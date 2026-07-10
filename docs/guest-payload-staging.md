@@ -249,6 +249,7 @@ Expected host output locations:
 ```text
 D:\Temp\KSwordSandbox\jobs\<job-id-n>\runbook-execution.json
 D:\Temp\KSwordSandbox\jobs\<job-id-n>\guest\<job-id-n>\events.json
+D:\Temp\KSwordSandbox\jobs\<job-id-n>\guest\<job-id-n>\driver-events.jsonl
 D:\Temp\KSwordSandbox\jobs\<job-id-n>\report.json
 D:\Temp\KSwordSandbox\jobs\<job-id-n>\report.html
 ```
@@ -260,8 +261,8 @@ process, file, optional network, and import marker events. Keep the whole
 ## Current R0Collector note
 
 `Prepare-GuestPayload.ps1` stages `KSword.Sandbox.R0Collector.exe` so the VM has
-the user-mode bridge available. The current generated runbook invokes only the
-guest agent path from config and passes `--driver-events`; it does not yet add
-`--r0collector`. Use the staged collector for manual guest-side sidecar tests or
-wire the argument into a future runbook change before expecting automatic R0
-JSONL rows from a live job.
+the user-mode bridge available. The generated runbook now passes
+`--driver-events C:\KSwordSandbox\out\<job-id-n>\driver-events.jsonl`,
+`--r0collector`, and `--driver-device` to the Guest Agent when driver collection
+is enabled. Use `driver.useMockCollector=true` for no-driver demos, or prepare a
+test-signed driver in the guest before expecting real R0 JSONL rows.

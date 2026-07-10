@@ -94,40 +94,105 @@ public sealed class HyperVRunbookBuilder
     }
 
     /// <summary>
-    /// Adds steps that copy the sample, run the guest agent, and collect output.
-    /// Inputs are VM names and host/guest paths, processing appends PowerShell
-    /// Direct commands, and the method returns no value.
+    /// Adds steps that copy the sample, start the guest agent, live-sync output,
+    /// and collect final artifacts. Inputs are VM names and host/guest paths;
+    /// processing appends PowerShell Direct commands with job-specific output
+    /// paths; the method returns no value.
     /// </summary>
     private static void AddGuestExecutionSteps(List<SandboxRunbookStep> steps, SandboxConfig config, string targetVmName, SampleIdentity sample, string guestSample, string guestOut, string hostOut)
     {
         var guestRoot = config.Guest.WorkingDirectory.TrimEnd('\\');
         var agentPath = $"{guestRoot}\\agent\\{config.Guest.AgentExecutableName}";
-        var driverArg = BuildDriverAgentArguments(config);
+        var driverEventsPath = $"{guestOut}\\driver-events.jsonl";
+        var agentPidPath = $"{guestOut}\\agent.pid";
+        var agentExitPath = $"{guestOut}\\agent.exit";
 
         steps.Add(Step("copy-sample", "Copy submitted sample into guest", $"Copy-VMFile -VMName {Q(targetVmName)} -SourcePath {Q(sample.FullPath)} -DestinationPath {Q(guestSample)} -FileSource Host -CreateFullPath"));
-        steps.Add(Step("run-agent", "Run guest collector and sample", $"Invoke-Command -VMName {Q(targetVmName)} -Credential $guestCredential -ScriptBlock {{ & {Q(agentPath)} --sample {Q(guestSample)} --out {Q(guestOut)} --duration {config.Analysis.DefaultDurationSeconds}{driverArg} }}"));
         steps.Add(Step("make-host-output", "Create host output folder", $"New-Item -ItemType Directory -Force -Path {Q(hostOut)} | Out-Null", mutatesVmState: false));
-        steps.Add(Step("collect-output", "Collect guest JSON output", $"$session = New-PSSession -VMName {Q(targetVmName)} -Credential $guestCredential; Copy-Item -FromSession $session -Path {Q(guestOut)} -Destination {Q(hostOut)} -Recurse -Force; Remove-PSSession $session"));
+        steps.Add(Step("prepare-guest-output", "Prepare job-specific guest output folder", BuildPrepareGuestOutputCommand(targetVmName, guestOut, driverEventsPath, agentPidPath, agentExitPath)));
+        steps.Add(Step("run-agent", "Start guest collector and sample asynchronously", BuildStartGuestAgentCommand(config, targetVmName, guestRoot, agentPath, guestSample, guestOut, driverEventsPath, agentPidPath, agentExitPath)));
+        steps.Add(Step("sync-live-output", "Live-sync guest events while sample runs", BuildLiveOutputSyncCommand(config, targetVmName, guestOut, hostOut, agentPidPath, agentExitPath)));
+        steps.Add(Step("collect-output", "Collect final guest JSON output", BuildCollectOutputCommand(targetVmName, guestOut, hostOut)));
+    }
+
+    /// <summary>
+    /// Builds a command that clears stale job-specific output before execution.
+    /// Inputs are target VM and guest artifact paths; processing creates the
+    /// guest output directory and removes stale artifacts; the method returns a
+    /// PowerShell Direct command string.
+    /// </summary>
+    private static string BuildPrepareGuestOutputCommand(string targetVmName, string guestOut, string driverEventsPath, string agentPidPath, string agentExitPath)
+    {
+        var stalePaths = string.Join(", ", new[] { $"{guestOut}\\events.json", driverEventsPath, agentPidPath, agentExitPath }.Select(Q));
+        return $"Invoke-Command -VMName {Q(targetVmName)} -Credential $guestCredential -ScriptBlock {{ New-Item -ItemType Directory -Force -Path {Q(guestOut)} | Out-Null; Remove-Item -LiteralPath {stalePaths} -Force -ErrorAction SilentlyContinue }}";
+    }
+
+    /// <summary>
+    /// Builds a PowerShell Direct command that starts the Guest Agent through a
+    /// guest-side PowerShell wrapper. Inputs are guest paths and config;
+    /// processing writes PID and exit-code marker files into guestOut; the
+    /// method returns a host PowerShell command for the runbook step.
+    /// </summary>
+    private static string BuildStartGuestAgentCommand(
+        SandboxConfig config,
+        string targetVmName,
+        string guestRoot,
+        string agentPath,
+        string guestSample,
+        string guestOut,
+        string driverEventsPath,
+        string agentPidPath,
+        string agentExitPath)
+    {
+        var agentCommand = BuildGuestAgentInvocation(config, agentPath, guestSample, guestOut, driverEventsPath, agentExitPath);
+        return $"Invoke-Command -VMName {Q(targetVmName)} -Credential $guestCredential -ScriptBlock {{ $agentCommand = {Q(agentCommand)}; $process = Start-Process -FilePath 'powershell.exe' -ArgumentList @('-NoLogo','-NoProfile','-ExecutionPolicy','Bypass','-Command',$agentCommand) -WorkingDirectory {Q(guestRoot)} -PassThru; $process.Id | Set-Content -Path {Q(agentPidPath)} -Encoding ASCII }}";
+    }
+
+    /// <summary>
+    /// Builds the command executed inside the guest wrapper process.
+    /// Inputs are guest file paths, duration, and driver settings; processing
+    /// formats the Guest Agent CLI and records its exit code; the method returns
+    /// a command string passed to guest powershell.exe -Command.
+    /// </summary>
+    private static string BuildGuestAgentInvocation(SandboxConfig config, string agentPath, string guestSample, string guestOut, string driverEventsPath, string agentExitPath)
+    {
+        var arguments = new List<string>
+        {
+            "--sample",
+            Q(guestSample),
+            "--out",
+            Q(guestOut),
+            "--duration",
+            config.Analysis.DefaultDurationSeconds.ToString()
+        };
+        arguments.AddRange(BuildDriverAgentArguments(config, driverEventsPath));
+
+        return string.Join("; ", new[]
+        {
+            $"& {Q(agentPath)} {string.Join(' ', arguments)}",
+            "$exitCode = if ($global:LASTEXITCODE -is [int]) { $global:LASTEXITCODE } else { 0 }",
+            $"Set-Content -Path {Q(agentExitPath)} -Value $exitCode -Encoding ASCII",
+            "exit $exitCode"
+        });
     }
 
     /// <summary>
     /// Builds optional Guest Agent arguments for R0Collector integration.
-    /// Inputs are the typed sandbox config; processing forwards the driver JSONL
-    /// path, collector executable, device name, and optional mock flag; the
-    /// method returns a PowerShell-safe argument suffix or an empty string when
-    /// driver collection is disabled.
+    /// Inputs are typed sandbox config and the job-specific driver JSONL path;
+    /// processing forwards collector path, device name, and optional mock flag;
+    /// the method returns PowerShell-safe CLI tokens.
     /// </summary>
-    private static string BuildDriverAgentArguments(SandboxConfig config)
+    private static List<string> BuildDriverAgentArguments(SandboxConfig config, string driverEventsPath)
     {
         if (!config.Driver.Enabled)
         {
-            return string.Empty;
+            return [];
         }
 
         var arguments = new List<string>
         {
             "--driver-events",
-            Q(config.Driver.EventJsonLinesPath),
+            Q(driverEventsPath),
             "--r0collector",
             Q(config.Driver.R0CollectorPathInGuest),
             "--driver-device",
@@ -139,7 +204,54 @@ public sealed class HyperVRunbookBuilder
             arguments.Add("--r0-mock");
         }
 
-        return " " + string.Join(' ', arguments);
+        return arguments;
+    }
+
+    /// <summary>
+    /// Builds a host loop that copies guest output while the guest process runs.
+    /// Inputs are VM name, guest output paths, host output folder, and duration;
+    /// processing opens one PSSession, copies artifacts repeatedly, checks the
+    /// guest PID, validates the agent exit marker, and returns a PowerShell
+    /// command string.
+    /// </summary>
+    private static string BuildLiveOutputSyncCommand(SandboxConfig config, string targetVmName, string guestOut, string hostOut, string agentPidPath, string agentExitPath)
+    {
+        var maxSyncSeconds = Math.Max(config.Analysis.DefaultDurationSeconds + 60, 90);
+        return string.Join(" ", new[]
+        {
+            $"$session = New-PSSession -VMName {Q(targetVmName)} -Credential $guestCredential;",
+            "try {",
+            $"$guestOut = {Q(guestOut)};",
+            $"$hostOut = {Q(hostOut)};",
+            $"$pidPath = {Q(agentPidPath)};",
+            $"$exitPath = {Q(agentExitPath)};",
+            $"$deadline = (Get-Date).AddSeconds({maxSyncSeconds});",
+            "New-Item -ItemType Directory -Force -Path $hostOut | Out-Null;",
+            "$guestAgentPid = Invoke-Command -Session $session -ScriptBlock { param($path) if (Test-Path -LiteralPath $path) { [int](Get-Content -LiteralPath $path -Raw) } else { 0 } } -ArgumentList $pidPath;",
+            "do {",
+            "Copy-Item -FromSession $session -Path $guestOut -Destination $hostOut -Recurse -Force -ErrorAction SilentlyContinue;",
+            "$running = Invoke-Command -Session $session -ScriptBlock { param($processId) if ($processId -le 0) { $false } else { [bool](Get-Process -Id $processId -ErrorAction SilentlyContinue) } } -ArgumentList $guestAgentPid;",
+            "if ($running) { Start-Sleep -Seconds 2 }",
+            "} while ($running -and (Get-Date) -lt $deadline);",
+            "Copy-Item -FromSession $session -Path $guestOut -Destination $hostOut -Recurse -Force -ErrorAction SilentlyContinue;",
+            "if ($running) { throw \"Guest Agent did not exit before live-sync deadline.\" }",
+            "$exitText = Invoke-Command -Session $session -ScriptBlock { param($path) if (Test-Path -LiteralPath $path) { (Get-Content -LiteralPath $path -Raw).Trim() } else { '0' } } -ArgumentList $exitPath;",
+            "$exitCode = [int]$exitText;",
+            "if ($exitCode -ne 0) { throw \"Guest Agent exited with code $exitCode.\" }",
+            "}",
+            "finally { if ($session) { Remove-PSSession $session } }"
+        });
+    }
+
+    /// <summary>
+    /// Builds the final collection command after live sync completes.
+    /// Inputs are target VM, guest output folder, and host output folder;
+    /// processing copies the complete guest output tree one last time and
+    /// closes the PSSession; the method returns a PowerShell command string.
+    /// </summary>
+    private static string BuildCollectOutputCommand(string targetVmName, string guestOut, string hostOut)
+    {
+        return $"$session = New-PSSession -VMName {Q(targetVmName)} -Credential $guestCredential; try {{ Copy-Item -FromSession $session -Path {Q(guestOut)} -Destination {Q(hostOut)} -Recurse -Force }} finally {{ if ($session) {{ Remove-PSSession $session }} }}";
     }
 
     /// <summary>

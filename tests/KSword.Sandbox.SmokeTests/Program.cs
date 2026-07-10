@@ -161,8 +161,13 @@ internal static class SmokeTestProgram
         Assert(runbook.Steps.Count > 0, "runbook should contain steps");
         var runAgentStep = runbook.Steps.Single(step => step.Id == "run-agent");
         Assert(runAgentStep.PowerShell.Contains("--driver-events", StringComparison.Ordinal), "runbook should pass driver events path");
+        Assert(runAgentStep.PowerShell.Contains($"{job.JobId:N}\\driver-events.jsonl", StringComparison.Ordinal), "runbook should use job-specific driver events path");
         Assert(runAgentStep.PowerShell.Contains("--r0collector", StringComparison.Ordinal), "runbook should pass R0Collector path");
         Assert(runAgentStep.PowerShell.Contains("--driver-device", StringComparison.Ordinal), "runbook should pass driver device path");
+        var liveSyncStep = runbook.Steps.Single(step => step.Id == "sync-live-output");
+        Assert(liveSyncStep.PowerShell.Contains("Copy-Item -FromSession", StringComparison.Ordinal), "runbook should sync guest output through PowerShell Direct");
+        Assert(liveSyncStep.PowerShell.Contains($"{job.JobId:N}", StringComparison.Ordinal), "live sync should target the job-specific guest output directory");
+        Assert(runbook.Steps.Any(step => step.Id == "collect-output"), "runbook should keep a final guest output collection step");
         Assert(File.Exists(job.JsonReportPath), "json report should exist");
         Assert(File.Exists(job.HtmlReportPath), "html report should exist");
         var savedExecutionJob = service.SaveRunbookExecutionResult(job.JobId, new SandboxRunbookExecutionResult
