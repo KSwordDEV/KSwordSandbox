@@ -90,14 +90,14 @@ KswCopyRegistryPayloadString(
     ULONG bytesCopied;
     UNICODE_STRING safeSource;
 
-    if (Destination != NULL && DestinationChars != 0) {
-        Destination[0] = L'\0';
-    }
-
-    if (Flags == NULL || LengthBytes == NULL) {
+    if (Destination == NULL ||
+        DestinationChars == 0 ||
+        Flags == NULL ||
+        LengthBytes == NULL) {
         return FALSE;
     }
 
+    Destination[0] = L'\0';
     *LengthBytes = 0;
     truncated = FALSE;
     copied = FALSE;
@@ -169,6 +169,9 @@ KswCopyRegistryKeyObjectPath(
         KSWORD_SANDBOX_REGISTRY_EVENT_FLAG_KEY_TRUNCATED,
         &Payload->Flags,
         &Payload->KeyPathLengthBytes);
+    if (copied) {
+        Payload->Flags |= KSWORD_SANDBOX_REGISTRY_EVENT_FLAG_KEY_FROM_OBJECT;
+    }
     CmCallbackReleaseKeyObjectIDEx(keyName);
     return copied;
 }
@@ -193,7 +196,9 @@ KswInitializeRegistryPayload(
     Payload->Version = KSWORD_SANDBOX_REGISTRY_EVENT_VERSION;
     Payload->Size = sizeof(*Payload);
     Payload->Operation = Operation;
-    Payload->Flags = KSWORD_SANDBOX_REGISTRY_EVENT_FLAG_STATUS_PRESENT;
+    Payload->Flags =
+        KSWORD_SANDBOX_REGISTRY_EVENT_FLAG_STATUS_PRESENT |
+        KSWORD_SANDBOX_REGISTRY_EVENT_FLAG_POST_OPERATION;
     Payload->ProcessId = (ULONGLONG)(ULONG_PTR)PsGetCurrentProcessId();
     Payload->Status = Status;
 }
@@ -213,6 +218,7 @@ KswQueueRegistryEvent(
     )
 {
     PKSWORD_SANDBOX_DEVICE_EXTENSION deviceExtension;
+    NTSTATUS status;
 
     if (Payload == NULL ||
         InterlockedCompareExchange(&g_KswRegistryMonitorActive, 0, 0) == 0) {
@@ -225,12 +231,20 @@ KswQueueRegistryEvent(
         return;
     }
 
-    (VOID)KswPushEvent(
+    status = KswPushEvent(
         deviceExtension,
         KswSandboxEventTypeRegistry,
         0,
         Payload,
         (ULONG)sizeof(*Payload));
+    if (!NT_SUCCESS(status) && status != STATUS_CANCELLED) {
+        /*
+         * Producer enable masks intentionally surface disabled registry events
+         * as STATUS_CANCELLED from KswPushEvent.  Any other failure is an
+         * unexpected ABI/state problem worth exposing through health telemetry.
+         */
+        KswSetLastStatus(deviceExtension, status);
+    }
 }
 
 /*
@@ -269,6 +283,9 @@ KswCapturePostCreateOrOpenKey(
         KSWORD_SANDBOX_REGISTRY_EVENT_FLAG_KEY_TRUNCATED,
         &payload.Flags,
         &payload.KeyPathLengthBytes);
+    if (copied) {
+        payload.Flags |= KSWORD_SANDBOX_REGISTRY_EVENT_FLAG_KEY_FROM_CALLBACK;
+    }
     if (!copied && PostInfo->Object != NULL) {
         (VOID)KswCopyRegistryKeyObjectPath(PostInfo->Object, &payload);
     }
@@ -303,6 +320,11 @@ KswCapturePostSetValue(
         &payload,
         KswSandboxRegistryOperationSetValue,
         PostInfo->Status);
+    payload.ValueDataType = preInfo->Type;
+    payload.ValueDataSizeBytes = preInfo->DataSize;
+    payload.Flags |=
+        KSWORD_SANDBOX_REGISTRY_EVENT_FLAG_VALUE_TYPE_PRESENT |
+        KSWORD_SANDBOX_REGISTRY_EVENT_FLAG_VALUE_SIZE_PRESENT;
     KswCopyRegistryKeyObjectPath(keyObject, &payload);
     KswCopyRegistryPayloadString(
         payload.ValueName,

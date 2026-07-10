@@ -7,7 +7,7 @@ a final HTML report.
 
 ## Current estimated completion
 
-- Overall v1 deliverable: **42%**
+- Overall v1 deliverable: **43%**
 - Repository architecture, docs, module boundaries, policy: **82%**
 - Core job/event/rule/report models: **68%**
 - Web/API/WebUI submission and job UX: **60%**
@@ -19,7 +19,7 @@ a final HTML report.
 - Static analysis and behavior rules: **48%**
 - HTML report generation: **58%**
 - Artifact manifest and dropped-file plumbing: **45%**
-- Tests and quality gates: **48%**
+- Tests and quality gates: **56%**
 - Install/operations/security hardening: **32%**
 
 ## Evidence already present
@@ -37,6 +37,12 @@ a final HTML report.
   static, dynamic, process, file, registry, network, failures, and raw events.
 - Repository policy blocks VM disks, binaries, samples, reports, keys, and build
   outputs.
+- Smoke validation now has a P0/P1 gate that checks WebUI live endpoint shape,
+  guest `events.json` plus `driver-events.jsonl` import, Hyper-V script safety,
+  R0 driver/collector file and ABI strings, report sections, and repo policy.
+- `Invoke-FullValidation.ps1` now runs the live-telemetry contract script and a
+  non-mutating Hyper-V `PlanOnly`/`WhatIf` plan check before native/readiness
+  gates.
 
 ## Remaining P0 gaps
 
@@ -54,7 +60,8 @@ a final HTML report.
 ## Next best work
 
 - Finish R0 ABI/capability negotiation and typed payload parsing.
-- Finish Hyper-V E2E PlanOnly/live script and bind it to operator docs.
+- Run the Hyper-V E2E PlanOnly/full-validation gates on the target host after
+  each script change, then run the live mode only from an elevated test session.
 - Add a harmless guest test executable and a repeatable live-run checklist.
 - Add final report artifact links for `events.json`, `driver-events.jsonl`,
   screenshots, and dropped-file manifests.

@@ -54,6 +54,7 @@ public sealed class HtmlReportRenderer
         AppendDroppedFiles(html, report);
         AppendRegistryBehavior(html, report);
         AppendNetworkBehavior(html, report);
+        AppendR0Events(html, report);
         AppendFailureReasons(html, report);
         AppendRawEvents(html, report);
         html.AppendLine("</main>");
@@ -71,7 +72,25 @@ public sealed class HtmlReportRenderer
     {
         html.AppendLine("<head><meta charset=\"utf-8\"><title>KSword Sandbox Report</title>");
         html.AppendLine("<style>");
-        html.AppendLine("body{margin:0;background:#f5f7fb;color:#111827;font-family:Segoe UI,Arial,sans-serif}header{background:linear-gradient(135deg,#101827,#1d4ed8);color:white;padding:32px 42px}main,nav{max-width:1180px;margin:22px auto;padding:0 24px}.card{background:white;border:1px solid #e5e7eb;border-radius:16px;box-shadow:0 10px 30px rgba(15,23,42,.06);margin:18px 0;padding:22px}.grid{display:grid;gap:14px;grid-template-columns:repeat(4,1fr)}.metric{background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:14px}.metric b{display:block;font-size:26px;margin-top:4px}.muted{color:#64748b}.risk-high{color:#b91c1c}.risk-medium{color:#b45309}.risk-low{color:#047857}.risk-info{color:#1d4ed8}.badge{border-radius:999px;display:inline-block;font-weight:700;padding:6px 12px}.badge-high{background:#fee2e2;color:#991b1b}.badge-medium{background:#fef3c7;color:#92400e}.badge-low{background:#dcfce7;color:#166534}.badge-info{background:#dbeafe;color:#1e40af}table{border-collapse:collapse;width:100%;margin-top:14px}td,th{border-bottom:1px solid #e5e7eb;padding:9px;text-align:left;vertical-align:top}th{color:#475569;font-size:12px;text-transform:uppercase}code{background:#f1f5f9;border-radius:6px;padding:2px 5px;word-break:break-all}.toc a{display:inline-block;margin:4px 14px 4px 0}.empty{border:1px dashed #cbd5e1;border-radius:10px;color:#64748b;padding:14px}.copy-btn{background:#eef2ff;border:1px solid #c7d2fe;border-radius:999px;color:#3730a3;cursor:pointer;font-size:12px;font-weight:700;margin:2px 0;padding:4px 9px}.copyable{cursor:copy}.copy-hint{color:#64748b;font-size:12px;margin-top:8px}.timeline{border-left:3px solid #bfdbfe;margin:14px 0 0 8px;padding-left:18px}.timeline-item{margin:0 0 14px;position:relative}.timeline-item:before{background:#2563eb;border:3px solid #dbeafe;border-radius:999px;content:'';height:11px;left:-25px;position:absolute;top:3px;width:11px}.tree{font-family:Consolas,monospace;line-height:1.5;margin:12px 0}.tree ul{border-left:1px dashed #cbd5e1;list-style:none;margin:0 0 0 18px;padding-left:14px}.tree li{margin:5px 0}.evidence{max-width:520px}.evidence details{background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:8px}.evidence summary{cursor:pointer;font-weight:700}.evidence pre{white-space:pre-wrap;word-break:break-word}.toolbar{display:flex;gap:8px;justify-content:flex-end}@media(max-width:900px){.grid{grid-template-columns:1fr 1fr}table{display:block;overflow-x:auto}}");
+        html.AppendLine("""
+body{margin:0;background:#f5f7fb;color:#111827;font-family:Segoe UI,Arial,sans-serif}
+header{background:radial-gradient(circle at 80% 15%,rgba(59,130,246,.45),transparent 34%),linear-gradient(135deg,#101827,#1d4ed8);color:white;padding:32px 42px}
+main,nav{max-width:1180px;margin:22px auto;padding:0 24px}.card{background:white;border:1px solid #e5e7eb;border-radius:16px;box-shadow:0 10px 30px rgba(15,23,42,.06);margin:18px 0;padding:22px}
+.card h2{align-items:center;display:flex;gap:10px;margin-top:0}.card h2:before{background:#2563eb;border-radius:999px;content:'';display:inline-block;height:12px;width:12px}
+.grid{display:grid;gap:14px;grid-template-columns:repeat(4,1fr)}.metric{background:linear-gradient(180deg,#fff,#f8fafc);border:1px solid #e2e8f0;border-radius:12px;padding:14px}.metric b{display:block;font-size:26px;margin-top:4px}
+.muted{color:#64748b}.risk-high{color:#b91c1c}.risk-medium{color:#b45309}.risk-low{color:#047857}.risk-info{color:#1d4ed8}
+.badge,.chip{border-radius:999px;display:inline-block;font-weight:700;padding:6px 12px}.chip{font-size:12px;margin:2px 4px 2px 0;padding:3px 8px}
+.badge-high,.chip-high{background:#fee2e2;color:#991b1b}.badge-medium,.chip-medium{background:#fef3c7;color:#92400e}.badge-low,.chip-low{background:#dcfce7;color:#166534}.badge-info,.chip-info{background:#dbeafe;color:#1e40af}
+.section-note{background:#f8fafc;border-left:4px solid #93c5fd;border-radius:8px;color:#475569;margin:10px 0;padding:10px 12px}
+table{border-collapse:collapse;width:100%;margin-top:14px}td,th{border-bottom:1px solid #e5e7eb;padding:9px;text-align:left;vertical-align:top}th{color:#475569;font-size:12px;text-transform:uppercase}
+code{background:#f1f5f9;border-radius:6px;padding:2px 5px;word-break:break-all}.toc a{display:inline-block;margin:4px 14px 4px 0}.empty{border:1px dashed #cbd5e1;border-radius:10px;color:#64748b;padding:14px}
+.copy-btn{background:#eef2ff;border:1px solid #c7d2fe;border-radius:999px;color:#3730a3;cursor:pointer;font-size:12px;font-weight:700;margin:2px 0;padding:4px 9px}.copyable{cursor:copy}.copy-hint{color:#64748b;font-size:12px;margin-top:8px}
+.timeline{border-left:3px solid #bfdbfe;margin:14px 0 0 8px;padding-left:18px}.timeline-item{margin:0 0 14px;position:relative}.timeline-item:before{background:#2563eb;border:3px solid #dbeafe;border-radius:999px;content:'';height:11px;left:-25px;position:absolute;top:3px;width:11px}
+.tree{font-family:Consolas,monospace;line-height:1.5;margin:12px 0}.tree ul{border-left:1px dashed #cbd5e1;list-style:none;margin:0 0 0 18px;padding-left:14px}.tree li{margin:5px 0}
+.evidence{max-width:520px}.evidence details{background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:8px}.evidence summary{cursor:pointer;font-weight:700}.evidence pre{white-space:pre-wrap;word-break:break-word}
+.toolbar{display:flex;gap:8px;justify-content:flex-end}.columns{display:grid;gap:14px;grid-template-columns:1fr 1fr}.compact-list{margin:8px 0 0 0;padding-left:18px}.compact-list li{margin:4px 0}
+@media(max-width:900px){.grid,.columns{grid-template-columns:1fr 1fr}table{display:block;overflow-x:auto}}@media(max-width:640px){.grid,.columns{grid-template-columns:1fr}}
+""");
         html.AppendLine("</style></head>");
     }
 
@@ -118,6 +137,7 @@ public sealed class HtmlReportRenderer
             ("files", "Dropped files"),
             ("registry", "Registry behavior"),
             ("network", "Network behavior"),
+            ("r0", "R0 / driver events"),
             ("failure", "Failure reasons"),
             ("events", "Raw normalized events")
         })
@@ -144,9 +164,10 @@ public sealed class HtmlReportRenderer
         Metric(html, "Rule hits", report.Findings.Count.ToString(), "risk-info");
         Metric(html, "Static tags", (report.StaticAnalysis?.Tags.Count ?? 0).ToString(), "risk-info");
         Metric(html, "Static URLs", (report.StaticAnalysis?.Urls.Count ?? 0).ToString(), "risk-medium");
-        Metric(html, "Dropped files", CountEvents(report, "file.created", "file.modified").ToString(), "risk-medium");
-        Metric(html, "Network events", CountEvents(report, "network.tcp").ToString(), "risk-medium");
-        Metric(html, "Registry events", CountEventsByPrefix(report, "registry.").ToString(), "risk-medium");
+        Metric(html, "Dropped files", report.Events.Count(IsFileEvent).ToString(), "risk-medium");
+        Metric(html, "Network events", report.Events.Count(IsNetworkEvent).ToString(), "risk-medium");
+        Metric(html, "Registry events", report.Events.Count(IsRegistryEvent).ToString(), "risk-medium");
+        Metric(html, "R0 / driver events", report.Events.Count(IsR0Event).ToString(), "risk-info");
         html.AppendLine("</div></section>");
     }
 
@@ -266,7 +287,7 @@ public sealed class HtmlReportRenderer
         }
 
         AppendSectionTable(html, staticAnalysis);
-        AppendStringList(html, "URLs", staticAnalysis.Urls);
+        AppendStaticEvidenceGroups(html, staticAnalysis);
         AppendStringList(html, "Interesting strings", staticAnalysis.InterestingStrings);
         AppendStringList(html, "Static warnings", staticAnalysis.Warnings);
         html.AppendLine("</section>");
@@ -286,13 +307,81 @@ public sealed class HtmlReportRenderer
             return;
         }
 
-        html.AppendLine("<table><thead><tr><th>Name</th><th>VA</th><th>Virtual size</th><th>Raw size</th><th>Entropy</th></tr></thead><tbody>");
+        html.AppendLine("<table><thead><tr><th>Name</th><th>VA</th><th>Virtual size</th><th>Raw size</th><th>Entropy</th><th>Signal</th></tr></thead><tbody>");
         foreach (var section in staticAnalysis.Sections)
         {
-            html.AppendLine($"<tr><td>{E(section.Name)}</td><td><code>{E(section.VirtualAddress)}</code></td><td>{section.VirtualSize}</td><td>{section.RawDataSize}</td><td>{section.Entropy:F3}</td></tr>");
+            var signal = DescribeSectionSignal(section);
+            html.AppendLine($"<tr class=\"copyable\" data-copy=\"{A(SectionToPlainText(section, signal))}\"><td>{E(section.Name)}</td><td><code>{E(section.VirtualAddress)}</code></td><td>{section.VirtualSize}</td><td>{section.RawDataSize}</td><td>{section.Entropy:F3}</td><td>{E(signal)}</td></tr>");
         }
 
         html.AppendLine("</tbody></table>");
+    }
+
+    /// <summary>
+    /// Appends grouped static evidence without changing the public report model.
+    /// Inputs are static-analysis tags, URLs, and interesting string prefixes;
+    /// processing splits imports, exports, URLs/IPs, registry paths, file paths,
+    /// resource/TLS hints, and other indicators; the method returns no value.
+    /// </summary>
+    private static void AppendStaticEvidenceGroups(StringBuilder html, StaticAnalysisResult staticAnalysis)
+    {
+        html.AppendLine("<h3>Static evidence map</h3>");
+        html.AppendLine("<div class=\"section-note\">Imports, exports, resources, TLS, and indicators are grouped from <code>StaticAnalysisResult.Tags</code>, <code>Urls</code>, and prefixed <code>InterestingStrings</code> evidence so report JSON stays backward-compatible.</div>");
+
+        html.AppendLine("<div class=\"columns\">");
+        html.AppendLine("<div>");
+        AppendEvidenceList(html, "PE imports", SelectEvidence(staticAnalysis.InterestingStrings, "import:"), "No PE imports were parsed.");
+        AppendEvidenceList(html, "PE exports", SelectEvidence(staticAnalysis.InterestingStrings, "export-module:", "export:"), "No PE exports were parsed.");
+        AppendEvidenceList(html, "Resources and TLS", SelectEvidence(staticAnalysis.InterestingStrings, "resource", "tls:"), "No resource or TLS evidence was recorded.");
+        html.AppendLine("</div>");
+        html.AppendLine("<div>");
+        AppendEvidenceList(html, "URL indicators", staticAnalysis.Urls.Select(url => $"url:{url}"), "No URL indicators were extracted.");
+        AppendEvidenceList(html, "IP indicators", SelectEvidence(staticAnalysis.InterestingStrings, "ip:"), "No IP indicators were extracted.");
+        AppendEvidenceList(html, "Registry indicators", SelectEvidence(staticAnalysis.InterestingStrings, "registry-path:"), "No registry path indicators were extracted.");
+        AppendEvidenceList(html, "File/path indicators", SelectEvidence(staticAnalysis.InterestingStrings, "path:"), "No filesystem path indicators were extracted.");
+        html.AppendLine("</div>");
+        html.AppendLine("</div>");
+
+        html.AppendLine("<h3>Static rule tags</h3>");
+        if (staticAnalysis.Tags.Count == 0)
+        {
+            Empty(html, "No static tags were emitted.");
+            return;
+        }
+
+        foreach (var tag in staticAnalysis.Tags.OrderBy(tag => tag, StringComparer.OrdinalIgnoreCase))
+        {
+            html.AppendLine($"<span class=\"chip chip-info copyable\" data-copy=\"{A(tag)}\">{E(tag)}</span>");
+        }
+    }
+
+    /// <summary>
+    /// Appends a compact list of grouped static evidence.
+    /// Inputs are a title and bounded evidence values; processing writes a
+    /// copyable unordered list or an empty state; the method returns no value.
+    /// </summary>
+    private static void AppendEvidenceList(StringBuilder html, string title, IEnumerable<string> values, string emptyMessage)
+    {
+        var items = values
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(value => value, StringComparer.OrdinalIgnoreCase)
+            .Take(80)
+            .ToList();
+        html.AppendLine($"<h4>{E(title)}</h4>");
+        if (items.Count == 0)
+        {
+            Empty(html, emptyMessage);
+            return;
+        }
+
+        html.AppendLine("<ul class=\"compact-list\">");
+        foreach (var value in items)
+        {
+            html.AppendLine($"<li><code class=\"copyable\" data-copy=\"{A(value)}\">{E(value)}</code></li>");
+        }
+
+        html.AppendLine("</ul>");
     }
 
     /// <summary>
@@ -312,7 +401,7 @@ public sealed class HtmlReportRenderer
         html.AppendLine("<ul>");
         foreach (var value in values)
         {
-            html.AppendLine($"<li><code>{E(value)}</code></li>");
+            html.AppendLine($"<li><code class=\"copyable\" data-copy=\"{A(value)}\">{E(value)}</code></li>");
         }
 
         html.AppendLine("</ul>");
@@ -328,9 +417,10 @@ public sealed class HtmlReportRenderer
         html.AppendLine("<section id=\"dynamic\" class=\"card\"><h2>Dynamic analysis</h2><div class=\"grid\">");
         Metric(html, "Process starts", CountEvents(report, "process.start").ToString(), "risk-info");
         Metric(html, "Process exits", CountEvents(report, "process.exit").ToString(), "risk-info");
-        Metric(html, "Registry events", CountEventsByPrefix(report, "registry.").ToString(), "risk-medium");
-        Metric(html, "File events", CountEventsByPrefix(report, "file.").ToString(), "risk-medium");
-        Metric(html, "Driver / R0 events", report.Events.Count(e => e.Source.Contains("driver", StringComparison.OrdinalIgnoreCase) || e.Source.Contains("r0", StringComparison.OrdinalIgnoreCase) || e.EventType.StartsWith("driver.", StringComparison.OrdinalIgnoreCase) || e.EventType.StartsWith("r0collector.", StringComparison.OrdinalIgnoreCase)).ToString(), "risk-info");
+        Metric(html, "Registry events", report.Events.Count(IsRegistryEvent).ToString(), "risk-medium");
+        Metric(html, "File events", report.Events.Count(IsFileEvent).ToString(), "risk-medium");
+        Metric(html, "Network events", report.Events.Count(IsNetworkEvent).ToString(), "risk-medium");
+        Metric(html, "R0 / driver events", report.Events.Count(IsR0Event).ToString(), "risk-info");
         Metric(html, "Failure markers", report.Events.Count(IsFailureEvent).ToString(), "risk-high");
         html.AppendLine("</div></section>");
     }
@@ -419,7 +509,7 @@ public sealed class HtmlReportRenderer
     /// </summary>
     private static void AppendDroppedFiles(StringBuilder html, AnalysisReport report)
     {
-        AppendEventTable(html, "files", "Dropped files", report.Events.Where(e => e.EventType.StartsWith("file.", StringComparison.OrdinalIgnoreCase)));
+        AppendEventTable(html, "files", "Dropped files", report.Events.Where(IsFileEvent));
     }
 
     /// <summary>
@@ -429,7 +519,7 @@ public sealed class HtmlReportRenderer
     /// </summary>
     private static void AppendRegistryBehavior(StringBuilder html, AnalysisReport report)
     {
-        AppendEventTable(html, "registry", "Registry behavior", report.Events.Where(e => e.EventType.StartsWith("registry.", StringComparison.OrdinalIgnoreCase) || e.EventType.StartsWith("driver.registry", StringComparison.OrdinalIgnoreCase)));
+        AppendEventTable(html, "registry", "Registry behavior", report.Events.Where(IsRegistryEvent));
     }
 
     /// <summary>
@@ -439,7 +529,35 @@ public sealed class HtmlReportRenderer
     /// </summary>
     private static void AppendNetworkBehavior(StringBuilder html, AnalysisReport report)
     {
-        AppendEventTable(html, "network", "Network behavior", report.Events.Where(e => e.EventType.StartsWith("network.", StringComparison.OrdinalIgnoreCase)));
+        AppendEventTable(html, "network", "Network behavior", report.Events.Where(IsNetworkEvent));
+    }
+
+    /// <summary>
+    /// Appends R0Collector and driver-originated telemetry separately from raw
+    /// events. Inputs are normalized events; processing filters by source and
+    /// driver/r0 event-type prefixes; the method returns no value.
+    /// </summary>
+    private static void AppendR0Events(StringBuilder html, AnalysisReport report)
+    {
+        var r0Events = report.Events.Where(IsR0Event).ToList();
+        html.AppendLine("<section id=\"r0\" class=\"card\"><h2>R0 / driver events</h2>");
+        if (r0Events.Count == 0)
+        {
+            Empty(html, "No R0Collector or driver-originated events were imported.");
+            html.AppendLine("</section>");
+            return;
+        }
+
+        html.AppendLine("<div class=\"grid\">");
+        Metric(html, "Collector lifecycle", r0Events.Count(e => e.EventType.StartsWith("r0collector.", StringComparison.OrdinalIgnoreCase)).ToString(), "risk-info");
+        Metric(html, "Driver payloads", r0Events.Count(e => e.EventType.StartsWith("driver.", StringComparison.OrdinalIgnoreCase) || e.Source.Contains("driver", StringComparison.OrdinalIgnoreCase)).ToString(), "risk-info");
+        Metric(html, "Kernel file rows", r0Events.Count(IsFileEvent).ToString(), "risk-medium");
+        Metric(html, "Kernel registry rows", r0Events.Count(IsRegistryEvent).ToString(), "risk-medium");
+        Metric(html, "Kernel network rows", r0Events.Count(IsNetworkEvent).ToString(), "risk-medium");
+        Metric(html, "R0 failures", r0Events.Count(IsFailureEvent).ToString(), "risk-high");
+        html.AppendLine("</div>");
+        AppendEventRows(html, r0Events);
+        html.AppendLine("</section>");
     }
 
     /// <summary>
@@ -454,6 +572,10 @@ public sealed class HtmlReportRenderer
         if (report.Status != AnalysisStatus.Failed && failures.Count == 0)
         {
             Empty(html, "No failure reason was recorded.");
+        }
+        else if (failures.Count == 0)
+        {
+            Empty(html, "Analysis status is Failed, but no timeout/error/failure event was recorded in normalized telemetry.");
         }
         else
         {
@@ -594,7 +716,7 @@ public sealed class HtmlReportRenderer
     /// </summary>
     private static void Row(StringBuilder html, string label, string value)
     {
-        html.AppendLine($"<tr><th>{E(label)}</th><td>{E(value)}</td></tr>");
+        html.AppendLine($"<tr><th>{E(label)}</th><td class=\"copyable\" data-copy=\"{A(value)}\">{E(value)}</td></tr>");
     }
 
     /// <summary>
@@ -635,6 +757,117 @@ public sealed class HtmlReportRenderer
     private static int CountEventsByPrefix(AnalysisReport report, string eventTypePrefix)
     {
         return report.Events.Count(e => e.EventType.StartsWith(eventTypePrefix, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// Selects static evidence entries by prefix.
+    /// Inputs are interesting strings and accepted prefixes; processing keeps
+    /// matching values in original form; the method returns matching entries.
+    /// </summary>
+    private static IEnumerable<string> SelectEvidence(IEnumerable<string> values, params string[] prefixes)
+    {
+        return values.Where(value => prefixes.Any(prefix => value.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)));
+    }
+
+    /// <summary>
+    /// Describes PE section risk signals from display metadata.
+    /// Inputs are section size and entropy values; processing emits concise
+    /// labels for report triage; the method returns a display string.
+    /// </summary>
+    private static string DescribeSectionSignal(PeSectionInfo section)
+    {
+        var signals = new List<string>();
+        if (section.Entropy >= 7.2)
+        {
+            signals.Add(section.Entropy >= 7.8 ? "very high entropy" : "high entropy");
+        }
+        else if (section.RawDataSize > 0 && section.Entropy <= 1.0)
+        {
+            signals.Add("low entropy");
+        }
+
+        if (section.RawDataSize == 0 && section.VirtualSize > 0)
+        {
+            signals.Add("virtual only");
+        }
+        else if (section.VirtualSize > section.RawDataSize * 4 && section.VirtualSize > 4096)
+        {
+            signals.Add("large virtual/raw gap");
+        }
+
+        if (section.Name.Contains("UPX", StringComparison.OrdinalIgnoreCase))
+        {
+            signals.Add("UPX-like");
+        }
+
+        return signals.Count == 0 ? "normal" : string.Join(", ", signals);
+    }
+
+    /// <summary>
+    /// Converts one PE section row to copyable text.
+    /// Inputs are section metadata and signal text; processing serializes a
+    /// stable multiline block; the method returns clipboard text.
+    /// </summary>
+    private static string SectionToPlainText(PeSectionInfo section, string signal)
+    {
+        return string.Join(
+            Environment.NewLine,
+            [
+                $"name={section.Name}",
+                $"virtualAddress={section.VirtualAddress}",
+                $"virtualSize={section.VirtualSize}",
+                $"rawDataSize={section.RawDataSize}",
+                $"entropy={section.Entropy:F3}",
+                $"signal={signal}"
+            ]);
+    }
+
+    /// <summary>
+    /// Determines whether an event belongs to file behavior.
+    /// Inputs are normalized events; processing includes guest-normalized and
+    /// driver-prefixed file rows; the method returns true on file evidence.
+    /// </summary>
+    private static bool IsFileEvent(SandboxEvent evt)
+    {
+        return evt.EventType.StartsWith("file.", StringComparison.OrdinalIgnoreCase) ||
+            evt.EventType.StartsWith("driver.file", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Determines whether an event belongs to registry behavior.
+    /// Inputs are normalized events; processing includes guest-normalized and
+    /// driver-prefixed registry rows; the method returns true on registry evidence.
+    /// </summary>
+    private static bool IsRegistryEvent(SandboxEvent evt)
+    {
+        return evt.EventType.StartsWith("registry.", StringComparison.OrdinalIgnoreCase) ||
+            evt.EventType.StartsWith("driver.registry", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Determines whether an event belongs to network behavior.
+    /// Inputs are normalized events; processing includes protocol-specific
+    /// guest rows and driver network rows; the method returns true on network evidence.
+    /// </summary>
+    private static bool IsNetworkEvent(SandboxEvent evt)
+    {
+        return evt.EventType.StartsWith("network.", StringComparison.OrdinalIgnoreCase) ||
+            evt.EventType.StartsWith("http.", StringComparison.OrdinalIgnoreCase) ||
+            evt.EventType.StartsWith("dns.", StringComparison.OrdinalIgnoreCase) ||
+            evt.EventType.StartsWith("driver.network", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Determines whether an event came from R0Collector or driver telemetry.
+    /// Inputs are normalized events; processing checks source names and event
+    /// prefixes; the method returns true for R0/driver evidence.
+    /// </summary>
+    private static bool IsR0Event(SandboxEvent evt)
+    {
+        return evt.Source.Contains("driver", StringComparison.OrdinalIgnoreCase) ||
+            evt.Source.Contains("r0", StringComparison.OrdinalIgnoreCase) ||
+            evt.EventType.StartsWith("driver.", StringComparison.OrdinalIgnoreCase) ||
+            evt.EventType.StartsWith("r0collector.", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>

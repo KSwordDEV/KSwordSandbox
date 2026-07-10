@@ -8,7 +8,7 @@ external tools and intentionally writes findings into the stable
 - `Tags`: rule-facing tokens consumed by `rules/behavior-rules.json`.
 - `Urls`: bounded URL strings extracted from ASCII/UTF-16 strings.
 - `InterestingStrings`: bounded human-readable evidence such as imports,
-  exports, resources, paths, IPs, and command strings.
+  exports, section summaries, resources, paths, URLs, IPs, and command strings.
 - `Warnings`: parse-boundary and truncation notes.
 
 ## PE coverage
@@ -17,6 +17,8 @@ The analyzer parses these PE structures best-effort with hard limits:
 
 - DOS/PE headers, architecture, subsystem, entry point, and section count.
 - Section names, raw sizes, virtual sizes, entropy, and characteristics.
+- Copyable section evidence strings in the form
+  `section:<name>,va=<rva>,vsize=<n>,raw=<n>,entropy=<n>` for report grouping.
 - Imports by module/API, including ordinal fallback evidence.
 - Exports and registration/service-style entry points.
 - TLS directory and callback-table pointers.
@@ -64,6 +66,18 @@ Import and fallback API-string tags are grouped to keep rules concise:
 - Anti-analysis: `import_anti_analysis_api`
 
 All grouped API hits also set `import_suspicious_api` for broad triage.
+
+## Static notes / YARA boundary
+
+`rules/static-notes.yar` mirrors the built-in analyzer vocabulary for future
+YARA integration and manual triage. It is intentionally not the production
+classification path yet: current reports and behavior findings come from
+`StaticAnalyzer.Tags`, `StaticAnalyzer.Urls`, and `StaticAnalyzer.InterestingStrings`
+plus the `static.analysis.completed` event consumed by `RuleEngine`.
+
+When a future YARA runner is added, it should write matched rule IDs or mapped
+tags into `StaticAnalysisResult.Tags` and the `static.analysis.completed`
+`Data["tags"]` field so existing behavior rules and reports remain compatible.
 
 ## Rule integration
 

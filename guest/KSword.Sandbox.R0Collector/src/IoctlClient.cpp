@@ -168,6 +168,57 @@ bool EmitDriverHealth(const UniqueHandle& device, const Options& options, EventW
 }
 
 // Input: Open driver handle, collector options, and JSONL sink.
+// Processing: Issues IOCTL_KSWORD_SANDBOX_GET_CAPABILITIES before normal event
+// draining so the collector negotiates ABI limits, optional IOCTLs, and producer
+// masks instead of assuming a matching driver.
+// Return: true if the IOCTL succeeded, the reply was structurally valid, and
+// the event sink accepted the capabilities row.
+bool EmitDriverCapabilities(const UniqueHandle& device, const Options& options, EventWriter& writer) {
+    KSWORD_SANDBOX_CAPABILITIES_REPLY reply {};
+    DWORD bytesReturned = 0;
+    DWORD errorCode = ERROR_SUCCESS;
+
+    if (!CallDriverIoctl(
+            device,
+            IOCTL_KSWORD_SANDBOX_GET_CAPABILITIES,
+            nullptr,
+            0,
+            &reply,
+            static_cast<DWORD>(sizeof(reply)),
+            &bytesReturned,
+            &errorCode)) {
+        return EmitIoctlFailure(
+            writer,
+            options,
+            "IOCTL_KSWORD_SANDBOX_GET_CAPABILITIES",
+            IOCTL_KSWORD_SANDBOX_GET_CAPABILITIES,
+            errorCode,
+            bytesReturned,
+            L"Verify that the loaded driver supports the public capabilities IOCTL.");
+    }
+
+    if (bytesReturned < static_cast<DWORD>(sizeof(reply)) ||
+        reply.Version != KSWORD_SANDBOX_INTERFACE_VERSION ||
+        reply.Size < sizeof(reply) ||
+        reply.AbiVersionMajor != KSWORD_SANDBOX_ABI_VERSION_MAJOR ||
+        reply.EventHeaderVersion != KSWORD_SANDBOX_EVENT_HEADER_VERSION ||
+        reply.EventMaxPayloadSize > KSWORD_SANDBOX_EVENT_MAX_PAYLOAD_SIZE) {
+        return EmitProtocolError(
+            writer,
+            options,
+            "IOCTL_KSWORD_SANDBOX_GET_CAPABILITIES",
+            L"GET_CAPABILITIES returned an incompatible KSWORD_SANDBOX_CAPABILITIES_REPLY.",
+            bytesReturned);
+    }
+
+    SandboxEventFields event;
+    event.eventType = "r0collector.driverCapabilities";
+    event.path = options.devicePath;
+    event.dataJson = BuildCapabilitiesData(reply, bytesReturned);
+    return EmitEvent(writer, event);
+}
+
+// Input: Open driver handle, collector options, and JSONL sink.
 // Processing: Issues IOCTL_KSWORD_SANDBOX_POLL and writes a
 // r0collector.driverPoll row with the queue snapshot.
 // Return: true if the IOCTL succeeded, the reply was structurally valid, and the
@@ -278,12 +329,26 @@ bool EmitDriverEventRecords(
         SandboxEventFields event;
         event.eventType = DriverEventJsonType(header.Type);
         event.source = "driver";
-        event.processId = header.ProcessId;
+        event.processId = ExtractTypedPayloadProcessId(
+            header.Type,
+            payload,
+            header.PayloadSize,
+            header.ProcessId);
         event.path = options.devicePath;
         const std::wstring subjectPath =
             ExtractTypedPayloadPath(header.Type, payload, header.PayloadSize);
         if (!subjectPath.empty()) {
             event.path = subjectPath;
+        }
+        const std::wstring processName =
+            ExtractTypedPayloadProcessName(header.Type, payload, header.PayloadSize);
+        if (!processName.empty()) {
+            event.processName = processName;
+        }
+        const std::wstring commandLine =
+            ExtractTypedPayloadCommandLine(header.Type, payload, header.PayloadSize);
+        if (!commandLine.empty()) {
+            event.commandLine = commandLine;
         }
         event.dataJson = BuildDriverEventData(
             header,

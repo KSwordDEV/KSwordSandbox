@@ -53,13 +53,13 @@ document.addEventListener('click', function (event) {
 });
 
 document.addEventListener('contextmenu', function (event) {
-  var target = event.target.closest('[data-copy], code, pre, td, th');
+  var target = event.target.closest('[data-copy], code, pre, td, th, p, li, h1, h2, h3, label, span, a, button, input');
   if (!target) {
     return;
   }
 
   event.preventDefault();
-  var value = target.getAttribute('data-copy') || target.innerText || target.textContent || '';
+  var value = target.getAttribute('data-copy') || target.value || target.innerText || target.textContent || '';
   kswCopyDashboardValue(value);
 });
 </script>

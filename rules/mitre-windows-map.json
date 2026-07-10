@@ -1,6 +1,6 @@
 {
   "matrix": "enterprise-windows",
-  "version": "2026-07-10-static-mitre-expansion",
+  "version": "2026-07-10-report-static-r0-expansion",
   "techniques": [
     {
       "id": "T1027",
@@ -155,8 +155,32 @@
       ]
     },
     {
+      "id": "T1546",
+      "name": "Event Triggered Execution",
+      "categories": [
+        "persistence",
+        "privilege-escalation"
+      ]
+    },
+    {
+      "id": "T1546.012",
+      "name": "Image File Execution Options Injection",
+      "categories": [
+        "persistence",
+        "privilege-escalation"
+      ]
+    },
+    {
       "id": "T1547.001",
       "name": "Registry Run Keys / Startup Folder",
+      "categories": [
+        "persistence",
+        "privilege-escalation"
+      ]
+    },
+    {
+      "id": "T1547.004",
+      "name": "Winlogon Helper DLL",
       "categories": [
         "persistence",
         "privilege-escalation"

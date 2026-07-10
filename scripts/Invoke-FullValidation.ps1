@@ -84,8 +84,13 @@ function Invoke-PowerShellFile {
         $Path
     ) + $Arguments
 
-    & powershell.exe @argumentList
-    return $LASTEXITCODE
+    $output = @(& powershell.exe @argumentList 2>&1)
+    $exitCode = if ($LASTEXITCODE -is [int]) { $LASTEXITCODE } else { 0 }
+    foreach ($line in $output) {
+        Write-Host $line
+    }
+
+    return $exitCode
 }
 
 Push-Location $repoRoot
@@ -97,6 +102,68 @@ try {
 
         Invoke-Step -Name 'smoke tests' -Script {
             dotnet run --project (Join-Path $repoRoot 'tests/KSword.Sandbox.SmokeTests/KSword.Sandbox.SmokeTests.csproj') --configuration $Configuration --no-build
+        }
+    }
+
+    Invoke-Step -Name 'live telemetry framework contract' -Script {
+        $exitCode = Invoke-PowerShellFile -Path (Join-Path $repoRoot 'scripts/Test-LiveTelemetryFramework.ps1') -Arguments @('-ContractOnly', '-RequireImplementedStream')
+        if ($exitCode -ne 0) {
+            throw "Live telemetry framework contract failed with exit code $exitCode"
+        }
+
+        $global:LASTEXITCODE = 0
+    }
+
+    Invoke-Step -Name 'Hyper-V E2E PlanOnly contract' -Script {
+        $contractRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('ksword-hyperv-e2e-planonly-{0}' -f ([guid]::NewGuid().ToString('N')))
+        $planPath = Join-Path $contractRoot 'hyperv-e2e-plan.json'
+        $configPath = Join-Path $contractRoot 'sandbox.planonly.json'
+        try {
+            New-Item -ItemType Directory -Path $contractRoot -Force | Out-Null
+            $config = Get-Content -LiteralPath (Join-Path $repoRoot 'config/sandbox.example.json') -Raw | ConvertFrom-Json
+            $config.paths.runtimeRoot = Join-Path $contractRoot 'runtime'
+            $config.paths.guestPayloadRoot = Join-Path $contractRoot 'payload\guest-tools'
+            $config | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $configPath -Encoding UTF8
+
+            $exitCode = Invoke-PowerShellFile -Path (Join-Path $repoRoot 'scripts/Invoke-HyperVE2E.ps1') -Arguments @(
+                '-RepoRoot',
+                $repoRoot,
+                '-ConfigPath',
+                $configPath,
+                '-PlanOnly',
+                '-PlanPath',
+                $planPath,
+                '-WhatIf'
+            )
+            if ($exitCode -ne 0) {
+                throw "Hyper-V E2E PlanOnly contract failed with exit code $exitCode"
+            }
+
+            if (-not (Test-Path -LiteralPath $planPath -PathType Leaf)) {
+                throw "Hyper-V E2E PlanOnly contract did not write a review plan: $planPath"
+            }
+
+            $plan = Get-Content -LiteralPath $planPath -Raw | ConvertFrom-Json
+            if ([bool]$plan.willMutateVm) {
+                throw 'Hyper-V E2E PlanOnly contract unexpectedly indicates VM mutation.'
+            }
+
+            if (-not [bool]$plan.safeDefault) {
+                throw 'Hyper-V E2E PlanOnly contract did not preserve safeDefault=true.'
+            }
+
+            if (-not [bool]$plan.safety.noVmMutationWhenPlanOnly) {
+                throw 'Hyper-V E2E PlanOnly contract did not preserve noVmMutationWhenPlanOnly=true.'
+            }
+
+            if (@($plan.steps).Count -eq 0) {
+                throw 'Hyper-V E2E PlanOnly contract produced no reviewable steps.'
+            }
+
+            $global:LASTEXITCODE = 0
+        }
+        finally {
+            Remove-Item -LiteralPath $contractRoot -Recurse -Force -ErrorAction SilentlyContinue
         }
     }
 

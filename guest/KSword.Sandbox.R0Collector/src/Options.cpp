@@ -107,13 +107,18 @@ bool ParseArguments(int argc, wchar_t* argv[], Options* options, std::wstring* e
             continue;
         }
 
+        if (arg == L"--health") {
+            options->healthOnly = true;
+            continue;
+        }
+
         std::wstring value;
         if (arg == L"--device" || arg == L"-d") {
             if (!readValue(arg, &value)) {
                 return false;
             }
             options->devicePath = value;
-        } else if (arg == L"--output" || arg == L"-o") {
+        } else if (arg == L"--output" || arg == L"--out" || arg == L"-o") {
             if (!readValue(arg, &value)) {
                 return false;
             }
@@ -160,11 +165,12 @@ void PrintUsage(const wchar_t* programName) {
         << L"\n"
         << L"Options:\n"
         << L"  -d, --device <path>          Win32 device path (default: \\\\.\\KSwordSandboxDriver)\n"
-        << L"  -o, --output <jsonl|->       JSON Lines output path, or '-' for stdout (default: -)\n"
+        << L"  -o, --output, --out <path>   JSON Lines output path, or '-' for stdout (default: -)\n"
         << L"  -t, --duration <seconds>     Poll duration; 0 opens once and exits (default: 0)\n"
         << L"  -p, --poll-ms <ms>           Poll interval in milliseconds (default: 500)\n"
         << L"      --poll-interval-ms <ms>  Alias for --poll-ms\n"
         << L"      --enable-mask <mask>     Pass a 32-bit decimal/hex mask in READ_EVENTS request flags\n"
+        << L"      --health                 Open the device, emit GET_HEALTH, and exit without draining\n"
         << L"      --heartbeat              Emit r0collector.heartbeat lifecycle rows\n"
         << L"      --mock                   Emit synthetic rows without opening a device\n"
         << L"      --synthetic              Alias for --mock\n"

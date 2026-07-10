@@ -14,6 +14,7 @@ struct Options {
     unsigned long enableMask = 0;
     bool enableMaskSpecified = false;
     bool mockMode = false;
+    bool healthOnly = false;
     bool heartbeat = false;
     bool showHelp = false;
 };

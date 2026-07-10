@@ -21,6 +21,8 @@ std::string NetworkAddressText(ULONG addressFamily, const unsigned char* address
 std::string UtcTimestampIso8601();
 std::wstring Win32ErrorMessage(DWORD errorCode);
 std::wstring CurrentCommandLine();
+std::wstring CurrentProcessName();
+std::wstring BaseNameFromPath(const std::wstring& path);
 
 // Input: Ordered key/value pairs that must be serialized under SandboxEvent.data.
 // Processing: Appends each value as a JSON string regardless of its semantic
@@ -75,6 +77,7 @@ struct SandboxEventFields {
     std::string source = kCollectorSource;
     std::wstring timestampOverride;
     unsigned long long processId = GetCurrentProcessId();
+    std::wstring processName = CurrentProcessName();
     std::wstring path;
     std::wstring commandLine = CurrentCommandLine();
     std::string dataJson = "{}";

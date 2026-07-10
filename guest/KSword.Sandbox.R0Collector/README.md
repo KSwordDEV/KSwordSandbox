@@ -25,7 +25,7 @@ or `x64/` outputs.
 ```powershell
 .\KSword.Sandbox.R0Collector.exe `
   --device \\.\KSwordSandboxDriver `
-  --output C:\Sandbox\driver-events.jsonl `
+  --out C:\Sandbox\driver-events.jsonl `
   --duration 10 `
   --poll-ms 500 `
   --heartbeat
@@ -34,13 +34,15 @@ or `x64/` outputs.
 Options:
 
 - `--device`, `-d`: Win32 device path. Default: `\\.\KSwordSandboxDriver`.
-- `--output`, `-o`: JSONL output path, or `-` for stdout. Default: `-`.
+- `--output`, `--out`, `-o`: JSONL output path, or `-` for stdout. Default: `-`.
 - `--duration`, `-t`: Poll duration in seconds. `0` performs one health/poll/read-events pass.
 - `--poll-ms`, `--poll-interval`, `--poll-interval-ms`, `-p`: poll interval in milliseconds.
 - `--enable-mask <mask>`: pass a decimal or `0x` 32-bit mask through the
   `READ_EVENTS` request flags and record it in lifecycle JSONL.
+- `--health`: open the live device, emit `r0collector.driverHealth`, and exit
+  without polling or draining queued events.
 - `--heartbeat`: emit `r0collector.heartbeat` progress rows.
-- `--mock`: emit synthetic process/image/file/registry driver-category rows
+- `--mock`: emit synthetic process/image/file/registry/network driver-category rows
   without opening a device.
 - `--synthetic`: alias for `--mock`.
 - `--self-test`: alias for `--mock`.
@@ -56,6 +58,7 @@ Options:
   - `image.load`
   - `driver.file`
   - `driver.registry`
+  - `driver.network`
   - optional `r0collector.heartbeat`
   - `r0collector.stopped`
 - If the device cannot be opened, the collector emits
@@ -63,11 +66,11 @@ Options:
 - If the device opens, the collector emits:
   - `r0collector.deviceOpened`
   - `r0collector.driverHealth`
-  - `r0collector.driverPoll`
-  - stable driver rows from `IOCTL_KSWORD_SANDBOX_READ_EVENTS`
+  - unless `--health` was requested, `r0collector.driverPoll`
+  - unless `--health` was requested, stable driver rows from `IOCTL_KSWORD_SANDBOX_READ_EVENTS`
     (`driver.process`, `image.load`, `driver.file`, `driver.registry`,
     `driver.network`, `driver.event.reserved`, or fallback `driver.event`)
-  - `r0collector.driverReadEvents`
+  - unless `--health` was requested, `r0collector.driverReadEvents`
   - optional `r0collector.heartbeat`
   - `r0collector.stopped`
 
@@ -76,7 +79,7 @@ Options:
 Every line is a `SandboxEvent` object with stable top-level fields:
 
 ```json
-{"eventType":"r0collector.deviceUnavailable","source":"r0collector","timestamp":"2026-07-10T00:00:00.000Z","processId":1234,"path":"\\\\.\\KSwordSandboxDriver","commandLine":"KSword.Sandbox.R0Collector.exe --output -","data":{"message":"...","win32Error":"2","hint":"..."}}
+{"timestamp":"2026-07-10T00:00:00.000Z","eventType":"r0collector.deviceUnavailable","source":"r0collector","processId":1234,"processName":"KSword.Sandbox.R0Collector.exe","path":"\\\\.\\KSwordSandboxDriver","commandLine":"KSword.Sandbox.R0Collector.exe --out -","data":{"message":"...","win32Error":"2","hint":"..."}}
 ```
 
 The `data` object is string-valued because the shared host model currently uses

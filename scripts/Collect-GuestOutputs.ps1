@@ -27,6 +27,8 @@ $ErrorActionPreference = 'Stop'
 $script:StepResults = New-Object System.Collections.Generic.List[object]
 $script:CollectedFiles = New-Object System.Collections.Generic.List[object]
 $script:CleanupErrors = New-Object System.Collections.Generic.List[string]
+$script:CollectionWarnings = New-Object System.Collections.Generic.List[string]
+$script:RequiredArtifacts = New-Object System.Collections.Generic.List[object]
 $script:Cmdlet = $PSCmdlet
 
 function Write-GuestCollectStep {
@@ -139,11 +141,37 @@ function Copy-GuestOutputOnce {
     param(
         [Parameter(Mandatory)][System.Management.Automation.Runspaces.PSSession]$Session,
         [Parameter(Mandatory)][string]$GuestOutputDirectory,
-        [Parameter(Mandatory)][string]$HostOutputRoot
+        [Parameter(Mandatory)][string]$HostOutputRoot,
+        [bool]$Required
     )
 
     New-Item -ItemType Directory -Path $HostOutputRoot -Force | Out-Null
-    Copy-Item -FromSession $Session -Path $GuestOutputDirectory -Destination $HostOutputRoot -Recurse -Force -ErrorAction SilentlyContinue
+    $guestOutputExists = Invoke-Command -Session $Session -ScriptBlock {
+        param([string]$Path)
+        Test-Path -LiteralPath $Path -PathType Container
+    } -ArgumentList $GuestOutputDirectory
+
+    if (-not [bool]$guestOutputExists) {
+        $message = "Guest output directory is not available yet: $GuestOutputDirectory"
+        if ($Required) {
+            throw $message
+        }
+
+        [void]$script:CollectionWarnings.Add($message)
+        return
+    }
+
+    try {
+        Copy-Item -FromSession $Session -Path $GuestOutputDirectory -Destination $HostOutputRoot -Recurse -Force -ErrorAction Stop
+    }
+    catch {
+        $message = "Copy-Item -FromSession failed for '$GuestOutputDirectory' -> '$HostOutputRoot': $($_.Exception.Message)"
+        if ($Required) {
+            throw $message
+        }
+
+        [void]$script:CollectionWarnings.Add($message)
+    }
 }
 
 function Get-GuestAgentPid {
@@ -219,14 +247,14 @@ function Wait-AndCollectGuestOutput {
         $running = $true
 
         do {
-            Copy-GuestOutputOnce -Session $session -GuestOutputDirectory $Plan.guest.outputDirectory -HostOutputRoot $Plan.host.outputRoot
+            Copy-GuestOutputOnce -Session $session -GuestOutputDirectory $Plan.guest.outputDirectory -HostOutputRoot $Plan.host.outputRoot -Required $false
             $running = Test-GuestProcessRunning -Session $session -ProcessId $guestPid
             if ($running) {
                 Start-Sleep -Seconds $syncInterval
             }
         } while ($running -and (Get-Date) -lt $deadline)
 
-        Copy-GuestOutputOnce -Session $session -GuestOutputDirectory $Plan.guest.outputDirectory -HostOutputRoot $Plan.host.outputRoot
+        Copy-GuestOutputOnce -Session $session -GuestOutputDirectory $Plan.guest.outputDirectory -HostOutputRoot $Plan.host.outputRoot -Required $true
 
         if ($running) {
             throw "Guest Agent process $guestPid did not exit within $($Plan.timeouts.executionSeconds) seconds."
@@ -259,11 +287,96 @@ function Index-CollectedFiles {
             $relative = $relative.Substring($rootWithSeparator.Length)
         }
 
+        $hash = $null
+        try {
+            $hash = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256 -ErrorAction Stop).Hash
+        }
+        catch {
+            [void]$script:CollectionWarnings.Add("Unable to hash collected file '$($file.FullName)': $($_.Exception.Message)")
+        }
+
+        $kind = switch -Regex ([System.IO.Path]::GetFileName($file.FullName)) {
+            '^events\.json$' { 'GuestEventsJson'; break }
+            '^driver-events\.jsonl$' { 'DriverEventsJsonLines'; break }
+            '^agent\.pid$' { 'AgentPid'; break }
+            '^agent\.exit$' { 'AgentExit'; break }
+            '^agent-summary\.json$' { 'AgentSummary'; break }
+            default { 'GuestArtifact' }
+        }
+
         [void]$script:CollectedFiles.Add([ordered]@{
                 path = $file.FullName
                 relativePath = $relative
                 length = $file.Length
+                sha256 = $hash
+                kind = $kind
             })
+    }
+}
+
+function Get-HostGuestOutputDirectory {
+    param([Parameter(Mandatory)][object]$Plan)
+
+    if ($null -ne $Plan.host.guestOutputDirectory -and -not [string]::IsNullOrWhiteSpace([string]$Plan.host.guestOutputDirectory)) {
+        return [string]$Plan.host.guestOutputDirectory
+    }
+
+    return Join-Path ([string]$Plan.host.outputRoot) (Split-Path -Leaf ([string]$Plan.guest.outputDirectory))
+}
+
+function Add-RequiredArtifactStatus {
+    param(
+        [Parameter(Mandatory)][string]$Name,
+        [Parameter(Mandatory)][string]$Path,
+        [bool]$Required
+    )
+
+    $exists = Test-Path -LiteralPath $Path -PathType Leaf
+    $length = $null
+    if ($exists) {
+        $length = (Get-Item -LiteralPath $Path).Length
+    }
+
+    [void]$script:RequiredArtifacts.Add([ordered]@{
+            name = $Name
+            path = $Path
+            required = $Required
+            exists = $exists
+            length = $length
+        })
+
+    if ($Required -and -not $exists) {
+        throw "Required collected artifact is missing: $Name ($Path)"
+    }
+}
+
+function Assert-CollectedArtifacts {
+    param([Parameter(Mandatory)][object]$Plan)
+
+    $hostGuestOutputDirectory = Get-HostGuestOutputDirectory -Plan $Plan
+    $eventsPath = if ($null -ne $Plan.host.eventsJsonPath -and -not [string]::IsNullOrWhiteSpace([string]$Plan.host.eventsJsonPath)) {
+        [string]$Plan.host.eventsJsonPath
+    }
+    else {
+        Join-Path $hostGuestOutputDirectory 'events.json'
+    }
+
+    $driverEventsPath = if ($null -ne $Plan.host.driverEventsJsonlPath -and -not [string]::IsNullOrWhiteSpace([string]$Plan.host.driverEventsJsonlPath)) {
+        [string]$Plan.host.driverEventsJsonlPath
+    }
+    else {
+        Join-Path $hostGuestOutputDirectory 'driver-events.jsonl'
+    }
+
+    Add-RequiredArtifactStatus -Name 'events.json' -Path $eventsPath -Required $true
+    Add-RequiredArtifactStatus -Name 'agent.exit' -Path (Join-Path $hostGuestOutputDirectory 'agent.exit') -Required $true
+    Add-RequiredArtifactStatus -Name 'agent.pid' -Path (Join-Path $hostGuestOutputDirectory 'agent.pid') -Required $true
+
+    if ([System.Convert]::ToBoolean($Plan.driver.enabled)) {
+        Add-RequiredArtifactStatus -Name 'driver-events.jsonl' -Path $driverEventsPath -Required $false
+        if (-not (Test-Path -LiteralPath $driverEventsPath -PathType Leaf)) {
+            [void]$script:CollectionWarnings.Add("Driver collection is enabled but driver-events.jsonl was not collected. Guest Agent may have recorded r0collector.start_failed in events.json.")
+        }
     }
 }
 
@@ -275,8 +388,8 @@ function Invoke-Cleanup {
 
     try {
         Invoke-RecordedStep -Id 'stop-vm-after-run' -Title 'Stop VM after collection' -ScriptBlock {
-            if ($script:Cmdlet.ShouldProcess($plan.vm.name, 'Stop VM after Hyper-V E2E collection')) {
-                Stop-VM -Name $plan.vm.name -TurnOff -Force -ErrorAction SilentlyContinue
+            if ($script:Cmdlet.ShouldProcess($Plan.vm.name, 'Stop VM after Hyper-V E2E collection')) {
+                Stop-VM -Name $Plan.vm.name -TurnOff -Force -ErrorAction SilentlyContinue
             }
         }
     }
@@ -287,8 +400,8 @@ function Invoke-Cleanup {
     if ($RestoreAfterRun) {
         try {
             Invoke-RecordedStep -Id 'restore-checkpoint-after-run' -Title 'Restore clean checkpoint after run' -ScriptBlock {
-                if ($script:Cmdlet.ShouldProcess($plan.vm.name, "Restore checkpoint '$($plan.vm.cleanCheckpointName)' after run")) {
-                    Restore-VMSnapshot -VMName $plan.vm.name -Name $plan.vm.cleanCheckpointName -Confirm:$false
+                if ($script:Cmdlet.ShouldProcess($Plan.vm.name, "Restore checkpoint '$($Plan.vm.cleanCheckpointName)' after run")) {
+                    Restore-VMSnapshot -VMName $Plan.vm.name -Name $Plan.vm.cleanCheckpointName -Confirm:$false
                 }
             }
         }
@@ -306,7 +419,7 @@ function Save-CollectResult {
     )
 
     $jobRoot = [string]$Plan.host.jobRoot
-    New-Item -ItemType Directory -Path $jobRoot -Force | Out-Null
+    New-Item -ItemType Directory -Path $jobRoot -Force -WhatIf:$false | Out-Null
     $resultPath = Join-Path $jobRoot 'hyperv-e2e-collect-result.json'
     $result = [ordered]@{
         contractVersion = 1
@@ -317,13 +430,18 @@ function Save-CollectResult {
         success = $Success
         message = $Message
         hostOutputRoot = $Plan.host.outputRoot
+        hostGuestOutputDirectory = (Get-HostGuestOutputDirectory -Plan $Plan)
+        eventsJsonPath = $Plan.host.eventsJsonPath
+        driverEventsJsonlPath = $Plan.host.driverEventsJsonlPath
         completedAtUtc = [DateTimeOffset]::UtcNow.ToString('O')
+        warnings = @($script:CollectionWarnings.ToArray())
+        requiredArtifacts = @($script:RequiredArtifacts.ToArray())
         cleanupErrors = @($script:CleanupErrors.ToArray())
         collectedFiles = @($script:CollectedFiles.ToArray())
         steps = @($script:StepResults.ToArray())
     }
 
-    $result | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $resultPath -Encoding UTF8
+    $result | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $resultPath -Encoding UTF8 -WhatIf:$false
     Write-GuestCollectStep "Collect result written: $resultPath"
 }
 
@@ -348,7 +466,16 @@ if ((-not [bool]$Live) -or [bool]$WhatIfPreference) {
     Write-GuestCollectStep "Safe $mode mode: collection would wait for Guest Agent, copy artifacts, stop VM, and optionally restore checkpoint; no VM command was executed."
     foreach ($step in @($plan.steps | Where-Object { $_.phase -eq 'collect' -or $_.phase -eq 'cleanup' })) {
         Write-GuestCollectStep ("PLAN {0}: {1}" -f $step.id, $step.title)
+        [void]$script:StepResults.Add((New-StepResult `
+                    -Id ([string]$step.id) `
+                    -Title ([string]$step.title) `
+                    -Success $true `
+                    -Skipped $true `
+                    -StartedAtUtc ([DateTimeOffset]::UtcNow) `
+                    -Duration ([TimeSpan]::Zero) `
+                    -Message "Safe $mode mode; no VM command was executed."))
     }
+    Save-CollectResult -Plan $plan -Success $true -Message "Safe $mode mode; no VM command was executed."
     exit 0
 }
 
@@ -365,6 +492,7 @@ try {
 
         Invoke-RecordedStep -Id 'collect-final-output' -Title 'Index collected events and artifacts on host' -ScriptBlock {
             Index-CollectedFiles -Plan $plan
+            Assert-CollectedArtifacts -Plan $plan
         }
 
         $success = $true

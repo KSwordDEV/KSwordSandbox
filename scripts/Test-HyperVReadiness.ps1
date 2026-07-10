@@ -67,6 +67,7 @@ param(
 
 Set-StrictMode -Version 3.0
 $ErrorActionPreference = 'Stop'
+$script:GuestServiceInterfaceComponentId = '6C09BB55-D683-4DA0-8931-C9BF705F6480'
 
 # New-ReadinessResult builds one structured result row.
 # Inputs are the check name, status, requirement flag, operator-facing message,
@@ -750,6 +751,24 @@ function Test-HyperVCheckpoint {
     }
 }
 
+# Select-GuestServiceInterface returns the Hyper-V Guest Service Interface
+# integration component by stable component GUID instead of display name only.
+# Inputs are VMIntegrationService objects. Processing tolerates localized
+# Windows display names such as "来宾服务接口". Return behavior is the first
+# matching service or $null.
+function Select-GuestServiceInterface {
+    param([object[]]$Services)
+
+    $componentSuffix = '\' + $script:GuestServiceInterfaceComponentId
+    return @($Services | Where-Object {
+            $id = [string]$_.Id
+            $name = [string]$_.Name
+            $id.EndsWith($componentSuffix, [System.StringComparison]::OrdinalIgnoreCase) -or
+            $name -eq 'Guest Service Interface' -or
+            $name -eq '来宾服务接口'
+        } | Select-Object -First 1)[0]
+}
+
 # Test-GuestServiceInterface checks that Copy-VMFile support is enabled.
 # Inputs are the VM name and query readiness. Processing reads Hyper-V
 # integration services only. Return behavior is a readiness object; the script
@@ -776,32 +795,35 @@ function Test-GuestServiceInterface {
     }
 
     try {
-        $services = @(Get-VMIntegrationService -VMName $Vm -ErrorAction Stop |
-            Where-Object { $_.Name -eq $serviceName })
+        $services = @(Get-VMIntegrationService -VMName $Vm -ErrorAction Stop)
+        $service = Select-GuestServiceInterface -Services $services
 
-        if ($services.Count -eq 0) {
+        if ($null -eq $service) {
             return New-ReadinessResult `
                 -Name 'Guest Service Interface' `
                 -Status 'Failed' `
                 -Required $true `
-                -Message "Integration service '$serviceName' was not found on VM '$Vm'." `
+                -Message "Guest Service Interface integration service was not found on VM '$Vm'. Checked localized names and component id '$script:GuestServiceInterfaceComponentId'." `
                 -Details @{
-                    VmName      = $Vm
-                    ServiceName = $serviceName
+                    VmName            = $Vm
+                    ServiceName       = $serviceName
+                    StableComponentId = $script:GuestServiceInterfaceComponentId
+                    AvailableServices = @($services | ForEach-Object { $_.Name })
                 }
         }
 
-        $service = $services[0]
         if ([bool]$service.Enabled) {
             return New-ReadinessResult `
                 -Name 'Guest Service Interface' `
                 -Status 'Passed' `
                 -Required $true `
-                -Message "Integration service '$serviceName' is enabled on VM '$Vm'." `
+                -Message "Guest Service Interface integration service '$($service.Name)' is enabled on VM '$Vm'." `
                 -Details @{
-                    VmName      = $Vm
-                    ServiceName = $service.Name
-                    Enabled     = [bool]$service.Enabled
+                    VmName            = $Vm
+                    ServiceName       = $service.Name
+                    StableComponentId = $script:GuestServiceInterfaceComponentId
+                    ServiceId         = [string]$service.Id
+                    Enabled           = [bool]$service.Enabled
                 }
         }
 
@@ -809,11 +831,13 @@ function Test-GuestServiceInterface {
             -Name 'Guest Service Interface' `
             -Status 'Failed' `
             -Required $true `
-            -Message "Integration service '$serviceName' is disabled on VM '$Vm'." `
+            -Message "Guest Service Interface integration service '$($service.Name)' is disabled on VM '$Vm'." `
             -Details @{
-                VmName      = $Vm
-                ServiceName = $service.Name
-                Enabled     = [bool]$service.Enabled
+                VmName            = $Vm
+                ServiceName       = $service.Name
+                StableComponentId = $script:GuestServiceInterfaceComponentId
+                ServiceId         = [string]$service.Id
+                Enabled           = [bool]$service.Enabled
             }
     }
     catch {

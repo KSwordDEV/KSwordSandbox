@@ -1,5 +1,5 @@
 {
-  "version": "2026-07-10-v3-static-mitre-expansion",
+  "version": "2026-07-10-v4-report-static-r0-expansion",
   "rules": [
     {
       "id": "host-submission",
@@ -1178,6 +1178,423 @@
         "static",
         "strings",
         "anti-analysis"
+      ]
+    },
+    {
+      "id": "r0collector-lifecycle",
+      "title": "R0 collector lifecycle event",
+      "severity": "info",
+      "summary": "R0Collector emitted startup, heartbeat, device-open, or stopped lifecycle telemetry for driver-side collection visibility.",
+      "eventTypes": [
+        "r0collector.started",
+        "r0collector.deviceOpened",
+        "r0collector.heartbeat",
+        "r0collector.stopped"
+      ],
+      "tags": [
+        "r0collector",
+        "driver-health",
+        "lifecycle",
+        "plumbing"
+      ]
+    },
+    {
+      "id": "r0collector-ioctl-failure",
+      "title": "R0 collector IOCTL or protocol failure",
+      "severity": "info",
+      "summary": "R0Collector reported an IOCTL, argument, output, or driver protocol error. This is collection-health evidence rather than direct sample behavior.",
+      "eventTypes": [
+        "r0collector.ioctlFailure",
+        "r0collector.driverProtocolError",
+        "r0collector.argumentError",
+        "r0collector.outputUnavailable"
+      ],
+      "tags": [
+        "r0collector",
+        "driver-health",
+        "ioctl",
+        "failure"
+      ]
+    },
+    {
+      "id": "r0-driver-process-event",
+      "title": "R0 driver process callback event",
+      "severity": "info",
+      "summary": "A kernel process callback row was imported from driver telemetry and should be inspected with the raw event payload.",
+      "eventTypes": [
+        "driver.process"
+      ],
+      "tags": [
+        "driver",
+        "r0",
+        "process"
+      ]
+    },
+    {
+      "id": "r0-driver-file-write-signal",
+      "title": "R0 driver file write or rename signal",
+      "severity": "medium",
+      "summary": "Driver telemetry reported file create/write/set-information/rename/delete style operations, which can reveal dropped or modified payloads below user-mode collection.",
+      "mitreTechniqueId": "T1105",
+      "mitreTechniqueName": "Ingress Tool Transfer",
+      "eventTypes": [
+        "driver.file",
+        "driver.file.create",
+        "driver.file.write",
+        "driver.file.setinfo",
+        "driver.file.rename",
+        "driver.file.delete"
+      ],
+      "dataContains": {
+        "operationName": [
+          "create",
+          "write",
+          "setInformation",
+          "rename",
+          "delete"
+        ],
+        "operation": [
+          "create",
+          "write",
+          "setInformation",
+          "rename",
+          "delete"
+        ]
+      },
+      "tags": [
+        "driver",
+        "r0",
+        "filesystem",
+        "file-drop"
+      ]
+    },
+    {
+      "id": "r0-driver-registry-change-signal",
+      "title": "R0 driver registry mutation signal",
+      "severity": "medium",
+      "summary": "Driver telemetry reported registry create, set, delete, or rename operations from kernel callback evidence.",
+      "mitreTechniqueId": "T1112",
+      "mitreTechniqueName": "Modify Registry",
+      "eventTypes": [
+        "driver.registry"
+      ],
+      "dataContains": {
+        "operationName": [
+          "createKey",
+          "setValue",
+          "deleteValue",
+          "deleteKey",
+          "renameKey"
+        ],
+        "operation": [
+          "createKey",
+          "setValue",
+          "deleteValue",
+          "deleteKey",
+          "renameKey"
+        ]
+      },
+      "tags": [
+        "driver",
+        "r0",
+        "registry"
+      ]
+    },
+    {
+      "id": "r0-driver-network-signal",
+      "title": "R0 driver network signal",
+      "severity": "medium",
+      "summary": "Driver telemetry reported a kernel network event, preserving WFP-style evidence for network triage.",
+      "mitreTechniqueId": "T1105",
+      "mitreTechniqueName": "Ingress Tool Transfer",
+      "eventTypes": [
+        "driver.network"
+      ],
+      "tags": [
+        "driver",
+        "r0",
+        "network"
+      ]
+    },
+    {
+      "id": "service-create-command",
+      "title": "Windows service creation command",
+      "severity": "high",
+      "summary": "A process command line referenced Windows service creation or service-control primitives.",
+      "mitreTechniqueId": "T1543.003",
+      "mitreTechniqueName": "Windows Service",
+      "eventTypes": [
+        "process.start"
+      ],
+      "containsCommandLine": [
+        "sc create",
+        "sc.exe create",
+        "New-Service",
+        "CreateService",
+        "ChangeServiceConfig"
+      ],
+      "tags": [
+        "execution",
+        "persistence",
+        "service"
+      ]
+    },
+    {
+      "id": "tasks-folder-file-write",
+      "title": "Scheduled Tasks folder file write",
+      "severity": "high",
+      "summary": "A file write targeted the Windows Scheduled Tasks folder, which can indicate task-based persistence outside command-line creation telemetry.",
+      "mitreTechniqueId": "T1053.005",
+      "mitreTechniqueName": "Scheduled Task",
+      "eventTypes": [
+        "file.created",
+        "file.modified",
+        "driver.file"
+      ],
+      "containsPath": [
+        "\\System32\\Tasks\\",
+        "\\SysWOW64\\Tasks\\"
+      ],
+      "tags": [
+        "filesystem",
+        "persistence",
+        "scheduled-task"
+      ]
+    },
+    {
+      "id": "ifeo-debugger-persistence",
+      "title": "IFEO debugger persistence path",
+      "severity": "high",
+      "summary": "A registry event targeted Image File Execution Options debugger configuration, a common event-triggered persistence and hijack location.",
+      "mitreTechniqueId": "T1546.012",
+      "mitreTechniqueName": "Image File Execution Options Injection",
+      "eventTypes": [
+        "registry.set",
+        "registry.create",
+        "driver.registry"
+      ],
+      "containsPath": [
+        "Image File Execution Options",
+        "\\Debugger"
+      ],
+      "tags": [
+        "registry",
+        "persistence",
+        "ifeo"
+      ]
+    },
+    {
+      "id": "winlogon-persistence",
+      "title": "Winlogon persistence registry path",
+      "severity": "high",
+      "summary": "A registry event targeted Winlogon Shell, Userinit, Notify, or helper DLL values used for logon persistence.",
+      "mitreTechniqueId": "T1547.004",
+      "mitreTechniqueName": "Winlogon Helper DLL",
+      "eventTypes": [
+        "registry.set",
+        "registry.create",
+        "driver.registry"
+      ],
+      "containsPath": [
+        "Winlogon\\Shell",
+        "Winlogon\\Userinit",
+        "Winlogon\\Notify",
+        "Winlogon\\GinaDLL"
+      ],
+      "tags": [
+        "registry",
+        "persistence",
+        "winlogon"
+      ]
+    },
+    {
+      "id": "script-file-drop",
+      "title": "Script file dropped or modified",
+      "severity": "medium",
+      "summary": "A file creation or modification event wrote a script-like file extension that may be launched by command interpreters or LOLBins.",
+      "mitreTechniqueId": "T1059",
+      "mitreTechniqueName": "Command and Scripting Interpreter",
+      "eventTypes": [
+        "file.created",
+        "file.modified",
+        "driver.file"
+      ],
+      "containsPath": [
+        ".ps1",
+        ".vbs",
+        ".js",
+        ".jse",
+        ".hta",
+        ".wsf",
+        ".bat",
+        ".cmd"
+      ],
+      "tags": [
+        "filesystem",
+        "file-drop",
+        "script"
+      ]
+    },
+    {
+      "id": "system-directory-executable-write",
+      "title": "System directory executable write",
+      "severity": "medium",
+      "summary": "A file write touched Windows system directories or executable-like extensions; inspect evidence to distinguish benign installers from payload placement.",
+      "mitreTechniqueId": "T1105",
+      "mitreTechniqueName": "Ingress Tool Transfer",
+      "eventTypes": [
+        "file.created",
+        "file.modified",
+        "driver.file"
+      ],
+      "containsPath": [
+        "\\Windows\\System32\\",
+        "\\Windows\\SysWOW64\\",
+        ".exe",
+        ".dll",
+        ".sys"
+      ],
+      "tags": [
+        "filesystem",
+        "file-drop",
+        "system-directory"
+      ]
+    },
+    {
+      "id": "udp-network-activity",
+      "title": "UDP network activity observed",
+      "severity": "medium",
+      "summary": "A normalized UDP network event was collected during sample execution.",
+      "mitreTechniqueId": "T1105",
+      "mitreTechniqueName": "Ingress Tool Transfer",
+      "eventTypes": [
+        "network.udp",
+        "network.udp.listener.opened",
+        "network.udp.listener.closed"
+      ],
+      "tags": [
+        "network",
+        "udp"
+      ]
+    },
+    {
+      "id": "tls-or-https-network-activity",
+      "title": "TLS or HTTPS network activity observed",
+      "severity": "medium",
+      "summary": "A normalized network event or driver payload referenced TLS/HTTPS or remote port 443.",
+      "mitreTechniqueId": "T1071.001",
+      "mitreTechniqueName": "Web Protocols",
+      "eventTypes": [
+        "network.tcp",
+        "network.http",
+        "http.request",
+        "network.tls",
+        "tls.connection",
+        "driver.network"
+      ],
+      "dataContains": {
+        "protocolName": [
+          "tls",
+          "https"
+        ],
+        "remotePort": [
+          "443"
+        ],
+        "port": [
+          "443"
+        ]
+      },
+      "tags": [
+        "network",
+        "web",
+        "tls"
+      ]
+    },
+    {
+      "id": "network-ip-literal-observed",
+      "title": "Network event with IP literal",
+      "severity": "low",
+      "summary": "A network event included a remote address field, preserving IP literal evidence for triage.",
+      "mitreTechniqueId": "T1105",
+      "mitreTechniqueName": "Ingress Tool Transfer",
+      "eventTypes": [
+        "network.tcp",
+        "network.udp",
+        "driver.network"
+      ],
+      "dataKeys": [
+        "remoteAddress",
+        "remoteIp",
+        "destinationAddress",
+        "destinationIp"
+      ],
+      "tags": [
+        "network",
+        "indicator"
+      ]
+    },
+    {
+      "id": "anti-analysis-vm-artifact-query",
+      "title": "VM, sandbox, debugger, or analysis-tool artifact query",
+      "severity": "medium",
+      "summary": "A path-bearing registry, file, or process query referenced VM, sandbox, debugger, or analysis-tool artifacts.",
+      "mitreTechniqueId": "T1497",
+      "mitreTechniqueName": "Virtualization/Sandbox Evasion",
+      "eventTypes": [
+        "registry.query",
+        "file.open",
+        "process.query",
+        "driver.registry",
+        "driver.file",
+        "driver.process"
+      ],
+      "containsPath": [
+        "VirtualBox",
+        "VMware",
+        "VBox",
+        "vmtoolsd",
+        "Sandboxie",
+        "procmon",
+        "wireshark",
+        "x64dbg",
+        "ollydbg"
+      ],
+      "tags": [
+        "anti-analysis",
+        "sandbox-evasion",
+        "discovery"
+      ]
+    },
+    {
+      "id": "anti-analysis-delay-api-observed",
+      "title": "Sleep or delay API observed",
+      "severity": "medium",
+      "summary": "Telemetry reported sleep, delay, or wait API usage that can be used to evade short sandbox windows.",
+      "mitreTechniqueId": "T1497.003",
+      "mitreTechniqueName": "Time Based Evasion",
+      "eventTypes": [
+        "antiAnalysis.sleep",
+        "api.sleep",
+        "api.call"
+      ],
+      "dataContains": {
+        "operation": [
+          "Sleep",
+          "NtDelayExecution",
+          "WaitForSingleObject",
+          "WaitForMultipleObjects"
+        ],
+        "api": [
+          "Sleep",
+          "NtDelayExecution",
+          "WaitForSingleObject",
+          "WaitForMultipleObjects"
+        ]
+      },
+      "tags": [
+        "anti-analysis",
+        "delay",
+        "time-evasion"
       ]
     }
   ]

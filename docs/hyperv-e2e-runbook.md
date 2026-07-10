@@ -24,6 +24,8 @@ Live execution requires all of these conditions:
 3. `-WhatIf` is not present.
 4. The guest password environment variable is visible to the process.
 5. The sample and staged guest payload files exist outside the repository.
+6. The generated `preflightSummary.liveReady` is `true` before any child script
+   is launched.
 
 ## Generate a plan JSON only
 
@@ -52,12 +54,21 @@ The generated JSON includes:
 
 - `safeDefault`, `requestedMode`, `effectiveMode`, and `willMutateVm`;
 - VM name and clean checkpoint name;
+- host environment checks for Windows, Administrator, Hyper-V cmdlets,
+  `Get-VM`, `Get-VMSnapshot`, Guest Service Interface, credential env var, and
+  non-mutating PowerShell Direct probes when the VM is already running;
 - host sample path and guest sample path;
 - host payload root and expected Guest Agent/R0Collector payload files;
 - guest output paths for `events.json`, `driver-events.jsonl`, `agent.pid`, and
   `agent.exit`;
+- resolved Guest Agent command line and R0Collector mock/live sidecar arguments;
 - ordered `steps` with `mutatesVmState` flags;
-- preflight file-presence warnings for live-only requirements.
+- preflight summary and live-only failures;
+- the planned `runbook-execution.json` path under the job root.
+
+The top-level script also writes `runbook-execution.json` in `PlanOnly` and
+`WhatIf` modes. Those records mark all steps as skipped and prove that no child
+script or VM command was launched.
 
 ## Review live intent without mutation
 
@@ -69,7 +80,8 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\Invoke-HyperVE2E.ps1 `
 ```
 
 This still writes a plan, but `effectiveMode` is `WhatIf` and
-`willMutateVm=false`.
+`willMutateVm=false`. It also writes a safe `runbook-execution.json` beside the
+planned job output.
 
 ## Live execution sequence
 
@@ -87,7 +99,9 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\Invoke-HyperVE2E.ps1 `
 Live mode calls two child scripts:
 
 1. `scripts/Start-SandboxHyperVJob.ps1`
-   - validates elevation, Hyper-V commands, sample, and payload files;
+   - validates elevation, Hyper-V commands, VM existence, clean checkpoint,
+     Guest Service Interface, sample, payload folders/files, and optional
+     payload manifest before the first VM mutation;
    - loads the guest credential from `KSWORDBOX_GUEST_PASSWORD` without printing
      the secret value;
    - stops the golden VM if needed;
@@ -98,8 +112,10 @@ Live mode calls two child scripts:
    - copies Guest Agent and R0Collector payload with `Copy-Item -ToSession`;
    - copies the sample with `Copy-VMFile`;
    - creates a clean guest output folder;
-   - starts Guest Agent asynchronously with `--driver-events`, `--r0collector`,
-     and `--driver-device` when driver collection is enabled.
+   - starts Guest Agent asynchronously with `--sample`, `--out`, `--duration`,
+     and, when driver collection is enabled, `--driver-events`, `--r0collector`,
+     `--driver-device`; `driver.useMockCollector=true` adds `--r0-mock`, which
+     makes the agent forward `--mock` to R0Collector.
 
 2. `scripts/Collect-GuestOutputs.ps1`
    - opens a PowerShell Direct session;
@@ -107,9 +123,17 @@ Live mode calls two child scripts:
    - repeatedly copies the guest output folder to the host with
      `Copy-Item -FromSession`;
    - requires `agent.exit` and fails on a non-zero Guest Agent exit code;
-   - indexes collected events/artifacts;
+   - indexes collected events/artifacts with size, kind, and SHA-256 when
+     hashing succeeds;
+   - requires `events.json`, `agent.pid`, and `agent.exit` on the host; warns
+     when driver collection is enabled but `driver-events.jsonl` is absent;
    - stops the VM;
    - restores the clean checkpoint again by default.
+
+After child scripts finish, `Invoke-HyperVE2E.ps1` writes one aggregate
+`runbook-execution.json` containing the requested/effective mode, preflight
+results, child exit codes, phase result paths, skipped/executed step records,
+cleanup errors, and collected artifact paths.
 
 ## Output locations
 
@@ -117,6 +141,7 @@ For job `<job-id-n>`, live output is written under:
 
 ```text
 D:\Temp\KSwordSandbox\jobs\<job-id-n>\
+  runbook-execution.json
   hyperv-e2e-start-result.json
   hyperv-e2e-collect-result.json
   guest\<job-id-n>\events.json
@@ -130,10 +155,12 @@ products out of git.
 
 ## Recovery notes
 
-If live execution fails after the VM starts, `Collect-GuestOutputs.ps1` still
-tries to stop the VM and restore the clean checkpoint in `finally`. If cleanup
-reports errors, fix the VM manually from Hyper-V Manager or an elevated shell,
-then rerun the read-only readiness preflight before attempting another live E2E:
+If live execution fails during the start phase after VM mutation,
+`Start-SandboxHyperVJob.ps1` attempts stop/restore cleanup. If the collection
+phase starts, `Collect-GuestOutputs.ps1` still tries to stop the VM and restore
+the clean checkpoint in `finally`. If cleanup reports errors, fix the VM
+manually from Hyper-V Manager or an elevated shell, then rerun the read-only
+readiness preflight before attempting another live E2E:
 
 ```powershell
 pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\Test-HyperVReadiness.ps1 `

@@ -44,6 +44,9 @@ internal static class DashboardExperiencePage
             .copy-field { align-items: center; display: inline-flex; flex-wrap: wrap; gap: 4px; max-width: 100%; }
             .copy-field code { overflow-wrap: anywhere; word-break: break-word; }
             .artifact-table td:nth-child(2) { word-break: break-word; }
+            .button-row { align-items: center; display: flex; flex-wrap: wrap; gap: 8px; }
+            .button-row button, .button-row a.buttonlink { margin-top: 8px; }
+            .mini-form { background: #f8fafc; border: 1px dashed #cbd5e1; border-radius: 10px; margin: 10px 0; padding: 12px; }
             .toast { background: #0f172a; border-radius: 999px; bottom: 22px; color: white; left: 50%; opacity: 0; padding: 10px 16px; pointer-events: none; position: fixed; transform: translate(-50%, 12px); transition: opacity .15s ease, transform .15s ease; z-index: 20; }
             .toast.visible { opacity: .96; transform: translate(-50%, 0); }
             .grid { display: grid; gap: 18px; grid-template-columns: repeat(3, 1fr); }
@@ -117,6 +120,13 @@ internal static class DashboardExperiencePage
               <h2>Last planned job</h2>
               <div id="jobResult" class="hint">No job planned yet.</div>
             </section>
+
+            <section>
+              <h2>Recent jobs</h2>
+              <p class="hint">Refresh this list after planning or importing to compare job status, sample paths, and report artifact locations.</p>
+              <button class="secondary" onclick="refreshJobs(true)">Refresh job list</button>
+              <div id="jobList" class="hint">No jobs loaded yet.</div>
+            </section>
           </main>
           <div id="copyToast" class="toast" role="status" aria-live="polite"></div>
           <script>
@@ -139,13 +149,15 @@ internal static class DashboardExperiencePage
               copyText(button.getAttribute('data-copy') || '', button.getAttribute('data-copy-label') || 'value');
             });
 
+            const copyableSelector = '[data-copy], code, pre, td, th, p, li, h1, h2, h3, label, span, a, button, input';
+
             document.addEventListener('contextmenu', event => {
-              const target = event.target.closest ? event.target.closest('[data-copy], code, pre, td, th') : null;
+              const target = event.target.closest ? event.target.closest(copyableSelector) : null;
               if (!target) {
                 return;
               }
 
-              const value = target.getAttribute('data-copy') || target.innerText || target.textContent || '';
+              const value = target.getAttribute('data-copy') || target.value || target.innerText || target.textContent || '';
               if (!value.trim()) {
                 return;
               }
@@ -167,10 +179,7 @@ internal static class DashboardExperiencePage
                     maxResults: 300
                   })
                 });
-                const payload = await response.json();
-                if (!response.ok) {
-                  throw new Error(payload.error || 'Scan failed');
-                }
+                const payload = await requireOk(response, 'Scan executable candidates');
 
                 renderCandidates(payload);
                 setStatus(`Scan complete: ${payload.candidates.length} executable candidate(s).`, false);
@@ -215,10 +224,7 @@ internal static class DashboardExperiencePage
                   method: 'POST',
                   body: form
                 });
-                const uploaded = await uploadResponse.json();
-                if (!uploadResponse.ok) {
-                  throw new Error(uploaded.error || 'Upload failed');
-                }
+                const uploaded = await requireOk(uploadResponse, 'Upload executable');
 
                 document.getElementById('samplePath').value = uploaded.fullPath;
                 document.getElementById('duration').value = document.getElementById('uploadDuration').value || 120;
@@ -250,18 +256,27 @@ internal static class DashboardExperiencePage
                     dryRun: true
                   })
                 });
-                const payload = await response.json();
-                if (!response.ok) {
-                  throw new Error(payload.error || 'Planning failed');
-                }
+                const payload = await requireOk(response, 'Create dry-run analysis plan');
 
                 renderJob(payload);
+                refreshJobs(false);
                 setStatus('Job planned. Review status, artifact paths, raw telemetry, and runbook before enabling privileged live execution.', false);
               } catch (error) {
                 setStatus(error.message, true);
               } finally {
                 setBusy(false);
               }
+            }
+
+            async function planSelectedCandidate() {
+              const selected = document.querySelector('input[name="candidate"]:checked');
+              if (!selected || !selected.value) {
+                setStatus('Select one executable candidate from the scan table before planning.', true);
+                return;
+              }
+
+              document.getElementById('samplePath').value = selected.value;
+              await planPath(selected.value);
             }
 
             function renderCandidates(result) {
@@ -273,7 +288,7 @@ internal static class DashboardExperiencePage
 
               const rows = result.candidates.map((candidate, index) => `
                 <tr>
-                  <td><input type="radio" name="candidate" ${index === 0 ? 'checked' : ''} value="${escapeHtml(candidate.fullPath)}"></td>
+                  <td><input type="radio" name="candidate" ${index === 0 ? 'checked' : ''} value="${escapeAttribute(candidate.fullPath)}" data-copy="${escapeAttribute(candidate.fullPath)}" data-copy-label="selected candidate path"></td>
                   <td data-copy="${escapeAttribute(candidate.fileName)}" data-copy-label="candidate file name">${escapeHtml(candidate.fileName)}</td>
                   <td>${copyableCode(candidate.fullPath, 'candidate path')}</td>
                   <td data-copy="${escapeAttribute(String(candidate.sizeBytes))}" data-copy-label="candidate size">${formatBytes(candidate.sizeBytes)}</td>
@@ -285,6 +300,7 @@ internal static class DashboardExperiencePage
                   <thead><tr><th></th><th>Name</th><th>Path</th><th>Size</th><th>Action</th></tr></thead>
                   <tbody>${rows}</tbody>
                 </table>
+                <p><button class="secondary" onclick="planSelectedCandidate()">Plan selected candidate</button></p>
                 ${warnings ? `<p class="hint">Warnings:</p><ul class="hint">${warnings}</ul>` : ''}`;
             }
 
@@ -301,7 +317,7 @@ internal static class DashboardExperiencePage
               const guestImportStatus = buildGuestImportStatus(job, artifactPaths);
               const servedReportHref = jobId ? `/api/jobs/${encodeURIComponent(jobId)}/report/html` : '';
               const fileReportHref = toFileUri(htmlReportPath);
-            const steps = (job.runbook?.steps || []).map(step => `<li data-copy="${escapeAttribute((step.title || '') + '\n' + (step.powerShell || ''))}" data-copy-label="planned runbook step"><strong>${escapeHtml(step.title)}</strong><br>${copyableCode(step.powerShell, 'planned runbook PowerShell')}</li>`).join('');
+              const steps = (job.runbook?.steps || []).map(step => `<li data-copy="${escapeAttribute((step.title || '') + '\n' + (step.powerShell || ''))}" data-copy-label="planned runbook step"><strong>${escapeHtml(step.title)}</strong><br>${copyableCode(step.powerShell, 'planned runbook PowerShell')}</li>`).join('');
               const messages = (job.messages || []).map(message => `<li data-copy="${escapeAttribute(message)}" data-copy-label="job message">${escapeHtml(message)} ${copyButton(message, 'job message')}</li>`).join('');
               const reportLinks = htmlReportPath ? `
                   <a class="buttonlink" target="_blank" rel="noopener" href="${escapeHtml(servedReportHref)}">Open served HTML report</a>
@@ -311,7 +327,7 @@ internal static class DashboardExperiencePage
                 <p><strong>Status:</strong> <span class="pill" data-copy="${escapeAttribute(job.status || '')}" data-copy-label="job status">${escapeHtml(job.status)}</span></p>
                 <p><strong>Sample:</strong> ${copyableCode(job.sample?.fullPath || '', 'sample path')}</p>
                 <h3>Report access</h3>
-                <p>
+                <p class="button-row">
                   <button class="secondary" onclick="refreshJob('${escapeJs(jobId)}')">Refresh job</button>
                   <button class="secondary" onclick="showReportPaths('${escapeJs(htmlReportPath)}')">Show report path</button>
                   ${reportLinks}
@@ -329,13 +345,18 @@ internal static class DashboardExperiencePage
                     </tbody>
                   </table>
                   <p><strong>Imported guest events path:</strong> ${copyableCode(guestEventsPath, 'guest import source path')}</p>
+                  <div class="mini-form">
+                    <label for="guestImportPath">Optional guest events path for manual import</label>
+                    <input id="guestImportPath" placeholder="${escapeAttribute(artifactPaths.eventsJsonPath || 'D:\\runtime\\jobs\\<job>\\guest\\events.json')}" value="${escapeAttribute(guestEventsPath || artifactPaths.eventsJsonPath || '')}" data-copy-label="manual guest import path">
+                    <p class="hint">Leave blank to let the server search the job guest folder, or paste a specific events.json / .jsonl path when collection landed elsewhere.</p>
+                  </div>
                   <p class="hint">If the browser blocks the file:// link, copy report.html above or use the served report link. Expected guest paths are shown before import so live operators know where events.json and driver-events.jsonl should appear.</p>
                 </div>
                 <h3>Job messages</h3>
                 ${messages ? `<ul>${messages}</ul>` : '<p class="hint">No job messages recorded.</p>'}
                 <h3>Live raw event monitor</h3>
                 <div class="event-monitor">
-                  <p>
+                  <p class="button-row">
                     <span id="liveEventStatus" class="hint">Waiting for live raw telemetry...</span>
                     <button class="secondary" onclick="refreshLiveEvents('${escapeJs(jobId)}', true)">Refresh raw telemetry now</button>
                     ${copyButton(jobId, 'live telemetry job id')}
@@ -344,7 +365,7 @@ internal static class DashboardExperiencePage
                   <div id="liveEventRows" class="hint">No raw events loaded yet.</div>
                 </div>
                 <h3>Hyper-V runbook</h3>
-                <p>
+                <p class="button-row">
                   <button class="secondary" onclick="executeRunbook('${escapeJs(jobId)}', false)">Record dry-run execution</button>
                   <button onclick="executeRunbook('${escapeJs(jobId)}', true)">Execute live runbook</button>
                   <button class="secondary" onclick="importGuestEvents('${escapeJs(jobId)}')">Import guest events / refresh report</button>
@@ -367,18 +388,78 @@ internal static class DashboardExperiencePage
               setStatus('Refreshing job status...', false);
               try {
                 const response = await fetch(`/api/jobs/${encodeURIComponent(jobId)}`);
-                const job = await response.json();
-                if (!response.ok) {
-                  throw new Error(job.error || 'Job refresh failed');
-                }
+                const job = await requireOk(response, 'Refresh job status');
 
                 renderJob(job);
+                refreshJobs(false);
                 setStatus(`Job refreshed. Status: ${job.status}.`, false);
               } catch (error) {
                 setStatus(error.message, true);
               } finally {
                 setBusy(false);
               }
+            }
+
+            async function refreshJobs(showStatus) {
+              // Inputs: optional status flag from the recent-jobs refresh
+              // button. Processing: fetches the in-memory job list and renders
+              // copyable status/path rows. Return: no value.
+              if (showStatus) {
+                setBusy(true);
+                setStatus('Refreshing recent jobs...', false);
+              }
+
+              try {
+                const response = await fetch('/api/jobs');
+                const jobs = await requireOk(response, 'Refresh recent jobs');
+                renderJobList(Array.isArray(jobs) ? jobs : []);
+                if (showStatus) {
+                  setStatus(`Recent jobs refreshed: ${Array.isArray(jobs) ? jobs.length : 0} job(s).`, false);
+                }
+              } catch (error) {
+                if (showStatus) {
+                  setStatus(error.message, true);
+                }
+              } finally {
+                if (showStatus) {
+                  setBusy(false);
+                }
+              }
+            }
+
+            function renderJobList(jobs) {
+              // Inputs: job array from /api/jobs. Processing: renders a compact
+              // copyable table with status, sample, and report path fields.
+              // Return: no value.
+              const container = document.getElementById('jobList');
+              if (!container) {
+                return;
+              }
+
+              if (!jobs.length) {
+                container.innerHTML = '<p>No jobs are currently held by the Web host.</p>';
+                return;
+              }
+
+              const rows = jobs.slice().reverse().map(job => {
+                const jobId = String(job.jobId || '');
+                const samplePath = job.sample?.fullPath || job.submission?.samplePath || '';
+                const reportPath = job.htmlReportPath || '';
+                return `
+                <tr>
+                  <td>${copyableCode(jobId, 'job id')}</td>
+                  <td data-copy="${escapeAttribute(job.status || '')}" data-copy-label="job status">${escapeHtml(job.status || '-')}</td>
+                  <td>${copyableCode(samplePath, 'job sample path', '-')}</td>
+                  <td>${copyableCode(reportPath, 'job report.html path', '-')}</td>
+                  <td><button class="secondary" onclick="refreshJob('${escapeJs(jobId)}')">Open</button></td>
+                </tr>`;
+              }).join('');
+
+              container.innerHTML = `
+                <table>
+                  <thead><tr><th>Job ID</th><th>Status</th><th>Sample</th><th>report.html</th><th>Action</th></tr></thead>
+                  <tbody>${rows}</tbody>
+                </table>`;
             }
 
             function startLiveMonitor(jobId) {
@@ -528,10 +609,7 @@ internal static class DashboardExperiencePage
               const offset = liveEventOffsets.get(jobId) || 0;
               try {
                 const response = await fetch(`/api/jobs/${encodeURIComponent(jobId)}/events/live?offset=${offset}&take=100`);
-                const snapshot = await response.json();
-                if (!response.ok) {
-                  throw new Error(snapshot.error || 'Live event refresh failed');
-                }
+                const snapshot = await requireOk(response, 'Refresh live raw telemetry');
 
                 renderLiveEventSnapshot(jobId, snapshot, reset || offset === 0, 'polling');
               } catch (error) {
@@ -677,7 +755,7 @@ internal static class DashboardExperiencePage
               setBusy(true);
               setStatus(live ? 'Executing live Hyper-V runbook...' : 'Recording dry-run runbook execution...', false);
               try {
-                const response = await fetch(`/api/jobs/${jobId}/runbook/execute`, {
+                const response = await fetch(`/api/jobs/${encodeURIComponent(jobId)}/runbook/execute`, {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({
@@ -686,10 +764,7 @@ internal static class DashboardExperiencePage
                     importGuestEvents: true
                   })
                 });
-                const payload = await response.json();
-                if (!response.ok) {
-                  throw new Error(payload.error || 'Runbook execution failed');
-                }
+                const payload = await requireOk(response, live ? 'Execute live Hyper-V runbook' : 'Record dry-run runbook execution');
 
                 const execution = payload.execution || payload;
                 if (payload.job) {
@@ -697,6 +772,7 @@ internal static class DashboardExperiencePage
                 }
 
                 renderExecution(execution, payload);
+                refreshJobs(false);
                 const suffix = payload.guestImportMessage ? ` ${payload.guestImportMessage}` : '';
                 const importFailed = Boolean(payload.guestImportMessage && !payload.guestImportSucceeded);
                 setStatus((execution.success ? 'Runbook execution completed.' : 'Runbook execution stopped with a failure.') + suffix, !execution.success || importFailed);
@@ -711,17 +787,16 @@ internal static class DashboardExperiencePage
               setBusy(true);
               setStatus('Importing guest events and regenerating report...', false);
               try {
-                const response = await fetch(`/api/jobs/${jobId}/guest-events/import`, {
+                const explicitPath = (document.getElementById('guestImportPath')?.value || '').trim();
+                const response = await fetch(`/api/jobs/${encodeURIComponent(jobId)}/guest-events/import`, {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({})
+                  body: JSON.stringify(explicitPath ? { eventsPath: explicitPath } : {})
                 });
-                const job = await response.json();
-                if (!response.ok) {
-                  throw new Error(job.error || 'Guest event import failed');
-                }
+                const job = await requireOk(response, 'Import guest events and refresh report');
 
                 renderJob(job);
+                refreshJobs(false);
                 setStatus(`Guest events imported. Report refreshed at ${job.htmlReportPath || 'report.html'}.`, false);
               } catch (error) {
                 setStatus(error.message, true);
@@ -809,10 +884,25 @@ internal static class DashboardExperiencePage
               // Inputs: current job and derived artifact paths. Processing:
               // turns nullable GuestEventsPath into an operator-facing status.
               // Return: label/detail text for the dashboard.
+              const messageText = (job.messages || []).join('\n').toLowerCase();
               if (job.guestEventsPath) {
+                if (messageText.includes('found no events')) {
+                  return {
+                    label: 'imported empty',
+                    detail: `Guest import used ${job.guestEventsPath}, but no events were found. Check guest collection logs and driver-events.jsonl.`
+                  };
+                }
+
                 return {
                   label: 'imported',
                   detail: `Guest events are recorded from ${job.guestEventsPath}.`
+                };
+              }
+
+              if (messageText.includes('guest') && (messageText.includes('not imported') || messageText.includes('not found') || messageText.includes('failed'))) {
+                return {
+                  label: 'import failed',
+                  detail: 'Guest import did not complete. Review the latest job message and paste an explicit events.json or .jsonl path if needed.'
                 };
               }
 
@@ -951,6 +1041,8 @@ internal static class DashboardExperiencePage
               const element = document.getElementById('status');
               element.className = `status ${isError ? 'error' : 'ok'}`;
               element.textContent = message;
+              element.setAttribute('data-copy', message || '');
+              element.setAttribute('data-copy-label', 'status message');
             }
 
             function setBusy(isBusy) {
@@ -1001,8 +1093,79 @@ internal static class DashboardExperiencePage
             }
 
             function escapeJs(value) {
-              return String(value).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+              return String(value).replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\r/g, '\\r').replace(/\n/g, '\\n');
             }
+
+            async function requireOk(response, action) {
+              const payload = await readResponsePayload(response);
+              if (!response.ok) {
+                throw new Error(formatHttpError(action, response, payload));
+              }
+
+              return payload;
+            }
+
+            async function readResponsePayload(response) {
+              const text = await response.text();
+              if (!text) {
+                return {};
+              }
+
+              try {
+                return JSON.parse(text);
+              } catch {
+                return { raw: text };
+              }
+            }
+
+            function formatHttpError(action, response, payload) {
+              const statusText = response.statusText ? ` ${response.statusText}` : '';
+              const detail = extractErrorMessage(payload) || 'No error detail was returned by the server.';
+              const traceId = payload && (payload.traceId || payload.requestId);
+              return `${action} failed (HTTP ${response.status}${statusText}${traceId ? `, trace ${traceId}` : ''}): ${detail}`;
+            }
+
+            function extractErrorMessage(payload) {
+              if (!payload) {
+                return '';
+              }
+
+              if (typeof payload === 'string') {
+                return payload;
+              }
+
+              if (payload.error) {
+                if (typeof payload.error === 'string') {
+                  return payload.error;
+                }
+
+                if (payload.error.message) {
+                  return payload.error.message;
+                }
+              }
+
+              if (payload.title || payload.detail) {
+                return [payload.title, payload.detail].filter(Boolean).join(': ');
+              }
+
+              if (payload.message) {
+                return payload.message;
+              }
+
+              if (payload.errors) {
+                return Object.entries(payload.errors)
+                  .map(([field, values]) => `${field}: ${Array.isArray(values) ? values.join('; ') : values}`)
+                  .join(' | ');
+              }
+
+              if (payload.raw) {
+                return payload.raw;
+              }
+
+              return '';
+            }
+
+            refreshJobs(false);
           </script>
         </body>
         </html>

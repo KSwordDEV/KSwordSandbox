@@ -76,7 +76,7 @@ public sealed class HyperVRunbookBuilder
         steps.Add(Step("make-vm-root", "Create temporary VM folder", $"New-Item -ItemType Directory -Force -Path {Q(vmRoot)} | Out-Null"));
         steps.Add(Step("make-diff-disk", "Create differencing disk", $"New-VHD -Path {Q(diffDisk)} -ParentPath {Q(config.HyperV.BaseVhdxPath!)} -Differencing | Out-Null"));
         steps.Add(Step("create-temp-vm", "Create temporary analysis VM", $"New-VM -Name {Q(targetVmName)} -Generation 2 -MemoryStartupBytes {config.HyperV.MemoryStartupBytes} -VHDPath {Q(diffDisk)}{switchPart} | Out-Null"));
-        steps.Add(Step("enable-guest-service", "Enable Guest Service Interface", $"Enable-VMIntegrationService -VMName {Q(targetVmName)} -Name 'Guest Service Interface'"));
+        steps.Add(Step("enable-guest-service", "Enable Guest Service Interface", BuildEnableGuestServiceCommand(targetVmName)));
         steps.Add(Step("start-temp-vm", "Start temporary analysis VM", $"Start-VM -Name {Q(targetVmName)}"));
     }
 
@@ -89,8 +89,23 @@ public sealed class HyperVRunbookBuilder
     {
         steps.Add(Step("stop-golden", "Stop golden VM before restore", $"Stop-VM -Name {Q(config.HyperV.GoldenVmName)} -TurnOff -Force -ErrorAction SilentlyContinue"));
         steps.Add(Step("restore-golden", "Restore clean checkpoint", $"Restore-VMSnapshot -VMName {Q(config.HyperV.GoldenVmName)} -Name {Q(config.HyperV.GoldenSnapshotName)} -Confirm:$false"));
-        steps.Add(Step("enable-guest-service", "Enable Guest Service Interface", $"Enable-VMIntegrationService -VMName {Q(config.HyperV.GoldenVmName)} -Name 'Guest Service Interface'"));
+        steps.Add(Step("enable-guest-service", "Enable Guest Service Interface", BuildEnableGuestServiceCommand(config.HyperV.GoldenVmName)));
         steps.Add(Step("start-golden", "Start restored golden VM", $"Start-VM -Name {Q(config.HyperV.GoldenVmName)}"));
+    }
+
+    /// <summary>
+    /// Builds a locale-neutral command that enables the Hyper-V Guest Service
+    /// Interface. Inputs are the target VM name; processing resolves the
+    /// integration component by stable GUID first so localized hosts (for
+    /// example Chinese Windows showing "来宾服务接口") do not fail; the method
+    /// returns a PowerShell command string.
+    /// </summary>
+    private static string BuildEnableGuestServiceCommand(string vmName)
+    {
+        return "$guestServiceComponentId = '6C09BB55-D683-4DA0-8931-C9BF705F6480'; " +
+               $"$guestService = Get-VMIntegrationService -VMName {Q(vmName)} | Where-Object {{ ([string]$_.Id).EndsWith('\\' + $guestServiceComponentId, [System.StringComparison]::OrdinalIgnoreCase) -or $_.Name -eq 'Guest Service Interface' -or $_.Name -eq '来宾服务接口' }} | Select-Object -First 1; " +
+               "if ($null -eq $guestService) { throw 'Guest Service Interface integration service was not found.' }; " +
+               "Enable-VMIntegrationService -VMIntegrationService $guestService";
     }
 
     /// <summary>

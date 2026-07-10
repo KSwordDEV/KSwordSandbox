@@ -4,7 +4,7 @@ This document describes the staged Web project layout used to extract endpoint
 and dashboard logic from `Program.cs`. Most endpoint modules remain passive
 staging, but the root WebUI is now rendered by
 `Dashboard/DashboardExperiencePage.cs` so the operator experience can evolve
-inside the Dashboard layer.
+inside the Dashboard layer without touching Core, Driver, or Guest code.
 
 ## Write boundary
 
@@ -14,10 +14,11 @@ Worker-Web changes are limited to:
 - `src/KSword.Sandbox.Web/Dashboard/**`
 - `src/KSword.Sandbox.Web/Endpoints/**`
 - `src/KSword.Sandbox.Web/Infrastructure/**`
+- `src/KSword.Sandbox.Web/Program.cs` for route wiring and Web-only error text
 - `docs/webui-framework.md`
 
-No `driver/`, `guest/`, `src/KSword.Sandbox.Core/`, or existing Web source file
-was modified by this staging work.
+No `driver/`, `guest/`, or `src/KSword.Sandbox.Core/` files should be modified
+by WebUI/UX work.
 
 ## Layer responsibilities
 
@@ -38,8 +39,9 @@ was modified by this staging work.
 The root dashboard must keep these operator-facing areas visible and copyable:
 
 - clearer one-click entry points for upload-and-plan, host-path planning, and
-  directory scan plus first-candidate planning;
-- explicit job status, job ID, sample path, and guest import status;
+  directory scan plus first-candidate or selected-candidate planning;
+- explicit job status, job ID, sample path, recent job list, and guest import
+  status;
 - artifact paths for `report.json`, `report.html`, `events.json`,
   `driver-events.jsonl`, and `runbook-execution.json`;
 - a live raw telemetry area that shows source files and unclassified raw event
@@ -48,8 +50,31 @@ The root dashboard must keep these operator-facing areas visible and copyable:
   duration, and command text.
 
 All tables, path values, raw telemetry evidence, runbook command/output blocks,
-and job messages must support either an explicit `Copy` button or right-click
-copy through `data-copy`, `code`, `pre`, `td`, or `th` elements.
+job messages, status text, inputs, and section text must support either an
+explicit `Copy` button or right-click copy through `data-copy`, `code`, `pre`,
+`td`, `th`, `p`, `li`, heading, `label`, `span`, `a`, `button`, or `input`
+elements. The WebUI should display a small toast after copy succeeds or fails so
+operators know whether clipboard capture worked.
+
+Guest import status should be specific:
+
+- `waiting for import` when the job has report paths but no imported event
+  source yet;
+- `imported` when an `events.json` or JSONL source path is recorded;
+- `imported empty` when import succeeded technically but no guest events were
+  found;
+- `import failed` when job messages indicate guest output was missing or could
+  not be imported.
+
+The import action should allow an optional explicit `events.json` / `.jsonl`
+path. If the field is blank, the endpoint searches the deterministic job guest
+folder. This keeps the one-click path short while still giving operators a
+repair path when guest collection artifacts landed somewhere else.
+
+Client-side errors should preserve the failing action, HTTP status, server
+detail, and trace/request ID when present, for example:
+`Create dry-run analysis plan failed (HTTP 400 Bad Request): Dry-run plan could
+not be created: <specific path validation detail>`.
 
 ## Migration path
 
@@ -82,6 +107,11 @@ For planned jobs, the UI may derive expected guest paths from the recorded job
 root: `guest\<job-id-n>\events.json` and
 `guest\<job-id-n>\driver-events.jsonl`. These derived paths are display hints;
 the import endpoint still resolves actual files server-side.
+
+The current root page also renders a recent job table from `/api/jobs`. That
+table is intentionally read-only: the `Open` action fetches the selected job
+detail and reuses the main job panel instead of duplicating artifact/runbook
+rendering logic.
 
 ## Verification guidance
 

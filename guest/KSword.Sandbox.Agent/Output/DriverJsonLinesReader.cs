@@ -25,25 +25,46 @@ internal sealed class DriverJsonLinesReader
         }
 
         var events = new List<SandboxEvent>();
-        foreach (var line in File.ReadLines(path))
+        try
         {
-            if (string.IsNullOrWhiteSpace(line))
+            foreach (var line in File.ReadLines(path))
             {
-                continue;
-            }
-
-            try
-            {
-                var evt = JsonSerializer.Deserialize<SandboxEvent>(line, JsonOptions);
-                if (evt is not null)
+                if (string.IsNullOrWhiteSpace(line))
                 {
-                    events.Add(evt with { Source = string.IsNullOrWhiteSpace(evt.Source) ? "driver" : evt.Source });
+                    continue;
+                }
+
+                try
+                {
+                    using var document = JsonDocument.Parse(line);
+                    var hasSource = document.RootElement.ValueKind == JsonValueKind.Object &&
+                        document.RootElement.EnumerateObject().Any(property =>
+                            string.Equals(property.Name, "source", StringComparison.OrdinalIgnoreCase));
+                    var evt = JsonSerializer.Deserialize<SandboxEvent>(line, JsonOptions);
+                    if (evt is not null)
+                    {
+                        events.Add(evt with { Source = !hasSource || string.IsNullOrWhiteSpace(evt.Source) ? "driver" : evt.Source });
+                    }
+                }
+                catch (JsonException)
+                {
+                    events.Add(new SandboxEvent { EventType = "driver.parse_error", Source = "guest", Path = path, Data = { ["line"] = line } });
                 }
             }
-            catch (JsonException)
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            events.Add(new SandboxEvent
             {
-                events.Add(new SandboxEvent { EventType = "driver.parse_error", Source = "guest", Path = path, Data = { ["line"] = line } });
-            }
+                EventType = "driver.read_error",
+                Source = "guest",
+                Path = path,
+                Data =
+                {
+                    ["exceptionType"] = ex.GetType().FullName ?? ex.GetType().Name,
+                    ["message"] = ex.Message
+                }
+            });
         }
 
         return events;

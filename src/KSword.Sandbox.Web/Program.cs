@@ -36,7 +36,7 @@ app.MapGet("/api/jobs", (SandboxJobService service) => Results.Ok(service.ListJo
 app.MapGet("/api/jobs/{jobId:guid}", (Guid jobId, SandboxJobService service) =>
 {
     var job = service.GetJob(jobId);
-    return job is null ? Results.NotFound(new { error = "Job was not found." }) : Results.Ok(job);
+    return job is null ? Results.NotFound(new { error = $"Job {jobId:D} was not found in the in-memory Web host job list." }) : Results.Ok(job);
 });
 // GET /api/jobs/{jobId}/events/live returns unclassified raw events for the
 // WebUI monitor. Inputs are a job id plus optional offset/take query values;
@@ -66,7 +66,7 @@ app.MapGet("/api/jobs/{jobId:guid}/report/html", async Task<IResult> (Guid jobId
 {
     if (!TryResolveHtmlReportPath(jobId, service, out var reportPath, out var errorResult))
     {
-        return errorResult ?? Results.NotFound(new { error = "HTML report was not found for this job." });
+        return errorResult ?? Results.NotFound(new { error = $"HTML report was not found for job {jobId:D}." });
     }
 
     try
@@ -78,7 +78,7 @@ app.MapGet("/api/jobs/{jobId:guid}/report/html", async Task<IResult> (Guid jobId
     {
         return Results.Problem(
             title: "Unable to read HTML report.",
-            detail: ex.Message,
+            detail: $"The recorded report path '{reportPath}' could not be read: {ex.Message}",
             statusCode: 500);
     }
 });
@@ -90,7 +90,7 @@ app.MapPost("/api/files/scan", (ExecutableScanRequest request, ExecutableTargetS
     }
     catch (Exception ex) when (ex is ArgumentException or DirectoryNotFoundException or IOException or UnauthorizedAccessException)
     {
-        return Results.BadRequest(new { error = ex.Message });
+        return Results.BadRequest(new { error = $"File scan request is invalid or inaccessible: {ex.Message}" });
     }
 });
 app.MapPost("/api/files/upload", async (HttpRequest request, SandboxConfig currentConfig) =>
@@ -102,7 +102,7 @@ app.MapPost("/api/files/upload", async (HttpRequest request, SandboxConfig curre
     }
     catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or IOException or UnauthorizedAccessException)
     {
-        return Results.BadRequest(new { error = ex.Message });
+        return Results.BadRequest(new { error = $"Executable upload failed validation or storage: {ex.Message}" });
     }
 });
 app.MapPost("/api/jobs/plan", (SandboxSubmission submission, SandboxJobService service) =>
@@ -114,7 +114,7 @@ app.MapPost("/api/jobs/plan", (SandboxSubmission submission, SandboxJobService s
     }
     catch (Exception ex) when (ex is ArgumentException or FileNotFoundException or InvalidOperationException)
     {
-        return Results.BadRequest(new { error = ex.Message });
+        return Results.BadRequest(new { error = $"Dry-run plan could not be created: {ex.Message}" });
     }
 });
 app.MapPost("/api/jobs/{jobId:guid}/runbook/execute", async (Guid jobId, RunbookExecuteRequest request, SandboxJobService service, IRunbookExecutor executor) =>
@@ -122,12 +122,12 @@ app.MapPost("/api/jobs/{jobId:guid}/runbook/execute", async (Guid jobId, Runbook
     var job = service.GetJob(jobId);
     if (job is null)
     {
-        return Results.NotFound(new { error = "Job was not found." });
+        return Results.NotFound(new { error = $"Job {jobId:D} was not found; create a dry-run plan before running a runbook." });
     }
 
     if (job.Runbook is null)
     {
-        return Results.BadRequest(new { error = "Job does not have a runbook." });
+        return Results.BadRequest(new { error = $"Job {jobId:D} does not have a runbook; recreate the dry-run plan for the selected executable." });
     }
 
     var options = new SandboxRunbookExecutionOptions
@@ -177,7 +177,7 @@ app.MapPost("/api/jobs/{jobId:guid}/guest-events/import", (Guid jobId, GuestEven
     }
     catch (Exception ex) when (ex is DirectoryNotFoundException or FileNotFoundException or InvalidDataException or IOException or UnauthorizedAccessException)
     {
-        return Results.BadRequest(new { error = ex.Message });
+        return Results.BadRequest(new { error = $"Guest event import failed for job {jobId:D}: {ex.Message}" });
     }
 });
 
@@ -309,13 +309,13 @@ static bool TryResolveHtmlReportPath(Guid jobId, SandboxJobService service, out 
     var job = service.GetJob(jobId);
     if (job is null)
     {
-        errorResult = Results.NotFound(new { error = "Job was not found." });
+        errorResult = Results.NotFound(new { error = $"Job {jobId:D} was not found in the in-memory Web host job list." });
         return false;
     }
 
     if (string.IsNullOrWhiteSpace(job.HtmlReportPath))
     {
-        errorResult = Results.NotFound(new { error = "Job does not have an HTML report path." });
+        errorResult = Results.NotFound(new { error = $"Job {jobId:D} does not have an HTML report path yet; create a dry-run plan first." });
         return false;
     }
 
@@ -325,7 +325,7 @@ static bool TryResolveHtmlReportPath(Guid jobId, SandboxJobService service, out 
     }
     catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
     {
-        errorResult = Results.BadRequest(new { error = $"Recorded HTML report path is invalid: {ex.Message}" });
+        errorResult = Results.BadRequest(new { error = $"Recorded HTML report path for job {jobId:D} is invalid ('{job.HtmlReportPath}'): {ex.Message}" });
         reportPath = string.Empty;
         return false;
     }
@@ -334,14 +334,14 @@ static bool TryResolveHtmlReportPath(Guid jobId, SandboxJobService service, out 
     if (!string.Equals(extension, ".html", StringComparison.OrdinalIgnoreCase) &&
         !string.Equals(extension, ".htm", StringComparison.OrdinalIgnoreCase))
     {
-        errorResult = Results.BadRequest(new { error = "Recorded report path is not an HTML file." });
+        errorResult = Results.BadRequest(new { error = $"Recorded report path for job {jobId:D} is not an HTML file: {reportPath}" });
         reportPath = string.Empty;
         return false;
     }
 
     if (!File.Exists(reportPath))
     {
-        errorResult = Results.NotFound(new { error = "HTML report file was not found for this job." });
+        errorResult = Results.NotFound(new { error = $"HTML report file was not found at the recorded path for job {jobId:D}: {reportPath}" });
         reportPath = string.Empty;
         return false;
     }
@@ -359,30 +359,30 @@ static async Task<ExecutableCandidate> SaveUploadedExecutableAsync(HttpRequest r
 {
     if (!request.HasFormContentType)
     {
-        throw new ArgumentException("Upload must use multipart/form-data.");
+        throw new ArgumentException("Upload must use multipart/form-data with an executable file field named 'sample'.");
     }
 
     var form = await request.ReadFormAsync();
     var file = form.Files.GetFile("sample") ?? form.Files.FirstOrDefault();
     if (file is null)
     {
-        throw new ArgumentException("No uploaded file was provided.");
+        throw new ArgumentException("No uploaded file was provided; choose one .exe in the 'sample' multipart field.");
     }
 
     if (file.Length <= 0)
     {
-        throw new InvalidOperationException("Uploaded file is empty.");
+        throw new InvalidOperationException($"Uploaded file '{file.FileName}' is empty.");
     }
 
     if (file.Length > config.Analysis.MaxSampleBytes)
     {
-        throw new InvalidOperationException($"Uploaded file size {file.Length} exceeds limit {config.Analysis.MaxSampleBytes}.");
+        throw new InvalidOperationException($"Uploaded file '{file.FileName}' size {file.Length} bytes exceeds limit {config.Analysis.MaxSampleBytes} bytes.");
     }
 
     var originalName = Path.GetFileName(file.FileName);
     if (!string.Equals(Path.GetExtension(originalName), ".exe", StringComparison.OrdinalIgnoreCase))
     {
-        throw new InvalidOperationException("Only .exe uploads are accepted in the v1 WebUI.");
+        throw new InvalidOperationException($"Only .exe uploads are accepted in the v1 WebUI; received '{originalName}'.");
     }
 
     var uploadRoot = Path.Combine(config.Paths.RuntimeRoot, "uploads");

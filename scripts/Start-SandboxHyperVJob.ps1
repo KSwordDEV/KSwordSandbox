@@ -22,8 +22,14 @@ $ErrorActionPreference = 'Stop'
 $script:StepResults = New-Object System.Collections.Generic.List[object]
 $script:CleanupErrors = New-Object System.Collections.Generic.List[string]
 $script:GuestAgentProcessId = $null
+$script:GuestAgentCommandLine = ''
+$script:GuestAgentArguments = @()
+$script:R0CollectorCommandLine = ''
+$script:R0CollectorArguments = @()
+$script:R0CollectorMode = 'Disabled'
 $script:VmMutationStarted = $false
 $script:Cmdlet = $PSCmdlet
+$script:GuestServiceInterfaceComponentId = '6C09BB55-D683-4DA0-8931-C9BF705F6480'
 
 function Write-HyperVJobStep {
     param([Parameter(Mandatory)][string]$Message)
@@ -64,6 +70,27 @@ function Quote-PowerShellString {
     return "'" + ($Text -replace "'", "''") + "'"
 }
 
+function Get-GuestServiceInterface {
+    param([Parameter(Mandatory)][string]$VmName)
+
+    $componentSuffix = '\' + $script:GuestServiceInterfaceComponentId
+    $service = @(Get-VMIntegrationService -VMName $VmName -ErrorAction Stop |
+        Where-Object {
+            $id = [string]$_.Id
+            $name = [string]$_.Name
+            $id.EndsWith($componentSuffix, [System.StringComparison]::OrdinalIgnoreCase) -or
+            $name -eq 'Guest Service Interface' -or
+            $name -eq '来宾服务接口'
+        } |
+        Select-Object -First 1)[0]
+
+    if ($null -eq $service) {
+        throw "Guest Service Interface integration service was not found on VM '$VmName'. Checked localized names and component id '$script:GuestServiceInterfaceComponentId'."
+    }
+
+    return $service
+}
+
 function Test-IsAdministrator {
     try {
         $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent()
@@ -98,6 +125,37 @@ function Assert-FileForLive {
 
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
         throw "$Name was not found: $Path"
+    }
+}
+
+function Assert-DirectoryForLive {
+    param(
+        [Parameter(Mandatory)][string]$Name,
+        [Parameter(Mandatory)][string]$Path
+    )
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Container)) {
+        throw "$Name was not found: $Path"
+    }
+}
+
+function Assert-VmCheckpointForLive {
+    param([Parameter(Mandatory)][object]$Plan)
+
+    $vm = Get-VM -Name $Plan.vm.name -ErrorAction Stop
+    $snapshot = Get-VMSnapshot -VMName $Plan.vm.name -Name $Plan.vm.cleanCheckpointName -ErrorAction Stop
+    Write-HyperVJobStep ("Verified VM '{0}' in state '{1}' and checkpoint '{2}' from {3}." -f $Plan.vm.name, $vm.State, $Plan.vm.cleanCheckpointName, $snapshot.CreationTime)
+}
+
+function Assert-GuestServiceForLive {
+    param([Parameter(Mandatory)][object]$Plan)
+
+    $guestService = Get-GuestServiceInterface -VmName $Plan.vm.name
+    if ([bool]$guestService.Enabled) {
+        Write-HyperVJobStep "Guest Service Interface is already enabled."
+    }
+    else {
+        Write-HyperVJobStep "Guest Service Interface is currently disabled; live start will enable it before Copy-VMFile."
     }
 }
 
@@ -297,6 +355,7 @@ function Initialize-GuestOutputDirectory {
         [string]$Plan.guest.agentPidPath,
         [string]$Plan.guest.agentExitPath,
         [string]$Plan.driver.eventJsonLinesPath,
+        [string]$Plan.guest.agentSummaryPath,
         $eventsPath
     )
 
@@ -337,6 +396,34 @@ function Start-GuestAgent {
     }
 
     $launchLine = '& ' + (Quote-PowerShellString $Plan.guest.agentPath) + ' ' + (($arguments.ToArray()) -join ' ')
+    $script:GuestAgentArguments = @($arguments.ToArray())
+    $script:GuestAgentCommandLine = $launchLine
+    $script:R0CollectorMode = if (-not (ConvertTo-BooleanValue $Plan.driver.enabled)) {
+        'Disabled'
+    }
+    elseif (ConvertTo-BooleanValue $Plan.driver.useMockCollector) {
+        'Mock'
+    }
+    else {
+        'Live'
+    }
+
+    if (ConvertTo-BooleanValue $Plan.driver.enabled) {
+        $collectorArguments = New-Object System.Collections.Generic.List[string]
+        [void]$collectorArguments.Add('--device')
+        [void]$collectorArguments.Add((Quote-PowerShellString $Plan.driver.devicePath))
+        [void]$collectorArguments.Add('--output')
+        [void]$collectorArguments.Add((Quote-PowerShellString $Plan.driver.eventJsonLinesPath))
+        [void]$collectorArguments.Add('--duration')
+        [void]$collectorArguments.Add([string]$Plan.job.durationSeconds)
+        if (ConvertTo-BooleanValue $Plan.driver.useMockCollector) {
+            [void]$collectorArguments.Add('--mock')
+        }
+
+        $script:R0CollectorArguments = @($collectorArguments.ToArray())
+        $script:R0CollectorCommandLine = '& ' + (Quote-PowerShellString $Plan.driver.r0CollectorPathInGuest) + ' ' + (($collectorArguments.ToArray()) -join ' ')
+    }
+
     $agentCommand = @(
         $launchLine,
         '$exitCode = if ($global:LASTEXITCODE -is [int]) { $global:LASTEXITCODE } else { 0 }',
@@ -376,6 +463,7 @@ function Assert-LivePreconditions {
     Assert-CommandAvailable -Names @(
         'Get-VM',
         'Get-VMSnapshot',
+        'Get-VMIntegrationService',
         'Restore-VMSnapshot',
         'Enable-VMIntegrationService',
         'Start-VM',
@@ -386,10 +474,19 @@ function Assert-LivePreconditions {
         'Copy-Item'
     )
 
+    Assert-VmCheckpointForLive -Plan $Plan
+    Assert-GuestServiceForLive -Plan $Plan
+    Assert-DirectoryForLive -Name 'Guest payload root' -Path $Plan.host.guestPayloadRoot
+    Assert-DirectoryForLive -Name 'Guest Agent payload directory' -Path (Join-Path $Plan.host.guestPayloadRoot 'agent')
     Assert-FileForLive -Name 'Sample file' -Path $Plan.sample.hostPath
     Assert-FileForLive -Name 'Guest Agent payload' -Path $Plan.host.agentPayloadPath
+    if (-not [string]::IsNullOrWhiteSpace([string]$Plan.host.payloadManifestPath) -and
+        -not (Test-Path -LiteralPath $Plan.host.payloadManifestPath -PathType Leaf)) {
+        Write-HyperVJobStep "Payload manifest is not present: $($Plan.host.payloadManifestPath). Continuing because live execution only requires the staged binaries."
+    }
 
     if (ConvertTo-BooleanValue $Plan.driver.enabled) {
+        Assert-DirectoryForLive -Name 'R0Collector payload directory' -Path (Join-Path $Plan.host.guestPayloadRoot 'r0collector')
         Assert-FileForLive -Name 'R0Collector payload' -Path $Plan.host.r0CollectorPayloadPath
     }
 
@@ -434,7 +531,7 @@ function Save-StartResult {
     )
 
     $jobRoot = [string]$Plan.host.jobRoot
-    New-Item -ItemType Directory -Path $jobRoot -Force | Out-Null
+    New-Item -ItemType Directory -Path $jobRoot -Force -WhatIf:$false | Out-Null
     $resultPath = Join-Path $jobRoot 'hyperv-e2e-start-result.json'
     $result = [ordered]@{
         contractVersion = 1
@@ -445,12 +542,24 @@ function Save-StartResult {
         success = $Success
         message = $Message
         guestAgentProcessId = $script:GuestAgentProcessId
+        guestAgentCommandLine = $script:GuestAgentCommandLine
+        guestAgentArguments = @($script:GuestAgentArguments)
+        r0CollectorMode = $script:R0CollectorMode
+        r0CollectorCommandLine = $script:R0CollectorCommandLine
+        r0CollectorArguments = @($script:R0CollectorArguments)
+        driverEventsPath = $Plan.driver.eventJsonLinesPath
+        payload = [ordered]@{
+            root = $Plan.host.guestPayloadRoot
+            manifestPath = $Plan.host.payloadManifestPath
+            agentPayloadPath = $Plan.host.agentPayloadPath
+            r0CollectorPayloadPath = $Plan.host.r0CollectorPayloadPath
+        }
         completedAtUtc = [DateTimeOffset]::UtcNow.ToString('O')
         cleanupErrors = @($script:CleanupErrors.ToArray())
         steps = @($script:StepResults.ToArray())
     }
 
-    $result | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $resultPath -Encoding UTF8
+    $result | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $resultPath -Encoding UTF8 -WhatIf:$false
     Write-HyperVJobStep "Start result written: $resultPath"
 }
 
@@ -461,7 +570,16 @@ if ((-not [bool]$Live) -or [bool]$WhatIfPreference) {
     Write-HyperVJobStep "Safe $mode mode: start phase would restore checkpoint, start VM, stage payload/sample, and start Guest Agent; no VM command was executed."
     foreach ($step in @($plan.steps | Where-Object { $_.phase -eq 'start' })) {
         Write-HyperVJobStep ("PLAN {0}: {1}" -f $step.id, $step.title)
+        [void]$script:StepResults.Add((New-StepResult `
+                    -Id ([string]$step.id) `
+                    -Title ([string]$step.title) `
+                    -Success $true `
+                    -Skipped $true `
+                    -StartedAtUtc ([DateTimeOffset]::UtcNow) `
+                    -Duration ([TimeSpan]::Zero) `
+                    -Message "Safe $mode mode; no VM command was executed."))
     }
+    Save-StartResult -Plan $plan -Success $true -Message "Safe $mode mode; no VM command was executed."
     exit 0
 }
 
@@ -486,7 +604,8 @@ try {
     Invoke-RecordedStep -Id 'enable-guest-service' -Title 'Enable Guest Service Interface' -ScriptBlock {
         if ($script:Cmdlet.ShouldProcess($plan.vm.name, 'Enable Guest Service Interface')) {
             $script:VmMutationStarted = $true
-            Enable-VMIntegrationService -VMName $plan.vm.name -Name 'Guest Service Interface'
+            $guestService = Get-GuestServiceInterface -VmName $plan.vm.name
+            Enable-VMIntegrationService -VMIntegrationService $guestService
         }
     }
 

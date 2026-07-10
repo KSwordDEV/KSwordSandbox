@@ -5,6 +5,7 @@
 #include <iomanip>
 #include <iostream>
 #include <sstream>
+#include <vector>
 
 namespace KSword::Sandbox::R0Collector {
 
@@ -250,9 +251,54 @@ std::wstring CurrentCommandLine() {
     return commandLine == nullptr ? std::wstring() : std::wstring(commandLine);
 }
 
+// Input: Windows path-like text.
+// Processing: Extracts the final component after either slash style without
+// touching the filesystem, which keeps device paths and truncated ABI prefixes
+// safe to process.
+// Return: The final path component, or the original value when no separator exists.
+std::wstring BaseNameFromPath(const std::wstring& path) {
+    if (path.empty()) {
+        return {};
+    }
+
+    const size_t separator = path.find_last_of(L"\\/");
+    if (separator == std::wstring::npos || separator + 1 >= path.size()) {
+        return path;
+    }
+
+    return path.substr(separator + 1);
+}
+
+// Input: No explicit input; reads the executable path for the current process.
+// Processing: Uses a growable buffer around GetModuleFileNameW and extracts the
+// final filename component for top-level SandboxEvent.processName.
+// Return: Current executable filename, or an empty string if unavailable.
+std::wstring CurrentProcessName() {
+    std::vector<wchar_t> buffer(MAX_PATH);
+
+    for (;;) {
+        const DWORD copied = GetModuleFileNameW(
+            nullptr,
+            buffer.data(),
+            static_cast<DWORD>(buffer.size()));
+        if (copied == 0) {
+            return {};
+        }
+
+        if (static_cast<size_t>(copied) < buffer.size() - 1U) {
+            return BaseNameFromPath(std::wstring(buffer.data(), copied));
+        }
+
+        buffer.resize(buffer.size() * 2U);
+        if (buffer.size() > 32768U) {
+            return {};
+        }
+    }
+}
+
 // Input: Fully populated event fields.
-// Processing: Serializes fields in the SandboxEvent-compatible order requested
-// by the repo: eventType/source/timestamp/processId/path/commandLine/data.
+// Processing: Serializes fields in a stable SandboxEvent-compatible order:
+// timestamp/eventType/source/processId/processName/path/commandLine/data.
 // Return: One complete JSON object without a trailing newline.
 std::string BuildSandboxEventJsonLine(const SandboxEventFields& fields) {
     const std::string timestamp = fields.timestampOverride.empty()
@@ -262,14 +308,16 @@ std::string BuildSandboxEventJsonLine(const SandboxEventFields& fields) {
 
     std::string line;
     line.reserve(512 + data.size());
-    line += "{\"eventType\":";
+    line += "{\"timestamp\":";
+    line += JsonStringFromUtf8(timestamp);
+    line += ",\"eventType\":";
     line += JsonStringFromUtf8(fields.eventType);
     line += ",\"source\":";
     line += JsonStringFromUtf8(fields.source);
-    line += ",\"timestamp\":";
-    line += JsonStringFromUtf8(timestamp);
     line += ",\"processId\":";
     line += std::to_string(fields.processId);
+    line += ",\"processName\":";
+    line += JsonStringFromWide(fields.processName);
     line += ",\"path\":";
     line += JsonStringFromWide(fields.path);
     line += ",\"commandLine\":";

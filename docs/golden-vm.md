@@ -12,6 +12,8 @@
   submitted sample into the guest.
 - Host payload prepared outside git under `paths.guestPayloadRoot`, normally
   `D:\Temp\KSwordSandbox\payload\guest-tools`.
+- Payload manifest present when possible:
+  `D:\Temp\KSwordSandbox\payload\guest-tools\payload-manifest.json`.
 - Network isolation appropriate for the malware-analysis lab.
 
 ## Suggested guest folders
@@ -61,6 +63,12 @@ explicitly. Administrator shells additionally check the VM, checkpoint, Guest
 Service Interface, host payload files, and, when the VM is already running,
 PowerShell Direct plus guest-deployed payload files. The script does not start,
 stop, create, delete, or restore any VM.
+
+The one-command E2E script also performs non-mutating preflight while writing
+its plan. In `PlanOnly`/`WhatIf` it records Windows/Admin/Hyper-V command
+availability, VM/checkpoint/Guest Service state, credential env var presence,
+host payload paths, and PowerShell Direct status when the VM is already running.
+Live mode refuses to launch child scripts when required checks fail.
 
 ## Host credential handling
 
@@ -137,9 +145,19 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\Invoke-HyperVE2E.ps1 `
 
 The live path restores `Clean`, starts the VM, stages Guest Agent/R0Collector
 payloads, copies the sample, runs the Guest Agent, collects `events.json` and
-`driver-events.jsonl`, stops the VM, and restores `Clean` again by default. Use `-WhatIf`
-to verify that the live command line still performs no VM mutation.
+`driver-events.jsonl`, stops the VM, and restores `Clean` again by default. It
+also writes `runbook-execution.json` under
+`D:\Temp\KSwordSandbox\jobs\<job-id-n>\` with preflight, start, collect, cleanup,
+and artifact status. Use `-WhatIf` to verify that the live command line still
+performs no VM mutation.
 See `docs/hyperv-e2e-runbook.md` for the full operator flow and output paths.
+
+For R0 telemetry demos without a loaded driver, set `driver.useMockCollector` to
+`true` in a local config. The Guest Agent will still start the R0Collector
+sidecar but adds `--r0-mock`, producing synthetic JSONL rows. For real live R0,
+leave mock mode off, stage a signed driver outside git, ensure the driver
+service/device path exists in the guest, and expect the collector to emit
+`r0collector.deviceUnavailable` if `\\.\KSwordSandboxDriver` cannot be opened.
 
 ## Differencing-disk mode
 

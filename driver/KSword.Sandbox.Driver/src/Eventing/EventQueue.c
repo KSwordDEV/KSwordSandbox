@@ -190,10 +190,12 @@ KswPushEvent(
     }
 
     if (PayloadSize > KSWORD_SANDBOX_EVENT_MAX_PAYLOAD_SIZE) {
+        KswSetLastStatus(DeviceExtension, STATUS_BUFFER_TOO_SMALL);
         return STATUS_BUFFER_TOO_SMALL;
     }
 
     if (PayloadSize != 0 && Payload == NULL) {
+        KswSetLastStatus(DeviceExtension, STATUS_INVALID_PARAMETER);
         return STATUS_INVALID_PARAMETER;
     }
 

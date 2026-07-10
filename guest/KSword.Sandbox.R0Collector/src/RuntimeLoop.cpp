@@ -21,6 +21,7 @@ std::string BuildConfigData(const Options& options) {
     data.AddSigned("pollIntervalMs", options.pollIntervalMs);
     data.AddBool("mockMode", options.mockMode);
     data.AddBool("syntheticMode", options.mockMode);
+    data.AddBool("healthOnly", options.healthOnly);
     data.AddBool("heartbeat", options.heartbeat);
     data.AddBool("enableMaskSpecified", options.enableMaskSpecified);
     data.AddUnsigned("enableMask", options.enableMask);
@@ -69,6 +70,7 @@ bool EmitCollectorHeartbeat(
     data.AddSigned("pollIntervalMs", options.pollIntervalMs);
     data.AddBool("mockMode", options.mockMode);
     data.AddBool("syntheticMode", options.mockMode);
+    data.AddBool("healthOnly", options.healthOnly);
     data.AddBool("enableMaskSpecified", options.enableMaskSpecified);
     data.AddUnsigned("enableMask", options.enableMask);
     data.AddUtf8("enableMaskHex", HexUnsignedLongLong(options.enableMask, 8));
@@ -78,9 +80,44 @@ bool EmitCollectorHeartbeat(
 }
 
 // Input: Open driver handle, collector options, and event sink.
+// Processing: Runs only the public GET_HEALTH IOCTL and emits a stopped row
+// without polling or draining the event queue.  This is useful for service
+// readiness checks that must not consume queued telemetry.
+// Return: Process exit code.
+int RunDriverHealthOnly(const UniqueHandle& device, const Options& options, EventWriter& writer) {
+    if (!device.IsValid()) {
+        return kExitDeviceUnavailable;
+    }
+
+    if (!EmitDriverHealth(device, options, writer)) {
+        return kExitRuntimeFailure;
+    }
+
+    if (!EmitCollectorHeartbeat(writer, options, "healthComplete", 0, 0, 0)) {
+        return kExitRuntimeFailure;
+    }
+
+    JsonDataObjectBuilder data;
+    data.AddUtf8("reason", "healthComplete");
+    data.AddUnsigned("polls", 0);
+    data.AddUnsigned("readBatches", 0);
+    data.AddUnsigned("driverEvents", 0);
+    data.AddBool("ioctlIssued", true);
+    data.AddBool("healthOnly", true);
+    data.AddBool("heartbeat", options.heartbeat);
+
+    SandboxEventFields stoppedEvent;
+    stoppedEvent.eventType = "r0collector.stopped";
+    stoppedEvent.path = options.devicePath;
+    stoppedEvent.dataJson = data.Build();
+
+    return EmitEvent(writer, stoppedEvent) ? kExitSuccess : kExitRuntimeFailure;
+}
+
+// Input: Open driver handle, collector options, and event sink.
 // Processing: Calls the public driver skeleton IOCTLs. Health is read once;
-// POLL and READ_EVENTS are called once for duration 0, or repeatedly until the
-// requested duration elapses.
+// POLL is called once per loop and READ_EVENTS is drained in batches until the
+// batch is smaller than the request cap. Duration 0 performs one poll/drain pass.
 // Return: Process exit code describing write or IOCTL failure versus success.
 int RunDriverIoctlLoop(const UniqueHandle& device, const Options& options, EventWriter& writer) {
     if (!device.IsValid()) {
@@ -91,9 +128,14 @@ int RunDriverIoctlLoop(const UniqueHandle& device, const Options& options, Event
         return kExitRuntimeFailure;
     }
 
+    if (!EmitDriverCapabilities(device, options, writer)) {
+        return kExitRuntimeFailure;
+    }
+
     unsigned long long polls = 0;
     unsigned long long readBatches = 0;
     unsigned long long driverEvents = 0;
+    bool drainStoppedAtDeadline = false;
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(options.durationSeconds);
 
     do {
@@ -102,12 +144,23 @@ int RunDriverIoctlLoop(const UniqueHandle& device, const Options& options, Event
         }
         ++polls;
 
-        unsigned long long eventsEmitted = 0;
-        if (!EmitDriverReadEvents(device, options, readBatches + 1, writer, &eventsEmitted)) {
-            return kExitRuntimeFailure;
+        for (;;) {
+            unsigned long long eventsEmitted = 0;
+            if (!EmitDriverReadEvents(device, options, readBatches + 1, writer, &eventsEmitted)) {
+                return kExitRuntimeFailure;
+            }
+            ++readBatches;
+            driverEvents += eventsEmitted;
+
+            if (eventsEmitted < kReadEventsMaxEvents) {
+                break;
+            }
+
+            if (options.durationSeconds > 0 && std::chrono::steady_clock::now() >= deadline) {
+                drainStoppedAtDeadline = true;
+                break;
+            }
         }
-        ++readBatches;
-        driverEvents += eventsEmitted;
 
         if (!EmitCollectorHeartbeat(writer, options, "pollComplete", polls, readBatches, driverEvents)) {
             return kExitRuntimeFailure;
@@ -126,6 +179,10 @@ int RunDriverIoctlLoop(const UniqueHandle& device, const Options& options, Event
     data.AddUnsigned("readBatches", readBatches);
     data.AddUnsigned("driverEvents", driverEvents);
     data.AddBool("ioctlIssued", true);
+    data.AddBool("healthOnly", false);
+    data.AddUtf8("drainMode", "batchUntilEmpty");
+    data.AddBool("drainStoppedAtDeadline", drainStoppedAtDeadline);
+    data.AddUnsigned("readEventsMaxEvents", kReadEventsMaxEvents);
     data.AddBool("heartbeat", options.heartbeat);
 
     SandboxEventFields stoppedEvent;
@@ -198,6 +255,7 @@ int RunCollector(int argc, wchar_t* argv[]) {
         JsonDataObjectBuilder stoppedData;
         stoppedData.AddUtf8("reason", "mockComplete");
         stoppedData.AddBool("ioctlIssued", false);
+        stoppedData.AddBool("healthOnly", options.healthOnly);
         stoppedData.AddBool("heartbeat", options.heartbeat);
         stoppedEvent.dataJson = stoppedData.Build();
         return EmitEvent(writer, stoppedEvent) ? kExitSuccess : kExitRuntimeFailure;
@@ -224,6 +282,7 @@ int RunCollector(int argc, wchar_t* argv[]) {
     JsonDataObjectBuilder openedData;
     openedData.AddWide("devicePath", options.devicePath);
     openedData.AddBool("ioctlIssued", false);
+    openedData.AddBool("healthOnly", options.healthOnly);
     openedData.AddBool("enableMaskSpecified", options.enableMaskSpecified);
     openedData.AddUnsigned("enableMask", options.enableMask);
     openedData.AddUtf8("enableMaskHex", HexUnsignedLongLong(options.enableMask, 8));
@@ -231,6 +290,10 @@ int RunCollector(int argc, wchar_t* argv[]) {
     openedEvent.dataJson = openedData.Build();
     if (!EmitEvent(writer, openedEvent)) {
         return kExitRuntimeFailure;
+    }
+
+    if (options.healthOnly) {
+        return RunDriverHealthOnly(device, options, writer);
     }
 
     return RunDriverIoctlLoop(device, options, writer);

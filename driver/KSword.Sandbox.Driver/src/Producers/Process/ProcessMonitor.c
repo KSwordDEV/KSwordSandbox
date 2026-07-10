@@ -15,11 +15,21 @@ typedef enum _KSWORD_SANDBOX_PROCESS_NOTIFY_MODE {
 } KSWORD_SANDBOX_PROCESS_NOTIFY_MODE;
 
 #define KSWORD_SANDBOX_PROCESS_LINEAGE_CAPACITY 128UL
+#define KSWORD_SANDBOX_PROCESS_LINEAGE_STRING_FLAGS \
+    (KSWORD_SANDBOX_PROCESS_EVENT_FLAG_IMAGE_PATH_PRESENT | \
+     KSWORD_SANDBOX_PROCESS_EVENT_FLAG_IMAGE_PATH_TRUNCATED | \
+     KSWORD_SANDBOX_PROCESS_EVENT_FLAG_COMMAND_PRESENT | \
+     KSWORD_SANDBOX_PROCESS_EVENT_FLAG_COMMAND_TRUNCATED)
 
 typedef struct _KSWORD_SANDBOX_PROCESS_LINEAGE_ENTRY {
     ULONGLONG ProcessId;
     ULONGLONG ParentProcessId;
     ULONGLONG CreatingProcessId;
+    ULONG Flags;
+    ULONG ImagePathLengthBytes;
+    ULONG CommandLineLengthBytes;
+    WCHAR ImagePath[KSWORD_SANDBOX_PROCESS_IMAGE_PATH_CHARS];
+    WCHAR CommandLine[KSWORD_SANDBOX_PROCESS_COMMAND_LINE_CHARS];
 } KSWORD_SANDBOX_PROCESS_LINEAGE_ENTRY, *PKSWORD_SANDBOX_PROCESS_LINEAGE_ENTRY;
 
 static PKSWORD_SANDBOX_DEVICE_EXTENSION g_KswProcessMonitorDeviceExtension;
@@ -76,32 +86,33 @@ KswClearProcessLineage(
 
 /*
  * Remembers process lineage from a create callback for the later exit callback.
- * Inputs : ProcessId is the child PID; ParentProcessId and CreatingProcessId
- *          describe lineage captured by Ps callbacks.
+ * Inputs : Payload is the already bounded process-create payload.
  * Logic  : keeps a bounded non-paged cache under a spin lock; when full it
  *          replaces entries round-robin instead of allocating in callbacks.
+ *          Bounded image/command prefixes are replayed on exit so R0Collector
+ *          can map both create and exit records to a useful SandboxEvent path.
  * Return : no return value.
  */
 static
 VOID
 KswRememberProcessLineage(
-    _In_ ULONGLONG ProcessId,
-    _In_ ULONGLONG ParentProcessId,
-    _In_ ULONGLONG CreatingProcessId
+    _In_ const KSWORD_SANDBOX_PROCESS_EVENT_PAYLOAD* Payload
     )
 {
     ULONG index;
     ULONG selectedIndex;
+    ULONG bytesToCopy;
+    ULONG charsToCopy;
     KIRQL oldIrql;
 
-    if (ProcessId == 0) {
+    if (Payload == NULL || Payload->ProcessId == 0) {
         return;
     }
 
     selectedIndex = KSWORD_SANDBOX_PROCESS_LINEAGE_CAPACITY;
     KeAcquireSpinLock(&g_KswProcessLineageLock, &oldIrql);
     for (index = 0; index < KSWORD_SANDBOX_PROCESS_LINEAGE_CAPACITY; index++) {
-        if (g_KswProcessLineage[index].ProcessId == ProcessId) {
+        if (g_KswProcessLineage[index].ProcessId == Payload->ProcessId) {
             selectedIndex = index;
             break;
         }
@@ -119,16 +130,66 @@ KswRememberProcessLineage(
             (selectedIndex + 1U) % KSWORD_SANDBOX_PROCESS_LINEAGE_CAPACITY;
     }
 
-    g_KswProcessLineage[selectedIndex].ProcessId = ProcessId;
-    g_KswProcessLineage[selectedIndex].ParentProcessId = ParentProcessId;
-    g_KswProcessLineage[selectedIndex].CreatingProcessId = CreatingProcessId;
+    RtlZeroMemory(
+        &g_KswProcessLineage[selectedIndex],
+        sizeof(g_KswProcessLineage[selectedIndex]));
+    g_KswProcessLineage[selectedIndex].ProcessId = Payload->ProcessId;
+    g_KswProcessLineage[selectedIndex].ParentProcessId = Payload->ParentProcessId;
+    g_KswProcessLineage[selectedIndex].CreatingProcessId = Payload->CreatingProcessId;
+    g_KswProcessLineage[selectedIndex].Flags =
+        Payload->Flags & KSWORD_SANDBOX_PROCESS_LINEAGE_STRING_FLAGS;
+
+    if ((Payload->Flags &
+            KSWORD_SANDBOX_PROCESS_EVENT_FLAG_IMAGE_PATH_PRESENT) != 0) {
+        bytesToCopy = Payload->ImagePathLengthBytes;
+        if (bytesToCopy >
+            (KSWORD_SANDBOX_PROCESS_IMAGE_PATH_CHARS - 1U) *
+                (ULONG)sizeof(WCHAR)) {
+            bytesToCopy =
+                (KSWORD_SANDBOX_PROCESS_IMAGE_PATH_CHARS - 1U) *
+                (ULONG)sizeof(WCHAR);
+        }
+        bytesToCopy -= bytesToCopy % (ULONG)sizeof(WCHAR);
+        if (bytesToCopy != 0) {
+            RtlCopyMemory(
+                g_KswProcessLineage[selectedIndex].ImagePath,
+                Payload->ImagePath,
+                bytesToCopy);
+            charsToCopy = bytesToCopy / (ULONG)sizeof(WCHAR);
+            g_KswProcessLineage[selectedIndex].ImagePath[charsToCopy] = L'\0';
+            g_KswProcessLineage[selectedIndex].ImagePathLengthBytes = bytesToCopy;
+        }
+    }
+
+    if ((Payload->Flags &
+            KSWORD_SANDBOX_PROCESS_EVENT_FLAG_COMMAND_PRESENT) != 0) {
+        bytesToCopy = Payload->CommandLineLengthBytes;
+        if (bytesToCopy >
+            (KSWORD_SANDBOX_PROCESS_COMMAND_LINE_CHARS - 1U) *
+                (ULONG)sizeof(WCHAR)) {
+            bytesToCopy =
+                (KSWORD_SANDBOX_PROCESS_COMMAND_LINE_CHARS - 1U) *
+                (ULONG)sizeof(WCHAR);
+        }
+        bytesToCopy -= bytesToCopy % (ULONG)sizeof(WCHAR);
+        if (bytesToCopy != 0) {
+            RtlCopyMemory(
+                g_KswProcessLineage[selectedIndex].CommandLine,
+                Payload->CommandLine,
+                bytesToCopy);
+            charsToCopy = bytesToCopy / (ULONG)sizeof(WCHAR);
+            g_KswProcessLineage[selectedIndex].CommandLine[charsToCopy] = L'\0';
+            g_KswProcessLineage[selectedIndex].CommandLineLengthBytes = bytesToCopy;
+        }
+    }
+
     KeReleaseSpinLock(&g_KswProcessLineageLock, oldIrql);
 }
 
 /*
  * Removes and returns cached process lineage for an exit callback.
- * Inputs : ProcessId identifies the exiting process; ParentProcessId and
- *          CreatingProcessId receive cached values when present.
+ * Inputs : ProcessId identifies the exiting process; Payload receives cached
+ *          lineage and bounded create-time strings when present.
  * Logic  : bounded lookup under the lineage spin lock; the entry is cleared so
  *          PID reuse does not inherit old parent IDs.
  * Return : TRUE when cached lineage was found.
@@ -137,21 +198,16 @@ static
 BOOLEAN
 KswTakeProcessLineage(
     _In_ ULONGLONG ProcessId,
-    _Out_ PULONGLONG ParentProcessId,
-    _Out_ PULONGLONG CreatingProcessId
+    _Inout_ PKSWORD_SANDBOX_PROCESS_EVENT_PAYLOAD Payload
     )
 {
     ULONG index;
     BOOLEAN found;
+    ULONG bytesToCopy;
+    ULONG charsToCopy;
     KIRQL oldIrql;
 
-    if (ParentProcessId != NULL) {
-        *ParentProcessId = 0;
-    }
-    if (CreatingProcessId != NULL) {
-        *CreatingProcessId = 0;
-    }
-    if (ProcessId == 0) {
+    if (ProcessId == 0 || Payload == NULL) {
         return FALSE;
     }
 
@@ -159,12 +215,78 @@ KswTakeProcessLineage(
     KeAcquireSpinLock(&g_KswProcessLineageLock, &oldIrql);
     for (index = 0; index < KSWORD_SANDBOX_PROCESS_LINEAGE_CAPACITY; index++) {
         if (g_KswProcessLineage[index].ProcessId == ProcessId) {
-            if (ParentProcessId != NULL) {
-                *ParentProcessId = g_KswProcessLineage[index].ParentProcessId;
+            Payload->ParentProcessId = g_KswProcessLineage[index].ParentProcessId;
+            Payload->CreatingProcessId =
+                g_KswProcessLineage[index].CreatingProcessId;
+            Payload->Flags |=
+                KSWORD_SANDBOX_PROCESS_EVENT_FLAG_LINEAGE_CACHE_HIT;
+            if (Payload->ParentProcessId != 0) {
+                Payload->Flags |=
+                    KSWORD_SANDBOX_PROCESS_EVENT_FLAG_PARENT_ID_PRESENT;
             }
-            if (CreatingProcessId != NULL) {
-                *CreatingProcessId = g_KswProcessLineage[index].CreatingProcessId;
+            if (Payload->CreatingProcessId != 0) {
+                Payload->Flags |=
+                    KSWORD_SANDBOX_PROCESS_EVENT_FLAG_CREATOR_ID_PRESENT;
             }
+
+            if ((g_KswProcessLineage[index].Flags &
+                    KSWORD_SANDBOX_PROCESS_EVENT_FLAG_IMAGE_PATH_PRESENT) != 0 &&
+                g_KswProcessLineage[index].ImagePathLengthBytes != 0) {
+                bytesToCopy = g_KswProcessLineage[index].ImagePathLengthBytes;
+                if (bytesToCopy >
+                    (KSWORD_SANDBOX_PROCESS_IMAGE_PATH_CHARS - 1U) *
+                        (ULONG)sizeof(WCHAR)) {
+                    bytesToCopy =
+                        (KSWORD_SANDBOX_PROCESS_IMAGE_PATH_CHARS - 1U) *
+                        (ULONG)sizeof(WCHAR);
+                }
+                bytesToCopy -= bytesToCopy % (ULONG)sizeof(WCHAR);
+                if (bytesToCopy != 0) {
+                    RtlCopyMemory(
+                        Payload->ImagePath,
+                        g_KswProcessLineage[index].ImagePath,
+                        bytesToCopy);
+                    charsToCopy = bytesToCopy / (ULONG)sizeof(WCHAR);
+                    Payload->ImagePath[charsToCopy] = L'\0';
+                    Payload->ImagePathLengthBytes = bytesToCopy;
+                    Payload->Flags |=
+                        g_KswProcessLineage[index].Flags &
+                        (KSWORD_SANDBOX_PROCESS_EVENT_FLAG_IMAGE_PATH_PRESENT |
+                         KSWORD_SANDBOX_PROCESS_EVENT_FLAG_IMAGE_PATH_TRUNCATED);
+                    Payload->Flags |=
+                        KSWORD_SANDBOX_PROCESS_EVENT_FLAG_LINEAGE_STRINGS_REPLAYED;
+                }
+            }
+
+            if ((g_KswProcessLineage[index].Flags &
+                    KSWORD_SANDBOX_PROCESS_EVENT_FLAG_COMMAND_PRESENT) != 0 &&
+                g_KswProcessLineage[index].CommandLineLengthBytes != 0) {
+                bytesToCopy = g_KswProcessLineage[index].CommandLineLengthBytes;
+                if (bytesToCopy >
+                    (KSWORD_SANDBOX_PROCESS_COMMAND_LINE_CHARS - 1U) *
+                        (ULONG)sizeof(WCHAR)) {
+                    bytesToCopy =
+                        (KSWORD_SANDBOX_PROCESS_COMMAND_LINE_CHARS - 1U) *
+                        (ULONG)sizeof(WCHAR);
+                }
+                bytesToCopy -= bytesToCopy % (ULONG)sizeof(WCHAR);
+                if (bytesToCopy != 0) {
+                    RtlCopyMemory(
+                        Payload->CommandLine,
+                        g_KswProcessLineage[index].CommandLine,
+                        bytesToCopy);
+                    charsToCopy = bytesToCopy / (ULONG)sizeof(WCHAR);
+                    Payload->CommandLine[charsToCopy] = L'\0';
+                    Payload->CommandLineLengthBytes = bytesToCopy;
+                    Payload->Flags |=
+                        g_KswProcessLineage[index].Flags &
+                        (KSWORD_SANDBOX_PROCESS_EVENT_FLAG_COMMAND_PRESENT |
+                         KSWORD_SANDBOX_PROCESS_EVENT_FLAG_COMMAND_TRUNCATED);
+                    Payload->Flags |=
+                        KSWORD_SANDBOX_PROCESS_EVENT_FLAG_LINEAGE_STRINGS_REPLAYED;
+                }
+            }
+
             RtlZeroMemory(
                 &g_KswProcessLineage[index],
                 sizeof(g_KswProcessLineage[index]));
@@ -248,14 +370,14 @@ KswCopyProcessPayloadString(
     ULONG bytesCopied;
     UNICODE_STRING safeSource;
 
-    if (Destination != NULL && DestinationChars != 0) {
-        Destination[0] = L'\0';
-    }
-
-    if (Flags == NULL || LengthBytes == NULL) {
+    if (Destination == NULL ||
+        DestinationChars == 0 ||
+        Flags == NULL ||
+        LengthBytes == NULL) {
         return FALSE;
     }
 
+    Destination[0] = L'\0';
     *LengthBytes = 0;
     truncated = FALSE;
     copied = FALSE;
@@ -294,6 +416,7 @@ KswQueueProcessEvent(
     )
 {
     PKSWORD_SANDBOX_DEVICE_EXTENSION deviceExtension;
+    NTSTATUS status;
 
     if (Payload == NULL ||
         InterlockedCompareExchange(&g_KswProcessMonitorActive, 0, 0) == 0) {
@@ -306,12 +429,20 @@ KswQueueProcessEvent(
         return;
     }
 
-    (VOID)KswPushEvent(
+    status = KswPushEvent(
         deviceExtension,
         KswSandboxEventTypeProcess,
         0,
         Payload,
         (ULONG)sizeof(*Payload));
+    if (!NT_SUCCESS(status) && status != STATUS_CANCELLED) {
+        /*
+         * STATUS_CANCELLED is the expected producer-disabled path and was
+         * already counted by the shared queue.  Other failures indicate an ABI
+         * or state bug that should be visible through GET_HEALTH.LastNtStatus.
+         */
+        KswSetLastStatus(deviceExtension, status);
+    }
 }
 
 /*
@@ -328,6 +459,7 @@ KswQueueImageEvent(
     )
 {
     PKSWORD_SANDBOX_DEVICE_EXTENSION deviceExtension;
+    NTSTATUS status;
 
     if (Payload == NULL ||
         InterlockedCompareExchange(&g_KswProcessMonitorActive, 0, 0) == 0) {
@@ -340,12 +472,19 @@ KswQueueImageEvent(
         return;
     }
 
-    (VOID)KswPushEvent(
+    status = KswPushEvent(
         deviceExtension,
         KswSandboxEventTypeImage,
         0,
         Payload,
         (ULONG)sizeof(*Payload));
+    if (!NT_SUCCESS(status) && status != STATUS_CANCELLED) {
+        /*
+         * Disabled image telemetry returns STATUS_CANCELLED by design.  Preserve
+         * unexpected enqueue failures for collector diagnostics instead.
+         */
+        KswSetLastStatus(deviceExtension, status);
+    }
 }
 
 /*
@@ -378,6 +517,12 @@ KswProcessCreateNotifyEx(
         payload.CreatingProcessId = (ULONGLONG)(ULONG_PTR)PsGetCurrentProcessId();
         payload.Status = CreateInfo->CreationStatus;
         payload.Flags |= KSWORD_SANDBOX_PROCESS_EVENT_FLAG_STATUS_PRESENT;
+        if (payload.ParentProcessId != 0) {
+            payload.Flags |= KSWORD_SANDBOX_PROCESS_EVENT_FLAG_PARENT_ID_PRESENT;
+        }
+        if (payload.CreatingProcessId != 0) {
+            payload.Flags |= KSWORD_SANDBOX_PROCESS_EVENT_FLAG_CREATOR_ID_PRESENT;
+        }
         KswCopyProcessPayloadString(
             payload.ImagePath,
             KSWORD_SANDBOX_PROCESS_IMAGE_PATH_CHARS,
@@ -394,17 +539,15 @@ KswProcessCreateNotifyEx(
             KSWORD_SANDBOX_PROCESS_EVENT_FLAG_COMMAND_TRUNCATED,
             &payload.Flags,
             &payload.CommandLineLengthBytes);
-        KswRememberProcessLineage(
-            payload.ProcessId,
-            payload.ParentProcessId,
-            payload.CreatingProcessId);
+        KswRememberProcessLineage(&payload);
     } else {
         payload.Operation = KswSandboxProcessOperationExit;
-        if (!KswTakeProcessLineage(
-                payload.ProcessId,
-                &payload.ParentProcessId,
-                &payload.CreatingProcessId)) {
+        if (!KswTakeProcessLineage(payload.ProcessId, &payload)) {
             payload.CreatingProcessId = (ULONGLONG)(ULONG_PTR)PsGetCurrentProcessId();
+            if (payload.CreatingProcessId != 0) {
+                payload.Flags |=
+                    KSWORD_SANDBOX_PROCESS_EVENT_FLAG_CREATOR_ID_PRESENT;
+            }
         }
         if (Process != NULL && KeGetCurrentIrql() <= APC_LEVEL) {
             payload.Status = PsGetProcessExitStatus(Process);
@@ -444,15 +587,19 @@ KswProcessCreateNotifyLegacy(
     payload.ParentProcessId = (ULONGLONG)(ULONG_PTR)ParentId;
     payload.CreatingProcessId = (ULONGLONG)(ULONG_PTR)PsGetCurrentProcessId();
     if (Create) {
-        KswRememberProcessLineage(
-            payload.ProcessId,
-            payload.ParentProcessId,
-            payload.CreatingProcessId);
-    } else if (!KswTakeProcessLineage(
-            payload.ProcessId,
-            &payload.ParentProcessId,
-            &payload.CreatingProcessId)) {
+        if (payload.ParentProcessId != 0) {
+            payload.Flags |= KSWORD_SANDBOX_PROCESS_EVENT_FLAG_PARENT_ID_PRESENT;
+        }
+        if (payload.CreatingProcessId != 0) {
+            payload.Flags |= KSWORD_SANDBOX_PROCESS_EVENT_FLAG_CREATOR_ID_PRESENT;
+        }
+        KswRememberProcessLineage(&payload);
+    } else if (!KswTakeProcessLineage(payload.ProcessId, &payload)) {
         payload.CreatingProcessId = (ULONGLONG)(ULONG_PTR)PsGetCurrentProcessId();
+        if (payload.CreatingProcessId != 0) {
+            payload.Flags |=
+                KSWORD_SANDBOX_PROCESS_EVENT_FLAG_CREATOR_ID_PRESENT;
+        }
     }
     KswQueueProcessEvent(&payload);
 }
@@ -485,6 +632,11 @@ KswLoadImageNotify(
     payload.ProcessId = (ULONGLONG)(ULONG_PTR)ProcessId;
     payload.ImageBase = (ULONGLONG)(ULONG_PTR)ImageInfo->ImageBase;
     payload.ImageSize = (ULONGLONG)ImageInfo->ImageSize;
+    payload.ImageProperties = ImageInfo->Properties;
+    payload.Flags |= KSWORD_SANDBOX_IMAGE_EVENT_FLAG_PROPERTIES_PRESENT;
+    if (ProcessId != NULL) {
+        payload.Flags |= KSWORD_SANDBOX_IMAGE_EVENT_FLAG_PROCESS_ID_PRESENT;
+    }
     if (ImageInfo->SystemModeImage != 0) {
         payload.Flags |= KSWORD_SANDBOX_IMAGE_EVENT_FLAG_SYSTEM_MODE_IMAGE;
     }

@@ -24,14 +24,17 @@ bool EmitMockDriverCategoryEvent(
     event.eventType = eventType;
     event.source = "driver";
     event.processId = GetCurrentProcessId();
+    event.processName = L"notepad.exe";
     event.path = path;
     event.commandLine = commandLine;
 
     JsonDataObjectBuilder data;
     data.AddBool("mock", true);
     data.AddWide("devicePath", options.devicePath);
+    data.AddBool("healthOnly", options.healthOnly);
     data.AddUtf8("driverEventTypeName", driverEventTypeName);
     data.AddUtf8("operation", operation);
+    data.AddUtf8("operationName", operation);
     data.AddUtf8("typedPayloadStatus", "mock");
     data.AddUtf8("payloadSchema", "mock-forward-compatible");
     data.AddUtf8(
@@ -60,11 +63,13 @@ int RunSyntheticMode(const Options& options, EventWriter& writer) {
     SandboxEventFields mockEvent;
     mockEvent.eventType = "r0collector.mockDriverEvent";
     mockEvent.processId = currentProcessId;
+    mockEvent.processName = L"notepad.exe";
     mockEvent.path = mockProcessPath;
     mockEvent.commandLine = mockCommandLine;
     JsonDataObjectBuilder mockData;
     mockData.AddBool("mock", true);
     mockData.AddWide("devicePath", options.devicePath);
+    mockData.AddBool("healthOnly", options.healthOnly);
     mockData.AddUtf8("ioctlProtocol", "not-issued");
     mockData.AddUtf8("note", "Synthetic marker; driver category mock rows follow.");
     mockEvent.dataJson = mockData.Build();
@@ -133,6 +138,27 @@ int RunSyntheticMode(const Options& options, EventWriter& writer) {
                 {"keyPath", "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run"},
                 {"valueName", "KSwordMock"},
                 {"valueType", "REG_SZ"}
+            })) {
+        return kExitRuntimeFailure;
+    }
+
+    if (!EmitMockDriverCategoryEvent(
+            writer,
+            options,
+            "driver.network",
+            LR"(tcp://203.0.113.10:443)",
+            mockCommandLine,
+            "network",
+            "connect",
+            {
+                {"protocolName", "tcp"},
+                {"directionName", "outbound"},
+                {"addressFamilyName", "ipv4"},
+                {"localAddress", "192.0.2.10"},
+                {"localPort", "51515"},
+                {"remoteAddress", "203.0.113.10"},
+                {"remotePort", "443"},
+                {"processId", currentProcessIdText}
             })) {
         return kExitRuntimeFailure;
     }

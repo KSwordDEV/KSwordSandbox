@@ -364,7 +364,7 @@ public sealed class StaticAnalyzer
         var sectionHeadersOffset = optionalHeaderOffset + optionalHeaderSize;
 
         var sectionLayouts = new List<PeSectionLayout>();
-        var sections = ReadSections(reader, sectionHeadersOffset, sectionCount, fileLength, tags, warnings, sectionLayouts);
+        var sections = ReadSections(reader, sectionHeadersOffset, sectionCount, fileLength, tags, warnings, sectionLayouts, interestingStrings);
         var architecture = DescribeArchitecture(machine, optionalMagic);
         var subsystemText = DescribeSubsystem(subsystem);
         AddPeTags(optionalMagic, subsystemText, sections, tags);
@@ -397,7 +397,8 @@ public sealed class StaticAnalyzer
         long fileLength,
         SortedSet<string> tags,
         List<string> warnings,
-        List<PeSectionLayout> layouts)
+        List<PeSectionLayout> layouts,
+        SortedSet<string> interestingStrings)
     {
         var sections = new List<PeSectionInfo>();
         if (sectionCount <= 0 || sectionCount > 96)
@@ -427,6 +428,9 @@ public sealed class StaticAnalyzer
             var entropy = CalculateEntropy(reader, rawPointer, rawSize, fileLength, warnings);
             AddSectionTags(name, entropy, virtualSize, rawSize, characteristics, tags);
             layouts.Add(new PeSectionLayout(name, virtualAddress, virtualSize, rawSize, rawPointer));
+            AddInterestingString(
+                interestingStrings,
+                $"section:{name},va=0x{virtualAddress:X8},vsize={virtualSize},raw={rawSize},entropy={Math.Round(entropy, 3):F3}");
 
             sections.Add(new PeSectionInfo
             {
@@ -559,7 +563,7 @@ public sealed class StaticAnalyzer
         }
 
         var isInteresting = false;
-        if (AddUrlClassifications(trimmed, tags, urls))
+        if (AddUrlClassifications(trimmed, tags, urls, interestingStrings))
         {
             tags.Add("network_indicator_string");
         }
@@ -636,7 +640,7 @@ public sealed class StaticAnalyzer
     /// Inputs are text plus output tag and URL collections, processing trims
     /// common delimiters, and the method returns whether any URL was found.
     /// </summary>
-    private static bool AddUrlClassifications(string text, SortedSet<string> tags, SortedSet<string> urls)
+    private static bool AddUrlClassifications(string text, SortedSet<string> tags, SortedSet<string> urls, SortedSet<string> interestingStrings)
     {
         var found = false;
         foreach (Match match in UrlPattern.Matches(text))
@@ -648,6 +652,7 @@ public sealed class StaticAnalyzer
             }
 
             urls.Add(url);
+            AddInterestingString(interestingStrings, $"url:{url}");
             found = true;
         }
 

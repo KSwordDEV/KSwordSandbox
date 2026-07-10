@@ -160,3 +160,71 @@ rule KSwordSandbox_Static_AntiAnalysis_Strings
     condition:
         any of them
 }
+
+rule KSwordSandbox_Static_Discovery_And_AntiAnalysis_Apis
+{
+    meta:
+        description = "System discovery, debugger, delay, and VM artifact APIs mirrored by StaticAnalyzer anti-analysis/discovery tags"
+        scope = "triage"
+        mitre = "T1497"
+    strings:
+        $sys1 = "GetSystemInfo" ascii wide
+        $sys2 = "GlobalMemoryStatusEx" ascii wide
+        $sys3 = "GetComputerName" ascii wide
+        $sys4 = "GetUserName" ascii wide
+        $proc1 = "CreateToolhelp32Snapshot" ascii wide
+        $proc2 = "Process32First" ascii wide
+        $proc3 = "EnumProcesses" ascii wide
+        $delay1 = "NtDelayExecution" ascii wide
+        $delay2 = "WaitForSingleObject" ascii wide
+        $dbg1 = "IsDebuggerPresent" ascii wide
+        $dbg2 = "CheckRemoteDebuggerPresent" ascii wide
+        $vm1 = "VirtualBox" ascii wide nocase
+        $vm2 = "VMware" ascii wide nocase
+        $tool1 = "procmon" ascii wide nocase
+        $tool2 = "x64dbg" ascii wide nocase
+    condition:
+        any of them
+}
+
+rule KSwordSandbox_Static_IFEO_WMI_Winlogon_Persistence
+{
+    meta:
+        description = "Persistence strings for IFEO debugger, WMI event subscriptions, and Winlogon helper paths"
+        scope = "triage"
+        mitre = "T1546"
+    strings:
+        $ifeo1 = "Image File Execution Options" ascii wide nocase
+        $ifeo2 = "\\Debugger" ascii wide nocase
+        $wmi1 = "__EventFilter" ascii wide
+        $wmi2 = "CommandLineEventConsumer" ascii wide
+        $wmi3 = "FilterToConsumerBinding" ascii wide
+        $winlogon1 = "Winlogon\\Shell" ascii wide nocase
+        $winlogon2 = "Winlogon\\Userinit" ascii wide nocase
+        $winlogon3 = "Winlogon\\Notify" ascii wide nocase
+        $com1 = "InprocServer32" ascii wide nocase
+        $com2 = "LocalServer32" ascii wide nocase
+    condition:
+        any of them
+}
+
+rule KSwordSandbox_Static_Dropper_Network_Indicator_Depth
+{
+    meta:
+        description = "Additional dropper and network indicator strings for report grouping"
+        scope = "triage"
+        mitre = "T1105"
+    strings:
+        $drop1 = "\\System32\\Tasks\\" ascii wide nocase
+        $drop2 = "\\Windows\\System32\\" ascii wide nocase
+        $drop3 = "\\AppData\\Local\\Temp\\" ascii wide nocase
+        $drop4 = "WriteFile" ascii wide
+        $drop5 = "MoveFileEx" ascii wide
+        $net1 = "InternetConnect" ascii wide
+        $net2 = "HttpSendRequest" ascii wide
+        $net3 = "WinHttpSendRequest" ascii wide
+        $net4 = "WSAStartup" ascii wide
+        $net5 = "getaddrinfo" ascii wide
+    condition:
+        any of them
+}

@@ -6,6 +6,7 @@ using System.Net.NetworkInformation;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using KSword.Sandbox.Agent.Collection;
+using KSword.Sandbox.Agent.Output;
 using KSword.Sandbox.Abstractions;
 
 return await AgentProgram.RunAsync(args);
@@ -581,61 +582,16 @@ internal static class AgentProgram
     }
 
     /// <summary>
-    /// Reads optional driver JSONL events produced by the R0 collector.
-    /// The input is an optional file path, processing deserializes each JSON
-    /// line independently after sidecar shutdown and converts read/parse
-    /// failures into guest events, and the method returns normalized events.
+    /// Reads optional driver JSONL events produced by the R0Collector sidecar.
+    /// The input is the --driver-events path, processing delegates parsing to
+    /// DriverJsonLinesReader so malformed lines and read errors remain visible
+    /// as guest evidence, and the method returns normalized events for
+    /// inclusion in events.json.
     /// </summary>
-    private static List<SandboxEvent> ReadDriverEvents(string? path)
+    private static IReadOnlyList<SandboxEvent> ReadDriverEvents(string? path)
     {
-        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
-        {
-            return [];
-        }
-
-        var events = new List<SandboxEvent>();
-        try
-        {
-            foreach (var line in File.ReadLines(path))
-            {
-                if (string.IsNullOrWhiteSpace(line))
-                {
-                    continue;
-                }
-
-                try
-                {
-                    using var document = JsonDocument.Parse(line);
-                    var hasSource = document.RootElement.ValueKind == JsonValueKind.Object
-                        && document.RootElement.EnumerateObject().Any(property => string.Equals(property.Name, "source", StringComparison.OrdinalIgnoreCase));
-                    var evt = document.RootElement.Deserialize<SandboxEvent>(JsonOptions);
-                    if (evt is not null)
-                    {
-                        events.Add(evt with { Source = !hasSource || string.IsNullOrWhiteSpace(evt.Source) ? "driver" : evt.Source });
-                    }
-                }
-                catch (JsonException)
-                {
-                    events.Add(new SandboxEvent { EventType = "driver.parse_error", Source = "guest", Data = { ["line"] = line } });
-                }
-            }
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            events.Add(new SandboxEvent
-            {
-                EventType = "driver.read_error",
-                Source = "guest",
-                Path = path,
-                Data =
-                {
-                    ["exceptionType"] = ex.GetType().FullName ?? ex.GetType().Name,
-                    ["message"] = ex.Message
-                }
-            });
-        }
-
-        return events;
+        var driverJsonLinesReader = new DriverJsonLinesReader();
+        return driverJsonLinesReader.Read(path);
     }
 
     /// <summary>

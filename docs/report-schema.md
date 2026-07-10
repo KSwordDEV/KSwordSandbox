@@ -24,6 +24,10 @@ JSON model is `AnalysisReport`:
   such as `imports_present`, `exports_present`, `tls_directory_present`,
   `tls_callbacks`, `import_suspicious_api`, and
   `export_registration_entrypoint`.
+- Section and indicator depth also stays schema-compatible: section summaries
+  remain in `sections`, while copyable evidence strings such as `section:...`,
+  `url:...`, `ip:...`, `registry-path:...`, `path:...`, `resource:...`, and
+  `tls:...` appear in `interestingStrings`.
 
 The host also emits a normalized `static.analysis.completed` event. Its
 `data.tags` value is the comma-joined static tag list consumed by
@@ -80,19 +84,21 @@ and falls back to copyable paths from events when a link cannot be trusted.
 
 ## HTML sections
 
-The v1 HTML report includes:
+The HTML report is self-contained and renders the stable `AnalysisReport`
+model into operator-facing sections:
 
-- summary and sample identity;
-- behavior findings with MITRE seed mappings;
-- normalized event table.
+- cover and table of contents;
+- risk summary metrics for severities, rule hits, MITRE techniques, events,
+  static tags, network, registry, dropped files, and R0/driver telemetry;
+- behavior detections, MITRE detections, and engine/rule hits;
+- static analysis with PE sections, grouped imports, exports, URL/IP
+  indicators, registry/path indicators, resources/TLS, tags, warnings, and the
+  complete bounded interesting-string list;
+- dynamic analysis metrics;
+- artifact links with safe relative links when available;
+- timeline, process details/tree, dropped files, registry behavior, network
+  behavior, R0/driver events, failure reasons, and raw normalized events.
 
-Static import/export/TLS details appear in the existing Static analysis section
-under `Tags` and `Interesting strings`; no WebUI contract changes are required
-for this depth increment.
-
-Future sections should keep the same source model and add rendered sections for
-table of contents, risk summary, behavior detections, multi-dimensional
-detections, engine/rule hits, static analysis, dynamic analysis, process tree,
-dropped files, network timeline, screenshots, driver health, and failure
-reasons. The target structure is summarized in
-`docs/microstep-report-benchmark.md`.
+Tables, chips, code fields, timeline entries, and evidence blocks expose
+`data-copy` attributes. The local report script supports right-click copy and
+explicit **Copy event** buttons without external dependencies.

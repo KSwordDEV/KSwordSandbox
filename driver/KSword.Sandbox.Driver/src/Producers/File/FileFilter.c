@@ -4,6 +4,7 @@ C_ASSERT(sizeof(KSWORD_SANDBOX_FILE_EVENT_PAYLOAD) <=
     KSWORD_SANDBOX_EVENT_MAX_PAYLOAD_SIZE);
 
 static KSWORD_SANDBOX_FILE_FILTER_RUNTIME g_KswFileFilterRuntime;
+static volatile LONG g_KswFileFilterUninitializing;
 
 static NTSTATUS FLTAPI
 KswFileFilterUnloadCallback(
@@ -30,8 +31,11 @@ KswFileFilterPostOperation(
  *
  * Inputs : consumed by FltRegisterFilter during DriverEntry.
  * Logic  : CREATE, READ, WRITE, SET_INFORMATION, CLEANUP, and CLOSE are
- *          registered.  The callback maps SET_INFORMATION to Rename/Delete for
- *          those information classes and otherwise preserves SetInformation.
+ *          registered.  CLOSE is pre-only because there is no useful final
+ *          status at that point; other operations use post callbacks when
+ *          available so collectors see result status.  The callback maps
+ *          SET_INFORMATION to Rename/Delete for those information classes and
+ *          otherwise preserves SetInformation.
  * Return : not applicable; FltMgr reads this static registration table.
  */
 static const FLT_OPERATION_REGISTRATION g_KswFileFilterOperations[] = {
@@ -40,7 +44,7 @@ static const FLT_OPERATION_REGISTRATION g_KswFileFilterOperations[] = {
     { IRP_MJ_WRITE, 0, KswFileFilterPreOperation, KswFileFilterPostOperation },
     { IRP_MJ_SET_INFORMATION, 0, KswFileFilterPreOperation, KswFileFilterPostOperation },
     { IRP_MJ_CLEANUP, 0, KswFileFilterPreOperation, KswFileFilterPostOperation },
-    { IRP_MJ_CLOSE, 0, KswFileFilterPreOperation, KswFileFilterPostOperation },
+    { IRP_MJ_CLOSE, 0, KswFileFilterPreOperation, NULL },
     { IRP_MJ_OPERATION_END }
 };
 
@@ -344,7 +348,9 @@ KswIsRenameInformationClass(
     )
 {
     return InformationClass == FileRenameInformation ||
-        InformationClass == FileRenameInformationEx;
+        InformationClass == FileRenameInformationEx ||
+        InformationClass == FileLinkInformation ||
+        InformationClass == FileLinkInformationEx;
 }
 
 /*
@@ -711,6 +717,30 @@ KswShouldSuppressFilePayload(
 }
 
 /*
+ * Records unexpected shared-ring enqueue failures for health diagnostics.
+ *
+ * Inputs : DeviceExtension owns LastStatus; PushStatus is the KswPushEvent
+ *          result.
+ * Logic  : producer-disabled STATUS_CANCELLED is expected operator policy and
+ *          already increments EventsSuppressed in EventQueue, so only true
+ *          write/format failures are promoted to LastStatus.
+ * Return : no return value.
+ */
+static
+VOID
+KswRecordFileEventPushStatus(
+    _Inout_ PKSWORD_SANDBOX_DEVICE_EXTENSION DeviceExtension,
+    _In_ NTSTATUS PushStatus
+    )
+{
+    if (NT_SUCCESS(PushStatus) || PushStatus == STATUS_CANCELLED) {
+        return;
+    }
+
+    KswSetLastStatus(DeviceExtension, PushStatus);
+}
+
+/*
  * Builds and queues one file event into the existing READ_EVENTS ring.
  *
  * Inputs : Data and FltObjects describe the completed file operation;
@@ -733,6 +763,7 @@ KswPushFileEvent(
 {
     KSWORD_SANDBOX_FILE_EVENT_PAYLOAD payload;
     PKSWORD_SANDBOX_DEVICE_EXTENSION deviceExtension;
+    NTSTATUS pushStatus;
     BOOLEAN suppressEvent;
 
     if (Operation == KswSandboxFileOperationNone ||
@@ -773,12 +804,13 @@ KswPushFileEvent(
         return;
     }
 
-    (VOID)KswPushEvent(
+    pushStatus = KswPushEvent(
         deviceExtension,
         KswSandboxEventTypeFile,
         0,
         &payload,
         sizeof(payload));
+    KswRecordFileEventPushStatus(deviceExtension, pushStatus);
 }
 
 /*
@@ -786,8 +818,10 @@ KswPushFileEvent(
  *
  * Inputs : Data and FltObjects describe the current file-system request;
  *          CompletionContext is unused and always cleared.
- * Logic  : maps the operation and requests a post-operation callback for all
- *          supported file telemetry events so final status is preserved.
+ * Logic  : maps the operation, emits CLOSE immediately because it is registered
+ *          without a post callback, and requests a post-operation callback for
+ *          the remaining supported telemetry events so final status is
+ *          preserved.
  * Return : FLT_PREOP_SUCCESS_WITH_CALLBACK when a final-status event should be
  *          emitted later; otherwise FLT_PREOP_SUCCESS_NO_CALLBACK.
  */
@@ -802,8 +836,6 @@ KswFileFilterPreOperation(
 {
     ULONG operation;
 
-    UNREFERENCED_PARAMETER(FltObjects);
-
     if (CompletionContext != NULL) {
         *CompletionContext = NULL;
     }
@@ -811,6 +843,13 @@ KswFileFilterPreOperation(
     operation = KswMapFileOperation(Data);
     if (operation == KswSandboxFileOperationNone ||
         InterlockedCompareExchange(&g_KswFileFilterRuntime.Active, 0, 0) == 0) {
+        return FLT_PREOP_SUCCESS_NO_CALLBACK;
+    }
+
+    if (Data != NULL &&
+        Data->Iopb != NULL &&
+        Data->Iopb->MajorFunction == IRP_MJ_CLOSE) {
+        KswPushFileEvent(Data, FltObjects, operation, FALSE);
         return FLT_PREOP_SUCCESS_NO_CALLBACK;
     }
 
@@ -856,8 +895,9 @@ KswFileFilterPostOperation(
  * Allows FltMgr-initiated unload for the registered minifilter.
  *
  * Inputs : Flags describes the unload request type from FltMgr.
- * Logic  : no per-instance state is allocated, so the driver permits unload;
- *          DriverUnload still owns the explicit unregister path.
+ * Logic  : delegates to the same cleanup path used by DriverUnload so external
+ *          FltMgr unload requests clear Active, drop the device-extension
+ *          pointer, and unregister the filter exactly once.
  * Return : STATUS_SUCCESS.
  */
 static
@@ -868,6 +908,8 @@ KswFileFilterUnloadCallback(
     )
 {
     UNREFERENCED_PARAMETER(Flags);
+
+    KswUninitializeFileFilter();
 
     return STATUS_SUCCESS;
 }
@@ -898,6 +940,7 @@ KswInitializeFileFilter(
     }
 
     RtlZeroMemory(&g_KswFileFilterRuntime, sizeof(g_KswFileFilterRuntime));
+    InterlockedExchange(&g_KswFileFilterUninitializing, 0);
     g_KswFileFilterRuntime.DeviceExtension = DeviceExtension;
     g_KswFileFilterRuntime.RegisterStatus = STATUS_NOT_SUPPORTED;
     g_KswFileFilterRuntime.StartStatus = STATUS_NOT_SUPPORTED;
@@ -939,9 +982,9 @@ KswInitializeFileFilter(
  * Stops callback emission and unregisters the minifilter producer.
  *
  * Inputs : none; uses the single static runtime initialized by DriverEntry.
- * Logic  : clears Active so new callbacks skip emission, unregisters the
- *          FltMgr filter handle, and clears the device-extension pointer before
- *          the WDM control device is deleted.
+ * Logic  : runs once, clears Active so new callbacks skip emission, unregisters
+ *          the FltMgr filter handle, and clears the device-extension pointer
+ *          before the WDM control device is deleted.
  * Return : no return value.
  */
 VOID
@@ -950,6 +993,10 @@ KswUninitializeFileFilter(
     )
 {
     PFLT_FILTER filter;
+
+    if (InterlockedExchange(&g_KswFileFilterUninitializing, 1) != 0) {
+        return;
+    }
 
     InterlockedExchange(&g_KswFileFilterRuntime.Active, 0);
 
