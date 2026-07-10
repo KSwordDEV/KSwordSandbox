@@ -151,7 +151,9 @@ public sealed class HyperVRunbookBuilder
             $"if ([string]::IsNullOrWhiteSpace($guestPasswordText)) {{ $guestPasswordText = [System.Environment]::GetEnvironmentVariable({Q(secretName)}, 'User') }};",
             $"if ([string]::IsNullOrWhiteSpace($guestPasswordText)) {{ $guestPasswordText = [System.Environment]::GetEnvironmentVariable({Q(secretName)}, 'Machine') }};",
             $"if ([string]::IsNullOrWhiteSpace($guestPasswordText)) {{ throw 'Guest password environment variable {secretName} is not set for this PowerShell step.' }};",
-            "$guestPassword = ConvertTo-SecureString $guestPasswordText -AsPlainText -Force;",
+            "$guestPassword = [System.Security.SecureString]::new();",
+            "foreach ($guestPasswordChar in $guestPasswordText.ToCharArray()) { $guestPassword.AppendChar($guestPasswordChar) };",
+            "$guestPassword.MakeReadOnly();",
             $"$guestCredential = [pscredential]::new({Q(config.Guest.UserName)}, $guestPassword);"
         });
     }

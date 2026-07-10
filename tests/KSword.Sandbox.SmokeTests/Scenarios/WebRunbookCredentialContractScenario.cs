@@ -76,9 +76,14 @@ internal sealed class WebRunbookCredentialContractScenario : ISmokeTestScenario
                 step.PowerShell.Contains("[System.Environment]::GetEnvironmentVariable('KSWORDBOX_GUEST_PASSWORD', 'Process')", StringComparison.Ordinal) &&
                 step.PowerShell.Contains("[System.Environment]::GetEnvironmentVariable('KSWORDBOX_GUEST_PASSWORD', 'User')", StringComparison.Ordinal) &&
                 step.PowerShell.Contains("[System.Environment]::GetEnvironmentVariable('KSWORDBOX_GUEST_PASSWORD', 'Machine')", StringComparison.Ordinal) &&
-                step.PowerShell.Contains("ConvertTo-SecureString $guestPasswordText", StringComparison.Ordinal) &&
+                step.PowerShell.Contains("[System.Security.SecureString]::new()", StringComparison.Ordinal) &&
+                step.PowerShell.Contains("$guestPassword.AppendChar($guestPasswordChar)", StringComparison.Ordinal) &&
                 step.PowerShell.Contains("[pscredential]::new('SandboxUser'", StringComparison.Ordinal),
                 $"Runbook step {step.Id} references $guestCredential but does not recreate it in the same PowerShell command.");
+
+            SmokeAssert.True(
+                !step.PowerShell.Contains("ConvertTo-SecureString", StringComparison.Ordinal),
+                $"Runbook step {step.Id} should not depend on ConvertTo-SecureString module autoloading.");
         }
 
         SmokeAssert.True(
