@@ -6,9 +6,9 @@ Minimal WDK driver skeleton for the KSword sandbox R0 event path.
 
 This project creates the kernel-side control device that the future
 `KSword.Sandbox.R0Collector` will open from the Windows 10 guest VM. The current
-driver is intentionally a small skeleton: it validates the load/unload path,
-exposes a stable symbolic link, implements health/poll IOCTLs, and keeps a
-bounded non-paged event ring for `READ_EVENTS`.
+driver is intentionally small: it validates the load/unload path, exposes a
+stable symbolic link, implements health/poll IOCTLs, keeps a bounded non-paged
+event ring for `READ_EVENTS`, and starts a minimal file minifilter producer.
 
 ## Current ABI
 
@@ -52,7 +52,14 @@ the WDM device object and remains non-paged. `DriverEntry` queues one header-onl
 reserved self-test event with `KSWORD_SANDBOX_EVENT_FLAG_SELF_TEST` and
 `KSWORD_SANDBOX_EVENT_FLAG_DRIVER_STARTED`. Collectors can treat this as the
 minimal `driver.started` heartbeat to verify the device, IOCTL number, and event
-framing before real telemetry producers are added.
+framing before consuming telemetry producers.
+
+The driver also registers a minimal minifilter for `CREATE`, `WRITE`, and
+delete-style `SET_INFORMATION` operations. File callbacks emit
+`KswSandboxEventTypeFile` records into the same `READ_EVENTS` stream. Each file
+payload is bounded to `KSWORD_SANDBOX_EVENT_MAX_PAYLOAD_SIZE` and carries the
+operation, requestor PID, final NTSTATUS, IRP major/minor function, path flags,
+and a truncated UTF-16 path prefix copied from `FILE_OBJECT.FileName`.
 
 When the ring is empty, `READ_EVENTS` still succeeds if the fixed reply header
 fits and returns `EventsWritten == 0` and `BytesWritten == 0`. If the output
@@ -89,8 +96,8 @@ Commit only source, project files, headers, and documentation. Do not commit:
 
 ## Next implementation steps
 
-1. Add file-monitor events first, reusing the protocol boundary from the
-   existing KSword driver code where safe.
+1. Extend file-monitor coverage beyond the current create/write/delete slice
+   only after the collector parser and VM load path are validated.
 2. Add process, image-load, registry, and network events after the file event
    path is stable.
 3. Keep user-mode JSON serialization in `KSword.Sandbox.R0Collector`; the driver

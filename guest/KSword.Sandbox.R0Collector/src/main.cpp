@@ -712,6 +712,126 @@ std::string BoundedAsciiString(const CHAR* value, const size_t capacity) {
     return std::string(value, value + length);
 }
 
+// Input: File operation value from KSWORD_SANDBOX_FILE_EVENT_PAYLOAD.Operation.
+// Processing: Converts the stable ABI enum into a compact lowercase label for
+// WebUI live event display, rule diagnostics, and raw report inspection.
+// Return: ASCII operation name; unknown numeric values are preserved elsewhere
+// by the caller and represented here as "unrecognized".
+std::string FileOperationName(const ULONG operation) {
+    switch (operation) {
+    case KswSandboxFileOperationNone:
+        return "none";
+    case KswSandboxFileOperationCreate:
+        return "create";
+    case KswSandboxFileOperationWrite:
+        return "write";
+    case KswSandboxFileOperationSetInformation:
+        return "setInformation";
+    case KswSandboxFileOperationDelete:
+        return "delete";
+    case KswSandboxFileOperationCleanup:
+        return "cleanup";
+    case KswSandboxFileOperationClose:
+        return "close";
+    default:
+        return "unrecognized";
+    }
+}
+
+// Input: File event flag bits from KSWORD_SANDBOX_FILE_EVENT_PAYLOAD.Flags.
+// Processing: Decodes public bits and keeps any newer unknown bits visible as a
+// hexadecimal suffix so older collectors remain useful with newer drivers.
+// Return: Human-readable ASCII flag names, or "none" when no bits are set.
+std::string FileEventFlagNames(const ULONG flags) {
+    std::string names;
+    ULONG knownFlags = 0;
+
+    const auto appendName = [&names](const std::string& name) {
+        if (!names.empty()) {
+            names += "|";
+        }
+        names += name;
+    };
+
+    if ((flags & KSWORD_SANDBOX_FILE_EVENT_FLAG_PATH_PRESENT) != 0) {
+        appendName("PathPresent");
+        knownFlags |= KSWORD_SANDBOX_FILE_EVENT_FLAG_PATH_PRESENT;
+    }
+
+    if ((flags & KSWORD_SANDBOX_FILE_EVENT_FLAG_PATH_TRUNCATED) != 0) {
+        appendName("PathTruncated");
+        knownFlags |= KSWORD_SANDBOX_FILE_EVENT_FLAG_PATH_TRUNCATED;
+    }
+
+    if ((flags & KSWORD_SANDBOX_FILE_EVENT_FLAG_STATUS_PRESENT) != 0) {
+        appendName("StatusPresent");
+        knownFlags |= KSWORD_SANDBOX_FILE_EVENT_FLAG_STATUS_PRESENT;
+    }
+
+    if ((flags & KSWORD_SANDBOX_FILE_EVENT_FLAG_POST_OPERATION) != 0) {
+        appendName("PostOperation");
+        knownFlags |= KSWORD_SANDBOX_FILE_EVENT_FLAG_POST_OPERATION;
+    }
+
+    const ULONG unknownFlags = flags & ~knownFlags;
+    if (unknownFlags != 0) {
+        appendName("Unknown(" + HexUnsignedLongLong(unknownFlags, 8) + ")");
+    }
+
+    return names.empty() ? "none" : names;
+}
+
+// Input: Fixed UTF-16 file path buffer and a byte length supplied by the driver.
+// Processing: Clamps the byte length to the public fixed buffer, rounds down to
+// whole WCHARs, and stops at the first embedded NUL to avoid over-reading stale
+// stack bytes from malformed or future payloads.
+// Return: Decoded UTF-16 string; empty means no bounded path could be decoded.
+std::wstring BoundedWideStringFromUtf16Bytes(
+    const WCHAR* value,
+    const ULONG lengthBytes,
+    const size_t capacityChars) {
+    if (value == nullptr || lengthBytes == 0 || capacityChars == 0) {
+        return {};
+    }
+
+    const size_t capacityBytes = capacityChars * sizeof(WCHAR);
+    const size_t clampedBytes =
+        std::min(static_cast<size_t>(lengthBytes), capacityBytes);
+    const size_t clampedChars = clampedBytes / sizeof(WCHAR);
+
+    size_t lengthChars = 0;
+    while (lengthChars < clampedChars && value[lengthChars] != L'\0') {
+        ++lengthChars;
+    }
+
+    return std::wstring(value, value + lengthChars);
+}
+
+// Input: File payload bytes from a KswSandboxEventTypeFile record.
+// Processing: Validates the public payload size and decodes the bounded path
+// only when the PathPresent flag is set.
+// Return: File path for top-level SandboxEvent.path, or empty on malformed /
+// path-less records.
+std::wstring ExtractFilePayloadPath(
+    const unsigned char* payload,
+    const size_t payloadBytes) {
+    if (payload == nullptr ||
+        payloadBytes < sizeof(KSWORD_SANDBOX_FILE_EVENT_PAYLOAD)) {
+        return {};
+    }
+
+    const auto* filePayload =
+        reinterpret_cast<const KSWORD_SANDBOX_FILE_EVENT_PAYLOAD*>(payload);
+    if ((filePayload->Flags & KSWORD_SANDBOX_FILE_EVENT_FLAG_PATH_PRESENT) == 0) {
+        return {};
+    }
+
+    return BoundedWideStringFromUtf16Bytes(
+        filePayload->Path,
+        filePayload->PathLengthBytes,
+        KSWORD_SANDBOX_FILE_EVENT_PATH_CHARS);
+}
+
 // Input: One public driver event header and the JSON data builder being filled.
 // Processing: Adds string-valued flag diagnostics and names the current
 // header-only DriverEntry startup event when the reserved type carries the
@@ -785,6 +905,86 @@ bool AddDriverLoadPayloadData(
     data->AddUtf8(
         "buildTag",
         BoundedAsciiString(driverLoad->BuildTag, sizeof(driverLoad->BuildTag)));
+    return true;
+}
+
+// Input: Payload bytes for KswSandboxEventTypeFile and the JSON builder.
+// Processing: Parses the public compact minifilter payload and emits only
+// string-valued data fields so the host import path can keep using
+// Dictionary<string,string>. The common payloadHex fallback remains present for
+// byte-level diagnosis even when parsing succeeds.
+// Return: true when the public file payload was parsed; false for short or
+// missing payloads.
+bool AddFilePayloadData(
+    const unsigned char* payload,
+    const size_t payloadBytes,
+    JsonDataObjectBuilder* data) {
+    if (data == nullptr) {
+        return false;
+    }
+
+    data->AddUtf8("typedPayloadKind", "file");
+    data->AddUtf8("payloadSchema", "KSWORD_SANDBOX_FILE_EVENT_PAYLOAD");
+    data->AddUnsigned(
+        "typedPayloadMinimumSize",
+        static_cast<unsigned long long>(sizeof(KSWORD_SANDBOX_FILE_EVENT_PAYLOAD)));
+    data->AddUnsigned("typedPayloadObservedBytes", static_cast<unsigned long long>(payloadBytes));
+
+    if (payload == nullptr ||
+        payloadBytes < sizeof(KSWORD_SANDBOX_FILE_EVENT_PAYLOAD)) {
+        data->AddUtf8("typedPayloadStatus", "payload-too-small");
+        return false;
+    }
+
+    const auto* filePayload =
+        reinterpret_cast<const KSWORD_SANDBOX_FILE_EVENT_PAYLOAD*>(payload);
+    const bool pathPresent =
+        (filePayload->Flags & KSWORD_SANDBOX_FILE_EVENT_FLAG_PATH_PRESENT) != 0;
+    const bool pathTruncated =
+        (filePayload->Flags & KSWORD_SANDBOX_FILE_EVENT_FLAG_PATH_TRUNCATED) != 0;
+    const bool statusPresent =
+        (filePayload->Flags & KSWORD_SANDBOX_FILE_EVENT_FLAG_STATUS_PRESENT) != 0;
+    const bool postOperation =
+        (filePayload->Flags & KSWORD_SANDBOX_FILE_EVENT_FLAG_POST_OPERATION) != 0;
+    const std::wstring filePath = ExtractFilePayloadPath(payload, payloadBytes);
+
+    data->AddUtf8("typedPayloadStatus", "parsed");
+    data->AddUnsigned("fileVersion", filePayload->Version);
+    data->AddUtf8("fileVersionHex", HexUnsignedLongLong(filePayload->Version, 8));
+    data->AddUnsigned("filePayloadSize", filePayload->Size);
+    data->AddBool(
+        "filePayloadSizeMatchesPublicAbi",
+        filePayload->Size == static_cast<ULONG>(sizeof(KSWORD_SANDBOX_FILE_EVENT_PAYLOAD)));
+    data->AddUnsigned("operation", filePayload->Operation);
+    data->AddUtf8("operationName", FileOperationName(filePayload->Operation));
+    data->AddUnsigned("flags", filePayload->Flags);
+    data->AddUtf8("flagsHex", HexUnsignedLongLong(filePayload->Flags, 8));
+    data->AddUtf8("flagNames", FileEventFlagNames(filePayload->Flags));
+    data->AddBool("pathPresent", pathPresent);
+    data->AddBool("pathTruncated", pathTruncated);
+    data->AddBool("statusPresent", statusPresent);
+    data->AddBool("postOperation", postOperation);
+    data->AddSigned("status", filePayload->Status);
+    data->AddUtf8(
+        "statusHex",
+        HexUnsignedLongLong(static_cast<unsigned long>(filePayload->Status), 8));
+    data->AddUnsigned("processId", filePayload->ProcessId);
+    data->AddUnsigned("pathLengthBytes", filePayload->PathLengthBytes);
+    data->AddUnsigned(
+        "pathLengthBytesClamped",
+        static_cast<unsigned long long>(std::min(
+            static_cast<size_t>(filePayload->PathLengthBytes),
+            sizeof(filePayload->Path))));
+    data->AddUnsigned("majorFunction", filePayload->MajorFunction);
+    data->AddUtf8("majorFunctionHex", HexUnsignedLongLong(filePayload->MajorFunction, 2));
+    data->AddUnsigned("minorFunction", filePayload->MinorFunction);
+    data->AddUtf8("minorFunctionHex", HexUnsignedLongLong(filePayload->MinorFunction, 2));
+    data->AddBool("pathDecoded", !filePath.empty());
+    if (!filePath.empty()) {
+        data->AddWide("path", filePath);
+        data->AddWide("filePath", filePath);
+    }
+
     return true;
 }
 
@@ -882,12 +1082,7 @@ bool AddTypedPayloadData(
             payloadBytes,
             data);
     case KswSandboxEventTypeFile:
-        return AddAbiPendingPayloadData(
-            "file",
-            "KSWORD_SANDBOX_FILE_PAYLOAD",
-            payload,
-            payloadBytes,
-            data);
+        return AddFilePayloadData(payload, payloadBytes, data);
     case KswSandboxEventTypeRegistry:
         return AddAbiPendingPayloadData(
             "registry",
@@ -1287,6 +1482,13 @@ bool EmitDriverEventRecords(
         event.source = "driver";
         event.processId = header.ProcessId;
         event.path = options.devicePath;
+        if (header.Type == KswSandboxEventTypeFile) {
+            const std::wstring filePath =
+                ExtractFilePayloadPath(payload, header.PayloadSize);
+            if (!filePath.empty()) {
+                event.path = filePath;
+            }
+        }
         event.dataJson = BuildDriverEventData(
             header,
             batchIndex,

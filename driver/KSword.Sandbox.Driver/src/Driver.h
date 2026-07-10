@@ -6,7 +6,7 @@
  * This file is not part of the user-mode collector ABI.  Public IOCTL numbers
  * and record layouts live in include/KSwordSandboxDriverIoctl.h.
  */
-#include <ntddk.h>
+#include <fltKernel.h>
 #include <KSwordSandboxDriverIoctl.h>
 
 /*
@@ -24,6 +24,19 @@
  * Return : not applicable; future event producers can raise this cautiously.
  */
 #define KSWORD_SANDBOX_EVENT_RING_CAPACITY 64UL
+
+/*
+ * Local minifilter instance metadata.
+ *
+ * Inputs : used when DriverEntry self-heals the service key before calling
+ *          FltRegisterFilter.
+ * Logic  : FltMgr requires an Instances key and altitude for non-INF lab
+ *          loading; these values keep the minimal driver load path predictable.
+ * Return : not applicable.
+ */
+#define KSWORD_SANDBOX_FILE_FILTER_INSTANCE_KEY_NAME L"Instances"
+#define KSWORD_SANDBOX_FILE_FILTER_DEFAULT_INSTANCE_NAME L"KSword Sandbox File Instance"
+#define KSWORD_SANDBOX_FILE_FILTER_ALTITUDE_TEXT L"385240"
 
 /*
  * Internal event record stored in the fixed non-paged ring.
@@ -82,6 +95,24 @@ typedef struct _KSWORD_SANDBOX_STATE_SNAPSHOT {
     ULONG EventCount;
 } KSWORD_SANDBOX_STATE_SNAPSHOT, *PKSWORD_SANDBOX_STATE_SNAPSHOT;
 
+/*
+ * Runtime state for the minimal file minifilter producer.
+ *
+ * Inputs : initialized from DriverEntry and read by minifilter callbacks.
+ * Logic  : stores the FltMgr filter handle, the existing READ_EVENTS device
+ *          extension, and registration/start statuses.  Active gates callback
+ *          event emission before the filter is unregistered during unload.
+ * Return : no direct return value; failures are summarized through the device
+ *          extension LastStatus field exposed by health.
+ */
+typedef struct _KSWORD_SANDBOX_FILE_FILTER_RUNTIME {
+    PFLT_FILTER Filter;
+    PKSWORD_SANDBOX_DEVICE_EXTENSION DeviceExtension;
+    volatile LONG Active;
+    NTSTATUS RegisterStatus;
+    NTSTATUS StartStatus;
+} KSWORD_SANDBOX_FILE_FILTER_RUNTIME, *PKSWORD_SANDBOX_FILE_FILTER_RUNTIME;
+
 NTSTATUS
 KswPushEvent(
     _In_ PKSWORD_SANDBOX_DEVICE_EXTENSION DeviceExtension,
@@ -89,6 +120,18 @@ KswPushEvent(
     _In_ ULONG Flags,
     _In_reads_bytes_opt_(PayloadSize) const VOID* Payload,
     _In_ ULONG PayloadSize
+    );
+
+NTSTATUS
+KswInitializeFileFilter(
+    _In_ PDRIVER_OBJECT DriverObject,
+    _In_ PUNICODE_STRING RegistryPath,
+    _In_ PKSWORD_SANDBOX_DEVICE_EXTENSION DeviceExtension
+    );
+
+VOID
+KswUninitializeFileFilter(
+    VOID
     );
 
 DRIVER_INITIALIZE DriverEntry;

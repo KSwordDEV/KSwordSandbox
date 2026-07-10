@@ -54,13 +54,20 @@ header-only reserved self-test event with `KSWORD_SANDBOX_EVENT_FLAG_SELF_TEST`
 and `KSWORD_SANDBOX_EVENT_FLAG_DRIVER_STARTED`. `READ_EVENTS` consumes complete
 records from the ring and reports drop/sequence counters.
 
-Reserved event categories already exist in the ABI for the next increments:
+The first concrete behavior payload is now `KswSandboxEventTypeFile` with
+`KSWORD_SANDBOX_FILE_EVENT_PAYLOAD`. R0Collector parses it into string-valued
+`data` fields such as `operationName`, `filePath`, `pathPresent`,
+`pathTruncated`, `statusHex`, `majorFunction`, and `minorFunction`. When a file
+payload carries a bounded path, the top-level `SandboxEvent.path` is also set to
+that file path so the WebUI live monitor and HTML report show the subject path
+instead of only `\\.\KSwordSandboxDriver`.
 
-1. `KswSandboxEventTypeFile`
-2. `KswSandboxEventTypeProcess`
-3. `KswSandboxEventTypeImage`
-4. `KswSandboxEventTypeRegistry`
-5. `KswSandboxEventTypeNetwork`
+Reserved event categories still exist in the ABI for the next increments:
+
+1. `KswSandboxEventTypeProcess`
+2. `KswSandboxEventTypeImage`
+3. `KswSandboxEventTypeRegistry`
+4. `KswSandboxEventTypeNetwork`
 
 ## CLI contract
 

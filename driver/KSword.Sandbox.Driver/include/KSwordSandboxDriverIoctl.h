@@ -9,7 +9,9 @@
  * can consume the same IOCTL numbers and structure layouts.
  */
 #if defined(_KERNEL_MODE)
+#if !defined(__FLTKERNEL__)
 #include <ntddk.h>
+#endif
 #else
 #include <Windows.h>
 #endif
@@ -124,6 +126,53 @@ typedef enum _KSWORD_SANDBOX_EVENT_TYPE {
 #define KSWORD_SANDBOX_EVENT_FLAG_DRIVER_STARTED  0x00000002U
 
 /*
+ * File event payload version and operation values.
+ *
+ * Inputs : written by minifilter callbacks in
+ *          KSWORD_SANDBOX_FILE_EVENT_PAYLOAD.Operation.
+ * Logic  : operations are stable numeric values instead of IRP major codes so
+ *          collectors can parse file telemetry without WDK headers.
+ * Return : not applicable; unknown operation values are reserved for future
+ *          producer expansion.
+ */
+#define KSWORD_SANDBOX_FILE_EVENT_VERSION 0x00010000U
+
+typedef enum _KSWORD_SANDBOX_FILE_OPERATION {
+    KswSandboxFileOperationNone = 0,
+    KswSandboxFileOperationCreate = 1,
+    KswSandboxFileOperationWrite = 2,
+    KswSandboxFileOperationSetInformation = 3,
+    KswSandboxFileOperationDelete = 4,
+    KswSandboxFileOperationCleanup = 5,
+    KswSandboxFileOperationClose = 6
+} KSWORD_SANDBOX_FILE_OPERATION;
+
+/*
+ * File payload flag bits.
+ *
+ * Inputs : written by the driver in KSWORD_SANDBOX_FILE_EVENT_PAYLOAD.Flags.
+ * Logic  : PathPresent means PathLengthBytes and Path contain a bounded UTF-16
+ *          string, PathTruncated means the original name did not fit, and
+ *          PostOperation identifies callbacks that captured the final status.
+ * Return : not applicable; collectors should treat unknown bits as reserved.
+ */
+#define KSWORD_SANDBOX_FILE_EVENT_FLAG_PATH_PRESENT     0x00000001U
+#define KSWORD_SANDBOX_FILE_EVENT_FLAG_PATH_TRUNCATED   0x00000002U
+#define KSWORD_SANDBOX_FILE_EVENT_FLAG_STATUS_PRESENT   0x00000004U
+#define KSWORD_SANDBOX_FILE_EVENT_FLAG_POST_OPERATION   0x00000008U
+
+/*
+ * Bounded UTF-16 path capacity for file payloads.
+ *
+ * Inputs : used by both driver callbacks and collectors.
+ * Logic  : the value keeps KSWORD_SANDBOX_FILE_EVENT_PAYLOAD within the common
+ *          KSWORD_SANDBOX_EVENT_MAX_PAYLOAD_SIZE limit while still preserving a
+ *          useful path prefix for early R0 telemetry.
+ * Return : not applicable.
+ */
+#define KSWORD_SANDBOX_FILE_EVENT_PATH_CHARS 44U
+
+/*
  * Maximum payload size for one event returned by READ_EVENTS.
  *
  * Inputs : used by collectors to size stack or heap parsing buffers.
@@ -231,6 +280,29 @@ typedef struct _KSWORD_SANDBOX_DRIVER_LOAD_PAYLOAD {
     ULONGLONG BootId;
     CHAR BuildTag[32];
 } KSWORD_SANDBOX_DRIVER_LOAD_PAYLOAD, *PKSWORD_SANDBOX_DRIVER_LOAD_PAYLOAD;
+
+/*
+ * Bounded payload for KswSandboxEventTypeFile.
+ *
+ * Inputs : output-only payload following KSWORD_SANDBOX_EVENT_HEADER.
+ * Logic  : carries a compact file operation, requestor PID, final NTSTATUS when
+ *          known, the original IRP major/minor function numbers, and a bounded
+ *          UTF-16 path copied from the file object without dynamic allocation.
+ * Return : not applicable; Size describes this payload and PathLengthBytes does
+ *          not include a trailing NUL terminator.
+ */
+typedef struct _KSWORD_SANDBOX_FILE_EVENT_PAYLOAD {
+    ULONG Version;
+    ULONG Size;
+    ULONG Operation;
+    ULONG Flags;
+    ULONGLONG ProcessId;
+    LONG Status;
+    ULONG PathLengthBytes;
+    ULONG MajorFunction;
+    ULONG MinorFunction;
+    WCHAR Path[KSWORD_SANDBOX_FILE_EVENT_PATH_CHARS];
+} KSWORD_SANDBOX_FILE_EVENT_PAYLOAD, *PKSWORD_SANDBOX_FILE_EVENT_PAYLOAD;
 
 /*
  * Reply header for READ_EVENTS.
