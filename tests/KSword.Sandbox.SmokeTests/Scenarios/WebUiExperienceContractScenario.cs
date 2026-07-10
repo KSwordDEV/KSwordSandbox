@@ -22,6 +22,10 @@ internal sealed class WebUiExperienceContractScenario : ISmokeTestScenario
 
         var program = ReadRepositoryText(context, "src", "KSword.Sandbox.Web", "Program.cs");
         var dashboard = ReadRepositoryText(context, "src", "KSword.Sandbox.Web", "Dashboard", "DashboardExperiencePage.cs");
+        var liveEventsPage = ReadRepositoryText(context, "src", "KSword.Sandbox.Web", "Dashboard", "LiveEventsPage.cs");
+        var settingsPage = ReadRepositoryText(context, "src", "KSword.Sandbox.Web", "Dashboard", "SettingsPage.cs");
+        var virusTotalLookup = ReadRepositoryText(context, "src", "KSword.Sandbox.Web", "Infrastructure", "VirusTotalLookupService.cs");
+        var virusTotalSettings = ReadRepositoryText(context, "src", "KSword.Sandbox.Web", "Infrastructure", "VirusTotalSettingsStore.cs");
         var copyScript = ReadRepositoryText(context, "src", "KSword.Sandbox.Web", "Dashboard", "DashboardClientScripts.cs");
         var executionFlow = ReadRepositoryText(context, "src", "KSword.Sandbox.Web", "Dashboard", "RunbookExecutionFlowPage.cs");
         var artifactContract = ReadRepositoryText(context, "src", "KSword.Sandbox.Web", "Contracts", "JobArtifactPathsContract.cs");
@@ -39,6 +43,10 @@ internal sealed class WebUiExperienceContractScenario : ISmokeTestScenario
         RequireContains(program, "\"/api/jobs/{jobId:guid}/runbook/progress\"", "Program.cs should expose a UI-safe real runbook progress endpoint.");
         RequireContains(program, "RunbookProgressStore", "Program.cs should store executor progress snapshots for live WebUI polling.");
         RequireContains(program, "ProgressSink = new Progress<SandboxRunbookProgressSnapshot>", "Runbook execute endpoint should pass a real progress sink into the executor.");
+        RequireContains(program, "\"/settings\"", "Program.cs should expose the local settings page.");
+        RequireContains(program, "\"/api/settings/virustotal\"", "Program.cs should expose VirusTotal settings endpoints.");
+        RequireContains(program, "\"/api/jobs/{jobId:guid}/virustotal\"", "Program.cs should expose per-job VirusTotal hash lookup.");
+        RequireContains(program, "AddHttpClient<VirusTotalLookupService>", "Program.cs should register the VirusTotal lookup HTTP client.");
 
         RequireContains(dashboard, "<html lang=\"zh-CN\">", "Dashboard should default to Chinese.");
         RequireContains(dashboard, "onclick=\"toggleLanguage()\"", "Dashboard should expose the top-right Chinese/English switch.");
@@ -110,6 +118,7 @@ internal sealed class WebUiExperienceContractScenario : ISmokeTestScenario
         RequireContains(dashboard, "renderRunbookProgress", "Dashboard should render exact executor runbook step progress.");
         RequireContains(dashboard, "不含命令行", "Dashboard should state that expanded runbook progress omits command lines.");
         RequireContains(dashboard, "executeRunbook(String(jobId), true)", "Upload flow should automatically start live VM analysis after planning.");
+        RequireContains(dashboard, "href=\"/settings\"", "Dashboard should link to the settings page.");
         RequireContains(dashboard, "events.json", "Dashboard should display events.json path.");
         RequireContains(dashboard, "driver-events.jsonl", "Dashboard should display driver-events.jsonl path.");
         RequireContains(dashboard, "runbook-execution.json", "Dashboard should display runbook execution result path.");
@@ -138,6 +147,19 @@ internal sealed class WebUiExperienceContractScenario : ISmokeTestScenario
 
         RequireContains(copyScript, "button.copy-btn[data-copy]", "Shared dashboard copy script should handle explicit copy buttons.");
         RequireContains(copyScript, "[data-copy], code, pre, td, th", "Shared dashboard copy script should support right-click table/path copying.");
+
+        RequireContains(liveEventsPage, "/virustotal", "Live monitor should fetch the per-job VirusTotal lookup endpoint.");
+        RequireContains(liveEventsPage, "VirusTotal 官方结果", "Live monitor should display a VirusTotal result card.");
+        RequireContains(liveEventsPage, "不上传样本", "Live monitor should state that VirusTotal integration does not upload samples.");
+        RequireContains(settingsPage, "VirusTotal API Key", "Settings page should allow operators to set the VirusTotal API key.");
+        RequireContains(settingsPage, "/api/settings/virustotal", "Settings page should save VirusTotal settings through the API endpoint.");
+        RequireContains(settingsPage, "不会提交到仓库", "Settings page should explain that local settings are not committed.");
+        RequireContains(virusTotalSettings, "KSWORDBOX_VIRUSTOTAL_API_KEY", "VirusTotal settings should support an environment variable override.");
+        RequireContains(virusTotalSettings, "virustotal.key", "VirusTotal settings should persist under the runtime settings folder.");
+        RequireContains(virusTotalLookup, "https://www.virustotal.com/api/v3/", "VirusTotal lookup should call the official v3 API base URL.");
+        RequireContains(virusTotalLookup, "files/{Uri.EscapeDataString(normalizedHash)}", "VirusTotal lookup should use the files/{hash} endpoint.");
+        RequireContains(virusTotalLookup, "x-apikey", "VirusTotal lookup should authenticate with the x-apikey header.");
+        RequireContains(virusTotalLookup, "not upload", "VirusTotal lookup code comments should document that it does not upload samples.");
 
         RequireContains(artifactContract, "ReportJsonPath", "Artifact contract should include report.json.");
         RequireContains(artifactContract, "ReportHtmlPath", "Artifact contract should include report.html.");

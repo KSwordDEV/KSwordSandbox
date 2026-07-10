@@ -126,6 +126,7 @@ internal static class DashboardExperiencePage
               <a href="#plan" data-zh="提交样本" data-en="Submit sample">提交样本</a>
               <a href="#current-job" data-zh="当前任务" data-en="Current job">当前任务</a>
               <a href="#recent-jobs" data-zh="历史任务" data-en="Recent jobs">历史任务</a>
+              <a href="/settings" data-zh="设置 / VirusTotal" data-en="Settings / VirusTotal">设置 / VirusTotal</a>
             </nav>
           </header>
           <main>

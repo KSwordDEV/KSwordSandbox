@@ -88,6 +88,11 @@ a final HTML report.
 - Current validation evidence for this snapshot:
   `dotnet build .\KSwordSandbox.sln`, smoke tests, local pipeline smoke, and
   repository policy all pass.
+- VirusTotal integration has a first WebUI pass: `/settings` stores or clears a
+  local API key, `KSWORDBOX_VIRUSTOTAL_API_KEY` can override it, and
+  `/api/jobs/{jobId}/virustotal` performs a hash-only official v3 file-report
+  lookup without uploading samples. Missing keys or API failures return quiet
+  status payloads and do not interrupt sandbox execution.
 
 ## Remaining P0 gaps
 

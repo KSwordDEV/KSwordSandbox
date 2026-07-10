@@ -63,6 +63,14 @@ The root dashboard must keep these operator-facing areas visible and copyable:
   stored and a plan is created, the dashboard automatically starts live VM
   analysis and switches the progress panel from estimated stages to real
   runbook step status;
+- VirusTotal official result integration is optional and hash-only. Operators
+  can open `/settings` to save or clear a local API key; the key is read from
+  `KSWORDBOX_VIRUSTOTAL_API_KEY` first or from the runtime settings file under
+  `D:\Temp\KSwordSandbox\settings`. The job page exposes
+  `GET /api/jobs/{jobId}/virustotal`, which queries the official v3
+  `files/{sha256}` endpoint with `x-apikey`, does not upload samples, and
+  returns a quiet `not_configured` / `lookup_failed` state when missing or
+  unavailable instead of interrupting analysis;
 - a link to a dedicated live raw monitor page that shows source files and
   unclassified raw event rows before final report classification;
 - a link to the dedicated execution-flow page for runbook step status. The root

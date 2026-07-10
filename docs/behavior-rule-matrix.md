@@ -66,8 +66,17 @@ readers should still inspect the event `source` field in the evidence table.
 
 - `T1059` is used only when the command line references common Windows
   scripting interpreters.
+- `T1003.001` is reserved for LSASS process access or dump evidence, while
+  `T1003.002` is used for SAM/SECURITY/SYSTEM hive access and hive-save
+  commands.
+- `T1021.002` and `T1021.006` cover SMB/admin-share and WinRM/PowerShell
+  remoting evidence respectively; network-port rules are triage signals, not
+  proof of successful lateral movement.
+- `T1047` covers WMI/CIM remote execution command evidence.
 - `T1112` covers generic registry modification. `T1547.001` is reserved for
   Run/RunOnce autostart paths because that evidence is more specific.
+- `T1070.001` is used only for event-log clearing command evidence; generic
+  file deletion remains `T1070.004`.
 - `T1070.004` is used for file deletion because the current event does not yet
   prove cleanup intent, but it is still useful to surface in reports.
 - `T1053.005` is used only when a command line shows scheduled-task creation
@@ -79,10 +88,15 @@ readers should still inspect the event `source` field in the evidence table.
 - `T1105` is retained for outbound TCP, embedded URL/IP evidence, and static
   network/download API imports, download staging paths, and download-execute
   placeholders until more precise seed mappings are available.
+- `T1204.002` is used for execution from download/staging paths because the
+  rule observes launch context, not the preceding transfer by itself.
 - `T1055` is used only for static import groups that include process-injection
   primitives such as cross-process allocation/write/thread APIs, or dynamic
   events that explicitly report remote-thread/APC, hollowing, RWX memory, or
   LoadLibrary-style injection operations.
+- `T1055.001` is used when LoadLibrary/LdrLoadDll-style DLL injection evidence
+  is present; `T1055.012` is used for hollowing or suspended-process
+  replacement signals.
 - `T1106` covers broad native Windows API import/string evidence; more specific
   rules such as process injection, network transfer, persistence, and
   anti-analysis should take precedence in triage.
@@ -97,23 +111,29 @@ readers should still inspect the event `source` field in the evidence table.
   to time-based evasion and delay/sleep telemetry. Dynamic anti-analysis
   command rules also use `T1497` for VM/tool lookup, user-activity checks, and
   analysis-tool termination evidence.
+- `T1497.001` is used for CPU, hypervisor, hardware, user-activity, and
+  low-resource system checks.
 - `T1546` is used as the broad event-triggered execution mapping for WMI
   event subscriptions, COM hijacks, and AppInit DLL registry evidence because
   the current seed map intentionally does not include every subtechnique.
 - `T1546.012` is used for Image File Execution Options debugger registry paths.
 - `T1547.004` is used for Winlogon Shell/Userinit/Notify/GinaDLL persistence
   paths.
+- `T1555` and `T1555.003` cover credential stores broadly and browser
+  credential databases specifically.
+- `T1562.001` covers attempts to disable or modify security tools, Defender,
+  AMSI, or ETW; `T1562.004` covers firewall disablement.
+- `T1569.002` covers remote service execution command evidence; `T1570` covers
+  lateral tool transfer over UNC/admin-share style paths.
+- `T1573` is used for TLS/SNI/JA3 placeholder evidence where encrypted-channel
+  metadata is available but content is not inspected.
 - `T1620` is used for dynamic code loading and memory-protection import groups
   as a triage hint, not as proof of reflective loading at runtime.
 - `T1622` is used for debugger/timing import strings where static evidence
   suggests anti-analysis checks.
-- Lateral movement and credential/LSASS rules are intentionally unmapped unless
-  they can use an existing seed ID, because the current MITRE seed file does
-  not yet include `T1021` Remote Services or `T1003` OS Credential Dumping
-  families.
 - Rules without MITRE IDs are intentionally unmapped because the current event
-  is health, placeholder, generic telemetry, or belongs to a technique family
-  not yet present in `rules/mitre-windows-map.json`.
+  is health, placeholder, generic telemetry, or intentionally too broad for a
+  stable technique assignment.
 
 ## Static-analysis tag contract
 

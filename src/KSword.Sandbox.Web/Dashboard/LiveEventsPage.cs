@@ -67,6 +67,7 @@ internal static class LiveEventsPage
               <a class="button secondary" href="/jobs/{{Attr(jobId)}}/execution-flow" data-zh="执行流程" data-en="Execution flow">执行流程</a>
               <a class="button" href="/api/jobs/{{Attr(jobId)}}/report/html?lang=zh" target="_blank" rel="noopener" data-zh="打开中文报告" data-en="Open Chinese report">打开中文报告</a>
               <a class="button secondary" href="/api/jobs/{{Attr(jobId)}}/report/html?lang=en" target="_blank" rel="noopener" data-zh="打开英文报告" data-en="Open English report">打开英文报告</a>
+              <a class="button secondary" href="/settings" data-zh="设置 / VirusTotal" data-en="Settings / VirusTotal">设置 / VirusTotal</a>
               <button type="button" onclick="connectSse()" data-zh="连接实时流" data-en="Connect stream">连接实时流</button>
               <button class="secondary" type="button" onclick="refreshLiveEvents(true)" data-zh="手动刷新" data-en="Manual refresh">手动刷新</button>
             </div>
@@ -82,6 +83,12 @@ internal static class LiveEventsPage
               </div>
               <div id="status" class="status muted" data-zh="等待连接实时事件流。" data-en="Waiting to connect live event stream.">等待连接实时事件流。</div>
               <div id="sources" class="muted"></div>
+            </section>
+            <section>
+              <h2 data-zh="VirusTotal 官方结果" data-en="VirusTotal official result">VirusTotal 官方结果</h2>
+              <p class="muted" data-zh="只查询 SHA-256 文件报告，不上传样本；未配置或失败时不影响沙箱流程。" data-en="SHA-256 file-report lookup only; samples are not uploaded. Missing keys or failures do not affect sandbox execution.">只查询 SHA-256 文件报告，不上传样本；未配置或失败时不影响沙箱流程。</p>
+              <div id="vtResult" class="metric muted" data-copy="VirusTotal: pending">VirusTotal：等待查询 / waiting</div>
+              <button class="secondary" type="button" onclick="refreshVirusTotal()" data-zh="刷新 VirusTotal" data-en="Refresh VirusTotal">刷新 VirusTotal</button>
             </section>
             <section>
               <h2 data-zh="原始事件流" data-en="Raw event stream">原始事件流</h2>
@@ -160,6 +167,49 @@ internal static class LiveEventsPage
               } catch (error) {
                 setStatus(error.message, true);
               }
+            }
+
+            async function refreshVirusTotal() {
+              const target = document.getElementById('vtResult');
+              if (target) {
+                target.textContent = t('VirusTotal：正在查询...', 'VirusTotal: querying...');
+                target.setAttribute('data-copy', target.textContent);
+              }
+              try {
+                const response = await fetch(`/api/jobs/${encodeURIComponent(jobId)}/virustotal`, { cache: 'no-store' });
+                const payload = await requireOk(response, 'VirusTotal');
+                renderVirusTotal(payload);
+              } catch {
+                // Keep VirusTotal silent and non-blocking. Operators can open
+                // Settings if they need to inspect the API key.
+                renderVirusTotal({ status: 'lookup_failed', configured: true, queried: false, message: t('VirusTotal 查询不可用。', 'VirusTotal lookup unavailable.') });
+              }
+            }
+
+            function renderVirusTotal(result) {
+              const target = document.getElementById('vtResult');
+              if (!target) { return; }
+              const stats = result.lastAnalysisStats || {};
+              const malicious = Number(stats.malicious || 0);
+              const suspicious = Number(stats.suspicious || 0);
+              const harmless = Number(stats.harmless || 0);
+              const undetected = Number(stats.undetected || 0);
+              let label;
+              if (!result.configured) {
+                label = t('未配置 API Key，已跳过官方结果。', 'API key not configured; official result skipped.');
+              } else if (!result.queried) {
+                label = t('查询失败或被限速，沙箱流程继续。', 'Lookup failed or was rate-limited; sandbox flow continues.');
+              } else if (!result.found) {
+                label = t('VirusTotal 未收录该 SHA-256。', 'VirusTotal has no report for this SHA-256.');
+              } else {
+                label = t(`已收录：恶意 ${malicious} / 可疑 ${suspicious} / 无害 ${harmless} / 未检出 ${undetected}`, `Found: malicious ${malicious} / suspicious ${suspicious} / harmless ${harmless} / undetected ${undetected}`);
+              }
+
+              const link = result.permalink ? `<a href="${escapeAttr(result.permalink)}" target="_blank" rel="noopener">VirusTotal</a>` : '';
+              const name = result.meaningfulName ? `<br><span>${escapeHtml(result.meaningfulName)}</span>` : '';
+              const sha = result.sha256 ? `<br><code data-copy="${escapeAttr(result.sha256)}">${escapeHtml(result.sha256)}</code>` : '';
+              target.innerHTML = `<strong>${escapeHtml(label)}</strong> ${link}${name}${sha}`;
+              target.setAttribute('data-copy', `VirusTotal ${result.status || ''}: ${label} ${result.sha256 || ''}`);
             }
 
             function renderSnapshot(snapshot, transport) {
@@ -270,6 +320,7 @@ internal static class LiveEventsPage
               setTimeout(() => toast.classList.remove('visible'), 1200);
             }
             applyLanguage();
+            refreshVirusTotal();
             connectSse();
           </script>
         </body>

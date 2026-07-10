@@ -22,11 +22,18 @@ builder.Services.AddSingleton(rules);
 builder.Services.AddSingleton(jobService);
 builder.Services.AddSingleton(targetScanner);
 builder.Services.AddSingleton<RunbookProgressStore>();
+builder.Services.AddSingleton<VirusTotalSettingsStore>();
 builder.Services.AddSingleton<IRunbookExecutor, PowerShellRunbookExecutor>();
+builder.Services.AddHttpClient<VirusTotalLookupService>(client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(10);
+});
 
 var app = builder.Build();
 
 app.MapGet("/", () => Results.Content(DashboardExperiencePage.Render(), "text/html"));
+app.MapGet("/settings", (VirusTotalSettingsStore settingsStore) =>
+    Results.Content(SettingsPage.Render(settingsStore.GetState()), "text/html; charset=utf-8"));
 app.MapGet("/jobs/{jobId:guid}/execution-flow", (Guid jobId, SandboxJobService service) =>
 {
     var job = service.GetJob(jobId);
@@ -55,11 +62,47 @@ app.MapGet("/health", () => Results.Ok(new
     time = DateTimeOffset.UtcNow
 }));
 app.MapGet("/api/config", (SandboxConfig currentConfig) => Results.Ok(currentConfig));
+app.MapGet("/api/settings/virustotal", (VirusTotalSettingsStore settingsStore) => Results.Ok(settingsStore.GetState()));
+app.MapPost("/api/settings/virustotal", (VirusTotalSettingsUpdateRequest request, VirusTotalSettingsStore settingsStore) =>
+{
+    try
+    {
+        return Results.Ok(settingsStore.Save(request.ApiKey, request.Clear));
+    }
+    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
+    {
+        return Results.BadRequest(new { error = $"VirusTotal settings could not be saved: {ex.Message}" });
+    }
+});
 app.MapGet("/api/jobs", (SandboxJobService service) => Results.Ok(service.ListJobs()));
 app.MapGet("/api/jobs/{jobId:guid}", (Guid jobId, SandboxJobService service) =>
 {
     var job = service.GetJob(jobId);
     return job is null ? Results.NotFound(new { error = $"Job {jobId:D} was not found in the in-memory Web host job list." }) : Results.Ok(job);
+});
+app.MapGet("/api/jobs/{jobId:guid}/virustotal", async Task<IResult> (Guid jobId, SandboxJobService service, VirusTotalLookupService virusTotal, CancellationToken cancellationToken) =>
+{
+    var job = service.GetJob(jobId);
+    if (job is null)
+    {
+        return Results.NotFound(new { error = $"Job {jobId:D} was not found in the in-memory Web host job list." });
+    }
+
+    if (job.Sample is null || string.IsNullOrWhiteSpace(job.Sample.Sha256))
+    {
+        return Results.Ok(new VirusTotalLookupResult
+        {
+            Sha256 = string.Empty,
+            Configured = false,
+            Queried = false,
+            Found = false,
+            Status = "missing_hash",
+            Message = "Sample SHA-256 is not available yet."
+        });
+    }
+
+    var result = await virusTotal.LookupFileHashAsync(job.Sample.Sha256, cancellationToken);
+    return Results.Ok(result);
 });
 // GET /api/jobs/{jobId}/runbook/progress returns the latest UI-safe runbook
 // progress snapshot while a long live request is still running. Inputs are only
