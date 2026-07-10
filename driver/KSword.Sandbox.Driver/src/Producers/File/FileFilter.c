@@ -766,13 +766,15 @@ KswPushFileEvent(
     NTSTATUS pushStatus;
     BOOLEAN suppressEvent;
 
-    if (Operation == KswSandboxFileOperationNone ||
+    if (Data == NULL ||
+        Operation == KswSandboxFileOperationNone ||
         InterlockedCompareExchange(&g_KswFileFilterRuntime.Active, 0, 0) == 0) {
         return;
     }
 
     deviceExtension = g_KswFileFilterRuntime.DeviceExtension;
-    if (deviceExtension == NULL) {
+    if (deviceExtension == NULL ||
+        deviceExtension->Signature != KSWORD_SANDBOX_DEVICE_EXTENSION_SIGNATURE) {
         return;
     }
 
@@ -809,7 +811,7 @@ KswPushFileEvent(
         KswSandboxEventTypeFile,
         0,
         &payload,
-        sizeof(payload));
+        (ULONG)sizeof(payload));
     KswRecordFileEventPushStatus(deviceExtension, pushStatus);
 }
 
@@ -895,9 +897,9 @@ KswFileFilterPostOperation(
  * Allows FltMgr-initiated unload for the registered minifilter.
  *
  * Inputs : Flags describes the unload request type from FltMgr.
- * Logic  : delegates to the same cleanup path used by DriverUnload so external
- *          FltMgr unload requests clear Active, drop the device-extension
- *          pointer, and unregister the filter exactly once.
+ * Logic  : delegates to the same cleanup path used by DriverUnload.  The shared
+ *          cleanup routine is guarded so direct DriverUnload and FltMgr unload
+ *          paths unregister the filter at most once.
  * Return : STATUS_SUCCESS.
  */
 static
@@ -1002,12 +1004,12 @@ KswUninitializeFileFilter(
 
     filter = g_KswFileFilterRuntime.Filter;
     g_KswFileFilterRuntime.Filter = NULL;
-    g_KswFileFilterRuntime.DeviceExtension = NULL;
 
     if (filter != NULL) {
         FltUnregisterFilter(filter);
     }
 
+    g_KswFileFilterRuntime.DeviceExtension = NULL;
     g_KswFileFilterRuntime.RegisterStatus = STATUS_NOT_SUPPORTED;
     g_KswFileFilterRuntime.StartStatus = STATUS_NOT_SUPPORTED;
 }

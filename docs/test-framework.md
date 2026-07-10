@@ -11,9 +11,12 @@ Current expansion points:
   report generation, and HTML section assertions.
 - `scripts/Test-ProjectFramework.ps1`: quick path-level validation.
 
-Recommended next scenarios:
+Current smoke coverage to keep lightweight:
 
 1. Synthetic `events.json` import refreshes `report.json` and `report.html`.
-2. Report HTML contains process, file, network, MITRE, and raw event sections.
+2. Sibling `driver-events.jsonl` is imported with the guest events; the
+   synthetic `r0collector.mockDriverEvent` row appears in `report.json`,
+   `report.html`, findings, and live raw event snapshots without requiring a
+   real Hyper-V VM or driver.
 3. Repository policy rejects binaries, VM disks, PDFs, and build artifacts.
-4. R0Collector mock JSONL can be imported as live telemetry.
+4. Report HTML contains process, file, network, MITRE, and raw event sections.

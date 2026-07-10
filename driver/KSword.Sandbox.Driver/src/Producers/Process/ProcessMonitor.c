@@ -705,6 +705,15 @@ KswInitializeProcessMonitor(
         InterlockedExchange(&g_KswImageCallbackRegistered, 1);
     }
 
+    KswRecordProducerStatus(
+        DeviceExtension,
+        KSWORD_SANDBOX_PRODUCER_FLAG_PROCESS,
+        processStatus);
+    KswRecordProducerStatus(
+        DeviceExtension,
+        KSWORD_SANDBOX_PRODUCER_FLAG_IMAGE,
+        imageStatus);
+
     if (InterlockedCompareExchange(&g_KswProcessCallbackRegistered, 0, 0) != 0 ||
         InterlockedCompareExchange(&g_KswImageCallbackRegistered, 0, 0) != 0) {
         InterlockedExchange(&g_KswProcessMonitorActive, 1);

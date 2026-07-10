@@ -39,6 +39,16 @@ present as sibling `driver-events.jsonl`. Guest dropped-file evidence may be
 represented by `artifacts/manifest.json`, and screenshots may be present under
 `screenshots/`.
 
+When `events.json` is imported, sibling `*.jsonl` files under the same guest
+output root are merged into the regenerated `report.json` and `report.html`.
+This includes R0Collector mock JSONL rows such as
+`r0collector.mockDriverEvent`; they remain raw events with
+`source=r0collector`, keep `data.mock=true` / `data.driverEventPath`, and trigger the
+`r0collector-mock-driver-event` informational rule. The host
+`guest.events.imported` marker stores an `eventCount` that includes both
+`events.json` rows and imported JSONL rows so a smoke run can prove the R0 mock
+sidecar was included in the final report.
+
 ## Artifact manifest evidence
 
 Dropped files and other copied evidence use

@@ -146,6 +146,9 @@ dotnet run --project .\tests\KSword.Sandbox.SmokeTests\KSword.Sandbox.SmokeTests
 The runtime WebUI smoke contract is intentionally API-level so it can run on
 headless workers. It probes:
 
+- `GET /jobs/{jobId}/live-events` and requires a successful `text/html` page
+  containing the live raw monitor title plus references to both raw event
+  transports;
 - `GET /api/jobs/{jobId}/events/live?offset=0&take=1` and requires the live raw
   telemetry JSON cursor fields: `jobId`, `retrievedAt`, `totalEvents`,
   `nextOffset`, `hasMore`, `sources`, and `events`;
@@ -153,6 +156,10 @@ headless workers. It probes:
 - `GET /api/jobs/{jobId}/report/html` and requires a successful `text/html`
   served report response, which is the same safe report link rendered by the
   dashboard;
+- bilingual report endpoints: `GET /api/jobs/{jobId}/report/html?lang=zh` and
+  `GET /api/jobs/{jobId}/report/html?lang=en` should both return `text/html`
+  from the recorded job report paths, falling back to the compatibility
+  `report.html` only when a localized report file is not recorded;
 - `POST /api/jobs/{jobId}/guest-events/import` with an explicit missing
   `eventsPath` and requires a controlled HTTP 400 validation response. This
   proves the manual guest import endpoint and payload contract without importing
@@ -167,10 +174,13 @@ and `-JobId` are omitted:
 
 For an end-to-end operator validation, create or select a job after starting the
 Web host, open the dashboard in a browser manually, and confirm that the served
-HTML report link opens, the live raw monitor page refreshes, the root dashboard
-does not show long runbook command/output blocks, and the manual guest import
-field can be left blank or filled with a specific `events.json` / `.jsonl` path.
-Do not commit generated reports, imported guest output, browser screenshots, or
+HTML report link opens, the live raw monitor page refreshes through SSE or
+polling, the Chinese report endpoint
+`/api/jobs/{jobId}/report/html?lang=zh` and English report endpoint
+`/api/jobs/{jobId}/report/html?lang=en` both serve HTML, the root dashboard does
+not show long runbook command/output blocks, and the manual guest import field
+can be left blank or filled with a specific `events.json` / `.jsonl` path. Do
+not commit generated reports, imported guest output, browser screenshots, or
 build binaries from this validation.
 
 ## Verification guidance

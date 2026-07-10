@@ -209,6 +209,221 @@ function Get-GuestPayloadRoot {
     return [System.IO.Path]::GetFullPath($fromConfig)
 }
 
+function Get-RelativeRepositoryPath {
+    param(
+        [Parameter(Mandatory)][string]$RepositoryRoot,
+        [Parameter(Mandatory)][string]$Path
+    )
+
+    $fullRoot = [System.IO.Path]::GetFullPath($RepositoryRoot).TrimEnd('\', '/') + '\'
+    $fullPath = [System.IO.Path]::GetFullPath($Path)
+    if ($fullPath.StartsWith($fullRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+        return $fullPath.Substring($fullRoot.Length).Replace('\', '/')
+    }
+
+    return $fullPath.Replace('\', '/')
+}
+
+function Get-GuestPayloadSourceFiles {
+    $sourceRoots = @(
+        'guest\KSword.Sandbox.Agent',
+        'guest\KSword.Sandbox.R0Collector',
+        'src\KSword.Sandbox.Abstractions'
+    )
+    $extensions = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($extension in @('.cs', '.csproj', '.props', '.targets', '.cpp', '.c', '.h', '.hpp', '.vcxproj', '.filters', '.json')) {
+        [void]$extensions.Add($extension)
+    }
+
+    $files = New-Object System.Collections.Generic.List[System.IO.FileInfo]
+    foreach ($relativeRoot in $sourceRoots) {
+        $candidateRoot = Join-Path $script:RepositoryRoot $relativeRoot
+        if (-not (Test-Path -LiteralPath $candidateRoot -PathType Container)) {
+            continue
+        }
+
+        foreach ($file in Get-ChildItem -LiteralPath $candidateRoot -Recurse -File) {
+            $normalized = $file.FullName.Replace('/', '\')
+            if ($normalized -match '\\(bin|obj|x64|\.vs)\\') {
+                continue
+            }
+
+            if ($extensions.Contains($file.Extension)) {
+                $files.Add($file)
+            }
+        }
+    }
+
+    return @($files | Sort-Object FullName)
+}
+
+function Get-FileSha256Hex {
+    param([Parameter(Mandatory)][string]$Path)
+
+    $stream = [System.IO.File]::Open($Path, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite -bor [System.IO.FileShare]::Delete)
+    try {
+        $sha = [System.Security.Cryptography.SHA256]::Create()
+        try {
+            return ([System.BitConverter]::ToString($sha.ComputeHash($stream))).Replace('-', '').ToLowerInvariant()
+        }
+        finally {
+            $sha.Dispose()
+        }
+    }
+    finally {
+        $stream.Dispose()
+    }
+}
+
+function Get-GuestPayloadSourceFingerprint {
+    $files = @(Get-GuestPayloadSourceFiles)
+    $builder = [System.Text.StringBuilder]::new()
+    foreach ($file in $files) {
+        $relative = Get-RelativeRepositoryPath -RepositoryRoot $script:RepositoryRoot -Path $file.FullName
+        $hash = Get-FileSha256Hex -Path $file.FullName
+        [void]$builder.AppendLine("$relative|$hash|$($file.Length)")
+    }
+
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $bytes = [System.Text.Encoding]::UTF8.GetBytes($builder.ToString())
+        return ([System.BitConverter]::ToString($sha.ComputeHash($bytes))).Replace('-', '').ToLowerInvariant()
+    }
+    finally {
+        $sha.Dispose()
+    }
+}
+
+function Get-PayloadManifestProperty {
+    param(
+        [AllowNull()]$Manifest,
+        [Parameter(Mandatory)][string]$Name
+    )
+
+    if ($null -eq $Manifest) {
+        return $null
+    }
+
+    $property = $Manifest.PSObject.Properties[$Name]
+    if ($null -eq $property) {
+        return $null
+    }
+
+    return $property.Value
+}
+
+function Test-GuestPayloadManifestFileHash {
+    param(
+        [Parameter(Mandatory)]$Manifest,
+        [Parameter(Mandatory)][string]$Name,
+        [Parameter(Mandatory)][string]$ExpectedPath,
+        [AllowEmptyCollection()]
+        [Parameter(Mandatory)][System.Collections.Generic.List[string]]$Reasons
+    )
+
+    if (-not (Test-Path -LiteralPath $ExpectedPath -PathType Leaf)) {
+        $Reasons.Add("$Name file is missing: $ExpectedPath")
+        return
+    }
+
+    $requiredFiles = Get-PayloadManifestProperty -Manifest $Manifest -Name 'requiredHostFiles'
+    if ($null -eq $requiredFiles) {
+        $Reasons.Add('payload-manifest.json is missing requiredHostFiles metadata.')
+        return
+    }
+
+    $entry = @($requiredFiles | Where-Object {
+        $entryName = Get-PayloadManifestProperty -Manifest $_ -Name 'name'
+        [System.StringComparer]::OrdinalIgnoreCase.Equals([string]$entryName, $Name)
+    } | Select-Object -First 1)
+    if ($entry.Count -eq 0) {
+        $Reasons.Add("payload-manifest.json is missing $Name hash metadata.")
+        return
+    }
+
+    $manifestPath = [string](Get-PayloadManifestProperty -Manifest $entry[0] -Name 'path')
+    if (-not [string]::IsNullOrWhiteSpace($manifestPath)) {
+        try {
+            $samePath = [System.StringComparer]::OrdinalIgnoreCase.Equals(
+                [System.IO.Path]::GetFullPath($manifestPath),
+                [System.IO.Path]::GetFullPath($ExpectedPath))
+            if (-not $samePath) {
+                $Reasons.Add("$Name path in payload-manifest.json points to '$manifestPath' instead of '$ExpectedPath'.")
+            }
+        }
+        catch {
+            $Reasons.Add("$Name path in payload-manifest.json is invalid: $manifestPath")
+        }
+    }
+
+    $expectedHash = [string](Get-PayloadManifestProperty -Manifest $entry[0] -Name 'sha256')
+    if ([string]::IsNullOrWhiteSpace($expectedHash)) {
+        $Reasons.Add("$Name hash is absent from payload-manifest.json.")
+        return
+    }
+
+    $actualHash = Get-FileSha256Hex -Path $ExpectedPath
+    if (-not [System.StringComparer]::OrdinalIgnoreCase.Equals($expectedHash, $actualHash)) {
+        $Reasons.Add("$Name hash differs from payload-manifest.json; staged payload may be partially overwritten.")
+    }
+}
+
+function Test-GuestPayloadFresh {
+    param(
+        [Parameter(Mandatory)][string]$PayloadRoot,
+        [Parameter(Mandatory)][string]$AgentExe,
+        [Parameter(Mandatory)][string]$CollectorExe,
+        [Parameter(Mandatory)][string]$ManifestPath
+    )
+
+    $reasons = [System.Collections.Generic.List[string]]::new()
+    if (-not (Test-Path -LiteralPath $AgentExe -PathType Leaf)) {
+        $reasons.Add("Guest Agent executable is missing: $AgentExe")
+    }
+    if (-not (Test-Path -LiteralPath $CollectorExe -PathType Leaf)) {
+        $reasons.Add("R0Collector executable is missing: $CollectorExe")
+    }
+    if (-not (Test-Path -LiteralPath $ManifestPath -PathType Leaf)) {
+        $reasons.Add("payload-manifest.json is missing: $ManifestPath")
+        return [pscustomobject]@{ Fresh = $false; Reasons = @($reasons) }
+    }
+
+    try {
+        $manifest = Get-Content -LiteralPath $ManifestPath -Raw | ConvertFrom-Json
+    }
+    catch {
+        $reasons.Add("payload-manifest.json is unreadable: $($_.Exception.Message)")
+        return [pscustomobject]@{ Fresh = $false; Reasons = @($reasons) }
+    }
+
+    $contractVersionValue = Get-PayloadManifestProperty -Manifest $manifest -Name 'payloadContractVersion'
+    $contractVersion = if ($null -eq $contractVersionValue) { 0 } else { [int]$contractVersionValue }
+    if ($contractVersion -lt 2) {
+        $reasons.Add("payload-manifest.json contract version is $contractVersion; version 2+ is required for freshness checks.")
+    }
+
+    $manifestConfiguration = [string](Get-PayloadManifestProperty -Manifest $manifest -Name 'configuration')
+    if (-not [System.StringComparer]::OrdinalIgnoreCase.Equals($manifestConfiguration, $Configuration)) {
+        $reasons.Add("payload configuration '$manifestConfiguration' does not match requested '$Configuration'.")
+    }
+
+    $sourceFingerprint = [string](Get-PayloadManifestProperty -Manifest $manifest -Name 'sourceFingerprint')
+    if ([string]::IsNullOrWhiteSpace($sourceFingerprint)) {
+        $reasons.Add('payload-manifest.json is missing sourceFingerprint.')
+    }
+    else {
+        $currentFingerprint = Get-GuestPayloadSourceFingerprint
+        if (-not [System.StringComparer]::OrdinalIgnoreCase.Equals($sourceFingerprint, $currentFingerprint)) {
+            $reasons.Add('guest payload source fingerprint is stale; Guest Agent/R0Collector sources changed after staging.')
+        }
+    }
+
+    Test-GuestPayloadManifestFileHash -Manifest $manifest -Name 'GuestAgent' -ExpectedPath $AgentExe -Reasons $reasons
+    Test-GuestPayloadManifestFileHash -Manifest $manifest -Name 'R0Collector' -ExpectedPath $CollectorExe -Reasons $reasons
+
+    return [pscustomobject]@{ Fresh = $reasons.Count -eq 0; Reasons = @($reasons) }
+}
+
 function Ensure-GuestPayload {
     param(
         [Parameter(Mandatory)][string]$PayloadRoot,
@@ -236,11 +451,17 @@ function Ensure-GuestPayload {
     $agentExe = Join-Path (Join-Path $PayloadRoot 'agent') $agentName
     $collectorExe = Join-Path (Join-Path $PayloadRoot 'r0collector') $collectorName
     $manifest = Join-Path $PayloadRoot 'payload-manifest.json'
-    $payloadReady = (Test-Path -LiteralPath $agentExe -PathType Leaf) -and (Test-Path -LiteralPath $collectorExe -PathType Leaf) -and (Test-Path -LiteralPath $manifest -PathType Leaf)
+    if (-not $ForcePayloadPreparation) {
+        $freshness = Test-GuestPayloadFresh -PayloadRoot $PayloadRoot -AgentExe $agentExe -CollectorExe $collectorExe -ManifestPath $manifest
+        if ($freshness.Fresh) {
+            Write-RunInfo "Guest payload ready and fresh: $PayloadRoot"
+            return
+        }
 
-    if ($payloadReady -and -not $ForcePayloadPreparation) {
-        Write-RunInfo "Guest payload ready: $PayloadRoot"
-        return
+        Write-RunInfo "Guest payload will be rebuilt: $($freshness.Reasons -join '; ')"
+    }
+    else {
+        Write-RunInfo 'Guest payload rebuild forced by -ForcePayloadPreparation.'
     }
 
     $prepareScript = Join-Path $script:RepositoryRoot 'scripts\Prepare-GuestPayload.ps1'
@@ -267,6 +488,11 @@ function Ensure-GuestPayload {
     & powershell @arguments
     if ($LASTEXITCODE -ne 0) {
         throw "Guest payload preparation failed with exit code $LASTEXITCODE."
+    }
+
+    $freshnessAfterPrepare = Test-GuestPayloadFresh -PayloadRoot $PayloadRoot -AgentExe $agentExe -CollectorExe $collectorExe -ManifestPath $manifest
+    if (-not $freshnessAfterPrepare.Fresh) {
+        throw "Guest payload preparation finished but freshness checks failed: $($freshnessAfterPrepare.Reasons -join '; ')"
     }
 }
 
@@ -572,6 +798,9 @@ switch ($Mode) {
         Show-RunStatus -State $state -EffectiveRuntimeRoot $effectiveRuntimeRoot -EffectiveConfigPath $effectiveConfigPath | Format-List
     }
     'WebUI' {
+        $config = Read-SandboxConfig -EffectiveConfigPath $effectiveConfigPath
+        $payloadRoot = Get-GuestPayloadRoot -State $state -Config $config -EffectiveRuntimeRoot $effectiveRuntimeRoot
+        Ensure-GuestPayload -PayloadRoot $payloadRoot -Config $config
         Invoke-WebUi -EffectiveConfigPath $effectiveConfigPath
     }
     'Plan' {

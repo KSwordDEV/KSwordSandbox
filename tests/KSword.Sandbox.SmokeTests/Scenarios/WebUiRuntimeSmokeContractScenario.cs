@@ -41,14 +41,17 @@ internal sealed class WebUiRuntimeSmokeContractScenario : ISmokeTestScenario
         };
 
         await ProbeLiveEndpointAsync(httpClient, baseUri, jobId, cancellationToken);
+        await ProbeLiveRawMonitorPageAsync(httpClient, baseUri, jobId, cancellationToken);
         await ProbeServedReportLinkAsync(httpClient, baseUri, jobId, cancellationToken);
+        await ProbeServedReportLinkAsync(httpClient, baseUri, jobId, cancellationToken, "zh");
+        await ProbeServedReportLinkAsync(httpClient, baseUri, jobId, cancellationToken, "en");
         await ProbeManualGuestImportEndpointAsync(httpClient, baseUri, jobId, cancellationToken);
 
         return new SmokeTestResult
         {
             ScenarioId = ScenarioId,
             Passed = true,
-            Message = "Runtime WebUI smoke checked live events, served report link, and manual guest import endpoint."
+            Message = "Runtime WebUI smoke checked live events, live raw monitor page, localized report links, and manual guest import endpoint."
         };
     }
 
@@ -62,26 +65,51 @@ internal sealed class WebUiRuntimeSmokeContractScenario : ISmokeTestScenario
     {
         var program = ReadRepositoryText(context, "src", "KSword.Sandbox.Web", "Program.cs");
         var dashboard = ReadRepositoryText(context, "src", "KSword.Sandbox.Web", "Dashboard", "DashboardExperiencePage.cs");
+        var liveEventsPage = ReadRepositoryText(context, "src", "KSword.Sandbox.Web", "Dashboard", "LiveEventsPage.cs");
         var doc = ReadRepositoryText(context, "docs", "webui-framework.md");
         var script = ReadRepositoryText(context, "scripts", "Test-LiveTelemetryFramework.ps1");
 
+        RequireContains(program, "\"/jobs/{jobId:guid}/live-events\"", "Web source should expose the live raw monitor page route.");
         RequireContains(program, "\"/api/jobs/{jobId:guid}/events/live\"", "Web source should expose the live-event polling endpoint.");
         RequireContains(program, "\"/api/jobs/{jobId:guid}/report/html\"", "Web source should expose the served HTML report endpoint.");
+        RequireContains(program, "string? lang", "Served report endpoint should accept a language query.");
+        RequireContains(program, "ResolveLocalizedReportPath", "Web source should resolve localized report paths.");
+        RequireContains(program, "HtmlReportZhPath", "Served report endpoint should know the Chinese report path.");
+        RequireContains(program, "HtmlReportEnPath", "Served report endpoint should know the English report path.");
         RequireContains(program, "\"/api/jobs/{jobId:guid}/guest-events/import\"", "Web source should expose the manual guest import endpoint.");
         RequireContains(program, "GuestEventImportRequest", "Web source should keep a typed guest import request body.");
         RequireContains(program, "EventsPath", "Guest import request should accept an optional explicit events path.");
 
-        RequireContains(dashboard, "Open served HTML report", "Dashboard should render the served report link.");
-        RequireContains(dashboard, "Open local file:// report", "Dashboard should render the local report fallback link.");
+        RequireContains(dashboard, "/jobs/${encodeURIComponent(jobId)}/live-events", "Dashboard should link to the live raw monitor page.");
+        RequireContains(dashboard, "/report/html?lang=zh", "Dashboard should build the Chinese served report endpoint.");
+        RequireContains(dashboard, "/report/html?lang=en", "Dashboard should build the English served report endpoint.");
+        RequireAnyContains(
+            dashboard,
+            ["Open served HTML report", "Open served report", "打开服务内报告"],
+            "Dashboard should render the served report link.");
+        RequireAnyContains(
+            dashboard,
+            ["Open local file:// report", "Open local file", "打开本地文件"],
+            "Dashboard should render the local report fallback link.");
         RequireContains(dashboard, "guestImportPath", "Dashboard should render a manual guest import path input.");
         RequireContains(dashboard, "guest-events/import", "Dashboard should call the manual guest import endpoint.");
         RequireContains(dashboard, "JSON.stringify(explicitPath ? { eventsPath: explicitPath } : {})", "Dashboard should send optional manual import path JSON.");
 
+        RequireContains(liveEventsPage, "Live raw event monitor", "Live raw monitor page should have a stable title.");
+        RequireContains(liveEventsPage, "/events/stream", "Live raw monitor page should attempt the SSE stream endpoint.");
+        RequireContains(liveEventsPage, "/events/live", "Live raw monitor page should fall back to polling.");
+        RequireContains(liveEventsPage, "data-zh", "Live raw monitor page should expose Chinese text markers.");
+        RequireContains(liveEventsPage, "data-en", "Live raw monitor page should expose English text markers.");
+
         RequireContains(doc, BaseUrlEnvironmentVariable, "WebUI framework doc should describe the runtime smoke base URL environment variable.");
         RequireContains(doc, JobIdEnvironmentVariable, "WebUI framework doc should describe the runtime smoke job ID environment variable.");
+        RequireContains(doc, "/jobs/{jobId}/live-events", "WebUI framework doc should describe the live raw page validation probe.");
         RequireContains(doc, "/api/jobs/{jobId}/events/live", "WebUI framework doc should describe the live endpoint smoke probe.");
         RequireContains(doc, "/api/jobs/{jobId}/report/html", "WebUI framework doc should describe the served report smoke probe.");
+        RequireContains(doc, "/api/jobs/{jobId}/report/html?lang=zh", "WebUI framework doc should describe the Chinese report endpoint probe.");
+        RequireContains(doc, "/api/jobs/{jobId}/report/html?lang=en", "WebUI framework doc should describe the English report endpoint probe.");
         RequireContains(doc, "/api/jobs/{jobId}/guest-events/import", "WebUI framework doc should describe the manual guest import smoke probe.");
+        RequireContains(doc, "bilingual report endpoints", "WebUI framework doc should identify bilingual report endpoint validation.");
         RequireContains(doc, "static gate", "WebUI framework doc should describe the static gate fallback.");
 
         RequireContains(script, BaseUrlEnvironmentVariable, "Live telemetry framework script should accept the runtime smoke base URL environment variable.");
@@ -144,23 +172,49 @@ internal sealed class WebUiRuntimeSmokeContractScenario : ISmokeTestScenario
     }
 
     /// <summary>
-    /// Probes the safe served report link.
+    /// Probes the dedicated live raw monitor page without launching a browser.
     /// Inputs are an HTTP client, base URI, job ID, and cancellation token;
-    /// processing requests the server-owned report.html endpoint and validates
-    /// HTML response shape; the method returns no value on success.
+    /// processing requests the job-scoped HTML page and validates stable page
+    /// text and endpoint references; the method returns no value on success.
     /// </summary>
-    private static async Task ProbeServedReportLinkAsync(HttpClient httpClient, Uri baseUri, Guid jobId, CancellationToken cancellationToken)
+    private static async Task ProbeLiveRawMonitorPageAsync(HttpClient httpClient, Uri baseUri, Guid jobId, CancellationToken cancellationToken)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Get, BuildUri(baseUri, $"/api/jobs/{jobId:D}/report/html"));
+        using var request = new HttpRequestMessage(HttpMethod.Get, BuildUri(baseUri, $"/jobs/{jobId:D}/live-events"));
         request.Headers.Accept.ParseAdd("text/html");
 
         using var response = await httpClient.SendAsync(request, cancellationToken);
         var body = await response.Content.ReadAsStringAsync(cancellationToken);
         var mediaType = response.Content.Headers.ContentType?.MediaType ?? string.Empty;
 
-        SmokeAssert.True(response.IsSuccessStatusCode, $"Served report link returned HTTP {(int)response.StatusCode}: {Truncate(body)}");
-        SmokeAssert.True(string.Equals(mediaType, "text/html", StringComparison.OrdinalIgnoreCase), $"Served report link should return text/html, not '{mediaType}'.");
-        SmokeAssert.True(body.Contains("<html", StringComparison.OrdinalIgnoreCase), "Served report link should return an HTML document.");
+        SmokeAssert.True(response.IsSuccessStatusCode, $"Live raw monitor page returned HTTP {(int)response.StatusCode}: {Truncate(body)}");
+        SmokeAssert.True(string.Equals(mediaType, "text/html", StringComparison.OrdinalIgnoreCase), $"Live raw monitor page should return text/html, not '{mediaType}'.");
+        SmokeAssert.True(body.Contains("Live raw event monitor", StringComparison.OrdinalIgnoreCase), "Live raw monitor page should include its English title.");
+        SmokeAssert.True(body.Contains("实时原始事件监控", StringComparison.Ordinal), "Live raw monitor page should include its Chinese title.");
+        SmokeAssert.True(body.Contains("/events/live", StringComparison.Ordinal), "Live raw monitor page should reference the polling endpoint.");
+        SmokeAssert.True(body.Contains("/events/stream", StringComparison.Ordinal), "Live raw monitor page should reference the SSE endpoint.");
+    }
+
+    /// <summary>
+    /// Probes the safe served report link.
+    /// Inputs are an HTTP client, base URI, job ID, optional language, and
+    /// cancellation token; processing requests the server-owned report.html
+    /// endpoint and validates HTML response shape; the method returns no value
+    /// on success.
+    /// </summary>
+    private static async Task ProbeServedReportLinkAsync(HttpClient httpClient, Uri baseUri, Guid jobId, CancellationToken cancellationToken, string? language = null)
+    {
+        var suffix = string.IsNullOrWhiteSpace(language) ? string.Empty : $"?lang={language}";
+        using var request = new HttpRequestMessage(HttpMethod.Get, BuildUri(baseUri, $"/api/jobs/{jobId:D}/report/html{suffix}"));
+        request.Headers.Accept.ParseAdd("text/html");
+
+        using var response = await httpClient.SendAsync(request, cancellationToken);
+        var body = await response.Content.ReadAsStringAsync(cancellationToken);
+        var mediaType = response.Content.Headers.ContentType?.MediaType ?? string.Empty;
+
+        var label = string.IsNullOrWhiteSpace(language) ? "Served report link" : $"Served {language} report link";
+        SmokeAssert.True(response.IsSuccessStatusCode, $"{label} returned HTTP {(int)response.StatusCode}: {Truncate(body)}");
+        SmokeAssert.True(string.Equals(mediaType, "text/html", StringComparison.OrdinalIgnoreCase), $"{label} should return text/html, not '{mediaType}'.");
+        SmokeAssert.True(body.Contains("<html", StringComparison.OrdinalIgnoreCase), $"{label} should return an HTML document.");
     }
 
     /// <summary>
@@ -221,6 +275,16 @@ internal sealed class WebUiRuntimeSmokeContractScenario : ISmokeTestScenario
     private static void RequireContains(string content, string expected, string message)
     {
         SmokeAssert.True(content.Contains(expected, StringComparison.Ordinal), message);
+    }
+
+    /// <summary>
+    /// Requires that a text block contains at least one of several literals.
+    /// Inputs are text, alternatives, and assertion message; processing uses
+    /// ordinal substring matching; the method returns no value on success.
+    /// </summary>
+    private static void RequireAnyContains(string content, IReadOnlyCollection<string> expectedAny, string message)
+    {
+        SmokeAssert.True(expectedAny.Any(expected => content.Contains(expected, StringComparison.Ordinal)), message);
     }
 
     /// <summary>

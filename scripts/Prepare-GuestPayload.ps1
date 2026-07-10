@@ -120,6 +120,177 @@ function Get-NormalizedFullPath {
     return [System.IO.Path]::GetFullPath($Path)
 }
 
+# Get-RelativeRepositoryPath returns a stable slash-separated path used in
+# source fingerprints. Inputs are the repository root and an existing file path;
+# processing removes the root prefix without requiring .NET Core-only APIs; the
+# returned string is stable across Windows PowerShell and PowerShell 7.
+function Get-RelativeRepositoryPath {
+    param(
+        [Parameter(Mandatory)]
+        [string]$RepositoryRoot,
+
+        [Parameter(Mandatory)]
+        [string]$Path
+    )
+
+    $fullRoot = (Get-NormalizedFullPath -Path $RepositoryRoot).TrimEnd('\', '/') + '\'
+    $fullPath = Get-NormalizedFullPath -Path $Path
+    if ($fullPath.StartsWith($fullRoot, [StringComparison]::OrdinalIgnoreCase)) {
+        return $fullPath.Substring($fullRoot.Length).Replace('\', '/')
+    }
+
+    return $fullPath.Replace('\', '/')
+}
+
+# Get-GuestPayloadSourceFiles lists source inputs that affect the staged Guest
+# Agent/R0Collector payload. Inputs are the repository root; processing excludes
+# generated build folders; return behavior is a sorted file list.
+function Get-GuestPayloadSourceFiles {
+    param(
+        [Parameter(Mandatory)]
+        [string]$RepositoryRoot
+    )
+
+    $sourceRoots = @(
+        'guest\KSword.Sandbox.Agent',
+        'guest\KSword.Sandbox.R0Collector',
+        'src\KSword.Sandbox.Abstractions'
+    )
+    $extensions = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($extension in @('.cs', '.csproj', '.props', '.targets', '.cpp', '.c', '.h', '.hpp', '.vcxproj', '.filters', '.json')) {
+        [void]$extensions.Add($extension)
+    }
+
+    $files = New-Object System.Collections.Generic.List[System.IO.FileInfo]
+    foreach ($relativeRoot in $sourceRoots) {
+        $candidateRoot = Join-Path $RepositoryRoot $relativeRoot
+        if (-not (Test-Path -LiteralPath $candidateRoot -PathType Container)) {
+            continue
+        }
+
+        foreach ($file in Get-ChildItem -LiteralPath $candidateRoot -Recurse -File) {
+            $normalized = $file.FullName.Replace('/', '\')
+            if ($normalized -match '\\(bin|obj|x64|\.vs)\\') {
+                continue
+            }
+
+            if ($extensions.Contains($file.Extension)) {
+                $files.Add($file)
+            }
+        }
+    }
+
+    return @($files | Sort-Object FullName)
+}
+
+# Get-FileSha256Hex calculates SHA256 without depending on Get-FileHash, which
+# can be unavailable in stripped-down Windows PowerShell hosts.
+# Inputs: existing file path. Processing: opens with sharing and hashes bytes.
+# Return behavior: lowercase hexadecimal SHA256.
+function Get-FileSha256Hex {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Path
+    )
+
+    $stream = [System.IO.File]::Open($Path, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite -bor [System.IO.FileShare]::Delete)
+    try {
+        $sha = [System.Security.Cryptography.SHA256]::Create()
+        try {
+            return ([System.BitConverter]::ToString($sha.ComputeHash($stream))).Replace('-', '').ToLowerInvariant()
+        }
+        finally {
+            $sha.Dispose()
+        }
+    }
+    finally {
+        $stream.Dispose()
+    }
+}
+
+# Get-GuestPayloadSourceFingerprint hashes the relevant source file hashes into
+# one compact manifest value. Inputs are the repository root; processing hashes
+# stable relative paths, file content hashes, and sizes; return behavior is a
+# small metadata object.
+function Get-GuestPayloadSourceFingerprint {
+    param(
+        [Parameter(Mandatory)]
+        [string]$RepositoryRoot
+    )
+
+    $files = @(Get-GuestPayloadSourceFiles -RepositoryRoot $RepositoryRoot)
+    $builder = [System.Text.StringBuilder]::new()
+    foreach ($file in $files) {
+        $relative = Get-RelativeRepositoryPath -RepositoryRoot $RepositoryRoot -Path $file.FullName
+        $hash = Get-FileSha256Hex -Path $file.FullName
+        [void]$builder.AppendLine("$relative|$hash|$($file.Length)")
+    }
+
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $bytes = [System.Text.Encoding]::UTF8.GetBytes($builder.ToString())
+        $fingerprint = ([BitConverter]::ToString($sha.ComputeHash($bytes))).Replace('-', '').ToLowerInvariant()
+    }
+    finally {
+        $sha.Dispose()
+    }
+
+    $latestWriteUtc = $null
+    if ($files.Count -gt 0) {
+        $latestWriteUtc = ($files | Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1).LastWriteTimeUtc.ToString('O')
+    }
+
+    return [pscustomobject][ordered]@{
+        Algorithm = 'sha256(relative-path|file-sha256|length)'
+        Fingerprint = $fingerprint
+        SourceInputCount = $files.Count
+        SourceLatestWriteUtc = if ($null -eq $latestWriteUtc) { '' } else { $latestWriteUtc }
+    }
+}
+
+# Get-GitHeadOrEmpty reads the current repository commit when git is available.
+# Inputs are the repository root; processing suppresses errors; return behavior
+# is a commit hash or an empty string.
+function Get-GitHeadOrEmpty {
+    param(
+        [Parameter(Mandatory)]
+        [string]$RepositoryRoot
+    )
+
+    try {
+        $head = & git -C $RepositoryRoot rev-parse HEAD 2>$null
+        if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace([string]$head)) {
+            return [string]$head
+        }
+    }
+    catch {
+    }
+
+    return ''
+}
+
+# Get-PayloadFileDescriptor records integrity metadata for one staged file.
+# Inputs are a friendly name and existing path; processing calculates SHA256,
+# size, and timestamp; return behavior is a manifest object.
+function Get-PayloadFileDescriptor {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Name,
+
+        [Parameter(Mandatory)]
+        [string]$Path
+    )
+
+    $item = Get-Item -LiteralPath $Path
+    return [ordered]@{
+        name = $Name
+        path = (Get-NormalizedFullPath -Path $Path)
+        length = $item.Length
+        lastWriteUtc = $item.LastWriteTimeUtc.ToString('O')
+        sha256 = Get-FileSha256Hex -Path $Path
+    }
+}
+
 # Test-PathUnderRoot checks whether a path is inside a root directory.
 # Inputs: a candidate path and root path.
 # Processing: normalizes both paths, appends a trailing separator to the root,
@@ -320,10 +491,16 @@ function Write-PayloadManifest {
     $collectorExecutablePath = Join-Path $CollectorDirectory $R0CollectorExecutableName
     $guestAgentPath = Join-GuestPath -Root $GuestWorkingDirectory -Segments @('agent', $GuestAgentExecutableName)
     $guestCollectorPath = Join-GuestPath -Root $GuestWorkingDirectory -Segments @('r0collector', $R0CollectorExecutableName)
+    $sourceFingerprint = Get-GuestPayloadSourceFingerprint -RepositoryRoot $RepoRoot
     $manifest = [ordered]@{
-        payloadContractVersion = 1
+        payloadContractVersion = 2
         generatedAtUtc      = [DateTimeOffset]::UtcNow.ToString('O')
         repositoryRoot      = (Get-NormalizedFullPath -Path $RepoRoot)
+        repositoryHead      = Get-GitHeadOrEmpty -RepositoryRoot $RepoRoot
+        sourceFingerprintAlgorithm = $sourceFingerprint.Algorithm
+        sourceFingerprint = $sourceFingerprint.Fingerprint
+        sourceInputCount  = $sourceFingerprint.SourceInputCount
+        sourceLatestWriteUtc = $sourceFingerprint.SourceLatestWriteUtc
         configuration       = $Configuration
         platform            = $Platform
         runtimeIdentifier   = $RuntimeIdentifier
@@ -338,14 +515,8 @@ function Write-PayloadManifest {
         agentFileCount      = $AgentFileCount
         collectorFileCount  = $CollectorFileCount
         requiredHostFiles   = @(
-            [ordered]@{
-                name = 'GuestAgent'
-                path = (Get-NormalizedFullPath -Path $agentExecutablePath)
-            },
-            [ordered]@{
-                name = 'R0Collector'
-                path = (Get-NormalizedFullPath -Path $collectorExecutablePath)
-            },
+            (Get-PayloadFileDescriptor -Name 'GuestAgent' -Path $agentExecutablePath),
+            (Get-PayloadFileDescriptor -Name 'R0Collector' -Path $collectorExecutablePath),
             [ordered]@{
                 name = 'PayloadManifest'
                 path = (Get-NormalizedFullPath -Path $manifestPath)

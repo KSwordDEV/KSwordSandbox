@@ -62,7 +62,61 @@ KswSetLastStatus(
     }
 
     KeAcquireSpinLock(&DeviceExtension->StateLock, &oldIrql);
-    DeviceExtension->LastStatus = Status;
+    if (NT_SUCCESS(Status)) {
+        if (NT_SUCCESS(DeviceExtension->LastStatus)) {
+            DeviceExtension->LastStatus = Status;
+        }
+    } else {
+        DeviceExtension->LastStatus = Status;
+        DeviceExtension->LastFailureStatus = Status;
+    }
+    KeReleaseSpinLock(&DeviceExtension->StateLock, oldIrql);
+}
+
+/*
+ * Records whether a producer family reached an active or failed state.
+ *
+ * Inputs : DeviceExtension owns the producer bitmaps; ProducerMask names one or
+ *          more KSWORD_SANDBOX_PRODUCER_FLAG_* bits; Status is that producer's
+ *          initialization result.
+ * Logic  : success marks producer bits active and clears their failure bits,
+ *          while failure marks them failed and stores sticky LastStatus data so
+ *          a later successful producer cannot hide an earlier bring-up problem.
+ * Return : no return value.
+ */
+VOID
+KswRecordProducerStatus(
+    _Inout_ PKSWORD_SANDBOX_DEVICE_EXTENSION DeviceExtension,
+    _In_ ULONG ProducerMask,
+    _In_ NTSTATUS Status
+    )
+{
+    KIRQL oldIrql;
+
+    if (DeviceExtension == NULL ||
+        DeviceExtension->Signature != KSWORD_SANDBOX_DEVICE_EXTENSION_SIGNATURE ||
+        ProducerMask == 0) {
+        return;
+    }
+
+    KeAcquireSpinLock(&DeviceExtension->StateLock, &oldIrql);
+
+    ProducerMask &= DeviceExtension->SupportedProducerMask;
+    if (ProducerMask != 0) {
+        if (NT_SUCCESS(Status)) {
+            DeviceExtension->ActiveProducerMask |= ProducerMask;
+            DeviceExtension->FailedProducerMask &= ~ProducerMask;
+            if (NT_SUCCESS(DeviceExtension->LastStatus)) {
+                DeviceExtension->LastStatus = STATUS_SUCCESS;
+            }
+        } else {
+            DeviceExtension->FailedProducerMask |= ProducerMask;
+            DeviceExtension->ActiveProducerMask &= ~ProducerMask;
+            DeviceExtension->LastStatus = Status;
+            DeviceExtension->LastFailureStatus = Status;
+        }
+    }
+
     KeReleaseSpinLock(&DeviceExtension->StateLock, oldIrql);
 }
 
@@ -107,7 +161,9 @@ KswSetProducerEnableMask(
     *PreviousEnableMask = DeviceExtension->ProducerEnableMask;
     DeviceExtension->ProducerEnableMask = EnableMask;
     *EffectiveEnableMask = DeviceExtension->ProducerEnableMask;
-    DeviceExtension->LastStatus = STATUS_SUCCESS;
+    if (NT_SUCCESS(DeviceExtension->LastStatus)) {
+        DeviceExtension->LastStatus = STATUS_SUCCESS;
+    }
 
     KeReleaseSpinLock(&DeviceExtension->StateLock, oldIrql);
 
@@ -199,7 +255,9 @@ KswPushEvent(
     if (DeviceExtension->EventCount > DeviceExtension->QueueHighWatermark) {
         DeviceExtension->QueueHighWatermark = DeviceExtension->EventCount;
     }
-    DeviceExtension->LastStatus = STATUS_SUCCESS;
+    if (NT_SUCCESS(DeviceExtension->LastStatus)) {
+        DeviceExtension->LastStatus = STATUS_SUCCESS;
+    }
 
     KeReleaseSpinLock(&DeviceExtension->StateLock, oldIrql);
 
@@ -210,9 +268,10 @@ KswPushEvent(
  * Queues the DriverEntry startup self-test event.
  *
  * Inputs : DeviceExtension owns the fixed non-paged ring.
- * Logic  : writes a header-only Reserved event with SelfTest and DriverStarted
+ * Logic  : writes a typed DriverLoad event with SelfTest and DriverStarted
  *          flags.  This is the minimal "driver.started" heartbeat that lets
- *          collectors validate IOCTL framing without requiring a payload parser.
+ *          collectors validate IOCTL framing while preserving a stable payload
+ *          layout for ABI tests.
  * Return : no return value.
  */
 static
@@ -221,13 +280,22 @@ KswQueueDriverStartedEvent(
     _Inout_ PKSWORD_SANDBOX_DEVICE_EXTENSION DeviceExtension
     )
 {
+    KSWORD_SANDBOX_DRIVER_LOAD_PAYLOAD payload;
+    static const CHAR buildTag[] = "ksword-r0-v1";
+
+    RtlZeroMemory(&payload, sizeof(payload));
+    payload.Version = KSWORD_SANDBOX_INTERFACE_VERSION;
+    payload.Size = sizeof(payload);
+    payload.BootId = 0;
+    RtlCopyMemory(payload.BuildTag, buildTag, sizeof(buildTag));
+
     (VOID)KswPushEvent(
         DeviceExtension,
-        KswSandboxEventTypeReserved,
+        KswSandboxEventTypeDriverLoad,
         KSWORD_SANDBOX_EVENT_FLAG_SELF_TEST |
             KSWORD_SANDBOX_EVENT_FLAG_DRIVER_STARTED,
-        NULL,
-        0);
+        &payload,
+        (ULONG)sizeof(payload));
 }
 
 /*
@@ -255,8 +323,11 @@ KswInitializeDeviceExtension(
     DeviceExtension->EventsSuppressed = 0;
     DeviceExtension->NextSequence = 1;
     DeviceExtension->LastStatus = STATUS_SUCCESS;
+    DeviceExtension->LastFailureStatus = STATUS_SUCCESS;
     DeviceExtension->ProducerEnableMask = KSWORD_SANDBOX_PRODUCER_MASK_DEFAULT;
     DeviceExtension->SupportedProducerMask = KSWORD_SANDBOX_PRODUCER_MASK_CURRENT;
+    DeviceExtension->ActiveProducerMask = KSWORD_SANDBOX_PRODUCER_FLAG_DRIVER;
+    DeviceExtension->FailedProducerMask = 0;
     DeviceExtension->QueueHighWatermark = 0;
 
     KeInitializeSpinLock(&DeviceExtension->StateLock);
@@ -289,8 +360,11 @@ KswSnapshotState(
     Snapshot->EventsSuppressed = DeviceExtension->EventsSuppressed;
     Snapshot->NextSequence = KswGetNextReadableSequenceLocked(DeviceExtension);
     Snapshot->LastStatus = DeviceExtension->LastStatus;
+    Snapshot->LastFailureStatus = DeviceExtension->LastFailureStatus;
     Snapshot->ProducerEnableMask = DeviceExtension->ProducerEnableMask;
     Snapshot->SupportedProducerMask = DeviceExtension->SupportedProducerMask;
+    Snapshot->ActiveProducerMask = DeviceExtension->ActiveProducerMask;
+    Snapshot->FailedProducerMask = DeviceExtension->FailedProducerMask;
     Snapshot->QueueCapacity = KSWORD_SANDBOX_EVENT_RING_CAPACITY;
     Snapshot->EventCount = DeviceExtension->EventCount;
     Snapshot->QueueHighWatermark = DeviceExtension->QueueHighWatermark;

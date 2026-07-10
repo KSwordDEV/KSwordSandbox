@@ -27,7 +27,7 @@ internal sealed class DriverJsonLinesReader
         var events = new List<SandboxEvent>();
         try
         {
-            foreach (var line in File.ReadLines(path))
+            foreach (var line in ReadSharedLines(path))
             {
                 if (string.IsNullOrWhiteSpace(line))
                 {
@@ -68,5 +68,20 @@ internal sealed class DriverJsonLinesReader
         }
 
         return events;
+    }
+
+    /// <summary>
+    /// Reads JSONL rows using permissive file sharing so the guest agent can
+    /// import rows immediately after sidecar shutdown while the filesystem is
+    /// still settling.
+    /// </summary>
+    private static IEnumerable<string> ReadSharedLines(string path)
+    {
+        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+        using var reader = new StreamReader(stream);
+        while (reader.ReadLine() is { } line)
+        {
+            yield return line;
+        }
     }
 }

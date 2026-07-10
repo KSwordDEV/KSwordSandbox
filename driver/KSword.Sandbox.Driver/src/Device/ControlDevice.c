@@ -108,7 +108,9 @@ KswBuildStatusFlags(
         flags |= KSWORD_SANDBOX_STATUS_FLAG_PRODUCERS_PARTIAL;
     }
 
-    if (!NT_SUCCESS(Snapshot->LastStatus)) {
+    if (!NT_SUCCESS(Snapshot->LastStatus) ||
+        !NT_SUCCESS(Snapshot->LastFailureStatus) ||
+        Snapshot->FailedProducerMask != 0) {
         flags |= KSWORD_SANDBOX_STATUS_FLAG_LAST_STATUS_FAILURE;
     }
 
@@ -215,10 +217,12 @@ KswHandleGetHealth(
 static
 NTSTATUS
 KswHandleGetCapabilities(
+    _In_ PDEVICE_OBJECT DeviceObject,
     _Inout_ PIRP Irp,
     _In_ ULONG OutputBufferLength
     )
 {
+    PKSWORD_SANDBOX_DEVICE_EXTENSION deviceExtension;
     PKSWORD_SANDBOX_CAPABILITIES_REPLY reply;
 
     if (OutputBufferLength < sizeof(*reply)) {
@@ -228,6 +232,11 @@ KswHandleGetCapabilities(
     reply = (PKSWORD_SANDBOX_CAPABILITIES_REPLY)Irp->AssociatedIrp.SystemBuffer;
     if (reply == NULL) {
         return KswCompleteIrp(Irp, STATUS_INVALID_USER_BUFFER, 0);
+    }
+
+    deviceExtension = KswGetDeviceExtension(DeviceObject);
+    if (deviceExtension == NULL) {
+        return KswCompleteIrp(Irp, STATUS_DEVICE_NOT_READY, 0);
     }
 
     KswFillCapabilitiesReply(reply);
@@ -358,12 +367,14 @@ NTSTATUS
 KswValidateReadEventsRequest(
     _In_opt_ PVOID Buffer,
     _In_ ULONG InputBufferLength,
-    _Out_ PULONG RequestedMaxEvents
+    _Out_ PULONG RequestedMaxEvents,
+    _Out_ PULONGLONG RequestedStartingSequence
     )
 {
     PKSWORD_SANDBOX_READ_EVENTS_REQUEST request;
 
     *RequestedMaxEvents = 0;
+    *RequestedStartingSequence = 0;
 
     if (InputBufferLength == 0) {
         return STATUS_SUCCESS;
@@ -380,11 +391,13 @@ KswValidateReadEventsRequest(
     request = (PKSWORD_SANDBOX_READ_EVENTS_REQUEST)Buffer;
     if (request->Version != KSWORD_SANDBOX_INTERFACE_VERSION ||
         request->Size < sizeof(*request) ||
-        request->Size > InputBufferLength) {
+        request->Size > InputBufferLength ||
+        request->Flags != 0) {
         return STATUS_INVALID_PARAMETER;
     }
 
     *RequestedMaxEvents = request->MaxEvents;
+    *RequestedStartingSequence = request->StartingSequence;
 
     return STATUS_SUCCESS;
 }
@@ -528,6 +541,7 @@ KswHandleReadEvents(
     PKSWORD_SANDBOX_DEVICE_EXTENSION deviceExtension;
     PKSWORD_SANDBOX_READ_EVENTS_REPLY reply;
     ULONG requestedMaxEvents;
+    ULONGLONG requestedStartingSequence;
     ULONG maxEvents;
     ULONG eventCapacityBytes;
     ULONG eventsWritten;
@@ -540,7 +554,8 @@ KswHandleReadEvents(
     status = KswValidateReadEventsRequest(
         systemBuffer,
         InputBufferLength,
-        &requestedMaxEvents);
+        &requestedMaxEvents,
+        &requestedStartingSequence);
     if (!NT_SUCCESS(status)) {
         return KswCompleteIrp(Irp, status, 0);
     }
@@ -574,6 +589,7 @@ KswHandleReadEvents(
         reply->Events,
         eventCapacityBytes,
         maxEvents,
+        requestedStartingSequence,
         &eventsWritten,
         &bytesWritten,
         &eventsDropped,
@@ -681,7 +697,10 @@ KswDispatchDeviceControl(
             outputBufferLength);
 
     case IOCTL_KSWORD_SANDBOX_GET_CAPABILITIES:
-        return KswHandleGetCapabilities(Irp, outputBufferLength);
+        return KswHandleGetCapabilities(
+            DeviceObject,
+            Irp,
+            outputBufferLength);
 
     case IOCTL_KSWORD_SANDBOX_GET_STATUS:
         return KswHandleGetStatus(DeviceObject, Irp, outputBufferLength);

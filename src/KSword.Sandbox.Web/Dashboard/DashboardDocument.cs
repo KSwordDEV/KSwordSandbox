@@ -26,7 +26,7 @@ internal sealed record DashboardDocument(
     {
         var builder = new StringBuilder();
         builder.AppendLine("<!doctype html>");
-        builder.AppendLine("<html lang=\"en\">");
+        builder.AppendLine("<html lang=\"zh-CN\">");
         builder.AppendLine("<head>");
         builder.AppendLine("  <meta charset=\"utf-8\">");
         builder.AppendLine("  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">");

@@ -61,6 +61,7 @@
       <SDLCheck>true</SDLCheck>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp17</LanguageStandard>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
       <AdditionalIncludeDirectories>$(ProjectDir)..\..\driver\KSword.Sandbox.Driver\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>WIN32;_CONSOLE;UNICODE;_UNICODE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
@@ -75,6 +76,7 @@
       <SDLCheck>true</SDLCheck>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp17</LanguageStandard>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
       <AdditionalIncludeDirectories>$(ProjectDir)..\..\driver\KSword.Sandbox.Driver\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>

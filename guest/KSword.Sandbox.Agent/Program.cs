@@ -27,6 +27,18 @@ internal static class AgentProgram
         WriteIndented = true
     };
 
+    private static readonly TimeSpan R0CollectorGracefulStopTimeout = TimeSpan.FromSeconds(5);
+
+    private static readonly TimeSpan R0CollectorDiagnosticDrainTimeout = TimeSpan.FromSeconds(2);
+
+    private static readonly TimeSpan R0CollectorJsonLinesDrainTimeout = TimeSpan.FromSeconds(2);
+
+    private static readonly TimeSpan R0CollectorJsonLinesPollInterval = TimeSpan.FromMilliseconds(100);
+
+    private const string R0CollectorStandardOutputFileName = "r0collector.stdout.log";
+
+    private const string R0CollectorStandardErrorFileName = "r0collector.stderr.log";
+
     /// <summary>
     /// Main async entry point for the guest collector.
     /// Inputs are raw command-line arguments, processing parses options and
@@ -180,27 +192,81 @@ internal static class AgentProgram
     /// Starts the optional R0Collector sidecar before sample execution.
     /// Inputs are parsed agent options and the event output list; processing
     /// requires both --r0collector and --driver-events, creates the JSONL parent
-    /// directory, forwards --device/--output/--duration plus optional --mock,
-    /// and records r0collector.start_failed on startup errors; the method
+    /// directory, redirects stdout/stderr into guest diagnostics, forwards
+    /// --device/--output/--duration plus optional --mock, and records
+    /// r0collector.failed on configuration or startup errors; the method
     /// returns a process handle when the sidecar starts or null when disabled or
     /// failed.
     /// </summary>
     private static R0CollectorProcess? StartR0Collector(AgentOptions options, List<SandboxEvent> events)
     {
-        if (string.IsNullOrWhiteSpace(options.R0CollectorPath) || string.IsNullOrWhiteSpace(options.DriverEventsPath))
+        var sidecarRequested = !string.IsNullOrWhiteSpace(options.R0CollectorPath) || options.R0Mock;
+        if (!sidecarRequested)
         {
             return null;
         }
 
+        var standardOutputPath = Path.Combine(options.OutputDirectory, R0CollectorStandardOutputFileName);
+        var standardErrorPath = Path.Combine(options.OutputDirectory, R0CollectorStandardErrorFileName);
+
+        if (string.IsNullOrWhiteSpace(options.R0CollectorPath))
+        {
+            var reason = "collectorPathMissing";
+            WriteR0CollectorStartupDiagnostic(standardOutputPath, standardErrorPath, reason, null);
+            events.Add(CreateLegacyR0CollectorStartFailedEvent(options, reason, null, standardOutputPath, standardErrorPath));
+            events.Add(CreateR0CollectorFailedEvent(
+                options,
+                phase: "start",
+                reason: reason,
+                standardOutputPath: standardOutputPath,
+                standardErrorPath: standardErrorPath));
+            return null;
+        }
+
+        if (string.IsNullOrWhiteSpace(options.DriverEventsPath))
+        {
+            var reason = "driverEventsPathMissing";
+            WriteR0CollectorStartupDiagnostic(standardOutputPath, standardErrorPath, reason, null);
+            events.Add(CreateLegacyR0CollectorStartFailedEvent(options, reason, null, standardOutputPath, standardErrorPath));
+            events.Add(CreateR0CollectorFailedEvent(
+                options,
+                phase: "start",
+                reason: reason,
+                standardOutputPath: standardOutputPath,
+                standardErrorPath: standardErrorPath));
+            return null;
+        }
+
+        if (!File.Exists(options.R0CollectorPath))
+        {
+            var reason = "collectorMissing";
+            WriteR0CollectorStartupDiagnostic(standardOutputPath, standardErrorPath, reason, null);
+            events.Add(CreateLegacyR0CollectorStartFailedEvent(options, reason, null, standardOutputPath, standardErrorPath));
+            events.Add(CreateR0CollectorFailedEvent(
+                options,
+                phase: "start",
+                reason: reason,
+                standardOutputPath: standardOutputPath,
+                standardErrorPath: standardErrorPath));
+            return null;
+        }
+
+        FileStream? standardOutputFile = null;
+        FileStream? standardErrorFile = null;
+        Process? startedProcess = null;
         try
         {
             EnsureParentDirectory(options.DriverEventsPath);
+            standardOutputFile = OpenR0CollectorDiagnosticFile(standardOutputPath);
+            standardErrorFile = OpenR0CollectorDiagnosticFile(standardErrorPath);
 
             var startInfo = new ProcessStartInfo
             {
                 FileName = options.R0CollectorPath,
                 UseShellExecute = false,
-                CreateNoWindow = true
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true
             };
 
             startInfo.ArgumentList.Add("--device");
@@ -214,28 +280,69 @@ internal static class AgentProgram
                 startInfo.ArgumentList.Add("--mock");
             }
 
-            var process = Process.Start(startInfo) ?? throw new InvalidOperationException("R0Collector process start returned null.");
-            return new R0CollectorProcess(process, options.R0CollectorPath, options.DriverEventsPath);
+            startedProcess = Process.Start(startInfo) ?? throw new InvalidOperationException("R0Collector process start returned null.");
+            var standardOutputTask = CopyR0CollectorDiagnosticStreamAsync(startedProcess.StandardOutput.BaseStream, standardOutputFile);
+            standardOutputFile = null;
+            var standardErrorTask = CopyR0CollectorDiagnosticStreamAsync(startedProcess.StandardError.BaseStream, standardErrorFile);
+            standardErrorFile = null;
+            var commandLine = BuildR0CollectorCommandLine(options);
+            events.Add(CreateR0CollectorStartedEvent(options, startedProcess.Id, standardOutputPath, standardErrorPath, commandLine));
+            return new R0CollectorProcess(
+                startedProcess,
+                options.R0CollectorPath,
+                options.DriverEventsPath,
+                standardOutputPath,
+                standardErrorPath,
+                standardOutputTask,
+                standardErrorTask,
+                commandLine);
         }
         catch (Exception ex)
         {
-            events.Add(new SandboxEvent
-            {
-                EventType = "r0collector.start_failed",
-                Source = "guest",
-                Path = options.R0CollectorPath,
-                Data =
-                {
-                    ["collectorPath"] = options.R0CollectorPath ?? string.Empty,
-                    ["driverDevicePath"] = options.DriverDevicePath,
-                    ["driverEventsPath"] = options.DriverEventsPath ?? string.Empty,
-                    ["durationSeconds"] = options.DurationSeconds.ToString(CultureInfo.InvariantCulture),
-                    ["r0Mock"] = options.R0Mock.ToString(),
-                    ["exceptionType"] = ex.GetType().FullName ?? ex.GetType().Name,
-                    ["message"] = ex.Message
-                }
-            });
+            standardOutputFile?.Dispose();
+            standardErrorFile?.Dispose();
+            DisposePartiallyStartedR0Collector(startedProcess);
+            var reason = "startException";
+            WriteR0CollectorStartupDiagnostic(standardOutputPath, standardErrorPath, reason, ex);
+            events.Add(CreateLegacyR0CollectorStartFailedEvent(options, reason, ex, standardOutputPath, standardErrorPath));
+            events.Add(CreateR0CollectorFailedEvent(
+                options,
+                phase: "start",
+                reason: reason,
+                exception: ex,
+                standardOutputPath: standardOutputPath,
+                standardErrorPath: standardErrorPath));
             return null;
+        }
+    }
+
+    /// <summary>
+    /// Best-effort cleanup for rare failures after Process.Start succeeds but
+    /// before the sidecar record can be returned to normal shutdown handling.
+    /// </summary>
+    private static void DisposePartiallyStartedR0Collector(Process? process)
+    {
+        if (process is null)
+        {
+            return;
+        }
+
+        try
+        {
+            if (!HasProcessExited(process))
+            {
+                process.Kill(entireProcessTree: true);
+            }
+
+            process.WaitForExit(milliseconds: 1000);
+        }
+        catch
+        {
+            // Startup failure reporting must not be replaced by cleanup noise.
+        }
+        finally
+        {
+            process.Dispose();
         }
     }
 
@@ -243,8 +350,10 @@ internal static class AgentProgram
     /// Waits briefly for the optional R0Collector sidecar and terminates it if
     /// needed after sample execution. The input is the nullable sidecar process
     /// record plus the event output list; processing gives the collector a
-    /// short graceful-exit window, then kills the process tree and records
-    /// stop_forced or stop_failed details; the method returns no value.
+    /// short graceful-exit window, then kills the process tree if needed,
+    /// drains redirected diagnostics and the JSONL file, and records
+    /// r0collector.exited or r0collector.failed details; the method returns no
+    /// value.
     /// </summary>
     private static async Task StopR0CollectorAsync(R0CollectorProcess? collector, List<SandboxEvent> events)
     {
@@ -253,44 +362,550 @@ internal static class AgentProgram
             return;
         }
 
+        var forcedStop = false;
+        var stopFailed = false;
+        var stopFailureReason = string.Empty;
+        Exception? stopException = null;
+        var processId = SafeProcessId(collector.Process);
         try
         {
-            if (!await WaitForExitAsync(collector.Process, TimeSpan.FromSeconds(5)))
+            if (!await WaitForExitAsync(collector.Process, R0CollectorGracefulStopTimeout))
             {
+                forcedStop = true;
                 events.Add(new SandboxEvent
                 {
                     EventType = "r0collector.stop_forced",
                     Source = "guest",
                     Path = collector.CollectorPath,
+                    ProcessId = processId,
+                    ProcessName = Path.GetFileName(collector.CollectorPath),
+                    CommandLine = collector.CommandLine,
                     Data =
                     {
                         ["driverEventsPath"] = collector.DriverEventsPath,
-                        ["processId"] = collector.Process.Id.ToString(CultureInfo.InvariantCulture)
+                        ["processId"] = processId?.ToString(CultureInfo.InvariantCulture) ?? string.Empty,
+                        ["stdoutPath"] = collector.StandardOutputPath,
+                        ["stderrPath"] = collector.StandardErrorPath,
+                        ["gracefulStopTimeoutSeconds"] = R0CollectorGracefulStopTimeout.TotalSeconds.ToString(CultureInfo.InvariantCulture)
                     }
                 });
-                collector.Process.Kill(entireProcessTree: true);
+
+                if (!HasProcessExited(collector.Process))
+                {
+                    collector.Process.Kill(entireProcessTree: true);
+                }
+
                 await collector.Process.WaitForExitAsync();
             }
         }
         catch (Exception ex)
         {
-            events.Add(new SandboxEvent
-            {
-                EventType = "r0collector.stop_failed",
-                Source = "guest",
-                Path = collector.CollectorPath,
-                Data =
-                {
-                    ["driverEventsPath"] = collector.DriverEventsPath,
-                    ["exceptionType"] = ex.GetType().FullName ?? ex.GetType().Name,
-                    ["message"] = ex.Message
-                }
-            });
+            stopFailed = true;
+            stopFailureReason = "stopException";
+            stopException = ex;
+            events.Add(CreateLegacyR0CollectorStopFailedEvent(collector, ex, processId));
         }
         finally
         {
+            var diagnosticDrainStatus = await DrainR0CollectorDiagnosticsAsync(collector);
+            var jsonLinesDrainStatus = await DrainR0CollectorJsonLinesAsync(collector.DriverEventsPath);
+            var exitCode = SafeExitCode(collector.Process);
+
+            if (stopFailed)
+            {
+                events.Add(CreateR0CollectorFailedEvent(
+                    collector,
+                    phase: "stop",
+                    reason: stopFailureReason,
+                    exception: stopException,
+                    processId: processId,
+                    exitCode: exitCode,
+                    forcedStop: forcedStop,
+                    diagnosticDrainStatus: diagnosticDrainStatus,
+                    jsonLinesDrainStatus: jsonLinesDrainStatus));
+            }
+            else if (forcedStop || !string.Equals(exitCode, "0", StringComparison.Ordinal))
+            {
+                events.Add(CreateR0CollectorFailedEvent(
+                    collector,
+                    phase: forcedStop ? "stop" : "runtime",
+                    reason: forcedStop ? "forcedStop" : "nonZeroExit",
+                    exception: null,
+                    processId: processId,
+                    exitCode: exitCode,
+                    forcedStop: forcedStop,
+                    diagnosticDrainStatus: diagnosticDrainStatus,
+                    jsonLinesDrainStatus: jsonLinesDrainStatus));
+            }
+            else
+            {
+                events.Add(CreateR0CollectorExitedEvent(
+                    collector,
+                    processId,
+                    exitCode,
+                    forcedStop,
+                    diagnosticDrainStatus,
+                    jsonLinesDrainStatus));
+            }
+
             collector.Process.Dispose();
         }
+    }
+
+    /// <summary>
+    /// Opens a sidecar diagnostic log with sharing so host copy/import tools can
+    /// read it while the guest agent is still draining process output.
+    /// </summary>
+    private static FileStream OpenR0CollectorDiagnosticFile(string path)
+    {
+        EnsureParentDirectory(path);
+        return new FileStream(
+            path,
+            FileMode.Create,
+            FileAccess.Write,
+            FileShare.ReadWrite | FileShare.Delete,
+            bufferSize: 4096,
+            FileOptions.Asynchronous | FileOptions.SequentialScan);
+    }
+
+    /// <summary>
+    /// Copies one redirected sidecar stream to its diagnostic file and closes
+    /// the destination when the process pipe reaches EOF.
+    /// </summary>
+    private static async Task CopyR0CollectorDiagnosticStreamAsync(Stream source, FileStream destination)
+    {
+        await using var diagnosticFile = destination;
+        await source.CopyToAsync(diagnosticFile);
+        await diagnosticFile.FlushAsync();
+    }
+
+    /// <summary>
+    /// Writes best-effort diagnostic files for failures that happen before a
+    /// sidecar process exists and therefore before stdout/stderr redirection
+    /// can start.
+    /// </summary>
+    private static void WriteR0CollectorStartupDiagnostic(
+        string standardOutputPath,
+        string standardErrorPath,
+        string reason,
+        Exception? exception)
+    {
+        try
+        {
+            EnsureParentDirectory(standardOutputPath);
+            File.WriteAllText(standardOutputPath, string.Empty);
+            var lines = new List<string>
+            {
+                $"R0Collector did not start: {reason}"
+            };
+
+            if (exception is not null)
+            {
+                lines.Add($"{exception.GetType().FullName ?? exception.GetType().Name}: {exception.Message}");
+            }
+
+            File.WriteAllLines(standardErrorPath, lines);
+        }
+        catch
+        {
+            // Startup diagnostics must never mask the structured events that
+            // explain why the optional sidecar did not run.
+        }
+    }
+
+    /// <summary>
+    /// Waits briefly for redirected sidecar stdout/stderr copy tasks to finish.
+    /// </summary>
+    private static async Task<string> DrainR0CollectorDiagnosticsAsync(R0CollectorProcess collector)
+    {
+        var stdoutStatus = await DrainR0CollectorDiagnosticTaskAsync("stdout", collector.StandardOutputTask);
+        var stderrStatus = await DrainR0CollectorDiagnosticTaskAsync("stderr", collector.StandardErrorTask);
+        return $"{stdoutStatus};{stderrStatus}";
+    }
+
+    /// <summary>
+    /// Waits for one diagnostic copy task and converts completion, timeout, or
+    /// failure into compact event metadata.
+    /// </summary>
+    private static async Task<string> DrainR0CollectorDiagnosticTaskAsync(string name, Task task)
+    {
+        try
+        {
+            var completedTask = await Task.WhenAny(task, Task.Delay(R0CollectorDiagnosticDrainTimeout));
+            if (completedTask != task)
+            {
+                return $"{name}=timeout";
+            }
+
+            await task;
+            return $"{name}=completed";
+        }
+        catch (Exception ex)
+        {
+            return $"{name}=failed:{ex.GetType().Name}:{ex.Message}";
+        }
+    }
+
+    /// <summary>
+    /// Gives the sidecar JSONL artifact a short best-effort drain window after
+    /// process exit/kill so the final read sees flushed rows whenever possible.
+    /// </summary>
+    private static async Task<string> DrainR0CollectorJsonLinesAsync(string path)
+    {
+        var deadline = DateTimeOffset.UtcNow + R0CollectorJsonLinesDrainTimeout;
+        long? previousLength = null;
+        DateTime? previousLastWriteUtc = null;
+        var stableObservations = 0;
+        var observed = false;
+        Exception? lastException = null;
+
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            try
+            {
+                var info = new FileInfo(path);
+                info.Refresh();
+                if (!info.Exists)
+                {
+                    await Task.Delay(R0CollectorJsonLinesPollInterval);
+                    continue;
+                }
+
+                observed = true;
+                using (new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+                {
+                }
+
+                if (previousLength == info.Length && previousLastWriteUtc == info.LastWriteTimeUtc)
+                {
+                    stableObservations++;
+                    if (stableObservations >= 2)
+                    {
+                        return "stable";
+                    }
+                }
+                else
+                {
+                    previousLength = info.Length;
+                    previousLastWriteUtc = info.LastWriteTimeUtc;
+                    stableObservations = 0;
+                }
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                lastException = ex;
+            }
+
+            await Task.Delay(R0CollectorJsonLinesPollInterval);
+        }
+
+        if (!observed)
+        {
+            return "missing";
+        }
+
+        if (lastException is not null)
+        {
+            return $"timeoutAfterReadError:{lastException.GetType().Name}:{lastException.Message}";
+        }
+
+        return "timeout";
+    }
+
+    /// <summary>
+    /// Creates the sidecar supervision event written immediately after a
+    /// process handle is obtained.
+    /// </summary>
+    private static SandboxEvent CreateR0CollectorStartedEvent(
+        AgentOptions options,
+        int processId,
+        string standardOutputPath,
+        string standardErrorPath,
+        string commandLine)
+    {
+        return new SandboxEvent
+        {
+            EventType = "r0collector.started",
+            Source = "guest",
+            ProcessName = Path.GetFileName(options.R0CollectorPath),
+            ProcessId = processId,
+            Path = options.R0CollectorPath,
+            CommandLine = commandLine,
+            Data =
+            {
+                ["collectorPath"] = options.R0CollectorPath ?? string.Empty,
+                ["driverDevicePath"] = options.DriverDevicePath,
+                ["driverEventsPath"] = options.DriverEventsPath ?? string.Empty,
+                ["durationSeconds"] = options.DurationSeconds.ToString(CultureInfo.InvariantCulture),
+                ["r0Mock"] = options.R0Mock.ToString(),
+                ["stdoutPath"] = standardOutputPath,
+                ["stderrPath"] = standardErrorPath,
+                ["processId"] = processId.ToString(CultureInfo.InvariantCulture),
+                ["supervisor"] = "guest-agent"
+            }
+        };
+    }
+
+    /// <summary>
+    /// Creates the sidecar supervision event for a clean collector process exit.
+    /// </summary>
+    private static SandboxEvent CreateR0CollectorExitedEvent(
+        R0CollectorProcess collector,
+        int? processId,
+        string exitCode,
+        bool forcedStop,
+        string diagnosticDrainStatus,
+        string jsonLinesDrainStatus)
+    {
+        return new SandboxEvent
+        {
+            EventType = "r0collector.exited",
+            Source = "guest",
+            ProcessName = Path.GetFileName(collector.CollectorPath),
+            ProcessId = processId,
+            Path = collector.CollectorPath,
+            CommandLine = collector.CommandLine,
+            Data =
+            {
+                ["collectorPath"] = collector.CollectorPath,
+                ["driverEventsPath"] = collector.DriverEventsPath,
+                ["stdoutPath"] = collector.StandardOutputPath,
+                ["stderrPath"] = collector.StandardErrorPath,
+                ["processId"] = processId?.ToString(CultureInfo.InvariantCulture) ?? string.Empty,
+                ["exitCode"] = exitCode,
+                ["forcedStop"] = forcedStop.ToString(),
+                ["diagnosticDrainStatus"] = diagnosticDrainStatus,
+                ["jsonlDrainStatus"] = jsonLinesDrainStatus,
+                ["supervisor"] = "guest-agent"
+            }
+        };
+    }
+
+    /// <summary>
+    /// Creates a sidecar failure event when no process handle is available.
+    /// </summary>
+    private static SandboxEvent CreateR0CollectorFailedEvent(
+        AgentOptions options,
+        string phase,
+        string reason,
+        Exception? exception = null,
+        string? standardOutputPath = null,
+        string? standardErrorPath = null)
+    {
+        var evt = new SandboxEvent
+        {
+            EventType = "r0collector.failed",
+            Source = "guest",
+            ProcessName = string.IsNullOrWhiteSpace(options.R0CollectorPath) ? null : Path.GetFileName(options.R0CollectorPath),
+            Path = options.R0CollectorPath,
+            Data =
+            {
+                ["collectorPath"] = options.R0CollectorPath ?? string.Empty,
+                ["driverDevicePath"] = options.DriverDevicePath,
+                ["driverEventsPath"] = options.DriverEventsPath ?? string.Empty,
+                ["durationSeconds"] = options.DurationSeconds.ToString(CultureInfo.InvariantCulture),
+                ["r0Mock"] = options.R0Mock.ToString(),
+                ["phase"] = phase,
+                ["reason"] = reason,
+                ["stdoutPath"] = standardOutputPath ?? string.Empty,
+                ["stderrPath"] = standardErrorPath ?? string.Empty,
+                ["supervisor"] = "guest-agent"
+            }
+        };
+
+        AddExceptionData(evt, exception);
+        return evt;
+    }
+
+    /// <summary>
+    /// Creates a sidecar failure event for a process that started but did not
+    /// complete cleanly.
+    /// </summary>
+    private static SandboxEvent CreateR0CollectorFailedEvent(
+        R0CollectorProcess collector,
+        string phase,
+        string reason,
+        Exception? exception,
+        int? processId,
+        string exitCode,
+        bool forcedStop,
+        string diagnosticDrainStatus,
+        string jsonLinesDrainStatus)
+    {
+        var evt = new SandboxEvent
+        {
+            EventType = "r0collector.failed",
+            Source = "guest",
+            ProcessName = Path.GetFileName(collector.CollectorPath),
+            ProcessId = processId,
+            Path = collector.CollectorPath,
+            CommandLine = collector.CommandLine,
+            Data =
+            {
+                ["collectorPath"] = collector.CollectorPath,
+                ["driverEventsPath"] = collector.DriverEventsPath,
+                ["stdoutPath"] = collector.StandardOutputPath,
+                ["stderrPath"] = collector.StandardErrorPath,
+                ["processId"] = processId?.ToString(CultureInfo.InvariantCulture) ?? string.Empty,
+                ["exitCode"] = exitCode,
+                ["forcedStop"] = forcedStop.ToString(),
+                ["phase"] = phase,
+                ["reason"] = reason,
+                ["diagnosticDrainStatus"] = diagnosticDrainStatus,
+                ["jsonlDrainStatus"] = jsonLinesDrainStatus,
+                ["supervisor"] = "guest-agent"
+            }
+        };
+
+        AddExceptionData(evt, exception);
+        return evt;
+    }
+
+    /// <summary>
+    /// Preserves the older startup failure event name for downstream consumers
+    /// while the canonical sidecar outcome is r0collector.failed.
+    /// </summary>
+    private static SandboxEvent CreateLegacyR0CollectorStartFailedEvent(
+        AgentOptions options,
+        string reason,
+        Exception? exception,
+        string standardOutputPath,
+        string standardErrorPath)
+    {
+        var evt = new SandboxEvent
+        {
+            EventType = "r0collector.start_failed",
+            Source = "guest",
+            Path = options.R0CollectorPath,
+            Data =
+            {
+                ["collectorPath"] = options.R0CollectorPath ?? string.Empty,
+                ["driverDevicePath"] = options.DriverDevicePath,
+                ["driverEventsPath"] = options.DriverEventsPath ?? string.Empty,
+                ["durationSeconds"] = options.DurationSeconds.ToString(CultureInfo.InvariantCulture),
+                ["r0Mock"] = options.R0Mock.ToString(),
+                ["reason"] = reason,
+                ["stdoutPath"] = standardOutputPath,
+                ["stderrPath"] = standardErrorPath
+            }
+        };
+
+        AddExceptionData(evt, exception);
+        return evt;
+    }
+
+    /// <summary>
+    /// Preserves the older stop failure event name while the canonical sidecar
+    /// outcome is r0collector.failed.
+    /// </summary>
+    private static SandboxEvent CreateLegacyR0CollectorStopFailedEvent(R0CollectorProcess collector, Exception exception, int? processId)
+    {
+        var evt = new SandboxEvent
+        {
+            EventType = "r0collector.stop_failed",
+            Source = "guest",
+            ProcessName = Path.GetFileName(collector.CollectorPath),
+            ProcessId = processId,
+            Path = collector.CollectorPath,
+            CommandLine = collector.CommandLine,
+            Data =
+            {
+                ["driverEventsPath"] = collector.DriverEventsPath,
+                ["stdoutPath"] = collector.StandardOutputPath,
+                ["stderrPath"] = collector.StandardErrorPath,
+                ["processId"] = processId?.ToString(CultureInfo.InvariantCulture) ?? string.Empty
+            }
+        };
+
+        AddExceptionData(evt, exception);
+        return evt;
+    }
+
+    /// <summary>
+    /// Adds exception metadata to a diagnostic event when an exception exists.
+    /// </summary>
+    private static void AddExceptionData(SandboxEvent evt, Exception? exception)
+    {
+        if (exception is null)
+        {
+            return;
+        }
+
+        evt.Data["exceptionType"] = exception.GetType().FullName ?? exception.GetType().Name;
+        evt.Data["message"] = exception.Message;
+    }
+
+    /// <summary>
+    /// Reads Process.Id defensively for shutdown paths.
+    /// </summary>
+    private static int? SafeProcessId(Process process)
+    {
+        try
+        {
+            return process.Id;
+        }
+        catch (InvalidOperationException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Checks whether a process has exited without throwing if state changed.
+    /// </summary>
+    private static bool HasProcessExited(Process process)
+    {
+        try
+        {
+            return process.HasExited;
+        }
+        catch (InvalidOperationException)
+        {
+            return true;
+        }
+    }
+
+    /// <summary>
+    /// Builds a diagnostic command line string matching the arguments supplied
+    /// to ProcessStartInfo.
+    /// </summary>
+    private static string BuildR0CollectorCommandLine(AgentOptions options)
+    {
+        var arguments = new List<string>
+        {
+            QuoteCommandLineArgument(options.R0CollectorPath ?? string.Empty),
+            "--device",
+            QuoteCommandLineArgument(options.DriverDevicePath),
+            "--output",
+            QuoteCommandLineArgument(options.DriverEventsPath ?? string.Empty),
+            "--duration",
+            options.DurationSeconds.ToString(CultureInfo.InvariantCulture)
+        };
+
+        if (options.R0Mock)
+        {
+            arguments.Add("--mock");
+        }
+
+        return string.Join(" ", arguments);
+    }
+
+    /// <summary>
+    /// Quotes command-line arguments for diagnostic display.
+    /// </summary>
+    private static string QuoteCommandLineArgument(string value)
+    {
+        if (value.Length == 0)
+        {
+            return "\"\"";
+        }
+
+        if (!value.Any(char.IsWhiteSpace) && !value.Contains('"', StringComparison.Ordinal))
+        {
+            return value;
+        }
+
+        return $"\"{value.Replace("\"", "\\\"", StringComparison.Ordinal)}\"";
     }
 
     /// <summary>
@@ -648,11 +1263,20 @@ internal static class AgentProgram
 
     /// <summary>
     /// Tracks a started R0Collector sidecar so shutdown can happen reliably.
-    /// Inputs are the started Process plus the collector executable and JSONL
-    /// paths; processing is simple storage; the record is returned from
+    /// Inputs are the started Process plus collector executable, JSONL,
+    /// diagnostic paths, redirect tasks, and the displayed command line;
+    /// processing is simple storage; the record is returned from
     /// StartR0Collector and consumed by StopR0CollectorAsync.
     /// </summary>
-    private sealed record R0CollectorProcess(Process Process, string CollectorPath, string DriverEventsPath);
+    private sealed record R0CollectorProcess(
+        Process Process,
+        string CollectorPath,
+        string DriverEventsPath,
+        string StandardOutputPath,
+        string StandardErrorPath,
+        Task StandardOutputTask,
+        Task StandardErrorTask,
+        string CommandLine);
 
     private sealed record FileSnapshot(long SizeBytes, DateTime LastWriteUtc);
 

@@ -48,7 +48,10 @@ internal sealed class WebUiExperienceContractScenario : ISmokeTestScenario
             @"(?is)(aria-selected=""true""[^>]*(upload|上传|sampleUpload)|(?:upload|上传|sampleUpload)[^>]*aria-selected=""true"")",
             "The upload planning tab should be selected by default.");
         RequireContains(dashboard, "Upload .exe", "Dashboard should clarify upload-and-plan entry text.");
-        RequireContains(dashboard, "Create dry-run plan from path", "Dashboard should clarify host-path planning.");
+        RequireAnyContains(
+            dashboard,
+            ["Create dry-run plan from path", "Create plan from path"],
+            "Dashboard should clarify host-path planning.");
         RequireContains(dashboard, "Scan and plan first candidate", "Dashboard should expose one-click scan-and-plan.");
         foreach (var vmField in new[]
         {
@@ -63,8 +66,14 @@ internal sealed class WebUiExperienceContractScenario : ISmokeTestScenario
             RequireContains(dashboard, vmField, $"Dashboard should render and submit VM configuration field '{vmField}'.");
         }
 
-        RequireContains(dashboard, "Guest import status", "Dashboard should display guest import status.");
-        RequireContains(dashboard, "Live raw event monitor", "Dashboard should link to the dedicated live raw telemetry monitor.");
+        RequireAnyContains(
+            dashboard,
+            ["Guest import status", "Event import status", "事件导入状态"],
+            "Dashboard should display guest import status.");
+        RequireAnyContains(
+            dashboard,
+            ["Live raw event monitor", "Standalone live monitor", "实时监控独立页"],
+            "Dashboard should link to the dedicated live raw telemetry monitor.");
         RequireAnyContains(
             program,
             ["LiveEventsPage.Render", "LiveRawEventMonitorPage.Render", "RawEventMonitorPage.Render", "LiveEventMonitorPage.Render"],
@@ -81,7 +90,10 @@ internal sealed class WebUiExperienceContractScenario : ISmokeTestScenario
         RequireContains(dashboard, "report.html", "Dashboard should display report.html path.");
         RequireContains(dashboard, "renderJob(payload)", "Planning responses should automatically render job report links.");
         RequireContains(dashboard, "servedReportHref", "Dashboard should build the served report link automatically from the planned job id.");
-        RequireContains(dashboard, "Open served HTML report", "Dashboard should expose an automatic served HTML report link.");
+        RequireAnyContains(
+            dashboard,
+            ["Open served HTML report", "Open served report", "打开服务内报告"],
+            "Dashboard should expose an automatic served HTML report link.");
         RequireAnyContains(
             dashboard,
             ["stage-progress", "progressStages", "renderProgressStages", "Stage progress", "阶段进度"],

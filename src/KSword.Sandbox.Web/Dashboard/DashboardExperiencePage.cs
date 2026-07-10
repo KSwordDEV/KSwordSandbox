@@ -61,7 +61,13 @@ internal static class DashboardExperiencePage
             .error { color: #b91c1c; }
             .ok { color: #047857; }
             .pathbox { background: #f8fbff; border: 1px solid var(--line); border-radius: 12px; margin-top: 10px; padding: 12px; }
+            .callout { background:#eef7ff; border:1px solid #bfdbfe; border-radius:14px; margin-top:12px; padding:14px; }
+            .callout strong { display:block; margin-bottom:4px; }
+            .report-notice { background:#ecfdf5; border:1px solid #86efac; border-radius:14px; color:#065f46; margin:12px 0; padding:14px; }
+            .report-notice[hidden] { display:none; }
+            .report-notice p { margin:6px 0; }
             .pill { background: #e7f3ff; border:1px solid rgba(67,160,255,.35); border-radius: 999px; color: #075985; display: inline-block; font-size: 12px; font-weight: 800; padding: 4px 9px; }
+            .pill.ready { background:#dcfce7; border-color:#86efac; color:#166534; }
             .tabs { display:flex; flex-wrap:wrap; gap:8px; margin:16px 0 10px; }
             .tab-button { background:#e7f3ff; border:1px solid rgba(67,160,255,.35); color:#075985; margin-top:0; }
             .tab-button.active { background:var(--blue); color:white; }
@@ -94,7 +100,7 @@ internal static class DashboardExperiencePage
             <div class="header-row">
               <div>
                 <h1 data-zh="KSword 沙箱主机" data-en="KSword Sandbox Host">KSword 沙箱主机</h1>
-                <p data-zh="选择或上传 exe 后先创建 dry-run 计划；主页面只展示关键状态和报告入口，详细排障信息请从“执行流程 / Execution flow”独立视图查看。" data-en="Choose or upload an exe and create a dry-run plan first; the dashboard only shows key status and report access. Open Execution flow for troubleshooting details.">选择或上传 exe 后先创建 dry-run 计划；主页面只展示关键状态和报告入口，详细排障信息请从“执行流程 / Execution flow”独立视图查看。</p>
+                <p data-zh="提交样本后先生成安全计划；主页面只保留关键状态、报告入口和独立监控入口，排障细节放在“执行流程”。" data-en="Submit a sample to create a safe plan first. The dashboard keeps only key status, report access, and the standalone monitor; troubleshooting details live in Execution flow.">提交样本后先生成安全计划；主页面只保留关键状态、报告入口和独立监控入口，排障细节放在“执行流程”。</p>
                 <p><span class="pill" data-zh="提示：右键路径、表格值、证据字段和执行流程视图可复制。" data-en="Tip: right-click paths, table values, evidence fields, and execution-flow details to copy.">提示：右键路径、表格值、证据字段和执行流程视图可复制。</span></p>
               </div>
               <button class="secondary lang-toggle" type="button" onclick="toggleLanguage()" data-zh="English" data-en="中文">English</button>
@@ -108,31 +114,31 @@ internal static class DashboardExperiencePage
           <main>
             <section id="plan">
               <h2 data-zh="规划分析" data-en="Plan analysis">规划分析</h2>
-              <p class="hint"><span data-zh="三种入口已拆成 Tab，默认上传。创建 dry-run 计划不会执行样本，点击“启动虚拟机执行”才会进入 live Hyper-V 流程。" data-en="The three entry points are separated into tabs, upload is the default. Creating a dry-run plan does not execute the sample; click Execute live VM runbook to enter the live Hyper-V flow.">三种入口已拆成 Tab，默认上传。创建 dry-run 计划不会执行样本，点击“启动虚拟机执行”才会进入 live Hyper-V 流程。</span></p>
+              <p class="hint"><span data-zh="三种输入方式已拆成 Tab，默认选中“上传 EXE”。生成计划不会执行样本；确认后再启动虚拟机分析。" data-en="The three input methods are tabs, with Upload EXE selected by default. Creating a plan does not execute the sample; start VM analysis only after review.">三种输入方式已拆成 Tab，默认选中“上传 EXE”。生成计划不会执行样本；确认后再启动虚拟机分析。</span></p>
               <div class="tabs" role="tablist">
                 <button id="tab-upload" class="tab-button active" type="button" role="tab" aria-selected="true" aria-controls="panel-upload" onclick="selectPlanTab('upload')" data-zh="上传 EXE" data-en="Upload EXE">上传 EXE</button>
                 <button id="tab-path" class="tab-button" type="button" role="tab" aria-selected="false" aria-controls="panel-path" onclick="selectPlanTab('path')" data-zh="已有路径" data-en="Existing path">已有路径</button>
                 <button id="tab-scan" class="tab-button" type="button" role="tab" aria-selected="false" aria-controls="panel-scan" onclick="selectPlanTab('scan')" data-zh="扫描目录" data-en="Scan folder">扫描目录</button>
               </div>
               <div id="panel-upload" class="tab-panel active" role="tabpanel" aria-labelledby="tab-upload">
-                  <h3 data-zh="上传 .exe 并规划" data-en="Upload .exe and plan">上传 .exe 并规划</h3>
-                  <p class="hint" data-zh="将文件保存到配置的运行时上传目录，然后创建 dry-run 任务；不会执行样本。" data-en="Stores the file in the configured runtime upload folder, then creates a dry-run job. It does not execute the sample.">将文件保存到配置的运行时上传目录，然后创建 dry-run 任务；不会执行样本。</p>
+                  <h3 data-zh="上传 .exe 并生成计划" data-en="Upload .exe and create plan">上传 .exe 并生成计划</h3>
+                  <p class="hint" data-zh="保存文件并生成一个可检查的分析计划；此步骤不会执行样本。" data-en="Stores the file and creates a reviewable analysis plan; this step does not execute the sample.">保存文件并生成一个可检查的分析计划；此步骤不会执行样本。</p>
                   <label for="sampleUpload" data-zh="可执行文件（.exe）" data-en="Executable file (.exe)">可执行文件（.exe）</label>
                   <input id="sampleUpload" type="file" accept=".exe,application/vnd.microsoft.portable-executable,application/octet-stream">
                   <label for="uploadDuration" data-zh="分析时长（秒）" data-en="Analysis duration, seconds">分析时长（秒）</label>
                   <input id="uploadDuration" type="number" min="1" max="900" value="120">
-                  <button onclick="uploadAndPlan()" data-zh="上传 .exe → 创建 dry-run 计划" data-en="Upload .exe → create dry-run plan">上传 .exe → 创建 dry-run 计划</button>
+                  <button onclick="uploadAndPlan()" data-zh="上传 .exe → 生成计划" data-en="Upload .exe → create plan">上传 .exe → 生成计划</button>
               </div>
-              <div id="panel-path" class="tab-panel" role="tabpanel" aria-labelledby="tab-path">
+              <div id="panel-path" class="tab-panel" role="tabpanel" aria-labelledby="tab-path" hidden>
                   <h3 data-zh="规划已有主机路径" data-en="Plan existing host path">规划已有主机路径</h3>
                   <p class="hint" data-zh="适用于样本已经位于本机或挂载共享时。服务器会先校验路径，再写入产物。" data-en="Use when the sample is already on this host or a mounted share. The server validates the path before writing artifacts.">适用于样本已经位于本机或挂载共享时。服务器会先校验路径，再写入产物。</p>
                   <label for="samplePath" data-zh="主机上的可执行文件路径" data-en="Executable path on host">主机上的可执行文件路径</label>
                   <input id="samplePath" placeholder="D:\Temp\sample.exe">
                   <label for="duration" data-zh="分析时长（秒）" data-en="Analysis duration, seconds">分析时长（秒）</label>
                   <input id="duration" type="number" min="1" max="900" value="120">
-                  <button onclick="planPath()" data-zh="从路径创建 dry-run 计划" data-en="Create dry-run plan from path">从路径创建 dry-run 计划</button>
+                  <button onclick="planPath()" data-zh="从路径生成计划" data-en="Create plan from path">从路径生成计划</button>
               </div>
-              <div id="panel-scan" class="tab-panel" role="tabpanel" aria-labelledby="tab-scan">
+              <div id="panel-scan" class="tab-panel" role="tabpanel" aria-labelledby="tab-scan" hidden>
                   <h3 data-zh="扫描文件夹后规划" data-en="Scan folder, then plan">扫描文件夹后规划</h3>
                   <p class="hint" data-zh="仅基于元数据发现 .exe。可复核候选项，或一键规划排序后的第一个结果。" data-en="Metadata-only .exe discovery. Review candidates or use one-click planning for the first sorted result.">仅基于元数据发现 .exe。可复核候选项，或一键规划排序后的第一个结果。</p>
                   <label for="scanPath" data-zh="目录或精确 .exe 路径" data-en="Directory or exact .exe path">目录或精确 .exe 路径</label>
@@ -143,15 +149,15 @@ internal static class DashboardExperiencePage
                   <button class="secondary" onclick="scanAndPlanFirst()" data-zh="扫描并规划第一个候选项" data-en="Scan and plan first candidate">扫描并规划第一个候选项</button>
               </div>
               <details class="vm-config">
-                <summary data-zh="虚拟机配置 / VM configuration" data-en="VM configuration / 虚拟机配置">虚拟机配置 / VM configuration</summary>
+                <summary data-zh="高级：虚拟机配置" data-en="Advanced: VM configuration">高级：虚拟机配置</summary>
                 <p class="hint" data-zh="默认从 config 读取；这里的值只覆盖当前任务，不写入配置文件。" data-en="Defaults are loaded from config; these values only override the current job and do not write config files.">默认从 config 读取；这里的值只覆盖当前任务，不写入配置文件。</p>
                 <div class="vm-grid">
-                  <div><label for="goldenVmName">VM name</label><input id="goldenVmName" placeholder="KSwordSandbox-Win10-Golden"></div>
-                  <div><label for="goldenSnapshotName">Checkpoint</label><input id="goldenSnapshotName" placeholder="Clean"></div>
-                  <div><label for="guestUserName">Guest user</label><input id="guestUserName" placeholder="SandboxUser"></div>
-                  <div><label for="guestWorkingDirectory">Guest working dir</label><input id="guestWorkingDirectory" placeholder="C:\KSwordSandbox"></div>
-                  <div><label for="guestPayloadRoot">Host payload root</label><input id="guestPayloadRoot" placeholder="D:\Temp\KSwordSandbox\payload\guest-tools"></div>
-                  <div><label for="useMockCollector"><input id="useMockCollector" type="checkbox"> <span data-zh="使用 R0 mock collector" data-en="Use R0 mock collector">使用 R0 mock collector</span></label></div>
+                  <div><label for="goldenVmName" data-zh="虚拟机名称" data-en="VM name">虚拟机名称</label><input id="goldenVmName" placeholder="KSwordSandbox-Win10-Golden"></div>
+                  <div><label for="goldenSnapshotName" data-zh="还原点" data-en="Checkpoint">还原点</label><input id="goldenSnapshotName" placeholder="Clean"></div>
+                  <div><label for="guestUserName" data-zh="虚拟机用户" data-en="Guest user">虚拟机用户</label><input id="guestUserName" placeholder="SandboxUser"></div>
+                  <div><label for="guestWorkingDirectory" data-zh="虚拟机工作目录" data-en="Guest working folder">虚拟机工作目录</label><input id="guestWorkingDirectory" placeholder="C:\KSwordSandbox"></div>
+                  <div><label for="guestPayloadRoot" data-zh="工具目录（主机）" data-en="Host tool folder">工具目录（主机）</label><input id="guestPayloadRoot" placeholder="D:\Temp\KSwordSandbox\payload\guest-tools"></div>
+                  <div><label for="useMockCollector"><input id="useMockCollector" type="checkbox"> <span data-zh="使用模拟采集器" data-en="Use mock collector">使用模拟采集器</span></label></div>
                 </div>
               </details>
               <div id="status" class="status"></div>
@@ -218,12 +224,20 @@ internal static class DashboardExperiencePage
 
             function formatJobStatus(status) {
               const names = {
-                0: 'Queued',
-                1: 'Planning',
-                2: 'Planned',
-                3: 'Running',
-                4: 'Completed',
-                5: 'Failed'
+                0: '排队中 / Queued',
+                1: '规划中 / Planning',
+                2: '已规划 / Planned',
+                3: '运行中 / Running',
+                4: '已完成 / Completed',
+                5: '失败 / Failed'
+              };
+              const namedStatuses = {
+                queued: '排队中 / Queued',
+                planning: '规划中 / Planning',
+                planned: '已规划 / Planned',
+                running: '运行中 / Running',
+                completed: '已完成 / Completed',
+                failed: '失败 / Failed'
               };
               if (status === null || status === undefined || status === '') {
                 return '-';
@@ -231,7 +245,12 @@ internal static class DashboardExperiencePage
 
               if (typeof status === 'number' || /^\d+$/.test(String(status))) {
                 const numeric = Number(status);
-                return names[numeric] ? `${names[numeric]} (${numeric})` : `Unknown (${numeric})`;
+                return names[numeric] ? `${names[numeric]} (${numeric})` : `未知 / Unknown (${numeric})`;
+              }
+
+              const normalized = String(status).trim().toLowerCase();
+              if (namedStatuses[normalized]) {
+                return namedStatuses[normalized];
               }
 
               return String(status);
@@ -240,9 +259,12 @@ internal static class DashboardExperiencePage
             function selectPlanTab(name) {
               for (const candidate of ['upload', 'path', 'scan']) {
                 const tab = document.getElementById(`tab-${candidate}`);
+                const panel = document.getElementById(`panel-${candidate}`);
                 tab.classList.toggle('active', candidate === name);
                 tab.setAttribute('aria-selected', candidate === name ? 'true' : 'false');
-                document.getElementById(`panel-${candidate}`).classList.toggle('active', candidate === name);
+                tab.tabIndex = candidate === name ? 0 : -1;
+                panel.classList.toggle('active', candidate === name);
+                panel.hidden = candidate !== name;
               }
             }
 
@@ -307,7 +329,7 @@ internal static class DashboardExperiencePage
 
             async function scanTargets() {
               setBusy(true);
-              setStatus('Scanning host path...', false);
+              setStatus(t('正在扫描路径...', 'Scanning host path...'), false);
               try {
                 const response = await fetch('/api/files/scan', {
                   method: 'POST',
@@ -318,10 +340,10 @@ internal static class DashboardExperiencePage
                     maxResults: 300
                   })
                 });
-                const payload = await requireOk(response, 'Scan executable candidates');
+                const payload = await requireOk(response, t('扫描候选项', 'Scan executable candidates'));
 
                 renderCandidates(payload);
-                setStatus(`Scan complete: ${payload.candidates.length} executable candidate(s).`, false);
+                setStatus(t(`扫描完成：${payload.candidates.length} 个候选项。`, `Scan complete: ${payload.candidates.length} executable candidate(s).`), false);
                 return payload;
               } catch (error) {
                 setStatus(error.message, true);
@@ -336,11 +358,11 @@ internal static class DashboardExperiencePage
                 if (!result) { return; }
                 const first = result.candidates && result.candidates[0];
                 if (!first) {
-                  setStatus('Scan completed, but no executable candidates were found to plan.', true);
+                  setStatus(t('扫描完成，但没有可规划的 .exe 候选项。', 'Scan completed, but no executable candidates were found to plan.'), true);
                   return;
                 }
 
-                setStatus(`Planning first candidate: ${first.fullPath}`, false);
+                setStatus(t(`正在规划第一个候选项：${first.fullPath}`, `Planning first candidate: ${first.fullPath}`), false);
                 await planPath(first.fullPath);
               } catch {
                 // scanTargets or planPath already wrote the visible status.
@@ -350,12 +372,12 @@ internal static class DashboardExperiencePage
             async function uploadAndPlan() {
               const input = document.getElementById('sampleUpload');
               if (!input.files || input.files.length === 0) {
-                setStatus('Select one .exe file to upload.', true);
+                setStatus(t('请选择一个 .exe 文件上传。', 'Select one .exe file to upload.'), true);
                 return;
               }
 
               setBusy(true);
-              setStatus('Uploading executable into runtime storage...', false);
+              setStatus(t('正在上传样本并保存...', 'Uploading sample into storage...'), false);
               try {
                 const form = new FormData();
                 form.append('sample', input.files[0]);
@@ -363,11 +385,11 @@ internal static class DashboardExperiencePage
                   method: 'POST',
                   body: form
                 });
-                const uploaded = await requireOk(uploadResponse, 'Upload executable');
+                const uploaded = await requireOk(uploadResponse, t('上传样本', 'Upload executable'));
 
                 document.getElementById('samplePath').value = uploaded.fullPath;
                 document.getElementById('duration').value = document.getElementById('uploadDuration').value || 120;
-                setStatus(`Uploaded to ${uploaded.fullPath}; creating analysis plan...`, false);
+                setStatus(t('上传完成，正在生成分析计划...', `Uploaded to ${uploaded.fullPath}; creating analysis plan...`), false);
                 await planPath(uploaded.fullPath);
               } catch (error) {
                 setStatus(error.message, true);
@@ -379,12 +401,12 @@ internal static class DashboardExperiencePage
             async function planPath(path) {
               const samplePath = path || document.getElementById('samplePath').value;
               if (!samplePath) {
-                setStatus('Enter an executable path or select one from scan results.', true);
+                setStatus(t('请输入可执行文件路径，或从扫描结果中选择一个。', 'Enter an executable path or select one from scan results.'), true);
                 return;
               }
 
               setBusy(true);
-              setStatus('Creating dry-run Hyper-V analysis plan...', false);
+              setStatus(t('正在生成分析计划...', 'Creating analysis plan...'), false);
               try {
                 const response = await fetch('/api/jobs/plan', {
                   method: 'POST',
@@ -396,12 +418,12 @@ internal static class DashboardExperiencePage
                     ...getVmConfig()
                   })
                 });
-                const payload = await requireOk(response, 'Create dry-run analysis plan');
+                const payload = await requireOk(response, t('生成分析计划', 'Create analysis plan'));
 
                 renderJob(payload);
                 applyLanguage();
             refreshJobs(false);
-                setStatus('Job planned. Review the compact card, then start live VM analysis when ready.', false);
+                setStatus(t('计划已生成。确认当前任务卡片后，可启动虚拟机分析。', 'Plan created. Review the current job card, then start VM analysis when ready.'), false);
                 document.getElementById('current-job').scrollIntoView({ behavior: 'smooth', block: 'start' });
               } catch (error) {
                 setStatus(error.message, true);
@@ -413,7 +435,7 @@ internal static class DashboardExperiencePage
             async function planSelectedCandidate() {
               const selected = document.querySelector('input[name="candidate"]:checked');
               if (!selected || !selected.value) {
-                setStatus('Select one executable candidate from the scan table before planning.', true);
+                setStatus(t('请先从候选项表格中选择一个可执行文件。', 'Select one executable candidate from the scan table before planning.'), true);
                 return;
               }
 
@@ -424,7 +446,8 @@ internal static class DashboardExperiencePage
             function renderCandidates(result) {
               document.getElementById('candidateCount').textContent = result.candidates.length;
               if (!result.candidates.length) {
-                document.getElementById('candidates').innerHTML = '<p>No .exe candidates found.</p>';
+                document.getElementById('candidates').innerHTML = '<p data-zh="没有找到 .exe 候选项。" data-en="No .exe candidates found.">没有找到 .exe 候选项。</p>';
+                applyLanguage();
                 return;
               }
 
@@ -464,6 +487,10 @@ internal static class DashboardExperiencePage
               const fileReportHref = toFileUri(htmlReportPath);
               const executionFlowHref = jobId ? `/jobs/${encodeURIComponent(jobId)}/execution-flow` : '';
               const liveEventsHref = jobId ? `/jobs/${encodeURIComponent(jobId)}/live-events` : '';
+              const reportReady = Boolean(htmlReportPath || zhReportPath || enReportPath);
+              const reportBadge = reportReady
+                ? '<span class="pill ready" data-zh="已生成" data-en="Ready">已生成</span>'
+                : '<span class="pill" data-zh="待生成" data-en="Not ready">待生成</span>';
               const plannedStepCount = job.runbook?.steps?.length || 0;
               const messages = (job.messages || []).slice(-3).map(message => `<li data-copy="${escapeAttribute(message)}" data-copy-label="job message">${escapeHtml(message)} ${copyButton(message, 'job message')}</li>`).join('');
               document.getElementById('jobResult').innerHTML = `
@@ -473,48 +500,55 @@ internal static class DashboardExperiencePage
                     <div class="metric"><strong data-zh="状态" data-en="Status">状态</strong><span class="pill" data-copy="${escapeAttribute(statusLabel)}" data-copy-label="job status">${escapeHtml(statusLabel)}</span></div>
                     <div class="metric"><strong data-zh="样本" data-en="Sample">样本</strong>${copyableCode(job.sample?.fullPath || job.submission?.samplePath || '', 'sample path')}</div>
                     <div class="metric"><strong data-zh="分析时长" data-en="Duration">分析时长</strong><span>${escapeHtml(String(job.submission?.durationSeconds || '-'))}s</span></div>
-                    <div class="metric"><strong>VM</strong><span>${escapeHtml(job.submission?.goldenVmName || document.getElementById('goldenVmName').value || 'default')}</span></div>
+                    <div class="metric"><strong data-zh="报告" data-en="Report">报告</strong>${reportBadge}</div>
                   </div>
                   <p class="button-row">
-                    <button onclick="executeRunbook('${escapeJs(jobId)}', true)" data-zh="启动虚拟机执行" data-en="Execute live VM runbook">启动虚拟机执行</button>
-                    <button class="secondary" onclick="executeRunbook('${escapeJs(jobId)}', false)" data-zh="仅记录 dry-run" data-en="Record dry-run only">仅记录 dry-run</button>
-                    <button class="secondary" onclick="importGuestEvents('${escapeJs(jobId)}')" data-zh="手动导入事件" data-en="Import events manually">手动导入事件</button>
+                    <button onclick="executeRunbook('${escapeJs(jobId)}', true)" data-zh="启动虚拟机分析" data-en="Start VM analysis">启动虚拟机分析</button>
                     <a class="buttonlink" target="_blank" rel="noopener" href="${escapeHtml(servedZhReportHref)}" data-zh="打开中文报告" data-en="Open Chinese report">打开中文报告</a>
                     <a class="buttonlink secondary" target="_blank" rel="noopener" href="${escapeHtml(servedEnReportHref)}" data-zh="打开英文报告" data-en="Open English report">打开英文报告</a>
-                    <a class="buttonlink secondary" target="_blank" rel="noopener" href="${escapeHtml(executionFlowHref)}" data-zh="执行流程 / Execution flow" data-en="Execution flow / 执行流程">执行流程 / Execution flow</a>
-                    <a class="buttonlink secondary" target="_blank" rel="noopener" href="${escapeHtml(liveEventsHref)}" data-zh="实时原始事件 / Live raw event monitor" data-en="Live raw event monitor / 实时原始事件">实时原始事件 / Live raw event monitor</a>
+                    <a class="buttonlink secondary" target="_blank" rel="noopener" href="${escapeHtml(executionFlowHref)}" data-zh="执行流程" data-en="Execution flow">执行流程</a>
                   </p>
+                  <div id="reportNotice" class="report-notice" hidden></div>
+                  <div class="callout">
+                    <strong data-zh="独立页：实时原始事件监控" data-en="Standalone page: live raw event monitor">独立页：实时原始事件监控</strong>
+                    <p class="hint" data-zh="分析运行时可在新标签页查看原始事件；主页面保持简洁，最终结论以报告为准。" data-en="Open raw events in a separate tab while analysis runs; the dashboard stays simple and the final report remains the source of truth.">分析运行时可在新标签页查看原始事件；主页面保持简洁，最终结论以报告为准。</p>
+                    <p class="button-row"><a class="buttonlink secondary" target="_blank" rel="noopener" href="${escapeHtml(liveEventsHref)}" data-zh="打开实时原始事件监控（独立页）" data-en="Open live raw event monitor (standalone)">打开实时原始事件监控（独立页）</a></p>
+                  </div>
                   <div id="analysisProgress" class="progress-box stage-progress">
                     <strong data-zh="阶段进度" data-en="Stage progress">阶段进度</strong>
                     <div class="progress-bar"><div id="progressFill" class="progress-fill"></div></div>
                     <div id="stageList" class="stages"></div>
                     <p id="progressText" class="hint" data-zh="等待启动。虚拟机恢复/启动可能占用大部分时间。" data-en="Waiting to start. VM restore/start usually takes most of the time.">等待启动。虚拟机恢复/启动可能占用大部分时间。</p>
                   </div>
-                  <p class="hint"><strong>Guest import status:</strong> <span class="pill" data-copy="${escapeAttribute(guestImportStatus.label)}" data-copy-label="guest import status">${escapeHtml(guestImportStatus.label)}</span> <span>${escapeHtml(guestImportStatus.detail)}</span></p>
-                  <div class="mini-form">
-                    <label for="guestImportPath">events.json / driver JSONL</label>
-                    <input id="guestImportPath" placeholder="${escapeAttribute(artifactPaths.eventsJsonPath || 'D:\\runtime\\jobs\\<job>\\guest\\events.json')}" value="${escapeAttribute(guestEventsPath || artifactPaths.eventsJsonPath || '')}" data-copy-label="manual guest import path">
-                  </div>
                   <details id="jobReportPaths" class="compact-details">
-                    <summary data-zh="路径 / Artifacts" data-en="Artifacts / 路径">路径 / Artifacts</summary>
+                    <summary data-zh="高级详情：事件导入与文件路径" data-en="Advanced details: event import and file paths">高级详情：事件导入与文件路径</summary>
+                    <p class="hint"><strong data-zh="事件导入状态" data-en="Event import status">事件导入状态</strong> <span class="pill" data-copy="${escapeAttribute(guestImportStatus.label)}" data-copy-label="guest import status">${escapeHtml(guestImportStatus.label)}</span> <span>${escapeHtml(guestImportStatus.detail)}</span></p>
+                    <div class="mini-form">
+                      <label for="guestImportPath" data-zh="手动事件文件（可选）" data-en="Manual event file (optional)">手动事件文件（可选）</label>
+                      <input id="guestImportPath" placeholder="${escapeAttribute(artifactPaths.eventsJsonPath || 'D:\\runtime\\jobs\\<job>\\guest\\events.json')}" value="${escapeAttribute(guestEventsPath || artifactPaths.eventsJsonPath || '')}" data-copy-label="manual guest import path">
+                      <p class="button-row">
+                        <button class="secondary" onclick="executeRunbook('${escapeJs(jobId)}', false)" data-zh="仅验证流程（不启动虚拟机）" data-en="Verify flow only (no VM start)">仅验证流程（不启动虚拟机）</button>
+                        <button class="secondary" onclick="importGuestEvents('${escapeJs(jobId)}')" data-zh="手动导入事件并刷新报告" data-en="Import events manually and refresh report">手动导入事件并刷新报告</button>
+                      </p>
+                    </div>
                     <table class="artifact-table">
-                      <thead><tr><th>Artifact</th><th>Copyable path</th><th>Status</th></tr></thead>
+                      <thead><tr><th data-zh="文件" data-en="File">文件</th><th data-zh="可复制路径" data-en="Copyable path">可复制路径</th><th data-zh="状态" data-en="Status">状态</th></tr></thead>
                       <tbody>
-                        <tr><td>report.html</td><td>${copyableCode(artifactPaths.reportHtmlPath, 'report.html path')}</td><td><a target="_blank" rel="noopener" href="${escapeHtml(servedReportHref)}">Open served HTML report</a> · <a target="_blank" rel="noopener" href="${escapeHtml(fileReportHref)}">Open local file:// report</a></td></tr>
-                        <tr><td>report.zh.html</td><td>${copyableCode(zhReportPath, 'report.zh.html path')}</td><td><a target="_blank" rel="noopener" href="${escapeHtml(servedZhReportHref)}">中文</a></td></tr>
-                        <tr><td>report.en.html</td><td>${copyableCode(enReportPath, 'report.en.html path')}</td><td><a target="_blank" rel="noopener" href="${escapeHtml(servedEnReportHref)}">English</a></td></tr>
-                        <tr><td>report.json</td><td>${copyableCode(jsonReportPath, 'report.json path')}</td><td>${artifactStatus(jsonReportPath, 'recorded')}</td></tr>
-                        <tr><td>events.json</td><td>${copyableCode(artifactPaths.eventsJsonPath, 'events.json path')}</td><td>${artifactStatus(artifactPaths.eventsJsonPath, guestEventsPath ? 'recorded/import source' : 'expected after live run')}</td></tr>
-                        <tr><td>driver-events.jsonl</td><td>${copyableCode(artifactPaths.driverEventsJsonlPath, 'driver-events.jsonl path')}</td><td>${artifactStatus(artifactPaths.driverEventsJsonlPath, 'expected driver telemetry')}</td></tr>
-                        <tr><td>runbook-execution.json</td><td>${copyableCode(artifactPaths.runbookExecutionPath, 'runbook execution path')}</td><td>${artifactStatus(runbookExecutionPath, runbookExecutionPath ? 'recorded' : 'expected after runbook execution')}</td></tr>
+                        <tr><td>report.html</td><td>${copyableCode(artifactPaths.reportHtmlPath, 'report.html path')}</td><td><a target="_blank" rel="noopener" href="${escapeHtml(servedReportHref)}" data-zh="打开服务内报告" data-en="Open served report">打开服务内报告</a> · <a target="_blank" rel="noopener" href="${escapeHtml(fileReportHref)}" data-zh="打开本地文件" data-en="Open local file">打开本地文件</a></td></tr>
+                        <tr><td>report.zh.html</td><td>${copyableCode(zhReportPath, 'report.zh.html path')}</td><td><a target="_blank" rel="noopener" href="${escapeHtml(servedZhReportHref)}" data-zh="中文报告" data-en="Chinese report">中文报告</a></td></tr>
+                        <tr><td>report.en.html</td><td>${copyableCode(enReportPath, 'report.en.html path')}</td><td><a target="_blank" rel="noopener" href="${escapeHtml(servedEnReportHref)}" data-zh="英文报告" data-en="English report">英文报告</a></td></tr>
+                        <tr><td>report.json</td><td>${copyableCode(jsonReportPath, 'report.json path')}</td><td>${artifactStatus(jsonReportPath, t('已记录', 'recorded'))}</td></tr>
+                        <tr><td>events.json</td><td>${copyableCode(artifactPaths.eventsJsonPath, 'events.json path')}</td><td>${artifactStatus(artifactPaths.eventsJsonPath, guestEventsPath ? t('已记录 / 导入来源', 'recorded / import source') : t('虚拟机分析后生成', 'expected after VM analysis'))}</td></tr>
+                        <tr><td>driver-events.jsonl</td><td>${copyableCode(artifactPaths.driverEventsJsonlPath, 'driver-events.jsonl path')}</td><td>${artifactStatus(artifactPaths.driverEventsJsonlPath, t('驱动遥测文件', 'driver telemetry'))}</td></tr>
+                        <tr><td>runbook-execution.json</td><td>${copyableCode(artifactPaths.runbookExecutionPath, 'runbook execution path')}</td><td>${artifactStatus(runbookExecutionPath, runbookExecutionPath ? t('已记录', 'recorded') : t('执行后生成', 'expected after execution'))}</td></tr>
                       </tbody>
                     </table>
                   </details>
                   <details class="compact-details">
                     <summary data-zh="最近消息" data-en="Recent messages">最近消息</summary>
-                    ${messages ? `<ul>${messages}</ul>` : '<p class="hint">No job messages recorded.</p>'}
+                    ${messages ? `<ul>${messages}</ul>` : '<p class="hint" data-zh="暂无任务消息。" data-en="No job messages recorded.">暂无任务消息。</p>'}
                   </details>
-                  <div id="executionResult" class="hint" data-copy="planned steps: ${plannedStepCount}" data-copy-label="planned runbook step count">已规划 ${plannedStepCount} 个步骤。主界面不展开 1~16 步；请打开“执行流程 / Execution flow”查看独立视图。</div>
+                  <div id="executionResult" class="hint" data-copy="planned steps: ${plannedStepCount}" data-copy-label="planned runbook step count">${t(`已规划 ${plannedStepCount} 个步骤。主界面只显示摘要；请打开“执行流程”查看详情。`, `${plannedStepCount} steps planned. The dashboard shows a summary only; open Execution flow for details.`)}</div>
                 </article>`;
               applyLanguage();
               renderStages(0, false);
@@ -525,20 +559,20 @@ internal static class DashboardExperiencePage
               // current server-side job state and rerenders the panel. Return:
               // no value; status text reports success or failure.
               if (!jobId) {
-                setStatus('No job ID is available to refresh.', true);
+                setStatus(t('没有可刷新的任务 ID。', 'No job ID is available to refresh.'), true);
                 return;
               }
 
               setBusy(true);
-              setStatus('Refreshing job status...', false);
+              setStatus(t('正在刷新任务状态...', 'Refreshing job status...'), false);
               try {
                 const response = await fetch(`/api/jobs/${encodeURIComponent(jobId)}`);
-                const job = await requireOk(response, 'Refresh job status');
+                const job = await requireOk(response, t('刷新任务状态', 'Refresh job status'));
 
                 renderJob(job);
                 applyLanguage();
             refreshJobs(false);
-                setStatus(`Job refreshed. Status: ${formatJobStatus(job.status)}.`, false);
+                setStatus(t(`任务已刷新。状态：${formatJobStatus(job.status)}。`, `Job refreshed. Status: ${formatJobStatus(job.status)}.`), false);
               } catch (error) {
                 setStatus(error.message, true);
               } finally {
@@ -552,15 +586,15 @@ internal static class DashboardExperiencePage
               // copyable status/path rows. Return: no value.
               if (showStatus) {
                 setBusy(true);
-                setStatus('Refreshing recent jobs...', false);
+                setStatus(t('正在刷新近期任务...', 'Refreshing recent jobs...'), false);
               }
 
               try {
                 const response = await fetch('/api/jobs');
-                const jobs = await requireOk(response, 'Refresh recent jobs');
+                const jobs = await requireOk(response, t('刷新近期任务', 'Refresh recent jobs'));
                 renderJobList(Array.isArray(jobs) ? jobs : []);
                 if (showStatus) {
-                  setStatus(`Recent jobs refreshed: ${Array.isArray(jobs) ? jobs.length : 0} job(s).`, false);
+                  setStatus(t(`近期任务已刷新：${Array.isArray(jobs) ? jobs.length : 0} 个。`, `Recent jobs refreshed: ${Array.isArray(jobs) ? jobs.length : 0} job(s).`), false);
                 }
               } catch (error) {
                 if (showStatus) {
@@ -583,7 +617,8 @@ internal static class DashboardExperiencePage
               }
 
               if (!jobs.length) {
-                container.innerHTML = '<p>No jobs are currently held by the Web host.</p>';
+                container.innerHTML = '<p data-zh="当前没有任务。" data-en="No jobs are currently held by the Web host.">当前没有任务。</p>';
+                applyLanguage();
                 return;
               }
 
@@ -592,19 +627,23 @@ internal static class DashboardExperiencePage
                 const statusLabel = formatJobStatus(job.status);
                 const samplePath = job.sample?.fullPath || job.submission?.samplePath || '';
                 const reportPath = job.htmlReportPath || '';
+                const reportHref = `/api/jobs/${encodeURIComponent(jobId)}/report/html?lang=${currentLanguage === 'en' ? 'en' : 'zh'}`;
+                const reportCell = reportPath
+                  ? `<a target="_blank" rel="noopener" href="${escapeHtml(reportHref)}" data-zh="打开报告" data-en="Open report">打开报告</a>`
+                  : '<span class="hint" data-zh="待生成" data-en="Not ready">待生成</span>';
                 return `
                 <tr>
                   <td>${copyableCode(jobId, 'job id')}</td>
                   <td data-copy="${escapeAttribute(statusLabel)}" data-copy-label="job status">${escapeHtml(statusLabel)}</td>
                   <td>${copyableCode(samplePath, 'job sample path', '-')}</td>
-                  <td>${copyableCode(reportPath, 'job report.html path', '-')}</td>
-                  <td><button class="secondary" onclick="refreshJob('${escapeJs(jobId)}')" data-zh="打开" data-en="Open">打开</button> <a href="/jobs/${encodeURIComponent(jobId)}/live-events" target="_blank" rel="noopener">Live raw event monitor</a></td>
+                  <td>${reportCell}</td>
+                  <td><button class="secondary" onclick="refreshJob('${escapeJs(jobId)}')" data-zh="打开任务" data-en="Open job">打开任务</button> <a class="buttonlink secondary" href="/jobs/${encodeURIComponent(jobId)}/live-events" target="_blank" rel="noopener" data-zh="实时监控独立页" data-en="Standalone live monitor">实时监控独立页</a></td>
                 </tr>`;
               }).join('');
 
               container.innerHTML = `
                 <table>
-                  <thead><tr><th>Job ID</th><th data-zh="状态" data-en="Status">状态</th><th data-zh="样本" data-en="Sample">样本</th><th>report.html</th><th data-zh="操作" data-en="Action">操作</th></tr></thead>
+                  <thead><tr><th>Job ID</th><th data-zh="状态" data-en="Status">状态</th><th data-zh="样本" data-en="Sample">样本</th><th data-zh="报告" data-en="Report">报告</th><th data-zh="入口" data-en="Links">入口</th></tr></thead>
                   <tbody>${rows}</tbody>
                 </table>`;
               applyLanguage();
@@ -619,7 +658,7 @@ internal static class DashboardExperiencePage
                 pathBox.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
               }
 
-              setStatus(reportPath ? `HTML report path: ${reportPath}` : 'No HTML report path is recorded for this job yet.', !reportPath);
+              setStatus(reportPath ? t(`报告路径：${reportPath}`, `HTML report path: ${reportPath}`) : t('当前任务还没有报告路径。', 'No HTML report path is recorded for this job yet.'), !reportPath);
             }
 
             function renderStages(active, completed) {
@@ -644,8 +683,8 @@ internal static class DashboardExperiencePage
               const text = document.getElementById('progressText');
               if (text) {
                 text.textContent = live
-                  ? t('正在执行 live runbook；启动/恢复 VM 可能需要几十秒到数分钟。', 'Executing live runbook; VM start/restore may take tens of seconds to minutes.')
-                  : t('正在记录 dry-run 执行结果。', 'Recording dry-run execution result.');
+                  ? t('正在执行虚拟机分析；启动或还原可能需要几十秒到数分钟。', 'Executing VM analysis; start or restore may take tens of seconds to minutes.')
+                  : t('正在验证流程（不启动虚拟机）。', 'Verifying flow without starting the VM.');
               }
 
               progressTimer = setInterval(() => {
@@ -670,10 +709,44 @@ internal static class DashboardExperiencePage
               window.location.href = `/api/jobs/${encodeURIComponent(jobId)}/report/html?lang=${lang}`;
             }
 
+            function buildReportHref(jobId, lang) {
+              return `/api/jobs/${encodeURIComponent(jobId)}/report/html?lang=${lang}`;
+            }
+
+            function showReportReadyNotice(jobId, autoOpen) {
+              const notice = document.getElementById('reportNotice');
+              if (!notice || !jobId) {
+                return;
+              }
+
+              const currentHref = buildReportHref(jobId, currentLanguage === 'en' ? 'en' : 'zh');
+              const zhHref = buildReportHref(jobId, 'zh');
+              const enHref = buildReportHref(jobId, 'en');
+              notice.hidden = false;
+              notice.innerHTML = `
+                <strong data-zh="报告已生成" data-en="Report is ready">报告已生成</strong>
+                <p data-zh="${autoOpen ? '页面即将打开当前语言报告；如果没有跳转，请点击下方按钮。' : '报告已刷新，可直接打开查看。'}" data-en="${autoOpen ? 'The report will open in the current language shortly; if it does not, use the buttons below.' : 'The report has been refreshed and is ready to open.'}">${autoOpen ? '页面即将打开当前语言报告；如果没有跳转，请点击下方按钮。' : '报告已刷新，可直接打开查看。'}</p>
+                <p class="button-row">
+                  <a class="buttonlink" href="${escapeHtml(currentHref)}" data-zh="打开报告" data-en="Open report">打开报告</a>
+                  <a class="buttonlink secondary" target="_blank" rel="noopener" href="${escapeHtml(zhHref)}" data-zh="新标签打开中文报告" data-en="Open Chinese report in new tab">新标签打开中文报告</a>
+                  <a class="buttonlink secondary" target="_blank" rel="noopener" href="${escapeHtml(enHref)}" data-zh="新标签打开英文报告" data-en="Open English report in new tab">新标签打开英文报告</a>
+                </p>`;
+              applyLanguage();
+              notice.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+              setStatus(
+                autoOpen
+                  ? t('报告已生成，正在打开；如果没有跳转，请点击“打开报告”。', 'Report is ready and opening; if it does not navigate, click Open report.')
+                  : t('报告已生成，可在当前任务卡片中打开。', 'Report is ready; open it from the current job card.'),
+                false);
+              if (autoOpen) {
+                setTimeout(() => openReport(jobId), 1600);
+              }
+            }
+
             async function executeRunbook(jobId, live) {
               setBusy(true);
               startEstimatedProgress(live);
-              setStatus(live ? 'Executing live Hyper-V runbook...' : 'Recording dry-run runbook execution...', false);
+              setStatus(live ? t('正在启动虚拟机分析...', 'Starting VM analysis...') : t('正在验证流程（不启动虚拟机）...', 'Verifying flow without starting the VM...'), false);
               try {
                 const response = await fetch(`/api/jobs/${encodeURIComponent(jobId)}/runbook/execute`, {
                   method: 'POST',
@@ -684,7 +757,7 @@ internal static class DashboardExperiencePage
                     importGuestEvents: true
                   })
                 });
-                const payload = await requireOk(response, live ? 'Execute live Hyper-V runbook' : 'Record dry-run runbook execution');
+                const payload = await requireOk(response, live ? t('执行虚拟机分析', 'Execute VM analysis') : t('验证流程', 'Verify flow'));
 
                 const execution = payload.execution || payload;
                 if (payload.job) {
@@ -698,13 +771,13 @@ internal static class DashboardExperiencePage
                 const importFailed = Boolean(payload.guestImportMessage && !payload.guestImportSucceeded);
                 stopEstimatedProgress();
                 renderStages(liveStages.length - 1, Boolean(execution.success));
-                setStatus((execution.success ? 'Runbook execution completed.' : 'Runbook execution stopped with a failure.') + suffix, !execution.success || importFailed);
+                setStatus((execution.success ? t('分析流程已完成。', 'Analysis flow completed.') : t('分析流程失败。', 'Analysis flow stopped with a failure.')) + suffix, !execution.success || importFailed);
                 if (live && execution.success) {
                   const text = document.getElementById('progressText');
                   if (text) {
-                    text.textContent = t('分析完成，正在打开报告。', 'Analysis completed; opening report.');
+                    text.textContent = t('分析完成，报告已生成，正在打开。', 'Analysis completed; report is ready and opening.');
                   }
-                  setTimeout(() => openReport(jobId), 900);
+                  showReportReadyNotice(jobId, !importFailed);
                 }
               } catch (error) {
                 stopEstimatedProgress();
@@ -716,7 +789,7 @@ internal static class DashboardExperiencePage
 
             async function importGuestEvents(jobId) {
               setBusy(true);
-              setStatus('Importing guest events and regenerating report...', false);
+              setStatus(t('正在导入事件并刷新报告...', 'Importing events and refreshing report...'), false);
               try {
                 const explicitPath = (document.getElementById('guestImportPath')?.value || '').trim();
                 const response = await fetch(`/api/jobs/${encodeURIComponent(jobId)}/guest-events/import`, {
@@ -724,12 +797,12 @@ internal static class DashboardExperiencePage
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify(explicitPath ? { eventsPath: explicitPath } : {})
                 });
-                const job = await requireOk(response, 'Import guest events and refresh report');
+                const job = await requireOk(response, t('导入事件并刷新报告', 'Import events and refresh report'));
 
                 renderJob(job);
                 applyLanguage();
             refreshJobs(false);
-                setStatus(`Guest events imported. Report refreshed at ${job.htmlReportPath || 'report.html'}.`, false);
+                showReportReadyNotice(jobId, false);
               } catch (error) {
                 setStatus(error.message, true);
               } finally {
@@ -803,34 +876,34 @@ internal static class DashboardExperiencePage
               if (job.guestEventsPath) {
                 if (messageText.includes('found no events')) {
                   return {
-                    label: 'imported empty',
-                    detail: `Guest import used ${job.guestEventsPath}, but no events were found. Check guest collection logs and driver-events.jsonl.`
+                    label: t('已导入（无事件）', 'imported empty'),
+                    detail: t(`已从 ${job.guestEventsPath} 导入，但未发现事件。`, `Guest import used ${job.guestEventsPath}, but no events were found.`)
                   };
                 }
 
                 return {
-                  label: 'imported',
-                  detail: `Guest events are recorded from ${job.guestEventsPath}.`
+                  label: t('已导入', 'imported'),
+                  detail: t(`事件来源：${job.guestEventsPath}`, `Guest events are recorded from ${job.guestEventsPath}.`)
                 };
               }
 
               if (messageText.includes('guest') && (messageText.includes('not imported') || messageText.includes('not found') || messageText.includes('failed'))) {
                 return {
-                  label: 'import failed',
-                  detail: 'Guest import did not complete. Review the latest job message and paste an explicit events.json or .jsonl path if needed.'
+                  label: t('导入失败', 'import failed'),
+                  detail: t('事件导入未完成；可查看最近消息，必要时手动填写事件文件。', 'Guest import did not complete. Review the latest message and paste an event file if needed.')
                 };
               }
 
               if (artifactPaths.eventsJsonPath || artifactPaths.driverEventsJsonlPath) {
                 return {
-                  label: 'waiting for import',
-                  detail: 'No guest import source is recorded yet; expected events.json and driver-events.jsonl paths are shown below.'
+                  label: t('等待导入', 'waiting for import'),
+                  detail: t('尚未记录事件来源；下方高级详情保留预期文件路径。', 'No event source is recorded yet; expected file paths are kept below.')
                 };
               }
 
               return {
-                label: 'not available',
-                detail: 'Plan/report paths are not available yet, so guest artifact paths cannot be inferred.'
+                label: t('暂无', 'not available'),
+                detail: t('计划或报告路径尚不可用。', 'Plan or report paths are not available yet.')
               };
             }
 
@@ -878,7 +951,7 @@ internal static class DashboardExperiencePage
                 return `<span class="copy-field"><code>${escapeHtml(text)}</code></span>`;
               }
 
-              return `<span class="copy-field"><code data-copy="${escapeAttribute(value)}" data-copy-label="${escapeAttribute(label)}" title="Right-click to copy ${escapeAttribute(label)}">${escapeHtml(text)}</code>${copyButton(value, label)}</span>`;
+              return `<span class="copy-field"><code data-copy="${escapeAttribute(value)}" data-copy-label="${escapeAttribute(label)}" title="${escapeAttribute(t('右键复制', 'Right-click to copy'))} ${escapeAttribute(label)}">${escapeHtml(text)}</code>${copyButton(value, label)}</span>`;
             }
 
             function copyButton(value, label) {
@@ -886,13 +959,13 @@ internal static class DashboardExperiencePage
                 return '';
               }
 
-              return `<button type="button" class="copy-btn" data-copy="${escapeAttribute(String(value))}" data-copy-label="${escapeAttribute(label || 'value')}" title="Copy ${escapeAttribute(label || 'value')}">Copy</button>`;
+              return `<button type="button" class="copy-btn" data-copy="${escapeAttribute(String(value))}" data-copy-label="${escapeAttribute(label || 'value')}" title="${escapeAttribute(t('复制', 'Copy'))} ${escapeAttribute(label || 'value')}">${t('复制', 'Copy')}</button>`;
             }
 
             async function copyText(value, label) {
               const text = value == null ? '' : String(value);
               if (!text) {
-                showCopyToast('Nothing to copy.');
+                showCopyToast(t('没有可复制的内容。', 'Nothing to copy.'));
                 return;
               }
 
@@ -903,13 +976,13 @@ internal static class DashboardExperiencePage
                   fallbackCopyText(text);
                 }
 
-                showCopyToast(`Copied ${label || 'value'}.`);
+                showCopyToast(t('已复制。', `Copied ${label || 'value'}.`));
               } catch (error) {
                 try {
                   fallbackCopyText(text);
-                  showCopyToast(`Copied ${label || 'value'}.`);
+                  showCopyToast(t('已复制。', `Copied ${label || 'value'}.`));
                 } catch {
-                  showCopyToast(`Copy failed: ${error.message}`);
+                  showCopyToast(t(`复制失败：${error.message}`, `Copy failed: ${error.message}`));
                 }
               }
             }
@@ -1039,9 +1112,9 @@ internal static class DashboardExperiencePage
 
             function formatHttpError(action, response, payload) {
               const statusText = response.statusText ? ` ${response.statusText}` : '';
-              const detail = extractErrorMessage(payload) || 'No error detail was returned by the server.';
+              const detail = extractErrorMessage(payload) || t('服务器未返回错误详情。', 'No error detail was returned by the server.');
               const traceId = payload && (payload.traceId || payload.requestId);
-              return `${action} failed (HTTP ${response.status}${statusText}${traceId ? `, trace ${traceId}` : ''}): ${detail}`;
+              return `${action} ${t('失败', 'failed')} (HTTP ${response.status}${statusText}${traceId ? `, trace ${traceId}` : ''}): ${detail}`;
             }
 
             function extractErrorMessage(payload) {

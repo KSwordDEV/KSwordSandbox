@@ -72,6 +72,8 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(doc, "Chinese and English", "Report UX doc should require Chinese and English report rendering support.");
         RequireContains(doc, "report.zh.html", "Report UX doc should mention report.zh.html.");
         RequireContains(doc, "report.en.html", "Report UX doc should mention report.en.html.");
+        RequireContains(doc, "/api/jobs/{jobId}/report/html?lang=zh", "Report UX doc should describe the Chinese served report endpoint validation.");
+        RequireContains(doc, "/api/jobs/{jobId}/report/html?lang=en", "Report UX doc should describe the English served report endpoint validation.");
 
         return Task.FromResult(new SmokeTestResult
         {

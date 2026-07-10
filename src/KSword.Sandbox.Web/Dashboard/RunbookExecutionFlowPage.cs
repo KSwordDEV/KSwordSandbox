@@ -23,6 +23,7 @@ internal static class RunbookExecutionFlowPage
         var title = "执行流程 / Execution flow";
         var rows = RenderStepCards(job, execution);
         var summary = RenderSummary(job, execution);
+        var liveEventsLink = $"<a class=\"button secondary\" href=\"/jobs/{Attr(jobId)}/live-events\" target=\"_blank\" rel=\"noopener\" data-zh=\"实时原始事件监控\" data-en=\"Live raw event monitor\">实时原始事件监控</a>";
         var reportLink = string.IsNullOrWhiteSpace(job.HtmlReportPath)
             ? "<span class=\"muted\" data-zh=\"暂无报告\" data-en=\"No report yet\">暂无报告</span>"
             : $"<a class=\"button\" href=\"/api/jobs/{Attr(jobId)}/report/html\" target=\"_blank\" rel=\"noopener\" data-zh=\"打开报告\" data-en=\"Open report\">打开报告</a>";
@@ -74,6 +75,7 @@ internal static class RunbookExecutionFlowPage
             <div class="actions">
               <a class="button secondary" href="/" data-zh="返回主界面" data-en="Back to dashboard">返回主界面</a>
               {{reportLink}}
+              {{liveEventsLink}}
             </div>
           </header>
           <main>

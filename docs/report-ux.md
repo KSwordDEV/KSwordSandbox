@@ -44,6 +44,11 @@ plain diagnostic dump. The visual contract is:
 - Jobs should keep report path fields suitable for automatic WebUI links, so a
   completed plan can expose the default report plus localized report clues
   without asking the operator to paste a filesystem path.
+- Validation should request the served bilingual endpoints
+  `/api/jobs/{jobId}/report/html?lang=zh` and
+  `/api/jobs/{jobId}/report/html?lang=en` and require `text/html` responses.
+  The default `/api/jobs/{jobId}/report/html` endpoint remains the compatibility
+  link for existing report consumers.
 
 ## Evidence interaction
 

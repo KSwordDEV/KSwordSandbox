@@ -174,6 +174,14 @@ Fix: run `scripts/Prepare-GuestPayload.ps1` from the repository root and keep
 the generated payload under `D:\Temp\KSwordSandbox` or another non-repository
 runtime directory.
 
+The readiness script is intentionally a presence and path-contract preflight;
+it does not rebuild payloads and it does not decide payload freshness on its
+own. For payload freshness, open `payload-manifest.json` and compare
+`generatedAtUtc`, `repositoryHead`, `sourceFingerprint`, and
+`sourceLatestWriteUtc` with the current repository and guest source changes. If
+the manifest is stale, rerun `scripts/Prepare-GuestPayload.ps1` before live
+execution or before refreshing the golden checkpoint.
+
 ### Runtime root writable
 
 Checks that `-RuntimeRoot` exists as a directory and appears writable from

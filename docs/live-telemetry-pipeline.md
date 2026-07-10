@@ -38,11 +38,15 @@ guest TCP/WebSocket service.
 
 The live monitor has two browser-facing surfaces:
 
+- `GET /jobs/{jobId}/live-events` for the dedicated live raw event page.
 - `GET /api/jobs/{jobId}/events/stream` for Server-Sent Events (SSE).
 - `GET /api/jobs/{jobId}/events/live` for JSON polling fallback.
 
-Both surfaces return raw, normalized telemetry. They do not classify behavior,
-score risk, or regenerate reports.
+The page consumes the two API surfaces below. Both APIs return raw, normalized
+telemetry. They do not classify behavior, score risk, or regenerate reports.
+The page itself should be validated as `text/html`, should contain both Chinese
+and English labels, and should reference `/events/stream` plus `/events/live`
+so a headless smoke can confirm the route without opening a browser.
 
 ### Polling snapshot
 

@@ -258,6 +258,7 @@ internal static class SmokeTestProgram
         Assert(html.Contains("Registry modification observed", StringComparison.Ordinal), "html report should include driver jsonl finding");
         Assert(html.Contains("R0 collector mock driver event", StringComparison.Ordinal), "html report should include R0 collector finding");
         Assert(html.Contains("r0collector.mockDriverEvent", StringComparison.Ordinal), "html report should include raw R0 event type");
+        Assert(html.Contains("driver-events.jsonl", StringComparison.Ordinal), "html report should include the imported R0 mock JSONL source path");
         Assert(html.Contains("Raw normalized events", StringComparison.Ordinal), "html report should include raw events section");
     }
 
@@ -307,8 +308,8 @@ internal static class SmokeTestProgram
     /// <summary>
     /// Verifies regenerated report JSON after guest event import.
     /// The input is the imported job, processing deserializes report.json and
-    /// checks status, metrics, raw event merge, and R0/driver event presence;
-    /// the method returns no value.
+    /// checks status, metrics, raw event merge, import counts, and R0/driver
+    /// event presence; the method returns no value.
     /// </summary>
     private static void AssertRefreshedReportJson(AnalysisJob importedJob)
     {
@@ -316,9 +317,25 @@ internal static class SmokeTestProgram
         var report = JsonSerializer.Deserialize<AnalysisReport>(File.ReadAllText(reportPath), new JsonSerializerOptions { PropertyNameCaseInsensitive = true })
             ?? throw new InvalidOperationException("report.json should deserialize");
         Assert(report.Status == AnalysisStatus.Completed, "report json should be regenerated with completed status");
-        Assert(report.Events.Any(evt => string.Equals(evt.EventType, "guest.events.imported", StringComparison.OrdinalIgnoreCase)), "report json should include guest import marker");
+        var importEvent = report.Events.FirstOrDefault(evt => string.Equals(evt.EventType, "guest.events.imported", StringComparison.OrdinalIgnoreCase));
+        Assert(importEvent is not null, "report json should include guest import marker");
+        Assert(string.Equals(importEvent!.Path, importedJob.GuestEventsPath, StringComparison.OrdinalIgnoreCase), "guest import marker should point at the imported events.json path");
+        Assert(
+            importEvent.Data.TryGetValue("eventCount", out var importedCountText) &&
+            int.TryParse(importedCountText, out var importedCount) &&
+            importedCount == 5,
+            "guest import marker should count events.json plus sibling R0 mock JSONL rows");
         Assert(report.Events.Any(evt => string.Equals(evt.EventType, "registry.set", StringComparison.OrdinalIgnoreCase)), "report json should include driver registry jsonl event");
-        Assert(report.Events.Any(evt => string.Equals(evt.EventType, "r0collector.mockDriverEvent", StringComparison.OrdinalIgnoreCase)), "report json should include synthetic R0 collector jsonl event");
+        var r0MockEvent = report.Events.FirstOrDefault(evt => string.Equals(evt.EventType, "r0collector.mockDriverEvent", StringComparison.OrdinalIgnoreCase));
+        Assert(r0MockEvent is not null, "report json should include synthetic R0 collector jsonl event");
+        Assert(
+            r0MockEvent!.Data.TryGetValue("mock", out var mockFlag) &&
+            string.Equals(mockFlag, "true", StringComparison.OrdinalIgnoreCase),
+            "synthetic R0 collector jsonl event should retain mock=true evidence");
+        Assert(
+            r0MockEvent.Data.TryGetValue("driverEventPath", out var driverEventPath) &&
+            string.Equals(driverEventPath, "driver-events.jsonl", StringComparison.OrdinalIgnoreCase),
+            "synthetic R0 collector jsonl event should retain the driver-events.jsonl source clue");
         Assert(report.Findings.Any(finding => finding.RuleId == "registry-change"), "report json should include registry rule finding");
         Assert(report.Findings.Any(finding => finding.RuleId == "r0collector-mock-driver-event"), "report json should include R0 collector rule finding");
         Assert(report.Metrics.TryGetValue("events.total", out var eventCount) && eventCount == report.Events.Count, "report metrics should count all raw events");

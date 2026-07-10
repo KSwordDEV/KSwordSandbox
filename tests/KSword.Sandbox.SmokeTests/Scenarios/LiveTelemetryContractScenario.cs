@@ -39,6 +39,8 @@ internal sealed class LiveTelemetryContractScenario : ISmokeTestScenario
 
         RequireContains(liveTelemetryDoc, "/api/jobs/{jobId}/events/stream", "Live telemetry doc should describe the SSE route.");
         RequireContains(liveTelemetryDoc, "/api/jobs/{jobId}/events/live", "Live telemetry doc should describe polling fallback.");
+        RequireContains(liveTelemetryDoc, "/jobs/{jobId}/live-events", "Live telemetry doc should describe the dedicated live raw page route.");
+        RequireContains(liveTelemetryDoc, "text/html", "Live telemetry doc should describe the live raw page validation media type.");
         RequireContains(liveTelemetryDoc, "offset", "Live telemetry doc should describe offset behavior.");
         RequireContains(liveTelemetryDoc, "take", "Live telemetry doc should describe take behavior.");
         RequireContains(liveTelemetryDoc, "intervalMs", "Live telemetry doc should describe intervalMs behavior.");

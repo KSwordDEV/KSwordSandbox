@@ -55,6 +55,29 @@ operator can see when and how the payload was prepared. The manifest now also
 records a payload contract version, required host files, and expected guest
 paths consumed by the Hyper-V readiness preflight.
 
+### Payload manifest freshness
+
+`payload-manifest.json` is the operator's freshness record for the staged
+Guest Agent and R0Collector payload. For contract version 2, check these fields
+before refreshing a golden checkpoint or starting a live run:
+
+- `payloadContractVersion`: should be `2` for the current manifest shape.
+- `generatedAtUtc`: when the payload was last prepared.
+- `repositoryHead`: git commit or working tree head used during staging.
+- `sourceFingerprint`: compact hash over the guest payload source inputs.
+- `sourceLatestWriteUtc`: newest source-file timestamp included in that
+  fingerprint.
+- `requiredHostFiles`: absolute staged paths that readiness expects, including
+  `PayloadManifest`, `GuestAgent`, and `R0Collector`.
+- `expectedGuestAgentPath` and `expectedR0CollectorPath`: guest paths the live
+  runbook validates after staging.
+
+Freshness rule: if the repository head, guest source inputs, build settings, or
+expected guest paths changed after `generatedAtUtc` / `sourceLatestWriteUtc`,
+rerun `scripts/Prepare-GuestPayload.ps1` and keep the new payload under the
+external runtime tree. Do not copy an old payload into the golden VM just
+because the required files still exist.
+
 You can validate only the staged host files, without building or copying
 anything, by running:
 
@@ -310,3 +333,10 @@ into the guest, then passes
 `--r0collector`, and `--driver-device` to the Guest Agent when driver collection
 is enabled. Use `driver.useMockCollector=true` for no-driver demos, or prepare a
 test-signed driver in the guest before expecting real R0 JSONL rows.
+
+`KSword.Sandbox.R0Collector.vcxproj` links the collector with the static MSVC
+runtime (`/MT`) for both Debug and Release. This is intentional: a clean Win10
+golden VM should not need the Visual C++ Redistributable just to run the mock or
+driver JSONL bridge. If the collector exits with `0xC0000135`, rebuild and
+restage the payload because that indicates a missing runtime dependency in the
+guest.

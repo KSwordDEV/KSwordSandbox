@@ -79,6 +79,10 @@ DriverEntry(
         DriverObject,
         RegistryPath,
         deviceExtension);
+    KswRecordProducerStatus(
+        deviceExtension,
+        KSWORD_SANDBOX_PRODUCER_FLAG_FILE,
+        status);
     if (!NT_SUCCESS(status)) {
         KswSetLastStatus(deviceExtension, status);
     }
@@ -100,6 +104,10 @@ DriverEntry(
      * must not prevent the control device or other telemetry from loading.
      */
     status = KswInitializeRegistryMonitor(DriverObject, deviceExtension);
+    KswRecordProducerStatus(
+        deviceExtension,
+        KSWORD_SANDBOX_PRODUCER_FLAG_REGISTRY,
+        status);
     if (!NT_SUCCESS(status)) {
         KswSetLastStatus(deviceExtension, status);
     }
@@ -110,6 +118,10 @@ DriverEntry(
      * may lack usable WFP state during early driver bring-up.
      */
     status = KswInitializeNetworkMonitor(deviceObject, deviceExtension);
+    KswRecordProducerStatus(
+        deviceExtension,
+        KSWORD_SANDBOX_PRODUCER_FLAG_NETWORK,
+        status);
     if (!NT_SUCCESS(status)) {
         KswSetLastStatus(deviceExtension, status);
     }

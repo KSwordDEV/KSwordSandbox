@@ -44,7 +44,14 @@ internal sealed class HyperVReadinessContractScenario : ISmokeTestScenario
         RequireContains(repositoryPolicyScript, "Value was not printed", "Repository policy should not print rejected secret values.");
 
         RequireContains(payloadScript, "payloadContractVersion", "Payload manifest should expose a contract version.");
+        RequireContains(payloadScript, "payloadContractVersion = 2", "Payload manifest should expose the current freshness-aware contract version.");
+        RequireContains(payloadScript, "generatedAtUtc", "Payload manifest should record when the payload was generated.");
+        RequireContains(payloadScript, "repositoryHead", "Payload manifest should record the repository head used for staging.");
+        RequireContains(payloadScript, "sourceFingerprint", "Payload manifest should record a source freshness fingerprint.");
+        RequireContains(payloadScript, "sourceLatestWriteUtc", "Payload manifest should record the newest source input timestamp.");
         RequireContains(payloadScript, "requiredHostFiles", "Payload manifest should list readiness-required host files.");
+        RequireContains(payloadScript, "expectedGuestAgentPath", "Payload manifest should record the expected guest agent path.");
+        RequireContains(payloadScript, "expectedR0CollectorPath", "Payload manifest should record the expected guest R0Collector path.");
         RequireContains(payloadScript, "Assert-StagedPayloadFile", "Payload preparation should verify staged executable outputs.");
 
         RequireContains(readinessDoc, "Host payload files", "Readiness doc should describe host payload checks.");
@@ -56,7 +63,13 @@ internal sealed class HyperVReadinessContractScenario : ISmokeTestScenario
         RequireContains(goldenVmDoc, "Readiness preflight", "Golden VM doc should reference the readiness preflight.");
         RequireContains(runbookDoc, "The preflight is intentionally safer than the live runbook", "Runbook doc should distinguish preflight from live execution.");
         RequireContains(runbookDoc, "PromptForMissingGuestPassword", "Runbook doc should document the process-only password prompt.");
+        RequireContains(readinessDoc, "payload freshness", "Readiness doc should explain how to evaluate payload freshness.");
+        RequireContains(readinessDoc, "generatedAtUtc", "Readiness doc should mention the payload manifest generation timestamp.");
+        RequireContains(readinessDoc, "sourceFingerprint", "Readiness doc should mention the payload manifest source fingerprint.");
         RequireContains(payloadDoc, "payload contract version", "Payload staging doc should mention manifest contract metadata.");
+        RequireContains(payloadDoc, "Payload manifest freshness", "Payload staging doc should include freshness validation guidance.");
+        RequireContains(payloadDoc, "sourceLatestWriteUtc", "Payload staging doc should explain source freshness timestamps.");
+        RequireContains(payloadDoc, "repositoryHead", "Payload staging doc should explain repository-head freshness checks.");
 
         return Task.FromResult(new SmokeTestResult
         {

@@ -57,7 +57,7 @@ internal static class LiveEventsPage
             <div class="topbar">
               <div>
                 <h1 data-zh="实时原始事件监控" data-en="Live raw event monitor">实时原始事件监控</h1>
-                <p data-zh="这里只显示未归类原始事件；分析结束后才统一归类并生成报告。" data-en="This page shows unclassified raw events only; final classification happens after analysis completes.">这里只显示未归类原始事件；分析结束后才统一归类并生成报告。</p>
+                <p data-zh="这是独立页面，可与主界面并行打开；这里只显示未归类原始事件，最终结论请看报告。" data-en="This standalone page can stay open beside the dashboard; it shows unclassified raw events only, and final conclusions stay in the report.">这是独立页面，可与主界面并行打开；这里只显示未归类原始事件，最终结论请看报告。</p>
                 <p><span class="pill">Job</span> <code data-copy="{{Attr(jobId)}}">{{Html(jobId)}}</code></p>
               </div>
               <button class="secondary" id="langToggle" type="button">English</button>
@@ -66,6 +66,7 @@ internal static class LiveEventsPage
               <a class="button secondary" href="/" data-zh="返回主界面" data-en="Back to dashboard">返回主界面</a>
               <a class="button secondary" href="/jobs/{{Attr(jobId)}}/execution-flow" data-zh="执行流程" data-en="Execution flow">执行流程</a>
               <a class="button" href="/api/jobs/{{Attr(jobId)}}/report/html?lang=zh" target="_blank" rel="noopener" data-zh="打开中文报告" data-en="Open Chinese report">打开中文报告</a>
+              <a class="button secondary" href="/api/jobs/{{Attr(jobId)}}/report/html?lang=en" target="_blank" rel="noopener" data-zh="打开英文报告" data-en="Open English report">打开英文报告</a>
               <button type="button" onclick="connectSse()" data-zh="连接实时流" data-en="Connect stream">连接实时流</button>
               <button class="secondary" type="button" onclick="refreshLiveEvents(true)" data-zh="手动刷新" data-en="Manual refresh">手动刷新</button>
             </div>
@@ -76,7 +77,7 @@ internal static class LiveEventsPage
               <div class="grid">
                 <div class="metric"><strong data-zh="样本" data-en="Sample">样本</strong><code data-copy="{{Attr(samplePath)}}">{{Html(samplePath)}}</code></div>
                 <div class="metric"><strong data-zh="状态" data-en="Status">状态</strong><span class="pill" data-copy="{{Attr(job.Status.ToString())}}">{{Html(job.Status.ToString())}}</span></div>
-                <div class="metric"><strong>events.json</strong><code data-copy="{{Attr(job.GuestEventsPath ?? string.Empty)}}">{{Html(string.IsNullOrWhiteSpace(job.GuestEventsPath) ? "等待回收 / waiting" : job.GuestEventsPath)}}</code></div>
+                <div class="metric"><strong data-zh="事件文件" data-en="Event file">事件文件</strong><code data-copy="{{Attr(job.GuestEventsPath ?? string.Empty)}}">{{Html(string.IsNullOrWhiteSpace(job.GuestEventsPath) ? "等待回收 / waiting" : job.GuestEventsPath)}}</code></div>
                 <div class="metric"><strong data-zh="报告" data-en="Report">报告</strong><code data-copy="{{Attr(job.HtmlReportPath ?? string.Empty)}}">{{Html(job.HtmlReportPath ?? "report.html")}}</code></div>
               </div>
               <div id="status" class="status muted" data-zh="等待连接实时事件流。" data-en="Waiting to connect live event stream.">等待连接实时事件流。</div>
@@ -87,7 +88,7 @@ internal static class LiveEventsPage
               <p class="muted" data-zh="右键任意表格单元可复制。若 SSE 不可用，会自动降级为轮询。" data-en="Right-click any table cell to copy. If SSE is unavailable, the page falls back to polling.">右键任意表格单元可复制。若 SSE 不可用，会自动降级为轮询。</p>
               <div class="table-wrap">
                 <table>
-                  <thead><tr><th>time</th><th>eventType</th><th>source</th><th>pid/process</th><th>path</th><th>commandLine</th><th>data</th></tr></thead>
+                  <thead><tr><th data-zh="时间" data-en="time">时间</th><th data-zh="事件类型" data-en="eventType">事件类型</th><th data-zh="来源" data-en="source">来源</th><th data-zh="进程" data-en="pid/process">进程</th><th data-zh="路径" data-en="path">路径</th><th data-zh="命令行" data-en="commandLine">命令行</th><th data-zh="数据" data-en="data">数据</th></tr></thead>
                   <tbody id="eventRows"><tr><td colspan="7" class="muted" data-zh="暂无事件。" data-en="No events yet.">暂无事件。</td></tr></tbody>
                 </table>
               </div>
@@ -154,7 +155,7 @@ internal static class LiveEventsPage
               }
               try {
                 const response = await fetch(`/api/jobs/${encodeURIComponent(jobId)}/events/live?offset=${eventOffset}&take=100`);
-                const payload = await requireOk(response, 'live events');
+                const payload = await requireOk(response, t('实时事件', 'live events'));
                 renderSnapshot(payload, 'poll');
               } catch (error) {
                 setStatus(error.message, true);
@@ -173,7 +174,7 @@ internal static class LiveEventsPage
               eventOffset = snapshot.nextOffset || eventOffset;
               renderSources(snapshot.sources || []);
               appendRows(snapshot.events || []);
-              setStatus(`${transport}: ${snapshot.totalEvents || 0} raw events; next offset ${eventOffset}; ${new Date().toLocaleTimeString()}.`, false);
+              setStatus(t(`${transport}：${snapshot.totalEvents || 0} 条原始事件；下次位置 ${eventOffset}；${new Date().toLocaleTimeString()}。`, `${transport}: ${snapshot.totalEvents || 0} raw events; next offset ${eventOffset}; ${new Date().toLocaleTimeString()}.`), false);
             }
 
             function renderSources(sources) {
@@ -182,7 +183,7 @@ internal static class LiveEventsPage
                 target.textContent = t('尚未发现事件源。', 'No event sources found yet.');
                 return;
               }
-              target.innerHTML = '<strong>Sources</strong><ul>' + sources.map(s => `<li><code data-copy="${escapeAttr(s)}">${escapeHtml(s)}</code></li>`).join('') + '</ul>';
+              target.innerHTML = `<strong>${t('事件来源', 'Sources')}</strong><ul>` + sources.map(s => `<li><code data-copy="${escapeAttr(s)}">${escapeHtml(s)}</code></li>`).join('') + '</ul>';
             }
 
             function appendRows(events) {
@@ -219,7 +220,7 @@ internal static class LiveEventsPage
               const text = await response.text();
               let payload;
               try { payload = text ? JSON.parse(text) : {}; } catch { payload = { error: text }; }
-              if (!response.ok) { throw new Error(`${label} failed: ${payload.error || response.status}`); }
+              if (!response.ok) { throw new Error(`${label} ${t('失败', 'failed')}: ${payload.error || response.status}`); }
               return payload;
             }
 

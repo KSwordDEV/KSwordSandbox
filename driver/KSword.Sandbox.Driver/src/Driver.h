@@ -74,8 +74,11 @@ typedef struct _KSWORD_SANDBOX_DEVICE_EXTENSION {
     ULONGLONG EventsSuppressed;
     ULONGLONG NextSequence;
     NTSTATUS LastStatus;
+    NTSTATUS LastFailureStatus;
     ULONG ProducerEnableMask;
     ULONG SupportedProducerMask;
+    ULONG ActiveProducerMask;
+    ULONG FailedProducerMask;
     ULONG EventReadIndex;
     ULONG EventWriteIndex;
     ULONG EventCount;
@@ -100,8 +103,11 @@ typedef struct _KSWORD_SANDBOX_STATE_SNAPSHOT {
     ULONGLONG EventsSuppressed;
     ULONGLONG NextSequence;
     NTSTATUS LastStatus;
+    NTSTATUS LastFailureStatus;
     ULONG ProducerEnableMask;
     ULONG SupportedProducerMask;
+    ULONG ActiveProducerMask;
+    ULONG FailedProducerMask;
     ULONG QueueCapacity;
     ULONG EventCount;
     ULONG QueueHighWatermark;
@@ -128,6 +134,13 @@ typedef struct _KSWORD_SANDBOX_FILE_FILTER_RUNTIME {
 VOID
 KswSetLastStatus(
     _Inout_ PKSWORD_SANDBOX_DEVICE_EXTENSION DeviceExtension,
+    _In_ NTSTATUS Status
+    );
+
+VOID
+KswRecordProducerStatus(
+    _Inout_ PKSWORD_SANDBOX_DEVICE_EXTENSION DeviceExtension,
+    _In_ ULONG ProducerMask,
     _In_ NTSTATUS Status
     );
 
@@ -180,6 +193,7 @@ KswDrainEventHeaders(
     _Out_writes_bytes_(EventCapacityBytes) PUCHAR EventBuffer,
     _In_ ULONG EventCapacityBytes,
     _In_ ULONG MaxEvents,
+    _In_ ULONGLONG StartingSequence,
     _Out_ PULONG EventsWritten,
     _Out_ PULONG BytesWritten,
     _Out_ PULONGLONG EventsDropped,
