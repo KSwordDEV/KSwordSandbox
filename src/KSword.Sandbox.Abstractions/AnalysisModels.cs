@@ -34,7 +34,8 @@ public sealed record SandboxSubmission
 /// <summary>
 /// Stores stable file identity for the submitted sample.
 /// Inputs are read from the host filesystem, processing hashes the file with
-/// SHA-256, and the record is returned in job metadata and reports.
+/// common malware-analysis digests, and the record is returned in job metadata
+/// and reports.
 /// </summary>
 public sealed record SampleIdentity
 {
@@ -43,6 +44,12 @@ public sealed record SampleIdentity
     public required string FullPath { get; init; }
 
     public required string Sha256 { get; init; }
+
+    public required string Sha1 { get; init; }
+
+    public required string Md5 { get; init; }
+
+    public required string Crc32 { get; init; }
 
     public long SizeBytes { get; init; }
 }

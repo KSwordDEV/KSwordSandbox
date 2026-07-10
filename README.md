@@ -74,6 +74,9 @@ Install the optional local pre-commit hook:
 The policy rejects VM images, compiled binaries, symbols, PDFs, archives,
 samples, runtime reports, secrets, and files over 25 MB.
 
+The repository remote can be configured as `origin`, but the default workflow is
+local commits only. Push to GitHub only when explicitly requested.
+
 ## Hyper-V assumption
 
 The default configuration expects a local golden VM named

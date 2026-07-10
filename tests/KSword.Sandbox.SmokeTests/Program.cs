@@ -115,9 +115,18 @@ internal static class SmokeTestProgram
         });
 
         Assert(job.Status == AnalysisStatus.Planned, "job should be planned");
+        Assert(!string.IsNullOrWhiteSpace(job.Sample?.Md5), "md5 should be computed");
+        Assert(!string.IsNullOrWhiteSpace(job.Sample?.Sha1), "sha1 should be computed");
+        Assert(!string.IsNullOrWhiteSpace(job.Sample?.Crc32), "crc32 should be computed");
         Assert(job.Runbook is not null && job.Runbook.Steps.Count > 0, "runbook should contain steps");
         Assert(File.Exists(job.JsonReportPath), "json report should exist");
         Assert(File.Exists(job.HtmlReportPath), "html report should exist");
+
+        var htmlReportPath = job.HtmlReportPath ?? throw new InvalidOperationException("html report path should be set");
+        var html = File.ReadAllText(htmlReportPath);
+        Assert(html.Contains("Risk summary", StringComparison.Ordinal), "html report should include risk summary");
+        Assert(html.Contains("Static analysis", StringComparison.Ordinal), "html report should include static analysis");
+        Assert(html.Contains("CRC32", StringComparison.Ordinal), "html report should include crc32");
     }
 
     /// <summary>
