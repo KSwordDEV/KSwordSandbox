@@ -34,7 +34,31 @@ app.MapGet("/api/jobs", (SandboxJobService service) => Results.Ok(service.ListJo
 app.MapGet("/api/jobs/{jobId:guid}", (Guid jobId, SandboxJobService service) =>
 {
     var job = service.GetJob(jobId);
-    return job is null ? Results.NotFound() : Results.Ok(job);
+    return job is null ? Results.NotFound(new { error = "Job was not found." }) : Results.Ok(job);
+});
+// GET /api/jobs/{jobId}/report/html accepts only a job identifier from the
+// route. It never accepts a caller-supplied filesystem path; processing looks
+// up the recorded HTML report path for that job and returns the report body
+// when the file still exists.
+app.MapGet("/api/jobs/{jobId:guid}/report/html", async Task<IResult> (Guid jobId, SandboxJobService service) =>
+{
+    if (!TryResolveHtmlReportPath(jobId, service, out var reportPath, out var errorResult))
+    {
+        return errorResult ?? Results.NotFound(new { error = "HTML report was not found for this job." });
+    }
+
+    try
+    {
+        var html = await File.ReadAllTextAsync(reportPath);
+        return Results.Content(html, "text/html; charset=utf-8");
+    }
+    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+    {
+        return Results.Problem(
+            title: "Unable to read HTML report.",
+            detail: ex.Message,
+            statusCode: 500);
+    }
 });
 app.MapPost("/api/files/scan", (ExecutableScanRequest request, ExecutableTargetScanner scanner) =>
 {
@@ -92,7 +116,47 @@ app.MapPost("/api/jobs/{jobId:guid}/runbook/execute", async (Guid jobId, Runbook
         WorkingDirectory = Directory.GetCurrentDirectory()
     };
     var result = await executor.ExecuteAsync(job.Runbook, options);
-    return Results.Ok(result);
+    var updatedJob = service.SaveRunbookExecutionResult(jobId, result);
+    var guestImportSucceeded = false;
+    string? guestImportMessage = null;
+
+    if (request.ImportGuestEvents && request.Live && result.Success)
+    {
+        try
+        {
+            updatedJob = service.ImportGuestEvents(jobId);
+            guestImportSucceeded = true;
+            guestImportMessage = $"Guest events imported from {updatedJob.GuestEventsPath}.";
+        }
+        catch (Exception ex) when (ex is DirectoryNotFoundException or FileNotFoundException or InvalidDataException or IOException or UnauthorizedAccessException)
+        {
+            guestImportMessage = $"Runbook completed, but guest events were not imported automatically: {ex.Message}";
+        }
+    }
+
+    return Results.Ok(new
+    {
+        execution = result,
+        job = updatedJob,
+        guestImportSucceeded,
+        guestImportMessage
+    });
+});
+app.MapPost("/api/jobs/{jobId:guid}/guest-events/import", (Guid jobId, GuestEventImportRequest request, SandboxJobService service) =>
+{
+    try
+    {
+        var job = service.ImportGuestEvents(jobId, request.EventsPath);
+        return Results.Ok(job);
+    }
+    catch (KeyNotFoundException ex)
+    {
+        return Results.NotFound(new { error = ex.Message });
+    }
+    catch (Exception ex) when (ex is DirectoryNotFoundException or FileNotFoundException or InvalidDataException or IOException or UnauthorizedAccessException)
+    {
+        return Results.BadRequest(new { error = ex.Message });
+    }
 });
 
 app.Run();
@@ -116,6 +180,60 @@ static string ResolveRepositoryRoot(string contentRoot)
     }
 
     return contentRoot;
+}
+
+/// <summary>
+/// Resolves the HTML report file recorded for a job without accepting a path
+/// from the browser. Inputs are a job ID and job service, processing validates
+/// job existence, recorded path shape, extension, and file existence, and the
+/// function returns true plus a full path or false plus an HTTP error result.
+/// </summary>
+static bool TryResolveHtmlReportPath(Guid jobId, SandboxJobService service, out string reportPath, out IResult? errorResult)
+{
+    reportPath = string.Empty;
+    errorResult = null;
+
+    var job = service.GetJob(jobId);
+    if (job is null)
+    {
+        errorResult = Results.NotFound(new { error = "Job was not found." });
+        return false;
+    }
+
+    if (string.IsNullOrWhiteSpace(job.HtmlReportPath))
+    {
+        errorResult = Results.NotFound(new { error = "Job does not have an HTML report path." });
+        return false;
+    }
+
+    try
+    {
+        reportPath = Path.GetFullPath(job.HtmlReportPath);
+    }
+    catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+    {
+        errorResult = Results.BadRequest(new { error = $"Recorded HTML report path is invalid: {ex.Message}" });
+        reportPath = string.Empty;
+        return false;
+    }
+
+    var extension = Path.GetExtension(reportPath);
+    if (!string.Equals(extension, ".html", StringComparison.OrdinalIgnoreCase) &&
+        !string.Equals(extension, ".htm", StringComparison.OrdinalIgnoreCase))
+    {
+        errorResult = Results.BadRequest(new { error = "Recorded report path is not an HTML file." });
+        reportPath = string.Empty;
+        return false;
+    }
+
+    if (!File.Exists(reportPath))
+    {
+        errorResult = Results.NotFound(new { error = "HTML report file was not found for this job." });
+        reportPath = string.Empty;
+        return false;
+    }
+
+    return true;
 }
 
 /// <summary>
@@ -207,8 +325,9 @@ static string RenderDashboard()
             section { background: white; border: 1px solid #e5e7eb; border-radius: 14px; box-shadow: 0 8px 28px rgba(15, 23, 42, .06); margin-bottom: 18px; padding: 22px; }
             label { display: block; font-weight: 600; margin: 14px 0 6px; }
             input { box-sizing: border-box; width: 100%; border: 1px solid #cbd5e1; border-radius: 10px; padding: 10px 12px; font: inherit; }
-            button { border: 0; border-radius: 10px; background: #1d4ed8; color: white; cursor: pointer; font-weight: 700; margin-top: 14px; padding: 10px 16px; }
+            button, a.buttonlink { border: 0; border-radius: 10px; background: #1d4ed8; color: white; cursor: pointer; display: inline-block; font-weight: 700; margin-top: 14px; padding: 10px 16px; text-decoration: none; }
             button.secondary { background: #334155; }
+            a.buttonlink.secondary { background: #334155; }
             button:disabled { background: #94a3b8; cursor: wait; }
             table { border-collapse: collapse; width: 100%; margin-top: 16px; }
             td, th { border-bottom: 1px solid #e5e7eb; padding: 9px; text-align: left; vertical-align: top; }
@@ -221,6 +340,7 @@ static string RenderDashboard()
             .status { margin-top: 12px; min-height: 24px; }
             .error { color: #b91c1c; }
             .ok { color: #047857; }
+            .pathbox { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; margin-top: 10px; padding: 12px; }
             .pill { background: #dbeafe; border-radius: 999px; color: #1e40af; display: inline-block; font-size: 12px; font-weight: 700; padding: 3px 8px; }
             @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
           </style>
@@ -391,20 +511,87 @@ static string RenderDashboard()
             }
 
             function renderJob(job) {
+              // Inputs: one AnalysisJob payload returned by the API. Processing:
+              // precomputes safe report links and artifact path labels. Return:
+              // no value; the latest job panel is replaced in-place.
+              const jobId = String(job.jobId || '');
+              const htmlReportPath = job.htmlReportPath || '';
+              const jsonReportPath = job.jsonReportPath || '';
+              const runbookExecutionPath = job.runbookExecutionResultPath || '';
+              const guestEventsPath = job.guestEventsPath || '';
+              const servedReportHref = jobId ? `/api/jobs/${encodeURIComponent(jobId)}/report/html` : '';
+              const fileReportHref = toFileUri(htmlReportPath);
               const steps = (job.runbook?.steps || []).map(step => `<li><strong>${escapeHtml(step.title)}</strong><br><code>${escapeHtml(step.powerShell)}</code></li>`).join('');
+              const messages = (job.messages || []).map(message => `<li>${escapeHtml(message)}</li>`).join('');
+              const reportLinks = htmlReportPath ? `
+                  <a class="buttonlink" target="_blank" rel="noopener" href="${escapeHtml(servedReportHref)}">Open served HTML report</a>
+                  <a class="buttonlink secondary" target="_blank" rel="noopener" href="${escapeHtml(fileReportHref)}">Open local file:// report</a>` : '<span class="hint">No HTML report path is recorded yet.</span>';
               document.getElementById('jobResult').innerHTML = `
-                <p><strong>Job:</strong> <code>${escapeHtml(job.jobId)}</code></p>
-                <p><strong>Status:</strong> ${escapeHtml(job.status)}</p>
+                <p><strong>Job:</strong> <code>${escapeHtml(jobId)}</code></p>
+                <p><strong>Status:</strong> <span class="pill">${escapeHtml(job.status)}</span></p>
                 <p><strong>Sample:</strong> <code>${escapeHtml(job.sample?.fullPath || '')}</code></p>
-                <p><strong>JSON report:</strong> <code>${escapeHtml(job.jsonReportPath || '')}</code></p>
-                <p><strong>HTML report:</strong> <code>${escapeHtml(job.htmlReportPath || '')}</code></p>
+                <h3>Report access</h3>
+                <p>
+                  <button class="secondary" onclick="refreshJob('${escapeJs(jobId)}')">Refresh job</button>
+                  <button class="secondary" onclick="showReportPaths('${escapeJs(htmlReportPath)}')">Show report path</button>
+                  ${reportLinks}
+                </p>
+                <div id="jobReportPaths" class="pathbox">
+                  <p><strong>HTML report path:</strong> <code>${escapeHtml(htmlReportPath || '(not recorded)')}</code></p>
+                  <p><strong>JSON report path:</strong> <code>${escapeHtml(jsonReportPath || '(not recorded)')}</code></p>
+                  <p><strong>Runbook execution path:</strong> <code>${escapeHtml(runbookExecutionPath || '(not recorded)')}</code></p>
+                  <p><strong>Guest events path:</strong> <code>${escapeHtml(guestEventsPath || '(not recorded)')}</code></p>
+                  <p class="hint">If the browser blocks the file:// link, copy the HTML report path above or use the served report link.</p>
+                </div>
+                <h3>Job messages</h3>
+                ${messages ? `<ul>${messages}</ul>` : '<p class="hint">No job messages recorded.</p>'}
                 <h3>Hyper-V runbook</h3>
                 <p>
-                  <button class="secondary" onclick="executeRunbook('${escapeJs(job.jobId)}', false)">Record dry-run execution</button>
-                  <button onclick="executeRunbook('${escapeJs(job.jobId)}', true)">Execute live runbook</button>
+                  <button class="secondary" onclick="executeRunbook('${escapeJs(jobId)}', false)">Record dry-run execution</button>
+                  <button onclick="executeRunbook('${escapeJs(jobId)}', true)">Execute live runbook</button>
+                  <button class="secondary" onclick="importGuestEvents('${escapeJs(jobId)}')">Import guest events / refresh report</button>
                 </p>
                 <div id="executionResult" class="hint">Live execution requires an elevated host process and a prepared golden VM.</div>
                 <ol>${steps}</ol>`;
+            }
+
+            async function refreshJob(jobId) {
+              // Inputs: jobId from the rendered job panel. Processing: fetches
+              // current server-side job state and rerenders the panel. Return:
+              // no value; status text reports success or failure.
+              if (!jobId) {
+                setStatus('No job ID is available to refresh.', true);
+                return;
+              }
+
+              setBusy(true);
+              setStatus('Refreshing job status...', false);
+              try {
+                const response = await fetch(`/api/jobs/${encodeURIComponent(jobId)}`);
+                const job = await response.json();
+                if (!response.ok) {
+                  throw new Error(job.error || 'Job refresh failed');
+                }
+
+                renderJob(job);
+                setStatus(`Job refreshed. Status: ${job.status}.`, false);
+              } catch (error) {
+                setStatus(error.message, true);
+              } finally {
+                setBusy(false);
+              }
+            }
+
+            function showReportPaths(reportPath) {
+              // Inputs: the current HTML report path string. Processing: keeps
+              // the visible path box in view and mirrors the path into the
+              // status line. Return: no value.
+              const pathBox = document.getElementById('jobReportPaths');
+              if (pathBox) {
+                pathBox.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+              }
+
+              setStatus(reportPath ? `HTML report path: ${reportPath}` : 'No HTML report path is recorded for this job yet.', !reportPath);
             }
 
             async function executeRunbook(jobId, live) {
@@ -416,7 +603,8 @@ static string RenderDashboard()
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({
                     live,
-                    stepTimeoutSeconds: 1800
+                    stepTimeoutSeconds: 1800,
+                    importGuestEvents: true
                   })
                 });
                 const payload = await response.json();
@@ -424,8 +612,15 @@ static string RenderDashboard()
                   throw new Error(payload.error || 'Runbook execution failed');
                 }
 
-                renderExecution(payload);
-                setStatus(payload.success ? 'Runbook execution completed.' : 'Runbook execution stopped with a failure.', !payload.success);
+                const execution = payload.execution || payload;
+                if (payload.job) {
+                  renderJob(payload.job);
+                }
+
+                renderExecution(execution, payload);
+                const suffix = payload.guestImportMessage ? ` ${payload.guestImportMessage}` : '';
+                const importFailed = Boolean(payload.guestImportMessage && !payload.guestImportSucceeded);
+                setStatus((execution.success ? 'Runbook execution completed.' : 'Runbook execution stopped with a failure.') + suffix, !execution.success || importFailed);
               } catch (error) {
                 setStatus(error.message, true);
               } finally {
@@ -433,7 +628,30 @@ static string RenderDashboard()
               }
             }
 
-            function renderExecution(result) {
+            async function importGuestEvents(jobId) {
+              setBusy(true);
+              setStatus('Importing guest events and regenerating report...', false);
+              try {
+                const response = await fetch(`/api/jobs/${jobId}/guest-events/import`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({})
+                });
+                const job = await response.json();
+                if (!response.ok) {
+                  throw new Error(job.error || 'Guest event import failed');
+                }
+
+                renderJob(job);
+                setStatus(`Guest events imported. Report refreshed at ${job.htmlReportPath || 'report.html'}.`, false);
+              } catch (error) {
+                setStatus(error.message, true);
+              } finally {
+                setBusy(false);
+              }
+            }
+
+            function renderExecution(result, wrapper) {
               const rows = (result.stepResults || []).map(step => `
                 <tr>
                   <td>${step.stepIndex}</td>
@@ -443,9 +661,11 @@ static string RenderDashboard()
                   <td>${step.exitCode ?? ''}</td>
                   <td>${escapeHtml(step.message || '')}</td>
                 </tr>`).join('');
+              const importMessage = wrapper && wrapper.guestImportMessage ? `<p class="${wrapper.guestImportSucceeded ? 'ok' : 'hint'}">${escapeHtml(wrapper.guestImportMessage)}</p>` : '';
               document.getElementById('executionResult').innerHTML = `
                 <p><strong>Mode:</strong> ${escapeHtml(result.mode)} | <strong>Success:</strong> ${result.success} | <strong>Executed:</strong> ${result.executedSteps}/${result.totalSteps}</p>
                 ${result.message ? `<p class="error">${escapeHtml(result.message)}</p>` : ''}
+                ${importMessage}
                 <table>
                   <thead><tr><th>#</th><th>Step</th><th>Status</th><th>Skipped</th><th>Exit</th><th>Message</th></tr></thead>
                   <tbody>${rows}</tbody>
@@ -468,6 +688,33 @@ static string RenderDashboard()
               if (bytes < 1024) return `${bytes} B`;
               if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KiB`;
               return `${(bytes / 1024 / 1024).toFixed(1)} MiB`;
+            }
+
+            function toFileUri(path) {
+              // Inputs: a local Windows or POSIX path recorded in job metadata.
+              // Processing: normalizes separators and URI-encodes each path
+              // segment. Return: a file:/// URL best effort; browsers may still
+              // block it from http:// pages by policy.
+              if (!path) {
+                return '';
+              }
+
+              let normalized = String(path).replace(/\\/g, '/');
+              if (/^[A-Za-z]:\//.test(normalized)) {
+                const drive = normalized.slice(0, 2);
+                const tail = normalized.slice(2).split('/').map(encodeURIComponent).join('/');
+                return `file:///${drive}${tail}`;
+              }
+
+              if (normalized.startsWith('//')) {
+                return `file:${normalized.split('/').map(encodeURIComponent).join('/')}`;
+              }
+
+              if (normalized.startsWith('/')) {
+                return `file://${normalized.split('/').map(encodeURIComponent).join('/')}`;
+              }
+
+              return `file:///${normalized.split('/').map(encodeURIComponent).join('/')}`;
             }
 
             function escapeHtml(value) {
@@ -493,4 +740,16 @@ internal sealed record RunbookExecuteRequest
     public bool Live { get; init; }
 
     public int StepTimeoutSeconds { get; init; } = 1800;
+
+    public bool ImportGuestEvents { get; init; } = true;
+}
+
+/// <summary>
+/// Request body for importing collected guest events after a runbook.
+/// Inputs may specify an explicit events.json or JSONL path; processing passes
+/// the path to the job service, and the record itself is not persisted.
+/// </summary>
+internal sealed record GuestEventImportRequest
+{
+    public string? EventsPath { get; init; }
 }

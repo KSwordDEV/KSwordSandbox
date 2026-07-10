@@ -30,7 +30,10 @@ requires an elevated host process plus a prepared golden VM.
 ```text
 config/                         Configuration templates only
 docs/                           Operator and developer runbooks
+driver/KSword.Sandbox.Driver/   WDK R0 event driver skeleton
 guest/KSword.Sandbox.Agent/     Guest-side collector
+guest/KSword.Sandbox.R0Collector/
+                                User-mode bridge from driver IOCTLs to JSONL
 rules/                          Behavior and static-rule seeds
 scripts/                        Build, smoke-test, and repository checks
 src/KSword.Sandbox.Abstractions Shared models
@@ -46,6 +49,17 @@ dotnet build .\KSwordSandbox.sln
 .\scripts\Invoke-SandboxSmokeTest.ps1
 dotnet run --project .\src\KSword.Sandbox.Web\KSword.Sandbox.Web.csproj
 ```
+
+Build the native x64 collector and driver skeleton from the main solution:
+
+```powershell
+.\scripts\Invoke-NativeBuild.ps1 -Project .\KSwordSandbox.sln -Configuration Debug -Platform x64
+```
+
+`Invoke-NativeBuild.ps1` normalizes the child MSBuild environment so native
+Visual C++ tasks do not fail when the parent shell contains both `PATH` and
+`Path`. The driver project defaults to unsigned source builds; sign the generated
+`.sys` explicitly outside git before loading it in a VM.
 
 Plan a dry-run job:
 
@@ -93,6 +107,11 @@ copied into the guest image or staged by the Hyper-V runner. The guest agent can
 ingest driver events from JSON Lines at the configured path. The v1 scaffold
 does not copy the full `D:\Projects\Ksword5.1` tree and does not commit driver
 binaries.
+
+The initial R0 source path now contains a WDK control-device skeleton under
+`driver/KSword.Sandbox.Driver/` and a user-mode JSONL bridge skeleton under
+`guest/KSword.Sandbox.R0Collector/`. These are source-only scaffolds; generated
+`.sys`, `.exe`, symbols, certificates, and native build output remain ignored.
 
 ## Research references
 

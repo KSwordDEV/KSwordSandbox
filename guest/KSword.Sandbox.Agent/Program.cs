@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Globalization;
 using System.Net;
 using System.Net.NetworkInformation;
 using System.Runtime.InteropServices;
@@ -11,14 +12,16 @@ return await AgentProgram.RunAsync(args);
 /// <summary>
 /// Guest-side collector that runs inside the disposable Windows VM.
 /// Inputs are command-line arguments for sample path, output path, duration,
-/// and optional driver event path; processing starts the sample, records process
-/// and environment events, and writes JSON artifacts; RunAsync returns a
-/// process exit code.
+/// optional driver event path, and optional R0Collector sidecar path;
+/// processing can start the sidecar, starts the sample, records process and
+/// environment events, merges driver JSONL, and writes JSON artifacts; RunAsync
+/// returns a process exit code.
 /// </summary>
 internal static class AgentProgram
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
+        PropertyNameCaseInsensitive = true,
         WriteIndented = true
     };
 
@@ -61,7 +64,7 @@ internal static class AgentProgram
                 Path = options.SamplePath,
                 Data =
                 {
-                    ["durationSeconds"] = options.DurationSeconds.ToString()
+                    ["durationSeconds"] = options.DurationSeconds.ToString(CultureInfo.InvariantCulture)
                 }
             }
         };
@@ -72,61 +75,201 @@ internal static class AgentProgram
         var filesBefore = SnapshotFiles(workingDirectory);
         var tcpBefore = SnapshotTcpConnections();
         var emittedProcessKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        events.AddRange(ReadDriverEvents(options.DriverEventsPath));
+        var r0Collector = StartR0Collector(options, events);
 
-        var startInfo = new ProcessStartInfo
+        try
         {
-            FileName = options.SamplePath,
-            WorkingDirectory = workingDirectory,
-            UseShellExecute = false,
-            CreateNoWindow = true
-        };
+            var startInfo = new ProcessStartInfo
+            {
+                FileName = options.SamplePath,
+                WorkingDirectory = workingDirectory,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
 
-        using var process = Process.Start(startInfo) ?? throw new InvalidOperationException("Failed to start sample process.");
-        events.Add(new SandboxEvent
-        {
-            EventType = "process.start",
-            Source = "guest",
-            ProcessName = process.ProcessName,
-            ProcessId = process.Id,
-            Path = options.SamplePath,
-            CommandLine = options.SamplePath
-        });
-        AddProcessDeltaEvents(events, processesBefore, SnapshotProcesses(), "after-start", emittedProcessKeys);
-
-        var exited = await WaitForExitAsync(process, TimeSpan.FromSeconds(options.DurationSeconds));
-        if (!exited)
-        {
+            using var process = Process.Start(startInfo) ?? throw new InvalidOperationException("Failed to start sample process.");
             events.Add(new SandboxEvent
             {
-                EventType = "process.timeout",
+                EventType = "process.start",
+                Source = "guest",
+                ProcessName = process.ProcessName,
+                ProcessId = process.Id,
+                Path = options.SamplePath,
+                CommandLine = options.SamplePath
+            });
+            AddProcessDeltaEvents(events, processesBefore, SnapshotProcesses(), "after-start", emittedProcessKeys);
+
+            var exited = await WaitForExitAsync(process, TimeSpan.FromSeconds(options.DurationSeconds));
+            if (!exited)
+            {
+                events.Add(new SandboxEvent
+                {
+                    EventType = "process.timeout",
+                    Source = "guest",
+                    ProcessName = SafeProcessName(process),
+                    ProcessId = process.Id,
+                    Path = options.SamplePath
+                });
+                process.Kill(entireProcessTree: true);
+                await process.WaitForExitAsync();
+            }
+
+            events.Add(new SandboxEvent
+            {
+                EventType = "process.exit",
                 Source = "guest",
                 ProcessName = SafeProcessName(process),
                 ProcessId = process.Id,
-                Path = options.SamplePath
+                Path = options.SamplePath,
+                Data =
+                {
+                    ["exitCode"] = SafeExitCode(process)
+                }
             });
-            process.Kill(entireProcessTree: true);
-            await process.WaitForExitAsync();
+
+            AddProcessDeltaEvents(events, processesBefore, SnapshotProcesses(), "after-run", emittedProcessKeys);
+            AddFileDeltaEvents(events, workingDirectory, filesBefore, SnapshotFiles(workingDirectory));
+            AddTcpDeltaEvents(events, tcpBefore, SnapshotTcpConnections());
+        }
+        finally
+        {
+            await StopR0CollectorAsync(r0Collector, events);
         }
 
-        events.Add(new SandboxEvent
-        {
-            EventType = "process.exit",
-            Source = "guest",
-            ProcessName = SafeProcessName(process),
-            ProcessId = process.Id,
-            Path = options.SamplePath,
-            Data =
-            {
-                ["exitCode"] = SafeExitCode(process)
-            }
-        });
-
-        AddProcessDeltaEvents(events, processesBefore, SnapshotProcesses(), "after-run", emittedProcessKeys);
-        AddFileDeltaEvents(events, workingDirectory, filesBefore, SnapshotFiles(workingDirectory));
-        AddTcpDeltaEvents(events, tcpBefore, SnapshotTcpConnections());
+        events.AddRange(ReadDriverEvents(options.DriverEventsPath));
         events.Add(new SandboxEvent { EventType = "agent.stop", Source = "guest", Path = options.OutputDirectory });
         return events;
+    }
+
+    /// <summary>
+    /// Starts the optional R0Collector sidecar before sample execution.
+    /// Inputs are parsed agent options and the event output list; processing
+    /// requires both --r0collector and --driver-events, creates the JSONL parent
+    /// directory, forwards --device/--output/--duration plus optional --mock,
+    /// and records r0collector.start_failed on startup errors; the method
+    /// returns a process handle when the sidecar starts or null when disabled or
+    /// failed.
+    /// </summary>
+    private static R0CollectorProcess? StartR0Collector(AgentOptions options, List<SandboxEvent> events)
+    {
+        if (string.IsNullOrWhiteSpace(options.R0CollectorPath) || string.IsNullOrWhiteSpace(options.DriverEventsPath))
+        {
+            return null;
+        }
+
+        try
+        {
+            EnsureParentDirectory(options.DriverEventsPath);
+
+            var startInfo = new ProcessStartInfo
+            {
+                FileName = options.R0CollectorPath,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+
+            startInfo.ArgumentList.Add("--device");
+            startInfo.ArgumentList.Add(options.DriverDevicePath);
+            startInfo.ArgumentList.Add("--output");
+            startInfo.ArgumentList.Add(options.DriverEventsPath);
+            startInfo.ArgumentList.Add("--duration");
+            startInfo.ArgumentList.Add(options.DurationSeconds.ToString(CultureInfo.InvariantCulture));
+            if (options.R0Mock)
+            {
+                startInfo.ArgumentList.Add("--mock");
+            }
+
+            var process = Process.Start(startInfo) ?? throw new InvalidOperationException("R0Collector process start returned null.");
+            return new R0CollectorProcess(process, options.R0CollectorPath, options.DriverEventsPath);
+        }
+        catch (Exception ex)
+        {
+            events.Add(new SandboxEvent
+            {
+                EventType = "r0collector.start_failed",
+                Source = "guest",
+                Path = options.R0CollectorPath,
+                Data =
+                {
+                    ["collectorPath"] = options.R0CollectorPath ?? string.Empty,
+                    ["driverDevicePath"] = options.DriverDevicePath,
+                    ["driverEventsPath"] = options.DriverEventsPath ?? string.Empty,
+                    ["durationSeconds"] = options.DurationSeconds.ToString(CultureInfo.InvariantCulture),
+                    ["r0Mock"] = options.R0Mock.ToString(),
+                    ["exceptionType"] = ex.GetType().FullName ?? ex.GetType().Name,
+                    ["message"] = ex.Message
+                }
+            });
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Waits briefly for the optional R0Collector sidecar and terminates it if
+    /// needed after sample execution. The input is the nullable sidecar process
+    /// record plus the event output list; processing gives the collector a
+    /// short graceful-exit window, then kills the process tree and records
+    /// stop_forced or stop_failed details; the method returns no value.
+    /// </summary>
+    private static async Task StopR0CollectorAsync(R0CollectorProcess? collector, List<SandboxEvent> events)
+    {
+        if (collector is null)
+        {
+            return;
+        }
+
+        try
+        {
+            if (!await WaitForExitAsync(collector.Process, TimeSpan.FromSeconds(5)))
+            {
+                events.Add(new SandboxEvent
+                {
+                    EventType = "r0collector.stop_forced",
+                    Source = "guest",
+                    Path = collector.CollectorPath,
+                    Data =
+                    {
+                        ["driverEventsPath"] = collector.DriverEventsPath,
+                        ["processId"] = collector.Process.Id.ToString(CultureInfo.InvariantCulture)
+                    }
+                });
+                collector.Process.Kill(entireProcessTree: true);
+                await collector.Process.WaitForExitAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            events.Add(new SandboxEvent
+            {
+                EventType = "r0collector.stop_failed",
+                Source = "guest",
+                Path = collector.CollectorPath,
+                Data =
+                {
+                    ["driverEventsPath"] = collector.DriverEventsPath,
+                    ["exceptionType"] = ex.GetType().FullName ?? ex.GetType().Name,
+                    ["message"] = ex.Message
+                }
+            });
+        }
+        finally
+        {
+            collector.Process.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// Creates the parent directory for a sidecar JSONL file when needed.
+    /// The input is an output file path; processing extracts its directory and
+    /// creates it if non-empty; the method returns no value.
+    /// </summary>
+    private static void EnsureParentDirectory(string path)
+    {
+        var parentDirectory = Path.GetDirectoryName(path);
+        if (!string.IsNullOrWhiteSpace(parentDirectory))
+        {
+            Directory.CreateDirectory(parentDirectory);
+        }
     }
 
     /// <summary>
@@ -406,7 +549,8 @@ internal static class AgentProgram
     /// <summary>
     /// Reads optional driver JSONL events produced by the R0 collector.
     /// The input is an optional file path, processing deserializes each JSON
-    /// line independently, and the method returns normalized events.
+    /// line independently after sidecar shutdown and converts read/parse
+    /// failures into guest events, and the method returns normalized events.
     /// </summary>
     private static List<SandboxEvent> ReadDriverEvents(string? path)
     {
@@ -416,20 +560,45 @@ internal static class AgentProgram
         }
 
         var events = new List<SandboxEvent>();
-        foreach (var line in File.ReadLines(path))
+        try
         {
-            try
+            foreach (var line in File.ReadLines(path))
             {
-                var evt = JsonSerializer.Deserialize<SandboxEvent>(line, JsonOptions);
-                if (evt is not null)
+                if (string.IsNullOrWhiteSpace(line))
                 {
-                    events.Add(evt with { Source = string.IsNullOrWhiteSpace(evt.Source) ? "driver" : evt.Source });
+                    continue;
+                }
+
+                try
+                {
+                    using var document = JsonDocument.Parse(line);
+                    var hasSource = document.RootElement.ValueKind == JsonValueKind.Object
+                        && document.RootElement.EnumerateObject().Any(property => string.Equals(property.Name, "source", StringComparison.OrdinalIgnoreCase));
+                    var evt = document.RootElement.Deserialize<SandboxEvent>(JsonOptions);
+                    if (evt is not null)
+                    {
+                        events.Add(evt with { Source = !hasSource || string.IsNullOrWhiteSpace(evt.Source) ? "driver" : evt.Source });
+                    }
+                }
+                catch (JsonException)
+                {
+                    events.Add(new SandboxEvent { EventType = "driver.parse_error", Source = "guest", Data = { ["line"] = line } });
                 }
             }
-            catch (JsonException)
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            events.Add(new SandboxEvent
             {
-                events.Add(new SandboxEvent { EventType = "driver.parse_error", Source = "guest", Data = { ["line"] = line } });
-            }
+                EventType = "driver.read_error",
+                Source = "guest",
+                Path = path,
+                Data =
+                {
+                    ["exceptionType"] = ex.GetType().FullName ?? ex.GetType().Name,
+                    ["message"] = ex.Message
+                }
+            });
         }
 
         return events;
@@ -487,6 +656,14 @@ internal static class AgentProgram
         }
     }
 
+    /// <summary>
+    /// Tracks a started R0Collector sidecar so shutdown can happen reliably.
+    /// Inputs are the started Process plus the collector executable and JSONL
+    /// paths; processing is simple storage; the record is returned from
+    /// StartR0Collector and consumed by StopR0CollectorAsync.
+    /// </summary>
+    private sealed record R0CollectorProcess(Process Process, string CollectorPath, string DriverEventsPath);
+
     private sealed record FileSnapshot(long SizeBytes, DateTime LastWriteUtc);
 
     private sealed record ProcessSnapshot(int ProcessId, string ProcessName, string? Path, DateTime? StartTimeUtc)
@@ -520,6 +697,8 @@ internal static class AgentProgram
 /// </summary>
 internal sealed record AgentOptions
 {
+    private const string DefaultDriverDevicePath = @"\\.\KSwordSandboxDriver";
+
     public required string SamplePath { get; init; }
 
     public required string OutputDirectory { get; init; }
@@ -528,22 +707,43 @@ internal sealed record AgentOptions
 
     public string? DriverEventsPath { get; init; }
 
+    public string? R0CollectorPath { get; init; }
+
+    public string DriverDevicePath { get; init; } = DefaultDriverDevicePath;
+
+    public bool R0Mock { get; init; }
+
     /// <summary>
     /// Parses command-line switches for the guest agent.
     /// Inputs are string arguments, processing consumes --sample, --out,
-    /// --duration, and --driver-events, and the method returns options.
+    /// --duration, --driver-events, optional R0Collector sidecar switches, and
+    /// boolean --r0-mock without breaking existing value switches; the method
+    /// returns validated and normalized options.
     /// </summary>
     public static AgentOptions Parse(string[] args)
     {
         var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var flags = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         for (var index = 0; index < args.Length; index++)
         {
-            if (!args[index].StartsWith("--", StringComparison.Ordinal) || index + 1 >= args.Length)
+            if (!args[index].StartsWith("--", StringComparison.Ordinal))
             {
                 continue;
             }
 
-            values[args[index][2..]] = args[++index];
+            var optionName = args[index][2..];
+            if (string.Equals(optionName, "r0-mock", StringComparison.OrdinalIgnoreCase))
+            {
+                flags.Add(optionName);
+                continue;
+            }
+
+            if (index + 1 >= args.Length || args[index + 1].StartsWith("--", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            values[optionName] = args[++index];
         }
 
         if (!values.TryGetValue("sample", out var samplePath) || !File.Exists(samplePath))
@@ -561,12 +761,22 @@ internal sealed record AgentOptions
             : 120;
 
         values.TryGetValue("driver-events", out var driverEventsPath);
+        values.TryGetValue("driver-device", out var driverDevicePath);
+        values.TryGetValue("r0collector", out var r0CollectorPath);
+        if (string.IsNullOrWhiteSpace(r0CollectorPath))
+        {
+            values.TryGetValue("r0-collector", out r0CollectorPath);
+        }
+
         return new AgentOptions
         {
             SamplePath = Path.GetFullPath(samplePath),
             OutputDirectory = Path.GetFullPath(outputDirectory),
             DurationSeconds = duration,
-            DriverEventsPath = driverEventsPath
+            DriverEventsPath = string.IsNullOrWhiteSpace(driverEventsPath) ? null : Path.GetFullPath(driverEventsPath),
+            R0CollectorPath = string.IsNullOrWhiteSpace(r0CollectorPath) ? null : Path.GetFullPath(r0CollectorPath),
+            DriverDevicePath = string.IsNullOrWhiteSpace(driverDevicePath) ? DefaultDriverDevicePath : driverDevicePath,
+            R0Mock = flags.Contains("r0-mock")
         };
     }
 }

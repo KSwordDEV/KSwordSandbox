@@ -151,5 +151,9 @@ public sealed record AnalysisJob
 
     public string? HtmlReportPath { get; init; }
 
+    public string? RunbookExecutionResultPath { get; init; }
+
+    public string? GuestEventsPath { get; init; }
+
     public List<string> Messages { get; init; } = [];
 }

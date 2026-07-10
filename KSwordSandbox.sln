@@ -1,4 +1,4 @@
-﻿
+
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.0.31903.59
@@ -14,6 +14,14 @@ EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "KSword.Sandbox.Agent", "guest\KSword.Sandbox.Agent\KSword.Sandbox.Agent.csproj", "{147EC659-A057-4D6E-AE54-A9E9139D8E54}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "KSword.Sandbox.SmokeTests", "tests\KSword.Sandbox.SmokeTests\KSword.Sandbox.SmokeTests.csproj", "{1FCE10D7-F08D-4E26-B9E9-F29BEEA6B572}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "guest", "guest", "{AEBB45F1-EB4E-4D0E-A86E-A6FB61BFEFA4}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "driver", "driver", "{D499D332-CF34-4B0B-8D74-F8F7907A5C3D}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "KSword.Sandbox.R0Collector", "guest\KSword.Sandbox.R0Collector\KSword.Sandbox.R0Collector.vcxproj", "{D9E9A3F7-BB99-48A0-AF7E-54D7D5D8C701}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "KSword.Sandbox.Driver", "driver\KSword.Sandbox.Driver\KSword.Sandbox.Driver.vcxproj", "{E8C3DCE9-E60B-4A0F-8D8F-620E1182635A}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -85,6 +93,22 @@ Global
 		{1FCE10D7-F08D-4E26-B9E9-F29BEEA6B572}.Release|x64.Build.0 = Release|Any CPU
 		{1FCE10D7-F08D-4E26-B9E9-F29BEEA6B572}.Release|x86.ActiveCfg = Release|Any CPU
 		{1FCE10D7-F08D-4E26-B9E9-F29BEEA6B572}.Release|x86.Build.0 = Release|Any CPU
+		{D9E9A3F7-BB99-48A0-AF7E-54D7D5D8C701}.Debug|Any CPU.ActiveCfg = Debug|x64
+		{D9E9A3F7-BB99-48A0-AF7E-54D7D5D8C701}.Debug|x64.ActiveCfg = Debug|x64
+		{D9E9A3F7-BB99-48A0-AF7E-54D7D5D8C701}.Debug|x64.Build.0 = Debug|x64
+		{D9E9A3F7-BB99-48A0-AF7E-54D7D5D8C701}.Debug|x86.ActiveCfg = Debug|x64
+		{D9E9A3F7-BB99-48A0-AF7E-54D7D5D8C701}.Release|Any CPU.ActiveCfg = Release|x64
+		{D9E9A3F7-BB99-48A0-AF7E-54D7D5D8C701}.Release|x64.ActiveCfg = Release|x64
+		{D9E9A3F7-BB99-48A0-AF7E-54D7D5D8C701}.Release|x64.Build.0 = Release|x64
+		{D9E9A3F7-BB99-48A0-AF7E-54D7D5D8C701}.Release|x86.ActiveCfg = Release|x64
+		{E8C3DCE9-E60B-4A0F-8D8F-620E1182635A}.Debug|Any CPU.ActiveCfg = Debug|x64
+		{E8C3DCE9-E60B-4A0F-8D8F-620E1182635A}.Debug|x64.ActiveCfg = Debug|x64
+		{E8C3DCE9-E60B-4A0F-8D8F-620E1182635A}.Debug|x64.Build.0 = Debug|x64
+		{E8C3DCE9-E60B-4A0F-8D8F-620E1182635A}.Debug|x86.ActiveCfg = Debug|x64
+		{E8C3DCE9-E60B-4A0F-8D8F-620E1182635A}.Release|Any CPU.ActiveCfg = Release|x64
+		{E8C3DCE9-E60B-4A0F-8D8F-620E1182635A}.Release|x64.ActiveCfg = Release|x64
+		{E8C3DCE9-E60B-4A0F-8D8F-620E1182635A}.Release|x64.Build.0 = Release|x64
+		{E8C3DCE9-E60B-4A0F-8D8F-620E1182635A}.Release|x86.ActiveCfg = Release|x64
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -95,5 +119,7 @@ Global
 		{5FD66665-C326-4F6E-90EC-9F4A40F9E537} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 		{147EC659-A057-4D6E-AE54-A9E9139D8E54} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 		{1FCE10D7-F08D-4E26-B9E9-F29BEEA6B572} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
+		{D9E9A3F7-BB99-48A0-AF7E-54D7D5D8C701} = {AEBB45F1-EB4E-4D0E-A86E-A6FB61BFEFA4}
+		{E8C3DCE9-E60B-4A0F-8D8F-620E1182635A} = {D499D332-CF34-4B0B-8D74-F8F7907A5C3D}
 	EndGlobalSection
 EndGlobal

@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <!-- Visual Studio filter layout only; it has no build behavior. -->
+  <ItemGroup>
+    <Filter Include="Source Files">
+      <UniqueIdentifier>{F521F886-D818-4827-8E2D-C7604D16F94F}</UniqueIdentifier>
+      <Extensions>c;cpp;cxx</Extensions>
+    </Filter>
+    <Filter Include="Header Files">
+      <UniqueIdentifier>{5601E6F4-01F0-43CB-B5C7-E008E5901F21}</UniqueIdentifier>
+      <Extensions>h;hpp;hxx</Extensions>
+    </Filter>
+    <Filter Include="Documentation">
+      <UniqueIdentifier>{EF11A53F-5743-4204-B37C-7D7E4E83764A}</UniqueIdentifier>
+      <Extensions>md;txt</Extensions>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="src\Driver.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="include\KSwordSandboxDriverIoctl.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="src\Driver.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="README.md">
+      <Filter>Documentation</Filter>
+    </None>
+  </ItemGroup>
+</Project>

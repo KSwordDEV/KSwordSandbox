@@ -82,6 +82,30 @@ Each step result contains:
 - Optional message for dry-run, timeout, cancellation, launch failure, or exit
   failure details.
 
+The Web/API now persists every execution attempt to the job folder:
+
+```text
+D:\Temp\KSwordSandbox\jobs\<job-id>\runbook-execution.json
+```
+
+After a live runbook succeeds, the host attempts to import guest output from the
+collected guest folder. Manual import is also available when testing with
+synthetic events or when collection finishes after the API call:
+
+```http
+POST /api/jobs/{jobId}/guest-events/import
+Content-Type: application/json
+
+{
+  "eventsPath": "D:\\Temp\\KSwordSandbox\\jobs\\<job-id>\\guest\\<job-id>\\events.json"
+}
+```
+
+When `eventsPath` is omitted, the service searches
+`D:\Temp\KSwordSandbox\jobs\<job-id>\guest\` recursively for `events.json`, then
+for `*.jsonl`. Importing events re-runs behavior rules and regenerates both
+`report.json` and `report.html`.
+
 ## Web API integration
 
 After creating a job with `/api/jobs/plan`, run or record the planned runbook:
@@ -107,6 +131,7 @@ The job result panel exposes:
 
 - `Record dry-run execution`
 - `Execute live runbook`
+- `Import guest events / refresh report`
 
 The live button is the first usable path toward "start VM and report behavior",
 but it still depends on local Hyper-V readiness:

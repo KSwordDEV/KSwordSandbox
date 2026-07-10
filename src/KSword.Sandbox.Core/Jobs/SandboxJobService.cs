@@ -18,6 +18,7 @@ public sealed class SandboxJobService
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
+        PropertyNameCaseInsensitive = true,
         WriteIndented = true
     };
 
@@ -79,7 +80,7 @@ public sealed class SandboxJobService
         var duration = ClampDuration(submission.DurationSeconds);
         var normalizedSubmission = submission with { DurationSeconds = duration, DryRun = true };
         var jobId = Guid.NewGuid();
-        var jobRoot = Path.Combine(config.Paths.RuntimeRoot, "jobs", jobId.ToString("N"));
+        var jobRoot = GetJobRoot(jobId);
         Directory.CreateDirectory(jobRoot);
 
         var sample = SampleHasher.Compute(normalizedSubmission.SamplePath, config.Analysis.MaxSampleBytes);
@@ -126,6 +127,414 @@ public sealed class SandboxJobService
 
         jobs[job.JobId] = job;
         return job;
+    }
+
+    /// <summary>
+    /// Persists one dry-run or live runbook execution result beside the job.
+    /// Inputs are a job ID and executor result, processing writes
+    /// runbook-execution.json and refreshes host report artifacts; the method
+    /// returns the updated AnalysisJob.
+    /// </summary>
+    public AnalysisJob SaveRunbookExecutionResult(Guid jobId, SandboxRunbookExecutionResult result)
+    {
+        if (!jobs.TryGetValue(jobId, out var job))
+        {
+            throw new KeyNotFoundException($"Job {jobId} was not found.");
+        }
+
+        var jobRoot = GetJobRoot(jobId);
+        Directory.CreateDirectory(jobRoot);
+        var resultPath = Path.Combine(jobRoot, "runbook-execution.json");
+        File.WriteAllText(resultPath, JsonSerializer.Serialize(result, JsonOptions));
+
+        var status = result.Mode == SandboxRunbookExecutionMode.Live
+            ? result.Success ? AnalysisStatus.Running : AnalysisStatus.Failed
+            : job.Status;
+        var existingGuestEvents = LoadEventsIfPresent(job.GuestEventsPath);
+        var updated = RegenerateReport(job with
+        {
+            Status = status,
+            RunbookExecutionResultPath = resultPath,
+            Messages = AppendMessage(job.Messages, $"Runbook execution result persisted to {resultPath}.")
+        }, status, existingGuestEvents, job.GuestEventsPath);
+
+        jobs[jobId] = updated;
+        return updated;
+    }
+
+    /// <summary>
+    /// Imports guest events collected by the runbook and regenerates reports.
+    /// Inputs are a job ID and optional events file path; processing locates
+    /// events.json or JSONL output, merges optional driver JSONL files,
+    /// re-runs rules, and returns the updated completed or failed job.
+    /// </summary>
+    public AnalysisJob ImportGuestEvents(Guid jobId, string? eventsPath = null)
+    {
+        if (!jobs.TryGetValue(jobId, out var job))
+        {
+            throw new KeyNotFoundException($"Job {jobId} was not found.");
+        }
+
+        var resolvedEventsPath = ResolveGuestEventsPath(jobId, eventsPath);
+        var guestEvents = LoadGuestEventsWithDriverJsonl(resolvedEventsPath);
+        var status = guestEvents.Count == 0 ? AnalysisStatus.Failed : AnalysisStatus.Completed;
+        var message = guestEvents.Count == 0
+            ? $"Guest event import found no events in {resolvedEventsPath}."
+            : $"Imported {guestEvents.Count} guest event(s) from {resolvedEventsPath}.";
+        var updated = RegenerateReport(job with
+        {
+            Status = status,
+            GuestEventsPath = resolvedEventsPath,
+            Messages = AppendMessage(job.Messages, message)
+        }, status, guestEvents, resolvedEventsPath);
+
+        jobs[jobId] = updated;
+        return updated;
+    }
+
+    /// <summary>
+    /// Rewrites report.json and report.html from current host and guest data.
+    /// Inputs are job metadata, target status, guest events, and source path;
+    /// processing rebuilds deterministic host seed events, appends execution
+    /// and import markers, classifies all events, and returns updated metadata.
+    /// </summary>
+    private AnalysisJob RegenerateReport(AnalysisJob job, AnalysisStatus status, IReadOnlyCollection<SandboxEvent> guestEvents, string? guestEventsPath)
+    {
+        var sample = job.Sample ?? throw new InvalidOperationException("Job does not have sample metadata.");
+        var runbook = job.Runbook ?? throw new InvalidOperationException("Job does not have a runbook.");
+        var jobRoot = GetJobRoot(job.JobId);
+        Directory.CreateDirectory(jobRoot);
+
+        var staticAnalysis = LoadExistingReport(job.JsonReportPath)?.StaticAnalysis ?? AnalyzeSample(sample);
+        var events = CreatePlanningEvents(sample, job.Submission, runbook, staticAnalysis);
+        AppendRunbookExecutionEvent(events, job.RunbookExecutionResultPath);
+        events.AddRange(guestEvents.Select(NormalizeEvent));
+        AppendGuestImportEvent(events, guestEventsPath, guestEvents.Count);
+
+        var findings = ruleEngine.Classify(events);
+        var report = new AnalysisReport
+        {
+            JobId = job.JobId,
+            Sample = sample,
+            Status = status,
+            StaticAnalysis = staticAnalysis,
+            Events = events,
+            Findings = findings,
+            Metrics = BuildMetrics(events, findings, staticAnalysis)
+        };
+
+        var jsonPath = Path.Combine(jobRoot, "report.json");
+        var htmlPath = Path.Combine(jobRoot, "report.html");
+        File.WriteAllText(jsonPath, JsonSerializer.Serialize(report, JsonOptions));
+        File.WriteAllText(htmlPath, reportRenderer.Render(report));
+
+        return job with
+        {
+            Status = status,
+            JsonReportPath = jsonPath,
+            HtmlReportPath = htmlPath,
+            GuestEventsPath = guestEventsPath ?? job.GuestEventsPath
+        };
+    }
+
+    /// <summary>
+    /// Returns the deterministic runtime folder for one job.
+    /// The input is a job ID, processing combines runtime root and job ID, and
+    /// the method returns an absolute or configured local path.
+    /// </summary>
+    private string GetJobRoot(Guid jobId)
+    {
+        return Path.Combine(config.Paths.RuntimeRoot, "jobs", jobId.ToString("N"));
+    }
+
+    /// <summary>
+    /// Loads an existing report when static-analysis data can be reused.
+    /// The input is an optional JSON path, processing tolerates missing or
+    /// corrupt files, and the method returns a report or null.
+    /// </summary>
+    private static AnalysisReport? LoadExistingReport(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+        {
+            return null;
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<AnalysisReport>(File.ReadAllText(path), JsonOptions);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Resolves the guest event artifact for a job.
+    /// Inputs are job ID and optional explicit path, processing accepts a file
+    /// or searches jobRoot\guest recursively, and the method returns the file
+    /// path or throws when no artifact exists.
+    /// </summary>
+    private string ResolveGuestEventsPath(Guid jobId, string? eventsPath)
+    {
+        if (!string.IsNullOrWhiteSpace(eventsPath))
+        {
+            if (!File.Exists(eventsPath))
+            {
+                throw new FileNotFoundException("Guest events file was not found.", eventsPath);
+            }
+
+            return Path.GetFullPath(eventsPath);
+        }
+
+        var guestRoot = Path.Combine(GetJobRoot(jobId), "guest");
+        if (!Directory.Exists(guestRoot))
+        {
+            throw new DirectoryNotFoundException($"Guest output folder was not found: {guestRoot}");
+        }
+
+        var eventsJson = Directory
+            .EnumerateFiles(guestRoot, "events.json", SearchOption.AllDirectories)
+            .OrderByDescending(path => File.GetLastWriteTimeUtc(path))
+            .FirstOrDefault();
+        if (eventsJson is not null)
+        {
+            return eventsJson;
+        }
+
+        var jsonLines = Directory
+            .EnumerateFiles(guestRoot, "*.jsonl", SearchOption.AllDirectories)
+            .OrderByDescending(path => File.GetLastWriteTimeUtc(path))
+            .FirstOrDefault();
+        if (jsonLines is not null)
+        {
+            return jsonLines;
+        }
+
+        throw new FileNotFoundException($"No events.json or .jsonl artifact was found under {guestRoot}.");
+    }
+
+    /// <summary>
+    /// Loads guest events and nearby driver JSONL events without duplicates.
+    /// The input is a primary event file, processing reads JSON array or JSONL
+    /// data and optional sibling driver-events.jsonl files, and the method
+    /// returns normalized event records.
+    /// </summary>
+    private static List<SandboxEvent> LoadGuestEventsWithDriverJsonl(string eventsPath)
+    {
+        var events = LoadEventsFromFile(eventsPath);
+        if (!string.Equals(Path.GetExtension(eventsPath), ".json", StringComparison.OrdinalIgnoreCase))
+        {
+            return events.Select(NormalizeEvent).ToList();
+        }
+
+        var eventKeys = events.Select(EventKey).ToHashSet(StringComparer.Ordinal);
+        var searchRoot = Path.GetDirectoryName(eventsPath);
+        if (string.IsNullOrWhiteSpace(searchRoot))
+        {
+            return events.Select(NormalizeEvent).ToList();
+        }
+
+        foreach (var jsonlPath in Directory.EnumerateFiles(searchRoot, "*.jsonl", SearchOption.AllDirectories))
+        {
+            foreach (var driverEvent in LoadEventsFromJsonLines(jsonlPath))
+            {
+                var normalized = NormalizeEvent(driverEvent);
+                if (eventKeys.Add(EventKey(normalized)))
+                {
+                    events.Add(normalized);
+                }
+            }
+        }
+
+        return events.Select(NormalizeEvent).ToList();
+    }
+
+    /// <summary>
+    /// Loads events from a file if the path exists.
+    /// The input is an optional path, processing supports JSON array and JSONL,
+    /// and the method returns an empty list for missing paths.
+    /// </summary>
+    private static List<SandboxEvent> LoadEventsIfPresent(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+        {
+            return [];
+        }
+
+        return LoadEventsFromFile(path);
+    }
+
+    /// <summary>
+    /// Loads events from either events.json or JSON Lines.
+    /// The input is a file path, processing selects the parser by extension,
+    /// and the method returns normalized events.
+    /// </summary>
+    private static List<SandboxEvent> LoadEventsFromFile(string path)
+    {
+        return string.Equals(Path.GetExtension(path), ".jsonl", StringComparison.OrdinalIgnoreCase)
+            ? LoadEventsFromJsonLines(path)
+            : (JsonSerializer.Deserialize<List<SandboxEvent>>(File.ReadAllText(path), JsonOptions) ?? []).Select(NormalizeEvent).ToList();
+    }
+
+    /// <summary>
+    /// Loads one JSON event per line.
+    /// The input is a JSONL path, processing deserializes lines independently
+    /// and converts malformed lines into parse-error events; the method returns
+    /// normalized events.
+    /// </summary>
+    private static List<SandboxEvent> LoadEventsFromJsonLines(string path)
+    {
+        var events = new List<SandboxEvent>();
+        foreach (var line in File.ReadLines(path))
+        {
+            if (string.IsNullOrWhiteSpace(line))
+            {
+                continue;
+            }
+
+            try
+            {
+                var evt = JsonSerializer.Deserialize<SandboxEvent>(line, JsonOptions);
+                if (evt is not null)
+                {
+                    events.Add(NormalizeEvent(evt));
+                }
+            }
+            catch (JsonException)
+            {
+                events.Add(new SandboxEvent
+                {
+                    EventType = "driver.parse_error",
+                    Source = "host",
+                    Path = path,
+                    Data =
+                    {
+                        ["line"] = line
+                    }
+                });
+            }
+        }
+
+        return events;
+    }
+
+    /// <summary>
+    /// Normalizes nullable or missing event fields after JSON import.
+    /// The input is a deserialized event, processing fills source, timestamp,
+    /// and data defaults, and the method returns a safe event for reports.
+    /// </summary>
+    private static SandboxEvent NormalizeEvent(SandboxEvent evt)
+    {
+        var data = evt.Data is null
+            ? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            : new Dictionary<string, string>(evt.Data, StringComparer.OrdinalIgnoreCase);
+        return evt with
+        {
+            Source = string.IsNullOrWhiteSpace(evt.Source) ? "guest" : evt.Source,
+            Timestamp = evt.Timestamp == default ? DateTimeOffset.UtcNow : evt.Timestamp,
+            Data = data
+        };
+    }
+
+    /// <summary>
+    /// Appends a host event that summarizes a persisted runbook attempt.
+    /// Inputs are event output and optional execution-result path; processing
+    /// reads the persisted result when present, and the method returns no value.
+    /// </summary>
+    private static void AppendRunbookExecutionEvent(List<SandboxEvent> events, string? resultPath)
+    {
+        if (string.IsNullOrWhiteSpace(resultPath) || !File.Exists(resultPath))
+        {
+            return;
+        }
+
+        try
+        {
+            var result = JsonSerializer.Deserialize<SandboxRunbookExecutionResult>(File.ReadAllText(resultPath), JsonOptions);
+            if (result is null)
+            {
+                return;
+            }
+
+            events.Add(new SandboxEvent
+            {
+                EventType = "hyperv.runbook.executed",
+                Source = "host",
+                Path = result.TargetVmName,
+                Data =
+                {
+                    ["mode"] = result.Mode.ToString(),
+                    ["success"] = result.Success.ToString(),
+                    ["totalSteps"] = result.TotalSteps.ToString(),
+                    ["executedSteps"] = result.ExecutedSteps.ToString(),
+                    ["failedStepIndex"] = result.FailedStepIndex?.ToString() ?? string.Empty,
+                    ["duration"] = result.Duration.ToString(),
+                    ["resultPath"] = resultPath,
+                    ["message"] = result.Message ?? string.Empty
+                }
+            });
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        {
+            events.Add(new SandboxEvent
+            {
+                EventType = "hyperv.runbook.execution_result_error",
+                Source = "host",
+                Path = resultPath,
+                Data =
+                {
+                    ["error"] = ex.Message
+                }
+            });
+        }
+    }
+
+    /// <summary>
+    /// Appends a host event documenting guest event import status.
+    /// Inputs are event output, imported path, and imported count; processing
+    /// writes one status event when a path is known; the method returns no value.
+    /// </summary>
+    private static void AppendGuestImportEvent(List<SandboxEvent> events, string? guestEventsPath, int guestEventCount)
+    {
+        if (string.IsNullOrWhiteSpace(guestEventsPath))
+        {
+            return;
+        }
+
+        events.Add(new SandboxEvent
+        {
+            EventType = guestEventCount == 0 ? "guest.events.empty" : "guest.events.imported",
+            Source = "host",
+            Path = guestEventsPath,
+            Data =
+            {
+                ["eventCount"] = guestEventCount.ToString()
+            }
+        });
+    }
+
+    /// <summary>
+    /// Creates a stable key used to avoid duplicate driver events.
+    /// The input is one event, processing combines common fields and ordered
+    /// data values, and the method returns a comparison key.
+    /// </summary>
+    private static string EventKey(SandboxEvent evt)
+    {
+        var data = string.Join(";", evt.Data.OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase).Select(pair => $"{pair.Key}={pair.Value}"));
+        return string.Join("|", evt.EventType, evt.Source, evt.Timestamp.ToString("O"), evt.ProcessId?.ToString() ?? string.Empty, evt.Path ?? string.Empty, evt.CommandLine ?? string.Empty, data);
+    }
+
+    /// <summary>
+    /// Returns a new message list with one appended message.
+    /// Inputs are existing messages and a new message, processing copies to
+    /// avoid mutating previous job records, and the method returns the list.
+    /// </summary>
+    private static List<string> AppendMessage(IEnumerable<string> messages, string message)
+    {
+        var next = messages.ToList();
+        next.Add(message);
+        return next;
     }
 
     /// <summary>

@@ -1,0 +1,97 @@
+# KSword.Sandbox.Driver
+
+Minimal WDK driver skeleton for the KSword sandbox R0 event path.
+
+## Purpose
+
+This project creates the kernel-side control device that the future
+`KSword.Sandbox.R0Collector` will open from the Windows 10 guest VM. The current
+driver is intentionally a small skeleton: it validates the load/unload path,
+exposes a stable symbolic link, implements health/poll IOCTLs, and keeps a
+bounded non-paged event ring for `READ_EVENTS`.
+
+## Current ABI
+
+Public names and structures are defined in:
+
+```text
+include/KSwordSandboxDriverIoctl.h
+```
+
+The driver creates:
+
+- NT device: `\Device\KSwordSandboxDriver`
+- DOS device link: `\DosDevices\KSwordSandboxDriver`
+- Win32 path for user mode: `\\.\KSwordSandboxDriver`
+
+Initial IOCTLs:
+
+- `IOCTL_KSWORD_SANDBOX_GET_HEALTH`
+  - Input: none.
+  - Processing: snapshots skeleton state and queue counters.
+  - Return: `KSWORD_SANDBOX_HEALTH_REPLY`.
+- `IOCTL_KSWORD_SANDBOX_POLL`
+  - Input: none.
+  - Processing: snapshots the ring counters and reports whether events are
+    currently queued.
+  - Return: `KSWORD_SANDBOX_POLL_REPLY`.
+- `IOCTL_KSWORD_SANDBOX_READ_EVENTS`
+  - Input: optional `KSWORD_SANDBOX_READ_EVENTS_REQUEST`.
+  - Processing: validates the request, computes how many complete records fit in
+    the caller's output buffer, and drains that many records from the fixed
+    non-paged ring under the driver spin lock.
+  - Return: `KSWORD_SANDBOX_READ_EVENTS_REPLY` with `EventsWritten`,
+    `BytesWritten`, `EventsDropped`, and `NextSequence` set. The trailing
+    `Events` stream contains zero or more records, each starting with
+    `KSWORD_SANDBOX_EVENT_HEADER`.
+
+## Current event behavior
+
+The ring is a fixed-size array in the device extension, so it is allocated with
+the WDM device object and remains non-paged. `DriverEntry` queues one header-only
+reserved self-test event with `KSWORD_SANDBOX_EVENT_FLAG_SELF_TEST` and
+`KSWORD_SANDBOX_EVENT_FLAG_DRIVER_STARTED`. Collectors can treat this as the
+minimal `driver.started` heartbeat to verify the device, IOCTL number, and event
+framing before real telemetry producers are added.
+
+When the ring is empty, `READ_EVENTS` still succeeds if the fixed reply header
+fits and returns `EventsWritten == 0` and `BytesWritten == 0`. If the output
+buffer has no room for a complete pending record, the event remains queued and
+the call also returns an empty batch rather than writing a partial record.
+
+## Build requirements
+
+Build only on a machine with Visual Studio C++ tooling and WDK installed:
+
+```powershell
+& 'D:\Software\VS\MSBuild\Current\Bin\MSBuild.exe' `
+  'D:\Projects\KswordSandbox\driver\KSword.Sandbox.Driver\KSword.Sandbox.Driver.vcxproj' `
+  /p:Configuration=Debug /p:Platform=x64 /m:1 /v:minimal
+```
+
+Driver loading requires the normal Windows driver-signing path. For a lab VM,
+use a test certificate and test-signing mode as documented in
+`docs/driver-signing.md`. The project defaults to `SignMode=Off` so local source
+builds do not try to create or install a certificate automatically. Sign the
+generated `.sys` explicitly outside git before loading it in a VM.
+
+## Repository hygiene
+
+Commit only source, project files, headers, and documentation. Do not commit:
+
+- `.sys`
+- `.pdb`
+- `.obj`
+- `.lib`
+- `.exe`
+- generated `bin/` or `obj/` folders
+- certificates or private keys
+
+## Next implementation steps
+
+1. Add file-monitor events first, reusing the protocol boundary from the
+   existing KSword driver code where safe.
+2. Add process, image-load, registry, and network events after the file event
+   path is stable.
+3. Keep user-mode JSON serialization in `KSword.Sandbox.R0Collector`; the driver
+   should return compact typed records, not JSON strings.

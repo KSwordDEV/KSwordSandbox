@@ -42,7 +42,7 @@ function Test-ForbiddenPath {
         '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.zip', '.7z', '.rar',
         '.pfx', '.p12', '.cer', '.key'
     )
-    $forbiddenFragments = @('/bin/', '/obj/', '/.vs/', '/dist/')
+    $forbiddenFragments = @('/bin/', '/obj/', '/x64/', '/.vs/', '/dist/')
     $forbiddenRootPrefixes = @('runtime/', 'reports/', 'samples/', 'captures/', 'logs/')
 
     if ($forbiddenExtensions -contains $extension) {

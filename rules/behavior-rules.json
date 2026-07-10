@@ -6,16 +6,117 @@
       "title": "Sample accepted for sandbox planning",
       "severity": "info",
       "summary": "The host accepted a local sample path and created a planning artifact.",
-      "eventTypes": [ "submission.accepted" ],
-      "tags": [ "host", "planning" ]
+      "eventTypes": [
+        "submission.accepted"
+      ],
+      "tags": [
+        "host",
+        "planning"
+      ]
     },
     {
       "id": "runbook-created",
       "title": "Hyper-V runbook generated",
       "severity": "info",
       "summary": "The host generated a reproducible Hyper-V execution plan for review.",
-      "eventTypes": [ "hyperv.runbook.created" ],
-      "tags": [ "host", "hyperv" ]
+      "eventTypes": [
+        "hyperv.runbook.created"
+      ],
+      "tags": [
+        "host",
+        "hyperv"
+      ]
+    },
+    {
+      "id": "r0collector-device-unavailable",
+      "title": "R0 collector device unavailable",
+      "severity": "info",
+      "summary": "R0Collector could not open the configured driver device; this records driver health rather than malicious sample behavior.",
+      "eventTypes": [
+        "r0collector.deviceUnavailable"
+      ],
+      "tags": [
+        "r0collector",
+        "driver-health",
+        "plumbing"
+      ]
+    },
+    {
+      "id": "r0collector-start-failed",
+      "title": "R0 collector start failed",
+      "severity": "info",
+      "summary": "The guest agent could not start the optional R0Collector sidecar; this records collection health rather than malicious sample behavior.",
+      "eventTypes": [
+        "r0collector.start_failed",
+        "r0collector.stop_failed",
+        "r0collector.stop_forced"
+      ],
+      "tags": [
+        "r0collector",
+        "driver-health",
+        "plumbing"
+      ]
+    },
+    {
+      "id": "r0collector-mock-driver-event",
+      "title": "R0 collector mock driver event",
+      "severity": "info",
+      "summary": "R0Collector emitted a synthetic driver event for JSONL and Guest Agent plumbing tests.",
+      "eventTypes": [
+        "r0collector.mockDriverEvent"
+      ],
+      "tags": [
+        "r0collector",
+        "synthetic",
+        "plumbing"
+      ]
+    },
+    {
+      "id": "r0collector-ioctl-protocol-pending",
+      "title": "Legacy R0 collector protocol placeholder",
+      "severity": "info",
+      "summary": "A legacy R0Collector build opened the driver device without issuing the read-events IOCTL; current builds should emit driverHealth, driverPoll, and driverReadEvents rows instead.",
+      "eventTypes": [
+        "r0collector.ioctlProtocolPending"
+      ],
+      "tags": [
+        "r0collector",
+        "driver-health",
+        "legacy",
+        "plumbing"
+      ]
+    },
+    {
+      "id": "r0collector-driver-health",
+      "title": "R0 driver health queried",
+      "severity": "info",
+      "summary": "R0Collector successfully queried the KSword sandbox driver health or queue status through DeviceIoControl.",
+      "eventTypes": [
+        "r0collector.driverHealth",
+        "r0collector.driverPoll",
+        "r0collector.driverReadEvents"
+      ],
+      "tags": [
+        "r0collector",
+        "driver-health",
+        "ioctl",
+        "plumbing"
+      ]
+    },
+    {
+      "id": "driver-load-heartbeat",
+      "title": "R0 driver load heartbeat observed",
+      "severity": "info",
+      "summary": "The kernel driver emitted a startup heartbeat through the R0 event drain path.",
+      "eventTypes": [
+        "driver.load"
+      ],
+      "tags": [
+        "driver",
+        "r0",
+        "heartbeat",
+        "ioctl"
+      ]
     },
     {
       "id": "script-interpreter",
@@ -24,9 +125,32 @@
       "summary": "A process command line references a common Windows scripting interpreter.",
       "mitreTechniqueId": "T1059",
       "mitreTechniqueName": "Command and Scripting Interpreter",
-      "eventTypes": [ "process.start" ],
-      "containsCommandLine": [ "powershell", "cmd.exe", "wscript", "cscript", "mshta" ],
-      "tags": [ "execution" ]
+      "eventTypes": [
+        "process.start"
+      ],
+      "containsCommandLine": [
+        "powershell",
+        "cmd.exe",
+        "wscript",
+        "cscript",
+        "mshta"
+      ],
+      "tags": [
+        "execution"
+      ]
+    },
+    {
+      "id": "process-new",
+      "title": "New process observed after launch",
+      "severity": "low",
+      "summary": "The guest agent observed a process that was not present in the baseline after sample execution started.",
+      "eventTypes": [
+        "process.new"
+      ],
+      "tags": [
+        "process",
+        "execution"
+      ]
     },
     {
       "id": "registry-change",
@@ -35,16 +159,110 @@
       "summary": "A driver or agent event reported a registry write.",
       "mitreTechniqueId": "T1112",
       "mitreTechniqueName": "Modify Registry",
-      "eventTypes": [ "registry.set", "registry.create", "registry.delete" ],
-      "tags": [ "registry", "persistence" ]
+      "eventTypes": [
+        "registry.set",
+        "registry.create",
+        "registry.delete",
+        "driver.registry"
+      ],
+      "tags": [
+        "registry",
+        "persistence"
+      ]
+    },
+    {
+      "id": "registry-run-key-persistence",
+      "title": "Run key persistence",
+      "severity": "high",
+      "summary": "A registry creation or update targeted a Windows Run or RunOnce autostart key.",
+      "mitreTechniqueId": "T1547.001",
+      "mitreTechniqueName": "Registry Run Keys / Startup Folder",
+      "eventTypes": [
+        "registry.set",
+        "registry.create"
+      ],
+      "containsPath": [
+        "CurrentVersion\\Run\\",
+        "CurrentVersion\\RunOnce\\",
+        "Policies\\Explorer\\Run\\"
+      ],
+      "tags": [
+        "registry",
+        "persistence",
+        "autostart"
+      ]
     },
     {
       "id": "file-drop",
       "title": "Dropped or modified file",
       "severity": "low",
       "summary": "The guest agent observed a file creation or modification during execution.",
-      "eventTypes": [ "file.created", "file.modified" ],
-      "tags": [ "filesystem" ]
+      "eventTypes": [
+        "file.created",
+        "file.modified",
+        "driver.file"
+      ],
+      "tags": [
+        "filesystem"
+      ]
+    },
+    {
+      "id": "file-deleted",
+      "title": "File deletion observed",
+      "severity": "low",
+      "summary": "The guest agent or driver event stream reported a file deletion during execution.",
+      "mitreTechniqueId": "T1070.004",
+      "mitreTechniqueName": "File Deletion",
+      "eventTypes": [
+        "file.deleted"
+      ],
+      "tags": [
+        "filesystem",
+        "cleanup"
+      ]
+    },
+    {
+      "id": "executable-file-write",
+      "title": "Executable or script file written",
+      "severity": "medium",
+      "summary": "A file creation or modification event wrote an executable, driver, library, or script-like path.",
+      "eventTypes": [
+        "file.created",
+        "file.modified"
+      ],
+      "containsPath": [
+        ".exe",
+        ".dll",
+        ".sys",
+        ".scr",
+        ".com",
+        ".bat",
+        ".cmd",
+        ".ps1",
+        ".vbs",
+        ".hta"
+      ],
+      "tags": [
+        "filesystem",
+        "executable-drop"
+      ]
+    },
+    {
+      "id": "image-load-placeholder",
+      "title": "Image load event placeholder",
+      "severity": "info",
+      "summary": "An image-load callback event was ingested; richer image-load classification should be added when R0 payloads are finalized.",
+      "eventTypes": [
+        "image.load",
+        "image.loaded",
+        "driver.imageLoad",
+        "driver.image.load"
+      ],
+      "tags": [
+        "driver",
+        "image-load",
+        "placeholder"
+      ]
     },
     {
       "id": "network-connection",
@@ -53,8 +271,12 @@
       "summary": "The guest agent observed a new TCP connection after sample execution.",
       "mitreTechniqueId": "T1105",
       "mitreTechniqueName": "Ingress Tool Transfer",
-      "eventTypes": [ "network.tcp" ],
-      "tags": [ "network" ]
+      "eventTypes": [
+        "network.tcp"
+      ],
+      "tags": [
+        "network"
+      ]
     },
     {
       "id": "process-timeout-long-sleep",
@@ -63,8 +285,12 @@
       "summary": "The sample exceeded the configured analysis window, which can indicate time-based sandbox evasion or long-running behavior.",
       "mitreTechniqueId": "T1497.003",
       "mitreTechniqueName": "Time Based Evasion",
-      "eventTypes": [ "process.timeout" ],
-      "tags": [ "anti-analysis" ]
+      "eventTypes": [
+        "process.timeout"
+      ],
+      "tags": [
+        "anti-analysis"
+      ]
     },
     {
       "id": "static-pe-known-packer",
@@ -73,11 +299,18 @@
       "summary": "Static analysis found packer tags such as UPX section names.",
       "mitreTechniqueId": "T1027.002",
       "mitreTechniqueName": "Software Packing",
-      "eventTypes": [ "static.analysis.completed" ],
+      "eventTypes": [
+        "static.analysis.completed"
+      ],
       "dataContains": {
-        "tags": [ "packer_upx" ]
+        "tags": [
+          "packer_upx"
+        ]
       },
-      "tags": [ "static", "packer" ]
+      "tags": [
+        "static",
+        "packer"
+      ]
     },
     {
       "id": "static-pe-high-entropy-sections",
@@ -86,11 +319,20 @@
       "summary": "Static analysis found high-entropy or abnormal PE section traits.",
       "mitreTechniqueId": "T1027",
       "mitreTechniqueName": "Obfuscated Files or Information",
-      "eventTypes": [ "static.analysis.completed" ],
+      "eventTypes": [
+        "static.analysis.completed"
+      ],
       "dataContains": {
-        "tags": [ "high_entropy_section", "section_name_exception", "virtual_only_section" ]
+        "tags": [
+          "high_entropy_section",
+          "section_name_exception",
+          "virtual_only_section"
+        ]
       },
-      "tags": [ "static", "pe" ]
+      "tags": [
+        "static",
+        "pe"
+      ]
     },
     {
       "id": "static-embedded-url",
@@ -99,11 +341,18 @@
       "summary": "Static analysis extracted at least one URL-like string from the sample.",
       "mitreTechniqueId": "T1105",
       "mitreTechniqueName": "Ingress Tool Transfer",
-      "eventTypes": [ "static.analysis.completed" ],
+      "eventTypes": [
+        "static.analysis.completed"
+      ],
       "dataContains": {
-        "tags": [ "url" ]
+        "tags": [
+          "url"
+        ]
       },
-      "tags": [ "static", "network" ]
+      "tags": [
+        "static",
+        "network"
+      ]
     }
   ]
 }

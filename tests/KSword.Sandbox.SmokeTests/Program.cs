@@ -4,6 +4,7 @@ using KSword.Sandbox.Core.Files;
 using KSword.Sandbox.Core.Jobs;
 using KSword.Sandbox.Core.Rules;
 using KSword.Sandbox.Core.StaticAnalysis;
+using System.Text.Json;
 
 return SmokeTestProgram.Run(args);
 
@@ -156,16 +157,102 @@ internal static class SmokeTestProgram
         Assert(!string.IsNullOrWhiteSpace(job.Sample?.Md5), "md5 should be computed");
         Assert(!string.IsNullOrWhiteSpace(job.Sample?.Sha1), "sha1 should be computed");
         Assert(!string.IsNullOrWhiteSpace(job.Sample?.Crc32), "crc32 should be computed");
-        Assert(job.Runbook is not null && job.Runbook.Steps.Count > 0, "runbook should contain steps");
+        var runbook = job.Runbook ?? throw new InvalidOperationException("runbook should be set");
+        Assert(runbook.Steps.Count > 0, "runbook should contain steps");
         Assert(File.Exists(job.JsonReportPath), "json report should exist");
         Assert(File.Exists(job.HtmlReportPath), "html report should exist");
+        var savedExecutionJob = service.SaveRunbookExecutionResult(job.JobId, new SandboxRunbookExecutionResult
+        {
+            JobId = job.JobId,
+            TargetVmName = runbook.TargetVmName,
+            Mode = SandboxRunbookExecutionMode.DryRun,
+            Success = true,
+            TotalSteps = runbook.Steps.Count,
+            ExecutedSteps = 0,
+            StartedAtUtc = DateTimeOffset.UtcNow,
+            Duration = TimeSpan.Zero,
+            RequiresElevation = true
+        });
+        Assert(File.Exists(savedExecutionJob.RunbookExecutionResultPath), "runbook execution result should be persisted");
 
-        var htmlReportPath = job.HtmlReportPath ?? throw new InvalidOperationException("html report path should be set");
+        var eventsPath = WriteSyntheticGuestEvents(savedExecutionJob);
+        var importedJob = service.ImportGuestEvents(savedExecutionJob.JobId, eventsPath);
+        Assert(importedJob.Status == AnalysisStatus.Completed, "imported job should be completed");
+        Assert(File.Exists(importedJob.JsonReportPath), "refreshed json report should exist");
+        Assert(File.Exists(importedJob.HtmlReportPath), "refreshed html report should exist");
+
+        var htmlReportPath = importedJob.HtmlReportPath ?? throw new InvalidOperationException("html report path should be set");
         var html = File.ReadAllText(htmlReportPath);
         Assert(html.Contains("Risk summary", StringComparison.Ordinal), "html report should include risk summary");
         Assert(html.Contains("Static analysis", StringComparison.Ordinal), "html report should include static analysis");
         Assert(html.Contains("CRC32", StringComparison.Ordinal), "html report should include crc32");
         Assert(html.Contains("PE sections", StringComparison.Ordinal), "html report should include pe sections");
+        Assert(html.Contains("Process details", StringComparison.Ordinal), "html report should include process details");
+        Assert(html.Contains("Dropped files", StringComparison.Ordinal), "html report should include dropped files");
+        Assert(html.Contains("Network behavior", StringComparison.Ordinal), "html report should include network behavior");
+        Assert(html.Contains("Outbound TCP activity observed", StringComparison.Ordinal), "html report should include network finding");
+        Assert(html.Contains("Dropped or modified file", StringComparison.Ordinal), "html report should include file finding");
+        Assert(html.Contains("Registry modification observed", StringComparison.Ordinal), "html report should include driver jsonl finding");
+    }
+
+    /// <summary>
+    /// Writes synthetic guest output for report-regeneration smoke coverage.
+    /// The input is a planned job, processing creates events.json and driver
+    /// JSONL under the expected job guest folder, and the method returns the
+    /// primary events.json path.
+    /// </summary>
+    private static string WriteSyntheticGuestEvents(AnalysisJob job)
+    {
+        var reportPath = job.JsonReportPath ?? throw new InvalidOperationException("job report path should be set");
+        var jobRoot = Path.GetDirectoryName(reportPath) ?? throw new InvalidOperationException("job root should be discoverable");
+        var guestRoot = Path.Combine(jobRoot, "guest", job.JobId.ToString("N"));
+        Directory.CreateDirectory(guestRoot);
+
+        var events = new List<SandboxEvent>
+        {
+            new()
+            {
+                EventType = "process.start",
+                Source = "guest",
+                ProcessName = "powershell",
+                ProcessId = 4242,
+                Path = "C:\\KSwordSandbox\\incoming\\benign-sample.exe",
+                CommandLine = "powershell -NoProfile -ExecutionPolicy Bypass"
+            },
+            new()
+            {
+                EventType = "file.created",
+                Source = "guest",
+                Path = "C:\\KSwordSandbox\\incoming\\drop.bin"
+            },
+            new()
+            {
+                EventType = "network.tcp",
+                Source = "guest",
+                Data =
+                {
+                    ["remoteAddress"] = "203.0.113.10",
+                    ["remotePort"] = "443",
+                    ["state"] = "Established"
+                }
+            }
+        };
+
+        var eventsPath = Path.Combine(guestRoot, "events.json");
+        File.WriteAllText(eventsPath, JsonSerializer.Serialize(events, new JsonSerializerOptions { WriteIndented = true }));
+        var driverEvent = new SandboxEvent
+        {
+            EventType = "registry.set",
+            Source = "driver",
+            ProcessId = 4242,
+            Path = "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\\SandboxSmoke",
+            Data =
+            {
+                ["value"] = "C:\\KSwordSandbox\\incoming\\benign-sample.exe"
+            }
+        };
+        File.WriteAllText(Path.Combine(guestRoot, "driver-events.jsonl"), JsonSerializer.Serialize(driverEvent));
+        return eventsPath;
     }
 
     /// <summary>

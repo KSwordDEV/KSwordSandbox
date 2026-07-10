@@ -1,6 +1,7 @@
 # Build output and IDE state.
 bin/
 obj/
+x64/
 .vs/
 .vscode/
 .idea/

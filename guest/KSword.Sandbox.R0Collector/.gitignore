@@ -1,0 +1,19 @@
+# Local build outputs for the standalone R0Collector project.
+bin/
+obj/
+.vs/
+
+# Native binaries and symbols must not be committed from this collector.
+*.exe
+*.dll
+*.sys
+*.pdb
+*.ilk
+*.idb
+*.iobj
+*.ipdb
+*.obj
+*.tlog
+*.lastbuildstate
+*.recipe
+*.log
