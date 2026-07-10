@@ -1,6 +1,6 @@
 {
   "matrix": "enterprise-windows",
-  "version": "2026-07-10-static-depth",
+  "version": "2026-07-10-static-mitre-expansion",
   "techniques": [
     {
       "id": "T1027",
@@ -14,6 +14,22 @@
       "name": "Software Packing",
       "categories": [
         "defense-evasion"
+      ]
+    },
+    {
+      "id": "T1027.009",
+      "name": "Embedded Payloads",
+      "categories": [
+        "defense-evasion"
+      ]
+    },
+    {
+      "id": "T1053.005",
+      "name": "Scheduled Task",
+      "categories": [
+        "execution",
+        "persistence",
+        "privilege-escalation"
       ]
     },
     {
@@ -32,10 +48,31 @@
       ]
     },
     {
+      "id": "T1059.001",
+      "name": "PowerShell",
+      "categories": [
+        "execution"
+      ]
+    },
+    {
       "id": "T1070.004",
       "name": "File Deletion",
       "categories": [
         "defense-evasion"
+      ]
+    },
+    {
+      "id": "T1071.001",
+      "name": "Web Protocols",
+      "categories": [
+        "command-and-control"
+      ]
+    },
+    {
+      "id": "T1071.004",
+      "name": "DNS",
+      "categories": [
+        "command-and-control"
       ]
     },
     {
@@ -61,8 +98,43 @@
       ]
     },
     {
+      "id": "T1140",
+      "name": "Deobfuscate/Decode Files or Information",
+      "categories": [
+        "defense-evasion"
+      ]
+    },
+    {
+      "id": "T1218",
+      "name": "System Binary Proxy Execution",
+      "categories": [
+        "defense-evasion"
+      ]
+    },
+    {
+      "id": "T1218.005",
+      "name": "Mshta",
+      "categories": [
+        "defense-evasion"
+      ]
+    },
+    {
       "id": "T1218.010",
       "name": "Regsvr32",
+      "categories": [
+        "defense-evasion"
+      ]
+    },
+    {
+      "id": "T1218.011",
+      "name": "Rundll32",
+      "categories": [
+        "defense-evasion"
+      ]
+    },
+    {
+      "id": "T1497",
+      "name": "Virtualization/Sandbox Evasion",
       "categories": [
         "defense-evasion"
       ]
@@ -88,6 +160,13 @@
       "categories": [
         "persistence",
         "privilege-escalation"
+      ]
+    },
+    {
+      "id": "T1620",
+      "name": "Reflective Code Loading",
+      "categories": [
+        "defense-evasion"
       ]
     },
     {

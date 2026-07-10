@@ -37,14 +37,20 @@ readers should still inspect the event `source` field in the evidence table.
 | R0 collector health | `r0collector-device-unavailable`, `r0collector-driver-health`, `r0collector-ioctl-protocol-pending` | `r0collector.deviceUnavailable`, `r0collector.driverHealth`, `r0collector.driverPoll`, `r0collector.driverReadEvents`, `r0collector.ioctlProtocolPending` | `info` | None | Shows driver-open failures and successful health/poll/read IOCTL plumbing; the pending row is retained only for older local collector builds. |
 | R0 synthetic plumbing | `r0collector-mock-driver-event` | `r0collector.mockDriverEvent` | `info` | None | Marks mock JSONL rows so report output stays clear during Guest Agent sidecar tests. |
 | Process behavior | `script-interpreter`, `process-new`, `process-timeout-long-sleep` | `process.start`, `process.new`, `process.timeout` | `low` to `medium` | `T1059`, `T1497.003` | Separates generic new-process evidence from stronger scripting and timeout/evasion indicators. |
-| Registry behavior | `registry-change`, `registry-run-key-persistence` | `registry.set`, `registry.create`, `registry.delete`, `driver.registry` | `medium` to `high` | `T1112`, `T1547.001` | Generic registry writes remain medium; Run/RunOnce autostart paths are high. |
-| File behavior | `file-drop`, `file-deleted`, `executable-file-write` | `file.created`, `file.modified`, `file.deleted`, `driver.file` | `low` to `medium` | `T1070.004` where deletion applies | Executable/script extension matching makes driver and guest file-write rows easier to triage. |
+| Script execution behavior | `script-interpreter`, `script-file-executed` | `process.start` | `medium` | `T1059` | Matches interpreter names and script-like command-line extensions. |
+| Persistence behavior | `registry-run-key-persistence`, `service-registry-persistence`, `scheduled-task-persistence`, `startup-folder-persistence` | `registry.set`, `registry.create`, `driver.registry`, `process.start`, `file.created`, `file.modified`, `driver.file` | `high` | `T1547.001`, `T1543.003`, `T1053.005` | Covers Run/RunOnce keys, service registry paths, scheduled-task creation commands, and Startup folder writes. |
+| Registry behavior | `registry-change`, `registry-run-key-persistence`, `service-registry-persistence` | `registry.set`, `registry.create`, `registry.delete`, `driver.registry` | `medium` to `high` | `T1112`, `T1547.001`, `T1543.003` | Generic registry writes remain medium; Run/RunOnce and service paths are high. |
+| File behavior | `file-drop`, `file-deleted`, `executable-file-write`, `temp-executable-drop`, `startup-folder-persistence` | `file.created`, `file.modified`, `file.deleted`, `driver.file` | `low` to `high` | `T1070.004`, `T1105`, `T1547.001` where specific evidence applies | Executable/script extension and Temp/AppData/Startup path matching make driver and guest file-write rows easier to triage. |
+| Injection behavior | `remote-thread-injection-observed` | `process.remote_thread`, `thread.remote`, `driver.thread` | `high` | `T1055` | Reserved for normalized process/thread telemetry that includes remote-thread or APC-style operation evidence. |
 | R0 driver heartbeat | `driver-load-heartbeat` | `driver.event.reserved`, `driver.load` | `info` | None | Shows that the R0 event drain path produced the driver startup self-test or future driver-load heartbeat. |
 | Image-load placeholder | `image-load-placeholder` | `image.load`, `image.loaded`, `driver.imageLoad`, `driver.image.load` | `info` | None yet | Keeps future R0 image callback rows from appearing as unexplained raw events. |
-| Network behavior | `network-connection` | `network.tcp` | `medium` | `T1105` | Records outbound TCP activity; richer DNS/HTTP/TLS rules should use structured data fields later. |
-| Static PE traits | `static-pe-known-packer`, `static-pe-high-entropy-sections`, `static-embedded-url`, `static-pe-imports-present`, `static-pe-exports-present`, `static-pe-tls-callbacks` | `static.analysis.completed` | `info` to `medium` | `T1027.002`, `T1027`, `T1105` | Uses `dataContains.tags` emitted by static analysis for packers, entropy, URLs, import/export table presence, and TLS directory/callback hints. |
-| Static import/API traits | `static-import-suspicious-api`, `static-import-process-injection`, `static-import-network-api`, `static-import-persistence-api`, `static-import-anti-analysis-api` | `static.analysis.completed` | `medium` to `high` | `T1106`, `T1055`, `T1105`, `T1112`, `T1622` | StaticAnalyzer maps parsed imports and fallback API strings into tags such as `import_suspicious_api`, `import_process_injection_api`, `import_network_api`, `import_persistence_api`, and `import_anti_analysis_api`. |
+| Network behavior | `network-connection`, `http-network-activity`, `dns-query-observed` | `network.tcp`, `http.request`, `network.http`, `dns.query`, `network.dns` | `medium` | `T1105`, `T1071.001`, `T1071.004` | Records outbound TCP plus protocol-specific HTTP/DNS rows when normalized collectors provide them. |
+| Anti-analysis behavior | `process-timeout-long-sleep`, `anti-analysis-debugger-check` | `process.timeout`, `antiAnalysis.debuggerCheck`, `antiAnalysis.sandboxCheck`, `debugger.detected`, `sandbox.detected` | `medium` | `T1497.003`, `T1622` | Covers timeout/sleep evasion and explicit debugger/sandbox check events. |
+| Static PE traits | `static-pe-known-packer`, `static-pe-high-entropy-sections`, `static-section-writable-executable`, `static-embedded-url`, `static-pe-imports-present`, `static-pe-exports-present`, `static-pe-tls-callbacks`, `static-pe-resources-present` | `static.analysis.completed` | `info` to `medium` | `T1027.002`, `T1027`, `T1105` | Uses `dataContains.tags` emitted by static analysis for packers, entropy, RWX/abnormal sections, URLs, import/export/resource table presence, and TLS directory/callback hints. |
+| Static resource traits | `static-resource-payload-candidate`, `static-resource-embedded-pe`, `static-resource-high-entropy` | `static.analysis.completed` | `medium` to `high` | `T1027.009`, `T1027` | Maps resource-directory parsing tags such as `resource_payload_candidate`, `resource_embedded_pe`, and `resource_high_entropy_data`. |
+| Static import/API traits | `static-import-suspicious-api`, `static-import-process-injection`, `static-import-network-api`, `static-import-persistence-api`, `static-import-anti-analysis-api`, `static-import-dynamic-code`, `static-import-script-execution`, `static-import-file-drop`, `static-import-resource-api`, `static-import-registry-persistence`, `static-import-service-persistence` | `static.analysis.completed` | `medium` to `high` | `T1106`, `T1055`, `T1105`, `T1112`, `T1543.003`, `T1059`, `T1027.009`, `T1620`, `T1622` | StaticAnalyzer maps parsed imports and fallback API strings into tags such as `import_suspicious_api`, `import_process_injection_api`, `import_network_api`, `import_file_drop_api`, `import_resource_api`, `import_script_execution_api`, and persistence/anti-analysis subgroups. |
 | Static export traits | `static-export-registration-entrypoint`, `static-export-service-entrypoint` | `static.analysis.completed` | `low` to `medium` | `T1218.010`, `T1543.003` | Export names are triage-only evidence; registration exports can indicate regsvr32-compatible DLL entry points, and service exports can support service DLL triage. |
+| Static string indicators | `static-ip-address`, `static-windows-path-string`, `static-registry-path-string`, `static-persistence-string`, `static-script-command-string`, `static-encoded-command-string`, `static-lolbin-string`, `static-anti-sandbox-string` | `static.analysis.completed` | `low` to `medium` | `T1105`, `T1112`, `T1547.001`, `T1059`, `T1059.001`, `T1218`, `T1497` | Covers URL/IP/network indicators, Windows/registry paths, persistence paths, PowerShell encoded commands, living-off-the-land utility names, and VM/debugger/sandbox strings. |
 
 ## MITRE mapping notes
 
@@ -54,18 +60,32 @@ readers should still inspect the event `source` field in the evidence table.
   Run/RunOnce autostart paths because that evidence is more specific.
 - `T1070.004` is used for file deletion because the current event does not yet
   prove cleanup intent, but it is still useful to surface in reports.
-- `T1105` is retained for outbound TCP and embedded URL evidence as a seed
-- `T1105` is retained for outbound TCP, embedded URL evidence, and static
+- `T1053.005` is used only when a command line shows scheduled-task creation
+  or registration evidence.
+- `T1059` covers interpreter and script-file execution evidence. `T1059.001`
+  is used when static strings specifically show PowerShell encoded-command
+  markers.
+- `T1071.001` and `T1071.004` are reserved for normalized HTTP and DNS events.
+- `T1105` is retained for outbound TCP, embedded URL/IP evidence, and static
   network/download API imports as a seed mapping until protocol-specific
   network rules exist.
 - `T1055` is used only for static import groups that include process-injection
-  primitives such as cross-process allocation/write/thread APIs.
+  primitives such as cross-process allocation/write/thread APIs, or dynamic
+  events that explicitly report remote-thread/APC-style operations.
 - `T1106` covers broad native Windows API import/string evidence; more specific
   rules such as process injection, network transfer, persistence, and
   anti-analysis should take precedence in triage.
+- `T1027.009` is used for resource payload candidates and embedded PE resource
+  evidence. `T1027` remains the broader entropy/obfuscation fallback.
+- `T1218` is used for generic living-off-the-land binary strings; specific
+  export evidence still uses `T1218.010` for regsvr32-compatible DLL exports.
 - `T1218.010` is used for static COM registration exports because those names
   are compatible with regsvr32-style execution, but the static rule does not
   prove that regsvr32 was actually used.
+- `T1497` covers static VM/sandbox/tool strings; `T1497.003` remains specific
+  to time-based evasion.
+- `T1620` is used for dynamic code loading and memory-protection import groups
+  as a triage hint, not as proof of reflective loading at runtime.
 - `T1622` is used for debugger/timing import strings where static evidence
   suggests anti-analysis checks.
 - Rules without MITRE IDs are intentionally unmapped because the current event
@@ -78,12 +98,18 @@ The current report model does not have first-class `imports`, `exports`, or
 existing fields:
 
 - `Tags`: rule-facing tokens such as `imports_present`, `exports_present`,
-  `tls_directory_present`, `tls_callbacks`, `import_suspicious_api`,
+  `resources_present`, `tls_directory_present`, `tls_callbacks`,
+  `resource_payload_candidate`, `resource_embedded_pe`,
+  `writable_executable_section`, `import_suspicious_api`,
   `import_process_injection_api`, `import_network_api`,
+  `import_file_drop_api`, `import_resource_api`,
+  `import_script_execution_api`, `registry_path_string`,
+  `script_execution_string`, `ip_address`,
   `export_registration_entrypoint`, `packer_section_name`, and
   `packer_string_hint`.
 - `InterestingStrings`: bounded human-readable evidence such as
-  `import:kernel32.dll!VirtualAllocEx`, `export:DllRegisterServer`, and
+  `import:kernel32.dll!VirtualAllocEx`, `export:DllRegisterServer`,
+  `resource:rcdata,size=...`, `path:C:\...`, `ip:8.8.8.8`, and
   `tls:callback@0x...`.
 - `static.analysis.completed.Data["tags"]`: comma-joined `Tags` used by
   `dataContains.tags` predicates in `rules/behavior-rules.json`.

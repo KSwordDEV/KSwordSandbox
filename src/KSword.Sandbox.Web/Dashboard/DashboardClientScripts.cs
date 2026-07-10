@@ -16,15 +16,51 @@ internal static class DashboardClientScripts
     {
         return """
 <script>
-document.addEventListener('contextmenu', function (event) {
-  var target = event.target.closest('[data-copy]');
-  if (!target || !navigator.clipboard) {
+function kswFallbackCopyText(value) {
+  var textarea = document.createElement('textarea');
+  textarea.value = value;
+  textarea.setAttribute('readonly', 'readonly');
+  textarea.style.position = 'fixed';
+  textarea.style.left = '-9999px';
+  document.body.appendChild(textarea);
+  textarea.select();
+  document.execCommand('copy');
+  document.body.removeChild(textarea);
+}
+
+function kswCopyDashboardValue(value) {
+  if (!value) {
+    return;
+  }
+
+  if (navigator.clipboard && window.isSecureContext) {
+    navigator.clipboard.writeText(value).catch(function () { kswFallbackCopyText(value); });
+    return;
+  }
+
+  kswFallbackCopyText(value);
+}
+
+document.addEventListener('click', function (event) {
+  var button = event.target.closest('button.copy-btn[data-copy]');
+  if (!button) {
     return;
   }
 
   event.preventDefault();
-  var value = target.getAttribute('data-copy') || target.textContent || '';
-  navigator.clipboard.writeText(value);
+  event.stopPropagation();
+  kswCopyDashboardValue(button.getAttribute('data-copy') || '');
+});
+
+document.addEventListener('contextmenu', function (event) {
+  var target = event.target.closest('[data-copy], code, pre, td, th');
+  if (!target) {
+    return;
+  }
+
+  event.preventDefault();
+  var value = target.getAttribute('data-copy') || target.innerText || target.textContent || '';
+  kswCopyDashboardValue(value);
 });
 </script>
 """;

@@ -68,13 +68,18 @@ typedef struct _KSWORD_SANDBOX_DEVICE_EXTENSION {
     ULONG DriverState;
     KSPIN_LOCK StateLock;
     ULONGLONG EventsQueued;
+    ULONGLONG TotalEventsQueued;
     ULONGLONG EventsDropped;
+    ULONGLONG EventsRead;
+    ULONGLONG EventsSuppressed;
     ULONGLONG NextSequence;
     NTSTATUS LastStatus;
+    ULONG ProducerEnableMask;
+    ULONG SupportedProducerMask;
     ULONG EventReadIndex;
     ULONG EventWriteIndex;
     ULONG EventCount;
-    ULONG EventReserved;
+    ULONG QueueHighWatermark;
     KSWORD_SANDBOX_EVENT_RECORD EventRing[KSWORD_SANDBOX_EVENT_RING_CAPACITY];
 } KSWORD_SANDBOX_DEVICE_EXTENSION, *PKSWORD_SANDBOX_DEVICE_EXTENSION;
 
@@ -89,10 +94,17 @@ typedef struct _KSWORD_SANDBOX_DEVICE_EXTENSION {
 typedef struct _KSWORD_SANDBOX_STATE_SNAPSHOT {
     ULONG DriverState;
     ULONGLONG EventsQueued;
+    ULONGLONG TotalEventsQueued;
     ULONGLONG EventsDropped;
+    ULONGLONG EventsRead;
+    ULONGLONG EventsSuppressed;
     ULONGLONG NextSequence;
     NTSTATUS LastStatus;
+    ULONG ProducerEnableMask;
+    ULONG SupportedProducerMask;
+    ULONG QueueCapacity;
     ULONG EventCount;
+    ULONG QueueHighWatermark;
 } KSWORD_SANDBOX_STATE_SNAPSHOT, *PKSWORD_SANDBOX_STATE_SNAPSHOT;
 
 /*
@@ -133,6 +145,14 @@ VOID
 KswSnapshotState(
     _In_ PKSWORD_SANDBOX_DEVICE_EXTENSION DeviceExtension,
     _Out_ PKSWORD_SANDBOX_STATE_SNAPSHOT Snapshot
+    );
+
+NTSTATUS
+KswSetProducerEnableMask(
+    _Inout_ PKSWORD_SANDBOX_DEVICE_EXTENSION DeviceExtension,
+    _In_ ULONG EnableMask,
+    _Out_ PULONG PreviousEnableMask,
+    _Out_ PULONG EffectiveEnableMask
     );
 
 NTSTATUS

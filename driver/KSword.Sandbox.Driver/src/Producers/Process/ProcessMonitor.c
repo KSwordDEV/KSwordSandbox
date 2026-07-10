@@ -14,11 +14,23 @@ typedef enum _KSWORD_SANDBOX_PROCESS_NOTIFY_MODE {
     KswProcessNotifyModeLegacy = 2
 } KSWORD_SANDBOX_PROCESS_NOTIFY_MODE;
 
+#define KSWORD_SANDBOX_PROCESS_LINEAGE_CAPACITY 128UL
+
+typedef struct _KSWORD_SANDBOX_PROCESS_LINEAGE_ENTRY {
+    ULONGLONG ProcessId;
+    ULONGLONG ParentProcessId;
+    ULONGLONG CreatingProcessId;
+} KSWORD_SANDBOX_PROCESS_LINEAGE_ENTRY, *PKSWORD_SANDBOX_PROCESS_LINEAGE_ENTRY;
+
 static PKSWORD_SANDBOX_DEVICE_EXTENSION g_KswProcessMonitorDeviceExtension;
 static volatile LONG g_KswProcessMonitorActive;
 static volatile LONG g_KswProcessCallbackRegistered;
 static volatile LONG g_KswImageCallbackRegistered;
 static ULONG g_KswProcessNotifyMode;
+static KSPIN_LOCK g_KswProcessLineageLock;
+static ULONG g_KswProcessLineageNextIndex;
+static KSWORD_SANDBOX_PROCESS_LINEAGE_ENTRY
+    g_KswProcessLineage[KSWORD_SANDBOX_PROCESS_LINEAGE_CAPACITY];
 
 static VOID
 KswProcessCreateNotifyEx(
@@ -42,15 +54,185 @@ KswLoadImageNotify(
     );
 
 /*
- * Copies an optional callback string into a process payload field.
- * Inputs : Destination is fixed payload storage; Source may be NULL; PresentFlag
- *          and TruncatedFlag identify the payload bits to update.
- * Logic  : uses the shared bounded UTF-16 helper and stores byte counts without
- *          allocating or touching pageable buffers above the callback contract.
- * Return : no return value; flags and length are updated in place.
+ * Clears the fixed process lineage cache.
+ * Inputs : none; the module-local spin lock must already be initialized.
+ * Logic  : used during initialize/uninitialize so stale PID reuse never leaks
+ *          parent/creator IDs across driver reloads.
+ * Return : no return value.
  */
 static
 VOID
+KswClearProcessLineage(
+    VOID
+    )
+{
+    KIRQL oldIrql;
+
+    KeAcquireSpinLock(&g_KswProcessLineageLock, &oldIrql);
+    RtlZeroMemory(g_KswProcessLineage, sizeof(g_KswProcessLineage));
+    g_KswProcessLineageNextIndex = 0;
+    KeReleaseSpinLock(&g_KswProcessLineageLock, oldIrql);
+}
+
+/*
+ * Remembers process lineage from a create callback for the later exit callback.
+ * Inputs : ProcessId is the child PID; ParentProcessId and CreatingProcessId
+ *          describe lineage captured by Ps callbacks.
+ * Logic  : keeps a bounded non-paged cache under a spin lock; when full it
+ *          replaces entries round-robin instead of allocating in callbacks.
+ * Return : no return value.
+ */
+static
+VOID
+KswRememberProcessLineage(
+    _In_ ULONGLONG ProcessId,
+    _In_ ULONGLONG ParentProcessId,
+    _In_ ULONGLONG CreatingProcessId
+    )
+{
+    ULONG index;
+    ULONG selectedIndex;
+    KIRQL oldIrql;
+
+    if (ProcessId == 0) {
+        return;
+    }
+
+    selectedIndex = KSWORD_SANDBOX_PROCESS_LINEAGE_CAPACITY;
+    KeAcquireSpinLock(&g_KswProcessLineageLock, &oldIrql);
+    for (index = 0; index < KSWORD_SANDBOX_PROCESS_LINEAGE_CAPACITY; index++) {
+        if (g_KswProcessLineage[index].ProcessId == ProcessId) {
+            selectedIndex = index;
+            break;
+        }
+
+        if (g_KswProcessLineage[index].ProcessId == 0 &&
+            selectedIndex == KSWORD_SANDBOX_PROCESS_LINEAGE_CAPACITY) {
+            selectedIndex = index;
+        }
+    }
+
+    if (selectedIndex == KSWORD_SANDBOX_PROCESS_LINEAGE_CAPACITY) {
+        selectedIndex =
+            g_KswProcessLineageNextIndex % KSWORD_SANDBOX_PROCESS_LINEAGE_CAPACITY;
+        g_KswProcessLineageNextIndex =
+            (selectedIndex + 1U) % KSWORD_SANDBOX_PROCESS_LINEAGE_CAPACITY;
+    }
+
+    g_KswProcessLineage[selectedIndex].ProcessId = ProcessId;
+    g_KswProcessLineage[selectedIndex].ParentProcessId = ParentProcessId;
+    g_KswProcessLineage[selectedIndex].CreatingProcessId = CreatingProcessId;
+    KeReleaseSpinLock(&g_KswProcessLineageLock, oldIrql);
+}
+
+/*
+ * Removes and returns cached process lineage for an exit callback.
+ * Inputs : ProcessId identifies the exiting process; ParentProcessId and
+ *          CreatingProcessId receive cached values when present.
+ * Logic  : bounded lookup under the lineage spin lock; the entry is cleared so
+ *          PID reuse does not inherit old parent IDs.
+ * Return : TRUE when cached lineage was found.
+ */
+static
+BOOLEAN
+KswTakeProcessLineage(
+    _In_ ULONGLONG ProcessId,
+    _Out_ PULONGLONG ParentProcessId,
+    _Out_ PULONGLONG CreatingProcessId
+    )
+{
+    ULONG index;
+    BOOLEAN found;
+    KIRQL oldIrql;
+
+    if (ParentProcessId != NULL) {
+        *ParentProcessId = 0;
+    }
+    if (CreatingProcessId != NULL) {
+        *CreatingProcessId = 0;
+    }
+    if (ProcessId == 0) {
+        return FALSE;
+    }
+
+    found = FALSE;
+    KeAcquireSpinLock(&g_KswProcessLineageLock, &oldIrql);
+    for (index = 0; index < KSWORD_SANDBOX_PROCESS_LINEAGE_CAPACITY; index++) {
+        if (g_KswProcessLineage[index].ProcessId == ProcessId) {
+            if (ParentProcessId != NULL) {
+                *ParentProcessId = g_KswProcessLineage[index].ParentProcessId;
+            }
+            if (CreatingProcessId != NULL) {
+                *CreatingProcessId = g_KswProcessLineage[index].CreatingProcessId;
+            }
+            RtlZeroMemory(
+                &g_KswProcessLineage[index],
+                sizeof(g_KswProcessLineage[index]));
+            found = TRUE;
+            break;
+        }
+    }
+    KeReleaseSpinLock(&g_KswProcessLineageLock, oldIrql);
+    return found;
+}
+
+/*
+ * Builds a bounded, read-only UNICODE_STRING view that is safe for the common
+ * copy helper.
+ * Inputs : Source is callback-owned optional UTF-16 text; SafeSource receives a
+ *          clamped view that never has Length greater than MaximumLength.
+ * Logic  : avoids touching pageable callback strings above APC_LEVEL and rounds
+ *          odd byte lengths down to full WCHARs before any copy is attempted.
+ * Return : TRUE when SafeSource references useful UTF-16 text, FALSE otherwise.
+ */
+static
+BOOLEAN
+KswPrepareProcessCallbackString(
+    _In_opt_ PCUNICODE_STRING Source,
+    _Out_ PUNICODE_STRING SafeSource
+    )
+{
+    USHORT safeLength;
+
+    if (SafeSource == NULL) {
+        return FALSE;
+    }
+
+    RtlZeroMemory(SafeSource, sizeof(*SafeSource));
+    if (Source == NULL ||
+        Source->Buffer == NULL ||
+        Source->Length == 0 ||
+        KeGetCurrentIrql() > APC_LEVEL) {
+        return FALSE;
+    }
+
+    safeLength = Source->Length;
+    if (Source->MaximumLength != 0 && safeLength > Source->MaximumLength) {
+        safeLength = Source->MaximumLength;
+    }
+
+    safeLength = (USHORT)(safeLength - (safeLength % (USHORT)sizeof(WCHAR)));
+    if (safeLength == 0) {
+        return FALSE;
+    }
+
+    SafeSource->Buffer = Source->Buffer;
+    SafeSource->Length = safeLength;
+    SafeSource->MaximumLength = safeLength;
+    return TRUE;
+}
+
+/*
+ * Copies an optional callback string into a process payload field.
+ * Inputs : Destination is fixed payload storage; Source may be NULL; PresentFlag
+ *          and TruncatedFlag identify the payload bits to update.
+ * Logic  : validates IRQL and UNICODE_STRING bounds before delegating to the
+ *          shared bounded UTF-16 helper; no allocation or blocking occurs.
+ * Return : TRUE when text was copied; FALSE when the field is intentionally
+ *          absent. Flags and length are updated in place.
+ */
+static
+BOOLEAN
 KswCopyProcessPayloadString(
     _Out_writes_(DestinationChars) PWCHAR Destination,
     _In_ ULONG DestinationChars,
@@ -62,29 +244,40 @@ KswCopyProcessPayloadString(
     )
 {
     BOOLEAN truncated;
+    BOOLEAN copied;
     ULONG bytesCopied;
+    UNICODE_STRING safeSource;
+
+    if (Destination != NULL && DestinationChars != 0) {
+        Destination[0] = L'\0';
+    }
 
     if (Flags == NULL || LengthBytes == NULL) {
-        return;
+        return FALSE;
     }
 
     *LengthBytes = 0;
     truncated = FALSE;
+    copied = FALSE;
     bytesCopied = 0;
 
-    if (KswCopyUnicodePrefix(
+    if (KswPrepareProcessCallbackString(Source, &safeSource) &&
+        KswCopyUnicodePrefix(
             Destination,
             DestinationChars,
-            Source,
+            &safeSource,
             &bytesCopied,
             &truncated)) {
         *Flags |= PresentFlag;
         *LengthBytes = bytesCopied;
+        copied = TRUE;
     }
 
     if (truncated) {
         *Flags |= TruncatedFlag;
     }
+
+    return copied;
 }
 
 /*
@@ -201,8 +394,18 @@ KswProcessCreateNotifyEx(
             KSWORD_SANDBOX_PROCESS_EVENT_FLAG_COMMAND_TRUNCATED,
             &payload.Flags,
             &payload.CommandLineLengthBytes);
+        KswRememberProcessLineage(
+            payload.ProcessId,
+            payload.ParentProcessId,
+            payload.CreatingProcessId);
     } else {
         payload.Operation = KswSandboxProcessOperationExit;
+        if (!KswTakeProcessLineage(
+                payload.ProcessId,
+                &payload.ParentProcessId,
+                &payload.CreatingProcessId)) {
+            payload.CreatingProcessId = (ULONGLONG)(ULONG_PTR)PsGetCurrentProcessId();
+        }
         if (Process != NULL && KeGetCurrentIrql() <= APC_LEVEL) {
             payload.Status = PsGetProcessExitStatus(Process);
             payload.Flags |= KSWORD_SANDBOX_PROCESS_EVENT_FLAG_STATUS_PRESENT;
@@ -239,6 +442,18 @@ KswProcessCreateNotifyLegacy(
     payload.Flags = KSWORD_SANDBOX_PROCESS_EVENT_FLAG_LEGACY_CALLBACK;
     payload.ProcessId = (ULONGLONG)(ULONG_PTR)ProcessId;
     payload.ParentProcessId = (ULONGLONG)(ULONG_PTR)ParentId;
+    payload.CreatingProcessId = (ULONGLONG)(ULONG_PTR)PsGetCurrentProcessId();
+    if (Create) {
+        KswRememberProcessLineage(
+            payload.ProcessId,
+            payload.ParentProcessId,
+            payload.CreatingProcessId);
+    } else if (!KswTakeProcessLineage(
+            payload.ProcessId,
+            &payload.ParentProcessId,
+            &payload.CreatingProcessId)) {
+        payload.CreatingProcessId = (ULONGLONG)(ULONG_PTR)PsGetCurrentProcessId();
+    }
     KswQueueProcessEvent(&payload);
 }
 
@@ -259,8 +474,6 @@ KswLoadImageNotify(
     )
 {
     KSWORD_SANDBOX_IMAGE_EVENT_PAYLOAD payload;
-    BOOLEAN truncated;
-    ULONG bytesCopied;
 
     if (ImageInfo == NULL) {
         return;
@@ -276,20 +489,14 @@ KswLoadImageNotify(
         payload.Flags |= KSWORD_SANDBOX_IMAGE_EVENT_FLAG_SYSTEM_MODE_IMAGE;
     }
 
-    truncated = FALSE;
-    bytesCopied = 0;
-    if (KswCopyUnicodePrefix(
-            payload.ImagePath,
-            KSWORD_SANDBOX_IMAGE_PATH_CHARS,
-            FullImageName,
-            &bytesCopied,
-            &truncated)) {
-        payload.Flags |= KSWORD_SANDBOX_IMAGE_EVENT_FLAG_PATH_PRESENT;
-        payload.PathLengthBytes = bytesCopied;
-    }
-    if (truncated) {
-        payload.Flags |= KSWORD_SANDBOX_IMAGE_EVENT_FLAG_PATH_TRUNCATED;
-    }
+    (VOID)KswCopyProcessPayloadString(
+        payload.ImagePath,
+        KSWORD_SANDBOX_IMAGE_PATH_CHARS,
+        FullImageName,
+        KSWORD_SANDBOX_IMAGE_EVENT_FLAG_PATH_PRESENT,
+        KSWORD_SANDBOX_IMAGE_EVENT_FLAG_PATH_TRUNCATED,
+        &payload.Flags,
+        &payload.PathLengthBytes);
 
     KswQueueImageEvent(&payload);
 }
@@ -322,6 +529,8 @@ KswInitializeProcessMonitor(
     InterlockedExchange(&g_KswProcessMonitorActive, 0);
     InterlockedExchange(&g_KswProcessCallbackRegistered, 0);
     InterlockedExchange(&g_KswImageCallbackRegistered, 0);
+    KeInitializeSpinLock(&g_KswProcessLineageLock);
+    KswClearProcessLineage();
 
     processStatus = PsSetCreateProcessNotifyRoutineEx(
         KswProcessCreateNotifyEx,
@@ -377,8 +586,8 @@ KswUninitializeProcessMonitor(
     ULONG processNotifyMode;
 
     InterlockedExchange(&g_KswProcessMonitorActive, 0);
-    processRegistered = InterlockedCompareExchange(&g_KswProcessCallbackRegistered, 0, 0);
-    imageRegistered = InterlockedCompareExchange(&g_KswImageCallbackRegistered, 0, 0);
+    processRegistered = InterlockedExchange(&g_KswProcessCallbackRegistered, 0);
+    imageRegistered = InterlockedExchange(&g_KswImageCallbackRegistered, 0);
     processNotifyMode = g_KswProcessNotifyMode;
 
     if (processRegistered != 0) {
@@ -387,14 +596,13 @@ KswUninitializeProcessMonitor(
         } else if (processNotifyMode == KswProcessNotifyModeLegacy) {
             (VOID)PsSetCreateProcessNotifyRoutine(KswProcessCreateNotifyLegacy, TRUE);
         }
-        InterlockedExchange(&g_KswProcessCallbackRegistered, 0);
     }
 
     if (imageRegistered != 0) {
         (VOID)PsRemoveLoadImageNotifyRoutine(KswLoadImageNotify);
-        InterlockedExchange(&g_KswImageCallbackRegistered, 0);
     }
 
     g_KswProcessNotifyMode = KswProcessNotifyModeNone;
+    KswClearProcessLineage();
     g_KswProcessMonitorDeviceExtension = NULL;
 }

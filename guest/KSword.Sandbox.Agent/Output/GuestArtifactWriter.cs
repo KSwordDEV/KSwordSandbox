@@ -116,14 +116,23 @@ internal sealed class GuestArtifactWriter
     private static ArtifactDescriptor CreateDroppedFileDescriptor(string outputDirectory, string path)
     {
         var info = new FileInfo(path);
+        var relativePath = NormalizeRelativePath(Path.GetRelativePath(outputDirectory, info.FullName));
+        var sha256 = ComputeSha256(info.FullName);
         return new ArtifactDescriptor
         {
             Kind = ArtifactKind.DroppedFile,
+            Category = "dropped-file",
             Name = info.Name,
-            RelativePath = Path.GetRelativePath(outputDirectory, info.FullName),
+            RelativePath = relativePath,
             FullPath = info.FullName,
+            SafeLink = BuildSafeLink(relativePath),
+            MimeType = MimeTypeForPath(info.FullName),
             SizeBytes = info.Length,
-            Sha256 = ComputeSha256(info.FullName),
+            Sha256 = sha256,
+            Hashes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["sha256"] = sha256
+            },
             CreatedAtUtc = info.CreationTimeUtc,
             Metadata = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
             {
@@ -144,5 +153,77 @@ internal sealed class GuestArtifactWriter
         using var stream = File.OpenRead(path);
         var hash = System.Security.Cryptography.SHA256.HashData(stream);
         return Convert.ToHexString(hash).ToLowerInvariant();
+    }
+
+    /// <summary>
+    /// Normalizes manifest-relative paths to safe slash-separated text.
+    /// The input may contain platform separators; processing rejects rooted or
+    /// parent-traversal segments; the method returns safe relative path text.
+    /// </summary>
+    private static string NormalizeRelativePath(string relativePath)
+    {
+        if (string.IsNullOrWhiteSpace(relativePath))
+        {
+            return string.Empty;
+        }
+
+        var unified = relativePath.Replace('\\', '/').Trim();
+        if (Path.IsPathFullyQualified(unified) || unified.StartsWith("/", StringComparison.Ordinal))
+        {
+            return string.Empty;
+        }
+
+        var segments = unified
+            .Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(segment => !string.Equals(segment, ".", StringComparison.Ordinal))
+            .ToList();
+        if (segments.Count == 0 ||
+            segments.Any(segment =>
+                string.Equals(segment, "..", StringComparison.Ordinal) ||
+                segment.Contains(':', StringComparison.Ordinal)))
+        {
+            return string.Empty;
+        }
+
+        return string.Join("/", segments);
+    }
+
+    /// <summary>
+    /// Builds a link target for local reports from a relative manifest path.
+    /// Inputs are slash-separated relative path text; processing URL-encodes
+    /// each segment; the method returns safe href text or empty text.
+    /// </summary>
+    private static string BuildSafeLink(string relativePath)
+    {
+        var normalized = NormalizeRelativePath(relativePath);
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return string.Empty;
+        }
+
+        return string.Join("/", normalized.Split('/').Select(Uri.EscapeDataString));
+    }
+
+    /// <summary>
+    /// Maps common artifact file names to MIME types.
+    /// The input is a path; processing checks the extension; the method returns
+    /// a deterministic content type string.
+    /// </summary>
+    private static string MimeTypeForPath(string path)
+    {
+        return Path.GetExtension(path).ToLowerInvariant() switch
+        {
+            ".json" => "application/json",
+            ".jsonl" => "application/x-ndjson",
+            ".html" or ".htm" => "text/html",
+            ".txt" or ".log" => "text/plain",
+            ".bmp" => "image/bmp",
+            ".png" => "image/png",
+            ".jpg" or ".jpeg" => "image/jpeg",
+            ".gif" => "image/gif",
+            ".zip" => "application/zip",
+            ".exe" or ".dll" or ".sys" => "application/vnd.microsoft.portable-executable",
+            _ => "application/octet-stream"
+        };
     }
 }

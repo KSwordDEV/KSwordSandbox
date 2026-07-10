@@ -46,6 +46,45 @@ KswGetNextReadableSequenceLocked(
 }
 
 /*
+ * Maps a public event type to the producer enable bit that controls it.
+ *
+ * Inputs : EventType is the KSWORD_SANDBOX_EVENT_TYPE value passed to
+ *          KswPushEvent.
+ * Logic  : centralizes producer gating so existing producer modules do not need
+ *          separate enable-mask checks in callback hot paths.
+ * Return : one KSWORD_SANDBOX_PRODUCER_FLAG_* bit, or DRIVER for reserved and
+ *          driver-lifecycle records.
+ */
+static
+ULONG
+KswGetProducerMaskForEventType(
+    _In_ ULONG EventType
+    )
+{
+    switch (EventType) {
+    case KswSandboxEventTypeProcess:
+        return KSWORD_SANDBOX_PRODUCER_FLAG_PROCESS;
+
+    case KswSandboxEventTypeImage:
+        return KSWORD_SANDBOX_PRODUCER_FLAG_IMAGE;
+
+    case KswSandboxEventTypeFile:
+        return KSWORD_SANDBOX_PRODUCER_FLAG_FILE;
+
+    case KswSandboxEventTypeRegistry:
+        return KSWORD_SANDBOX_PRODUCER_FLAG_REGISTRY;
+
+    case KswSandboxEventTypeNetwork:
+        return KSWORD_SANDBOX_PRODUCER_FLAG_NETWORK;
+
+    case KswSandboxEventTypeDriverLoad:
+    case KswSandboxEventTypeReserved:
+    default:
+        return KSWORD_SANDBOX_PRODUCER_FLAG_DRIVER;
+    }
+}
+
+/*
  * Updates the last internal status reported through GET_HEALTH.
  *
  * Inputs : DeviceExtension owns the status field; Status is the newest internal
@@ -73,6 +112,54 @@ KswSetLastStatus(
 }
 
 /*
+ * Updates the producer event emission mask.
+ *
+ * Inputs : DeviceExtension owns the shared mask; EnableMask is the collector's
+ *          requested subset; PreviousEnableMask and EffectiveEnableMask receive
+ *          the before/after values.
+ * Logic  : rejects unsupported bits before taking the spin lock, then updates
+ *          the mask atomically with respect to KswPushEvent enqueue checks.
+ * Return : STATUS_SUCCESS or STATUS_INVALID_PARAMETER for unsupported bits.
+ */
+NTSTATUS
+KswSetProducerEnableMask(
+    _Inout_ PKSWORD_SANDBOX_DEVICE_EXTENSION DeviceExtension,
+    _In_ ULONG EnableMask,
+    _Out_ PULONG PreviousEnableMask,
+    _Out_ PULONG EffectiveEnableMask
+    )
+{
+    KIRQL oldIrql;
+
+    if (PreviousEnableMask == NULL || EffectiveEnableMask == NULL) {
+        return STATUS_INVALID_PARAMETER;
+    }
+
+    *PreviousEnableMask = 0;
+    *EffectiveEnableMask = 0;
+
+    if (DeviceExtension == NULL ||
+        DeviceExtension->Signature != KSWORD_SANDBOX_DEVICE_EXTENSION_SIGNATURE) {
+        return STATUS_INVALID_PARAMETER;
+    }
+
+    if ((EnableMask & ~DeviceExtension->SupportedProducerMask) != 0) {
+        return STATUS_INVALID_PARAMETER;
+    }
+
+    KeAcquireSpinLock(&DeviceExtension->StateLock, &oldIrql);
+
+    *PreviousEnableMask = DeviceExtension->ProducerEnableMask;
+    DeviceExtension->ProducerEnableMask = EnableMask;
+    *EffectiveEnableMask = DeviceExtension->ProducerEnableMask;
+    DeviceExtension->LastStatus = STATUS_SUCCESS;
+
+    KeReleaseSpinLock(&DeviceExtension->StateLock, oldIrql);
+
+    return STATUS_SUCCESS;
+}
+
+/*
  * Queues one bounded event record in the device ring.
  *
  * Inputs : DeviceExtension owns the ring; EventType and Flags describe the
@@ -95,6 +182,7 @@ KswPushEvent(
 {
     KIRQL oldIrql;
     KSWORD_SANDBOX_EVENT_RECORD eventRecord;
+    ULONG producerMask;
 
     if (DeviceExtension == NULL ||
         DeviceExtension->Signature != KSWORD_SANDBOX_DEVICE_EXTENSION_SIGNATURE) {
@@ -108,6 +196,8 @@ KswPushEvent(
     if (PayloadSize != 0 && Payload == NULL) {
         return STATUS_INVALID_PARAMETER;
     }
+
+    producerMask = KswGetProducerMaskForEventType(EventType);
 
     RtlZeroMemory(&eventRecord, sizeof(eventRecord));
     eventRecord.Header.Version = KSWORD_SANDBOX_EVENT_HEADER_VERSION;
@@ -127,6 +217,12 @@ KswPushEvent(
 
     KeAcquireSpinLock(&DeviceExtension->StateLock, &oldIrql);
 
+    if ((DeviceExtension->ProducerEnableMask & producerMask) == 0) {
+        DeviceExtension->EventsSuppressed++;
+        KeReleaseSpinLock(&DeviceExtension->StateLock, oldIrql);
+        return STATUS_CANCELLED;
+    }
+
     eventRecord.Header.Sequence = DeviceExtension->NextSequence;
     DeviceExtension->NextSequence++;
 
@@ -142,6 +238,10 @@ KswPushEvent(
         KswAdvanceRingIndex(DeviceExtension->EventWriteIndex);
     DeviceExtension->EventCount++;
     DeviceExtension->EventsQueued = DeviceExtension->EventCount;
+    DeviceExtension->TotalEventsQueued++;
+    if (DeviceExtension->EventCount > DeviceExtension->QueueHighWatermark) {
+        DeviceExtension->QueueHighWatermark = DeviceExtension->EventCount;
+    }
     DeviceExtension->LastStatus = STATUS_SUCCESS;
 
     KeReleaseSpinLock(&DeviceExtension->StateLock, oldIrql);
@@ -247,6 +347,7 @@ KswDrainEventHeaders(
 
     DeviceExtension->EventCount -= *EventsWritten;
     DeviceExtension->EventsQueued = DeviceExtension->EventCount;
+    DeviceExtension->EventsRead += *EventsWritten;
 
     *EventsDropped = DeviceExtension->EventsDropped;
     *NextSequence = KswGetNextReadableSequenceLocked(DeviceExtension);
@@ -273,9 +374,15 @@ KswInitializeDeviceExtension(
     DeviceExtension->Signature = KSWORD_SANDBOX_DEVICE_EXTENSION_SIGNATURE;
     DeviceExtension->DriverState = KswSandboxDriverStateRunning;
     DeviceExtension->EventsQueued = 0;
+    DeviceExtension->TotalEventsQueued = 0;
     DeviceExtension->EventsDropped = 0;
+    DeviceExtension->EventsRead = 0;
+    DeviceExtension->EventsSuppressed = 0;
     DeviceExtension->NextSequence = 1;
     DeviceExtension->LastStatus = STATUS_SUCCESS;
+    DeviceExtension->ProducerEnableMask = KSWORD_SANDBOX_PRODUCER_MASK_DEFAULT;
+    DeviceExtension->SupportedProducerMask = KSWORD_SANDBOX_PRODUCER_MASK_CURRENT;
+    DeviceExtension->QueueHighWatermark = 0;
 
     KeInitializeSpinLock(&DeviceExtension->StateLock);
     KswQueueDriverStartedEvent(DeviceExtension);
@@ -301,10 +408,17 @@ KswSnapshotState(
 
     Snapshot->DriverState = DeviceExtension->DriverState;
     Snapshot->EventsQueued = DeviceExtension->EventsQueued;
+    Snapshot->TotalEventsQueued = DeviceExtension->TotalEventsQueued;
     Snapshot->EventsDropped = DeviceExtension->EventsDropped;
+    Snapshot->EventsRead = DeviceExtension->EventsRead;
+    Snapshot->EventsSuppressed = DeviceExtension->EventsSuppressed;
     Snapshot->NextSequence = KswGetNextReadableSequenceLocked(DeviceExtension);
     Snapshot->LastStatus = DeviceExtension->LastStatus;
+    Snapshot->ProducerEnableMask = DeviceExtension->ProducerEnableMask;
+    Snapshot->SupportedProducerMask = DeviceExtension->SupportedProducerMask;
+    Snapshot->QueueCapacity = KSWORD_SANDBOX_EVENT_RING_CAPACITY;
     Snapshot->EventCount = DeviceExtension->EventCount;
+    Snapshot->QueueHighWatermark = DeviceExtension->QueueHighWatermark;
 
     KeReleaseSpinLock(&DeviceExtension->StateLock, oldIrql);
 }

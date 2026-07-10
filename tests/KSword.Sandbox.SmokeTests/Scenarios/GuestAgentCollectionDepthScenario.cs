@@ -29,8 +29,19 @@ internal sealed class GuestAgentCollectionDepthScenario : ISmokeTestScenario
         AssertFileContains(Path.Combine(collectionRoot, "FileDiffProbe.cs"), "file.modified", "File diff probe must emit file.modified.");
         AssertFileContains(Path.Combine(collectionRoot, "FileDiffProbe.cs"), "file.deleted", "File diff probe must emit file.deleted.");
         AssertFileContains(Path.Combine(collectionRoot, "TcpConnectionDiffProbe.cs"), "network.tcp.closed", "TCP diff probe must emit closed connection deltas.");
+        AssertFileContains(Path.Combine(collectionRoot, "TcpConnectionDiffProbe.cs"), "dns.cache.added", "Network probe must emit DNS cache deltas.");
+        AssertFileContains(Path.Combine(collectionRoot, "TcpConnectionDiffProbe.cs"), "network.netstat", "Network probe must emit netstat evidence.");
+        AssertFileContains(Path.Combine(collectionRoot, "TcpConnectionDiffProbe.cs"), "ipconfig.exe", "DNS cache collection must use a bounded ipconfig helper.");
+        AssertFileContains(Path.Combine(collectionRoot, "TcpConnectionDiffProbe.cs"), "netstat.exe", "Netstat collection must use a bounded netstat helper.");
+        AssertFileContains(Path.Combine(collectionRoot, "ProcessTreeProbe.cs"), "environment.detail", "Process probe must emit extended environment details.");
+        AssertFileContains(Path.Combine(collectionRoot, "ProcessTreeProbe.cs"), "service.created", "Process probe must emit service diff events.");
+        AssertFileContains(Path.Combine(collectionRoot, "ProcessTreeProbe.cs"), "scheduled_task.created", "Process probe must emit scheduled task diff events.");
+        AssertFileContains(Path.Combine(collectionRoot, "ProcessTreeProbe.cs"), "startup_item.created", "Process probe must emit startup item diff events.");
         AssertFileContains(Path.Combine(collectionRoot, "ScreenshotProbe.cs"), "IScreenshotCapture", "Screenshot interface must be present.");
         AssertFileContains(Path.Combine(collectionRoot, "ScreenshotProbe.cs"), "screenshot.skipped", "Screenshot capture must be non-fatal in unsupported sessions.");
+        AssertFileContains(Path.Combine(collectionRoot, "ScreenshotProbe.cs"), "diagnosticStage", "Screenshot skipped events must include failure-stage diagnostics.");
+        AssertFileContains(Path.Combine(collectionRoot, "GuestProbeRunner.cs"), "probe.timeout", "Probe runner must isolate timed-out probes.");
+        AssertFileContains(Path.Combine(agentRoot, "Diagnostics", "BoundedProcessRunner.cs"), "Kill(entireProcessTree: true)", "Bounded helper commands must be terminated on timeout.");
 
         SmokeAssert.True(programText.Contains("new ProcessTreeProbe()", StringComparison.Ordinal), "Agent pipeline must include ProcessTreeProbe.");
         SmokeAssert.True(programText.Contains("new FileDiffProbe()", StringComparison.Ordinal), "Agent pipeline must include FileDiffProbe.");
@@ -40,8 +51,15 @@ internal sealed class GuestAgentCollectionDepthScenario : ISmokeTestScenario
 
         SmokeAssert.True(guestAgentDoc.Contains("process.tree", StringComparison.Ordinal), "Guest agent doc must document process.tree.");
         SmokeAssert.True(guestAgentDoc.Contains("network.tcp.closed", StringComparison.Ordinal), "Guest agent doc must document TCP closed deltas.");
+        SmokeAssert.True(guestAgentDoc.Contains("dns.cache.added", StringComparison.Ordinal), "Guest agent doc must document DNS cache deltas.");
+        SmokeAssert.True(guestAgentDoc.Contains("network.netstat", StringComparison.Ordinal), "Guest agent doc must document netstat collection.");
+        SmokeAssert.True(guestAgentDoc.Contains("service.created", StringComparison.Ordinal), "Guest agent doc must document service diffs.");
+        SmokeAssert.True(guestAgentDoc.Contains("scheduled_task.created", StringComparison.Ordinal), "Guest agent doc must document scheduled task diffs.");
+        SmokeAssert.True(guestAgentDoc.Contains("startup_item.created", StringComparison.Ordinal), "Guest agent doc must document startup item diffs.");
+        SmokeAssert.True(guestAgentDoc.Contains("probe.timeout", StringComparison.Ordinal), "Guest agent doc must document probe timeouts.");
         SmokeAssert.True(guestAgentDoc.Contains("--screenshot", StringComparison.Ordinal), "Guest agent doc must document screenshot CLI.");
         SmokeAssert.True(frameworkDoc.Contains("IGuestProbe.CollectAsync", StringComparison.Ordinal), "Framework doc must document the probe extension point.");
+        SmokeAssert.True(frameworkDoc.Contains("BoundedProcessRunner", StringComparison.Ordinal), "Framework doc must document bounded helper command execution.");
         SmokeAssert.True(frameworkDoc.Contains("IScreenshotCapture", StringComparison.Ordinal), "Framework doc must document screenshot capture interface.");
 
         return Task.FromResult(new SmokeTestResult

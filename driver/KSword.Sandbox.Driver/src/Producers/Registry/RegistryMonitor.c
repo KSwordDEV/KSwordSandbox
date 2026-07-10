@@ -16,20 +16,65 @@
 static PKSWORD_SANDBOX_DEVICE_EXTENSION g_KswRegistryMonitorDeviceExtension;
 static LARGE_INTEGER g_KswRegistryCallbackCookie;
 static volatile LONG g_KswRegistryMonitorActive;
-static BOOLEAN g_KswRegistryCallbackRegistered;
+static volatile LONG g_KswRegistryCallbackRegistered;
+
+/*
+ * Builds a bounded, read-only UNICODE_STRING view for registry callback text.
+ * Inputs : Source is callback-owned optional UTF-16 text; SafeSource receives a
+ *          clamped view whose Length never exceeds MaximumLength.
+ * Logic  : registry names are copied only at IRQL <= APC_LEVEL, odd byte counts
+ *          are rounded down to full WCHARs, and no allocation is performed.
+ * Return : TRUE when SafeSource can be passed to KswCopyUnicodePrefix.
+ */
+static
+BOOLEAN
+KswPrepareRegistryCallbackString(
+    _In_opt_ PCUNICODE_STRING Source,
+    _Out_ PUNICODE_STRING SafeSource
+    )
+{
+    USHORT safeLength;
+
+    if (SafeSource == NULL) {
+        return FALSE;
+    }
+
+    RtlZeroMemory(SafeSource, sizeof(*SafeSource));
+    if (Source == NULL ||
+        Source->Buffer == NULL ||
+        Source->Length == 0 ||
+        KeGetCurrentIrql() > APC_LEVEL) {
+        return FALSE;
+    }
+
+    safeLength = Source->Length;
+    if (Source->MaximumLength != 0 && safeLength > Source->MaximumLength) {
+        safeLength = Source->MaximumLength;
+    }
+
+    safeLength = (USHORT)(safeLength - (safeLength % (USHORT)sizeof(WCHAR)));
+    if (safeLength == 0) {
+        return FALSE;
+    }
+
+    SafeSource->Buffer = Source->Buffer;
+    SafeSource->Length = safeLength;
+    SafeSource->MaximumLength = safeLength;
+    return TRUE;
+}
 
 /*
  * Copies optional UTF-16 registry metadata into a compact payload field.
  * Inputs : Destination is a fixed WCHAR field, DestinationChars is the capacity,
  *          Source may be NULL, PresentFlag and TruncatedFlag are payload bits,
  *          Flags and LengthBytes belong to the target payload.
- * Logic  : delegates bounded copy to the shared kernel string helper and sets
- *          present/truncated bits only when source text exists and fits enough
- *          to emit a useful prefix.
- * Return : no return value; Flags and LengthBytes are updated in place.
+ * Logic  : validates IRQL and UNICODE_STRING bounds before delegating to the
+ *          shared kernel string helper.
+ * Return : TRUE when text was copied; FALSE when the field is absent. Flags and
+ *          LengthBytes are updated in place.
  */
 static
-VOID
+BOOLEAN
 KswCopyRegistryPayloadString(
     _Out_writes_(DestinationChars) PWCHAR Destination,
     _In_ ULONG DestinationChars,
@@ -41,29 +86,40 @@ KswCopyRegistryPayloadString(
     )
 {
     BOOLEAN truncated;
+    BOOLEAN copied;
     ULONG bytesCopied;
+    UNICODE_STRING safeSource;
+
+    if (Destination != NULL && DestinationChars != 0) {
+        Destination[0] = L'\0';
+    }
 
     if (Flags == NULL || LengthBytes == NULL) {
-        return;
+        return FALSE;
     }
 
     *LengthBytes = 0;
     truncated = FALSE;
+    copied = FALSE;
     bytesCopied = 0;
 
-    if (KswCopyUnicodePrefix(
+    if (KswPrepareRegistryCallbackString(Source, &safeSource) &&
+        KswCopyUnicodePrefix(
             Destination,
             DestinationChars,
-            Source,
+            &safeSource,
             &bytesCopied,
             &truncated)) {
         *Flags |= PresentFlag;
         *LengthBytes = bytesCopied;
+        copied = TRUE;
     }
 
     if (truncated) {
         *Flags |= TruncatedFlag;
     }
+
+    return copied;
 }
 
 /*
@@ -73,10 +129,11 @@ KswCopyRegistryPayloadString(
  * Logic  : uses CmCallbackGetKeyObjectIDEx only when the callback cookie and
  *          IRQL allow name lookup, copies a bounded prefix, then releases the
  *          name buffer through CmCallbackReleaseKeyObjectIDEx.
- * Return : no return value; missing names simply leave key-present unset.
+ * Return : TRUE when a key name was copied; missing names simply leave
+ *          key-present unset.
  */
 static
-VOID
+BOOLEAN
 KswCopyRegistryKeyObjectPath(
     _In_opt_ PVOID KeyObject,
     _Inout_ PKSWORD_SANDBOX_REGISTRY_EVENT_PAYLOAD Payload
@@ -84,12 +141,13 @@ KswCopyRegistryKeyObjectPath(
 {
     NTSTATUS status;
     PCUNICODE_STRING keyName;
+    BOOLEAN copied;
 
     if (Payload == NULL ||
         KeyObject == NULL ||
         g_KswRegistryCallbackCookie.QuadPart == 0 ||
         KeGetCurrentIrql() > APC_LEVEL) {
-        return;
+        return FALSE;
     }
 
     keyName = NULL;
@@ -100,10 +158,10 @@ KswCopyRegistryKeyObjectPath(
         &keyName,
         0);
     if (!NT_SUCCESS(status) || keyName == NULL) {
-        return;
+        return FALSE;
     }
 
-    KswCopyRegistryPayloadString(
+    copied = KswCopyRegistryPayloadString(
         Payload->KeyPath,
         KSWORD_SANDBOX_REGISTRY_KEY_PATH_CHARS,
         keyName,
@@ -112,6 +170,7 @@ KswCopyRegistryKeyObjectPath(
         &Payload->Flags,
         &Payload->KeyPathLengthBytes);
     CmCallbackReleaseKeyObjectIDEx(keyName);
+    return copied;
 }
 
 /*
@@ -191,6 +250,7 @@ KswCapturePostCreateOrOpenKey(
 {
     KSWORD_SANDBOX_REGISTRY_EVENT_PAYLOAD payload;
     PCUNICODE_STRING keyName;
+    BOOLEAN copied;
 
     if (PostInfo == NULL || PostInfo->PreInformation == NULL) {
         return;
@@ -201,7 +261,7 @@ KswCapturePostCreateOrOpenKey(
         : ((PREG_OPEN_KEY_INFORMATION)PostInfo->PreInformation)->CompleteName;
 
     KswInitializeRegistryPayload(&payload, Operation, PostInfo->Status);
-    KswCopyRegistryPayloadString(
+    copied = KswCopyRegistryPayloadString(
         payload.KeyPath,
         KSWORD_SANDBOX_REGISTRY_KEY_PATH_CHARS,
         keyName,
@@ -209,6 +269,9 @@ KswCapturePostCreateOrOpenKey(
         KSWORD_SANDBOX_REGISTRY_EVENT_FLAG_KEY_TRUNCATED,
         &payload.Flags,
         &payload.KeyPathLengthBytes);
+    if (!copied && PostInfo->Object != NULL) {
+        (VOID)KswCopyRegistryKeyObjectPath(PostInfo->Object, &payload);
+    }
     KswQueueRegistryEvent(&payload);
 }
 
@@ -451,7 +514,7 @@ KswInitializeRegistryMonitor(
 
     g_KswRegistryMonitorDeviceExtension = DeviceExtension;
     g_KswRegistryCallbackCookie.QuadPart = 0;
-    g_KswRegistryCallbackRegistered = FALSE;
+    InterlockedExchange(&g_KswRegistryCallbackRegistered, 0);
     InterlockedExchange(&g_KswRegistryMonitorActive, 0);
 
     RtlInitUnicodeString(&altitude, KSWORD_SANDBOX_REGISTRY_CALLBACK_ALTITUDE);
@@ -467,7 +530,7 @@ KswInitializeRegistryMonitor(
         return status;
     }
 
-    g_KswRegistryCallbackRegistered = TRUE;
+    InterlockedExchange(&g_KswRegistryCallbackRegistered, 1);
     InterlockedExchange(&g_KswRegistryMonitorActive, 1);
     return STATUS_SUCCESS;
 }
@@ -485,14 +548,18 @@ KswUninitializeRegistryMonitor(
     VOID
     )
 {
-    InterlockedExchange(&g_KswRegistryMonitorActive, 0);
+    LARGE_INTEGER callbackCookie;
+    LONG callbackRegistered;
 
-    if (g_KswRegistryCallbackRegistered ||
-        g_KswRegistryCallbackCookie.QuadPart != 0) {
-        (VOID)CmUnRegisterCallback(g_KswRegistryCallbackCookie);
+    InterlockedExchange(&g_KswRegistryMonitorActive, 0);
+    callbackRegistered = InterlockedExchange(&g_KswRegistryCallbackRegistered, 0);
+    callbackCookie = g_KswRegistryCallbackCookie;
+
+    if (callbackRegistered != 0 ||
+        callbackCookie.QuadPart != 0) {
+        (VOID)CmUnRegisterCallback(callbackCookie);
     }
 
-    g_KswRegistryCallbackRegistered = FALSE;
     g_KswRegistryCallbackCookie.QuadPart = 0;
     g_KswRegistryMonitorDeviceExtension = NULL;
 }

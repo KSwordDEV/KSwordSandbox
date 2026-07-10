@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.RegularExpressions;
 using KSword.Sandbox.Abstractions;
 
 namespace KSword.Sandbox.Core.StaticAnalysis;
@@ -20,13 +21,37 @@ public sealed class StaticAnalyzer
     private const int MaxImportEvidence = 96;
     private const int MaxExportNames = 64;
     private const int MaxTlsCallbacks = 32;
+    private const int MaxResourceEntries = 160;
+    private const int MaxResourceEvidence = 96;
+    private const int MaxResourceDepth = 4;
     private const int MaxPeStringLength = 180;
+
+    private static readonly Regex UrlPattern = new(
+        @"https?://[^\s""'<>]+",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
+
+    private static readonly Regex Ipv4Pattern = new(
+        @"(?<![\d.])(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(?![\d.])",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+    private static readonly Regex WindowsPathPattern = new(
+        @"(?<![A-Za-z0-9])(?:[A-Za-z]:\\|\\\\)[^""'<>|\r\n]{3,}",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
+
+    private static readonly Regex RegistryPathPattern = new(
+        @"\b(?:HKCU|HKLM|HKCR|HKU|HKCC|HKEY_CURRENT_USER|HKEY_LOCAL_MACHINE|HKEY_CLASSES_ROOT|HKEY_USERS|HKEY_CURRENT_CONFIG)\\[^""'<>|\r\n]{3,}",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
 
     private static readonly string[] ProcessInjectionApis =
     [
         "VirtualAllocEx",
+        "VirtualProtectEx",
         "WriteProcessMemory",
+        "NtWriteVirtualMemory",
+        "NtAllocateVirtualMemory",
+        "NtMapViewOfSection",
         "CreateRemoteThread",
+        "CreateRemoteThreadEx",
         "NtCreateThreadEx",
         "RtlCreateUserThread",
         "QueueUserAPC",
@@ -41,6 +66,7 @@ public sealed class StaticAnalyzer
     [
         "VirtualAlloc",
         "VirtualProtect",
+        "NtProtectVirtualMemory",
         "LoadLibrary",
         "GetProcAddress",
         "MapViewOfFile",
@@ -59,20 +85,89 @@ public sealed class StaticAnalyzer
         "ShellExecute"
     ];
 
+    private static readonly string[] RegistryPersistenceApis =
+    [
+        "RegCreateKey",
+        "RegCreateKeyEx",
+        "RegSetValue",
+        "RegSetValueEx",
+        "RegOpenKey",
+        "RegOpenKeyEx",
+        "RegDeleteValue"
+    ];
+
+    private static readonly string[] ServicePersistenceApis =
+    [
+        "CreateService",
+        "OpenSCManager",
+        "StartService",
+        "ChangeServiceConfig",
+        "ChangeServiceConfig2"
+    ];
+
     private static readonly string[] NetworkApis =
     [
         "InternetOpen",
         "InternetConnect",
         "HttpOpenRequest",
         "HttpSendRequest",
+        "InternetReadFile",
+        "InternetCrackUrl",
         "URLDownloadToFile",
+        "URLDownloadToCacheFile",
         "WinHttpOpen",
         "WinHttpConnect",
         "WinHttpSendRequest",
+        "WinHttpReceiveResponse",
+        "WinHttpReadData",
         "WSAStartup",
+        "socket",
+        "getaddrinfo",
         "connect",
         "send",
         "recv"
+    ];
+
+    private static readonly string[] FileDropApis =
+    [
+        "CreateFileA",
+        "CreateFileW",
+        "CreateFile2",
+        "WriteFile",
+        "CopyFile",
+        "MoveFile",
+        "MoveFileEx",
+        "ReplaceFile",
+        "DeleteFile",
+        "GetTempPath",
+        "GetTempFileName",
+        "ExpandEnvironmentStrings",
+        "SHGetFolderPath",
+        "SHGetKnownFolderPath"
+    ];
+
+    private static readonly string[] ScriptExecutionApis =
+    [
+        "CreateProcess",
+        "ShellExecute",
+        "WinExec",
+        "system",
+        "_wsystem",
+        "CreateProcessAsUser",
+        "CreateProcessWithLogon",
+        "CreateProcessWithToken"
+    ];
+
+    private static readonly string[] ResourceApis =
+    [
+        "FindResource",
+        "FindResourceEx",
+        "LoadResource",
+        "LockResource",
+        "SizeofResource",
+        "BeginUpdateResource",
+        "UpdateResource",
+        "EndUpdateResource"
     ];
 
     private static readonly string[] AntiAnalysisApis =
@@ -80,7 +175,14 @@ public sealed class StaticAnalyzer
         "IsDebuggerPresent",
         "CheckRemoteDebuggerPresent",
         "NtQueryInformationProcess",
+        "ZwQueryInformationProcess",
+        "NtSetInformationThread",
         "OutputDebugString",
+        "FindWindow",
+        "GetComputerName",
+        "GetUserName",
+        "GlobalMemoryStatusEx",
+        "GetSystemInfo",
         "GetTickCount",
         "QueryPerformanceCounter",
         "Sleep"
@@ -91,6 +193,9 @@ public sealed class StaticAnalyzer
             .Concat(DynamicCodeApis)
             .Concat(PersistenceApis)
             .Concat(NetworkApis)
+            .Concat(FileDropApis)
+            .Concat(ScriptExecutionApis)
+            .Concat(ResourceApis)
             .Concat(AntiAnalysisApis)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
@@ -101,6 +206,8 @@ public sealed class StaticAnalyzer
             .Where(api => !string.Equals(api, "send", StringComparison.OrdinalIgnoreCase))
             .Where(api => !string.Equals(api, "recv", StringComparison.OrdinalIgnoreCase))
             .Where(api => !string.Equals(api, "Sleep", StringComparison.OrdinalIgnoreCase))
+            .Where(api => !string.Equals(api, "system", StringComparison.OrdinalIgnoreCase))
+            .Where(api => !string.Equals(api, "_wsystem", StringComparison.OrdinalIgnoreCase))
             .ToArray();
 
     private static readonly string[] PackerStringMarkers =
@@ -129,6 +236,50 @@ public sealed class StaticAnalyzer
         ".packed",
         ".themida",
         ".enigma"
+    ];
+
+    private static readonly string[] ScriptInterpreterMarkers =
+    [
+        "powershell",
+        "pwsh",
+        "cmd.exe",
+        "wscript",
+        "cscript",
+        "mshta",
+        "rundll32",
+        "regsvr32",
+        "certutil",
+        "bitsadmin",
+        "wmic",
+        "schtasks",
+        "reg.exe",
+        "installutil"
+    ];
+
+    private static readonly string[] EncodedCommandMarkers =
+    [
+        "-enc",
+        "-encodedcommand",
+        "frombase64string",
+        "iex ",
+        "invoke-expression"
+    ];
+
+    private static readonly string[] AntiSandboxStringMarkers =
+    [
+        "sandboxie",
+        "virtualbox",
+        "vbox",
+        "vmware",
+        "qemu",
+        "xen",
+        "wireshark",
+        "procmon",
+        "process monitor",
+        "ollydbg",
+        "x64dbg",
+        "idaq",
+        "ida64"
     ];
 
     /// <summary>
@@ -271,8 +422,10 @@ public sealed class StaticAnalyzer
             var virtualAddress = reader.ReadUInt32();
             var rawSize = reader.ReadUInt32();
             var rawPointer = reader.ReadUInt32();
+            reader.BaseStream.Position += 12;
+            var characteristics = reader.ReadUInt32();
             var entropy = CalculateEntropy(reader, rawPointer, rawSize, fileLength, warnings);
-            AddSectionTags(name, entropy, virtualSize, rawSize, tags);
+            AddSectionTags(name, entropy, virtualSize, rawSize, characteristics, tags);
             layouts.Add(new PeSectionLayout(name, virtualAddress, virtualSize, rawSize, rawPointer));
 
             sections.Add(new PeSectionInfo
@@ -405,18 +558,50 @@ public sealed class StaticAnalyzer
             trimmed = trimmed[..240];
         }
 
-        if (trimmed.StartsWith("http://", StringComparison.OrdinalIgnoreCase) || trimmed.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+        var isInteresting = false;
+        if (AddUrlClassifications(trimmed, tags, urls))
         {
-            urls.Add(trimmed);
-            tags.Add("url");
-            return;
+            tags.Add("network_indicator_string");
         }
 
-        var isInteresting = false;
-        if (ContainsAny(trimmed, "powershell", "cmd.exe", "wscript", "cscript", "mshta", "rundll32", "reg.exe", "schtasks", "Run\\", "Software\\Microsoft\\Windows\\CurrentVersion\\Run"))
+        if (AddIpClassifications(trimmed, tags, interestingStrings))
+        {
+            isInteresting = true;
+        }
+
+        if (AddPathClassifications(trimmed, tags, interestingStrings))
+        {
+            isInteresting = true;
+        }
+
+        if (ContainsAny(trimmed, ScriptInterpreterMarkers))
         {
             isInteresting = true;
             tags.Add("interesting_string");
+            tags.Add("script_execution_string");
+            if (ContainsAny(trimmed, "powershell", "pwsh"))
+            {
+                tags.Add("powershell_string");
+            }
+
+            if (ContainsAny(trimmed, "rundll32", "regsvr32", "mshta", "certutil", "bitsadmin", "wmic", "installutil"))
+            {
+                tags.Add("lolbin_string");
+            }
+        }
+
+        if (ContainsAny(trimmed, EncodedCommandMarkers))
+        {
+            isInteresting = true;
+            tags.Add("interesting_string");
+            tags.Add("encoded_command_string");
+        }
+
+        if (ContainsAny(trimmed, "Run\\", "RunOnce\\", "Software\\Microsoft\\Windows\\CurrentVersion\\Run"))
+        {
+            isInteresting = true;
+            tags.Add("interesting_string");
+            tags.Add("persistence_string");
         }
 
         if (ContainsAny(trimmed, SuspiciousApiStringMarkers))
@@ -424,6 +609,14 @@ public sealed class StaticAnalyzer
             isInteresting = true;
             tags.Add("suspicious_api_string");
             AddSuspiciousApiTags(trimmed, tags);
+        }
+
+        if (ContainsAny(trimmed, AntiSandboxStringMarkers))
+        {
+            isInteresting = true;
+            tags.Add("interesting_string");
+            tags.Add("anti_analysis_string");
+            tags.Add("sandbox_evasion_string");
         }
 
         if (ContainsAny(trimmed, PackerStringMarkers))
@@ -434,8 +627,156 @@ public sealed class StaticAnalyzer
 
         if (isInteresting)
         {
-            interestingStrings.Add(trimmed);
+            AddInterestingString(interestingStrings, trimmed);
         }
+    }
+
+    /// <summary>
+    /// Extracts URL-like substrings from one static string.
+    /// Inputs are text plus output tag and URL collections, processing trims
+    /// common delimiters, and the method returns whether any URL was found.
+    /// </summary>
+    private static bool AddUrlClassifications(string text, SortedSet<string> tags, SortedSet<string> urls)
+    {
+        var found = false;
+        foreach (Match match in UrlPattern.Matches(text))
+        {
+            var url = TrimEvidence(match.Value).TrimEnd('.', ',', ';', ')', ']', '}', '!');
+            if (string.IsNullOrWhiteSpace(url))
+            {
+                continue;
+            }
+
+            urls.Add(url);
+            found = true;
+        }
+
+        if (found)
+        {
+            tags.Add("url");
+            tags.Add("embedded_url");
+        }
+
+        return found;
+    }
+
+    /// <summary>
+    /// Extracts IPv4 indicators and coarse routability labels.
+    /// Inputs are text plus output collections, processing validates octets
+    /// and private/reserved ranges, and the method returns whether any IP hit.
+    /// </summary>
+    private static bool AddIpClassifications(string text, SortedSet<string> tags, SortedSet<string> interestingStrings)
+    {
+        var found = false;
+        foreach (Match match in Ipv4Pattern.Matches(text))
+        {
+            var ip = match.Value;
+            if (!TryParseIpv4(ip, out var octets))
+            {
+                continue;
+            }
+
+            tags.Add("ip_address");
+            tags.Add(IsPrivateOrReservedIpv4(octets) ? "private_or_reserved_ip_address" : "public_ip_address");
+            tags.Add("network_indicator_string");
+            AddInterestingString(interestingStrings, $"ip:{ip}");
+            found = true;
+        }
+
+        return found;
+    }
+
+    /// <summary>
+    /// Extracts Windows filesystem and registry path labels from a string.
+    /// Inputs are text plus output collections, processing applies bounded
+    /// regex matches and path marker checks, and the method returns true on hit.
+    /// </summary>
+    private static bool AddPathClassifications(string text, SortedSet<string> tags, SortedSet<string> interestingStrings)
+    {
+        var found = false;
+        foreach (Match match in RegistryPathPattern.Matches(text))
+        {
+            var path = TrimEvidence(match.Value);
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                continue;
+            }
+
+            tags.Add("registry_path_string");
+            if (ContainsAny(path, "CurrentVersion\\Run", "CurrentVersion\\RunOnce", "Policies\\Explorer\\Run"))
+            {
+                tags.Add("run_key_path_string");
+                tags.Add("persistence_string");
+            }
+
+            if (ContainsAny(path, "CurrentControlSet\\Services", "\\Services\\"))
+            {
+                tags.Add("service_registry_path_string");
+                tags.Add("persistence_string");
+            }
+
+            AddInterestingString(interestingStrings, $"registry-path:{path}");
+            found = true;
+        }
+
+        foreach (Match match in WindowsPathPattern.Matches(text))
+        {
+            var path = TrimEvidence(match.Value);
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                continue;
+            }
+
+            tags.Add("windows_path_string");
+            tags.Add("file_path_string");
+            if (ContainsAny(path, "\\Temp\\", "\\Windows\\Temp\\", "%TEMP%", "%TMP%"))
+            {
+                tags.Add("temp_path_string");
+            }
+
+            if (ContainsAny(path, "\\AppData\\", "%APPDATA%", "%LOCALAPPDATA%"))
+            {
+                tags.Add("appdata_path_string");
+            }
+
+            if (ContainsAny(path, "\\Startup\\", "\\Start Menu\\Programs\\Startup", "Microsoft\\Windows\\Start Menu\\Programs\\Startup"))
+            {
+                tags.Add("startup_folder_path_string");
+                tags.Add("persistence_string");
+            }
+
+            if (ContainsAny(path, ".exe", ".dll", ".sys", ".scr", ".com"))
+            {
+                tags.Add("executable_path_string");
+            }
+
+            if (ContainsAny(path, ".ps1", ".bat", ".cmd", ".vbs", ".js", ".jse", ".hta", ".wsf"))
+            {
+                tags.Add("script_path_string");
+                tags.Add("script_execution_string");
+            }
+
+            AddInterestingString(interestingStrings, $"path:{path}");
+            found = true;
+        }
+
+        if (ContainsAny(text, "%TEMP%", "%TMP%", "%APPDATA%", "%LOCALAPPDATA%", "%PROGRAMDATA%", "%USERPROFILE%"))
+        {
+            tags.Add("environment_path_string");
+            if (ContainsAny(text, "%TEMP%", "%TMP%"))
+            {
+                tags.Add("temp_path_string");
+            }
+
+            if (ContainsAny(text, "%APPDATA%", "%LOCALAPPDATA%"))
+            {
+                tags.Add("appdata_path_string");
+            }
+
+            found = true;
+        }
+
+        return found;
     }
 
     /// <summary>
@@ -473,7 +814,7 @@ public sealed class StaticAnalyzer
     /// processing checks common packer/anomaly hints, and the method returns no
     /// value.
     /// </summary>
-    private static void AddSectionTags(string name, double entropy, uint virtualSize, uint rawSize, SortedSet<string> tags)
+    private static void AddSectionTags(string name, double entropy, uint virtualSize, uint rawSize, uint characteristics, SortedSet<string> tags)
     {
         if (string.IsNullOrWhiteSpace(name) || name.Any(ch => ch < 0x20 || ch > 0x7e))
         {
@@ -495,9 +836,41 @@ public sealed class StaticAnalyzer
             tags.Add("high_entropy_section");
         }
 
+        if (entropy >= 7.8)
+        {
+            tags.Add("very_high_entropy_section");
+        }
+
+        if (rawSize >= 512 && entropy <= 1.0)
+        {
+            tags.Add("low_entropy_section");
+        }
+
         if (rawSize == 0 && virtualSize > 0)
         {
             tags.Add("virtual_only_section");
+        }
+
+        if (rawSize > 0 && virtualSize > rawSize * 4UL && virtualSize >= 0x2000)
+        {
+            tags.Add("oversized_virtual_section");
+        }
+
+        var isExecutable = (characteristics & 0x20000000) != 0;
+        var isWritable = (characteristics & 0x80000000) != 0;
+        if (isExecutable)
+        {
+            tags.Add("executable_section");
+        }
+
+        if (isWritable)
+        {
+            tags.Add("writable_section");
+        }
+
+        if (isExecutable && isWritable)
+        {
+            tags.Add("writable_executable_section");
         }
     }
 
@@ -591,6 +964,11 @@ public sealed class StaticAnalyzer
             ReadImports(reader, directories[1], sections, optionalMagic, fileLength, tags, interestingStrings, warnings);
         }
 
+        if (directories.Count > 2)
+        {
+            ReadResources(reader, directories[2], sections, fileLength, tags, interestingStrings, warnings);
+        }
+
         if (directories.Count > 9)
         {
             ReadTlsDirectory(reader, directories[9], sections, optionalMagic, imageBase, fileLength, tags, interestingStrings, warnings);
@@ -650,6 +1028,7 @@ public sealed class StaticAnalyzer
             }
 
             var dllName = TryReadRvaAsciiString(reader, nameRva, sections, fileLength) ?? $"dll@0x{nameRva:X8}";
+            AddImportModuleTags(dllName, tags);
             AddPeEvidence(interestingStrings, $"import:{dllName}", ref evidenceCount, MaxImportEvidence);
             var thunkRva = originalFirstThunk != 0 ? originalFirstThunk : firstThunk;
             if (thunkRva != 0)
@@ -718,6 +1097,314 @@ public sealed class StaticAnalyzer
 
             AddPeEvidence(interestingStrings, $"import:{dllName}!{apiName}", ref evidenceCount, MaxImportEvidence);
             AddSuspiciousApiTags(apiName, tags);
+        }
+    }
+
+    /// <summary>
+    /// Reads the PE resource tree and records type/data-level triage tags.
+    /// Inputs are the resource data directory and section layouts, processing
+    /// walks bounded IMAGE_RESOURCE_DIRECTORY nodes, and the method records
+    /// payload, manifest, icon, high-entropy, and embedded-PE evidence.
+    /// </summary>
+    private static void ReadResources(
+        BinaryReader reader,
+        PeDataDirectory resourceDirectory,
+        IReadOnlyList<PeSectionLayout> sections,
+        long fileLength,
+        SortedSet<string> tags,
+        SortedSet<string> interestingStrings,
+        List<string> warnings)
+    {
+        if (!resourceDirectory.IsPresent)
+        {
+            return;
+        }
+
+        tags.Add("resources_present");
+        if (!TryRvaToFileOffset(resourceDirectory.Rva, sections, fileLength, out var resourceRootOffset))
+        {
+            warnings.Add($"Resource directory RVA 0x{resourceDirectory.Rva:X8} could not be mapped to a file offset.");
+            return;
+        }
+
+        var evidenceCount = 0;
+        var visitedDirectories = new HashSet<long>();
+        WalkResourceDirectory(
+            reader,
+            resourceRootOffset,
+            resourceRootOffset,
+            depth: 0,
+            resourceType: null,
+            sections,
+            fileLength,
+            tags,
+            interestingStrings,
+            warnings,
+            visitedDirectories,
+            ref evidenceCount);
+    }
+
+    /// <summary>
+    /// Walks one IMAGE_RESOURCE_DIRECTORY node.
+    /// Inputs are resource-root and current-directory offsets, processing keeps
+    /// recursion and entry counts bounded, and the method emits tags/evidence.
+    /// </summary>
+    private static void WalkResourceDirectory(
+        BinaryReader reader,
+        long resourceRootOffset,
+        long directoryOffset,
+        int depth,
+        string? resourceType,
+        IReadOnlyList<PeSectionLayout> sections,
+        long fileLength,
+        SortedSet<string> tags,
+        SortedSet<string> interestingStrings,
+        List<string> warnings,
+        HashSet<long> visitedDirectories,
+        ref int evidenceCount)
+    {
+        if (depth > MaxResourceDepth)
+        {
+            warnings.Add("Resource-directory recursion depth limit reached.");
+            return;
+        }
+
+        if (!visitedDirectories.Add(directoryOffset))
+        {
+            return;
+        }
+
+        if (directoryOffset < 0 || directoryOffset > fileLength - 16)
+        {
+            warnings.Add("Resource directory is truncated.");
+            return;
+        }
+
+        var numberOfNamedEntries = ReadUInt16At(reader, directoryOffset + 12, fileLength, warnings);
+        var numberOfIdEntries = ReadUInt16At(reader, directoryOffset + 14, fileLength, warnings);
+        var totalEntries = numberOfNamedEntries + numberOfIdEntries;
+        if (totalEntries > MaxResourceEntries)
+        {
+            warnings.Add($"Resource-directory scan truncated at {MaxResourceEntries} of {totalEntries} entries.");
+        }
+
+        for (var index = 0; index < Math.Min(totalEntries, MaxResourceEntries); index++)
+        {
+            var entryOffset = directoryOffset + 16 + index * 8L;
+            if (entryOffset < 0 || entryOffset > fileLength - 8)
+            {
+                break;
+            }
+
+            var nameOrId = ReadUInt32At(reader, entryOffset, fileLength, warnings);
+            var dataOrDirectory = ReadUInt32At(reader, entryOffset + sizeof(uint), fileLength, warnings);
+            var entryName = ReadResourceEntryName(reader, resourceRootOffset, nameOrId, fileLength, tags);
+            var currentType = depth == 0 ? DescribeResourceType(nameOrId, entryName) : resourceType;
+            if (depth == 0)
+            {
+                AddResourceTypeTags(currentType, tags, interestingStrings, ref evidenceCount);
+            }
+
+            var isDirectory = (dataOrDirectory & 0x80000000) != 0;
+            var relativeOffset = dataOrDirectory & 0x7fffffff;
+            var childOffset = resourceRootOffset + relativeOffset;
+            if (isDirectory)
+            {
+                WalkResourceDirectory(
+                    reader,
+                    resourceRootOffset,
+                    childOffset,
+                    depth + 1,
+                    currentType,
+                    sections,
+                    fileLength,
+                    tags,
+                    interestingStrings,
+                    warnings,
+                    visitedDirectories,
+                    ref evidenceCount);
+                continue;
+            }
+
+            ReadResourceDataEntry(
+                reader,
+                childOffset,
+                currentType ?? "unknown",
+                sections,
+                fileLength,
+                tags,
+                interestingStrings,
+                warnings,
+                ref evidenceCount);
+        }
+    }
+
+    /// <summary>
+    /// Reads one IMAGE_RESOURCE_DATA_ENTRY and classifies payload traits.
+    /// Inputs are the data-entry offset and resource type, processing maps the
+    /// data RVA when possible, and the method records resource evidence.
+    /// </summary>
+    private static void ReadResourceDataEntry(
+        BinaryReader reader,
+        long dataEntryOffset,
+        string resourceType,
+        IReadOnlyList<PeSectionLayout> sections,
+        long fileLength,
+        SortedSet<string> tags,
+        SortedSet<string> interestingStrings,
+        List<string> warnings,
+        ref int evidenceCount)
+    {
+        if (dataEntryOffset < 0 || dataEntryOffset > fileLength - 16)
+        {
+            warnings.Add("Resource data entry is truncated.");
+            return;
+        }
+
+        var dataRva = ReadUInt32At(reader, dataEntryOffset, fileLength, warnings);
+        var size = ReadUInt32At(reader, dataEntryOffset + sizeof(uint), fileLength, warnings);
+        AddPeEvidence(interestingStrings, $"resource:{resourceType},size={size}", ref evidenceCount, MaxResourceEvidence);
+        if (size >= 1024 * 1024)
+        {
+            tags.Add("resource_large_data");
+        }
+
+        if (string.Equals(resourceType, "rcdata", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(resourceType, "html", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(resourceType, "unknown", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(resourceType, "named", StringComparison.OrdinalIgnoreCase))
+        {
+            tags.Add("resource_payload_candidate");
+        }
+
+        if (!TryRvaToFileOffset(dataRva, sections, fileLength, out var dataOffset))
+        {
+            return;
+        }
+
+        if (size >= 256)
+        {
+            var entropy = CalculateEntropy(reader, dataOffset, size, fileLength, warnings);
+            if (entropy >= 7.2)
+            {
+                tags.Add("resource_high_entropy_data");
+            }
+        }
+
+        if (TryReadUInt16At(reader, dataOffset, fileLength, out var magic) && magic == 0x5a4d)
+        {
+            tags.Add("resource_embedded_pe");
+            tags.Add("resource_payload_candidate");
+            AddPeEvidence(interestingStrings, $"resource:{resourceType}:embedded-pe@0x{dataRva:X8}", ref evidenceCount, MaxResourceEvidence);
+        }
+    }
+
+    /// <summary>
+    /// Reads a resource entry name or numeric ID.
+    /// Inputs are the raw name/id field and resource-root offset, processing
+    /// resolves bounded UTF-16 names, and the method returns a display token.
+    /// </summary>
+    private static string ReadResourceEntryName(BinaryReader reader, long resourceRootOffset, uint nameOrId, long fileLength, SortedSet<string> tags)
+    {
+        if ((nameOrId & 0x80000000) == 0)
+        {
+            return (nameOrId & 0xffff).ToString();
+        }
+
+        tags.Add("resource_named_entry");
+        var nameOffset = resourceRootOffset + (nameOrId & 0x7fffffff);
+        if (nameOffset < 0 || nameOffset > fileLength - sizeof(ushort))
+        {
+            return "named";
+        }
+
+        reader.BaseStream.Position = nameOffset;
+        var length = reader.ReadUInt16();
+        var maxChars = Math.Min(length, (ushort)64);
+        if (nameOffset + sizeof(ushort) + maxChars * 2L > fileLength)
+        {
+            return "named";
+        }
+
+        var bytes = reader.ReadBytes(maxChars * 2);
+        var name = Encoding.Unicode.GetString(bytes).Trim('\0').Trim();
+        return string.IsNullOrWhiteSpace(name) ? "named" : name;
+    }
+
+    /// <summary>
+    /// Maps a root-level resource type ID/name to a stable token.
+    /// Inputs are the resource ID/name field, processing recognizes common PE
+    /// resource IDs, and the method returns a lower-case tag component.
+    /// </summary>
+    private static string DescribeResourceType(uint nameOrId, string entryName)
+    {
+        if ((nameOrId & 0x80000000) != 0)
+        {
+            return "named";
+        }
+
+        return (nameOrId & 0xffff) switch
+        {
+            1 => "cursor",
+            2 => "bitmap",
+            3 => "icon",
+            4 => "menu",
+            5 => "dialog",
+            6 => "string",
+            7 => "fontdir",
+            8 => "font",
+            9 => "accelerator",
+            10 => "rcdata",
+            11 => "message_table",
+            12 => "group_cursor",
+            14 => "group_icon",
+            16 => "version",
+            17 => "dlginclude",
+            19 => "plugplay",
+            20 => "vxd",
+            21 => "animated_cursor",
+            22 => "animated_icon",
+            23 => "html",
+            24 => "manifest",
+            _ => string.IsNullOrWhiteSpace(entryName) ? "unknown" : "unknown"
+        };
+    }
+
+    /// <summary>
+    /// Adds high-level resource type tags and bounded evidence.
+    /// Inputs are the resource type token and output collections, processing
+    /// highlights payload-bearing types, and the method returns no value.
+    /// </summary>
+    private static void AddResourceTypeTags(string? resourceType, SortedSet<string> tags, SortedSet<string> interestingStrings, ref int evidenceCount)
+    {
+        if (string.IsNullOrWhiteSpace(resourceType))
+        {
+            return;
+        }
+
+        tags.Add($"resource_type_{resourceType}");
+        AddPeEvidence(interestingStrings, $"resource-type:{resourceType}", ref evidenceCount, MaxResourceEvidence);
+        if (string.Equals(resourceType, "manifest", StringComparison.OrdinalIgnoreCase))
+        {
+            tags.Add("resource_manifest");
+        }
+
+        if (string.Equals(resourceType, "version", StringComparison.OrdinalIgnoreCase))
+        {
+            tags.Add("resource_version_info");
+        }
+
+        if (resourceType.Contains("icon", StringComparison.OrdinalIgnoreCase))
+        {
+            tags.Add("resource_icon");
+        }
+
+        if (string.Equals(resourceType, "rcdata", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(resourceType, "html", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(resourceType, "named", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(resourceType, "unknown", StringComparison.OrdinalIgnoreCase))
+        {
+            tags.Add("resource_payload_candidate");
         }
     }
 
@@ -880,6 +1567,20 @@ public sealed class StaticAnalyzer
             tags.Add("import_dynamic_code_api");
         }
 
+        if (ContainsAny(apiName, RegistryPersistenceApis))
+        {
+            tags.Add("import_suspicious_api");
+            tags.Add("import_persistence_api");
+            tags.Add("import_registry_persistence_api");
+        }
+
+        if (ContainsAny(apiName, ServicePersistenceApis))
+        {
+            tags.Add("import_suspicious_api");
+            tags.Add("import_persistence_api");
+            tags.Add("import_service_persistence_api");
+        }
+
         if (ContainsAny(apiName, PersistenceApis))
         {
             tags.Add("import_suspicious_api");
@@ -892,10 +1593,58 @@ public sealed class StaticAnalyzer
             tags.Add("import_network_api");
         }
 
+        if (ContainsAny(apiName, FileDropApis))
+        {
+            tags.Add("import_suspicious_api");
+            tags.Add("import_file_drop_api");
+        }
+
+        if (ContainsScriptExecutionApi(apiName))
+        {
+            tags.Add("import_suspicious_api");
+            tags.Add("import_script_execution_api");
+        }
+
+        if (ContainsAny(apiName, ResourceApis))
+        {
+            tags.Add("import_suspicious_api");
+            tags.Add("import_resource_api");
+        }
+
         if (ContainsAny(apiName, AntiAnalysisApis))
         {
             tags.Add("import_suspicious_api");
             tags.Add("import_anti_analysis_api");
+            tags.Add("anti_analysis_string");
+            tags.Add("debugger_evasion_string");
+        }
+    }
+
+    /// <summary>
+    /// Adds coarse tags for imported DLL families.
+    /// Inputs are a module name and tag set, processing checks common Windows
+    /// networking/script/crypto modules, and the method returns no value.
+    /// </summary>
+    private static void AddImportModuleTags(string dllName, SortedSet<string> tags)
+    {
+        if (ContainsAny(dllName, "wininet", "winhttp", "urlmon", "ws2_32", "wsock32", "dnsapi"))
+        {
+            tags.Add("import_network_library");
+        }
+
+        if (ContainsAny(dllName, "advapi32"))
+        {
+            tags.Add("import_registry_or_service_library");
+        }
+
+        if (ContainsAny(dllName, "shell32"))
+        {
+            tags.Add("import_shell_execution_library");
+        }
+
+        if (ContainsAny(dllName, "wincrypt", "bcrypt", "crypt32", "ncrypt"))
+        {
+            tags.Add("import_crypto_library");
         }
     }
 
@@ -1102,11 +1851,39 @@ public sealed class StaticAnalyzer
     }
 
     /// <summary>
+    /// Tries to read a UInt16 at an absolute offset without emitting warnings.
+    /// Inputs are reader, offset, and file length; processing checks bounds,
+    /// and the method returns false when the value is unavailable.
+    /// </summary>
+    private static bool TryReadUInt16At(BinaryReader reader, long offset, long fileLength, out ushort value)
+    {
+        if (offset < 0 || offset > fileLength - sizeof(ushort))
+        {
+            value = 0;
+            return false;
+        }
+
+        reader.BaseStream.Position = offset;
+        value = reader.ReadUInt16();
+        return true;
+    }
+
+    /// <summary>
     /// Calculates Shannon entropy for section raw bytes.
     /// Inputs are a reader, raw pointer, raw size, file size, and warnings;
     /// processing reads bounded section bytes, and the method returns entropy.
     /// </summary>
     private static double CalculateEntropy(BinaryReader reader, uint rawPointer, uint rawSize, long fileLength, List<string> warnings)
+    {
+        return CalculateEntropy(reader, (long)rawPointer, rawSize, fileLength, warnings);
+    }
+
+    /// <summary>
+    /// Calculates Shannon entropy for raw bytes at a long file offset.
+    /// Inputs are a reader, raw pointer, raw size, file size, and warnings;
+    /// processing reads bounded bytes, and the method returns entropy.
+    /// </summary>
+    private static double CalculateEntropy(BinaryReader reader, long rawPointer, uint rawSize, long fileLength, List<string> warnings)
     {
         if (rawSize == 0)
         {
@@ -1145,6 +1922,79 @@ public sealed class StaticAnalyzer
         }
 
         return entropy;
+    }
+
+    /// <summary>
+    /// Adds one bounded human-readable evidence string.
+    /// Inputs are an output set and value, processing trims report-unfriendly
+    /// length, and the method returns no value.
+    /// </summary>
+    private static void AddInterestingString(SortedSet<string> interestingStrings, string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return;
+        }
+
+        var trimmed = TrimEvidence(value);
+        interestingStrings.Add(trimmed.Length > 240 ? trimmed[..240] : trimmed);
+    }
+
+    /// <summary>
+    /// Trims evidence delimiters commonly attached to extracted strings.
+    /// Inputs are raw evidence, processing removes quotes and trailing
+    /// punctuation, and the method returns a bounded display string.
+    /// </summary>
+    private static string TrimEvidence(string value)
+    {
+        var trimmed = value.Trim().Trim('"', '\'', '`');
+        trimmed = trimmed.TrimEnd('\0', '.', ',', ';', ')', ']', '}', '"', '\'', '`');
+        return trimmed.Length > 240 ? trimmed[..240] : trimmed;
+    }
+
+    /// <summary>
+    /// Parses a dotted IPv4 literal into four octets.
+    /// Inputs are a candidate string, processing validates each numeric octet,
+    /// and the method returns true when parsing succeeds.
+    /// </summary>
+    private static bool TryParseIpv4(string value, out byte[] octets)
+    {
+        octets = new byte[4];
+        var parts = value.Split('.');
+        if (parts.Length != 4)
+        {
+            return false;
+        }
+
+        for (var index = 0; index < parts.Length; index++)
+        {
+            if (!byte.TryParse(parts[index], out octets[index]))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Checks whether an IPv4 address belongs to private, loopback, link-local,
+    /// documentation, multicast, or otherwise reserved ranges.
+    /// </summary>
+    private static bool IsPrivateOrReservedIpv4(IReadOnlyList<byte> octets)
+    {
+        return
+            octets[0] == 0 ||
+            octets[0] == 10 ||
+            octets[0] == 127 ||
+            octets[0] >= 224 ||
+            octets[0] == 169 && octets[1] == 254 ||
+            octets[0] == 172 && octets[1] is >= 16 and <= 31 ||
+            octets[0] == 192 && octets[1] == 168 ||
+            octets[0] == 100 && octets[1] is >= 64 and <= 127 ||
+            octets[0] == 192 && octets[1] == 0 && octets[2] == 2 ||
+            octets[0] == 198 && octets[1] == 51 && octets[2] == 100 ||
+            octets[0] == 203 && octets[1] == 0 && octets[2] == 113;
     }
 
     /// <summary>
@@ -1256,6 +2106,70 @@ public sealed class StaticAnalyzer
     private static bool ContainsAny(string text, params string[] fragments)
     {
         return fragments.Any(fragment => text.Contains(fragment, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// Checks script/process execution API markers while keeping broad CRT
+    /// names such as `system` token-bounded.
+    /// </summary>
+    private static bool ContainsScriptExecutionApi(string text)
+    {
+        foreach (var fragment in ScriptExecutionApis)
+        {
+            if (string.Equals(fragment, "system", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(fragment, "_wsystem", StringComparison.OrdinalIgnoreCase))
+            {
+                if (ContainsToken(text, fragment))
+                {
+                    return true;
+                }
+
+                continue;
+            }
+
+            if (text.Contains(fragment, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Checks a case-insensitive token with non-identifier boundaries.
+    /// </summary>
+    private static bool ContainsToken(string text, string token)
+    {
+        var start = 0;
+        while (start < text.Length)
+        {
+            var index = text.IndexOf(token, start, StringComparison.OrdinalIgnoreCase);
+            if (index < 0)
+            {
+                return false;
+            }
+
+            var before = index == 0 ? '\0' : text[index - 1];
+            var afterIndex = index + token.Length;
+            var after = afterIndex >= text.Length ? '\0' : text[afterIndex];
+            if (!IsIdentifierChar(before) && !IsIdentifierChar(after))
+            {
+                return true;
+            }
+
+            start = index + token.Length;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Returns whether a character is part of a common API identifier token.
+    /// </summary>
+    private static bool IsIdentifierChar(char value)
+    {
+        return char.IsLetterOrDigit(value) || value == '_';
     }
 
     /// <summary>

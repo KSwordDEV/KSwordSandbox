@@ -87,9 +87,14 @@ public sealed class GuestArtifactManifestReader
     /// </summary>
     private static ArtifactDescriptor NormalizeDescriptor(ArtifactDescriptor descriptor, string guestOutputRoot)
     {
-        if (string.IsNullOrWhiteSpace(descriptor.RelativePath))
+        var relativePath = ArtifactDescriptorFactory.NormalizeRelativePath(descriptor.RelativePath);
+        if (string.IsNullOrWhiteSpace(relativePath))
         {
-            return descriptor;
+            return ArtifactDescriptorFactory.NormalizeDescriptor(descriptor) with
+            {
+                RelativePath = string.Empty,
+                SafeLink = string.Empty
+            };
         }
 
         var metadata = new Dictionary<string, string>(descriptor.Metadata, StringComparer.OrdinalIgnoreCase);
@@ -99,10 +104,39 @@ public sealed class GuestArtifactManifestReader
             metadata["guestFullPath"] = descriptor.FullPath;
         }
 
-        return descriptor with
+        var fullPath = Path.GetFullPath(Path.Combine(guestOutputRoot, relativePath));
+        var normalized = File.Exists(fullPath)
+            ? ArtifactDescriptorFactory.FromExistingFile(fullPath, guestOutputRoot, descriptor.Kind, metadata)
+            : ArtifactDescriptorFactory.FromKnownPath(fullPath, guestOutputRoot, descriptor.Kind, metadata);
+
+        return normalized with
         {
-            FullPath = Path.GetFullPath(Path.Combine(guestOutputRoot, descriptor.RelativePath)),
+            Category = string.IsNullOrWhiteSpace(descriptor.Category) ? normalized.Category : descriptor.Category,
+            MimeType = string.IsNullOrWhiteSpace(descriptor.MimeType) ? normalized.MimeType : descriptor.MimeType,
+            SizeBytes = descriptor.SizeBytes > 0 ? descriptor.SizeBytes : normalized.SizeBytes,
+            Sha256 = string.IsNullOrWhiteSpace(descriptor.Sha256) ? normalized.Sha256 : descriptor.Sha256,
+            Hashes = MergeHashes(descriptor, normalized),
+            CreatedAtUtc = descriptor.CreatedAtUtc == default ? normalized.CreatedAtUtc : descriptor.CreatedAtUtc,
             Metadata = metadata
         };
+    }
+
+    private static Dictionary<string, string> MergeHashes(ArtifactDescriptor descriptor, ArtifactDescriptor normalized)
+    {
+        var hashes = new Dictionary<string, string>(normalized.Hashes, StringComparer.OrdinalIgnoreCase);
+        if (descriptor.Hashes is not null)
+        {
+            foreach (var pair in descriptor.Hashes)
+            {
+                hashes[pair.Key] = pair.Value;
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(descriptor.Sha256))
+        {
+            hashes["sha256"] = descriptor.Sha256;
+        }
+
+        return hashes;
     }
 }

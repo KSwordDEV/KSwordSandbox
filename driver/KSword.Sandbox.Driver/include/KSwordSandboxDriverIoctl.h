@@ -43,10 +43,20 @@ extern "C" {
  * Interface and structure versions.
  *
  * The high word is the major ABI version and the low word is the minor ABI
- * version.  All current skeleton structures use version 1.0.
+ * version.  All current skeleton structures use version 1.0.  Collectors should
+ * first read capabilities, compare the major version, and then gate optional
+ * IOCTL use on CapabilityFlags.
  */
-#define KSWORD_SANDBOX_INTERFACE_VERSION   0x00010000U
-#define KSWORD_SANDBOX_EVENT_HEADER_VERSION 0x00010000U
+#define KSWORD_SANDBOX_ABI_VERSION_MAJOR   1U
+#define KSWORD_SANDBOX_ABI_VERSION_MINOR   0U
+#define KSWORD_SANDBOX_MAKE_ABI_VERSION(Major, Minor) \
+    ((((ULONG)(Major)) << 16) | (((ULONG)(Minor)) & 0xFFFFU))
+#define KSWORD_SANDBOX_ABI_VERSION \
+    KSWORD_SANDBOX_MAKE_ABI_VERSION( \
+        KSWORD_SANDBOX_ABI_VERSION_MAJOR, \
+        KSWORD_SANDBOX_ABI_VERSION_MINOR)
+#define KSWORD_SANDBOX_INTERFACE_VERSION   KSWORD_SANDBOX_ABI_VERSION
+#define KSWORD_SANDBOX_EVENT_HEADER_VERSION KSWORD_SANDBOX_ABI_VERSION
 
 /*
  * IOCTL_KSWORD_SANDBOX_GET_HEALTH
@@ -81,6 +91,41 @@ extern "C" {
     CTL_CODE(KSWORD_SANDBOX_DEVICE_TYPE, KSWORD_SANDBOX_IOCTL_BASE + 0x02U, METHOD_BUFFERED, FILE_READ_DATA)
 
 /*
+ * IOCTL_KSWORD_SANDBOX_GET_CAPABILITIES
+ *   Input : none.
+ *   Output: KSWORD_SANDBOX_CAPABILITIES_REPLY.
+ *   Return: STATUS_SUCCESS when the output buffer is large enough.  Future
+ *           collectors should use this as the first negotiated R0 driver ABI
+ *           probe and fall back to GET_HEALTH only when an older driver returns
+ *           STATUS_INVALID_DEVICE_REQUEST for this IOCTL.
+ */
+#define IOCTL_KSWORD_SANDBOX_GET_CAPABILITIES \
+    CTL_CODE(KSWORD_SANDBOX_DEVICE_TYPE, KSWORD_SANDBOX_IOCTL_BASE + 0x03U, METHOD_BUFFERED, FILE_READ_DATA)
+
+/*
+ * IOCTL_KSWORD_SANDBOX_GET_STATUS
+ *   Input : none.
+ *   Output: KSWORD_SANDBOX_STATUS_REPLY.
+ *   Return: STATUS_SUCCESS with lifecycle, enable-mask, queue-capacity, and
+ *           total counter state for collector diagnostics.
+ */
+#define IOCTL_KSWORD_SANDBOX_GET_STATUS \
+    CTL_CODE(KSWORD_SANDBOX_DEVICE_TYPE, KSWORD_SANDBOX_IOCTL_BASE + 0x04U, METHOD_BUFFERED, FILE_READ_DATA)
+
+/*
+ * IOCTL_KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK
+ *   Input : KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK_REQUEST.
+ *   Output: KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK_REPLY.
+ *   Return: STATUS_SUCCESS after updating the producer emission mask, or
+ *           STATUS_INVALID_PARAMETER when the request names unsupported bits.
+ */
+#define IOCTL_KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK \
+    CTL_CODE(KSWORD_SANDBOX_DEVICE_TYPE, KSWORD_SANDBOX_IOCTL_BASE + 0x05U, METHOD_BUFFERED, FILE_READ_DATA | FILE_WRITE_DATA)
+
+#define IOCTL_KSWORD_SANDBOX_SET_ENABLE_MASK \
+    IOCTL_KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK
+
+/*
  * Alias kept for local experiments that used the DrainEvents name.  The public
  * skeleton contract remains IOCTL_KSWORD_SANDBOX_READ_EVENTS.
  */
@@ -94,6 +139,74 @@ typedef enum _KSWORD_SANDBOX_DRIVER_STATE {
     KswSandboxDriverStateRunning = 1,
     KswSandboxDriverStateStopping = 2
 } KSWORD_SANDBOX_DRIVER_STATE;
+
+/*
+ * Health/status/capability flag bits.
+ *
+ * Inputs : returned by GET_HEALTH, GET_STATUS, and GET_CAPABILITIES replies.
+ * Logic  : these bits let collectors detect optional IOCTLs and status meaning
+ *          without depending on structure growth in older health/poll replies.
+ * Return : not applicable; callers preserve unknown bits.
+ */
+#define KSWORD_SANDBOX_HEALTH_FLAG_HAS_EVENTS             0x00000001U
+#define KSWORD_SANDBOX_HEALTH_FLAG_CAPABILITIES_AVAILABLE 0x00000002U
+#define KSWORD_SANDBOX_HEALTH_FLAG_STATUS_AVAILABLE       0x00000004U
+#define KSWORD_SANDBOX_HEALTH_FLAG_ENABLE_MASK_AVAILABLE  0x00000008U
+
+#define KSWORD_SANDBOX_STATUS_FLAG_HAS_EVENTS             0x00000001U
+#define KSWORD_SANDBOX_STATUS_FLAG_PRODUCERS_PARTIAL      0x00000002U
+#define KSWORD_SANDBOX_STATUS_FLAG_PRODUCERS_ALL_DISABLED 0x00000004U
+#define KSWORD_SANDBOX_STATUS_FLAG_LAST_STATUS_FAILURE    0x00000008U
+
+#define KSWORD_SANDBOX_CAPABILITY_FLAG_GET_HEALTH             0x0000000000000001ULL
+#define KSWORD_SANDBOX_CAPABILITY_FLAG_POLL                   0x0000000000000002ULL
+#define KSWORD_SANDBOX_CAPABILITY_FLAG_READ_EVENTS            0x0000000000000004ULL
+#define KSWORD_SANDBOX_CAPABILITY_FLAG_GET_CAPABILITIES       0x0000000000000008ULL
+#define KSWORD_SANDBOX_CAPABILITY_FLAG_GET_STATUS             0x0000000000000010ULL
+#define KSWORD_SANDBOX_CAPABILITY_FLAG_SET_PRODUCER_ENABLE_MASK 0x0000000000000020ULL
+#define KSWORD_SANDBOX_CAPABILITY_FLAG_QUEUE_STATUS_COUNTERS  0x0000000000000040ULL
+#define KSWORD_SANDBOX_CAPABILITY_FLAG_PRODUCER_ENABLE_BITS   0x0000000000000080ULL
+#define KSWORD_SANDBOX_CAPABILITY_FLAG_TYPED_EVENT_PAYLOADS   0x0000000000000100ULL
+
+#define KSWORD_SANDBOX_CAPABILITY_FLAGS_CURRENT \
+    (KSWORD_SANDBOX_CAPABILITY_FLAG_GET_HEALTH | \
+     KSWORD_SANDBOX_CAPABILITY_FLAG_POLL | \
+     KSWORD_SANDBOX_CAPABILITY_FLAG_READ_EVENTS | \
+     KSWORD_SANDBOX_CAPABILITY_FLAG_GET_CAPABILITIES | \
+     KSWORD_SANDBOX_CAPABILITY_FLAG_GET_STATUS | \
+     KSWORD_SANDBOX_CAPABILITY_FLAG_SET_PRODUCER_ENABLE_MASK | \
+     KSWORD_SANDBOX_CAPABILITY_FLAG_QUEUE_STATUS_COUNTERS | \
+     KSWORD_SANDBOX_CAPABILITY_FLAG_PRODUCER_ENABLE_BITS | \
+     KSWORD_SANDBOX_CAPABILITY_FLAG_TYPED_EVENT_PAYLOADS)
+
+/*
+ * Producer enable bits.
+ *
+ * Inputs : used in GET_CAPABILITIES.SupportedProducerMask,
+ *          GET_STATUS.ProducerEnableMask, and SET_PRODUCER_ENABLE_MASK input.
+ * Logic  : one bit gates enqueue of one public event family.  Disabling a
+ *          producer suppresses future KswPushEvent records for that family; it
+ *          does not unregister kernel callbacks or clear already queued events.
+ * Return : not applicable; collectors must mask requested bits with
+ *          SupportedProducerMask before issuing SET_PRODUCER_ENABLE_MASK.
+ */
+#define KSWORD_SANDBOX_PRODUCER_FLAG_DRIVER    0x00000001U
+#define KSWORD_SANDBOX_PRODUCER_FLAG_PROCESS   0x00000002U
+#define KSWORD_SANDBOX_PRODUCER_FLAG_IMAGE     0x00000004U
+#define KSWORD_SANDBOX_PRODUCER_FLAG_FILE      0x00000008U
+#define KSWORD_SANDBOX_PRODUCER_FLAG_REGISTRY  0x00000010U
+#define KSWORD_SANDBOX_PRODUCER_FLAG_NETWORK   0x00000020U
+
+#define KSWORD_SANDBOX_PRODUCER_MASK_CURRENT \
+    (KSWORD_SANDBOX_PRODUCER_FLAG_DRIVER | \
+     KSWORD_SANDBOX_PRODUCER_FLAG_PROCESS | \
+     KSWORD_SANDBOX_PRODUCER_FLAG_IMAGE | \
+     KSWORD_SANDBOX_PRODUCER_FLAG_FILE | \
+     KSWORD_SANDBOX_PRODUCER_FLAG_REGISTRY | \
+     KSWORD_SANDBOX_PRODUCER_FLAG_NETWORK)
+
+#define KSWORD_SANDBOX_PRODUCER_MASK_DEFAULT \
+    KSWORD_SANDBOX_PRODUCER_MASK_CURRENT
 
 /*
  * Event type values.
@@ -144,7 +257,9 @@ typedef enum _KSWORD_SANDBOX_FILE_OPERATION {
     KswSandboxFileOperationSetInformation = 3,
     KswSandboxFileOperationDelete = 4,
     KswSandboxFileOperationCleanup = 5,
-    KswSandboxFileOperationClose = 6
+    KswSandboxFileOperationClose = 6,
+    KswSandboxFileOperationRead = 7,
+    KswSandboxFileOperationRename = 8
 } KSWORD_SANDBOX_FILE_OPERATION;
 
 /*
@@ -152,7 +267,9 @@ typedef enum _KSWORD_SANDBOX_FILE_OPERATION {
  *
  * Inputs : written by the driver in KSWORD_SANDBOX_FILE_EVENT_PAYLOAD.Flags.
  * Logic  : PathPresent means PathLengthBytes and Path contain a bounded UTF-16
- *          string, PathTruncated means the original name did not fit, and
+ *          string, PathTruncated means the original name did not fit,
+ *          PathNormalized means FltMgr provided a normalized name, PathFallback
+ *          means the producer fell back to FILE_OBJECT.FileName, and
  *          PostOperation identifies callbacks that captured the final status.
  * Return : not applicable; collectors should treat unknown bits as reserved.
  */
@@ -160,6 +277,8 @@ typedef enum _KSWORD_SANDBOX_FILE_OPERATION {
 #define KSWORD_SANDBOX_FILE_EVENT_FLAG_PATH_TRUNCATED   0x00000002U
 #define KSWORD_SANDBOX_FILE_EVENT_FLAG_STATUS_PRESENT   0x00000004U
 #define KSWORD_SANDBOX_FILE_EVENT_FLAG_POST_OPERATION   0x00000008U
+#define KSWORD_SANDBOX_FILE_EVENT_FLAG_PATH_NORMALIZED  0x00000010U
+#define KSWORD_SANDBOX_FILE_EVENT_FLAG_PATH_FALLBACK    0x00000020U
 
 /*
  * Bounded UTF-16 path capacity for file payloads.
@@ -366,6 +485,102 @@ typedef struct _KSWORD_SANDBOX_POLL_REPLY {
     ULONGLONG NextSequence;
     ULONGLONG Reserved[4];
 } KSWORD_SANDBOX_POLL_REPLY, *PKSWORD_SANDBOX_POLL_REPLY;
+
+/*
+ * Capabilities reply returned by GET_CAPABILITIES.
+ *
+ * Inputs : output buffer supplied by DeviceIoControl.
+ * Logic  : The driver publishes ABI version numbers, supported optional IOCTLs,
+ *          producer enable bits, and fixed queue/event layout limits before a
+ *          collector commits to newer status or enable-mask calls.
+ * Return : sizeof(KSWORD_SANDBOX_CAPABILITIES_REPLY) bytes on success.
+ */
+typedef struct _KSWORD_SANDBOX_CAPABILITIES_REPLY {
+    ULONG Version;
+    ULONG Size;
+    ULONG AbiVersionMajor;
+    ULONG AbiVersionMinor;
+    ULONGLONG CapabilityFlags;
+    ULONG SupportedProducerMask;
+    ULONG DefaultProducerMask;
+    ULONG EventHeaderVersion;
+    ULONG EventMaxPayloadSize;
+    ULONG EventRingCapacity;
+    ULONG ReadEventsReplyHeaderSize;
+    ULONG CapabilitiesReplySize;
+    ULONG StatusReplySize;
+    ULONG SetProducerEnableMaskRequestSize;
+    ULONG SetProducerEnableMaskReplySize;
+    ULONG Reserved0;
+    ULONGLONG Reserved[4];
+} KSWORD_SANDBOX_CAPABILITIES_REPLY, *PKSWORD_SANDBOX_CAPABILITIES_REPLY;
+
+/*
+ * Status reply returned by GET_STATUS.
+ *
+ * Inputs : output buffer supplied by DeviceIoControl.
+ * Logic  : The driver returns a stable lifecycle snapshot, current producer
+ *          enable mask, ring capacity/depth, and monotonic total counters for
+ *          enqueued, read, dropped, and suppressed events.
+ * Return : sizeof(KSWORD_SANDBOX_STATUS_REPLY) bytes on success.
+ */
+typedef struct _KSWORD_SANDBOX_STATUS_REPLY {
+    ULONG Version;
+    ULONG Size;
+    ULONG DriverState;
+    ULONG Flags;
+    ULONG QueueCapacity;
+    ULONG QueueDepth;
+    ULONG QueueHighWatermark;
+    ULONG ProducerEnableMask;
+    ULONG SupportedProducerMask;
+    LONG LastNtStatus;
+    ULONG Reserved0;
+    ULONGLONG TotalEventsEnqueued;
+    ULONGLONG TotalEventsDropped;
+    ULONGLONG TotalEventsRead;
+    ULONGLONG TotalEventsSuppressed;
+    ULONGLONG NextSequence;
+    ULONGLONG Reserved[4];
+} KSWORD_SANDBOX_STATUS_REPLY, *PKSWORD_SANDBOX_STATUS_REPLY;
+
+/*
+ * Request for SET_PRODUCER_ENABLE_MASK.
+ *
+ * Inputs : collectors write the Version, Size, and requested EnableMask.
+ * Logic  : EnableMask must be a subset of SupportedProducerMask returned by
+ *          GET_CAPABILITIES/GET_STATUS.  Flags is reserved and must be zero.
+ * Return : not returned directly; the same METHOD_BUFFERED buffer receives
+ *          KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK_REPLY on success.
+ */
+typedef struct _KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK_REQUEST {
+    ULONG Version;
+    ULONG Size;
+    ULONG EnableMask;
+    ULONG Flags;
+    ULONGLONG Reserved[4];
+} KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK_REQUEST,
+    *PKSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK_REQUEST;
+
+/*
+ * Reply for SET_PRODUCER_ENABLE_MASK.
+ *
+ * Inputs : output buffer supplied by DeviceIoControl.
+ * Logic  : reports the previous and effective masks so collectors can log the
+ *          exact transition used for the capture session.
+ * Return : sizeof(KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK_REPLY) bytes on
+ *          success.
+ */
+typedef struct _KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK_REPLY {
+    ULONG Version;
+    ULONG Size;
+    ULONG PreviousEnableMask;
+    ULONG EffectiveEnableMask;
+    ULONG SupportedProducerMask;
+    ULONG Flags;
+    ULONGLONG Reserved[4];
+} KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK_REPLY,
+    *PKSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK_REPLY;
 
 /*
  * Optional request for READ_EVENTS.

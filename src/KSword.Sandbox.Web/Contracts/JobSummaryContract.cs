@@ -17,4 +17,16 @@ public sealed record JobSummaryContract(
     string State,
     string? HtmlReportPath,
     DateTimeOffset? CreatedAtUtc,
-    DateTimeOffset? CompletedAtUtc);
+    DateTimeOffset? CompletedAtUtc)
+{
+    /// <summary>
+    /// Full artifact path set used by the dashboard when the summary is shown
+    /// as the latest job card.
+    /// </summary>
+    public JobArtifactPathsContract? ArtifactPaths { get; init; }
+
+    /// <summary>
+    /// Guest event import status shown beside report and telemetry paths.
+    /// </summary>
+    public GuestImportStatusContract? GuestImportStatus { get; init; }
+}

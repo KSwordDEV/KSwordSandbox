@@ -33,6 +33,21 @@ internal static class WebRouteCatalog
     internal const string FileUpload = "/api/files/upload";
 
     /// <summary>
+    /// Runbook execute route suffix under a job detail route.
+    /// </summary>
+    internal const string RunbookExecuteSuffix = "/runbook/execute";
+
+    /// <summary>
+    /// Guest event import route suffix under a job detail route.
+    /// </summary>
+    internal const string GuestEventsImportSuffix = "/guest-events/import";
+
+    /// <summary>
+    /// Served HTML report route suffix under a job detail route.
+    /// </summary>
+    internal const string ReportHtmlSuffix = "/report/html";
+
+    /// <summary>
     /// Inputs: a job identifier selected by the dashboard.
     /// Processing: formats the identifier with the invariant "D" format and appends it to the jobs route.
     /// Return behavior: returns the concrete route path for a job detail request.
@@ -60,5 +75,35 @@ internal static class WebRouteCatalog
     internal static string LiveEventStream(Guid jobId)
     {
         return $"{JobById(jobId)}/events/stream";
+    }
+
+    /// <summary>
+    /// Inputs: a job identifier selected by the dashboard.
+    /// Processing: appends the served HTML report suffix to the job route.
+    /// Return behavior: returns the concrete route path for report.html access.
+    /// </summary>
+    internal static string ReportHtml(Guid jobId)
+    {
+        return $"{JobById(jobId)}{ReportHtmlSuffix}";
+    }
+
+    /// <summary>
+    /// Inputs: a job identifier selected by the dashboard.
+    /// Processing: appends the runbook execute suffix to the job route.
+    /// Return behavior: returns the concrete route path for runbook execution.
+    /// </summary>
+    internal static string RunbookExecute(Guid jobId)
+    {
+        return $"{JobById(jobId)}{RunbookExecuteSuffix}";
+    }
+
+    /// <summary>
+    /// Inputs: a job identifier selected by the dashboard.
+    /// Processing: appends the guest import suffix to the job route.
+    /// Return behavior: returns the concrete route path for guest event import.
+    /// </summary>
+    internal static string GuestEventsImport(Guid jobId)
+    {
+        return $"{JobById(jobId)}{GuestEventsImportSuffix}";
     }
 }

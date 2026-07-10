@@ -54,7 +54,16 @@ The current guest collector emits these host-reportable event groups:
 - `process.tree` for the launched sample process and visible descendants. The
   event includes `ParentProcessId` plus `rootProcessId` and `treeDepth` in
   `Data` so reports can reconstruct a low-privilege process tree without WMI or
-  administrator rights.
+  administrator rights. Tree events also include `childProcessCount`,
+  `treeLineage`, `sessionId`, `threadCount`, and Toolhelp image metadata when
+  available.
+- `process.tree_unavailable` when the root PID has already exited or is not
+  visible in the current low-privilege snapshot.
+- `environment.detail` for additional runtime and guest context, including
+  .NET framework description, runtime identifier, elevation estimate,
+  interactive-session flag, time-zone metadata, temp/user profile paths, and
+  selected environment-derived fields without dumping the full environment
+  block.
 - `file.created`, `file.modified`, and `file.deleted` for files changed under
   the sample working directory. File delta events include `root`,
   `relativePath`, `sizeBytes`/`lastWriteUtc`, and previous values for modified
@@ -66,12 +75,37 @@ The current guest collector emits these host-reportable event groups:
 - `network.tcp.closed` for baseline TCP connections that disappeared by the
   post-run snapshot. These events use the same endpoint fields with
   `change=closed`.
+- `dns.cache.snapshot`, `dns.cache.added`, and `dns.cache.removed` from a
+  bounded `ipconfig /displaydns` query. DNS entries include parsed
+  `name`/`recordType`/`data`/`timeToLive` when English labels are present and a
+  hash plus `rawSummary` fallback when output is localized.
+- `network.netstat.snapshot`, `network.netstat`,
+  `network.netstat.added`, and `network.netstat.removed` from bounded
+  `netstat -ano` collection. Rows include protocol, local/remote endpoints,
+  state, and owning PID when present. Large row sets are capped and emit
+  `network.netstat.truncated` rather than blocking live output.
+- `network.tcp.listener.snapshot`, `network.udp.listener.snapshot`,
+  `network.tcp.listener.opened` / `.closed`, and
+  `network.udp.listener.opened` / `.closed` for managed listener diffs.
+- `service.snapshot`, `service.created`, `service.modified`, and
+  `service.deleted` from bounded `sc queryex state= all` inventory.
+- `scheduled_task.snapshot`, `scheduled_task.created`,
+  `scheduled_task.modified`, and `scheduled_task.deleted` from bounded
+  `schtasks /query /fo csv /v` inventory.
+- `startup_item.snapshot`, `startup_item.created`,
+  `startup_item.modified`, and `startup_item.deleted` for common Run/RunOnce
+  registry values and Startup folder entries. Registry and folder access errors
+  become `startup_item.capture_failed` diagnostics instead of failing the run.
 - `screenshot.captured` when `--screenshot` successfully writes a desktop BMP.
   The event path points at the BMP file and `Data` includes `phase`,
   `widthPixels`, and `heightPixels`.
 - `screenshot.skipped` when screenshot capture was requested but the platform or
-  guest session cannot expose a desktop surface. This is non-fatal and keeps
+  guest session cannot expose a desktop surface. This is non-fatal and includes
+  `diagnosticStage`, `exceptionType`, and `win32Error` when available, keeping
   smoke tests usable on headless hosts.
+- `probe.timeout`, `probe.failed`, and `probe.canceled` for per-probe isolation.
+  A slow DNS/netstat/service/task query is bounded and converted to an event so
+  later probes and final JSON artifact writing can continue.
 - Driver JSONL events from `--driver-events`, preserving driver-provided fields
   and defaulting missing sources to `driver`.
 - `r0collector.start_failed` if the optional sidecar process could not be

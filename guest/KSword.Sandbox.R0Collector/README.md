@@ -27,7 +27,8 @@ or `x64/` outputs.
   --device \\.\KSwordSandboxDriver `
   --output C:\Sandbox\driver-events.jsonl `
   --duration 10 `
-  --poll-interval-ms 500
+  --poll-ms 500 `
+  --heartbeat
 ```
 
 Options:
@@ -36,19 +37,26 @@ Options:
 - `--output`, `-o`: JSONL output path, or `-` for stdout. Default: `-`.
 - `--duration`, `-t`: Poll duration in seconds. `0` performs one health/poll/read-events pass.
 - `--poll-ms`, `--poll-interval`, `--poll-interval-ms`, `-p`: poll interval in milliseconds.
+- `--enable-mask <mask>`: pass a decimal or `0x` 32-bit mask through the
+  `READ_EVENTS` request flags and record it in lifecycle JSONL.
+- `--heartbeat`: emit `r0collector.heartbeat` progress rows.
 - `--mock`: emit synthetic process/image/file/registry driver-category rows
   without opening a device.
+- `--synthetic`: alias for `--mock`.
+- `--self-test`: alias for `--mock`.
 - `--help`, `-h`: show CLI help.
 
 ## Current behavior
 
-- `--mock` emits:
+- `--mock`, `--synthetic`, and `--self-test` emit:
   - `r0collector.started`
+  - optional `r0collector.heartbeat`
   - `r0collector.mockDriverEvent`
   - `driver.process`
   - `image.load`
   - `driver.file`
   - `driver.registry`
+  - optional `r0collector.heartbeat`
   - `r0collector.stopped`
 - If the device cannot be opened, the collector emits
   `r0collector.deviceUnavailable` and exits with code `66`.
@@ -60,6 +68,7 @@ Options:
     (`driver.process`, `image.load`, `driver.file`, `driver.registry`,
     `driver.network`, `driver.event.reserved`, or fallback `driver.event`)
   - `r0collector.driverReadEvents`
+  - optional `r0collector.heartbeat`
   - `r0collector.stopped`
 
 ## JSONL contract

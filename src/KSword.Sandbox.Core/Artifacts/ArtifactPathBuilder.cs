@@ -58,4 +58,14 @@ public sealed class ArtifactPathBuilder
     {
         return BuildArtifactPath(jobId, "artifact-manifest.json");
     }
+
+    /// <summary>
+    /// Returns the canonical host artifact index path for one job.
+    /// Inputs are a job ID, processing appends the reserved index file name to
+    /// the job root, and the method returns the index path.
+    /// </summary>
+    public string BuildArtifactIndexPath(Guid jobId)
+    {
+        return BuildArtifactPath(jobId, "artifact-index.json");
+    }
 }

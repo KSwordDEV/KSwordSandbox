@@ -1,0 +1,239 @@
+#include "RuntimeLoop.h"
+
+#include "IoctlClient.h"
+#include "JsonWriter.h"
+#include "Options.h"
+#include "SyntheticMode.h"
+
+#include <chrono>
+#include <thread>
+
+namespace KSword::Sandbox::R0Collector {
+
+// Input: Collector options used for this run.
+// Processing: Serializes the configuration into the data object of lifecycle events.
+// Return: JSON object text for SandboxEvent.data.
+std::string BuildConfigData(const Options& options) {
+    JsonDataObjectBuilder data;
+    data.AddWide("devicePath", options.devicePath);
+    data.AddWide("outputPath", options.outputPath);
+    data.AddSigned("durationSeconds", options.durationSeconds);
+    data.AddSigned("pollIntervalMs", options.pollIntervalMs);
+    data.AddBool("mockMode", options.mockMode);
+    data.AddBool("syntheticMode", options.mockMode);
+    data.AddBool("heartbeat", options.heartbeat);
+    data.AddBool("enableMaskSpecified", options.enableMaskSpecified);
+    data.AddUnsigned("enableMask", options.enableMask);
+    data.AddUtf8("enableMaskHex", HexUnsignedLongLong(options.enableMask, 8));
+    data.AddUtf8("ioctlProtocol", "KSwordSandboxDriverIoctl.h");
+    return data.Build();
+}
+
+// Input: CLI parse or output-open failure details.
+// Processing: Builds a structured error object while keeping top-level fields
+// compatible with SandboxEvent.
+// Return: JSON object text for SandboxEvent.data.
+std::string BuildErrorData(const std::wstring& message, const DWORD errorCode, const std::wstring& hint) {
+    JsonDataObjectBuilder data;
+    data.AddWide("message", message);
+    data.AddUnsigned("win32Error", errorCode);
+    data.AddWide("hint", hint);
+    return data.Build();
+}
+
+// Input: Collector runtime counters and a reason label.
+// Processing: Emits an optional lifecycle heartbeat row so timed runs provide
+// progress evidence even when the driver queue is empty.
+// Return: true if heartbeat output was disabled or the JSONL sink accepted the row.
+bool EmitCollectorHeartbeat(
+    EventWriter& writer,
+    const Options& options,
+    const std::string& reason,
+    const unsigned long long polls,
+    const unsigned long long readBatches,
+    const unsigned long long driverEvents) {
+    if (!options.heartbeat) {
+        return true;
+    }
+
+    SandboxEventFields event;
+    event.eventType = "r0collector.heartbeat";
+    event.path = options.devicePath;
+
+    JsonDataObjectBuilder data;
+    data.AddUtf8("reason", reason);
+    data.AddUnsigned("polls", polls);
+    data.AddUnsigned("readBatches", readBatches);
+    data.AddUnsigned("driverEvents", driverEvents);
+    data.AddSigned("durationSeconds", options.durationSeconds);
+    data.AddSigned("pollIntervalMs", options.pollIntervalMs);
+    data.AddBool("mockMode", options.mockMode);
+    data.AddBool("syntheticMode", options.mockMode);
+    data.AddBool("enableMaskSpecified", options.enableMaskSpecified);
+    data.AddUnsigned("enableMask", options.enableMask);
+    data.AddUtf8("enableMaskHex", HexUnsignedLongLong(options.enableMask, 8));
+    event.dataJson = data.Build();
+
+    return EmitEvent(writer, event);
+}
+
+// Input: Open driver handle, collector options, and event sink.
+// Processing: Calls the public driver skeleton IOCTLs. Health is read once;
+// POLL and READ_EVENTS are called once for duration 0, or repeatedly until the
+// requested duration elapses.
+// Return: Process exit code describing write or IOCTL failure versus success.
+int RunDriverIoctlLoop(const UniqueHandle& device, const Options& options, EventWriter& writer) {
+    if (!device.IsValid()) {
+        return kExitDeviceUnavailable;
+    }
+
+    if (!EmitDriverHealth(device, options, writer)) {
+        return kExitRuntimeFailure;
+    }
+
+    unsigned long long polls = 0;
+    unsigned long long readBatches = 0;
+    unsigned long long driverEvents = 0;
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(options.durationSeconds);
+
+    do {
+        if (!EmitDriverPoll(device, options, writer)) {
+            return kExitRuntimeFailure;
+        }
+        ++polls;
+
+        unsigned long long eventsEmitted = 0;
+        if (!EmitDriverReadEvents(device, options, readBatches + 1, writer, &eventsEmitted)) {
+            return kExitRuntimeFailure;
+        }
+        ++readBatches;
+        driverEvents += eventsEmitted;
+
+        if (!EmitCollectorHeartbeat(writer, options, "pollComplete", polls, readBatches, driverEvents)) {
+            return kExitRuntimeFailure;
+        }
+
+        if (options.durationSeconds <= 0 || std::chrono::steady_clock::now() >= deadline) {
+            break;
+        }
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(options.pollIntervalMs));
+    } while (std::chrono::steady_clock::now() < deadline);
+
+    JsonDataObjectBuilder data;
+    data.AddUtf8("reason", options.durationSeconds > 0 ? "durationElapsed" : "oneShotComplete");
+    data.AddUnsigned("polls", polls);
+    data.AddUnsigned("readBatches", readBatches);
+    data.AddUnsigned("driverEvents", driverEvents);
+    data.AddBool("ioctlIssued", true);
+    data.AddBool("heartbeat", options.heartbeat);
+
+    SandboxEventFields stoppedEvent;
+    stoppedEvent.eventType = "r0collector.stopped";
+    stoppedEvent.path = options.devicePath;
+    stoppedEvent.dataJson = data.Build();
+
+    return EmitEvent(writer, stoppedEvent) ? kExitSuccess : kExitRuntimeFailure;
+}
+
+// Input: Windows Unicode process arguments.
+// Processing: Parses collector options, opens the output JSONL sink, optionally
+// opens the driver device, and emits SandboxEvent-compatible lifecycle/error rows.
+// Return: Conventional process exit code; nonzero values distinguish argument,
+// output, device-open, and runtime failures.
+int RunCollector(int argc, wchar_t* argv[]) {
+    Options options;
+    std::wstring parseError;
+    if (!ParseArguments(argc, argv, &options, &parseError)) {
+        PrintUsage(argc > 0 ? argv[0] : L"KSword.Sandbox.R0Collector.exe");
+        SandboxEventFields parseEvent;
+        parseEvent.eventType = "r0collector.argumentError";
+        parseEvent.path = L"";
+        parseEvent.dataJson = BuildErrorData(parseError, ERROR_INVALID_PARAMETER, L"Run with --help for supported options.");
+        EmitFallbackEventToStderr(parseEvent);
+        return kExitInvalidArguments;
+    }
+
+    if (options.showHelp) {
+        PrintUsage(argc > 0 ? argv[0] : L"KSword.Sandbox.R0Collector.exe");
+        return kExitSuccess;
+    }
+
+    EventWriter writer;
+    std::wstring outputError;
+    if (!writer.Open(options.outputPath, &outputError)) {
+        SandboxEventFields outputEvent;
+        outputEvent.eventType = "r0collector.outputUnavailable";
+        outputEvent.path = options.outputPath;
+        outputEvent.dataJson = BuildErrorData(outputError, ERROR_OPEN_FAILED, L"Create the parent directory or use --output -.");
+        EmitFallbackEventToStderr(outputEvent);
+        return kExitOutputUnavailable;
+    }
+
+    SandboxEventFields startedEvent;
+    startedEvent.eventType = "r0collector.started";
+    startedEvent.path = options.devicePath;
+    startedEvent.dataJson = BuildConfigData(options);
+    if (!EmitEvent(writer, startedEvent)) {
+        return kExitRuntimeFailure;
+    }
+
+    if (!EmitCollectorHeartbeat(writer, options, "collectorStarted", 0, 0, 0)) {
+        return kExitRuntimeFailure;
+    }
+
+    if (options.mockMode) {
+        const int mockExitCode = RunSyntheticMode(options, writer);
+        if (mockExitCode != kExitSuccess) {
+            return mockExitCode;
+        }
+
+        if (!EmitCollectorHeartbeat(writer, options, "syntheticComplete", 0, 0, 0)) {
+            return kExitRuntimeFailure;
+        }
+
+        SandboxEventFields stoppedEvent;
+        stoppedEvent.eventType = "r0collector.stopped";
+        stoppedEvent.path = options.devicePath;
+        JsonDataObjectBuilder stoppedData;
+        stoppedData.AddUtf8("reason", "mockComplete");
+        stoppedData.AddBool("ioctlIssued", false);
+        stoppedData.AddBool("heartbeat", options.heartbeat);
+        stoppedEvent.dataJson = stoppedData.Build();
+        return EmitEvent(writer, stoppedEvent) ? kExitSuccess : kExitRuntimeFailure;
+    }
+
+    DWORD openError = ERROR_SUCCESS;
+    UniqueHandle device = OpenDriverDevice(options.devicePath, &openError);
+    if (!device.IsValid()) {
+        const std::wstring message = L"Unable to open driver device " + options.devicePath + L": " + Win32ErrorMessage(openError);
+        SandboxEventFields deviceEvent;
+        deviceEvent.eventType = "r0collector.deviceUnavailable";
+        deviceEvent.path = options.devicePath;
+        deviceEvent.dataJson = BuildErrorData(
+            message,
+            openError,
+            L"Install/start the KSword driver, verify the symbolic link, or run with --mock/--synthetic/--self-test for plumbing tests.");
+        EmitEvent(writer, deviceEvent);
+        return kExitDeviceUnavailable;
+    }
+
+    SandboxEventFields openedEvent;
+    openedEvent.eventType = "r0collector.deviceOpened";
+    openedEvent.path = options.devicePath;
+    JsonDataObjectBuilder openedData;
+    openedData.AddWide("devicePath", options.devicePath);
+    openedData.AddBool("ioctlIssued", false);
+    openedData.AddBool("enableMaskSpecified", options.enableMaskSpecified);
+    openedData.AddUnsigned("enableMask", options.enableMask);
+    openedData.AddUtf8("enableMaskHex", HexUnsignedLongLong(options.enableMask, 8));
+    openedData.AddUtf8("ioctlProtocol", "KSwordSandboxDriverIoctl.h");
+    openedEvent.dataJson = openedData.Build();
+    if (!EmitEvent(writer, openedEvent)) {
+        return kExitRuntimeFailure;
+    }
+
+    return RunDriverIoctlLoop(device, options, writer);
+}
+
+} // namespace KSword::Sandbox::R0Collector

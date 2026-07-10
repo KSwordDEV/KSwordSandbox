@@ -71,6 +71,16 @@ internal sealed class ScreenshotProbe : IGuestProbe
             evt.Data["exceptionType"] = result.ExceptionType;
         }
 
+        if (!string.IsNullOrWhiteSpace(result.DiagnosticStage))
+        {
+            evt.Data["diagnosticStage"] = result.DiagnosticStage;
+        }
+
+        if (result.Win32Error is not null)
+        {
+            evt.Data["win32Error"] = result.Win32Error.Value.ToString(CultureInfo.InvariantCulture);
+        }
+
         if (result.WidthPixels is not null)
         {
             evt.Data["widthPixels"] = result.WidthPixels.Value.ToString(CultureInfo.InvariantCulture);
@@ -143,7 +153,9 @@ internal sealed class WindowsDesktopScreenshotCapture : IScreenshotCapture
 
         if (!OperatingSystem.IsWindows())
         {
-            return Task.FromResult(ScreenshotCaptureResult.Skipped("Screenshot capture is only implemented on Windows."));
+            return Task.FromResult(ScreenshotCaptureResult.Skipped(
+                "Screenshot capture is only implemented on Windows.",
+                diagnosticStage: "platform-check"));
         }
 
         try
@@ -155,9 +167,20 @@ internal sealed class WindowsDesktopScreenshotCapture : IScreenshotCapture
             var (width, height) = CaptureDesktopToBmp(path, cancellationToken);
             return Task.FromResult(ScreenshotCaptureResult.Success(path, width, height));
         }
+        catch (ScreenshotCaptureException ex)
+        {
+            return Task.FromResult(ScreenshotCaptureResult.Skipped(
+                ex.Message,
+                ex.GetType().FullName ?? ex.GetType().Name,
+                ex.Stage,
+                ex.Win32Error));
+        }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ExternalException or InvalidOperationException)
         {
-            return Task.FromResult(ScreenshotCaptureResult.Skipped(ex.Message, ex.GetType().FullName ?? ex.GetType().Name));
+            return Task.FromResult(ScreenshotCaptureResult.Skipped(
+                ex.Message,
+                ex.GetType().FullName ?? ex.GetType().Name,
+                diagnosticStage: "capture"));
         }
     }
 
@@ -182,13 +205,15 @@ internal sealed class WindowsDesktopScreenshotCapture : IScreenshotCapture
 
         if (width <= 0 || height <= 0)
         {
-            throw new InvalidOperationException("No visible desktop surface is available for screenshot capture.");
+            throw ScreenshotCaptureException.ForLastPInvokeError(
+                "GetSystemMetrics",
+                "No visible desktop surface is available for screenshot capture.");
         }
 
         var screenDc = GetDC(IntPtr.Zero);
         if (screenDc == IntPtr.Zero)
         {
-            throw new InvalidOperationException("GetDC returned null for the desktop.");
+            throw ScreenshotCaptureException.ForLastPInvokeError("GetDC", "GetDC returned null for the desktop.");
         }
 
         var memoryDc = IntPtr.Zero;
@@ -200,24 +225,24 @@ internal sealed class WindowsDesktopScreenshotCapture : IScreenshotCapture
             memoryDc = CreateCompatibleDC(screenDc);
             if (memoryDc == IntPtr.Zero)
             {
-                throw new InvalidOperationException("CreateCompatibleDC failed.");
+                throw ScreenshotCaptureException.ForLastPInvokeError("CreateCompatibleDC", "CreateCompatibleDC failed.");
             }
 
             bitmap = CreateCompatibleBitmap(screenDc, width, height);
             if (bitmap == IntPtr.Zero)
             {
-                throw new InvalidOperationException("CreateCompatibleBitmap failed.");
+                throw ScreenshotCaptureException.ForLastPInvokeError("CreateCompatibleBitmap", "CreateCompatibleBitmap failed.");
             }
 
             previousObject = SelectObject(memoryDc, bitmap);
             if (previousObject == IntPtr.Zero)
             {
-                throw new InvalidOperationException("SelectObject failed for screenshot bitmap.");
+                throw ScreenshotCaptureException.ForLastPInvokeError("SelectObject", "SelectObject failed for screenshot bitmap.");
             }
 
             if (!BitBlt(memoryDc, 0, 0, width, height, screenDc, x, y, SrcCopy))
             {
-                throw new InvalidOperationException("BitBlt failed while capturing the desktop.");
+                throw ScreenshotCaptureException.ForLastPInvokeError("BitBlt", "BitBlt failed while capturing the desktop.");
             }
 
             cancellationToken.ThrowIfCancellationRequested();
@@ -270,7 +295,7 @@ internal sealed class WindowsDesktopScreenshotCapture : IScreenshotCapture
         var scanLines = GetDIBits(deviceContext, bitmap, 0, (uint)height, pixels, ref info, DibRgbColors);
         if (scanLines == 0)
         {
-            throw new InvalidOperationException("GetDIBits failed while reading screenshot pixels.");
+            throw ScreenshotCaptureException.ForLastPInvokeError("GetDIBits", "GetDIBits failed while reading screenshot pixels.");
         }
 
         using var stream = File.Create(path);
@@ -297,34 +322,34 @@ internal sealed class WindowsDesktopScreenshotCapture : IScreenshotCapture
         writer.Write(pixels);
     }
 
-    [DllImport("user32.dll")]
+    [DllImport("user32.dll", SetLastError = true)]
     private static extern int GetSystemMetrics(int nIndex);
 
-    [DllImport("user32.dll")]
+    [DllImport("user32.dll", SetLastError = true)]
     private static extern IntPtr GetDC(IntPtr hWnd);
 
-    [DllImport("user32.dll")]
+    [DllImport("user32.dll", SetLastError = true)]
     private static extern int ReleaseDC(IntPtr hWnd, IntPtr hDc);
 
-    [DllImport("gdi32.dll")]
+    [DllImport("gdi32.dll", SetLastError = true)]
     private static extern IntPtr CreateCompatibleDC(IntPtr hDc);
 
-    [DllImport("gdi32.dll")]
+    [DllImport("gdi32.dll", SetLastError = true)]
     private static extern bool DeleteDC(IntPtr hDc);
 
-    [DllImport("gdi32.dll")]
+    [DllImport("gdi32.dll", SetLastError = true)]
     private static extern IntPtr CreateCompatibleBitmap(IntPtr hDc, int cx, int cy);
 
-    [DllImport("gdi32.dll")]
+    [DllImport("gdi32.dll", SetLastError = true)]
     private static extern IntPtr SelectObject(IntPtr hDc, IntPtr hObject);
 
-    [DllImport("gdi32.dll")]
+    [DllImport("gdi32.dll", SetLastError = true)]
     private static extern bool DeleteObject(IntPtr hObject);
 
-    [DllImport("gdi32.dll")]
+    [DllImport("gdi32.dll", SetLastError = true)]
     private static extern bool BitBlt(IntPtr hdcDest, int xDest, int yDest, int width, int height, IntPtr hdcSrc, int xSrc, int ySrc, uint rop);
 
-    [DllImport("gdi32.dll")]
+    [DllImport("gdi32.dll", SetLastError = true)]
     private static extern int GetDIBits(IntPtr hdc, IntPtr hbm, uint start, uint cLines, byte[] lpvBits, ref BitmapInfoHeader lpbmi, int usage);
 
     [StructLayout(LayoutKind.Sequential)]
@@ -345,6 +370,36 @@ internal sealed class WindowsDesktopScreenshotCapture : IScreenshotCapture
 }
 
 /// <summary>
+/// Carries screenshot capture failure diagnostics from the platform-specific
+/// implementation. Inputs are a capture stage, message, and Win32 error code;
+/// processing is immutable exception storage; records are converted into
+/// screenshot.skipped event Data.
+/// </summary>
+internal sealed class ScreenshotCaptureException : InvalidOperationException
+{
+    public ScreenshotCaptureException(string stage, string message, int win32Error)
+        : base(message)
+    {
+        Stage = stage;
+        Win32Error = win32Error;
+    }
+
+    public string Stage { get; }
+
+    public int Win32Error { get; }
+
+    /// <summary>
+    /// Creates a screenshot exception using the last P/Invoke error code.
+    /// Inputs are capture stage and message; processing reads the thread-local
+    /// P/Invoke error; the method returns a ScreenshotCaptureException.
+    /// </summary>
+    public static ScreenshotCaptureException ForLastPInvokeError(string stage, string message)
+    {
+        return new ScreenshotCaptureException(stage, message, Marshal.GetLastPInvokeError());
+    }
+}
+
+/// <summary>
 /// Describes the result of one screenshot attempt.
 /// Inputs are capture outcome details; processing is immutable storage; records
 /// are returned by IScreenshotCapture and converted into SandboxEvent data.
@@ -354,6 +409,8 @@ internal sealed record ScreenshotCaptureResult(
     string? Path,
     string? Reason,
     string? ExceptionType,
+    string? DiagnosticStage,
+    int? Win32Error,
     int? WidthPixels,
     int? HeightPixels)
 {
@@ -364,16 +421,21 @@ internal sealed record ScreenshotCaptureResult(
     /// </summary>
     public static ScreenshotCaptureResult Success(string path, int widthPixels, int heightPixels)
     {
-        return new ScreenshotCaptureResult(true, path, null, null, widthPixels, heightPixels);
+        return new ScreenshotCaptureResult(true, path, null, null, null, null, widthPixels, heightPixels);
     }
 
     /// <summary>
     /// Creates a skipped screenshot result.
-    /// Inputs are skip reason and optional exception type; processing stores
-    /// diagnostic metadata; the method returns a ScreenshotCaptureResult.
+    /// Inputs are skip reason, optional exception type, diagnostic stage, and
+    /// Win32 error; processing stores diagnostic metadata; the method returns a
+    /// ScreenshotCaptureResult.
     /// </summary>
-    public static ScreenshotCaptureResult Skipped(string reason, string? exceptionType = null)
+    public static ScreenshotCaptureResult Skipped(
+        string reason,
+        string? exceptionType = null,
+        string? diagnosticStage = null,
+        int? win32Error = null)
     {
-        return new ScreenshotCaptureResult(false, null, reason, exceptionType, null, null);
+        return new ScreenshotCaptureResult(false, null, reason, exceptionType, diagnosticStage, win32Error, null, null);
     }
 }

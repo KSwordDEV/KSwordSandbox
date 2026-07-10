@@ -1,5 +1,5 @@
 {
-  "version": "2026-07-10-v2",
+  "version": "2026-07-10-v3-static-mitre-expansion",
   "rules": [
     {
       "id": "host-submission",
@@ -566,6 +566,618 @@
         "static",
         "exports",
         "service"
+      ]
+    },
+    {
+      "id": "service-registry-persistence",
+      "title": "Windows service persistence registry path",
+      "severity": "high",
+      "summary": "A registry event targeted a Windows service configuration path, which can indicate service-based persistence or privilege escalation setup.",
+      "mitreTechniqueId": "T1543.003",
+      "mitreTechniqueName": "Windows Service",
+      "eventTypes": [
+        "registry.set",
+        "registry.create",
+        "driver.registry"
+      ],
+      "containsPath": [
+        "CurrentControlSet\\Services\\",
+        "\\Services\\"
+      ],
+      "tags": [
+        "registry",
+        "persistence",
+        "service"
+      ]
+    },
+    {
+      "id": "scheduled-task-persistence",
+      "title": "Scheduled task persistence command",
+      "severity": "high",
+      "summary": "A process command line referenced scheduled-task creation or registration primitives.",
+      "mitreTechniqueId": "T1053.005",
+      "mitreTechniqueName": "Scheduled Task",
+      "eventTypes": [
+        "process.start"
+      ],
+      "containsCommandLine": [
+        "schtasks /create",
+        "Register-ScheduledTask",
+        "New-ScheduledTask",
+        "Schedule.Service"
+      ],
+      "tags": [
+        "execution",
+        "persistence",
+        "scheduled-task"
+      ]
+    },
+    {
+      "id": "startup-folder-persistence",
+      "title": "Startup folder persistence path",
+      "severity": "high",
+      "summary": "A file creation or modification event targeted a Windows Startup folder path.",
+      "mitreTechniqueId": "T1547.001",
+      "mitreTechniqueName": "Registry Run Keys / Startup Folder",
+      "eventTypes": [
+        "file.created",
+        "file.modified",
+        "driver.file"
+      ],
+      "containsPath": [
+        "Start Menu\\Programs\\Startup",
+        "\\Startup\\"
+      ],
+      "tags": [
+        "filesystem",
+        "persistence",
+        "startup-folder"
+      ]
+    },
+    {
+      "id": "temp-executable-drop",
+      "title": "Temp/AppData or executable file drop",
+      "severity": "medium",
+      "summary": "A file write targeted Temp/AppData or used an executable, library, driver, or script extension; the current rule schema treats path fragments as OR conditions.",
+      "mitreTechniqueId": "T1105",
+      "mitreTechniqueName": "Ingress Tool Transfer",
+      "eventTypes": [
+        "file.created",
+        "file.modified",
+        "driver.file"
+      ],
+      "containsPath": [
+        "\\Temp\\",
+        "\\AppData\\",
+        "%TEMP%",
+        "%APPDATA%",
+        ".exe",
+        ".dll",
+        ".sys",
+        ".ps1",
+        ".vbs",
+        ".hta",
+        ".bat",
+        ".cmd"
+      ],
+      "tags": [
+        "filesystem",
+        "executable-drop",
+        "temp-drop"
+      ]
+    },
+    {
+      "id": "script-file-executed",
+      "title": "Script file execution command",
+      "severity": "medium",
+      "summary": "A process command line referenced a script-like file extension.",
+      "mitreTechniqueId": "T1059",
+      "mitreTechniqueName": "Command and Scripting Interpreter",
+      "eventTypes": [
+        "process.start"
+      ],
+      "containsCommandLine": [
+        ".ps1",
+        ".vbs",
+        ".vbe",
+        ".js",
+        ".jse",
+        ".hta",
+        ".wsf",
+        ".bat",
+        ".cmd"
+      ],
+      "tags": [
+        "execution",
+        "script"
+      ]
+    },
+    {
+      "id": "http-network-activity",
+      "title": "HTTP or HTTPS activity observed",
+      "severity": "medium",
+      "summary": "A normalized HTTP request event was observed during execution.",
+      "mitreTechniqueId": "T1071.001",
+      "mitreTechniqueName": "Web Protocols",
+      "eventTypes": [
+        "http.request",
+        "network.http"
+      ],
+      "tags": [
+        "network",
+        "http"
+      ]
+    },
+    {
+      "id": "dns-query-observed",
+      "title": "DNS query observed",
+      "severity": "medium",
+      "summary": "A normalized DNS query event was observed during execution.",
+      "mitreTechniqueId": "T1071.004",
+      "mitreTechniqueName": "DNS",
+      "eventTypes": [
+        "dns.query",
+        "network.dns"
+      ],
+      "tags": [
+        "network",
+        "dns"
+      ]
+    },
+    {
+      "id": "remote-thread-injection-observed",
+      "title": "Remote thread or cross-process injection event",
+      "severity": "high",
+      "summary": "A normalized process/thread event indicated remote thread creation or cross-process injection-style activity.",
+      "mitreTechniqueId": "T1055",
+      "mitreTechniqueName": "Process Injection",
+      "eventTypes": [
+        "process.remote_thread",
+        "thread.remote",
+        "driver.thread"
+      ],
+      "dataContains": {
+        "operation": [
+          "remote_thread",
+          "CreateRemoteThread",
+          "NtCreateThreadEx",
+          "QueueUserAPC"
+        ]
+      },
+      "tags": [
+        "process",
+        "injection"
+      ]
+    },
+    {
+      "id": "anti-analysis-debugger-check",
+      "title": "Debugger or sandbox check observed",
+      "severity": "medium",
+      "summary": "A normalized anti-analysis event reported a debugger, sandbox, or timing check.",
+      "mitreTechniqueId": "T1622",
+      "mitreTechniqueName": "Debugger Evasion",
+      "eventTypes": [
+        "antiAnalysis.debuggerCheck",
+        "antiAnalysis.sandboxCheck",
+        "debugger.detected",
+        "sandbox.detected"
+      ],
+      "tags": [
+        "anti-analysis"
+      ]
+    },
+    {
+      "id": "static-pe-resources-present",
+      "title": "PE resource directory present",
+      "severity": "info",
+      "summary": "Static analysis parsed a PE resource directory; resource type and payload hints may appear in static evidence.",
+      "eventTypes": [
+        "static.analysis.completed"
+      ],
+      "dataContains": {
+        "tags": [
+          "resources_present"
+        ]
+      },
+      "tags": [
+        "static",
+        "pe",
+        "resources"
+      ]
+    },
+    {
+      "id": "static-resource-payload-candidate",
+      "title": "Resource payload candidate",
+      "severity": "medium",
+      "summary": "Static analysis found RCDATA, HTML, named, unknown, large, or embedded resource data that may carry a staged payload.",
+      "mitreTechniqueId": "T1027.009",
+      "mitreTechniqueName": "Embedded Payloads",
+      "eventTypes": [
+        "static.analysis.completed"
+      ],
+      "dataContains": {
+        "tags": [
+          "resource_payload_candidate",
+          "resource_large_data",
+          "resource_type_rcdata",
+          "resource_type_html"
+        ]
+      },
+      "tags": [
+        "static",
+        "resources",
+        "payload"
+      ]
+    },
+    {
+      "id": "static-resource-embedded-pe",
+      "title": "Embedded PE in resources",
+      "severity": "high",
+      "summary": "Static analysis found MZ/PE-like bytes inside a PE resource data entry.",
+      "mitreTechniqueId": "T1027.009",
+      "mitreTechniqueName": "Embedded Payloads",
+      "eventTypes": [
+        "static.analysis.completed"
+      ],
+      "dataContains": {
+        "tags": [
+          "resource_embedded_pe"
+        ]
+      },
+      "tags": [
+        "static",
+        "resources",
+        "embedded-pe"
+      ]
+    },
+    {
+      "id": "static-resource-high-entropy",
+      "title": "High-entropy resource data",
+      "severity": "medium",
+      "summary": "Static analysis found high-entropy resource data, which can indicate compressed or encrypted embedded content.",
+      "mitreTechniqueId": "T1027",
+      "mitreTechniqueName": "Obfuscated Files or Information",
+      "eventTypes": [
+        "static.analysis.completed"
+      ],
+      "dataContains": {
+        "tags": [
+          "resource_high_entropy_data"
+        ]
+      },
+      "tags": [
+        "static",
+        "resources",
+        "entropy"
+      ]
+    },
+    {
+      "id": "static-section-writable-executable",
+      "title": "Writable executable or abnormal section",
+      "severity": "medium",
+      "summary": "Static analysis found a writable executable section or an abnormal section layout.",
+      "mitreTechniqueId": "T1027",
+      "mitreTechniqueName": "Obfuscated Files or Information",
+      "eventTypes": [
+        "static.analysis.completed"
+      ],
+      "dataContains": {
+        "tags": [
+          "writable_executable_section",
+          "very_high_entropy_section",
+          "oversized_virtual_section",
+          "low_entropy_section"
+        ]
+      },
+      "tags": [
+        "static",
+        "pe",
+        "sections"
+      ]
+    },
+    {
+      "id": "static-import-dynamic-code",
+      "title": "Dynamic code loading or memory protection APIs",
+      "severity": "medium",
+      "summary": "Static analysis found imports or API-like strings used for dynamic code loading, memory mapping, or memory protection changes.",
+      "mitreTechniqueId": "T1620",
+      "mitreTechniqueName": "Reflective Code Loading",
+      "eventTypes": [
+        "static.analysis.completed"
+      ],
+      "dataContains": {
+        "tags": [
+          "import_dynamic_code_api"
+        ]
+      },
+      "tags": [
+        "static",
+        "imports",
+        "dynamic-code"
+      ]
+    },
+    {
+      "id": "static-import-script-execution",
+      "title": "Script or process execution API imports",
+      "severity": "medium",
+      "summary": "Static analysis found imports commonly used to launch command interpreters, scripts, or child processes.",
+      "mitreTechniqueId": "T1059",
+      "mitreTechniqueName": "Command and Scripting Interpreter",
+      "eventTypes": [
+        "static.analysis.completed"
+      ],
+      "dataContains": {
+        "tags": [
+          "import_script_execution_api",
+          "import_shell_execution_library"
+        ]
+      },
+      "tags": [
+        "static",
+        "imports",
+        "script-execution"
+      ]
+    },
+    {
+      "id": "static-import-file-drop",
+      "title": "File creation or dropper API imports",
+      "severity": "medium",
+      "summary": "Static analysis found imports commonly used to create, copy, move, delete, or write files.",
+      "mitreTechniqueId": "T1106",
+      "mitreTechniqueName": "Native API",
+      "eventTypes": [
+        "static.analysis.completed"
+      ],
+      "dataContains": {
+        "tags": [
+          "import_file_drop_api"
+        ]
+      },
+      "tags": [
+        "static",
+        "imports",
+        "file-drop"
+      ]
+    },
+    {
+      "id": "static-import-resource-api",
+      "title": "Resource extraction API imports",
+      "severity": "medium",
+      "summary": "Static analysis found imports commonly used to find, load, lock, or size PE resources before extracting embedded content.",
+      "mitreTechniqueId": "T1027.009",
+      "mitreTechniqueName": "Embedded Payloads",
+      "eventTypes": [
+        "static.analysis.completed"
+      ],
+      "dataContains": {
+        "tags": [
+          "import_resource_api"
+        ]
+      },
+      "tags": [
+        "static",
+        "imports",
+        "resources"
+      ]
+    },
+    {
+      "id": "static-import-registry-persistence",
+      "title": "Registry persistence API imports",
+      "severity": "medium",
+      "summary": "Static analysis found registry APIs that can support autostart or configuration persistence.",
+      "mitreTechniqueId": "T1112",
+      "mitreTechniqueName": "Modify Registry",
+      "eventTypes": [
+        "static.analysis.completed"
+      ],
+      "dataContains": {
+        "tags": [
+          "import_registry_persistence_api"
+        ]
+      },
+      "tags": [
+        "static",
+        "imports",
+        "registry"
+      ]
+    },
+    {
+      "id": "static-import-service-persistence",
+      "title": "Service-control persistence API imports",
+      "severity": "medium",
+      "summary": "Static analysis found service-control APIs that can create or alter Windows services.",
+      "mitreTechniqueId": "T1543.003",
+      "mitreTechniqueName": "Windows Service",
+      "eventTypes": [
+        "static.analysis.completed"
+      ],
+      "dataContains": {
+        "tags": [
+          "import_service_persistence_api"
+        ]
+      },
+      "tags": [
+        "static",
+        "imports",
+        "service"
+      ]
+    },
+    {
+      "id": "static-ip-address",
+      "title": "Embedded IP address indicator",
+      "severity": "low",
+      "summary": "Static analysis extracted an IPv4 literal from sample strings.",
+      "mitreTechniqueId": "T1105",
+      "mitreTechniqueName": "Ingress Tool Transfer",
+      "eventTypes": [
+        "static.analysis.completed"
+      ],
+      "dataContains": {
+        "tags": [
+          "ip_address",
+          "public_ip_address"
+        ]
+      },
+      "tags": [
+        "static",
+        "network",
+        "indicator"
+      ]
+    },
+    {
+      "id": "static-windows-path-string",
+      "title": "Embedded Windows path string",
+      "severity": "low",
+      "summary": "Static analysis extracted Windows filesystem path strings that may help triage dropped files or staging locations.",
+      "eventTypes": [
+        "static.analysis.completed"
+      ],
+      "dataContains": {
+        "tags": [
+          "windows_path_string",
+          "file_path_string",
+          "temp_path_string",
+          "appdata_path_string",
+          "executable_path_string",
+          "script_path_string"
+        ]
+      },
+      "tags": [
+        "static",
+        "strings",
+        "path"
+      ]
+    },
+    {
+      "id": "static-registry-path-string",
+      "title": "Embedded registry path string",
+      "severity": "medium",
+      "summary": "Static analysis extracted registry path strings, including service or Run-key paths when present.",
+      "mitreTechniqueId": "T1112",
+      "mitreTechniqueName": "Modify Registry",
+      "eventTypes": [
+        "static.analysis.completed"
+      ],
+      "dataContains": {
+        "tags": [
+          "registry_path_string",
+          "service_registry_path_string"
+        ]
+      },
+      "tags": [
+        "static",
+        "strings",
+        "registry"
+      ]
+    },
+    {
+      "id": "static-persistence-string",
+      "title": "Embedded persistence path or command string",
+      "severity": "medium",
+      "summary": "Static analysis extracted Run-key, Startup-folder, service, or similar persistence-oriented strings.",
+      "mitreTechniqueId": "T1547.001",
+      "mitreTechniqueName": "Registry Run Keys / Startup Folder",
+      "eventTypes": [
+        "static.analysis.completed"
+      ],
+      "dataContains": {
+        "tags": [
+          "persistence_string",
+          "run_key_path_string",
+          "startup_folder_path_string"
+        ]
+      },
+      "tags": [
+        "static",
+        "strings",
+        "persistence"
+      ]
+    },
+    {
+      "id": "static-script-command-string",
+      "title": "Embedded script or interpreter command string",
+      "severity": "medium",
+      "summary": "Static analysis extracted strings referencing scripting interpreters or common command execution utilities.",
+      "mitreTechniqueId": "T1059",
+      "mitreTechniqueName": "Command and Scripting Interpreter",
+      "eventTypes": [
+        "static.analysis.completed"
+      ],
+      "dataContains": {
+        "tags": [
+          "script_execution_string",
+          "powershell_string"
+        ]
+      },
+      "tags": [
+        "static",
+        "strings",
+        "script"
+      ]
+    },
+    {
+      "id": "static-encoded-command-string",
+      "title": "Encoded PowerShell or script command string",
+      "severity": "medium",
+      "summary": "Static analysis extracted encoded-command or base64 execution markers in command strings.",
+      "mitreTechniqueId": "T1059.001",
+      "mitreTechniqueName": "PowerShell",
+      "eventTypes": [
+        "static.analysis.completed"
+      ],
+      "dataContains": {
+        "tags": [
+          "encoded_command_string"
+        ]
+      },
+      "tags": [
+        "static",
+        "strings",
+        "powershell"
+      ]
+    },
+    {
+      "id": "static-lolbin-string",
+      "title": "Living-off-the-land binary string",
+      "severity": "medium",
+      "summary": "Static analysis extracted strings referencing signed Windows utilities often used for proxy execution or download helpers.",
+      "mitreTechniqueId": "T1218",
+      "mitreTechniqueName": "System Binary Proxy Execution",
+      "eventTypes": [
+        "static.analysis.completed"
+      ],
+      "dataContains": {
+        "tags": [
+          "lolbin_string"
+        ]
+      },
+      "tags": [
+        "static",
+        "strings",
+        "lolbin"
+      ]
+    },
+    {
+      "id": "static-anti-sandbox-string",
+      "title": "Anti-sandbox or debugger string",
+      "severity": "medium",
+      "summary": "Static analysis extracted debugger, sandbox, VM, or analysis-tool strings.",
+      "mitreTechniqueId": "T1497",
+      "mitreTechniqueName": "Virtualization/Sandbox Evasion",
+      "eventTypes": [
+        "static.analysis.completed"
+      ],
+      "dataContains": {
+        "tags": [
+          "anti_analysis_string",
+          "sandbox_evasion_string",
+          "debugger_evasion_string"
+        ]
+      },
+      "tags": [
+        "static",
+        "strings",
+        "anti-analysis"
       ]
     }
   ]

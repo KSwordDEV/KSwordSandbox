@@ -20,5 +20,6 @@ public enum ArtifactKind
     StaticAnalysisJson,
     Screenshot,
     Log,
-    Bundle
+    Bundle,
+    ArtifactIndex
 }

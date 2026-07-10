@@ -11,8 +11,25 @@ Current status:
   in a one-shot or timed polling loop.
 - Converts driver event records into `SandboxEvent` JSON Lines for the Guest
   Agent and Host import path.
-- Keeps `--mock` mode for CI/local plumbing when the unsigned/test-signed driver
-  is not installed.
+- Keeps synthetic self-test mode (`--mock`, `--synthetic`, or `--self-test`) for
+  CI/local plumbing when the unsigned/test-signed driver is not installed.
+- Emits optional collector progress rows with `--heartbeat`.
+
+## Source layout
+
+`guest/KSword.Sandbox.R0Collector/src` is split by runtime responsibility:
+
+- `main.cpp`: minimal `wmain` entry point.
+- `Options.*`: command-line parsing and usage text.
+- `JsonWriter.*`: UTF-8 conversion, JSON escaping, `SandboxEvent` JSONL writer,
+  and fallback stderr output.
+- `EventParser.*`: public driver ABI decoding and typed payload JSON mapping.
+- `IoctlClient.*`: device open, `DeviceIoControl` wrappers, health/poll/drain
+  calls, and protocol error rows.
+- `SyntheticMode.*`: deterministic synthetic driver-category rows for local
+  plumbing tests.
+- `RuntimeLoop.*`: lifecycle orchestration, heartbeat rows, timed polling loop,
+  and exit-code mapping.
 
 ## Driver IOCTL contract
 
@@ -81,7 +98,9 @@ KSword.Sandbox.R0Collector.exe `
   --device \\.\KSwordSandboxDriver `
   --output C:\Sandbox\driver-events.jsonl `
   --duration 10 `
-  --poll-interval-ms 500
+  --poll-ms 500 `
+  --enable-mask 0xffffffff `
+  --heartbeat
 ```
 
 Supported options:
@@ -92,12 +111,30 @@ Supported options:
   health, poll, and read-events.
 - `--poll-ms`, `--poll-interval`, `--poll-interval-ms`, `-p`: poll interval in
   milliseconds.
+- `--enable-mask <mask>`: pass an unsigned 32-bit decimal or `0x` hexadecimal
+  mask in the `KSWORD_SANDBOX_READ_EVENTS_REQUEST.Flags` field. Current drivers
+  may ignore the field, but the collector records it in `r0collector.started`
+  and `r0collector.deviceOpened` data for reproducibility.
+- `--heartbeat`: emit `r0collector.heartbeat` lifecycle rows after startup, at
+  each completed poll/read-events iteration, and at synthetic completion.
 - `--mock`: emit synthetic process/file/registry-style rows and do not open the
   driver device.
+- `--synthetic`: alias for `--mock`.
+- `--self-test`: alias for `--mock`; intended for quick operator checks.
 
 Device-unavailable behavior is explicit: the collector writes
 `r0collector.deviceUnavailable` to the selected JSONL sink and exits with code
 `66`.
+
+Quick self-test without a driver:
+
+```powershell
+KSword.Sandbox.R0Collector.exe `
+  --self-test `
+  --heartbeat `
+  --enable-mask 0x3 `
+  --output -
+```
 
 ## VM readiness and one-shot drain
 
@@ -153,6 +190,9 @@ Top-level field rules:
 - `commandLine`: collector invocation until process payloads add richer command
   lines.
 - `data`: string-valued metadata compatible with the current host model.
+
+The detailed JSONL contract is documented in
+[`docs/r0-jsonl-schema.md`](r0-jsonl-schema.md).
 
 ## Guest Agent integration
 

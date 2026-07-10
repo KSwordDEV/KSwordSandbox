@@ -6,8 +6,9 @@
  * Initializes registry telemetry callbacks.
  * Inputs : DriverObject identifies this driver for CmRegisterCallbackEx;
  *          DeviceExtension owns the READ_EVENTS ring.
- * Logic  : this boundary isolates registry callback code from DriverEntry.
- * Return : STATUS_NOT_SUPPORTED until callback registration is implemented.
+ * Logic  : registers a Configuration Manager post-operation callback for
+ *          create/open/set/delete/rename telemetry.
+ * Return : STATUS_SUCCESS when active or the registration failure NTSTATUS.
  */
 NTSTATUS
 KswInitializeRegistryMonitor(
@@ -18,7 +19,8 @@ KswInitializeRegistryMonitor(
 /*
  * Stops registry telemetry callbacks.
  * Inputs : none; callback cookie storage is module-local.
- * Logic  : no-op until CmRegisterCallbackEx support lands.
+ * Logic  : disables event emission and unregisters CmRegisterCallbackEx state
+ *          before the control device is deleted.
  * Return : no return value.
  */
 VOID

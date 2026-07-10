@@ -13,10 +13,12 @@ through explicit probe boundaries:
 `Program.cs` owns the CLI and top-level R0 sidecar orchestration. It creates a
 `GuestProbeRunner` and runs these phases:
 
-1. `BeforeStart` - baseline process list, file tree, and TCP connections.
+1. `BeforeStart` - baseline process list, file tree, TCP connections, DNS cache,
+   netstat rows, listeners, services, scheduled tasks, startup items, and
+   environment details.
 2. `AfterStart` - process deltas, process tree, and optional screenshot.
-3. `AfterRun` - final process deltas, file diffs, TCP diffs, and optional
-   screenshot.
+3. `AfterRun` - final process deltas, file diffs, TCP/DNS/netstat/listener
+   diffs, service/task/startup diffs, and optional screenshot.
 
 The CLI remains backward compatible:
 
@@ -44,23 +46,44 @@ optional `RootProcessId`, and the `CaptureScreenshots` flag. New process, image,
 registry, or WFP collectors can use this context without changing the public
 agent CLI.
 
+`GuestProbeRunner` enforces a per-probe timeout and turns probe exceptions into
+`probe.timeout`, `probe.failed`, or `probe.canceled` events. A timed-out or
+faulted collector is isolated from later collectors so live output and final
+artifact writing remain stable even when a Windows helper command hangs or a
+platform API fails.
+
+`Diagnostics.BoundedProcessRunner` is the shared helper for short-lived Windows
+commands. It starts processes without a shell, redirects stdout/stderr, kills
+the process tree on timeout, and returns structured command results instead of
+throwing for expected launch/exit failures.
+
 ## Current probes
 
 - `ProcessTreeProbe` uses Toolhelp process snapshots on Windows to capture
-  parent process IDs without WMI or elevation. It preserves `process.observed`
-  and `process.new`, then adds `process.tree` for the launched sample process
-  and visible descendants.
+  parent process IDs, image names, thread counts, and base priorities without
+  WMI or elevation. It preserves `process.observed` and `process.new`, then adds
+  `process.tree` for the launched sample process and visible descendants. It
+  also emits `environment.detail`, service diffs, scheduled task diffs, and
+  startup item diffs using bounded `sc.exe`, `schtasks.exe`, registry, and
+  Startup-folder collection.
 - `FileDiffProbe` compares file size and UTC last-write time below the sample
   working directory and emits `file.created`, `file.modified`, and
   `file.deleted` with relative-path metadata.
 - `TcpConnectionDiffProbe` compares `IPGlobalProperties.GetActiveTcpConnections`
   before and after execution. New connections keep the legacy `network.tcp`
   event type with `change=opened`; disappeared baseline connections emit
-  `network.tcp.closed` with `change=closed`.
+  `network.tcp.closed` with `change=closed`. The same probe also captures
+  DNS cache entries through `ipconfig /displaydns`, `netstat -ano` rows, and
+  managed TCP/UDP listener snapshots with bounded command timeouts and
+  truncation events for high-volume outputs.
 - `ScreenshotProbe` is opt-in through `--screenshot`. `IScreenshotCapture`
   allows replacement capture implementations; the default
   `WindowsDesktopScreenshotCapture` writes BMP files through User32/GDI32 and
-  emits `screenshot.skipped` instead of failing in headless sessions.
+  emits `screenshot.skipped` instead of failing in headless sessions. Skipped
+  events include the failing capture stage and Win32 error code when available.
+- `ProcessSampleExecutor` records `process.start_failed`,
+  `process.wait_failed`, and `process.kill_failed` diagnostics for execution
+  exceptions while preserving normal cancellation behavior.
 
 ## Smoke strategy
 

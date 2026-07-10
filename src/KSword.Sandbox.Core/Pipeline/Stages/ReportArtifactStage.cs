@@ -1,4 +1,5 @@
 using System.Text.Json;
+using KSword.Sandbox.Core.Artifacts;
 using KSword.Sandbox.Core.Pipeline;
 using KSword.Sandbox.Core.Reporting;
 
@@ -12,6 +13,7 @@ namespace KSword.Sandbox.Core.Pipeline.Stages;
 public sealed class ReportArtifactStage : IAnalysisPipelineStage
 {
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
+    private readonly HostArtifactIndexBuilder artifactIndexBuilder = new();
     private readonly HtmlReportRenderer renderer = new();
 
     public string StageId => "report.artifacts.write";
@@ -29,7 +31,9 @@ public sealed class ReportArtifactStage : IAnalysisPipelineStage
         var jobRoot = Path.Combine(context.Config.Paths.RuntimeRoot, "jobs", context.JobId.ToString("N"));
         Directory.CreateDirectory(jobRoot);
         File.WriteAllText(Path.Combine(jobRoot, "report.json"), JsonSerializer.Serialize(context.Report, JsonOptions));
-        File.WriteAllText(Path.Combine(jobRoot, "report.html"), renderer.Render(context.Report));
+        var currentIndex = artifactIndexBuilder.Build(context.JobId, jobRoot);
+        File.WriteAllText(Path.Combine(jobRoot, "report.html"), renderer.Render(context.Report, currentIndex.Artifacts));
+        artifactIndexBuilder.WriteIndex(context.JobId, jobRoot);
         return Task.CompletedTask;
     }
 }

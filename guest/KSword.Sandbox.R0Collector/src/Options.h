@@ -1,0 +1,24 @@
+#pragma once
+
+#include "Common.h"
+
+#include <string>
+
+namespace KSword::Sandbox::R0Collector {
+
+struct Options {
+    std::wstring devicePath = LR"(\\.\KSwordSandboxDriver)";
+    std::wstring outputPath = L"-";
+    int durationSeconds = 0;
+    int pollIntervalMs = 500;
+    unsigned long enableMask = 0;
+    bool enableMaskSpecified = false;
+    bool mockMode = false;
+    bool heartbeat = false;
+    bool showHelp = false;
+};
+
+bool ParseArguments(int argc, wchar_t* argv[], Options* options, std::wstring* error);
+void PrintUsage(const wchar_t* programName);
+
+} // namespace KSword::Sandbox::R0Collector

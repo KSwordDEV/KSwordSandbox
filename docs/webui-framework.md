@@ -1,9 +1,10 @@
 # Web UI framework staging
 
-This document describes the staged Web project layout added for future
-extraction of the current `Program.cs` endpoint and dashboard logic. The new
-files are intentionally passive: they compile with the Web project, but
-`Program.cs` has not been changed to call them yet.
+This document describes the staged Web project layout used to extract endpoint
+and dashboard logic from `Program.cs`. Most endpoint modules remain passive
+staging, but the root WebUI is now rendered by
+`Dashboard/DashboardExperiencePage.cs` so the operator experience can evolve
+inside the Dashboard layer.
 
 ## Write boundary
 
@@ -29,8 +30,26 @@ was modified by this staging work.
   helpers, and feature-area modules for Dashboard, Health, Files, Jobs, and
   Runbooks.
 - `Dashboard`: server-rendered HTML component primitives, document composition,
-  navigation, status badges, and a standard context-copy script for copyable
-  dashboard values.
+  navigation, status badges, the root experience page, and a standard
+  context-copy script for copyable dashboard values.
+
+## WebUI experience contract
+
+The root dashboard must keep these operator-facing areas visible and copyable:
+
+- clearer one-click entry points for upload-and-plan, host-path planning, and
+  directory scan plus first-candidate planning;
+- explicit job status, job ID, sample path, and guest import status;
+- artifact paths for `report.json`, `report.html`, `events.json`,
+  `driver-events.jsonl`, and `runbook-execution.json`;
+- a live raw telemetry area that shows source files and unclassified raw event
+  rows before final report classification;
+- runbook execution rows with step status, `stdout`, `stderr`, exit code,
+  duration, and command text.
+
+All tables, path values, raw telemetry evidence, runbook command/output blocks,
+and job messages must support either an explicit `Copy` button or right-click
+copy through `data-copy`, `code`, `pre`, `td`, or `th` elements.
 
 ## Migration path
 
@@ -56,6 +75,13 @@ must go through `DashboardHtml.Encode` or `DashboardHtml.Attribute`. When values
 need to be copied from text, badges, cards, or future tables, render them with a
 `data-copy` attribute so the standard context-copy script can handle right-click
 copy behavior consistently.
+
+When JavaScript renders dynamic table rows, each path or evidence cell should
+either call the local copy-button helper or set `data-copy` to the raw value.
+For planned jobs, the UI may derive expected guest paths from the recorded job
+root: `guest\<job-id-n>\events.json` and
+`guest\<job-id-n>\driver-events.jsonl`. These derived paths are display hints;
+the import endpoint still resolves actual files server-side.
 
 ## Verification guidance
 

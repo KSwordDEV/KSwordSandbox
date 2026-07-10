@@ -30,14 +30,15 @@ The host also emits a normalized `static.analysis.completed` event. Its
 `rules/behavior-rules.json` via `dataContains.tags`.
 
 Guest collection writes `events.json` and `agent-summary.json` under the guest
-output directory before the host collects them. Guest dropped-file evidence may
-also be represented by `artifacts/manifest.json`.
+output directory before the host collects them. Driver/R0 telemetry may also be
+present as sibling `driver-events.jsonl`. Guest dropped-file evidence may be
+represented by `artifacts/manifest.json`, and screenshots may be present under
+`screenshots/`.
 
 ## Artifact manifest evidence
 
 Dropped files and other copied evidence use
-`KSword.Sandbox.Abstractions.Artifacts.ArtifactManifest`. The current minimal
-schema is:
+`KSword.Sandbox.Abstractions.Artifacts.ArtifactManifest`. The schema is:
 
 - `schemaVersion`: manifest contract version, currently `1`.
 - `jobId`: host job ID when known; guest-side manifests may leave this empty.
@@ -51,22 +52,31 @@ schema is:
 Each `ArtifactDescriptor` records:
 
 - `kind`: for dropped files, `DroppedFile`; manifest files use
-  `ArtifactManifest`.
+  `ArtifactManifest`; event streams use `GuestEventsJson` or
+  `DriverEventsJsonLines`; screenshots use `Screenshot`.
+- `category`: stable report grouping such as `dropped-file`, `telemetry`,
+  `screenshot`, or `artifact-manifest`.
 - `name`: file name.
 - `relativePath`: path relative to the collected output root, for example
   `artifacts/drop.bin`.
+- `safeLink`: URL-encoded relative link derived from `relativePath`; rooted
+  paths and `..` traversal are not emitted as links.
 - `fullPath`: host-resolved path after collection, or producer-local path before
   host normalization.
-- `sizeBytes`, `sha256`, `createdAtUtc`.
+- `mimeType`, `sizeBytes`, `sha256`, `hashes`, `createdAtUtc`.
 - `metadata`: string fields such as `origin=guest`,
   `evidenceRole=dropped-file`, and `guestFullPath`.
 
 Host-side code can load guest manifests with `GuestArtifactManifestReader`,
 which resolves `relativePath` under the collected guest-output directory and
-preserves original guest absolute paths in metadata. The main report import path
-does not yet merge this manifest into `AnalysisReport`; until that integration
-lands, `events.json` remains the behavior timeline and `artifacts/manifest.json`
-is the evidence-chain sidecar.
+preserves original guest absolute paths in metadata.
+
+The host writes `artifact-index.json` beside `report.json` and `report.html`.
+This `HostArtifactIndex` scans the job root for report files, `events.json`,
+`driver-events.jsonl`, `artifacts/manifest.json`, `screenshots/*`, and dropped
+files under `artifacts/*`. The HTML report has an **Artifact links** section
+that exposes those indexed artifacts with safe relative links when available,
+and falls back to copyable paths from events when a link cannot be trusted.
 
 ## HTML sections
 

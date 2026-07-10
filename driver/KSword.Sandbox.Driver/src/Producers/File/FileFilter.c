@@ -26,17 +26,21 @@ KswFileFilterPostOperation(
     );
 
 /*
- * Minifilter operation table for the first file telemetry slice.
+ * Minifilter operation table for the file telemetry producer.
  *
  * Inputs : consumed by FltRegisterFilter during DriverEntry.
- * Logic  : CREATE, WRITE, and SET_INFORMATION are registered; the callback maps
- *          SET_INFORMATION to Delete only for disposition information classes.
+ * Logic  : CREATE, READ, WRITE, SET_INFORMATION, CLEANUP, and CLOSE are
+ *          registered.  The callback maps SET_INFORMATION to Rename/Delete for
+ *          those information classes and otherwise preserves SetInformation.
  * Return : not applicable; FltMgr reads this static registration table.
  */
 static const FLT_OPERATION_REGISTRATION g_KswFileFilterOperations[] = {
     { IRP_MJ_CREATE, 0, KswFileFilterPreOperation, KswFileFilterPostOperation },
+    { IRP_MJ_READ, 0, KswFileFilterPreOperation, KswFileFilterPostOperation },
     { IRP_MJ_WRITE, 0, KswFileFilterPreOperation, KswFileFilterPostOperation },
     { IRP_MJ_SET_INFORMATION, 0, KswFileFilterPreOperation, KswFileFilterPostOperation },
+    { IRP_MJ_CLEANUP, 0, KswFileFilterPreOperation, KswFileFilterPostOperation },
+    { IRP_MJ_CLOSE, 0, KswFileFilterPreOperation, KswFileFilterPostOperation },
     { IRP_MJ_OPERATION_END }
 };
 
@@ -305,12 +309,154 @@ Exit:
 }
 
 /*
+ * Tests whether a SET_INFORMATION request represents delete intent.
+ *
+ * Inputs : InformationClass is the WDK file-information class from the I/O
+ *          parameter block.
+ * Logic  : disposition classes are normalized to the public Delete operation so
+ *          collectors do not need WDK-specific class values for common file
+ *          removal evidence.
+ * Return : TRUE for delete/disposition classes; FALSE otherwise.
+ */
+static
+BOOLEAN
+KswIsDeleteInformationClass(
+    _In_ FILE_INFORMATION_CLASS InformationClass
+    )
+{
+    return InformationClass == FileDispositionInformation ||
+        InformationClass == FileDispositionInformationEx;
+}
+
+/*
+ * Tests whether a SET_INFORMATION request represents rename intent.
+ *
+ * Inputs : InformationClass is the WDK file-information class from the I/O
+ *          parameter block.
+ * Logic  : rename classes are normalized to the public Rename operation while
+ *          all other metadata changes remain SetInformation events.
+ * Return : TRUE for rename classes; FALSE otherwise.
+ */
+static
+BOOLEAN
+KswIsRenameInformationClass(
+    _In_ FILE_INFORMATION_CLASS InformationClass
+    )
+{
+    return InformationClass == FileRenameInformation ||
+        InformationClass == FileRenameInformationEx;
+}
+
+/*
+ * Performs bounded, case-insensitive substring matching on a UNICODE_STRING.
+ *
+ * Inputs : Value is the bounded string to scan, NeedleText is a NUL-terminated
+ *          UTF-16 substring.
+ * Logic  : compares WCHARs using RtlUpcaseUnicodeChar and never reads beyond
+ *          Value->Length or NeedleText's initialized UNICODE_STRING length.
+ * Return : TRUE when NeedleText is present in Value; FALSE otherwise.
+ */
+static
+BOOLEAN
+KswUnicodeStringContainsInsensitive(
+    _In_opt_ PCUNICODE_STRING Value,
+    _In_z_ PCWSTR NeedleText
+    )
+{
+    UNICODE_STRING needle;
+    ULONG valueChars;
+    ULONG needleChars;
+    ULONG startIndex;
+    ULONG needleIndex;
+
+    if (Value == NULL ||
+        Value->Buffer == NULL ||
+        Value->Length == 0 ||
+        NeedleText == NULL) {
+        return FALSE;
+    }
+
+    RtlInitUnicodeString(&needle, NeedleText);
+    if (needle.Buffer == NULL || needle.Length == 0) {
+        return FALSE;
+    }
+
+    valueChars = Value->Length / (ULONG)sizeof(WCHAR);
+    needleChars = needle.Length / (ULONG)sizeof(WCHAR);
+    if (needleChars == 0 || valueChars < needleChars) {
+        return FALSE;
+    }
+
+    for (startIndex = 0;
+         startIndex <= valueChars - needleChars;
+         ++startIndex) {
+        for (needleIndex = 0;
+             needleIndex < needleChars;
+             ++needleIndex) {
+            if (RtlUpcaseUnicodeChar(Value->Buffer[startIndex + needleIndex]) !=
+                RtlUpcaseUnicodeChar(needle.Buffer[needleIndex])) {
+                break;
+            }
+        }
+
+        if (needleIndex == needleChars) {
+            return TRUE;
+        }
+    }
+
+    return FALSE;
+}
+
+/*
+ * Applies the built-in sandbox self-noise path filter.
+ *
+ * Inputs : FileName is a normalized or fallback subject path.
+ * Logic  : suppresses known KSword infrastructure locations that are produced
+ *          by the guest agent, R0Collector, driver staging, and telemetry output
+ *          while leaving sample paths such as \KSwordSandbox\incoming\*
+ *          observable.
+ * Return : TRUE when the event should not be queued.
+ */
+static
+BOOLEAN
+KswIsSandboxSelfPath(
+    _In_opt_ PCUNICODE_STRING FileName
+    )
+{
+    if (FileName == NULL ||
+        FileName->Buffer == NULL ||
+        FileName->Length == 0) {
+        return FALSE;
+    }
+
+    if (KswUnicodeStringContainsInsensitive(
+            FileName,
+            L"\\KSwordSandbox\\agent\\") ||
+        KswUnicodeStringContainsInsensitive(
+            FileName,
+            L"\\KSwordSandbox\\r0collector\\") ||
+        KswUnicodeStringContainsInsensitive(
+            FileName,
+            L"\\KSwordSandbox\\driver\\") ||
+        KswUnicodeStringContainsInsensitive(
+            FileName,
+            L"\\KSwordSandbox\\out\\") ||
+        KswUnicodeStringContainsInsensitive(
+            FileName,
+            L"\\KSwordSandboxDriver")) {
+        return TRUE;
+    }
+
+    return FALSE;
+}
+
+/*
  * Maps a minifilter callback to the public file operation ABI.
  *
  * Inputs : Data is the FltMgr callback data for one file-system operation.
- * Logic  : CREATE and WRITE map directly; SET_INFORMATION is emitted only when
- *          it represents file disposition, which is the first delete signal the
- *          minimal collector needs.
+ * Logic  : common create/read/write/lifetime operations map directly; selected
+ *          SET_INFORMATION classes are normalized to Rename/Delete and all
+ *          remaining metadata updates are preserved as SetInformation.
  * Return : KSWORD_SANDBOX_FILE_OPERATION value or None for ignored callbacks.
  */
 static
@@ -329,17 +475,28 @@ KswMapFileOperation(
     case IRP_MJ_CREATE:
         return KswSandboxFileOperationCreate;
 
+    case IRP_MJ_READ:
+        return KswSandboxFileOperationRead;
+
     case IRP_MJ_WRITE:
         return KswSandboxFileOperationWrite;
 
     case IRP_MJ_SET_INFORMATION:
         informationClass =
             Data->Iopb->Parameters.SetFileInformation.FileInformationClass;
-        if (informationClass == FileDispositionInformation ||
-            informationClass == FileDispositionInformationEx) {
+        if (KswIsDeleteInformationClass(informationClass)) {
             return KswSandboxFileOperationDelete;
         }
-        return KswSandboxFileOperationNone;
+        if (KswIsRenameInformationClass(informationClass)) {
+            return KswSandboxFileOperationRename;
+        }
+        return KswSandboxFileOperationSetInformation;
+
+    case IRP_MJ_CLEANUP:
+        return KswSandboxFileOperationCleanup;
+
+    case IRP_MJ_CLOSE:
+        return KswSandboxFileOperationClose;
 
     default:
         return KswSandboxFileOperationNone;
@@ -350,16 +507,17 @@ KswMapFileOperation(
  * Copies a bounded UTF-16 file name into a file event payload.
  *
  * Inputs : Payload receives the copied name; FileName is an optional source
- *          UNICODE_STRING from FILE_OBJECT.FileName.
+ *          UNICODE_STRING; SourceFlag identifies normalized vs fallback names.
  * Logic  : copies at most PATH_CHARS - 1 WCHARs, stores a NUL terminator, and
  *          marks truncation when the original path exceeds the fixed payload.
- * Return : no return value.
+ * Return : TRUE when a non-empty bounded path was copied; FALSE otherwise.
  */
 static
-VOID
+BOOLEAN
 KswCopyFilePathToPayload(
     _Inout_ PKSWORD_SANDBOX_FILE_EVENT_PAYLOAD Payload,
-    _In_opt_ PCUNICODE_STRING FileName
+    _In_opt_ PCUNICODE_STRING FileName,
+    _In_ ULONG SourceFlag
     )
 {
     ULONG maxBytes;
@@ -371,7 +529,7 @@ KswCopyFilePathToPayload(
         FileName == NULL ||
         FileName->Buffer == NULL ||
         FileName->Length == 0) {
-        return;
+        return FALSE;
     }
 
     sourceBytes = FileName->Length;
@@ -385,14 +543,171 @@ KswCopyFilePathToPayload(
 
     bytesToCopy -= bytesToCopy % (ULONG)sizeof(WCHAR);
     if (bytesToCopy == 0) {
-        return;
+        return FALSE;
     }
 
     RtlCopyMemory(Payload->Path, FileName->Buffer, bytesToCopy);
     copiedChars = bytesToCopy / (ULONG)sizeof(WCHAR);
     Payload->Path[copiedChars] = L'\0';
     Payload->PathLengthBytes = bytesToCopy;
-    Payload->Flags |= KSWORD_SANDBOX_FILE_EVENT_FLAG_PATH_PRESENT;
+    Payload->Flags |=
+        KSWORD_SANDBOX_FILE_EVENT_FLAG_PATH_PRESENT |
+        SourceFlag;
+
+    return TRUE;
+}
+
+/*
+ * Attempts to capture a normalized FltMgr path into the file payload.
+ *
+ * Inputs : Data is the callback data, Payload receives the bounded path, and
+ *          SuppressEvent receives whether the full source path matched the
+ *          sandbox self-noise policy.
+ * Logic  : first asks FltMgr for a normalized name using the default query
+ *          policy, then falls back to cache-only lookup for close/cleanup or
+ *          other contexts where a file-system name query is unsafe.  Filtering
+ *          is evaluated on the full FltMgr name before payload truncation.
+ * Return : TRUE when a normalized path was copied; FALSE otherwise.
+ */
+static
+BOOLEAN
+KswCopyNormalizedFilePathToPayload(
+    _In_ PFLT_CALLBACK_DATA Data,
+    _Inout_ PKSWORD_SANDBOX_FILE_EVENT_PAYLOAD Payload,
+    _Out_ PBOOLEAN SuppressEvent
+    )
+{
+    PFLT_FILE_NAME_INFORMATION nameInformation;
+    NTSTATUS status;
+    BOOLEAN copied;
+
+    if (SuppressEvent != NULL) {
+        *SuppressEvent = FALSE;
+    }
+
+    if (Data == NULL ||
+        Payload == NULL ||
+        SuppressEvent == NULL ||
+        KeGetCurrentIrql() > APC_LEVEL) {
+        return FALSE;
+    }
+
+    nameInformation = NULL;
+    copied = FALSE;
+
+    status = FltGetFileNameInformation(
+        Data,
+        FLT_FILE_NAME_NORMALIZED | FLT_FILE_NAME_QUERY_DEFAULT,
+        &nameInformation);
+    if (!NT_SUCCESS(status)) {
+        nameInformation = NULL;
+        status = FltGetFileNameInformation(
+            Data,
+            FLT_FILE_NAME_NORMALIZED |
+                FLT_FILE_NAME_QUERY_ALWAYS_ALLOW_CACHE_LOOKUP,
+            &nameInformation);
+    }
+
+    if (NT_SUCCESS(status) && nameInformation != NULL) {
+        if (KswIsSandboxSelfPath(&nameInformation->Name)) {
+            *SuppressEvent = TRUE;
+        } else {
+            copied = KswCopyFilePathToPayload(
+                Payload,
+                &nameInformation->Name,
+                KSWORD_SANDBOX_FILE_EVENT_FLAG_PATH_NORMALIZED);
+        }
+    }
+
+    if (nameInformation != NULL) {
+        FltReleaseFileNameInformation(nameInformation);
+    }
+
+    return copied;
+}
+
+/*
+ * Captures the best available path for a file callback.
+ *
+ * Inputs : Data and FltObjects identify the file operation; Payload receives a
+ *          normalized name when available or a bounded FILE_OBJECT fallback;
+ *          SuppressEvent receives sandbox self-filter matches.
+ * Logic  : avoids name work above APC_LEVEL, prefers FltMgr-normalized names,
+ *          filters full source paths before truncation, and only falls back to
+ *          FILE_OBJECT.FileName when normalization fails.
+ * Return : TRUE when a path was copied; FALSE otherwise.
+ */
+static
+BOOLEAN
+KswCopyBestFilePathToPayload(
+    _In_ PFLT_CALLBACK_DATA Data,
+    _In_ PCFLT_RELATED_OBJECTS FltObjects,
+    _Inout_ PKSWORD_SANDBOX_FILE_EVENT_PAYLOAD Payload,
+    _Out_ PBOOLEAN SuppressEvent
+    )
+{
+    if (SuppressEvent != NULL) {
+        *SuppressEvent = FALSE;
+    }
+
+    if (Payload == NULL ||
+        SuppressEvent == NULL ||
+        KeGetCurrentIrql() > APC_LEVEL) {
+        return FALSE;
+    }
+
+    if (KswCopyNormalizedFilePathToPayload(Data, Payload, SuppressEvent)) {
+        return TRUE;
+    }
+
+    if (*SuppressEvent) {
+        return FALSE;
+    }
+
+    if (FltObjects == NULL || FltObjects->FileObject == NULL) {
+        return FALSE;
+    }
+
+    if (KswIsSandboxSelfPath(&FltObjects->FileObject->FileName)) {
+        *SuppressEvent = TRUE;
+        return FALSE;
+    }
+
+    return KswCopyFilePathToPayload(
+        Payload,
+        &FltObjects->FileObject->FileName,
+        KSWORD_SANDBOX_FILE_EVENT_FLAG_PATH_FALLBACK);
+}
+
+/*
+ * Tests whether a completed payload should be suppressed as sandbox self-noise.
+ *
+ * Inputs : Payload is the bounded file event payload after path capture.
+ * Logic  : reconstructs a bounded UNICODE_STRING over the inline path and
+ *          applies the static KSword infrastructure path rules.
+ * Return : TRUE when the caller should skip KswPushEvent.
+ */
+static
+BOOLEAN
+KswShouldSuppressFilePayload(
+    _In_ const KSWORD_SANDBOX_FILE_EVENT_PAYLOAD* Payload
+    )
+{
+    UNICODE_STRING path;
+
+    if (Payload == NULL ||
+        (Payload->Flags & KSWORD_SANDBOX_FILE_EVENT_FLAG_PATH_PRESENT) == 0 ||
+        Payload->PathLengthBytes == 0) {
+        return FALSE;
+    }
+
+    RtlZeroMemory(&path, sizeof(path));
+    path.Buffer = (PWCH)Payload->Path;
+    path.Length = (USHORT)Payload->PathLengthBytes;
+    path.MaximumLength =
+        (USHORT)(Payload->PathLengthBytes + (ULONG)sizeof(WCHAR));
+
+    return KswIsSandboxSelfPath(&path);
 }
 
 /*
@@ -401,9 +716,10 @@ KswCopyFilePathToPayload(
  * Inputs : Data and FltObjects describe the completed file operation;
  *          Operation is the public file operation; IsPostOperation indicates
  *          whether Data->IoStatus.Status is final.
- * Logic  : fills a stack payload, performs only bounded path copying, avoids
- *          path access above APC_LEVEL, and calls the existing KswPushEvent
- *          producer to preserve READ_EVENTS framing and drop accounting.
+ * Logic  : fills a stack payload, prefers normalized FltMgr names, marks
+ *          fallback/truncation flags, suppresses known sandbox self paths, and
+ *          calls the existing KswPushEvent producer to preserve READ_EVENTS
+ *          framing and drop accounting.
  * Return : no return value.
  */
 static
@@ -417,6 +733,7 @@ KswPushFileEvent(
 {
     KSWORD_SANDBOX_FILE_EVENT_PAYLOAD payload;
     PKSWORD_SANDBOX_DEVICE_EXTENSION deviceExtension;
+    BOOLEAN suppressEvent;
 
     if (Operation == KswSandboxFileOperationNone ||
         InterlockedCompareExchange(&g_KswFileFilterRuntime.Active, 0, 0) == 0) {
@@ -429,6 +746,7 @@ KswPushFileEvent(
     }
 
     RtlZeroMemory(&payload, sizeof(payload));
+    suppressEvent = FALSE;
     payload.Version = KSWORD_SANDBOX_FILE_EVENT_VERSION;
     payload.Size = sizeof(payload);
     payload.Operation = Operation;
@@ -446,10 +764,13 @@ KswPushFileEvent(
             KSWORD_SANDBOX_FILE_EVENT_FLAG_POST_OPERATION;
     }
 
-    if (KeGetCurrentIrql() <= APC_LEVEL &&
-        FltObjects != NULL &&
-        FltObjects->FileObject != NULL) {
-        KswCopyFilePathToPayload(&payload, &FltObjects->FileObject->FileName);
+    (VOID)KswCopyBestFilePathToPayload(
+        Data,
+        FltObjects,
+        &payload,
+        &suppressEvent);
+    if (suppressEvent || KswShouldSuppressFilePayload(&payload)) {
+        return;
     }
 
     (VOID)KswPushEvent(
@@ -465,8 +786,8 @@ KswPushFileEvent(
  *
  * Inputs : Data and FltObjects describe the current file-system request;
  *          CompletionContext is unused and always cleared.
- * Logic  : maps the operation and requests a post-operation callback only for
- *          create/write/delete events that the minimal collector understands.
+ * Logic  : maps the operation and requests a post-operation callback for all
+ *          supported file telemetry events so final status is preserved.
  * Return : FLT_PREOP_SUCCESS_WITH_CALLBACK when a final-status event should be
  *          emitted later; otherwise FLT_PREOP_SUCCESS_NO_CALLBACK.
  */

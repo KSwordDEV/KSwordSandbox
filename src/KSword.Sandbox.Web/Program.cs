@@ -5,6 +5,7 @@ using KSword.Sandbox.Core.Execution;
 using KSword.Sandbox.Core.Files;
 using KSword.Sandbox.Core.Jobs;
 using KSword.Sandbox.Core.Rules;
+using KSword.Sandbox.Web.Dashboard;
 
 var builder = WebApplication.CreateBuilder(args);
 var repositoryRoot = ResolveRepositoryRoot(builder.Environment.ContentRootPath);
@@ -23,7 +24,7 @@ builder.Services.AddSingleton<IRunbookExecutor, PowerShellRunbookExecutor>();
 
 var app = builder.Build();
 
-app.MapGet("/", () => Results.Content(RenderDashboard(), "text/html"));
+app.MapGet("/", () => Results.Content(DashboardExperiencePage.Render(), "text/html"));
 app.MapGet("/health", () => Results.Ok(new
 {
     status = "ok",
@@ -421,6 +422,7 @@ static string SanitizeFileName(string fileName)
 /// There are no inputs; processing creates a self-contained HTML/JavaScript
 /// dashboard; the function returns HTML text for the root endpoint.
 /// </summary>
+#pragma warning disable CS8321 // Kept temporarily as fallback while DashboardExperiencePage is finalized.
 static string RenderDashboard()
 {
     return """

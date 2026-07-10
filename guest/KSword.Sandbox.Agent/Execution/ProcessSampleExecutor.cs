@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using KSword.Sandbox.Abstractions;
 
 namespace KSword.Sandbox.Agent.Execution;
@@ -22,9 +23,30 @@ internal sealed class ProcessSampleExecutor : ISampleExecutor
             CreateNoWindow = true
         };
 
-        using var process = Process.Start(startInfo);
+        Process? startedProcess;
+        try
+        {
+            startedProcess = Process.Start(startInfo);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception or IOException or UnauthorizedAccessException)
+        {
+            events.Add(CreateExecutionExceptionEvent("process.start_failed", plan.SamplePath, processId: null, ex));
+            return new SampleExecutionResult { Started = false, Events = events };
+        }
+
+        using var process = startedProcess;
         if (process is null)
         {
+            events.Add(new SandboxEvent
+            {
+                EventType = "process.start_failed",
+                Source = "guest",
+                Path = plan.SamplePath,
+                Data =
+                {
+                    ["message"] = "Process.Start returned null."
+                }
+            });
             return new SampleExecutionResult { Started = false, Events = events };
         }
 
@@ -38,12 +60,49 @@ internal sealed class ProcessSampleExecutor : ISampleExecutor
             CommandLine = plan.SamplePath
         });
 
-        var exited = await WaitForExitAsync(process, plan.Duration, cancellationToken);
-        if (!exited)
+        bool exited;
+        try
         {
-            events.Add(new SandboxEvent { EventType = "process.timeout", Source = "guest", ProcessId = process.Id, Path = plan.SamplePath });
-            process.Kill(entireProcessTree: true);
-            await process.WaitForExitAsync(cancellationToken);
+            exited = await WaitForExitAsync(process, plan.Duration, cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
+        {
+            events.Add(CreateExecutionExceptionEvent("process.wait_failed", plan.SamplePath, process.Id, ex));
+            exited = SafeHasExited(process);
+        }
+
+        var timedOut = !exited;
+        if (timedOut)
+        {
+            events.Add(new SandboxEvent
+            {
+                EventType = "process.timeout",
+                Source = "guest",
+                ProcessId = process.Id,
+                Path = plan.SamplePath,
+                Data =
+                {
+                    ["timeoutSeconds"] = plan.Duration.TotalSeconds.ToString("0", CultureInfo.InvariantCulture)
+                }
+            });
+
+            try
+            {
+                process.Kill(entireProcessTree: true);
+                await process.WaitForExitAsync(cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
+            {
+                events.Add(CreateExecutionExceptionEvent("process.kill_failed", plan.SamplePath, process.Id, ex));
+            }
         }
 
         events.Add(new SandboxEvent
@@ -59,8 +118,8 @@ internal sealed class ProcessSampleExecutor : ISampleExecutor
         return new SampleExecutionResult
         {
             Started = true,
-            TimedOut = !exited,
-            ExitCode = exited ? process.ExitCode : null,
+            TimedOut = timedOut,
+            ExitCode = exited ? SafeExitCodeValue(process) : null,
             Events = events
         };
     }
@@ -103,11 +162,67 @@ internal sealed class ProcessSampleExecutor : ISampleExecutor
     {
         try
         {
-            return process.ExitCode.ToString();
+            return process.ExitCode.ToString(CultureInfo.InvariantCulture);
         }
         catch (InvalidOperationException)
         {
             return "unknown";
         }
+    }
+
+    /// <summary>
+    /// Reads a process exit code defensively.
+    /// The input is a Process, processing catches invalid state, and the method
+    /// returns a nullable exit code.
+    /// </summary>
+    private static int? SafeExitCodeValue(Process process)
+    {
+        try
+        {
+            return process.ExitCode;
+        }
+        catch (InvalidOperationException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Reads process exit state defensively.
+    /// The input is a Process, processing catches invalid state, and the method
+    /// returns true when the process is known to have exited.
+    /// </summary>
+    private static bool SafeHasExited(Process process)
+    {
+        try
+        {
+            return process.HasExited;
+        }
+        catch (InvalidOperationException)
+        {
+            return true;
+        }
+    }
+
+    /// <summary>
+    /// Creates a normalized execution exception event.
+    /// Inputs are event type, sample path, optional PID, and exception;
+    /// processing copies exception type/message into Data; the method returns a
+    /// SandboxEvent.
+    /// </summary>
+    private static SandboxEvent CreateExecutionExceptionEvent(string eventType, string samplePath, int? processId, Exception exception)
+    {
+        return new SandboxEvent
+        {
+            EventType = eventType,
+            Source = "guest",
+            ProcessId = processId,
+            Path = samplePath,
+            Data =
+            {
+                ["exceptionType"] = exception.GetType().FullName ?? exception.GetType().Name,
+                ["message"] = exception.Message
+            }
+        };
     }
 }

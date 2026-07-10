@@ -18,6 +18,13 @@ public sealed record RunbookExecutionContract(
     DateTimeOffset CompletedAtUtc)
 {
     /// <summary>
+    /// Copyable per-step execution rows for the WebUI. Values include stdout,
+    /// stderr, exit code, duration, and step status when an endpoint has moved
+    /// from the legacy label-only list to the richer experience contract.
+    /// </summary>
+    public IReadOnlyList<RunbookStepExecutionContract> StepResults { get; init; } = [];
+
+    /// <summary>
     /// Inputs: a reason string and a UTC timestamp from the caller.
     /// Processing: creates a non-live, non-successful result that still uses the normal contract shape.
     /// Return behavior: returns a skipped execution payload with an empty step list.

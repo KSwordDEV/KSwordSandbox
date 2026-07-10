@@ -115,6 +115,32 @@ Checkpoint mode restores the named golden VM before each run. It is simple and
 works well for one job at a time. Do not run concurrent jobs against the same
 golden VM.
 
+## One-command Hyper-V E2E script
+
+After the guest payload, local account, Guest Service Interface, PowerShell
+Direct, and `Clean` checkpoint are ready, operators can generate a safe E2E
+plan without touching the VM:
+
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\Invoke-HyperVE2E.ps1 `
+  -SamplePath 'D:\Temp\KSwordSandbox\samples\KSword.Sandbox.TestSample\KSword.Sandbox.TestSample.exe'
+```
+
+Live mode is intentionally separate. Run it only from an elevated host shell,
+with `KSWORDBOX_GUEST_PASSWORD` set, and after reviewing the plan JSON:
+
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\Invoke-HyperVE2E.ps1 `
+  -SamplePath 'D:\Temp\KSwordSandbox\samples\KSword.Sandbox.TestSample\KSword.Sandbox.TestSample.exe' `
+  -Live
+```
+
+The live path restores `Clean`, starts the VM, stages Guest Agent/R0Collector
+payloads, copies the sample, runs the Guest Agent, collects `events.json` and
+`driver-events.jsonl`, stops the VM, and restores `Clean` again by default. Use `-WhatIf`
+to verify that the live command line still performs no VM mutation.
+See `docs/hyperv-e2e-runbook.md` for the full operator flow and output paths.
+
 ## Differencing-disk mode
 
 Differencing-disk mode creates a temporary VM from a base VHDX. Set

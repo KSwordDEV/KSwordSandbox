@@ -53,6 +53,105 @@ KswGetDeviceExtension(
 }
 
 /*
+ * Builds health flag bits from a state snapshot.
+ *
+ * Inputs : Snapshot is a stable copy of driver state.
+ * Logic  : exposes optional negotiation IOCTL availability without changing the
+ *          legacy health reply size that existing collectors may already use.
+ * Return : KSWORD_SANDBOX_HEALTH_FLAG_* bits.
+ */
+static
+ULONG
+KswBuildHealthFlags(
+    _In_ const KSWORD_SANDBOX_STATE_SNAPSHOT* Snapshot
+    )
+{
+    ULONG flags;
+
+    flags =
+        KSWORD_SANDBOX_HEALTH_FLAG_CAPABILITIES_AVAILABLE |
+        KSWORD_SANDBOX_HEALTH_FLAG_STATUS_AVAILABLE |
+        KSWORD_SANDBOX_HEALTH_FLAG_ENABLE_MASK_AVAILABLE;
+
+    if (Snapshot->EventCount != 0) {
+        flags |= KSWORD_SANDBOX_HEALTH_FLAG_HAS_EVENTS;
+    }
+
+    return flags;
+}
+
+/*
+ * Builds status flag bits from a state snapshot.
+ *
+ * Inputs : Snapshot is a stable copy of driver state.
+ * Logic  : summarizes queue depth, producer-mask coverage, and whether the most
+ *          recent internal NTSTATUS represents a failure.
+ * Return : KSWORD_SANDBOX_STATUS_FLAG_* bits.
+ */
+static
+ULONG
+KswBuildStatusFlags(
+    _In_ const KSWORD_SANDBOX_STATE_SNAPSHOT* Snapshot
+    )
+{
+    ULONG flags;
+
+    flags = 0;
+
+    if (Snapshot->EventCount != 0) {
+        flags |= KSWORD_SANDBOX_STATUS_FLAG_HAS_EVENTS;
+    }
+
+    if (Snapshot->ProducerEnableMask == 0) {
+        flags |= KSWORD_SANDBOX_STATUS_FLAG_PRODUCERS_ALL_DISABLED;
+    } else if (Snapshot->ProducerEnableMask != Snapshot->SupportedProducerMask) {
+        flags |= KSWORD_SANDBOX_STATUS_FLAG_PRODUCERS_PARTIAL;
+    }
+
+    if (!NT_SUCCESS(Snapshot->LastStatus)) {
+        flags |= KSWORD_SANDBOX_STATUS_FLAG_LAST_STATUS_FAILURE;
+    }
+
+    return flags;
+}
+
+/*
+ * Fills a GET_CAPABILITIES reply.
+ *
+ * Inputs : Reply points to a caller-sized output buffer already validated by
+ *          the IOCTL handler.
+ * Logic  : writes only compile-time ABI constants and fixed structure sizes, so
+ *          callers can negotiate with the driver before using newer contracts.
+ * Return : no return value.
+ */
+static
+VOID
+KswFillCapabilitiesReply(
+    _Out_ PKSWORD_SANDBOX_CAPABILITIES_REPLY Reply
+    )
+{
+    RtlZeroMemory(Reply, sizeof(*Reply));
+    Reply->Version = KSWORD_SANDBOX_INTERFACE_VERSION;
+    Reply->Size = sizeof(*Reply);
+    Reply->AbiVersionMajor = KSWORD_SANDBOX_ABI_VERSION_MAJOR;
+    Reply->AbiVersionMinor = KSWORD_SANDBOX_ABI_VERSION_MINOR;
+    Reply->CapabilityFlags = KSWORD_SANDBOX_CAPABILITY_FLAGS_CURRENT;
+    Reply->SupportedProducerMask = KSWORD_SANDBOX_PRODUCER_MASK_CURRENT;
+    Reply->DefaultProducerMask = KSWORD_SANDBOX_PRODUCER_MASK_DEFAULT;
+    Reply->EventHeaderVersion = KSWORD_SANDBOX_EVENT_HEADER_VERSION;
+    Reply->EventMaxPayloadSize = KSWORD_SANDBOX_EVENT_MAX_PAYLOAD_SIZE;
+    Reply->EventRingCapacity = KSWORD_SANDBOX_EVENT_RING_CAPACITY;
+    Reply->ReadEventsReplyHeaderSize =
+        KSWORD_SANDBOX_READ_EVENTS_REPLY_HEADER_SIZE;
+    Reply->CapabilitiesReplySize = sizeof(KSWORD_SANDBOX_CAPABILITIES_REPLY);
+    Reply->StatusReplySize = sizeof(KSWORD_SANDBOX_STATUS_REPLY);
+    Reply->SetProducerEnableMaskRequestSize =
+        sizeof(KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK_REQUEST);
+    Reply->SetProducerEnableMaskReplySize =
+        sizeof(KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK_REPLY);
+}
+
+/*
  * Handles IOCTL_KSWORD_SANDBOX_GET_HEALTH.
  *
  * Inputs : DeviceObject identifies the skeleton device; Irp carries a buffered
@@ -94,11 +193,102 @@ KswHandleGetHealth(
     reply->Version = KSWORD_SANDBOX_INTERFACE_VERSION;
     reply->Size = sizeof(*reply);
     reply->DriverState = snapshot.DriverState;
-    reply->Flags = 0;
+    reply->Flags = KswBuildHealthFlags(&snapshot);
     reply->EventsQueued = snapshot.EventsQueued;
     reply->EventsDropped = snapshot.EventsDropped;
     reply->NextSequence = snapshot.NextSequence;
     reply->LastNtStatus = snapshot.LastStatus;
+
+    return KswCompleteIrp(Irp, STATUS_SUCCESS, sizeof(*reply));
+}
+
+/*
+ * Handles IOCTL_KSWORD_SANDBOX_GET_CAPABILITIES.
+ *
+ * Inputs : Irp carries a buffered output buffer; OutputBufferLength is the
+ *          caller's output size.
+ * Logic  : validates the output buffer and returns static ABI/capability data
+ *          for collector negotiation.
+ * Return : STATUS_SUCCESS with sizeof(KSWORD_SANDBOX_CAPABILITIES_REPLY) bytes,
+ *          or a failure status.
+ */
+static
+NTSTATUS
+KswHandleGetCapabilities(
+    _Inout_ PIRP Irp,
+    _In_ ULONG OutputBufferLength
+    )
+{
+    PKSWORD_SANDBOX_CAPABILITIES_REPLY reply;
+
+    if (OutputBufferLength < sizeof(*reply)) {
+        return KswCompleteIrp(Irp, STATUS_BUFFER_TOO_SMALL, 0);
+    }
+
+    reply = (PKSWORD_SANDBOX_CAPABILITIES_REPLY)Irp->AssociatedIrp.SystemBuffer;
+    if (reply == NULL) {
+        return KswCompleteIrp(Irp, STATUS_INVALID_USER_BUFFER, 0);
+    }
+
+    KswFillCapabilitiesReply(reply);
+
+    return KswCompleteIrp(Irp, STATUS_SUCCESS, sizeof(*reply));
+}
+
+/*
+ * Handles IOCTL_KSWORD_SANDBOX_GET_STATUS.
+ *
+ * Inputs : DeviceObject identifies the skeleton device; Irp carries a buffered
+ *          output buffer; OutputBufferLength is the caller's output size.
+ * Logic  : validates the output buffer, snapshots shared state, and returns
+ *          lifecycle, producer-mask, queue-capacity, and total counter fields.
+ * Return : STATUS_SUCCESS with sizeof(KSWORD_SANDBOX_STATUS_REPLY) bytes, or a
+ *          failure status.
+ */
+static
+NTSTATUS
+KswHandleGetStatus(
+    _In_ PDEVICE_OBJECT DeviceObject,
+    _Inout_ PIRP Irp,
+    _In_ ULONG OutputBufferLength
+    )
+{
+    PKSWORD_SANDBOX_DEVICE_EXTENSION deviceExtension;
+    PKSWORD_SANDBOX_STATUS_REPLY reply;
+    KSWORD_SANDBOX_STATE_SNAPSHOT snapshot;
+
+    if (OutputBufferLength < sizeof(*reply)) {
+        return KswCompleteIrp(Irp, STATUS_BUFFER_TOO_SMALL, 0);
+    }
+
+    reply = (PKSWORD_SANDBOX_STATUS_REPLY)Irp->AssociatedIrp.SystemBuffer;
+    if (reply == NULL) {
+        return KswCompleteIrp(Irp, STATUS_INVALID_USER_BUFFER, 0);
+    }
+
+    deviceExtension = KswGetDeviceExtension(DeviceObject);
+    if (deviceExtension == NULL) {
+        return KswCompleteIrp(Irp, STATUS_DEVICE_NOT_READY, 0);
+    }
+
+    KswSnapshotState(deviceExtension, &snapshot);
+
+    RtlZeroMemory(reply, sizeof(*reply));
+    reply->Version = KSWORD_SANDBOX_INTERFACE_VERSION;
+    reply->Size = sizeof(*reply);
+    reply->DriverState = snapshot.DriverState;
+    reply->Flags = KswBuildStatusFlags(&snapshot);
+    reply->QueueCapacity = snapshot.QueueCapacity;
+    reply->QueueDepth = snapshot.EventCount;
+    reply->QueueHighWatermark = snapshot.QueueHighWatermark;
+    reply->ProducerEnableMask = snapshot.ProducerEnableMask;
+    reply->SupportedProducerMask = snapshot.SupportedProducerMask;
+    reply->LastNtStatus = snapshot.LastStatus;
+    reply->TotalEventsEnqueued = snapshot.TotalEventsQueued;
+    reply->TotalEventsDropped = snapshot.EventsDropped;
+    reply->TotalEventsRead = snapshot.EventsRead;
+    reply->TotalEventsSuppressed = snapshot.EventsSuppressed;
+    reply->NextSequence = snapshot.NextSequence;
 
     return KswCompleteIrp(Irp, STATUS_SUCCESS, sizeof(*reply));
 }
@@ -197,6 +387,117 @@ KswValidateReadEventsRequest(
     *RequestedMaxEvents = request->MaxEvents;
 
     return STATUS_SUCCESS;
+}
+
+/*
+ * Validates a SET_PRODUCER_ENABLE_MASK request header.
+ *
+ * Inputs : Buffer points to the METHOD_BUFFERED system buffer; InputBufferLength
+ *          is the number of input bytes supplied by the collector.
+ * Logic  : requires the current ABI version, a known-size prefix, and reserved
+ *          flags set to zero.  Unsupported bits are checked later against the
+ *          live device extension.
+ * Return : STATUS_SUCCESS with EnableMask copied out, otherwise a failure
+ *          NTSTATUS that is completed back to user mode.
+ */
+static
+NTSTATUS
+KswValidateSetProducerEnableMaskRequest(
+    _In_opt_ PVOID Buffer,
+    _In_ ULONG InputBufferLength,
+    _Out_ PULONG EnableMask
+    )
+{
+    PKSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK_REQUEST request;
+
+    *EnableMask = 0;
+
+    if (Buffer == NULL) {
+        return STATUS_INVALID_USER_BUFFER;
+    }
+
+    if (InputBufferLength < sizeof(*request)) {
+        return STATUS_BUFFER_TOO_SMALL;
+    }
+
+    request = (PKSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK_REQUEST)Buffer;
+    if (request->Version != KSWORD_SANDBOX_INTERFACE_VERSION ||
+        request->Size < sizeof(*request) ||
+        request->Size > InputBufferLength ||
+        request->Flags != 0) {
+        return STATUS_INVALID_PARAMETER;
+    }
+
+    *EnableMask = request->EnableMask;
+
+    return STATUS_SUCCESS;
+}
+
+/*
+ * Handles IOCTL_KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK.
+ *
+ * Inputs : DeviceObject identifies the skeleton device; Irp carries a buffered
+ *          request/reply buffer; InputBufferLength and OutputBufferLength are
+ *          the caller-provided METHOD_BUFFERED sizes.
+ * Logic  : validates the request and reply capacity, applies the new producer
+ *          mask under the shared state lock, and returns the before/after masks.
+ * Return : STATUS_SUCCESS with a
+ *          KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK_REPLY, or a failure status.
+ */
+static
+NTSTATUS
+KswHandleSetProducerEnableMask(
+    _In_ PDEVICE_OBJECT DeviceObject,
+    _Inout_ PIRP Irp,
+    _In_ ULONG InputBufferLength,
+    _In_ ULONG OutputBufferLength
+    )
+{
+    NTSTATUS status;
+    PVOID systemBuffer;
+    PKSWORD_SANDBOX_DEVICE_EXTENSION deviceExtension;
+    PKSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK_REPLY reply;
+    ULONG requestedEnableMask;
+    ULONG previousEnableMask;
+    ULONG effectiveEnableMask;
+
+    if (OutputBufferLength < sizeof(*reply)) {
+        return KswCompleteIrp(Irp, STATUS_BUFFER_TOO_SMALL, 0);
+    }
+
+    systemBuffer = Irp->AssociatedIrp.SystemBuffer;
+    status = KswValidateSetProducerEnableMaskRequest(
+        systemBuffer,
+        InputBufferLength,
+        &requestedEnableMask);
+    if (!NT_SUCCESS(status)) {
+        return KswCompleteIrp(Irp, status, 0);
+    }
+
+    deviceExtension = KswGetDeviceExtension(DeviceObject);
+    if (deviceExtension == NULL) {
+        return KswCompleteIrp(Irp, STATUS_DEVICE_NOT_READY, 0);
+    }
+
+    status = KswSetProducerEnableMask(
+        deviceExtension,
+        requestedEnableMask,
+        &previousEnableMask,
+        &effectiveEnableMask);
+    if (!NT_SUCCESS(status)) {
+        return KswCompleteIrp(Irp, status, 0);
+    }
+
+    reply = (PKSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK_REPLY)systemBuffer;
+    RtlZeroMemory(reply, sizeof(*reply));
+    reply->Version = KSWORD_SANDBOX_INTERFACE_VERSION;
+    reply->Size = sizeof(*reply);
+    reply->PreviousEnableMask = previousEnableMask;
+    reply->EffectiveEnableMask = effectiveEnableMask;
+    reply->SupportedProducerMask = KSWORD_SANDBOX_PRODUCER_MASK_CURRENT;
+    reply->Flags = 0;
+
+    return KswCompleteIrp(Irp, STATUS_SUCCESS, sizeof(*reply));
 }
 
 /*
@@ -344,8 +645,8 @@ KswDispatchUnsupported(
  *
  * Inputs : DeviceObject identifies the control device; Irp contains the IOCTL
  *          code plus METHOD_BUFFERED input/output lengths.
- * Logic  : routes the three initial collector IOCTLs to dedicated handlers and
- *          rejects unknown control codes.
+ * Logic  : routes public collector IOCTLs to dedicated handlers and rejects
+ *          unknown control codes.
  * Return : handler-specific NTSTATUS and byte count.
  */
 _Use_decl_annotations_
@@ -374,6 +675,19 @@ KswDispatchDeviceControl(
 
     case IOCTL_KSWORD_SANDBOX_READ_EVENTS:
         return KswHandleReadEvents(
+            DeviceObject,
+            Irp,
+            inputBufferLength,
+            outputBufferLength);
+
+    case IOCTL_KSWORD_SANDBOX_GET_CAPABILITIES:
+        return KswHandleGetCapabilities(Irp, outputBufferLength);
+
+    case IOCTL_KSWORD_SANDBOX_GET_STATUS:
+        return KswHandleGetStatus(DeviceObject, Irp, outputBufferLength);
+
+    case IOCTL_KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK:
+        return KswHandleSetProducerEnableMask(
             DeviceObject,
             Irp,
             inputBufferLength,
