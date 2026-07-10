@@ -27,6 +27,24 @@ Required `report.html` sections:
 - Failure reasons.
 - Raw normalized events.
 
+
+## Report renderer visual contract
+
+The final report renderer should use a modern sandbox report layout, not a
+plain diagnostic dump. The visual contract is:
+
+- Primary accent color: `#43A0FF`.
+- Major report areas should render as modern cards/panels with clear spacing,
+  readable typography, and an operator-focused summary-first flow.
+- Each major section should keep very large evidence sets bounded with a
+  maximum height around `75vh` and `overflow:auto`, so timeline, process,
+  registry, network, and raw event evidence remain navigable during demos.
+- The report must support Chinese and English rendering entrypoints, or
+  equivalent core renderer support for `report.zh.html` and `report.en.html`.
+- Jobs should keep report path fields suitable for automatic WebUI links, so a
+  completed plan can expose the default report plus localized report clues
+  without asking the operator to paste a filesystem path.
+
 ## Evidence interaction
 
 Evidence rows are operator-facing. Tables, timeline entries, and raw evidence
@@ -39,9 +57,10 @@ blocks should support fast copying:
 
 ## Live UI expectations
 
-The WebUI live monitor intentionally shows raw events only. It does not run
-behavior classification until the analysis is completed and guest output is
-imported. The live table should show:
+The WebUI live raw monitor is a dedicated page linked from the main dashboard.
+It intentionally shows raw events only. It does not run behavior classification
+until the analysis is completed and guest output is imported. The live table
+should show:
 
 - timestamp
 - `eventType`
@@ -51,5 +70,8 @@ imported. The live table should show:
 - command line
 - data
 
-When a job fails, the dashboard should keep the runbook stdout/stderr, exit
-code, duration, and failure message visible next to the report/artifact paths.
+When a job fails, the main dashboard should keep the report links, artifact
+paths, progress stage status, failed step title/message, exit code, and duration
+visible. It should not inline long runbook command text, stdout, or stderr; the
+operator can open the execution-flow page and copy `runbook-execution.json` for
+deep troubleshooting.

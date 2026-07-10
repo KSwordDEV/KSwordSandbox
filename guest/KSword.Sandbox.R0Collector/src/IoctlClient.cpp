@@ -120,6 +120,46 @@ bool EmitProtocolError(
     return EmitEvent(writer, event);
 }
 
+// Input: Win32 error code from a failed optional DeviceIoControl call.
+// Processing: Recognizes the common mappings for STATUS_INVALID_DEVICE_REQUEST
+// and STATUS_NOT_SUPPORTED so newer collectors can keep draining older v1
+// health/poll/read-events drivers.
+// Return: true when the error means the optional IOCTL is unavailable.
+bool IsOptionalIoctlUnavailable(const DWORD errorCode) {
+    return errorCode == ERROR_INVALID_FUNCTION ||
+           errorCode == ERROR_NOT_SUPPORTED;
+}
+
+// Input: Optional IOCTL failure details plus collector options.
+// Processing: Emits a non-fatal diagnostic row for ABI negotiation paths that
+// older live drivers may not implement while preserving the normal error fields.
+// Return: true if the JSONL sink accepted the diagnostic event.
+bool EmitOptionalIoctlUnavailable(
+    EventWriter& writer,
+    const Options& options,
+    const std::string& ioctlName,
+    const DWORD ioctlCode,
+    const DWORD errorCode,
+    const DWORD bytesReturned,
+    const std::wstring& compatibilityAction) {
+    JsonDataObjectBuilder data;
+    data.AddUtf8("ioctl", ioctlName);
+    data.AddUnsigned("ioctlCode", ioctlCode);
+    data.AddUnsigned("bytesReturned", bytesReturned);
+    data.AddUnsigned("win32Error", errorCode);
+    data.AddWide("win32Message", Win32ErrorMessage(errorCode));
+    data.AddWide("compatibilityAction", compatibilityAction);
+    data.AddUtf8("eventSchemaName", KSWORD_SANDBOX_EVENT_SCHEMA_NAME);
+    data.AddUnsigned("collectorAbiVersion", KSWORD_SANDBOX_INTERFACE_VERSION);
+    data.AddUtf8("collectorAbiVersionHex", HexUnsignedLongLong(KSWORD_SANDBOX_INTERFACE_VERSION, 8));
+
+    SandboxEventFields event;
+    event.eventType = "r0collector.optionalIoctlUnavailable";
+    event.path = options.devicePath;
+    event.dataJson = data.Build();
+    return EmitEvent(writer, event);
+}
+
 // Input: Open driver handle, collector options, and JSONL sink.
 // Processing: Issues IOCTL_KSWORD_SANDBOX_GET_HEALTH and writes a
 // r0collector.driverHealth row with the public health reply fields.
@@ -187,6 +227,16 @@ bool EmitDriverCapabilities(const UniqueHandle& device, const Options& options, 
             static_cast<DWORD>(sizeof(reply)),
             &bytesReturned,
             &errorCode)) {
+        if (IsOptionalIoctlUnavailable(errorCode)) {
+            return EmitOptionalIoctlUnavailable(
+                writer,
+                options,
+                "IOCTL_KSWORD_SANDBOX_GET_CAPABILITIES",
+                IOCTL_KSWORD_SANDBOX_GET_CAPABILITIES,
+                errorCode,
+                bytesReturned,
+                L"Continuing with legacy health/poll/read-events behavior.");
+        }
         return EmitIoctlFailure(
             writer,
             options,
@@ -236,6 +286,16 @@ bool EmitDriverStatus(const UniqueHandle& device, const Options& options, EventW
             static_cast<DWORD>(sizeof(reply)),
             &bytesReturned,
             &errorCode)) {
+        if (IsOptionalIoctlUnavailable(errorCode)) {
+            return EmitOptionalIoctlUnavailable(
+                writer,
+                options,
+                "IOCTL_KSWORD_SANDBOX_GET_STATUS",
+                IOCTL_KSWORD_SANDBOX_GET_STATUS,
+                errorCode,
+                bytesReturned,
+                L"Continuing without queue/status counter snapshots.");
+        }
         return EmitIoctlFailure(
             writer,
             options,
@@ -292,6 +352,16 @@ bool EmitDriverSetProducerEnableMask(const UniqueHandle& device, const Options& 
             static_cast<DWORD>(buffer.size()),
             &bytesReturned,
             &errorCode)) {
+        if (IsOptionalIoctlUnavailable(errorCode)) {
+            return EmitOptionalIoctlUnavailable(
+                writer,
+                options,
+                "IOCTL_KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK",
+                IOCTL_KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK,
+                errorCode,
+                bytesReturned,
+                L"Continuing with the driver default producer mask.");
+        }
         return EmitIoctlFailure(
             writer,
             options,

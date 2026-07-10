@@ -36,6 +36,16 @@ app.MapGet("/jobs/{jobId:guid}/execution-flow", (Guid jobId, SandboxJobService s
     var execution = TryReadRunbookExecutionResult(job.RunbookExecutionResultPath);
     return Results.Content(RunbookExecutionFlowPage.Render(job, execution), "text/html; charset=utf-8");
 });
+app.MapGet("/jobs/{jobId:guid}/live-events", (Guid jobId, SandboxJobService service) =>
+{
+    var job = service.GetJob(jobId);
+    if (job is null)
+    {
+        return Results.NotFound(new { error = $"Job {jobId:D} was not found in the in-memory Web host job list." });
+    }
+
+    return Results.Content(LiveEventsPage.Render(job), "text/html; charset=utf-8");
+});
 app.MapGet("/health", () => Results.Ok(new
 {
     status = "ok",
@@ -73,9 +83,9 @@ app.MapGet("/api/jobs/{jobId:guid}/events/stream", WriteLiveEventStreamAsync);
 // route. It never accepts a caller-supplied filesystem path; processing looks
 // up the recorded HTML report path for that job and returns the report body
 // when the file still exists.
-app.MapGet("/api/jobs/{jobId:guid}/report/html", async Task<IResult> (Guid jobId, SandboxJobService service) =>
+app.MapGet("/api/jobs/{jobId:guid}/report/html", async Task<IResult> (Guid jobId, string? lang, SandboxJobService service) =>
 {
-    if (!TryResolveHtmlReportPath(jobId, service, out var reportPath, out var errorResult))
+    if (!TryResolveHtmlReportPath(jobId, lang, service, out var reportPath, out var errorResult))
     {
         return errorResult ?? Results.NotFound(new { error = $"HTML report was not found for job {jobId:D}." });
     }
@@ -387,7 +397,7 @@ static string ResolveRepositoryRoot(string contentRoot)
 /// job existence, recorded path shape, extension, and file existence, and the
 /// function returns true plus a full path or false plus an HTTP error result.
 /// </summary>
-static bool TryResolveHtmlReportPath(Guid jobId, SandboxJobService service, out string reportPath, out IResult? errorResult)
+static bool TryResolveHtmlReportPath(Guid jobId, string? lang, SandboxJobService service, out string reportPath, out IResult? errorResult)
 {
     reportPath = string.Empty;
     errorResult = null;
@@ -399,7 +409,8 @@ static bool TryResolveHtmlReportPath(Guid jobId, SandboxJobService service, out 
         return false;
     }
 
-    if (string.IsNullOrWhiteSpace(job.HtmlReportPath))
+    var requestedPath = ResolveLocalizedReportPath(job, lang);
+    if (string.IsNullOrWhiteSpace(requestedPath))
     {
         errorResult = Results.NotFound(new { error = $"Job {jobId:D} does not have an HTML report path yet; create a dry-run plan first." });
         return false;
@@ -407,11 +418,11 @@ static bool TryResolveHtmlReportPath(Guid jobId, SandboxJobService service, out 
 
     try
     {
-        reportPath = Path.GetFullPath(job.HtmlReportPath);
+        reportPath = Path.GetFullPath(requestedPath);
     }
     catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
     {
-        errorResult = Results.BadRequest(new { error = $"Recorded HTML report path for job {jobId:D} is invalid ('{job.HtmlReportPath}'): {ex.Message}" });
+        errorResult = Results.BadRequest(new { error = $"Recorded HTML report path for job {jobId:D} is invalid ('{requestedPath}'): {ex.Message}" });
         reportPath = string.Empty;
         return false;
     }
@@ -433,6 +444,28 @@ static bool TryResolveHtmlReportPath(Guid jobId, SandboxJobService service, out 
     }
 
     return true;
+}
+
+/// <summary>
+/// Selects the best report file for a requested language.
+/// Inputs are the recorded job and optional lang query string; processing maps
+/// zh/zh-CN/cn to report.zh.html, en to report.en.html, and falls back to the
+/// compatibility report.html; the function returns a recorded path or null.
+/// </summary>
+static string? ResolveLocalizedReportPath(AnalysisJob job, string? lang)
+{
+    var normalized = string.IsNullOrWhiteSpace(lang) ? string.Empty : lang.Trim().ToLowerInvariant();
+    if ((normalized is "zh" or "zh-cn" or "cn" or "chinese") && !string.IsNullOrWhiteSpace(job.HtmlReportZhPath))
+    {
+        return job.HtmlReportZhPath;
+    }
+
+    if ((normalized is "en" or "en-us" or "english") && !string.IsNullOrWhiteSpace(job.HtmlReportEnPath))
+    {
+        return job.HtmlReportEnPath;
+    }
+
+    return job.HtmlReportPath ?? job.HtmlReportZhPath ?? job.HtmlReportEnPath;
 }
 
 /// <summary>

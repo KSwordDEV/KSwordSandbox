@@ -38,19 +38,29 @@ by WebUI/UX work.
 
 The root dashboard must keep these operator-facing areas visible and copyable:
 
-- clearer one-click entry points for upload-and-plan, host-path planning, and
-  directory scan plus first-candidate or selected-candidate planning;
+- three tab-separated planning entry points for upload-and-plan, host-path
+  planning, and directory scan plus first-candidate or selected-candidate
+  planning; the upload tab is the default selected tab;
+- VM configuration fields that are sent with every dry-run planning request:
+  `goldenVmName`, `goldenSnapshotName`, `guestUserName`,
+  `guestWorkingDirectory`, `guestPayloadRoot`, and `useMockCollector`;
 - explicit job status, job ID, sample path, recent job list, and guest import
   status;
 - artifact paths for `report.json`, `report.html`, `events.json`,
   `driver-events.jsonl`, and `runbook-execution.json`;
-- a live raw telemetry area that shows source files and unclassified raw event
-  rows before final report classification;
-- runbook execution rows with step status, `stdout`, `stderr`, exit code,
-  duration, and command text.
+- automatic report links after a plan is created, including the served
+  `/api/jobs/{jobId}/report/html` link and the local-file fallback when a path
+  is recorded;
+- stage progress that shows ordered planning/execution/import/report steps with
+  stable IDs and human-readable status;
+- a link to a dedicated live raw monitor page that shows source files and
+  unclassified raw event rows before final report classification;
+- a link to the dedicated execution-flow page for runbook step status. The root
+  dashboard must not inline long runbook PowerShell commands, `stdout`, or
+  `stderr`.
 
-All tables, path values, raw telemetry evidence, runbook command/output blocks,
-job messages, status text, inputs, and section text must support either an
+All tables, path values, raw telemetry evidence, job messages, status text,
+inputs, and section text must support either an
 explicit `Copy` button or right-click copy through `data-copy`, `code`, `pre`,
 `td`, `th`, `p`, `li`, heading, `label`, `span`, `a`, `button`, or `input`
 elements. The WebUI should display a small toast after copy succeeds or fails so
@@ -139,6 +149,7 @@ headless workers. It probes:
 - `GET /api/jobs/{jobId}/events/live?offset=0&take=1` and requires the live raw
   telemetry JSON cursor fields: `jobId`, `retrievedAt`, `totalEvents`,
   `nextOffset`, `hasMore`, `sources`, and `events`;
+- the root dashboard source must link to the dedicated live raw monitor page;
 - `GET /api/jobs/{jobId}/report/html` and requires a successful `text/html`
   served report response, which is the same safe report link rendered by the
   dashboard;
@@ -156,10 +167,11 @@ and `-JobId` are omitted:
 
 For an end-to-end operator validation, create or select a job after starting the
 Web host, open the dashboard in a browser manually, and confirm that the served
-HTML report link opens, the live raw telemetry panel refreshes, and the manual
-guest import field can be left blank or filled with a specific `events.json` /
-`.jsonl` path. Do not commit generated reports, imported guest output, browser
-screenshots, or build binaries from this validation.
+HTML report link opens, the live raw monitor page refreshes, the root dashboard
+does not show long runbook command/output blocks, and the manual guest import
+field can be left blank or filled with a specific `events.json` / `.jsonl` path.
+Do not commit generated reports, imported guest output, browser screenshots, or
+build binaries from this validation.
 
 ## Verification guidance
 

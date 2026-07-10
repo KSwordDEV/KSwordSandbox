@@ -6,6 +6,52 @@
 
 namespace KSword::Sandbox::R0Collector {
 
+// Input: Mock driver event type name.
+// Processing: Maps synthetic category rows to the same public event type values
+// and payload schema names that live READ_EVENTS parser rows emit.
+// Return: Public payload schema name for the category, or a mock fallback.
+std::string MockPayloadSchemaForDriverType(const std::string& driverEventTypeName) {
+    if (driverEventTypeName == "process") {
+        return "KSWORD_SANDBOX_PROCESS_EVENT_PAYLOAD";
+    }
+    if (driverEventTypeName == "image") {
+        return "KSWORD_SANDBOX_IMAGE_EVENT_PAYLOAD";
+    }
+    if (driverEventTypeName == "file") {
+        return "KSWORD_SANDBOX_FILE_EVENT_PAYLOAD";
+    }
+    if (driverEventTypeName == "registry") {
+        return "KSWORD_SANDBOX_REGISTRY_EVENT_PAYLOAD";
+    }
+    if (driverEventTypeName == "network") {
+        return "KSWORD_SANDBOX_NETWORK_EVENT_PAYLOAD";
+    }
+    return "mock-forward-compatible";
+}
+
+// Input: Mock driver event type name.
+// Processing: Maps mock categories to public KswSandboxEventType* values so
+// mock/live JSONL rows share comparable diagnostic fields.
+// Return: Numeric public event type or KswSandboxEventTypeReserved fallback.
+ULONG MockDriverEventTypeValue(const std::string& driverEventTypeName) {
+    if (driverEventTypeName == "process") {
+        return KswSandboxEventTypeProcess;
+    }
+    if (driverEventTypeName == "image") {
+        return KswSandboxEventTypeImage;
+    }
+    if (driverEventTypeName == "file") {
+        return KswSandboxEventTypeFile;
+    }
+    if (driverEventTypeName == "registry") {
+        return KswSandboxEventTypeRegistry;
+    }
+    if (driverEventTypeName == "network") {
+        return KswSandboxEventTypeNetwork;
+    }
+    return KswSandboxEventTypeReserved;
+}
+
 // Input: Mock category metadata, collector options, and the JSONL sink.
 // Processing: Emits one synthetic driver-originated row that uses the same
 // stable eventType values as drained R0 events while clearly marking the data as
@@ -32,11 +78,16 @@ bool EmitMockDriverCategoryEvent(
     data.AddBool("mock", true);
     data.AddWide("devicePath", options.devicePath);
     data.AddBool("healthOnly", options.healthOnly);
+    data.AddUtf8("eventSchemaName", KSWORD_SANDBOX_EVENT_SCHEMA_NAME);
+    data.AddUnsigned("eventSchemaVersion", KSWORD_SANDBOX_EVENT_SCHEMA_VERSION);
+    data.AddUtf8("eventSchemaVersionHex", HexUnsignedLongLong(KSWORD_SANDBOX_EVENT_SCHEMA_VERSION, 8));
+    data.AddUnsigned("driverEventType", MockDriverEventTypeValue(driverEventTypeName));
     data.AddUtf8("driverEventTypeName", driverEventTypeName);
     data.AddUtf8("operation", operation);
     data.AddUtf8("operationName", operation);
     data.AddUtf8("typedPayloadStatus", "mock");
-    data.AddUtf8("payloadSchema", "mock-forward-compatible");
+    data.AddBool("typedPayloadParsed", true);
+    data.AddUtf8("payloadSchema", MockPayloadSchemaForDriverType(driverEventTypeName));
     data.AddUtf8(
         "note",
         "Synthetic driver-category row for Guest Agent and host import plumbing.");

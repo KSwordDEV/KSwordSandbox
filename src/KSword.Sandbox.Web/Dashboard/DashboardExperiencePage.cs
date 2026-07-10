@@ -20,18 +20,20 @@ internal static class DashboardExperiencePage
           <meta charset="utf-8">
           <title>KSword Sandbox 主机控制台</title>
           <style>
-            :root { color-scheme: light; }
-            body { font-family: "Microsoft YaHei UI", Segoe UI, Arial, sans-serif; margin: 0; color: #111827; background: #f8fafc; }
-            header { padding: 28px 36px; color: white; background: linear-gradient(135deg, #111827, #1d4ed8); }
+            :root { --blue:#43A0FF; --blue-dark:#0B6FCC; --ink:#0f172a; --muted:#64748b; --line:#dbeafe; --soft:#eef7ff; color-scheme: light; }
+            * { box-sizing: border-box; }
+            body { font-family: "Microsoft YaHei UI", Segoe UI, Arial, sans-serif; margin: 0; color: var(--ink); background: radial-gradient(circle at 8% 4%,rgba(67,160,255,.20),transparent 27%),linear-gradient(180deg,#f4f9ff,#f8fafc); }
+            header { padding: 28px 36px; color: white; background: radial-gradient(circle at 85% 10%,rgba(67,160,255,.55),transparent 32%),linear-gradient(135deg,#08111f,#123d66 62%,#0d5fa8); }
             .header-row { align-items: flex-start; display: flex; gap: 18px; justify-content: space-between; }
             .lang-toggle { background: rgba(255,255,255,.16); border: 1px solid rgba(255,255,255,.35); white-space: nowrap; }
             .topnav { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
             .topnav a { border: 1px solid rgba(255,255,255,.35); border-radius: 999px; color: white; font-weight: 700; padding: 7px 11px; text-decoration: none; }
-            main { max-width: 1180px; margin: 24px auto; padding: 0 24px 48px; }
-            section { background: white; border: 1px solid #e5e7eb; border-radius: 14px; box-shadow: 0 8px 28px rgba(15, 23, 42, .06); margin-bottom: 18px; padding: 22px; }
-            label { display: block; font-weight: 600; margin: 14px 0 6px; }
-            input { box-sizing: border-box; width: 100%; border: 1px solid #cbd5e1; border-radius: 10px; padding: 10px 12px; font: inherit; }
-            button, a.buttonlink { border: 0; border-radius: 10px; background: #1d4ed8; color: white; cursor: pointer; display: inline-block; font-weight: 700; margin-top: 14px; padding: 10px 16px; text-decoration: none; }
+            main { max-width: 1220px; margin: 24px auto; padding: 0 24px 48px; }
+            section { background: rgba(255,255,255,.96); border: 1px solid var(--line); border-radius: 18px; box-shadow: 0 14px 36px rgba(15, 23, 42, .07); margin-bottom: 18px; padding: 22px; }
+            label { display: block; font-weight: 700; margin: 14px 0 6px; }
+            input { box-sizing: border-box; width: 100%; border: 1px solid #c7dff7; border-radius: 11px; padding: 10px 12px; font: inherit; }
+            input[type="checkbox"] { width: auto; }
+            button, a.buttonlink { border: 0; border-radius: 11px; background: var(--blue); color: white; cursor: pointer; display: inline-block; font-weight: 800; margin-top: 14px; padding: 10px 16px; text-decoration: none; }
             button.secondary { background: #334155; }
             a.buttonlink.secondary { background: #334155; }
             button:disabled { background: #94a3b8; cursor: wait; }
@@ -54,22 +56,37 @@ internal static class DashboardExperiencePage
             .toast { background: #0f172a; border-radius: 999px; bottom: 22px; color: white; left: 50%; opacity: 0; padding: 10px 16px; pointer-events: none; position: fixed; transform: translate(-50%, 12px); transition: opacity .15s ease, transform .15s ease; z-index: 20; }
             .toast.visible { opacity: .96; transform: translate(-50%, 0); }
             .grid { display: grid; gap: 18px; grid-template-columns: repeat(3, 1fr); }
-            .hint { color: #64748b; font-size: 14px; }
+            .hint { color: var(--muted); font-size: 14px; }
             .status { margin-top: 12px; min-height: 24px; }
             .error { color: #b91c1c; }
             .ok { color: #047857; }
-            .pathbox { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; margin-top: 10px; padding: 12px; }
-            .pill { background: #dbeafe; border-radius: 999px; color: #1e40af; display: inline-block; font-size: 12px; font-weight: 700; padding: 3px 8px; }
-            .event-monitor { border: 1px solid #bfdbfe; border-radius: 12px; background: #eff6ff; margin-top: 12px; padding: 12px; }
-            .event-monitor table { background: white; font-size: 13px; }
-            .event-monitor td:nth-child(5), .event-monitor td:nth-child(6) { max-width: 260px; word-break: break-all; }
-            .event-source-list { margin: 6px 0 0; padding-left: 18px; }
-            .runbook-output details { margin: 4px 0; }
-            .runbook-output summary { cursor: pointer; font-weight: 700; }
-            .runbook-output pre { max-height: 180px; margin: 6px 0 0; }
+            .pathbox { background: #f8fbff; border: 1px solid var(--line); border-radius: 12px; margin-top: 10px; padding: 12px; }
+            .pill { background: #e7f3ff; border:1px solid rgba(67,160,255,.35); border-radius: 999px; color: #075985; display: inline-block; font-size: 12px; font-weight: 800; padding: 4px 9px; }
+            .tabs { display:flex; flex-wrap:wrap; gap:8px; margin:16px 0 10px; }
+            .tab-button { background:#e7f3ff; border:1px solid rgba(67,160,255,.35); color:#075985; margin-top:0; }
+            .tab-button.active { background:var(--blue); color:white; }
+            .tab-panel { display:none; border:1px solid var(--line); border-radius:16px; background:#f8fbff; padding:16px; }
+            .tab-panel.active { display:block; }
+            .vm-grid { display:grid; gap:12px; grid-template-columns:repeat(3,minmax(0,1fr)); }
+            details.vm-config { background:#f8fbff; border:1px dashed #b9d7f3; border-radius:14px; margin-top:16px; padding:12px 14px; }
+            details.vm-config summary { cursor:pointer; font-weight:800; }
+            .job-card { border-left:5px solid var(--blue); }
+            .job-summary { display:grid; gap:12px; grid-template-columns:repeat(4,minmax(0,1fr)); margin-top:12px; }
+            .metric { background:#f8fbff; border:1px solid var(--line); border-radius:14px; padding:12px; }
+            .metric strong { color:var(--muted); display:block; font-size:12px; margin-bottom:6px; }
+            .progress-box { background:#f8fbff; border:1px solid var(--line); border-radius:16px; margin-top:14px; padding:14px; }
+            .progress-bar { background:#dbeafe; border-radius:999px; height:12px; overflow:hidden; }
+            .progress-fill { background:linear-gradient(90deg,var(--blue),#7dd3fc); height:100%; width:0%; transition:width .25s ease; }
+            .stages { display:grid; gap:8px; grid-template-columns:repeat(4,minmax(0,1fr)); margin-top:12px; }
+            .stage { background:white; border:1px solid #e5edf6; border-radius:12px; color:#64748b; padding:9px; }
+            .stage.active { border-color:var(--blue); box-shadow:0 0 0 3px rgba(67,160,255,.12); color:#075985; font-weight:800; }
+            .stage.done { background:#ecfdf5; border-color:#bbf7d0; color:#047857; }
+            .compact-details { margin-top:12px; }
+            .compact-details summary { cursor:pointer; color:#075985; font-weight:800; }
+            .empty { border:1px dashed #b9d7f3; border-radius:12px; color:var(--muted); padding:14px; }
             .status-failed { color: #b91c1c; font-weight: 700; }
             .status-ok { color: #047857; font-weight: 700; }
-            @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+            @media (max-width: 980px) { .grid,.vm-grid,.job-summary,.stages { grid-template-columns: 1fr; } header { padding:24px; } }
           </style>
         </head>
         <body>
@@ -91,28 +108,32 @@ internal static class DashboardExperiencePage
           <main>
             <section id="plan">
               <h2 data-zh="规划分析" data-en="Plan analysis">规划分析</h2>
-              <p class="hint"><span data-zh="这是本地 WebUI。可使用主机可见路径，例如" data-en="This is a local WebUI. Use host-visible paths such as">这是本地 WebUI。可使用主机可见路径，例如</span> <code data-copy="D:\Temp\sample.exe" data-copy-label="example sample path">D:\Temp\sample.exe</code> <span data-zh="，也可扫描目录并选择发现的可执行文件。以下入口都会先创建 dry-run 计划和报告，不会直接执行 VM 动作。" data-en="or scan a directory and select one discovered executable. Every entry point below creates a dry-run plan and report before any live VM action.">，也可扫描目录并选择发现的可执行文件。以下入口都会先创建 dry-run 计划和报告，不会直接执行 VM 动作。</span></p>
-              <div class="grid">
-                <div>
-                  <h3 data-zh="1) 上传 .exe 并规划" data-en="1) Upload .exe and plan">1) 上传 .exe 并规划</h3>
+              <p class="hint"><span data-zh="三种入口已拆成 Tab，默认上传。创建 dry-run 计划不会执行样本，点击“启动虚拟机执行”才会进入 live Hyper-V 流程。" data-en="The three entry points are separated into tabs, upload is the default. Creating a dry-run plan does not execute the sample; click Execute live VM runbook to enter the live Hyper-V flow.">三种入口已拆成 Tab，默认上传。创建 dry-run 计划不会执行样本，点击“启动虚拟机执行”才会进入 live Hyper-V 流程。</span></p>
+              <div class="tabs" role="tablist">
+                <button id="tab-upload" class="tab-button active" type="button" role="tab" aria-selected="true" aria-controls="panel-upload" onclick="selectPlanTab('upload')" data-zh="上传 EXE" data-en="Upload EXE">上传 EXE</button>
+                <button id="tab-path" class="tab-button" type="button" role="tab" aria-selected="false" aria-controls="panel-path" onclick="selectPlanTab('path')" data-zh="已有路径" data-en="Existing path">已有路径</button>
+                <button id="tab-scan" class="tab-button" type="button" role="tab" aria-selected="false" aria-controls="panel-scan" onclick="selectPlanTab('scan')" data-zh="扫描目录" data-en="Scan folder">扫描目录</button>
+              </div>
+              <div id="panel-upload" class="tab-panel active" role="tabpanel" aria-labelledby="tab-upload">
+                  <h3 data-zh="上传 .exe 并规划" data-en="Upload .exe and plan">上传 .exe 并规划</h3>
                   <p class="hint" data-zh="将文件保存到配置的运行时上传目录，然后创建 dry-run 任务；不会执行样本。" data-en="Stores the file in the configured runtime upload folder, then creates a dry-run job. It does not execute the sample.">将文件保存到配置的运行时上传目录，然后创建 dry-run 任务；不会执行样本。</p>
                   <label for="sampleUpload" data-zh="可执行文件（.exe）" data-en="Executable file (.exe)">可执行文件（.exe）</label>
                   <input id="sampleUpload" type="file" accept=".exe,application/vnd.microsoft.portable-executable,application/octet-stream">
                   <label for="uploadDuration" data-zh="分析时长（秒）" data-en="Analysis duration, seconds">分析时长（秒）</label>
                   <input id="uploadDuration" type="number" min="1" max="900" value="120">
                   <button onclick="uploadAndPlan()" data-zh="上传 .exe → 创建 dry-run 计划" data-en="Upload .exe → create dry-run plan">上传 .exe → 创建 dry-run 计划</button>
-                </div>
-                <div>
-                  <h3 data-zh="2) 规划已有主机路径" data-en="2) Plan existing host path">2) 规划已有主机路径</h3>
+              </div>
+              <div id="panel-path" class="tab-panel" role="tabpanel" aria-labelledby="tab-path">
+                  <h3 data-zh="规划已有主机路径" data-en="Plan existing host path">规划已有主机路径</h3>
                   <p class="hint" data-zh="适用于样本已经位于本机或挂载共享时。服务器会先校验路径，再写入产物。" data-en="Use when the sample is already on this host or a mounted share. The server validates the path before writing artifacts.">适用于样本已经位于本机或挂载共享时。服务器会先校验路径，再写入产物。</p>
                   <label for="samplePath" data-zh="主机上的可执行文件路径" data-en="Executable path on host">主机上的可执行文件路径</label>
                   <input id="samplePath" placeholder="D:\Temp\sample.exe">
                   <label for="duration" data-zh="分析时长（秒）" data-en="Analysis duration, seconds">分析时长（秒）</label>
                   <input id="duration" type="number" min="1" max="900" value="120">
                   <button onclick="planPath()" data-zh="从路径创建 dry-run 计划" data-en="Create dry-run plan from path">从路径创建 dry-run 计划</button>
-                </div>
-                <div>
-                  <h3 data-zh="3) 扫描文件夹后规划" data-en="3) Scan folder, then plan">3) 扫描文件夹后规划</h3>
+              </div>
+              <div id="panel-scan" class="tab-panel" role="tabpanel" aria-labelledby="tab-scan">
+                  <h3 data-zh="扫描文件夹后规划" data-en="Scan folder, then plan">扫描文件夹后规划</h3>
                   <p class="hint" data-zh="仅基于元数据发现 .exe。可复核候选项，或一键规划排序后的第一个结果。" data-en="Metadata-only .exe discovery. Review candidates or use one-click planning for the first sorted result.">仅基于元数据发现 .exe。可复核候选项，或一键规划排序后的第一个结果。</p>
                   <label for="scanPath" data-zh="目录或精确 .exe 路径" data-en="Directory or exact .exe path">目录或精确 .exe 路径</label>
                   <input id="scanPath" placeholder="D:\Temp\incoming">
@@ -120,8 +141,19 @@ internal static class DashboardExperiencePage
                   <input id="maxDepth" type="number" min="0" max="16" value="4">
                   <button class="secondary" onclick="scanTargets()" data-zh="查找 .exe 候选项" data-en="Find .exe candidates">查找 .exe 候选项</button>
                   <button class="secondary" onclick="scanAndPlanFirst()" data-zh="扫描并规划第一个候选项" data-en="Scan and plan first candidate">扫描并规划第一个候选项</button>
-                </div>
               </div>
+              <details class="vm-config">
+                <summary data-zh="虚拟机配置 / VM configuration" data-en="VM configuration / 虚拟机配置">虚拟机配置 / VM configuration</summary>
+                <p class="hint" data-zh="默认从 config 读取；这里的值只覆盖当前任务，不写入配置文件。" data-en="Defaults are loaded from config; these values only override the current job and do not write config files.">默认从 config 读取；这里的值只覆盖当前任务，不写入配置文件。</p>
+                <div class="vm-grid">
+                  <div><label for="goldenVmName">VM name</label><input id="goldenVmName" placeholder="KSwordSandbox-Win10-Golden"></div>
+                  <div><label for="goldenSnapshotName">Checkpoint</label><input id="goldenSnapshotName" placeholder="Clean"></div>
+                  <div><label for="guestUserName">Guest user</label><input id="guestUserName" placeholder="SandboxUser"></div>
+                  <div><label for="guestWorkingDirectory">Guest working dir</label><input id="guestWorkingDirectory" placeholder="C:\KSwordSandbox"></div>
+                  <div><label for="guestPayloadRoot">Host payload root</label><input id="guestPayloadRoot" placeholder="D:\Temp\KSwordSandbox\payload\guest-tools"></div>
+                  <div><label for="useMockCollector"><input id="useMockCollector" type="checkbox"> <span data-zh="使用 R0 mock collector" data-en="Use R0 mock collector">使用 R0 mock collector</span></label></div>
+                </div>
+              </details>
               <div id="status" class="status"></div>
             </section>
 
@@ -131,27 +163,37 @@ internal static class DashboardExperiencePage
             </section>
 
             <section id="current-job">
-              <h2 data-zh="最近规划的任务" data-en="Last planned job">最近规划的任务</h2>
+              <h2 data-zh="当前任务" data-en="Current job">当前任务</h2>
               <div id="jobResult" class="hint"><span data-zh="尚未规划任务。" data-en="No job planned yet.">尚未规划任务。</span></div>
             </section>
 
             <section id="recent-jobs">
               <h2 data-zh="近期任务" data-en="Recent jobs">近期任务</h2>
-              <p class="hint" data-zh="规划或导入后刷新列表，以比较任务状态、样本路径和报告产物位置。" data-en="Refresh this list after planning or importing to compare job status, sample paths, and report artifact locations.">规划或导入后刷新列表，以比较任务状态、样本路径和报告产物位置。</p>
+              <p class="hint" data-zh="这里仅列出关键状态和入口；详细执行流程和原始事件流在独立页面查看。" data-en="Only key status and entry points are listed here; execution flow and raw event streams live on separate pages.">这里仅列出关键状态和入口；详细执行流程和原始事件流在独立页面查看。</p>
               <button class="secondary" onclick="refreshJobs(true)" data-zh="刷新任务列表" data-en="Refresh job list">刷新任务列表</button>
               <div id="jobList" class="hint"><span data-zh="尚未加载任务。" data-en="No jobs loaded yet.">尚未加载任务。</span></div>
             </section>
           </main>
           <div id="copyToast" class="toast" role="status" aria-live="polite"></div>
           <script>
-            const liveEventOffsets = new Map();
-            const liveEventSourceSignatures = new Map();
-            let liveEventTimer = null;
-            let liveEventStream = null;
-            let liveEventJobId = null;
-            let liveEventMode = 'idle';
             let copyToastTimer = null;
             let currentLanguage = localStorage.getItem('ksword-lang') === 'en' ? 'en' : 'zh';
+            let progressTimer = null;
+            let progressStageIndex = 0;
+            const liveStages = [
+              ['任务已规划', 'Job planned'],
+              ['检查 Hyper-V / 凭据', 'Check Hyper-V / credential'],
+              ['恢复检查点', 'Restore checkpoint'],
+              ['启动虚拟机', 'Start VM'],
+              ['复制样本与工具', 'Stage sample and tools'],
+              ['运行样本与采集器', 'Run sample and collectors'],
+              ['回收事件', 'Collect events'],
+              ['导入并生成报告', 'Import and report']
+            ];
+
+            function t(zh, en) {
+              return currentLanguage === 'en' ? en : zh;
+            }
 
             function setLanguage(lang) {
               currentLanguage = lang === 'en' ? 'en' : 'zh';
@@ -166,7 +208,7 @@ internal static class DashboardExperiencePage
             function applyLanguage() {
               document.documentElement.lang = currentLanguage === 'en' ? 'en' : 'zh-CN';
               document.querySelectorAll('[data-zh][data-en]').forEach(element => {
-                if (element.id === 'candidates' || element.id === 'jobResult' || element.id === 'jobList' || element.id === 'executionResult') {
+                if (element.id === 'candidates' || element.id === 'jobResult' || element.id === 'jobList' || element.id === 'executionResult' || element.id === 'analysisProgress') {
                   return;
                 }
 
@@ -193,6 +235,46 @@ internal static class DashboardExperiencePage
               }
 
               return String(status);
+            }
+
+            function selectPlanTab(name) {
+              for (const candidate of ['upload', 'path', 'scan']) {
+                const tab = document.getElementById(`tab-${candidate}`);
+                tab.classList.toggle('active', candidate === name);
+                tab.setAttribute('aria-selected', candidate === name ? 'true' : 'false');
+                document.getElementById(`panel-${candidate}`).classList.toggle('active', candidate === name);
+              }
+            }
+
+            async function loadConfigDefaults() {
+              try {
+                const response = await fetch('/api/config');
+                const config = await requireOk(response, 'Load config');
+                document.getElementById('goldenVmName').value = config.hyperV?.goldenVmName || '';
+                document.getElementById('goldenSnapshotName').value = config.hyperV?.goldenSnapshotName || '';
+                document.getElementById('guestUserName').value = config.guest?.userName || '';
+                document.getElementById('guestWorkingDirectory').value = config.guest?.workingDirectory || '';
+                document.getElementById('guestPayloadRoot').value = config.paths?.guestPayloadRoot || '';
+                document.getElementById('useMockCollector').checked = Boolean(config.driver?.useMockCollector);
+              } catch {
+                // Keep placeholders when config loading fails; planning still works with server defaults.
+              }
+            }
+
+            function getVmConfig() {
+              const clean = id => {
+                const value = document.getElementById(id).value.trim();
+                return value ? value : undefined;
+              };
+
+              return {
+                goldenVmName: clean('goldenVmName'),
+                goldenSnapshotName: clean('goldenSnapshotName'),
+                guestUserName: clean('guestUserName'),
+                guestWorkingDirectory: clean('guestWorkingDirectory'),
+                guestPayloadRoot: clean('guestPayloadRoot'),
+                useMockCollector: document.getElementById('useMockCollector').checked
+              };
             }
 
             document.addEventListener('click', event => {
@@ -310,7 +392,8 @@ internal static class DashboardExperiencePage
                   body: JSON.stringify({
                     samplePath,
                     durationSeconds: Number(document.getElementById('duration').value || 120),
-                    dryRun: true
+                    dryRun: true,
+                    ...getVmConfig()
                   })
                 });
                 const payload = await requireOk(response, 'Create dry-run analysis plan');
@@ -318,7 +401,8 @@ internal static class DashboardExperiencePage
                 renderJob(payload);
                 applyLanguage();
             refreshJobs(false);
-                setStatus('Job planned. Review status, artifact paths, raw telemetry, and runbook before enabling privileged live execution.', false);
+                setStatus('Job planned. Review the compact card, then start live VM analysis when ready.', false);
+                document.getElementById('current-job').scrollIntoView({ behavior: 'smooth', block: 'start' });
               } catch (error) {
                 setStatus(error.message, true);
               } finally {
@@ -364,77 +448,76 @@ internal static class DashboardExperiencePage
             }
 
             function renderJob(job) {
-              // Inputs: one AnalysisJob payload returned by the API. Processing:
-              // precomputes safe report links and artifact path labels. Return:
-              // no value; the latest job panel is replaced in-place.
               const jobId = String(job.jobId || '');
               const statusLabel = formatJobStatus(job.status);
               const htmlReportPath = job.htmlReportPath || '';
+              const zhReportPath = job.htmlReportZhPath || '';
+              const enReportPath = job.htmlReportEnPath || '';
               const jsonReportPath = job.jsonReportPath || '';
               const runbookExecutionPath = job.runbookExecutionResultPath || '';
               const guestEventsPath = job.guestEventsPath || '';
               const artifactPaths = buildArtifactPaths(job);
               const guestImportStatus = buildGuestImportStatus(job, artifactPaths);
               const servedReportHref = jobId ? `/api/jobs/${encodeURIComponent(jobId)}/report/html` : '';
+              const servedZhReportHref = jobId ? `/api/jobs/${encodeURIComponent(jobId)}/report/html?lang=zh` : '';
+              const servedEnReportHref = jobId ? `/api/jobs/${encodeURIComponent(jobId)}/report/html?lang=en` : '';
               const fileReportHref = toFileUri(htmlReportPath);
               const executionFlowHref = jobId ? `/jobs/${encodeURIComponent(jobId)}/execution-flow` : '';
+              const liveEventsHref = jobId ? `/jobs/${encodeURIComponent(jobId)}/live-events` : '';
               const plannedStepCount = job.runbook?.steps?.length || 0;
-              const messages = (job.messages || []).map(message => `<li data-copy="${escapeAttribute(message)}" data-copy-label="job message">${escapeHtml(message)} ${copyButton(message, 'job message')}</li>`).join('');
-              const reportLinks = htmlReportPath ? `
-                  <a class="buttonlink" target="_blank" rel="noopener" href="${escapeHtml(servedReportHref)}">Open served HTML report</a>
-                  <a class="buttonlink secondary" target="_blank" rel="noopener" href="${escapeHtml(fileReportHref)}">Open local file:// report</a>` : '<span class="hint">No HTML report path is recorded yet.</span>';
+              const messages = (job.messages || []).slice(-3).map(message => `<li data-copy="${escapeAttribute(message)}" data-copy-label="job message">${escapeHtml(message)} ${copyButton(message, 'job message')}</li>`).join('');
               document.getElementById('jobResult').innerHTML = `
-                <p><strong>Job:</strong> ${copyableCode(jobId, 'job id')}</p>
-                <p><strong>Status:</strong> <span class="pill" data-copy="${escapeAttribute(statusLabel)}" data-copy-label="job status">${escapeHtml(statusLabel)}</span></p>
-                <p><strong>Sample:</strong> ${copyableCode(job.sample?.fullPath || '', 'sample path')}</p>
-                <h3>Report access</h3>
-                <p class="button-row">
-                  <button class="secondary" onclick="refreshJob('${escapeJs(jobId)}')">Refresh job</button>
-                  <button class="secondary" onclick="showReportPaths('${escapeJs(htmlReportPath)}')">Show report path</button>
-                  ${reportLinks}
-                </p>
-                <div id="jobReportPaths" class="pathbox">
-                  <p><strong>Guest import status:</strong> <span class="pill" data-copy="${escapeAttribute(guestImportStatus.label)}" data-copy-label="guest import status">${escapeHtml(guestImportStatus.label)}</span> <span class="hint">${escapeHtml(guestImportStatus.detail)}</span></p>
-                  <table class="artifact-table">
-                    <thead><tr><th>Artifact</th><th>Copyable path</th><th>Status</th></tr></thead>
-                    <tbody>
-                      <tr><td>report.html</td><td>${copyableCode(artifactPaths.reportHtmlPath, 'report.html path')}</td><td>${artifactStatus(artifactPaths.reportHtmlPath, 'recorded')}</td></tr>
-                      <tr><td>report.json</td><td>${copyableCode(artifactPaths.reportJsonPath, 'report.json path')}</td><td>${artifactStatus(artifactPaths.reportJsonPath, 'recorded')}</td></tr>
-                      <tr><td>events.json</td><td>${copyableCode(artifactPaths.eventsJsonPath, 'events.json path')}</td><td>${artifactStatus(artifactPaths.eventsJsonPath, guestEventsPath ? 'recorded/import source' : 'expected after live run')}</td></tr>
-                      <tr><td>driver-events.jsonl</td><td>${copyableCode(artifactPaths.driverEventsJsonlPath, 'driver-events.jsonl path')}</td><td>${artifactStatus(artifactPaths.driverEventsJsonlPath, 'expected driver telemetry')}</td></tr>
-                      <tr><td>runbook-execution.json</td><td>${copyableCode(artifactPaths.runbookExecutionPath, 'runbook execution path')}</td><td>${artifactStatus(runbookExecutionPath, runbookExecutionPath ? 'recorded' : 'expected after runbook execution')}</td></tr>
-                    </tbody>
-                  </table>
-                  <p><strong>Imported guest events path:</strong> ${copyableCode(guestEventsPath, 'guest import source path')}</p>
-                  <div class="mini-form">
-                    <label for="guestImportPath">Optional guest events path for manual import</label>
-                    <input id="guestImportPath" placeholder="${escapeAttribute(artifactPaths.eventsJsonPath || 'D:\\runtime\\jobs\\<job>\\guest\\events.json')}" value="${escapeAttribute(guestEventsPath || artifactPaths.eventsJsonPath || '')}" data-copy-label="manual guest import path">
-                    <p class="hint">Leave blank to let the server search the job guest folder, or paste a specific events.json / .jsonl path when collection landed elsewhere.</p>
+                <article class="job-card">
+                  <h3><span data-zh="任务已创建" data-en="Job created">任务已创建</span> ${copyableCode(jobId, 'job id')}</h3>
+                  <div class="job-summary">
+                    <div class="metric"><strong data-zh="状态" data-en="Status">状态</strong><span class="pill" data-copy="${escapeAttribute(statusLabel)}" data-copy-label="job status">${escapeHtml(statusLabel)}</span></div>
+                    <div class="metric"><strong data-zh="样本" data-en="Sample">样本</strong>${copyableCode(job.sample?.fullPath || job.submission?.samplePath || '', 'sample path')}</div>
+                    <div class="metric"><strong data-zh="分析时长" data-en="Duration">分析时长</strong><span>${escapeHtml(String(job.submission?.durationSeconds || '-'))}s</span></div>
+                    <div class="metric"><strong>VM</strong><span>${escapeHtml(job.submission?.goldenVmName || document.getElementById('goldenVmName').value || 'default')}</span></div>
                   </div>
-                  <p class="hint">If the browser blocks the file:// link, copy report.html above or use the served report link. Expected guest paths are shown before import so live operators know where events.json and driver-events.jsonl should appear.</p>
-                </div>
-                <h3>Job messages</h3>
-                ${messages ? `<ul>${messages}</ul>` : '<p class="hint">No job messages recorded.</p>'}
-                <h3>Live raw event monitor</h3>
-                <div class="event-monitor">
                   <p class="button-row">
-                    <span id="liveEventStatus" class="hint">Waiting for live raw telemetry...</span>
-                    <button class="secondary" onclick="refreshLiveEvents('${escapeJs(jobId)}', true)">Refresh raw telemetry now</button>
-                    ${copyButton(jobId, 'live telemetry job id')}
+                    <button onclick="executeRunbook('${escapeJs(jobId)}', true)" data-zh="启动虚拟机执行" data-en="Execute live VM runbook">启动虚拟机执行</button>
+                    <button class="secondary" onclick="executeRunbook('${escapeJs(jobId)}', false)" data-zh="仅记录 dry-run" data-en="Record dry-run only">仅记录 dry-run</button>
+                    <button class="secondary" onclick="importGuestEvents('${escapeJs(jobId)}')" data-zh="手动导入事件" data-en="Import events manually">手动导入事件</button>
+                    <a class="buttonlink" target="_blank" rel="noopener" href="${escapeHtml(servedZhReportHref)}" data-zh="打开中文报告" data-en="Open Chinese report">打开中文报告</a>
+                    <a class="buttonlink secondary" target="_blank" rel="noopener" href="${escapeHtml(servedEnReportHref)}" data-zh="打开英文报告" data-en="Open English report">打开英文报告</a>
+                    <a class="buttonlink secondary" target="_blank" rel="noopener" href="${escapeHtml(executionFlowHref)}" data-zh="执行流程 / Execution flow" data-en="Execution flow / 执行流程">执行流程 / Execution flow</a>
+                    <a class="buttonlink secondary" target="_blank" rel="noopener" href="${escapeHtml(liveEventsHref)}" data-zh="实时原始事件 / Live raw event monitor" data-en="Live raw event monitor / 实时原始事件">实时原始事件 / Live raw event monitor</a>
                   </p>
-                  <div id="liveEventSources" class="hint"></div>
-                  <div id="liveEventRows" class="hint">No raw events loaded yet.</div>
-                </div>
-                <h3 data-zh="执行" data-en="Execution">执行</h3>
-                <p class="button-row">
-                  <button class="secondary" onclick="executeRunbook('${escapeJs(jobId)}', false)" data-zh="记录一次 dry-run" data-en="Record dry-run execution">记录一次 dry-run</button>
-                  <button onclick="executeRunbook('${escapeJs(jobId)}', true)" data-zh="启动虚拟机执行" data-en="Execute live runbook">启动虚拟机执行</button>
-                  <button class="secondary" onclick="importGuestEvents('${escapeJs(jobId)}')" data-zh="导入事件并刷新报告" data-en="Import events / refresh report">导入事件并刷新报告</button>
-                  <a class="buttonlink secondary" target="_blank" rel="noopener" href="${escapeHtml(executionFlowHref)}" data-zh="执行流程 / Execution flow" data-en="Execution flow / 执行流程">执行流程 / Execution flow</a>
-                </p>
-                <div id="executionResult" class="hint" data-copy="planned steps: ${plannedStepCount}" data-copy-label="planned runbook step count">已规划 ${plannedStepCount} 个步骤。主界面不展开 1~16 步；请打开“执行流程 / Execution flow”查看独立视图。</div>`;
+                  <div id="analysisProgress" class="progress-box stage-progress">
+                    <strong data-zh="阶段进度" data-en="Stage progress">阶段进度</strong>
+                    <div class="progress-bar"><div id="progressFill" class="progress-fill"></div></div>
+                    <div id="stageList" class="stages"></div>
+                    <p id="progressText" class="hint" data-zh="等待启动。虚拟机恢复/启动可能占用大部分时间。" data-en="Waiting to start. VM restore/start usually takes most of the time.">等待启动。虚拟机恢复/启动可能占用大部分时间。</p>
+                  </div>
+                  <p class="hint"><strong>Guest import status:</strong> <span class="pill" data-copy="${escapeAttribute(guestImportStatus.label)}" data-copy-label="guest import status">${escapeHtml(guestImportStatus.label)}</span> <span>${escapeHtml(guestImportStatus.detail)}</span></p>
+                  <div class="mini-form">
+                    <label for="guestImportPath">events.json / driver JSONL</label>
+                    <input id="guestImportPath" placeholder="${escapeAttribute(artifactPaths.eventsJsonPath || 'D:\\runtime\\jobs\\<job>\\guest\\events.json')}" value="${escapeAttribute(guestEventsPath || artifactPaths.eventsJsonPath || '')}" data-copy-label="manual guest import path">
+                  </div>
+                  <details id="jobReportPaths" class="compact-details">
+                    <summary data-zh="路径 / Artifacts" data-en="Artifacts / 路径">路径 / Artifacts</summary>
+                    <table class="artifact-table">
+                      <thead><tr><th>Artifact</th><th>Copyable path</th><th>Status</th></tr></thead>
+                      <tbody>
+                        <tr><td>report.html</td><td>${copyableCode(artifactPaths.reportHtmlPath, 'report.html path')}</td><td><a target="_blank" rel="noopener" href="${escapeHtml(servedReportHref)}">Open served HTML report</a> · <a target="_blank" rel="noopener" href="${escapeHtml(fileReportHref)}">Open local file:// report</a></td></tr>
+                        <tr><td>report.zh.html</td><td>${copyableCode(zhReportPath, 'report.zh.html path')}</td><td><a target="_blank" rel="noopener" href="${escapeHtml(servedZhReportHref)}">中文</a></td></tr>
+                        <tr><td>report.en.html</td><td>${copyableCode(enReportPath, 'report.en.html path')}</td><td><a target="_blank" rel="noopener" href="${escapeHtml(servedEnReportHref)}">English</a></td></tr>
+                        <tr><td>report.json</td><td>${copyableCode(jsonReportPath, 'report.json path')}</td><td>${artifactStatus(jsonReportPath, 'recorded')}</td></tr>
+                        <tr><td>events.json</td><td>${copyableCode(artifactPaths.eventsJsonPath, 'events.json path')}</td><td>${artifactStatus(artifactPaths.eventsJsonPath, guestEventsPath ? 'recorded/import source' : 'expected after live run')}</td></tr>
+                        <tr><td>driver-events.jsonl</td><td>${copyableCode(artifactPaths.driverEventsJsonlPath, 'driver-events.jsonl path')}</td><td>${artifactStatus(artifactPaths.driverEventsJsonlPath, 'expected driver telemetry')}</td></tr>
+                        <tr><td>runbook-execution.json</td><td>${copyableCode(artifactPaths.runbookExecutionPath, 'runbook execution path')}</td><td>${artifactStatus(runbookExecutionPath, runbookExecutionPath ? 'recorded' : 'expected after runbook execution')}</td></tr>
+                      </tbody>
+                    </table>
+                  </details>
+                  <details class="compact-details">
+                    <summary data-zh="最近消息" data-en="Recent messages">最近消息</summary>
+                    ${messages ? `<ul>${messages}</ul>` : '<p class="hint">No job messages recorded.</p>'}
+                  </details>
+                  <div id="executionResult" class="hint" data-copy="planned steps: ${plannedStepCount}" data-copy-label="planned runbook step count">已规划 ${plannedStepCount} 个步骤。主界面不展开 1~16 步；请打开“执行流程 / Execution flow”查看独立视图。</div>
+                </article>`;
               applyLanguage();
-              startLiveMonitor(jobId);
+              renderStages(0, false);
             }
 
             async function refreshJob(jobId) {
@@ -515,7 +598,7 @@ internal static class DashboardExperiencePage
                   <td data-copy="${escapeAttribute(statusLabel)}" data-copy-label="job status">${escapeHtml(statusLabel)}</td>
                   <td>${copyableCode(samplePath, 'job sample path', '-')}</td>
                   <td>${copyableCode(reportPath, 'job report.html path', '-')}</td>
-                  <td><button class="secondary" onclick="refreshJob('${escapeJs(jobId)}')" data-zh="打开" data-en="Open">打开</button></td>
+                  <td><button class="secondary" onclick="refreshJob('${escapeJs(jobId)}')" data-zh="打开" data-en="Open">打开</button> <a href="/jobs/${encodeURIComponent(jobId)}/live-events" target="_blank" rel="noopener">Live raw event monitor</a></td>
                 </tr>`;
               }).join('');
 
@@ -525,283 +608,6 @@ internal static class DashboardExperiencePage
                   <tbody>${rows}</tbody>
                 </table>`;
               applyLanguage();
-            }
-
-            function startLiveMonitor(jobId) {
-              // Inputs: the current job id rendered in the UI. Processing:
-              // resets the visible raw-event table for that job, prefers an
-              // SSE EventSource stream, and falls back to one shared polling
-              // timer when streaming is unavailable. Return: no value.
-              if (!jobId) {
-                return;
-              }
-
-              stopLiveMonitor();
-              liveEventJobId = jobId;
-              liveEventOffsets.set(jobId, 0);
-              liveEventSourceSignatures.delete(jobId);
-
-              const rows = document.getElementById('liveEventRows');
-              if (rows) {
-                rows.innerHTML = '<p class="hint">Opening live raw-event stream...</p>';
-              }
-
-              if ('EventSource' in window) {
-                startLiveEventStream(jobId);
-              } else {
-                startLiveEventPolling(jobId, true, 'EventSource is not available in this browser.');
-              }
-            }
-
-            function stopLiveMonitor() {
-              // Inputs: none. Processing: closes any active SSE stream and
-              // clears the polling timer before another job is rendered.
-              // Return: no value.
-              if (liveEventStream) {
-                liveEventStream.close();
-                liveEventStream = null;
-              }
-
-              if (liveEventTimer) {
-                clearInterval(liveEventTimer);
-                liveEventTimer = null;
-              }
-
-              liveEventMode = 'idle';
-            }
-
-            function startLiveEventStream(jobId) {
-              // Inputs: job id for the current panel. Processing: opens an
-              // EventSource against the SSE endpoint and appends every snapshot;
-              // on connection failure the function switches to polling. Return:
-              // no value.
-              liveEventMode = 'sse';
-              const url = `/api/jobs/${encodeURIComponent(jobId)}/events/stream?offset=0&take=100&intervalMs=2000`;
-              try {
-                liveEventStream = new EventSource(url);
-              } catch (error) {
-                startLiveEventPolling(jobId, false, `SSE could not start: ${error.message}`);
-                return;
-              }
-
-              const status = document.getElementById('liveEventStatus');
-              if (status) {
-                status.className = 'hint';
-                status.textContent = 'Opening SSE raw-event stream...';
-              }
-
-              liveEventStream.onopen = () => {
-                const openStatus = document.getElementById('liveEventStatus');
-                if (openStatus && liveEventMode === 'sse') {
-                  openStatus.className = 'hint';
-                  openStatus.textContent = 'SSE raw-event stream connected; waiting for snapshots...';
-                }
-              };
-
-              liveEventStream.addEventListener('snapshot', event => {
-                if (liveEventJobId !== jobId) {
-                  return;
-                }
-
-                try {
-                  const snapshot = JSON.parse(event.data);
-                  renderLiveEventSnapshot(jobId, snapshot, liveEventOffsets.get(jobId) === 0, 'SSE');
-                } catch (error) {
-                  const parseStatus = document.getElementById('liveEventStatus');
-                  if (parseStatus) {
-                    parseStatus.className = 'error';
-                    parseStatus.textContent = `SSE snapshot parse failed: ${error.message}`;
-                  }
-                }
-              });
-
-              liveEventStream.onerror = () => {
-                if (liveEventJobId !== jobId || liveEventMode !== 'sse') {
-                  return;
-                }
-
-                if (liveEventStream) {
-                  liveEventStream.close();
-                  liveEventStream = null;
-                }
-
-                startLiveEventPolling(jobId, false, 'SSE stream disconnected; switched to polling fallback.');
-              };
-            }
-
-            function startLiveEventPolling(jobId, reset, reason) {
-              // Inputs: job id, reset flag, and optional fallback reason.
-              // Processing: starts the legacy polling endpoint at the current
-              // offset and keeps the raw monitor alive. Return: no value.
-              liveEventMode = 'polling';
-              if (reason) {
-                const status = document.getElementById('liveEventStatus');
-                if (status) {
-                  status.className = 'hint';
-                  status.textContent = reason;
-                }
-              }
-
-              refreshLiveEvents(jobId, reset);
-              liveEventTimer = setInterval(() => {
-                if (liveEventJobId) {
-                  refreshLiveEvents(liveEventJobId, false);
-                }
-              }, 2000);
-            }
-
-            async function refreshLiveEvents(jobId, reset) {
-              // Inputs: job id and a reset flag. Processing: calls the raw
-              // live-events API with the last offset, updates source labels, and
-              // appends unclassified rows. Return: no value; failures are shown
-              // inline without stopping the rest of the dashboard.
-              if (!jobId) {
-                return;
-              }
-
-              const status = document.getElementById('liveEventStatus');
-              const rows = document.getElementById('liveEventRows');
-              const sources = document.getElementById('liveEventSources');
-              if (!status || !rows || !sources) {
-                return;
-              }
-
-              if (reset) {
-                liveEventOffsets.set(jobId, 0);
-                rows.innerHTML = '<p class="hint">Loading raw events...</p>';
-              }
-
-              const offset = liveEventOffsets.get(jobId) || 0;
-              try {
-                const response = await fetch(`/api/jobs/${encodeURIComponent(jobId)}/events/live?offset=${offset}&take=100`);
-                const snapshot = await requireOk(response, 'Refresh live raw telemetry');
-
-                renderLiveEventSnapshot(jobId, snapshot, reset || offset === 0, 'polling');
-              } catch (error) {
-                status.textContent = `Live event refresh failed: ${error.message}`;
-                status.className = 'error';
-              }
-            }
-
-            function renderLiveEventSnapshot(jobId, snapshot, replace, transport) {
-              // Inputs: the active job id, one API/SSE live-event snapshot,
-              // replacement flag, and transport label. Processing: advances
-              // the cursor, updates source labels, and appends raw rows without
-              // classification. Return: no value.
-              const status = document.getElementById('liveEventStatus');
-              const sources = document.getElementById('liveEventSources');
-              if (!status || !sources) {
-                return;
-              }
-
-              const previousOffset = liveEventOffsets.get(jobId) || 0;
-              const sourceSignature = buildLiveSourceSignature(snapshot.sources || []);
-              const previousSourceSignature = liveEventSourceSignatures.get(jobId);
-              if (previousSourceSignature && previousSourceSignature !== sourceSignature) {
-                liveEventOffsets.set(jobId, 0);
-                if (transport === 'polling' && previousOffset > 0) {
-                  liveEventSourceSignatures.set(jobId, sourceSignature);
-                  refreshLiveEvents(jobId, true);
-                  return;
-                }
-
-                replace = true;
-              }
-
-              liveEventSourceSignatures.set(jobId, sourceSignature);
-              const nextOffset = snapshot.nextOffset == null ? previousOffset : Number(snapshot.nextOffset);
-              liveEventOffsets.set(jobId, Number.isFinite(nextOffset) ? nextOffset : previousOffset);
-
-              status.className = 'hint';
-              status.textContent = `${transport} raw events: ${snapshot.totalEvents || 0}; next offset: ${liveEventOffsets.get(jobId) || 0}; updated ${new Date().toLocaleTimeString()}.`;
-              sources.innerHTML = renderLiveEventSources(snapshot.sources || []);
-              renderLiveEventRows(snapshot.events || [], replace);
-            }
-
-            function buildLiveSourceSignature(sources) {
-              // Inputs: source artifact paths from one live snapshot.
-              // Processing: sorts them case-insensitively and joins with a
-              // delimiter. Return: a stable key used to reset polling cursors
-              // when guest output files replace planning-only report events.
-              return (sources || [])
-                .map(source => String(source))
-                .sort((left, right) => left.localeCompare(right, undefined, { sensitivity: 'accent' }))
-                .join('\n');
-            }
-
-            function renderLiveEventSources(sources) {
-              // Inputs: source artifact paths returned by the API. Processing:
-              // escapes them and renders a compact list. Return: HTML text.
-              if (!sources.length) {
-                return '<span class="hint">Sources: planning report only or no guest artifacts yet.</span>';
-              }
-
-              const items = sources.map(source => `<li>${copyableCode(source, 'live raw telemetry source path')}</li>`).join('');
-              return `<span class="hint">Sources:</span><ul class="event-source-list">${items}</ul>`;
-            }
-
-            function renderLiveEventRows(events, replace) {
-              // Inputs: raw SandboxEvent rows and a replacement flag. Processing:
-              // creates the table on demand and appends escaped rows. Return: no
-              // value; the monitor displays a no-events hint when empty.
-              const container = document.getElementById('liveEventRows');
-              if (!container) {
-                return;
-              }
-
-              if (replace || !container.querySelector('tbody')) {
-                container.innerHTML = `
-                  <table>
-                    <thead><tr><th>Time</th><th>Type</th><th>Source</th><th>Process</th><th>Path / command</th><th>Data</th></tr></thead>
-                    <tbody></tbody>
-                  </table>`;
-              }
-
-              const body = container.querySelector('tbody');
-              if (!body) {
-                return;
-              }
-
-              if (!events.length && body.children.length === 0) {
-                body.innerHTML = '<tr><td colspan="6" class="hint">No raw events available yet.</td></tr>';
-                return;
-              }
-
-              if (events.length && body.children.length === 1 && body.textContent.includes('No raw events')) {
-                body.innerHTML = '';
-              }
-
-              for (const evt of events) {
-                const processLabel = `${escapeHtml(evt.processName || '-') } (${escapeHtml(evt.processId == null ? '-' : String(evt.processId))})`;
-                const dataText = Object.entries(evt.data || {})
-                  .map(([key, value]) => `${key}=${String(value)}`)
-                  .join('\n');
-                const data = Object.entries(evt.data || {})
-                  .map(([key, value]) => `<span data-copy="${escapeAttribute(`${key}=${String(value)}`)}" data-copy-label="event data field">${escapeHtml(key)}=${escapeHtml(String(value))}</span>`)
-                  .join('<br>');
-                const eventJson = JSON.stringify(evt, null, 2);
-                const row = document.createElement('tr');
-                row.innerHTML = `
-                  <td data-copy="${escapeAttribute(formatEventTime(evt.timestamp))}" data-copy-label="event time">${escapeHtml(formatEventTime(evt.timestamp))}</td>
-                  <td data-copy="${escapeAttribute(evt.eventType || '-')}" data-copy-label="event type">${escapeHtml(evt.eventType || '-')}</td>
-                  <td data-copy="${escapeAttribute(evt.source || '-')}" data-copy-label="event source">${escapeHtml(evt.source || '-')}</td>
-                  <td data-copy="${escapeAttribute(processLabel)}" data-copy-label="event process">${processLabel}</td>
-                  <td data-copy="${escapeAttribute([evt.path || '', evt.commandLine || ''].filter(Boolean).join('\n'))}" data-copy-label="event path and command">${copyableCode(evt.path || '', 'event path', '-')}<br><span class="hint">${evt.commandLine ? copyableCode(evt.commandLine, 'event command line') : ''}</span></td>
-                  <td data-copy="${escapeAttribute(dataText)}" data-copy-label="event data">${data || '<span class="hint">-</span>'} ${copyButton(eventJson, 'raw telemetry event')}</td>`;
-                body.appendChild(row);
-              }
-            }
-
-            function formatEventTime(timestamp) {
-              // Inputs: timestamp from the API. Processing: attempts local time
-              // formatting and falls back to the raw string. Return: display
-              // text for the event table.
-              if (!timestamp) {
-                return '-';
-              }
-
-              const parsed = new Date(timestamp);
-              return Number.isNaN(parsed.getTime()) ? String(timestamp) : parsed.toLocaleTimeString();
             }
 
             function showReportPaths(reportPath) {
@@ -816,8 +622,57 @@ internal static class DashboardExperiencePage
               setStatus(reportPath ? `HTML report path: ${reportPath}` : 'No HTML report path is recorded for this job yet.', !reportPath);
             }
 
+            function renderStages(active, completed) {
+              const list = document.getElementById('stageList');
+              const fill = document.getElementById('progressFill');
+              if (!list || !fill) {
+                return;
+              }
+
+              list.innerHTML = liveStages.map((stage, index) => {
+                const css = completed || index < active ? 'done' : index === active ? 'active' : '';
+                return `<div class="stage ${css}">${escapeHtml(t(stage[0], stage[1]))}</div>`;
+              }).join('');
+              const percent = completed ? 100 : Math.min(94, Math.round((active / (liveStages.length - 1)) * 100));
+              fill.style.width = `${percent}%`;
+            }
+
+            function startEstimatedProgress(live) {
+              stopEstimatedProgress();
+              progressStageIndex = live ? 1 : 0;
+              renderStages(progressStageIndex, false);
+              const text = document.getElementById('progressText');
+              if (text) {
+                text.textContent = live
+                  ? t('正在执行 live runbook；启动/恢复 VM 可能需要几十秒到数分钟。', 'Executing live runbook; VM start/restore may take tens of seconds to minutes.')
+                  : t('正在记录 dry-run 执行结果。', 'Recording dry-run execution result.');
+              }
+
+              progressTimer = setInterval(() => {
+                progressStageIndex = Math.min(liveStages.length - 2, progressStageIndex + 1);
+                renderStages(progressStageIndex, false);
+                const stage = liveStages[progressStageIndex];
+                if (text) {
+                  text.textContent = `${t('当前阶段', 'Current stage')}: ${t(stage[0], stage[1])}`;
+                }
+              }, live ? 9000 : 1500);
+            }
+
+            function stopEstimatedProgress() {
+              if (progressTimer) {
+                clearInterval(progressTimer);
+                progressTimer = null;
+              }
+            }
+
+            function openReport(jobId) {
+              const lang = currentLanguage === 'en' ? 'en' : 'zh';
+              window.location.href = `/api/jobs/${encodeURIComponent(jobId)}/report/html?lang=${lang}`;
+            }
+
             async function executeRunbook(jobId, live) {
               setBusy(true);
+              startEstimatedProgress(live);
               setStatus(live ? 'Executing live Hyper-V runbook...' : 'Recording dry-run runbook execution...', false);
               try {
                 const response = await fetch(`/api/jobs/${encodeURIComponent(jobId)}/runbook/execute`, {
@@ -841,8 +696,18 @@ internal static class DashboardExperiencePage
             refreshJobs(false);
                 const suffix = payload.guestImportMessage ? ` ${payload.guestImportMessage}` : '';
                 const importFailed = Boolean(payload.guestImportMessage && !payload.guestImportSucceeded);
+                stopEstimatedProgress();
+                renderStages(liveStages.length - 1, Boolean(execution.success));
                 setStatus((execution.success ? 'Runbook execution completed.' : 'Runbook execution stopped with a failure.') + suffix, !execution.success || importFailed);
+                if (live && execution.success) {
+                  const text = document.getElementById('progressText');
+                  if (text) {
+                    text.textContent = t('分析完成，正在打开报告。', 'Analysis completed; opening report.');
+                  }
+                  setTimeout(() => openReport(jobId), 900);
+                }
               } catch (error) {
+                stopEstimatedProgress();
                 setStatus(error.message, true);
               } finally {
                 setBusy(false);
@@ -1097,6 +962,10 @@ internal static class DashboardExperiencePage
 
             function setBusy(isBusy) {
               for (const button of document.querySelectorAll('button:not(.copy-btn)')) {
+                if (button.classList.contains('lang-toggle') || button.classList.contains('tab-button')) {
+                  continue;
+                }
+
                 button.disabled = isBusy;
               }
             }
@@ -1216,6 +1085,8 @@ internal static class DashboardExperiencePage
             }
 
             applyLanguage();
+            selectPlanTab('upload');
+            loadConfigDefaults();
             refreshJobs(false);
           </script>
         </body>

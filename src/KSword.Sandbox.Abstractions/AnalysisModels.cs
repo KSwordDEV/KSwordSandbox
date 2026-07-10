@@ -29,6 +29,18 @@ public sealed record SandboxSubmission
     public int DurationSeconds { get; init; } = 120;
 
     public bool DryRun { get; init; } = true;
+
+    public string? GoldenVmName { get; init; }
+
+    public string? GoldenSnapshotName { get; init; }
+
+    public string? GuestUserName { get; init; }
+
+    public string? GuestWorkingDirectory { get; init; }
+
+    public string? GuestPayloadRoot { get; init; }
+
+    public bool? UseMockCollector { get; init; }
 }
 
 /// <summary>
@@ -173,6 +185,10 @@ public sealed record AnalysisJob
     public string? JsonReportPath { get; init; }
 
     public string? HtmlReportPath { get; init; }
+
+    public string? HtmlReportZhPath { get; init; }
+
+    public string? HtmlReportEnPath { get; init; }
 
     public string? RunbookExecutionResultPath { get; init; }
 

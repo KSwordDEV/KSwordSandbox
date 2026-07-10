@@ -110,7 +110,9 @@ public sealed class HostArtifactIndexBuilder
             return ArtifactKind.ReportJson;
         }
 
-        if (string.Equals(fileName, "report.html", StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(fileName, "report.html", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(fileName, "report.zh.html", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(fileName, "report.en.html", StringComparison.OrdinalIgnoreCase))
         {
             return ArtifactKind.ReportHtml;
         }

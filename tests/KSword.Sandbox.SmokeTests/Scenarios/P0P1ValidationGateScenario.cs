@@ -46,6 +46,7 @@ internal sealed class P0P1ValidationGateScenario : ISmokeTestScenario
     {
         var program = ReadRepositoryText(context, "src", "KSword.Sandbox.Web", "Program.cs");
         var dashboard = ReadRepositoryText(context, "src", "KSword.Sandbox.Web", "Dashboard", "DashboardExperiencePage.cs");
+        var liveEventsPage = ReadRepositoryText(context, "src", "KSword.Sandbox.Web", "Dashboard", "LiveEventsPage.cs");
         var routeCatalog = ReadRepositoryText(context, "src", "KSword.Sandbox.Web", "Infrastructure", "WebRouteCatalog.cs");
         var analysisModels = ReadRepositoryText(context, "src", "KSword.Sandbox.Abstractions", "AnalysisModels.cs");
 
@@ -58,12 +59,15 @@ internal sealed class P0P1ValidationGateScenario : ISmokeTestScenario
         RequireContains(program, "text/event-stream", "SSE endpoint must use the event-stream media type.");
         RequireContains(program, "BuildLiveSourceSignature", "SSE endpoint must reset offsets when live source files change.");
 
-        RequireContains(dashboard, "new EventSource(url)", "Dashboard must prefer the SSE EventSource live monitor.");
-        RequireContains(dashboard, "/events/stream?offset=0&take=100&intervalMs=2000", "Dashboard must call the SSE endpoint with cursor controls.");
-        RequireContains(dashboard, "/events/live?offset=${offset}&take=100", "Dashboard must keep the polling fallback endpoint wired.");
-        RequireContains(dashboard, "liveEventSourceSignatures", "Dashboard must reset live cursors when event artifacts change.");
-        RequireContains(dashboard, "snapshot.nextOffset", "Dashboard must honor the server cursor.");
-        RequireContains(dashboard, "snapshot.sources", "Dashboard must display live source artifacts.");
+        RequireContains(program, "/jobs/{jobId:guid}/live-events", "Web host must expose a dedicated live raw-event monitor page.");
+        RequireContains(program, "LiveEventsPage.Render", "The live raw-event monitor route must render the dedicated page.");
+        RequireContains(dashboard, "/live-events", "Dashboard must link to the dedicated live raw-event monitor instead of inlining it.");
+        RequireContains(liveEventsPage, "new EventSource", "Dedicated live monitor must prefer the SSE EventSource transport.");
+        RequireContains(liveEventsPage, "/events/stream?offset=${eventOffset}&take=100&intervalMs=1500", "Dedicated live monitor must call the SSE endpoint with cursor controls.");
+        RequireContains(liveEventsPage, "/events/live?offset=${eventOffset}&take=100", "Dedicated live monitor must keep the polling fallback endpoint wired.");
+        RequireContains(liveEventsPage, "sourceSignature", "Dedicated live monitor must reset live cursors when event artifacts change.");
+        RequireContains(liveEventsPage, "snapshot.nextOffset", "Dedicated live monitor must honor the server cursor.");
+        RequireContains(liveEventsPage, "snapshot.sources", "Dedicated live monitor must display live source artifacts.");
 
         RequireContains(routeCatalog, "LiveEvents(Guid jobId)", "Route catalog must expose the polling route helper.");
         RequireContains(routeCatalog, "LiveEventStream(Guid jobId)", "Route catalog must expose the SSE route helper.");

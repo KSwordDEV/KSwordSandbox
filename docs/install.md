@@ -81,6 +81,21 @@ Non-interactive Hyper-V config update:
 Useful optional parameters are `-RuntimeRoot`, `-GuestPayloadRoot`,
 `-GuestUserName`, `-SecretName`, and `-LocalConfigPath`.
 
+After install or config changes, run the read-only readiness preflight from an
+elevated PowerShell session:
+
+```powershell
+.\scripts\Test-HyperVReadiness.ps1
+```
+
+The readiness script reuses the installed `Sandbox__ConfigPath` /
+`install-state.json` values, so you normally do not need to retype VM name,
+checkpoint, guest username, guest working directory, runtime root, or payload
+root. It checks the password secret presence, target VM, clean checkpoint,
+Guest Service Interface, PowerShell Direct when the VM is already running,
+guest working directory shape, host payload files, and repository secret
+hygiene without starting/restoring/stopping a VM.
+
 ## Reset password secret
 
 This is host-only secret storage. It does not change the VM account.
@@ -146,6 +161,16 @@ Status shows secret presence, runtime folders, local config path,
 `Sandbox__ConfigPath`, Hyper-V module availability, VM existence, checkpoint
 existence, and whether the shell is elevated. It does not print passwords.
 
+For deeper one-command readiness, use:
+
+```powershell
+.\scripts\Test-HyperVReadiness.ps1 -PromptForMissingGuestPassword
+```
+
+`-PromptForMissingGuestPassword` is process-only and non-persistent. It is for a
+single elevated shell when you do not want to write User environment or DPAPI
+backup. Use installer password reset modes for repeatable local setup.
+
 Uninstall removes the current process/User environment secret plus local
 installer metadata/DPAPI backup. It does not delete runtime job outputs under
 `D:\Temp\KSwordSandbox`.
@@ -159,3 +184,6 @@ guest Windows credential to stage the sample, run Guest Agent/R0Collector, and
 copy outputs back.
 
 Still avoid putting the value in git, reports, screenshots, or runbook logs.
+The readiness and repository-policy scripts compare the current environment
+secret value against candidate repository text files and fail without printing
+the value if it appears in a file that could be staged.

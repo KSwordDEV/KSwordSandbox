@@ -86,6 +86,9 @@ internal sealed class InstallerContractScenario : ISmokeTestScenario
         RequireContains(doc, "Uninstall", "Install doc should describe uninstall.");
         RequireContains(doc, "Status", "Install doc should describe status.");
         RequireContains(doc, "The password value is never printed.", "Install doc should state that password values are never printed.");
+        RequireContains(doc, ".\\scripts\\Test-HyperVReadiness.ps1", "Install doc should point operators to the one-command readiness preflight.");
+        RequireContains(doc, "PromptForMissingGuestPassword", "Install doc should document the process-only readiness password prompt.");
+        RequireContains(doc, "repository-policy", "Install doc should describe secret hygiene repository policy.");
 
         return Task.FromResult(new SmokeTestResult
         {

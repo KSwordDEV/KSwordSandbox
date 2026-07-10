@@ -67,6 +67,9 @@
     <ClCompile Include="src\Eventing\EventQueue.c">
       <Filter>Source Files\Eventing</Filter>
     </ClCompile>
+    <ClCompile Include="src\Eventing\EventRing.c">
+      <Filter>Source Files\Eventing</Filter>
+    </ClCompile>
     <ClCompile Include="src\Producers\File\FileFilter.c">
       <Filter>Source Files\Producers\File</Filter>
     </ClCompile>

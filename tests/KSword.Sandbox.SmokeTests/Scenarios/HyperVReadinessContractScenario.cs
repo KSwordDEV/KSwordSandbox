@@ -18,6 +18,7 @@ internal sealed class HyperVReadinessContractScenario : ISmokeTestScenario
         cancellationToken.ThrowIfCancellationRequested();
 
         var readinessScript = ReadRepositoryText(context, "scripts", "Test-HyperVReadiness.ps1");
+        var repositoryPolicyScript = ReadRepositoryText(context, "scripts", "Test-RepositoryPolicy.ps1");
         var payloadScript = ReadRepositoryText(context, "scripts", "Prepare-GuestPayload.ps1");
         var readinessDoc = ReadRepositoryText(context, "docs", "hyperv-readiness.md");
         var goldenVmDoc = ReadRepositoryText(context, "docs", "golden-vm.md");
@@ -32,6 +33,15 @@ internal sealed class HyperVReadinessContractScenario : ISmokeTestScenario
         RequireContains(readinessScript, "MutatedVm", "Readiness output should explicitly mark non-mutating probes.");
         RequireContains(readinessScript, "GuestPayloadRoot", "Readiness summary should include the host payload root.");
         RequireContains(readinessScript, "Details.Contains('State')", "Readiness script should read VM state from readiness detail dictionaries.");
+        RequireContains(readinessScript, "Resolve-ReadinessInputConfiguration", "Readiness should reuse install/run local config when no explicit parameters are provided.");
+        RequireContains(readinessScript, "PromptForMissingGuestPassword", "Readiness should offer an opt-in process-only password prompt.");
+        RequireContains(readinessScript, "Guest working directory", "Readiness should validate the configured guest working directory.");
+        RequireContains(readinessScript, "Repository secret hygiene", "Readiness should guard against committing the current guest password value.");
+        RequireContains(readinessScript, "SecretValuePrinted = $false", "Readiness should explicitly avoid printing password values.");
+
+        RequireContains(repositoryPolicyScript, "SecretEnvironmentNames", "Repository policy should scan configured environment secrets.");
+        RequireContains(repositoryPolicyScript, "Secret value from environment variable", "Repository policy should reject current secret values in candidate files.");
+        RequireContains(repositoryPolicyScript, "Value was not printed", "Repository policy should not print rejected secret values.");
 
         RequireContains(payloadScript, "payloadContractVersion", "Payload manifest should expose a contract version.");
         RequireContains(payloadScript, "requiredHostFiles", "Payload manifest should list readiness-required host files.");
@@ -41,8 +51,11 @@ internal sealed class HyperVReadinessContractScenario : ISmokeTestScenario
         RequireContains(readinessDoc, "PowerShell Direct", "Readiness doc should describe PowerShell Direct checks.");
         RequireContains(readinessDoc, "Guest deployed payload files", "Readiness doc should describe guest payload checks.");
         RequireContains(readinessDoc, "does not start the VM", "Readiness doc should state that off VMs are not started.");
+        RequireContains(readinessDoc, "Readiness input resolution", "Readiness doc should describe install/run config resolution.");
+        RequireContains(readinessDoc, "Repository secret hygiene", "Readiness doc should describe no-secret-in-git checks.");
         RequireContains(goldenVmDoc, "Readiness preflight", "Golden VM doc should reference the readiness preflight.");
         RequireContains(runbookDoc, "The preflight is intentionally safer than the live runbook", "Runbook doc should distinguish preflight from live execution.");
+        RequireContains(runbookDoc, "PromptForMissingGuestPassword", "Runbook doc should document the process-only password prompt.");
         RequireContains(payloadDoc, "payload contract version", "Payload staging doc should mention manifest contract metadata.");
 
         return Task.FromResult(new SmokeTestResult

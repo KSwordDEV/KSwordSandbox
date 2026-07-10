@@ -9,6 +9,25 @@ using KSword.Sandbox.Core.Artifacts;
 namespace KSword.Sandbox.Core.Reporting;
 
 /// <summary>
+/// Defines the localized HTML report variants supported by the renderer.
+/// Inputs are selected by callers before rendering; processing uses the value
+/// to emit language-specific chrome; the generated evidence remains unchanged.
+/// </summary>
+public enum HtmlReportLanguage
+{
+    English,
+    ChineseSimplified
+}
+
+/// <summary>
+/// Represents one generated localized report document.
+/// Inputs are a target filename, language, culture name, and HTML payload;
+/// processing is performed by <see cref="HtmlReportRenderer"/>; the value is
+/// returned to callers that want to write report.en.html/report.zh.html pairs.
+/// </summary>
+public sealed record HtmlReportDocument(string FileName, HtmlReportLanguage Language, string CultureName, string Html);
+
+/// <summary>
 /// Renders a local, self-contained HTML report from normalized analysis data.
 /// Inputs are report models, processing groups findings and events into a
 /// Microstep-style report layout, and the method returns a complete HTML
@@ -30,10 +49,15 @@ public sealed class HtmlReportRenderer
     /// summary, detection, static, dynamic, network, and failure sections, and
     /// the method returns HTML text.
     /// </summary>
-    public string Render(AnalysisReport report)
-    {
-        return Render(report, []);
-    }
+    public string Render(AnalysisReport report) => Render(report, []);
+
+    /// <summary>
+    /// Converts one AnalysisReport to localized HTML.
+    /// Inputs are a completed or planned report and language; processing writes
+    /// report chrome in that language while preserving normalized evidence;
+    /// the method returns HTML text.
+    /// </summary>
+    public string Render(AnalysisReport report, HtmlReportLanguage language) => Render(report, [], language);
 
     /// <summary>
     /// Converts one AnalysisReport plus optional artifact descriptors to HTML.
@@ -41,7 +65,76 @@ public sealed class HtmlReportRenderer
     /// renders artifact links before behavior timelines; the method returns a
     /// complete HTML document string.
     /// </summary>
-    public string Render(AnalysisReport report, IEnumerable<ArtifactDescriptor>? artifacts)
+    public string Render(AnalysisReport report, IEnumerable<ArtifactDescriptor>? artifacts) =>
+        Render(report, artifacts, HtmlReportLanguage.English);
+
+    /// <summary>
+    /// Converts one AnalysisReport plus optional artifact descriptors to
+    /// localized HTML.
+    /// Inputs are a report, host/guest artifact index entries, and language;
+    /// processing renders artifact links before behavior timelines and then
+    /// localizes the report shell; the method returns a complete HTML document.
+    /// </summary>
+    public string Render(AnalysisReport report, IEnumerable<ArtifactDescriptor>? artifacts, HtmlReportLanguage language)
+    {
+        var html = RenderEnglishCore(report, artifacts);
+        return language == HtmlReportLanguage.ChineseSimplified
+            ? LocalizeChineseHtml(html)
+            : html;
+    }
+
+    /// <summary>
+    /// Converts one AnalysisReport to the default English HTML variant.
+    /// Inputs are a completed or planned report; processing delegates to the
+    /// localized render entry point; the method returns HTML text.
+    /// </summary>
+    public string RenderEnglish(AnalysisReport report) => Render(report, HtmlReportLanguage.English);
+
+    /// <summary>
+    /// Converts one AnalysisReport plus artifact descriptors to the English
+    /// HTML variant.
+    /// </summary>
+    public string RenderEnglish(AnalysisReport report, IEnumerable<ArtifactDescriptor>? artifacts) =>
+        Render(report, artifacts, HtmlReportLanguage.English);
+
+    /// <summary>
+    /// Converts one AnalysisReport to the Simplified Chinese HTML variant.
+    /// Inputs are a completed or planned report; processing delegates to the
+    /// localized render entry point; the method returns HTML text.
+    /// </summary>
+    public string RenderChinese(AnalysisReport report) => Render(report, HtmlReportLanguage.ChineseSimplified);
+
+    /// <summary>
+    /// Converts one AnalysisReport plus artifact descriptors to the Simplified
+    /// Chinese HTML variant.
+    /// </summary>
+    public string RenderChinese(AnalysisReport report, IEnumerable<ArtifactDescriptor>? artifacts) =>
+        Render(report, artifacts, HtmlReportLanguage.ChineseSimplified);
+
+    /// <summary>
+    /// Renders the pair of localized report documents expected by operators.
+    /// Inputs are a completed report; processing returns in-memory HTML payloads
+    /// for report.en.html and report.zh.html; callers decide whether and where
+    /// to write the files.
+    /// </summary>
+    public IReadOnlyList<HtmlReportDocument> RenderBilingualReports(AnalysisReport report) =>
+        RenderBilingualReports(report, []);
+
+    /// <summary>
+    /// Renders report.en.html and report.zh.html document payloads with shared
+    /// artifact descriptors.
+    /// </summary>
+    public IReadOnlyList<HtmlReportDocument> RenderBilingualReports(AnalysisReport report, IEnumerable<ArtifactDescriptor>? artifacts)
+    {
+        var artifactList = artifacts?.ToList();
+        return
+        [
+            new HtmlReportDocument("report.en.html", HtmlReportLanguage.English, "en-US", RenderEnglish(report, artifactList)),
+            new HtmlReportDocument("report.zh.html", HtmlReportLanguage.ChineseSimplified, "zh-CN", RenderChinese(report, artifactList))
+        ];
+    }
+
+    private static string RenderEnglishCore(AnalysisReport report, IEnumerable<ArtifactDescriptor>? artifacts)
     {
         var artifactLinks = BuildReportArtifactList(report, artifacts);
         var artifactLookup = BuildArtifactLookup(artifactLinks);
@@ -49,7 +142,7 @@ public sealed class HtmlReportRenderer
         html.AppendLine("<!doctype html>");
         html.AppendLine("<html lang=\"en\">");
         AppendHead(html);
-        html.AppendLine("<body>");
+        html.AppendLine("<body class=\"modern-sandbox-report\">");
         AppendCover(html, report);
         AppendTableOfContents(html);
         html.AppendLine("<main>");
@@ -84,24 +177,32 @@ public sealed class HtmlReportRenderer
         html.AppendLine("<head><meta charset=\"utf-8\"><title>KSword Sandbox Report</title>");
         html.AppendLine("<style>");
         html.AppendLine("""
-body{margin:0;background:#f5f7fb;color:#111827;font-family:Segoe UI,Arial,sans-serif}
-header{background:radial-gradient(circle at 80% 15%,rgba(59,130,246,.45),transparent 34%),linear-gradient(135deg,#101827,#1d4ed8);color:white;padding:32px 42px}
-main,nav{max-width:1180px;margin:22px auto;padding:0 24px}.card{background:white;border:1px solid #e5e7eb;border-radius:16px;box-shadow:0 10px 30px rgba(15,23,42,.06);margin:18px 0;padding:22px}
-.card h2{align-items:center;display:flex;gap:10px;margin-top:0}.card h2:before{background:#2563eb;border-radius:999px;content:'';display:inline-block;height:12px;width:12px}
-.grid{display:grid;gap:14px;grid-template-columns:repeat(4,1fr)}.metric{background:linear-gradient(180deg,#fff,#f8fafc);border:1px solid #e2e8f0;border-radius:12px;padding:14px}.metric b{display:block;font-size:26px;margin-top:4px}
-.muted{color:#64748b}.risk-high{color:#b91c1c}.risk-medium{color:#b45309}.risk-low{color:#047857}.risk-info{color:#1d4ed8}
+:root{--primary:#43A0FF;--primary-deep:#0969c9;--primary-soft:#e7f3ff;--ink:#0f172a;--muted:#64748b;--line:#dce8f5;--panel:#ffffff}
+*{box-sizing:border-box}html{scroll-behavior:smooth}
+body{margin:0;background:radial-gradient(circle at 8% 5%,rgba(67,160,255,.22),transparent 28%),linear-gradient(180deg,#f4f9ff 0,#f8fafc 46%,#eef6ff 100%);color:var(--ink);font-family:Segoe UI,Arial,sans-serif}
+body.modern-sandbox-report:before{background:linear-gradient(90deg,var(--primary),#7dd3fc,#22d3ee);content:'';display:block;height:5px;width:100%}
+header{background:radial-gradient(circle at 80% 15%,rgba(67,160,255,.55),transparent 34%),linear-gradient(135deg,#08111f,#123d66 62%,#0d5fa8);color:white;padding:38px 48px;position:relative;overflow:hidden}
+header:after{border:1px solid rgba(255,255,255,.18);border-radius:999px;content:'';height:220px;position:absolute;right:-70px;top:-80px;width:220px}
+header h1{font-size:34px;letter-spacing:-.03em;margin:0 0 8px}header .muted{color:#dbeafe}
+header table{background:rgba(8,17,31,.32);border:1px solid rgba(255,255,255,.16);border-radius:16px;overflow:hidden}header td,header th{border-bottom:1px solid rgba(255,255,255,.14);color:white}header th{background:rgba(255,255,255,.08);position:static}
+main,nav{max-width:1280px;margin:24px auto;padding:0 24px}.card{background:rgba(255,255,255,.94);border:1px solid var(--line);border-radius:22px;box-shadow:0 18px 48px rgba(15,23,42,.08);margin:22px 0;padding:24px;position:relative}
+section.card{max-height:75vh;overflow:auto;scrollbar-color:var(--primary) #eaf4ff;scrollbar-width:thin}.card:before{background:linear-gradient(180deg,var(--primary),rgba(67,160,255,0));border-radius:22px 0 0 22px;content:'';height:100%;left:0;opacity:.9;position:absolute;top:0;width:4px}
+.card h2{align-items:center;display:flex;gap:10px;margin:0 0 14px}.card h2:before{background:var(--primary);box-shadow:0 0 0 6px rgba(67,160,255,.14);border-radius:999px;content:'';display:inline-block;height:12px;width:12px}
+.grid{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(170px,1fr))}.metric{background:linear-gradient(180deg,#fff,#f7fbff);border:1px solid var(--line);border-top:3px solid var(--primary);border-radius:16px;padding:15px}.metric b{display:block;font-size:26px;margin-top:4px}
+.muted{color:var(--muted)}.risk-high{color:#b91c1c}.risk-medium{color:#b45309}.risk-low{color:#047857}.risk-info{color:var(--primary-deep)}
 .badge,.chip{border-radius:999px;display:inline-block;font-weight:700;padding:6px 12px}.chip{font-size:12px;margin:2px 4px 2px 0;padding:3px 8px}
-.badge-high,.chip-high{background:#fee2e2;color:#991b1b}.badge-medium,.chip-medium{background:#fef3c7;color:#92400e}.badge-low,.chip-low{background:#dcfce7;color:#166534}.badge-info,.chip-info{background:#dbeafe;color:#1e40af}
-.section-note{background:#f8fafc;border-left:4px solid #93c5fd;border-radius:8px;color:#475569;margin:10px 0;padding:10px 12px}
-table{border-collapse:collapse;width:100%;margin-top:14px}td,th{border-bottom:1px solid #e5e7eb;padding:9px;text-align:left;vertical-align:top}th{color:#475569;font-size:12px;text-transform:uppercase}
-code{background:#f1f5f9;border-radius:6px;padding:2px 5px;word-break:break-all}.toc a{display:inline-block;margin:4px 14px 4px 0}.empty{border:1px dashed #cbd5e1;border-radius:10px;color:#64748b;padding:14px}
-.copy-btn{background:#eef2ff;border:1px solid #c7d2fe;border-radius:999px;color:#3730a3;cursor:pointer;font-size:12px;font-weight:700;margin:2px 0;padding:4px 9px}.copyable{cursor:copy}.copy-hint{color:#64748b;font-size:12px;margin-top:8px}
-.timeline{border-left:3px solid #bfdbfe;margin:14px 0 0 8px;padding-left:18px}.timeline-item{margin:0 0 14px;position:relative}.timeline-item:before{background:#2563eb;border:3px solid #dbeafe;border-radius:999px;content:'';height:11px;left:-25px;position:absolute;top:3px;width:11px}
-.tree{font-family:Consolas,monospace;line-height:1.5;margin:12px 0}.tree ul{border-left:1px dashed #cbd5e1;list-style:none;margin:0 0 0 18px;padding-left:14px}.tree li{margin:5px 0}
-.evidence{max-width:520px}.evidence details{background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:8px}.evidence summary{cursor:pointer;font-weight:700}.evidence pre{white-space:pre-wrap;word-break:break-word}
+.badge-high,.chip-high{background:#fee2e2;color:#991b1b}.badge-medium,.chip-medium{background:#fef3c7;color:#92400e}.badge-low,.chip-low{background:#dcfce7;color:#166534}.badge-info,.chip-info{background:var(--primary-soft);color:#075985}
+.section-note{background:#f7fbff;border-left:4px solid var(--primary);border-radius:10px;color:#475569;margin:10px 0;padding:11px 13px}
+table{border-collapse:separate;border-spacing:0;width:100%;margin-top:14px}td,th{border-bottom:1px solid #e5edf6;padding:10px;text-align:left;vertical-align:top}th{background:rgba(248,251,255,.96);color:#475569;font-size:12px;position:sticky;text-transform:uppercase;top:0;z-index:1}
+code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.toc a{background:#f7fbff;border:1px solid var(--line);border-radius:999px;color:#075985;display:inline-block;font-weight:700;margin:4px 8px 4px 0;padding:7px 12px;text-decoration:none}.toc a:hover{border-color:var(--primary);box-shadow:0 0 0 4px rgba(67,160,255,.14)}
+.empty{background:linear-gradient(180deg,#fff,#f7fbff);border:1px dashed #b9d7f3;border-radius:12px;color:var(--muted);padding:14px}
+.copy-btn{background:rgba(67,160,255,.12);border:1px solid rgba(67,160,255,.45);border-radius:999px;color:#075985;cursor:pointer;font-size:12px;font-weight:700;margin:2px 0;padding:5px 10px}.copyable{cursor:copy}.copy-hint{color:var(--muted);font-size:12px;margin-top:8px}
+.timeline{border-left:3px solid rgba(67,160,255,.45);margin:14px 0 0 8px;padding-left:18px}.timeline-item{background:#f9fcff;border:1px solid var(--line);border-radius:12px;margin:0 0 12px;padding:10px 12px;position:relative}.timeline-item:before{background:var(--primary);border:3px solid var(--primary-soft);border-radius:999px;content:'';height:11px;left:-26px;position:absolute;top:13px;width:11px}
+.tree{font-family:Consolas,monospace;line-height:1.5;margin:12px 0}.tree ul{border-left:1px dashed #b9d7f3;list-style:none;margin:0 0 0 18px;padding-left:14px}.tree li{margin:5px 0}
+.evidence{max-width:560px}.evidence details{background:#f7fbff;border:1px solid var(--line);border-radius:12px;padding:8px}.evidence summary{cursor:pointer;font-weight:700}.evidence pre{white-space:pre-wrap;word-break:break-word}
 .toolbar{display:flex;gap:8px;justify-content:flex-end}.columns{display:grid;gap:14px;grid-template-columns:1fr 1fr}.compact-list{margin:8px 0 0 0;padding-left:18px}.compact-list li{margin:4px 0}
 .artifact-ref{font-weight:700}.artifact-list{list-style:none;margin:8px 0 0 0;padding:0}.artifact-list li{border-top:1px solid #e2e8f0;margin-top:8px;padding-top:8px}.artifact-preview img{border:1px solid #cbd5e1;border-radius:10px;max-height:260px;max-width:100%}
-@media(max-width:900px){.grid,.columns{grid-template-columns:1fr 1fr}table{display:block;overflow-x:auto}}@media(max-width:640px){.grid,.columns{grid-template-columns:1fr}}
+@media(max-width:900px){.grid,.columns{grid-template-columns:1fr 1fr}table{display:block;overflow-x:auto}}@media(max-width:640px){header{padding:28px 24px}.grid,.columns{grid-template-columns:1fr}main,nav{padding:0 14px}}
 """);
         html.AppendLine("</style></head>");
     }
@@ -1040,6 +1141,140 @@ code{background:#f1f5f9;border-radius:6px;padding:2px 5px;word-break:break-all}.
     {
         return $"<button type=\"button\" class=\"copy-btn\" data-copy-button=\"true\" data-copy=\"{A(copyText)}\">{E(label)}</button>";
     }
+
+    /// <summary>
+    /// Localizes the static report shell to Simplified Chinese.
+    /// Inputs are renderer-owned English HTML; processing replaces only known
+    /// report chrome strings and language metadata; the method returns the
+    /// localized document while leaving normalized telemetry values intact.
+    /// </summary>
+    private static string LocalizeChineseHtml(string html)
+    {
+        foreach (var (english, chinese) in ChineseHtmlTranslations.OrderByDescending(pair => pair.English.Length))
+        {
+            html = html.Replace(english, chinese, StringComparison.Ordinal);
+        }
+
+        return html;
+    }
+
+    private static readonly IReadOnlyList<(string English, string Chinese)> ChineseHtmlTranslations =
+    [
+        ("<html lang=\"en\">", "<html lang=\"zh-CN\">"),
+        ("<title>KSword Sandbox Report</title>", "<title>KSword 沙箱分析报告</title>"),
+        ("KSword Sandbox Report", "KSword 沙箱分析报告"),
+        (" generated at ", " 生成于 "),
+        ("Analysis failed", "分析失败"),
+        ("No high-risk behavior", "未发现高风险行为"),
+        ("High risk", "高风险"),
+        ("Suspicious", "可疑行为"),
+        ("Table of contents", "目录"),
+        ("Risk summary", "风险摘要"),
+        ("Behavior detections", "行为检测"),
+        ("Multi-dimensional / MITRE detections", "多维 / MITRE 检测"),
+        ("Multi-dimensional / MITRE", "多维 / MITRE"),
+        ("Engine and rule hits", "引擎和规则命中"),
+        ("Static analysis", "静态分析"),
+        ("Dynamic analysis", "动态分析"),
+        ("Artifact links", "证据文件链接"),
+        ("Timeline", "时间线"),
+        ("Process details", "进程详情"),
+        ("Dropped files", "落地文件"),
+        ("Registry behavior", "注册表行为"),
+        ("Network behavior", "网络行为"),
+        ("R0 / driver events", "R0 / 驱动事件"),
+        ("Failure reasons", "失败原因"),
+        ("Raw normalized events", "原始规范化事件"),
+        ("General / info", "常规 / 信息"),
+        ("MITRE techniques", "MITRE 技术"),
+        ("Rule hits", "规则命中"),
+        ("Static tags", "静态标签"),
+        ("Static URLs", "静态 URL"),
+        ("Network events", "网络事件"),
+        ("Registry events", "注册表事件"),
+        ("File events", "文件事件"),
+        ("Process starts", "进程启动"),
+        ("Process exits", "进程退出"),
+        ("Failure markers", "失败标记"),
+        ("Collector lifecycle", "采集器生命周期"),
+        ("Driver payloads", "驱动载荷"),
+        ("Kernel file rows", "内核文件行"),
+        ("Kernel registry rows", "内核注册表行"),
+        ("Kernel network rows", "内核网络行"),
+        ("R0 failures", "R0 失败"),
+        ("Behavior", "行为"),
+        ("Evidence fields", "证据字段"),
+        ("Artifact evidence", "证据文件详情"),
+        ("Related artifacts", "相关证据文件"),
+        ("Screenshot preview", "截图预览"),
+        ("Driver JSONL preview", "驱动 JSONL 预览"),
+        ("Manifest preview", "清单预览"),
+        ("Events JSON preview", "事件 JSON 预览"),
+        ("Text preview", "文本预览"),
+        ("Copy artifact", "复制证据文件"),
+        ("Copy artifacts", "复制证据文件"),
+        ("Copy event", "复制事件"),
+        ("Copied", "已复制"),
+        ("Process tree", "进程树"),
+        ("PE sections", "PE 节区"),
+        ("Static evidence map", "静态证据图"),
+        ("Interesting strings", "可疑字符串"),
+        ("Static warnings", "静态警告"),
+        ("PE imports", "PE 导入"),
+        ("PE exports", "PE 导出"),
+        ("Resources and TLS", "资源与 TLS"),
+        ("URL indicators", "URL 指标"),
+        ("IP indicators", "IP 指标"),
+        ("Registry indicators", "注册表指标"),
+        ("File/path indicators", "文件/路径指标"),
+        ("Severity", "严重级别"),
+        ("Technique", "技术"),
+        ("Rules", "规则"),
+        ("Rule ID", "规则 ID"),
+        ("Engine", "引擎"),
+        ("Category", "类别"),
+        ("Artifact", "证据文件"),
+        ("Path / safe link", "路径 / 安全链接"),
+        ("MIME", "MIME"),
+        ("Time", "时间"),
+        ("Source", "来源"),
+        ("Path / Command", "路径 / 命令"),
+        ("File name", "文件名"),
+        ("Full path", "完整路径"),
+        ("File size", "文件大小"),
+        ("File format", "文件格式"),
+        ("Architecture", "架构"),
+        ("Subsystem", "子系统"),
+        ("Entry point RVA", "入口点 RVA"),
+        ("Tags", "标签"),
+        ("Magic", "魔数"),
+        ("Sample", "样本"),
+        ("Size", "大小"),
+        ("Status", "状态"),
+        ("Right-click timeline entries, table cells, or evidence blocks to copy their contents.", "右键时间线条目、表格单元格或证据块即可复制内容。"),
+        ("Safe links are relative to the report artifact root; unsafe or guest-local paths are shown as copyable text only.", "安全链接相对于报告证据根目录；不安全或来宾本地路径仅显示为可复制文本。"),
+        ("Imports, exports, resources, TLS, and indicators are grouped from <code>StaticAnalysisResult.Tags</code>, <code>Urls</code>, and prefixed <code>InterestingStrings</code> evidence so report JSON stays backward-compatible.", "导入、导出、资源、TLS 和指标会从 <code>StaticAnalysisResult.Tags</code>、<code>Urls</code> 以及带前缀的 <code>InterestingStrings</code> 证据中分组，以保持 report JSON 向后兼容。"),
+        ("No behavior rules matched.", "未命中行为规则。"),
+        ("No MITRE ATT&CK techniques mapped yet.", "尚未映射 MITRE ATT&CK 技术。"),
+        ("No local behavior, YARA, or static rules matched in this artifact.", "此样本未命中本地行为、YARA 或静态规则。"),
+        ("Static analyzer did not run.", "静态分析器未运行。"),
+        ("No PE sections parsed.", "未解析到 PE 节区。"),
+        ("No PE imports were parsed.", "未解析到 PE 导入。"),
+        ("No PE exports were parsed.", "未解析到 PE 导出。"),
+        ("No resource or TLS evidence was recorded.", "未记录资源或 TLS 证据。"),
+        ("No URL indicators were extracted.", "未提取 URL 指标。"),
+        ("No IP indicators were extracted.", "未提取 IP 指标。"),
+        ("No registry path indicators were extracted.", "未提取注册表路径指标。"),
+        ("No filesystem path indicators were extracted.", "未提取文件系统路径指标。"),
+        ("No events.json, driver-events.jsonl, screenshot, or dropped-file artifacts were indexed.", "未索引 events.json、driver-events.jsonl、截图或落地文件证据。"),
+        ("No timeline events were collected.", "未采集到时间线事件。"),
+        ("No R0Collector or driver-originated events were imported.", "未导入 R0Collector 或驱动来源事件。"),
+        ("No failure reason was recorded.", "未记录失败原因。"),
+        ("Analysis status is Failed, but no timeout/error/failure event was recorded in normalized telemetry.", "分析状态为失败，但规范化遥测中未记录超时、错误或失败事件。"),
+        ("No events were collected for this section.", "此章节未采集到事件。"),
+        ("No process start events were available to build a process tree.", "没有可用于构建进程树的进程启动事件。"),
+        ("unknown", "未知")
+    ];
 
     /// <summary>
     /// Converts event data dictionary to stable plain text.

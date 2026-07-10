@@ -36,7 +36,16 @@ registered golden VM.
 - Optional test-signed driver kept outside git and referenced by
   `driver.hostDriverPath` only when real driver staging is desired.
 
-Before live execution, run the read-only preflight:
+Before live execution, run the read-only preflight. On an installed host, the
+one-command form reuses `Sandbox__ConfigPath` / install state and checks the
+configured VM name, checkpoint, Guest Service Interface, PowerShell Direct,
+guest working directory, payload roots, and repository secret hygiene:
+
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\Test-HyperVReadiness.ps1
+```
+
+Equivalent fully explicit form:
 
 ```powershell
 pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\Test-HyperVReadiness.ps1 `
@@ -54,6 +63,11 @@ and command availability, VM existence, checkpoint existence, Guest Service
 Interface state, host payload files, PowerShell Direct reachability, and guest
 payload file presence when the VM is already running. It does not restore a
 checkpoint, start a VM, stage payloads, or create guest folders.
+
+If the only missing item is the guest password for the current elevated shell,
+use `-PromptForMissingGuestPassword` for a process-only prompt, or rerun
+`install.ps1 -Mode Change -ResetPassword -PromptPassword` for persistent local
+setup. Neither flow should put password values in repository files.
 
 ## Current local status
 

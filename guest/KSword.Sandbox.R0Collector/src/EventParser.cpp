@@ -111,6 +111,187 @@ std::string DriverEventFlagNames(const ULONG flags) {
     return names.empty() ? "none" : names;
 }
 
+// Input: GET_HEALTH flag bits.
+// Processing: Names the optional IOCTL and queue-state bits exposed by the
+// public health reply while preserving unknown bits for forward compatibility.
+// Return: Pipe-delimited flag names, or "none".
+std::string HealthFlagNames(const ULONG flags) {
+    std::string names;
+    ULONG knownFlags = 0;
+    const auto appendName = [&names](const std::string& name) {
+        if (!names.empty()) {
+            names += "|";
+        }
+        names += name;
+    };
+
+    if ((flags & KSWORD_SANDBOX_HEALTH_FLAG_HAS_EVENTS) != 0) {
+        appendName("HasEvents");
+        knownFlags |= KSWORD_SANDBOX_HEALTH_FLAG_HAS_EVENTS;
+    }
+    if ((flags & KSWORD_SANDBOX_HEALTH_FLAG_CAPABILITIES_AVAILABLE) != 0) {
+        appendName("CapabilitiesAvailable");
+        knownFlags |= KSWORD_SANDBOX_HEALTH_FLAG_CAPABILITIES_AVAILABLE;
+    }
+    if ((flags & KSWORD_SANDBOX_HEALTH_FLAG_STATUS_AVAILABLE) != 0) {
+        appendName("StatusAvailable");
+        knownFlags |= KSWORD_SANDBOX_HEALTH_FLAG_STATUS_AVAILABLE;
+    }
+    if ((flags & KSWORD_SANDBOX_HEALTH_FLAG_ENABLE_MASK_AVAILABLE) != 0) {
+        appendName("EnableMaskAvailable");
+        knownFlags |= KSWORD_SANDBOX_HEALTH_FLAG_ENABLE_MASK_AVAILABLE;
+    }
+
+    const ULONG unknownFlags = flags & ~knownFlags;
+    if (unknownFlags != 0) {
+        appendName("Unknown(" + HexUnsignedLongLong(unknownFlags, 8) + ")");
+    }
+    return names.empty() ? "none" : names;
+}
+
+// Input: GET_STATUS flag bits.
+// Processing: Names queue/producers/last-status bits from the status reply.
+// Return: Pipe-delimited flag names, or "none".
+std::string StatusFlagNames(const ULONG flags) {
+    std::string names;
+    ULONG knownFlags = 0;
+    const auto appendName = [&names](const std::string& name) {
+        if (!names.empty()) {
+            names += "|";
+        }
+        names += name;
+    };
+
+    if ((flags & KSWORD_SANDBOX_STATUS_FLAG_HAS_EVENTS) != 0) {
+        appendName("HasEvents");
+        knownFlags |= KSWORD_SANDBOX_STATUS_FLAG_HAS_EVENTS;
+    }
+    if ((flags & KSWORD_SANDBOX_STATUS_FLAG_PRODUCERS_PARTIAL) != 0) {
+        appendName("ProducersPartial");
+        knownFlags |= KSWORD_SANDBOX_STATUS_FLAG_PRODUCERS_PARTIAL;
+    }
+    if ((flags & KSWORD_SANDBOX_STATUS_FLAG_PRODUCERS_ALL_DISABLED) != 0) {
+        appendName("ProducersAllDisabled");
+        knownFlags |= KSWORD_SANDBOX_STATUS_FLAG_PRODUCERS_ALL_DISABLED;
+    }
+    if ((flags & KSWORD_SANDBOX_STATUS_FLAG_LAST_STATUS_FAILURE) != 0) {
+        appendName("LastStatusFailure");
+        knownFlags |= KSWORD_SANDBOX_STATUS_FLAG_LAST_STATUS_FAILURE;
+    }
+
+    const ULONG unknownFlags = flags & ~knownFlags;
+    if (unknownFlags != 0) {
+        appendName("Unknown(" + HexUnsignedLongLong(unknownFlags, 8) + ")");
+    }
+    return names.empty() ? "none" : names;
+}
+
+// Input: Capability flag mask returned by GET_CAPABILITIES.
+// Processing: Names public optional IOCTL/schema flags and preserves unknowns.
+// Return: Pipe-delimited flag names, or "none".
+std::string CapabilityFlagNames(const ULONGLONG flags) {
+    std::string names;
+    ULONGLONG knownFlags = 0;
+    const auto appendName = [&names](const std::string& name) {
+        if (!names.empty()) {
+            names += "|";
+        }
+        names += name;
+    };
+
+    if ((flags & KSWORD_SANDBOX_CAPABILITY_FLAG_GET_HEALTH) != 0) {
+        appendName("GetHealth");
+        knownFlags |= KSWORD_SANDBOX_CAPABILITY_FLAG_GET_HEALTH;
+    }
+    if ((flags & KSWORD_SANDBOX_CAPABILITY_FLAG_POLL) != 0) {
+        appendName("Poll");
+        knownFlags |= KSWORD_SANDBOX_CAPABILITY_FLAG_POLL;
+    }
+    if ((flags & KSWORD_SANDBOX_CAPABILITY_FLAG_READ_EVENTS) != 0) {
+        appendName("ReadEvents");
+        knownFlags |= KSWORD_SANDBOX_CAPABILITY_FLAG_READ_EVENTS;
+    }
+    if ((flags & KSWORD_SANDBOX_CAPABILITY_FLAG_GET_CAPABILITIES) != 0) {
+        appendName("GetCapabilities");
+        knownFlags |= KSWORD_SANDBOX_CAPABILITY_FLAG_GET_CAPABILITIES;
+    }
+    if ((flags & KSWORD_SANDBOX_CAPABILITY_FLAG_GET_STATUS) != 0) {
+        appendName("GetStatus");
+        knownFlags |= KSWORD_SANDBOX_CAPABILITY_FLAG_GET_STATUS;
+    }
+    if ((flags & KSWORD_SANDBOX_CAPABILITY_FLAG_SET_PRODUCER_ENABLE_MASK) != 0) {
+        appendName("SetProducerEnableMask");
+        knownFlags |= KSWORD_SANDBOX_CAPABILITY_FLAG_SET_PRODUCER_ENABLE_MASK;
+    }
+    if ((flags & KSWORD_SANDBOX_CAPABILITY_FLAG_QUEUE_STATUS_COUNTERS) != 0) {
+        appendName("QueueStatusCounters");
+        knownFlags |= KSWORD_SANDBOX_CAPABILITY_FLAG_QUEUE_STATUS_COUNTERS;
+    }
+    if ((flags & KSWORD_SANDBOX_CAPABILITY_FLAG_PRODUCER_ENABLE_BITS) != 0) {
+        appendName("ProducerEnableBits");
+        knownFlags |= KSWORD_SANDBOX_CAPABILITY_FLAG_PRODUCER_ENABLE_BITS;
+    }
+    if ((flags & KSWORD_SANDBOX_CAPABILITY_FLAG_TYPED_EVENT_PAYLOADS) != 0) {
+        appendName("TypedEventPayloads");
+        knownFlags |= KSWORD_SANDBOX_CAPABILITY_FLAG_TYPED_EVENT_PAYLOADS;
+    }
+    if ((flags & KSWORD_SANDBOX_CAPABILITY_FLAG_EVENT_SCHEMA_NAMES) != 0) {
+        appendName("EventSchemaNames");
+        knownFlags |= KSWORD_SANDBOX_CAPABILITY_FLAG_EVENT_SCHEMA_NAMES;
+    }
+
+    const ULONGLONG unknownFlags = flags & ~knownFlags;
+    if (unknownFlags != 0) {
+        appendName("Unknown(" + HexUnsignedLongLong(unknownFlags, 16) + ")");
+    }
+    return names.empty() ? "none" : names;
+}
+
+// Input: Producer enable/support mask bits.
+// Processing: Names public producer categories and keeps unknown bits visible.
+// Return: Pipe-delimited producer names, or "none".
+std::string ProducerMaskNames(const ULONG mask) {
+    std::string names;
+    ULONG knownFlags = 0;
+    const auto appendName = [&names](const std::string& name) {
+        if (!names.empty()) {
+            names += "|";
+        }
+        names += name;
+    };
+
+    if ((mask & KSWORD_SANDBOX_PRODUCER_FLAG_DRIVER) != 0) {
+        appendName("driver");
+        knownFlags |= KSWORD_SANDBOX_PRODUCER_FLAG_DRIVER;
+    }
+    if ((mask & KSWORD_SANDBOX_PRODUCER_FLAG_PROCESS) != 0) {
+        appendName("process");
+        knownFlags |= KSWORD_SANDBOX_PRODUCER_FLAG_PROCESS;
+    }
+    if ((mask & KSWORD_SANDBOX_PRODUCER_FLAG_IMAGE) != 0) {
+        appendName("image");
+        knownFlags |= KSWORD_SANDBOX_PRODUCER_FLAG_IMAGE;
+    }
+    if ((mask & KSWORD_SANDBOX_PRODUCER_FLAG_FILE) != 0) {
+        appendName("file");
+        knownFlags |= KSWORD_SANDBOX_PRODUCER_FLAG_FILE;
+    }
+    if ((mask & KSWORD_SANDBOX_PRODUCER_FLAG_REGISTRY) != 0) {
+        appendName("registry");
+        knownFlags |= KSWORD_SANDBOX_PRODUCER_FLAG_REGISTRY;
+    }
+    if ((mask & KSWORD_SANDBOX_PRODUCER_FLAG_NETWORK) != 0) {
+        appendName("network");
+        knownFlags |= KSWORD_SANDBOX_PRODUCER_FLAG_NETWORK;
+    }
+
+    const ULONG unknownFlags = mask & ~knownFlags;
+    if (unknownFlags != 0) {
+        appendName("unknown(" + HexUnsignedLongLong(unknownFlags, 8) + ")");
+    }
+    return names.empty() ? "none" : names;
+}
+
 // Input: Bounded ANSI character array from a driver payload.
 // Processing: Copies bytes until NUL or capacity is reached, preserving only the
 // supplied bounded range so malformed payloads cannot over-read collector memory.
@@ -395,6 +576,22 @@ std::string ProcessEventFlagNames(const ULONG flags) {
         appendName("LegacyCallback");
         knownFlags |= KSWORD_SANDBOX_PROCESS_EVENT_FLAG_LEGACY_CALLBACK;
     }
+    if ((flags & KSWORD_SANDBOX_PROCESS_EVENT_FLAG_PARENT_ID_PRESENT) != 0) {
+        appendName("ParentIdPresent");
+        knownFlags |= KSWORD_SANDBOX_PROCESS_EVENT_FLAG_PARENT_ID_PRESENT;
+    }
+    if ((flags & KSWORD_SANDBOX_PROCESS_EVENT_FLAG_CREATOR_ID_PRESENT) != 0) {
+        appendName("CreatorIdPresent");
+        knownFlags |= KSWORD_SANDBOX_PROCESS_EVENT_FLAG_CREATOR_ID_PRESENT;
+    }
+    if ((flags & KSWORD_SANDBOX_PROCESS_EVENT_FLAG_LINEAGE_CACHE_HIT) != 0) {
+        appendName("LineageCacheHit");
+        knownFlags |= KSWORD_SANDBOX_PROCESS_EVENT_FLAG_LINEAGE_CACHE_HIT;
+    }
+    if ((flags & KSWORD_SANDBOX_PROCESS_EVENT_FLAG_LINEAGE_STRINGS_REPLAYED) != 0) {
+        appendName("LineageStringsReplayed");
+        knownFlags |= KSWORD_SANDBOX_PROCESS_EVENT_FLAG_LINEAGE_STRINGS_REPLAYED;
+    }
 
     const ULONG unknownFlags = flags & ~knownFlags;
     if (unknownFlags != 0) {
@@ -427,6 +624,14 @@ std::string ImageEventFlagNames(const ULONG flags) {
     if ((flags & KSWORD_SANDBOX_IMAGE_EVENT_FLAG_SYSTEM_MODE_IMAGE) != 0) {
         appendName("SystemModeImage");
         knownFlags |= KSWORD_SANDBOX_IMAGE_EVENT_FLAG_SYSTEM_MODE_IMAGE;
+    }
+    if ((flags & KSWORD_SANDBOX_IMAGE_EVENT_FLAG_PROCESS_ID_PRESENT) != 0) {
+        appendName("ProcessIdPresent");
+        knownFlags |= KSWORD_SANDBOX_IMAGE_EVENT_FLAG_PROCESS_ID_PRESENT;
+    }
+    if ((flags & KSWORD_SANDBOX_IMAGE_EVENT_FLAG_PROPERTIES_PRESENT) != 0) {
+        appendName("PropertiesPresent");
+        knownFlags |= KSWORD_SANDBOX_IMAGE_EVENT_FLAG_PROPERTIES_PRESENT;
     }
     const ULONG unknownFlags = flags & ~knownFlags;
     if (unknownFlags != 0) {
@@ -467,6 +672,26 @@ std::string RegistryEventFlagNames(const ULONG flags) {
     if ((flags & KSWORD_SANDBOX_REGISTRY_EVENT_FLAG_STATUS_PRESENT) != 0) {
         appendName("StatusPresent");
         knownFlags |= KSWORD_SANDBOX_REGISTRY_EVENT_FLAG_STATUS_PRESENT;
+    }
+    if ((flags & KSWORD_SANDBOX_REGISTRY_EVENT_FLAG_POST_OPERATION) != 0) {
+        appendName("PostOperation");
+        knownFlags |= KSWORD_SANDBOX_REGISTRY_EVENT_FLAG_POST_OPERATION;
+    }
+    if ((flags & KSWORD_SANDBOX_REGISTRY_EVENT_FLAG_KEY_FROM_CALLBACK) != 0) {
+        appendName("KeyFromCallback");
+        knownFlags |= KSWORD_SANDBOX_REGISTRY_EVENT_FLAG_KEY_FROM_CALLBACK;
+    }
+    if ((flags & KSWORD_SANDBOX_REGISTRY_EVENT_FLAG_KEY_FROM_OBJECT) != 0) {
+        appendName("KeyFromObject");
+        knownFlags |= KSWORD_SANDBOX_REGISTRY_EVENT_FLAG_KEY_FROM_OBJECT;
+    }
+    if ((flags & KSWORD_SANDBOX_REGISTRY_EVENT_FLAG_VALUE_TYPE_PRESENT) != 0) {
+        appendName("ValueTypePresent");
+        knownFlags |= KSWORD_SANDBOX_REGISTRY_EVENT_FLAG_VALUE_TYPE_PRESENT;
+    }
+    if ((flags & KSWORD_SANDBOX_REGISTRY_EVENT_FLAG_VALUE_SIZE_PRESENT) != 0) {
+        appendName("ValueSizePresent");
+        knownFlags |= KSWORD_SANDBOX_REGISTRY_EVENT_FLAG_VALUE_SIZE_PRESENT;
     }
     const ULONG unknownFlags = flags & ~knownFlags;
     if (unknownFlags != 0) {
@@ -896,6 +1121,24 @@ bool AddProcessPayloadData(
     data->AddBool(
         "legacyCallback",
         (processPayload->Flags & KSWORD_SANDBOX_PROCESS_EVENT_FLAG_LEGACY_CALLBACK) != 0);
+    data->AddBool(
+        "parentProcessIdPresent",
+        (processPayload->Flags & KSWORD_SANDBOX_PROCESS_EVENT_FLAG_PARENT_ID_PRESENT) != 0);
+    data->AddBool(
+        "creatingProcessIdPresent",
+        (processPayload->Flags & KSWORD_SANDBOX_PROCESS_EVENT_FLAG_CREATOR_ID_PRESENT) != 0);
+    data->AddBool(
+        "lineageCacheHit",
+        (processPayload->Flags & KSWORD_SANDBOX_PROCESS_EVENT_FLAG_LINEAGE_CACHE_HIT) != 0);
+    data->AddBool(
+        "lineageStringsReplayed",
+        (processPayload->Flags & KSWORD_SANDBOX_PROCESS_EVENT_FLAG_LINEAGE_STRINGS_REPLAYED) != 0);
+    data->AddBool(
+        "imagePathTruncated",
+        (processPayload->Flags & KSWORD_SANDBOX_PROCESS_EVENT_FLAG_IMAGE_PATH_TRUNCATED) != 0);
+    data->AddBool(
+        "commandLineTruncated",
+        (processPayload->Flags & KSWORD_SANDBOX_PROCESS_EVENT_FLAG_COMMAND_TRUNCATED) != 0);
     data->AddUnsigned("processId", processPayload->ProcessId);
     data->AddUnsigned("parentProcessId", processPayload->ParentProcessId);
     data->AddUnsigned("creatingProcessId", processPayload->CreatingProcessId);
@@ -961,10 +1204,21 @@ bool AddImagePayloadData(
     data->AddBool(
         "systemModeImage",
         (imagePayload->Flags & KSWORD_SANDBOX_IMAGE_EVENT_FLAG_SYSTEM_MODE_IMAGE) != 0);
+    data->AddBool(
+        "processIdPresent",
+        (imagePayload->Flags & KSWORD_SANDBOX_IMAGE_EVENT_FLAG_PROCESS_ID_PRESENT) != 0);
+    data->AddBool(
+        "propertiesPresent",
+        (imagePayload->Flags & KSWORD_SANDBOX_IMAGE_EVENT_FLAG_PROPERTIES_PRESENT) != 0);
+    data->AddBool(
+        "imagePathTruncated",
+        (imagePayload->Flags & KSWORD_SANDBOX_IMAGE_EVENT_FLAG_PATH_TRUNCATED) != 0);
     data->AddUnsigned("processId", imagePayload->ProcessId);
     data->AddUtf8("imageBaseHex", HexUnsignedLongLong(imagePayload->ImageBase, 16));
     data->AddUnsigned("imageBase", imagePayload->ImageBase);
     data->AddUnsigned("imageSize", imagePayload->ImageSize);
+    data->AddUnsigned("imageProperties", imagePayload->ImageProperties);
+    data->AddUtf8("imagePropertiesHex", HexUnsignedLongLong(imagePayload->ImageProperties, 8));
     data->AddUnsigned("pathLengthBytes", imagePayload->PathLengthBytes);
     data->AddBool("pathDecoded", !imagePath.empty());
     if (!imagePath.empty()) {
@@ -1024,11 +1278,29 @@ bool AddRegistryPayloadData(
     data->AddBool(
         "statusPresent",
         (registryPayload->Flags & KSWORD_SANDBOX_REGISTRY_EVENT_FLAG_STATUS_PRESENT) != 0);
+    data->AddBool(
+        "postOperation",
+        (registryPayload->Flags & KSWORD_SANDBOX_REGISTRY_EVENT_FLAG_POST_OPERATION) != 0);
+    data->AddBool(
+        "keyFromCallback",
+        (registryPayload->Flags & KSWORD_SANDBOX_REGISTRY_EVENT_FLAG_KEY_FROM_CALLBACK) != 0);
+    data->AddBool(
+        "keyFromObject",
+        (registryPayload->Flags & KSWORD_SANDBOX_REGISTRY_EVENT_FLAG_KEY_FROM_OBJECT) != 0);
+    data->AddBool(
+        "valueTypePresent",
+        (registryPayload->Flags & KSWORD_SANDBOX_REGISTRY_EVENT_FLAG_VALUE_TYPE_PRESENT) != 0);
+    data->AddBool(
+        "valueSizePresent",
+        (registryPayload->Flags & KSWORD_SANDBOX_REGISTRY_EVENT_FLAG_VALUE_SIZE_PRESENT) != 0);
     data->AddSigned("status", registryPayload->Status);
     data->AddUtf8(
         "statusHex",
         HexUnsignedLongLong(static_cast<unsigned long>(registryPayload->Status), 8));
     data->AddUnsigned("processId", registryPayload->ProcessId);
+    data->AddUnsigned("valueDataType", registryPayload->ValueDataType);
+    data->AddUtf8("valueDataTypeHex", HexUnsignedLongLong(registryPayload->ValueDataType, 8));
+    data->AddUnsigned("valueDataSizeBytes", registryPayload->ValueDataSizeBytes);
     data->AddUnsigned("keyPathLengthBytes", registryPayload->KeyPathLengthBytes);
     data->AddUnsigned("valueNameLengthBytes", registryPayload->ValueNameLengthBytes);
     data->AddBool("keyPathDecoded", !keyPath.empty());
@@ -1207,8 +1479,8 @@ bool AddReservedPayloadData(
 
 // Input: One public event header, its payload bytes, and the JSON builder.
 // Processing: Dispatches to a typed parser only when the public header exposes a
-// payload layout.  Categories reserved for future process/image/file/registry
-// payloads intentionally report ABI-pending status instead of guessing offsets.
+// payload layout.  Unknown future payload categories keep the common payloadHex
+// fallback instead of guessing offsets.
 // Return: true when the payload or header-only semantic record was parsed;
 // false when callers should rely on payloadHex as the opaque fallback.
 bool AddTypedPayloadData(
@@ -1256,6 +1528,7 @@ std::string BuildHealthData(const KSWORD_SANDBOX_HEALTH_REPLY& reply, const DWOR
     data.AddUtf8("driverStateName", DriverStateName(reply.DriverState));
     data.AddUnsigned("flags", reply.Flags);
     data.AddUtf8("flagsHex", HexUnsignedLongLong(reply.Flags, 8));
+    data.AddUtf8("flagNames", HealthFlagNames(reply.Flags));
     data.AddUnsigned("eventsQueued", reply.EventsQueued);
     data.AddUnsigned("eventsDropped", reply.EventsDropped);
     data.AddUnsigned("nextSequence", reply.NextSequence);
@@ -1281,10 +1554,16 @@ std::string BuildCapabilitiesData(const KSWORD_SANDBOX_CAPABILITIES_REPLY& reply
     data.AddUnsigned("abiVersionMinor", reply.AbiVersionMinor);
     data.AddUnsigned("capabilityFlags", reply.CapabilityFlags);
     data.AddUtf8("capabilityFlagsHex", HexUnsignedLongLong(reply.CapabilityFlags, 16));
+    data.AddUtf8("capabilityFlagNames", CapabilityFlagNames(reply.CapabilityFlags));
     data.AddUnsigned("supportedProducerMask", reply.SupportedProducerMask);
     data.AddUtf8("supportedProducerMaskHex", HexUnsignedLongLong(reply.SupportedProducerMask, 8));
+    data.AddUtf8("supportedProducerMaskNames", ProducerMaskNames(reply.SupportedProducerMask));
     data.AddUnsigned("defaultProducerMask", reply.DefaultProducerMask);
     data.AddUtf8("defaultProducerMaskHex", HexUnsignedLongLong(reply.DefaultProducerMask, 8));
+    data.AddUtf8("defaultProducerMaskNames", ProducerMaskNames(reply.DefaultProducerMask));
+    data.AddUtf8("eventSchemaName", KSWORD_SANDBOX_EVENT_SCHEMA_NAME);
+    data.AddUnsigned("eventSchemaVersion", KSWORD_SANDBOX_EVENT_SCHEMA_VERSION);
+    data.AddUtf8("eventSchemaVersionHex", HexUnsignedLongLong(KSWORD_SANDBOX_EVENT_SCHEMA_VERSION, 8));
     data.AddUnsigned("eventHeaderVersion", reply.EventHeaderVersion);
     data.AddUnsigned("eventMaxPayloadSize", reply.EventMaxPayloadSize);
     data.AddUnsigned("eventRingCapacity", reply.EventRingCapacity);
@@ -1293,7 +1572,9 @@ std::string BuildCapabilitiesData(const KSWORD_SANDBOX_CAPABILITIES_REPLY& reply
     data.AddUnsigned("statusReplySize", reply.StatusReplySize);
     data.AddUnsigned("setProducerEnableMaskRequestSize", reply.SetProducerEnableMaskRequestSize);
     data.AddUnsigned("setProducerEnableMaskReplySize", reply.SetProducerEnableMaskReplySize);
+    data.AddBool("driverProducerSupported", (reply.SupportedProducerMask & KSWORD_SANDBOX_PRODUCER_FLAG_DRIVER) != 0);
     data.AddBool("processProducerSupported", (reply.SupportedProducerMask & KSWORD_SANDBOX_PRODUCER_FLAG_PROCESS) != 0);
+    data.AddBool("imageProducerSupported", (reply.SupportedProducerMask & KSWORD_SANDBOX_PRODUCER_FLAG_IMAGE) != 0);
     data.AddBool("fileProducerSupported", (reply.SupportedProducerMask & KSWORD_SANDBOX_PRODUCER_FLAG_FILE) != 0);
     data.AddBool("registryProducerSupported", (reply.SupportedProducerMask & KSWORD_SANDBOX_PRODUCER_FLAG_REGISTRY) != 0);
     data.AddBool("networkProducerSupported", (reply.SupportedProducerMask & KSWORD_SANDBOX_PRODUCER_FLAG_NETWORK) != 0);
@@ -1316,13 +1597,16 @@ std::string BuildStatusData(const KSWORD_SANDBOX_STATUS_REPLY& reply, const DWOR
     data.AddUtf8("driverStateName", DriverStateName(reply.DriverState));
     data.AddUnsigned("flags", reply.Flags);
     data.AddUtf8("flagsHex", HexUnsignedLongLong(reply.Flags, 8));
+    data.AddUtf8("flagNames", StatusFlagNames(reply.Flags));
     data.AddUnsigned("queueCapacity", reply.QueueCapacity);
     data.AddUnsigned("queueDepth", reply.QueueDepth);
     data.AddUnsigned("queueHighWatermark", reply.QueueHighWatermark);
     data.AddUnsigned("producerEnableMask", reply.ProducerEnableMask);
     data.AddUtf8("producerEnableMaskHex", HexUnsignedLongLong(reply.ProducerEnableMask, 8));
+    data.AddUtf8("producerEnableMaskNames", ProducerMaskNames(reply.ProducerEnableMask));
     data.AddUnsigned("supportedProducerMask", reply.SupportedProducerMask);
     data.AddUtf8("supportedProducerMaskHex", HexUnsignedLongLong(reply.SupportedProducerMask, 8));
+    data.AddUtf8("supportedProducerMaskNames", ProducerMaskNames(reply.SupportedProducerMask));
     data.AddSigned("lastNtStatus", reply.LastNtStatus);
     data.AddUtf8("lastNtStatusHex", HexUnsignedLongLong(static_cast<unsigned long>(reply.LastNtStatus), 8));
     data.AddUnsigned("totalEventsEnqueued", reply.TotalEventsEnqueued);
@@ -1347,15 +1631,19 @@ std::string BuildSetProducerEnableMaskData(
     data.AddUnsigned("bytesReturned", bytesReturned);
     data.AddUnsigned("requestedEnableMask", requestedEnableMask);
     data.AddUtf8("requestedEnableMaskHex", HexUnsignedLongLong(requestedEnableMask, 8));
+    data.AddUtf8("requestedEnableMaskNames", ProducerMaskNames(requestedEnableMask));
     data.AddUnsigned("version", reply.Version);
     data.AddUtf8("versionHex", HexUnsignedLongLong(reply.Version, 8));
     data.AddUnsigned("size", reply.Size);
     data.AddUnsigned("previousEnableMask", reply.PreviousEnableMask);
     data.AddUtf8("previousEnableMaskHex", HexUnsignedLongLong(reply.PreviousEnableMask, 8));
+    data.AddUtf8("previousEnableMaskNames", ProducerMaskNames(reply.PreviousEnableMask));
     data.AddUnsigned("effectiveEnableMask", reply.EffectiveEnableMask);
     data.AddUtf8("effectiveEnableMaskHex", HexUnsignedLongLong(reply.EffectiveEnableMask, 8));
+    data.AddUtf8("effectiveEnableMaskNames", ProducerMaskNames(reply.EffectiveEnableMask));
     data.AddUnsigned("supportedProducerMask", reply.SupportedProducerMask);
     data.AddUtf8("supportedProducerMaskHex", HexUnsignedLongLong(reply.SupportedProducerMask, 8));
+    data.AddUtf8("supportedProducerMaskNames", ProducerMaskNames(reply.SupportedProducerMask));
     data.AddUnsigned("flags", reply.Flags);
     data.AddUtf8("flagsHex", HexUnsignedLongLong(reply.Flags, 8));
     return data.Build();
@@ -1425,6 +1713,9 @@ std::string BuildDriverEventData(
     data.AddUnsigned("recordOffset", recordOffset);
     data.AddUnsigned("version", header.Version);
     data.AddUtf8("versionHex", HexUnsignedLongLong(header.Version, 8));
+    data.AddUtf8("eventSchemaName", KSWORD_SANDBOX_EVENT_SCHEMA_NAME);
+    data.AddUnsigned("eventSchemaVersion", KSWORD_SANDBOX_EVENT_SCHEMA_VERSION);
+    data.AddUtf8("eventSchemaVersionHex", HexUnsignedLongLong(KSWORD_SANDBOX_EVENT_SCHEMA_VERSION, 8));
     data.AddUnsigned("recordSize", header.Size);
     data.AddUnsigned("driverEventType", header.Type);
     data.AddUtf8("driverEventTypeName", DriverEventTypeName(header.Type));

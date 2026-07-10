@@ -78,17 +78,14 @@ public sealed class SandboxJobService
     public AnalysisJob Plan(SandboxSubmission submission)
     {
         var duration = ClampDuration(submission.DurationSeconds);
-        var normalizedSubmission = submission with { DurationSeconds = duration, DryRun = true };
+        var normalizedSubmission = NormalizeSubmission(submission, duration);
         var jobId = Guid.NewGuid();
         var jobRoot = GetJobRoot(jobId);
         Directory.CreateDirectory(jobRoot);
 
         var sample = SampleHasher.Compute(normalizedSubmission.SamplePath, config.Analysis.MaxSampleBytes);
         var staticAnalysis = AnalyzeSample(sample);
-        var runbook = runbookBuilder.Build(config with
-        {
-            Analysis = config.Analysis with { DefaultDurationSeconds = duration }
-        }, jobId, sample);
+        var runbook = runbookBuilder.Build(BuildJobConfig(normalizedSubmission, duration), jobId, sample);
 
         var seedEvents = CreatePlanningEvents(sample, normalizedSubmission, runbook, staticAnalysis);
         var findings = ruleEngine.Classify(seedEvents);
@@ -105,8 +102,10 @@ public sealed class SandboxJobService
 
         var jsonPath = Path.Combine(jobRoot, "report.json");
         var htmlPath = Path.Combine(jobRoot, "report.html");
+        var zhHtmlPath = Path.Combine(jobRoot, "report.zh.html");
+        var enHtmlPath = Path.Combine(jobRoot, "report.en.html");
         File.WriteAllText(jsonPath, JsonSerializer.Serialize(report, JsonOptions));
-        File.WriteAllText(htmlPath, reportRenderer.Render(report));
+        WriteHtmlReports(jobRoot, report);
 
         var job = new AnalysisJob
         {
@@ -117,6 +116,8 @@ public sealed class SandboxJobService
             Runbook = runbook,
             JsonReportPath = jsonPath,
             HtmlReportPath = htmlPath,
+            HtmlReportZhPath = zhHtmlPath,
+            HtmlReportEnPath = enHtmlPath,
             Messages =
             [
                 "Dry-run planning completed.",
@@ -330,16 +331,35 @@ public sealed class SandboxJobService
 
         var jsonPath = Path.Combine(jobRoot, "report.json");
         var htmlPath = Path.Combine(jobRoot, "report.html");
+        var zhHtmlPath = Path.Combine(jobRoot, "report.zh.html");
+        var enHtmlPath = Path.Combine(jobRoot, "report.en.html");
         File.WriteAllText(jsonPath, JsonSerializer.Serialize(report, JsonOptions));
-        File.WriteAllText(htmlPath, reportRenderer.Render(report));
+        WriteHtmlReports(jobRoot, report);
 
         return job with
         {
             Status = status,
             JsonReportPath = jsonPath,
             HtmlReportPath = htmlPath,
+            HtmlReportZhPath = zhHtmlPath,
+            HtmlReportEnPath = enHtmlPath,
             GuestEventsPath = guestEventsPath ?? job.GuestEventsPath
         };
+    }
+
+    /// <summary>
+    /// Writes the default compatibility report plus explicit localized report
+    /// variants. Inputs are one job directory and report model; processing keeps
+    /// report.html English for existing smoke tests and emits report.zh.html /
+    /// report.en.html for the bilingual WebUI; the method returns no value.
+    /// </summary>
+    private void WriteHtmlReports(string jobRoot, AnalysisReport report)
+    {
+        File.WriteAllText(Path.Combine(jobRoot, "report.html"), reportRenderer.RenderEnglish(report));
+        foreach (var document in reportRenderer.RenderBilingualReports(report))
+        {
+            File.WriteAllText(Path.Combine(jobRoot, document.FileName), document.Html);
+        }
     }
 
     /// <summary>
@@ -713,6 +733,63 @@ public sealed class SandboxJobService
     {
         var duration = requestedSeconds <= 0 ? config.Analysis.DefaultDurationSeconds : requestedSeconds;
         return Math.Clamp(duration, 1, config.Analysis.MaxDurationSeconds);
+    }
+
+    /// <summary>
+    /// Normalizes optional WebUI job settings while preserving per-job VM
+    /// overrides. Inputs are the raw submission and clamped duration; processing
+    /// trims string values and forces dry-run planning mode; the method returns
+    /// the persisted request snapshot.
+    /// </summary>
+    private static SandboxSubmission NormalizeSubmission(SandboxSubmission submission, int duration)
+    {
+        return submission with
+        {
+            DurationSeconds = duration,
+            DryRun = true,
+            GoldenVmName = CleanOptional(submission.GoldenVmName),
+            GoldenSnapshotName = CleanOptional(submission.GoldenSnapshotName),
+            GuestUserName = CleanOptional(submission.GuestUserName),
+            GuestWorkingDirectory = CleanOptional(submission.GuestWorkingDirectory),
+            GuestPayloadRoot = CleanOptional(submission.GuestPayloadRoot)
+        };
+    }
+
+    /// <summary>
+    /// Creates a per-job sandbox configuration from optional WebUI overrides.
+    /// Inputs are the normalized submission and clamped analysis duration;
+    /// processing overlays safe Hyper-V/guest/path/driver fields; the method
+    /// returns the config used to build the concrete runbook.
+    /// </summary>
+    private SandboxConfig BuildJobConfig(SandboxSubmission submission, int duration)
+    {
+        return config with
+        {
+            HyperV = config.HyperV with
+            {
+                GoldenVmName = submission.GoldenVmName ?? config.HyperV.GoldenVmName,
+                GoldenSnapshotName = submission.GoldenSnapshotName ?? config.HyperV.GoldenSnapshotName
+            },
+            Guest = config.Guest with
+            {
+                UserName = submission.GuestUserName ?? config.Guest.UserName,
+                WorkingDirectory = submission.GuestWorkingDirectory ?? config.Guest.WorkingDirectory
+            },
+            Paths = config.Paths with
+            {
+                GuestPayloadRoot = submission.GuestPayloadRoot ?? config.Paths.GuestPayloadRoot
+            },
+            Driver = config.Driver with
+            {
+                UseMockCollector = submission.UseMockCollector ?? config.Driver.UseMockCollector
+            },
+            Analysis = config.Analysis with { DefaultDurationSeconds = duration }
+        };
+    }
+
+    private static string? CleanOptional(string? value)
+    {
+        return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
     }
 
     /// <summary>

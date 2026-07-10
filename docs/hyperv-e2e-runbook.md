@@ -27,6 +27,15 @@ Live execution requires all of these conditions:
 6. The generated `preflightSummary.liveReady` is `true` before any child script
    is launched.
 
+Before switching from PlanOnly/WhatIf to live, also run the standalone
+readiness helper. It is read-only and catches installed-config drift plus local
+secret hygiene issues that should be fixed before committing:
+
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\Test-HyperVReadiness.ps1
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\Test-RepositoryPolicy.ps1 -StagedOnly
+```
+
 ## Current local go/no-go checklist
 
 Use this checklist as the current executable state for the local host. It was
@@ -103,6 +112,11 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\Invoke-HyperVE2E.ps1 `
   -SamplePath 'D:\Temp\KSwordSandbox\samples\KSword.Sandbox.HarmlessSample\KSword.Sandbox.HarmlessSample.exe' `
   -Live
 ```
+
+If you do not want to persist the password in User scope for a one-off elevated
+session, run `Test-HyperVReadiness.ps1 -PromptForMissingGuestPassword` first.
+That prompt writes only Process scope and never writes config/report/repository
+files.
 
 Use the existing `PlanOnly` and `-WhatIf` review modes before live execution;
 the live command is only for the isolated golden VM workflow described below.

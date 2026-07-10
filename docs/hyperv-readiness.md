@@ -20,7 +20,17 @@ Windows PowerShell also works:
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\Test-HyperVReadiness.ps1
 ```
 
-Defaults match `config/sandbox.example.json`:
+After `install.ps1` has been run, the no-argument command automatically tries
+the same local config path used by `run.ps1`:
+
+1. `Sandbox__ConfigPath` from Process/User/Machine scope;
+2. `%ProgramData%\KSwordSandbox\install-state.json` -> `localConfigPath`;
+3. repository fallback `config/sandbox.example.json`.
+
+Use `-IgnoreInstalledConfig` when you deliberately want only explicit
+parameters plus the repository example fallback.
+
+Defaults match `config/sandbox.example.json` when no installed config is found:
 
 ```powershell
 .\scripts\Test-HyperVReadiness.ps1 `
@@ -32,6 +42,18 @@ Defaults match `config/sandbox.example.json`:
   -GuestWorkingDirectory 'C:\KSwordSandbox' `
   -RuntimeRoot 'D:\Temp\KSwordSandbox'
 ```
+
+If the password is missing and you only want a one-shot process-scoped value for
+this readiness run, opt in to a secure prompt:
+
+```powershell
+.\scripts\Test-HyperVReadiness.ps1 -PromptForMissingGuestPassword
+```
+
+The prompt stores the value in the current PowerShell process only. It does not
+write `%ProgramData%`, user environment, config JSON, reports, or any repository
+file. For repeatable setup, prefer `install.ps1 -Mode Install -PromptPassword`
+or `install.ps1 -Mode Change -ResetPassword -PromptPassword`.
 
 The script writes structured PowerShell objects:
 
@@ -54,6 +76,13 @@ probes. It never starts the VM, restores a checkpoint, enables services, copies
 files, creates guest folders, or writes probe files.
 
 ## Checks
+
+### Readiness input resolution
+
+Reports the config source used for effective VM/checkpoint/guest settings. This
+is the bridge between `install.ps1`, `run.ps1`, and the standalone readiness
+script: operators can run the preflight without retyping local VM names after
+the installer has written `Sandbox__ConfigPath` or install state.
 
 ### Administrator privilege
 
@@ -104,6 +133,25 @@ or generate/reset a local value:
 The readiness and live scripts read Process, User, then Machine scope. If a
 value exists at User or Machine scope, a newly opened elevated PowerShell
 session inherits it; the scripts also check those scopes directly.
+
+### Guest working directory
+
+Checks that `-GuestWorkingDirectory` is a non-empty absolute Windows path such
+as:
+
+```text
+C:\KSwordSandbox
+```
+
+The check is syntax-only and does not create guest folders. It also reports the
+derived guest paths expected by the live runbook:
+
+```text
+C:\KSwordSandbox\agent\KSword.Sandbox.Agent.exe
+C:\KSwordSandbox\r0collector\KSword.Sandbox.R0Collector.exe
+C:\KSwordSandbox\incoming
+C:\KSwordSandbox\out
+```
 
 ### Host payload files
 
@@ -207,6 +255,24 @@ This check uses `Test-Path` inside the guest only. Missing deployed files are a
 warning, not a hard failure, because the live runbook can stage tools from the
 host payload root immediately before execution. Treat the warning as actionable
 when refreshing the golden `Clean` checkpoint.
+
+### Repository secret hygiene
+
+When `KSWORDBOX_GUEST_PASSWORD` or the configured secret is visible and at least
+8 characters long, readiness scans git tracked/untracked candidate text files
+for that exact value. A match fails the preflight and lists only file names; the
+secret value is not printed.
+
+Use this as a final guard before staging local changes:
+
+```powershell
+.\scripts\Test-RepositoryPolicy.ps1 -StagedOnly
+```
+
+`Test-RepositoryPolicy.ps1` also blocks VM disks, samples, reports, binaries,
+DPAPI backups, `install-state.json`, and other local artifacts. Use
+`-SkipRepositorySecretScan` on readiness only when the current shell should not
+read repository text files.
 
 ## Payload staging dependency
 

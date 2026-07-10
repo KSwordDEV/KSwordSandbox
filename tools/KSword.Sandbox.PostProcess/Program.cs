@@ -57,8 +57,15 @@ internal static class PostProcessProgram
 
             var jsonReportPath = Path.Combine(jobRoot, "report.json");
             var htmlReportPath = Path.Combine(jobRoot, "report.html");
+            var htmlZhReportPath = Path.Combine(jobRoot, "report.zh.html");
+            var htmlEnReportPath = Path.Combine(jobRoot, "report.en.html");
+            var renderer = new HtmlReportRenderer();
             File.WriteAllText(jsonReportPath, JsonSerializer.Serialize(report, JsonOptions));
-            File.WriteAllText(htmlReportPath, new HtmlReportRenderer().Render(report));
+            File.WriteAllText(htmlReportPath, renderer.RenderEnglish(report));
+            foreach (var document in renderer.RenderBilingualReports(report))
+            {
+                File.WriteAllText(Path.Combine(jobRoot, document.FileName), document.Html);
+            }
 
             var resultPath = Path.Combine(jobRoot, "postprocess-result.json");
             var result = new
@@ -74,6 +81,8 @@ internal static class PostProcessProgram
                 findingCount = findings.Count,
                 jsonReportPath,
                 htmlReportPath,
+                htmlZhReportPath,
+                htmlEnReportPath,
                 completedAtUtc = DateTimeOffset.UtcNow,
                 secretValuePrinted = false
             };

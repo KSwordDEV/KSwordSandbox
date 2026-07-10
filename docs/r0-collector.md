@@ -88,8 +88,9 @@ Initial IOCTLs:
 
 `R0Collector` emits `r0collector.driverCapabilities` after
 `IOCTL_KSWORD_SANDBOX_GET_CAPABILITIES` succeeds. The row preserves ABI
-major/minor, capability flags, producer-mask support, event header version,
-ring capacity, reply sizes, and max payload size for later diagnostics.
+major/minor, capability flag names, producer-mask support/names, event schema
+name/version, event header version, ring capacity, reply sizes, and max payload
+size for later diagnostics.
 
 `R0Collector` emits `r0collector.driverStatus` for
 `IOCTL_KSWORD_SANDBOX_GET_STATUS` before draining and again after the final drain.
@@ -100,8 +101,15 @@ These rows preserve queue depth/capacity, high watermark, `ProducerEnableMask`,
 When `--enable-mask <mask>` is supplied, `R0Collector` issues
 `IOCTL_KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK` and emits
 `r0collector.driverProducerMask`. The row records the requested mask plus the
-previous, effective, and supported masks returned by
+previous, effective, and supported masks and producer names returned by
 `KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK_REPLY`.
+
+When a live driver implements only the earlier health/poll/read-events subset,
+newer optional negotiation calls may fail with the Win32 mapping of
+`STATUS_INVALID_DEVICE_REQUEST` or `STATUS_NOT_SUPPORTED`.  The collector treats
+those specific optional failures as non-fatal, emits
+`r0collector.optionalIoctlUnavailable`, and continues with the compatible drain
+path.
 
 `IOCTL_KSWORD_SANDBOX_DRAIN_EVENTS` may exist as a compatibility alias in local
 driver experiments, but R0Collector issues the public `READ_EVENTS` name.
@@ -116,8 +124,11 @@ records from the ring and reports drop/sequence counters.
 Concrete behavior payloads are parsed by event type.  File events use
 `KSWORD_SANDBOX_FILE_EVENT_PAYLOAD` and expose fields such as `operationName`,
 `filePath`, `pathPresent`, `pathTruncated`, `statusHex`, `majorFunction`, and
-`minorFunction`.  Process, image, and registry payloads expose their bounded
-path/name/status fields when present.
+`minorFunction`.  Process payloads expose lineage cache/replay flags, parent and
+creator identifiers, bounded image paths, and command-line prefixes.  Image
+payloads expose process-id/property presence, base, size, image properties, and
+bounded paths.  Registry payloads expose key/value provenance, status,
+value-type, value-size, and bounded key/value names.
 
 Network events use `KSWORD_SANDBOX_NETWORK_EVENT_PAYLOAD` from the WFP/ALE
 producer.  R0Collector now parses `protocolName`, `directionName`,
@@ -283,6 +294,9 @@ Top-level field rules:
 - `commandLine`: collector invocation until process payloads add richer command
   lines.
 - `data`: string-valued metadata compatible with the current host model.
+  Driver rows include `eventSchemaName`, `eventSchemaVersion`, and
+  `payloadSchema` when the payload category is known; mock rows use the same
+  schema names so mock/live JSONL remain comparable.
 
 The detailed JSONL contract is documented in
 [`docs/r0-jsonl-schema.md`](r0-jsonl-schema.md).

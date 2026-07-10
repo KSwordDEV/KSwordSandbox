@@ -62,12 +62,43 @@ param(
     # Processing: checks existence and ACLs only; no write probe file is made.
     # Return behavior: a failed result is emitted when writability cannot be
     # inferred from read-only ACL inspection.
-    [string]$RuntimeRoot = 'D:\Temp\KSwordSandbox'
+    [string]$RuntimeRoot = 'D:\Temp\KSwordSandbox',
+
+    # Input: optional sandbox config path. When omitted, the script attempts to
+    # reuse the installed local config path from Sandbox__ConfigPath or
+    # %ProgramData%\KSwordSandbox\install-state.json before falling back to the
+    # repository example config.
+    [string]$ConfigPath = '',
+
+    # Input: optional install state path written by install.ps1. Processing is
+    # read-only and never writes local install metadata.
+    [string]$InstallStatePath = $(if ([string]::IsNullOrWhiteSpace($env:ProgramData)) { '' } else { Join-Path $env:ProgramData 'KSwordSandbox\install-state.json' }),
+
+    # Input: repository root for config fallback and local secret-hygiene scan.
+    # Processing is read-only. Leave empty to infer the parent of scripts/.
+    [string]$RepositoryRoot = '',
+
+    # Input: ignore installed state/env config and use only explicit parameters
+    # plus the repository example config fallback.
+    [switch]$IgnoreInstalledConfig,
+
+    # Input: if the password is missing, prompt once and put it in Process scope
+    # only. The value is never printed, persisted, or written to disk.
+    [switch]$PromptForMissingGuestPassword,
+
+    # Input: skip the read-only scan that prevents the current guest password
+    # value from being committed in tracked/untracked repository text files.
+    [switch]$SkipRepositorySecretScan
 )
 
 Set-StrictMode -Version 3.0
 $ErrorActionPreference = 'Stop'
 $script:GuestServiceInterfaceComponentId = '6C09BB55-D683-4DA0-8931-C9BF705F6480'
+$script:InitialBoundParameters = @{}
+foreach ($parameterName in $PSBoundParameters.Keys) {
+    $script:InitialBoundParameters[$parameterName] = $true
+}
+$script:ReadinessInputMetadata = $null
 
 function Get-GuestPasswordSecretValue {
     param([Parameter(Mandatory)][string]$SecretName)
@@ -87,6 +118,354 @@ function Get-GuestPasswordSecretValue {
         Value = $null
         Scope = ''
         IsSet = $false
+    }
+}
+
+# ConvertFrom-SecureStringToPlainText converts a prompt-only secure string into
+# a transient process environment value. Inputs are a SecureString from
+# Read-Host -AsSecureString. Processing zeroes the unmanaged buffer. Return
+# behavior is one plaintext string kept in memory only long enough to set the
+# process environment variable.
+function ConvertFrom-SecureStringToPlainText {
+    param([Parameter(Mandatory)][securestring]$SecureString)
+
+    $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($SecureString)
+    try {
+        return [Runtime.InteropServices.Marshal]::PtrToStringUni($bstr)
+    }
+    finally {
+        if ($bstr -ne [IntPtr]::Zero) {
+            [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
+        }
+    }
+}
+
+# Get-DefaultRepositoryRoot infers the repository root from this script path.
+# Inputs are none; processing resolves the parent directory of scripts/.
+# Return behavior is an absolute path string.
+function Get-DefaultRepositoryRoot {
+    if (-not [string]::IsNullOrWhiteSpace($PSScriptRoot)) {
+        return (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).ProviderPath
+    }
+
+    return (Get-Location).ProviderPath
+}
+
+# Get-ObjectPropertyString safely reads a string property from a PSCustomObject.
+# Inputs are an object, property name, and default value. Processing performs no
+# mutation. Return behavior is the non-empty string value or the default.
+function Get-ObjectPropertyString {
+    param(
+        [AllowNull()]$Object,
+        [Parameter(Mandatory)][string]$Name,
+        [string]$DefaultValue = ''
+    )
+
+    if ($null -eq $Object) {
+        return $DefaultValue
+    }
+
+    $property = $Object.PSObject.Properties[$Name]
+    if ($null -eq $property -or $null -eq $property.Value) {
+        return $DefaultValue
+    }
+
+    $value = [string]$property.Value
+    if ([string]::IsNullOrWhiteSpace($value)) {
+        return $DefaultValue
+    }
+
+    return $value
+}
+
+# Get-ObjectPropertyObject safely reads a nested object property from a
+# PSCustomObject under StrictMode. Inputs are the object and property name.
+# Return behavior is the property value or $null.
+function Get-ObjectPropertyObject {
+    param(
+        [AllowNull()]$Object,
+        [Parameter(Mandatory)][string]$Name
+    )
+
+    if ($null -eq $Object) {
+        return $null
+    }
+
+    $property = $Object.PSObject.Properties[$Name]
+    if ($null -eq $property) {
+        return $null
+    }
+
+    return $property.Value
+}
+
+# Read-JsonObjectIfPresent reads a JSON object if the file exists. Inputs are a
+# path and logical name. Processing is read-only. Return behavior includes the
+# parsed object and a diagnostic string.
+function Read-JsonObjectIfPresent {
+    param(
+        [string]$Path,
+        [string]$Name
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Path)) {
+        return [pscustomobject][ordered]@{
+            Path   = ''
+            Exists = $false
+            Object = $null
+            Error  = ''
+            Name   = $Name
+        }
+    }
+
+    try {
+        $resolved = if (Test-Path -LiteralPath $Path -PathType Leaf) {
+            (Resolve-Path -LiteralPath $Path).ProviderPath
+        }
+        else {
+            [System.IO.Path]::GetFullPath($Path)
+        }
+
+        if (-not (Test-Path -LiteralPath $resolved -PathType Leaf)) {
+            return [pscustomobject][ordered]@{
+                Path   = $resolved
+                Exists = $false
+                Object = $null
+                Error  = ''
+                Name   = $Name
+            }
+        }
+
+        return [pscustomobject][ordered]@{
+            Path   = $resolved
+            Exists = $true
+            Object = (Get-Content -LiteralPath $resolved -Raw | ConvertFrom-Json)
+            Error  = ''
+            Name   = $Name
+        }
+    }
+    catch {
+        return [pscustomobject][ordered]@{
+            Path   = $Path
+            Exists = $false
+            Object = $null
+            Error  = $_.Exception.Message
+            Name   = $Name
+        }
+    }
+}
+
+# Get-EnvironmentValueByScope returns the first non-empty variable value from
+# Process, User, then Machine scope. Inputs are the variable name. Return
+# behavior includes value presence without printing the value.
+function Get-EnvironmentValueByScope {
+    param([Parameter(Mandatory)][string]$Name)
+
+    foreach ($scope in @('Process', 'User', 'Machine')) {
+        $value = [Environment]::GetEnvironmentVariable($Name, $scope)
+        if (-not [string]::IsNullOrWhiteSpace($value)) {
+            return [pscustomobject][ordered]@{
+                Value = $value
+                Scope = $scope
+                IsSet = $true
+            }
+        }
+    }
+
+    return [pscustomobject][ordered]@{
+        Value = ''
+        Scope = ''
+        IsSet = $false
+    }
+}
+
+# Set-ReadinessParameterDefault updates a script parameter only when the caller
+# did not explicitly bind that parameter. Inputs are the variable/parameter name
+# and candidate values ordered by precedence. Processing mutates script-scope
+# parameter variables only. Return behavior is none.
+function Set-ReadinessParameterDefault {
+    param(
+        [Parameter(Mandatory)][string]$VariableName,
+        [Parameter(Mandatory)][string]$ParameterName,
+        [string[]]$Candidates
+    )
+
+    if ($script:InitialBoundParameters.ContainsKey($ParameterName)) {
+        return
+    }
+
+    foreach ($candidate in $Candidates) {
+        if (-not [string]::IsNullOrWhiteSpace($candidate)) {
+            Set-Variable -Name $VariableName -Scope Script -Value $candidate
+            return
+        }
+    }
+}
+
+# Resolve-ReadinessInputConfiguration aligns Test-HyperVReadiness.ps1 with the
+# install.ps1/run.ps1 local config flow. Inputs are explicit parameter values,
+# optional install state, and optional sandbox config. Processing reads only
+# local JSON metadata and updates unbound parameters. Return behavior is a
+# metadata object included in the summary.
+function Resolve-ReadinessInputConfiguration {
+    $resolvedRepositoryRoot = if ([string]::IsNullOrWhiteSpace($RepositoryRoot)) {
+        Get-DefaultRepositoryRoot
+    }
+    else {
+        [System.IO.Path]::GetFullPath($RepositoryRoot)
+    }
+    $script:RepositoryRoot = $resolvedRepositoryRoot
+
+    $stateInfo = [pscustomobject][ordered]@{
+        Path   = ''
+        Exists = $false
+        Object = $null
+        Error  = ''
+        Name   = 'install-state'
+    }
+    if (-not [bool]$IgnoreInstalledConfig) {
+        $stateInfo = Read-JsonObjectIfPresent -Path $InstallStatePath -Name 'install-state'
+    }
+
+    $effectiveConfigPath = $ConfigPath
+    $configSource = 'explicit'
+    if ([string]::IsNullOrWhiteSpace($effectiveConfigPath) -and (-not [bool]$IgnoreInstalledConfig)) {
+        $envConfig = Get-EnvironmentValueByScope -Name 'Sandbox__ConfigPath'
+        if ([bool]$envConfig.IsSet) {
+            $effectiveConfigPath = [string]$envConfig.Value
+            $configSource = "Sandbox__ConfigPath:$($envConfig.Scope)"
+        }
+    }
+
+    if ([string]::IsNullOrWhiteSpace($effectiveConfigPath) -and $null -ne $stateInfo.Object) {
+        $stateConfig = Get-ObjectPropertyString -Object $stateInfo.Object -Name 'localConfigPath'
+        if (-not [string]::IsNullOrWhiteSpace($stateConfig)) {
+            $effectiveConfigPath = $stateConfig
+            $configSource = 'install-state.localConfigPath'
+        }
+    }
+
+    if ([string]::IsNullOrWhiteSpace($effectiveConfigPath)) {
+        $effectiveConfigPath = Join-Path $resolvedRepositoryRoot 'config\sandbox.example.json'
+        $configSource = 'repository-example'
+    }
+
+    $configInfo = Read-JsonObjectIfPresent -Path $effectiveConfigPath -Name 'sandbox-config'
+    $config = $configInfo.Object
+    $state = $stateInfo.Object
+    $hyperV = Get-ObjectPropertyObject -Object $config -Name 'hyperV'
+    $guest = Get-ObjectPropertyObject -Object $config -Name 'guest'
+    $paths = Get-ObjectPropertyObject -Object $config -Name 'paths'
+    $driver = Get-ObjectPropertyObject -Object $config -Name 'driver'
+
+    $collectorLeaf = ''
+    $collectorPath = Get-ObjectPropertyString -Object $driver -Name 'r0CollectorPathInGuest'
+    if (-not [string]::IsNullOrWhiteSpace($collectorPath)) {
+        $collectorLeaf = Split-Path -Leaf $collectorPath
+    }
+
+    Set-ReadinessParameterDefault -VariableName 'VmName' -ParameterName 'VmName' -Candidates @(
+        (Get-ObjectPropertyString -Object $state -Name 'vmName'),
+        (Get-ObjectPropertyString -Object $hyperV -Name 'goldenVmName'))
+    Set-ReadinessParameterDefault -VariableName 'CheckpointName' -ParameterName 'CheckpointName' -Candidates @(
+        (Get-ObjectPropertyString -Object $state -Name 'checkpointName'),
+        (Get-ObjectPropertyString -Object $hyperV -Name 'goldenSnapshotName'))
+    Set-ReadinessParameterDefault -VariableName 'GuestPasswordSecretName' -ParameterName 'GuestPasswordSecretName' -Candidates @(
+        (Get-ObjectPropertyString -Object $state -Name 'secretName'),
+        (Get-ObjectPropertyString -Object $guest -Name 'passwordSecretName'))
+    Set-ReadinessParameterDefault -VariableName 'GuestUserName' -ParameterName 'GuestUserName' -Candidates @(
+        (Get-ObjectPropertyString -Object $state -Name 'guestUserName'),
+        (Get-ObjectPropertyString -Object $guest -Name 'userName'))
+    Set-ReadinessParameterDefault -VariableName 'GuestWorkingDirectory' -ParameterName 'GuestWorkingDirectory' -Candidates @(
+        (Get-ObjectPropertyString -Object $state -Name 'guestWorkingDirectory'),
+        (Get-ObjectPropertyString -Object $guest -Name 'workingDirectory'))
+    Set-ReadinessParameterDefault -VariableName 'GuestAgentExecutableName' -ParameterName 'GuestAgentExecutableName' -Candidates @(
+        (Get-ObjectPropertyString -Object $guest -Name 'agentExecutableName'))
+    Set-ReadinessParameterDefault -VariableName 'GuestPayloadRoot' -ParameterName 'GuestPayloadRoot' -Candidates @(
+        (Get-ObjectPropertyString -Object $state -Name 'guestPayloadRoot'),
+        (Get-ObjectPropertyString -Object $paths -Name 'guestPayloadRoot'))
+    Set-ReadinessParameterDefault -VariableName 'R0CollectorExecutableName' -ParameterName 'R0CollectorExecutableName' -Candidates @($collectorLeaf)
+    Set-ReadinessParameterDefault -VariableName 'RuntimeRoot' -ParameterName 'RuntimeRoot' -Candidates @(
+        (Get-ObjectPropertyString -Object $state -Name 'runtimeRoot'),
+        (Get-ObjectPropertyString -Object $paths -Name 'runtimeRoot'))
+
+    return [pscustomobject][ordered]@{
+        RepositoryRoot        = $resolvedRepositoryRoot
+        ConfigPath            = $configInfo.Path
+        ConfigSource          = $configSource
+        ConfigLoaded          = [bool]$configInfo.Exists
+        ConfigReadError       = $configInfo.Error
+        InstallStatePath      = $stateInfo.Path
+        InstallStateLoaded    = [bool]$stateInfo.Exists
+        InstallStateReadError = $stateInfo.Error
+        IgnoredInstalledConfig = [bool]$IgnoreInstalledConfig
+        ExplicitParameters    = @($script:InitialBoundParameters.Keys | Sort-Object)
+        SecretValuePrinted    = $false
+        WroteFiles            = $false
+    }
+}
+
+# Import-GuestPasswordFromPrompt optionally fills the current process secret
+# only. Inputs are the secret name and the opt-in switch. Processing prompts
+# with Read-Host -AsSecureString and writes only Process scope. Return behavior
+# is metadata; no secret value is printed or persisted.
+function Import-GuestPasswordFromPrompt {
+    param(
+        [Parameter(Mandatory)][string]$SecretName,
+        [bool]$Prompt
+    )
+
+    if (-not $Prompt) {
+        return [pscustomobject][ordered]@{
+            PromptAttempted      = $false
+            PromptSucceeded      = $false
+            ProcessSecretUpdated = $false
+            SecretValuePrinted   = $false
+        }
+    }
+
+    if ([string]::IsNullOrWhiteSpace($SecretName) -or $SecretName.Contains('=')) {
+        return [pscustomobject][ordered]@{
+            PromptAttempted      = $false
+            PromptSucceeded      = $false
+            ProcessSecretUpdated = $false
+            SecretValuePrinted   = $false
+        }
+    }
+
+    $current = Get-GuestPasswordSecretValue -SecretName $SecretName
+    if ([bool]$current.IsSet) {
+        return [pscustomobject][ordered]@{
+            PromptAttempted      = $false
+            PromptSucceeded      = $false
+            ProcessSecretUpdated = $false
+            SecretValuePrinted   = $false
+        }
+    }
+
+    $secure = Read-Host "Enter guest password for $SecretName (stored in this PowerShell process only)" -AsSecureString
+    $plainText = ConvertFrom-SecureStringToPlainText -SecureString $secure
+    try {
+        if ([string]::IsNullOrEmpty($plainText)) {
+            return [pscustomobject][ordered]@{
+                PromptAttempted      = $true
+                PromptSucceeded      = $false
+                ProcessSecretUpdated = $false
+                SecretValuePrinted   = $false
+            }
+        }
+
+        [Environment]::SetEnvironmentVariable($SecretName, $plainText, 'Process')
+        Set-Item -Path "Env:\$SecretName" -Value $plainText
+        return [pscustomobject][ordered]@{
+            PromptAttempted      = $true
+            PromptSucceeded      = $true
+            ProcessSecretUpdated = $true
+            SecretValuePrinted   = $false
+        }
+    }
+    finally {
+        $plainText = $null
     }
 }
 
@@ -118,6 +497,48 @@ function New-ReadinessResult {
         Message    = $Message
         Details    = [pscustomobject]$orderedDetails
     }
+}
+
+# Test-ReadinessInputResolution reports which local install/run configuration
+# source supplied effective readiness inputs. Inputs are the metadata object from
+# Resolve-ReadinessInputConfiguration and prompt metadata. Processing is
+# read-only. Return behavior is a non-failing readiness object for operators and
+# automation.
+function Test-ReadinessInputResolution {
+    param(
+        [Parameter(Mandatory)][object]$Metadata,
+        [Parameter(Mandatory)][object]$PromptMetadata
+    )
+
+    $status = 'Passed'
+    $message = "Readiness inputs resolved from $($Metadata.ConfigSource)."
+    if (-not [bool]$Metadata.ConfigLoaded) {
+        $status = 'Warning'
+        $message = "Sandbox config was not loaded from '$($Metadata.ConfigPath)'; explicit/default parameters are in use."
+    }
+
+    return New-ReadinessResult `
+        -Name 'Readiness input resolution' `
+        -Status $status `
+        -Required $false `
+        -Message $message `
+        -Details @{
+            RepositoryRoot         = $Metadata.RepositoryRoot
+            ConfigPath             = $Metadata.ConfigPath
+            ConfigSource           = $Metadata.ConfigSource
+            ConfigLoaded           = [bool]$Metadata.ConfigLoaded
+            ConfigReadError        = $Metadata.ConfigReadError
+            InstallStatePath       = $Metadata.InstallStatePath
+            InstallStateLoaded     = [bool]$Metadata.InstallStateLoaded
+            InstallStateReadError  = $Metadata.InstallStateReadError
+            IgnoredInstalledConfig = [bool]$Metadata.IgnoredInstalledConfig
+            ExplicitParameters     = @($Metadata.ExplicitParameters)
+            PromptAttempted        = [bool]$PromptMetadata.PromptAttempted
+            PromptSucceeded        = [bool]$PromptMetadata.PromptSucceeded
+            ProcessSecretUpdated   = [bool]$PromptMetadata.ProcessSecretUpdated
+            SecretValuePrinted     = $false
+            WroteFiles             = $false
+        }
 }
 
 # Test-AdministratorPrivilege checks the current host token.
@@ -515,6 +936,71 @@ function Join-GuestPath {
     }
 
     return $current
+}
+
+# Test-GuestWorkingDirectoryPath validates the configured guest root before any
+# Hyper-V calls. Inputs are the guest working directory and expected executable
+# names. Processing validates the string form only; it does not connect to or
+# create folders in the VM. Return behavior is a readiness object.
+function Test-GuestWorkingDirectoryPath {
+    param(
+        [string]$GuestRoot,
+        [string]$AgentExecutableName,
+        [string]$CollectorExecutableName
+    )
+
+    if ([string]::IsNullOrWhiteSpace($GuestRoot)) {
+        return New-ReadinessResult `
+            -Name 'Guest working directory' `
+            -Status 'Failed' `
+            -Required $true `
+            -Message 'Guest working directory is empty.' `
+            -Details @{
+                GuestRoot = $GuestRoot
+            }
+    }
+
+    $trimmed = $GuestRoot.Trim()
+    $isDriveAbsolute = $trimmed -match '^[A-Za-z]:[\\/][^*?"<>|]*$'
+    $isUncAbsolute = $trimmed -match '^[\\/]{2}[^\\/]+[\\/][^\\/]+'
+    if (-not ($isDriveAbsolute -or $isUncAbsolute)) {
+        return New-ReadinessResult `
+            -Name 'Guest working directory' `
+            -Status 'Failed' `
+            -Required $true `
+            -Message "Guest working directory '$trimmed' is not an absolute Windows path." `
+            -Details @{
+                GuestRoot          = $trimmed
+                ExpectedForm       = 'C:\KSwordSandbox'
+                MutatedVm          = $false
+                SecretValuePrinted = $false
+            }
+    }
+
+    $expectedDirectories = @(
+        (Join-GuestPath -Root $trimmed -Segments @('agent')),
+        (Join-GuestPath -Root $trimmed -Segments @('r0collector')),
+        (Join-GuestPath -Root $trimmed -Segments @('incoming')),
+        (Join-GuestPath -Root $trimmed -Segments @('out'))
+    )
+    $expectedFiles = @(
+        (Join-GuestPath -Root $trimmed -Segments @('agent', $AgentExecutableName)),
+        (Join-GuestPath -Root $trimmed -Segments @('r0collector', $CollectorExecutableName))
+    )
+
+    return New-ReadinessResult `
+        -Name 'Guest working directory' `
+        -Status 'Passed' `
+        -Required $true `
+        -Message "Guest working directory path is valid: $trimmed" `
+        -Details @{
+            GuestRoot             = $trimmed
+            ExpectedDirectories   = $expectedDirectories
+            ExpectedPayloadFiles  = $expectedFiles
+            CheckedSyntaxOnly     = $true
+            MutatedVm             = $false
+            SecretValuePrinted    = $false
+        }
 }
 
 # Get-RequiredPayloadFileMap returns the host and guest payload contract.
@@ -1141,7 +1627,183 @@ function Test-GuestPayloadFilesReadOnly {
     }
 }
 
+# Test-RepositorySecretHygiene checks whether the currently visible guest
+# password value appears in repository candidate text files. Inputs are the
+# repository root, secret name, and skip switch. Processing reads only git
+# tracked/untracked candidate files and never prints the secret value. Return
+# behavior is a readiness object that fails if the secret value appears in a
+# candidate file.
+function Test-RepositorySecretHygiene {
+    param(
+        [string]$RepoRoot,
+        [string]$SecretName,
+        [bool]$Skip
+    )
+
+    if ($Skip) {
+        return New-ReadinessResult `
+            -Name 'Repository secret hygiene' `
+            -Status 'Warning' `
+            -Required $false `
+            -Message 'Skipped repository secret scan by request.' `
+            -Details @{
+                RepositoryRoot     = $RepoRoot
+                SecretName         = $SecretName
+                Skipped            = $true
+                SecretValuePrinted = $false
+            }
+    }
+
+    $secretValue = Get-GuestPasswordSecretValue -SecretName $SecretName
+    if (-not [bool]$secretValue.IsSet) {
+        return New-ReadinessResult `
+            -Name 'Repository secret hygiene' `
+            -Status 'Warning' `
+            -Required $false `
+            -Message "Skipped repository secret scan because '$SecretName' is not set in Process, User, or Machine scope." `
+            -Details @{
+                RepositoryRoot     = $RepoRoot
+                SecretName         = $SecretName
+                Skipped            = $true
+                Reason             = 'missingCredentialSecret'
+                SecretValuePrinted = $false
+            }
+    }
+
+    $secretText = [string]$secretValue.Value
+    if ($secretText.Length -lt 8) {
+        return New-ReadinessResult `
+            -Name 'Repository secret hygiene' `
+            -Status 'Warning' `
+            -Required $false `
+            -Message "Skipped repository secret scan because '$SecretName' is shorter than 8 characters; refusing noisy content matching." `
+            -Details @{
+                RepositoryRoot     = $RepoRoot
+                SecretName         = $SecretName
+                Skipped            = $true
+                Reason             = 'secretTooShortForReliableScan'
+                SecretValuePrinted = $false
+            }
+    }
+
+    if ([string]::IsNullOrWhiteSpace($RepoRoot) -or -not (Test-Path -LiteralPath $RepoRoot -PathType Container)) {
+        return New-ReadinessResult `
+            -Name 'Repository secret hygiene' `
+            -Status 'Warning' `
+            -Required $false `
+            -Message "Repository root '$RepoRoot' is not a directory; secret scan skipped." `
+            -Details @{
+                RepositoryRoot     = $RepoRoot
+                SecretName         = $SecretName
+                Skipped            = $true
+                Reason             = 'repositoryRootMissing'
+                SecretValuePrinted = $false
+            }
+    }
+
+    if ($null -eq (Get-Command -Name git -ErrorAction SilentlyContinue)) {
+        return New-ReadinessResult `
+            -Name 'Repository secret hygiene' `
+            -Status 'Warning' `
+            -Required $false `
+            -Message 'git is not available; repository candidate secret scan skipped.' `
+            -Details @{
+                RepositoryRoot     = $RepoRoot
+                SecretName         = $SecretName
+                Skipped            = $true
+                Reason             = 'gitUnavailable'
+                SecretValuePrinted = $false
+            }
+    }
+
+    $binaryExtensions = @(
+        '.7z', '.avhd', '.avhdx', '.bin', '.bmp', '.cer', '.dll', '.doc',
+        '.docx', '.esd', '.exe', '.exp', '.gif', '.ico', '.ilk', '.iso',
+        '.jpg', '.jpeg', '.key', '.lib', '.obj', '.p12', '.pdb', '.pdf',
+        '.pfx', '.png', '.rar', '.snk', '.sys', '.vhd', '.vhdx', '.wim',
+        '.xls', '.xlsx', '.zip'
+    )
+    $files = @(git -C $RepoRoot ls-files --cached --others --exclude-standard 2>$null)
+    $scannedCount = 0
+    $skippedCount = 0
+    $leakingFiles = New-Object System.Collections.Generic.List[string]
+
+    foreach ($relativePath in $files) {
+        if ([string]::IsNullOrWhiteSpace($relativePath)) {
+            continue
+        }
+
+        $normalized = $relativePath -replace '/', [System.IO.Path]::DirectorySeparatorChar
+        $fullPath = Join-Path $RepoRoot $normalized
+        if (-not (Test-Path -LiteralPath $fullPath -PathType Leaf)) {
+            $skippedCount++
+            continue
+        }
+
+        $extension = [System.IO.Path]::GetExtension($relativePath).ToLowerInvariant()
+        $item = Get-Item -LiteralPath $fullPath -ErrorAction SilentlyContinue
+        if ($null -eq $item -or $binaryExtensions -contains $extension -or $item.Length -gt 1048576) {
+            $skippedCount++
+            continue
+        }
+
+        try {
+            $content = Get-Content -LiteralPath $fullPath -Raw -ErrorAction Stop
+            $scannedCount++
+            if ($content.IndexOf($secretText, [System.StringComparison]::Ordinal) -ge 0) {
+                [void]$leakingFiles.Add($relativePath)
+            }
+        }
+        catch {
+            $skippedCount++
+        }
+    }
+
+    if ($leakingFiles.Count -gt 0) {
+        return New-ReadinessResult `
+            -Name 'Repository secret hygiene' `
+            -Status 'Failed' `
+            -Required $true `
+            -Message "Current guest password value for '$SecretName' appears in repository candidate file(s). Remove it before staging or committing." `
+            -Details @{
+                RepositoryRoot       = $RepoRoot
+                SecretName           = $SecretName
+                SecretScope          = $secretValue.Scope
+                CandidateFileCount   = @($files).Count
+                ScannedTextFileCount = $scannedCount
+                SkippedFileCount     = $skippedCount
+                LeakingFiles         = @($leakingFiles.ToArray())
+                SecretValuePrinted   = $false
+            }
+    }
+
+    return New-ReadinessResult `
+        -Name 'Repository secret hygiene' `
+        -Status 'Passed' `
+        -Required $false `
+        -Message "Current guest password value for '$SecretName' was not found in repository candidate text files." `
+        -Details @{
+            RepositoryRoot       = $RepoRoot
+            SecretName           = $SecretName
+            SecretScope          = $secretValue.Scope
+            CandidateFileCount   = @($files).Count
+            ScannedTextFileCount = $scannedCount
+            SkippedFileCount     = $skippedCount
+            SecretValuePrinted   = $false
+        }
+}
+
+$script:ReadinessInputMetadata = Resolve-ReadinessInputConfiguration
+$promptMetadata = Import-GuestPasswordFromPrompt `
+    -SecretName $GuestPasswordSecretName `
+    -Prompt ([bool]$PromptForMissingGuestPassword)
+
 $results = New-Object System.Collections.Generic.List[object]
+
+$inputResolutionResult = Test-ReadinessInputResolution `
+    -Metadata $script:ReadinessInputMetadata `
+    -PromptMetadata $promptMetadata
+[void]$results.Add($inputResolutionResult)
 
 $administratorResult = Test-AdministratorPrivilege
 [void]$results.Add($administratorResult)
@@ -1154,6 +1816,12 @@ $guestSecretResult = Test-GuestPasswordSecret -SecretName $GuestPasswordSecretNa
 
 $runtimeRootResult = Test-RuntimeRootWritableReadOnly -Path $RuntimeRoot
 [void]$results.Add($runtimeRootResult)
+
+$guestWorkingDirectoryResult = Test-GuestWorkingDirectoryPath `
+    -GuestRoot $GuestWorkingDirectory `
+    -AgentExecutableName $GuestAgentExecutableName `
+    -CollectorExecutableName $R0CollectorExecutableName
+[void]$results.Add($guestWorkingDirectoryResult)
 
 $hostPayloadResult = Test-HostPayloadFiles `
     -PayloadRoot $GuestPayloadRoot `
@@ -1218,6 +1886,12 @@ $guestPayloadResult = Test-GuestPayloadFilesReadOnly `
     -PowerShellDirectResult $powerShellDirectResult
 [void]$results.Add($guestPayloadResult)
 
+$secretHygieneResult = Test-RepositorySecretHygiene `
+    -RepoRoot $script:ReadinessInputMetadata.RepositoryRoot `
+    -SecretName $GuestPasswordSecretName `
+    -Skip ([bool]$SkipRepositorySecretScan)
+[void]$results.Add($secretHygieneResult)
+
 $failedCount = @($results | Where-Object { $_.Status -eq 'Failed' }).Count
 $warningCount = @($results | Where-Object { $_.Status -eq 'Warning' }).Count
 $passedCount = @($results | Where-Object { $_.Status -eq 'Passed' }).Count
@@ -1243,6 +1917,9 @@ Write-Output ([pscustomobject][ordered]@{
         PassedCount    = $passedCount
         WarningCount   = $warningCount
         FailedCount    = $failedCount
+        ConfigPath     = $script:ReadinessInputMetadata.ConfigPath
+        ConfigSource   = $script:ReadinessInputMetadata.ConfigSource
+        InstallStatePath = $script:ReadinessInputMetadata.InstallStatePath
         VmName         = $VmName
         CheckpointName = $CheckpointName
         RuntimeRoot    = $RuntimeRoot

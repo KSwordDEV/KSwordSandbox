@@ -164,6 +164,16 @@ KswPushEvent(
     _In_ ULONG PayloadSize
     );
 
+ULONG
+KswAdvanceEventRingIndex(
+    _In_ ULONG Index
+    );
+
+ULONGLONG
+KswGetNextReadableSequenceLocked(
+    _In_ PKSWORD_SANDBOX_DEVICE_EXTENSION DeviceExtension
+    );
+
 VOID
 KswDrainEventHeaders(
     _Inout_ PKSWORD_SANDBOX_DEVICE_EXTENSION DeviceExtension,

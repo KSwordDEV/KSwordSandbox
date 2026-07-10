@@ -98,6 +98,7 @@
     <ClCompile Include="src\Core\DriverEntry.c" />
     <ClCompile Include="src\Device\ControlDevice.c" />
     <ClCompile Include="src\Eventing\EventQueue.c" />
+    <ClCompile Include="src\Eventing\EventRing.c" />
     <ClCompile Include="src\Producers\File\FileFilter.c" />
     <ClCompile Include="src\Producers\Network\NetworkMonitor.c" />
     <ClCompile Include="src\Producers\Process\ProcessMonitor.c" />

@@ -35,6 +35,13 @@ internal sealed class HyperVE2EContractScenario : ISmokeTestScenario
         RequireContains(invokeScript, "launchedOutOfProcess", "Top-level script should record child process launch evidence in runbook-execution.json.");
         RequireContains(invokeScript, "startInvocation", "Top-level script should persist start child stdout/stderr/exit metadata.");
         RequireContains(invokeScript, "collectInvocation", "Top-level script should persist collect child stdout/stderr/exit metadata.");
+        RequireContains(invokeScript, "New-HyperVE2EStep", "Top-level plan should model ordered progress stages/steps.");
+        RequireContains(invokeScript, "phase", "Top-level plan should tag each step with a phase for operator progress.");
+        RequireContains(invokeScript, "phaseResults", "Runbook execution record should persist per-phase progress results.");
+        RequireContains(invokeScript, "TotalSteps", "Runbook execution record should persist total planned steps.");
+        RequireContains(invokeScript, "ExecutedSteps", "Runbook execution record should persist executed step count.");
+        RequireContains(invokeScript, "StepResults", "Runbook execution record should persist per-step progress results.");
+        RequireContains(invokeScript, "Convert-PhaseStepsToRunbookStepResults", "Top-level script should merge child phase steps into runbook progress.");
         SmokeAssert.True(!invokeScript.Contains("& $startScript -PlanPath", StringComparison.Ordinal), "Top-level script should not dot/call the start script in-process because exit 1 bypasses aggregate runbook persistence.");
         SmokeAssert.True(!invokeScript.Contains("& $collectScript -PlanPath", StringComparison.Ordinal), "Top-level script should not dot/call the collect script in-process because exit 1 bypasses aggregate runbook persistence.");
         RequireContains(invokeScript, "Test-IsAdministrator", "Top-level live mode should require an elevated shell.");
@@ -52,6 +59,8 @@ internal sealed class HyperVE2EContractScenario : ISmokeTestScenario
         RequireContains(startScript, "No VM command was executed", "Start script should document safe failure before live mutation.");
         RequireContains(startScript, "Start phase failed after VM mutation", "Start script should attempt stop/restore cleanup after partial live mutation.");
         RequireContains(startScript, "cleanupErrors", "Start script should persist cleanup failures for operators.");
+        RequireContains(startScript, "StepResults", "Start script should persist per-step progress for the parent runbook record.");
+        RequireContains(startScript, "phase = 'start'", "Start script should label its result as the start phase.");
 
         RequireContains(collectScript, "SupportsShouldProcess", "Collect script should support -WhatIf/-Confirm semantics.");
         RequireContains(collectScript, "Copy-Item -FromSession", "Collect script should pull artifacts from the guest session.");
@@ -62,6 +71,8 @@ internal sealed class HyperVE2EContractScenario : ISmokeTestScenario
         RequireContains(collectScript, "Restore-VMSnapshot", "Collect script should restore the clean checkpoint after cleanup.");
         RequireContains(collectScript, "finally", "Collect script should attempt cleanup after collection failures.");
         RequireContains(collectScript, "No VM command was executed", "Collect script should document safe no-live behavior.");
+        RequireContains(collectScript, "StepResults", "Collect script should persist per-step progress for the parent runbook record.");
+        RequireContains(collectScript, "phase = 'collect'", "Collect script should label its result as the collect phase.");
 
         RequireContains(e2eDoc, "default mode is `PlanOnly`", "E2E runbook should document safe default mode.");
         RequireContains(e2eDoc, "-WhatIf", "E2E runbook should document WhatIf safety.");
@@ -69,6 +80,12 @@ internal sealed class HyperVE2EContractScenario : ISmokeTestScenario
         RequireContains(e2eDoc, "willMutateVm=false", "E2E runbook should tell reviewers how to confirm no mutation.");
         RequireContains(e2eDoc, "Copy-Item -FromSession", "E2E runbook should describe artifact collection.");
         RequireContains(e2eDoc, "restores the clean checkpoint again", "E2E runbook should describe final restore.");
+        RequireContains(e2eDoc, "Test-HyperVReadiness.ps1", "E2E runbook should point to the standalone readiness helper.");
+        RequireContains(e2eDoc, "Test-RepositoryPolicy.ps1 -StagedOnly", "E2E runbook should include a staged repository policy check.");
+        RequireContains(e2eDoc, "PromptForMissingGuestPassword", "E2E runbook should document the process-only readiness password prompt.");
+        RequireContains(e2eDoc, "runbook-execution.json", "E2E runbook should document the persisted progress record.");
+        RequireContains(e2eDoc, "phase result paths", "E2E runbook should document per-phase progress result paths.");
+        RequireContains(e2eDoc, "skipped/executed step records", "E2E runbook should document skipped/executed step records.");
         RequireContains(goldenDoc, "One-command Hyper-V E2E script", "Golden VM doc should point to the one-command E2E script.");
         RequireContains(goldenDoc, "Use `-WhatIf`", "Golden VM doc should remind operators that WhatIf is non-mutating.");
 
