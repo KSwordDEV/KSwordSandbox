@@ -15,14 +15,18 @@ internal static class DashboardExperiencePage
     {
         return """
         <!doctype html>
-        <html lang="en">
+        <html lang="zh-CN">
         <head>
           <meta charset="utf-8">
-          <title>KSword Sandbox Host</title>
+          <title>KSword Sandbox 主机控制台</title>
           <style>
             :root { color-scheme: light; }
-            body { font-family: Segoe UI, Arial, sans-serif; margin: 0; color: #111827; background: #f8fafc; }
+            body { font-family: "Microsoft YaHei UI", Segoe UI, Arial, sans-serif; margin: 0; color: #111827; background: #f8fafc; }
             header { padding: 28px 36px; color: white; background: linear-gradient(135deg, #111827, #1d4ed8); }
+            .header-row { align-items: flex-start; display: flex; gap: 18px; justify-content: space-between; }
+            .lang-toggle { background: rgba(255,255,255,.16); border: 1px solid rgba(255,255,255,.35); white-space: nowrap; }
+            .topnav { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+            .topnav a { border: 1px solid rgba(255,255,255,.35); border-radius: 999px; color: white; font-weight: 700; padding: 7px 11px; text-decoration: none; }
             main { max-width: 1180px; margin: 24px auto; padding: 0 24px 48px; }
             section { background: white; border: 1px solid #e5e7eb; border-radius: 14px; box-shadow: 0 8px 28px rgba(15, 23, 42, .06); margin-bottom: 18px; padding: 22px; }
             label { display: block; font-weight: 600; margin: 14px 0 6px; }
@@ -70,62 +74,72 @@ internal static class DashboardExperiencePage
         </head>
         <body>
           <header>
-            <h1>KSword Sandbox Host</h1>
-            <p>Windows Hyper-V malware behavior sandbox scaffold. Upload, choose a path, or scan a folder to create a safe dry-run plan first; live execution remains explicit.</p>
-            <p><span class="pill">Tip: right-click any highlighted path, table value, stdout/stderr block, or raw evidence cell to copy it.</span></p>
+            <div class="header-row">
+              <div>
+                <h1 data-zh="KSword 沙箱主机" data-en="KSword Sandbox Host">KSword 沙箱主机</h1>
+                <p data-zh="选择或上传 exe 后先创建 dry-run 计划；主页面只展示关键状态和报告入口，详细排障信息请从“执行流程 / Execution flow”独立视图查看。" data-en="Choose or upload an exe and create a dry-run plan first; the dashboard only shows key status and report access. Open Execution flow for troubleshooting details.">选择或上传 exe 后先创建 dry-run 计划；主页面只展示关键状态和报告入口，详细排障信息请从“执行流程 / Execution flow”独立视图查看。</p>
+                <p><span class="pill" data-zh="提示：右键路径、表格值、证据字段和执行流程视图可复制。" data-en="Tip: right-click paths, table values, evidence fields, and execution-flow details to copy.">提示：右键路径、表格值、证据字段和执行流程视图可复制。</span></p>
+              </div>
+              <button class="secondary lang-toggle" type="button" onclick="toggleLanguage()" data-zh="English" data-en="中文">English</button>
+            </div>
+            <nav class="topnav" aria-label="Dashboard navigation">
+              <a href="#plan" data-zh="提交样本" data-en="Submit sample">提交样本</a>
+              <a href="#current-job" data-zh="当前任务" data-en="Current job">当前任务</a>
+              <a href="#recent-jobs" data-zh="历史任务" data-en="Recent jobs">历史任务</a>
+            </nav>
           </header>
           <main>
-            <section>
-              <h2>Plan analysis</h2>
-              <p class="hint">This is a local WebUI. Use host-visible paths such as <code data-copy="D:\Temp\sample.exe" data-copy-label="example sample path">D:\Temp\sample.exe</code> or scan a directory and select one discovered executable. Every entry point below creates a dry-run plan and report before any live VM action.</p>
+            <section id="plan">
+              <h2 data-zh="规划分析" data-en="Plan analysis">规划分析</h2>
+              <p class="hint"><span data-zh="这是本地 WebUI。可使用主机可见路径，例如" data-en="This is a local WebUI. Use host-visible paths such as">这是本地 WebUI。可使用主机可见路径，例如</span> <code data-copy="D:\Temp\sample.exe" data-copy-label="example sample path">D:\Temp\sample.exe</code> <span data-zh="，也可扫描目录并选择发现的可执行文件。以下入口都会先创建 dry-run 计划和报告，不会直接执行 VM 动作。" data-en="or scan a directory and select one discovered executable. Every entry point below creates a dry-run plan and report before any live VM action.">，也可扫描目录并选择发现的可执行文件。以下入口都会先创建 dry-run 计划和报告，不会直接执行 VM 动作。</span></p>
               <div class="grid">
                 <div>
-                  <h3>1) Upload .exe and plan</h3>
-                  <p class="hint">Stores the file in the configured runtime upload folder, then creates a dry-run job. It does not execute the sample.</p>
-                  <label for="sampleUpload">Executable file (.exe)</label>
+                  <h3 data-zh="1) 上传 .exe 并规划" data-en="1) Upload .exe and plan">1) 上传 .exe 并规划</h3>
+                  <p class="hint" data-zh="将文件保存到配置的运行时上传目录，然后创建 dry-run 任务；不会执行样本。" data-en="Stores the file in the configured runtime upload folder, then creates a dry-run job. It does not execute the sample.">将文件保存到配置的运行时上传目录，然后创建 dry-run 任务；不会执行样本。</p>
+                  <label for="sampleUpload" data-zh="可执行文件（.exe）" data-en="Executable file (.exe)">可执行文件（.exe）</label>
                   <input id="sampleUpload" type="file" accept=".exe,application/vnd.microsoft.portable-executable,application/octet-stream">
-                  <label for="uploadDuration">Analysis duration, seconds</label>
+                  <label for="uploadDuration" data-zh="分析时长（秒）" data-en="Analysis duration, seconds">分析时长（秒）</label>
                   <input id="uploadDuration" type="number" min="1" max="900" value="120">
-                  <button onclick="uploadAndPlan()">Upload .exe → create dry-run plan</button>
+                  <button onclick="uploadAndPlan()" data-zh="上传 .exe → 创建 dry-run 计划" data-en="Upload .exe → create dry-run plan">上传 .exe → 创建 dry-run 计划</button>
                 </div>
                 <div>
-                  <h3>2) Plan existing host path</h3>
-                  <p class="hint">Use when the sample is already on this host or a mounted share. The server validates the path before writing artifacts.</p>
-                  <label for="samplePath">Executable path on host</label>
+                  <h3 data-zh="2) 规划已有主机路径" data-en="2) Plan existing host path">2) 规划已有主机路径</h3>
+                  <p class="hint" data-zh="适用于样本已经位于本机或挂载共享时。服务器会先校验路径，再写入产物。" data-en="Use when the sample is already on this host or a mounted share. The server validates the path before writing artifacts.">适用于样本已经位于本机或挂载共享时。服务器会先校验路径，再写入产物。</p>
+                  <label for="samplePath" data-zh="主机上的可执行文件路径" data-en="Executable path on host">主机上的可执行文件路径</label>
                   <input id="samplePath" placeholder="D:\Temp\sample.exe">
-                  <label for="duration">Analysis duration, seconds</label>
+                  <label for="duration" data-zh="分析时长（秒）" data-en="Analysis duration, seconds">分析时长（秒）</label>
                   <input id="duration" type="number" min="1" max="900" value="120">
-                  <button onclick="planPath()">Create dry-run plan from path</button>
+                  <button onclick="planPath()" data-zh="从路径创建 dry-run 计划" data-en="Create dry-run plan from path">从路径创建 dry-run 计划</button>
                 </div>
                 <div>
-                  <h3>3) Scan folder, then plan</h3>
-                  <p class="hint">Metadata-only .exe discovery. Review candidates or use one-click planning for the first sorted result.</p>
-                  <label for="scanPath">Directory or exact .exe path</label>
+                  <h3 data-zh="3) 扫描文件夹后规划" data-en="3) Scan folder, then plan">3) 扫描文件夹后规划</h3>
+                  <p class="hint" data-zh="仅基于元数据发现 .exe。可复核候选项，或一键规划排序后的第一个结果。" data-en="Metadata-only .exe discovery. Review candidates or use one-click planning for the first sorted result.">仅基于元数据发现 .exe。可复核候选项，或一键规划排序后的第一个结果。</p>
+                  <label for="scanPath" data-zh="目录或精确 .exe 路径" data-en="Directory or exact .exe path">目录或精确 .exe 路径</label>
                   <input id="scanPath" placeholder="D:\Temp\incoming">
-                  <label for="maxDepth">Max scan depth</label>
+                  <label for="maxDepth" data-zh="最大扫描深度" data-en="Max scan depth">最大扫描深度</label>
                   <input id="maxDepth" type="number" min="0" max="16" value="4">
-                  <button class="secondary" onclick="scanTargets()">Find .exe candidates</button>
-                  <button class="secondary" onclick="scanAndPlanFirst()">Scan and plan first candidate</button>
+                  <button class="secondary" onclick="scanTargets()" data-zh="查找 .exe 候选项" data-en="Find .exe candidates">查找 .exe 候选项</button>
+                  <button class="secondary" onclick="scanAndPlanFirst()" data-zh="扫描并规划第一个候选项" data-en="Scan and plan first candidate">扫描并规划第一个候选项</button>
                 </div>
               </div>
               <div id="status" class="status"></div>
             </section>
 
             <section>
-              <h2>Executable candidates <span id="candidateCount" class="pill">0</span></h2>
-              <div id="candidates" class="hint">No scan has been run yet.</div>
+              <h2><span data-zh="可执行文件候选项" data-en="Executable candidates">可执行文件候选项</span> <span id="candidateCount" class="pill">0</span></h2>
+              <div id="candidates" class="hint"><span data-zh="尚未运行扫描。" data-en="No scan has been run yet.">尚未运行扫描。</span></div>
             </section>
 
-            <section>
-              <h2>Last planned job</h2>
-              <div id="jobResult" class="hint">No job planned yet.</div>
+            <section id="current-job">
+              <h2 data-zh="最近规划的任务" data-en="Last planned job">最近规划的任务</h2>
+              <div id="jobResult" class="hint"><span data-zh="尚未规划任务。" data-en="No job planned yet.">尚未规划任务。</span></div>
             </section>
 
-            <section>
-              <h2>Recent jobs</h2>
-              <p class="hint">Refresh this list after planning or importing to compare job status, sample paths, and report artifact locations.</p>
-              <button class="secondary" onclick="refreshJobs(true)">Refresh job list</button>
-              <div id="jobList" class="hint">No jobs loaded yet.</div>
+            <section id="recent-jobs">
+              <h2 data-zh="近期任务" data-en="Recent jobs">近期任务</h2>
+              <p class="hint" data-zh="规划或导入后刷新列表，以比较任务状态、样本路径和报告产物位置。" data-en="Refresh this list after planning or importing to compare job status, sample paths, and report artifact locations.">规划或导入后刷新列表，以比较任务状态、样本路径和报告产物位置。</p>
+              <button class="secondary" onclick="refreshJobs(true)" data-zh="刷新任务列表" data-en="Refresh job list">刷新任务列表</button>
+              <div id="jobList" class="hint"><span data-zh="尚未加载任务。" data-en="No jobs loaded yet.">尚未加载任务。</span></div>
             </section>
           </main>
           <div id="copyToast" class="toast" role="status" aria-live="polite"></div>
@@ -137,6 +151,49 @@ internal static class DashboardExperiencePage
             let liveEventJobId = null;
             let liveEventMode = 'idle';
             let copyToastTimer = null;
+            let currentLanguage = localStorage.getItem('ksword-lang') === 'en' ? 'en' : 'zh';
+
+            function setLanguage(lang) {
+              currentLanguage = lang === 'en' ? 'en' : 'zh';
+              localStorage.setItem('ksword-lang', currentLanguage);
+              applyLanguage();
+            }
+
+            function toggleLanguage() {
+              setLanguage(currentLanguage === 'en' ? 'zh' : 'en');
+            }
+
+            function applyLanguage() {
+              document.documentElement.lang = currentLanguage === 'en' ? 'en' : 'zh-CN';
+              document.querySelectorAll('[data-zh][data-en]').forEach(element => {
+                if (element.id === 'candidates' || element.id === 'jobResult' || element.id === 'jobList' || element.id === 'executionResult') {
+                  return;
+                }
+
+                element.textContent = currentLanguage === 'en' ? element.getAttribute('data-en') : element.getAttribute('data-zh');
+              });
+            }
+
+            function formatJobStatus(status) {
+              const names = {
+                0: 'Queued',
+                1: 'Planning',
+                2: 'Planned',
+                3: 'Running',
+                4: 'Completed',
+                5: 'Failed'
+              };
+              if (status === null || status === undefined || status === '') {
+                return '-';
+              }
+
+              if (typeof status === 'number' || /^\d+$/.test(String(status))) {
+                const numeric = Number(status);
+                return names[numeric] ? `${names[numeric]} (${numeric})` : `Unknown (${numeric})`;
+              }
+
+              return String(status);
+            }
 
             document.addEventListener('click', event => {
               const button = event.target.closest ? event.target.closest('button.copy-btn[data-copy]') : null;
@@ -259,7 +316,8 @@ internal static class DashboardExperiencePage
                 const payload = await requireOk(response, 'Create dry-run analysis plan');
 
                 renderJob(payload);
-                refreshJobs(false);
+                applyLanguage();
+            refreshJobs(false);
                 setStatus('Job planned. Review status, artifact paths, raw telemetry, and runbook before enabling privileged live execution.', false);
               } catch (error) {
                 setStatus(error.message, true);
@@ -292,16 +350,17 @@ internal static class DashboardExperiencePage
                   <td data-copy="${escapeAttribute(candidate.fileName)}" data-copy-label="candidate file name">${escapeHtml(candidate.fileName)}</td>
                   <td>${copyableCode(candidate.fullPath, 'candidate path')}</td>
                   <td data-copy="${escapeAttribute(String(candidate.sizeBytes))}" data-copy-label="candidate size">${formatBytes(candidate.sizeBytes)}</td>
-                  <td><button onclick="planPath('${escapeJs(candidate.fullPath)}')">Plan</button></td>
+                  <td><button onclick="planPath('${escapeJs(candidate.fullPath)}')" data-zh="规划" data-en="Plan">规划</button></td>
                 </tr>`).join('');
               const warnings = (result.warnings || []).map(warning => `<li data-copy="${escapeAttribute(warning)}" data-copy-label="scan warning">${escapeHtml(warning)} ${copyButton(warning, 'scan warning')}</li>`).join('');
               document.getElementById('candidates').innerHTML = `
                 <table>
-                  <thead><tr><th></th><th>Name</th><th>Path</th><th>Size</th><th>Action</th></tr></thead>
+                  <thead><tr><th></th><th data-zh="名称" data-en="Name">名称</th><th data-zh="路径" data-en="Path">路径</th><th data-zh="大小" data-en="Size">大小</th><th data-zh="操作" data-en="Action">操作</th></tr></thead>
                   <tbody>${rows}</tbody>
                 </table>
-                <p><button class="secondary" onclick="planSelectedCandidate()">Plan selected candidate</button></p>
-                ${warnings ? `<p class="hint">Warnings:</p><ul class="hint">${warnings}</ul>` : ''}`;
+                <p><button class="secondary" onclick="planSelectedCandidate()" data-zh="规划选中的候选项" data-en="Plan selected candidate">规划选中的候选项</button></p>
+                ${warnings ? `<p class="hint" data-zh="警告：" data-en="Warnings:">警告：</p><ul class="hint">${warnings}</ul>` : ''}`;
+              applyLanguage();
             }
 
             function renderJob(job) {
@@ -309,6 +368,7 @@ internal static class DashboardExperiencePage
               // precomputes safe report links and artifact path labels. Return:
               // no value; the latest job panel is replaced in-place.
               const jobId = String(job.jobId || '');
+              const statusLabel = formatJobStatus(job.status);
               const htmlReportPath = job.htmlReportPath || '';
               const jsonReportPath = job.jsonReportPath || '';
               const runbookExecutionPath = job.runbookExecutionResultPath || '';
@@ -317,14 +377,15 @@ internal static class DashboardExperiencePage
               const guestImportStatus = buildGuestImportStatus(job, artifactPaths);
               const servedReportHref = jobId ? `/api/jobs/${encodeURIComponent(jobId)}/report/html` : '';
               const fileReportHref = toFileUri(htmlReportPath);
-              const steps = (job.runbook?.steps || []).map(step => `<li data-copy="${escapeAttribute((step.title || '') + '\n' + (step.powerShell || ''))}" data-copy-label="planned runbook step"><strong>${escapeHtml(step.title)}</strong><br>${copyableCode(step.powerShell, 'planned runbook PowerShell')}</li>`).join('');
+              const executionFlowHref = jobId ? `/jobs/${encodeURIComponent(jobId)}/execution-flow` : '';
+              const plannedStepCount = job.runbook?.steps?.length || 0;
               const messages = (job.messages || []).map(message => `<li data-copy="${escapeAttribute(message)}" data-copy-label="job message">${escapeHtml(message)} ${copyButton(message, 'job message')}</li>`).join('');
               const reportLinks = htmlReportPath ? `
                   <a class="buttonlink" target="_blank" rel="noopener" href="${escapeHtml(servedReportHref)}">Open served HTML report</a>
                   <a class="buttonlink secondary" target="_blank" rel="noopener" href="${escapeHtml(fileReportHref)}">Open local file:// report</a>` : '<span class="hint">No HTML report path is recorded yet.</span>';
               document.getElementById('jobResult').innerHTML = `
                 <p><strong>Job:</strong> ${copyableCode(jobId, 'job id')}</p>
-                <p><strong>Status:</strong> <span class="pill" data-copy="${escapeAttribute(job.status || '')}" data-copy-label="job status">${escapeHtml(job.status)}</span></p>
+                <p><strong>Status:</strong> <span class="pill" data-copy="${escapeAttribute(statusLabel)}" data-copy-label="job status">${escapeHtml(statusLabel)}</span></p>
                 <p><strong>Sample:</strong> ${copyableCode(job.sample?.fullPath || '', 'sample path')}</p>
                 <h3>Report access</h3>
                 <p class="button-row">
@@ -364,14 +425,15 @@ internal static class DashboardExperiencePage
                   <div id="liveEventSources" class="hint"></div>
                   <div id="liveEventRows" class="hint">No raw events loaded yet.</div>
                 </div>
-                <h3>Hyper-V runbook</h3>
+                <h3 data-zh="执行" data-en="Execution">执行</h3>
                 <p class="button-row">
-                  <button class="secondary" onclick="executeRunbook('${escapeJs(jobId)}', false)">Record dry-run execution</button>
-                  <button onclick="executeRunbook('${escapeJs(jobId)}', true)">Execute live runbook</button>
-                  <button class="secondary" onclick="importGuestEvents('${escapeJs(jobId)}')">Import guest events / refresh report</button>
+                  <button class="secondary" onclick="executeRunbook('${escapeJs(jobId)}', false)" data-zh="记录一次 dry-run" data-en="Record dry-run execution">记录一次 dry-run</button>
+                  <button onclick="executeRunbook('${escapeJs(jobId)}', true)" data-zh="启动虚拟机执行" data-en="Execute live runbook">启动虚拟机执行</button>
+                  <button class="secondary" onclick="importGuestEvents('${escapeJs(jobId)}')" data-zh="导入事件并刷新报告" data-en="Import events / refresh report">导入事件并刷新报告</button>
+                  <a class="buttonlink secondary" target="_blank" rel="noopener" href="${escapeHtml(executionFlowHref)}" data-zh="执行流程 / Execution flow" data-en="Execution flow / 执行流程">执行流程 / Execution flow</a>
                 </p>
-                <div id="executionResult" class="hint">Live execution requires an elevated host process and a prepared golden VM.</div>
-                <ol>${steps}</ol>`;
+                <div id="executionResult" class="hint" data-copy="planned steps: ${plannedStepCount}" data-copy-label="planned runbook step count">已规划 ${plannedStepCount} 个步骤。主界面不展开 1~16 步；请打开“执行流程 / Execution flow”查看独立视图。</div>`;
+              applyLanguage();
               startLiveMonitor(jobId);
             }
 
@@ -391,8 +453,9 @@ internal static class DashboardExperiencePage
                 const job = await requireOk(response, 'Refresh job status');
 
                 renderJob(job);
-                refreshJobs(false);
-                setStatus(`Job refreshed. Status: ${job.status}.`, false);
+                applyLanguage();
+            refreshJobs(false);
+                setStatus(`Job refreshed. Status: ${formatJobStatus(job.status)}.`, false);
               } catch (error) {
                 setStatus(error.message, true);
               } finally {
@@ -443,23 +506,25 @@ internal static class DashboardExperiencePage
 
               const rows = jobs.slice().reverse().map(job => {
                 const jobId = String(job.jobId || '');
+                const statusLabel = formatJobStatus(job.status);
                 const samplePath = job.sample?.fullPath || job.submission?.samplePath || '';
                 const reportPath = job.htmlReportPath || '';
                 return `
                 <tr>
                   <td>${copyableCode(jobId, 'job id')}</td>
-                  <td data-copy="${escapeAttribute(job.status || '')}" data-copy-label="job status">${escapeHtml(job.status || '-')}</td>
+                  <td data-copy="${escapeAttribute(statusLabel)}" data-copy-label="job status">${escapeHtml(statusLabel)}</td>
                   <td>${copyableCode(samplePath, 'job sample path', '-')}</td>
                   <td>${copyableCode(reportPath, 'job report.html path', '-')}</td>
-                  <td><button class="secondary" onclick="refreshJob('${escapeJs(jobId)}')">Open</button></td>
+                  <td><button class="secondary" onclick="refreshJob('${escapeJs(jobId)}')" data-zh="打开" data-en="Open">打开</button></td>
                 </tr>`;
               }).join('');
 
               container.innerHTML = `
                 <table>
-                  <thead><tr><th>Job ID</th><th>Status</th><th>Sample</th><th>report.html</th><th>Action</th></tr></thead>
+                  <thead><tr><th>Job ID</th><th data-zh="状态" data-en="Status">状态</th><th data-zh="样本" data-en="Sample">样本</th><th>report.html</th><th data-zh="操作" data-en="Action">操作</th></tr></thead>
                   <tbody>${rows}</tbody>
                 </table>`;
+              applyLanguage();
             }
 
             function startLiveMonitor(jobId) {
@@ -772,7 +837,8 @@ internal static class DashboardExperiencePage
                 }
 
                 renderExecution(execution, payload);
-                refreshJobs(false);
+                applyLanguage();
+            refreshJobs(false);
                 const suffix = payload.guestImportMessage ? ` ${payload.guestImportMessage}` : '';
                 const importFailed = Boolean(payload.guestImportMessage && !payload.guestImportSucceeded);
                 setStatus((execution.success ? 'Runbook execution completed.' : 'Runbook execution stopped with a failure.') + suffix, !execution.success || importFailed);
@@ -796,7 +862,8 @@ internal static class DashboardExperiencePage
                 const job = await requireOk(response, 'Import guest events and refresh report');
 
                 renderJob(job);
-                refreshJobs(false);
+                applyLanguage();
+            refreshJobs(false);
                 setStatus(`Guest events imported. Report refreshed at ${job.htmlReportPath || 'report.html'}.`, false);
               } catch (error) {
                 setStatus(error.message, true);
@@ -806,47 +873,30 @@ internal static class DashboardExperiencePage
             }
 
             function renderExecution(result, wrapper) {
-              const rows = (result.stepResults || []).map(step => {
-                const statusClass = step.success ? 'status-ok' : 'status-failed';
-                const stepLabel = `${escapeHtml(step.title || step.stepId || 'runbook step')}<br><code>${escapeHtml(step.stepId || '')}</code>`;
-                const command = step.powerShell ? `<details open><summary>PowerShell command ${copyButton(step.powerShell, 'PowerShell command')}</summary><pre data-copy="${escapeAttribute(step.powerShell)}" data-copy-label="PowerShell command">${escapeHtml(step.powerShell)}</pre></details>` : '<span class="hint">No command text.</span>';
-                const message = step.message ? `<p class="${step.success ? 'hint' : 'error'}"><strong>Message:</strong> ${escapeHtml(step.message)}</p>` : '';
-                const stdout = renderOutputDetails('stdout', step.standardOutput);
-                const stderr = renderOutputDetails('stderr', step.standardError);
-                return `
-                <tr>
-                  <td>${step.stepIndex}</td>
-                  <td>${stepLabel}</td>
-                  <td><span class="${statusClass}">${step.success ? 'ok' : 'failed'}</span><br><span class="hint">skipped: ${step.skipped ? 'yes' : 'no'}</span></td>
-                  <td>
-                    <strong>Exit:</strong> ${step.exitCode ?? '(none)'}<br>
-                    <strong>Duration:</strong> ${escapeHtml(formatDuration(step.duration))}<br>
-                    <strong>Started:</strong> ${escapeHtml(formatEventTime(step.startedAtUtc))}<br>
-                    <span class="hint">elevation: ${step.requiresElevation ? 'yes' : 'no'}; mutates VM: ${step.mutatesVmState ? 'yes' : 'no'}</span>
-                  </td>
-                  <td class="runbook-output">${command}${message}${stdout}${stderr}</td>
-                </tr>`;
-              }).join('');
+              // Inputs: runbook execution response and wrapper metadata.
+              // Processing: renders a compact summary only. Detailed step flow
+              // lives on /jobs/{jobId}/execution-flow so the main dashboard does
+              // not inline the 1~16 runbook steps, PowerShell, stdout, or stderr.
+              const jobId = result.jobId || (wrapper && wrapper.job && wrapper.job.jobId) || '';
+              const flowHref = jobId ? `/jobs/${encodeURIComponent(jobId)}/execution-flow` : '#';
               const importMessage = wrapper && wrapper.guestImportMessage ? `<p class="${wrapper.guestImportSucceeded ? 'ok' : 'hint'}">${escapeHtml(wrapper.guestImportMessage)}</p>` : '';
+              const failedStep = Array.isArray(result.stepResults) ? result.stepResults.find(step => step && step.success === false) : null;
+              const failure = failedStep
+                ? `<p class="error"><strong>失败步骤 / Failed step:</strong> ${escapeHtml(failedStep.title || failedStep.stepId || '')}${failedStep.message ? ` — ${escapeHtml(failedStep.message)}` : ''}</p>`
+                : '';
+              const successClass = result.success ? 'status-ok' : 'status-failed';
               document.getElementById('executionResult').innerHTML = `
-                <p><strong>Mode:</strong> ${escapeHtml(result.mode)} | <strong>Success:</strong> ${result.success} | <strong>Executed:</strong> ${result.executedSteps}/${result.totalSteps} | <strong>Duration:</strong> ${escapeHtml(formatDuration(result.duration))}</p>
-                ${result.message ? `<p class="error">${escapeHtml(result.message)}</p>` : ''}
-                ${importMessage}
-                <table>
-                  <thead><tr><th>#</th><th>Step</th><th>Status</th><th>Timing / exit</th><th>Command / output / error</th></tr></thead>
-                  <tbody>${rows}</tbody>
-                </table>`;
-            }
-
-            function renderOutputDetails(label, value) {
-              // Inputs: a stream label and captured text. Processing: skips
-              // empty streams and renders non-empty data behind a details
-              // expander. Return: HTML text for the runbook output cell.
-              if (!value) {
-                return '';
-              }
-
-              return `<details ${label === 'stderr' ? 'open' : ''}><summary>${escapeHtml(label)} ${copyButton(value, label)}</summary><pre data-copy="${escapeAttribute(value)}" data-copy-label="${escapeAttribute(label)}">${escapeHtml(value)}</pre></details>`;
+                <div class="pathbox" data-copy="mode=${escapeAttribute(result.mode)}; success=${result.success}; executed=${result.executedSteps}/${result.totalSteps}; duration=${escapeAttribute(formatDuration(result.duration))}" data-copy-label="runbook execution summary">
+                  <p><strong>模式 / Mode:</strong> ${escapeHtml(result.mode)} · <strong>结果 / Result:</strong> <span class="${successClass}">${result.success ? '成功 / success' : '失败 / failed'}</span></p>
+                  <p><strong>进度 / Progress:</strong> ${result.executedSteps}/${result.totalSteps} · <strong>耗时 / Duration:</strong> ${escapeHtml(formatDuration(result.duration))}</p>
+                  ${result.message ? `<p class="error">${escapeHtml(result.message)}</p>` : ''}
+                  ${failure}
+                  ${importMessage}
+                  <p class="button-row">
+                    <a class="buttonlink secondary" target="_blank" rel="noopener" href="${escapeHtml(flowHref)}" data-zh="执行流程 / Execution flow" data-en="Execution flow / 执行流程">执行流程 / Execution flow</a>
+                  </p>
+                </div>`;
+              applyLanguage();
             }
 
             function buildArtifactPaths(job) {
@@ -1165,6 +1215,7 @@ internal static class DashboardExperiencePage
               return '';
             }
 
+            applyLanguage();
             refreshJobs(false);
           </script>
         </body>

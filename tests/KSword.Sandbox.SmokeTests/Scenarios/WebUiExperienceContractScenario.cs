@@ -22,13 +22,19 @@ internal sealed class WebUiExperienceContractScenario : ISmokeTestScenario
         var program = ReadRepositoryText(context, "src", "KSword.Sandbox.Web", "Program.cs");
         var dashboard = ReadRepositoryText(context, "src", "KSword.Sandbox.Web", "Dashboard", "DashboardExperiencePage.cs");
         var copyScript = ReadRepositoryText(context, "src", "KSword.Sandbox.Web", "Dashboard", "DashboardClientScripts.cs");
+        var executionFlow = ReadRepositoryText(context, "src", "KSword.Sandbox.Web", "Dashboard", "RunbookExecutionFlowPage.cs");
         var artifactContract = ReadRepositoryText(context, "src", "KSword.Sandbox.Web", "Contracts", "JobArtifactPathsContract.cs");
         var importContract = ReadRepositoryText(context, "src", "KSword.Sandbox.Web", "Contracts", "GuestImportStatusContract.cs");
         var stepContract = ReadRepositoryText(context, "src", "KSword.Sandbox.Web", "Contracts", "RunbookStepExecutionContract.cs");
         var doc = ReadRepositoryText(context, "docs", "webui-framework.md");
 
         RequireContains(program, "DashboardExperiencePage.Render()", "Program.cs should route the root WebUI through the Dashboard layer.");
+        RequireContains(program, "\"/jobs/{jobId:guid}/execution-flow\"", "Program.cs should expose a dedicated execution-flow route.");
+        RequireContains(program, "RunbookExecutionFlowPage.Render", "Program.cs should expose a separate execution-flow page for runbook details.");
 
+        RequireContains(dashboard, "<html lang=\"zh-CN\">", "Dashboard should default to Chinese.");
+        RequireContains(dashboard, "onclick=\"toggleLanguage()\"", "Dashboard should expose the top-right Chinese/English switch.");
+        RequireContains(dashboard, "data-zh=\"English\" data-en=\"中文\"", "Language switch should toggle between Chinese and English labels.");
         RequireContains(dashboard, "Upload .exe", "Dashboard should clarify upload-and-plan entry text.");
         RequireContains(dashboard, "Create dry-run plan from path", "Dashboard should clarify host-path planning.");
         RequireContains(dashboard, "Scan and plan first candidate", "Dashboard should expose one-click scan-and-plan.");
@@ -39,10 +45,16 @@ internal sealed class WebUiExperienceContractScenario : ISmokeTestScenario
         RequireContains(dashboard, "events.json", "Dashboard should display events.json path.");
         RequireContains(dashboard, "driver-events.jsonl", "Dashboard should display driver-events.jsonl path.");
         RequireContains(dashboard, "runbook-execution.json", "Dashboard should display runbook execution result path.");
-        RequireContains(dashboard, "stdout", "Dashboard should display runbook stdout.");
-        RequireContains(dashboard, "stderr", "Dashboard should display runbook stderr.");
-        RequireContains(dashboard, "Exit:", "Dashboard should display runbook exit code.");
-        RequireContains(dashboard, "Duration:", "Dashboard should display runbook duration.");
+        RequireContains(dashboard, "执行流程", "Dashboard should link to the separate execution-flow page instead of rendering all steps inline.");
+        RequireContains(dashboard, "formatJobStatus", "Dashboard should translate numeric enum status values into readable labels.");
+        RequireContains(dashboard, """<div id="jobResult" class="hint"><span""", "Dashboard dynamic job container should not be directly translated and wiped after renderJob.");
+        RequireContains(dashboard, "element.id === 'jobResult'", "Dashboard language switching should skip dynamic job containers.");
+        RequireNotContains(dashboard, "<ol>${steps}</ol>", "Dashboard should not render all planned runbook steps inline.");
+        RequireNotContains(dashboard, "planned runbook PowerShell", "Dashboard should not expose planned PowerShell commands on the main page.");
+        RequireNotContains(dashboard, "step.standardOutput", "Dashboard should not render runbook stdout inline on the main page.");
+        RequireNotContains(dashboard, "step.standardError", "Dashboard should not render runbook stderr inline on the main page.");
+        RequireContains(executionFlow, "stdout/stderr", "Execution-flow page should document that command output is intentionally hidden from the main page.");
+        RequireContains(executionFlow, "Step status", "Execution-flow page should show human-readable step status.");
         RequireContains(dashboard, "copy-btn", "Dashboard should render explicit copy buttons.");
         RequireContains(dashboard, "data-copy", "Dashboard should mark paths and evidence as copyable.");
         RequireContains(dashboard, "contextmenu", "Dashboard should support right-click copy.");
@@ -70,6 +82,17 @@ internal sealed class WebUiExperienceContractScenario : ISmokeTestScenario
             Passed = true,
             Message = "WebUI one-click, status/path, telemetry, runbook, guest import, and copy contracts are present."
         });
+    }
+
+
+    /// <summary>
+    /// Requires that a text block does not contain a literal value.
+    /// Inputs are text, forbidden literal, and assertion message; processing
+    /// uses ordinal substring matching; the method returns no value on success.
+    /// </summary>
+    private static void RequireNotContains(string content, string forbidden, string message)
+    {
+        SmokeAssert.True(!content.Contains(forbidden, StringComparison.Ordinal), message);
     }
 
     /// <summary>
