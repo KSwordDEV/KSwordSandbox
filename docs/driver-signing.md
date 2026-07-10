@@ -95,7 +95,7 @@ Export-Certificate `
 
 Import-Certificate `
   -FilePath C:\KSwordSandbox\certs\KSwordSandboxTestDriver.cer `
-  -CertStoreLocation Cert:\LocalMachine\TrustedRoot
+  -CertStoreLocation Cert:\LocalMachine\Root
 
 Import-Certificate `
   -FilePath C:\KSwordSandbox\certs\KSwordSandboxTestDriver.cer `

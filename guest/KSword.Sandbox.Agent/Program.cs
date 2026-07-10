@@ -89,6 +89,7 @@ internal static class AgentProgram
         var probeContext = CreateGuestProbeContext(options, workingDirectory, rootProcessId: null);
         events.AddRange(await probeRunner.CollectAsync(ProbePhase.BeforeStart, probeContext));
         var r0Collector = StartR0Collector(options, events);
+        var analysisDeadline = DateTimeOffset.UtcNow.AddSeconds(options.DurationSeconds);
 
         try
         {
@@ -140,6 +141,26 @@ internal static class AgentProgram
                     ["exitCode"] = SafeExitCode(process)
                 }
             });
+
+            var remainingAnalysisWindow = analysisDeadline - DateTimeOffset.UtcNow;
+            if (remainingAnalysisWindow > TimeSpan.Zero)
+            {
+                events.Add(new SandboxEvent
+                {
+                    EventType = "analysis.wait_remaining",
+                    Source = "guest",
+                    ProcessName = SafeProcessName(process),
+                    ProcessId = process.Id,
+                    Path = options.SamplePath,
+                    Data =
+                    {
+                        ["remainingSeconds"] = Math.Ceiling(remainingAnalysisWindow.TotalSeconds).ToString(CultureInfo.InvariantCulture),
+                        ["reason"] = "sampleExitedBeforeAnalysisDuration",
+                        ["durationSeconds"] = options.DurationSeconds.ToString(CultureInfo.InvariantCulture)
+                    }
+                });
+                await Task.Delay(remainingAnalysisWindow);
+            }
 
             events.AddRange(await probeRunner.CollectAsync(ProbePhase.AfterRun, runningProbeContext));
         }

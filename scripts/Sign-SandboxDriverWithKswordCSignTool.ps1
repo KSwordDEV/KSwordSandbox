@@ -226,6 +226,8 @@ function Invoke-SandboxDriverSigning {
         throw 'CSignTool signing is disabled by default for unattended builds because it may display timestamp/AuthentiCode UI. Default driver validation is compile-only. If a human is present and you intentionally want the legacy path, rerun with -AllowInteractiveCSignTool; otherwise use scripts\Sign-SandboxDriverWithTestCertificate.ps1 inside an isolated test VM.'
     }
 
+    throw 'Legacy CSignTool execution is temporarily disabled for this project because the timestamp/AuthentiCode flow can display UI and block unattended agents. Keep driver validation compile-only, or use scripts\Sign-SandboxDriverWithTestCertificate.ps1 plus Windows test-signing in an isolated lab VM. Re-enable this script only after an attended operator explicitly restores the legacy path.'
+
     $repositoryRoot = Resolve-RepositoryRoot
     $driver = Resolve-DriverSysPath -RepositoryRoot $repositoryRoot -RequestedPath $DriverPath
     $certDirectory = if ([string]::IsNullOrWhiteSpace($CertificateDirectory)) {

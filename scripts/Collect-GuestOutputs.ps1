@@ -199,7 +199,22 @@ function Copy-GuestOutputOnce {
     }
 
     try {
-        Copy-Item -FromSession $Session -Path $GuestOutputDirectory -Destination $HostOutputRoot -Recurse -Force -ErrorAction Stop
+        if ($Required) {
+            Copy-Item -FromSession $Session -Path $GuestOutputDirectory -Destination $HostOutputRoot -Recurse -Force -ErrorAction Stop
+        }
+        else {
+            $destinationDirectory = Join-Path $HostOutputRoot (Split-Path -Leaf $GuestOutputDirectory)
+            New-Item -ItemType Directory -Path $destinationDirectory -Force | Out-Null
+            $guestContentPath = ([string]$GuestOutputDirectory).TrimEnd('\', '/') + '\*'
+            Copy-Item `
+                -FromSession $Session `
+                -Path $guestContentPath `
+                -Destination $destinationDirectory `
+                -Recurse `
+                -Force `
+                -Exclude @('*.log', 'driver-events.jsonl') `
+                -ErrorAction Stop
+        }
     }
     catch {
         $message = "Copy-Item -FromSession failed for '$GuestOutputDirectory' -> '$HostOutputRoot': $($_.Exception.Message)"
@@ -208,6 +223,33 @@ function Copy-GuestOutputOnce {
         }
 
         [void]$script:CollectionWarnings.Add($message)
+    }
+}
+
+function Get-HostFileSha256Hex {
+    param([Parameter(Mandatory)][string]$Path)
+
+    $getFileHash = Get-Command -Name Get-FileHash -ErrorAction SilentlyContinue
+    if ($null -ne $getFileHash) {
+        return (Get-FileHash -LiteralPath $Path -Algorithm SHA256 -ErrorAction Stop).Hash
+    }
+
+    $stream = [System.IO.File]::Open(
+        $Path,
+        [System.IO.FileMode]::Open,
+        [System.IO.FileAccess]::Read,
+        [System.IO.FileShare]::ReadWrite -bor [System.IO.FileShare]::Delete)
+    try {
+        $sha = [System.Security.Cryptography.SHA256]::Create()
+        try {
+            return ([System.BitConverter]::ToString($sha.ComputeHash($stream))).Replace('-', '').ToUpperInvariant()
+        }
+        finally {
+            $sha.Dispose()
+        }
+    }
+    finally {
+        $stream.Dispose()
     }
 }
 
@@ -338,7 +380,7 @@ function Index-CollectedFiles {
 
         $hash = $null
         try {
-            $hash = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256 -ErrorAction Stop).Hash
+            $hash = Get-HostFileSha256Hex -Path $file.FullName
         }
         catch {
             [void]$script:CollectionWarnings.Add("Unable to hash collected file '$($file.FullName)': $($_.Exception.Message)")

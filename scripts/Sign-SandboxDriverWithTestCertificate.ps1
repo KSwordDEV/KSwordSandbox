@@ -121,7 +121,7 @@ function Trust-TestCertificateForLocalMachine {
     $temporaryCertificate = Join-Path $ScratchDirectory ('ksword-sandbox-test-driver-{0}.cer' -f $Certificate.Thumbprint)
     Export-TestCertificate -Certificate $Certificate -Path $temporaryCertificate
 
-    foreach ($store in @('Cert:\LocalMachine\TrustedRoot', 'Cert:\LocalMachine\TrustedPublisher')) {
+    foreach ($store in @('Cert:\LocalMachine\Root', 'Cert:\LocalMachine\TrustedPublisher')) {
         if ($PSCmdlet.ShouldProcess($store, "Import public test certificate $($Certificate.Thumbprint)")) {
             Import-Certificate -FilePath $temporaryCertificate -CertStoreLocation $store | Out-Null
         }
