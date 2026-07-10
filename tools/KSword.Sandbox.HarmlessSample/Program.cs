@@ -2,7 +2,7 @@ using System.Diagnostics;
 using System.Net.Sockets;
 using System.Text;
 
-namespace KSword.Sandbox.TestSample;
+namespace KSword.Sandbox.HarmlessSample;
 
 /// <summary>
 /// Provides a harmless Windows smoke-test executable for end-to-end sandbox validation.
@@ -334,10 +334,10 @@ internal static class Program
     /// </summary>
     private static void PrintUsage()
     {
-        Console.WriteLine("KSword.Sandbox.TestSample");
+        Console.WriteLine("KSword.Sandbox.HarmlessSample");
         Console.WriteLine();
         Console.WriteLine("Usage:");
-        Console.WriteLine("  KSword.Sandbox.TestSample.exe [--output-dir <path>] [--network-probe]");
+        Console.WriteLine("  KSword.Sandbox.HarmlessSample.exe [--output-dir <path>] [--network-probe]");
         Console.WriteLine();
         Console.WriteLine("Options:");
         Console.WriteLine("  --output-dir <path>   Directory that receives ksword-sandbox-smoke.txt.");

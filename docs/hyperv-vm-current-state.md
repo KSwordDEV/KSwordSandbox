@@ -111,7 +111,7 @@ Observed:
   - `D:\Temp\KSwordSandbox\HyperV\KSwordSandbox-Win10-Golden\Virtual Hard Disks\KSwordSandbox-Win10-Golden.vhdx`
   - `D:\Temp\KSwordSandbox\payload\guest-tools\agent\KSword.Sandbox.Agent.exe`
   - `D:\Temp\KSwordSandbox\payload\guest-tools\r0collector\KSword.Sandbox.R0Collector.exe`
-  - `D:\Temp\KSwordSandbox\samples\KSword.Sandbox.TestSample\KSword.Sandbox.TestSample.exe`
+  - `D:\Temp\KSwordSandbox\samples\KSword.Sandbox.HarmlessSample\KSword.Sandbox.HarmlessSample.exe`
   - `D:\Temp\KSwordSandbox\hyperv-vm-setup.md`
   - `D:\Temp\KSwordSandbox\hyperv-live-smoke.md`
 

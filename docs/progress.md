@@ -43,6 +43,11 @@ a final HTML report.
 - `Invoke-FullValidation.ps1` now runs the live-telemetry contract script and a
   non-mutating Hyper-V `PlanOnly`/`WhatIf` plan check before native/readiness
   gates.
+- Smoke validation now enforces the harmless-sample contract for
+  `KSword.Sandbox.HarmlessSample`: the source project and
+  `Prepare-HarmlessSample.ps1` exist, generated `.exe`/`.dll`/`.bin` and
+  `bin`/`obj` outputs must stay out of git, and the Hyper-V E2E runbook explains
+  how to publish it outside the repository before `-Live`.
 
 ## Remaining P0 gaps
 
@@ -56,13 +61,16 @@ a final HTML report.
    real R0 event path, preferably process create or file minifilter.
 5. Confirm WebUI live table remains responsive during a live run, then final
    import regenerates `report.json` and `report.html`.
+6. Run the published harmless behavior sample through live Hyper-V once
+   `KSWORDBOX_GUEST_PASSWORD` is set in the elevated operator process.
 
 ## Next best work
 
 - Finish R0 ABI/capability negotiation and typed payload parsing.
 - Run the Hyper-V E2E PlanOnly/full-validation gates on the target host after
   each script change, then run the live mode only from an elevated test session.
-- Add a harmless guest test executable and a repeatable live-run checklist.
+- Use `Prepare-HarmlessSample.ps1` and the runbook checklist to build the
+  executable outside git for live Hyper-V validation.
 - Add final report artifact links for `events.json`, `driver-events.jsonl`,
   screenshots, and dropped-file manifests.
 - Run native build and full smoke after each R0/collector merge.

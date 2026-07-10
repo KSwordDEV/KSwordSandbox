@@ -45,8 +45,32 @@ internal sealed class R0CollectorContractScenario : ISmokeTestScenario
         RequireContains(ReadText(Path.Combine(sourceRoot, "Options.cpp")), "--synthetic", "synthetic alias should be parsed.");
         RequireContains(ReadText(Path.Combine(sourceRoot, "Options.cpp")), "--enable-mask", "enable-mask should be parsed.");
         RequireContains(ReadText(Path.Combine(sourceRoot, "Options.cpp")), "--heartbeat", "heartbeat should be parsed.");
-        RequireContains(ReadText(Path.Combine(sourceRoot, "IoctlClient.cpp")), "request.Flags = options.enableMask", "enable-mask should flow to READ_EVENTS request flags.");
-        RequireContains(ReadText(Path.Combine(sourceRoot, "RuntimeLoop.cpp")), "r0collector.heartbeat", "heartbeat rows should be emitted by the runtime loop.");
+        var ioctlClient = ReadText(Path.Combine(sourceRoot, "IoctlClient.cpp"));
+        var eventParser = ReadText(Path.Combine(sourceRoot, "EventParser.cpp"));
+        var runtimeLoop = ReadText(Path.Combine(sourceRoot, "RuntimeLoop.cpp"));
+        RequireContains(ioctlClient, "EmitDriverCapabilities", "R0Collector should negotiate capabilities.");
+        RequireContains(ioctlClient, "EmitDriverStatus", "R0Collector should emit status snapshots.");
+        RequireContains(ioctlClient, "EmitDriverSetProducerEnableMask", "R0Collector should support producer-mask IOCTL negotiation.");
+        RequireContains(ioctlClient, "IOCTL_KSWORD_SANDBOX_GET_CAPABILITIES", "R0Collector should issue capabilities IOCTL.");
+        RequireContains(ioctlClient, "IOCTL_KSWORD_SANDBOX_GET_STATUS", "R0Collector should issue status IOCTL.");
+        RequireContains(ioctlClient, "IOCTL_KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK", "R0Collector should issue producer-mask IOCTL.");
+        RequireContains(ioctlClient, "request->EnableMask = options.enableMask", "enable-mask should flow to SET_PRODUCER_ENABLE_MASK request.");
+        RequireContains(ioctlClient, "request->Flags = 0", "producer-mask request reserved flags should be zero.");
+        RequireContains(ioctlClient, "r0collector.driverCapabilities", "R0Collector should emit capabilities JSONL rows.");
+        RequireContains(ioctlClient, "r0collector.driverStatus", "R0Collector should emit status JSONL rows.");
+        RequireContains(ioctlClient, "r0collector.driverProducerMask", "R0Collector should emit producer-mask JSONL rows.");
+        RequireContains(eventParser, "capabilityFlagsHex", "Capabilities row should preserve capability flags.");
+        RequireContains(eventParser, "supportedProducerMaskHex", "Capabilities/status rows should preserve supported producer mask.");
+        RequireContains(eventParser, "queueCapacity", "Status row should preserve queue capacity.");
+        RequireContains(eventParser, "queueDepth", "Status row should preserve queue depth.");
+        RequireContains(eventParser, "producerEnableMaskHex", "Status row should preserve producer enable mask.");
+        RequireContains(eventParser, "totalEventsSuppressed", "Status row should preserve suppressed event counter.");
+        RequireContains(eventParser, "requestedEnableMaskHex", "Producer-mask row should preserve requested mask.");
+        RequireContains(eventParser, "effectiveEnableMaskHex", "Producer-mask row should preserve effective mask.");
+        RequireContains(runtimeLoop, "EmitDriverCapabilities", "Runtime loop should call capabilities before drain.");
+        RequireContains(runtimeLoop, "EmitDriverSetProducerEnableMask", "Runtime loop should apply requested producer mask before drain.");
+        RequireContains(runtimeLoop, "EmitDriverStatus", "Runtime loop should capture status before/after drain.");
+        RequireContains(runtimeLoop, "r0collector.heartbeat", "heartbeat rows should be emitted by the runtime loop.");
 
         foreach (var option in new[] { "--self-test", "--synthetic", "--enable-mask", "--heartbeat", "--duration", "--poll-ms" })
         {

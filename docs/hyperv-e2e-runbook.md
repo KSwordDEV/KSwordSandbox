@@ -27,11 +27,91 @@ Live execution requires all of these conditions:
 6. The generated `preflightSummary.liveReady` is `true` before any child script
    is launched.
 
+## Current local go/no-go checklist
+
+Use this checklist as the current executable state for the local host. It was
+observed on 2026-07-10 from an elevated PowerShell session with non-mutating
+Hyper-V/readiness probes.
+
+- [x] Host shell is elevated.
+- [x] VM exists: `KSwordSandbox-Win10-Golden`.
+- [x] VM currently reads as `Off`.
+- [x] Clean checkpoint exists: `Clean`.
+- [x] Guest Service Interface is enabled even though the local display name is
+  `来宾服务接口`; scripts accept the stable component id
+  `6C09BB55-D683-4DA0-8931-C9BF705F6480`, English display name, and localized
+  display name.
+- [x] Runtime root exists: `D:\Temp\KSwordSandbox`.
+- [x] Host payload root exists:
+  `D:\Temp\KSwordSandbox\payload\guest-tools`.
+- [x] Host payload files exist:
+  `payload-manifest.json`, `agent\KSword.Sandbox.Agent.exe`, and
+  `r0collector\KSword.Sandbox.R0Collector.exe`.
+- [ ] Set `KSWORDBOX_GUEST_PASSWORD` in the same elevated process that will run
+  readiness/PlanOnly/live.
+- [ ] Confirm PowerShell Direct with `SandboxUser` after the password is set.
+  Readiness will still skip the probe while the VM is `Off`; it will not start
+  the VM for you.
+
+Current readiness result summary:
+
+```text
+Passed: 7
+Warnings: 2
+Failed: 1
+Required failure: KSWORDBOX_GUEST_PASSWORD is missing from the current process.
+Warnings: PowerShell Direct and guest payload probes were skipped because the
+password secret is missing.
+Read-only guarantee: no probe files were written and no VM mutation commands
+were executed.
+```
+
+## Harmless behavior sample contract
+
+The preferred live smoke input is the harmless behavior sample source project
+`tools/KSword.Sandbox.HarmlessSample/KSword.Sandbox.HarmlessSample.csproj`.
+If a worker places the project elsewhere, it must still be a same-name
+`KSword.Sandbox.HarmlessSample.csproj` project so smoke tests can discover it.
+
+Build and publish the sample through `Prepare-HarmlessSample.ps1`. The script is
+expected to keep all build output outside this repository, with publish output
+under:
+
+```text
+D:\Temp\KSwordSandbox\samples\KSword.Sandbox.HarmlessSample
+```
+
+The published `KSword.Sandbox.HarmlessSample.exe`, generated `bin`/`obj`
+directories, and any helper `.dll`/`.bin` files are local lab artifacts and must
+stay out of git. The repository should contain only source, the preparation
+script, docs, and smoke contracts.
+
+For a live Hyper-V run, prepare the sample first, verify the plan, then pass the
+published executable to the one-command E2E script:
+
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\Prepare-HarmlessSample.ps1 `
+  -RepositoryRoot 'D:\Projects\KswordSandbox' `
+  -OutputRoot 'D:\Temp\KSwordSandbox\samples\KSword.Sandbox.HarmlessSample'
+
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\Invoke-HyperVE2E.ps1 `
+  -SamplePath 'D:\Temp\KSwordSandbox\samples\KSword.Sandbox.HarmlessSample\KSword.Sandbox.HarmlessSample.exe' `
+  -PlanOnly
+
+$env:KSWORDBOX_GUEST_PASSWORD = '<local guest password>'
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\Invoke-HyperVE2E.ps1 `
+  -SamplePath 'D:\Temp\KSwordSandbox\samples\KSword.Sandbox.HarmlessSample\KSword.Sandbox.HarmlessSample.exe' `
+  -Live
+```
+
+Use the existing `PlanOnly` and `-WhatIf` review modes before live execution;
+the live command is only for the isolated golden VM workflow described below.
+
 ## Generate a plan JSON only
 
 ```powershell
 pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\Invoke-HyperVE2E.ps1 `
-  -SamplePath 'D:\Temp\KSwordSandbox\samples\KSword.Sandbox.TestSample\KSword.Sandbox.TestSample.exe'
+  -SamplePath 'D:\Temp\KSwordSandbox\samples\KSword.Sandbox.HarmlessSample\KSword.Sandbox.HarmlessSample.exe'
 ```
 
 The default plan path is outside git:
@@ -45,7 +125,7 @@ operator evidence:
 
 ```powershell
 pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\Invoke-HyperVE2E.ps1 `
-  -SamplePath 'D:\Temp\KSwordSandbox\samples\KSword.Sandbox.TestSample\KSword.Sandbox.TestSample.exe' `
+  -SamplePath 'D:\Temp\KSwordSandbox\samples\KSword.Sandbox.HarmlessSample\KSword.Sandbox.HarmlessSample.exe' `
   -PlanPath 'D:\Temp\KSwordSandbox\plans\manual-review.json' `
   -PlanOnly
 ```
@@ -74,7 +154,7 @@ script or VM command was launched.
 
 ```powershell
 pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\Invoke-HyperVE2E.ps1 `
-  -SamplePath 'D:\Temp\KSwordSandbox\samples\KSword.Sandbox.TestSample\KSword.Sandbox.TestSample.exe' `
+  -SamplePath 'D:\Temp\KSwordSandbox\samples\KSword.Sandbox.HarmlessSample\KSword.Sandbox.HarmlessSample.exe' `
   -Live `
   -WhatIf
 ```
@@ -82,6 +162,51 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\Invoke-HyperVE2E.ps1 `
 This still writes a plan, but `effectiveMode` is `WhatIf` and
 `willMutateVm=false`. It also writes a safe `runbook-execution.json` beside the
 planned job output.
+
+## Mock R0 live flow
+
+Use mock R0 when the live Guest Agent/R0Collector path should be exercised but
+no signed kernel driver is loaded. The config must stay outside git:
+
+```powershell
+$mockConfigPath = 'D:\Temp\KSwordSandbox\mock-r0.live.json'
+$config = Get-Content .\config\sandbox.example.json -Raw | ConvertFrom-Json
+$config.driver.enabled = $true
+$config.driver.useMockCollector = $true
+$config | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $mockConfigPath -Encoding UTF8
+```
+
+Review the exact mock intent without touching the VM:
+
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\Invoke-HyperVE2E.ps1 `
+  -ConfigPath $mockConfigPath `
+  -SamplePath 'D:\Temp\KSwordSandbox\samples\KSword.Sandbox.HarmlessSample\KSword.Sandbox.HarmlessSample.exe' `
+  -PlanOnly
+```
+
+Before live execution, inspect the plan JSON and verify:
+
+- `willMutateVm=false` for the review run;
+- `driver.collectionMode` is `Mock`;
+- `driver.useMockCollector` is `true`;
+- `execution.guestAgentArguments` contains `--r0-mock`;
+- `execution.r0CollectorArguments` contains `--mock`.
+
+Then set the guest password in the same elevated process and run live:
+
+```powershell
+$env:KSWORDBOX_GUEST_PASSWORD = '<local guest password>'
+
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\Invoke-HyperVE2E.ps1 `
+  -ConfigPath $mockConfigPath `
+  -SamplePath 'D:\Temp\KSwordSandbox\samples\KSword.Sandbox.HarmlessSample\KSword.Sandbox.HarmlessSample.exe' `
+  -Live
+```
+
+The mock run still restores `Clean`, starts the VM, stages payloads, copies the
+sample, runs Guest Agent/R0Collector, collects outputs, stops the VM, and
+restores `Clean` again. Only the R0Collector device dependency is mocked.
 
 ## Live execution sequence
 
@@ -92,7 +217,7 @@ elevated PowerShell session, expose the guest password to that session, then run
 $env:KSWORDBOX_GUEST_PASSWORD = '<local guest password>'
 
 pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\Invoke-HyperVE2E.ps1 `
-  -SamplePath 'D:\Temp\KSwordSandbox\samples\KSword.Sandbox.TestSample\KSword.Sandbox.TestSample.exe' `
+  -SamplePath 'D:\Temp\KSwordSandbox\samples\KSword.Sandbox.HarmlessSample\KSword.Sandbox.HarmlessSample.exe' `
   -Live
 ```
 
@@ -172,3 +297,29 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\Test-HyperVReadiness.ps1
   -GuestWorkingDirectory 'C:\KSwordSandbox' `
   -RuntimeRoot 'D:\Temp\KSwordSandbox'
 ```
+
+## PowerShell Direct confirmation
+
+PowerShell Direct cannot be fully confirmed while the password secret is absent
+or the VM is stopped. To confirm it explicitly:
+
+```powershell
+$env:KSWORDBOX_GUEST_PASSWORD = '<local guest password>'
+$vmName = 'KSwordSandbox-Win10-Golden'
+$guestPassword = ConvertTo-SecureString $env:KSWORDBOX_GUEST_PASSWORD -AsPlainText -Force
+$guestCredential = [pscredential]::new('SandboxUser', $guestPassword)
+
+# Run this only when the VM is already running, or after intentionally starting
+# it for manual validation.
+Invoke-Command -VMName $vmName -Credential $guestCredential -ScriptBlock {
+  [pscustomobject][ordered]@{
+    ComputerName = $env:COMPUTERNAME
+    UserName = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+    AgentExists = Test-Path 'C:\KSwordSandbox\agent\KSword.Sandbox.Agent.exe' -PathType Leaf
+    R0CollectorExists = Test-Path 'C:\KSwordSandbox\r0collector\KSword.Sandbox.R0Collector.exe' -PathType Leaf
+  }
+}
+```
+
+After manual validation, restore the `Clean` checkpoint before treating
+`KSwordSandbox-Win10-Golden` as the golden baseline again.

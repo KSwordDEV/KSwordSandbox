@@ -16,6 +16,42 @@
   `D:\Temp\KSwordSandbox\payload\guest-tools\payload-manifest.json`.
 - Network isolation appropriate for the malware-analysis lab.
 
+## Current host live checklist
+
+Observed on the local Hyper-V host on 2026-07-10 from an elevated shell. Keep
+this section factual and do not paste guest passwords, VM disks, payload
+binaries, or generated run outputs into git.
+
+- [x] Golden VM exists: `KSwordSandbox-Win10-Golden`.
+  - Current observed state: `Off`.
+  - Generation/version: `2` / `9.0`.
+- [x] Clean checkpoint exists: `Clean`.
+  - Current observed creation time: `2026-07-10 14:30:54 +08:00`.
+- [x] Guest Service Interface is present and enabled.
+  - Current localized display name: `来宾服务接口`.
+  - Stable component id:
+    `6C09BB55-D683-4DA0-8931-C9BF705F6480`.
+  - Treat this as localized OK; scripts match by component id as well as
+    `Guest Service Interface` and `来宾服务接口`.
+- [x] Host runtime root exists: `D:\Temp\KSwordSandbox`.
+- [x] Host payload root exists:
+  `D:\Temp\KSwordSandbox\payload\guest-tools`.
+  - Current host files are present:
+    `payload-manifest.json`,
+    `agent\KSword.Sandbox.Agent.exe`, and
+    `r0collector\KSword.Sandbox.R0Collector.exe`.
+- [ ] `KSWORDBOX_GUEST_PASSWORD` is visible to the current process.
+  - Current observed gap: not set in the process, user, or machine environment.
+  - This is the only required readiness failure currently observed.
+- [ ] PowerShell Direct confirmed for `SandboxUser`.
+  - Current observed status: skipped because the password secret is missing; the
+    VM is also `Off`, and the readiness script will not start it.
+- [ ] Guest-deployed payload files confirmed in the VM.
+  - Current observed status: skipped because PowerShell Direct was skipped.
+  - Live mode still stages host payload files before execution, so this is a
+    useful checkpoint-refresh check rather than a blocker when host payload
+    files are present.
+
 ## Suggested guest folders
 
 ```text
@@ -91,15 +127,40 @@ Enable the Guest Service Interface from an elevated host shell:
 Enable-VMIntegrationService -VMName 'KSwordSandbox-Win10-Golden' -Name 'Guest Service Interface'
 ```
 
+On localized hosts, prefer the stable component id lookup used by the scripts:
+
+```powershell
+$guestServiceComponentId = '6C09BB55-D683-4DA0-8931-C9BF705F6480'
+Get-VMIntegrationService -VMName 'KSwordSandbox-Win10-Golden' |
+  Where-Object {
+    ([string]$_.Id).EndsWith('\' + $guestServiceComponentId, [StringComparison]::OrdinalIgnoreCase) -or
+    $_.Name -eq 'Guest Service Interface' -or
+    $_.Name -eq '来宾服务接口'
+  } |
+  Enable-VMIntegrationService
+```
+
 Verify PowerShell Direct with the same local account that the runbook will use:
 
 ```powershell
+$vmName = 'KSwordSandbox-Win10-Golden'
 $guestPassword = ConvertTo-SecureString $env:KSWORDBOX_GUEST_PASSWORD -AsPlainText -Force
 $guestCredential = [pscredential]::new('SandboxUser', $guestPassword)
-Invoke-Command -VMName 'KSwordSandbox-Win10-Golden' -Credential $guestCredential -ScriptBlock {
-    Test-Path 'C:\KSwordSandbox\agent\KSword.Sandbox.Agent.exe'
+Invoke-Command -VMName $vmName -Credential $guestCredential -ScriptBlock {
+    [pscustomobject][ordered]@{
+        ComputerName = $env:COMPUTERNAME
+        UserName = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+        AgentExists = Test-Path 'C:\KSwordSandbox\agent\KSword.Sandbox.Agent.exe' -PathType Leaf
+        R0CollectorExists = Test-Path 'C:\KSwordSandbox\r0collector\KSword.Sandbox.R0Collector.exe' -PathType Leaf
+    }
 }
 ```
+
+PowerShell Direct requires the VM to be running. The readiness script is
+read-only and intentionally skips this probe instead of starting the VM. For a
+manual confirmation, set `KSWORDBOX_GUEST_PASSWORD`, start the VM only when you
+are ready to touch the lab VM, run the command above, then restore `Clean`
+before using the VM as the golden baseline.
 
 Both checks should pass before taking the `Clean` checkpoint.
 
@@ -131,7 +192,7 @@ plan without touching the VM:
 
 ```powershell
 pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\Invoke-HyperVE2E.ps1 `
-  -SamplePath 'D:\Temp\KSwordSandbox\samples\KSword.Sandbox.TestSample\KSword.Sandbox.TestSample.exe'
+  -SamplePath 'D:\Temp\KSwordSandbox\samples\KSword.Sandbox.HarmlessSample\KSword.Sandbox.HarmlessSample.exe'
 ```
 
 Live mode is intentionally separate. Run it only from an elevated host shell,
@@ -139,7 +200,7 @@ with `KSWORDBOX_GUEST_PASSWORD` set, and after reviewing the plan JSON:
 
 ```powershell
 pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\Invoke-HyperVE2E.ps1 `
-  -SamplePath 'D:\Temp\KSwordSandbox\samples\KSword.Sandbox.TestSample\KSword.Sandbox.TestSample.exe' `
+  -SamplePath 'D:\Temp\KSwordSandbox\samples\KSword.Sandbox.HarmlessSample\KSword.Sandbox.HarmlessSample.exe' `
   -Live
 ```
 
@@ -158,6 +219,31 @@ sidecar but adds `--r0-mock`, producing synthetic JSONL rows. For real live R0,
 leave mock mode off, stage a signed driver outside git, ensure the driver
 service/device path exists in the guest, and expect the collector to emit
 `r0collector.deviceUnavailable` if `\\.\KSwordSandboxDriver` cannot be opened.
+
+Example mock-R0 live config flow, keeping the config outside git:
+
+```powershell
+$mockConfigPath = 'D:\Temp\KSwordSandbox\mock-r0.live.json'
+$config = Get-Content .\config\sandbox.example.json -Raw | ConvertFrom-Json
+$config.driver.enabled = $true
+$config.driver.useMockCollector = $true
+$config | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $mockConfigPath -Encoding UTF8
+
+# Non-mutating review first. The plan should show collectionMode=Mock,
+# useMockCollector=true, Guest Agent --r0-mock, and R0Collector --mock.
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\Invoke-HyperVE2E.ps1 `
+  -ConfigPath $mockConfigPath `
+  -SamplePath 'D:\Temp\KSwordSandbox\samples\KSword.Sandbox.HarmlessSample\KSword.Sandbox.HarmlessSample.exe' `
+  -PlanOnly
+
+# Live only after reviewing the plan, setting the guest password in this
+# elevated process, and confirming the readiness gap is closed.
+$env:KSWORDBOX_GUEST_PASSWORD = '<local guest password>'
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\Invoke-HyperVE2E.ps1 `
+  -ConfigPath $mockConfigPath `
+  -SamplePath 'D:\Temp\KSwordSandbox\samples\KSword.Sandbox.HarmlessSample\KSword.Sandbox.HarmlessSample.exe' `
+  -Live
+```
 
 ## Differencing-disk mode
 

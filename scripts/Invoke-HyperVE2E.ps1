@@ -17,7 +17,7 @@ param(
     [string]$ConfigPath = '',
 
     # Host sample executable to copy into the guest during live execution.
-    [string]$SamplePath = 'D:\Temp\KSwordSandbox\samples\KSword.Sandbox.TestSample\KSword.Sandbox.TestSample.exe',
+    [string]$SamplePath = 'D:\Temp\KSwordSandbox\samples\KSword.Sandbox.HarmlessSample\KSword.Sandbox.HarmlessSample.exe',
 
     # Output plan JSON path. Defaults outside the repo under runtimeRoot\plans.
     [string]$PlanPath = '',

@@ -69,3 +69,7 @@ appsettings.Local.json
 *.p12
 *.cer
 *.key
+
+# Local signing tool/certificate bundle copied from Ksword5.1 for VM-only
+# driver validation. Never commit this directory or its private keys/tools.
+/.cert/

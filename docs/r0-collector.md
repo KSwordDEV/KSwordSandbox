@@ -7,6 +7,13 @@ Current status:
 
 - Opens the driver Win32 path `\\.\KSwordSandboxDriver` with `CreateFileW`.
 - Issues `IOCTL_KSWORD_SANDBOX_GET_HEALTH` once after opening the device.
+- Issues `IOCTL_KSWORD_SANDBOX_GET_CAPABILITIES` to record ABI version,
+  capability flags, `SupportedProducerMask`, `DefaultProducerMask`, and layout
+  limits before draining.
+- Optionally issues `IOCTL_KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK` when
+  `--enable-mask <mask>` is supplied, then emits the requested/effective mask.
+- Issues `IOCTL_KSWORD_SANDBOX_GET_STATUS` before and after draining to capture
+  queue depth, `ProducerEnableMask`, supported producer bits, and total counters.
 - Issues `IOCTL_KSWORD_SANDBOX_POLL` and `IOCTL_KSWORD_SANDBOX_READ_EVENTS`
   in a one-shot or timed polling loop.
 - Converts driver event records into `SandboxEvent` JSON Lines for the Guest
@@ -24,8 +31,9 @@ Current status:
 - `JsonWriter.*`: UTF-8 conversion, JSON escaping, `SandboxEvent` JSONL writer,
   and fallback stderr output.
 - `EventParser.*`: public driver ABI decoding and typed payload JSON mapping.
-- `IoctlClient.*`: device open, `DeviceIoControl` wrappers, health/poll/drain
-  calls, and protocol error rows.
+- `IoctlClient.*`: device open, `DeviceIoControl` wrappers, health,
+  capabilities, status, producer-mask, poll, drain calls, and protocol error
+  rows.
 - `SyntheticMode.*`: deterministic synthetic driver-category rows for local
   plumbing tests.
 - `RuntimeLoop.*`: lifecycle orchestration, heartbeat rows, timed polling loop,
@@ -60,6 +68,40 @@ Initial IOCTLs:
   - Output: `KSWORD_SANDBOX_READ_EVENTS_REPLY` followed by zero or more
     `KSWORD_SANDBOX_EVENT_HEADER + payload` records.
   - Purpose: consume queued R0 events.
+- `IOCTL_KSWORD_SANDBOX_GET_CAPABILITIES`
+  - Input: none.
+  - Output: `KSWORD_SANDBOX_CAPABILITIES_REPLY`.
+  - Purpose: Capability negotiation before assuming optional IOCTLs, ABI
+    layout sizes, `SupportedProducerMask`, or `DefaultProducerMask`.
+- `IOCTL_KSWORD_SANDBOX_GET_STATUS`
+  - Input: none.
+  - Output: `KSWORD_SANDBOX_STATUS_REPLY`.
+  - Purpose: Queue and status counters, lifecycle state, `ProducerEnableMask`,
+    `TotalEventsSuppressed`, queue capacity, high watermark, and last NTSTATUS.
+- `IOCTL_KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK`
+  - Input: `KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK_REQUEST`.
+  - Output: `KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK_REPLY`.
+  - Purpose: Apply an operator-selected producer mask and record requested,
+    previous, effective, and supported masks.
+
+### Capability/status/producer-mask negotiation
+
+`R0Collector` emits `r0collector.driverCapabilities` after
+`IOCTL_KSWORD_SANDBOX_GET_CAPABILITIES` succeeds. The row preserves ABI
+major/minor, capability flags, producer-mask support, event header version,
+ring capacity, reply sizes, and max payload size for later diagnostics.
+
+`R0Collector` emits `r0collector.driverStatus` for
+`IOCTL_KSWORD_SANDBOX_GET_STATUS` before draining and again after the final drain.
+These rows preserve queue depth/capacity, high watermark, `ProducerEnableMask`,
+`SupportedProducerMask`, `TotalEventsEnqueued`, `TotalEventsDropped`,
+`TotalEventsRead`, `TotalEventsSuppressed`, `NextSequence`, and `LastNtStatus`.
+
+When `--enable-mask <mask>` is supplied, `R0Collector` issues
+`IOCTL_KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK` and emits
+`r0collector.driverProducerMask`. The row records the requested mask plus the
+previous, effective, and supported masks returned by
+`KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK_REPLY`.
 
 `IOCTL_KSWORD_SANDBOX_DRAIN_EVENTS` may exist as a compatibility alias in local
 driver experiments, but R0Collector issues the public `READ_EVENTS` name.
@@ -112,9 +154,9 @@ Supported options:
 - `--poll-ms`, `--poll-interval`, `--poll-interval-ms`, `-p`: poll interval in
   milliseconds.
 - `--enable-mask <mask>`: pass an unsigned 32-bit decimal or `0x` hexadecimal
-  mask in the `KSWORD_SANDBOX_READ_EVENTS_REQUEST.Flags` field. Current drivers
-  may ignore the field, but the collector records it in `r0collector.started`
-  and `r0collector.deviceOpened` data for reproducibility.
+  mask through `IOCTL_KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK`, then record the
+  requested/effective mask in `r0collector.driverProducerMask`. The collector
+  also includes the requested value in lifecycle rows for reproducibility.
 - `--health`: open the live device, emit `r0collector.driverHealth`, and exit
   without polling or draining queued events.
 - `--heartbeat`: emit `r0collector.heartbeat` lifecycle rows after startup, at
@@ -164,6 +206,15 @@ This check succeeds only if `CreateFileW("\\.\KSwordSandboxDriver", ...)` opens
 the device and `IOCTL_KSWORD_SANDBOX_GET_HEALTH` returns the public health
 reply.
 
+The readiness script also performs a default static negotiated-IOCTL contract
+check before any driver load. That source/docs-only row covers
+`IOCTL_KSWORD_SANDBOX_GET_CAPABILITIES`,
+`IOCTL_KSWORD_SANDBOX_GET_STATUS`, and
+`IOCTL_KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK`; it is intended to catch ABI or
+runbook drift even when the signed/test-signed driver cannot be loaded. Treat
+live load failures outside an intentionally isolated VM as non-fatal diagnostics
+and rely on the static row plus VM logs to decide what changed.
+
 Next verify the collector health-only CLI contract. This invokes
 `R0Collector --health --out <jsonl>` and fails unless the output JSONL parses
 and contains `r0collector.deviceOpened` plus `r0collector.driverHealth`:
@@ -189,8 +240,9 @@ Then run a collector one-shot drain through the script:
 ```
 
 The drain path invokes R0Collector with `--duration 0`, so it opens the driver,
-emits health/poll/read-events lifecycle rows, drains any queued driver records,
-and exits. A first load should normally expose the header-only
+emits health/capabilities/status/poll/read-events lifecycle rows, drains any
+queued driver records, and exits. A first load should normally expose the
+header-only
 driver-start heartbeat row (`driver.event.reserved`) unless another reader has
 already consumed it.
 
@@ -206,7 +258,11 @@ Expected script rows for the live VM path:
   works.
 - `R0Collector health`: proves `--health --out` output is valid.
 - `R0Collector drain`: proves `--out --duration 0` output includes health,
+  `r0collector.driverCapabilities`, at least one `r0collector.driverStatus`,
   poll, read-events, and queued driver rows.
+- `r0collector.driverProducerMask`: expected when a VM operator invokes
+  R0Collector with `--enable-mask <mask>` to exercise
+  `IOCTL_KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK`.
 
 ## JSON Lines format
 

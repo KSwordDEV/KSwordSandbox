@@ -23,6 +23,10 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "KSword.Sandbox.R0Collector"
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "KSword.Sandbox.Driver", "driver\KSword.Sandbox.Driver\KSword.Sandbox.Driver.vcxproj", "{E8C3DCE9-E60B-4A0F-8D8F-620E1182635A}"
 EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tools", "tools", "{07C2787E-EAC7-C090-1BA3-A61EC2A24D84}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "KSword.Sandbox.HarmlessSample", "tools\KSword.Sandbox.HarmlessSample\KSword.Sandbox.HarmlessSample.csproj", "{4F9CD9F7-EAF3-47AC-A895-E7CEB0CF180C}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -109,6 +113,18 @@ Global
 		{E8C3DCE9-E60B-4A0F-8D8F-620E1182635A}.Release|x64.ActiveCfg = Release|x64
 		{E8C3DCE9-E60B-4A0F-8D8F-620E1182635A}.Release|x64.Build.0 = Release|x64
 		{E8C3DCE9-E60B-4A0F-8D8F-620E1182635A}.Release|x86.ActiveCfg = Release|x64
+		{4F9CD9F7-EAF3-47AC-A895-E7CEB0CF180C}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{4F9CD9F7-EAF3-47AC-A895-E7CEB0CF180C}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{4F9CD9F7-EAF3-47AC-A895-E7CEB0CF180C}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{4F9CD9F7-EAF3-47AC-A895-E7CEB0CF180C}.Debug|x64.Build.0 = Debug|Any CPU
+		{4F9CD9F7-EAF3-47AC-A895-E7CEB0CF180C}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{4F9CD9F7-EAF3-47AC-A895-E7CEB0CF180C}.Debug|x86.Build.0 = Debug|Any CPU
+		{4F9CD9F7-EAF3-47AC-A895-E7CEB0CF180C}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{4F9CD9F7-EAF3-47AC-A895-E7CEB0CF180C}.Release|Any CPU.Build.0 = Release|Any CPU
+		{4F9CD9F7-EAF3-47AC-A895-E7CEB0CF180C}.Release|x64.ActiveCfg = Release|Any CPU
+		{4F9CD9F7-EAF3-47AC-A895-E7CEB0CF180C}.Release|x64.Build.0 = Release|Any CPU
+		{4F9CD9F7-EAF3-47AC-A895-E7CEB0CF180C}.Release|x86.ActiveCfg = Release|Any CPU
+		{4F9CD9F7-EAF3-47AC-A895-E7CEB0CF180C}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -121,5 +137,6 @@ Global
 		{1FCE10D7-F08D-4E26-B9E9-F29BEEA6B572} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 		{D9E9A3F7-BB99-48A0-AF7E-54D7D5D8C701} = {AEBB45F1-EB4E-4D0E-A86E-A6FB61BFEFA4}
 		{E8C3DCE9-E60B-4A0F-8D8F-620E1182635A} = {D499D332-CF34-4B0B-8D74-F8F7907A5C3D}
+		{4F9CD9F7-EAF3-47AC-A895-E7CEB0CF180C} = {07C2787E-EAC7-C090-1BA3-A61EC2A24D84}
 	EndGlobalSection
 EndGlobal

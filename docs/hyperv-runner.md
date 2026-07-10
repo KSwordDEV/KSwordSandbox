@@ -177,7 +177,7 @@ but it still depends on local Hyper-V readiness:
 - Guest agent published to the configured guest path.
 
 For the operator sequence that builds the guest payload, deploys it into the
-golden VM, runs `tools/KSword.Sandbox.TestSample`, and refreshes the HTML report
+golden VM, runs `tools/KSword.Sandbox.HarmlessSample`, and refreshes the HTML report
 from imported guest events, see `docs/guest-payload-staging.md`.
 
 Minimal live API flow:
@@ -186,8 +186,8 @@ Minimal live API flow:
 $job = Invoke-RestMethod -Method Post -Uri 'http://localhost:5000/api/jobs/plan' `
   -ContentType 'application/json' `
   -Body (@{
-      samplePath = 'D:\Temp\KSwordSandbox\samples\KSword.Sandbox.TestSample\KSword.Sandbox.TestSample.exe'
-      displayName = 'KSword.Sandbox.TestSample.exe'
+      samplePath = 'D:\Temp\KSwordSandbox\samples\KSword.Sandbox.HarmlessSample\KSword.Sandbox.HarmlessSample.exe'
+      displayName = 'KSword.Sandbox.HarmlessSample.exe'
       durationSeconds = 30
       dryRun = $true
   } | ConvertTo-Json)

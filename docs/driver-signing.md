@@ -28,14 +28,54 @@ problems instead of silently losing data.
 ## Signing notes
 
 - Use a test-signed driver only in an isolated test VM.
-- Keep test certificates and private keys outside this repository.
+- The working copy may contain a local `/.cert/` directory copied from
+  `D:\Projects\Ksword5.1\.cert` so the same KswordARKDriver CSignTool chain can
+  be reused. This directory is deliberately ignored by git through `/.cert/`.
+- Never stage or commit `/.cert/`, private keys, certificates, signing tools,
+  signed `.sys` files, or WDK output.
 - Record the driver service name in local config through `Driver.ServiceName`.
 - Record the guest output path through `Driver.EventJsonLinesPath`.
 
+## Ksword CSignTool signing path
+
+The preferred local signing path is now:
+
+```powershell
+.\scripts\Sign-SandboxDriverWithKswordCSignTool.ps1 `
+  -DriverPath .\driver\KSword.Sandbox.Driver\x64\Release\KSword.Sandbox.Driver.sys
+```
+
+The wrapper defaults to `.\.cert` and mirrors the known-loadable
+KswordARKDriver sequence:
+
+1. `CSignTool.exe sign /r 1 /f <driver.sys>`
+2. `CSignTool.exe sign /r 1 /f <driver.sys> /ac`
+3. `AuthenticodeVariantGUI.exe generate ...` when
+   `AuthenticodeVariantGUI.exe` and `outer_display_info.dat` are present.
+
+Useful options:
+
+```powershell
+# Use only the two CSignTool passes and skip the Authenticode variant stage.
+.\scripts\Sign-SandboxDriverWithKswordCSignTool.ps1 `
+  -DriverPath D:\Temp\KSwordSandbox\payload\driver\KSword.Sandbox.Driver.sys `
+  -SkipAuthenticodeVariant
+
+# Keep automation moving while logging signing failure.
+.\scripts\Sign-SandboxDriverWithKswordCSignTool.ps1 `
+  -DriverPath D:\Temp\KSwordSandbox\payload\driver\KSword.Sandbox.Driver.sys `
+  -NonFatal
+```
+
+The script backs up the target driver before signing and restores the original
+file if any signing stage fails. Keep the target driver under ignored build or
+payload output such as `x64\...` or `D:\Temp\KSwordSandbox\...`.
+
 ## Test-signing runbook for VM validation
 
-The repository does not generate or store certificates. Build output should be
-placed under a scratch or payload directory outside git, then signed there.
+The repository does not generate committed certificates. Build output should be
+placed under an ignored build directory or scratch/payload directory, then
+signed there.
 
 Example VM-only workflow:
 
@@ -87,6 +127,12 @@ run R0Collector:
 Required first-pass rows before loading:
 
 - `Driver .sys git hygiene`: `Passed`; no driver `.sys` is in the commit path.
+- `R0 capability/status IOCTL static contract`: `Passed`; this is a
+  source/docs-only check for `IOCTL_KSWORD_SANDBOX_GET_CAPABILITIES`,
+  `IOCTL_KSWORD_SANDBOX_GET_STATUS`, and
+  `IOCTL_KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK`. It proves the public header,
+  driver dispatch source, R0Collector source, and operator docs still describe
+  the same negotiated ABI without opening `\\.\KSwordSandboxDriver`.
 - `Driver binary readable`: `Passed`.
 - `Driver Authenticode signature`: `Passed` for a trusted test certificate, or
   investigate any non-`Valid` status before loading.
@@ -153,6 +199,14 @@ public health IOCTL:
   -DevicePath \\.\KSwordSandboxDriver
 ```
 
+The default static readiness pass already checks that the negotiated ABI is
+documented and wired for `IOCTL_KSWORD_SANDBOX_GET_CAPABILITIES`,
+`IOCTL_KSWORD_SANDBOX_GET_STATUS`, and
+`IOCTL_KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK`. Keep failed live driver loads
+outside an isolated VM as non-fatal diagnostics: use the static row to catch
+contract drift, and reserve live IOCTL failures for VM logs where the service
+was intentionally loaded.
+
 Then verify the collector health-only path without consuming queued telemetry.
 This runs `R0Collector --health --out <jsonl>` and validates that the JSONL file
 contains `r0collector.deviceOpened` and `r0collector.driverHealth` rows:
@@ -186,8 +240,13 @@ Expected first-pass evidence:
   `r0collector.started`, `r0collector.deviceOpened`,
   `r0collector.driverHealth`, and `r0collector.stopped`.
 - `R0Collector drain` returns exit code `0` and writes a JSONL file with
-  `r0collector.driverHealth`, `r0collector.driverPoll`,
+  `r0collector.driverHealth`, `r0collector.driverCapabilities`,
+  `r0collector.driverStatus`, `r0collector.driverPoll`,
   `r0collector.driverReadEvents`, and any queued driver rows.
+- `r0collector.driverProducerMask` is expected when the collector is run with
+  `--enable-mask <mask>` so it can issue
+  `IOCTL_KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK` and record requested,
+  previous, effective, and supported producer masks.
 - The first drain normally contains at least the header-only
   `driver.event.reserved` / driver-start heartbeat when the ring has not already
   been consumed.
@@ -206,8 +265,10 @@ Run this sequence only inside an isolated VM checkpoint/snapshot:
 5. Run `-CheckDeviceHealth` to prove `\\.\KSwordSandboxDriver` opens.
 6. Run `-CheckCollectorHealth` to prove `R0Collector --health --out` writes
    health JSONL.
-7. Run `-DrainWithCollector` to prove health/poll/read-events JSONL and queued
-   driver rows are emitted.
+7. Run `-DrainWithCollector` to prove health/capabilities/status/poll/read-events
+   JSONL and queued driver rows are emitted. For producer-mask negotiation,
+   additionally run R0Collector with `--enable-mask <mask>` in the same VM and
+   confirm `r0collector.driverProducerMask`.
 8. Stop/delete the service and restore the VM checkpoint.
 
 ## Reuse boundary from KSword5.1

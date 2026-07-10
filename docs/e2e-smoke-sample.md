@@ -1,13 +1,14 @@
 # E2E smoke test sample
 
 This document describes the harmless Windows sample in
-`tools/KSword.Sandbox.TestSample/`. The project is intentionally not added to
-`KSwordSandbox.sln` so multiple workers can build or run it without touching the
-main solution.
+`tools/KSword.Sandbox.HarmlessSample/`. The project is included in
+`KSwordSandbox.sln` so normal solution builds catch source regressions, while
+all publish output and intermediates are redirected to `D:\Temp\KSwordSandbox`
+by `scripts/Prepare-HarmlessSample.ps1`.
 
 ## Behavior
 
-When executed, `KSword.Sandbox.TestSample.exe` performs only safe, visible
+When executed, `KSword.Sandbox.HarmlessSample.exe` performs only safe, visible
 actions:
 
 1. Creates `ksword-sandbox-smoke.txt` in the requested output directory.
@@ -22,16 +23,22 @@ settings, and does not contact arbitrary external hosts.
 
 ## Build outside the repository
 
-Do not commit the generated `.exe`, `bin`, or `obj` output. Build into
-`D:\Temp\KSwordSandbox\samples\...` and redirect intermediate files away from
-the repository:
+Do not commit the generated `.exe`, `.dll`, `bin`, or `obj` output. Prefer the
+checked-in preparation script, which builds into `D:\Temp\KSwordSandbox\samples`
+and redirects intermediate files away from the repository:
+
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\Prepare-HarmlessSample.ps1
+```
+
+Equivalent manual publish command:
 
 ```powershell
 $repo = 'D:\Projects\KswordSandbox'
-$project = Join-Path $repo 'tools\KSword.Sandbox.TestSample\KSword.Sandbox.TestSample.csproj'
-$sampleOut = 'D:\Temp\KSwordSandbox\samples\KSword.Sandbox.TestSample'
-$sampleBuild = 'D:\Temp\KSwordSandbox\build\KSword.Sandbox.TestSample\'
-$sampleObj = 'D:\Temp\KSwordSandbox\obj\KSword.Sandbox.TestSample\'
+$project = Join-Path $repo 'tools\KSword.Sandbox.HarmlessSample\KSword.Sandbox.HarmlessSample.csproj'
+$sampleOut = 'D:\Temp\KSwordSandbox\samples\KSword.Sandbox.HarmlessSample'
+$sampleBuild = 'D:\Temp\KSwordSandbox\build\KSword.Sandbox.HarmlessSample\'
+$sampleObj = 'D:\Temp\KSwordSandbox\obj\KSword.Sandbox.HarmlessSample\'
 
 New-Item -ItemType Directory -Force -Path $sampleOut, $sampleBuild, $sampleObj | Out-Null
 
@@ -44,8 +51,8 @@ dotnet publish $project `
   /p:BaseIntermediateOutputPath=$sampleObj
 ```
 
-Expected publish output includes `KSword.Sandbox.TestSample.exe` under
-`D:\Temp\KSwordSandbox\samples\KSword.Sandbox.TestSample\`. That executable is a
+Expected publish output includes `KSword.Sandbox.HarmlessSample.exe` under
+`D:\Temp\KSwordSandbox\samples\KSword.Sandbox.HarmlessSample\`. That executable is a
 local build artifact and must stay out of git.
 
 ## Manual run inside a VM
@@ -56,13 +63,13 @@ Copy the published sample directory into the test VM, then run:
 $runOut = 'C:\Temp\KSwordSandboxSampleRun'
 New-Item -ItemType Directory -Force -Path $runOut | Out-Null
 
-.\KSword.Sandbox.TestSample.exe --output-dir $runOut
+.\KSword.Sandbox.HarmlessSample.exe --output-dir $runOut
 ```
 
 For network telemetry that remains safe and deterministic:
 
 ```powershell
-.\KSword.Sandbox.TestSample.exe --output-dir $runOut --network-probe
+.\KSword.Sandbox.HarmlessSample.exe --output-dir $runOut --network-probe
 ```
 
 ## E2E validation points

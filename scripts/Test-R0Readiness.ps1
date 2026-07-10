@@ -3,10 +3,11 @@
 Runs non-destructive R0 driver readiness checks before a real VM validation.
 
 .DESCRIPTION
-Default mode checks only local files, read permissions, Authenticode signing
-metadata, Administrator status, test-signing boot configuration, and read-only
-SCM service state. It never loads, unloads, installs, deletes, or opens the
-driver device unless the caller supplies explicit parameters.
+Default mode checks only local files, public R0 IOCTL contract text, read
+permissions, Authenticode signing metadata, Administrator status, test-signing
+boot configuration, and read-only SCM service state. It never loads, unloads,
+installs, deletes, or opens the driver device unless the caller supplies
+explicit parameters.
 
 Service mutation requires both the operation switch and -AllowServiceMutation.
 Device health and R0Collector drain checks are opt-in and assume the caller has
@@ -149,6 +150,201 @@ function Test-RepositoryFile {
         -Message "Required repository file is missing: $Path" `
         -Details @{
             Path = $Path
+        }
+}
+
+# Test-TextContractFragments checks that a repository text file contains all
+# required fragments for a static contract. It is read-only and never treats
+# kernel/collector runtime availability as evidence.
+function Test-TextContractFragments {
+    param(
+        [string]$Label,
+        [string]$Path,
+        [string[]]$Fragments,
+        [System.Collections.Generic.List[string]]$MissingFragments,
+        [System.Collections.Generic.List[string]]$CheckedFiles
+    )
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        [void]$MissingFragments.Add(('{0}: missing file ''{1}''' -f $Label, $Path))
+        return
+    }
+
+    [void]$CheckedFiles.Add($Path)
+    $content = Get-Content -LiteralPath $Path -Raw -ErrorAction Stop
+    foreach ($fragment in $Fragments) {
+        if (-not $content.Contains($fragment)) {
+            [void]$MissingFragments.Add(('{0}: missing ''{1}''' -f $Label, $fragment))
+        }
+    }
+}
+
+# Test-R0CapabilityIoctlStaticContract verifies that the new negotiated R0
+# runtime ABI is represented consistently across the public header, driver
+# dispatch source, collector source, and operator docs. This is a static,
+# non-destructive check: it does not load the service or open the device.
+function Test-R0CapabilityIoctlStaticContract {
+    param(
+        [string]$DriverHeaderPath,
+        [string]$DriverDispatchPath,
+        [string]$DriverEventQueuePath,
+        [string]$CollectorIoctlClientPath,
+        [string]$CollectorEventParserPath,
+        [string]$CollectorRuntimeLoopPath,
+        [string]$DriverSigningDocPath,
+        [string]$R0CollectorDocPath
+    )
+
+    $missing = New-Object System.Collections.Generic.List[string]
+    $checkedFiles = New-Object System.Collections.Generic.List[string]
+
+    Test-TextContractFragments `
+        -Label 'Driver public IOCTL header' `
+        -Path $DriverHeaderPath `
+        -Fragments @(
+            'IOCTL_KSWORD_SANDBOX_GET_CAPABILITIES',
+            'IOCTL_KSWORD_SANDBOX_GET_STATUS',
+            'IOCTL_KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK',
+            'KSWORD_SANDBOX_CAPABILITY_FLAG_GET_CAPABILITIES',
+            'KSWORD_SANDBOX_CAPABILITY_FLAG_GET_STATUS',
+            'KSWORD_SANDBOX_CAPABILITY_FLAG_SET_PRODUCER_ENABLE_MASK',
+            'KSWORD_SANDBOX_CAPABILITIES_REPLY',
+            'KSWORD_SANDBOX_STATUS_REPLY',
+            'KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK_REQUEST',
+            'KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK_REPLY',
+            'SupportedProducerMask',
+            'ProducerEnableMask',
+            'TotalEventsSuppressed',
+            'SetProducerEnableMaskRequestSize'
+        ) `
+        -MissingFragments $missing `
+        -CheckedFiles $checkedFiles
+
+    Test-TextContractFragments `
+        -Label 'Driver IOCTL dispatch' `
+        -Path $DriverDispatchPath `
+        -Fragments @(
+            'case IOCTL_KSWORD_SANDBOX_GET_CAPABILITIES',
+            'case IOCTL_KSWORD_SANDBOX_GET_STATUS',
+            'case IOCTL_KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK',
+            'KswHandleGetCapabilities',
+            'KswHandleGetStatus',
+            'KswHandleSetProducerEnableMask',
+            'KswSetProducerEnableMask',
+            'STATUS_INVALID_PARAMETER'
+        ) `
+        -MissingFragments $missing `
+        -CheckedFiles $checkedFiles
+
+    Test-TextContractFragments `
+        -Label 'Driver event queue producer mask' `
+        -Path $DriverEventQueuePath `
+        -Fragments @(
+            'KswSetProducerEnableMask',
+            'KswGetProducerMaskForEventType',
+            'ProducerEnableMask',
+            'EventsSuppressed'
+        ) `
+        -MissingFragments $missing `
+        -CheckedFiles $checkedFiles
+
+    Test-TextContractFragments `
+        -Label 'R0Collector IOCTL client' `
+        -Path $CollectorIoctlClientPath `
+        -Fragments @(
+            'EmitDriverCapabilities',
+            'EmitDriverStatus',
+            'EmitDriverSetProducerEnableMask',
+            'IOCTL_KSWORD_SANDBOX_GET_CAPABILITIES',
+            'IOCTL_KSWORD_SANDBOX_GET_STATUS',
+            'IOCTL_KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK',
+            'r0collector.driverCapabilities',
+            'r0collector.driverStatus',
+            'r0collector.driverProducerMask',
+            'options.enableMaskSpecified'
+        ) `
+        -MissingFragments $missing `
+        -CheckedFiles $checkedFiles
+
+    Test-TextContractFragments `
+        -Label 'R0Collector event parser' `
+        -Path $CollectorEventParserPath `
+        -Fragments @(
+            'BuildCapabilitiesData',
+            'BuildStatusData',
+            'BuildSetProducerEnableMaskData',
+            'supportedProducerMask',
+            'producerEnableMask',
+            'effectiveEnableMask',
+            'requestedEnableMask'
+        ) `
+        -MissingFragments $missing `
+        -CheckedFiles $checkedFiles
+
+    Test-TextContractFragments `
+        -Label 'R0Collector runtime loop' `
+        -Path $CollectorRuntimeLoopPath `
+        -Fragments @(
+            'EmitDriverCapabilities',
+            'EmitDriverSetProducerEnableMask',
+            'EmitDriverStatus'
+        ) `
+        -MissingFragments $missing `
+        -CheckedFiles $checkedFiles
+
+    Test-TextContractFragments `
+        -Label 'Driver signing runbook' `
+        -Path $DriverSigningDocPath `
+        -Fragments @(
+            'IOCTL_KSWORD_SANDBOX_GET_CAPABILITIES',
+            'IOCTL_KSWORD_SANDBOX_GET_STATUS',
+            'IOCTL_KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK',
+            'r0collector.driverCapabilities',
+            'r0collector.driverStatus',
+            'r0collector.driverProducerMask',
+            'non-fatal diagnostics'
+        ) `
+        -MissingFragments $missing `
+        -CheckedFiles $checkedFiles
+
+    Test-TextContractFragments `
+        -Label 'R0Collector runbook' `
+        -Path $R0CollectorDocPath `
+        -Fragments @(
+            'Capability/status/producer-mask negotiation',
+            'IOCTL_KSWORD_SANDBOX_GET_CAPABILITIES',
+            'IOCTL_KSWORD_SANDBOX_GET_STATUS',
+            'IOCTL_KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK',
+            'r0collector.driverCapabilities',
+            'r0collector.driverStatus',
+            'r0collector.driverProducerMask',
+            'non-fatal diagnostics'
+        ) `
+        -MissingFragments $missing `
+        -CheckedFiles $checkedFiles
+
+    $passed = $missing.Count -eq 0
+    return New-R0ReadinessResult `
+        -Name 'R0 capability/status IOCTL static contract' `
+        -Status ($(if ($passed) { 'Passed' } else { 'Failed' })) `
+        -Required $true `
+        -Message ($(if ($passed) { 'Static contract references for GET_CAPABILITIES, GET_STATUS, and SET_PRODUCER_ENABLE_MASK are present.' } else { 'One or more static contract references for negotiated R0 IOCTL readiness are missing.' })) `
+        -Details @{
+            StaticOnly       = $true
+            OpensDevice      = $false
+            MutatesDriver    = $false
+            CheckedFiles     = @($checkedFiles.ToArray())
+            MissingFragments = @($missing.ToArray())
+            Ioctls           = @(
+                'IOCTL_KSWORD_SANDBOX_GET_CAPABILITIES',
+                'IOCTL_KSWORD_SANDBOX_GET_STATUS',
+                'IOCTL_KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK'
+            )
+            CollectorRows    = @(
+                'r0collector.driverCapabilities',
+                'r0collector.driverStatus',
+                'r0collector.driverProducerMask'
+            )
         }
 }
 
@@ -860,16 +1056,19 @@ function Invoke-R0CollectorDrain {
         $summary = Get-JsonLineEventSummary -Path $CollectorOutputPath
         $eventTypes = @($summary.EventTypes)
         $hasDriverHealth = $eventTypes -contains 'r0collector.driverHealth'
+        $hasDriverCapabilities = $eventTypes -contains 'r0collector.driverCapabilities'
+        $driverStatusCount = @($eventTypes | Where-Object { $_ -eq 'r0collector.driverStatus' }).Count
+        $hasDriverStatus = $driverStatusCount -ge 1
         $hasDriverPoll = $eventTypes -contains 'r0collector.driverPoll'
         $hasDriverReadEvents = $eventTypes -contains 'r0collector.driverReadEvents'
         $parseErrorCount = [int]$summary.ParseErrorCount
-        $passed = $exitCode -eq 0 -and [bool]$summary.OutputExists -and [int64]$summary.OutputLength -gt 0 -and $parseErrorCount -eq 0 -and $hasDriverHealth -and $hasDriverPoll -and $hasDriverReadEvents
+        $passed = $exitCode -eq 0 -and [bool]$summary.OutputExists -and [int64]$summary.OutputLength -gt 0 -and $parseErrorCount -eq 0 -and $hasDriverHealth -and $hasDriverCapabilities -and $hasDriverStatus -and $hasDriverPoll -and $hasDriverReadEvents
 
         return New-R0ReadinessResult `
             -Name 'R0Collector drain' `
             -Status ($(if ($passed) { 'Passed' } else { 'Failed' })) `
             -Required $true `
-            -Message "R0Collector --out one-shot drain returned exit code $exitCode." `
+            -Message "R0Collector --out one-shot drain returned exit code $exitCode and is expected to emit health/capabilities/status/poll/read-events rows." `
             -Details @{
                 R0CollectorPath    = $R0CollectorPath
                 DevicePath         = $DevicePath
@@ -879,6 +1078,9 @@ function Invoke-R0CollectorDrain {
                 LineCount          = [int]$summary.LineCount
                 EventTypes         = @($eventTypes)
                 HasDriverHealth    = $hasDriverHealth
+                HasDriverCapabilities = $hasDriverCapabilities
+                HasDriverStatus    = $hasDriverStatus
+                DriverStatusCount  = $driverStatusCount
                 HasDriverPoll      = $hasDriverPoll
                 HasDriverReadEvents = $hasDriverReadEvents
                 ParseErrorCount    = $parseErrorCount
@@ -906,11 +1108,27 @@ $results = New-Object System.Collections.Generic.List[object]
 
 $driverProject = Join-Path $RepositoryRoot 'driver\KSword.Sandbox.Driver\KSword.Sandbox.Driver.vcxproj'
 $driverHeader = Join-Path $RepositoryRoot 'driver\KSword.Sandbox.Driver\include\KSwordSandboxDriverIoctl.h'
+$driverDispatch = Join-Path $RepositoryRoot 'driver\KSword.Sandbox.Driver\src\Device\ControlDevice.c'
+$driverEventQueue = Join-Path $RepositoryRoot 'driver\KSword.Sandbox.Driver\src\Eventing\EventQueue.c'
 $collectorProject = Join-Path $RepositoryRoot 'guest\KSword.Sandbox.R0Collector\KSword.Sandbox.R0Collector.vcxproj'
+$collectorIoctlClient = Join-Path $RepositoryRoot 'guest\KSword.Sandbox.R0Collector\src\IoctlClient.cpp'
+$collectorEventParser = Join-Path $RepositoryRoot 'guest\KSword.Sandbox.R0Collector\src\EventParser.cpp'
+$collectorRuntimeLoop = Join-Path $RepositoryRoot 'guest\KSword.Sandbox.R0Collector\src\RuntimeLoop.cpp'
+$driverSigningDoc = Join-Path $RepositoryRoot 'docs\driver-signing.md'
+$r0CollectorDoc = Join-Path $RepositoryRoot 'docs\r0-collector.md'
 
 [void]$results.Add((Test-RepositoryFile -Name 'Driver project file' -Path $driverProject))
 [void]$results.Add((Test-RepositoryFile -Name 'Driver public IOCTL header' -Path $driverHeader))
 [void]$results.Add((Test-RepositoryFile -Name 'R0Collector project file' -Path $collectorProject))
+[void]$results.Add((Test-R0CapabilityIoctlStaticContract `
+            -DriverHeaderPath $driverHeader `
+            -DriverDispatchPath $driverDispatch `
+            -DriverEventQueuePath $driverEventQueue `
+            -CollectorIoctlClientPath $collectorIoctlClient `
+            -CollectorEventParserPath $collectorEventParser `
+            -CollectorRuntimeLoopPath $collectorRuntimeLoop `
+            -DriverSigningDocPath $driverSigningDoc `
+            -R0CollectorDocPath $r0CollectorDoc))
 [void]$results.Add((Test-DriverSysGitHygiene -Root $RepositoryRoot))
 [void]$results.Add((Test-ReadableFile -Name 'Driver binary readable' -Path $DriverSysPath -Required $true))
 [void]$results.Add((Test-ReadableFile -Name 'R0Collector executable readable' -Path $R0CollectorPath -Required $false))
@@ -976,7 +1194,7 @@ Write-Output ([pscustomobject][ordered]@{
         CollectorHealthOutputPath = $CollectorHealthOutputPath
         CollectorOutputPath     = $CollectorOutputPath
         DefaultModeSafe        = -not ($InstallService -or $StartService -or $StopService -or $DeleteService -or $CheckDeviceHealth -or $CheckCollectorHealth -or $DrainWithCollector)
-        Note                   = 'Default mode does not load/unload the driver, mutate SCM state, open the device, or write collector output.'
+        Note                   = 'Default mode performs static negotiated-IOCTL contract checks but does not load/unload the driver, mutate SCM state, open the device, or write collector output.'
     })
 
 exit $exitCode

@@ -202,10 +202,10 @@ Publish the benign sample under `D:\Temp\KSwordSandbox\samples`:
 
 ```powershell
 $repo = 'D:\Projects\KswordSandbox'
-$sampleProject = Join-Path $repo 'tools\KSword.Sandbox.TestSample\KSword.Sandbox.TestSample.csproj'
-$sampleOut = 'D:\Temp\KSwordSandbox\samples\KSword.Sandbox.TestSample'
-$sampleBuild = 'D:\Temp\KSwordSandbox\build\KSword.Sandbox.TestSample\'
-$sampleObj = 'D:\Temp\KSwordSandbox\obj\KSword.Sandbox.TestSample\'
+$sampleProject = Join-Path $repo 'tools\KSword.Sandbox.HarmlessSample\KSword.Sandbox.HarmlessSample.csproj'
+$sampleOut = 'D:\Temp\KSwordSandbox\samples\KSword.Sandbox.HarmlessSample'
+$sampleBuild = 'D:\Temp\KSwordSandbox\build\KSword.Sandbox.HarmlessSample\'
+$sampleObj = 'D:\Temp\KSwordSandbox\obj\KSword.Sandbox.HarmlessSample\'
 
 New-Item -ItemType Directory -Force -Path $sampleOut, $sampleBuild, $sampleObj | Out-Null
 
@@ -221,7 +221,7 @@ dotnet publish $sampleProject `
 Use this sample path for the live job:
 
 ```text
-D:\Temp\KSwordSandbox\samples\KSword.Sandbox.TestSample\KSword.Sandbox.TestSample.exe
+D:\Temp\KSwordSandbox\samples\KSword.Sandbox.HarmlessSample\KSword.Sandbox.HarmlessSample.exe
 ```
 
 The sample only creates a marker file, launches a short-lived `cmd.exe`, and
@@ -241,13 +241,13 @@ In another elevated shell, create a plan for the harmless sample:
 
 ```powershell
 $baseUrl = 'http://localhost:5000'
-$sampleExe = 'D:\Temp\KSwordSandbox\samples\KSword.Sandbox.TestSample\KSword.Sandbox.TestSample.exe'
+$sampleExe = 'D:\Temp\KSwordSandbox\samples\KSword.Sandbox.HarmlessSample\KSword.Sandbox.HarmlessSample.exe'
 
 $job = Invoke-RestMethod -Method Post -Uri "$baseUrl/api/jobs/plan" `
   -ContentType 'application/json' `
   -Body (@{
       samplePath = $sampleExe
-      displayName = 'KSword.Sandbox.TestSample.exe'
+      displayName = 'KSword.Sandbox.HarmlessSample.exe'
       durationSeconds = 30
       dryRun = $true
   } | ConvertTo-Json)

@@ -59,7 +59,7 @@ public sealed class HyperVRunbookBuilder
     {
         steps.Add(Step("check-hyperv", "Verify Hyper-V module", "Get-Command Get-VM | Out-Null", mutatesVmState: false));
         steps.Add(Step("check-golden-vm", "Verify golden VM exists", $"Get-VM -Name {Q(config.HyperV.GoldenVmName)} | Out-Null", mutatesVmState: false));
-        steps.Add(Step("load-credential", "Load guest credential from environment secret", $"$guestPassword = ConvertTo-SecureString $env:{config.Guest.PasswordSecretName} -AsPlainText -Force; $guestCredential = [pscredential]::new({Q(config.Guest.UserName)}, $guestPassword)", mutatesVmState: false));
+        steps.Add(Step("check-guest-credential", "Verify guest credential environment secret", BuildGuestCredentialPreamble(config) + " Write-Host 'Guest credential secret is available for this step.'", mutatesVmState: false));
     }
 
     /// <summary>
@@ -78,6 +78,7 @@ public sealed class HyperVRunbookBuilder
         steps.Add(Step("create-temp-vm", "Create temporary analysis VM", $"New-VM -Name {Q(targetVmName)} -Generation 2 -MemoryStartupBytes {config.HyperV.MemoryStartupBytes} -VHDPath {Q(diffDisk)}{switchPart} | Out-Null"));
         steps.Add(Step("enable-guest-service", "Enable Guest Service Interface", BuildEnableGuestServiceCommand(targetVmName)));
         steps.Add(Step("start-temp-vm", "Start temporary analysis VM", $"Start-VM -Name {Q(targetVmName)}"));
+        steps.Add(Step("wait-powershell-direct", "Wait for PowerShell Direct in guest", BuildWaitPowerShellDirectCommand(config, targetVmName), mutatesVmState: false));
     }
 
     /// <summary>
@@ -91,6 +92,7 @@ public sealed class HyperVRunbookBuilder
         steps.Add(Step("restore-golden", "Restore clean checkpoint", $"Restore-VMSnapshot -VMName {Q(config.HyperV.GoldenVmName)} -Name {Q(config.HyperV.GoldenSnapshotName)} -Confirm:$false"));
         steps.Add(Step("enable-guest-service", "Enable Guest Service Interface", BuildEnableGuestServiceCommand(config.HyperV.GoldenVmName)));
         steps.Add(Step("start-golden", "Start restored golden VM", $"Start-VM -Name {Q(config.HyperV.GoldenVmName)}"));
+        steps.Add(Step("wait-powershell-direct", "Wait for PowerShell Direct in guest", BuildWaitPowerShellDirectCommand(config, config.HyperV.GoldenVmName), mutatesVmState: false));
     }
 
     /// <summary>
@@ -125,10 +127,71 @@ public sealed class HyperVRunbookBuilder
         steps.Add(Step("stage-guest-payload", "Stage Guest Agent and R0Collector into guest", BuildStageGuestPayloadCommand(config, targetVmName)));
         steps.Add(Step("copy-sample", "Copy submitted sample into guest", $"Copy-VMFile -VMName {Q(targetVmName)} -SourcePath {Q(sample.FullPath)} -DestinationPath {Q(guestSample)} -FileSource Host -CreateFullPath"));
         steps.Add(Step("make-host-output", "Create host output folder", $"New-Item -ItemType Directory -Force -Path {Q(hostOut)} | Out-Null", mutatesVmState: false));
-        steps.Add(Step("prepare-guest-output", "Prepare job-specific guest output folder", BuildPrepareGuestOutputCommand(targetVmName, guestOut, driverEventsPath, agentPidPath, agentExitPath)));
+        steps.Add(Step("prepare-guest-output", "Prepare job-specific guest output folder", BuildPrepareGuestOutputCommand(config, targetVmName, guestOut, driverEventsPath, agentPidPath, agentExitPath)));
         steps.Add(Step("run-agent", "Start guest collector and sample asynchronously", BuildStartGuestAgentCommand(config, targetVmName, guestRoot, agentPath, guestSample, guestOut, driverEventsPath, agentPidPath, agentExitPath)));
         steps.Add(Step("sync-live-output", "Live-sync guest events while sample runs", BuildLiveOutputSyncCommand(config, targetVmName, guestOut, hostOut, agentPidPath, agentExitPath)));
-        steps.Add(Step("collect-output", "Collect final guest JSON output", BuildCollectOutputCommand(targetVmName, guestOut, hostOut)));
+        steps.Add(Step("collect-output", "Collect final guest JSON output", BuildCollectOutputCommand(config, targetVmName, guestOut, hostOut)));
+    }
+
+    /// <summary>
+    /// Builds a self-contained credential preamble for one PowerShell step.
+    /// Inputs are guest username and configured environment-secret name;
+    /// processing validates that the secret is present and creates
+    /// $guestCredential inside the current PowerShell process. The returned
+    /// script is intentionally repeated in every PowerShell Direct step because
+    /// the WebUI runbook executor launches a fresh PowerShell process for each
+    /// step and does not preserve variables across steps.
+    /// </summary>
+    private static string BuildGuestCredentialPreamble(SandboxConfig config)
+    {
+        var secretName = config.Guest.PasswordSecretName;
+        return string.Join(" ", new[]
+        {
+            $"$guestPasswordText = [System.Environment]::GetEnvironmentVariable({Q(secretName)});",
+            $"if ([string]::IsNullOrWhiteSpace($guestPasswordText)) {{ throw 'Guest password environment variable {secretName} is not set for this PowerShell step.' }};",
+            "$guestPassword = ConvertTo-SecureString $guestPasswordText -AsPlainText -Force;",
+            $"$guestCredential = [pscredential]::new({Q(config.Guest.UserName)}, $guestPassword);"
+        });
+    }
+
+    /// <summary>
+    /// Prefixes a PowerShell Direct command with guest credential setup.
+    /// Inputs are sandbox config and a command body that references
+    /// $guestCredential; processing concatenates the credential preamble with
+    /// the command body; the method returns a self-contained step command.
+    /// </summary>
+    private static string WithGuestCredential(SandboxConfig config, string command)
+    {
+        return BuildGuestCredentialPreamble(config) + " " + command;
+    }
+
+    /// <summary>
+    /// Builds a readiness loop for PowerShell Direct after VM start. Inputs are
+    /// sandbox config and VM name; processing repeatedly invokes a harmless
+    /// guest script block with the configured credential until the guest is
+    /// reachable or a fixed timeout expires; the returned command is
+    /// self-contained for the per-step WebUI PowerShell executor.
+    /// </summary>
+    private static string BuildWaitPowerShellDirectCommand(SandboxConfig config, string targetVmName)
+    {
+        var command = string.Join(" ", new[]
+        {
+            "$deadline = (Get-Date).AddSeconds(300);",
+            "$ready = $false;",
+            "do {",
+            "try {",
+            $"Invoke-Command -VMName {Q(targetVmName)} -Credential $guestCredential -ScriptBlock {{ $env:COMPUTERNAME }} | Out-Null;",
+            "$ready = $true;",
+            "}",
+            "catch {",
+            "Start-Sleep -Seconds 3;",
+            "}",
+            "} while (-not $ready -and (Get-Date) -lt $deadline);",
+            $"if (-not $ready) {{ throw 'PowerShell Direct did not become ready for VM {targetVmName} within 300 seconds.' }};",
+            "Write-Host 'PowerShell Direct is ready.'"
+        });
+
+        return WithGuestCredential(config, command);
     }
 
     /// <summary>
@@ -179,7 +242,7 @@ public sealed class HyperVRunbookBuilder
         commands.Add("}");
         commands.Add("finally { if ($session) { Remove-PSSession $session } }");
 
-        return string.Join(" ", commands);
+        return WithGuestCredential(config, string.Join(" ", commands));
     }
 
     /// <summary>
@@ -188,10 +251,10 @@ public sealed class HyperVRunbookBuilder
     /// guest output directory and removes stale artifacts; the method returns a
     /// PowerShell Direct command string.
     /// </summary>
-    private static string BuildPrepareGuestOutputCommand(string targetVmName, string guestOut, string driverEventsPath, string agentPidPath, string agentExitPath)
+    private static string BuildPrepareGuestOutputCommand(SandboxConfig config, string targetVmName, string guestOut, string driverEventsPath, string agentPidPath, string agentExitPath)
     {
         var stalePaths = string.Join(", ", new[] { $"{guestOut}\\events.json", driverEventsPath, agentPidPath, agentExitPath }.Select(Q));
-        return $"Invoke-Command -VMName {Q(targetVmName)} -Credential $guestCredential -ScriptBlock {{ New-Item -ItemType Directory -Force -Path {Q(guestOut)} | Out-Null; Remove-Item -LiteralPath {stalePaths} -Force -ErrorAction SilentlyContinue }}";
+        return WithGuestCredential(config, $"Invoke-Command -VMName {Q(targetVmName)} -Credential $guestCredential -ScriptBlock {{ New-Item -ItemType Directory -Force -Path {Q(guestOut)} | Out-Null; Remove-Item -LiteralPath {stalePaths} -Force -ErrorAction SilentlyContinue }}");
     }
 
     /// <summary>
@@ -212,7 +275,7 @@ public sealed class HyperVRunbookBuilder
         string agentExitPath)
     {
         var agentCommand = BuildGuestAgentInvocation(config, agentPath, guestSample, guestOut, driverEventsPath, agentExitPath);
-        return $"Invoke-Command -VMName {Q(targetVmName)} -Credential $guestCredential -ScriptBlock {{ $agentCommand = {Q(agentCommand)}; $process = Start-Process -FilePath 'powershell.exe' -ArgumentList @('-NoLogo','-NoProfile','-ExecutionPolicy','Bypass','-Command',$agentCommand) -WorkingDirectory {Q(guestRoot)} -PassThru; $process.Id | Set-Content -Path {Q(agentPidPath)} -Encoding ASCII }}";
+        return WithGuestCredential(config, $"Invoke-Command -VMName {Q(targetVmName)} -Credential $guestCredential -ScriptBlock {{ $agentCommand = {Q(agentCommand)}; $process = Start-Process -FilePath 'powershell.exe' -ArgumentList @('-NoLogo','-NoProfile','-ExecutionPolicy','Bypass','-Command',$agentCommand) -WorkingDirectory {Q(guestRoot)} -PassThru; $process.Id | Set-Content -Path {Q(agentPidPath)} -Encoding ASCII }}");
     }
 
     /// <summary>
@@ -284,7 +347,7 @@ public sealed class HyperVRunbookBuilder
     private static string BuildLiveOutputSyncCommand(SandboxConfig config, string targetVmName, string guestOut, string hostOut, string agentPidPath, string agentExitPath)
     {
         var maxSyncSeconds = Math.Max(config.Analysis.DefaultDurationSeconds + 60, 90);
-        return string.Join(" ", new[]
+        var command = string.Join(" ", new[]
         {
             $"$session = New-PSSession -VMName {Q(targetVmName)} -Credential $guestCredential;",
             "try {",
@@ -308,6 +371,8 @@ public sealed class HyperVRunbookBuilder
             "}",
             "finally { if ($session) { Remove-PSSession $session } }"
         });
+
+        return WithGuestCredential(config, command);
     }
 
     /// <summary>
@@ -316,9 +381,9 @@ public sealed class HyperVRunbookBuilder
     /// processing copies the complete guest output tree one last time and
     /// closes the PSSession; the method returns a PowerShell command string.
     /// </summary>
-    private static string BuildCollectOutputCommand(string targetVmName, string guestOut, string hostOut)
+    private static string BuildCollectOutputCommand(SandboxConfig config, string targetVmName, string guestOut, string hostOut)
     {
-        return $"$session = New-PSSession -VMName {Q(targetVmName)} -Credential $guestCredential; try {{ Copy-Item -FromSession $session -Path {Q(guestOut)} -Destination {Q(hostOut)} -Recurse -Force }} finally {{ if ($session) {{ Remove-PSSession $session }} }}";
+        return WithGuestCredential(config, $"$session = New-PSSession -VMName {Q(targetVmName)} -Credential $guestCredential; try {{ Copy-Item -FromSession $session -Path {Q(guestOut)} -Destination {Q(hostOut)} -Recurse -Force }} finally {{ if ($session) {{ Remove-PSSession $session }} }}");
     }
 
     /// <summary>
