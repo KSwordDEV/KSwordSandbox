@@ -293,6 +293,8 @@ KswHandleGetStatus(
     reply->ProducerEnableMask = snapshot.ProducerEnableMask;
     reply->SupportedProducerMask = snapshot.SupportedProducerMask;
     reply->LastNtStatus = snapshot.LastStatus;
+    reply->ActiveProducerMask = snapshot.ActiveProducerMask;
+    reply->FailedProducerMask = snapshot.FailedProducerMask;
     reply->TotalEventsEnqueued = snapshot.TotalEventsQueued;
     reply->TotalEventsDropped = snapshot.EventsDropped;
     reply->TotalEventsRead = snapshot.EventsRead;

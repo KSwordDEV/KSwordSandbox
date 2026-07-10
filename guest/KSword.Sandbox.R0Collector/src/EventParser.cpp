@@ -905,9 +905,9 @@ unsigned long long ExtractTypedPayloadProcessId(
 }
 
 // Input: One public driver event header and the JSON data builder being filled.
-// Processing: Adds string-valued flag diagnostics and names the current
-// header-only DriverEntry startup event when the reserved type carries the
-// DriverStarted flag.
+// Processing: Adds string-valued flag diagnostics and names DriverEntry startup
+// heartbeat semantics for both the current typed driver-load event and legacy
+// reserved/header-only rows.
 // Return: No return value; the builder is mutated when it is non-null.
 void AddDriverEventFlagData(
     const KSWORD_SANDBOX_EVENT_HEADER& header,
@@ -931,11 +931,16 @@ void AddDriverEventFlagData(
     data->AddUnsigned("unknownFlags", unknownFlags);
     data->AddUtf8("unknownFlagsHex", HexUnsignedLongLong(unknownFlags, 8));
 
-    if (header.Type == KswSandboxEventTypeReserved && isDriverStarted) {
+    if (header.Type == KswSandboxEventTypeDriverLoad && isDriverStarted) {
+        data->AddUtf8("driverLoadEventName", "driver.load");
+        data->AddUtf8(
+            "driverLoadEventDescription",
+            "Typed DriverEntry startup heartbeat emitted by the KSword sandbox driver.");
+    } else if (header.Type == KswSandboxEventTypeReserved && isDriverStarted) {
         data->AddUtf8("reservedEventName", "driver.started");
         data->AddUtf8(
             "reservedEventDescription",
-            "Header-only DriverEntry startup heartbeat emitted with reserved event type.");
+            "Legacy header-only DriverEntry startup heartbeat emitted with reserved event type.");
     }
 }
 
@@ -1441,7 +1446,7 @@ bool AddAbiPendingPayloadData(
 }
 
 // Input: Reserved event header, optional payload bytes, and the JSON builder.
-// Processing: Names the current header-only driver-start event and treats any
+// Processing: Names legacy header-only driver-start events and treats any
 // reserved payload bytes as opaque so forward compatibility is preserved.
 // Return: true when the reserved event was fully represented by header flags;
 // false when opaque reserved payload bytes remain unparsed.
@@ -1609,6 +1614,12 @@ std::string BuildStatusData(const KSWORD_SANDBOX_STATUS_REPLY& reply, const DWOR
     data.AddUtf8("supportedProducerMaskNames", ProducerMaskNames(reply.SupportedProducerMask));
     data.AddSigned("lastNtStatus", reply.LastNtStatus);
     data.AddUtf8("lastNtStatusHex", HexUnsignedLongLong(static_cast<unsigned long>(reply.LastNtStatus), 8));
+    data.AddUnsigned("activeProducerMask", reply.ActiveProducerMask);
+    data.AddUtf8("activeProducerMaskHex", HexUnsignedLongLong(reply.ActiveProducerMask, 8));
+    data.AddUtf8("activeProducerMaskNames", ProducerMaskNames(reply.ActiveProducerMask));
+    data.AddUnsigned("failedProducerMask", reply.FailedProducerMask);
+    data.AddUtf8("failedProducerMaskHex", HexUnsignedLongLong(reply.FailedProducerMask, 8));
+    data.AddUtf8("failedProducerMaskNames", ProducerMaskNames(reply.FailedProducerMask));
     data.AddUnsigned("totalEventsEnqueued", reply.TotalEventsEnqueued);
     data.AddUnsigned("totalEventsDropped", reply.TotalEventsDropped);
     data.AddUnsigned("totalEventsRead", reply.TotalEventsRead);

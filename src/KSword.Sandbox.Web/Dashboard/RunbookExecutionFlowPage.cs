@@ -26,7 +26,7 @@ internal static class RunbookExecutionFlowPage
         var liveEventsLink = $"<a class=\"button secondary\" href=\"/jobs/{Attr(jobId)}/live-events\" target=\"_blank\" rel=\"noopener\" data-zh=\"实时原始事件监控\" data-en=\"Live raw event monitor\">实时原始事件监控</a>";
         var reportLink = string.IsNullOrWhiteSpace(job.HtmlReportPath)
             ? "<span class=\"muted\" data-zh=\"暂无报告\" data-en=\"No report yet\">暂无报告</span>"
-            : $"<a class=\"button\" href=\"/api/jobs/{Attr(jobId)}/report/html\" target=\"_blank\" rel=\"noopener\" data-zh=\"打开报告\" data-en=\"Open report\">打开报告</a>";
+            : $"<a class=\"button\" href=\"/api/jobs/{Attr(jobId)}/report/html?lang=zh\" target=\"_blank\" rel=\"noopener\" data-zh=\"打开中文报告\" data-en=\"Open Chinese report\">打开中文报告</a><a class=\"button secondary\" href=\"/api/jobs/{Attr(jobId)}/report/html?lang=en\" target=\"_blank\" rel=\"noopener\" data-zh=\"打开英文报告\" data-en=\"Open English report\">打开英文报告</a>";
 
         return $$"""
         <!doctype html>
@@ -35,21 +35,21 @@ internal static class RunbookExecutionFlowPage
           <meta charset="utf-8">
           <title>{{Html(title)}} - KSword Sandbox</title>
           <style>
-            :root { color-scheme: light; }
-            body { background: #f8fafc; color: #111827; font-family: Segoe UI, Microsoft YaHei UI, Arial, sans-serif; margin: 0; }
-            header { background: linear-gradient(135deg, #111827, #1d4ed8); color: white; padding: 24px 34px; }
+            :root { --blue:#43A0FF; --blue-dark:#0B6FCC; --line:#dbeafe; color-scheme: light; }
+            body { background: radial-gradient(circle at 8% 4%,rgba(67,160,255,.18),transparent 27%),linear-gradient(180deg,#f4f9ff,#f8fafc); color: #111827; font-family: Segoe UI, Microsoft YaHei UI, Arial, sans-serif; margin: 0; }
+            header { background: radial-gradient(circle at 84% 12%,rgba(67,160,255,.55),transparent 30%),linear-gradient(135deg, #08111f, #0B6FCC); color: white; padding: 24px 34px; }
             main { max-width: 1080px; margin: 22px auto 54px; padding: 0 22px; }
             .topbar { align-items: center; display: flex; gap: 12px; justify-content: space-between; }
             .actions { align-items: center; display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
-            a.button, button { background: #1d4ed8; border: 0; border-radius: 10px; color: white; cursor: pointer; display: inline-block; font-weight: 700; padding: 9px 14px; text-decoration: none; }
+            a.button, button { background: var(--blue); border: 0; border-radius: 10px; color: white; cursor: pointer; display: inline-block; font-weight: 700; padding: 9px 14px; text-decoration: none; }
             a.secondary, button.secondary { background: #334155; }
-            section, article.step { background: white; border: 1px solid #e5e7eb; border-radius: 14px; box-shadow: 0 8px 24px rgba(15, 23, 42, .06); margin-bottom: 14px; padding: 18px; }
+            section, article.step { background: white; border: 1px solid var(--line); border-radius: 14px; box-shadow: 0 8px 24px rgba(15, 23, 42, .06); margin-bottom: 14px; padding: 18px; }
             .grid { display: grid; gap: 12px; grid-template-columns: repeat(4, minmax(0, 1fr)); }
             .metric { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 12px; }
             .metric strong { display: block; font-size: 12px; color: #64748b; margin-bottom: 6px; }
             .step { align-items: flex-start; display: grid; gap: 14px; grid-template-columns: 64px minmax(0, 1fr) 150px; }
-            .num { align-items: center; background: #dbeafe; border-radius: 999px; color: #1e40af; display: inline-flex; font-weight: 800; height: 42px; justify-content: center; width: 42px; }
-            .pill { background: #dbeafe; border-radius: 999px; color: #1e40af; display: inline-block; font-size: 12px; font-weight: 800; padding: 4px 9px; }
+            .num { align-items: center; background: #e7f3ff; border: 1px solid rgba(67,160,255,.35); border-radius: 999px; color: #075985; display: inline-flex; font-weight: 800; height: 42px; justify-content: center; width: 42px; }
+            .pill { background: #e7f3ff; border: 1px solid rgba(67,160,255,.35); border-radius: 999px; color: #075985; display: inline-block; font-size: 12px; font-weight: 800; padding: 4px 9px; }
             .ok { background: #dcfce7; color: #166534; }
             .failed { background: #fee2e2; color: #991b1b; }
             .skipped { background: #fef3c7; color: #92400e; }
@@ -57,7 +57,7 @@ internal static class RunbookExecutionFlowPage
             .muted { color: #64748b; }
             code { background: #f1f5f9; border-radius: 7px; padding: 2px 5px; word-break: break-all; }
             [data-copy], code { cursor: copy; }
-            [data-copy]:hover, code:hover { outline: 1px dashed #93c5fd; outline-offset: 2px; }
+            [data-copy]:hover, code:hover { outline: 1px dashed var(--blue); outline-offset: 2px; }
             .toast { background: #0f172a; border-radius: 999px; bottom: 22px; color: white; left: 50%; opacity: 0; padding: 10px 16px; pointer-events: none; position: fixed; transform: translate(-50%, 12px); transition: opacity .15s ease, transform .15s ease; }
             .toast.visible { opacity: .96; transform: translate(-50%, 0); }
             @media (max-width: 820px) { .grid { grid-template-columns: 1fr; } .step { grid-template-columns: 48px minmax(0, 1fr); } .step-status { grid-column: 2; } }
@@ -111,8 +111,31 @@ internal static class RunbookExecutionFlowPage
               const value = target.getAttribute('data-copy') || target.innerText || target.textContent || '';
               if (!value.trim()) { return; }
               event.preventDefault();
-              navigator.clipboard?.writeText(value).then(() => showToast('已复制 / copied'));
+              copyText(value);
             });
+            function fallbackCopyText(text) {
+              const area = document.createElement('textarea');
+              area.value = text;
+              area.setAttribute('readonly', 'readonly');
+              area.style.position = 'fixed';
+              area.style.left = '-9999px';
+              document.body.appendChild(area);
+              area.select();
+              document.execCommand('copy');
+              document.body.removeChild(area);
+            }
+            function copyText(text) {
+              if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(text).then(() => showToast('已复制 / copied')).catch(() => {
+                  fallbackCopyText(text);
+                  showToast('已复制 / copied');
+                });
+                return;
+              }
+
+              fallbackCopyText(text);
+              showToast('已复制 / copied');
+            }
             function showToast(text) {
               const toast = document.getElementById('copyToast');
               toast.textContent = text;

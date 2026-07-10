@@ -279,6 +279,7 @@ internal static class SmokeTestProgram
         Assert(snapshot.HasMore, "live snapshot should report more events when page is truncated");
         Assert(snapshot.Sources.Any(source => string.Equals(source, eventsPath, StringComparison.OrdinalIgnoreCase)), "live snapshot should include events.json source");
         Assert(snapshot.Sources.Any(source => string.Equals(Path.GetFileName(source), "driver-events.jsonl", StringComparison.OrdinalIgnoreCase)), "live snapshot should include driver-events.jsonl source");
+        Assert(snapshot.Sources.Any(source => string.Equals(Path.GetFileName(source), "partial-driver-events.jsonl", StringComparison.OrdinalIgnoreCase)), "live snapshot should tolerate and list a partially written JSONL source");
 
         var fullSnapshot = service.GetLiveEvents(jobId, offset: 0, take: 100);
         Assert(fullSnapshot.Events.Any(evt => string.Equals(evt.EventType, "process.start", StringComparison.OrdinalIgnoreCase)), "live snapshot should include process event");
@@ -415,6 +416,9 @@ internal static class SmokeTestProgram
                 JsonSerializer.Serialize(driverEvent),
                 JsonSerializer.Serialize(r0Event)
             ]);
+        File.WriteAllText(
+            Path.Combine(guestRoot, "partial-driver-events.jsonl"),
+            "{\"eventType\":\"driver.file\",\"source\":\"driver\"");
         return eventsPath;
     }
 

@@ -61,11 +61,13 @@ internal static class DashboardExperiencePage
             .error { color: #b91c1c; }
             .ok { color: #047857; }
             .pathbox { background: #f8fbff; border: 1px solid var(--line); border-radius: 12px; margin-top: 10px; padding: 12px; }
-            .callout { background:#eef7ff; border:1px solid #bfdbfe; border-radius:14px; margin-top:12px; padding:14px; }
+            .callout { background:#f7fbff; border:1px solid rgba(67,160,255,.30); border-radius:14px; margin-top:12px; padding:12px 14px; }
             .callout strong { display:block; margin-bottom:4px; }
             .report-notice { background:#ecfdf5; border:1px solid #86efac; border-radius:14px; color:#065f46; margin:12px 0; padding:14px; }
             .report-notice[hidden] { display:none; }
             .report-notice p { margin:6px 0; }
+            .report-entry { align-items:center; display:flex; flex-wrap:wrap; gap:8px; margin-top:12px; }
+            .report-entry .hint { margin:0; }
             .pill { background: #e7f3ff; border:1px solid rgba(67,160,255,.35); border-radius: 999px; color: #075985; display: inline-block; font-size: 12px; font-weight: 800; padding: 4px 9px; }
             .pill.ready { background:#dcfce7; border-color:#86efac; color:#166534; }
             .tabs { display:flex; flex-wrap:wrap; gap:8px; margin:16px 0 10px; }
@@ -81,12 +83,17 @@ internal static class DashboardExperiencePage
             .metric { background:#f8fbff; border:1px solid var(--line); border-radius:14px; padding:12px; }
             .metric strong { color:var(--muted); display:block; font-size:12px; margin-bottom:6px; }
             .progress-box { background:#f8fbff; border:1px solid var(--line); border-radius:16px; margin-top:14px; padding:14px; }
+            .progress-head { align-items:center; display:flex; flex-wrap:wrap; gap:8px; justify-content:space-between; margin-bottom:8px; }
+            .progress-meta { color:#075985; font-size:12px; font-weight:800; }
             .progress-bar { background:#dbeafe; border-radius:999px; height:12px; overflow:hidden; }
             .progress-fill { background:linear-gradient(90deg,var(--blue),#7dd3fc); height:100%; width:0%; transition:width .25s ease; }
+            .progress-fill.failed { background:linear-gradient(90deg,#f97316,#ef4444); }
             .stages { display:grid; gap:8px; grid-template-columns:repeat(4,minmax(0,1fr)); margin-top:12px; }
             .stage { background:white; border:1px solid #e5edf6; border-radius:12px; color:#64748b; padding:9px; }
+            .stage small { color:#94a3b8; display:block; font-size:11px; margin-top:2px; }
             .stage.active { border-color:var(--blue); box-shadow:0 0 0 3px rgba(67,160,255,.12); color:#075985; font-weight:800; }
             .stage.done { background:#ecfdf5; border-color:#bbf7d0; color:#047857; }
+            .stage.failed { background:#fff7ed; border-color:#fdba74; color:#c2410c; font-weight:800; }
             .compact-details { margin-top:12px; }
             .compact-details summary { cursor:pointer; color:#075985; font-weight:800; }
             .empty { border:1px dashed #b9d7f3; border-radius:12px; color:var(--muted); padding:14px; }
@@ -186,15 +193,17 @@ internal static class DashboardExperiencePage
             let currentLanguage = localStorage.getItem('ksword-lang') === 'en' ? 'en' : 'zh';
             let progressTimer = null;
             let progressStageIndex = 0;
+            let progressCompleted = false;
+            let progressFailed = false;
             const liveStages = [
-              ['任务已规划', 'Job planned'],
-              ['检查 Hyper-V / 凭据', 'Check Hyper-V / credential'],
-              ['恢复检查点', 'Restore checkpoint'],
-              ['启动虚拟机', 'Start VM'],
-              ['复制样本与工具', 'Stage sample and tools'],
-              ['运行样本与采集器', 'Run sample and collectors'],
-              ['回收事件', 'Collect events'],
-              ['导入并生成报告', 'Import and report']
+              ['任务已规划', 'Job planned', '已生成可复核计划', 'Reviewable plan is ready'],
+              ['检查 Hyper-V / 凭据', 'Check Hyper-V / credential', '验证主机与登录条件', 'Validate host and logon prerequisites'],
+              ['恢复检查点', 'Restore checkpoint', '通常是耗时阶段', 'Usually one of the slower stages'],
+              ['启动虚拟机', 'Start VM', '等待 PowerShell Direct 可用', 'Wait for PowerShell Direct readiness'],
+              ['复制样本与工具', 'Stage sample and tools', '传入样本、Agent 与采集器', 'Copy sample, agent, and collectors'],
+              ['运行样本与采集器', 'Run sample and collectors', '采集运行期行为', 'Collect runtime behavior'],
+              ['回收事件', 'Collect events', '从来宾机同步证据', 'Sync evidence from the guest'],
+              ['导入并生成报告', 'Import and report', '写入 JSON/HTML 报告', 'Write JSON/HTML reports']
             ];
 
             function t(zh, en) {
@@ -220,6 +229,8 @@ internal static class DashboardExperiencePage
 
                 element.textContent = currentLanguage === 'en' ? element.getAttribute('data-en') : element.getAttribute('data-zh');
               });
+              refreshLocalizedReportLinks();
+              renderStages(progressStageIndex, progressCompleted, progressFailed);
             }
 
             function formatJobStatus(status) {
@@ -484,6 +495,7 @@ internal static class DashboardExperiencePage
               const servedReportHref = jobId ? `/api/jobs/${encodeURIComponent(jobId)}/report/html` : '';
               const servedZhReportHref = jobId ? `/api/jobs/${encodeURIComponent(jobId)}/report/html?lang=zh` : '';
               const servedEnReportHref = jobId ? `/api/jobs/${encodeURIComponent(jobId)}/report/html?lang=en` : '';
+              const currentReportHref = currentLanguage === 'en' ? servedEnReportHref : servedZhReportHref;
               const fileReportHref = toFileUri(htmlReportPath);
               const executionFlowHref = jobId ? `/jobs/${encodeURIComponent(jobId)}/execution-flow` : '';
               const liveEventsHref = jobId ? `/jobs/${encodeURIComponent(jobId)}/live-events` : '';
@@ -504,10 +516,15 @@ internal static class DashboardExperiencePage
                   </div>
                   <p class="button-row">
                     <button onclick="executeRunbook('${escapeJs(jobId)}', true)" data-zh="启动虚拟机分析" data-en="Start VM analysis">启动虚拟机分析</button>
-                    <a class="buttonlink" target="_blank" rel="noopener" href="${escapeHtml(servedZhReportHref)}" data-zh="打开中文报告" data-en="Open Chinese report">打开中文报告</a>
-                    <a class="buttonlink secondary" target="_blank" rel="noopener" href="${escapeHtml(servedEnReportHref)}" data-zh="打开英文报告" data-en="Open English report">打开英文报告</a>
                     <a class="buttonlink secondary" target="_blank" rel="noopener" href="${escapeHtml(executionFlowHref)}" data-zh="执行流程" data-en="Execution flow">执行流程</a>
                   </p>
+                  <div class="report-entry" data-copy="${escapeAttribute([servedReportHref, servedZhReportHref, servedEnReportHref].filter(Boolean).join('\n'))}" data-copy-label="served report links">
+                    <strong data-zh="报告入口" data-en="Report entry">报告入口</strong>
+                    <a class="buttonlink" target="_blank" rel="noopener" href="${escapeHtml(currentReportHref)}" data-report-current="true" data-job-id="${escapeAttribute(jobId)}" data-zh="打开当前语言报告" data-en="Open current-language report">打开当前语言报告</a>
+                    <a class="buttonlink secondary" target="_blank" rel="noopener" href="${escapeHtml(servedZhReportHref)}" data-zh="中文" data-en="ZH">中文</a>
+                    <a class="buttonlink secondary" target="_blank" rel="noopener" href="${escapeHtml(servedEnReportHref)}" data-zh="英文" data-en="EN">英文</a>
+                    <span class="hint" data-zh="报告生成或导入刷新后会自动打开当前语言版本；若浏览器阻止跳转，请点这里。" data-en="After generation or import refresh, the current-language report opens automatically; click here if the browser blocks navigation.">报告生成或导入刷新后会自动打开当前语言版本；若浏览器阻止跳转，请点这里。</span>
+                  </div>
                   <div id="reportNotice" class="report-notice" hidden></div>
                   <div class="callout">
                     <strong data-zh="独立页：实时原始事件监控" data-en="Standalone page: live raw event monitor">独立页：实时原始事件监控</strong>
@@ -515,7 +532,10 @@ internal static class DashboardExperiencePage
                     <p class="button-row"><a class="buttonlink secondary" target="_blank" rel="noopener" href="${escapeHtml(liveEventsHref)}" data-zh="打开实时原始事件监控（独立页）" data-en="Open live raw event monitor (standalone)">打开实时原始事件监控（独立页）</a></p>
                   </div>
                   <div id="analysisProgress" class="progress-box stage-progress">
-                    <strong data-zh="阶段进度" data-en="Stage progress">阶段进度</strong>
+                    <div class="progress-head">
+                      <strong data-zh="阶段进度" data-en="Stage progress">阶段进度</strong>
+                      <span id="progressMeta" class="progress-meta" data-copy-label="progress stage">1/8</span>
+                    </div>
                     <div class="progress-bar"><div id="progressFill" class="progress-fill"></div></div>
                     <div id="stageList" class="stages"></div>
                     <p id="progressText" class="hint" data-zh="等待启动。虚拟机恢复/启动可能占用大部分时间。" data-en="Waiting to start. VM restore/start usually takes most of the time.">等待启动。虚拟机恢复/启动可能占用大部分时间。</p>
@@ -551,7 +571,7 @@ internal static class DashboardExperiencePage
                   <div id="executionResult" class="hint" data-copy="planned steps: ${plannedStepCount}" data-copy-label="planned runbook step count">${t(`已规划 ${plannedStepCount} 个步骤。主界面只显示摘要；请打开“执行流程”查看详情。`, `${plannedStepCount} steps planned. The dashboard shows a summary only; open Execution flow for details.`)}</div>
                 </article>`;
               applyLanguage();
-              renderStages(0, false);
+              renderStages(0, false, false);
             }
 
             async function refreshJob(jobId) {
@@ -629,7 +649,7 @@ internal static class DashboardExperiencePage
                 const reportPath = job.htmlReportPath || '';
                 const reportHref = `/api/jobs/${encodeURIComponent(jobId)}/report/html?lang=${currentLanguage === 'en' ? 'en' : 'zh'}`;
                 const reportCell = reportPath
-                  ? `<a target="_blank" rel="noopener" href="${escapeHtml(reportHref)}" data-zh="打开报告" data-en="Open report">打开报告</a>`
+                  ? `<a target="_blank" rel="noopener" href="${escapeHtml(reportHref)}" data-report-current="true" data-job-id="${escapeAttribute(jobId)}" data-zh="打开报告" data-en="Open report">打开报告</a>`
                   : '<span class="hint" data-zh="待生成" data-en="Not ready">待生成</span>';
                 return `
                 <tr>
@@ -661,25 +681,50 @@ internal static class DashboardExperiencePage
               setStatus(reportPath ? t(`报告路径：${reportPath}`, `HTML report path: ${reportPath}`) : t('当前任务还没有报告路径。', 'No HTML report path is recorded for this job yet.'), !reportPath);
             }
 
-            function renderStages(active, completed) {
+            function renderStages(active, completed, failed) {
               const list = document.getElementById('stageList');
               const fill = document.getElementById('progressFill');
+              const meta = document.getElementById('progressMeta');
               if (!list || !fill) {
                 return;
               }
 
+              const boundedActive = Math.max(0, Math.min(liveStages.length - 1, Number(active) || 0));
+              progressStageIndex = boundedActive;
+              progressCompleted = Boolean(completed);
+              progressFailed = Boolean(failed);
               list.innerHTML = liveStages.map((stage, index) => {
-                const css = completed || index < active ? 'done' : index === active ? 'active' : '';
-                return `<div class="stage ${css}">${escapeHtml(t(stage[0], stage[1]))}</div>`;
+                const css = progressCompleted
+                  ? 'done'
+                  : progressFailed && index === boundedActive
+                    ? 'failed'
+                    : index < boundedActive
+                      ? 'done'
+                      : index === boundedActive
+                        ? 'active'
+                        : '';
+                return `<div class="stage ${css}">${escapeHtml(t(stage[0], stage[1]))}<small>${escapeHtml(t(stage[2], stage[3]))}</small></div>`;
               }).join('');
-              const percent = completed ? 100 : Math.min(94, Math.round((active / (liveStages.length - 1)) * 100));
+              const percent = progressCompleted ? 100 : Math.min(94, Math.max(8, Math.round((boundedActive / (liveStages.length - 1)) * 100)));
               fill.style.width = `${percent}%`;
+              fill.classList.toggle('failed', progressFailed);
+              if (meta) {
+                const label = progressCompleted
+                  ? t('完成 / 8 阶段', 'Complete / 8 stages')
+                  : progressFailed
+                    ? t(`停在 ${boundedActive + 1}/8`, `Stopped at ${boundedActive + 1}/8`)
+                    : `${boundedActive + 1}/${liveStages.length}`;
+                meta.textContent = label;
+                meta.setAttribute('data-copy', `${label}: ${t(liveStages[boundedActive][0], liveStages[boundedActive][1])}`);
+              }
             }
 
             function startEstimatedProgress(live) {
               stopEstimatedProgress();
               progressStageIndex = live ? 1 : 0;
-              renderStages(progressStageIndex, false);
+              progressCompleted = false;
+              progressFailed = false;
+              renderStages(progressStageIndex, false, false);
               const text = document.getElementById('progressText');
               if (text) {
                 text.textContent = live
@@ -689,10 +734,10 @@ internal static class DashboardExperiencePage
 
               progressTimer = setInterval(() => {
                 progressStageIndex = Math.min(liveStages.length - 2, progressStageIndex + 1);
-                renderStages(progressStageIndex, false);
+                renderStages(progressStageIndex, false, false);
                 const stage = liveStages[progressStageIndex];
                 if (text) {
-                  text.textContent = `${t('当前阶段', 'Current stage')}: ${t(stage[0], stage[1])}`;
+                  text.textContent = `${t('当前阶段', 'Current stage')}: ${t(stage[0], stage[1])} — ${t(stage[2], stage[3])}`;
                 }
               }, live ? 9000 : 1500);
             }
@@ -713,6 +758,18 @@ internal static class DashboardExperiencePage
               return `/api/jobs/${encodeURIComponent(jobId)}/report/html?lang=${lang}`;
             }
 
+            function refreshLocalizedReportLinks() {
+              const lang = currentLanguage === 'en' ? 'en' : 'zh';
+              document.querySelectorAll('a[data-report-current][data-job-id]').forEach(anchor => {
+                const jobId = anchor.getAttribute('data-job-id');
+                if (!jobId) {
+                  return;
+                }
+
+                anchor.href = buildReportHref(jobId, lang);
+              });
+            }
+
             function showReportReadyNotice(jobId, autoOpen) {
               const notice = document.getElementById('reportNotice');
               if (!notice || !jobId) {
@@ -727,7 +784,7 @@ internal static class DashboardExperiencePage
                 <strong data-zh="报告已生成" data-en="Report is ready">报告已生成</strong>
                 <p data-zh="${autoOpen ? '页面即将打开当前语言报告；如果没有跳转，请点击下方按钮。' : '报告已刷新，可直接打开查看。'}" data-en="${autoOpen ? 'The report will open in the current language shortly; if it does not, use the buttons below.' : 'The report has been refreshed and is ready to open.'}">${autoOpen ? '页面即将打开当前语言报告；如果没有跳转，请点击下方按钮。' : '报告已刷新，可直接打开查看。'}</p>
                 <p class="button-row">
-                  <a class="buttonlink" href="${escapeHtml(currentHref)}" data-zh="打开报告" data-en="Open report">打开报告</a>
+                  <a class="buttonlink" href="${escapeHtml(currentHref)}" data-report-current="true" data-job-id="${escapeAttribute(jobId)}" data-zh="打开报告" data-en="Open report">打开报告</a>
                   <a class="buttonlink secondary" target="_blank" rel="noopener" href="${escapeHtml(zhHref)}" data-zh="新标签打开中文报告" data-en="Open Chinese report in new tab">新标签打开中文报告</a>
                   <a class="buttonlink secondary" target="_blank" rel="noopener" href="${escapeHtml(enHref)}" data-zh="新标签打开英文报告" data-en="Open English report in new tab">新标签打开英文报告</a>
                 </p>`;
@@ -770,17 +827,28 @@ internal static class DashboardExperiencePage
                 const suffix = payload.guestImportMessage ? ` ${payload.guestImportMessage}` : '';
                 const importFailed = Boolean(payload.guestImportMessage && !payload.guestImportSucceeded);
                 stopEstimatedProgress();
-                renderStages(liveStages.length - 1, Boolean(execution.success));
+                renderStages(liveStages.length - 1, Boolean(execution.success && !importFailed), Boolean(!execution.success || importFailed));
                 setStatus((execution.success ? t('分析流程已完成。', 'Analysis flow completed.') : t('分析流程失败。', 'Analysis flow stopped with a failure.')) + suffix, !execution.success || importFailed);
-                if (live && execution.success) {
+                if (live && execution.success && !importFailed) {
                   const text = document.getElementById('progressText');
                   if (text) {
                     text.textContent = t('分析完成，报告已生成，正在打开。', 'Analysis completed; report is ready and opening.');
                   }
-                  showReportReadyNotice(jobId, !importFailed);
+                  showReportReadyNotice(jobId, true);
+                } else if (live && execution.success) {
+                  const text = document.getElementById('progressText');
+                  if (text) {
+                    text.textContent = t('分析完成，但事件导入未确认；请检查报告入口或手动导入。', 'Analysis completed, but event import was not confirmed; check report links or import events manually.');
+                  }
+                  showReportReadyNotice(jobId, false);
                 }
               } catch (error) {
                 stopEstimatedProgress();
+                renderStages(progressStageIndex, false, true);
+                const text = document.getElementById('progressText');
+                if (text) {
+                  text.textContent = t('执行未完成；请打开执行流程查看失败步骤和 runbook-execution.json。', 'Execution did not complete; open Execution flow for the failed step and runbook-execution.json.');
+                }
                 setStatus(error.message, true);
               } finally {
                 setBusy(false);

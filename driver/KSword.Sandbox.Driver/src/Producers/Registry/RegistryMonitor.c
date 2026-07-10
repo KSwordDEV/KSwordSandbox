@@ -293,6 +293,47 @@ KswCapturePostCreateOrOpenKey(
 }
 
 /*
+ * Captures legacy completed create-key or open-key registry operations.
+ * Inputs : PostInfo is the XP-style post-operation record for RegNtPostCreateKey
+ *          or RegNtPostOpenKey; Operation identifies create versus open.
+ * Logic  : preserves compatibility with non-Ex create/open notifications by
+ *          copying CompleteName directly, falling back to the returned object
+ *          path when available, then queueing the same public registry payload.
+ * Return : no return value.
+ */
+static
+VOID
+KswCaptureLegacyPostCreateOrOpenKey(
+    _In_opt_ PREG_POST_CREATE_KEY_INFORMATION PostInfo,
+    _In_ ULONG Operation
+    )
+{
+    KSWORD_SANDBOX_REGISTRY_EVENT_PAYLOAD payload;
+    BOOLEAN copied;
+
+    if (PostInfo == NULL) {
+        return;
+    }
+
+    KswInitializeRegistryPayload(&payload, Operation, PostInfo->Status);
+    copied = KswCopyRegistryPayloadString(
+        payload.KeyPath,
+        KSWORD_SANDBOX_REGISTRY_KEY_PATH_CHARS,
+        PostInfo->CompleteName,
+        KSWORD_SANDBOX_REGISTRY_EVENT_FLAG_KEY_PRESENT,
+        KSWORD_SANDBOX_REGISTRY_EVENT_FLAG_KEY_TRUNCATED,
+        &payload.Flags,
+        &payload.KeyPathLengthBytes);
+    if (copied) {
+        payload.Flags |= KSWORD_SANDBOX_REGISTRY_EVENT_FLAG_KEY_FROM_CALLBACK;
+    }
+    if (!copied && PostInfo->Object != NULL) {
+        (VOID)KswCopyRegistryKeyObjectPath(PostInfo->Object, &payload);
+    }
+    KswQueueRegistryEvent(&payload);
+}
+
+/*
  * Captures a completed set-value registry operation.
  * Inputs : PostInfo is the post-operation record for RegNtPostSetValueKey.
  * Logic  : resolves the key object path, copies the value name prefix, records
@@ -476,10 +517,22 @@ KswRegistryCallback(
 
     notifyClass = (REG_NOTIFY_CLASS)(ULONG_PTR)Argument1;
     switch (notifyClass) {
+    case RegNtPostCreateKey:
+        KswCaptureLegacyPostCreateOrOpenKey(
+            (PREG_POST_CREATE_KEY_INFORMATION)Argument2,
+            KswSandboxRegistryOperationCreateKey);
+        break;
+
     case RegNtPostCreateKeyEx:
         KswCapturePostCreateOrOpenKey(
             (PREG_POST_OPERATION_INFORMATION)Argument2,
             KswSandboxRegistryOperationCreateKey);
+        break;
+
+    case RegNtPostOpenKey:
+        KswCaptureLegacyPostCreateOrOpenKey(
+            (PREG_POST_OPEN_KEY_INFORMATION)Argument2,
+            KswSandboxRegistryOperationOpenKey);
         break;
 
     case RegNtPostOpenKeyEx:

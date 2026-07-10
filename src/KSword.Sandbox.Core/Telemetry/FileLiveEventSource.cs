@@ -24,9 +24,36 @@ public sealed class FileLiveEventSource
             return [];
         }
 
-        return string.Equals(Path.GetExtension(path), ".jsonl", StringComparison.OrdinalIgnoreCase)
-            ? ReadJsonLines(path)
-            : JsonSerializer.Deserialize<List<SandboxEvent>>(File.ReadAllText(path), JsonOptions) ?? [];
+        try
+        {
+            return string.Equals(Path.GetExtension(path), ".jsonl", StringComparison.OrdinalIgnoreCase)
+                ? ReadJsonLines(path)
+                : ReadJsonArray(path);
+        }
+        catch (IOException)
+        {
+            return [];
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return [];
+        }
+        catch (JsonException)
+        {
+            return [];
+        }
+    }
+
+    /// <summary>
+    /// Reads a JSON event array through a shared file handle.
+    /// The input may still be open by the live Hyper-V sync loop; processing
+    /// uses read/write/delete sharing and returns an empty page for partial
+    /// JSON instead of failing the WebUI endpoint.
+    /// </summary>
+    private static IReadOnlyList<SandboxEvent> ReadJsonArray(string path)
+    {
+        using var stream = OpenSharedRead(path);
+        return JsonSerializer.Deserialize<List<SandboxEvent>>(stream, JsonOptions) ?? [];
     }
 
     /// <summary>
@@ -37,7 +64,9 @@ public sealed class FileLiveEventSource
     private static IReadOnlyList<SandboxEvent> ReadJsonLines(string path)
     {
         var events = new List<SandboxEvent>();
-        foreach (var line in File.ReadLines(path))
+        using var stream = OpenSharedRead(path);
+        using var reader = new StreamReader(stream);
+        while (reader.ReadLine() is { } line)
         {
             if (string.IsNullOrWhiteSpace(line))
             {
@@ -58,5 +87,18 @@ public sealed class FileLiveEventSource
         }
 
         return events;
+    }
+
+    /// <summary>
+    /// Opens an artifact for live reading while PowerShell Direct or the guest
+    /// collector may still be writing/copying it.
+    /// </summary>
+    private static FileStream OpenSharedRead(string path)
+    {
+        return new FileStream(
+            path,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.ReadWrite | FileShare.Delete);
     }
 }

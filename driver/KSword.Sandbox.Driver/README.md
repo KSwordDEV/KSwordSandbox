@@ -49,10 +49,11 @@ Initial IOCTLs:
 ## Current event behavior
 
 The ring is a fixed-size array in the device extension, so it is allocated with
-the WDM device object and remains non-paged. `DriverEntry` queues one header-only
-reserved self-test event with `KSWORD_SANDBOX_EVENT_FLAG_SELF_TEST` and
+the WDM device object and remains non-paged. `DriverEntry` queues one typed
+`KswSandboxEventTypeDriverLoad` self-test event with
+`KSWORD_SANDBOX_EVENT_FLAG_SELF_TEST` and
 `KSWORD_SANDBOX_EVENT_FLAG_DRIVER_STARTED`. Collectors can treat this as the
-minimal `driver.started` heartbeat to verify the device, IOCTL number, and event
+minimal `driver.load` heartbeat to verify the device, IOCTL number, and event
 framing before consuming telemetry producers.
 
 The driver also registers a minimal minifilter for `CREATE`, `WRITE`, and

@@ -91,8 +91,8 @@ internal sealed class P0P1ValidationGateScenario : ISmokeTestScenario
 
     /// <summary>
     /// Verifies host import and guest-side driver JSONL merge contracts. Inputs
-    /// are repository paths; processing reads source/docs for recursive JSONL
-    /// discovery, parse-error preservation, dedupe, and report regeneration;
+    /// are repository paths; processing reads source/docs for recursive
+    /// driver-events.jsonl discovery, parse-error preservation, dedupe, and report regeneration;
     /// return value is none.
     /// </summary>
     private static void AssertGuestEventsAndDriverJsonlImportContract(SmokeTestContext context)
@@ -106,7 +106,7 @@ internal sealed class P0P1ValidationGateScenario : ISmokeTestScenario
         RequireContains(jobService, "ImportGuestEvents(Guid jobId, string? eventsPath = null)", "Job service must expose explicit guest import.");
         RequireContains(jobService, "ResolveGuestEventsPath", "Guest import must locate collected events deterministically.");
         RequireContains(jobService, "LoadGuestEventsWithDriverJsonl", "Guest import must merge sibling driver JSONL.");
-        RequireContains(jobService, "Directory.EnumerateFiles(searchRoot, \"*.jsonl\", SearchOption.AllDirectories)", "Guest import must recursively discover driver JSONL files.");
+        RequireContains(jobService, ".EnumerateFiles(searchRoot, \"driver-events.jsonl\", SearchOption.AllDirectories)", "Guest import must recursively discover canonical driver-events.jsonl files without importing arbitrary live scratch JSONL.");
         RequireContains(jobService, "driver.parse_error", "Malformed JSONL rows must remain visible as parse-error evidence.");
         RequireContains(jobService, "EventKey", "Guest import must de-duplicate events when merging JSON and JSONL.");
         RequireContains(jobService, "guest.events.imported", "Report regeneration must include an import marker event.");

@@ -64,6 +64,8 @@ internal sealed class R0CollectorContractScenario : ISmokeTestScenario
         RequireContains(eventParser, "queueCapacity", "Status row should preserve queue capacity.");
         RequireContains(eventParser, "queueDepth", "Status row should preserve queue depth.");
         RequireContains(eventParser, "producerEnableMaskHex", "Status row should preserve producer enable mask.");
+        RequireContains(eventParser, "activeProducerMaskHex", "Status row should preserve active producer mask.");
+        RequireContains(eventParser, "failedProducerMaskHex", "Status row should preserve failed producer mask.");
         RequireContains(eventParser, "totalEventsSuppressed", "Status row should preserve suppressed event counter.");
         RequireContains(eventParser, "requestedEnableMaskHex", "Producer-mask row should preserve requested mask.");
         RequireContains(eventParser, "effectiveEnableMaskHex", "Producer-mask row should preserve effective mask.");

@@ -90,6 +90,10 @@ internal sealed class WebUiExperienceContractScenario : ISmokeTestScenario
         RequireContains(dashboard, "report.html", "Dashboard should display report.html path.");
         RequireContains(dashboard, "renderJob(payload)", "Planning responses should automatically render job report links.");
         RequireContains(dashboard, "servedReportHref", "Dashboard should build the served report link automatically from the planned job id.");
+        RequireContains(dashboard, "data-report-current", "Dashboard should mark current-language report links for stable language switching.");
+        RequireContains(dashboard, "refreshLocalizedReportLinks", "Dashboard should update current-language report links after the language toggle.");
+        RequireContains(dashboard, "showReportReadyNotice", "Dashboard should show a stable report-ready notice after generation or import.");
+        RequireContains(dashboard, "setTimeout(() => openReport(jobId)", "Dashboard should auto-open the current-language report after successful live analysis.");
         RequireAnyContains(
             dashboard,
             ["Open served HTML report", "Open served report", "打开服务内报告"],

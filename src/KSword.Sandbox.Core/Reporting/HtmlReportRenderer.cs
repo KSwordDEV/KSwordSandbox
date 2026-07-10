@@ -144,6 +144,7 @@ public sealed class HtmlReportRenderer
         AppendHead(html);
         html.AppendLine("<body class=\"modern-sandbox-report\">");
         AppendCover(html, report);
+        AppendLanguageEntrypoints(html);
         AppendTableOfContents(html);
         html.AppendLine("<main>");
         AppendRiskSummary(html, report);
@@ -187,6 +188,7 @@ header h1{font-size:34px;letter-spacing:-.03em;margin:0 0 8px}header .muted{colo
 header table{background:rgba(8,17,31,.32);border:1px solid rgba(255,255,255,.16);border-radius:16px;overflow:hidden}header td,header th{border-bottom:1px solid rgba(255,255,255,.14);color:white}header th{background:rgba(255,255,255,.08);position:static}
 main,nav{max-width:1280px;margin:24px auto;padding:0 24px}.card{background:rgba(255,255,255,.94);border:1px solid var(--line);border-radius:22px;box-shadow:0 18px 48px rgba(15,23,42,.08);margin:22px 0;padding:24px;position:relative}
 section.card{max-height:75vh;overflow:auto;scrollbar-color:var(--primary) #eaf4ff;scrollbar-width:thin}.card:before{background:linear-gradient(180deg,var(--primary),rgba(67,160,255,0));border-radius:22px 0 0 22px;content:'';height:100%;left:0;opacity:.9;position:absolute;top:0;width:4px}
+.language-entry{align-items:center;display:flex;flex-wrap:wrap;gap:10px}.language-entry strong{color:#075985}.language-entry .hint{color:var(--muted);font-size:13px}.language-entry a{background:var(--primary);border-radius:999px;color:white;font-weight:800;padding:8px 12px;text-decoration:none}.language-entry a.secondary{background:#334155}.language-entry a:hover{box-shadow:0 0 0 4px rgba(67,160,255,.14)}
 .card h2{align-items:center;display:flex;gap:10px;margin:0 0 14px}.card h2:before{background:var(--primary);box-shadow:0 0 0 6px rgba(67,160,255,.14);border-radius:999px;content:'';display:inline-block;height:12px;width:12px}
 .grid{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(170px,1fr))}.metric{background:linear-gradient(180deg,#fff,#f7fbff);border:1px solid var(--line);border-top:3px solid var(--primary);border-radius:16px;padding:15px}.metric b{display:block;font-size:26px;margin-top:4px}
 .muted{color:var(--muted)}.risk-high{color:#b91c1c}.risk-medium{color:#b45309}.risk-low{color:#047857}.risk-info{color:var(--primary-deep)}
@@ -226,6 +228,23 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
         Row(html, "Status", report.Status.ToString());
         html.AppendLine("</tbody></table>");
         html.AppendLine("</header>");
+    }
+
+    /// <summary>
+    /// Appends local bilingual report entry points.
+    /// Inputs are none because report files use stable sibling names;
+    /// processing writes links for report.zh.html and report.en.html; the
+    /// method returns no value.
+    /// </summary>
+    private static void AppendLanguageEntrypoints(StringBuilder html)
+    {
+        html.AppendLine("<nav class=\"card language-entry\" data-copy=\"report.html&#10;report.zh.html&#10;report.en.html\">");
+        html.AppendLine("<strong>Report language</strong>");
+        html.AppendLine("<a href=\"report.zh.html\">中文报告</a>");
+        html.AppendLine("<a class=\"secondary\" href=\"report.en.html\">English report</a>");
+        html.AppendLine("<a class=\"secondary\" href=\"report.html\">Default report</a>");
+        html.AppendLine("<span class=\"hint\">The WebUI also serves these through /api/jobs/{jobId}/report/html?lang=zh and ?lang=en.</span>");
+        html.AppendLine("</nav>");
     }
 
     /// <summary>
@@ -1169,6 +1188,10 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
         ("High risk", "高风险"),
         ("Suspicious", "可疑行为"),
         ("Table of contents", "目录"),
+        ("Report language", "报告语言"),
+        ("English report", "英文报告"),
+        ("Default report", "默认报告"),
+        ("The WebUI also serves these through /api/jobs/{jobId}/report/html?lang=zh and ?lang=en.", "WebUI 也通过 /api/jobs/{jobId}/report/html?lang=zh 和 ?lang=en 提供这些报告。"),
         ("Risk summary", "风险摘要"),
         ("Behavior detections", "行为检测"),
         ("Multi-dimensional / MITRE detections", "多维 / MITRE 检测"),
@@ -2086,9 +2109,14 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
   function copyText(value) {
     if (!value) { return; }
     if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(value);
+      navigator.clipboard.writeText(value).catch(function () { fallbackCopyText(value); });
       return;
     }
+
+    fallbackCopyText(value);
+  }
+
+  function fallbackCopyText(value) {
     var area = document.createElement('textarea');
     area.value = value;
     area.style.position = 'fixed';
@@ -2100,10 +2128,12 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
   }
 
   document.addEventListener('contextmenu', function (event) {
-    var target = event.target.closest('[data-copy]');
+    var target = event.target.closest('[data-copy], code, pre, td, th, li, p, h1, h2, h3, a, button');
     if (!target) { return; }
+    var value = target.getAttribute('data-copy') || target.innerText || target.textContent || '';
+    if (!value.trim()) { return; }
     event.preventDefault();
-    copyText(target.getAttribute('data-copy') || target.textContent || '');
+    copyText(value);
   });
 
   document.addEventListener('click', function (event) {

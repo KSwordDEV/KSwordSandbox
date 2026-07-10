@@ -1,5 +1,5 @@
 {
-  "version": "2026-07-10-v4-report-static-r0-expansion",
+  "version": "2026-07-11-v1-windows-sandbox-rules-worker-replacement",
   "rules": [
     {
       "id": "host-submission",
@@ -133,6 +133,8 @@
       ],
       "containsCommandLine": [
         "powershell",
+        "pwsh",
+        "pwsh.exe",
         "cmd.exe",
         "wscript",
         "cscript",
@@ -182,12 +184,16 @@
       "mitreTechniqueName": "Registry Run Keys / Startup Folder",
       "eventTypes": [
         "registry.set",
-        "registry.create"
+        "registry.create",
+        "driver.registry"
       ],
       "containsPath": [
         "CurrentVersion\\Run\\",
         "CurrentVersion\\RunOnce\\",
-        "Policies\\Explorer\\Run\\"
+        "CurrentVersion\\RunOnceEx\\",
+        "Policies\\Explorer\\Run\\",
+        "StartupApproved\\Run",
+        "StartupApproved\\Run32"
       ],
       "tags": [
         "registry",
@@ -602,9 +608,15 @@
       ],
       "containsCommandLine": [
         "schtasks /create",
+        "schtasks.exe /create",
+        "schtasks /change",
+        "schtasks.exe /change",
         "Register-ScheduledTask",
         "New-ScheduledTask",
-        "Schedule.Service"
+        "New-ScheduledTaskAction",
+        "Set-ScheduledTask",
+        "Schedule.Service",
+        "at.exe "
       ],
       "tags": [
         "execution",
@@ -1329,7 +1341,13 @@
       "containsCommandLine": [
         "sc create",
         "sc.exe create",
+        "sc config",
+        "sc.exe config",
+        "sc failure",
+        "sc.exe failure",
         "New-Service",
+        "Set-Service",
+        "Start-Service",
         "CreateService",
         "ChangeServiceConfig"
       ],
@@ -1552,12 +1570,29 @@
         "VirtualBox",
         "VMware",
         "VBox",
+        "VMTools",
+        "vm3dgl",
+        "vmmouse",
+        "VBoxService",
+        "VBoxTray",
+        "qemu-ga",
+        "QEMU",
+        "Hyper-V",
+        "VMBus",
+        "xenservice",
         "vmtoolsd",
         "Sandboxie",
         "procmon",
         "wireshark",
         "x64dbg",
-        "ollydbg"
+        "ollydbg",
+        "fakenet",
+        "processhacker",
+        "ida.exe",
+        "ida64.exe",
+        "ghidra",
+        "dnspy",
+        "frida"
       ],
       "tags": [
         "anti-analysis",
@@ -1591,6 +1626,526 @@
           "WaitForMultipleObjects"
         ]
       },
+      "tags": [
+        "anti-analysis",
+        "delay",
+        "time-evasion"
+      ]
+    },
+    {
+      "id": "driver-registry-run-key-typed-persistence",
+      "title": "Typed driver registry Run-key persistence",
+      "severity": "high",
+      "summary": "A driver.registry typed payload reported a key path under Run, RunOnce, RunOnceEx, or policy Run autostart locations.",
+      "mitreTechniqueId": "T1547.001",
+      "mitreTechniqueName": "Registry Run Keys / Startup Folder",
+      "eventTypes": [
+        "driver.registry"
+      ],
+      "dataContains": {
+        "keyPath": [
+          "CurrentVersion\\Run\\",
+          "CurrentVersion\\RunOnce\\",
+          "CurrentVersion\\RunOnceEx\\",
+          "Policies\\Explorer\\Run\\",
+          "StartupApproved\\Run",
+          "StartupApproved\\Run32"
+        ],
+        "path": [
+          "CurrentVersion\\Run\\",
+          "CurrentVersion\\RunOnce\\",
+          "CurrentVersion\\RunOnceEx\\",
+          "Policies\\Explorer\\Run\\",
+          "StartupApproved\\Run",
+          "StartupApproved\\Run32"
+        ]
+      },
+      "tags": [
+        "driver",
+        "r0",
+        "registry",
+        "persistence",
+        "autostart"
+      ]
+    },
+    {
+      "id": "driver-registry-service-typed-persistence",
+      "title": "Typed driver registry service persistence",
+      "severity": "high",
+      "summary": "A driver.registry typed payload reported a key path below a Windows service configuration hive.",
+      "mitreTechniqueId": "T1543.003",
+      "mitreTechniqueName": "Windows Service",
+      "eventTypes": [
+        "driver.registry"
+      ],
+      "dataContains": {
+        "keyPath": [
+          "CurrentControlSet\\Services\\",
+          "ControlSet001\\Services\\",
+          "ControlSet002\\Services\\",
+          "\\Services\\"
+        ],
+        "path": [
+          "CurrentControlSet\\Services\\",
+          "ControlSet001\\Services\\",
+          "ControlSet002\\Services\\",
+          "\\Services\\"
+        ]
+      },
+      "tags": [
+        "driver",
+        "r0",
+        "registry",
+        "persistence",
+        "service"
+      ]
+    },
+    {
+      "id": "service-imagepath-or-dll-registry-change",
+      "title": "Service ImagePath or ServiceDll registry change",
+      "severity": "high",
+      "summary": "A service registry path changed executable, DLL, or failure-command values commonly used to install or hijack Windows services.",
+      "mitreTechniqueId": "T1543.003",
+      "mitreTechniqueName": "Windows Service",
+      "eventTypes": [
+        "registry.set",
+        "registry.create",
+        "driver.registry"
+      ],
+      "containsPath": [
+        "CurrentControlSet\\Services\\",
+        "ControlSet001\\Services\\",
+        "ControlSet002\\Services\\",
+        "\\Services\\"
+      ],
+      "dataContains": {
+        "valueName": [
+          "ImagePath",
+          "ServiceDll",
+          "FailureCommand",
+          "ObjectName"
+        ]
+      },
+      "tags": [
+        "registry",
+        "persistence",
+        "service",
+        "service-config"
+      ]
+    },
+    {
+      "id": "scheduled-task-registry-cache-persistence",
+      "title": "Scheduled TaskCache registry persistence",
+      "severity": "high",
+      "summary": "A registry event targeted Task Scheduler cache keys used to register or hide scheduled-task persistence.",
+      "mitreTechniqueId": "T1053.005",
+      "mitreTechniqueName": "Scheduled Task",
+      "eventTypes": [
+        "registry.set",
+        "registry.create",
+        "driver.registry"
+      ],
+      "containsPath": [
+        "Schedule\\TaskCache\\Tree\\",
+        "Schedule\\TaskCache\\Tasks\\",
+        "Windows NT\\CurrentVersion\\Schedule\\TaskCache\\"
+      ],
+      "tags": [
+        "registry",
+        "persistence",
+        "scheduled-task"
+      ]
+    },
+    {
+      "id": "driver-registry-taskcache-typed-persistence",
+      "title": "Typed driver registry Scheduled TaskCache persistence",
+      "severity": "high",
+      "summary": "A driver.registry typed payload reported Task Scheduler cache key activity.",
+      "mitreTechniqueId": "T1053.005",
+      "mitreTechniqueName": "Scheduled Task",
+      "eventTypes": [
+        "driver.registry"
+      ],
+      "dataContains": {
+        "keyPath": [
+          "Schedule\\TaskCache\\Tree\\",
+          "Schedule\\TaskCache\\Tasks\\",
+          "Windows NT\\CurrentVersion\\Schedule\\TaskCache\\"
+        ],
+        "path": [
+          "Schedule\\TaskCache\\Tree\\",
+          "Schedule\\TaskCache\\Tasks\\",
+          "Windows NT\\CurrentVersion\\Schedule\\TaskCache\\"
+        ]
+      },
+      "tags": [
+        "driver",
+        "r0",
+        "registry",
+        "persistence",
+        "scheduled-task"
+      ]
+    },
+    {
+      "id": "powershell-encoded-command-execution",
+      "title": "PowerShell encoded command execution",
+      "severity": "high",
+      "summary": "A process command line used PowerShell encoded-command switches or short aliases frequently used to conceal script payloads.",
+      "mitreTechniqueId": "T1059.001",
+      "mitreTechniqueName": "PowerShell",
+      "eventTypes": [
+        "process.start"
+      ],
+      "containsCommandLine": [
+        "-EncodedCommand",
+        "/EncodedCommand",
+        " -enc ",
+        " /enc ",
+        "FromBase64String"
+      ],
+      "tags": [
+        "execution",
+        "script",
+        "powershell",
+        "encoded-command"
+      ]
+    },
+    {
+      "id": "powershell-evasion-download-abuse",
+      "title": "PowerShell evasion or download abuse",
+      "severity": "high",
+      "summary": "A PowerShell command line used bypass, hidden-window, expression-evaluation, or web-download primitives commonly seen in script abuse.",
+      "mitreTechniqueId": "T1059.001",
+      "mitreTechniqueName": "PowerShell",
+      "eventTypes": [
+        "process.start"
+      ],
+      "containsCommandLine": [
+        "-ExecutionPolicy Bypass",
+        "powershell -NoProfile",
+        "powershell.exe -NoProfile",
+        "pwsh -NoProfile",
+        "pwsh.exe -NoProfile",
+        "powershell -nop",
+        "powershell.exe -nop",
+        "pwsh -nop",
+        "pwsh.exe -nop",
+        "-WindowStyle Hidden",
+        "powershell -w hidden",
+        "powershell.exe -w hidden",
+        "pwsh -w hidden",
+        "pwsh.exe -w hidden",
+        "Invoke-Expression",
+        "IEX ",
+        "DownloadString",
+        "DownloadFile",
+        "Invoke-WebRequest",
+        "Invoke-RestMethod",
+        "Start-BitsTransfer"
+      ],
+      "tags": [
+        "execution",
+        "script",
+        "powershell",
+        "evasion",
+        "download"
+      ]
+    },
+    {
+      "id": "mshta-script-proxy-execution",
+      "title": "Mshta script proxy execution",
+      "severity": "high",
+      "summary": "A process command line invoked mshta with URL, HTA, JScript, or VBScript content for living-off-the-land script execution.",
+      "mitreTechniqueId": "T1218.005",
+      "mitreTechniqueName": "Mshta",
+      "eventTypes": [
+        "process.start"
+      ],
+      "containsCommandLine": [
+        "mshta http",
+        "mshta.exe http",
+        "mshta vbscript:",
+        "mshta.exe vbscript:",
+        "mshta javascript:",
+        "mshta.exe javascript:",
+        ".hta"
+      ],
+      "tags": [
+        "execution",
+        "script",
+        "lolbin",
+        "mshta"
+      ]
+    },
+    {
+      "id": "regsvr32-scriptlet-proxy-execution",
+      "title": "Regsvr32 scriptlet proxy execution",
+      "severity": "high",
+      "summary": "A process command line used regsvr32 scriptlet-loading patterns such as scrobj.dll or remote /i: URLs.",
+      "mitreTechniqueId": "T1218.010",
+      "mitreTechniqueName": "Regsvr32",
+      "eventTypes": [
+        "process.start"
+      ],
+      "containsCommandLine": [
+        "regsvr32 /s /n /u /i:",
+        "regsvr32.exe /s /n /u /i:",
+        "scrobj.dll",
+        "/i:http",
+        "/i:https"
+      ],
+      "tags": [
+        "execution",
+        "script",
+        "lolbin",
+        "regsvr32"
+      ]
+    },
+    {
+      "id": "script-interpreter-network-download",
+      "title": "Script or LOLBin network download command",
+      "severity": "high",
+      "summary": "A command line referenced built-in download helpers or script web-request primitives often used to stage payloads.",
+      "mitreTechniqueId": "T1105",
+      "mitreTechniqueName": "Ingress Tool Transfer",
+      "eventTypes": [
+        "process.start"
+      ],
+      "containsCommandLine": [
+        "certutil -urlcache",
+        "certutil.exe -urlcache",
+        "bitsadmin /transfer",
+        "bitsadmin.exe /transfer",
+        "curl.exe ",
+        "wget ",
+        "Invoke-WebRequest",
+        "Invoke-RestMethod",
+        "Start-BitsTransfer"
+      ],
+      "tags": [
+        "execution",
+        "script",
+        "download",
+        "lolbin"
+      ]
+    },
+    {
+      "id": "wscript-cscript-script-execution",
+      "title": "Windows Script Host execution",
+      "severity": "medium",
+      "summary": "A process command line invoked Windows Script Host or launched script extensions handled by WSH.",
+      "mitreTechniqueId": "T1059",
+      "mitreTechniqueName": "Command and Scripting Interpreter",
+      "eventTypes": [
+        "process.start"
+      ],
+      "containsCommandLine": [
+        "wscript.exe",
+        "cscript.exe",
+        ".vbs",
+        ".vbe",
+        ".js",
+        ".jse",
+        ".wsf"
+      ],
+      "tags": [
+        "execution",
+        "script",
+        "wsh"
+      ]
+    },
+    {
+      "id": "driver-network-outbound-connect",
+      "title": "Typed driver outbound network connection",
+      "severity": "medium",
+      "summary": "A driver.network typed payload reported outbound or connect-style network activity from the kernel event stream.",
+      "mitreTechniqueId": "T1105",
+      "mitreTechniqueName": "Ingress Tool Transfer",
+      "eventTypes": [
+        "driver.network"
+      ],
+      "dataContains": {
+        "directionName": [
+          "outbound"
+        ],
+        "operationName": [
+          "connect"
+        ],
+        "operation": [
+          "connect"
+        ]
+      },
+      "tags": [
+        "driver",
+        "r0",
+        "network",
+        "outbound"
+      ]
+    },
+    {
+      "id": "driver-network-dns-traffic",
+      "title": "Typed driver DNS network traffic",
+      "severity": "medium",
+      "summary": "A driver.network typed payload referenced DNS protocol or port 53 traffic.",
+      "mitreTechniqueId": "T1071.004",
+      "mitreTechniqueName": "DNS",
+      "eventTypes": [
+        "driver.network"
+      ],
+      "dataContains": {
+        "protocolName": [
+          "dns"
+        ],
+        "remotePort": [
+          "53"
+        ],
+        "localPort": [
+          "53"
+        ]
+      },
+      "tags": [
+        "driver",
+        "r0",
+        "network",
+        "dns"
+      ]
+    },
+    {
+      "id": "driver-network-web-protocol-or-port",
+      "title": "Typed driver web protocol or web-port traffic",
+      "severity": "medium",
+      "summary": "A driver.network typed payload referenced HTTP/HTTPS protocol labels or common web ports beyond normalized user-mode network rows.",
+      "mitreTechniqueId": "T1071.001",
+      "mitreTechniqueName": "Web Protocols",
+      "eventTypes": [
+        "driver.network"
+      ],
+      "dataContains": {
+        "protocolName": [
+          "http",
+          "https",
+          "tls"
+        ],
+        "remotePort": [
+          "443",
+          "8443",
+          "8080",
+          "8000"
+        ]
+      },
+      "tags": [
+        "driver",
+        "r0",
+        "network",
+        "web"
+      ]
+    },
+    {
+      "id": "anti-analysis-system-fingerprint-command",
+      "title": "System fingerprinting command for anti-analysis",
+      "severity": "medium",
+      "summary": "A command line queried OS, BIOS, computer-system, or hardware inventory data commonly used before sandbox or VM checks.",
+      "mitreTechniqueId": "T1497",
+      "mitreTechniqueName": "Virtualization/Sandbox Evasion",
+      "eventTypes": [
+        "process.start"
+      ],
+      "containsCommandLine": [
+        "systeminfo",
+        "wmic computersystem",
+        "wmic bios",
+        "Win32_ComputerSystem",
+        "Win32_BIOS",
+        "Win32_BaseBoard",
+        "Get-CimInstance Win32_ComputerSystem",
+        "Get-CimInstance Win32_BIOS",
+        "Get-CimInstance Win32_BaseBoard",
+        "Get-WmiObject Win32_ComputerSystem",
+        "Get-WmiObject Win32_BIOS",
+        "Get-WmiObject Win32_BaseBoard",
+        "Get-ComputerInfo",
+        "Get-ItemProperty HKLM:\\HARDWARE"
+      ],
+      "tags": [
+        "anti-analysis",
+        "sandbox-evasion",
+        "discovery"
+      ]
+    },
+    {
+      "id": "anti-analysis-process-enumeration-command",
+      "title": "Process or driver enumeration for anti-analysis",
+      "severity": "medium",
+      "summary": "A command line enumerated running processes, loaded modules, or drivers, which samples often use to look for analysis tools.",
+      "mitreTechniqueId": "T1497",
+      "mitreTechniqueName": "Virtualization/Sandbox Evasion",
+      "eventTypes": [
+        "process.start"
+      ],
+      "containsCommandLine": [
+        "tasklist /v",
+        "tasklist /m",
+        "Get-Process",
+        "wmic process list",
+        "Get-CimInstance Win32_Process",
+        "driverquery",
+        "qprocess"
+      ],
+      "tags": [
+        "anti-analysis",
+        "sandbox-evasion",
+        "process-discovery"
+      ]
+    },
+    {
+      "id": "anti-analysis-hardware-registry-query",
+      "title": "Hardware or VM registry fingerprint query",
+      "severity": "medium",
+      "summary": "A registry query or driver registry event touched hardware, BIOS, ACPI, PCI, or hypervisor-identifying registry paths.",
+      "mitreTechniqueId": "T1497",
+      "mitreTechniqueName": "Virtualization/Sandbox Evasion",
+      "eventTypes": [
+        "registry.query",
+        "driver.registry"
+      ],
+      "containsPath": [
+        "HARDWARE\\DESCRIPTION\\System",
+        "SystemBiosVersion",
+        "SystemBiosDate",
+        "VideoBiosVersion",
+        "CurrentControlSet\\Enum\\PCI\\VEN_80EE",
+        "CurrentControlSet\\Enum\\PCI\\VEN_15AD",
+        "ACPI\\VBOX",
+        "ACPI\\VMWARE",
+        "ACPI\\QEMU",
+        "ACPI\\HYPER_V"
+      ],
+      "tags": [
+        "anti-analysis",
+        "sandbox-evasion",
+        "registry",
+        "hardware"
+      ]
+    },
+    {
+      "id": "anti-analysis-timing-command",
+      "title": "Command-line sleep or delay for anti-analysis",
+      "severity": "medium",
+      "summary": "A command line invoked sleep, timeout, ping-delay, or wait primitives that can stall short sandbox windows.",
+      "mitreTechniqueId": "T1497.003",
+      "mitreTechniqueName": "Time Based Evasion",
+      "eventTypes": [
+        "process.start"
+      ],
+      "containsCommandLine": [
+        "timeout /t",
+        "ping -n ",
+        "Start-Sleep",
+        "[Threading.Thread]::Sleep",
+        "WaitForSingleObject",
+        "WaitForMultipleObjects",
+        "NtDelayExecution"
+      ],
       "tags": [
         "anti-analysis",
         "delay",

@@ -50,7 +50,8 @@ Example:
   requested, previous, effective, and supported masks.
 - `r0collector.driverStatus`: successful `IOCTL_KSWORD_SANDBOX_GET_STATUS`
   reply. Driver mode emits it before draining and again after the final drain so
-  queue depth, counters, and last NTSTATUS are preserved.
+  queue depth, counters, active/failed producer masks, and last NTSTATUS are
+  preserved.
 - `r0collector.driverPoll`: successful `IOCTL_KSWORD_SANDBOX_POLL` reply.
 - `r0collector.driverReadEvents`: batch summary for successful
   `IOCTL_KSWORD_SANDBOX_READ_EVENTS`.
@@ -123,8 +124,9 @@ from real R0 telemetry.
   iterations.
 - `--health` opens the live device, emits health, and exits without poll/read
   drain so readiness checks do not consume queued telemetry.
-- `--enable-mask <mask>` accepts decimal or `0x` 32-bit values, passes the value
-  in `KSWORD_SANDBOX_READ_EVENTS_REQUEST.Flags`, and records it in lifecycle and
-  heartbeat rows.
+- `--enable-mask <mask>` accepts decimal or `0x` 32-bit values, applies the
+  value through `IOCTL_KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK`, and records
+  requested/effective masks in lifecycle and heartbeat rows. The reserved
+  `KSWORD_SANDBOX_READ_EVENTS_REQUEST.Flags` field remains zero.
 - `--heartbeat` adds `r0collector.heartbeat` rows without changing driver drain
   semantics.

@@ -540,8 +540,9 @@ typedef struct _KSWORD_SANDBOX_CAPABILITIES_REPLY {
  *
  * Inputs : output buffer supplied by DeviceIoControl.
  * Logic  : The driver returns a stable lifecycle snapshot, current producer
- *          enable mask, ring capacity/depth, and monotonic total counters for
- *          enqueued, read, dropped, and suppressed events.
+ *          enable mask, active/failed producer registration masks, ring
+ *          capacity/depth, and monotonic total counters for enqueued, read,
+ *          dropped, and suppressed events.
  * Return : sizeof(KSWORD_SANDBOX_STATUS_REPLY) bytes on success.
  */
 typedef struct _KSWORD_SANDBOX_STATUS_REPLY {
@@ -555,7 +556,8 @@ typedef struct _KSWORD_SANDBOX_STATUS_REPLY {
     ULONG ProducerEnableMask;
     ULONG SupportedProducerMask;
     LONG LastNtStatus;
-    ULONG Reserved0;
+    ULONG ActiveProducerMask;
+    ULONG FailedProducerMask;
     ULONGLONG TotalEventsEnqueued;
     ULONGLONG TotalEventsDropped;
     ULONGLONG TotalEventsRead;
@@ -623,13 +625,12 @@ typedef struct _KSWORD_SANDBOX_READ_EVENTS_REQUEST {
 } KSWORD_SANDBOX_READ_EVENTS_REQUEST, *PKSWORD_SANDBOX_READ_EVENTS_REQUEST;
 
 /*
- * Reserved payload layout for a future KswSandboxEventTypeDriverLoad record.
+ * Payload layout for the KswSandboxEventTypeDriverLoad startup heartbeat.
  *
  * Inputs : output-only payload that follows KSWORD_SANDBOX_EVENT_HEADER.
  * Logic  : BootId is reserved for a later boot/session identifier and BuildTag
- *          is an ASCII, NUL-terminated driver heartbeat marker.  The current
- *          DriverEntry self-test event is header-only and does not emit this
- *          payload yet.
+ *          is an ASCII, NUL-terminated driver heartbeat marker emitted from
+ *          DriverEntry so collectors can validate typed payload parsing.
  * Return : not applicable.
  */
 typedef struct _KSWORD_SANDBOX_DRIVER_LOAD_PAYLOAD {

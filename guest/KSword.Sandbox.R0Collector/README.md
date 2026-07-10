@@ -37,8 +37,10 @@ Options:
 - `--output`, `--out`, `-o`: JSONL output path, or `-` for stdout. Default: `-`.
 - `--duration`, `-t`: Poll duration in seconds. `0` performs one health/poll/read-events pass.
 - `--poll-ms`, `--poll-interval`, `--poll-interval-ms`, `-p`: poll interval in milliseconds.
-- `--enable-mask <mask>`: pass a decimal or `0x` 32-bit mask through the
-  `READ_EVENTS` request flags and record it in lifecycle JSONL.
+- `--enable-mask <mask>`: pass a decimal or `0x` 32-bit mask through
+  `IOCTL_KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK` before draining events and
+  record requested/effective producer masks in lifecycle JSONL. `READ_EVENTS`
+  reserved request flags stay zero.
 - `--health`: open the live device, emit `r0collector.driverHealth`, and exit
   without polling or draining queued events.
 - `--heartbeat`: emit `r0collector.heartbeat` progress rows.

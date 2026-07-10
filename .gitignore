@@ -71,8 +71,20 @@ guest-password.dpapi
 *.pfx
 *.p12
 *.cer
+*.crt
+*.pem
+*.der
+*.csr
+*.snk
 *.key
 
 # Local signing tool/certificate bundle copied from Ksword5.1 for VM-only
 # driver validation. Never commit this directory or its private keys/tools.
 /.cert/
+
+# Defensive guard for ad-hoc report exports accidentally written at repo root.
+/report.html
+/report.*.html
+/report.json
+/events.json
+/driver-events.jsonl

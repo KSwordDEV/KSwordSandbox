@@ -41,6 +41,10 @@ plain diagnostic dump. The visual contract is:
   registry, network, and raw event evidence remain navigable during demos.
 - The report must support Chinese and English rendering entrypoints, or
   equivalent core renderer support for `report.zh.html` and `report.en.html`.
+- Each generated HTML report should expose an in-report bilingual entry bar
+  linking the sibling `report.zh.html`, `report.en.html`, and compatibility
+  `report.html` files, so local file viewing and served WebUI viewing behave
+  consistently.
 - Jobs should keep report path fields suitable for automatic WebUI links, so a
   completed plan can expose the default report plus localized report clues
   without asking the operator to paste a filesystem path.
@@ -80,3 +84,8 @@ paths, progress stage status, failed step title/message, exit code, and duration
 visible. It should not inline long runbook command text, stdout, or stderr; the
 operator can open the execution-flow page and copy `runbook-execution.json` for
 deep troubleshooting.
+
+The main dashboard should keep report navigation low-noise: one current-language
+primary report button, compact Chinese/English alternatives, a stable automatic
+open notice after successful generation/import, and the live raw monitor as a
+separate page rather than an inline stream.

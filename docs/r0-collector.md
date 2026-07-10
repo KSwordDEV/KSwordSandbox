@@ -117,8 +117,9 @@ driver experiments, but R0Collector issues the public `READ_EVENTS` name.
 ## Current driver event path
 
 The driver owns a fixed non-paged ring buffer. On load it currently queues one
-header-only reserved self-test event with `KSWORD_SANDBOX_EVENT_FLAG_SELF_TEST`
-and `KSWORD_SANDBOX_EVENT_FLAG_DRIVER_STARTED`. `READ_EVENTS` consumes complete
+typed `driver.load` self-test event with
+`KSWORD_SANDBOX_EVENT_FLAG_SELF_TEST` and
+`KSWORD_SANDBOX_EVENT_FLAG_DRIVER_STARTED`. `READ_EVENTS` consumes complete
 records from the ring and reports drop/sequence counters.
 
 Concrete behavior payloads are parsed by event type.  File events use
@@ -252,10 +253,10 @@ Then run a collector one-shot drain through the script:
 
 The drain path invokes R0Collector with `--duration 0`, so it opens the driver,
 emits health/capabilities/status/poll/read-events lifecycle rows, drains any
-queued driver records, and exits. A first load should normally expose the
-header-only
-driver-start heartbeat row (`driver.event.reserved`) unless another reader has
-already consumed it.
+queued driver records, and exits. A first load should normally expose the typed
+driver-start heartbeat row (`driver.load`) unless another reader has already
+consumed it. Older local builds may still surface the legacy
+`driver.event.reserved` heartbeat.
 
 Expected script rows for the live VM path:
 
@@ -280,7 +281,7 @@ Expected script rows for the live VM path:
 Every output line is a single `SandboxEvent`-compatible JSON object:
 
 ```json
-{"eventType":"driver.event.reserved","source":"driver","timestamp":"2026-07-10T00:00:00.000Z","processId":1234,"path":"\\\\.\\KSwordSandboxDriver","commandLine":"KSword.Sandbox.R0Collector.exe --out C:\\Sandbox\\driver-events.jsonl","data":{"sequence":"1","driverEventTypeName":"reserved","flagsHex":"0x00000003"}}
+{"eventType":"driver.load","source":"driver","timestamp":"2026-07-10T00:00:00.000Z","processId":1234,"path":"\\\\.\\KSwordSandboxDriver","commandLine":"KSword.Sandbox.R0Collector.exe --out C:\\Sandbox\\driver-events.jsonl","data":{"sequence":"1","driverEventTypeName":"driverLoad","flagsHex":"0x00000003","driverLoadEventName":"driver.load"}}
 ```
 
 Top-level field rules:

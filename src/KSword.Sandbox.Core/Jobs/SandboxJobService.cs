@@ -497,7 +497,8 @@ public sealed class SandboxJobService
             return events.Select(NormalizeEvent).ToList();
         }
 
-        foreach (var jsonlPath in Directory.EnumerateFiles(searchRoot, "*.jsonl", SearchOption.AllDirectories))
+        foreach (var jsonlPath in Directory
+            .EnumerateFiles(searchRoot, "driver-events.jsonl", SearchOption.AllDirectories))
         {
             foreach (var driverEvent in LoadEventsFromJsonLines(jsonlPath))
             {

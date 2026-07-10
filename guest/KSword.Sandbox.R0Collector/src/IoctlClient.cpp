@@ -582,7 +582,12 @@ bool EmitDriverReadEvents(
     request.Version = KSWORD_SANDBOX_INTERFACE_VERSION;
     request.Size = sizeof(request);
     request.MaxEvents = kReadEventsMaxEvents;
-    request.Flags = options.enableMaskSpecified ? options.enableMask : 0;
+    /*
+     * READ_EVENTS currently reserves Flags and the kernel validates that the
+     * field is zero.  Producer selection is negotiated exclusively through
+     * IOCTL_KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK before draining.
+     */
+    request.Flags = 0;
     request.StartingSequence = 0;
 
     std::vector<unsigned char> buffer(kReadEventsBufferBytes);

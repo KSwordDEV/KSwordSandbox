@@ -54,6 +54,8 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(renderer, "report.zh.html", "Report renderer should include the report.zh.html output clue.");
         RequireContains(renderer, "report.en.html", "Report renderer should include the report.en.html output clue.");
         RequireContains(renderer, "RenderBilingualReports", "Report renderer should provide a bilingual report generation entrypoint.");
+        RequireContains(renderer, "AppendLanguageEntrypoints", "Report renderer should expose in-report bilingual navigation links.");
+        RequireContains(renderer, "Report language", "Report renderer should label the bilingual report entry bar.");
         RequireContains(analysisModels, "HtmlReportZhPath", "Analysis job model should have a Chinese HTML report path for automatic report links.");
         RequireContains(analysisModels, "HtmlReportEnPath", "Analysis job model should have an English HTML report path for automatic report links.");
         RequireContains(reportStage, "report.artifacts.write", "Report stage should expose a stable progress stage id.");
@@ -70,6 +72,7 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(doc, "75vh", "Report UX doc should specify bounded major report section height.");
         RequireContains(doc, "overflow:auto", "Report UX doc should specify scrolling major report sections.");
         RequireContains(doc, "Chinese and English", "Report UX doc should require Chinese and English report rendering support.");
+        RequireContains(doc, "bilingual entry bar", "Report UX doc should require stable in-report bilingual entry links.");
         RequireContains(doc, "report.zh.html", "Report UX doc should mention report.zh.html.");
         RequireContains(doc, "report.en.html", "Report UX doc should mention report.en.html.");
         RequireContains(doc, "/api/jobs/{jobId}/report/html?lang=zh", "Report UX doc should describe the Chinese served report endpoint validation.");

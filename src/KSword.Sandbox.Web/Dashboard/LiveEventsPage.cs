@@ -228,16 +228,40 @@ internal static class LiveEventsPage
               const status = document.getElementById('status');
               status.className = `status ${isError ? 'error' : 'ok'}`;
               status.textContent = message;
+              status.setAttribute('data-copy', message || '');
             }
             function escapeHtml(value) { return String(value ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch])); }
             function escapeAttr(value) { return escapeHtml(value).replace(/`/g, '&#96;'); }
+            function fallbackCopyText(value) {
+              const area = document.createElement('textarea');
+              area.value = value;
+              area.setAttribute('readonly', 'readonly');
+              area.style.position = 'fixed';
+              area.style.left = '-9999px';
+              document.body.appendChild(area);
+              area.select();
+              document.execCommand('copy');
+              document.body.removeChild(area);
+            }
+            function copyText(value) {
+              if (!value) { return; }
+              if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(value).then(() => showToast(t('已复制', 'Copied'))).catch(() => {
+                  fallbackCopyText(value);
+                  showToast(t('已复制', 'Copied'));
+                });
+                return;
+              }
+              fallbackCopyText(value);
+              showToast(t('已复制', 'Copied'));
+            }
             document.addEventListener('contextmenu', event => {
               const target = event.target.closest ? event.target.closest('[data-copy], code, td, th, p, h1, h2, h3, span, a, button') : null;
               if (!target) { return; }
               const value = target.getAttribute('data-copy') || target.innerText || target.textContent || '';
               if (!value.trim()) { return; }
               event.preventDefault();
-              navigator.clipboard?.writeText(value).then(() => showToast(t('已复制', 'Copied')));
+              copyText(value);
             });
             function showToast(message) {
               const toast = document.getElementById('copyToast');

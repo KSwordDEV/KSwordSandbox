@@ -247,9 +247,8 @@ Expected first-pass evidence:
   `--enable-mask <mask>` so it can issue
   `IOCTL_KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK` and record requested,
   previous, effective, and supported producer masks.
-- The first drain normally contains at least the header-only
-  `driver.event.reserved` / driver-start heartbeat when the ring has not already
-  been consumed.
+- The first drain normally contains at least the typed `driver.load`
+  driver-start heartbeat when the ring has not already been consumed.
 
 ## Full VM validation sequence
 
