@@ -195,6 +195,8 @@ internal static class DashboardExperiencePage
             let progressStageIndex = 0;
             let progressCompleted = false;
             let progressFailed = false;
+            let currentJobPayload = null;
+            let currentJobListPayload = [];
             const liveStages = [
               ['任务已规划', 'Job planned', '已生成可复核计划', 'Reviewable plan is ready'],
               ['检查 Hyper-V / 凭据', 'Check Hyper-V / credential', '验证主机与登录条件', 'Validate host and logon prerequisites'],
@@ -214,6 +216,7 @@ internal static class DashboardExperiencePage
               currentLanguage = lang === 'en' ? 'en' : 'zh';
               localStorage.setItem('ksword-lang', currentLanguage);
               applyLanguage();
+              rerenderDynamicPanelsForLanguage();
             }
 
             function toggleLanguage() {
@@ -231,6 +234,20 @@ internal static class DashboardExperiencePage
               });
               refreshLocalizedReportLinks();
               renderStages(progressStageIndex, progressCompleted, progressFailed);
+            }
+
+            function rerenderDynamicPanelsForLanguage() {
+              // Inputs: current cached job payloads plus the selected language.
+              // Processing rerenders only dynamic panels that are intentionally
+              // skipped by applyLanguage because they contain generated HTML.
+              // Return: no value; keeps report-state labels bilingual.
+              if (currentJobPayload) {
+                renderJob(currentJobPayload);
+              }
+
+              if (Array.isArray(currentJobListPayload) && currentJobListPayload.length > 0) {
+                renderJobList(currentJobListPayload);
+              }
             }
 
             function formatJobStatus(status) {
@@ -481,7 +498,94 @@ internal static class DashboardExperiencePage
               applyLanguage();
             }
 
+            function normalizeJobPayload(rawJob) {
+              // Inputs: a job payload from current raw AnalysisJob endpoints or
+              // future DTO/contract-shaped endpoints. Processing flattens the
+              // fields consumed by Dashboard so UI rendering is resilient to
+              // jobId/id, flat artifact paths, nested artifactPaths, or nested
+              // report objects. Return: a shallow normalized job object.
+              const raw = rawJob || {};
+              const artifactPaths = raw.artifactPaths || raw.artifacts || {};
+              const report = raw.report || {};
+              const sample = raw.sample || {};
+              const submission = raw.submission || {};
+              return {
+                ...raw,
+                jobId: raw.jobId || raw.id || raw.jobID || '',
+                status: raw.status ?? raw.state ?? raw.analysisStatus ?? '',
+                sample: {
+                  ...sample,
+                  fullPath: sample.fullPath || sample.path || raw.samplePath || submission.samplePath || ''
+                },
+                submission: {
+                  ...submission,
+                  samplePath: submission.samplePath || raw.samplePath || sample.fullPath || sample.path || '',
+                  durationSeconds: submission.durationSeconds ?? raw.durationSeconds ?? raw.analysisDurationSeconds ?? ''
+                },
+                jsonReportPath: raw.jsonReportPath || artifactPaths.reportJsonPath || artifactPaths.jsonReportPath || report.jsonReportPath || report.reportJsonPath || '',
+                htmlReportPath: raw.htmlReportPath || artifactPaths.reportHtmlPath || artifactPaths.htmlReportPath || report.htmlReportPath || report.reportHtmlPath || '',
+                htmlReportZhPath: raw.htmlReportZhPath || raw.reportZhHtmlPath || artifactPaths.reportZhHtmlPath || artifactPaths.htmlReportZhPath || report.htmlReportZhPath || report.reportZhHtmlPath || '',
+                htmlReportEnPath: raw.htmlReportEnPath || raw.reportEnHtmlPath || artifactPaths.reportEnHtmlPath || artifactPaths.htmlReportEnPath || report.htmlReportEnPath || report.reportEnHtmlPath || '',
+                guestEventsPath: raw.guestEventsPath || artifactPaths.eventsJsonPath || artifactPaths.guestEventsPath || report.guestEventsPath || '',
+                runbookExecutionResultPath: raw.runbookExecutionResultPath || artifactPaths.runbookExecutionPath || artifactPaths.runbookExecutionResultPath || '',
+                messages: Array.isArray(raw.messages) ? raw.messages : []
+              };
+            }
+
+            function buildReportState(job) {
+              // Inputs: a normalized job. Processing distinguishes an initial
+              // planning/static report from a dynamic report refreshed after VM
+              // execution and guest import. Return: badge/link labels.
+              const hasReport = Boolean(job.htmlReportPath || job.htmlReportZhPath || job.htmlReportEnPath);
+              const hasGuestImport = Boolean(job.guestEventsPath);
+              const completed = Number(job.status) === 4 || String(job.status).toLowerCase() === 'completed';
+              const failed = Number(job.status) === 5 || String(job.status).toLowerCase() === 'failed';
+              if (hasReport && hasGuestImport && completed) {
+                return {
+                  kind: 'dynamic',
+                  ready: true,
+                  badgeClass: 'pill ready',
+                  badge: t('动态报告已生成', 'Dynamic report ready'),
+                  link: t('打开动态报告', 'Open dynamic report'),
+                  hint: t('虚拟机分析与事件导入已完成，当前报告包含动态行为。', 'VM analysis and event import completed; this report includes dynamic behavior.')
+                };
+              }
+
+              if (hasReport && failed) {
+                return {
+                  kind: 'failure',
+                  ready: true,
+                  badgeClass: 'pill',
+                  badge: t('失败报告已生成', 'Failure report ready'),
+                  link: t('打开失败报告', 'Open failure report'),
+                  hint: t('分析失败但报告已记录失败原因和当前证据。', 'Analysis failed, but the report records failure reasons and available evidence.')
+                };
+              }
+
+              if (hasReport) {
+                return {
+                  kind: 'planning',
+                  ready: true,
+                  badgeClass: 'pill',
+                  badge: t('规划报告已生成', 'Planning report ready'),
+                  link: t('打开规划报告', 'Open planning report'),
+                  hint: t('这是规划/静态报告；点击“启动虚拟机分析”后才会刷新为动态报告。', 'This is the planning/static report; start VM analysis to refresh it into a dynamic report.')
+                };
+              }
+
+              return {
+                kind: 'missing',
+                ready: false,
+                badgeClass: 'pill',
+                badge: t('待生成', 'Not ready'),
+                link: t('打开报告', 'Open report'),
+                hint: t('报告尚未生成。', 'No report has been generated yet.')
+              };
+            }
+
             function renderJob(job) {
+              job = normalizeJobPayload(job);
+              currentJobPayload = job;
               const jobId = String(job.jobId || '');
               const statusLabel = formatJobStatus(job.status);
               const htmlReportPath = job.htmlReportPath || '';
@@ -499,10 +603,8 @@ internal static class DashboardExperiencePage
               const fileReportHref = toFileUri(htmlReportPath);
               const executionFlowHref = jobId ? `/jobs/${encodeURIComponent(jobId)}/execution-flow` : '';
               const liveEventsHref = jobId ? `/jobs/${encodeURIComponent(jobId)}/live-events` : '';
-              const reportReady = Boolean(htmlReportPath || zhReportPath || enReportPath);
-              const reportBadge = reportReady
-                ? '<span class="pill ready" data-zh="已生成" data-en="Ready">已生成</span>'
-                : '<span class="pill" data-zh="待生成" data-en="Not ready">待生成</span>';
+              const reportState = buildReportState(job);
+              const reportBadge = `<span class="${reportState.badgeClass}" data-copy="${escapeAttribute(reportState.badge)}" data-copy-label="report state">${escapeHtml(reportState.badge)}</span>`;
               const plannedStepCount = job.runbook?.steps?.length || 0;
               const messages = (job.messages || []).slice(-3).map(message => `<li data-copy="${escapeAttribute(message)}" data-copy-label="job message">${escapeHtml(message)} ${copyButton(message, 'job message')}</li>`).join('');
               document.getElementById('jobResult').innerHTML = `
@@ -520,10 +622,10 @@ internal static class DashboardExperiencePage
                   </p>
                   <div class="report-entry" data-copy="${escapeAttribute([servedReportHref, servedZhReportHref, servedEnReportHref].filter(Boolean).join('\n'))}" data-copy-label="served report links">
                     <strong data-zh="报告入口" data-en="Report entry">报告入口</strong>
-                    <a class="buttonlink" target="_blank" rel="noopener" href="${escapeHtml(currentReportHref)}" data-report-current="true" data-job-id="${escapeAttribute(jobId)}" data-zh="打开当前语言报告" data-en="Open current-language report">打开当前语言报告</a>
+                    <a class="buttonlink" target="_blank" rel="noopener" href="${escapeHtml(currentReportHref)}" data-report-current="true" data-job-id="${escapeAttribute(jobId)}">${escapeHtml(reportState.link)}</a>
                     <a class="buttonlink secondary" target="_blank" rel="noopener" href="${escapeHtml(servedZhReportHref)}" data-zh="中文" data-en="ZH">中文</a>
                     <a class="buttonlink secondary" target="_blank" rel="noopener" href="${escapeHtml(servedEnReportHref)}" data-zh="英文" data-en="EN">英文</a>
-                    <span class="hint" data-zh="报告生成或导入刷新后会自动打开当前语言版本；若浏览器阻止跳转，请点这里。" data-en="After generation or import refresh, the current-language report opens automatically; click here if the browser blocks navigation.">报告生成或导入刷新后会自动打开当前语言版本；若浏览器阻止跳转，请点这里。</span>
+                    <span class="hint">${escapeHtml(reportState.hint)} <span data-zh="动态分析成功后会自动打开当前语言报告；若浏览器阻止跳转，请点这里。" data-en="After a successful dynamic analysis, the current-language report opens automatically; click here if the browser blocks navigation.">动态分析成功后会自动打开当前语言报告；若浏览器阻止跳转，请点这里。</span></span>
                   </div>
                   <div id="reportNotice" class="report-notice" hidden></div>
                   <div class="callout">
@@ -636,20 +738,24 @@ internal static class DashboardExperiencePage
                 return;
               }
 
+              currentJobListPayload = Array.isArray(jobs) ? jobs.slice() : [];
+
               if (!jobs.length) {
                 container.innerHTML = '<p data-zh="当前没有任务。" data-en="No jobs are currently held by the Web host.">当前没有任务。</p>';
                 applyLanguage();
                 return;
               }
 
-              const rows = jobs.slice().reverse().map(job => {
+              const rows = jobs.slice().reverse().map(rawJob => {
+                const job = normalizeJobPayload(rawJob);
                 const jobId = String(job.jobId || '');
                 const statusLabel = formatJobStatus(job.status);
                 const samplePath = job.sample?.fullPath || job.submission?.samplePath || '';
                 const reportPath = job.htmlReportPath || '';
                 const reportHref = `/api/jobs/${encodeURIComponent(jobId)}/report/html?lang=${currentLanguage === 'en' ? 'en' : 'zh'}`;
+                const reportState = buildReportState(job);
                 const reportCell = reportPath
-                  ? `<a target="_blank" rel="noopener" href="${escapeHtml(reportHref)}" data-report-current="true" data-job-id="${escapeAttribute(jobId)}" data-zh="打开报告" data-en="Open report">打开报告</a>`
+                  ? `<a target="_blank" rel="noopener" href="${escapeHtml(reportHref)}" data-report-current="true" data-job-id="${escapeAttribute(jobId)}">${escapeHtml(reportState.link)}</a><br><span class="hint">${escapeHtml(reportState.badge)}</span>`
                   : '<span class="hint" data-zh="待生成" data-en="Not ready">待生成</span>';
                 return `
                 <tr>
@@ -909,6 +1015,7 @@ internal static class DashboardExperiencePage
               // Inputs: current job payload. Processing: derives recorded and
               // expected report/guest artifact paths without touching the host
               // filesystem. Return: stable labels for display and copy.
+              job = normalizeJobPayload(job);
               const jobId = String(job.jobId || '');
               const jobIdNoDash = jobId.replace(/-/g, '');
               const reportJsonPath = job.jsonReportPath || '';
@@ -940,6 +1047,7 @@ internal static class DashboardExperiencePage
               // Inputs: current job and derived artifact paths. Processing:
               // turns nullable GuestEventsPath into an operator-facing status.
               // Return: label/detail text for the dashboard.
+              job = normalizeJobPayload(job);
               const messageText = (job.messages || []).join('\n').toLowerCase();
               if (job.guestEventsPath) {
                 if (messageText.includes('found no events')) {
