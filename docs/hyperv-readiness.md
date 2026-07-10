@@ -27,6 +27,9 @@ Defaults match `config/sandbox.example.json`:
   -VmName 'KSwordSandbox-Win10-Golden' `
   -CheckpointName 'Clean' `
   -GuestPasswordSecretName 'KSWORDBOX_GUEST_PASSWORD' `
+  -GuestUserName 'SandboxUser' `
+  -GuestPayloadRoot 'D:\Temp\KSwordSandbox\payload\guest-tools' `
+  -GuestWorkingDirectory 'C:\KSwordSandbox' `
   -RuntimeRoot 'D:\Temp\KSwordSandbox'
 ```
 
@@ -44,6 +47,12 @@ Warnings are still printed as objects. A non-administrator run usually emits a
 failed Administrator check and warning objects for VM state that cannot be read
 reliably from a non-elevated process.
 
+The preflight is still non-destructive when it runs as Administrator. It may
+query Hyper-V and, only when the VM is already running and a guest password is
+visible to the current process, run read-only `Invoke-Command -VMName ...`
+probes. It never starts the VM, restores a checkpoint, enables services, copies
+files, creates guest folders, or writes probe files.
+
 ## Checks
 
 ### Administrator privilege
@@ -57,11 +66,13 @@ Fix: reopen PowerShell with "Run as administrator" and run the preflight again.
 ### Hyper-V PowerShell module
 
 Checks that the `Hyper-V` PowerShell module is installed and that the required
-read-only cmdlets are available:
+cmdlets are available. The preflight checks command availability only; it does
+not call mutation-capable commands such as `Copy-VMFile`.
 
 - `Get-VM`
 - `Get-VMSnapshot`
 - `Get-VMIntegrationService`
+- `Copy-VMFile`
 
 Fix: enable/install Hyper-V management tools for the host OS, then open a new
 PowerShell session.
@@ -80,6 +91,27 @@ $env:KSWORDBOX_GUEST_PASSWORD = '<local guest password>'
 
 If the variable exists at User or Machine scope but not in the current process,
 open a new elevated PowerShell session or set `$env:...` in the current session.
+
+### Host payload files
+
+Checks the host-staged payload root without building or copying anything. The
+default root is:
+
+```text
+D:\Temp\KSwordSandbox\payload\guest-tools
+```
+
+Required files:
+
+```text
+agent\KSword.Sandbox.Agent.exe
+r0collector\KSword.Sandbox.R0Collector.exe
+payload-manifest.json
+```
+
+Fix: run `scripts/Prepare-GuestPayload.ps1` from the repository root and keep
+the generated payload under `D:\Temp\KSwordSandbox` or another non-repository
+runtime directory.
 
 ### Runtime root writable
 
@@ -130,6 +162,38 @@ operator command such as:
 ```powershell
 Enable-VMIntegrationService -VMName 'KSwordSandbox-Win10-Golden' -Name 'Guest Service Interface'
 ```
+
+### PowerShell Direct
+
+When the process is elevated, Hyper-V is queryable, the VM exists, the VM state
+is `Running`, and the guest password is visible, the script runs a read-only
+PowerShell Direct probe:
+
+```powershell
+Invoke-Command -VMName '<vm>' -Credential '<in-memory credential>' -ScriptBlock {
+    $PSVersionTable.PSVersion
+}
+```
+
+If the VM is `Off`, the check is reported as `Warning` with
+`RequiresRunning = true`; the preflight does not start the VM just to test
+PowerShell Direct. If the password is missing, the password check fails and the
+PowerShell Direct check is skipped with an explicit warning.
+
+### Guest deployed payload files
+
+When the PowerShell Direct probe passes, the script also checks whether the
+golden VM already contains the expected deployed files:
+
+```text
+C:\KSwordSandbox\agent\KSword.Sandbox.Agent.exe
+C:\KSwordSandbox\r0collector\KSword.Sandbox.R0Collector.exe
+```
+
+This check uses `Test-Path` inside the guest only. Missing deployed files are a
+warning, not a hard failure, because the live runbook can stage tools from the
+host payload root immediately before execution. Treat the warning as actionable
+when refreshing the golden `Clean` checkpoint.
 
 ## Payload staging dependency
 

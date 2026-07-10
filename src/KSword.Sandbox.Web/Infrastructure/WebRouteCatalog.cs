@@ -51,4 +51,14 @@ internal static class WebRouteCatalog
     {
         return $"{JobById(jobId)}/events/live";
     }
+
+    /// <summary>
+    /// Inputs: a job identifier selected by the dashboard.
+    /// Processing: formats the identifier with the invariant "D" format and appends the SSE live-event suffix.
+    /// Return behavior: returns the concrete route path for streaming raw live events.
+    /// </summary>
+    internal static string LiveEventStream(Guid jobId)
+    {
+        return $"{JobById(jobId)}/events/stream";
+    }
 }

@@ -42,7 +42,9 @@ readers should still inspect the event `source` field in the evidence table.
 | R0 driver heartbeat | `driver-load-heartbeat` | `driver.event.reserved`, `driver.load` | `info` | None | Shows that the R0 event drain path produced the driver startup self-test or future driver-load heartbeat. |
 | Image-load placeholder | `image-load-placeholder` | `image.load`, `image.loaded`, `driver.imageLoad`, `driver.image.load` | `info` | None yet | Keeps future R0 image callback rows from appearing as unexplained raw events. |
 | Network behavior | `network-connection` | `network.tcp` | `medium` | `T1105` | Records outbound TCP activity; richer DNS/HTTP/TLS rules should use structured data fields later. |
-| Static PE traits | `static-pe-known-packer`, `static-pe-high-entropy-sections`, `static-embedded-url` | `static.analysis.completed` | `low` to `medium` | `T1027.002`, `T1027`, `T1105` | Uses `dataContains.tags` emitted by static analysis. |
+| Static PE traits | `static-pe-known-packer`, `static-pe-high-entropy-sections`, `static-embedded-url`, `static-pe-imports-present`, `static-pe-exports-present`, `static-pe-tls-callbacks` | `static.analysis.completed` | `info` to `medium` | `T1027.002`, `T1027`, `T1105` | Uses `dataContains.tags` emitted by static analysis for packers, entropy, URLs, import/export table presence, and TLS directory/callback hints. |
+| Static import/API traits | `static-import-suspicious-api`, `static-import-process-injection`, `static-import-network-api`, `static-import-persistence-api`, `static-import-anti-analysis-api` | `static.analysis.completed` | `medium` to `high` | `T1106`, `T1055`, `T1105`, `T1112`, `T1622` | StaticAnalyzer maps parsed imports and fallback API strings into tags such as `import_suspicious_api`, `import_process_injection_api`, `import_network_api`, `import_persistence_api`, and `import_anti_analysis_api`. |
+| Static export traits | `static-export-registration-entrypoint`, `static-export-service-entrypoint` | `static.analysis.completed` | `low` to `medium` | `T1218.010`, `T1543.003` | Export names are triage-only evidence; registration exports can indicate regsvr32-compatible DLL entry points, and service exports can support service DLL triage. |
 
 ## MITRE mapping notes
 
@@ -53,9 +55,43 @@ readers should still inspect the event `source` field in the evidence table.
 - `T1070.004` is used for file deletion because the current event does not yet
   prove cleanup intent, but it is still useful to surface in reports.
 - `T1105` is retained for outbound TCP and embedded URL evidence as a seed
-  mapping until protocol-specific network rules exist.
+- `T1105` is retained for outbound TCP, embedded URL evidence, and static
+  network/download API imports as a seed mapping until protocol-specific
+  network rules exist.
+- `T1055` is used only for static import groups that include process-injection
+  primitives such as cross-process allocation/write/thread APIs.
+- `T1106` covers broad native Windows API import/string evidence; more specific
+  rules such as process injection, network transfer, persistence, and
+  anti-analysis should take precedence in triage.
+- `T1218.010` is used for static COM registration exports because those names
+  are compatible with regsvr32-style execution, but the static rule does not
+  prove that regsvr32 was actually used.
+- `T1622` is used for debugger/timing import strings where static evidence
+  suggests anti-analysis checks.
 - Rules without MITRE IDs are intentionally unmapped because the current event
   is health, placeholder, or generic telemetry.
+
+## Static-analysis tag contract
+
+The current report model does not have first-class `imports`, `exports`, or
+`tls` fields. StaticAnalyzer therefore records lightweight static depth through
+existing fields:
+
+- `Tags`: rule-facing tokens such as `imports_present`, `exports_present`,
+  `tls_directory_present`, `tls_callbacks`, `import_suspicious_api`,
+  `import_process_injection_api`, `import_network_api`,
+  `export_registration_entrypoint`, `packer_section_name`, and
+  `packer_string_hint`.
+- `InterestingStrings`: bounded human-readable evidence such as
+  `import:kernel32.dll!VirtualAllocEx`, `export:DllRegisterServer`, and
+  `tls:callback@0x...`.
+- `static.analysis.completed.Data["tags"]`: comma-joined `Tags` used by
+  `dataContains.tags` predicates in `rules/behavior-rules.json`.
+
+This keeps static coverage useful without changing public report contracts.
+If a future Abstractions model adds structured `Imports`, `Exports`, or `Tls`
+fields, keep these tags for backward-compatible rule matching and add structured
+predicates separately.
 
 ## Future R0 expansion
 

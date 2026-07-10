@@ -1,21 +1,101 @@
 {
   "matrix": "enterprise-windows",
-  "version": "2026-07-10-seed",
+  "version": "2026-07-10-static-depth",
   "techniques": [
+    {
+      "id": "T1027",
+      "name": "Obfuscated Files or Information",
+      "categories": [
+        "defense-evasion"
+      ]
+    },
+    {
+      "id": "T1027.002",
+      "name": "Software Packing",
+      "categories": [
+        "defense-evasion"
+      ]
+    },
+    {
+      "id": "T1055",
+      "name": "Process Injection",
+      "categories": [
+        "defense-evasion",
+        "privilege-escalation"
+      ]
+    },
     {
       "id": "T1059",
       "name": "Command and Scripting Interpreter",
-      "categories": [ "execution" ]
+      "categories": [
+        "execution"
+      ]
+    },
+    {
+      "id": "T1070.004",
+      "name": "File Deletion",
+      "categories": [
+        "defense-evasion"
+      ]
     },
     {
       "id": "T1105",
       "name": "Ingress Tool Transfer",
-      "categories": [ "command-and-control" ]
+      "categories": [
+        "command-and-control"
+      ]
+    },
+    {
+      "id": "T1106",
+      "name": "Native API",
+      "categories": [
+        "execution"
+      ]
     },
     {
       "id": "T1112",
       "name": "Modify Registry",
-      "categories": [ "defense-evasion", "persistence" ]
+      "categories": [
+        "defense-evasion",
+        "persistence"
+      ]
+    },
+    {
+      "id": "T1218.010",
+      "name": "Regsvr32",
+      "categories": [
+        "defense-evasion"
+      ]
+    },
+    {
+      "id": "T1497.003",
+      "name": "Time Based Evasion",
+      "categories": [
+        "defense-evasion"
+      ]
+    },
+    {
+      "id": "T1543.003",
+      "name": "Windows Service",
+      "categories": [
+        "persistence",
+        "privilege-escalation"
+      ]
+    },
+    {
+      "id": "T1547.001",
+      "name": "Registry Run Keys / Startup Folder",
+      "categories": [
+        "persistence",
+        "privilege-escalation"
+      ]
+    },
+    {
+      "id": "T1622",
+      "name": "Debugger Evasion",
+      "categories": [
+        "defense-evasion"
+      ]
     }
   ]
 }

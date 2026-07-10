@@ -5,6 +5,7 @@ using System.Net;
 using System.Net.NetworkInformation;
 using System.Runtime.InteropServices;
 using System.Text.Json;
+using KSword.Sandbox.Agent.Collection;
 using KSword.Sandbox.Abstractions;
 
 return await AgentProgram.RunAsync(args);
@@ -12,10 +13,10 @@ return await AgentProgram.RunAsync(args);
 /// <summary>
 /// Guest-side collector that runs inside the disposable Windows VM.
 /// Inputs are command-line arguments for sample path, output path, duration,
-/// optional driver event path, and optional R0Collector sidecar path;
-/// processing can start the sidecar, starts the sample, records process and
-/// environment events, merges driver JSONL, and writes JSON artifacts; RunAsync
-/// returns a process exit code.
+/// optional driver event path, optional R0Collector sidecar path, and optional
+/// screenshot capture flag; processing can start the sidecar, starts the sample,
+/// runs dynamic guest probes, merges driver JSONL, and writes JSON artifacts;
+/// RunAsync returns a process exit code.
 /// </summary>
 internal static class AgentProgram
 {
@@ -49,8 +50,9 @@ internal static class AgentProgram
 
     /// <summary>
     /// Runs the sample and collects normalized behavior events.
-    /// Inputs are parsed options, processing snapshots network and files before
-    /// and after execution, and the method returns collected events.
+    /// Inputs are parsed options, processing snapshots process tree, file, TCP,
+    /// and optional screenshot state before and after execution, and the method
+    /// returns collected events.
     /// </summary>
     private static async Task<List<SandboxEvent>> CollectAsync(AgentOptions options)
     {
@@ -70,11 +72,9 @@ internal static class AgentProgram
         };
 
         AddEnvironmentSnapshotEvent(events, options, workingDirectory);
-        var processesBefore = SnapshotProcesses();
-        AddProcessObservationEvents(events, processesBefore, "before-start");
-        var filesBefore = SnapshotFiles(workingDirectory);
-        var tcpBefore = SnapshotTcpConnections();
-        var emittedProcessKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var probeRunner = CreateProbeRunner();
+        var probeContext = CreateGuestProbeContext(options, workingDirectory, rootProcessId: null);
+        events.AddRange(await probeRunner.CollectAsync(ProbePhase.BeforeStart, probeContext));
         var r0Collector = StartR0Collector(options, events);
 
         try
@@ -97,7 +97,8 @@ internal static class AgentProgram
                 Path = options.SamplePath,
                 CommandLine = options.SamplePath
             });
-            AddProcessDeltaEvents(events, processesBefore, SnapshotProcesses(), "after-start", emittedProcessKeys);
+            var runningProbeContext = CreateGuestProbeContext(options, workingDirectory, process.Id);
+            events.AddRange(await probeRunner.CollectAsync(ProbePhase.AfterStart, runningProbeContext));
 
             var exited = await WaitForExitAsync(process, TimeSpan.FromSeconds(options.DurationSeconds));
             if (!exited)
@@ -127,9 +128,7 @@ internal static class AgentProgram
                 }
             });
 
-            AddProcessDeltaEvents(events, processesBefore, SnapshotProcesses(), "after-run", emittedProcessKeys);
-            AddFileDeltaEvents(events, workingDirectory, filesBefore, SnapshotFiles(workingDirectory));
-            AddTcpDeltaEvents(events, tcpBefore, SnapshotTcpConnections());
+            events.AddRange(await probeRunner.CollectAsync(ProbePhase.AfterRun, runningProbeContext));
         }
         finally
         {
@@ -139,6 +138,41 @@ internal static class AgentProgram
         events.AddRange(ReadDriverEvents(options.DriverEventsPath));
         events.Add(new SandboxEvent { EventType = "agent.stop", Source = "guest", Path = options.OutputDirectory });
         return events;
+    }
+
+    /// <summary>
+    /// Creates the dynamic guest probe pipeline.
+    /// Inputs are none; processing constructs the process tree, file diff, TCP
+    /// diff, and optional screenshot probes in deterministic order; the method
+    /// returns a reusable GuestProbeRunner for one agent run.
+    /// </summary>
+    private static GuestProbeRunner CreateProbeRunner()
+    {
+        return new GuestProbeRunner(
+        [
+            new ProcessTreeProbe(),
+            new FileDiffProbe(),
+            new TcpConnectionDiffProbe(),
+            new ScreenshotProbe()
+        ]);
+    }
+
+    /// <summary>
+    /// Builds a probe context from current agent options and execution state.
+    /// Inputs are parsed options, working directory, and optional root process
+    /// id; processing copies values into an immutable context; the method
+    /// returns the context consumed by guest probes.
+    /// </summary>
+    private static GuestProbeContext CreateGuestProbeContext(AgentOptions options, string workingDirectory, int? rootProcessId)
+    {
+        return new GuestProbeContext
+        {
+            SamplePath = options.SamplePath,
+            WorkingDirectory = workingDirectory,
+            OutputDirectory = options.OutputDirectory,
+            RootProcessId = rootProcessId,
+            CaptureScreenshots = options.CaptureScreenshots
+        };
     }
 
     /// <summary>
@@ -692,8 +726,8 @@ internal static class AgentProgram
 
 /// <summary>
 /// Parsed command-line options for the guest agent.
-/// Inputs are raw CLI tokens, processing maps known switches to properties,
-/// and Parse returns a validated AgentOptions instance.
+/// Inputs are raw CLI tokens, processing maps known switches and boolean flags
+/// to properties, and Parse returns a validated AgentOptions instance.
 /// </summary>
 internal sealed record AgentOptions
 {
@@ -713,12 +747,14 @@ internal sealed record AgentOptions
 
     public bool R0Mock { get; init; }
 
+    public bool CaptureScreenshots { get; init; }
+
     /// <summary>
     /// Parses command-line switches for the guest agent.
     /// Inputs are string arguments, processing consumes --sample, --out,
     /// --duration, --driver-events, optional R0Collector sidecar switches, and
-    /// boolean --r0-mock without breaking existing value switches; the method
-    /// returns validated and normalized options.
+    /// boolean --r0-mock/--screenshot flags without breaking existing value
+    /// switches; the method returns validated and normalized options.
     /// </summary>
     public static AgentOptions Parse(string[] args)
     {
@@ -732,7 +768,9 @@ internal sealed record AgentOptions
             }
 
             var optionName = args[index][2..];
-            if (string.Equals(optionName, "r0-mock", StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(optionName, "r0-mock", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(optionName, "screenshot", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(optionName, "screenshots", StringComparison.OrdinalIgnoreCase))
             {
                 flags.Add(optionName);
                 continue;
@@ -776,7 +814,8 @@ internal sealed record AgentOptions
             DriverEventsPath = string.IsNullOrWhiteSpace(driverEventsPath) ? null : Path.GetFullPath(driverEventsPath),
             R0CollectorPath = string.IsNullOrWhiteSpace(r0CollectorPath) ? null : Path.GetFullPath(r0CollectorPath),
             DriverDevicePath = string.IsNullOrWhiteSpace(driverDevicePath) ? DefaultDriverDevicePath : driverDevicePath,
-            R0Mock = flags.Contains("r0-mock")
+            R0Mock = flags.Contains("r0-mock"),
+            CaptureScreenshots = flags.Contains("screenshot") || flags.Contains("screenshots")
         };
     }
 }

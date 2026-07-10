@@ -8,7 +8,8 @@ This project creates the kernel-side control device that the future
 `KSword.Sandbox.R0Collector` will open from the Windows 10 guest VM. The current
 driver is intentionally small: it validates the load/unload path, exposes a
 stable symbolic link, implements health/poll IOCTLs, keeps a bounded non-paged
-event ring for `READ_EVENTS`, and starts a minimal file minifilter producer.
+event ring for `READ_EVENTS`, and starts minimal file plus WFP/ALE network
+producers.
 
 ## Current ABI
 
@@ -61,6 +62,11 @@ payload is bounded to `KSWORD_SANDBOX_EVENT_MAX_PAYLOAD_SIZE` and carries the
 operation, requestor PID, final NTSTATUS, IRP major/minor function, path flags,
 and a truncated UTF-16 path prefix copied from `FILE_OBJECT.FileName`.
 
+The network producer registers inspect-only WFP/ALE connect and recv-accept
+callouts for IPv4 and IPv6. It does not block, absorb, redirect, or modify
+traffic; it queues compact `KswSandboxEventTypeNetwork` records into the same
+ring for R0Collector to drain.
+
 When the ring is empty, `READ_EVENTS` still succeeds if the fixed reply header
 fits and returns `EventsWritten == 0` and `BytesWritten == 0`. If the output
 buffer has no room for a complete pending record, the event remains queued and
@@ -81,6 +87,46 @@ use a test certificate and test-signing mode as documented in
 `docs/driver-signing.md`. The project defaults to `SignMode=Off` so local source
 builds do not try to create or install a certificate automatically. Sign the
 generated `.sys` explicitly outside git before loading it in a VM.
+
+## Runtime validation preflight
+
+Before a real VM test, run the non-destructive readiness checks from an elevated
+PowerShell session in the guest or staging VM:
+
+```powershell
+.\scripts\Test-R0Readiness.ps1 `
+  -DriverSysPath C:\KSwordSandbox\driver\KSword.Sandbox.Driver.sys `
+  -R0CollectorPath C:\KSwordSandbox\tools\KSword.Sandbox.R0Collector.exe
+```
+
+Default mode checks only repository files, driver/collector readability, driver
+signature metadata, Administrator status, Windows `testsigning` state, and
+read-only SCM service state. It does **not** load the driver, open
+`\\.\KSwordSandboxDriver`, write JSONL, or mutate service state.
+
+Service install/load and device checks are explicit opt-in steps for an isolated
+test VM:
+
+```powershell
+.\scripts\Test-R0Readiness.ps1 `
+  -DriverSysPath C:\KSwordSandbox\driver\KSword.Sandbox.Driver.sys `
+  -R0CollectorPath C:\KSwordSandbox\tools\KSword.Sandbox.R0Collector.exe `
+  -AllowServiceMutation `
+  -InstallService `
+  -StartService `
+  -CheckDeviceHealth `
+  -DrainWithCollector `
+  -CollectorOutputPath C:\KSwordSandbox\out\driver-events.jsonl
+```
+
+Unload and remove the kernel service explicitly when finished:
+
+```powershell
+.\scripts\Test-R0Readiness.ps1 `
+  -AllowServiceMutation `
+  -StopService `
+  -DeleteService
+```
 
 ## Repository hygiene
 

@@ -37,6 +37,15 @@ param(
     # Runtime identifier used by the SDK-style Guest Agent publish target.
     [string]$RuntimeIdentifier = 'win-x64',
 
+    # Guest root path that receives payload folders during Hyper-V staging.
+    [string]$GuestWorkingDirectory = 'C:\KSwordSandbox',
+
+    # Expected Guest Agent executable name in the staged agent folder.
+    [string]$GuestAgentExecutableName = 'KSword.Sandbox.Agent.exe',
+
+    # Expected R0Collector executable name in the staged r0collector folder.
+    [string]$R0CollectorExecutableName = 'KSword.Sandbox.R0Collector.exe',
+
     # Includes .pdb files in the payload when local debugging needs symbols.
     [switch]$IncludeSymbols,
 
@@ -134,6 +143,30 @@ function Test-PathUnderRoot {
 
     $rootWithSeparator = $fullRoot + [System.IO.Path]::DirectorySeparatorChar
     return $fullPath.StartsWith($rootWithSeparator, [StringComparison]::OrdinalIgnoreCase)
+}
+
+# Join-GuestPath joins Windows guest path fragments without accessing the VM.
+# Inputs are a guest root path and child segments. Processing trims separators
+# and joins with backslashes. Return behavior is one guest-style path string.
+function Join-GuestPath {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Root,
+
+        [Parameter(Mandatory)]
+        [string[]]$Segments
+    )
+
+    $current = $Root.TrimEnd('\', '/')
+    foreach ($segment in $Segments) {
+        if ([string]::IsNullOrWhiteSpace($segment)) {
+            continue
+        }
+
+        $current = $current + '\' + $segment.TrimStart('\', '/')
+    }
+
+    return $current
 }
 
 # Assert-OutsideRepository rejects output paths that would place binaries in git.
@@ -243,6 +276,23 @@ function Copy-DirectoryContents {
     return $copied
 }
 
+# Assert-StagedPayloadFile verifies one required payload output file.
+# Inputs: the file path and friendly name. Processing uses Test-Path only after
+# staging. Return behavior: throws when the expected file is missing.
+function Assert-StagedPayloadFile {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Path,
+
+        [Parameter(Mandatory)]
+        [string]$Name
+    )
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        throw "$Name was not staged at expected path: $Path"
+    }
+}
+
 # Write-PayloadManifest writes a small operator-readable manifest next to tools.
 # Inputs: payload paths, build settings, and copied file counts.
 # Processing: serializes metadata as JSON into the payload root.
@@ -266,7 +316,12 @@ function Write-PayloadManifest {
     )
 
     $manifestPath = Join-Path $DestinationRoot 'payload-manifest.json'
+    $agentExecutablePath = Join-Path $AgentDirectory $GuestAgentExecutableName
+    $collectorExecutablePath = Join-Path $CollectorDirectory $R0CollectorExecutableName
+    $guestAgentPath = Join-GuestPath -Root $GuestWorkingDirectory -Segments @('agent', $GuestAgentExecutableName)
+    $guestCollectorPath = Join-GuestPath -Root $GuestWorkingDirectory -Segments @('r0collector', $R0CollectorExecutableName)
     $manifest = [ordered]@{
+        payloadContractVersion = 1
         generatedAtUtc      = [DateTimeOffset]::UtcNow.ToString('O')
         repositoryRoot      = (Get-NormalizedFullPath -Path $RepoRoot)
         configuration       = $Configuration
@@ -275,10 +330,27 @@ function Write-PayloadManifest {
         selfContained       = [bool]$SelfContained
         symbolsIncluded     = [bool]$IncludeSymbols
         payloadRoot         = (Get-NormalizedFullPath -Path $DestinationRoot)
+        guestWorkingDirectory = $GuestWorkingDirectory
+        expectedGuestAgentPath = $guestAgentPath
+        expectedR0CollectorPath = $guestCollectorPath
         guestAgentDirectory = (Get-NormalizedFullPath -Path $AgentDirectory)
         r0CollectorDirectory = (Get-NormalizedFullPath -Path $CollectorDirectory)
         agentFileCount      = $AgentFileCount
         collectorFileCount  = $CollectorFileCount
+        requiredHostFiles   = @(
+            [ordered]@{
+                name = 'GuestAgent'
+                path = (Get-NormalizedFullPath -Path $agentExecutablePath)
+            },
+            [ordered]@{
+                name = 'R0Collector'
+                path = (Get-NormalizedFullPath -Path $collectorExecutablePath)
+            },
+            [ordered]@{
+                name = 'PayloadManifest'
+                path = (Get-NormalizedFullPath -Path $manifestPath)
+            }
+        )
     }
 
     $manifest | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $manifestPath -Encoding UTF8
@@ -377,9 +449,13 @@ try {
 
     Write-PrepStep "Copying Guest Agent runtime files into $agentPayloadDir"
     $agentFileCount = Copy-DirectoryContents -SourceDirectory $agentPublishRoot -DestinationDirectory $agentPayloadDir -CopySymbols ([bool]$IncludeSymbols)
+    $agentExecutablePath = Join-Path $agentPayloadDir $GuestAgentExecutableName
+    Assert-StagedPayloadFile -Path $agentExecutablePath -Name 'Guest Agent executable'
 
     Write-PrepStep "Copying R0Collector executable into $collectorPayloadDir"
-    Copy-Item -LiteralPath $collectorExe -Destination (Join-Path $collectorPayloadDir 'KSword.Sandbox.R0Collector.exe') -Force
+    $collectorPayloadExecutable = Join-Path $collectorPayloadDir $R0CollectorExecutableName
+    Copy-Item -LiteralPath $collectorExe -Destination $collectorPayloadExecutable -Force
+    Assert-StagedPayloadFile -Path $collectorPayloadExecutable -Name 'R0Collector executable'
     $collectorFileCount = 1
 
     if ($IncludeSymbols) {
@@ -403,6 +479,7 @@ try {
     Write-Host "  Guest Agent:   $agentPayloadDir"
     Write-Host "  R0Collector:   $collectorPayloadDir"
     Write-Host "  Manifest:      $manifestPath"
+    Write-Host "  Readiness:     pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\Test-HyperVReadiness.ps1 -GuestPayloadRoot '$resolvedPayload' -GuestWorkingDirectory '$GuestWorkingDirectory'"
     Write-Host '  Git hygiene:   payload files are outside the repository; do not commit copied binaries.'
     exit 0
 }

@@ -4,8 +4,8 @@ namespace KSword.Sandbox.Agent.Collection;
 
 /// <summary>
 /// Runs a set of guest probes and converts probe failures into events.
-/// Inputs are probe instances and a phase; processing calls each probe in
-/// order; methods return collected or diagnostic SandboxEvent records.
+/// Inputs are probe instances, a phase, and run context; processing calls each
+/// probe in order; methods return collected or diagnostic SandboxEvent records.
 /// </summary>
 internal sealed class GuestProbeRunner
 {
@@ -23,17 +23,20 @@ internal sealed class GuestProbeRunner
 
     /// <summary>
     /// Runs every configured probe for one phase.
-    /// Inputs are phase and cancellation token, processing catches probe
-    /// exceptions, and the method returns collected events.
+    /// Inputs are phase, shared run context, and cancellation token; processing
+    /// catches probe exceptions; the method returns collected events.
     /// </summary>
-    public async Task<IReadOnlyList<SandboxEvent>> CollectAsync(ProbePhase phase, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<SandboxEvent>> CollectAsync(
+        ProbePhase phase,
+        GuestProbeContext context,
+        CancellationToken cancellationToken = default)
     {
         var events = new List<SandboxEvent>();
         foreach (var probe in probes)
         {
             try
             {
-                events.AddRange(await probe.CollectAsync(phase, cancellationToken));
+                events.AddRange(await probe.CollectAsync(phase, context, cancellationToken));
             }
             catch (Exception ex)
             {

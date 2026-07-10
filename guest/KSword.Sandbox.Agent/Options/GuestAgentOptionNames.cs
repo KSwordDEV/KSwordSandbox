@@ -15,4 +15,6 @@ internal static class GuestAgentOptionNames
     public const string R0Collector = "r0collector";
     public const string R0CollectorAlias = "r0-collector";
     public const string R0Mock = "r0-mock";
+    public const string Screenshot = "screenshot";
+    public const string Screenshots = "screenshots";
 }

@@ -99,6 +99,41 @@ Device-unavailable behavior is explicit: the collector writes
 `r0collector.deviceUnavailable` to the selected JSONL sink and exits with code
 `66`.
 
+## VM readiness and one-shot drain
+
+Use `scripts/Test-R0Readiness.ps1` before a real VM run. Its default mode is
+non-destructive and does not open `\\.\KSwordSandboxDriver`:
+
+```powershell
+.\scripts\Test-R0Readiness.ps1 `
+  -DriverSysPath C:\KSwordSandbox\driver\KSword.Sandbox.Driver.sys `
+  -R0CollectorPath C:\KSwordSandbox\tools\KSword.Sandbox.R0Collector.exe
+```
+
+After the signed driver service is explicitly installed and started in the VM,
+verify the public health IOCTL:
+
+```powershell
+.\scripts\Test-R0Readiness.ps1 `
+  -DevicePath \\.\KSwordSandboxDriver `
+  -CheckDeviceHealth
+```
+
+Then run a collector one-shot drain through the script:
+
+```powershell
+.\scripts\Test-R0Readiness.ps1 `
+  -R0CollectorPath C:\KSwordSandbox\tools\KSword.Sandbox.R0Collector.exe `
+  -DevicePath \\.\KSwordSandboxDriver `
+  -DrainWithCollector `
+  -CollectorOutputPath C:\KSwordSandbox\out\driver-events.jsonl
+```
+
+The drain path invokes R0Collector with `--duration 0`, so it opens the driver,
+emits health/poll/read-events lifecycle rows, drains any queued driver records,
+and exits. A first load should normally expose the header-only
+`driver.started` heartbeat unless another reader has already consumed it.
+
 ## JSON Lines format
 
 Every output line is a single `SandboxEvent`-compatible JSON object:

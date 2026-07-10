@@ -3,8 +3,8 @@
 Runs read-only Hyper-V readiness checks for KSword Sandbox live VM runs.
 
 .DESCRIPTION
-Inputs are the golden VM name, checkpoint name, guest password environment
-variable name, and host runtime root path. Processing validates local host and
+Inputs are the golden VM name, checkpoint name, guest credential metadata, host
+payload root, and host runtime root path. Processing validates local host and
 golden-VM prerequisites without creating probe files and without creating,
 starting, restoring, stopping, or deleting any VM. The script emits structured
 PowerShell objects for each check plus a summary object. It returns exit code 0
@@ -28,6 +28,35 @@ param(
     # Processing: checks only whether the current process can see a non-empty
     # value. Return behavior: the value is never printed or returned.
     [string]$GuestPasswordSecretName = 'KSWORDBOX_GUEST_PASSWORD',
+
+    # Input: local guest account name used for PowerShell Direct.
+    # Processing: used only to construct an in-memory PSCredential when the
+    # password secret is visible; the script never prints the password.
+    # Return behavior: a failed or skipped PowerShell Direct result identifies
+    # missing credential metadata without mutating the VM.
+    [string]$GuestUserName = 'SandboxUser',
+
+    # Input: guest root path from config/sandbox.example.json.
+    # Processing: used to build expected guest payload file paths for read-only
+    # Test-Path probes through PowerShell Direct when the VM is already running.
+    # Return behavior: guest path checks are skipped with diagnostics when
+    # PowerShell Direct cannot be safely attempted.
+    [string]$GuestWorkingDirectory = 'C:\KSwordSandbox',
+
+    # Input: expected guest agent executable name under the agent payload folder.
+    # Processing: used for host and guest payload file checks only.
+    # Return behavior: the file is never executed by this readiness script.
+    [string]$GuestAgentExecutableName = 'KSword.Sandbox.Agent.exe',
+
+    # Input: host-staged guest payload root from config/sandbox.example.json.
+    # Processing: checks required payload files with Test-Path only.
+    # Return behavior: no payload files are built, copied, or deleted.
+    [string]$GuestPayloadRoot = 'D:\Temp\KSwordSandbox\payload\guest-tools',
+
+    # Input: expected R0Collector executable name under the r0collector payload
+    # folder. Processing uses it for host and guest payload file checks only.
+    # Return behavior: the file is never executed by this readiness script.
+    [string]$R0CollectorExecutableName = 'KSword.Sandbox.R0Collector.exe',
 
     # Input: host runtime root from config/sandbox.example.json.
     # Processing: checks existence and ACLs only; no write probe file is made.
@@ -114,12 +143,12 @@ function Test-AdministratorPrivilege {
     }
 }
 
-# Test-HyperVModule checks for the management module and read-only commands.
-# Inputs are none; processing uses Get-Module/Get-Command only. Return behavior
-# is a readiness object; failure means VM/checkpoint/integration-service checks
-# cannot be trusted from this session.
+# Test-HyperVModule checks for the management module and required commands.
+# Inputs are none; processing uses Get-Module/Get-Command only and never calls
+# mutation-capable cmdlets. Return behavior is a readiness object; failure means
+# VM/checkpoint/integration-service checks cannot be trusted from this session.
 function Test-HyperVModule {
-    $requiredCommands = @('Get-VM', 'Get-VMSnapshot', 'Get-VMIntegrationService')
+    $requiredCommands = @('Get-VM', 'Get-VMSnapshot', 'Get-VMIntegrationService', 'Copy-VMFile')
 
     try {
         $module = @(Get-Module -ListAvailable -Name Hyper-V |
@@ -165,7 +194,7 @@ function Test-HyperVModule {
             -Name 'Hyper-V PowerShell module' `
             -Status 'Passed' `
             -Required $true `
-            -Message 'Hyper-V PowerShell module and required read-only cmdlets are available.' `
+            -Message 'Hyper-V PowerShell module and required cmdlets are available.' `
             -Details @{
                 ModuleName       = $module[0].Name
                 ModuleVersion    = $module[0].Version.ToString()
@@ -424,6 +453,134 @@ function Test-RuntimeRootWritableReadOnly {
         }
 }
 
+# Join-GuestPath joins Windows guest path fragments without touching the guest.
+# Inputs are a root path and child segments. Processing trims separators and
+# joins with backslashes. Return behavior is one guest-style path string.
+function Join-GuestPath {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Root,
+
+        [Parameter(Mandatory)]
+        [string[]]$Segments
+    )
+
+    $current = $Root.TrimEnd('\', '/')
+    foreach ($segment in $Segments) {
+        if ([string]::IsNullOrWhiteSpace($segment)) {
+            continue
+        }
+
+        $current = $current + '\' + $segment.TrimStart('\', '/')
+    }
+
+    return $current
+}
+
+# Get-RequiredPayloadFileMap returns the host and guest payload contract.
+# Inputs are the host payload root, guest root, and executable names.
+# Processing only builds strings.
+# Return behavior is an ordered map of logical names to host and guest paths.
+function Get-RequiredPayloadFileMap {
+    param(
+        [string]$PayloadRoot,
+        [string]$GuestRoot,
+        [string]$AgentExecutableName,
+        [string]$CollectorExecutableName
+    )
+
+    return [ordered]@{
+        GuestAgent = [pscustomobject][ordered]@{
+            HostPath  = Join-Path (Join-Path $PayloadRoot 'agent') $AgentExecutableName
+            GuestPath = Join-GuestPath -Root $GuestRoot -Segments @('agent', $AgentExecutableName)
+            Required  = $true
+        }
+        R0Collector = [pscustomobject][ordered]@{
+            HostPath  = Join-Path (Join-Path $PayloadRoot 'r0collector') $CollectorExecutableName
+            GuestPath = Join-GuestPath -Root $GuestRoot -Segments @('r0collector', $CollectorExecutableName)
+            Required  = $true
+        }
+        PayloadManifest = [pscustomobject][ordered]@{
+            HostPath  = Join-Path $PayloadRoot 'payload-manifest.json'
+            GuestPath = $null
+            Required  = $true
+        }
+    }
+}
+
+# Test-HostPayloadFiles checks the staged host payload without building it.
+# Inputs are the payload root and expected executable names. Processing uses
+# Test-Path only. Return behavior is a readiness object; failure means the live
+# runbook cannot stage tools into the VM from the configured host payload root.
+function Test-HostPayloadFiles {
+    param(
+        [string]$PayloadRoot,
+        [string]$GuestRoot,
+        [string]$AgentExecutableName,
+        [string]$CollectorExecutableName
+    )
+
+    if ([string]::IsNullOrWhiteSpace($PayloadRoot)) {
+        return New-ReadinessResult `
+            -Name 'Host payload files' `
+            -Status 'Failed' `
+            -Required $true `
+            -Message 'Guest payload root path is empty.' `
+            -Details @{
+                GuestPayloadRoot = $PayloadRoot
+                CheckedHostOnly  = $true
+            }
+    }
+
+    $fileMap = Get-RequiredPayloadFileMap `
+        -PayloadRoot $PayloadRoot `
+        -GuestRoot $GuestRoot `
+        -AgentExecutableName $AgentExecutableName `
+        -CollectorExecutableName $CollectorExecutableName
+    $checkedFiles = New-Object System.Collections.Generic.List[object]
+    $missingFiles = New-Object System.Collections.Generic.List[string]
+
+    foreach ($key in $fileMap.Keys) {
+        $entry = $fileMap[$key]
+        $exists = Test-Path -LiteralPath $entry.HostPath -PathType Leaf
+        [void]$checkedFiles.Add([pscustomobject][ordered]@{
+                Name     = $key
+                Path     = $entry.HostPath
+                Exists   = $exists
+                Required = [bool]$entry.Required
+            })
+
+        if (([bool]$entry.Required) -and (-not $exists)) {
+            [void]$missingFiles.Add($entry.HostPath)
+        }
+    }
+
+    if ($missingFiles.Count -gt 0) {
+        return New-ReadinessResult `
+            -Name 'Host payload files' `
+            -Status 'Failed' `
+            -Required $true `
+            -Message "Host payload root '$PayloadRoot' is missing required files. Run scripts/Prepare-GuestPayload.ps1 before live Hyper-V execution." `
+            -Details @{
+                GuestPayloadRoot = $PayloadRoot
+                CheckedFiles     = @($checkedFiles.ToArray())
+                MissingFiles     = @($missingFiles.ToArray())
+                MutatedFiles     = $false
+            }
+    }
+
+    return New-ReadinessResult `
+        -Name 'Host payload files' `
+        -Status 'Passed' `
+        -Required $true `
+        -Message "Host payload root '$PayloadRoot' contains required Guest Agent and R0Collector files." `
+        -Details @{
+            GuestPayloadRoot = $PayloadRoot
+            CheckedFiles     = @($checkedFiles.ToArray())
+            MutatedFiles     = $false
+        }
+}
+
 # Test-HyperVVm checks that the requested golden VM can be read.
 # Inputs are the VM name plus precomputed module/admin readiness. Processing
 # skips Get-VM when the current process cannot reliably query Hyper-V. Return
@@ -673,6 +830,254 @@ function Test-GuestServiceInterface {
     }
 }
 
+# Test-PowerShellDirectReadOnly checks whether a running VM accepts a no-op
+# PowerShell Direct command with the configured guest credential. Inputs are VM
+# state, guest user, and secret name. Processing never starts or changes the VM.
+# Return behavior is Passed when a read-only command returns, Warning when the
+# probe is intentionally skipped, or Failed when an attempted probe fails.
+function Test-PowerShellDirectReadOnly {
+    param(
+        [string]$Vm,
+        [string]$VmState,
+        [bool]$CanQueryVmState,
+        [string]$GuestUser,
+        [string]$SecretName
+    )
+
+    if (-not $CanQueryVmState) {
+        return New-ReadinessResult `
+            -Name 'PowerShell Direct' `
+            -Status 'Warning' `
+            -Required $true `
+            -Message 'Skipped PowerShell Direct probe because VM state is not queryable in this session.' `
+            -Details @{
+                VmName  = $Vm
+                Skipped = $true
+                Reason  = 'VM state is not queryable'
+            }
+    }
+
+    if ([string]::IsNullOrWhiteSpace($GuestUser)) {
+        return New-ReadinessResult `
+            -Name 'PowerShell Direct' `
+            -Status 'Failed' `
+            -Required $true `
+            -Message 'Guest user name is empty; PowerShell Direct cannot build a credential.' `
+            -Details @{
+                VmName        = $Vm
+                GuestUserName = $GuestUser
+            }
+    }
+
+    $password = [Environment]::GetEnvironmentVariable($SecretName, 'Process')
+    if ([string]::IsNullOrEmpty($password)) {
+        return New-ReadinessResult `
+            -Name 'PowerShell Direct' `
+            -Status 'Warning' `
+            -Required $true `
+            -Message "Skipped PowerShell Direct probe because '$SecretName' is not visible to the current process." `
+            -Details @{
+                VmName        = $Vm
+                GuestUserName = $GuestUser
+                SecretName    = $SecretName
+                Skipped       = $true
+                Reason        = 'Guest password secret missing from current process'
+            }
+    }
+
+    if (-not [StringComparer]::OrdinalIgnoreCase.Equals($VmState, 'Running')) {
+        return New-ReadinessResult `
+            -Name 'PowerShell Direct' `
+            -Status 'Warning' `
+            -Required $true `
+            -Message "Skipped PowerShell Direct probe because VM '$Vm' is '$VmState'; read-only preflight will not start it." `
+            -Details @{
+                VmName          = $Vm
+                VmState         = $VmState
+                GuestUserName   = $GuestUser
+                Skipped         = $true
+                RequiresRunning = $true
+                MutatedVm       = $false
+            }
+    }
+
+    $invokeCommand = Get-Command -Name Invoke-Command -ErrorAction SilentlyContinue
+    if ($null -eq $invokeCommand -or -not $invokeCommand.Parameters.ContainsKey('VMName')) {
+        return New-ReadinessResult `
+            -Name 'PowerShell Direct' `
+            -Status 'Failed' `
+            -Required $true `
+            -Message 'Invoke-Command does not expose the VMName parameter needed for PowerShell Direct.' `
+            -Details @{
+                VmName        = $Vm
+                GuestUserName = $GuestUser
+                CommandFound  = $null -ne $invokeCommand
+            }
+    }
+
+    try {
+        $securePassword = ConvertTo-SecureString $password -AsPlainText -Force
+        $credential = [pscredential]::new($GuestUser, $securePassword)
+        $probe = Invoke-Command `
+            -VMName $Vm `
+            -Credential $credential `
+            -ScriptBlock {
+                [pscustomobject][ordered]@{
+                    ComputerName      = $env:COMPUTERNAME
+                    PowerShellVersion = $PSVersionTable.PSVersion.ToString()
+                    UserName          = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+                }
+            } `
+            -ErrorAction Stop
+
+        $firstProbe = @($probe | Select-Object -First 1)[0]
+        return New-ReadinessResult `
+            -Name 'PowerShell Direct' `
+            -Status 'Passed' `
+            -Required $true `
+            -Message "PowerShell Direct returned from VM '$Vm' using guest user '$GuestUser'." `
+            -Details @{
+                VmName             = $Vm
+                VmState            = $VmState
+                GuestUserName      = $GuestUser
+                GuestComputerName  = $firstProbe.ComputerName
+                GuestPowerShell    = $firstProbe.PowerShellVersion
+                GuestEffectiveUser = $firstProbe.UserName
+                SecretValuePrinted = $false
+                MutatedVm          = $false
+            }
+    }
+    catch {
+        return New-ReadinessResult `
+            -Name 'PowerShell Direct' `
+            -Status 'Failed' `
+            -Required $true `
+            -Message "PowerShell Direct probe failed for VM '$Vm': $($_.Exception.Message)" `
+            -Details @{
+                VmName             = $Vm
+                VmState            = $VmState
+                GuestUserName      = $GuestUser
+                ErrorType          = $_.Exception.GetType().FullName
+                SecretValuePrinted = $false
+                MutatedVm          = $false
+            }
+    }
+}
+
+# Test-GuestPayloadFilesReadOnly checks expected files already deployed in the
+# guest. Inputs are the VM, credential metadata, guest root, executable names,
+# and prior PowerShell Direct result. Processing uses Test-Path in the guest
+# only when PowerShell Direct already passed. Return behavior is Passed when all
+# files exist, Warning when skipped or missing, and no VM mutation occurs.
+function Test-GuestPayloadFilesReadOnly {
+    param(
+        [string]$Vm,
+        [string]$GuestUser,
+        [string]$SecretName,
+        [string]$PayloadRoot,
+        [string]$GuestRoot,
+        [string]$AgentExecutableName,
+        [string]$CollectorExecutableName,
+        [object]$PowerShellDirectResult
+    )
+
+    $fileMap = Get-RequiredPayloadFileMap `
+        -PayloadRoot $PayloadRoot `
+        -GuestRoot $GuestRoot `
+        -AgentExecutableName $AgentExecutableName `
+        -CollectorExecutableName $CollectorExecutableName
+    $guestPaths = @(
+        $fileMap['GuestAgent'].GuestPath,
+        $fileMap['R0Collector'].GuestPath
+    )
+
+    if ($PowerShellDirectResult.Status -ne 'Passed') {
+        return New-ReadinessResult `
+            -Name 'Guest deployed payload files' `
+            -Status 'Warning' `
+            -Required $false `
+            -Message "Skipped guest payload file probe because PowerShell Direct status is '$($PowerShellDirectResult.Status)'." `
+            -Details @{
+                VmName        = $Vm
+                GuestRoot     = $GuestRoot
+                ExpectedFiles = $guestPaths
+                Skipped       = $true
+                Reason        = $PowerShellDirectResult.Message
+                MutatedVm     = $false
+            }
+    }
+
+    try {
+        $password = [Environment]::GetEnvironmentVariable($SecretName, 'Process')
+        $securePassword = ConvertTo-SecureString $password -AsPlainText -Force
+        $credential = [pscredential]::new($GuestUser, $securePassword)
+        $probe = Invoke-Command `
+            -VMName $Vm `
+            -Credential $credential `
+            -ScriptBlock {
+                param([string[]]$Paths)
+
+                foreach ($path in $Paths) {
+                    [pscustomobject][ordered]@{
+                        Path   = $path
+                        Exists = Test-Path -LiteralPath $path -PathType Leaf
+                    }
+                }
+            } `
+            -ArgumentList (,$guestPaths) `
+            -ErrorAction Stop
+
+        $checked = @($probe | ForEach-Object {
+                [pscustomobject][ordered]@{
+                    Path   = $_.Path
+                    Exists = [bool]$_.Exists
+                }
+            })
+        $missing = @($checked | Where-Object { -not $_.Exists } | ForEach-Object { $_.Path })
+
+        if ($missing.Count -gt 0) {
+            return New-ReadinessResult `
+                -Name 'Guest deployed payload files' `
+                -Status 'Warning' `
+                -Required $false `
+                -Message "Guest VM '$Vm' is missing one or more pre-deployed payload files. This is acceptable only when the live runbook stages host payload files before execution." `
+                -Details @{
+                    VmName       = $Vm
+                    GuestRoot    = $GuestRoot
+                    CheckedFiles = $checked
+                    MissingFiles = $missing
+                    MutatedVm    = $false
+                }
+        }
+
+        return New-ReadinessResult `
+            -Name 'Guest deployed payload files' `
+            -Status 'Passed' `
+            -Required $false `
+            -Message "Guest VM '$Vm' already contains the expected Guest Agent and R0Collector files." `
+            -Details @{
+                VmName       = $Vm
+                GuestRoot    = $GuestRoot
+                CheckedFiles = $checked
+                MutatedVm    = $false
+            }
+    }
+    catch {
+        return New-ReadinessResult `
+            -Name 'Guest deployed payload files' `
+            -Status 'Warning' `
+            -Required $false `
+            -Message "Unable to read guest payload file state on VM '$Vm': $($_.Exception.Message)" `
+            -Details @{
+                VmName       = $Vm
+                GuestRoot    = $GuestRoot
+                ExpectedFiles = $guestPaths
+                ErrorType    = $_.Exception.GetType().FullName
+                MutatedVm    = $false
+            }
+    }
+}
+
 $results = New-Object System.Collections.Generic.List[object]
 
 $administratorResult = Test-AdministratorPrivilege
@@ -686,6 +1091,13 @@ $guestSecretResult = Test-GuestPasswordSecret -SecretName $GuestPasswordSecretNa
 
 $runtimeRootResult = Test-RuntimeRootWritableReadOnly -Path $RuntimeRoot
 [void]$results.Add($runtimeRootResult)
+
+$hostPayloadResult = Test-HostPayloadFiles `
+    -PayloadRoot $GuestPayloadRoot `
+    -GuestRoot $GuestWorkingDirectory `
+    -AgentExecutableName $GuestAgentExecutableName `
+    -CollectorExecutableName $R0CollectorExecutableName
+[void]$results.Add($hostPayloadResult)
 
 $isAdministrator = $administratorResult.Status -eq 'Passed'
 $isHyperVAvailable = $hyperVModuleResult.Status -eq 'Passed'
@@ -710,6 +1122,38 @@ $guestServiceResult = Test-GuestServiceInterface `
     -Vm $VmName `
     -CanQueryVmState $canQueryVmState
 [void]$results.Add($guestServiceResult)
+
+$vmState = ''
+$vmDetails = $vmResult.Details
+if ($vmResult.Status -eq 'Passed' -and
+    $vmDetails -is [System.Collections.IDictionary] -and
+    $vmDetails.Contains('State')) {
+    $vmState = [string]$vmDetails['State']
+}
+elseif ($vmResult.Status -eq 'Passed' -and
+    $null -ne $vmDetails -and
+    $null -ne $vmDetails.PSObject.Properties['State']) {
+    $vmState = [string]$vmDetails.State
+}
+
+$powerShellDirectResult = Test-PowerShellDirectReadOnly `
+    -Vm $VmName `
+    -VmState $vmState `
+    -CanQueryVmState $canQueryVmState `
+    -GuestUser $GuestUserName `
+    -SecretName $GuestPasswordSecretName
+[void]$results.Add($powerShellDirectResult)
+
+$guestPayloadResult = Test-GuestPayloadFilesReadOnly `
+    -Vm $VmName `
+    -GuestUser $GuestUserName `
+    -SecretName $GuestPasswordSecretName `
+    -PayloadRoot $GuestPayloadRoot `
+    -GuestRoot $GuestWorkingDirectory `
+    -AgentExecutableName $GuestAgentExecutableName `
+    -CollectorExecutableName $R0CollectorExecutableName `
+    -PowerShellDirectResult $powerShellDirectResult
+[void]$results.Add($guestPayloadResult)
 
 $failedCount = @($results | Where-Object { $_.Status -eq 'Failed' }).Count
 $warningCount = @($results | Where-Object { $_.Status -eq 'Warning' }).Count
@@ -739,8 +1183,11 @@ Write-Output ([pscustomobject][ordered]@{
         VmName         = $VmName
         CheckpointName = $CheckpointName
         RuntimeRoot    = $RuntimeRoot
+        GuestPayloadRoot = $GuestPayloadRoot
+        GuestUserName  = $GuestUserName
+        GuestRoot      = $GuestWorkingDirectory
         ReadOnly       = $true
-        Note           = 'No probe files were written and no VM mutation commands were executed.'
+        Note           = 'No probe files were written and no VM mutation commands were executed; PowerShell Direct and guest payload probes run only when the VM is already running and credentials are visible.'
     })
 
 exit $exitCode

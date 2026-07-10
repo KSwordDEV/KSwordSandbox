@@ -20,4 +20,6 @@ internal sealed record GuestAgentParsedOptions
     public string DriverDevicePath { get; init; } = @"\\.\KSwordSandboxDriver";
 
     public bool R0Mock { get; init; }
+
+    public bool CaptureScreenshots { get; init; }
 }

@@ -10,6 +10,8 @@
   `Invoke-Command -VMName ... -Credential ...`.
 - Guest Service Interface enabled. Live runbooks use `Copy-VMFile` to copy the
   submitted sample into the guest.
+- Host payload prepared outside git under `paths.guestPayloadRoot`, normally
+  `D:\Temp\KSwordSandbox\payload\guest-tools`.
 - Network isolation appropriate for the malware-analysis lab.
 
 ## Suggested guest folders
@@ -36,6 +38,29 @@ C:\KSwordSandbox\agent\KSword.Sandbox.Agent.exe
 
 See `docs/guest-payload-staging.md` for the MSBuild staging script and
 PowerShell Direct copy commands.
+
+## Readiness preflight
+
+Run the non-destructive readiness report before refreshing or using the clean
+checkpoint:
+
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\Test-HyperVReadiness.ps1 `
+  -VmName 'KSwordSandbox-Win10-Golden' `
+  -CheckpointName 'Clean' `
+  -GuestUserName 'SandboxUser' `
+  -GuestPasswordSecretName 'KSWORDBOX_GUEST_PASSWORD' `
+  -GuestPayloadRoot 'D:\Temp\KSwordSandbox\payload\guest-tools' `
+  -GuestWorkingDirectory 'C:\KSwordSandbox' `
+  -RuntimeRoot 'D:\Temp\KSwordSandbox'
+```
+
+Expected output is a sequence of `ReadinessCheck` objects plus one
+`ReadinessSummary`. Non-admin shells and missing guest passwords are reported
+explicitly. Administrator shells additionally check the VM, checkpoint, Guest
+Service Interface, host payload files, and, when the VM is already running,
+PowerShell Direct plus guest-deployed payload files. The script does not start,
+stop, create, delete, or restore any VM.
 
 ## Host credential handling
 

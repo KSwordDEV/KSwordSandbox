@@ -1,5 +1,5 @@
 {
-  "version": "2026-07-10-v1",
+  "version": "2026-07-10-v2",
   "rules": [
     {
       "id": "host-submission",
@@ -299,7 +299,7 @@
       "id": "static-pe-known-packer",
       "title": "Known packer or UPX-like PE traits",
       "severity": "medium",
-      "summary": "Static analysis found packer tags such as UPX section names.",
+      "summary": "Static analysis found packer tags such as UPX section names, known packer section markers, or packer strings.",
       "mitreTechniqueId": "T1027.002",
       "mitreTechniqueName": "Software Packing",
       "eventTypes": [
@@ -307,7 +307,9 @@
       ],
       "dataContains": {
         "tags": [
-          "packer_upx"
+          "packer_upx",
+          "packer_section_name",
+          "packer_string_hint"
         ]
       },
       "tags": [
@@ -355,6 +357,215 @@
       "tags": [
         "static",
         "network"
+      ]
+    },
+    {
+      "id": "static-pe-imports-present",
+      "title": "PE import table present",
+      "severity": "info",
+      "summary": "Static analysis parsed at least one PE import descriptor; imported module/API evidence may appear in interesting strings.",
+      "eventTypes": [
+        "static.analysis.completed"
+      ],
+      "dataContains": {
+        "tags": [
+          "imports_present"
+        ]
+      },
+      "tags": [
+        "static",
+        "pe",
+        "imports"
+      ]
+    },
+    {
+      "id": "static-import-suspicious-api",
+      "title": "Suspicious Windows API import or string",
+      "severity": "medium",
+      "summary": "Static analysis found imports or API-like strings commonly used for native Windows execution, memory, persistence, network, or anti-analysis behavior.",
+      "mitreTechniqueId": "T1106",
+      "mitreTechniqueName": "Native API",
+      "eventTypes": [
+        "static.analysis.completed"
+      ],
+      "dataContains": {
+        "tags": [
+          "import_suspicious_api",
+          "suspicious_api_string"
+        ]
+      },
+      "tags": [
+        "static",
+        "imports",
+        "windows-api"
+      ]
+    },
+    {
+      "id": "static-import-process-injection",
+      "title": "Process injection API imports",
+      "severity": "high",
+      "summary": "Static analysis found imports associated with cross-process memory writes, thread creation, APC injection, or thread-context manipulation.",
+      "mitreTechniqueId": "T1055",
+      "mitreTechniqueName": "Process Injection",
+      "eventTypes": [
+        "static.analysis.completed"
+      ],
+      "dataContains": {
+        "tags": [
+          "import_process_injection_api"
+        ]
+      },
+      "tags": [
+        "static",
+        "imports",
+        "process-injection"
+      ]
+    },
+    {
+      "id": "static-import-network-api",
+      "title": "Network or download API imports",
+      "severity": "medium",
+      "summary": "Static analysis found WinINet, WinHTTP, URLMon, or Winsock import evidence that can support download or command-and-control behavior.",
+      "mitreTechniqueId": "T1105",
+      "mitreTechniqueName": "Ingress Tool Transfer",
+      "eventTypes": [
+        "static.analysis.completed"
+      ],
+      "dataContains": {
+        "tags": [
+          "import_network_api"
+        ]
+      },
+      "tags": [
+        "static",
+        "imports",
+        "network"
+      ]
+    },
+    {
+      "id": "static-import-persistence-api",
+      "title": "Persistence-capable API imports",
+      "severity": "medium",
+      "summary": "Static analysis found registry, service-control, or shell execution API imports that can support persistence changes.",
+      "mitreTechniqueId": "T1112",
+      "mitreTechniqueName": "Modify Registry",
+      "eventTypes": [
+        "static.analysis.completed"
+      ],
+      "dataContains": {
+        "tags": [
+          "import_persistence_api"
+        ]
+      },
+      "tags": [
+        "static",
+        "imports",
+        "persistence"
+      ]
+    },
+    {
+      "id": "static-import-anti-analysis-api",
+      "title": "Anti-analysis API imports or strings",
+      "severity": "medium",
+      "summary": "Static analysis found debugger or timing API imports/strings commonly used in sandbox or debugger checks.",
+      "mitreTechniqueId": "T1622",
+      "mitreTechniqueName": "Debugger Evasion",
+      "eventTypes": [
+        "static.analysis.completed"
+      ],
+      "dataContains": {
+        "tags": [
+          "import_anti_analysis_api"
+        ]
+      },
+      "tags": [
+        "static",
+        "imports",
+        "anti-analysis"
+      ]
+    },
+    {
+      "id": "static-pe-tls-callbacks",
+      "title": "TLS directory or callback pointer present",
+      "severity": "medium",
+      "summary": "Static analysis found a PE TLS directory or callback pointer, which can execute code before the main entry point and is useful to triage for packing or evasion.",
+      "mitreTechniqueId": "T1027",
+      "mitreTechniqueName": "Obfuscated Files or Information",
+      "eventTypes": [
+        "static.analysis.completed"
+      ],
+      "dataContains": {
+        "tags": [
+          "tls_directory_present",
+          "tls_callback_pointer",
+          "tls_callbacks"
+        ]
+      },
+      "tags": [
+        "static",
+        "pe",
+        "tls"
+      ]
+    },
+    {
+      "id": "static-pe-exports-present",
+      "title": "PE export table present",
+      "severity": "info",
+      "summary": "Static analysis parsed a PE export directory; exported names may appear in interesting strings for DLL triage.",
+      "eventTypes": [
+        "static.analysis.completed"
+      ],
+      "dataContains": {
+        "tags": [
+          "exports_present"
+        ]
+      },
+      "tags": [
+        "static",
+        "pe",
+        "exports"
+      ]
+    },
+    {
+      "id": "static-export-registration-entrypoint",
+      "title": "COM registration export entry point",
+      "severity": "medium",
+      "summary": "Static analysis found DllRegisterServer, DllUnregisterServer, or DllInstall exports that may be invoked through regsvr32-style execution.",
+      "mitreTechniqueId": "T1218.010",
+      "mitreTechniqueName": "Regsvr32",
+      "eventTypes": [
+        "static.analysis.completed"
+      ],
+      "dataContains": {
+        "tags": [
+          "export_registration_entrypoint"
+        ]
+      },
+      "tags": [
+        "static",
+        "exports",
+        "lolbin"
+      ]
+    },
+    {
+      "id": "static-export-service-entrypoint",
+      "title": "Service-style export entry point",
+      "severity": "low",
+      "summary": "Static analysis found service-oriented export names such as ServiceMain, useful for DLL/service triage.",
+      "mitreTechniqueId": "T1543.003",
+      "mitreTechniqueName": "Windows Service",
+      "eventTypes": [
+        "static.analysis.completed"
+      ],
+      "dataContains": {
+        "tags": [
+          "export_service_entrypoint"
+        ]
+      },
+      "tags": [
+        "static",
+        "exports",
+        "service"
       ]
     }
   ]

@@ -1,3 +1,4 @@
+using System.Text.Json;
 using KSword.Sandbox.Abstractions;
 using KSword.Sandbox.Core.Configuration;
 using KSword.Sandbox.Core.Execution;
@@ -51,6 +52,11 @@ app.MapGet("/api/jobs/{jobId:guid}/events/live", (Guid jobId, int? offset, int? 
         return Results.NotFound(new { error = ex.Message });
     }
 });
+// GET /api/jobs/{jobId}/events/stream keeps the raw-event monitor open with
+// Server-Sent Events. Inputs are a job id plus optional offset/take/intervalMs
+// query values; processing repeatedly reads unclassified live events and writes
+// snapshot events; the endpoint returns no body after the client disconnects.
+app.MapGet("/api/jobs/{jobId:guid}/events/stream", WriteLiveEventStreamAsync);
 // GET /api/jobs/{jobId}/report/html accepts only a job identifier from the
 // route. It never accepts a caller-supplied filesystem path; processing looks
 // up the recorded HTML report path for that job and returns the report body
@@ -175,6 +181,97 @@ app.MapPost("/api/jobs/{jobId:guid}/guest-events/import", (Guid jobId, GuestEven
 });
 
 app.Run();
+
+/// <summary>
+/// Streams live raw-event snapshots to a browser with Server-Sent Events.
+/// Inputs are the route job ID, optional paging/interval query values, the HTTP
+/// context, and the job service; processing repeatedly reads current host and
+/// guest artifacts without rule classification; the function returns no value
+/// and exits when the browser cancels the request.
+/// </summary>
+static async Task WriteLiveEventStreamAsync(
+    Guid jobId,
+    int? offset,
+    int? take,
+    int? intervalMs,
+    HttpContext context,
+    SandboxJobService service)
+{
+    var cancellationToken = context.RequestAborted;
+    var currentOffset = Math.Max(0, offset ?? 0);
+    var pageSize = Math.Clamp(take ?? 100, 1, 500);
+    var pollInterval = TimeSpan.FromMilliseconds(Math.Clamp(intervalMs ?? 2000, 500, 10000));
+
+    LiveEventSnapshot initialSnapshot;
+    try
+    {
+        initialSnapshot = service.GetLiveEvents(jobId, currentOffset, pageSize);
+    }
+    catch (KeyNotFoundException ex)
+    {
+        context.Response.StatusCode = StatusCodes.Status404NotFound;
+        await context.Response.WriteAsJsonAsync(new { error = ex.Message }, cancellationToken);
+        return;
+    }
+
+    context.Response.StatusCode = StatusCodes.Status200OK;
+    context.Response.ContentType = "text/event-stream; charset=utf-8";
+    context.Response.Headers["Cache-Control"] = "no-cache";
+    context.Response.Headers["X-Accel-Buffering"] = "no";
+
+    var sourceSignature = BuildLiveSourceSignature(initialSnapshot.Sources);
+    try
+    {
+        await WriteLiveEventSnapshotAsync(context.Response, initialSnapshot, cancellationToken);
+        currentOffset = initialSnapshot.NextOffset;
+
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            await Task.Delay(pollInterval, cancellationToken);
+
+            var snapshot = service.GetLiveEvents(jobId, currentOffset, pageSize);
+            var nextSignature = BuildLiveSourceSignature(snapshot.Sources);
+            if (!string.Equals(nextSignature, sourceSignature, StringComparison.Ordinal))
+            {
+                snapshot = service.GetLiveEvents(jobId, 0, pageSize);
+                sourceSignature = nextSignature;
+            }
+
+            await WriteLiveEventSnapshotAsync(context.Response, snapshot, cancellationToken);
+            currentOffset = snapshot.NextOffset;
+        }
+    }
+    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+    {
+        // Browser navigation or EventSource.close() cancels the request. There
+        // is no response body to return after an SSE client disconnects.
+    }
+}
+
+/// <summary>
+/// Builds a stable signature for live-event source paths.
+/// Inputs are source artifact paths from a snapshot; processing sorts them
+/// ordinal-ignore-case; the function returns a compact comparison key used to
+/// reset live cursors when guest artifacts replace planning-only events.
+/// </summary>
+static string BuildLiveSourceSignature(IEnumerable<string> sources)
+{
+    return string.Join("\n", sources.OrderBy(source => source, StringComparer.OrdinalIgnoreCase));
+}
+
+/// <summary>
+/// Writes one Server-Sent Events frame for a live snapshot.
+/// Inputs are the HTTP response, snapshot payload, and cancellation token;
+/// processing serializes with ASP.NET-style camelCase JSON and flushes the
+/// stream; the function returns no value.
+/// </summary>
+static async Task WriteLiveEventSnapshotAsync(HttpResponse response, LiveEventSnapshot snapshot, CancellationToken cancellationToken)
+{
+    var data = JsonSerializer.Serialize(snapshot, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+    await response.WriteAsync("event: snapshot\n", cancellationToken);
+    await response.WriteAsync($"data: {data}\n\n", cancellationToken);
+    await response.Body.FlushAsync(cancellationToken);
+}
 
 /// <summary>
 /// Finds the repository root by walking upward from the Web content root.
@@ -361,6 +458,11 @@ static string RenderDashboard()
             .event-monitor table { background: white; font-size: 13px; }
             .event-monitor td:nth-child(5), .event-monitor td:nth-child(6) { max-width: 260px; word-break: break-all; }
             .event-source-list { margin: 6px 0 0; padding-left: 18px; }
+            .runbook-output details { margin: 4px 0; }
+            .runbook-output summary { cursor: pointer; font-weight: 700; }
+            .runbook-output pre { max-height: 180px; margin: 6px 0 0; }
+            .status-failed { color: #b91c1c; font-weight: 700; }
+            .status-ok { color: #047857; font-weight: 700; }
             @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
           </style>
         </head>
@@ -414,8 +516,11 @@ static string RenderDashboard()
           </main>
           <script>
             const liveEventOffsets = new Map();
+            const liveEventSourceSignatures = new Map();
             let liveEventTimer = null;
+            let liveEventStream = null;
             let liveEventJobId = null;
+            let liveEventMode = 'idle';
 
             async function scanTargets() {
               setBusy(true);
@@ -617,19 +722,120 @@ static string RenderDashboard()
 
             function startLiveMonitor(jobId) {
               // Inputs: the current job id rendered in the UI. Processing:
-              // resets the visible raw-event table for that job and starts one
-              // shared polling timer. Return: no value.
+              // resets the visible raw-event table for that job, prefers an
+              // SSE EventSource stream, and falls back to one shared polling
+              // timer when streaming is unavailable. Return: no value.
               if (!jobId) {
                 return;
               }
 
+              stopLiveMonitor();
               liveEventJobId = jobId;
               liveEventOffsets.set(jobId, 0);
-              if (liveEventTimer) {
-                clearInterval(liveEventTimer);
+              liveEventSourceSignatures.delete(jobId);
+
+              const rows = document.getElementById('liveEventRows');
+              if (rows) {
+                rows.innerHTML = '<p class="hint">Opening live raw-event stream...</p>';
               }
 
-              refreshLiveEvents(jobId, true);
+              if ('EventSource' in window) {
+                startLiveEventStream(jobId);
+              } else {
+                startLiveEventPolling(jobId, true, 'EventSource is not available in this browser.');
+              }
+            }
+
+            function stopLiveMonitor() {
+              // Inputs: none. Processing: closes any active SSE stream and
+              // clears the polling timer before another job is rendered.
+              // Return: no value.
+              if (liveEventStream) {
+                liveEventStream.close();
+                liveEventStream = null;
+              }
+
+              if (liveEventTimer) {
+                clearInterval(liveEventTimer);
+                liveEventTimer = null;
+              }
+
+              liveEventMode = 'idle';
+            }
+
+            function startLiveEventStream(jobId) {
+              // Inputs: job id for the current panel. Processing: opens an
+              // EventSource against the SSE endpoint and appends every snapshot;
+              // on connection failure the function switches to polling. Return:
+              // no value.
+              liveEventMode = 'sse';
+              const url = `/api/jobs/${encodeURIComponent(jobId)}/events/stream?offset=0&take=100&intervalMs=2000`;
+              try {
+                liveEventStream = new EventSource(url);
+              } catch (error) {
+                startLiveEventPolling(jobId, false, `SSE could not start: ${error.message}`);
+                return;
+              }
+
+              const status = document.getElementById('liveEventStatus');
+              if (status) {
+                status.className = 'hint';
+                status.textContent = 'Opening SSE raw-event stream...';
+              }
+
+              liveEventStream.onopen = () => {
+                const openStatus = document.getElementById('liveEventStatus');
+                if (openStatus && liveEventMode === 'sse') {
+                  openStatus.className = 'hint';
+                  openStatus.textContent = 'SSE raw-event stream connected; waiting for snapshots...';
+                }
+              };
+
+              liveEventStream.addEventListener('snapshot', event => {
+                if (liveEventJobId !== jobId) {
+                  return;
+                }
+
+                try {
+                  const snapshot = JSON.parse(event.data);
+                  renderLiveEventSnapshot(jobId, snapshot, liveEventOffsets.get(jobId) === 0, 'SSE');
+                } catch (error) {
+                  const parseStatus = document.getElementById('liveEventStatus');
+                  if (parseStatus) {
+                    parseStatus.className = 'error';
+                    parseStatus.textContent = `SSE snapshot parse failed: ${error.message}`;
+                  }
+                }
+              });
+
+              liveEventStream.onerror = () => {
+                if (liveEventJobId !== jobId || liveEventMode !== 'sse') {
+                  return;
+                }
+
+                if (liveEventStream) {
+                  liveEventStream.close();
+                  liveEventStream = null;
+                }
+
+                startLiveEventPolling(jobId, false, 'SSE stream disconnected; switched to polling fallback.');
+              };
+            }
+
+            function startLiveEventPolling(jobId, reset, reason) {
+              // Inputs: job id, reset flag, and optional fallback reason.
+              // Processing: starts the legacy polling endpoint at the current
+              // offset and keeps the raw monitor alive. Return: no value.
+              liveEventMode = 'polling';
+              if (reason) {
+                const status = document.getElementById('liveEventStatus');
+                if (status) {
+                  status.className = 'hint';
+                  status.textContent = reason;
+                }
+              }
+
+              refreshLiveEvents(jobId, reset);
               liveEventTimer = setInterval(() => {
                 if (liveEventJobId) {
                   refreshLiveEvents(liveEventJobId, false);
@@ -666,15 +872,57 @@ static string RenderDashboard()
                   throw new Error(snapshot.error || 'Live event refresh failed');
                 }
 
-                liveEventOffsets.set(jobId, snapshot.nextOffset || offset);
-                status.className = 'hint';
-                status.textContent = `Raw events: ${snapshot.totalEvents || 0}; next offset: ${snapshot.nextOffset || 0}; updated ${new Date().toLocaleTimeString()}.`;
-                sources.innerHTML = renderLiveEventSources(snapshot.sources || []);
-                renderLiveEventRows(snapshot.events || [], reset || offset === 0);
+                renderLiveEventSnapshot(jobId, snapshot, reset || offset === 0, 'polling');
               } catch (error) {
                 status.textContent = `Live event refresh failed: ${error.message}`;
                 status.className = 'error';
               }
+            }
+
+            function renderLiveEventSnapshot(jobId, snapshot, replace, transport) {
+              // Inputs: the active job id, one API/SSE live-event snapshot,
+              // replacement flag, and transport label. Processing: advances
+              // the cursor, updates source labels, and appends raw rows without
+              // classification. Return: no value.
+              const status = document.getElementById('liveEventStatus');
+              const sources = document.getElementById('liveEventSources');
+              if (!status || !sources) {
+                return;
+              }
+
+              const previousOffset = liveEventOffsets.get(jobId) || 0;
+              const sourceSignature = buildLiveSourceSignature(snapshot.sources || []);
+              const previousSourceSignature = liveEventSourceSignatures.get(jobId);
+              if (previousSourceSignature && previousSourceSignature !== sourceSignature) {
+                liveEventOffsets.set(jobId, 0);
+                if (transport === 'polling' && previousOffset > 0) {
+                  liveEventSourceSignatures.set(jobId, sourceSignature);
+                  refreshLiveEvents(jobId, true);
+                  return;
+                }
+
+                replace = true;
+              }
+
+              liveEventSourceSignatures.set(jobId, sourceSignature);
+              const nextOffset = snapshot.nextOffset == null ? previousOffset : Number(snapshot.nextOffset);
+              liveEventOffsets.set(jobId, Number.isFinite(nextOffset) ? nextOffset : previousOffset);
+
+              status.className = 'hint';
+              status.textContent = `${transport} raw events: ${snapshot.totalEvents || 0}; next offset: ${liveEventOffsets.get(jobId) || 0}; updated ${new Date().toLocaleTimeString()}.`;
+              sources.innerHTML = renderLiveEventSources(snapshot.sources || []);
+              renderLiveEventRows(snapshot.events || [], replace);
+            }
+
+            function buildLiveSourceSignature(sources) {
+              // Inputs: source artifact paths from one live snapshot.
+              // Processing: sorts them case-insensitively and joins with a
+              // delimiter. Return: a stable key used to reset polling cursors
+              // when guest output files replace planning-only report events.
+              return (sources || [])
+                .map(source => String(source))
+                .sort((left, right) => left.localeCompare(right, undefined, { sensitivity: 'accent' }))
+                .join('\n');
             }
 
             function renderLiveEventSources(sources) {
@@ -818,24 +1066,58 @@ static string RenderDashboard()
             }
 
             function renderExecution(result, wrapper) {
-              const rows = (result.stepResults || []).map(step => `
+              const rows = (result.stepResults || []).map(step => {
+                const statusClass = step.success ? 'status-ok' : 'status-failed';
+                const stepLabel = `${escapeHtml(step.title || step.stepId || 'runbook step')}<br><code>${escapeHtml(step.stepId || '')}</code>`;
+                const command = step.powerShell ? `<details open><summary>PowerShell command</summary><pre>${escapeHtml(step.powerShell)}</pre></details>` : '<span class="hint">No command text.</span>';
+                const message = step.message ? `<p class="${step.success ? 'hint' : 'error'}"><strong>Message:</strong> ${escapeHtml(step.message)}</p>` : '';
+                const stdout = renderOutputDetails('stdout', step.standardOutput);
+                const stderr = renderOutputDetails('stderr', step.standardError);
+                return `
                 <tr>
                   <td>${step.stepIndex}</td>
-                  <td>${escapeHtml(step.stepId)}</td>
-                  <td>${step.success ? 'ok' : 'failed'}</td>
-                  <td>${step.skipped ? 'yes' : 'no'}</td>
-                  <td>${step.exitCode ?? ''}</td>
-                  <td>${escapeHtml(step.message || '')}</td>
-                </tr>`).join('');
+                  <td>${stepLabel}</td>
+                  <td><span class="${statusClass}">${step.success ? 'ok' : 'failed'}</span><br><span class="hint">skipped: ${step.skipped ? 'yes' : 'no'}</span></td>
+                  <td>
+                    <strong>Exit:</strong> ${step.exitCode ?? '(none)'}<br>
+                    <strong>Duration:</strong> ${escapeHtml(formatDuration(step.duration))}<br>
+                    <strong>Started:</strong> ${escapeHtml(formatEventTime(step.startedAtUtc))}<br>
+                    <span class="hint">elevation: ${step.requiresElevation ? 'yes' : 'no'}; mutates VM: ${step.mutatesVmState ? 'yes' : 'no'}</span>
+                  </td>
+                  <td class="runbook-output">${command}${message}${stdout}${stderr}</td>
+                </tr>`;
+              }).join('');
               const importMessage = wrapper && wrapper.guestImportMessage ? `<p class="${wrapper.guestImportSucceeded ? 'ok' : 'hint'}">${escapeHtml(wrapper.guestImportMessage)}</p>` : '';
               document.getElementById('executionResult').innerHTML = `
-                <p><strong>Mode:</strong> ${escapeHtml(result.mode)} | <strong>Success:</strong> ${result.success} | <strong>Executed:</strong> ${result.executedSteps}/${result.totalSteps}</p>
+                <p><strong>Mode:</strong> ${escapeHtml(result.mode)} | <strong>Success:</strong> ${result.success} | <strong>Executed:</strong> ${result.executedSteps}/${result.totalSteps} | <strong>Duration:</strong> ${escapeHtml(formatDuration(result.duration))}</p>
                 ${result.message ? `<p class="error">${escapeHtml(result.message)}</p>` : ''}
                 ${importMessage}
                 <table>
-                  <thead><tr><th>#</th><th>Step</th><th>Status</th><th>Skipped</th><th>Exit</th><th>Message</th></tr></thead>
+                  <thead><tr><th>#</th><th>Step</th><th>Status</th><th>Timing / exit</th><th>Command / output / error</th></tr></thead>
                   <tbody>${rows}</tbody>
                 </table>`;
+            }
+
+            function renderOutputDetails(label, value) {
+              // Inputs: a stream label and captured text. Processing: skips
+              // empty streams and renders non-empty data behind a details
+              // expander. Return: HTML text for the runbook output cell.
+              if (!value) {
+                return '';
+              }
+
+              return `<details ${label === 'stderr' ? 'open' : ''}><summary>${escapeHtml(label)}</summary><pre>${escapeHtml(value)}</pre></details>`;
+            }
+
+            function formatDuration(value) {
+              // Inputs: .NET TimeSpan JSON text or a primitive value. Processing
+              // keeps non-empty values readable without assuming a browser
+              // duration parser. Return: display text.
+              if (value == null || value === '') {
+                return '-';
+              }
+
+              return String(value);
             }
 
             function setStatus(message, isError) {

@@ -4,6 +4,7 @@ using KSword.Sandbox.Core.Files;
 using KSword.Sandbox.Core.Jobs;
 using KSword.Sandbox.Core.Rules;
 using KSword.Sandbox.Core.StaticAnalysis;
+using KSword.Sandbox.SmokeTests.Framework;
 using System.Text.Json;
 
 return SmokeTestProgram.Run(args);
@@ -32,6 +33,7 @@ internal static class SmokeTestProgram
             AssertExecutableScanning();
             AssertStaticAnalysis(rules);
             AssertPlanningPipeline(repositoryRoot, rules);
+            AssertScenarioContracts(repositoryRoot);
             Console.WriteLine("Smoke tests passed.");
             return 0;
         }
@@ -40,6 +42,50 @@ internal static class SmokeTestProgram
             Console.Error.WriteLine(ex);
             return 1;
         }
+    }
+
+    /// <summary>
+    /// Runs modular smoke-test scenarios that live under Scenarios/.
+    /// Inputs are the repository root; processing creates a temporary runtime
+    /// root and executes source/docs contract checks; the method returns no
+    /// value when every scenario passes.
+    /// </summary>
+    private static void AssertScenarioContracts(string repositoryRoot)
+    {
+        var runtimeRoot = Path.Combine(Path.GetTempPath(), "KSwordSandboxScenarioSmoke", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(runtimeRoot);
+        var context = new SmokeTestContext
+        {
+            RepositoryRoot = repositoryRoot,
+            RuntimeRoot = runtimeRoot
+        };
+        var suite = new SmokeTestSuite(CreateScenarioInstances());
+        var results = suite.RunAsync(context).GetAwaiter().GetResult();
+        foreach (var result in results)
+        {
+            Assert(result.Passed, $"{result.ScenarioId} failed: {result.Message}");
+            Console.WriteLine($"Scenario {result.ScenarioId}: {result.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Discovers smoke scenarios compiled into this assembly.
+    /// There are no inputs; processing instantiates non-abstract scenario
+    /// classes with parameterless constructors and orders them by ScenarioId;
+    /// the method returns ready-to-run scenario instances.
+    /// </summary>
+    private static IReadOnlyList<ISmokeTestScenario> CreateScenarioInstances()
+    {
+        return typeof(ISmokeTestScenario)
+            .Assembly
+            .GetTypes()
+            .Where(type =>
+                typeof(ISmokeTestScenario).IsAssignableFrom(type) &&
+                type is { IsAbstract: false, IsInterface: false } &&
+                type.GetConstructor(Type.EmptyTypes) is not null)
+            .Select(type => (ISmokeTestScenario)Activator.CreateInstance(type)!)
+            .OrderBy(scenario => scenario.ScenarioId, StringComparer.OrdinalIgnoreCase)
+            .ToList();
     }
 
     /// <summary>

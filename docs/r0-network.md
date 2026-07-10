@@ -81,3 +81,63 @@ Do not place `.sys`, `.pdb`, `.obj`, or other native build outputs under the rep
 - The filters have no protocol conditions.  This maximizes early telemetry but can produce high event volume on active hosts.
 - Runtime validation should be performed in a test-signed VM by loading the driver, generating outbound and inbound TCP/UDP activity, draining `READ_EVENTS`, and checking PID, address, port, layer, callout, and filter fields.
 - The health IOCTL still exposes a single `LastNtStatus`; it does not yet expose separate per-producer status or WFP classify/event counters.
+
+## Runtime validation gate
+
+Before generating traffic, verify the VM can safely load the test-signed driver:
+
+```powershell
+.\scripts\Test-R0Readiness.ps1 `
+  -DriverSysPath C:\KSwordSandbox\driver\KSword.Sandbox.Driver.sys `
+  -R0CollectorPath C:\KSwordSandbox\tools\KSword.Sandbox.R0Collector.exe
+```
+
+Default readiness is read-only. It checks file readability, Authenticode
+signature metadata, Administrator status, `bcdedit` test-signing state, and
+read-only service state. It does not load WFP callouts.
+
+After signing is trusted and `testsigning` is enabled, explicitly install and
+start the service in the isolated VM:
+
+```powershell
+.\scripts\Test-R0Readiness.ps1 `
+  -DriverSysPath C:\KSwordSandbox\driver\KSword.Sandbox.Driver.sys `
+  -AllowServiceMutation `
+  -InstallService `
+  -StartService `
+  -CheckDeviceHealth
+```
+
+Generate controlled network activity only after the health check passes. Keep
+the first smoke simple:
+
+```powershell
+Test-NetConnection 1.1.1.1 -Port 443
+```
+
+Drain queued events:
+
+```powershell
+.\scripts\Test-R0Readiness.ps1 `
+  -R0CollectorPath C:\KSwordSandbox\tools\KSword.Sandbox.R0Collector.exe `
+  -DrainWithCollector `
+  -CollectorOutputPath C:\KSwordSandbox\out\r0-network-events.jsonl
+```
+
+Expected network evidence in the JSONL `data` object:
+
+- `typedPayloadKind` is `network`.
+- `protocolName` is usually `tcp` for the `Test-NetConnection` smoke.
+- `directionName` is `outbound` for connect authorization events.
+- `addressFamilyName` is `ipv4` or `ipv6`.
+- `remoteAddress`, `remotePort`, `layerIdHex`, `calloutIdHex`, and
+  `filterIdHex` are present when WFP supplied those fields.
+
+Unload and delete the service when finished:
+
+```powershell
+.\scripts\Test-R0Readiness.ps1 `
+  -AllowServiceMutation `
+  -StopService `
+  -DeleteService
+```

@@ -133,6 +133,39 @@ The job result panel exposes:
 - `Execute live runbook`
 - `Import guest events / refresh report`
 
+## Runbook execution UX contract
+
+Runbook execution is operator-diagnostics data, not final malware telemetry.
+The UI should make failures actionable without requiring the operator to open
+`runbook-execution.json` manually.
+
+The execution summary should show:
+
+- mode (`DryRun` or `Live`);
+- aggregate success/failure;
+- executed step count versus total step count;
+- aggregate duration;
+- failed step index when one exists;
+- top-level error/message text;
+- guest import status and error text when automatic import was requested.
+
+Each step row should expose:
+
+- step index, step ID, and title;
+- status and skipped state;
+- PowerShell exit code;
+- step duration;
+- error/message text;
+- captured stdout;
+- captured stderr.
+
+Long stdout/stderr values should be collapsed by default with a copy action so
+large command output does not hide the failed step or exit code. Empty output
+should render as an explicit empty state. The current persisted model already
+stores `standardOutput`, `standardError`, `exitCode`, `duration`, and `message`
+for every `SandboxRunbookStepExecutionResult`; QA should treat those fields as
+the stable contract even when the visual layout changes.
+
 The live button is the first usable path toward "start VM and report behavior",
 but it still depends on local Hyper-V readiness:
 
@@ -172,4 +205,54 @@ if (-not $execution.guestImportSucceeded) {
       -ContentType 'application/json' `
       -Body '{}'
 }
+```
+
+## Live telemetry stream validation
+
+During a live Hyper-V run, the UI-safe event source is still the host-collected
+guest output folder. The baseline validation path remains the polling endpoint:
+
+```http
+GET /api/jobs/{jobId}/events/live?offset=0&take=100
+Accept: application/json
+```
+
+The SSE endpoint, when available in the running Web API, is:
+
+```http
+GET /api/jobs/{jobId}/events/stream?offset=0
+Accept: text/event-stream
+```
+
+The stream endpoint also accepts `take=<n>` and `intervalMs=<milliseconds>`.
+Current server behavior clamps `take` to `1..500`, defaults it to `100`, clamps
+`intervalMs` to `500..10000`, and defaults it to `2000`.
+
+If `/events/stream` is unavailable in a running Web API, a QA probe should
+record that as "SSE route unavailable" and then validate polling fallback
+instead of failing the whole live telemetry check. The fallback loop is:
+
+1. Keep a client-side `offset`, initially `0`.
+2. Call `/api/jobs/{jobId}/events/live?offset=<offset>&take=100`.
+3. Verify the response contains `jobId`, `retrievedAt`, `totalEvents`,
+   `nextOffset`, `hasMore`, `sources`, and `events`.
+4. Render or inspect every returned raw event without applying verdict logic.
+5. Replace `offset` with `nextOffset`.
+6. If `hasMore=true`, poll again immediately; otherwise wait briefly while the
+   runbook is still running.
+
+Lightweight QA commands:
+
+```powershell
+# Static expected-contract check; does not start the Web API and writes no
+# runtime artifacts.
+.\scripts\Test-LiveTelemetryFramework.ps1 -ContractOnly
+
+# Runtime probe against an already-started Web API and an existing job. Keep
+# -UsePollingFallback enabled so stream failures or older polling-only builds
+# become a documented fallback validation.
+.\scripts\Test-LiveTelemetryFramework.ps1 `
+  -BaseUrl 'http://localhost:5000' `
+  -JobId '<job-guid>' `
+  -UsePollingFallback
 ```

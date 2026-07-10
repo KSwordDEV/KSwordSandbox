@@ -28,7 +28,10 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\Prepare-GuestPayload.ps1
   -MSBuildPath 'D:\Software\VS\MSBuild\Current\Bin\MSBuild.exe' `
   -Configuration Release `
   -PayloadRoot 'D:\Temp\KSwordSandbox\payload\guest-tools' `
-  -BuildRoot 'D:\Temp\KSwordSandbox\payload-build'
+  -BuildRoot 'D:\Temp\KSwordSandbox\payload-build' `
+  -GuestWorkingDirectory 'C:\KSwordSandbox' `
+  -GuestAgentExecutableName 'KSword.Sandbox.Agent.exe' `
+  -R0CollectorExecutableName 'KSword.Sandbox.R0Collector.exe'
 ```
 
 Expected staged layout:
@@ -48,7 +51,18 @@ D:\Temp\KSwordSandbox\payload\guest-tools\
 
 The default script skips `.pdb` files. Add `-IncludeSymbols` only for local
 debugging. The script writes the manifest into the payload directory so the VM
-operator can see when and how the payload was prepared.
+operator can see when and how the payload was prepared. The manifest now also
+records a payload contract version, required host files, and expected guest
+paths consumed by the Hyper-V readiness preflight.
+
+You can validate only the staged host files, without building or copying
+anything, by running:
+
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\Test-HyperVReadiness.ps1 `
+  -GuestPayloadRoot 'D:\Temp\KSwordSandbox\payload\guest-tools' `
+  -GuestWorkingDirectory 'C:\KSwordSandbox'
+```
 
 ## 2. Guest payload deployment model
 
@@ -169,9 +183,18 @@ Run the read-only host preflight before attempting live execution:
 pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\Test-HyperVReadiness.ps1 `
   -VmName 'KSwordSandbox-Win10-Golden' `
   -CheckpointName 'Clean' `
+  -GuestUserName 'SandboxUser' `
   -GuestPasswordSecretName 'KSWORDBOX_GUEST_PASSWORD' `
+  -GuestPayloadRoot 'D:\Temp\KSwordSandbox\payload\guest-tools' `
+  -GuestWorkingDirectory 'C:\KSwordSandbox' `
   -RuntimeRoot 'D:\Temp\KSwordSandbox'
 ```
+
+The preflight checks host payload files immediately. When running as
+Administrator and the VM is already on, it also checks PowerShell Direct and the
+guest-deployed payload files with read-only `Invoke-Command`/`Test-Path`
+probes. If the VM is off, those probes are reported as warnings because the
+preflight will not start the VM.
 
 ## 4. Build the harmless sample outside the repository
 
