@@ -216,10 +216,13 @@ function Invoke-StaticContractChecks {
 
     $program = Get-RepositoryText -RepositoryRoot $RepositoryRoot -RelativePath 'src\KSword.Sandbox.Web\Program.cs'
     $dashboard = Get-RepositoryText -RepositoryRoot $RepositoryRoot -RelativePath 'src\KSword.Sandbox.Web\Dashboard\DashboardExperiencePage.cs'
+    $liveEventsPage = Get-RepositoryText -RepositoryRoot $RepositoryRoot -RelativePath 'src\KSword.Sandbox.Web\Dashboard\LiveEventsPage.cs'
+    $executionFlowPage = Get-RepositoryText -RepositoryRoot $RepositoryRoot -RelativePath 'src\KSword.Sandbox.Web\Dashboard\RunbookExecutionFlowPage.cs'
     $executionModels = Get-RepositoryText -RepositoryRoot $RepositoryRoot -RelativePath 'src\KSword.Sandbox.Abstractions\ExecutionModels.cs'
     $liveDoc = Get-RepositoryText -RepositoryRoot $RepositoryRoot -RelativePath 'docs\live-telemetry-pipeline.md'
     $runnerDoc = Get-RepositoryText -RepositoryRoot $RepositoryRoot -RelativePath 'docs\hyperv-runner.md'
     $webuiDoc = Get-RepositoryText -RepositoryRoot $RepositoryRoot -RelativePath 'docs\webui-framework.md'
+    $webUiSources = "$program`n$dashboard`n$liveEventsPage`n$executionFlowPage"
 
     Test-LiteralText -Content $program -Expected '"/api/jobs/{jobId:guid}/events/live"' -Name 'Web source maps polling live-events route'
     Test-LiteralText -Content $program -Expected '"/api/jobs/{jobId:guid}/report/html"' -Name 'Web source maps served report route'
@@ -234,13 +237,13 @@ function Invoke-StaticContractChecks {
     Test-OptionalImplementationText -Content $program -Expected 'event: snapshot' -Name 'SSE source writes snapshot frames' -Required $RequireStreamImplementation
     Test-OptionalImplementationText -Content $program -Expected 'Math.Clamp(take ?? 100, 1, 500)' -Name 'SSE source clamps take' -Required $RequireStreamImplementation
     Test-OptionalImplementationText -Content $program -Expected 'Math.Clamp(intervalMs ?? 2000, 500, 10000)' -Name 'SSE source clamps intervalMs' -Required $RequireStreamImplementation
-    Test-RegexText -Content $program -Pattern 'events/live\?offset=\$\{offset\}&take=100' -Name 'WebUI polling fallback uses offset and take'
+    Test-RegexText -Content $webUiSources -Pattern 'events/live\?offset=\$\{(?:offset|eventOffset)\}&take=100' -Name 'WebUI polling fallback uses offset and take'
     Test-LiteralText -Content $program -Expected '/runbook/execute' -Name 'WebUI source calls runbook execution endpoint'
-    Test-LiteralText -Content $program -Expected 'step.exitCode' -Name 'WebUI source exposes runbook exit code'
-    Test-LiteralText -Content $program -Expected 'step.message' -Name 'WebUI source exposes runbook step message'
+    Test-LiteralText -Content $executionFlowPage -Expected 'result?.ExitCode' -Name 'Execution-flow page exposes runbook exit code'
+    Test-LiteralText -Content $executionFlowPage -Expected 'result.Message' -Name 'Execution-flow page exposes runbook step message'
 
-    Test-LiteralText -Content $dashboard -Expected 'Open served HTML report' -Name 'Dashboard renders served report link'
-    Test-LiteralText -Content $dashboard -Expected 'Open local file:// report' -Name 'Dashboard renders local report fallback link'
+    Test-LiteralText -Content $dashboard -Expected 'Open served report' -Name 'Dashboard renders served report link'
+    Test-LiteralText -Content $dashboard -Expected 'Open local file' -Name 'Dashboard renders local report fallback link'
     Test-LiteralText -Content $dashboard -Expected 'guestImportPath' -Name 'Dashboard renders manual guest import path input'
     Test-LiteralText -Content $dashboard -Expected 'guest-events/import' -Name 'Dashboard calls manual guest import endpoint'
     Test-LiteralText -Content $dashboard -Expected 'JSON.stringify(explicitPath ? { eventsPath: explicitPath } : {})' -Name 'Dashboard sends optional manual guest import path JSON'
@@ -537,7 +540,8 @@ function Invoke-Main {
     $script:Results | Format-Table -AutoSize
 
     if ($script:FailureCount -gt 0) {
-        Write-Error "$($script:FailureCount) live telemetry framework check(s) failed."
+        Write-Host "$($script:FailureCount) live telemetry framework check(s) failed." -ForegroundColor Red
+        $script:Results | Where-Object { -not $_.Passed } | Format-List
         return 1
     }
 

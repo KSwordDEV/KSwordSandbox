@@ -106,8 +106,13 @@ Build the native x64 collector and driver skeleton from the main solution:
 
 `Invoke-NativeBuild.ps1` normalizes the child MSBuild environment so native
 Visual C++ tasks do not fail when the parent shell contains both `PATH` and
-`Path`. The driver project defaults to unsigned source builds; sign the generated
-`.sys` explicitly outside git before loading it in a VM.
+`Path`. The driver project defaults to unsigned source builds, and current
+validation should stop at compile success. Do not call `CSignTool.exe` or the
+legacy signing wrapper from normal builds; optional real-driver loading should
+use Windows test mode plus a local test certificate in an isolated VM.
+For that optional lab path, see
+`scripts/Sign-SandboxDriverWithTestCertificate.ps1` and
+`scripts/Set-GuestTestSigning.ps1`.
 
 Plan a dry-run job:
 
@@ -150,11 +155,13 @@ credentials or VM paths.
 
 ## Driver integration assumption
 
-The R0 driver is expected to be built and signed outside this repository, then
-copied into the guest image or staged by the Hyper-V runner. The guest agent can
-ingest driver events from JSON Lines at the configured path. The v1 scaffold
-does not copy the full `D:\Projects\Ksword5.1` tree and does not commit driver
-binaries.
+The R0 driver is expected to be built as an unsigned local artifact by default.
+Only optional real-driver VM validation should test-sign the `.sys` outside this
+repository with Windows test mode and a local test certificate, then copy or
+stage it into the guest. The guest agent can ingest driver events from JSON Lines
+at the configured path. The v1 scaffold does not copy the full
+`D:\Projects\Ksword5.1` tree and does not commit driver binaries or signing
+material.
 
 The initial R0 source path now contains a WDK control-device skeleton under
 `driver/KSword.Sandbox.Driver/` and a user-mode JSONL bridge skeleton under

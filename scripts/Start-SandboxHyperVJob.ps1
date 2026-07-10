@@ -181,7 +181,11 @@ function Get-GuestCredential {
         throw "Guest password environment variable '$SecretName' is not set in Process, User, or Machine scope. Run .\install.ps1 -Mode Install -PromptPassword or -GeneratePassword."
     }
 
-    $securePassword = ConvertTo-SecureString $password -AsPlainText -Force
+    $securePassword = [System.Security.SecureString]::new()
+    foreach ($passwordCharacter in $password.ToCharArray()) {
+        $securePassword.AppendChar($passwordCharacter)
+    }
+    $securePassword.MakeReadOnly()
     return [pscredential]::new($UserName, $securePassword)
 }
 
@@ -373,6 +377,60 @@ function Initialize-GuestOutputDirectory {
             Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
         }
     } -ArgumentList $Plan.guest.outputDirectory, (,$stalePaths)
+}
+
+function Install-GuestDriverService {
+    param(
+        [Parameter(Mandatory)][object]$Plan,
+        [Parameter(Mandatory)][pscredential]$Credential
+    )
+
+    if (-not (ConvertTo-BooleanValue $Plan.driver.enabled) -or
+        [string]::IsNullOrWhiteSpace([string]$Plan.driver.hostDriverPath)) {
+        Write-HyperVJobStep 'Driver host path is not configured; skipping guest kernel service install.'
+        return
+    }
+
+    Invoke-Command -VMName $Plan.vm.name -Credential $Credential -ScriptBlock {
+        param(
+            [string]$ServiceName,
+            [string]$DriverPath
+        )
+
+        if ([string]::IsNullOrWhiteSpace($ServiceName)) {
+            throw 'Driver service name is empty.'
+        }
+
+        if (-not (Test-Path -LiteralPath $DriverPath -PathType Leaf)) {
+            throw "Driver .sys was not staged: $DriverPath"
+        }
+
+        $existing = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
+        if ($null -ne $existing) {
+            & sc.exe stop $ServiceName | Out-Null
+            Start-Sleep -Milliseconds 500
+            & sc.exe delete $ServiceName | Out-Null
+            Start-Sleep -Milliseconds 500
+        }
+
+        $createOutput = @(& sc.exe create $ServiceName type= kernel start= demand binPath= $DriverPath 2>&1)
+        if ($LASTEXITCODE -ne 0) {
+            throw "sc.exe create failed for $ServiceName with exit code $LASTEXITCODE. $($createOutput -join ' ')"
+        }
+
+        $startOutput = @(& sc.exe start $ServiceName 2>&1)
+        $startExitCode = $LASTEXITCODE
+        if ($startExitCode -ne 0 -and $startExitCode -ne 1056) {
+            throw "sc.exe start failed for $ServiceName with exit code $startExitCode. $($startOutput -join ' ')"
+        }
+
+        [pscustomobject][ordered]@{
+            ServiceName = $ServiceName
+            DriverPath = $DriverPath
+            Started = $true
+            StartExitCode = $startExitCode
+        }
+    } -ArgumentList ([string]$Plan.driver.serviceName), ([string]$Plan.driver.driverPathInGuest) | Out-Null
 }
 
 function Start-GuestAgent {
@@ -646,6 +704,15 @@ try {
         if ($script:Cmdlet.ShouldProcess($plan.vm.name, 'Create clean guest output directory')) {
             $script:VmMutationStarted = $true
             Initialize-GuestOutputDirectory -Plan $plan -Credential $credential
+        }
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace([string]$plan.driver.hostDriverPath)) {
+        Invoke-RecordedStep -Id 'install-driver-service' -Title 'Install and start guest R0 driver service' -ScriptBlock {
+            if ($script:Cmdlet.ShouldProcess($plan.vm.name, 'Install/start guest R0 driver service')) {
+                $script:VmMutationStarted = $true
+                Install-GuestDriverService -Plan $plan -Credential $credential
+            }
         }
     }
 

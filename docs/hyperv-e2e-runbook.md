@@ -14,7 +14,8 @@ Its default mode is `PlanOnly`:
 - does not restore checkpoints;
 - does not start, stop, create, delete, or restore any VM;
 - does not copy host files into the guest;
-- does not run Guest Agent, R0Collector, driver code, or samples.
+- does not run Guest Agent, R0Collector, driver code, or samples;
+- does not sign drivers or call `CSignTool.exe`.
 
 `-WhatIf` has the same no-mutation guarantee even when combined with `-Live`.
 Live execution requires all of these conditions:
@@ -29,7 +30,9 @@ Live execution requires all of these conditions:
 
 Before switching from PlanOnly/WhatIf to live, also run the standalone
 readiness helper. It is read-only and catches installed-config drift plus local
-secret hygiene issues that should be fixed before committing:
+secret hygiene issues that should be fixed before committing. Keep driver
+signing out of this path: the default E2E flow validates compilation and mock R0
+wiring only, and must not run `CSignTool.exe` or the legacy signing wrapper:
 
 ```powershell
 pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\Test-HyperVReadiness.ps1
@@ -180,7 +183,8 @@ planned job output.
 ## Mock R0 live flow
 
 Use mock R0 when the live Guest Agent/R0Collector path should be exercised but
-no signed kernel driver is loaded. The config must stay outside git:
+no signed kernel driver is loaded. This is the preferred E2E mode while driver
+signing is frozen. The config must stay outside git:
 
 ```powershell
 $mockConfigPath = 'D:\Temp\KSwordSandbox\mock-r0.live.json'
@@ -221,6 +225,17 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\Invoke-HyperVE2E.ps1 `
 The mock run still restores `Clean`, starts the VM, stages payloads, copies the
 sample, runs Guest Agent/R0Collector, collects outputs, stops the VM, and
 restores `Clean` again. Only the R0Collector device dependency is mocked.
+
+## Optional real R0 driver flow
+
+Real R0 loading is outside the default E2E path. Do not add `CSignTool.exe` or
+`scripts\Sign-SandboxDriverWithKswordCSignTool.ps1` to E2E preparation. If a
+real driver load is explicitly required, first complete compile-only validation,
+then use Windows test mode plus a local test certificate as described in
+`docs/driver-signing.md`. Stage the resulting test-signed `.sys` under a
+guest-only path such as `C:\KSwordSandbox\driver`, keep all signing material
+outside git, set `driver.useMockCollector=false`, and run the non-mutating R0
+readiness pass before `-Live`.
 
 ## Live execution sequence
 

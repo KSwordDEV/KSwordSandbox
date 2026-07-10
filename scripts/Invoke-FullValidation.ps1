@@ -18,7 +18,17 @@ param(
     [switch]$SkipRepositoryPolicy,
     [switch]$SkipReadiness,
     [switch]$SkipLocalPipelineSmoke,
-    [switch]$StagedPolicyOnly
+    [switch]$StagedPolicyOnly,
+    [switch]$SignNativeDriver,
+    [string]$NativeDriverOutputPath,
+    [string]$SignToolPath,
+    [string]$SigningCertificatePath,
+    [string]$SigningCertificatePassword,
+    [string]$SigningCertificateThumbprint,
+    [string]$SigningCertificateSubjectName,
+    [string]$TimestampUrl,
+    [string]$FileDigestAlgorithm = 'SHA256',
+    [string]$TimestampDigestAlgorithm = 'SHA256'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -79,6 +89,7 @@ function Invoke-PowerShellFile {
 
     $argumentList = @(
         '-NoProfile',
+        '-NonInteractive',
         '-ExecutionPolicy',
         'Bypass',
         '-File',
@@ -92,6 +103,18 @@ function Invoke-PowerShellFile {
     }
 
     return $exitCode
+}
+
+$nativeSigningParametersSupplied = -not [string]::IsNullOrWhiteSpace($NativeDriverOutputPath) -or
+    -not [string]::IsNullOrWhiteSpace($SignToolPath) -or
+    -not [string]::IsNullOrWhiteSpace($SigningCertificatePath) -or
+    -not [string]::IsNullOrWhiteSpace($SigningCertificatePassword) -or
+    -not [string]::IsNullOrWhiteSpace($SigningCertificateThumbprint) -or
+    -not [string]::IsNullOrWhiteSpace($SigningCertificateSubjectName) -or
+    -not [string]::IsNullOrWhiteSpace($TimestampUrl)
+
+if (-not $SignNativeDriver -and $nativeSigningParametersSupplied) {
+    throw 'Native driver signing parameters were supplied, but -SignNativeDriver was not set. The default validation path is compile-only.'
 }
 
 Push-Location $repoRoot
@@ -186,7 +209,64 @@ try {
 
     if (-not $SkipNative) {
         Invoke-Step -Name 'native x64 build' -Script {
-            & (Join-Path $repoRoot 'scripts/Invoke-NativeBuild.ps1') -Project $solution -Configuration $Configuration -Platform $Platform -Verbosity minimal -MSBuildPath $MSBuildPath
+            $nativeBuildArguments = @(
+                '-Project',
+                $solution,
+                '-Configuration',
+                $Configuration,
+                '-Platform',
+                $Platform,
+                '-Verbosity',
+                'minimal',
+                '-MSBuildPath',
+                $MSBuildPath
+            )
+
+            if ($SignNativeDriver) {
+                $nativeBuildArguments += '-SignDriver'
+
+                if (-not [string]::IsNullOrWhiteSpace($NativeDriverOutputPath)) {
+                    $nativeBuildArguments += @('-DriverOutputPath', $NativeDriverOutputPath)
+                }
+
+                if (-not [string]::IsNullOrWhiteSpace($SignToolPath)) {
+                    $nativeBuildArguments += @('-SignToolPath', $SignToolPath)
+                }
+
+                if (-not [string]::IsNullOrWhiteSpace($SigningCertificatePath)) {
+                    $nativeBuildArguments += @('-SigningCertificatePath', $SigningCertificatePath)
+                }
+
+                if (-not [string]::IsNullOrWhiteSpace($SigningCertificatePassword)) {
+                    $nativeBuildArguments += @('-SigningCertificatePassword', $SigningCertificatePassword)
+                }
+
+                if (-not [string]::IsNullOrWhiteSpace($SigningCertificateThumbprint)) {
+                    $nativeBuildArguments += @('-SigningCertificateThumbprint', $SigningCertificateThumbprint)
+                }
+
+                if (-not [string]::IsNullOrWhiteSpace($SigningCertificateSubjectName)) {
+                    $nativeBuildArguments += @('-SigningCertificateSubjectName', $SigningCertificateSubjectName)
+                }
+
+                if (-not [string]::IsNullOrWhiteSpace($TimestampUrl)) {
+                    $nativeBuildArguments += @('-TimestampUrl', $TimestampUrl)
+                }
+
+                $nativeBuildArguments += @(
+                    '-FileDigestAlgorithm',
+                    $FileDigestAlgorithm,
+                    '-TimestampDigestAlgorithm',
+                    $TimestampDigestAlgorithm
+                )
+            }
+
+            $exitCode = Invoke-PowerShellFile -Path (Join-Path $repoRoot 'scripts/Invoke-NativeBuild.ps1') -Arguments $nativeBuildArguments
+            if ($exitCode -ne 0) {
+                throw "Native x64 build failed with exit code $exitCode"
+            }
+
+            $global:LASTEXITCODE = 0
         }
     }
 

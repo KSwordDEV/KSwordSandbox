@@ -128,6 +128,11 @@ public sealed class HyperVRunbookBuilder
         steps.Add(Step("copy-sample", "Copy submitted sample into guest", $"Copy-VMFile -VMName {Q(targetVmName)} -SourcePath {Q(sample.FullPath)} -DestinationPath {Q(guestSample)} -FileSource Host -CreateFullPath"));
         steps.Add(Step("make-host-output", "Create host output folder", $"New-Item -ItemType Directory -Force -Path {Q(hostOut)} | Out-Null", mutatesVmState: false));
         steps.Add(Step("prepare-guest-output", "Prepare job-specific guest output folder", BuildPrepareGuestOutputCommand(config, targetVmName, guestOut, driverEventsPath, agentPidPath, agentExitPath)));
+        if (config.Driver.Enabled && !string.IsNullOrWhiteSpace(config.Driver.HostDriverPath))
+        {
+            steps.Add(Step("install-driver-service", "Install and start guest R0 driver service", BuildInstallDriverServiceCommand(config, targetVmName)));
+        }
+
         steps.Add(Step("run-agent", "Start guest collector and sample asynchronously", BuildStartGuestAgentCommand(config, targetVmName, guestRoot, agentPath, guestSample, guestOut, driverEventsPath, agentPidPath, agentExitPath)));
         steps.Add(Step("sync-live-output", "Live-sync guest events while sample runs", BuildLiveOutputSyncCommand(config, targetVmName, guestOut, hostOut, agentPidPath, agentExitPath)));
         steps.Add(Step("collect-output", "Collect final guest JSON output", BuildCollectOutputCommand(config, targetVmName, guestOut, hostOut)));
@@ -259,6 +264,36 @@ public sealed class HyperVRunbookBuilder
     {
         var stalePaths = string.Join(", ", new[] { $"{guestOut}\\events.json", driverEventsPath, agentPidPath, agentExitPath }.Select(Q));
         return WithGuestCredential(config, $"Invoke-Command -VMName {Q(targetVmName)} -Credential $guestCredential -ScriptBlock {{ New-Item -ItemType Directory -Force -Path {Q(guestOut)} | Out-Null; Remove-Item -LiteralPath {stalePaths} -Force -ErrorAction SilentlyContinue }}");
+    }
+
+    /// <summary>
+    /// Builds a guest command that installs and starts the staged kernel driver.
+    /// Inputs are the configured service name and guest .sys path; processing
+    /// removes stale service state, creates a demand-start kernel service, and
+    /// starts it before R0Collector opens the device; the method returns a
+    /// PowerShell Direct command string.
+    /// </summary>
+    private static string BuildInstallDriverServiceCommand(SandboxConfig config, string targetVmName)
+    {
+        var command = string.Join(" ", new[]
+        {
+            $"$serviceName = {Q(config.Driver.ServiceName)};",
+            $"$driverPath = {Q(config.Driver.DriverPathInGuest)};",
+            "Invoke-Command -VMName " + Q(targetVmName) + " -Credential $guestCredential -ScriptBlock {",
+            "param($serviceName, $driverPath)",
+            "if (-not (Test-Path -LiteralPath $driverPath -PathType Leaf)) { throw \"Driver .sys was not staged: $driverPath\" }",
+            "$existing = Get-Service -Name $serviceName -ErrorAction SilentlyContinue;",
+            "if ($existing) { & sc.exe stop $serviceName | Out-Null; Start-Sleep -Milliseconds 500; & sc.exe delete $serviceName | Out-Null; Start-Sleep -Milliseconds 500 }",
+            "& sc.exe create $serviceName type= kernel start= demand binPath= $driverPath | Out-String | Write-Host;",
+            "if ($LASTEXITCODE -ne 0) { throw \"sc.exe create failed for $serviceName with exit code $LASTEXITCODE.\" }",
+            "& sc.exe start $serviceName | Out-String | Write-Host;",
+            "$startExitCode = $LASTEXITCODE;",
+            "if ($startExitCode -ne 0 -and $startExitCode -ne 1056) { throw \"sc.exe start failed for $serviceName with exit code $startExitCode.\" }",
+            "Write-Host \"Driver service $serviceName is started or already running.\"",
+            "} -ArgumentList $serviceName, $driverPath"
+        });
+
+        return WithGuestCredential(config, command);
     }
 
     /// <summary>

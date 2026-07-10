@@ -4,13 +4,19 @@
 
 The sandbox repository does not store driver binaries, certificates, private
 keys, PDB files, or WDK build outputs. It only documents the integration point
-for the KSword driver family.
+for the KSword driver family and the safe validation boundary for local lab
+work.
+
+The current default worker/build policy is **compile-only**. Do not add driver
+signing or driver loading to normal builds, smoke checks, or Hyper-V E2E plan
+validation. Real driver loading is an optional, explicit VM-only step after the
+operator has enabled Windows test mode and supplied a local test certificate.
 
 `scripts/Test-R0Readiness.ps1` includes a `Driver .sys git hygiene` check that
 fails if any `.sys` file is tracked, staged, modified, or otherwise visible to
-git as a commit candidate. Keep the signed driver in VM-local scratch/payload
-storage, or in an ignored local path only for the duration of a disposable VM
-test. Never stage it.
+git as a commit candidate. Keep any generated or signed driver in VM-local
+scratch/payload storage, or in an ignored local path only for the duration of a
+disposable VM test. Never stage it.
 
 ## Expected event bridge
 
@@ -25,62 +31,58 @@ Each line should deserialize to the shared `SandboxEvent` shape. Invalid lines
 are preserved as `driver.parse_error` events so the report exposes integration
 problems instead of silently losing data.
 
-## Signing notes
+## Signing policy and guardrails
 
-- Use a test-signed driver only in an isolated test VM.
-- The working copy may contain a local `/.cert/` directory copied from
-  `D:\Projects\Ksword5.1\.cert` so the same KswordARKDriver CSignTool chain can
-  be reused. This directory is deliberately ignored by git through `/.cert/`.
+- Default validation is compile-only: build the native projects and confirm the
+  `.sys` output is produced, but do not sign, install, start, or open the driver
+  unless a real R0 VM validation was explicitly requested.
+- Do **not** call `CSignTool.exe`, and do **not** run the legacy
+  `scripts\Sign-SandboxDriverWithKswordCSignTool.ps1` wrapper from unattended
+  builds, validation scripts, or worker runbooks. The custom timestamp/
+  Authenticode-variant tooling can show modal UI and block automation.
+- A local `/.cert/` directory may still exist on some machines from older
+  KswordARKDriver handoff work. It remains ignored by git through `/.cert/`, but
+  it is not part of the current default signing path.
 - Never stage or commit `/.cert/`, private keys, certificates, signing tools,
   signed `.sys` files, or WDK output.
+- Use a test-signed driver only in an isolated test VM.
 - Record the driver service name in local config through `Driver.ServiceName`.
 - Record the guest output path through `Driver.EventJsonLinesPath`.
 
-## Ksword CSignTool signing path
+## Compile-only default validation
 
-The preferred local signing path is now:
-
-```powershell
-.\scripts\Sign-SandboxDriverWithKswordCSignTool.ps1 `
-  -DriverPath .\driver\KSword.Sandbox.Driver\x64\Release\KSword.Sandbox.Driver.sys
-```
-
-The wrapper defaults to `.\.cert` and mirrors the known-loadable
-KswordARKDriver sequence:
-
-1. `CSignTool.exe sign /r 1 /f <driver.sys>`
-2. `CSignTool.exe sign /r 1 /f <driver.sys> /ac`
-3. `AuthenticodeVariantGUI.exe generate ...` when
-   `AuthenticodeVariantGUI.exe` and `outer_display_info.dat` are present.
-
-Useful options:
+For the default repository validation path, build only:
 
 ```powershell
-# Use only the two CSignTool passes and skip the Authenticode variant stage.
-.\scripts\Sign-SandboxDriverWithKswordCSignTool.ps1 `
-  -DriverPath D:\Temp\KSwordSandbox\payload\driver\KSword.Sandbox.Driver.sys `
-  -SkipAuthenticodeVariant
-
-# Keep automation moving while logging signing failure.
-.\scripts\Sign-SandboxDriverWithKswordCSignTool.ps1 `
-  -DriverPath D:\Temp\KSwordSandbox\payload\driver\KSword.Sandbox.Driver.sys `
-  -NonFatal
+.\scripts\Invoke-NativeBuild.ps1 -Project .\KSwordSandbox.sln -Configuration Debug -Platform x64
 ```
 
-The script backs up the target driver before signing and restores the original
-file if any signing stage fails. Keep the target driver under ignored build or
-payload output such as `x64\...` or `D:\Temp\KSwordSandbox\...`.
+Expected result:
 
-## Test-signing runbook for VM validation
+- MSBuild/native compilation succeeds.
+- Generated `.sys`, `.exe`, `.pdb`, `x64\...`, `bin\...`, and `obj\...` outputs
+  remain ignored/local artifacts.
+- No signing helper, timestamp tool, SCM service action, device open, or
+  R0Collector live drain is executed.
 
-The repository does not generate committed certificates. Build output should be
-placed under an ignored build directory or scratch/payload directory, then
-signed there.
+For Hyper-V E2E demonstrations while signing is deferred, prefer mock R0 mode
+(`driver.useMockCollector=true`) so the Guest Agent and R0Collector sidecar path
+is exercised without loading a kernel driver.
+
+## Test-signing runbook for optional VM validation
+
+The repository does not generate committed certificates. If a real R0 driver
+load is explicitly required, build output should be placed under an ignored
+build directory or scratch/payload directory, then test-signed there or inside
+the disposable VM. This path uses Windows test mode and a local test
+certificate; it intentionally avoids `CSignTool.exe` and custom timestamp tools.
 
 Example VM-only workflow:
 
 ```powershell
 $driver = 'C:\KSwordSandbox\driver\KSword.Sandbox.Driver.sys'
+New-Item -ItemType Directory -Force C:\KSwordSandbox\certs | Out-Null
+
 $cert = New-SelfSignedCertificate `
   -Type CodeSigningCert `
   -Subject 'CN=KSword Sandbox Test Driver' `
@@ -103,6 +105,34 @@ Set-AuthenticodeSignature `
   -FilePath $driver `
   -Certificate $cert `
   -HashAlgorithm SHA256
+
+Get-AuthenticodeSignature -FilePath $driver | Format-List Status,SignerCertificate
+```
+
+Host/guest lab helper for the same non-CSignTool path:
+
+```powershell
+# Run in an elevated isolated VM or against a VM-local driver path.
+.\scripts\Sign-SandboxDriverWithTestCertificate.ps1 `
+  -DriverPath C:\KSwordSandbox\driver\KSword.Sandbox.Driver.sys `
+  -TrustCertificateForLocalMachine `
+  -EnableLocalTestSigning
+```
+
+If you need to toggle test-signing inside the configured Hyper-V guest from the
+host, use the installer or direct helper. Both read the guest credential from
+`KSWORDBOX_GUEST_PASSWORD` and do not call CSignTool:
+
+```powershell
+.\install.ps1 -Mode Change -QueryGuestTestSigning
+.\install.ps1 -Mode Change -EnableGuestTestSigning -RestartGuestAfterTestSigning -Force
+
+.\scripts\Set-GuestTestSigning.ps1 `
+  -VmName KSwordSandbox-Win10-Golden `
+  -GuestUserName SandboxUser `
+  -Mode Enable `
+  -RestartGuest `
+  -Force
 ```
 
 Enable Windows test-signing inside the disposable VM, then reboot the VM:
@@ -145,7 +175,9 @@ Required first-pass rows before loading:
 
 Use the readiness script for service actions so each mutating step is explicit.
 The script requires `-AllowServiceMutation` in addition to the requested
-operation.
+operation. Run these commands only in an isolated VM checkpoint/snapshot after
+the compile-only path has succeeded and the optional test-signed driver is
+trusted by that VM.
 
 Install and start in an isolated test VM:
 
@@ -252,10 +284,11 @@ Expected first-pass evidence:
 
 ## Full VM validation sequence
 
-Run this sequence only inside an isolated VM checkpoint/snapshot:
+Run this sequence only inside an isolated VM checkpoint/snapshot, and only when
+real R0 loading was explicitly requested:
 
-1. Copy the signed driver and R0Collector into VM-local paths. Do not stage the
-   `.sys` file in git.
+1. Build the driver and R0Collector, then copy the optional test-signed driver
+   and R0Collector into VM-local paths. Do not stage the `.sys` file in git.
 2. Enable test-signing with `bcdedit /set testsigning on`, reboot, and confirm
    the non-mutating readiness pass is clean.
 3. Install and start the kernel service with `-AllowServiceMutation
@@ -275,4 +308,6 @@ Run this sequence only inside an isolated VM checkpoint/snapshot:
 Prefer reusing protocol definitions and driver-client boundaries from
 `D:\Projects\Ksword5.1\shared\driver`, `KswordARKDriver`, and `ArkDriverClient`
 as source references. Do not copy the full source tree, generated binaries,
-certificates, or `APIMonitor_x64` into this repository.
+certificates, private keys, signing tools, or `APIMonitor_x64` into this
+repository. The legacy CSignTool handoff remains frozen for unattended
+KSwordSandbox builds until it is explicitly re-enabled by the project owner.

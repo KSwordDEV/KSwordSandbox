@@ -121,7 +121,11 @@ function Get-GuestCredential {
         throw "Guest password environment variable '$SecretName' is not set in Process, User, or Machine scope. Run .\install.ps1 -Mode Install -PromptPassword or -GeneratePassword."
     }
 
-    $securePassword = ConvertTo-SecureString $password -AsPlainText -Force
+    $securePassword = [System.Security.SecureString]::new()
+    foreach ($passwordCharacter in $password.ToCharArray()) {
+        $securePassword.AppendChar($passwordCharacter)
+    }
+    $securePassword.MakeReadOnly()
     return [pscredential]::new($UserName, $securePassword)
 }
 

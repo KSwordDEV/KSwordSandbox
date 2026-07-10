@@ -17,6 +17,7 @@ Automation examples:
   .\install.ps1 -Mode Change -ResetPassword -PromptPassword
   .\install.ps1 -Mode Change -UpdateHyperVConfig -VmName KSwordSandbox-Win10-Golden -CheckpointName Clean
   .\install.ps1 -Mode Change -ResetGuestVmPassword -GeneratePassword -Force
+  .\install.ps1 -Mode Change -EnableGuestTestSigning -Force
   .\install.ps1 -Mode Uninstall
 
 The script never prints the password value. By default it writes the configured
@@ -53,6 +54,14 @@ param(
     [switch]$ResetGuestVmPassword,
 
     [switch]$UpdateHyperVConfig,
+
+    [switch]$EnableGuestTestSigning,
+
+    [switch]$DisableGuestTestSigning,
+
+    [switch]$QueryGuestTestSigning,
+
+    [switch]$RestartGuestAfterTestSigning,
 
     [switch]$CurrentProcessOnly,
 
@@ -691,6 +700,83 @@ function Uninstall-KSwordSandboxLocal {
     Write-InstallInfo 'Runtime output folders were left intact.'
 }
 
+function Invoke-GuestTestSigningMode {
+    param(
+        [Parameter(Mandatory)]
+        [ValidateSet('Enable', 'Disable', 'Query')]
+        [string]$TestSigningMode,
+
+        [bool]$RestartAfterChange = $false
+    )
+
+    $testSigningScript = Join-Path $PSScriptRoot 'scripts\Set-GuestTestSigning.ps1'
+    if (-not (Test-Path -LiteralPath $testSigningScript -PathType Leaf)) {
+        throw "Guest test-signing script is missing: $testSigningScript"
+    }
+
+    if ($TestSigningMode -ne 'Query' -and -not $Force -and $Mode -ne 'Interactive') {
+        throw 'Non-interactive guest test-signing changes require -Force.'
+    }
+
+    if ($TestSigningMode -ne 'Query' -and $Mode -eq 'Interactive') {
+        Write-Host ''
+        Write-Host "This will run bcdedit /set testsigning $($TestSigningMode.ToLowerInvariant()) inside '$VmName'."
+        if ($RestartAfterChange) {
+            Write-Host 'The guest may reboot if the state changes.'
+        }
+
+        $continue = Read-MenuChoice -Prompt 'Continue guest test-signing change? [y/n]' -Allowed @('y', 'Y', 'n', 'N')
+        if ($continue -in @('n', 'N')) {
+            Write-InstallInfo 'Guest test-signing change cancelled.'
+            return
+        }
+    }
+
+    $arguments = @(
+        '-NoProfile',
+        '-ExecutionPolicy', 'Bypass',
+        '-File', $testSigningScript,
+        '-VmName', $VmName,
+        '-GuestUserName', $GuestUserName,
+        '-SecretName', $SecretName,
+        '-Mode', $TestSigningMode
+    )
+
+    if ($RestartAfterChange) {
+        $arguments += '-RestartGuest'
+    }
+
+    if ($Force -or $Mode -eq 'Interactive') {
+        $arguments += '-Force'
+    }
+
+    Write-InstallInfo "Running guest test-signing '$TestSigningMode' for VM '$VmName'."
+    & powershell @arguments
+    if ($LASTEXITCODE -ne 0) {
+        throw "Guest test-signing '$TestSigningMode' failed with exit code $LASTEXITCODE."
+    }
+}
+
+function Invoke-GuestTestSigningMenu {
+    while ($true) {
+        Write-Host ''
+        Write-Host 'Guest test-signing options:'
+        Write-Host '  1) Query current guest test-signing state'
+        Write-Host '  2) Enable guest test-signing'
+        Write-Host '  3) Enable guest test-signing and reboot guest if changed'
+        Write-Host '  4) Disable guest test-signing'
+        Write-Host '  5) Back'
+        $choice = Read-MenuChoice -Prompt 'Choose [1-5]' -Allowed @('1', '2', '3', '4', '5')
+        switch ($choice) {
+            '1' { Invoke-GuestTestSigningMode -TestSigningMode Query }
+            '2' { Invoke-GuestTestSigningMode -TestSigningMode Enable }
+            '3' { Invoke-GuestTestSigningMode -TestSigningMode Enable -RestartAfterChange $true }
+            '4' { Invoke-GuestTestSigningMode -TestSigningMode Disable }
+            '5' { return }
+        }
+    }
+}
+
 function Invoke-ChangeMenu {
     while ($true) {
         Write-Host ''
@@ -701,8 +787,9 @@ function Invoke-ChangeMenu {
         Write-Host '  4) Change recorded guest username'
         Write-Host '  5) Recreate runtime folders and local config'
         Write-Host '  6) Show Hyper-V readiness/status'
-        Write-Host '  7) Back'
-        $choice = Read-MenuChoice -Prompt 'Choose [1-7]' -Allowed @('1', '2', '3', '4', '5', '6', '7')
+        Write-Host '  7) Manage guest test-signing'
+        Write-Host '  8) Back'
+        $choice = Read-MenuChoice -Prompt 'Choose [1-8]' -Allowed @('1', '2', '3', '4', '5', '6', '7', '8')
         switch ($choice) {
             '1' { Reset-GuestPasswordSecret }
             '2' { Invoke-GuestVmPasswordReset }
@@ -713,7 +800,8 @@ function Invoke-ChangeMenu {
             }
             '5' { Set-HyperVConfigState -Action 'runtime-folders-and-config-refreshed' }
             '6' { Show-KSwordSandboxInstallStatus | Format-List }
-            '7' { return }
+            '7' { Invoke-GuestTestSigningMenu }
+            '8' { return }
         }
     }
 }
@@ -759,6 +847,15 @@ switch ($Mode) {
     'Change' {
         if ($ResetGuestVmPassword) {
             Invoke-GuestVmPasswordReset
+        }
+        elseif ($EnableGuestTestSigning) {
+            Invoke-GuestTestSigningMode -TestSigningMode Enable -RestartAfterChange ([bool]$RestartGuestAfterTestSigning)
+        }
+        elseif ($DisableGuestTestSigning) {
+            Invoke-GuestTestSigningMode -TestSigningMode Disable -RestartAfterChange ([bool]$RestartGuestAfterTestSigning)
+        }
+        elseif ($QueryGuestTestSigning) {
+            Invoke-GuestTestSigningMode -TestSigningMode Query
         }
         elseif ($UpdateHyperVConfig) {
             Set-HyperVConfigState

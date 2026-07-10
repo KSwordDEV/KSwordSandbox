@@ -1465,7 +1465,11 @@ function Test-PowerShellDirectReadOnly {
     }
 
     try {
-        $securePassword = ConvertTo-SecureString ([string]$secretValue.Value) -AsPlainText -Force
+        $securePassword = [System.Security.SecureString]::new()
+        foreach ($passwordCharacter in ([string]$secretValue.Value).ToCharArray()) {
+            $securePassword.AppendChar($passwordCharacter)
+        }
+        $securePassword.MakeReadOnly()
         $credential = [pscredential]::new($GuestUser, $securePassword)
         $probe = Invoke-Command `
             -VMName $Vm `
@@ -1558,7 +1562,11 @@ function Test-GuestPayloadFilesReadOnly {
 
     try {
         $secretValue = Get-GuestPasswordSecretValue -SecretName $SecretName
-        $securePassword = ConvertTo-SecureString ([string]$secretValue.Value) -AsPlainText -Force
+        $securePassword = [System.Security.SecureString]::new()
+        foreach ($passwordCharacter in ([string]$secretValue.Value).ToCharArray()) {
+            $securePassword.AppendChar($passwordCharacter)
+        }
+        $securePassword.MakeReadOnly()
         $credential = [pscredential]::new($GuestUser, $securePassword)
         $probe = Invoke-Command `
             -VMName $Vm `

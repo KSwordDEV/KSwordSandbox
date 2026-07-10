@@ -578,7 +578,11 @@ function New-PowerShellDirectCheck {
                 -Details @{ vmName = $VmName; checked = $false; vmState = $vm.State.ToString(); reason = 'vmNotRunning' }
         }
 
-        $securePassword = ConvertTo-SecureString ([string]$secretValue.Value) -AsPlainText -Force
+        $securePassword = [System.Security.SecureString]::new()
+        foreach ($passwordCharacter in ([string]$secretValue.Value).ToCharArray()) {
+            $securePassword.AppendChar($passwordCharacter)
+        }
+        $securePassword.MakeReadOnly()
         $credential = [pscredential]::new($UserName, $securePassword)
         $probe = Invoke-Command -VMName $VmName -Credential $credential -ScriptBlock {
             param([string[]]$Paths)
@@ -870,7 +874,7 @@ function New-RunbookStepExecutionResult {
         [string]$Message = $null
     )
 
-    return [ordered]@{
+    return [pscustomobject][ordered]@{
         StepIndex = $StepIndex
         StepId = $StepId
         Title = $Title
@@ -1105,6 +1109,9 @@ function New-HyperVE2ESteps {
         [Parameter(Mandatory)][string]$AgentPidPath,
         [Parameter(Mandatory)][string]$AgentExitPath,
         [Parameter(Mandatory)][string]$DriverEventsPath,
+        [string]$DriverHostPath = '',
+        [string]$DriverServiceName = '',
+        [string]$DriverPathInGuest = '',
         [Parameter(Mandatory)][string]$SecretName,
         [Parameter(Mandatory)][string]$GuestAgentCommandLine,
         [string]$R0CollectorCommandLine = '',
@@ -1113,7 +1120,7 @@ function New-HyperVE2ESteps {
 
     $steps = New-Object System.Collections.Generic.List[object]
     [void]$steps.Add((New-HyperVE2EStep -Id 'write-plan' -Phase 'plan' -Title 'Write reviewable Hyper-V E2E plan JSON' -PowerShell 'ConvertTo-Json -Depth 12 | Set-Content <planPath>' -MutatesVmState $false -RequiresLive $false))
-    [void]$steps.Add((New-HyperVE2EStep -Id 'load-guest-credential' -Phase 'start' -Title 'Load guest credential from environment secret' -PowerShell ('$guestPassword = ConvertTo-SecureString $env:' + $SecretName + ' -AsPlainText -Force') -MutatesVmState $false))
+    [void]$steps.Add((New-HyperVE2EStep -Id 'load-guest-credential' -Phase 'start' -Title 'Load guest credential from environment secret' -PowerShell ('$guestPassword = [System.Security.SecureString]::new(); foreach ($ch in $env:' + $SecretName + '.ToCharArray()) { $guestPassword.AppendChar($ch) }; $guestPassword.MakeReadOnly()') -MutatesVmState $false))
     [void]$steps.Add((New-HyperVE2EStep -Id 'stop-before-restore' -Phase 'start' -Title 'Stop golden VM before checkpoint restore' -PowerShell ("Stop-VM -Name {0} -TurnOff -Force -ErrorAction SilentlyContinue" -f (Quote-PowerShellString $Vm)) -MutatesVmState $true))
     [void]$steps.Add((New-HyperVE2EStep -Id 'restore-checkpoint' -Phase 'start' -Title 'Restore clean checkpoint' -PowerShell ("Restore-VMSnapshot -VMName {0} -Name {1} -Confirm:`$false" -f (Quote-PowerShellString $Vm), (Quote-PowerShellString $Snapshot)) -MutatesVmState $true))
     [void]$steps.Add((New-HyperVE2EStep -Id 'enable-guest-service' -Phase 'start' -Title 'Enable Guest Service Interface' -PowerShell (Get-EnableGuestServicePowerShell -Vm $Vm) -MutatesVmState $true))
@@ -1122,6 +1129,11 @@ function New-HyperVE2ESteps {
     [void]$steps.Add((New-HyperVE2EStep -Id 'stage-guest-payload' -Phase 'start' -Title 'Copy Guest Agent and R0Collector payload into guest' -PowerShell ("Copy-Item -ToSession <PSSession> -Path {0}\agent\* -Destination <guestAgentDirectory> -Recurse -Force" -f $PayloadRoot) -MutatesVmState $true))
     [void]$steps.Add((New-HyperVE2EStep -Id 'copy-sample' -Phase 'start' -Title 'Copy submitted sample into guest' -PowerShell ("Copy-VMFile -VMName {0} -SourcePath {1} -DestinationPath {2} -FileSource Host -CreateFullPath -Force" -f (Quote-PowerShellString $Vm), (Quote-PowerShellString $SampleHostPath), (Quote-PowerShellString $SampleGuestPath)) -MutatesVmState $true))
     [void]$steps.Add((New-HyperVE2EStep -Id 'prepare-guest-output' -Phase 'start' -Title 'Create clean guest output folder' -PowerShell ("Invoke-Command -VMName {0} -Credential `$guestCredential -ScriptBlock {{ New-Item -ItemType Directory -Force -Path {1} | Out-Null }}" -f (Quote-PowerShellString $Vm), (Quote-PowerShellString $GuestOut)) -MutatesVmState $true))
+    if (-not [string]::IsNullOrWhiteSpace($DriverHostPath)) {
+        $installDriverPowerShell = "Invoke-Command -VMName {0} -Credential `$guestCredential -ScriptBlock {{ sc.exe create {1} type= kernel start= demand binPath= {2}; sc.exe start {1} }}" -f (Quote-PowerShellString $Vm), (Quote-PowerShellString $DriverServiceName), (Quote-PowerShellString $DriverPathInGuest)
+        [void]$steps.Add((New-HyperVE2EStep -Id 'install-driver-service' -Phase 'start' -Title 'Install and start guest R0 driver service' -PowerShell $installDriverPowerShell -MutatesVmState $true))
+    }
+
     $runAgentPowerShell = "Start-Process powershell.exe -ArgumentList <agent wrapper: $GuestAgentCommandLine>; pid -> $AgentPidPath; exit -> $AgentExitPath; driver events -> $DriverEventsPath"
     if (-not [string]::IsNullOrWhiteSpace($R0CollectorCommandLine)) {
         $runAgentPowerShell += "; R0Collector sidecar args: $R0CollectorCommandLine"
@@ -1187,6 +1199,7 @@ try {
 
     $driverEnabledFromConfig = Get-BooleanOrDefault -Value (Get-ObjectPropertyValue -Object $driver -Name 'enabled' -DefaultValue $true) -DefaultValue $true
     $driverEnabled = $driverEnabledFromConfig -and (-not [bool]$NoR0Collector)
+    $serviceName = Get-ObjectPropertyValue -Object $driver -Name 'serviceName' -DefaultValue 'KSwordARK'
     $driverPathInGuest = Get-ObjectPropertyValue -Object $driver -Name 'driverPathInGuest' -DefaultValue 'C:\KSwordSandbox\driver\KSwordARKDriver.sys'
     $r0CollectorPathInGuest = Get-ObjectPropertyValue -Object $driver -Name 'r0CollectorPathInGuest' -DefaultValue 'C:\KSwordSandbox\r0collector\KSword.Sandbox.R0Collector.exe'
     $devicePath = Get-ObjectPropertyValue -Object $driver -Name 'devicePath' -DefaultValue '\\.\KSwordSandboxDriver'
@@ -1347,6 +1360,7 @@ try {
         }
         driver = [ordered]@{
             enabled = $driverEnabled
+            serviceName = $serviceName
             r0CollectorPathInGuest = $r0CollectorPathInGuest
             devicePath = $devicePath
             useMockCollector = $useMockCollector
@@ -1390,6 +1404,9 @@ try {
             -AgentPidPath $agentPidPath `
             -AgentExitPath $agentExitPath `
             -DriverEventsPath $driverEventsPath `
+            -DriverHostPath ([string]$hostDriverPath) `
+            -DriverServiceName ([string]$serviceName) `
+            -DriverPathInGuest ([string]$driverPathInGuest) `
             -SecretName $effectiveGuestSecretName `
             -GuestAgentCommandLine $guestAgentCommandLine `
             -R0CollectorCommandLine $r0CollectorCommandLine `

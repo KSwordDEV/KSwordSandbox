@@ -56,7 +56,7 @@ binaries, or generated run outputs into git.
 
 ```text
 C:\KSwordSandbox\agent      Guest collector binaries
-C:\KSwordSandbox\driver     Signed driver artifacts, if used
+C:\KSwordSandbox\driver     Optional test-signed driver artifacts, if used
 C:\KSwordSandbox\incoming   Submitted sample for the current run
 C:\KSwordSandbox\out        JSON event output
 ```
@@ -185,17 +185,24 @@ Both checks should pass before taking the `Clean` checkpoint.
 
 ## Test-signed driver prerequisite
 
-Only enable test signing in isolated analysis VMs that need a test-signed R0
-driver. Run inside an elevated guest shell, reboot, and then install/start the
-driver from a guest-only path:
+The default golden-VM workflow does not require a signed or loaded driver. Keep
+normal validation compile-only and use mock R0 when the E2E path only needs to
+exercise Guest Agent/R0Collector wiring. Do not call `CSignTool.exe` or the
+legacy signing wrapper during golden image preparation; custom timestamp tooling
+can display modal UI and block unattended workers.
+
+Only enable Windows test signing in isolated analysis VMs that explicitly need a
+real test-signed R0 driver. Run inside an elevated guest shell, reboot, and then
+install/start a driver from a guest-only path:
 
 ```powershell
 bcdedit.exe /set testsigning on
 shutdown.exe /r /t 0
 ```
 
-Keep signed `.sys` files, certificates, private keys, symbols, and driver logs
-outside git. Do not bake private keys into the golden image.
+Use a local test certificate for optional real-driver validation, and keep signed
+`.sys` files, certificates, private keys, symbols, and driver logs outside git.
+Do not bake private keys into the golden image.
 
 ## Checkpoint mode
 
@@ -235,9 +242,11 @@ See `docs/hyperv-e2e-runbook.md` for the full operator flow and output paths.
 For R0 telemetry demos without a loaded driver, set `driver.useMockCollector` to
 `true` in a local config. The Guest Agent will still start the R0Collector
 sidecar but adds `--r0-mock`, producing synthetic JSONL rows. For real live R0,
-leave mock mode off, stage a signed driver outside git, ensure the driver
-service/device path exists in the guest, and expect the collector to emit
-`r0collector.deviceUnavailable` if `\\.\KSwordSandboxDriver` cannot be opened.
+leave mock mode off only after staging an optional test-signed driver outside
+git with Windows test mode enabled; the current runbooks must not call
+`CSignTool.exe`. Ensure the driver service/device path exists in the guest, and
+expect the collector to emit `r0collector.deviceUnavailable` if
+`\\.\KSwordSandboxDriver` cannot be opened.
 
 Example mock-R0 live config flow, keeping the config outside git:
 

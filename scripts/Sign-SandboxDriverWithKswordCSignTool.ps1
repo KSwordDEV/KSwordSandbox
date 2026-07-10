@@ -1,9 +1,17 @@
 <#
 .SYNOPSIS
-Signs a KSwordSandbox driver build with the local Ksword CSignTool chain.
+Legacy manual-only signer for the local Ksword CSignTool chain.
 
 .DESCRIPTION
-This script intentionally mirrors the loadable KswordARKDriver signing path:
+This script intentionally mirrors the loadable KswordARKDriver signing path,
+but it is disabled by default for unattended KSwordSandbox automation because
+the custom timestamp / Authenticode variant tooling can display UI and block a
+long-running build or Hyper-V test.
+
+Default builds must compile only. To run this legacy path manually, pass
+-AllowInteractiveCSignTool after confirming a human is available to handle any
+tool UI. Prefer scripts\Sign-SandboxDriverWithTestCertificate.ps1 for isolated
+test-mode VM validation.
 
 1. Run .cert\CSignTool.exe sign /r 1 /f <driver.sys>
 2. Run .cert\CSignTool.exe sign /r 1 /f <driver.sys> /ac
@@ -23,6 +31,8 @@ param(
     [string]$SignToolPath,
 
     [switch]$SkipAuthenticodeVariant,
+
+    [switch]$AllowInteractiveCSignTool,
 
     [switch]$NonFatal
 )
@@ -212,6 +222,10 @@ function Test-CertificateDirectoryIgnored {
 }
 
 function Invoke-SandboxDriverSigning {
+    if (-not $AllowInteractiveCSignTool) {
+        throw 'CSignTool signing is disabled by default for unattended builds because it may display timestamp/AuthentiCode UI. Default driver validation is compile-only. If a human is present and you intentionally want the legacy path, rerun with -AllowInteractiveCSignTool; otherwise use scripts\Sign-SandboxDriverWithTestCertificate.ps1 inside an isolated test VM.'
+    }
+
     $repositoryRoot = Resolve-RepositoryRoot
     $driver = Resolve-DriverSysPath -RepositoryRoot $repositoryRoot -RequestedPath $DriverPath
     $certDirectory = if ([string]::IsNullOrWhiteSpace($CertificateDirectory)) {
