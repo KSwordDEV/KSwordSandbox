@@ -100,3 +100,7 @@ Design references and platform documentation are tracked in
 `docs/research-basis.md`. The initial scaffold uses CAPE, Cuckoo, DRAKVUF,
 MITRE ATT&CK for Windows, Hyper-V PowerShell Direct, `Copy-VMFile`, and Windows
 driver callback documentation as design inputs.
+
+For a concise explanation-oriented summary of the extracted report structure,
+current implementation status, R0 reuse boundary, and next engineering steps,
+see `docs/extracted-results-summary.md`.
