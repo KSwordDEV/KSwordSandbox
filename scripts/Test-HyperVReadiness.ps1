@@ -69,6 +69,27 @@ Set-StrictMode -Version 3.0
 $ErrorActionPreference = 'Stop'
 $script:GuestServiceInterfaceComponentId = '6C09BB55-D683-4DA0-8931-C9BF705F6480'
 
+function Get-GuestPasswordSecretValue {
+    param([Parameter(Mandatory)][string]$SecretName)
+
+    foreach ($scope in @('Process', 'User', 'Machine')) {
+        $value = [Environment]::GetEnvironmentVariable($SecretName, $scope)
+        if (-not [string]::IsNullOrEmpty($value)) {
+            return [pscustomobject]@{
+                Value = $value
+                Scope = $scope
+                IsSet = $true
+            }
+        }
+    }
+
+    return [pscustomobject]@{
+        Value = $null
+        Scope = ''
+        IsSet = $false
+    }
+}
+
 # New-ReadinessResult builds one structured result row.
 # Inputs are the check name, status, requirement flag, operator-facing message,
 # and optional machine-readable details. Processing copies details into a
@@ -263,6 +284,24 @@ function Test-GuestPasswordSecret {
                 VisibleInProcess   = $true
                 ConfiguredForUser  = $isUserConfigured
                 ConfiguredForHost  = $isMachineConfigured
+                EffectiveScope     = 'Process'
+                SecretValuePrinted = $false
+            }
+    }
+
+    if ($isUserConfigured -or $isMachineConfigured) {
+        $scope = if ($isUserConfigured) { 'User' } else { 'Machine' }
+        return New-ReadinessResult `
+            -Name 'Guest password environment variable' `
+            -Status 'Passed' `
+            -Required $true `
+            -Message "Environment variable '$SecretName' is configured in $scope scope. Secret value was not printed." `
+            -Details @{
+                SecretName         = $SecretName
+                VisibleInProcess   = $false
+                ConfiguredForUser  = $isUserConfigured
+                ConfiguredForHost  = $isMachineConfigured
+                EffectiveScope     = $scope
                 SecretValuePrinted = $false
             }
     }
@@ -271,7 +310,7 @@ function Test-GuestPasswordSecret {
         -Name 'Guest password environment variable' `
         -Status 'Failed' `
         -Required $true `
-        -Message "Environment variable '$SecretName' is not set or is empty in the current process." `
+        -Message "Environment variable '$SecretName' is not set or is empty in Process, User, or Machine scope." `
         -Details @{
             SecretName         = $SecretName
             VisibleInProcess   = $false
@@ -893,19 +932,19 @@ function Test-PowerShellDirectReadOnly {
             }
     }
 
-    $password = [Environment]::GetEnvironmentVariable($SecretName, 'Process')
-    if ([string]::IsNullOrEmpty($password)) {
+    $secretValue = Get-GuestPasswordSecretValue -SecretName $SecretName
+    if (-not [bool]$secretValue.IsSet) {
         return New-ReadinessResult `
             -Name 'PowerShell Direct' `
             -Status 'Warning' `
             -Required $true `
-            -Message "Skipped PowerShell Direct probe because '$SecretName' is not visible to the current process." `
+            -Message "Skipped PowerShell Direct probe because '$SecretName' is not set in Process, User, or Machine scope." `
             -Details @{
                 VmName        = $Vm
                 GuestUserName = $GuestUser
                 SecretName    = $SecretName
                 Skipped       = $true
-                Reason        = 'Guest password secret missing from current process'
+                Reason        = 'Guest password secret missing from Process, User, or Machine scope'
             }
     }
 
@@ -940,7 +979,7 @@ function Test-PowerShellDirectReadOnly {
     }
 
     try {
-        $securePassword = ConvertTo-SecureString $password -AsPlainText -Force
+        $securePassword = ConvertTo-SecureString ([string]$secretValue.Value) -AsPlainText -Force
         $credential = [pscredential]::new($GuestUser, $securePassword)
         $probe = Invoke-Command `
             -VMName $Vm `
@@ -1032,8 +1071,8 @@ function Test-GuestPayloadFilesReadOnly {
     }
 
     try {
-        $password = [Environment]::GetEnvironmentVariable($SecretName, 'Process')
-        $securePassword = ConvertTo-SecureString $password -AsPlainText -Force
+        $secretValue = Get-GuestPasswordSecretValue -SecretName $SecretName
+        $securePassword = ConvertTo-SecureString ([string]$secretValue.Value) -AsPlainText -Force
         $credential = [pscredential]::new($GuestUser, $securePassword)
         $probe = Invoke-Command `
             -VMName $Vm `

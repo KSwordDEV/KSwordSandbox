@@ -112,6 +112,25 @@ Store the guest password outside git. The default runbook reads it from the
 environment variable named by `Guest.PasswordSecretName`, which defaults to
 `KSWORDBOX_GUEST_PASSWORD`.
 
+For deployment or a new lab workstation, use the local installer menu:
+
+```powershell
+.\install.ps1
+```
+
+The menu supports install, change, uninstall, and status. Change includes a
+password reset option. For a quick generated local value:
+
+```powershell
+.\install.ps1 -Mode Install -GeneratePassword
+```
+
+For an existing VM account password:
+
+```powershell
+.\install.ps1 -Mode Install -PromptPassword
+```
+
 ```powershell
 $env:KSWORDBOX_GUEST_PASSWORD = '<local guest password>'
 ```

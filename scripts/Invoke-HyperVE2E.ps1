@@ -61,6 +61,7 @@ param(
 Set-StrictMode -Version 3.0
 $ErrorActionPreference = 'Stop'
 $script:GuestServiceInterfaceComponentId = '6C09BB55-D683-4DA0-8931-C9BF705F6480'
+$script:LastHyperVE2EPlan = $null
 
 function Write-HyperVE2EStep {
     param([Parameter(Mandatory)][string]$Message)
@@ -153,6 +154,27 @@ function Get-IntOrDefault {
     }
 
     return [System.Convert]::ToInt32($Value, [Globalization.CultureInfo]::InvariantCulture)
+}
+
+function Get-GuestPasswordSecretValue {
+    param([Parameter(Mandatory)][string]$SecretName)
+
+    foreach ($scope in @('Process', 'User', 'Machine')) {
+        $value = [Environment]::GetEnvironmentVariable($SecretName, $scope)
+        if (-not [string]::IsNullOrEmpty($value)) {
+            return [pscustomobject]@{
+                Value = $value
+                Scope = $scope
+                IsSet = $true
+            }
+        }
+    }
+
+    return [pscustomobject]@{
+        Value = $null
+        Scope = ''
+        IsSet = $false
+    }
 }
 
 function Join-GuestPath {
@@ -330,22 +352,22 @@ function New-GuestSecretCheck {
             -Details @{ secretName = ''; isSet = $false; valuePrinted = $false }
     }
 
-    $secretValue = [Environment]::GetEnvironmentVariable($SecretName, 'Process')
-    if ([string]::IsNullOrEmpty($secretValue)) {
+    $secretValue = Get-GuestPasswordSecretValue -SecretName $SecretName
+    if (-not [bool]$secretValue.IsSet) {
         return New-PlanCheck `
             -Name 'Guest credential environment variable' `
             -Status 'Failed' `
             -RequiredForLive $true `
-            -Message "Guest password environment variable '$SecretName' is not set in the current process." `
-            -Details @{ secretName = $SecretName; isSet = $false; valuePrinted = $false }
+            -Message "Guest password environment variable '$SecretName' is not set in Process, User, or Machine scope." `
+            -Details @{ secretName = $SecretName; isSet = $false; scope = ''; valuePrinted = $false }
     }
 
     return New-PlanCheck `
         -Name 'Guest credential environment variable' `
         -Status 'Passed' `
         -RequiredForLive $true `
-        -Message "Guest password environment variable '$SecretName' is set; value was not printed." `
-        -Details @{ secretName = $SecretName; isSet = $true; valuePrinted = $false }
+        -Message "Guest password environment variable '$SecretName' is set in $($secretValue.Scope) scope; value was not printed." `
+        -Details @{ secretName = $SecretName; isSet = $true; scope = $secretValue.Scope; valuePrinted = $false }
 }
 
 function New-HostOsCheck {
@@ -535,13 +557,13 @@ function New-PowerShellDirectCheck {
             -Details @{ vmName = $VmName; checked = $false }
     }
 
-    $password = [Environment]::GetEnvironmentVariable($SecretName, 'Process')
-    if ([string]::IsNullOrEmpty($password)) {
+    $secretValue = Get-GuestPasswordSecretValue -SecretName $SecretName
+    if (-not [bool]$secretValue.IsSet) {
         return New-PlanCheck `
             -Name 'PowerShell Direct readiness' `
             -Status 'Warning' `
             -RequiredForLive $true `
-            -Message "PowerShell Direct probe skipped because guest password environment variable '$SecretName' is not set." `
+            -Message "PowerShell Direct probe skipped because guest password environment variable '$SecretName' is not set in Process, User, or Machine scope." `
             -Details @{ vmName = $VmName; checked = $false; reason = 'missingCredentialSecret'; secretName = $SecretName; valuePrinted = $false }
     }
 
@@ -556,7 +578,7 @@ function New-PowerShellDirectCheck {
                 -Details @{ vmName = $VmName; checked = $false; vmState = $vm.State.ToString(); reason = 'vmNotRunning' }
         }
 
-        $securePassword = ConvertTo-SecureString $password -AsPlainText -Force
+        $securePassword = ConvertTo-SecureString ([string]$secretValue.Value) -AsPlainText -Force
         $credential = [pscredential]::new($UserName, $securePassword)
         $probe = Invoke-Command -VMName $VmName -Credential $credential -ScriptBlock {
             param([string[]]$Paths)
@@ -680,6 +702,154 @@ function Read-JsonFileIfPresent {
     }
 
     return (Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json)
+}
+
+
+function ConvertTo-NativeCommandLineArgument {
+    param([AllowNull()][string]$Argument)
+
+    if ($null -eq $Argument) {
+        return '""'
+    }
+
+    if ($Argument -notmatch '[\s"]') {
+        return $Argument
+    }
+
+    $escaped = $Argument.Replace('"', '\"')
+    if ($escaped.EndsWith('\')) {
+        $escaped += '\'
+    }
+
+    return '"' + $escaped + '"'
+}
+
+function Join-NativeCommandLineArguments {
+    param([string[]]$Arguments)
+
+    return (@($Arguments) | ForEach-Object { ConvertTo-NativeCommandLineArgument -Argument $_ }) -join ' '
+}
+
+function Invoke-ChildPowerShellScript {
+    param(
+        [Parameter(Mandatory)][string]$PhaseName,
+        [Parameter(Mandatory)][string]$ScriptPath,
+        [string[]]$Arguments = @(),
+        [int]$TimeoutSeconds = 900
+    )
+
+    $startedAtUtc = [DateTimeOffset]::UtcNow
+    $timer = [Diagnostics.Stopwatch]::StartNew()
+    $powerShellCommand = Get-Command powershell.exe -ErrorAction SilentlyContinue
+    $powerShellExe = if ($null -ne $powerShellCommand -and -not [string]::IsNullOrWhiteSpace($powerShellCommand.Source)) {
+        $powerShellCommand.Source
+    }
+    else {
+        'powershell.exe'
+    }
+
+    $nativeArguments = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $ScriptPath) + @($Arguments)
+    $exitCode = 1
+    $launchError = $null
+    $stdout = ''
+    $stderr = ''
+    $timedOut = $false
+    $process = $null
+
+    try {
+        $startInfo = [Diagnostics.ProcessStartInfo]::new()
+        $startInfo.FileName = $powerShellExe
+        $startInfo.Arguments = Join-NativeCommandLineArguments -Arguments $nativeArguments
+        $startInfo.UseShellExecute = $false
+        $startInfo.RedirectStandardOutput = $true
+        $startInfo.RedirectStandardError = $true
+        $startInfo.CreateNoWindow = $true
+        $startInfo.WorkingDirectory = $resolvedRepoRoot
+
+        $process = [Diagnostics.Process]::new()
+        $process.StartInfo = $startInfo
+        if (-not $process.Start()) {
+            throw 'Process.Start returned false.'
+        }
+
+        $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+        $stderrTask = $process.StandardError.ReadToEndAsync()
+        $timeoutMilliseconds = [Math]::Max(1, $TimeoutSeconds) * 1000
+        if (-not $process.WaitForExit($timeoutMilliseconds)) {
+            $timedOut = $true
+            try {
+                $process.Kill()
+            }
+            catch {
+                $exitCode = 124
+                $launchError = "Child process timeout after $TimeoutSeconds seconds and Kill failed: $($_.Exception.Message)"
+            }
+            $process.WaitForExit()
+        }
+
+        $stdout = [string]$stdoutTask.GetAwaiter().GetResult()
+        $stderr = [string]$stderrTask.GetAwaiter().GetResult()
+        if ($timedOut) {
+            $exitCode = 124
+            $timeoutMessage = "Child process timeout after $TimeoutSeconds seconds."
+            $stderr = (($stderr, $timeoutMessage) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }) -join [Environment]::NewLine
+        }
+        else {
+            $exitCode = [int]$process.ExitCode
+        }
+    }
+    catch {
+        $launchError = $_.Exception.Message
+        $exitCode = 1
+    }
+    finally {
+        if ($null -ne $process) {
+            $process.Dispose()
+        }
+        $timer.Stop()
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($launchError)) {
+        $stderr = (($stderr, "Launcher error: $launchError") | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }) -join [Environment]::NewLine
+    }
+
+    $maxCapturedOutputChars = 65536
+    $stdoutWasTruncated = $false
+    $stderrWasTruncated = $false
+    if ($stdout.Length -gt $maxCapturedOutputChars) {
+        $stdout = $stdout.Substring(0, $maxCapturedOutputChars) + [Environment]::NewLine + '[truncated]'
+        $stdoutWasTruncated = $true
+    }
+
+    if ($stderr.Length -gt $maxCapturedOutputChars) {
+        $stderr = $stderr.Substring(0, $maxCapturedOutputChars) + [Environment]::NewLine + '[truncated]'
+        $stderrWasTruncated = $true
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($stdout)) {
+        Write-HyperVE2EStep "Child $PhaseName stdout captured ($($stdout.Length) chars; truncated=$stdoutWasTruncated)."
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($stderr)) {
+        Write-HyperVE2EStep "Child $PhaseName stderr captured ($($stderr.Length) chars; truncated=$stderrWasTruncated)."
+    }
+
+    return [pscustomobject][ordered]@{
+        phaseName = $PhaseName
+        powerShell = $powerShellExe
+        scriptPath = $ScriptPath
+        arguments = @($Arguments)
+        exitCode = $exitCode
+        standardOutput = $stdout
+        standardError = $stderr
+        standardOutputTruncated = $stdoutWasTruncated
+        standardErrorTruncated = $stderrWasTruncated
+        startedAtUtc = $startedAtUtc.ToString('O')
+        duration = $timer.Elapsed.ToString('c')
+        launchedOutOfProcess = $true
+        timedOut = $timedOut
+        timeoutSeconds = $TimeoutSeconds
+    }
 }
 
 function New-RunbookStepExecutionResult {
@@ -812,6 +982,8 @@ function Save-RunbookExecutionRecord {
         [object[]]$StepResults = @(),
         [object]$StartResult = $null,
         [object]$CollectResult = $null,
+        [object]$StartInvocation = $null,
+        [object]$CollectInvocation = $null,
         [Nullable[int]]$StartExitCode = $null,
         [Nullable[int]]$CollectExitCode = $null,
         [bool]$WhatIf = $false
@@ -868,6 +1040,8 @@ function Save-RunbookExecutionRecord {
             collectExitCode = $CollectExitCode
             startResultPath = (Join-Path ([string]$Plan.host.jobRoot) 'hyperv-e2e-start-result.json')
             collectResultPath = (Join-Path ([string]$Plan.host.jobRoot) 'hyperv-e2e-collect-result.json')
+            startInvocation = $StartInvocation
+            collectInvocation = $CollectInvocation
         }
         phaseResults = [ordered]@{
             start = $StartResult
@@ -1229,6 +1403,12 @@ try {
 
     $plan | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $PlanPath -Encoding UTF8 -WhatIf:$false
     Write-HyperVE2EStep "Plan JSON written: $PlanPath"
+    $planFromDisk = Read-JsonFileIfPresent -Path $PlanPath
+    if ($null -ne $planFromDisk) {
+        $plan = $planFromDisk
+    }
+
+    $script:LastHyperVE2EPlan = $plan
 
     if (-not $willRunLive) {
         $safeStartedAtUtc = [DateTimeOffset]::UtcNow
@@ -1288,20 +1468,22 @@ try {
         $collectExitCode = $null
         $startResult = $null
         $collectResult = $null
+        $startInvocation = $null
+        $collectInvocation = $null
         $liveSuccess = $false
         $liveMessage = ''
 
         Write-HyperVE2EStep 'Starting live VM phase.'
-        & $startScript -PlanPath $PlanPath -Live
-        $startExitCode = $LASTEXITCODE
+        $startInvocation = Invoke-ChildPowerShellScript -PhaseName 'start' -ScriptPath $startScript -Arguments @('-PlanPath', $PlanPath, '-Live')
+        $startExitCode = [int]$startInvocation.exitCode
         $startResult = Read-JsonFileIfPresent -Path (Join-Path $jobRoot 'hyperv-e2e-start-result.json')
         if ($startExitCode -ne 0) {
             $liveMessage = "Start phase failed with exit code $startExitCode; collection phase was not launched."
         }
         else {
             Write-HyperVE2EStep 'Starting live collection/cleanup phase.'
-            & $collectScript -PlanPath $PlanPath -Live -RestoreCheckpointAfterRun:$RestoreCheckpointAfterRun
-            $collectExitCode = $LASTEXITCODE
+            $collectInvocation = Invoke-ChildPowerShellScript -PhaseName 'collect' -ScriptPath $collectScript -Arguments @('-PlanPath', $PlanPath, '-Live', "-RestoreCheckpointAfterRun:$RestoreCheckpointAfterRun")
+            $collectExitCode = [int]$collectInvocation.exitCode
             $collectResult = Read-JsonFileIfPresent -Path (Join-Path $jobRoot 'hyperv-e2e-collect-result.json')
             if ($collectExitCode -ne 0) {
                 $liveMessage = "Collection phase failed with exit code $collectExitCode."
@@ -1323,6 +1505,8 @@ try {
             -StepResults $liveStepResults `
             -StartResult $startResult `
             -CollectResult $collectResult `
+            -StartInvocation $startInvocation `
+            -CollectInvocation $collectInvocation `
             -StartExitCode $startExitCode `
             -CollectExitCode $collectExitCode `
             -WhatIf $false
@@ -1350,6 +1534,36 @@ try {
     exit 0
 }
 catch {
-    Write-Error "FAIL: Hyper-V E2E orchestration failed. $($_.Exception.Message)"
+    $failureMessage = "FAIL: Hyper-V E2E orchestration failed. $($_.Exception.Message)"
+    if ($null -ne $script:LastHyperVE2EPlan) {
+        try {
+            $fallbackExecutionPath = [string]$script:LastHyperVE2EPlan.host.runbookExecutionPath
+            if ([string]::IsNullOrWhiteSpace($fallbackExecutionPath)) {
+                $fallbackExecutionPath = Join-Path ([string]$script:LastHyperVE2EPlan.host.jobRoot) 'runbook-execution.json'
+            }
+
+            if (-not (Test-Path -LiteralPath $fallbackExecutionPath -PathType Leaf)) {
+                $fallbackModeName = [string]$script:LastHyperVE2EPlan.effectiveMode
+                if ([string]::IsNullOrWhiteSpace($fallbackModeName)) {
+                    $fallbackModeName = 'Live'
+                }
+
+                Save-RunbookExecutionRecord `
+                    -Plan $script:LastHyperVE2EPlan `
+                    -ModeName $fallbackModeName `
+                    -Success $false `
+                    -Message $failureMessage `
+                    -StartedAtUtc ([DateTimeOffset]::UtcNow) `
+                    -Duration ([TimeSpan]::Zero) `
+                    -StepResults @() `
+                    -WhatIf ([bool]$WhatIfPreference)
+            }
+        }
+        catch {
+            Write-Warning "Could not write fallback runbook execution record: $($_.Exception.Message)"
+        }
+    }
+
+    Write-Error $failureMessage
     exit 1
 }

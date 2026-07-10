@@ -73,7 +73,9 @@ internal sealed class WebRunbookCredentialContractScenario : ISmokeTestScenario
         foreach (var step in credentialSteps)
         {
             SmokeAssert.True(
-                step.PowerShell.Contains("[System.Environment]::GetEnvironmentVariable('KSWORDBOX_GUEST_PASSWORD')", StringComparison.Ordinal) &&
+                step.PowerShell.Contains("[System.Environment]::GetEnvironmentVariable('KSWORDBOX_GUEST_PASSWORD', 'Process')", StringComparison.Ordinal) &&
+                step.PowerShell.Contains("[System.Environment]::GetEnvironmentVariable('KSWORDBOX_GUEST_PASSWORD', 'User')", StringComparison.Ordinal) &&
+                step.PowerShell.Contains("[System.Environment]::GetEnvironmentVariable('KSWORDBOX_GUEST_PASSWORD', 'Machine')", StringComparison.Ordinal) &&
                 step.PowerShell.Contains("ConvertTo-SecureString $guestPasswordText", StringComparison.Ordinal) &&
                 step.PowerShell.Contains("[pscredential]::new('SandboxUser'", StringComparison.Ordinal),
                 $"Runbook step {step.Id} references $guestCredential but does not recreate it in the same PowerShell command.");

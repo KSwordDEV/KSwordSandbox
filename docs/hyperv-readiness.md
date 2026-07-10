@@ -89,8 +89,21 @@ Fix for the current session:
 $env:KSWORDBOX_GUEST_PASSWORD = '<local guest password>'
 ```
 
-If the variable exists at User or Machine scope but not in the current process,
-open a new elevated PowerShell session or set `$env:...` in the current session.
+For deployment and repeat use, prefer the local installer:
+
+```powershell
+.\install.ps1 -Mode Install -PromptPassword
+```
+
+or generate/reset a local value:
+
+```powershell
+.\install.ps1 -Mode Change -ResetPassword -GeneratePassword
+```
+
+The readiness and live scripts read Process, User, then Machine scope. If a
+value exists at User or Machine scope, a newly opened elevated PowerShell
+session inherits it; the scripts also check those scopes directly.
 
 ### Host payload files
 

@@ -47,10 +47,28 @@ tests/KSword.Sandbox.SmokeTests Console smoke tests
 ## Quick start
 
 ```powershell
+.\install.ps1
 dotnet build .\KSwordSandbox.sln
 .\scripts\Invoke-SandboxSmokeTest.ps1
 dotnet run --project .\src\KSword.Sandbox.Web\KSword.Sandbox.Web.csproj
 ```
+
+`install.ps1` has an interactive menu for install, change, uninstall, and
+status. The Change menu includes password reset. For unattended local lab setup:
+
+```powershell
+.\install.ps1 -Mode Install -GeneratePassword
+```
+
+For an existing golden VM, prefer:
+
+```powershell
+.\install.ps1 -Mode Install -PromptPassword
+```
+
+The installer stores `KSWORDBOX_GUEST_PASSWORD` outside git in the current user
+environment and can write a DPAPI-protected local backup. See
+`docs/install.md`.
 
 Build the native x64 collector and driver skeleton from the main solution:
 

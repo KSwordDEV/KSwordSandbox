@@ -171,7 +171,14 @@ function Get-GuestCredential {
 
     $password = [Environment]::GetEnvironmentVariable($SecretName, 'Process')
     if ([string]::IsNullOrEmpty($password)) {
-        throw "Guest password environment variable '$SecretName' is not set in the current process."
+        $password = [Environment]::GetEnvironmentVariable($SecretName, 'User')
+    }
+    if ([string]::IsNullOrEmpty($password)) {
+        $password = [Environment]::GetEnvironmentVariable($SecretName, 'Machine')
+    }
+
+    if ([string]::IsNullOrEmpty($password)) {
+        throw "Guest password environment variable '$SecretName' is not set in Process, User, or Machine scope. Run .\install.ps1 -Mode Install -PromptPassword or -GeneratePassword."
     }
 
     $securePassword = ConvertTo-SecureString $password -AsPlainText -Force

@@ -31,6 +31,12 @@ internal sealed class HyperVE2EContractScenario : ISmokeTestScenario
         RequireContains(invokeScript, "ConvertTo-Json -Depth 12", "Top-level script should write a complete plan JSON.");
         RequireContains(invokeScript, "Start-SandboxHyperVJob.ps1", "Top-level script should delegate live start work.");
         RequireContains(invokeScript, "Collect-GuestOutputs.ps1", "Top-level script should delegate collection and cleanup.");
+        RequireContains(invokeScript, "Invoke-ChildPowerShellScript", "Top-level script should run child scripts out-of-process so child exit statements cannot skip aggregate persistence.");
+        RequireContains(invokeScript, "launchedOutOfProcess", "Top-level script should record child process launch evidence in runbook-execution.json.");
+        RequireContains(invokeScript, "startInvocation", "Top-level script should persist start child stdout/stderr/exit metadata.");
+        RequireContains(invokeScript, "collectInvocation", "Top-level script should persist collect child stdout/stderr/exit metadata.");
+        SmokeAssert.True(!invokeScript.Contains("& $startScript -PlanPath", StringComparison.Ordinal), "Top-level script should not dot/call the start script in-process because exit 1 bypasses aggregate runbook persistence.");
+        SmokeAssert.True(!invokeScript.Contains("& $collectScript -PlanPath", StringComparison.Ordinal), "Top-level script should not dot/call the collect script in-process because exit 1 bypasses aggregate runbook persistence.");
         RequireContains(invokeScript, "Test-IsAdministrator", "Top-level live mode should require an elevated shell.");
         RequireContains(invokeScript, "RestoreCheckpointAfterRun", "Plan should model final checkpoint restore behavior.");
 
