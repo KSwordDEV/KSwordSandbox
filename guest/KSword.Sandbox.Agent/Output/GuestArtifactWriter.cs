@@ -6,6 +6,20 @@ using KSword.Sandbox.Abstractions.Artifacts;
 namespace KSword.Sandbox.Agent.Output;
 
 /// <summary>
+/// Describes the result of writing a guest-side artifact manifest.
+/// Inputs are produced by GuestArtifactWriter; processing is immutable storage;
+/// callers use the manifest path and descriptor count for events.
+/// </summary>
+internal sealed record GuestArtifactManifestWriteResult(string ManifestPath, int ArtifactCount);
+
+/// <summary>
+/// Preserves original dropped-file evidence metadata for copied artifacts.
+/// Inputs are the VM-local source path, source-relative path, and source event;
+/// processing stores strings for manifest metadata only.
+/// </summary>
+internal sealed record DroppedFileArtifactMetadata(string OriginalFullPath, string OriginalRelativePath, string SourceEventType);
+
+/// <summary>
 /// Writes guest events and summaries into the configured output directory.
 /// Inputs are output paths and event lists; processing serializes JSON files;
 /// methods return paths to written artifacts.
@@ -67,11 +81,24 @@ internal sealed class GuestArtifactWriter
     /// </summary>
     public string WriteArtifactManifest(string outputDirectory)
     {
+        return WriteArtifactManifest(outputDirectory, metadataByRelativePath: null).ManifestPath;
+    }
+
+    /// <summary>
+    /// Writes artifacts/manifest.json with optional original source metadata.
+    /// Inputs are the output directory and copied artifact metadata keyed by
+    /// manifest-relative path; processing records size/hash/path metadata and
+    /// preserves original guest paths; the method returns write metadata.
+    /// </summary>
+    public GuestArtifactManifestWriteResult WriteArtifactManifest(
+        string outputDirectory,
+        IReadOnlyDictionary<string, DroppedFileArtifactMetadata>? metadataByRelativePath)
+    {
         Directory.CreateDirectory(outputDirectory);
         var artifactsRoot = Path.Combine(outputDirectory, ArtifactsDirectoryName);
         Directory.CreateDirectory(artifactsRoot);
         var manifestPath = Path.Combine(artifactsRoot, ManifestFileName);
-        var descriptors = EnumerateDroppedFileArtifacts(outputDirectory, artifactsRoot, manifestPath);
+        var descriptors = EnumerateDroppedFileArtifacts(outputDirectory, artifactsRoot, manifestPath, metadataByRelativePath);
         var manifest = new ArtifactManifest
         {
             RuntimeRoot = Path.GetFullPath(outputDirectory),
@@ -81,7 +108,7 @@ internal sealed class GuestArtifactWriter
         };
 
         File.WriteAllText(manifestPath, JsonSerializer.Serialize(manifest, ManifestJsonOptions));
-        return manifestPath;
+        return new GuestArtifactManifestWriteResult(manifestPath, descriptors.Count);
     }
 
     /// <summary>
@@ -90,7 +117,11 @@ internal sealed class GuestArtifactWriter
     /// the manifest itself and hashes readable files; the method returns
     /// descriptors suitable for the manifest JSON.
     /// </summary>
-    private static List<ArtifactDescriptor> EnumerateDroppedFileArtifacts(string outputDirectory, string artifactsRoot, string manifestPath)
+    private static List<ArtifactDescriptor> EnumerateDroppedFileArtifacts(
+        string outputDirectory,
+        string artifactsRoot,
+        string manifestPath,
+        IReadOnlyDictionary<string, DroppedFileArtifactMetadata>? metadataByRelativePath)
     {
         if (!Directory.Exists(artifactsRoot))
         {
@@ -104,7 +135,7 @@ internal sealed class GuestArtifactWriter
             .Select(Path.GetFullPath)
             .Where(path => !string.Equals(path, fullManifestPath, StringComparison.OrdinalIgnoreCase))
             .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
-            .Select(path => CreateDroppedFileDescriptor(fullOutputDirectory, path))
+            .Select(path => CreateDroppedFileDescriptor(fullOutputDirectory, path, metadataByRelativePath))
             .ToList();
     }
 
@@ -113,11 +144,16 @@ internal sealed class GuestArtifactWriter
     /// Inputs are the guest output root and a file path; processing reads file
     /// metadata and SHA-256, and the method returns the manifest descriptor.
     /// </summary>
-    private static ArtifactDescriptor CreateDroppedFileDescriptor(string outputDirectory, string path)
+    private static ArtifactDescriptor CreateDroppedFileDescriptor(
+        string outputDirectory,
+        string path,
+        IReadOnlyDictionary<string, DroppedFileArtifactMetadata>? metadataByRelativePath)
     {
         var info = new FileInfo(path);
         var relativePath = NormalizeRelativePath(Path.GetRelativePath(outputDirectory, info.FullName));
         var sha256 = ComputeSha256(info.FullName);
+        DroppedFileArtifactMetadata? sourceMetadata = null;
+        metadataByRelativePath?.TryGetValue(relativePath, out sourceMetadata);
         return new ArtifactDescriptor
         {
             Kind = ArtifactKind.DroppedFile,
@@ -134,13 +170,35 @@ internal sealed class GuestArtifactWriter
                 ["sha256"] = sha256
             },
             CreatedAtUtc = info.CreationTimeUtc,
-            Metadata = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-            {
-                ["origin"] = "guest",
-                ["evidenceRole"] = "dropped-file",
-                ["guestFullPath"] = info.FullName
-            }
+            Metadata = CreateDroppedFileMetadata(info.FullName, sourceMetadata)
         };
+    }
+
+    /// <summary>
+    /// Builds manifest metadata for a copied dropped-file artifact.
+    /// Inputs are the copied artifact path and optional original source
+    /// metadata; processing preserves the original guest path when known; the
+    /// method returns string metadata for ArtifactDescriptor.
+    /// </summary>
+    private static Dictionary<string, string> CreateDroppedFileMetadata(
+        string artifactFullPath,
+        DroppedFileArtifactMetadata? sourceMetadata)
+    {
+        var metadata = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["origin"] = "guest",
+            ["evidenceRole"] = "dropped-file",
+            ["guestFullPath"] = sourceMetadata?.OriginalFullPath ?? artifactFullPath,
+            ["artifactFullPath"] = artifactFullPath
+        };
+
+        if (sourceMetadata is not null)
+        {
+            metadata["guestRelativePath"] = sourceMetadata.OriginalRelativePath;
+            metadata["sourceEventType"] = sourceMetadata.SourceEventType;
+        }
+
+        return metadata;
     }
 
     /// <summary>
@@ -221,6 +279,7 @@ internal sealed class GuestArtifactWriter
             ".png" => "image/png",
             ".jpg" or ".jpeg" => "image/jpeg",
             ".gif" => "image/gif",
+            ".dmp" => "application/vnd.microsoft.minidump",
             ".zip" => "application/zip",
             ".exe" or ".dll" or ".sys" => "application/vnd.microsoft.portable-executable",
             _ => "application/octet-stream"

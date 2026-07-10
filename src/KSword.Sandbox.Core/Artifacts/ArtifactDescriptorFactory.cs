@@ -238,6 +238,7 @@ public static class ArtifactDescriptorFactory
             ".png" => "image/png",
             ".jpg" or ".jpeg" => "image/jpeg",
             ".gif" => "image/gif",
+            ".dmp" => "application/vnd.microsoft.minidump",
             ".zip" => "application/zip",
             ".exe" or ".dll" or ".sys" => "application/vnd.microsoft.portable-executable",
             _ => "application/octet-stream"

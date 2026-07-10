@@ -193,14 +193,17 @@ internal sealed class ArtifactManifestContractScenario : ISmokeTestScenario
         var jobRoot = Path.Combine(context.RuntimeRoot, "artifact-index", "jobs", jobId.ToString("N"));
         var guestRoot = Path.Combine(jobRoot, "guest", jobId.ToString("N"));
         var screenshotsRoot = Path.Combine(guestRoot, "screenshots");
+        var memoryDumpsRoot = Path.Combine(guestRoot, "memory-dumps");
         var artifactsRoot = Path.Combine(guestRoot, "artifacts");
         Directory.CreateDirectory(screenshotsRoot);
+        Directory.CreateDirectory(memoryDumpsRoot);
         Directory.CreateDirectory(artifactsRoot);
 
         await File.WriteAllTextAsync(Path.Combine(jobRoot, "report.json"), "{}", cancellationToken);
         await File.WriteAllTextAsync(Path.Combine(guestRoot, "events.json"), "[]", cancellationToken);
         await File.WriteAllTextAsync(Path.Combine(guestRoot, "driver-events.jsonl"), "{}", cancellationToken);
         await File.WriteAllBytesAsync(Path.Combine(screenshotsRoot, "after-run.bmp"), [0x42, 0x4d, 0x00, 0x00], cancellationToken);
+        await File.WriteAllBytesAsync(Path.Combine(memoryDumpsRoot, "after-start-pid123.dmp"), [0x4d, 0x44, 0x4d, 0x50], cancellationToken);
         await File.WriteAllTextAsync(Path.Combine(artifactsRoot, "drop.bin"), "drop", cancellationToken);
         await File.WriteAllTextAsync(Path.Combine(artifactsRoot, "manifest.json"), "{}", cancellationToken);
 
@@ -210,6 +213,10 @@ internal sealed class ArtifactManifestContractScenario : ISmokeTestScenario
         AssertIndexedArtifact(index, ArtifactKind.GuestEventsJson, $"guest/{jobId:N}/events.json");
         AssertIndexedArtifact(index, ArtifactKind.DriverEventsJsonLines, $"guest/{jobId:N}/driver-events.jsonl");
         AssertIndexedArtifact(index, ArtifactKind.Screenshot, $"guest/{jobId:N}/screenshots/after-run.bmp");
+        var memoryDump = AssertIndexedArtifact(index, ArtifactKind.Bundle, $"guest/{jobId:N}/memory-dumps/after-start-pid123.dmp");
+        SmokeAssert.True(memoryDump.Category == "memory-dump", "Memory dump index entry should include memory-dump category.");
+        SmokeAssert.True(memoryDump.MimeType == "application/vnd.microsoft.minidump", "Memory dump index entry should include minidump MIME type.");
+        SmokeAssert.True(memoryDump.Metadata.TryGetValue("evidenceRole", out var dumpEvidenceRole) && dumpEvidenceRole == "memory-dump", "Memory dump index entry should include evidence role.");
         var dropped = AssertIndexedArtifact(index, ArtifactKind.DroppedFile, $"guest/{jobId:N}/artifacts/drop.bin");
         SmokeAssert.True(dropped.SizeBytes == 4, "Dropped-file index entry should include size.");
         SmokeAssert.True(dropped.MimeType == "application/octet-stream", "Dropped-file index entry should include MIME type.");

@@ -94,6 +94,16 @@ internal static class DashboardExperiencePage
             .stage.active { border-color:var(--blue); box-shadow:0 0 0 3px rgba(67,160,255,.12); color:#075985; font-weight:800; }
             .stage.done { background:#ecfdf5; border-color:#bbf7d0; color:#047857; }
             .stage.failed { background:#fff7ed; border-color:#fdba74; color:#c2410c; font-weight:800; }
+            .runbook-step-grid { display:grid; gap:8px; grid-template-columns:repeat(4,minmax(0,1fr)); margin-top:10px; }
+            .runbook-step { background:white; border:1px solid #e5edf6; border-radius:12px; padding:8px; }
+            .runbook-step b { display:block; font-size:12px; margin-bottom:3px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+            .runbook-step small { color:#64748b; display:block; font-size:11px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+            .runbook-step.pending { color:#64748b; }
+            .runbook-step.running { border-color:var(--blue); box-shadow:0 0 0 3px rgba(67,160,255,.12); color:#075985; font-weight:800; }
+            .runbook-step.completed, .runbook-step.skipped { background:#ecfdf5; border-color:#bbf7d0; color:#047857; }
+            .runbook-step.failed, .runbook-step.canceled { background:#fff7ed; border-color:#fdba74; color:#c2410c; font-weight:800; }
+            .runbook-progress-details { margin-top:10px; }
+            .runbook-progress-details summary { cursor:pointer; color:#075985; font-weight:800; }
             .compact-details { margin-top:12px; }
             .compact-details summary { cursor:pointer; color:#075985; font-weight:800; }
             .empty { border:1px dashed #b9d7f3; border-radius:12px; color:var(--muted); padding:14px; }
@@ -192,11 +202,13 @@ internal static class DashboardExperiencePage
             let copyToastTimer = null;
             let currentLanguage = localStorage.getItem('ksword-lang') === 'en' ? 'en' : 'zh';
             let progressTimer = null;
+            let runbookProgressTimer = null;
             let progressStageIndex = 0;
             let progressCompleted = false;
             let progressFailed = false;
             let currentJobPayload = null;
             let currentJobListPayload = [];
+            let latestRunbookProgressSnapshot = null;
             const liveStages = [
               ['任务已规划', 'Job planned', '已生成可复核计划', 'Reviewable plan is ready'],
               ['检查 Hyper-V / 凭据', 'Check Hyper-V / credential', '验证主机与登录条件', 'Validate host and logon prerequisites'],
@@ -233,7 +245,11 @@ internal static class DashboardExperiencePage
                 element.textContent = currentLanguage === 'en' ? element.getAttribute('data-en') : element.getAttribute('data-zh');
               });
               refreshLocalizedReportLinks();
-              renderStages(progressStageIndex, progressCompleted, progressFailed);
+              if (latestRunbookProgressSnapshot) {
+                renderRunbookProgress(latestRunbookProgressSnapshot);
+              } else {
+                renderStages(progressStageIndex, progressCompleted, progressFailed);
+              }
             }
 
             function rerenderDynamicPanelsForLanguage() {
@@ -418,7 +434,12 @@ internal static class DashboardExperiencePage
                 document.getElementById('samplePath').value = uploaded.fullPath;
                 document.getElementById('duration').value = document.getElementById('uploadDuration').value || 120;
                 setStatus(t('上传完成，正在生成分析计划...', `Uploaded to ${uploaded.fullPath}; creating analysis plan...`), false);
-                await planPath(uploaded.fullPath);
+                const job = await planPath(uploaded.fullPath);
+                const jobId = job && (job.jobId || job.id);
+                if (jobId) {
+                  setStatus(t('上传完成，已自动开始虚拟机分析。', 'Upload completed; VM analysis has started automatically.'), false);
+                  await executeRunbook(String(jobId), true);
+                }
               } catch (error) {
                 setStatus(error.message, true);
               } finally {
@@ -453,8 +474,10 @@ internal static class DashboardExperiencePage
             refreshJobs(false);
                 setStatus(t('计划已生成。确认当前任务卡片后，可启动虚拟机分析。', 'Plan created. Review the current job card, then start VM analysis when ready.'), false);
                 document.getElementById('current-job').scrollIntoView({ behavior: 'smooth', block: 'start' });
+                return payload;
               } catch (error) {
                 setStatus(error.message, true);
+                return null;
               } finally {
                 setBusy(false);
               }
@@ -587,6 +610,9 @@ internal static class DashboardExperiencePage
               job = normalizeJobPayload(job);
               currentJobPayload = job;
               const jobId = String(job.jobId || '');
+              if (latestRunbookProgressSnapshot && String(latestRunbookProgressSnapshot.jobId || '').toLowerCase() !== jobId.toLowerCase()) {
+                latestRunbookProgressSnapshot = null;
+              }
               const statusLabel = formatJobStatus(job.status);
               const htmlReportPath = job.htmlReportPath || '';
               const zhReportPath = job.htmlReportZhPath || '';
@@ -640,6 +666,7 @@ internal static class DashboardExperiencePage
                     </div>
                     <div class="progress-bar"><div id="progressFill" class="progress-fill"></div></div>
                     <div id="stageList" class="stages"></div>
+                    <div id="runbookProgressDetails" class="runbook-progress-details"></div>
                     <p id="progressText" class="hint" data-zh="等待启动。虚拟机恢复/启动可能占用大部分时间。" data-en="Waiting to start. VM restore/start usually takes most of the time.">等待启动。虚拟机恢复/启动可能占用大部分时间。</p>
                   </div>
                   <details id="jobReportPaths" class="compact-details">
@@ -673,7 +700,11 @@ internal static class DashboardExperiencePage
                   <div id="executionResult" class="hint" data-copy="planned steps: ${plannedStepCount}" data-copy-label="planned runbook step count">${t(`已规划 ${plannedStepCount} 个步骤。主界面只显示摘要；请打开“执行流程”查看详情。`, `${plannedStepCount} steps planned. The dashboard shows a summary only; open Execution flow for details.`)}</div>
                 </article>`;
               applyLanguage();
-              renderStages(0, false, false);
+              if (latestRunbookProgressSnapshot) {
+                renderRunbookProgress(latestRunbookProgressSnapshot);
+              } else {
+                renderStages(0, false, false);
+              }
             }
 
             async function refreshJob(jobId) {
@@ -855,6 +886,183 @@ internal static class DashboardExperiencePage
               }
             }
 
+            function startRunbookProgressPolling(jobId) {
+              // Inputs: current job id. Processing: polls the UI-safe progress
+              // endpoint while /runbook/execute is still pending, replacing the
+              // old estimated progress with real runbook step state. Return:
+              // no value; polling stops on terminal executor states.
+              stopRunbookProgressPolling();
+              if (!jobId) {
+                return;
+              }
+
+              const tick = async () => {
+                const terminal = await refreshRunbookProgress(jobId, true);
+                if (terminal) {
+                  stopRunbookProgressPolling();
+                }
+              };
+              tick();
+              runbookProgressTimer = setInterval(tick, 1500);
+            }
+
+            function stopRunbookProgressPolling() {
+              if (runbookProgressTimer) {
+                clearInterval(runbookProgressTimer);
+                runbookProgressTimer = null;
+              }
+            }
+
+            async function refreshRunbookProgress(jobId, quiet) {
+              // Inputs: job id and quiet flag. Processing: GETs the latest
+              // progress snapshot, renders exact step count/current step, and
+              // returns true for terminal states. It never renders PowerShell,
+              // stdout, or stderr in the main dashboard.
+              try {
+                const response = await fetch(`/api/jobs/${encodeURIComponent(jobId)}/runbook/progress`, { cache: 'no-store' });
+                const snapshot = await requireOk(response, t('刷新真实执行进度', 'Refresh real execution progress'));
+                renderRunbookProgress(snapshot);
+                const state = normalizeProgressState(snapshot.state);
+                return state === 'completed' || state === 'failed' || state === 'canceled' || snapshot.success === true || snapshot.success === false;
+              } catch (error) {
+                if (!quiet) {
+                  setStatus(error.message, true);
+                }
+                return false;
+              }
+            }
+
+            function normalizeProgressState(state) {
+              const value = String(state || '').trim().toLowerCase();
+              return value || 'pending';
+            }
+
+            function progressStateLabel(state) {
+              switch (normalizeProgressState(state)) {
+                case 'running': return t('运行中', 'Running');
+                case 'completed': return t('已完成', 'Completed');
+                case 'failed': return t('失败', 'Failed');
+                case 'canceled': return t('已取消', 'Canceled');
+                case 'skipped': return t('已跳过', 'Skipped');
+                default: return t('等待中', 'Pending');
+              }
+            }
+
+            function renderRunbookProgress(snapshot) {
+              const list = document.getElementById('stageList');
+              const fill = document.getElementById('progressFill');
+              const meta = document.getElementById('progressMeta');
+              const text = document.getElementById('progressText');
+              const details = document.getElementById('runbookProgressDetails');
+              if (!snapshot || !list || !fill) {
+                return;
+              }
+
+              stopEstimatedProgress();
+              latestRunbookProgressSnapshot = snapshot;
+              const steps = Array.isArray(snapshot.steps) ? snapshot.steps : [];
+              const total = Math.max(steps.length, Number(snapshot.totalSteps) || 0);
+              const completed = Math.max(0, Number(snapshot.completedSteps) || steps.filter(step => ['completed', 'skipped'].includes(normalizeProgressState(step.state))).length);
+              const executed = Math.max(0, Number(snapshot.executedSteps) || 0);
+              const state = normalizeProgressState(snapshot.state);
+              const failed = state === 'failed' || state === 'canceled' || snapshot.success === false;
+              const done = state === 'completed' || snapshot.success === true;
+              const currentIndex = snapshot.currentStepIndex === null || snapshot.currentStepIndex === undefined ? -1 : Number(snapshot.currentStepIndex);
+              const currentStep = currentIndex >= 0 && currentIndex < steps.length ? steps[currentIndex] : null;
+              const percent = total > 0 ? Math.round((completed / total) * 100) : (done ? 100 : 0);
+              fill.style.width = `${done ? 100 : Math.min(99, Math.max(failed ? percent : 4, percent))}%`;
+              fill.classList.toggle('failed', failed);
+              progressCompleted = done;
+              progressFailed = failed;
+              progressStageIndex = total > 0 ? Math.max(0, Math.min(total - 1, currentIndex >= 0 ? currentIndex : completed)) : 0;
+
+              if (meta) {
+                const label = done
+                  ? t(`真实步骤完成 ${completed}/${total}`, `Real steps complete ${completed}/${total}`)
+                  : failed
+                    ? t(`真实步骤失败 ${completed}/${total}`, `Real steps failed ${completed}/${total}`)
+                    : t(`真实步骤 ${Math.min(total, Math.max(1, currentIndex + 1 || completed + 1))}/${total}`, `Real step ${Math.min(total, Math.max(1, currentIndex + 1 || completed + 1))}/${total}`);
+                meta.textContent = label;
+                meta.setAttribute('data-copy', `${label}; executed=${executed}; state=${state}`);
+              }
+
+              const currentTitle = currentStep ? (currentStep.title || currentStep.stepId || '') : (snapshot.currentStepTitle || '');
+              const currentPrefix = done
+                ? t('所有 runbook 步骤已完成', 'All runbook steps completed')
+                : failed
+                  ? t('runbook 执行已停止', 'Runbook execution stopped')
+                  : currentTitle
+                    ? t('当前真实步骤', 'Current real step')
+                    : t('等待 executor 上报真实步骤', 'Waiting for executor step telemetry');
+              if (text) {
+                const message = snapshot.message ? ` · ${snapshot.message}` : '';
+                text.textContent = currentTitle
+                  ? `${currentPrefix}: ${currentIndex + 1}/${total} — ${currentTitle}${message}`
+                  : `${currentPrefix}${message}`;
+              }
+
+              const focusSteps = buildProgressFocusSteps(steps, currentIndex, failed, done);
+              list.className = 'stages';
+              list.innerHTML = focusSteps.length
+                ? focusSteps.map(step => renderProgressStageCard(step, total)).join('')
+                : `<div class="stage active">${escapeHtml(progressStateLabel(state))}<small>${escapeHtml(t('等待进度快照', 'Waiting for progress snapshot'))}</small></div>`;
+
+              if (details) {
+                const rows = steps.map(step => renderRunbookStepChip(step, currentIndex)).join('');
+                details.innerHTML = rows
+                  ? `<details><summary>${escapeHtml(t('展开真实 runbook 步骤状态（不含命令行）', 'Expand real runbook step status (no commands)'))}</summary><div class="runbook-step-grid">${rows}</div></details>`
+                  : '';
+              }
+            }
+
+            function buildProgressFocusSteps(steps, currentIndex, failed, done) {
+              const interesting = [];
+              const failedStep = steps.find(step => ['failed', 'canceled'].includes(normalizeProgressState(step.state)));
+              if (failedStep) {
+                interesting.push(failedStep);
+              }
+
+              const runningStep = steps.find(step => normalizeProgressState(step.state) === 'running') || (currentIndex >= 0 ? steps[currentIndex] : null);
+              if (runningStep && !interesting.includes(runningStep)) {
+                interesting.push(runningStep);
+              }
+
+              const completed = steps.filter(step => ['completed', 'skipped'].includes(normalizeProgressState(step.state))).slice(-2);
+              for (const step of completed) {
+                if (!interesting.includes(step)) {
+                  interesting.unshift(step);
+                }
+              }
+
+              if (done && steps.length > 0 && !interesting.includes(steps[steps.length - 1])) {
+                interesting.push(steps[steps.length - 1]);
+              }
+
+              return interesting.slice(-4);
+            }
+
+            function renderProgressStageCard(step, total) {
+              const state = normalizeProgressState(step.state);
+              const css = state === 'completed' || state === 'skipped'
+                ? 'done'
+                : state === 'failed' || state === 'canceled'
+                  ? 'failed'
+                  : state === 'running'
+                    ? 'active'
+                    : '';
+              const title = `${Number(step.stepIndex) + 1}/${total} ${step.title || step.stepId || ''}`;
+              const subtitle = `${progressStateLabel(state)}${step.message ? ` · ${step.message}` : ''}`;
+              return `<div class="stage ${css}" data-copy="${escapeAttribute(`${title} - ${subtitle}`)}" data-copy-label="runbook progress step">${escapeHtml(title)}<small>${escapeHtml(subtitle)}</small></div>`;
+            }
+
+            function renderRunbookStepChip(step, currentIndex) {
+              const state = normalizeProgressState(step.state);
+              const css = ['pending', 'running', 'completed', 'failed', 'skipped', 'canceled'].includes(state) ? state : 'pending';
+              const title = `${Number(step.stepIndex) + 1}. ${step.title || step.stepId || ''}`;
+              const detail = `${progressStateLabel(state)}${step.duration ? ` · ${formatDuration(step.duration)}` : ''}${step.exitCode !== null && step.exitCode !== undefined ? ` · exit ${step.exitCode}` : ''}${step.message ? ` · ${step.message}` : ''}`;
+              return `<div class="runbook-step ${css}" data-copy="${escapeAttribute(`${title} - ${detail}`)}" data-copy-label="runbook step status"><b>${escapeHtml(title)}</b><small>${escapeHtml(detail)}</small></div>`;
+            }
+
             function openReport(jobId) {
               const lang = currentLanguage === 'en' ? 'en' : 'zh';
               window.location.href = `/api/jobs/${encodeURIComponent(jobId)}/report/html?lang=${lang}`;
@@ -908,7 +1116,9 @@ internal static class DashboardExperiencePage
 
             async function executeRunbook(jobId, live) {
               setBusy(true);
+              latestRunbookProgressSnapshot = null;
               startEstimatedProgress(live);
+              startRunbookProgressPolling(jobId);
               setStatus(live ? t('正在启动虚拟机分析...', 'Starting VM analysis...') : t('正在验证流程（不启动虚拟机）...', 'Verifying flow without starting the VM...'), false);
               try {
                 const response = await fetch(`/api/jobs/${encodeURIComponent(jobId)}/runbook/execute`, {
@@ -933,7 +1143,10 @@ internal static class DashboardExperiencePage
                 const suffix = payload.guestImportMessage ? ` ${payload.guestImportMessage}` : '';
                 const importFailed = Boolean(payload.guestImportMessage && !payload.guestImportSucceeded);
                 stopEstimatedProgress();
-                renderStages(liveStages.length - 1, Boolean(execution.success && !importFailed), Boolean(!execution.success || importFailed));
+                await refreshRunbookProgress(jobId, true);
+                if (!latestRunbookProgressSnapshot) {
+                  renderStages(liveStages.length - 1, Boolean(execution.success && !importFailed), Boolean(!execution.success || importFailed));
+                }
                 setStatus((execution.success ? t('分析流程已完成。', 'Analysis flow completed.') : t('分析流程失败。', 'Analysis flow stopped with a failure.')) + suffix, !execution.success || importFailed);
                 if (live && execution.success && !importFailed) {
                   const text = document.getElementById('progressText');
@@ -950,13 +1163,17 @@ internal static class DashboardExperiencePage
                 }
               } catch (error) {
                 stopEstimatedProgress();
-                renderStages(progressStageIndex, false, true);
+                await refreshRunbookProgress(jobId, true);
+                if (!latestRunbookProgressSnapshot) {
+                  renderStages(progressStageIndex, false, true);
+                }
                 const text = document.getElementById('progressText');
                 if (text) {
                   text.textContent = t('执行未完成；请打开执行流程查看失败步骤和 runbook-execution.json。', 'Execution did not complete; open Execution flow for the failed step and runbook-execution.json.');
                 }
                 setStatus(error.message, true);
               } finally {
+                stopRunbookProgressPolling();
                 setBusy(false);
               }
             }

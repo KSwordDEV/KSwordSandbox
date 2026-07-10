@@ -1,7 +1,42 @@
 {
   "matrix": "enterprise-windows",
-  "version": "2026-07-10-report-static-r0-expansion",
+  "version": "2026-07-11-behavior-coverage-expansion",
   "techniques": [
+    {
+      "id": "T1003",
+      "name": "OS Credential Dumping",
+      "categories": [
+        "credential-access"
+      ]
+    },
+    {
+      "id": "T1003.001",
+      "name": "LSASS Memory",
+      "categories": [
+        "credential-access"
+      ]
+    },
+    {
+      "id": "T1003.002",
+      "name": "Security Account Manager",
+      "categories": [
+        "credential-access"
+      ]
+    },
+    {
+      "id": "T1021.002",
+      "name": "SMB/Windows Admin Shares",
+      "categories": [
+        "lateral-movement"
+      ]
+    },
+    {
+      "id": "T1021.006",
+      "name": "Windows Remote Management",
+      "categories": [
+        "lateral-movement"
+      ]
+    },
     {
       "id": "T1027",
       "name": "Obfuscated Files or Information",
@@ -24,6 +59,14 @@
       ]
     },
     {
+      "id": "T1047",
+      "name": "Windows Management Instrumentation",
+      "categories": [
+        "execution",
+        "lateral-movement"
+      ]
+    },
+    {
       "id": "T1053.005",
       "name": "Scheduled Task",
       "categories": [
@@ -41,6 +84,22 @@
       ]
     },
     {
+      "id": "T1055.001",
+      "name": "Dynamic-link library injection",
+      "categories": [
+        "defense-evasion",
+        "privilege-escalation"
+      ]
+    },
+    {
+      "id": "T1055.012",
+      "name": "Process Hollowing",
+      "categories": [
+        "defense-evasion",
+        "privilege-escalation"
+      ]
+    },
+    {
       "id": "T1059",
       "name": "Command and Scripting Interpreter",
       "categories": [
@@ -52,6 +111,13 @@
       "name": "PowerShell",
       "categories": [
         "execution"
+      ]
+    },
+    {
+      "id": "T1070.001",
+      "name": "Clear Windows Event Logs",
+      "categories": [
+        "defense-evasion"
       ]
     },
     {
@@ -105,6 +171,13 @@
       ]
     },
     {
+      "id": "T1204.002",
+      "name": "Malicious File",
+      "categories": [
+        "execution"
+      ]
+    },
+    {
       "id": "T1218",
       "name": "System Binary Proxy Execution",
       "categories": [
@@ -135,6 +208,13 @@
     {
       "id": "T1497",
       "name": "Virtualization/Sandbox Evasion",
+      "categories": [
+        "defense-evasion"
+      ]
+    },
+    {
+      "id": "T1497.001",
+      "name": "System Checks",
       "categories": [
         "defense-evasion"
       ]
@@ -184,6 +264,56 @@
       "categories": [
         "persistence",
         "privilege-escalation"
+      ]
+    },
+    {
+      "id": "T1555",
+      "name": "Credentials from Password Stores",
+      "categories": [
+        "credential-access"
+      ]
+    },
+    {
+      "id": "T1555.003",
+      "name": "Credentials from Web Browsers",
+      "categories": [
+        "credential-access"
+      ]
+    },
+    {
+      "id": "T1562.001",
+      "name": "Disable or Modify Tools",
+      "categories": [
+        "defense-evasion"
+      ]
+    },
+    {
+      "id": "T1562.004",
+      "name": "Disable or Modify System Firewall",
+      "categories": [
+        "defense-evasion"
+      ]
+    },
+    {
+      "id": "T1569.002",
+      "name": "Service Execution",
+      "categories": [
+        "execution",
+        "lateral-movement"
+      ]
+    },
+    {
+      "id": "T1570",
+      "name": "Lateral Tool Transfer",
+      "categories": [
+        "lateral-movement"
+      ]
+    },
+    {
+      "id": "T1573",
+      "name": "Encrypted Channel",
+      "categories": [
+        "command-and-control"
       ]
     },
     {

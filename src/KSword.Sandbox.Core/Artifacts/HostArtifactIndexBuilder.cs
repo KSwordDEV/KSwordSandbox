@@ -7,8 +7,8 @@ namespace KSword.Sandbox.Core.Artifacts;
 /// <summary>
 /// Builds and persists host-side artifact indexes for job directories.
 /// Inputs are a job ID and job root; processing scans known report, telemetry,
-/// screenshot, manifest, and dropped-file paths; methods return index models
-/// or the descriptor for artifact-index.json.
+/// screenshot, memory-dump, manifest, and dropped-file paths; methods return
+/// index models or the descriptor for artifact-index.json.
 /// </summary>
 public sealed class HostArtifactIndexBuilder
 {
@@ -35,21 +35,28 @@ public sealed class HostArtifactIndexBuilder
                 .Where(path => !string.Equals(Path.GetFileName(path), IndexFileName, StringComparison.OrdinalIgnoreCase))
                 .OrderBy(path => ArtifactDescriptorFactory.SafeRelativePath(fullJobRoot, path), StringComparer.OrdinalIgnoreCase))
             {
-                var kind = Classify(path, fullJobRoot);
-                if (kind == ArtifactKind.Unknown)
+                var classification = Classify(path, fullJobRoot);
+                if (classification.Kind == ArtifactKind.Unknown)
                 {
                     continue;
+                }
+
+                var metadata = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["origin"] = "host",
+                    ["indexRoot"] = fullJobRoot
+                };
+                if (!string.IsNullOrWhiteSpace(classification.EvidenceRole))
+                {
+                    metadata["evidenceRole"] = classification.EvidenceRole;
                 }
 
                 artifacts.Add(ArtifactDescriptorFactory.FromExistingFile(
                     path,
                     fullJobRoot,
-                    kind,
-                    new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-                    {
-                        ["origin"] = "host",
-                        ["indexRoot"] = fullJobRoot
-                    }));
+                    classification.Kind,
+                    metadata,
+                    classification.Category));
             }
         }
 
@@ -101,73 +108,81 @@ public sealed class HostArtifactIndexBuilder
         return JsonSerializer.Deserialize<HostArtifactIndex>(File.ReadAllText(indexPath), JsonOptions);
     }
 
-    private static ArtifactKind Classify(string path, string jobRoot)
+    private static ArtifactClassification Classify(string path, string jobRoot)
     {
         var fileName = Path.GetFileName(path);
         var relativePath = ArtifactDescriptorFactory.SafeRelativePath(jobRoot, path);
         if (string.Equals(fileName, "report.json", StringComparison.OrdinalIgnoreCase))
         {
-            return ArtifactKind.ReportJson;
+            return new ArtifactClassification(ArtifactKind.ReportJson);
         }
 
         if (string.Equals(fileName, "report.html", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(fileName, "report.zh.html", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(fileName, "report.en.html", StringComparison.OrdinalIgnoreCase))
         {
-            return ArtifactKind.ReportHtml;
+            return new ArtifactClassification(ArtifactKind.ReportHtml);
         }
 
         if (string.Equals(fileName, "runbook.json", StringComparison.OrdinalIgnoreCase))
         {
-            return ArtifactKind.RunbookJson;
+            return new ArtifactClassification(ArtifactKind.RunbookJson);
         }
 
         if (string.Equals(fileName, "runbook-execution.json", StringComparison.OrdinalIgnoreCase))
         {
-            return ArtifactKind.RunbookExecutionJson;
+            return new ArtifactClassification(ArtifactKind.RunbookExecutionJson);
         }
 
         if (string.Equals(fileName, "events.json", StringComparison.OrdinalIgnoreCase))
         {
-            return ArtifactKind.GuestEventsJson;
+            return new ArtifactClassification(ArtifactKind.GuestEventsJson);
         }
 
         if (string.Equals(fileName, "agent-summary.json", StringComparison.OrdinalIgnoreCase))
         {
-            return ArtifactKind.GuestSummaryJson;
+            return new ArtifactClassification(ArtifactKind.GuestSummaryJson);
         }
 
         if (string.Equals(fileName, "artifact-manifest.json", StringComparison.OrdinalIgnoreCase) ||
             relativePath.EndsWith("/artifacts/manifest.json", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(relativePath, "artifacts/manifest.json", StringComparison.OrdinalIgnoreCase))
         {
-            return ArtifactKind.ArtifactManifest;
+            return new ArtifactClassification(ArtifactKind.ArtifactManifest);
         }
 
         if (string.Equals(Path.GetExtension(path), ".jsonl", StringComparison.OrdinalIgnoreCase) &&
             fileName.Contains("driver", StringComparison.OrdinalIgnoreCase))
         {
-            return ArtifactKind.DriverEventsJsonLines;
+            return new ArtifactClassification(ArtifactKind.DriverEventsJsonLines);
         }
 
         if (relativePath.Contains("/screenshots/", StringComparison.OrdinalIgnoreCase) ||
             relativePath.StartsWith("screenshots/", StringComparison.OrdinalIgnoreCase))
         {
-            return ArtifactKind.Screenshot;
+            return new ArtifactClassification(ArtifactKind.Screenshot, EvidenceRole: "screenshot");
+        }
+
+        if (relativePath.Contains("/memory-dumps/", StringComparison.OrdinalIgnoreCase) ||
+            relativePath.StartsWith("memory-dumps/", StringComparison.OrdinalIgnoreCase))
+        {
+            return new ArtifactClassification(ArtifactKind.Bundle, Category: "memory-dump", EvidenceRole: "memory-dump");
         }
 
         if (relativePath.Contains("/artifacts/", StringComparison.OrdinalIgnoreCase) ||
             relativePath.StartsWith("artifacts/", StringComparison.OrdinalIgnoreCase))
         {
-            return ArtifactKind.DroppedFile;
+            return new ArtifactClassification(ArtifactKind.DroppedFile, EvidenceRole: "dropped-file");
         }
 
         if (string.Equals(Path.GetExtension(path), ".log", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(Path.GetExtension(path), ".txt", StringComparison.OrdinalIgnoreCase))
         {
-            return ArtifactKind.Log;
+            return new ArtifactClassification(ArtifactKind.Log);
         }
 
-        return ArtifactKind.Unknown;
+        return new ArtifactClassification(ArtifactKind.Unknown);
     }
+
+    private sealed record ArtifactClassification(ArtifactKind Kind, string? Category = null, string? EvidenceRole = null);
 }

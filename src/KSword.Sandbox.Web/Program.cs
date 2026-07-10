@@ -6,6 +6,7 @@ using KSword.Sandbox.Core.Files;
 using KSword.Sandbox.Core.Jobs;
 using KSword.Sandbox.Core.Rules;
 using KSword.Sandbox.Web.Dashboard;
+using KSword.Sandbox.Web.Infrastructure;
 
 var builder = WebApplication.CreateBuilder(args);
 var repositoryRoot = ResolveRepositoryRoot(builder.Environment.ContentRootPath);
@@ -20,6 +21,7 @@ builder.Services.AddSingleton(config);
 builder.Services.AddSingleton(rules);
 builder.Services.AddSingleton(jobService);
 builder.Services.AddSingleton(targetScanner);
+builder.Services.AddSingleton<RunbookProgressStore>();
 builder.Services.AddSingleton<IRunbookExecutor, PowerShellRunbookExecutor>();
 
 var app = builder.Build();
@@ -58,6 +60,30 @@ app.MapGet("/api/jobs/{jobId:guid}", (Guid jobId, SandboxJobService service) =>
 {
     var job = service.GetJob(jobId);
     return job is null ? Results.NotFound(new { error = $"Job {jobId:D} was not found in the in-memory Web host job list." }) : Results.Ok(job);
+});
+// GET /api/jobs/{jobId}/runbook/progress returns the latest UI-safe runbook
+// progress snapshot while a long live request is still running. Inputs are only
+// a job id; processing reads the Web host's in-memory progress store; the
+// response intentionally excludes PowerShell commands, stdout, and stderr.
+app.MapGet("/api/jobs/{jobId:guid}/runbook/progress", (Guid jobId, SandboxJobService service, RunbookProgressStore progressStore) =>
+{
+    if (progressStore.TryGet(jobId, out var snapshot))
+    {
+        return Results.Ok(snapshot);
+    }
+
+    var job = service.GetJob(jobId);
+    if (job is null)
+    {
+        return Results.NotFound(new { error = $"Job {jobId:D} was not found in the in-memory Web host job list." });
+    }
+
+    if (job.Runbook is null)
+    {
+        return Results.NotFound(new { error = $"Job {jobId:D} does not have a runbook progress snapshot yet." });
+    }
+
+    return Results.Ok(progressStore.Begin(job.Runbook, SandboxRunbookExecutionMode.DryRun));
 });
 // GET /api/jobs/{jobId}/events/live returns unclassified raw events for the
 // WebUI monitor. Inputs are a job id plus optional offset/take query values;
@@ -138,7 +164,7 @@ app.MapPost("/api/jobs/plan", (SandboxSubmission submission, SandboxJobService s
         return Results.BadRequest(new { error = $"Dry-run plan could not be created: {ex.Message}" });
     }
 });
-app.MapPost("/api/jobs/{jobId:guid}/runbook/execute", async (Guid jobId, RunbookExecuteRequest request, SandboxJobService service, IRunbookExecutor executor, SandboxConfig currentConfig) =>
+app.MapPost("/api/jobs/{jobId:guid}/runbook/execute", async (Guid jobId, RunbookExecuteRequest request, SandboxJobService service, IRunbookExecutor executor, SandboxConfig currentConfig, RunbookProgressStore progressStore) =>
 {
     var job = service.GetJob(jobId);
     if (job is null)
@@ -151,6 +177,9 @@ app.MapPost("/api/jobs/{jobId:guid}/runbook/execute", async (Guid jobId, Runbook
         return Results.BadRequest(new { error = $"Job {jobId:D} does not have a runbook; recreate the dry-run plan for the selected executable." });
     }
 
+    var mode = request.Live ? SandboxRunbookExecutionMode.Live : SandboxRunbookExecutionMode.DryRun;
+    progressStore.Begin(job.Runbook, mode);
+
     var environmentVariables = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
     if (request.Live)
     {
@@ -160,6 +189,10 @@ app.MapPost("/api/jobs/{jobId:guid}/runbook/execute", async (Guid jobId, Runbook
 
         if (!TryResolveEnvironmentSecret(secretName, out var guestPassword))
         {
+            progressStore.Fail(
+                job.Runbook,
+                mode,
+                $"Live runbook needs guest credential secret '{secretName}' in the WebUI process, User, or Machine environment.");
             return Results.BadRequest(new
             {
                 error = $"Live runbook needs guest credential secret '{secretName}' in the WebUI process, User, or Machine environment. Run .\\install.ps1, choose the password reset option, then restart .\\run.ps1 -Mode WebUI."
@@ -172,11 +205,12 @@ app.MapPost("/api/jobs/{jobId:guid}/runbook/execute", async (Guid jobId, Runbook
 
     var options = new SandboxRunbookExecutionOptions
     {
-        Mode = request.Live ? SandboxRunbookExecutionMode.Live : SandboxRunbookExecutionMode.DryRun,
+        Mode = mode,
         StepTimeout = TimeSpan.FromSeconds(Math.Clamp(request.StepTimeoutSeconds, 1, 7200)),
         RequireElevatedPowerShell = true,
         WorkingDirectory = Directory.GetCurrentDirectory(),
-        EnvironmentVariables = environmentVariables
+        EnvironmentVariables = environmentVariables,
+        ProgressSink = new Progress<SandboxRunbookProgressSnapshot>(progressStore.Update)
     };
     var result = await executor.ExecuteAsync(job.Runbook, options);
     var updatedJob = service.SaveRunbookExecutionResult(jobId, result);

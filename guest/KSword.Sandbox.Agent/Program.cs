@@ -15,9 +15,10 @@ return await AgentProgram.RunAsync(args);
 /// Guest-side collector that runs inside the disposable Windows VM.
 /// Inputs are command-line arguments for sample path, output path, duration,
 /// optional driver event path, optional R0Collector sidecar path, and optional
-/// screenshot capture flag; processing can start the sidecar, starts the sample,
-/// runs dynamic guest probes, merges driver JSONL, and writes JSON artifacts;
-/// RunAsync returns a process exit code.
+/// screenshot, dropped-file extraction, and memory-dump flags; processing can
+/// start the sidecar, starts the sample, runs dynamic guest probes, merges
+/// driver JSONL, and writes JSON artifacts; RunAsync returns a process exit
+/// code.
 /// </summary>
 internal static class AgentProgram
 {
@@ -38,6 +39,8 @@ internal static class AgentProgram
     private const string R0CollectorStandardOutputFileName = "r0collector.stdout.log";
 
     private const string R0CollectorStandardErrorFileName = "r0collector.stderr.log";
+
+    private const string DroppedFilesArtifactDirectoryName = "dropped-files";
 
     /// <summary>
     /// Main async entry point for the guest collector.
@@ -64,8 +67,8 @@ internal static class AgentProgram
     /// <summary>
     /// Runs the sample and collects normalized behavior events.
     /// Inputs are parsed options, processing snapshots process tree, file, TCP,
-    /// and optional screenshot state before and after execution, and the method
-    /// returns collected events.
+    /// optional screenshot state, and optional after-start memory dump state
+    /// before and after execution, and the method returns collected events.
     /// </summary>
     private static async Task<List<SandboxEvent>> CollectAsync(AgentOptions options)
     {
@@ -177,8 +180,8 @@ internal static class AgentProgram
     /// <summary>
     /// Creates the dynamic guest probe pipeline.
     /// Inputs are none; processing constructs the process tree, file diff, TCP
-    /// diff, and optional screenshot probes in deterministic order; the method
-    /// returns a reusable GuestProbeRunner for one agent run.
+    /// diff, optional screenshot, and opt-in memory dump probes in deterministic
+    /// order; the method returns a reusable GuestProbeRunner for one agent run.
     /// </summary>
     private static GuestProbeRunner CreateProbeRunner()
     {
@@ -187,7 +190,8 @@ internal static class AgentProgram
             new ProcessTreeProbe(),
             new FileDiffProbe(),
             new TcpConnectionDiffProbe(),
-            new ScreenshotProbe()
+            new ScreenshotProbe(),
+            new MemoryDumpProbe()
         ]);
     }
 
@@ -205,7 +209,8 @@ internal static class AgentProgram
             WorkingDirectory = workingDirectory,
             OutputDirectory = options.OutputDirectory,
             RootProcessId = rootProcessId,
-            CaptureScreenshots = options.CaptureScreenshots
+            CaptureScreenshots = options.CaptureScreenshots,
+            CaptureMemoryDump = options.CaptureMemoryDump
         };
     }
 
@@ -1231,21 +1236,318 @@ internal static class AgentProgram
     }
 
     /// <summary>
-    /// Writes events and a compact summary into the output directory.
-    /// Inputs are agent options and event list, processing serializes JSON
-    /// files, and the method returns no value.
+    /// Writes events, optional dropped-file artifacts, optional screenshot and
+    /// memory-dump paths, and a compact summary into the output directory.
+    /// Inputs are agent options and event list; processing copies opt-in
+    /// dropped files before serializing final event and summary JSON files; the
+    /// method returns no value.
     /// </summary>
     private static void WriteArtifacts(AgentOptions options, List<SandboxEvent> events)
     {
-        var eventsPath = Path.Combine(options.OutputDirectory, "events.json");
-        var summaryPath = Path.Combine(options.OutputDirectory, "agent-summary.json");
-        File.WriteAllText(eventsPath, JsonSerializer.Serialize(events, JsonOptions));
-        File.WriteAllText(summaryPath, JsonSerializer.Serialize(new
+        var artifactWriter = new GuestArtifactWriter();
+        var droppedFileMetadataByRelativePath = options.CollectDroppedFiles
+            ? CopyDroppedFileArtifacts(options, events)
+            : new Dictionary<string, DroppedFileArtifactMetadata>(StringComparer.OrdinalIgnoreCase);
+
+        if (options.CollectDroppedFiles)
         {
-            sample = options.SamplePath,
-            eventCount = events.Count,
-            generatedAt = DateTimeOffset.UtcNow
-        }, JsonOptions));
+            TryWriteDroppedFileManifest(options, events, artifactWriter, droppedFileMetadataByRelativePath);
+        }
+
+        artifactWriter.WriteEvents(options.OutputDirectory, events);
+        artifactWriter.WriteSummary(options.OutputDirectory, options.SamplePath, events.Count);
+    }
+
+    /// <summary>
+    /// Copies newly-created files from the sample working directory into the
+    /// guest output artifact tree when explicitly enabled.
+    /// Inputs are parsed options and collected file events; processing copies
+    /// file.created paths outside --out into artifacts/dropped-files and emits
+    /// copy/skip events; the method returns metadata keyed by manifest-relative
+    /// copied artifact path.
+    /// </summary>
+    private static Dictionary<string, DroppedFileArtifactMetadata> CopyDroppedFileArtifacts(AgentOptions options, List<SandboxEvent> events)
+    {
+        var metadataByRelativePath = new Dictionary<string, DroppedFileArtifactMetadata>(StringComparer.OrdinalIgnoreCase);
+        var candidates = events
+            .Where(static evt => string.Equals(evt.EventType, "file.created", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        if (candidates.Count == 0)
+        {
+            return metadataByRelativePath;
+        }
+
+        var workingDirectory = Path.GetFullPath(Path.GetDirectoryName(options.SamplePath) ?? Environment.CurrentDirectory);
+        var outputDirectory = Path.GetFullPath(options.OutputDirectory);
+        var artifactsRoot = Path.Combine(outputDirectory, GuestArtifactWriter.ArtifactsDirectoryName);
+        var droppedFilesRoot = Path.Combine(artifactsRoot, DroppedFilesArtifactDirectoryName);
+
+        foreach (var candidate in candidates)
+        {
+            if (string.IsNullOrWhiteSpace(candidate.Path))
+            {
+                events.Add(CreateDroppedFileSkippedEvent(candidate, reason: "sourcePathMissing"));
+                continue;
+            }
+
+            string sourcePath;
+            try
+            {
+                sourcePath = Path.GetFullPath(candidate.Path);
+            }
+            catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+            {
+                events.Add(CreateDroppedFileSkippedEvent(candidate, reason: "sourcePathInvalid", exception: ex));
+                continue;
+            }
+
+            if (!IsSameOrUnderDirectory(sourcePath, workingDirectory))
+            {
+                events.Add(CreateDroppedFileSkippedEvent(candidate, reason: "outsideWorkingDirectory", sourcePath: sourcePath));
+                continue;
+            }
+
+            if (IsSameOrUnderDirectory(sourcePath, outputDirectory))
+            {
+                events.Add(CreateDroppedFileSkippedEvent(candidate, reason: "underOutputDirectory", sourcePath: sourcePath));
+                continue;
+            }
+
+            if (!File.Exists(sourcePath))
+            {
+                events.Add(CreateDroppedFileSkippedEvent(candidate, reason: "sourceFileMissing", sourcePath: sourcePath));
+                continue;
+            }
+
+            var originalRelativePath = GetOriginalRelativePath(candidate, workingDirectory, sourcePath);
+            var safeRelativePath = BuildSafeDroppedFileRelativePath(originalRelativePath, sourcePath);
+            var destinationPath = Path.GetFullPath(Path.Combine(droppedFilesRoot, safeRelativePath));
+            if (!IsSameOrUnderDirectory(destinationPath, droppedFilesRoot))
+            {
+                events.Add(CreateDroppedFileSkippedEvent(candidate, reason: "destinationPathInvalid", sourcePath: sourcePath));
+                continue;
+            }
+
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(destinationPath) ?? droppedFilesRoot);
+                File.Copy(sourcePath, destinationPath, overwrite: true);
+                var artifactRelativePath = NormalizeArtifactRelativePath(Path.GetRelativePath(outputDirectory, destinationPath));
+                var copiedInfo = new FileInfo(destinationPath);
+                metadataByRelativePath[artifactRelativePath] = new DroppedFileArtifactMetadata(
+                    sourcePath,
+                    originalRelativePath,
+                    candidate.EventType);
+                events.Add(CreateDroppedFileCopiedEvent(
+                    sourcePath,
+                    originalRelativePath,
+                    destinationPath,
+                    artifactRelativePath,
+                    copiedInfo.Length));
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException or PathTooLongException)
+            {
+                events.Add(CreateDroppedFileSkippedEvent(candidate, reason: "copyFailed", sourcePath: sourcePath, exception: ex));
+            }
+        }
+
+        return metadataByRelativePath;
+    }
+
+    /// <summary>
+    /// Writes the dropped-file artifact manifest and records the outcome as a
+    /// guest event. Inputs are options, event list, writer, and copied artifact
+    /// metadata; processing writes artifacts/manifest.json best-effort; the
+    /// method returns no value.
+    /// </summary>
+    private static void TryWriteDroppedFileManifest(
+        AgentOptions options,
+        List<SandboxEvent> events,
+        GuestArtifactWriter artifactWriter,
+        IReadOnlyDictionary<string, DroppedFileArtifactMetadata> droppedFileMetadataByRelativePath)
+    {
+        try
+        {
+            var manifestResult = artifactWriter.WriteArtifactManifest(options.OutputDirectory, droppedFileMetadataByRelativePath);
+            events.Add(new SandboxEvent
+            {
+                EventType = "artifact.manifest.written",
+                Source = "guest",
+                Path = manifestResult.ManifestPath,
+                Data =
+                {
+                    ["artifactCount"] = manifestResult.ArtifactCount.ToString(CultureInfo.InvariantCulture),
+                    ["copiedDroppedFileCount"] = droppedFileMetadataByRelativePath.Count.ToString(CultureInfo.InvariantCulture),
+                    ["collectDroppedFiles"] = options.CollectDroppedFiles.ToString(),
+                    ["relativePath"] = NormalizeArtifactRelativePath(Path.GetRelativePath(options.OutputDirectory, manifestResult.ManifestPath)),
+                    ["artifactRoot"] = Path.Combine(options.OutputDirectory, GuestArtifactWriter.ArtifactsDirectoryName)
+                }
+            });
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException or PathTooLongException)
+        {
+            var evt = new SandboxEvent
+            {
+                EventType = "artifact.manifest.failed",
+                Source = "guest",
+                Path = Path.Combine(options.OutputDirectory, GuestArtifactWriter.ArtifactsDirectoryName, GuestArtifactWriter.ManifestFileName),
+                Data =
+                {
+                    ["collectDroppedFiles"] = options.CollectDroppedFiles.ToString(),
+                    ["reason"] = "writeFailed"
+                }
+            };
+            AddExceptionData(evt, ex);
+            events.Add(evt);
+        }
+    }
+
+    /// <summary>
+    /// Creates an event for a copied dropped-file artifact.
+    /// Inputs are source and destination paths plus metadata; processing stores
+    /// paths and sizes as strings; the method returns a SandboxEvent.
+    /// </summary>
+    private static SandboxEvent CreateDroppedFileCopiedEvent(
+        string sourcePath,
+        string originalRelativePath,
+        string destinationPath,
+        string artifactRelativePath,
+        long sizeBytes)
+    {
+        return new SandboxEvent
+        {
+            EventType = "artifact.dropped_file.copied",
+            Source = "guest",
+            Path = destinationPath,
+            Data =
+            {
+                ["sourcePath"] = sourcePath,
+                ["guestFullPath"] = sourcePath,
+                ["guestRelativePath"] = originalRelativePath,
+                ["artifactRelativePath"] = artifactRelativePath,
+                ["relativePath"] = artifactRelativePath,
+                ["sizeBytes"] = sizeBytes.ToString(CultureInfo.InvariantCulture),
+                ["evidenceRole"] = "dropped-file",
+                ["collectDroppedFiles"] = "true"
+            }
+        };
+    }
+
+    /// <summary>
+    /// Creates an event for a skipped dropped-file copy attempt.
+    /// Inputs are the source file event, reason, optional normalized path, and
+    /// exception; processing records diagnostics in Data; the method returns a
+    /// SandboxEvent.
+    /// </summary>
+    private static SandboxEvent CreateDroppedFileSkippedEvent(
+        SandboxEvent sourceEvent,
+        string reason,
+        string? sourcePath = null,
+        Exception? exception = null)
+    {
+        var evt = new SandboxEvent
+        {
+            EventType = "artifact.dropped_file.skipped",
+            Source = "guest",
+            Path = sourcePath ?? sourceEvent.Path,
+            Data =
+            {
+                ["reason"] = reason,
+                ["sourceEventType"] = sourceEvent.EventType,
+                ["sourcePath"] = sourcePath ?? sourceEvent.Path ?? string.Empty,
+                ["collectDroppedFiles"] = "true"
+            }
+        };
+
+        if (sourceEvent.Data.TryGetValue("relativePath", out var relativePath))
+        {
+            evt.Data["guestRelativePath"] = relativePath;
+        }
+
+        AddExceptionData(evt, exception);
+        return evt;
+    }
+
+    /// <summary>
+    /// Reads the original file relative path from a source event or computes a
+    /// fallback under the working directory.
+    /// </summary>
+    private static string GetOriginalRelativePath(SandboxEvent sourceEvent, string workingDirectory, string sourcePath)
+    {
+        if (sourceEvent.Data.TryGetValue("relativePath", out var relativePath) && !string.IsNullOrWhiteSpace(relativePath))
+        {
+            return NormalizeArtifactRelativePath(relativePath);
+        }
+
+        return NormalizeArtifactRelativePath(Path.GetRelativePath(workingDirectory, sourcePath));
+    }
+
+    /// <summary>
+    /// Converts a guest relative path to a safe file-system relative path below
+    /// artifacts/dropped-files.
+    /// </summary>
+    private static string BuildSafeDroppedFileRelativePath(string originalRelativePath, string sourcePath)
+    {
+        var candidate = string.IsNullOrWhiteSpace(originalRelativePath)
+            ? Path.GetFileName(sourcePath)
+            : originalRelativePath;
+
+        var segments = candidate
+            .Replace('\\', '/')
+            .Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(segment => !string.Equals(segment, ".", StringComparison.Ordinal) && !string.Equals(segment, "..", StringComparison.Ordinal))
+            .Select(SanitizeFileNameSegment)
+            .Where(segment => !string.IsNullOrWhiteSpace(segment))
+            .ToList();
+
+        if (segments.Count == 0)
+        {
+            segments.Add(SanitizeFileNameSegment(Path.GetFileName(sourcePath)));
+        }
+
+        return Path.Combine(segments.ToArray());
+    }
+
+    /// <summary>
+    /// Replaces invalid filename characters in a copied artifact path segment.
+    /// </summary>
+    private static string SanitizeFileNameSegment(string segment)
+    {
+        var invalid = Path.GetInvalidFileNameChars();
+        var sanitized = new string(segment.Select(ch => invalid.Contains(ch) || ch == ':' ? '_' : ch).ToArray()).Trim();
+        return string.IsNullOrWhiteSpace(sanitized) ? "_" : sanitized;
+    }
+
+    /// <summary>
+    /// Normalizes an artifact-relative path to slash-separated display text.
+    /// </summary>
+    private static string NormalizeArtifactRelativePath(string path)
+    {
+        return path.Replace('\\', '/');
+    }
+
+    /// <summary>
+    /// Tests whether a path is equal to or below a directory root.
+    /// Inputs are a file path and directory path; processing normalizes both;
+    /// the method returns true only for same-root descendants.
+    /// </summary>
+    private static bool IsSameOrUnderDirectory(string path, string directory)
+    {
+        var fullPath = Path.GetFullPath(path);
+        var fullDirectory = Path.GetFullPath(directory);
+        if (string.Equals(
+            Path.TrimEndingDirectorySeparator(fullPath),
+            Path.TrimEndingDirectorySeparator(fullDirectory),
+            StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        var directoryWithSeparator = Path.EndsInDirectorySeparator(fullDirectory)
+            ? fullDirectory
+            : fullDirectory + Path.DirectorySeparatorChar;
+        return fullPath.StartsWith(directoryWithSeparator, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>
@@ -1350,12 +1652,17 @@ internal sealed record AgentOptions
 
     public bool CaptureScreenshots { get; init; }
 
+    public bool CollectDroppedFiles { get; init; }
+
+    public bool CaptureMemoryDump { get; init; }
+
     /// <summary>
     /// Parses command-line switches for the guest agent.
     /// Inputs are string arguments, processing consumes --sample, --out,
     /// --duration, --driver-events, optional R0Collector sidecar switches, and
-    /// boolean --r0-mock/--screenshot flags without breaking existing value
-    /// switches; the method returns validated and normalized options.
+    /// boolean --r0-mock/--screenshot/--collect-dropped-files/--memory-dump
+    /// flags without breaking existing value switches; the method returns
+    /// validated and normalized options.
     /// </summary>
     public static AgentOptions Parse(string[] args)
     {
@@ -1371,7 +1678,11 @@ internal sealed record AgentOptions
             var optionName = args[index][2..];
             if (string.Equals(optionName, "r0-mock", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(optionName, "screenshot", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(optionName, "screenshots", StringComparison.OrdinalIgnoreCase))
+                string.Equals(optionName, "screenshots", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(optionName, "collect-dropped-files", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(optionName, "dropped-files", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(optionName, "memory-dump", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(optionName, "memory-dumps", StringComparison.OrdinalIgnoreCase))
             {
                 flags.Add(optionName);
                 continue;
@@ -1416,7 +1727,9 @@ internal sealed record AgentOptions
             R0CollectorPath = string.IsNullOrWhiteSpace(r0CollectorPath) ? null : Path.GetFullPath(r0CollectorPath),
             DriverDevicePath = string.IsNullOrWhiteSpace(driverDevicePath) ? DefaultDriverDevicePath : driverDevicePath,
             R0Mock = flags.Contains("r0-mock"),
-            CaptureScreenshots = flags.Contains("screenshot") || flags.Contains("screenshots")
+            CaptureScreenshots = flags.Contains("screenshot") || flags.Contains("screenshots"),
+            CollectDroppedFiles = flags.Contains("collect-dropped-files") || flags.Contains("dropped-files"),
+            CaptureMemoryDump = flags.Contains("memory-dump") || flags.Contains("memory-dumps")
         };
     }
 }

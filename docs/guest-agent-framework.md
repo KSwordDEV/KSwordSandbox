@@ -4,7 +4,8 @@ The Guest Agent is still a compact executable, but dynamic collection now flows
 through explicit probe boundaries:
 
 - `Collection`: guest probes, probe phases, run context, event sink, process
-  tree snapshots, file diffs, TCP diffs, and optional screenshot capture.
+  tree snapshots, file diffs, TCP diffs, optional screenshot capture, and
+  opt-in sample process memory dump capture.
 - `Execution`: sample launch plans and process execution results.
 - `Output`: `events.json`, `agent-summary.json`, and driver JSONL import.
 - `Options`: command-line switch constants and parsed option models.
@@ -25,7 +26,7 @@ The CLI remains backward compatible:
 ```text
 --sample <path> --out <directory> --duration <seconds>
 --driver-events <jsonl> --r0collector <path> --driver-device <path>
---r0-mock --screenshot
+--r0-mock --screenshot --collect-dropped-files --memory-dump
 ```
 
 The driver sidecar remains optional so VM smoke tests can proceed without a
@@ -42,9 +43,9 @@ the internal extension point. Probes should:
 - keep the existing event names stable when replacing older inline logic.
 
 `GuestProbeContext` carries `SamplePath`, `WorkingDirectory`, `OutputDirectory`,
-optional `RootProcessId`, and the `CaptureScreenshots` flag. New process, image,
-registry, or WFP collectors can use this context without changing the public
-agent CLI.
+optional `RootProcessId`, `CaptureScreenshots`, and `CaptureMemoryDump`. New
+process, image, registry, or WFP collectors can use this context without
+changing the public agent CLI.
 
 `GuestProbeRunner` enforces a per-probe timeout and turns probe exceptions into
 `probe.timeout`, `probe.failed`, or `probe.canceled` events. A timed-out or
@@ -81,9 +82,29 @@ throwing for expected launch/exit failures.
   `WindowsDesktopScreenshotCapture` writes BMP files through User32/GDI32 and
   emits `screenshot.skipped` instead of failing in headless sessions. Skipped
   events include the failing capture stage and Win32 error code when available.
+- `MemoryDumpProbe` is opt-in through `--memory-dump` / `--memory-dumps`. The
+  default `WindowsMiniDumpCapture` writes one `MiniDumpNormal` file for the
+  launched sample root PID during `AfterStart`; it skips non-Windows, exited, or
+  inaccessible targets and emits `memory_dump.skipped` rather than failing the
+  run.
 - `ProcessSampleExecutor` records `process.start_failed`,
   `process.wait_failed`, and `process.kill_failed` diagnostics for execution
   exceptions while preserving normal cancellation behavior.
+
+## Current output artifact handling
+
+`GuestArtifactWriter` owns `events.json`, `agent-summary.json`, and optional
+`artifacts/manifest.json` serialization. With `--collect-dropped-files`, the
+top-level agent copies `file.created` paths from the sample working directory to
+`artifacts/dropped-files`, skips paths under `--out`, then writes a dropped-file
+manifest with SHA-256, MIME type, safe relative link, and original guest path
+metadata.
+
+The copy step emits `artifact.dropped_file.copied` or
+`artifact.dropped_file.skipped`; manifest output emits
+`artifact.manifest.written` or `artifact.manifest.failed`. Dropped-file
+extraction is independent from memory dump capture; both remain disabled unless
+their explicit CLI flags are supplied.
 
 ## Smoke strategy
 

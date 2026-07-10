@@ -1,5 +1,5 @@
 {
-  "version": "2026-07-11-v1-windows-sandbox-rules-worker-replacement",
+  "version": "2026-07-11-v3-behavior-rule-expansion",
   "rules": [
     {
       "id": "host-submission",
@@ -2150,6 +2150,1831 @@
         "anti-analysis",
         "delay",
         "time-evasion"
+      ]
+    },
+    {
+      "id": "downloaded-file-zone-identifier",
+      "title": "Downloaded file mark-of-the-web metadata",
+      "severity": "medium",
+      "summary": "A file write referenced Zone.Identifier or mark-of-the-web metadata that can indicate content downloaded from an untrusted zone.",
+      "mitreTechniqueId": "T1105",
+      "mitreTechniqueName": "Ingress Tool Transfer",
+      "eventTypes": [
+        "file.created",
+        "file.modified",
+        "driver.file"
+      ],
+      "dataContains": {
+        "stream": [
+          "Zone.Identifier"
+        ],
+        "streamName": [
+          "Zone.Identifier"
+        ],
+        "name": [
+          "Zone.Identifier"
+        ],
+        "details": [
+          "Mark-of-the-Web",
+          "ZoneId="
+        ]
+      },
+      "tags": [
+        "filesystem",
+        "download",
+        "motw"
+      ]
+    },
+    {
+      "id": "browser-download-cache-write",
+      "title": "Browser or download cache file write",
+      "severity": "medium",
+      "summary": "A file was created or modified in a common browser download, cache, or user download location used for staged payloads.",
+      "mitreTechniqueId": "T1105",
+      "mitreTechniqueName": "Ingress Tool Transfer",
+      "eventTypes": [
+        "file.created",
+        "file.modified",
+        "driver.file"
+      ],
+      "containsPath": [
+        "\\Downloads\\",
+        "\\INetCache\\",
+        "\\Temporary Internet Files\\",
+        "\\Chrome\\User Data\\",
+        "\\Edge\\User Data\\",
+        "\\Firefox\\Profiles\\",
+        "\\AppData\\Local\\Microsoft\\Windows\\INetCache\\"
+      ],
+      "tags": [
+        "filesystem",
+        "download",
+        "browser-cache"
+      ]
+    },
+    {
+      "id": "execution-from-downloads-or-staging-path",
+      "title": "Execution from download or staging path",
+      "severity": "high",
+      "summary": "A process launched from a user download, temporary, public, or ProgramData staging path commonly used after payload transfer.",
+      "mitreTechniqueId": "T1105",
+      "mitreTechniqueName": "Ingress Tool Transfer",
+      "eventTypes": [
+        "process.start"
+      ],
+      "containsCommandLine": [
+        "\\Downloads\\",
+        "\\AppData\\Local\\Temp\\",
+        "\\Windows\\Temp\\",
+        "\\Users\\Public\\",
+        "\\ProgramData\\",
+        "%TEMP%",
+        "%PUBLIC%",
+        "%PROGRAMDATA%"
+      ],
+      "tags": [
+        "execution",
+        "download",
+        "staging-path"
+      ]
+    },
+    {
+      "id": "download-archive-or-script-stage",
+      "title": "Downloaded archive or script staged on disk",
+      "severity": "medium",
+      "summary": "A newly written file used an archive, disk image, script, or shortcut extension often seen in download-and-execute chains.",
+      "mitreTechniqueId": "T1105",
+      "mitreTechniqueName": "Ingress Tool Transfer",
+      "eventTypes": [
+        "file.created",
+        "file.modified",
+        "driver.file"
+      ],
+      "containsPath": [
+        ".zip",
+        ".rar",
+        ".7z",
+        ".iso",
+        ".img",
+        ".lnk",
+        ".url",
+        ".ps1",
+        ".vbs",
+        ".js",
+        ".hta",
+        ".wsf"
+      ],
+      "tags": [
+        "filesystem",
+        "download",
+        "stage"
+      ]
+    },
+    {
+      "id": "download-execute-chain-placeholder",
+      "title": "Download then execute chain placeholder",
+      "severity": "high",
+      "summary": "A normalized higher-level event reported that a downloaded artifact was executed during the same analysis window.",
+      "mitreTechniqueId": "T1105",
+      "mitreTechniqueName": "Ingress Tool Transfer",
+      "eventTypes": [
+        "behavior.download_execute",
+        "download.execute",
+        "file.downloaded.executed"
+      ],
+      "tags": [
+        "execution",
+        "download",
+        "correlation-placeholder"
+      ]
+    },
+    {
+      "id": "process-injection-memory-primitive",
+      "title": "Cross-process memory injection primitive",
+      "severity": "high",
+      "summary": "An event referenced cross-process allocation or memory-write APIs frequently used for process injection.",
+      "mitreTechniqueId": "T1055",
+      "mitreTechniqueName": "Process Injection",
+      "eventTypes": [
+        "process.memory",
+        "process.write_memory",
+        "driver.process",
+        "api.call"
+      ],
+      "dataContains": {
+        "operation": [
+          "VirtualAllocEx",
+          "WriteProcessMemory",
+          "NtWriteVirtualMemory",
+          "MapViewOfFile",
+          "sectionMap"
+        ],
+        "operationName": [
+          "VirtualAllocEx",
+          "WriteProcessMemory",
+          "NtWriteVirtualMemory",
+          "MapViewOfFile",
+          "sectionMap"
+        ],
+        "api": [
+          "VirtualAllocEx",
+          "WriteProcessMemory",
+          "NtWriteVirtualMemory",
+          "NtMapViewOfSection"
+        ]
+      },
+      "tags": [
+        "process",
+        "injection",
+        "memory"
+      ]
+    },
+    {
+      "id": "process-injection-thread-or-apc-primitive",
+      "title": "Remote thread or APC injection primitive",
+      "severity": "high",
+      "summary": "An event referenced remote-thread, APC, or Windows hook primitives frequently used to execute code in another process.",
+      "mitreTechniqueId": "T1055",
+      "mitreTechniqueName": "Process Injection",
+      "eventTypes": [
+        "process.remote_thread",
+        "thread.remote",
+        "driver.thread",
+        "api.call"
+      ],
+      "dataContains": {
+        "operation": [
+          "CreateRemoteThread",
+          "NtCreateThreadEx",
+          "QueueUserAPC",
+          "SetWindowsHookEx",
+          "RtlCreateUserThread"
+        ],
+        "operationName": [
+          "CreateRemoteThread",
+          "NtCreateThreadEx",
+          "QueueUserAPC",
+          "SetWindowsHookEx",
+          "RtlCreateUserThread"
+        ],
+        "api": [
+          "CreateRemoteThread",
+          "NtCreateThreadEx",
+          "QueueUserAPC",
+          "SetWindowsHookEx",
+          "RtlCreateUserThread"
+        ]
+      },
+      "tags": [
+        "process",
+        "injection",
+        "thread"
+      ]
+    },
+    {
+      "id": "process-hollowing-signal",
+      "title": "Process hollowing or suspended-process replacement signal",
+      "severity": "high",
+      "summary": "An event referenced suspended process creation, image unmapping, context manipulation, or resume patterns associated with process hollowing.",
+      "mitreTechniqueId": "T1055",
+      "mitreTechniqueName": "Process Injection",
+      "eventTypes": [
+        "process.hollowing",
+        "process.memory",
+        "driver.process",
+        "api.call"
+      ],
+      "dataContains": {
+        "operation": [
+          "CREATE_SUSPENDED",
+          "NtUnmapViewOfSection",
+          "ZwUnmapViewOfSection",
+          "SetThreadContext",
+          "ResumeThread",
+          "processHollowing"
+        ],
+        "operationName": [
+          "CREATE_SUSPENDED",
+          "NtUnmapViewOfSection",
+          "ZwUnmapViewOfSection",
+          "SetThreadContext",
+          "ResumeThread",
+          "processHollowing"
+        ],
+        "api": [
+          "NtUnmapViewOfSection",
+          "ZwUnmapViewOfSection",
+          "SetThreadContext",
+          "ResumeThread"
+        ]
+      },
+      "tags": [
+        "process",
+        "injection",
+        "hollowing"
+      ]
+    },
+    {
+      "id": "rwx-memory-protection-change",
+      "title": "Executable writable memory protection change",
+      "severity": "medium",
+      "summary": "A memory event referenced RWX or executable memory protection changes that can precede injected code execution.",
+      "mitreTechniqueId": "T1055",
+      "mitreTechniqueName": "Process Injection",
+      "eventTypes": [
+        "process.memory",
+        "memory.protect",
+        "api.call"
+      ],
+      "dataContains": {
+        "protection": [
+          "PAGE_EXECUTE_READWRITE",
+          "PAGE_EXECUTE_WRITECOPY",
+          "EXECUTE_READWRITE",
+          "RWX"
+        ],
+        "newProtection": [
+          "PAGE_EXECUTE_READWRITE",
+          "PAGE_EXECUTE_WRITECOPY",
+          "EXECUTE_READWRITE",
+          "RWX"
+        ],
+        "api": [
+          "VirtualProtect",
+          "VirtualProtectEx",
+          "NtProtectVirtualMemory"
+        ]
+      },
+      "tags": [
+        "process",
+        "injection",
+        "memory",
+        "rwx"
+      ]
+    },
+    {
+      "id": "dll-injection-loadlibrary-signal",
+      "title": "LoadLibrary-style DLL injection signal",
+      "severity": "high",
+      "summary": "A remote thread, API, or image-load event referenced LoadLibrary/LdrLoadDll style DLL loading often used for DLL injection.",
+      "mitreTechniqueId": "T1055",
+      "mitreTechniqueName": "Process Injection",
+      "eventTypes": [
+        "process.remote_thread",
+        "thread.remote",
+        "driver.thread",
+        "api.call",
+        "image.load",
+        "driver.image.load"
+      ],
+      "dataContains": {
+        "operation": [
+          "LoadLibraryA",
+          "LoadLibraryW",
+          "LdrLoadDll",
+          "dllInjection"
+        ],
+        "operationName": [
+          "LoadLibraryA",
+          "LoadLibraryW",
+          "LdrLoadDll",
+          "dllInjection"
+        ],
+        "api": [
+          "LoadLibraryA",
+          "LoadLibraryW",
+          "LdrLoadDll"
+        ],
+        "target": [
+          "LoadLibrary"
+        ]
+      },
+      "tags": [
+        "process",
+        "injection",
+        "dll"
+      ]
+    },
+    {
+      "id": "wmi-event-subscription-persistence",
+      "title": "WMI event subscription persistence path",
+      "severity": "high",
+      "summary": "A registry or driver registry event referenced WMI permanent event subscription artifacts such as filters, consumers, or bindings.",
+      "mitreTechniqueId": "T1546",
+      "mitreTechniqueName": "Event Triggered Execution",
+      "eventTypes": [
+        "registry.set",
+        "registry.create",
+        "driver.registry"
+      ],
+      "containsPath": [
+        "root\\subscription",
+        "__EventFilter",
+        "CommandLineEventConsumer",
+        "ActiveScriptEventConsumer",
+        "__FilterToConsumerBinding",
+        "\\WMI\\"
+      ],
+      "tags": [
+        "registry",
+        "persistence",
+        "wmi",
+        "event-subscription"
+      ]
+    },
+    {
+      "id": "wmi-event-subscription-command",
+      "title": "WMI event subscription creation command",
+      "severity": "high",
+      "summary": "A process command line referenced WMI permanent event subscription creation primitives.",
+      "mitreTechniqueId": "T1546",
+      "mitreTechniqueName": "Event Triggered Execution",
+      "eventTypes": [
+        "process.start"
+      ],
+      "containsCommandLine": [
+        "wmic /namespace:\\\\root\\subscription",
+        "wmic.exe /namespace:\\\\root\\subscription",
+        "__EventFilter",
+        "CommandLineEventConsumer",
+        "ActiveScriptEventConsumer",
+        "__FilterToConsumerBinding",
+        "Set-WmiInstance -Namespace root\\subscription",
+        "New-CimInstance -Namespace root\\subscription"
+      ],
+      "tags": [
+        "execution",
+        "persistence",
+        "wmi",
+        "event-subscription"
+      ]
+    },
+    {
+      "id": "com-hijack-persistence",
+      "title": "COM class hijack persistence path",
+      "severity": "high",
+      "summary": "A registry event targeted COM class registration locations that can redirect execution through InprocServer32, LocalServer32, TreatAs, or ScriptletURL values.",
+      "mitreTechniqueId": "T1546",
+      "mitreTechniqueName": "Event Triggered Execution",
+      "eventTypes": [
+        "registry.set",
+        "registry.create",
+        "driver.registry"
+      ],
+      "containsPath": [
+        "Software\\Classes\\CLSID\\",
+        "\\CLSID\\",
+        "InprocServer32",
+        "LocalServer32",
+        "TreatAs",
+        "ScriptletURL"
+      ],
+      "tags": [
+        "registry",
+        "persistence",
+        "com-hijack"
+      ]
+    },
+    {
+      "id": "appinit-dlls-persistence",
+      "title": "AppInit DLLs persistence path",
+      "severity": "high",
+      "summary": "A registry event targeted Windows AppInit DLL loading values used for event-triggered DLL persistence.",
+      "mitreTechniqueId": "T1546",
+      "mitreTechniqueName": "Event Triggered Execution",
+      "eventTypes": [
+        "registry.set",
+        "registry.create",
+        "driver.registry"
+      ],
+      "containsPath": [
+        "Windows NT\\CurrentVersion\\Windows\\AppInit_DLLs",
+        "Windows NT\\CurrentVersion\\Windows\\LoadAppInit_DLLs",
+        "AppInit_DLLs",
+        "LoadAppInit_DLLs"
+      ],
+      "tags": [
+        "registry",
+        "persistence",
+        "dll-load"
+      ]
+    },
+    {
+      "id": "lsa-security-provider-persistence",
+      "title": "LSA security provider persistence path",
+      "severity": "high",
+      "summary": "A registry event targeted LSA authentication, security, or notification package values that can load credential-facing providers at boot or logon.",
+      "mitreTechniqueId": "T1112",
+      "mitreTechniqueName": "Modify Registry",
+      "eventTypes": [
+        "registry.set",
+        "registry.create",
+        "driver.registry"
+      ],
+      "containsPath": [
+        "Control\\Lsa\\Authentication Packages",
+        "Control\\Lsa\\Security Packages",
+        "Control\\Lsa\\Notification Packages",
+        "Control\\Lsa\\OSConfig\\Security Packages"
+      ],
+      "tags": [
+        "registry",
+        "persistence",
+        "credentials",
+        "lsa"
+      ]
+    },
+    {
+      "id": "psexec-or-remote-service-lateral-command",
+      "title": "PsExec or remote service lateral movement command",
+      "severity": "high",
+      "summary": "A process command line referenced PsExec-like tools or Service Control Manager syntax that can create or start services on remote hosts.",
+      "eventTypes": [
+        "process.start"
+      ],
+      "containsCommandLine": [
+        "psexec",
+        "psexesvc",
+        "paexec",
+        "sc \\",
+        "sc.exe \\",
+        "\\\\ADMIN$\\PSEXESVC"
+      ],
+      "tags": [
+        "execution",
+        "lateral-movement",
+        "remote-service"
+      ]
+    },
+    {
+      "id": "winrm-powershell-remoting-lateral-command",
+      "title": "WinRM or PowerShell remoting command",
+      "severity": "high",
+      "summary": "A process command line referenced PowerShell remoting or WinRM execution primitives that can run commands on remote systems.",
+      "eventTypes": [
+        "process.start"
+      ],
+      "containsCommandLine": [
+        "Enter-PSSession",
+        "Invoke-Command -ComputerName",
+        "New-PSSession",
+        "winrs -r:",
+        "winrs.exe -r:",
+        "Enable-PSRemoting",
+        "Test-WSMan",
+        "WSMan:\\"
+      ],
+      "tags": [
+        "execution",
+        "lateral-movement",
+        "winrm",
+        "powershell-remoting"
+      ]
+    },
+    {
+      "id": "admin-share-or-remote-copy-command",
+      "title": "Admin share or remote copy command",
+      "severity": "high",
+      "summary": "A process command line referenced administrative shares or copy tools commonly used to stage payloads on remote Windows hosts.",
+      "eventTypes": [
+        "process.start"
+      ],
+      "containsCommandLine": [
+        "net use \\",
+        "copy \\",
+        "xcopy \\",
+        "robocopy \\",
+        "move \\",
+        "\\\\ADMIN$",
+        "\\\\C$",
+        "\\\\IPC$"
+      ],
+      "tags": [
+        "execution",
+        "lateral-movement",
+        "admin-share",
+        "file-transfer"
+      ]
+    },
+    {
+      "id": "wmi-remote-execution-command",
+      "title": "WMI remote execution command",
+      "severity": "high",
+      "summary": "A process command line referenced WMI or CIM remote execution and discovery switches for another host.",
+      "eventTypes": [
+        "process.start"
+      ],
+      "containsCommandLine": [
+        "wmic /node:",
+        "wmic.exe /node:",
+        "Invoke-WmiMethod -ComputerName",
+        "Invoke-CimMethod -ComputerName",
+        "Get-WmiObject -ComputerName",
+        "Get-CimInstance -ComputerName",
+        "Win32_Process Create"
+      ],
+      "tags": [
+        "execution",
+        "lateral-movement",
+        "wmi"
+      ]
+    },
+    {
+      "id": "anti-analysis-sandbox-artifact-command",
+      "title": "Command-line sandbox or analysis artifact lookup",
+      "severity": "medium",
+      "summary": "A process command line referenced VM, sandbox, debugger, or analysis-tool process names commonly queried before changing behavior.",
+      "mitreTechniqueId": "T1497",
+      "mitreTechniqueName": "Virtualization/Sandbox Evasion",
+      "eventTypes": [
+        "process.start"
+      ],
+      "containsCommandLine": [
+        "vboxservice",
+        "vboxtray",
+        "vmtoolsd",
+        "vmwaretray",
+        "qemu-ga",
+        "xenservice",
+        "sandboxie",
+        "procmon",
+        "procexp",
+        "wireshark",
+        "x64dbg",
+        "ollydbg",
+        "ida64",
+        "frida",
+        "tasklist | findstr"
+      ],
+      "tags": [
+        "anti-analysis",
+        "sandbox-evasion",
+        "tool-discovery"
+      ]
+    },
+    {
+      "id": "anti-analysis-user-activity-check",
+      "title": "User activity or interaction check",
+      "severity": "medium",
+      "summary": "A process command line referenced recent-document, user-assist, session, mouse, keyboard, or idle-time checks commonly used to detect automated sandboxes.",
+      "mitreTechniqueId": "T1497",
+      "mitreTechniqueName": "Virtualization/Sandbox Evasion",
+      "eventTypes": [
+        "process.start"
+      ],
+      "containsCommandLine": [
+        "RecentDocs",
+        "UserAssist",
+        "GetLastInputInfo",
+        "GetCursorPos",
+        "GetAsyncKeyState",
+        "GetKeyboardState",
+        "quser",
+        "qwinsta",
+        "query user",
+        "whoami /user",
+        "net user"
+      ],
+      "tags": [
+        "anti-analysis",
+        "sandbox-evasion",
+        "user-activity"
+      ]
+    },
+    {
+      "id": "anti-analysis-security-tool-termination-command",
+      "title": "Analysis or security tool termination command",
+      "severity": "high",
+      "summary": "A process command line attempted to terminate common analysis, monitoring, debugger, or packet-capture tools.",
+      "mitreTechniqueId": "T1497",
+      "mitreTechniqueName": "Virtualization/Sandbox Evasion",
+      "eventTypes": [
+        "process.start"
+      ],
+      "containsCommandLine": [
+        "taskkill /im procmon",
+        "taskkill /im procexp",
+        "taskkill /im wireshark",
+        "taskkill /im x64dbg",
+        "taskkill /im ollydbg",
+        "taskkill /im ida",
+        "Stop-Process -Name procmon",
+        "Stop-Process -Name wireshark",
+        "Stop-Process -Name x64dbg"
+      ],
+      "tags": [
+        "anti-analysis",
+        "defense-evasion",
+        "tool-termination"
+      ]
+    },
+    {
+      "id": "lsass-memory-dump-command",
+      "title": "LSASS memory dump command",
+      "severity": "critical",
+      "summary": "A process command line referenced LSASS dump tooling, MiniDump paths, or common dump utilities used for credential theft triage.",
+      "eventTypes": [
+        "process.start"
+      ],
+      "containsCommandLine": [
+        "procdump",
+        "-ma lsass",
+        "lsass.exe",
+        "comsvcs.dll",
+        "MiniDump",
+        "nanodump",
+        "dumpert",
+        "rdrleakdiag.exe",
+        "createdump.exe"
+      ],
+      "tags": [
+        "credentials",
+        "lsass",
+        "dump"
+      ]
+    },
+    {
+      "id": "lsass-process-access-observed",
+      "title": "LSASS process access observed",
+      "severity": "critical",
+      "summary": "Process, API, or driver telemetry reported LSASS as the target process or image for access that should be reviewed for credential dumping.",
+      "eventTypes": [
+        "process.open",
+        "process.access",
+        "api.call",
+        "driver.process"
+      ],
+      "dataContains": {
+        "targetProcessName": [
+          "lsass.exe"
+        ],
+        "processName": [
+          "lsass.exe"
+        ],
+        "targetImage": [
+          "\\lsass.exe"
+        ],
+        "imagePath": [
+          "\\lsass.exe"
+        ],
+        "path": [
+          "\\lsass.exe"
+        ]
+      },
+      "tags": [
+        "credentials",
+        "lsass",
+        "process-access"
+      ]
+    },
+    {
+      "id": "credential-store-access-observed",
+      "title": "Credential store access observed",
+      "severity": "high",
+      "summary": "File, registry, or driver telemetry touched Windows hives, domain database, browser stores, vaults, or password manager paths containing credential material.",
+      "eventTypes": [
+        "file.open",
+        "file.created",
+        "file.modified",
+        "file.read",
+        "driver.file",
+        "registry.query",
+        "driver.registry"
+      ],
+      "containsPath": [
+        "\\Windows\\System32\\config\\SAM",
+        "\\Windows\\System32\\config\\SECURITY",
+        "\\Windows\\System32\\config\\SYSTEM",
+        "\\NTDS\\ntds.dit",
+        "\\Microsoft\\Vault\\",
+        "\\Microsoft\\Credentials\\",
+        "\\Protect\\",
+        "\\AppData\\Local\\Google\\Chrome\\User Data\\Default\\Login Data",
+        "\\AppData\\Roaming\\Mozilla\\Firefox\\Profiles\\",
+        "\\KeePass",
+        "\\1Password",
+        "\\Bitwarden"
+      ],
+      "tags": [
+        "credentials",
+        "credential-store",
+        "filesystem"
+      ]
+    },
+    {
+      "id": "credential-dumping-tool-command",
+      "title": "Credential dumping tool command",
+      "severity": "critical",
+      "summary": "A process command line referenced credential dumping tool names or command tokens such as sekurlsa, lsadump, DCSync, Kerberoast, or browser/vault dump modes.",
+      "eventTypes": [
+        "process.start"
+      ],
+      "containsCommandLine": [
+        "mimikatz",
+        "sekurlsa::",
+        "lsadump::",
+        "creds::",
+        "vault::cred",
+        "SharpKatz",
+        "SafetyKatz",
+        "LaZagne",
+        "Rubeus",
+        "kerberoast",
+        "dcsync"
+      ],
+      "tags": [
+        "credentials",
+        "credential-dumping",
+        "tooling"
+      ]
+    },
+    {
+      "id": "network-c2-beacon-event",
+      "title": "Explicit C2 beacon event",
+      "severity": "high",
+      "summary": "A normalized collector emitted an explicit command-and-control or beacon event.",
+      "mitreTechniqueId": "T1071.001",
+      "mitreTechniqueName": "Web Protocols",
+      "eventTypes": [
+        "network.c2",
+        "c2.beacon",
+        "beacon.observed"
+      ],
+      "tags": [
+        "network",
+        "c2",
+        "beacon"
+      ]
+    },
+    {
+      "id": "network-c2-indicator-fields",
+      "title": "C2 indicator fields in network telemetry",
+      "severity": "high",
+      "summary": "HTTP, TLS, or driver network telemetry contained beacon, callback, check-in, tasking, URI, or user-agent fields often used to label C2 activity.",
+      "mitreTechniqueId": "T1071.001",
+      "mitreTechniqueName": "Web Protocols",
+      "eventTypes": [
+        "network.http",
+        "http.request",
+        "network.tls",
+        "tls.connection",
+        "driver.network"
+      ],
+      "dataContains": {
+        "behavior": [
+          "c2",
+          "beacon",
+          "checkin",
+          "callback",
+          "command-and-control",
+          "command_control"
+        ],
+        "classification": [
+          "c2",
+          "beacon",
+          "checkin",
+          "callback"
+        ],
+        "indicator": [
+          "c2",
+          "beacon",
+          "checkin",
+          "callback"
+        ],
+        "uri": [
+          "/beacon",
+          "/checkin",
+          "/gate",
+          "/panel",
+          "/api/checkin",
+          "/submit.php",
+          "/tasks"
+        ],
+        "userAgent": [
+          "PowerShell/",
+          "WinHTTP",
+          "python-requests",
+          "Go-http-client",
+          "curl/"
+        ],
+        "protocolName": [
+          "c2"
+        ]
+      },
+      "tags": [
+        "network",
+        "c2",
+        "beacon",
+        "indicator"
+      ]
+    },
+    {
+      "id": "dns-c2-tunnel-placeholder",
+      "title": "DNS C2 or tunneling placeholder",
+      "severity": "medium",
+      "summary": "DNS telemetry contained TXT/NULL/CNAME, tunnel, DGA, or known DNS tunneling labels; this is a placeholder until richer DNS feature extraction exists.",
+      "mitreTechniqueId": "T1071.004",
+      "mitreTechniqueName": "DNS",
+      "eventTypes": [
+        "dns.query",
+        "network.dns",
+        "driver.network"
+      ],
+      "dataContains": {
+        "recordType": [
+          "TXT",
+          "NULL",
+          "CNAME"
+        ],
+        "queryType": [
+          "TXT",
+          "NULL",
+          "CNAME"
+        ],
+        "classification": [
+          "tunnel",
+          "dga",
+          "c2"
+        ],
+        "queryName": [
+          "dnscat",
+          "iodine",
+          "dnslog",
+          "tunnel"
+        ],
+        "protocolName": [
+          "dns"
+        ]
+      },
+      "tags": [
+        "network",
+        "dns",
+        "c2",
+        "placeholder"
+      ]
+    },
+    {
+      "id": "http-c2-suspicious-user-agent",
+      "title": "Suspicious HTTP C2 user agent",
+      "severity": "medium",
+      "summary": "HTTP telemetry reported script, library, legacy, or command-line user agents commonly seen in automated beacons and downloaders.",
+      "mitreTechniqueId": "T1071.001",
+      "mitreTechniqueName": "Web Protocols",
+      "eventTypes": [
+        "http.request",
+        "network.http"
+      ],
+      "dataContains": {
+        "userAgent": [
+          "PowerShell/",
+          "Microsoft BITS/",
+          "WinHTTP",
+          "python-requests",
+          "Go-http-client",
+          "curl/",
+          "Wget/",
+          "Java/",
+          "Mozilla/4.0 (compatible; MSIE 6.0; Windows NT 5.1)"
+        ]
+      },
+      "tags": [
+        "network",
+        "http",
+        "c2",
+        "user-agent"
+      ]
+    },
+    {
+      "id": "tls-sni-ja3-placeholder",
+      "title": "TLS SNI, JA3, or certificate metadata placeholder",
+      "severity": "low",
+      "summary": "TLS telemetry included SNI, JA3/JA3S, certificate hash, or TLS version fields for future encrypted C2 triage.",
+      "mitreTechniqueId": "T1071.001",
+      "mitreTechniqueName": "Web Protocols",
+      "eventTypes": [
+        "network.tls",
+        "tls.connection",
+        "driver.network"
+      ],
+      "dataKeys": [
+        "sni",
+        "serverName",
+        "ja3",
+        "ja3s",
+        "certificateSha256",
+        "tlsVersion"
+      ],
+      "tags": [
+        "network",
+        "tls",
+        "c2",
+        "placeholder"
+      ]
+    },
+    {
+      "id": "pcap-artifact-placeholder",
+      "title": "PCAP artifact placeholder",
+      "severity": "info",
+      "summary": "A packet-capture summary, flow, or packet placeholder event was imported; richer PCAP parsing can attach protocol-specific rules later.",
+      "eventTypes": [
+        "pcap.summary",
+        "pcap.flow",
+        "network.pcap",
+        "pcap.packet"
+      ],
+      "tags": [
+        "network",
+        "pcap",
+        "placeholder"
+      ]
+    },
+    {
+      "id": "pcap-protocol-summary-placeholder",
+      "title": "PCAP protocol summary placeholder",
+      "severity": "info",
+      "summary": "A PCAP protocol summary referenced DNS, HTTP, TLS, TCP, or UDP evidence for report visibility before first-class packet parsing is available.",
+      "eventTypes": [
+        "pcap.protocol.summary",
+        "pcap.summary"
+      ],
+      "dataContains": {
+        "protocol": [
+          "dns",
+          "http",
+          "tls",
+          "tcp",
+          "udp"
+        ],
+        "protocols": [
+          "dns",
+          "http",
+          "tls",
+          "tcp",
+          "udp"
+        ]
+      },
+      "tags": [
+        "network",
+        "pcap",
+        "placeholder",
+        "protocol-summary"
+      ]
+    },
+    {
+      "id": "credential-lsass-process-access",
+      "title": "LSASS process access observed",
+      "severity": "high",
+      "summary": "A process, driver, or API event referenced opening or reading lsass.exe, a common precursor to credential dumping.",
+      "mitreTechniqueId": "T1003.001",
+      "mitreTechniqueName": "LSASS Memory",
+      "eventTypes": [
+        "process.access",
+        "process.open",
+        "driver.process",
+        "api.call"
+      ],
+      "dataContains": {
+        "targetImage": [
+          "lsass.exe"
+        ],
+        "targetProcess": [
+          "lsass.exe",
+          "lsass"
+        ],
+        "processName": [
+          "lsass.exe"
+        ],
+        "path": [
+          "\\lsass.exe"
+        ],
+        "accessMask": [
+          "PROCESS_VM_READ",
+          "PROCESS_ALL_ACCESS",
+          "0x0010",
+          "0x0410",
+          "0x1410"
+        ]
+      },
+      "tags": [
+        "credential-access",
+        "lsass",
+        "process-access"
+      ]
+    },
+    {
+      "id": "credential-lsass-dump-command",
+      "title": "LSASS dump command line",
+      "severity": "high",
+      "summary": "A command line referenced common LSASS dumping utilities, MiniDump exports, or credential-dumping command tokens.",
+      "mitreTechniqueId": "T1003.001",
+      "mitreTechniqueName": "LSASS Memory",
+      "eventTypes": [
+        "process.start"
+      ],
+      "containsCommandLine": [
+        "procdump -ma lsass",
+        "procdump.exe -ma lsass",
+        "procdump64.exe -ma lsass",
+        "comsvcs.dll, MiniDump",
+        "comsvcs.dll MiniDump",
+        "MiniDump lsass",
+        "lsass.dmp",
+        "sekurlsa::logonpasswords",
+        "sekurlsa::tickets",
+        "nanodump",
+        "rundll32.exe C:\\Windows\\System32\\comsvcs.dll"
+      ],
+      "tags": [
+        "credential-access",
+        "lsass",
+        "dump-command"
+      ]
+    },
+    {
+      "id": "credential-sam-system-hive-access",
+      "title": "SAM/SYSTEM hive credential material access",
+      "severity": "high",
+      "summary": "A file or registry event referenced Windows SAM, SECURITY, or SYSTEM hive material used for offline credential extraction.",
+      "mitreTechniqueId": "T1003.002",
+      "mitreTechniqueName": "Security Account Manager",
+      "eventTypes": [
+        "file.open",
+        "file.created",
+        "file.modified",
+        "registry.query",
+        "driver.file",
+        "driver.registry"
+      ],
+      "containsPath": [
+        "\\Windows\\System32\\config\\SAM",
+        "\\Windows\\System32\\config\\SECURITY",
+        "\\Windows\\System32\\config\\SYSTEM",
+        "HKLM\\SAM",
+        "HKLM\\SECURITY",
+        "HKLM\\SYSTEM"
+      ],
+      "tags": [
+        "credential-access",
+        "registry",
+        "hive"
+      ]
+    },
+    {
+      "id": "credential-hive-save-command",
+      "title": "Registry hive save command for credentials",
+      "severity": "high",
+      "summary": "A process command line used reg save or shadow-copy helpers against credential-bearing registry hives.",
+      "mitreTechniqueId": "T1003.002",
+      "mitreTechniqueName": "Security Account Manager",
+      "eventTypes": [
+        "process.start"
+      ],
+      "containsCommandLine": [
+        "reg save HKLM\\SAM",
+        "reg.exe save HKLM\\SAM",
+        "reg save HKLM\\SECURITY",
+        "reg.exe save HKLM\\SECURITY",
+        "reg save HKLM\\SYSTEM",
+        "reg.exe save HKLM\\SYSTEM",
+        "vssadmin create shadow",
+        "wmic shadowcopy call create"
+      ],
+      "tags": [
+        "credential-access",
+        "registry",
+        "hive",
+        "command"
+      ]
+    },
+    {
+      "id": "credential-browser-store-access",
+      "title": "Browser credential store access",
+      "severity": "high",
+      "summary": "A file event touched common Chromium or Firefox credential database files.",
+      "mitreTechniqueId": "T1555.003",
+      "mitreTechniqueName": "Credentials from Web Browsers",
+      "eventTypes": [
+        "file.open",
+        "file.created",
+        "file.modified",
+        "driver.file"
+      ],
+      "containsPath": [
+        "\\Chrome\\User Data\\Default\\Login Data",
+        "\\Chrome\\User Data\\Default\\Web Data",
+        "\\Edge\\User Data\\Default\\Login Data",
+        "\\Edge\\User Data\\Default\\Web Data",
+        "\\Firefox\\Profiles\\",
+        "\\logins.json",
+        "\\key4.db",
+        "\\cookies.sqlite"
+      ],
+      "tags": [
+        "credential-access",
+        "browser",
+        "password-store"
+      ]
+    },
+    {
+      "id": "credential-vault-dpapi-access",
+      "title": "Windows credential vault or DPAPI material access",
+      "severity": "high",
+      "summary": "A file or registry event referenced Windows Vault, DPAPI Protect directories, credential files, or policy secrets.",
+      "mitreTechniqueId": "T1555",
+      "mitreTechniqueName": "Credentials from Password Stores",
+      "eventTypes": [
+        "file.open",
+        "file.created",
+        "file.modified",
+        "registry.query",
+        "driver.file",
+        "driver.registry"
+      ],
+      "containsPath": [
+        "\\Microsoft\\Credentials\\",
+        "\\Microsoft\\Protect\\",
+        "\\Microsoft\\Vault\\",
+        "\\Windows\\System32\\config\\SECURITY",
+        "Policy\\Secrets",
+        "DPAPI"
+      ],
+      "tags": [
+        "credential-access",
+        "vault",
+        "dpapi"
+      ]
+    },
+    {
+      "id": "remote-scheduled-task-command",
+      "title": "Remote scheduled task command",
+      "severity": "high",
+      "summary": "A command line referenced scheduled task creation or execution against a remote system.",
+      "mitreTechniqueId": "T1053.005",
+      "mitreTechniqueName": "Scheduled Task",
+      "eventTypes": [
+        "process.start"
+      ],
+      "containsCommandLine": [
+        "schtasks /s ",
+        "schtasks.exe /s ",
+        "schtasks /run /s",
+        "schtasks.exe /run /s",
+        "Register-ScheduledTask -CimSession",
+        "New-ScheduledTask -CimSession"
+      ],
+      "tags": [
+        "lateral-movement",
+        "scheduled-task",
+        "remote-execution"
+      ]
+    },
+    {
+      "id": "smb-network-port-observed",
+      "title": "SMB network port observed",
+      "severity": "medium",
+      "summary": "A network or driver event referenced SMB port 445 or legacy NetBIOS file-sharing ports.",
+      "mitreTechniqueId": "T1021.002",
+      "mitreTechniqueName": "SMB/Windows Admin Shares",
+      "eventTypes": [
+        "network.tcp",
+        "network.udp",
+        "driver.network",
+        "pcap.tcp",
+        "pcap.udp",
+        "network.flow"
+      ],
+      "dataContains": {
+        "remotePort": [
+          "445",
+          "139"
+        ],
+        "destinationPort": [
+          "445",
+          "139"
+        ],
+        "port": [
+          "445",
+          "139"
+        ],
+        "protocolName": [
+          "smb",
+          "netbios"
+        ]
+      },
+      "tags": [
+        "lateral-movement",
+        "smb",
+        "network"
+      ]
+    },
+    {
+      "id": "winrm-network-port-observed",
+      "title": "WinRM network port observed",
+      "severity": "medium",
+      "summary": "A network, driver, or PCAP event referenced WinRM ports 5985 or 5986.",
+      "mitreTechniqueId": "T1021.006",
+      "mitreTechniqueName": "Windows Remote Management",
+      "eventTypes": [
+        "network.tcp",
+        "driver.network",
+        "pcap.tcp",
+        "network.flow"
+      ],
+      "dataContains": {
+        "remotePort": [
+          "5985",
+          "5986"
+        ],
+        "destinationPort": [
+          "5985",
+          "5986"
+        ],
+        "port": [
+          "5985",
+          "5986"
+        ],
+        "protocolName": [
+          "winrm",
+          "wsman"
+        ]
+      },
+      "tags": [
+        "lateral-movement",
+        "winrm",
+        "network"
+      ]
+    },
+    {
+      "id": "anti-analysis-cpuid-api-observed",
+      "title": "CPU or hypervisor check API observed",
+      "severity": "medium",
+      "summary": "An API or anti-analysis event referenced CPU, hypervisor, or native system information checks used for sandbox fingerprinting.",
+      "mitreTechniqueId": "T1497.001",
+      "mitreTechniqueName": "System Checks",
+      "eventTypes": [
+        "api.call",
+        "antiAnalysis.sandboxCheck",
+        "system.fingerprint"
+      ],
+      "dataContains": {
+        "api": [
+          "cpuid",
+          "IsProcessorFeaturePresent",
+          "GetNativeSystemInfo",
+          "GetSystemInfo",
+          "NtQuerySystemInformation"
+        ],
+        "operation": [
+          "cpuid",
+          "hypervisor",
+          "processorFeature",
+          "systemInformation"
+        ],
+        "check": [
+          "cpuid",
+          "hypervisor",
+          "vmexit",
+          "processor"
+        ]
+      },
+      "tags": [
+        "anti-analysis",
+        "sandbox-evasion",
+        "hardware"
+      ]
+    },
+    {
+      "id": "anti-analysis-mac-disk-fingerprint-command",
+      "title": "MAC, disk, or device fingerprint command",
+      "severity": "medium",
+      "summary": "A command line queried NIC, MAC address, disk, volume, or device inventory commonly used to identify virtualized environments.",
+      "mitreTechniqueId": "T1497.001",
+      "mitreTechniqueName": "System Checks",
+      "eventTypes": [
+        "process.start"
+      ],
+      "containsCommandLine": [
+        "getmac",
+        "ipconfig /all",
+        "Get-NetAdapter",
+        "Win32_NetworkAdapter",
+        "Win32_DiskDrive",
+        "Get-PhysicalDisk",
+        "wmic diskdrive",
+        "wmic nic",
+        "fsutil fsinfo",
+        "vol ",
+        "mountvol"
+      ],
+      "tags": [
+        "anti-analysis",
+        "sandbox-evasion",
+        "hardware"
+      ]
+    },
+    {
+      "id": "anti-analysis-sleep-duration-placeholder",
+      "title": "Long sleep duration telemetry placeholder",
+      "severity": "medium",
+      "summary": "A sleep, timeout, or anti-analysis event carried duration fields for future long-sleep thresholding in reports.",
+      "mitreTechniqueId": "T1497.003",
+      "mitreTechniqueName": "Time Based Evasion",
+      "eventTypes": [
+        "antiAnalysis.sleep",
+        "api.sleep",
+        "process.timeout",
+        "api.call"
+      ],
+      "dataKeys": [
+        "durationMs",
+        "sleepMs",
+        "timeoutMs",
+        "requestedDelayMs",
+        "elapsedMs"
+      ],
+      "tags": [
+        "anti-analysis",
+        "delay",
+        "placeholder"
+      ]
+    },
+    {
+      "id": "anti-analysis-window-or-tool-check-api",
+      "title": "Analysis tool window or process check API",
+      "severity": "medium",
+      "summary": "An API event referenced window, process, module, or debugger enumeration primitives often used to detect analysis tools.",
+      "mitreTechniqueId": "T1622",
+      "mitreTechniqueName": "Debugger Evasion",
+      "eventTypes": [
+        "api.call",
+        "process.query",
+        "antiAnalysis.debuggerCheck",
+        "antiAnalysis.sandboxCheck"
+      ],
+      "dataContains": {
+        "api": [
+          "FindWindow",
+          "FindWindowEx",
+          "EnumWindows",
+          "EnumProcesses",
+          "CreateToolhelp32Snapshot",
+          "Process32First",
+          "Module32First",
+          "CheckRemoteDebuggerPresent"
+        ],
+        "operation": [
+          "FindWindow",
+          "EnumWindows",
+          "processEnumeration",
+          "moduleEnumeration",
+          "debuggerCheck"
+        ]
+      },
+      "tags": [
+        "anti-analysis",
+        "debugger-evasion",
+        "tool-detection"
+      ]
+    },
+    {
+      "id": "anti-analysis-low-resource-check",
+      "title": "Low-resource sandbox check placeholder",
+      "severity": "medium",
+      "summary": "A system-fingerprint or sandbox-check event referenced CPU, memory, disk, uptime, or display resource fields used in sandbox heuristics.",
+      "mitreTechniqueId": "T1497.001",
+      "mitreTechniqueName": "System Checks",
+      "eventTypes": [
+        "system.fingerprint",
+        "antiAnalysis.sandboxCheck",
+        "api.call"
+      ],
+      "dataKeys": [
+        "processorCount",
+        "physicalMemoryMb",
+        "diskSizeGb",
+        "uptimeSeconds",
+        "screenWidth",
+        "screenHeight",
+        "userName"
+      ],
+      "tags": [
+        "anti-analysis",
+        "sandbox-evasion",
+        "resource-check"
+      ]
+    },
+    {
+      "id": "defender-disable-command",
+      "title": "Microsoft Defender disable or exclusion command",
+      "severity": "high",
+      "summary": "A command line attempted to disable Defender features, add exclusions, stop services, or remove definitions.",
+      "mitreTechniqueId": "T1562.001",
+      "mitreTechniqueName": "Disable or Modify Tools",
+      "eventTypes": [
+        "process.start"
+      ],
+      "containsCommandLine": [
+        "Set-MpPreference -DisableRealtimeMonitoring",
+        "Set-MpPreference -DisableBehaviorMonitoring",
+        "Set-MpPreference -DisableIOAVProtection",
+        "Set-MpPreference -DisableScriptScanning",
+        "Add-MpPreference -ExclusionPath",
+        "Add-MpPreference -ExclusionProcess",
+        "Remove-MpPreference",
+        "sc stop WinDefend",
+        "sc.exe stop WinDefend",
+        "Stop-Service WinDefend",
+        "Set-Service WinDefend -StartupType Disabled",
+        "MpCmdRun.exe -RemoveDefinitions"
+      ],
+      "tags": [
+        "defense-evasion",
+        "security-tools",
+        "defender"
+      ]
+    },
+    {
+      "id": "defender-policy-registry-disable",
+      "title": "Defender policy registry disable setting",
+      "severity": "high",
+      "summary": "A registry event modified Windows Defender policy values associated with disabled protections or exclusions.",
+      "mitreTechniqueId": "T1562.001",
+      "mitreTechniqueName": "Disable or Modify Tools",
+      "eventTypes": [
+        "registry.set",
+        "registry.create",
+        "driver.registry"
+      ],
+      "containsPath": [
+        "Windows Defender",
+        "Microsoft\\Windows Defender",
+        "Policies\\Microsoft\\Windows Defender"
+      ],
+      "dataContains": {
+        "valueName": [
+          "DisableAntiSpyware",
+          "DisableRealtimeMonitoring",
+          "DisableBehaviorMonitoring",
+          "DisableIOAVProtection",
+          "DisableScriptScanning",
+          "Exclusions_Paths",
+          "Exclusions_Processes"
+        ],
+        "value": [
+          "DisableAntiSpyware",
+          "DisableRealtimeMonitoring",
+          "Exclusion"
+        ]
+      },
+      "tags": [
+        "defense-evasion",
+        "security-tools",
+        "defender",
+        "registry"
+      ]
+    },
+    {
+      "id": "security-tool-stop-or-kill-command",
+      "title": "Security tool stop or kill command",
+      "severity": "high",
+      "summary": "A command line referenced stopping or killing common Windows security, logging, or EDR-related services and processes.",
+      "mitreTechniqueId": "T1562.001",
+      "mitreTechniqueName": "Disable or Modify Tools",
+      "eventTypes": [
+        "process.start"
+      ],
+      "containsCommandLine": [
+        "taskkill /IM MsMpEng.exe",
+        "taskkill /F /IM MsMpEng.exe",
+        "Stop-Process -Name MsMpEng",
+        "sc stop Sense",
+        "sc.exe stop Sense",
+        "sc stop WdNisSvc",
+        "net stop WinDefend",
+        "Sysmon",
+        "CSFalconService",
+        "CrowdStrike",
+        "CarbonBlack",
+        "SentinelAgent",
+        "Sophos",
+        "SecurityHealthService"
+      ],
+      "tags": [
+        "defense-evasion",
+        "security-tools",
+        "tampering"
+      ]
+    },
+    {
+      "id": "firewall-defense-disable-command",
+      "title": "Windows firewall or network defense disable command",
+      "severity": "high",
+      "summary": "A command line disabled firewall profiles, disabled rules, or broadly opened network access.",
+      "mitreTechniqueId": "T1562.004",
+      "mitreTechniqueName": "Disable or Modify System Firewall",
+      "eventTypes": [
+        "process.start"
+      ],
+      "containsCommandLine": [
+        "netsh advfirewall set allprofiles state off",
+        "netsh firewall set opmode disable",
+        "Set-NetFirewallProfile -Enabled False",
+        "Disable-NetFirewallRule",
+        "New-NetFirewallRule -Action Allow",
+        "Set-NetFirewallRule -Enabled False"
+      ],
+      "tags": [
+        "defense-evasion",
+        "firewall",
+        "network"
+      ]
+    },
+    {
+      "id": "event-log-clearing-command",
+      "title": "Windows event log clearing command",
+      "severity": "high",
+      "summary": "A command line attempted to clear Windows event logs or PowerShell logs.",
+      "mitreTechniqueId": "T1070.001",
+      "mitreTechniqueName": "Clear Windows Event Logs",
+      "eventTypes": [
+        "process.start"
+      ],
+      "containsCommandLine": [
+        "wevtutil cl",
+        "wevtutil.exe cl",
+        "Clear-EventLog",
+        "Clear-WinEvent",
+        "Remove-EventLog",
+        "Microsoft-Windows-PowerShell/Operational"
+      ],
+      "tags": [
+        "defense-evasion",
+        "log-clearing"
+      ]
+    },
+    {
+      "id": "amsi-etw-bypass-command-string",
+      "title": "AMSI or ETW bypass command string",
+      "severity": "high",
+      "summary": "A command line referenced common AMSI or ETW bypass tokens used to reduce script and telemetry visibility.",
+      "mitreTechniqueId": "T1562.001",
+      "mitreTechniqueName": "Disable or Modify Tools",
+      "eventTypes": [
+        "process.start"
+      ],
+      "containsCommandLine": [
+        "amsiInitFailed",
+        "AmsiUtils",
+        "amsi.dll",
+        "AmsiScanBuffer",
+        "EtwEventWrite",
+        "System.Management.Automation.AmsiUtils",
+        "Reflection.Assembly"
+      ],
+      "tags": [
+        "defense-evasion",
+        "amsi",
+        "etw",
+        "script"
+      ]
+    },
+    {
+      "id": "pcap-flow-observed-placeholder",
+      "title": "PCAP network flow placeholder",
+      "severity": "info",
+      "summary": "A normalized PCAP flow row was imported with endpoint metadata for report correlation.",
+      "eventTypes": [
+        "pcap.flow",
+        "pcap.tcp",
+        "pcap.udp",
+        "network.flow"
+      ],
+      "dataKeys": [
+        "srcIp",
+        "dstIp",
+        "sourceIp",
+        "destinationIp",
+        "remoteAddress",
+        "remotePort",
+        "protocolName"
+      ],
+      "tags": [
+        "network",
+        "pcap",
+        "placeholder"
+      ]
+    },
+    {
+      "id": "pcap-http-request-observed",
+      "title": "PCAP HTTP request observed",
+      "severity": "medium",
+      "summary": "A normalized HTTP or PCAP HTTP event included host, URL, method, or user-agent metadata.",
+      "mitreTechniqueId": "T1071.001",
+      "mitreTechniqueName": "Web Protocols",
+      "eventTypes": [
+        "pcap.http",
+        "http.request",
+        "network.http"
+      ],
+      "dataKeys": [
+        "host",
+        "url",
+        "method",
+        "userAgent",
+        "requestUri"
+      ],
+      "tags": [
+        "network",
+        "pcap",
+        "http"
+      ]
+    },
+    {
+      "id": "pcap-dns-query-observed",
+      "title": "PCAP DNS query observed",
+      "severity": "medium",
+      "summary": "A normalized DNS or PCAP DNS event included query metadata.",
+      "mitreTechniqueId": "T1071.004",
+      "mitreTechniqueName": "DNS",
+      "eventTypes": [
+        "pcap.dns",
+        "dns.query",
+        "network.dns"
+      ],
+      "dataKeys": [
+        "queryName",
+        "qname",
+        "domain",
+        "rrname",
+        "recordType"
+      ],
+      "tags": [
+        "network",
+        "pcap",
+        "dns"
+      ]
+    },
+    {
+      "id": "pcap-tls-clienthello-observed",
+      "title": "PCAP TLS ClientHello observed",
+      "severity": "medium",
+      "summary": "A normalized TLS or PCAP TLS event included SNI, JA3, ALPN, or TLS version metadata.",
+      "mitreTechniqueId": "T1573",
+      "mitreTechniqueName": "Encrypted Channel",
+      "eventTypes": [
+        "pcap.tls",
+        "network.tls",
+        "tls.connection"
+      ],
+      "dataKeys": [
+        "sni",
+        "ja3",
+        "ja3s",
+        "alpn",
+        "tlsVersion",
+        "cipherSuite"
+      ],
+      "tags": [
+        "network",
+        "pcap",
+        "tls",
+        "encrypted-channel"
+      ]
+    },
+    {
+      "id": "dns-dynamic-domain-pattern",
+      "title": "DNS query to dynamic or disposable domain pattern",
+      "severity": "medium",
+      "summary": "A DNS event referenced dynamic DNS, disposable, or commonly abused top-level domain fragments for triage.",
+      "mitreTechniqueId": "T1071.004",
+      "mitreTechniqueName": "DNS",
+      "eventTypes": [
+        "dns.query",
+        "network.dns",
+        "pcap.dns"
+      ],
+      "dataContains": {
+        "queryName": [
+          ".duckdns.",
+          ".no-ip.",
+          ".hopto.",
+          ".ddns.",
+          ".dynu.",
+          ".top",
+          ".xyz",
+          ".club"
+        ],
+        "qname": [
+          ".duckdns.",
+          ".no-ip.",
+          ".hopto.",
+          ".ddns.",
+          ".dynu.",
+          ".top",
+          ".xyz",
+          ".club"
+        ],
+        "domain": [
+          ".duckdns.",
+          ".no-ip.",
+          ".hopto.",
+          ".ddns.",
+          ".dynu.",
+          ".top",
+          ".xyz",
+          ".club"
+        ]
+      },
+      "tags": [
+        "network",
+        "dns",
+        "triage"
+      ]
+    },
+    {
+      "id": "http-direct-ip-or-nonstandard-port",
+      "title": "HTTP direct-IP or nonstandard-port placeholder",
+      "severity": "medium",
+      "summary": "A web protocol event referenced direct-IP hosts or nonstandard web ports often worth surfacing in sandbox reports.",
+      "mitreTechniqueId": "T1071.001",
+      "mitreTechniqueName": "Web Protocols",
+      "eventTypes": [
+        "http.request",
+        "network.http",
+        "pcap.http",
+        "driver.network"
+      ],
+      "dataContains": {
+        "host": [
+          "http://",
+          "https://",
+          "["
+        ],
+        "url": [
+          "http://",
+          "https://"
+        ],
+        "remotePort": [
+          "8080",
+          "8000",
+          "8443",
+          "9001",
+          "4444",
+          "1337"
+        ],
+        "destinationPort": [
+          "8080",
+          "8000",
+          "8443",
+          "9001",
+          "4444",
+          "1337"
+        ]
+      },
+      "tags": [
+        "network",
+        "http",
+        "triage"
       ]
     }
   ]

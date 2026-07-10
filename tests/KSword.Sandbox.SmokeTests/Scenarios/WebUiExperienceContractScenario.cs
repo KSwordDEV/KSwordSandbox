@@ -36,6 +36,9 @@ internal sealed class WebUiExperienceContractScenario : ISmokeTestScenario
         RequireContains(program, "DashboardExperiencePage.Render()", "Program.cs should route the root WebUI through the Dashboard layer.");
         RequireContains(program, "\"/jobs/{jobId:guid}/execution-flow\"", "Program.cs should expose a dedicated execution-flow route.");
         RequireContains(program, "RunbookExecutionFlowPage.Render", "Program.cs should expose a separate execution-flow page for runbook details.");
+        RequireContains(program, "\"/api/jobs/{jobId:guid}/runbook/progress\"", "Program.cs should expose a UI-safe real runbook progress endpoint.");
+        RequireContains(program, "RunbookProgressStore", "Program.cs should store executor progress snapshots for live WebUI polling.");
+        RequireContains(program, "ProgressSink = new Progress<SandboxRunbookProgressSnapshot>", "Runbook execute endpoint should pass a real progress sink into the executor.");
 
         RequireContains(dashboard, "<html lang=\"zh-CN\">", "Dashboard should default to Chinese.");
         RequireContains(dashboard, "onclick=\"toggleLanguage()\"", "Dashboard should expose the top-right Chinese/English switch.");
@@ -102,6 +105,11 @@ internal sealed class WebUiExperienceContractScenario : ISmokeTestScenario
             dashboard,
             ["stage-progress", "progressStages", "renderProgressStages", "Stage progress", "阶段进度"],
             "Dashboard should render operator-facing progress stages.");
+        RequireContains(dashboard, "/runbook/progress", "Dashboard should poll the real runbook progress endpoint.");
+        RequireContains(dashboard, "startRunbookProgressPolling", "Dashboard should start real runbook progress polling during execution.");
+        RequireContains(dashboard, "renderRunbookProgress", "Dashboard should render exact executor runbook step progress.");
+        RequireContains(dashboard, "不含命令行", "Dashboard should state that expanded runbook progress omits command lines.");
+        RequireContains(dashboard, "executeRunbook(String(jobId), true)", "Upload flow should automatically start live VM analysis after planning.");
         RequireContains(dashboard, "events.json", "Dashboard should display events.json path.");
         RequireContains(dashboard, "driver-events.jsonl", "Dashboard should display driver-events.jsonl path.");
         RequireContains(dashboard, "runbook-execution.json", "Dashboard should display runbook execution result path.");

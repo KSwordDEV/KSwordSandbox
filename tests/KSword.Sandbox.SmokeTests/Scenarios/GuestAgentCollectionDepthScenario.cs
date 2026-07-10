@@ -21,6 +21,7 @@ internal sealed class GuestAgentCollectionDepthScenario : ISmokeTestScenario
         var collectionRoot = Path.Combine(agentRoot, "Collection");
         var guestAgentDoc = ReadRepositoryText(context, "docs", "guest-agent.md");
         var frameworkDoc = ReadRepositoryText(context, "docs", "guest-agent-framework.md");
+        var artifactsDoc = ReadRepositoryText(context, "docs", "artifacts.md");
         var programText = ReadRepositoryText(context, "guest", "KSword.Sandbox.Agent", "Program.cs");
 
         AssertFileContains(Path.Combine(collectionRoot, "ProcessTreeProbe.cs"), "process.tree", "Process tree probe must emit process.tree.");
@@ -40,6 +41,10 @@ internal sealed class GuestAgentCollectionDepthScenario : ISmokeTestScenario
         AssertFileContains(Path.Combine(collectionRoot, "ScreenshotProbe.cs"), "IScreenshotCapture", "Screenshot interface must be present.");
         AssertFileContains(Path.Combine(collectionRoot, "ScreenshotProbe.cs"), "screenshot.skipped", "Screenshot capture must be non-fatal in unsupported sessions.");
         AssertFileContains(Path.Combine(collectionRoot, "ScreenshotProbe.cs"), "diagnosticStage", "Screenshot skipped events must include failure-stage diagnostics.");
+        AssertFileContains(Path.Combine(collectionRoot, "MemoryDumpProbe.cs"), "IProcessMemoryDumpCapture", "Memory dump interface must be present.");
+        AssertFileContains(Path.Combine(collectionRoot, "MemoryDumpProbe.cs"), "MiniDumpWriteDump", "Memory dump capture must use Windows minidump APIs.");
+        AssertFileContains(Path.Combine(collectionRoot, "MemoryDumpProbe.cs"), "memory_dump.skipped", "Memory dump capture must be non-fatal.");
+        AssertFileContains(Path.Combine(collectionRoot, "MemoryDumpProbe.cs"), "MiniDumpNormal", "Memory dump capture must default to lightweight minidumps.");
         AssertFileContains(Path.Combine(collectionRoot, "GuestProbeRunner.cs"), "probe.timeout", "Probe runner must isolate timed-out probes.");
         AssertFileContains(Path.Combine(agentRoot, "Diagnostics", "BoundedProcessRunner.cs"), "Kill(entireProcessTree: true)", "Bounded helper commands must be terminated on timeout.");
 
@@ -47,7 +52,10 @@ internal sealed class GuestAgentCollectionDepthScenario : ISmokeTestScenario
         SmokeAssert.True(programText.Contains("new FileDiffProbe()", StringComparison.Ordinal), "Agent pipeline must include FileDiffProbe.");
         SmokeAssert.True(programText.Contains("new TcpConnectionDiffProbe()", StringComparison.Ordinal), "Agent pipeline must include TcpConnectionDiffProbe.");
         SmokeAssert.True(programText.Contains("new ScreenshotProbe()", StringComparison.Ordinal), "Agent pipeline must include ScreenshotProbe.");
+        SmokeAssert.True(programText.Contains("new MemoryDumpProbe()", StringComparison.Ordinal), "Agent pipeline must include MemoryDumpProbe.");
         SmokeAssert.True(programText.Contains("CaptureScreenshots", StringComparison.Ordinal), "Agent options must carry screenshot enablement.");
+        SmokeAssert.True(programText.Contains("CaptureMemoryDump", StringComparison.Ordinal), "Agent options must carry explicit memory dump enablement.");
+        SmokeAssert.True(programText.Contains("flags.Contains(\"memory-dump\")", StringComparison.Ordinal), "Memory dump capture must require an explicit flag.");
 
         SmokeAssert.True(guestAgentDoc.Contains("process.tree", StringComparison.Ordinal), "Guest agent doc must document process.tree.");
         SmokeAssert.True(guestAgentDoc.Contains("network.tcp.closed", StringComparison.Ordinal), "Guest agent doc must document TCP closed deltas.");
@@ -58,6 +66,11 @@ internal sealed class GuestAgentCollectionDepthScenario : ISmokeTestScenario
         SmokeAssert.True(guestAgentDoc.Contains("startup_item.created", StringComparison.Ordinal), "Guest agent doc must document startup item diffs.");
         SmokeAssert.True(guestAgentDoc.Contains("probe.timeout", StringComparison.Ordinal), "Guest agent doc must document probe timeouts.");
         SmokeAssert.True(guestAgentDoc.Contains("--screenshot", StringComparison.Ordinal), "Guest agent doc must document screenshot CLI.");
+        SmokeAssert.True(guestAgentDoc.Contains("--memory-dump", StringComparison.Ordinal), "Guest agent doc must document memory dump CLI.");
+        SmokeAssert.True(guestAgentDoc.Contains("off by default", StringComparison.OrdinalIgnoreCase), "Guest agent doc must document memory dumps as opt-in.");
+        SmokeAssert.True(artifactsDoc.Contains("memory-dumps/*.dmp", StringComparison.Ordinal), "Artifacts doc must document memory dump output.");
+        SmokeAssert.True(artifactsDoc.Contains("dropped-files", StringComparison.Ordinal), "Artifacts doc must document dropped-file artifacts.");
+        SmokeAssert.True(artifactsDoc.Contains("screenshots/", StringComparison.Ordinal), "Artifacts doc must document screenshot artifacts.");
         SmokeAssert.True(frameworkDoc.Contains("IGuestProbe.CollectAsync", StringComparison.Ordinal), "Framework doc must document the probe extension point.");
         SmokeAssert.True(frameworkDoc.Contains("BoundedProcessRunner", StringComparison.Ordinal), "Framework doc must document bounded helper command execution.");
         SmokeAssert.True(frameworkDoc.Contains("IScreenshotCapture", StringComparison.Ordinal), "Framework doc must document screenshot capture interface.");

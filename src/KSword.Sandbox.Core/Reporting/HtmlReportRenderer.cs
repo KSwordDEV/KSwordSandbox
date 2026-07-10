@@ -36,6 +36,7 @@ public sealed record HtmlReportDocument(string FileName, HtmlReportLanguage Lang
 public sealed class HtmlReportRenderer
 {
     private const int ArtifactPreviewCharacterLimit = 12_000;
+    private const int RawEventInlineLimit = 200;
 
     private static readonly JsonSerializerOptions ArtifactJsonOptions = new(JsonSerializerDefaults.Web)
     {
@@ -199,11 +200,13 @@ table{border-collapse:separate;border-spacing:0;width:100%;margin-top:14px}td,th
 code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.toc a{background:#f7fbff;border:1px solid var(--line);border-radius:999px;color:#075985;display:inline-block;font-weight:700;margin:4px 8px 4px 0;padding:7px 12px;text-decoration:none}.toc a:hover{border-color:var(--primary);box-shadow:0 0 0 4px rgba(67,160,255,.14)}
 .empty{background:linear-gradient(180deg,#fff,#f7fbff);border:1px dashed #b9d7f3;border-radius:12px;color:var(--muted);padding:14px}
 .copy-btn{background:rgba(67,160,255,.12);border:1px solid rgba(67,160,255,.45);border-radius:999px;color:#075985;cursor:pointer;font-size:12px;font-weight:700;margin:2px 0;padding:5px 10px}.copyable{cursor:copy}.copy-hint{color:var(--muted);font-size:12px;margin-top:8px}
+.event-table td:first-child{white-space:nowrap}.event-table td:nth-child(2){min-width:140px}.event-table td:nth-child(4){min-width:140px}.event-table td:nth-child(5){min-width:260px}.event-table .evidence{min-width:280px}
 .timeline{border-left:3px solid rgba(67,160,255,.45);margin:14px 0 0 8px;padding-left:18px}.timeline-item{background:#f9fcff;border:1px solid var(--line);border-radius:12px;margin:0 0 12px;padding:10px 12px;position:relative}.timeline-item:before{background:var(--primary);border:3px solid var(--primary-soft);border-radius:999px;content:'';height:11px;left:-26px;position:absolute;top:13px;width:11px}
 .tree{font-family:Consolas,monospace;line-height:1.5;margin:12px 0}.tree ul{border-left:1px dashed #b9d7f3;list-style:none;margin:0 0 0 18px;padding-left:14px}.tree li{margin:5px 0}
 .evidence{max-width:560px}.evidence details{background:#f7fbff;border:1px solid var(--line);border-radius:12px;padding:8px}.evidence summary{cursor:pointer;font-weight:700}.evidence pre{white-space:pre-wrap;word-break:break-word}
 .toolbar{display:flex;gap:8px;justify-content:flex-end}.columns{display:grid;gap:14px;grid-template-columns:1fr 1fr}.compact-list{margin:8px 0 0 0;padding-left:18px}.compact-list li{margin:4px 0}
 .artifact-ref{font-weight:700}.artifact-list{list-style:none;margin:8px 0 0 0;padding:0}.artifact-list li{border-top:1px solid #e2e8f0;margin-top:8px;padding-top:8px}.artifact-preview img{border:1px solid #cbd5e1;border-radius:10px;max-height:260px;max-width:100%}
+.raw-events-shell{background:#f9fcff;border:1px solid var(--line);border-radius:16px;margin-top:14px;overflow:hidden}.raw-events-shell>summary{cursor:pointer;font-weight:800;list-style:none;padding:12px 14px}.raw-events-shell>summary::-webkit-details-marker{display:none}.raw-events-shell>summary:before{color:var(--primary-deep);content:'▶';display:inline-block;margin-right:8px}.raw-events-shell[open]>summary:before{content:'▼'}.raw-events-panel{border-top:1px solid var(--line);max-height:58vh;overflow:auto;padding:0 12px 12px}.raw-source-hints{background:#f8fbff;border:1px solid var(--line);border-radius:14px;margin-top:12px;padding:12px}.raw-source-hints ul{list-style:none;margin:8px 0 0 0;padding:0}.raw-source-hints li{border-top:1px solid #e2e8f0;margin-top:8px;padding-top:8px}.raw-source-hints li:first-child{border-top:0;margin-top:0;padding-top:0}.raw-source-hints .hint-label{font-weight:800}
 @media(max-width:900px){.grid,.columns{grid-template-columns:1fr 1fr}table{display:block;overflow-x:auto}}@media(max-width:640px){header{padding:28px 24px}.grid,.columns{grid-template-columns:1fr}main,nav{padding:0 14px}}
 """);
         html.AppendLine("</style></head>");
@@ -759,7 +762,37 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
         IReadOnlyDictionary<string, List<ArtifactDescriptor>> artifactLookup,
         IReadOnlyCollection<ArtifactDescriptor> artifacts)
     {
-        AppendEventTable(html, "events", "Raw normalized events", report.Events, artifactLookup, artifacts);
+        var orderedEvents = report.Events
+            .OrderBy(e => e.Timestamp)
+            .ToList();
+        var inlineEvents = orderedEvents
+            .Take(RawEventInlineLimit)
+            .ToList();
+        var hiddenCount = Math.Max(0, orderedEvents.Count - inlineEvents.Count);
+
+        html.AppendLine("<section id=\"events\" class=\"card\"><h2>Raw normalized events</h2>");
+        html.AppendLine("<div class=\"grid\">");
+        Metric(html, "Total events", orderedEvents.Count.ToString(), "risk-info");
+        Metric(html, "Inline rendered", inlineEvents.Count.ToString(), "risk-low");
+        Metric(html, "Hidden raw events", hiddenCount.ToString(), hiddenCount > 0 ? "risk-medium" : "risk-info");
+        html.AppendLine("</div>");
+        html.AppendLine($"<div class=\"section-note\"><strong>Raw events are collapsed by default.</strong> Raw events shown inline: {inlineEvents.Count}/{orderedEvents.Count}. Hidden raw events: {hiddenCount}. Open report.json or raw source artifacts for complete evidence.</div>");
+        AppendRawSourceHints(html, report, artifacts);
+
+        if (orderedEvents.Count == 0)
+        {
+            Empty(html, "No events were collected for this section.");
+        }
+        else
+        {
+            html.AppendLine($"<details class=\"raw-events-shell\"><summary>Show inline raw events ({inlineEvents.Count}/{orderedEvents.Count}; {hiddenCount} hidden)</summary>");
+            html.AppendLine("<div class=\"raw-events-panel\">");
+            AppendEventRows(html, inlineEvents, artifactLookup, artifacts);
+            html.AppendLine("</div>");
+            html.AppendLine("</details>");
+        }
+
+        html.AppendLine("</section>");
     }
 
     /// <summary>
@@ -797,7 +830,7 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
             return;
         }
 
-        html.AppendLine("<table><thead><tr><th>Time</th><th>Type</th><th>Source</th><th>Process</th><th>Path / Command</th><th>Data</th></tr></thead><tbody>");
+        html.AppendLine("<table class=\"event-table\"><thead><tr><th>Time</th><th>Type</th><th>Source</th><th>Process</th><th>Path / Command</th><th>Data</th></tr></thead><tbody>");
         foreach (var evt in events.OrderBy(e => e.Timestamp))
         {
             var plain = EventToPlainText(evt);
@@ -814,6 +847,149 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
         }
 
         html.AppendLine("</tbody></table>");
+    }
+
+    /// <summary>
+    /// Appends compact source-path hints for complete raw evidence.
+    /// Inputs are the report and indexed artifacts; processing lists the
+    /// co-located report JSON plus raw guest/driver source artifacts, and the
+    /// method returns no value.
+    /// </summary>
+    private static void AppendRawSourceHints(StringBuilder html, AnalysisReport report, IReadOnlyCollection<ArtifactDescriptor> artifacts)
+    {
+        var reportJsonHint = ResolveReportJsonHint(report, artifacts);
+        var rawArtifacts = artifacts
+            .Where(artifact => artifact.Kind is ArtifactKind.GuestEventsJson or ArtifactKind.DriverEventsJsonLines or ArtifactKind.ArtifactManifest)
+            .OrderBy(artifact => ArtifactKindRank(artifact.Kind))
+            .ThenBy(artifact => artifact.RelativePath, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(artifact => artifact.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        html.AppendLine("<div class=\"raw-source-hints\"><strong>Raw source paths</strong><ul>");
+        AppendRawSourceHint(
+            html,
+            "Complete normalized report JSON",
+            "report.json",
+            reportJsonHint,
+            "report.json",
+            reportJsonHint);
+
+        if (rawArtifacts.Count == 0)
+        {
+            html.AppendLine("<li class=\"muted\">No raw source artifacts were indexed; report.json remains the complete normalized source.</li>");
+        }
+        else
+        {
+            foreach (var artifact in rawArtifacts.Take(12))
+            {
+                var label = artifact.Kind switch
+                {
+                    ArtifactKind.GuestEventsJson => "Guest events JSON",
+                    ArtifactKind.DriverEventsJsonLines => "Driver events JSONL",
+                    ArtifactKind.ArtifactManifest => "Artifact manifest",
+                    _ => "Raw source artifact"
+                };
+                var display = ArtifactDisplayName(artifact);
+                var note = RawSourceArtifactNote(artifact);
+                var copy = ArtifactToPlainText(artifact);
+                AppendRawSourceHint(
+                    html,
+                    label,
+                    display,
+                    note,
+                    string.IsNullOrWhiteSpace(artifact.SafeLink) ? null : artifact.SafeLink,
+                    copy);
+            }
+
+            var hiddenArtifacts = rawArtifacts.Count - Math.Min(rawArtifacts.Count, 12);
+            if (hiddenArtifacts > 0)
+            {
+                html.AppendLine($"<li class=\"muted\">{hiddenArtifacts} additional raw source artifacts are listed in the Artifact links section.</li>");
+            }
+        }
+
+        html.AppendLine("</ul></div>");
+    }
+
+    /// <summary>
+    /// Appends one copyable raw-source hint row.
+    /// Inputs are display label, visible path, optional link, and copy text;
+    /// processing keeps links local and copy payloads complete; return is none.
+    /// </summary>
+    private static void AppendRawSourceHint(
+        StringBuilder html,
+        string label,
+        string display,
+        string note,
+        string? link,
+        string copyText)
+    {
+        html.Append($"<li class=\"copyable\" data-copy=\"{A(copyText)}\"><span class=\"hint-label\">{E(label)}</span><br>");
+        if (string.IsNullOrWhiteSpace(link))
+        {
+            html.Append($"<code>{E(display)}</code>");
+        }
+        else
+        {
+            html.Append($"<a href=\"{A(link)}\">{E(display)}</a>");
+        }
+
+        if (!string.IsNullOrWhiteSpace(note))
+        {
+            html.Append($"<br><span class=\"muted\">{E(note)}</span>");
+        }
+
+        html.AppendLine("</li>");
+    }
+
+    /// <summary>
+    /// Resolves the likely report.json path without requiring caller-provided
+    /// job metadata. Inputs are report id and artifacts; processing infers the
+    /// job root from indexed artifact paths when possible; return is a hint.
+    /// </summary>
+    private static string ResolveReportJsonHint(AnalysisReport report, IReadOnlyCollection<ArtifactDescriptor> artifacts)
+    {
+        foreach (var artifact in artifacts)
+        {
+            if (string.IsNullOrWhiteSpace(artifact.FullPath))
+            {
+                continue;
+            }
+
+            var reportRoot = TryResolveReportRoot(report.JobId, artifact.FullPath);
+            if (!string.IsNullOrWhiteSpace(reportRoot))
+            {
+                return Path.Combine(reportRoot, "report.json");
+            }
+        }
+
+        return $"same directory as report.html/report.en.html/report.zh.html; job folder {report.JobId:N}";
+    }
+
+    /// <summary>
+    /// Builds a short raw-source artifact note.
+    /// Inputs are one artifact descriptor; processing prefers full paths and
+    /// includes safe links when useful; returns operator-readable text.
+    /// </summary>
+    private static string RawSourceArtifactNote(ArtifactDescriptor artifact)
+    {
+        var parts = new List<string>
+        {
+            $"{artifact.Kind} / {artifact.Category}"
+        };
+
+        if (!string.IsNullOrWhiteSpace(artifact.FullPath))
+        {
+            parts.Add(artifact.FullPath);
+        }
+
+        if (!string.IsNullOrWhiteSpace(artifact.SafeLink) &&
+            !string.Equals(artifact.SafeLink, artifact.RelativePath, StringComparison.OrdinalIgnoreCase))
+        {
+            parts.Add($"safe link: {artifact.SafeLink}");
+        }
+
+        return string.Join(" | ", parts);
     }
 
     /// <summary>
@@ -1210,6 +1386,24 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
         ("R0 / driver events", "R0 / 驱动事件"),
         ("Failure reasons", "失败原因"),
         ("Raw normalized events", "原始事件"),
+        ("Total events", "事件总数"),
+        ("Inline rendered", "内联渲染"),
+        ("Hidden raw events", "隐藏原始事件"),
+        ("Raw source paths", "原始来源路径"),
+        ("Complete normalized report JSON", "完整规范化报告 JSON"),
+        ("Guest events JSON", "来宾事件 JSON"),
+        ("Driver events JSONL", "驱动事件 JSONL"),
+        ("Artifact manifest", "证据清单"),
+        ("Raw source artifact", "原始来源证据"),
+        ("Raw events are collapsed by default.", "原始事件默认折叠。"),
+        ("Raw events shown inline", "原始事件内联显示"),
+        ("Open report.json or raw source artifacts for complete evidence.", "打开 report.json 或原始来源证据查看完整证据。"),
+        ("Show inline raw events", "显示内联原始事件"),
+        ("hidden)", "隐藏)"),
+        ("same directory as report.html/report.en.html/report.zh.html; job folder", "与 report.html/report.en.html/report.zh.html 位于同一目录；作业目录"),
+        ("No raw source artifacts were indexed; report.json remains the complete normalized source.", "未索引原始来源证据；report.json 仍是完整的规范化来源。"),
+        ("additional raw source artifacts are listed in the Artifact links section.", "个额外原始来源证据已列在证据文件链接章节。"),
+        ("safe link:", "安全链接："),
         ("General / info", "常规 / 信息"),
         ("MITRE techniques", "MITRE 技术"),
         ("Rule hits", "规则命中"),

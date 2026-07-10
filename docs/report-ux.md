@@ -41,6 +41,14 @@ plain diagnostic dump. The visual contract is:
   maximum height around `75vh` and `overflow:auto`, so risk, behavior, MITRE,
   static, dynamic, timeline, process, file, registry, network, R0, failure,
   and raw event evidence remain navigable during demos.
+- The Raw normalized events section should be slim by default: render a native
+  collapsed `<details>` block, bound the expanded raw event panel height, and
+  inline only the first 200 raw events. The section must show total events,
+  inline-rendered events, hidden raw events, and clear `report.json` plus raw
+  source artifact path hints for complete evidence.
+- Raw event expansion and layout stability must use native HTML/CSS rather than
+  JavaScript. Copy affordances may enhance the static HTML but must not be
+  required to reveal evidence.
 - The report must support Chinese and English rendering entrypoints, or
   equivalent core renderer support for `report.zh.html` and `report.en.html`.
 - Each generated HTML report should expose an in-report bilingual entry bar
@@ -65,6 +73,12 @@ blocks should support fast copying:
 - Click a copy button on raw evidence to copy a complete event block.
 - Raw event fields should be sorted and rendered in a collapsible evidence
   block so large driver payloads do not overwhelm the page.
+- Raw normalized events should default to a closed summary, show only the first
+  200 inline rows, and tell the operator exactly how many events are hidden.
+- The raw section should point to `report.json`, `events.json`,
+  `driver-events.jsonl`, and/or artifact manifests when indexed, so operators
+  have raw source artifact path hints and can open or copy the full raw source
+  instead of relying on an oversized HTML table.
 
 ## Live UI expectations
 

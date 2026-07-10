@@ -53,6 +53,16 @@ The root dashboard must keep these operator-facing areas visible and copyable:
   is recorded;
 - stage progress that shows ordered planning/execution/import/report steps with
   stable IDs and human-readable status;
+- real executor progress from
+  `GET /api/jobs/{jobId}/runbook/progress` while `/runbook/execute` is still
+  running. The endpoint is backed by `RunbookProgressStore`, receives
+  `SandboxRunbookProgressSnapshot` values through the executor `ProgressSink`,
+  and intentionally omits PowerShell command text, `stdout`, and `stderr` from
+  the main dashboard;
+- upload flow should be one-click for operators: after an `.exe` upload is
+  stored and a plan is created, the dashboard automatically starts live VM
+  analysis and switches the progress panel from estimated stages to real
+  runbook step status;
 - a link to a dedicated live raw monitor page that shows source files and
   unclassified raw event rows before final report classification;
 - a link to the dedicated execution-flow page for runbook step status. The root

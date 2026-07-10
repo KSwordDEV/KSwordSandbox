@@ -7,6 +7,12 @@ contract:
 --sample <path> --out <directory> [--duration <seconds>] [--driver-events <path>]
 ```
 
+Optional dropped-file extraction is disabled by default and can be enabled with:
+
+```text
+[--collect-dropped-files | --dropped-files]
+```
+
 Optional R0 sidecar flags extend the contract without changing the existing
 arguments:
 
@@ -20,6 +26,13 @@ Optional screenshot capture is disabled by default and can be enabled with:
 [--screenshot]
 ```
 
+Optional memory dump capture is disabled by default and can be enabled only with
+an explicit opt-in:
+
+```text
+[--memory-dump | --memory-dumps]
+```
+
 It writes the primary JSON artifacts under `--out`:
 
 - `events.json` - ordered `SandboxEvent` entries collected in the guest.
@@ -27,8 +40,14 @@ It writes the primary JSON artifacts under `--out`:
   generation time.
 - `screenshots/*.bmp` - optional desktop screenshots when `--screenshot` is
   supplied and the guest session exposes a capturable desktop.
-- `artifacts/manifest.json` - optional dropped-file manifest when the guest
-  writer is asked to index files below `--out\artifacts`.
+- `memory-dumps/*.dmp` - optional `MiniDumpNormal` process minidump when
+  `--memory-dump` or `--memory-dumps` is supplied.
+- `artifacts/dropped-files/**` - optional copies of newly-created files under
+  the sample working directory when `--collect-dropped-files` or
+  `--dropped-files` is supplied.
+- `artifacts/manifest.json` - optional dropped-file manifest written alongside
+  extracted dropped files when `--collect-dropped-files` or `--dropped-files` is
+  supplied.
 
 `artifacts/manifest.json` uses `ArtifactManifest` from
 `KSword.Sandbox.Abstractions.Artifacts`. Each entry records `kind:
@@ -103,6 +122,13 @@ The current guest collector emits these host-reportable event groups:
   guest session cannot expose a desktop surface. This is non-fatal and includes
   `diagnosticStage`, `exceptionType`, and `win32Error` when available, keeping
   smoke tests usable on headless hosts.
+- `memory_dump.captured` when `--memory-dump` successfully writes a
+  `memory-dumps/*.dmp` minidump for the launched sample process. The event path
+  points at the `.dmp` file and `Data` includes `phase`, `dumpType`,
+  `sizeBytes`, and `relativePath`.
+- `memory_dump.skipped` when memory dump capture was requested but the platform,
+  process state, or access rights prevent capture. This is non-fatal and
+  includes `diagnosticStage`, `exceptionType`, and `win32Error` when available.
 - `probe.timeout`, `probe.failed`, and `probe.canceled` for per-probe isolation.
   A slow DNS/netstat/service/task query is bounded and converted to an event so
   later probes and final JSON artifact writing can continue.
@@ -121,6 +147,20 @@ Dropped files are represented in the artifact manifest rather than embedded in
 `events.json`. File behavior events can still reference the path that triggered
 the evidence, while `artifacts/manifest.json` is the durable evidence chain for
 the copied bytes, hash, and relative host-collectable location.
+
+When dropped-file extraction is enabled, the agent emits:
+
+- `artifact.dropped_file.copied` for each copied `file.created` path. The event
+  path points at the copied artifact under `--out\artifacts\dropped-files`, and
+  `Data` includes the original guest path, guest-relative path,
+  artifact-relative path, size, and `evidenceRole=dropped-file`.
+- `artifact.dropped_file.skipped` when a candidate path disappeared, is outside
+  the sample working directory, is under `--out`, or cannot be copied.
+- `artifact.manifest.written` after `artifacts/manifest.json` is written. The
+  event records the manifest-relative path, manifest artifact count, and copied
+  dropped-file count.
+- `artifact.manifest.failed` if manifest writing fails; events and summary
+  writing still continue best-effort.
 
 ## Optional R0Collector sidecar
 
@@ -156,6 +196,32 @@ with a reason instead of failing the analysis.
 Screenshots are intentionally opt-in because they can contain sensitive desktop
 state and can be noisy in automated VM runs. Future host policies should decide
 whether to forward `--screenshot` per job.
+
+## Optional dropped-file extraction
+
+`--collect-dropped-files` (alias `--dropped-files`) copies files observed
+through `file.created` events under the sample working directory into
+`--out\artifacts\dropped-files`. The agent skips files below `--out` to avoid
+recursively collecting its own output and records skip diagnostics instead of
+failing the run.
+
+The manifest hashes the copied artifact bytes and preserves the original
+VM-local path in descriptor metadata (`guestFullPath`). This option does not
+collect memory dumps; memory dump collection remains a separate explicit opt-in.
+
+## Optional memory dumps
+
+`--memory-dump` (alias `--memory-dumps`) enables one best-effort
+`MiniDumpNormal` capture of the launched sample process during the `after-start`
+probe phase. The dump is written under `--out\memory-dumps\*.dmp`; the host
+artifact index classifies these files as category `memory-dump` without adding a
+new shared artifact enum value.
+
+Memory dump capture is intentionally **off by default** because dump files can
+contain credentials, tokens, document fragments, or other sensitive memory.
+Operators or host policy must explicitly opt in per job. If the sample exits too
+quickly, the session is not Windows, or process access is denied, the agent emits
+`memory_dump.skipped` and continues with normal event and artifact writing.
 
 ## Driver JSONL compatibility
 

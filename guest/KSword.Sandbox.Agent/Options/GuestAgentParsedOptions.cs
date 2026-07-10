@@ -22,4 +22,8 @@ internal sealed record GuestAgentParsedOptions
     public bool R0Mock { get; init; }
 
     public bool CaptureScreenshots { get; init; }
+
+    public bool CollectDroppedFiles { get; init; }
+
+    public bool CaptureMemoryDump { get; init; }
 }

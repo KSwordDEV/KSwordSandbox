@@ -17,4 +17,6 @@ internal sealed record GuestProbeContext
     public int? RootProcessId { get; init; }
 
     public bool CaptureScreenshots { get; init; }
+
+    public bool CaptureMemoryDump { get; init; }
 }

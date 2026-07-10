@@ -7,20 +7,20 @@ a final HTML report.
 
 ## Current estimated completion
 
-- Overall v1 deliverable: **56%**
-- Minimum usable E2E chain on this host: **72%**
+- Overall v1 deliverable: **60%**
+- Minimum usable E2E chain on this host: **75%**
 - Repository architecture, docs, module boundaries, policy: **82%**
-- Core job/event/rule/report models: **68%**
-- Web/API/WebUI submission and job UX: **66%**
-- Live raw telemetry contract: **70%**
-- Hyper-V runbook generation and execution recording: **66%**
+- Core job/event/rule/report models: **70%**
+- Web/API/WebUI submission and job UX: **73%**
+- Live raw telemetry contract: **78%**
+- Hyper-V runbook generation and execution recording: **69%**
 - Golden VM / payload staging / operator readiness: **58%**
-- Guest Agent dynamic collection: **60%**
+- Guest Agent dynamic collection: **67%**
 - R0 Driver + R0Collector: **56%**
-- Static analysis and behavior rules: **48%**
-- HTML report generation: **62%**
-- Artifact manifest and dropped-file plumbing: **45%**
-- Tests and quality gates: **62%**
+- Static analysis and behavior rules: **58%**
+- HTML report generation: **70%**
+- Artifact manifest and dropped-file plumbing: **58%**
+- Tests and quality gates: **68%**
 - Install/operations/security hardening: **32%**
 
 ## Evidence already present
@@ -64,22 +64,47 @@ a final HTML report.
 - The reusable `scripts/Invoke-WebUIApiE2E.ps1` gate now covers the WebUI API
   path. Its default mode is dry-run and safe; `-Live` is required before any VM
   mutation.
+- WebUI runbook execution now emits real UI-safe
+  `SandboxRunbookProgressSnapshot` updates through the executor `ProgressSink`.
+  `GET /api/jobs/{jobId}/runbook/progress` exposes the latest per-step state
+  while `/runbook/execute` is still running, without exposing PowerShell
+  commands, stdout, or stderr on the main dashboard.
+- The upload flow is now closer to one-click operation: after an `.exe` upload
+  is stored and planned, the dashboard automatically starts live VM analysis
+  and switches the progress panel to exact runbook step state.
+- Final HTML reports no longer inline every raw event by default. Raw evidence
+  is collapsed in a bounded scroll panel, capped to the first 200 inline rows,
+  and the report shows complete source hints for `report.json`, `events.json`,
+  `driver-events.jsonl`, and artifact manifests.
+- Behavior rules have been expanded to 153 rules with added coverage for
+  persistence, service/task abuse, PowerShell/script launch, download-execute,
+  process injection signals, credential/LSASS/browser-store access, lateral
+  movement, anti-sandbox checks, firewall/tool tampering, DNS/HTTP/TLS/C2
+  placeholders, and MITRE map consistency.
+- Guest Agent artifact collection now has an opt-in dropped-file manifest path
+  and an opt-in memory dump path. Dropped files are copied under
+  `artifacts/dropped-files/**` with manifest metadata; memory dumps are off by
+  default and only written under `memory-dumps/**` when explicitly requested.
+- Current validation evidence for this snapshot:
+  `dotnet build .\KSwordSandbox.sln`, smoke tests, local pipeline smoke, and
+  repository policy all pass.
 
 ## Remaining P0 gaps
 
 1. Turn the currently single-job/single-golden-VM flow into an operator-safe
    packaged experience: clearer install/run checks, better failure recovery, and
    one-click defaults that do not require reading runbook internals.
-2. Replace the estimated WebUI progress bar with exact per-step executor
-   telemetry while the long live request is still running.
-3. Harden the real R0 path beyond the successful smoke: ABI versioning,
+2. Harden the real R0 path beyond the successful smoke: ABI versioning,
    backpressure, producer-specific stress tests, unload/reload reliability, and
    better event filtering.
-4. Reduce final report size and improve raw-event evidence pagination/collapse.
-5. Add dropped-file extraction, hashing, artifact manifests, screenshots, and
-   optional PCAP/memory artifacts to the report pipeline.
-6. Move from single golden VM restore to safer temporary VM or differencing-disk
+3. Continue report evidence polish beyond the new raw-event collapse: add
+   graph/process-tree polish, IOC copy/export, and richer artifact cards.
+4. Finish screenshots and PCAP/network-flow artifacts, then connect them to the
+   artifact manifest and final report.
+5. Move from single golden VM restore to safer temporary VM or differencing-disk
    isolation before any broader sample testing.
+6. Add VirusTotal settings/hash lookup and keep failures silent unless the
+   operator opens the settings/status page.
 
 ## Next best work
 
@@ -89,5 +114,7 @@ a final HTML report.
 - Use `Prepare-HarmlessSample.ps1` and the runbook checklist to build the
   executable outside git for live Hyper-V validation.
 - Add final report artifact links for `events.json`, `driver-events.jsonl`,
-  screenshots, and dropped-file manifests.
+  screenshots, dropped-file manifests, memory dumps, and future PCAP files.
+- Add VirusTotal settings storage plus hash lookup, with no noisy logs when the
+  key is absent or the API call fails.
 - Run native build and full smoke after each R0/collector merge.

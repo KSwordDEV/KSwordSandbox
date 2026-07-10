@@ -62,6 +62,101 @@ public sealed record SandboxRunbookExecutionOptions
     /// the variable from the child process environment.
     /// </summary>
     public IReadOnlyDictionary<string, string?> EnvironmentVariables { get; init; } = new Dictionary<string, string?>();
+
+    /// <summary>
+    /// Optional progress sink used by WebUI hosts while the long live request is
+    /// still running. Inputs are immutable snapshots emitted before and after
+    /// every runbook step; processing is owned by the caller, and the executor
+    /// never blocks on UI rendering.
+    /// </summary>
+    public IProgress<SandboxRunbookProgressSnapshot>? ProgressSink { get; init; }
+}
+
+/// <summary>
+/// Stable string constants used by live runbook progress snapshots.
+/// Inputs are written by the executor and consumed by WebUI/API clients;
+/// processing uses strings instead of numeric enums so JavaScript dashboards and
+/// JSON logs remain readable and forward-compatible.
+/// </summary>
+public static class SandboxRunbookProgressStates
+{
+    public const string Pending = "pending";
+    public const string Running = "running";
+    public const string Completed = "completed";
+    public const string Failed = "failed";
+    public const string Skipped = "skipped";
+    public const string Canceled = "canceled";
+}
+
+/// <summary>
+/// UI-safe progress state for one source runbook step.
+/// Inputs are step metadata and optional execution result fields; processing
+/// intentionally omits PowerShell command text, stdout, and stderr so main
+/// dashboard progress can update without exposing command-line internals.
+/// </summary>
+public sealed record SandboxRunbookStepProgressSnapshot
+{
+    public required int StepIndex { get; init; }
+
+    public required string StepId { get; init; }
+
+    public required string Title { get; init; }
+
+    public required string State { get; init; }
+
+    public bool RequiresElevation { get; init; }
+
+    public bool MutatesVmState { get; init; }
+
+    public DateTimeOffset? StartedAtUtc { get; init; }
+
+    public TimeSpan? Duration { get; init; }
+
+    public int? ExitCode { get; init; }
+
+    public string? Message { get; init; }
+}
+
+/// <summary>
+/// UI-safe progress snapshot for one runbook execution attempt.
+/// Inputs are emitted by the executor while dry-run/live work proceeds;
+/// processing stores aggregate state, current step identity, and compact step
+/// status; the returned JSON never contains PowerShell commands or captured
+/// stdout/stderr.
+/// </summary>
+public sealed record SandboxRunbookProgressSnapshot
+{
+    public required Guid JobId { get; init; }
+
+    public required string TargetVmName { get; init; }
+
+    public required SandboxRunbookExecutionMode Mode { get; init; }
+
+    public required string State { get; init; }
+
+    public int TotalSteps { get; init; }
+
+    public int CompletedSteps { get; init; }
+
+    public int ExecutedSteps { get; init; }
+
+    public int? CurrentStepIndex { get; init; }
+
+    public string? CurrentStepId { get; init; }
+
+    public string? CurrentStepTitle { get; init; }
+
+    public bool? Success { get; init; }
+
+    public string? Message { get; init; }
+
+    public DateTimeOffset StartedAtUtc { get; init; }
+
+    public DateTimeOffset UpdatedAtUtc { get; init; }
+
+    public TimeSpan Duration { get; init; }
+
+    public IReadOnlyList<SandboxRunbookStepProgressSnapshot> Steps { get; init; } = [];
 }
 
 /// <summary>

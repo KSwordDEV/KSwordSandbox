@@ -43,11 +43,33 @@ public sealed class PowerShellRunbookExecutor : IRunbookExecutor
 
         if (options.Mode == SandboxRunbookExecutionMode.DryRun)
         {
+            PublishProgress(
+                runbook,
+                options,
+                SandboxRunbookProgressStates.Running,
+                startedAtUtc,
+                attemptTimer.Elapsed,
+                [],
+                currentStepIndex: null,
+                success: null,
+                message: "Dry-run runbook recording started.");
+
             var dryRunResults = runbook.Steps
                 .Select((step, index) => CreateDryRunStepResult(step, index, startedAtUtc))
                 .ToList();
 
             attemptTimer.Stop();
+            PublishProgress(
+                runbook,
+                options,
+                SandboxRunbookProgressStates.Completed,
+                startedAtUtc,
+                attemptTimer.Elapsed,
+                dryRunResults,
+                currentStepIndex: runbook.Steps.Count > 0 ? runbook.Steps.Count - 1 : null,
+                success: true,
+                message: "Dry-run runbook recording completed.");
+
             return CreateAggregateResult(
                 runbook,
                 options,
@@ -65,11 +87,33 @@ public sealed class PowerShellRunbookExecutor : IRunbookExecutor
             throw new ArgumentOutOfRangeException(nameof(options), options.Mode, "Unsupported runbook execution mode.");
         }
 
+        PublishProgress(
+            runbook,
+            options,
+            SandboxRunbookProgressStates.Running,
+            startedAtUtc,
+            attemptTimer.Elapsed,
+            [],
+            currentStepIndex: null,
+            success: null,
+            message: "Live runbook execution started.");
+
         if (options.RequireElevatedPowerShell && requiresElevation && !IsCurrentProcessElevated())
         {
             var elevationFailure = CreateElevationFailureStepResult(startedAtUtc);
 
             attemptTimer.Stop();
+            PublishProgress(
+                runbook,
+                options,
+                SandboxRunbookProgressStates.Failed,
+                startedAtUtc,
+                attemptTimer.Elapsed,
+                [elevationFailure],
+                currentStepIndex: null,
+                success: false,
+                message: ElevationFailureMessage);
+
             return CreateAggregateResult(
                 runbook,
                 options,
@@ -93,8 +137,29 @@ public sealed class PowerShellRunbookExecutor : IRunbookExecutor
             {
                 failedStepIndex = index;
                 liveResults.Add(CreateCanceledStepResult(step, index, DateTimeOffset.UtcNow, TimeSpan.Zero));
+                PublishProgress(
+                    runbook,
+                    options,
+                    SandboxRunbookProgressStates.Canceled,
+                    startedAtUtc,
+                    attemptTimer.Elapsed,
+                    liveResults,
+                    index,
+                    success: false,
+                    message: "Runbook execution was canceled before this step started.");
                 break;
             }
+
+            PublishProgress(
+                runbook,
+                options,
+                SandboxRunbookProgressStates.Running,
+                startedAtUtc,
+                attemptTimer.Elapsed,
+                liveResults,
+                index,
+                success: null,
+                message: $"Running step {index + 1} of {runbook.Steps.Count}: {step.Title}");
 
             var stepResult = await ExecutePowerShellStepAsync(step, index, options, cancellationToken).ConfigureAwait(false);
             liveResults.Add(stepResult);
@@ -102,13 +167,45 @@ public sealed class PowerShellRunbookExecutor : IRunbookExecutor
             if (!stepResult.Success)
             {
                 failedStepIndex = index;
+                PublishProgress(
+                    runbook,
+                    options,
+                    SandboxRunbookProgressStates.Failed,
+                    startedAtUtc,
+                    attemptTimer.Elapsed,
+                    liveResults,
+                    index,
+                    success: false,
+                    message: stepResult.Message ?? $"Runbook step {index + 1} failed.");
                 break;
             }
+
+            PublishProgress(
+                runbook,
+                options,
+                SandboxRunbookProgressStates.Running,
+                startedAtUtc,
+                attemptTimer.Elapsed,
+                liveResults,
+                index,
+                success: null,
+                message: $"Completed step {index + 1} of {runbook.Steps.Count}: {step.Title}");
         }
 
         attemptTimer.Stop();
         var success = failedStepIndex is null && liveResults.Count == runbook.Steps.Count;
         var message = success ? null : BuildLiveFailureMessage(failedStepIndex);
+
+        PublishProgress(
+            runbook,
+            options,
+            success ? SandboxRunbookProgressStates.Completed : SandboxRunbookProgressStates.Failed,
+            startedAtUtc,
+            attemptTimer.Elapsed,
+            liveResults,
+            failedStepIndex ?? (runbook.Steps.Count > 0 ? Math.Min(liveResults.Count, runbook.Steps.Count) - 1 : null),
+            success,
+            message ?? (success ? "Live runbook execution completed." : "Live runbook execution failed."));
 
         return CreateAggregateResult(
             runbook,
@@ -528,6 +625,139 @@ public sealed class PowerShellRunbookExecutor : IRunbookExecutor
         return failedStepIndex is null
             ? null
             : $"Live runbook execution stopped after step index {failedStepIndex.Value} failed.";
+    }
+
+    /// <summary>
+    /// Emits one UI-safe progress snapshot when a caller supplied a progress
+    /// sink. Inputs are the runbook, execution state, current result list, and
+    /// optional message; processing builds compact per-step status without
+    /// PowerShell/stdout/stderr; the method returns no value.
+    /// </summary>
+    private static void PublishProgress(
+        SandboxRunbook runbook,
+        SandboxRunbookExecutionOptions options,
+        string state,
+        DateTimeOffset startedAtUtc,
+        TimeSpan duration,
+        IReadOnlyList<SandboxRunbookStepExecutionResult> results,
+        int? currentStepIndex,
+        bool? success,
+        string? message)
+    {
+        var sink = options.ProgressSink;
+        if (sink is null)
+        {
+            return;
+        }
+
+        var snapshot = CreateProgressSnapshot(
+            runbook,
+            options,
+            state,
+            startedAtUtc,
+            duration,
+            results,
+            currentStepIndex,
+            success,
+            message);
+        sink.Report(snapshot);
+    }
+
+    /// <summary>
+    /// Builds a UI-safe progress snapshot. Inputs are the source runbook and
+    /// result list produced so far; processing derives pending/running/
+    /// completed/failed state for every step; the snapshot is returned to the
+    /// caller for storage or streaming.
+    /// </summary>
+    private static SandboxRunbookProgressSnapshot CreateProgressSnapshot(
+        SandboxRunbook runbook,
+        SandboxRunbookExecutionOptions options,
+        string state,
+        DateTimeOffset startedAtUtc,
+        TimeSpan duration,
+        IReadOnlyList<SandboxRunbookStepExecutionResult> results,
+        int? currentStepIndex,
+        bool? success,
+        string? message)
+    {
+        var resultByIndex = results
+            .Where(result => result.StepIndex >= 0)
+            .GroupBy(result => result.StepIndex)
+            .ToDictionary(group => group.Key, group => group.Last());
+        var steps = runbook.Steps
+            .Select((step, index) => CreateStepProgressSnapshot(step, index, resultByIndex, state, currentStepIndex))
+            .ToList();
+        var currentStep = currentStepIndex is >= 0 && currentStepIndex.Value < runbook.Steps.Count
+            ? runbook.Steps[currentStepIndex.Value]
+            : null;
+
+        return new SandboxRunbookProgressSnapshot
+        {
+            JobId = runbook.JobId,
+            TargetVmName = runbook.TargetVmName,
+            Mode = options.Mode,
+            State = state,
+            TotalSteps = runbook.Steps.Count,
+            CompletedSteps = steps.Count(step => step.State is SandboxRunbookProgressStates.Completed or SandboxRunbookProgressStates.Skipped),
+            ExecutedSteps = results.Count(step => !step.Skipped && step.StepIndex >= 0),
+            CurrentStepIndex = currentStep is null ? null : currentStepIndex,
+            CurrentStepId = currentStep?.Id,
+            CurrentStepTitle = currentStep?.Title,
+            Success = success,
+            Message = message,
+            StartedAtUtc = startedAtUtc,
+            UpdatedAtUtc = DateTimeOffset.UtcNow,
+            Duration = duration,
+            Steps = steps
+        };
+    }
+
+    /// <summary>
+    /// Builds one progress row for the dashboard. Inputs are source step
+    /// metadata, result lookup, aggregate state, and current index; processing
+    /// never copies PowerShell or captured output; the returned row is safe for
+    /// the main WebUI.
+    /// </summary>
+    private static SandboxRunbookStepProgressSnapshot CreateStepProgressSnapshot(
+        SandboxRunbookStep step,
+        int stepIndex,
+        IReadOnlyDictionary<int, SandboxRunbookStepExecutionResult> resultByIndex,
+        string aggregateState,
+        int? currentStepIndex)
+    {
+        if (resultByIndex.TryGetValue(stepIndex, out var result))
+        {
+            return new SandboxRunbookStepProgressSnapshot
+            {
+                StepIndex = stepIndex,
+                StepId = step.Id,
+                Title = step.Title,
+                State = result.Skipped
+                    ? SandboxRunbookProgressStates.Skipped
+                    : result.Success
+                        ? SandboxRunbookProgressStates.Completed
+                        : SandboxRunbookProgressStates.Failed,
+                RequiresElevation = step.RequiresElevation,
+                MutatesVmState = step.MutatesVmState,
+                StartedAtUtc = result.StartedAtUtc,
+                Duration = result.Duration,
+                ExitCode = result.ExitCode,
+                Message = result.Message
+            };
+        }
+
+        var isCurrent = currentStepIndex == stepIndex &&
+            aggregateState is SandboxRunbookProgressStates.Running;
+
+        return new SandboxRunbookStepProgressSnapshot
+        {
+            StepIndex = stepIndex,
+            StepId = step.Id,
+            Title = step.Title,
+            State = isCurrent ? SandboxRunbookProgressStates.Running : SandboxRunbookProgressStates.Pending,
+            RequiresElevation = step.RequiresElevation,
+            MutatesVmState = step.MutatesVmState
+        };
     }
 
     /// <summary>

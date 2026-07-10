@@ -42,6 +42,12 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(rendererSource, "contextmenu", "Report renderer should support right-click copy.");
         RequireContains(rendererSource, "Copy event", "Report renderer should provide explicit copy buttons.");
         RequireContains(rendererSource, "Raw normalized events", "Report renderer should include raw event evidence.");
+        RequireContains(rendererSource, "RawEventInlineLimit = 200", "Report renderer should cap inline raw event rendering.");
+        RequireContains(rendererSource, "raw-events-shell", "Report renderer should collapse raw events with native HTML.");
+        RequireContains(rendererSource, "raw-events-panel", "Report renderer should bound expanded raw event height.");
+        RequireContains(rendererSource, "Hidden raw events", "Report renderer should expose hidden raw event counts.");
+        RequireContains(rendererSource, "report.json", "Report renderer should point operators to report.json.");
+        RequireContains(rendererSource, "raw source artifacts", "Report renderer should point operators to raw source artifacts.");
         RequireContains(rendererSource, "#43A0FF", "Report renderer should use the required primary accent color.");
         RequireAnyContains(
             rendererSource,
@@ -71,6 +77,11 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(doc, "Registry behavior", "Report UX doc should list registry behavior.");
         RequireContains(doc, "Right-click", "Report UX doc should describe right-click copy.");
         RequireContains(doc, "raw events only", "Report UX doc should distinguish live raw events from final classification.");
+        RequireContains(doc, "first 200 raw events", "Report UX doc should require a raw event inline limit.");
+        RequireContains(doc, "hidden raw events", "Report UX doc should require hidden raw event counts.");
+        RequireContains(doc, "report.json", "Report UX doc should require report.json source hints.");
+        RequireContains(doc, "raw source artifact path hints", "Report UX doc should require raw source path hints.");
+        RequireContains(doc, "native HTML/CSS", "Report UX doc should keep raw event expansion independent of JavaScript.");
         RequireContains(doc, "#43A0FF", "Report UX doc should specify the report primary accent color.");
         RequireContains(doc, "modern sandbox report layout", "Report UX doc should require the modern sandbox report layout.");
         RequireContains(doc, "75vh", "Report UX doc should specify bounded major report section height.");
@@ -148,6 +159,12 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContainsNormalized(englishHtml, "overflow:auto", "Rendered major sections should scroll overflowing evidence.");
         RequireContains(englishHtml, "href=\"report.zh.html\"", "Rendered HTML should link to report.zh.html.");
         RequireContains(englishHtml, "href=\"report.en.html\"", "Rendered HTML should link to report.en.html.");
+        RequireContains(englishHtml, "<details class=\"raw-events-shell\"><summary>Show inline raw events (200/211; 11 hidden)</summary>", "Rendered raw events should be collapsed and capped.");
+        RequireContains(englishHtml, "Total events", "Rendered raw event overview should show the total count label.");
+        RequireContains(englishHtml, "Hidden raw events", "Rendered raw event overview should show the hidden count label.");
+        RequireContains(englishHtml, "Raw source paths", "Rendered raw event section should show source path hints.");
+        RequireContains(englishHtml, "report.json", "Rendered raw event section should link or hint report.json.");
+        RequireContains(englishHtml, "No raw source artifacts were indexed; report.json remains the complete normalized source.", "Rendered raw source hints should explain missing raw artifacts.");
 
         foreach (var expected in RequiredEnglishSectionFragments())
         {
@@ -294,6 +311,23 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
                 ["reason"] = "contract timeout evidence"
             }
         };
+        var events = new List<SandboxEvent> { processEvent, fileEvent, registryEvent, networkEvent, r0Event, failureEvent };
+        for (var index = 0; index < 205; index++)
+        {
+            events.Add(new SandboxEvent
+            {
+                EventType = $"contract.raw.{index:D3}",
+                Timestamp = timestamp.AddSeconds(10 + index),
+                Source = "guest",
+                ProcessName = "contract-sample.exe",
+                ProcessId = 4242,
+                Data =
+                {
+                    ["index"] = index.ToString(),
+                    ["rawSource"] = "events.json"
+                }
+            });
+        }
 
         return new AnalysisReport
         {
@@ -339,7 +373,7 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
                 ],
                 Warnings = ["synthetic warning"]
             },
-            Events = [processEvent, fileEvent, registryEvent, networkEvent, r0Event, failureEvent],
+            Events = events,
             Findings =
             [
                 new BehaviorFinding
@@ -355,7 +389,7 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
             ],
             Metrics = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase)
             {
-                ["events.total"] = 6
+                ["events.total"] = events.Count
             }
         };
     }
