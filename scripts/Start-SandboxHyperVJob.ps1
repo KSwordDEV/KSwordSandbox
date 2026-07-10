@@ -362,11 +362,15 @@ function Initialize-GuestOutputDirectory {
     )
 
     $eventsPath = ([string]$Plan.guest.outputDirectory).TrimEnd('\', '/') + '\events.json'
+    $agentStdoutPath = ([string]$Plan.guest.outputDirectory).TrimEnd('\', '/') + '\agent.stdout.log'
+    $agentStderrPath = ([string]$Plan.guest.outputDirectory).TrimEnd('\', '/') + '\agent.stderr.log'
     $stalePaths = @(
         [string]$Plan.guest.agentPidPath,
         [string]$Plan.guest.agentExitPath,
         [string]$Plan.driver.eventJsonLinesPath,
         [string]$Plan.guest.agentSummaryPath,
+        $agentStdoutPath,
+        $agentStderrPath,
         $eventsPath
     )
 
@@ -439,6 +443,8 @@ function Start-GuestAgent {
         [Parameter(Mandatory)][pscredential]$Credential
     )
 
+    $agentStdoutPath = ([string]$Plan.guest.outputDirectory).TrimEnd('\', '/') + '\agent.stdout.log'
+    $agentStderrPath = ([string]$Plan.guest.outputDirectory).TrimEnd('\', '/') + '\agent.stderr.log'
     $arguments = New-Object System.Collections.Generic.List[string]
     [void]$arguments.Add('--sample')
     [void]$arguments.Add((Quote-PowerShellString $Plan.sample.guestPath))
@@ -500,20 +506,26 @@ function Start-GuestAgent {
         param(
             [string]$GuestRoot,
             [string]$AgentCommand,
-            [string]$PidPath
+            [string]$PidPath,
+            [string]$StdoutPath,
+            [string]$StderrPath
         )
 
         $process = Start-Process `
             -FilePath 'powershell.exe' `
             -ArgumentList @('-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', $AgentCommand) `
             -WorkingDirectory $GuestRoot `
+            -RedirectStandardOutput $StdoutPath `
+            -RedirectStandardError $StderrPath `
             -PassThru
         $process.Id | Set-Content -Path $PidPath -Encoding ASCII
         [pscustomobject][ordered]@{
             ProcessId = $process.Id
             PidPath = $PidPath
+            StdoutPath = $StdoutPath
+            StderrPath = $StderrPath
         }
-    } -ArgumentList $Plan.guest.workingDirectory, $agentCommand, $Plan.guest.agentPidPath
+    } -ArgumentList $Plan.guest.workingDirectory, $agentCommand, $Plan.guest.agentPidPath, $agentStdoutPath, $agentStderrPath
 
     $script:GuestAgentProcessId = @($launch | Select-Object -First 1)[0].ProcessId
 }

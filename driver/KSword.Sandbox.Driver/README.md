@@ -38,6 +38,8 @@ Initial IOCTLs:
   - Return: `KSWORD_SANDBOX_POLL_REPLY`.
 - `IOCTL_KSWORD_SANDBOX_READ_EVENTS`
   - Input: optional `KSWORD_SANDBOX_READ_EVENTS_REQUEST`.
+    `Flags` is reserved and must be zero; producer enable masks are accepted
+    only by `IOCTL_KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK`.
   - Processing: validates the request, computes how many complete records fit in
     the caller's output buffer, and drains that many records from the fixed
     non-paged ring under the driver spin lock.
@@ -45,6 +47,25 @@ Initial IOCTLs:
     `BytesWritten`, `EventsDropped`, and `NextSequence` set. The trailing
     `Events` stream contains zero or more records, each starting with
     `KSWORD_SANDBOX_EVENT_HEADER`.
+- `IOCTL_KSWORD_SANDBOX_GET_CAPABILITIES`
+  - Input: none.
+  - Processing: returns ABI version, capability flags, producer masks, event
+    layout limits, and public reply/request sizes for collector negotiation.
+  - Return: `KSWORD_SANDBOX_CAPABILITIES_REPLY`.
+- `IOCTL_KSWORD_SANDBOX_GET_STATUS`
+  - Input: none.
+  - Processing: snapshots lifecycle, queue depth/capacity, producer enable
+    state, active/failed producer registration masks, last NTSTATUS, and total
+    event counters.
+  - Return: `KSWORD_SANDBOX_STATUS_REPLY`. `ActiveProducerMask` and
+    `FailedProducerMask` reuse previously unused reserved/alignment space, so
+    the ABI 1.0 status reply size remains compatible with older collectors.
+- `IOCTL_KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK`
+  - Input: `KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK_REQUEST`.
+  - Processing: applies an operator-selected producer emission mask after
+    rejecting unsupported bits.
+  - Return: `KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK_REPLY` with previous,
+    effective, and supported masks.
 
 ## Current event behavior
 

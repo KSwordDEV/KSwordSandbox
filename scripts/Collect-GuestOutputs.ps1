@@ -291,15 +291,27 @@ function Wait-AndCollectGuestOutput {
             }
         } while ($running -and (Get-Date) -lt $deadline)
 
-        Copy-GuestOutputOnce -Session $session -GuestOutputDirectory $Plan.guest.outputDirectory -HostOutputRoot $Plan.host.outputRoot -Required $true
+        try {
+            Copy-GuestOutputOnce -Session $session -GuestOutputDirectory $Plan.guest.outputDirectory -HostOutputRoot $Plan.host.outputRoot -Required $true
 
-        if ($running) {
-            throw "Guest Agent process $guestPid did not exit within $($Plan.timeouts.executionSeconds) seconds."
+            if ($running) {
+                throw "Guest Agent process $guestPid did not exit within $($Plan.timeouts.executionSeconds) seconds."
+            }
+
+            $exitCode = Read-GuestAgentExitCode -Session $session -ExitPath $Plan.guest.agentExitPath
+            if ($exitCode -ne 0) {
+                throw "Guest Agent exited with code $exitCode."
+            }
         }
+        catch {
+            try {
+                Copy-GuestOutputOnce -Session $session -GuestOutputDirectory $Plan.guest.outputDirectory -HostOutputRoot $Plan.host.outputRoot -Required $false
+            }
+            catch {
+                [void]$script:CollectionWarnings.Add("Best-effort failure output copy failed: $($_.Exception.Message)")
+            }
 
-        $exitCode = Read-GuestAgentExitCode -Session $session -ExitPath $Plan.guest.agentExitPath
-        if ($exitCode -ne 0) {
-            throw "Guest Agent exited with code $exitCode."
+            throw
         }
     }
     finally {
@@ -337,6 +349,8 @@ function Index-CollectedFiles {
             '^driver-events\.jsonl$' { 'DriverEventsJsonLines'; break }
             '^agent\.pid$' { 'AgentPid'; break }
             '^agent\.exit$' { 'AgentExit'; break }
+            '^agent\.stdout\.log$' { 'AgentStdoutLog'; break }
+            '^agent\.stderr\.log$' { 'AgentStderrLog'; break }
             '^agent-summary\.json$' { 'AgentSummary'; break }
             default { 'GuestArtifact' }
         }
@@ -408,6 +422,8 @@ function Assert-CollectedArtifacts {
     Add-RequiredArtifactStatus -Name 'events.json' -Path $eventsPath -Required $true
     Add-RequiredArtifactStatus -Name 'agent.exit' -Path (Join-Path $hostGuestOutputDirectory 'agent.exit') -Required $true
     Add-RequiredArtifactStatus -Name 'agent.pid' -Path (Join-Path $hostGuestOutputDirectory 'agent.pid') -Required $true
+    Add-RequiredArtifactStatus -Name 'agent.stdout.log' -Path (Join-Path $hostGuestOutputDirectory 'agent.stdout.log') -Required $false
+    Add-RequiredArtifactStatus -Name 'agent.stderr.log' -Path (Join-Path $hostGuestOutputDirectory 'agent.stderr.log') -Required $false
 
     if ([System.Convert]::ToBoolean($Plan.driver.enabled)) {
         Add-RequiredArtifactStatus -Name 'driver-events.jsonl' -Path $driverEventsPath -Required $false
@@ -536,6 +552,12 @@ try {
     }
     catch {
         $message = $_.Exception.Message
+        try {
+            Index-CollectedFiles -Plan $plan
+        }
+        catch {
+            [void]$script:CollectionWarnings.Add("Unable to index failure artifacts: $($_.Exception.Message)")
+        }
         throw
     }
     finally {

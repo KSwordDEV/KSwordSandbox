@@ -217,7 +217,7 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
     private static void AppendCover(StringBuilder html, AnalysisReport report)
     {
         var verdict = DetermineVerdict(report);
-        html.AppendLine("<header>");
+        html.AppendLine("<header id=\"cover\">");
         html.AppendLine("<h1>KSword Sandbox Report</h1>");
         html.AppendLine($"<p class=\"muted\">Job {E(report.JobId.ToString())} generated at {E(report.GeneratedAt.ToString("u"))}</p>");
         html.AppendLine($"<p><span class=\"badge badge-{E(verdict.Css)}\">{E(verdict.Label)}</span></p>");
@@ -254,9 +254,10 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
     /// </summary>
     private static void AppendTableOfContents(StringBuilder html)
     {
-        html.AppendLine("<nav class=\"card toc\"><h2>Table of contents</h2>");
+        html.AppendLine("<nav id=\"toc\" class=\"card toc\"><h2>Table of contents</h2>");
         foreach (var (href, title) in new[]
         {
+            ("cover", "Cover"),
             ("risk", "Risk summary"),
             ("behavior", "Behavior detections"),
             ("mitre", "Multi-dimensional / MITRE"),
@@ -1188,12 +1189,13 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
         ("High risk", "高风险"),
         ("Suspicious", "可疑行为"),
         ("Table of contents", "目录"),
+        ("Cover", "封面"),
         ("Report language", "报告语言"),
         ("English report", "英文报告"),
         ("Default report", "默认报告"),
         ("The WebUI also serves these through /api/jobs/{jobId}/report/html?lang=zh and ?lang=en.", "WebUI 也通过 /api/jobs/{jobId}/report/html?lang=zh 和 ?lang=en 提供这些报告。"),
         ("Risk summary", "风险摘要"),
-        ("Behavior detections", "行为检测"),
+        ("Behavior detections", "行为命中"),
         ("Multi-dimensional / MITRE detections", "多维 / MITRE 检测"),
         ("Multi-dimensional / MITRE", "多维 / MITRE"),
         ("Engine and rule hits", "引擎和规则命中"),
@@ -1207,7 +1209,7 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
         ("Network behavior", "网络行为"),
         ("R0 / driver events", "R0 / 驱动事件"),
         ("Failure reasons", "失败原因"),
-        ("Raw normalized events", "原始规范化事件"),
+        ("Raw normalized events", "原始事件"),
         ("General / info", "常规 / 信息"),
         ("MITRE techniques", "MITRE 技术"),
         ("Rule hits", "规则命中"),

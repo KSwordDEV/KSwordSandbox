@@ -151,7 +151,7 @@ public sealed class SandboxJobService
         var status = result.Mode == SandboxRunbookExecutionMode.Live
             ? result.Success ? AnalysisStatus.Running : AnalysisStatus.Failed
             : job.Status;
-        var existingGuestEvents = LoadEventsIfPresent(job.GuestEventsPath);
+        var existingGuestEvents = LoadGuestEventsIfPresent(job.GuestEventsPath);
         var updated = RegenerateReport(job with
         {
             Status = status,
@@ -511,6 +511,22 @@ public sealed class SandboxJobService
         }
 
         return events.Select(NormalizeEvent).ToList();
+    }
+
+    /// <summary>
+    /// Loads guest events from an existing import path, including canonical
+    /// sibling driver JSONL streams when the import path is events.json.
+    /// The input is an optional path; processing tolerates missing paths like
+    /// LoadEventsIfPresent, and the method returns normalized event records.
+    /// </summary>
+    private static List<SandboxEvent> LoadGuestEventsIfPresent(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+        {
+            return [];
+        }
+
+        return LoadGuestEventsWithDriverJsonl(path);
     }
 
     /// <summary>

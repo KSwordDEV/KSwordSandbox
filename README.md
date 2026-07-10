@@ -91,12 +91,17 @@ elevated shell:
 See `docs/install.md`.
 
 After installation, `run.ps1` is the normal per-use entry point. `.\run.ps1`
-starts the WebUI with the installed local config; `.\run.ps1 -Mode Plan
--SamplePath D:\Temp\sample.exe` creates a non-mutating Hyper-V plan; and
-`.\run.ps1 -Mode Analyze -SamplePath D:\Temp\sample.exe -Live` performs a
-single live Hyper-V analysis from an elevated shell and automatically
-post-processes collected guest events into `report.json` / `report.html`. See
-`docs/run.md`.
+starts the WebUI with the installed local config, sets `Sandbox__ConfigPath`,
+mirrors the guest password secret into the WebUI process when available, and
+checks/prepares the self-contained guest payload under the configured
+`guestPayloadRoot`. WebUI launch remains best-effort if local payload build tools
+are missing, so upload, planning, dry-run runbooks, and config review can still
+run; use `.\run.ps1 -RequirePayloadForWebUI` when payload preparation should be
+fatal. `.\run.ps1 -Mode Plan -SamplePath D:\Temp\sample.exe` creates a
+non-mutating Hyper-V plan; and `.\run.ps1 -Mode Analyze -SamplePath
+D:\Temp\sample.exe -Live` performs a single live Hyper-V analysis from an
+elevated shell and automatically post-processes collected guest events into
+`report.json` / `report.html`. See `docs/run.md`.
 
 Build the native x64 collector and driver skeleton from the main solution:
 
@@ -107,9 +112,10 @@ Build the native x64 collector and driver skeleton from the main solution:
 `Invoke-NativeBuild.ps1` normalizes the child MSBuild environment so native
 Visual C++ tasks do not fail when the parent shell contains both `PATH` and
 `Path`. The driver project defaults to unsigned source builds, and current
-validation should stop at compile success. Do not call `CSignTool.exe` or the
-legacy signing wrapper from normal builds; optional real-driver loading should
-use Windows test mode plus a local test certificate in an isolated VM.
+validation should stop at compile success. `install.ps1`/`run.ps1` do not call
+`CSignTool.exe`; do not use the legacy signing wrapper from normal builds.
+Optional real-driver loading should use Windows test mode plus a local test
+certificate in an isolated VM.
 For that optional lab path, see
 `scripts/Sign-SandboxDriverWithTestCertificate.ps1` and
 `scripts/Set-GuestTestSigning.ps1`.

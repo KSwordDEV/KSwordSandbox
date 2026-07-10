@@ -13,7 +13,8 @@ Current status:
 - Optionally issues `IOCTL_KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK` when
   `--enable-mask <mask>` is supplied, then emits the requested/effective mask.
 - Issues `IOCTL_KSWORD_SANDBOX_GET_STATUS` before and after draining to capture
-  queue depth, `ProducerEnableMask`, supported producer bits, and total counters.
+  queue depth, `ProducerEnableMask`, `ActiveProducerMask`,
+  `FailedProducerMask`, supported producer bits, and total counters.
 - Issues `IOCTL_KSWORD_SANDBOX_POLL` and `IOCTL_KSWORD_SANDBOX_READ_EVENTS`
   in a one-shot or timed polling loop.
 - Converts driver event records into `SandboxEvent` JSON Lines for the Guest
@@ -65,6 +66,8 @@ Initial IOCTLs:
   - Purpose: cheap queue snapshot before drain.
 - `IOCTL_KSWORD_SANDBOX_READ_EVENTS`
   - Input: optional `KSWORD_SANDBOX_READ_EVENTS_REQUEST`.
+  - Request `Flags` is reserved and must be zero. Producer selection is not
+    accepted on this IOCTL; use `IOCTL_KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK`.
   - Output: `KSWORD_SANDBOX_READ_EVENTS_REPLY` followed by zero or more
     `KSWORD_SANDBOX_EVENT_HEADER + payload` records.
   - Purpose: consume queued R0 events.
@@ -77,7 +80,8 @@ Initial IOCTLs:
   - Input: none.
   - Output: `KSWORD_SANDBOX_STATUS_REPLY`.
   - Purpose: Queue and status counters, lifecycle state, `ProducerEnableMask`,
-    `TotalEventsSuppressed`, queue capacity, high watermark, and last NTSTATUS.
+    `ActiveProducerMask`, `FailedProducerMask`, `TotalEventsSuppressed`, queue
+    capacity, high watermark, and last NTSTATUS.
 - `IOCTL_KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK`
   - Input: `KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK_REQUEST`.
   - Output: `KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK_REPLY`.
@@ -95,8 +99,18 @@ size for later diagnostics.
 `R0Collector` emits `r0collector.driverStatus` for
 `IOCTL_KSWORD_SANDBOX_GET_STATUS` before draining and again after the final drain.
 These rows preserve queue depth/capacity, high watermark, `ProducerEnableMask`,
-`SupportedProducerMask`, `TotalEventsEnqueued`, `TotalEventsDropped`,
-`TotalEventsRead`, `TotalEventsSuppressed`, `NextSequence`, and `LastNtStatus`.
+`SupportedProducerMask`, `ActiveProducerMask`, `FailedProducerMask`,
+`TotalEventsEnqueued`, `TotalEventsDropped`, `TotalEventsRead`,
+`TotalEventsSuppressed`, `NextSequence`, and `LastNtStatus`.  The JSON field
+names are `activeProducerMask`, `activeProducerMaskHex`,
+`activeProducerMaskNames`, `failedProducerMask`, `failedProducerMaskHex`, and
+`failedProducerMaskNames`.
+
+The active/failed producer masks are published without an ABI minor bump by
+using the previously unused reserved/alignment space in
+`KSWORD_SANDBOX_STATUS_REPLY`; the reply `Size` stays unchanged for ABI 1.0
+collectors.  Older drivers that zeroed that reserved space surface both masks as
+zero, while newer drivers fill them explicitly.
 
 When `--enable-mask <mask>` is supplied, `R0Collector` issues
 `IOCTL_KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK` and emits
@@ -168,7 +182,8 @@ Supported options:
 - `--enable-mask <mask>`: pass an unsigned 32-bit decimal or `0x` hexadecimal
   mask through `IOCTL_KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK`, then record the
   requested/effective mask in `r0collector.driverProducerMask`. The collector
-  also includes the requested value in lifecycle rows for reproducibility.
+  also includes the requested value in lifecycle rows for reproducibility. This
+  mask is never copied into `KSWORD_SANDBOX_READ_EVENTS_REQUEST.Flags`.
 - `--health`: open the live device, emit `r0collector.driverHealth`, and exit
   without polling or draining queued events.
 - `--heartbeat`: emit `r0collector.heartbeat` lifecycle rows after startup, at

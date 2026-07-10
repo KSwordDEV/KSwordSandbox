@@ -243,6 +243,19 @@ internal static class SmokeTestProgram
         Assert(File.Exists(importedJob.JsonReportPath), "refreshed json report should exist");
         Assert(File.Exists(importedJob.HtmlReportPath), "refreshed html report should exist");
         AssertRefreshedReportJson(importedJob);
+        var refreshedExecutionJob = service.SaveRunbookExecutionResult(importedJob.JobId, new SandboxRunbookExecutionResult
+        {
+            JobId = importedJob.JobId,
+            TargetVmName = runbook.TargetVmName,
+            Mode = SandboxRunbookExecutionMode.DryRun,
+            Success = true,
+            TotalSteps = runbook.Steps.Count,
+            ExecutedSteps = runbook.Steps.Count,
+            StartedAtUtc = DateTimeOffset.UtcNow,
+            Duration = TimeSpan.FromSeconds(1),
+            RequiresElevation = true
+        });
+        AssertRefreshedReportJson(refreshedExecutionJob);
 
         var htmlReportPath = importedJob.HtmlReportPath ?? throw new InvalidOperationException("html report path should be set");
         var html = File.ReadAllText(htmlReportPath);

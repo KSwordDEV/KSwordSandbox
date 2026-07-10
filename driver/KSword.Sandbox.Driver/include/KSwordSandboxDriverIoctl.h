@@ -43,9 +43,11 @@ extern "C" {
  * Interface and structure versions.
  *
  * The high word is the major ABI version and the low word is the minor ABI
- * version.  All current skeleton structures use version 1.0.  Collectors should
- * first read capabilities, compare the major version, and then gate optional
- * IOCTL use on CapabilityFlags.
+ * version.  All current skeleton structures use version 1.0.  Compatible
+ * status additions may reuse reserved reply space without changing the minor
+ * version or fixed reply size.  Collectors should first read capabilities,
+ * compare the major version, and then gate optional IOCTL use on
+ * CapabilityFlags and reply Size.
  */
 #define KSWORD_SANDBOX_ABI_VERSION_MAJOR   1U
 #define KSWORD_SANDBOX_ABI_VERSION_MINOR   0U
@@ -113,8 +115,9 @@ extern "C" {
  * IOCTL_KSWORD_SANDBOX_GET_STATUS
  *   Input : none.
  *   Output: KSWORD_SANDBOX_STATUS_REPLY.
- *   Return: STATUS_SUCCESS with lifecycle, enable-mask, queue-capacity, and
- *           total counter state for collector diagnostics.
+ *   Return: STATUS_SUCCESS with lifecycle, enable-mask, active/failed producer
+ *           masks, queue-capacity, and total counter state for collector
+ *           diagnostics.
  */
 #define IOCTL_KSWORD_SANDBOX_GET_STATUS \
     CTL_CODE(KSWORD_SANDBOX_DEVICE_TYPE, KSWORD_SANDBOX_IOCTL_BASE + 0x04U, METHOD_BUFFERED, FILE_READ_DATA)
@@ -542,7 +545,9 @@ typedef struct _KSWORD_SANDBOX_CAPABILITIES_REPLY {
  * Logic  : The driver returns a stable lifecycle snapshot, current producer
  *          enable mask, active/failed producer registration masks, ring
  *          capacity/depth, and monotonic total counters for enqueued, read,
- *          dropped, and suppressed events.
+ *          dropped, and suppressed events.  ActiveProducerMask and
+ *          FailedProducerMask occupy previously unused reserved/alignment space
+ *          so the ABI 1.0 reply size remains stable for older collectors.
  * Return : sizeof(KSWORD_SANDBOX_STATUS_REPLY) bytes on success.
  */
 typedef struct _KSWORD_SANDBOX_STATUS_REPLY {
@@ -610,8 +615,10 @@ typedef struct _KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK_REPLY {
  * Inputs : collectors may pass this at the start of the METHOD_BUFFERED system
  *          buffer.  A zero-length input is also valid for the current skeleton.
  * Logic  : MaxEvents limits the number of records when non-zero.  A zero value
- *          means the driver may return as many complete records as fit.  The
- *          current skeleton validates but otherwise ignores StartingSequence.
+ *          means the driver may return as many complete records as fit.  Flags
+ *          is reserved and must be zero; producer selection belongs only to
+ *          IOCTL_KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK.  The current skeleton
+ *          validates but otherwise ignores StartingSequence.
  * Return : not returned directly; the same METHOD_BUFFERED buffer receives
  *          KSWORD_SANDBOX_READ_EVENTS_REPLY on success.
  */

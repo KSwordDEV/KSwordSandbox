@@ -49,8 +49,14 @@ param(
     # Includes .pdb files in the payload when local debugging needs symbols.
     [switch]$IncludeSymbols,
 
-    # Publishes the Guest Agent as self-contained instead of framework-dependent.
-    [switch]$SelfContained
+    # Publishes the Guest Agent as self-contained. This is the default for
+    # Hyper-V live runs because a clean Win10 guest usually does not have the
+    # exact .NET runtime installed.
+    [switch]$SelfContained,
+
+    # Opts into a smaller framework-dependent Guest Agent payload. Use only when
+    # the golden VM is known to contain the matching .NET runtime.
+    [switch]$FrameworkDependent
 )
 
 Set-StrictMode -Version 3.0
@@ -504,7 +510,8 @@ function Write-PayloadManifest {
         configuration       = $Configuration
         platform            = $Platform
         runtimeIdentifier   = $RuntimeIdentifier
-        selfContained       = [bool]$SelfContained
+        selfContained       = [bool]$script:EffectiveSelfContained
+        frameworkDependent  = -not [bool]$script:EffectiveSelfContained
         symbolsIncluded     = [bool]$IncludeSymbols
         payloadRoot         = (Get-NormalizedFullPath -Path $DestinationRoot)
         guestWorkingDirectory = $GuestWorkingDirectory
@@ -553,6 +560,7 @@ try {
     $resolvedRepo = Get-NormalizedFullPath -Path $RepoRoot
     $resolvedPayload = Get-NormalizedFullPath -Path $PayloadRoot
     $resolvedBuild = Get-NormalizedFullPath -Path $BuildRoot
+    $script:EffectiveSelfContained = (-not [bool]$FrameworkDependent) -or [bool]$SelfContained
     $agentProject = Join-Path $resolvedRepo 'guest\KSword.Sandbox.Agent\KSword.Sandbox.Agent.csproj'
     $collectorProject = Join-Path $resolvedRepo 'guest\KSword.Sandbox.R0Collector\KSword.Sandbox.R0Collector.vcxproj'
 
@@ -587,7 +595,7 @@ try {
         '/t:Publish',
         "/p:Configuration=$Configuration",
         "/p:RuntimeIdentifier=$RuntimeIdentifier",
-        "/p:SelfContained=$([bool]$SelfContained)",
+        "/p:SelfContained=$([bool]$script:EffectiveSelfContained)",
         '/p:UseAppHost=true',
         "/p:PublishDir=$(Add-TrailingDirectorySeparator -Path $agentPublishRoot)",
         "/p:ArtifactsPath=$agentArtifacts",

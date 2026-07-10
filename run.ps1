@@ -19,7 +19,9 @@ Single-sample CLI modes are also available:
 The script loads C:\ProgramData\KSwordSandbox\install-state.json when present,
 sets Sandbox__ConfigPath for the Web/API, mirrors the guest password from User
 or Machine environment into the current process when available, and never prints
-secret values.
+secret values. WebUI mode attempts self-contained guest payload preparation but
+keeps the UI launchable when local build tools are not installed; use
+-RequirePayloadForWebUI when payload preparation must be fatal.
 #>
 [CmdletBinding()]
 param(
@@ -55,7 +57,9 @@ param(
 
     [switch]$OpenBrowser,
 
-    [switch]$StrictUrl
+    [switch]$StrictUrl,
+
+    [switch]$RequirePayloadForWebUI
 )
 
 Set-StrictMode -Version 3.0
@@ -496,6 +500,27 @@ function Ensure-GuestPayload {
     }
 }
 
+function Ensure-GuestPayloadForWebUi {
+    param(
+        [Parameter(Mandatory)][string]$PayloadRoot,
+        [Parameter(Mandatory)][object]$Config
+    )
+
+    Write-RunInfo "Checking self-contained guest payload before WebUI launch: $PayloadRoot"
+    try {
+        Ensure-GuestPayload -PayloadRoot $PayloadRoot -Config $Config
+    }
+    catch {
+        if ($RequirePayloadForWebUI) {
+            throw
+        }
+
+        Write-RunInfo "Guest payload preparation failed before WebUI startup: $($_.Exception.Message)"
+        Write-RunInfo 'WebUI will still start for upload, planning, dry-run runbooks, and configuration review.'
+        Write-RunInfo 'Fix the payload before live Hyper-V execution, or rerun with -RequirePayloadForWebUI to make this fatal.'
+    }
+}
+
 function Show-RunStatus {
     param(
         [AllowNull()]$State,
@@ -505,6 +530,20 @@ function Show-RunStatus {
 
     $secretName = Get-SecretName -State $State
     $configExists = Test-Path -LiteralPath $EffectiveConfigPath -PathType Leaf
+    $payloadRoot = [System.IO.Path]::GetFullPath((Get-StateString -State $State -Name 'guestPayloadRoot' -DefaultValue (Join-Path $EffectiveRuntimeRoot 'payload\guest-tools')))
+    if ($configExists) {
+        try {
+            $statusConfig = Get-Content -LiteralPath $EffectiveConfigPath -Raw | ConvertFrom-Json
+            if ($null -ne $statusConfig.paths -and $null -ne $statusConfig.paths.PSObject.Properties['guestPayloadRoot'] -and -not [string]::IsNullOrWhiteSpace([string]$statusConfig.paths.guestPayloadRoot)) {
+                $payloadRoot = [System.IO.Path]::GetFullPath([string]$statusConfig.paths.guestPayloadRoot)
+            }
+        }
+        catch {
+            Write-RunInfo "Status could not read payload root from config '$EffectiveConfigPath': $($_.Exception.Message)"
+        }
+    }
+
+    $payloadManifest = Join-Path $payloadRoot 'payload-manifest.json'
     $hyperVModuleAvailable = $null -ne (Get-Command Get-VM -ErrorAction SilentlyContinue)
     $vmName = Get-StateString -State $State -Name 'vmName' -DefaultValue 'KSwordSandbox-Win10-Golden'
     $checkpointName = Get-StateString -State $State -Name 'checkpointName' -DefaultValue 'Clean'
@@ -533,11 +572,17 @@ function Show-RunStatus {
         ConfigPath = $EffectiveConfigPath
         ConfigExists = $configExists
         WebUrl = $Url
+        WebUiCommand = '.\run.ps1'
         RuntimeRoot = $EffectiveRuntimeRoot
         RuntimeRootExists = Test-Path -LiteralPath $EffectiveRuntimeRoot -PathType Container
+        GuestPayloadRoot = $payloadRoot
+        GuestPayloadRootExists = Test-Path -LiteralPath $payloadRoot -PathType Container
+        GuestPayloadManifest = $payloadManifest
+        GuestPayloadManifestExists = Test-Path -LiteralPath $payloadManifest -PathType Leaf
         SecretName = $secretName
         ProcessSecretSet = -not [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($secretName, 'Process'))
         UserSecretSet = -not [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($secretName, 'User'))
+        GuestPasswordGuidance = ".\install.ps1 -Mode Install -PromptPassword, or .\install.ps1 -Mode Change -ResetGuestVmPassword -GeneratePassword -Force"
         VmName = $vmName
         CheckpointName = $checkpointName
         HyperVModuleAvailable = $hyperVModuleAvailable
@@ -631,6 +676,7 @@ function Invoke-WebUi {
     $env:ASPNETCORE_URLS = $effectiveUrl
     Write-RunInfo "Starting WebUI: $effectiveUrl"
     Write-RunInfo "Config: $EffectiveConfigPath"
+    Write-RunInfo "Hyper-V live prerequisites: configured VM/checkpoint, prepared self-contained guest payload, and guest password secret."
     Write-RunInfo 'Press Ctrl+C to stop the WebUI.'
 
     if ($OpenBrowser) {
@@ -800,7 +846,7 @@ switch ($Mode) {
     'WebUI' {
         $config = Read-SandboxConfig -EffectiveConfigPath $effectiveConfigPath
         $payloadRoot = Get-GuestPayloadRoot -State $state -Config $config -EffectiveRuntimeRoot $effectiveRuntimeRoot
-        Ensure-GuestPayload -PayloadRoot $payloadRoot -Config $config
+        Ensure-GuestPayloadForWebUi -PayloadRoot $payloadRoot -Config $config
         Invoke-WebUi -EffectiveConfigPath $effectiveConfigPath
     }
     'Plan' {

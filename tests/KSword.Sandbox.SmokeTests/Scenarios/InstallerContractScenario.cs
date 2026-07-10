@@ -67,6 +67,8 @@ internal sealed class InstallerContractScenario : ISmokeTestScenario
         RequireContains(installer, "if ($ResetGuestVmPassword)", "Non-interactive change should prioritize actual VM password reset.");
         RequireContains(installer, "elseif ($UpdateHyperVConfig)", "Non-interactive change should support Hyper-V config updates.");
         RequireContains(installer, "if ($ResetPassword -or $GeneratePassword -or $PromptPassword)", "Non-interactive change should support reset password prompt/generate.");
+        RequireNotContains(installer, "CSignTool", "Installer must not call or reference CSignTool.");
+        RequireNotContains(installer, "Sign-SandboxDriverWithKswordCSignTool", "Installer must not call the legacy KSword signing wrapper.");
 
         RequireContains(doc, "- Install / prepare local settings", "Install doc should describe interactive install.");
         RequireContains(doc, "Change menu", "Install doc should describe the change menu.");
@@ -86,6 +88,11 @@ internal sealed class InstallerContractScenario : ISmokeTestScenario
         RequireContains(doc, "Uninstall", "Install doc should describe uninstall.");
         RequireContains(doc, "Status", "Install doc should describe status.");
         RequireContains(doc, "The password value is never printed.", "Install doc should state that password values are never printed.");
+        RequireContains(doc, ".\\run.ps1", "Install doc should show the post-install one-command WebUI launch.");
+        RequireContains(doc, "self-contained Guest", "Install doc should explain self-contained guest payload preparation.");
+        RequireContains(doc, "-RequirePayloadForWebUI", "Install doc should explain strict WebUI payload preparation.");
+        RequireContains(doc, "does not sign drivers", "Install doc should state install does not sign drivers.");
+        RequireContains(doc, "must not call `CSignTool.exe`", "Install doc should explicitly prohibit CSignTool in install packaging.");
         RequireContains(doc, ".\\scripts\\Test-HyperVReadiness.ps1", "Install doc should point operators to the one-command readiness preflight.");
         RequireContains(doc, "PromptForMissingGuestPassword", "Install doc should document the process-only readiness password prompt.");
         RequireContains(doc, "repository-policy", "Install doc should describe secret hygiene repository policy.");

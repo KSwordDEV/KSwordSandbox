@@ -96,6 +96,36 @@ Guest Service Interface, PowerShell Direct when the VM is already running,
 guest working directory shape, host payload files, and repository secret
 hygiene without starting/restoring/stopping a VM.
 
+## Start WebUI after install
+
+The release-wrapper path is intentionally short:
+
+```powershell
+.\install.ps1 -Mode Install -PromptPassword
+.\run.ps1
+```
+
+Use `-GeneratePassword` only when you will also synchronize the actual VM
+`SandboxUser` password to that generated value. For the normal per-use launch,
+`.\run.ps1` loads `%ProgramData%\KSwordSandbox\install-state.json`, sets
+`Sandbox__ConfigPath`, mirrors `KSWORDBOX_GUEST_PASSWORD` into the WebUI process
+when it exists in User/Machine environment, and starts the WebUI on
+`http://127.0.0.1:18080` or the next available fallback localhost port.
+
+Before launching the WebUI, `run.ps1` checks the configured
+`paths.guestPayloadRoot` and tries to build a self-contained Guest
+Agent/R0Collector payload by calling:
+
+```powershell
+.\scripts\Prepare-GuestPayload.ps1 -SelfContained
+```
+
+If Visual Studio/MSBuild or native build tools are missing, WebUI mode prints a
+warning and still starts for upload, planning, dry-run runbooks, and
+configuration review. Fix the payload before live Hyper-V execution, or run
+`.\run.ps1 -RequirePayloadForWebUI` when you want payload preparation failure to
+stop startup.
+
 ## Reset password secret
 
 This is host-only secret storage. It does not change the VM account.
@@ -187,3 +217,8 @@ Still avoid putting the value in git, reports, screenshots, or runbook logs.
 The readiness and repository-policy scripts compare the current environment
 secret value against candidate repository text files and fail without printing
 the value if it appears in a file that could be staged.
+
+The installer does not sign drivers and must not call `CSignTool.exe` or the
+legacy `scripts\Sign-SandboxDriverWithKswordCSignTool.ps1` wrapper. Optional
+real-driver lab validation is separate from install/run packaging and should use
+the documented Windows test-signing path outside this repository.

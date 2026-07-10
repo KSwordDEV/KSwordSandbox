@@ -9,23 +9,24 @@ complete. The page should let an operator answer three questions quickly:
 
 ## Report sections
 
-Required `report.html` sections:
+Required `report.html`, `report.zh.html`, and `report.en.html` sections:
 
-- Cover with job id, generation time, verdict, sample identity, and hashes.
-- Table of contents.
-- Risk summary cards.
-- Behavior detections.
-- MITRE mapping.
+- Cover / 封面 with job id, generation time, verdict, sample identity, and hashes.
+- Table of contents / 目录.
+- Risk summary / 风险摘要 cards.
+- Behavior detections / 行为命中.
+- MITRE mapping / MITRE 映射.
 - Engine/rule hits.
-- Static analysis with PE sections, URLs, strings, warnings, and tags.
-- Dynamic summary.
+- Static analysis / 静态分析 with PE sections, URLs, strings, warnings, and tags.
+- Dynamic summary / 动态分析.
 - Timeline.
-- Process tree and process event table.
-- File behavior / dropped files.
-- Registry behavior.
-- Network behavior.
-- Failure reasons.
-- Raw normalized events.
+- Process details / 进程, including the Process tree and process event table.
+- File behavior / 文件, including dropped files.
+- Registry behavior / 注册表.
+- Network behavior / 网络.
+- R0 / driver events.
+- Failure reasons / 失败原因.
+- Raw normalized events / 原始事件.
 
 
 ## Report renderer visual contract
@@ -36,9 +37,10 @@ plain diagnostic dump. The visual contract is:
 - Primary accent color: `#43A0FF`.
 - Major report areas should render as modern cards/panels with clear spacing,
   readable typography, and an operator-focused summary-first flow.
-- Each major section should keep very large evidence sets bounded with a
-  maximum height around `75vh` and `overflow:auto`, so timeline, process,
-  registry, network, and raw event evidence remain navigable during demos.
+- Each major `section.card` should keep very large evidence sets bounded with a
+  maximum height around `75vh` and `overflow:auto`, so risk, behavior, MITRE,
+  static, dynamic, timeline, process, file, registry, network, R0, failure,
+  and raw event evidence remain navigable during demos.
 - The report must support Chinese and English rendering entrypoints, or
   equivalent core renderer support for `report.zh.html` and `report.en.html`.
 - Each generated HTML report should expose an in-report bilingual entry bar
