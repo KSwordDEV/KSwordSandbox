@@ -1,0 +1,21 @@
+{
+  "matrix": "enterprise-windows",
+  "version": "2026-07-10-seed",
+  "techniques": [
+    {
+      "id": "T1059",
+      "name": "Command and Scripting Interpreter",
+      "categories": [ "execution" ]
+    },
+    {
+      "id": "T1105",
+      "name": "Ingress Tool Transfer",
+      "categories": [ "command-and-control" ]
+    },
+    {
+      "id": "T1112",
+      "name": "Modify Registry",
+      "categories": [ "defense-evasion", "persistence" ]
+    }
+  ]
+}

@@ -1,0 +1,4 @@
+#!/bin/sh
+repo_root="$(cd "$(dirname "$0")/.." && pwd)"
+pwsh -NoProfile -ExecutionPolicy Bypass -File "$repo_root/scripts/Test-RepositoryPolicy.ps1" -StagedOnly
+exit $?

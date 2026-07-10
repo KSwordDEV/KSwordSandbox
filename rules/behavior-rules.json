@@ -1,0 +1,60 @@
+{
+  "version": "2026-07-10-v1",
+  "rules": [
+    {
+      "id": "host-submission",
+      "title": "Sample accepted for sandbox planning",
+      "severity": "info",
+      "summary": "The host accepted a local sample path and created a planning artifact.",
+      "eventTypes": [ "submission.accepted" ],
+      "tags": [ "host", "planning" ]
+    },
+    {
+      "id": "runbook-created",
+      "title": "Hyper-V runbook generated",
+      "severity": "info",
+      "summary": "The host generated a reproducible Hyper-V execution plan for review.",
+      "eventTypes": [ "hyperv.runbook.created" ],
+      "tags": [ "host", "hyperv" ]
+    },
+    {
+      "id": "script-interpreter",
+      "title": "Command and scripting interpreter",
+      "severity": "medium",
+      "summary": "A process command line references a common Windows scripting interpreter.",
+      "mitreTechniqueId": "T1059",
+      "mitreTechniqueName": "Command and Scripting Interpreter",
+      "eventTypes": [ "process.start" ],
+      "containsCommandLine": [ "powershell", "cmd.exe", "wscript", "cscript", "mshta" ],
+      "tags": [ "execution" ]
+    },
+    {
+      "id": "registry-change",
+      "title": "Registry modification observed",
+      "severity": "medium",
+      "summary": "A driver or agent event reported a registry write.",
+      "mitreTechniqueId": "T1112",
+      "mitreTechniqueName": "Modify Registry",
+      "eventTypes": [ "registry.set", "registry.create", "registry.delete" ],
+      "tags": [ "registry", "persistence" ]
+    },
+    {
+      "id": "file-drop",
+      "title": "Dropped or modified file",
+      "severity": "low",
+      "summary": "The guest agent observed a file creation or modification during execution.",
+      "eventTypes": [ "file.created", "file.modified" ],
+      "tags": [ "filesystem" ]
+    },
+    {
+      "id": "network-connection",
+      "title": "Outbound TCP activity observed",
+      "severity": "medium",
+      "summary": "The guest agent observed a new TCP connection after sample execution.",
+      "mitreTechniqueId": "T1105",
+      "mitreTechniqueName": "Ingress Tool Transfer",
+      "eventTypes": [ "network.tcp" ],
+      "tags": [ "network" ]
+    }
+  ]
+}
