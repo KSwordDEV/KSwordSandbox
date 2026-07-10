@@ -120,6 +120,28 @@ For that optional lab path, see
 `scripts/Sign-SandboxDriverWithTestCertificate.ps1` and
 `scripts/Set-GuestTestSigning.ps1`.
 
+Run the current WebUI/API E2E gate:
+
+```powershell
+# Safe: starts no VM and mutates no VM state.
+.\scripts\Invoke-WebUIApiE2E.ps1 `
+  -BaseUrl 'http://127.0.0.1:18082' `
+  -DurationSeconds 3 `
+  -StepTimeoutSeconds 120
+
+# Live: restores/starts the configured VM and runs the sample.
+.\scripts\Invoke-WebUIApiE2E.ps1 `
+  -BaseUrl 'http://127.0.0.1:18082' `
+  -Live `
+  -DurationSeconds 3 `
+  -StepTimeoutSeconds 900
+```
+
+The latest local real-R0 WebUI/API evidence is documented in
+`docs/webui-real-r0-e2e.md`. It completed 17/17 Hyper-V runbook steps, imported
+guest/R0 events, generated default/Chinese/English HTML reports, and did not
+call `CSignTool.exe`.
+
 Plan a dry-run job:
 
 ```powershell

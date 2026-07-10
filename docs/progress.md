@@ -7,19 +7,20 @@ a final HTML report.
 
 ## Current estimated completion
 
-- Overall v1 deliverable: **43%**
+- Overall v1 deliverable: **56%**
+- Minimum usable E2E chain on this host: **72%**
 - Repository architecture, docs, module boundaries, policy: **82%**
 - Core job/event/rule/report models: **68%**
-- Web/API/WebUI submission and job UX: **60%**
-- Live raw telemetry contract: **63%**
-- Hyper-V runbook generation and execution recording: **55%**
-- Golden VM / payload staging / operator readiness: **45%**
-- Guest Agent dynamic collection: **52%**
-- R0 Driver + R0Collector: **48%**
+- Web/API/WebUI submission and job UX: **66%**
+- Live raw telemetry contract: **70%**
+- Hyper-V runbook generation and execution recording: **66%**
+- Golden VM / payload staging / operator readiness: **58%**
+- Guest Agent dynamic collection: **60%**
+- R0 Driver + R0Collector: **56%**
 - Static analysis and behavior rules: **48%**
-- HTML report generation: **58%**
+- HTML report generation: **62%**
 - Artifact manifest and dropped-file plumbing: **45%**
-- Tests and quality gates: **56%**
+- Tests and quality gates: **62%**
 - Install/operations/security hardening: **32%**
 
 ## Evidence already present
@@ -55,21 +56,30 @@ a final HTML report.
   final `report.html`.
 - `Invoke-FullValidation.ps1` includes the local WebUI/API pipeline smoke by
   default, so the runnable host-side MVP path is part of the standard gate.
+- A real WebUI/API + Hyper-V + test-signed R0 validation has completed on the
+  local prepared VM. Evidence is recorded in `docs/webui-real-r0-e2e.md`:
+  `fe0db7cb-df74-444b-897e-50c9f5a27d4d` completed 17/17 runbook steps,
+  imported guest events, served default/zh/en HTML reports, and exposed 522
+  live raw events without calling `CSignTool.exe`.
+- The reusable `scripts/Invoke-WebUIApiE2E.ps1` gate now covers the WebUI API
+  path. Its default mode is dry-run and safe; `-Live` is required before any VM
+  mutation.
 
 ## Remaining P0 gaps
 
-1. Run a real administrator Hyper-V end-to-end job against
-   `KSwordSandbox-Win10-Golden` with checkpoint `Clean`.
-2. Confirm guest credential flow via `KSWORDBOX_GUEST_PASSWORD` on the actual
-   host session that runs the Web app.
-3. Confirm PowerShell Direct / Guest Service copy latency is acceptable for live
-   JSONL polling.
-4. Load a signed or test-signed driver inside the guest and prove at least one
-   real R0 event path, preferably process create or file minifilter.
-5. Confirm WebUI live table remains responsive during a live run, then final
-   import regenerates `report.json` and `report.html`.
-6. Run the published harmless behavior sample through live Hyper-V once
-   `KSWORDBOX_GUEST_PASSWORD` is set in the elevated operator process.
+1. Turn the currently single-job/single-golden-VM flow into an operator-safe
+   packaged experience: clearer install/run checks, better failure recovery, and
+   one-click defaults that do not require reading runbook internals.
+2. Replace the estimated WebUI progress bar with exact per-step executor
+   telemetry while the long live request is still running.
+3. Harden the real R0 path beyond the successful smoke: ABI versioning,
+   backpressure, producer-specific stress tests, unload/reload reliability, and
+   better event filtering.
+4. Reduce final report size and improve raw-event evidence pagination/collapse.
+5. Add dropped-file extraction, hashing, artifact manifests, screenshots, and
+   optional PCAP/memory artifacts to the report pipeline.
+6. Move from single golden VM restore to safer temporary VM or differencing-disk
+   isolation before any broader sample testing.
 
 ## Next best work
 
