@@ -1,5 +1,7 @@
 # KSwordSandbox
 
+[![KSwordDEV/KSwordSandbox GitStock K-Line Chart](https://gitstock.org/KSwordDEV/KSwordSandbox/stock.svg)](https://gitstock.org/KSwordDEV/KSwordSandbox)
+
 KSwordSandbox is a Windows malware-analysis sandbox scaffold for the KSword
 project. The v1 design uses a Hyper-V Windows 10 golden VM, checkpoint restore
 or differencing disks, a guest-side collector, optional KSword R0 driver event
