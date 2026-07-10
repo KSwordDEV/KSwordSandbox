@@ -36,7 +36,8 @@ Options:
 - `--output`, `-o`: JSONL output path, or `-` for stdout. Default: `-`.
 - `--duration`, `-t`: Poll duration in seconds. `0` performs one health/poll/read-events pass.
 - `--poll-ms`, `--poll-interval`, `--poll-interval-ms`, `-p`: poll interval in milliseconds.
-- `--mock`: emit synthetic driver-like rows without opening a device.
+- `--mock`: emit synthetic process/image/file/registry driver-category rows
+  without opening a device.
 - `--help`, `-h`: show CLI help.
 
 ## Current behavior
@@ -44,8 +45,10 @@ Options:
 - `--mock` emits:
   - `r0collector.started`
   - `r0collector.mockDriverEvent`
-  - `file.created`
-  - `registry.set`
+  - `driver.process`
+  - `image.load`
+  - `driver.file`
+  - `driver.registry`
   - `r0collector.stopped`
 - If the device cannot be opened, the collector emits
   `r0collector.deviceUnavailable` and exits with code `66`.
@@ -53,7 +56,9 @@ Options:
   - `r0collector.deviceOpened`
   - `r0collector.driverHealth`
   - `r0collector.driverPoll`
-  - `driver.*` rows from `IOCTL_KSWORD_SANDBOX_READ_EVENTS`
+  - stable driver rows from `IOCTL_KSWORD_SANDBOX_READ_EVENTS`
+    (`driver.process`, `image.load`, `driver.file`, `driver.registry`,
+    `driver.network`, `driver.event.reserved`, or fallback `driver.event`)
   - `r0collector.driverReadEvents`
   - `r0collector.stopped`
 

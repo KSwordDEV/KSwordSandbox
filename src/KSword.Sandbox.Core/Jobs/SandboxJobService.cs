@@ -193,6 +193,111 @@ public sealed class SandboxJobService
     }
 
     /// <summary>
+    /// Returns raw events for the WebUI live monitor without rule classification.
+    /// Inputs are a job ID plus offset/take paging values; processing reads any
+    /// current guest JSON/JSONL artifacts and falls back to the persisted report
+    /// events when guest output is not present yet; the method returns an
+    /// ordered, unclassified LiveEventSnapshot for polling UI clients.
+    /// </summary>
+    public LiveEventSnapshot GetLiveEvents(Guid jobId, int offset = 0, int take = 100)
+    {
+        if (!jobs.TryGetValue(jobId, out var job))
+        {
+            throw new KeyNotFoundException($"Job {jobId} was not found.");
+        }
+
+        var normalizedOffset = Math.Max(0, offset);
+        var normalizedTake = Math.Clamp(take, 1, 500);
+        var sources = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var eventKeys = new HashSet<string>(StringComparer.Ordinal);
+        var events = new List<SandboxEvent>();
+
+        foreach (var path in EnumerateLiveEventFiles(job))
+        {
+            foreach (var liveEvent in TryLoadEventsForLiveMonitor(path))
+            {
+                var normalized = NormalizeEvent(liveEvent);
+                if (eventKeys.Add(EventKey(normalized)))
+                {
+                    events.Add(normalized);
+                }
+            }
+
+            sources.Add(path);
+        }
+
+        if (events.Count == 0)
+        {
+            var existingReport = LoadExistingReport(job.JsonReportPath);
+            if (existingReport is not null)
+            {
+                foreach (var reportEvent in existingReport.Events.Select(NormalizeEvent))
+                {
+                    if (eventKeys.Add(EventKey(reportEvent)))
+                    {
+                        events.Add(reportEvent);
+                    }
+                }
+
+                if (!string.IsNullOrWhiteSpace(job.JsonReportPath))
+                {
+                    sources.Add(job.JsonReportPath);
+                }
+            }
+        }
+
+        events = events
+            .OrderBy(evt => evt.Timestamp)
+            .ThenBy(evt => evt.EventType, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(evt => evt.Path, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        var page = events.Skip(normalizedOffset).Take(normalizedTake).ToList();
+        var nextOffset = Math.Min(events.Count, normalizedOffset + page.Count);
+        return new LiveEventSnapshot
+        {
+            JobId = jobId,
+            TotalEvents = events.Count,
+            NextOffset = nextOffset,
+            HasMore = nextOffset < events.Count,
+            Sources = sources.OrderBy(source => source, StringComparer.OrdinalIgnoreCase).ToList(),
+            Events = page
+        };
+    }
+
+    /// <summary>
+    /// Loads events for the polling live monitor without failing the request.
+    /// The input is a JSON or JSONL artifact path that may still be changing;
+    /// processing shares reads with writers and converts parse or IO failures
+    /// into a synthetic host event; the method returns zero or more normalized
+    /// events suitable for raw display only.
+    /// </summary>
+    private static List<SandboxEvent> TryLoadEventsForLiveMonitor(string path)
+    {
+        try
+        {
+            return LoadEventsIfPresent(path);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or InvalidDataException)
+        {
+            return
+            [
+                new SandboxEvent
+                {
+                    EventType = "live.events.read_pending",
+                    Source = "host",
+                    Path = path,
+                    Data =
+                    {
+                        ["exceptionType"] = ex.GetType().Name,
+                        ["message"] = ex.Message
+                    }
+                }
+            ];
+        }
+    }
+
+    /// <summary>
     /// Rewrites report.json and report.html from current host and guest data.
     /// Inputs are job metadata, target status, guest events, and source path;
     /// processing rebuilds deterministic host seed events, appends execution
@@ -315,6 +420,43 @@ public sealed class SandboxJobService
     }
 
     /// <summary>
+    /// Enumerates raw live-monitor event artifacts for one job.
+    /// The input is a job record, processing looks at the recorded import path
+    /// and the deterministic job guest folder, and the method returns JSON or
+    /// JSONL files that may be present while or after a live run executes.
+    /// </summary>
+    private IEnumerable<string> EnumerateLiveEventFiles(AnalysisJob job)
+    {
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (!string.IsNullOrWhiteSpace(job.GuestEventsPath) && File.Exists(job.GuestEventsPath))
+        {
+            var fullPath = Path.GetFullPath(job.GuestEventsPath);
+            seen.Add(fullPath);
+            yield return fullPath;
+        }
+
+        var guestRoot = Path.Combine(GetJobRoot(job.JobId), "guest");
+        if (!Directory.Exists(guestRoot))
+        {
+            yield break;
+        }
+
+        foreach (var path in Directory
+            .EnumerateFiles(guestRoot, "*.*", SearchOption.AllDirectories)
+            .Where(path =>
+                string.Equals(Path.GetFileName(path), "events.json", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(Path.GetExtension(path), ".jsonl", StringComparison.OrdinalIgnoreCase))
+            .OrderBy(path => File.GetLastWriteTimeUtc(path)))
+        {
+            var fullPath = Path.GetFullPath(path);
+            if (seen.Add(fullPath))
+            {
+                yield return fullPath;
+            }
+        }
+    }
+
+    /// <summary>
     /// Loads guest events and nearby driver JSONL events without duplicates.
     /// The input is a primary event file, processing reads JSON array or JSONL
     /// data and optional sibling driver-events.jsonl files, and the method
@@ -386,7 +528,10 @@ public sealed class SandboxJobService
     private static List<SandboxEvent> LoadEventsFromJsonLines(string path)
     {
         var events = new List<SandboxEvent>();
-        foreach (var line in File.ReadLines(path))
+        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+        using var reader = new StreamReader(stream);
+        string? line;
+        while ((line = reader.ReadLine()) is not null)
         {
             if (string.IsNullOrWhiteSpace(line))
             {

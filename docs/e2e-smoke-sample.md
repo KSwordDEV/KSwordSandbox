@@ -78,3 +78,16 @@ The sandbox runner/report can assert:
 
 The marker file contains key-value lines for timestamp, machine name, process
 IDs, child process output, and optional network-probe statuses.
+
+## Live sandbox runbook
+
+After publishing the sample outside the repository, use
+`docs/guest-payload-staging.md` for the full host-to-guest smoke flow:
+
+1. Build and stage Guest Agent plus R0Collector under
+   `D:\Temp\KSwordSandbox\payload\guest-tools`.
+2. Copy the staged payload into the golden VM before refreshing the `Clean`
+   checkpoint.
+3. Use the published sample `.exe` as the WebUI/API job input.
+4. Execute the Hyper-V runbook live and import guest events to regenerate the
+   HTML report.

@@ -159,6 +159,10 @@ internal static class SmokeTestProgram
         Assert(!string.IsNullOrWhiteSpace(job.Sample?.Crc32), "crc32 should be computed");
         var runbook = job.Runbook ?? throw new InvalidOperationException("runbook should be set");
         Assert(runbook.Steps.Count > 0, "runbook should contain steps");
+        var runAgentStep = runbook.Steps.Single(step => step.Id == "run-agent");
+        Assert(runAgentStep.PowerShell.Contains("--driver-events", StringComparison.Ordinal), "runbook should pass driver events path");
+        Assert(runAgentStep.PowerShell.Contains("--r0collector", StringComparison.Ordinal), "runbook should pass R0Collector path");
+        Assert(runAgentStep.PowerShell.Contains("--driver-device", StringComparison.Ordinal), "runbook should pass driver device path");
         Assert(File.Exists(job.JsonReportPath), "json report should exist");
         Assert(File.Exists(job.HtmlReportPath), "html report should exist");
         var savedExecutionJob = service.SaveRunbookExecutionResult(job.JobId, new SandboxRunbookExecutionResult
@@ -176,10 +180,12 @@ internal static class SmokeTestProgram
         Assert(File.Exists(savedExecutionJob.RunbookExecutionResultPath), "runbook execution result should be persisted");
 
         var eventsPath = WriteSyntheticGuestEvents(savedExecutionJob);
+        AssertLiveEventSnapshotShape(service, savedExecutionJob.JobId, eventsPath);
         var importedJob = service.ImportGuestEvents(savedExecutionJob.JobId, eventsPath);
         Assert(importedJob.Status == AnalysisStatus.Completed, "imported job should be completed");
         Assert(File.Exists(importedJob.JsonReportPath), "refreshed json report should exist");
         Assert(File.Exists(importedJob.HtmlReportPath), "refreshed html report should exist");
+        AssertRefreshedReportJson(importedJob);
 
         var htmlReportPath = importedJob.HtmlReportPath ?? throw new InvalidOperationException("html report path should be set");
         var html = File.ReadAllText(htmlReportPath);
@@ -193,6 +199,72 @@ internal static class SmokeTestProgram
         Assert(html.Contains("Outbound TCP activity observed", StringComparison.Ordinal), "html report should include network finding");
         Assert(html.Contains("Dropped or modified file", StringComparison.Ordinal), "html report should include file finding");
         Assert(html.Contains("Registry modification observed", StringComparison.Ordinal), "html report should include driver jsonl finding");
+        Assert(html.Contains("R0 collector mock driver event", StringComparison.Ordinal), "html report should include R0 collector finding");
+        Assert(html.Contains("r0collector.mockDriverEvent", StringComparison.Ordinal), "html report should include raw R0 event type");
+        Assert(html.Contains("Raw normalized events", StringComparison.Ordinal), "html report should include raw events section");
+    }
+
+    /// <summary>
+    /// Verifies live event polling shape without requiring a real VM.
+    /// Inputs are the job service, job ID, and synthetic events.json path;
+    /// processing reads the same guest folder that the Web endpoint uses,
+    /// checks paging metadata, and serializes with Web JSON defaults to validate
+    /// the camelCase endpoint contract; the method returns no value.
+    /// </summary>
+    private static void AssertLiveEventSnapshotShape(SandboxJobService service, Guid jobId, string eventsPath)
+    {
+        var snapshot = service.GetLiveEvents(jobId, offset: 0, take: 2);
+        Assert(snapshot.JobId == jobId, "live snapshot should carry the requested job id");
+        Assert(snapshot.TotalEvents >= 5, "live snapshot should include events.json plus driver-events.jsonl rows");
+        Assert(snapshot.Events.Count == 2, "live snapshot should honor take paging");
+        Assert(snapshot.NextOffset == 2, "live snapshot should advance next offset by returned event count");
+        Assert(snapshot.HasMore, "live snapshot should report more events when page is truncated");
+        Assert(snapshot.Sources.Any(source => string.Equals(source, eventsPath, StringComparison.OrdinalIgnoreCase)), "live snapshot should include events.json source");
+        Assert(snapshot.Sources.Any(source => string.Equals(Path.GetFileName(source), "driver-events.jsonl", StringComparison.OrdinalIgnoreCase)), "live snapshot should include driver-events.jsonl source");
+
+        var fullSnapshot = service.GetLiveEvents(jobId, offset: 0, take: 100);
+        Assert(fullSnapshot.Events.Any(evt => string.Equals(evt.EventType, "process.start", StringComparison.OrdinalIgnoreCase)), "live snapshot should include process event");
+        Assert(fullSnapshot.Events.Any(evt => string.Equals(evt.EventType, "file.created", StringComparison.OrdinalIgnoreCase)), "live snapshot should include file event");
+        Assert(fullSnapshot.Events.Any(evt => string.Equals(evt.EventType, "network.tcp", StringComparison.OrdinalIgnoreCase)), "live snapshot should include network event");
+        Assert(fullSnapshot.Events.Any(evt => string.Equals(evt.EventType, "registry.set", StringComparison.OrdinalIgnoreCase)), "live snapshot should include synthetic driver registry event");
+        Assert(fullSnapshot.Events.Any(evt => string.Equals(evt.EventType, "r0collector.mockDriverEvent", StringComparison.OrdinalIgnoreCase)), "live snapshot should include synthetic R0 collector event");
+
+        var json = JsonSerializer.Serialize(fullSnapshot, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        using var document = JsonDocument.Parse(json);
+        var root = document.RootElement;
+        Assert(root.TryGetProperty("jobId", out var jsonJobId) && Guid.Parse(jsonJobId.GetString() ?? string.Empty) == jobId, "live endpoint JSON should expose camelCase jobId");
+        Assert(root.TryGetProperty("retrievedAt", out _), "live endpoint JSON should expose retrievedAt");
+        Assert(root.TryGetProperty("totalEvents", out var totalEvents) && totalEvents.GetInt32() == fullSnapshot.TotalEvents, "live endpoint JSON should expose totalEvents");
+        Assert(root.TryGetProperty("nextOffset", out var nextOffset) && nextOffset.GetInt32() == fullSnapshot.NextOffset, "live endpoint JSON should expose nextOffset");
+        Assert(root.TryGetProperty("hasMore", out var hasMore) && hasMore.ValueKind is JsonValueKind.True or JsonValueKind.False, "live endpoint JSON should expose hasMore boolean");
+        Assert(root.TryGetProperty("sources", out var sources) && sources.ValueKind == JsonValueKind.Array && sources.GetArrayLength() >= 2, "live endpoint JSON should expose sources array");
+        Assert(root.TryGetProperty("events", out var events) && events.ValueKind == JsonValueKind.Array && events.GetArrayLength() >= 5, "live endpoint JSON should expose events array");
+
+        var firstEvent = events.EnumerateArray().First();
+        Assert(firstEvent.TryGetProperty("eventType", out _), "live endpoint event JSON should expose eventType");
+        Assert(firstEvent.TryGetProperty("timestamp", out _), "live endpoint event JSON should expose timestamp");
+        Assert(firstEvent.TryGetProperty("source", out _), "live endpoint event JSON should expose source");
+        Assert(firstEvent.TryGetProperty("data", out var data) && data.ValueKind == JsonValueKind.Object, "live endpoint event JSON should expose data object");
+    }
+
+    /// <summary>
+    /// Verifies regenerated report JSON after guest event import.
+    /// The input is the imported job, processing deserializes report.json and
+    /// checks status, metrics, raw event merge, and R0/driver event presence;
+    /// the method returns no value.
+    /// </summary>
+    private static void AssertRefreshedReportJson(AnalysisJob importedJob)
+    {
+        var reportPath = importedJob.JsonReportPath ?? throw new InvalidOperationException("json report path should be set");
+        var report = JsonSerializer.Deserialize<AnalysisReport>(File.ReadAllText(reportPath), new JsonSerializerOptions { PropertyNameCaseInsensitive = true })
+            ?? throw new InvalidOperationException("report.json should deserialize");
+        Assert(report.Status == AnalysisStatus.Completed, "report json should be regenerated with completed status");
+        Assert(report.Events.Any(evt => string.Equals(evt.EventType, "guest.events.imported", StringComparison.OrdinalIgnoreCase)), "report json should include guest import marker");
+        Assert(report.Events.Any(evt => string.Equals(evt.EventType, "registry.set", StringComparison.OrdinalIgnoreCase)), "report json should include driver registry jsonl event");
+        Assert(report.Events.Any(evt => string.Equals(evt.EventType, "r0collector.mockDriverEvent", StringComparison.OrdinalIgnoreCase)), "report json should include synthetic R0 collector jsonl event");
+        Assert(report.Findings.Any(finding => finding.RuleId == "registry-change"), "report json should include registry rule finding");
+        Assert(report.Findings.Any(finding => finding.RuleId == "r0collector-mock-driver-event"), "report json should include R0 collector rule finding");
+        Assert(report.Metrics.TryGetValue("events.total", out var eventCount) && eventCount == report.Events.Count, "report metrics should count all raw events");
     }
 
     /// <summary>
@@ -251,7 +323,24 @@ internal static class SmokeTestProgram
                 ["value"] = "C:\\KSwordSandbox\\incoming\\benign-sample.exe"
             }
         };
-        File.WriteAllText(Path.Combine(guestRoot, "driver-events.jsonl"), JsonSerializer.Serialize(driverEvent));
+        var r0Event = new SandboxEvent
+        {
+            EventType = "r0collector.mockDriverEvent",
+            Source = "r0collector",
+            ProcessId = 4242,
+            Path = @"\\.\KSwordSandboxDriver",
+            Data =
+            {
+                ["mock"] = "true",
+                ["driverEventPath"] = "driver-events.jsonl"
+            }
+        };
+        File.WriteAllLines(
+            Path.Combine(guestRoot, "driver-events.jsonl"),
+            [
+                JsonSerializer.Serialize(driverEvent),
+                JsonSerializer.Serialize(r0Event)
+            ]);
         return eventsPath;
     }
 

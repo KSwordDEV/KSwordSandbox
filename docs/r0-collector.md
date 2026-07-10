@@ -49,9 +49,9 @@ driver experiments, but R0Collector issues the public `READ_EVENTS` name.
 
 ## Current driver event path
 
-The driver owns a fixed non-paged ring buffer. On load it queues a
-`KswSandboxEventTypeDriverLoad` heartbeat event with a compact
-`KSWORD_SANDBOX_DRIVER_LOAD_PAYLOAD` payload. `READ_EVENTS` consumes complete
+The driver owns a fixed non-paged ring buffer. On load it currently queues one
+header-only reserved self-test event with `KSWORD_SANDBOX_EVENT_FLAG_SELF_TEST`
+and `KSWORD_SANDBOX_EVENT_FLAG_DRIVER_STARTED`. `READ_EVENTS` consumes complete
 records from the ring and reports drop/sequence counters.
 
 Reserved event categories already exist in the ABI for the next increments:
@@ -92,7 +92,7 @@ Device-unavailable behavior is explicit: the collector writes
 Every output line is a single `SandboxEvent`-compatible JSON object:
 
 ```json
-{"eventType":"driver.load","source":"driver","timestamp":"2026-07-10T00:00:00.000Z","processId":1234,"path":"\\\\.\\KSwordSandboxDriver","commandLine":"KSword.Sandbox.R0Collector.exe --output C:\\Sandbox\\driver-events.jsonl","data":{"sequence":"1","driverEventTypeName":"driverLoad","buildTag":"ksword-r0-driver-load"}}
+{"eventType":"driver.event.reserved","source":"driver","timestamp":"2026-07-10T00:00:00.000Z","processId":1234,"path":"\\\\.\\KSwordSandboxDriver","commandLine":"KSword.Sandbox.R0Collector.exe --output C:\\Sandbox\\driver-events.jsonl","data":{"sequence":"1","driverEventTypeName":"reserved","flagsHex":"0x00000003"}}
 ```
 
 Top-level field rules:

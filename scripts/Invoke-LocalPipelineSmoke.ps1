@@ -447,14 +447,77 @@ function Write-SmokeGuestEvents {
             value = $guestSamplePath
         }
     }
-    $driverLine = $driverEvent | ConvertTo-Json -Depth 12 -Compress
-    Set-Content -LiteralPath $driverEventsPath -Value $driverLine -Encoding UTF8
+    $r0CollectorEvent = [ordered]@{
+        eventType = 'r0collector.mockDriverEvent'
+        source    = 'r0collector'
+        processId = 4242
+        path      = '\\.\KSwordSandboxDriver'
+        data      = [ordered]@{
+            mock            = 'true'
+            driverEventPath = 'driver-events.jsonl'
+        }
+    }
+    $driverLines = @(
+        ($driverEvent | ConvertTo-Json -Depth 12 -Compress)
+        ($r0CollectorEvent | ConvertTo-Json -Depth 12 -Compress)
+    )
+    Set-Content -LiteralPath $driverEventsPath -Value $driverLines -Encoding UTF8
 
     return [pscustomobject]@{
         GuestRoot        = $guestRoot
         EventsPath       = $eventsPath
         DriverEventsPath = $driverEventsPath
     }
+}
+
+function Test-SmokeLiveEventsEndpoint {
+    <#
+    .SYNOPSIS
+    Validates the live event polling endpoint shape.
+
+    .DESCRIPTION
+    Inputs are the API base URL, planned job, and synthetic guest artifact
+    paths. Processing calls /api/jobs/{jobId}/events/live with a small page and
+    a full page, validates camelCase metadata fields, source paths, event rows,
+    and synthetic JSONL merge behavior. The function returns no value on
+    success.
+    #>
+    param(
+        [Parameter(Mandatory)]
+        [string]$BaseUrl,
+
+        [Parameter(Mandatory)]
+        [pscustomobject]$Job,
+
+        [Parameter(Mandatory)]
+        [pscustomobject]$GuestArtifacts
+    )
+
+    $jobId = [string]$Job.jobId
+    $page = Invoke-RestMethod -Method Get -Uri "$BaseUrl/api/jobs/$jobId/events/live?offset=0&take=2" -TimeoutSec 30
+    Assert-SmokeCondition -Condition ([string]$page.jobId -eq $jobId) -Message "Live events response jobId mismatch."
+    Assert-SmokeCondition -Condition ([int]$page.totalEvents -ge 5) -Message "Live events response should include events.json plus two JSONL rows."
+    Assert-SmokeCondition -Condition (@($page.events).Count -eq 2) -Message "Live events endpoint did not honor take=2."
+    Assert-SmokeCondition -Condition ([int]$page.nextOffset -eq 2) -Message "Live events endpoint returned unexpected nextOffset."
+    Assert-SmokeCondition -Condition ([bool]$page.hasMore) -Message "Live events endpoint should report hasMore for a truncated page."
+    Assert-SmokeCondition -Condition (-not [string]::IsNullOrWhiteSpace([string]$page.retrievedAt)) -Message "Live events endpoint did not return retrievedAt."
+
+    $full = Invoke-RestMethod -Method Get -Uri "$BaseUrl/api/jobs/$jobId/events/live?offset=0&take=100" -TimeoutSec 30
+    $sources = @($full.sources | ForEach-Object { [string]$_ })
+    Assert-SmokeCondition -Condition (@($sources | Where-Object { [StringComparer]::OrdinalIgnoreCase.Equals($_, [string]$GuestArtifacts.EventsPath) }).Count -gt 0) -Message "Live events sources missing events.json."
+    Assert-SmokeCondition -Condition (@($sources | Where-Object { [StringComparer]::OrdinalIgnoreCase.Equals($_, [string]$GuestArtifacts.DriverEventsPath) }).Count -gt 0) -Message "Live events sources missing driver-events.jsonl."
+
+    $events = @($full.events)
+    $eventTypes = @($events | ForEach-Object { [string]$_.eventType })
+    foreach ($expectedType in @('process.start', 'file.created', 'network.tcp', 'registry.set', 'r0collector.mockDriverEvent')) {
+        Assert-SmokeCondition -Condition ($eventTypes -contains $expectedType) -Message "Live events endpoint missing event type: $expectedType"
+    }
+
+    $firstEvent = $events | Select-Object -First 1
+    Assert-SmokeCondition -Condition (-not [string]::IsNullOrWhiteSpace([string]$firstEvent.eventType)) -Message "Live event row missing eventType."
+    Assert-SmokeCondition -Condition (-not [string]::IsNullOrWhiteSpace([string]$firstEvent.timestamp)) -Message "Live event row missing timestamp."
+    Assert-SmokeCondition -Condition (-not [string]::IsNullOrWhiteSpace([string]$firstEvent.source)) -Message "Live event row missing source."
+    Assert-SmokeCondition -Condition ($null -ne $firstEvent.data) -Message "Live event row missing data object."
 }
 
 function Test-SmokeReportHtml {
@@ -485,7 +548,10 @@ function Test-SmokeReportHtml {
         'Command and scripting interpreter',
         'Dropped or modified file',
         'Outbound TCP activity observed',
-        'Registry modification observed'
+        'Registry modification observed',
+        'R0 collector mock driver event',
+        'r0collector.mockDriverEvent',
+        'Raw normalized events'
     )
 
     foreach ($snippet in $requiredSnippets) {
@@ -610,6 +676,9 @@ try {
     $guestArtifacts = Write-SmokeGuestEvents -Job $job
     Write-SmokeStep "Wrote synthetic guest events: $($guestArtifacts.EventsPath)"
     Write-SmokeStep "Wrote synthetic driver events: $($guestArtifacts.DriverEventsPath)"
+
+    Test-SmokeLiveEventsEndpoint -BaseUrl $url -Job $job -GuestArtifacts $guestArtifacts
+    Write-SmokeStep "Live events endpoint shape validation passed."
 
     $importedJob = Invoke-SmokeJsonPost -Uri "$url/api/jobs/$($job.jobId)/guest-events/import" -Body @{
         eventsPath = $guestArtifacts.EventsPath

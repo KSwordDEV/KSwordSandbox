@@ -131,6 +131,26 @@ operator command such as:
 Enable-VMIntegrationService -VMName 'KSwordSandbox-Win10-Golden' -Name 'Guest Service Interface'
 ```
 
+## Payload staging dependency
+
+This preflight verifies host/VM readiness only. It does not build or copy guest
+tools. Before refreshing the golden `Clean` checkpoint for a live run, prepare
+the payload outside the repository and deploy it into the guest:
+
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\Prepare-GuestPayload.ps1
+```
+
+Then follow `docs/guest-payload-staging.md` to copy the staged files into:
+
+```text
+C:\KSwordSandbox\agent
+C:\KSwordSandbox\r0collector
+```
+
+At minimum, the configured guest agent path must exist before a live runbook can
+produce `events.json`.
+
 ## Reporting and automation
 
 To save machine-readable output while preserving the script exit code:

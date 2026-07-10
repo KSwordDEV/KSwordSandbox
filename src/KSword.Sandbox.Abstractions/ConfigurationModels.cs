@@ -100,4 +100,10 @@ public sealed record DriverConfig
     public string DriverPathInGuest { get; init; } = "C:\\KSwordSandbox\\driver\\KSwordARKDriver.sys";
 
     public string EventJsonLinesPath { get; init; } = "C:\\KSwordSandbox\\out\\driver-events.jsonl";
+
+    public string R0CollectorPathInGuest { get; init; } = "C:\\KSwordSandbox\\r0collector\\KSword.Sandbox.R0Collector.exe";
+
+    public string DevicePath { get; init; } = "\\\\.\\KSwordSandboxDriver";
+
+    public bool UseMockCollector { get; init; }
 }

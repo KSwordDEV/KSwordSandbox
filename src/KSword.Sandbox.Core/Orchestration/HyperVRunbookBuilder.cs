@@ -102,12 +102,44 @@ public sealed class HyperVRunbookBuilder
     {
         var guestRoot = config.Guest.WorkingDirectory.TrimEnd('\\');
         var agentPath = $"{guestRoot}\\agent\\{config.Guest.AgentExecutableName}";
-        var driverArg = config.Driver.Enabled ? $" --driver-events {Q(config.Driver.EventJsonLinesPath)}" : string.Empty;
+        var driverArg = BuildDriverAgentArguments(config);
 
         steps.Add(Step("copy-sample", "Copy submitted sample into guest", $"Copy-VMFile -VMName {Q(targetVmName)} -SourcePath {Q(sample.FullPath)} -DestinationPath {Q(guestSample)} -FileSource Host -CreateFullPath"));
         steps.Add(Step("run-agent", "Run guest collector and sample", $"Invoke-Command -VMName {Q(targetVmName)} -Credential $guestCredential -ScriptBlock {{ & {Q(agentPath)} --sample {Q(guestSample)} --out {Q(guestOut)} --duration {config.Analysis.DefaultDurationSeconds}{driverArg} }}"));
         steps.Add(Step("make-host-output", "Create host output folder", $"New-Item -ItemType Directory -Force -Path {Q(hostOut)} | Out-Null", mutatesVmState: false));
         steps.Add(Step("collect-output", "Collect guest JSON output", $"$session = New-PSSession -VMName {Q(targetVmName)} -Credential $guestCredential; Copy-Item -FromSession $session -Path {Q(guestOut)} -Destination {Q(hostOut)} -Recurse -Force; Remove-PSSession $session"));
+    }
+
+    /// <summary>
+    /// Builds optional Guest Agent arguments for R0Collector integration.
+    /// Inputs are the typed sandbox config; processing forwards the driver JSONL
+    /// path, collector executable, device name, and optional mock flag; the
+    /// method returns a PowerShell-safe argument suffix or an empty string when
+    /// driver collection is disabled.
+    /// </summary>
+    private static string BuildDriverAgentArguments(SandboxConfig config)
+    {
+        if (!config.Driver.Enabled)
+        {
+            return string.Empty;
+        }
+
+        var arguments = new List<string>
+        {
+            "--driver-events",
+            Q(config.Driver.EventJsonLinesPath),
+            "--r0collector",
+            Q(config.Driver.R0CollectorPathInGuest),
+            "--driver-device",
+            Q(config.Driver.DevicePath)
+        };
+
+        if (config.Driver.UseMockCollector)
+        {
+            arguments.Add("--r0-mock");
+        }
+
+        return " " + string.Join(' ', arguments);
     }
 
     /// <summary>

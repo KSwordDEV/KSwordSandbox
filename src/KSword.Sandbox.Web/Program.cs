@@ -36,6 +36,21 @@ app.MapGet("/api/jobs/{jobId:guid}", (Guid jobId, SandboxJobService service) =>
     var job = service.GetJob(jobId);
     return job is null ? Results.NotFound(new { error = "Job was not found." }) : Results.Ok(job);
 });
+// GET /api/jobs/{jobId}/events/live returns unclassified raw events for the
+// WebUI monitor. Inputs are a job id plus optional offset/take query values;
+// processing reads current host/guest artifacts without running rules, and the
+// endpoint returns a LiveEventSnapshot suitable for polling.
+app.MapGet("/api/jobs/{jobId:guid}/events/live", (Guid jobId, int? offset, int? take, SandboxJobService service) =>
+{
+    try
+    {
+        return Results.Ok(service.GetLiveEvents(jobId, offset ?? 0, take ?? 100));
+    }
+    catch (KeyNotFoundException ex)
+    {
+        return Results.NotFound(new { error = ex.Message });
+    }
+});
 // GET /api/jobs/{jobId}/report/html accepts only a job identifier from the
 // route. It never accepts a caller-supplied filesystem path; processing looks
 // up the recorded HTML report path for that job and returns the report body
@@ -342,6 +357,10 @@ static string RenderDashboard()
             .ok { color: #047857; }
             .pathbox { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; margin-top: 10px; padding: 12px; }
             .pill { background: #dbeafe; border-radius: 999px; color: #1e40af; display: inline-block; font-size: 12px; font-weight: 700; padding: 3px 8px; }
+            .event-monitor { border: 1px solid #bfdbfe; border-radius: 12px; background: #eff6ff; margin-top: 12px; padding: 12px; }
+            .event-monitor table { background: white; font-size: 13px; }
+            .event-monitor td:nth-child(5), .event-monitor td:nth-child(6) { max-width: 260px; word-break: break-all; }
+            .event-source-list { margin: 6px 0 0; padding-left: 18px; }
             @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
           </style>
         </head>
@@ -394,6 +413,10 @@ static string RenderDashboard()
             </section>
           </main>
           <script>
+            const liveEventOffsets = new Map();
+            let liveEventTimer = null;
+            let liveEventJobId = null;
+
             async function scanTargets() {
               setBusy(true);
               setStatus('Scanning host path...', false);
@@ -545,6 +568,15 @@ static string RenderDashboard()
                 </div>
                 <h3>Job messages</h3>
                 ${messages ? `<ul>${messages}</ul>` : '<p class="hint">No job messages recorded.</p>'}
+                <h3>Live raw event monitor</h3>
+                <div class="event-monitor">
+                  <p>
+                    <span id="liveEventStatus" class="hint">Waiting for live event polling...</span>
+                    <button class="secondary" onclick="refreshLiveEvents('${escapeJs(jobId)}', true)">Refresh events now</button>
+                  </p>
+                  <div id="liveEventSources" class="hint"></div>
+                  <div id="liveEventRows" class="hint">No raw events loaded yet.</div>
+                </div>
                 <h3>Hyper-V runbook</h3>
                 <p>
                   <button class="secondary" onclick="executeRunbook('${escapeJs(jobId)}', false)">Record dry-run execution</button>
@@ -553,6 +585,7 @@ static string RenderDashboard()
                 </p>
                 <div id="executionResult" class="hint">Live execution requires an elevated host process and a prepared golden VM.</div>
                 <ol>${steps}</ol>`;
+              startLiveMonitor(jobId);
             }
 
             async function refreshJob(jobId) {
@@ -580,6 +613,139 @@ static string RenderDashboard()
               } finally {
                 setBusy(false);
               }
+            }
+
+            function startLiveMonitor(jobId) {
+              // Inputs: the current job id rendered in the UI. Processing:
+              // resets the visible raw-event table for that job and starts one
+              // shared polling timer. Return: no value.
+              if (!jobId) {
+                return;
+              }
+
+              liveEventJobId = jobId;
+              liveEventOffsets.set(jobId, 0);
+              if (liveEventTimer) {
+                clearInterval(liveEventTimer);
+              }
+
+              refreshLiveEvents(jobId, true);
+              liveEventTimer = setInterval(() => {
+                if (liveEventJobId) {
+                  refreshLiveEvents(liveEventJobId, false);
+                }
+              }, 2000);
+            }
+
+            async function refreshLiveEvents(jobId, reset) {
+              // Inputs: job id and a reset flag. Processing: calls the raw
+              // live-events API with the last offset, updates source labels, and
+              // appends unclassified rows. Return: no value; failures are shown
+              // inline without stopping the rest of the dashboard.
+              if (!jobId) {
+                return;
+              }
+
+              const status = document.getElementById('liveEventStatus');
+              const rows = document.getElementById('liveEventRows');
+              const sources = document.getElementById('liveEventSources');
+              if (!status || !rows || !sources) {
+                return;
+              }
+
+              if (reset) {
+                liveEventOffsets.set(jobId, 0);
+                rows.innerHTML = '<p class="hint">Loading raw events...</p>';
+              }
+
+              const offset = liveEventOffsets.get(jobId) || 0;
+              try {
+                const response = await fetch(`/api/jobs/${encodeURIComponent(jobId)}/events/live?offset=${offset}&take=100`);
+                const snapshot = await response.json();
+                if (!response.ok) {
+                  throw new Error(snapshot.error || 'Live event refresh failed');
+                }
+
+                liveEventOffsets.set(jobId, snapshot.nextOffset || offset);
+                status.className = 'hint';
+                status.textContent = `Raw events: ${snapshot.totalEvents || 0}; next offset: ${snapshot.nextOffset || 0}; updated ${new Date().toLocaleTimeString()}.`;
+                sources.innerHTML = renderLiveEventSources(snapshot.sources || []);
+                renderLiveEventRows(snapshot.events || [], reset || offset === 0);
+              } catch (error) {
+                status.textContent = `Live event refresh failed: ${error.message}`;
+                status.className = 'error';
+              }
+            }
+
+            function renderLiveEventSources(sources) {
+              // Inputs: source artifact paths returned by the API. Processing:
+              // escapes them and renders a compact list. Return: HTML text.
+              if (!sources.length) {
+                return '<span class="hint">Sources: planning report only or no guest artifacts yet.</span>';
+              }
+
+              const items = sources.map(source => `<li><code>${escapeHtml(source)}</code></li>`).join('');
+              return `<span class="hint">Sources:</span><ul class="event-source-list">${items}</ul>`;
+            }
+
+            function renderLiveEventRows(events, replace) {
+              // Inputs: raw SandboxEvent rows and a replacement flag. Processing:
+              // creates the table on demand and appends escaped rows. Return: no
+              // value; the monitor displays a no-events hint when empty.
+              const container = document.getElementById('liveEventRows');
+              if (!container) {
+                return;
+              }
+
+              if (replace || !container.querySelector('tbody')) {
+                container.innerHTML = `
+                  <table>
+                    <thead><tr><th>Time</th><th>Type</th><th>Source</th><th>Process</th><th>Path / command</th><th>Data</th></tr></thead>
+                    <tbody></tbody>
+                  </table>`;
+              }
+
+              const body = container.querySelector('tbody');
+              if (!body) {
+                return;
+              }
+
+              if (!events.length && body.children.length === 0) {
+                body.innerHTML = '<tr><td colspan="6" class="hint">No raw events available yet.</td></tr>';
+                return;
+              }
+
+              if (events.length && body.children.length === 1 && body.textContent.includes('No raw events')) {
+                body.innerHTML = '';
+              }
+
+              for (const evt of events) {
+                const processLabel = `${escapeHtml(evt.processName || '-') } (${escapeHtml(evt.processId == null ? '-' : String(evt.processId))})`;
+                const data = Object.entries(evt.data || {})
+                  .map(([key, value]) => `${escapeHtml(key)}=${escapeHtml(String(value))}`)
+                  .join('<br>');
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                  <td>${escapeHtml(formatEventTime(evt.timestamp))}</td>
+                  <td>${escapeHtml(evt.eventType || '-')}</td>
+                  <td>${escapeHtml(evt.source || '-')}</td>
+                  <td>${processLabel}</td>
+                  <td><code>${escapeHtml(evt.path || '-')}</code><br><span class="hint">${escapeHtml(evt.commandLine || '')}</span></td>
+                  <td>${data || '<span class="hint">-</span>'}</td>`;
+                body.appendChild(row);
+              }
+            }
+
+            function formatEventTime(timestamp) {
+              // Inputs: timestamp from the API. Processing: attempts local time
+              // formatting and falls back to the raw string. Return: display
+              // text for the event table.
+              if (!timestamp) {
+                return '-';
+              }
+
+              const parsed = new Date(timestamp);
+              return Number.isNaN(parsed.getTime()) ? String(timestamp) : parsed.toLocaleTimeString();
             }
 
             function showReportPaths(reportPath) {

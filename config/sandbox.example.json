@@ -28,6 +28,9 @@
     "enabled": true,
     "serviceName": "KSwordARK",
     "driverPathInGuest": "C:\\KSwordSandbox\\driver\\KSwordARKDriver.sys",
-    "eventJsonLinesPath": "C:\\KSwordSandbox\\out\\driver-events.jsonl"
+    "eventJsonLinesPath": "C:\\KSwordSandbox\\out\\driver-events.jsonl",
+    "r0CollectorPathInGuest": "C:\\KSwordSandbox\\r0collector\\KSword.Sandbox.R0Collector.exe",
+    "devicePath": "\\\\.\\KSwordSandboxDriver",
+    "useMockCollector": false
   }
 }

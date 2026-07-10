@@ -142,3 +142,34 @@ but it still depends on local Hyper-V readiness:
 - Guest credential secret available through the configured environment variable.
 - Guest Service Interface / PowerShell Direct usable.
 - Guest agent published to the configured guest path.
+
+For the operator sequence that builds the guest payload, deploys it into the
+golden VM, runs `tools/KSword.Sandbox.TestSample`, and refreshes the HTML report
+from imported guest events, see `docs/guest-payload-staging.md`.
+
+Minimal live API flow:
+
+```powershell
+$job = Invoke-RestMethod -Method Post -Uri 'http://localhost:5000/api/jobs/plan' `
+  -ContentType 'application/json' `
+  -Body (@{
+      samplePath = 'D:\Temp\KSwordSandbox\samples\KSword.Sandbox.TestSample\KSword.Sandbox.TestSample.exe'
+      displayName = 'KSword.Sandbox.TestSample.exe'
+      durationSeconds = 30
+      dryRun = $true
+  } | ConvertTo-Json)
+
+$execution = Invoke-RestMethod -Method Post -Uri "http://localhost:5000/api/jobs/$($job.jobId)/runbook/execute" `
+  -ContentType 'application/json' `
+  -Body (@{
+      live = $true
+      stepTimeoutSeconds = 1800
+      importGuestEvents = $true
+  } | ConvertTo-Json)
+
+if (-not $execution.guestImportSucceeded) {
+    Invoke-RestMethod -Method Post -Uri "http://localhost:5000/api/jobs/$($job.jobId)/guest-events/import" `
+      -ContentType 'application/json' `
+      -Body '{}'
+}
+```

@@ -540,7 +540,7 @@ void PrintUsage(const wchar_t* programName) {
         << L"  -t, --duration <seconds>     Poll duration; 0 opens once and exits (default: 0)\n"
         << L"  -p, --poll-ms <ms>           Poll interval in milliseconds (default: 500)\n"
         << L"      --poll-interval-ms <ms>  Alias for --poll-ms\n"
-        << L"      --mock                   Emit a mock driver event without opening a device\n"
+        << L"      --mock                   Emit mock process/image/file/registry rows without opening a device\n"
         << L"  -h, --help                   Show this help text\n";
 }
 
@@ -662,6 +662,39 @@ std::string DriverEventJsonType(const ULONG eventType) {
     }
 }
 
+// Input: Flag bits from KSWORD_SANDBOX_EVENT_HEADER.Flags.
+// Processing: Decodes currently public flag bits and preserves unknown bits as a
+// hexadecimal suffix so newer drivers remain diagnosable by older collectors.
+// Return: Human-readable ASCII flag names, or "none" when no bits are set.
+std::string DriverEventFlagNames(const ULONG flags) {
+    std::string names;
+    ULONG knownFlags = 0;
+
+    const auto appendName = [&names](const std::string& name) {
+        if (!names.empty()) {
+            names += "|";
+        }
+        names += name;
+    };
+
+    if ((flags & KSWORD_SANDBOX_EVENT_FLAG_SELF_TEST) != 0) {
+        appendName("SelfTest");
+        knownFlags |= KSWORD_SANDBOX_EVENT_FLAG_SELF_TEST;
+    }
+
+    if ((flags & KSWORD_SANDBOX_EVENT_FLAG_DRIVER_STARTED) != 0) {
+        appendName("DriverStarted");
+        knownFlags |= KSWORD_SANDBOX_EVENT_FLAG_DRIVER_STARTED;
+    }
+
+    const ULONG unknownFlags = flags & ~knownFlags;
+    if (unknownFlags != 0) {
+        appendName("Unknown(" + HexUnsignedLongLong(unknownFlags, 8) + ")");
+    }
+
+    return names.empty() ? "none" : names;
+}
+
 // Input: Bounded ANSI character array from a driver payload.
 // Processing: Copies bytes until NUL or capacity is reached, preserving only the
 // supplied bounded range so malformed payloads cannot over-read collector memory.
@@ -677,6 +710,208 @@ std::string BoundedAsciiString(const CHAR* value, const size_t capacity) {
     }
 
     return std::string(value, value + length);
+}
+
+// Input: One public driver event header and the JSON data builder being filled.
+// Processing: Adds string-valued flag diagnostics and names the current
+// header-only DriverEntry startup event when the reserved type carries the
+// DriverStarted flag.
+// Return: No return value; the builder is mutated when it is non-null.
+void AddDriverEventFlagData(
+    const KSWORD_SANDBOX_EVENT_HEADER& header,
+    JsonDataObjectBuilder* data) {
+    if (data == nullptr) {
+        return;
+    }
+
+    const ULONG knownFlags =
+        KSWORD_SANDBOX_EVENT_FLAG_SELF_TEST |
+        KSWORD_SANDBOX_EVENT_FLAG_DRIVER_STARTED;
+    const ULONG unknownFlags = header.Flags & ~knownFlags;
+    const bool isSelfTest =
+        (header.Flags & KSWORD_SANDBOX_EVENT_FLAG_SELF_TEST) != 0;
+    const bool isDriverStarted =
+        (header.Flags & KSWORD_SANDBOX_EVENT_FLAG_DRIVER_STARTED) != 0;
+
+    data->AddUtf8("flagNames", DriverEventFlagNames(header.Flags));
+    data->AddBool("flagSelfTest", isSelfTest);
+    data->AddBool("flagDriverStarted", isDriverStarted);
+    data->AddUnsigned("unknownFlags", unknownFlags);
+    data->AddUtf8("unknownFlagsHex", HexUnsignedLongLong(unknownFlags, 8));
+
+    if (header.Type == KswSandboxEventTypeReserved && isDriverStarted) {
+        data->AddUtf8("reservedEventName", "driver.started");
+        data->AddUtf8(
+            "reservedEventDescription",
+            "Header-only DriverEntry startup heartbeat emitted with reserved event type.");
+    }
+}
+
+// Input: Payload bytes for KswSandboxEventTypeDriverLoad and the JSON builder.
+// Processing: Validates that the public driver-load payload is present before
+// copying its fixed fields.  Malformed or short payloads keep the common
+// payloadHex fallback emitted by the caller.
+// Return: true when the public driver-load payload was parsed; false otherwise.
+bool AddDriverLoadPayloadData(
+    const unsigned char* payload,
+    const size_t payloadBytes,
+    JsonDataObjectBuilder* data) {
+    if (data == nullptr) {
+        return false;
+    }
+
+    data->AddUtf8("typedPayloadKind", "driver.load");
+    data->AddUtf8("payloadSchema", "KSWORD_SANDBOX_DRIVER_LOAD_PAYLOAD");
+    data->AddUnsigned(
+        "typedPayloadMinimumSize",
+        static_cast<unsigned long long>(sizeof(KSWORD_SANDBOX_DRIVER_LOAD_PAYLOAD)));
+
+    if (payload == nullptr ||
+        payloadBytes < sizeof(KSWORD_SANDBOX_DRIVER_LOAD_PAYLOAD)) {
+        data->AddUtf8("typedPayloadStatus", "payload-too-small");
+        return false;
+    }
+
+    const auto* driverLoad =
+        reinterpret_cast<const KSWORD_SANDBOX_DRIVER_LOAD_PAYLOAD*>(payload);
+    data->AddUtf8("typedPayloadStatus", "parsed");
+    data->AddUnsigned("driverLoadVersion", driverLoad->Version);
+    data->AddUtf8("driverLoadVersionHex", HexUnsignedLongLong(driverLoad->Version, 8));
+    data->AddUnsigned("driverLoadSize", driverLoad->Size);
+    data->AddBool(
+        "driverLoadSizeMatchesPublicAbi",
+        driverLoad->Size == static_cast<ULONG>(sizeof(KSWORD_SANDBOX_DRIVER_LOAD_PAYLOAD)));
+    data->AddUnsigned("bootId", driverLoad->BootId);
+    data->AddUtf8(
+        "buildTag",
+        BoundedAsciiString(driverLoad->BuildTag, sizeof(driverLoad->BuildTag)));
+    return true;
+}
+
+// Input: Event category whose payload structure is not yet public, the observed
+// payload bytes, and the JSON builder.
+// Processing: Records an ABI-pending parser status without inventing field
+// offsets.  The caller has already emitted payloadHex for any non-empty payload.
+// Return: false because no typed public payload could be parsed.
+bool AddAbiPendingPayloadData(
+    const char* payloadKind,
+    const char* expectedPublicAbiName,
+    const unsigned char* payload,
+    const size_t payloadBytes,
+    JsonDataObjectBuilder* data) {
+    if (data == nullptr) {
+        return false;
+    }
+
+    data->AddUtf8("typedPayloadKind", payloadKind == nullptr ? "unknown" : payloadKind);
+    data->AddUtf8(
+        "payloadSchema",
+        expectedPublicAbiName == nullptr ? "not-public" : expectedPublicAbiName);
+    data->AddUtf8("typedPayloadStatus", "abi-not-public");
+    data->AddUnsigned("typedPayloadObservedBytes", static_cast<unsigned long long>(payloadBytes));
+    data->AddBool("typedPayloadHasBytes", payload != nullptr && payloadBytes != 0);
+    data->AddUtf8(
+        "typedPayloadNote",
+        "No public payload struct exists in KSwordSandboxDriverIoctl.h; payloadHex is retained.");
+    return false;
+}
+
+// Input: Reserved event header, optional payload bytes, and the JSON builder.
+// Processing: Names the current header-only driver-start event and treats any
+// reserved payload bytes as opaque so forward compatibility is preserved.
+// Return: true when the reserved event was fully represented by header flags;
+// false when opaque reserved payload bytes remain unparsed.
+bool AddReservedPayloadData(
+    const KSWORD_SANDBOX_EVENT_HEADER& header,
+    const unsigned char* payload,
+    const size_t payloadBytes,
+    JsonDataObjectBuilder* data) {
+    if (data == nullptr) {
+        return false;
+    }
+
+    const bool isDriverStarted =
+        (header.Flags & KSWORD_SANDBOX_EVENT_FLAG_DRIVER_STARTED) != 0;
+
+    data->AddUtf8("typedPayloadKind", "reserved");
+    data->AddUnsigned("typedPayloadObservedBytes", static_cast<unsigned long long>(payloadBytes));
+
+    if (isDriverStarted && payloadBytes == 0) {
+        data->AddUtf8("payloadSchema", "header-only");
+        data->AddUtf8("typedPayloadStatus", "parsed-from-header-flags");
+        return true;
+    }
+
+    if (payload != nullptr && payloadBytes != 0) {
+        data->AddUtf8("payloadSchema", "reserved-opaque");
+        data->AddUtf8("typedPayloadStatus", "reserved-payload-opaque");
+        return false;
+    }
+
+    data->AddUtf8("payloadSchema", "none");
+    data->AddUtf8("typedPayloadStatus", "no-payload");
+    return true;
+}
+
+// Input: One public event header, its payload bytes, and the JSON builder.
+// Processing: Dispatches to a typed parser only when the public header exposes a
+// payload layout.  Categories reserved for future process/image/file/registry
+// payloads intentionally report ABI-pending status instead of guessing offsets.
+// Return: true when the payload or header-only semantic record was parsed;
+// false when callers should rely on payloadHex as the opaque fallback.
+bool AddTypedPayloadData(
+    const KSWORD_SANDBOX_EVENT_HEADER& header,
+    const unsigned char* payload,
+    const size_t payloadBytes,
+    JsonDataObjectBuilder* data) {
+    switch (header.Type) {
+    case KswSandboxEventTypeDriverLoad:
+        return AddDriverLoadPayloadData(payload, payloadBytes, data);
+    case KswSandboxEventTypeProcess:
+        return AddAbiPendingPayloadData(
+            "process",
+            "KSWORD_SANDBOX_PROCESS_PAYLOAD",
+            payload,
+            payloadBytes,
+            data);
+    case KswSandboxEventTypeImage:
+        return AddAbiPendingPayloadData(
+            "image",
+            "KSWORD_SANDBOX_IMAGE_PAYLOAD",
+            payload,
+            payloadBytes,
+            data);
+    case KswSandboxEventTypeFile:
+        return AddAbiPendingPayloadData(
+            "file",
+            "KSWORD_SANDBOX_FILE_PAYLOAD",
+            payload,
+            payloadBytes,
+            data);
+    case KswSandboxEventTypeRegistry:
+        return AddAbiPendingPayloadData(
+            "registry",
+            "KSWORD_SANDBOX_REGISTRY_PAYLOAD",
+            payload,
+            payloadBytes,
+            data);
+    case KswSandboxEventTypeNetwork:
+        return AddAbiPendingPayloadData(
+            "network",
+            "KSWORD_SANDBOX_NETWORK_PAYLOAD",
+            payload,
+            payloadBytes,
+            data);
+    case KswSandboxEventTypeReserved:
+        return AddReservedPayloadData(header, payload, payloadBytes, data);
+    default:
+        return AddAbiPendingPayloadData(
+            "unknown",
+            "unknown-public-payload",
+            payload,
+            payloadBytes,
+            data);
+    }
 }
 
 // Input: GET_HEALTH reply plus the byte count returned by DeviceIoControl.
@@ -771,6 +1006,7 @@ std::string BuildDriverEventData(
     data.AddUtf8("driverEventTypeName", DriverEventTypeName(header.Type));
     data.AddUnsigned("flags", header.Flags);
     data.AddUtf8("flagsHex", HexUnsignedLongLong(header.Flags, 8));
+    AddDriverEventFlagData(header, &data);
     data.AddUnsigned("sequence", header.Sequence);
     data.AddSigned("timestampQpc", header.TimestampQpc.QuadPart);
     data.AddUnsigned("driverProcessId", header.ProcessId);
@@ -779,19 +1015,8 @@ std::string BuildDriverEventData(
     data.AddUnsigned("payloadHexBytes", payloadPreviewBytes);
     data.AddBool("payloadTruncated", payloadPreviewBytes < payloadBytes);
     data.AddUtf8("payloadHex", HexBytes(payload, payloadBytes, kMaxPayloadHexBytes));
-
-    if (header.Type == KswSandboxEventTypeDriverLoad &&
-        payload != nullptr &&
-        payloadBytes >= sizeof(KSWORD_SANDBOX_DRIVER_LOAD_PAYLOAD)) {
-        const auto* driverLoad =
-            reinterpret_cast<const KSWORD_SANDBOX_DRIVER_LOAD_PAYLOAD*>(payload);
-        data.AddUnsigned("driverLoadVersion", driverLoad->Version);
-        data.AddUnsigned("driverLoadSize", driverLoad->Size);
-        data.AddUnsigned("bootId", driverLoad->BootId);
-        data.AddUtf8(
-            "buildTag",
-            BoundedAsciiString(driverLoad->BuildTag, sizeof(driverLoad->BuildTag)));
-    }
+    const bool typedPayloadParsed = AddTypedPayloadData(header, payload, payloadBytes, &data);
+    data.AddBool("typedPayloadParsed", typedPayloadParsed);
 
     return data.Build();
 }
@@ -1205,55 +1430,134 @@ bool EmitDriverReadEvents(
     return true;
 }
 
+// Input: Mock category metadata, collector options, and the JSONL sink.
+// Processing: Emits one synthetic driver-originated row that uses the same
+// stable eventType values as drained R0 events while clearly marking the data as
+// mock-only and not sourced from a real kernel payload.
+// Return: true if the JSONL sink accepted the mock row; false on write failure.
+bool EmitMockDriverCategoryEvent(
+    EventWriter& writer,
+    const Options& options,
+    const std::string& eventType,
+    const std::wstring& path,
+    const std::wstring& commandLine,
+    const std::string& driverEventTypeName,
+    const std::string& operation,
+    const std::vector<std::pair<std::string, std::string>>& extraData) {
+    SandboxEventFields event;
+    event.eventType = eventType;
+    event.source = "driver";
+    event.processId = GetCurrentProcessId();
+    event.path = path;
+    event.commandLine = commandLine;
+
+    JsonDataObjectBuilder data;
+    data.AddBool("mock", true);
+    data.AddWide("devicePath", options.devicePath);
+    data.AddUtf8("driverEventTypeName", driverEventTypeName);
+    data.AddUtf8("operation", operation);
+    data.AddUtf8("typedPayloadStatus", "mock");
+    data.AddUtf8("payloadSchema", "mock-forward-compatible");
+    data.AddUtf8(
+        "note",
+        "Synthetic driver-category row for Guest Agent and host import plumbing.");
+
+    for (const auto& item : extraData) {
+        data.AddUtf8(item.first, item.second);
+    }
+
+    event.dataJson = data.Build();
+    return EmitEvent(writer, event);
+}
+
 // Input: User options and event writer.
 // Processing: Emits deterministic mock driver-like rows, then exits without
 // opening the device path. This keeps CI and Guest Agent wiring testable before
 // a signed kernel driver is installed in the guest VM.
 // Return: Process exit code.
 int RunMockMode(const Options& options, EventWriter& writer) {
+    const DWORD currentProcessId = GetCurrentProcessId();
+    const std::string currentProcessIdText = std::to_string(currentProcessId);
+    const std::wstring mockProcessPath = LR"(C:\Windows\System32\notepad.exe)";
+    const std::wstring mockCommandLine = LR"("C:\Windows\System32\notepad.exe" --ksword-mock)";
+
     SandboxEventFields mockEvent;
     mockEvent.eventType = "r0collector.mockDriverEvent";
-    mockEvent.processId = GetCurrentProcessId();
-    mockEvent.path = LR"(C:\Windows\System32\notepad.exe)";
-    mockEvent.commandLine = LR"("C:\Windows\System32\notepad.exe" --ksword-mock)";
+    mockEvent.processId = currentProcessId;
+    mockEvent.path = mockProcessPath;
+    mockEvent.commandLine = mockCommandLine;
     JsonDataObjectBuilder mockData;
     mockData.AddBool("mock", true);
     mockData.AddWide("devicePath", options.devicePath);
     mockData.AddUtf8("ioctlProtocol", "not-issued");
-    mockData.AddUtf8("note", "Synthetic event for JSONL and Guest Agent plumbing.");
+    mockData.AddUtf8("note", "Synthetic marker; driver category mock rows follow.");
     mockEvent.dataJson = mockData.Build();
 
     if (!EmitEvent(writer, mockEvent)) {
         return kExitRuntimeFailure;
     }
 
-    SandboxEventFields fileEvent;
-    fileEvent.eventType = "file.created";
-    fileEvent.processId = GetCurrentProcessId();
-    fileEvent.path = LR"(C:\Users\Public\ksword-r0collector-mock.tmp)";
-    fileEvent.commandLine = LR"("C:\Windows\System32\notepad.exe" --ksword-mock)";
-    JsonDataObjectBuilder fileData;
-    fileData.AddBool("mock", true);
-    fileData.AddUtf8("driverEventType", "file");
-    fileData.AddUtf8("operation", "create");
-    fileData.AddWide("devicePath", options.devicePath);
-    fileEvent.dataJson = fileData.Build();
-    if (!EmitEvent(writer, fileEvent)) {
+    if (!EmitMockDriverCategoryEvent(
+            writer,
+            options,
+            "driver.process",
+            mockProcessPath,
+            mockCommandLine,
+            "process",
+            "create",
+            {
+                {"imagePath", "C:\\Windows\\System32\\notepad.exe"},
+                {"processId", currentProcessIdText},
+                {"parentProcessId", currentProcessIdText}
+            })) {
         return kExitRuntimeFailure;
     }
 
-    SandboxEventFields registryEvent;
-    registryEvent.eventType = "registry.set";
-    registryEvent.processId = GetCurrentProcessId();
-    registryEvent.path = LR"(HKCU\Software\Microsoft\Windows\CurrentVersion\Run\KSwordMock)";
-    registryEvent.commandLine = LR"("C:\Windows\System32\notepad.exe" --ksword-mock)";
-    JsonDataObjectBuilder registryData;
-    registryData.AddBool("mock", true);
-    registryData.AddUtf8("driverEventType", "registry");
-    registryData.AddUtf8("operation", "setValue");
-    registryData.AddUtf8("valueName", "KSwordMock");
-    registryEvent.dataJson = registryData.Build();
-    if (!EmitEvent(writer, registryEvent)) {
+    if (!EmitMockDriverCategoryEvent(
+            writer,
+            options,
+            "image.load",
+            LR"(C:\Windows\System32\kernel32.dll)",
+            mockCommandLine,
+            "image",
+            "load",
+            {
+                {"imagePath", "C:\\Windows\\System32\\kernel32.dll"},
+                {"imageBase", "0x0000000180000000"},
+                {"imageSize", "1048576"}
+            })) {
+        return kExitRuntimeFailure;
+    }
+
+    if (!EmitMockDriverCategoryEvent(
+            writer,
+            options,
+            "driver.file",
+            LR"(C:\Users\Public\ksword-r0collector-mock.tmp)",
+            mockCommandLine,
+            "file",
+            "create",
+            {
+                {"filePath", "C:\\Users\\Public\\ksword-r0collector-mock.tmp"},
+                {"desiredAccessHex", "0x0012019F"},
+                {"disposition", "create"}
+            })) {
+        return kExitRuntimeFailure;
+    }
+
+    if (!EmitMockDriverCategoryEvent(
+            writer,
+            options,
+            "driver.registry",
+            LR"(HKCU\Software\Microsoft\Windows\CurrentVersion\Run\KSwordMock)",
+            mockCommandLine,
+            "registry",
+            "setValue",
+            {
+                {"keyPath", "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run"},
+                {"valueName", "KSwordMock"},
+                {"valueType", "REG_SZ"}
+            })) {
         return kExitRuntimeFailure;
     }
 

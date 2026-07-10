@@ -105,17 +105,20 @@
     },
     {
       "id": "driver-load-heartbeat",
-      "title": "R0 driver load heartbeat observed",
+      "title": "R0 driver startup heartbeat observed",
       "severity": "info",
-      "summary": "The kernel driver emitted a startup heartbeat through the R0 event drain path.",
+      "summary": "The kernel driver emitted a startup heartbeat through the R0 event drain path; current builds use a reserved self-test event and later builds may emit driver.load.",
       "eventTypes": [
-        "driver.load"
+        "driver.load",
+        "driver.event.reserved"
       ],
       "tags": [
         "driver",
         "r0",
         "heartbeat",
-        "ioctl"
+        "ioctl",
+        "self-test",
+        "startup"
       ]
     },
     {

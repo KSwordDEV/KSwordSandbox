@@ -82,6 +82,29 @@ public sealed record SandboxEvent
 }
 
 /// <summary>
+/// Carries unclassified events for the WebUI live monitor.
+/// Inputs are already-normalized SandboxEvent records from host reports or
+/// guest JSON/JSONL files, processing applies only ordering and paging, and the
+/// record is returned to browsers without running behavior rules.
+/// </summary>
+public sealed record LiveEventSnapshot
+{
+    public required Guid JobId { get; init; }
+
+    public DateTimeOffset RetrievedAt { get; init; } = DateTimeOffset.UtcNow;
+
+    public int TotalEvents { get; init; }
+
+    public int NextOffset { get; init; }
+
+    public bool HasMore { get; init; }
+
+    public List<string> Sources { get; init; } = [];
+
+    public List<SandboxEvent> Events { get; init; } = [];
+}
+
+/// <summary>
 /// Describes one rule hit after event classification.
 /// Inputs are normalized sandbox events and behavior rules, processing keeps
 /// matching evidence, and the record is returned to JSON and HTML reports.
