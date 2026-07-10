@@ -217,6 +217,41 @@ std::string HexBytes(const unsigned char* bytes, const size_t byteCount, const s
     return hex.str();
 }
 
+// Input: Address family and raw address bytes from a network payload.
+// Processing: Formats IPv4 as dotted decimal and IPv6 as eight hexadecimal
+// hextets without compression so the output stays deterministic and dependency-free.
+// Return: Presentation-style address text, or an empty string for unknown inputs.
+std::string NetworkAddressText(const ULONG addressFamily, const unsigned char* addressBytes) {
+    if (addressBytes == nullptr) {
+        return {};
+    }
+
+    std::ostringstream text;
+    if (addressFamily == KSWORD_SANDBOX_NETWORK_ADDRESS_FAMILY_IPV4) {
+        text << static_cast<unsigned int>(addressBytes[0]) << "."
+             << static_cast<unsigned int>(addressBytes[1]) << "."
+             << static_cast<unsigned int>(addressBytes[2]) << "."
+             << static_cast<unsigned int>(addressBytes[3]);
+        return text.str();
+    }
+
+    if (addressFamily == KSWORD_SANDBOX_NETWORK_ADDRESS_FAMILY_IPV6) {
+        text << std::hex << std::nouppercase;
+        for (size_t index = 0; index < KSWORD_SANDBOX_NETWORK_ADDRESS_BYTES; index += 2U) {
+            if (index != 0) {
+                text << ":";
+            }
+            const unsigned int hextet =
+                (static_cast<unsigned int>(addressBytes[index]) << 8U) |
+                static_cast<unsigned int>(addressBytes[index + 1U]);
+            text << hextet;
+        }
+        return text.str();
+    }
+
+    return {};
+}
+
 // Input: No explicit input; uses the current system clock.
 // Processing: Produces a UTC timestamp with millisecond precision.
 // Return: ISO-8601/RFC3339-style timestamp suitable for SandboxEvent.timestamp.
@@ -888,17 +923,37 @@ std::string NetworkDirectionName(const ULONG direction) {
     }
 }
 
+// Input: Network address family value from KSWORD_SANDBOX_NETWORK_EVENT_PAYLOAD.
+// Processing: Converts public address-family constants into stable labels.
+// Return: ASCII family name.
+std::string NetworkAddressFamilyName(const ULONG addressFamily) {
+    switch (addressFamily) {
+    case KSWORD_SANDBOX_NETWORK_ADDRESS_FAMILY_UNKNOWN:
+        return "unknown";
+    case KSWORD_SANDBOX_NETWORK_ADDRESS_FAMILY_IPV4:
+        return "ipv4";
+    case KSWORD_SANDBOX_NETWORK_ADDRESS_FAMILY_IPV6:
+        return "ipv6";
+    default:
+        return "unrecognized";
+    }
+}
+
 // Input: IP protocol number from a network payload.
 // Processing: Names common protocols while preserving the numeric field.
 // Return: ASCII protocol name.
 std::string NetworkProtocolName(const ULONG protocol) {
     switch (protocol) {
-    case 1:
+    case KSWORD_SANDBOX_NETWORK_PROTOCOL_ANY:
+        return "any";
+    case KSWORD_SANDBOX_NETWORK_PROTOCOL_ICMP:
         return "icmp";
-    case 6:
+    case KSWORD_SANDBOX_NETWORK_PROTOCOL_TCP:
         return "tcp";
-    case 17:
+    case KSWORD_SANDBOX_NETWORK_PROTOCOL_UDP:
         return "udp";
+    case KSWORD_SANDBOX_NETWORK_PROTOCOL_ICMPV6:
+        return "icmpv6";
     default:
         return "unrecognized";
     }
@@ -1038,21 +1093,25 @@ std::string NetworkEventFlagNames(const ULONG flags) {
         names += name;
     };
 
-    if ((flags & KSWORD_SANDBOX_NETWORK_EVENT_FLAG_IPV4) != 0) {
-        appendName("IPv4");
-        knownFlags |= KSWORD_SANDBOX_NETWORK_EVENT_FLAG_IPV4;
+    if ((flags & KSWORD_SANDBOX_NETWORK_EVENT_FLAG_LOCAL_ADDRESS_PRESENT) != 0) {
+        appendName("LocalAddressPresent");
+        knownFlags |= KSWORD_SANDBOX_NETWORK_EVENT_FLAG_LOCAL_ADDRESS_PRESENT;
     }
-    if ((flags & KSWORD_SANDBOX_NETWORK_EVENT_FLAG_IPV6) != 0) {
-        appendName("IPv6");
-        knownFlags |= KSWORD_SANDBOX_NETWORK_EVENT_FLAG_IPV6;
+    if ((flags & KSWORD_SANDBOX_NETWORK_EVENT_FLAG_REMOTE_ADDRESS_PRESENT) != 0) {
+        appendName("RemoteAddressPresent");
+        knownFlags |= KSWORD_SANDBOX_NETWORK_EVENT_FLAG_REMOTE_ADDRESS_PRESENT;
     }
-    if ((flags & KSWORD_SANDBOX_NETWORK_EVENT_FLAG_DIRECTION_KNOWN) != 0) {
-        appendName("DirectionKnown");
-        knownFlags |= KSWORD_SANDBOX_NETWORK_EVENT_FLAG_DIRECTION_KNOWN;
+    if ((flags & KSWORD_SANDBOX_NETWORK_EVENT_FLAG_PROCESS_ID_PRESENT) != 0) {
+        appendName("ProcessIdPresent");
+        knownFlags |= KSWORD_SANDBOX_NETWORK_EVENT_FLAG_PROCESS_ID_PRESENT;
     }
-    if ((flags & KSWORD_SANDBOX_NETWORK_EVENT_FLAG_PID_PRESENT) != 0) {
-        appendName("PidPresent");
-        knownFlags |= KSWORD_SANDBOX_NETWORK_EVENT_FLAG_PID_PRESENT;
+    if ((flags & KSWORD_SANDBOX_NETWORK_EVENT_FLAG_FLOW_HANDLE_PRESENT) != 0) {
+        appendName("FlowHandlePresent");
+        knownFlags |= KSWORD_SANDBOX_NETWORK_EVENT_FLAG_FLOW_HANDLE_PRESENT;
+    }
+    if ((flags & KSWORD_SANDBOX_NETWORK_EVENT_FLAG_ENDPOINT_HANDLE_PRESENT) != 0) {
+        appendName("EndpointHandlePresent");
+        knownFlags |= KSWORD_SANDBOX_NETWORK_EVENT_FLAG_ENDPOINT_HANDLE_PRESENT;
     }
     const ULONG unknownFlags = flags & ~knownFlags;
     if (unknownFlags != 0) {
@@ -1499,6 +1558,23 @@ bool AddNetworkPayloadData(
 
     const auto* networkPayload =
         reinterpret_cast<const KSWORD_SANDBOX_NETWORK_EVENT_PAYLOAD*>(payload);
+    const bool localAddressPresent =
+        (networkPayload->Flags & KSWORD_SANDBOX_NETWORK_EVENT_FLAG_LOCAL_ADDRESS_PRESENT) != 0;
+    const bool remoteAddressPresent =
+        (networkPayload->Flags & KSWORD_SANDBOX_NETWORK_EVENT_FLAG_REMOTE_ADDRESS_PRESENT) != 0;
+    const bool processIdPresent =
+        (networkPayload->Flags & KSWORD_SANDBOX_NETWORK_EVENT_FLAG_PROCESS_ID_PRESENT) != 0;
+    const bool flowHandlePresent =
+        (networkPayload->Flags & KSWORD_SANDBOX_NETWORK_EVENT_FLAG_FLOW_HANDLE_PRESENT) != 0;
+    const bool endpointHandlePresent =
+        (networkPayload->Flags & KSWORD_SANDBOX_NETWORK_EVENT_FLAG_ENDPOINT_HANDLE_PRESENT) != 0;
+    const std::string localAddress = localAddressPresent
+        ? NetworkAddressText(networkPayload->AddressFamily, networkPayload->LocalAddress)
+        : std::string();
+    const std::string remoteAddress = remoteAddressPresent
+        ? NetworkAddressText(networkPayload->AddressFamily, networkPayload->RemoteAddress)
+        : std::string();
+
     data->AddUtf8("typedPayloadStatus", "parsed");
     data->AddUnsigned("networkVersion", networkPayload->Version);
     data->AddUtf8("networkVersionHex", HexUnsignedLongLong(networkPayload->Version, 8));
@@ -1510,9 +1586,16 @@ bool AddNetworkPayloadData(
     data->AddUtf8("protocolName", NetworkProtocolName(networkPayload->Protocol));
     data->AddUnsigned("direction", networkPayload->Direction);
     data->AddUtf8("directionName", NetworkDirectionName(networkPayload->Direction));
+    data->AddUnsigned("addressFamily", networkPayload->AddressFamily);
+    data->AddUtf8("addressFamilyName", NetworkAddressFamilyName(networkPayload->AddressFamily));
     data->AddUnsigned("flags", networkPayload->Flags);
     data->AddUtf8("flagsHex", HexUnsignedLongLong(networkPayload->Flags, 8));
     data->AddUtf8("flagNames", NetworkEventFlagNames(networkPayload->Flags));
+    data->AddBool("localAddressPresent", localAddressPresent);
+    data->AddBool("remoteAddressPresent", remoteAddressPresent);
+    data->AddBool("processIdPresent", processIdPresent);
+    data->AddBool("flowHandlePresent", flowHandlePresent);
+    data->AddBool("endpointHandlePresent", endpointHandlePresent);
     data->AddUnsigned("processId", networkPayload->ProcessId);
     data->AddUtf8(
         "localAddressHex",
@@ -1520,10 +1603,28 @@ bool AddNetworkPayloadData(
     data->AddUtf8(
         "remoteAddressHex",
         HexBytes(networkPayload->RemoteAddress, KSWORD_SANDBOX_NETWORK_ADDRESS_BYTES, KSWORD_SANDBOX_NETWORK_ADDRESS_BYTES));
+    data->AddBool("localAddressDecoded", !localAddress.empty());
+    data->AddBool("remoteAddressDecoded", !remoteAddress.empty());
+    if (!localAddress.empty()) {
+        data->AddUtf8("localAddress", localAddress);
+    }
+    if (!remoteAddress.empty()) {
+        data->AddUtf8("remoteAddress", remoteAddress);
+    }
     data->AddUnsigned("localPort", networkPayload->LocalPort);
     data->AddUnsigned("remotePort", networkPayload->RemotePort);
     data->AddUnsigned("layerId", networkPayload->LayerId);
+    data->AddUtf8("layerIdHex", HexUnsignedLongLong(networkPayload->LayerId, 4));
     data->AddUnsigned("calloutId", networkPayload->CalloutId);
+    data->AddUtf8("calloutIdHex", HexUnsignedLongLong(networkPayload->CalloutId, 8));
+    data->AddUnsigned("filterId", networkPayload->FilterId);
+    data->AddUtf8("filterIdHex", HexUnsignedLongLong(networkPayload->FilterId, 16));
+    data->AddUnsigned("flowHandle", networkPayload->FlowHandle);
+    data->AddUtf8("flowHandleHex", HexUnsignedLongLong(networkPayload->FlowHandle, 16));
+    data->AddUnsigned("transportEndpointHandle", networkPayload->TransportEndpointHandle);
+    data->AddUtf8(
+        "transportEndpointHandleHex",
+        HexUnsignedLongLong(networkPayload->TransportEndpointHandle, 16));
 
     return true;
 }

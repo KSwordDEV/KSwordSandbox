@@ -1,4 +1,5 @@
 #include "Driver.h"
+#include "Producers/Network/NetworkMonitor.h"
 #include "Producers/Process/ProcessMonitor.h"
 #include "Producers/Registry/RegistryMonitor.h"
 
@@ -103,6 +104,16 @@ DriverEntry(
         KswSetLastStatus(deviceExtension, status);
     }
 
+    /*
+     * Network telemetry registers inspect-only WFP/ALE callouts over the same
+     * READ_EVENTS ring.  Registration failures are non-fatal because lab VMs
+     * may lack usable WFP state during early driver bring-up.
+     */
+    status = KswInitializeNetworkMonitor(deviceObject, deviceExtension);
+    if (!NT_SUCCESS(status)) {
+        KswSetLastStatus(deviceExtension, status);
+    }
+
     deviceObject->Flags &= ~DO_DEVICE_INITIALIZING;
 
     return STATUS_SUCCESS;
@@ -139,6 +150,7 @@ KswDriverUnload(
         }
     }
 
+    KswUninitializeNetworkMonitor();
     KswUninitializeProcessMonitor();
     KswUninitializeRegistryMonitor();
     KswUninitializeFileFilter();

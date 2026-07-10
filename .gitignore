@@ -5,6 +5,7 @@ x64/
 .vs/
 .vscode/
 .idea/
+*.vcxproj.user
 TestResults/
 artifacts/
 coverage/

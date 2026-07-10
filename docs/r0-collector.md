@@ -54,20 +54,25 @@ header-only reserved self-test event with `KSWORD_SANDBOX_EVENT_FLAG_SELF_TEST`
 and `KSWORD_SANDBOX_EVENT_FLAG_DRIVER_STARTED`. `READ_EVENTS` consumes complete
 records from the ring and reports drop/sequence counters.
 
-The first concrete behavior payload is now `KswSandboxEventTypeFile` with
-`KSWORD_SANDBOX_FILE_EVENT_PAYLOAD`. R0Collector parses it into string-valued
-`data` fields such as `operationName`, `filePath`, `pathPresent`,
-`pathTruncated`, `statusHex`, `majorFunction`, and `minorFunction`. When a file
-payload carries a bounded path, the top-level `SandboxEvent.path` is also set to
-that file path so the WebUI live monitor and HTML report show the subject path
-instead of only `\\.\KSwordSandboxDriver`.
+Concrete behavior payloads are parsed by event type.  File events use
+`KSWORD_SANDBOX_FILE_EVENT_PAYLOAD` and expose fields such as `operationName`,
+`filePath`, `pathPresent`, `pathTruncated`, `statusHex`, `majorFunction`, and
+`minorFunction`.  Process, image, and registry payloads expose their bounded
+path/name/status fields when present.
 
-Reserved event categories still exist in the ABI for the next increments:
+Network events use `KSWORD_SANDBOX_NETWORK_EVENT_PAYLOAD` from the WFP/ALE
+producer.  R0Collector now parses `protocolName`, `directionName`,
+`addressFamilyName`, `localAddress`, `remoteAddress`, `localPort`,
+`remotePort`, `processIdPresent`, `flowHandleHex`,
+`transportEndpointHandleHex`, `layerIdHex`, `calloutIdHex`, and `filterIdHex`.
+Address bytes are also retained as `localAddressHex` and `remoteAddressHex` for
+diagnosis.
 
-1. `KswSandboxEventTypeProcess`
-2. `KswSandboxEventTypeImage`
-3. `KswSandboxEventTypeRegistry`
-4. `KswSandboxEventTypeNetwork`
+When a file/process/image/registry payload carries a bounded subject path, the
+top-level `SandboxEvent.path` is set to that subject path so the WebUI live
+monitor and HTML report show the relevant object instead of only
+`\\.\KSwordSandboxDriver`.  Network events currently keep the device path as the
+top-level path and put endpoint details under `data`.
 
 ## CLI contract
 
@@ -108,8 +113,8 @@ Top-level field rules:
 - `source`: `r0collector` for lifecycle rows, `driver` for drained R0 rows.
 - `timestamp`: collector UTC timestamp for the JSONL row.
 - `processId`: driver-supplied process ID when present; otherwise collector PID.
-- `path`: device path for lifecycle rows; future file/registry rows should use
-  subject paths when payloads carry them.
+- `path`: device path for lifecycle and network rows; file, process, image,
+  and registry rows use subject paths when payloads carry them.
 - `commandLine`: collector invocation until process payloads add richer command
   lines.
 - `data`: string-valued metadata compatible with the current host model.

@@ -242,16 +242,23 @@ typedef enum _KSWORD_SANDBOX_REGISTRY_OPERATION {
 #define KSWORD_SANDBOX_REGISTRY_EVENT_FLAG_STATUS_PRESENT    0x00000010U
 
 /*
- * Network event payload version and compact address fields.
+ * Network event payload version, protocol values, and compact address fields.
  *
- * Inputs : future WFP/ALE producers write protocol, direction, addresses, and
- *          ports into this payload.
- * Logic  : addresses are 16-byte slots so IPv4 is stored in the first 4 bytes
- *          and IPv6 uses the full field without changing the ABI.
+ * Inputs : WFP/ALE producers write protocol, direction, addresses, ports, and
+ *          optional WFP metadata into KSWORD_SANDBOX_NETWORK_EVENT_PAYLOAD.
+ * Logic  : protocol values intentionally match IANA IP protocol numbers for
+ *          common protocols.  Addresses are 16-byte slots: IPv4 uses bytes
+ *          [0..3] and IPv6 uses all 16 bytes.
  * Return : not applicable.
  */
 #define KSWORD_SANDBOX_NETWORK_EVENT_VERSION 0x00010000U
 #define KSWORD_SANDBOX_NETWORK_ADDRESS_BYTES 16U
+
+#define KSWORD_SANDBOX_NETWORK_PROTOCOL_ANY 0U
+#define KSWORD_SANDBOX_NETWORK_PROTOCOL_ICMP 1U
+#define KSWORD_SANDBOX_NETWORK_PROTOCOL_TCP 6U
+#define KSWORD_SANDBOX_NETWORK_PROTOCOL_UDP 17U
+#define KSWORD_SANDBOX_NETWORK_PROTOCOL_ICMPV6 58U
 
 typedef enum _KSWORD_SANDBOX_NETWORK_DIRECTION {
     KswSandboxNetworkDirectionUnknown = 0,
@@ -259,10 +266,34 @@ typedef enum _KSWORD_SANDBOX_NETWORK_DIRECTION {
     KswSandboxNetworkDirectionInbound = 2
 } KSWORD_SANDBOX_NETWORK_DIRECTION;
 
-#define KSWORD_SANDBOX_NETWORK_EVENT_FLAG_IPV4            0x00000001U
-#define KSWORD_SANDBOX_NETWORK_EVENT_FLAG_IPV6            0x00000002U
-#define KSWORD_SANDBOX_NETWORK_EVENT_FLAG_DIRECTION_KNOWN 0x00000004U
-#define KSWORD_SANDBOX_NETWORK_EVENT_FLAG_PID_PRESENT     0x00000008U
+/*
+ * Network address family values.
+ *
+ * Inputs : written before LocalAddress and RemoteAddress are interpreted.
+ * Logic  : IPv4 uses the first four bytes of each address array in presentation
+ *          order; IPv6 uses all 16 bytes.  Unknown means address bytes are
+ *          diagnostic only.
+ * Return : not applicable.
+ */
+#define KSWORD_SANDBOX_NETWORK_ADDRESS_FAMILY_UNKNOWN 0U
+#define KSWORD_SANDBOX_NETWORK_ADDRESS_FAMILY_IPV4 4U
+#define KSWORD_SANDBOX_NETWORK_ADDRESS_FAMILY_IPV6 6U
+
+/*
+ * Network payload flag bits.
+ *
+ * Inputs : written by the WFP/ALE producer in the network payload Flags field.
+ * Logic  : these bits distinguish absent metadata from zero-valued metadata,
+ *          such as PID 0 or an unspecified address.
+ * Return : not applicable; collectors should preserve unknown bits.
+ */
+#define KSWORD_SANDBOX_NETWORK_EVENT_FLAG_LOCAL_ADDRESS_PRESENT  0x00000001U
+#define KSWORD_SANDBOX_NETWORK_EVENT_FLAG_REMOTE_ADDRESS_PRESENT 0x00000002U
+#define KSWORD_SANDBOX_NETWORK_EVENT_FLAG_PROCESS_ID_PRESENT     0x00000004U
+#define KSWORD_SANDBOX_NETWORK_EVENT_FLAG_FLOW_HANDLE_PRESENT    0x00000008U
+#define KSWORD_SANDBOX_NETWORK_EVENT_FLAG_ENDPOINT_HANDLE_PRESENT 0x00000010U
+#define KSWORD_SANDBOX_NETWORK_EVENT_FLAG_PID_PRESENT \
+    KSWORD_SANDBOX_NETWORK_EVENT_FLAG_PROCESS_ID_PRESENT
 
 /*
  * Maximum payload size for one event returned by READ_EVENTS.
@@ -463,24 +494,31 @@ typedef struct _KSWORD_SANDBOX_REGISTRY_EVENT_PAYLOAD {
  * Bounded payload for KswSandboxEventTypeNetwork.
  *
  * Inputs : output-only payload following KSWORD_SANDBOX_EVENT_HEADER.
- * Logic  : supports IPv4 and IPv6 without changing the record size and keeps
- *          protocol/direction/port information rule-friendly.
- * Return : not applicable.
+ * Logic  : carries a normalized ALE authorization event from the WFP callout
+ *          producer.  AddressFamily selects how LocalAddress and RemoteAddress
+ *          are interpreted; layer, callout, and filter identifiers are
+ *          diagnostic hints for WFP registration correlation.
+ * Return : not applicable; Size describes this payload and remains bounded by
+ *          KSWORD_SANDBOX_EVENT_MAX_PAYLOAD_SIZE for READ_EVENTS.
  */
 typedef struct _KSWORD_SANDBOX_NETWORK_EVENT_PAYLOAD {
     ULONG Version;
     ULONG Size;
     ULONG Protocol;
     ULONG Direction;
+    ULONG AddressFamily;
     ULONG Flags;
     ULONGLONG ProcessId;
-    UCHAR LocalAddress[KSWORD_SANDBOX_NETWORK_ADDRESS_BYTES];
-    UCHAR RemoteAddress[KSWORD_SANDBOX_NETWORK_ADDRESS_BYTES];
-    USHORT LocalPort;
-    USHORT RemotePort;
     ULONG LayerId;
     ULONG CalloutId;
-    ULONGLONG Reserved[4];
+    USHORT LocalPort;
+    USHORT RemotePort;
+    UCHAR LocalAddress[KSWORD_SANDBOX_NETWORK_ADDRESS_BYTES];
+    UCHAR RemoteAddress[KSWORD_SANDBOX_NETWORK_ADDRESS_BYTES];
+    ULONGLONG FlowHandle;
+    ULONGLONG TransportEndpointHandle;
+    ULONGLONG FilterId;
+    ULONGLONG Reserved;
 } KSWORD_SANDBOX_NETWORK_EVENT_PAYLOAD, *PKSWORD_SANDBOX_NETWORK_EVENT_PAYLOAD;
 
 /*
