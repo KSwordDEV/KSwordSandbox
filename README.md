@@ -94,7 +94,9 @@ After installation, `run.ps1` is the normal per-use entry point. `.\run.ps1`
 starts the WebUI with the installed local config; `.\run.ps1 -Mode Plan
 -SamplePath D:\Temp\sample.exe` creates a non-mutating Hyper-V plan; and
 `.\run.ps1 -Mode Analyze -SamplePath D:\Temp\sample.exe -Live` performs a
-single live Hyper-V analysis from an elevated shell. See `docs/run.md`.
+single live Hyper-V analysis from an elevated shell and automatically
+post-processes collected guest events into `report.json` / `report.html`. See
+`docs/run.md`.
 
 Build the native x64 collector and driver skeleton from the main solution:
 

@@ -41,6 +41,9 @@ internal sealed class RunScriptContractScenario : ISmokeTestScenario
         RequireContains(runScript, "dotnet", "run.ps1 should launch the Web project through dotnet.");
         RequireContains(runScript, "--no-launch-profile", "run.ps1 should avoid launchSettings port surprises.");
         RequireContains(runScript, "Invoke-HyperVE2E.ps1", "run.ps1 should delegate one-shot analysis to the Hyper-V E2E script.");
+        RequireContains(runScript, "KSword.Sandbox.PostProcess.csproj", "run.ps1 should post-process live artifacts into final reports.");
+        RequireContains(runScript, "Resolve-JobRootFromHyperVOutput", "run.ps1 should resolve the live job root from Hyper-V output.");
+        RequireContains(runScript, "Invoke-PostProcessJob", "run.ps1 should invoke post-processing after successful live runs.");
         RequireContains(runScript, "Prepare-GuestPayload.ps1", "run.ps1 should prepare missing guest payloads.");
         RequireContains(runScript, "-SelfContained", "run.ps1 should prepare self-contained guest payloads for the VM.");
         RequireContains(runScript, "-PlanOnly", "run.ps1 should support non-mutating plans.");
@@ -54,6 +57,8 @@ internal sealed class RunScriptContractScenario : ISmokeTestScenario
         RequireContains(runDoc, "-Mode Plan", "run doc should document non-mutating plan mode.");
         RequireContains(runDoc, "-Mode Analyze", "run doc should document one-shot analyze mode.");
         RequireContains(runDoc, "-Live", "run doc should document explicit live execution.");
+        RequireContains(runDoc, "postprocess-result.json", "run doc should document automatic live post-processing.");
+        RequireContains(runDoc, "report.html", "run doc should document final HTML report output.");
         RequireContains(runDoc, "The password value is never printed.", "run doc should state that secrets are not printed.");
 
         RequireContains(readme, ".\\run.ps1", "README quick start should show run.ps1.");

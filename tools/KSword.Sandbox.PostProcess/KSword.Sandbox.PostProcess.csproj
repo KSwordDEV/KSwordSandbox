@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\KSword.Sandbox.Abstractions\KSword.Sandbox.Abstractions.csproj" />
+    <ProjectReference Include="..\..\src\KSword.Sandbox.Core\KSword.Sandbox.Core.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>KSword.Sandbox.PostProcess</AssemblyName>
+    <RootNamespace>KSword.Sandbox.PostProcess</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Remove="bin\**\*.cs;obj\**\*.cs" />
+  </ItemGroup>
+
+</Project>

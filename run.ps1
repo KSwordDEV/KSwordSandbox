@@ -474,8 +474,88 @@ function Invoke-OneShotAnalysis {
         Write-RunInfo 'Add -Live to run the sample in the configured Hyper-V VM.'
     }
 
-    & powershell @arguments
-    exit $LASTEXITCODE
+    $hyperVOutput = @(& powershell @arguments 2>&1)
+    $hyperVExitCode = $LASTEXITCODE
+    foreach ($line in $hyperVOutput) {
+        Write-Host ([string]$line)
+    }
+
+    if ($hyperVExitCode -ne 0) {
+        exit $hyperVExitCode
+    }
+
+    if ($runLive) {
+        $jobRoot = Resolve-JobRootFromHyperVOutput -OutputLines $hyperVOutput -EffectiveRuntimeRoot $EffectiveRuntimeRoot
+        Invoke-PostProcessJob -JobRoot $jobRoot -EffectiveConfigPath $EffectiveConfigPath -ResolvedSamplePath $resolvedSample
+    }
+
+    exit 0
+}
+
+function Resolve-JobRootFromHyperVOutput {
+    param(
+        [Parameter(Mandatory)][object[]]$OutputLines,
+        [Parameter(Mandatory)][string]$EffectiveRuntimeRoot
+    )
+
+    foreach ($entry in $OutputLines) {
+        $line = [string]$entry
+        if ($line -match 'Runbook execution record written:\s*(?<path>.+?runbook-execution\.json)\s*$') {
+            return (Split-Path -Parent $Matches['path'])
+        }
+        if ($line -match 'RunbookExecutionPath\s*:\s*(?<path>.+?runbook-execution\.json)\s*$') {
+            return (Split-Path -Parent $Matches['path'])
+        }
+        if ($line -match 'JobId\s*:\s*(?<jobId>[0-9a-fA-F-]{36})') {
+            $compact = ([guid]$Matches['jobId']).ToString('N')
+            $candidate = Join-Path (Join-Path $EffectiveRuntimeRoot 'jobs') $compact
+            if (Test-Path -LiteralPath $candidate -PathType Container) {
+                return $candidate
+            }
+        }
+    }
+
+    $latest = Get-ChildItem -LiteralPath (Join-Path $EffectiveRuntimeRoot 'jobs') -Directory -ErrorAction SilentlyContinue |
+        Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName 'runbook-execution.json') -PathType Leaf } |
+        Sort-Object LastWriteTimeUtc -Descending |
+        Select-Object -First 1
+    if ($null -ne $latest) {
+        Write-RunInfo "Could not parse job root from Hyper-V output; falling back to latest job root: $($latest.FullName)"
+        return $latest.FullName
+    }
+
+    throw 'Could not resolve live job root from Hyper-V output.'
+}
+
+function Invoke-PostProcessJob {
+    param(
+        [Parameter(Mandatory)][string]$JobRoot,
+        [Parameter(Mandatory)][string]$EffectiveConfigPath,
+        [Parameter(Mandatory)][string]$ResolvedSamplePath
+    )
+
+    $postProcessProject = Join-Path $script:RepositoryRoot 'tools\KSword.Sandbox.PostProcess\KSword.Sandbox.PostProcess.csproj'
+    if (-not (Test-Path -LiteralPath $postProcessProject -PathType Leaf)) {
+        throw "PostProcess project is missing: $postProcessProject"
+    }
+
+    Write-RunInfo "Post-processing live artifacts into report: $JobRoot"
+    $arguments = @('run', '--project', $postProcessProject)
+    if ($NoBuild) {
+        $arguments += '--no-build'
+    }
+    $arguments += @(
+        '--',
+        '--repo-root', $script:RepositoryRoot,
+        '--config-path', $EffectiveConfigPath,
+        '--job-root', $JobRoot,
+        '--sample-path', $ResolvedSamplePath
+    )
+
+    & dotnet @arguments
+    if ($LASTEXITCODE -ne 0) {
+        throw "Post-processing failed with exit code $LASTEXITCODE."
+    }
 }
 
 $state = Read-InstallState

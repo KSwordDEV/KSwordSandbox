@@ -56,6 +56,16 @@ If `-Live` is omitted, `Analyze` falls back to PlanOnly and does not mutate the
 VM. This keeps accidental sample execution out of the default path while still
 making the real live command short.
 
+When `-Live` succeeds, `run.ps1` automatically invokes
+`tools/KSword.Sandbox.PostProcess` against the collected job directory. The
+single command therefore ends with:
+
+- `runbook-execution.json`
+- `guest\<job-id>\events.json`
+- `postprocess-result.json`
+- `report.json`
+- `report.html`
+
 Before invoking `scripts/Invoke-HyperVE2E.ps1`, `run.ps1` checks the staged Guest
 Agent/R0Collector payload under the configured `guestPayloadRoot`. If it is
 missing, it calls `scripts/Prepare-GuestPayload.ps1 -SelfContained` so a fresh

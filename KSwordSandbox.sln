@@ -1,4 +1,4 @@
-
+﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.0.31903.59
@@ -26,6 +26,8 @@ EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tools", "tools", "{07C2787E-EAC7-C090-1BA3-A61EC2A24D84}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "KSword.Sandbox.HarmlessSample", "tools\KSword.Sandbox.HarmlessSample\KSword.Sandbox.HarmlessSample.csproj", "{4F9CD9F7-EAF3-47AC-A895-E7CEB0CF180C}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "KSword.Sandbox.PostProcess", "tools\KSword.Sandbox.PostProcess\KSword.Sandbox.PostProcess.csproj", "{E35EEA46-1152-46BA-8A24-7A5D6507FC06}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -125,6 +127,18 @@ Global
 		{4F9CD9F7-EAF3-47AC-A895-E7CEB0CF180C}.Release|x64.Build.0 = Release|Any CPU
 		{4F9CD9F7-EAF3-47AC-A895-E7CEB0CF180C}.Release|x86.ActiveCfg = Release|Any CPU
 		{4F9CD9F7-EAF3-47AC-A895-E7CEB0CF180C}.Release|x86.Build.0 = Release|Any CPU
+		{E35EEA46-1152-46BA-8A24-7A5D6507FC06}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{E35EEA46-1152-46BA-8A24-7A5D6507FC06}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{E35EEA46-1152-46BA-8A24-7A5D6507FC06}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{E35EEA46-1152-46BA-8A24-7A5D6507FC06}.Debug|x64.Build.0 = Debug|Any CPU
+		{E35EEA46-1152-46BA-8A24-7A5D6507FC06}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{E35EEA46-1152-46BA-8A24-7A5D6507FC06}.Debug|x86.Build.0 = Debug|Any CPU
+		{E35EEA46-1152-46BA-8A24-7A5D6507FC06}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{E35EEA46-1152-46BA-8A24-7A5D6507FC06}.Release|Any CPU.Build.0 = Release|Any CPU
+		{E35EEA46-1152-46BA-8A24-7A5D6507FC06}.Release|x64.ActiveCfg = Release|Any CPU
+		{E35EEA46-1152-46BA-8A24-7A5D6507FC06}.Release|x64.Build.0 = Release|Any CPU
+		{E35EEA46-1152-46BA-8A24-7A5D6507FC06}.Release|x86.ActiveCfg = Release|Any CPU
+		{E35EEA46-1152-46BA-8A24-7A5D6507FC06}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -138,5 +152,6 @@ Global
 		{D9E9A3F7-BB99-48A0-AF7E-54D7D5D8C701} = {AEBB45F1-EB4E-4D0E-A86E-A6FB61BFEFA4}
 		{E8C3DCE9-E60B-4A0F-8D8F-620E1182635A} = {D499D332-CF34-4B0B-8D74-F8F7907A5C3D}
 		{4F9CD9F7-EAF3-47AC-A895-E7CEB0CF180C} = {07C2787E-EAC7-C090-1BA3-A61EC2A24D84}
+		{E35EEA46-1152-46BA-8A24-7A5D6507FC06} = {07C2787E-EAC7-C090-1BA3-A61EC2A24D84}
 	EndGlobalSection
 EndGlobal
