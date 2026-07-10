@@ -17,6 +17,7 @@ param(
     [switch]$SkipNative,
     [switch]$SkipRepositoryPolicy,
     [switch]$SkipReadiness,
+    [switch]$SkipLocalPipelineSmoke,
     [switch]$StagedPolicyOnly
 )
 
@@ -112,6 +113,22 @@ try {
         }
 
         $global:LASTEXITCODE = 0
+    }
+
+    if (-not $SkipLocalPipelineSmoke) {
+        Invoke-Step -Name 'local WebUI/API pipeline smoke' -Script {
+            $localSmokeArguments = @('-Configuration', $Configuration)
+            if (-not $SkipDotNet) {
+                $localSmokeArguments += '-NoBuild'
+            }
+
+            $exitCode = Invoke-PowerShellFile -Path (Join-Path $repoRoot 'scripts/Invoke-LocalPipelineSmoke.ps1') -Arguments $localSmokeArguments
+            if ($exitCode -ne 0) {
+                throw "Local WebUI/API pipeline smoke failed with exit code $exitCode"
+            }
+
+            $global:LASTEXITCODE = 0
+        }
     }
 
     Invoke-Step -Name 'Hyper-V E2E PlanOnly contract' -Script {

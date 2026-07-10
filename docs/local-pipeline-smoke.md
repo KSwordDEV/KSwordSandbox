@@ -12,14 +12,18 @@ services still form a closed loop:
    `D:\Temp\KSwordSandbox\pipeline-smoke`;
 2. start `KSword.Sandbox.Web` on a random `127.0.0.1` port;
 3. call `/health`, `/api/files/scan`, and `/api/jobs/plan`;
-4. write synthetic guest `events.json` plus `driver-events.jsonl` into the job
+4. call `/api/jobs/{jobId}/runbook/execute` with `live=false` and verify
+   `runbook-execution.json`;
+5. write synthetic guest `events.json` plus `driver-events.jsonl` into the job
    guest output folder;
-5. call `/api/jobs/{jobId}/guest-events/import`;
-6. verify that `report.html` contains the expected report sections and rule
+6. call `/api/jobs/{jobId}/events/live` and verify the raw unclassified event
+   rows and source paths;
+7. call `/api/jobs/{jobId}/guest-events/import`;
+8. verify that `report.html` contains the expected report sections and rule
    findings.
 
-The smoke does not call `/api/jobs/{jobId}/runbook/execute`, does not require
-Hyper-V, and does not require a golden VM.
+The smoke only executes the runbook in dry-run mode. It does not require
+Hyper-V, does not start a VM, and does not require a golden VM.
 
 ## Run
 

@@ -36,6 +36,9 @@ internal sealed class FullValidationScriptScenario : ISmokeTestScenario
         RequireContains(script, "Test-LiveTelemetryFramework.ps1", "Full validation should include the live telemetry contract gate.");
         RequireContains(script, "-ContractOnly", "Full validation should run live telemetry in non-mutating contract-only mode.");
         RequireContains(script, "-RequireImplementedStream", "Full validation should require the implemented SSE stream route.");
+        RequireContains(script, "Invoke-LocalPipelineSmoke.ps1", "Full validation should include the local WebUI/API pipeline smoke.");
+        RequireContains(script, "local WebUI/API pipeline smoke", "Full validation should name the local pipeline smoke gate.");
+        RequireContains(script, "SkipLocalPipelineSmoke", "Full validation should allow skipping the local pipeline smoke when needed.");
         RequireContains(script, "Invoke-HyperVE2E.ps1", "Full validation should include the Hyper-V E2E script contract.");
         RequireContains(script, "Hyper-V E2E PlanOnly contract", "Full validation should name the safe Hyper-V PlanOnly gate.");
         RequireContains(script, "sandbox.planonly.json", "Full validation should use a temporary Hyper-V PlanOnly config.");
@@ -51,6 +54,7 @@ internal sealed class FullValidationScriptScenario : ISmokeTestScenario
         RequireContains(progress, "Remaining P0 gaps", "Progress doc should list remaining P0 gaps.");
         RequireContains(progress, "R0 Driver + R0Collector", "Progress doc should track R0 progress.");
         RequireContains(progress, "Hyper-V", "Progress doc should track Hyper-V progress.");
+        RequireContains(progress, "local WebUI/API pipeline smoke", "Progress doc should mention the local WebUI/API smoke gate.");
 
         return Task.FromResult(new SmokeTestResult
         {

@@ -5,8 +5,9 @@ Runs a local API-level pipeline smoke without requiring Hyper-V or a VM.
 .DESCRIPTION
 Inputs are optional local paths, build settings, and startup timing values.
 Processing creates a benign .exe-named sample under the pipeline smoke temp
-root, starts the Web API on a random localhost port, plans a dry-run job, writes
-synthetic guest events into the job guest folder, imports those events through
+root, starts the Web API on a random localhost port, plans a dry-run job,
+executes the runbook in dry-run mode, writes synthetic guest events into the job
+guest folder, verifies the live raw-event endpoint, imports those events through
 the Web API, and validates that report.html contains the expected sections.
 The script returns process exit code 0 on pass and 1 on failure.
 
@@ -383,6 +384,55 @@ function Invoke-SmokeJsonPost {
     return Invoke-RestMethod -Method Post -Uri $Uri -ContentType 'application/json' -Body $json -TimeoutSec 30
 }
 
+function Invoke-SmokeDryRunRunbook {
+    <#
+    .SYNOPSIS
+    Executes the planned runbook through the Web API in dry-run mode.
+
+    .DESCRIPTION
+    Inputs are the API base URL and planned job. Processing calls
+    /api/jobs/{jobId}/runbook/execute with live=false, validates that the
+    execution result was persisted, and returns the updated job object from the
+    API response.
+    #>
+    param(
+        [Parameter(Mandatory)]
+        [string]$BaseUrl,
+
+        [Parameter(Mandatory)]
+        [pscustomobject]$Job
+    )
+
+    $jobId = [string]$Job.jobId
+    $payload = Invoke-SmokeJsonPost -Uri "$BaseUrl/api/jobs/$jobId/runbook/execute" -Body @{
+        live              = $false
+        stepTimeoutSeconds = 60
+        importGuestEvents = $false
+    }
+
+    Assert-SmokeCondition -Condition ($null -ne $payload.execution) -Message 'Dry-run runbook response is missing execution.'
+    Assert-SmokeCondition -Condition ($null -ne $payload.job) -Message 'Dry-run runbook response is missing updated job.'
+
+    $execution = $payload.execution
+    Assert-SmokeCondition -Condition ([bool]$execution.success) -Message 'Dry-run runbook execution should succeed.'
+    Assert-SmokeCondition -Condition (@('0', 'DryRun') -contains [string]$execution.mode) -Message "Dry-run runbook mode was unexpected: $($execution.mode)"
+    Assert-SmokeCondition -Condition ([int]$execution.totalSteps -gt 0) -Message 'Dry-run runbook did not contain any steps.'
+    Assert-SmokeCondition -Condition (@($execution.stepResults).Count -eq [int]$execution.totalSteps) -Message 'Dry-run runbook did not return one result per step.'
+    Assert-SmokeCondition -Condition ([int]$execution.executedSteps -eq 0) -Message 'Dry-run runbook should not execute live steps.'
+
+    $updatedJob = $payload.job
+    Assert-SmokeCondition -Condition (-not [string]::IsNullOrWhiteSpace([string]$updatedJob.runbookExecutionResultPath)) -Message 'Updated job is missing runbookExecutionResultPath.'
+    Assert-SmokeCondition -Condition (Test-Path -LiteralPath ([string]$updatedJob.runbookExecutionResultPath) -PathType Leaf) -Message "runbook-execution.json was not written: $($updatedJob.runbookExecutionResultPath)"
+
+    $resultText = Get-Content -LiteralPath ([string]$updatedJob.runbookExecutionResultPath) -Raw
+    $resultJson = $resultText | ConvertFrom-Json
+    Assert-SmokeCondition -Condition (@('0', 'DryRun') -contains [string]$resultJson.Mode) -Message "runbook-execution.json does not record DryRun mode. Actual: $($resultJson.Mode)"
+    Assert-SmokeCondition -Condition ($resultText.Contains('Dry-run mode recorded the command without launching PowerShell.')) -Message 'runbook-execution.json does not record dry-run step messages.'
+    Assert-SmokeCondition -Condition ($resultText.Contains('sync-live-output')) -Message 'runbook-execution.json does not include the live sync step.'
+
+    return $updatedJob
+}
+
 function Write-SmokeGuestEvents {
     <#
     .SYNOPSIS
@@ -672,6 +722,9 @@ try {
     Assert-SmokeCondition -Condition (Test-Path -LiteralPath ([string]$job.jsonReportPath) -PathType Leaf) -Message "JSON report was not created."
     Assert-SmokeCondition -Condition (Test-Path -LiteralPath ([string]$job.htmlReportPath) -PathType Leaf) -Message "HTML report was not created."
     Write-SmokeStep "Planned job $($job.jobId)."
+
+    $job = Invoke-SmokeDryRunRunbook -BaseUrl $url -Job $job
+    Write-SmokeStep "Dry-run runbook execution persisted: $($job.runbookExecutionResultPath)"
 
     $guestArtifacts = Write-SmokeGuestEvents -Job $job
     Write-SmokeStep "Wrote synthetic guest events: $($guestArtifacts.EventsPath)"

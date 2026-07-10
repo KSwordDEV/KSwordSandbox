@@ -48,6 +48,13 @@ a final HTML report.
   `Prepare-HarmlessSample.ps1` exist, generated `.exe`/`.dll`/`.bin` and
   `bin`/`obj` outputs must stay out of git, and the Hyper-V E2E runbook explains
   how to publish it outside the repository before `-Live`.
+- `Invoke-LocalPipelineSmoke.ps1` now covers the host-side minimal chain:
+  Web API health, directory scan, job plan, dry-run runbook execution,
+  `runbook-execution.json`, synthetic guest `events.json`,
+  synthetic `driver-events.jsonl`, live raw-event endpoint, guest import, and
+  final `report.html`.
+- `Invoke-FullValidation.ps1` includes the local WebUI/API pipeline smoke by
+  default, so the runnable host-side MVP path is part of the standard gate.
 
 ## Remaining P0 gaps
 
