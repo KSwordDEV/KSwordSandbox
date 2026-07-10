@@ -173,6 +173,98 @@ typedef enum _KSWORD_SANDBOX_FILE_OPERATION {
 #define KSWORD_SANDBOX_FILE_EVENT_PATH_CHARS 44U
 
 /*
+ * Process event payload version, operation values, and bounded string sizes.
+ *
+ * Inputs : process callback producers write Operation and flag fields.
+ * Logic  : strings are bounded UTF-16 prefixes so callback paths never allocate
+ *          variable-size output records and collectors can parse fixed layouts.
+ * Return : not applicable.
+ */
+#define KSWORD_SANDBOX_PROCESS_EVENT_VERSION 0x00010000U
+#define KSWORD_SANDBOX_PROCESS_IMAGE_PATH_CHARS 24U
+#define KSWORD_SANDBOX_PROCESS_COMMAND_LINE_CHARS 12U
+
+typedef enum _KSWORD_SANDBOX_PROCESS_OPERATION {
+    KswSandboxProcessOperationNone = 0,
+    KswSandboxProcessOperationCreate = 1,
+    KswSandboxProcessOperationExit = 2
+} KSWORD_SANDBOX_PROCESS_OPERATION;
+
+#define KSWORD_SANDBOX_PROCESS_EVENT_FLAG_IMAGE_PATH_PRESENT  0x00000001U
+#define KSWORD_SANDBOX_PROCESS_EVENT_FLAG_IMAGE_PATH_TRUNCATED 0x00000002U
+#define KSWORD_SANDBOX_PROCESS_EVENT_FLAG_COMMAND_PRESENT     0x00000004U
+#define KSWORD_SANDBOX_PROCESS_EVENT_FLAG_COMMAND_TRUNCATED   0x00000008U
+#define KSWORD_SANDBOX_PROCESS_EVENT_FLAG_STATUS_PRESENT      0x00000010U
+#define KSWORD_SANDBOX_PROCESS_EVENT_FLAG_EX_CALLBACK         0x00000020U
+#define KSWORD_SANDBOX_PROCESS_EVENT_FLAG_LEGACY_CALLBACK     0x00000040U
+
+/*
+ * Image-load event payload version and bounded path size.
+ *
+ * Inputs : image-load callback producers write this fixed payload.
+ * Logic  : image base and size are preserved as integer fields, while the image
+ *          path is a bounded UTF-16 prefix compatible with READ_EVENTS.
+ * Return : not applicable.
+ */
+#define KSWORD_SANDBOX_IMAGE_EVENT_VERSION 0x00010000U
+#define KSWORD_SANDBOX_IMAGE_PATH_CHARS 40U
+
+#define KSWORD_SANDBOX_IMAGE_EVENT_FLAG_PATH_PRESENT       0x00000001U
+#define KSWORD_SANDBOX_IMAGE_EVENT_FLAG_PATH_TRUNCATED     0x00000002U
+#define KSWORD_SANDBOX_IMAGE_EVENT_FLAG_SYSTEM_MODE_IMAGE  0x00000004U
+
+/*
+ * Registry event payload version, operation values, and bounded string sizes.
+ *
+ * Inputs : registry callback producers write operation, key, and value fields.
+ * Logic  : the compact layout prioritizes set/delete persistence evidence while
+ *          leaving enough fixed UTF-16 room for Run/Services path prefixes.
+ * Return : not applicable.
+ */
+#define KSWORD_SANDBOX_REGISTRY_EVENT_VERSION 0x00010000U
+#define KSWORD_SANDBOX_REGISTRY_KEY_PATH_CHARS 28U
+#define KSWORD_SANDBOX_REGISTRY_VALUE_NAME_CHARS 16U
+
+typedef enum _KSWORD_SANDBOX_REGISTRY_OPERATION {
+    KswSandboxRegistryOperationNone = 0,
+    KswSandboxRegistryOperationCreateKey = 1,
+    KswSandboxRegistryOperationOpenKey = 2,
+    KswSandboxRegistryOperationSetValue = 3,
+    KswSandboxRegistryOperationDeleteValue = 4,
+    KswSandboxRegistryOperationDeleteKey = 5,
+    KswSandboxRegistryOperationRenameKey = 6
+} KSWORD_SANDBOX_REGISTRY_OPERATION;
+
+#define KSWORD_SANDBOX_REGISTRY_EVENT_FLAG_KEY_PRESENT       0x00000001U
+#define KSWORD_SANDBOX_REGISTRY_EVENT_FLAG_KEY_TRUNCATED     0x00000002U
+#define KSWORD_SANDBOX_REGISTRY_EVENT_FLAG_VALUE_PRESENT     0x00000004U
+#define KSWORD_SANDBOX_REGISTRY_EVENT_FLAG_VALUE_TRUNCATED   0x00000008U
+#define KSWORD_SANDBOX_REGISTRY_EVENT_FLAG_STATUS_PRESENT    0x00000010U
+
+/*
+ * Network event payload version and compact address fields.
+ *
+ * Inputs : future WFP/ALE producers write protocol, direction, addresses, and
+ *          ports into this payload.
+ * Logic  : addresses are 16-byte slots so IPv4 is stored in the first 4 bytes
+ *          and IPv6 uses the full field without changing the ABI.
+ * Return : not applicable.
+ */
+#define KSWORD_SANDBOX_NETWORK_EVENT_VERSION 0x00010000U
+#define KSWORD_SANDBOX_NETWORK_ADDRESS_BYTES 16U
+
+typedef enum _KSWORD_SANDBOX_NETWORK_DIRECTION {
+    KswSandboxNetworkDirectionUnknown = 0,
+    KswSandboxNetworkDirectionOutbound = 1,
+    KswSandboxNetworkDirectionInbound = 2
+} KSWORD_SANDBOX_NETWORK_DIRECTION;
+
+#define KSWORD_SANDBOX_NETWORK_EVENT_FLAG_IPV4            0x00000001U
+#define KSWORD_SANDBOX_NETWORK_EVENT_FLAG_IPV6            0x00000002U
+#define KSWORD_SANDBOX_NETWORK_EVENT_FLAG_DIRECTION_KNOWN 0x00000004U
+#define KSWORD_SANDBOX_NETWORK_EVENT_FLAG_PID_PRESENT     0x00000008U
+
+/*
  * Maximum payload size for one event returned by READ_EVENTS.
  *
  * Inputs : used by collectors to size stack or heap parsing buffers.
@@ -303,6 +395,93 @@ typedef struct _KSWORD_SANDBOX_FILE_EVENT_PAYLOAD {
     ULONG MinorFunction;
     WCHAR Path[KSWORD_SANDBOX_FILE_EVENT_PATH_CHARS];
 } KSWORD_SANDBOX_FILE_EVENT_PAYLOAD, *PKSWORD_SANDBOX_FILE_EVENT_PAYLOAD;
+
+/*
+ * Bounded payload for KswSandboxEventTypeProcess.
+ *
+ * Inputs : output-only payload following KSWORD_SANDBOX_EVENT_HEADER.
+ * Logic  : process callbacks preserve key lineage identifiers, optional exit
+ *          status, and bounded image/command prefixes without dynamic output.
+ * Return : not applicable.
+ */
+typedef struct _KSWORD_SANDBOX_PROCESS_EVENT_PAYLOAD {
+    ULONG Version;
+    ULONG Size;
+    ULONG Operation;
+    ULONG Flags;
+    ULONGLONG ProcessId;
+    ULONGLONG ParentProcessId;
+    ULONGLONG CreatingProcessId;
+    LONG Status;
+    ULONG ImagePathLengthBytes;
+    ULONG CommandLineLengthBytes;
+    WCHAR ImagePath[KSWORD_SANDBOX_PROCESS_IMAGE_PATH_CHARS];
+    WCHAR CommandLine[KSWORD_SANDBOX_PROCESS_COMMAND_LINE_CHARS];
+} KSWORD_SANDBOX_PROCESS_EVENT_PAYLOAD, *PKSWORD_SANDBOX_PROCESS_EVENT_PAYLOAD;
+
+/*
+ * Bounded payload for KswSandboxEventTypeImage.
+ *
+ * Inputs : output-only payload following KSWORD_SANDBOX_EVENT_HEADER.
+ * Logic  : carries image load address/size, process id, and a bounded full
+ *          image name prefix from the image-load callback.
+ * Return : not applicable.
+ */
+typedef struct _KSWORD_SANDBOX_IMAGE_EVENT_PAYLOAD {
+    ULONG Version;
+    ULONG Size;
+    ULONG Flags;
+    ULONG PathLengthBytes;
+    ULONGLONG ProcessId;
+    ULONGLONG ImageBase;
+    ULONGLONG ImageSize;
+    WCHAR ImagePath[KSWORD_SANDBOX_IMAGE_PATH_CHARS];
+} KSWORD_SANDBOX_IMAGE_EVENT_PAYLOAD, *PKSWORD_SANDBOX_IMAGE_EVENT_PAYLOAD;
+
+/*
+ * Bounded payload for KswSandboxEventTypeRegistry.
+ *
+ * Inputs : output-only payload following KSWORD_SANDBOX_EVENT_HEADER.
+ * Logic  : registry callbacks preserve operation, status, process id, and
+ *          bounded key/value names for behavior rules and report evidence.
+ * Return : not applicable.
+ */
+typedef struct _KSWORD_SANDBOX_REGISTRY_EVENT_PAYLOAD {
+    ULONG Version;
+    ULONG Size;
+    ULONG Operation;
+    ULONG Flags;
+    ULONGLONG ProcessId;
+    LONG Status;
+    ULONG KeyPathLengthBytes;
+    ULONG ValueNameLengthBytes;
+    WCHAR KeyPath[KSWORD_SANDBOX_REGISTRY_KEY_PATH_CHARS];
+    WCHAR ValueName[KSWORD_SANDBOX_REGISTRY_VALUE_NAME_CHARS];
+} KSWORD_SANDBOX_REGISTRY_EVENT_PAYLOAD, *PKSWORD_SANDBOX_REGISTRY_EVENT_PAYLOAD;
+
+/*
+ * Bounded payload for KswSandboxEventTypeNetwork.
+ *
+ * Inputs : output-only payload following KSWORD_SANDBOX_EVENT_HEADER.
+ * Logic  : supports IPv4 and IPv6 without changing the record size and keeps
+ *          protocol/direction/port information rule-friendly.
+ * Return : not applicable.
+ */
+typedef struct _KSWORD_SANDBOX_NETWORK_EVENT_PAYLOAD {
+    ULONG Version;
+    ULONG Size;
+    ULONG Protocol;
+    ULONG Direction;
+    ULONG Flags;
+    ULONGLONG ProcessId;
+    UCHAR LocalAddress[KSWORD_SANDBOX_NETWORK_ADDRESS_BYTES];
+    UCHAR RemoteAddress[KSWORD_SANDBOX_NETWORK_ADDRESS_BYTES];
+    USHORT LocalPort;
+    USHORT RemotePort;
+    ULONG LayerId;
+    ULONG CalloutId;
+    ULONGLONG Reserved[4];
+} KSWORD_SANDBOX_NETWORK_EVENT_PAYLOAD, *PKSWORD_SANDBOX_NETWORK_EVENT_PAYLOAD;
 
 /*
  * Reply header for READ_EVENTS.

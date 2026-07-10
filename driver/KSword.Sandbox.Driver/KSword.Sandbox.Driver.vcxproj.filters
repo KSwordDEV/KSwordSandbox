@@ -6,9 +6,51 @@
       <UniqueIdentifier>{F521F886-D818-4827-8E2D-C7604D16F94F}</UniqueIdentifier>
       <Extensions>c;cpp;cxx</Extensions>
     </Filter>
+    <Filter Include="Source Files\Core">
+      <UniqueIdentifier>{7E3AD46F-1B7C-4070-86E2-A89E09027B41}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\Device">
+      <UniqueIdentifier>{852C55F7-1C5D-4310-A927-F5287EBDF8E7}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\Eventing">
+      <UniqueIdentifier>{AA1470C5-4162-4F5D-A281-02E240E78CF3}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\Common">
+      <UniqueIdentifier>{46304B5D-D566-4A13-8D92-70031E2D6248}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\Producers">
+      <UniqueIdentifier>{61F24D75-16D6-4325-B3F9-9469152A8DC0}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\Producers\File">
+      <UniqueIdentifier>{2546E742-57F5-4077-9B6F-27B2ED9325BD}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\Producers\Process">
+      <UniqueIdentifier>{699474F8-27A5-4E7B-942D-7598CD401F51}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\Producers\Registry">
+      <UniqueIdentifier>{717E95C2-F4E1-475E-B955-B41254B58318}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\Producers\Network">
+      <UniqueIdentifier>{CB1D71C4-1D11-46B0-A926-2679E2D5D815}</UniqueIdentifier>
+    </Filter>
     <Filter Include="Header Files">
       <UniqueIdentifier>{5601E6F4-01F0-43CB-B5C7-E008E5901F21}</UniqueIdentifier>
       <Extensions>h;hpp;hxx</Extensions>
+    </Filter>
+    <Filter Include="Header Files\Common">
+      <UniqueIdentifier>{C14A183A-6F48-4C42-B1F6-EB7E36903E79}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\Producers">
+      <UniqueIdentifier>{30B6890E-EE63-4055-B57D-087ACD2A694A}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\Producers\Process">
+      <UniqueIdentifier>{7A257324-D46F-40D7-8E06-E09C1DFAD65A}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\Producers\Registry">
+      <UniqueIdentifier>{0EBA19D2-FE85-42A8-8575-F52519C368D1}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\Producers\Network">
+      <UniqueIdentifier>{FA1548BD-E509-40A9-BD47-08744BD39F90}</UniqueIdentifier>
     </Filter>
     <Filter Include="Documentation">
       <UniqueIdentifier>{EF11A53F-5743-4204-B37C-7D7E4E83764A}</UniqueIdentifier>
@@ -16,8 +58,32 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="src\Driver.c">
-      <Filter>Source Files</Filter>
+    <ClCompile Include="src\Core\DriverEntry.c">
+      <Filter>Source Files\Core</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Device\ControlDevice.c">
+      <Filter>Source Files\Device</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Eventing\EventQueue.c">
+      <Filter>Source Files\Eventing</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Producers\File\FileFilter.c">
+      <Filter>Source Files\Producers\File</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Common\AbiGuards.c">
+      <Filter>Source Files\Common</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Common\KernelString.c">
+      <Filter>Source Files\Common</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Producers\Process\ProcessMonitor.c">
+      <Filter>Source Files\Producers\Process</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Producers\Registry\RegistryMonitor.c">
+      <Filter>Source Files\Producers\Registry</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Producers\Network\NetworkMonitor.c">
+      <Filter>Source Files\Producers\Network</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -26,6 +92,18 @@
     </ClInclude>
     <ClInclude Include="src\Driver.h">
       <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="src\Common\KernelString.h">
+      <Filter>Header Files\Common</Filter>
+    </ClInclude>
+    <ClInclude Include="src\Producers\Process\ProcessMonitor.h">
+      <Filter>Header Files\Producers\Process</Filter>
+    </ClInclude>
+    <ClInclude Include="src\Producers\Registry\RegistryMonitor.h">
+      <Filter>Header Files\Producers\Registry</Filter>
+    </ClInclude>
+    <ClInclude Include="src\Producers\Network\NetworkMonitor.h">
+      <Filter>Header Files\Producers\Network</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

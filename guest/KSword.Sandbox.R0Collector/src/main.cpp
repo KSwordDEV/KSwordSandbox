@@ -832,6 +832,289 @@ std::wstring ExtractFilePayloadPath(
         KSWORD_SANDBOX_FILE_EVENT_PATH_CHARS);
 }
 
+// Input: Process operation value from KSWORD_SANDBOX_PROCESS_EVENT_PAYLOAD.
+// Processing: Converts the stable ABI enum into a compact lowercase label.
+// Return: ASCII operation name for data.operationName.
+std::string ProcessOperationName(const ULONG operation) {
+    switch (operation) {
+    case KswSandboxProcessOperationNone:
+        return "none";
+    case KswSandboxProcessOperationCreate:
+        return "create";
+    case KswSandboxProcessOperationExit:
+        return "exit";
+    default:
+        return "unrecognized";
+    }
+}
+
+// Input: Registry operation value from KSWORD_SANDBOX_REGISTRY_EVENT_PAYLOAD.
+// Processing: Converts public enum values into report-friendly names.
+// Return: ASCII operation name for registry data.
+std::string RegistryOperationName(const ULONG operation) {
+    switch (operation) {
+    case KswSandboxRegistryOperationNone:
+        return "none";
+    case KswSandboxRegistryOperationCreateKey:
+        return "createKey";
+    case KswSandboxRegistryOperationOpenKey:
+        return "openKey";
+    case KswSandboxRegistryOperationSetValue:
+        return "setValue";
+    case KswSandboxRegistryOperationDeleteValue:
+        return "deleteValue";
+    case KswSandboxRegistryOperationDeleteKey:
+        return "deleteKey";
+    case KswSandboxRegistryOperationRenameKey:
+        return "renameKey";
+    default:
+        return "unrecognized";
+    }
+}
+
+// Input: Network direction value from KSWORD_SANDBOX_NETWORK_EVENT_PAYLOAD.
+// Processing: Converts the compact numeric ABI value into a stable label.
+// Return: ASCII direction name.
+std::string NetworkDirectionName(const ULONG direction) {
+    switch (direction) {
+    case KswSandboxNetworkDirectionUnknown:
+        return "unknown";
+    case KswSandboxNetworkDirectionOutbound:
+        return "outbound";
+    case KswSandboxNetworkDirectionInbound:
+        return "inbound";
+    default:
+        return "unrecognized";
+    }
+}
+
+// Input: IP protocol number from a network payload.
+// Processing: Names common protocols while preserving the numeric field.
+// Return: ASCII protocol name.
+std::string NetworkProtocolName(const ULONG protocol) {
+    switch (protocol) {
+    case 1:
+        return "icmp";
+    case 6:
+        return "tcp";
+    case 17:
+        return "udp";
+    default:
+        return "unrecognized";
+    }
+}
+
+// Input: Process payload flags.
+// Processing: Decodes public bits and preserves unknown bits for diagnostics.
+// Return: Pipe-delimited flag names, or "none".
+std::string ProcessEventFlagNames(const ULONG flags) {
+    std::string names;
+    ULONG knownFlags = 0;
+    const auto appendName = [&names](const std::string& name) {
+        if (!names.empty()) {
+            names += "|";
+        }
+        names += name;
+    };
+
+    if ((flags & KSWORD_SANDBOX_PROCESS_EVENT_FLAG_IMAGE_PATH_PRESENT) != 0) {
+        appendName("ImagePathPresent");
+        knownFlags |= KSWORD_SANDBOX_PROCESS_EVENT_FLAG_IMAGE_PATH_PRESENT;
+    }
+    if ((flags & KSWORD_SANDBOX_PROCESS_EVENT_FLAG_IMAGE_PATH_TRUNCATED) != 0) {
+        appendName("ImagePathTruncated");
+        knownFlags |= KSWORD_SANDBOX_PROCESS_EVENT_FLAG_IMAGE_PATH_TRUNCATED;
+    }
+    if ((flags & KSWORD_SANDBOX_PROCESS_EVENT_FLAG_COMMAND_PRESENT) != 0) {
+        appendName("CommandPresent");
+        knownFlags |= KSWORD_SANDBOX_PROCESS_EVENT_FLAG_COMMAND_PRESENT;
+    }
+    if ((flags & KSWORD_SANDBOX_PROCESS_EVENT_FLAG_COMMAND_TRUNCATED) != 0) {
+        appendName("CommandTruncated");
+        knownFlags |= KSWORD_SANDBOX_PROCESS_EVENT_FLAG_COMMAND_TRUNCATED;
+    }
+    if ((flags & KSWORD_SANDBOX_PROCESS_EVENT_FLAG_STATUS_PRESENT) != 0) {
+        appendName("StatusPresent");
+        knownFlags |= KSWORD_SANDBOX_PROCESS_EVENT_FLAG_STATUS_PRESENT;
+    }
+    if ((flags & KSWORD_SANDBOX_PROCESS_EVENT_FLAG_EX_CALLBACK) != 0) {
+        appendName("ExCallback");
+        knownFlags |= KSWORD_SANDBOX_PROCESS_EVENT_FLAG_EX_CALLBACK;
+    }
+    if ((flags & KSWORD_SANDBOX_PROCESS_EVENT_FLAG_LEGACY_CALLBACK) != 0) {
+        appendName("LegacyCallback");
+        knownFlags |= KSWORD_SANDBOX_PROCESS_EVENT_FLAG_LEGACY_CALLBACK;
+    }
+
+    const ULONG unknownFlags = flags & ~knownFlags;
+    if (unknownFlags != 0) {
+        appendName("Unknown(" + HexUnsignedLongLong(unknownFlags, 8) + ")");
+    }
+    return names.empty() ? "none" : names;
+}
+
+// Input: Image payload flags.
+// Processing: Decodes public image-load bits.
+// Return: Pipe-delimited flag names, or "none".
+std::string ImageEventFlagNames(const ULONG flags) {
+    std::string names;
+    ULONG knownFlags = 0;
+    const auto appendName = [&names](const std::string& name) {
+        if (!names.empty()) {
+            names += "|";
+        }
+        names += name;
+    };
+
+    if ((flags & KSWORD_SANDBOX_IMAGE_EVENT_FLAG_PATH_PRESENT) != 0) {
+        appendName("PathPresent");
+        knownFlags |= KSWORD_SANDBOX_IMAGE_EVENT_FLAG_PATH_PRESENT;
+    }
+    if ((flags & KSWORD_SANDBOX_IMAGE_EVENT_FLAG_PATH_TRUNCATED) != 0) {
+        appendName("PathTruncated");
+        knownFlags |= KSWORD_SANDBOX_IMAGE_EVENT_FLAG_PATH_TRUNCATED;
+    }
+    if ((flags & KSWORD_SANDBOX_IMAGE_EVENT_FLAG_SYSTEM_MODE_IMAGE) != 0) {
+        appendName("SystemModeImage");
+        knownFlags |= KSWORD_SANDBOX_IMAGE_EVENT_FLAG_SYSTEM_MODE_IMAGE;
+    }
+    const ULONG unknownFlags = flags & ~knownFlags;
+    if (unknownFlags != 0) {
+        appendName("Unknown(" + HexUnsignedLongLong(unknownFlags, 8) + ")");
+    }
+    return names.empty() ? "none" : names;
+}
+
+// Input: Registry payload flags.
+// Processing: Decodes public registry bits.
+// Return: Pipe-delimited flag names, or "none".
+std::string RegistryEventFlagNames(const ULONG flags) {
+    std::string names;
+    ULONG knownFlags = 0;
+    const auto appendName = [&names](const std::string& name) {
+        if (!names.empty()) {
+            names += "|";
+        }
+        names += name;
+    };
+
+    if ((flags & KSWORD_SANDBOX_REGISTRY_EVENT_FLAG_KEY_PRESENT) != 0) {
+        appendName("KeyPresent");
+        knownFlags |= KSWORD_SANDBOX_REGISTRY_EVENT_FLAG_KEY_PRESENT;
+    }
+    if ((flags & KSWORD_SANDBOX_REGISTRY_EVENT_FLAG_KEY_TRUNCATED) != 0) {
+        appendName("KeyTruncated");
+        knownFlags |= KSWORD_SANDBOX_REGISTRY_EVENT_FLAG_KEY_TRUNCATED;
+    }
+    if ((flags & KSWORD_SANDBOX_REGISTRY_EVENT_FLAG_VALUE_PRESENT) != 0) {
+        appendName("ValuePresent");
+        knownFlags |= KSWORD_SANDBOX_REGISTRY_EVENT_FLAG_VALUE_PRESENT;
+    }
+    if ((flags & KSWORD_SANDBOX_REGISTRY_EVENT_FLAG_VALUE_TRUNCATED) != 0) {
+        appendName("ValueTruncated");
+        knownFlags |= KSWORD_SANDBOX_REGISTRY_EVENT_FLAG_VALUE_TRUNCATED;
+    }
+    if ((flags & KSWORD_SANDBOX_REGISTRY_EVENT_FLAG_STATUS_PRESENT) != 0) {
+        appendName("StatusPresent");
+        knownFlags |= KSWORD_SANDBOX_REGISTRY_EVENT_FLAG_STATUS_PRESENT;
+    }
+    const ULONG unknownFlags = flags & ~knownFlags;
+    if (unknownFlags != 0) {
+        appendName("Unknown(" + HexUnsignedLongLong(unknownFlags, 8) + ")");
+    }
+    return names.empty() ? "none" : names;
+}
+
+// Input: Network payload flags.
+// Processing: Decodes public network bits.
+// Return: Pipe-delimited flag names, or "none".
+std::string NetworkEventFlagNames(const ULONG flags) {
+    std::string names;
+    ULONG knownFlags = 0;
+    const auto appendName = [&names](const std::string& name) {
+        if (!names.empty()) {
+            names += "|";
+        }
+        names += name;
+    };
+
+    if ((flags & KSWORD_SANDBOX_NETWORK_EVENT_FLAG_IPV4) != 0) {
+        appendName("IPv4");
+        knownFlags |= KSWORD_SANDBOX_NETWORK_EVENT_FLAG_IPV4;
+    }
+    if ((flags & KSWORD_SANDBOX_NETWORK_EVENT_FLAG_IPV6) != 0) {
+        appendName("IPv6");
+        knownFlags |= KSWORD_SANDBOX_NETWORK_EVENT_FLAG_IPV6;
+    }
+    if ((flags & KSWORD_SANDBOX_NETWORK_EVENT_FLAG_DIRECTION_KNOWN) != 0) {
+        appendName("DirectionKnown");
+        knownFlags |= KSWORD_SANDBOX_NETWORK_EVENT_FLAG_DIRECTION_KNOWN;
+    }
+    if ((flags & KSWORD_SANDBOX_NETWORK_EVENT_FLAG_PID_PRESENT) != 0) {
+        appendName("PidPresent");
+        knownFlags |= KSWORD_SANDBOX_NETWORK_EVENT_FLAG_PID_PRESENT;
+    }
+    const ULONG unknownFlags = flags & ~knownFlags;
+    if (unknownFlags != 0) {
+        appendName("Unknown(" + HexUnsignedLongLong(unknownFlags, 8) + ")");
+    }
+    return names.empty() ? "none" : names;
+}
+
+// Input: Payload bytes and driver event type.
+// Processing: Decodes the best available subject path for top-level event.path.
+// Return: UTF-16 subject path or an empty string when the payload has no path.
+std::wstring ExtractTypedPayloadPath(
+    const ULONG eventType,
+    const unsigned char* payload,
+    const size_t payloadBytes) {
+    if (payload == nullptr) {
+        return {};
+    }
+
+    if (eventType == KswSandboxEventTypeFile) {
+        return ExtractFilePayloadPath(payload, payloadBytes);
+    }
+
+    if (eventType == KswSandboxEventTypeProcess &&
+        payloadBytes >= sizeof(KSWORD_SANDBOX_PROCESS_EVENT_PAYLOAD)) {
+        const auto* processPayload =
+            reinterpret_cast<const KSWORD_SANDBOX_PROCESS_EVENT_PAYLOAD*>(payload);
+        if ((processPayload->Flags & KSWORD_SANDBOX_PROCESS_EVENT_FLAG_IMAGE_PATH_PRESENT) != 0) {
+            return BoundedWideStringFromUtf16Bytes(
+                processPayload->ImagePath,
+                processPayload->ImagePathLengthBytes,
+                KSWORD_SANDBOX_PROCESS_IMAGE_PATH_CHARS);
+        }
+    }
+
+    if (eventType == KswSandboxEventTypeImage &&
+        payloadBytes >= sizeof(KSWORD_SANDBOX_IMAGE_EVENT_PAYLOAD)) {
+        const auto* imagePayload =
+            reinterpret_cast<const KSWORD_SANDBOX_IMAGE_EVENT_PAYLOAD*>(payload);
+        if ((imagePayload->Flags & KSWORD_SANDBOX_IMAGE_EVENT_FLAG_PATH_PRESENT) != 0) {
+            return BoundedWideStringFromUtf16Bytes(
+                imagePayload->ImagePath,
+                imagePayload->PathLengthBytes,
+                KSWORD_SANDBOX_IMAGE_PATH_CHARS);
+        }
+    }
+
+    if (eventType == KswSandboxEventTypeRegistry &&
+        payloadBytes >= sizeof(KSWORD_SANDBOX_REGISTRY_EVENT_PAYLOAD)) {
+        const auto* registryPayload =
+            reinterpret_cast<const KSWORD_SANDBOX_REGISTRY_EVENT_PAYLOAD*>(payload);
+        if ((registryPayload->Flags & KSWORD_SANDBOX_REGISTRY_EVENT_FLAG_KEY_PRESENT) != 0) {
+            return BoundedWideStringFromUtf16Bytes(
+                registryPayload->KeyPath,
+                registryPayload->KeyPathLengthBytes,
+                KSWORD_SANDBOX_REGISTRY_KEY_PATH_CHARS);
+        }
+    }
+
+    return {};
+}
+
 // Input: One public driver event header and the JSON data builder being filled.
 // Processing: Adds string-valued flag diagnostics and names the current
 // header-only DriverEntry startup event when the reserved type carries the
@@ -988,6 +1271,263 @@ bool AddFilePayloadData(
     return true;
 }
 
+// Input: Payload bytes for KswSandboxEventTypeProcess and JSON builder.
+// Processing: Parses process create/exit payload fields into string-valued data.
+// Return: true when the public process payload was parsed; false otherwise.
+bool AddProcessPayloadData(
+    const unsigned char* payload,
+    const size_t payloadBytes,
+    JsonDataObjectBuilder* data) {
+    if (data == nullptr) {
+        return false;
+    }
+
+    data->AddUtf8("typedPayloadKind", "process");
+    data->AddUtf8("payloadSchema", "KSWORD_SANDBOX_PROCESS_EVENT_PAYLOAD");
+    data->AddUnsigned(
+        "typedPayloadMinimumSize",
+        static_cast<unsigned long long>(sizeof(KSWORD_SANDBOX_PROCESS_EVENT_PAYLOAD)));
+    data->AddUnsigned("typedPayloadObservedBytes", static_cast<unsigned long long>(payloadBytes));
+    if (payload == nullptr ||
+        payloadBytes < sizeof(KSWORD_SANDBOX_PROCESS_EVENT_PAYLOAD)) {
+        data->AddUtf8("typedPayloadStatus", "payload-too-small");
+        return false;
+    }
+
+    const auto* processPayload =
+        reinterpret_cast<const KSWORD_SANDBOX_PROCESS_EVENT_PAYLOAD*>(payload);
+    const std::wstring imagePath = ExtractTypedPayloadPath(
+        KswSandboxEventTypeProcess,
+        payload,
+        payloadBytes);
+    const std::wstring commandLine = BoundedWideStringFromUtf16Bytes(
+        processPayload->CommandLine,
+        processPayload->CommandLineLengthBytes,
+        KSWORD_SANDBOX_PROCESS_COMMAND_LINE_CHARS);
+
+    data->AddUtf8("typedPayloadStatus", "parsed");
+    data->AddUnsigned("processVersion", processPayload->Version);
+    data->AddUtf8("processVersionHex", HexUnsignedLongLong(processPayload->Version, 8));
+    data->AddUnsigned("processPayloadSize", processPayload->Size);
+    data->AddBool(
+        "processPayloadSizeMatchesPublicAbi",
+        processPayload->Size == static_cast<ULONG>(sizeof(KSWORD_SANDBOX_PROCESS_EVENT_PAYLOAD)));
+    data->AddUnsigned("operation", processPayload->Operation);
+    data->AddUtf8("operationName", ProcessOperationName(processPayload->Operation));
+    data->AddUnsigned("flags", processPayload->Flags);
+    data->AddUtf8("flagsHex", HexUnsignedLongLong(processPayload->Flags, 8));
+    data->AddUtf8("flagNames", ProcessEventFlagNames(processPayload->Flags));
+    data->AddBool(
+        "statusPresent",
+        (processPayload->Flags & KSWORD_SANDBOX_PROCESS_EVENT_FLAG_STATUS_PRESENT) != 0);
+    data->AddBool(
+        "exCallback",
+        (processPayload->Flags & KSWORD_SANDBOX_PROCESS_EVENT_FLAG_EX_CALLBACK) != 0);
+    data->AddBool(
+        "legacyCallback",
+        (processPayload->Flags & KSWORD_SANDBOX_PROCESS_EVENT_FLAG_LEGACY_CALLBACK) != 0);
+    data->AddUnsigned("processId", processPayload->ProcessId);
+    data->AddUnsigned("parentProcessId", processPayload->ParentProcessId);
+    data->AddUnsigned("creatingProcessId", processPayload->CreatingProcessId);
+    data->AddSigned("status", processPayload->Status);
+    data->AddUtf8(
+        "statusHex",
+        HexUnsignedLongLong(static_cast<unsigned long>(processPayload->Status), 8));
+    data->AddUnsigned("imagePathLengthBytes", processPayload->ImagePathLengthBytes);
+    data->AddUnsigned("commandLineLengthBytes", processPayload->CommandLineLengthBytes);
+    data->AddBool("imagePathDecoded", !imagePath.empty());
+    data->AddBool("commandLineDecoded", !commandLine.empty());
+    if (!imagePath.empty()) {
+        data->AddWide("imagePath", imagePath);
+        data->AddWide("path", imagePath);
+    }
+    if (!commandLine.empty()) {
+        data->AddWide("capturedCommandLine", commandLine);
+    }
+
+    return true;
+}
+
+// Input: Payload bytes for KswSandboxEventTypeImage and JSON builder.
+// Processing: Parses image-load callback payload fields for live display.
+// Return: true when the public image payload was parsed; false otherwise.
+bool AddImagePayloadData(
+    const unsigned char* payload,
+    const size_t payloadBytes,
+    JsonDataObjectBuilder* data) {
+    if (data == nullptr) {
+        return false;
+    }
+
+    data->AddUtf8("typedPayloadKind", "image");
+    data->AddUtf8("payloadSchema", "KSWORD_SANDBOX_IMAGE_EVENT_PAYLOAD");
+    data->AddUnsigned(
+        "typedPayloadMinimumSize",
+        static_cast<unsigned long long>(sizeof(KSWORD_SANDBOX_IMAGE_EVENT_PAYLOAD)));
+    data->AddUnsigned("typedPayloadObservedBytes", static_cast<unsigned long long>(payloadBytes));
+    if (payload == nullptr ||
+        payloadBytes < sizeof(KSWORD_SANDBOX_IMAGE_EVENT_PAYLOAD)) {
+        data->AddUtf8("typedPayloadStatus", "payload-too-small");
+        return false;
+    }
+
+    const auto* imagePayload =
+        reinterpret_cast<const KSWORD_SANDBOX_IMAGE_EVENT_PAYLOAD*>(payload);
+    const std::wstring imagePath = ExtractTypedPayloadPath(
+        KswSandboxEventTypeImage,
+        payload,
+        payloadBytes);
+
+    data->AddUtf8("typedPayloadStatus", "parsed");
+    data->AddUnsigned("imageVersion", imagePayload->Version);
+    data->AddUtf8("imageVersionHex", HexUnsignedLongLong(imagePayload->Version, 8));
+    data->AddUnsigned("imagePayloadSize", imagePayload->Size);
+    data->AddBool(
+        "imagePayloadSizeMatchesPublicAbi",
+        imagePayload->Size == static_cast<ULONG>(sizeof(KSWORD_SANDBOX_IMAGE_EVENT_PAYLOAD)));
+    data->AddUnsigned("flags", imagePayload->Flags);
+    data->AddUtf8("flagsHex", HexUnsignedLongLong(imagePayload->Flags, 8));
+    data->AddUtf8("flagNames", ImageEventFlagNames(imagePayload->Flags));
+    data->AddBool(
+        "systemModeImage",
+        (imagePayload->Flags & KSWORD_SANDBOX_IMAGE_EVENT_FLAG_SYSTEM_MODE_IMAGE) != 0);
+    data->AddUnsigned("processId", imagePayload->ProcessId);
+    data->AddUtf8("imageBaseHex", HexUnsignedLongLong(imagePayload->ImageBase, 16));
+    data->AddUnsigned("imageBase", imagePayload->ImageBase);
+    data->AddUnsigned("imageSize", imagePayload->ImageSize);
+    data->AddUnsigned("pathLengthBytes", imagePayload->PathLengthBytes);
+    data->AddBool("pathDecoded", !imagePath.empty());
+    if (!imagePath.empty()) {
+        data->AddWide("imagePath", imagePath);
+        data->AddWide("path", imagePath);
+    }
+
+    return true;
+}
+
+// Input: Payload bytes for KswSandboxEventTypeRegistry and JSON builder.
+// Processing: Parses registry callback payload fields.
+// Return: true when the public registry payload was parsed; false otherwise.
+bool AddRegistryPayloadData(
+    const unsigned char* payload,
+    const size_t payloadBytes,
+    JsonDataObjectBuilder* data) {
+    if (data == nullptr) {
+        return false;
+    }
+
+    data->AddUtf8("typedPayloadKind", "registry");
+    data->AddUtf8("payloadSchema", "KSWORD_SANDBOX_REGISTRY_EVENT_PAYLOAD");
+    data->AddUnsigned(
+        "typedPayloadMinimumSize",
+        static_cast<unsigned long long>(sizeof(KSWORD_SANDBOX_REGISTRY_EVENT_PAYLOAD)));
+    data->AddUnsigned("typedPayloadObservedBytes", static_cast<unsigned long long>(payloadBytes));
+    if (payload == nullptr ||
+        payloadBytes < sizeof(KSWORD_SANDBOX_REGISTRY_EVENT_PAYLOAD)) {
+        data->AddUtf8("typedPayloadStatus", "payload-too-small");
+        return false;
+    }
+
+    const auto* registryPayload =
+        reinterpret_cast<const KSWORD_SANDBOX_REGISTRY_EVENT_PAYLOAD*>(payload);
+    const std::wstring keyPath = ExtractTypedPayloadPath(
+        KswSandboxEventTypeRegistry,
+        payload,
+        payloadBytes);
+    const std::wstring valueName = BoundedWideStringFromUtf16Bytes(
+        registryPayload->ValueName,
+        registryPayload->ValueNameLengthBytes,
+        KSWORD_SANDBOX_REGISTRY_VALUE_NAME_CHARS);
+
+    data->AddUtf8("typedPayloadStatus", "parsed");
+    data->AddUnsigned("registryVersion", registryPayload->Version);
+    data->AddUtf8("registryVersionHex", HexUnsignedLongLong(registryPayload->Version, 8));
+    data->AddUnsigned("registryPayloadSize", registryPayload->Size);
+    data->AddBool(
+        "registryPayloadSizeMatchesPublicAbi",
+        registryPayload->Size == static_cast<ULONG>(sizeof(KSWORD_SANDBOX_REGISTRY_EVENT_PAYLOAD)));
+    data->AddUnsigned("operation", registryPayload->Operation);
+    data->AddUtf8("operationName", RegistryOperationName(registryPayload->Operation));
+    data->AddUnsigned("flags", registryPayload->Flags);
+    data->AddUtf8("flagsHex", HexUnsignedLongLong(registryPayload->Flags, 8));
+    data->AddUtf8("flagNames", RegistryEventFlagNames(registryPayload->Flags));
+    data->AddBool(
+        "statusPresent",
+        (registryPayload->Flags & KSWORD_SANDBOX_REGISTRY_EVENT_FLAG_STATUS_PRESENT) != 0);
+    data->AddSigned("status", registryPayload->Status);
+    data->AddUtf8(
+        "statusHex",
+        HexUnsignedLongLong(static_cast<unsigned long>(registryPayload->Status), 8));
+    data->AddUnsigned("processId", registryPayload->ProcessId);
+    data->AddUnsigned("keyPathLengthBytes", registryPayload->KeyPathLengthBytes);
+    data->AddUnsigned("valueNameLengthBytes", registryPayload->ValueNameLengthBytes);
+    data->AddBool("keyPathDecoded", !keyPath.empty());
+    data->AddBool("valueNameDecoded", !valueName.empty());
+    if (!keyPath.empty()) {
+        data->AddWide("keyPath", keyPath);
+        data->AddWide("path", keyPath);
+    }
+    if (!valueName.empty()) {
+        data->AddWide("valueName", valueName);
+    }
+
+    return true;
+}
+
+// Input: Payload bytes for KswSandboxEventTypeNetwork and JSON builder.
+// Processing: Parses the compact network ABI for future WFP producers.
+// Return: true when the public network payload was parsed; false otherwise.
+bool AddNetworkPayloadData(
+    const unsigned char* payload,
+    const size_t payloadBytes,
+    JsonDataObjectBuilder* data) {
+    if (data == nullptr) {
+        return false;
+    }
+
+    data->AddUtf8("typedPayloadKind", "network");
+    data->AddUtf8("payloadSchema", "KSWORD_SANDBOX_NETWORK_EVENT_PAYLOAD");
+    data->AddUnsigned(
+        "typedPayloadMinimumSize",
+        static_cast<unsigned long long>(sizeof(KSWORD_SANDBOX_NETWORK_EVENT_PAYLOAD)));
+    data->AddUnsigned("typedPayloadObservedBytes", static_cast<unsigned long long>(payloadBytes));
+    if (payload == nullptr ||
+        payloadBytes < sizeof(KSWORD_SANDBOX_NETWORK_EVENT_PAYLOAD)) {
+        data->AddUtf8("typedPayloadStatus", "payload-too-small");
+        return false;
+    }
+
+    const auto* networkPayload =
+        reinterpret_cast<const KSWORD_SANDBOX_NETWORK_EVENT_PAYLOAD*>(payload);
+    data->AddUtf8("typedPayloadStatus", "parsed");
+    data->AddUnsigned("networkVersion", networkPayload->Version);
+    data->AddUtf8("networkVersionHex", HexUnsignedLongLong(networkPayload->Version, 8));
+    data->AddUnsigned("networkPayloadSize", networkPayload->Size);
+    data->AddBool(
+        "networkPayloadSizeMatchesPublicAbi",
+        networkPayload->Size == static_cast<ULONG>(sizeof(KSWORD_SANDBOX_NETWORK_EVENT_PAYLOAD)));
+    data->AddUnsigned("protocol", networkPayload->Protocol);
+    data->AddUtf8("protocolName", NetworkProtocolName(networkPayload->Protocol));
+    data->AddUnsigned("direction", networkPayload->Direction);
+    data->AddUtf8("directionName", NetworkDirectionName(networkPayload->Direction));
+    data->AddUnsigned("flags", networkPayload->Flags);
+    data->AddUtf8("flagsHex", HexUnsignedLongLong(networkPayload->Flags, 8));
+    data->AddUtf8("flagNames", NetworkEventFlagNames(networkPayload->Flags));
+    data->AddUnsigned("processId", networkPayload->ProcessId);
+    data->AddUtf8(
+        "localAddressHex",
+        HexBytes(networkPayload->LocalAddress, KSWORD_SANDBOX_NETWORK_ADDRESS_BYTES, KSWORD_SANDBOX_NETWORK_ADDRESS_BYTES));
+    data->AddUtf8(
+        "remoteAddressHex",
+        HexBytes(networkPayload->RemoteAddress, KSWORD_SANDBOX_NETWORK_ADDRESS_BYTES, KSWORD_SANDBOX_NETWORK_ADDRESS_BYTES));
+    data->AddUnsigned("localPort", networkPayload->LocalPort);
+    data->AddUnsigned("remotePort", networkPayload->RemotePort);
+    data->AddUnsigned("layerId", networkPayload->LayerId);
+    data->AddUnsigned("calloutId", networkPayload->CalloutId);
+
+    return true;
+}
+
 // Input: Event category whose payload structure is not yet public, the observed
 // payload bytes, and the JSON builder.
 // Processing: Records an ABI-pending parser status without inventing field
@@ -1068,35 +1608,15 @@ bool AddTypedPayloadData(
     case KswSandboxEventTypeDriverLoad:
         return AddDriverLoadPayloadData(payload, payloadBytes, data);
     case KswSandboxEventTypeProcess:
-        return AddAbiPendingPayloadData(
-            "process",
-            "KSWORD_SANDBOX_PROCESS_PAYLOAD",
-            payload,
-            payloadBytes,
-            data);
+        return AddProcessPayloadData(payload, payloadBytes, data);
     case KswSandboxEventTypeImage:
-        return AddAbiPendingPayloadData(
-            "image",
-            "KSWORD_SANDBOX_IMAGE_PAYLOAD",
-            payload,
-            payloadBytes,
-            data);
+        return AddImagePayloadData(payload, payloadBytes, data);
     case KswSandboxEventTypeFile:
         return AddFilePayloadData(payload, payloadBytes, data);
     case KswSandboxEventTypeRegistry:
-        return AddAbiPendingPayloadData(
-            "registry",
-            "KSWORD_SANDBOX_REGISTRY_PAYLOAD",
-            payload,
-            payloadBytes,
-            data);
+        return AddRegistryPayloadData(payload, payloadBytes, data);
     case KswSandboxEventTypeNetwork:
-        return AddAbiPendingPayloadData(
-            "network",
-            "KSWORD_SANDBOX_NETWORK_PAYLOAD",
-            payload,
-            payloadBytes,
-            data);
+        return AddNetworkPayloadData(payload, payloadBytes, data);
     case KswSandboxEventTypeReserved:
         return AddReservedPayloadData(header, payload, payloadBytes, data);
     default:
@@ -1482,12 +2002,10 @@ bool EmitDriverEventRecords(
         event.source = "driver";
         event.processId = header.ProcessId;
         event.path = options.devicePath;
-        if (header.Type == KswSandboxEventTypeFile) {
-            const std::wstring filePath =
-                ExtractFilePayloadPath(payload, header.PayloadSize);
-            if (!filePath.empty()) {
-                event.path = filePath;
-            }
+        const std::wstring subjectPath =
+            ExtractTypedPayloadPath(header.Type, payload, header.PayloadSize);
+        if (!subjectPath.empty()) {
+            event.path = subjectPath;
         }
         event.dataJson = BuildDriverEventData(
             header,

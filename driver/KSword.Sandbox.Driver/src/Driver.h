@@ -113,6 +113,28 @@ typedef struct _KSWORD_SANDBOX_FILE_FILTER_RUNTIME {
     NTSTATUS StartStatus;
 } KSWORD_SANDBOX_FILE_FILTER_RUNTIME, *PKSWORD_SANDBOX_FILE_FILTER_RUNTIME;
 
+VOID
+KswSetLastStatus(
+    _Inout_ PKSWORD_SANDBOX_DEVICE_EXTENSION DeviceExtension,
+    _In_ NTSTATUS Status
+    );
+
+VOID
+KswInitializeDeviceExtension(
+    _Out_ PKSWORD_SANDBOX_DEVICE_EXTENSION DeviceExtension
+    );
+
+PKSWORD_SANDBOX_DEVICE_EXTENSION
+KswGetDeviceExtension(
+    _In_opt_ PDEVICE_OBJECT DeviceObject
+    );
+
+VOID
+KswSnapshotState(
+    _In_ PKSWORD_SANDBOX_DEVICE_EXTENSION DeviceExtension,
+    _Out_ PKSWORD_SANDBOX_STATE_SNAPSHOT Snapshot
+    );
+
 NTSTATUS
 KswPushEvent(
     _In_ PKSWORD_SANDBOX_DEVICE_EXTENSION DeviceExtension,
@@ -120,6 +142,18 @@ KswPushEvent(
     _In_ ULONG Flags,
     _In_reads_bytes_opt_(PayloadSize) const VOID* Payload,
     _In_ ULONG PayloadSize
+    );
+
+VOID
+KswDrainEventHeaders(
+    _Inout_ PKSWORD_SANDBOX_DEVICE_EXTENSION DeviceExtension,
+    _Out_writes_bytes_(EventCapacityBytes) PUCHAR EventBuffer,
+    _In_ ULONG EventCapacityBytes,
+    _In_ ULONG MaxEvents,
+    _Out_ PULONG EventsWritten,
+    _Out_ PULONG BytesWritten,
+    _Out_ PULONGLONG EventsDropped,
+    _Out_ PULONGLONG NextSequence
     );
 
 NTSTATUS

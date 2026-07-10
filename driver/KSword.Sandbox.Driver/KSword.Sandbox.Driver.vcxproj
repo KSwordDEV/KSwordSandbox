@@ -56,11 +56,12 @@
     <ClCompile>
       <WarningLevel>Level4</WarningLevel>
       <TreatWarningAsError>true</TreatWarningAsError>
-      <AdditionalIncludeDirectories>$(ProjectDir)include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)include;$(ProjectDir)src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>POOL_NX_OPTIN=1;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <Link>
       <TreatLinkerWarningAsErrors>true</TreatLinkerWarningAsErrors>
+      <AdditionalOptions>/INTEGRITYCHECK %(AdditionalOptions)</AdditionalOptions>
       <AdditionalDependencies>FltMgr.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <DriverSign>
@@ -71,11 +72,12 @@
     <ClCompile>
       <WarningLevel>Level4</WarningLevel>
       <TreatWarningAsError>true</TreatWarningAsError>
-      <AdditionalIncludeDirectories>$(ProjectDir)include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)include;$(ProjectDir)src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>POOL_NX_OPTIN=1;NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <Link>
       <TreatLinkerWarningAsErrors>true</TreatLinkerWarningAsErrors>
+      <AdditionalOptions>/INTEGRITYCHECK %(AdditionalOptions)</AdditionalOptions>
       <AdditionalDependencies>FltMgr.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <DriverSign>
@@ -85,9 +87,21 @@
   <ItemGroup>
     <ClInclude Include="include\KSwordSandboxDriverIoctl.h" />
     <ClInclude Include="src\Driver.h" />
+    <ClInclude Include="src\Common\KernelString.h" />
+    <ClInclude Include="src\Producers\Network\NetworkMonitor.h" />
+    <ClInclude Include="src\Producers\Process\ProcessMonitor.h" />
+    <ClInclude Include="src\Producers\Registry\RegistryMonitor.h" />
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="src\Driver.c" />
+    <ClCompile Include="src\Common\AbiGuards.c" />
+    <ClCompile Include="src\Common\KernelString.c" />
+    <ClCompile Include="src\Core\DriverEntry.c" />
+    <ClCompile Include="src\Device\ControlDevice.c" />
+    <ClCompile Include="src\Eventing\EventQueue.c" />
+    <ClCompile Include="src\Producers\File\FileFilter.c" />
+    <ClCompile Include="src\Producers\Network\NetworkMonitor.c" />
+    <ClCompile Include="src\Producers\Process\ProcessMonitor.c" />
+    <ClCompile Include="src\Producers\Registry\RegistryMonitor.c" />
   </ItemGroup>
   <ItemGroup>
     <None Include="README.md" />
