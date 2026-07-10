@@ -42,6 +42,15 @@ Example:
 - `r0collector.driverHealth`: successful
   `IOCTL_KSWORD_SANDBOX_GET_HEALTH` reply. With `--health`, this is the only
   live IOCTL emitted before `r0collector.stopped`.
+- `r0collector.driverCapabilities`: successful
+  `IOCTL_KSWORD_SANDBOX_GET_CAPABILITIES` reply. It records ABI major/minor,
+  capability flags, supported/default producer masks, and event layout limits.
+- `r0collector.driverProducerMask`: emitted when `--enable-mask` is supplied
+  and `IOCTL_KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK` succeeds. It records
+  requested, previous, effective, and supported masks.
+- `r0collector.driverStatus`: successful `IOCTL_KSWORD_SANDBOX_GET_STATUS`
+  reply. Driver mode emits it before draining and again after the final drain so
+  queue depth, counters, and last NTSTATUS are preserved.
 - `r0collector.driverPoll`: successful `IOCTL_KSWORD_SANDBOX_POLL` reply.
 - `r0collector.driverReadEvents`: batch summary for successful
   `IOCTL_KSWORD_SANDBOX_READ_EVENTS`.

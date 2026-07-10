@@ -1300,6 +1300,67 @@ std::string BuildCapabilitiesData(const KSWORD_SANDBOX_CAPABILITIES_REPLY& reply
     return data.Build();
 }
 
+// Input: GET_STATUS reply plus byte count returned by DeviceIoControl.
+// Processing: Copies current producer mask, queue depth, counters, and last
+// driver status into JSON data for operator diagnostics before event draining.
+// Return: JSON object text for SandboxEvent.data.
+std::string BuildStatusData(const KSWORD_SANDBOX_STATUS_REPLY& reply, const DWORD bytesReturned) {
+    JsonDataObjectBuilder data;
+    data.AddUtf8("ioctl", "IOCTL_KSWORD_SANDBOX_GET_STATUS");
+    data.AddUnsigned("ioctlCode", IOCTL_KSWORD_SANDBOX_GET_STATUS);
+    data.AddUnsigned("bytesReturned", bytesReturned);
+    data.AddUnsigned("version", reply.Version);
+    data.AddUtf8("versionHex", HexUnsignedLongLong(reply.Version, 8));
+    data.AddUnsigned("size", reply.Size);
+    data.AddUnsigned("driverState", reply.DriverState);
+    data.AddUtf8("driverStateName", DriverStateName(reply.DriverState));
+    data.AddUnsigned("flags", reply.Flags);
+    data.AddUtf8("flagsHex", HexUnsignedLongLong(reply.Flags, 8));
+    data.AddUnsigned("queueCapacity", reply.QueueCapacity);
+    data.AddUnsigned("queueDepth", reply.QueueDepth);
+    data.AddUnsigned("queueHighWatermark", reply.QueueHighWatermark);
+    data.AddUnsigned("producerEnableMask", reply.ProducerEnableMask);
+    data.AddUtf8("producerEnableMaskHex", HexUnsignedLongLong(reply.ProducerEnableMask, 8));
+    data.AddUnsigned("supportedProducerMask", reply.SupportedProducerMask);
+    data.AddUtf8("supportedProducerMaskHex", HexUnsignedLongLong(reply.SupportedProducerMask, 8));
+    data.AddSigned("lastNtStatus", reply.LastNtStatus);
+    data.AddUtf8("lastNtStatusHex", HexUnsignedLongLong(static_cast<unsigned long>(reply.LastNtStatus), 8));
+    data.AddUnsigned("totalEventsEnqueued", reply.TotalEventsEnqueued);
+    data.AddUnsigned("totalEventsDropped", reply.TotalEventsDropped);
+    data.AddUnsigned("totalEventsRead", reply.TotalEventsRead);
+    data.AddUnsigned("totalEventsSuppressed", reply.TotalEventsSuppressed);
+    data.AddUnsigned("nextSequence", reply.NextSequence);
+    return data.Build();
+}
+
+// Input: SET_PRODUCER_ENABLE_MASK reply, byte count, and requested mask.
+// Processing: Records requested/previous/effective masks so the final report can
+// prove exactly which kernel producers were enabled for this run.
+// Return: JSON object text for SandboxEvent.data.
+std::string BuildSetProducerEnableMaskData(
+    const KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK_REPLY& reply,
+    const DWORD bytesReturned,
+    const ULONG requestedEnableMask) {
+    JsonDataObjectBuilder data;
+    data.AddUtf8("ioctl", "IOCTL_KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK");
+    data.AddUnsigned("ioctlCode", IOCTL_KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK);
+    data.AddUnsigned("bytesReturned", bytesReturned);
+    data.AddUnsigned("requestedEnableMask", requestedEnableMask);
+    data.AddUtf8("requestedEnableMaskHex", HexUnsignedLongLong(requestedEnableMask, 8));
+    data.AddUnsigned("version", reply.Version);
+    data.AddUtf8("versionHex", HexUnsignedLongLong(reply.Version, 8));
+    data.AddUnsigned("size", reply.Size);
+    data.AddUnsigned("previousEnableMask", reply.PreviousEnableMask);
+    data.AddUtf8("previousEnableMaskHex", HexUnsignedLongLong(reply.PreviousEnableMask, 8));
+    data.AddUnsigned("effectiveEnableMask", reply.EffectiveEnableMask);
+    data.AddUtf8("effectiveEnableMaskHex", HexUnsignedLongLong(reply.EffectiveEnableMask, 8));
+    data.AddUnsigned("supportedProducerMask", reply.SupportedProducerMask);
+    data.AddUtf8("supportedProducerMaskHex", HexUnsignedLongLong(reply.SupportedProducerMask, 8));
+    data.AddUnsigned("flags", reply.Flags);
+    data.AddUtf8("flagsHex", HexUnsignedLongLong(reply.Flags, 8));
+    return data.Build();
+}
+
 // Input: POLL reply plus the byte count returned by DeviceIoControl.
 // Processing: Copies queue snapshot fields into string-valued data entries.
 // Return: JSON object text for SandboxEvent.data.

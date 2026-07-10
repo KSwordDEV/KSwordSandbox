@@ -56,6 +56,8 @@ private:
 UniqueHandle OpenDriverDevice(const std::wstring& devicePath, DWORD* errorCode);
 bool EmitDriverHealth(const UniqueHandle& device, const Options& options, EventWriter& writer);
 bool EmitDriverCapabilities(const UniqueHandle& device, const Options& options, EventWriter& writer);
+bool EmitDriverStatus(const UniqueHandle& device, const Options& options, EventWriter& writer);
+bool EmitDriverSetProducerEnableMask(const UniqueHandle& device, const Options& options, EventWriter& writer);
 bool EmitDriverPoll(const UniqueHandle& device, const Options& options, EventWriter& writer);
 bool EmitDriverReadEvents(
     const UniqueHandle& device,

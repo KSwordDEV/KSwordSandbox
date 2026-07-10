@@ -268,6 +268,9 @@ internal sealed class P0P1ValidationGateScenario : ISmokeTestScenario
         RequireContains(controlDevice, "case IOCTL_KSWORD_SANDBOX_GET_STATUS", "Control device must route status IOCTL.");
         RequireContains(controlDevice, "case IOCTL_KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK", "Control device must route producer-mask IOCTL.");
         RequireContains(ioctlClient, "IOCTL_KSWORD_SANDBOX_GET_HEALTH", "R0Collector must probe driver health.");
+        RequireContains(ioctlClient, "IOCTL_KSWORD_SANDBOX_GET_CAPABILITIES", "R0Collector must negotiate capabilities.");
+        RequireContains(ioctlClient, "IOCTL_KSWORD_SANDBOX_GET_STATUS", "R0Collector must capture driver status before/after draining.");
+        RequireContains(ioctlClient, "IOCTL_KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK", "R0Collector must support producer-mask negotiation.");
         RequireContains(ioctlClient, "IOCTL_KSWORD_SANDBOX_POLL", "R0Collector must poll for queued driver events.");
         RequireContains(ioctlClient, "IOCTL_KSWORD_SANDBOX_READ_EVENTS", "R0Collector must drain READ_EVENTS.");
         RequireContains(ioctlClient, "request.Flags = options.enableMaskSpecified ? options.enableMask : 0", "R0Collector must pass producer enable mask to READ_EVENTS.");

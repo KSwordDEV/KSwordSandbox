@@ -66,11 +66,16 @@ Options:
 - If the device opens, the collector emits:
   - `r0collector.deviceOpened`
   - `r0collector.driverHealth`
+  - unless `--health` was requested, `r0collector.driverCapabilities`
+  - unless `--health` was requested and `--enable-mask` was supplied,
+    `r0collector.driverProducerMask`
+  - unless `--health` was requested, `r0collector.driverStatus` before draining
   - unless `--health` was requested, `r0collector.driverPoll`
   - unless `--health` was requested, stable driver rows from `IOCTL_KSWORD_SANDBOX_READ_EVENTS`
     (`driver.process`, `image.load`, `driver.file`, `driver.registry`,
     `driver.network`, `driver.event.reserved`, or fallback `driver.event`)
   - unless `--health` was requested, `r0collector.driverReadEvents`
+  - unless `--health` was requested, final `r0collector.driverStatus`
   - optional `r0collector.heartbeat`
   - `r0collector.stopped`
 

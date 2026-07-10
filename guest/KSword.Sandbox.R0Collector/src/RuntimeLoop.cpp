@@ -132,6 +132,14 @@ int RunDriverIoctlLoop(const UniqueHandle& device, const Options& options, Event
         return kExitRuntimeFailure;
     }
 
+    if (!EmitDriverSetProducerEnableMask(device, options, writer)) {
+        return kExitRuntimeFailure;
+    }
+
+    if (!EmitDriverStatus(device, options, writer)) {
+        return kExitRuntimeFailure;
+    }
+
     unsigned long long polls = 0;
     unsigned long long readBatches = 0;
     unsigned long long driverEvents = 0;
@@ -189,6 +197,10 @@ int RunDriverIoctlLoop(const UniqueHandle& device, const Options& options, Event
     stoppedEvent.eventType = "r0collector.stopped";
     stoppedEvent.path = options.devicePath;
     stoppedEvent.dataJson = data.Build();
+
+    if (!EmitDriverStatus(device, options, writer)) {
+        return kExitRuntimeFailure;
+    }
 
     return EmitEvent(writer, stoppedEvent) ? kExitSuccess : kExitRuntimeFailure;
 }

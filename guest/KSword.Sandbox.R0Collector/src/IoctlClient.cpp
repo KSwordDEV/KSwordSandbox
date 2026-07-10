@@ -219,6 +219,118 @@ bool EmitDriverCapabilities(const UniqueHandle& device, const Options& options, 
 }
 
 // Input: Open driver handle, collector options, and JSONL sink.
+// Processing: Issues IOCTL_KSWORD_SANDBOX_GET_STATUS and writes queue,
+// producer-mask, and counter metadata before/after capture operations.
+// Return: true if the IOCTL/reply/sink are valid.
+bool EmitDriverStatus(const UniqueHandle& device, const Options& options, EventWriter& writer) {
+    KSWORD_SANDBOX_STATUS_REPLY reply {};
+    DWORD bytesReturned = 0;
+    DWORD errorCode = ERROR_SUCCESS;
+
+    if (!CallDriverIoctl(
+            device,
+            IOCTL_KSWORD_SANDBOX_GET_STATUS,
+            nullptr,
+            0,
+            &reply,
+            static_cast<DWORD>(sizeof(reply)),
+            &bytesReturned,
+            &errorCode)) {
+        return EmitIoctlFailure(
+            writer,
+            options,
+            "IOCTL_KSWORD_SANDBOX_GET_STATUS",
+            IOCTL_KSWORD_SANDBOX_GET_STATUS,
+            errorCode,
+            bytesReturned,
+            L"Verify that the loaded driver supports the public status IOCTL.");
+    }
+
+    if (bytesReturned < static_cast<DWORD>(sizeof(reply)) ||
+        reply.Version != KSWORD_SANDBOX_INTERFACE_VERSION ||
+        reply.Size < sizeof(reply)) {
+        return EmitProtocolError(
+            writer,
+            options,
+            "IOCTL_KSWORD_SANDBOX_GET_STATUS",
+            L"GET_STATUS returned an incompatible KSWORD_SANDBOX_STATUS_REPLY.",
+            bytesReturned);
+    }
+
+    SandboxEventFields event;
+    event.eventType = "r0collector.driverStatus";
+    event.path = options.devicePath;
+    event.dataJson = BuildStatusData(reply, bytesReturned);
+    return EmitEvent(writer, event);
+}
+
+// Input: Open driver handle and collector options carrying --enable-mask.
+// Processing: Issues IOCTL_KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK only when
+// requested by the operator, then records requested/previous/effective masks.
+// Return: true if no mask was requested or the IOCTL/reply/sink are valid.
+bool EmitDriverSetProducerEnableMask(const UniqueHandle& device, const Options& options, EventWriter& writer) {
+    if (!options.enableMaskSpecified) {
+        return true;
+    }
+
+    std::vector<unsigned char> buffer(sizeof(KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK_REPLY));
+    auto* request = reinterpret_cast<PKSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK_REQUEST>(buffer.data());
+    request->Version = KSWORD_SANDBOX_INTERFACE_VERSION;
+    request->Size = sizeof(KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK_REQUEST);
+    request->EnableMask = options.enableMask;
+    request->Flags = 0;
+
+    DWORD bytesReturned = 0;
+    DWORD errorCode = ERROR_SUCCESS;
+
+    if (!CallDriverIoctl(
+            device,
+            IOCTL_KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK,
+            request,
+            static_cast<DWORD>(sizeof(KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK_REQUEST)),
+            buffer.data(),
+            static_cast<DWORD>(buffer.size()),
+            &bytesReturned,
+            &errorCode)) {
+        return EmitIoctlFailure(
+            writer,
+            options,
+            "IOCTL_KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK",
+            IOCTL_KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK,
+            errorCode,
+            bytesReturned,
+            L"Ensure the requested producer mask is a subset of the supported mask.");
+    }
+
+    if (bytesReturned < static_cast<DWORD>(sizeof(KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK_REPLY))) {
+        return EmitProtocolError(
+            writer,
+            options,
+            "IOCTL_KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK",
+            L"SET_PRODUCER_ENABLE_MASK returned fewer bytes than the public reply.",
+            bytesReturned);
+    }
+
+    KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK_REPLY reply {};
+    std::memcpy(&reply, buffer.data(), sizeof(reply));
+    if (reply.Version != KSWORD_SANDBOX_INTERFACE_VERSION ||
+        reply.Size < sizeof(reply)) {
+        return EmitProtocolError(
+            writer,
+            options,
+            "IOCTL_KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK",
+            L"SET_PRODUCER_ENABLE_MASK returned an incompatible reply.",
+            bytesReturned);
+    }
+
+    SandboxEventFields event;
+    event.eventType = "r0collector.driverProducerMask";
+    event.path = options.devicePath;
+    event.dataJson = BuildSetProducerEnableMaskData(reply, bytesReturned, options.enableMask);
+    return EmitEvent(writer, event);
+}
+
+// Input: Open driver handle, collector options, and JSONL sink.
 // Processing: Issues IOCTL_KSWORD_SANDBOX_POLL and writes a
 // r0collector.driverPoll row with the queue snapshot.
 // Return: true if the IOCTL succeeded, the reply was structurally valid, and the

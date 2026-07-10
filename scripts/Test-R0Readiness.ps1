@@ -26,7 +26,9 @@ param(
     [switch]$StopService,
     [switch]$DeleteService,
     [switch]$CheckDeviceHealth,
+    [switch]$CheckCollectorHealth,
     [switch]$DrainWithCollector,
+    [string]$CollectorHealthOutputPath = (Join-Path ([System.IO.Path]::GetTempPath()) 'KSwordSandbox-r0collector-health-readiness.jsonl'),
     [string]$CollectorOutputPath = (Join-Path ([System.IO.Path]::GetTempPath()) 'KSwordSandbox-r0collector-readiness.jsonl')
 )
 
@@ -148,6 +150,114 @@ function Test-RepositoryFile {
         -Details @{
             Path = $Path
         }
+}
+
+# Test-DriverSysGitHygiene verifies that kernel-driver binaries are not tracked,
+# staged, or otherwise visible to git as commit candidates. Ignored local .sys
+# files are not enumerated; the preferred path is to keep signed drivers outside
+# the repository entirely.
+function Test-DriverSysGitHygiene {
+    param([string]$Root)
+
+    $gitCommand = Get-Command git -ErrorAction SilentlyContinue
+    if ($null -eq $gitCommand) {
+        return New-R0ReadinessResult `
+            -Name 'Driver .sys git hygiene' `
+            -Status 'Failed' `
+            -Required $true `
+            -Message 'git.exe was not found, so the script cannot verify that driver .sys files are excluded from commits.' `
+            -Details @{
+                RepositoryRoot = $Root
+                GitAvailable   = $false
+            }
+    }
+
+    try {
+        $repoOutput = @(& git -C $Root rev-parse --is-inside-work-tree 2>&1)
+        $repoExitCode = $LASTEXITCODE
+        if ($repoExitCode -ne 0 -or (($repoOutput | Select-Object -First 1) -ne 'true')) {
+            return New-R0ReadinessResult `
+                -Name 'Driver .sys git hygiene' `
+                -Status 'Failed' `
+                -Required $true `
+                -Message "Repository root '$Root' is not inside a git work tree; cannot prove driver .sys files are excluded from commits." `
+                -Details @{
+                    RepositoryRoot = $Root
+                    GitAvailable   = $true
+                    ExitCode       = $repoExitCode
+                    Output         = (($repoOutput | Out-String).Trim())
+                }
+        }
+
+        $trackedOutput = @(& git -C $Root ls-files -- '*.sys' 2>&1)
+        $trackedExitCode = $LASTEXITCODE
+        $statusOutput = @(& git -C $Root status --porcelain=v1 -- '*.sys' 2>&1)
+        $statusExitCode = $LASTEXITCODE
+
+        if ($trackedExitCode -ne 0 -or $statusExitCode -ne 0) {
+            return New-R0ReadinessResult `
+                -Name 'Driver .sys git hygiene' `
+                -Status 'Failed' `
+                -Required $true `
+                -Message 'git returned an error while checking .sys tracking/status.' `
+                -Details @{
+                    RepositoryRoot  = $Root
+                    GitAvailable    = $true
+                    TrackedExitCode = $trackedExitCode
+                    TrackedOutput   = (($trackedOutput | Out-String).Trim())
+                    StatusExitCode  = $statusExitCode
+                    StatusOutput    = (($statusOutput | Out-String).Trim())
+                }
+        }
+
+        $trackedSys = @($trackedOutput | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
+        $statusSys = @($statusOutput | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
+        $gitIgnorePath = Join-Path $Root '.gitignore'
+        $gitIgnoreHasSysRule = $false
+        if (Test-Path -LiteralPath $gitIgnorePath -PathType Leaf) {
+            $gitIgnoreHasSysRule = [bool](Select-String -LiteralPath $gitIgnorePath -Pattern '^\s*\*\.sys\s*$' -Quiet)
+        }
+
+        if ($trackedSys.Count -gt 0 -or $statusSys.Count -gt 0) {
+            return New-R0ReadinessResult `
+                -Name 'Driver .sys git hygiene' `
+                -Status 'Failed' `
+                -Required $true `
+                -Message 'One or more .sys files are tracked, staged, modified, or unignored by git. Remove them from the commit path and keep signed driver binaries outside git.' `
+                -Details @{
+                    RepositoryRoot      = $Root
+                    GitAvailable        = $true
+                    TrackedSysPaths     = @($trackedSys)
+                    PorcelainSysEntries = @($statusSys)
+                    GitIgnoreHasSysRule = $gitIgnoreHasSysRule
+                }
+        }
+
+        return New-R0ReadinessResult `
+            -Name 'Driver .sys git hygiene' `
+            -Status 'Passed' `
+            -Required $true `
+            -Message 'No .sys files are tracked, staged, modified, or unignored by git for this repository.' `
+            -Details @{
+                RepositoryRoot      = $Root
+                GitAvailable        = $true
+                TrackedSysCount     = 0
+                PorcelainSysCount   = 0
+                GitIgnoreHasSysRule = $gitIgnoreHasSysRule
+            }
+    }
+    catch {
+        return New-R0ReadinessResult `
+            -Name 'Driver .sys git hygiene' `
+            -Status 'Failed' `
+            -Required $true `
+            -Message "Unable to verify .sys git hygiene: $($_.Exception.Message)" `
+            -Details @{
+                RepositoryRoot = $Root
+                GitAvailable   = $true
+                ErrorType      = $_.Exception.GetType().FullName
+            }
+    }
 }
 
 # Test-ReadableFile checks that a runtime artifact exists and can be opened for
@@ -522,11 +632,12 @@ function Invoke-DeviceHealthCheck {
                 -Status 'Failed' `
                 -Required $true `
                 -Message "Unable to open driver device '$Path'. Win32 error $errorCode." `
-                -Details @{
-                    DevicePath = $Path
-                    Win32Error = $errorCode
-                    DriverLoadedByScript = $false
-                }
+            -Details @{
+                DevicePath = $Path
+                Win32Error = $errorCode
+                DeviceOpened = $false
+                DriverLoadedByScript = $false
+            }
         }
 
         try {
@@ -571,6 +682,7 @@ function Invoke-DeviceHealthCheck {
                     DevicePath    = $Path
                     IoctlCode     = ('0x{0:X8}' -f $ioctlGetHealth)
                     BytesReturned = $bytesReturned
+                    DeviceOpened  = $true
                     Version       = ('0x{0:X8}' -f $version)
                     Size          = $size
                     DriverState   = $driverState
@@ -597,6 +709,129 @@ function Invoke-DeviceHealthCheck {
     }
 }
 
+# Get-JsonLineEventSummary parses a collector JSONL output file enough to prove
+# that the expected lifecycle rows were written. It is read-only and keeps only
+# event type names plus a small parse-error sample for diagnostics.
+function Get-JsonLineEventSummary {
+    param([string]$Path)
+
+    $summary = [ordered]@{
+        OutputExists     = $false
+        OutputLength     = 0
+        LineCount        = 0
+        EventTypes       = @()
+        ParseErrorCount  = 0
+        ParseErrorSample = @()
+    }
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        return $summary
+    }
+
+    $item = Get-Item -LiteralPath $Path
+    $summary.OutputExists = $true
+    $summary.OutputLength = $item.Length
+
+    $eventTypes = New-Object System.Collections.Generic.List[string]
+    $parseErrors = New-Object System.Collections.Generic.List[string]
+    foreach ($line in (Get-Content -LiteralPath $Path -ErrorAction Stop)) {
+        if ([string]::IsNullOrWhiteSpace($line)) {
+            continue
+        }
+
+        $summary.LineCount = [int]$summary.LineCount + 1
+        try {
+            $row = $line | ConvertFrom-Json -ErrorAction Stop
+            if ($null -ne $row.eventType -and -not [string]::IsNullOrWhiteSpace([string]$row.eventType)) {
+                [void]$eventTypes.Add([string]$row.eventType)
+            }
+            else {
+                [void]$parseErrors.Add("Line $($summary.LineCount): missing eventType")
+            }
+        }
+        catch {
+            [void]$parseErrors.Add("Line $($summary.LineCount): $($_.Exception.Message)")
+        }
+    }
+
+    $summary.EventTypes = @($eventTypes.ToArray())
+    $summary.ParseErrorCount = $parseErrors.Count
+    $summary.ParseErrorSample = @($parseErrors.ToArray() | Select-Object -First 5)
+    return $summary
+}
+
+# Invoke-R0CollectorHealth runs the collector's health-only path using the
+# documented --health and --out options. It opens the already-loaded device,
+# writes JSONL to the explicit output path, and does not drain queued events.
+function Invoke-R0CollectorHealth {
+    if (-not (Test-Path -LiteralPath $R0CollectorPath -PathType Leaf)) {
+        return New-R0ReadinessResult `
+            -Name 'R0Collector health' `
+            -Status 'Failed' `
+            -Required $true `
+            -Message "R0Collector executable was not found: $R0CollectorPath" `
+            -Details @{
+                R0CollectorPath = $R0CollectorPath
+                DevicePath      = $DevicePath
+                OutputPath      = $CollectorHealthOutputPath
+                OutputWritten   = $false
+                HealthOnly      = $true
+            }
+    }
+
+    try {
+        $collectorArgs = @(
+            '--device', $DevicePath,
+            '--health',
+            '--out', $CollectorHealthOutputPath
+        )
+        $output = @(& $R0CollectorPath @collectorArgs 2>&1)
+        $exitCode = $LASTEXITCODE
+        $summary = Get-JsonLineEventSummary -Path $CollectorHealthOutputPath
+        $eventTypes = @($summary.EventTypes)
+        $hasDeviceOpened = $eventTypes -contains 'r0collector.deviceOpened'
+        $hasDriverHealth = $eventTypes -contains 'r0collector.driverHealth'
+        $parseErrorCount = [int]$summary.ParseErrorCount
+        $passed = $exitCode -eq 0 -and [bool]$summary.OutputExists -and [int64]$summary.OutputLength -gt 0 -and $parseErrorCount -eq 0 -and $hasDeviceOpened -and $hasDriverHealth
+
+        return New-R0ReadinessResult `
+            -Name 'R0Collector health' `
+            -Status ($(if ($passed) { 'Passed' } else { 'Failed' })) `
+            -Required $true `
+            -Message "R0Collector --health --out returned exit code $exitCode." `
+            -Details @{
+                R0CollectorPath = $R0CollectorPath
+                DevicePath      = $DevicePath
+                OutputPath      = $CollectorHealthOutputPath
+                HealthOnly      = $true
+                ExitCode        = $exitCode
+                OutputWritten   = [bool]$summary.OutputExists
+                OutputLength    = [int64]$summary.OutputLength
+                LineCount       = [int]$summary.LineCount
+                EventTypes      = @($eventTypes)
+                HasDeviceOpened = $hasDeviceOpened
+                HasDriverHealth = $hasDriverHealth
+                ParseErrorCount = $parseErrorCount
+                ParseErrors     = @($summary.ParseErrorSample)
+                ConsoleOutput   = (($output | Out-String).Trim())
+            }
+    }
+    catch {
+        return New-R0ReadinessResult `
+            -Name 'R0Collector health' `
+            -Status 'Failed' `
+            -Required $true `
+            -Message "R0Collector health check failed: $($_.Exception.Message)" `
+            -Details @{
+                R0CollectorPath = $R0CollectorPath
+                DevicePath      = $DevicePath
+                OutputPath      = $CollectorHealthOutputPath
+                HealthOnly      = $true
+                ErrorType       = $_.Exception.GetType().FullName
+            }
+    }
+}
+
 # Invoke-R0CollectorDrain runs R0Collector in one-shot mode. It is opt-in and
 # writes only to the explicit collector output path.
 function Invoke-R0CollectorDrain {
@@ -617,27 +852,39 @@ function Invoke-R0CollectorDrain {
     try {
         $collectorArgs = @(
             '--device', $DevicePath,
-            '--output', $CollectorOutputPath,
+            '--out', $CollectorOutputPath,
             '--duration', '0'
         )
         $output = @(& $R0CollectorPath @collectorArgs 2>&1)
         $exitCode = $LASTEXITCODE
-        $outputExists = Test-Path -LiteralPath $CollectorOutputPath -PathType Leaf
-        $outputLength = if ($outputExists) { (Get-Item -LiteralPath $CollectorOutputPath).Length } else { 0 }
+        $summary = Get-JsonLineEventSummary -Path $CollectorOutputPath
+        $eventTypes = @($summary.EventTypes)
+        $hasDriverHealth = $eventTypes -contains 'r0collector.driverHealth'
+        $hasDriverPoll = $eventTypes -contains 'r0collector.driverPoll'
+        $hasDriverReadEvents = $eventTypes -contains 'r0collector.driverReadEvents'
+        $parseErrorCount = [int]$summary.ParseErrorCount
+        $passed = $exitCode -eq 0 -and [bool]$summary.OutputExists -and [int64]$summary.OutputLength -gt 0 -and $parseErrorCount -eq 0 -and $hasDriverHealth -and $hasDriverPoll -and $hasDriverReadEvents
 
         return New-R0ReadinessResult `
             -Name 'R0Collector drain' `
-            -Status ($(if ($exitCode -eq 0) { 'Passed' } else { 'Failed' })) `
+            -Status ($(if ($passed) { 'Passed' } else { 'Failed' })) `
             -Required $true `
-            -Message "R0Collector one-shot drain returned exit code $exitCode." `
+            -Message "R0Collector --out one-shot drain returned exit code $exitCode." `
             -Details @{
-                R0CollectorPath = $R0CollectorPath
-                DevicePath      = $DevicePath
-                OutputPath      = $CollectorOutputPath
-                OutputWritten   = $outputExists
-                OutputLength    = $outputLength
-                ExitCode        = $exitCode
-                ConsoleOutput   = (($output | Out-String).Trim())
+                R0CollectorPath    = $R0CollectorPath
+                DevicePath         = $DevicePath
+                OutputPath         = $CollectorOutputPath
+                OutputWritten      = [bool]$summary.OutputExists
+                OutputLength       = [int64]$summary.OutputLength
+                LineCount          = [int]$summary.LineCount
+                EventTypes         = @($eventTypes)
+                HasDriverHealth    = $hasDriverHealth
+                HasDriverPoll      = $hasDriverPoll
+                HasDriverReadEvents = $hasDriverReadEvents
+                ParseErrorCount    = $parseErrorCount
+                ParseErrors        = @($summary.ParseErrorSample)
+                ExitCode           = $exitCode
+                ConsoleOutput      = (($output | Out-String).Trim())
             }
     }
     catch {
@@ -664,6 +911,7 @@ $collectorProject = Join-Path $RepositoryRoot 'guest\KSword.Sandbox.R0Collector\
 [void]$results.Add((Test-RepositoryFile -Name 'Driver project file' -Path $driverProject))
 [void]$results.Add((Test-RepositoryFile -Name 'Driver public IOCTL header' -Path $driverHeader))
 [void]$results.Add((Test-RepositoryFile -Name 'R0Collector project file' -Path $collectorProject))
+[void]$results.Add((Test-DriverSysGitHygiene -Root $RepositoryRoot))
 [void]$results.Add((Test-ReadableFile -Name 'Driver binary readable' -Path $DriverSysPath -Required $true))
 [void]$results.Add((Test-ReadableFile -Name 'R0Collector executable readable' -Path $R0CollectorPath -Required $false))
 [void]$results.Add((Test-DriverSignature -Path $DriverSysPath))
@@ -679,6 +927,9 @@ if ($StartService) {
 }
 if ($CheckDeviceHealth) {
     [void]$results.Add((Invoke-DeviceHealthCheck -Path $DevicePath))
+}
+if ($CheckCollectorHealth) {
+    [void]$results.Add((Invoke-R0CollectorHealth))
 }
 if ($DrainWithCollector) {
     [void]$results.Add((Invoke-R0CollectorDrain))
@@ -722,7 +973,9 @@ Write-Output ([pscustomobject][ordered]@{
         DevicePath             = $DevicePath
         RequireTestSigning     = $testSigningRequired
         ServiceMutationAllowed = [bool]$AllowServiceMutation
-        DefaultModeSafe        = -not ($InstallService -or $StartService -or $StopService -or $DeleteService -or $CheckDeviceHealth -or $DrainWithCollector)
+        CollectorHealthOutputPath = $CollectorHealthOutputPath
+        CollectorOutputPath     = $CollectorOutputPath
+        DefaultModeSafe        = -not ($InstallService -or $StartService -or $StopService -or $DeleteService -or $CheckDeviceHealth -or $CheckCollectorHealth -or $DrainWithCollector)
         Note                   = 'Default mode does not load/unload the driver, mutate SCM state, open the device, or write collector output.'
     })
 
