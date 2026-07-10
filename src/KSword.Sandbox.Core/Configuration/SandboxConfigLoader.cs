@@ -53,10 +53,16 @@ public static class SandboxConfigLoader
         var paths = config.Paths with
         {
             RuntimeRoot = ExpandPath(config.Paths.RuntimeRoot, repositoryRoot),
-            RulesDirectory = ExpandPath(config.Paths.RulesDirectory, repositoryRoot)
+            RulesDirectory = ExpandPath(config.Paths.RulesDirectory, repositoryRoot),
+            GuestPayloadRoot = ExpandPath(config.Paths.GuestPayloadRoot, repositoryRoot)
         };
 
-        return config with { Paths = paths };
+        var driver = config.Driver with
+        {
+            HostDriverPath = ExpandOptionalPath(config.Driver.HostDriverPath, repositoryRoot)
+        };
+
+        return config with { Paths = paths, Driver = driver };
     }
 
     /// <summary>
@@ -67,5 +73,16 @@ public static class SandboxConfigLoader
     private static string ExpandPath(string path, string repositoryRoot)
     {
         return Path.IsPathRooted(path) ? path : Path.GetFullPath(Path.Combine(repositoryRoot, path));
+    }
+
+    /// <summary>
+    /// Converts an optional relative path to an absolute path.
+    /// The input may be null or whitespace; processing returns null for absent
+    /// values and expands present relative paths; the method returns the
+    /// normalized optional path.
+    /// </summary>
+    private static string? ExpandOptionalPath(string? path, string repositoryRoot)
+    {
+        return string.IsNullOrWhiteSpace(path) ? null : ExpandPath(path, repositoryRoot);
     }
 }

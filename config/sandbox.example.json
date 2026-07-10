@@ -22,11 +22,13 @@
   },
   "paths": {
     "runtimeRoot": "D:\\Temp\\KSwordSandbox",
-    "rulesDirectory": "rules"
+    "rulesDirectory": "rules",
+    "guestPayloadRoot": "D:\\Temp\\KSwordSandbox\\payload\\guest-tools"
   },
   "driver": {
     "enabled": true,
     "serviceName": "KSwordARK",
+    "hostDriverPath": null,
     "driverPathInGuest": "C:\\KSwordSandbox\\driver\\KSwordARKDriver.sys",
     "eventJsonLinesPath": "C:\\KSwordSandbox\\out\\driver-events.jsonl",
     "r0CollectorPathInGuest": "C:\\KSwordSandbox\\r0collector\\KSword.Sandbox.R0Collector.exe",

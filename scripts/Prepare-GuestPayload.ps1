@@ -15,7 +15,7 @@ operator overrides safety checks by editing the script.
 [CmdletBinding()]
 param(
     # Repository root that contains KSwordSandbox.sln, guest/, and scripts/.
-    [string]$RepoRoot = (Split-Path -Parent $PSScriptRoot),
+    [string]$RepoRoot = '',
 
     # Visual Studio MSBuild used for both SDK-style .NET publish and native VC++ build.
     [string]$MSBuildPath = 'D:\Software\VS\MSBuild\Current\Bin\MSBuild.exe',
@@ -286,6 +286,27 @@ function Write-PayloadManifest {
 }
 
 try {
+    # Resolve-DefaultRepoRoot finds the repository root when -RepoRoot was not
+    # supplied. Inputs are the script location variables supplied by PowerShell;
+    # processing falls back from $PSScriptRoot to $MyInvocation for Windows
+    # PowerShell compatibility; return behavior is a full candidate repo path.
+    function Resolve-DefaultRepoRoot {
+        if (-not [string]::IsNullOrWhiteSpace($script:PSScriptRoot)) {
+            return (Split-Path -Parent $script:PSScriptRoot)
+        }
+
+        $scriptPath = $MyInvocation.MyCommand.Path
+        if (-not [string]::IsNullOrWhiteSpace($scriptPath)) {
+            return (Split-Path -Parent (Split-Path -Parent $scriptPath))
+        }
+
+        return (Get-Location).Path
+    }
+
+    if ([string]::IsNullOrWhiteSpace($RepoRoot)) {
+        $RepoRoot = Resolve-DefaultRepoRoot
+    }
+
     $resolvedRepo = Get-NormalizedFullPath -Path $RepoRoot
     $resolvedPayload = Get-NormalizedFullPath -Path $PayloadRoot
     $resolvedBuild = Get-NormalizedFullPath -Path $BuildRoot

@@ -6,15 +6,17 @@ for final rule classification.
 
 ## v1 data flow
 
-1. Guest Agent writes `events.json` under a job-specific guest output folder,
+1. Host stages the prepared Guest Agent and R0Collector payload from
+   `paths.guestPayloadRoot` into the guest.
+2. Guest Agent writes `events.json` under a job-specific guest output folder,
    for example `C:\KSwordSandbox\out\<job-id-n>`.
-2. R0Collector writes `driver-events.jsonl` beside `events.json`.
-3. Host starts the Guest Agent asynchronously, then a runbook
+3. R0Collector writes `driver-events.jsonl` beside `events.json`.
+4. Host starts the Guest Agent asynchronously, then a runbook
    `sync-live-output` step periodically copies that guest output tree into
    `D:\Temp\KSwordSandbox\jobs\<job-id-n>\guest`.
-4. Core live telemetry services read JSON/JSONL with shared-read tolerance.
-5. WebUI polls `/api/jobs/{jobId}/events/live` and appends unclassified rows.
-6. After completion, Host imports events, runs rules, and regenerates reports.
+5. Core live telemetry services read JSON/JSONL with shared-read tolerance.
+6. WebUI polls `/api/jobs/{jobId}/events/live` and appends unclassified rows.
+7. After completion, Host imports events, runs rules, and regenerates reports.
 
 ## Important boundary
 

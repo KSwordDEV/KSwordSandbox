@@ -141,7 +141,8 @@ internal static class SmokeTestProgram
             Paths = new SandboxPaths
             {
                 RuntimeRoot = tempRoot,
-                RulesDirectory = Path.Combine(repositoryRoot, "rules")
+                RulesDirectory = Path.Combine(repositoryRoot, "rules"),
+                GuestPayloadRoot = Path.Combine(tempRoot, "payload", "guest-tools")
             }
         };
 
@@ -159,6 +160,11 @@ internal static class SmokeTestProgram
         Assert(!string.IsNullOrWhiteSpace(job.Sample?.Crc32), "crc32 should be computed");
         var runbook = job.Runbook ?? throw new InvalidOperationException("runbook should be set");
         Assert(runbook.Steps.Count > 0, "runbook should contain steps");
+        var stagePayloadStep = runbook.Steps.Single(step => step.Id == "stage-guest-payload");
+        Assert(stagePayloadStep.PowerShell.Contains("Copy-Item -ToSession", StringComparison.Ordinal), "runbook should copy guest payload through PowerShell Direct");
+        Assert(stagePayloadStep.PowerShell.Contains(config.Paths.GuestPayloadRoot, StringComparison.Ordinal), "runbook should use configured host guest payload root");
+        Assert(stagePayloadStep.PowerShell.Contains("KSword.Sandbox.Agent.exe", StringComparison.Ordinal), "runbook should validate guest agent path");
+        Assert(stagePayloadStep.PowerShell.Contains("KSword.Sandbox.R0Collector.exe", StringComparison.Ordinal), "runbook should validate R0Collector path when driver is enabled");
         var runAgentStep = runbook.Steps.Single(step => step.Id == "run-agent");
         Assert(runAgentStep.PowerShell.Contains("--driver-events", StringComparison.Ordinal), "runbook should pass driver events path");
         Assert(runAgentStep.PowerShell.Contains($"{job.JobId:N}\\driver-events.jsonl", StringComparison.Ordinal), "runbook should use job-specific driver events path");

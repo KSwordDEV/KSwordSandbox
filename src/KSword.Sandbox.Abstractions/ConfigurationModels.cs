@@ -84,6 +84,8 @@ public sealed record SandboxPaths
     public string RuntimeRoot { get; init; } = "D:\\Temp\\KSwordSandbox";
 
     public string RulesDirectory { get; init; } = "rules";
+
+    public string GuestPayloadRoot { get; init; } = "D:\\Temp\\KSwordSandbox\\payload\\guest-tools";
 }
 
 /// <summary>
@@ -96,6 +98,8 @@ public sealed record DriverConfig
     public bool Enabled { get; init; } = true;
 
     public string ServiceName { get; init; } = "KSwordARK";
+
+    public string? HostDriverPath { get; init; }
 
     public string DriverPathInGuest { get; init; } = "C:\\KSwordSandbox\\driver\\KSwordARKDriver.sys";
 

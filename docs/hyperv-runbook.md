@@ -10,16 +10,20 @@ registered golden VM.
 2. Verify the configured golden VM exists.
 3. Load guest credentials from an environment variable.
 4. Restore a clean checkpoint or create a temporary differencing-disk VM.
-5. Copy the sample into the guest.
-6. Create a job-specific guest output folder such as
+5. Stage prepared Guest Agent and R0Collector payload files from
+   `paths.guestPayloadRoot` into the guest through PowerShell Direct.
+6. Optionally copy an external driver `.sys` from `driver.hostDriverPath` into
+   `driver.driverPathInGuest` when that path is configured.
+7. Copy the sample into the guest.
+8. Create a job-specific guest output folder such as
    `C:\KSwordSandbox\out\<job-id-n>`.
-7. Start `KSword.Sandbox.Agent.exe` asynchronously through PowerShell Direct.
-8. Pass `--driver-events C:\KSwordSandbox\out\<job-id-n>\driver-events.jsonl`,
+9. Start `KSword.Sandbox.Agent.exe` asynchronously through PowerShell Direct.
+10. Pass `--driver-events C:\KSwordSandbox\out\<job-id-n>\driver-events.jsonl`,
    `--r0collector`, and `--driver-device` when driver collection is enabled.
-9. While the guest agent process is running, periodically copy guest output
+11. While the guest agent process is running, periodically copy guest output
    back to `D:\Temp\KSwordSandbox\jobs\<job-id-n>\guest`.
-10. Copy guest JSON/JSONL output one final time.
-11. Stop and optionally remove the temporary VM.
+12. Copy guest JSON/JSONL output one final time.
+13. Stop and optionally remove the temporary VM.
 
 ## Execution prerequisites
 
@@ -27,9 +31,10 @@ registered golden VM.
 - Hyper-V feature installed.
 - Golden VM registered and checkpointed.
 - Guest credentials available through the configured environment variable.
-- Guest agent published and available at the configured guest path.
-- R0Collector published to the configured guest path when driver collection is
-  enabled, or `driver.useMockCollector` enabled for no-driver smoke demos.
+- Guest Agent and R0Collector host payload prepared under
+  `paths.guestPayloadRoot`, normally by `scripts/Prepare-GuestPayload.ps1`.
+- Optional test-signed driver kept outside git and referenced by
+  `driver.hostDriverPath` only when real driver staging is desired.
 
 ## Current local status
 

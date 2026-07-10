@@ -50,16 +50,34 @@ The default script skips `.pdb` files. Add `-IncludeSymbols` only for local
 debugging. The script writes the manifest into the payload directory so the VM
 operator can see when and how the payload was prepared.
 
-## 2. Deploy staged tools into the golden VM
+## 2. Guest payload deployment model
 
-The current live Hyper-V runbook assumes the guest agent is already present at:
+The live Hyper-V runbook now stages the prepared tools automatically before it
+runs the sample. It copies from the host payload root:
+
+```text
+D:\Temp\KSwordSandbox\payload\guest-tools
+```
+
+into the configured guest folders:
 
 ```text
 C:\KSwordSandbox\agent\KSword.Sandbox.Agent.exe
+C:\KSwordSandbox\r0collector\KSword.Sandbox.R0Collector.exe
 ```
 
-Deploy tools before creating or refreshing the `Clean` checkpoint. A practical
-PowerShell Direct deployment flow is:
+The host payload root is controlled by:
+
+```json
+{
+  "paths": {
+    "guestPayloadRoot": "D:\\Temp\\KSwordSandbox\\payload\\guest-tools"
+  }
+}
+```
+
+Manual deployment is still useful when refreshing the golden checkpoint or
+debugging PowerShell Direct. A practical PowerShell Direct deployment flow is:
 
 ```powershell
 $vmName = 'KSwordSandbox-Win10-Golden'
@@ -109,7 +127,8 @@ Prepare these before running a live runbook:
    Enable-VMIntegrationService -VMName 'KSwordSandbox-Win10-Golden' -Name 'Guest Service Interface'
    ```
 
-3. **PowerShell Direct usable.** The runbook invokes the guest agent through
+3. **PowerShell Direct usable.** The runbook stages guest tools with
+   `Copy-Item -ToSession` and invokes the guest agent through
    `Invoke-Command -VMName ... -Credential ...`. Use a local guest account with
    a non-empty password, store that password outside git, and expose it to the
    host process through the configured environment variable:
@@ -120,7 +139,8 @@ Prepare these before running a live runbook:
    $guestCredential = [pscredential]::new('SandboxUser', $guestPassword)
    Invoke-Command -VMName 'KSwordSandbox-Win10-Golden' -Credential $guestCredential -ScriptBlock {
        $PSVersionTable.PSVersion
-       Test-Path 'C:\KSwordSandbox\agent\KSword.Sandbox.Agent.exe'
+       New-Item -ItemType Directory -Force -Path 'C:\KSwordSandbox' | Out-Null
+       Test-Path 'C:\KSwordSandbox'
    }
    ```
 
@@ -261,7 +281,8 @@ process, file, optional network, and import marker events. Keep the whole
 ## Current R0Collector note
 
 `Prepare-GuestPayload.ps1` stages `KSword.Sandbox.R0Collector.exe` so the VM has
-the user-mode bridge available. The generated runbook now passes
+the user-mode bridge available. The generated runbook copies that staged bridge
+into the guest, then passes
 `--driver-events C:\KSwordSandbox\out\<job-id-n>\driver-events.jsonl`,
 `--r0collector`, and `--driver-device` to the Guest Agent when driver collection
 is enabled. Use `driver.useMockCollector=true` for no-driver demos, or prepare a

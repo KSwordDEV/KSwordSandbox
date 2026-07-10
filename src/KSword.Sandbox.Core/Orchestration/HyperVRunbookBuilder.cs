@@ -107,12 +107,64 @@ public sealed class HyperVRunbookBuilder
         var agentPidPath = $"{guestOut}\\agent.pid";
         var agentExitPath = $"{guestOut}\\agent.exit";
 
+        steps.Add(Step("stage-guest-payload", "Stage Guest Agent and R0Collector into guest", BuildStageGuestPayloadCommand(config, targetVmName)));
         steps.Add(Step("copy-sample", "Copy submitted sample into guest", $"Copy-VMFile -VMName {Q(targetVmName)} -SourcePath {Q(sample.FullPath)} -DestinationPath {Q(guestSample)} -FileSource Host -CreateFullPath"));
         steps.Add(Step("make-host-output", "Create host output folder", $"New-Item -ItemType Directory -Force -Path {Q(hostOut)} | Out-Null", mutatesVmState: false));
         steps.Add(Step("prepare-guest-output", "Prepare job-specific guest output folder", BuildPrepareGuestOutputCommand(targetVmName, guestOut, driverEventsPath, agentPidPath, agentExitPath)));
         steps.Add(Step("run-agent", "Start guest collector and sample asynchronously", BuildStartGuestAgentCommand(config, targetVmName, guestRoot, agentPath, guestSample, guestOut, driverEventsPath, agentPidPath, agentExitPath)));
         steps.Add(Step("sync-live-output", "Live-sync guest events while sample runs", BuildLiveOutputSyncCommand(config, targetVmName, guestOut, hostOut, agentPidPath, agentExitPath)));
         steps.Add(Step("collect-output", "Collect final guest JSON output", BuildCollectOutputCommand(targetVmName, guestOut, hostOut)));
+    }
+
+    /// <summary>
+    /// Builds a command that stages guest-side tools from the host payload root.
+    /// Inputs are sandbox config and target VM name; processing copies prepared
+    /// agent and R0Collector files through a PowerShell Direct session, creates
+    /// required guest directories, optionally copies an external driver .sys,
+    /// and validates guest paths; the method returns a runbook command string.
+    /// </summary>
+    private static string BuildStageGuestPayloadCommand(SandboxConfig config, string targetVmName)
+    {
+        var guestRoot = config.Guest.WorkingDirectory.TrimEnd('\\');
+        var guestAgentDirectory = $"{guestRoot}\\agent";
+        var guestCollectorDirectory = $"{guestRoot}\\r0collector";
+        var guestDriverDirectory = Path.GetDirectoryName(config.Driver.DriverPathInGuest)?.Replace('/', '\\') ?? $"{guestRoot}\\driver";
+        var requiredGuestPaths = new List<string>
+        {
+            $"{guestAgentDirectory}\\{config.Guest.AgentExecutableName}"
+        };
+        var commands = new List<string>
+        {
+            $"$payloadRoot = {Q(config.Paths.GuestPayloadRoot)};",
+            "$agentSource = Join-Path $payloadRoot 'agent\\*';",
+            "$collectorSource = Join-Path $payloadRoot 'r0collector\\*';",
+            $"$driverSource = {Q(config.Driver.HostDriverPath ?? string.Empty)};",
+            $"$session = New-PSSession -VMName {Q(targetVmName)} -Credential $guestCredential;",
+            "try {",
+            $"Invoke-Command -Session $session -ScriptBlock {{ New-Item -ItemType Directory -Force -Path {Q(guestAgentDirectory)}, {Q(guestCollectorDirectory)}, {Q(guestDriverDirectory)}, {Q($"{guestRoot}\\incoming")}, {Q($"{guestRoot}\\out")} | Out-Null }};",
+            "if (-not (Test-Path -LiteralPath (Join-Path $payloadRoot 'agent'))) { throw \"Guest Agent payload folder was not found: $(Join-Path $payloadRoot 'agent')\" }",
+            $"Copy-Item -ToSession $session -Path $agentSource -Destination {Q(guestAgentDirectory)} -Recurse -Force;"
+        };
+
+        if (config.Driver.Enabled)
+        {
+            requiredGuestPaths.Add(config.Driver.R0CollectorPathInGuest);
+            commands.Add("if (-not (Test-Path -LiteralPath (Join-Path $payloadRoot 'r0collector'))) { throw \"R0Collector payload folder was not found: $(Join-Path $payloadRoot 'r0collector')\" }");
+            commands.Add($"Copy-Item -ToSession $session -Path $collectorSource -Destination {Q(guestCollectorDirectory)} -Recurse -Force;");
+        }
+
+        if (!string.IsNullOrWhiteSpace(config.Driver.HostDriverPath))
+        {
+            requiredGuestPaths.Add(config.Driver.DriverPathInGuest);
+            commands.Add("if (-not (Test-Path -LiteralPath $driverSource -PathType Leaf)) { throw \"Host driver path was not found: $driverSource\" }");
+            commands.Add($"Copy-Item -ToSession $session -Path $driverSource -Destination {Q(config.Driver.DriverPathInGuest)} -Force;");
+        }
+
+        commands.Add($"Invoke-Command -Session $session -ScriptBlock {{ foreach ($path in @({string.Join(", ", requiredGuestPaths.Select(Q))})) {{ if (-not (Test-Path -LiteralPath $path)) {{ throw \"Required guest payload path is missing: $path\" }} }} }};");
+        commands.Add("}");
+        commands.Add("finally { if ($session) { Remove-PSSession $session } }");
+
+        return string.Join(" ", commands);
     }
 
     /// <summary>
