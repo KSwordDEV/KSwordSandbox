@@ -89,6 +89,30 @@ Common `data` fields include `ioctl`, `batchIndex`, `recordOffset`, `version`,
 `payloadSize`, `payloadHexBytes`, `payloadTruncated`, `payloadHex`, and
 `typedPayloadParsed`.
 
+Negotiation and queue rows must preserve these event-quality keys:
+
+- `r0collector.driverCapabilities.data`: `version`, `versionHex`, `size`,
+  `abiVersionMajor`, `abiVersionMinor`, `capabilityFlagsHex`,
+  `supportedProducerMask`, `supportedProducerMaskHex`,
+  `defaultProducerMask`, `defaultProducerMaskHex`, `eventSchemaName`,
+  `eventSchemaVersion`, `eventSchemaVersionHex`, `eventHeaderVersion`,
+  `eventMaxPayloadSize`, `eventRingCapacity`, `readEventsReplyHeaderSize`,
+  `capabilitiesReplySize`, `statusReplySize`,
+  `setProducerEnableMaskRequestSize`, and
+  `setProducerEnableMaskReplySize`.
+- `r0collector.driverStatus.data`: `version`, `versionHex`, `size`,
+  `queueCapacity`, `queueDepth`, `QueueHighWatermark` as JSON key
+  `queueHighWatermark`, `producerEnableMaskHex`, `supportedProducerMaskHex`,
+  `activeProducerMaskHex`, `failedProducerMaskHex`, `TotalEventsDropped` as
+  JSON key `totalEventsDropped`, `totalEventsSuppressed`,
+  `totalEventsRead`, `totalEventsEnqueued`, and `nextSequence`.
+- `r0collector.driverProducerMask.data`: `requestedEnableMaskHex`,
+  `previousEnableMaskHex`, `effectiveEnableMaskHex`,
+  `supportedProducerMaskHex`, and the matching `*MaskNames` fields.
+- `r0collector.driverReadEvents.data`: `requestedMaxEvents`,
+  `eventsWritten`, `eventsEmitted`, `bytesWritten`, `EventsDropped` as JSON key
+  `eventsDropped`, and `nextSequence`.
+
 Typed payload parsers add category-specific fields such as `operationName`,
 `filePath`, `imagePath`, `keyPath`, `valueName`, `protocolName`,
 `directionName`, `localAddress`, `remoteAddress`, and port metadata when the
@@ -130,3 +154,36 @@ from real R0 telemetry.
   `KSWORD_SANDBOX_READ_EVENTS_REQUEST.Flags` field remains zero.
 - `--heartbeat` adds `r0collector.heartbeat` rows without changing driver drain
   semantics.
+- `--max-events` bounds one `READ_EVENTS` request and is the primary synthetic
+  stress input for proving smaller batches.
+- `--max-read-batches` bounds a drain loop and records
+  `drainStoppedAtBatchLimit` on `r0collector.stopped`.
+
+## Synthetic event-quality and backpressure contract
+
+Synthetic event-quality rows are collector-like JSONL lines used by smoke tests
+and local CI when no signed/test-signed driver is available. They must be valid
+`SandboxEvent` objects except for intentionally injected noise lines. A good
+corpus includes:
+
+- one capabilities row with ABI major/minor, event header version, event schema
+  name/version, supported/default producer masks, and queue/event layout sizes;
+- one producer-mask row with requested, previous, effective, and supported mask
+  values;
+- pre/post status rows showing `queueCapacity`, `queueDepth`,
+  `QueueHighWatermark`/`queueHighWatermark`, `TotalEventsDropped`/
+  `totalEventsDropped`, `totalEventsSuppressed`, active/failed masks, and
+  `nextSequence`;
+- at least one `r0collector.driverReadEvents` row with batch
+  `EventsDropped`/`eventsDropped`;
+- mock or stress driver rows with `mock:"true"`, `stress:"true"`,
+  `eventSchemaName`, `eventSchemaVersion`, `version`, `recordSize`,
+  `payloadSize`, `payloadSchema`, `typedPayloadStatus`, and monotonic
+  `sequence` values;
+- malformed, truncated, blank, or extra-field rows to verify robust parsing.
+
+Backpressure is represented as evidence, not as kernel blocking. When the ring
+overflows, the driver preserves loss through `TotalEventsDropped`,
+`EventsDropped`, `NextSequence`, and sequence gaps. Host report import must keep
+malformed JSONL as `driver.parse_error` evidence; live views may skip or defer
+partial rows while continuing to display valid collector rows.

@@ -44,6 +44,8 @@ internal sealed class R0CollectorContractScenario : ISmokeTestScenario
         RequireContains(ReadText(Path.Combine(sourceRoot, "Options.cpp")), "--self-test", "self-test alias should be parsed.");
         RequireContains(ReadText(Path.Combine(sourceRoot, "Options.cpp")), "--synthetic", "synthetic alias should be parsed.");
         RequireContains(ReadText(Path.Combine(sourceRoot, "Options.cpp")), "--enable-mask", "enable-mask should be parsed.");
+        RequireContains(ReadText(Path.Combine(sourceRoot, "Options.cpp")), "--max-events", "max-events should be parsed.");
+        RequireContains(ReadText(Path.Combine(sourceRoot, "Options.cpp")), "--max-read-batches", "max-read-batches should be parsed.");
         RequireContains(ReadText(Path.Combine(sourceRoot, "Options.cpp")), "--heartbeat", "heartbeat should be parsed.");
         var ioctlClient = ReadText(Path.Combine(sourceRoot, "IoctlClient.cpp"));
         var eventParser = ReadText(Path.Combine(sourceRoot, "EventParser.cpp"));
@@ -74,11 +76,15 @@ internal sealed class R0CollectorContractScenario : ISmokeTestScenario
         RequireContains(runtimeLoop, "EmitDriverStatus", "Runtime loop should capture status before/after drain.");
         RequireContains(runtimeLoop, "r0collector.heartbeat", "heartbeat rows should be emitted by the runtime loop.");
 
-        foreach (var option in new[] { "--self-test", "--synthetic", "--enable-mask", "--heartbeat", "--duration", "--poll-ms" })
+        foreach (var option in new[] { "--self-test", "--synthetic", "--enable-mask", "--max-events", "--max-read-batches", "--heartbeat", "--duration", "--poll-ms" })
         {
             RequireContains(collectorDoc, option, $"{option} should be documented in r0-collector.md.");
             RequireContains(schemaDoc, option, $"{option} should be documented in r0-jsonl-schema.md.");
         }
+
+        RequireContains(collectorDoc, "batch limit", "r0-collector.md should describe the batch limit option.");
+        RequireContains(collectorDoc, "requestedMaxEvents", "r0-collector.md should describe the requested max-events field.");
+        RequireContains(collectorDoc, "drainStoppedAtBatchLimit", "r0-collector.md should describe the batch-limit exit field.");
 
         return Task.FromResult(new SmokeTestResult
         {

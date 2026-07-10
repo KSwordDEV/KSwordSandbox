@@ -40,13 +40,15 @@ bool ParseBoundedInt(
     return true;
 }
 
-// Input: CLI mask value that may be decimal or 0x-prefixed hexadecimal.
+// Input: CLI unsigned value that may be decimal or 0x-prefixed hexadecimal.
 // Processing: Parses the full string and validates it fits in the public ULONG
-// request field used by READ_EVENTS.
+// request fields used by READ_EVENTS or producer masks.
 // Return: true with parsed output, or false with a user-facing parse error.
 bool ParseUnsignedMask(
     const std::wstring& value,
     const std::wstring& optionName,
+    const unsigned long minValue,
+    const unsigned long maxValue,
     unsigned long* parsedValue,
     std::wstring* error) {
     if (value.empty()) {
@@ -63,9 +65,15 @@ bool ParseUnsignedMask(
         value[0] == L'0' &&
         (value[1] == L'x' || value[1] == L'X');
     const unsigned long long number = std::wcstoull(value.c_str(), &end, hexadecimal ? 16 : 10);
-    if (errno == ERANGE || end == value.c_str() || *end != L'\0' || number > 0xFFFFFFFFULL) {
+    if (errno == ERANGE ||
+        end == value.c_str() ||
+        *end != L'\0' ||
+        number > 0xFFFFFFFFULL ||
+        number < minValue ||
+        number > maxValue) {
         if (error != nullptr) {
-            *error = optionName + L" must be an unsigned 32-bit decimal or 0x-prefixed hexadecimal value.";
+            *error = optionName + L" must be an unsigned decimal or 0x-prefixed hexadecimal value between " +
+                std::to_wstring(minValue) + L" and " + std::to_wstring(maxValue) + L".";
         }
         return false;
     }
@@ -137,11 +145,25 @@ bool ParseArguments(int argc, wchar_t* argv[], Options* options, std::wstring* e
             if (!ParseBoundedInt(value, 1, 600000, arg, &options->pollIntervalMs, error)) {
                 return false;
             }
+        } else if (arg == L"--max-read-batches") {
+            if (!readValue(arg, &value)) {
+                return false;
+            }
+            if (!ParseBoundedInt(value, 0, 1000000, arg, &options->maxReadBatches, error)) {
+                return false;
+            }
+        } else if (arg == L"--max-events") {
+            if (!readValue(arg, &value)) {
+                return false;
+            }
+            if (!ParseUnsignedMask(value, arg, 1, 1024, &options->readEventsMaxEvents, error)) {
+                return false;
+            }
         } else if (arg == L"--enable-mask") {
             if (!readValue(arg, &value)) {
                 return false;
             }
-            if (!ParseUnsignedMask(value, arg, &options->enableMask, error)) {
+            if (!ParseUnsignedMask(value, arg, 0, 0xFFFFFFFFUL, &options->enableMask, error)) {
                 return false;
             }
             options->enableMaskSpecified = true;
@@ -169,7 +191,9 @@ void PrintUsage(const wchar_t* programName) {
         << L"  -t, --duration <seconds>     Poll duration; 0 opens once and exits (default: 0)\n"
         << L"  -p, --poll-ms <ms>           Poll interval in milliseconds (default: 500)\n"
         << L"      --poll-interval-ms <ms>  Alias for --poll-ms\n"
-        << L"      --enable-mask <mask>     Pass a 32-bit decimal/hex mask in READ_EVENTS request flags\n"
+        << L"      --max-events <count>     READ_EVENTS MaxEvents request cap 1..1024 (default: 64)\n"
+        << L"      --max-read-batches <n>   Stop after n READ_EVENTS batches; 0 means unlimited\n"
+        << L"      --enable-mask <mask>     Set producer enable mask through SET_PRODUCER_ENABLE_MASK\n"
         << L"      --health                 Open the device, emit GET_HEALTH, and exit without draining\n"
         << L"      --heartbeat              Emit r0collector.heartbeat lifecycle rows\n"
         << L"      --mock                   Emit synthetic rows without opening a device\n"

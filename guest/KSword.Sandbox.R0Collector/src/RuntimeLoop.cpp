@@ -19,6 +19,8 @@ std::string BuildConfigData(const Options& options) {
     data.AddWide("outputPath", options.outputPath);
     data.AddSigned("durationSeconds", options.durationSeconds);
     data.AddSigned("pollIntervalMs", options.pollIntervalMs);
+    data.AddSigned("maxReadBatches", options.maxReadBatches);
+    data.AddUnsigned("readEventsMaxEvents", options.readEventsMaxEvents);
     data.AddBool("mockMode", options.mockMode);
     data.AddBool("syntheticMode", options.mockMode);
     data.AddBool("healthOnly", options.healthOnly);
@@ -144,6 +146,7 @@ int RunDriverIoctlLoop(const UniqueHandle& device, const Options& options, Event
     unsigned long long readBatches = 0;
     unsigned long long driverEvents = 0;
     bool drainStoppedAtDeadline = false;
+    bool drainStoppedAtBatchLimit = false;
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(options.durationSeconds);
 
     do {
@@ -153,6 +156,12 @@ int RunDriverIoctlLoop(const UniqueHandle& device, const Options& options, Event
         ++polls;
 
         for (;;) {
+            if (options.maxReadBatches > 0 &&
+                readBatches >= static_cast<unsigned long long>(options.maxReadBatches)) {
+                drainStoppedAtBatchLimit = true;
+                break;
+            }
+
             unsigned long long eventsEmitted = 0;
             if (!EmitDriverReadEvents(device, options, readBatches + 1, writer, &eventsEmitted)) {
                 return kExitRuntimeFailure;
@@ -160,7 +169,7 @@ int RunDriverIoctlLoop(const UniqueHandle& device, const Options& options, Event
             ++readBatches;
             driverEvents += eventsEmitted;
 
-            if (eventsEmitted < kReadEventsMaxEvents) {
+            if (eventsEmitted < options.readEventsMaxEvents) {
                 break;
             }
 
@@ -178,6 +187,10 @@ int RunDriverIoctlLoop(const UniqueHandle& device, const Options& options, Event
             break;
         }
 
+        if (drainStoppedAtBatchLimit) {
+            break;
+        }
+
         std::this_thread::sleep_for(std::chrono::milliseconds(options.pollIntervalMs));
     } while (std::chrono::steady_clock::now() < deadline);
 
@@ -190,7 +203,9 @@ int RunDriverIoctlLoop(const UniqueHandle& device, const Options& options, Event
     data.AddBool("healthOnly", false);
     data.AddUtf8("drainMode", "batchUntilEmpty");
     data.AddBool("drainStoppedAtDeadline", drainStoppedAtDeadline);
-    data.AddUnsigned("readEventsMaxEvents", kReadEventsMaxEvents);
+    data.AddBool("drainStoppedAtBatchLimit", drainStoppedAtBatchLimit);
+    data.AddSigned("maxReadBatches", options.maxReadBatches);
+    data.AddUnsigned("readEventsMaxEvents", options.readEventsMaxEvents);
     data.AddBool("heartbeat", options.heartbeat);
 
     SandboxEventFields stoppedEvent;

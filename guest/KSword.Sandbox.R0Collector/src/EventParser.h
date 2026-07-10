@@ -27,6 +27,7 @@ std::string BuildPollData(const KSWORD_SANDBOX_POLL_REPLY& reply, DWORD bytesRet
 std::string BuildReadEventsBatchData(
     const KSWORD_SANDBOX_READ_EVENTS_REPLY& reply,
     DWORD bytesReturned,
+    unsigned long requestedMaxEvents,
     unsigned long long eventsEmitted);
 std::string BuildDriverEventData(
     const KSWORD_SANDBOX_EVENT_HEADER& header,

@@ -179,6 +179,13 @@ Supported options:
   health, poll, and read-events.
 - `--poll-ms`, `--poll-interval`, `--poll-interval-ms`, `-p`: poll interval in
   milliseconds.
+- `--max-events <count>`: cap each `READ_EVENTS` request to 1..1024 events.
+  Use small values in synthetic stress checks to prove batching and sequence
+  continuity.
+- `--max-read-batches <n>`: stop draining after `n` successful READ_EVENTS
+  batches; `0` means unlimited until the duration deadline or an empty batch.
+  This is the bounded batch limit and stress/backpressure input for safe local
+  tests.
 - `--enable-mask <mask>`: pass an unsigned 32-bit decimal or `0x` hexadecimal
   mask through `IOCTL_KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK`, then record the
   requested/effective mask in `r0collector.driverProducerMask`. The collector
@@ -290,6 +297,11 @@ Expected script rows for the live VM path:
 - `r0collector.driverProducerMask`: expected when a VM operator invokes
   R0Collector with `--enable-mask <mask>` to exercise
   `IOCTL_KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK`.
+- `requestedMaxEvents` on `r0collector.driverReadEvents`: records the exact
+  `READ_EVENTS` batch cap used for that collector run.
+- `drainStoppedAtBatchLimit` on `r0collector.stopped`: indicates the runtime
+  loop exited because `--max-read-batches` was reached instead of waiting for
+  the duration deadline.
 
 ## JSON Lines format
 
@@ -316,6 +328,40 @@ Top-level field rules:
 
 The detailed JSONL contract is documented in
 [`docs/r0-jsonl-schema.md`](r0-jsonl-schema.md).
+
+## Synthetic event-quality and backpressure contract
+
+R0Collector event quality is validated with synthetic JSONL before any real
+driver load. These tests do not call CSignTool, mutate the service, or open
+`\\.\KSwordSandboxDriver`; they generate collector-shaped rows and feed them
+through host/live JSONL readers.
+
+Required synthetic coverage:
+
+- ABI structure version evidence: capabilities and driver rows preserve
+  `version`, `versionHex`, ABI major/minor, `eventHeaderVersion`,
+  `eventSchemaName`, `eventSchemaVersion`, `recordSize`, `payloadSize`, and
+  `payloadSchema`.
+- Producer-mask evidence: lifecycle/status rows include requested, previous,
+  effective, supported, active, and failed masks. `READ_EVENTS.Flags` remains
+  zero; producer selection belongs to
+  `IOCTL_KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK`.
+- Queue overflow/loss evidence: status and batch rows include
+  `QueueHighWatermark`/`queueHighWatermark`, `TotalEventsDropped`/
+  `totalEventsDropped`, `eventsDropped`, `TotalEventsSuppressed`,
+  `nextSequence`, and per-driver-row `sequence` so lost records can be
+  diagnosed from counters and gaps.
+- Noise evidence: blank, truncated, malformed, and extra-field JSONL rows are
+  expected in the corpus. Import keeps malformed rows as `driver.parse_error`;
+  live display skips or defers bad partial rows without dropping valid rows.
+- Mock/stress inputs: use `--self-test`, `--synthetic`, `--mock`,
+  `--max-events`, `--max-read-batches`, `--duration 0`, `--poll-ms`, and
+  `--heartbeat` to exercise bounded drains and heartbeat evidence.
+
+Backpressure is intentionally non-blocking. Kernel producers should not wait on
+collector throughput. If the fixed ring overflows, the oldest unread records can
+be overwritten and the collector must surface the loss through
+`TotalEventsDropped`, `EventsDropped`, `NextSequence`, and `sequence` gaps.
 
 ## Guest Agent integration
 

@@ -1688,11 +1688,13 @@ std::string BuildPollData(const KSWORD_SANDBOX_POLL_REPLY& reply, const DWORD by
 std::string BuildReadEventsBatchData(
     const KSWORD_SANDBOX_READ_EVENTS_REPLY& reply,
     const DWORD bytesReturned,
+    const unsigned long requestedMaxEvents,
     const unsigned long long eventsEmitted) {
     JsonDataObjectBuilder data;
     data.AddUtf8("ioctl", "IOCTL_KSWORD_SANDBOX_READ_EVENTS");
     data.AddUnsigned("ioctlCode", IOCTL_KSWORD_SANDBOX_READ_EVENTS);
     data.AddUnsigned("bytesReturned", bytesReturned);
+    data.AddUnsigned("requestedMaxEvents", requestedMaxEvents);
     data.AddUnsigned("version", reply.Version);
     data.AddUtf8("versionHex", HexUnsignedLongLong(reply.Version, 8));
     data.AddUnsigned("size", reply.Size);

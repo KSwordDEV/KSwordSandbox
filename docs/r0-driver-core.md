@@ -15,6 +15,17 @@ source of truth for future `KSword.Sandbox.R0Collector` capability negotiation.
   and `Size` fields.
 - Every request/reply starts with `Version` and `Size`. Drivers reject malformed
   request headers with `STATUS_INVALID_PARAMETER`.
+- Every event record starts with `KSWORD_SANDBOX_EVENT_HEADER.Version` and
+  `KSWORD_SANDBOX_EVENT_HEADER.Size`. The collector must reject rows whose
+  header version is not `KSWORD_SANDBOX_EVENT_HEADER_VERSION`, whose record size
+  is smaller than the header, or whose `PayloadSize` exceeds the record body.
+- Every typed payload structure also starts with `Version` and `Size`; payload
+  parsers must treat too-small payloads as typed-payload failures while keeping
+  the common header, `sequence`, and bounded payload hex evidence.
+- `KSWORD_SANDBOX_EVENT_SCHEMA_NAME` and `KSWORD_SANDBOX_EVENT_SCHEMA_VERSION`
+  are the JSONL-visible event schema identifiers. Synthetic event-quality tests
+  must preserve these fields for mock rows and stress rows so mock/live output
+  remains comparable.
 
 ## Capability negotiation flow
 
@@ -81,6 +92,8 @@ remove events that were already queued.
 - `QueueDepth`: currently unread event count.
 - `QueueHighWatermark`: highest observed queue depth since load.
 - `ProducerEnableMask` and `SupportedProducerMask`.
+- `ActiveProducerMask` and `FailedProducerMask`, used to distinguish producers
+  that are registered and emitting from producers that failed initialization.
 - `LastNtStatus`: most recent internal initialization/producer status surfaced
   for diagnostics.
 - `TotalEventsEnqueued`: successful enqueue count.
@@ -93,6 +106,34 @@ remove events that were already queued.
 Legacy `GET_HEALTH` and `POLL` remain fixed-size compatibility calls. New queue
 capacity and total counters are intentionally exposed through `GET_STATUS` so old
 collectors do not need larger health/poll output buffers.
+
+## Synthetic event-quality and backpressure contract
+
+The event ring is bounded and non-blocking. Producers must not wait on user-mode
+collector throughput. When the ring is full, the oldest unread record may be
+overwritten, `TotalEventsDropped` increases, and collectors can also derive loss
+from `EventsDropped`, `NextSequence`, and per-event `sequence` gaps. This is the
+R0 backpressure contract: preserve evidence of loss instead of blocking kernel
+callbacks or hiding overflow.
+
+Synthetic tests and manual stress runs should model all of the following without
+loading a real driver:
+
+- ABI evidence: `Version`, `Size`, `KSWORD_SANDBOX_EVENT_HEADER_VERSION`,
+  `KSWORD_SANDBOX_EVENT_SCHEMA_VERSION`, `eventSchemaName`,
+  `eventSchemaVersion`, `recordSize`, `payloadSize`, and payload schema names.
+- Producer-mask evidence: requested/effective/supported masks, including the
+  decimal and `0x` forms, plus active/failed masks from `GET_STATUS`.
+- Queue pressure evidence: `QueueCapacity`, `QueueDepth`,
+  `QueueHighWatermark`, `TotalEventsDropped`, `TotalEventsSuppressed`,
+  `EventsDropped`, `NextSequence`, and monotonic per-record `sequence` values.
+- Noise evidence: malformed JSONL rows must not abort import. Host/guest readers
+  should preserve malformed collector lines as `driver.parse_error` evidence for
+  report import and should skip or defer partial rows for live display.
+- Stress inputs: use mock JSONL plus bounded collector knobs such as
+  `--max-events`, `--max-read-batches`, `--duration 0`, `--poll-ms`, and
+  `--heartbeat` to prove high-volume drain behavior without CSignTool, service
+  mutation, or loading the driver.
 
 ## IOCTL error contract
 

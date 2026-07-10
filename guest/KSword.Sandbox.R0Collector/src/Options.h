@@ -11,6 +11,8 @@ struct Options {
     std::wstring outputPath = L"-";
     int durationSeconds = 0;
     int pollIntervalMs = 500;
+    int maxReadBatches = 0;
+    unsigned long readEventsMaxEvents = kReadEventsMaxEvents;
     unsigned long enableMask = 0;
     bool enableMaskSpecified = false;
     bool mockMode = false;

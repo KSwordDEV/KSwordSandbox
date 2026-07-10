@@ -4,12 +4,12 @@ Minimal WDK driver skeleton for the KSword sandbox R0 event path.
 
 ## Purpose
 
-This project creates the kernel-side control device that the future
-`KSword.Sandbox.R0Collector` will open from the Windows 10 guest VM. The current
-driver is intentionally small: it validates the load/unload path, exposes a
-stable symbolic link, implements health/poll IOCTLs, keeps a bounded non-paged
-event ring for `READ_EVENTS`, and starts minimal file plus WFP/ALE network
-producers.
+This project creates the kernel-side control device that
+`KSword.Sandbox.R0Collector` opens from the Windows guest VM. The current driver
+validates the load/unload path, exposes a stable symbolic link, implements
+health/poll/capability/status/producer-mask IOCTLs, keeps a bounded non-paged
+event ring for `READ_EVENTS`, and starts driver, process, image, file, registry,
+and WFP/ALE network producers.
 
 ## Current ABI
 
@@ -74,8 +74,14 @@ the WDM device object and remains non-paged. `DriverEntry` queues one typed
 `KswSandboxEventTypeDriverLoad` self-test event with
 `KSWORD_SANDBOX_EVENT_FLAG_SELF_TEST` and
 `KSWORD_SANDBOX_EVENT_FLAG_DRIVER_STARTED`. Collectors can treat this as the
-minimal `driver.load` heartbeat to verify the device, IOCTL number, and event
-framing before consuming telemetry producers.
+minimal `driver.load` heartbeat to verify the device, IOCTL number, event
+structure version, and event framing before consuming telemetry producers.
+
+Process, image, file, registry, and network producers emit compact typed payload
+records. Each public payload starts with `Version` and `Size`, is bounded by
+`KSWORD_SANDBOX_EVENT_MAX_PAYLOAD_SIZE`, and is serialized by R0Collector into
+JSONL with `eventSchemaName`, `eventSchemaVersion`, `payloadSchema`, and
+per-record `sequence` evidence.
 
 The driver also registers a minimal minifilter for `CREATE`, `WRITE`, and
 delete-style `SET_INFORMATION` operations. File callbacks emit
@@ -93,6 +99,23 @@ When the ring is empty, `READ_EVENTS` still succeeds if the fixed reply header
 fits and returns `EventsWritten == 0` and `BytesWritten == 0`. If the output
 buffer has no room for a complete pending record, the event remains queued and
 the call also returns an empty batch rather than writing a partial record.
+
+## Synthetic event-quality and backpressure contract
+
+The event ring is non-blocking. Producers should not wait for user-mode
+collector throughput; under backpressure the ring preserves diagnostics instead
+of blocking kernel callbacks. If the ring is full, the oldest unread record can
+be overwritten, `TotalEventsDropped` increases, and collectors can derive lost
+records from `EventsDropped`, `NextSequence`, and per-record `sequence` gaps.
+`QueueHighWatermark` shows whether the queue reached capacity, while
+`TotalEventsSuppressed` shows producer-mask load shedding.
+
+Synthetic event-quality checks exercise this contract without CSignTool, SCM
+mutation, or loading the driver. The generated JSONL corpus should include ABI
+version fields, producer masks, `QueueHighWatermark`, `TotalEventsDropped`,
+`eventsDropped`, mock/stress rows, malformed noise rows that import as
+`driver.parse_error`, and bounded stress knobs such as `--max-events` and
+`--max-read-batches`.
 
 ## Build requirements
 
@@ -164,9 +187,10 @@ Commit only source, project files, headers, and documentation. Do not commit:
 
 ## Next implementation steps
 
-1. Extend file-monitor coverage beyond the current create/write/delete slice
-   only after the collector parser and VM load path are validated.
-2. Add process, image-load, registry, and network events after the file event
-   path is stable.
-3. Keep user-mode JSON serialization in `KSword.Sandbox.R0Collector`; the driver
+1. Keep user-mode JSON serialization in `KSword.Sandbox.R0Collector`; the driver
    should return compact typed records, not JSON strings.
+2. Expand stress/noise coverage around `--max-events`, `--max-read-batches`,
+   producer-mask load shedding, and queue-overflow counters before adding new
+   payload fields.
+3. Add future payload fields only through ABI-compatible `Version`, `Size`,
+   capability flags, and bounded parser fallbacks.

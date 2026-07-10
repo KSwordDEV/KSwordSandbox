@@ -581,7 +581,7 @@ bool EmitDriverReadEvents(
     KSWORD_SANDBOX_READ_EVENTS_REQUEST request {};
     request.Version = KSWORD_SANDBOX_INTERFACE_VERSION;
     request.Size = sizeof(request);
-    request.MaxEvents = kReadEventsMaxEvents;
+    request.MaxEvents = options.readEventsMaxEvents;
     /*
      * READ_EVENTS currently reserves Flags and the kernel validates that the
      * field is zero.  Producer selection is negotiated exclusively through
@@ -666,7 +666,7 @@ bool EmitDriverReadEvents(
     SandboxEventFields event;
     event.eventType = "r0collector.driverReadEvents";
     event.path = options.devicePath;
-    event.dataJson = BuildReadEventsBatchData(reply, bytesReturned, emitted);
+    event.dataJson = BuildReadEventsBatchData(reply, bytesReturned, options.readEventsMaxEvents, emitted);
     if (!EmitEvent(writer, event)) {
         if (eventsEmitted != nullptr) {
             *eventsEmitted = emitted;
