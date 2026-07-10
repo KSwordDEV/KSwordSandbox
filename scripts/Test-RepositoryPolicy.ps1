@@ -40,12 +40,17 @@ function Test-ForbiddenPath {
         '.vhd', '.vhdx', '.avhd', '.avhdx', '.iso', '.wim', '.esd',
         '.exe', '.dll', '.sys', '.pdb', '.lib', '.obj', '.ilk', '.exp',
         '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.zip', '.7z', '.rar',
-        '.pfx', '.p12', '.cer', '.key'
+        '.pfx', '.p12', '.cer', '.key', '.dpapi'
     )
     $forbiddenFragments = @('/bin/', '/obj/', '/x64/', '/.vs/', '/dist/')
     $forbiddenRootPrefixes = @('runtime/', 'reports/', 'samples/', 'captures/', 'logs/')
+    $forbiddenFileNames = @('install-state.json', 'guest-password.dpapi')
 
     if ($forbiddenExtensions -contains $extension) {
+        return $true
+    }
+
+    if ($forbiddenFileNames -contains ([System.IO.Path]::GetFileName($normalized).ToLowerInvariant())) {
         return $true
     }
 

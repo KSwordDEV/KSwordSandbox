@@ -483,6 +483,8 @@ internal sealed class P0P1ValidationGateScenario : ISmokeTestScenario
             ".exe",
             ".sys",
             ".pfx",
+            ".dpapi",
+            "install-state.json",
             "/bin/",
             "/obj/",
             "runtime/",

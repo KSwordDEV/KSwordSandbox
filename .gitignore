@@ -65,6 +65,9 @@ appsettings.Local.json
 *.secret.json
 .env
 .env.*
+install-state.json
+guest-password.dpapi
+*.dpapi
 *.pfx
 *.p12
 *.cer

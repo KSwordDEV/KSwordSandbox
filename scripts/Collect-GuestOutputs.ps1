@@ -19,7 +19,7 @@ param(
 
     [switch]$Live,
 
-    [bool]$RestoreCheckpointAfterRun = $true
+    [object]$RestoreCheckpointAfterRun = $true
 )
 
 Set-StrictMode -Version 3.0
@@ -30,6 +30,32 @@ $script:CleanupErrors = New-Object System.Collections.Generic.List[string]
 $script:CollectionWarnings = New-Object System.Collections.Generic.List[string]
 $script:RequiredArtifacts = New-Object System.Collections.Generic.List[object]
 $script:Cmdlet = $PSCmdlet
+
+function ConvertTo-GuestCollectBoolean {
+    param(
+        [object]$Value,
+        [bool]$DefaultValue = $true
+    )
+
+    if ($null -eq $Value) {
+        return $DefaultValue
+    }
+
+    if ($Value -is [bool]) {
+        return [bool]$Value
+    }
+
+    $text = ([string]$Value).Trim()
+    if ([string]::IsNullOrWhiteSpace($text)) {
+        return $DefaultValue
+    }
+
+    switch -Regex ($text) {
+        '^(?i:true|1|yes|y)$' { return $true }
+        '^(?i:false|0|no|n)$' { return $false }
+        default { throw "Cannot convert '$text' to Boolean." }
+    }
+}
 
 function Write-GuestCollectStep {
     param([Parameter(Mandatory)][string]$Message)
@@ -509,7 +535,7 @@ try {
         throw
     }
     finally {
-        Invoke-Cleanup -Plan $plan -RestoreAfterRun $RestoreCheckpointAfterRun
+        Invoke-Cleanup -Plan $plan -RestoreAfterRun (ConvertTo-GuestCollectBoolean -Value $RestoreCheckpointAfterRun -DefaultValue $true)
     }
 
     if ($script:CleanupErrors.Count -gt 0) {

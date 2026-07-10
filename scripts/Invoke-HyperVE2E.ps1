@@ -1482,7 +1482,8 @@ try {
         }
         else {
             Write-HyperVE2EStep 'Starting live collection/cleanup phase.'
-            $collectInvocation = Invoke-ChildPowerShellScript -PhaseName 'collect' -ScriptPath $collectScript -Arguments @('-PlanPath', $PlanPath, '-Live', "-RestoreCheckpointAfterRun:$RestoreCheckpointAfterRun")
+            $restoreCheckpointArgument = if ($RestoreCheckpointAfterRun) { '1' } else { '0' }
+            $collectInvocation = Invoke-ChildPowerShellScript -PhaseName 'collect' -ScriptPath $collectScript -Arguments @('-PlanPath', $PlanPath, '-Live', '-RestoreCheckpointAfterRun', $restoreCheckpointArgument)
             $collectExitCode = [int]$collectInvocation.exitCode
             $collectResult = Read-JsonFileIfPresent -Path (Join-Path $jobRoot 'hyperv-e2e-collect-result.json')
             if ($collectExitCode -ne 0) {

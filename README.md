@@ -48,13 +48,15 @@ tests/KSword.Sandbox.SmokeTests Console smoke tests
 
 ```powershell
 .\install.ps1
+.\run.ps1
 dotnet build .\KSwordSandbox.sln
 .\scripts\Invoke-SandboxSmokeTest.ps1
-dotnet run --project .\src\KSword.Sandbox.Web\KSword.Sandbox.Web.csproj
 ```
 
 `install.ps1` has an interactive menu for install, change, uninstall, and
-status. The Change menu includes password reset. For unattended local lab setup:
+status. The Change menu includes host-only password reset, actual VM guest
+password reset, Hyper-V VM/checkpoint/guest path config, runtime folder refresh,
+and Hyper-V readiness/status. For unattended local lab setup:
 
 ```powershell
 .\install.ps1 -Mode Install -GeneratePassword
@@ -67,8 +69,32 @@ For an existing golden VM, prefer:
 ```
 
 The installer stores `KSWORDBOX_GUEST_PASSWORD` outside git in the current user
-environment and can write a DPAPI-protected local backup. See
-`docs/install.md`.
+environment, can write a DPAPI-protected local backup, writes a local sandbox
+config under `D:\Temp\KSwordSandbox\config\sandbox.local.json`, and sets
+`Sandbox__ConfigPath` for the Web/API. To update VM config without editing the
+template:
+
+```powershell
+.\install.ps1 -Mode Change -UpdateHyperVConfig `
+  -VmName 'KSwordSandbox-Win10-Golden' `
+  -CheckpointName 'Clean' `
+  -GuestWorkingDirectory 'C:\KSwordSandbox'
+```
+
+To synchronize an unknown VM `SandboxUser` password with the host secret from an
+elevated shell:
+
+```powershell
+.\install.ps1 -Mode Change -ResetGuestVmPassword -GeneratePassword -Force
+```
+
+See `docs/install.md`.
+
+After installation, `run.ps1` is the normal per-use entry point. `.\run.ps1`
+starts the WebUI with the installed local config; `.\run.ps1 -Mode Plan
+-SamplePath D:\Temp\sample.exe` creates a non-mutating Hyper-V plan; and
+`.\run.ps1 -Mode Analyze -SamplePath D:\Temp\sample.exe -Live` performs a
+single live Hyper-V analysis from an elevated shell. See `docs/run.md`.
 
 Build the native x64 collector and driver skeleton from the main solution:
 
