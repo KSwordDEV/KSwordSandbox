@@ -104,7 +104,36 @@ public sealed class RuleEngine
             return false;
         }
 
+        if (rule.DataContains.Count > 0 && !MatchesDataContains(rule, evt))
+        {
+            return false;
+        }
+
         return true;
+    }
+
+    /// <summary>
+    /// Tests whether an event data field contains configured text fragments.
+    /// Inputs are a rule and event, processing checks each configured key with
+    /// case-insensitive substring matching, and the method returns true when
+    /// any key/fragments pair matches.
+    /// </summary>
+    private static bool MatchesDataContains(BehaviorRule rule, SandboxEvent evt)
+    {
+        foreach (var (key, fragments) in rule.DataContains)
+        {
+            if (!evt.Data.TryGetValue(key, out var value))
+            {
+                continue;
+            }
+
+            if (fragments.Count == 0 || ContainsAny(value, fragments))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>

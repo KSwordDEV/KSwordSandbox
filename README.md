@@ -13,6 +13,7 @@ drivers, symbols, and credentials stay outside git.
 
 - Host Web API for planning sandbox jobs.
 - Hyper-V runbook generation for a golden Windows 10 VM.
+- Explicit dry-run/live Hyper-V runbook execution from the WebUI/API.
 - Guest agent that runs inside the VM and emits normalized JSON events.
 - Rule engine that maps events to behavior findings and seed MITRE technique
   IDs.
@@ -20,8 +21,9 @@ drivers, symbols, and credentials stay outside git.
 - Repository policy script that blocks large files, binaries, VM images,
   reports, samples, and secrets from being committed.
 
-The current host service defaults to dry-run planning. It does not execute
-privileged Hyper-V commands automatically until a runner is explicitly added.
+The host service defaults to dry-run planning and dry-run runbook recording.
+Live Hyper-V execution must be selected explicitly from the WebUI/API and
+requires an elevated host process plus a prepared golden VM.
 
 ## Layout
 

@@ -119,6 +119,8 @@ public sealed record AnalysisReport
 
     public AnalysisStatus Status { get; init; } = AnalysisStatus.Planned;
 
+    public StaticAnalysisResult? StaticAnalysis { get; init; }
+
     public List<SandboxEvent> Events { get; init; } = [];
 
     public List<BehaviorFinding> Findings { get; init; } = [];

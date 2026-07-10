@@ -121,6 +121,8 @@ public sealed class HtmlReportRenderer
         Metric(html, "MITRE techniques", report.Findings.Where(f => !string.IsNullOrWhiteSpace(f.MitreTechniqueId)).Select(f => f.MitreTechniqueId).Distinct().Count().ToString(), "risk-low");
         Metric(html, "Events", report.Events.Count.ToString(), "risk-info");
         Metric(html, "Rule hits", report.Findings.Count.ToString(), "risk-info");
+        Metric(html, "Static tags", (report.StaticAnalysis?.Tags.Count ?? 0).ToString(), "risk-info");
+        Metric(html, "Static URLs", (report.StaticAnalysis?.Urls.Count ?? 0).ToString(), "risk-medium");
         Metric(html, "Dropped files", CountEvents(report, "file.created", "file.modified").ToString(), "risk-medium");
         Metric(html, "Network events", CountEvents(report, "network.tcp").ToString(), "risk-medium");
         html.AppendLine("</div></section>");
@@ -217,6 +219,7 @@ public sealed class HtmlReportRenderer
     /// </summary>
     private static void AppendStaticAnalysis(StringBuilder html, AnalysisReport report)
     {
+        var staticAnalysis = report.StaticAnalysis;
         html.AppendLine("<section id=\"static\" class=\"card\"><h2>Static analysis</h2><table><tbody>");
         Row(html, "File name", report.Sample.FileName);
         Row(html, "Full path", report.Sample.FullPath);
@@ -225,8 +228,72 @@ public sealed class HtmlReportRenderer
         Row(html, "SHA-1", report.Sample.Sha1);
         Row(html, "MD5", report.Sample.Md5);
         Row(html, "CRC32", report.Sample.Crc32);
-        Row(html, "PE/YARA detail", "Pending static analyzer integration.");
-        html.AppendLine("</tbody></table></section>");
+        Row(html, "File format", staticAnalysis?.FileFormat ?? "unknown");
+        Row(html, "Magic", staticAnalysis?.Magic ?? "unknown");
+        Row(html, "Architecture", staticAnalysis?.Architecture ?? "-");
+        Row(html, "Subsystem", staticAnalysis?.Subsystem ?? "-");
+        Row(html, "Entry point RVA", staticAnalysis?.EntryPointRva ?? "-");
+        Row(html, "Tags", staticAnalysis is null || staticAnalysis.Tags.Count == 0 ? "-" : string.Join(", ", staticAnalysis.Tags));
+        html.AppendLine("</tbody></table>");
+
+        if (staticAnalysis is null)
+        {
+            Empty(html, "Static analyzer did not run.");
+            html.AppendLine("</section>");
+            return;
+        }
+
+        AppendSectionTable(html, staticAnalysis);
+        AppendStringList(html, "URLs", staticAnalysis.Urls);
+        AppendStringList(html, "Interesting strings", staticAnalysis.InterestingStrings);
+        AppendStringList(html, "Static warnings", staticAnalysis.Warnings);
+        html.AppendLine("</section>");
+    }
+
+    /// <summary>
+    /// Appends PE section metadata.
+    /// Inputs are static-analysis results, processing writes section rows or an
+    /// empty state, and the method returns no value.
+    /// </summary>
+    private static void AppendSectionTable(StringBuilder html, StaticAnalysisResult staticAnalysis)
+    {
+        html.AppendLine("<h3>PE sections</h3>");
+        if (staticAnalysis.Sections.Count == 0)
+        {
+            Empty(html, "No PE sections parsed.");
+            return;
+        }
+
+        html.AppendLine("<table><thead><tr><th>Name</th><th>VA</th><th>Virtual size</th><th>Raw size</th><th>Entropy</th></tr></thead><tbody>");
+        foreach (var section in staticAnalysis.Sections)
+        {
+            html.AppendLine($"<tr><td>{E(section.Name)}</td><td><code>{E(section.VirtualAddress)}</code></td><td>{section.VirtualSize}</td><td>{section.RawDataSize}</td><td>{section.Entropy:F3}</td></tr>");
+        }
+
+        html.AppendLine("</tbody></table>");
+    }
+
+    /// <summary>
+    /// Appends a bounded list of static string evidence.
+    /// Inputs are a title and string values, processing writes an empty state or
+    /// list, and the method returns no value.
+    /// </summary>
+    private static void AppendStringList(StringBuilder html, string title, IReadOnlyCollection<string> values)
+    {
+        html.AppendLine($"<h3>{E(title)}</h3>");
+        if (values.Count == 0)
+        {
+            Empty(html, $"No {title.ToLowerInvariant()} recorded.");
+            return;
+        }
+
+        html.AppendLine("<ul>");
+        foreach (var value in values)
+        {
+            html.AppendLine($"<li><code>{E(value)}</code></li>");
+        }
+
+        html.AppendLine("</ul>");
     }
 
     /// <summary>

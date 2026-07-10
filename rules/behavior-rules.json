@@ -55,6 +55,55 @@
       "mitreTechniqueName": "Ingress Tool Transfer",
       "eventTypes": [ "network.tcp" ],
       "tags": [ "network" ]
+    },
+    {
+      "id": "process-timeout-long-sleep",
+      "title": "Long execution delay or timeout",
+      "severity": "medium",
+      "summary": "The sample exceeded the configured analysis window, which can indicate time-based sandbox evasion or long-running behavior.",
+      "mitreTechniqueId": "T1497.003",
+      "mitreTechniqueName": "Time Based Evasion",
+      "eventTypes": [ "process.timeout" ],
+      "tags": [ "anti-analysis" ]
+    },
+    {
+      "id": "static-pe-known-packer",
+      "title": "Known packer or UPX-like PE traits",
+      "severity": "medium",
+      "summary": "Static analysis found packer tags such as UPX section names.",
+      "mitreTechniqueId": "T1027.002",
+      "mitreTechniqueName": "Software Packing",
+      "eventTypes": [ "static.analysis.completed" ],
+      "dataContains": {
+        "tags": [ "packer_upx" ]
+      },
+      "tags": [ "static", "packer" ]
+    },
+    {
+      "id": "static-pe-high-entropy-sections",
+      "title": "High entropy or abnormal PE sections",
+      "severity": "medium",
+      "summary": "Static analysis found high-entropy or abnormal PE section traits.",
+      "mitreTechniqueId": "T1027",
+      "mitreTechniqueName": "Obfuscated Files or Information",
+      "eventTypes": [ "static.analysis.completed" ],
+      "dataContains": {
+        "tags": [ "high_entropy_section", "section_name_exception", "virtual_only_section" ]
+      },
+      "tags": [ "static", "pe" ]
+    },
+    {
+      "id": "static-embedded-url",
+      "title": "Embedded URL discovered in sample",
+      "severity": "low",
+      "summary": "Static analysis extracted at least one URL-like string from the sample.",
+      "mitreTechniqueId": "T1105",
+      "mitreTechniqueName": "Ingress Tool Transfer",
+      "eventTypes": [ "static.analysis.completed" ],
+      "dataContains": {
+        "tags": [ "url" ]
+      },
+      "tags": [ "static", "network" ]
     }
   ]
 }

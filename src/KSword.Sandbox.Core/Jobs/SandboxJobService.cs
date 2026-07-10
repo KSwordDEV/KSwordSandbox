@@ -4,6 +4,7 @@ using KSword.Sandbox.Core.Orchestration;
 using KSword.Sandbox.Core.Reporting;
 using KSword.Sandbox.Core.Rules;
 using KSword.Sandbox.Core.Samples;
+using KSword.Sandbox.Core.StaticAnalysis;
 
 namespace KSword.Sandbox.Core.Jobs;
 
@@ -24,6 +25,7 @@ public sealed class SandboxJobService
     private readonly RuleEngine ruleEngine;
     private readonly HyperVRunbookBuilder runbookBuilder;
     private readonly HtmlReportRenderer reportRenderer;
+    private readonly StaticAnalyzer staticAnalyzer;
     private readonly Dictionary<Guid, AnalysisJob> jobs = [];
 
     /// <summary>
@@ -36,12 +38,14 @@ public sealed class SandboxJobService
         SandboxConfig config,
         BehaviorRuleSet rules,
         HyperVRunbookBuilder? runbookBuilder = null,
-        HtmlReportRenderer? reportRenderer = null)
+        HtmlReportRenderer? reportRenderer = null,
+        StaticAnalyzer? staticAnalyzer = null)
     {
         this.config = config;
         this.ruleEngine = new RuleEngine(rules);
         this.runbookBuilder = runbookBuilder ?? new HyperVRunbookBuilder();
         this.reportRenderer = reportRenderer ?? new HtmlReportRenderer();
+        this.staticAnalyzer = staticAnalyzer ?? new StaticAnalyzer();
     }
 
     /// <summary>
@@ -79,21 +83,23 @@ public sealed class SandboxJobService
         Directory.CreateDirectory(jobRoot);
 
         var sample = SampleHasher.Compute(normalizedSubmission.SamplePath, config.Analysis.MaxSampleBytes);
+        var staticAnalysis = AnalyzeSample(sample);
         var runbook = runbookBuilder.Build(config with
         {
             Analysis = config.Analysis with { DefaultDurationSeconds = duration }
         }, jobId, sample);
 
-        var seedEvents = CreatePlanningEvents(sample, normalizedSubmission, runbook);
+        var seedEvents = CreatePlanningEvents(sample, normalizedSubmission, runbook, staticAnalysis);
         var findings = ruleEngine.Classify(seedEvents);
         var report = new AnalysisReport
         {
             JobId = jobId,
             Sample = sample,
             Status = AnalysisStatus.Planned,
+            StaticAnalysis = staticAnalysis,
             Events = seedEvents,
             Findings = findings,
-            Metrics = BuildMetrics(seedEvents, findings)
+            Metrics = BuildMetrics(seedEvents, findings, staticAnalysis)
         };
 
         var jsonPath = Path.Combine(jobRoot, "report.json");
@@ -123,6 +129,28 @@ public sealed class SandboxJobService
     }
 
     /// <summary>
+    /// Runs static analysis without making job planning depend on parser success.
+    /// The input is sample identity, processing catches parser and IO failures,
+    /// and the method returns a static-analysis result with warnings.
+    /// </summary>
+    private StaticAnalysisResult AnalyzeSample(SampleIdentity sample)
+    {
+        try
+        {
+            return staticAnalyzer.Analyze(sample.FullPath);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException)
+        {
+            return new StaticAnalysisResult
+            {
+                FileFormat = "unknown",
+                Magic = "analysis failed",
+                Warnings = [$"Static analysis failed: {ex.Message}"]
+            };
+        }
+    }
+
+    /// <summary>
     /// Clamps requested duration to configured safe bounds.
     /// The input is user-supplied seconds, processing applies defaults and max
     /// limits, and the method returns the effective duration in seconds.
@@ -138,7 +166,7 @@ public sealed class SandboxJobService
     /// Inputs are sample metadata, submission, and runbook; processing creates
     /// normalized host events; the method returns the event list.
     /// </summary>
-    private static List<SandboxEvent> CreatePlanningEvents(SampleIdentity sample, SandboxSubmission submission, SandboxRunbook runbook)
+    private static List<SandboxEvent> CreatePlanningEvents(SampleIdentity sample, SandboxSubmission submission, SandboxRunbook runbook, StaticAnalysisResult staticAnalysis)
     {
         return
         [
@@ -151,7 +179,24 @@ public sealed class SandboxJobService
                 Data =
                 {
                     ["sha256"] = sample.Sha256,
+                    ["sha1"] = sample.Sha1,
+                    ["md5"] = sample.Md5,
+                    ["crc32"] = sample.Crc32,
                     ["sizeBytes"] = sample.SizeBytes.ToString()
+                }
+            },
+            new SandboxEvent
+            {
+                EventType = "static.analysis.completed",
+                Source = "host",
+                Path = sample.FullPath,
+                Data =
+                {
+                    ["fileFormat"] = staticAnalysis.FileFormat,
+                    ["isPe"] = staticAnalysis.IsPe.ToString(),
+                    ["tags"] = string.Join(",", staticAnalysis.Tags),
+                    ["urls"] = staticAnalysis.Urls.Count.ToString(),
+                    ["interestingStrings"] = staticAnalysis.InterestingStrings.Count.ToString()
                 }
             },
             new SandboxEvent
@@ -170,15 +215,18 @@ public sealed class SandboxJobService
 
     /// <summary>
     /// Builds small report metrics from events and findings.
-    /// Inputs are event and finding lists, processing counts total and severity
-    /// groups, and the method returns a metric dictionary.
+    /// Inputs are event, finding, and static-analysis data, processing counts
+    /// totals and severity groups, and the method returns a metric dictionary.
     /// </summary>
-    private static Dictionary<string, int> BuildMetrics(List<SandboxEvent> events, List<BehaviorFinding> findings)
+    private static Dictionary<string, int> BuildMetrics(List<SandboxEvent> events, List<BehaviorFinding> findings, StaticAnalysisResult staticAnalysis)
     {
         var metrics = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase)
         {
             ["events.total"] = events.Count,
-            ["findings.total"] = findings.Count
+            ["findings.total"] = findings.Count,
+            ["static.tags"] = staticAnalysis.Tags.Count,
+            ["static.urls"] = staticAnalysis.Urls.Count,
+            ["static.interestingStrings"] = staticAnalysis.InterestingStrings.Count
         };
 
         foreach (var group in findings.GroupBy(finding => finding.Severity))

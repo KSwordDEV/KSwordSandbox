@@ -1,5 +1,6 @@
 using KSword.Sandbox.Abstractions;
 using KSword.Sandbox.Core.Configuration;
+using KSword.Sandbox.Core.Execution;
 using KSword.Sandbox.Core.Files;
 using KSword.Sandbox.Core.Jobs;
 using KSword.Sandbox.Core.Rules;
@@ -17,6 +18,7 @@ builder.Services.AddSingleton(config);
 builder.Services.AddSingleton(rules);
 builder.Services.AddSingleton(jobService);
 builder.Services.AddSingleton(targetScanner);
+builder.Services.AddSingleton<IRunbookExecutor, PowerShellRunbookExecutor>();
 
 var app = builder.Build();
 
@@ -45,6 +47,18 @@ app.MapPost("/api/files/scan", (ExecutableScanRequest request, ExecutableTargetS
         return Results.BadRequest(new { error = ex.Message });
     }
 });
+app.MapPost("/api/files/upload", async (HttpRequest request, SandboxConfig currentConfig) =>
+{
+    try
+    {
+        var candidate = await SaveUploadedExecutableAsync(request, currentConfig);
+        return Results.Ok(candidate);
+    }
+    catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or IOException or UnauthorizedAccessException)
+    {
+        return Results.BadRequest(new { error = ex.Message });
+    }
+});
 app.MapPost("/api/jobs/plan", (SandboxSubmission submission, SandboxJobService service) =>
 {
     try
@@ -56,6 +70,29 @@ app.MapPost("/api/jobs/plan", (SandboxSubmission submission, SandboxJobService s
     {
         return Results.BadRequest(new { error = ex.Message });
     }
+});
+app.MapPost("/api/jobs/{jobId:guid}/runbook/execute", async (Guid jobId, RunbookExecuteRequest request, SandboxJobService service, IRunbookExecutor executor) =>
+{
+    var job = service.GetJob(jobId);
+    if (job is null)
+    {
+        return Results.NotFound(new { error = "Job was not found." });
+    }
+
+    if (job.Runbook is null)
+    {
+        return Results.BadRequest(new { error = "Job does not have a runbook." });
+    }
+
+    var options = new SandboxRunbookExecutionOptions
+    {
+        Mode = request.Live ? SandboxRunbookExecutionMode.Live : SandboxRunbookExecutionMode.DryRun,
+        StepTimeout = TimeSpan.FromSeconds(Math.Clamp(request.StepTimeoutSeconds, 1, 7200)),
+        RequireElevatedPowerShell = true,
+        WorkingDirectory = Directory.GetCurrentDirectory()
+    };
+    var result = await executor.ExecuteAsync(job.Runbook, options);
+    return Results.Ok(result);
 });
 
 app.Run();
@@ -79,6 +116,74 @@ static string ResolveRepositoryRoot(string contentRoot)
     }
 
     return contentRoot;
+}
+
+/// <summary>
+/// Saves one uploaded executable into the configured runtime upload folder.
+/// Inputs are the HTTP multipart request and sandbox config, processing
+/// validates extension and size limits, and the function returns candidate
+/// metadata with a host-visible path suitable for job planning.
+/// </summary>
+static async Task<ExecutableCandidate> SaveUploadedExecutableAsync(HttpRequest request, SandboxConfig config)
+{
+    if (!request.HasFormContentType)
+    {
+        throw new ArgumentException("Upload must use multipart/form-data.");
+    }
+
+    var form = await request.ReadFormAsync();
+    var file = form.Files.GetFile("sample") ?? form.Files.FirstOrDefault();
+    if (file is null)
+    {
+        throw new ArgumentException("No uploaded file was provided.");
+    }
+
+    if (file.Length <= 0)
+    {
+        throw new InvalidOperationException("Uploaded file is empty.");
+    }
+
+    if (file.Length > config.Analysis.MaxSampleBytes)
+    {
+        throw new InvalidOperationException($"Uploaded file size {file.Length} exceeds limit {config.Analysis.MaxSampleBytes}.");
+    }
+
+    var originalName = Path.GetFileName(file.FileName);
+    if (!string.Equals(Path.GetExtension(originalName), ".exe", StringComparison.OrdinalIgnoreCase))
+    {
+        throw new InvalidOperationException("Only .exe uploads are accepted in the v1 WebUI.");
+    }
+
+    var uploadRoot = Path.Combine(config.Paths.RuntimeRoot, "uploads");
+    Directory.CreateDirectory(uploadRoot);
+    var storedName = $"{DateTimeOffset.UtcNow:yyyyMMddHHmmss}-{Guid.NewGuid():N}-{SanitizeFileName(originalName)}";
+    var storedPath = Path.Combine(uploadRoot, storedName);
+    await using (var target = File.Create(storedPath))
+    await using (var source = file.OpenReadStream())
+    {
+        await source.CopyToAsync(target);
+    }
+
+    var info = new FileInfo(storedPath);
+    return new ExecutableCandidate
+    {
+        FileName = info.Name,
+        FullPath = info.FullName,
+        SizeBytes = info.Length,
+        LastWriteTimeUtc = info.LastWriteTimeUtc
+    };
+}
+
+/// <summary>
+/// Removes path separators and invalid filesystem characters from a file name.
+/// The input is a browser-supplied file name, processing keeps only safe local
+/// filename characters, and the function returns a storage-safe file name.
+/// </summary>
+static string SanitizeFileName(string fileName)
+{
+    var invalid = Path.GetInvalidFileNameChars();
+    var sanitized = new string(fileName.Select(ch => invalid.Contains(ch) ? '_' : ch).ToArray());
+    return string.IsNullOrWhiteSpace(sanitized) ? "sample.exe" : sanitized;
 }
 
 /// <summary>
@@ -111,7 +216,7 @@ static string RenderDashboard()
             code, pre { background: #f1f5f9; border-radius: 8px; }
             code { padding: 2px 5px; }
             pre { overflow: auto; padding: 14px; white-space: pre-wrap; }
-            .grid { display: grid; gap: 18px; grid-template-columns: 1fr 1fr; }
+            .grid { display: grid; gap: 18px; grid-template-columns: repeat(3, 1fr); }
             .hint { color: #64748b; font-size: 14px; }
             .status { margin-top: 12px; min-height: 24px; }
             .error { color: #b91c1c; }
@@ -130,6 +235,14 @@ static string RenderDashboard()
               <h2>Plan analysis</h2>
               <p class="hint">This is a local WebUI. Use host-visible paths such as <code>D:\Temp\sample.exe</code> or scan a directory and select one discovered executable.</p>
               <div class="grid">
+                <div>
+                  <h3>Upload executable</h3>
+                  <label for="sampleUpload">Executable file</label>
+                  <input id="sampleUpload" type="file" accept=".exe,application/vnd.microsoft.portable-executable,application/octet-stream">
+                  <label for="uploadDuration">Analysis duration, seconds</label>
+                  <input id="uploadDuration" type="number" min="1" max="900" value="120">
+                  <button onclick="uploadAndPlan()">Upload and plan</button>
+                </div>
                 <div>
                   <h3>Single executable</h3>
                   <label for="samplePath">Executable path</label>
@@ -181,6 +294,38 @@ static string RenderDashboard()
 
                 renderCandidates(payload);
                 setStatus(`Scan complete: ${payload.candidates.length} executable candidate(s).`, false);
+              } catch (error) {
+                setStatus(error.message, true);
+              } finally {
+                setBusy(false);
+              }
+            }
+
+            async function uploadAndPlan() {
+              const input = document.getElementById('sampleUpload');
+              if (!input.files || input.files.length === 0) {
+                setStatus('Select one .exe file to upload.', true);
+                return;
+              }
+
+              setBusy(true);
+              setStatus('Uploading executable into runtime storage...', false);
+              try {
+                const form = new FormData();
+                form.append('sample', input.files[0]);
+                const uploadResponse = await fetch('/api/files/upload', {
+                  method: 'POST',
+                  body: form
+                });
+                const uploaded = await uploadResponse.json();
+                if (!uploadResponse.ok) {
+                  throw new Error(uploaded.error || 'Upload failed');
+                }
+
+                document.getElementById('samplePath').value = uploaded.fullPath;
+                document.getElementById('duration').value = document.getElementById('uploadDuration').value || 120;
+                setStatus(`Uploaded to ${uploaded.fullPath}; creating analysis plan...`, false);
+                await planPath(uploaded.fullPath);
               } catch (error) {
                 setStatus(error.message, true);
               } finally {
@@ -254,7 +399,57 @@ static string RenderDashboard()
                 <p><strong>JSON report:</strong> <code>${escapeHtml(job.jsonReportPath || '')}</code></p>
                 <p><strong>HTML report:</strong> <code>${escapeHtml(job.htmlReportPath || '')}</code></p>
                 <h3>Hyper-V runbook</h3>
+                <p>
+                  <button class="secondary" onclick="executeRunbook('${escapeJs(job.jobId)}', false)">Record dry-run execution</button>
+                  <button onclick="executeRunbook('${escapeJs(job.jobId)}', true)">Execute live runbook</button>
+                </p>
+                <div id="executionResult" class="hint">Live execution requires an elevated host process and a prepared golden VM.</div>
                 <ol>${steps}</ol>`;
+            }
+
+            async function executeRunbook(jobId, live) {
+              setBusy(true);
+              setStatus(live ? 'Executing live Hyper-V runbook...' : 'Recording dry-run runbook execution...', false);
+              try {
+                const response = await fetch(`/api/jobs/${jobId}/runbook/execute`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    live,
+                    stepTimeoutSeconds: 1800
+                  })
+                });
+                const payload = await response.json();
+                if (!response.ok) {
+                  throw new Error(payload.error || 'Runbook execution failed');
+                }
+
+                renderExecution(payload);
+                setStatus(payload.success ? 'Runbook execution completed.' : 'Runbook execution stopped with a failure.', !payload.success);
+              } catch (error) {
+                setStatus(error.message, true);
+              } finally {
+                setBusy(false);
+              }
+            }
+
+            function renderExecution(result) {
+              const rows = (result.stepResults || []).map(step => `
+                <tr>
+                  <td>${step.stepIndex}</td>
+                  <td>${escapeHtml(step.stepId)}</td>
+                  <td>${step.success ? 'ok' : 'failed'}</td>
+                  <td>${step.skipped ? 'yes' : 'no'}</td>
+                  <td>${step.exitCode ?? ''}</td>
+                  <td>${escapeHtml(step.message || '')}</td>
+                </tr>`).join('');
+              document.getElementById('executionResult').innerHTML = `
+                <p><strong>Mode:</strong> ${escapeHtml(result.mode)} | <strong>Success:</strong> ${result.success} | <strong>Executed:</strong> ${result.executedSteps}/${result.totalSteps}</p>
+                ${result.message ? `<p class="error">${escapeHtml(result.message)}</p>` : ''}
+                <table>
+                  <thead><tr><th>#</th><th>Step</th><th>Status</th><th>Skipped</th><th>Exit</th><th>Message</th></tr></thead>
+                  <tbody>${rows}</tbody>
+                </table>`;
             }
 
             function setStatus(message, isError) {
@@ -286,4 +481,16 @@ static string RenderDashboard()
         </body>
         </html>
         """;
+}
+
+/// <summary>
+/// Request body for running a planned Hyper-V runbook.
+/// Inputs come from the WebUI, processing maps Live to dry-run or live executor
+/// mode and clamps StepTimeoutSeconds, and the record is not persisted.
+/// </summary>
+internal sealed record RunbookExecuteRequest
+{
+    public bool Live { get; init; }
+
+    public int StepTimeoutSeconds { get; init; } = 1800;
 }

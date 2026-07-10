@@ -39,5 +39,7 @@ public sealed record BehaviorRule
 
     public List<string> DataKeys { get; init; } = [];
 
+    public Dictionary<string, List<string>> DataContains { get; init; } = new(StringComparer.OrdinalIgnoreCase);
+
     public List<string> Tags { get; init; } = [];
 }

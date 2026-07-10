@@ -3,6 +3,7 @@ using KSword.Sandbox.Core.Configuration;
 using KSword.Sandbox.Core.Files;
 using KSword.Sandbox.Core.Jobs;
 using KSword.Sandbox.Core.Rules;
+using KSword.Sandbox.Core.StaticAnalysis;
 
 return SmokeTestProgram.Run(args);
 
@@ -28,6 +29,7 @@ internal static class SmokeTestProgram
             Assert(rules.Rules.Count > 0, "rules should load");
             AssertRuleClassification(rules);
             AssertExecutableScanning();
+            AssertStaticAnalysis(rules);
             AssertPlanningPipeline(repositoryRoot, rules);
             Console.WriteLine("Smoke tests passed.");
             return 0;
@@ -37,6 +39,42 @@ internal static class SmokeTestProgram
             Console.Error.WriteLine(ex);
             return 1;
         }
+    }
+
+    /// <summary>
+    /// Verifies that host static analysis parses a minimal PE-like sample and
+    /// feeds static tags into behavior rules.
+    /// Inputs are loaded rules, processing creates a bounded synthetic PE file,
+    /// and the method returns no value on success.
+    /// </summary>
+    private static void AssertStaticAnalysis(BehaviorRuleSet rules)
+    {
+        var tempRoot = Path.Combine(Path.GetTempPath(), "KSwordSandboxStatic", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempRoot);
+        var samplePath = Path.Combine(tempRoot, "packed.exe");
+        WriteMinimalPe(samplePath);
+
+        var analyzer = new StaticAnalyzer();
+        var result = analyzer.Analyze(samplePath);
+        Assert(result.IsPe, "static analyzer should parse minimal PE");
+        Assert(result.Tags.Contains("packer_upx"), "static analyzer should tag UPX section");
+
+        var engine = new RuleEngine(rules);
+        var findings = engine.Classify(
+        [
+            new SandboxEvent
+            {
+                EventType = "static.analysis.completed",
+                Source = "host",
+                Path = samplePath,
+                Data =
+                {
+                    ["tags"] = string.Join(",", result.Tags)
+                }
+            }
+        ]);
+
+        Assert(findings.Any(finding => finding.RuleId == "static-pe-known-packer"), "static packer rule should match");
     }
 
     /// <summary>
@@ -127,6 +165,59 @@ internal static class SmokeTestProgram
         Assert(html.Contains("Risk summary", StringComparison.Ordinal), "html report should include risk summary");
         Assert(html.Contains("Static analysis", StringComparison.Ordinal), "html report should include static analysis");
         Assert(html.Contains("CRC32", StringComparison.Ordinal), "html report should include crc32");
+        Assert(html.Contains("PE sections", StringComparison.Ordinal), "html report should include pe sections");
+    }
+
+    /// <summary>
+    /// Writes a tiny PE-shaped file for parser smoke tests.
+    /// The input is an output path, processing writes DOS, PE, optional-header,
+    /// and one UPX-named section, and the method returns no value.
+    /// </summary>
+    private static void WriteMinimalPe(string path)
+    {
+        var buffer = new byte[1024];
+        WriteUInt16(buffer, 0x00, 0x5a4d);
+        WriteUInt32(buffer, 0x3c, 0x80);
+        WriteUInt32(buffer, 0x80, 0x00004550);
+        WriteUInt16(buffer, 0x84, 0x8664);
+        WriteUInt16(buffer, 0x86, 1);
+        WriteUInt16(buffer, 0x94, 0xf0);
+        WriteUInt16(buffer, 0x98, 0x20b);
+        WriteUInt32(buffer, 0xa8, 0x1000);
+        WriteUInt16(buffer, 0xdc, 2);
+        var sectionOffset = 0x188;
+        var name = "UPX0"u8;
+        name.CopyTo(buffer.AsSpan(sectionOffset, name.Length));
+        WriteUInt32(buffer, sectionOffset + 8, 0x1000);
+        WriteUInt32(buffer, sectionOffset + 12, 0x1000);
+        WriteUInt32(buffer, sectionOffset + 16, 0x200);
+        WriteUInt32(buffer, sectionOffset + 20, 0x200);
+        for (var index = 0x200; index < 0x400; index++)
+        {
+            buffer[index] = (byte)(index % 251);
+        }
+
+        File.WriteAllBytes(path, buffer);
+    }
+
+    /// <summary>
+    /// Writes a little-endian UInt16 into a byte buffer.
+    /// Inputs are a buffer, offset, and value; processing writes bytes in place;
+    /// the method returns no value.
+    /// </summary>
+    private static void WriteUInt16(byte[] buffer, int offset, ushort value)
+    {
+        BitConverter.GetBytes(value).CopyTo(buffer, offset);
+    }
+
+    /// <summary>
+    /// Writes a little-endian UInt32 into a byte buffer.
+    /// Inputs are a buffer, offset, and value; processing writes bytes in place;
+    /// the method returns no value.
+    /// </summary>
+    private static void WriteUInt32(byte[] buffer, int offset, uint value)
+    {
+        BitConverter.GetBytes(value).CopyTo(buffer, offset);
     }
 
     /// <summary>
