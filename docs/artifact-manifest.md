@@ -66,3 +66,28 @@ relative links for:
 The HTML report consumes this index when available. If no index has been
 provided, it still exposes artifact paths inferred from report events, but only
 host-normalized relative paths receive clickable `safeLink` anchors.
+
+## HTML report links and evidence
+
+`report.html` renders an **Artifact links** section for durable evidence that
+operators need to open from the local job folder:
+
+- `events.json`
+- `driver-events.jsonl`
+- `artifacts/manifest.json`
+- `screenshots/*`
+- dropped files under `artifacts/*`
+
+Each artifact row includes the safe relative link, kind/category, size, MIME,
+SHA-256, and a collapsible **Artifact evidence** block. Text evidence artifacts
+(`events.json`, `driver-events.jsonl`, and artifact manifests) include a bounded
+preview. Screenshot artifacts include an inline preview that links to the image.
+Dropped files are not previewed as text; their evidence expansion shows hashes,
+size, safe path, and metadata such as `guestFullPath`.
+
+Event tables also back-link to related artifacts. File events can link to
+dropped-file artifacts through exact paths or `relativePath` data, screenshot
+events link to screenshots, R0/driver events link to `driver-events.jsonl`, and
+guest import events link to `events.json`, driver JSONL, and the artifact
+manifest. These links are report-local `safeLink` anchors; original VM-local
+paths remain copyable evidence only.

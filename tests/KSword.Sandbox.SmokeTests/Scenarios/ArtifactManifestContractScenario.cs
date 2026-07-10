@@ -245,11 +245,38 @@ internal sealed class ArtifactManifestContractScenario : ISmokeTestScenario
         var driverPath = Path.Combine(guestRoot, "driver-events.jsonl");
         var screenshotPath = Path.Combine(screenshotsRoot, "after-run.bmp");
         var dropPath = Path.Combine(artifactsRoot, "drop.bin");
+        var manifestPath = Path.Combine(artifactsRoot, "manifest.json");
         await File.WriteAllTextAsync(eventsPath, "[]", cancellationToken);
         await File.WriteAllTextAsync(driverPath, "{}", cancellationToken);
         await File.WriteAllBytesAsync(screenshotPath, [0x42, 0x4d, 0x00, 0x00], cancellationToken);
         await File.WriteAllTextAsync(dropPath, "drop", cancellationToken);
-        await File.WriteAllTextAsync(Path.Combine(artifactsRoot, "manifest.json"), "{}", cancellationToken);
+        await File.WriteAllTextAsync(
+            manifestPath,
+            JsonSerializer.Serialize(new ArtifactManifest
+            {
+                RuntimeRoot = @"C:\KSwordSandbox\out",
+                RootPath = @"C:\KSwordSandbox\out\artifacts",
+                Producer = "KSword.Sandbox.Agent",
+                Artifacts =
+                [
+                    new ArtifactDescriptor
+                    {
+                        Kind = ArtifactKind.DroppedFile,
+                        Name = "drop.bin",
+                        Category = "dropped-file",
+                        RelativePath = "artifacts/drop.bin",
+                        FullPath = @"C:\KSwordSandbox\out\artifacts\drop.bin",
+                        SafeLink = "artifacts/drop.bin",
+                        MimeType = "application/octet-stream",
+                        SizeBytes = 4,
+                        Metadata = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                        {
+                            ["evidenceRole"] = "dropped-file"
+                        }
+                    }
+                ]
+            }, ManifestJsonOptions),
+            cancellationToken);
 
         var report = CreateReport(jobId, eventsPath, screenshotPath, dropPath);
         var index = new HostArtifactIndexBuilder().Build(jobId, jobRoot);
@@ -352,6 +379,16 @@ internal sealed class ArtifactManifestContractScenario : ISmokeTestScenario
         SmokeAssert.True(html.Contains("screenshots/after-run.bmp", StringComparison.Ordinal), "HTML report should expose screenshot path.");
         SmokeAssert.True(html.Contains("artifacts/drop.bin", StringComparison.Ordinal), "HTML report should expose dropped-file path.");
         SmokeAssert.True(html.Contains($"href=\"guest/{jobId:N}/events.json\"", StringComparison.Ordinal), "HTML report should use safe relative event links.");
+        SmokeAssert.True(html.Contains($"href=\"guest/{jobId:N}/driver-events.jsonl\"", StringComparison.Ordinal), "HTML report should link driver JSONL.");
+        SmokeAssert.True(html.Contains($"href=\"guest/{jobId:N}/screenshots/after-run.bmp\"", StringComparison.Ordinal), "HTML report should link screenshots.");
+        SmokeAssert.True(html.Contains($"href=\"guest/{jobId:N}/artifacts/manifest.json\"", StringComparison.Ordinal), "HTML report should link artifact manifest.");
+        SmokeAssert.True(html.Contains($"href=\"guest/{jobId:N}/artifacts/drop.bin\"", StringComparison.Ordinal), "HTML report should link dropped files.");
+        SmokeAssert.True(html.Contains("Artifact evidence", StringComparison.Ordinal), "HTML report should render collapsible artifact evidence.");
+        SmokeAssert.True(html.Contains("Related artifacts", StringComparison.Ordinal), "HTML report event evidence should expand related artifacts.");
+        SmokeAssert.True(html.Contains("Screenshot preview", StringComparison.Ordinal), "HTML report should render screenshot evidence preview.");
+        SmokeAssert.True(html.Contains("Driver JSONL preview", StringComparison.Ordinal), "HTML report should render driver-events evidence preview.");
+        SmokeAssert.True(html.Contains("Manifest preview", StringComparison.Ordinal), "HTML report should render artifact manifest evidence preview.");
+        SmokeAssert.True(html.Contains("metadata.guestFullPath", StringComparison.Ordinal), "HTML report should expand original guest artifact paths.");
     }
 
     /// <summary>

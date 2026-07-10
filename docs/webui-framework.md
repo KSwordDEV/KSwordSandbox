@@ -113,6 +113,54 @@ table is intentionally read-only: the `Open` action fetches the selected job
 detail and reuses the main job panel instead of duplicating artifact/runbook
 rendering logic.
 
+## Optional runtime WebUI smoke
+
+The normal smoke path is a static gate: it checks source, script, and
+documentation contracts without launching a browser or modifying runtime
+artifacts. Use it when the Web host or a real browser cannot be started:
+
+```powershell
+dotnet run --project .\tests\KSword.Sandbox.SmokeTests\KSword.Sandbox.SmokeTests.csproj
+.\scripts\Test-LiveTelemetryFramework.ps1 -ContractOnly
+```
+
+When a Web host is already running and an existing planned/live job ID is
+available, set both runtime variables before running the smoke project:
+
+```powershell
+$env:KSWORD_SMOKE_BASE_URL = 'http://127.0.0.1:5000'
+$env:KSWORD_SMOKE_JOB_ID = '<existing-job-guid>'
+dotnet run --project .\tests\KSword.Sandbox.SmokeTests\KSword.Sandbox.SmokeTests.csproj
+```
+
+The runtime WebUI smoke contract is intentionally API-level so it can run on
+headless workers. It probes:
+
+- `GET /api/jobs/{jobId}/events/live?offset=0&take=1` and requires the live raw
+  telemetry JSON cursor fields: `jobId`, `retrievedAt`, `totalEvents`,
+  `nextOffset`, `hasMore`, `sources`, and `events`;
+- `GET /api/jobs/{jobId}/report/html` and requires a successful `text/html`
+  served report response, which is the same safe report link rendered by the
+  dashboard;
+- `POST /api/jobs/{jobId}/guest-events/import` with an explicit missing
+  `eventsPath` and requires a controlled HTTP 400 validation response. This
+  proves the manual guest import endpoint and payload contract without importing
+  or rewriting real guest artifacts during smoke.
+
+The PowerShell gate also accepts the same environment variables when `-BaseUrl`
+and `-JobId` are omitted:
+
+```powershell
+.\scripts\Test-LiveTelemetryFramework.ps1 -UsePollingFallback
+```
+
+For an end-to-end operator validation, create or select a job after starting the
+Web host, open the dashboard in a browser manually, and confirm that the served
+HTML report link opens, the live raw telemetry panel refreshes, and the manual
+guest import field can be left blank or filled with a specific `events.json` /
+`.jsonl` path. Do not commit generated reports, imported guest output, browser
+screenshots, or build binaries from this validation.
+
 ## Verification guidance
 
 To avoid modifying repository `bin/` or `obj/` directories during verification,

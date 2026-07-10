@@ -6,16 +6,19 @@ Runs lightweight live-telemetry framework checks without Hyper-V.
 The default mode performs static source and documentation checks for the WebUI
 live telemetry contract. Optional runtime mode probes an already-running Web API
 and an existing job ID; the script never starts a VM, never requires
-Administrator, and never launches Hyper-V cmdlets.
+Administrator, and never launches Hyper-V cmdlets. When -BaseUrl or -JobId are
+omitted, runtime mode reads KSWORD_SMOKE_BASE_URL and KSWORD_SMOKE_JOB_ID.
 
 .PARAMETER ContractOnly
 Skips runtime HTTP probing even when BaseUrl and JobId are supplied.
 
 .PARAMETER BaseUrl
 Optional Web API base URL for runtime probes, for example http://localhost:5000.
+Defaults to KSWORD_SMOKE_BASE_URL when omitted.
 
 .PARAMETER JobId
-Optional existing job ID for runtime probes.
+Optional existing job ID for runtime probes. Defaults to KSWORD_SMOKE_JOB_ID
+when omitted.
 
 .PARAMETER UsePollingFallback
 Allows polling fallback validation when the SSE stream route is unavailable or
@@ -212,11 +215,17 @@ function Invoke-StaticContractChecks {
     )
 
     $program = Get-RepositoryText -RepositoryRoot $RepositoryRoot -RelativePath 'src\KSword.Sandbox.Web\Program.cs'
+    $dashboard = Get-RepositoryText -RepositoryRoot $RepositoryRoot -RelativePath 'src\KSword.Sandbox.Web\Dashboard\DashboardExperiencePage.cs'
     $executionModels = Get-RepositoryText -RepositoryRoot $RepositoryRoot -RelativePath 'src\KSword.Sandbox.Abstractions\ExecutionModels.cs'
     $liveDoc = Get-RepositoryText -RepositoryRoot $RepositoryRoot -RelativePath 'docs\live-telemetry-pipeline.md'
     $runnerDoc = Get-RepositoryText -RepositoryRoot $RepositoryRoot -RelativePath 'docs\hyperv-runner.md'
+    $webuiDoc = Get-RepositoryText -RepositoryRoot $RepositoryRoot -RelativePath 'docs\webui-framework.md'
 
     Test-LiteralText -Content $program -Expected '"/api/jobs/{jobId:guid}/events/live"' -Name 'Web source maps polling live-events route'
+    Test-LiteralText -Content $program -Expected '"/api/jobs/{jobId:guid}/report/html"' -Name 'Web source maps served report route'
+    Test-LiteralText -Content $program -Expected '"/api/jobs/{jobId:guid}/guest-events/import"' -Name 'Web source maps manual guest import route'
+    Test-LiteralText -Content $program -Expected 'GuestEventImportRequest' -Name 'Web source keeps typed guest import request'
+    Test-LiteralText -Content $program -Expected 'EventsPath' -Name 'Web source accepts optional guest import events path'
     Test-LiteralText -Content $program -Expected 'int? offset' -Name 'SSE/polling source accepts offset'
     Test-LiteralText -Content $program -Expected 'int? take' -Name 'SSE/polling source accepts take'
     Test-OptionalImplementationText -Content $program -Expected '"/api/jobs/{jobId:guid}/events/stream"' -Name 'Web source maps SSE live-events route' -Required $RequireStreamImplementation
@@ -229,6 +238,12 @@ function Invoke-StaticContractChecks {
     Test-LiteralText -Content $program -Expected '/runbook/execute' -Name 'WebUI source calls runbook execution endpoint'
     Test-LiteralText -Content $program -Expected 'step.exitCode' -Name 'WebUI source exposes runbook exit code'
     Test-LiteralText -Content $program -Expected 'step.message' -Name 'WebUI source exposes runbook step message'
+
+    Test-LiteralText -Content $dashboard -Expected 'Open served HTML report' -Name 'Dashboard renders served report link'
+    Test-LiteralText -Content $dashboard -Expected 'Open local file:// report' -Name 'Dashboard renders local report fallback link'
+    Test-LiteralText -Content $dashboard -Expected 'guestImportPath' -Name 'Dashboard renders manual guest import path input'
+    Test-LiteralText -Content $dashboard -Expected 'guest-events/import' -Name 'Dashboard calls manual guest import endpoint'
+    Test-LiteralText -Content $dashboard -Expected 'JSON.stringify(explicitPath ? { eventsPath: explicitPath } : {})' -Name 'Dashboard sends optional manual guest import path JSON'
 
     Test-LiteralText -Content $executionModels -Expected 'StandardOutput' -Name 'Runbook model stores stdout'
     Test-LiteralText -Content $executionModels -Expected 'StandardError' -Name 'Runbook model stores stderr'
@@ -249,8 +264,18 @@ function Invoke-StaticContractChecks {
     Test-LiteralText -Content $runnerDoc -Expected 'duration' -Name 'Hyper-V runner doc covers duration UX'
     Test-LiteralText -Content $runnerDoc -Expected 'error' -Name 'Hyper-V runner doc covers error UX'
 
+    Test-LiteralText -Content $webuiDoc -Expected 'KSWORD_SMOKE_BASE_URL' -Name 'WebUI doc covers runtime smoke base URL environment variable'
+    Test-LiteralText -Content $webuiDoc -Expected 'KSWORD_SMOKE_JOB_ID' -Name 'WebUI doc covers runtime smoke job ID environment variable'
+    Test-LiteralText -Content $webuiDoc -Expected '/api/jobs/{jobId}/events/live' -Name 'WebUI doc covers runtime live endpoint probe'
+    Test-LiteralText -Content $webuiDoc -Expected '/api/jobs/{jobId}/report/html' -Name 'WebUI doc covers runtime report endpoint probe'
+    Test-LiteralText -Content $webuiDoc -Expected '/api/jobs/{jobId}/guest-events/import' -Name 'WebUI doc covers runtime manual guest import endpoint probe'
+    Test-LiteralText -Content $webuiDoc -Expected 'static gate' -Name 'WebUI doc covers static gate fallback'
+
     $scenarioPath = Join-Path $RepositoryRoot 'tests\KSword.Sandbox.SmokeTests\Scenarios\LiveTelemetryContractScenario.cs'
     Add-CheckResult -Name 'Live telemetry smoke scenario exists' -Passed (Test-Path -LiteralPath $scenarioPath) -Detail $scenarioPath
+
+    $runtimeScenarioPath = Join-Path $RepositoryRoot 'tests\KSword.Sandbox.SmokeTests\Scenarios\WebUiRuntimeSmokeContractScenario.cs'
+    Add-CheckResult -Name 'WebUI runtime smoke scenario exists' -Passed (Test-Path -LiteralPath $runtimeScenarioPath) -Detail $runtimeScenarioPath
 }
 
 <#
@@ -351,6 +376,100 @@ function Test-PollingEndpoint {
 }
 
 <#
+Inputs: base URL and job ID.
+Processing: requests the server-owned report.html endpoint and validates that
+the safe dashboard report link can return an HTML response.
+Return: no return value; failures are accumulated in script state.
+#>
+function Test-ReportHtmlEndpoint {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$NormalizedBaseUrl,
+
+        [Parameter(Mandatory = $true)]
+        [Guid]$RuntimeJobId
+    )
+
+    Add-Type -AssemblyName System.Net.Http
+
+    $uri = '{0}/api/jobs/{1}/report/html' -f $NormalizedBaseUrl, $RuntimeJobId
+    $client = [System.Net.Http.HttpClient]::new()
+    $request = [System.Net.Http.HttpRequestMessage]::new([System.Net.Http.HttpMethod]::Get, $uri)
+    $request.Headers.Accept.ParseAdd('text/html')
+
+    try {
+        $response = $client.SendAsync($request).GetAwaiter().GetResult()
+        try {
+            $statusCode = [int]$response.StatusCode
+            $mediaType = ''
+            if ($null -ne $response.Content.Headers.ContentType) {
+                $mediaType = $response.Content.Headers.ContentType.MediaType
+            }
+
+            $body = $response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+            Add-CheckResult -Name 'Runtime served report link returns success' -Passed ($statusCode -ge 200 -and $statusCode -lt 300) -Detail "status=$statusCode uri=$uri"
+            Add-CheckResult -Name 'Runtime served report link returns text/html' -Passed ($mediaType -like 'text/html*') -Detail "contentType=$mediaType"
+            Add-CheckResult -Name 'Runtime served report link returns HTML body' -Passed ($body -match '<html') -Detail $uri
+        }
+        finally {
+            $response.Dispose()
+        }
+    }
+    catch {
+        Add-CheckResult -Name 'Runtime served report link request succeeds' -Passed $false -Detail $_.Exception.Message
+    }
+    finally {
+        $request.Dispose()
+        $client.Dispose()
+    }
+}
+
+<#
+Inputs: base URL and job ID.
+Processing: posts a deliberately missing explicit events path to the manual
+guest import endpoint and expects a controlled validation failure. This proves
+the endpoint exists and accepts the manual payload without importing artifacts.
+Return: no return value; failures are accumulated in script state.
+#>
+function Test-ManualGuestImportEndpoint {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$NormalizedBaseUrl,
+
+        [Parameter(Mandatory = $true)]
+        [Guid]$RuntimeJobId
+    )
+
+    Add-Type -AssemblyName System.Net.Http
+
+    $uri = '{0}/api/jobs/{1}/guest-events/import' -f $NormalizedBaseUrl, $RuntimeJobId
+    $missingEventsPath = Join-Path ([System.IO.Path]::GetTempPath()) ('ksword-smoke-missing-{0}.events.json' -f [Guid]::NewGuid().ToString('N'))
+    $body = @{ eventsPath = $missingEventsPath } | ConvertTo-Json -Compress
+    $client = [System.Net.Http.HttpClient]::new()
+    $content = [System.Net.Http.StringContent]::new($body, [System.Text.Encoding]::UTF8, 'application/json')
+
+    try {
+        $response = $client.PostAsync($uri, $content).GetAwaiter().GetResult()
+        try {
+            $statusCode = [int]$response.StatusCode
+            $responseBody = $response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+            Add-CheckResult -Name 'Runtime manual guest import endpoint rejects missing explicit path with HTTP 400' -Passed ($statusCode -eq 400) -Detail "status=$statusCode uri=$uri"
+            Add-CheckResult -Name 'Runtime manual guest import endpoint returns validation message' -Passed (($responseBody -match 'Guest event import failed') -or ($responseBody -match 'Guest events file was not found')) -Detail $responseBody
+        }
+        finally {
+            $response.Dispose()
+        }
+    }
+    catch {
+        Add-CheckResult -Name 'Runtime manual guest import endpoint request succeeds' -Passed $false -Detail $_.Exception.Message
+    }
+    finally {
+        $content.Dispose()
+        $client.Dispose()
+    }
+}
+
+<#
 Inputs: optional base URL and job ID from script parameters.
 Processing: runs static checks, then optional SSE and polling probes when a
 runtime target was supplied.
@@ -360,12 +479,31 @@ function Invoke-Main {
     $repositoryRoot = Get-RepositoryRoot -StartPath $PSScriptRoot
     Invoke-StaticContractChecks -RepositoryRoot $repositoryRoot -RequireStreamImplementation ([bool]$RequireImplementedStream)
 
-    $hasRuntimeTarget = -not [string]::IsNullOrWhiteSpace($BaseUrl) -and $JobId -ne [Guid]::Empty
+    $runtimeBaseUrl = $BaseUrl
+    if ([string]::IsNullOrWhiteSpace($runtimeBaseUrl)) {
+        $runtimeBaseUrl = $env:KSWORD_SMOKE_BASE_URL
+    }
+
+    [Guid]$runtimeJobId = $JobId
+    $invalidEnvironmentJobId = $false
+    if ($runtimeJobId -eq [Guid]::Empty -and -not [string]::IsNullOrWhiteSpace($env:KSWORD_SMOKE_JOB_ID)) {
+        [Guid]$parsedJobId = [Guid]::Empty
+        if ([Guid]::TryParse($env:KSWORD_SMOKE_JOB_ID, [ref]$parsedJobId)) {
+            $runtimeJobId = $parsedJobId
+        }
+        else {
+            $invalidEnvironmentJobId = $true
+            Add-CheckResult -Name 'Runtime environment job id is valid GUID' -Passed $false -Detail 'KSWORD_SMOKE_JOB_ID'
+        }
+    }
+
+    $hasRuntimeTarget = -not [string]::IsNullOrWhiteSpace($runtimeBaseUrl) -and $runtimeJobId -ne [Guid]::Empty
+    $hasPartialRuntimeTarget = -not [string]::IsNullOrWhiteSpace($runtimeBaseUrl) -or $runtimeJobId -ne [Guid]::Empty -or $invalidEnvironmentJobId
     if (-not $ContractOnly -and $hasRuntimeTarget) {
-        $normalizedBaseUrl = $BaseUrl.TrimEnd('/')
+        $normalizedBaseUrl = $runtimeBaseUrl.TrimEnd('/')
         $sseUsable = Test-SseEndpoint `
             -NormalizedBaseUrl $normalizedBaseUrl `
-            -RuntimeJobId $JobId `
+            -RuntimeJobId $runtimeJobId `
             -RuntimeOffset $Offset `
             -RuntimeTake $Take `
             -RuntimeIntervalMs $IntervalMs `
@@ -374,13 +512,26 @@ function Invoke-Main {
         if ($UsePollingFallback -or -not $sseUsable) {
             Test-PollingEndpoint `
                 -NormalizedBaseUrl $normalizedBaseUrl `
-                -RuntimeJobId $JobId `
+                -RuntimeJobId $runtimeJobId `
                 -RuntimeOffset $Offset `
                 -RuntimeTake $Take
         }
+
+        Test-ReportHtmlEndpoint `
+            -NormalizedBaseUrl $normalizedBaseUrl `
+            -RuntimeJobId $runtimeJobId
+
+        Test-ManualGuestImportEndpoint `
+            -NormalizedBaseUrl $normalizedBaseUrl `
+            -RuntimeJobId $runtimeJobId
+    }
+    elseif (-not $ContractOnly -and $hasPartialRuntimeTarget) {
+        if (-not $invalidEnvironmentJobId) {
+            Add-CheckResult -Name 'Runtime probe target is complete' -Passed $false -Detail 'Provide both BaseUrl/KSWORD_SMOKE_BASE_URL and JobId/KSWORD_SMOKE_JOB_ID.'
+        }
     }
     else {
-        Add-CheckResult -Name 'Runtime probe skipped' -Passed $true -Detail 'Provide -BaseUrl and -JobId without -ContractOnly to probe a running Web API.'
+        Add-CheckResult -Name 'Runtime probe skipped' -Passed $true -Detail 'Provide -BaseUrl/-JobId or KSWORD_SMOKE_BASE_URL/KSWORD_SMOKE_JOB_ID without -ContractOnly to probe a running Web API.'
     }
 
     $script:Results | Format-Table -AutoSize

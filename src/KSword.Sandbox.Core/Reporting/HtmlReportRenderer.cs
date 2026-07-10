@@ -1,5 +1,7 @@
 using System.Net;
 using System.Text;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using KSword.Sandbox.Abstractions;
 using KSword.Sandbox.Abstractions.Artifacts;
 using KSword.Sandbox.Core.Artifacts;
@@ -14,6 +16,14 @@ namespace KSword.Sandbox.Core.Reporting;
 /// </summary>
 public sealed class HtmlReportRenderer
 {
+    private const int ArtifactPreviewCharacterLimit = 12_000;
+
+    private static readonly JsonSerializerOptions ArtifactJsonOptions = new(JsonSerializerDefaults.Web)
+    {
+        PropertyNameCaseInsensitive = true,
+        Converters = { new JsonStringEnumConverter() }
+    };
+
     /// <summary>
     /// Converts one AnalysisReport to HTML.
     /// The input is a completed or planned report, processing writes cover,
@@ -34,6 +44,7 @@ public sealed class HtmlReportRenderer
     public string Render(AnalysisReport report, IEnumerable<ArtifactDescriptor>? artifacts)
     {
         var artifactLinks = BuildReportArtifactList(report, artifacts);
+        var artifactLookup = BuildArtifactLookup(artifactLinks);
         var html = new StringBuilder();
         html.AppendLine("<!doctype html>");
         html.AppendLine("<html lang=\"en\">");
@@ -49,14 +60,14 @@ public sealed class HtmlReportRenderer
         AppendStaticAnalysis(html, report);
         AppendDynamicAnalysis(html, report);
         AppendArtifactLinks(html, artifactLinks);
-        AppendTimeline(html, report);
-        AppendProcessDetails(html, report);
-        AppendDroppedFiles(html, report);
-        AppendRegistryBehavior(html, report);
-        AppendNetworkBehavior(html, report);
-        AppendR0Events(html, report);
-        AppendFailureReasons(html, report);
-        AppendRawEvents(html, report);
+        AppendTimeline(html, report, artifactLookup, artifactLinks);
+        AppendProcessDetails(html, report, artifactLookup, artifactLinks);
+        AppendDroppedFiles(html, report, artifactLookup, artifactLinks);
+        AppendRegistryBehavior(html, report, artifactLookup, artifactLinks);
+        AppendNetworkBehavior(html, report, artifactLookup, artifactLinks);
+        AppendR0Events(html, report, artifactLookup, artifactLinks);
+        AppendFailureReasons(html, report, artifactLookup, artifactLinks);
+        AppendRawEvents(html, report, artifactLookup, artifactLinks);
         html.AppendLine("</main>");
         AppendReportScripts(html);
         html.AppendLine("</body></html>");
@@ -89,6 +100,7 @@ code{background:#f1f5f9;border-radius:6px;padding:2px 5px;word-break:break-all}.
 .tree{font-family:Consolas,monospace;line-height:1.5;margin:12px 0}.tree ul{border-left:1px dashed #cbd5e1;list-style:none;margin:0 0 0 18px;padding-left:14px}.tree li{margin:5px 0}
 .evidence{max-width:520px}.evidence details{background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:8px}.evidence summary{cursor:pointer;font-weight:700}.evidence pre{white-space:pre-wrap;word-break:break-word}
 .toolbar{display:flex;gap:8px;justify-content:flex-end}.columns{display:grid;gap:14px;grid-template-columns:1fr 1fr}.compact-list{margin:8px 0 0 0;padding-left:18px}.compact-list li{margin:4px 0}
+.artifact-ref{font-weight:700}.artifact-list{list-style:none;margin:8px 0 0 0;padding:0}.artifact-list li{border-top:1px solid #e2e8f0;margin-top:8px;padding-top:8px}.artifact-preview img{border:1px solid #cbd5e1;border-radius:10px;max-height:260px;max-width:100%}
 @media(max-width:900px){.grid,.columns{grid-template-columns:1fr 1fr}table{display:block;overflow-x:auto}}@media(max-width:640px){.grid,.columns{grid-template-columns:1fr}}
 """);
         html.AppendLine("</style></head>");
@@ -441,7 +453,7 @@ code{background:#f1f5f9;border-radius:6px;padding:2px 5px;word-break:break-all}.
             return;
         }
 
-        html.AppendLine("<table><thead><tr><th>Category</th><th>Artifact</th><th>Path / safe link</th><th>Size</th><th>SHA-256</th><th>MIME</th></tr></thead><tbody>");
+        html.AppendLine("<table><thead><tr><th>Category</th><th>Artifact</th><th>Path / safe link</th><th>Size</th><th>SHA-256</th><th>MIME</th><th>Evidence</th></tr></thead><tbody>");
         foreach (var artifact in artifacts)
         {
             var plain = ArtifactToPlainText(artifact);
@@ -452,6 +464,7 @@ code{background:#f1f5f9;border-radius:6px;padding:2px 5px;word-break:break-all}.
             html.AppendLine($"<td>{E(FormatArtifactSize(artifact.SizeBytes))}</td>");
             html.AppendLine($"<td><code>{E(ArtifactSha256(artifact))}</code></td>");
             html.AppendLine($"<td>{E(string.IsNullOrWhiteSpace(artifact.MimeType) ? "-" : artifact.MimeType)}</td>");
+            html.AppendLine($"<td class=\"evidence\"><div class=\"toolbar\">{CopyButton("Copy artifact", plain)}</div><details><summary>Artifact evidence</summary><pre class=\"copyable\" data-copy=\"{A(plain)}\">{E(plain)}</pre></details>{RenderArtifactPreview(artifact)}</td>");
             html.AppendLine("</tr>");
         }
 
@@ -465,7 +478,11 @@ code{background:#f1f5f9;border-radius:6px;padding:2px 5px;word-break:break-all}.
     /// Inputs are report events, processing orders and limits them for readable
     /// evidence flow, and the method returns no value.
     /// </summary>
-    private static void AppendTimeline(StringBuilder html, AnalysisReport report)
+    private static void AppendTimeline(
+        StringBuilder html,
+        AnalysisReport report,
+        IReadOnlyDictionary<string, List<ArtifactDescriptor>> artifactLookup,
+        IReadOnlyCollection<ArtifactDescriptor> artifacts)
     {
         html.AppendLine("<section id=\"timeline\" class=\"card\"><h2>Timeline</h2>");
         var events = report.Events
@@ -483,7 +500,8 @@ code{background:#f1f5f9;border-radius:6px;padding:2px 5px;word-break:break-all}.
         foreach (var evt in events)
         {
             var copy = EventToPlainText(evt);
-            html.AppendLine($"<div class=\"timeline-item copyable\" data-copy=\"{A(copy)}\"><strong>{E(evt.Timestamp.ToString("u"))}</strong> <span class=\"badge badge-info\">{E(evt.EventType)}</span><br><span class=\"muted\">{E(evt.ProcessName ?? evt.Source)} {E(evt.Path ?? evt.CommandLine ?? string.Empty)}</span></div>");
+            var relatedArtifacts = FindRelatedArtifacts(evt, artifactLookup, artifacts);
+            html.AppendLine($"<div class=\"timeline-item copyable\" data-copy=\"{A(copy)}\"><strong>{E(evt.Timestamp.ToString("u"))}</strong> <span class=\"badge badge-info\">{E(evt.EventType)}</span><br><span class=\"muted\">{E(evt.ProcessName ?? evt.Source)} {RenderInlineEventLocation(evt, relatedArtifacts)}</span></div>");
         }
 
         html.AppendLine("</div><div class=\"copy-hint\">Right-click timeline entries, table cells, or evidence blocks to copy their contents.</div></section>");
@@ -494,11 +512,15 @@ code{background:#f1f5f9;border-radius:6px;padding:2px 5px;word-break:break-all}.
     /// Inputs are a report and output builder, processing filters process
     /// events, and the method returns no value.
     /// </summary>
-    private static void AppendProcessDetails(StringBuilder html, AnalysisReport report)
+    private static void AppendProcessDetails(
+        StringBuilder html,
+        AnalysisReport report,
+        IReadOnlyDictionary<string, List<ArtifactDescriptor>> artifactLookup,
+        IReadOnlyCollection<ArtifactDescriptor> artifacts)
     {
         html.AppendLine("<section id=\"process\" class=\"card\"><h2>Process details</h2>");
         AppendProcessTree(html, report);
-        AppendEventRows(html, report.Events.Where(e => e.EventType.StartsWith("process.", StringComparison.OrdinalIgnoreCase)).ToList());
+        AppendEventRows(html, report.Events.Where(e => e.EventType.StartsWith("process.", StringComparison.OrdinalIgnoreCase)).ToList(), artifactLookup, artifacts);
         html.AppendLine("</section>");
     }
 
@@ -507,9 +529,13 @@ code{background:#f1f5f9;border-radius:6px;padding:2px 5px;word-break:break-all}.
     /// Inputs are a report and output builder, processing filters file events,
     /// and the method returns no value.
     /// </summary>
-    private static void AppendDroppedFiles(StringBuilder html, AnalysisReport report)
+    private static void AppendDroppedFiles(
+        StringBuilder html,
+        AnalysisReport report,
+        IReadOnlyDictionary<string, List<ArtifactDescriptor>> artifactLookup,
+        IReadOnlyCollection<ArtifactDescriptor> artifacts)
     {
-        AppendEventTable(html, "files", "Dropped files", report.Events.Where(IsFileEvent));
+        AppendEventTable(html, "files", "Dropped files", report.Events.Where(IsFileEvent), artifactLookup, artifacts);
     }
 
     /// <summary>
@@ -517,9 +543,13 @@ code{background:#f1f5f9;border-radius:6px;padding:2px 5px;word-break:break-all}.
     /// Inputs are a report and output builder, processing filters registry
     /// events, and the method returns no value.
     /// </summary>
-    private static void AppendRegistryBehavior(StringBuilder html, AnalysisReport report)
+    private static void AppendRegistryBehavior(
+        StringBuilder html,
+        AnalysisReport report,
+        IReadOnlyDictionary<string, List<ArtifactDescriptor>> artifactLookup,
+        IReadOnlyCollection<ArtifactDescriptor> artifacts)
     {
-        AppendEventTable(html, "registry", "Registry behavior", report.Events.Where(IsRegistryEvent));
+        AppendEventTable(html, "registry", "Registry behavior", report.Events.Where(IsRegistryEvent), artifactLookup, artifacts);
     }
 
     /// <summary>
@@ -527,9 +557,13 @@ code{background:#f1f5f9;border-radius:6px;padding:2px 5px;word-break:break-all}.
     /// Inputs are a report and output builder, processing filters network
     /// events, and the method returns no value.
     /// </summary>
-    private static void AppendNetworkBehavior(StringBuilder html, AnalysisReport report)
+    private static void AppendNetworkBehavior(
+        StringBuilder html,
+        AnalysisReport report,
+        IReadOnlyDictionary<string, List<ArtifactDescriptor>> artifactLookup,
+        IReadOnlyCollection<ArtifactDescriptor> artifacts)
     {
-        AppendEventTable(html, "network", "Network behavior", report.Events.Where(IsNetworkEvent));
+        AppendEventTable(html, "network", "Network behavior", report.Events.Where(IsNetworkEvent), artifactLookup, artifacts);
     }
 
     /// <summary>
@@ -537,7 +571,11 @@ code{background:#f1f5f9;border-radius:6px;padding:2px 5px;word-break:break-all}.
     /// events. Inputs are normalized events; processing filters by source and
     /// driver/r0 event-type prefixes; the method returns no value.
     /// </summary>
-    private static void AppendR0Events(StringBuilder html, AnalysisReport report)
+    private static void AppendR0Events(
+        StringBuilder html,
+        AnalysisReport report,
+        IReadOnlyDictionary<string, List<ArtifactDescriptor>> artifactLookup,
+        IReadOnlyCollection<ArtifactDescriptor> artifacts)
     {
         var r0Events = report.Events.Where(IsR0Event).ToList();
         html.AppendLine("<section id=\"r0\" class=\"card\"><h2>R0 / driver events</h2>");
@@ -556,7 +594,7 @@ code{background:#f1f5f9;border-radius:6px;padding:2px 5px;word-break:break-all}.
         Metric(html, "Kernel network rows", r0Events.Count(IsNetworkEvent).ToString(), "risk-medium");
         Metric(html, "R0 failures", r0Events.Count(IsFailureEvent).ToString(), "risk-high");
         html.AppendLine("</div>");
-        AppendEventRows(html, r0Events);
+        AppendEventRows(html, r0Events, artifactLookup, artifacts);
         html.AppendLine("</section>");
     }
 
@@ -565,7 +603,11 @@ code{background:#f1f5f9;border-radius:6px;padding:2px 5px;word-break:break-all}.
     /// Inputs are a report and output builder, processing filters failed status
     /// and timeout/error events, and the method returns no value.
     /// </summary>
-    private static void AppendFailureReasons(StringBuilder html, AnalysisReport report)
+    private static void AppendFailureReasons(
+        StringBuilder html,
+        AnalysisReport report,
+        IReadOnlyDictionary<string, List<ArtifactDescriptor>> artifactLookup,
+        IReadOnlyCollection<ArtifactDescriptor> artifacts)
     {
         var failures = report.Events.Where(IsFailureEvent).ToList();
         html.AppendLine("<section id=\"failure\" class=\"card\"><h2>Failure reasons</h2>");
@@ -579,7 +621,7 @@ code{background:#f1f5f9;border-radius:6px;padding:2px 5px;word-break:break-all}.
         }
         else
         {
-            AppendEventRows(html, failures);
+            AppendEventRows(html, failures, artifactLookup, artifacts);
         }
 
         html.AppendLine("</section>");
@@ -590,9 +632,13 @@ code{background:#f1f5f9;border-radius:6px;padding:2px 5px;word-break:break-all}.
     /// Inputs are a report and output builder, processing orders events by time,
     /// and the method returns no value.
     /// </summary>
-    private static void AppendRawEvents(StringBuilder html, AnalysisReport report)
+    private static void AppendRawEvents(
+        StringBuilder html,
+        AnalysisReport report,
+        IReadOnlyDictionary<string, List<ArtifactDescriptor>> artifactLookup,
+        IReadOnlyCollection<ArtifactDescriptor> artifacts)
     {
-        AppendEventTable(html, "events", "Raw normalized events", report.Events);
+        AppendEventTable(html, "events", "Raw normalized events", report.Events, artifactLookup, artifacts);
     }
 
     /// <summary>
@@ -600,10 +646,16 @@ code{background:#f1f5f9;border-radius:6px;padding:2px 5px;word-break:break-all}.
     /// Inputs are a section id, title, and events, processing renders rows or
     /// an empty-state block, and the method returns no value.
     /// </summary>
-    private static void AppendEventTable(StringBuilder html, string id, string title, IEnumerable<SandboxEvent> events)
+    private static void AppendEventTable(
+        StringBuilder html,
+        string id,
+        string title,
+        IEnumerable<SandboxEvent> events,
+        IReadOnlyDictionary<string, List<ArtifactDescriptor>> artifactLookup,
+        IReadOnlyCollection<ArtifactDescriptor> artifacts)
     {
         html.AppendLine($"<section id=\"{E(id)}\" class=\"card\"><h2>{E(title)}</h2>");
-        AppendEventRows(html, events.ToList());
+        AppendEventRows(html, events.ToList(), artifactLookup, artifacts);
         html.AppendLine("</section>");
     }
 
@@ -612,7 +664,11 @@ code{background:#f1f5f9;border-radius:6px;padding:2px 5px;word-break:break-all}.
     /// Inputs are event records, processing encodes row fields and data, and
     /// the method returns no value.
     /// </summary>
-    private static void AppendEventRows(StringBuilder html, IReadOnlyCollection<SandboxEvent> events)
+    private static void AppendEventRows(
+        StringBuilder html,
+        IReadOnlyCollection<SandboxEvent> events,
+        IReadOnlyDictionary<string, List<ArtifactDescriptor>> artifactLookup,
+        IReadOnlyCollection<ArtifactDescriptor> artifacts)
     {
         if (events.Count == 0)
         {
@@ -625,13 +681,14 @@ code{background:#f1f5f9;border-radius:6px;padding:2px 5px;word-break:break-all}.
         {
             var plain = EventToPlainText(evt);
             var data = EventDataToText(evt);
+            var relatedArtifacts = FindRelatedArtifacts(evt, artifactLookup, artifacts);
             html.AppendLine("<tr>");
             html.AppendLine($"<td class=\"copyable\" data-copy=\"{A(evt.Timestamp.ToString("u"))}\">{E(evt.Timestamp.ToString("u"))}</td>");
             html.AppendLine($"<td class=\"copyable\" data-copy=\"{A(evt.EventType)}\">{E(evt.EventType)}</td>");
             html.AppendLine($"<td class=\"copyable\" data-copy=\"{A(evt.Source)}\">{E(evt.Source)}</td>");
             html.AppendLine($"<td class=\"copyable\" data-copy=\"{A((evt.ProcessName ?? "-") + " (" + (evt.ProcessId?.ToString() ?? "-") + ")")}\">{E(evt.ProcessName ?? "-")} ({E(evt.ProcessId?.ToString() ?? "-")})</td>");
-            html.AppendLine($"<td class=\"copyable\" data-copy=\"{A((evt.Path ?? string.Empty) + Environment.NewLine + (evt.CommandLine ?? string.Empty))}\"><code>{E(evt.Path ?? "-")}</code><br><span class=\"muted\">{E(evt.CommandLine ?? string.Empty)}</span></td>");
-            html.AppendLine($"<td class=\"evidence\"><div class=\"toolbar\">{CopyButton("Copy event", plain)}</div><details><summary>Evidence fields</summary><pre class=\"copyable\" data-copy=\"{A(data)}\">{E(data)}</pre></details></td>");
+            html.AppendLine($"<td class=\"copyable\" data-copy=\"{A((evt.Path ?? string.Empty) + Environment.NewLine + (evt.CommandLine ?? string.Empty))}\">{RenderEventPathAndCommand(evt, relatedArtifacts)}</td>");
+            html.AppendLine($"<td class=\"evidence\"><div class=\"toolbar\">{CopyButton("Copy event", plain)}{RenderCopyArtifactsButton(relatedArtifacts)}</div><details><summary>Evidence fields</summary><pre class=\"copyable\" data-copy=\"{A(data)}\">{E(data)}</pre></details>{RenderRelatedArtifacts(relatedArtifacts)}</td>");
             html.AppendLine("</tr>");
         }
 
@@ -1023,6 +1080,183 @@ code{background:#f1f5f9;border-radius:6px;padding:2px 5px;word-break:break-all}.
     }
 
     /// <summary>
+    /// Builds lookup keys that let event rows link back to indexed artifacts.
+    /// Inputs are report artifact descriptors; processing indexes full paths,
+    /// relative paths, safe links, file names, and preserved guest paths; the
+    /// method returns a case-insensitive key map.
+    /// </summary>
+    private static IReadOnlyDictionary<string, List<ArtifactDescriptor>> BuildArtifactLookup(IEnumerable<ArtifactDescriptor> artifacts)
+    {
+        var lookup = new Dictionary<string, List<ArtifactDescriptor>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var artifact in artifacts)
+        {
+            foreach (var key in ArtifactLookupKeys(artifact))
+            {
+                if (string.IsNullOrWhiteSpace(key))
+                {
+                    continue;
+                }
+
+                if (!lookup.TryGetValue(key, out var bucket))
+                {
+                    bucket = [];
+                    lookup[key] = bucket;
+                }
+
+                if (!bucket.Any(existing => string.Equals(ArtifactKey(existing), ArtifactKey(artifact), StringComparison.OrdinalIgnoreCase)))
+                {
+                    bucket.Add(artifact);
+                }
+            }
+        }
+
+        return lookup;
+    }
+
+    /// <summary>
+    /// Finds artifacts referenced by one event.
+    /// Inputs are a normalized event plus artifact lookup/index data; processing
+    /// matches event paths, path-like data values, screenshot/file import rows,
+    /// and R0/driver events; the method returns related descriptors.
+    /// </summary>
+    private static IReadOnlyCollection<ArtifactDescriptor> FindRelatedArtifacts(
+        SandboxEvent evt,
+        IReadOnlyDictionary<string, List<ArtifactDescriptor>> artifactLookup,
+        IReadOnlyCollection<ArtifactDescriptor> artifacts)
+    {
+        var related = new Dictionary<string, ArtifactDescriptor>(StringComparer.OrdinalIgnoreCase);
+        AddRelatedByValue(related, artifactLookup, evt.Path);
+
+        foreach (var pair in evt.Data)
+        {
+            if (IsArtifactReferenceKey(pair.Key) || LooksLikeArtifactReference(pair.Value))
+            {
+                AddRelatedByValue(related, artifactLookup, pair.Value);
+            }
+        }
+
+        if (IsR0Event(evt) || evt.Source.Contains("driver", StringComparison.OrdinalIgnoreCase))
+        {
+            AddRelatedByKind(related, artifacts, ArtifactKind.DriverEventsJsonLines);
+        }
+
+        if (string.Equals(evt.EventType, "screenshot.captured", StringComparison.OrdinalIgnoreCase))
+        {
+            AddRelatedByKind(related, artifacts, ArtifactKind.Screenshot);
+        }
+
+        if (evt.EventType.StartsWith("guest.events.", StringComparison.OrdinalIgnoreCase))
+        {
+            AddRelatedByKind(related, artifacts, ArtifactKind.GuestEventsJson);
+            AddRelatedByKind(related, artifacts, ArtifactKind.DriverEventsJsonLines);
+            AddRelatedByKind(related, artifacts, ArtifactKind.ArtifactManifest);
+        }
+
+        return related.Values
+            .OrderBy(artifact => ArtifactKindRank(artifact.Kind))
+            .ThenBy(artifact => artifact.RelativePath, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(artifact => artifact.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    /// <summary>
+    /// Renders an inline event location with a compact artifact link when one is
+    /// available. Inputs are one event and related artifacts; processing keeps
+    /// the original event path visible while adding the durable safe link.
+    /// </summary>
+    private static string RenderInlineEventLocation(SandboxEvent evt, IReadOnlyCollection<ArtifactDescriptor> relatedArtifacts)
+    {
+        var label = evt.Path ?? evt.CommandLine ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(label))
+        {
+            return string.Empty;
+        }
+
+        var link = relatedArtifacts.FirstOrDefault(artifact => !string.IsNullOrWhiteSpace(artifact.SafeLink));
+        if (link is null)
+        {
+            return E(label);
+        }
+
+        return $"{E(label)} <a class=\"artifact-ref\" href=\"{A(link.SafeLink)}\">artifact: {E(ArtifactDisplayName(link))}</a>";
+    }
+
+    /// <summary>
+    /// Renders the path/command cell for event tables.
+    /// Inputs are one event and related artifacts; processing adds report-local
+    /// anchors for dropped files, screenshots, driver JSONL, and manifests.
+    /// </summary>
+    private static string RenderEventPathAndCommand(SandboxEvent evt, IReadOnlyCollection<ArtifactDescriptor> relatedArtifacts)
+    {
+        var path = string.IsNullOrWhiteSpace(evt.Path) ? "-" : evt.Path;
+        var html = new StringBuilder();
+        html.Append($"<code>{E(path)}</code>");
+
+        var links = relatedArtifacts
+            .Where(artifact => !string.IsNullOrWhiteSpace(artifact.SafeLink))
+            .Take(4)
+            .ToList();
+        foreach (var artifact in links)
+        {
+            html.Append($"<br><a class=\"artifact-ref\" href=\"{A(artifact.SafeLink)}\">Open {E(ArtifactDisplayName(artifact))}</a>");
+        }
+
+        if (!string.IsNullOrWhiteSpace(evt.CommandLine))
+        {
+            html.Append($"<br><span class=\"muted\">{E(evt.CommandLine)}</span>");
+        }
+
+        return html.ToString();
+    }
+
+    /// <summary>
+    /// Renders a copy button for related artifact descriptors.
+    /// Inputs are related artifacts; processing serializes descriptor evidence
+    /// into one clipboard block; the method returns an empty string when there
+    /// are no related artifacts.
+    /// </summary>
+    private static string RenderCopyArtifactsButton(IReadOnlyCollection<ArtifactDescriptor> artifacts)
+    {
+        if (artifacts.Count == 0)
+        {
+            return string.Empty;
+        }
+
+        var copy = string.Join(
+            $"{Environment.NewLine}---{Environment.NewLine}",
+            artifacts.Select(ArtifactToPlainText));
+        return CopyButton("Copy artifacts", copy);
+    }
+
+    /// <summary>
+    /// Renders collapsible related-artifact evidence for one event.
+    /// Inputs are related descriptors; processing writes safe links and a nested
+    /// descriptor evidence block; the method returns trusted local HTML.
+    /// </summary>
+    private static string RenderRelatedArtifacts(IReadOnlyCollection<ArtifactDescriptor> artifacts)
+    {
+        if (artifacts.Count == 0)
+        {
+            return string.Empty;
+        }
+
+        var html = new StringBuilder();
+        html.AppendLine($"<details><summary>Related artifacts ({artifacts.Count})</summary><ul class=\"artifact-list\">");
+        foreach (var artifact in artifacts)
+        {
+            var plain = ArtifactToPlainText(artifact);
+            html.Append("<li>");
+            html.Append(RenderArtifactLocation(artifact));
+            html.Append($"<br><span class=\"muted\">{E(artifact.Kind.ToString())} / {E(artifact.Category)}</span>");
+            html.Append($"<details><summary>Artifact evidence</summary><pre class=\"copyable\" data-copy=\"{A(plain)}\">{E(plain)}</pre></details>");
+            html.AppendLine("</li>");
+        }
+
+        html.AppendLine("</ul></details>");
+        return html.ToString();
+    }
+
+    /// <summary>
     /// Builds the report artifact list from a host index plus paths embedded in
     /// events. Inputs are report events and optional descriptors; processing
     /// deduplicates safe/indexed files and guest-local path hints; the method
@@ -1142,12 +1376,76 @@ code{background:#f1f5f9;border-radius:6px;padding:2px 5px;word-break:break-all}.
         if (File.Exists(manifestPath))
         {
             AddPathDescriptor(descriptors, manifestPath, reportRoot, ArtifactKind.ArtifactManifest, "artifact-manifest");
+            descriptors.AddRange(TryReadGuestManifestArtifacts(manifestPath, guestOutputRoot, reportRoot));
         }
 
         foreach (var droppedPath in Directory.EnumerateFiles(artifactsRoot, "*", SearchOption.AllDirectories)
             .Where(path => !string.Equals(Path.GetFullPath(path), Path.GetFullPath(manifestPath), StringComparison.OrdinalIgnoreCase)))
         {
             AddPathDescriptor(descriptors, droppedPath, reportRoot, ArtifactKind.DroppedFile, "dropped-file");
+        }
+    }
+
+    private static IReadOnlyCollection<ArtifactDescriptor> TryReadGuestManifestArtifacts(string manifestPath, string guestOutputRoot, string? reportRoot)
+    {
+        try
+        {
+            var manifest = JsonSerializer.Deserialize<ArtifactManifest>(File.ReadAllText(manifestPath), ArtifactJsonOptions);
+            if (manifest is null || manifest.Artifacts.Count == 0)
+            {
+                return [];
+            }
+
+            var linkRoot = string.IsNullOrWhiteSpace(reportRoot) ? guestOutputRoot : reportRoot;
+            var descriptors = new List<ArtifactDescriptor>();
+            foreach (var descriptor in manifest.Artifacts)
+            {
+                var relativePath = ArtifactDescriptorFactory.NormalizeRelativePath(descriptor.RelativePath);
+                if (string.IsNullOrWhiteSpace(relativePath))
+                {
+                    continue;
+                }
+
+                var metadata = descriptor.Metadata is null
+                    ? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                    : new Dictionary<string, string>(descriptor.Metadata, StringComparer.OrdinalIgnoreCase);
+                metadata["origin"] = "guest-manifest";
+                metadata["manifestPath"] = manifestPath;
+                if (!string.IsNullOrWhiteSpace(descriptor.FullPath) &&
+                    !metadata.ContainsKey("guestFullPath"))
+                {
+                    metadata["guestFullPath"] = descriptor.FullPath;
+                }
+
+                if (!metadata.ContainsKey("evidenceRole"))
+                {
+                    metadata["evidenceRole"] = string.IsNullOrWhiteSpace(descriptor.Category)
+                        ? ArtifactDescriptorFactory.CategoryForKind(descriptor.Kind)
+                        : descriptor.Category;
+                }
+
+                var hostPath = Path.GetFullPath(Path.Combine(guestOutputRoot, relativePath));
+                var normalized = File.Exists(hostPath)
+                    ? ArtifactDescriptorFactory.FromExistingFile(hostPath, linkRoot, descriptor.Kind, metadata, descriptor.Category)
+                    : ArtifactDescriptorFactory.FromKnownPath(hostPath, linkRoot, descriptor.Kind, metadata, descriptor.Category);
+
+                descriptors.Add(normalized with
+                {
+                    Name = string.IsNullOrWhiteSpace(descriptor.Name) ? normalized.Name : descriptor.Name,
+                    MimeType = string.IsNullOrWhiteSpace(descriptor.MimeType) ? normalized.MimeType : descriptor.MimeType,
+                    SizeBytes = descriptor.SizeBytes > 0 ? descriptor.SizeBytes : normalized.SizeBytes,
+                    Sha256 = string.IsNullOrWhiteSpace(descriptor.Sha256) ? normalized.Sha256 : descriptor.Sha256,
+                    Hashes = MergeArtifactHashes(descriptor, normalized),
+                    CreatedAtUtc = descriptor.CreatedAtUtc == default ? normalized.CreatedAtUtc : descriptor.CreatedAtUtc,
+                    Metadata = metadata
+                });
+            }
+
+            return descriptors;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return [];
         }
     }
 
@@ -1179,6 +1477,108 @@ code{background:#f1f5f9;border-radius:6px;padding:2px 5px;word-break:break-all}.
         descriptors.Add(ArtifactDescriptorFactory.FromKnownPath(path, reportRoot, kind, metadata));
     }
 
+    private static IEnumerable<string> ArtifactLookupKeys(ArtifactDescriptor artifact)
+    {
+        yield return NormalizeLookupKey(artifact.FullPath);
+        yield return NormalizeLookupKey(artifact.RelativePath);
+        yield return NormalizeLookupKey(artifact.SafeLink);
+        yield return NormalizeLookupKey(artifact.Name);
+
+        foreach (var pair in artifact.Metadata ?? [])
+        {
+            if (IsArtifactReferenceKey(pair.Key) || LooksLikeArtifactReference(pair.Value))
+            {
+                yield return NormalizeLookupKey(pair.Value);
+            }
+        }
+    }
+
+    private static void AddRelatedByValue(
+        Dictionary<string, ArtifactDescriptor> related,
+        IReadOnlyDictionary<string, List<ArtifactDescriptor>> artifactLookup,
+        string? value)
+    {
+        var key = NormalizeLookupKey(value);
+        if (string.IsNullOrWhiteSpace(key) || !artifactLookup.TryGetValue(key, out var artifacts))
+        {
+            return;
+        }
+
+        foreach (var artifact in artifacts)
+        {
+            related[ArtifactKey(artifact)] = artifact;
+        }
+    }
+
+    private static void AddRelatedByKind(
+        Dictionary<string, ArtifactDescriptor> related,
+        IReadOnlyCollection<ArtifactDescriptor> artifacts,
+        ArtifactKind kind)
+    {
+        foreach (var artifact in artifacts.Where(artifact => artifact.Kind == kind))
+        {
+            related[ArtifactKey(artifact)] = artifact;
+        }
+    }
+
+    private static bool IsArtifactReferenceKey(string key)
+    {
+        return key.Contains("path", StringComparison.OrdinalIgnoreCase) ||
+            key.Contains("artifact", StringComparison.OrdinalIgnoreCase) ||
+            key.Contains("screenshot", StringComparison.OrdinalIgnoreCase) ||
+            key.Contains("manifest", StringComparison.OrdinalIgnoreCase) ||
+            key.Contains("driverEvent", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool LooksLikeArtifactReference(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        var normalized = value.Replace('\\', '/');
+        return normalized.Contains("/artifacts/", StringComparison.OrdinalIgnoreCase) ||
+            normalized.StartsWith("artifacts/", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Contains("/screenshots/", StringComparison.OrdinalIgnoreCase) ||
+            normalized.StartsWith("screenshots/", StringComparison.OrdinalIgnoreCase) ||
+            normalized.EndsWith("driver-events.jsonl", StringComparison.OrdinalIgnoreCase) ||
+            normalized.EndsWith("manifest.json", StringComparison.OrdinalIgnoreCase) ||
+            normalized.EndsWith(".jsonl", StringComparison.OrdinalIgnoreCase) ||
+            normalized.EndsWith(".bmp", StringComparison.OrdinalIgnoreCase) ||
+            normalized.EndsWith(".png", StringComparison.OrdinalIgnoreCase) ||
+            normalized.EndsWith(".jpg", StringComparison.OrdinalIgnoreCase) ||
+            normalized.EndsWith(".jpeg", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string NormalizeLookupKey(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        var trimmed = value.Trim().Trim('"', '\'');
+        try
+        {
+            if (Path.IsPathFullyQualified(trimmed))
+            {
+                return Path.GetFullPath(trimmed)
+                    .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+                    .ToLowerInvariant();
+            }
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return string.Empty;
+        }
+
+        var relative = ArtifactDescriptorFactory.NormalizeRelativePath(trimmed);
+        return string.IsNullOrWhiteSpace(relative)
+            ? trimmed.Replace('\\', '/').Trim('/').ToLowerInvariant()
+            : relative.ToLowerInvariant();
+    }
+
     private static void AddReportArtifact(Dictionary<string, ArtifactDescriptor> artifacts, ArtifactDescriptor artifact)
     {
         if (!IsReportArtifactKind(artifact.Kind))
@@ -1187,13 +1587,46 @@ code{background:#f1f5f9;border-radius:6px;padding:2px 5px;word-break:break-all}.
         }
 
         var key = ArtifactKey(artifact);
-        if (artifacts.TryGetValue(key, out var existing) &&
-            !string.IsNullOrWhiteSpace(existing.SafeLink))
+        if (artifacts.TryGetValue(key, out var existing))
         {
+            artifacts[key] = MergeArtifactDescriptor(existing, artifact);
             return;
         }
 
         artifacts[key] = artifact;
+    }
+
+    private static ArtifactDescriptor MergeArtifactDescriptor(ArtifactDescriptor existing, ArtifactDescriptor incoming)
+    {
+        var metadata = new Dictionary<string, string>(existing.Metadata, StringComparer.OrdinalIgnoreCase);
+        foreach (var pair in incoming.Metadata)
+        {
+            metadata.TryAdd(pair.Key, pair.Value);
+        }
+
+        var hashes = new Dictionary<string, string>(existing.Hashes, StringComparer.OrdinalIgnoreCase);
+        foreach (var pair in incoming.Hashes)
+        {
+            hashes.TryAdd(pair.Key, pair.Value);
+        }
+
+        if (!string.IsNullOrWhiteSpace(incoming.Sha256))
+        {
+            hashes.TryAdd("sha256", incoming.Sha256);
+        }
+
+        return existing with
+        {
+            Category = string.IsNullOrWhiteSpace(existing.Category) ? incoming.Category : existing.Category,
+            RelativePath = string.IsNullOrWhiteSpace(existing.RelativePath) ? incoming.RelativePath : existing.RelativePath,
+            FullPath = string.IsNullOrWhiteSpace(existing.FullPath) ? incoming.FullPath : existing.FullPath,
+            SafeLink = string.IsNullOrWhiteSpace(existing.SafeLink) ? incoming.SafeLink : existing.SafeLink,
+            MimeType = string.IsNullOrWhiteSpace(existing.MimeType) ? incoming.MimeType : existing.MimeType,
+            SizeBytes = existing.SizeBytes > 0 ? existing.SizeBytes : incoming.SizeBytes,
+            Sha256 = string.IsNullOrWhiteSpace(existing.Sha256) ? incoming.Sha256 : existing.Sha256,
+            Hashes = hashes,
+            Metadata = metadata
+        };
     }
 
     private static string ArtifactKey(ArtifactDescriptor artifact)
@@ -1277,6 +1710,29 @@ code{background:#f1f5f9;border-radius:6px;padding:2px 5px;word-break:break-all}.
         return $"<code>{E(string.IsNullOrWhiteSpace(displayPath) ? "-" : displayPath)}</code>";
     }
 
+    private static string RenderArtifactPreview(ArtifactDescriptor artifact)
+    {
+        if (artifact.Kind == ArtifactKind.Screenshot && !string.IsNullOrWhiteSpace(artifact.SafeLink))
+        {
+            return $"<details class=\"artifact-preview\"><summary>Screenshot preview</summary><a href=\"{A(artifact.SafeLink)}\"><img alt=\"{A(artifact.Name)}\" src=\"{A(artifact.SafeLink)}\"></a></details>";
+        }
+
+        var preview = TryReadTextArtifactPreview(artifact);
+        if (string.IsNullOrWhiteSpace(preview))
+        {
+            return string.Empty;
+        }
+
+        var title = artifact.Kind switch
+        {
+            ArtifactKind.DriverEventsJsonLines => "Driver JSONL preview",
+            ArtifactKind.ArtifactManifest => "Manifest preview",
+            ArtifactKind.GuestEventsJson => "Events JSON preview",
+            _ => "Text preview"
+        };
+        return $"<details><summary>{E(title)}</summary><pre class=\"copyable\" data-copy=\"{A(preview)}\">{E(preview)}</pre></details>";
+    }
+
     private static string ArtifactToPlainText(ArtifactDescriptor artifact)
     {
         var builder = new StringBuilder();
@@ -1288,8 +1744,65 @@ code{background:#f1f5f9;border-radius:6px;padding:2px 5px;word-break:break-all}.
         builder.AppendLine($"fullPath={artifact.FullPath}");
         builder.AppendLine($"mimeType={artifact.MimeType}");
         builder.AppendLine($"sizeBytes={artifact.SizeBytes}");
-        builder.Append($"sha256={ArtifactSha256(artifact)}");
+        builder.AppendLine($"sha256={ArtifactSha256(artifact)}");
+        foreach (var hash in (artifact.Hashes ?? []).OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase))
+        {
+            builder.AppendLine($"hash.{hash.Key}={hash.Value}");
+        }
+
+        foreach (var pair in (artifact.Metadata ?? []).OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase))
+        {
+            builder.AppendLine($"metadata.{pair.Key}={pair.Value}");
+        }
+
         return builder.ToString();
+    }
+
+    private static string ArtifactDisplayName(ArtifactDescriptor artifact)
+    {
+        if (!string.IsNullOrWhiteSpace(artifact.RelativePath))
+        {
+            return artifact.RelativePath;
+        }
+
+        if (!string.IsNullOrWhiteSpace(artifact.Name))
+        {
+            return artifact.Name;
+        }
+
+        return artifact.Kind.ToString();
+    }
+
+    private static string? TryReadTextArtifactPreview(ArtifactDescriptor artifact)
+    {
+        if (artifact.Kind is not (ArtifactKind.DriverEventsJsonLines or ArtifactKind.ArtifactManifest or ArtifactKind.GuestEventsJson))
+        {
+            return null;
+        }
+
+        if (string.IsNullOrWhiteSpace(artifact.FullPath) || !File.Exists(artifact.FullPath))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var stream = new FileStream(artifact.FullPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+            var buffer = new char[ArtifactPreviewCharacterLimit + 1];
+            var read = reader.ReadBlock(buffer, 0, buffer.Length);
+            var preview = new string(buffer, 0, Math.Min(read, ArtifactPreviewCharacterLimit));
+            if (read > ArtifactPreviewCharacterLimit || stream.Position < stream.Length)
+            {
+                preview += $"{Environment.NewLine}... truncated after {ArtifactPreviewCharacterLimit} characters ...";
+            }
+
+            return preview;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or DecoderFallbackException or ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return null;
+        }
     }
 
     private static string FormatArtifactSize(long sizeBytes)
@@ -1307,6 +1820,22 @@ code{background:#f1f5f9;border-radius:6px;padding:2px 5px;word-break:break-all}.
         return artifact.Hashes is not null && artifact.Hashes.TryGetValue("sha256", out var hash) && !string.IsNullOrWhiteSpace(hash)
             ? hash
             : "-";
+    }
+
+    private static Dictionary<string, string> MergeArtifactHashes(ArtifactDescriptor descriptor, ArtifactDescriptor normalized)
+    {
+        var hashes = new Dictionary<string, string>(normalized.Hashes ?? [], StringComparer.OrdinalIgnoreCase);
+        foreach (var pair in descriptor.Hashes ?? [])
+        {
+            hashes[pair.Key] = pair.Value;
+        }
+
+        if (!string.IsNullOrWhiteSpace(descriptor.Sha256))
+        {
+            hashes["sha256"] = descriptor.Sha256;
+        }
+
+        return hashes;
     }
 
     /// <summary>

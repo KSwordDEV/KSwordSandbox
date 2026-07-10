@@ -96,7 +96,7 @@ top-level path and put endpoint details under `data`.
 ```powershell
 KSword.Sandbox.R0Collector.exe `
   --device \\.\KSwordSandboxDriver `
-  --output C:\Sandbox\driver-events.jsonl `
+  --out C:\Sandbox\driver-events.jsonl `
   --duration 10 `
   --poll-ms 500 `
   --enable-mask 0xffffffff `
@@ -106,7 +106,7 @@ KSword.Sandbox.R0Collector.exe `
 Supported options:
 
 - `--device`, `-d`: Win32 symbolic-link path for the driver device.
-- `--output`, `-o`: JSON Lines output path, or `-` for stdout.
+- `--output`, `--out`, `-o`: JSON Lines output path, or `-` for stdout.
 - `--duration`, `-t`: Polling duration in seconds. `0` means one-shot open,
   health, poll, and read-events.
 - `--poll-ms`, `--poll-interval`, `--poll-interval-ms`, `-p`: poll interval in
@@ -115,6 +115,8 @@ Supported options:
   mask in the `KSWORD_SANDBOX_READ_EVENTS_REQUEST.Flags` field. Current drivers
   may ignore the field, but the collector records it in `r0collector.started`
   and `r0collector.deviceOpened` data for reproducibility.
+- `--health`: open the live device, emit `r0collector.driverHealth`, and exit
+  without polling or draining queued events.
 - `--heartbeat`: emit `r0collector.heartbeat` lifecycle rows after startup, at
   each completed poll/read-events iteration, and at synthetic completion.
 - `--mock`: emit synthetic process/file/registry-style rows and do not open the
@@ -133,13 +135,15 @@ KSword.Sandbox.R0Collector.exe `
   --self-test `
   --heartbeat `
   --enable-mask 0x3 `
-  --output -
+  --out -
 ```
 
 ## VM readiness and one-shot drain
 
 Use `scripts/Test-R0Readiness.ps1` before a real VM run. Its default mode is
-non-destructive and does not open `\\.\KSwordSandboxDriver`:
+non-destructive and does not open `\\.\KSwordSandboxDriver`. It checks source
+files, `.sys` git hygiene, driver readability, Authenticode status,
+Administrator status, test-signing state, and read-only service state:
 
 ```powershell
 .\scripts\Test-R0Readiness.ps1 `
@@ -156,6 +160,24 @@ verify the public health IOCTL:
   -CheckDeviceHealth
 ```
 
+This check succeeds only if `CreateFileW("\\.\KSwordSandboxDriver", ...)` opens
+the device and `IOCTL_KSWORD_SANDBOX_GET_HEALTH` returns the public health
+reply.
+
+Next verify the collector health-only CLI contract. This invokes
+`R0Collector --health --out <jsonl>` and fails unless the output JSONL parses
+and contains `r0collector.deviceOpened` plus `r0collector.driverHealth`:
+
+```powershell
+New-Item -ItemType Directory -Force C:\KSwordSandbox\out | Out-Null
+
+.\scripts\Test-R0Readiness.ps1 `
+  -R0CollectorPath C:\KSwordSandbox\tools\KSword.Sandbox.R0Collector.exe `
+  -DevicePath \\.\KSwordSandboxDriver `
+  -CheckCollectorHealth `
+  -CollectorHealthOutputPath C:\KSwordSandbox\out\r0collector-health.jsonl
+```
+
 Then run a collector one-shot drain through the script:
 
 ```powershell
@@ -169,14 +191,29 @@ Then run a collector one-shot drain through the script:
 The drain path invokes R0Collector with `--duration 0`, so it opens the driver,
 emits health/poll/read-events lifecycle rows, drains any queued driver records,
 and exits. A first load should normally expose the header-only
-`driver.started` heartbeat unless another reader has already consumed it.
+driver-start heartbeat row (`driver.event.reserved`) unless another reader has
+already consumed it.
+
+Expected script rows for the live VM path:
+
+- `Driver .sys git hygiene`: no `.sys` file is tracked, staged, modified, or
+  unignored as a commit candidate.
+- `Windows test-signing boot option`: `Passed` after `bcdedit /set
+  testsigning on` and reboot for test-signed drivers.
+- `Kernel service state`, `Service install`, and `Service start`: prove SCM
+  registration and load when the explicit service-mutation switches are used.
+- `Device IOCTL health`: proves the Win32 device can be opened and health IOCTL
+  works.
+- `R0Collector health`: proves `--health --out` output is valid.
+- `R0Collector drain`: proves `--out --duration 0` output includes health,
+  poll, read-events, and queued driver rows.
 
 ## JSON Lines format
 
 Every output line is a single `SandboxEvent`-compatible JSON object:
 
 ```json
-{"eventType":"driver.event.reserved","source":"driver","timestamp":"2026-07-10T00:00:00.000Z","processId":1234,"path":"\\\\.\\KSwordSandboxDriver","commandLine":"KSword.Sandbox.R0Collector.exe --output C:\\Sandbox\\driver-events.jsonl","data":{"sequence":"1","driverEventTypeName":"reserved","flagsHex":"0x00000003"}}
+{"eventType":"driver.event.reserved","source":"driver","timestamp":"2026-07-10T00:00:00.000Z","processId":1234,"path":"\\\\.\\KSwordSandboxDriver","commandLine":"KSword.Sandbox.R0Collector.exe --out C:\\Sandbox\\driver-events.jsonl","data":{"sequence":"1","driverEventTypeName":"reserved","flagsHex":"0x00000003"}}
 ```
 
 Top-level field rules:
@@ -202,7 +239,7 @@ The Guest Agent treats R0Collector as an optional sidecar:
 2. When `--driver-events <jsonl>` and `--r0collector <exe>` are supplied, the
    agent starts R0Collector with:
    - `--device <driver-device>`
-   - `--output <jsonl>`
+   - `--out <jsonl>` (or the equivalent `--output <jsonl>` alias)
    - `--duration <analysis seconds>`
    - optional `--mock`
 3. After sample execution, the agent stops the sidecar and merges JSONL rows into
