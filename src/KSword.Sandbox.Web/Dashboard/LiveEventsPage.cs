@@ -97,6 +97,7 @@ internal static class LiveEventsPage
               <h2 data-zh="虚拟机分析进度" data-en="Runbook progress">虚拟机分析进度</h2>
               <p class="muted" data-zh="这里同步主界面的真实 runbook step，只展示安全的步骤状态，不展示命令行、stdout 或 stderr。" data-en="This panel mirrors the real runbook steps from the dashboard and only shows UI-safe status, not command lines, stdout, or stderr.">这里同步主界面的真实 runbook step，只展示安全的步骤状态，不展示命令行、stdout 或 stderr。</p>
               <div id="runbookProgress" class="metric muted" data-copy="runbook progress pending">等待主界面启动分析 / waiting for dashboard analysis</div>
+              <div id="backgroundStatus" class="metric muted" data-copy="background execution pending">后台执行状态：等待启动 / background execution: waiting</div>
             </section>
             <section>
               <h2 data-zh="VirusTotal 官方结果" data-en="VirusTotal official result">VirusTotal 官方结果</h2>
@@ -124,7 +125,9 @@ internal static class LiveEventsPage
             let eventSource = null;
             let pollTimer = null;
             let progressTimer = null;
+            let backgroundTimer = null;
             let lastProgressSnapshot = null;
+            let lastBackgroundSnapshot = null;
             const seen = new Set();
 
             function t(zh, en) { return currentLanguage === 'en' ? en : zh; }
@@ -136,6 +139,7 @@ internal static class LiveEventsPage
               });
               document.getElementById('langToggle').textContent = currentLanguage === 'en' ? '中文' : 'English';
               if (lastProgressSnapshot) { renderRunbookProgress(lastProgressSnapshot); }
+              if (lastBackgroundSnapshot) { renderBackgroundStatus(lastBackgroundSnapshot); }
             }
             document.getElementById('langToggle').addEventListener('click', () => {
               currentLanguage = currentLanguage === 'en' ? 'zh' : 'en';
@@ -178,6 +182,67 @@ internal static class LiveEventsPage
                 // card must stay usable even before the dashboard starts live
                 // execution or after the Web host restarts.
               }
+            }
+
+            function startBackgroundStatusPolling() {
+              refreshBackgroundStatus();
+              if (backgroundTimer) { clearInterval(backgroundTimer); }
+              backgroundTimer = setInterval(refreshBackgroundStatus, 2000);
+            }
+
+            async function refreshBackgroundStatus() {
+              try {
+                const response = await fetch(`/api/jobs/${encodeURIComponent(jobId)}/runbook/background`, { cache: 'no-store' });
+                const payload = await requireOk(response, t('后台分析状态', 'background analysis status'));
+                renderBackgroundStatus(payload);
+                const state = String(payload.state || '').toLowerCase();
+                if (['completed', 'failed'].includes(state) && backgroundTimer) {
+                  clearInterval(backgroundTimer);
+                  backgroundTimer = null;
+                }
+              } catch {
+                // The monitor must remain useful for raw events even when the
+                // Web host has no background execution snapshot, such as after
+                // a restart or when an older blocking endpoint was used.
+              }
+            }
+
+            function renderBackgroundStatus(snapshot) {
+              lastBackgroundSnapshot = snapshot;
+              const target = document.getElementById('backgroundStatus');
+              if (!target || !snapshot) { return; }
+              const state = String(snapshot.state || 'not_started').toLowerCase();
+              const stateLabel = formatBackgroundState(state);
+              const message = snapshot.message || '';
+              const job = snapshot.job || {};
+              const hasReport = Boolean(job.htmlReportPath || job.htmlReportZhPath || job.htmlReportEnPath);
+              const reportButtons = hasReport || state === 'completed'
+                ? `<p class="actions">
+                    <a class="button" href="/api/jobs/${encodeURIComponent(jobId)}/report/html?lang=zh" target="_blank" rel="noopener">${t('打开中文报告', 'Open Chinese report')}</a>
+                    <a class="button secondary" href="/api/jobs/${encodeURIComponent(jobId)}/report/html?lang=en" target="_blank" rel="noopener">${t('打开英文报告', 'Open English report')}</a>
+                  </p>`
+                : '';
+              const importMessage = snapshot.guestImportMessage
+                ? `<p class="${snapshot.guestImportSucceeded ? 'ok' : 'muted'}">${escapeHtml(snapshot.guestImportMessage)}</p>`
+                : '';
+              target.innerHTML = `
+                <div><span class="pill">${escapeHtml(stateLabel)}</span>
+                  <strong>${escapeHtml(snapshot.live ? t('虚拟机分析', 'VM analysis') : t('流程验证', 'flow verification'))}</strong></div>
+                ${message ? `<p>${escapeHtml(message)}</p>` : ''}
+                ${importMessage}
+                ${reportButtons}`;
+              target.setAttribute('data-copy', `background ${stateLabel}: ${message}`);
+            }
+
+            function formatBackgroundState(state) {
+              const labels = {
+                not_started: t('未启动', 'not started'),
+                queued: t('已排队', 'queued'),
+                running: t('后台运行中', 'running in background'),
+                completed: t('已完成', 'completed'),
+                failed: t('失败', 'failed')
+              };
+              return labels[state] || state;
             }
 
             function renderRunbookProgress(snapshot) {
@@ -420,6 +485,7 @@ internal static class LiveEventsPage
             applyLanguage();
             refreshVirusTotal();
             startRunbookProgressPolling();
+            startBackgroundStatusPolling();
             connectSse();
           </script>
         </body>

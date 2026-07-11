@@ -42,7 +42,10 @@ internal sealed class WebUiExperienceContractScenario : ISmokeTestScenario
         RequireContains(program, "\"/jobs/{jobId:guid}/execution-flow\"", "Program.cs should expose a dedicated execution-flow route.");
         RequireContains(program, "RunbookExecutionFlowPage.Render", "Program.cs should expose a separate execution-flow page for runbook details.");
         RequireContains(program, "\"/api/jobs/{jobId:guid}/runbook/progress\"", "Program.cs should expose a UI-safe real runbook progress endpoint.");
+        RequireContains(program, "\"/api/jobs/{jobId:guid}/runbook/start\"", "Program.cs should expose a background runbook start endpoint.");
+        RequireContains(program, "\"/api/jobs/{jobId:guid}/runbook/background\"", "Program.cs should expose a background runbook status endpoint.");
         RequireContains(program, "RunbookProgressStore", "Program.cs should store executor progress snapshots for live WebUI polling.");
+        RequireContains(program, "RunbookBackgroundExecutionStore", "Program.cs should store WebUI background runbook execution state.");
         RequireContains(program, "ProgressSink = new Progress<SandboxRunbookProgressSnapshot>", "Runbook execute endpoint should pass a real progress sink into the executor.");
         RequireContains(program, "\"/settings\"", "Program.cs should expose the local settings page.");
         RequireContains(program, "\"/api/settings/virustotal\"", "Program.cs should expose VirusTotal settings endpoints.");
@@ -131,7 +134,11 @@ internal sealed class WebUiExperienceContractScenario : ISmokeTestScenario
             ["stage-progress", "progressStages", "renderProgressStages", "Stage progress", "阶段进度"],
             "Dashboard should render operator-facing progress stages.");
         RequireContains(dashboard, "/runbook/progress", "Dashboard should poll the real runbook progress endpoint.");
+        RequireContains(dashboard, "/runbook/start", "Dashboard should start VM analysis through the background runbook endpoint.");
+        RequireContains(dashboard, "/runbook/background", "Dashboard should poll background runbook terminal state.");
         RequireContains(dashboard, "startRunbookProgressPolling", "Dashboard should start real runbook progress polling during execution.");
+        RequireContains(dashboard, "startBackgroundExecutionPolling", "Dashboard should start background execution status polling during execution.");
+        RequireContains(dashboard, "renderBackgroundExecutionSnapshot", "Dashboard should render background runbook terminal state and report readiness.");
         RequireContains(dashboard, "renderRunbookProgress", "Dashboard should render exact executor runbook step progress.");
         RequireContains(dashboard, "不含命令行", "Dashboard should state that expanded runbook progress omits command lines.");
         RequireContains(dashboard, "executeRunbook(String(jobId), true)", "Upload flow should automatically start live VM analysis after planning.");
@@ -171,9 +178,12 @@ internal sealed class WebUiExperienceContractScenario : ISmokeTestScenario
         RequireContains(liveEventsPage, "VirusTotal 官方结果", "Live monitor should display a VirusTotal result card.");
         RequireContains(liveEventsPage, "不上传样本", "Live monitor should state that VirusTotal integration does not upload samples.");
         RequireContains(liveEventsPage, "/runbook/progress", "Live monitor should poll the real runbook progress endpoint.");
+        RequireContains(liveEventsPage, "/runbook/background", "Live monitor should poll background runbook terminal state.");
         RequireContains(liveEventsPage, "虚拟机分析进度", "Live monitor should display a runbook progress panel.");
+        RequireContains(liveEventsPage, "后台执行状态", "Live monitor should display background execution status.");
         RequireContains(liveEventsPage, "Runbook progress", "Live monitor runbook progress panel should be bilingual.");
         RequireContains(liveEventsPage, "startRunbookProgressPolling", "Live monitor should start runbook progress polling automatically.");
+        RequireContains(liveEventsPage, "startBackgroundStatusPolling", "Live monitor should start background status polling automatically.");
         RequireContains(liveEventsPage, "renderRunbookProgress", "Live monitor should render UI-safe runbook step snapshots.");
         RequireContains(liveEventsPage, "不展示命令行", "Live monitor progress panel should hide command-line details.");
         RequireContains(liveEventsPage, "not command lines, stdout, or stderr", "Live monitor progress panel should hide stdout/stderr details.");

@@ -7,13 +7,13 @@ a final HTML report.
 
 ## Current estimated completion
 
-- Overall v1 deliverable: **69%**
-- Minimum usable E2E chain on this host: **81%**
+- Overall v1 deliverable: **70%**
+- Minimum usable E2E chain on this host: **82%**
 - Repository architecture, docs, module boundaries, policy: **82%**
 - Core job/event/rule/report models: **74%**
-- Web/API/WebUI submission and job UX: **78%**
-- Live raw telemetry contract: **82%**
-- Hyper-V runbook generation and execution recording: **69%**
+- Web/API/WebUI submission and job UX: **80%**
+- Live raw telemetry contract: **83%**
+- Hyper-V runbook generation and execution recording: **71%**
 - Golden VM / payload staging / operator readiness: **58%**
 - Guest Agent dynamic collection: **74%**
 - R0 Driver + R0Collector: **63%**
@@ -88,6 +88,14 @@ a final HTML report.
   results. The upload flow opens a same-gesture blank monitor placeholder before
   asynchronous upload work, then navigates it to the job monitor after planning
   to reduce browser popup-blocker failures.
+- WebUI live analysis now has a server-side background start path:
+  `POST /api/jobs/{jobId}/runbook/start` accepts the run and returns
+  immediately, while `GET /api/jobs/{jobId}/runbook/background` exposes queued,
+  running, completed, or failed state plus terminal execution/import metadata.
+  The dashboard and dynamic monitor both poll background state, so the browser
+  no longer owns one long Hyper-V execute request after the Web host accepts the
+  job. The older blocking `/runbook/execute` endpoint remains available for
+  tools.
 - The upload flow is now closer to one-click operation: after an `.exe` upload
   is stored and planned, the dashboard opens the standalone dynamic monitor,
   starts live VM analysis, keeps the main page on exact runbook step state, and

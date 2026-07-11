@@ -215,6 +215,7 @@ internal static class DashboardExperiencePage
             let currentLanguage = localStorage.getItem('ksword-lang') === 'en' ? 'en' : 'zh';
             let progressTimer = null;
             let runbookProgressTimer = null;
+            let backgroundExecutionTimer = null;
             let progressStageIndex = 0;
             let progressCompleted = false;
             let progressFailed = false;
@@ -1253,14 +1254,98 @@ internal static class DashboardExperiencePage
               }
             }
 
+            function startBackgroundExecutionPolling(jobId, live) {
+              stopBackgroundExecutionPolling();
+              const tick = async () => {
+                const terminal = await refreshBackgroundExecution(jobId, live, true);
+                if (terminal) {
+                  stopBackgroundExecutionPolling();
+                }
+              };
+              tick();
+              backgroundExecutionTimer = setInterval(tick, 2000);
+            }
+
+            function stopBackgroundExecutionPolling() {
+              if (backgroundExecutionTimer) {
+                clearInterval(backgroundExecutionTimer);
+                backgroundExecutionTimer = null;
+              }
+            }
+
+            async function refreshBackgroundExecution(jobId, live, quiet) {
+              try {
+                const response = await fetch(`/api/jobs/${encodeURIComponent(jobId)}/runbook/background`, { cache: 'no-store' });
+                const snapshot = await requireOk(response, t('刷新后台分析状态', 'Refresh background analysis status'));
+                return renderBackgroundExecutionSnapshot(snapshot, live);
+              } catch (error) {
+                if (!quiet) {
+                  setStatus(error.message, true);
+                }
+                return false;
+              }
+            }
+
+            function renderBackgroundExecutionSnapshot(snapshot, live) {
+              const state = String(snapshot.state || 'not_started').toLowerCase();
+              const terminal = state === 'completed' || state === 'failed';
+              if (!terminal) {
+                const text = document.getElementById('progressText');
+                if (text) {
+                  text.textContent = state === 'running'
+                    ? t('后台分析正在运行；可以停留在此页或查看动态监控页。', 'Background analysis is running; stay here or watch the dynamic monitor page.')
+                    : t('后台分析已排队，等待执行器启动。', 'Background analysis is queued and waiting for the executor.');
+                }
+                return false;
+              }
+
+              stopEstimatedProgress();
+              stopRunbookProgressPolling();
+              if (snapshot.job) {
+                renderJob(snapshot.job);
+              }
+
+              if (snapshot.execution) {
+                renderExecution(snapshot.execution, snapshot);
+              }
+
+              applyLanguage();
+              refreshJobs(false);
+              const execution = snapshot.execution || {};
+              const importFailed = Boolean(snapshot.guestImportMessage && !snapshot.guestImportSucceeded);
+              const success = Boolean(snapshot.success ?? (execution.success && !importFailed));
+              renderStages(liveStages.length - 1, success, !success);
+              setStatus(
+                (success ? t('后台分析流程已完成。', 'Background analysis flow completed.') : t('后台分析流程失败。', 'Background analysis flow failed.')) +
+                  (snapshot.guestImportMessage ? ` ${snapshot.guestImportMessage}` : ''),
+                !success);
+
+              if (live && success) {
+                const text = document.getElementById('progressText');
+                if (text) {
+                  text.textContent = t('分析完成，报告已生成，正在打开。', 'Analysis completed; report is ready and opening.');
+                }
+                showReportReadyNotice(jobId, true);
+              } else if (live && execution.success) {
+                const text = document.getElementById('progressText');
+                if (text) {
+                  text.textContent = t('分析完成，但事件导入未确认；请检查报告入口或手动导入。', 'Analysis completed, but event import was not confirmed; check report links or import events manually.');
+                }
+                showReportReadyNotice(jobId, false);
+              }
+
+              return true;
+            }
+
             async function executeRunbook(jobId, live) {
               setBusy(true);
               latestRunbookProgressSnapshot = null;
               startEstimatedProgress(live);
               startRunbookProgressPolling(jobId);
-              setStatus(live ? t('正在启动虚拟机分析...', 'Starting VM analysis...') : t('正在验证流程（不启动虚拟机）...', 'Verifying flow without starting the VM...'), false);
+              stopBackgroundExecutionPolling();
+              setStatus(live ? t('正在提交后台虚拟机分析...', 'Submitting background VM analysis...') : t('正在提交后台流程验证...', 'Submitting background flow verification...'), false);
               try {
-                const response = await fetch(`/api/jobs/${encodeURIComponent(jobId)}/runbook/execute`, {
+                const response = await fetch(`/api/jobs/${encodeURIComponent(jobId)}/runbook/start`, {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({
@@ -1269,39 +1354,18 @@ internal static class DashboardExperiencePage
                     importGuestEvents: true
                   })
                 });
-                const payload = await requireOk(response, live ? t('执行虚拟机分析', 'Execute VM analysis') : t('验证流程', 'Verify flow'));
+                const payload = await requireOk(response, live ? t('启动后台虚拟机分析', 'Start background VM analysis') : t('启动后台流程验证', 'Start background flow verification'));
 
-                const execution = payload.execution || payload;
-                if (payload.job) {
-                  renderJob(payload.job);
+                startBackgroundExecutionPolling(jobId, live);
+                const text = document.getElementById('progressText');
+                if (text) {
+                  text.textContent = t('后台任务已启动；真实 runbook step 会持续更新，完成后自动打开报告。', 'Background task started; real runbook steps will keep updating and the report opens when complete.');
                 }
-
-                renderExecution(execution, payload);
-                applyLanguage();
-            refreshJobs(false);
-                const suffix = payload.guestImportMessage ? ` ${payload.guestImportMessage}` : '';
-                const importFailed = Boolean(payload.guestImportMessage && !payload.guestImportSucceeded);
-                stopEstimatedProgress();
-                await refreshRunbookProgress(jobId, true);
-                if (!latestRunbookProgressSnapshot) {
-                  renderStages(liveStages.length - 1, Boolean(execution.success && !importFailed), Boolean(!execution.success || importFailed));
-                }
-                setStatus((execution.success ? t('分析流程已完成。', 'Analysis flow completed.') : t('分析流程失败。', 'Analysis flow stopped with a failure.')) + suffix, !execution.success || importFailed);
-                if (live && execution.success && !importFailed) {
-                  const text = document.getElementById('progressText');
-                  if (text) {
-                    text.textContent = t('分析完成，报告已生成，正在打开。', 'Analysis completed; report is ready and opening.');
-                  }
-                  showReportReadyNotice(jobId, true);
-                } else if (live && execution.success) {
-                  const text = document.getElementById('progressText');
-                  if (text) {
-                    text.textContent = t('分析完成，但事件导入未确认；请检查报告入口或手动导入。', 'Analysis completed, but event import was not confirmed; check report links or import events manually.');
-                  }
-                  showReportReadyNotice(jobId, false);
-                }
+                setStatus(live ? t('虚拟机分析已在后台启动。', 'VM analysis started in the background.') : t('流程验证已在后台启动。', 'Flow verification started in the background.'), false);
+                renderBackgroundExecutionSnapshot(payload, live);
               } catch (error) {
                 stopEstimatedProgress();
+                stopBackgroundExecutionPolling();
                 await refreshRunbookProgress(jobId, true);
                 if (!latestRunbookProgressSnapshot) {
                   renderStages(progressStageIndex, false, true);
@@ -1312,7 +1376,6 @@ internal static class DashboardExperiencePage
                 }
                 setStatus(error.message, true);
               } finally {
-                stopRunbookProgressPolling();
                 setBusy(false);
               }
             }

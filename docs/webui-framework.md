@@ -68,6 +68,12 @@ The root dashboard must keep these operator-facing areas visible and copyable:
   `SandboxRunbookProgressSnapshot` values through the executor `ProgressSink`,
   and intentionally omits PowerShell command text, `stdout`, and `stderr` from
   the main dashboard;
+- live VM analysis should be started through the server-side background path:
+  `POST /api/jobs/{jobId}/runbook/start` returns immediately after accepting
+  the job, and `GET /api/jobs/{jobId}/runbook/background` exposes queued,
+  running, completed, or failed state plus the terminal execution/import result.
+  The legacy blocking `/runbook/execute` endpoint remains available for tools,
+  but the browser experience must not depend on one long fetch staying alive;
 - upload flow should be one-click for operators: after an `.exe` upload is
   stored and a plan is created, the dashboard automatically opens the dedicated
   dynamic monitor page in a new tab, starts live VM analysis, and switches the
@@ -78,7 +84,8 @@ The root dashboard must keep these operator-facing areas visible and copyable:
   failures compared with opening the monitor only after upload completes. If
   the browser blocks the new tab, the current job card must show an explicit
   bilingual `Enter dynamic monitor` fallback link while keeping the dashboard
-  alive for the long-running execute request;
+  usable while the Web host background runner owns the long-running Hyper-V
+  execution;
 - VirusTotal official result integration is optional and hash-only. Operators
   can open `/settings` to save or clear a local API key; the key is read from
   `KSWORDBOX_VIRUSTOTAL_API_KEY` first or from the runtime settings file under
@@ -93,7 +100,10 @@ The root dashboard must keep these operator-facing areas visible and copyable:
   upload, the dashboard tab must stay open to continue the analysis request.
   The monitor page also polls `GET /api/jobs/{jobId}/runbook/progress` and shows
   UI-safe runbook step state, current step, and progress percentage without
-  command lines, `stdout`, or `stderr`;
+  command lines, `stdout`, or `stderr`. It also polls
+  `GET /api/jobs/{jobId}/runbook/background` so the monitor can show terminal
+  completed/failed state and report links even if the main dashboard tab is
+  closed after the server accepted the background task;
 - a natural progress-page link to the dedicated execution-flow page for runbook
   step status, available both from the job actions and the progress summary.
   The root dashboard must not inline long runbook PowerShell commands,

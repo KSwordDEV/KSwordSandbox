@@ -22,6 +22,7 @@ builder.Services.AddSingleton(rules);
 builder.Services.AddSingleton(jobService);
 builder.Services.AddSingleton(targetScanner);
 builder.Services.AddSingleton<RunbookProgressStore>();
+builder.Services.AddSingleton<RunbookBackgroundExecutionStore>();
 builder.Services.AddSingleton<VirusTotalSettingsStore>();
 builder.Services.AddSingleton<IRunbookExecutor, PowerShellRunbookExecutor>();
 builder.Services.AddHttpClient<VirusTotalLookupService>(client =>
@@ -128,6 +129,19 @@ app.MapGet("/api/jobs/{jobId:guid}/runbook/progress", (Guid jobId, SandboxJobSer
 
     return Results.Ok(progressStore.Begin(job.Runbook, SandboxRunbookExecutionMode.DryRun));
 });
+// GET /api/jobs/{jobId}/runbook/background returns the WebUI server-side
+// background execution state. It complements the per-step progress endpoint:
+// progress is live/streaming, while this endpoint carries the terminal
+// execution result, imported job, and report-ready metadata after completion.
+app.MapGet("/api/jobs/{jobId:guid}/runbook/background", (Guid jobId, SandboxJobService service, RunbookBackgroundExecutionStore backgroundStore) =>
+{
+    if (service.GetJob(jobId) is null)
+    {
+        return Results.NotFound(new { error = $"Job {jobId:D} was not found in the in-memory Web host job list." });
+    }
+
+    return Results.Ok(backgroundStore.Get(jobId));
+});
 // GET /api/jobs/{jobId}/events/live returns unclassified raw events for the
 // WebUI monitor. Inputs are a job id plus optional offset/take query values;
 // processing reads current host/guest artifacts without running rules, and the
@@ -220,6 +234,96 @@ app.MapPost("/api/jobs/{jobId:guid}/runbook/execute", async (Guid jobId, Runbook
         return Results.BadRequest(new { error = $"Job {jobId:D} does not have a runbook; recreate the dry-run plan for the selected executable." });
     }
 
+    var prepareError = TryPrepareRunbookExecution(job, request, currentConfig, progressStore, out var options);
+    if (prepareError is not null)
+    {
+        return prepareError;
+    }
+
+    return Results.Ok(await ExecuteRunbookAndImportAsync(jobId, request, service, executor, options));
+});
+// POST /api/jobs/{jobId}/runbook/start starts the same runbook work on a
+// server-side background task and returns immediately. This is the preferred
+// WebUI path for live VM analysis because the browser tab no longer owns the
+// long PowerShell/Hyper-V request lifetime.
+app.MapPost("/api/jobs/{jobId:guid}/runbook/start", (Guid jobId, RunbookExecuteRequest request, SandboxJobService service, IRunbookExecutor executor, SandboxConfig currentConfig, RunbookProgressStore progressStore, RunbookBackgroundExecutionStore backgroundStore) =>
+{
+    var job = service.GetJob(jobId);
+    if (job is null)
+    {
+        return Results.NotFound(new { error = $"Job {jobId:D} was not found; create a dry-run plan before starting a runbook." });
+    }
+
+    if (job.Runbook is null)
+    {
+        return Results.BadRequest(new { error = $"Job {jobId:D} does not have a runbook; recreate the dry-run plan for the selected executable." });
+    }
+
+    var existingBackground = backgroundStore.Get(jobId);
+    if (string.Equals(existingBackground.State, RunbookBackgroundExecutionStore.Queued, StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(existingBackground.State, RunbookBackgroundExecutionStore.Running, StringComparison.OrdinalIgnoreCase))
+    {
+        return Results.Ok(existingBackground with
+        {
+            Accepted = false,
+            Message = "Runbook execution is already queued or running for this job."
+        });
+    }
+
+    var prepareError = TryPrepareRunbookExecution(job, request, currentConfig, progressStore, out var options);
+    if (prepareError is not null)
+    {
+        return prepareError;
+    }
+
+    var accepted = backgroundStore.TryStart(
+        jobId,
+        request.Live,
+        request.ImportGuestEvents,
+        () => ExecuteRunbookAndImportAsync(jobId, request, service, executor, options),
+        out var snapshot);
+
+    return accepted ? Results.Accepted($"/api/jobs/{jobId:D}/runbook/background", snapshot) : Results.Ok(snapshot);
+});
+app.MapPost("/api/jobs/{jobId:guid}/guest-events/import", (Guid jobId, GuestEventImportRequest request, SandboxJobService service) =>
+{
+    try
+    {
+        var job = service.ImportGuestEvents(jobId, request.EventsPath);
+        return Results.Ok(job);
+    }
+    catch (KeyNotFoundException ex)
+    {
+        return Results.NotFound(new { error = ex.Message });
+    }
+    catch (Exception ex) when (ex is DirectoryNotFoundException or FileNotFoundException or InvalidDataException or IOException or UnauthorizedAccessException)
+    {
+        return Results.BadRequest(new { error = $"Guest event import failed for job {jobId:D}: {ex.Message}" });
+    }
+});
+
+app.Run();
+
+/// <summary>
+/// Builds validated executor options for blocking and background runbook paths.
+/// Inputs are the planned job, request, config, and progress store; processing
+/// performs the same live credential preflight and starts a UI-safe progress
+/// snapshot; the function returns an HTTP error result when execution should
+/// not start.
+/// </summary>
+static IResult? TryPrepareRunbookExecution(
+    AnalysisJob job,
+    RunbookExecuteRequest request,
+    SandboxConfig currentConfig,
+    RunbookProgressStore progressStore,
+    out SandboxRunbookExecutionOptions options)
+{
+    options = new SandboxRunbookExecutionOptions();
+    if (job.Runbook is null)
+    {
+        return Results.BadRequest(new { error = $"Job {job.JobId:D} does not have a runbook; recreate the dry-run plan for the selected executable." });
+    }
+
     var mode = request.Live ? SandboxRunbookExecutionMode.Live : SandboxRunbookExecutionMode.DryRun;
     progressStore.Begin(job.Runbook, mode);
 
@@ -246,7 +350,7 @@ app.MapPost("/api/jobs/{jobId:guid}/runbook/execute", async (Guid jobId, Runbook
         environmentVariables[secretName] = guestPassword;
     }
 
-    var options = new SandboxRunbookExecutionOptions
+    options = new SandboxRunbookExecutionOptions
     {
         Mode = mode,
         StepTimeout = TimeSpan.FromSeconds(Math.Clamp(request.StepTimeoutSeconds, 1, 7200)),
@@ -255,7 +359,30 @@ app.MapPost("/api/jobs/{jobId:guid}/runbook/execute", async (Guid jobId, Runbook
         EnvironmentVariables = environmentVariables,
         ProgressSink = new Progress<SandboxRunbookProgressSnapshot>(progressStore.Update)
     };
-    var result = await executor.ExecuteAsync(job.Runbook, options);
+    return null;
+}
+
+/// <summary>
+/// Executes a runbook and performs the existing automatic guest import policy.
+/// Inputs are job id, request, job service, executor, and prepared options;
+/// processing persists execution, optionally imports guest events on successful
+/// live runs, and returns a compact outcome suitable for blocking or background
+/// API responses.
+/// </summary>
+static async Task<RunbookExecutionOutcome> ExecuteRunbookAndImportAsync(
+    Guid jobId,
+    RunbookExecuteRequest request,
+    SandboxJobService service,
+    IRunbookExecutor executor,
+    SandboxRunbookExecutionOptions options)
+{
+    var job = service.GetJob(jobId) ?? throw new KeyNotFoundException($"Job {jobId:D} was not found before execution.");
+    if (job.Runbook is null)
+    {
+        throw new InvalidOperationException($"Job {jobId:D} does not have a runbook.");
+    }
+
+    var result = await executor.ExecuteAsync(job.Runbook, options).ConfigureAwait(false);
     var updatedJob = service.SaveRunbookExecutionResult(jobId, result);
     var guestImportSucceeded = false;
     string? guestImportMessage = null;
@@ -274,32 +401,8 @@ app.MapPost("/api/jobs/{jobId:guid}/runbook/execute", async (Guid jobId, Runbook
         }
     }
 
-    return Results.Ok(new
-    {
-        execution = result,
-        job = updatedJob,
-        guestImportSucceeded,
-        guestImportMessage
-    });
-});
-app.MapPost("/api/jobs/{jobId:guid}/guest-events/import", (Guid jobId, GuestEventImportRequest request, SandboxJobService service) =>
-{
-    try
-    {
-        var job = service.ImportGuestEvents(jobId, request.EventsPath);
-        return Results.Ok(job);
-    }
-    catch (KeyNotFoundException ex)
-    {
-        return Results.NotFound(new { error = ex.Message });
-    }
-    catch (Exception ex) when (ex is DirectoryNotFoundException or FileNotFoundException or InvalidDataException or IOException or UnauthorizedAccessException)
-    {
-        return Results.BadRequest(new { error = $"Guest event import failed for job {jobId:D}: {ex.Message}" });
-    }
-});
-
-app.Run();
+    return new RunbookExecutionOutcome(result, updatedJob, guestImportSucceeded, guestImportMessage);
+}
 
 /// <summary>
 /// Streams live raw-event snapshots to a browser with Server-Sent Events.
