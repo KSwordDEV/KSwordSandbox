@@ -1,16 +1,17 @@
 # R0 ABI review and next implementation plan
 
-Date: 2026-07-10
+Date: 2026-07-12 (current status note refreshed for local v22+ release-prep baseline `77298d6 / v22`)
 
 中文优先维护说明：本文是历史实施计划，不是当前 ABI 的唯一事实来源。阅读时先以
 `docs/r0-driver-core.md`、`docs/r0-collector.md`、`docs/r0-jsonl-schema.md` 和各
 producer 专项文档为准；本文件保留早期落地顺序、风险和 patch split 供对照。所有字段名、
 ABI 结构名、event type 和 JSON key 继续保持英文稳定值。
 
-> Historical planning note: this file records an earlier R0 landing plan. Use
-> `docs/r0-driver-core.md` for the current ABI source of truth,
-> `docs/r0-collector.md` / `docs/r0-jsonl-schema.md` for collector status and
-> JSONL, and producer-specific docs such as `docs/r0-driver.md`,
+> Historical planning note: this file records an earlier R0 landing plan, not
+> the current implementation checklist. Use `docs/r0-driver-core.md` for the
+> current ABI source of truth, `docs/r0-collector.md` /
+> `docs/r0-jsonl-schema.md` for collector status and JSONL, and
+> producer-specific docs such as `docs/r0-driver.md`,
 > `docs/r0-file-monitor.md`, `docs/r0-process-registry-image.md`, and
 > `docs/r0-network.md` for current producer notes.
 
@@ -37,6 +38,31 @@ Reviewed files:
 - `driver/KSword.Sandbox.Driver/src/Driver.c`
 - `guest/KSword.Sandbox.R0Collector/src/main.cpp`
 - `docs/ksword5-driver-reuse.md`
+
+
+## Current v22 status correction
+
+As of the local v22+ release-prep batch (baseline `77298d6 / v22`), the project has moved beyond several items in this
+historical plan:
+
+- The current ABI source of truth advertises v1 typed payloads for process,
+  image, registry, file, and ALE inspect-only network events, plus producer
+  masks, queue/loss/backpressure counters, common metadata, and read-only
+  `GET_NETWORK_STATUS` diagnostics.
+- The current R0 docs describe process/image callbacks, registry callback, file
+  minifilter, and WFP/ALE network producer boundaries. Network remains endpoint
+  telemetry only; DNS/HTTP/TLS payload facts still come from PCAP/sidecar rows.
+- The remaining release gap is not “define the first payloads”; it is fresh lab
+  validation: no new Hyper-V live run, real driver load, pressure run,
+  unload/reload evidence, or full report handoff was generated during this doc
+  refresh.
+- Default release language must still say R0 is an optional isolated-lab path.
+  Source/readiness/package checks do not sign, load, or query a live driver and
+  do not prove current candidate R0 runtime behavior.
+
+The implementation sequence below is retained for history and risk context only.
+Do not use it to infer that current producer docs are missing or that live
+validation has been refreshed.
 
 ## Current ABI and collector review
 
@@ -79,23 +105,17 @@ This means the next VM smoke can prove:
 
 ### What is still missing
 
-The current code does not yet provide behavior telemetry beyond the synthetic
-startup event:
+This section is historical. The current code no longer stops at only the
+synthetic startup event: current R0 docs describe typed payloads and producer
+runtime state for process, image, file, registry, and ALE inspect-only network
+telemetry. Remaining current gaps should be read from the producer-specific docs
+and release audit, especially:
 
-- No process creation/exit callback is registered.
-- No image-load callback is registered.
-- No file minifilter is registered.
-- No registry callback is registered.
-- No network endpoint snapshot or WFP observation path is implemented.
-- Public payload layouts for process, image, file, registry, and network events
-  are not defined, so the collector can only emit opaque `payloadHex` for future
-  payloads.
-- `StartingSequence` is validated but not used for replay or gap recovery.
-- The ring capacity is only 64 records. That is acceptable for a first callback
-  smoke, but it will drop data quickly under file or registry activity.
-- The ABI has event type numbers reserved, but per-type operation enums, flags,
-  fixed string sizes, path encodings, status semantics, and timestamp semantics
-  are not stable yet.
+- no fresh Hyper-V live evidence was produced in this documentation pass;
+- full real-driver load, pressure, unload/reload, and report-ingestion evidence
+  must still be refreshed on an isolated lab VM before release notes claim it;
+- R0 network remains ALE endpoint telemetry, not packet/DNS/HTTP/TLS parsing;
+- runtime package/readiness success does not prove live R0 behavior.
 
 ### ABI fields that should be treated as stable now
 

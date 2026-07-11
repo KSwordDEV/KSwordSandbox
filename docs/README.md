@@ -17,7 +17,7 @@ WebUI 展示实时进度和原始事件；可选 VirusTotal 只做 hash-only 查
 
 ## 发布就绪快照 / Release-readiness snapshot
 
-截至 `b845c3d` 后的文档刷新，发布评审（release review）的当前事实入口是
+截至本地 v22+ 发布准备批次（基线 `77298d6 / v22`），发布评审（release review）的当前事实入口是
 [`v1-release-gap-audit.md`](v1-release-gap-audit.md)：它维护组件完成百分比、
 剩余差距和低副作用验收命令。简要状态：
 

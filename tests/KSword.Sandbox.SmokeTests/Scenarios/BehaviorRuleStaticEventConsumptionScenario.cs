@@ -65,7 +65,10 @@ internal sealed class BehaviorRuleStaticEventConsumptionScenario : ISmokeTestSce
         "static-exfil-command-string",
         "static-credential-access-string",
         "static-defense-evasion-string",
-        "static-anti-sandbox-string"
+        "static-anti-sandbox-string",
+        "static-granular-download-exec-capability",
+        "static-granular-injection-capability",
+        "static-granular-anti-debug-capability"
     ];
 
     private static readonly string[] GranularStaticEventTypes =
@@ -220,6 +223,13 @@ internal sealed class BehaviorRuleStaticEventConsumptionScenario : ISmokeTestSce
                     ["apiNames"] = "VirtualAllocEx,WriteProcessMemory,CreateRemoteThread,VirtualProtect,URLDownloadToFileW,RegSetValueExW,OpenSCManagerW,FindResourceW,CreateFileW,ShellExecuteW,IsDebuggerPresent,MiniDumpWriteDump,InternetWriteFile,AmsiScanBuffer",
                     ["suspiciousApiNames"] = "VirtualAllocEx,WriteProcessMemory,CreateRemoteThread,VirtualProtect,URLDownloadToFileW,RegSetValueExW,OpenSCManagerW,FindResourceW,CreateFileW,ShellExecuteW,IsDebuggerPresent,MiniDumpWriteDump,InternetWriteFile,AmsiScanBuffer",
                     ["suspiciousApiClusters"] = "process-injection,dynamic-code,download,registry-persistence,service-persistence,resource,file-drop,script-execution,anti-analysis,credential-access,exfiltration,defense-evasion",
+                    ["staticOnly"] = "true",
+                    ["evidenceOrigin"] = "static.pe.import.module",
+                    ["primaryCapability"] = "download-execute",
+                    ["downloadExecCandidate"] = "true",
+                    ["hasProcessInjectionApi"] = "true",
+                    ["hasAntiDebugApi"] = "true",
+                    ["behaviorFamily"] = "process-injection",
                     ["tags"] = "imports_present,import_suspicious_api,import_process_injection_api,import_dynamic_code_api,import_network_api,import_download_api,import_persistence_api,import_registry_persistence_api,import_service_persistence_api,import_resource_api,import_file_drop_api,import_script_execution_api,import_anti_analysis_api,import_credential_access_api,import_exfil_api,import_defense_evasion_api"
                 }
             },

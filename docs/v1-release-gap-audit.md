@@ -1,14 +1,15 @@
-# KSwordSandbox v1 发布差距审计（截至 0068358）
+# KSwordSandbox v1 发布差距审计（本地 v22+ 发布准备批次）
 
-更新时间：2026-07-12。本文是发布经理/审阅者 handoff，基于 `0068358 Advance v20 evidence and release readiness`
-之后的源码与文档状态整理；本次文档刷新没有重跑 Hyper-V live、重 smoke 或签名链。
+更新时间：2026-07-12。本文是发布经理/审阅者 handoff，基于 `77298d6 Advance v22 defensive matrix and release polish`
+之后的本地发布准备批次整理；本轮没有重跑 Hyper-V live、重 smoke、完整 runtime package handoff 或签名链。
 
 本页只回答发布前最重要的三件事：当前能交付什么、还差什么、审阅者用哪些低副作用命令验收。
 百分比不包含测试覆盖占比；100% 指当前 open-source MVP 可务实做到的范围，不包含云端多租户、海量样本库、
 完整恶意家族归因或默认真实 R0 驱动签名。
-本次不调整百分比：这次只加强 release/deployment guardrail、runtime dry-run 诊断和
-no-fresh-live 说明；没有新的 build 矩阵、真实样本报告、fresh live evidence `job id`
-或签名链结果可支撑上调。
+本轮增加了 release-readiness handoff metadata、typed artifact download contract 使用、network address-scope metadata、
+live progress freshness 以及 R0/driver JSONL import provenance 等发布准备补强；但仍没有新的 build 矩阵、真实样本报告、fresh live evidence `job id`、完整
+`RuntimePublishRoot` handoff 或签名链结果。组件百分比只反映代码/文档能力的务实估计，
+不是新验证覆盖率。
 
 ## 总体判断
 
@@ -18,8 +19,8 @@ no-fresh-live 说明；没有新的 build 矩阵、真实样本报告、fresh li
 - Host 侧会做 hash/静态分析，`SandboxJobService` 已接入完整 `static.*` 事件而不是单条 summary。
 - Guest Agent 可采集进程树、文件差异、网络快照，以及显式启用的 dropped files、截图、memory dump、PCAP artifact。
 - Host 可导入 guest events、driver JSONL、PCAP/sidecar/artifacts，生成 `report.json`、`report.html`、`report.zh.html`、`report.en.html`。
-- Web live progress 优先使用 `/api/jobs/{jobId}/progress/stream` 和 durable `runbook-progress.json`，命令/stdout/stderr 默认不在主视图展开。
-- Artifact index/download 已有安全 selector、duplicate 信息和拒绝诊断；下载必须命中 job artifact index。
+- Web live progress 优先使用 `/api/jobs/{jobId}/progress/stream`、durable `runbook-progress.json` 和 runbook progress facts，主视图显示 snapshot freshness/updated-at，命令/stdout/stderr 默认不展开。
+- Artifact index/download 已有安全 selector、typed download contract、duplicate 信息、拒绝诊断和 content-disposition/download metadata；下载必须命中 job artifact index。
 - VirusTotal 是可选 hash-only enrichment；缺 key、限速、未收录等 quiet/status 状态不应污染主行为判定。
 - 报告已按 Process / Files / Network / R0 / VT / Artifacts 分区，raw events 默认折叠/分页/限高，并区分 R0 health/noise 与样本行为。
 - R0Collector/R0 driver 有 ABI、lost/backpressure/highWatermark/sequence、readiness/diagnose 等 telemetry contract；真实驱动加载仍是隔离 lab 高级路径。
@@ -37,12 +38,12 @@ no-fresh-live 说明；没有新的 build 矩阵、真实样本报告、fresh li
 | Guest Agent R3 采集 | 91% | artifact manifest、截图/PCAP/dump 等 opt-in 证据 lane 更完整；仍需用更多样本校准 dropped file、child process、PCAP 和 opt-in artifact 质量。 |
 | R0Collector 用户态采集链 | 88% | 已接入可选 `GET_NETWORK_STATUS` 诊断、sequence/backpressure/readiness/noise contract；仍需真实驱动输入和压力样本复验。 |
 | R0 driver / kernel producer | 76% | driver 侧 telemetry/diagnostic 面更完整，Collector 已消费 `GET_NETWORK_STATUS`；默认发布仍不承诺未签名驱动加载，报告/UI 还可继续加强该状态叙事。 |
-| 静态分析与行为规则 | 94% | `static.*` 结构化事件、resource projection 和规则消费已落地，规则库已扩展；后续按 corpus 校准误报/漏报、MITRE 映射和 YARA-like 规则噪音。 |
-| 网络 sidecar / PCAP 元数据 | 86% | DNS/HTTP/TLS/flow/IPv6/sidecar 归一化已可用；深度协议字段和异常证书/JA3 质量还需样本校准。 |
+| 静态分析与行为规则 | 95% | `static.*` 结构化事件、resource projection 和规则消费已落地；规则库当前 550 条、无重复 ID；后续按 corpus 校准误报/漏报、MITRE 映射和 YARA-like 规则噪音。 |
+| 网络 sidecar / PCAP 元数据 | 87% | DNS/HTTP/TLS/flow/IPv6/sidecar 归一化、artifact-backed PCAP correlation 和 richer TLS/HTTP metadata 已可用；深度协议字段和异常证书/JA3 质量还需样本校准。 |
 | artifact import / host index / download | 92% | 安全下载、duplicate/rejection 诊断和 artifact evidence readiness 已增强；继续补非 ASCII、深目录、重复内容和路径穿越 synthetic 覆盖。 |
 | 中英 HTML 报告 | 94% | 证据叙事和 artifact 证据呈现已可审阅；继续用真实样本报告校准首屏摘要、关系卡和 raw evidence 边界。 |
 | VirusTotal hash-only enrichment | 90% | 官方 file object 字段、permalink/cache/quiet 状态已接入；继续补 rate-limit/错误分类的 UI 文案。 |
-| 发布/打包/仓库策略 | 94% | readiness/package gate 已有；runtime zip 交付必须显式完整 payload，正式 tag 前仍需 release manager 跑 staged policy 和 source package dry run。 |
+| 发布/打包/仓库策略 | 95% | readiness/package gate 已有；runtime zip 交付必须显式完整 payload，正式 tag 前仍需 release manager 跑 staged policy、source package dry run，并用仓库外 `RuntimePublishRoot` 复验完整 handoff。 |
 | 文档与操作者 onboarding | 89% | 中文优先索引和 release handoff 已收敛；随最终 release notes 再做一次去重。 |
 
 ## P0 发布门禁
@@ -121,10 +122,10 @@ no-fresh-live 说明；没有新的 build 矩阵、真实样本报告、fresh li
 
 ### 行为规则与静态分析
 
-已验证的轻量事实：`rules/behavior-rules.json` 当前 521 条规则、重复 ID 组为 0。
+已验证的轻量事实：`rules/behavior-rules.json` 当前 550 条规则、重复 ID 组为 0。
 
 已实现：`static.analysis.completed` 保持兼容 summary；`static.pe.*`、`static.string.*`、`static.packer.hint`、`static.yara.match` 结构化事件进入规则消费；
-`rules/static-notes.yar` 由内置轻量 YARA-like matcher 处理，不依赖外部 YARA。
+`rules/static-notes.yar` 由内置轻量 YARA-like matcher 处理，不依赖外部 YARA。v21/v22 继续补强静态 PE metadata、persistence、injection、lateral movement、anti-sandbox、download-execute、LOLBin 和 staging 规则。
 
 仍需：按 corpus 校准 ATT&CK、误报/漏报和 YARA-like 噪音；任何 static-only 命中都保持 triage，不当作已观察到的 guest 行为。
 

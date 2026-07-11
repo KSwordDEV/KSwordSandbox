@@ -7,6 +7,7 @@ using KSword.Sandbox.Core.Execution;
 using KSword.Sandbox.Core.Files;
 using KSword.Sandbox.Core.Jobs;
 using KSword.Sandbox.Core.Rules;
+using KSword.Sandbox.Web.Contracts;
 using KSword.Sandbox.Web.Dashboard;
 using KSword.Sandbox.Web.Infrastructure;
 
@@ -416,9 +417,7 @@ static object ToWebArtifactDescriptor(Guid jobId, ArtifactDescriptor artifact)
     var fileName = SanitizeDownloadFileName(FirstNonEmpty(artifact.Name, artifact.RelativePath, "artifact.bin"));
     var sha256 = FirstNonEmpty(artifact.Sha256, artifact.Hashes.GetValueOrDefault("sha256"));
     var safeMetadata = ToWebArtifactMetadata(artifact.Metadata);
-    var href = string.IsNullOrWhiteSpace(selector)
-        ? string.Empty
-        : $"/api/jobs/{jobId:D}/artifacts/download?path={Uri.EscapeDataString(selector)}";
+    var download = ToJobArtifactDownloadContract(jobId, artifact, selector, fileName, contentType, sha256);
     return new
     {
         artifact.Kind,
@@ -457,28 +456,41 @@ static object ToWebArtifactDescriptor(Guid jobId, ArtifactDescriptor artifact)
             GroupCount = safeMetadata.GetValueOrDefault("duplicateGroupCount") ?? string.Empty,
             PrimarySelector = safeMetadata.GetValueOrDefault("duplicatePrimarySelector") ?? string.Empty
         },
-        Download = new
-        {
-            Available = !string.IsNullOrWhiteSpace(selector),
-            Selector = selector,
-            Href = href,
-            FileName = fileName,
-            ContentType = contentType,
-            artifact.SizeBytes,
-            Sha256 = sha256,
-            Sha256Short = ShortHash(sha256),
-            RejectionCode = string.IsNullOrWhiteSpace(selector) ? "missing-safe-selector" : string.Empty,
-            RejectionMessage = string.IsNullOrWhiteSpace(selector)
-                ? "Artifact is indexed but has no safe relative selector; server will not stream it."
-                : string.Empty,
-            RejectionMessageZh = string.IsNullOrWhiteSpace(selector)
-                ? "产物已被索引，但缺少安全相对 selector，Web 端不会下载。"
-                : string.Empty
-        },
+        Download = download,
         Metadata = safeMetadata,
         DownloadSelector = selector,
-        DownloadHref = href
+        DownloadHref = download.Href
     };
+}
+
+static JobArtifactDownloadContract ToJobArtifactDownloadContract(
+    Guid jobId,
+    ArtifactDescriptor artifact,
+    string selector,
+    string fileName,
+    string contentType,
+    string sha256)
+{
+    var href = string.IsNullOrWhiteSpace(selector)
+        ? string.Empty
+        : $"/api/jobs/{jobId:D}/artifacts/download?path={Uri.EscapeDataString(selector)}";
+    var rejectionCode = string.IsNullOrWhiteSpace(selector) ? "missing-safe-selector" : string.Empty;
+
+    return new JobArtifactDownloadContract(
+        Available: string.IsNullOrWhiteSpace(rejectionCode),
+        Selector: selector,
+        Href: href,
+        FileName: fileName,
+        ContentType: contentType,
+        SizeBytes: artifact.SizeBytes,
+        Sha256: sha256,
+        RejectionCode: rejectionCode,
+        RejectionMessage: string.IsNullOrWhiteSpace(rejectionCode)
+            ? string.Empty
+            : "Artifact is indexed but has no safe relative selector; server will not stream it.",
+        RejectionMessageZh: string.IsNullOrWhiteSpace(rejectionCode)
+            ? string.Empty
+            : "产物已被索引，但缺少安全相对 selector，Web 端不会下载。");
 }
 
 static (string RelativePath, string SafeLink, string ImportPath) BuildWebArtifactSelectors(ArtifactDescriptor artifact)

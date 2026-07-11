@@ -102,6 +102,10 @@ internal sealed class PcapArtifactImportScenario : ISmokeTestScenario
         RequireData(dns, "dns.flags.rcode", "NOERROR");
         RequireData(dns, "pcapSourceArtifactRelativePath", "sample.pcap");
         RequireData(dns, "sourcePcapArtifactRelativePath", "sample.pcap");
+        RequireData(dns, "sourceAddressScope", "private");
+        RequireData(dns, "sourceAddressIsPrivate", "true");
+        RequireData(dns, "destinationAddressScope", "public");
+        RequireData(dns, "destinationAddressIsPublic", "true");
         RequireNonEmpty(dns, "sourcePcapArtifactSha256");
         RequireData(http, "method", "GET");
         RequireData(http, "requestMethod", "GET");
@@ -117,6 +121,8 @@ internal sealed class PcapArtifactImportScenario : ISmokeTestScenario
         RequireData(http, "bodySizeBytes", "2");
         RequireData(http, "downloadSelector", "sample.pcap");
         RequireData(http, "pcapSourceArtifactRelativePath", "sample.pcap");
+        RequireData(http, "destinationAddressScope", "documentation");
+        RequireData(http, "destinationAddressIsDocumentation", "true");
         RequireData(httpResponse, "httpMessageType", "response");
         RequireData(httpResponse, "responseStatusCode", "200");
         RequireData(httpResponse, "http.response.status_code", "200");
@@ -451,6 +457,22 @@ internal sealed class PcapArtifactImportScenario : ISmokeTestScenario
                 }),
                 JsonSerializer.Serialize(new
                 {
+                    event_type = "http",
+                    timestamp = "2026-07-11T00:00:02.500Z",
+                    src_ip = "10.0.0.4",
+                    src_port = "50246",
+                    dest_ip = "198.51.100.92",
+                    dest_port = "8080",
+                    proto = "TCP",
+                    http = new
+                    {
+                        method = "GET",
+                        host = "198.51.100.92:8080",
+                        uri = "/ip-literal"
+                    }
+                }),
+                JsonSerializer.Serialize(new
+                {
                     event_type = "flow",
                     timestamp = "2026-07-11T00:00:03Z",
                     src_ip = "10.0.0.4",
@@ -475,7 +497,7 @@ internal sealed class PcapArtifactImportScenario : ISmokeTestScenario
         RequireData(summary, "pcapArtifactCount", "0");
         RequireData(summary, "sidecarArtifactCount", "1");
         RequireData(summary, "dnsEventCount", "1");
-        RequireData(summary, "httpEventCount", "1");
+        RequireData(summary, "httpEventCount", "2");
         RequireData(summary, "tlsEventCount", "1");
         RequireData(summary, "flowEventCount", "1");
 
@@ -502,6 +524,8 @@ internal sealed class PcapArtifactImportScenario : ISmokeTestScenario
         RequireData(dns, "isNxDomain", "true");
         RequireData(dns, "rootProcessId", "5150");
         RequireData(dns, "treeLineage", "5150:sidecar-sample.exe");
+        RequireData(dns, "sourceAddressScope", "private");
+        RequireData(dns, "destinationAddressScope", "public");
 
         var http = RequireEvent(events, "http.request", "host", "api.sidecar-only.test");
         RequireData(http, "method", "POST");
@@ -533,6 +557,16 @@ internal sealed class PcapArtifactImportScenario : ISmokeTestScenario
         RequireData(http, "httpResponseBodyBytes", "256");
         RequireData(http, "authorizationHeaderPresent", "true");
         RequireData(http, "cookiePresent", "true");
+        RequireData(http, "destinationAddressScope", "documentation");
+        RequireData(http, "destinationAddressIsDocumentation", "true");
+
+        var directIpHttp = RequireEvent(events, "http.request", "host", "198.51.100.92:8080");
+        RequireData(directIpHttp, "hostIsIpLiteral", "true");
+        RequireData(directIpHttp, "httpHostIsIpLiteral", "true");
+        RequireData(directIpHttp, "directIpHost", "true");
+        RequireData(directIpHttp, "hostIpAddress", "198.51.100.92");
+        RequireData(directIpHttp, "hostAddressScope", "documentation");
+        RequireData(directIpHttp, "destinationAddressScope", "documentation");
 
         var tls = RequireEvent(events, "tls.connection", "sni", "tls.sidecar-only.test");
         RequireData(tls, "destinationIp", "203.0.113.90");
@@ -609,6 +643,8 @@ internal sealed class PcapArtifactImportScenario : ISmokeTestScenario
         RequireData(flow, "flowKey", "udp|[2001:db8::10]:5353|[2606:4700:4700::1111]:53");
         RequireData(flow, "rootProcessId", "5150");
         RequireData(flow, "treeLineage", "5150:sidecar-sample.exe>6161:child.exe");
+        RequireData(flow, "sourceAddressScope", "documentation");
+        RequireData(flow, "destinationAddressScope", "public");
 
         var ipFieldFlow = RequireEvent(events, "network.flow", "uid", "ipv6-ip-field-flow");
         RequireData(ipFieldFlow, "ipFamily", "ipv6");
@@ -619,6 +655,8 @@ internal sealed class PcapArtifactImportScenario : ISmokeTestScenario
         RequireData(ipFieldFlow, "sourceEndpoint", "[2001:db8::20]:5354");
         RequireData(ipFieldFlow, "destinationEndpoint", "[2606:4700:4700::8888]:853");
         RequireData(ipFieldFlow, "flowKey", "udp|[2001:db8::20]:5354|[2606:4700:4700::8888]:853");
+        RequireData(ipFieldFlow, "sourceAddressScope", "documentation");
+        RequireData(ipFieldFlow, "destinationAddressScope", "public");
     }
 
     private static async Task AssertMalformedPcapBoundaryDiagnosticsAsync(string parentRoot, CancellationToken cancellationToken)

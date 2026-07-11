@@ -957,6 +957,54 @@ internal static class LiveEventsPage
               return info ? info.title : '';
             }
 
+            function progressSnapshotUpdatedAt(snapshot) {
+              return lastProgressStreamEnvelope?.generatedAtUtc ||
+                snapshot?.updatedAtUtc || snapshot?.UpdatedAtUtc ||
+                snapshot?.generatedAtUtc || snapshot?.GeneratedAtUtc || '';
+            }
+
+            function progressFreshnessInfo(value, state) {
+              const source = value ? String(value) : '';
+              const parsed = Date.parse(source);
+              const terminal = ['completed', 'failed', 'canceled'].includes(String(state || '').toLowerCase());
+              if (!Number.isFinite(parsed)) {
+                return { source, ageSeconds: null, stale: false, terminal };
+              }
+
+              const ageSeconds = Math.max(0, Math.round((Date.now() - parsed) / 1000));
+              return {
+                source,
+                ageSeconds,
+                stale: !terminal && ageSeconds >= 120,
+                terminal
+              };
+            }
+
+            function progressFreshnessText(info) {
+              if (!info || info.ageSeconds == null) {
+                return t('无更新时间；等待下一条真实进度', 'no update time; waiting for the next real progress update');
+              }
+
+              const age = formatAgeSeconds(info.ageSeconds);
+              if (info.terminal) {
+                return t(`终态快照，最后更新 ${age} 前`, `terminal snapshot, last updated ${age} ago`);
+              }
+
+              return info.stale
+                ? t(`进度可能停滞，最后更新 ${age} 前`, `progress may be stale; last updated ${age} ago`)
+                : t(`进度新鲜，最后更新 ${age} 前`, `progress fresh; last updated ${age} ago`);
+            }
+
+            function formatAgeSeconds(seconds) {
+              const value = Math.max(0, Number(seconds) || 0);
+              if (value < 60) { return `${value}s`; }
+              const minutes = Math.floor(value / 60);
+              const rest = value % 60;
+              if (minutes < 60) { return `${minutes}m ${rest}s`; }
+              const hours = Math.floor(minutes / 60);
+              return `${hours}h ${minutes % 60}m`;
+            }
+
             function formatElapsedBetween(start, end) {
               const started = Date.parse(start || '');
               const updated = Date.parse(end || '');
@@ -1039,9 +1087,11 @@ internal static class LiveEventsPage
               const stepState = currentInfo?.state ? formatProgressState(currentInfo.state) : stateLabel;
               const ordinal = currentInfo?.ordinalText || t('步骤序号待定', 'step ordinal pending');
               const transport = progressStreamLabel();
-              const updatedAt = lastProgressStreamEnvelope?.generatedAtUtc || snapshot.updatedAtUtc || snapshot.UpdatedAtUtc || '';
-              const tone = rawState === 'completed' ? 'ready' : (rawState === 'failed' || rawState === 'canceled' ? 'failed' : (progressStreamMode === 'sse' ? 'endpoint' : 'waiting'));
-              const copy = `${t('当前真实步骤', 'Current real step')}=${stepTitle}; ${t('状态', 'state')}=${stepState}; ${t('进度', 'progress')}=${percent}%; ${transport}; ${updatedAt}`;
+              const freshness = progressFreshnessInfo(progressSnapshotUpdatedAt(snapshot), rawState);
+              const updatedAt = freshness.source || '';
+              const freshnessText = progressFreshnessText(freshness);
+              const tone = freshness.stale ? 'failed' : rawState === 'completed' ? 'ready' : (rawState === 'failed' || rawState === 'canceled' ? 'failed' : (progressStreamMode === 'sse' ? 'endpoint' : 'waiting'));
+              const copy = `${t('当前真实步骤', 'Current real step')}=${stepTitle}; ${t('状态', 'state')}=${stepState}; ${t('进度', 'progress')}=${percent}%; ${transport}; ${freshnessText}; ${updatedAt}`;
               return {
                 copy,
                 html: `<article class="cockpit-card ${tone}" data-copy="${escapeAttr(copy)}">
@@ -1051,6 +1101,7 @@ internal static class LiveEventsPage
                     <span class="pill ${tone}" data-copy="${escapeAttr(stateLabel)}">${escapeHtml(stateLabel)}</span>
                     <span class="pill endpoint" data-copy="${escapeAttr(ordinal)}">${escapeHtml(ordinal)}</span>
                     <span class="pill quiet" data-copy="${escapeAttr(transport)}">${escapeHtml(transport)}</span>
+                    <span class="pill ${freshness.stale ? 'failed' : freshness.ageSeconds == null ? 'waiting' : 'ready'}" data-copy="${escapeAttr(freshnessText)}">${escapeHtml(freshnessText)}</span>
                     <span class="pill" data-copy="${escapeAttr(String(percent))}">${escapeHtml(`${percent}%`)}</span>
                     ${cockpitCopyButton(copy)}
                   </div>
@@ -2040,12 +2091,15 @@ internal static class LiveEventsPage
               const currentOrdinal = currentInfo?.ordinalText || t('步骤序号待定', 'step ordinal pending');
               const currentSource = streamInfo ? t('真实进度流 currentStep', 'real progress stream currentStep') : t('轮询/持久化快照', 'poll/durable snapshot');
               const elapsed = formatDuration(snapshot.duration) || '-';
+              const freshness = progressFreshnessInfo(progressSnapshotUpdatedAt(snapshot), rawState);
+              const freshnessText = progressFreshnessText(freshness);
+              const freshnessTone = freshness.stale ? 'failed' : freshness.ageSeconds == null ? 'waiting' : 'ready';
               const failedStep = steps.find(step => ['failed', 'canceled'].includes(String(step.state || '').toLowerCase()));
               const failureReason = buildProgressFailureReason(snapshot, failedStep);
               const message = snapshot.message ? `<p class="muted" data-copy="${escapeAttr(localizeServerMessage(snapshot.message))}">${escapeHtml(localizeServerMessage(snapshot.message))}</p>` : '';
               const failure = failureReason ? `<p class="error" data-copy="${escapeAttr(failureReason)}">${t('失败原因：', 'Failure reason: ')}${escapeHtml(failureReason)}</p>` : '';
               const stageRail = renderMonitorStages(stageIndex, done, failed);
-              const focusCopy = `${state}; ${completed}/${total}; 当前=${current}; 当前状态=${currentState}; 序号=${currentOrdinal}; 来源=${currentSource}; 已执行=${executed}; 已耗时=${elapsed}`;
+              const focusCopy = `${state}; ${completed}/${total}; 当前=${current}; 当前状态=${currentState}; 序号=${currentOrdinal}; 来源=${currentSource}; 已执行=${executed}; 已耗时=${elapsed}; 快照=${freshnessText}; 更新时间=${freshness.source || '-'}`;
               const stepCards = steps.slice(0, 32).map(step => renderRunbookStepCard(step, currentInfo, total)).join('');
               const hiddenCount = Math.max(0, steps.length - 32);
               const hiddenNotice = hiddenCount > 0 ? `<p class="muted">${escapeHtml(t(`另有 ${hiddenCount} 个步骤已折叠，执行流程页可查看完整列表。`, `${hiddenCount} additional steps are hidden; open Execution flow for the full list.`))}</p>` : '';
@@ -2061,6 +2115,8 @@ internal static class LiveEventsPage
                   <div><span>${escapeHtml(t('当前步骤状态', 'Current step status'))}</span><strong>${escapeHtml(currentState)}</strong></div>
                   <div><span>${escapeHtml(t('步骤序号', 'Step ordinal'))}</span><strong>${escapeHtml(currentOrdinal)}</strong></div>
                   <div><span>${escapeHtml(t('进度来源', 'Progress source'))}</span><strong>${escapeHtml(currentSource)}</strong></div>
+                  <div><span>${escapeHtml(t('快照新鲜度', 'Snapshot freshness'))}</span><strong class="pill ${freshnessTone}" data-copy="${escapeAttr(freshnessText)}">${escapeHtml(freshnessText)}</strong></div>
+                  <div><span>${escapeHtml(t('更新时间', 'Updated at'))}</span><strong data-copy="${escapeAttr(freshness.source || '-')}">${escapeHtml(freshness.source || '-')}</strong></div>
                   <div><span>${escapeHtml(t('已执行步骤', 'Executed steps'))}</span><strong>${escapeHtml(executed)} / ${escapeHtml(total)}</strong></div>
                   <div><span>${escapeHtml(t('已耗时', 'Elapsed'))}</span><strong>${escapeHtml(elapsed)}</strong></div>
                 </div>

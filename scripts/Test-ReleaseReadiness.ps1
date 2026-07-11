@@ -1020,14 +1020,14 @@ function Test-NoFreshLiveEvidenceGuardrail {
             'job id'
         )
         'docs/v1-release-gap-audit.md' = @(
-            '本次不调整百分比',
             'fresh live evidence',
-            'job id'
+            'job id',
+            'RuntimePublishRoot'
         )
         'docs/progress.md' = @(
-            '本次不调整百分比',
             'fresh live evidence',
-            'job id'
+            'job id',
+            'RuntimePublishRoot'
         )
         'scripts/package-portable.ps1' = @(
             'freshLiveEvidenceGuardrail',
@@ -1138,6 +1138,110 @@ function Invoke-LightBuild {
         -Remediation @('Fix compile errors before release handoff.')
 }
 
+function Get-GitReleaseMetadata {
+    $metadata = [ordered]@{
+        available = $false
+        branch = $null
+        commit = $null
+        shortCommit = $null
+        statusCount = $null
+        statusPreview = @()
+    }
+
+    if ($null -eq (Get-Command git -ErrorAction SilentlyContinue)) {
+        return [pscustomobject]$metadata
+    }
+
+    try {
+        $metadata.available = $true
+        $metadata.branch = [string](& git -C $RepositoryRoot rev-parse --abbrev-ref HEAD 2>$null)
+        $metadata.commit = [string](& git -C $RepositoryRoot rev-parse HEAD 2>$null)
+        $metadata.shortCommit = [string](& git -C $RepositoryRoot rev-parse --short HEAD 2>$null)
+        $statusLines = @(& git -C $RepositoryRoot status --porcelain 2>$null)
+        $metadata.statusCount = $statusLines.Count
+        $metadata.statusPreview = @($statusLines | Select-Object -First 20)
+    }
+    catch {
+        $metadata.available = $false
+        $metadata.statusPreview = @("Unable to collect git metadata: $($_.Exception.Message)")
+    }
+
+    return [pscustomobject]$metadata
+}
+
+function ConvertTo-ReleaseReadinessMarkdown {
+    param(
+        [Parameter(Mandatory)]
+        [object]$Summary
+    )
+
+    $lines = New-Object System.Collections.Generic.List[string]
+    [void]$lines.Add('# KSwordSandbox release-readiness handoff')
+    [void]$lines.Add('')
+    [void]$lines.Add("Generated: ``$($Summary.generatedAtUtc)``")
+    [void]$lines.Add("Repository: ``$($Summary.repositoryRoot)``")
+    [void]$lines.Add("Branch/commit: ``$($Summary.gitBranch)`` / ``$($Summary.gitShortCommit)``")
+    [void]$lines.Add("Changed items at check time: ``$($Summary.gitStatusCount)``")
+    [void]$lines.Add('')
+    [void]$lines.Add('## Summary')
+    [void]$lines.Add('')
+    [void]$lines.Add("- Passed: ``$($Summary.passedCount)``")
+    [void]$lines.Add("- Warnings: ``$($Summary.warningCount)``")
+    [void]$lines.Add("- Failed: ``$($Summary.failedCount)``")
+    [void]$lines.Add("- Skipped: ``$($Summary.skippedCount)``")
+    [void]$lines.Add("- Exit code: ``$($Summary.exitCode)``")
+    [void]$lines.Add('')
+    [void]$lines.Add('## Non-mutating release boundaries')
+    [void]$lines.Add('')
+    [void]$lines.Add("- VM mutation: ``$($Summary.noVmMutation)``")
+    [void]$lines.Add("- Driver signing: ``$($Summary.noDriverSigning)``")
+    [void]$lines.Add("- GUI signing fallback: ``$($Summary.noGuiSigningFallback)``")
+    [void]$lines.Add("- CSignTool not called: ``$($Summary.csignToolNotCalled)``")
+    [void]$lines.Add("- Fresh live evidence generated: ``$($Summary.freshLiveEvidenceGenerated)``")
+    [void]$lines.Add("- Release-note fallback without a lab job id: ``$($Summary.releaseNotesFreshLiveFallback)``")
+    [void]$lines.Add('')
+    [void]$lines.Add('## Runtime handoff status')
+    [void]$lines.Add('')
+    if ([string]::IsNullOrWhiteSpace([string]$Summary.runtimePublishRoot)) {
+        [void]$lines.Add('- RuntimePublishRoot: not supplied. Complete runtime handoff is **not verified** by this run.')
+    }
+    else {
+        [void]$lines.Add("- RuntimePublishRoot: ``$($Summary.runtimePublishRoot)``")
+        [void]$lines.Add("- Require complete runtime package: ``$($Summary.requireCompleteRuntimePackage)``")
+    }
+
+    [void]$lines.Add('- Required final evidence before claiming a fresh live release: commit, job id, runtime root, generated time, report JSON path, zh/en HTML report paths.')
+    [void]$lines.Add('')
+    [void]$lines.Add('## Warnings and failures')
+    [void]$lines.Add('')
+    $interestingResults = @($Summary.results | Where-Object { $_.status -in @('Failed', 'Warning') })
+    if ($interestingResults.Count -eq 0) {
+        [void]$lines.Add('- No warning or failed checks were reported.')
+    }
+    else {
+        foreach ($result in @($interestingResults | Select-Object -First 12)) {
+            [void]$lines.Add("- **$($result.status)** ``$($result.id)``: $($result.message)")
+            $remediation = @($result.remediation)
+            if ($remediation.Count -gt 0) {
+                [void]$lines.Add("  - Next: $($remediation -join '；')")
+            }
+        }
+    }
+
+    [void]$lines.Add('')
+    [void]$lines.Add('## Reviewer commands')
+    [void]$lines.Add('')
+    [void]$lines.Add('```powershell')
+    [void]$lines.Add('.\scripts\Test-RepositoryPolicy.ps1')
+    [void]$lines.Add('.\scripts\Test-ReleaseReadiness.ps1 -AllowDirtySource')
+    [void]$lines.Add('.\scripts\Test-ReleaseReadiness.ps1 -AllowDirtySource -RuntimePublishRoot <external-publish-root> -RequireCompleteRuntimePackage')
+    [void]$lines.Add('```')
+    [void]$lines.Add('')
+    [void]$lines.Add('This handoff summary is generated by the non-mutating readiness script; it is not a substitute for a lab Hyper-V live run.')
+
+    return $lines -join [Environment]::NewLine
+}
+
 if (-not (Test-Path -LiteralPath $OutputRoot -PathType Container)) {
     [void](New-Item -ItemType Directory -Force -Path $OutputRoot)
 }
@@ -1164,6 +1268,7 @@ Invoke-LightBuild
 $failed = @($script:Results | Where-Object { $_.status -eq 'Failed' })
 $warnings = @($script:Results | Where-Object { $_.status -eq 'Warning' })
 $exitCode = if ($failed.Count -gt 0 -or ($TreatWarningsAsErrors -and $warnings.Count -gt 0)) { 1 } else { 0 }
+$gitMetadata = Get-GitReleaseMetadata
 
 $summary = [pscustomobject][ordered]@{
     contractVersion       = 1
@@ -1171,6 +1276,12 @@ $summary = [pscustomobject][ordered]@{
     generatedAtUtc        = [DateTimeOffset]::UtcNow.ToString('O')
     repositoryRoot        = $RepositoryRoot
     outputRoot            = $OutputRoot
+    gitAvailable          = [bool]$gitMetadata.available
+    gitBranch             = $gitMetadata.branch
+    gitCommit             = $gitMetadata.commit
+    gitShortCommit        = $gitMetadata.shortCommit
+    gitStatusCount        = $gitMetadata.statusCount
+    gitStatusPreview      = @($gitMetadata.statusPreview)
     exitCode              = $exitCode
     failedCount           = $failed.Count
     warningCount          = $warnings.Count
@@ -1201,6 +1312,8 @@ $summary = [pscustomobject][ordered]@{
 
 $summaryPath = Join-Path $OutputRoot 'release-readiness.json'
 $summary | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $summaryPath -Encoding UTF8
+$markdownPath = Join-Path $OutputRoot 'release-readiness.md'
+ConvertTo-ReleaseReadinessMarkdown -Summary $summary | Set-Content -LiteralPath $markdownPath -Encoding UTF8
 
 function ConvertTo-ChineseFirstLabel {
     param([string]$Text)
@@ -1231,5 +1344,6 @@ foreach ($result in $script:Results) {
 }
 
 Write-Host "发布就绪摘要已写入：$summaryPath"
+Write-Host "审阅交接摘要已写入：$markdownPath"
 Write-Host '安全护栏：未启动/还原/停止 VM，未签名，未调用 CSignTool/GUI signing fallback，未生成 fresh live evidence。'
 exit $exitCode

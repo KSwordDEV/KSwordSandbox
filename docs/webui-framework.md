@@ -284,7 +284,8 @@ dotnet run --project .\tests\KSword.Sandbox.SmokeTests\KSword.Sandbox.SmokeTests
   也就是 dashboard 渲染的同一个安全报告链接；
 - 双语报告端点 `GET /api/jobs/{jobId}/report/html?lang=zh` 与
   `GET /api/jobs/{jobId}/report/html?lang=en` 都应从记录的 job report path 返回
-  `text/html`；只有没有记录本地化报告文件时才回退到兼容 `report.html`；
+  `text/html`；只有没有记录本地化报告文件时才回退到兼容 `report.html`。This is the
+  stable bilingual report endpoints validation marker used by the static smoke gate；
 - `POST /api/jobs/{jobId}/guest-events/import` 携带显式缺失的 `eventsPath` 时，
   要求返回受控 HTTP 400 validation response。这样可证明手动 guest import endpoint
   与 payload contract，而不在 smoke 中导入或重写真实 guest artifacts。

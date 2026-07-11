@@ -70,6 +70,7 @@ internal sealed class WebUiRuntimeSmokeContractScenario : ISmokeTestScenario
         var dashboard = ReadRepositoryText(context, "src", "KSword.Sandbox.Web", "Dashboard", "DashboardExperiencePage.cs");
         var liveEventsPage = ReadRepositoryText(context, "src", "KSword.Sandbox.Web", "Dashboard", "LiveEventsPage.cs");
         var settingsPage = ReadRepositoryText(context, "src", "KSword.Sandbox.Web", "Dashboard", "SettingsPage.cs");
+        var artifactDownloadContract = ReadRepositoryText(context, "src", "KSword.Sandbox.Web", "Contracts", "JobArtifactDownloadContract.cs");
         var doc = ReadRepositoryText(context, "docs", "webui-framework.md");
         var script = ReadRepositoryText(context, "scripts", "Test-LiveTelemetryFramework.ps1");
 
@@ -80,6 +81,8 @@ internal sealed class WebUiRuntimeSmokeContractScenario : ISmokeTestScenario
         RequireContains(program, "\"/api/jobs/{jobId:guid}/artifacts/download\"", "Web source should expose the guarded artifact download endpoint.");
         RequireContains(program, "\"/api/jobs/{jobId:guid}/report/{**artifactPath}\"", "Web source should expose report-relative artifact download links.");
         RequireContains(program, "ToWebArtifactDescriptor", "Web artifact endpoint should map host descriptors through an explicit safe DTO.");
+        RequireContains(program, "JobArtifactDownloadContract", "Web artifact endpoint should use the typed artifact download selector contract.");
+        RequireContains(program, "ToJobArtifactDownloadContract", "Web artifact endpoint should centralize download selector contract mapping.");
         RequireContains(program, "ToWebArtifactCollectionDescriptor", "Web artifact endpoint should map host collections through an explicit safe DTO.");
         RequireContains(program, "ToWebArtifactMetadata", "Web artifact endpoint should sanitize path-bearing metadata.");
         RequireContains(program, "RootPathPolicy", "Web artifact endpoint should document that root paths are server-owned and not exposed.");
@@ -97,6 +100,12 @@ internal sealed class WebUiRuntimeSmokeContractScenario : ISmokeTestScenario
         RequireContains(program, "\"/api/jobs/{jobId:guid}/guest-events/import\"", "Web source should expose the manual guest import endpoint.");
         RequireContains(program, "GuestEventImportRequest", "Web source should keep a typed guest import request body.");
         RequireContains(program, "EventsPath", "Guest import request should accept an optional explicit events path.");
+
+        RequireContains(artifactDownloadContract, "public sealed record JobArtifactDownloadContract", "Artifact download contract should remain a typed Web API shape.");
+        RequireContains(artifactDownloadContract, "bool Available", "Artifact download contract should expose availability.");
+        RequireContains(artifactDownloadContract, "string Selector", "Artifact download contract should expose the accepted relative selector.");
+        RequireContains(artifactDownloadContract, "string Href", "Artifact download contract should expose the guarded href.");
+        RequireContains(artifactDownloadContract, "string RejectionCode", "Artifact download contract should expose stable rejection codes.");
 
         RequireContains(dashboard, "/jobs/${encodeURIComponent(jobId)}/live-events", "Dashboard should link to the live raw monitor page.");
         RequireContains(dashboard, "/report/html?lang=zh", "Dashboard should build the Chinese served report endpoint.");
@@ -118,6 +127,10 @@ internal sealed class WebUiRuntimeSmokeContractScenario : ISmokeTestScenario
         RequireContains(liveEventsPage, "data-en", "Live raw monitor page should expose English text markers.");
         RequireContains(liveEventsPage, "已耗时", "Live raw monitor page should expose elapsed runbook progress.");
         RequireContains(liveEventsPage, "buildProgressFailureReason", "Live raw monitor page should expose runbook failure reasons.");
+        RequireContains(liveEventsPage, "progressFreshnessInfo", "Live raw monitor page should calculate progress snapshot freshness.");
+        RequireContains(liveEventsPage, "快照新鲜度", "Live raw monitor page should expose snapshot freshness in Chinese.");
+        RequireContains(liveEventsPage, "Snapshot freshness", "Live raw monitor page should expose snapshot freshness in English.");
+        RequireContains(liveEventsPage, "progress may be stale", "Live raw monitor page should surface stale non-terminal progress snapshots.");
         RequireContains(liveEventsPage, "Open settings", "Live raw monitor page should link to settings for missing VirusTotal keys.");
         RequireContains(liveEventsPage, "result.isQuietState || result.IsQuietState", "Live raw monitor page should honor VirusTotal quiet-state metadata.");
         RequireContains(liveEventsPage, "not configured, not found, rate limits", "Live raw monitor page should explain quiet VirusTotal states in English.");
@@ -307,6 +320,13 @@ internal sealed class WebUiRuntimeSmokeContractScenario : ISmokeTestScenario
             var hrefText = href.GetString() ?? string.Empty;
             SmokeAssert.True(hrefText.StartsWith($"/api/jobs/{jobId:D}/artifacts/download?path=", StringComparison.Ordinal), "Artifact download href should target the guarded download endpoint.");
             SmokeAssert.True(!LooksLikeLocalAbsolutePath(hrefText), "Artifact download href should not embed an absolute host path.");
+            SmokeAssert.True(artifact.TryGetProperty("download", out var download) && download.ValueKind == JsonValueKind.Object, "Web artifact descriptors should expose the typed download contract.");
+            SmokeAssert.True(download.TryGetProperty("available", out var available) && available.ValueKind is JsonValueKind.True or JsonValueKind.False, "Artifact download contract should expose boolean availability.");
+            SmokeAssert.True(download.TryGetProperty("selector", out var contractSelector), "Artifact download contract should expose selector.");
+            SmokeAssert.True(string.Equals(contractSelector.GetString(), selector.GetString(), StringComparison.Ordinal), "Artifact download contract selector should match the top-level downloadSelector.");
+            SmokeAssert.True(download.TryGetProperty("href", out var contractHref), "Artifact download contract should expose href.");
+            SmokeAssert.True(string.Equals(contractHref.GetString(), hrefText, StringComparison.Ordinal), "Artifact download contract href should match the top-level downloadHref.");
+            SmokeAssert.True(download.TryGetProperty("rejectionCode", out _), "Artifact download contract should expose a stable rejectionCode field.");
             if (artifact.TryGetProperty("metadata", out var metadata))
             {
                 AssertNoAbsolutePathMetadata(metadata, "artifact metadata");

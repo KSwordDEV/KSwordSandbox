@@ -58,10 +58,20 @@ internal sealed class DriverJsonLinesReader
                             ["lineLength"] = line.Length.ToString(System.Globalization.CultureInfo.InvariantCulture),
                             ["lineTruncated"] = (line.Length > 2048).ToString(System.Globalization.CultureInfo.InvariantCulture),
                             ["lineNumber"] = lineNumber.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                            ["jsonlPath"] = path,
+                            ["jsonlLineNumber"] = lineNumber.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                            ["jsonlLineSelector"] = BuildJsonlLineSelector(path, lineNumber),
+                            ["jsonlImportStatus"] = "parse-error-preserved",
+                            ["jsonlLineCategory"] = "malformed-json",
+                            ["jsonlNoisePolicy"] = "blank lines ignored; malformed rows preserved as driver.parse_error; subsequent rows still imported",
+                            ["parseErrorRecoverable"] = "true",
+                            ["importAction"] = "preserve-error-and-continue",
+                            ["behaviorCounted"] = "false",
+                            ["nonbehavior"] = "true",
                             ["exceptionType"] = ex.GetType().FullName ?? ex.GetType().Name,
                             ["message"] = ex.Message,
                             ["zhMessage"] = "driver-events JSONL 中有一行无法解析，Host/Agent 会把它保留为 driver.parse_error 证据而不是静默丢弃。",
-                            ["zhHint"] = "请检查该行是否为完整 JSON 对象、是否包含稳定的 eventType 字段；如果来自 --inject-jsonl-noise，可按预期视为噪声测试。",
+                            ["zhHint"] = "该行已通过 jsonlLineSelector 标出并且导入会继续；请检查该行是否为完整 JSON 对象、是否包含稳定的 eventType 字段；如果来自 --inject-jsonl-noise，可按预期视为噪声测试。",
                             ["eventOrigin"] = "guest-agent-import",
                             ["collectionNoise"] = "true",
                             ["attributionSummary"] = "guest-agent-import:malformed-driver-jsonl"
@@ -81,6 +91,14 @@ internal sealed class DriverJsonLinesReader
                 {
                     ["exceptionType"] = ex.GetType().FullName ?? ex.GetType().Name,
                     ["message"] = ex.Message,
+                    ["jsonlPath"] = path,
+                    ["jsonlImportStatus"] = "read-error-preserved",
+                    ["jsonlLineCategory"] = "unreadable-jsonl",
+                    ["jsonlNoisePolicy"] = "read failures are preserved as driver.read_error so missing R0 evidence is explicit",
+                    ["parseErrorRecoverable"] = "false",
+                    ["importAction"] = "preserve-read-error",
+                    ["behaviorCounted"] = "false",
+                    ["nonbehavior"] = "true",
                     ["zhMessage"] = "Guest Agent 读取 driver-events JSONL 失败。",
                     ["zhHint"] = "请检查 R0Collector 是否成功写出该文件、路径是否正确，以及文件是否仍被占用或权限不足。",
                     ["eventOrigin"] = "guest-agent-import",
@@ -140,6 +158,10 @@ internal sealed class DriverJsonLinesReader
 
         AddIfMissing(data, "jsonlLineNumber", lineNumber.ToString(System.Globalization.CultureInfo.InvariantCulture));
         AddIfMissing(data, "jsonlPath", path);
+        AddIfMissing(data, "jsonlLineSelector", BuildJsonlLineSelector(path, lineNumber));
+        AddIfMissing(data, "jsonlImportStatus", "parsed");
+        AddIfMissing(data, "jsonlLineCategory", "event");
+        AddIfMissing(data, "importAction", "preserve-event");
 
         if (string.Equals(source, "driver", StringComparison.OrdinalIgnoreCase))
         {
@@ -362,6 +384,11 @@ internal sealed class DriverJsonLinesReader
         var subjectPath = FirstNonEmpty(evt.Path, ValueOrNull(data, "filePath"), ValueOrNull(data, "imagePath"), ValueOrNull(data, "keyPath"), ValueOrNull(data, "remoteEndpoint"), "-");
         var selfNoise = IsTrue(ValueOrNull(data, "selfNoise")) ? " selfNoise=true" : string.Empty;
         return $"{origin}:{category} subject={subject} pid={pid} path={subjectPath}{selfNoise}";
+    }
+
+    private static string BuildJsonlLineSelector(string path, int lineNumber)
+    {
+        return $"{path}#L{lineNumber.ToString(System.Globalization.CultureInfo.InvariantCulture)}";
     }
 
     private static string Truncate(string value, int maxLength)

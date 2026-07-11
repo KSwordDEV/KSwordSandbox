@@ -90,6 +90,8 @@ public static class NetworkTelemetrySchema
             data["flowKeyVersion"] = "network.telemetry.v1.endpoint-pair";
         }
 
+        AddEndpointAddressScope(data, "source", normalizedSourceIp);
+        AddEndpointAddressScope(data, "destination", normalizedDestinationIp);
         AddIfNotEmpty(data, "direction", "outbound");
         var serviceHint = ServiceHint(eventKind, normalizedProtocol, sourcePort, destinationPort);
         AddIfNotEmpty(data, "serviceHint", serviceHint);
@@ -876,6 +878,7 @@ public static class NetworkTelemetrySchema
         if (!string.IsNullOrWhiteSpace(host))
         {
             AddAliases(data, host, "host", "hostname", "httpHost", "authority", "url.host", "url.domain", "server.domain", "http.host", "http.hostname", "http.request.headers.host", "request.headers.host", "hostNormalized");
+            AddHttpHostAddressScope(data, host);
         }
 
         if (!string.IsNullOrWhiteSpace(uri))
@@ -983,6 +986,47 @@ public static class NetworkTelemetrySchema
                 : FirstNonEmpty(requestBodyBytes, responseBodyBytes, requestContentLength, responseContentLength);
         AddAliases(data, bodyBytes, "bodyBytes", "bodySizeBytes", "httpBodyBytes", "http.body.bytes");
         AddIfNotEmpty(data, "contentLength", FirstNonEmpty(FirstDataValue(data, "contentLength"), requestContentLength, responseContentLength));
+    }
+
+    private static void AddEndpointAddressScope(Dictionary<string, string> data, string prefix, string address)
+    {
+        if (string.IsNullOrWhiteSpace(address) ||
+            !IPAddress.TryParse(address, out var parsed))
+        {
+            return;
+        }
+
+        var scope = AddressScope(parsed);
+        AddIfNotEmpty(data, $"{prefix}AddressScope", scope);
+        AddIfNotEmpty(data, $"{prefix}IpScope", scope);
+        AddIfNotEmpty(data, $"{prefix}AddressIsPrivate", BoolString(scope is "private"));
+        AddIfNotEmpty(data, $"{prefix}AddressIsPublic", BoolString(scope is "public"));
+        AddIfNotEmpty(data, $"{prefix}AddressIsDocumentation", BoolString(scope is "documentation"));
+        AddIfNotEmpty(data, $"{prefix}AddressIsLoopback", BoolString(scope is "loopback"));
+        AddIfNotEmpty(data, $"{prefix}AddressIsLinkLocal", BoolString(scope is "link-local"));
+        AddIfNotEmpty(data, $"{prefix}AddressIsMulticast", BoolString(scope is "multicast"));
+    }
+
+    private static void AddHttpHostAddressScope(Dictionary<string, string> data, string host)
+    {
+        var hostAddress = ExtractHostAddress(host);
+        if (string.IsNullOrWhiteSpace(hostAddress) ||
+            !IPAddress.TryParse(hostAddress, out var parsed))
+        {
+            return;
+        }
+
+        var scope = AddressScope(parsed);
+        AddIfNotEmpty(data, "hostIpAddress", NormalizeAddress(hostAddress));
+        AddIfNotEmpty(data, "httpHostIpAddress", NormalizeAddress(hostAddress));
+        AddIfNotEmpty(data, "hostIsIpLiteral", "true");
+        AddIfNotEmpty(data, "httpHostIsIpLiteral", "true");
+        AddIfNotEmpty(data, "directIpHost", "true");
+        AddIfNotEmpty(data, "hostAddressScope", scope);
+        AddIfNotEmpty(data, "httpHostAddressScope", scope);
+        AddIfNotEmpty(data, "hostAddressIsPrivate", BoolString(scope is "private"));
+        AddIfNotEmpty(data, "hostAddressIsPublic", BoolString(scope is "public"));
+        AddIfNotEmpty(data, "hostAddressIsDocumentation", BoolString(scope is "documentation"));
     }
 
     private static void ApplyTlsNormalization(Dictionary<string, string> data)
@@ -1315,6 +1359,127 @@ public static class NetworkTelemetrySchema
         }
 
         return trimmed;
+    }
+
+    private static string ExtractHostAddress(string host)
+    {
+        if (string.IsNullOrWhiteSpace(host))
+        {
+            return string.Empty;
+        }
+
+        var trimmed = host.Trim().Trim('"', '\'');
+        if (trimmed.StartsWith("[", StringComparison.Ordinal))
+        {
+            var closing = trimmed.IndexOf(']');
+            return closing > 1 ? trimmed[1..closing] : string.Empty;
+        }
+
+        if (IPAddress.TryParse(trimmed, out _))
+        {
+            return trimmed;
+        }
+
+        var colon = trimmed.LastIndexOf(':');
+        if (colon > 0 &&
+            trimmed.IndexOf(':') == colon &&
+            ParsePort(trimmed[(colon + 1)..]).HasValue)
+        {
+            var candidate = trimmed[..colon];
+            return IPAddress.TryParse(candidate, out _) ? candidate : string.Empty;
+        }
+
+        return string.Empty;
+    }
+
+    private static string AddressScope(IPAddress address)
+    {
+        if (IPAddress.IsLoopback(address))
+        {
+            return "loopback";
+        }
+
+        if (address.Equals(IPAddress.Any) ||
+            address.Equals(IPAddress.IPv6Any) ||
+            address.Equals(IPAddress.Broadcast))
+        {
+            return "reserved";
+        }
+
+        if (address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
+        {
+            var bytes = address.GetAddressBytes();
+            if (bytes[0] == 10 ||
+                (bytes[0] == 172 && bytes[1] is >= 16 and <= 31) ||
+                (bytes[0] == 192 && bytes[1] == 168))
+            {
+                return "private";
+            }
+
+            if (bytes[0] == 169 && bytes[1] == 254)
+            {
+                return "link-local";
+            }
+
+            if ((bytes[0] == 192 && bytes[1] == 0 && bytes[2] == 2) ||
+                (bytes[0] == 198 && bytes[1] == 51 && bytes[2] == 100) ||
+                (bytes[0] == 203 && bytes[1] == 0 && bytes[2] == 113))
+            {
+                return "documentation";
+            }
+
+            if (bytes[0] is >= 224 and <= 239)
+            {
+                return "multicast";
+            }
+
+            if ((bytes[0] == 100 && bytes[1] is >= 64 and <= 127) ||
+                bytes[0] == 0 ||
+                bytes[0] >= 240)
+            {
+                return "reserved";
+            }
+
+            return "public";
+        }
+
+        if (address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetworkV6)
+        {
+            var bytes = address.GetAddressBytes();
+            if ((bytes[0] & 0xfe) == 0xfc)
+            {
+                return "private";
+            }
+
+            if (bytes[0] == 0xfe && (bytes[1] & 0xc0) == 0x80)
+            {
+                return "link-local";
+            }
+
+            if (bytes[0] == 0xff)
+            {
+                return "multicast";
+            }
+
+            if (bytes[0] == 0x20 && bytes[1] == 0x01 && bytes[2] == 0x0d && bytes[3] == 0xb8)
+            {
+                return "documentation";
+            }
+
+            if (address.Equals(IPAddress.IPv6None))
+            {
+                return "reserved";
+            }
+
+            return "public";
+        }
+
+        return "unknown";
+    }
+
+    private static string BoolString(bool value)
+    {
+        return value.ToString(CultureInfo.InvariantCulture).ToLowerInvariant();
     }
 
     private static string IpFamily(string sourceIp, string destinationIp)
