@@ -59,7 +59,36 @@ public sealed class HyperVRunbookBuilder
     {
         steps.Add(Step("check-hyperv", "Verify Hyper-V module", "Get-Command Get-VM | Out-Null", mutatesVmState: false));
         steps.Add(Step("check-golden-vm", "Verify golden VM exists", $"Get-VM -Name {Q(config.HyperV.GoldenVmName)} | Out-Null", mutatesVmState: false));
+        if (config.Driver.Enabled && !config.Driver.UseMockCollector)
+        {
+            steps.Add(Step("check-r0-driver-config", "Verify real R0 driver host path", BuildR0DriverHostPathCheckCommand(config), requiresElevation: false, mutatesVmState: false));
+        }
+
         steps.Add(Step("check-guest-credential", "Verify guest credential environment secret", BuildGuestCredentialPreamble(config) + " Write-Host 'Guest credential secret is available for this step.'", mutatesVmState: false));
+    }
+
+    /// <summary>
+    /// Builds an early host-side R0 driver readiness check. Inputs are driver
+    /// settings; processing fails fast when live R0 is requested without a
+    /// configured/staged .sys path and warns when the file is unsigned; the
+    /// method returns a PowerShell command string.
+    /// </summary>
+    private static string BuildR0DriverHostPathCheckCommand(SandboxConfig config)
+    {
+        if (string.IsNullOrWhiteSpace(config.Driver.HostDriverPath))
+        {
+            return "Write-Warning 'R0 live driver collection is enabled (driver.enabled=true and driver.useMockCollector=false), but driver.hostDriverPath is empty. The runbook will not generate install-driver-service, stage-guest-payload will use an empty driverSource, and R0Collector can fail opening the device with deviceUnavailable/win32Error=2.'; throw 'R0 driver preflight failed: configure driver.hostDriverPath to a built and test-signed .sys, set driver.useMockCollector=true for mock R0 validation, or set driver.enabled=false / use -NoR0Collector before live execution.'";
+        }
+
+        return string.Join(" ", new[]
+        {
+            $"$driverPath = {Q(config.Driver.HostDriverPath)};",
+            "if (-not (Test-Path -LiteralPath $driverPath -PathType Leaf)) { throw \"R0 driver host path was not found: $driverPath\" };",
+            "$signature = Get-AuthenticodeSignature -FilePath $driverPath;",
+            "Write-Host \"R0 driver host path: $driverPath\";",
+            "Write-Host \"R0 driver Authenticode status: $($signature.Status)\";",
+            "if ($signature.Status -eq 'NotSigned') { Write-Warning 'R0 driver file is not signed. Windows x64 guests normally require a trusted/test-signed kernel driver; sc.exe start may fail with 577/1275 until the guest is in test-signing mode and the driver is test-signed.' }"
+        });
     }
 
     /// <summary>
@@ -233,6 +262,11 @@ public sealed class HyperVRunbookBuilder
             $"Copy-Item -ToSession $session -Path $agentSource -Destination {Q(guestAgentDirectory)} -Recurse -Force;"
         };
 
+        if (config.Driver.Enabled && !config.Driver.UseMockCollector && string.IsNullOrWhiteSpace(config.Driver.HostDriverPath))
+        {
+            commands.Add("Write-Warning 'R0 live driver collection is enabled but driver.hostDriverPath is empty; no driver .sys will be copied and no install-driver-service step was generated. R0Collector will likely fail opening the configured device with deviceUnavailable/win32Error=2.';");
+        }
+
         if (config.Driver.Enabled)
         {
             requiredGuestPaths.Add(config.Driver.R0CollectorPathInGuest);
@@ -284,11 +318,16 @@ public sealed class HyperVRunbookBuilder
             "if (-not (Test-Path -LiteralPath $driverPath -PathType Leaf)) { throw \"Driver .sys was not staged: $driverPath\" }",
             "$existing = Get-Service -Name $serviceName -ErrorAction SilentlyContinue;",
             "if ($existing) { & sc.exe stop $serviceName | Out-Null; Start-Sleep -Milliseconds 500; & sc.exe delete $serviceName | Out-Null; Start-Sleep -Milliseconds 500 }",
-            "& sc.exe create $serviceName type= kernel start= demand binPath= $driverPath | Out-String | Write-Host;",
-            "if ($LASTEXITCODE -ne 0) { throw \"sc.exe create failed for $serviceName with exit code $LASTEXITCODE.\" }",
-            "& sc.exe start $serviceName | Out-String | Write-Host;",
+            "$createOutput = @(& sc.exe create $serviceName type= kernel start= demand binPath= $driverPath 2>&1);",
+            "$createExitCode = $LASTEXITCODE;",
+            "$createText = $createOutput -join ' ';",
+            "Write-Host $createText;",
+            "if ($createExitCode -ne 0) { throw \"sc.exe create failed for $serviceName with exit code $createExitCode. $createText\" }",
+            "$startOutput = @(& sc.exe start $serviceName 2>&1);",
             "$startExitCode = $LASTEXITCODE;",
-            "if ($startExitCode -ne 0 -and $startExitCode -ne 1056) { throw \"sc.exe start failed for $serviceName with exit code $startExitCode.\" }",
+            "$startText = $startOutput -join ' ';",
+            "Write-Host $startText;",
+            "if ($startExitCode -ne 0 -and $startExitCode -ne 1056) { throw \"sc.exe start failed for $serviceName with exit code $startExitCode. $startText. If this is 577/1275, enable guest test-signing and use a trusted test-signed driver; if it is 2/3, verify the staged guest driver path.\" }",
             "Write-Host \"Driver service $serviceName is started or already running.\"",
             "} -ArgumentList $serviceName, $driverPath"
         });

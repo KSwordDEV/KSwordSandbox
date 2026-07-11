@@ -316,6 +316,76 @@ function New-DirectoryPresenceCheck {
         -Remediation $effectiveRemediation
 }
 
+function New-R0DriverHostPathCheck {
+    param(
+        [bool]$DriverEnabled,
+        [bool]$UseMockCollector,
+        [AllowNull()][string]$HostDriverPath,
+        [Parameter(Mandatory)][string]$DriverPathInGuest,
+        [Parameter(Mandatory)][string]$DevicePath
+    )
+
+    if (-not $DriverEnabled) {
+        return New-PlanCheck `
+            -Name 'R0 driver host path configuration' `
+            -Status 'Passed' `
+            -RequiredForLive $false `
+            -Message 'R0 driver collection is disabled; no host driver .sys is required.' `
+            -Details @{
+                driverEnabled = $false
+                useMockCollector = $UseMockCollector
+                hostDriverPath = $HostDriverPath
+                driverPathInGuest = $DriverPathInGuest
+                devicePath = $DevicePath
+            }
+    }
+
+    if ($UseMockCollector) {
+        return New-PlanCheck `
+            -Name 'R0 driver host path configuration' `
+            -Status 'Passed' `
+            -RequiredForLive $false `
+            -Message 'R0 mock collector is enabled; live driver .sys staging is not required.' `
+            -Details @{
+                driverEnabled = $DriverEnabled
+                useMockCollector = $true
+                hostDriverPath = $HostDriverPath
+                driverPathInGuest = $DriverPathInGuest
+                devicePath = $DevicePath
+            }
+    }
+
+    if ([string]::IsNullOrWhiteSpace($HostDriverPath)) {
+        return New-PlanCheck `
+            -Name 'R0 driver host path configuration' `
+            -Status 'Failed' `
+            -RequiredForLive $true `
+            -Message 'Real R0 driver collection is enabled, but driver.hostDriverPath is empty. The plan cannot stage a .sys or generate install-driver-service; R0Collector can fail with deviceUnavailable/win32Error=2.' `
+            -Details @{
+                driverEnabled = $DriverEnabled
+                useMockCollector = $UseMockCollector
+                hostDriverPath = $null
+                driverPathInGuest = $DriverPathInGuest
+                devicePath = $DevicePath
+                expectedRunbookImpact = 'stage-guest-payload uses empty driverSource and install-driver-service is omitted'
+            } `
+            -Remediation @(
+                "Configure driver.hostDriverPath in the local sandbox config to a built and test-signed driver .sys before live R0 collection.",
+                "For payload-only validation, set driver.useMockCollector=true or run with -NoR0Collector.",
+                "To disable R0 collection entirely, set driver.enabled=false."
+            )
+    }
+
+    return New-FilePresenceCheck `
+        -Name 'R0 driver host path configuration' `
+        -Path $HostDriverPath `
+        -RequiredForLive $true `
+        -Remediation @(
+            "Build the native driver and set driver.hostDriverPath to the resulting .sys, or correct the configured path: $HostDriverPath",
+            "For payload-only validation, set driver.useMockCollector=true or run with -NoR0Collector."
+        )
+}
+
 function Test-CommandListAvailable {
     param([Parameter(Mandatory)][string[]]$Names)
 
@@ -1211,6 +1281,8 @@ function New-HyperVE2ESteps {
         [Parameter(Mandatory)][string]$AgentPidPath,
         [Parameter(Mandatory)][string]$AgentExitPath,
         [Parameter(Mandatory)][string]$DriverEventsPath,
+        [bool]$DriverEnabled,
+        [bool]$UseMockCollector,
         [string]$DriverHostPath = '',
         [string]$DriverServiceName = '',
         [string]$DriverPathInGuest = '',
@@ -1231,6 +1303,10 @@ function New-HyperVE2ESteps {
     [void]$steps.Add((New-HyperVE2EStep -Id 'stage-guest-payload' -Phase 'start' -Title 'Copy Guest Agent and R0Collector payload into guest' -PowerShell ("Copy-Item -ToSession <PSSession> -Path {0}\agent\* -Destination <guestAgentDirectory> -Recurse -Force" -f $PayloadRoot) -MutatesVmState $true))
     [void]$steps.Add((New-HyperVE2EStep -Id 'copy-sample' -Phase 'start' -Title 'Copy submitted sample into guest' -PowerShell ("Copy-VMFile -VMName {0} -SourcePath {1} -DestinationPath {2} -FileSource Host -CreateFullPath -Force" -f (Quote-PowerShellString $Vm), (Quote-PowerShellString $SampleHostPath), (Quote-PowerShellString $SampleGuestPath)) -MutatesVmState $true))
     [void]$steps.Add((New-HyperVE2EStep -Id 'prepare-guest-output' -Phase 'start' -Title 'Create clean guest output folder' -PowerShell ("Invoke-Command -VMName {0} -Credential `$guestCredential -ScriptBlock {{ New-Item -ItemType Directory -Force -Path {1} | Out-Null }}" -f (Quote-PowerShellString $Vm), (Quote-PowerShellString $GuestOut)) -MutatesVmState $true))
+    if ($DriverEnabled -and -not $UseMockCollector -and [string]::IsNullOrWhiteSpace($DriverHostPath)) {
+        [void]$steps.Add((New-HyperVE2EStep -Id 'diagnose-r0-driver-config' -Phase 'start' -Title 'Diagnose missing real R0 driver host path' -PowerShell 'Real R0 collection has no driver.hostDriverPath; stage-guest-payload would have empty driverSource and install-driver-service is omitted. Configure a built/test-signed .sys or enable driver.useMockCollector.' -MutatesVmState $false -RequiresLive $false))
+    }
+
     if (-not [string]::IsNullOrWhiteSpace($DriverHostPath)) {
         $installDriverPowerShell = "Invoke-Command -VMName {0} -Credential `$guestCredential -ScriptBlock {{ sc.exe create {1} type= kernel start= demand binPath= {2}; sc.exe start {1} }}" -f (Quote-PowerShellString $Vm), (Quote-PowerShellString $DriverServiceName), (Quote-PowerShellString $DriverPathInGuest)
         [void]$steps.Add((New-HyperVE2EStep -Id 'install-driver-service' -Phase 'start' -Title 'Install and start guest R0 driver service' -PowerShell $installDriverPowerShell -MutatesVmState $true))
@@ -1301,8 +1377,8 @@ try {
 
     $driverEnabledFromConfig = Get-BooleanOrDefault -Value (Get-ObjectPropertyValue -Object $driver -Name 'enabled' -DefaultValue $true) -DefaultValue $true
     $driverEnabled = $driverEnabledFromConfig -and (-not [bool]$NoR0Collector)
-    $serviceName = Get-ObjectPropertyValue -Object $driver -Name 'serviceName' -DefaultValue 'KSwordARK'
-    $driverPathInGuest = Get-ObjectPropertyValue -Object $driver -Name 'driverPathInGuest' -DefaultValue 'C:\KSwordSandbox\driver\KSwordARKDriver.sys'
+    $serviceName = Get-ObjectPropertyValue -Object $driver -Name 'serviceName' -DefaultValue 'KSwordSandboxDriver'
+    $driverPathInGuest = Get-ObjectPropertyValue -Object $driver -Name 'driverPathInGuest' -DefaultValue 'C:\KSwordSandbox\driver\KSword.Sandbox.Driver.sys'
     $r0CollectorPathInGuest = Get-ObjectPropertyValue -Object $driver -Name 'r0CollectorPathInGuest' -DefaultValue 'C:\KSwordSandbox\r0collector\KSword.Sandbox.R0Collector.exe'
     $devicePath = Get-ObjectPropertyValue -Object $driver -Name 'devicePath' -DefaultValue '\\.\KSwordSandboxDriver'
     $useMockCollector = Get-BooleanOrDefault -Value (Get-ObjectPropertyValue -Object $driver -Name 'useMockCollector' -DefaultValue $false) -DefaultValue $false
@@ -1398,9 +1474,12 @@ try {
         [void]$checks.Add((New-DirectoryPresenceCheck -Name 'R0Collector payload directory' -Path (Join-Path $resolvedPayloadRoot 'r0collector') -RequiredForLive $true -Remediation $payloadRepairSuggestions))
         [void]$checks.Add((New-FilePresenceCheck -Name 'R0Collector payload' -Path $collectorHostPath -RequiredForLive $true -Remediation $payloadRepairSuggestions))
     }
-    if (-not [string]::IsNullOrWhiteSpace($hostDriverPath)) {
-        [void]$checks.Add((New-FilePresenceCheck -Name 'Optional host driver' -Path $hostDriverPath -RequiredForLive $true -Remediation @("Provide the configured host driver path '$hostDriverPath' before live driver collection, or run with -NoR0Collector / disable driver.enabled for payload-only validation.")))
-    }
+    [void]$checks.Add((New-R0DriverHostPathCheck `
+                -DriverEnabled $driverEnabled `
+                -UseMockCollector $useMockCollector `
+                -HostDriverPath $hostDriverPath `
+                -DriverPathInGuest $driverPathInGuest `
+                -DevicePath $devicePath))
     $preflightArray = @($checks.ToArray())
     $preflightSummary = New-PreflightSummary -Checks $preflightArray
 
@@ -1474,6 +1553,11 @@ try {
             useMockCollector = $useMockCollector
             collectionMode = $driverCollectionMode
             hostDriverPath = $hostDriverPath
+            hostDriverPathConfigured = (-not [string]::IsNullOrWhiteSpace($hostDriverPath))
+            hostDriverPathExists = if ([string]::IsNullOrWhiteSpace($hostDriverPath)) { $false } else { Test-Path -LiteralPath $hostDriverPath -PathType Leaf }
+            willStageDriver = (-not [string]::IsNullOrWhiteSpace($hostDriverPath))
+            willInstallDriverService = (-not [string]::IsNullOrWhiteSpace($hostDriverPath))
+            configurationWarning = if ($driverEnabled -and (-not $useMockCollector) -and [string]::IsNullOrWhiteSpace($hostDriverPath)) { 'Real R0 collection is enabled but driver.hostDriverPath is empty; stage-guest-payload will have empty driverSource and install-driver-service is omitted, so R0Collector can fail with deviceUnavailable/win32Error=2.' } else { $null }
             driverPathInGuest = $driverPathInGuest
             eventJsonLinesPath = $driverEventsPath
         }
@@ -1521,6 +1605,8 @@ try {
             -AgentPidPath $agentPidPath `
             -AgentExitPath $agentExitPath `
             -DriverEventsPath $driverEventsPath `
+            -DriverEnabled $driverEnabled `
+            -UseMockCollector $useMockCollector `
             -DriverHostPath ([string]$hostDriverPath) `
             -DriverServiceName ([string]$serviceName) `
             -DriverPathInGuest ([string]$driverPathInGuest) `

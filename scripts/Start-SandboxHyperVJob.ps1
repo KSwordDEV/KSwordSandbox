@@ -318,6 +318,12 @@ function Copy-GuestPayload {
         $agentSource = Join-Path $Plan.host.guestPayloadRoot 'agent\*'
         Copy-Item -ToSession $session -Path $agentSource -Destination $Plan.guest.agentDirectory -Recurse -Force
 
+        if ($driverEnabled -and
+            -not (ConvertTo-BooleanValue $Plan.driver.useMockCollector) -and
+            [string]::IsNullOrWhiteSpace([string]$Plan.driver.hostDriverPath)) {
+            Write-Warning 'R0 live driver collection is enabled but plan.driver.hostDriverPath is empty; no driver .sys will be staged and R0Collector can fail with deviceUnavailable/win32Error=2.'
+        }
+
         if ($driverEnabled) {
             $collectorSource = Join-Path $Plan.host.guestPayloadRoot 'r0collector\*'
             Copy-Item -ToSession $session -Path $collectorSource -Destination $Plan.guest.collectorDirectory -Recurse -Force
@@ -565,10 +571,14 @@ function Assert-LivePreconditions {
     if (ConvertTo-BooleanValue $Plan.driver.enabled) {
         Assert-DirectoryForLive -Name 'R0Collector payload directory' -Path (Join-Path $Plan.host.guestPayloadRoot 'r0collector')
         Assert-FileForLive -Name 'R0Collector payload' -Path $Plan.host.r0CollectorPayloadPath
-    }
+        if (-not (ConvertTo-BooleanValue $Plan.driver.useMockCollector) -and
+            [string]::IsNullOrWhiteSpace([string]$Plan.driver.hostDriverPath)) {
+            throw 'Real R0 driver collection is enabled, but driver.hostDriverPath is empty. Start aborted before VM mutation because stage-guest-payload would have empty driverSource, install-driver-service would be omitted, and R0Collector can fail with deviceUnavailable/win32Error=2. Configure a built/test-signed KSword.Sandbox.Driver.sys, set driver.useMockCollector=true for mock/plumbing tests, or disable driver.enabled.'
+        }
 
-    if (-not [string]::IsNullOrWhiteSpace([string]$Plan.driver.hostDriverPath)) {
-        Assert-FileForLive -Name 'Optional host driver' -Path $Plan.driver.hostDriverPath
+        if (-not [string]::IsNullOrWhiteSpace([string]$Plan.driver.hostDriverPath)) {
+            Assert-FileForLive -Name 'Host R0 driver' -Path $Plan.driver.hostDriverPath
+        }
     }
 }
 

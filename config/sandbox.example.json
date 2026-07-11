@@ -33,9 +33,9 @@
   },
   "driver": {
     "enabled": true,
-    "serviceName": "KSwordARK",
+    "serviceName": "KSwordSandboxDriver",
     "hostDriverPath": null,
-    "driverPathInGuest": "C:\\KSwordSandbox\\driver\\KSwordARKDriver.sys",
+    "driverPathInGuest": "C:\\KSwordSandbox\\driver\\KSword.Sandbox.Driver.sys",
     "eventJsonLinesPath": "C:\\KSwordSandbox\\out\\driver-events.jsonl",
     "r0CollectorPathInGuest": "C:\\KSwordSandbox\\r0collector\\KSword.Sandbox.R0Collector.exe",
     "devicePath": "\\\\.\\KSwordSandboxDriver",

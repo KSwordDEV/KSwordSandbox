@@ -43,6 +43,10 @@ internal static class AgentProgram
 
     private const string DroppedFilesArtifactDirectoryName = "dropped-files";
 
+    internal const int DefaultR0CollectorMaxEventsPerRead = 64;
+
+    internal const int DefaultR0CollectorMaxReadBatches = 64;
+
     /// <summary>
     /// Main async entry point for the guest collector.
     /// Inputs are raw command-line arguments, processing parses options and
@@ -309,6 +313,10 @@ internal static class AgentProgram
             startInfo.ArgumentList.Add(options.DriverEventsPath);
             startInfo.ArgumentList.Add("--duration");
             startInfo.ArgumentList.Add(options.DurationSeconds.ToString(CultureInfo.InvariantCulture));
+            startInfo.ArgumentList.Add("--max-events");
+            startInfo.ArgumentList.Add(options.R0CollectorMaxEventsPerRead.ToString(CultureInfo.InvariantCulture));
+            startInfo.ArgumentList.Add("--max-read-batches");
+            startInfo.ArgumentList.Add(options.R0CollectorMaxReadBatches.ToString(CultureInfo.InvariantCulture));
             if (options.R0Mock)
             {
                 startInfo.ArgumentList.Add("--mock");
@@ -671,6 +679,8 @@ internal static class AgentProgram
                 ["driverDevicePath"] = options.DriverDevicePath,
                 ["driverEventsPath"] = options.DriverEventsPath ?? string.Empty,
                 ["durationSeconds"] = options.DurationSeconds.ToString(CultureInfo.InvariantCulture),
+                ["r0MaxEventsPerRead"] = options.R0CollectorMaxEventsPerRead.ToString(CultureInfo.InvariantCulture),
+                ["r0MaxReadBatches"] = options.R0CollectorMaxReadBatches.ToString(CultureInfo.InvariantCulture),
                 ["r0Mock"] = options.R0Mock.ToString(),
                 ["stdoutPath"] = standardOutputPath,
                 ["stderrPath"] = standardErrorPath,
@@ -913,7 +923,11 @@ internal static class AgentProgram
             "--output",
             QuoteCommandLineArgument(options.DriverEventsPath ?? string.Empty),
             "--duration",
-            options.DurationSeconds.ToString(CultureInfo.InvariantCulture)
+            options.DurationSeconds.ToString(CultureInfo.InvariantCulture),
+            "--max-events",
+            options.R0CollectorMaxEventsPerRead.ToString(CultureInfo.InvariantCulture),
+            "--max-read-batches",
+            options.R0CollectorMaxReadBatches.ToString(CultureInfo.InvariantCulture)
         };
 
         if (options.R0Mock)
@@ -1681,6 +1695,10 @@ internal sealed record AgentOptions
 
     public bool R0Mock { get; init; }
 
+    public int R0CollectorMaxEventsPerRead { get; init; } = AgentProgram.DefaultR0CollectorMaxEventsPerRead;
+
+    public int R0CollectorMaxReadBatches { get; init; } = AgentProgram.DefaultR0CollectorMaxReadBatches;
+
     public bool CaptureScreenshots { get; init; }
 
     public ScreenshotProbeOptions ScreenshotOptions { get; init; } = ScreenshotProbeOptions.Default;
@@ -1759,6 +1777,8 @@ internal sealed record AgentOptions
         }
 
         var captureScreenshots = flags.Contains("screenshot") || flags.Contains("screenshots");
+        var r0MaxEventsPerRead = ParseBoundedOption(values, 1, 1024, AgentProgram.DefaultR0CollectorMaxEventsPerRead, "r0-max-events", "r0-read-events-max-events", "driver-max-events");
+        var r0MaxReadBatches = ParseBoundedOption(values, 0, 1_000_000, AgentProgram.DefaultR0CollectorMaxReadBatches, "r0-max-read-batches", "driver-max-read-batches");
         var screenshotOptions = ScreenshotProbeOptions.Parse(
             FirstValue(values, "screenshot-phases", "screenshot-stages", "screenshots-phases", "screenshots-stages"),
             FirstValue(values, "screenshot-count", "screenshots-count"));
@@ -1772,6 +1792,8 @@ internal sealed record AgentOptions
             R0CollectorPath = string.IsNullOrWhiteSpace(r0CollectorPath) ? null : Path.GetFullPath(r0CollectorPath),
             DriverDevicePath = string.IsNullOrWhiteSpace(driverDevicePath) ? DefaultDriverDevicePath : driverDevicePath,
             R0Mock = flags.Contains("r0-mock"),
+            R0CollectorMaxEventsPerRead = r0MaxEventsPerRead,
+            R0CollectorMaxReadBatches = r0MaxReadBatches,
             CaptureScreenshots = captureScreenshots,
             ScreenshotOptions = screenshotOptions,
             CollectDroppedFiles = flags.Contains("collect-dropped-files") || flags.Contains("dropped-files"),
@@ -1796,5 +1818,21 @@ internal sealed record AgentOptions
         }
 
         return null;
+    }
+
+    private static int ParseBoundedOption(IReadOnlyDictionary<string, string> values, int minValue, int maxValue, int defaultValue, params string[] names)
+    {
+        var raw = FirstValue(values, names);
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return defaultValue;
+        }
+
+        if (!int.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed))
+        {
+            return defaultValue;
+        }
+
+        return Math.Clamp(parsed, minValue, maxValue);
     }
 }

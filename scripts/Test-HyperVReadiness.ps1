@@ -178,6 +178,48 @@ function Get-ObjectPropertyString {
     return $value
 }
 
+# Get-ObjectPropertyBoolean safely reads a Boolean config property from a
+# PSCustomObject. Inputs are an object, property name, and default. Processing
+# tolerates absent/null properties. Return behavior is a Boolean.
+function Get-ObjectPropertyBoolean {
+    param(
+        [AllowNull()]$Object,
+        [Parameter(Mandatory)][string]$Name,
+        [bool]$DefaultValue
+    )
+
+    if ($null -eq $Object) {
+        return $DefaultValue
+    }
+
+    $property = $Object.PSObject.Properties[$Name]
+    if ($null -eq $property -or $null -eq $property.Value) {
+        return $DefaultValue
+    }
+
+    return [System.Convert]::ToBoolean($property.Value)
+}
+
+# Resolve-ConfigRelativePath expands a config path relative to the repository.
+# Inputs are a possibly empty path and base root. Processing is read-only.
+# Return behavior is null for absent values, otherwise a full path string.
+function Resolve-ConfigRelativePath {
+    param(
+        [AllowNull()][string]$Path,
+        [Parameter(Mandatory)][string]$BasePath
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Path)) {
+        return $null
+    }
+
+    if ([System.IO.Path]::IsPathRooted($Path)) {
+        return [System.IO.Path]::GetFullPath($Path)
+    }
+
+    return [System.IO.Path]::GetFullPath((Join-Path $BasePath $Path))
+}
+
 # Get-ObjectPropertyObject safely reads a nested object property from a
 # PSCustomObject under StrictMode. Inputs are the object and property name.
 # Return behavior is the property value or $null.
@@ -357,6 +399,13 @@ function Resolve-ReadinessInputConfiguration {
     $guest = Get-ObjectPropertyObject -Object $config -Name 'guest'
     $paths = Get-ObjectPropertyObject -Object $config -Name 'paths'
     $driver = Get-ObjectPropertyObject -Object $config -Name 'driver'
+    $driverEnabled = Get-ObjectPropertyBoolean -Object $driver -Name 'enabled' -DefaultValue $true
+    $driverUseMockCollector = Get-ObjectPropertyBoolean -Object $driver -Name 'useMockCollector' -DefaultValue $false
+    $driverHostPath = Resolve-ConfigRelativePath `
+        -Path (Get-ObjectPropertyString -Object $driver -Name 'hostDriverPath') `
+        -BasePath $resolvedRepositoryRoot
+    $driverPathInGuest = Get-ObjectPropertyString -Object $driver -Name 'driverPathInGuest' -DefaultValue 'C:\KSwordSandbox\driver\KSwordARKDriver.sys'
+    $driverDevicePath = Get-ObjectPropertyString -Object $driver -Name 'devicePath' -DefaultValue '\\.\KSwordSandboxDriver'
 
     $collectorLeaf = ''
     $collectorPath = Get-ObjectPropertyString -Object $driver -Name 'r0CollectorPathInGuest'
@@ -399,6 +448,11 @@ function Resolve-ReadinessInputConfiguration {
         InstallStateLoaded    = [bool]$stateInfo.Exists
         InstallStateReadError = $stateInfo.Error
         IgnoredInstalledConfig = [bool]$IgnoreInstalledConfig
+        DriverEnabled = $driverEnabled
+        DriverUseMockCollector = $driverUseMockCollector
+        DriverHostPath = $driverHostPath
+        DriverPathInGuest = $driverPathInGuest
+        DriverDevicePath = $driverDevicePath
         ExplicitParameters    = @($script:InitialBoundParameters.Keys | Sort-Object)
         SecretValuePrinted    = $false
         WroteFiles            = $false
@@ -1905,6 +1959,123 @@ function Test-RepositorySecretHygiene {
         }
 }
 
+# Test-R0DriverHostPathConfiguration validates the config state that controls
+# whether the live runbook can stage/install the kernel driver. Inputs are
+# metadata resolved from the local sandbox config. Processing only checks host
+# path presence. Return behavior is a readiness row with remediation.
+function Test-R0DriverHostPathConfiguration {
+    param([Parameter(Mandatory)][object]$Metadata)
+
+    $driverEnabled = [System.Convert]::ToBoolean($Metadata.DriverEnabled)
+    $useMockCollector = [System.Convert]::ToBoolean($Metadata.DriverUseMockCollector)
+    $hostDriverPath = [string]$Metadata.DriverHostPath
+    $driverPathInGuest = [string]$Metadata.DriverPathInGuest
+    $devicePath = [string]$Metadata.DriverDevicePath
+
+    if (-not $driverEnabled) {
+        return New-ReadinessResult `
+            -Name 'R0 driver host path configuration' `
+            -Status 'Passed' `
+            -Required $false `
+            -Message 'driver.enabled=false; R0 driver host .sys staging is not required.' `
+            -Details @{
+                DriverEnabled = $driverEnabled
+                UseMockCollector = $useMockCollector
+                HostDriverPath = $hostDriverPath
+                DriverPathInGuest = $driverPathInGuest
+                DevicePath = $devicePath
+            }
+    }
+
+    if ($useMockCollector) {
+        return New-ReadinessResult `
+            -Name 'R0 driver host path configuration' `
+            -Status 'Passed' `
+            -Required $false `
+            -Message 'driver.useMockCollector=true; real driver .sys staging is not required for this readiness mode.' `
+            -Details @{
+                DriverEnabled = $driverEnabled
+                UseMockCollector = $useMockCollector
+                HostDriverPath = $hostDriverPath
+                DriverPathInGuest = $driverPathInGuest
+                DevicePath = $devicePath
+            }
+    }
+
+    if ([string]::IsNullOrWhiteSpace($hostDriverPath)) {
+        return New-ReadinessResult `
+            -Name 'R0 driver host path configuration' `
+            -Status 'Failed' `
+            -Required $true `
+            -Message 'Real R0 collection is enabled, but driver.hostDriverPath is empty. Live runbooks will not stage a .sys or generate install-driver-service, and R0Collector can fail with deviceUnavailable/win32Error=2.' `
+            -Details @{
+                DriverEnabled = $driverEnabled
+                UseMockCollector = $useMockCollector
+                HostDriverPath = $null
+                DriverPathInGuest = $driverPathInGuest
+                DevicePath = $devicePath
+                ExpectedRunbookImpact = 'empty driverSource and omitted install-driver-service'
+            } `
+            -Remediation @(
+                ".\install.ps1 -Mode Change -UpdateHyperVConfig -DriverHostPath <path-to-test-signed-KSword.Sandbox.Driver.sys>",
+                "Set driver.useMockCollector=true for payload-only R0 plumbing validation.",
+                "Set driver.enabled=false if R0 collection is not part of this run."
+            )
+    }
+
+    if (-not (Test-Path -LiteralPath $hostDriverPath -PathType Leaf)) {
+        return New-ReadinessResult `
+            -Name 'R0 driver host path configuration' `
+            -Status 'Failed' `
+            -Required $true `
+            -Message "Configured driver.hostDriverPath does not exist: $hostDriverPath" `
+            -Details @{
+                DriverEnabled = $driverEnabled
+                UseMockCollector = $useMockCollector
+                HostDriverPath = $hostDriverPath
+                HostDriverPathExists = $false
+                DriverPathInGuest = $driverPathInGuest
+                DevicePath = $devicePath
+            } `
+            -Remediation @(
+                "Build the R0 driver and correct driver.hostDriverPath, or rerun .\install.ps1 -Mode Change -UpdateHyperVConfig -DriverHostPath <path-to-sys>.",
+                "Set driver.useMockCollector=true for payload-only validation."
+            )
+    }
+
+    $signatureStatus = ''
+    try {
+        $signatureStatus = [string](Get-AuthenticodeSignature -FilePath $hostDriverPath).Status
+    }
+    catch {
+        $signatureStatus = "Unknown: $($_.Exception.Message)"
+    }
+
+    $status = if ($signatureStatus -eq 'NotSigned') { 'Warning' } else { 'Passed' }
+    $message = if ($signatureStatus -eq 'NotSigned') {
+        "Configured driver.hostDriverPath exists, but Authenticode status is NotSigned: $hostDriverPath"
+    }
+    else {
+        "Configured driver.hostDriverPath exists: $hostDriverPath"
+    }
+
+    return New-ReadinessResult `
+        -Name 'R0 driver host path configuration' `
+        -Status $status `
+        -Required $true `
+        -Message $message `
+        -Details @{
+            DriverEnabled = $driverEnabled
+            UseMockCollector = $useMockCollector
+            HostDriverPath = $hostDriverPath
+            HostDriverPathExists = $true
+            DriverPathInGuest = $driverPathInGuest
+            DevicePath = $devicePath
+            AuthenticodeStatus = $signatureStatus
+        } `
+        -Remediation $(if ($signatureStatus -eq 'NotSigned') { @("Test-sign the driver and enable guest test-signing before live R0 collection.") } else { @() })
+}
+
 $script:ReadinessInputMetadata = Resolve-ReadinessInputConfiguration
 $promptMetadata = Import-GuestPasswordFromPrompt `
     -SecretName $GuestPasswordSecretName `
@@ -1916,6 +2087,10 @@ $inputResolutionResult = Test-ReadinessInputResolution `
     -Metadata $script:ReadinessInputMetadata `
     -PromptMetadata $promptMetadata
 [void]$results.Add($inputResolutionResult)
+
+$r0DriverHostPathResult = Test-R0DriverHostPathConfiguration `
+    -Metadata $script:ReadinessInputMetadata
+[void]$results.Add($r0DriverHostPathResult)
 
 $administratorResult = Test-AdministratorPrivilege
 [void]$results.Add($administratorResult)
@@ -2039,6 +2214,9 @@ Write-Output ([pscustomobject][ordered]@{
         GuestPayloadRoot = $GuestPayloadRoot
         GuestUserName  = $GuestUserName
         GuestRoot      = $GuestWorkingDirectory
+        DriverEnabled  = $script:ReadinessInputMetadata.DriverEnabled
+        DriverUseMockCollector = $script:ReadinessInputMetadata.DriverUseMockCollector
+        DriverHostPath = $script:ReadinessInputMetadata.DriverHostPath
         ReadOnly       = $true
         RecommendedActions = $recommendedActions
         Note           = 'No probe files were written and no VM mutation commands were executed; PowerShell Direct and guest payload probes run only when the VM is already running and credentials are visible.'

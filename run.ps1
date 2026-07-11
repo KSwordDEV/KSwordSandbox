@@ -213,6 +213,112 @@ function Read-SandboxConfig {
     return Get-Content -LiteralPath $EffectiveConfigPath -Raw | ConvertFrom-Json
 }
 
+function Get-RunObjectPropertyValue {
+    param(
+        [AllowNull()]$Object,
+        [Parameter(Mandatory)][string]$Name,
+        [object]$DefaultValue = $null
+    )
+
+    if ($null -eq $Object) {
+        return $DefaultValue
+    }
+
+    $property = $Object.PSObject.Properties[$Name]
+    if ($null -eq $property -or $null -eq $property.Value) {
+        return $DefaultValue
+    }
+
+    return $property.Value
+}
+
+function Get-RunBooleanOrDefault {
+    param(
+        [object]$Value,
+        [bool]$DefaultValue
+    )
+
+    if ($null -eq $Value) {
+        return $DefaultValue
+    }
+
+    return [System.Convert]::ToBoolean($Value)
+}
+
+function Resolve-RunConfigPath {
+    param([AllowNull()][string]$Path)
+
+    if ([string]::IsNullOrWhiteSpace($Path)) {
+        return ''
+    }
+
+    if ([System.IO.Path]::IsPathRooted($Path)) {
+        return [System.IO.Path]::GetFullPath($Path)
+    }
+
+    return [System.IO.Path]::GetFullPath((Join-Path $script:RepositoryRoot $Path))
+}
+
+function Get-R0DriverConfigurationStatus {
+    param([AllowNull()]$Config)
+
+    $driver = Get-RunObjectPropertyValue -Object $Config -Name 'driver' -DefaultValue $null
+    $driverEnabled = Get-RunBooleanOrDefault -Value (Get-RunObjectPropertyValue -Object $driver -Name 'enabled' -DefaultValue $true) -DefaultValue $true
+    $useMockCollector = Get-RunBooleanOrDefault -Value (Get-RunObjectPropertyValue -Object $driver -Name 'useMockCollector' -DefaultValue $false) -DefaultValue $false
+    $hostDriverPathValue = Get-RunObjectPropertyValue -Object $driver -Name 'hostDriverPath' -DefaultValue ''
+    $hostDriverPathRaw = if ($null -eq $hostDriverPathValue) { '' } else { [string]$hostDriverPathValue }
+    $hostDriverPath = Resolve-RunConfigPath -Path $hostDriverPathRaw
+    $hostDriverPathExists = -not [string]::IsNullOrWhiteSpace($hostDriverPath) -and (Test-Path -LiteralPath $hostDriverPath -PathType Leaf)
+    $requiresHostDriver = $driverEnabled -and (-not $useMockCollector)
+    $warning = ''
+    $status = 'Ready'
+    $recommendedActions = New-Object System.Collections.Generic.List[string]
+
+    if (-not $driverEnabled) {
+        $status = 'Disabled'
+    }
+    elseif ($useMockCollector) {
+        $status = 'Mock'
+    }
+    elseif ([string]::IsNullOrWhiteSpace($hostDriverPath)) {
+        $status = 'MissingHostDriverPath'
+        $warning = 'Real R0 collection is enabled, but driver.hostDriverPath is empty. Live runbooks will not stage a .sys or generate install-driver-service, and R0Collector can fail with deviceUnavailable/win32Error=2.'
+        [void]$recommendedActions.Add(".\install.ps1 -Mode Change -UpdateHyperVConfig -DriverHostPath <path-to-test-signed-KSword.Sandbox.Driver.sys>")
+        [void]$recommendedActions.Add("Set driver.useMockCollector=true for payload-only R0 validation, or set driver.enabled=false if R0 is not required.")
+        [void]$recommendedActions.Add(".\scripts\Invoke-NativeBuild.ps1 -Configuration Release -Platform x64 builds the native driver; keep signing/test-signing explicit and do not call CSignTool.")
+    }
+    elseif (-not $hostDriverPathExists) {
+        $status = 'MissingHostDriverFile'
+        $warning = "Real R0 collection is enabled, but configured driver.hostDriverPath does not exist: $hostDriverPath"
+        [void]$recommendedActions.Add("Build the R0 driver or correct driver.hostDriverPath: $hostDriverPath")
+        [void]$recommendedActions.Add("Set driver.useMockCollector=true for payload-only R0 validation.")
+    }
+
+    return [pscustomobject][ordered]@{
+        Status = $status
+        DriverEnabled = $driverEnabled
+        UseMockCollector = $useMockCollector
+        RequiresHostDriverPath = $requiresHostDriver
+        HostDriverPath = $hostDriverPath
+        HostDriverPathConfigured = -not [string]::IsNullOrWhiteSpace($hostDriverPath)
+        HostDriverPathExists = $hostDriverPathExists
+        Warning = $warning
+        RecommendedActions = @($recommendedActions.ToArray())
+    }
+}
+
+function Write-R0DriverConfigurationWarning {
+    param([AllowNull()]$Config)
+
+    $driverStatus = Get-R0DriverConfigurationStatus -Config $Config
+    if (-not [string]::IsNullOrWhiteSpace([string]$driverStatus.Warning)) {
+        Write-RunInfo "R0 warning: $($driverStatus.Warning)"
+        foreach ($action in @($driverStatus.RecommendedActions)) {
+            Write-RunInfo "R0 action: $action"
+        }
+    }
+}
+
 function Get-GuestPayloadRoot {
     param(
         [AllowNull()]$State,
@@ -559,6 +665,7 @@ function Show-RunStatus {
     $payloadRoot = [System.IO.Path]::GetFullPath((Get-StateString -State $State -Name 'guestPayloadRoot' -DefaultValue (Join-Path $EffectiveRuntimeRoot 'payload\guest-tools')))
     $agentName = 'KSword.Sandbox.Agent.exe'
     $collectorName = 'KSword.Sandbox.R0Collector.exe'
+    $statusConfig = $null
     if ($configExists) {
         try {
             $statusConfig = Get-Content -LiteralPath $EffectiveConfigPath -Raw | ConvertFrom-Json
@@ -579,6 +686,7 @@ function Show-RunStatus {
             Write-RunInfo "Status could not read payload root from config '$EffectiveConfigPath': $($_.Exception.Message)"
         }
     }
+    $driverStatus = Get-R0DriverConfigurationStatus -Config $statusConfig
 
     $payloadManifest = Join-Path $payloadRoot 'payload-manifest.json'
     $agentPayload = Join-Path (Join-Path $payloadRoot 'agent') $agentName
@@ -623,6 +731,9 @@ function Show-RunStatus {
         [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($secretName, 'Machine'))) {
         [void]$recommendedActions.Add(".\install.ps1 -Mode Install -PromptPassword, or .\scripts\Test-HyperVReadiness.ps1 -PromptForMissingGuestPassword for a process-only check.")
     }
+    foreach ($driverAction in @($driverStatus.RecommendedActions)) {
+        [void]$recommendedActions.Add([string]$driverAction)
+    }
     if (-not $hyperVModuleAvailable) {
         [void]$recommendedActions.Add('Enable/install Hyper-V PowerShell tools, then rerun .\run.ps1 -Mode CheckEnvironment.')
     }
@@ -651,6 +762,13 @@ function Show-RunStatus {
         GuestAgentPayloadExists = Test-Path -LiteralPath $agentPayload -PathType Leaf
         R0CollectorPayload = $collectorPayload
         R0CollectorPayloadExists = Test-Path -LiteralPath $collectorPayload -PathType Leaf
+        R0DriverConfigurationStatus = $driverStatus.Status
+        R0DriverConfigurationWarning = $driverStatus.Warning
+        DriverEnabled = $driverStatus.DriverEnabled
+        DriverUseMockCollector = $driverStatus.UseMockCollector
+        DriverHostPath = $driverStatus.HostDriverPath
+        DriverHostPathConfigured = $driverStatus.HostDriverPathConfigured
+        DriverHostPathExists = $driverStatus.HostDriverPathExists
         SecretName = $secretName
         ProcessSecretSet = -not [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($secretName, 'Process'))
         UserSecretSet = -not [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($secretName, 'User'))
@@ -844,6 +962,7 @@ function Invoke-OneShotAnalysis {
 
     $runLive = [bool]$Live -and (-not [bool]$PlanOnly) -and ($Mode -ne 'Plan')
     $payloadRoot = Get-GuestPayloadRoot -State $State -Config $Config -EffectiveRuntimeRoot $EffectiveRuntimeRoot
+    Write-R0DriverConfigurationWarning -Config $Config
     if ($runLive) {
         Ensure-GuestPayload -PayloadRoot $payloadRoot -Config $Config
     }
@@ -986,12 +1105,14 @@ switch ($Mode) {
     }
     'WebUI' {
         $config = Read-SandboxConfig -EffectiveConfigPath $effectiveConfigPath
+        Write-R0DriverConfigurationWarning -Config $config
         $payloadRoot = Get-GuestPayloadRoot -State $state -Config $config -EffectiveRuntimeRoot $effectiveRuntimeRoot
         Ensure-GuestPayloadForWebUi -PayloadRoot $payloadRoot -Config $config
         Invoke-WebUi -EffectiveConfigPath $effectiveConfigPath
     }
     'StartWebUI' {
         $config = Read-SandboxConfig -EffectiveConfigPath $effectiveConfigPath
+        Write-R0DriverConfigurationWarning -Config $config
         $payloadRoot = Get-GuestPayloadRoot -State $state -Config $config -EffectiveRuntimeRoot $effectiveRuntimeRoot
         Ensure-GuestPayloadForWebUi -PayloadRoot $payloadRoot -Config $config
         Invoke-WebUi -EffectiveConfigPath $effectiveConfigPath

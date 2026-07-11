@@ -10,6 +10,8 @@ namespace KSword.Sandbox.Core.Rules;
 /// </summary>
 public sealed class RuleEngine
 {
+    private const int MaxEvidenceEventsPerRule = 50;
+
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNameCaseInsensitive = true,
@@ -56,10 +58,33 @@ public sealed class RuleEngine
 
         foreach (var rule in ruleSet.Rules)
         {
-            var evidence = eventList.Where(evt => Matches(rule, evt)).ToList();
-            if (evidence.Count == 0)
+            var evidence = new List<SandboxEvent>();
+            var matchedCount = 0;
+            foreach (var evt in eventList)
+            {
+                if (!Matches(rule, evt))
+                {
+                    continue;
+                }
+
+                matchedCount++;
+                if (evidence.Count < MaxEvidenceEventsPerRule)
+                {
+                    evidence.Add(evt);
+                }
+            }
+
+            if (matchedCount == 0)
             {
                 continue;
+            }
+
+            var summary = rule.Summary;
+            if (matchedCount > evidence.Count)
+            {
+                summary = string.IsNullOrWhiteSpace(summary)
+                    ? $"Evidence shown: {evidence.Count} of {matchedCount} matching events."
+                    : $"{summary} Evidence shown: {evidence.Count} of {matchedCount} matching events.";
             }
 
             findings.Add(new BehaviorFinding
@@ -67,9 +92,11 @@ public sealed class RuleEngine
                 RuleId = rule.Id,
                 Title = rule.Title,
                 Severity = rule.Severity,
-                Summary = rule.Summary,
+                Confidence = rule.Confidence,
+                Summary = summary,
                 MitreTechniqueId = rule.MitreTechniqueId,
                 MitreTechniqueName = rule.MitreTechniqueName,
+                Tags = rule.Tags,
                 Evidence = evidence
             });
         }
@@ -109,6 +136,26 @@ public sealed class RuleEngine
             return false;
         }
 
+        if (rule.ExcludeProcessNames.Count > 0 && MatchesProcessName(evt, rule.ExcludeProcessNames))
+        {
+            return false;
+        }
+
+        if (rule.ExcludePathContains.Count > 0 && ContainsAny(evt.Path, rule.ExcludePathContains))
+        {
+            return false;
+        }
+
+        if (rule.ExcludeCommandLineContains.Count > 0 && ContainsAny(evt.CommandLine, rule.ExcludeCommandLineContains))
+        {
+            return false;
+        }
+
+        if (rule.ExcludeDataContains.Count > 0 && MatchesDataContains(rule.ExcludeDataContains, evt))
+        {
+            return false;
+        }
+
         return true;
     }
 
@@ -120,7 +167,18 @@ public sealed class RuleEngine
     /// </summary>
     private static bool MatchesDataContains(BehaviorRule rule, SandboxEvent evt)
     {
-        foreach (var (key, fragments) in rule.DataContains)
+        return MatchesDataContains(rule.DataContains, evt);
+    }
+
+    /// <summary>
+    /// Tests whether one event data dictionary contains configured fragments.
+    /// Inputs are a predicate dictionary and event, processing checks each key
+    /// with case-insensitive substring matching, and the method returns true
+    /// when any key/fragments pair matches.
+    /// </summary>
+    private static bool MatchesDataContains(IReadOnlyDictionary<string, List<string>> dataContains, SandboxEvent evt)
+    {
+        foreach (var (key, fragments) in dataContains)
         {
             if (!evt.Data.TryGetValue(key, out var value))
             {
@@ -134,6 +192,43 @@ public sealed class RuleEngine
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// Checks the normalized process name plus common image-name metadata.
+    /// Inputs are one event and excluded names, processing compares exact base
+    /// names with or without .exe suffix, and the method returns true on match.
+    /// </summary>
+    private static bool MatchesProcessName(SandboxEvent evt, IEnumerable<string> candidates)
+    {
+        var names = new List<string?>();
+        names.Add(evt.ProcessName);
+        foreach (var key in new[] { "processName", "imageName", "toolhelpImageName", "fileName", "name" })
+        {
+            if (evt.Data.TryGetValue(key, out var value))
+            {
+                names.Add(value);
+            }
+        }
+
+        return names
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .Any(name => candidates.Any(candidate => SameProcessName(name!, candidate)));
+    }
+
+    private static bool SameProcessName(string value, string candidate)
+    {
+        var normalizedValue = Path.GetFileName(value.Trim());
+        var normalizedCandidate = Path.GetFileName(candidate.Trim());
+        return string.Equals(normalizedValue, normalizedCandidate, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(TrimExe(normalizedValue), TrimExe(normalizedCandidate), StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string TrimExe(string value)
+    {
+        return value.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)
+            ? value[..^4]
+            : value;
     }
 
     /// <summary>

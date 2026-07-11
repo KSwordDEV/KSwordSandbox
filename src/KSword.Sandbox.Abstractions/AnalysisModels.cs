@@ -137,11 +137,15 @@ public sealed record BehaviorFinding
 
     public string Severity { get; init; } = "info";
 
+    public string Confidence { get; init; } = "medium";
+
     public string? MitreTechniqueId { get; init; }
 
     public string? MitreTechniqueName { get; init; }
 
     public string Summary { get; init; } = string.Empty;
+
+    public List<string> Tags { get; init; } = [];
 
     public List<SandboxEvent> Evidence { get; init; } = [];
 }

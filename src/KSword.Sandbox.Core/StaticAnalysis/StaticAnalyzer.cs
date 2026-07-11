@@ -60,9 +60,7 @@ public sealed class StaticAnalyzer
         "QueueUserAPC",
         "SetThreadContext",
         "GetThreadContext",
-        "OpenProcess",
-        "ResumeThread",
-        "CreateToolhelp32Snapshot"
+        "ResumeThread"
     ];
 
     private static readonly string[] DynamicCodeApis =
@@ -555,8 +553,8 @@ public sealed class StaticAnalyzer
 
     /// <summary>
     /// Classifies one extracted string into URL or interesting static evidence.
-    /// Inputs are text and output collections, processing applies simple
-    /// substring heuristics, and the method returns no value.
+    /// Inputs are text and output collections, processing applies token-bounded
+    /// heuristics and benign manifest suppression, and the method returns no value.
     /// </summary>
     private static void AddStringClassifications(string text, SortedSet<string> tags, SortedSet<string> urls, SortedSet<string> interestingStrings)
     {
@@ -569,7 +567,10 @@ public sealed class StaticAnalyzer
         var isInteresting = false;
         if (AddUrlClassifications(trimmed, tags, urls, interestingStrings))
         {
-            tags.Add("network_indicator_string");
+            if (!IsBenignManifestOrMicrosoftReference(trimmed))
+            {
+                tags.Add("network_indicator_string");
+            }
         }
 
         if (AddIpClassifications(trimmed, tags, interestingStrings))
@@ -612,7 +613,7 @@ public sealed class StaticAnalyzer
             tags.Add("persistence_string");
         }
 
-        if (ContainsAny(trimmed, SuspiciousApiStringMarkers))
+        if (ContainsAnyApiToken(trimmed, SuspiciousApiStringMarkers))
         {
             isInteresting = true;
             tags.Add("suspicious_api_string");
@@ -656,8 +657,17 @@ public sealed class StaticAnalyzer
             }
 
             urls.Add(url);
-            AddInterestingString(interestingStrings, $"url:{url}");
-            found = true;
+            if (IsBenignManifestOrMicrosoftReference(url))
+            {
+                AddInterestingString(interestingStrings, $"url-reference:{url}");
+            }
+            else
+            {
+                AddInterestingString(interestingStrings, $"url:{url}");
+                found = true;
+            }
+
+            continue;
         }
 
         if (found)
@@ -670,9 +680,23 @@ public sealed class StaticAnalyzer
     }
 
     /// <summary>
+    /// Returns whether a URL/string is a benign Windows manifest or Microsoft
+    /// framework reference that should remain visible but not score as network
+    /// IOC evidence.
+    /// </summary>
+    private static bool IsBenignManifestOrMicrosoftReference(string value)
+    {
+        return value.Contains("schemas.microsoft.com/", StringComparison.OrdinalIgnoreCase) ||
+            value.Contains("go.microsoft.com/fwlink", StringComparison.OrdinalIgnoreCase) ||
+            value.Contains("go.microsoft.com/fwlink/p/", StringComparison.OrdinalIgnoreCase) ||
+            value.Contains("asm.v1", StringComparison.OrdinalIgnoreCase) ||
+            value.Contains("compatibility.v1", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
     /// Extracts IPv4 indicators and coarse routability labels.
-    /// Inputs are text plus output collections, processing validates octets
-    /// and private/reserved ranges, and the method returns whether any IP hit.
+    /// Inputs are text plus output collections, processing validates octets,
+    /// suppresses version-like manifest values, and returns whether an IOC hit.
     /// </summary>
     private static bool AddIpClassifications(string text, SortedSet<string> tags, SortedSet<string> interestingStrings)
     {
@@ -680,7 +704,9 @@ public sealed class StaticAnalyzer
         foreach (Match match in Ipv4Pattern.Matches(text))
         {
             var ip = match.Value;
-            if (!TryParseIpv4(ip, out var octets))
+            if (!TryParseIpv4(ip, out var octets) ||
+                IsVersionLikeIpv4(ip, text) ||
+                IsBenignManifestOrMicrosoftReference(text))
             {
                 continue;
             }
@@ -693,6 +719,28 @@ public sealed class StaticAnalyzer
         }
 
         return found;
+    }
+
+    /// <summary>
+    /// Identifies Windows/manifest version tuples such as 5.1.0.0 or 6.0.0.0
+    /// that look like IPv4 literals but are not network indicators.
+    /// </summary>
+    private static bool IsVersionLikeIpv4(string ip, string context)
+    {
+        if (!TryParseIpv4(ip, out var octets))
+        {
+            return false;
+        }
+
+        if (octets[2] == 0 && octets[3] == 0 && octets[0] <= 10 && octets[1] <= 30)
+        {
+            return true;
+        }
+
+        return context.Contains("version", StringComparison.OrdinalIgnoreCase) ||
+            context.Contains("supportedOS", StringComparison.OrdinalIgnoreCase) ||
+            context.Contains("compatibility", StringComparison.OrdinalIgnoreCase) ||
+            context.Contains("manifest", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>
@@ -1810,49 +1858,49 @@ public sealed class StaticAnalyzer
     /// <summary>
     /// Adds grouped tags for suspicious Windows API imports or strings.
     /// Inputs are one API-like text value and tag set, processing matches
-    /// curated substring groups, and the method returns no value.
+    /// curated API tokens instead of raw substrings, and the method returns no value.
     /// </summary>
     private static void AddSuspiciousApiTags(string apiName, SortedSet<string> tags)
     {
-        if (ContainsAny(apiName, ProcessInjectionApis))
+        if (ContainsAnyApiToken(apiName, ProcessInjectionApis))
         {
             tags.Add("import_suspicious_api");
             tags.Add("import_process_injection_api");
         }
 
-        if (ContainsAny(apiName, DynamicCodeApis))
+        if (ContainsAnyApiToken(apiName, DynamicCodeApis))
         {
             tags.Add("import_suspicious_api");
             tags.Add("import_dynamic_code_api");
         }
 
-        if (ContainsAny(apiName, RegistryPersistenceApis))
+        if (ContainsAnyApiToken(apiName, RegistryPersistenceApis))
         {
             tags.Add("import_suspicious_api");
             tags.Add("import_persistence_api");
             tags.Add("import_registry_persistence_api");
         }
 
-        if (ContainsAny(apiName, ServicePersistenceApis))
+        if (ContainsAnyApiToken(apiName, ServicePersistenceApis))
         {
             tags.Add("import_suspicious_api");
             tags.Add("import_persistence_api");
             tags.Add("import_service_persistence_api");
         }
 
-        if (ContainsAny(apiName, PersistenceApis))
+        if (ContainsAnyApiToken(apiName, PersistenceApis))
         {
             tags.Add("import_suspicious_api");
             tags.Add("import_persistence_api");
         }
 
-        if (ContainsAny(apiName, NetworkApis))
+        if (ContainsAnyApiToken(apiName, NetworkApis))
         {
             tags.Add("import_suspicious_api");
             tags.Add("import_network_api");
         }
 
-        if (ContainsAny(apiName, FileDropApis))
+        if (ContainsAnyApiToken(apiName, FileDropApis))
         {
             tags.Add("import_suspicious_api");
             tags.Add("import_file_drop_api");
@@ -1864,13 +1912,13 @@ public sealed class StaticAnalyzer
             tags.Add("import_script_execution_api");
         }
 
-        if (ContainsAny(apiName, ResourceApis))
+        if (ContainsAnyApiToken(apiName, ResourceApis))
         {
             tags.Add("import_suspicious_api");
             tags.Add("import_resource_api");
         }
 
-        if (ContainsAny(apiName, AntiAnalysisApis))
+        if (ContainsAnyApiToken(apiName, AntiAnalysisApis))
         {
             tags.Add("import_suspicious_api");
             tags.Add("import_anti_analysis_api");
@@ -1887,37 +1935,37 @@ public sealed class StaticAnalyzer
     /// </summary>
     private static IEnumerable<string> GetSuspiciousApiClusters(string apiName)
     {
-        if (ContainsAny(apiName, ProcessInjectionApis))
+        if (ContainsAnyApiToken(apiName, ProcessInjectionApis))
         {
             yield return "process-injection";
         }
 
-        if (ContainsAny(apiName, DynamicCodeApis))
+        if (ContainsAnyApiToken(apiName, DynamicCodeApis))
         {
             yield return "dynamic-code";
         }
 
-        if (ContainsAny(apiName, RegistryPersistenceApis))
+        if (ContainsAnyApiToken(apiName, RegistryPersistenceApis))
         {
             yield return "registry-persistence";
         }
 
-        if (ContainsAny(apiName, ServicePersistenceApis))
+        if (ContainsAnyApiToken(apiName, ServicePersistenceApis))
         {
             yield return "service-persistence";
         }
 
-        if (ContainsAny(apiName, PersistenceApis))
+        if (ContainsAnyApiToken(apiName, PersistenceApis))
         {
             yield return "persistence";
         }
 
-        if (ContainsAny(apiName, NetworkApis))
+        if (ContainsAnyApiToken(apiName, NetworkApis))
         {
             yield return "network";
         }
 
-        if (ContainsAny(apiName, FileDropApis))
+        if (ContainsAnyApiToken(apiName, FileDropApis))
         {
             yield return "file-drop";
         }
@@ -1927,12 +1975,12 @@ public sealed class StaticAnalyzer
             yield return "script-execution";
         }
 
-        if (ContainsAny(apiName, ResourceApis))
+        if (ContainsAnyApiToken(apiName, ResourceApis))
         {
             yield return "resource";
         }
 
-        if (ContainsAny(apiName, AntiAnalysisApis))
+        if (ContainsAnyApiToken(apiName, AntiAnalysisApis))
         {
             yield return "anti-analysis";
         }
@@ -2500,6 +2548,17 @@ public sealed class StaticAnalyzer
     }
 
     /// <summary>
+    /// Matches imported API names exactly and extracted strings with identifier
+    /// boundaries. This avoids `OpenProcess` matching `OpenProcessToken`.
+    /// </summary>
+    private static bool ContainsAnyApiToken(string text, params string[] fragments)
+    {
+        return fragments.Any(fragment =>
+            string.Equals(text, fragment, StringComparison.OrdinalIgnoreCase) ||
+            ContainsApiToken(text, fragment));
+    }
+
+    /// <summary>
     /// Checks script/process execution API markers while keeping broad CRT
     /// names such as `system` token-bounded.
     /// </summary>
@@ -2518,7 +2577,8 @@ public sealed class StaticAnalyzer
                 continue;
             }
 
-            if (text.Contains(fragment, StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(text, fragment, StringComparison.OrdinalIgnoreCase) ||
+                ContainsApiToken(text, fragment))
             {
                 return true;
             }
@@ -2545,6 +2605,44 @@ public sealed class StaticAnalyzer
             var afterIndex = index + token.Length;
             var after = afterIndex >= text.Length ? '\0' : text[afterIndex];
             if (!IsIdentifierChar(before) && !IsIdentifierChar(after))
+            {
+                return true;
+            }
+
+            start = index + token.Length;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Checks a Windows API token with identifier boundaries and optional
+    /// ANSI/Unicode A/W suffixes. This keeps `InternetOpenA` matched to
+    /// `InternetOpen` while preventing `OpenProcessToken` from matching
+    /// `OpenProcess`.
+    /// </summary>
+    private static bool ContainsApiToken(string text, string token)
+    {
+        var start = 0;
+        while (start < text.Length)
+        {
+            var index = text.IndexOf(token, start, StringComparison.OrdinalIgnoreCase);
+            if (index < 0)
+            {
+                return false;
+            }
+
+            var before = index == 0 ? '\0' : text[index - 1];
+            var afterIndex = index + token.Length;
+            var after = afterIndex >= text.Length ? '\0' : text[afterIndex];
+            if (!IsIdentifierChar(before) && !IsIdentifierChar(after))
+            {
+                return true;
+            }
+
+            if (!IsIdentifierChar(before) &&
+                (after is 'A' or 'a' or 'W' or 'w') &&
+                (afterIndex + 1 >= text.Length || !IsIdentifierChar(text[afterIndex + 1])))
             {
                 return true;
             }

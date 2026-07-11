@@ -156,6 +156,9 @@ The generated JSON includes:
   non-mutating PowerShell Direct probes when the VM is already running;
 - host sample path and guest sample path;
 - host payload root and expected Guest Agent/R0Collector payload files;
+- R0 driver host-path readiness, including a failed live preflight when
+  `driver.enabled=true`, `driver.useMockCollector=false`, and
+  `driver.hostDriverPath` is empty or points at a missing `.sys`;
 - guest output paths for `events.json`, `driver-events.jsonl`, `agent.pid`, and
   `agent.exit`;
 - resolved Guest Agent command line and R0Collector mock/live sidecar arguments;
@@ -236,6 +239,12 @@ then use Windows test mode plus a local test certificate as described in
 guest-only path such as `C:\KSwordSandbox\driver`, keep all signing material
 outside git, set `driver.useMockCollector=false`, and run the non-mutating R0
 readiness pass before `-Live`.
+
+For real R0, also set `driver.hostDriverPath` to the host-side `.sys`. Leaving
+it empty makes `stage-guest-payload` use an empty `driverSource` and omits
+`install-driver-service`; the plan preflight now stops live execution with a
+clear diagnostic instead of letting R0Collector fail later with
+`deviceUnavailable` / `win32Error=2`.
 
 ## Live execution sequence
 

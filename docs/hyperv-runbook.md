@@ -36,6 +36,27 @@ registered golden VM.
 - Optional test-signed driver kept outside git and referenced by
   `driver.hostDriverPath` only when real driver staging is desired.
 
+## Real R0 driver preflight
+
+Real R0 collection requires three config values to agree:
+
+- `driver.enabled=true`;
+- `driver.useMockCollector=false`;
+- `driver.hostDriverPath` points to an existing built and test-signed `.sys`.
+
+If `driver.enabled=true` and `driver.useMockCollector=false` but
+`driver.hostDriverPath` is empty, the runbook cannot copy a driver into the
+guest and does not generate `install-driver-service`. The staging command would
+otherwise show `$driverSource = ''`, and R0Collector can later fail opening
+`\\.\KSwordSandboxDriver` with `deviceUnavailable` / `win32Error=2`.
+
+The generated runbook now emits an early non-mutating
+`check-r0-driver-config` preflight step, and the script E2E plan records a
+failed `R0 driver host path configuration` check before any live VM mutation.
+Fix the condition by setting `driver.hostDriverPath` in the local config,
+switching to `driver.useMockCollector=true` for payload-only R0 validation, or
+disabling R0 with `driver.enabled=false` / `-NoR0Collector`.
+
 Before live execution, run the read-only preflight. On an installed host, the
 one-command form reuses `Sandbox__ConfigPath` / install state and checks the
 configured VM name, checkpoint, Guest Service Interface, PowerShell Direct,

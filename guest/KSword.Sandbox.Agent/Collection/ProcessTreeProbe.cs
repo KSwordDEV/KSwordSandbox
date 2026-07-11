@@ -878,10 +878,10 @@ internal sealed class ProcessSnapshotProvider : IProcessSnapshotProvider
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern IntPtr CreateToolhelp32Snapshot(uint dwFlags, uint th32ProcessId);
 
-    [DllImport("kernel32.dll", SetLastError = true)]
+    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode, EntryPoint = "Process32FirstW")]
     private static extern bool Process32First(IntPtr hSnapshot, ref ProcessEntry32 lppe);
 
-    [DllImport("kernel32.dll", SetLastError = true)]
+    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode, EntryPoint = "Process32NextW")]
     private static extern bool Process32Next(IntPtr hSnapshot, ref ProcessEntry32 lppe);
 
     [DllImport("kernel32.dll", SetLastError = true)]

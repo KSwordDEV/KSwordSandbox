@@ -9,13 +9,15 @@ substrings. Rules therefore favor stable evidence already emitted by guest
 events and typed R0 collector rows rather than requiring correlation that the
 engine does not support yet.
 
-The current rule set has 257 behavior rules. The v7 placeholder-reduction
-pass replaces many broad placeholder labels with concrete metadata, indicator,
-or normalized-correlation rules while staying within existing rule-engine
-predicates. Newer high-value rules may include metadata-only `confidence` and
-`evidenceFields` values; those fields do not change matching, but they document
-expected triage confidence and the evidence fields analysts should inspect
-first.
+The current rule set has 257 behavior rules. The v8 report-semantic cleanup
+keeps the v7 placeholder-reduction coverage while tagging static triage and
+collection diagnostics so report verdicts can distinguish them from primary
+sample behavior. The v7 pass replaced many broad placeholder labels with
+concrete metadata, indicator, or normalized-correlation rules while staying
+within existing rule-engine predicates. Newer high-value rules may include
+metadata-only `confidence`, `tags`, and `evidenceFields` values; those fields do
+not change matching, but they document expected triage confidence, report
+grouping intent, and the evidence fields analysts should inspect first.
 
 ## Added coverage
 

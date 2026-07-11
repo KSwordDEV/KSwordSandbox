@@ -43,6 +43,14 @@ public sealed record BehaviorRule
 
     public Dictionary<string, List<string>> DataContains { get; init; } = new(StringComparer.OrdinalIgnoreCase);
 
+    public List<string> ExcludeProcessNames { get; init; } = [];
+
+    public List<string> ExcludePathContains { get; init; } = [];
+
+    public List<string> ExcludeCommandLineContains { get; init; } = [];
+
+    public Dictionary<string, List<string>> ExcludeDataContains { get; init; } = new(StringComparer.OrdinalIgnoreCase);
+
     public List<string> EvidenceFields { get; init; } = [];
 
     public List<string> Tags { get; init; } = [];

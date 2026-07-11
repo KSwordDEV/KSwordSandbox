@@ -105,7 +105,11 @@ Non-interactive Hyper-V config update:
 ```
 
 Useful optional parameters are `-RuntimeRoot`, `-GuestPayloadRoot`,
-`-GuestUserName`, `-SecretName`, and `-LocalConfigPath`.
+`-GuestUserName`, `-SecretName`, `-DriverHostPath`, and `-LocalConfigPath`.
+When `-DriverHostPath` is omitted, the installer preserves an existing local
+`driver.hostDriverPath` or auto-detects common built
+`KSword.Sandbox.Driver.sys` outputs. It does not sign drivers and must not call
+`CSignTool.exe`.
 
 Safe environment summary without changing local state:
 
@@ -125,7 +129,11 @@ live execution:
   `.\scripts\Prepare-GuestPayload.ps1 -RepoRoot . -PayloadRoot <payloadRoot> -GuestWorkingDirectory <guestRoot> -SelfContained`;
 - missing guest password secret: run `.\install.ps1 -Mode Install -PromptPassword`
   or use `.\scripts\Test-HyperVReadiness.ps1 -PromptForMissingGuestPassword` for
-  a process-only readiness probe.
+  a process-only readiness probe;
+- real R0 requested but no host driver path: set
+  `driver.hostDriverPath` with
+  `.\install.ps1 -Mode Change -UpdateHyperVConfig -DriverHostPath <test-signed .sys>`,
+  enable `driver.useMockCollector=true`, or set `driver.enabled=false`.
 
 Preview local Hyper-V config writes:
 
@@ -149,8 +157,9 @@ checkpoint, guest username, guest working directory, runtime root, or payload
 root. It checks the password secret presence, target VM, clean checkpoint,
 Guest Service Interface, PowerShell Direct when the VM is already running,
 guest working directory shape, host payload files, and repository secret
-hygiene without starting/restoring/stopping a VM. The summary includes
-`RecommendedActions` for missing VM/checkpoint/payload/secret problems.
+hygiene plus real R0 driver host-path readiness without
+starting/restoring/stopping a VM. The summary includes
+`RecommendedActions` for missing VM/checkpoint/payload/secret/driver problems.
 
 ## Start WebUI after install
 

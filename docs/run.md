@@ -93,6 +93,16 @@ machine can reach the Hyper-V path without manually building guest binaries.
 Use `-SkipPayloadPreparation` only when intentionally testing planner behavior
 without payload files.
 
+`run.ps1` also reports the real R0 driver configuration before WebUI or one-shot
+analysis. If `driver.enabled=true`, `driver.useMockCollector=false`, and
+`driver.hostDriverPath` is empty or missing, it prints an `R0 warning` because
+the live runbook cannot stage a `.sys` or generate `install-driver-service`;
+R0Collector would otherwise fail later with `deviceUnavailable` /
+`win32Error=2`. Fix it by setting
+`.\install.ps1 -Mode Change -UpdateHyperVConfig -DriverHostPath <test-signed .sys>`,
+using `driver.useMockCollector=true` for payload-only R0 validation, or setting
+`driver.enabled=false`.
+
 ## Status
 
 ```powershell
@@ -101,8 +111,9 @@ without payload files.
 
 Status reports repository root, install state, local config, Web URL, runtime
 root, secret presence, optional VirusTotal key presence, VM/checkpoint
-presence, host Guest Agent/R0Collector payload presence, and whether the secret
-value was printed (`False`). It also prints `RecommendedActions` with
+presence, host Guest Agent/R0Collector payload presence, R0 driver host-path
+readiness, and whether the secret value was printed (`False`). It also prints
+`RecommendedActions` with
 human-readable fixes for common setup gaps:
 
 - missing VM: record the real VM with
@@ -112,7 +123,9 @@ human-readable fixes for common setup gaps:
   `.\scripts\Prepare-GuestPayload.ps1 -RepoRoot . -PayloadRoot <payloadRoot> -SelfContained`;
 - missing guest password secret: run `.\install.ps1 -Mode Install -PromptPassword`
   or use `.\scripts\Test-HyperVReadiness.ps1 -PromptForMissingGuestPassword` for
-  a process-only check.
+  a process-only check;
+- real R0 requested but no `driver.hostDriverPath`: set `-DriverHostPath`,
+  enable `driver.useMockCollector=true`, or disable `driver.enabled`.
 
 For a fuller non-mutating preflight summary:
 

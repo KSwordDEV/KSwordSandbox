@@ -329,7 +329,7 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
             ("artifacts", "Artifact links"),
             ("timeline", "Timeline"),
             ("process", "Process details"),
-            ("files", "Dropped files"),
+            ("files", "File system activity"),
             ("registry", "Registry behavior"),
             ("network", "Network behavior"),
             ("r0", "R0 / driver events"),
@@ -350,16 +350,21 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
     /// </summary>
     private static void AppendRiskSummary(StringBuilder html, AnalysisReport report)
     {
+        var primaryFindings = PrimaryBehaviorFindings(report).ToList();
+        var staticFindings = StaticTriageFindings(report).ToList();
+        var diagnosticFindings = DiagnosticFindings(report).ToList();
         html.AppendLine("<section id=\"risk\" class=\"card\"><h2>Risk summary</h2><div class=\"grid\">");
-        Metric(html, "High risk", CountSeverity(report, "high").ToString(), "risk-high");
-        Metric(html, "Suspicious", CountSeverity(report, "medium").ToString(), "risk-medium");
-        Metric(html, "General / info", (CountSeverity(report, "low") + CountSeverity(report, "info")).ToString(), "risk-info");
-        Metric(html, "MITRE techniques", report.Findings.Where(f => !string.IsNullOrWhiteSpace(f.MitreTechniqueId)).Select(f => f.MitreTechniqueId).Distinct().Count().ToString(), "risk-low");
+        Metric(html, "High risk", CountSeverity(primaryFindings, "high").ToString(), "risk-high");
+        Metric(html, "Suspicious", CountSeverity(primaryFindings, "medium").ToString(), "risk-medium");
+        Metric(html, "General / info", (CountSeverity(primaryFindings, "low") + CountSeverity(primaryFindings, "info")).ToString(), "risk-info");
+        Metric(html, "Static triage", staticFindings.Count.ToString(), staticFindings.Any(f => SeverityRank(f.Severity) <= SeverityRank("medium")) ? "risk-medium" : "risk-info");
+        Metric(html, "Collection diagnostics", diagnosticFindings.Count.ToString(), diagnosticFindings.Count > 0 ? "risk-info" : "risk-low");
+        Metric(html, "MITRE techniques", primaryFindings.Where(f => !string.IsNullOrWhiteSpace(f.MitreTechniqueId)).Select(f => f.MitreTechniqueId).Distinct().Count().ToString(), "risk-low");
         Metric(html, "Events", report.Events.Count.ToString(), "risk-info");
         Metric(html, "Rule hits", report.Findings.Count.ToString(), "risk-info");
         Metric(html, "Static tags", (report.StaticAnalysis?.Tags.Count ?? 0).ToString(), "risk-info");
-        Metric(html, "Static URLs", (report.StaticAnalysis?.Urls.Count ?? 0).ToString(), "risk-medium");
-        Metric(html, "Dropped files", report.Events.Count(IsFileEvent).ToString(), "risk-medium");
+        Metric(html, "Static URL refs", (report.StaticAnalysis?.Urls.Count ?? 0).ToString(), "risk-info");
+        Metric(html, "File events", report.Events.Count(IsFileEvent).ToString(), "risk-medium");
         Metric(html, "Network events", report.Events.Count(IsNetworkEvent).ToString(), "risk-medium");
         Metric(html, "Registry events", report.Events.Count(IsRegistryEvent).ToString(), "risk-medium");
         Metric(html, "R0 / driver events", report.Events.Count(IsR0Event).ToString(), "risk-info");
@@ -374,10 +379,15 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
     private static void AppendBehaviorDetections(StringBuilder html, AnalysisReport report)
     {
         html.AppendLine("<section id=\"behavior\" class=\"card\"><h2>Behavior detections</h2>");
-        var findings = report.Findings.OrderBy(f => SeverityRank(f.Severity)).ThenBy(f => f.Title).ToList();
+        var findings = PrimaryBehaviorFindings(report)
+            .OrderBy(f => SeverityRank(f.Severity))
+            .ThenBy(f => f.Title)
+            .ToList();
+        var staticFindings = StaticTriageFindings(report).OrderBy(f => SeverityRank(f.Severity)).ThenBy(f => f.Title).ToList();
+        var diagnosticFindings = DiagnosticFindings(report).OrderBy(f => f.Title).ToList();
         if (findings.Count == 0)
         {
-            Empty(html, "No behavior rules matched.");
+            Empty(html, "No primary sample behavior rules matched. Static triage and collection diagnostics are separated below so operational health does not inflate the verdict.");
         }
         else
         {
@@ -390,7 +400,41 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
             html.AppendLine("</tbody></table>");
         }
 
+        AppendSecondaryFindingGroup(
+            html,
+            "Static triage indicators",
+            "Static-only findings are useful triage signals, but they do not by themselves prove runtime malicious behavior.",
+            staticFindings);
+        AppendSecondaryFindingGroup(
+            html,
+            "Collection and pipeline diagnostics",
+            "Collector health, runbook, import, and timing diagnostics explain evidence quality and are not sample behavior.",
+            diagnosticFindings);
         html.AppendLine("</section>");
+    }
+
+    private static void AppendSecondaryFindingGroup(
+        StringBuilder html,
+        string title,
+        string note,
+        IReadOnlyCollection<BehaviorFinding> findings)
+    {
+        html.AppendLine($"<details class=\"relationship-details\"><summary>{E(title)} ({E(findings.Count.ToString())})</summary>");
+        html.AppendLine($"<p class=\"muted\">{E(note)}</p>");
+        if (findings.Count == 0)
+        {
+            Empty(html, "None.");
+            html.AppendLine("</details>");
+            return;
+        }
+
+        html.AppendLine("<table><thead><tr><th>Severity</th><th>Indicator</th><th>Evidence</th></tr></thead><tbody>");
+        foreach (var finding in findings)
+        {
+            html.AppendLine($"<tr><td class=\"risk-{E(NormalizeSeverity(finding.Severity))}\">{E(finding.Severity)}</td><td><strong>{E(finding.Title)}</strong><br><span class=\"muted\">{E(finding.Summary)}</span></td><td>{RenderFindingEvidence(finding.Evidence)}</td></tr>");
+        }
+
+        html.AppendLine("</tbody></table></details>");
     }
 
     /// <summary>
@@ -431,7 +475,7 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
     private static void AppendMitreDetections(StringBuilder html, AnalysisReport report)
     {
         html.AppendLine("<section id=\"mitre\" class=\"card\"><h2>Multi-dimensional / MITRE detections</h2>");
-        var groups = report.Findings
+        var groups = PrimaryBehaviorFindings(report)
             .Where(f => !string.IsNullOrWhiteSpace(f.MitreTechniqueId))
             .GroupBy(f => new { f.MitreTechniqueId, f.MitreTechniqueName })
             .OrderBy(g => g.Key.MitreTechniqueId)
@@ -842,7 +886,7 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
         IReadOnlyCollection<string> networkIocs,
         IReadOnlyCollection<string> artifactIocs)
     {
-        var highestSeverity = report.Findings
+        var highestSeverity = PrimaryBehaviorFindings(report)
             .OrderBy(finding => SeverityRank(finding.Severity))
             .Select(finding => $"{finding.Severity}: {finding.Title}")
             .FirstOrDefault() ?? "No behavior rules matched";
@@ -1231,7 +1275,7 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
         IReadOnlyDictionary<string, List<ArtifactDescriptor>> artifactLookup,
         IReadOnlyCollection<ArtifactDescriptor> artifacts)
     {
-        AppendEventTable(html, "files", "Dropped files", report.Events.Where(IsFileEvent), artifactLookup, artifacts);
+        AppendEventTable(html, "files", "File system activity", report.Events.Where(IsFileEvent), artifactLookup, artifacts);
     }
 
     /// <summary>
@@ -2864,7 +2908,12 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
     /// </summary>
     private static int CountSeverity(AnalysisReport report, string severity)
     {
-        return report.Findings.Count(f => string.Equals(f.Severity, severity, StringComparison.OrdinalIgnoreCase));
+        return CountSeverity(PrimaryBehaviorFindings(report), severity);
+    }
+
+    private static int CountSeverity(IEnumerable<BehaviorFinding> findings, string severity)
+    {
+        return findings.Count(f => string.Equals(f.Severity, severity, StringComparison.OrdinalIgnoreCase));
     }
 
     /// <summary>
@@ -3024,17 +3073,57 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
             return ("Analysis failed", "high");
         }
 
-        if (CountSeverity(report, "high") > 0)
+        var primaryFindings = PrimaryBehaviorFindings(report).ToList();
+        if (CountSeverity(primaryFindings, "high") > 0)
         {
             return ("High risk", "high");
         }
 
-        if (CountSeverity(report, "medium") > 0)
+        if (CountSeverity(primaryFindings, "medium") > 0)
         {
             return ("Suspicious", "medium");
         }
 
         return ("No high-risk behavior", "info");
+    }
+
+    private static IEnumerable<BehaviorFinding> PrimaryBehaviorFindings(AnalysisReport report)
+    {
+        return report.Findings.Where(finding => !IsDiagnosticFinding(finding) && !IsStaticTriageFinding(finding));
+    }
+
+    private static IEnumerable<BehaviorFinding> StaticTriageFindings(AnalysisReport report)
+    {
+        return report.Findings.Where(IsStaticTriageFinding);
+    }
+
+    private static IEnumerable<BehaviorFinding> DiagnosticFindings(AnalysisReport report)
+    {
+        return report.Findings.Where(IsDiagnosticFinding);
+    }
+
+    private static bool IsStaticTriageFinding(BehaviorFinding finding)
+    {
+        return finding.RuleId.StartsWith("static-", StringComparison.OrdinalIgnoreCase) ||
+            finding.Tags.Any(tag => string.Equals(tag, "static", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool IsDiagnosticFinding(BehaviorFinding finding)
+    {
+        if (finding.Tags.Any(tag =>
+                string.Equals(tag, "plumbing", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(tag, "driver-health", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(tag, "collection", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(tag, "diagnostic", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(tag, "metadata", StringComparison.OrdinalIgnoreCase)))
+        {
+            return true;
+        }
+
+        return finding.RuleId.StartsWith("host-", StringComparison.OrdinalIgnoreCase) ||
+            finding.RuleId.StartsWith("runbook-", StringComparison.OrdinalIgnoreCase) ||
+            finding.RuleId.StartsWith("r0collector-", StringComparison.OrdinalIgnoreCase) ||
+            finding.RuleId.Contains("unavailable", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>
@@ -3158,6 +3247,7 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
         ("Artifact collection status", "证据采集状态"),
         ("Collection evidence", "采集证据"),
         ("Dropped files", "落地文件"),
+        ("File system activity", "文件系统活动"),
         ("Screenshots", "截图"),
         ("Memory dumps", "内存转储"),
         ("Packet captures", "网络抓包"),
@@ -3166,6 +3256,7 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
         ("Timeline", "时间线"),
         ("Process details", "进程详情"),
         ("Dropped files", "落地文件"),
+        ("File system activity", "文件系统活动"),
         ("Registry behavior", "注册表行为"),
         ("Network behavior", "网络行为"),
         ("R0 / driver events", "R0 / 驱动事件"),
@@ -3206,6 +3297,8 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
         ("Rule hits", "规则命中"),
         ("Static tags", "静态标签"),
         ("Static URLs", "静态 URL"),
+        ("Static URL refs", "静态 URL 引用"),
+        ("File events", "文件事件"),
         ("Network events", "网络事件"),
         ("Registry events", "注册表事件"),
         ("File events", "文件事件"),

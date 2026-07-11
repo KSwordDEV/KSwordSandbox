@@ -11,6 +11,13 @@ return exitCode;
 
 internal static class PostProcessProgram
 {
+    private const int MaxReportEvents = 500;
+    private const int MaxReportEventsPerType = 70;
+    private const int MaxEvidenceEventsPerFinding = 8;
+    private const int MaxEventDataPairs = 16;
+    private const int MaxEventDataValueCharacters = 512;
+    private const int MaxPathCharacters = 4_096;
+
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNameCaseInsensitive = true,
@@ -42,7 +49,28 @@ internal static class PostProcessProgram
             var hostEvents = BuildHostPostProcessEvents(jobId, jobRoot, eventsPath, guestEvents.Count);
             var allEvents = hostEvents.Concat(guestEvents).OrderBy(evt => evt.Timestamp).ToList();
             var rulesPath = Path.Combine(repoRoot, config.Paths.RulesDirectory, "behavior-rules.json");
-            var findings = new RuleEngine(RuleEngine.LoadRuleSet(rulesPath)).Classify(allEvents);
+            var findings = SanitizeFindings(new RuleEngine(RuleEngine.LoadRuleSet(rulesPath)).Classify(allEvents));
+            var reportEvents = BuildReportEventSample(allEvents, out var omittedReportEvents);
+            if (omittedReportEvents > 0)
+            {
+                reportEvents.Insert(0, new SandboxEvent
+                {
+                    EventType = "report.events.sampled",
+                    Timestamp = DateTimeOffset.UtcNow,
+                    Source = "host",
+                    Path = jobRoot,
+                    Data =
+                    {
+                        ["reason"] = "raw event volume exceeded report inline limit",
+                        ["rawEventCount"] = allEvents.Count.ToString(),
+                        ["reportEventCount"] = reportEvents.Count.ToString(),
+                        ["omittedEventCount"] = omittedReportEvents.ToString(),
+                        ["rawEventsPath"] = eventsPath,
+                        ["driverEventsPath"] = Path.Combine(Path.GetDirectoryName(eventsPath) ?? string.Empty, "driver-events.jsonl")
+                    }
+                });
+            }
+
             var status = guestEvents.Count > 0 ? AnalysisStatus.Completed : AnalysisStatus.Failed;
             var report = new AnalysisReport
             {
@@ -50,9 +78,9 @@ internal static class PostProcessProgram
                 Sample = sample,
                 Status = status,
                 StaticAnalysis = staticAnalysis,
-                Events = allEvents,
+                Events = reportEvents,
                 Findings = findings,
-                Metrics = BuildMetrics(allEvents, findings, staticAnalysis)
+                Metrics = BuildMetrics(allEvents, reportEvents, findings, staticAnalysis)
             };
 
             var jsonReportPath = Path.Combine(jobRoot, "report.json");
@@ -78,6 +106,8 @@ internal static class PostProcessProgram
                 eventsPath,
                 importedGuestEventCount = guestEvents.Count,
                 totalEventCount = allEvents.Count,
+                reportEventCount = reportEvents.Count,
+                omittedReportEventCount = omittedReportEvents,
                 findingCount = findings.Count,
                 jsonReportPath,
                 htmlReportPath,
@@ -314,7 +344,7 @@ internal static class PostProcessProgram
     {
         var events = LoadEvents(eventsPath);
         var driverJsonl = Path.Combine(Path.GetDirectoryName(eventsPath) ?? string.Empty, "driver-events.jsonl");
-        if (File.Exists(driverJsonl))
+        if (File.Exists(driverJsonl) && !events.Any(IsDriverPayloadEvent))
         {
             events.AddRange(LoadJsonLines(driverJsonl));
         }
@@ -324,20 +354,22 @@ internal static class PostProcessProgram
 
     private static List<SandboxEvent> LoadEvents(string path)
     {
-        var text = File.ReadAllText(path).Trim();
-        if (string.IsNullOrWhiteSpace(text))
+        using var stream = File.OpenRead(path);
+        var first = ReadFirstNonWhitespaceByte(stream);
+        if (first is null)
         {
             return [];
         }
 
-        if (text.StartsWith('['))
+        stream.Position = 0;
+        if (first == (byte)'[')
         {
-            return JsonSerializer.Deserialize<List<SandboxEvent>>(text, JsonOptions) ?? [];
+            return JsonSerializer.Deserialize<List<SandboxEvent>>(stream, JsonOptions) ?? [];
         }
 
-        if (text.StartsWith('{'))
+        if (first == (byte)'{')
         {
-            using var doc = JsonDocument.Parse(text);
+            using var doc = JsonDocument.Parse(stream);
             if (doc.RootElement.TryGetProperty("events", out var eventsElement) && eventsElement.ValueKind == JsonValueKind.Array)
             {
                 return JsonSerializer.Deserialize<List<SandboxEvent>>(eventsElement.GetRawText(), JsonOptions) ?? [];
@@ -345,6 +377,21 @@ internal static class PostProcessProgram
         }
 
         return LoadJsonLines(path);
+    }
+
+    private static byte? ReadFirstNonWhitespaceByte(Stream stream)
+    {
+        int value;
+        do
+        {
+            value = stream.ReadByte();
+            if (value < 0)
+            {
+                return null;
+            }
+        } while (char.IsWhiteSpace((char)value));
+
+        return (byte)value;
     }
 
     private static List<SandboxEvent> LoadJsonLines(string path)
@@ -375,6 +422,125 @@ internal static class PostProcessProgram
             Source = string.IsNullOrWhiteSpace(evt.Source) ? "guest" : evt.Source,
             Data = evt.Data ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         };
+    }
+
+    private static bool IsDriverPayloadEvent(SandboxEvent evt)
+    {
+        return evt.EventType.StartsWith("driver.", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(evt.Source, "driver", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static List<SandboxEvent> BuildReportEventSample(IReadOnlyList<SandboxEvent> allEvents, out int omittedEventCount)
+    {
+        if (allEvents.Count <= MaxReportEvents)
+        {
+            omittedEventCount = 0;
+            return allEvents.Select(SanitizeEvent).ToList();
+        }
+
+        var selected = new bool[allEvents.Count];
+        var selectedCount = 0;
+        var perType = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+
+        for (var index = 0; index < allEvents.Count && selectedCount < MaxReportEvents; index++)
+        {
+            var evt = allEvents[index];
+            var eventType = string.IsNullOrWhiteSpace(evt.EventType) ? "unknown" : evt.EventType;
+            perType.TryGetValue(eventType, out var currentForType);
+            if (IsHighValueReportEvent(evt) || currentForType < MaxReportEventsPerType)
+            {
+                selected[index] = true;
+                selectedCount++;
+                perType[eventType] = currentForType + 1;
+            }
+        }
+
+        for (var index = 0; index < allEvents.Count && selectedCount < MaxReportEvents; index++)
+        {
+            if (selected[index])
+            {
+                continue;
+            }
+
+            selected[index] = true;
+            selectedCount++;
+        }
+
+        omittedEventCount = allEvents.Count - selectedCount;
+        var reportEvents = new List<SandboxEvent>(selectedCount);
+        for (var index = 0; index < allEvents.Count; index++)
+        {
+            if (selected[index])
+            {
+                reportEvents.Add(SanitizeEvent(allEvents[index]));
+            }
+        }
+
+        return reportEvents;
+    }
+
+    private static bool IsHighValueReportEvent(SandboxEvent evt)
+    {
+        var eventType = evt.EventType ?? string.Empty;
+        return eventType.Contains("process", StringComparison.OrdinalIgnoreCase) ||
+            eventType.Contains("network", StringComparison.OrdinalIgnoreCase) ||
+            eventType.Contains("tcp", StringComparison.OrdinalIgnoreCase) ||
+            eventType.Contains("r0collector", StringComparison.OrdinalIgnoreCase) ||
+            eventType.Contains("agent.", StringComparison.OrdinalIgnoreCase) ||
+            eventType.Contains("report.", StringComparison.OrdinalIgnoreCase) ||
+            eventType.Contains("guest.events", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static List<BehaviorFinding> SanitizeFindings(IEnumerable<BehaviorFinding> findings)
+    {
+        return findings.Select(finding => finding with
+        {
+            Evidence = finding.Evidence
+                .Take(MaxEvidenceEventsPerFinding)
+                .Select(SanitizeEvent)
+                .ToList()
+        }).ToList();
+    }
+
+    private static SandboxEvent SanitizeEvent(SandboxEvent evt)
+    {
+        return evt with
+        {
+            Path = Truncate(evt.Path, MaxPathCharacters),
+            CommandLine = Truncate(evt.CommandLine, MaxPathCharacters),
+            Data = SanitizeData(evt.Data)
+        };
+    }
+
+    private static Dictionary<string, string> SanitizeData(Dictionary<string, string>? data)
+    {
+        var sanitized = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (data is null || data.Count == 0)
+        {
+            return sanitized;
+        }
+
+        foreach (var pair in data.Take(MaxEventDataPairs))
+        {
+            sanitized[pair.Key] = Truncate(pair.Value, MaxEventDataValueCharacters) ?? string.Empty;
+        }
+
+        if (data.Count > MaxEventDataPairs)
+        {
+            sanitized["__omittedDataPairs"] = (data.Count - MaxEventDataPairs).ToString();
+        }
+
+        return sanitized;
+    }
+
+    private static string? Truncate(string? value, int maxCharacters)
+    {
+        if (string.IsNullOrEmpty(value) || value.Length <= maxCharacters)
+        {
+            return value;
+        }
+
+        return value[..maxCharacters] + $"…<truncated {value.Length - maxCharacters} chars>";
     }
 
     private static List<SandboxEvent> BuildHostPostProcessEvents(Guid jobId, string jobRoot, string eventsPath, int guestEventCount)
@@ -409,20 +575,23 @@ internal static class PostProcessProgram
         ];
     }
 
-    private static Dictionary<string, int> BuildMetrics(IReadOnlyCollection<SandboxEvent> events, IReadOnlyCollection<BehaviorFinding> findings, StaticAnalysisResult? staticAnalysis)
+    private static Dictionary<string, int> BuildMetrics(IReadOnlyCollection<SandboxEvent> rawEvents, IReadOnlyCollection<SandboxEvent> reportEvents, IReadOnlyCollection<BehaviorFinding> findings, StaticAnalysisResult? staticAnalysis)
     {
         var metrics = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase)
         {
-            ["events"] = events.Count,
+            ["events"] = rawEvents.Count,
+            ["rawEvents"] = rawEvents.Count,
+            ["reportEvents"] = reportEvents.Count,
+            ["omittedReportEvents"] = Math.Max(0, rawEvents.Count - reportEvents.Count),
             ["findings"] = findings.Count,
             ["highFindings"] = findings.Count(finding => string.Equals(finding.Severity, "high", StringComparison.OrdinalIgnoreCase)),
             ["mediumFindings"] = findings.Count(finding => string.Equals(finding.Severity, "medium", StringComparison.OrdinalIgnoreCase)),
             ["lowFindings"] = findings.Count(finding => string.Equals(finding.Severity, "low", StringComparison.OrdinalIgnoreCase)),
             ["infoFindings"] = findings.Count(finding => string.Equals(finding.Severity, "info", StringComparison.OrdinalIgnoreCase)),
-            ["processEvents"] = events.Count(evt => evt.EventType.Contains("process", StringComparison.OrdinalIgnoreCase)),
-            ["fileEvents"] = events.Count(evt => evt.EventType.Contains("file", StringComparison.OrdinalIgnoreCase)),
-            ["registryEvents"] = events.Count(evt => evt.EventType.Contains("registry", StringComparison.OrdinalIgnoreCase)),
-            ["networkEvents"] = events.Count(evt => evt.EventType.Contains("network", StringComparison.OrdinalIgnoreCase) || evt.EventType.Contains("tcp", StringComparison.OrdinalIgnoreCase)),
+            ["processEvents"] = rawEvents.Count(evt => evt.EventType.Contains("process", StringComparison.OrdinalIgnoreCase)),
+            ["fileEvents"] = rawEvents.Count(evt => evt.EventType.Contains("file", StringComparison.OrdinalIgnoreCase)),
+            ["registryEvents"] = rawEvents.Count(evt => evt.EventType.Contains("registry", StringComparison.OrdinalIgnoreCase)),
+            ["networkEvents"] = rawEvents.Count(evt => evt.EventType.Contains("network", StringComparison.OrdinalIgnoreCase) || evt.EventType.Contains("tcp", StringComparison.OrdinalIgnoreCase)),
             ["staticTags"] = staticAnalysis?.Tags.Count ?? 0
         };
         return metrics;

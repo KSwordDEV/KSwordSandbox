@@ -116,11 +116,11 @@ public sealed record DriverConfig
 {
     public bool Enabled { get; init; } = true;
 
-    public string ServiceName { get; init; } = "KSwordARK";
+    public string ServiceName { get; init; } = "KSwordSandboxDriver";
 
     public string? HostDriverPath { get; init; }
 
-    public string DriverPathInGuest { get; init; } = "C:\\KSwordSandbox\\driver\\KSwordARKDriver.sys";
+    public string DriverPathInGuest { get; init; } = "C:\\KSwordSandbox\\driver\\KSword.Sandbox.Driver.sys";
 
     public string EventJsonLinesPath { get; init; } = "C:\\KSwordSandbox\\out\\driver-events.jsonl";
 

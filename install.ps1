@@ -18,6 +18,7 @@ Automation examples:
   .\install.ps1 -Mode Install -GeneratePassword
   .\install.ps1 -Mode Change -ResetPassword -PromptPassword
   .\install.ps1 -Mode Change -UpdateHyperVConfig -VmName KSwordSandbox-Win10-Golden -CheckpointName Clean
+  .\install.ps1 -Mode Change -UpdateHyperVConfig -DriverHostPath D:\Temp\KSwordSandbox\build\r0-driver\Release\KSword.Sandbox.Driver.sys
   .\install.ps1 -Mode ConfigureVTKey -PromptVTKey
   .\install.ps1 -Mode CheckEnvironment
   .\install.ps1 -Mode StartWebUI
@@ -43,6 +44,8 @@ param(
     [string]$RuntimeRoot = 'D:\Temp\KSwordSandbox',
 
     [string]$GuestPayloadRoot = 'D:\Temp\KSwordSandbox\payload\guest-tools',
+
+    [string]$DriverHostPath = '',
 
     [string]$VmName = 'KSwordSandbox-Win10-Golden',
 
@@ -174,6 +177,7 @@ function Initialize-EffectiveParameters {
         VirusTotalSecretName = 'virusTotalSecretName'
         RuntimeRoot = 'runtimeRoot'
         GuestPayloadRoot = 'guestPayloadRoot'
+        DriverHostPath = 'driverHostPath'
         VmName = 'vmName'
         CheckpointName = 'checkpointName'
         GuestWorkingDirectory = 'guestWorkingDirectory'
@@ -307,6 +311,54 @@ function Get-LocalSandboxConfigPath {
     return [System.IO.Path]::GetFullPath((Join-Path $RuntimeRoot 'config\sandbox.local.json'))
 }
 
+function Resolve-RepositoryRelativePath {
+    param([Parameter(Mandatory)][string]$Path)
+
+    if ([System.IO.Path]::IsPathRooted($Path)) {
+        return [System.IO.Path]::GetFullPath($Path)
+    }
+
+    return [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot $Path))
+}
+
+function Resolve-DriverHostPath {
+    if (-not [string]::IsNullOrWhiteSpace($DriverHostPath)) {
+        return Resolve-RepositoryRelativePath -Path $DriverHostPath
+    }
+
+    $existingConfigPath = Get-LocalSandboxConfigPath
+    if (Test-Path -LiteralPath $existingConfigPath -PathType Leaf) {
+        try {
+            $existingConfig = Get-Content -LiteralPath $existingConfigPath -Raw | ConvertFrom-Json
+            $existingHostDriverPathProperty = $existingConfig.PSObject.Properties['driver']
+            if ($null -ne $existingHostDriverPathProperty -and $null -ne $existingHostDriverPathProperty.Value) {
+                $driverObject = $existingHostDriverPathProperty.Value
+                $hostDriverPathProperty = $driverObject.PSObject.Properties['hostDriverPath']
+                if ($null -ne $hostDriverPathProperty -and -not [string]::IsNullOrWhiteSpace([string]$hostDriverPathProperty.Value)) {
+                    return Resolve-RepositoryRelativePath -Path ([string]$hostDriverPathProperty.Value)
+                }
+            }
+        }
+        catch {
+            Write-InstallInfo "Ignoring unreadable existing driver.hostDriverPath from '$existingConfigPath': $($_.Exception.Message)"
+        }
+    }
+
+    foreach ($candidate in @(
+            (Join-Path $RuntimeRoot 'build\r0-driver\Release\KSword.Sandbox.Driver.sys'),
+            (Join-Path $RuntimeRoot 'build\r0-driver\Debug\KSword.Sandbox.Driver.sys'),
+            (Join-Path $PSScriptRoot 'x64\Release\KSword.Sandbox.Driver.sys'),
+            (Join-Path $PSScriptRoot 'x64\Debug\KSword.Sandbox.Driver.sys'),
+            (Join-Path $PSScriptRoot 'driver\KSword.Sandbox.Driver\x64\Release\KSword.Sandbox.Driver.sys'),
+            (Join-Path $PSScriptRoot 'driver\KSword.Sandbox.Driver\x64\Debug\KSword.Sandbox.Driver.sys'))) {
+        if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+            return [System.IO.Path]::GetFullPath($candidate)
+        }
+    }
+
+    return $null
+}
+
 function Write-LocalSandboxConfig {
     $targetPath = Get-LocalSandboxConfigPath
     $templatePath = Join-Path $PSScriptRoot 'config\sandbox.example.json'
@@ -322,6 +374,7 @@ function Write-LocalSandboxConfig {
     $config.guest.workingDirectory = $GuestWorkingDirectory
     $config.paths.runtimeRoot = $RuntimeRoot
     $config.paths.guestPayloadRoot = $GuestPayloadRoot
+    $config.driver.hostDriverPath = Resolve-DriverHostPath
 
     $driverEventsFileName = Split-Path -Leaf $config.driver.eventJsonLinesPath
     $r0CollectorFileName = Split-Path -Leaf $config.driver.r0CollectorPathInGuest
@@ -344,6 +397,12 @@ function Write-LocalSandboxConfig {
 
         $config | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $targetPath -Encoding UTF8
         Write-InstallInfo "Local sandbox config written: $targetPath"
+        if ([string]::IsNullOrWhiteSpace([string]$config.driver.hostDriverPath)) {
+            Write-InstallInfo 'R0 warning: real R0 collection needs driver.hostDriverPath. No built driver .sys was auto-detected; live preflight will ask you to set -DriverHostPath, enable driver.useMockCollector, or disable driver.enabled.'
+        }
+        else {
+            Write-InstallInfo "Configured driver.hostDriverPath: $($config.driver.hostDriverPath)"
+        }
     }
     else {
         Write-InstallInfo "WhatIf: local sandbox config would be written: $targetPath"
@@ -474,6 +533,7 @@ function Save-InstallState {
         [string]$Vm = $VmName,
         [string]$Checkpoint = $CheckpointName,
         [string]$GuestWorking = $GuestWorkingDirectory,
+        [AllowNull()][string]$DriverHost = (Resolve-DriverHostPath),
         [string]$LocalConfig = ''
     )
 
@@ -497,6 +557,7 @@ function Save-InstallState {
         vmName = $Vm
         checkpointName = $Checkpoint
         guestWorkingDirectory = $GuestWorking
+        driverHostPath = $DriverHost
         localConfigPath = $LocalConfig
         webConfigPathEnvironmentName = $script:WebConfigPathEnvironmentName
         secretValuePrinted = $false
@@ -686,6 +747,7 @@ function Invoke-HyperVConfigPrompt {
     $script:GuestWorkingDirectory = Read-OptionalText -Prompt 'Guest working directory' -CurrentValue $GuestWorkingDirectory
     $script:RuntimeRoot = Read-OptionalText -Prompt 'Host runtime root' -CurrentValue $RuntimeRoot
     $script:GuestPayloadRoot = Read-OptionalText -Prompt 'Host guest payload root' -CurrentValue $GuestPayloadRoot
+    $script:DriverHostPath = Read-OptionalText -Prompt 'Host R0 driver .sys path (blank = auto-detect/none)' -CurrentValue (Resolve-DriverHostPath)
     $script:LocalConfigPath = Read-OptionalText -Prompt 'Local sandbox config path' -CurrentValue (Get-LocalSandboxConfigPath)
     Set-HyperVConfigState
 }
@@ -812,6 +874,17 @@ function Show-KSwordSandboxInstallStatus {
     $guestAgentPayload = Join-Path (Join-Path $GuestPayloadRoot 'agent') 'KSword.Sandbox.Agent.exe'
     $r0CollectorPayload = Join-Path (Join-Path $GuestPayloadRoot 'r0collector') 'KSword.Sandbox.R0Collector.exe'
     $payloadManifest = Join-Path $GuestPayloadRoot 'payload-manifest.json'
+    $driverHost = Resolve-DriverHostPath
+    $driverHostExists = -not [string]::IsNullOrWhiteSpace($driverHost) -and (Test-Path -LiteralPath $driverHost -PathType Leaf)
+    $driverSignatureStatus = $null
+    if ($driverHostExists) {
+        try {
+            $driverSignatureStatus = [string](Get-AuthenticodeSignature -FilePath $driverHost).Status
+        }
+        catch {
+            $driverSignatureStatus = "Error: $($_.Exception.Message)"
+        }
+    }
 
     if ($hyperVModuleAvailable) {
         try {
@@ -841,6 +914,15 @@ function Show-KSwordSandboxInstallStatus {
     }
     if ([string]::IsNullOrWhiteSpace($processValue) -and [string]::IsNullOrWhiteSpace($userValue) -and [string]::IsNullOrWhiteSpace($machineValue)) {
         [void]$recommendedActions.Add(".\install.ps1 -Mode Install -PromptPassword, or .\scripts\Test-HyperVReadiness.ps1 -PromptForMissingGuestPassword for a process-only check.")
+    }
+    if ([string]::IsNullOrWhiteSpace($driverHost)) {
+        [void]$recommendedActions.Add(".\install.ps1 -Mode Change -UpdateHyperVConfig -DriverHostPath <path-to-test-signed-KSword.Sandbox.Driver.sys>, or set driver.useMockCollector=true for plumbing-only tests.")
+    }
+    elseif (-not $driverHostExists) {
+        [void]$recommendedActions.Add("Build the R0 driver or correct DriverHostPath: $driverHost")
+    }
+    elseif ($driverSignatureStatus -eq 'NotSigned') {
+        [void]$recommendedActions.Add("Test-sign the configured driver and enable guest test-signing before live R0 collection: $driverHost")
     }
     if (-not $hyperVModuleAvailable) {
         [void]$recommendedActions.Add('Enable/install Hyper-V PowerShell tools, then rerun .\install.ps1 -Mode CheckEnvironment.')
@@ -872,6 +954,9 @@ function Show-KSwordSandboxInstallStatus {
         R0CollectorPayloadExists = Test-Path -LiteralPath $r0CollectorPayload -PathType Leaf
         GuestPayloadManifest = $payloadManifest
         GuestPayloadManifestExists = Test-Path -LiteralPath $payloadManifest -PathType Leaf
+        DriverHostPath = $driverHost
+        DriverHostPathExists = $driverHostExists
+        DriverSignatureStatus = $driverSignatureStatus
         VmName = $VmName
         CheckpointName = $CheckpointName
         GuestWorkingDirectory = $GuestWorkingDirectory
