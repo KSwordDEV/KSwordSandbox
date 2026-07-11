@@ -33,6 +33,7 @@ public static class ArtifactDescriptorFactory
         {
             ["sha256"] = sha256
         };
+        AddIdentityMetadata(copiedMetadata, relativePath, info.FullName, info.Length, sha256);
 
         return new ArtifactDescriptor
         {
@@ -82,6 +83,7 @@ public static class ArtifactDescriptorFactory
             ? NormalizeRelativePath(path)
             : SafeRelativePath(rootPath, path);
         var safeLink = BuildSafeLink(relativePath);
+        AddIdentityMetadata(copiedMetadata, relativePath, path, null, null);
 
         return new ArtifactDescriptor
         {
@@ -117,6 +119,7 @@ public static class ArtifactDescriptorFactory
         {
             hashes["sha256"] = descriptor.Sha256;
         }
+        AddIdentityMetadata(metadata, relativePath, descriptor.FullPath, descriptor.SizeBytes > 0 ? descriptor.SizeBytes : null, descriptor.Sha256);
 
         var safeLink = BuildSafeLink(relativePath);
         if (string.IsNullOrWhiteSpace(safeLink))
@@ -348,6 +351,34 @@ public static class ArtifactDescriptorFactory
         return metadata is null
             ? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
             : new Dictionary<string, string>(metadata, StringComparer.OrdinalIgnoreCase);
+    }
+
+
+    private static void AddIdentityMetadata(
+        Dictionary<string, string> metadata,
+        string relativePath,
+        string fullPath,
+        long? sizeBytes,
+        string? sha256)
+    {
+        AddDefault(metadata, "artifactRelativePath", relativePath);
+        AddDefault(metadata, "sourceArtifactRelativePath", relativePath);
+        AddDefault(metadata, "importPath", relativePath);
+        AddDefault(metadata, "sourceArtifactPath", fullPath);
+        AddDefault(metadata, "fullPath", fullPath);
+        if (sizeBytes is > 0)
+        {
+            var sizeText = sizeBytes.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            AddDefault(metadata, "sizeBytes", sizeText);
+            AddDefault(metadata, "sourceArtifactSizeBytes", sizeText);
+        }
+
+        if (!string.IsNullOrWhiteSpace(sha256))
+        {
+            AddDefault(metadata, "sha256", sha256);
+            AddDefault(metadata, "sourceArtifactSha256", sha256);
+            AddDefault(metadata, "hash.sha256", sha256);
+        }
     }
 
     private static void ApplyKindMetadataDefaults(ArtifactKind kind, Dictionary<string, string> metadata, bool includeAvailability)

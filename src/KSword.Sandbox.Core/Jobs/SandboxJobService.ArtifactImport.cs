@@ -169,6 +169,7 @@ public sealed partial class SandboxJobService
             ["mimeType"] = artifact.MimeType,
             ["sizeBytes"] = artifact.SizeBytes.ToString(CultureInfo.InvariantCulture),
             ["sourceArtifactSizeBytes"] = artifact.SizeBytes.ToString(CultureInfo.InvariantCulture),
+            ["artifactSizeBytes"] = artifact.SizeBytes.ToString(CultureInfo.InvariantCulture),
             ["hostImport"] = "true",
             ["importMode"] = "host-artifact-index",
             ["indexRoot"] = jobRoot,
@@ -177,14 +178,23 @@ public sealed partial class SandboxJobService
         };
 
         AddIfNotEmpty(data, "sha256", artifact.Sha256);
+        AddIfNotEmpty(data, "artifactSha256", artifact.Sha256);
         AddIfNotEmpty(data, "sourceArtifactSha256", artifact.Sha256);
         AddIfNotEmpty(data, "hash.sha256", artifact.Hashes.TryGetValue("sha256", out var hash) ? hash : artifact.Sha256);
         AddIfNotEmpty(data, "guestPath", artifact.GuestPath);
         AddIfNotEmpty(data, "sourceEventSource", MetadataValue(artifact.Metadata, "sourceEventSource"));
         AddIfNotEmpty(data, "sourceEventsPath", MetadataValue(artifact.Metadata, "sourceEventsPath"));
         AddIfNotEmpty(data, "processId", MetadataValue(artifact.Metadata, "processId"));
-        AddIfNotEmpty(data, "rootProcessId", MetadataValue(artifact.Metadata, "rootProcessId"));
+        AddIfNotEmpty(data, "parentProcessId", MetadataValue(artifact.Metadata, "parentProcessId"));
+        AddIfNotEmpty(data, "rootProcessId", MetadataValue(artifact.Metadata, "rootProcessId", "rootPid", "processRootId"));
+        AddIfNotEmpty(data, "treeLineage", MetadataValue(artifact.Metadata, "treeLineage", "processTreeLineage", "lineage"));
         AddIfNotEmpty(data, "processName", MetadataValue(artifact.Metadata, "processName"));
+        AddIfNotEmpty(data, "commandLine", MetadataValue(artifact.Metadata, "commandLine"));
+        AddIfNotEmpty(data, "duplicateGroupKey", MetadataValue(artifact.Metadata, "duplicateGroupKey"));
+        AddIfNotEmpty(data, "duplicateGroupCount", MetadataValue(artifact.Metadata, "duplicateGroupCount"));
+        AddIfNotEmpty(data, "duplicateOrdinal", MetadataValue(artifact.Metadata, "duplicateOrdinal"));
+        AddIfNotEmpty(data, "isDuplicate", MetadataValue(artifact.Metadata, "isDuplicate"));
+        AddIfNotEmpty(data, "duplicateOfArtifactRelativePath", MetadataValue(artifact.Metadata, "duplicateOfArtifactRelativePath"));
 
         return new SandboxEvent
         {

@@ -179,7 +179,7 @@ internal sealed class R0CollectorJsonlSchemaContractScenario : ISmokeTestScenari
                 ["backpressure"] = "false",
                 ["backpressureObserved"] = "false",
                 ["lastEnqueueFailureStatus"] = "0",
-                ["StressJsonlLossEvidence"] = "lost|lostCount|lossObserved|sequence|head|tail|loss",
+                ["StressJsonlLossEvidence"] = "lost|lostCount|lossObserved|sequence|sequenceGapObserved|sequenceGapEstimate|head|tail|loss",
                 ["StressJsonlBackpressureEvidence"] = "backpressure|backpressureObserved|highWatermark|sampling"
             }
         };

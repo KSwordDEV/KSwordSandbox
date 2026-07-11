@@ -181,6 +181,7 @@ public static class NetworkTelemetrySchema
         AddIfNotEmpty(data, "sourceArtifactName", source.Name);
         AddIfNotEmpty(data, "sourceArtifactRelativePath", source.RelativePath);
         AddIfNotEmpty(data, "artifactRelativePath", source.RelativePath);
+        AddIfNotEmpty(data, "downloadSelector", source.RelativePath);
         AddIfNotEmpty(data, "sourceImportRoot", source.ImportRoot);
         AddIfNotEmpty(data, "sourceArtifactKind", source.ArtifactKind);
         AddIfNotEmpty(data, "collectionName", source.CollectionName);
@@ -191,7 +192,25 @@ public static class NetworkTelemetrySchema
             if (pair.Key.StartsWith("network.", StringComparison.OrdinalIgnoreCase) ||
                 pair.Key.StartsWith("pcap", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(pair.Key, "captureState", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(pair.Key, "capturePhase", StringComparison.OrdinalIgnoreCase))
+                string.Equals(pair.Key, "capturePhase", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(pair.Key, "sha256", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(pair.Key, "sourceArtifactSha256", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(pair.Key, "hash.sha256", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(pair.Key, "sizeBytes", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(pair.Key, "sourceArtifactSizeBytes", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(pair.Key, "artifactRelativePath", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(pair.Key, "sourceArtifactRelativePath", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(pair.Key, "rootProcessId", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(pair.Key, "treeLineage", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(pair.Key, "processId", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(pair.Key, "parentProcessId", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(pair.Key, "processName", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(pair.Key, "commandLine", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(pair.Key, "duplicateGroupKey", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(pair.Key, "duplicateGroupCount", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(pair.Key, "duplicateOrdinal", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(pair.Key, "isDuplicate", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(pair.Key, "duplicateOfArtifactRelativePath", StringComparison.OrdinalIgnoreCase))
             {
                 AddIfNotEmpty(data, pair.Key, pair.Value);
             }
@@ -202,8 +221,13 @@ public static class NetworkTelemetrySchema
             var info = new FileInfo(source.FullPath);
             if (info.Exists)
             {
-                data["sourceArtifactSizeBytes"] = info.Length.ToString(CultureInfo.InvariantCulture);
-                data["sourceArtifactSha256"] = ComputeSha256(info.FullName);
+                var sizeText = info.Length.ToString(CultureInfo.InvariantCulture);
+                var sha256 = ComputeSha256(info.FullName);
+                data["sourceArtifactSizeBytes"] = sizeText;
+                data["sizeBytes"] = sizeText;
+                data["sourceArtifactSha256"] = sha256;
+                data["sha256"] = sha256;
+                data["hash.sha256"] = sha256;
             }
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException)

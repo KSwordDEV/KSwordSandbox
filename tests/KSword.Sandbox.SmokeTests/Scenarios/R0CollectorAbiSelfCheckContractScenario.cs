@@ -78,7 +78,19 @@ internal sealed class R0CollectorAbiSelfCheckContractScenario : ISmokeTestScenar
             "capabilityFlagsCurrentHex",
             "producerMaskCurrentHex",
             "producerMaskDefaultHex",
+            "abiGuardPassed",
+            "abiGuardPolicy",
+            "zhAbiGuardPolicy",
             "eventHeaderSize",
+            "eventHeaderSequenceOffset",
+            "eventHeaderLostEventsOffset",
+            "eventHeaderBackpressureEventsOffset",
+            "statusQueueHighWatermarkOffset",
+            "statusTotalEventsDroppedOffset",
+            "statusTotalEventsBackpressuredOffset",
+            "statusLastEnqueueFailureOffset",
+            "readEventsEventsDroppedOffset",
+            "readEventsEventsOffset",
             "healthReplySize",
             "healthReplyLegacyMinimumBytes",
             "healthReplyProducerMaskBytes",
@@ -98,7 +110,11 @@ internal sealed class R0CollectorAbiSelfCheckContractScenario : ISmokeTestScenar
             "producerSelectionPolicy",
             "jsonlNoisePolicy",
             "jsonlMalformedPolicy",
+            "jsonlNoiseInjectionGuard",
+            "zhJsonlNoiseInjectionGuard",
             "kernelBackpressurePolicy",
+            "sequenceSemantics",
+            "zhSequenceSemantics",
             "queueLossEvidence",
             "stableJsonlFields",
             "abiSelfCheckComplete"
@@ -209,7 +225,17 @@ internal sealed class R0CollectorAbiSelfCheckContractScenario : ISmokeTestScenar
         RequireData(abiSelfCheck, "capabilityFlagsCurrentHex", "0x000000000003FFFF");
         RequireData(abiSelfCheck, "producerMaskCurrentHex", "0x0000003F");
         RequireData(abiSelfCheck, "producerMaskDefaultHex", "0x0000003F");
+        RequireData(abiSelfCheck, "abiGuardPassed", "true");
         RequireData(abiSelfCheck, "eventHeaderSize", "104");
+        RequireData(abiSelfCheck, "eventHeaderSequenceOffset", "16");
+        RequireData(abiSelfCheck, "eventHeaderLostEventsOffset", "64");
+        RequireData(abiSelfCheck, "eventHeaderBackpressureEventsOffset", "72");
+        RequireData(abiSelfCheck, "statusQueueHighWatermarkOffset", "24");
+        RequireData(abiSelfCheck, "statusTotalEventsDroppedOffset", "56");
+        RequireData(abiSelfCheck, "statusTotalEventsBackpressuredOffset", "88");
+        RequireData(abiSelfCheck, "statusLastEnqueueFailureOffset", "112");
+        RequireData(abiSelfCheck, "readEventsEventsDroppedOffset", "24");
+        RequireData(abiSelfCheck, "readEventsEventsOffset", "40");
         RequireData(abiSelfCheck, "healthReplySize", "80");
         RequireData(abiSelfCheck, "healthReplyLegacyMinimumBytes", "44");
         RequireData(abiSelfCheck, "healthReplyProducerMaskBytes", "60");
@@ -252,8 +278,16 @@ internal sealed class R0CollectorAbiSelfCheckContractScenario : ISmokeTestScenar
             "ABI self-check should describe non-blocking backpressure.");
         RequireContains(
             abiSelfCheck.Data["queueLossEvidence"],
-            "sequence",
-            "ABI self-check should name sequence-based loss evidence.");
+            "sequenceGapObserved",
+            "ABI self-check should name sequence-gap loss evidence.");
+        RequireContains(
+            abiSelfCheck.Data["sequenceSemantics"],
+            "sequenceMeaning=nextSequence",
+            "ABI self-check should explain sequence summary semantics.");
+        RequireContains(
+            abiSelfCheck.Data["jsonlNoiseInjectionGuard"],
+            "rejected",
+            "ABI self-check should document noise-injection guardrails.");
 
         var stopped = RequireEvent(jsonLines.Events, "r0collector.stopped");
         RequireData(stopped, "reason", "abiSelfCheckComplete");

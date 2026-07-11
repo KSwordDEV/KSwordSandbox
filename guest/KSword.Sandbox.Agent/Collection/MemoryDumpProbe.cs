@@ -264,6 +264,7 @@ internal sealed class MemoryDumpProbe : IGuestProbe
         var evt = CreateBaseEvent("memory_dump.captured", result, phaseLabel, target, rootProcessId);
         evt.Data["captureState"] = "captured";
         evt.Data["status"] = "captured";
+        evt.Data["childProcessDumpTarget"] = (target is not null && !target.IsRoot).ToString(CultureInfo.InvariantCulture).ToLowerInvariant();
         evt.Data["nonfatal"] = "false";
         evt.Data["zhMessage"] = "内存转储已采集为可下载证据文件。";
         evt.Data["zhHint"] = "内存转储可能包含敏感内容；请使用 artifactRelativePath 下载，并用 sizeBytes/sha256 校验完整性。";
@@ -299,6 +300,7 @@ internal sealed class MemoryDumpProbe : IGuestProbe
         evt.Data["status"] = "skipped";
         evt.Data["nonfatal"] = "true";
         evt.Data["duplicate"] = duplicate.ToString(CultureInfo.InvariantCulture).ToLowerInvariant();
+        evt.Data["childProcessDumpTarget"] = (target is not null && !target.IsRoot).ToString(CultureInfo.InvariantCulture).ToLowerInvariant();
         AddOptionalData(evt, "reason", result.Reason);
         AddOptionalData(evt, "zhMessage", "内存转储采集被跳过；该事件说明证据缺口，不会中断整体分析。");
         AddOptionalData(evt, "zhHint", MemoryDumpReasonZhHint(result.Reason, result.DiagnosticStage, duplicate));
@@ -344,6 +346,8 @@ internal sealed class MemoryDumpProbe : IGuestProbe
                 ["capturePhase"] = phaseLabel,
                 ["captureEnabled"] = "true",
                 ["implemented"] = "true",
+                ["childProcessDumpEnabled"] = "true",
+                ["childProcessDumpMode"] = "visible-root-tree",
                 ["dumpType"] = result.DumpType,
                 ["evidenceRole"] = "memory-dump",
                 ["collectionName"] = "memory-dumps",
@@ -403,6 +407,8 @@ internal sealed class MemoryDumpProbe : IGuestProbe
                 ["capturePhase"] = phaseLabel,
                 ["captureEnabled"] = "true",
                 ["implemented"] = "true",
+                ["childProcessDumpEnabled"] = "true",
+                ["childProcessDumpMode"] = "visible-root-tree",
                 ["captureState"] = "summary",
                 ["status"] = "summary",
                 ["summaryEvent"] = "true",
@@ -421,7 +427,7 @@ internal sealed class MemoryDumpProbe : IGuestProbe
                 ["skippedCount"] = skippedCount.ToString(CultureInfo.InvariantCulture),
                 ["alreadyCapturedCount"] = alreadyCapturedCount.ToString(CultureInfo.InvariantCulture),
                 ["zhMessage"] = "内存转储 sweep 已完成并记录根/子进程覆盖情况。",
-                ["zhHint"] = "请结合 rootProcessId/treeLineage、capturedCount、skippedCount 和 alreadyCapturedCount 判断转储覆盖面。"
+                ["zhHint"] = "内存转储为显式 opt-in；启用后会尽力覆盖可见根进程树中的子进程。请结合 rootProcessId/treeLineage、capturedCount、skippedCount 和 alreadyCapturedCount 判断覆盖面。"
             }
         };
     }
@@ -443,6 +449,8 @@ internal sealed class MemoryDumpProbe : IGuestProbe
                 ["capturePhase"] = "before-start",
                 ["captureEnabled"] = "false",
                 ["implemented"] = "true",
+                ["childProcessDumpEnabled"] = "false",
+                ["childProcessDumpMode"] = "disabled-until-memory-dump-requested",
                 ["reason"] = "memoryDumpNotRequested",
                 ["zhMessage"] = "内存转储采集未启用。",
                 ["zhHint"] = "未启用 --memory-dump/--memory-dumps，Guest Agent 不会生成进程 minidump。",

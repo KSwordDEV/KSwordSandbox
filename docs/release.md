@@ -89,6 +89,111 @@ portable script copies. Keep exclusions broad enough to block:
 10. Record hashes and release notes. Push/publish only when a release manager
     explicitly requests it; the package script does not push.
 
+## Open-source MVP readiness checklist
+
+Use this as the concise release manager gate before publishing the first public
+MVP package.
+
+- **Repository policy:** `.\scripts\Test-RepositoryPolicy.ps1` passes for the
+  current tree and, before commit, `.\scripts\Test-RepositoryPolicy.ps1
+  -StagedOnly` passes for staged files.
+- **Artifact exclusion:** no samples, job folders, reports, event streams,
+  captures, dumps, screenshots, VM exports, Hyper-V checkpoints, `bin/`, `obj/`,
+  `x64/`, `.sys`, `.pdb`, archives, certificates, private keys, DPAPI backups,
+  `sandbox.local.json`, or `install-state.json` are tracked or packaged.
+- **Packaging locality:** package output root is outside the repository, for
+  example `D:\Temp\KSwordSandbox\packages`; the packaging script only stages and
+  zips locally.
+- **No legacy signing tool:** build, smoke, package, and onboarding commands do
+  not call `CSignTool.exe` or old KSword interactive signing wrappers.
+- **Known R0 signing limitation:** real R0 remains an optional lab path, not a
+  default release promise. The driver can be compiled, but loading it requires a
+  test-signed `.sys`, guest Windows test-signing, and an isolated Hyper-V VM.
+  Keep `.sys`, `.pdb`, certificates, and private signing material outside git
+  and outside source packages.
+- **Hyper-V live prerequisites documented:** the operator runbook states that
+  Live mode requires an elevated Windows host with Hyper-V PowerShell tools,
+  hardware virtualization enabled in BIOS/UEFI, an existing Windows golden VM,
+  a clean checkpoint, Guest Service Interface / PowerShell Direct access, a
+  guest password secret, and staged Guest Agent/R0Collector payloads.
+- **VT terminology is explicit:** VirusTotal is optional hash-only enrichment
+  configured with `.\install.ps1 -Mode ConfigureVTKey -PromptVTKey`; Intel VT-x
+  / AMD-V is the BIOS/UEFI virtualization setting required by Hyper-V. These are
+  unrelated settings despite sharing the letters "VT".
+- **Default behavior is safe:** `.\run.ps1`, `.\run.ps1 -Mode Analyze
+  -SamplePreset Notepad`, `Status`, `CheckEnvironment`, `Plan`, `WhatIf`, and
+  package creation do not start, restore, stop, or mutate a VM. Live execution
+  requires explicit `-Live` or the WebUI/API live action.
+- **Real Notepad 5s report path is documented and tested on a lab machine:** see
+  the command sequence below. The resulting job/report remains under the runtime
+  root, not the repository.
+
+## Real Notepad 5s report runbook
+
+This is the shortest public-MVP live smoke for generating a real report with
+the built-in Windows Notepad sample. Run it only on the prepared lab host/VM;
+it can restore, start, stop, and modify the configured golden VM.
+
+1. From an elevated PowerShell in the repository or portable package root, check
+   read-only readiness:
+
+   ```powershell
+   .\install.ps1 -Mode CheckEnvironment
+   .\run.ps1 -Mode CheckEnvironment
+   ```
+
+2. If readiness reports missing local state, configure it outside git:
+
+   ```powershell
+   .\install.ps1 -Mode Install -PromptPassword
+   .\install.ps1 -Mode Change -UpdateHyperVConfig `
+     -VmName 'KSwordSandbox-Win10-Golden' `
+     -CheckpointName 'Clean' `
+     -GuestWorkingDirectory 'C:\KSwordSandbox'
+   .\scripts\Prepare-GuestPayload.ps1 -RepoRoot . -SelfContained
+   ```
+
+3. Optional enrichment only: configure VirusTotal hash-only lookups if desired.
+   This never uploads sample bytes.
+
+   ```powershell
+   .\install.ps1 -Mode ConfigureVTKey -PromptVTKey
+   ```
+
+4. Optional real R0 only: configure a repository-external test-signed driver
+   path and enable guest test-signing in the isolated VM. Skip this step for
+   the default MVP live smoke or use mock/disabled R0.
+
+   ```powershell
+   .\install.ps1 -Mode Change -UpdateHyperVConfig -DriverHostPath 'D:\Temp\KSwordSandbox\build\r0-driver\Release\KSword.Sandbox.Driver.sys'
+   .\install.ps1 -Mode Change -EnableGuestTestSigning -RestartGuestAfterTestSigning -Force
+   ```
+
+5. Generate the real 5-second Notepad report:
+
+   ```powershell
+   .\run.ps1 -Mode Analyze -SamplePreset Notepad -DurationSeconds 5 -Live
+   ```
+
+6. Confirm the output job directory printed by `run.ps1` contains:
+
+   ```text
+   runbook-execution.json
+   guest\<job-id>\events.json
+   postprocess-result.json
+   report.json
+   report.html
+   report.zh.html
+   report.en.html
+   ```
+
+   If the job id is known later, reports can be regenerated without touching the
+   VM:
+
+   ```powershell
+   .\scripts\Rebuild-JobReport.ps1 -JobId <job-guid>
+   ```
+
 ## Portable zip script draft
 
 `scripts/package-portable.ps1` reads the selected manifest, stages files under

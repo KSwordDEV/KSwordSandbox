@@ -138,7 +138,7 @@ public sealed class HostArtifactIndexBuilder
             artifacts.Add(MergeGuestDescriptor(descriptor, guestArtifact, fullJobRoot));
         }
 
-        artifacts = artifacts
+        artifacts = MarkDuplicateArtifacts(artifacts)
             .OrderBy(artifact => artifact.RelativePath, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
@@ -709,6 +709,7 @@ public sealed class HostArtifactIndexBuilder
             AddIfMissing(metadata, pair.Key, pair.Value);
         }
 
+        AddArtifactIdentityMetadata(metadata, scanned);
         AddIfNotEmpty(metadata, "hostRelativePath", scanned.RelativePath);
         AddIfNotEmpty(metadata, "hostFullPath", scanned.FullPath);
         AddIfNotEmpty(metadata, "indexedBy", nameof(HostArtifactIndexBuilder));
@@ -749,6 +750,8 @@ public sealed class HostArtifactIndexBuilder
             metadata["guestManifestSizeBytes"] = guest.SizeBytes.ToString(CultureInfo.InvariantCulture);
         }
 
+        AddIfNotEmpty(metadata, "rootProcessId", MetadataValue(guest.Metadata, "rootProcessId", "rootPid", "processRootId"));
+        AddIfNotEmpty(metadata, "treeLineage", MetadataValue(guest.Metadata, "treeLineage", "processTreeLineage", "lineage"));
         AddIfNotEmpty(metadata, "guestManifestSha256", guest.Sha256);
         if (guest.Hashes is not null)
         {
@@ -1117,7 +1120,8 @@ public sealed class HostArtifactIndexBuilder
             ["discoveredBy"] = nameof(HostArtifactIndexBuilder),
             ["hrefPolicy"] = "relative-safe-link-only",
             ["artifactCount"] = artifacts.Count.ToString(CultureInfo.InvariantCulture),
-            ["totalBytes"] = artifacts.Sum(artifact => artifact.SizeBytes).ToString(CultureInfo.InvariantCulture)
+            ["totalBytes"] = artifacts.Sum(artifact => artifact.SizeBytes).ToString(CultureInfo.InvariantCulture),
+            ["duplicateArtifactCount"] = artifacts.Count(IsDuplicateArtifact).ToString(CultureInfo.InvariantCulture)
         };
         if (mimeTypes.Count > 0)
         {
@@ -1231,6 +1235,73 @@ public sealed class HostArtifactIndexBuilder
                     ? "pcap"
                     : "unknown"
         };
+    }
+
+
+    private static List<ArtifactDescriptor> MarkDuplicateArtifacts(IReadOnlyList<ArtifactDescriptor> artifacts)
+    {
+        var grouped = artifacts
+            .Select((artifact, index) => new { artifact, index })
+            .GroupBy(item => DuplicateKey(item.artifact), StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.OrderBy(item => item.artifact.RelativePath, StringComparer.OrdinalIgnoreCase).ToList(), StringComparer.OrdinalIgnoreCase);
+        var result = new ArtifactDescriptor[artifacts.Count];
+        foreach (var group in grouped.Values)
+        {
+            for (var ordinal = 0; ordinal < group.Count; ordinal++)
+            {
+                var artifact = group[ordinal].artifact;
+                var metadata = CopyMetadata(artifact.Metadata);
+                AddArtifactIdentityMetadata(metadata, artifact);
+                if (group.Count > 1 && !string.IsNullOrWhiteSpace(DuplicateKey(artifact)))
+                {
+                    metadata["duplicateGroupKey"] = DuplicateKey(artifact);
+                    metadata["duplicateGroupCount"] = group.Count.ToString(CultureInfo.InvariantCulture);
+                    metadata["duplicateOrdinal"] = ordinal.ToString(CultureInfo.InvariantCulture);
+                    metadata["isDuplicate"] = (ordinal > 0).ToString(CultureInfo.InvariantCulture).ToLowerInvariant();
+                    metadata["duplicateOfArtifactRelativePath"] = group[0].artifact.RelativePath;
+                }
+                else
+                {
+                    AddIfMissing(metadata, "isDuplicate", "false");
+                }
+
+                result[group[ordinal].index] = artifact with { Metadata = metadata };
+            }
+        }
+
+        return result.ToList();
+    }
+
+    private static string DuplicateKey(ArtifactDescriptor artifact)
+    {
+        var sha256 = FirstNonEmpty(artifact.Sha256, MetadataValue(artifact.Metadata, "sha256", "sourceArtifactSha256", "hash.sha256"));
+        return !string.IsNullOrWhiteSpace(sha256) && artifact.SizeBytes > 0
+            ? $"sha256:{sha256};size:{artifact.SizeBytes.ToString(CultureInfo.InvariantCulture)}"
+            : string.Empty;
+    }
+
+    private static bool IsDuplicateArtifact(ArtifactDescriptor artifact)
+    {
+        return string.Equals(MetadataValue(artifact.Metadata, "isDuplicate"), "true", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static void AddArtifactIdentityMetadata(Dictionary<string, string> metadata, ArtifactDescriptor artifact)
+    {
+        AddIfMissing(metadata, "artifactRelativePath", artifact.RelativePath);
+        AddIfMissing(metadata, "sourceArtifactRelativePath", artifact.RelativePath);
+        AddIfMissing(metadata, "importPath", artifact.ImportPath);
+        AddIfMissing(metadata, "sourceArtifactPath", artifact.FullPath);
+        AddIfMissing(metadata, "fullPath", artifact.FullPath);
+        if (artifact.SizeBytes > 0)
+        {
+            var sizeText = artifact.SizeBytes.ToString(CultureInfo.InvariantCulture);
+            AddIfMissing(metadata, "sizeBytes", sizeText);
+            AddIfMissing(metadata, "sourceArtifactSizeBytes", sizeText);
+        }
+
+        AddIfMissing(metadata, "sha256", artifact.Sha256);
+        AddIfMissing(metadata, "sourceArtifactSha256", artifact.Sha256);
+        AddIfMissing(metadata, "hash.sha256", artifact.Hashes.TryGetValue("sha256", out var hash) ? hash : artifact.Sha256);
     }
 
     private static string PrefixGuestRelativePath(GuestManifestContext context, string relativePath)

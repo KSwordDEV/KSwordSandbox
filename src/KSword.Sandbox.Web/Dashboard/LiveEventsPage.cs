@@ -14,6 +14,8 @@ internal static class LiveEventsPage
     {
         var jobId = job.JobId.ToString("D");
         var samplePath = job.Sample?.FullPath ?? job.Submission.SamplePath;
+        var submission = job.Submission;
+        static string JsBool(bool? value) => value == true ? "true" : "false";
         return $$"""
         <!doctype html>
         <html lang="zh-CN">
@@ -82,7 +84,10 @@ internal static class LiveEventsPage
             .step-card.running { border-color:var(--blue); box-shadow:none; }
             .step-card.failed { border-color:#fecaca; background:#fff7f7; }
             .step-card.completed { border-color:#bbf7d0; background:#f7fff9; }
+            .step-card.current { border-left-color:var(--blue); background:#eff6ff; }
             .step-card strong { display:block; margin-bottom:5px; }
+            .runbook-live-summary { border:1px solid var(--line); border-left:3px solid var(--blue); display:grid; gap:8px; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); margin:10px 0 12px; padding:10px; }
+            .runbook-live-summary span { color:var(--muted); display:block; font-size:12px; font-weight:800; margin-bottom:3px; }
             .step-output-details { border-top:1px solid #e5edf6; margin-top:8px; padding-top:8px; }
             .step-output-details summary, .output-details summary { color:#075985; cursor:pointer; font-weight:800; }
             .output-details { border:1px dashed var(--line); margin-top:12px; padding:10px; }
@@ -102,6 +107,7 @@ internal static class LiveEventsPage
             .vt-card .vt-score { font-size:30px; font-weight:900; line-height:1; }
             .vt-card .vt-stats { display:grid; gap:8px; grid-template-columns:repeat(auto-fit,minmax(110px,1fr)); margin-top:12px; }
             .vt-card .vt-stats span { background:rgba(255,255,255,.72); border:1px solid rgba(148,163,184,.28); border-radius:2px; padding:8px; }
+            .vt-state-row { display:flex; flex-wrap:wrap; gap:6px; margin:10px 0; }
             .vt-danger { background:#fff7f7; border-color:#fca5a5; }
             .vt-danger .vt-score { color:#b91c1c; }
             .vt-warning { background:#fff8ed; border-color:#fdba74; }
@@ -164,6 +170,11 @@ internal static class LiveEventsPage
               <div id="sources" class="muted"></div>
             </section>
             <section>
+              <h2 data-zh="本次采集选项" data-en="This run collection options">本次采集选项</h2>
+              <p class="muted" data-zh="上传/启动分析时提交的 operator 选项会固定显示在这里；内存转储语义为样本进程，Guest Agent 支持时包含已解析子进程。" data-en="Operator options submitted by upload/start are fixed here; memory-dump semantics are the sample process, including resolved child processes when supported by the Guest Agent.">上传/启动分析时提交的 operator 选项会固定显示在这里；内存转储语义为样本进程，Guest Agent 支持时包含已解析子进程。</p>
+              <div id="operatorOptions" class="grid" data-copy="采集选项加载中 / collection options loading"></div>
+            </section>
+            <section>
               <h2 data-zh="证据 / 下载（Artifacts）" data-en="Artifacts / downloads">证据 / 下载（Artifacts）</h2>
               <p class="muted" data-zh="证据文件来自真实证据索引（artifact index）；可下载的文件走安全下载端点（endpoint），尚未回收的采集项显示等待状态。" data-en="Evidence files come from the real artifact index; downloadable files use the guarded download endpoint, and collection lanes not yet recovered show a waiting state.">证据文件来自真实证据索引（artifact index）；可下载的文件走安全下载端点（endpoint），尚未回收的采集项显示等待状态。</p>
               <div id="reportReadyActions" class="report-ready muted" data-copy="报告待生成 / reports pending">报告按钮会在运行结束后保持可用。</div>
@@ -205,7 +216,13 @@ internal static class LiveEventsPage
               htmlReportEnPath: '{{Js(job.HtmlReportEnPath)}}',
               runbookExecutionResultPath: '{{Js(job.RunbookExecutionResultPath)}}',
               guestEventsPath: '{{Js(job.GuestEventsPath)}}',
-              status: '{{Js(job.Status.ToString())}}'
+              status: '{{Js(job.Status.ToString())}}',
+              submission: {
+                collectDroppedFiles: {{JsBool(submission.CollectDroppedFiles)}},
+                captureScreenshots: {{JsBool(submission.CaptureScreenshots)}},
+                captureMemoryDumps: {{JsBool(submission.CaptureMemoryDumps)}},
+                capturePacketCapture: {{JsBool(submission.CapturePacketCapture)}}
+              }
             };
             let currentLanguage = localStorage.getItem('ksword-lang') === 'en' ? 'en' : 'zh';
             let eventOffset = 0;
@@ -248,6 +265,7 @@ internal static class LiveEventsPage
               if (lastProgressSnapshot) { renderRunbookProgress(lastProgressSnapshot); }
               if (lastBackgroundSnapshot) { renderBackgroundStatus(lastBackgroundSnapshot); }
               if (lastVirusTotalResult) { renderVirusTotal(lastVirusTotalResult); }
+              renderOperatorOptions(latestJobSnapshot || initialJob);
               if (reportAutoOpenScheduled) { updateReportAutoOpenNotice(); }
               renderArtifactPanel();
             }
@@ -410,7 +428,7 @@ internal static class LiveEventsPage
               const importMessage = snapshot.guestImportMessage
                 ? `<p class="${snapshot.guestImportSucceeded ? 'ok' : 'muted'}" data-copy="${escapeAttr(snapshot.guestImportMessage)}">${escapeHtml(localizeServerMessage(snapshot.guestImportMessage))}</p>`
                 : '';
-              const outputDetails = renderExecutionOutputDetails(snapshot);
+              const outputNotice = `<p class="muted">${escapeHtml(t('Live 页不展示命令行、stdout 或 stderr；这里只显示可读进度。需要排障时请打开执行流程或复制 runbook-execution.json 路径。', 'The Live page does not show command lines, stdout, or stderr; it only shows readable progress. For troubleshooting, open Execution flow or copy the runbook-execution.json path.'))}</p>`;
               target.innerHTML = `
                 <div class="card-status"><span class="pill ${backgroundStateTone(state)}">${escapeHtml(stateLabel)}</span>
                   <strong>${escapeHtml(snapshot.live ? t('虚拟机分析', 'VM analysis') : t('流程验证', 'flow verification'))}</strong>
@@ -421,7 +439,7 @@ internal static class LiveEventsPage
                 ${message ? `<p>${escapeHtml(message)}</p>` : ''}
                 ${importMessage}
                 ${reportButtons}
-                ${outputDetails}`;
+                ${outputNotice}`;
               target.setAttribute('data-copy', `background ${stateLabel}; progress=${progress.percentText}; current=${currentStep}; elapsed=${elapsed}; message=${message}`);
               if (autoOpenReportFromMonitor && state === 'completed' && !reportAutoOpenScheduled) {
                 scheduleReportAutoOpen();
@@ -595,8 +613,38 @@ internal static class LiveEventsPage
                 htmlReportEnPath: raw.htmlReportEnPath || raw.reportEnHtmlPath || '',
                 runbookExecutionResultPath: raw.runbookExecutionResultPath || raw.runbookExecutionPath || '',
                 guestEventsPath: raw.guestEventsPath || '',
-                status: raw.status == null ? '' : raw.status
+                status: raw.status == null ? '' : raw.status,
+                submission: normalizeSubmission(raw.submission || raw.Submission || {})
               };
+            }
+
+            function normalizeSubmission(submission) {
+              submission = submission || {};
+              return {
+                collectDroppedFiles: Boolean(submission.collectDroppedFiles ?? submission.CollectDroppedFiles),
+                captureScreenshots: Boolean(submission.captureScreenshots ?? submission.CaptureScreenshots),
+                captureMemoryDumps: Boolean(submission.captureMemoryDumps ?? submission.CaptureMemoryDumps),
+                capturePacketCapture: Boolean(submission.capturePacketCapture ?? submission.CapturePacketCapture)
+              };
+            }
+
+            function renderOperatorOptions(job) {
+              const target = document.getElementById('operatorOptions');
+              if (!target) { return; }
+              const submission = normalizeSubmission(job?.submission || job?.Submission || {});
+              const options = [
+                ['collectDroppedFiles', submission.collectDroppedFiles, t('落地文件', 'Dropped files'), t('采集运行期间新增/修改的文件。', 'Collect files created/modified during execution.')],
+                ['captureScreenshots', submission.captureScreenshots, t('截图', 'Screenshots'), t('采集运行窗口或桌面截图。', 'Capture run-window or desktop screenshots.')],
+                ['captureMemoryDumps', submission.captureMemoryDumps, t('内存转储（含子进程，若支持）', 'Memory dumps (children if supported)'), t('转储样本进程；Guest Agent 支持时包含已解析子进程。', 'Dump the sample process; includes resolved child processes when the Guest Agent supports it.')],
+                ['capturePacketCapture', submission.capturePacketCapture, t('PCAP 抓包', 'PCAP packet capture'), t('采集网络包为 PCAP/PCAPNG 证据。', 'Collect network packets as PCAP/PCAPNG evidence.')]
+              ];
+              const copy = options.map(option => `${option[2]}=${option[1] ? 'on' : 'off'}`).join(' | ');
+              target.setAttribute('data-copy', copy);
+              target.innerHTML = options.map(option => {
+                const enabled = Boolean(option[1]);
+                const state = enabled ? t('已启用', 'enabled') : t('未启用', 'disabled');
+                return `<div class="metric" data-copy="${escapeAttr(`${option[2]}: ${state}; ${option[3]}`)}"><strong>${escapeHtml(option[2])}</strong><span class="pill ${enabled ? 'ready' : 'waiting'}">${escapeHtml(state)}</span><p class="muted">${escapeHtml(option[3])}</p></div>`;
+              }).join('');
             }
 
             async function refreshArtifactIndex(showError) {
@@ -1026,58 +1074,81 @@ internal static class LiveEventsPage
               lastProgressSnapshot = snapshot;
               const target = document.getElementById('runbookProgress');
               if (!target || !snapshot) { return; }
-              const total = Number(snapshot.totalSteps || 0);
-              const completed = Number(snapshot.completedSteps || 0);
-              const percent = progressPercent(snapshot);
+              const steps = Array.isArray(snapshot.steps) ? snapshot.steps : [];
+              const total = Math.max(steps.length, Number(snapshot.totalSteps || 0));
+              const completed = Math.max(0, Number(snapshot.completedSteps || 0));
+              const executed = Math.max(0, Number(snapshot.executedSteps || 0));
               const rawState = String(snapshot.state || 'pending').toLowerCase();
               const state = formatProgressState(rawState);
-              const done = rawState === 'completed';
-              const failed = rawState === 'failed' || rawState === 'canceled';
+              const done = rawState === 'completed' || snapshot.success === true;
+              const failed = rawState === 'failed' || rawState === 'canceled' || snapshot.success === false;
+              const percent = progressPercent(snapshot);
               const stageIndex = estimateMonitorStageIndex(percent, done, failed);
-              const current = snapshot.currentStepTitle || t('等待下一步', 'waiting for next step');
+              const currentIndex = snapshot.currentStepIndex === null || snapshot.currentStepIndex === undefined ? -1 : Number(snapshot.currentStepIndex);
+              const runningStep = steps.find(step => String(step.state || '').toLowerCase() === 'running');
+              const indexedStep = currentIndex >= 0 && currentIndex < steps.length ? steps[currentIndex] : null;
+              const currentStep = runningStep || indexedStep || steps.find(step => String(step.state || '').toLowerCase() === 'pending') || null;
+              const current = snapshot.currentStepTitle || currentStep?.title || currentStep?.stepId || (done ? t('所有步骤已完成', 'all steps completed') : t('等待下一步', 'waiting for next step'));
               const elapsed = formatDuration(snapshot.duration) || '-';
-              const failedStep = (snapshot.steps || []).find(step => ['failed', 'canceled'].includes(String(step.state || '').toLowerCase()));
+              const failedStep = steps.find(step => ['failed', 'canceled'].includes(String(step.state || '').toLowerCase()));
               const failureReason = buildProgressFailureReason(snapshot, failedStep);
-              const message = snapshot.message ? `<p class="muted">${escapeHtml(snapshot.message)}</p>` : '';
-              const failure = failureReason ? `<p class="error">${t('失败原因：', 'Failure reason: ')}${escapeHtml(failureReason)}</p>` : '';
+              const message = snapshot.message ? `<p class="muted" data-copy="${escapeAttr(localizeServerMessage(snapshot.message))}">${escapeHtml(localizeServerMessage(snapshot.message))}</p>` : '';
+              const failure = failureReason ? `<p class="error" data-copy="${escapeAttr(failureReason)}">${t('失败原因：', 'Failure reason: ')}${escapeHtml(failureReason)}</p>` : '';
               const stageRail = renderMonitorStages(stageIndex, done, failed);
-              const steps = (snapshot.steps || []).slice(0, 24).map(step => {
-                const stepState = String(step.state || 'pending').toLowerCase();
-                const line = `${Number(step.stepIndex ?? 0) + 1}. ${step.title || step.stepId || ''}`;
-                const stepMessage = step.message || '';
-                const detail = [
-                  formatProgressState(stepState),
-                  step.exitCode == null ? '' : `exit ${step.exitCode}`,
-                  step.duration ? formatDuration(step.duration) : '',
-                  stepMessage
-                ].filter(Boolean).join(' · ');
-                const duration = step.duration ? formatDuration(step.duration) : '-';
-                const diagnosticHint = t(
-                  '进度快照只包含 UI-safe 状态；stdout/stderr 不在进度流中，完成后如有终端执行结果会折叠在后台执行状态排障输出里。',
-                  'Progress snapshots contain UI-safe status only; stdout/stderr are not in the progress stream and, when terminal execution output exists, stay collapsed under background-status troubleshooting output.');
-                return `<details class="step-card ${escapeAttr(stepState)}" data-copy="${escapeAttr(line + ' ' + detail)}">
-                  <summary>
-                    <strong>${escapeHtml(line)}</strong>
-                    <span class="pill">${escapeHtml(detail || formatProgressState('pending'))}</span>
-                  </summary>
-                  <p>${t('Step status', 'Step status')}：<strong>${escapeHtml(formatProgressState(stepState))}</strong></p>
-                  <p>${t('已耗时', 'Elapsed')}：<strong>${escapeHtml(duration)}</strong></p>
-                  ${step.exitCode == null ? '' : `<p>exit：<strong>${escapeHtml(step.exitCode)}</strong></p>`}
-                  ${stepMessage ? `<p class="muted">${escapeHtml(stepMessage)}</p>` : ''}
-                  <p class="muted">${escapeHtml(diagnosticHint)}</p>
-                </details>`;
-              }).join('');
+              const focusCopy = `${state}; ${completed}/${total}; current=${current}; executed=${executed}; elapsed=${elapsed}`;
+              const stepCards = steps.slice(0, 32).map(step => renderRunbookStepCard(step, currentStep, total)).join('');
+              const hiddenCount = Math.max(0, steps.length - 32);
+              const hiddenNotice = hiddenCount > 0 ? `<p class="muted">${escapeHtml(t(`另有 ${hiddenCount} 个步骤已折叠，执行流程页可查看完整列表。`, `${hiddenCount} additional steps are hidden; open Execution flow for the full list.`))}</p>` : '';
               target.innerHTML = `
-                <div><span class="pill" data-copy="${escapeAttr(state)}">${escapeHtml(state)}</span>
-                <strong>${escapeHtml(completed)} / ${escapeHtml(total)} ${t('步骤完成', 'steps completed')}</strong></div>
+                <div class="card-status">
+                  <span class="pill ${failed ? 'failed' : done ? 'ready' : 'endpoint'}" data-copy="${escapeAttr(state)}">${escapeHtml(state)}</span>
+                  <strong>${escapeHtml(completed)} / ${escapeHtml(total)} ${t('步骤完成', 'steps completed')}</strong>
+                  <span class="percent-label" data-copy="${percent}%">${percent}%</span>
+                </div>
                 <div class="progressbar" aria-label="runbook progress"><div class="progressbar-fill ${failed ? 'failed' : ''}" style="width:${percent}%"></div></div>
-                <p>${t('当前步骤', 'Current step')}：<strong>${escapeHtml(current)}</strong></p>
-                <p>${t('已耗时', 'Elapsed')}：<strong>${escapeHtml(elapsed)}</strong></p>
+                <div class="runbook-live-summary" data-copy="${escapeAttr(focusCopy)}">
+                  <div><span>${escapeHtml(t('当前真实步骤', 'Current real step'))}</span><strong>${escapeHtml(current)}</strong></div>
+                  <div><span>${escapeHtml(t('已执行步骤', 'Executed steps'))}</span><strong>${escapeHtml(executed)} / ${escapeHtml(total)}</strong></div>
+                  <div><span>${escapeHtml(t('已耗时', 'Elapsed'))}</span><strong>${escapeHtml(elapsed)}</strong></div>
+                </div>
                 ${message}
                 ${failure}
                 <div class="monitor-stage-grid" aria-label="${escapeAttr(t('分析阶段进度', 'analysis stage progress'))}">${stageRail}</div>
-                <div class="step-list">${steps || `<p class="muted">${t('尚无步骤快照。', 'No step snapshot yet.')}</p>`}</div>`;
-              target.setAttribute('data-copy', `runbook ${state} ${completed}/${total} ${current}; elapsed=${elapsed}; failure=${failureReason || '-'}`);
+                <div class="step-list">${stepCards || `<p class="muted">${t('尚无步骤快照。', 'No step snapshot yet.')}</p>`}</div>
+                ${hiddenNotice}`;
+              target.setAttribute('data-copy', `runbook ${focusCopy}; failure=${failureReason || '-'}`);
+            }
+
+            function renderRunbookStepCard(step, currentStep, total) {
+              const stepState = String(step.state || 'pending').toLowerCase();
+              const stepNumber = Number(step.stepIndex ?? 0) + 1;
+              const title = `${stepNumber}/${Math.max(1, Number(total) || 1)} ${step.title || step.stepId || ''}`;
+              const stepMessage = localizeServerMessage(step.message || '');
+              const duration = step.duration ? formatDuration(step.duration) : '-';
+              const isCurrent = currentStep && step === currentStep;
+              const stateClass = ['running', 'completed', 'failed', 'skipped', 'canceled'].includes(stepState) ? stepState : 'pending';
+              const detail = [
+                isCurrent ? t('当前', 'current') : '',
+                formatProgressState(stepState),
+                step.exitCode == null ? '' : `${t('退出码', 'exit')} ${step.exitCode}`,
+                step.duration ? formatDuration(step.duration) : '',
+                step.requiresElevation ? t('需要提权', 'elevated') : '',
+                step.mutatesVmState ? t('会改变 VM 状态', 'mutates VM') : '',
+                stepMessage
+              ].filter(Boolean).join(' · ');
+              return `<details class="step-card ${escapeAttr(stateClass)} ${isCurrent ? 'current' : ''}" ${isCurrent ? 'open' : ''} data-copy="${escapeAttr(title + ' ' + detail)}">
+                <summary>
+                  <strong>${escapeHtml(title)}</strong>
+                  <span class="pill ${stateClass === 'failed' || stateClass === 'canceled' ? 'failed' : stateClass === 'completed' || stateClass === 'skipped' ? 'ready' : stateClass === 'running' ? 'endpoint' : 'waiting'}">${escapeHtml(detail || formatProgressState('pending'))}</span>
+                </summary>
+                <p>${t('步骤状态', 'Step status')}：<strong>${escapeHtml(formatProgressState(stepState))}</strong></p>
+                <p>${t('已耗时', 'Elapsed')}：<strong>${escapeHtml(duration)}</strong></p>
+                ${step.exitCode == null ? '' : `<p>${t('退出码', 'Exit code')}：<strong>${escapeHtml(step.exitCode)}</strong></p>`}
+                ${step.requiresElevation ? `<p class="muted">${escapeHtml(t('该步骤需要提权。', 'This step requires elevation.'))}</p>` : ''}
+                ${step.mutatesVmState ? `<p class="muted">${escapeHtml(t('该步骤会改变虚拟机状态。', 'This step mutates VM state.'))}</p>` : ''}
+                ${stepMessage ? `<p class="muted">${escapeHtml(stepMessage)}</p>` : ''}
+                <p class="muted">${escapeHtml(t('只显示 UI-safe 状态；不展示命令、stdout 或 stderr。', 'UI-safe status only; commands, stdout, and stderr are not shown.'))}</p>
+              </details>`;
             }
 
             function estimateMonitorStageIndex(percent, done, failed) {
@@ -1121,10 +1192,19 @@ internal static class LiveEventsPage
             }
 
             function progressPercent(snapshot) {
-              const total = Number(snapshot.totalSteps || 0);
+              const steps = Array.isArray(snapshot?.steps) ? snapshot.steps : [];
+              const total = Math.max(steps.length, Number(snapshot?.totalSteps || 0));
               if (total <= 0) { return 0; }
-              const completed = Number(snapshot.completedSteps || 0);
-              return Math.max(0, Math.min(100, Math.round((completed / total) * 100)));
+              const state = String(snapshot?.state || '').toLowerCase();
+              if (state === 'completed' || snapshot?.success === true) { return 100; }
+              const completed = Math.max(0, Number(snapshot?.completedSteps || 0));
+              const currentIndex = snapshot?.currentStepIndex === null || snapshot?.currentStepIndex === undefined ? -1 : Number(snapshot.currentStepIndex);
+              const hasRunning = steps.some(step => String(step.state || '').toLowerCase() === 'running');
+              const runningCredit = hasRunning ? 0.45 : (currentIndex >= 0 && completed <= currentIndex ? 0.25 : 0);
+              const numerator = Math.max(completed, currentIndex >= 0 ? currentIndex : 0) + runningCredit;
+              const percent = Math.round((Math.min(total, numerator) / total) * 100);
+              const floor = state === 'running' || hasRunning ? 3 : 0;
+              return Math.max(floor, Math.min(100, percent));
             }
 
             function formatProgressState(state) {
@@ -1216,6 +1296,7 @@ internal static class LiveEventsPage
               const progress = virusTotalProgressPercent(workflowState, result);
               const currentStep = virusTotalCurrentStep(workflowState, result);
               const statusLabel = virusTotalStatusLabel(vtStatus, result);
+              const outcomeStatus = virusTotalOutcomeStatus(vtStatus, result, malicious, suspicious);
               if (workflowState === 'running') {
                 label = result.message || t('正在查询 VirusTotal 官方文件报告。', 'Querying the official VirusTotal file report.');
                 className = 'metric vt-card vt-neutral';
@@ -1223,7 +1304,7 @@ internal static class LiveEventsPage
               } else if (vtStatus === 'found' || result.found) {
                 label = t(`已收录：恶意 ${malicious} / 可疑 ${suspicious} / 无害 ${harmless} / 未检出 ${undetected}`, `Found: malicious ${malicious} / suspicious ${suspicious} / harmless ${harmless} / undetected ${undetected}`);
                 score = `${malicious + suspicious}`;
-                status = malicious > 0 ? t('命中恶意', 'malicious hits') : (suspicious > 0 ? t('可疑命中', 'suspicious hits') : t('未见恶意命中', 'no malicious hits'));
+                status = outcomeStatus.label;
                 className = malicious > 0 ? 'metric vt-card vt-danger' : (suspicious > 0 ? 'metric vt-card vt-warning' : 'metric vt-card vt-ok');
               } else {
                 const quiet = virusTotalQuietDisplay(vtStatus, result);
@@ -1240,6 +1321,9 @@ internal static class LiveEventsPage
               const cache = virusTotalCacheText(result);
               const cacheHtml = cache ? `<p class="muted" data-copy="${escapeAttr(cache)}">${escapeHtml(cache)}</p>` : '';
               const retry = result.retryAfterUtc ? `${t('重试时间', 'Retry after')}: ${result.retryAfterUtc}` : '';
+              const configuredLabel = result.configured ? t('VT 已配置', 'VT configured') : t('VT 未配置', 'VT not configured');
+              const queriedLabel = result.queried ? t('已查询官方 API', 'official API queried') : t('未调用官方 API', 'official API not called');
+              const quietLabel = (result.isQuietState || result.IsQuietState || workflowState === 'quiet') ? t('quiet：不阻断分析', 'quiet: non-blocking') : t('可见结果', 'visible result');
               const retryHtml = retry ? `<p class="muted" data-copy="${escapeAttr(retry)}">${escapeHtml(retry)}</p>` : '';
               const isQuiet = Boolean(result.isQuietState || result.IsQuietState || workflowState === 'quiet');
               const quietNote = isQuiet
@@ -1262,6 +1346,12 @@ internal static class LiveEventsPage
                   </div>
                   <div class="vt-score" data-copy="${escapeAttr(score)}">${escapeHtml(score)}</div>
                 </div>
+                <div class="vt-state-row">
+                  <span class="pill ${result.configured ? 'ready' : 'quiet'}" data-copy="${escapeAttr(configuredLabel)}">${escapeHtml(configuredLabel)}</span>
+                  <span class="pill ${result.queried ? 'endpoint' : 'quiet'}" data-copy="${escapeAttr(queriedLabel)}">${escapeHtml(queriedLabel)}</span>
+                  <span class="pill ${outcomeStatus.tone}" data-copy="${escapeAttr(outcomeStatus.copy)}">${escapeHtml(outcomeStatus.label)}</span>
+                  <span class="pill quiet" data-copy="${escapeAttr(quietLabel)}">${escapeHtml(quietLabel)}</span>
+                </div>
                 ${quietNote}
                 <div class="vt-stats">
                   <span data-copy="${malicious}"><strong>${t('恶意', 'Malicious')}</strong>${malicious}</span>
@@ -1275,6 +1365,23 @@ internal static class LiveEventsPage
                 ${retryHtml}
                 <p class="artifact-action"><span class="pill ${virusTotalStatusPillTone(vtStatus, result)}" data-copy="${escapeAttr(statusCopy)}">${escapeHtml(status || statusLabel)}</span><span class="pill quiet" data-copy="${escapeAttr(vtStatus)}">${escapeHtml(vtStatus)}</span>${link}${settingsLink}</p>`;
               target.setAttribute('data-copy', `VirusTotal ${workflowLabel}; progress=${progress}%; current=${currentStep}; ${vtStatus}: ${label} ${result.sha256 || ''}`);
+            }
+
+            function virusTotalOutcomeStatus(status, result, malicious, suspicious) {
+              if (status === 'found' || result?.found) {
+                if (Number(malicious) > 0) { return { label: t('恶意命中', 'malicious'), tone: 'failed', copy: `malicious=${malicious}; suspicious=${suspicious}` }; }
+                if (Number(suspicious) > 0) { return { label: t('可疑命中', 'suspicious'), tone: 'endpoint', copy: `suspicious=${suspicious}` }; }
+                return { label: t('已收录：未见恶意', 'found: no malicious hits'), tone: 'ready', copy: 'found clean-or-unknown' };
+              }
+              if (['not_configured', 'missing_hash', 'invalid_hash'].includes(status)) {
+                return { label: t('已跳过官方查询', 'official lookup skipped'), tone: 'quiet', copy: `skipped; status=${status}` };
+              }
+              if (status === 'not_found') { return { label: t('未收录', 'not found'), tone: 'quiet', copy: 'not_found' }; }
+              if (status === 'rate_limited') { return { label: t('限速', 'rate-limited'), tone: 'quiet', copy: 'rate_limited' }; }
+              if (status === 'authentication_failed') { return { label: t('鉴权失败', 'auth failed'), tone: 'quiet', copy: 'authentication_failed' }; }
+              if (status === 'timeout') { return { label: t('查询超时', 'timeout'), tone: 'quiet', copy: 'timeout' }; }
+              if (status === 'running' || status === 'querying') { return { label: t('查询中', 'querying'), tone: 'endpoint', copy: 'querying' }; }
+              return { label: t('查询失败', 'lookup failed'), tone: 'quiet', copy: `lookup_failed; status=${status || 'unknown'}` };
             }
 
             function vtNumber(...values) {

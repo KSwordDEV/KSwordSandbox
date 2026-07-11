@@ -43,8 +43,8 @@ public sealed class HtmlReportRenderer
     private const int TimelineGroupEventInlineLimit = 12;
     private const int EventTableInlineLimit = 80;
     private const int StaticStringInlineLimit = 200;
-    private const int RawEventInlineLimit = 200;
-    private const int RawEventPageSize = 50;
+    private const int RawEventInlineLimit = 75;
+    private const int RawEventPageSize = 25;
     private const int R0HealthEvidenceInlineLimit = 12;
     private const int R0SelfNoiseExampleLimit = 8;
     private const int EventCompactFieldInlineLimit = 28;
@@ -291,15 +291,15 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
 .event-table td:first-child{white-space:nowrap}.event-table td:nth-child(2){min-width:140px}.event-table td:nth-child(4){min-width:140px}.event-table td:nth-child(5){min-width:260px}.event-table .evidence{min-width:280px}
 .timeline-groups{display:grid;gap:10px;margin-top:14px}.timeline-group{background:#fff;border:1px solid var(--line);border-radius:2px;overflow:hidden}.timeline-group>summary{align-items:flex-start;cursor:pointer;display:flex;gap:10px;justify-content:space-between;list-style:none;padding:12px 14px}.timeline-group>summary::-webkit-details-marker{display:none}.timeline-group>summary:before{color:var(--primary-deep);content:'▶';font-weight:900;margin-top:2px}.timeline-group[open]>summary:before{content:'▼'}.timeline-group small{color:var(--muted);display:block;line-height:1.4;margin-top:3px}.timeline{border-left:3px solid rgba(67,160,255,.45);margin:0 14px 14px 20px;padding:12px 0 0 18px}.timeline-item{background:#fff;border:1px solid var(--line);border-radius:2px;margin:0 0 10px;padding:10px 12px;position:relative}.timeline-item:before{background:var(--primary);border:2px solid var(--primary-soft);border-radius:2px;content:'';height:10px;left:-25px;position:absolute;top:13px;width:10px}.timeline-overflow{background:#f1f7ff;border:1px dashed #b9d7f3;border-radius:2px;color:var(--muted);margin:0 0 12px;padding:9px 11px}
 .graph-map{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));margin-top:12px}.graph-node{background:#fff;border:1px solid var(--line);border-left:4px solid var(--primary);border-radius:2px;padding:12px}.graph-node strong{display:block;margin-bottom:4px}.graph-node small{color:var(--muted);display:block;line-height:1.4}.behavior-chain{background:#fff;border:1px solid var(--line);border-radius:2px;counter-reset:chain;margin:12px 0;max-height:var(--subsection-max);overflow:auto;padding:8px 10px}.behavior-chain li{align-items:flex-start;background:#fff;border-bottom:1px solid #dbeafe;border-radius:0;counter-increment:chain;display:grid;gap:8px;grid-template-columns:auto 1fr;margin:0;padding:10px}.behavior-chain li:last-child{border-bottom:0}.behavior-chain li:before{align-items:center;background:var(--primary);border-radius:2px;color:white;content:counter(chain);display:inline-flex;font-weight:900;height:24px;justify-content:center;width:24px}.behavior-chain details{grid-column:2}.behavior-chain pre{max-height:var(--detail-max);overflow:auto;white-space:pre-wrap;word-break:break-word}.edge-table td:nth-child(1),.edge-table td:nth-child(3){min-width:170px}.ioc-grid{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));margin-top:14px}.ioc-card{background:#fff;border:1px solid var(--line);border-radius:2px;padding:12px}.ioc-card h3{font-size:15px;margin:0 0 8px}.ioc-card ul{margin:0;padding-left:18px}.ioc-card li{margin:5px 0;word-break:break-word}
-.evidence-summary-grid,.relation-grid,.overview-strip{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));margin-top:14px}.evidence-summary-card,.relation-card,.overview-item{background:#fff;border:1px solid var(--line);border-left:4px solid var(--primary);border-radius:2px;box-shadow:none;max-height:var(--subsection-max);overflow:auto;padding:14px;position:relative}.evidence-summary-card:before,.relation-card:before,.overview-item:before{display:none}.evidence-summary-card h3,.relation-card h3,.overview-item h3{font-size:15px;margin:0 0 8px;padding-left:0}.summary-value,.overview-value{color:#075985;display:block;font-size:26px;font-weight:900;letter-spacing:-.04em}.overview-value.risk-medium{color:#b45309}.overview-value.risk-high{color:#b91c1c}.overview-value.risk-low{color:#047857}.overview-value.risk-info{color:var(--primary-deep)}.overview-item p{color:var(--muted);font-size:13px;line-height:1.45;margin:6px 0 0}.relationship-meta{display:grid;gap:6px;grid-template-columns:repeat(2,minmax(0,1fr));margin:10px 0}.relationship-meta span{background:#f8fbff;border:1px solid #cfe6fb;border-radius:2px;color:#075985;font-size:12px;font-weight:700;padding:7px}.relationship-tags{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}.relationship-tags .chip{margin:0}.relationship-details,.flat-details,.event-evidence-fields,.technical-field,.raw-technical-fields,.raw-technical-field{background:transparent;border:0;border-left:2px solid #cfe6fb;border-radius:0;margin-top:8px;padding:4px 0 4px 8px}.relationship-details summary,.flat-details summary,.event-evidence-fields summary,.technical-field summary,.raw-technical-fields summary,.raw-technical-field summary{cursor:pointer;font-weight:800}.relationship-details pre,.flat-details pre,.event-evidence-fields pre,.technical-field pre,.raw-technical-field pre{max-height:var(--detail-max);overflow:auto;white-space:pre-wrap;word-break:break-word}.relationship-title{display:flex;align-items:flex-start;gap:8px;justify-content:space-between}.relationship-title code{max-width:100%;overflow-wrap:anywhere}.anchor-offset{scroll-margin-top:18px}.mono-list{font-family:Consolas,monospace;font-size:12px;line-height:1.45;margin:6px 0 0 0;padding-left:18px}.mono-list li{margin:3px 0;word-break:break-word}
+.evidence-summary-grid,.relation-grid,.overview-strip{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));margin-top:14px}.evidence-summary-card,.relation-card,.overview-item{background:#fff;border:1px solid var(--line);border-left:4px solid var(--primary);border-radius:2px;box-shadow:none;max-height:var(--subsection-max);overflow:auto;padding:14px;position:relative}.evidence-summary-card:before,.relation-card:before,.overview-item:before{display:none}.evidence-summary-card h3,.relation-card h3,.overview-item h3{font-size:15px;margin:0 0 8px;padding-left:0}.summary-value,.overview-value{color:#075985;display:block;font-size:26px;font-weight:900;letter-spacing:-.04em}.overview-value.risk-medium{color:#b45309}.overview-value.risk-high{color:#b91c1c}.overview-value.risk-low{color:#047857}.overview-value.risk-info{color:var(--primary-deep)}.overview-item p{color:var(--muted);font-size:13px;line-height:1.45;margin:6px 0 0}.relationship-meta{display:grid;gap:6px;grid-template-columns:repeat(2,minmax(0,1fr));margin:10px 0}.relationship-meta span{background:#f8fbff;border:1px solid #cfe6fb;border-radius:2px;color:#075985;font-size:12px;font-weight:700;padding:7px}.relationship-tags{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}.relationship-tags .chip{margin:0}.evidence-expansion-card{background:#f8fbff;border:1px solid #cfe6fb;border-left:3px solid var(--primary);margin-top:10px;padding:8px 10px}.evidence-expansion-card[open]{background:#fff}.relationship-details,.flat-details,.event-evidence-fields,.technical-field,.raw-technical-fields,.raw-technical-field{background:transparent;border:0;border-left:2px solid #cfe6fb;border-radius:0;margin-top:8px;padding:4px 0 4px 8px}.relationship-details summary,.flat-details summary,.event-evidence-fields summary,.technical-field summary,.raw-technical-fields summary,.raw-technical-field summary,.evidence-expansion-card summary{cursor:pointer;font-weight:800}.relationship-details pre,.flat-details pre,.event-evidence-fields pre,.technical-field pre,.raw-technical-field pre,.evidence-expansion-card pre{max-height:var(--detail-max);overflow:auto;white-space:pre-wrap;word-break:break-word}.relationship-title{display:flex;align-items:flex-start;gap:8px;justify-content:space-between}.relationship-title code{max-width:100%;overflow-wrap:anywhere}.anchor-offset{scroll-margin-top:18px}.mono-list{font-family:Consolas,monospace;font-size:12px;line-height:1.45;margin:6px 0 0 0;padding-left:18px}.mono-list li{margin:3px 0;word-break:break-word}
 .tree{font-family:Consolas,monospace;line-height:1.5;margin:12px 0}.tree ul{border-left:1px dashed #b9d7f3;list-style:none;margin:0 0 0 18px;padding-left:14px}.tree li{margin:5px 0}.process-tree{background:#fff;border:1px solid var(--line);border-radius:2px;max-height:var(--subsection-max);overflow:auto;padding:12px}.process-tree details.process-tree-node{margin:4px 0}.process-tree summary,.process-tree-leaf{align-items:center;cursor:pointer;display:flex;flex-wrap:wrap;gap:8px;list-style:none}.process-tree summary::-webkit-details-marker{display:none}.process-tree summary:before{color:var(--primary-deep);content:'▶';font-weight:900}.process-tree details[open]>summary:before{content:'▼'}.tree-badges{display:flex;flex-wrap:wrap;gap:5px}.tree-badge{background:#eef7ff;border:1px solid #cfe6fb;border-radius:2px;color:#075985;font-family:Segoe UI,Arial,sans-serif;font-size:11px;font-weight:800;padding:2px 7px}
 .evidence{max-width:560px}.evidence summary{cursor:pointer;font-weight:700}.evidence pre{white-space:pre-wrap;word-break:break-word}
 .columns{display:grid;gap:14px;grid-template-columns:1fr 1fr}.compact-list{margin:8px 0 0 0;padding-left:18px}.compact-list li{margin:4px 0}
 .artifact-ref{font-weight:700}.artifact-location{display:grid;gap:6px}.artifact-actions{align-items:center;display:inline-flex;flex-wrap:wrap;gap:6px;margin-top:4px}.artifact-actions-inline{display:inline-flex;margin-left:6px;margin-top:0;vertical-align:middle}.artifact-btn{background:#fff;border:1px solid rgba(67,160,255,.72);border-radius:2px;box-shadow:none;color:#075985;display:inline-block;font-size:12px;font-weight:900;padding:4px 8px;text-decoration:none}.artifact-btn.download{background:#eef7ff;color:#075985}.artifact-btn:hover{outline:2px solid rgba(67,160,255,.14)}.artifact-no-link{background:#fff;border:1px dashed #cbd5e1;border-radius:2px;color:var(--muted);display:inline-block;font-size:12px;font-weight:800;padding:4px 8px}.artifact-copy-path{background:#fff;border:1px solid var(--line);border-radius:2px;padding:8px}.artifact-list{list-style:none;margin:8px 0 0 0;padding:0}.artifact-list li{border-top:1px solid #e2e8f0;margin-top:8px;padding-top:8px}.artifact-preview{max-height:var(--subsection-max);overflow:auto}.artifact-preview img{border:1px solid #cbd5e1;border-radius:2px;max-height:var(--artifact-preview-img-max);max-width:100%;object-fit:contain}
-.raw-field-list{margin:6px 0 0 0;padding-left:18px}.raw-field-list li{margin:4px 0;word-break:break-word}.raw-events-shell{background:#fff;border:1px solid var(--line);border-radius:2px;margin-top:14px;overflow:hidden}.raw-events-shell>summary{cursor:pointer;font-weight:800;list-style:none;padding:12px 14px}.raw-events-shell>summary::-webkit-details-marker{display:none}.raw-events-shell>summary:before{color:var(--primary-deep);content:'▶';display:inline-block;margin-right:8px}.raw-events-shell[open]>summary:before{content:'▼'}.raw-events-panel{border-top:1px solid var(--line);max-height:58vh;overflow:auto;padding:12px}.raw-events-panel .event-table-wrap{max-height:38vh}.raw-event-pages{display:grid;gap:10px}.raw-event-page{background:#fff;border:1px solid #dbeafe;border-radius:2px;overflow:hidden}.raw-event-page>summary{background:#eef7ff;color:#075985;cursor:pointer;font-weight:900;list-style:none;padding:10px 12px}.raw-event-page>summary::-webkit-details-marker{display:none}.raw-event-page>summary:before{content:'▶';display:inline-block;margin-right:8px}.raw-event-page[open]>summary:before{content:'▼'}.raw-event-page table{margin:0}.raw-source-hints{background:#fff;border:1px solid var(--line);border-radius:2px;margin-top:12px;padding:12px}.raw-source-hints ul{list-style:none;margin:8px 0 0 0;padding:0}.raw-source-hints li{border-top:1px solid #e2e8f0;margin-top:8px;padding-top:8px}.raw-source-hints li:first-child{border-top:0;margin-top:0;padding-top:0}.raw-source-hints .hint-label{font-weight:800}
+.raw-field-list{margin:6px 0 0 0;padding-left:18px}.raw-field-list li{margin:4px 0;word-break:break-word}.raw-events-shell{background:#fff;border:1px solid var(--line);border-radius:2px;margin-top:14px;overflow:hidden}.raw-events-shell>summary{cursor:pointer;font-weight:800;list-style:none;padding:12px 14px}.raw-events-shell>summary::-webkit-details-marker{display:none}.raw-events-shell>summary:before{color:var(--primary-deep);content:'▶';display:inline-block;margin-right:8px}.raw-events-shell[open]>summary:before{content:'▼'}.raw-events-panel{border-top:1px solid var(--line);max-height:58vh;overflow:auto;padding:12px}.raw-events-panel .event-table-wrap{max-height:32vh}.raw-event-pages{display:grid;gap:10px}.raw-event-page{background:#fff;border:1px solid #dbeafe;border-radius:2px;overflow:hidden}.raw-event-page>summary{background:#eef7ff;color:#075985;cursor:pointer;font-weight:900;list-style:none;padding:10px 12px}.raw-event-page>summary::-webkit-details-marker{display:none}.raw-event-page>summary:before{content:'▶';display:inline-block;margin-right:8px}.raw-event-page[open]>summary:before{content:'▼'}.raw-event-page table{margin:0}.raw-source-hints{background:#fff;border:1px solid var(--line);border-radius:2px;margin-top:12px;padding:12px}.raw-source-hints ul{list-style:none;margin:8px 0 0 0;padding:0}.raw-source-hints li{border-top:1px solid #e2e8f0;margin-top:8px;padding-top:8px}.raw-source-hints li:first-child{border-top:0;margin-top:0;padding-top:0}.raw-source-hints .hint-label{font-weight:800}
 
 /* Square, flat operator theme: no pill/card nesting beyond one visual layer. */
-.modern-sandbox-report header:after{display:none}.modern-sandbox-report .card,.modern-sandbox-report section.card,.modern-sandbox-report .metric,.modern-sandbox-report .quick-link,.modern-sandbox-report .language-entry a,.modern-sandbox-report .badge,.modern-sandbox-report .chip,.modern-sandbox-report .section-note,.modern-sandbox-report code,.modern-sandbox-report .toc a,.modern-sandbox-report .empty,.modern-sandbox-report .copy-btn,.modern-sandbox-report .event-table-wrap,.modern-sandbox-report .timeline-group,.modern-sandbox-report .timeline-item,.modern-sandbox-report .timeline-overflow,.modern-sandbox-report .graph-node,.modern-sandbox-report .behavior-chain,.modern-sandbox-report .behavior-chain li,.modern-sandbox-report .behavior-chain details,.modern-sandbox-report .ioc-card,.modern-sandbox-report .evidence-summary-card,.modern-sandbox-report .relation-card,.modern-sandbox-report .overview-item,.modern-sandbox-report .relationship-meta span,.modern-sandbox-report .relationship-details,.modern-sandbox-report .process-tree,.modern-sandbox-report .tree-badge,.modern-sandbox-report .evidence details,.modern-sandbox-report .artifact-btn,.modern-sandbox-report .artifact-no-link,.modern-sandbox-report .artifact-copy-path,.modern-sandbox-report .artifact-preview img,.modern-sandbox-report .technical-field,.modern-sandbox-report .raw-technical-fields,.modern-sandbox-report .raw-technical-field,.modern-sandbox-report .raw-events-shell,.modern-sandbox-report .raw-event-page,.modern-sandbox-report .raw-source-hints{border-radius:0!important}.modern-sandbox-report .card:before,.modern-sandbox-report .evidence-summary-card:before,.modern-sandbox-report .relation-card:before,.modern-sandbox-report .overview-item:before{border-radius:0!important}.modern-sandbox-report .badge,.modern-sandbox-report .chip,.modern-sandbox-report .copy-btn,.modern-sandbox-report .artifact-btn,.modern-sandbox-report .artifact-no-link{box-shadow:none!important}.modern-sandbox-report .event-evidence-fields,.modern-sandbox-report .flat-technical-fields,.modern-sandbox-report .related-artifacts-flat{background:transparent;border:0;border-radius:0;padding:0}.modern-sandbox-report .flat-technical-fields{border-top:1px solid var(--line);margin-top:8px;padding-top:8px}.modern-sandbox-report .related-artifacts-flat ul{border-top:1px solid var(--line);list-style:none;margin:6px 0 0 0;padding:0}.modern-sandbox-report .related-artifacts-flat li{border-top:1px solid #e2e8f0;margin-top:6px;padding-top:6px}.modern-sandbox-report .related-artifacts-flat li:first-child{border-top:0}.modern-sandbox-report .self-noise-note{background:#f8fafc;border-left:4px solid #94a3b8;color:#475569;margin:10px 0;padding:10px 12px}
+.modern-sandbox-report header:after{display:none}.modern-sandbox-report .card,.modern-sandbox-report section.card,.modern-sandbox-report .metric,.modern-sandbox-report .quick-link,.modern-sandbox-report .language-entry a,.modern-sandbox-report .badge,.modern-sandbox-report .chip,.modern-sandbox-report .section-note,.modern-sandbox-report code,.modern-sandbox-report .toc a,.modern-sandbox-report .empty,.modern-sandbox-report .copy-btn,.modern-sandbox-report .event-table-wrap,.modern-sandbox-report .timeline-group,.modern-sandbox-report .timeline-item,.modern-sandbox-report .timeline-overflow,.modern-sandbox-report .graph-node,.modern-sandbox-report .behavior-chain,.modern-sandbox-report .behavior-chain li,.modern-sandbox-report .behavior-chain details,.modern-sandbox-report .ioc-card,.modern-sandbox-report .evidence-summary-card,.modern-sandbox-report .relation-card,.modern-sandbox-report .overview-item,.modern-sandbox-report .relationship-meta span,.modern-sandbox-report .relationship-details,.modern-sandbox-report .evidence-expansion-card,.modern-sandbox-report .process-tree,.modern-sandbox-report .tree-badge,.modern-sandbox-report .evidence details,.modern-sandbox-report .artifact-btn,.modern-sandbox-report .artifact-no-link,.modern-sandbox-report .artifact-copy-path,.modern-sandbox-report .artifact-preview img,.modern-sandbox-report .technical-field,.modern-sandbox-report .raw-technical-fields,.modern-sandbox-report .raw-technical-field,.modern-sandbox-report .raw-events-shell,.modern-sandbox-report .raw-event-page,.modern-sandbox-report .raw-source-hints{border-radius:0!important}.modern-sandbox-report .card:before,.modern-sandbox-report .evidence-summary-card:before,.modern-sandbox-report .relation-card:before,.modern-sandbox-report .overview-item:before{border-radius:0!important}.modern-sandbox-report .badge,.modern-sandbox-report .chip,.modern-sandbox-report .copy-btn,.modern-sandbox-report .artifact-btn,.modern-sandbox-report .artifact-no-link{box-shadow:none!important}.modern-sandbox-report .event-evidence-fields,.modern-sandbox-report .flat-technical-fields,.modern-sandbox-report .related-artifacts-flat{background:transparent;border:0;border-radius:0;padding:0}.modern-sandbox-report .flat-technical-fields{border-top:1px solid var(--line);margin-top:8px;padding-top:8px}.modern-sandbox-report .related-artifacts-flat ul{border-top:1px solid var(--line);list-style:none;margin:6px 0 0 0;padding:0}.modern-sandbox-report .related-artifacts-flat li{border-top:1px solid #e2e8f0;margin-top:6px;padding-top:6px}.modern-sandbox-report .related-artifacts-flat li:first-child{border-top:0}.modern-sandbox-report .self-noise-note{background:#f8fafc;border-left:4px solid #94a3b8;color:#475569;margin:10px 0;padding:10px 12px}
 @media(max-width:900px){.grid,.columns{grid-template-columns:1fr 1fr}table{display:block;overflow-x:auto}}@media(max-width:640px){header{padding:28px 24px}.grid,.columns{grid-template-columns:1fr}main,nav{padding:0 14px}}
 
 """);
@@ -914,7 +914,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
                 html.AppendLine($"<td class=\"copyable\" data-copy=\"{A(edge.From)}\"><code>{E(edge.From)}</code></td>");
                 html.AppendLine($"<td><span class=\"badge badge-info\">{E(edge.Relation)}</span></td>");
                 html.AppendLine($"<td class=\"copyable\" data-copy=\"{A(edge.To)}\"><code>{E(edge.To)}</code></td>");
-                html.AppendLine($"<td class=\"evidence\"><span class=\"inline-actions\">{CopyButton("Copy graph edge", copy)}</span><details class=\"flat-details\"><summary>Evidence fields</summary><pre class=\"copyable\" data-copy=\"{A(copy)}\">{E(copy)}</pre></details></td>");
+                html.AppendLine($"<td class=\"evidence\"><span class=\"inline-actions\">{CopyButton("Copy graph edge", copy)}</span><details class=\"evidence-expansion-card\"><summary>Expand edge evidence</summary><pre class=\"copyable\" data-copy=\"{A(copy)}\">{E(copy)}</pre></details></td>");
                 html.AppendLine("</tr>");
             }
 
@@ -961,7 +961,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         {
             html.AppendLine("<li>");
             html.AppendLine($"<code>{E(edge.From)}</code> <span class=\"badge badge-info\">{E(edge.Relation)}</span> <code>{E(edge.To)}</code>");
-            html.AppendLine($"<details class=\"flat-details\"><summary>Edge evidence</summary><pre class=\"copyable\" data-copy=\"{A(edge.Evidence)}\">{E(edge.Evidence)}</pre></details>");
+            html.AppendLine($"<details class=\"evidence-expansion-card\"><summary>Expand edge evidence</summary><pre class=\"copyable\" data-copy=\"{A(edge.Evidence)}\">{E(edge.Evidence)}</pre></details>");
             html.AppendLine("</li>");
         }
 
@@ -1007,7 +1007,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
             html.AppendLine("</div>");
             html.AppendLine($"<span class=\"summary-value\">{E(card.Value)}</span>");
             html.AppendLine($"<p class=\"muted\">{E(card.Detail)}</p>");
-            html.AppendLine($"<details class=\"relationship-details\"><summary>Evidence summary</summary><pre class=\"copyable\" data-copy=\"{A(card.CopyText)}\">{E(card.CopyText)}</pre></details>");
+            html.AppendLine($"<details class=\"evidence-expansion-card\"><summary>Expand evidence card details</summary><pre class=\"copyable\" data-copy=\"{A(card.CopyText)}\">{E(card.CopyText)}</pre></details>");
             html.AppendLine("</article>");
         }
 
@@ -1093,7 +1093,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
             html.AppendLine($"<td>{E(FormatArtifactSize(artifact.SizeBytes))}</td>");
             html.AppendLine($"<td><code>{E(ArtifactSha256(artifact))}</code></td>");
             html.AppendLine($"<td>{E(string.IsNullOrWhiteSpace(artifact.MimeType) ? "-" : artifact.MimeType)}</td>");
-            html.AppendLine($"<td class=\"evidence\"><span class=\"inline-actions\">{CopyButton("Copy artifact", plain)}</span><details class=\"flat-details\"><summary>Artifact evidence</summary><pre class=\"copyable\" data-copy=\"{A(plain)}\">{E(plain)}</pre></details>{RenderArtifactPreview(artifact)}</td>");
+            html.AppendLine($"<td class=\"evidence\"><span class=\"inline-actions\">{CopyButton("Copy artifact", plain)}</span><details class=\"evidence-expansion-card\"><summary>Expand artifact evidence</summary><pre class=\"copyable\" data-copy=\"{A(plain)}\">{E(plain)}</pre></details>{RenderArtifactPreview(artifact)}</td>");
             html.AppendLine("</tr>");
         }
 
@@ -1126,7 +1126,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
             html.AppendLine($"<span>Artifacts: {E(card.ArtifactCount.ToString())}</span><span>Events: {E(card.EventCount.ToString())}</span>");
             html.AppendLine("</div>");
             html.AppendLine($"<p class=\"muted\">{E(card.Detail)}</p>");
-            html.AppendLine($"<details class=\"relationship-details\"><summary>Collection evidence</summary><pre class=\"copyable\" data-copy=\"{A(card.CopyText)}\">{E(card.CopyText)}</pre></details>");
+            html.AppendLine($"<details class=\"evidence-expansion-card\"><summary>Expand collection evidence</summary><pre class=\"copyable\" data-copy=\"{A(card.CopyText)}\">{E(card.CopyText)}</pre></details>");
             html.AppendLine("</article>");
         }
 
@@ -1675,7 +1675,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         Metric(html, "Inline pages", RawEventPageCount(inlineEvents.Count).ToString(), "risk-info");
         Metric(html, "Hidden raw events", hiddenCount.ToString(), hiddenCount > 0 ? "risk-medium" : "risk-info");
         html.AppendLine("</div>");
-        html.AppendLine($"<div class=\"section-note\"><strong>Raw events are collapsed by default.</strong> Raw events shown inline: {inlineEvents.Count}/{orderedEvents.Count}. Inline page size: {RawEventPageSize}. Raw evidence height limit: 58vh. Hidden raw events: {hiddenCount}. Open report.json or raw source artifacts for complete evidence.</div>");
+        html.AppendLine($"<div class=\"section-note\"><strong>Slim raw event sample.</strong> Raw events are collapsed by default. Raw events shown inline: {inlineEvents.Count}/{orderedEvents.Count}. Inline page size: {RawEventPageSize}. Raw evidence height limit: 58vh. Hidden raw events: {hiddenCount}. Open report.json or raw source artifacts for complete evidence.</div>");
         AppendRawSourceHints(html, report, artifacts);
         AppendRawEventDistribution(html, orderedEvents);
 
@@ -2363,7 +2363,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
             html.AppendLine("<div class=\"toolbar\">");
             html.AppendLine(CopyButton("Copy process card", card.CopyText));
             html.AppendLine("</div>");
-            html.AppendLine($"<details class=\"relationship-details\"><summary>Top evidence</summary><pre class=\"copyable\" data-copy=\"{A(string.Join(Environment.NewLine, card.EvidenceLines))}\">{E(string.Join(Environment.NewLine, card.EvidenceLines))}</pre></details>");
+            html.AppendLine($"<details class=\"evidence-expansion-card\"><summary>Expand top process evidence</summary><pre class=\"copyable\" data-copy=\"{A(string.Join(Environment.NewLine, card.EvidenceLines))}\">{E(string.Join(Environment.NewLine, card.EvidenceLines))}</pre></details>");
             html.AppendLine("</article>");
         }
 
@@ -2531,7 +2531,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
             html.AppendLine("<div class=\"toolbar\">");
             html.AppendLine(CopyButton("Copy network card", card.CopyText));
             html.AppendLine("</div>");
-            html.AppendLine($"<details class=\"relationship-details\"><summary>Top evidence</summary><pre class=\"copyable\" data-copy=\"{A(string.Join(Environment.NewLine, card.EvidenceLines))}\">{E(string.Join(Environment.NewLine, card.EvidenceLines))}</pre></details>");
+            html.AppendLine($"<details class=\"evidence-expansion-card\"><summary>Expand top network evidence</summary><pre class=\"copyable\" data-copy=\"{A(string.Join(Environment.NewLine, card.EvidenceLines))}\">{E(string.Join(Environment.NewLine, card.EvidenceLines))}</pre></details>");
             html.AppendLine("</article>");
         }
 
@@ -4638,6 +4638,12 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         ("Collection and pipeline diagnostics", "采集与流水线诊断"),
         ("Collector health, runbook, import, and timing diagnostics explain evidence quality and are not sample behavior.", "采集器健康、运行手册、导入和时序诊断用于说明证据质量，不属于样本行为。"),
         ("Copy behavior evidence", "复制行为证据"),
+        ("Expand evidence card details", "展开证据卡详情"),
+        ("Expand edge evidence", "展开边证据"),
+        ("Expand artifact evidence", "展开证据文件详情"),
+        ("Expand collection evidence", "展开采集证据"),
+        ("Expand top process evidence", "展开关键进程证据"),
+        ("Expand top network evidence", "展开关键网络证据"),
         ("Top evidence summary", "关键证据摘要"),
         ("KSword behavior rules", "KSword 行为规则"),
         ("None.", "无。"),
@@ -4732,6 +4738,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         ("No R0 collection health rows were imported.", "未导入 R0 采集健康行。"),
         ("Failure reasons", "失败原因"),
         ("Raw normalized events", "原始事件"),
+        ("Slim raw event sample.", "精简原始事件样本。"),
         ("Event table capped for readability.", "事件表已为可读性限制行数。"),
         ("Inline rows:", "内联行："),
         ("Hidden rows:", "隐藏行："),
@@ -4746,6 +4753,11 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         ("Hidden raw events", "隐藏原始事件"),
         ("Raw source paths", "原始来源路径"),
         ("Complete normalized report JSON", "完整规范化报告 JSON"),
+        ("(all events)", "（全部事件）"),
+        ("Raw source guide.", "原始来源指南。"),
+        ("Complete normalized event and finding source.", "完整的规范化事件和命中来源。"),
+        ("Expected location:", "预计位置："),
+        ("Original source:", "原始来源："),
         ("Guest events JSON", "来宾事件 JSON"),
         ("Driver events JSONL", "驱动事件 JSONL"),
         ("Artifact manifest", "证据清单"),
@@ -4889,6 +4901,13 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         ("Protocol categories are counted before raw rows so relationship cards stay readable.", "协议类别先于原始行计数，使关系卡保持可读。"),
         ("Flow / other", "流量 / 其他"),
         ("TCP/UDP/PCAP flow rows are grouped by endpoint and kept out of collector self-noise.", "TCP/UDP/PCAP 流量行按端点分组，并排除采集器自噪声。"),
+        ("Artifacts:", "证据文件："),
+        ("Categories:", "类别："),
+        ("DNS:", "DNS："),
+        ("HTTP:", "HTTP："),
+        ("TLS:", "TLS："),
+        ("Flow/other:", "流量/其他："),
+        ("Event types:", "事件类型："),
         ("Children:", "子进程："),
         ("Files:", "文件："),
         ("Registry:", "注册表："),
@@ -4898,6 +4917,10 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         ("First seen:", "首次出现："),
         ("Last seen:", "最后出现："),
         ("<span class=\"tree-badge\">children ", "<span class=\"tree-badge\">子进程 "),
+        ("<span class=\"tree-badge\">events ", "<span class=\"tree-badge\">事件 "),
+        ("<span class=\"tree-badge\">files ", "<span class=\"tree-badge\">文件 "),
+        ("<span class=\"tree-badge\">registry ", "<span class=\"tree-badge\">注册表 "),
+        ("<span class=\"tree-badge\">network ", "<span class=\"tree-badge\">网络 "),
         ("<span class=\"tree-badge\">start ", "<span class=\"tree-badge\">启动 "),
         ("<span class=\"tree-badge\">key ", "<span class=\"tree-badge\">键 "),
         ("<strong>Path</strong>", "<strong>路径</strong>"),

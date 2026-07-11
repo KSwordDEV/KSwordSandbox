@@ -395,6 +395,8 @@ public sealed class NetworkSidecarEventImporter
     {
         NetworkTelemetrySchema.AddIfNotEmpty(extra, "processId", FirstValue(fields, "processId", "pid", "proc.pid", "process.pid", "process_id"));
         NetworkTelemetrySchema.AddIfNotEmpty(extra, "parentProcessId", FirstValue(fields, "parentProcessId", "ppid", "process.parent.pid", "parent_pid"));
+        NetworkTelemetrySchema.AddIfNotEmpty(extra, "rootProcessId", FirstValue(fields, "rootProcessId", "rootPid", "root.pid", "process.root.pid", "process.rootProcessId", "processRootId"));
+        NetworkTelemetrySchema.AddIfNotEmpty(extra, "treeLineage", FirstValue(fields, "treeLineage", "lineage", "process.lineage", "process.treeLineage", "processTreeLineage"));
         NetworkTelemetrySchema.AddIfNotEmpty(extra, "processName", FirstValue(fields, "processName", "imageName", "process.name", "process.executable", "proc.name", "application", "app", "image", "exe"));
         NetworkTelemetrySchema.AddIfNotEmpty(extra, "imageName", FirstValue(fields, "imageName", "processName", "process.name", "process.executable", "proc.name", "image", "exe"));
         NetworkTelemetrySchema.AddIfNotEmpty(extra, "commandLine", FirstValue(fields, "commandLine", "cmdline", "process.command_line", "process.commandLine", "process.cmdline"));

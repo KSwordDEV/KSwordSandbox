@@ -5,15 +5,14 @@
 `Dashboard/DashboardExperiencePage.cs` 渲染，因此操作者体验可以在
 Dashboard 层迭代，而不触碰 Core、Driver 或 Guest 代码。
 
-English context: this document describes the staged Web project layout used to
-extract endpoint and dashboard logic from `Program.cs`.
+中文说明：本文描述 Web 项目的 staged layout，用于逐步把 endpoint 和 dashboard
+逻辑从 `Program.cs` 拆出。
 
-Canonical cross-links: use `docs/report-ux.md` for report/UI presentation,
-`docs/report-schema.md` for report data shape, `docs/artifact-manifest.md` for
-artifact download selectors, `docs/virustotal.md` for hash-only VT behavior,
-and `docs/verification.md` for repeatable validation commands. Do not commit
-runtime reports, raw events, uploaded samples, payload binaries, browser
-screenshots, VM outputs, or build artifacts produced while testing WebUI work.
+权威交叉链接：报告/UI 呈现看 `docs/report-ux.md`，报告数据结构看
+`docs/report-schema.md`，artifact 下载 selector 看 `docs/artifact-manifest.md`，
+VirusTotal hash-only 行为看 `docs/virustotal.md`，可重复验证命令看
+`docs/verification.md`。测试 WebUI 时产生的 runtime 报告、原始事件、上传样本、
+payload 二进制、浏览器截图、VM 输出或构建产物都不要提交。
 
 ## 写入边界 / Write boundary
 
@@ -78,15 +77,12 @@ WebUI/UX 工作不得修改 `driver/`、`guest/` 或
 - 可选高级手动 guest import input 只用于修复。根 dashboard 不再渲染
   artifact/download 路径表；报告与证据下载统一集中在 live monitor。
 - 操作者可见结果文件使用 artifact index 和 download endpoints：
-  `GET /api/jobs/{jobId}/artifacts` returns the current host-side
-  `artifact-index` view, and
-  `GET /api/jobs/{jobId}/artifacts/download?path=<relative>` streams only files
-  present in that index. The download path is a normalized relative/safe-link
-  value, never an arbitrary absolute host path. The same guarded resolver backs
-  `GET /api/jobs/{jobId}/report/{relativeArtifactPath}` so links embedded in a
-  served HTML report can open `events.json`, `driver-events.jsonl`, dropped
-  files, screenshots, memory dumps, or PCAP artifacts without exposing local
-  filesystem paths to the browser;
+  `GET /api/jobs/{jobId}/artifacts` 返回当前宿主侧 `artifact-index` 视图；
+  `GET /api/jobs/{jobId}/artifacts/download?path=<relative>` 只 stream 该索引中存在的文件。
+  下载 path 必须是规范化的 relative/safe-link 值，绝不能是任意宿主绝对路径。
+  `GET /api/jobs/{jobId}/report/{relativeArtifactPath}` 复用同一个受保护 resolver，
+  使 served HTML report 内的链接可以打开 `events.json`、`driver-events.jsonl`、
+  dropped files、screenshots、memory dumps 或 PCAP artifacts，而不把本地文件系统路径暴露给浏览器；
 - 计划创建后自动给出报告链接，包括 served
   `/api/jobs/{jobId}/report/html` link. Manual report buttons follow the
   current Chinese/English dashboard language, while compact `zh` / `en` alternatives
@@ -116,75 +112,58 @@ WebUI/UX 工作不得修改 `driver/`、`guest/` 或
   running, completed, or failed state plus the terminal execution/import result.
   The legacy blocking `/runbook/execute` endpoint remains available for tools,
   but the browser experience must not depend on one long fetch staying alive;
-- 上传流程应保持 one-click：`.exe` 上传后，
-  stored and a plan is created, the dashboard must submit live VM analysis to
-  the Web host background runner and redirect the current browser page to
-  `/jobs/{jobId}/live-events`. The dynamic monitor becomes the primary
-  operator surface for real runbook progress, raw events, VirusTotal status,
-  and artifact/download cards; no popup or extra dashboard tab is required. The
-  preferred API path is
-  `POST /api/files/upload/start`, which saves the upload, creates the job, and
-  submits background runbook execution in one server-side operation. This avoids
-  the earlier three-request chain (`upload` -> `plan` -> `runbook/start`) losing
-  context if a browser fetch fails between steps;
-- VirusTotal 官方结果集成为可选、仅 hash 查询。操作者
-  can open `/settings` to save or clear a local API key and manage browser-local
-  VM WebUI presets for VM name, checkpoint, duration, Guest user hints,
-  real/mock R0 collector mode, and artifact opt-in toggles. VM presets are
-  stored only in browser `localStorage` and become per-job overrides on the
-  upload page; they do not write `config/*.json`, Core, Driver, or Guest files.
-  The key is read from `KSWORDBOX_VIRUSTOTAL_API_KEY` first or from the
-  process-local settings page update; WebUI must not write API keys to repo,
-  config, or runtime files. The job page exposes
-  `GET /api/jobs/{jobId}/virustotal`, which queries the official v3
-  `files/{sha256}` endpoint with `x-apikey`, does not upload samples, and
-  returns a quiet `not_configured` / `lookup_failed` state when missing or
-  unavailable instead of interrupting analysis. A missing API key should remain
-  a quiet UI state with a settings link, not a repeated warning/noisy log path
-  or automatic report-enrichment write;
-- 提供 dedicated live raw monitor page / dynamic monitor page 链接，用于展示
-  source files and unclassified raw event rows before final report
-  classification. When opened automatically from upload, the Web host has
-  already accepted the background run, so the original dashboard page does not
-  need to remain open. The monitor page also polls
-  `GET /api/jobs/{jobId}/runbook/progress` and shows UI-safe runbook step state,
-  current step, and progress percentage without command lines, `stdout`, or
-  `stderr` inline. If terminal execution results are present on
-  `/runbook/background`, per-step `stdout`/`stderr` may be available only under
-  collapsed troubleshooting `<details>` blocks; command lines remain hidden.
-  It also polls
-  `GET /api/jobs/{jobId}/runbook/background` so the monitor can show terminal
-  completed/failed state and report links even if the main dashboard tab is
-  closed after the server accepted the background task. For upload-launched
-  monitor sessions, a completed run should automatically navigate to
-  `/api/jobs/{jobId}/report/html?lang=zh` (`report.zh.html`) after displaying a
-  short report-ready notice. Operators can still use the top-right language
-  switch and explicit English report button for manual English navigation;
+- 上传流程应保持 one-click：`.exe` 上传并保存后创建 plan，dashboard 必须把 live VM
+  analysis 提交给 Web host background runner，并将当前浏览器页重定向到
+  `/jobs/{jobId}/live-events`。动态监控页（dynamic monitor）是操作者查看真实
+  runbook 进度、原始事件、VirusTotal 状态和 artifact/download 卡片的主入口；
+  不需要 popup 或额外 dashboard tab。首选 API 路径是
+  `POST /api/files/upload/start`，它在一个服务端操作中保存上传、创建 job、提交后台
+  runbook 执行，避免早期三段请求链（`upload` -> `plan` -> `runbook/start`）在浏览器
+  fetch 中途失败时丢失上下文；
+- VirusTotal 官方结果集成为可选、仅 hash 查询。操作者可以打开 `/settings` 保存或清除
+  本地 API key，并管理浏览器本地 VM WebUI 预设（VM 名称、checkpoint、duration、
+  Guest user hints、real/mock R0 collector mode 和 artifact opt-in toggles）。
+  VM 预设只保存在浏览器 `localStorage`，在 upload page 上作为 per-job override；
+  不会写入 `config/*.json`、Core、Driver 或 Guest 文件。Key 优先从
+  `KSWORDBOX_VIRUSTOTAL_API_KEY` 读取，也可来自 settings 页的 process-local 更新；
+  WebUI 不得把 API key 写入 repo、config 或 runtime 文件。Job 页提供
+  `GET /api/jobs/{jobId}/virustotal`，使用 `x-apikey` 查询官方 v3 `files/{sha256}`
+  endpoint，不上传样本；缺失或不可用时返回 quiet `not_configured` / `lookup_failed`
+  状态，而不是中断分析。缺失 API key 应保持为带 settings 链接的 quiet UI 状态，
+  不应成为重复 warning/noisy log 或自动 report-enrichment write；
+- 提供 dedicated live raw monitor page / dynamic monitor page 链接，用于在最终报告
+  classification 前展示 source files 和未归类 raw event rows。若页面由 upload 自动打开，
+  Web host 已经接受后台运行，原 dashboard 页不必继续打开。Monitor 页还应轮询
+  `GET /api/jobs/{jobId}/runbook/progress`，只展示 UI-safe 的 runbook step state、
+  current step 和 progress percentage，不内联 command lines、`stdout` 或 `stderr`。
+  如果 `/runbook/background` 上存在终端执行结果，per-step `stdout`/`stderr` 只能放在折叠的
+  troubleshooting `<details>` 中；command lines 仍保持隐藏。页面也轮询
+  `GET /api/jobs/{jobId}/runbook/background`，以便主 dashboard tab 在后台任务接受后关闭时，
+  monitor 仍能显示 terminal completed/failed state 和报告链接。Upload-launched monitor
+  会在完成后先显示短 report-ready notice，再自动导航到中文报告
+  `/api/jobs/{jobId}/report/html?lang=zh`（`report.zh.html`）。操作者仍可使用右上角语言切换
+  和显式英文报告按钮进入英文报告；
 - dynamic monitor page 应优先服务真实产品使用，而不只服务 smoke 覆盖；页面展示
   **证据 / 下载（Artifacts / downloads）** 卡片面板。面板列出
-  `report.html`, `report.zh.html`, `report.en.html`, `report.json`,
-  `events.json`, `driver-events.jsonl`, dropped files, screenshots, memory
-  dumps, and packet captures. If a safe Web endpoint is available, including
-  `/api/jobs/{jobId}/artifacts/download?path=<relative>` or the served report
-  endpoint, the card should render bilingual open/download buttons. For evidence
-  without a download endpoint, it should render the copyable host path or
-  derived expected path plus a bilingual `等待回收` / `waiting for collection`
-  state instead of hiding the lane. The same monitor should make VirusTotal
-  results visually prominent with clear malicious/suspicious/clean/missing/
-  not-configured states, and after a run reaches a terminal background state it
-  should keep explicit Chinese and English report buttons visible;
+  `report.html`、`report.zh.html`、`report.en.html`、`report.json`、`events.json`、
+  `driver-events.jsonl`、dropped files、screenshots、memory dumps 和 packet captures。
+  如果存在安全 Web endpoint（包括 `/api/jobs/{jobId}/artifacts/download?path=<relative>`
+  或 served report endpoint），卡片应渲染双语打开/下载按钮。没有 download endpoint 的证据，
+  应显示可复制 host path 或 derived expected path，并显示双语 `等待回收` / `waiting for collection`
+  状态，而不是隐藏该 lane。同一 monitor 应突出展示 VirusTotal 结果，并清晰区分
+  malicious/suspicious/clean/missing/not-configured 状态；后台运行进入 terminal state 后，
+  仍保持显式中文和英文报告按钮可见；
 - 为 runbook step status 提供自然的 progress-page link，指向 dedicated
   execution-flow page，并同时出现在 job actions 与 progress summary 中。
-  The root dashboard must not inline long runbook PowerShell commands,
-  command-line details, `stdout`, `stderr`, raw event rows, or artifact/download
-  lists. Recent job cards should remain compact and show only status, report
-  readiness, an `执行流程 / Execution flow` link, and a live monitor/download
-  entry for technical follow-up.
+  根 dashboard 不得内联长 runbook PowerShell commands、command-line details、`stdout`、
+  `stderr`、raw event rows 或 artifact/download lists。Recent job cards 应保持紧凑，
+  只展示 status、report readiness、`执行流程 / Execution flow` 链接，以及用于技术跟进的
+  live monitor/download 入口。
 
 所有表格、路径值、raw telemetry evidence、job messages、status text、inputs
 和 section text 都必须支持显式 `复制 / Copy` 按钮，或通过 `data-copy`、
 `code`、`pre`、`td`、`th`、`p`、`li`、heading、`label`、`span`、`a`、
-`button`、`input` 元素 right-click copy。复制成功或失败后 WebUI 应显示小
+`button`、`input` 元素支持右键复制（right-click copy）。复制成功或失败后 WebUI 应显示小
 toast，告知操作者剪贴板捕获是否成功。
 
 Guest import status 应具体且中文优先：
@@ -228,7 +207,7 @@ Dry-run plan could not be created: <specific path validation detail>`.
 Dashboard components 只渲染本地拥有的 HTML fragments。普通文本必须经过
 `DashboardHtml.Encode` 或 `DashboardHtml.Attribute`。当文本、badges、cards
 或未来表格中的值需要复制时，使用 `data-copy` attribute 渲染，使标准
-context-copy script 能一致处理 right-click copy 行为。
+context-copy script 能一致处理右键复制（right-click copy）行为。
 
 敏感产物采集控制必须位于高级/显式启用（advanced/explicit opt-in）区域。UI
 可从以下配置预勾选：
@@ -310,12 +289,11 @@ and `-JobId` are omitted:
 
 端到端操作者验证：启动 Web host 后创建或选择一个 job，手动在浏览器打开
 dashboard，并确认 served HTML report link 可打开、live raw monitor page 通过
-SSE 或 polling 刷新、monitor 显示 artifacts/download cards、Chinese report endpoint
-`/api/jobs/{jobId}/report/html?lang=zh` and English report endpoint
-`/api/jobs/{jobId}/report/html?lang=en` both serve HTML, upload-launched
-completion navigates to the Chinese report (`report.zh.html`), and the root
-dashboard does not show long runbook command/output blocks or artifact/download
-lists. The optional manual guest import field can be left blank or filled with a
+SSE 或 polling 刷新、monitor 显示 artifacts/download cards、中文报告 endpoint
+`/api/jobs/{jobId}/report/html?lang=zh` 与英文报告 endpoint
+`/api/jobs/{jobId}/report/html?lang=en` 都返回 HTML、upload-launched completion
+会导航到中文报告（`report.zh.html`），并且根 dashboard 不展示长 runbook command/output blocks
+或 artifact/download lists。 The optional manual guest import field can be left blank or filled with a
 specific `events.json` / `.jsonl` path. Do not commit generated reports,
 imported guest output, browser screenshots, or build binaries from this
 validation.

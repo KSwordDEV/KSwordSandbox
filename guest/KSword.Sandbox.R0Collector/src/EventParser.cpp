@@ -2275,6 +2275,8 @@ std::string BuildHealthData(const KSWORD_SANDBOX_HEALTH_REPLY& reply, const DWOR
     data.AddUnsigned("nextSequence", reply.NextSequence);
     data.AddUnsigned("sequence", reply.NextSequence);
     data.AddUtf8("sequenceMeaning", "nextSequence");
+    data.AddUtf8("sequencePolicy", "NextSequence is a queue snapshot/summary value; event rows carry concrete Sequence values");
+    data.AddWide("zhSequencePolicy", L"NextSequence 是队列快照/摘要值；事件行才携带具体事件 Sequence。");
     data.AddBool("producerMasksAdvertised", producerMasksAdvertised);
     data.AddBool("producerMaskFieldsReturned", producerMaskFieldsReturned);
     data.AddBool("producerMasksAvailable", producerMasksAvailable);
@@ -2501,6 +2503,8 @@ std::string BuildStatusData(const KSWORD_SANDBOX_STATUS_REPLY& reply, const DWOR
     data.AddUnsigned("nextSequence", reply.NextSequence);
     data.AddUnsigned("sequence", reply.NextSequence);
     data.AddUtf8("sequenceMeaning", "nextSequence");
+    data.AddUtf8("sequencePolicy", "NextSequence is a queue snapshot/summary value; event rows carry concrete Sequence values");
+    data.AddWide("zhSequencePolicy", L"NextSequence 是队列快照/摘要值；事件行才携带具体事件 Sequence。");
     data.AddUnsigned("totalEventsBackpressured", reply.TotalEventsBackpressured);
     data.AddUnsigned("producerDroppedMask", reply.ProducerDroppedMask);
     data.AddUtf8("producerDroppedMaskHex", HexUnsignedLongLong(reply.ProducerDroppedMask, 8));
@@ -2629,6 +2633,8 @@ std::string BuildPollData(const KSWORD_SANDBOX_POLL_REPLY& reply, const DWORD by
     data.AddUnsigned("nextSequence", reply.NextSequence);
     data.AddUnsigned("sequence", reply.NextSequence);
     data.AddUtf8("sequenceMeaning", "nextSequence");
+    data.AddUtf8("sequencePolicy", "NextSequence is a queue snapshot/summary value; event rows carry concrete Sequence values");
+    data.AddWide("zhSequencePolicy", L"NextSequence 是队列快照/摘要值；事件行才携带具体事件 Sequence。");
     return data.Build();
 }
 
@@ -2662,6 +2668,16 @@ std::string BuildReadEventsBatchData(
         counters.hasEmittedSequenceRange ? std::to_string(counters.emittedHeadSequence) : "";
     const std::string emittedTail =
         counters.hasEmittedSequenceRange ? std::to_string(counters.emittedTailSequence) : "";
+    unsigned long long sequenceGapEstimate = 0;
+    if (counters.hasSequenceRange &&
+        counters.recordsProcessed > 0 &&
+        counters.tailSequence >= counters.headSequence) {
+        const unsigned long long observedSpan = counters.tailSequence - counters.headSequence + 1ULL;
+        if (observedSpan > counters.recordsProcessed) {
+            sequenceGapEstimate = observedSpan - counters.recordsProcessed;
+        }
+    }
+    const bool sequenceGapObserved = sequenceGapEstimate != 0;
 
     data.AddUnsigned("requestedMaxEvents", requestedMaxEvents);
     data.AddUnsigned("recordsProcessed", counters.recordsProcessed);
@@ -2675,8 +2691,12 @@ std::string BuildReadEventsBatchData(
     data.AddUnsigned("skipped", counters.collectorSkippedEvents);
     data.AddUtf8("head", head);
     data.AddUtf8("tail", tail);
+    data.AddBool("sequenceGapObserved", sequenceGapObserved);
+    data.AddUnsigned("sequenceGapEstimate", sequenceGapEstimate);
+    data.AddUtf8("sequenceRangeMeaning", "head/tail are consumed event sequences before collector self-noise suppression or sampling accounting");
+    data.AddWide("zhSequenceRangeMeaning", L"head/tail 表示本批次已消费的事件 sequence 范围，用于区分真实丢失与 Collector 自身噪声/采样跳过。");
     data.AddUtf8("sampling", sampling);
-    data.AddUtf8("loss", loss);
+    data.AddUtf8("loss", sequenceGapObserved && !lost ? "sequence-gap" : loss);
     data.AddUnsigned("eligibleEvents", counters.eligibleEvents);
     data.AddUtf8("schema", KSWORD_SANDBOX_EVENT_SCHEMA_NAME);
     data.AddUtf8("producer", "r0collector");
@@ -2710,13 +2730,13 @@ std::string BuildReadEventsBatchData(
             ? (counters.collectorSuppressedEvents == 0 ? "suppress-self-noise" : "suppress-self-noise:applied")
             : "emit-self-noise");
     data.AddBool("noise", false);
-    data.AddBool("lost", lost);
-    data.AddBool("lossObserved", lost);
+    data.AddBool("lost", lost || sequenceGapObserved);
+    data.AddBool("lossObserved", lost || sequenceGapObserved);
     data.AddBool("backpressure", backpressure);
     data.AddBool("backpressureObserved", backpressure);
     data.AddUtf8(
         "backpressureReason",
-        lost ? "events-dropped" : (cappedByMaxEvents ? "requested-max-events-reached" : (outputBufferFull ? "output-buffer-full" : "none")));
+        lost ? "events-dropped" : (cappedByMaxEvents ? "requested-max-events-reached" : (outputBufferFull ? "output-buffer-full" : (sequenceGapObserved ? "sequence-gap-without-drop-counter" : "none"))));
     data.AddBool("cappedByMaxEvents", cappedByMaxEvents);
     data.AddBool("outputBufferFull", outputBufferFull);
     data.AddUnsigned("flags", reply.Flags);
@@ -2731,6 +2751,8 @@ std::string BuildReadEventsBatchData(
     data.AddUnsigned("nextSequence", reply.NextSequence);
     data.AddUnsigned("sequence", reply.NextSequence);
     data.AddUtf8("sequenceMeaning", "nextSequence");
+    data.AddUtf8("sequencePolicy", "NextSequence is a queue snapshot/summary value; event rows carry concrete Sequence values");
+    data.AddWide("zhSequencePolicy", L"NextSequence 是队列快照/摘要值；事件行才携带具体事件 Sequence。");
     return data.Build();
 }
 

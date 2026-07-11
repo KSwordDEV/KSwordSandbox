@@ -114,6 +114,7 @@ internal sealed class FileDiffProbe : IGuestProbe
         {
             evt.Data["sizeBytes"] = current.SizeBytes.ToString(CultureInfo.InvariantCulture);
             evt.Data["lastWriteUtc"] = current.LastWriteUtc.ToString("O", CultureInfo.InvariantCulture);
+            AddFileHashEvidence(evt, path);
         }
 
         if (previous is not null)
@@ -122,7 +123,62 @@ internal sealed class FileDiffProbe : IGuestProbe
             evt.Data["previousLastWriteUtc"] = previous.LastWriteUtc.ToString("O", CultureInfo.InvariantCulture);
         }
 
+        evt.Data["captureState"] = eventType.EndsWith(".deleted", StringComparison.OrdinalIgnoreCase) ? "deleted" : "observed";
+        evt.Data["status"] = evt.Data["captureState"];
+        evt.Data["nonfatal"] = "false";
+        evt.Data["zhMessage"] = FileEventZhMessage(eventType);
+        evt.Data["zhHint"] = FileEventZhHint(eventType);
+
         return evt;
+    }
+
+    /// <summary>
+    /// Adds best-effort SHA-256 metadata to created/modified file events so
+    /// dropped-file copy decisions can be traced even if later copy is skipped.
+    /// </summary>
+    private static void AddFileHashEvidence(SandboxEvent evt, string path)
+    {
+        try
+        {
+            if (!File.Exists(path))
+            {
+                evt.Data["hashStatus"] = "missing";
+                return;
+            }
+
+            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            evt.Data["sha256"] = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(stream)).ToLowerInvariant();
+            evt.Data["hashAlgorithm"] = "sha256";
+            evt.Data["hashStatus"] = "computed";
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException or PathTooLongException)
+        {
+            evt.Data["hashStatus"] = "failed";
+            evt.Data["hashExceptionType"] = ex.GetType().FullName ?? ex.GetType().Name;
+            evt.Data["hashMessage"] = ex.Message;
+        }
+    }
+
+    private static string FileEventZhMessage(string eventType)
+    {
+        return eventType switch
+        {
+            "file.created" => "样本工作目录内检测到新建文件；可能是掉落文件候选。",
+            "file.modified" => "样本工作目录内检测到文件被修改。",
+            "file.deleted" => "样本工作目录内检测到文件被删除。",
+            _ => "文件变更事件已记录。"
+        };
+    }
+
+    private static string FileEventZhHint(string eventType)
+    {
+        return eventType switch
+        {
+            "file.created" => "若启用 dropped-file 复制，后续 artifact.dropped_file.* 事件会给出 artifactRelativePath、sizeBytes 和 sha256。",
+            "file.modified" => "请结合 relativePath、sizeBytes、sha256/hashStatus 与 previous* 字段判断文件内容变化。",
+            "file.deleted" => "删除事件没有可下载文件；如复制被跳过，请查看 artifact.dropped_file.skipped 的 reason/zhHint。",
+            _ => "请结合 relativePath、sizeBytes、sha256/hashStatus 和时间字段分析文件行为。"
+        };
     }
 
     /// <summary>

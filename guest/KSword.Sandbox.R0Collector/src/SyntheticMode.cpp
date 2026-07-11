@@ -257,6 +257,9 @@ bool EmitSyntheticStressEvents(EventWriter& writer, const Options& options, cons
                     {"StressJsonlSequenceStart", stressSequenceStartText},
                     {"StressJsonlSequenceEnd", stressSequenceEndText},
                     {"StressJsonlSequenceGapCount", "0"},
+                    {"sequenceGapObserved", "false"},
+                    {"sequenceGapEstimate", "0"},
+                    {"sequenceRangeMeaning", "synthetic contiguous concrete event sequence"},
                     {"StressJsonlLossEvidence", kStressJsonlLossEvidence},
                     {"StressJsonlBackpressureEvidence", kStressJsonlBackpressureEvidence},
                     {"version", std::to_string(KSWORD_SANDBOX_EVENT_HEADER_VERSION)},
@@ -328,6 +331,10 @@ bool EmitSyntheticStressSummary(EventWriter& writer, const Options& options) {
     data.AddUnsigned("skipped", 0);
     data.AddUtf8("head", stressSequenceStartText);
     data.AddUtf8("tail", stressSequenceEndText);
+    data.AddBool("sequenceGapObserved", false);
+    data.AddUnsigned("sequenceGapEstimate", 0);
+    data.AddUtf8("sequenceRangeMeaning", "synthetic stress rows are contiguous concrete event sequences");
+    data.AddWide("zhSequenceRangeMeaning", L"合成压测行使用连续的具体事件 sequence，用于验证丢失/缺口检测。");
     data.AddUtf8("sampling", options.driverEventSampleStride <= 1 ? "none" : "stride:not-applied-in-synthetic-stress");
     data.AddUtf8("loss", "none");
     data.AddUtf8("schema", KSWORD_SANDBOX_EVENT_SCHEMA_NAME);
@@ -359,6 +366,8 @@ bool EmitSyntheticStressSummary(EventWriter& writer, const Options& options) {
     data.AddUtf8("nextSequence", stressNextSequenceText);
     data.AddUtf8("sequence", stressNextSequenceText);
     data.AddUtf8("sequenceMeaning", "nextSequence");
+    data.AddUtf8("sequencePolicy", "summary sequence is the next synthetic sequence after the contiguous stress corpus");
+    data.AddWide("zhSequencePolicy", L"摘要行的 sequence 是连续合成压测集后的下一个 sequence。");
     data.AddUtf8("producerDroppedMaskHex", "0x00000000");
     data.AddUtf8("producerBackpressureMaskHex", "0x00000000");
     data.AddUtf8("StressJsonlExpectedDriverRows", std::to_string(options.stressCount));
@@ -431,6 +440,8 @@ int RunSyntheticMode(const Options& options, EventWriter& writer) {
         mockData.AddUtf8("StressJsonlSequenceStart", stressSequenceStartText);
         mockData.AddUtf8("StressJsonlSequenceEnd", stressSequenceEndText);
         mockData.AddSigned("StressJsonlSequenceGapCount", 0);
+        mockData.AddBool("sequenceGapObserved", false);
+        mockData.AddUnsigned("sequenceGapEstimate", 0);
         mockData.AddUtf8("StressJsonlLossEvidence", kStressJsonlLossEvidence);
         mockData.AddUtf8("StressJsonlBackpressureEvidence", kStressJsonlBackpressureEvidence);
     }

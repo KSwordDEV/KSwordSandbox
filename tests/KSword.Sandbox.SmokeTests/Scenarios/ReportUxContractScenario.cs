@@ -83,8 +83,8 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(rendererSource, "contextmenu", "Report renderer should support right-click copy.");
         RequireContains(rendererSource, "Copy event", "Report renderer should provide explicit copy buttons.");
         RequireContains(rendererSource, "Raw normalized events", "Report renderer should include raw event evidence.");
-        RequireContains(rendererSource, "RawEventInlineLimit = 200", "Report renderer should cap inline raw event rendering.");
-        RequireContains(rendererSource, "RawEventPageSize = 50", "Report renderer should page inline raw events into bounded chunks.");
+        RequireContains(rendererSource, "RawEventInlineLimit = 75", "Report renderer should cap inline raw event rendering to a slim release-ready sample.");
+        RequireContains(rendererSource, "RawEventPageSize = 25", "Report renderer should page inline raw events into compact bounded chunks.");
         RequireContains(rendererSource, "AppendRawEventPages", "Report renderer should render native raw event pages.");
         RequireContains(rendererSource, "raw-events-shell", "Report renderer should collapse raw events with native HTML.");
         RequireContains(rendererSource, "raw-events-panel", "Report renderer should bound expanded raw event height.");
@@ -145,8 +145,8 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(doc, "Registry behavior", "Report UX doc should list registry behavior.");
         RequireContains(doc, "Right-click", "Report UX doc should describe right-click copy.");
         RequireContains(doc, "raw events only", "Report UX doc should distinguish live raw events from final classification.");
-        RequireContains(doc, "first 200 raw events", "Report UX doc should require a raw event inline limit.");
-        RequireContains(doc, "50-row native pages", "Report UX doc should require bounded raw event pages.");
+        RequireContains(doc, "first 75 raw events", "Report UX doc should require a slim raw event inline limit.");
+        RequireContains(doc, "25-row native pages", "Report UX doc should require compact bounded raw event pages.");
         RequireContains(doc, "Raw evidence height limit", "Report UX doc should require a raw evidence height limit.");
         RequireContains(doc, "hidden raw events", "Report UX doc should require hidden raw event counts.");
         RequireContains(doc, "report.json", "Report UX doc should require report.json source hints.");
@@ -265,10 +265,10 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(englishHtml, "position:sticky", "Rendered major section headers should be sticky.");
         RequireContains(englishHtml, "href=\"report.zh.html\"", "Rendered HTML should link to report.zh.html.");
         RequireContains(englishHtml, "href=\"report.en.html\"", "Rendered HTML should link to report.en.html.");
-        RequireContains(englishHtml, "<details class=\"raw-events-shell\"><summary>Show inline raw events (200/213; 13 hidden)</summary>", "Rendered raw events should be collapsed and capped.");
+        RequireContains(englishHtml, "<details class=\"raw-events-shell\"><summary>Show inline raw events (75/213; 138 hidden)</summary>", "Rendered raw events should be collapsed and capped.");
         RequireContains(englishHtml, "Inline pages", "Rendered raw event overview should show page counts.");
-        RequireContains(englishHtml, "Raw event page 1: rows 1-50 of 213", "Rendered raw event panel should show the first native page.");
-        RequireContains(englishHtml, "Raw event page 4: rows 151-200 of 213", "Rendered raw event panel should show the final inline page.");
+        RequireContains(englishHtml, "Raw event page 1: rows 1-25 of 213", "Rendered raw event panel should show the first native page.");
+        RequireContains(englishHtml, "Raw event page 3: rows 51-75 of 213", "Rendered raw event panel should show the final inline page.");
         RequireContains(englishHtml, "raw-event-page", "Rendered raw event panel should use bounded page containers.");
         RequireContains(englishHtml, "Total events", "Rendered raw event overview should show the total count label.");
         RequireContains(englishHtml, "Hidden raw events", "Rendered raw event overview should show the hidden count label.");

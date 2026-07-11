@@ -319,10 +319,9 @@ internal sealed class ProcessTreeProbe : IGuestProbe
                 continue;
             }
 
-            var missingDepth = context.RootProcessId == observation.Snapshot.ProcessId ? 0 : (int?)null;
-            var missingLineage = context.RootProcessId == observation.Snapshot.ProcessId
-                ? observation.Snapshot.ProcessId.ToString(CultureInfo.InvariantCulture)
-                : null;
+            var missingLineage = TryBuildObservedLineage(observation.Snapshot, context.RootProcessId);
+            var missingDepth = DepthFromLineage(missingLineage) ??
+                (context.RootProcessId == observation.Snapshot.ProcessId ? 0 : (int?)null);
             var evt = CreateProcessSnapshotEvent(
                 "process.snapshot",
                 observation.Snapshot,
@@ -353,6 +352,61 @@ internal sealed class ProcessTreeProbe : IGuestProbe
         }
 
         return events;
+    }
+
+    /// <summary>
+    /// Rebuilds a root-relative lineage for a missing process from previously
+    /// observed parent links so exited child rows keep stable tree attribution.
+    /// </summary>
+    private string? TryBuildObservedLineage(ProcessTreeSnapshot process, int? rootProcessId)
+    {
+        if (rootProcessId is null)
+        {
+            return null;
+        }
+
+        var lineage = new Stack<int>();
+        var visited = new HashSet<int>();
+        var current = process;
+        while (true)
+        {
+            if (!visited.Add(current.ProcessId))
+            {
+                return null;
+            }
+
+            lineage.Push(current.ProcessId);
+            if (current.ProcessId == rootProcessId.Value)
+            {
+                return string.Join(">", lineage.Select(pid => pid.ToString(CultureInfo.InvariantCulture)));
+            }
+
+            if (current.ParentProcessId is null)
+            {
+                return null;
+            }
+
+            var parent = observedSnapshots.Values
+                .Where(observation => observation.Snapshot.ProcessId == current.ParentProcessId.Value)
+                .OrderByDescending(observation => observation.LastSeenAtUtc)
+                .Select(observation => observation.Snapshot)
+                .FirstOrDefault();
+            if (parent is null)
+            {
+                return current.ParentProcessId.Value == rootProcessId.Value
+                    ? $"{rootProcessId.Value.ToString(CultureInfo.InvariantCulture)}>{string.Join(">", lineage.Select(pid => pid.ToString(CultureInfo.InvariantCulture)))}"
+                    : null;
+            }
+
+            current = parent;
+        }
+    }
+
+    private static int? DepthFromLineage(string? lineage)
+    {
+        return string.IsNullOrWhiteSpace(lineage)
+            ? null
+            : lineage.Split('>', StringSplitOptions.RemoveEmptyEntries).Length - 1;
     }
 
     /// <summary>

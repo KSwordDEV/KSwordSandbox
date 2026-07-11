@@ -12,7 +12,7 @@ param(
     [string]$RepositoryRoot,
     [int64]$MaxBytes = 25000000,
     [switch]$StagedOnly,
-    [string[]]$SecretEnvironmentNames = @('KSWORDBOX_GUEST_PASSWORD'),
+    [string[]]$SecretEnvironmentNames = @('KSWORDBOX_GUEST_PASSWORD', 'KSWORDBOX_VIRUSTOTAL_API_KEY'),
     [int]$MinSecretValueLength = 8,
     [switch]$SkipSecretValueScan
 )

@@ -157,11 +157,18 @@ Built-in sample live forms:
 ```powershell
 .\run.ps1 -Mode Analyze -SamplePreset Notepad -Live
 .\run.ps1 -Mode Analyze -SamplePreset HarmlessSample -Live
+
+# Public-MVP live smoke: real Notepad for 5 seconds.
+.\run.ps1 -Mode Analyze -SamplePreset Notepad -DurationSeconds 5 -Live
 ```
 
 Live mode can restore/start/stop the configured VM and requires the installed
 golden VM/checkpoint, guest password secret, prepared guest payload, and any
 real R0 `driver.hostDriverPath`/guest test-signing setup required by your lab.
+The host must have Hyper-V PowerShell tools and BIOS/UEFI hardware
+virtualization enabled (Intel VT-x / AMD-V). This is unrelated to optional
+VirusTotal hash-only enrichment, which is configured separately with
+`.\install.ps1 -Mode ConfigureVTKey -PromptVTKey`.
 
 If `-Live` is omitted, `Analyze` falls back to PlanOnly and does not mutate the
 VM. This keeps accidental sample execution out of the default path while still
@@ -176,6 +183,8 @@ single command therefore ends with:
 - `postprocess-result.json`
 - `report.json`
 - `report.html`
+- `report.zh.html`
+- `report.en.html`
 
 ## Rebuild reports and inspect artifacts without rerunning the VM
 

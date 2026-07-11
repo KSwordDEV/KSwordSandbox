@@ -1,49 +1,42 @@
-# Report and WebUI UX contract
+# 报告与 WebUI UX 契约 / Report and WebUI UX contract
 
-Canonical scope: this page owns report/WebUI presentation expectations. Use
-`docs/report-schema.md` for JSON/HTML section data contracts,
-`docs/artifact-manifest.md` for artifact selector/link schema, and
-`docs/virustotal.md` for hash-only reputation behavior.
+权威范围：本页负责 report/WebUI 展示预期。JSON/HTML section 数据契约见
+`docs/report-schema.md`，artifact selector/link schema 见 `docs/artifact-manifest.md`，
+VirusTotal hash-only reputation 行为见 `docs/virustotal.md`。
 
-Do not commit generated reports, raw events, artifact indexes, screenshots,
-dumps, packet captures, samples, payload binaries, or VM outputs used while
-validating these UX requirements.
+验证这些 UX 要求时，不要提交生成报告、raw events、artifact indexes、screenshots、
+dumps、packet captures、samples、payload binaries 或 VM outputs。
 
-The v1 report must be useful during a live demo, not merely technically
-complete. The page should let an operator answer three questions quickly:
+v1 报告必须在 live demo 中对操作者有用，而不只是技术上完整。页面应让操作者快速回答三件事：
 
-1. What is the risk?
-2. What behavior proves that risk?
-3. Where are the raw artifacts and original events?
+1. 风险是什么？ / What is the risk?
+2. 哪些行为证明该风险？ / What behavior proves that risk?
+3. 原始 artifacts 和 original events 在哪里？ / Where are the raw artifacts and original events?
 
-## Report sections
+## 报告章节 / Report sections
 
-Required `report.html`, `report.zh.html`, and `report.en.html` sections.
-`report.html` is the default Simplified Chinese compatibility report; the
-explicit English entry remains `report.en.html`.
+`report.html`、`report.zh.html` 和 `report.en.html` 必须包含以下章节。
+`report.html` 是默认简体中文兼容报告；显式英文入口仍是 `report.en.html`。
 
-- Cover / 封面 with job id, generation time, verdict, sample identity, and hashes.
+- Cover / 封面：包含 job id、生成时间、verdict、样本身份和 hashes。
 - Table of contents / 目录.
-- Quick navigation / 快速导航 sticky subnav for high-traffic sections:
-  Risk, Process, Files, Network, R0, VT, Artifacts, and Raw events. Counts
-  should represent currently embedded evidence and must not imply that R0
-  health, collector self-noise, or VT lookup status is malicious behavior.
-- Risk summary / 风险摘要 square summary panels.
+- Quick navigation / 快速导航：面向高频章节的 sticky subnav：
+  Risk、Process、Files、Network、R0、VT、Artifacts 和 Raw events。计数应代表当前嵌入证据，
+  不得暗示 R0 health、collector self-noise 或 VT lookup status 是恶意行为。
+- Risk summary / 风险摘要：方形摘要面板。
 - Behavior detections / 行为命中.
-  Each finding should show the evidence count plus a native `<details>` "Top
-  evidence" block with copyable high-signal events so analysts can understand a
-  rule hit without opening the full raw table first.
+  每个 finding 应显示 evidence count，并提供原生 `<details>` “Top evidence / 关键证据”块，
+  其中包含可复制的高信号事件，便于分析员无需先打开完整 raw table 就理解规则命中。
   Primary behavior verdicts must exclude static-only triage, collection
   diagnostics, R0 unavailable/health rows, and VirusTotal/reputation findings.
   Those signals belong in their dedicated quality or reputation sections.
 - MITRE mapping / MITRE 映射.
-- Engine/rule hits.
-- Static analysis / 静态分析 with PE sections, URLs, strings, warnings, and tags.
+- Engine/rule hits / 引擎与规则命中。
+- Static analysis / 静态分析：包含 PE sections、URLs、strings、warnings 和 tags。
 - Dynamic summary / 动态分析.
-- VirusTotal / reputation / VirusTotal / 信誉. VT is optional hash-only
-  reputation enrichment. Missing API keys, rate limits, not-found responses, or
-  lookup transport status are enrichment quality/status, not sandbox-observed
-  malicious behavior.
+- VirusTotal / reputation / VirusTotal / 信誉：VT 是可选 hash-only 信誉 enrichment。
+  缺失 API key、限速、未收录响应或 lookup transport status 属于 enrichment 质量/状态，
+  不是沙箱观察到的恶意行为。
 - Behavior graph / IOC summary / 行为图谱与 IOC 摘要. This is a stable,
   weak-interaction graph view that derives process-to-file, process-to-registry,
   process-to-network, and process-to-artifact edges from normalized telemetry.
@@ -63,15 +56,13 @@ explicit English entry remains `report.en.html`.
   counts, high-signal default-expanded nodes, and self-noise excluded from the
   tree before the operator expands the lineage.
 - File behavior / 文件, including dropped files.
-- Artifact links / 证据文件链接 must include `events.json`,
-  `driver-events.jsonl`, artifact manifests, screenshots, dropped files,
-  opt-in memory dumps, and imported `.pcap` / `.pcapng` packet captures when
-  those files exist in the job directory. This section must also include
-  Artifact collection status panels for dropped files, screenshots, memory
-  dumps, packet captures, and driver events. These panels should summarize
-  captured, failed, skipped, partial, observed, or not-observed collection state
-  from both indexed artifacts and normalized telemetry, so operators can see
-  whether evidence was actually collected even when no artifact file exists.
+- Artifact links / 证据文件链接：当 job 目录存在对应文件时，必须包含 `events.json`、
+  `driver-events.jsonl`、artifact manifests、screenshots、dropped files、显式 opt-in 的
+  memory dumps，以及导入的 `.pcap` / `.pcapng` packet captures。本章节还必须包含
+  Artifact collection status panels，用于 dropped files、screenshots、memory dumps、
+  packet captures 和 driver events。这些面板应从 indexed artifacts 与 normalized telemetry
+  汇总 captured、failed、skipped、partial、observed 或 not-observed 状态，让操作者即使在
+  没有 artifact 文件时也能判断证据是否实际采集。
 - Registry behavior / 注册表.
 - Network behavior / 网络. A Network category view should summarize endpoint
   groups plus DNS / HTTP / TLS / flow counts before raw network rows, so
@@ -127,15 +118,13 @@ plain diagnostic dump. The visual contract is:
 - Large static strings/warnings lists should be capped in the default view
   (currently 200 entries) with a visible hidden-entry count and a pointer to
   `report.json`.
-- Artifact evidence with a trusted `safeLink` or safe relative path should
-  render as explicit Open/Download buttons. Arbitrary host or guest absolute
-  filesystem paths must remain copyable evidence text only and must not be used
-  as `href` values.
-  Absolute paths must not be used as `href` values.
+- 具有可信 `safeLink` 或安全相对路径的 Artifact evidence 应渲染为显式
+  `打开 / Open`、`下载 / Download` 按钮。任意 host/guest 绝对文件系统路径只能作为可复制
+  evidence text 展示，不得作为 `href` 值。绝对路径不得用于 `href`。
 - The Raw normalized events section should be slim by default: render a native
   collapsed `<details>` block, bound the expanded raw event panel height, and
-  inline only the first 200 raw events. Expanded inline rows must be split into
-  50-row native pages so analysts can open a small chunk instead of a long
+  inline only the first 75 raw events. Expanded inline rows must be split into
+  25-row native pages so analysts can open a small chunk instead of a long
   table. The section must show total events, inline-rendered events, inline
   page count, hidden raw events, a Raw evidence height limit (currently
   `58vh`), and clear `report.json` plus raw source artifact path hints for
@@ -191,52 +180,44 @@ plain diagnostic dump. The visual contract is:
   link for existing report consumers and should serve the Simplified Chinese
   report chrome by default.
 
-## Evidence interaction
+## 证据交互 / Evidence interaction
 
-Evidence rows are operator-facing. Tables, timeline entries, and raw evidence
-blocks should support fast copying:
+Evidence rows 是操作者可见内容。Tables、timeline entries 和 raw evidence blocks
+应支持快速复制：
 
-- Right-click a copyable cell or timeline item to copy its evidence text.
-- Click a copy button on raw evidence to copy a complete event block.
+- 右键可复制单元格或 timeline item，复制其 evidence text。
+- 点击 raw evidence 上的 `复制 / Copy` 按钮，复制完整 event block。
 - Raw event fields should be sorted and rendered in a flat collapsible evidence
   block; command/output/script fields stay in nested copyable `<details>` so
   large driver payloads do not overwhelm the page.
 - Raw normalized events should default to a closed summary, show only the first
-  200 inline rows in 50-row native pages, and tell the operator exactly how
+  75 inline rows in 25-row native pages, and tell the operator exactly how
   many events are hidden.
 - The raw section should point to `report.json`, `events.json`,
   `driver-events.jsonl`, and/or artifact manifests when indexed, so operators
   have raw source artifact path hints and can open or copy the full raw source
   instead of relying on an oversized HTML table.
-- Indexed artifacts should be opened or downloaded through safe relative report
-  links. If only an absolute host/guest path is known, show it as copyable text
-  evidence rather than a clickable link.
+- Indexed artifacts 应通过安全相对 report links 打开或下载。若只知道绝对 host/guest path，
+  则显示为可复制 text evidence，而不是 clickable link。
 
-## Live UI expectations
+## Live UI 预期 / Live UI expectations
 
-The WebUI live raw monitor is a dedicated dynamic monitor page linked from the
-main dashboard and opened automatically by the upload flow when the browser
-allows it. It intentionally shows raw events only. It does not run behavior
-classification until the analysis is completed and guest output is imported.
-When the page opens from upload, its bilingual hint should tell the operator to
-leave the dashboard tab running the analysis request. The live table should
-show:
+WebUI live raw monitor 是独立 dynamic monitor page，由 main dashboard 链接；浏览器允许时，
+upload flow 会自动打开它。该页刻意只显示 raw events；在 analysis 完成并导入 guest output 前，
+不运行 behavior classification。当页面由 upload 打开时，双语提示应告知操作者分析请求已由后台接管，
+可在 monitor 页查看进度/下载。Live table 应显示：
 
-- timestamp
+- timestamp / 时间戳
 - `eventType`
-- source
-- process id/name
-- path
-- data with command/output fields hidden in copyable details
+- source / 来源
+- process id/name / 进程 ID/名称
+- path / 路径
+- data / 数据：command/output 字段隐藏在可复制 details 中
 
-When a job fails, the main dashboard should keep the report links, artifact
-paths, progress stage status, failed step title/message, exit code, and duration
-visible. It should not inline long runbook command text, stdout, or stderr; the
-operator can open the execution-flow page and copy `runbook-execution.json` for
-deep troubleshooting.
+当 job 失败时，main dashboard 应保持 report links、artifact paths、progress stage status、
+failed step title/message、exit code 和 duration 可见。它不应内联长 runbook command text、
+stdout 或 stderr；操作者可打开 execution-flow page，并复制 `runbook-execution.json` 进行深度排障。
 
-The main dashboard should keep report navigation low-noise: one current-language
-primary report button, compact Chinese/English alternatives, a stable automatic
-open notice after successful generation/import, a natural progress-page
-(`execution-flow`) link beside the progress summary, and the live raw monitor as
-a separate page rather than an inline stream.
+Main dashboard 的 report navigation 应保持低噪音：一个当前语言 primary report button、紧凑的
+中文/英文替代入口、生成/导入成功后的稳定 automatic open notice、progress summary 旁自然的
+progress-page（`execution-flow`）链接，以及作为独立页面而非 inline stream 的 live raw monitor。

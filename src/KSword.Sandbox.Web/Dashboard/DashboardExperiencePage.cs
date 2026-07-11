@@ -266,12 +266,12 @@ internal static class DashboardExperiencePage
               </details>
               <details class="vm-config" open>
                 <summary data-zh="高级：敏感产物采集（显式启用 / opt-in）" data-en="Advanced: sensitive artifact collection (explicit opt-in)">高级：敏感产物采集（显式启用 / opt-in）</summary>
-                <p class="hint" data-zh="这些选项默认关闭；勾选后只影响当前任务，runbook 会把对应参数（flag）传给 Guest Agent。" data-en="These options are disabled by default. When checked, they only affect the current job and the runbook forwards matching flags to the Guest Agent.">这些选项默认关闭；勾选后只影响当前任务，runbook 会把对应参数（flag）传给 Guest Agent。</p>
+                <p class="hint" data-zh="这些选项默认关闭；勾选后只影响当前任务，上传点击会随计划一起提交并在动态监控页显示，runbook 会把对应参数（flag）传给 Guest Agent。" data-en="These options are disabled by default. When checked, they affect only this job, upload submits them with the plan and shows them on the dynamic monitor, and the runbook forwards matching flags to the Guest Agent.">这些选项默认关闭；勾选后只影响当前任务，上传点击会随计划一起提交并在动态监控页显示，runbook 会把对应参数（flag）传给 Guest Agent。</p>
                 <div class="vm-grid">
-                  <div class="toggle-card"><label for="collectDroppedFiles"><input id="collectDroppedFiles" type="checkbox"> <span data-zh="采集落地文件" data-en="Collect dropped files">采集落地文件</span></label></div>
-                  <div class="toggle-card"><label for="captureScreenshots"><input id="captureScreenshots" type="checkbox"> <span data-zh="采集截图" data-en="Capture screenshots">采集截图</span></label></div>
-                  <div class="toggle-card"><label for="captureMemoryDumps"><input id="captureMemoryDumps" type="checkbox"> <span data-zh="采集内存转储" data-en="Capture memory dumps">采集内存转储</span></label></div>
-                  <div class="toggle-card"><label for="capturePacketCapture"><input id="capturePacketCapture" type="checkbox"> <span data-zh="采集 PCAP 抓包" data-en="Capture PCAP">采集 PCAP 抓包</span></label></div>
+                  <div class="toggle-card" data-copy="采集落地文件 / Collect dropped files"><label for="collectDroppedFiles"><input id="collectDroppedFiles" type="checkbox"> <span data-zh="采集落地文件" data-en="Collect dropped files">采集落地文件</span></label><p class="field-hint" data-zh="保存样本运行期间新增或修改的落地文件证据。" data-en="Preserve dropped-file evidence created or modified during sample execution.">保存样本运行期间新增或修改的落地文件证据。</p></div>
+                  <div class="toggle-card" data-copy="采集截图 / Capture screenshots"><label for="captureScreenshots"><input id="captureScreenshots" type="checkbox"> <span data-zh="采集截图" data-en="Capture screenshots">采集截图</span></label><p class="field-hint" data-zh="采集运行窗口或桌面截图，帮助复核 GUI 行为。" data-en="Capture run-window or desktop screenshots for GUI behavior review.">采集运行窗口或桌面截图，帮助复核 GUI 行为。</p></div>
+                  <div class="toggle-card" data-copy="采集内存转储：样本进程；支持时包含子进程 / Capture memory dumps: sample process; child processes when supported"><label for="captureMemoryDumps"><input id="captureMemoryDumps" type="checkbox"> <span data-zh="采集内存转储（含子进程，若支持）" data-en="Capture memory dumps (children if supported)">采集内存转储（含子进程，若支持）</span></label><p class="field-hint" data-zh="请求样本进程内存转储；Guest Agent 支持时也包含可解析的子进程转储。" data-en="Request sample-process memory dumps; when the Guest Agent supports it, resolved child processes are dumped too.">请求样本进程内存转储；Guest Agent 支持时也包含可解析的子进程转储。</p></div>
+                  <div class="toggle-card" data-copy="采集 PCAP 抓包 / Capture packet capture PCAP"><label for="capturePacketCapture"><input id="capturePacketCapture" type="checkbox"> <span data-zh="采集 PCAP 抓包" data-en="Capture PCAP">采集 PCAP 抓包</span></label><p class="field-hint" data-zh="采集网络包为 PCAP/PCAPNG 证据，监控页提供下载状态。" data-en="Capture network packets as PCAP/PCAPNG evidence; the monitor shows download status.">采集网络包为 PCAP/PCAPNG 证据，监控页提供下载状态。</p></div>
                 </div>
               </details>
               <div id="status" class="status" role="status" aria-live="polite"></div>
@@ -1102,7 +1102,7 @@ internal static class DashboardExperiencePage
               const lanes = [
                 [submission.collectDroppedFiles, t('落地文件', 'dropped files')],
                 [submission.captureScreenshots, t('截图', 'screenshots')],
-                [submission.captureMemoryDumps, t('内存转储', 'memory dumps')],
+                [submission.captureMemoryDumps, t('内存转储（含子进程，若支持）', 'memory dumps (children if supported)')],
                 [submission.capturePacketCapture, t('网络抓包', 'packet capture')]
               ];
               const enabled = lanes.filter(([value]) => Boolean(value)).map(([, label]) => label);

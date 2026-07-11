@@ -256,7 +256,10 @@ function Assert-PathAllowed {
     )
 
     foreach ($segment in $segments) {
-        if ($forbiddenSegments -contains $segment) {
+        # Use exact-case segment checks so source namespaces such as
+        # src/KSword.Sandbox.Abstractions/Artifacts are not mistaken for the
+        # lower-case runtime artifact-output folder "artifacts/".
+        if ($forbiddenSegments -ccontains $segment) {
             throw "Forbidden package path segment '$segment' in '$normalized'."
         }
     }

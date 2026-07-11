@@ -19,3 +19,15 @@ This directory contains the first productization-facing package manifests:
 Use `scripts/package-portable.ps1` to stage a local package tree and optionally
 create a `.zip` under an output directory outside the repository. The script is
 local-only and intentionally has no push/publish step.
+
+Before a review handoff or source package dry run, use the combined lightweight
+gate from the repository root:
+
+```powershell
+.\scripts\Test-ReleaseReadiness.ps1 -AllowDirtySource -StageSourcePackage
+```
+
+The readiness wrapper calls repository policy, parses operational PowerShell
+scripts, validates package manifests, and scans normal release paths for legacy
+`CSignTool.exe` references. It does not start Hyper-V, sign drivers, or publish
+artifacts.

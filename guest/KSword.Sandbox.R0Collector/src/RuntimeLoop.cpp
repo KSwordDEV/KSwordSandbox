@@ -42,6 +42,8 @@ std::string BuildConfigData(const Options& options) {
     data.AddBool("mockMode", options.mockMode);
     data.AddBool("syntheticMode", options.mockMode);
     data.AddBool("injectJsonlNoise", options.injectJsonlNoise);
+    data.AddUtf8("jsonlNoiseInjectionGuard", "noise injection is accepted only in mock/stress mode and rejected for abi/diagnose/health/live collection");
+    data.AddWide("zhJsonlNoiseInjectionGuard", L"JSONL 噪声注入仅在 mock/stress 模式允许，ABI/就绪/健康/实时采集会拒绝。");
     data.AddBool("abiSelfCheck", options.abiSelfCheck);
     data.AddBool("diagnose", options.diagnose);
     data.AddBool("healthOnly", options.healthOnly);

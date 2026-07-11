@@ -406,6 +406,10 @@ internal sealed class GuestArtifactWriter
         var normalizedRelativePath = NormalizeRelativePath(relativePath);
         var disabledCount = enabled ? disabledEventCount : Math.Max(1, disabledEventCount);
         var capturedCount = Math.Max(artifactCount, capturedEventCount);
+        var collectionArtifacts = descriptors
+            .Where(artifact => string.Equals(artifact.CollectionName, name, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        var totalBytes = collectionArtifacts.Sum(artifact => artifact.SizeBytes);
         var metadata = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
             ["collectionName"] = name,
@@ -414,6 +418,8 @@ internal sealed class GuestArtifactWriter
             ["captureEnabled"] = enabled.ToString(System.Globalization.CultureInfo.InvariantCulture).ToLowerInvariant(),
             ["implemented"] = implemented.ToString(System.Globalization.CultureInfo.InvariantCulture).ToLowerInvariant(),
             ["artifactCount"] = artifactCount.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["fileCount"] = artifactCount.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["totalBytes"] = totalBytes.ToString(System.Globalization.CultureInfo.InvariantCulture),
             ["capturedCount"] = capturedCount.ToString(System.Globalization.CultureInfo.InvariantCulture),
             ["skippedCount"] = skippedEventCount.ToString(System.Globalization.CultureInfo.InvariantCulture),
             ["disabledCount"] = disabledCount.ToString(System.Globalization.CultureInfo.InvariantCulture),
@@ -424,6 +430,21 @@ internal sealed class GuestArtifactWriter
             ["failedEventCount"] = failedEventCount.ToString(System.Globalization.CultureInfo.InvariantCulture),
             ["safeByDefault"] = (!enabled).ToString(System.Globalization.CultureInfo.InvariantCulture)
         };
+
+        if (kind == ArtifactKind.PacketCapture)
+        {
+            AddIfMissing(metadata, "captureSource", enabled ? "guest-pktmon" : "not-requested");
+            AddIfMissing(metadata, "captureTool", "pktmon.exe");
+            AddIfMissing(metadata, "conversionTool", "pktmon.exe");
+            AddIfMissing(metadata, "expectedRelativePath", "packet-captures/*.pcapng");
+            AddIfMissing(metadata, "pcapArtifactCount", artifactCount.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            AddIfMissing(metadata, "packetCaptureFileCount", artifactCount.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            AddIfMissing(metadata, "protocolSummaryAvailable", "false");
+            AddIfMissing(metadata, "protocolSummaryState", "capture-metadata-only");
+            AddIfMissing(metadata, "protocolSummaryStatus", "skipped");
+            AddIfMissing(metadata, "protocolSummaryReason", "protocolParserNotImplemented");
+            AddIfMissing(metadata, "zhHint", "未集成协议解析时，请优先查看 artifactCount/fileCount/totalBytes、lastArtifactRelativePath、lastDiagnosticEtlRelativePath、lastDiagnosticPacketCountStatus 与 sha256 等文件完整性字段。");
+        }
 
         AddLastCollectionEventMetadata(
             metadata,
@@ -452,6 +473,10 @@ internal sealed class GuestArtifactWriter
         metadata["zhStatus"] = ZhCollectionStatus(status);
         metadata["zhReason"] = ZhCollectionReason(reason);
         metadata["zhHint"] = ZhCollectionHint(name, status, reason);
+        if (kind == ArtifactKind.PacketCapture && string.IsNullOrWhiteSpace(metadata["zhHint"]))
+        {
+            metadata["zhHint"] = "未集成协议解析时，请优先查看 artifactCount/fileCount/totalBytes、lastArtifactRelativePath、lastDiagnosticEtlRelativePath、lastDiagnosticPacketCountStatus 与 sha256 等文件完整性字段。";
+        }
 
         return new ArtifactCollectionDescriptor
         {
@@ -988,7 +1013,36 @@ internal sealed class GuestArtifactWriter
             "protocolSummaryState",
             "protocolSummaryStatus",
             "protocolSummaryReason",
+            "protocolSummaryFormat",
             "protocolsObserved",
+            "captureTool",
+            "captureToolMode",
+            "captureToolCommand",
+            "conversionTool",
+            "conversionCommand",
+            "conversionStatus",
+            "conversionSourceFormat",
+            "conversionTargetFormat",
+            "captureStartedUtc",
+            "captureStoppedUtc",
+            "fileCount",
+            "packetCaptureFileCount",
+            "packetCount",
+            "packetCountStatus",
+            "pcapngBlockCount",
+            "pcapngPacketBlockCount",
+            "pcapngEnhancedPacketBlockCount",
+            "pcapngSimplePacketBlockCount",
+            "conversionOutputSummaryAvailable",
+            "pktmonReportedPacketCount",
+            "etlExists",
+            "etlSizeBytes",
+            "etlLastWriteUtc",
+            "etlSha256",
+            "etlHashAlgorithm",
+            "etlHashStatus",
+            "etlHashExceptionType",
+            "etlHashMessage",
             "zhMessage",
             "zhHint",
             "zhReason"
@@ -1129,10 +1183,15 @@ internal sealed class GuestArtifactWriter
         AddIfMissing(metadata, "captureSource", metadata.ContainsKey("collector") ? "guest-pktmon" : "guest-output");
         AddIfMissing(metadata, "hostCaptureStarted", "false");
         AddIfMissing(metadata, "importMode", "guest-artifact");
+        AddIfMissing(metadata, "packetCaptureFileCount", "1");
+        AddIfMissing(metadata, "fileCount", "1");
+        AddIfMissing(metadata, "captureTool", metadata.ContainsKey("collector") ? "pktmon.exe" : "unknown");
+        AddIfMissing(metadata, "conversionTool", metadata.ContainsKey("collector") ? "pktmon.exe" : "unknown");
         AddIfMissing(metadata, "protocolSummaryAvailable", "false");
-        AddIfMissing(metadata, "protocolSummaryState", "placeholder");
+        AddIfMissing(metadata, "protocolSummaryState", "capture-metadata-only");
         AddIfMissing(metadata, "protocolSummaryStatus", "skipped");
         AddIfMissing(metadata, "protocolSummaryReason", "protocolParserNotImplemented");
+        AddIfMissing(metadata, "zhHint", "未集成协议解析时，此条目仍提供 PCAP/PCAPNG 路径、大小、sha256、采集/转换状态和可下载证据。请下载 artifactRelativePath 进行外部协议分析。");
     }
 
     private static string? InferCaptureState(string eventType)

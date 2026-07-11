@@ -12,7 +12,9 @@
 - DRAKVUF Sandbox basic usage：其文档指出插件越多越影响性能，插件选择需要在覆盖率和性能间折中；本项目 R0/Guest 采集也应保持按需开关，例如截图、内存 dump、PCAP。参考：<https://drakvuf-sandbox.readthedocs.io/en/v0.19.0/usage/basic_usage.html>
 - MITRE ATT&CK Windows Matrix：Windows 平台技术矩阵是规则映射基准，规则必须尽量映射到明确 technique，collection-health、VT reputation、采集失败等诊断事件不强行映射。参考：<https://attack.mitre.org/matrices/enterprise/windows/>
 - MITRE ATT&CK technique pages：新增 technique 必须按官方 technique name 写入 `rules/mitre-windows-map.json`，例如 Odbcconf (`T1218.008`)、MMC (`T1218.014`)、Security Software Discovery (`T1518.001`) 和 Credentials In Files (`T1552.001`)。参考：<https://attack.mitre.org/techniques/T1218/008/>、<https://attack.mitre.org/techniques/T1218/014/>、<https://attack.mitre.org/techniques/T1518/001/>、<https://attack.mitre.org/techniques/T1552/001/>
-- Sigma 规则规范与公开 Windows 规则思路：Sigma 的 `detection`/`condition`/`falsepositives`/`level` 结构适合转换成本项目的 event type + path/command/data predicates + exclusion guard + severity/confidence 元数据；只吸收可泛化的检测思想，不复制规则文本。参考：<https://sigmahq.io/docs/basics/rules.html>、<https://github.com/SigmaHQ/sigma/tree/master/rules/windows>
+- SigmaHQ 规则规范与公开 Windows 规则思路：Sigma 的 `detection`/`condition`/`falsepositives`/`level` 结构适合转换成本项目的 event type + path/command/data predicates + exclusion guard + severity/confidence 元数据；只吸收可泛化的检测思想，不复制规则文本。参考：<https://sigmahq.io/docs/basics/rules.html>、<https://github.com/SigmaHQ/sigma/tree/master/rules/windows>
+- Elastic detection rules：Elastic 公开规则库可作为 Windows 持久化、进程注入、横向移动、PowerShell/LOLBin、网络 C2 与误报控制的参考家族；本项目只借鉴规则组织、字段约束和 ATT&CK 对齐方式，不复制查询或描述文本。参考：<https://github.com/elastic/detection-rules>、<https://www.elastic.co/guide/en/security/current/prebuilt-rules.html>
+- Splunk Security Content：Splunk 的 analytic story / detection / investigation 组织方式适合参考到 release notes、行为矩阵分组和 triage 描述；本项目不复制 SPL，只保留通用行为语义和 ATT&CK 映射思路。参考：<https://github.com/splunk/security_content>、<https://research.splunk.com/>
 
 ## 已映射到本项目的方向
 
@@ -20,6 +22,7 @@
    - `rules/behavior-rules.json` 采用 signature-like 规则，覆盖持久化、注入、下载执行、横向移动、反沙箱、凭据访问、防御规避、C2/网络行为。
    - `RuleEngine` 已支持更多 all-of 谓词，避免 CAPE/Cuckoo 类规则常见的单字符串误报。
    - v15 将公开 Sigma/LOLBAS 风格的 Windows 代理执行与 API 监控思路落到三个高约束规则：`odbcconf-regsvr-user-writable-dll-proxy-execution`、`mmc-user-writable-msc-proxy-execution`、`named-pipe-impersonation-api-observed`。这些规则要求 event type 加命令行/API/路径上下文，并显式排除 KSword/R0Collector/VT 采集噪声。
+   - 2026-07-12 的 38 条新增规则把 SigmaHQ、Elastic detection rules、Splunk Security Content 与 MITRE ATT&CK 作为“灵感家族”：参考其持久化、注入、横向移动、反沙箱、下载执行和网络 triage 维度，但规则 ID、谓词、字段组合、中文摘要和 false-positive guard 均按 KSwordSandbox 事件模型重新编写。
 
 2. 报告结构
    - 报告分为风险摘要、行为命中、MITRE 映射、静态分析、动态分析、进程树、文件、注册表、网络、R0、证据文件、raw events。
@@ -30,6 +33,20 @@
    - dropped files、screenshots、memory dumps、PCAP/PCAPNG、driver JSONL、events.json 都进入 artifact index。
    - 高成本能力按需启用，尤其是截图、全进程内存 dump、PCAP、R0 网络 producer。
    - DRAKVUF 的 `apimon`、`filetracer`、`procmon`、`socketmon`、`tlsmon`、`regmon`、`delaymon` 等插件维度，对应本项目的 `api.call`、`driver.file`/`file.*`、`process.*`、`network.*`/`pcap.*`、`registry.*` 和 `antiAnalysis.*` 事件族。新增 named-pipe impersonation 规则即预留给 API monitor / typed sidecar 行消费。
+
+
+## 2026-07-12 release-facing 行为扩展说明
+
+本轮只更新行为规则文档/矩阵说明，不修改 `rules/behavior-rules.json`。当前规则集通过 38 条新增行为规则覆盖以下 release-facing 能力：
+
+- 持久化：LSA authentication package、AppInit/AppCert DLL、BootExecute、Time Provider、WMI event subscription、COM InprocServer hijack、print monitor、Active Setup。
+- 注入：R0/driver/API monitor 风格的跨进程内存写、远程线程、QueueUserAPC、section map execute、suspended-process hollowing、LSASS handle access。
+- 横向移动：admin share executable copy、PsExec service ImagePath、WinRM remote target、WMI remote process create、RDP shadow / RestrictedAdmin。
+- 反沙箱：CPUID/hypervisor、VM registry key、analysis-tool process query、long sleep / time skew。
+- 下载执行：Certutil URL cache、BITS transfer、PowerShell WebClient 到用户可写路径、Mshta/Regsvr32 remote scriptlet、Rundll32 URL/DLL entrypoint。
+- DNS/HTTP/TLS/PCAP：DNS TXT long-label exfil、NXDOMAIN/DGA burst、HTTP executable payload magic、small periodic POST beacon、Host/SNI suspicious metadata、self-signed/invalid TLS、no-SNI rare JA3、SMB admin-share session setup。
+
+开源参考边界：SigmaHQ、Elastic detection rules、Splunk Security Content 和 MITRE ATT&CK 只作为检测家族、字段约束、误报控制和技术映射参考；不复制规则正文、查询语句、SPL/EQL/KQL、描述文本或测试样例。落地到本项目时必须转换为 `SandboxEvent` event type、path/command/data predicates、`evidenceFields`、severity/confidence 和 KSword/R0Collector/VT 噪声排除。
 
 ## 2026-07-11 v15 落地说明
 

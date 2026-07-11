@@ -16,11 +16,16 @@ collector rows, and normalized protocol/correlation rows rather than requiring
 stateful joins in the engine.
 
 The current rule set spans behavior, enrichment, static, and collection-health
-signals. The recent open-source-reference pass adds sandbox-safe Odbcconf, MMC,
-and named-pipe impersonation coverage using public ATT&CK/Sigma-style behavior
-ideas and explicit false-positive guards. The previous v14 combination and
-MITRE-quality pass built on the v13 advanced predicates with high-signal
-coverage for
+signals. The 2026-07-12 release-facing pass adds 38 behavior rules for
+persistence, process injection, lateral movement, anti-sandbox checks,
+download-execute chains, and DNS/HTTP/TLS/PCAP evidence. The rule ideas are
+aligned with public inspiration families including SigmaHQ, Elastic detection
+rules, Splunk Security Content, and MITRE ATT&CK, but the project uses its own
+event predicates and does not copy upstream rule text. The previous
+open-source-reference pass adds sandbox-safe Odbcconf, MMC, and named-pipe
+impersonation coverage using public ATT&CK/Sigma-style behavior ideas and
+explicit false-positive guards. The previous v14 combination and MITRE-quality
+pass built on the v13 advanced predicates with high-signal coverage for
 Run-key/dropper persistence, Defender exclusion dropper evasion,
 security-tool discovery, credential-file search, periodic C2 from
 user-writable payloads, anti-sandbox VM-check sleep gates, and script-download
@@ -36,6 +41,27 @@ they document expected triage confidence, bilingual operator text, report
 grouping intent, and the evidence fields analysts should inspect first.
 
 ## Added coverage
+
+### Release-facing mapping for the 38 newest rules
+
+- Persistence: LSA authentication packages, AppInit/AppCert DLLs,
+  BootExecute, Time Providers, WMI event subscriptions, COM InprocServer
+  hijacks, print monitors, and Active Setup StubPath values.
+- Injection: R0/driver/API evidence for cross-process memory writes, remote
+  thread creation, QueueUserAPC-style injection, executable section mapping,
+  suspended-process hollowing, and LSASS cross-process handles.
+- Lateral movement: admin-share executable copy, PsExec service ImagePath,
+  WinRM remote targets, WMI remote process creation, and RDP shadow or
+  RestrictedAdmin command evidence.
+- Anti-sandbox: CPUID/hypervisor checks, VM registry-key queries,
+  analysis-tool process queries, and long-sleep/time-skew behavior.
+- Download-execute: Certutil URL cache staging, BITS transfer jobs,
+  PowerShell WebClient downloads to user-writable locations, remote
+  Mshta/Regsvr32 scriptlets, and Rundll32 URL/DLL entrypoint launches.
+- DNS/HTTP/TLS/PCAP: DNS TXT/long-label exfil, NXDOMAIN/DGA bursts, HTTP
+  executable payload magic, small periodic POST beacons, suspicious Host/SNI
+  metadata, invalid or self-signed TLS, no-SNI/rare-JA3 combinations, and SMB
+  admin-share session setup evidence.
 
 - Open-source reference behavior rules:
   - Odbcconf `REGSVR` proxy execution with a user-writable DLL path, mapped to
@@ -93,6 +119,9 @@ grouping intent, and the evidence fields analysts should inspect first.
     persistence, browser extension force-install policies, browser native
     messaging host registry/manifest writes, and IE Browser Helper Object or
     toolbar hooks with payload/update URL/user-writable constraints.
+  - Release-facing persistence surfaces for LSA authentication packages,
+    AppInit/AppCert DLLs, BootExecute, Time Providers, WMI event subscriptions,
+    COM InprocServer hijacks, print monitors, and Active Setup.
 - System inventory diff persistence:
   - `service.created` / `service.modified` and suspicious service raw command
     metadata.
@@ -123,6 +152,8 @@ grouping intent, and the evidence fields analysts should inspect first.
   - HH/HTML Help remote script or CHM proxy execution, MSXSL remote XSL/script
     execution, and `forfiles /c` launches of shells, script interpreters, or
     proxy-execution LOLBins.
+  - Certutil URL cache, BITS transfer, PowerShell WebClient, Mshta/Regsvr32
+    remote scriptlet, and Rundll32 URL/DLL entrypoint download-execute chains.
 - DNS/HTTP/TLS/PCAP:
   - DNS cache additions, TXT/NULL/CNAME/tunnel-style entries, and dynamic DNS
     domain fragments from the current network probe.
@@ -150,6 +181,10 @@ grouping intent, and the evidence fields analysts should inspect first.
     domains, plus constrained HTTP POST rows carrying authorization, cookie,
     bearer-token, password, session, or explicit credential-exfil labels.
   - Root certificate store modification commands and registry/file paths.
+  - Packet-derived DNS TXT/long-label exfil, NXDOMAIN/DGA bursts, HTTP
+    executable payload magic, small periodic POST beacons, suspicious Host/SNI
+    metadata, invalid/self-signed TLS, no-SNI/rare-JA3 combinations, and SMB
+    admin-share session setup evidence.
   - DNS tunnel/DGA labels, TLS SNI/JA3/certificate metadata, PCAP artifact
     import rows, PCAP endpoint flows, upload/exfil labels, and PCAP flow-count
     metadata now use concrete rule names and documented evidence fields.
@@ -164,6 +199,9 @@ grouping intent, and the evidence fields analysts should inspect first.
   - Explicit WinRM / PowerShell Remoting enablement through `Enable-PSRemoting`,
     `winrm quickconfig`, WSMan quick-config, AllowUnencrypted, or TrustedHosts
     command evidence.
+  - Admin-share executable staging, PsExec service ImagePath, WinRM remote
+    target process starts, WMI remote create calls, and RDP shadow or
+    RestrictedAdmin command evidence.
 - Anti-analysis:
   - VM/tool artifact paths expanded for common VMware, VirtualBox, Hyper-V,
     QEMU, Xen, debugger, reverse-engineering, and traffic-analysis tools.
@@ -178,6 +216,9 @@ grouping intent, and the evidence fields analysts should inspect first.
   - Sleep-duration and accelerated/skipped-sleep telemetry fields carry
     explicit confidence and evidence-field metadata; v13/v14 numeric-range
     rules now elevate only bounded long-sleep or VM-check sleep-gate evidence.
+  - CPUID/hypervisor checks, VM registry-key queries, analysis-tool process
+    queries, and long-sleep/time-skew rows are medium-confidence anti-sandbox
+    evidence rather than verdicts.
 - Collection/defense-evasion extras:
   - Screen-capture API calls (`BitBlt`, `GetDC`, `PrintWindow`, foreground or
     desktop window APIs).
@@ -187,6 +228,9 @@ grouping intent, and the evidence fields analysts should inspect first.
   - Token impersonation, sensitive privilege enablement, auto-elevate UAC
     registry/LOLBin chains, debug/all-access process opens, and user-writable
     DLL image-load evidence.
+  - Cross-process memory write, remote thread, QueueUserAPC, executable section
+    mapping, suspended-process hollowing, and LSASS handle-access telemetry from
+    R0/driver/API monitor style events.
   - Defender service `Start=4`, Defender realtime/security policy disable
     values, Defender exclusions that point at user-writable staging paths,
     PowerShell ScriptBlock/Module/Transcription logging disable values, UAC

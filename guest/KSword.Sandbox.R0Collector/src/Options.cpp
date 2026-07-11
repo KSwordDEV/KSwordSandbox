@@ -248,7 +248,17 @@ bool ParseArguments(int argc, wchar_t* argv[], Options* options, std::wstring* e
     if (options->injectJsonlNoise && !options->mockMode) {
         if (error != nullptr) {
             *error = L"--inject-jsonl-noise is only supported with --mock/--synthetic or --stress-count. / "
-                L"--inject-jsonl-noise \u4ec5\u652f\u6301\u4e0e --mock/--synthetic \u6216 --stress-count \u4e00\u8d77\u4f7f\u7528\u3002";
+                L"--inject-jsonl-noise 仅支持与 --mock/--synthetic 或 --stress-count 一起使用。";
+        }
+        return false;
+    }
+
+    if (options->injectJsonlNoise &&
+        (options->abiSelfCheck || options->diagnose || options->healthOnly)) {
+        if (error != nullptr) {
+            *error = L"--inject-jsonl-noise cannot be combined with --abi-self-check, --diagnose/readiness, or --health. / "
+                L"--inject-jsonl-noise 不能与 --abi-self-check、--diagnose/readiness 或 --health 同时使用；"
+                L"噪声注入只用于 mock/stress 读取器容错测试。";
         }
         return false;
     }

@@ -142,7 +142,7 @@ Test-signing 命令只影响配置的 guest VM。验证结束后恢复 clean che
 
 ### 环境检查和 VirusTotal（VT）配置
 
-不改变状态地检查本机 readiness：
+不改变状态地检查本机发布/运行就绪状态（readiness）：
 
 ```powershell
 .\install.ps1 -Mode CheckEnvironment
@@ -243,7 +243,7 @@ WebUI/API E2E：
   -DurationSeconds 3 `
   -StepTimeoutSeconds 120
 
-# Live：会还原/启动配置的 VM 并运行样本，只能在 readiness 通过后执行。
+# Live：会还原/启动配置的 VM 并运行样本，只能在就绪检查（readiness）通过后执行。
 .\scripts\Invoke-WebUIApiE2E.ps1 `
   -BaseUrl 'http://127.0.0.1:18082' `
   -Live `
@@ -288,6 +288,17 @@ WebUI/API E2E：
 清单默认排除样本、VM 镜像/检查点、runtime reports、captures、构建中间产物、符号、本机
 config/secrets 和私有签名材料。脚本只做本地 staging/zip，不 push、不发布；上传发布仍是
 release manager 明确执行的独立步骤。详见 `docs/release.md`。
+
+Open-source MVP 发布前使用 `docs/release.md` 的发布就绪清单（readiness checklist）：确认 Hyper-V live
+前置条件、BIOS/UEFI Intel VT-x / AMD-V 设置、可选 VirusTotal 仅哈希（hash-only）配置、artifact（证据/产物）
+排除、仓库策略、无 `CSignTool.exe` 默认路径，以及真实 R0 仍受 test-signing/隔离 VM 限制。
+真实 5 秒 Notepad 报告的最短 live 验证命令也记录在那里：
+
+```powershell
+.\run.ps1 -Mode Analyze -SamplePreset Notepad -DurationSeconds 5 -Live
+```
+
+该命令会操作已配置的 Hyper-V golden VM；输出报告保存在 runtime root 的 job 目录中，不要提交到 git。
 
 ## Hyper-V 前提（assumptions）
 

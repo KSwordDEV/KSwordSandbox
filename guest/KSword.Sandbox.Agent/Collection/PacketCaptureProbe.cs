@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using System.Globalization;
 using System.Runtime.InteropServices;
 using KSword.Sandbox.Agent.Diagnostics;
@@ -115,6 +116,8 @@ internal sealed class PacketCaptureProbe : IGuestProbe
                 ["captureEnabled"] = "true",
                 ["implemented"] = "true",
                 ["collector"] = "pktmon",
+                ["captureTool"] = PktmonExecutable,
+                ["captureToolMode"] = "windows-pktmon-etw",
                 ["collectionName"] = CollectionName,
                 ["evidenceRole"] = "packet-capture",
                 ["captureState"] = "started",
@@ -126,6 +129,13 @@ internal sealed class PacketCaptureProbe : IGuestProbe
                 ["etlRelativePath"] = RelativeToOutput(context.OutputDirectory, session.EtlPath),
                 ["pcapngRelativePath"] = RelativeToOutput(context.OutputDirectory, session.PcapngPath),
                 ["diagnosticRelativePath"] = RelativeToOutput(context.OutputDirectory, session.EtlPath),
+                ["captureStartedUtc"] = session.StartedAtUtc.ToString("O", CultureInfo.InvariantCulture),
+                ["captureToolCommand"] = "pktmon start --capture --pkt-size 0 --file-name <etl> --file-size 128",
+                ["conversionTool"] = PktmonExecutable,
+                ["conversionCommand"] = "pktmon etl2pcap <etl> --out <pcapng>",
+                ["conversionStatus"] = "pending",
+                ["conversionSourceFormat"] = "etl",
+                ["conversionTargetFormat"] = "pcapng",
                 ["artifactRelativePath"] = RelativeToOutput(context.OutputDirectory, session.PcapngPath),
                 ["sourceArtifactRelativePath"] = RelativeToOutput(context.OutputDirectory, session.PcapngPath),
                 ["packetCaptureRelativePath"] = RelativeToOutput(context.OutputDirectory, session.PcapngPath),
@@ -185,6 +195,8 @@ internal sealed class PacketCaptureProbe : IGuestProbe
                 ["captureEnabled"] = "true",
                 ["implemented"] = "true",
                 ["collector"] = "pktmon",
+                ["captureTool"] = PktmonExecutable,
+                ["captureToolMode"] = "windows-pktmon-etw",
                 ["collectionName"] = CollectionName,
                 ["evidenceRole"] = "packet-capture",
                 ["captureState"] = "stopped",
@@ -196,6 +208,14 @@ internal sealed class PacketCaptureProbe : IGuestProbe
                 ["etlRelativePath"] = RelativeToOutput(context.OutputDirectory, session.EtlPath),
                 ["pcapngRelativePath"] = RelativeToOutput(context.OutputDirectory, session.PcapngPath),
                 ["diagnosticRelativePath"] = RelativeToOutput(context.OutputDirectory, session.EtlPath),
+                ["captureStartedUtc"] = session.StartedAtUtc.ToString("O", CultureInfo.InvariantCulture),
+                ["captureStoppedUtc"] = DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture),
+                ["captureToolCommand"] = "pktmon stop",
+                ["conversionTool"] = PktmonExecutable,
+                ["conversionCommand"] = "pktmon etl2pcap <etl> --out <pcapng>",
+                ["conversionStatus"] = "pending",
+                ["conversionSourceFormat"] = "etl",
+                ["conversionTargetFormat"] = "pcapng",
                 ["artifactRelativePath"] = RelativeToOutput(context.OutputDirectory, session.PcapngPath),
                 ["sourceArtifactRelativePath"] = RelativeToOutput(context.OutputDirectory, session.PcapngPath),
                 ["packetCaptureRelativePath"] = RelativeToOutput(context.OutputDirectory, session.PcapngPath),
@@ -208,6 +228,7 @@ internal sealed class PacketCaptureProbe : IGuestProbe
                 ["zhHint"] = "stopped 事件保留 ETL 诊断路径；最终 artifactRelativePath、sizeBytes、sha256 以 captured 事件为准。"
             }
         };
+        AddNamedFileEvidence(stopped.Data, "etl", session.EtlPath);
         AddRootProcessData(stopped, context);
         events.Add(stopped);
 
@@ -243,6 +264,8 @@ internal sealed class PacketCaptureProbe : IGuestProbe
                 ["captureEnabled"] = "true",
                 ["implemented"] = "true",
                 ["collector"] = "pktmon",
+                ["captureTool"] = PktmonExecutable,
+                ["captureToolMode"] = "windows-pktmon-etw",
                 ["collectionName"] = CollectionName,
                 ["evidenceRole"] = "packet-capture",
                 ["captureState"] = "captured",
@@ -251,12 +274,21 @@ internal sealed class PacketCaptureProbe : IGuestProbe
                 ["zhMessage"] = "网络抓包已采集为 PCAPNG 证据文件。",
                 ["zhHint"] = "请使用 artifactRelativePath 下载 PCAPNG；sizeBytes/sha256 可用于校验抓包文件完整性。",
                 ["pcapFormat"] = "pcapng",
+                ["packetCaptureFileCount"] = "1",
+                ["fileCount"] = "1",
+                ["conversionStatus"] = "succeeded",
+                ["conversionTool"] = PktmonExecutable,
+                ["conversionCommand"] = "pktmon etl2pcap <etl> --out <pcapng>",
+                ["conversionSourceFormat"] = "etl",
+                ["conversionTargetFormat"] = "pcapng",
                 ["etlPath"] = session.EtlPath,
                 ["pcapngPath"] = session.PcapngPath,
                 ["relativePath"] = RelativeToOutput(context.OutputDirectory, session.PcapngPath),
                 ["etlRelativePath"] = RelativeToOutput(context.OutputDirectory, session.EtlPath),
                 ["pcapngRelativePath"] = RelativeToOutput(context.OutputDirectory, session.PcapngPath),
                 ["diagnosticRelativePath"] = RelativeToOutput(context.OutputDirectory, session.EtlPath),
+                ["captureStartedUtc"] = session.StartedAtUtc.ToString("O", CultureInfo.InvariantCulture),
+                ["captureStoppedUtc"] = DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture),
                 ["artifactRelativePath"] = RelativeToOutput(context.OutputDirectory, session.PcapngPath),
                 ["sourceArtifactRelativePath"] = RelativeToOutput(context.OutputDirectory, session.PcapngPath),
                 ["packetCaptureRelativePath"] = RelativeToOutput(context.OutputDirectory, session.PcapngPath),
@@ -270,6 +302,9 @@ internal sealed class PacketCaptureProbe : IGuestProbe
             }
         };
         AddArtifactFileEvidence(captured, session.PcapngPath);
+        AddNamedFileEvidence(captured.Data, "etl", session.EtlPath);
+        AddPcapngPacketSummary(captured.Data, session.PcapngPath);
+        AddPktmonConversionOutputSummary(captured.Data, convertResult);
         AddRootProcessData(captured, context);
         events.Add(captured);
         events.Add(CreateProtocolSummaryPlaceholderEvent(context, session, pcapInfo));
@@ -308,6 +343,12 @@ internal sealed class PacketCaptureProbe : IGuestProbe
                 ["zhMessage"] = "网络抓包采集被跳过；该事件说明证据缺口，不会中断整体分析。",
                 ["zhHint"] = PacketCaptureReasonZhHint(reason),
                 ["collector"] = "pktmon",
+                ["captureTool"] = PktmonExecutable,
+                ["captureToolMode"] = "windows-pktmon-etw",
+                ["conversionTool"] = PktmonExecutable,
+                ["conversionStatus"] = reason == "pktmonConvertFailed" ? "failed" : "not-attempted",
+                ["conversionSourceFormat"] = "etl",
+                ["conversionTargetFormat"] = "pcapng",
                 ["evidenceRole"] = "packet-capture",
                 ["collectionName"] = CollectionName,
                 ["captureState"] = "skipped",
@@ -389,6 +430,8 @@ internal sealed class PacketCaptureProbe : IGuestProbe
                 ["captureEnabled"] = "true",
                 ["implemented"] = "true",
                 ["collector"] = "pktmon",
+                ["captureTool"] = PktmonExecutable,
+                ["captureToolMode"] = "windows-pktmon-etw",
                 ["collectionName"] = CollectionName,
                 ["evidenceRole"] = "packet-capture",
                 ["captureState"] = "captured",
@@ -414,13 +457,21 @@ internal sealed class PacketCaptureProbe : IGuestProbe
                 ["protocolSummaryState"] = "placeholder",
                 ["protocolSummaryStatus"] = "skipped",
                 ["protocolSummaryReason"] = "protocolParserNotImplemented",
-                ["protocolSummaryFormat"] = "placeholder",
+                ["protocolSummaryFormat"] = "capture-metadata",
                 ["protocolSummary"] = "{}",
-                ["protocolsObserved"] = "unknown"
+                ["protocolsObserved"] = "unknown",
+                ["packetCaptureFileCount"] = "1",
+                ["fileCount"] = "1",
+                ["conversionStatus"] = "succeeded",
+                ["conversionTool"] = PktmonExecutable,
+                ["conversionSourceFormat"] = "etl",
+                ["conversionTargetFormat"] = "pcapng"
             }
         };
 
         AddArtifactFileEvidence(evt, session.PcapngPath);
+        AddNamedFileEvidence(evt.Data, "etl", session.EtlPath);
+        AddPcapngPacketSummary(evt.Data, session.PcapngPath);
         AddRootProcessData(evt, context);
         return evt;
     }
@@ -457,6 +508,12 @@ internal sealed class PacketCaptureProbe : IGuestProbe
                 ["zhMessage"] = "pktmon 命令失败，网络抓包通道未完整产出。",
                 ["zhHint"] = PacketCaptureReasonZhHint(reason),
                 ["collector"] = "pktmon",
+                ["captureTool"] = PktmonExecutable,
+                ["captureToolMode"] = "windows-pktmon-etw",
+                ["conversionTool"] = PktmonExecutable,
+                ["conversionStatus"] = reason == "pktmonConvertFailed" ? "failed" : "not-attempted",
+                ["conversionSourceFormat"] = "etl",
+                ["conversionTargetFormat"] = "pcapng",
                 ["evidenceRole"] = "packet-capture",
                 ["collectionName"] = CollectionName,
                 ["captureState"] = captureState,
@@ -483,6 +540,7 @@ internal sealed class PacketCaptureProbe : IGuestProbe
             }
         };
 
+        AddNamedFileEvidence(evt.Data, "etl", session.EtlPath);
         AddRootProcessData(evt, context);
         AddArtifactFileEvidence(evt, session.PcapngPath);
         return evt;
@@ -573,6 +631,173 @@ internal sealed class PacketCaptureProbe : IGuestProbe
         }
     }
 
+
+    /// <summary>
+    /// Adds prefixed existence, size, timestamp, and SHA-256 evidence for a related capture file.
+    /// </summary>
+    private static void AddNamedFileEvidence(Dictionary<string, string> data, string prefix, string path)
+    {
+        try
+        {
+            var info = new FileInfo(path);
+            data[$"{prefix}Path"] = path;
+            if (!info.Exists)
+            {
+                data[$"{prefix}Exists"] = "false";
+                data[$"{prefix}HashStatus"] = "missing";
+                return;
+            }
+
+            data[$"{prefix}Exists"] = "true";
+            data[$"{prefix}SizeBytes"] = info.Length.ToString(CultureInfo.InvariantCulture);
+            data[$"{prefix}LastWriteUtc"] = info.LastWriteTimeUtc.ToString("O", CultureInfo.InvariantCulture);
+            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            data[$"{prefix}Sha256"] = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(stream)).ToLowerInvariant();
+            data[$"{prefix}HashAlgorithm"] = "sha256";
+            data[$"{prefix}HashStatus"] = "computed";
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException or PathTooLongException)
+        {
+            data[$"{prefix}HashStatus"] = "failed";
+            data[$"{prefix}HashExceptionType"] = ex.GetType().FullName ?? ex.GetType().Name;
+            data[$"{prefix}HashMessage"] = ex.Message;
+        }
+    }
+
+    /// <summary>
+    /// Counts common PCAPNG packet blocks without requiring tshark or other external dependencies.
+    /// </summary>
+    private static void AddPcapngPacketSummary(Dictionary<string, string> data, string path)
+    {
+        try
+        {
+            var summary = CountPcapngPacketBlocks(path);
+            data["packetCountStatus"] = summary.Status;
+            if (summary.PacketCount is not null)
+            {
+                data["packetCount"] = summary.PacketCount.Value.ToString(CultureInfo.InvariantCulture);
+                data["pcapngPacketBlockCount"] = summary.PacketCount.Value.ToString(CultureInfo.InvariantCulture);
+            }
+
+            if (summary.BlockCount is not null)
+            {
+                data["pcapngBlockCount"] = summary.BlockCount.Value.ToString(CultureInfo.InvariantCulture);
+            }
+
+            if (summary.EnhancedPacketBlockCount is not null)
+            {
+                data["pcapngEnhancedPacketBlockCount"] = summary.EnhancedPacketBlockCount.Value.ToString(CultureInfo.InvariantCulture);
+            }
+
+            if (summary.SimplePacketBlockCount is not null)
+            {
+                data["pcapngSimplePacketBlockCount"] = summary.SimplePacketBlockCount.Value.ToString(CultureInfo.InvariantCulture);
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException or PathTooLongException)
+        {
+            data["packetCountStatus"] = "failed";
+            data["packetCountExceptionType"] = ex.GetType().FullName ?? ex.GetType().Name;
+            data["packetCountMessage"] = ex.Message;
+        }
+    }
+
+    private static PcapngPacketSummary CountPcapngPacketBlocks(string path)
+    {
+        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+        Span<byte> header = stackalloc byte[12];
+        if (stream.Read(header) != header.Length)
+        {
+            return new PcapngPacketSummary(null, null, null, null, "too-small");
+        }
+
+        var littleEndian = true;
+        var firstBlockType = BinaryPrimitives.ReadUInt32LittleEndian(header[..4]);
+        if (firstBlockType != 0x0A0D0D0A)
+        {
+            return new PcapngPacketSummary(null, null, null, null, "not-pcapng");
+        }
+
+        var byteOrderMagic = BinaryPrimitives.ReadUInt32LittleEndian(header[8..12]);
+        if (byteOrderMagic == 0x4D3C2B1A)
+        {
+            littleEndian = false;
+        }
+        else if (byteOrderMagic != 0x1A2B3C4D)
+        {
+            return new PcapngPacketSummary(null, null, null, null, "unknown-byte-order");
+        }
+
+        stream.Position = 0;
+        var blockCount = 0L;
+        var enhancedPacketBlocks = 0L;
+        var simplePacketBlocks = 0L;
+        Span<byte> blockHeader = stackalloc byte[8];
+        while (stream.Position + blockHeader.Length <= stream.Length && stream.Read(blockHeader) == blockHeader.Length)
+        {
+            var blockType = ReadUInt32(blockHeader[..4], littleEndian);
+            var blockLength = ReadUInt32(blockHeader[4..8], littleEndian);
+            if (blockLength < 12 || blockLength > int.MaxValue || stream.Position - 8 + blockLength > stream.Length)
+            {
+                return new PcapngPacketSummary(enhancedPacketBlocks + simplePacketBlocks, blockCount, enhancedPacketBlocks, simplePacketBlocks, "partial-or-invalid");
+            }
+
+            blockCount++;
+            if (blockType == 0x00000006)
+            {
+                enhancedPacketBlocks++;
+            }
+            else if (blockType == 0x00000003)
+            {
+                simplePacketBlocks++;
+            }
+
+            stream.Position += blockLength - 8;
+        }
+
+        return new PcapngPacketSummary(enhancedPacketBlocks + simplePacketBlocks, blockCount, enhancedPacketBlocks, simplePacketBlocks, "computed");
+    }
+
+    private static uint ReadUInt32(ReadOnlySpan<byte> value, bool littleEndian)
+    {
+        return littleEndian
+            ? BinaryPrimitives.ReadUInt32LittleEndian(value)
+            : BinaryPrimitives.ReadUInt32BigEndian(value);
+    }
+
+    /// <summary>
+    /// Extracts bounded pktmon conversion counters from stdout/stderr when pktmon prints them.
+    /// </summary>
+    private static void AddPktmonConversionOutputSummary(Dictionary<string, string> data, BoundedCommandResult result)
+    {
+        var output = string.Join('\n', new[] { result.StandardOutput, result.StandardError }.Where(text => !string.IsNullOrWhiteSpace(text)));
+        if (string.IsNullOrWhiteSpace(output))
+        {
+            data["conversionOutputSummaryAvailable"] = "false";
+            return;
+        }
+
+        data["conversionOutputSummaryAvailable"] = "true";
+        var convertedPackets = FindFirstNumberAfterLabel(output, "packet");
+        if (convertedPackets is not null)
+        {
+            data["pktmonReportedPacketCount"] = convertedPackets.Value.ToString(CultureInfo.InvariantCulture);
+            AddIfNotEmpty(data, "packetCount", data.TryGetValue("packetCount", out var existing) && !string.IsNullOrWhiteSpace(existing) ? existing : convertedPackets.Value.ToString(CultureInfo.InvariantCulture));
+        }
+    }
+
+    private static long? FindFirstNumberAfterLabel(string text, string label)
+    {
+        var labelIndex = text.IndexOf(label, StringComparison.OrdinalIgnoreCase);
+        if (labelIndex < 0)
+        {
+            return null;
+        }
+
+        var digits = new string(text[(labelIndex + label.Length)..].SkipWhile(ch => !char.IsDigit(ch)).TakeWhile(char.IsDigit).ToArray());
+        return long.TryParse(digits, NumberStyles.None, CultureInfo.InvariantCulture, out var value) ? value : null;
+    }
+
     /// <summary>
     /// Adds non-empty event Data values.
     /// </summary>
@@ -619,6 +844,13 @@ internal sealed class PacketCaptureProbe : IGuestProbe
             return string.Empty;
         }
     }
+
+    private sealed record PcapngPacketSummary(
+        long? PacketCount,
+        long? BlockCount,
+        long? EnhancedPacketBlockCount,
+        long? SimplePacketBlockCount,
+        string Status);
 
     private sealed record PacketCaptureSession(
         string CaptureDirectory,

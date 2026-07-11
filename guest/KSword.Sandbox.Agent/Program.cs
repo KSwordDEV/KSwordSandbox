@@ -1835,7 +1835,8 @@ internal static class AgentProgram
                     DriverEventsRequested = !string.IsNullOrWhiteSpace(options.DriverEventsPath),
                     R0CollectorRequested = !string.IsNullOrWhiteSpace(options.R0CollectorPath) || options.R0Mock
                 });
-            events.Add(new SandboxEvent
+            var manifestRelativePath = NormalizeArtifactRelativePath(Path.GetRelativePath(options.OutputDirectory, manifestResult.ManifestPath));
+            var manifestEvent = new SandboxEvent
             {
                 EventType = "artifact.manifest.written",
                 Source = "guest",
@@ -1851,11 +1852,19 @@ internal static class AgentProgram
                     ["screenshotCount"] = options.ScreenshotOptions.CaptureCount.ToString(CultureInfo.InvariantCulture),
                     ["captureMemoryDump"] = options.CaptureMemoryDump.ToString(),
                     ["capturePacketCapture"] = options.CapturePacketCapture.ToString(),
-                    ["relativePath"] = NormalizeArtifactRelativePath(Path.GetRelativePath(options.OutputDirectory, manifestResult.ManifestPath)),
-                    ["importPath"] = NormalizeArtifactRelativePath(Path.GetRelativePath(options.OutputDirectory, manifestResult.ManifestPath)),
-                    ["artifactRoot"] = Path.Combine(options.OutputDirectory, GuestArtifactWriter.ArtifactsDirectoryName)
+                    ["relativePath"] = manifestRelativePath,
+                    ["artifactRelativePath"] = manifestRelativePath,
+                    ["importPath"] = manifestRelativePath,
+                    ["artifactRoot"] = Path.Combine(options.OutputDirectory, GuestArtifactWriter.ArtifactsDirectoryName),
+                    ["captureState"] = "captured",
+                    ["status"] = "captured",
+                    ["nonfatal"] = "false",
+                    ["zhMessage"] = "Guest artifact manifest 已写入，证据集合摘要可用。",
+                    ["zhHint"] = "请使用 artifactRelativePath 下载 manifest；其中 collections metadata 汇总每个证据通道的 captured/skipped/failed/disabled 状态。"
                 }
-            });
+            };
+            AddManifestFileEvidence(manifestEvent, manifestResult.ManifestPath);
+            events.Add(manifestEvent);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException or PathTooLongException)
         {
@@ -1879,6 +1888,45 @@ internal static class AgentProgram
             };
             AddExceptionData(evt, ex);
             events.Add(evt);
+        }
+    }
+
+    /// <summary>
+    /// Adds manifest file size/hash metadata to artifact.manifest.written.
+    /// </summary>
+    private static void AddManifestFileEvidence(SandboxEvent evt, string path)
+    {
+        try
+        {
+            var info = new FileInfo(path);
+            if (!info.Exists)
+            {
+                evt.Data["artifactHashStatus"] = "missing";
+                evt.Data["artifactExists"] = "false";
+                return;
+            }
+
+            evt.Data["artifactExists"] = "true";
+            evt.Data["sizeBytes"] = info.Length.ToString(CultureInfo.InvariantCulture);
+            evt.Data["artifactSizeBytes"] = info.Length.ToString(CultureInfo.InvariantCulture);
+            evt.Data["artifactLastWriteUtc"] = info.LastWriteTimeUtc.ToString("O", CultureInfo.InvariantCulture);
+            var hash = ComputeSha256BestEffort(path);
+            if (!string.IsNullOrWhiteSpace(hash.Sha256))
+            {
+                evt.Data["sha256"] = hash.Sha256;
+                evt.Data["artifactSha256"] = hash.Sha256;
+                evt.Data["hashAlgorithm"] = "sha256";
+            }
+
+            evt.Data["artifactHashStatus"] = hash.Status;
+            AddDataIfNotEmpty(evt.Data, "artifactHashExceptionType", hash.ExceptionType);
+            AddDataIfNotEmpty(evt.Data, "artifactHashMessage", hash.Message);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException or PathTooLongException)
+        {
+            evt.Data["artifactHashStatus"] = "failed";
+            evt.Data["artifactHashExceptionType"] = ex.GetType().FullName ?? ex.GetType().Name;
+            evt.Data["artifactHashMessage"] = ex.Message;
         }
     }
 

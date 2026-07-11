@@ -448,7 +448,7 @@ internal sealed class R0CollectorEventQualityScenario : ISmokeTestScenario
                     ["StressJsonlSequenceStart"] = StressJsonlSequenceStart.ToString(),
                     ["StressJsonlSequenceEnd"] = StressJsonlSequenceEnd.ToString(),
                     ["StressJsonlSequenceGapCount"] = StressJsonlSequenceGapCount.ToString(),
-                    ["StressJsonlLossEvidence"] = "lost|lostCount|lossObserved|TotalEventsDropped|totalEventsDropped|EventsDropped|eventsDropped|ProducerDroppedMask|producerDroppedMask|NextSequence|nextSequence|sequence|head|tail|loss",
+                    ["StressJsonlLossEvidence"] = "lost|lostCount|lossObserved|TotalEventsDropped|totalEventsDropped|EventsDropped|eventsDropped|ProducerDroppedMask|producerDroppedMask|NextSequence|nextSequence|sequence|sequenceGapObserved|sequenceGapEstimate|head|tail|loss",
                     ["StressJsonlBackpressureEvidence"] = "backpressure|backpressureObserved|highWatermark|QueueCapacity|queueCapacity|QueueHighWatermark|queueHighWatermark|TotalEventsBackpressured|totalEventsBackpressured|ProducerBackpressureMask|producerBackpressureMask|lastEnqueueFailureStatus|drainStoppedAtBatchLimit|requestedMaxEvents|readEventsMaxEvents|maxReadBatches|sampling",
                     ["ReadinessNoDevicePolicy"] = "no-device",
                     ["ReadinessNonFatalPolicy"] = "warning"
@@ -612,7 +612,7 @@ internal sealed class R0CollectorEventQualityScenario : ISmokeTestScenario
                     ["StressJsonlSequenceStart"] = StressJsonlSequenceStart.ToString(),
                     ["StressJsonlSequenceEnd"] = StressJsonlSequenceEnd.ToString(),
                     ["StressJsonlSequenceGapCount"] = StressJsonlSequenceGapCount.ToString(),
-                    ["StressJsonlLossEvidence"] = "lost|lostCount|lossObserved|TotalEventsDropped|totalEventsDropped|EventsDropped|eventsDropped|ProducerDroppedMask|producerDroppedMask|NextSequence|nextSequence|sequence|head|tail|loss",
+                    ["StressJsonlLossEvidence"] = "lost|lostCount|lossObserved|TotalEventsDropped|totalEventsDropped|EventsDropped|eventsDropped|ProducerDroppedMask|producerDroppedMask|NextSequence|nextSequence|sequence|sequenceGapObserved|sequenceGapEstimate|head|tail|loss",
                     ["StressJsonlBackpressureEvidence"] = "backpressure|backpressureObserved|highWatermark|QueueCapacity|queueCapacity|QueueHighWatermark|queueHighWatermark|TotalEventsBackpressured|totalEventsBackpressured|ProducerBackpressureMask|producerBackpressureMask|lastEnqueueFailureStatus|drainStoppedAtBatchLimit|requestedMaxEvents|readEventsMaxEvents|maxReadBatches|sampling"
                 }
             });
