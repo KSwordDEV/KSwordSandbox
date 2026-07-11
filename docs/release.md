@@ -1,4 +1,4 @@
-# KSwordSandbox release packaging checklist
+# KSwordSandbox 发布打包检查清单 / Release packaging checklist
 
 中文优先：本页描述本机打包闭环。`scripts/package-portable.ps1` 只在本机
 staging/zip，不提交、不 push、不发布；清单和脚本会拒绝本机 secret、VM
@@ -9,7 +9,7 @@ packages. It is intentionally conservative: packages are staged outside the
 repository, release artifacts are not pushed by the packaging script, and
 sensitive/runtime material is excluded by manifest policy.
 
-## 当前发布 handoff（21a81ac 后）
+## 当前发布 handoff（截至 071ec4c）
 
 面向审阅者的当前结论：源码层 MVP 主链路已经成形，但正式 tag 前仍应由
 release manager 在候选提交上重新跑低副作用门禁。本文档刷新没有重跑
@@ -38,7 +38,7 @@ Hyper-V live、重 smoke 或驱动签名。
 2. 本页的 package/checklist；确认 staging 输出在仓库外。
 3. `docs/README.md` 的 canonical 文档地图，避免引用历史 planning 文件作为当前事实。
 
-## Package types
+## 包类型 / Package types
 
 - Source package: repository source, rules, docs, tests, packaging metadata, and
   scripts needed to rebuild from source. It excludes VM state, submitted
@@ -50,13 +50,13 @@ Hyper-V live、重 smoke 或驱动签名。
   host/guest/tool payloads are expected under external folders such as
   `host-web`, `guest-tools`, `tools/job-tool`, and `tools/postprocess`.
 
-## Manifests
+## 清单 / Manifests
 
 - `packaging/source-package.manifest.json`
 - `packaging/runtime-package.manifest.json`
 
-The manifests are the package contract. Update them before changing what the
-portable script copies. Keep exclusions broad enough to block:
+清单是 package contract。修改便携脚本复制内容前，先更新对应 manifest；排除项要足够宽，
+至少阻止以下内容：
 
 - submitted samples and generated harmless-sample binaries;
 - Hyper-V disks, checkpoints, snapshots, and other VM exports;
@@ -69,13 +69,12 @@ portable script copies. Keep exclusions broad enough to block:
 - signed driver binaries and private signing/certificate material;
 - local config, environment files, DPAPI backups, and install state.
 
-Both manifests also carry a `releaseContract` and `stagedMetadata` section.
-These are operator-facing guardrails, not build inputs: they document that
-packaging/readiness must not mutate Hyper-V, sign drivers, use GUI signing
-fallback, call `CSignTool.exe`, push, or publish, and they define the generated
-metadata fields reviewers should expect inside each staged package.
+两个 manifest 都带有 `releaseContract` 和 `stagedMetadata`。它们是面向操作者的
+guardrail，不是构建输入：用于声明 packaging/readiness 不得修改 Hyper-V、不得签名
+driver、不得使用 GUI signing fallback、不得调用 `CSignTool.exe`、不得 push 或 publish，
+并定义审阅者应在 staged package 内看到的 generated metadata 字段。
 
-## Pre-release checklist
+## 发布前检查清单 / Pre-release checklist
 
 1. Coordinate with other workers before cutting a package. Do not revert their
    work and do not include unrelated local artifacts.
@@ -141,10 +140,9 @@ metadata fields reviewers should expect inside each staged package.
 10. Record hashes and release notes. Push/publish only when a release manager
     explicitly requests it; the package script does not push.
 
-## Open-source MVP readiness checklist
+## 开源 MVP readiness 检查清单 / Open-source MVP readiness checklist
 
-Use this as the concise release manager gate before publishing the first public
-MVP package.
+发布第一个公开 MVP 包前，release manager 用本节做精简 gate：
 
 - **Repository policy:** `.\scripts\Test-RepositoryPolicy.ps1` passes for the
   current tree and, before commit, `.\scripts\Test-RepositoryPolicy.ps1
@@ -190,11 +188,10 @@ MVP package.
   run unless the release manager reruns it on the prepared lab host. The
   resulting job/report remains under the runtime root, not the repository.
 
-## Real Notepad 5s report runbook
+## 真实 Notepad 5s 报告 runbook / Real Notepad 5s report runbook
 
-This is the shortest public-MVP live smoke for generating a real report with
-the built-in Windows Notepad sample. Run it only on the prepared lab host/VM;
-it can restore, start, stop, and modify the configured golden VM.
+这是用内置 Windows Notepad 样本生成真实报告的最短 public-MVP live smoke。
+只在准备好的 lab host/VM 上运行；它可能还原、启动、停止并修改已配置的 golden VM。
 
 1. From an elevated PowerShell in the repository or portable package root, check
    read-only readiness:
@@ -222,22 +219,28 @@ it can restore, start, stop, and modify the configured golden VM.
    .\install.ps1 -Mode ConfigureVTKey -PromptVTKey
    ```
 
-4. Optional real R0 only: configure a repository-external test-signed driver
-   path and enable guest test-signing in the isolated VM. Skip this step for
-   the default MVP live smoke or use mock/disabled R0.
+4. 仅当需要真实 R0 时：配置仓库外 test-signed driver path，并在隔离 VM 中启用
+   guest test-signing。默认 MVP live smoke 跳过这一步，或使用 mock/disabled R0。
 
    ```powershell
    .\install.ps1 -Mode Change -UpdateHyperVConfig -DriverHostPath 'D:\Temp\KSwordSandbox\build\r0-driver\Release\KSword.Sandbox.Driver.sys'
    .\install.ps1 -Mode Change -EnableGuestTestSigning -RestartGuestAfterTestSigning -Force
    ```
 
-5. Generate the real 5-second Notepad report:
+   启用真实 R0 后、live 前先跑只读 R0 readiness/status；不要在这一步签名或安装 driver：
+
+   ```powershell
+   .\scripts\Test-R0Readiness.ps1
+   .\scripts\Manage-SandboxDriver.ps1 -Action Status
+   ```
+
+5. 生成真实 5 秒 Notepad 报告：
 
    ```powershell
    .\run.ps1 -Mode Analyze -SamplePreset Notepad -DurationSeconds 5 -Live
    ```
 
-6. Confirm the output job directory printed by `run.ps1` contains:
+6. 确认 `run.ps1` 打印的输出 job 目录包含：
 
    ```text
    runbook-execution.json
@@ -256,18 +259,19 @@ it can restore, start, stop, and modify the configured golden VM.
    .\scripts\Rebuild-JobReport.ps1 -JobId <job-guid>
    ```
 
-## Portable zip script draft
+## 便携 zip 脚本草案 / Portable zip script draft
 
-`scripts/package-portable.ps1` reads the selected manifest, stages files under
-`D:\Temp\KSwordSandbox\packages\staging` by default, writes generated package
-metadata, and creates a zip next to the staging folder. Use `-StageOnly` to
-inspect the tree without creating an archive. Use `-Force` to replace a prior
-local staging folder/archive under the same output root.
+`scripts/package-portable.ps1` 读取选定 manifest，默认把文件暂存到
+`D:\Temp\KSwordSandbox\packages\staging`，写出 generated package metadata，
+并在 staging 旁边创建 zip。使用 `-StageOnly` 只审阅目录树、不创建 archive；
+使用 `-Force` 替换同一 output root 下已有的本地 staging folder/archive。
 
-The script validates output placement, path traversal, manifest exclusions, and
-high-risk extensions before copying. Runtime package binaries are allowed only
-when they come from the external runtime publish root; source packages remain
-source-only.
+脚本在复制前校验 output 位置、path traversal、manifest exclusions 和高风险扩展名。
+runtime package binary 只允许来自仓库外 `RuntimePublishRoot`；source package 始终
+保持 source-only。为避免把 layout dry-run 误交付成可运行包，非 `-StageOnly` 的
+runtime zip 必须显式传入 `-RequireCompleteRuntimePayloads` 且 `RuntimePublishRoot`
+中所有 runtime publish entries 都存在。generated metadata 中的
+`operatorDiagnostics.runtimeArchiveRequiresCompleteRuntimePayloads` 会记录这一策略。
 
 Release-manager diagnostics are printed at the end of each package run:
 

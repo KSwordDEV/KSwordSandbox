@@ -1844,7 +1844,8 @@ internal static class AgentProgram
             candidateModifiedFileCount,
             copyOutcomeEvents.Count(static evt => string.Equals(evt.EventType, "artifact.dropped_file.copied", StringComparison.OrdinalIgnoreCase)),
             copyOutcomeEvents.Count(static evt => string.Equals(evt.EventType, "artifact.dropped_file.skipped", StringComparison.OrdinalIgnoreCase)),
-            metadataByRelativePath.Count));
+            metadataByRelativePath.Count,
+            copyOutcomeEvents));
         return metadataByRelativePath;
     }
 
@@ -1947,12 +1948,16 @@ internal static class AgentProgram
             {
                 evt.Data["artifactHashStatus"] = "missing";
                 evt.Data["artifactExists"] = "false";
+                evt.Data["artifactIntegrityState"] = "missing";
+                evt.Data["sizeBytesStatus"] = "missing";
+                evt.Data["sha256Status"] = "missing";
                 return;
             }
 
             evt.Data["artifactExists"] = "true";
             evt.Data["sizeBytes"] = info.Length.ToString(CultureInfo.InvariantCulture);
             evt.Data["artifactSizeBytes"] = info.Length.ToString(CultureInfo.InvariantCulture);
+            evt.Data["sizeBytesStatus"] = "computed";
             evt.Data["artifactLastWriteUtc"] = info.LastWriteTimeUtc.ToString("O", CultureInfo.InvariantCulture);
             var hash = ComputeSha256BestEffort(path);
             if (!string.IsNullOrWhiteSpace(hash.Sha256))
@@ -1960,15 +1965,20 @@ internal static class AgentProgram
                 evt.Data["sha256"] = hash.Sha256;
                 evt.Data["artifactSha256"] = hash.Sha256;
                 evt.Data["hashAlgorithm"] = "sha256";
+                evt.Data["sha256Status"] = "computed";
             }
 
             evt.Data["artifactHashStatus"] = hash.Status;
+            evt.Data.TryAdd("sha256Status", hash.Status);
+            evt.Data["artifactIntegrityState"] = hash.Status == "computed" ? "verified" : "hash-failed";
             AddDataIfNotEmpty(evt.Data, "artifactHashExceptionType", hash.ExceptionType);
             AddDataIfNotEmpty(evt.Data, "artifactHashMessage", hash.Message);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException or PathTooLongException)
         {
             evt.Data["artifactHashStatus"] = "failed";
+            evt.Data["artifactIntegrityState"] = "hash-failed";
+            evt.Data["sha256Status"] = "failed";
             evt.Data["artifactHashExceptionType"] = ex.GetType().FullName ?? ex.GetType().Name;
             evt.Data["artifactHashMessage"] = ex.Message;
         }
@@ -2036,6 +2046,9 @@ internal static class AgentProgram
                 ["status"] = "captured",
                 ["nonfatal"] = "false",
                 ["artifactExists"] = copiedInfo.Exists.ToString(CultureInfo.InvariantCulture).ToLowerInvariant(),
+                ["artifactIntegrityState"] = DroppedFileArtifactIntegrityState(copiedHash),
+                ["sizeBytesStatus"] = "computed",
+                ["sha256Status"] = copiedHash.Status,
                 ["processRole"] = processContext.RootProcessId is null ? "sample-context" : "sample-root-context",
                 ["zhMessage"] = "掉落文件已复制为可下载证据文件。",
                 ["zhHint"] = "请使用 artifactRelativePath 下载复制后的文件；sourceSha256/copiedSha256 可用于比对源文件与证据文件。",
@@ -2060,6 +2073,16 @@ internal static class AgentProgram
         {
             evt.Data["hashStatus"] = copiedHash.Status;
             evt.Data["artifactHashStatus"] = copiedHash.Status;
+        }
+
+        if (!string.IsNullOrWhiteSpace(sourceEvidence.Sha256) && !string.IsNullOrWhiteSpace(copiedHash.Sha256))
+        {
+            evt.Data["sourceCopiedSha256Match"] = string.Equals(sourceEvidence.Sha256, copiedHash.Sha256, StringComparison.OrdinalIgnoreCase)
+                .ToString(CultureInfo.InvariantCulture)
+                .ToLowerInvariant();
+            evt.Data["artifactIntegrityState"] = string.Equals(sourceEvidence.Sha256, copiedHash.Sha256, StringComparison.OrdinalIgnoreCase)
+                ? "verified-source-copy-match"
+                : "hash-mismatch";
         }
 
         return evt;
@@ -2094,6 +2117,9 @@ internal static class AgentProgram
                 ["capturePhase"] = "after-run",
                 ["reason"] = reason,
                 ["skipReason"] = reason,
+                ["reasonCode"] = reason,
+                ["reasonCategory"] = DroppedFileReasonCategory(reason),
+                ["zhReason"] = DroppedFileReasonZhReason(reason),
                 ["zhMessage"] = "掉落文件复制被跳过；该事件说明证据缺口，不会中断整体分析。",
                 ["zhHint"] = DroppedFileReasonZhHint(reason),
                 ["sourceEventType"] = sourceEvent.EventType,
@@ -2112,6 +2138,8 @@ internal static class AgentProgram
                 ["processRole"] = processContext?.RootProcessId is null ? "sample-context" : "sample-root-context",
                 ["expectedRelativePath"] = "artifacts/dropped-files/**",
                 ["artifactRelativePathStatus"] = "not-created",
+                ["artifactExists"] = "false",
+                ["artifactIntegrityState"] = "skipped",
                 ["sizeBytesStatus"] = "not-created",
                 ["sha256Status"] = "not-created",
                 ["collectDroppedFiles"] = "true"
@@ -2143,7 +2171,8 @@ internal static class AgentProgram
         int candidateModifiedFileCount,
         int copiedCount,
         int skippedCount,
-        int artifactCount)
+        int artifactCount,
+        IReadOnlyList<SandboxEvent>? copyOutcomeEvents = null)
     {
         var candidateFileCount = candidateCreatedFileCount + candidateModifiedFileCount;
         var status = copiedCount > 0
@@ -2151,6 +2180,8 @@ internal static class AgentProgram
             : skippedCount > 0
                 ? "skipped"
                 : "enabled-empty";
+        var outcomeEvents = copyOutcomeEvents ?? Array.Empty<SandboxEvent>();
+        var reason = DroppedFileSummaryReason(candidateFileCount, copiedCount, skippedCount);
         var evt = new SandboxEvent
         {
             EventType = "artifact.dropped_file.summary",
@@ -2170,11 +2201,16 @@ internal static class AgentProgram
                 ["capturePolicy"] = "explicit-opt-in-copy-working-directory-new-files",
                 ["captureState"] = status,
                 ["status"] = status,
+                ["reason"] = reason,
+                ["reasonCode"] = reason,
+                ["reasonCategory"] = copiedCount > 0 ? "captured" : skippedCount > 0 ? "skipped" : "empty",
+                ["zhReason"] = DroppedFileSummaryZhReason(reason),
                 ["summaryEvent"] = "true",
                 ["nonfatal"] = "true",
                 ["processRole"] = processContext.RootProcessId is null ? "sample-context" : "sample-root-context",
                 ["expectedRelativePath"] = "artifacts/dropped-files/**",
                 ["artifactRelativePathStatus"] = copiedCount > 0 ? "some-captured" : "not-created",
+                ["artifactIntegrityState"] = DroppedFileSummaryIntegrityState(outcomeEvents, copiedCount),
                 ["collectDroppedFiles"] = "true",
                 ["candidateFileCount"] = candidateFileCount.ToString(CultureInfo.InvariantCulture),
                 ["candidateCreatedFileCount"] = candidateCreatedFileCount.ToString(CultureInfo.InvariantCulture),
@@ -2183,6 +2219,10 @@ internal static class AgentProgram
                 ["copiedCount"] = copiedCount.ToString(CultureInfo.InvariantCulture),
                 ["copiedDroppedFileCount"] = copiedCount.ToString(CultureInfo.InvariantCulture),
                 ["skippedCount"] = skippedCount.ToString(CultureInfo.InvariantCulture),
+                ["copiedHashComputedCount"] = CountOutcomeDataValue(outcomeEvents, "copiedHashStatus", "computed").ToString(CultureInfo.InvariantCulture),
+                ["copiedHashFailedCount"] = CountOutcomeDataValue(outcomeEvents, "copiedHashStatus", "failed").ToString(CultureInfo.InvariantCulture),
+                ["sourceHashComputedCount"] = CountOutcomeDataValue(outcomeEvents, "sourceHashStatus", "computed").ToString(CultureInfo.InvariantCulture),
+                ["sourceHashFailedCount"] = CountOutcomeDataValue(outcomeEvents, "sourceHashStatus", "failed").ToString(CultureInfo.InvariantCulture),
                 ["artifactCount"] = artifactCount.ToString(CultureInfo.InvariantCulture),
                 ["copyMethod"] = "shared-read-stream-copy",
                 ["zhMessage"] = copiedCount > 0
@@ -2192,6 +2232,7 @@ internal static class AgentProgram
             }
         };
         AddDroppedFileProcessContext(evt, processContext);
+        AddDroppedFileSummaryReasonCounts(evt, outcomeEvents);
         return evt;
     }
 
@@ -2216,6 +2257,9 @@ internal static class AgentProgram
                 ["phase"] = "after-run",
                 ["capturePhase"] = "after-run",
                 ["reason"] = "collectDroppedFilesNotRequested",
+                ["reasonCode"] = "collectDroppedFilesNotRequested",
+                ["reasonCategory"] = "disabled",
+                ["zhReason"] = "未请求掉落文件复制。",
                 ["zhMessage"] = "掉落文件复制采集未启用。",
                 ["zhHint"] = "未启用 --collect-dropped-files/--dropped-files，Guest Agent 只记录文件事件，不复制新建文件内容。",
                 ["collectionName"] = "dropped-files",
@@ -2229,6 +2273,8 @@ internal static class AgentProgram
                 ["processRole"] = processContext.RootProcessId is null ? "sample-context" : "sample-root-context",
                 ["expectedRelativePath"] = "artifacts/dropped-files/**",
                 ["artifactRelativePathStatus"] = "disabled",
+                ["artifactExists"] = "false",
+                ["artifactIntegrityState"] = "disabled",
                 ["sizeBytesStatus"] = "disabled",
                 ["sha256Status"] = "disabled",
                 ["collectDroppedFiles"] = "false",
@@ -2296,9 +2342,16 @@ internal static class AgentProgram
         {
             var rootPid = processContext.RootProcessId.Value.ToString(CultureInfo.InvariantCulture);
             evt.Data["rootProcessId"] = rootPid;
+            evt.Data["rootProcessIdStatus"] = "available";
             evt.Data.TryAdd("processId", rootPid);
             evt.Data.TryAdd("treeDepth", "0");
             evt.Data.TryAdd("treeLineage", rootPid);
+            evt.Data.TryAdd("treeLineageStatus", "stable");
+        }
+        else
+        {
+            evt.Data["rootProcessIdStatus"] = "unavailable";
+            evt.Data["treeLineageStatus"] = "unavailable";
         }
 
         if (processContext.ParentProcessId is not null)
@@ -2366,6 +2419,146 @@ internal static class AgentProgram
             "copyFailed" => "复制失败；请检查文件锁、权限、路径长度和磁盘空间。",
             _ => "该掉落文件复制尝试被跳过；请结合 reason、sourcePath 和 exceptionType/message 判断。"
         };
+    }
+
+    private static string DroppedFileReasonZhReason(string reason)
+    {
+        return reason switch
+        {
+            "sourcePathMissing" => "源事件缺少路径。",
+            "sourcePathInvalid" => "源路径无效。",
+            "sourceFileMissing" => "源文件已不存在。",
+            "outsideWorkingDirectory" => "源文件不在样本工作目录内。",
+            "underOutputDirectory" => "源文件位于输出目录内。",
+            "destinationPathInvalid" => "目标证据路径无效。",
+            "copyFailed" => "复制失败。",
+            "collectDroppedFilesNotRequested" => "未请求掉落文件复制。",
+            _ => "复制尝试被跳过。"
+        };
+    }
+
+    private static string DroppedFileReasonCategory(string reason)
+    {
+        return reason switch
+        {
+            "sourcePathMissing" or "sourcePathInvalid" => "source-path",
+            "sourceFileMissing" => "source-missing",
+            "outsideWorkingDirectory" or "underOutputDirectory" => "policy",
+            "destinationPathInvalid" => "destination-path",
+            "copyFailed" => "copy-io",
+            "collectDroppedFilesNotRequested" => "disabled",
+            _ => "unknown"
+        };
+    }
+
+    private static string DroppedFileArtifactIntegrityState(DroppedFileHashResult copiedHash)
+    {
+        return copiedHash.Status switch
+        {
+            "computed" => "verified",
+            "missing" => "missing",
+            "failed" => "hash-failed",
+            _ => "unknown"
+        };
+    }
+
+    private static string DroppedFileSummaryReason(int candidateFileCount, int copiedCount, int skippedCount)
+    {
+        if (copiedCount > 0)
+        {
+            return skippedCount > 0 ? "someCandidatesCopied" : "allCandidatesCopied";
+        }
+
+        if (skippedCount > 0)
+        {
+            return "allCandidatesSkipped";
+        }
+
+        return candidateFileCount == 0 ? "noFileCandidates" : "noCopyOutcomes";
+    }
+
+    private static string DroppedFileSummaryZhReason(string reason)
+    {
+        return reason switch
+        {
+            "allCandidatesCopied" => "所有候选文件均已复制。",
+            "someCandidatesCopied" => "部分候选文件已复制，部分被跳过。",
+            "allCandidatesSkipped" => "所有候选文件均被跳过。",
+            "noFileCandidates" => "没有发现可复制的文件候选。",
+            "noCopyOutcomes" => "没有复制结果事件。",
+            _ => "掉落文件复制 sweep 已记录。"
+        };
+    }
+
+    private static string DroppedFileSummaryIntegrityState(IReadOnlyList<SandboxEvent> outcomeEvents, int copiedCount)
+    {
+        if (copiedCount == 0)
+        {
+            return outcomeEvents.Count == 0 ? "not-applicable-empty" : "skipped";
+        }
+
+        var copiedEvents = outcomeEvents
+            .Where(static evt => string.Equals(evt.EventType, "artifact.dropped_file.copied", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        if (copiedEvents.Count == 0)
+        {
+            return "unknown";
+        }
+
+        if (copiedEvents.All(static evt =>
+            evt.Data.TryGetValue("artifactIntegrityState", out var state) &&
+            (string.Equals(state, "verified", StringComparison.OrdinalIgnoreCase) ||
+             string.Equals(state, "verified-source-copy-match", StringComparison.OrdinalIgnoreCase))))
+        {
+            return "verified";
+        }
+
+        if (copiedEvents.Any(static evt =>
+            evt.Data.TryGetValue("artifactIntegrityState", out var state) &&
+            string.Equals(state, "hash-mismatch", StringComparison.OrdinalIgnoreCase)))
+        {
+            return "hash-mismatch";
+        }
+
+        return "partial-integrity";
+    }
+
+    private static int CountOutcomeDataValue(IReadOnlyList<SandboxEvent> outcomeEvents, string key, string expected)
+    {
+        return outcomeEvents.Count(evt =>
+            evt.Data.TryGetValue(key, out var value) &&
+            string.Equals(value, expected, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static void AddDroppedFileSummaryReasonCounts(SandboxEvent evt, IReadOnlyList<SandboxEvent> outcomeEvents)
+    {
+        var skippedReasonCounts = outcomeEvents
+            .Where(static item => string.Equals(item.EventType, "artifact.dropped_file.skipped", StringComparison.OrdinalIgnoreCase))
+            .Select(static item => item.Data.TryGetValue("reason", out var reason) ? reason : string.Empty)
+            .Where(static reason => !string.IsNullOrWhiteSpace(reason))
+            .GroupBy(static reason => reason, StringComparer.OrdinalIgnoreCase)
+            .OrderBy(static group => group.Key, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(static group => group.Key, static group => group.Count(), StringComparer.OrdinalIgnoreCase);
+
+        if (skippedReasonCounts.Count == 0)
+        {
+            evt.Data["skippedReasonCount"] = "0";
+            return;
+        }
+
+        evt.Data["skippedReasonCount"] = skippedReasonCounts.Count.ToString(CultureInfo.InvariantCulture);
+        evt.Data["skippedReasons"] = string.Join(",", skippedReasonCounts.Keys);
+        evt.Data["skippedReasonCounts"] = string.Join(
+            ";",
+            skippedReasonCounts.Select(pair => $"{pair.Key}={pair.Value.ToString(CultureInfo.InvariantCulture)}"));
+        evt.Data["skippedReasonCountsJson"] = JsonSerializer.Serialize(skippedReasonCounts);
+        var lastSkipped = outcomeEvents.LastOrDefault(static item => string.Equals(item.EventType, "artifact.dropped_file.skipped", StringComparison.OrdinalIgnoreCase));
+        if (lastSkipped is not null)
+        {
+            AddDataIfNotEmpty(evt.Data, "lastSkippedReason", FirstEventData(lastSkipped, "reason"));
+            AddDataIfNotEmpty(evt.Data, "lastSkippedReasonCategory", FirstEventData(lastSkipped, "reasonCategory"));
+            AddDataIfNotEmpty(evt.Data, "lastSkippedZhHint", FirstEventData(lastSkipped, "zhHint"));
+        }
     }
 
     /// <summary>

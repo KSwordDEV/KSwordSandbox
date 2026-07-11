@@ -74,6 +74,9 @@ internal sealed class PcapArtifactImportScenario : ISmokeTestScenario
         RequireNonEmpty(importSummary, "zhHint");
         SmokeAssert.True(summary.Data.TryGetValue("protocols", out var protocols) && protocols.Contains("dns", StringComparison.OrdinalIgnoreCase) && protocols.Contains("http", StringComparison.OrdinalIgnoreCase) && protocols.Contains("tls", StringComparison.OrdinalIgnoreCase), "pcap.summary should expose protocol rollup metadata.");
         RequireNonEmpty(summary, "zhMessage");
+        RequireData(summary, "sourceArtifactSelector", "sample.pcap");
+        RequireData(summary, "pcapDownloadSelector", "sample.pcap");
+        RequireNonEmpty(summary, "pcapSourceArtifactSha256");
         RequireData(dns, "schema", "network.telemetry.v1");
         RequireData(dns, "eventKind", "dns");
         RequireData(dns, "transportProtocol", "udp");
@@ -83,6 +86,8 @@ internal sealed class PcapArtifactImportScenario : ISmokeTestScenario
         RequireData(dns, "dnsQueryName", "beacon.example.test");
         RequireData(dns, "rcodeName", "NOERROR");
         RequireData(dns, "pcapSourceArtifactRelativePath", "sample.pcap");
+        RequireData(dns, "sourcePcapArtifactRelativePath", "sample.pcap");
+        RequireNonEmpty(dns, "sourcePcapArtifactSha256");
         RequireData(http, "method", "GET");
         RequireData(http, "host", "download.example.test");
         RequireData(http, "payloadMagic", "MZ");
@@ -130,11 +135,24 @@ internal sealed class PcapArtifactImportScenario : ISmokeTestScenario
         RequireData(sidecarLogFlow, "byteCount", "512");
         RequireData(sidecarLogFlow, "collectionHealth", "ok");
         RequireData(sidecarLogFlow, "pcapSourceArtifactRelativePath", "sample.pcap");
+        RequireData(sidecarLogFlow, "sourcePcapArtifactRelativePath", "sample.pcap");
+        RequireData(sidecarLogFlow, "pcapDownloadSelector", "sample.pcap");
+        RequireData(sidecarLogFlow, "sourceArtifactRelativePath", "sample.conn.log");
+        RequireNonEmpty(sidecarLogFlow, "sourceArtifactSha256");
+        RequireNonEmpty(sidecarLogFlow, "pcapSourceArtifactSha256");
+        RequireNonEmpty(sidecarLogFlow, "sourcePcapArtifactSha256");
         RequireNonEmpty(sidecarLogFlow, "zhMessage");
         RequireNonEmpty(sidecarLogFlow, "zhHint");
         var sidecarParseError = RequireEvent(events, "network.sidecar.parse_error");
         RequireData(sidecarParseError, "collectionHealth", "degraded");
+        RequireData(sidecarParseError, "sidecarLineNumber", "3");
+        RequireData(sidecarParseError, "sidecarFormat", "jsonl");
+        RequireData(sidecarParseError, "diagnosticCode", "sidecar_json_parse_error");
+        RequireData(sidecarParseError, "parserBoundary", "sidecar.line");
+        RequireNonEmpty(sidecarParseError, "pcapSourceArtifactSha256");
         RequireNonEmpty(sidecarParseError, "zhMessage");
+        RequireNonEmpty(sidecarParseError, "zhHint");
+        await AssertMalformedPcapBoundaryDiagnosticsAsync(root, cancellationToken);
         await AssertGuestManifestNetworkImportAsync(root, cancellationToken);
     }
 
@@ -214,6 +232,13 @@ internal sealed class PcapArtifactImportScenario : ISmokeTestScenario
                 })
             ],
             cancellationToken);
+
+        var directNetworkEvents = new NetworkArtifactEventImporter().ImportGuestArtifacts(guestRoot, includeCanonicalDriverJsonl: false);
+        var directSidecarFlow = RequireEvent(directNetworkEvents, "network.flow", "uid", "job-sidecar-flow-1");
+        RequireData(directSidecarFlow, "sourceArtifactRelativePath", "packet-captures/sample.conn.jsonl");
+        RequireData(directSidecarFlow, "pcapSourceArtifactRelativePath", "packet-captures/sample.pcap");
+        RequireData(directSidecarFlow, "pcapDownloadSelector", "packet-captures/sample.pcap");
+        RequireNonEmpty(directSidecarFlow, "sourcePcapArtifactSha256");
 
         var imported = service.ImportGuestEvents(job.JobId, eventsPath);
         var importedReportPath = imported.JsonReportPath ?? throw new InvalidOperationException("imported report missing");
@@ -460,6 +485,15 @@ internal sealed class PcapArtifactImportScenario : ISmokeTestScenario
                     uid = "ipv6-flow-1",
                     rootProcessId = "5150",
                     treeLineage = "5150:sidecar-sample.exe>6161:child.exe"
+                }),
+                JsonSerializer.Serialize(new
+                {
+                    eventType = "network.connection",
+                    timestamp = "2026-07-11T00:00:05Z",
+                    sourceIp = "[2001:db8::20]:5354",
+                    destinationIp = "[2606:4700:4700::8888]:853",
+                    proto = "udp",
+                    uid = "ipv6-ip-field-flow"
                 })
             ],
             cancellationToken);
@@ -474,6 +508,39 @@ internal sealed class PcapArtifactImportScenario : ISmokeTestScenario
         RequireData(flow, "flowKey", "udp|[2001:db8::10]:5353|[2606:4700:4700::1111]:53");
         RequireData(flow, "rootProcessId", "5150");
         RequireData(flow, "treeLineage", "5150:sidecar-sample.exe>6161:child.exe");
+
+        var ipFieldFlow = RequireEvent(events, "network.flow", "uid", "ipv6-ip-field-flow");
+        RequireData(ipFieldFlow, "ipFamily", "ipv6");
+        RequireData(ipFieldFlow, "sourceIp", "2001:db8::20");
+        RequireData(ipFieldFlow, "destinationIp", "2606:4700:4700::8888");
+        RequireData(ipFieldFlow, "sourcePort", "5354");
+        RequireData(ipFieldFlow, "destinationPort", "853");
+        RequireData(ipFieldFlow, "sourceEndpoint", "[2001:db8::20]:5354");
+        RequireData(ipFieldFlow, "destinationEndpoint", "[2606:4700:4700::8888]:853");
+        RequireData(ipFieldFlow, "flowKey", "udp|[2001:db8::20]:5354|[2606:4700:4700::8888]:853");
+    }
+
+    private static async Task AssertMalformedPcapBoundaryDiagnosticsAsync(string parentRoot, CancellationToken cancellationToken)
+    {
+        var malformedPath = Path.Combine(parentRoot, "truncated-boundary.pcap");
+        await File.WriteAllBytesAsync(malformedPath, BuildTruncatedPcap(), cancellationToken);
+
+        var events = new PcapArtifactEventImporter().Import(malformedPath);
+        var summary = RequireEvent(events, "network.import.summary");
+        var parseError = RequireEvent(events, "pcap.parse_error");
+        RequireData(summary, "status", "parse_error");
+        RequireData(summary, "diagnosticCode", "pcap_boundary_truncated");
+        RequireData(parseError, "collectionHealth", "degraded");
+        RequireData(parseError, "diagnosticCode", "pcap_boundary_truncated");
+        RequireData(parseError, "parserBoundary", "pcap.packet_payload");
+        RequireData(parseError, "parseFailureStage", "read-packet-payload");
+        RequireNonEmpty(parseError, "byteOffset");
+        RequireNonEmpty(parseError, "expectedBytes");
+        RequireNonEmpty(parseError, "actualBytes");
+        RequireNonEmpty(parseError, "sourceArtifactSha256");
+        RequireNonEmpty(parseError, "pcapSourceArtifactSha256");
+        RequireNonEmpty(parseError, "zhMessage");
+        RequireNonEmpty(parseError, "zhHint");
     }
 
     private static async Task AssertGuestManifestNetworkImportAsync(string parentRoot, CancellationToken cancellationToken)
@@ -728,6 +795,24 @@ internal sealed class PcapArtifactImportScenario : ISmokeTestScenario
         WritePacket(stream, 1, BuildUdpFrame("10.0.0.4", "8.8.8.8", 53000, 53, BuildDnsQuery("beacon.example.test")));
         WritePacket(stream, 2, BuildTcpFrame("10.0.0.4", "198.51.100.20", 50000, 80, Encoding.ASCII.GetBytes("GET /payload.exe HTTP/1.1\r\nHost: download.example.test\r\nUser-Agent: KSwordSmoke\r\nContent-Type: application/x-msdownload\r\n\r\nMZ")));
         WritePacket(stream, 3, BuildTcpFrame("10.0.0.4", "203.0.113.10", 50001, 443, BuildTlsClientHello("secure.example.test")));
+        return stream.ToArray();
+    }
+
+    private static byte[] BuildTruncatedPcap()
+    {
+        using var stream = new MemoryStream();
+        WriteUInt32Le(stream, 0xA1B2C3D4);
+        WriteUInt16Le(stream, 2);
+        WriteUInt16Le(stream, 4);
+        WriteUInt32Le(stream, 0);
+        WriteUInt32Le(stream, 0);
+        WriteUInt32Le(stream, 65535);
+        WriteUInt32Le(stream, 1);
+        WriteUInt32Le(stream, 1);
+        WriteUInt32Le(stream, 0);
+        WriteUInt32Le(stream, 64);
+        WriteUInt32Le(stream, 64);
+        stream.Write([0x00, 0x01, 0x02, 0x03]);
         return stream.ToArray();
     }
 

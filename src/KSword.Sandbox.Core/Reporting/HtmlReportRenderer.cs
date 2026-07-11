@@ -72,6 +72,14 @@ public sealed class HtmlReportRenderer
 
     private sealed record EvidenceSummaryCard(string Title, string Value, string Detail, string Css, string CopyText);
 
+    private sealed record EvidenceNarrativeCard(
+        string Step,
+        string Title,
+        string Value,
+        string Detail,
+        string Css,
+        string CopyText);
+
     private sealed record EvidenceStoryCard(
         string Title,
         string Status,
@@ -310,7 +318,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
 .event-table td:first-child{white-space:nowrap}.event-table td:nth-child(2){min-width:140px}.event-table td:nth-child(4){min-width:140px}.event-table td:nth-child(5){min-width:260px}.event-table .evidence{min-width:280px}
 .timeline-groups{display:grid;gap:10px;margin-top:14px}.timeline-group{background:#fff;border:1px solid var(--line);border-radius:2px;overflow:hidden}.timeline-group>summary{align-items:flex-start;cursor:pointer;display:flex;gap:10px;justify-content:space-between;list-style:none;padding:12px 14px}.timeline-group>summary::-webkit-details-marker{display:none}.timeline-group>summary:before{color:var(--primary-deep);content:'▶';font-weight:900;margin-top:2px}.timeline-group[open]>summary:before{content:'▼'}.timeline-group small{color:var(--muted);display:block;line-height:1.4;margin-top:3px}.timeline{border-left:3px solid rgba(67,160,255,.45);margin:0 14px 14px 20px;padding:12px 0 0 18px}.timeline-item{background:#fff;border:1px solid var(--line);border-radius:2px;margin:0 0 10px;padding:10px 12px;position:relative}.timeline-item:before{background:var(--primary);border:2px solid var(--primary-soft);border-radius:2px;content:'';height:10px;left:-25px;position:absolute;top:13px;width:10px}.timeline-overflow{background:#f1f7ff;border:1px dashed #b9d7f3;border-radius:2px;color:var(--muted);margin:0 0 12px;padding:9px 11px}
 .graph-map{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));margin-top:12px}.graph-node{background:#fff;border:1px solid var(--line);border-left:4px solid var(--primary);border-radius:2px;padding:12px}.graph-node strong{display:block;margin-bottom:4px}.graph-node small{color:var(--muted);display:block;line-height:1.4}.behavior-chain{background:#fff;border:1px solid var(--line);border-radius:2px;counter-reset:chain;margin:12px 0;max-height:var(--subsection-max);overflow:auto;padding:8px 10px}.behavior-chain li{align-items:flex-start;background:#fff;border-bottom:1px solid #dbeafe;border-radius:0;counter-increment:chain;display:grid;gap:8px;grid-template-columns:auto 1fr;margin:0;padding:10px}.behavior-chain li:last-child{border-bottom:0}.behavior-chain li:before{align-items:center;background:var(--primary);border-radius:2px;color:white;content:counter(chain);display:inline-flex;font-weight:900;height:24px;justify-content:center;width:24px}.behavior-chain details{grid-column:2}.behavior-chain pre{max-height:var(--detail-max);overflow:auto;white-space:pre-wrap;word-break:break-word}.edge-table td:nth-child(1),.edge-table td:nth-child(3){min-width:170px}.ioc-grid{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));margin-top:14px}.ioc-card{background:#fff;border:1px solid var(--line);border-radius:2px;padding:12px}.ioc-card h3{font-size:15px;margin:0 0 8px}.ioc-card ul{margin:0;padding-left:18px}.ioc-card li{margin:5px 0;word-break:break-word}
-.evidence-summary-grid,.relation-grid,.overview-strip,.evidence-story-board{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));margin-top:14px}.evidence-summary-card,.relation-card,.overview-item,.evidence-story-lane{background:#fff;border:1px solid var(--line);border-left:4px solid var(--primary);border-radius:2px;box-shadow:none;max-height:var(--subsection-max);overflow:auto;padding:14px;position:relative}.evidence-summary-card:before,.relation-card:before,.overview-item:before,.evidence-story-lane:before{display:none}.evidence-summary-card h3,.relation-card h3,.overview-item h3,.evidence-story-lane h3{font-size:15px;margin:0 0 8px;padding-left:0}.summary-value,.overview-value{color:#075985;display:block;font-size:26px;font-weight:900;letter-spacing:-.04em}.overview-value.risk-medium{color:#b45309}.overview-value.risk-high{color:#b91c1c}.overview-value.risk-low{color:#047857}.overview-value.risk-info{color:var(--primary-deep)}.overview-item p,.story-lead{color:var(--muted);font-size:13px;line-height:1.45;margin:6px 0 0}.compact-evidence-summary{background:#f8fbff;border:1px solid #cfe6fb;border-left:3px solid var(--primary);color:#334155;font-size:13px;line-height:1.45;margin:8px 0;padding:8px 10px;word-break:break-word}.compact-evidence-summary strong{color:#075985}.story-metrics{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0}.story-metrics span{background:#f8fbff;border:1px solid #cfe6fb;border-radius:2px;color:#075985;font-size:12px;font-weight:800;padding:6px 8px}.story-evidence-list{font-family:Consolas,monospace;font-size:12px;line-height:1.45;margin:8px 0 0;padding-left:18px}.story-evidence-list li{margin:3px 0;word-break:break-word}.relationship-meta{display:grid;gap:6px;grid-template-columns:repeat(2,minmax(0,1fr));margin:10px 0}.relationship-meta span{background:#f8fbff;border:1px solid #cfe6fb;border-radius:2px;color:#075985;font-size:12px;font-weight:700;padding:7px}.relationship-tags{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}.relationship-tags .chip{margin:0}.evidence-expansion-card{background:#f8fbff;border:1px solid #cfe6fb;border-left:3px solid var(--primary);margin-top:10px;padding:8px 10px}.evidence-expansion-card[open]{background:#fff}.relationship-details,.flat-details,.event-evidence-fields,.technical-field,.raw-technical-fields,.raw-technical-field{background:transparent;border:0;border-left:2px solid #cfe6fb;border-radius:0;margin-top:8px;padding:4px 0 4px 8px}.relationship-details summary,.flat-details summary,.event-evidence-fields summary,.technical-field summary,.raw-technical-fields summary,.raw-technical-field summary,.evidence-expansion-card summary{cursor:pointer;font-weight:800}.relationship-details pre,.flat-details pre,.event-evidence-fields pre,.technical-field pre,.raw-technical-field pre,.evidence-expansion-card pre{max-height:var(--detail-max);overflow:auto;white-space:pre-wrap;word-break:break-word}.relationship-title{display:flex;align-items:flex-start;gap:8px;justify-content:space-between}.relationship-title code{max-width:100%;overflow-wrap:anywhere}.anchor-offset{scroll-margin-top:18px}.mono-list{font-family:Consolas,monospace;font-size:12px;line-height:1.45;margin:6px 0 0 0;padding-left:18px}.mono-list li{margin:3px 0;word-break:break-word}
+.evidence-summary-grid,.relation-grid,.overview-strip,.evidence-story-board,.narrative-spine{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));margin-top:14px}.evidence-summary-card,.relation-card,.overview-item,.evidence-story-lane,.narrative-step{background:#fff;border:1px solid var(--line);border-left:4px solid var(--primary);border-radius:2px;box-shadow:none;max-height:var(--subsection-max);min-width:0;overflow:auto;overflow-wrap:anywhere;padding:14px;position:relative}.narrative-spine{counter-reset:narrative-step}.narrative-step{contain:layout paint;display:grid;grid-template-columns:auto 1fr;gap:8px 10px;max-height:none;overflow:hidden}.narrative-step-index{align-items:center;background:var(--primary);color:#fff;display:inline-flex;font-weight:900;height:26px;justify-content:center;width:26px}.narrative-step h3{grid-column:2;margin:2px 0 0}.narrative-step .overview-value{grid-column:1/3}.narrative-step p{grid-column:1/3;color:var(--muted);font-size:13px;line-height:1.45;margin:0}.narrative-step .toolbar{grid-column:1/3}.evidence-summary-card:before,.relation-card:before,.overview-item:before,.evidence-story-lane:before,.narrative-step:before{display:none}.evidence-summary-card h3,.relation-card h3,.overview-item h3,.evidence-story-lane h3{font-size:15px;margin:0 0 8px;padding-left:0}.summary-value,.overview-value{color:#075985;display:block;font-size:26px;font-weight:900;letter-spacing:-.04em}.overview-value.risk-medium{color:#b45309}.overview-value.risk-high{color:#b91c1c}.overview-value.risk-low{color:#047857}.overview-value.risk-info{color:var(--primary-deep)}.overview-item p,.story-lead{color:var(--muted);font-size:13px;line-height:1.45;margin:6px 0 0}.compact-evidence-summary{background:#f8fbff;border:1px solid #cfe6fb;border-left:3px solid var(--primary);color:#334155;font-size:13px;line-height:1.45;margin:8px 0;padding:8px 10px;word-break:break-word}.compact-evidence-summary strong{color:#075985}.story-metrics{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0}.story-metrics span{background:#f8fbff;border:1px solid #cfe6fb;border-radius:2px;color:#075985;font-size:12px;font-weight:800;padding:6px 8px}.story-evidence-list{font-family:Consolas,monospace;font-size:12px;line-height:1.45;margin:8px 0 0;padding-left:18px}.story-evidence-list li{margin:3px 0;word-break:break-word}.relationship-meta{display:grid;gap:6px;grid-template-columns:repeat(2,minmax(0,1fr));margin:10px 0}.relationship-meta span{background:#f8fbff;border:1px solid #cfe6fb;border-radius:2px;color:#075985;font-size:12px;font-weight:700;padding:7px}.relationship-tags{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}.relationship-tags .chip{margin:0}.evidence-expansion-card{background:#f8fbff;border:1px solid #cfe6fb;border-left:3px solid var(--primary);margin-top:10px;padding:8px 10px}.evidence-expansion-card[open]{background:#fff}.relationship-details,.flat-details,.event-evidence-fields,.technical-field,.raw-technical-fields,.raw-technical-field{background:transparent;border:0;border-left:2px solid #cfe6fb;border-radius:0;margin-top:8px;padding:4px 0 4px 8px}.relationship-details summary,.flat-details summary,.event-evidence-fields summary,.technical-field summary,.raw-technical-fields summary,.raw-technical-field summary,.evidence-expansion-card summary{cursor:pointer;font-weight:800}.relationship-details pre,.flat-details pre,.event-evidence-fields pre,.technical-field pre,.raw-technical-field pre,.evidence-expansion-card pre{max-height:var(--detail-max);overflow:auto;white-space:pre-wrap;word-break:break-word}.relationship-title{display:flex;align-items:flex-start;gap:8px;justify-content:space-between}.relationship-title code{max-width:100%;overflow-wrap:anywhere}.anchor-offset{scroll-margin-top:18px}.mono-list{font-family:Consolas,monospace;font-size:12px;line-height:1.45;margin:6px 0 0 0;padding-left:18px}.mono-list li{margin:3px 0;word-break:break-word}
 .tree{font-family:Consolas,monospace;line-height:1.5;margin:12px 0}.tree ul{border-left:1px dashed #b9d7f3;list-style:none;margin:0 0 0 18px;padding-left:14px}.tree li{margin:5px 0}.process-tree{background:#fff;border:1px solid var(--line);border-radius:2px;max-height:var(--subsection-max);overflow:auto;padding:12px}.process-tree details.process-tree-node{margin:4px 0}.process-tree summary,.process-tree-leaf{align-items:center;cursor:pointer;display:flex;flex-wrap:wrap;gap:8px;list-style:none}.process-tree summary::-webkit-details-marker{display:none}.process-tree summary:before{color:var(--primary-deep);content:'▶';font-weight:900}.process-tree details[open]>summary:before{content:'▼'}.tree-badges{display:flex;flex-wrap:wrap;gap:5px}.tree-badge{background:#eef7ff;border:1px solid #cfe6fb;border-radius:2px;color:#075985;font-family:Segoe UI,Arial,sans-serif;font-size:11px;font-weight:800;padding:2px 7px}
 .evidence{max-width:560px}.evidence summary{cursor:pointer;font-weight:700}.evidence pre{white-space:pre-wrap;word-break:break-word}
 .columns{display:grid;gap:14px;grid-template-columns:1fr 1fr}.compact-list{margin:8px 0 0 0;padding-left:18px}.compact-list li{margin:4px 0}
@@ -318,7 +326,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
 .raw-field-list{margin:6px 0 0 0;padding-left:18px}.raw-field-list li{margin:4px 0;word-break:break-word}.raw-events-shell{background:#fff;border:1px solid var(--line);border-radius:2px;margin-top:14px;overflow:hidden}.raw-events-shell>summary{cursor:pointer;font-weight:800;list-style:none;padding:12px 14px}.raw-events-shell>summary::-webkit-details-marker{display:none}.raw-events-shell>summary:before{color:var(--primary-deep);content:'▶';display:inline-block;margin-right:8px}.raw-events-shell[open]>summary:before{content:'▼'}.raw-events-panel{border-top:1px solid var(--line);max-height:58vh;overflow:auto;padding:12px}.raw-events-panel .event-table-wrap{max-height:32vh}.raw-event-pages{display:grid;gap:10px}.raw-event-page{background:#fff;border:1px solid #dbeafe;border-radius:2px;overflow:hidden}.raw-event-page>summary{background:#eef7ff;color:#075985;cursor:pointer;font-weight:900;list-style:none;padding:10px 12px}.raw-event-page>summary::-webkit-details-marker{display:none}.raw-event-page>summary:before{content:'▶';display:inline-block;margin-right:8px}.raw-event-page[open]>summary:before{content:'▼'}.raw-event-page table{margin:0}.raw-source-hints{background:#fff;border:1px solid var(--line);border-radius:2px;margin-top:12px;padding:12px}.raw-source-hints ul{list-style:none;margin:8px 0 0 0;padding:0}.raw-source-hints li{border-top:1px solid #e2e8f0;margin-top:8px;padding-top:8px}.raw-source-hints li:first-child{border-top:0;margin-top:0;padding-top:0}.raw-source-hints .hint-label{font-weight:800}
 
 /* Square, flat operator theme: no pill/card nesting beyond one visual layer. */
-.modern-sandbox-report header:after{display:none}.modern-sandbox-report .card,.modern-sandbox-report section.card,.modern-sandbox-report .metric,.modern-sandbox-report .quick-link,.modern-sandbox-report .language-entry a,.modern-sandbox-report .badge,.modern-sandbox-report .chip,.modern-sandbox-report .section-note,.modern-sandbox-report code,.modern-sandbox-report .toc a,.modern-sandbox-report .empty,.modern-sandbox-report .copy-btn,.modern-sandbox-report .event-table-wrap,.modern-sandbox-report .timeline-group,.modern-sandbox-report .timeline-item,.modern-sandbox-report .timeline-overflow,.modern-sandbox-report .graph-node,.modern-sandbox-report .behavior-chain,.modern-sandbox-report .behavior-chain li,.modern-sandbox-report .behavior-chain details,.modern-sandbox-report .ioc-card,.modern-sandbox-report .evidence-summary-card,.modern-sandbox-report .evidence-story-lane,.modern-sandbox-report .relation-card,.modern-sandbox-report .overview-item,.modern-sandbox-report .relationship-meta span,.modern-sandbox-report .relationship-details,.modern-sandbox-report .evidence-expansion-card,.modern-sandbox-report .process-tree,.modern-sandbox-report .tree-badge,.modern-sandbox-report .evidence details,.modern-sandbox-report .artifact-btn,.modern-sandbox-report .artifact-no-link,.modern-sandbox-report .artifact-copy-path,.modern-sandbox-report .artifact-preview img,.modern-sandbox-report .technical-field,.modern-sandbox-report .raw-technical-fields,.modern-sandbox-report .raw-technical-field,.modern-sandbox-report .raw-events-shell,.modern-sandbox-report .raw-event-page,.modern-sandbox-report .raw-source-hints{border-radius:0!important}.modern-sandbox-report .card:before,.modern-sandbox-report .evidence-summary-card:before,.modern-sandbox-report .evidence-story-lane:before,.modern-sandbox-report .relation-card:before,.modern-sandbox-report .overview-item:before{border-radius:0!important}.modern-sandbox-report .badge,.modern-sandbox-report .chip,.modern-sandbox-report .copy-btn,.modern-sandbox-report .artifact-btn,.modern-sandbox-report .artifact-no-link{box-shadow:none!important}.modern-sandbox-report .event-evidence-fields,.modern-sandbox-report .flat-technical-fields,.modern-sandbox-report .related-artifacts-flat{background:transparent;border:0;border-radius:0;padding:0}.modern-sandbox-report .flat-technical-fields{border-top:1px solid var(--line);margin-top:8px;padding-top:8px}.modern-sandbox-report .related-artifacts-flat ul{border-top:1px solid var(--line);list-style:none;margin:6px 0 0 0;padding:0}.modern-sandbox-report .related-artifacts-flat li{border-top:1px solid #e2e8f0;margin-top:6px;padding-top:6px}.modern-sandbox-report .related-artifacts-flat li:first-child{border-top:0}.modern-sandbox-report .self-noise-note{background:#f8fafc;border-left:4px solid #94a3b8;color:#475569;margin:10px 0;padding:10px 12px}
+.modern-sandbox-report header:after{display:none}.modern-sandbox-report .card,.modern-sandbox-report section.card,.modern-sandbox-report .metric,.modern-sandbox-report .quick-link,.modern-sandbox-report .language-entry a,.modern-sandbox-report .badge,.modern-sandbox-report .chip,.modern-sandbox-report .section-note,.modern-sandbox-report code,.modern-sandbox-report .toc a,.modern-sandbox-report .empty,.modern-sandbox-report .copy-btn,.modern-sandbox-report .event-table-wrap,.modern-sandbox-report .timeline-group,.modern-sandbox-report .timeline-item,.modern-sandbox-report .timeline-overflow,.modern-sandbox-report .graph-node,.modern-sandbox-report .behavior-chain,.modern-sandbox-report .behavior-chain li,.modern-sandbox-report .behavior-chain details,.modern-sandbox-report .ioc-card,.modern-sandbox-report .evidence-summary-card,.modern-sandbox-report .evidence-story-lane,.modern-sandbox-report .narrative-step,.modern-sandbox-report .relation-card,.modern-sandbox-report .overview-item,.modern-sandbox-report .relationship-meta span,.modern-sandbox-report .relationship-details,.modern-sandbox-report .evidence-expansion-card,.modern-sandbox-report .process-tree,.modern-sandbox-report .tree-badge,.modern-sandbox-report .evidence details,.modern-sandbox-report .artifact-btn,.modern-sandbox-report .artifact-no-link,.modern-sandbox-report .artifact-copy-path,.modern-sandbox-report .artifact-preview img,.modern-sandbox-report .technical-field,.modern-sandbox-report .raw-technical-fields,.modern-sandbox-report .raw-technical-field,.modern-sandbox-report .raw-events-shell,.modern-sandbox-report .raw-event-page,.modern-sandbox-report .raw-source-hints{border-radius:0!important}.modern-sandbox-report .card:before,.modern-sandbox-report .evidence-summary-card:before,.modern-sandbox-report .evidence-story-lane:before,.modern-sandbox-report .narrative-step:before,.modern-sandbox-report .relation-card:before,.modern-sandbox-report .overview-item:before{border-radius:0!important}.modern-sandbox-report .badge,.modern-sandbox-report .chip,.modern-sandbox-report .copy-btn,.modern-sandbox-report .artifact-btn,.modern-sandbox-report .artifact-no-link{box-shadow:none!important}.modern-sandbox-report .event-evidence-fields,.modern-sandbox-report .flat-technical-fields,.modern-sandbox-report .related-artifacts-flat{background:transparent;border:0;border-radius:0;padding:0}.modern-sandbox-report .flat-technical-fields{border-top:1px solid var(--line);margin-top:8px;padding-top:8px}.modern-sandbox-report .related-artifacts-flat ul{border-top:1px solid var(--line);list-style:none;margin:6px 0 0 0;padding:0}.modern-sandbox-report .related-artifacts-flat li{border-top:1px solid #e2e8f0;margin-top:6px;padding-top:6px}.modern-sandbox-report .related-artifacts-flat li:first-child{border-top:0}.modern-sandbox-report .event-table-wrap,.modern-sandbox-report .raw-events-panel,.modern-sandbox-report .process-tree,.modern-sandbox-report .behavior-chain,.modern-sandbox-report .relation-card,.modern-sandbox-report .evidence-story-lane{overscroll-behavior:contain}.modern-sandbox-report .event-table td,.modern-sandbox-report .edge-table td{overflow-wrap:anywhere}.modern-sandbox-report .self-noise-note{background:#f8fafc;border-left:4px solid #94a3b8;color:#475569;margin:10px 0;padding:10px 12px}
 @media(max-width:900px){.grid,.columns{grid-template-columns:1fr 1fr}table{display:block;overflow-x:auto}}@media(max-width:640px){header{padding:28px 24px}.grid,.columns{grid-template-columns:1fr}main,nav{padding:0 14px}}
 
 """);
@@ -1166,6 +1174,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         Metric(html, "Artifact IOCs", artifactIocs.Count.ToString(), "risk-info");
         html.AppendLine("</div>");
 
+        AppendEvidenceNarrativeSpine(html, report, processNodes, edges, fileIocs, registryIocs, networkIocs, artifactIocs, artifacts);
         AppendEvidenceSummaryCards(html, report, processNodes, edges, fileIocs, registryIocs, networkIocs, artifactIocs);
         AppendEvidenceStoryBoard(html, report, artifacts);
         AppendTopBehaviorChain(html, edges);
@@ -1217,6 +1226,109 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         AppendIocCard(html, "Artifact IOCs", artifactIocs, "No linked artifacts were indexed for this report.");
         html.AppendLine("</div>");
         html.AppendLine("</section>");
+    }
+
+    /// <summary>
+    /// Appends a compact left-to-right narrative before the heavier graph
+    /// widgets. Inputs are already-derived graph, IOC, and artifact summaries;
+    /// processing emits four bounded copyable cards that answer what happened,
+    /// what it touched, what it contacted, and what proof was collected.
+    /// </summary>
+    private static void AppendEvidenceNarrativeSpine(
+        StringBuilder html,
+        AnalysisReport report,
+        IReadOnlyCollection<ProcessGraphNode> processNodes,
+        IReadOnlyCollection<BehaviorGraphEdge> edges,
+        IReadOnlyCollection<string> fileIocs,
+        IReadOnlyCollection<string> registryIocs,
+        IReadOnlyCollection<string> networkIocs,
+        IReadOnlyCollection<string> artifactIocs,
+        IReadOnlyCollection<ArtifactDescriptor> artifacts)
+    {
+        var cards = BuildEvidenceNarrativeCards(report, processNodes, edges, fileIocs, registryIocs, networkIocs, artifactIocs, artifacts);
+        html.AppendLine("<h3 id=\"narrative-spine\" class=\"anchor-offset\">Narrative spine</h3>");
+        html.AppendLine("<div class=\"section-note\"><strong>Compact evidence narrative.</strong> Read left to right: process tree root, behavior graph edges, network endpoint scope, and collected artifact proof. Each step stays bounded and copyable so the report explains the evidence before dense tables or raw rows.</div>");
+        html.AppendLine("<div class=\"narrative-spine\">");
+        foreach (var card in cards)
+        {
+            html.AppendLine($"<article class=\"narrative-step copyable\" data-copy=\"{A(card.CopyText)}\">");
+            html.AppendLine($"<span class=\"narrative-step-index\">{E(card.Step)}</span>");
+            html.AppendLine($"<h3>{E(card.Title)}</h3>");
+            html.AppendLine($"<span class=\"overview-value {E(card.Css)}\">{E(card.Value)}</span>");
+            html.AppendLine($"<p>{E(card.Detail)}</p>");
+            html.AppendLine($"<div class=\"toolbar\">{CopyButton("Copy narrative step", card.CopyText)}</div>");
+            html.AppendLine("</article>");
+        }
+
+        html.AppendLine("</div>");
+    }
+
+    private static IReadOnlyList<EvidenceNarrativeCard> BuildEvidenceNarrativeCards(
+        AnalysisReport report,
+        IReadOnlyCollection<ProcessGraphNode> processNodes,
+        IReadOnlyCollection<BehaviorGraphEdge> edges,
+        IReadOnlyCollection<string> fileIocs,
+        IReadOnlyCollection<string> registryIocs,
+        IReadOnlyCollection<string> networkIocs,
+        IReadOnlyCollection<string> artifactIocs,
+        IReadOnlyCollection<ArtifactDescriptor> artifacts)
+    {
+        var topProcess = processNodes.FirstOrDefault()?.Label ?? "-";
+        var spawnEdges = edges.Count(edge => string.Equals(edge.Relation, "spawn", StringComparison.OrdinalIgnoreCase));
+        var fileEdges = edges.Count(edge => string.Equals(edge.Relation, "file", StringComparison.OrdinalIgnoreCase));
+        var registryEdges = edges.Count(edge => string.Equals(edge.Relation, "registry", StringComparison.OrdinalIgnoreCase));
+        var networkEdges = edges.Count(edge => string.Equals(edge.Relation, "network", StringComparison.OrdinalIgnoreCase));
+        var artifactEdges = edges.Count(edge => string.Equals(edge.Relation, "artifact", StringComparison.OrdinalIgnoreCase));
+        var storageIocCount = fileIocs.Count + registryIocs.Count;
+        var artifactCounts = ArtifactKindNarrativeSummary(artifacts);
+        var highestFinding = PrimaryBehaviorFindings(report)
+            .OrderBy(finding => SeverityRank(finding.Severity))
+            .Select(finding => $"{finding.Severity}: {finding.Title}")
+            .FirstOrDefault() ?? "No behavior finding";
+
+        return
+        [
+            new EvidenceNarrativeCard(
+                "1",
+                "Execution root",
+                processNodes.Count.ToString(CultureInfo.InvariantCulture),
+                $"Top process: {topProcess}; spawn edges: {spawnEdges}; highest finding: {highestFinding}.",
+                processNodes.Count > 0 ? "risk-info" : "risk-low",
+                string.Join(Environment.NewLine, ["Narrative step: Execution root", $"topProcess={topProcess}", $"processNodes={processNodes.Count}", $"spawnEdges={spawnEdges}", $"highestFinding={highestFinding}", .. processNodes.Take(6).Select(node => node.CopyText)])),
+            new EvidenceNarrativeCard(
+                "2",
+                "Storage changes",
+                storageIocCount.ToString(CultureInfo.InvariantCulture),
+                $"File IOCs: {fileIocs.Count}; registry IOCs: {registryIocs.Count}; graph edges file/registry: {fileEdges}/{registryEdges}.",
+                storageIocCount > 0 ? "risk-medium" : "risk-low",
+                string.Join(Environment.NewLine, ["Narrative step: Storage changes", $"fileIocs={fileIocs.Count}", $"registryIocs={registryIocs.Count}", $"fileEdges={fileEdges}", $"registryEdges={registryEdges}", .. fileIocs.Take(5), .. registryIocs.Take(5)])),
+            new EvidenceNarrativeCard(
+                "3",
+                "Network scope",
+                networkIocs.Count.ToString(CultureInfo.InvariantCulture),
+                networkIocs.Count == 0 ? $"No endpoint IOC extracted; network graph edges: {networkEdges}." : $"Top endpoints: {string.Join(", ", networkIocs.Take(4))}; network graph edges: {networkEdges}.",
+                networkIocs.Count + networkEdges > 0 ? "risk-medium" : "risk-low",
+                string.Join(Environment.NewLine, ["Narrative step: Network scope", $"networkIocs={networkIocs.Count}", $"networkEdges={networkEdges}", .. networkIocs.Take(8)])),
+            new EvidenceNarrativeCard(
+                "4",
+                "Artifact proof",
+                artifactIocs.Count.ToString(CultureInfo.InvariantCulture),
+                $"Artifact edges: {artifactEdges}; indexed evidence types: {artifactCounts}.",
+                artifactIocs.Count + artifactEdges > 0 ? "risk-info" : "risk-low",
+                string.Join(Environment.NewLine, ["Narrative step: Artifact proof", $"artifactIocs={artifactIocs.Count}", $"artifactEdges={artifactEdges}", $"artifactKinds={artifactCounts}", .. artifactIocs.Take(8)]))
+        ];
+    }
+
+    private static string ArtifactKindNarrativeSummary(IReadOnlyCollection<ArtifactDescriptor> artifacts)
+    {
+        var summary = artifacts
+            .Where(artifact => IsEvidenceArtifactKind(artifact) && !IsCollectorSelfNoiseArtifact(artifact))
+            .GroupBy(artifact => artifact.Kind)
+            .OrderBy(group => ArtifactKindRank(group.Key))
+            .Select(group => $"{group.Key}={group.Count()}")
+            .Take(6)
+            .ToList();
+        return summary.Count == 0 ? "none" : string.Join(", ", summary);
     }
 
     /// <summary>
@@ -6111,6 +6223,25 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         ("Copy-only external VirusTotal GUI/API link; use it for analyst pivoting outside the local report.", "仅复制的外部 VirusTotal GUI/API 链接；用于在本地报告外进行分析跳转。"),
         ("Copy VirusTotal official evidence", "复制 VirusTotal 官方证据"),
         ("Behavior graph / IOC summary", "行为图谱 / IOC 摘要"),
+        ("Narrative spine", "叙事主线"),
+        ("Compact evidence narrative.", "紧凑证据叙事。"),
+        ("Read left to right: process tree root, behavior graph edges, network endpoint scope, and collected artifact proof. Each step stays bounded and copyable so the report explains the evidence before dense tables or raw rows.", "从左到右阅读：进程树根、行为图谱边、网络端点范围和已采集证据文件。每一步都保持有界且可复制，让报告先解释证据，再进入密集表格或原始行。"),
+        ("Execution root", "执行根节点"),
+        ("Storage changes", "存储变更"),
+        ("Network scope", "网络范围"),
+        ("Artifact proof", "证据文件证明"),
+        ("Copy narrative step", "复制叙事步骤"),
+        ("Top process:", "主要进程："),
+        ("spawn edges:", "启动边："),
+        ("highest finding:", "最高命中："),
+        ("File IOCs:", "文件 IOC："),
+        ("registry IOCs:", "注册表 IOC："),
+        ("graph edges file/registry:", "图谱文件/注册表边："),
+        ("No endpoint IOC extracted; network graph edges:", "未提取端点 IOC；网络图谱边："),
+        ("network graph edges:", "网络图谱边："),
+        ("Artifact edges:", "证据文件边："),
+        ("indexed evidence types:", "已索引证据类型："),
+        ("No behavior finding", "无行为命中"),
         ("Evidence story board", "证据故事板"),
         ("Evidence story.", "证据故事。"),
         ("Evidence story lanes.", "证据故事通道。"),

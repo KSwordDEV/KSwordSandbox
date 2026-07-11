@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Net;
 using System.Security.Cryptography;
 using KSword.Sandbox.Abstractions;
 
@@ -206,6 +207,9 @@ public static class NetworkTelemetrySchema
         AddIfNotEmpty(data, "sourceArtifactRelativePath", source.RelativePath);
         AddIfNotEmpty(data, "artifactRelativePath", source.RelativePath);
         AddIfNotEmpty(data, "downloadSelector", source.RelativePath);
+        AddIfNotEmpty(data, "sourceArtifactSelector", source.RelativePath);
+        AddIfNotEmpty(data, "artifactSelector", source.RelativePath);
+        AddIfNotEmpty(data, "sourceDownloadSelector", source.RelativePath);
         AddIfNotEmpty(data, "sourceImportRoot", source.ImportRoot);
         AddIfNotEmpty(data, "sourceArtifactKind", source.ArtifactKind);
         AddIfNotEmpty(data, "collectionName", source.CollectionName);
@@ -216,6 +220,13 @@ public static class NetworkTelemetrySchema
             AddIfNotEmpty(data, "pcapSourceArtifactPath", source.FullPath);
             AddIfNotEmpty(data, "pcapSourceArtifactName", source.Name);
             AddIfNotEmpty(data, "pcapSourceArtifactRelativePath", source.RelativePath);
+            AddIfNotEmpty(data, "pcapSourceArtifactSelector", source.RelativePath);
+            AddIfNotEmpty(data, "pcapDownloadSelector", source.RelativePath);
+            AddIfNotEmpty(data, "sourcePcapArtifactPath", source.FullPath);
+            AddIfNotEmpty(data, "sourcePcapArtifactName", source.Name);
+            AddIfNotEmpty(data, "sourcePcapArtifactRelativePath", source.RelativePath);
+            AddIfNotEmpty(data, "sourcePcapArtifactSelector", source.RelativePath);
+            AddIfNotEmpty(data, "sourcePcapDownloadSelector", source.RelativePath);
         }
 
         foreach (var pair in source.Metadata ?? EmptyMetadata)
@@ -249,6 +260,7 @@ public static class NetworkTelemetrySchema
         }
 
         AddMetadataAliases(data, source.Metadata);
+        AddPcapSourceArtifactIdentity(data, source);
 
         try
         {
@@ -266,6 +278,10 @@ public static class NetworkTelemetrySchema
                 {
                     data["pcapSourceArtifactSizeBytes"] = sizeText;
                     data["pcapSourceArtifactSha256"] = sha256;
+                    data["sourcePcapArtifactSizeBytes"] = sizeText;
+                    data["sourcePcapArtifactSha256"] = sha256;
+                    data["pcapArtifactSizeBytes"] = sizeText;
+                    data["pcapArtifactSha256"] = sha256;
                 }
             }
         }
@@ -576,7 +592,10 @@ public static class NetworkTelemetrySchema
 
     public static int? ParsePort(string? value)
     {
-        return int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var port) &&
+        var normalized = string.IsNullOrWhiteSpace(value)
+            ? string.Empty
+            : value.Trim().Trim('"', '\'');
+        return int.TryParse(normalized, NumberStyles.Integer, CultureInfo.InvariantCulture, out var port) &&
             port is >= 0 and <= 65535
             ? port
             : null;
@@ -949,11 +968,21 @@ public static class NetworkTelemetrySchema
         }
 
         var trimmed = address.Trim().Trim('"', '\'');
+        if (TrySplitBracketedEndpoint(trimmed, out var bracketedAddress, out _))
+        {
+            return bracketedAddress;
+        }
+
         if (trimmed.StartsWith("[", StringComparison.Ordinal) &&
             trimmed.EndsWith("]", StringComparison.Ordinal) &&
             trimmed.Length > 2)
         {
             trimmed = trimmed[1..^1];
+        }
+
+        if (TrySplitSingleColonEndpoint(trimmed, out var hostAddress, out _))
+        {
+            return hostAddress;
         }
 
         return trimmed;
@@ -980,6 +1009,158 @@ public static class NetworkTelemetrySchema
         return string.Equals(source.ArtifactKind, "PacketCapture", StringComparison.OrdinalIgnoreCase) ||
             source.FullPath.EndsWith(".pcap", StringComparison.OrdinalIgnoreCase) ||
             source.FullPath.EndsWith(".pcapng", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static void AddPcapSourceArtifactIdentity(Dictionary<string, string> data, NetworkArtifactSource source)
+    {
+        var pcapPath = FirstDataValue(data, "pcapSourceArtifactPath", "sourcePcapArtifactPath");
+        var pcapRelativePath = FirstDataValue(data, "pcapSourceArtifactRelativePath", "sourcePcapArtifactRelativePath", "pcapArtifactRelativePath");
+
+        if (string.IsNullOrWhiteSpace(pcapPath) &&
+            !string.IsNullOrWhiteSpace(pcapRelativePath) &&
+            !string.IsNullOrWhiteSpace(source.ImportRoot))
+        {
+            try
+            {
+                var candidate = Path.GetFullPath(Path.Combine(source.ImportRoot, pcapRelativePath));
+                if (IsUnderRoot(candidate, source.ImportRoot))
+                {
+                    pcapPath = candidate;
+                }
+            }
+            catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+            {
+                // Keep relative selector metadata even when a host path cannot be resolved.
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(pcapRelativePath) &&
+            !string.IsNullOrWhiteSpace(pcapPath) &&
+            !string.IsNullOrWhiteSpace(source.ImportRoot))
+        {
+            try
+            {
+                pcapRelativePath = ArtifactRelativePath(source.ImportRoot, pcapPath);
+            }
+            catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+            {
+                // Leave selector empty; path metadata is still useful.
+            }
+        }
+
+        var pcapName = FirstNonEmpty(
+            FirstDataValue(data, "pcapSourceArtifactName", "sourcePcapArtifactName"),
+            string.IsNullOrWhiteSpace(pcapPath) ? string.Empty : Path.GetFileName(pcapPath),
+            string.IsNullOrWhiteSpace(pcapRelativePath) ? string.Empty : Path.GetFileName(pcapRelativePath));
+
+        AddIfNotEmpty(data, "pcapSourceArtifactPath", pcapPath);
+        AddIfNotEmpty(data, "sourcePcapArtifactPath", pcapPath);
+        AddIfNotEmpty(data, "pcapSourceArtifactName", pcapName);
+        AddIfNotEmpty(data, "sourcePcapArtifactName", pcapName);
+        AddIfNotEmpty(data, "pcapSourceArtifactRelativePath", pcapRelativePath);
+        AddIfNotEmpty(data, "sourcePcapArtifactRelativePath", pcapRelativePath);
+        AddIfNotEmpty(data, "pcapArtifactRelativePath", pcapRelativePath);
+        AddIfNotEmpty(data, "pcapSourceArtifactSelector", pcapRelativePath);
+        AddIfNotEmpty(data, "sourcePcapArtifactSelector", pcapRelativePath);
+        AddIfNotEmpty(data, "pcapDownloadSelector", pcapRelativePath);
+        AddIfNotEmpty(data, "sourcePcapDownloadSelector", pcapRelativePath);
+
+        if (string.IsNullOrWhiteSpace(pcapPath))
+        {
+            return;
+        }
+
+        try
+        {
+            var info = new FileInfo(pcapPath);
+            if (!info.Exists)
+            {
+                return;
+            }
+
+            var sizeText = info.Length.ToString(CultureInfo.InvariantCulture);
+            var sha256 = ComputeSha256(info.FullName);
+            data["pcapSourceArtifactSizeBytes"] = sizeText;
+            data["sourcePcapArtifactSizeBytes"] = sizeText;
+            data["pcapArtifactSizeBytes"] = sizeText;
+            data["pcapSourceArtifactSha256"] = sha256;
+            data["sourcePcapArtifactSha256"] = sha256;
+            data["pcapArtifactSha256"] = sha256;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException)
+        {
+            data["pcapSourceArtifactHashSkipped"] = ex.GetType().Name;
+        }
+    }
+
+    private static bool TrySplitBracketedEndpoint(string value, out string address, out int? port)
+    {
+        address = string.Empty;
+        port = null;
+        if (!value.StartsWith("[", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var closing = value.IndexOf(']');
+        if (closing <= 1)
+        {
+            return false;
+        }
+
+        address = value[1..closing];
+        if (closing + 1 < value.Length && value[closing + 1] == ':')
+        {
+            port = ParsePort(value[(closing + 2)..]);
+        }
+
+        return !string.IsNullOrWhiteSpace(address);
+    }
+
+    private static bool TrySplitSingleColonEndpoint(string value, out string address, out int? port)
+    {
+        address = string.Empty;
+        port = null;
+        var lastColon = value.LastIndexOf(':');
+        if (lastColon <= 0 || value.IndexOf(':') != lastColon)
+        {
+            return false;
+        }
+
+        var parsedPort = ParsePort(value[(lastColon + 1)..]);
+        if (!parsedPort.HasValue)
+        {
+            return false;
+        }
+
+        var host = value[..lastColon];
+        if (IPAddress.TryParse(host, out _) ||
+            Uri.CheckHostName(host) is UriHostNameType.Dns or UriHostNameType.IPv4)
+        {
+            address = host;
+            port = parsedPort;
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool IsUnderRoot(string path, string root)
+    {
+        var fullRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(root)) + Path.DirectorySeparatorChar;
+        var fullPath = Path.GetFullPath(path);
+        return fullPath.StartsWith(fullRoot, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(Path.TrimEndingDirectorySeparator(fullPath), Path.TrimEndingDirectorySeparator(root), StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string ArtifactRelativePath(string root, string path)
+    {
+        if (string.IsNullOrWhiteSpace(root) || !IsUnderRoot(path, root))
+        {
+            return string.Empty;
+        }
+
+        return Path.GetRelativePath(root, path).Replace('\\', '/');
     }
 
     private static void AddMetadataAliases(Dictionary<string, string> data, IReadOnlyDictionary<string, string>? metadata)
@@ -1297,6 +1478,25 @@ public static class NetworkTelemetrySchema
     {
         var eventKind = ValueOrEmpty(data, "eventKind");
         var health = ValueOrEmpty(data, "collectionHealth");
+        if (string.Equals(eventKind, "parse_error", StringComparison.OrdinalIgnoreCase))
+        {
+            var boundary = FirstDataValue(data, "parserBoundary", "parseFailureStage", "diagnosticCode");
+            if (boundary.Contains("pcap", StringComparison.OrdinalIgnoreCase))
+            {
+                return "PCAP 文件边界或长度校验失败；请保留源文件，优先检查抓包是否截断、复制未完成或格式不匹配。";
+            }
+
+            if (boundary.Contains("sidecar", StringComparison.OrdinalIgnoreCase))
+            {
+                var line = FirstDataValue(data, "sidecarLineNumber", "lineNumber");
+                return string.IsNullOrWhiteSpace(line)
+                    ? "Sidecar 行解析失败；请保留原始 JSONL/log 并检查字段名、引号和截断情况。"
+                    : $"Sidecar 第 {line} 行解析失败；请检查 JSON 引号、换行截断或 exporter 字段格式。";
+            }
+
+            return "网络证据解析失败；请结合 parserBoundary、diagnosticCode 和源 artifact hash 复核。";
+        }
+
         if (string.Equals(health, "degraded", StringComparison.OrdinalIgnoreCase))
         {
             return "部分网络证据解析失败；请保留源 PCAP/sidecar 文件并查看 parse_error 事件。";

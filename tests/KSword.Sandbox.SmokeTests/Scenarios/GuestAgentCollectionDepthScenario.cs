@@ -28,6 +28,9 @@ internal sealed class GuestAgentCollectionDepthScenario : ISmokeTestScenario
         AssertFileContains(Path.Combine(collectionRoot, "ProcessTreeProbe.cs"), "process.tree", "Process tree probe must emit process.tree.");
         AssertFileContains(Path.Combine(collectionRoot, "ProcessTreeProbe.cs"), "CreateToolhelp32Snapshot", "Process tree probe must use low-privilege Toolhelp snapshots.");
         AssertFileContains(Path.Combine(collectionRoot, "ProcessTreeProbe.cs"), "treeLineage", "Process tree events must preserve root/child lineage.");
+        AssertFileContains(Path.Combine(collectionRoot, "ProcessTreeProbe.cs"), "processTreeRole", "Process tree events must preserve stable root/direct-child/descendant roles.");
+        AssertFileContains(Path.Combine(collectionRoot, "ProcessTreeProbe.cs"), "rootAncestorProcessId", "Process tree events must preserve stable root ancestor metadata.");
+        AssertFileContains(Path.Combine(collectionRoot, "ProcessTreeProbe.cs"), "isDirectChildOfRoot", "Process tree events must distinguish direct children from deeper descendants.");
         AssertFileContains(Path.Combine(collectionRoot, "ProcessTreeProbe.cs"), "processExited", "Process tree missing rows must preserve exited markers.");
         AssertFileContains(Path.Combine(collectionRoot, "ProcessTreeProbe.cs"), "rootExited", "Process tree summaries must preserve root-exited markers.");
         AssertFileContains(Path.Combine(collectionRoot, "ProcessTreeProbe.cs"), "rootTreeMetadata", "New process rows should reuse root-tree metadata when lineage is available.");
@@ -65,6 +68,9 @@ internal sealed class GuestAgentCollectionDepthScenario : ISmokeTestScenario
         AssertFileContains(Path.Combine(collectionRoot, "ScreenshotProbe.cs"), "artifactRelativePath", "Screenshot events must expose artifact-relative paths.");
         AssertFileContains(Path.Combine(collectionRoot, "ScreenshotProbe.cs"), "sha256", "Screenshot captured events must expose event-level SHA-256 metadata.");
         AssertFileContains(Path.Combine(collectionRoot, "ScreenshotProbe.cs"), "sizeBytes", "Screenshot captured events must expose event-level size metadata.");
+        AssertFileContains(Path.Combine(collectionRoot, "ScreenshotProbe.cs"), "artifactIntegrityState", "Screenshot events must expose artifact integrity state.");
+        AssertFileContains(Path.Combine(collectionRoot, "ScreenshotProbe.cs"), "reasonCode", "Screenshot skipped events must expose stable reason codes.");
+        AssertFileContains(Path.Combine(collectionRoot, "ScreenshotProbe.cs"), "reasonCategory", "Screenshot skipped events must expose stable reason categories.");
         AssertFileContains(Path.Combine(collectionRoot, "ScreenshotProbe.cs"), "processRole", "Screenshot events should identify sample-root scoped attribution.");
         AssertFileContains(Path.Combine(collectionRoot, "ScreenshotProbe.cs"), "treeLineage", "Screenshot events should preserve root lineage when available.");
         AssertFileContains(Path.Combine(collectionRoot, "ScreenshotProbe.cs"), "zhMessage", "Screenshot events must include Chinese report text.");
@@ -92,6 +98,11 @@ internal sealed class GuestAgentCollectionDepthScenario : ISmokeTestScenario
         AssertFileContains(Path.Combine(collectionRoot, "MemoryDumpProbe.cs"), "zhMessage", "Memory dump events must include Chinese report text.");
         AssertFileContains(Path.Combine(collectionRoot, "MemoryDumpProbe.cs"), "targetProcessName", "Memory dump events must preserve target process identity.");
         AssertFileContains(Path.Combine(collectionRoot, "MemoryDumpProbe.cs"), "targetProcessPath", "Memory dump events must preserve target process path metadata.");
+        AssertFileContains(Path.Combine(collectionRoot, "MemoryDumpProbe.cs"), "targetProcessRole", "Memory dump events must preserve root/direct-child/descendant target roles.");
+        AssertFileContains(Path.Combine(collectionRoot, "MemoryDumpProbe.cs"), "targetTreeLineage", "Memory dump events must preserve target lineage metadata.");
+        AssertFileContains(Path.Combine(collectionRoot, "MemoryDumpProbe.cs"), "rootDescendantCoverageState", "Memory dump sweep must summarize root plus descendant coverage.");
+        AssertFileContains(Path.Combine(collectionRoot, "MemoryDumpProbe.cs"), "reasonCode", "Memory dump skipped events must expose stable reason codes.");
+        AssertFileContains(Path.Combine(collectionRoot, "MemoryDumpProbe.cs"), "reasonCategory", "Memory dump skipped events must expose stable reason categories.");
         AssertFileContains(Path.Combine(collectionRoot, "MemoryDumpProbe.cs"), "capturePhase", "Memory dump events must include normalized capture phase metadata.");
         AssertFileContains(Path.Combine(collectionRoot, "MemoryDumpProbe.cs"), "nonfatal", "Memory dump skipped events must mark non-fatal collection status.");
         AssertFileContains(Path.Combine(collectionRoot, "PacketCaptureProbe.cs"), "pktmon.exe", "Packet capture probe must use Windows pktmon.");
@@ -135,6 +146,9 @@ internal sealed class GuestAgentCollectionDepthScenario : ISmokeTestScenario
         SmokeAssert.True(guestWriterText.Contains("CountProbeFailureEvents", StringComparison.Ordinal), "Guest artifact writer must count probe failures in collection status.");
         SmokeAssert.True(guestWriterText.Contains("lastProcessId", StringComparison.Ordinal), "Guest artifact writer must preserve process identity in artifact/collection metadata.");
         SmokeAssert.True(guestWriterText.Contains("lastTreeLineage", StringComparison.Ordinal), "Guest artifact writer must preserve child lineage metadata in collection metadata.");
+        SmokeAssert.True(guestWriterText.Contains("collectionSummaryVersion", StringComparison.Ordinal), "Guest artifact writer must version collection summary metadata.");
+        SmokeAssert.True(guestWriterText.Contains("artifactIntegrityState", StringComparison.Ordinal), "Guest artifact writer must preserve artifact integrity metadata.");
+        SmokeAssert.True(guestWriterText.Contains("reasonCountsJson", StringComparison.Ordinal), "Guest artifact writer must summarize collection skipped/failed reasons.");
         SmokeAssert.True(guestWriterText.Contains("lastProcessExited", StringComparison.Ordinal), "Guest artifact writer must preserve process exited markers in collection metadata.");
         SmokeAssert.True(programText.Contains("artifact.dropped_file.copied", StringComparison.Ordinal), "Dropped-file copied events must be emitted for copied artifacts.");
         SmokeAssert.True(programText.Contains("artifact.dropped_file.skipped", StringComparison.Ordinal), "Dropped-file skipped events must be emitted for copy diagnostics.");
@@ -150,6 +164,9 @@ internal sealed class GuestAgentCollectionDepthScenario : ISmokeTestScenario
         SmokeAssert.True(programText.Contains("AddDroppedFileHashData(evt, copiedHash, prefix: \"copied\")", StringComparison.Ordinal), "Dropped-file events must include copied artifact SHA-256 metadata.");
         SmokeAssert.True(programText.Contains("sourceHashStatus", StringComparison.Ordinal), "Dropped-file events must include source hash status metadata.");
         SmokeAssert.True(programText.Contains("sourceEventSha256", StringComparison.Ordinal), "Dropped-file events must preserve source file-event hashes when available.");
+        SmokeAssert.True(programText.Contains("sourceCopiedSha256Match", StringComparison.Ordinal), "Dropped-file copied events must compare source and copied hashes when available.");
+        SmokeAssert.True(programText.Contains("skippedReasonCountsJson", StringComparison.Ordinal), "Dropped-file summaries must expose skipped reason counts.");
+        SmokeAssert.True(programText.Contains("reasonCategory", StringComparison.Ordinal), "Dropped-file skipped events must expose stable reason categories.");
 
         SmokeAssert.True(programText.Contains("new ProcessTreeProbe()", StringComparison.Ordinal), "Agent pipeline must include ProcessTreeProbe.");
         SmokeAssert.True(programText.Contains("new FileDiffProbe()", StringComparison.Ordinal), "Agent pipeline must include FileDiffProbe.");

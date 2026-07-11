@@ -345,6 +345,30 @@ public static class ArtifactDescriptorFactory
             string.Equals(extension, ".pcapng", StringComparison.OrdinalIgnoreCase);
     }
 
+    /// <summary>
+    /// Returns true when a path names a supported memory-dump artifact.
+    /// Inputs are arbitrary paths or file names; processing checks only the
+    /// extension; the method returns true for .dmp files.
+    /// </summary>
+    public static bool IsMemoryDumpPath(string path)
+    {
+        return string.Equals(Path.GetExtension(path), ".dmp", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Returns true when a path names an image type commonly used for
+    /// screenshots. Inputs are arbitrary paths or file names; processing checks
+    /// only the extension; the method returns true for BMP/PNG/JPEG files.
+    /// </summary>
+    public static bool IsScreenshotImagePath(string path)
+    {
+        var extension = Path.GetExtension(path);
+        return string.Equals(extension, ".bmp", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(extension, ".png", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(extension, ".jpg", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(extension, ".jpeg", StringComparison.OrdinalIgnoreCase);
+    }
+
     private static string FirstNonEmpty(params string?[] values)
     {
         foreach (var value in values)

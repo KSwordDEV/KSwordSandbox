@@ -29,6 +29,8 @@ internal static class SettingsPage
             input { border:1px solid #c7dff7; border-radius:2px; font:inherit; padding:10px 12px; width:100%; }
             button,a.button { background:var(--blue); border:0; border-radius:2px; color:white; cursor:pointer; display:inline-block; font-weight:800; margin-top:12px; padding:10px 14px; text-decoration:none; }
             button.secondary,a.secondary { background:#334155; }
+            button.copy-btn { background:#e2e8f0; border:1px solid #cbd5e1; color:#334155; font-size:12px; margin:8px 0 0; padding:5px 8px; }
+            button.copy-btn:hover { background:#cbd5e1; }
             .row { display:flex; flex-wrap:wrap; gap:10px; }
             .grid { display:grid; gap:12px; grid-template-columns:repeat(3,minmax(0,1fr)); }
             .metric { background:#f8fbff; border:1px solid var(--line); border-radius:2px; margin-top:10px; padding:12px; }
@@ -46,8 +48,8 @@ internal static class SettingsPage
             .muted { color:var(--muted); }
             .error { color:#b91c1c; }
             code { background:#eef7ff; border-radius:2px; padding:2px 5px; word-break:break-all; }
-            [data-copy], code { cursor:copy; }
-            [data-copy]:hover, code:hover, input:hover, label:hover { outline:1px dashed var(--blue); outline-offset:2px; }
+            [data-copy], code, .card, .metric, .toggle-card { cursor:copy; }
+            [data-copy]:hover, code:hover, input:hover, label:hover, .card:hover, .metric:hover, .toggle-card:hover { outline:1px dashed var(--blue); outline-offset:2px; }
             .toast { background:#0f172a; border-radius:2px; bottom:22px; color:white; left:50%; opacity:0; padding:10px 16px; pointer-events:none; position:fixed; transform:translate(-50%,12px); transition:opacity .15s ease,transform .15s ease; z-index:20; }
             .toast.visible { opacity:.96; transform:translate(-50%,0); }
 
@@ -70,9 +72,10 @@ internal static class SettingsPage
             <p class="row"><a class="button secondary" href="/" data-zh="返回主界面" data-en="Back to dashboard">返回主界面</a></p>
           </header>
           <main>
-            <section>
+            <section id="vtSettingsSection" data-copy="VirusTotal status={{Attr(virusTotal.Configured ? "configured" : "not-configured")}}; source={{Attr(virusTotal.Source)}}; persistence=process-only-no-file; no sample upload">
               <h2 data-zh="VirusTotal 官方结果" data-en="VirusTotal official results">VirusTotal 官方结果</h2>
               <p class="muted" data-zh="当前只做哈希查询（hash lookup），不上传样本。不配置、限速、鉴权失败或超时时，主流程继续运行且不会产生噪音日志。" data-en="Current integration performs hash lookup only and does not upload samples. Missing keys, rate limits, auth failures, or timeouts keep the main flow running without noisy logs.">当前只做哈希查询（hash lookup），不上传样本。不配置、限速、鉴权失败或超时时，主流程继续运行且不会产生噪音日志。</p>
+              <button class="copy-btn" type="button" data-copy="VirusTotal status={{Attr(virusTotal.Configured ? "configured" : "not-configured")}}; source={{Attr(virusTotal.Source)}}; persistence=process-only-no-file; hash-only; does not upload samples" data-copy-label="VirusTotal settings summary" data-zh="复制本卡摘要" data-en="Copy card summary">复制本卡摘要</button>
               <div class="metric">
                 <strong data-zh="安全提示" data-en="Security note">安全提示</strong>
                 <p class="muted" data-copy="VirusTotal API key WebUI updates are process-only and never persisted to disk." data-zh="在本页输入的 API Key 只写入当前进程环境变量 KSWORDBOX_VIRUSTOTAL_API_KEY；WebUI 不落盘。需要重启后仍生效时，请在启动 Web Host 之前设置 User/Machine 环境变量。" data-en="Keys entered here are written only to the current process environment variable KSWORDBOX_VIRUSTOTAL_API_KEY; the WebUI never persists them to disk. For restart-stable use, set a User/Machine environment variable before starting the Web Host.">在本页输入的 API Key 只写入当前进程环境变量 KSWORDBOX_VIRUSTOTAL_API_KEY；WebUI 不落盘。需要重启后仍生效时，请在启动 Web Host 之前设置 User/Machine 环境变量。</p>
@@ -102,13 +105,14 @@ internal static class SettingsPage
               </div>
               <p id="status" class="muted" data-copy=""></p>
             </section>
-            <section>
+            <section id="vmSettingsSection" data-copy="VM WebUI preset loading">
               <h2 data-zh="WebUI 虚拟机预设" data-en="WebUI VM preset">WebUI 虚拟机预设</h2>
               <p class="muted" data-zh="这些值保存在当前浏览器 localStorage，只作为上传页的每任务覆盖值；不会改配置（config）、Core、Driver 或 Guest 业务。" data-en="These values are saved in this browser's localStorage and only become per-job overrides on the upload page; they do not modify config, Core, Driver, or Guest behavior.">这些值保存在当前浏览器 localStorage，只作为上传页的每任务覆盖值；不会改配置（config）、Core、Driver 或 Guest 业务。</p>
               <div id="vmPresetSummary" class="summary" data-copy="" data-copy-label="VM preset summary"></div>
               <div class="grid">
-                <div class="card">
+                <div id="vmPresetCoreCard" class="card" data-copy="VM preset core card">
                   <h3 data-zh="VM 与时长" data-en="VM and duration">VM 与时长</h3>
+                  <button id="copyVmPresetCoreCard" class="copy-btn" type="button" data-copy="VM preset core card" data-copy-label="VM and duration preset card" data-zh="复制本卡摘要" data-en="Copy card summary">复制本卡摘要</button>
                   <label for="settingsGoldenVmName" data-zh="VM 名称" data-en="VM name">VM 名称</label>
                   <input id="settingsGoldenVmName" placeholder="KSwordSandbox-Win10-Golden" data-copy-label="VM name preset">
                   <label for="settingsGoldenSnapshotName" data-zh="检查点" data-en="Checkpoint">检查点</label>
@@ -117,8 +121,9 @@ internal static class SettingsPage
                   <input id="settingsDurationSeconds" type="number" min="1" max="900" value="120" data-copy-label="analysis duration preset">
                   <p id="settingsDurationHint" class="field-hint" data-copy="" data-copy-label="duration preset hint">-</p>
                 </div>
-                <div class="card">
+                <div id="vmPresetGuestCard" class="card" data-copy="VM preset guest card">
                   <h3 data-zh="Guest 用户提示" data-en="Guest user hint">Guest 用户提示</h3>
+                  <button id="copyVmPresetGuestCard" class="copy-btn" type="button" data-copy="VM preset guest card" data-copy-label="guest preset card" data-zh="复制本卡摘要" data-en="Copy card summary">复制本卡摘要</button>
                   <label for="settingsGuestUserName" data-zh="Guest 用户" data-en="Guest user">Guest 用户</label>
                   <input id="settingsGuestUserName" placeholder="SandboxUser" data-copy-label="guest user preset">
                   <p id="settingsGuestHint" class="field-hint" data-copy="" data-copy-label="guest credential hint">-</p>
@@ -127,8 +132,9 @@ internal static class SettingsPage
                   <label for="settingsGuestPayloadRoot" data-zh="Guest 工具目录（主机）" data-en="Guest tool folder (host)">Guest 工具目录（主机）</label>
                   <input id="settingsGuestPayloadRoot" placeholder="D:\Temp\KSwordSandbox\payload\guest-tools" data-copy-label="guest payload root preset">
                 </div>
-                <div class="card">
+                <div id="vmPresetArtifactCard" class="card" data-copy="VM preset artifact card">
                   <h3 data-zh="R0 与产物采集" data-en="R0 and artifacts">R0 与产物采集</h3>
+                  <button id="copyVmPresetArtifactCard" class="copy-btn" type="button" data-copy="VM preset artifact card" data-copy-label="R0 artifact preset card" data-zh="复制本卡摘要" data-en="Copy card summary">复制本卡摘要</button>
                   <div class="toggle-card readonly-toggle">
                     <label for="settingsR0Enabled"><input id="settingsR0Enabled" type="checkbox" disabled> <span data-zh="R0 总开关来自 config" data-en="R0 master switch comes from config">R0 总开关来自 config</span></label>
                     <p id="settingsR0Hint" class="field-hint" data-copy="" data-copy-label="R0 config hint">-</p>
@@ -376,7 +382,43 @@ internal static class SettingsPage
               ];
               target.setAttribute('data-copy', parts.join(' | '));
               target.innerHTML = parts.map(part => `<span class="pill" data-copy="${escapeAttribute(part)}" data-copy-label="VM preset summary item">${escapeHtml(part)}</span>`).join('');
+              refreshSettingsCopyAffordances(parts);
             }
+            function refreshSettingsCopyAffordances(summaryParts){
+              const core = [
+                `${t('VM', 'VM')}: ${(document.getElementById('settingsGoldenVmName')?.value || settingsConfigDefaults?.hyperV?.goldenVmName || t('默认', 'default')).trim()}`,
+                `${t('检查点', 'Checkpoint')}: ${(document.getElementById('settingsGoldenSnapshotName')?.value || settingsConfigDefaults?.hyperV?.goldenSnapshotName || t('默认', 'default')).trim()}`,
+                `${t('时长', 'Duration')}: ${getPresetDuration()}s`
+              ].join(' | ');
+              const guest = [
+                `${t('Guest 用户', 'Guest user')}: ${(document.getElementById('settingsGuestUserName')?.value || settingsConfigDefaults?.guest?.userName || t('默认', 'default')).trim()}`,
+                `${t('Guest 工作目录', 'Guest working folder')}: ${(document.getElementById('settingsGuestWorkingDirectory')?.value || settingsConfigDefaults?.guest?.workingDirectory || t('默认', 'default')).trim()}`,
+                `${t('Guest 工具目录', 'Guest tool folder')}: ${(document.getElementById('settingsGuestPayloadRoot')?.value || settingsConfigDefaults?.paths?.guestPayloadRoot || t('默认', 'default')).trim()}`,
+                document.getElementById('settingsGuestHint')?.textContent || ''
+              ].filter(Boolean).join(' | ');
+              const artifact = [
+                document.getElementById('settingsR0Hint')?.textContent || '',
+                `${t('Mock 采集器', 'Mock collector')}: ${document.getElementById('settingsUseMockCollector')?.checked ? t('启用', 'enabled') : t('关闭', 'disabled')}`,
+                `${t('落地文件', 'Dropped files')}: ${document.getElementById('settingsCollectDroppedFiles')?.checked ? t('启用', 'enabled') : t('关闭', 'disabled')}`,
+                `${t('截图', 'Screenshots')}: ${document.getElementById('settingsCaptureScreenshots')?.checked ? t('启用', 'enabled') : t('关闭', 'disabled')}`,
+                `${t('内存转储', 'Memory dumps')}: ${document.getElementById('settingsCaptureMemoryDumps')?.checked ? t('启用', 'enabled') : t('关闭', 'disabled')}`,
+                `${t('PCAP', 'PCAP')}: ${document.getElementById('settingsCapturePacketCapture')?.checked ? t('启用', 'enabled') : t('关闭', 'disabled')}`
+              ].filter(Boolean).join(' | ');
+              const whole = (summaryParts && summaryParts.length ? summaryParts.join(' | ') : [core, guest, artifact].join(' | '));
+              setCopyTarget('vmSettingsSection', whole);
+              setCopyTarget('vmPresetCoreCard', core);
+              setCopyTarget('copyVmPresetCoreCard', core);
+              setCopyTarget('vmPresetGuestCard', guest);
+              setCopyTarget('copyVmPresetGuestCard', guest);
+              setCopyTarget('vmPresetArtifactCard', artifact);
+              setCopyTarget('copyVmPresetArtifactCard', artifact);
+              setCopyTarget('settingsUseMockCollector', `${t('Mock 采集器', 'Mock collector')}: ${document.getElementById('settingsUseMockCollector')?.checked ? t('启用', 'enabled') : t('关闭', 'disabled')}`);
+              setCopyTarget('settingsCollectDroppedFiles', `${t('落地文件', 'Dropped files')}: ${document.getElementById('settingsCollectDroppedFiles')?.checked ? t('启用', 'enabled') : t('关闭', 'disabled')}`);
+              setCopyTarget('settingsCaptureScreenshots', `${t('截图', 'Screenshots')}: ${document.getElementById('settingsCaptureScreenshots')?.checked ? t('启用', 'enabled') : t('关闭', 'disabled')}`);
+              setCopyTarget('settingsCaptureMemoryDumps', `${t('内存转储', 'Memory dumps')}: ${document.getElementById('settingsCaptureMemoryDumps')?.checked ? t('启用', 'enabled') : t('关闭', 'disabled')}`);
+              setCopyTarget('settingsCapturePacketCapture', `${t('PCAP', 'PCAP')}: ${document.getElementById('settingsCapturePacketCapture')?.checked ? t('启用', 'enabled') : t('关闭', 'disabled')}`);
+            }
+            function setCopyTarget(id, text){ const el = document.getElementById(id); if(el){ el.setAttribute('data-copy', text || ''); } }
             function setTextAndCopy(id, text){ const el = document.getElementById(id); if(!el){ return; } el.textContent = text; el.setAttribute('data-copy', text); }
             function escapeHtml(value){ return String(value).replace(/[&<>"']/g, char => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#039;' }[char])); }
             function escapeAttribute(value){ return escapeHtml(value).replace(/`/g, '&#096;'); }
@@ -438,8 +480,15 @@ internal static class SettingsPage
                 element.addEventListener('change', renderVmPresetSummary);
               });
             }
+            document.addEventListener('click', event => {
+              const button = event.target.closest ? event.target.closest('button.copy-btn[data-copy]') : null;
+              if(!button){ return; }
+              event.preventDefault();
+              event.stopPropagation();
+              copyText(button.getAttribute('data-copy') || '');
+            });
             document.addEventListener('contextmenu', event => {
-              const target = event.target.closest ? event.target.closest('[data-copy], code, pre, input, p, li, h1, h2, h3, span, label, button, a, td, th') : null;
+              const target = event.target.closest ? event.target.closest('[data-copy], code, pre, input, p, li, h1, h2, h3, span, label, button, a, td, th, section, article, .metric, .card, .toggle-card') : null;
               if(!target){ return; }
               const value = target.getAttribute('data-copy') || target.value || target.textContent || '';
               if(!value.trim()){ return; }

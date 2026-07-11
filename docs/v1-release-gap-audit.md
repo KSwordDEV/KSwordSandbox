@@ -1,6 +1,6 @@
-# KSwordSandbox v1 发布差距审计（21a81ac 后）
+# KSwordSandbox v1 发布差距审计（截至 071ec4c）
 
-更新时间：2026-07-12。本文是发布经理/审阅者 handoff，基于 `21a81ac Deepen sandbox evidence and release polish`
+更新时间：2026-07-12。本文是发布经理/审阅者 handoff，基于 `071ec4c Advance MVP artifact evidence readiness`
 之后的源码与文档状态整理；本次文档刷新没有重跑 Hyper-V live、重 smoke 或签名链。
 
 本页只回答发布前最重要的三件事：当前能交付什么、还差什么、审阅者用哪些低副作用命令验收。
@@ -31,16 +31,16 @@
 | --- | ---: | --- |
 | WebUI 上传/选择、自动启动、live monitor | 95% | 做一次真实样本 UI 走查，确认失败态、artifact 卡片和报告按钮在 live 结束后可读。 |
 | Hyper-V runbook / host orchestration | 90% | 继续收敛 checkpoint 偏差恢复、前置条件提示和失败诊断文案。 |
-| Guest Agent R3 采集 | 90% | 用更多样本校准 dropped file、child process、PCAP 和 opt-in artifact 质量。 |
-| R0Collector 用户态采集链 | 87% | 已接入可选 `GET_NETWORK_STATUS` 诊断、sequence/backpressure/readiness/noise contract；仍需真实驱动输入和压力样本复验。 |
+| Guest Agent R3 采集 | 91% | artifact manifest、截图/PCAP/dump 等 opt-in 证据 lane 更完整；仍需用更多样本校准 dropped file、child process、PCAP 和 opt-in artifact 质量。 |
+| R0Collector 用户态采集链 | 88% | 已接入可选 `GET_NETWORK_STATUS` 诊断、sequence/backpressure/readiness/noise contract；仍需真实驱动输入和压力样本复验。 |
 | R0 driver / kernel producer | 76% | driver 侧 telemetry/diagnostic 面更完整，Collector 已消费 `GET_NETWORK_STATUS`；默认发布仍不承诺未签名驱动加载，报告/UI 还可继续加强该状态叙事。 |
-| 静态分析与行为规则 | 93% | `static.*` 结构化事件、resource projection 和规则消费已落地；后续按 corpus 校准误报/漏报、MITRE 映射和 YARA-like 规则噪音。 |
+| 静态分析与行为规则 | 94% | `static.*` 结构化事件、resource projection 和规则消费已落地，规则库已扩展；后续按 corpus 校准误报/漏报、MITRE 映射和 YARA-like 规则噪音。 |
 | 网络 sidecar / PCAP 元数据 | 86% | DNS/HTTP/TLS/flow/IPv6/sidecar 归一化已可用；深度协议字段和异常证书/JA3 质量还需样本校准。 |
-| artifact import / host index / download | 90% | 安全下载和 duplicate/rejection 诊断已具备；继续补非 ASCII、深目录、重复内容和路径穿越 synthetic 覆盖。 |
-| 中英 HTML 报告 | 93% | 证据叙事已可审阅；继续用真实样本报告校准首屏摘要、关系卡和 raw evidence 边界。 |
+| artifact import / host index / download | 92% | 安全下载、duplicate/rejection 诊断和 artifact evidence readiness 已增强；继续补非 ASCII、深目录、重复内容和路径穿越 synthetic 覆盖。 |
+| 中英 HTML 报告 | 94% | 证据叙事和 artifact 证据呈现已可审阅；继续用真实样本报告校准首屏摘要、关系卡和 raw evidence 边界。 |
 | VirusTotal hash-only enrichment | 90% | 官方 file object 字段、permalink/cache/quiet 状态已接入；继续补 rate-limit/错误分类的 UI 文案。 |
-| 发布/打包/仓库策略 | 93% | readiness/package gate 已有；正式 tag 前仍需 release manager 跑 staged policy 和 source package dry run。 |
-| 文档与操作者 onboarding | 88% | 中文优先索引和 release handoff 已收敛；随最终 release notes 再做一次去重。 |
+| 发布/打包/仓库策略 | 94% | readiness/package gate 已有；runtime zip 交付必须显式完整 payload，正式 tag 前仍需 release manager 跑 staged policy 和 source package dry run。 |
+| 文档与操作者 onboarding | 89% | 中文优先索引和 release handoff 已收敛；随最终 release notes 再做一次去重。 |
 
 ## P0 发布门禁
 
@@ -75,7 +75,7 @@
 
 通过证据：`Test-ReleaseReadiness.ps1` 的 `no-csigntool-release-path` 为 `Passed`。
 
-### 3. Fresh live evidence 由 release manager 在 lab 主机确认
+### 3. 最新 live 证据 / Fresh live evidence 由 release manager 在 lab 主机确认
 
 已具备能力：
 
@@ -97,7 +97,7 @@
 
 ## P1 发布质量差距
 
-### WebUI live monitor
+### WebUI 实时监控页 / WebUI live monitor
 
 已实现：SSE 真实进度流、durable progress fallback、上传后跳转 live page、stdout/stderr 默认折叠、artifact 卡片/下载入口、VT quiet 状态。
 
@@ -111,7 +111,7 @@
 
 ### 行为规则与静态分析
 
-已验证的轻量事实：`rules/behavior-rules.json` 当前 458 条规则、重复 ID 组为 0。
+已验证的轻量事实：`rules/behavior-rules.json` 当前 521 条规则、重复 ID 组为 0。
 
 已实现：`static.analysis.completed` 保持兼容 summary；`static.pe.*`、`static.string.*`、`static.packer.hint`、`static.yara.match` 结构化事件进入规则消费；
 `rules/static-notes.yar` 由内置轻量 YARA-like matcher 处理，不依赖外部 YARA。
@@ -124,7 +124,7 @@
 
 仍需：补充 synthetic import/download 覆盖非 ASCII、深目录、重复内容、路径穿越拒绝，以及真实 sidecar/PCAP 样本字段质量。
 
-### R0 telemetry
+### R0 遥测 / R0 telemetry
 
 已实现：R0Collector/报告保留 lost/backpressure/highWatermark/lastEnqueueFailureStatusHex/sequence/sequenceMeaning、readiness/diagnose 中文提示和 self-noise 边界；driver 侧已有更完整 producer runtime state 与 network status ABI。
 
@@ -156,7 +156,7 @@ dotnet build .\tools\KSword.Sandbox.JobTool\KSword.Sandbox.JobTool.csproj -c Ver
 .\run.ps1 -Mode Analyze -SamplePreset Notepad -DurationSeconds 5 -Live
 ```
 
-## Release notes 必须写清楚
+## 发布说明 / Release notes 必须写清楚
 
 - 本项目是本地授权分析沙箱，不是云上传服务。
 - VirusTotal 是 hash-only；Intel VT-x/AMD-V 是 Hyper-V 硬件虚拟化，两者不是同一个配置。

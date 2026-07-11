@@ -39,39 +39,36 @@ The intended operator flow is:
 `-OpenBrowser:$false` 时会自动打开浏览器。默认 `.\run.ps1` 仍只启动本地
 WebUI 服务，不会启动、还原或停止 VM。
 
-Release bundles may also expose the same entry points from `scripts\`:
+release bundle 也会在 `scripts\` 下暴露等价入口：
 
 ```powershell
 .\scripts\install.ps1
 .\scripts\run.ps1
 ```
 
-The script-folder wrappers forward to the repository-root wrappers in the same
-PowerShell process. They are aliases for packaging convenience, not a second
-configuration system. Use either root or `scripts\` form consistently in a
-session; both read `%ProgramData%\KSwordSandbox\install-state.json`, use the
-same `Sandbox__ConfigPath`, and keep secrets out of command output.
-Because the root scripts remain the implementation owner, diagnostic output and
-`RecommendedActions` can still show canonical commands such as `.\run.ps1` and
-`.\install.ps1`; those commands are expected and are equivalent to the wrapper
-form.
+`scripts\` 包装器会在同一个 PowerShell 进程中转发到仓库根 wrapper。它们只是
+packaging convenience alias，不是第二套配置系统。同一个 session 中建议固定使用根目录或
+`scripts\` 形式；两者都会读取 `%ProgramData%\KSwordSandbox\install-state.json`，
+使用同一个 `Sandbox__ConfigPath`，并避免把 secret 打到命令输出。
+因为根脚本仍是实现 owner，诊断输出和 `RecommendedActions` 仍可能显示
+`.\run.ps1`、`.\install.ps1` 等 canonical 命令；这些命令是预期输出，且与 wrapper 形式等价。
 
-## Start the WebUI
+## 启动 WebUI / Start the WebUI
 
-Default mode starts the local WebUI and loads the installed local config:
+默认模式会启动本地 WebUI，并加载已安装的本机配置：
 
 ```powershell
 .\run.ps1
 .\scripts\run.ps1
 ```
 
-Equivalent explicit form:
+等价的显式形式：
 
 ```powershell
 .\run.ps1 -Mode WebUI -Url 'http://127.0.0.1:18080' -OpenBrowser
 ```
 
-`StartWebUI` is an alias intended for menus and automation that prefer a verb:
+`StartWebUI` 是给菜单和偏好 verb 的自动化使用的 alias：
 
 ```powershell
 .\run.ps1 -Mode StartWebUI
@@ -105,35 +102,33 @@ or touching a VM:
   User/Machine environment value if one exists.
 
 The password value is never printed. Optional VT key values are never printed.
-The WebUI startup path intentionally prints only concise status, the selected
-URL, and repair hints. It does not dump a long command sequence to the operator.
+WebUI 启动路径只打印简短状态、选定 URL 和修复提示；不会向操作者输出一长串命令墙。
 
-If the requested localhost port is blocked by Windows/Hyper-V TCP port
-exclusions or another process, `run.ps1` automatically falls back to a nearby
-safe port and prints the final WebUI URL. Use `-StrictUrl` when you want port
-binding failure to stop immediately instead.
+如果请求的 localhost 端口被 Windows/Hyper-V TCP port exclusion 或其他进程占用，
+`run.ps1` 会自动 fallback 到附近可用安全端口，并打印最终 WebUI URL。需要端口绑定失败时
+立即停止，请使用 `-StrictUrl`。
 
-## Single EXE plan or live run
+## 单个 EXE 计划或 Live 运行 / Single EXE plan or live run
 
-For a non-mutating plan check:
+只做不修改 VM 的 plan 检查：
 
 ```powershell
 .\run.ps1 -Mode Plan -SamplePath 'D:\Temp\sample.exe' -DurationSeconds 30
 ```
 
-Release shortcuts for built-in samples:
+内置样本的 release shortcut：
 
 ```powershell
-# Analyze Notepad in PlanOnly mode; no VM mutation.
+# PlanOnly 分析 Notepad；不修改 VM。
 .\run.ps1 -Mode Analyze -SamplePreset Notepad
 
-# Equivalent short alias.
+# 等价短别名。
 .\run.ps1 -Mode Analyze -SamplePath notepad
 
-# Publish the harmless sample outside git, then create a PlanOnly runbook.
+# 在 git 外发布 harmless sample，然后创建 PlanOnly runbook。
 .\run.ps1 -Mode Analyze -SamplePreset HarmlessSample
 
-# Equivalent short alias.
+# 等价短别名。
 .\run.ps1 -Mode Analyze -SamplePath sample
 ```
 
@@ -142,38 +137,35 @@ Release shortcuts for built-in samples:
 `HarmlessSample` 会在 `D:\Temp\KSwordSandbox\samples\...` 或已配置的
 `RuntimeRoot` 下发布测试 EXE，输出位于仓库外。
 
-`-Mode Plan` is PlanOnly and non-mutating: it does not start, restore, stop, or
-copy into a VM, and it now skips guest payload preparation. The generated
-Hyper-V plan records missing/stale payload files plus repair suggestions such as
-running `.\scripts\Prepare-GuestPayload.ps1 -SelfContained`.
+`-Mode Plan` 是 PlanOnly 且不修改 VM：不会启动、还原、停止 VM，也不会复制文件进 VM；
+它还会跳过 guest payload preparation。生成的 Hyper-V plan 会记录 missing/stale payload
+files，并给出修复建议，例如运行 `.\scripts\Prepare-GuestPayload.ps1 -SelfContained`。
 
-For a single live Hyper-V analysis from an elevated shell:
+在 elevated shell 中运行单次 live Hyper-V 分析：
 
 ```powershell
 .\run.ps1 -Mode Analyze -SamplePath 'D:\Temp\sample.exe' -DurationSeconds 30 -Live
 ```
 
-Built-in sample live forms:
+内置样本 live 形式：
 
 ```powershell
 .\run.ps1 -Mode Analyze -SamplePreset Notepad -Live
 .\run.ps1 -Mode Analyze -SamplePreset HarmlessSample -Live
 
-# Public-MVP live smoke: real Notepad for 5 seconds.
+# Public-MVP live smoke：真实 Notepad 5 秒。
 .\run.ps1 -Mode Analyze -SamplePreset Notepad -DurationSeconds 5 -Live
 ```
 
-Live mode can restore/start/stop the configured VM and requires the installed
-golden VM/checkpoint, guest password secret, prepared guest payload, and any
-real R0 `driver.hostDriverPath`/guest test-signing setup required by your lab.
-The host must have Hyper-V PowerShell tools and BIOS/UEFI hardware
-virtualization enabled (Intel VT-x / AMD-V). This is unrelated to optional
-VirusTotal hash-only enrichment, which is configured separately with
+Live mode 可能还原/启动/停止已配置 VM，因此需要 installed golden VM/checkpoint、
+guest password secret、prepared guest payload，以及你的 lab 所需的真实 R0
+`driver.hostDriverPath` / guest test-signing 设置。宿主机必须具备 Hyper-V PowerShell
+tools，并在 BIOS/UEFI 启用硬件虚拟化（Intel VT-x / AMD-V）。这与可选的 VirusTotal
+hash-only enrichment 无关；VT key 需单独通过
 `.\install.ps1 -Mode ConfigureVTKey -PromptVTKey`.
 
-If `-Live` is omitted, `Analyze` falls back to PlanOnly and does not mutate the
-VM. This keeps accidental sample execution out of the default path while still
-making the real live command short.
+如果省略 `-Live`，`Analyze` 会回退到 PlanOnly 且不修改 VM。这样默认路径不会意外执行样本，
+同时真实 live 命令仍保持简短。
 
 When `-Live` succeeds, `run.ps1` automatically invokes
 `tools/KSword.Sandbox.PostProcess` against the collected job directory. The
@@ -187,25 +179,25 @@ single command therefore ends with:
 - `report.zh.html`
 - `report.en.html`
 
-## Rebuild reports and inspect artifacts without rerunning the VM
+## 不重跑 VM 的报告重建与 artifact 检查 / Rebuild reports and inspect artifacts without rerunning the VM
 
-Operators can rebuild reports or inspect collected artifacts after a live run
-without starting, restoring, stopping, or mutating Hyper-V:
+live run 结束后，操作者可以重建报告或检查已收集 artifacts；这些命令不会启动、还原、
+停止或修改 Hyper-V：
 
 ```powershell
-# List runtime jobs.
+# 列出 runtime jobs。
 dotnet run --project .\tools\KSword.Sandbox.JobTool\KSword.Sandbox.JobTool.csproj -- list-jobs
 
-# Show one job summary.
+# 显示单个 job 摘要。
 dotnet run --project .\tools\KSword.Sandbox.JobTool\KSword.Sandbox.JobTool.csproj -- show-job --job-id <job-guid>
 
-# Rebuild report.json/report.html/report.zh.html/report.en.html and artifact-index.json.
+# 重建 report.json/report.html/report.zh.html/report.en.html 和 artifact-index.json。
 .\scripts\Rebuild-JobReport.ps1 -JobId <job-guid>
 
-# Inspect artifacts in memory without rewriting artifact-index.json.
+# 仅在内存中检查 artifacts，不重写 artifact-index.json。
 .\scripts\Inspect-JobArtifacts.ps1 -JobId <job-guid>
 
-# Explicitly refresh artifact-index.json when desired.
+# 需要时显式刷新 artifact-index.json。
 .\scripts\Inspect-JobArtifacts.ps1 -JobId <job-guid> -WriteIndex
 ```
 
@@ -247,45 +239,41 @@ R0Collector would otherwise fail later with `deviceUnavailable` /
 using `driver.useMockCollector=true` for payload-only R0 validation, or setting
 `driver.enabled=false`.
 
-## Status
+## 状态 / Status
 
 ```powershell
 .\run.ps1 -Mode Status
 ```
 
-Status reports repository root, install state, local config, Web URL, runtime
-root, secret presence, optional VirusTotal key presence, VM/checkpoint
-presence, host Guest Agent/R0Collector payload presence, R0 driver host-path
-readiness, and whether the secret value was printed (`False`). It also prints
-`RecommendedActions` with
-human-readable fixes for common setup gaps:
+`Status` 会报告 repository root、install state、local config、Web URL、runtime root、
+secret 是否存在、可选 VirusTotal key 是否存在、VM/checkpoint 是否存在、host
+Guest Agent/R0Collector payload 是否存在、R0 driver host-path readiness，以及是否打印
+secret 值（应为 `False`）。它还会输出 `RecommendedActions`，用可读文本给出常见缺口修复：
 
-- missing VM: record the real VM with
+- 缺少 VM：用以下命令记录真实 VM：
   `.\install.ps1 -Mode Change -UpdateHyperVConfig -VmName <existing VM> -CheckpointName <checkpoint>`;
-- missing checkpoint: create or record the clean checkpoint;
-- missing guest payload: run
+- 缺少 checkpoint：创建或记录 clean checkpoint；
+- 缺少 guest payload：运行
   `.\scripts\Prepare-GuestPayload.ps1 -RepoRoot . -PayloadRoot <payloadRoot> -SelfContained`;
-- missing guest password secret: run `.\install.ps1 -Mode Install -PromptPassword`
-  or use `.\scripts\Test-HyperVReadiness.ps1 -PromptForMissingGuestPassword` for
-  a process-only check;
-- real R0 requested but no `driver.hostDriverPath`: set `-DriverHostPath`,
-  enable `driver.useMockCollector=true`, or disable `driver.enabled`.
+- 缺少 guest password secret：运行 `.\install.ps1 -Mode Install -PromptPassword`，
+  或使用 `.\scripts\Test-HyperVReadiness.ps1 -PromptForMissingGuestPassword`
+  做 process-only check；
+- 请求真实 R0 但没有 `driver.hostDriverPath`：设置 `-DriverHostPath`，
+  启用 `driver.useMockCollector=true`，或禁用 `driver.enabled`。
 
-For a fuller non-mutating preflight summary:
+需要更完整且不修改 VM 的 preflight summary：
 
 ```powershell
 .\run.ps1 -Mode CheckEnvironment
 ```
 
-`CheckEnvironment` prints the daily startup command, `ReadinessCommand`, whether
-`dotnet`, the Web project, payload-preparation script, Hyper-V E2E script,
-local config, guest secret, optional VirusTotal key, VM, checkpoint, and payload
-files are visible from this host. `CheckEnvironmentStartsVm=False` and
-`PlanOnlyStartsVm=False`; these paths are meant to be safe on another
-developer's computer before they try `-Live`.
+`CheckEnvironment` 会打印 daily startup command、`ReadinessCommand`，以及当前 host
+是否可见 `dotnet`、Web project、payload-preparation script、Hyper-V E2E script、
+local config、guest secret、可选 VirusTotal key、VM、checkpoint 和 payload files。
+`CheckEnvironmentStartsVm=False` 且 `PlanOnlyStartsVm=False`；这些路径用于在另一台
+developer 电脑尝试 `-Live` 前做安全检查。
 
-Release-readiness reviewers should also look for these fields in Status /
-CheckEnvironment output:
+release-readiness reviewer 还应在 `Status` / `CheckEnvironment` 输出中查看：
 
 - `GuestPayloadFreshnessReasons`: why the prepared Guest Agent/R0Collector
   payload is fresh, stale, or missing, plus the `Prepare-GuestPayload.ps1`
@@ -293,16 +281,14 @@ CheckEnvironment output:
 - `VirusTotalMissingKeyBehavior`: confirms that absent or failing optional
   VirusTotal hash-only enrichment is skipped quietly instead of polluting job
   logs.
-- `RequirePayloadForWebUI`: use `.\run.ps1 -RequirePayloadForWebUI` when a
-  release candidate must fail fast rather than starting WebUI with a missing
-  guest payload.
+- `RequirePayloadForWebUI`：当 release candidate 必须在 payload 缺失时 fail fast，
+  而不是继续启动 WebUI，请使用 `.\run.ps1 -RequirePayloadForWebUI`。
 
-`-WhatIf` is supported on `run.ps1`. In WebUI modes it skips payload
-preparation and dotnet startup. In `Plan` / `Analyze` modes it stops before
-delegating to `scripts\Invoke-HyperVE2E.ps1`, so no Hyper-V child script is
-launched.
+`run.ps1` 支持 `-WhatIf`。在 WebUI 模式下会跳过 payload preparation 和 dotnet startup；
+在 `Plan` / `Analyze` 模式下会在委托给 `scripts\Invoke-HyperVE2E.ps1` 之前停止，
+因此不会启动 Hyper-V 子脚本。
 
-## Relationship with install.ps1
+## 与 install.ps1 的关系 / Relationship with install.ps1
 
 - `install.ps1` is for one-time local preparation: folders, Hyper-V VM/checkpoint
   config, local config file, Web/API config env var, and guest password sync.

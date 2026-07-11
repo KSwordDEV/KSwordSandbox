@@ -6,14 +6,14 @@ using KSword.Sandbox.SmokeTests.Framework;
 namespace KSword.Sandbox.SmokeTests.Scenarios;
 
 /// <summary>
-/// Verifies the v19 artifact-backed correlation rules without live Hyper-V,
+/// Verifies artifact-backed correlation rules without live Hyper-V,
 /// signing, or external enrichment calls. Inputs are repository rules plus
 /// synthetic artifact/PCAP/process-tree/VT rows; processing checks narrow
 /// predicates and quiet-state/self-noise suppression; output is a smoke result.
 /// </summary>
 internal sealed class BehaviorRuleArtifactCorrelationScenario : ISmokeTestScenario
 {
-    private const string ExpectedVersion = "2026-07-12-v19-artifact-correlation-guards";
+    private const string ExpectedVersion = "2026-07-12-v20-high-signal-windows-behavior";
 
     private static readonly string[] RequiredRuleIds =
     [
@@ -38,7 +38,7 @@ internal sealed class BehaviorRuleArtifactCorrelationScenario : ISmokeTestScenar
         var rules = RuleEngine.LoadRuleSet(behaviorRulesPath);
         SmokeAssert.True(
             string.Equals(rules.Version, ExpectedVersion, StringComparison.OrdinalIgnoreCase),
-            "Behavior rules should carry the v19 artifact-correlation version.");
+            "Behavior rules should carry the v20 high-signal Windows behavior version while retaining v19 artifact-correlation rules.");
 
         var indexedRules = rules.Rules.ToDictionary(rule => rule.Id, StringComparer.OrdinalIgnoreCase);
         foreach (var ruleId in RequiredRuleIds)

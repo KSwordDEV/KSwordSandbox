@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
+using System.Net;
 using KSword.Sandbox.Abstractions;
 
 namespace KSword.Sandbox.Core.Network;
@@ -22,7 +23,7 @@ public sealed class NetworkSidecarEventImporter
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     private static readonly Regex EndpointFlowRegex = new(
-        "(?<src>(?:\\d{1,3}\\.){3}\\d{1,3}|\\[[0-9a-fA-F:.]+\\]):(?<srcPort>\\d{1,5})\\s*(?:->|=>|to)\\s*(?<dst>(?:\\d{1,3}\\.){3}\\d{1,3}|\\[[0-9a-fA-F:.]+\\]):(?<dstPort>\\d{1,5})",
+        "(?<src>(?:\\d{1,3}\\.){3}\\d{1,3}|\\[[0-9a-fA-F:.%]+\\]|[A-Za-z0-9_.-]+):(?<srcPort>\\d{1,5})\\s*(?:->|=>|to)\\s*(?<dst>(?:\\d{1,3}\\.){3}\\d{1,3}|\\[[0-9a-fA-F:.%]+\\]|[A-Za-z0-9_.-]+):(?<dstPort>\\d{1,5})",
         RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
 
     private static readonly Regex HttpRequestLineRegex = new(
@@ -92,7 +93,7 @@ public sealed class NetworkSidecarEventImporter
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or InvalidDataException)
         {
-            events.Add(CreateParseError(path, 0, ex.Message, source));
+            events.Add(CreateParseError(path, 0, ex.Message, source, "stream", "sidecar_stream_parse_error", "sidecar.stream"));
         }
 
         return events;
@@ -146,7 +147,7 @@ public sealed class NetworkSidecarEventImporter
         }
         catch (JsonException ex)
         {
-            events.Add(CreateParseError(path, lineNumber, ex.Message, source));
+            events.Add(CreateParseError(path, lineNumber, ex.Message, source, "jsonl", "sidecar_json_parse_error", "sidecar.line"));
         }
     }
 
@@ -195,12 +196,18 @@ public sealed class NetworkSidecarEventImporter
         var timestamp = NetworkTelemetrySchema.ParseTimestampOrDefault(
             FirstValue(fields, "timestamp", "@timestamp", "time", "ts", "start", "startTime", "event.start", "frame.time_epoch", "_source.layers.frame.frame.time_epoch"),
             DateTimeOffset.UtcNow);
-        var sourceEndpoint = SplitEndpoint(FirstValue(fields, "sourceEndpoint", "srcEndpoint", "src", "source", "clientEndpoint", "client.endpoint", "localEndpoint", "local.endpoint", "id.orig"));
-        var destinationEndpoint = SplitEndpoint(FirstValue(fields, "destinationEndpoint", "dstEndpoint", "destEndpoint", "dst", "dest", "destination", "serverEndpoint", "server.endpoint", "remoteEndpoint", "remote.endpoint", "id.resp"));
-        var sourceIp = FirstValue(fields, "sourceIp", "sourceAddress", "srcIp", "src_ip", "src_addr", "orig_h", "id.orig_h", "client.ip", "client.address", "source.ip", "source.address", "source.addr", "localAddress", "local.address", "ip.src", "ipv6.src", "_source.layers.ip.ip.src", "_source.layers.ipv6.ipv6.src") ?? sourceEndpoint.Address;
-        var destinationIp = FirstValue(fields, "destinationIp", "destinationAddress", "destIp", "dstIp", "dest_ip", "dst_ip", "dst_addr", "resp_h", "id.resp_h", "server.ip", "server.address", "destination.ip", "destination.address", "dest.ip", "dest.address", "remoteAddress", "remote.address", "ip.dst", "ipv6.dst", "_source.layers.ip.ip.dst", "_source.layers.ipv6.ipv6.dst") ?? destinationEndpoint.Address;
-        var sourcePort = NetworkTelemetrySchema.ParsePort(FirstValue(fields, "sourcePort", "srcPort", "src_port", "sport", "orig_p", "id.orig_p", "client.port", "source.port", "localPort", "local.port", "tcp.srcport", "udp.srcport", "_source.layers.tcp.tcp.srcport", "_source.layers.udp.udp.srcport")) ?? sourceEndpoint.Port;
-        var destinationPort = NetworkTelemetrySchema.ParsePort(FirstValue(fields, "destinationPort", "destPort", "dstPort", "dest_port", "dst_port", "dport", "resp_p", "id.resp_p", "server.port", "destination.port", "dest.port", "remotePort", "remote.port", "tcp.dstport", "udp.dstport", "_source.layers.tcp.tcp.dstport", "_source.layers.udp.udp.dstport")) ?? destinationEndpoint.Port;
+        var rawSourceEndpoint = FirstValue(fields, "sourceEndpoint", "srcEndpoint", "src", "source", "clientEndpoint", "client.endpoint", "localEndpoint", "local.endpoint", "id.orig");
+        var rawDestinationEndpoint = FirstValue(fields, "destinationEndpoint", "dstEndpoint", "destEndpoint", "dst", "dest", "destination", "serverEndpoint", "server.endpoint", "remoteEndpoint", "remote.endpoint", "id.resp");
+        var sourceEndpoint = SplitEndpoint(rawSourceEndpoint);
+        var destinationEndpoint = SplitEndpoint(rawDestinationEndpoint);
+        var rawSourceIp = FirstValue(fields, "sourceIp", "sourceAddress", "srcIp", "src_ip", "src_addr", "orig_h", "id.orig_h", "client.ip", "client.address", "source.ip", "source.address", "source.addr", "localAddress", "local.address", "ip.src", "ipv6.src", "_source.layers.ip.ip.src", "_source.layers.ipv6.ipv6.src");
+        var rawDestinationIp = FirstValue(fields, "destinationIp", "destinationAddress", "destIp", "dstIp", "dest_ip", "dst_ip", "dst_addr", "resp_h", "id.resp_h", "server.ip", "server.address", "destination.ip", "destination.address", "dest.ip", "dest.address", "remoteAddress", "remote.address", "ip.dst", "ipv6.dst", "_source.layers.ip.ip.dst", "_source.layers.ipv6.ipv6.dst");
+        var sourceIpValue = SplitEndpoint(rawSourceIp);
+        var destinationIpValue = SplitEndpoint(rawDestinationIp);
+        var sourceIp = sourceIpValue.Address ?? sourceEndpoint.Address;
+        var destinationIp = destinationIpValue.Address ?? destinationEndpoint.Address;
+        var sourcePort = NetworkTelemetrySchema.ParsePort(FirstValue(fields, "sourcePort", "srcPort", "src_port", "sport", "orig_p", "id.orig_p", "client.port", "source.port", "localPort", "local.port", "tcp.srcport", "udp.srcport", "_source.layers.tcp.tcp.srcport", "_source.layers.udp.udp.srcport")) ?? sourceEndpoint.Port ?? sourceIpValue.Port;
+        var destinationPort = NetworkTelemetrySchema.ParsePort(FirstValue(fields, "destinationPort", "destPort", "dstPort", "dest_port", "dst_port", "dport", "resp_p", "id.resp_p", "server.port", "destination.port", "dest.port", "remotePort", "remote.port", "tcp.dstport", "udp.dstport", "_source.layers.tcp.tcp.dstport", "_source.layers.udp.udp.dstport")) ?? destinationEndpoint.Port ?? destinationIpValue.Port;
         var protocol = FirstValue(fields, "protocol", "transportProtocol", "protocolName", "proto", "network.transport", "network.protocol", "transport", "ip_proto", "ip.protocol", "_source.layers.frame.frame.protocols");
         protocol = InferProtocol(protocol, sourcePort, destinationPort);
 
@@ -897,8 +904,18 @@ public sealed class NetworkSidecarEventImporter
         var endpointMatch = EndpointFlowRegex.Match(line);
         if (endpointMatch.Success)
         {
-            AddIfMissing(fields, "src", $"{TrimBrackets(endpointMatch.Groups["src"].Value)}:{endpointMatch.Groups["srcPort"].Value}");
-            AddIfMissing(fields, "dst", $"{TrimBrackets(endpointMatch.Groups["dst"].Value)}:{endpointMatch.Groups["dstPort"].Value}");
+            AddIfMissing(
+                fields,
+                "src",
+                NetworkTelemetrySchema.Endpoint(
+                    TrimBrackets(endpointMatch.Groups["src"].Value),
+                    NetworkTelemetrySchema.ParsePort(endpointMatch.Groups["srcPort"].Value)));
+            AddIfMissing(
+                fields,
+                "dst",
+                NetworkTelemetrySchema.Endpoint(
+                    TrimBrackets(endpointMatch.Groups["dst"].Value),
+                    NetworkTelemetrySchema.ParsePort(endpointMatch.Groups["dstPort"].Value)));
         }
 
         var httpMatch = HttpRequestLineRegex.Match(line);
@@ -990,12 +1007,26 @@ public sealed class NetworkSidecarEventImporter
             }
         }
 
+        if (IPAddress.TryParse(trimmed, out _))
+        {
+            return (trimmed, null);
+        }
+
         var lastColon = trimmed.LastIndexOf(':');
         if (lastColon > 0 &&
             trimmed.IndexOf(':') == lastColon &&
             NetworkTelemetrySchema.ParsePort(trimmed[(lastColon + 1)..]) is { } parsedPort)
         {
             return (trimmed[..lastColon], parsedPort);
+        }
+
+        if (lastColon > 0 &&
+            trimmed.IndexOf(':') != lastColon &&
+            NetworkTelemetrySchema.ParsePort(trimmed[(lastColon + 1)..]) is { } ipv6Port &&
+            IPAddress.TryParse(trimmed[..lastColon], out var parsedAddress) &&
+            parsedAddress.AddressFamily == System.Net.Sockets.AddressFamily.InterNetworkV6)
+        {
+            return (trimmed[..lastColon], ipv6Port);
         }
 
         return (trimmed, null);
@@ -1014,7 +1045,14 @@ public sealed class NetworkSidecarEventImporter
         return value.Trim().TrimStart('[').TrimEnd(']');
     }
 
-    private static SandboxEvent CreateParseError(string path, int lineNumber, string message, NetworkArtifactSource source)
+    private static SandboxEvent CreateParseError(
+        string path,
+        int lineNumber,
+        string message,
+        NetworkArtifactSource source,
+        string sidecarFormat,
+        string diagnosticCode,
+        string parserBoundary)
     {
         var data = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
@@ -1022,8 +1060,16 @@ public sealed class NetworkSidecarEventImporter
             ["eventFamily"] = "network",
             ["eventKind"] = "parse_error",
             ["lineNumber"] = lineNumber.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["sidecarLineNumber"] = lineNumber.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["sidecarFormat"] = sidecarFormat,
             ["message"] = message,
-            ["parser"] = "sidecar-jsonl"
+            ["parser"] = "sidecar-jsonl",
+            ["diagnosticCode"] = diagnosticCode,
+            ["parserBoundary"] = parserBoundary,
+            ["parseFailureStage"] = sidecarFormat == "jsonl" ? "json-line" : "sidecar-stream",
+            ["zhHint"] = lineNumber > 0
+                ? $"Sidecar 第 {lineNumber.ToString(System.Globalization.CultureInfo.InvariantCulture)} 行解析失败；请检查 JSON 引号、换行截断或 exporter 字段格式。"
+                : "Sidecar 文件读取或解析失败；请检查文件是否仍在写入、被截断或编码异常。"
         };
         NetworkTelemetrySchema.AddArtifactData(data, source);
         NetworkTelemetrySchema.ApplyHealthAndLocalization(data);

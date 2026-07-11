@@ -157,6 +157,9 @@ internal sealed class ScreenshotProbe : IGuestProbe
         else if (!string.IsNullOrWhiteSpace(result.Reason))
         {
             evt.Data["reason"] = result.Reason;
+            evt.Data["reasonCode"] = ScreenshotReasonCode(result);
+            evt.Data["reasonCategory"] = ScreenshotReasonCategory(result);
+            evt.Data["zhReason"] = ScreenshotReasonZhReason(result);
             evt.Data["zhMessage"] = "截图采集被跳过；该事件说明证据缺口，不会中断整体分析。";
             evt.Data["zhHint"] = ScreenshotReasonZhHint(result.Reason, result.DiagnosticStage);
         }
@@ -205,6 +208,7 @@ internal sealed class ScreenshotProbe : IGuestProbe
             evt.Data["artifactRelativePathStatus"] = result.Captured ? "missing" : "not-created";
             evt.Data["sizeBytesStatus"] = result.Captured ? "missing" : "not-created";
             evt.Data["sha256Status"] = result.Captured ? "missing" : "not-created";
+            evt.Data["artifactHashStatus"] = result.Captured ? "missing" : "not-created";
         }
 
         return evt;
@@ -239,8 +243,11 @@ internal sealed class ScreenshotProbe : IGuestProbe
                 ["processRole"] = context.RootProcessId is null ? "sample-context" : "sample-root-context",
                 ["expectedRelativePath"] = "screenshots/*.bmp",
                 ["artifactRelativePathStatus"] = "disabled",
+                ["artifactExists"] = "false",
+                ["artifactIntegrityState"] = "disabled",
                 ["sizeBytesStatus"] = "disabled",
                 ["sha256Status"] = "disabled",
+                ["artifactHashStatus"] = "disabled",
                 ["samplePath"] = context.SamplePath
             }
         };
@@ -272,6 +279,61 @@ internal sealed class ScreenshotProbe : IGuestProbe
         return "请结合 diagnosticStage、exceptionType 和 win32Error 判断是桌面会话、权限、GDI 还是输出路径问题。";
     }
 
+    private static string ScreenshotReasonCode(ScreenshotCaptureResult result)
+    {
+        if (result.Reason?.Contains("only implemented on Windows", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            return "notWindows";
+        }
+
+        return result.DiagnosticStage switch
+        {
+            "GetSystemMetrics" => "noVisibleDesktopSurface",
+            "GetDC" => "desktopDeviceContextUnavailable",
+            "CreateCompatibleDC" => "gdiCompatibleDcFailed",
+            "CreateCompatibleBitmap" => "gdiBitmapCreateFailed",
+            "SelectObject" => "gdiSelectObjectFailed",
+            "BitBlt" => "gdiBitBltFailed",
+            "GetDIBits" => "gdiReadPixelsFailed",
+            "platform-check" => "notWindows",
+            "capture" => "captureFailed",
+            _ => "screenshotSkipped"
+        };
+    }
+
+    private static string ScreenshotReasonCategory(ScreenshotCaptureResult result)
+    {
+        if (string.Equals(ScreenshotReasonCode(result), "notWindows", StringComparison.OrdinalIgnoreCase))
+        {
+            return "platform";
+        }
+
+        return result.DiagnosticStage switch
+        {
+            "GetSystemMetrics" => "desktop-session",
+            "GetDC" or "CreateCompatibleDC" or "CreateCompatibleBitmap" or "SelectObject" or "BitBlt" or "GetDIBits" => "windows-gdi",
+            "capture" => "capture-io",
+            _ => "unknown"
+        };
+    }
+
+    private static string ScreenshotReasonZhReason(ScreenshotCaptureResult result)
+    {
+        return ScreenshotReasonCode(result) switch
+        {
+            "notWindows" => "非 Windows guest。",
+            "noVisibleDesktopSurface" => "没有可见桌面表面。",
+            "desktopDeviceContextUnavailable" => "无法获取桌面设备上下文。",
+            "gdiCompatibleDcFailed" => "GDI 兼容 DC 创建失败。",
+            "gdiBitmapCreateFailed" => "GDI 位图创建失败。",
+            "gdiSelectObjectFailed" => "GDI 选择位图失败。",
+            "gdiBitBltFailed" => "桌面 BitBlt 复制失败。",
+            "gdiReadPixelsFailed" => "截图像素读取失败。",
+            "captureFailed" => "截图写入或捕获失败。",
+            _ => "截图采集被跳过。"
+        };
+    }
+
     /// <summary>
     /// Adds event-level size and SHA-256 metadata for a captured screenshot.
     /// Inputs are a screenshot event and artifact path; processing reads the
@@ -287,6 +349,9 @@ internal sealed class ScreenshotProbe : IGuestProbe
                 evt.Data["hashStatus"] = "missing";
                 evt.Data["artifactHashStatus"] = "missing";
                 evt.Data["artifactExists"] = "false";
+                evt.Data["artifactIntegrityState"] = "missing";
+                evt.Data["sizeBytesStatus"] = "missing";
+                evt.Data["sha256Status"] = "missing";
                 return;
             }
 
@@ -302,11 +367,16 @@ internal sealed class ScreenshotProbe : IGuestProbe
             evt.Data["hashStatus"] = "computed";
             evt.Data["artifactHashAlgorithm"] = "sha256";
             evt.Data["artifactHashStatus"] = "computed";
+            evt.Data["artifactIntegrityState"] = "verified";
+            evt.Data["sizeBytesStatus"] = "computed";
+            evt.Data["sha256Status"] = "computed";
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException or PathTooLongException)
         {
             evt.Data["hashStatus"] = "failed";
             evt.Data["artifactHashStatus"] = "failed";
+            evt.Data["artifactIntegrityState"] = "hash-failed";
+            evt.Data["sha256Status"] = "failed";
             evt.Data["artifactHashExceptionType"] = ex.GetType().FullName ?? ex.GetType().Name;
             evt.Data["artifactHashMessage"] = ex.Message;
         }

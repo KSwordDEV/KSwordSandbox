@@ -171,35 +171,43 @@ function Test-GitClean {
 }
 
 function Test-PowerShellScriptSyntax {
-    $scripts = @(
-        'run.ps1',
-        'install.ps1',
-        'scripts/run.ps1',
-        'scripts/install.ps1',
-        'scripts/package-portable.ps1',
-        'scripts/Test-RepositoryPolicy.ps1',
-        'scripts/Invoke-HyperVE2E.ps1',
-        'scripts/Start-SandboxHyperVJob.ps1',
-        'scripts/Collect-GuestOutputs.ps1',
-        'scripts/Import-HyperVJobReport.ps1',
-        'scripts/Test-HyperVReadiness.ps1',
-        'scripts/Test-ReleaseReadiness.ps1'
-    )
+    $scriptPaths = New-Object System.Collections.Generic.List[string]
+    foreach ($relative in @('run.ps1', 'install.ps1')) {
+        [void]$scriptPaths.Add((Join-Path $RepositoryRoot $relative))
+    }
+
+    $scriptsRoot = Join-Path $RepositoryRoot 'scripts'
+    if (Test-Path -LiteralPath $scriptsRoot -PathType Container) {
+        foreach ($scriptFile in @(Get-ChildItem -LiteralPath $scriptsRoot -Filter '*.ps1' -File |
+                Where-Object { $_.Name -notlike 'Sign-SandboxDriver*.ps1' } |
+                Sort-Object FullName)) {
+            [void]$scriptPaths.Add($scriptFile.FullName)
+        }
+    }
 
     $errors = New-Object System.Collections.Generic.List[object]
-    foreach ($relative in $scripts) {
-        $path = Join-Path $RepositoryRoot $relative
+    $repoPrefix = $RepositoryRoot.TrimEnd('\', '/') + [System.IO.Path]::DirectorySeparatorChar
+    $parsedCount = 0
+    foreach ($path in @($scriptPaths.ToArray() | Sort-Object -Unique)) {
+        $displayPath = if ($path.StartsWith($repoPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+            $path.Substring($repoPrefix.Length)
+        }
+        else {
+            $path
+        }
+
         if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
-            [void]$errors.Add([pscustomobject]@{ script = $relative; error = 'missing' })
+            [void]$errors.Add([pscustomobject]@{ script = $displayPath; error = 'missing' })
             continue
         }
 
         $tokens = $null
         $parseErrors = $null
         [System.Management.Automation.Language.Parser]::ParseFile($path, [ref]$tokens, [ref]$parseErrors) | Out-Null
+        $parsedCount++
         foreach ($parseError in @($parseErrors)) {
             [void]$errors.Add([pscustomobject]@{
-                    script  = $relative
+                    script  = $displayPath
                     message = $parseError.Message
                     extent  = [string]$parseError.Extent
                 })
@@ -211,7 +219,7 @@ function Test-PowerShellScriptSyntax {
             -Id 'powershell-syntax' `
             -Title 'PowerShell syntax / PowerShell 语法' `
             -Status Passed `
-            -Message "Parsed $($scripts.Count) operational PowerShell script(s)."
+            -Message "Parsed $parsedCount PowerShell script(s): root wrappers plus scripts/*.ps1 excluding signing helpers."
         return
     }
 
@@ -677,6 +685,7 @@ function Test-ReadinessNoVmMutationCommands {
 
     $checkedScripts = @(
         'scripts\Test-ReleaseReadiness.ps1',
+        'scripts\Test-RepositoryPolicy.ps1',
         'scripts\package-portable.ps1'
     )
 
@@ -761,9 +770,11 @@ function Test-DeploymentOperatorDiagnosticsContract {
             'StartsOrMutatesVm = $false'
         )
         'scripts/package-portable.ps1' = @(
+            'Assert-RuntimePackageArchiveRequiresCompletePayloads',
             'operatorDiagnostics',
             'runtimePublishEntries',
             'runtimePublishSummary',
+            'runtimeArchiveRequiresCompleteRuntimePayloads',
             'runtimePublishRootMissingRecommendedActions',
             'externalStateDiagnostics',
             'runtimePublishRootMustBeOutsideRepository',
@@ -857,6 +868,7 @@ function Test-DeploymentDocsOperatorHints {
         )
         'docs/release.md' = @(
             'runtimePublishSummary',
+            'runtimeArchiveRequiresCompleteRuntimePayloads',
             'runtimePublishRootMissingRecommendedActions',
             'externalStateDiagnostics',
             'no VM mutation',

@@ -256,6 +256,11 @@ internal static class DashboardExperiencePage
                     </div>
                     <button class="primary-cta" onclick="uploadAndPlan()" data-zh="开始分析：上传 → 提交 VM → 打开监控" data-en="Start analysis: upload → submit VM → monitor">开始分析：上传 → 提交 VM → 打开监控</button>
                     <p class="microcopy" data-copy="Upload creates a job, attempts VM analysis, and opens the live monitor" data-zh="点击后会显示浏览器真实上传进度；若 VM 启动预检失败，仍会保留已创建任务、错误原因和监控/近期任务入口，避免丢上下文。" data-en="After click, the browser shows real upload progress. If VM start preflight fails, the UI still preserves the created job, failure reason, and monitor/recent-job entry points so context is not lost.">点击后会显示浏览器真实上传进度；若 VM 启动预检失败，仍会保留已创建任务、错误原因和监控/近期任务入口，避免丢上下文。</p>
+                    <div id="uploadAutoStartNotice" class="callout" data-copy="upload/start=/api/files/upload/start; redirect=/jobs/{jobId}/live-events; current page opens monitor; no popup required" data-copy-label="upload auto-start live redirect affordance">
+                      <strong data-zh="一键接管路径" data-en="One-click handoff path">一键接管路径</strong>
+                      <p class="hint" data-zh="主按钮使用 /api/files/upload/start：保存样本、创建任务、提交后台 VM 分析，然后当前页面进入 /jobs/{jobId}/live-events；右键或点击按钮可复制这条操作路径。" data-en="The primary button uses /api/files/upload/start: save sample, create job, submit background VM analysis, then navigate the current page to /jobs/{jobId}/live-events. Right-click or use the button to copy this operation path.">主按钮使用 /api/files/upload/start：保存样本、创建任务、提交后台 VM 分析，然后当前页面进入 /jobs/{jobId}/live-events；右键或点击按钮可复制这条操作路径。</p>
+                      <button class="copy-btn" type="button" data-copy="upload/start=/api/files/upload/start; redirect=/jobs/{jobId}/live-events; current page opens monitor; no popup required" data-copy-label="one-click handoff path" data-zh="复制一键路径" data-en="Copy handoff path">复制一键路径</button>
+                    </div>
                   </div>
               </div>
               <div id="panel-path" class="tab-panel" role="tabpanel" aria-labelledby="tab-path" hidden>
@@ -1267,6 +1272,11 @@ internal static class DashboardExperiencePage
               renderSelectedSample();
               renderOperatorReadinessChips();
               setStatus(t('正在准备上传样本；浏览器会显示真实上传进度，上传完成后 Web Host 会创建任务并尝试提交后台 VM 分析。', 'Preparing to upload the sample; the browser will show real upload progress. After upload, the Web Host creates a job and attempts background VM analysis.'), false);
+              setUploadAutoStartNotice(
+                t('正在提交一键动态分析', 'Submitting one-click dynamic analysis'),
+                t('正在调用 /api/files/upload/start；完成后当前页面会自动进入实时监控页，不会打开弹窗。', 'Calling /api/files/upload/start; when complete, the current page navigates to the live monitor without a popup.'),
+                'upload/start=/api/files/upload/start; state=submitting; redirect=/jobs/{jobId}/live-events; popup=false',
+                false);
               try {
                 const form = new FormData();
                 form.append('sample', input.files[0]);
@@ -1438,6 +1448,33 @@ internal static class DashboardExperiencePage
                 <p class="button-row">
                   <a class="buttonlink" href="${escapeAttribute(href)}" data-copy="${escapeAttribute(href)}">${escapeHtml(t('打开实时监控页', 'Open live monitor'))}</a>
                   <a class="buttonlink secondary" target="_blank" rel="noopener" href="${escapeAttribute(progressHref)}" data-copy="${escapeAttribute(progressHref)}">${escapeHtml(t('打开进度页（执行流程）', 'Open progress page (execution flow)'))}</a>
+                </p>`;
+              setUploadAutoStartNotice(headline, `${detail} ${countdown}`, copy, isError, href, progressHref);
+            }
+
+            function setUploadAutoStartNotice(headline, detail, copy, isError, monitorHref, progressHref) {
+              const notice = document.getElementById('uploadAutoStartNotice');
+              if (!notice) {
+                return;
+              }
+
+              const copyValue = copy || `${headline}; ${detail}`;
+              notice.className = `callout ${isError ? 'error' : ''}`;
+              notice.setAttribute('data-copy', copyValue);
+              notice.setAttribute('data-copy-label', 'upload auto-start live redirect affordance');
+              const monitor = monitorHref
+                ? `<a class="buttonlink" href="${escapeAttribute(monitorHref)}" data-copy="${escapeAttribute(monitorHref)}">${escapeHtml(t('进入动态监控页', 'Enter dynamic monitor'))}</a>`
+                : '';
+              const progress = progressHref
+                ? `<a class="buttonlink secondary" target="_blank" rel="noopener" href="${escapeAttribute(progressHref)}" data-copy="${escapeAttribute(progressHref)}">${escapeHtml(t('打开进度页', 'Open progress page'))}</a>`
+                : '';
+              notice.innerHTML = `
+                <strong>${escapeHtml(headline)}</strong>
+                <p class="hint">${escapeHtml(detail)}</p>
+                <p class="button-row">
+                  <button class="copy-btn" type="button" data-copy="${escapeAttribute(copyValue)}" data-copy-label="upload handoff summary">${escapeHtml(t('复制一键路径', 'Copy handoff path'))}</button>
+                  ${monitor}
+                  ${progress}
                 </p>`;
             }
 

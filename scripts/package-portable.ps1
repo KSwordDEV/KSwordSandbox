@@ -715,6 +715,19 @@ function Update-PackageOperatorDiagnostics {
         missingRuntimePublishEntries = @($missingRuntimeEntries | ForEach-Object { $_.source })
         runtimePublishReady = if ($PackageKind -ne 'runtime') { $true } else { $missingRuntimeEntries.Count -eq 0 }
         completeRuntimePayloadsRequired = [bool]$RequireCompleteRuntimePayloads
+        runtimeArchiveRequiresCompleteRuntimePayloads = ($PackageKind -eq 'runtime')
+        runtimeArchiveMode = if ($PackageKind -ne 'runtime') {
+            'sourceArchive'
+        }
+        elseif ($StageOnly.IsPresent) {
+            'layoutDryRunStageOnly'
+        }
+        elseif ($RequireCompleteRuntimePayloads.IsPresent) {
+            'completeRuntimeHandoffArchive'
+        }
+        else {
+            'blockedIncompleteRuntimeArchive'
+        }
         runtimePublishRootMissingRecommendedActions = @($recommendedActions | Where-Object { $_ -match 'RuntimePublishRoot|runtime 便携包|payload' })
         preflightCommands = [ordered]@{
             releaseReadiness = '.\scripts\Test-ReleaseReadiness.ps1 -AllowDirtySource -StageSourcePackage'
@@ -747,6 +760,30 @@ function Update-PackageOperatorDiagnostics {
             'Inspect package-manifest.generated.json before handoff; verify fileInventory sha256/sizeBytes and packageDiagnostics.'
         )
         chineseGuidance = '中文提示：runtime 便携包如果没有 RuntimePublishRoot 也可做 layout dry-run；完整交付必须传入仓库外 RuntimePublishRoot 并使用 -RequireCompleteRuntimePayloads。'
+    }
+}
+
+# Assert-RuntimePackageArchiveRequiresCompletePayloads prevents accidental
+# portable-runtime archives that contain docs/scripts but no published WebUI,
+# guest tools, or JobTool payloads. Layout inspection is still available through
+# -StageOnly; a zip/archive handoff must be explicit and complete.
+function Assert-RuntimePackageArchiveRequiresCompletePayloads {
+    if ($PackageKind -ne 'runtime' -or $StageOnly.IsPresent) {
+        return
+    }
+
+    if (-not $RequireCompleteRuntimePayloads.IsPresent) {
+        throw "错误：runtime 便携包生成 zip 时必须显式传入 -RequireCompleteRuntimePayloads，避免把 layout dry-run 误交付为可运行包。下一步：完整交付请提供仓库外 -RuntimePublishRoot 并加 -RequireCompleteRuntimePayloads；只审阅 layout/safety 时请加 -StageOnly。"
+    }
+
+    if ([string]::IsNullOrWhiteSpace($RuntimePublishRoot)) {
+        throw "错误：完整 runtime 便携包要求仓库外 -RuntimePublishRoot。下一步：先发布 host-web、guest-tools、tools/job-tool、tools/postprocess 到 D:\Temp\KSwordSandbox\publish 或其他仓库外目录，再重跑 package-portable.ps1。"
+    }
+
+    $summary = $script:operatorDiagnostics.runtimePublishSummary
+    if ($null -ne $summary -and [int]$summary.missingCount -gt 0) {
+        $missing = @([string[]]@($summary.missingRequiredSources + $summary.missingOptionalSources)) -join ', '
+        throw "错误：完整 runtime 便携包缺少 published payload：$missing。下一步：补齐 RuntimePublishRoot 后重跑；package-portable.ps1 不会从仓库 bin/obj/x64 兜底复制，也不会构建、签名或操作 VM。"
     }
 }
 
@@ -1022,6 +1059,7 @@ function Write-GeneratedPackageManifest {
             VmMutation = 'not performed'
             RepositoryBuildOutput = 'not packaged'
             RuntimeBinariesSource = if ($PackageKind -eq 'runtime') { 'external RuntimePublishRoot only' } else { 'not packaged' }
+            RuntimeArchivePolicy = if ($PackageKind -eq 'runtime') { 'non-StageOnly runtime archives require -RequireCompleteRuntimePayloads and a complete external RuntimePublishRoot' } else { 'source package is source-only' }
             NetworkPublish = 'not performed'
             GitPush = 'not performed'
             DriverSigning = 'not performed'
@@ -1079,6 +1117,7 @@ $script:packageDiagnostics = [System.Collections.Generic.List[object]]::new()
 $script:operatorDiagnostics = [ordered]@{}
 
 Update-PackageOperatorDiagnostics -Manifest $manifest
+Assert-RuntimePackageArchiveRequiresCompletePayloads
 
 if (Test-Path -LiteralPath $stageRoot) {
     if (-not $Force.IsPresent) {

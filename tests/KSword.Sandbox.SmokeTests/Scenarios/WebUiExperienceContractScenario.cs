@@ -125,6 +125,9 @@ internal sealed class WebUiExperienceContractScenario : ISmokeTestScenario
         RequireContains(dashboard, "fetch('/api/files/upload/start'", "Upload flow should use the one-click upload/start endpoint.");
         RequireContains(dashboard, "redirectToLiveMonitor", "Upload flow should redirect the current page into the dynamic monitor after background start.");
         RequireContains(dashboard, "window.location.href = monitorHref", "Upload flow should navigate the current page instead of relying on a popup.");
+        RequireContains(dashboard, "uploadAutoStartNotice", "Upload UI should expose a copyable auto-start/live-redirect affordance before and during handoff.");
+        RequireContains(dashboard, "setUploadAutoStartNotice", "Upload handoff state should update the visible auto-start/live-redirect affordance.");
+        RequireContains(dashboard, "复制一键路径", "Upload handoff affordance should have an explicit Chinese-first copy button.");
         RequireAnyContains(
             dashboard,
             ["后台虚拟机分析已提交；正在进入动态监控页", "entering the dynamic monitor"],
@@ -253,6 +256,12 @@ internal sealed class WebUiExperienceContractScenario : ISmokeTestScenario
         RequireContains(liveEventsPage, "result.isQuietState || result.IsQuietState", "Live monitor should honor backend VirusTotal quiet-state metadata.");
         RequireContains(liveEventsPage, "'lookup_failed'].includes(status)) { return 'quiet';", "Live monitor should treat VirusTotal lookup failures as quiet non-blocking states.");
         RequireContains(liveEventsPage, "默认不写日志噪音", "Live monitor should make quiet VirusTotal no-log policy visible.");
+        RequireContains(liveEventsPage, "virusTotalOperatorStateText", "Live monitor should centralize clearer VirusTotal found/quiet operator-state text.");
+        RequireContains(liveEventsPage, "官方已收录", "Live monitor should clearly distinguish official VirusTotal found state in Chinese.");
+        RequireContains(liveEventsPage, "静默状态：", "Live monitor should clearly label quiet VirusTotal states in Chinese.");
+        RequireContains(liveEventsPage, "artifactLaneReadinessText", "Live monitor artifact cards should centralize lane-readiness display text.");
+        RequireContains(liveEventsPage, "artifact lane readiness", "Live monitor should expose English artifact lane readiness copy text.");
+        RequireContains(liveEventsPage, "复制 selector", "Live monitor artifact cards should expose explicit selector copy actions.");
         RequireContains(program, "DisplayText = BuildRunbookCurrentStepDisplay", "Progress SSE payload should include a safe current-step display label.");
         RequireContains(program, "StateMeaning", "Progress SSE payload should explain that command/stdout/stderr are excluded.");
         RequireContains(settingsPage, "VirusTotal API Key", "Settings page should allow operators to set the VirusTotal API key.");
@@ -263,6 +272,9 @@ internal sealed class WebUiExperienceContractScenario : ISmokeTestScenario
         RequireContains(settingsPage, "fallbackCopyText", "Settings page should support copy fallback outside secure clipboard contexts.");
         RequireContains(settingsPage, "showToast", "Settings page should show success/failure feedback for right-click copy.");
         RequireContains(settingsPage, "h1, h2, h3", "Settings page right-click copy should include headings and labels.");
+        RequireContains(settingsPage, "button.copy-btn", "Settings page should expose explicit copy buttons for important cards.");
+        RequireContains(settingsPage, "refreshSettingsCopyAffordances", "Settings page should refresh card-level copy summaries as presets change.");
+        RequireContains(settingsPage, ".card, .toggle-card", "Settings page right-click copy should cover card and toggle-card surfaces.");
         RequireContains(virusTotalSettings, "KSWORDBOX_VIRUSTOTAL_API_KEY", "VirusTotal settings should support an environment variable override.");
         RequireContains(virusTotalSettings, "Environment.SetEnvironmentVariable(EnvironmentVariableName", "VirusTotal settings should store submitted keys only in the current process.");
         RequireNotContains(virusTotalSettings, "File.WriteAllText", "VirusTotal settings should not persist API keys to disk.");

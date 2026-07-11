@@ -1052,7 +1052,8 @@ public sealed class HostArtifactIndexBuilder
         }
 
         if (relativePath.Contains("/screenshots/", StringComparison.OrdinalIgnoreCase) ||
-            relativePath.StartsWith("screenshots/", StringComparison.OrdinalIgnoreCase))
+            relativePath.StartsWith("screenshots/", StringComparison.OrdinalIgnoreCase) ||
+            IsScreenshotNamedImage(path, relativePath))
         {
             return new ArtifactClassification(
                 ArtifactKind.Screenshot,
@@ -1065,7 +1066,8 @@ public sealed class HostArtifactIndexBuilder
         if (relativePath.Contains("/memory-dumps/", StringComparison.OrdinalIgnoreCase) ||
             relativePath.StartsWith("memory-dumps/", StringComparison.OrdinalIgnoreCase) ||
             relativePath.Contains("/dumps/", StringComparison.OrdinalIgnoreCase) ||
-            relativePath.StartsWith("dumps/", StringComparison.OrdinalIgnoreCase))
+            relativePath.StartsWith("dumps/", StringComparison.OrdinalIgnoreCase) ||
+            ArtifactDescriptorFactory.IsMemoryDumpPath(path))
         {
             return new ArtifactClassification(
                 ArtifactKind.MemoryDump,
@@ -1316,6 +1318,7 @@ public sealed class HostArtifactIndexBuilder
             ["totalBytes"] = artifacts.Sum(artifact => artifact.SizeBytes).ToString(CultureInfo.InvariantCulture),
             ["duplicateArtifactCount"] = artifacts.Count(IsDuplicateArtifact).ToString(CultureInfo.InvariantCulture)
         };
+        AddCollectionDuplicateMetadata(metadata, artifacts);
         if (mimeTypes.Count > 0)
         {
             metadata["mimeTypes"] = string.Join(",", mimeTypes);
@@ -1343,7 +1346,7 @@ public sealed class HostArtifactIndexBuilder
         var reason = string.Equals(collectionName, "packet-captures", StringComparison.OrdinalIgnoreCase)
             ? "external-pcap-artifacts-indexed"
             : string.Empty;
-        AddCollectionPresentationMetadata(metadata, collectionName, first.Kind, "captured", reason, artifacts.Count);
+        AddCollectionPresentationMetadata(metadata, collectionName, first.Kind, "captured", reason, artifacts.Count(IsDownloadableArtifact));
 
         return new ArtifactCollectionDescriptor
         {
@@ -1463,7 +1466,65 @@ public sealed class HostArtifactIndexBuilder
                 .Where(reason => !string.IsNullOrWhiteSpace(reason))
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .OrderBy(reason => reason, StringComparer.OrdinalIgnoreCase));
+        metadata["artifactRejectionsJson"] = JsonSerializer.Serialize(
+            rejections.Select(rejection => new
+            {
+                rejection.CollectionName,
+                Kind = rejection.Kind == ArtifactKind.Unknown ? string.Empty : rejection.Kind.ToString(),
+                rejection.Name,
+                rejection.AttemptedSelector,
+                rejection.Reason,
+                rejection.HostRelativeGuestRoot
+            }),
+            JsonOptions);
         metadata["zhRejectionHint"] = "Host 已拒绝不安全、缺失或不可下载的 guest manifest 产物引用；只有 job 输出目录下的已索引相对路径可以下载。";
+    }
+
+    private static void AddCollectionDuplicateMetadata(
+        Dictionary<string, string> metadata,
+        IReadOnlyList<ArtifactDescriptor> artifacts)
+    {
+        var duplicateGroups = artifacts
+            .Where(artifact => TryReadPositiveInt(MetadataValue(artifact.Metadata, "duplicateGroupCount"), out var count) && count > 1)
+            .GroupBy(artifact => FirstNonEmpty(MetadataValue(artifact.Metadata, "duplicateGroupId"), MetadataValue(artifact.Metadata, "duplicateGroupKey")), StringComparer.OrdinalIgnoreCase)
+            .Where(group => !string.IsNullOrWhiteSpace(group.Key))
+            .OrderBy(group => group.Key, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (duplicateGroups.Count == 0)
+        {
+            AddIfMissing(metadata, "duplicateDiagnosticsAvailable", "false");
+            AddIfMissing(metadata, "duplicateGroupCount", "0");
+            AddIfMissing(metadata, "hasDuplicateArtifacts", "false");
+            return;
+        }
+
+        var summaries = duplicateGroups
+            .Select(group =>
+            {
+                var members = group
+                    .OrderBy(artifact => artifact.RelativePath, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+                var primary = members.FirstOrDefault(artifact =>
+                    string.Equals(MetadataValue(artifact.Metadata, "duplicateRole"), "primary", StringComparison.OrdinalIgnoreCase)) ?? members[0];
+                return new
+                {
+                    GroupId = group.Key,
+                    GroupKey = FirstNonEmpty(MetadataValue(primary.Metadata, "duplicateGroupKey"), group.Key),
+                    Count = members.Count,
+                    PrimarySelector = primary.RelativePath,
+                    PrimarySafeLink = primary.SafeLink,
+                    MemberSelectors = members.Select(artifact => artifact.RelativePath).ToList()
+                };
+            })
+            .ToList();
+
+        metadata["duplicateDiagnosticsAvailable"] = "true";
+        metadata["duplicateGroupCount"] = summaries.Count.ToString(CultureInfo.InvariantCulture);
+        metadata["hasDuplicateArtifacts"] = "true";
+        metadata["duplicateGroupIds"] = string.Join(",", summaries.Select(summary => summary.GroupId));
+        metadata["duplicatePrimarySelectors"] = string.Join(",", summaries.Select(summary => summary.PrimarySelector));
+        metadata["duplicateGroupSummariesJson"] = JsonSerializer.Serialize(summaries, JsonOptions);
     }
 
     private static void AddCollectionPresentationMetadata(
@@ -1875,6 +1936,12 @@ public sealed class HostArtifactIndexBuilder
         AddIfMissing(metadata, "downloadSafeLink", artifact.SafeLink);
         AddIfMissing(metadata, "safeRelativeSelector", artifact.RelativePath);
         AddIfMissing(metadata, "downloadAvailable", "true");
+        AddIfMissing(metadata, "downloadResolutionState", "available");
+        AddIfMissing(metadata, "downloadReadiness", "host-file-present");
+        AddIfMissing(metadata, "downloadRejectionCode", "none");
+        AddIfMissing(metadata, "downloadSelectorKind", "relativePath");
+        AddIfMissing(metadata, "selectorSafety", "normalized-relative-indexed");
+        AddIfMissing(metadata, "streamAuthority", "host-artifact-index");
         AddIfMissing(metadata, "selectorEncoding", "path-segment-url-encoded-safeLink");
         AddIfMissing(metadata, "selectorFields", "relativePath,safeLink,importPath,downloadSelector,downloadSafeLink");
         AddIfMissing(metadata, "downloadSecurityPolicy", "server-indexed-relative-selector");
@@ -2044,11 +2111,38 @@ public sealed class HostArtifactIndexBuilder
         return null;
     }
 
+    private static bool IsScreenshotNamedImage(string path, string relativePath)
+    {
+        if (!ArtifactDescriptorFactory.IsScreenshotImagePath(path))
+        {
+            return false;
+        }
+
+        if (relativePath.Contains("/artifacts/dropped-files/", StringComparison.OrdinalIgnoreCase) ||
+            relativePath.StartsWith("artifacts/dropped-files/", StringComparison.OrdinalIgnoreCase) ||
+            relativePath.Contains("/dropped-files/", StringComparison.OrdinalIgnoreCase) ||
+            relativePath.StartsWith("dropped-files/", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var fileName = Path.GetFileNameWithoutExtension(path);
+        return fileName.Contains("screenshot", StringComparison.OrdinalIgnoreCase) ||
+            fileName.Contains("screen", StringComparison.OrdinalIgnoreCase) ||
+            fileName.Contains("desktop", StringComparison.OrdinalIgnoreCase) ||
+            fileName.Contains("capture", StringComparison.OrdinalIgnoreCase);
+    }
+
     private static bool HasMetadataValue(IDictionary<string, string>? metadata, string key)
     {
         return metadata is not null &&
             metadata.TryGetValue(key, out var value) &&
             !string.IsNullOrWhiteSpace(value);
+    }
+
+    private static bool TryReadPositiveInt(string? value, out int count)
+    {
+        return int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out count) && count > 0;
     }
 
     private static Dictionary<string, string> CopyMetadata(IDictionary<string, string>? metadata)

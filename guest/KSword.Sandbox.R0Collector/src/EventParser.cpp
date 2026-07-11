@@ -1219,6 +1219,21 @@ void AddDriverNoiseClassificationFields(
     const bool sampleBehaviorCandidate = !attribution.collectorNoise && !attribution.selfNoise;
 
     data.AddUtf8("noiseClass", noiseClass);
+    data.AddUtf8(
+        "noiseScope",
+        attribution.collectorNoise
+            ? "collector-infrastructure"
+            : (attribution.selfNoise ? "producer-self-noise" : "none"));
+    data.AddUtf8(
+        "noiseKind",
+        attribution.collectorNoise
+            ? "collector-self-noise"
+            : (attribution.selfNoise ? "producer-self-noise" : "none"));
+    data.AddUtf8(
+        "noiseSource",
+        attribution.collectorNoise
+            ? "collector-path-or-pid"
+            : (attribution.selfNoise ? "driver-producer-flag" : "not-noise"));
     data.AddUtf8("selfNoiseClass", selfNoiseClass);
     data.AddUtf8(
         "collectorNoiseClass",
@@ -1227,8 +1242,14 @@ void AddDriverNoiseClassificationFields(
         "noiseAction",
         attribution.suppressed ? "suppress" : "emit");
     data.AddUtf8(
+        "noiseDisposition",
+        attribution.suppressed
+            ? "suppressed-before-jsonl"
+            : (sampleBehaviorCandidate ? "emitted-as-sample-or-system-candidate" : "emitted-for-audit-only"));
+    data.AddUtf8(
         "noiseReasons",
         attribution.selfNoiseReason.empty() ? "none" : attribution.selfNoiseReason);
+    data.AddUtf8("noiseFieldSet", kJsonlNoiseFieldSet);
     data.AddBool("sampleBehaviorCandidate", sampleBehaviorCandidate);
     data.AddBool("collectionDiagnostic", false);
     data.AddBool("collectionNoise", attribution.collectorNoise);
@@ -1246,6 +1267,13 @@ void AddDriverNoiseClassificationFields(
             : (attribution.selfNoise
                 ? L"该行由 producer 标记为自噪声，不应直接计入样本行为。"
                 : L"该行未命中 Collector 自噪声规则，可作为样本或系统行为候选证据。"));
+    data.AddWide(
+        "zhOperatorHint",
+        attribution.collectorNoise
+            ? L"运营提示：Collector/KSword 基础设施噪声只用于审计采集链路，不要作为样本行为结论。"
+            : (attribution.selfNoise
+                ? L"运营提示：producer 自噪声需要和 sampleBehaviorCandidate=false 一起处理，避免误报。"
+                : L"运营提示：该行可进入样本/系统行为候选，但仍需结合进程树、文件、注册表和网络上下文判断。"));
 }
 
 // Input: Process payload flags.
@@ -1530,6 +1558,65 @@ std::string NetworkFlowKey(
     const std::string source = direction == KswSandboxNetworkDirectionInbound ? remoteEndpoint : localEndpoint;
     const std::string destination = direction == KswSandboxNetworkDirectionInbound ? localEndpoint : remoteEndpoint;
     return protocolName + "|" + source + "|" + destination;
+}
+
+// Input: Network flow key and service-hint label already derived from endpoint
+// metadata.
+// Processing: Emits explicit L7/PCAP boundary fields so DNS/HTTP/TLS candidates
+// remain endpoint/port evidence and do not look like payload parsing verdicts.
+// Return: No return value; builder is mutated.
+void AddNetworkProtocolBoundaryData(
+    JsonDataObjectBuilder& data,
+    const std::string& flowKey,
+    const std::string& serviceHint) {
+    data.AddBool("protocolPayloadParsed", false);
+    data.AddUtf8("protocolParserSource", "r0-ale-endpoint-only");
+    data.AddUtf8("protocolPayloadSource", "none-r0-endpoint-metadata-only");
+    data.AddBool("pcapCorrelationRequired", true);
+    data.AddUtf8("pcapCorrelationStatus", "required-unmatched-in-r0-row");
+    data.AddUtf8("pcapFlowKeyCandidate", flowKey);
+    data.AddUtf8("pcapCorrelationKey", flowKey);
+    data.AddUtf8("pcapCorrelationKeySource", "flowKey");
+    data.AddUtf8("pcapExpectedRecordTypes", "pcap.flow|pcap.dns|pcap.http|pcap.tls");
+    data.AddBool("pcapDnsDetailsAvailable", false);
+    data.AddBool("pcapHttpDetailsAvailable", false);
+    data.AddBool("pcapTlsDetailsAvailable", false);
+    data.AddUtf8(
+        "pcapBoundaryPolicy",
+        "R0 rows provide endpoint/port/PID/layer evidence; L7 names and URLs require PCAP/browser/sidecar rows");
+    data.AddUtf8("networkProtocolBoundaryFields", kNetworkProtocolBoundaryFields);
+    data.AddUtf8(
+        "networkProtocolParserBoundary",
+        "R0 WFP/ALE rows do not parse DNS names, HTTP Host/URI, or TLS SNI; correlate PCAP/browser/sidecar rows");
+    data.AddUtf8("dnsQueryName", "");
+    data.AddBool("dnsQueryNameAvailable", false);
+    data.AddUtf8("dnsQueryNameSource", "pcap-required-not-r0");
+    data.AddUtf8(
+        "dnsBoundary",
+        serviceHint == "dns" ? "candidate-port-only-name-required-from-pcap" : "not-dns-candidate");
+    data.AddUtf8("httpHost", "");
+    data.AddUtf8("httpUri", "");
+    data.AddUtf8("httpMethod", "");
+    data.AddBool("httpHostAvailable", false);
+    data.AddBool("httpUriAvailable", false);
+    data.AddBool("httpMethodAvailable", false);
+    data.AddUtf8("httpMetadataSource", "pcap-or-browser-required-not-r0");
+    data.AddUtf8(
+        "httpBoundary",
+        serviceHint == "http" ? "candidate-port-only-host-uri-required-from-pcap" : "not-http-candidate");
+    data.AddUtf8("tlsSni", "");
+    data.AddBool("tlsSniAvailable", false);
+    data.AddBool("tlsCertificateAvailable", false);
+    data.AddUtf8("tlsMetadataSource", "pcap-required-not-r0");
+    data.AddUtf8(
+        "tlsBoundary",
+        serviceHint == "tls" ? "candidate-port-only-sni-cert-required-from-pcap" : "not-tls-candidate");
+    data.AddWide(
+        "zhPcapCorrelationHint",
+        L"该 R0 网络行只提供端点/端口/PID/layer 证据；DNS 名称、HTTP Host/URI、TLS SNI/证书需查看 PCAP、浏览器或 sidecar 行。");
+    data.AddWide(
+        "zhNetworkBoundaryHint",
+        L"不要把 serviceHint 或 candidate 布尔值解读为协议载荷已解析；它们只是端口/协议候选标签。");
 }
 
 // Input: ASCII text already produced from numeric network metadata.
@@ -2704,6 +2791,7 @@ bool AddNetworkPayloadData(
     data->AddBool("serviceHintDns", dnsCandidate);
     data->AddBool("serviceHintHttp", httpCandidate);
     data->AddBool("serviceHintTls", tlsCandidate);
+    AddNetworkProtocolBoundaryData(*data, flowKey, serviceHint);
     data->AddUnsigned("layerId", networkPayload->LayerId);
     data->AddUtf8("layerIdHex", HexUnsignedLongLong(networkPayload->LayerId, 4));
     data->AddUnsigned("calloutId", networkPayload->CalloutId);

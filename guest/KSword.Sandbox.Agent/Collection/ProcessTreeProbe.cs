@@ -711,13 +711,39 @@ internal sealed class ProcessTreeProbe : IGuestProbe
             depth is not null ||
             !string.IsNullOrWhiteSpace(lineage);
         var isChild = rootProcessId is not null && !isRoot && isTreeNode;
+        var isDirectChild = isChild && depth == 1;
+        var treeNodeRole = isRoot
+            ? "root"
+            : isDirectChild
+                ? "direct-child"
+                : isChild
+                    ? "descendant"
+                    : "process-snapshot";
 
         evt.Data["isRootProcess"] = ToLowerInvariantString(isRoot);
         evt.Data["isChildProcess"] = ToLowerInvariantString(isChild);
         evt.Data["isDescendantOfRoot"] = ToLowerInvariantString(isChild);
+        evt.Data["isDirectChildOfRoot"] = ToLowerInvariantString(isDirectChild);
         evt.Data["processTreeNode"] = ToLowerInvariantString(isTreeNode);
+        evt.Data["processTreeRole"] = treeNodeRole;
+        evt.Data["treeNodeRole"] = treeNodeRole;
+        evt.Data["rootAncestorProcessId"] = rootProcessId?.ToString(CultureInfo.InvariantCulture) ?? string.Empty;
+        if (depth is not null)
+        {
+            evt.Data["rootRelativeDepth"] = depth.Value.ToString(CultureInfo.InvariantCulture);
+            evt.Data["descendantDepth"] = depth.Value.ToString(CultureInfo.InvariantCulture);
+        }
+
+        if (process.ParentProcessId is not null)
+        {
+            evt.Data["treeParentProcessId"] = process.ParentProcessId.Value.ToString(CultureInfo.InvariantCulture);
+        }
+
         evt.Data["treeNodeState"] = snapshotState;
         evt.Data["treeLineageStatus"] = string.IsNullOrWhiteSpace(lineage) ? "unavailable" : "stable";
+        evt.Data["lineageStabilityReason"] = string.IsNullOrWhiteSpace(lineage)
+            ? "root-relative-lineage-unavailable"
+            : "root-relative-lineage-derived-from-parent-pids";
         evt.Data["rootProcessIdStatus"] = rootProcessId is null ? "unavailable-before-sample-start" : "available";
         evt.Data["processTreeCoverageState"] = isMissing
             ? "tracked-process-missing"
@@ -1080,12 +1106,19 @@ internal sealed class ProcessTreeProbe : IGuestProbe
         evt.Data["isRootProcess"] = "true";
         evt.Data["isChildProcess"] = "false";
         evt.Data["isDescendantOfRoot"] = "false";
+        evt.Data["isDirectChildOfRoot"] = "false";
         evt.Data["processTreeNode"] = "true";
+        evt.Data["processTreeRole"] = "root";
+        evt.Data["treeNodeRole"] = "root";
+        evt.Data["rootAncestorProcessId"] = rootProcessId.ToString(CultureInfo.InvariantCulture);
+        evt.Data["rootRelativeDepth"] = "0";
+        evt.Data["descendantDepth"] = "0";
         evt.Data["treeNodeState"] = "missing";
         evt.Data["treeScope"] = "sample-root-tree";
         evt.Data["lineageStable"] = "true";
         evt.Data["lineageIncludesRoot"] = "true";
         evt.Data["treeLineageStatus"] = "stable";
+        evt.Data["lineageStabilityReason"] = "root-relative-lineage-derived-from-launch-context";
         evt.Data["rootProcessIdStatus"] = "available";
         evt.Data["processTreeCompleteness"] = "partial-root-missing-visible-descendants-only";
         evt.Data["childSummary"] = "none";
@@ -1204,12 +1237,19 @@ internal sealed class ProcessTreeProbe : IGuestProbe
         evt.Data["isRootProcess"] = "true";
         evt.Data["isChildProcess"] = "false";
         evt.Data["isDescendantOfRoot"] = "false";
+        evt.Data["isDirectChildOfRoot"] = "false";
         evt.Data["processTreeNode"] = "true";
+        evt.Data["processTreeRole"] = "root";
+        evt.Data["treeNodeRole"] = "root";
+        evt.Data["rootAncestorProcessId"] = tree.RootProcessId.ToString(CultureInfo.InvariantCulture);
+        evt.Data["rootRelativeDepth"] = "0";
+        evt.Data["descendantDepth"] = "0";
         evt.Data["treeNodeState"] = tree.RootVisible ? "present" : "missing";
         evt.Data["treeScope"] = "sample-root-tree";
         evt.Data["lineageStable"] = "true";
         evt.Data["lineageIncludesRoot"] = "true";
         evt.Data["treeLineageStatus"] = "stable";
+        evt.Data["lineageStabilityReason"] = "root-relative-lineage-derived-from-summary";
         evt.Data["rootProcessIdStatus"] = "available";
         evt.Data["zhProcessRole"] = "根进程";
         var copyText = CreateProcessTreeCopyText(

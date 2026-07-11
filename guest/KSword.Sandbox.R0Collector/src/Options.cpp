@@ -299,8 +299,8 @@ void PrintUsage(const wchar_t* programName) {
         << L"      --mock                   Emit synthetic rows without opening a device / \u53d1\u51fa\u5408\u6210\u884c\uff0c\u4e0d\u6253\u5f00\u8bbe\u5907\n"
         << L"      --synthetic              Alias for --mock / --mock \u522b\u540d\n"
         << L"      --self-test              Alias for --mock / --mock \u522b\u540d\n"
-        << L"      --stress-count <n>       Emit n synthetic contiguous driver.file stress rows; implies --mock / \u53d1\u51fa n \u6761\u5408\u6210\u538b\u6d4b\u884c\uff0c\u9690\u542b --mock\n"
-        << L"      --inject-jsonl-noise     In mock/stress mode also emit blank and malformed JSONL rows / mock/stress \u6a21\u5f0f\u4e2d\u989d\u5916\u53d1\u51fa\u7a7a\u884c\u548c\u7578\u5f62 JSONL \u884c\n"
+        << L"      --stress-count <n>       Emit n synthetic contiguous driver.file stress rows; implies --mock / \u53d1\u51fa n \u6761\u5408\u6210\u538b\u6d4b\u884c\uff0c\u9690\u542b --mock\uff1b\u53e6\u9644\u52a0 6 \u6761 DNS/HTTP/TLS/\u6a2a\u5411\u79fb\u52a8/\u4e0b\u8f7d\u6267\u884c/\u8fdb\u7a0b\u8840\u7f18\u8bed\u4e49 companion \u884c\uff0c\u4e0d\u8ba1\u5165 stress row count\n"
+        << L"      --inject-jsonl-noise     In mock/stress mode also emit blank, malformed, and valid extra-field driver.network rows / mock/stress \u6a21\u5f0f\u4e2d\u989d\u5916\u53d1\u51fa\u7a7a\u884c\u3001\u7578\u5f62 JSONL \u884c\u548c\u5408\u6cd5\u989d\u5916\u5b57\u6bb5 driver.network \u884c\n"
         << L"  -h, --help                   Show this help text / \u663e\u793a\u5e2e\u52a9\u6587\u672c\n";
 }
 

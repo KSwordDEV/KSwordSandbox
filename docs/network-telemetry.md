@@ -35,6 +35,9 @@ Host 只在 collected guest output root 下解析 manifest `relativePath` / `imp
 
 损坏或暂不支持的 capture 会生成 `pcap.parse_error` 和一条 `status=parse_error` 的
 `network.import.summary`；这不会让整个 guest event import 失败。
+解析边界诊断会稳定携带 `diagnosticCode`、`parserBoundary`、`parseFailureStage`、
+`byteOffset`、`expectedBytes`、`actualBytes`（可用时）和中文 `zhHint`，用于区分
+PCAP global header、packet header/payload、PCAPNG block body/trailer 等截断或长度异常。
 
 ## Guest 抓包诊断与导入证据 / Guest capture diagnostics vs imported evidence
 
@@ -102,13 +105,17 @@ Sidecar JSONL/log rows 会直接归一化到标准事件类型。损坏 JSON lin
   - `sourceArtifactPath`
   - `sourceArtifactRelativePath`
   - `artifactRelativePath`, `downloadSelector`
+  - `sourceArtifactSelector`, `artifactSelector`, `sourceDownloadSelector`
   - `sourceArtifactSizeBytes`
   - `sourceArtifactSha256`
   - PCAP-native rows 暴露 `pcapSourceArtifactRelativePath`、
-    `pcapSourceArtifactName`、`pcapSourceArtifactSizeBytes` 和
-    `pcapSourceArtifactSha256`。相邻 sidecars 保留自己的 `sourceArtifactRelativePath`，
-    同时用 `pcapSourceArtifactRelativePath` / `sourcePcapArtifactRelativePath`
-    保留 parent capture。
+    `pcapSourceArtifactName`、`pcapSourceArtifactSelector`、`pcapDownloadSelector`、
+    `pcapSourceArtifactSizeBytes` 和 `pcapSourceArtifactSha256`。相邻 sidecars
+    保留自己的 `sourceArtifactRelativePath` / `sourceArtifactSha256`，同时用
+    `pcapSourceArtifactRelativePath` / `sourcePcapArtifactRelativePath`、
+    `pcapSourceArtifactSha256` / `sourcePcapArtifactSha256` 和
+    `pcapDownloadSelector` / `sourcePcapDownloadSelector` 保留 parent capture。
+    Guest-root aggregate import 会对同目录同 basename 的 sidecar 自动关联 sibling PCAP。
   - `collectionName`
   - `evidenceRole`
   - `importMode`
@@ -167,6 +174,9 @@ Sidecar 专属字段：
 - `sidecarFormat`: `jsonl` 或 `log`
 - `parser=sidecar-jsonl`
 - `originalEventType`: 输入 row 暴露时记录
+- Parse error rows 额外暴露 `diagnosticCode`、`parserBoundary`、`parseFailureStage`
+  和中文 `zhHint`。JSONL 行级错误通常是
+  `diagnosticCode=sidecar_json_parse_error`、`parserBoundary=sidecar.line`。
 
 Log sidecar（日志 sidecar）是弱解析：importer 识别带引号或不带引号的 `key=value` / `key: value` token、
 endpoint arrow、HTTP request line、DNS query token 和 TLS SNI token。无法识别的普通 log line

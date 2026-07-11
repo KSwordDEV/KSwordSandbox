@@ -132,6 +132,7 @@ public sealed class NetworkArtifactEventImporter
                 }
 
                 var source = NetworkArtifactSource.FromDescriptor(descriptor, importRoot);
+                source = AttachAdjacentPcapMetadata(source, importRoot);
                 if (File.Exists(source.FullPath) && IsUnderRoot(source.FullPath, importRoot) && seen.Add(source.FullPath))
                 {
                     yield return new NetworkImportCandidate(source, "manifest");
@@ -147,14 +148,17 @@ public sealed class NetworkArtifactEventImporter
             var fullPath = Path.GetFullPath(path);
             if (seen.Add(fullPath))
             {
+                var isPacketCapture = ArtifactDescriptorFactory.IsPacketCapturePath(fullPath);
                 yield return new NetworkImportCandidate(
-                    NetworkArtifactSource.FromPath(
-                        fullPath,
-                        importRoot,
-                        ArtifactDescriptorFactory.IsPacketCapturePath(fullPath) ? ArtifactKind.PacketCapture.ToString() : ArtifactKind.Log.ToString(),
-                        ArtifactDescriptorFactory.IsPacketCapturePath(fullPath) ? "packet-captures" : "network-sidecars",
-                        ArtifactDescriptorFactory.IsPacketCapturePath(fullPath) ? "packet-capture" : "network-telemetry-sidecar",
-                        ArtifactDescriptorFactory.IsPacketCapturePath(fullPath) ? "external-artifact" : "sidecar-artifact"),
+                    AttachAdjacentPcapMetadata(
+                        NetworkArtifactSource.FromPath(
+                            fullPath,
+                            importRoot,
+                            isPacketCapture ? ArtifactKind.PacketCapture.ToString() : ArtifactKind.Log.ToString(),
+                            isPacketCapture ? "packet-captures" : "network-sidecars",
+                            isPacketCapture ? "packet-capture" : "network-telemetry-sidecar",
+                            isPacketCapture ? "external-artifact" : "sidecar-artifact"),
+                        importRoot),
                     "filesystem");
             }
         }
@@ -194,6 +198,63 @@ public sealed class NetworkArtifactEventImporter
     {
         return ArtifactDescriptorFactory.IsPacketCapturePath(path) ||
             NetworkSidecarEventImporter.IsLikelyNetworkSidecarPath(path);
+    }
+
+    private static NetworkArtifactSource AttachAdjacentPcapMetadata(NetworkArtifactSource source, string importRoot)
+    {
+        if (ArtifactDescriptorFactory.IsPacketCapturePath(source.FullPath))
+        {
+            return source;
+        }
+
+        var parentPcapPath = FindAdjacentPacketCapture(source.FullPath);
+        if (string.IsNullOrWhiteSpace(parentPcapPath))
+        {
+            return source;
+        }
+
+        var metadata = source.Metadata is null
+            ? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            : new Dictionary<string, string>(source.Metadata, StringComparer.OrdinalIgnoreCase);
+        var parentRelativePath = ArtifactDescriptorFactory.SafeRelativePath(importRoot, parentPcapPath);
+        metadata["pcapSourceArtifactPath"] = parentPcapPath;
+        metadata["pcapSourceArtifactName"] = Path.GetFileName(parentPcapPath);
+        metadata["pcapSourceArtifactRelativePath"] = parentRelativePath;
+        metadata["pcapArtifactRelativePath"] = parentRelativePath;
+        metadata["pcapSourceArtifactSelector"] = parentRelativePath;
+        metadata["pcapDownloadSelector"] = parentRelativePath;
+        metadata["sourcePcapArtifactPath"] = parentPcapPath;
+        metadata["sourcePcapArtifactName"] = Path.GetFileName(parentPcapPath);
+        metadata["sourcePcapArtifactRelativePath"] = parentRelativePath;
+        metadata["sourcePcapArtifactSelector"] = parentRelativePath;
+        metadata["sourcePcapDownloadSelector"] = parentRelativePath;
+        return source with { Metadata = metadata };
+    }
+
+    private static string? FindAdjacentPacketCapture(string sidecarPath)
+    {
+        var directory = Path.GetDirectoryName(sidecarPath);
+        if (string.IsNullOrWhiteSpace(directory) || !Directory.Exists(directory))
+        {
+            return null;
+        }
+
+        var sidecarBase = Path.GetFileNameWithoutExtension(sidecarPath);
+        var captures = Directory.EnumerateFiles(directory)
+            .Where(ArtifactDescriptorFactory.IsPacketCapturePath)
+            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        foreach (var capture in captures)
+        {
+            var captureBase = Path.GetFileNameWithoutExtension(capture);
+            if (sidecarBase.StartsWith(captureBase + ".", StringComparison.OrdinalIgnoreCase) ||
+                sidecarBase.Equals(captureBase, StringComparison.OrdinalIgnoreCase))
+            {
+                return Path.GetFullPath(capture);
+            }
+        }
+
+        return captures.Count == 1 ? Path.GetFullPath(captures[0]) : null;
     }
 
     private static bool IsCanonicalDriverEventsPath(string path)

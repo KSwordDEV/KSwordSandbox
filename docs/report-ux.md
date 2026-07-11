@@ -42,7 +42,7 @@ v1 报告必须在 live demo 中对操作者有用，而不只是技术上完整
   不是沙箱观察到的恶意行为。
 - Behavior graph / IOC summary / 行为图谱与 IOC 摘要：使用稳定、弱交互的图谱视图，
   从 normalized telemetry 推导 process-to-file、process-to-registry、process-to-network
-  和 process-to-artifact edges。必须包含 Evidence story board、Top behavior chain、
+  和 process-to-artifact edges。必须包含 Narrative spine、Evidence story board、Top behavior chain、
   Evidence graph edges 和 IOC summary panels，使最终报告像分析员可读的沙箱报告，
   而不是纯 raw table。Evidence story board 应在密集事件表之前，把 dropped files、
   screenshots、memory dumps、PCAP/network、process lineage 和 R0 health/noise boundary
@@ -159,9 +159,13 @@ plain diagnostic dump. The visual contract is:
   required to reveal evidence.
 - The Behavior graph / IOC summary section should remain static HTML/CSS. It
   should prefer stable weak interactions over fragile canvas/SVG rendering:
-  an Evidence story board, process graph nodes, a bounded Top behavior chain,
-  Evidence graph edges, and IOC summary panels for network, file/path,
-  registry, and artifact indicators.
+  a compact Narrative spine, an Evidence story board, process graph nodes, a
+  bounded Top behavior chain, Evidence graph edges, and IOC summary panels for
+  network, file/path, registry, and artifact indicators.
+- The Narrative spine should be a four-step, left-to-right compact evidence
+  narrative before dense graph tables: execution root, storage changes, network
+  scope, and artifact proof. It must stay bounded, copyable, weakly
+  interactive, and Chinese-first in `report.html` / `report.zh.html`.
 - The Evidence story board should be summary-first and weakly interactive:
   each lane must show a compact status badge, a short analyst narrative,
   3-8 metric chips, and a native collapsed evidence block. Required lanes are

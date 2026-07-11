@@ -9,18 +9,18 @@
 
 这些百分比衡量“当前开源 MVP 可务实做到的范围”，不包含云端多租户、海量样本库、完整家族归因或默认真实 R0 驱动签名：
 
-- 总体 v1 交付链路：**88%**
+- 总体 v1 交付链路：**89%**
 - WebUI 上传/选择、自动启动、实时监控页（live monitor）：**95%**
 - Hyper-V runbook / host orchestration：**90%**
-- Guest Agent R3 采集：**90%**
-- R0Collector 用户态采集链：**87%**
+- Guest Agent R3 采集：**91%**
+- R0Collector 用户态采集链：**88%**
 - R0 driver / kernel producer：**76%**
-- 静态分析与行为规则：**93%**
+- 静态分析与行为规则：**94%**
 - 网络 sidecar / PCAP 元数据：**86%**
-- Artifact import / host index / download：**90%**
-- 中英 HTML 报告：**93%**
+- Artifact import / host index / download：**92%**
+- 中英 HTML 报告：**94%**
 - VirusTotal hash-only enrichment：**90%**
-- 发布/打包/仓库策略：**93%**
+- 发布/打包/仓库策略：**94%**
 - 文档与操作者 onboarding：**89%**
 
 ## 已具备的交付证据

@@ -137,6 +137,7 @@ internal static class LiveEventsPage
             .vt-card .vt-details { border:1px dashed rgba(67,160,255,.32); margin-top:10px; padding:9px; }
             .vt-card .vt-details summary { color:#075985; cursor:pointer; font-weight:900; }
             .vt-card .vt-quiet-explainer { background:#f8fafc; border-color:#cbd5e1; }
+            .vt-state-banner { background:rgba(255,255,255,.72); border:1px solid rgba(148,163,184,.28); margin:8px 0; padding:8px; }
             .vt-state-row { display:flex; flex-wrap:wrap; gap:6px; margin:10px 0; }
             .vt-danger { background:#fff7f7; border-color:#fca5a5; }
             .vt-danger .vt-score { color:#b91c1c; }
@@ -160,7 +161,7 @@ internal static class LiveEventsPage
             .report-ready { background:transparent; border-color:var(--line); }
 
             /* Square, flat operator theme: keep visual nesting shallow. */
-            section, article, .metric, .pill, button, a.button, a.buttonlink, input, code, pre, .pathbox, .callout, .report-notice, .report-entry, .workspace-tab, .tab-button, .tab-panel, details, .progress-box, .progress-bar, .progress-fill, .stage, .recent-job-card, .runbook-step, .empty, .table-wrap, .step-card, .artifact-group, .artifact-card, .cockpit-card, .report-ready, .handoff-notice, .countdown, .toast, .num { border-radius: 0 !important; }
+            section, article, .metric, .pill, button, a.button, a.buttonlink, input, code, pre, .pathbox, .callout, .report-notice, .report-entry, .workspace-tab, .tab-button, .tab-panel, details, .progress-box, .progress-bar, .progress-fill, .stage, .recent-job-card, .runbook-step, .empty, .table-wrap, .step-card, .artifact-group, .artifact-card, .cockpit-card, .vt-state-banner, .report-ready, .handoff-notice, .countdown, .toast, .num { border-radius: 0 !important; }
             section, article, .metric, .pathbox, .callout, .report-notice, .report-entry, .tab-panel, .progress-box, .stage, .recent-job-card, .runbook-step, .step-card, .artifact-group, .artifact-card, .cockpit-card, .report-ready, .handoff-notice { box-shadow: none !important; }
             .pill, button, a.button, a.buttonlink { box-shadow: none !important; }
             @media(max-width:900px){ .grid{grid-template-columns:1fr;} header{padding:24px;} }
@@ -986,10 +987,11 @@ internal static class LiveEventsPage
               const community = virusTotalCommunityCopy(result, communityVotes);
               const permalink = vtValue(result, 'detectionPermalink') || vtValue(result, 'permalink') || '';
               const policy = virusTotalPolicyText(vtValue(result, 'liveLogPolicy'));
+              const operatorState = virusTotalOperatorStateText(status, result, malicious, suspicious);
               const headline = status === 'found'
                 ? t(`命中 ${malicious + suspicious} / 官方已收录`, `${malicious + suspicious} detections / found`)
-                : virusTotalStatusLabel(status, result);
-              const copy = `VirusTotal ${status}; ${headline}; ${community}; permalink=${permalink || 'n/a'}; policy=${policy}`;
+                : operatorState;
+              const copy = `VirusTotal ${status}; ${headline}; ${operatorState}; ${community}; permalink=${permalink || 'n/a'}; policy=${policy}`;
               return {
                 copy,
                 html: `<article class="cockpit-card ${tone}" data-copy="${escapeAttr(copy)}">
@@ -1000,6 +1002,7 @@ internal static class LiveEventsPage
                     <span class="pill quiet" data-copy="${escapeAttr(policy)}">${escapeHtml(t('默认不写日志噪音', 'no log noise by default'))}</span>
                     <span class="pill ${permalink ? 'endpoint' : 'waiting'}" data-copy="${escapeAttr(permalink || t('官方链接未提供', 'official permalink not provided'))}">${escapeHtml(permalink ? t('官方链接就绪', 'permalink ready') : t('无官方链接', 'no permalink'))}</span>
                   </div>
+                  <p class="muted" data-copy="${escapeAttr(operatorState)}">${escapeHtml(operatorState)}</p>
                   <p class="muted" data-copy="${escapeAttr(community)}">${escapeHtml(community)}</p>
                 </article>`
               };
@@ -1598,6 +1601,7 @@ internal static class LiveEventsPage
               const safeSelector = download.selector || selectors.primary || '';
               const statusText = ready ? detail : t('等待回收', 'waiting for collection');
               const statusClass = ready ? (href ? 'endpoint' : 'ready') : 'waiting';
+              const laneReadiness = artifactLaneReadinessText(displayName, fileName, ready, href, safeSelector, hasIndexedArtifact);
               const pathHtml = path
                 ? `<code data-copy="${escapeAttr(path)}">${escapeHtml(path)}</code>`
                 : `<span class="muted" data-copy="${escapeAttr(statusText)}">${escapeHtml(t('等待回收', 'waiting for collection'))}</span>`;
@@ -1618,12 +1622,13 @@ internal static class LiveEventsPage
               const duplicateBlock = renderArtifactDuplicateBlock(duplicate);
               const rejectionBlock = renderArtifactDownloadRejection(download, ready, safeSelector, hasIndexedArtifact);
               const chipRow = renderArtifactChipRow(download, selectors, duplicate);
-              const copy = [previewLabel, fileName, path || statusText, safeSelector ? `selector=${safeSelector}` : '', statusText].filter(Boolean).join(' | ');
+              const copy = [previewLabel, fileName, path || statusText, safeSelector ? `selector=${safeSelector}` : '', `lane readiness=${laneReadiness}`, statusText].filter(Boolean).join(' | ');
               const summaryCopyAction = `<button class="secondary" type="button" data-copy="${escapeAttr(copy)}" onclick="copyText(this.getAttribute('data-copy'))">${escapeHtml(t('复制卡片摘要', 'Copy card summary'))}</button>`;
               return `<article class="artifact-card ${statusClass}" data-copy="${escapeAttr(copy)}">
                 <div class="artifact-card-title">
                   <strong data-copy="${escapeAttr(previewLabel)}">${escapeHtml(displayName)}</strong>
                   <span class="pill ${statusClass}" data-copy="${escapeAttr(statusText)}">${escapeHtml(statusText)}</span>
+                  <span class="pill ${statusClass}" data-copy="${escapeAttr(laneReadiness)}">${escapeHtml(laneReadiness)}</span>
                 </div>
                 <p class="muted">${escapeHtml(fileName)}</p>
                 <p>${pathHtml}</p>
@@ -1633,6 +1638,21 @@ internal static class LiveEventsPage
                 ${rejectionBlock}
                 <div class="artifact-action">${openAction}${summaryCopyAction}${copyAction}${selectorAction}${hrefCopyAction}</div>
               </article>`;
+            }
+
+            function artifactLaneReadinessText(displayName, fileName, ready, href, safeSelector, hasIndexedArtifact) {
+              if (ready && (href || safeSelector)) {
+                return t('证据 lane 就绪：安全端点可用', 'artifact lane readiness: safe endpoint ready');
+              }
+
+              if (ready) {
+                return hasIndexedArtifact
+                  ? t('证据 lane 就绪：索引已记录，可复制 selector/状态', 'artifact lane readiness: indexed, copy selector/status')
+                  : t('证据 lane 就绪：可复制路径或状态', 'artifact lane readiness: copy-only path/status');
+              }
+
+              const name = [displayName, fileName].filter(Boolean).join(' / ');
+              return t(`证据 lane 等待回收：${name}`, `artifact lane readiness: waiting for collection: ${name}`);
             }
 
             function artifactPreviewLabel(artifact, fallback) {
@@ -2153,6 +2173,7 @@ internal static class LiveEventsPage
               const currentStep = virusTotalCurrentStep(workflowState, result);
               const statusLabel = virusTotalStatusLabel(vtStatus, result);
               const outcomeStatus = virusTotalOutcomeStatus(vtStatus, result, malicious, suspicious);
+              const operatorState = virusTotalOperatorStateText(vtStatus, result, malicious, suspicious);
               if (workflowState === 'running') {
                 label = result.message || t('正在查询 VirusTotal 官方文件报告。', 'Querying the official VirusTotal file report.');
                 className = 'metric vt-card vt-neutral';
@@ -2204,6 +2225,7 @@ internal static class LiveEventsPage
                 </div>
                 <div class="progressbar compact" aria-label="${escapeAttr(t('VirusTotal 查询进度', 'VirusTotal lookup progress'))}"><div class="progressbar-fill ${workflowState === 'failed' ? 'failed' : ''}" style="width:${progress}%"></div></div>
                 <p>${t('当前步骤', 'Current step')}：<strong>${escapeHtml(currentStep)}</strong></p>
+                <p class="vt-state-banner" data-copy="${escapeAttr(operatorState)}"><strong>${escapeHtml(t('操作者状态', 'Operator state'))}：</strong>${escapeHtml(operatorState)}</p>
                 <div class="vt-head">
                   <div>
                     <strong>${escapeHtml(label)}</strong>
@@ -2247,7 +2269,7 @@ internal static class LiveEventsPage
                 ${cacheHtml}
                 ${retryHtml}
                 <p class="artifact-action"><span class="pill ${virusTotalStatusPillTone(vtStatus, result)}" data-copy="${escapeAttr(statusCopy)}">${escapeHtml(status || statusLabel)}</span><span class="pill quiet" data-copy="${escapeAttr(vtStatus)}">${escapeHtml(vtStatus)}</span>${link}${reportLink}${settingsLink}</p>`;
-              target.setAttribute('data-copy', `VirusTotal ${workflowLabel}; 进度=${progress}%; 当前=${currentStep}; ${vtStatus}: ${label}; 引擎=${engineTotal}; 社区=${virusTotalCommunityCopy(result, communityVotes)} ${shaValue || ''}; ${logPolicy}`);
+              target.setAttribute('data-copy', `VirusTotal ${workflowLabel}; 进度=${progress}%; 当前=${currentStep}; ${vtStatus}: ${label}; ${operatorState}; 引擎=${engineTotal}; 社区=${virusTotalCommunityCopy(result, communityVotes)} ${shaValue || ''}; ${logPolicy}`);
               renderOperatorCockpit();
             }
 
@@ -2358,6 +2380,23 @@ internal static class LiveEventsPage
               if (status === 'timeout') { return { label: t('查询超时', 'timeout'), tone: 'quiet', copy: 'timeout' }; }
               if (status === 'running' || status === 'querying') { return { label: t('查询中', 'querying'), tone: 'endpoint', copy: 'querying' }; }
               return { label: t('查询失败', 'lookup failed'), tone: 'quiet', copy: `lookup_failed; status=${status || 'unknown'}` };
+            }
+
+            function virusTotalOperatorStateText(status, result, malicious, suspicious) {
+              const hits = Number(malicious || 0) + Number(suspicious || 0);
+              if (status === 'found' || vtBoolValue(result, 'found')) {
+                if (hits > 0) {
+                  return t(`官方已收录：命中 ${hits}（恶意 ${malicious} / 可疑 ${suspicious}）；这是信誉信号，最终结论仍以本地沙箱报告为准。`, `Found in official VT: ${hits} hits (malicious ${malicious} / suspicious ${suspicious}); this is reputation signal and the local sandbox report remains authoritative.`);
+                }
+
+                return t('官方已收录：未见恶意或可疑命中；仍以本地行为和证据报告为准。', 'Found in official VT: no malicious or suspicious hits; local behavior and evidence report remain authoritative.');
+              }
+
+              if (status === 'running' || status === 'querying' || status === 'queued') {
+                return t('官方查询进行中：hash-only，不上传样本，等待页面结果。', 'Official lookup in progress: hash-only, no sample upload, waiting for page result.');
+              }
+
+              return t(`静默状态：${virusTotalStatusLabel(status, result)}；不阻断分析，不写任务/行为日志。`, `Quiet state: ${virusTotalStatusLabel(status, result)}; does not block analysis and does not write job/behavior logs.`);
             }
 
             function vtNumber(...values) {
@@ -2693,9 +2732,9 @@ internal static class LiveEventsPage
               showToast(t('已复制', 'Copied'));
             }
             document.addEventListener('contextmenu', event => {
-              const target = event.target.closest ? event.target.closest('[data-copy], code, td, th, p, h1, h2, h3, span, a, button') : null;
+              const target = event.target.closest ? event.target.closest('[data-copy], code, pre, input, p, li, h1, h2, h3, label, span, a, button, td, th, section, article, .metric, .artifact-card, .cockpit-card, .step-card') : null;
               if (!target) { return; }
-              const value = target.getAttribute('data-copy') || target.innerText || target.textContent || '';
+              const value = target.getAttribute('data-copy') || target.value || target.innerText || target.textContent || '';
               if (!value.trim()) { return; }
               event.preventDefault();
               copyText(value);

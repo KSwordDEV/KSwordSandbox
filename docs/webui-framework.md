@@ -56,6 +56,10 @@ WebUI/UX 工作不得修改 `driver/`、`guest/` 或
   选择样本前显示空态；选择后显示文件名、大小、分析时长、扩展名检查和 artifact 采集摘要。
   可选运行预设（例如快速观察、标准动态、证据优先、内存取证）只能修改当前表单字段，不写配置。
   拖拽上传区、样本摘要、预设按钮、状态文本和错误提示都必须支持右键复制。
+  主按钮附近必须保留可复制的 one-click handoff 提示，明确
+  `/api/files/upload/start` 会保存样本、创建 job、提交后台 VM 分析，并将当前浏览器页
+  导航到 `/jobs/{jobId}/live-events`；上传中、启动接受或预检失败时，该提示应更新为
+  可复制的 job/monitor/progress 摘要。
 - 顶层工作区分为 `上传 / 配置`、`进度`、`报告` 三个 tab。上传/配置 tab
   是 default selected tab；上传/启动成功后按需切换到进度/报告区域；报告
   就绪通知必须在自动打开报告前显示。
@@ -136,6 +140,9 @@ WebUI/UX 工作不得修改 `driver/`、`guest/` 或
   endpoint，不上传样本；缺失或不可用时返回静默 `not_configured` / `lookup_failed`
   状态，而不是中断分析。缺失 API key 应保持为带设置链接的静默 UI 状态，
   不应成为重复 warning/noisy log 或自动 report-enrichment write；
+  live monitor 的 VirusTotal 卡片必须中文优先地区分 `官方已收录 / found` 与
+  `静默状态 / quiet state`：found 是官方信誉信号，仍以本地沙箱报告为准；quiet
+  明确“不阻断分析、不写任务/行为日志”。这些状态必须可右键复制。
 - 提供专用实时原始事件监控页（dedicated live raw monitor page / dynamic monitor page）
   链接，用于在最终报告 classification 前展示 source files 和未归类 raw event rows。若页面由 upload 自动打开，
   Web host 已经接受后台运行，原 dashboard 页不必继续打开。Monitor 页还应轮询
@@ -161,6 +168,9 @@ WebUI/UX 工作不得修改 `driver/`、`guest/` 或
   Monitor 还应提供“刷新证据/下载卡片”手动入口，并为每张卡片提供右键复制和显式
   `复制卡片摘要` / `复制 selector` / `复制下载链接` affordances，方便值守人员不打开
   host 路径即可传递安全 selector 或 endpoint。
+  每张证据卡还应显示 copyable artifact lane readiness，例如“安全端点可用”、
+  “索引已记录，可复制 selector/状态”或“等待回收”，让操作者不用展开详情也能判断该 lane
+  是否可交付。
 - 为 runbook step status 提供自然的进度页链接，指向 dedicated execution-flow page，
   并同时出现在任务操作与进度摘要中。该入口在 UI 文案中称为 progress-page link，
   让操作者自然进入 execution-flow 诊断页，而不是在 dashboard 内展开命令墙。
@@ -174,6 +184,9 @@ WebUI/UX 工作不得修改 `driver/`、`guest/` 或
 `code`、`pre`、`td`、`th`、`p`、`li`、heading、`label`、`span`、`a`、
 `button`、`input` 元素支持右键复制（right-click copy）。复制成功或失败后 WebUI 应显示小
 toast，告知操作者剪贴板捕获是否成功。
+`/settings` 的 VirusTotal、VM、Guest、R0/artifact 重要卡片也必须有卡片级复制摘要；
+输入框、toggle card、source/mask/path/status 值既可右键复制，也应保留显式复制按钮或
+可复制摘要按钮。
 
 Guest 导入状态应具体且中文优先：
 

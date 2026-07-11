@@ -359,6 +359,7 @@ internal sealed class MemoryDumpProbe : IGuestProbe
         {
             evt.Data["sizeBytes"] = result.SizeBytes.Value.ToString(CultureInfo.InvariantCulture);
             evt.Data["artifactSizeBytes"] = result.SizeBytes.Value.ToString(CultureInfo.InvariantCulture);
+            evt.Data["sizeBytesStatus"] = "computed";
         }
 
         if (!string.IsNullOrWhiteSpace(result.Path))
@@ -411,6 +412,9 @@ internal sealed class MemoryDumpProbe : IGuestProbe
         evt.Data["alreadyCaptured"] = duplicate.ToString(CultureInfo.InvariantCulture).ToLowerInvariant();
         evt.Data["childProcessDumpTarget"] = (target is not null && !target.IsRoot).ToString(CultureInfo.InvariantCulture).ToLowerInvariant();
         AddOptionalData(evt, "reason", result.Reason);
+        evt.Data["reasonCode"] = MemoryDumpReasonCode(result, duplicate);
+        evt.Data["reasonCategory"] = MemoryDumpReasonCategory(result, duplicate);
+        evt.Data["zhReason"] = MemoryDumpReasonZhReason(result, duplicate);
         AddOptionalData(evt, "zhMessage", "内存转储采集被跳过；该事件说明证据缺口，不会中断整体分析。");
         AddOptionalData(evt, "zhHint", MemoryDumpReasonZhHint(result.Reason, result.DiagnosticStage, duplicate));
         AddOptionalData(evt, "exceptionType", result.ExceptionType);
@@ -465,7 +469,8 @@ internal sealed class MemoryDumpProbe : IGuestProbe
                 ["dumpTargetSelectionMode"] = "root-plus-visible-descendants",
                 ["descendantProcessDumpEnabled"] = "true",
                 ["rootProcessIdStatus"] = rootProcessId is null ? "unavailable" : "available",
-                ["treeLineageStatus"] = rootProcessId is null ? "unavailable" : "stable"
+                ["treeLineageStatus"] = rootProcessId is null ? "unavailable" : "stable",
+                ["artifactIntegrityState"] = "pending"
             }
         };
 
@@ -495,10 +500,15 @@ internal sealed class MemoryDumpProbe : IGuestProbe
             evt.Data["targetProcessId"] = target.ProcessId.ToString(CultureInfo.InvariantCulture);
             evt.Data["targetProcessName"] = target.ProcessName;
             evt.Data["targetSelectionSource"] = target.SelectionSource;
+            evt.Data["targetTreeDepth"] = target.Depth.ToString(CultureInfo.InvariantCulture);
+            evt.Data["targetTreeLineage"] = target.Lineage;
+            evt.Data["targetProcessRole"] = target.IsRoot ? "root" : target.Depth == 1 ? "direct-child" : "descendant";
+            evt.Data["rootAncestorProcessId"] = rootProcessId?.ToString(CultureInfo.InvariantCulture) ?? string.Empty;
             evt.Data["rootVisibleInSnapshot"] = target.RootVisibleInSnapshot.ToString(CultureInfo.InvariantCulture).ToLowerInvariant();
             evt.Data["isRootProcess"] = target.IsRoot.ToString(CultureInfo.InvariantCulture).ToLowerInvariant();
             evt.Data["isChildProcess"] = (!target.IsRoot).ToString(CultureInfo.InvariantCulture).ToLowerInvariant();
             evt.Data["isDescendantOfRoot"] = (!target.IsRoot).ToString(CultureInfo.InvariantCulture).ToLowerInvariant();
+            evt.Data["isDirectChildOfRoot"] = (!target.IsRoot && target.Depth == 1).ToString(CultureInfo.InvariantCulture).ToLowerInvariant();
             evt.Data["lineageIncludesRoot"] = (!string.IsNullOrWhiteSpace(target.Lineage) &&
                 rootProcessId is not null &&
                 LineageContainsPid(target.Lineage, rootProcessId.Value)).ToString(CultureInfo.InvariantCulture).ToLowerInvariant();
@@ -596,6 +606,10 @@ internal sealed class MemoryDumpProbe : IGuestProbe
                 ["collectionName"] = "memory-dumps",
                 ["expectedRelativePath"] = "memory-dumps/*.dmp",
                 ["artifactRelativePathStatus"] = "not-applicable-summary",
+                ["artifactExists"] = "false",
+                ["artifactIntegrityState"] = "not-applicable-summary",
+                ["sizeBytesStatus"] = "not-applicable-summary",
+                ["sha256Status"] = "not-applicable-summary",
                 ["dumpTargetSelectionMode"] = "root-plus-visible-descendants",
                 ["descendantProcessDumpEnabled"] = "true",
                 ["rootProcessId"] = rootProcessId.ToString(CultureInfo.InvariantCulture),
@@ -630,6 +644,7 @@ internal sealed class MemoryDumpProbe : IGuestProbe
                 ["rootProcessCoverageState"] = DetermineDumpCoverageState(rootTargetCount, rootAttemptedCount, rootCapturedCount, rootSkippedCount, rootAlreadyCapturedCount),
                 ["childProcessCoverageState"] = DetermineDumpCoverageState(childTargetCount, childAttemptedCount, childCapturedCount, childSkippedCount, childAlreadyCapturedCount),
                 ["memoryDumpCoverageState"] = DetermineDumpCoverageState(visibleTargetCount, attemptedCount, capturedCount, skippedCount, alreadyCapturedCount),
+                ["rootDescendantCoverageState"] = DetermineRootDescendantCoverageState(rootTargetCount, childTargetCount, rootCapturedCount, childCapturedCount, rootAlreadyCapturedCount, childAlreadyCapturedCount),
                 ["zhMessage"] = "内存转储 sweep 已完成并记录根/子进程覆盖情况。",
                 ["zhHint"] = "内存转储为显式 opt-in；启用后会尽力覆盖可见根进程树中的子进程。请结合 rootProcessId/treeLineage、capturedCount、skippedCount 和 alreadyCapturedCount 判断覆盖面。"
             }
@@ -670,10 +685,16 @@ internal sealed class MemoryDumpProbe : IGuestProbe
                 ["processRole"] = context.RootProcessId is null ? "sample-context" : "sample-root-context",
                 ["expectedRelativePath"] = "memory-dumps/*.dmp",
                 ["artifactRelativePathStatus"] = "disabled",
+                ["artifactExists"] = "false",
+                ["artifactIntegrityState"] = "disabled",
                 ["rootProcessIdStatus"] = context.RootProcessId is null ? "unavailable-before-sample-start" : "available",
                 ["treeLineageStatus"] = context.RootProcessId is null ? "unavailable-before-sample-start" : "stable",
                 ["sizeBytesStatus"] = "disabled",
                 ["sha256Status"] = "disabled",
+                ["artifactHashStatus"] = "disabled",
+                ["reasonCode"] = "memoryDumpNotRequested",
+                ["reasonCategory"] = "disabled",
+                ["zhReason"] = "未请求内存转储。",
                 ["samplePath"] = context.SamplePath
             }
         };
@@ -737,6 +758,77 @@ internal sealed class MemoryDumpProbe : IGuestProbe
         return "请结合 diagnosticStage、exceptionType/message 和 win32Error 判断是权限、进程状态、DbgHelp 还是输出路径问题。";
     }
 
+    private static string MemoryDumpReasonCode(MemoryDumpCaptureResult result, bool duplicate)
+    {
+        if (duplicate)
+        {
+            return "duplicate";
+        }
+
+        if (result.Reason?.Contains("only implemented on Windows", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            return "notWindows";
+        }
+
+        if (result.Reason?.Contains("root process ID is not available", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            return string.Equals(result.DiagnosticStage, "root-process-final", StringComparison.OrdinalIgnoreCase)
+                ? "rootProcessIdUnavailableFinal"
+                : "rootProcessIdUnavailable";
+        }
+
+        return result.DiagnosticStage switch
+        {
+            "process-state" => "processExitedBeforeDump",
+            "process-lookup" => "processNotFound",
+            "process-tree-empty" => "noVisibleProcessTargets",
+            "process-tree-snapshot" => "processTreeSnapshotFailed",
+            "MiniDumpWriteDump" => "miniDumpWriteDumpFailed",
+            "pid-reuse" => "pidReuseGuard",
+            "platform-check" => "notWindows",
+            "capture" => "captureFailed",
+            _ => "memoryDumpSkipped"
+        };
+    }
+
+    private static string MemoryDumpReasonCategory(MemoryDumpCaptureResult result, bool duplicate)
+    {
+        if (duplicate)
+        {
+            return "duplicate";
+        }
+
+        return MemoryDumpReasonCode(result, duplicate) switch
+        {
+            "notWindows" => "platform",
+            "rootProcessIdUnavailable" or "rootProcessIdUnavailableFinal" or "noVisibleProcessTargets" or "processTreeSnapshotFailed" => "process-tree",
+            "processExitedBeforeDump" or "processNotFound" => "process-state",
+            "miniDumpWriteDumpFailed" => "minidump-api",
+            "pidReuseGuard" => "pid-reuse",
+            "captureFailed" => "capture-io",
+            _ => "unknown"
+        };
+    }
+
+    private static string MemoryDumpReasonZhReason(MemoryDumpCaptureResult result, bool duplicate)
+    {
+        return MemoryDumpReasonCode(result, duplicate) switch
+        {
+            "duplicate" => "目标进程已采集过。",
+            "notWindows" => "非 Windows guest。",
+            "rootProcessIdUnavailable" => "样本根进程 ID 不可用。",
+            "rootProcessIdUnavailableFinal" => "最终 sweep 时样本根进程 ID 不可用。",
+            "processExitedBeforeDump" => "目标进程已退出。",
+            "processNotFound" => "无法找到目标进程。",
+            "noVisibleProcessTargets" => "没有可见的转储目标。",
+            "processTreeSnapshotFailed" => "进程树快照失败。",
+            "miniDumpWriteDumpFailed" => "MiniDumpWriteDump 失败。",
+            "pidReuseGuard" => "检测到 PID 复用保护。",
+            "captureFailed" => "转储捕获失败。",
+            _ => "内存转储采集被跳过。"
+        };
+    }
+
     /// <summary>
     /// Summarizes root/child minidump coverage for report cards without
     /// requiring the host to recompute per-target attempt counters.
@@ -771,6 +863,34 @@ internal sealed class MemoryDumpProbe : IGuestProbe
         return "unknown";
     }
 
+    private static string DetermineRootDescendantCoverageState(
+        int rootTargetCount,
+        int childTargetCount,
+        int rootCapturedCount,
+        int childCapturedCount,
+        int rootAlreadyCapturedCount,
+        int childAlreadyCapturedCount)
+    {
+        var rootCovered = rootTargetCount == 0 || rootCapturedCount + rootAlreadyCapturedCount >= rootTargetCount;
+        var descendantsCovered = childTargetCount == 0 || childCapturedCount + childAlreadyCapturedCount >= childTargetCount;
+        if (rootCovered && descendantsCovered)
+        {
+            return childTargetCount == 0 ? "root-covered-no-visible-descendants" : "root-and-descendants-covered";
+        }
+
+        if (rootCovered)
+        {
+            return "root-covered-descendants-partial";
+        }
+
+        if (descendantsCovered)
+        {
+            return "root-missing-descendants-covered";
+        }
+
+        return "partial-root-and-descendants";
+    }
+
     private static bool IsExitedBeforeDump(string? reason, string? diagnosticStage)
     {
         return (!string.IsNullOrWhiteSpace(reason) &&
@@ -802,7 +922,9 @@ internal sealed class MemoryDumpProbe : IGuestProbe
         evt.Data["rootProcessDumpTarget"] = "false";
         evt.Data["memoryDumpCoverageRole"] = "root-pid-reuse";
         evt.Data["rootVisibleInSnapshot"] = "false";
-        evt.Data["reasonCode"] = "pid-reuse";
+        evt.Data["reasonCode"] = "pidReuseGuard";
+        evt.Data["reasonCategory"] = "pid-reuse";
+        evt.Data["zhReason"] = "检测到 PID 复用保护。";
         evt.Data["visiblePidSnapshotKey"] = visiblePidSnapshot.Key;
         evt.Data["visiblePidProcessId"] = visiblePidSnapshot.ProcessId.ToString(CultureInfo.InvariantCulture);
         evt.Data["visiblePidProcessName"] = visiblePidSnapshot.ProcessName;
@@ -1014,6 +1136,8 @@ internal sealed class MemoryDumpProbe : IGuestProbe
                 evt.Data["artifactHashStatus"] = "missing";
                 evt.Data["artifactExists"] = "false";
                 evt.Data["artifactIntegrityState"] = "missing";
+                evt.Data["sizeBytesStatus"] = "missing";
+                evt.Data["sha256Status"] = "missing";
                 return;
             }
 
@@ -1030,12 +1154,15 @@ internal sealed class MemoryDumpProbe : IGuestProbe
             evt.Data["artifactHashAlgorithm"] = "sha256";
             evt.Data["artifactHashStatus"] = "computed";
             evt.Data["artifactIntegrityState"] = "verified";
+            evt.Data["sizeBytesStatus"] = "computed";
+            evt.Data["sha256Status"] = "computed";
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException or PathTooLongException)
         {
             evt.Data["hashStatus"] = "failed";
             evt.Data["artifactHashStatus"] = "failed";
             evt.Data["artifactIntegrityState"] = "hash-failed";
+            evt.Data["sha256Status"] = "failed";
             evt.Data["artifactHashExceptionType"] = ex.GetType().FullName ?? ex.GetType().Name;
             evt.Data["artifactHashMessage"] = ex.Message;
         }

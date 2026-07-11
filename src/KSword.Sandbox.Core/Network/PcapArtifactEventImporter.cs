@@ -79,23 +79,7 @@ public sealed class PcapArtifactEventImporter
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException or ArgumentException)
         {
-            var parseError = new SandboxEvent
-            {
-                EventType = "pcap.parse_error",
-                Source = "host",
-                Path = path,
-                Data =
-                {
-                    ["schema"] = NetworkTelemetrySchema.SchemaVersion,
-                    ["eventFamily"] = "network",
-                    ["eventKind"] = "parse_error",
-                    ["exceptionType"] = ex.GetType().Name,
-                    ["message"] = ex.Message,
-                    ["parser"] = "native-pcap"
-                }
-            };
-            NetworkTelemetrySchema.AddArtifactData(parseError.Data, source);
-            NetworkTelemetrySchema.ApplyHealthAndLocalization(parseError.Data);
+            var parseError = CreateParseError(path, source, ex);
             return
             [
                 NetworkTelemetrySchema.CreateImportSummary(
@@ -110,7 +94,10 @@ public sealed class PcapArtifactEventImporter
                         ["tsharkRequired"] = "false",
                         ["tsharkAvailable"] = IsTsharkAvailable().ToString(CultureInfo.InvariantCulture).ToLowerInvariant(),
                         ["tsharkStatus"] = IsTsharkAvailable() ? "available-not-required" : "not-found-native-parser-used",
-                        ["exceptionType"] = ex.GetType().Name
+                        ["exceptionType"] = ex.GetType().Name,
+                        ["diagnosticCode"] = ValueOrEmpty(parseError.Data, "diagnosticCode"),
+                        ["parserBoundary"] = ValueOrEmpty(parseError.Data, "parserBoundary"),
+                        ["parseFailureStage"] = ValueOrEmpty(parseError.Data, "parseFailureStage")
                     }),
                 parseError
             ];
@@ -120,9 +107,21 @@ public sealed class PcapArtifactEventImporter
     private static IEnumerable<PcapPacket> ReadPackets(Stream stream, string path)
     {
         var magic = new byte[4];
-        if (stream.Read(magic) != 4)
+        var magicBytesRead = stream.Read(magic);
+        if (magicBytesRead == 0)
         {
             yield break;
+        }
+
+        if (magicBytesRead != 4)
+        {
+            throw new PcapBoundaryException(
+                "pcap.global_header",
+                "read-magic",
+                "PCAP global header is truncated.",
+                0,
+                4,
+                magicBytesRead);
         }
 
         stream.Position = 0;
@@ -146,10 +145,7 @@ public sealed class PcapArtifactEventImporter
     private static IEnumerable<PcapPacket> ReadClassicPcapPackets(Stream stream, string path)
     {
         var header = new byte[24];
-        if (!ReadExactly(stream, header))
-        {
-            yield break;
-        }
+        ReadRequired(stream, header, "pcap.global_header", "read-global-header");
 
         var magic = BinaryPrimitives.ReadUInt32LittleEndian(header.AsSpan(0, 4));
         var bigEndian = false;
@@ -180,21 +176,24 @@ public sealed class PcapArtifactEventImporter
         var linkType = ReadUInt32(header.AsSpan(20, 4), bigEndian);
         var index = 0;
         var packetHeader = new byte[16];
-        while (ReadExactly(stream, packetHeader))
+        while (ReadRequired(stream, packetHeader, "pcap.packet_header", "read-packet-header", allowEndOfFile: true))
         {
             var tsSec = ReadUInt32(packetHeader.AsSpan(0, 4), bigEndian);
             var tsFrac = ReadUInt32(packetHeader.AsSpan(4, 4), bigEndian);
             var includedLength = ReadUInt32(packetHeader.AsSpan(8, 4), bigEndian);
             if (includedLength > 16 * 1024 * 1024)
             {
-                throw new InvalidDataException("PCAP packet length is unreasonably large.");
+                throw new PcapBoundaryException(
+                    "pcap.packet_header",
+                    "validate-packet-length",
+                    "PCAP packet length is unreasonably large.",
+                    stream.CanSeek ? stream.Position - 8 : null,
+                    16 * 1024 * 1024,
+                    checked((long)includedLength));
             }
 
             var payload = new byte[includedLength];
-            if (!ReadExactly(stream, payload))
-            {
-                yield break;
-            }
+            ReadRequired(stream, payload, "pcap.packet_payload", "read-packet-payload");
 
             index++;
             yield return new PcapPacket(index, linkType, TimestampFromClassic(tsSec, tsFrac, nano), payload);
@@ -209,29 +208,37 @@ public sealed class PcapArtifactEventImporter
         while (stream.Position < stream.Length)
         {
             var blockHeader = new byte[8];
-            if (!ReadExactly(stream, blockHeader))
-            {
-                yield break;
-            }
+            ReadRequired(stream, blockHeader, "pcapng.block_header", "read-block-header");
 
             var blockType = BinaryPrimitives.ReadUInt32LittleEndian(blockHeader.AsSpan(0, 4));
             var blockLength = BinaryPrimitives.ReadUInt32LittleEndian(blockHeader.AsSpan(4, 4));
             if (blockLength < 12 || blockLength > 64 * 1024 * 1024)
             {
-                throw new InvalidDataException($"Unsupported PCAPNG block length in {path}.");
+                throw new PcapBoundaryException(
+                    "pcapng.block_header",
+                    "validate-block-length",
+                    $"Unsupported PCAPNG block length in {path}.",
+                    stream.CanSeek ? stream.Position - 4 : null,
+                    64 * 1024 * 1024,
+                    checked((long)blockLength));
             }
 
             var bodyLength = checked((int)blockLength - 12);
             var body = new byte[bodyLength];
-            if (!ReadExactly(stream, body))
-            {
-                yield break;
-            }
+            ReadRequired(stream, body, "pcapng.block_body", "read-block-body");
 
             var trailer = new byte[4];
-            if (!ReadExactly(stream, trailer))
+            ReadRequired(stream, trailer, "pcapng.block_trailer", "read-block-trailer");
+            var trailerLength = ReadUInt32(trailer, bigEndian);
+            if (trailerLength != blockLength)
             {
-                yield break;
+                throw new PcapBoundaryException(
+                    "pcapng.block_trailer",
+                    "validate-block-trailer",
+                    "PCAPNG block trailer length does not match block header length.",
+                    stream.CanSeek ? stream.Position - 4 : null,
+                    blockLength,
+                    trailerLength);
             }
 
             if (blockType == 0x0A0D0D0A && body.Length >= 4)
@@ -250,7 +257,13 @@ public sealed class PcapArtifactEventImporter
                 var capturedLength = ReadUInt32(body.AsSpan(12, 4), bigEndian);
                 if (capturedLength > body.Length - 20)
                 {
-                    continue;
+                    throw new PcapBoundaryException(
+                        "pcapng.enhanced_packet",
+                        "validate-captured-length",
+                        "PCAPNG enhanced packet captured length exceeds block body.",
+                        stream.CanSeek ? stream.Position - body.Length - 4 + 12 : null,
+                        body.Length - 20,
+                        checked((long)capturedLength));
                 }
 
                 var packet = body.AsSpan(20, checked((int)capturedLength)).ToArray();
@@ -1431,6 +1444,48 @@ public sealed class PcapArtifactEventImporter
         return string.Empty;
     }
 
+    private static SandboxEvent CreateParseError(string path, NetworkArtifactSource source, Exception ex)
+    {
+        var boundary = ex is PcapBoundaryException boundaryException
+            ? boundaryException
+            : null;
+        var data = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["schema"] = NetworkTelemetrySchema.SchemaVersion,
+            ["eventFamily"] = "network",
+            ["eventKind"] = "parse_error",
+            ["status"] = "parse_error",
+            ["exceptionType"] = ex.GetType().Name,
+            ["message"] = ex.Message,
+            ["parser"] = "native-pcap",
+            ["diagnosticCode"] = boundary?.DiagnosticCode ?? "pcap_parse_error",
+            ["parserBoundary"] = boundary?.ParserBoundary ?? "pcap.container",
+            ["parseFailureStage"] = boundary?.ParseFailureStage ?? "native-pcap-read",
+            ["zhHint"] = "PCAP 文件边界或长度校验失败；请保留源文件，优先检查抓包是否截断、复制未完成或格式不匹配。"
+        };
+        if (boundary is not null)
+        {
+            NetworkTelemetrySchema.AddIfNotEmpty(data, "byteOffset", boundary.ByteOffset?.ToString(CultureInfo.InvariantCulture));
+            NetworkTelemetrySchema.AddIfNotEmpty(data, "expectedBytes", boundary.ExpectedBytes?.ToString(CultureInfo.InvariantCulture));
+            NetworkTelemetrySchema.AddIfNotEmpty(data, "actualBytes", boundary.ActualBytes?.ToString(CultureInfo.InvariantCulture));
+        }
+
+        NetworkTelemetrySchema.AddArtifactData(data, source);
+        NetworkTelemetrySchema.ApplyHealthAndLocalization(data);
+        return new SandboxEvent
+        {
+            EventType = "pcap.parse_error",
+            Source = "host",
+            Path = path,
+            Data = data
+        };
+    }
+
+    private static string ValueOrEmpty(IReadOnlyDictionary<string, string> data, string key)
+    {
+        return data.TryGetValue(key, out var value) ? value : string.Empty;
+    }
+
     private static string StatusFamily(string? statusCode)
     {
         return int.TryParse(statusCode, NumberStyles.Integer, CultureInfo.InvariantCulture, out var status) &&
@@ -1488,21 +1543,59 @@ public sealed class PcapArtifactEventImporter
         return bigEndian ? BinaryPrimitives.ReadUInt32BigEndian(value) : BinaryPrimitives.ReadUInt32LittleEndian(value);
     }
 
-    private static bool ReadExactly(Stream stream, Span<byte> buffer)
+    private static bool ReadRequired(
+        Stream stream,
+        Span<byte> buffer,
+        string parserBoundary,
+        string parseFailureStage,
+        bool allowEndOfFile = false)
     {
+        var startOffset = stream.CanSeek ? stream.Position : (long?)null;
         var total = 0;
         while (total < buffer.Length)
         {
             var read = stream.Read(buffer[total..]);
             if (read == 0)
             {
-                return false;
+                if (allowEndOfFile && total == 0)
+                {
+                    return false;
+                }
+
+                throw new PcapBoundaryException(
+                    parserBoundary,
+                    parseFailureStage,
+                    $"{parserBoundary} is truncated.",
+                    startOffset.HasValue ? startOffset.Value + total : null,
+                    buffer.Length,
+                    total);
             }
 
             total += read;
         }
 
         return true;
+    }
+
+    private sealed class PcapBoundaryException(
+        string parserBoundary,
+        string parseFailureStage,
+        string message,
+        long? byteOffset,
+        long? expectedBytes,
+        long? actualBytes) : IOException(message)
+    {
+        public string ParserBoundary { get; } = parserBoundary;
+
+        public string ParseFailureStage { get; } = parseFailureStage;
+
+        public string DiagnosticCode { get; } = "pcap_boundary_truncated";
+
+        public long? ByteOffset { get; } = byteOffset;
+
+        public long? ExpectedBytes { get; } = expectedBytes;
+
+        public long? ActualBytes { get; } = actualBytes;
     }
 
     private static string DnsTypeName(ushort qtype)
@@ -1565,8 +1658,40 @@ public sealed class PcapArtifactEventImporter
         metadata["pcapSourceArtifactName"] = pcapSource.Name;
         metadata["pcapSourceArtifactRelativePath"] = pcapSource.RelativePath;
         metadata["pcapArtifactRelativePath"] = pcapSource.RelativePath;
+        metadata["pcapSourceArtifactSelector"] = pcapSource.RelativePath;
+        metadata["pcapDownloadSelector"] = pcapSource.RelativePath;
+        metadata["sourcePcapArtifactPath"] = pcapSource.FullPath;
+        metadata["sourcePcapArtifactName"] = pcapSource.Name;
         metadata["sourcePcapArtifactRelativePath"] = pcapSource.RelativePath;
+        metadata["sourcePcapArtifactSelector"] = pcapSource.RelativePath;
+        metadata["sourcePcapDownloadSelector"] = pcapSource.RelativePath;
+        try
+        {
+            var info = new FileInfo(pcapSource.FullPath);
+            if (info.Exists)
+            {
+                var sizeText = info.Length.ToString(CultureInfo.InvariantCulture);
+                var sha256 = ComputeFileSha256(info.FullName);
+                metadata["pcapSourceArtifactSizeBytes"] = sizeText;
+                metadata["sourcePcapArtifactSizeBytes"] = sizeText;
+                metadata["pcapArtifactSizeBytes"] = sizeText;
+                metadata["pcapSourceArtifactSha256"] = sha256;
+                metadata["sourcePcapArtifactSha256"] = sha256;
+                metadata["pcapArtifactSha256"] = sha256;
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException)
+        {
+            metadata["pcapSourceArtifactHashSkipped"] = ex.GetType().Name;
+        }
+
         return metadata;
+    }
+
+    private static string ComputeFileSha256(string fullPath)
+    {
+        using var stream = File.OpenRead(fullPath);
+        return Convert.ToHexString(SHA256.HashData(stream)).ToLowerInvariant();
     }
 
     private static int CountSidecarArtifacts(string pcapPath)

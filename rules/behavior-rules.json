@@ -1,5 +1,5 @@
 {
-  "version": "2026-07-12-v19-artifact-correlation-guards",
+  "version": "2026-07-12-v20-high-signal-windows-behavior",
   "rules": [
     {
       "id": "host-submission",
@@ -28346,6 +28346,2151 @@
         "reputation",
         "found",
         "metadata"
+      ]
+    },
+    {
+      "id": "persistence-silentprocessexit-monitorprocess-user-writable",
+      "title": "SilentProcessExit MonitorProcess points to user-writable payload",
+      "titleZh": "SilentProcessExit MonitorProcess 指向用户可写载荷",
+      "severity": "high",
+      "confidence": "high",
+      "summary": "A SilentProcessExit MonitorProcess registry value was written with an executable or script path in a user-writable location, a constrained IFEO persistence pattern.",
+      "summaryZh": "SilentProcessExit 的 MonitorProcess 注册表值被写入用户可写位置中的可执行或脚本路径，这是受约束的 IFEO 持久化模式。",
+      "mitreTechniqueId": "T1546.012",
+      "mitreTechniqueName": "Image File Execution Options Injection",
+      "eventTypes": [
+        "registry.set",
+        "registry.create",
+        "driver.registry"
+      ],
+      "pathRegex": [
+        "\\\\Microsoft\\\\Windows NT\\\\CurrentVersion\\\\SilentProcessExit\\\\[^\\\\]+\\\\MonitorProcess$"
+      ],
+      "dataRegex": {
+        "value": [
+          "\\\\(?:Users\\\\[^\\\\]+\\\\(?:AppData|Downloads|Desktop|Documents)|Users\\\\Public|ProgramData|Windows\\\\Temp)\\\\.*\\.(?:exe|dll|scr|com|ps1|vbs|js|jse|hta|bat|cmd|wsf)(?:\\b|$|[\\s\\\"])"
+        ],
+        "valueData": [
+          "\\\\(?:Users\\\\[^\\\\]+\\\\(?:AppData|Downloads|Desktop|Documents)|Users\\\\Public|ProgramData|Windows\\\\Temp)\\\\.*\\.(?:exe|dll|scr|com|ps1|vbs|js|jse|hta|bat|cmd|wsf)(?:\\b|$|[\\s\\\"])"
+        ],
+        "newValue": [
+          "\\\\(?:Users\\\\[^\\\\]+\\\\(?:AppData|Downloads|Desktop|Documents)|Users\\\\Public|ProgramData|Windows\\\\Temp)\\\\.*\\.(?:exe|dll|scr|com|ps1|vbs|js|jse|hta|bat|cmd|wsf)(?:\\b|$|[\\s\\\"])"
+        ],
+        "commandLine": [
+          "\\\\(?:Users\\\\[^\\\\]+\\\\(?:AppData|Downloads|Desktop|Documents)|Users\\\\Public|ProgramData|Windows\\\\Temp)\\\\.*\\.(?:exe|dll|scr|com|ps1|vbs|js|jse|hta|bat|cmd|wsf)(?:\\b|$|[\\s\\\"])"
+        ]
+      },
+      "excludeProcessNames": [
+        "KSword.Sandbox.Agent.exe",
+        "KSword.Sandbox.R0Collector.exe"
+      ],
+      "excludeDataEquals": {
+        "operationName": [
+          "openKey",
+          "queryKey",
+          "queryValue",
+          "enumerateKey",
+          "enumerateValue",
+          "closeKey"
+        ],
+        "operation": [
+          "openKey",
+          "queryKey",
+          "queryValue",
+          "enumerateKey",
+          "enumerateValue",
+          "closeKey",
+          "read",
+          "query"
+        ]
+      },
+      "excludeDataContains": {
+        "eventType": [
+          "collection.health",
+          "enrichment.virustotal.lookup",
+          "reputation.virustotal.file",
+          "r0collector."
+        ],
+        "source": [
+          "virustotal",
+          "collection-health",
+          "r0collector"
+        ],
+        "producer": [
+          "virustotal",
+          "collection-health",
+          "r0collector"
+        ],
+        "component": [
+          "KSword.Sandbox.Agent",
+          "KSword.Sandbox.R0Collector",
+          "r0collector",
+          "virustotal"
+        ],
+        "status": [
+          "not_configured",
+          "disabled",
+          "skipped",
+          "not_found",
+          "rate_limited",
+          "authentication_failed",
+          "timeout",
+          "lookup_failed",
+          "missing_hash",
+          "collection health",
+          "driver-health"
+        ],
+        "vtStatus": [
+          "not_configured",
+          "not_found",
+          "rate_limited",
+          "authentication_failed",
+          "timeout",
+          "lookup_failed",
+          "missing_hash"
+        ],
+        "healthStatus": [
+          "driver-health",
+          "collection-health",
+          "collection health"
+        ],
+        "noise": [
+          "true"
+        ],
+        "selfNoise": [
+          "true"
+        ],
+        "collectorSelfNoise": [
+          "true"
+        ],
+        "collectorNoise": [
+          "true"
+        ],
+        "selfNoiseClass": [
+          "collector",
+          "sandbox-agent",
+          "plumbing"
+        ],
+        "collectorNoiseClass": [
+          "collector",
+          "plumbing"
+        ],
+        "message": [
+          "collection health",
+          "driver health",
+          "R0Collector",
+          "VirusTotal not configured",
+          "VT not configured",
+          "VirusTotal rate limited",
+          "VirusTotal timeout"
+        ]
+      },
+      "evidenceFields": [
+        "eventType",
+        "path",
+        "data.valueName",
+        "data.value",
+        "data.valueData",
+        "data.newValue",
+        "processName"
+      ],
+      "tags": [
+        "persistence",
+        "registry",
+        "ifeo",
+        "silentprocessexit",
+        "user-writable",
+        "mitre"
+      ]
+    },
+    {
+      "id": "persistence-print-processor-user-writable-dll",
+      "title": "Print processor registry driver points to user-writable DLL",
+      "titleZh": "Print Processor 注册表驱动指向用户可写 DLL",
+      "severity": "high",
+      "confidence": "high",
+      "summary": "A Print Processors registry Driver value references a DLL under a user-writable directory, reducing false positives from normal print configuration enumeration.",
+      "summaryZh": "Print Processors 注册表 Driver 值引用用户可写目录下的 DLL，可减少正常打印配置枚举造成的误报。",
+      "mitreTechniqueId": "T1547.012",
+      "mitreTechniqueName": "Print Processors",
+      "eventTypes": [
+        "registry.set",
+        "registry.create",
+        "driver.registry"
+      ],
+      "pathRegex": [
+        "\\\\CurrentControlSet\\\\Control\\\\Print\\\\Environments\\\\[^\\\\]+\\\\Print Processors\\\\[^\\\\]+\\\\Driver$"
+      ],
+      "dataRegex": {
+        "value": [
+          "\\\\(?:Users\\\\[^\\\\]+\\\\(?:AppData|Downloads|Desktop|Documents)|Users\\\\Public|ProgramData|Windows\\\\Temp)\\\\.*\\.dll(?:\\b|$|[\\s\\\"])"
+        ],
+        "valueData": [
+          "\\\\(?:Users\\\\[^\\\\]+\\\\(?:AppData|Downloads|Desktop|Documents)|Users\\\\Public|ProgramData|Windows\\\\Temp)\\\\.*\\.dll(?:\\b|$|[\\s\\\"])"
+        ],
+        "newValue": [
+          "\\\\(?:Users\\\\[^\\\\]+\\\\(?:AppData|Downloads|Desktop|Documents)|Users\\\\Public|ProgramData|Windows\\\\Temp)\\\\.*\\.dll(?:\\b|$|[\\s\\\"])"
+        ],
+        "driverPath": [
+          "\\\\(?:Users\\\\[^\\\\]+\\\\(?:AppData|Downloads|Desktop|Documents)|Users\\\\Public|ProgramData|Windows\\\\Temp)\\\\.*\\.dll(?:\\b|$|[\\s\\\"])"
+        ]
+      },
+      "excludeProcessNames": [
+        "KSword.Sandbox.Agent.exe",
+        "KSword.Sandbox.R0Collector.exe"
+      ],
+      "excludeDataEquals": {
+        "operationName": [
+          "openKey",
+          "queryKey",
+          "queryValue",
+          "enumerateKey",
+          "enumerateValue",
+          "closeKey"
+        ],
+        "operation": [
+          "openKey",
+          "queryKey",
+          "queryValue",
+          "enumerateKey",
+          "enumerateValue",
+          "closeKey",
+          "read",
+          "query"
+        ]
+      },
+      "excludeDataContains": {
+        "eventType": [
+          "collection.health",
+          "enrichment.virustotal.lookup",
+          "reputation.virustotal.file",
+          "r0collector."
+        ],
+        "source": [
+          "virustotal",
+          "collection-health",
+          "r0collector"
+        ],
+        "producer": [
+          "virustotal",
+          "collection-health",
+          "r0collector"
+        ],
+        "component": [
+          "KSword.Sandbox.Agent",
+          "KSword.Sandbox.R0Collector",
+          "r0collector",
+          "virustotal"
+        ],
+        "status": [
+          "not_configured",
+          "disabled",
+          "skipped",
+          "not_found",
+          "rate_limited",
+          "authentication_failed",
+          "timeout",
+          "lookup_failed",
+          "missing_hash",
+          "collection health",
+          "driver-health"
+        ],
+        "vtStatus": [
+          "not_configured",
+          "not_found",
+          "rate_limited",
+          "authentication_failed",
+          "timeout",
+          "lookup_failed",
+          "missing_hash"
+        ],
+        "healthStatus": [
+          "driver-health",
+          "collection-health",
+          "collection health"
+        ],
+        "noise": [
+          "true"
+        ],
+        "selfNoise": [
+          "true"
+        ],
+        "collectorSelfNoise": [
+          "true"
+        ],
+        "collectorNoise": [
+          "true"
+        ],
+        "selfNoiseClass": [
+          "collector",
+          "sandbox-agent",
+          "plumbing"
+        ],
+        "collectorNoiseClass": [
+          "collector",
+          "plumbing"
+        ],
+        "message": [
+          "collection health",
+          "driver health",
+          "R0Collector",
+          "VirusTotal not configured",
+          "VT not configured",
+          "VirusTotal rate limited",
+          "VirusTotal timeout"
+        ]
+      },
+      "evidenceFields": [
+        "eventType",
+        "path",
+        "data.valueName",
+        "data.value",
+        "data.driverPath",
+        "processName"
+      ],
+      "tags": [
+        "persistence",
+        "registry",
+        "print-processor",
+        "dll",
+        "user-writable",
+        "mitre"
+      ]
+    },
+    {
+      "id": "persistence-winsock-provider-user-writable-dll",
+      "title": "Winsock provider catalog references user-writable DLL",
+      "titleZh": "Winsock Provider Catalog 引用用户可写 DLL",
+      "severity": "high",
+      "confidence": "medium",
+      "summary": "A Winsock provider catalog write carries a provider/library path under a user-writable directory, a constrained network-triggered persistence signal.",
+      "summaryZh": "Winsock provider catalog 写入携带用户可写目录下的 provider/library 路径，是受约束的网络触发持久化信号。",
+      "mitreTechniqueId": "T1546",
+      "mitreTechniqueName": "Event Triggered Execution",
+      "eventTypes": [
+        "registry.set",
+        "registry.create",
+        "driver.registry"
+      ],
+      "pathRegex": [
+        "\\\\WinSock2\\\\Parameters\\\\Protocol_Catalog9\\\\Catalog_Entries(?:64)?\\\\"
+      ],
+      "allDataContains": {
+        "valueName": [
+          "PackedCatalogItem",
+          "LibraryPath",
+          "ProviderPath",
+          "DllPath"
+        ]
+      },
+      "dataRegex": {
+        "value": [
+          "\\\\(?:Users\\\\[^\\\\]+\\\\(?:AppData|Downloads|Desktop|Documents)|Users\\\\Public|ProgramData|Windows\\\\Temp)\\\\.*\\.dll(?:\\b|$|[\\s\\\"])"
+        ],
+        "valueData": [
+          "\\\\(?:Users\\\\[^\\\\]+\\\\(?:AppData|Downloads|Desktop|Documents)|Users\\\\Public|ProgramData|Windows\\\\Temp)\\\\.*\\.dll(?:\\b|$|[\\s\\\"])"
+        ],
+        "newValue": [
+          "\\\\(?:Users\\\\[^\\\\]+\\\\(?:AppData|Downloads|Desktop|Documents)|Users\\\\Public|ProgramData|Windows\\\\Temp)\\\\.*\\.dll(?:\\b|$|[\\s\\\"])"
+        ],
+        "providerPath": [
+          "\\\\(?:Users\\\\[^\\\\]+\\\\(?:AppData|Downloads|Desktop|Documents)|Users\\\\Public|ProgramData|Windows\\\\Temp)\\\\.*\\.dll(?:\\b|$|[\\s\\\"])"
+        ],
+        "rawSummary": [
+          "(?=.*Winsock)(?=.*\\\\(?:Users\\\\[^\\\\]+\\\\(?:AppData|Downloads|Desktop|Documents)|Users\\\\Public|ProgramData|Windows\\\\Temp)\\\\.*\\.dll(?:\\b|$|[\\s\\\"]))"
+        ]
+      },
+      "excludeProcessNames": [
+        "KSword.Sandbox.Agent.exe",
+        "KSword.Sandbox.R0Collector.exe"
+      ],
+      "excludeDataEquals": {
+        "operationName": [
+          "openKey",
+          "queryKey",
+          "queryValue",
+          "enumerateKey",
+          "enumerateValue",
+          "closeKey"
+        ],
+        "operation": [
+          "openKey",
+          "queryKey",
+          "queryValue",
+          "enumerateKey",
+          "enumerateValue",
+          "closeKey",
+          "read",
+          "query"
+        ]
+      },
+      "excludeDataContains": {
+        "eventType": [
+          "collection.health",
+          "enrichment.virustotal.lookup",
+          "reputation.virustotal.file",
+          "r0collector."
+        ],
+        "source": [
+          "virustotal",
+          "collection-health",
+          "r0collector"
+        ],
+        "producer": [
+          "virustotal",
+          "collection-health",
+          "r0collector"
+        ],
+        "component": [
+          "KSword.Sandbox.Agent",
+          "KSword.Sandbox.R0Collector",
+          "r0collector",
+          "virustotal"
+        ],
+        "status": [
+          "not_configured",
+          "disabled",
+          "skipped",
+          "not_found",
+          "rate_limited",
+          "authentication_failed",
+          "timeout",
+          "lookup_failed",
+          "missing_hash",
+          "collection health",
+          "driver-health"
+        ],
+        "vtStatus": [
+          "not_configured",
+          "not_found",
+          "rate_limited",
+          "authentication_failed",
+          "timeout",
+          "lookup_failed",
+          "missing_hash"
+        ],
+        "healthStatus": [
+          "driver-health",
+          "collection-health",
+          "collection health"
+        ],
+        "noise": [
+          "true"
+        ],
+        "selfNoise": [
+          "true"
+        ],
+        "collectorSelfNoise": [
+          "true"
+        ],
+        "collectorNoise": [
+          "true"
+        ],
+        "selfNoiseClass": [
+          "collector",
+          "sandbox-agent",
+          "plumbing"
+        ],
+        "collectorNoiseClass": [
+          "collector",
+          "plumbing"
+        ],
+        "message": [
+          "collection health",
+          "driver health",
+          "R0Collector",
+          "VirusTotal not configured",
+          "VT not configured",
+          "VirusTotal rate limited",
+          "VirusTotal timeout"
+        ]
+      },
+      "evidenceFields": [
+        "eventType",
+        "path",
+        "data.valueName",
+        "data.providerPath",
+        "data.value",
+        "data.rawSummary",
+        "processName"
+      ],
+      "tags": [
+        "persistence",
+        "registry",
+        "winsock",
+        "lsp",
+        "dll",
+        "user-writable",
+        "mitre"
+      ]
+    },
+    {
+      "id": "injection-early-bird-apc-suspended-resume-sequence",
+      "title": "Early-bird APC sequence into suspended target process",
+      "titleZh": "面向挂起目标进程的 Early-bird APC 序列",
+      "severity": "high",
+      "confidence": "high",
+      "summary": "Thread or API telemetry contains the same-field sequence CREATE_SUSPENDED, QueueUserAPC, and ResumeThread with target process/thread context.",
+      "summaryZh": "线程或 API 遥测在同一字段中包含 CREATE_SUSPENDED、QueueUserAPC 和 ResumeThread 序列，并带有目标进程/线程上下文。",
+      "mitreTechniqueId": "T1055.004",
+      "mitreTechniqueName": "Create Thread",
+      "eventTypes": [
+        "api.call",
+        "process.memory",
+        "thread.remote",
+        "driver.thread",
+        "process.remote_thread"
+      ],
+      "dataContainsAll": {
+        "operation": [
+          "CREATE_SUSPENDED",
+          "QueueUserAPC",
+          "ResumeThread"
+        ]
+      },
+      "allDataKeys": [
+        "targetProcessName",
+        "targetThreadId"
+      ],
+      "excludeProcessNames": [
+        "KSword.Sandbox.Agent.exe",
+        "KSword.Sandbox.R0Collector.exe"
+      ],
+      "excludeDataContains": {
+        "eventType": [
+          "collection.health",
+          "enrichment.virustotal.lookup",
+          "reputation.virustotal.file",
+          "r0collector."
+        ],
+        "source": [
+          "virustotal",
+          "collection-health",
+          "r0collector"
+        ],
+        "producer": [
+          "virustotal",
+          "collection-health",
+          "r0collector"
+        ],
+        "component": [
+          "KSword.Sandbox.Agent",
+          "KSword.Sandbox.R0Collector",
+          "r0collector",
+          "virustotal"
+        ],
+        "status": [
+          "not_configured",
+          "disabled",
+          "skipped",
+          "not_found",
+          "rate_limited",
+          "authentication_failed",
+          "timeout",
+          "lookup_failed",
+          "missing_hash",
+          "collection health",
+          "driver-health"
+        ],
+        "vtStatus": [
+          "not_configured",
+          "not_found",
+          "rate_limited",
+          "authentication_failed",
+          "timeout",
+          "lookup_failed",
+          "missing_hash"
+        ],
+        "healthStatus": [
+          "driver-health",
+          "collection-health",
+          "collection health"
+        ],
+        "noise": [
+          "true"
+        ],
+        "selfNoise": [
+          "true"
+        ],
+        "collectorSelfNoise": [
+          "true"
+        ],
+        "collectorNoise": [
+          "true"
+        ],
+        "selfNoiseClass": [
+          "collector",
+          "sandbox-agent",
+          "plumbing"
+        ],
+        "collectorNoiseClass": [
+          "collector",
+          "plumbing"
+        ],
+        "message": [
+          "collection health",
+          "driver health",
+          "R0Collector",
+          "VirusTotal not configured",
+          "VT not configured",
+          "VirusTotal rate limited",
+          "VirusTotal timeout"
+        ]
+      },
+      "evidenceFields": [
+        "eventType",
+        "processName",
+        "data.operation",
+        "data.targetProcessName",
+        "data.targetProcessId",
+        "data.targetThreadId"
+      ],
+      "tags": [
+        "injection",
+        "apc",
+        "early-bird",
+        "thread",
+        "mitre"
+      ]
+    },
+    {
+      "id": "injection-process-herpaderping-delete-pending-image",
+      "title": "Delete-pending image mutation before process creation",
+      "titleZh": "进程创建前出现 delete-pending 镜像变形",
+      "severity": "high",
+      "confidence": "medium",
+      "summary": "File/process telemetry correlates image overwrite or delete-pending mutation with process creation from a user-writable image path.",
+      "summaryZh": "文件/进程遥测将镜像覆盖或 delete-pending 变形与来自用户可写镜像路径的进程创建关联起来。",
+      "mitreTechniqueId": "T1055",
+      "mitreTechniqueName": "Process Injection",
+      "eventTypes": [
+        "api.call",
+        "process.image",
+        "file.image",
+        "process.start",
+        "driver.process"
+      ],
+      "dataContainsAll": {
+        "operation": [
+          "CreateFile",
+          "WriteFile",
+          "SetFileInformationByHandle",
+          "CreateProcess"
+        ]
+      },
+      "allDataContains": {
+        "imageMutation": [
+          "delete-pending",
+          "rename-pending",
+          "image-overwrite",
+          "herpaderp"
+        ]
+      },
+      "dataRegex": {
+        "imagePath": [
+          "\\\\(?:Users\\\\[^\\\\]+\\\\(?:AppData|Downloads|Desktop|Documents)|Users\\\\Public|ProgramData|Windows\\\\Temp)\\\\.*\\.(?:exe|dll|scr|com)(?:\\b|$|[\\s\\\"])"
+        ],
+        "targetImagePath": [
+          "\\\\(?:Users\\\\[^\\\\]+\\\\(?:AppData|Downloads|Desktop|Documents)|Users\\\\Public|ProgramData|Windows\\\\Temp)\\\\.*\\.(?:exe|dll|scr|com)(?:\\b|$|[\\s\\\"])"
+        ]
+      },
+      "excludeProcessNames": [
+        "KSword.Sandbox.Agent.exe",
+        "KSword.Sandbox.R0Collector.exe"
+      ],
+      "excludeDataContains": {
+        "eventType": [
+          "collection.health",
+          "enrichment.virustotal.lookup",
+          "reputation.virustotal.file",
+          "r0collector."
+        ],
+        "source": [
+          "virustotal",
+          "collection-health",
+          "r0collector"
+        ],
+        "producer": [
+          "virustotal",
+          "collection-health",
+          "r0collector"
+        ],
+        "component": [
+          "KSword.Sandbox.Agent",
+          "KSword.Sandbox.R0Collector",
+          "r0collector",
+          "virustotal"
+        ],
+        "status": [
+          "not_configured",
+          "disabled",
+          "skipped",
+          "not_found",
+          "rate_limited",
+          "authentication_failed",
+          "timeout",
+          "lookup_failed",
+          "missing_hash",
+          "collection health",
+          "driver-health"
+        ],
+        "vtStatus": [
+          "not_configured",
+          "not_found",
+          "rate_limited",
+          "authentication_failed",
+          "timeout",
+          "lookup_failed",
+          "missing_hash"
+        ],
+        "healthStatus": [
+          "driver-health",
+          "collection-health",
+          "collection health"
+        ],
+        "noise": [
+          "true"
+        ],
+        "selfNoise": [
+          "true"
+        ],
+        "collectorSelfNoise": [
+          "true"
+        ],
+        "collectorNoise": [
+          "true"
+        ],
+        "selfNoiseClass": [
+          "collector",
+          "sandbox-agent",
+          "plumbing"
+        ],
+        "collectorNoiseClass": [
+          "collector",
+          "plumbing"
+        ],
+        "message": [
+          "collection health",
+          "driver health",
+          "R0Collector",
+          "VirusTotal not configured",
+          "VT not configured",
+          "VirusTotal rate limited",
+          "VirusTotal timeout"
+        ]
+      },
+      "evidenceFields": [
+        "eventType",
+        "processName",
+        "data.operation",
+        "data.imageMutation",
+        "data.imagePath",
+        "data.targetProcessName"
+      ],
+      "tags": [
+        "injection",
+        "process-image",
+        "herpaderping",
+        "delete-pending",
+        "user-writable",
+        "mitre"
+      ]
+    },
+    {
+      "id": "lateral-winrm-wsman-remote-shell-command",
+      "title": "WinRM WSMan remote shell command over HTTP",
+      "titleZh": "通过 HTTP 的 WinRM WSMan 远程 Shell 命令",
+      "severity": "high",
+      "confidence": "high",
+      "summary": "HTTP/PCAP metadata shows a WSMan POST to a WinRM port with CreateShell or Command SOAP action evidence.",
+      "summaryZh": "HTTP/PCAP 元数据显示发往 WinRM 端口的 WSMan POST，并包含 CreateShell 或 Command SOAP action 证据。",
+      "mitreTechniqueId": "T1021.006",
+      "mitreTechniqueName": "Windows Remote Management",
+      "eventTypes": [
+        "http.request",
+        "network.http",
+        "pcap.http"
+      ],
+      "allDataContains": {
+        "method": [
+          "POST"
+        ],
+        "uri": [
+          "/wsman"
+        ],
+        "action": [
+          "CreateShell",
+          "Command",
+          "Receive",
+          "http://schemas.microsoft.com/wbem/wsman/1/windows/shell"
+        ]
+      },
+      "allDataKeys": [
+        "host",
+        "uri",
+        "destinationPort"
+      ],
+      "dataNumericRanges": {
+        "destinationPort": [
+          {
+            "min": 5985,
+            "max": 5986
+          }
+        ],
+        "remotePort": [
+          {
+            "min": 5985,
+            "max": 5986
+          }
+        ]
+      },
+      "excludeProcessNames": [
+        "KSword.Sandbox.Agent.exe",
+        "KSword.Sandbox.R0Collector.exe"
+      ],
+      "excludeDataContains": {
+        "eventType": [
+          "collection.health",
+          "enrichment.virustotal.lookup",
+          "reputation.virustotal.file",
+          "r0collector."
+        ],
+        "source": [
+          "virustotal",
+          "collection-health",
+          "r0collector"
+        ],
+        "producer": [
+          "virustotal",
+          "collection-health",
+          "r0collector"
+        ],
+        "component": [
+          "KSword.Sandbox.Agent",
+          "KSword.Sandbox.R0Collector",
+          "r0collector",
+          "virustotal"
+        ],
+        "status": [
+          "not_configured",
+          "disabled",
+          "skipped",
+          "not_found",
+          "rate_limited",
+          "authentication_failed",
+          "timeout",
+          "lookup_failed",
+          "missing_hash",
+          "collection health",
+          "driver-health"
+        ],
+        "vtStatus": [
+          "not_configured",
+          "not_found",
+          "rate_limited",
+          "authentication_failed",
+          "timeout",
+          "lookup_failed",
+          "missing_hash"
+        ],
+        "healthStatus": [
+          "driver-health",
+          "collection-health",
+          "collection health"
+        ],
+        "noise": [
+          "true"
+        ],
+        "selfNoise": [
+          "true"
+        ],
+        "collectorSelfNoise": [
+          "true"
+        ],
+        "collectorNoise": [
+          "true"
+        ],
+        "selfNoiseClass": [
+          "collector",
+          "sandbox-agent",
+          "plumbing"
+        ],
+        "collectorNoiseClass": [
+          "collector",
+          "plumbing"
+        ],
+        "message": [
+          "collection health",
+          "driver health",
+          "R0Collector",
+          "VirusTotal not configured",
+          "VT not configured",
+          "VirusTotal rate limited",
+          "VirusTotal timeout"
+        ]
+      },
+      "evidenceFields": [
+        "eventType",
+        "data.host",
+        "data.uri",
+        "data.method",
+        "data.action",
+        "data.destinationPort",
+        "destinationIp"
+      ],
+      "tags": [
+        "lateral-movement",
+        "winrm",
+        "wsman",
+        "remote-shell",
+        "http",
+        "mitre"
+      ]
+    },
+    {
+      "id": "lateral-smb-atsvc-named-pipe-task-registration",
+      "title": "SMB ATSVC named pipe remote task registration",
+      "titleZh": "SMB ATSVC 命名管道远程任务注册",
+      "severity": "high",
+      "confidence": "high",
+      "summary": "SMB or driver network telemetry reports the ATSVC named pipe with remote scheduled-task registration or legacy job-add operation context.",
+      "summaryZh": "SMB 或驱动网络遥测报告 ATSVC 命名管道，并带有远程计划任务注册或旧式 job-add 操作上下文。",
+      "mitreTechniqueId": "T1053.005",
+      "mitreTechniqueName": "Scheduled Task",
+      "eventTypes": [
+        "pcap.smb",
+        "smb.pipe",
+        "driver.network",
+        "network.flow"
+      ],
+      "allDataContains": {
+        "pipeName": [
+          "\\PIPE\\atsvc",
+          "atsvc"
+        ],
+        "operation": [
+          "SchRpcRegisterTask",
+          "SchRpcRun",
+          "NetrJobAdd",
+          "remote scheduled task"
+        ]
+      },
+      "allDataKeys": [
+        "destinationIp",
+        "pipeName"
+      ],
+      "excludeProcessNames": [
+        "KSword.Sandbox.Agent.exe",
+        "KSword.Sandbox.R0Collector.exe"
+      ],
+      "excludeDataContains": {
+        "eventType": [
+          "collection.health",
+          "enrichment.virustotal.lookup",
+          "reputation.virustotal.file",
+          "r0collector."
+        ],
+        "source": [
+          "virustotal",
+          "collection-health",
+          "r0collector"
+        ],
+        "producer": [
+          "virustotal",
+          "collection-health",
+          "r0collector"
+        ],
+        "component": [
+          "KSword.Sandbox.Agent",
+          "KSword.Sandbox.R0Collector",
+          "r0collector",
+          "virustotal"
+        ],
+        "status": [
+          "not_configured",
+          "disabled",
+          "skipped",
+          "not_found",
+          "rate_limited",
+          "authentication_failed",
+          "timeout",
+          "lookup_failed",
+          "missing_hash",
+          "collection health",
+          "driver-health"
+        ],
+        "vtStatus": [
+          "not_configured",
+          "not_found",
+          "rate_limited",
+          "authentication_failed",
+          "timeout",
+          "lookup_failed",
+          "missing_hash"
+        ],
+        "healthStatus": [
+          "driver-health",
+          "collection-health",
+          "collection health"
+        ],
+        "noise": [
+          "true"
+        ],
+        "selfNoise": [
+          "true"
+        ],
+        "collectorSelfNoise": [
+          "true"
+        ],
+        "collectorNoise": [
+          "true"
+        ],
+        "selfNoiseClass": [
+          "collector",
+          "sandbox-agent",
+          "plumbing"
+        ],
+        "collectorNoiseClass": [
+          "collector",
+          "plumbing"
+        ],
+        "message": [
+          "collection health",
+          "driver health",
+          "R0Collector",
+          "VirusTotal not configured",
+          "VT not configured",
+          "VirusTotal rate limited",
+          "VirusTotal timeout"
+        ]
+      },
+      "evidenceFields": [
+        "eventType",
+        "data.sourceIp",
+        "data.destinationIp",
+        "data.pipeName",
+        "data.operation",
+        "data.shareName"
+      ],
+      "tags": [
+        "lateral-movement",
+        "smb",
+        "named-pipe",
+        "atsvc",
+        "scheduled-task",
+        "mitre"
+      ]
+    },
+    {
+      "id": "lateral-rdp-tscon-system-session-hijack",
+      "title": "TSCON RDP session switch from elevated context",
+      "titleZh": "高权限上下文中的 TSCON RDP 会话切换",
+      "severity": "high",
+      "confidence": "medium",
+      "summary": "A tscon command switches a numbered session to console or rdp-tcp from an elevated or SYSTEM-like context, a constrained RDP session hijack indicator.",
+      "summaryZh": "tscon 命令在高权限或 SYSTEM 类上下文中将编号会话切换到 console/rdp-tcp，是受约束的 RDP 会话劫持指标。",
+      "mitreTechniqueId": "T1021.001",
+      "mitreTechniqueName": "Remote Desktop Protocol",
+      "eventTypes": [
+        "process.start",
+        "process.new"
+      ],
+      "commandLineRegex": [
+        "(?=.*\\btscon(?:\\.exe)?\\b)(?=.*\\b\\d+\\b)(?=.*\\s/dest:(?:console|rdp-tcp#\\d+)\\b)"
+      ],
+      "dataContains": {
+        "tokenUser": [
+          "NT AUTHORITY\\SYSTEM",
+          "SYSTEM"
+        ],
+        "integrityLevel": [
+          "System",
+          "High"
+        ]
+      },
+      "excludeProcessNames": [
+        "KSword.Sandbox.Agent.exe",
+        "KSword.Sandbox.R0Collector.exe"
+      ],
+      "excludeCommandLineContains": [
+        "KSword.Sandbox.Agent",
+        "KSword.Sandbox.R0Collector",
+        "SmokeTests",
+        "Invoke-SandboxSmokeTest",
+        "Test-ReleaseReadiness"
+      ],
+      "excludeDataContains": {
+        "eventType": [
+          "collection.health",
+          "enrichment.virustotal.lookup",
+          "reputation.virustotal.file",
+          "r0collector."
+        ],
+        "source": [
+          "virustotal",
+          "collection-health",
+          "r0collector"
+        ],
+        "producer": [
+          "virustotal",
+          "collection-health",
+          "r0collector"
+        ],
+        "component": [
+          "KSword.Sandbox.Agent",
+          "KSword.Sandbox.R0Collector",
+          "r0collector",
+          "virustotal"
+        ],
+        "status": [
+          "not_configured",
+          "disabled",
+          "skipped",
+          "not_found",
+          "rate_limited",
+          "authentication_failed",
+          "timeout",
+          "lookup_failed",
+          "missing_hash",
+          "collection health",
+          "driver-health"
+        ],
+        "vtStatus": [
+          "not_configured",
+          "not_found",
+          "rate_limited",
+          "authentication_failed",
+          "timeout",
+          "lookup_failed",
+          "missing_hash"
+        ],
+        "healthStatus": [
+          "driver-health",
+          "collection-health",
+          "collection health"
+        ],
+        "noise": [
+          "true"
+        ],
+        "selfNoise": [
+          "true"
+        ],
+        "collectorSelfNoise": [
+          "true"
+        ],
+        "collectorNoise": [
+          "true"
+        ],
+        "selfNoiseClass": [
+          "collector",
+          "sandbox-agent",
+          "plumbing"
+        ],
+        "collectorNoiseClass": [
+          "collector",
+          "plumbing"
+        ],
+        "message": [
+          "collection health",
+          "driver health",
+          "R0Collector",
+          "VirusTotal not configured",
+          "VT not configured",
+          "VirusTotal rate limited",
+          "VirusTotal timeout"
+        ]
+      },
+      "evidenceFields": [
+        "eventType",
+        "processName",
+        "commandLine",
+        "data.tokenUser",
+        "data.integrityLevel",
+        "parentProcessId"
+      ],
+      "tags": [
+        "lateral-movement",
+        "rdp",
+        "tscon",
+        "session-hijack",
+        "mitre"
+      ]
+    },
+    {
+      "id": "anti-sandbox-firmware-wmi-vm-gate",
+      "title": "Firmware WMI VM check gates execution",
+      "titleZh": "固件 WMI 虚拟机检查控制执行路径",
+      "severity": "high",
+      "confidence": "high",
+      "summary": "A command probes BIOS, computer-system, baseboard, or SMBIOS WMI classes for VM vendor strings while the event records exit, sleep, or gate behavior.",
+      "summaryZh": "命令探测 BIOS、ComputerSystem、BaseBoard 或 SMBIOS WMI 类中的虚拟机厂商字符串，同时事件记录退出、睡眠或门控行为。",
+      "mitreTechniqueId": "T1497.001",
+      "mitreTechniqueName": "System Checks",
+      "eventTypes": [
+        "process.start",
+        "process.new",
+        "antiAnalysis.sandboxCheck"
+      ],
+      "commandLineRegex": [
+        "(?=.*\\b(?:wmic|powershell|pwsh)(?:\\.exe)?\\b)(?=.*(?:Win32_BIOS|Win32_ComputerSystem|Win32_BaseBoard|MSSMBios_RawSMBiosTables))(?=.*(?:VMware|VirtualBox|VBOX|QEMU|KVM|Hyper-V|Virtual Machine|Xen))"
+      ],
+      "allDataContains": {
+        "action": [
+          "exit",
+          "terminate",
+          "sleep",
+          "delay",
+          "gate"
+        ]
+      },
+      "excludeProcessNames": [
+        "KSword.Sandbox.Agent.exe",
+        "KSword.Sandbox.R0Collector.exe"
+      ],
+      "excludeCommandLineContains": [
+        "KSword.Sandbox.Agent",
+        "KSword.Sandbox.R0Collector",
+        "SmokeTests",
+        "Invoke-SandboxSmokeTest",
+        "Test-ReleaseReadiness"
+      ],
+      "excludeDataContains": {
+        "eventType": [
+          "collection.health",
+          "enrichment.virustotal.lookup",
+          "reputation.virustotal.file",
+          "r0collector."
+        ],
+        "source": [
+          "virustotal",
+          "collection-health",
+          "r0collector"
+        ],
+        "producer": [
+          "virustotal",
+          "collection-health",
+          "r0collector"
+        ],
+        "component": [
+          "KSword.Sandbox.Agent",
+          "KSword.Sandbox.R0Collector",
+          "r0collector",
+          "virustotal"
+        ],
+        "status": [
+          "not_configured",
+          "disabled",
+          "skipped",
+          "not_found",
+          "rate_limited",
+          "authentication_failed",
+          "timeout",
+          "lookup_failed",
+          "missing_hash",
+          "collection health",
+          "driver-health"
+        ],
+        "vtStatus": [
+          "not_configured",
+          "not_found",
+          "rate_limited",
+          "authentication_failed",
+          "timeout",
+          "lookup_failed",
+          "missing_hash"
+        ],
+        "healthStatus": [
+          "driver-health",
+          "collection-health",
+          "collection health"
+        ],
+        "noise": [
+          "true"
+        ],
+        "selfNoise": [
+          "true"
+        ],
+        "collectorSelfNoise": [
+          "true"
+        ],
+        "collectorNoise": [
+          "true"
+        ],
+        "selfNoiseClass": [
+          "collector",
+          "sandbox-agent",
+          "plumbing"
+        ],
+        "collectorNoiseClass": [
+          "collector",
+          "plumbing"
+        ],
+        "message": [
+          "collection health",
+          "driver health",
+          "R0Collector",
+          "VirusTotal not configured",
+          "VT not configured",
+          "VirusTotal rate limited",
+          "VirusTotal timeout"
+        ]
+      },
+      "evidenceFields": [
+        "eventType",
+        "processName",
+        "commandLine",
+        "data.action",
+        "data.check",
+        "data.vendor"
+      ],
+      "tags": [
+        "anti-sandbox",
+        "anti-analysis",
+        "wmi",
+        "firmware",
+        "vm-check",
+        "mitre"
+      ]
+    },
+    {
+      "id": "anti-sandbox-short-uptime-exit-gate",
+      "title": "Short system uptime gates execution",
+      "titleZh": "短系统运行时间控制执行路径",
+      "severity": "high",
+      "confidence": "high",
+      "summary": "Anti-analysis telemetry records an uptime check below ten minutes combined with exit, terminate, sleep, delay, or gate behavior.",
+      "summaryZh": "反分析遥测记录低于十分钟的 uptime 检查，并伴随退出、终止、睡眠、延迟或门控行为。",
+      "mitreTechniqueId": "T1497.003",
+      "mitreTechniqueName": "Time Based Evasion",
+      "eventTypes": [
+        "antiAnalysis.sandboxCheck",
+        "system.uptime",
+        "api.call"
+      ],
+      "allDataContains": {
+        "check": [
+          "uptime",
+          "GetTickCount",
+          "QueryUnbiasedInterruptTime",
+          "boot time"
+        ],
+        "action": [
+          "exit",
+          "terminate",
+          "sleep",
+          "delay",
+          "gate"
+        ]
+      },
+      "allDataNumericRanges": {
+        "uptimeSeconds": [
+          {
+            "min": 0,
+            "max": 600
+          }
+        ]
+      },
+      "excludeProcessNames": [
+        "KSword.Sandbox.Agent.exe",
+        "KSword.Sandbox.R0Collector.exe"
+      ],
+      "excludeDataContains": {
+        "eventType": [
+          "collection.health",
+          "enrichment.virustotal.lookup",
+          "reputation.virustotal.file",
+          "r0collector."
+        ],
+        "source": [
+          "virustotal",
+          "collection-health",
+          "r0collector"
+        ],
+        "producer": [
+          "virustotal",
+          "collection-health",
+          "r0collector"
+        ],
+        "component": [
+          "KSword.Sandbox.Agent",
+          "KSword.Sandbox.R0Collector",
+          "r0collector",
+          "virustotal"
+        ],
+        "status": [
+          "not_configured",
+          "disabled",
+          "skipped",
+          "not_found",
+          "rate_limited",
+          "authentication_failed",
+          "timeout",
+          "lookup_failed",
+          "missing_hash",
+          "collection health",
+          "driver-health"
+        ],
+        "vtStatus": [
+          "not_configured",
+          "not_found",
+          "rate_limited",
+          "authentication_failed",
+          "timeout",
+          "lookup_failed",
+          "missing_hash"
+        ],
+        "healthStatus": [
+          "driver-health",
+          "collection-health",
+          "collection health"
+        ],
+        "noise": [
+          "true"
+        ],
+        "selfNoise": [
+          "true"
+        ],
+        "collectorSelfNoise": [
+          "true"
+        ],
+        "collectorNoise": [
+          "true"
+        ],
+        "selfNoiseClass": [
+          "collector",
+          "sandbox-agent",
+          "plumbing"
+        ],
+        "collectorNoiseClass": [
+          "collector",
+          "plumbing"
+        ],
+        "message": [
+          "collection health",
+          "driver health",
+          "R0Collector",
+          "VirusTotal not configured",
+          "VT not configured",
+          "VirusTotal rate limited",
+          "VirusTotal timeout"
+        ]
+      },
+      "evidenceFields": [
+        "eventType",
+        "processName",
+        "data.check",
+        "data.action",
+        "data.uptimeSeconds",
+        "data.thresholdSeconds"
+      ],
+      "tags": [
+        "anti-sandbox",
+        "anti-analysis",
+        "uptime",
+        "time-evasion",
+        "mitre"
+      ]
+    },
+    {
+      "id": "download-execute-mounted-image-lnk-payload",
+      "title": "Downloaded disk image or archive launches LNK/script payload",
+      "titleZh": "下载的磁盘镜像或压缩包启动 LNK/脚本载荷",
+      "severity": "high",
+      "confidence": "high",
+      "summary": "A normalized download-execute row ties a user-downloaded ISO/IMG/VHD/archive container to execution of an LNK, executable, or script payload.",
+      "summaryZh": "规范化 download-execute 行将用户下载的 ISO/IMG/VHD/压缩包容器与 LNK、可执行文件或脚本载荷的执行关联起来。",
+      "mitreTechniqueId": "T1204.002",
+      "mitreTechniqueName": "Malicious File",
+      "eventTypes": [
+        "download.execute",
+        "behavior.download_execute",
+        "file.downloaded.executed",
+        "process.start"
+      ],
+      "allDataKeys": [
+        "containerPath",
+        "executedPath"
+      ],
+      "dataRegex": {
+        "containerPath": [
+          "\\\\Users\\\\[^\\\\]+\\\\(?:Downloads|Desktop|Documents)\\\\.*\\.(?:iso|img|vhd|vhdx|zip|rar|7z)(?:\\b|$|[\\s\\\"])"
+        ],
+        "executedPath": [
+          ".*\\.(?:lnk|exe|dll|ps1|vbs|js|jse|hta|bat|cmd|scr)(?:\\b|$|[\\s\\\"])"
+        ]
+      },
+      "excludeProcessNames": [
+        "KSword.Sandbox.Agent.exe",
+        "KSword.Sandbox.R0Collector.exe"
+      ],
+      "excludeCommandLineContains": [
+        "KSword.Sandbox.Agent",
+        "KSword.Sandbox.R0Collector",
+        "SmokeTests",
+        "Invoke-SandboxSmokeTest",
+        "Test-ReleaseReadiness"
+      ],
+      "excludeDataContains": {
+        "eventType": [
+          "collection.health",
+          "enrichment.virustotal.lookup",
+          "reputation.virustotal.file",
+          "r0collector."
+        ],
+        "source": [
+          "virustotal",
+          "collection-health",
+          "r0collector"
+        ],
+        "producer": [
+          "virustotal",
+          "collection-health",
+          "r0collector"
+        ],
+        "component": [
+          "KSword.Sandbox.Agent",
+          "KSword.Sandbox.R0Collector",
+          "r0collector",
+          "virustotal"
+        ],
+        "status": [
+          "not_configured",
+          "disabled",
+          "skipped",
+          "not_found",
+          "rate_limited",
+          "authentication_failed",
+          "timeout",
+          "lookup_failed",
+          "missing_hash",
+          "collection health",
+          "driver-health"
+        ],
+        "vtStatus": [
+          "not_configured",
+          "not_found",
+          "rate_limited",
+          "authentication_failed",
+          "timeout",
+          "lookup_failed",
+          "missing_hash"
+        ],
+        "healthStatus": [
+          "driver-health",
+          "collection-health",
+          "collection health"
+        ],
+        "noise": [
+          "true"
+        ],
+        "selfNoise": [
+          "true"
+        ],
+        "collectorSelfNoise": [
+          "true"
+        ],
+        "collectorNoise": [
+          "true"
+        ],
+        "selfNoiseClass": [
+          "collector",
+          "sandbox-agent",
+          "plumbing"
+        ],
+        "collectorNoiseClass": [
+          "collector",
+          "plumbing"
+        ],
+        "message": [
+          "collection health",
+          "driver health",
+          "R0Collector",
+          "VirusTotal not configured",
+          "VT not configured",
+          "VirusTotal rate limited",
+          "VirusTotal timeout"
+        ]
+      },
+      "evidenceFields": [
+        "eventType",
+        "data.containerPath",
+        "data.downloadPath",
+        "data.executedPath",
+        "data.zoneIdentifier",
+        "processName"
+      ],
+      "tags": [
+        "download-execute",
+        "mounted-image",
+        "archive",
+        "lnk",
+        "execution",
+        "mitre"
+      ]
+    },
+    {
+      "id": "download-execute-script-interpreter-motw",
+      "title": "Script interpreter launched Mark-of-the-Web download",
+      "titleZh": "脚本解释器启动带 Mark-of-the-Web 的下载文件",
+      "severity": "high",
+      "confidence": "high",
+      "summary": "A script interpreter or LOLBin command executes a user-downloaded script/HTA/LNK with Zone.Identifier evidence instead of relying on a bare command substring.",
+      "summaryZh": "脚本解释器或 LOLBin 命令执行带 Zone.Identifier 证据的用户下载脚本/HTA/LNK，而不是仅依赖宽泛命令子串。",
+      "mitreTechniqueId": "T1204.002",
+      "mitreTechniqueName": "Malicious File",
+      "eventTypes": [
+        "process.start",
+        "process.new",
+        "download.execute"
+      ],
+      "commandLineRegex": [
+        "(?=.*\\b(?:powershell|pwsh|wscript|cscript|mshta|rundll32|regsvr32)(?:\\.exe)?\\b)(?=.*\\\\Users\\\\[^\\\\]+\\\\(?:Downloads|Desktop|Documents|AppData\\\\Local\\\\Microsoft\\\\Windows\\\\INetCache)\\\\.*\\.(?:ps1|vbs|js|jse|hta|lnk|sct|dll)(?:\\b|$|[\\s\\\"]))"
+      ],
+      "allDataKeys": [
+        "zoneIdentifier",
+        "downloadPath"
+      ],
+      "allDataContains": {
+        "zoneIdentifier": [
+          "ZoneId=3",
+          "Mark-of-the-Web",
+          "MOTW"
+        ]
+      },
+      "dataRegex": {
+        "downloadPath": [
+          "\\\\Users\\\\[^\\\\]+\\\\(?:Downloads|Desktop|Documents|AppData\\\\Local\\\\Microsoft\\\\Windows\\\\INetCache)\\\\.*\\.(?:ps1|vbs|js|jse|hta|lnk|sct|dll)(?:\\b|$)"
+        ]
+      },
+      "excludeProcessNames": [
+        "KSword.Sandbox.Agent.exe",
+        "KSword.Sandbox.R0Collector.exe"
+      ],
+      "excludeCommandLineContains": [
+        "KSword.Sandbox.Agent",
+        "KSword.Sandbox.R0Collector",
+        "SmokeTests",
+        "Invoke-SandboxSmokeTest",
+        "Test-ReleaseReadiness"
+      ],
+      "excludeDataContains": {
+        "eventType": [
+          "collection.health",
+          "enrichment.virustotal.lookup",
+          "reputation.virustotal.file",
+          "r0collector."
+        ],
+        "source": [
+          "virustotal",
+          "collection-health",
+          "r0collector"
+        ],
+        "producer": [
+          "virustotal",
+          "collection-health",
+          "r0collector"
+        ],
+        "component": [
+          "KSword.Sandbox.Agent",
+          "KSword.Sandbox.R0Collector",
+          "r0collector",
+          "virustotal"
+        ],
+        "status": [
+          "not_configured",
+          "disabled",
+          "skipped",
+          "not_found",
+          "rate_limited",
+          "authentication_failed",
+          "timeout",
+          "lookup_failed",
+          "missing_hash",
+          "collection health",
+          "driver-health"
+        ],
+        "vtStatus": [
+          "not_configured",
+          "not_found",
+          "rate_limited",
+          "authentication_failed",
+          "timeout",
+          "lookup_failed",
+          "missing_hash"
+        ],
+        "healthStatus": [
+          "driver-health",
+          "collection-health",
+          "collection health"
+        ],
+        "noise": [
+          "true"
+        ],
+        "selfNoise": [
+          "true"
+        ],
+        "collectorSelfNoise": [
+          "true"
+        ],
+        "collectorNoise": [
+          "true"
+        ],
+        "selfNoiseClass": [
+          "collector",
+          "sandbox-agent",
+          "plumbing"
+        ],
+        "collectorNoiseClass": [
+          "collector",
+          "plumbing"
+        ],
+        "message": [
+          "collection health",
+          "driver health",
+          "R0Collector",
+          "VirusTotal not configured",
+          "VT not configured",
+          "VirusTotal rate limited",
+          "VirusTotal timeout"
+        ]
+      },
+      "evidenceFields": [
+        "eventType",
+        "processName",
+        "commandLine",
+        "data.downloadPath",
+        "data.zoneIdentifier",
+        "data.referrer"
+      ],
+      "tags": [
+        "download-execute",
+        "script",
+        "motw",
+        "execution",
+        "mitre"
+      ]
+    },
+    {
+      "id": "c2-websocket-upgrade-nonbrowser-user-agent",
+      "title": "WebSocket upgrade with non-browser automation user agent",
+      "titleZh": "带非浏览器自动化 User-Agent 的 WebSocket Upgrade",
+      "severity": "high",
+      "confidence": "high",
+      "summary": "HTTP metadata shows a WebSocket upgrade to a concrete host/URI from a scripting, CLI, or automation user agent often used by implants.",
+      "summaryZh": "HTTP 元数据显示来自脚本、CLI 或自动化 User-Agent 的 WebSocket upgrade，且包含具体 host/URI，常见于植入体通信。",
+      "mitreTechniqueId": "T1071.001",
+      "mitreTechniqueName": "Web Protocols",
+      "eventTypes": [
+        "http.request",
+        "network.http",
+        "pcap.http"
+      ],
+      "allDataContains": {
+        "method": [
+          "GET"
+        ],
+        "headers": [
+          "Upgrade: websocket",
+          "Sec-WebSocket-Key",
+          "websocket"
+        ]
+      },
+      "allDataKeys": [
+        "host",
+        "uri",
+        "userAgent"
+      ],
+      "dataRegex": {
+        "userAgent": [
+          "(?:python-requests|curl|Wget|Go-http-client|PowerShell|WinHTTP|libwww|okhttp|Java/|node-fetch)"
+        ]
+      },
+      "excludeProcessNames": [
+        "KSword.Sandbox.Agent.exe",
+        "KSword.Sandbox.R0Collector.exe"
+      ],
+      "excludeDataContains": {
+        "eventType": [
+          "collection.health",
+          "enrichment.virustotal.lookup",
+          "reputation.virustotal.file",
+          "r0collector."
+        ],
+        "source": [
+          "virustotal",
+          "collection-health",
+          "r0collector"
+        ],
+        "producer": [
+          "virustotal",
+          "collection-health",
+          "r0collector"
+        ],
+        "component": [
+          "KSword.Sandbox.Agent",
+          "KSword.Sandbox.R0Collector",
+          "r0collector",
+          "virustotal"
+        ],
+        "status": [
+          "not_configured",
+          "disabled",
+          "skipped",
+          "not_found",
+          "rate_limited",
+          "authentication_failed",
+          "timeout",
+          "lookup_failed",
+          "missing_hash",
+          "collection health",
+          "driver-health"
+        ],
+        "vtStatus": [
+          "not_configured",
+          "not_found",
+          "rate_limited",
+          "authentication_failed",
+          "timeout",
+          "lookup_failed",
+          "missing_hash"
+        ],
+        "healthStatus": [
+          "driver-health",
+          "collection-health",
+          "collection health"
+        ],
+        "noise": [
+          "true"
+        ],
+        "selfNoise": [
+          "true"
+        ],
+        "collectorSelfNoise": [
+          "true"
+        ],
+        "collectorNoise": [
+          "true"
+        ],
+        "selfNoiseClass": [
+          "collector",
+          "sandbox-agent",
+          "plumbing"
+        ],
+        "collectorNoiseClass": [
+          "collector",
+          "plumbing"
+        ],
+        "message": [
+          "collection health",
+          "driver health",
+          "R0Collector",
+          "VirusTotal not configured",
+          "VT not configured",
+          "VirusTotal rate limited",
+          "VirusTotal timeout"
+        ]
+      },
+      "evidenceFields": [
+        "eventType",
+        "data.host",
+        "data.uri",
+        "data.method",
+        "data.headers",
+        "data.userAgent",
+        "destinationIp"
+      ],
+      "tags": [
+        "network",
+        "http",
+        "websocket",
+        "c2",
+        "user-agent",
+        "mitre"
+      ]
+    },
+    {
+      "id": "c2-doh-post-high-entropy-query",
+      "title": "DoH POST carrying high-entropy DNS query payload",
+      "titleZh": "DoH POST 携带高熵 DNS 查询载荷",
+      "severity": "high",
+      "confidence": "high",
+      "summary": "HTTP/PCAP metadata records a DNS-over-HTTPS POST to /dns-query with DNS message content and an unusually long or encoded query payload.",
+      "summaryZh": "HTTP/PCAP 元数据记录发往 /dns-query 的 DNS-over-HTTPS POST，具有 DNS message 内容类型和异常长或编码的查询载荷。",
+      "mitreTechniqueId": "T1071.004",
+      "mitreTechniqueName": "DNS",
+      "eventTypes": [
+        "http.request",
+        "network.http",
+        "pcap.http"
+      ],
+      "allDataContains": {
+        "method": [
+          "POST"
+        ],
+        "uri": [
+          "/dns-query"
+        ],
+        "contentType": [
+          "application/dns-message",
+          "application/dns-json"
+        ]
+      },
+      "allDataKeys": [
+        "host",
+        "uri",
+        "queryLength"
+      ],
+      "dataNumericRanges": {
+        "queryLength": [
+          {
+            "min": 80
+          }
+        ],
+        "encodedQueryLength": [
+          {
+            "min": 80
+          }
+        ]
+      },
+      "excludeProcessNames": [
+        "KSword.Sandbox.Agent.exe",
+        "KSword.Sandbox.R0Collector.exe"
+      ],
+      "excludeDataContains": {
+        "eventType": [
+          "collection.health",
+          "enrichment.virustotal.lookup",
+          "reputation.virustotal.file",
+          "r0collector."
+        ],
+        "source": [
+          "virustotal",
+          "collection-health",
+          "r0collector"
+        ],
+        "producer": [
+          "virustotal",
+          "collection-health",
+          "r0collector"
+        ],
+        "component": [
+          "KSword.Sandbox.Agent",
+          "KSword.Sandbox.R0Collector",
+          "r0collector",
+          "virustotal"
+        ],
+        "status": [
+          "not_configured",
+          "disabled",
+          "skipped",
+          "not_found",
+          "rate_limited",
+          "authentication_failed",
+          "timeout",
+          "lookup_failed",
+          "missing_hash",
+          "collection health",
+          "driver-health"
+        ],
+        "vtStatus": [
+          "not_configured",
+          "not_found",
+          "rate_limited",
+          "authentication_failed",
+          "timeout",
+          "lookup_failed",
+          "missing_hash"
+        ],
+        "healthStatus": [
+          "driver-health",
+          "collection-health",
+          "collection health"
+        ],
+        "noise": [
+          "true"
+        ],
+        "selfNoise": [
+          "true"
+        ],
+        "collectorSelfNoise": [
+          "true"
+        ],
+        "collectorNoise": [
+          "true"
+        ],
+        "selfNoiseClass": [
+          "collector",
+          "sandbox-agent",
+          "plumbing"
+        ],
+        "collectorNoiseClass": [
+          "collector",
+          "plumbing"
+        ],
+        "message": [
+          "collection health",
+          "driver health",
+          "R0Collector",
+          "VirusTotal not configured",
+          "VT not configured",
+          "VirusTotal rate limited",
+          "VirusTotal timeout"
+        ]
+      },
+      "evidenceFields": [
+        "eventType",
+        "data.host",
+        "data.uri",
+        "data.method",
+        "data.contentType",
+        "data.queryLength",
+        "data.encodedQueryLength",
+        "destinationIp"
+      ],
+      "tags": [
+        "network",
+        "dns",
+        "doh",
+        "c2",
+        "high-entropy",
+        "mitre"
+      ]
+    },
+    {
+      "id": "c2-mtls-client-cert-rare-ja3",
+      "title": "Mutual TLS client certificate with rare or suspicious JA3",
+      "titleZh": "带罕见或可疑 JA3 的双向 TLS 客户端证书",
+      "severity": "high",
+      "confidence": "high",
+      "summary": "TLS metadata shows a client certificate plus concrete SNI/JA3 context where the JA3 reputation is rare, suspicious, malicious, or C2-labeled.",
+      "summaryZh": "TLS 元数据显示客户端证书以及具体 SNI/JA3 上下文，且 JA3 声誉为罕见、可疑、恶意或 C2 标记。",
+      "mitreTechniqueId": "T1573",
+      "mitreTechniqueName": "Encrypted Channel",
+      "eventTypes": [
+        "network.tls",
+        "tls.connection",
+        "pcap.tls"
+      ],
+      "allDataEquals": {
+        "clientCertificatePresent": [
+          "true"
+        ]
+      },
+      "allDataContains": {
+        "ja3Reputation": [
+          "rare",
+          "suspicious",
+          "malicious",
+          "c2"
+        ]
+      },
+      "allDataKeys": [
+        "sni",
+        "ja3",
+        "destinationIp"
+      ],
+      "excludeProcessNames": [
+        "KSword.Sandbox.Agent.exe",
+        "KSword.Sandbox.R0Collector.exe"
+      ],
+      "excludeDataContains": {
+        "eventType": [
+          "collection.health",
+          "enrichment.virustotal.lookup",
+          "reputation.virustotal.file",
+          "r0collector."
+        ],
+        "source": [
+          "virustotal",
+          "collection-health",
+          "r0collector"
+        ],
+        "producer": [
+          "virustotal",
+          "collection-health",
+          "r0collector"
+        ],
+        "component": [
+          "KSword.Sandbox.Agent",
+          "KSword.Sandbox.R0Collector",
+          "r0collector",
+          "virustotal"
+        ],
+        "status": [
+          "not_configured",
+          "disabled",
+          "skipped",
+          "not_found",
+          "rate_limited",
+          "authentication_failed",
+          "timeout",
+          "lookup_failed",
+          "missing_hash",
+          "collection health",
+          "driver-health"
+        ],
+        "vtStatus": [
+          "not_configured",
+          "not_found",
+          "rate_limited",
+          "authentication_failed",
+          "timeout",
+          "lookup_failed",
+          "missing_hash"
+        ],
+        "healthStatus": [
+          "driver-health",
+          "collection-health",
+          "collection health"
+        ],
+        "noise": [
+          "true"
+        ],
+        "selfNoise": [
+          "true"
+        ],
+        "collectorSelfNoise": [
+          "true"
+        ],
+        "collectorNoise": [
+          "true"
+        ],
+        "selfNoiseClass": [
+          "collector",
+          "sandbox-agent",
+          "plumbing"
+        ],
+        "collectorNoiseClass": [
+          "collector",
+          "plumbing"
+        ],
+        "message": [
+          "collection health",
+          "driver health",
+          "R0Collector",
+          "VirusTotal not configured",
+          "VT not configured",
+          "VirusTotal rate limited",
+          "VirusTotal timeout"
+        ]
+      },
+      "evidenceFields": [
+        "eventType",
+        "data.sni",
+        "data.ja3",
+        "data.ja3Reputation",
+        "data.clientCertificatePresent",
+        "data.destinationIp",
+        "data.destinationPort"
+      ],
+      "tags": [
+        "network",
+        "tls",
+        "mtls",
+        "ja3",
+        "c2",
+        "encrypted-channel",
+        "mitre"
       ]
     }
   ]

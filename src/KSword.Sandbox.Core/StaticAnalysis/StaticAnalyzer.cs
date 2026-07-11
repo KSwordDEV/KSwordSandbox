@@ -6269,6 +6269,129 @@ public sealed class StaticAnalyzer
         data["ruleKey"] = ruleKey;
         data["behaviorFamily"] = behaviorFamily;
         data["triageLevel"] = triageLevel;
+        data["reportLane"] = DescribeStaticReportLane(behaviorFamily);
+        data["evidenceStrength"] = DescribeStaticEvidenceStrength(triageLevel);
+        data["runtimeCorrelationRequired"] = "True";
+        data["staticEvidenceBoundary"] = "does-not-prove-runtime-execution";
+        data["zhBehaviorFamily"] = DescribeStaticBehaviorFamilyZh(behaviorFamily);
+        data["zhTriageLevel"] = DescribeStaticTriageLevelZh(triageLevel);
+        data["zhEvidenceBoundary"] = "静态证据只说明样本具备相关能力、字符串或文件结构特征，不能单独证明行为已发生。";
+        data["zhNextEvidenceHint"] = DescribeStaticNextEvidenceHintZh(behaviorFamily);
+    }
+
+    /// <summary>
+    /// Maps static behavior families to report lanes that can be grouped without
+    /// parsing localized text.
+    /// </summary>
+    private static string DescribeStaticReportLane(string behaviorFamily)
+    {
+        return behaviorFamily switch
+        {
+            "process-injection" or "code-injection-or-unpack" or "packing-or-obfuscation" or "packer" => "injection-and-obfuscation",
+            "persistence" => "persistence",
+            "network" or "download-execute" or "exfiltration" => "network-and-download",
+            "dropped-file" or "embedded-resource" or "embedded-payload" => "payload-and-artifacts",
+            "execution-chain" or "script-execution" or "command-string" or "living-off-the-land" => "execution-chain",
+            "anti-analysis" or "defense-evasion" => "anti-analysis-and-evasion",
+            "credential-access" => "credential-access",
+            "pe-section-layout" or "pe-resource" or "pe-export" or "pe-imports" or "pe-signature-metadata" => "pe-structure",
+            "static-analysis-summary" or "static-summary" => "static-summary",
+            _ => "static-triage"
+        };
+    }
+
+    /// <summary>
+    /// Converts static triage levels into a stable evidence-strength label for
+    /// reports and rules.
+    /// </summary>
+    private static string DescribeStaticEvidenceStrength(string triageLevel)
+    {
+        return triageLevel switch
+        {
+            "medium" => "static-medium-needs-runtime-correlation",
+            "low" => "static-low-needs-corroboration",
+            "info" => "static-context-only",
+            "none" => "static-no-signal",
+            _ => "static-triage-only"
+        };
+    }
+
+    /// <summary>
+    /// Localizes broad static behavior families for compact report cards.
+    /// </summary>
+    private static string DescribeStaticBehaviorFamilyZh(string behaviorFamily)
+    {
+        return behaviorFamily switch
+        {
+            "process-injection" => "进程注入能力",
+            "code-injection-or-unpack" => "动态代码/解包能力",
+            "persistence" => "持久化能力",
+            "network" => "网络能力",
+            "download-execute" => "下载执行链",
+            "exfiltration" => "外传能力",
+            "dropped-file" => "落地文件能力",
+            "embedded-resource" or "embedded-payload" => "内嵌资源/载荷",
+            "execution-chain" or "script-execution" or "command-string" => "命令/脚本执行链",
+            "living-off-the-land" => "系统自带工具执行",
+            "anti-analysis" => "反分析/反沙箱",
+            "defense-evasion" => "防御规避",
+            "credential-access" => "凭据访问",
+            "packing-or-obfuscation" or "packer" => "壳/混淆",
+            "capability-imports" => "导入表能力面",
+            "pe-imports" => "PE 导入表",
+            "pe-section-layout" => "PE 节布局",
+            "pe-resource" => "PE 资源",
+            "pe-export" => "PE 导出",
+            "pe-signature-metadata" => "PE 签名/证书元数据",
+            "static-signature" => "静态规则命中",
+            "static-analysis-summary" or "static-summary" => "静态分析摘要",
+            _ => "静态 triage 线索"
+        };
+    }
+
+    /// <summary>
+    /// Localizes static triage levels without changing the canonical level.
+    /// </summary>
+    private static string DescribeStaticTriageLevelZh(string triageLevel)
+    {
+        return triageLevel switch
+        {
+            "medium" => "中等静态线索，需要运行时证据确认",
+            "low" => "低强度静态线索，需要交叉验证",
+            "info" => "上下文信息，默认不提升风险",
+            "none" => "未见有效静态信号",
+            _ => "静态 triage 线索"
+        };
+    }
+
+    /// <summary>
+    /// Suggests the next dynamic evidence lane for a static behavior family.
+    /// </summary>
+    private static string DescribeStaticNextEvidenceHintZh(string behaviorFamily)
+    {
+        return behaviorFamily switch
+        {
+            "process-injection" or "code-injection-or-unpack" =>
+                "下一步查看 R0 进程/线程/映像加载事件、完整进程树和内存转储，确认是否真的写入或执行远程代码。",
+            "persistence" =>
+                "下一步查看 registry/service/scheduled task/startup folder 事件，确认是否真的写入持久化位置。",
+            "network" or "download-execute" =>
+                "下一步查看 DNS/HTTP/TLS/PCAP、dropped files 和子进程启动，确认是否发生下载、落地和执行。",
+            "exfiltration" =>
+                "下一步查看文件读取、凭据访问和出站连接流量，确认是否存在外传链路。",
+            "dropped-file" or "embedded-resource" or "embedded-payload" =>
+                "下一步查看 dropped files、artifact hash、资源释放路径和后续子进程，确认内嵌载荷是否被释放/运行。",
+            "execution-chain" or "script-execution" or "command-string" or "living-off-the-land" =>
+                "下一步查看 command line、子进程树和 LOLBIN 关联事件，确认字符串是否真的执行。",
+            "anti-analysis" or "defense-evasion" =>
+                "下一步查看早退、Sleep/时间加速、调试器/VM 检测和安全工具修改事件，区分正常兼容性检查与规避行为。",
+            "credential-access" =>
+                "下一步查看 LSASS/浏览器/凭据文件访问、dump 文件和可疑句柄事件。",
+            "packing-or-obfuscation" or "packer" =>
+                "下一步结合高熵节、overlay、TLS callback、运行时解包和内存转储判断是否只是打包或存在恶意载荷。",
+            _ =>
+                "下一步结合动态事件、规则命中、网络、进程树和 artifacts 判断该静态线索是否被执行。"
+        };
     }
 
     /// <summary>

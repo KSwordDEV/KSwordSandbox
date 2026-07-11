@@ -59,6 +59,7 @@ public sealed partial class SandboxJobService
     {
         var generated = new List<SandboxEvent>();
         var eventKeys = currentEvents.Select(EventKey).ToHashSet(StringComparer.Ordinal);
+        AddGeneratedEvent(generated, eventKeys, CreateHostArtifactImportSummaryEvent(artifactIndex, jobRoot, guestEventsPath));
 
         foreach (var artifact in artifactIndex.Artifacts
             .Where(IsSensitiveHostImportArtifact)
@@ -119,7 +120,124 @@ public sealed partial class SandboxJobService
                     guestEventsPath));
         }
 
+        foreach (var collection in artifactIndex.Collections
+            .Where(HasRejectionDiagnostics)
+            .OrderBy(collection => collection.Name, StringComparer.OrdinalIgnoreCase))
+        {
+            AddGeneratedEvent(generated, eventKeys, CreateArtifactImportRejectedEvent(collection, jobRoot, guestEventsPath));
+        }
+
         return generated;
+    }
+
+    private static SandboxEvent CreateHostArtifactImportSummaryEvent(
+        HostArtifactIndex artifactIndex,
+        string jobRoot,
+        string? guestEventsPath)
+    {
+        var sensitiveImportCount = artifactIndex.Artifacts.Count(IsSensitiveHostImportArtifact);
+        var duplicateGroupCount = artifactIndex.Artifacts
+            .Select(artifact => MetadataValue(artifact.Metadata, "duplicateGroupId"))
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Count();
+        var rejectedCollections = artifactIndex.Collections
+            .Where(HasRejectionDiagnostics)
+            .Select(collection => collection.Name)
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var collectionNames = artifactIndex.Collections
+            .Select(collection => collection.Name)
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        return new SandboxEvent
+        {
+            EventType = "artifact.import_summary",
+            Source = "host",
+            Path = jobRoot,
+            Data =
+            {
+                ["behaviorCounted"] = "false",
+                ["nonbehavior"] = "true",
+                ["behaviorScope"] = "artifact-import-summary",
+                ["notSampleBehavior"] = "true",
+                ["importMode"] = "host-artifact-index",
+                ["downloadPolicy"] = artifactIndex.DownloadPolicy,
+                ["importedSensitiveArtifactCount"] = sensitiveImportCount.ToString(CultureInfo.InvariantCulture),
+                ["sensitiveArtifactCount"] = artifactIndex.SensitiveArtifactCount.ToString(CultureInfo.InvariantCulture),
+                ["downloadableArtifactCount"] = artifactIndex.DownloadableArtifactCount.ToString(CultureInfo.InvariantCulture),
+                ["artifactCount"] = artifactIndex.ArtifactCount.ToString(CultureInfo.InvariantCulture),
+                ["collectionCount"] = artifactIndex.CollectionCount.ToString(CultureInfo.InvariantCulture),
+                ["rootPathPolicy"] = artifactIndex.RootPathPolicy,
+                ["hostImport"] = "true",
+                ["duplicateArtifactCount"] = artifactIndex.DuplicateArtifactCount.ToString(CultureInfo.InvariantCulture),
+                ["duplicateGroupCount"] = duplicateGroupCount.ToString(CultureInfo.InvariantCulture),
+                ["rejectedArtifactCount"] = artifactIndex.RejectedArtifactCount.ToString(CultureInfo.InvariantCulture),
+                ["hasDuplicateArtifacts"] = (artifactIndex.DuplicateArtifactCount > 0).ToString(CultureInfo.InvariantCulture).ToLowerInvariant(),
+                ["hasRejectedArtifacts"] = (artifactIndex.RejectedArtifactCount > 0).ToString(CultureInfo.InvariantCulture).ToLowerInvariant(),
+                ["downloadSecurityPolicy"] = "server-indexed-relative-selector",
+                ["downloadRejectionPolicy"] = "reject-empty-absolute-traversal-unindexed-missing",
+                ["collectionNames"] = string.Join(",", collectionNames),
+                ["rejectionDiagnosticCollections"] = string.Join(",", rejectedCollections),
+                ["sourceEventType"] = "host.artifact.index",
+                ["sourceEventPath"] = FirstNonEmpty(guestEventsPath, jobRoot),
+                ["indexRoot"] = jobRoot,
+                ["zhMessage"] = $"Host 产物导入完成：{sensitiveImportCount.ToString(CultureInfo.InvariantCulture)} 个敏感证据产物可用于报告下载。",
+                ["zhHint"] = "这是 artifact-index 导入摘要，用于报告状态、下载和诊断；不作为样本行为判定。"
+            }
+        };
+    }
+
+    private static SandboxEvent CreateArtifactImportRejectedEvent(
+        ArtifactCollectionDescriptor collection,
+        string jobRoot,
+        string? guestEventsPath)
+    {
+        var data = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["collectionName"] = collection.Name,
+            ["artifactKind"] = collection.Kind.ToString(),
+            ["sourceArtifactKind"] = collection.Kind.ToString(),
+            ["artifactRejected"] = "true",
+            ["behaviorCounted"] = "false",
+            ["nonbehavior"] = "true",
+            ["behaviorScope"] = "artifact-import-rejection",
+            ["notSampleBehavior"] = "true",
+            ["hostImport"] = "true",
+            ["importMode"] = "host-artifact-index",
+            ["sourceEventType"] = "host.artifact.index",
+            ["sourceEventPath"] = FirstNonEmpty(guestEventsPath, jobRoot),
+            ["indexRoot"] = jobRoot,
+            ["diagnosticCategory"] = "artifact-import",
+            ["healthSeverity"] = "warning",
+            ["downloadSecurityPolicy"] = FirstNonEmpty(MetadataValue(collection.Metadata, "downloadSecurityPolicy"), "server-indexed-relative-selector"),
+            ["downloadRejectionPolicy"] = FirstNonEmpty(MetadataValue(collection.Metadata, "downloadRejectionPolicy"), "reject-empty-absolute-traversal-unindexed-missing"),
+            ["rejectionDiagnosticsAvailable"] = FirstNonEmpty(MetadataValue(collection.Metadata, "rejectionDiagnosticsAvailable"), "true"),
+            ["rejectedArtifactCount"] = FirstNonEmpty(MetadataValue(collection.Metadata, "rejectedArtifactCount"), "0"),
+            ["artifactRejectionReasons"] = FirstNonEmpty(MetadataValue(collection.Metadata, "artifactRejectionReasons"), collection.Reason),
+            ["lastRejectedArtifactReason"] = FirstNonEmpty(MetadataValue(collection.Metadata, "lastRejectedArtifactReason"), collection.Reason),
+            ["lastRejectedArtifactSelector"] = FirstNonEmpty(MetadataValue(collection.Metadata, "lastRejectedArtifactSelector"), collection.ImportPath, collection.RelativePath),
+            ["zhMessage"] = $"Host 已拒绝 {collection.Name} collection 中的不安全、缺失或重复 artifact 引用。",
+            ["zhHint"] = FirstNonEmpty(
+                MetadataValue(collection.Metadata, "zhRejectionHint"),
+                "只有 job 输出目录下已索引且存在的相对 selector 可以下载；被拒绝引用仅用于操作者诊断。")
+        };
+
+        AddIfNotEmpty(data, "lastRejectedArtifactName", MetadataValue(collection.Metadata, "lastRejectedArtifactName"));
+        AddIfNotEmpty(data, "lastRejectedArtifactKind", MetadataValue(collection.Metadata, "lastRejectedArtifactKind"));
+        AddIfNotEmpty(data, "lastRejectedGuestRoot", MetadataValue(collection.Metadata, "lastRejectedGuestRoot"));
+        AddIfNotEmpty(data, "artifactRejectionsJson", MetadataValue(collection.Metadata, "artifactRejectionsJson"));
+
+        return new SandboxEvent
+        {
+            EventType = "artifact.import_rejected",
+            Source = "host",
+            Path = FirstNonEmpty(guestEventsPath, jobRoot),
+            Data = data
+        };
     }
 
     private static bool IsSensitiveHostImportArtifact(ArtifactDescriptor artifact)
@@ -127,6 +245,12 @@ public sealed partial class SandboxJobService
         return artifact.Kind is ArtifactKind.DroppedFile or ArtifactKind.Screenshot or ArtifactKind.MemoryDump or ArtifactKind.PacketCapture ||
             ArtifactImportExpectations.Any(expectation =>
                 string.Equals(artifact.CollectionName, expectation.CollectionName, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool HasRejectionDiagnostics(ArtifactCollectionDescriptor collection)
+    {
+        return string.Equals(MetadataValue(collection.Metadata, "rejectionDiagnosticsAvailable"), "true", StringComparison.OrdinalIgnoreCase) ||
+            TryReadPositiveInt(MetadataValue(collection.Metadata, "rejectedArtifactCount"), out _);
     }
 
     private static SandboxEvent CreateHostArtifactImportedEvent(
@@ -372,6 +496,11 @@ public sealed partial class SandboxJobService
         return reason.Contains("notRequested", StringComparison.OrdinalIgnoreCase) ||
             reason.Contains("not-requested", StringComparison.OrdinalIgnoreCase) ||
             reason.Contains("NotRequested", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool TryReadPositiveInt(string? value, out int count)
+    {
+        return int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out count) && count > 0;
     }
 
     private static string ChineseKindName(ArtifactKind kind)

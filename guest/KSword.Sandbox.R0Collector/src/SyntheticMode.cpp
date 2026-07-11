@@ -41,6 +41,12 @@ MockExtraData BuildSemanticBaseExtra(
     extra.push_back({"semanticEvidenceKind", evidenceKind});
     extra.push_back({"sequence", SemanticSequenceText(ordinal)});
     extra.push_back({"semanticSequenceScope", "synthetic-semantic-self-check"});
+    extra.push_back({"semanticContractVersion", std::to_string(kAbiSelfCheckDiagnosticsVersion)});
+    extra.push_back({"semanticRowKind", "no-device-companion"});
+    extra.push_back({"semanticRowCountedInStress", "false"});
+    extra.push_back({"semanticStressCountImpact", "none"});
+    extra.push_back({"operatorHintLanguage", "zh-CN"});
+    extra.push_back({"zhOperatorHint", zhHint});
     extra.push_back({"version", std::to_string(KSWORD_SANDBOX_EVENT_HEADER_VERSION)});
     extra.push_back({"versionHex", HexUnsignedLongLong(KSWORD_SANDBOX_EVENT_HEADER_VERSION, 8)});
     extra.push_back({"recordSize", std::to_string(sizeof(KSWORD_SANDBOX_EVENT_HEADER))});
@@ -53,22 +59,46 @@ MockExtraData BuildSemanticBaseExtra(
 // Processing: Adds protocol-parser boundary fields so DNS/HTTP/TLS candidates
 // remain endpoint/port hints and do not claim packet payload parsing.
 // Return: No return value; extra is appended in-place.
-void AddNetworkParserBoundaryFields(MockExtraData& extra) {
+void AddNetworkParserBoundaryFields(
+    MockExtraData& extra,
+    const std::string& flowKey,
+    const std::string& serviceHint) {
     extra.push_back({"protocolPayloadParsed", "false"});
     extra.push_back({"protocolParserSource", "r0-ale-endpoint-only"});
+    extra.push_back({"protocolPayloadSource", "none-r0-endpoint-metadata-only"});
     extra.push_back({"pcapCorrelationRequired", "true"});
+    extra.push_back({"pcapCorrelationStatus", "required-unmatched-in-r0-row"});
+    extra.push_back({"pcapFlowKeyCandidate", flowKey});
+    extra.push_back({"pcapCorrelationKey", flowKey});
+    extra.push_back({"pcapCorrelationKeySource", "flowKey"});
+    extra.push_back({"pcapExpectedRecordTypes", "pcap.flow|pcap.dns|pcap.http|pcap.tls"});
+    extra.push_back({"pcapDnsDetailsAvailable", "false"});
+    extra.push_back({"pcapHttpDetailsAvailable", "false"});
+    extra.push_back({"pcapTlsDetailsAvailable", "false"});
+    extra.push_back({"pcapBoundaryPolicy", "R0 rows provide endpoint/port/PID/layer evidence; L7 names and URLs require PCAP/browser/sidecar rows"});
+    extra.push_back({"networkProtocolBoundaryFields", kNetworkProtocolBoundaryFields});
     extra.push_back({
         "networkProtocolParserBoundary",
         "R0 WFP/ALE rows do not parse DNS names, HTTP Host/URI, or TLS SNI; correlate PCAP/browser/sidecar rows"});
+    extra.push_back({"dnsQueryName", ""});
     extra.push_back({"dnsQueryNameAvailable", "false"});
     extra.push_back({"dnsQueryNameSource", "pcap-required-not-r0"});
+    extra.push_back({"dnsBoundary", serviceHint == "dns" ? "candidate-port-only-name-required-from-pcap" : "not-dns-candidate"});
+    extra.push_back({"httpHost", ""});
+    extra.push_back({"httpUri", ""});
+    extra.push_back({"httpMethod", ""});
     extra.push_back({"httpHostAvailable", "false"});
     extra.push_back({"httpUriAvailable", "false"});
     extra.push_back({"httpMethodAvailable", "false"});
     extra.push_back({"httpMetadataSource", "pcap-or-browser-required-not-r0"});
+    extra.push_back({"httpBoundary", serviceHint == "http" ? "candidate-port-only-host-uri-required-from-pcap" : "not-http-candidate"});
+    extra.push_back({"tlsSni", ""});
     extra.push_back({"tlsSniAvailable", "false"});
     extra.push_back({"tlsCertificateAvailable", "false"});
     extra.push_back({"tlsMetadataSource", "pcap-required-not-r0"});
+    extra.push_back({"tlsBoundary", serviceHint == "tls" ? "candidate-port-only-sni-cert-required-from-pcap" : "not-tls-candidate"});
+    extra.push_back({"zhPcapCorrelationHint", u8"该 R0 网络行只提供端点/端口/PID/layer 证据；DNS 名称、HTTP Host/URI、TLS SNI/证书需查看 PCAP、浏览器或 sidecar 行。"});
+    extra.push_back({"zhNetworkBoundaryHint", u8"不要把 serviceHint 或 candidate 布尔值解读为协议载荷已解析；它们只是端口/协议候选标签。"});
 }
 
 // Input: Network scenario fields that mirror AddNetworkPayloadData aliases.
@@ -164,7 +194,7 @@ MockExtraData BuildNetworkSemanticExtra(
     extra.push_back({"filterIdHex", "0x0000000000000000"});
     extra.push_back({"flowHandleHex", "0x0000000000000000"});
     extra.push_back({"transportEndpointHandleHex", "0x0000000000000000"});
-    AddNetworkParserBoundaryFields(extra);
+    AddNetworkParserBoundaryFields(extra, flowKey, serviceHint);
     return extra;
 }
 
@@ -345,10 +375,15 @@ bool EmitMockDriverCategoryEvent(
     data.AddBool("collectorSelfNoise", false);
     data.AddBool("selfProcess", false);
     data.AddUtf8("noiseClass", "sample-or-system");
+    data.AddUtf8("noiseScope", "none");
+    data.AddUtf8("noiseKind", "none");
+    data.AddUtf8("noiseSource", "not-noise");
     data.AddUtf8("selfNoiseClass", "none");
     data.AddUtf8("collectorNoiseClass", "none");
     data.AddUtf8("noiseAction", "emit");
+    data.AddUtf8("noiseDisposition", "emitted-as-sample-or-system-candidate");
     data.AddUtf8("noiseReasons", "none");
+    data.AddUtf8("noiseFieldSet", kJsonlNoiseFieldSet);
     data.AddBool("sampleBehaviorCandidate", true);
     data.AddBool("collectionDiagnostic", false);
     data.AddBool("collectionNoise", false);
@@ -379,6 +414,7 @@ bool EmitMockDriverCategoryEvent(
     data.AddBool("evidenceReady", true);
     data.AddWide("zhMessage", MockZhMessage(driverEventTypeName));
     data.AddWide("zhHint", MockZhHint(driverEventTypeName));
+    data.AddWide("zhOperatorHint", MockZhHint(driverEventTypeName));
     data.AddWide(
         "zhNote",
         L"\u4f9b Guest Agent \u548c Host import \u7ba1\u7ebf\u6d4b\u8bd5\u4f7f\u7528\u7684\u5408\u6210 driver \u5206\u7c7b\u884c\u3002");
@@ -664,10 +700,15 @@ bool EmitSyntheticJsonlNoiseRows(EventWriter& writer) {
     data.AddBool("collectorSelfNoise", false);
     data.AddBool("selfProcess", false);
     data.AddUtf8("noiseClass", "jsonl-noise");
+    data.AddUtf8("noiseScope", "synthetic-jsonl-noise");
+    data.AddUtf8("noiseKind", "valid-extra-field-row");
+    data.AddUtf8("noiseSource", "explicit---inject-jsonl-noise");
     data.AddUtf8("selfNoiseClass", "none");
     data.AddUtf8("collectorNoiseClass", "none");
     data.AddUtf8("noiseAction", "emit");
+    data.AddUtf8("noiseDisposition", "emitted-for-importer-tolerance-probe");
     data.AddUtf8("noiseReasons", "synthetic-jsonl-noise-row");
+    data.AddUtf8("noiseFieldSet", kJsonlNoiseFieldSet);
     data.AddBool("sampleBehaviorCandidate", false);
     data.AddBool("collectionDiagnostic", true);
     data.AddBool("collectionNoise", false);
@@ -711,17 +752,50 @@ bool EmitSyntheticJsonlNoiseRows(EventWriter& writer) {
     data.AddBool("serviceHintTls", true);
     data.AddBool("protocolPayloadParsed", false);
     data.AddUtf8("protocolParserSource", "r0-ale-endpoint-only");
+    data.AddUtf8("protocolPayloadSource", "none-r0-endpoint-metadata-only");
     data.AddBool("pcapCorrelationRequired", true);
+    data.AddUtf8("pcapCorrelationStatus", "required-unmatched-in-r0-row");
+    data.AddUtf8("pcapFlowKeyCandidate", "tcp|192.0.2.10:51515|203.0.113.10:443");
+    data.AddUtf8("pcapCorrelationKey", "tcp|192.0.2.10:51515|203.0.113.10:443");
+    data.AddUtf8("pcapCorrelationKeySource", "flowKey");
+    data.AddUtf8("pcapExpectedRecordTypes", "pcap.flow|pcap.dns|pcap.http|pcap.tls");
+    data.AddBool("pcapDnsDetailsAvailable", false);
+    data.AddBool("pcapHttpDetailsAvailable", false);
+    data.AddBool("pcapTlsDetailsAvailable", false);
+    data.AddUtf8(
+        "pcapBoundaryPolicy",
+        "R0 rows provide endpoint/port/PID/layer evidence; L7 names and URLs require PCAP/browser/sidecar rows");
+    data.AddUtf8("networkProtocolBoundaryFields", kNetworkProtocolBoundaryFields);
+    data.AddUtf8("dnsQueryName", "");
     data.AddBool("dnsQueryNameAvailable", false);
+    data.AddUtf8("dnsQueryNameSource", "pcap-required-not-r0");
+    data.AddUtf8("dnsBoundary", "not-dns-candidate");
+    data.AddUtf8("httpHost", "");
+    data.AddUtf8("httpUri", "");
+    data.AddUtf8("httpMethod", "");
     data.AddBool("httpHostAvailable", false);
     data.AddBool("httpUriAvailable", false);
+    data.AddBool("httpMethodAvailable", false);
+    data.AddUtf8("httpMetadataSource", "pcap-or-browser-required-not-r0");
+    data.AddUtf8("httpBoundary", "not-http-candidate");
+    data.AddUtf8("tlsSni", "");
     data.AddBool("tlsSniAvailable", false);
+    data.AddBool("tlsCertificateAvailable", false);
+    data.AddUtf8("tlsMetadataSource", "pcap-required-not-r0");
+    data.AddUtf8("tlsBoundary", "candidate-port-only-sni-cert-required-from-pcap");
     data.AddUtf8(
         "networkProtocolParserBoundary",
         "valid noise row keeps endpoint/TLS candidate fields but does not claim protocol payload parsing");
+    data.AddWide(
+        "zhPcapCorrelationHint",
+        L"该合法噪声行保留 TLS flowKey 以测试导入容错；真实 SNI/证书仍需 PCAP/TLS sidecar。");
+    data.AddWide(
+        "zhNetworkBoundaryHint",
+        L"这是额外字段容错探针，不是样本真实网络行为，也不是 TLS 载荷解析结果。");
     data.AddBool("evidenceReady", true);
     data.AddWide("zhMessage", L"合成 JSONL 噪声网络行，保留 TLS flowKey 字段用于容错测试。");
     data.AddWide("zhHint", L"该行不代表真实样本网络行为；用于验证合法额外字段不会破坏导入。");
+    data.AddWide("zhOperatorHint", L"运营提示：将该行作为 JSONL 容错探针处理；不要计入样本网络关系图。");
     data.AddWide("zhSemanticHint", L"该合法噪声行只验证 TLS 候选字段和额外字段容错，不代表真实 SNI/证书解析。");
 
     std::string line =
@@ -768,6 +842,10 @@ bool EmitSyntheticStressEvents(EventWriter& writer, const Options& options, cons
                     {"stressCount", std::to_string(options.stressCount)},
                     {"stressCorpusRole", "counted-driver-file-row"},
                     {"semanticSelfCheck", "true"},
+                    {"semanticContractVersion", std::to_string(kAbiSelfCheckDiagnosticsVersion)},
+                    {"semanticRowKind", "counted-stress-driver-file"},
+                    {"semanticRowCountedInStress", "true"},
+                    {"semanticStressCountImpact", "counts-toward-StressJsonlExpectedDriverRows"},
                     {"semanticScenario", "stress-file-create"},
                     {"semanticEvidenceKind", "file-create-stress"},
                     {"semanticSelfCheckScenarios", kSyntheticSemanticSelfCheckScenarios},
@@ -978,6 +1056,7 @@ int RunSyntheticMode(const Options& options, EventWriter& writer) {
     mockData.AddBool("stress", stressMode);
     mockData.AddSigned("stressCount", options.stressCount);
     mockData.AddUtf8("semanticSelfCheckScenarios", kSyntheticSemanticSelfCheckScenarios);
+    mockData.AddUnsigned("semanticContractVersion", kAbiSelfCheckDiagnosticsVersion);
     mockData.AddUnsigned("semanticSelfCheckRows", kSyntheticSemanticSelfCheckRows);
     mockData.AddUnsigned("semanticSelfCheckSequenceStart", kSyntheticSemanticSequenceStart);
     mockData.AddUnsigned(

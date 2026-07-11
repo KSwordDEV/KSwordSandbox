@@ -1,6 +1,6 @@
 {
   "matrix": "enterprise-windows",
-  "version": "2026-07-12-v19-artifact-correlation-guards",
+  "version": "2026-07-12-v20-high-signal-windows-behavior",
   "techniques": [
     {
       "id": "T1003",
@@ -655,6 +655,14 @@
     {
       "id": "T1547.010",
       "name": "Port Monitors",
+      "categories": [
+        "persistence",
+        "privilege-escalation"
+      ]
+    },
+    {
+      "id": "T1547.012",
+      "name": "Print Processors",
       "categories": [
         "persistence",
         "privilege-escalation"

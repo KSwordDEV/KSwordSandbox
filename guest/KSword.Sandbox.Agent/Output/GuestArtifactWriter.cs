@@ -413,17 +413,32 @@ internal sealed class GuestArtifactWriter
             .Where(artifact => string.Equals(artifact.CollectionName, name, StringComparison.OrdinalIgnoreCase))
             .ToList();
         var totalBytes = collectionArtifacts.Sum(artifact => artifact.SizeBytes);
+        var artifactHashComputedCount = collectionArtifacts.Count(static artifact =>
+            !string.IsNullOrWhiteSpace(artifact.Sha256) ||
+            artifact.Hashes.ContainsKey("sha256") ||
+            (artifact.Metadata.TryGetValue("artifactHashStatus", out var hashStatus) &&
+             string.Equals(hashStatus, "computed", StringComparison.OrdinalIgnoreCase)));
+        var artifactHashFailedCount = collectionArtifacts.Count(static artifact =>
+            artifact.Metadata.TryGetValue("artifactHashStatus", out var hashStatus) &&
+            string.Equals(hashStatus, "failed", StringComparison.OrdinalIgnoreCase));
         var metadata = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
             ["collectionName"] = name,
             ["evidenceRole"] = evidenceRole,
+            ["collectionSummaryVersion"] = "artifact-collection-summary-v2",
             ["requested"] = enabled.ToString(System.Globalization.CultureInfo.InvariantCulture).ToLowerInvariant(),
             ["captureEnabled"] = enabled.ToString(System.Globalization.CultureInfo.InvariantCulture).ToLowerInvariant(),
             ["capturePolicy"] = CapturePolicyForCollection(name),
             ["implemented"] = implemented.ToString(System.Globalization.CultureInfo.InvariantCulture).ToLowerInvariant(),
             ["artifactCount"] = artifactCount.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["capturedArtifactCount"] = artifactCount.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["downloadableArtifactCount"] = artifactCount.ToString(System.Globalization.CultureInfo.InvariantCulture),
             ["fileCount"] = artifactCount.ToString(System.Globalization.CultureInfo.InvariantCulture),
             ["totalBytes"] = totalBytes.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["artifactTotalBytes"] = totalBytes.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["artifactHashComputedCount"] = artifactHashComputedCount.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["artifactHashFailedCount"] = artifactHashFailedCount.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["artifactIntegrityState"] = CollectionArtifactIntegrityState(artifactCount, artifactHashComputedCount, artifactHashFailedCount, status),
             ["capturedCount"] = capturedCount.ToString(System.Globalization.CultureInfo.InvariantCulture),
             ["skippedCount"] = skippedEventCount.ToString(System.Globalization.CultureInfo.InvariantCulture),
             ["disabledCount"] = disabledCount.ToString(System.Globalization.CultureInfo.InvariantCulture),
@@ -488,6 +503,9 @@ internal sealed class GuestArtifactWriter
             metadata["zhHint"] = "未集成协议解析时，请优先查看 artifactCount/fileCount/totalBytes、lastArtifactRelativePath、lastDiagnosticEtlRelativePath、lastDiagnosticPacketCountStatus 与 sha256 等文件完整性字段。";
         }
 
+        AddCollectionArtifactExtremes(metadata, collectionArtifacts);
+        AddCollectionReasonSummary(metadata, events, name, skippedEventPrefixes, disabledEventPrefixes, failedEventPrefixes ?? Array.Empty<string>());
+
         return new ArtifactCollectionDescriptor
         {
             Name = name,
@@ -545,6 +563,95 @@ internal sealed class GuestArtifactWriter
         }
 
         return "enabled-empty";
+    }
+
+    private static string CollectionArtifactIntegrityState(
+        int artifactCount,
+        int artifactHashComputedCount,
+        int artifactHashFailedCount,
+        string status)
+    {
+        if (artifactCount == 0)
+        {
+            return status switch
+            {
+                "disabled" => "disabled",
+                "skipped" => "skipped",
+                "failed" => "failed",
+                "enabled-empty" => "not-applicable-empty",
+                _ => "not-applicable"
+            };
+        }
+
+        if (artifactHashComputedCount >= artifactCount && artifactHashFailedCount == 0)
+        {
+            return "verified";
+        }
+
+        if (artifactHashComputedCount > 0)
+        {
+            return "partial";
+        }
+
+        return artifactHashFailedCount > 0 ? "hash-failed" : "unknown";
+    }
+
+    private static void AddCollectionArtifactExtremes(
+        Dictionary<string, string> metadata,
+        IReadOnlyList<ArtifactDescriptor> collectionArtifacts)
+    {
+        if (collectionArtifacts.Count == 0)
+        {
+            return;
+        }
+
+        var first = collectionArtifacts.OrderBy(artifact => artifact.RelativePath, StringComparer.OrdinalIgnoreCase).First();
+        var last = collectionArtifacts.OrderBy(artifact => artifact.RelativePath, StringComparer.OrdinalIgnoreCase).Last();
+        AddIfMissing(metadata, "firstArtifactRelativePath", first.RelativePath);
+        AddIfMissing(metadata, "lastArtifactRelativePath", last.RelativePath);
+        AddIfMissing(metadata, "lastArtifactSafeLink", last.SafeLink);
+        AddIfMissing(metadata, "lastArtifactSha256", last.Sha256);
+        AddIfMissing(metadata, "lastArtifactSizeBytes", last.SizeBytes.ToString(System.Globalization.CultureInfo.InvariantCulture));
+
+        var largest = collectionArtifacts
+            .OrderByDescending(artifact => artifact.SizeBytes)
+            .ThenBy(artifact => artifact.RelativePath, StringComparer.OrdinalIgnoreCase)
+            .First();
+        AddIfMissing(metadata, "largestArtifactRelativePath", largest.RelativePath);
+        AddIfMissing(metadata, "largestArtifactSizeBytes", largest.SizeBytes.ToString(System.Globalization.CultureInfo.InvariantCulture));
+    }
+
+    private static void AddCollectionReasonSummary(
+        Dictionary<string, string> metadata,
+        IReadOnlyList<SandboxEvent> events,
+        string collectionName,
+        IReadOnlyList<string> skippedEventPrefixes,
+        IReadOnlyList<string> disabledEventPrefixes,
+        IReadOnlyList<string> failedEventPrefixes)
+    {
+        var reasonCounts = events
+            .Where(evt =>
+                HasCollectionName(evt, collectionName) &&
+                (EventTypeMatches(evt, skippedEventPrefixes) ||
+                 EventTypeMatches(evt, disabledEventPrefixes) ||
+                 EventTypeMatches(evt, failedEventPrefixes)))
+            .Select(evt => evt.Data.TryGetValue("reason", out var reason) ? reason : string.Empty)
+            .Where(static reason => !string.IsNullOrWhiteSpace(reason))
+            .GroupBy(static reason => reason, StringComparer.OrdinalIgnoreCase)
+            .OrderBy(static group => group.Key, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(static group => group.Key, static group => group.Count(), StringComparer.OrdinalIgnoreCase);
+
+        if (reasonCounts.Count == 0)
+        {
+            return;
+        }
+
+        metadata["reasonCount"] = reasonCounts.Count.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        metadata["reasons"] = string.Join(",", reasonCounts.Keys);
+        metadata["reasonCounts"] = string.Join(
+            ";",
+            reasonCounts.Select(pair => $"{pair.Key}={pair.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)}"));
+        metadata["reasonCountsJson"] = JsonSerializer.Serialize(reasonCounts);
     }
 
     private static Dictionary<string, Dictionary<string, string>> BuildEventMetadataByRelativePath(string outputDirectory, IReadOnlyList<SandboxEvent> events)
@@ -1009,10 +1116,16 @@ internal sealed class GuestArtifactWriter
             "artifactSizeBytes",
             "hashStatus",
             "artifactHashStatus",
+            "artifactIntegrityState",
             "artifactExists",
             "artifactRelativePathStatus",
             "sizeBytesStatus",
             "sha256Status",
+            "reasonCode",
+            "reasonCategory",
+            "skippedReasons",
+            "skippedReasonCounts",
+            "sourceCopiedSha256Match",
             "capturePolicy",
             "screenshotRelativePath",
             "memoryDumpRelativePath",
@@ -1026,6 +1139,9 @@ internal sealed class GuestArtifactWriter
             "targetParentProcessId",
             "targetProcessName",
             "targetProcessPath",
+            "targetProcessRole",
+            "targetTreeDepth",
+            "targetTreeLineage",
             "targetSelectionSource",
             "dumpTargetKey",
             "duplicate",
@@ -1036,6 +1152,7 @@ internal sealed class GuestArtifactWriter
             "rootProcessCoverageState",
             "childProcessCoverageState",
             "memoryDumpCoverageState",
+            "rootDescendantCoverageState",
             "descendantTargetCount",
             "descendantAttemptedCount",
             "descendantCapturedCount",
@@ -1238,11 +1355,17 @@ internal sealed class GuestArtifactWriter
         CopyEventDataIfPresent(metadata, evt, "targetProcessName", "lastTargetProcessName");
         CopyEventDataIfPresent(metadata, evt, "targetProcessPath", "lastTargetProcessPath");
         CopyEventDataIfPresent(metadata, evt, "processRole", "lastProcessRole");
+        CopyEventDataIfPresent(metadata, evt, "processTreeRole", "lastProcessTreeRole");
+        CopyEventDataIfPresent(metadata, evt, "treeNodeRole", "lastTreeNodeRole");
         CopyEventDataIfPresent(metadata, evt, "treeDepth", "lastTreeDepth");
+        CopyEventDataIfPresent(metadata, evt, "rootRelativeDepth", "lastRootRelativeDepth");
+        CopyEventDataIfPresent(metadata, evt, "descendantDepth", "lastDescendantDepth");
         CopyEventDataIfPresent(metadata, evt, "treeLineage", "lastTreeLineage");
         CopyEventDataIfPresent(metadata, evt, "treeLineageDisplay", "lastTreeLineageDisplay");
         CopyEventDataIfPresent(metadata, evt, "treeLineageStatus", "lastTreeLineageStatus");
+        CopyEventDataIfPresent(metadata, evt, "lineageStabilityReason", "lastLineageStabilityReason");
         CopyEventDataIfPresent(metadata, evt, "rootProcessIdStatus", "lastRootProcessIdStatus");
+        CopyEventDataIfPresent(metadata, evt, "rootAncestorProcessId", "lastRootAncestorProcessId");
         CopyEventDataIfPresent(metadata, evt, "processTreeCoverageState", "lastProcessTreeCoverageState");
         CopyEventDataIfPresent(metadata, evt, "processTreeCompleteness", "lastProcessTreeCompleteness");
         CopyEventDataIfPresent(metadata, evt, "childProcessCount", "lastChildProcessCount");
@@ -1287,11 +1410,16 @@ internal sealed class GuestArtifactWriter
         AddIfMissing(metadata, "hashStatus", "computed");
         AddIfMissing(metadata, "artifactHashAlgorithm", "sha256");
         AddIfMissing(metadata, "artifactHashStatus", "computed");
+        AddIfMissing(metadata, "artifactIntegrityState", "verified");
+        AddIfMissing(metadata, "sizeBytesStatus", "computed");
+        AddIfMissing(metadata, "sha256Status", "computed");
 
         if (metadata.TryGetValue("rootProcessId", out var rootProcessId) && !string.IsNullOrWhiteSpace(rootProcessId))
         {
             AddIfMissing(metadata, "treeLineage", rootProcessId);
             AddIfMissing(metadata, "processRole", "sample-root-context");
+            AddIfMissing(metadata, "rootProcessIdStatus", "available");
+            AddIfMissing(metadata, "treeLineageStatus", "stable");
         }
 
         if (classification.Kind == ArtifactKind.PacketCapture)

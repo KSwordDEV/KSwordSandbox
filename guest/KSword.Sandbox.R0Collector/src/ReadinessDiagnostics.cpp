@@ -322,7 +322,7 @@ std::wstring ReadinessZhHint(const std::string& stage, const std::string& code) 
         }
 
         if (code == "driver_no_events") {
-            return L"READ_EVENTS 已完成但没有返回驱动记录。请确认 producer enable mask 未禁用目标 producer，并在 VM 内产生受控样本活动。";
+            return L"READ_EVENTS 已完成但没有返回驱动记录。请确认 producer enable mask 未禁用目标 producer，并在 VM 内产生受控样本活动；若只想验证无驱动字段质量，可先运行 --abi-self-check 或 --stress-count 32 --inject-jsonl-noise。";
         }
 
         if (code == "read_protocol_error" || code == "abi_mismatch") {
@@ -348,6 +348,43 @@ std::wstring ReadinessSummaryZhMessage(const ReadinessSummary& summary) {
     }
 
     return L"\u5c31\u7eea\u8bca\u65ad\u901a\u8fc7\uff1bR0Collector \u53ef\u7ee7\u7eed\u8fdb\u5165\u91c7\u96c6\u8def\u5f84\u3002";
+}
+
+// Input: Collector-diagnostic JSON builder plus row disposition label.
+// Processing: Adds the same rich noise taxonomy used by driver/mock rows while
+// keeping readiness diagnostics out of sample behavior.
+// Return: No return value; builder is mutated.
+void AddReadinessNoiseFields(
+    JsonDataObjectBuilder& data,
+    const std::string& disposition) {
+    data.AddBool("collectionNoise", true);
+    data.AddBool("collectorNoise", true);
+    data.AddBool("collectorSelfNoise", false);
+    data.AddBool("selfProcess", false);
+    data.AddUtf8("collectorNoiseReason", "collectionDiagnostic");
+    data.AddUtf8("collectorNoiseAction", "emit");
+    data.AddBool("collectorSuppressed", false);
+    data.AddBool("selfNoise", false);
+    data.AddUtf8("selfNoiseReason", "none");
+    data.AddUtf8("selfNoiseAction", "emit");
+    data.AddBool("noise", false);
+    data.AddUtf8("noiseScope", "collector-diagnostic");
+    data.AddUtf8("noiseKind", "readiness-diagnostic");
+    data.AddUtf8("noiseSource", "r0collector-readiness");
+    data.AddUtf8("noiseClass", "collector-diagnostic");
+    data.AddUtf8("selfNoiseClass", "none");
+    data.AddUtf8("collectorNoiseClass", "collector-diagnostic");
+    data.AddUtf8("noiseAction", "emit");
+    data.AddUtf8("noiseDisposition", disposition);
+    data.AddUtf8("noiseReasons", "collectionDiagnostic");
+    data.AddUtf8("noiseFieldSet", kJsonlNoiseFieldSet);
+    data.AddBool("sampleBehaviorCandidate", false);
+    data.AddWide(
+        "zhNoiseHint",
+        L"该 readiness 行是 Collector 采集健康/配置诊断，不是样本行为；报告应作为采集状态处理。");
+    data.AddWide(
+        "zhOperatorHint",
+        L"运营提示：先修复 readiness 的阻塞/降级项，再解读样本行为；可用 --abi-self-check 或 --stress-count 32 --inject-jsonl-noise 做无驱动验证。");
 }
 
 // Input: Common readiness event metadata.
@@ -386,17 +423,7 @@ bool EmitReadinessDiagnostic(
     data.AddSigned("diagnoseReadTimeoutMs", options.diagnoseReadTimeoutMs);
     data.AddUtf8("schema", KSWORD_SANDBOX_EVENT_SCHEMA_NAME);
     data.AddUtf8("producer", "r0collector");
-    data.AddBool("collectionNoise", true);
-    data.AddBool("collectorNoise", true);
-    data.AddBool("collectorSelfNoise", false);
-    data.AddBool("selfProcess", false);
-    data.AddUtf8("collectorNoiseReason", "collectionDiagnostic");
-    data.AddUtf8("collectorNoiseAction", "emit");
-    data.AddBool("collectorSuppressed", false);
-    data.AddBool("selfNoise", false);
-    data.AddUtf8("selfNoiseReason", "none");
-    data.AddUtf8("selfNoiseAction", "emit");
-    data.AddBool("noise", false);
+    AddReadinessNoiseFields(data, "emitted-as-readiness-diagnostic");
     data.AddBool("lost", false);
     data.AddUnsigned("lostCount", 0);
     data.AddBool("lossObserved", false);
@@ -624,13 +651,28 @@ bool ProbeCapabilitiesReadiness(
             &extra) && false;
     }
 
+    const bool bytesReturnedMatch = bytesReturned >= static_cast<DWORD>(sizeof(reply));
+    const bool interfaceVersionMatch = reply.Version == KSWORD_SANDBOX_INTERFACE_VERSION;
+    const bool replySizeCompatible = reply.Size >= sizeof(reply);
+    const bool abiMajorMatch = reply.AbiVersionMajor == KSWORD_SANDBOX_ABI_VERSION_MAJOR;
+    const bool abiMinorForwardCompatible = reply.AbiVersionMinor >= KSWORD_SANDBOX_ABI_VERSION_MINOR;
+    const bool eventHeaderVersionMatch = reply.EventHeaderVersion == KSWORD_SANDBOX_EVENT_HEADER_VERSION;
+    const bool maxPayloadSizeCompatible = reply.EventMaxPayloadSize <= KSWORD_SANDBOX_EVENT_MAX_PAYLOAD_SIZE;
+    const bool readEventsHeaderSizeMatch =
+        reply.ReadEventsReplyHeaderSize == KSWORD_SANDBOX_READ_EVENTS_REPLY_HEADER_SIZE;
+    const bool capabilitiesReplySizeCompatible = reply.CapabilitiesReplySize >= sizeof(reply);
+    const bool statusReplySizeCompatible = reply.StatusReplySize >= sizeof(KSWORD_SANDBOX_STATUS_REPLY);
     const bool compatible =
-        bytesReturned >= static_cast<DWORD>(sizeof(reply)) &&
-        reply.Version == KSWORD_SANDBOX_INTERFACE_VERSION &&
-        reply.Size >= sizeof(reply) &&
-        reply.AbiVersionMajor == KSWORD_SANDBOX_ABI_VERSION_MAJOR &&
-        reply.EventHeaderVersion == KSWORD_SANDBOX_EVENT_HEADER_VERSION &&
-        reply.EventMaxPayloadSize <= KSWORD_SANDBOX_EVENT_MAX_PAYLOAD_SIZE;
+        bytesReturnedMatch &&
+        interfaceVersionMatch &&
+        replySizeCompatible &&
+        abiMajorMatch &&
+        abiMinorForwardCompatible &&
+        eventHeaderVersionMatch &&
+        maxPayloadSizeCompatible &&
+        readEventsHeaderSizeMatch &&
+        capabilitiesReplySizeCompatible &&
+        statusReplySizeCompatible;
 
     SandboxEventFields capabilitiesEvent;
     capabilitiesEvent.eventType = "r0collector.driverCapabilities";
@@ -644,13 +686,62 @@ bool ProbeCapabilitiesReadiness(
     extra.AddUtf8("ioctl", "IOCTL_KSWORD_SANDBOX_GET_CAPABILITIES");
     extra.AddUnsigned("ioctlCode", IOCTL_KSWORD_SANDBOX_GET_CAPABILITIES);
     extra.AddUnsigned("bytesReturned", bytesReturned);
+    extra.AddUnsigned("expectedBytesReturnedAtLeast", sizeof(reply));
+    extra.AddBool("bytesReturnedMatch", bytesReturnedMatch);
     extra.AddUnsigned("collectorAbiVersion", KSWORD_SANDBOX_INTERFACE_VERSION);
     extra.AddUtf8("collectorAbiVersionHex", HexUnsignedLongLong(KSWORD_SANDBOX_INTERFACE_VERSION, 8));
+    extra.AddUnsigned("driverInterfaceVersion", reply.Version);
+    extra.AddUtf8("driverInterfaceVersionHex", HexUnsignedLongLong(reply.Version, 8));
+    extra.AddBool("interfaceVersionMatch", interfaceVersionMatch);
+    extra.AddUnsigned("expectedAbiVersionMajor", KSWORD_SANDBOX_ABI_VERSION_MAJOR);
+    extra.AddUnsigned("expectedAbiVersionMinor", KSWORD_SANDBOX_ABI_VERSION_MINOR);
     extra.AddUnsigned("driverAbiVersionMajor", reply.AbiVersionMajor);
     extra.AddUnsigned("driverAbiVersionMinor", reply.AbiVersionMinor);
+    extra.AddBool("abiMajorMatch", abiMajorMatch);
+    extra.AddBool("abiMinorForwardCompatible", abiMinorForwardCompatible);
+    extra.AddUnsigned("expectedEventHeaderVersion", KSWORD_SANDBOX_EVENT_HEADER_VERSION);
     extra.AddUnsigned("driverEventHeaderVersion", reply.EventHeaderVersion);
+    extra.AddUtf8("driverEventHeaderVersionHex", HexUnsignedLongLong(reply.EventHeaderVersion, 8));
+    extra.AddBool("eventHeaderVersionMatch", eventHeaderVersionMatch);
+    extra.AddUnsigned("expectedEventMaxPayloadSize", KSWORD_SANDBOX_EVENT_MAX_PAYLOAD_SIZE);
     extra.AddUnsigned("driverEventMaxPayloadSize", reply.EventMaxPayloadSize);
+    extra.AddBool("maxPayloadSizeCompatible", maxPayloadSizeCompatible);
+    extra.AddUnsigned("expectedCapabilitiesReplySize", sizeof(KSWORD_SANDBOX_CAPABILITIES_REPLY));
+    extra.AddUnsigned("driverCapabilitiesReplySize", reply.CapabilitiesReplySize);
+    extra.AddBool("capabilitiesReplySizeCompatible", capabilitiesReplySizeCompatible);
+    extra.AddUnsigned("expectedStatusReplySize", sizeof(KSWORD_SANDBOX_STATUS_REPLY));
+    extra.AddUnsigned("driverStatusReplySize", reply.StatusReplySize);
+    extra.AddBool("statusReplySizeCompatible", statusReplySizeCompatible);
+    extra.AddUnsigned("expectedReadEventsReplyHeaderSize", KSWORD_SANDBOX_READ_EVENTS_REPLY_HEADER_SIZE);
+    extra.AddUnsigned("driverReadEventsReplyHeaderSize", reply.ReadEventsReplyHeaderSize);
+    extra.AddBool("readEventsReplyHeaderSizeMatch", readEventsHeaderSizeMatch);
     extra.AddBool("abiCompatible", compatible);
+    std::string mismatchReasons;
+    const auto appendMismatch = [&mismatchReasons](const bool ok, const char* reason) {
+        if (ok) {
+            return;
+        }
+        if (!mismatchReasons.empty()) {
+            mismatchReasons += "|";
+        }
+        mismatchReasons += reason;
+    };
+    appendMismatch(bytesReturnedMatch, "bytesReturnedTooSmall");
+    appendMismatch(interfaceVersionMatch, "interfaceVersion");
+    appendMismatch(replySizeCompatible, "capabilitiesReplySizeField");
+    appendMismatch(abiMajorMatch, "abiMajor");
+    appendMismatch(abiMinorForwardCompatible, "abiMinorTooOld");
+    appendMismatch(eventHeaderVersionMatch, "eventHeaderVersion");
+    appendMismatch(maxPayloadSizeCompatible, "eventMaxPayloadSize");
+    appendMismatch(readEventsHeaderSizeMatch, "readEventsReplyHeaderSize");
+    appendMismatch(capabilitiesReplySizeCompatible, "capabilitiesReplySize");
+    appendMismatch(statusReplySizeCompatible, "statusReplySize");
+    extra.AddUtf8("abiMismatchReasons", mismatchReasons.empty() ? "none" : mismatchReasons);
+    extra.AddWide(
+        "zhAbiDiagnosticHint",
+        compatible
+            ? L"驱动 capabilities 与 Collector 期望 ABI 匹配。"
+            : L"ABI 不匹配；请对照 abiMismatchReasons 以及 expected*/driver* 字段，使用同一构建产物重新部署驱动和 Collector。");
 
     if (!compatible) {
         RecordProbe(summary, "abiNegotiation", "abi_mismatch", "error", "blocked");
@@ -834,10 +925,28 @@ bool ProbeReadEventsReadiness(
         extra.AddUtf8("ioctl", "IOCTL_KSWORD_SANDBOX_READ_EVENTS");
         extra.AddUnsigned("ioctlCode", IOCTL_KSWORD_SANDBOX_READ_EVENTS);
         extra.AddUnsigned("bytesReturned", bytesReturned);
+        extra.AddUnsigned("expectedReplyHeaderSize", KSWORD_SANDBOX_READ_EVENTS_REPLY_HEADER_SIZE);
+        extra.AddUnsigned("expectedReplyVersion", KSWORD_SANDBOX_INTERFACE_VERSION);
         extra.AddUnsigned("replyVersion", reply.Version);
         extra.AddUnsigned("replySize", reply.Size);
         extra.AddUnsigned("replyBytesWritten", reply.BytesWritten);
         extra.AddUnsigned("availableEventBytes", availableEventBytes);
+        extra.AddBool("replyVersionMatch", reply.Version == KSWORD_SANDBOX_INTERFACE_VERSION);
+        extra.AddBool("replySizeAtLeastHeader", reply.Size >= KSWORD_SANDBOX_READ_EVENTS_REPLY_HEADER_SIZE);
+        extra.AddBool("replySizeWithinBytesReturned", reply.Size <= bytesReturned);
+        extra.AddBool("replyBytesWrittenWithinAvailableBytes", reply.BytesWritten <= availableEventBytes);
+        extra.AddUtf8(
+            "abiMismatchReasons",
+            reply.Version != KSWORD_SANDBOX_INTERFACE_VERSION
+                ? "readEventsReplyVersion"
+                : (reply.Size < KSWORD_SANDBOX_READ_EVENTS_REPLY_HEADER_SIZE
+                    ? "readEventsReplyHeaderTooSmall"
+                    : (reply.Size > bytesReturned
+                        ? "readEventsReplySizeExceedsBytesReturned"
+                        : "readEventsReplyBytesWrittenExceedsAvailable")));
+        extra.AddWide(
+            "zhAbiDiagnosticHint",
+            L"READ_EVENTS 回复头与 Collector 期望不匹配；请对照 expected*/reply* 字段重新部署匹配版本。");
         RecordProbe(summary, "readEvents", "abi_mismatch", "error", "blocked");
         return EmitReadinessDiagnostic(
             writer,
@@ -926,17 +1035,7 @@ bool EmitReadinessSummary(
     data.AddSigned("diagnoseReadTimeoutMs", options.diagnoseReadTimeoutMs);
     data.AddUtf8("schema", KSWORD_SANDBOX_EVENT_SCHEMA_NAME);
     data.AddUtf8("producer", "r0collector");
-    data.AddBool("collectionNoise", true);
-    data.AddBool("collectorNoise", true);
-    data.AddBool("collectorSelfNoise", false);
-    data.AddBool("selfProcess", false);
-    data.AddUtf8("collectorNoiseReason", "collectionDiagnostic");
-    data.AddUtf8("collectorNoiseAction", "emit");
-    data.AddBool("collectorSuppressed", false);
-    data.AddBool("selfNoise", false);
-    data.AddUtf8("selfNoiseReason", "none");
-    data.AddUtf8("selfNoiseAction", "emit");
-    data.AddBool("noise", false);
+    AddReadinessNoiseFields(data, "emitted-as-readiness-summary");
     data.AddBool("lost", false);
     data.AddUnsigned("lostCount", 0);
     data.AddBool("lossObserved", false);
@@ -1002,17 +1101,7 @@ bool EmitDeviceUnavailableDiagnostic(
     data.AddWide("zhHint", DeviceOpenZhHint(openError, options.serviceName));
     data.AddUtf8("schema", KSWORD_SANDBOX_EVENT_SCHEMA_NAME);
     data.AddUtf8("producer", "r0collector");
-    data.AddBool("collectionNoise", true);
-    data.AddBool("collectorNoise", true);
-    data.AddBool("collectorSelfNoise", false);
-    data.AddBool("selfProcess", false);
-    data.AddUtf8("collectorNoiseReason", "collectionDiagnostic");
-    data.AddUtf8("collectorNoiseAction", "emit");
-    data.AddBool("collectorSuppressed", false);
-    data.AddBool("selfNoise", false);
-    data.AddUtf8("selfNoiseReason", "none");
-    data.AddUtf8("selfNoiseAction", "emit");
-    data.AddBool("noise", false);
+    AddReadinessNoiseFields(data, "emitted-as-device-unavailable-diagnostic");
     data.AddBool("lost", false);
     data.AddUnsigned("lostCount", 0);
     data.AddBool("lossObserved", false);

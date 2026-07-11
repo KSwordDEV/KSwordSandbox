@@ -43,6 +43,7 @@ std::string BuildConfigData(const Options& options) {
     data.AddBool("syntheticMode", options.mockMode);
     if (options.mockMode) {
         data.AddUtf8("semanticSelfCheckScenarios", kSyntheticSemanticSelfCheckScenarios);
+        data.AddSigned("semanticContractVersion", kAbiSelfCheckDiagnosticsVersion);
         data.AddSigned("semanticSelfCheckRows", kSyntheticSemanticSelfCheckRows);
         data.AddSigned("semanticSelfCheckSequenceStart", kSyntheticSemanticSequenceStart);
         data.AddSigned(
@@ -51,6 +52,8 @@ std::string BuildConfigData(const Options& options) {
         data.AddWide(
             "zhSemanticSelfCheckHint",
             L"mock/stress 模式会附加 DNS/HTTP/TLS/横向移动/下载执行/进程血缘语义自检行；这些行不来自真实驱动。");
+        data.AddUtf8("networkProtocolBoundaryFields", kNetworkProtocolBoundaryFields);
+        data.AddUtf8("jsonlNoiseFieldSet", kJsonlNoiseFieldSet);
     }
     data.AddBool("injectJsonlNoise", options.injectJsonlNoise);
     data.AddUtf8("jsonlNoiseInjectionGuard", "noise injection is accepted only in mock/stress mode and rejected for abi/diagnose/health/live collection");
@@ -80,6 +83,16 @@ std::string BuildConfigData(const Options& options) {
     data.AddUtf8("selfNoiseReason", "none");
     data.AddUtf8("selfNoiseAction", "emit");
     data.AddBool("noise", false);
+    data.AddUtf8("noiseScope", "none");
+    data.AddUtf8("noiseKind", "none");
+    data.AddUtf8("noiseSource", "not-noise");
+    data.AddUtf8("noiseClass", "collector-lifecycle");
+    data.AddUtf8("selfNoiseClass", "none");
+    data.AddUtf8("collectorNoiseClass", "none");
+    data.AddUtf8("noiseAction", "emit");
+    data.AddUtf8("noiseDisposition", "emitted-as-collector-lifecycle");
+    data.AddUtf8("noiseReasons", "none");
+    data.AddUtf8("noiseFieldSet", kJsonlNoiseFieldSet);
     data.AddBool("lost", false);
     data.AddUnsigned("lostCount", 0);
     data.AddBool("lossObserved", false);

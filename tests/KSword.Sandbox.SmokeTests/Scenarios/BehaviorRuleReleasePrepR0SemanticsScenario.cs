@@ -75,8 +75,8 @@ internal sealed class BehaviorRuleReleasePrepR0SemanticsScenario : ISmokeTestSce
 
         var rules = RuleEngine.LoadRuleSet(behaviorRulesPath);
         SmokeAssert.True(
-            string.Equals(rules.Version, "2026-07-12-v19-artifact-correlation-guards", StringComparison.OrdinalIgnoreCase),
-            "Behavior rules should carry the v19 artifact-correlation version.");
+            string.Equals(rules.Version, "2026-07-12-v20-high-signal-windows-behavior", StringComparison.OrdinalIgnoreCase),
+            "Behavior rules should carry the v20 high-signal Windows behavior version while retaining release-prep rules.");
 
         var indexedRules = rules.Rules.ToDictionary(rule => rule.Id, StringComparer.OrdinalIgnoreCase);
         foreach (var ruleId in RequiredRuleIds)

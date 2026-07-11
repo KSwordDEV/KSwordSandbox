@@ -29,10 +29,15 @@ inline constexpr int kSyntheticSemanticSequenceStart = 1100;
 inline constexpr int kSyntheticSemanticSelfCheckRows = 6;
 inline constexpr const char* kSyntheticSemanticSelfCheckScenarios =
     "process-lineage|dns|http|tls|lateral-movement|download-execute";
+inline constexpr unsigned long kAbiSelfCheckDiagnosticsVersion = 2U;
 inline constexpr const char* kStressJsonlLossEvidence =
     "lost|lostCount|lossObserved|TotalEventsDropped|totalEventsDropped|EventsDropped|eventsDropped|ProducerDroppedMask|producerDroppedMask|NextSequence|nextSequence|sequence|sequenceGapObserved|sequenceGapEstimate|head|tail|loss";
 inline constexpr const char* kStressJsonlBackpressureEvidence =
     "backpressure|backpressureObserved|highWatermark|QueueCapacity|queueCapacity|QueueHighWatermark|queueHighWatermark|TotalEventsBackpressured|totalEventsBackpressured|ProducerBackpressureMask|producerBackpressureMask|lastEnqueueFailureStatus|drainStoppedAtBatchLimit|requestedMaxEvents|readEventsMaxEvents|maxReadBatches|sampling";
+inline constexpr const char* kNetworkProtocolBoundaryFields =
+    "protocolPayloadParsed|protocolParserSource|protocolPayloadSource|networkProtocolParserBoundary|networkProtocolBoundaryFields|pcapCorrelationRequired|pcapCorrelationStatus|pcapFlowKeyCandidate|pcapCorrelationKey|pcapCorrelationKeySource|pcapExpectedRecordTypes|pcapBoundaryPolicy|pcapDnsDetailsAvailable|pcapHttpDetailsAvailable|pcapTlsDetailsAvailable|dnsQueryNameAvailable|dnsQueryNameSource|dnsBoundary|httpHostAvailable|httpUriAvailable|httpMethodAvailable|httpMetadataSource|httpBoundary|tlsSniAvailable|tlsCertificateAvailable|tlsMetadataSource|tlsBoundary|zhPcapCorrelationHint|zhNetworkBoundaryHint";
+inline constexpr const char* kJsonlNoiseFieldSet =
+    "noise|noiseScope|noiseKind|noiseSource|noiseClass|selfNoiseClass|collectorNoiseClass|noiseAction|noiseDisposition|noiseReasons|sampleBehaviorCandidate|collectionDiagnostic|collectionNoise|operatorInterpretation|zhNoiseHint|zhOperatorHint";
 
 // Collector-side ABI guard constants. These mirror the public driver ABI offsets
 // that release/readiness diagnostics depend on. Keep them in the collector so

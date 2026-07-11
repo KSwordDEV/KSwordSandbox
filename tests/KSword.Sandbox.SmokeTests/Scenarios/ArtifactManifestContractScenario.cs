@@ -153,6 +153,15 @@ internal sealed class ArtifactManifestContractScenario : ISmokeTestScenario
         AssertHostImportedArtifactEvent(hostImportedEvents, ArtifactKind.Screenshot, "screenshots");
         AssertHostImportedArtifactEvent(hostImportedEvents, ArtifactKind.MemoryDump, "memory-dumps");
         AssertHostImportedArtifactEvent(hostImportedEvents, ArtifactKind.PacketCapture, "packet-captures");
+        var importSummary = importedReport.Events.FirstOrDefault(evt =>
+            string.Equals(evt.EventType, "artifact.import_summary", StringComparison.OrdinalIgnoreCase));
+        SmokeAssert.True(importSummary is not null, "Imported report should include a report-ready host artifact import summary event.");
+        RequireData(importSummary!, "behaviorCounted", "false");
+        RequireData(importSummary!, "downloadPolicy", "relative-index-selectors-only");
+        SmokeAssert.True(
+            importSummary!.Data.TryGetValue("importedSensitiveArtifactCount", out var importedSensitiveArtifactCount) &&
+            int.Parse(importedSensitiveArtifactCount) >= 4,
+            "Artifact import summary should count downloadable dropped-file/screenshot/memory/PCAP evidence.");
 
         var missingJobId = Guid.NewGuid();
         var missingJobRoot = Path.Combine(runtimeRoot, "jobs", missingJobId.ToString("N"));
@@ -767,7 +776,9 @@ internal sealed class ArtifactManifestContractScenario : ISmokeTestScenario
         await File.WriteAllTextAsync(Path.Combine(guestRoot, "r0collector.stdout.log"), "collector out", cancellationToken);
         await File.WriteAllTextAsync(Path.Combine(guestRoot, "r0collector.stderr.log"), "collector err", cancellationToken);
         await File.WriteAllBytesAsync(Path.Combine(screenshotsRoot, "after-run.bmp"), [0x42, 0x4d, 0x00, 0x00], cancellationToken);
+        await File.WriteAllBytesAsync(Path.Combine(guestRoot, "screen-capture.png"), [0x89, 0x50, 0x4e, 0x47], cancellationToken);
         await File.WriteAllBytesAsync(Path.Combine(memoryDumpsRoot, "after-start-pid123.dmp"), [0x4d, 0x44, 0x4d, 0x50], cancellationToken);
+        await File.WriteAllBytesAsync(Path.Combine(guestRoot, "loose-pid999.dmp"), [0x4d, 0x44, 0x4d, 0x51], cancellationToken);
         await File.WriteAllBytesAsync(Path.Combine(packetCapturesRoot, "before-start.pcap"), [0xd4, 0xc3, 0xb2, 0xa1], cancellationToken);
         await File.WriteAllBytesAsync(Path.Combine(packetCapturesRoot, "future.pcapng"), [0x0a, 0x0d, 0x0d, 0x0a], cancellationToken);
         await File.WriteAllTextAsync(Path.Combine(droppedFilesRoot, "drop.bin"), "drop", cancellationToken);
@@ -917,6 +928,8 @@ internal sealed class ArtifactManifestContractScenario : ISmokeTestScenario
         SmokeAssert.True(screenshot.CapturePhase == "after-run", "Screenshot index entry should include capture phase.");
         SmokeAssert.True(screenshot.CollectionName == "screenshots", "Screenshot index entry should include collection name.");
         SmokeAssert.True(screenshot.CaptureState == "captured", "Screenshot index entry should mark existing screenshots as captured.");
+        var looseScreenshot = AssertIndexedArtifact(index, ArtifactKind.Screenshot, $"guest/{jobId:N}/screen-capture.png");
+        SmokeAssert.True(looseScreenshot.CollectionName == "screenshots", "Host index should classify screenshot-named image artifacts outside the canonical screenshots folder.");
         var memoryDump = AssertIndexedArtifact(index, ArtifactKind.MemoryDump, $"guest/{jobId:N}/memory-dumps/after-start-pid123.dmp");
         SmokeAssert.True(memoryDump.Category == "memory-dump", "Memory dump index entry should include memory-dump category.");
         SmokeAssert.True(memoryDump.MimeType == "application/vnd.microsoft.minidump", "Memory dump index entry should include minidump MIME type.");
@@ -925,6 +938,8 @@ internal sealed class ArtifactManifestContractScenario : ISmokeTestScenario
         SmokeAssert.True(memoryDump.Metadata.TryGetValue("processId", out var dumpProcessId) && dumpProcessId == "123", "Memory dump index entry should preserve process identity metadata from guest events/manifests.");
         SmokeAssert.True(memoryDump.Metadata.TryGetValue("processRole", out var dumpProcessRole) && dumpProcessRole == "root", "Memory dump index entry should preserve root/child process role metadata.");
         SmokeAssert.True(memoryDump.Metadata.TryGetValue("treeLineage", out var dumpLineage) && dumpLineage == "123", "Memory dump index entry should preserve child-process sweep lineage metadata.");
+        var looseMemoryDump = AssertIndexedArtifact(index, ArtifactKind.MemoryDump, $"guest/{jobId:N}/loose-pid999.dmp");
+        SmokeAssert.True(looseMemoryDump.CollectionName == "memory-dumps", "Host index should classify loose .dmp files as memory-dump artifacts.");
         var packetCapture = AssertIndexedArtifact(index, ArtifactKind.PacketCapture, $"guest/{jobId:N}/packet-captures/before-start.pcap");
         SmokeAssert.True(packetCapture.Category == "packet-capture", "Packet capture index entry should include packet-capture category.");
         SmokeAssert.True(packetCapture.CapturePhase == "before-start", "Packet capture index entry should include capture phase when encoded in the file name.");
@@ -961,6 +976,8 @@ internal sealed class ArtifactManifestContractScenario : ISmokeTestScenario
         SmokeAssert.True(dropped.Metadata.TryGetValue("previewLabelZh", out var droppedPreviewZh) && droppedPreviewZh.Contains("掉落文件", StringComparison.Ordinal), "Dropped-file index entry should include a Chinese preview label.");
         SmokeAssert.True(dropped.Metadata.TryGetValue("contentType", out var droppedContentType) && droppedContentType == "application/octet-stream", "Dropped-file index entry should include content type metadata.");
         SmokeAssert.True(dropped.Metadata.TryGetValue("downloadSelector", out var droppedDownloadSelector) && droppedDownloadSelector == dropped.RelativePath, "Dropped-file index entry should include a safe download selector.");
+        SmokeAssert.True(dropped.Metadata.TryGetValue("downloadResolutionState", out var downloadResolutionState) && downloadResolutionState == "available", "Dropped-file index entry should include report-ready download resolution state.");
+        SmokeAssert.True(dropped.Metadata.TryGetValue("selectorSafety", out var selectorSafety) && selectorSafety == "normalized-relative-indexed", "Dropped-file index entry should describe selector safety.");
         SmokeAssert.True(dropped.Metadata.TryGetValue("sha256Short", out var droppedShaShort) && droppedShaShort.Length == 12, "Dropped-file index entry should include a short SHA-256 preview.");
         var droppedCopy = AssertIndexedArtifact(index, ArtifactKind.DroppedFile, $"guest/{jobId:N}/artifacts/dropped-files/drop-copy.bin");
         SmokeAssert.True(dropped.Metadata.TryGetValue("duplicateGroupCount", out var duplicateGroupCount) && duplicateGroupCount == "2", "Duplicate dropped files should be grouped by hash and size.");
@@ -985,8 +1002,13 @@ internal sealed class ArtifactManifestContractScenario : ISmokeTestScenario
         SmokeAssert.True(droppedCollection.Metadata.TryGetValue("rejectionDiagnosticsAvailable", out var droppedRejectionAvailable) && droppedRejectionAvailable == "true", "Dropped-files collection should expose manifest rejection diagnostics.");
         SmokeAssert.True(droppedCollection.Metadata.TryGetValue("rejectedArtifactCount", out var droppedRejectedCount) && droppedRejectedCount == "1", "Dropped-files collection should count unsafe guest manifest descriptors.");
         SmokeAssert.True(droppedCollection.Metadata.TryGetValue("lastRejectedArtifactReason", out var droppedRejectedReason) && droppedRejectedReason == "unsafeGuestArtifactPath", "Dropped-files collection should preserve unsafe path rejection reason.");
+        SmokeAssert.True(droppedCollection.Metadata.TryGetValue("duplicateDiagnosticsAvailable", out var duplicateDiagnosticsAvailable) && duplicateDiagnosticsAvailable == "true", "Dropped-files collection should expose structured duplicate diagnostics.");
+        SmokeAssert.True(droppedCollection.Metadata.TryGetValue("duplicateGroupCount", out var duplicateCollectionGroupCount) && duplicateCollectionGroupCount == "1", "Dropped-files collection should count duplicate groups.");
+        SmokeAssert.True(droppedCollection.Metadata.TryGetValue("duplicateGroupSummariesJson", out var duplicateSummariesJson) && duplicateSummariesJson.Contains("drop-copy.bin", StringComparison.Ordinal), "Dropped-files collection should include duplicate group member selectors.");
+        SmokeAssert.True(droppedCollection.Metadata.TryGetValue("artifactRejectionsJson", out var droppedRejectionsJson) && droppedRejectionsJson.Contains("unsafeGuestArtifactPath", StringComparison.Ordinal), "Dropped-files collection should include machine-readable rejection details.");
         SmokeAssert.True(packetCaptureCollection.Metadata.TryGetValue("rejectionDiagnosticsAvailable", out var pcapRejectionAvailable) && pcapRejectionAvailable == "true", "Packet-captures collection should expose missing manifest artifact diagnostics.");
         SmokeAssert.True(packetCaptureCollection.Metadata.TryGetValue("lastRejectedArtifactReason", out var pcapRejectedReason) && pcapRejectedReason == "missingGuestArtifactFile", "Packet-captures collection should preserve missing file rejection reason.");
+        SmokeAssert.True(packetCaptureCollection.Metadata.TryGetValue("artifactRejectionsJson", out var pcapRejectionsJson) && pcapRejectionsJson.Contains("missing.pcapng", StringComparison.Ordinal), "Packet-captures collection should include missing artifact rejection details.");
 
         var indexDescriptor = builder.WriteIndex(jobId, jobRoot);
         SmokeAssert.True(indexDescriptor.Kind == ArtifactKind.ArtifactIndex, "Index descriptor should use ArtifactIndex kind.");
