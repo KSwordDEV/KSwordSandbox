@@ -61,6 +61,11 @@ For a non-mutating plan check:
 .\run.ps1 -Mode Plan -SamplePath 'D:\Temp\sample.exe' -DurationSeconds 30
 ```
 
+`-Mode Plan` is PlanOnly and non-mutating: it does not start, restore, stop, or
+copy into a VM, and it now skips guest payload preparation. The generated
+Hyper-V plan records missing/stale payload files plus repair suggestions such as
+running `.\scripts\Prepare-GuestPayload.ps1 -SelfContained`.
+
 For a single live Hyper-V analysis from an elevated shell:
 
 ```powershell
@@ -96,7 +101,18 @@ without payload files.
 
 Status reports repository root, install state, local config, Web URL, runtime
 root, secret presence, optional VirusTotal key presence, VM/checkpoint
-presence, and whether the secret value was printed (`False`).
+presence, host Guest Agent/R0Collector payload presence, and whether the secret
+value was printed (`False`). It also prints `RecommendedActions` with
+human-readable fixes for common setup gaps:
+
+- missing VM: record the real VM with
+  `.\install.ps1 -Mode Change -UpdateHyperVConfig -VmName <existing VM> -CheckpointName <checkpoint>`;
+- missing checkpoint: create or record the clean checkpoint;
+- missing guest payload: run
+  `.\scripts\Prepare-GuestPayload.ps1 -RepoRoot . -PayloadRoot <payloadRoot> -SelfContained`;
+- missing guest password secret: run `.\install.ps1 -Mode Install -PromptPassword`
+  or use `.\scripts\Test-HyperVReadiness.ps1 -PromptForMissingGuestPassword` for
+  a process-only check.
 
 For a fuller non-mutating preflight summary:
 
@@ -104,9 +120,12 @@ For a fuller non-mutating preflight summary:
 .\run.ps1 -Mode CheckEnvironment
 ```
 
-`CheckEnvironment` prints the daily startup command, whether `dotnet`, the Web
-project, payload-preparation script, Hyper-V E2E script, local config, guest
-secret, optional VirusTotal key, VM, and checkpoint are visible from this host.
+`CheckEnvironment` prints the daily startup command, `ReadinessCommand`, whether
+`dotnet`, the Web project, payload-preparation script, Hyper-V E2E script,
+local config, guest secret, optional VirusTotal key, VM, checkpoint, and payload
+files are visible from this host. `CheckEnvironmentStartsVm=False` and
+`PlanOnlyStartsVm=False`; these paths are meant to be safe on another
+developer's computer before they try `-Live`.
 
 `-WhatIf` is supported on `run.ps1`. In WebUI modes it skips payload
 preparation and dotnet startup. In `Plan` / `Analyze` modes it stops before

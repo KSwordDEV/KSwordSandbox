@@ -38,6 +38,13 @@ internal sealed class R0DriverCoreContractScenario : ISmokeTestScenario
             "src",
             "Eventing",
             "EventQueue.c");
+        var abiGuards = ReadRepositoryText(
+            context,
+            "driver",
+            "KSword.Sandbox.Driver",
+            "src",
+            "Common",
+            "AbiGuards.c");
         var contract = ReadRepositoryText(context, "docs", "r0-driver-core.md");
 
         RequireContains(header, "KSWORD_SANDBOX_ABI_VERSION_MAJOR", "Header must expose ABI major version.");
@@ -53,20 +60,31 @@ internal sealed class R0DriverCoreContractScenario : ISmokeTestScenario
         RequireContains(header, "KSWORD_SANDBOX_PRODUCER_FLAG_NETWORK", "Header must expose network producer bit.");
         RequireContains(header, "QueueCapacity", "Status reply must include queue capacity.");
         RequireContains(header, "TotalEventsSuppressed", "Status reply must include suppressed-event counter.");
+        RequireContains(header, "KSWORD_SANDBOX_HEALTH_FLAG_PRODUCER_MASKS_AVAILABLE", "Health flags must advertise producer-mask fields.");
+        RequireContains(header, "ProducerEnableMask", "Health/status replies must include producer enable mask.");
+        RequireContains(header, "ActiveProducerMask", "Health/status replies must include active producer mask.");
+        RequireContains(header, "FailedProducerMask", "Health/status replies must include failed producer mask.");
 
         RequireContains(dispatch, "case IOCTL_KSWORD_SANDBOX_GET_CAPABILITIES", "Dispatch must route capabilities IOCTL.");
         RequireContains(dispatch, "case IOCTL_KSWORD_SANDBOX_GET_STATUS", "Dispatch must route status IOCTL.");
         RequireContains(dispatch, "case IOCTL_KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK", "Dispatch must route enable-mask IOCTL.");
         RequireContains(dispatch, "KswHandleSetProducerEnableMask", "Enable-mask handler must be implemented.");
         RequireContains(dispatch, "STATUS_INVALID_PARAMETER", "Dispatch must reject malformed requests.");
+        RequireContains(dispatch, "KSWORD_SANDBOX_HEALTH_FLAG_PRODUCER_MASKS_AVAILABLE", "GET_HEALTH flags must expose producer-mask availability.");
+        RequireContains(dispatch, "reply->ProducerEnableMask = snapshot.ProducerEnableMask", "GET_HEALTH must return producer enable mask.");
+        RequireContains(dispatch, "reply->FailedProducerMask = snapshot.FailedProducerMask", "GET_HEALTH must return failed producer mask.");
 
         RequireContains(queue, "KswGetProducerMaskForEventType", "Queue must map event types to producer bits.");
         RequireContains(queue, "ProducerEnableMask", "Queue must gate events by producer enable mask.");
         RequireContains(queue, "EventsSuppressed", "Queue must count suppressed producer events.");
         RequireContains(queue, "QueueHighWatermark", "Queue must track queue high watermark.");
 
+        RequireContains(abiGuards, "sizeof(KSWORD_SANDBOX_HEALTH_REPLY) == 80U", "ABI guards must pin GET_HEALTH reply size.");
+        RequireContains(abiGuards, "FIELD_OFFSET(KSWORD_SANDBOX_HEALTH_REPLY, ProducerEnableMask)", "ABI guards must pin health producer-mask offsets.");
+
         RequireContains(contract, "Capability negotiation flow", "Core contract doc must describe negotiation flow.");
         RequireContains(contract, "Producer enable mask", "Core contract doc must describe producer enable mask.");
+        RequireContains(contract, "GET_HEALTH producer-mask snapshot", "Core contract doc must describe health producer-mask diagnostics.");
         RequireContains(contract, "Queue and status counters", "Core contract doc must describe queue/status counters.");
         RequireContains(contract, "IOCTL error contract", "Core contract doc must describe IOCTL errors.");
         RequireContains(contract, "STATUS_INVALID_DEVICE_REQUEST", "Core contract doc must document unknown/new IOCTL fallback.");

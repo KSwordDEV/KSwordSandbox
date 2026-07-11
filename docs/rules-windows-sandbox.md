@@ -9,10 +9,13 @@ substrings. Rules therefore favor stable evidence already emitted by guest
 events and typed R0 collector rows rather than requiring correlation that the
 engine does not support yet.
 
-The current rule set has 257 behavior rules. Newer high-value rules may include
-metadata-only `confidence` and `evidenceFields` values; those fields do not
-change matching, but they document expected triage confidence and the evidence
-fields analysts should inspect first.
+The current rule set has 257 behavior rules. The v7 placeholder-reduction
+pass replaces many broad placeholder labels with concrete metadata, indicator,
+or normalized-correlation rules while staying within existing rule-engine
+predicates. Newer high-value rules may include metadata-only `confidence` and
+`evidenceFields` values; those fields do not change matching, but they document
+expected triage confidence and the evidence fields analysts should inspect
+first.
 
 ## Added coverage
 
@@ -67,8 +70,8 @@ fields analysts should inspect first.
   - HTTP executable/script/archive downloads, POST/check-in beacon paths,
     DNS-over-HTTPS requests, and CONNECT/WebSocket/proxy tunnel indicators.
   - TLS invalid/self-signed certificate evidence plus ECH/ESNI metadata
-    placeholders.
-  - Baseline PCAP import placeholders for `pcap.summary`,
+    indicators.
+  - Baseline PCAP import metadata coverage for `pcap.summary`,
     `pcap.protocol.summary`, `pcap.flow`, `pcap.tcp`, `pcap.udp`,
     `pcap.http`, `pcap.dns`, `pcap.tls`, `network.pcap`, `pcap.packet`, and
     `network.flow`.
@@ -77,10 +80,13 @@ fields analysts should inspect first.
     `destinationIp`, `destinationPort`, `protocol`), HTTP metadata (`host`,
     `method`, `uri`, `contentType`, `payloadMagic`), DNS metadata
     (`queryName`, `rcode`), and TLS SNI (`sni`).
-  - PCAP executable payload, NXDOMAIN/DGA DNS, upload/exfiltration, and
-    high-fan-out flow placeholders.
+  - PCAP executable payload, NXDOMAIN/DGA DNS, upload/exfiltration
+    indicators, and flow-count metadata.
   - `.onion` domains, long/encoded HTTP URIs, domain-fronting labels, and TLS
     C2 classification fields when emitted by guest, PCAP, or enrichment rows.
+  - DNS tunnel/DGA labels, TLS SNI/JA3/certificate metadata, PCAP artifact
+    import rows, PCAP endpoint flows, upload/exfil labels, and PCAP flow-count
+    metadata now use concrete rule names and documented evidence fields.
 - Network/lateral movement:
   - Netstat observed/added/removed rows, listener-opened deltas, suspicious
     non-standard listener ports, RDP/SSH/LDAP/Kerberos/domain ports, and
@@ -98,6 +104,9 @@ fields analysts should inspect first.
   - Command-line delay primitives such as `timeout`, ping-delay, `Start-Sleep`,
     and wait APIs.
   - Uptime/boot-time checks and parent-process/PEB inspection API evidence.
+  - Sleep-duration and accelerated/skipped-sleep telemetry fields now carry
+    explicit confidence and evidence-field metadata until numeric thresholds are
+    supported by the rule engine.
 - Collection/defense-evasion extras:
   - Screen-capture API calls (`BitBlt`, `GetDC`, `PrintWindow`, foreground or
     desktop window APIs).

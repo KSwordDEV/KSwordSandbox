@@ -3,12 +3,13 @@
 This document describes the behavior rules in `rules/behavior-rules.json`.
 The matrix is intentionally conservative: rules classify normalized sandbox
 events for reporting, but they do not by themselves prove malicious intent.
-The 2026-07-11 v6 expansion broadens coverage to 257 rules for
-download/execute chains, injection, credential access, full process trees,
-screenshot/memory/drop artifacts, lateral movement, anti-analysis, defense
-evasion, and DNS/HTTP/TLS/PCAP evidence. The matching predicates remain simple;
-newer rules may also carry metadata-only `confidence` and `evidenceFields`
-values to make report triage and rule reviews more consistent.
+The 2026-07-11 v7 placeholder-reduction pass keeps coverage at 257 rules
+while replacing many placeholder-labeled entries with concrete metadata,
+indicator, or normalized-correlation rules for download/execute chains, process
+trees, anti-analysis timing, DNS/TLS/PCAP evidence, and R0 image-load rows. The
+matching predicates remain simple; newer rules may also carry metadata-only
+`confidence` and `evidenceFields` values to make report triage and rule reviews
+more consistent.
 
 ## Rule schema boundary
 
@@ -74,7 +75,7 @@ future parser rows.
 | R0 collector health | `r0collector-device-unavailable`, `r0collector-start-failed`, `r0collector-driver-health`, `r0collector-ioctl-protocol-pending`, `r0collector-lifecycle`, `r0collector-ioctl-failure` | `r0collector.deviceUnavailable`, `r0collector.start_failed`, `r0collector.driverHealth`, `r0collector.driverPoll`, `r0collector.driverReadEvents`, `r0collector.ioctlProtocolPending`, `r0collector.started`, `r0collector.deviceOpened`, `r0collector.heartbeat`, `r0collector.stopped`, `r0collector.ioctlFailure`, `r0collector.driverProtocolError` | `info` | None | Shows driver-open failures, lifecycle rows, successful health/poll/read IOCTL plumbing, and collection/protocol errors; the pending row is retained only for older local collector builds. |
 | R0 synthetic plumbing | `r0collector-mock-driver-event` | `r0collector.mockDriverEvent` | `info` | None | Marks mock JSONL rows so report output stays clear during Guest Agent sidecar tests. |
 | Process behavior | `script-interpreter`, `process-new`, `process-timeout-long-sleep` | `process.start`, `process.new`, `process.timeout` | `low` to `medium` | `T1059`, `T1497.003` | Separates generic new-process evidence from stronger scripting and timeout/evasion indicators. |
-| Full process tree and launch context | `process-tree-observed`, `process-tree-root-unavailable`, `process-start-failed`, `process-tree-large-fanout-placeholder`, `lolbin-process-tree-node`, `execution-from-user-writable-tree-path` | `process.tree`, `process.tree_unavailable`, `process.start_failed`, `process.new`, `process.start` | `info` to `medium` | `T1204.002`, `T1218` where specific evidence applies | Surfaces root/depth/lineage/child-count rows from the process-tree probe, rapid-exit collection gaps, launch failures, LOLBin descendants, and execution from user-writable staging paths. |
+| Full process tree and launch context | `process-tree-observed`, `process-tree-root-unavailable`, `process-start-failed`, `process-tree-child-count-observed`, `lolbin-process-tree-node`, `execution-from-user-writable-tree-path` | `process.tree`, `process.tree_unavailable`, `process.start_failed`, `process.new`, `process.start` | `info` to `medium` | `T1204.002`, `T1218` where specific evidence applies | Surfaces root/depth/lineage/child-count rows from the process-tree probe, rapid-exit collection gaps, launch failures, LOLBin descendants, and execution from user-writable staging paths. |
 | Script execution behavior | `script-interpreter`, `script-file-executed` | `process.start` | `medium` | `T1059` | Matches interpreter names and script-like command-line extensions. |
 | Persistence behavior | `registry-run-key-persistence`, `service-registry-persistence`, `service-create-command`, `scheduled-task-persistence`, `tasks-folder-file-write`, `startup-folder-persistence`, `ifeo-debugger-persistence`, `winlogon-persistence`, `driver-registry-run-key-typed-persistence`, `driver-registry-service-typed-persistence`, `scheduled-task-registry-cache-persistence`, `driver-registry-taskcache-typed-persistence`, `wmi-event-subscription-persistence`, `wmi-event-subscription-command`, `com-hijack-persistence`, `appinit-dlls-persistence`, `lsa-security-provider-persistence` | `registry.set`, `registry.create`, `driver.registry`, `process.start`, `file.created`, `file.modified`, `driver.file` | `high` | `T1547.001`, `T1547.004`, `T1543.003`, `T1053.005`, `T1546.012`, `T1546`, `T1112` | Covers Run/RunOnce keys, service registry paths and service creation commands, scheduled-task command/folder evidence, Startup folder writes, IFEO and Winlogon helper values, WMI subscription artifacts, COM hijacks, AppInit DLLs, and LSA package paths. |
 | System inventory diff persistence | `service-system-change-created`, `service-system-change-suspicious-command`, `scheduled-task-system-change-created`, `scheduled-task-suspicious-target`, `startup-item-system-change-created`, `startup-item-executable-value`, `persistence-system-item-deleted`, `system-diff-truncated` | `service.created`, `service.modified`, `service.deleted`, `scheduled_task.created`, `scheduled_task.modified`, `scheduled_task.deleted`, `startup_item.created`, `startup_item.modified`, `startup_item.deleted`, `*.diff_truncated` | `info` to `high` | `T1543.003`, `T1053.005`, `T1547.001`, `T1070.004` | Uses the current system-change probe’s service/task/startup diffs to catch persistence created or changed after launch, suspicious payload targets, deleted persistence entries, and truncation diagnostics. |
@@ -84,15 +85,15 @@ future parser rows.
 | Injection behavior | `remote-thread-injection-observed`, `process-injection-memory-primitive`, `process-injection-thread-or-apc-primitive`, `process-hollowing-signal`, `rwx-memory-protection-change`, `dll-injection-loadlibrary-signal` | `process.remote_thread`, `thread.remote`, `driver.thread`, `process.memory`, `process.write_memory`, `memory.protect`, `driver.process`, `api.call`, `image.load` | `medium` to `high` | `T1055`, `T1055.001`, `T1055.012` | Covers normalized remote-thread/APC events plus memory allocation/write, thread/APC, hollowing, RWX protection, and LoadLibrary-style DLL injection primitives. |
 | Lateral movement behavior | `psexec-or-remote-service-lateral-command`, `winrm-powershell-remoting-lateral-command`, `admin-share-or-remote-copy-command`, `wmi-remote-execution-command`, `remote-scheduled-task-command`, `smb-network-port-observed`, `winrm-network-port-observed` | `process.start`, `network.tcp`, `network.udp`, `driver.network`, `pcap.tcp`, `pcap.udp`, `network.flow` | `medium` to `high` | `T1021.002`, `T1021.006`, `T1047`, `T1053.005`, `T1569.002`, `T1570` | Covers PsExec/remote service, WinRM/PowerShell remoting, admin-share staging, WMI/CIM remote execution, remote scheduled tasks, SMB ports, and WinRM ports. |
 | Extended discovery and lateral movement | `rdp-network-port-observed`, `ssh-network-port-observed`, `ldap-kerberos-network-port-observed`, `tor-or-proxy-port-observed`, `admin-share-file-path-observed`, `remote-desktop-command-observed`, `network-share-discovery-command`, `system-discovery-command`, `process-discovery-command`, `network-discovery-command` | `process.start`, `file.created`, `file.modified`, `file.open`, `driver.file`, `network.tcp`, `network.udp`, `network.netstat`, `network.netstat.added`, `driver.network`, `pcap.tcp`, `pcap.udp`, `network.flow` | `medium` to `high` | `T1016`, `T1018`, `T1021.001`, `T1021.004`, `T1049`, `T1057`, `T1082`, `T1090`, `T1135`, `T1570` | Adds RDP/SSH/LDAP/Kerberos/domain-service ports, proxy/Tor ports, admin-share file paths, Remote Desktop commands, and common system/process/network/share discovery commands. |
-| R0 driver callback signals | `r0-driver-process-event`, `r0-driver-file-write-signal`, `r0-driver-registry-change-signal`, `r0-driver-network-signal`, `driver-load-heartbeat`, `image-load-placeholder` | `driver.process`, `driver.file`, `driver.registry`, `driver.network`, `driver.event.reserved`, `driver.load`, `image.load` | `info` to `medium` | `T1105`, `T1112` where specific evidence applies | Keeps typed R0 process/file/registry/network callback rows visible in findings before richer source predicates or cross-event correlation exist. |
+| R0 driver callback signals | `r0-driver-process-event`, `r0-driver-file-write-signal`, `r0-driver-registry-change-signal`, `r0-driver-network-signal`, `driver-load-heartbeat`, `image-load-metadata-observed` | `driver.process`, `driver.file`, `driver.registry`, `driver.network`, `driver.event.reserved`, `driver.load`, `image.load` | `info` to `medium` | `T1105`, `T1112` where specific evidence applies | Keeps typed R0 process/file/registry/network/image callback rows visible in findings before richer source predicates or cross-event correlation exist. |
 | R0 driver heartbeat | `driver-load-heartbeat` | `driver.event.reserved`, `driver.load` | `info` | None | Shows that the R0 event drain path produced the driver startup self-test or future driver-load heartbeat. |
-| Image-load placeholder | `image-load-placeholder` | `image.load`, `image.loaded`, `driver.imageLoad`, `driver.image.load` | `info` | None yet | Keeps future R0 image callback rows from appearing as unexplained raw events. |
-| Download-execute behavior | `powershell-evasion-download-abuse`, `script-interpreter-network-download`, `mshta-script-proxy-execution`, `regsvr32-scriptlet-proxy-execution`, `download-execute-chain-placeholder`, `execution-from-downloads-or-staging-path` | `process.start`, `behavior.download_execute`, `download.execute`, `file.downloaded.executed` | `high` | `T1059.001`, `T1218.005`, `T1218.010`, `T1105` | Covers script/LOLBin download primitives, mshta/regsvr32 URL/scriptlet execution, process starts from download/staging paths, and a future correlation placeholder for downloaded artifacts executed in the same analysis window. |
+| Image-load metadata | `image-load-metadata-observed` | `image.load`, `image.loaded`, `driver.imageLoad`, `driver.image.load` | `info` | None | Requires image/module path, process, base-address, or system-image metadata so R0 image callback rows are visible without matching every bare event-type stub. |
+| Download-execute behavior | `powershell-evasion-download-abuse`, `script-interpreter-network-download`, `mshta-script-proxy-execution`, `regsvr32-scriptlet-proxy-execution`, `download-execute-chain-observed`, `execution-from-downloads-or-staging-path` | `process.start`, `behavior.download_execute`, `download.execute`, `file.downloaded.executed` | `high` | `T1059.001`, `T1218.005`, `T1218.010`, `T1105` | Covers script/LOLBin download primitives, mshta/regsvr32 URL/scriptlet execution, process starts from download/staging paths, and normalized correlation rows for downloaded artifacts executed in the same analysis window. |
 | Network behavior | `network-connection`, `http-network-activity`, `dns-query-observed`, `udp-network-activity`, `tls-or-https-network-activity`, `network-ip-literal-observed`, `driver-network-outbound-connect`, `driver-network-dns-traffic`, `driver-network-web-protocol-or-port`, `r0-driver-network-signal` | `network.tcp`, `network.udp`, `http.request`, `network.http`, `network.tls`, `tls.connection`, `dns.query`, `network.dns`, `driver.network` | `low` to `medium` | `T1105`, `T1071.001`, `T1071.004` | Records outbound TCP/UDP plus protocol-specific HTTP/DNS/TLS rows and driver network payloads when normalized collectors provide them. |
 | Network probe depth | `dns-cache-added`, `dns-cache-txt-or-tunnel`, `dns-cache-dynamic-domain`, `netstat-connection-observed`, `netstat-added-connection`, `network-listener-opened`, `network-nonstandard-listener-port`, `network-connection-closed` | `dns.cache.added`, `network.netstat`, `network.netstat.added`, `network.netstat.removed`, `network.tcp.listener.opened`, `network.udp.listener.opened`, `network.tcp.closed` | `info` to `high` | `T1049`, `T1071.004`, `T1571` where specific evidence applies | Uses current TCP/DNS/netstat/listener probe output to report new DNS cache entries, tunnel-capable records, dynamic domains, netstat deltas, opened listeners, suspicious listener ports, and short-lived closed connections. |
-| C2, DNS, TLS, and PCAP placeholders | `network-c2-beacon-event`, `network-c2-indicator-fields`, `dns-c2-tunnel-placeholder`, `http-c2-suspicious-user-agent`, `tls-sni-ja3-placeholder`, `pcap-artifact-placeholder`, `pcap-protocol-summary-placeholder`, `pcap-flow-observed-placeholder`, `pcap-http-request-observed`, `pcap-dns-query-observed`, `pcap-tls-clienthello-observed`, `dns-dynamic-domain-pattern`, `http-direct-ip-or-nonstandard-port` | `network.c2`, `c2.beacon`, `beacon.observed`, `http.request`, `network.http`, `network.tls`, `tls.connection`, `dns.query`, `network.dns`, `driver.network`, `pcap.summary`, `pcap.protocol.summary`, `network.pcap`, `pcap.packet`, `pcap.flow`, `pcap.tcp`, `pcap.udp`, `pcap.http`, `pcap.dns`, `pcap.tls`, `network.flow` | `info` to `high` | `T1071.001`, `T1071.004`, `T1573` where protocol-specific evidence exists | Adds explicit C2/beacon event support, C2 indicator fields, DNS tunnel/DGA placeholders, suspicious HTTP user agents, TLS SNI/JA3/certificate metadata placeholders, direct-IP/nonstandard web port triage, and PCAP flow/HTTP/DNS/TLS placeholders without changing collectors. |
-| HTTP/TLS/PCAP deep triage | `http-executable-download`, `http-post-or-checkin-beacon`, `http-doh-request`, `http-proxy-or-tunnel-method`, `tls-invalid-certificate`, `tls-encrypted-clienthello-or-esni`, `pcap-executable-payload`, `pcap-dns-nxdomain-or-dga`, `pcap-flow-upload-exfil-placeholder`, `pcap-high-fanout-flow-placeholder` | `http.request`, `network.http`, `pcap.http`, `network.tls`, `tls.connection`, `pcap.tls`, `pcap.dns`, `dns.query`, `network.dns`, `pcap.flow`, `network.flow`, `pcap.packet`, `pcap.summary` | `low` to `high` | `T1041`, `T1071.001`, `T1071.004`, `T1090`, `T1105`, `T1573` where specific evidence applies | Adds executable/script/archive downloads, POST/check-in paths, DNS-over-HTTPS, HTTP tunnel/proxy methods, invalid/self-signed certificates, ECH/ESNI metadata, PE payload markers, NXDOMAIN/DGA DNS, upload/exfil placeholders, and high-fan-out packet summary fields. |
-| Anti-analysis behavior | `process-timeout-long-sleep`, `anti-analysis-debugger-check`, `anti-analysis-vm-artifact-query`, `anti-analysis-delay-api-observed`, `anti-analysis-system-fingerprint-command`, `anti-analysis-process-enumeration-command`, `anti-analysis-hardware-registry-query`, `anti-analysis-timing-command`, `anti-analysis-sandbox-artifact-command`, `anti-analysis-user-activity-check`, `anti-analysis-cpuid-api-observed`, `anti-analysis-mac-disk-fingerprint-command`, `anti-analysis-sleep-duration-placeholder`, `anti-analysis-window-or-tool-check-api`, `anti-analysis-low-resource-check` | `process.timeout`, `antiAnalysis.debuggerCheck`, `antiAnalysis.sandboxCheck`, `debugger.detected`, `sandbox.detected`, `registry.query`, `file.open`, `process.query`, `api.call`, `process.start`, `driver.registry`, `system.fingerprint` | `medium` to `high` | `T1497`, `T1497.001`, `T1497.003`, `T1622` | Covers timeout/sleep evasion, explicit debugger/sandbox check events, VM/tool artifact queries, hardware/process enumeration, CPU/hypervisor checks, MAC/disk fingerprinting, duration-field placeholders, user-activity checks, and low-resource telemetry keys. |
+| C2, DNS, TLS, and PCAP metadata | `network-c2-beacon-event`, `network-c2-indicator-fields`, `dns-tunnel-or-dga-indicator`, `http-c2-suspicious-user-agent`, `tls-sni-ja3-metadata-observed`, `pcap-artifact-imported`, `pcap-protocol-summary-placeholder`, `pcap-flow-observed`, `pcap-http-request-observed`, `pcap-dns-query-observed`, `pcap-tls-clienthello-observed`, `dns-dynamic-domain-pattern`, `http-direct-ip-or-nonstandard-port` | `network.c2`, `c2.beacon`, `beacon.observed`, `http.request`, `network.http`, `network.tls`, `tls.connection`, `dns.query`, `network.dns`, `dns.cache.added`, `driver.network`, `pcap.summary`, `pcap.protocol.summary`, `network.pcap`, `pcap.packet`, `pcap.flow`, `pcap.tcp`, `pcap.udp`, `pcap.http`, `pcap.dns`, `pcap.tls`, `network.flow` | `info` to `high` | `T1071.001`, `T1071.004`, `T1573` where protocol-specific evidence exists | Adds explicit C2/beacon event support, C2 indicator fields, DNS tunnel/DGA indicators, suspicious HTTP user agents, TLS SNI/JA3/certificate metadata, direct-IP/nonstandard web port triage, and PCAP artifact/flow/HTTP/DNS/TLS metadata without changing collectors. |
+| HTTP/TLS/PCAP deep triage | `http-executable-download`, `http-post-or-checkin-beacon`, `http-doh-request`, `http-proxy-or-tunnel-method`, `tls-invalid-certificate`, `tls-encrypted-clienthello-or-esni`, `pcap-executable-payload`, `pcap-dns-nxdomain-or-dga`, `pcap-upload-or-exfil-indicator`, `pcap-flow-count-metadata-observed` | `http.request`, `network.http`, `pcap.http`, `network.tls`, `tls.connection`, `pcap.tls`, `pcap.dns`, `dns.query`, `network.dns`, `pcap.flow`, `network.flow`, `pcap.packet`, `pcap.summary` | `low` to `high` | `T1041`, `T1071.001`, `T1071.004`, `T1090`, `T1105`, `T1573` where specific evidence applies | Adds executable/script/archive downloads, POST/check-in paths, DNS-over-HTTPS, HTTP tunnel/proxy methods, invalid/self-signed certificates, ECH/ESNI metadata, PE payload markers, NXDOMAIN/DGA DNS, upload/exfil labels, and packet/flow count metadata. |
+| Anti-analysis behavior | `process-timeout-long-sleep`, `anti-analysis-debugger-check`, `anti-analysis-vm-artifact-query`, `anti-analysis-delay-api-observed`, `anti-analysis-system-fingerprint-command`, `anti-analysis-process-enumeration-command`, `anti-analysis-hardware-registry-query`, `anti-analysis-timing-command`, `anti-analysis-sandbox-artifact-command`, `anti-analysis-user-activity-check`, `anti-analysis-cpuid-api-observed`, `anti-analysis-mac-disk-fingerprint-command`, `anti-analysis-sleep-duration-metadata`, `anti-analysis-window-or-tool-check-api`, `anti-analysis-low-resource-check`, `anti-analysis-accelerated-sleep-metadata` | `process.timeout`, `antiAnalysis.debuggerCheck`, `antiAnalysis.sandboxCheck`, `debugger.detected`, `sandbox.detected`, `registry.query`, `file.open`, `process.query`, `api.call`, `process.start`, `driver.registry`, `system.fingerprint`, `antiAnalysis.sleep`, `api.sleep` | `medium` to `high` | `T1497`, `T1497.001`, `T1497.003`, `T1622` | Covers timeout/sleep evasion, explicit debugger/sandbox check events, VM/tool artifact queries, hardware/process enumeration, CPU/hypervisor checks, MAC/disk fingerprinting, duration and sleep-acceleration metadata, user-activity checks, and low-resource telemetry keys. |
 | Defense evasion and security tooling | `anti-analysis-security-tool-termination-command`, `defender-disable-command`, `defender-policy-registry-disable`, `security-tool-stop-or-kill-command`, `firewall-defense-disable-command`, `event-log-clearing-command`, `amsi-etw-bypass-command-string` | `process.start`, `registry.set`, `registry.create`, `driver.registry` | `high` | `T1562.001`, `T1562.004`, `T1070.001`, `T1497` | Flags Defender disable/exclusion commands, Defender policy registry writes, EDR/security-tool stop or kill tokens, firewall disablement, event-log clearing, and AMSI/ETW bypass strings. |
 | Collection and concealment extras | `screenshot-api-observed`, `hidden-file-attribute-command` | `api.call`, `process.start` | `medium` to `high` | `T1113`, `T1564.001` | Flags screen-capture API primitives and `attrib` hidden/system attribute commands separately from sandbox-generated screenshot artifacts. |
 | Credential and LSASS behavior | `lsa-security-provider-persistence`, `lsass-memory-dump-command`, `lsass-process-access-observed`, `credential-store-access-observed`, `credential-dumping-tool-command`, `credential-lsass-process-access`, `credential-lsass-dump-command`, `credential-sam-system-hive-access`, `credential-hive-save-command`, `credential-browser-store-access`, `credential-vault-dpapi-access` | `registry.set`, `registry.create`, `driver.registry`, `process.start`, `process.open`, `process.access`, `api.call`, `driver.process`, `file.open`, `file.read`, `file.created`, `file.modified`, `registry.query`, `driver.file` | `high` to `critical` | `T1003.001`, `T1003.002`, `T1112`, `T1555`, `T1555.003` | Covers LSA package persistence, LSASS dump commands/access, SAM/SECURITY/SYSTEM/NTDS hive access, hive-save commands, browser credential databases, Vault/Credentials/DPAPI paths, and common credential dumping tool tokens. |
@@ -104,9 +105,9 @@ future parser rows.
 
 ## 2026-07-11 v6 quality expansion
 
-The latest rules add 21 high-value detections that only use fields already
-represented by `SandboxEvent`, the guest probes, typed R0 JSONL rows, or the
-PCAP importer:
+The v6 quality expansion added 21 high-value detections that only use fields
+already represented by `SandboxEvent`, the guest probes, typed R0 JSONL rows, or
+the PCAP importer:
 
 - Persistence: Office add-in/startup paths, accessibility IFEO debugger
   hijacks, and logon-script file paths.
@@ -122,6 +123,31 @@ PCAP importer:
   domain-fronting indicators, and TLS C2 classification fields.
 - Process trees: Office-to-script/LOLBin and browser-to-script/LOLBin lineage
   patterns emitted by `process.tree` rows.
+
+## 2026-07-11 v7 placeholder reduction
+
+The v7 pass replaces 15 placeholder-labeled rules with concrete names and
+metadata boundaries while staying within current `RuleEngine` predicates:
+
+- R0/image and process context: `image-load-metadata-observed` requires
+  image/module/process/base-address fields instead of matching every bare image
+  callback row.
+- Normalized correlation: `download-execute-chain-observed` and
+  `archive-extracted-execute-chain-observed` require download/archive/executed
+  path metadata on higher-level correlation events.
+- DNS/TLS/PCAP: `dns-tunnel-or-dga-indicator`,
+  `tls-sni-ja3-metadata-observed`, `pcap-artifact-imported`,
+  `pcap-flow-observed`, `pcap-upload-or-exfil-indicator`,
+  `pcap-flow-count-metadata-observed`, and
+  `tls-no-sni-or-rare-ja3-indicator` document the exact data fields analysts
+  should inspect.
+- Anti-analysis timing: `anti-analysis-sleep-duration-metadata` and
+  `anti-analysis-accelerated-sleep-metadata` make clear that numeric duration
+  fields are metadata until threshold predicates exist.
+
+Five intentionally broad or future-facing placeholders remain: the legacy R0
+IOCTL protocol row, PCAP protocol summary rollup, low-resource sandbox-check
+keys, HTTP direct-IP/nonstandard-port triage, and PCAP beacon-interval fields.
 
 ## MITRE mapping notes
 
@@ -161,8 +187,9 @@ PCAP importer:
   markers.
 - `T1071.001` and `T1071.004` are reserved for normalized HTTP and DNS events.
 - `T1105` is retained for outbound TCP, embedded URL/IP evidence, and static
-  network/download API imports, download staging paths, and download-execute
-  placeholders until more precise seed mappings are available.
+  network/download API imports, download staging paths, and normalized
+  download-execute correlation rows until more precise seed mappings are
+  available.
 - `T1113` covers runtime screen-capture API calls from sample telemetry. The
   sandbox's own `screenshot.captured` artifact rows are intentionally unmapped
   collection evidence.
@@ -212,7 +239,7 @@ PCAP importer:
   to hide staged files or persistence artifacts.
 - `T1569.002` covers remote service execution command evidence; `T1570` covers
   lateral tool transfer over UNC/admin-share style paths.
-- `T1573` is used for TLS/SNI/JA3 placeholder evidence where encrypted-channel
+- `T1573` is used for TLS/SNI/JA3 metadata indicators where encrypted-channel
   metadata is available but content is not inspected.
 - `T1571` covers listener or endpoint metadata that uses non-standard ports
   often associated with reverse shells, proxies, Tor, or custom C2 channels.
@@ -221,8 +248,8 @@ PCAP importer:
 - `T1622` is used for debugger/timing import strings where static evidence
   suggests anti-analysis checks.
 - Rules without MITRE IDs are intentionally unmapped because the current event
-  is health, placeholder, generic telemetry, or intentionally too broad for a
-  stable technique assignment.
+  is health, generic telemetry, parser metadata, or intentionally too broad for
+  a stable technique assignment.
 
 ## Static-analysis tag contract
 
@@ -265,8 +292,9 @@ existing `SandboxEvent` model and add rules in small, auditable groups:
    `registry.delete`; add separate high-confidence rules for Run keys,
    services, IFEO, and shell extension persistence.
 3. Normalize process/thread/image callbacks to `process.start`,
-   `process.exit`, `thread.created`, and `image.load`; add image-load rules
-   only after payload fields such as image path, signer, and process context are
+   `process.exit`, `thread.created`, and `image.load`; keep the generic
+   image-load metadata rule constrained by path/process/base-address fields,
+   and add more specific signer/path-context rules after those fields are
    stable.
 4. Normalize network/WFP evidence to protocol-specific events such as
    `network.tcp`, `network.udp`, `dns.query`, and `http.request` when those

@@ -113,6 +113,20 @@ Safe environment summary without changing local state:
 .\install.ps1 -Mode CheckEnvironment
 ```
 
+`CheckEnvironment` and `Status` do not start, restore, or stop a VM. They print
+`RecommendedActions` so a fresh workstation can fix packaging gaps before trying
+live execution:
+
+- missing VM: create/import the golden VM or record the real name with
+  `.\install.ps1 -Mode Change -UpdateHyperVConfig -VmName <existing VM> -CheckpointName <checkpoint>`;
+- missing checkpoint: create the clean checkpoint or update the recorded
+  checkpoint name;
+- missing Guest Agent/R0Collector payload or `payload-manifest.json`: run
+  `.\scripts\Prepare-GuestPayload.ps1 -RepoRoot . -PayloadRoot <payloadRoot> -GuestWorkingDirectory <guestRoot> -SelfContained`;
+- missing guest password secret: run `.\install.ps1 -Mode Install -PromptPassword`
+  or use `.\scripts\Test-HyperVReadiness.ps1 -PromptForMissingGuestPassword` for
+  a process-only readiness probe.
+
 Preview local Hyper-V config writes:
 
 ```powershell
@@ -135,7 +149,8 @@ checkpoint, guest username, guest working directory, runtime root, or payload
 root. It checks the password secret presence, target VM, clean checkpoint,
 Guest Service Interface, PowerShell Direct when the VM is already running,
 guest working directory shape, host payload files, and repository secret
-hygiene without starting/restoring/stopping a VM.
+hygiene without starting/restoring/stopping a VM. The summary includes
+`RecommendedActions` for missing VM/checkpoint/payload/secret problems.
 
 ## Start WebUI after install
 

@@ -67,6 +67,11 @@ internal sealed class InstallerContractScenario : ISmokeTestScenario
         RequireContains(installer, "ConvertFrom-SecureString", "Installer should support DPAPI-protected local backup.");
         RequireContains(installer, "SecretValuePrinted = $false", "Installer should explicitly avoid printing secret values.");
         RequireContains(installer, "Value was not printed.", "Installer should tell operators the password value was not printed.");
+        RequireContains(installer, "RecommendedActions", "Installer status should emit human-readable setup repair actions.");
+        RequireContains(installer, "GuestAgentPayloadExists", "Installer status should show Guest Agent payload readiness.");
+        RequireContains(installer, "R0CollectorPayloadExists", "Installer status should show R0Collector payload readiness.");
+        RequireContains(installer, "ReadinessCommand", "Installer environment check should point to the read-only Hyper-V readiness command.");
+        RequireContains(installer, "PlanOnlyStartsVm", "Installer environment check should explicitly state PlanOnly does not start a VM.");
         RequireNotContains(installer, "Write-Host $Password", "Installer should not print the password value.");
         RequireNotContains(installer, "Write-Output $Password", "Installer should not output the password value.");
         RequireNotContains(installer, "Write-InstallInfo $Password", "Installer should not log the password value.");
@@ -107,6 +112,10 @@ internal sealed class InstallerContractScenario : ISmokeTestScenario
         RequireContains(doc, ".\\install.ps1 -Mode ConfigureVTKey -PromptVTKey", "Install doc should describe non-interactive VT key setup.");
         RequireContains(doc, "KSWORDBOX_VIRUSTOTAL_API_KEY", "Install doc should document the VT key environment variable.");
         RequireContains(doc, ".\\install.ps1 -Mode CheckEnvironment", "Install doc should describe non-interactive environment checks.");
+        RequireContains(doc, "RecommendedActions", "Install doc should document repair suggestions from status/check environment.");
+        RequireContains(doc, "missing VM", "Install doc should explain missing VM remediation.");
+        RequireContains(doc, "missing checkpoint", "Install doc should explain missing checkpoint remediation.");
+        RequireContains(doc, "missing Guest Agent/R0Collector payload", "Install doc should explain missing payload remediation.");
         RequireContains(doc, ".\\install.ps1 -Mode StartWebUI", "Install doc should describe direct WebUI startup.");
         RequireContains(doc, "-WhatIf", "Install doc should document safe preview paths.");
         RequireContains(doc, ".\\install.ps1 -Mode Change -ResetGuestVmPassword -GeneratePassword -Force", "Install doc should describe non-interactive actual VM password reset.");

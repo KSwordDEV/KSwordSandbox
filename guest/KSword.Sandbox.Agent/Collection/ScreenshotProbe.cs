@@ -106,20 +106,35 @@ internal sealed class ScreenshotProbe : IGuestProbe
             EventType = result.Captured ? "screenshot.captured" : "screenshot.skipped",
             Source = "guest",
             Path = result.Path,
+            ProcessName = SampleProcessName(context.SamplePath),
+            ProcessId = context.RootProcessId,
             Data =
             {
                 ["phase"] = request.ProbePhaseLabel,
+                ["capturePhase"] = request.ProbePhaseLabel,
                 ["probePhase"] = ToPhaseLabel(phase),
                 ["screenshotStage"] = request.StageLabel,
                 ["captureEnabled"] = "true",
                 ["captureState"] = result.Captured ? "captured" : "skipped",
+                ["status"] = result.Captured ? "captured" : "skipped",
+                ["nonfatal"] = FormatBoolean(!result.Captured),
                 ["evidenceRole"] = "screenshot",
                 ["collectionName"] = "screenshots",
                 ["screenshotIndex"] = request.Sequence.ToString(CultureInfo.InvariantCulture),
                 ["screenshotCount"] = request.TotalCount.ToString(CultureInfo.InvariantCulture),
-                ["artifactLabel"] = request.ArtifactLabel
+                ["artifactLabel"] = request.ArtifactLabel,
+                ["expectedRelativePath"] = "screenshots/*.bmp",
+                ["samplePath"] = context.SamplePath
             }
         };
+
+        if (context.RootProcessId is not null)
+        {
+            evt.Data["rootProcessId"] = context.RootProcessId.Value.ToString(CultureInfo.InvariantCulture);
+            evt.Data["processId"] = context.RootProcessId.Value.ToString(CultureInfo.InvariantCulture);
+        }
+
+        AddIfNotEmpty(evt.Data, "processName", evt.ProcessName);
 
         if (!string.IsNullOrWhiteSpace(result.Reason))
         {
@@ -153,10 +168,29 @@ internal sealed class ScreenshotProbe : IGuestProbe
 
         if (!string.IsNullOrWhiteSpace(result.Path))
         {
-            evt.Data["relativePath"] = SafeRelativePath(context.OutputDirectory, result.Path);
+            var relativePath = SafeRelativePath(context.OutputDirectory, result.Path);
+            evt.Data["relativePath"] = relativePath;
+            AddIfNotEmpty(evt.Data, "artifactRelativePath", SafeArtifactRelativePath(context.OutputDirectory, result.Path));
         }
 
         return evt;
+    }
+
+    /// <summary>
+    /// Reads a display process name for sample-scoped artifact events.
+    /// Inputs are a sample path; processing extracts only the file name; the
+    /// method returns null when no stable name is available.
+    /// </summary>
+    private static string? SampleProcessName(string samplePath)
+    {
+        try
+        {
+            return string.IsNullOrWhiteSpace(samplePath) ? null : Path.GetFileName(samplePath);
+        }
+        catch (ArgumentException)
+        {
+            return null;
+        }
     }
 
     /// <summary>
@@ -174,6 +208,52 @@ internal sealed class ScreenshotProbe : IGuestProbe
         {
             return path;
         }
+    }
+
+    /// <summary>
+    /// Computes an artifact-relative path only when the path is under --out.
+    /// Inputs are output root and artifact path; processing rejects rooted or
+    /// cross-root values; the method returns empty text when no safe path exists.
+    /// </summary>
+    private static string SafeArtifactRelativePath(string root, string path)
+    {
+        try
+        {
+            var outputRoot = Path.GetFullPath(root);
+            var fullPath = Path.GetFullPath(path);
+            var outputRootWithSeparator = Path.EndsInDirectorySeparator(outputRoot)
+                ? outputRoot
+                : outputRoot + Path.DirectorySeparatorChar;
+            if (!fullPath.StartsWith(outputRootWithSeparator, StringComparison.OrdinalIgnoreCase))
+            {
+                return string.Empty;
+            }
+
+            return Path.GetRelativePath(outputRoot, fullPath).Replace('\\', '/');
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return string.Empty;
+        }
+    }
+
+    /// <summary>
+    /// Adds non-empty event Data values.
+    /// </summary>
+    private static void AddIfNotEmpty(Dictionary<string, string> data, string key, string? value)
+    {
+        if (!string.IsNullOrWhiteSpace(value))
+        {
+            data[key] = value;
+        }
+    }
+
+    /// <summary>
+    /// Formats booleans as lowercase invariant strings for event Data.
+    /// </summary>
+    private static string FormatBoolean(bool value)
+    {
+        return value.ToString(CultureInfo.InvariantCulture).ToLowerInvariant();
     }
 
     /// <summary>

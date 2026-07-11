@@ -50,7 +50,7 @@ internal sealed class GuestProbeRunner
             }
             catch (ProbeTimeoutException)
             {
-                events.Add(CreateProbeTimeoutEvent(probe, phase, elapsed.Elapsed));
+                events.Add(CreateProbeTimeoutEvent(probe, phase, context, elapsed.Elapsed));
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -58,11 +58,11 @@ internal sealed class GuestProbeRunner
             }
             catch (OperationCanceledException ex)
             {
-                events.Add(CreateProbeFailureEvent("probe.canceled", probe, phase, elapsed.Elapsed, ex));
+                events.Add(CreateProbeFailureEvent("probe.canceled", probe, phase, context, elapsed.Elapsed, ex));
             }
             catch (Exception ex)
             {
-                events.Add(CreateProbeFailureEvent("probe.failed", probe, phase, elapsed.Elapsed, ex));
+                events.Add(CreateProbeFailureEvent("probe.failed", probe, phase, context, elapsed.Elapsed, ex));
             }
         }
 
@@ -120,20 +120,33 @@ internal sealed class GuestProbeRunner
     /// Inputs are probe identity, phase, and elapsed duration; processing adds
     /// bounded timeout metadata; the method returns a SandboxEvent.
     /// </summary>
-    private SandboxEvent CreateProbeTimeoutEvent(IGuestProbe probe, ProbePhase phase, TimeSpan elapsed)
+    private SandboxEvent CreateProbeTimeoutEvent(
+        IGuestProbe probe,
+        ProbePhase phase,
+        GuestProbeContext context,
+        TimeSpan elapsed)
     {
-        return new SandboxEvent
+        var evt = new SandboxEvent
         {
             EventType = "probe.timeout",
             Source = "guest",
+            ProcessName = SampleProcessName(context.SamplePath),
+            ProcessId = context.RootProcessId,
             Data =
             {
                 ["probeId"] = probe.ProbeId,
-                ["phase"] = phase.ToString(),
+                ["phase"] = ToPhaseLabel(phase),
+                ["capturePhase"] = ToPhaseLabel(phase),
+                ["captureState"] = "failed",
+                ["status"] = "failed",
+                ["nonfatal"] = "true",
+                ["reason"] = "probeTimeout",
                 ["timeoutMilliseconds"] = probeTimeout.TotalMilliseconds.ToString("0", CultureInfo.InvariantCulture),
                 ["elapsedMilliseconds"] = elapsed.TotalMilliseconds.ToString("0", CultureInfo.InvariantCulture)
             }
         };
+        AddProbeCollectionData(evt, probe, context);
+        return evt;
     }
 
     /// <summary>
@@ -146,23 +159,119 @@ internal sealed class GuestProbeRunner
         string eventType,
         IGuestProbe probe,
         ProbePhase phase,
+        GuestProbeContext context,
         TimeSpan elapsed,
         Exception exception)
     {
-        return new SandboxEvent
+        var reason = string.Equals(eventType, "probe.canceled", StringComparison.OrdinalIgnoreCase)
+            ? "probeCanceled"
+            : "probeFailed";
+        var evt = new SandboxEvent
         {
             EventType = eventType,
             Source = "guest",
+            ProcessName = SampleProcessName(context.SamplePath),
+            ProcessId = context.RootProcessId,
             Data =
             {
                 ["probeId"] = probe.ProbeId,
-                ["phase"] = phase.ToString(),
+                ["phase"] = ToPhaseLabel(phase),
+                ["capturePhase"] = ToPhaseLabel(phase),
+                ["captureState"] = "failed",
+                ["status"] = "failed",
+                ["nonfatal"] = "true",
+                ["reason"] = reason,
                 ["elapsedMilliseconds"] = elapsed.TotalMilliseconds.ToString("0", CultureInfo.InvariantCulture),
                 ["exceptionType"] = exception.GetType().FullName ?? exception.GetType().Name,
                 ["message"] = exception.Message
             }
         };
+        AddProbeCollectionData(evt, probe, context);
+        return evt;
     }
+
+    /// <summary>
+    /// Adds artifact collection identity to known optional probe diagnostics.
+    /// Inputs are a diagnostic event, probe, and run context; processing maps
+    /// probe IDs to collection lanes; the method returns no value.
+    /// </summary>
+    private static void AddProbeCollectionData(SandboxEvent evt, IGuestProbe probe, GuestProbeContext context)
+    {
+        var collection = ProbeCollectionFor(probe.ProbeId);
+        if (collection is null)
+        {
+            return;
+        }
+
+        evt.Data["collectionName"] = collection.Value.CollectionName;
+        evt.Data["evidenceRole"] = collection.Value.EvidenceRole;
+        evt.Data["expectedRelativePath"] = collection.Value.ExpectedRelativePath;
+        if (context.RootProcessId is not null)
+        {
+            evt.Data["rootProcessId"] = context.RootProcessId.Value.ToString(CultureInfo.InvariantCulture);
+            evt.Data["processId"] = context.RootProcessId.Value.ToString(CultureInfo.InvariantCulture);
+        }
+
+        AddIfNotEmpty(evt.Data, "processName", evt.ProcessName);
+        AddIfNotEmpty(evt.Data, "samplePath", context.SamplePath);
+    }
+
+    /// <summary>
+    /// Maps known optional artifact probes to manifest collection metadata.
+    /// </summary>
+    private static ProbeCollection? ProbeCollectionFor(string probeId)
+    {
+        return probeId switch
+        {
+            "screenshot" => new ProbeCollection("screenshots", "screenshot", "screenshots/*.bmp"),
+            "memory-dump" => new ProbeCollection("memory-dumps", "memory-dump", "memory-dumps/*.dmp"),
+            "packet-capture" => new ProbeCollection("packet-captures", "packet-capture", "packet-captures/*.pcapng"),
+            _ => null
+        };
+    }
+
+    /// <summary>
+    /// Converts probe phases to stable lower-case labels.
+    /// </summary>
+    private static string ToPhaseLabel(ProbePhase phase)
+    {
+        return phase switch
+        {
+            ProbePhase.BeforeStart => "before-start",
+            ProbePhase.AfterStart => "after-start",
+            ProbePhase.AfterRun => "after-run",
+            ProbePhase.Cleanup => "cleanup",
+            _ => phase.ToString()
+        };
+    }
+
+    /// <summary>
+    /// Reads a display process name for sample-scoped probe diagnostics.
+    /// </summary>
+    private static string? SampleProcessName(string samplePath)
+    {
+        try
+        {
+            return string.IsNullOrWhiteSpace(samplePath) ? null : Path.GetFileName(samplePath);
+        }
+        catch (ArgumentException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Adds a string Data value when it is non-empty.
+    /// </summary>
+    private static void AddIfNotEmpty(Dictionary<string, string> data, string key, string? value)
+    {
+        if (!string.IsNullOrWhiteSpace(value))
+        {
+            data[key] = value;
+        }
+    }
+
+    private readonly record struct ProbeCollection(string CollectionName, string EvidenceRole, string ExpectedRelativePath);
 
     /// <summary>
     /// Marks an internal probe timeout without depending on localized exception

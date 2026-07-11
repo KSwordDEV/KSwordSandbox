@@ -114,7 +114,7 @@ internal sealed class MemoryDumpProbe : IGuestProbe
         var target = new MemoryDumpTarget(
             rememberedRootProcessId.Value,
             ParentProcessId: null,
-            ProcessName: "root",
+            ProcessName: SampleProcessName(context.SamplePath) ?? "root",
             Path: context.SamplePath,
             Depth: 0,
             Lineage: rememberedRootProcessId.Value.ToString(CultureInfo.InvariantCulture),
@@ -261,6 +261,8 @@ internal sealed class MemoryDumpProbe : IGuestProbe
     {
         var evt = CreateBaseEvent("memory_dump.captured", result, phaseLabel, target, rootProcessId);
         evt.Data["captureState"] = "captured";
+        evt.Data["status"] = "captured";
+        evt.Data["nonfatal"] = "false";
         if (result.SizeBytes is not null)
         {
             evt.Data["sizeBytes"] = result.SizeBytes.Value.ToString(CultureInfo.InvariantCulture);
@@ -268,7 +270,9 @@ internal sealed class MemoryDumpProbe : IGuestProbe
 
         if (!string.IsNullOrWhiteSpace(result.Path))
         {
-            evt.Data["relativePath"] = SafeRelativePathForEvent(result.Path);
+            var relativePath = SafeRelativePathForEvent(result.Path);
+            evt.Data["relativePath"] = relativePath;
+            AddOptionalData(evt, "artifactRelativePath", relativePath);
         }
 
         return evt;
@@ -286,6 +290,8 @@ internal sealed class MemoryDumpProbe : IGuestProbe
     {
         var evt = CreateBaseEvent("memory_dump.skipped", result, phaseLabel, target, rootProcessId);
         evt.Data["captureState"] = "skipped";
+        evt.Data["status"] = "skipped";
+        evt.Data["nonfatal"] = "true";
         evt.Data["duplicate"] = duplicate.ToString(CultureInfo.InvariantCulture).ToLowerInvariant();
         AddOptionalData(evt, "reason", result.Reason);
         AddOptionalData(evt, "exceptionType", result.ExceptionType);
@@ -321,10 +327,12 @@ internal sealed class MemoryDumpProbe : IGuestProbe
             Data =
             {
                 ["phase"] = phaseLabel,
+                ["capturePhase"] = phaseLabel,
                 ["captureEnabled"] = "true",
                 ["dumpType"] = result.DumpType,
                 ["evidenceRole"] = "memory-dump",
-                ["collectionName"] = "memory-dumps"
+                ["collectionName"] = "memory-dumps",
+                ["expectedRelativePath"] = "memory-dumps/*.dmp"
             }
         };
 
@@ -344,7 +352,9 @@ internal sealed class MemoryDumpProbe : IGuestProbe
             evt.Data["treeDepth"] = target.Depth.ToString(CultureInfo.InvariantCulture);
             evt.Data["treeLineage"] = target.Lineage;
             evt.Data["targetProcessName"] = target.ProcessName;
+            AddOptionalData(evt, "processName", target.ProcessName);
             AddOptionalData(evt, "targetProcessPath", target.Path);
+            AddOptionalData(evt, "processPath", target.Path);
             AddOptionalData(evt, "snapshotKey", target.SnapshotKey);
             if (target.ParentProcessId is not null)
             {
@@ -375,8 +385,11 @@ internal sealed class MemoryDumpProbe : IGuestProbe
             Data =
             {
                 ["phase"] = phaseLabel,
+                ["capturePhase"] = phaseLabel,
                 ["captureEnabled"] = "true",
                 ["captureState"] = "summary",
+                ["status"] = "summary",
+                ["nonfatal"] = "false",
                 ["dumpType"] = MemoryDumpCaptureResult.MiniDumpTypeName,
                 ["evidenceRole"] = "memory-dump",
                 ["collectionName"] = "memory-dumps",
@@ -456,6 +469,21 @@ internal sealed class MemoryDumpProbe : IGuestProbe
         if (!string.IsNullOrWhiteSpace(value))
         {
             evt.Data[key] = value;
+        }
+    }
+
+    /// <summary>
+    /// Reads a display process name for root sample dump attempts.
+    /// </summary>
+    private static string? SampleProcessName(string samplePath)
+    {
+        try
+        {
+            return string.IsNullOrWhiteSpace(samplePath) ? null : Path.GetFileName(samplePath);
+        }
+        catch (ArgumentException)
+        {
+            return null;
         }
     }
 

@@ -23,6 +23,7 @@ internal sealed class GuestAgentCollectionDepthScenario : ISmokeTestScenario
         var frameworkDoc = ReadRepositoryText(context, "docs", "guest-agent-framework.md");
         var artifactsDoc = ReadRepositoryText(context, "docs", "artifacts.md");
         var programText = ReadRepositoryText(context, "guest", "KSword.Sandbox.Agent", "Program.cs");
+        var guestWriterText = ReadRepositoryText(context, "guest", "KSword.Sandbox.Agent", "Output", "GuestArtifactWriter.cs");
 
         AssertFileContains(Path.Combine(collectionRoot, "ProcessTreeProbe.cs"), "process.tree", "Process tree probe must emit process.tree.");
         AssertFileContains(Path.Combine(collectionRoot, "ProcessTreeProbe.cs"), "CreateToolhelp32Snapshot", "Process tree probe must use low-privilege Toolhelp snapshots.");
@@ -45,6 +46,10 @@ internal sealed class GuestAgentCollectionDepthScenario : ISmokeTestScenario
         AssertFileContains(Path.Combine(collectionRoot, "ScreenshotProbe.cs"), "screenshotIndex", "Screenshot events must include sequence metadata.");
         AssertFileContains(Path.Combine(collectionRoot, "ScreenshotProbe.cs"), "screenshot.skipped", "Screenshot capture must be non-fatal in unsupported sessions.");
         AssertFileContains(Path.Combine(collectionRoot, "ScreenshotProbe.cs"), "diagnosticStage", "Screenshot skipped events must include failure-stage diagnostics.");
+        AssertFileContains(Path.Combine(collectionRoot, "ScreenshotProbe.cs"), "capturePhase", "Screenshot events must include normalized capture phase metadata.");
+        AssertFileContains(Path.Combine(collectionRoot, "ScreenshotProbe.cs"), "artifactRelativePath", "Screenshot events must expose artifact-relative paths.");
+        AssertFileContains(Path.Combine(collectionRoot, "ScreenshotProbe.cs"), "nonfatal", "Screenshot skipped events must mark non-fatal collection status.");
+        AssertFileContains(Path.Combine(collectionRoot, "ScreenshotProbe.cs"), "rootProcessId", "Screenshot events should carry sample root process identity when available.");
         AssertFileContains(Path.Combine(collectionRoot, "MemoryDumpProbe.cs"), "IProcessMemoryDumpCapture", "Memory dump interface must be present.");
         AssertFileContains(Path.Combine(collectionRoot, "MemoryDumpProbe.cs"), "MiniDumpWriteDump", "Memory dump capture must use Windows minidump APIs.");
         AssertFileContains(Path.Combine(collectionRoot, "MemoryDumpProbe.cs"), "memory_dump.skipped", "Memory dump capture must be non-fatal.");
@@ -54,6 +59,11 @@ internal sealed class GuestAgentCollectionDepthScenario : ISmokeTestScenario
         AssertFileContains(Path.Combine(collectionRoot, "MemoryDumpProbe.cs"), "BuildVisibleDumpTargets", "Memory dump capture must build root/child process dump targets.");
         AssertFileContains(Path.Combine(collectionRoot, "MemoryDumpProbe.cs"), "processRole", "Memory dump events must identify root versus child process dumps.");
         AssertFileContains(Path.Combine(collectionRoot, "MemoryDumpProbe.cs"), "alreadyCapturedCount", "Memory dump sweep must report duplicate root/child dump suppression.");
+        AssertFileContains(Path.Combine(collectionRoot, "MemoryDumpProbe.cs"), "artifactRelativePath", "Memory dump captured events must expose artifact-relative paths.");
+        AssertFileContains(Path.Combine(collectionRoot, "MemoryDumpProbe.cs"), "targetProcessName", "Memory dump events must preserve target process identity.");
+        AssertFileContains(Path.Combine(collectionRoot, "MemoryDumpProbe.cs"), "targetProcessPath", "Memory dump events must preserve target process path metadata.");
+        AssertFileContains(Path.Combine(collectionRoot, "MemoryDumpProbe.cs"), "capturePhase", "Memory dump events must include normalized capture phase metadata.");
+        AssertFileContains(Path.Combine(collectionRoot, "MemoryDumpProbe.cs"), "nonfatal", "Memory dump skipped events must mark non-fatal collection status.");
         AssertFileContains(Path.Combine(collectionRoot, "PacketCaptureProbe.cs"), "pktmon.exe", "Packet capture probe must use Windows pktmon.");
         AssertFileContains(Path.Combine(collectionRoot, "PacketCaptureProbe.cs"), "etl2pcap", "Packet capture probe must convert ETL output to PCAPNG.");
         AssertFileContains(Path.Combine(collectionRoot, "PacketCaptureProbe.cs"), "packet_capture.started", "Packet capture probe must emit start evidence.");
@@ -61,8 +71,21 @@ internal sealed class GuestAgentCollectionDepthScenario : ISmokeTestScenario
         AssertFileContains(Path.Combine(collectionRoot, "PacketCaptureProbe.cs"), "packet_capture.failed", "Packet capture probe must emit non-fatal failure evidence.");
         AssertFileContains(Path.Combine(collectionRoot, "PacketCaptureProbe.cs"), "packet_capture.skipped", "Packet capture probe must keep unavailable capture non-fatal.");
         AssertFileContains(Path.Combine(collectionRoot, "PacketCaptureProbe.cs"), "packet-captures", "Packet capture probe must write to the packet-captures collection lane.");
+        AssertFileContains(Path.Combine(collectionRoot, "PacketCaptureProbe.cs"), "artifactRelativePath", "Packet capture events must expose final PCAP artifact-relative paths.");
+        AssertFileContains(Path.Combine(collectionRoot, "PacketCaptureProbe.cs"), "etlRelativePath", "Packet capture diagnostics must distinguish ETL diagnostic paths.");
+        AssertFileContains(Path.Combine(collectionRoot, "PacketCaptureProbe.cs"), "capturePhase", "Packet capture events must include normalized capture phase metadata.");
+        AssertFileContains(Path.Combine(collectionRoot, "PacketCaptureProbe.cs"), "nonfatal", "Packet capture skipped/failed events must mark non-fatal collection status.");
         AssertFileContains(Path.Combine(collectionRoot, "GuestProbeRunner.cs"), "probe.timeout", "Probe runner must isolate timed-out probes.");
+        AssertFileContains(Path.Combine(collectionRoot, "GuestProbeRunner.cs"), "collectionName", "Probe timeout/failure events must map known artifact probes to collection lanes.");
+        AssertFileContains(Path.Combine(collectionRoot, "GuestProbeRunner.cs"), "probeTimeout", "Probe timeout events must retain concrete failure reasons.");
+        AssertFileContains(Path.Combine(collectionRoot, "GuestProbeRunner.cs"), "nonfatal", "Probe failure diagnostics must mark collection failures as non-fatal.");
         AssertFileContains(Path.Combine(agentRoot, "Diagnostics", "BoundedProcessRunner.cs"), "Kill(entireProcessTree: true)", "Bounded helper commands must be terminated on timeout.");
+
+        SmokeAssert.True(guestWriterText.Contains("lastReason", StringComparison.Ordinal), "Guest artifact writer must preserve concrete collection failure reasons.");
+        SmokeAssert.True(guestWriterText.Contains("lastDiagnosticStage", StringComparison.Ordinal), "Guest artifact writer must preserve diagnostic stages in collection metadata.");
+        SmokeAssert.True(guestWriterText.Contains("lastArtifactRelativePath", StringComparison.Ordinal), "Guest artifact writer must preserve last artifact-relative path metadata.");
+        SmokeAssert.True(guestWriterText.Contains("CountProbeFailureEvents", StringComparison.Ordinal), "Guest artifact writer must count probe failures in collection status.");
+        SmokeAssert.True(guestWriterText.Contains("lastProcessId", StringComparison.Ordinal), "Guest artifact writer must preserve process identity in artifact/collection metadata.");
 
         SmokeAssert.True(programText.Contains("new ProcessTreeProbe()", StringComparison.Ordinal), "Agent pipeline must include ProcessTreeProbe.");
         SmokeAssert.True(programText.Contains("new FileDiffProbe()", StringComparison.Ordinal), "Agent pipeline must include FileDiffProbe.");
@@ -107,6 +130,10 @@ internal sealed class GuestAgentCollectionDepthScenario : ISmokeTestScenario
         SmokeAssert.True(artifactsDoc.Contains("screenshots/", StringComparison.Ordinal), "Artifacts doc must document screenshot artifacts.");
         SmokeAssert.True(artifactsDoc.Contains("before,during,after", StringComparison.Ordinal), "Artifacts doc must document screenshot cadence metadata.");
         SmokeAssert.True(artifactsDoc.Contains("manifest.json` is always written", StringComparison.Ordinal), "Artifacts doc must document best-effort manifest output.");
+        SmokeAssert.True(artifactsDoc.Contains("artifactRelativePath", StringComparison.Ordinal), "Artifacts doc must document artifact-relative event links.");
+        SmokeAssert.True(artifactsDoc.Contains("nonfatal", StringComparison.OrdinalIgnoreCase), "Artifacts doc must document nonfatal collection status.");
+        SmokeAssert.True(artifactsDoc.Contains("rootProcessId", StringComparison.Ordinal), "Artifacts doc must document process identity fields.");
+        SmokeAssert.True(artifactsDoc.Contains("lastReason", StringComparison.Ordinal), "Artifacts doc must document retained collection failure reasons.");
         SmokeAssert.True(frameworkDoc.Contains("IGuestProbe.CollectAsync", StringComparison.Ordinal), "Framework doc must document the probe extension point.");
         SmokeAssert.True(frameworkDoc.Contains("BoundedProcessRunner", StringComparison.Ordinal), "Framework doc must document bounded helper command execution.");
         SmokeAssert.True(frameworkDoc.Contains("IScreenshotCapture", StringComparison.Ordinal), "Framework doc must document screenshot capture interface.");

@@ -809,6 +809,9 @@ function Show-KSwordSandboxInstallStatus {
     $vmState = $null
     $checkpointExists = $false
     $hyperVStatusError = $null
+    $guestAgentPayload = Join-Path (Join-Path $GuestPayloadRoot 'agent') 'KSword.Sandbox.Agent.exe'
+    $r0CollectorPayload = Join-Path (Join-Path $GuestPayloadRoot 'r0collector') 'KSword.Sandbox.R0Collector.exe'
+    $payloadManifest = Join-Path $GuestPayloadRoot 'payload-manifest.json'
 
     if ($hyperVModuleAvailable) {
         try {
@@ -821,6 +824,32 @@ function Show-KSwordSandboxInstallStatus {
         catch {
             $hyperVStatusError = $_.Exception.Message
         }
+    }
+
+    $recommendedActions = New-Object System.Collections.Generic.List[string]
+    if (-not (Test-Path -LiteralPath $RuntimeRoot -PathType Container)) {
+        [void]$recommendedActions.Add(".\install.ps1 -Mode Install to create runtime folders under '$RuntimeRoot'.")
+    }
+    if (-not (Test-Path -LiteralPath $localConfig -PathType Leaf)) {
+        [void]$recommendedActions.Add(".\install.ps1 -Mode Install -PromptPassword to create local config, or .\install.ps1 -Mode Change -UpdateHyperVConfig to record VM/checkpoint paths.")
+    }
+    if (-not (Test-Path -LiteralPath $GuestPayloadRoot -PathType Container) -or
+        -not (Test-Path -LiteralPath $guestAgentPayload -PathType Leaf) -or
+        -not (Test-Path -LiteralPath $r0CollectorPayload -PathType Leaf) -or
+        -not (Test-Path -LiteralPath $payloadManifest -PathType Leaf)) {
+        [void]$recommendedActions.Add(".\scripts\Prepare-GuestPayload.ps1 -RepoRoot . -PayloadRoot '$GuestPayloadRoot' -GuestWorkingDirectory '$GuestWorkingDirectory' -SelfContained")
+    }
+    if ([string]::IsNullOrWhiteSpace($processValue) -and [string]::IsNullOrWhiteSpace($userValue) -and [string]::IsNullOrWhiteSpace($machineValue)) {
+        [void]$recommendedActions.Add(".\install.ps1 -Mode Install -PromptPassword, or .\scripts\Test-HyperVReadiness.ps1 -PromptForMissingGuestPassword for a process-only check.")
+    }
+    if (-not $hyperVModuleAvailable) {
+        [void]$recommendedActions.Add('Enable/install Hyper-V PowerShell tools, then rerun .\install.ps1 -Mode CheckEnvironment.')
+    }
+    elseif (-not $vmExists) {
+        [void]$recommendedActions.Add(".\install.ps1 -Mode Change -UpdateHyperVConfig -VmName <existing VM> -CheckpointName <checkpoint>, or create/import VM '$VmName'.")
+    }
+    elseif (-not $checkpointExists) {
+        [void]$recommendedActions.Add(".\install.ps1 -Mode Change -UpdateHyperVConfig -VmName '$VmName' -CheckpointName <checkpoint>, or create checkpoint '$CheckpointName'.")
     }
 
     [pscustomobject][ordered]@{
@@ -837,6 +866,12 @@ function Show-KSwordSandboxInstallStatus {
         RuntimeRootExists = Test-Path -LiteralPath $RuntimeRoot -PathType Container
         GuestPayloadRoot = [System.IO.Path]::GetFullPath($GuestPayloadRoot)
         GuestPayloadRootExists = Test-Path -LiteralPath $GuestPayloadRoot -PathType Container
+        GuestAgentPayload = $guestAgentPayload
+        GuestAgentPayloadExists = Test-Path -LiteralPath $guestAgentPayload -PathType Leaf
+        R0CollectorPayload = $r0CollectorPayload
+        R0CollectorPayloadExists = Test-Path -LiteralPath $r0CollectorPayload -PathType Leaf
+        GuestPayloadManifest = $payloadManifest
+        GuestPayloadManifestExists = Test-Path -LiteralPath $payloadManifest -PathType Leaf
         VmName = $VmName
         CheckpointName = $CheckpointName
         GuestWorkingDirectory = $GuestWorkingDirectory
@@ -854,6 +889,11 @@ function Show-KSwordSandboxInstallStatus {
         InstallStateExists = Test-Path -LiteralPath $script:InstallStatePath -PathType Leaf
         DpapiBackupPath = $script:SecretBackupPath
         DpapiBackupExists = Test-Path -LiteralPath $script:SecretBackupPath -PathType Leaf
+        PayloadGuidance = ".\scripts\Prepare-GuestPayload.ps1 -RepoRoot . -PayloadRoot '$GuestPayloadRoot' -GuestWorkingDirectory '$GuestWorkingDirectory' -SelfContained"
+        VmGuidance = ".\install.ps1 -Mode Change -UpdateHyperVConfig -VmName <existing VM> -CheckpointName <checkpoint>"
+        CheckpointGuidance = ".\install.ps1 -Mode Change -UpdateHyperVConfig -VmName '$VmName' -CheckpointName <checkpoint>"
+        ReadinessGuidance = '.\scripts\Test-HyperVReadiness.ps1'
+        RecommendedActions = @($recommendedActions.ToArray())
         SecretValuePrinted = $false
     }
 }
@@ -877,6 +917,8 @@ function Show-KSwordSandboxEnvironmentCheck {
         ResetGuestPasswordCommand = '.\install.ps1 -Mode Change -ResetGuestVmPassword -PromptPassword -Force'
         ConfigureVTKeyCommand = '.\install.ps1 -Mode ConfigureVTKey -PromptVTKey'
         CheckEnvironmentCommand = '.\install.ps1 -Mode CheckEnvironment'
+        ReadinessCommand = '.\scripts\Test-HyperVReadiness.ps1'
+        PlanOnlyCommand = '.\run.ps1 -Mode Plan -SamplePath <sample.exe>'
         WebUiUrl = $WebUiUrl
         RunScriptExists = Test-Path -LiteralPath $runScript -PathType Leaf
         ReadinessScriptExists = Test-Path -LiteralPath $readinessScript -PathType Leaf
@@ -888,6 +930,8 @@ function Show-KSwordSandboxEnvironmentCheck {
         WhatIfSupported = $true
         DefaultStartsVm = $false
         StartWebUiStartsVm = $false
+        CheckEnvironmentStartsVm = $false
+        PlanOnlyStartsVm = $false
         LiveVmExecutionRequiresExplicitLive = $true
         SecretValuePrinted = $false
         InstallStatus = $installStatus

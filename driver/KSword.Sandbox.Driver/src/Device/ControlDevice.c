@@ -71,7 +71,8 @@ KswBuildHealthFlags(
     flags =
         KSWORD_SANDBOX_HEALTH_FLAG_CAPABILITIES_AVAILABLE |
         KSWORD_SANDBOX_HEALTH_FLAG_STATUS_AVAILABLE |
-        KSWORD_SANDBOX_HEALTH_FLAG_ENABLE_MASK_AVAILABLE;
+        KSWORD_SANDBOX_HEALTH_FLAG_ENABLE_MASK_AVAILABLE |
+        KSWORD_SANDBOX_HEALTH_FLAG_PRODUCER_MASKS_AVAILABLE;
 
     if (Snapshot->EventCount != 0) {
         flags |= KSWORD_SANDBOX_HEALTH_FLAG_HAS_EVENTS;
@@ -200,6 +201,10 @@ KswHandleGetHealth(
     reply->EventsDropped = snapshot.EventsDropped;
     reply->NextSequence = snapshot.NextSequence;
     reply->LastNtStatus = snapshot.LastStatus;
+    reply->ProducerEnableMask = snapshot.ProducerEnableMask;
+    reply->SupportedProducerMask = snapshot.SupportedProducerMask;
+    reply->ActiveProducerMask = snapshot.ActiveProducerMask;
+    reply->FailedProducerMask = snapshot.FailedProducerMask;
 
     return KswCompleteIrp(Irp, STATUS_SUCCESS, sizeof(*reply));
 }

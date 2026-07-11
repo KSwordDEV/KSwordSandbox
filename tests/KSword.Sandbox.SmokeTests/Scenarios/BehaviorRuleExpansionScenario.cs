@@ -8,7 +8,7 @@ namespace KSword.Sandbox.SmokeTests.Scenarios;
 /// <summary>
 /// Verifies expanded behavior-rule coverage for persistence, injection,
 /// lateral movement, anti-analysis, download execution, credential access,
-/// C2/DNS/HTTP/TLS, and PCAP placeholder rules.
+/// C2/DNS/HTTP/TLS, and PCAP metadata rules.
 /// </summary>
 internal sealed class BehaviorRuleExpansionScenario : ISmokeTestScenario
 {
@@ -18,7 +18,7 @@ internal sealed class BehaviorRuleExpansionScenario : ISmokeTestScenario
         "browser-download-cache-write",
         "execution-from-downloads-or-staging-path",
         "download-archive-or-script-stage",
-        "download-execute-chain-placeholder",
+        "download-execute-chain-observed",
         "process-injection-memory-primitive",
         "process-injection-thread-or-apc-primitive",
         "process-hollowing-signal",
@@ -42,10 +42,10 @@ internal sealed class BehaviorRuleExpansionScenario : ISmokeTestScenario
         "credential-dumping-tool-command",
         "network-c2-beacon-event",
         "network-c2-indicator-fields",
-        "dns-c2-tunnel-placeholder",
+        "dns-tunnel-or-dga-indicator",
         "http-c2-suspicious-user-agent",
-        "tls-sni-ja3-placeholder",
-        "pcap-artifact-placeholder",
+        "tls-sni-ja3-metadata-observed",
+        "pcap-artifact-imported",
         "pcap-protocol-summary-placeholder"
     ];
 
@@ -104,7 +104,12 @@ internal sealed class BehaviorRuleExpansionScenario : ISmokeTestScenario
             {
                 EventType = "download.execute",
                 Source = "guest",
-                Path = @"C:\Users\Smoke\Downloads\payload.exe"
+                Path = @"C:\Users\Smoke\Downloads\payload.exe",
+                Data =
+                {
+                    ["downloadPath"] = @"C:\Users\Smoke\Downloads\payload.exe",
+                    ["executedPath"] = @"C:\Users\Smoke\Downloads\payload.exe"
+                }
             },
             new SandboxEvent
             {
@@ -294,7 +299,13 @@ internal sealed class BehaviorRuleExpansionScenario : ISmokeTestScenario
             new SandboxEvent
             {
                 EventType = "pcap.summary",
-                Source = "host"
+                Source = "host",
+                Data =
+                {
+                    ["flowCount"] = "1",
+                    ["packetCount"] = "4",
+                    ["protocols"] = "dns,http,tls"
+                }
             },
             new SandboxEvent
             {

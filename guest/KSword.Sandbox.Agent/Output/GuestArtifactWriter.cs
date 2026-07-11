@@ -274,6 +274,7 @@ internal sealed class GuestArtifactWriter
         AddIfNotEmpty(metadata, "evidenceRole", classification.EvidenceRole);
         AddIfNotEmpty(metadata, "collectionName", classification.CollectionName);
         AddIfNotEmpty(metadata, "importPath", relativePath);
+        AddIfNotEmpty(metadata, "artifactRelativePath", relativePath);
         AddIfNotEmpty(metadata, "artifactFullPath", artifactFullPath);
         AddIfNotEmpty(metadata, "guestFullPath", FirstNonEmpty(droppedFileMetadata?.OriginalFullPath, ValueOrEmpty(metadata, "guestFullPath", "guestPath"), artifactFullPath));
         AddIfNotEmpty(metadata, "captureState", InferCaptureState(classification, metadata));
@@ -346,11 +347,13 @@ internal sealed class GuestArtifactWriter
         var artifactCount = descriptors.Count(artifact => string.Equals(artifact.CollectionName, name, StringComparison.OrdinalIgnoreCase));
         var capturedEventCount = CountEvents(events, capturedEventPrefixes);
         var skippedEventCount = CountEvents(events, skippedEventPrefixes);
-        var failedEventCount = failedEventPrefixes is null ? 0 : CountEvents(events, failedEventPrefixes);
+        var failedEventCount = (failedEventPrefixes is null ? 0 : CountEvents(events, failedEventPrefixes)) + CountProbeFailureEvents(events, name);
         var status = DetermineCollectionStatus(enabled, implemented, artifactCount, capturedEventCount, skippedEventCount, failedEventCount);
         var normalizedRelativePath = NormalizeRelativePath(relativePath);
         var metadata = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
+            ["collectionName"] = name,
+            ["evidenceRole"] = evidenceRole,
             ["artifactCount"] = artifactCount.ToString(System.Globalization.CultureInfo.InvariantCulture),
             ["capturedEventCount"] = capturedEventCount.ToString(System.Globalization.CultureInfo.InvariantCulture),
             ["skippedEventCount"] = skippedEventCount.ToString(System.Globalization.CultureInfo.InvariantCulture),
@@ -358,12 +361,25 @@ internal sealed class GuestArtifactWriter
             ["safeByDefault"] = (!enabled).ToString(System.Globalization.CultureInfo.InvariantCulture)
         };
 
+        AddLastCollectionEventMetadata(
+            metadata,
+            events,
+            name,
+            capturedEventPrefixes,
+            skippedEventPrefixes,
+            failedEventPrefixes ?? Array.Empty<string>());
+        var concreteStatusReason = LastCollectionReason(
+            events,
+            name,
+            status,
+            skippedEventPrefixes,
+            failedEventPrefixes ?? Array.Empty<string>());
         var reason = status switch
         {
             "disabled" => reasonWhenDisabled,
             "not-implemented" => "collectorNotImplemented",
-            "skipped" => "collectorSkippedOrUnavailable",
-            "failed" => "collectorFailed",
+            "skipped" => concreteStatusReason ?? "collectorSkippedOrUnavailable",
+            "failed" => concreteStatusReason ?? "collectorFailed",
             "enabled-empty" => "noArtifactsProduced",
             _ => string.Empty
         };
@@ -408,14 +424,14 @@ internal sealed class GuestArtifactWriter
             return "not-implemented";
         }
 
-        if (skippedEventCount > 0)
-        {
-            return "skipped";
-        }
-
         if (failedEventCount > 0)
         {
             return "failed";
+        }
+
+        if (skippedEventCount > 0)
+        {
+            return "skipped";
         }
 
         return "enabled-empty";
@@ -441,6 +457,14 @@ internal sealed class GuestArtifactWriter
                 {
                     metadata["processId"] = evt.ProcessId.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
                 }
+
+                AddIfNotEmpty(metadata, "processName", evt.ProcessName);
+                if (evt.ParentProcessId is not null)
+                {
+                    metadata["parentProcessId"] = evt.ParentProcessId.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                }
+
+                AddIfNotEmpty(metadata, "commandLine", evt.CommandLine);
 
                 foreach (var pair in evt.Data)
                 {
@@ -594,7 +618,195 @@ internal sealed class GuestArtifactWriter
             return 0;
         }
 
-        return events.Count(evt => eventPrefixes.Any(prefix => evt.EventType.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)));
+        return events.Count(evt => EventTypeMatches(evt, eventPrefixes));
+    }
+
+    private static int CountProbeFailureEvents(IReadOnlyList<SandboxEvent> events, string collectionName)
+    {
+        return events.Count(evt => IsProbeFailureForCollection(evt, collectionName));
+    }
+
+    private static bool EventTypeMatches(SandboxEvent evt, IReadOnlyList<string> eventPrefixes)
+    {
+        return eventPrefixes.Count > 0 &&
+            eventPrefixes.Any(prefix => evt.EventType.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool IsProbeFailureEvent(SandboxEvent evt)
+    {
+        return string.Equals(evt.EventType, "probe.timeout", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(evt.EventType, "probe.failed", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(evt.EventType, "probe.canceled", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool HasCollectionName(SandboxEvent evt, string collectionName)
+    {
+        return evt.Data.TryGetValue("collectionName", out var value) &&
+            string.Equals(value, collectionName, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string? LastCollectionReason(
+        IReadOnlyList<SandboxEvent> events,
+        string collectionName,
+        string status,
+        IReadOnlyList<string> skippedEventPrefixes,
+        IReadOnlyList<string> failedEventPrefixes)
+    {
+        for (var index = events.Count - 1; index >= 0; index--)
+        {
+            var evt = events[index];
+            var matchesStatus = status switch
+            {
+                "failed" => EventTypeMatches(evt, failedEventPrefixes) || IsProbeFailureForCollection(evt, collectionName),
+                "skipped" => EventTypeMatches(evt, skippedEventPrefixes),
+                _ => false
+            };
+            if (!matchesStatus)
+            {
+                continue;
+            }
+
+            if (evt.Data.TryGetValue("reason", out var reason) && !string.IsNullOrWhiteSpace(reason))
+            {
+                return reason;
+            }
+        }
+
+        return null;
+    }
+
+    private static void AddLastCollectionEventMetadata(
+        Dictionary<string, string> metadata,
+        IReadOnlyList<SandboxEvent> events,
+        string collectionName,
+        IReadOnlyList<string> capturedEventPrefixes,
+        IReadOnlyList<string> skippedEventPrefixes,
+        IReadOnlyList<string> failedEventPrefixes)
+    {
+        SandboxEvent? lastRelevant = null;
+        SandboxEvent? lastDiagnostic = null;
+        for (var index = 0; index < events.Count; index++)
+        {
+            var evt = events[index];
+            if (!IsCollectionEvent(evt, collectionName, capturedEventPrefixes, skippedEventPrefixes, failedEventPrefixes))
+            {
+                continue;
+            }
+
+            lastRelevant = evt;
+            if (HasDiagnosticData(evt))
+            {
+                lastDiagnostic = evt;
+            }
+        }
+
+        if (lastRelevant is not null)
+        {
+            CopyEventDataIfPresent(metadata, lastRelevant, "phase", "lastPhase");
+            CopyEventDataIfPresent(metadata, lastRelevant, "capturePhase", "lastCapturePhase");
+            CopyEventDataIfPresent(metadata, lastRelevant, "status", "lastStatus");
+            CopyEventDataIfPresent(metadata, lastRelevant, "captureState", "lastCaptureState");
+            CopyEventDataIfPresent(metadata, lastRelevant, "nonfatal", "lastNonfatal");
+            CopyEventDataIfPresent(metadata, lastRelevant, "artifactRelativePath", "lastArtifactRelativePath");
+            CopyEventDataIfPresent(metadata, lastRelevant, "relativePath", "lastRelativePath");
+            CopyProcessIdentity(metadata, lastRelevant);
+        }
+
+        if (lastDiagnostic is not null)
+        {
+            metadata["lastEventType"] = lastDiagnostic.EventType;
+            CopyEventDataIfPresent(metadata, lastDiagnostic, "reason", "lastReason");
+            CopyEventDataIfPresent(metadata, lastDiagnostic, "diagnosticStage", "lastDiagnosticStage");
+            CopyEventDataIfPresent(metadata, lastDiagnostic, "exceptionType", "lastExceptionType");
+            CopyEventDataIfPresent(metadata, lastDiagnostic, "win32Error", "lastWin32Error");
+            CopyEventDataIfPresent(metadata, lastDiagnostic, "commandFileName", "lastCommandFileName");
+            CopyEventDataIfPresent(metadata, lastDiagnostic, "commandExitCode", "lastCommandExitCode");
+            CopyEventDataIfPresent(metadata, lastDiagnostic, "commandTimedOut", "lastCommandTimedOut");
+            CopyEventDataIfPresent(metadata, lastDiagnostic, "commandExceptionType", "lastCommandExceptionType");
+            CopyEventDataIfPresent(metadata, lastDiagnostic, "commandMessage", "lastCommandMessage");
+            CopyEventDataIfPresent(metadata, lastDiagnostic, "probeId", "lastProbeId");
+            CopyProcessIdentity(metadata, lastDiagnostic);
+        }
+    }
+
+    private static bool IsCollectionEvent(
+        SandboxEvent evt,
+        string collectionName,
+        IReadOnlyList<string> capturedEventPrefixes,
+        IReadOnlyList<string> skippedEventPrefixes,
+        IReadOnlyList<string> failedEventPrefixes)
+    {
+        return HasCollectionName(evt, collectionName) ||
+            IsProbeFailureForCollection(evt, collectionName) ||
+            EventTypeMatches(evt, capturedEventPrefixes) ||
+            EventTypeMatches(evt, skippedEventPrefixes) ||
+            EventTypeMatches(evt, failedEventPrefixes);
+    }
+
+    private static bool IsProbeFailureForCollection(SandboxEvent evt, string collectionName)
+    {
+        if (!IsProbeFailureEvent(evt))
+        {
+            return false;
+        }
+
+        if (HasCollectionName(evt, collectionName))
+        {
+            return true;
+        }
+
+        if (!evt.Data.TryGetValue("probeId", out var probeId) || string.IsNullOrWhiteSpace(probeId))
+        {
+            return false;
+        }
+
+        var mappedCollection = probeId switch
+        {
+            "screenshot" => "screenshots",
+            "memory-dump" => "memory-dumps",
+            "packet-capture" => "packet-captures",
+            _ => string.Empty
+        };
+        return string.Equals(mappedCollection, collectionName, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool HasDiagnosticData(SandboxEvent evt)
+    {
+        return evt.Data.ContainsKey("reason") ||
+            evt.Data.ContainsKey("diagnosticStage") ||
+            evt.Data.ContainsKey("exceptionType") ||
+            evt.Data.ContainsKey("commandMessage") ||
+            IsProbeFailureEvent(evt);
+    }
+
+    private static void CopyEventDataIfPresent(Dictionary<string, string> metadata, SandboxEvent evt, string sourceKey, string destinationKey)
+    {
+        if (evt.Data.TryGetValue(sourceKey, out var value) && !string.IsNullOrWhiteSpace(value))
+        {
+            metadata[destinationKey] = value;
+        }
+    }
+
+    private static void CopyProcessIdentity(Dictionary<string, string> metadata, SandboxEvent evt)
+    {
+        if (evt.ProcessId is not null)
+        {
+            metadata["lastProcessId"] = evt.ProcessId.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        }
+
+        if (evt.ParentProcessId is not null)
+        {
+            metadata["lastParentProcessId"] = evt.ParentProcessId.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        }
+
+        AddIfNotEmpty(metadata, "lastProcessName", evt.ProcessName);
+        CopyEventDataIfPresent(metadata, evt, "processId", "lastProcessId");
+        CopyEventDataIfPresent(metadata, evt, "rootProcessId", "lastRootProcessId");
+        CopyEventDataIfPresent(metadata, evt, "parentProcessId", "lastParentProcessId");
+        CopyEventDataIfPresent(metadata, evt, "processName", "lastProcessName");
+        CopyEventDataIfPresent(metadata, evt, "targetProcessName", "lastTargetProcessName");
+        CopyEventDataIfPresent(metadata, evt, "targetProcessPath", "lastTargetProcessPath");
+        CopyEventDataIfPresent(metadata, evt, "processRole", "lastProcessRole");
     }
 
     private static string? InferCaptureState(ArtifactClassification classification, IReadOnlyDictionary<string, string> metadata)

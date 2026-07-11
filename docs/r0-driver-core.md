@@ -57,6 +57,24 @@ Current `CapabilityFlags` include:
 - `KSWORD_SANDBOX_CAPABILITY_FLAG_PRODUCER_ENABLE_BITS`
 - `KSWORD_SANDBOX_CAPABILITY_FLAG_TYPED_EVENT_PAYLOADS`
 
+## GET_HEALTH producer-mask snapshot
+
+`IOCTL_KSWORD_SANDBOX_GET_HEALTH` remains the legacy fixed-size probe, but the
+ABI 1.0 reserved space now carries a compact producer health snapshot for
+collectors that only perform a health check before deciding whether to issue
+newer status IOCTLs:
+
+- `ProducerEnableMask`: current event-emission mask.
+- `SupportedProducerMask`: mask of producer bits accepted by the driver.
+- `ActiveProducerMask`: producers that registered successfully and may emit.
+- `FailedProducerMask`: producers that failed initialization and require
+  diagnostics through `LastNtStatus` and `IOCTL_KSWORD_SANDBOX_GET_STATUS`.
+
+The driver sets `KSWORD_SANDBOX_HEALTH_FLAG_PRODUCER_MASKS_AVAILABLE` when these
+fields are populated. The fields reuse previous `Reserved` bytes, so
+`sizeof(KSWORD_SANDBOX_HEALTH_REPLY)` stays stable for older collectors; older
+collectors that still ignore the reserved area remain compatible.
+
 ## Producer enable mask
 
 `IOCTL_KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK` accepts

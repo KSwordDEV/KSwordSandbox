@@ -1,6 +1,21 @@
 #include "Driver.h"
 
 /*
+ * Guards fixed-size IOCTL replies that have historically been consumed by
+ * user-mode collectors.
+ * Inputs : public reply layouts from KSwordSandboxDriverIoctl.h.
+ * Logic  : C_ASSERT pins the v1.0 GET_HEALTH size and producer-mask offsets so
+ *          additions can safely reuse reserved space without silently changing
+ *          the METHOD_BUFFERED ABI.
+ * Return : no runtime value; build fails if the layout drifts.
+ */
+C_ASSERT(sizeof(KSWORD_SANDBOX_HEALTH_REPLY) == 80U);
+C_ASSERT(FIELD_OFFSET(KSWORD_SANDBOX_HEALTH_REPLY, ProducerEnableMask) == 44U);
+C_ASSERT(FIELD_OFFSET(KSWORD_SANDBOX_HEALTH_REPLY, SupportedProducerMask) == 48U);
+C_ASSERT(FIELD_OFFSET(KSWORD_SANDBOX_HEALTH_REPLY, ActiveProducerMask) == 52U);
+C_ASSERT(FIELD_OFFSET(KSWORD_SANDBOX_HEALTH_REPLY, FailedProducerMask) == 56U);
+
+/*
  * Verifies that every public producer payload fits the READ_EVENTS contract.
  * Inputs : compile-time structure definitions from KSwordSandboxDriverIoctl.h.
  * Logic  : C_ASSERT fails the WDK build if a future field expansion exceeds the

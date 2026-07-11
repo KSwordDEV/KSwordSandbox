@@ -38,6 +38,12 @@ internal sealed class HyperVReadinessContractScenario : ISmokeTestScenario
         RequireContains(readinessScript, "Guest working directory", "Readiness should validate the configured guest working directory.");
         RequireContains(readinessScript, "Repository secret hygiene", "Readiness should guard against committing the current guest password value.");
         RequireContains(readinessScript, "SecretValuePrinted = $false", "Readiness should explicitly avoid printing password values.");
+        RequireContains(readinessScript, "Remediation", "Readiness checks should include human-readable remediation suggestions.");
+        RequireContains(readinessScript, "Get-ReadinessRecommendedActions", "Readiness summary should aggregate recommended repair actions.");
+        RequireContains(readinessScript, "RecommendedActions", "Readiness summary should expose recommended actions.");
+        RequireContains(readinessScript, "ErrorMessage", "Readiness details should include useful error messages, not only exception types.");
+        RequireContains(readinessScript, "missing required directories or files", "Readiness should diagnose missing host payload directories and files.");
+        RequireContains(readinessScript, "Prepare-GuestPayload.ps1 -RepoRoot .", "Readiness should tell operators how to prepare the guest payload.");
 
         RequireContains(repositoryPolicyScript, "SecretEnvironmentNames", "Repository policy should scan configured environment secrets.");
         RequireContains(repositoryPolicyScript, "Secret value from environment variable", "Repository policy should reject current secret values in candidate files.");

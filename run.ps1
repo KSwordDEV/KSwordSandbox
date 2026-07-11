@@ -557,11 +557,22 @@ function Show-RunStatus {
     $virusTotalSecretName = Get-VirusTotalSecretName -State $State
     $configExists = Test-Path -LiteralPath $EffectiveConfigPath -PathType Leaf
     $payloadRoot = [System.IO.Path]::GetFullPath((Get-StateString -State $State -Name 'guestPayloadRoot' -DefaultValue (Join-Path $EffectiveRuntimeRoot 'payload\guest-tools')))
+    $agentName = 'KSword.Sandbox.Agent.exe'
+    $collectorName = 'KSword.Sandbox.R0Collector.exe'
     if ($configExists) {
         try {
             $statusConfig = Get-Content -LiteralPath $EffectiveConfigPath -Raw | ConvertFrom-Json
             if ($null -ne $statusConfig.paths -and $null -ne $statusConfig.paths.PSObject.Properties['guestPayloadRoot'] -and -not [string]::IsNullOrWhiteSpace([string]$statusConfig.paths.guestPayloadRoot)) {
                 $payloadRoot = [System.IO.Path]::GetFullPath([string]$statusConfig.paths.guestPayloadRoot)
+            }
+            if ($null -ne $statusConfig.guest -and $null -ne $statusConfig.guest.PSObject.Properties['agentExecutableName'] -and -not [string]::IsNullOrWhiteSpace([string]$statusConfig.guest.agentExecutableName)) {
+                $agentName = [string]$statusConfig.guest.agentExecutableName
+            }
+            if ($null -ne $statusConfig.driver -and $null -ne $statusConfig.driver.PSObject.Properties['r0CollectorPathInGuest']) {
+                $collectorLeaf = Split-Path -Leaf ([string]$statusConfig.driver.r0CollectorPathInGuest)
+                if (-not [string]::IsNullOrWhiteSpace($collectorLeaf)) {
+                    $collectorName = $collectorLeaf
+                }
             }
         }
         catch {
@@ -570,6 +581,8 @@ function Show-RunStatus {
     }
 
     $payloadManifest = Join-Path $payloadRoot 'payload-manifest.json'
+    $agentPayload = Join-Path (Join-Path $payloadRoot 'agent') $agentName
+    $collectorPayload = Join-Path (Join-Path $payloadRoot 'r0collector') $collectorName
     $hyperVModuleAvailable = $null -ne (Get-Command Get-VM -ErrorAction SilentlyContinue)
     $vmName = Get-StateString -State $State -Name 'vmName' -DefaultValue 'KSwordSandbox-Win10-Golden'
     $checkpointName = Get-StateString -State $State -Name 'checkpointName' -DefaultValue 'Clean'
@@ -591,6 +604,35 @@ function Show-RunStatus {
         }
     }
 
+    $recommendedActions = New-Object System.Collections.Generic.List[string]
+    if (-not $configExists) {
+        [void]$recommendedActions.Add(".\install.ps1 -Mode Install -PromptPassword to create the local config, or .\install.ps1 -Mode Change -UpdateHyperVConfig to record VM/checkpoint paths.")
+    }
+    if (-not (Test-Path -LiteralPath $EffectiveRuntimeRoot -PathType Container)) {
+        [void]$recommendedActions.Add(".\install.ps1 -Mode Install to create runtime folders under '$EffectiveRuntimeRoot'.")
+    }
+    if (-not (Test-Path -LiteralPath $payloadRoot -PathType Container) -or
+        -not (Test-Path -LiteralPath $agentPayload -PathType Leaf) -or
+        -not (Test-Path -LiteralPath $collectorPayload -PathType Leaf) -or
+        -not (Test-Path -LiteralPath $payloadManifest -PathType Leaf)) {
+        [void]$recommendedActions.Add(".\scripts\Prepare-GuestPayload.ps1 -RepoRoot . -PayloadRoot '$payloadRoot' -Configuration $Configuration -SelfContained")
+        [void]$recommendedActions.Add(".\run.ps1 -Mode CheckEnvironment to re-check payload readiness without starting or restoring a VM.")
+    }
+    if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($secretName, 'Process')) -and
+        [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($secretName, 'User')) -and
+        [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($secretName, 'Machine'))) {
+        [void]$recommendedActions.Add(".\install.ps1 -Mode Install -PromptPassword, or .\scripts\Test-HyperVReadiness.ps1 -PromptForMissingGuestPassword for a process-only check.")
+    }
+    if (-not $hyperVModuleAvailable) {
+        [void]$recommendedActions.Add('Enable/install Hyper-V PowerShell tools, then rerun .\run.ps1 -Mode CheckEnvironment.')
+    }
+    elseif (-not $vmExists) {
+        [void]$recommendedActions.Add(".\install.ps1 -Mode Change -UpdateHyperVConfig -VmName <existing VM> -CheckpointName <checkpoint>, or create/import VM '$vmName'.")
+    }
+    elseif (-not $checkpointExists) {
+        [void]$recommendedActions.Add(".\install.ps1 -Mode Change -UpdateHyperVConfig -VmName '$vmName' -CheckpointName <checkpoint>, or create checkpoint '$checkpointName'.")
+    }
+
     [pscustomobject][ordered]@{
         RepositoryRoot = $script:RepositoryRoot
         InstallStatePath = $script:InstallStatePath
@@ -605,6 +647,10 @@ function Show-RunStatus {
         GuestPayloadRootExists = Test-Path -LiteralPath $payloadRoot -PathType Container
         GuestPayloadManifest = $payloadManifest
         GuestPayloadManifestExists = Test-Path -LiteralPath $payloadManifest -PathType Leaf
+        GuestAgentPayload = $agentPayload
+        GuestAgentPayloadExists = Test-Path -LiteralPath $agentPayload -PathType Leaf
+        R0CollectorPayload = $collectorPayload
+        R0CollectorPayloadExists = Test-Path -LiteralPath $collectorPayload -PathType Leaf
         SecretName = $secretName
         ProcessSecretSet = -not [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($secretName, 'Process'))
         UserSecretSet = -not [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($secretName, 'User'))
@@ -620,6 +666,11 @@ function Show-RunStatus {
         VmState = $vmState
         CheckpointExists = $checkpointExists
         HyperVStatusError = $hyperVStatusError
+        PayloadGuidance = ".\scripts\Prepare-GuestPayload.ps1 -RepoRoot . -PayloadRoot '$payloadRoot' -Configuration $Configuration -SelfContained"
+        VmGuidance = ".\install.ps1 -Mode Change -UpdateHyperVConfig -VmName <existing VM> -CheckpointName <checkpoint>"
+        CheckpointGuidance = ".\install.ps1 -Mode Change -UpdateHyperVConfig -VmName '$vmName' -CheckpointName <checkpoint>"
+        ReadinessGuidance = '.\scripts\Test-HyperVReadiness.ps1'
+        RecommendedActions = @($recommendedActions.ToArray())
         SecretValuePrinted = $false
     }
 }
@@ -642,10 +693,13 @@ function Show-RunEnvironmentCheck {
         CheckEnvironmentCommand = '.\run.ps1 -Mode CheckEnvironment'
         PlanCommand = '.\run.ps1 -Mode Plan -SamplePath <sample.exe>'
         LiveCommand = '.\run.ps1 -Mode Analyze -SamplePath <sample.exe> -Live'
+        ReadinessCommand = '.\scripts\Test-HyperVReadiness.ps1'
         WhatIfSupported = $true
         DefaultStartsVm = $false
         WebUiStartsVm = $false
         LiveRequiresExplicitSwitch = $true
+        CheckEnvironmentStartsVm = $false
+        PlanOnlyStartsVm = $false
         DotNetAvailable = $null -ne (Get-Command dotnet -ErrorAction SilentlyContinue)
         WebProjectExists = Test-Path -LiteralPath $webProject -PathType Leaf
         HyperVE2EScriptExists = Test-Path -LiteralPath $hyperVScript -PathType Leaf
@@ -783,15 +837,21 @@ function Invoke-OneShotAnalysis {
         throw "v1 one-shot analysis only accepts .exe samples: $resolvedSample"
     }
 
-    $payloadRoot = Get-GuestPayloadRoot -State $State -Config $Config -EffectiveRuntimeRoot $EffectiveRuntimeRoot
-    Ensure-GuestPayload -PayloadRoot $payloadRoot -Config $Config
-
     $invokeScript = Join-Path $script:RepositoryRoot 'scripts\Invoke-HyperVE2E.ps1'
     if (-not (Test-Path -LiteralPath $invokeScript -PathType Leaf)) {
         throw "Hyper-V E2E script is missing: $invokeScript"
     }
 
     $runLive = [bool]$Live -and (-not [bool]$PlanOnly) -and ($Mode -ne 'Plan')
+    $payloadRoot = Get-GuestPayloadRoot -State $State -Config $Config -EffectiveRuntimeRoot $EffectiveRuntimeRoot
+    if ($runLive) {
+        Ensure-GuestPayload -PayloadRoot $payloadRoot -Config $Config
+    }
+    else {
+        Write-RunInfo "PlanOnly: guest payload preparation skipped at $payloadRoot."
+        Write-RunInfo 'The generated Hyper-V plan will report missing/stale payload files and repair suggestions without building or copying payloads.'
+    }
+
     $analysisAction = if ($runLive) {
         'Delegate live Hyper-V analysis. This can restore/start/stop the configured VM.'
     }

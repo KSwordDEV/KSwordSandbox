@@ -1,5 +1,5 @@
 {
-  "version": "2026-07-11-v6-mitre-quality-expansion",
+  "version": "2026-07-11-v7-placeholder-reduction",
   "rules": [
     {
       "id": "host-submission",
@@ -257,20 +257,39 @@
       ]
     },
     {
-      "id": "image-load-placeholder",
-      "title": "Image load event placeholder",
+      "id": "image-load-metadata-observed",
+      "title": "Image load metadata observed",
       "severity": "info",
-      "summary": "An image-load callback event was ingested; richer image-load classification should be added when R0 payloads are finalized.",
+      "confidence": "low",
+      "summary": "An R0 image-load callback row included image or module path metadata for report correlation with process and driver activity.",
       "eventTypes": [
         "image.load",
         "image.loaded",
         "driver.imageLoad",
         "driver.image.load"
       ],
+      "dataKeys": [
+        "imagePath",
+        "modulePath",
+        "filePath",
+        "processId",
+        "imageBaseHex",
+        "systemModeImage"
+      ],
+      "evidenceFields": [
+        "eventType",
+        "path",
+        "processId",
+        "data.imagePath",
+        "data.modulePath",
+        "data.filePath",
+        "data.imageBaseHex",
+        "data.systemModeImage"
+      ],
       "tags": [
         "driver",
         "image-load",
-        "placeholder"
+        "metadata"
       ]
     },
     {
@@ -2271,10 +2290,11 @@
       ]
     },
     {
-      "id": "download-execute-chain-placeholder",
-      "title": "Download then execute chain placeholder",
+      "id": "download-execute-chain-observed",
+      "title": "Downloaded artifact execution chain observed",
       "severity": "high",
-      "summary": "A normalized higher-level event reported that a downloaded artifact was executed during the same analysis window.",
+      "confidence": "high",
+      "summary": "A normalized higher-level event reported that a downloaded or staged artifact was executed during the same analysis window.",
       "mitreTechniqueId": "T1105",
       "mitreTechniqueName": "Ingress Tool Transfer",
       "eventTypes": [
@@ -2282,10 +2302,28 @@
         "download.execute",
         "file.downloaded.executed"
       ],
+      "dataKeys": [
+        "downloadPath",
+        "downloadedPath",
+        "executedPath",
+        "sourcePath",
+        "targetPath",
+        "filePath"
+      ],
+      "evidenceFields": [
+        "eventType",
+        "path",
+        "commandLine",
+        "data.downloadPath",
+        "data.downloadedPath",
+        "data.executedPath",
+        "data.sourcePath",
+        "data.targetPath"
+      ],
       "tags": [
         "execution",
         "download",
-        "correlation-placeholder"
+        "correlation"
       ]
     },
     {
@@ -3026,15 +3064,17 @@
       ]
     },
     {
-      "id": "dns-c2-tunnel-placeholder",
-      "title": "DNS C2 or tunneling placeholder",
+      "id": "dns-tunnel-or-dga-indicator",
+      "title": "DNS tunnel or DGA indicator",
       "severity": "medium",
-      "summary": "DNS telemetry contained TXT/NULL/CNAME, tunnel, DGA, or known DNS tunneling labels; this is a placeholder until richer DNS feature extraction exists.",
+      "confidence": "medium",
+      "summary": "DNS telemetry contained TXT/NULL/CNAME records, tunnel labels, DGA classification, or known DNS tunneling tool labels.",
       "mitreTechniqueId": "T1071.004",
       "mitreTechniqueName": "DNS",
       "eventTypes": [
         "dns.query",
         "network.dns",
+        "dns.cache.added",
         "pcap.dns",
         "driver.network"
       ],
@@ -3064,11 +3104,22 @@
           "dns"
         ]
       },
+      "evidenceFields": [
+        "eventType",
+        "data.queryName",
+        "data.qname",
+        "data.name",
+        "data.recordType",
+        "data.queryType",
+        "data.classification",
+        "data.protocolName"
+      ],
       "tags": [
         "network",
         "dns",
         "c2",
-        "placeholder"
+        "tunnel",
+        "dga"
       ]
     },
     {
@@ -3103,10 +3154,11 @@
       ]
     },
     {
-      "id": "tls-sni-ja3-placeholder",
-      "title": "TLS SNI, JA3, or certificate metadata placeholder",
+      "id": "tls-sni-ja3-metadata-observed",
+      "title": "TLS SNI, JA3, or certificate metadata observed",
       "severity": "low",
-      "summary": "TLS telemetry included SNI, JA3/JA3S, certificate hash, or TLS version fields for future encrypted C2 triage.",
+      "confidence": "low",
+      "summary": "TLS telemetry included SNI, JA3/JA3S, certificate hash, or TLS version fields for encrypted web-protocol triage.",
       "mitreTechniqueId": "T1071.001",
       "mitreTechniqueName": "Web Protocols",
       "eventTypes": [
@@ -3123,28 +3175,57 @@
         "certificateSha256",
         "tlsVersion"
       ],
+      "evidenceFields": [
+        "eventType",
+        "data.sni",
+        "data.serverName",
+        "data.ja3",
+        "data.ja3s",
+        "data.certificateSha256",
+        "data.tlsVersion"
+      ],
       "tags": [
         "network",
         "tls",
-        "c2",
-        "placeholder"
+        "metadata",
+        "triage"
       ]
     },
     {
-      "id": "pcap-artifact-placeholder",
-      "title": "PCAP artifact placeholder",
+      "id": "pcap-artifact-imported",
+      "title": "PCAP artifact imported",
       "severity": "info",
-      "summary": "A packet-capture summary, flow, or packet placeholder event was imported; richer PCAP parsing can attach protocol-specific rules later.",
+      "confidence": "low",
+      "summary": "A packet-capture summary, packet, or capture-artifact row was imported with bounded parser metadata for report visibility.",
       "eventTypes": [
         "pcap.summary",
-        "pcap.flow",
         "network.pcap",
         "pcap.packet"
+      ],
+      "dataKeys": [
+        "flowCount",
+        "packetCount",
+        "protocols",
+        "protocol",
+        "packetSize",
+        "capturePath",
+        "artifactRelativePath"
+      ],
+      "evidenceFields": [
+        "eventType",
+        "path",
+        "data.flowCount",
+        "data.packetCount",
+        "data.protocols",
+        "data.protocol",
+        "data.capturePath",
+        "data.artifactRelativePath"
       ],
       "tags": [
         "network",
         "pcap",
-        "placeholder"
+        "artifact",
+        "metadata"
       ]
     },
     {
@@ -3542,10 +3623,11 @@
       ]
     },
     {
-      "id": "anti-analysis-sleep-duration-placeholder",
-      "title": "Long sleep duration telemetry placeholder",
+      "id": "anti-analysis-sleep-duration-metadata",
+      "title": "Sleep duration telemetry observed",
       "severity": "medium",
-      "summary": "A sleep, timeout, or anti-analysis event carried duration fields for future long-sleep thresholding in reports.",
+      "confidence": "low",
+      "summary": "A sleep, timeout, or anti-analysis event carried duration fields used to triage time-based evasion evidence.",
       "mitreTechniqueId": "T1497.003",
       "mitreTechniqueName": "Time Based Evasion",
       "eventTypes": [
@@ -3561,10 +3643,21 @@
         "requestedDelayMs",
         "elapsedMs"
       ],
+      "evidenceFields": [
+        "eventType",
+        "processName",
+        "processId",
+        "data.durationMs",
+        "data.sleepMs",
+        "data.timeoutMs",
+        "data.requestedDelayMs",
+        "data.elapsedMs"
+      ],
       "tags": [
         "anti-analysis",
         "delay",
-        "placeholder"
+        "timing",
+        "metadata"
       ]
     },
     {
@@ -3808,10 +3901,11 @@
       ]
     },
     {
-      "id": "pcap-flow-observed-placeholder",
-      "title": "PCAP network flow placeholder",
+      "id": "pcap-flow-observed",
+      "title": "PCAP network flow observed",
       "severity": "info",
-      "summary": "A normalized PCAP flow row was imported with endpoint metadata for report correlation.",
+      "confidence": "low",
+      "summary": "A normalized PCAP flow row included endpoint, port, or protocol metadata for report correlation.",
       "eventTypes": [
         "pcap.flow",
         "pcap.tcp",
@@ -3830,10 +3924,24 @@
         "protocol",
         "protocolName"
       ],
+      "evidenceFields": [
+        "eventType",
+        "data.sourceIp",
+        "data.sourcePort",
+        "data.destinationIp",
+        "data.destinationPort",
+        "data.srcIp",
+        "data.dstIp",
+        "data.remoteAddress",
+        "data.remotePort",
+        "data.protocol",
+        "data.protocolName"
+      ],
       "tags": [
         "network",
         "pcap",
-        "placeholder"
+        "flow",
+        "metadata"
       ]
     },
     {
@@ -4280,20 +4388,32 @@
       ]
     },
     {
-      "id": "process-tree-large-fanout-placeholder",
-      "title": "Process tree fan-out metadata placeholder",
+      "id": "process-tree-child-count-observed",
+      "title": "Process tree child-count metadata observed",
       "severity": "low",
-      "summary": "A process-tree node carried child-count metadata, reserved for future thresholding of unusually broad process fan-out from a sample lineage.",
+      "confidence": "low",
+      "summary": "A process-tree node carried child-count metadata for triage of unusually broad sample lineage fan-out.",
       "eventTypes": [
         "process.tree"
       ],
       "dataKeys": [
         "childProcessCount"
       ],
+      "evidenceFields": [
+        "eventType",
+        "processName",
+        "processId",
+        "parentProcessId",
+        "data.rootProcessId",
+        "data.treeDepth",
+        "data.childProcessCount",
+        "data.treeLineage"
+      ],
       "tags": [
         "process",
         "process-tree",
-        "placeholder"
+        "fanout",
+        "metadata"
       ]
     },
     {
@@ -5033,7 +5153,8 @@
       "id": "tls-encrypted-clienthello-or-esni",
       "title": "TLS ECH or ESNI metadata observed",
       "severity": "low",
-      "summary": "TLS metadata referenced encrypted SNI/ClientHello fields, reserved for future encrypted-channel triage when packet parsers expose ECH/ESNI details.",
+      "confidence": "medium",
+      "summary": "TLS metadata referenced encrypted SNI or Encrypted ClientHello fields for encrypted-channel triage.",
       "mitreTechniqueId": "T1573",
       "mitreTechniqueName": "Encrypted Channel",
       "eventTypes": [
@@ -5058,11 +5179,19 @@
           "encrypted clienthello"
         ]
       },
+      "evidenceFields": [
+        "eventType",
+        "data.extension",
+        "data.sni",
+        "data.serverName",
+        "data.behavior"
+      ],
       "tags": [
         "network",
         "tls",
         "encrypted-channel",
-        "placeholder"
+        "ech",
+        "esni"
       ]
     },
     {
@@ -5158,10 +5287,11 @@
       ]
     },
     {
-      "id": "pcap-flow-upload-exfil-placeholder",
-      "title": "PCAP upload or exfiltration flow placeholder",
+      "id": "pcap-upload-or-exfil-indicator",
+      "title": "PCAP upload or exfiltration indicator",
       "severity": "medium",
-      "summary": "Flow or HTTP metadata referenced upload direction, POST/PUT bodies, or exfiltration labels; future parsers can attach thresholds for bytes sent.",
+      "confidence": "medium",
+      "summary": "Flow or HTTP metadata referenced upload direction or exfiltration labels that can support C2-channel exfiltration triage.",
       "mitreTechniqueId": "T1041",
       "mitreTechniqueName": "Exfiltration Over C2 Channel",
       "eventTypes": [
@@ -5176,10 +5306,6 @@
           "egress",
           "outbound"
         ],
-        "method": [
-          "POST",
-          "PUT"
-        ],
         "behavior": [
           "exfil",
           "upload",
@@ -5190,18 +5316,29 @@
           "upload"
         ]
       },
+      "evidenceFields": [
+        "eventType",
+        "data.sourceIp",
+        "data.destinationIp",
+        "data.destinationPort",
+        "data.method",
+        "data.direction",
+        "data.behavior",
+        "data.classification"
+      ],
       "tags": [
         "network",
         "pcap",
         "exfiltration",
-        "placeholder"
+        "upload"
       ]
     },
     {
-      "id": "pcap-high-fanout-flow-placeholder",
-      "title": "PCAP high fan-out flow placeholder",
+      "id": "pcap-flow-count-metadata-observed",
+      "title": "PCAP flow-count metadata observed",
       "severity": "low",
-      "summary": "Packet summary metadata carried flow-count or unique-destination fields for future high-fan-out scanning/beacon thresholding.",
+      "confidence": "low",
+      "summary": "Packet summary or flow metadata included count, unique-destination, packet, or duration fields for future fan-out and beacon thresholding.",
       "eventTypes": [
         "pcap.summary",
         "pcap.flow",
@@ -5214,11 +5351,19 @@
         "packetCount",
         "durationSeconds"
       ],
+      "evidenceFields": [
+        "eventType",
+        "data.flowCount",
+        "data.uniqueDestinationCount",
+        "data.uniqueRemoteIpCount",
+        "data.packetCount",
+        "data.durationSeconds"
+      ],
       "tags": [
         "network",
         "pcap",
         "fanout",
-        "placeholder"
+        "metadata"
       ]
     },
     {
@@ -6223,9 +6368,10 @@
       ]
     },
     {
-      "id": "anti-analysis-accelerated-sleep-placeholder",
-      "title": "Accelerated or skipped sleep telemetry placeholder",
+      "id": "anti-analysis-accelerated-sleep-metadata",
+      "title": "Accelerated or skipped sleep telemetry observed",
       "severity": "medium",
+      "confidence": "medium",
       "summary": "Sleep or timeout telemetry carried requested/actual duration fields that can expose long-sleep evasion or sandbox time acceleration.",
       "mitreTechniqueId": "T1497.003",
       "mitreTechniqueName": "Time Based Evasion",
@@ -6242,10 +6388,21 @@
         "sleepSkipped",
         "fastForwardedSleep"
       ],
+      "evidenceFields": [
+        "eventType",
+        "processName",
+        "processId",
+        "data.requestedSleepMs",
+        "data.actualSleepMs",
+        "data.sleepAccelerationRatio",
+        "data.sleepSkipped",
+        "data.fastForwardedSleep"
+      ],
       "tags": [
         "anti-analysis",
         "delay",
-        "placeholder"
+        "timing",
+        "sleep-acceleration"
       ]
     },
     {
@@ -6331,10 +6488,11 @@
       ]
     },
     {
-      "id": "archive-extracted-execute-chain-placeholder",
-      "title": "Archive extracted then executed placeholder",
+      "id": "archive-extracted-execute-chain-observed",
+      "title": "Archive extracted then executed chain observed",
       "severity": "high",
-      "summary": "A normalized correlation event indicates an archive or ISO was extracted/mounted and a child payload executed from the extracted path.",
+      "confidence": "high",
+      "summary": "A normalized correlation event indicates an archive or ISO was extracted or mounted and a child payload executed from the extracted path.",
       "mitreTechniqueId": "T1204.002",
       "mitreTechniqueName": "Malicious File",
       "eventTypes": [
@@ -6348,11 +6506,20 @@
         "executedPath",
         "archiveType"
       ],
+      "evidenceFields": [
+        "eventType",
+        "path",
+        "commandLine",
+        "data.archivePath",
+        "data.extractedPath",
+        "data.executedPath",
+        "data.archiveType"
+      ],
       "tags": [
         "download-execute",
         "archive",
         "correlation",
-        "placeholder"
+        "execution"
       ]
     },
     {
@@ -6382,10 +6549,11 @@
       ]
     },
     {
-      "id": "dns-exfil-volume-placeholder",
-      "title": "DNS exfiltration volume placeholder",
+      "id": "dns-exfil-volume-metadata-observed",
+      "title": "DNS exfiltration volume metadata observed",
       "severity": "medium",
-      "summary": "DNS or PCAP summary telemetry included query counts or byte totals for future high-volume tunnel and exfiltration correlation.",
+      "confidence": "low",
+      "summary": "DNS or PCAP summary telemetry included query-count or byte-total fields for tunnel and exfiltration triage.",
       "mitreTechniqueId": "T1041",
       "mitreTechniqueName": "Exfiltration Over C2 Channel",
       "eventTypes": [
@@ -6399,11 +6567,19 @@
         "totalQueryBytes",
         "dnsPayloadBytes"
       ],
+      "evidenceFields": [
+        "eventType",
+        "data.dnsQueryCount",
+        "data.uniqueDnsQueryCount",
+        "data.totalQueryBytes",
+        "data.dnsPayloadBytes"
+      ],
       "tags": [
         "network",
         "dns",
         "exfiltration",
-        "placeholder"
+        "volume",
+        "metadata"
       ]
     },
     {
@@ -6461,9 +6637,10 @@
       ]
     },
     {
-      "id": "tls-no-sni-or-rare-ja3-placeholder",
-      "title": "TLS missing SNI or rare JA3 placeholder",
+      "id": "tls-no-sni-or-rare-ja3-indicator",
+      "title": "TLS missing SNI or rare JA3 indicator",
       "severity": "medium",
+      "confidence": "medium",
       "summary": "TLS telemetry indicated missing/encrypted SNI or a rare JA3/JA3S classification for encrypted-channel C2 triage.",
       "mitreTechniqueId": "T1573",
       "mitreTechniqueName": "Encrypted Channel",
@@ -6499,11 +6676,21 @@
           "suspicious"
         ]
       },
+      "evidenceFields": [
+        "eventType",
+        "data.sni",
+        "data.serverName",
+        "data.classification",
+        "data.ja3",
+        "data.ja3Reputation",
+        "data.ja3sReputation"
+      ],
       "tags": [
         "network",
         "tls",
         "c2",
-        "placeholder"
+        "encrypted-channel",
+        "ja3"
       ]
     },
     {

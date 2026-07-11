@@ -57,6 +57,12 @@ internal sealed class RunScriptContractScenario : ISmokeTestScenario
         RequireContains(runScript, "-PlanOnly", "run.ps1 should support non-mutating plans.");
         RequireContains(runScript, "WhatIf: WebUI would start", "run.ps1 should make WebUI startup previewable with -WhatIf.");
         RequireContains(runScript, "WhatIf: guest payload preparation would be checked/prepared", "run.ps1 should make payload preparation previewable with -WhatIf.");
+        RequireContains(runScript, "PlanOnly: guest payload preparation skipped", "run.ps1 PlanOnly should avoid building guest payloads before writing a review plan.");
+        RequireContains(runScript, "RecommendedActions", "run.ps1 status should emit human-readable setup repair actions.");
+        RequireContains(runScript, "GuestAgentPayloadExists", "run.ps1 status should show Guest Agent payload readiness.");
+        RequireContains(runScript, "R0CollectorPayloadExists", "run.ps1 status should show R0Collector payload readiness.");
+        RequireContains(runScript, "ReadinessCommand", "run.ps1 environment check should point to the read-only Hyper-V readiness command.");
+        RequireContains(runScript, "PlanOnlyStartsVm", "run.ps1 environment check should explicitly state PlanOnly does not start a VM.");
         RequireContains(runScript, "No Hyper-V child script was launched", "run.ps1 should avoid Hyper-V delegation when -WhatIf declines ShouldProcess.");
         RequireContains(runScript, "Add -Live", "run.ps1 should tell operators how to opt into live VM execution.");
         RequireNotContains(runScript, "Write-Host $password", "run.ps1 must not print the guest password.");
@@ -69,6 +75,9 @@ internal sealed class RunScriptContractScenario : ISmokeTestScenario
         RequireContains(runDoc, "-Mode CheckEnvironment", "run doc should document environment check mode.");
         RequireContains(runDoc, "-WhatIf", "run doc should document safe preview mode.");
         RequireContains(runDoc, "-Mode Plan", "run doc should document non-mutating plan mode.");
+        RequireContains(runDoc, "skips guest payload preparation", "run doc should state PlanOnly skips payload preparation.");
+        RequireContains(runDoc, "RecommendedActions", "run doc should document status repair guidance.");
+        RequireContains(runDoc, "PlanOnlyStartsVm=False", "run doc should state PlanOnly does not start VMs.");
         RequireContains(runDoc, "-Mode Analyze", "run doc should document one-shot analyze mode.");
         RequireContains(runDoc, "-Live", "run doc should document explicit live execution.");
         RequireContains(runDoc, "postprocess-result.json", "run doc should document automatic live post-processing.");

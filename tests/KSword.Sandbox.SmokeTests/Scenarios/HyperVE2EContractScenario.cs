@@ -42,6 +42,11 @@ internal sealed class HyperVE2EContractScenario : ISmokeTestScenario
         RequireContains(invokeScript, "ExecutedSteps", "Runbook execution record should persist executed step count.");
         RequireContains(invokeScript, "StepResults", "Runbook execution record should persist per-step progress results.");
         RequireContains(invokeScript, "Convert-PhaseStepsToRunbookStepResults", "Top-level script should merge child phase steps into runbook progress.");
+        RequireContains(invokeScript, "remediation", "Top-level preflight checks should carry human-readable remediation suggestions.");
+        RequireContains(invokeScript, "repairSuggestions", "Top-level preflight summary should aggregate repair suggestions.");
+        RequireContains(invokeScript, "operatorGuidance", "Top-level plan should include operator guidance commands.");
+        RequireContains(invokeScript, "Preflight repair suggestions", "Top-level script should print repair suggestions in safe and failed-live paths.");
+        RequireContains(invokeScript, "Prepare-GuestPayload.ps1 -RepoRoot .", "Top-level payload preflight should tell operators how to prepare guest payloads.");
         SmokeAssert.True(!invokeScript.Contains("& $startScript -PlanPath", StringComparison.Ordinal), "Top-level script should not dot/call the start script in-process because exit 1 bypasses aggregate runbook persistence.");
         SmokeAssert.True(!invokeScript.Contains("& $collectScript -PlanPath", StringComparison.Ordinal), "Top-level script should not dot/call the collect script in-process because exit 1 bypasses aggregate runbook persistence.");
         RequireContains(invokeScript, "Test-IsAdministrator", "Top-level live mode should require an elevated shell.");

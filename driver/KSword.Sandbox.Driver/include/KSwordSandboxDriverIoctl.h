@@ -162,6 +162,7 @@ typedef enum _KSWORD_SANDBOX_DRIVER_STATE {
 #define KSWORD_SANDBOX_HEALTH_FLAG_CAPABILITIES_AVAILABLE 0x00000002U
 #define KSWORD_SANDBOX_HEALTH_FLAG_STATUS_AVAILABLE       0x00000004U
 #define KSWORD_SANDBOX_HEALTH_FLAG_ENABLE_MASK_AVAILABLE  0x00000008U
+#define KSWORD_SANDBOX_HEALTH_FLAG_PRODUCER_MASKS_AVAILABLE 0x00000010U
 
 #define KSWORD_SANDBOX_STATUS_FLAG_HAS_EVENTS             0x00000001U
 #define KSWORD_SANDBOX_STATUS_FLAG_PRODUCERS_PARTIAL      0x00000002U
@@ -473,8 +474,11 @@ typedef struct _KSWORD_SANDBOX_EVENT_HEADER {
  * Health reply returned by GET_HEALTH.
  *
  * Inputs : output buffer supplied by DeviceIoControl.
- * Logic  : The driver fills ABI metadata, current state, queue counters, and the
- *          most recent internal status field known to the skeleton.
+ * Logic  : The driver fills ABI metadata, current state, queue counters,
+ *          producer masks, and the most recent internal status field known to
+ *          the skeleton.  Producer mask fields occupy ABI 1.0 reserved space,
+ *          so sizeof(KSWORD_SANDBOX_HEALTH_REPLY) remains stable for older
+ *          collectors.
  * Return : sizeof(KSWORD_SANDBOX_HEALTH_REPLY) bytes on success.
  */
 typedef struct _KSWORD_SANDBOX_HEALTH_REPLY {
@@ -486,8 +490,11 @@ typedef struct _KSWORD_SANDBOX_HEALTH_REPLY {
     ULONGLONG EventsDropped;
     ULONGLONG NextSequence;
     LONG LastNtStatus;
-    ULONG Reserved0;
-    ULONGLONG Reserved[4];
+    ULONG ProducerEnableMask;
+    ULONG SupportedProducerMask;
+    ULONG ActiveProducerMask;
+    ULONG FailedProducerMask;
+    ULONGLONG Reserved[2];
 } KSWORD_SANDBOX_HEALTH_REPLY, *PKSWORD_SANDBOX_HEALTH_REPLY;
 
 /*

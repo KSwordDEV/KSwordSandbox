@@ -33,6 +33,13 @@ writes `artifacts/manifest.json` using `ArtifactManifest` /
 links, `importPath`, file size, MIME type, SHA-256, and metadata preserving the
 original VM-local path.
 
+Copied dropped-file artifact descriptors always carry
+`artifactRelativePath`, `relativePath`, `collectionName=dropped-files`,
+`evidenceRole=dropped-file`, and `captureState=captured`. Skipped copy
+attempts are nonfatal and keep a compact `reason` such as
+`sourceFileMissing`, `outsideWorkingDirectory`, or `copyFailed`; collection
+metadata keeps `lastReason` so a run with no copied files is diagnosable.
+
 The manifest never trusts VM-local absolute paths for links. The host resolves
 `relativePath` under the collected guest-output directory and keeps original
 paths as metadata only.
@@ -49,6 +56,13 @@ manifest can preserve the configured cadence. The guest manifest and host
 artifact index classify files under `screenshots/` as `kind=Screenshot`,
 `category=screenshot`, `evidenceRole=screenshot`, and
 `collectionName=screenshots`.
+
+Screenshot events also carry `phase`/`capturePhase`, `captureState`,
+`status`, `nonfatal`, `expectedRelativePath=screenshots/*.bmp`,
+`artifactRelativePath` when a file is created, and `rootProcessId` /
+`processId` when the sample process identity is known. Skipped screenshots
+preserve `reason`, `diagnosticStage`, optional `exceptionType`, and optional
+`win32Error` without failing the run.
 
 ## Memory dump artifacts
 
@@ -68,6 +82,15 @@ missing dump artifacts are explainable.
 The guest manifest and host artifact index classify `memory-dumps/**` files as
 `kind=MemoryDump`, `category=memory-dump`, `evidenceRole=memory-dump`, and
 `collectionName=memory-dumps`.
+
+Memory dump attempt events carry `phase`/`capturePhase`, `captureState`,
+`status`, `nonfatal`, `artifactRelativePath` for captured dumps, and process
+identity fields: `processId`, `rootProcessId`, `parentProcessId`,
+`targetProcessName`, `targetProcessPath`, `processRole`, `treeDepth`,
+`treeLineage`, `snapshotKey`, and `dumpType`. Skipped attempts preserve
+`reason`, `diagnosticStage`, optional `exceptionType`, and optional
+`win32Error`. Probe timeouts or exceptions are mapped to the `memory-dumps`
+collection as nonfatal failed status instead of becoming `enabled-empty`.
 
 ## Collection lanes and import paths
 
@@ -98,6 +121,15 @@ SHA-256 as authoritative link fields, while preserving guest collection
 original guest paths, process identity, and memory-dump root/child sweep
 metadata in descriptor or collection `metadata`.
 
+Collection metadata preserves nonfatal diagnostics consistently across
+dropped files, screenshots, memory dumps, and packet captures. The guest
+manifest records counts plus `lastReason`, `lastDiagnosticStage`,
+`lastExceptionType`, `lastCommandMessage`, `lastArtifactRelativePath`,
+`lastPhase` / `lastCapturePhase`, and `lastProcessId` / `lastRootProcessId`
+when those values were present on related events. Host indexes also retain
+guest status aliases such as `guestManifestStatus` / `guestManifestReason`
+and `guestCollectionStatus` / `guestCollectionReason`.
+
 Each file descriptor also carries `evidenceRole`, `capturePhase`,
 `captureState`, `guestPath`, `importPath`, and `collectionName` alongside size,
 MIME type, and hashes. `guestPath` is evidence only; clickable links and import
@@ -119,6 +151,16 @@ system capture conflicts, stop failures, or conversion failures emit
 `events.json`, dropped files, screenshots, memory dumps, or the artifact
 manifest from being written. Successful runs emit `packet_capture.started`,
 `packet_capture.stopped`, and `packet_capture.captured`.
+
+Packet capture lifecycle events carry `collectionName=packet-captures`,
+`evidenceRole=packet-capture`, `phase`/`capturePhase`, `status`,
+`captureState`, `nonfatal`, `expectedRelativePath=packet-captures/*.pcapng`,
+and `artifactRelativePath` for the final PCAPNG path. ETL diagnostics are
+separate from the packet artifact and use `etlRelativePath` /
+`diagnosticRelativePath`. Start/stop/convert command failures retain
+`reason`, command exit/timeout details, and `commandMessage`; a failed
+`pktmon start` is reported as `packet_capture.failed`, while unavailable or
+not-started cases remain `packet_capture.skipped`.
 
 For import/report purposes, existing packet captures are regular artifacts:
 

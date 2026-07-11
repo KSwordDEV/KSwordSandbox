@@ -481,7 +481,8 @@ function New-ReadinessResult {
         [string]$Status,
         [bool]$Required,
         [string]$Message,
-        [System.Collections.IDictionary]$Details = @{}
+        [System.Collections.IDictionary]$Details = @{},
+        [string[]]$Remediation = @()
     )
 
     $orderedDetails = [ordered]@{}
@@ -495,8 +496,38 @@ function New-ReadinessResult {
         Status     = $Status
         Required   = $Required
         Message    = $Message
+        Remediation = @($Remediation)
         Details    = [pscustomobject]$orderedDetails
     }
+}
+
+# Get-ReadinessRecommendedActions collapses remediation text from all failing
+# or warning checks into a short unique operator action list. Inputs are emitted
+# readiness result objects; processing is read-only. Return behavior is an
+# ordered string array suitable for the final summary and human-readable output.
+function Get-ReadinessRecommendedActions {
+    param([Parameter(Mandatory)][object[]]$Results)
+
+    $actions = New-Object System.Collections.Generic.List[string]
+    foreach ($result in $Results) {
+        if ($null -eq $result -or $result.Status -eq 'Passed') {
+            continue
+        }
+
+        $remediationProperty = $result.PSObject.Properties['Remediation']
+        if ($null -eq $remediationProperty) {
+            continue
+        }
+
+        foreach ($item in @($remediationProperty.Value)) {
+            $text = [string]$item
+            if (-not [string]::IsNullOrWhiteSpace($text) -and -not $actions.Contains($text)) {
+                [void]$actions.Add($text)
+            }
+        }
+    }
+
+    return @($actions.ToArray())
 }
 
 # Test-ReadinessInputResolution reports which local install/run configuration
@@ -572,7 +603,8 @@ function Test-AdministratorPrivilege {
             -Details @{
                 UserName        = $identity.Name
                 IsAdministrator = $false
-            }
+            } `
+            -Remediation @('Open PowerShell as Administrator for live Hyper-V readiness, or use .\run.ps1 -Mode CheckEnvironment / .\run.ps1 -Mode Plan for non-mutating checks from a normal shell.')
     }
     catch {
         return New-ReadinessResult `
@@ -582,7 +614,9 @@ function Test-AdministratorPrivilege {
             -Message "Unable to determine Administrator status: $($_.Exception.Message)" `
             -Details @{
                 ErrorType = $_.Exception.GetType().FullName
-            }
+                ErrorMessage = $_.Exception.Message
+            } `
+            -Remediation @('Open a new PowerShell session and rerun .\scripts\Test-HyperVReadiness.ps1; live VM operations require an elevated Windows shell.')
     }
 }
 
@@ -608,7 +642,11 @@ function Test-HyperVModule {
                     ModuleName       = 'Hyper-V'
                     RequiredCommands = $requiredCommands
                     MissingCommands  = $requiredCommands
-                }
+                } `
+                -Remediation @(
+                    'Enable Hyper-V and the Hyper-V PowerShell management tools, then open a new elevated PowerShell session.',
+                    'After installing the module, rerun .\scripts\Test-HyperVReadiness.ps1; it remains read-only and will not start or restore the VM.'
+                )
         }
 
         $missingCommands = New-Object System.Collections.Generic.List[string]
@@ -630,7 +668,8 @@ function Test-HyperVModule {
                     ModulePath       = $module[0].Path
                     RequiredCommands = $requiredCommands
                     MissingCommands  = @($missingCommands.ToArray())
-                }
+                } `
+                -Remediation @('Repair/reinstall the Hyper-V PowerShell feature so Get-VM, Get-VMSnapshot, Get-VMIntegrationService, and Copy-VMFile are available.')
         }
 
         return New-ReadinessResult `
@@ -653,7 +692,9 @@ function Test-HyperVModule {
             -Message "Unable to inspect Hyper-V PowerShell module: $($_.Exception.Message)" `
             -Details @{
                 ErrorType = $_.Exception.GetType().FullName
-            }
+                ErrorMessage = $_.Exception.Message
+            } `
+            -Remediation @('Open an elevated Windows PowerShell session and rerun the read-only preflight; verify the Hyper-V optional feature is installed.')
     }
 }
 
@@ -673,7 +714,8 @@ function Test-GuestPasswordSecret {
             -Message 'Guest password environment variable name is empty.' `
             -Details @{
                 SecretName = $SecretName
-            }
+            } `
+            -Remediation @('Set guest.passwordSecretName in the sandbox config, or rerun .\install.ps1 -Mode Change -UpdateHyperVConfig with the intended -SecretName.')
     }
 
     if ($SecretName.Contains('=')) {
@@ -684,7 +726,8 @@ function Test-GuestPasswordSecret {
             -Message 'Environment variable names cannot contain "=".' `
             -Details @{
                 SecretName = $SecretName
-            }
+            } `
+            -Remediation @('Choose a normal environment variable name such as KSWORDBOX_GUEST_PASSWORD, then rerun install.ps1 with that -SecretName.')
     }
 
     $processValue = [Environment]::GetEnvironmentVariable($SecretName, 'Process')
@@ -738,7 +781,12 @@ function Test-GuestPasswordSecret {
             ConfiguredForUser  = $isUserConfigured
             ConfiguredForHost  = $isMachineConfigured
             SecretValuePrinted = $false
-        }
+        } `
+        -Remediation @(
+            ".\install.ps1 -Mode Install -PromptPassword",
+            ".\install.ps1 -Mode Change -ResetPassword -PromptPassword",
+            ".\scripts\Test-HyperVReadiness.ps1 -PromptForMissingGuestPassword for a process-only one-shot readiness probe"
+        )
 }
 
 # Get-CurrentTokenSidValues returns SIDs that should apply to the current token.
@@ -1055,7 +1103,8 @@ function Test-HostPayloadFiles {
             -Details @{
                 GuestPayloadRoot = $PayloadRoot
                 CheckedHostOnly  = $true
-            }
+            } `
+            -Remediation @('Set paths.guestPayloadRoot in the sandbox config, or rerun .\install.ps1 -Mode Change -UpdateHyperVConfig with the intended -GuestPayloadRoot.')
     }
 
     $fileMap = Get-RequiredPayloadFileMap `
@@ -1064,7 +1113,20 @@ function Test-HostPayloadFiles {
         -AgentExecutableName $AgentExecutableName `
         -CollectorExecutableName $CollectorExecutableName
     $checkedFiles = New-Object System.Collections.Generic.List[object]
+    $checkedDirectories = New-Object System.Collections.Generic.List[object]
     $missingFiles = New-Object System.Collections.Generic.List[string]
+    $missingDirectories = New-Object System.Collections.Generic.List[string]
+
+    foreach ($directoryPath in @($PayloadRoot, (Join-Path $PayloadRoot 'agent'), (Join-Path $PayloadRoot 'r0collector'))) {
+        $exists = Test-Path -LiteralPath $directoryPath -PathType Container
+        [void]$checkedDirectories.Add([pscustomobject][ordered]@{
+                Path   = $directoryPath
+                Exists = $exists
+            })
+        if (-not $exists) {
+            [void]$missingDirectories.Add($directoryPath)
+        }
+    }
 
     foreach ($key in $fileMap.Keys) {
         $entry = $fileMap[$key]
@@ -1081,18 +1143,24 @@ function Test-HostPayloadFiles {
         }
     }
 
-    if ($missingFiles.Count -gt 0) {
+    if ($missingFiles.Count -gt 0 -or $missingDirectories.Count -gt 0) {
         return New-ReadinessResult `
             -Name 'Host payload files' `
             -Status 'Failed' `
             -Required $true `
-            -Message "Host payload root '$PayloadRoot' is missing required files. Run scripts/Prepare-GuestPayload.ps1 before live Hyper-V execution." `
+            -Message "Host payload root '$PayloadRoot' is missing required directories or files. Run scripts/Prepare-GuestPayload.ps1 -SelfContained before live Hyper-V execution." `
             -Details @{
-                GuestPayloadRoot = $PayloadRoot
-                CheckedFiles     = @($checkedFiles.ToArray())
-                MissingFiles     = @($missingFiles.ToArray())
-                MutatedFiles     = $false
-            }
+                GuestPayloadRoot    = $PayloadRoot
+                CheckedDirectories  = @($checkedDirectories.ToArray())
+                MissingDirectories  = @($missingDirectories.ToArray())
+                CheckedFiles        = @($checkedFiles.ToArray())
+                MissingFiles        = @($missingFiles.ToArray())
+                MutatedFiles        = $false
+            } `
+            -Remediation @(
+                ".\scripts\Prepare-GuestPayload.ps1 -RepoRoot . -PayloadRoot '$PayloadRoot' -GuestWorkingDirectory '$GuestRoot' -SelfContained",
+                ".\run.ps1 -Mode CheckEnvironment after payload preparation to re-check without starting or restoring a VM."
+            )
     }
 
     return New-ReadinessResult `
@@ -1101,9 +1169,10 @@ function Test-HostPayloadFiles {
         -Required $true `
         -Message "Host payload root '$PayloadRoot' contains required Guest Agent and R0Collector files." `
         -Details @{
-            GuestPayloadRoot = $PayloadRoot
-            CheckedFiles     = @($checkedFiles.ToArray())
-            MutatedFiles     = $false
+            GuestPayloadRoot   = $PayloadRoot
+            CheckedDirectories = @($checkedDirectories.ToArray())
+            CheckedFiles       = @($checkedFiles.ToArray())
+            MutatedFiles       = $false
         }
 }
 
@@ -1127,7 +1196,8 @@ function Test-HyperVVm {
             -Message 'Target VM name is empty.' `
             -Details @{
                 VmName = $Name
-            }
+            } `
+            -Remediation @('Record a Hyper-V VM name with .\install.ps1 -Mode Change -UpdateHyperVConfig -VmName <existing VM> -CheckpointName <checkpoint>.')
     }
 
     if (-not $HyperVAvailable) {
@@ -1140,7 +1210,8 @@ function Test-HyperVVm {
                 VmName  = $Name
                 Skipped = $true
                 Reason  = 'Hyper-V module or required cmdlets unavailable'
-            }
+            } `
+            -Remediation @('Enable/install Hyper-V PowerShell tools, then rerun .\scripts\Test-HyperVReadiness.ps1. This check is read-only.')
     }
 
     if (-not $IsAdministrator) {
@@ -1153,7 +1224,8 @@ function Test-HyperVVm {
                 VmName  = $Name
                 Skipped = $true
                 Reason  = 'Non-administrator process cannot reliably enumerate Hyper-V state'
-            }
+            } `
+            -Remediation @('Open PowerShell as Administrator for VM/checkpoint readiness, or use .\run.ps1 -Mode Plan for non-mutating planning without VM enumeration.')
     }
 
     try {
@@ -1168,7 +1240,11 @@ function Test-HyperVVm {
                 -Message "No exact VM named '$Name' was found." `
                 -Details @{
                     VmName = $Name
-                }
+                } `
+                -Remediation @(
+                    "Create or import a golden VM named '$Name', or record the existing VM with .\install.ps1 -Mode Change -UpdateHyperVConfig -VmName <existing VM> -CheckpointName <checkpoint>.",
+                    'After updating config, rerun .\scripts\Test-HyperVReadiness.ps1; it does not start or restore the VM.'
+                )
         }
 
         $vm = $vmMatches[0]
@@ -1191,9 +1267,11 @@ function Test-HyperVVm {
             -Required $true `
             -Message "Unable to read target VM '$Name': $($_.Exception.Message)" `
             -Details @{
-                VmName    = $Name
-                ErrorType = $_.Exception.GetType().FullName
-            }
+                VmName       = $Name
+                ErrorType    = $_.Exception.GetType().FullName
+                ErrorMessage = $_.Exception.Message
+            } `
+            -Remediation @("Verify Hyper-V service health and the configured VM name '$Name', then rerun the read-only readiness preflight from an elevated shell.")
     }
 }
 
@@ -1217,7 +1295,8 @@ function Test-HyperVCheckpoint {
             -Details @{
                 VmName         = $Vm
                 CheckpointName = $Name
-            }
+            } `
+            -Remediation @("Record the clean checkpoint with .\install.ps1 -Mode Change -UpdateHyperVConfig -VmName '$Vm' -CheckpointName <checkpoint>.")
     }
 
     if (-not $CanQueryVmState) {
@@ -1230,7 +1309,8 @@ function Test-HyperVCheckpoint {
                 VmName         = $Vm
                 CheckpointName = $Name
                 Skipped        = $true
-            }
+            } `
+            -Remediation @('Fix the VM/module/admin readiness item above first; this script intentionally does not start or restore a VM just to query checkpoints.')
     }
 
     try {
@@ -1246,7 +1326,11 @@ function Test-HyperVCheckpoint {
                 -Details @{
                     VmName         = $Vm
                     CheckpointName = $Name
-                }
+                } `
+                -Remediation @(
+                    "Create a clean checkpoint named '$Name' on VM '$Vm', or record the existing checkpoint with .\install.ps1 -Mode Change -UpdateHyperVConfig -VmName '$Vm' -CheckpointName <checkpoint>.",
+                    'Rerun .\scripts\Test-HyperVReadiness.ps1 after updating the checkpoint; no VM mutation is performed by the check.'
+                )
         }
 
         $snapshot = $snapshots[0]
@@ -1272,7 +1356,9 @@ function Test-HyperVCheckpoint {
                 VmName         = $Vm
                 CheckpointName = $Name
                 ErrorType      = $_.Exception.GetType().FullName
-            }
+                ErrorMessage   = $_.Exception.Message
+            } `
+            -Remediation @("Verify VM '$Vm' and checkpoint '$Name' in Hyper-V Manager, then rerun the read-only readiness preflight from an elevated shell.")
     }
 }
 
@@ -1316,7 +1402,8 @@ function Test-GuestServiceInterface {
                 VmName      = $Vm
                 ServiceName = $serviceName
                 Skipped     = $true
-            }
+            } `
+            -Remediation @('Fix VM/module/admin readiness first. This preflight will not start the VM; live start can enable Guest Service Interface before Copy-VMFile.')
     }
 
     try {
@@ -1334,7 +1421,8 @@ function Test-GuestServiceInterface {
                     ServiceName       = $serviceName
                     StableComponentId = $script:GuestServiceInterfaceComponentId
                     AvailableServices = @($services | ForEach-Object { $_.Name })
-                }
+                } `
+                -Remediation @("Verify the VM '$Vm' has Hyper-V integration services installed and that Guest Service Interface is available in VM settings.")
         }
 
         if ([bool]$service.Enabled) {
@@ -1363,7 +1451,8 @@ function Test-GuestServiceInterface {
                 StableComponentId = $script:GuestServiceInterfaceComponentId
                 ServiceId         = [string]$service.Id
                 Enabled           = [bool]$service.Enabled
-            }
+            } `
+            -Remediation @('Enable Guest Service Interface in Hyper-V VM settings, or let the live start phase enable it; this readiness script will not mutate that setting.')
     }
     catch {
         return New-ReadinessResult `
@@ -1372,10 +1461,12 @@ function Test-GuestServiceInterface {
             -Required $true `
             -Message "Unable to read Guest Service Interface state on VM '$Vm': $($_.Exception.Message)" `
             -Details @{
-                VmName      = $Vm
-                ServiceName = $serviceName
-                ErrorType   = $_.Exception.GetType().FullName
-            }
+                VmName       = $Vm
+                ServiceName  = $serviceName
+                ErrorType    = $_.Exception.GetType().FullName
+                ErrorMessage = $_.Exception.Message
+            } `
+            -Remediation @("Verify VM '$Vm' and Hyper-V integration services, then rerun the read-only preflight from an elevated shell.")
     }
 }
 
@@ -1403,7 +1494,8 @@ function Test-PowerShellDirectReadOnly {
                 VmName  = $Vm
                 Skipped = $true
                 Reason  = 'VM state is not queryable'
-            }
+            } `
+            -Remediation @('Fix VM/module/admin readiness first. This preflight intentionally does not start the VM to make PowerShell Direct queryable.')
     }
 
     if ([string]::IsNullOrWhiteSpace($GuestUser)) {
@@ -1415,7 +1507,8 @@ function Test-PowerShellDirectReadOnly {
             -Details @{
                 VmName        = $Vm
                 GuestUserName = $GuestUser
-            }
+            } `
+            -Remediation @('Record the guest username with .\install.ps1 -Mode Change -UpdateHyperVConfig -GuestUserName <user> or update guest.userName in the local config.')
     }
 
     $secretValue = Get-GuestPasswordSecretValue -SecretName $SecretName
@@ -1431,7 +1524,11 @@ function Test-PowerShellDirectReadOnly {
                 SecretName    = $SecretName
                 Skipped       = $true
                 Reason        = 'Guest password secret missing from Process, User, or Machine scope'
-            }
+            } `
+            -Remediation @(
+                ".\install.ps1 -Mode Install -PromptPassword",
+                ".\scripts\Test-HyperVReadiness.ps1 -PromptForMissingGuestPassword for a process-only probe without persisting the password"
+            )
     }
 
     if (-not [StringComparer]::OrdinalIgnoreCase.Equals($VmState, 'Running')) {
@@ -1447,7 +1544,8 @@ function Test-PowerShellDirectReadOnly {
                 Skipped         = $true
                 RequiresRunning = $true
                 MutatedVm       = $false
-            }
+            } `
+            -Remediation @('This is expected when the golden VM is Off. Start the VM manually only if you want this read-only probe before live execution; the preflight will not start it for you.')
     }
 
     $invokeCommand = Get-Command -Name Invoke-Command -ErrorAction SilentlyContinue
@@ -1511,9 +1609,11 @@ function Test-PowerShellDirectReadOnly {
                 VmState            = $VmState
                 GuestUserName      = $GuestUser
                 ErrorType          = $_.Exception.GetType().FullName
+                ErrorMessage       = $_.Exception.Message
                 SecretValuePrinted = $false
                 MutatedVm          = $false
-            }
+            } `
+            -Remediation @("Confirm VM '$Vm' is running, guest user '$GuestUser' exists, and '$SecretName' matches the guest password. If out of sync, use .\install.ps1 -Mode Change -ResetGuestVmPassword -PromptPassword -Force.")
     }
 }
 
@@ -1557,7 +1657,8 @@ function Test-GuestPayloadFilesReadOnly {
                 Skipped       = $true
                 Reason        = $PowerShellDirectResult.Message
                 MutatedVm     = $false
-            }
+            } `
+            -Remediation @('Fix the PowerShell Direct readiness item first if you need an in-guest payload probe. This script will not start the VM just to check guest files.')
     }
 
     try {
@@ -1604,7 +1705,8 @@ function Test-GuestPayloadFilesReadOnly {
                     CheckedFiles = $checked
                     MissingFiles = $missing
                     MutatedVm    = $false
-                }
+                } `
+                -Remediation @("Prepare host payload files with .\scripts\Prepare-GuestPayload.ps1 -RepoRoot . -PayloadRoot '$PayloadRoot' -GuestWorkingDirectory '$GuestRoot' -SelfContained. The live runbook will stage them into the guest before execution.")
         }
 
         return New-ReadinessResult `
@@ -1626,12 +1728,14 @@ function Test-GuestPayloadFilesReadOnly {
             -Required $false `
             -Message "Unable to read guest payload file state on VM '$Vm': $($_.Exception.Message)" `
             -Details @{
-                VmName       = $Vm
-                GuestRoot    = $GuestRoot
+                VmName        = $Vm
+                GuestRoot     = $GuestRoot
                 ExpectedFiles = $guestPaths
-                ErrorType    = $_.Exception.GetType().FullName
-                MutatedVm    = $false
-            }
+                ErrorType     = $_.Exception.GetType().FullName
+                ErrorMessage  = $_.Exception.Message
+                MutatedVm     = $false
+            } `
+            -Remediation @('Rerun readiness after PowerShell Direct is healthy, or rely on host payload staging during live execution if host payload files pass.')
     }
 }
 
@@ -1903,6 +2007,7 @@ $secretHygieneResult = Test-RepositorySecretHygiene `
 $failedCount = @($results | Where-Object { $_.Status -eq 'Failed' }).Count
 $warningCount = @($results | Where-Object { $_.Status -eq 'Warning' }).Count
 $passedCount = @($results | Where-Object { $_.Status -eq 'Passed' }).Count
+$recommendedActions = @(Get-ReadinessRecommendedActions -Results @($results.ToArray()))
 $exitCode = if ($failedCount -gt 0) { 1 } else { 0 }
 $overallStatus = if ($failedCount -gt 0) {
     'Failed'
@@ -1935,6 +2040,7 @@ Write-Output ([pscustomobject][ordered]@{
         GuestUserName  = $GuestUserName
         GuestRoot      = $GuestWorkingDirectory
         ReadOnly       = $true
+        RecommendedActions = $recommendedActions
         Note           = 'No probe files were written and no VM mutation commands were executed; PowerShell Direct and guest payload probes run only when the VM is already running and credentials are visible.'
     })
 

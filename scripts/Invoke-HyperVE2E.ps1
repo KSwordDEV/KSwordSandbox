@@ -221,7 +221,8 @@ function New-PlanCheck {
         [ValidateSet('Passed', 'Warning', 'Failed')][string]$Status,
         [bool]$RequiredForLive,
         [Parameter(Mandatory)][string]$Message,
-        [System.Collections.IDictionary]$Details = @{}
+        [System.Collections.IDictionary]$Details = @{},
+        [string[]]$Remediation = @()
     )
 
     $orderedDetails = [ordered]@{}
@@ -234,6 +235,7 @@ function New-PlanCheck {
         status          = $Status
         requiredForLive = $RequiredForLive
         message         = $Message
+        remediation     = @($Remediation)
         details         = $orderedDetails
     }
 }
@@ -242,7 +244,8 @@ function New-FilePresenceCheck {
     param(
         [Parameter(Mandatory)][string]$Name,
         [Parameter(Mandatory)][string]$Path,
-        [bool]$RequiredForLive
+        [bool]$RequiredForLive,
+        [string[]]$Remediation = @()
     )
 
     if (Test-Path -LiteralPath $Path -PathType Leaf) {
@@ -261,20 +264,26 @@ function New-FilePresenceCheck {
     else {
         "Optional file is not present: $Path"
     }
+    $effectiveRemediation = @($Remediation)
+    if ($effectiveRemediation.Count -eq 0) {
+        $effectiveRemediation = @("Create or configure the expected file, then rerun .\scripts\Invoke-HyperVE2E.ps1 -PlanOnly: $Path")
+    }
 
     return New-PlanCheck `
         -Name $Name `
         -Status $missingStatus `
         -RequiredForLive $RequiredForLive `
         -Message $missingMessage `
-        -Details @{ path = $Path; exists = $false }
+        -Details @{ path = $Path; exists = $false } `
+        -Remediation $effectiveRemediation
 }
 
 function New-DirectoryPresenceCheck {
     param(
         [Parameter(Mandatory)][string]$Name,
         [Parameter(Mandatory)][string]$Path,
-        [bool]$RequiredForLive
+        [bool]$RequiredForLive,
+        [string[]]$Remediation = @()
     )
 
     if (Test-Path -LiteralPath $Path -PathType Container) {
@@ -293,13 +302,18 @@ function New-DirectoryPresenceCheck {
     else {
         "Optional directory is not present: $Path"
     }
+    $effectiveRemediation = @($Remediation)
+    if ($effectiveRemediation.Count -eq 0) {
+        $effectiveRemediation = @("Create or configure the expected directory, then rerun .\scripts\Invoke-HyperVE2E.ps1 -PlanOnly: $Path")
+    }
 
     return New-PlanCheck `
         -Name $Name `
         -Status $missingStatus `
         -RequiredForLive $RequiredForLive `
         -Message $missingMessage `
-        -Details @{ path = $Path; exists = $false }
+        -Details @{ path = $Path; exists = $false } `
+        -Remediation $effectiveRemediation
 }
 
 function Test-CommandListAvailable {
@@ -337,7 +351,11 @@ function New-CommandAvailabilityCheck {
         -Status 'Failed' `
         -RequiredForLive $RequiredForLive `
         -Message "Required command(s) are missing: $($missing -join ', ')" `
-        -Details @{ commands = @($Commands); missing = @($missing) }
+        -Details @{ commands = @($Commands); missing = @($missing) } `
+        -Remediation @(
+            "Install or enable the Windows Hyper-V PowerShell management tools, then open a new elevated PowerShell session.",
+            "Run .\run.ps1 -Mode CheckEnvironment or .\scripts\Test-HyperVReadiness.ps1 to verify the host without starting a VM."
+        )
 }
 
 function New-GuestSecretCheck {
@@ -349,7 +367,8 @@ function New-GuestSecretCheck {
             -Status 'Failed' `
             -RequiredForLive $true `
             -Message 'Guest password secret name is empty.' `
-            -Details @{ secretName = ''; isSet = $false; valuePrinted = $false }
+            -Details @{ secretName = ''; isSet = $false; valuePrinted = $false } `
+            -Remediation @("Set guest.passwordSecretName in the sandbox config, or rerun .\install.ps1 -Mode Change -UpdateHyperVConfig with the intended -SecretName.")
     }
 
     $secretValue = Get-GuestPasswordSecretValue -SecretName $SecretName
@@ -359,7 +378,12 @@ function New-GuestSecretCheck {
             -Status 'Failed' `
             -RequiredForLive $true `
             -Message "Guest password environment variable '$SecretName' is not set in Process, User, or Machine scope." `
-            -Details @{ secretName = $SecretName; isSet = $false; scope = ''; valuePrinted = $false }
+            -Details @{ secretName = $SecretName; isSet = $false; scope = ''; valuePrinted = $false } `
+            -Remediation @(
+                ".\install.ps1 -Mode Install -PromptPassword",
+                ".\install.ps1 -Mode Change -ResetPassword -PromptPassword",
+                "If the host secret and actual VM account are out of sync, use .\install.ps1 -Mode Change -ResetGuestVmPassword -PromptPassword -Force from an elevated shell."
+            )
     }
 
     return New-PlanCheck `
@@ -392,7 +416,8 @@ function New-HostOsCheck {
         -Status 'Failed' `
         -RequiredForLive $true `
         -Message 'Live Hyper-V E2E requires a Windows host.' `
-        -Details @{ isWindows = $false }
+        -Details @{ isWindows = $false } `
+        -Remediation @("Run live Hyper-V analysis on a Windows Pro/Enterprise/Education host with Hyper-V enabled; use -PlanOnly on non-Windows hosts.")
 }
 
 function New-AdministratorCheck {
@@ -411,7 +436,8 @@ function New-AdministratorCheck {
         -Status 'Failed' `
         -RequiredForLive $true `
         -Message 'Live Hyper-V E2E requires an elevated Administrator PowerShell session.' `
-        -Details @{ isAdministrator = $false }
+        -Details @{ isAdministrator = $false } `
+        -Remediation @("Open PowerShell as Administrator for -Live; use -PlanOnly or -WhatIf for non-mutating review from a normal shell.")
 }
 
 function New-HyperVVmCheck {
@@ -423,7 +449,11 @@ function New-HyperVVmCheck {
             -Status 'Warning' `
             -RequiredForLive $true `
             -Message 'Get-VM is not available; VM existence could not be checked.' `
-            -Details @{ vmName = $VmName; checked = $false }
+            -Details @{ vmName = $VmName; checked = $false } `
+            -Remediation @(
+                "Enable/install Hyper-V PowerShell tools, then rerun .\scripts\Test-HyperVReadiness.ps1.",
+                "Use .\install.ps1 -Mode Change -UpdateHyperVConfig -VmName <existing VM> -CheckpointName <checkpoint> to record the local VM name."
+            )
     }
 
     try {
@@ -441,7 +471,11 @@ function New-HyperVVmCheck {
             -Status 'Failed' `
             -RequiredForLive $true `
             -Message "VM was not found or could not be queried: $VmName. $($_.Exception.Message)" `
-            -Details @{ vmName = $VmName; exists = $false; error = $_.Exception.Message }
+            -Details @{ vmName = $VmName; exists = $false; error = $_.Exception.Message } `
+            -Remediation @(
+                "Create or import a golden Hyper-V VM named '$VmName', or record the actual VM name with .\install.ps1 -Mode Change -UpdateHyperVConfig -VmName <existing VM> -CheckpointName <checkpoint>.",
+                "Run .\scripts\Test-HyperVReadiness.ps1 after updating the VM name; it is read-only and will not start or restore the VM."
+            )
     }
 }
 
@@ -457,7 +491,8 @@ function New-HyperVCheckpointCheck {
             -Status 'Warning' `
             -RequiredForLive $true `
             -Message 'Get-VMSnapshot is not available; checkpoint existence could not be checked.' `
-            -Details @{ vmName = $VmName; checkpointName = $CheckpointName; checked = $false }
+            -Details @{ vmName = $VmName; checkpointName = $CheckpointName; checked = $false } `
+            -Remediation @("Enable/install Hyper-V PowerShell tools, then rerun .\scripts\Test-HyperVReadiness.ps1 without starting the VM.")
     }
 
     try {
@@ -475,7 +510,11 @@ function New-HyperVCheckpointCheck {
             -Status 'Failed' `
             -RequiredForLive $true `
             -Message "Checkpoint was not found or could not be queried: $VmName / $CheckpointName. $($_.Exception.Message)" `
-            -Details @{ vmName = $VmName; checkpointName = $CheckpointName; exists = $false; error = $_.Exception.Message }
+            -Details @{ vmName = $VmName; checkpointName = $CheckpointName; exists = $false; error = $_.Exception.Message } `
+            -Remediation @(
+                "Create a clean checkpoint named '$CheckpointName' on VM '$VmName', or record the correct checkpoint with .\install.ps1 -Mode Change -UpdateHyperVConfig -VmName '$VmName' -CheckpointName <checkpoint>.",
+                "Rerun .\scripts\Test-HyperVReadiness.ps1 to confirm the checkpoint exists; the check is read-only."
+            )
     }
 }
 
@@ -488,7 +527,8 @@ function New-GuestServiceCheck {
             -Status 'Warning' `
             -RequiredForLive $true `
             -Message 'Get-VMIntegrationService is not available; Guest Service Interface could not be checked.' `
-            -Details @{ vmName = $VmName; checked = $false }
+            -Details @{ vmName = $VmName; checked = $false } `
+            -Remediation @("Enable/install Hyper-V PowerShell tools. The live start phase can enable Guest Service Interface when the VM is queryable.")
     }
 
     try {
@@ -519,7 +559,8 @@ function New-GuestServiceCheck {
             -Status $status `
             -RequiredForLive $true `
             -Message $message `
-            -Details @{ vmName = $VmName; exists = $true; enabled = $enabled; primaryStatus = $service.PrimaryStatusDescription }
+            -Details @{ vmName = $VmName; exists = $true; enabled = $enabled; primaryStatus = $service.PrimaryStatusDescription } `
+            -Remediation $(if ($enabled) { @() } else { @("No manual VM start is required for planning. For live runs, the start phase attempts to enable Guest Service Interface before Copy-VMFile; you can also enable it in Hyper-V VM settings.") })
     }
     catch {
         return New-PlanCheck `
@@ -527,7 +568,8 @@ function New-GuestServiceCheck {
             -Status 'Failed' `
             -RequiredForLive $true `
             -Message "Guest Service Interface could not be queried for $VmName. $($_.Exception.Message)" `
-            -Details @{ vmName = $VmName; exists = $false; error = $_.Exception.Message }
+            -Details @{ vmName = $VmName; exists = $false; error = $_.Exception.Message } `
+            -Remediation @("Verify the VM name and Hyper-V integration services, then rerun .\scripts\Test-HyperVReadiness.ps1. The readiness check does not start the VM.")
     }
 }
 
@@ -545,7 +587,8 @@ function New-PowerShellDirectCheck {
             -Status 'Warning' `
             -RequiredForLive $true `
             -Message 'Invoke-Command is not available; PowerShell Direct could not be checked.' `
-            -Details @{ vmName = $VmName; checked = $false }
+            -Details @{ vmName = $VmName; checked = $false } `
+            -Remediation @("Use Windows PowerShell or PowerShell with Hyper-V PowerShell Direct support, then rerun the read-only readiness check.")
     }
 
     if ($null -eq (Get-Command -Name Get-VM -ErrorAction SilentlyContinue)) {
@@ -554,7 +597,8 @@ function New-PowerShellDirectCheck {
             -Status 'Warning' `
             -RequiredForLive $true `
             -Message 'Get-VM is not available; VM state could not be checked before PowerShell Direct probe.' `
-            -Details @{ vmName = $VmName; checked = $false }
+            -Details @{ vmName = $VmName; checked = $false } `
+            -Remediation @("Enable/install Hyper-V PowerShell tools so the readiness check can confirm whether the VM is already running.")
     }
 
     $secretValue = Get-GuestPasswordSecretValue -SecretName $SecretName
@@ -564,7 +608,8 @@ function New-PowerShellDirectCheck {
             -Status 'Warning' `
             -RequiredForLive $true `
             -Message "PowerShell Direct probe skipped because guest password environment variable '$SecretName' is not set in Process, User, or Machine scope." `
-            -Details @{ vmName = $VmName; checked = $false; reason = 'missingCredentialSecret'; secretName = $SecretName; valuePrinted = $false }
+            -Details @{ vmName = $VmName; checked = $false; reason = 'missingCredentialSecret'; secretName = $SecretName; valuePrinted = $false } `
+            -Remediation @("Set the guest password secret with .\install.ps1 -Mode Install -PromptPassword or use .\scripts\Test-HyperVReadiness.ps1 -PromptForMissingGuestPassword for a process-only read-only probe.")
     }
 
     try {
@@ -575,7 +620,8 @@ function New-PowerShellDirectCheck {
                 -Status 'Warning' `
                 -RequiredForLive $true `
                 -Message "PowerShell Direct probe skipped because VM is $($vm.State); plan-only mode will not start it." `
-                -Details @{ vmName = $VmName; checked = $false; vmState = $vm.State.ToString(); reason = 'vmNotRunning' }
+                -Details @{ vmName = $VmName; checked = $false; vmState = $vm.State.ToString(); reason = 'vmNotRunning' } `
+                -Remediation @("This is expected for non-mutating PlanOnly/WhatIf checks. Start the VM manually only if you want the read-only PowerShell Direct probe to run before live execution.")
         }
 
         $securePassword = [System.Security.SecureString]::new()
@@ -612,7 +658,8 @@ function New-PowerShellDirectCheck {
             -Status 'Failed' `
             -RequiredForLive $true `
             -Message "PowerShell Direct read-only probe failed for $VmName. $($_.Exception.Message)" `
-            -Details @{ vmName = $VmName; checked = $true; error = $_.Exception.Message; valuePrinted = $false }
+            -Details @{ vmName = $VmName; checked = $true; error = $_.Exception.Message; valuePrinted = $false } `
+            -Remediation @("Confirm the VM is running, the guest user '$UserName' exists, and the host secret '$SecretName' matches the guest password. Use .\install.ps1 -Mode Change -ResetGuestVmPassword -PromptPassword -Force if they are out of sync.")
     }
 }
 
@@ -622,6 +669,41 @@ function New-PreflightSummary {
     $required = @($Checks | Where-Object { [bool]$_.requiredForLive })
     $failedRequired = @($required | Where-Object { $_.status -eq 'Failed' })
     $warnings = @($Checks | Where-Object { $_.status -eq 'Warning' })
+    $repairSuggestions = New-Object System.Collections.Generic.List[string]
+    foreach ($check in $Checks) {
+        $status = ''
+        $remediation = @()
+        if ($check -is [System.Collections.IDictionary]) {
+            if ($check.Contains('status')) {
+                $status = [string]$check['status']
+            }
+            if ($check.Contains('remediation')) {
+                $remediation = @($check['remediation'])
+            }
+        }
+        else {
+            $statusProperty = $check.PSObject.Properties['status']
+            if ($null -ne $statusProperty) {
+                $status = [string]$statusProperty.Value
+            }
+
+            $remediationProperty = $check.PSObject.Properties['remediation']
+            if ($null -ne $remediationProperty) {
+                $remediation = @($remediationProperty.Value)
+            }
+        }
+
+        if ($status -eq 'Passed') {
+            continue
+        }
+
+        foreach ($item in $remediation) {
+            $text = [string]$item
+            if (-not [string]::IsNullOrWhiteSpace($text) -and -not $repairSuggestions.Contains($text)) {
+                [void]$repairSuggestions.Add($text)
+            }
+        }
+    }
 
     return [ordered]@{
         totalChecks = @($Checks).Count
@@ -631,6 +713,26 @@ function New-PreflightSummary {
         liveReady = ($failedRequired.Count -eq 0)
         failedRequiredNames = @($failedRequired | ForEach-Object { $_.name })
         warningNames = @($warnings | ForEach-Object { $_.name })
+        repairSuggestionCount = $repairSuggestions.Count
+        repairSuggestions = @($repairSuggestions.ToArray())
+    }
+}
+
+function Write-PreflightRepairSuggestions {
+    param([AllowEmptyCollection()][string[]]$Suggestions)
+
+    $items = @($Suggestions | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } | Select-Object -Unique)
+    if ($items.Count -eq 0) {
+        return
+    }
+
+    Write-HyperVE2EStep 'Preflight repair suggestions:'
+    foreach ($item in @($items | Select-Object -First 8)) {
+        Write-HyperVE2EStep "  - $item"
+    }
+
+    if ($items.Count -gt 8) {
+        Write-HyperVE2EStep "  - ... $($items.Count - 8) more suggestion(s) are recorded in plan.preflightSummary.repairSuggestions."
     }
 }
 
@@ -1269,6 +1371,12 @@ try {
     $willRunLive = [bool]$Live -and (-not [bool]$PlanOnly) -and (-not [bool]$WhatIfPreference)
     $effectiveMode = if ($willRunLive) { 'Live' } elseif ($WhatIfPreference) { 'WhatIf' } else { 'PlanOnly' }
     $requestedMode = if ($Live) { 'Live' } else { 'PlanOnly' }
+    $payloadBuildConfiguration = 'Release'
+    $payloadPrepareCommand = ".\scripts\Prepare-GuestPayload.ps1 -RepoRoot . -PayloadRoot '$resolvedPayloadRoot' -Configuration $payloadBuildConfiguration -GuestWorkingDirectory '$guestRoot' -SelfContained"
+    $payloadRepairSuggestions = @(
+        "Prepare the self-contained guest payload: $payloadPrepareCommand",
+        "Then rerun .\scripts\Test-HyperVReadiness.ps1 or .\run.ps1 -Mode CheckEnvironment; neither command starts or restores the VM."
+    )
 
     $checks = New-Object System.Collections.Generic.List[object]
     [void]$checks.Add((New-PlanCheck -Name 'Live execution is explicit' -Status 'Passed' -RequiredForLive $true -Message 'No VM mutation is possible unless -Live is supplied and -WhatIf is not supplied.' -Details @{ liveSwitchPresent = [bool]$Live; planOnlySwitchPresent = [bool]$PlanOnly; whatIf = [bool]$WhatIfPreference; willMutateVm = $willRunLive }))
@@ -1281,17 +1389,17 @@ try {
     [void]$checks.Add((New-HyperVCheckpointCheck -VmName $effectiveVmName -CheckpointName $effectiveCheckpointName))
     [void]$checks.Add((New-GuestServiceCheck -VmName $effectiveVmName))
     [void]$checks.Add((New-PowerShellDirectCheck -VmName $effectiveVmName -UserName $effectiveGuestUserName -SecretName $effectiveGuestSecretName -GuestPathsToProbe @($guestRoot, $agentPathInGuest, $r0CollectorPathInGuest)))
-    [void]$checks.Add((New-DirectoryPresenceCheck -Name 'Guest payload root' -Path $resolvedPayloadRoot -RequiredForLive $true))
-    [void]$checks.Add((New-DirectoryPresenceCheck -Name 'Guest Agent payload directory' -Path (Join-Path $resolvedPayloadRoot 'agent') -RequiredForLive $true))
-    [void]$checks.Add((New-FilePresenceCheck -Name 'Sample file' -Path $resolvedSamplePath -RequiredForLive $true))
-    [void]$checks.Add((New-FilePresenceCheck -Name 'Guest Agent payload' -Path $agentHostPath -RequiredForLive $true))
-    [void]$checks.Add((New-FilePresenceCheck -Name 'Payload manifest' -Path $payloadManifestPath -RequiredForLive $false))
+    [void]$checks.Add((New-DirectoryPresenceCheck -Name 'Guest payload root' -Path $resolvedPayloadRoot -RequiredForLive $true -Remediation $payloadRepairSuggestions))
+    [void]$checks.Add((New-DirectoryPresenceCheck -Name 'Guest Agent payload directory' -Path (Join-Path $resolvedPayloadRoot 'agent') -RequiredForLive $true -Remediation $payloadRepairSuggestions))
+    [void]$checks.Add((New-FilePresenceCheck -Name 'Sample file' -Path $resolvedSamplePath -RequiredForLive $true -Remediation @("Pass an existing .exe sample path, for example: .\run.ps1 -Mode Plan -SamplePath <sample.exe>")))
+    [void]$checks.Add((New-FilePresenceCheck -Name 'Guest Agent payload' -Path $agentHostPath -RequiredForLive $true -Remediation $payloadRepairSuggestions))
+    [void]$checks.Add((New-FilePresenceCheck -Name 'Payload manifest' -Path $payloadManifestPath -RequiredForLive $false -Remediation $payloadRepairSuggestions))
     if ($driverEnabled) {
-        [void]$checks.Add((New-DirectoryPresenceCheck -Name 'R0Collector payload directory' -Path (Join-Path $resolvedPayloadRoot 'r0collector') -RequiredForLive $true))
-        [void]$checks.Add((New-FilePresenceCheck -Name 'R0Collector payload' -Path $collectorHostPath -RequiredForLive $true))
+        [void]$checks.Add((New-DirectoryPresenceCheck -Name 'R0Collector payload directory' -Path (Join-Path $resolvedPayloadRoot 'r0collector') -RequiredForLive $true -Remediation $payloadRepairSuggestions))
+        [void]$checks.Add((New-FilePresenceCheck -Name 'R0Collector payload' -Path $collectorHostPath -RequiredForLive $true -Remediation $payloadRepairSuggestions))
     }
     if (-not [string]::IsNullOrWhiteSpace($hostDriverPath)) {
-        [void]$checks.Add((New-FilePresenceCheck -Name 'Optional host driver' -Path $hostDriverPath -RequiredForLive $true))
+        [void]$checks.Add((New-FilePresenceCheck -Name 'Optional host driver' -Path $hostDriverPath -RequiredForLive $true -Remediation @("Provide the configured host driver path '$hostDriverPath' before live driver collection, or run with -NoR0Collector / disable driver.enabled for payload-only validation.")))
     }
     $preflightArray = @($checks.ToArray())
     $preflightSummary = New-PreflightSummary -Checks $preflightArray
@@ -1390,6 +1498,15 @@ try {
             secretValuePrinted = $false
             noVmMutationWhenPlanOnly = (-not $willRunLive)
         }
+        operatorGuidance = [ordered]@{
+            checkEnvironmentCommand = '.\run.ps1 -Mode CheckEnvironment'
+            readinessCommand = '.\scripts\Test-HyperVReadiness.ps1'
+            planOnlyCommand = '.\run.ps1 -Mode Plan -SamplePath <sample.exe>'
+            whatIfCommand = '.\run.ps1 -Mode Analyze -SamplePath <sample.exe> -Live -WhatIf'
+            payloadPreparationCommand = $payloadPrepareCommand
+            noVmMutationForPlanOnlyOrWhatIf = $true
+            repairSuggestions = @($preflightSummary['repairSuggestions'])
+        }
         preflightSummary = $preflightSummary
         preflight = $preflightArray
         steps = New-HyperVE2ESteps `
@@ -1440,6 +1557,11 @@ try {
             -StepResults $safeStepResults `
             -WhatIf ([bool]$WhatIfPreference)
         Write-HyperVE2EStep "Safe $effectiveMode mode: no checkpoint restore, VM start, file copy, guest command, shutdown, or restore was executed."
+        if ([int]$plan.preflightSummary.failedRequired -gt 0 -or [int]$plan.preflightSummary.warnings -gt 0) {
+            Write-HyperVE2EStep "Plan recorded $($plan.preflightSummary.failedRequired) failed required check(s) and $($plan.preflightSummary.warnings) warning(s). This is non-fatal in $effectiveMode mode."
+            Write-PreflightRepairSuggestions -Suggestions @($plan.preflightSummary.repairSuggestions)
+        }
+
         Write-Output ([pscustomobject][ordered]@{
                 PlanPath = $PlanPath
                 RunbookExecutionPath = $runbookExecutionPath
@@ -1453,7 +1575,14 @@ try {
 
     if ([int]$plan.preflightSummary.failedRequired -gt 0) {
         $failedNames = @($plan.preflightSummary.failedRequiredNames) -join ', '
-        $message = "Live Hyper-V E2E preflight failed before VM mutation. Failed required check(s): $failedNames"
+        $failedDetails = @(
+            $plan.preflight |
+                Where-Object { ([bool]$_.requiredForLive) -and ([string]$_.status -eq 'Failed') } |
+                ForEach-Object { "$($_.name): $($_.message)" }
+        )
+        $detailText = if ($failedDetails.Count -gt 0) { ' Details: ' + ($failedDetails -join ' | ') } else { '' }
+        $message = "Live Hyper-V E2E preflight failed before VM mutation. Failed required check(s): $failedNames.$detailText"
+        Write-PreflightRepairSuggestions -Suggestions @($plan.preflightSummary.repairSuggestions)
         Save-RunbookExecutionRecord `
             -Plan $plan `
             -ModeName 'Live' `

@@ -40,7 +40,10 @@ internal sealed class InstallRunPackagingContractScenario : ISmokeTestScenario
         RequireContains(runScript, "RequirePayloadForWebUI", "run.ps1 should allow strict WebUI payload enforcement.");
         RequireContains(runScript, "WebUI will still start", "WebUI mode should remain launchable when payload build prerequisites are missing.");
         RequireContains(runScript, "GuestPayloadManifestExists", "run.ps1 status should show payload readiness.");
+        RequireContains(runScript, "GuestAgentPayloadExists", "run.ps1 status should show agent payload readiness.");
+        RequireContains(runScript, "R0CollectorPayloadExists", "run.ps1 status should show collector payload readiness.");
         RequireContains(runScript, "GuestPasswordGuidance", "run.ps1 status should guide operators to configure the guest password.");
+        RequireContains(runScript, "RecommendedActions", "run.ps1 status should provide human-readable repair suggestions.");
         RequireContains(runScript, "Hyper-V live prerequisites", "run.ps1 should print live prerequisite guidance at WebUI startup.");
 
         RequireContains(installDoc, ".\\run.ps1", "Install docs should show the post-install WebUI command.");
@@ -48,6 +51,7 @@ internal sealed class InstallRunPackagingContractScenario : ISmokeTestScenario
         RequireContains(installDoc, ".\\install.ps1 -Mode ConfigureVTKey -PromptVTKey", "Install docs should show VT key configuration.");
         RequireContains(installDoc, "self-contained Guest", "Install docs should explain self-contained guest payload preparation.");
         RequireContains(installDoc, "-RequirePayloadForWebUI", "Install docs should document strict payload mode.");
+        RequireContains(installDoc, "RecommendedActions", "Install docs should describe repair suggestions for fresh hosts.");
         RequireContains(installDoc, "must not call `CSignTool.exe`", "Install docs should document the no-CSignTool boundary.");
 
         RequireContains(readme, ".\\run.ps1", "README quick start should show the runtime wrapper.");

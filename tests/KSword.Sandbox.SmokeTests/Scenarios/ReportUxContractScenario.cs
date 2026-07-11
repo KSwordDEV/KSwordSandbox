@@ -50,6 +50,12 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(rendererSource, "Evidence graph edges", "Report renderer should expose graph edge evidence.");
         RequireContains(rendererSource, "AppendEvidenceSummaryCards", "Report renderer should expose evidence summary cards.");
         RequireContains(rendererSource, "Evidence summary cards", "Report renderer should expose evidence summary cards title.");
+        RequireContains(rendererSource, "AppendArtifactCollectionStatusCards", "Report renderer should expose artifact collection status cards.");
+        RequireContains(rendererSource, "Artifact collection status", "Report renderer should expose artifact collection status title.");
+        RequireContains(rendererSource, "Dropped files", "Report renderer should summarize dropped-file collection status.");
+        RequireContains(rendererSource, "Screenshots", "Report renderer should summarize screenshot collection status.");
+        RequireContains(rendererSource, "Memory dumps", "Report renderer should summarize memory-dump collection status.");
+        RequireContains(rendererSource, "Packet captures", "Report renderer should summarize packet-capture collection status.");
         RequireContains(rendererSource, "AppendTopBehaviorChain", "Report renderer should expose a bounded top behavior chain.");
         RequireContains(rendererSource, "Top behavior chain", "Report renderer should expose the top behavior chain title.");
         RequireContains(rendererSource, "behavior-chain", "Report renderer should style the top behavior chain as a bounded panel.");
@@ -108,6 +114,7 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(doc, "bounded timeline", "Report UX doc should require bounded timeline rendering.");
         RequireContains(doc, "Behavior graph / IOC summary", "Report UX doc should list the behavior graph section.");
         RequireContains(doc, "Evidence graph edges", "Report UX doc should require graph edge evidence.");
+        RequireContains(doc, "Artifact collection status", "Report UX doc should require artifact collection status cards.");
         RequireContains(doc, "Top behavior chain", "Report UX doc should require a top behavior chain.");
         RequireContains(doc, "IOC summary", "Report UX doc should require IOC summary cards.");
         RequireContains(doc, "Process tree", "Report UX doc should list the process tree.");
@@ -228,6 +235,11 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(englishHtml, "contract-sample.exe pid:4242 --network--&gt; 203.0.113.10:443", "Rendered behavior chain should include the sample network edge.");
         RequireContains(englishHtml, "id=\"evidence-summary-cards\"", "Rendered HTML should include evidence summary card anchor.");
         RequireContains(englishHtml, "Evidence summary cards", "Rendered HTML should include evidence summary cards.");
+        RequireContains(englishHtml, "Artifact collection status", "Rendered HTML should include artifact collection status cards.");
+        RequireContains(englishHtml, "Dropped files", "Rendered HTML should include dropped-file status card.");
+        RequireContains(englishHtml, "Screenshots", "Rendered HTML should include screenshot status card.");
+        RequireContains(englishHtml, "Memory dumps", "Rendered HTML should include memory-dump status card.");
+        RequireContains(englishHtml, "Packet captures", "Rendered HTML should include packet-capture status card.");
         RequireContains(englishHtml, "IOC summary", "Rendered HTML should include IOC summary cards.");
         RequireContains(englishHtml, "Network IOCs", "Rendered HTML should include network IOC cards.");
         RequireContains(englishHtml, "id=\"process-relationship-cards\"", "Rendered HTML should include process relationship card anchor.");
@@ -326,6 +338,7 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         "时间线",
         "关键行为链",
         "证据摘要卡",
+        "证据采集状态",
         "进程详情",
         "进程关系卡",
         "落地文件",

@@ -42,7 +42,12 @@ Required `report.html`, `report.zh.html`, and `report.en.html` sections:
 - Artifact links / 证据文件链接 must include `events.json`,
   `driver-events.jsonl`, artifact manifests, screenshots, dropped files,
   opt-in memory dumps, and imported `.pcap` / `.pcapng` packet captures when
-  those files exist in the job directory.
+  those files exist in the job directory. This section must also include
+  Artifact collection status cards for dropped files, screenshots, memory
+  dumps, packet captures, and driver events. These cards should summarize
+  captured, failed, skipped, partial, observed, or not-observed collection state
+  from both indexed artifacts and normalized telemetry, so operators can see
+  whether evidence was actually collected even when no artifact file exists.
 - Registry behavior / 注册表.
 - Network behavior / 网络.
 - R0 / driver events.

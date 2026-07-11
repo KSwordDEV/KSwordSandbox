@@ -54,6 +54,15 @@ public sealed class HtmlReportRenderer
 
     private sealed record EvidenceSummaryCard(string Title, string Value, string Detail, string Css, string CopyText);
 
+    private sealed record ArtifactCollectionStatusCard(
+        string Name,
+        string Status,
+        string Css,
+        int ArtifactCount,
+        int EventCount,
+        string Detail,
+        string CopyText);
+
     private sealed record ProcessRelationshipCard(
         string Label,
         string RiskCss,
@@ -201,7 +210,7 @@ public sealed class HtmlReportRenderer
         AppendStaticAnalysis(html, report);
         AppendDynamicAnalysis(html, report);
         AppendBehaviorGraph(html, report, artifactLookup, artifactLinks);
-        AppendArtifactLinks(html, artifactLinks);
+        AppendArtifactLinks(html, report, artifactLinks);
         AppendTimeline(html, report, artifactLookup, artifactLinks);
         AppendProcessDetails(html, report, artifactLookup, artifactLinks);
         AppendDroppedFiles(html, report, artifactLookup, artifactLinks);
@@ -876,9 +885,10 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
     /// safe relative paths and plain text for guest-local or unsafe paths; the
     /// method returns no value.
     /// </summary>
-    private static void AppendArtifactLinks(StringBuilder html, IReadOnlyCollection<ArtifactDescriptor> artifacts)
+    private static void AppendArtifactLinks(StringBuilder html, AnalysisReport report, IReadOnlyCollection<ArtifactDescriptor> artifacts)
     {
         html.AppendLine("<section id=\"artifacts\" class=\"card\"><h2>Artifact links</h2>");
+        AppendArtifactCollectionStatusCards(html, report, artifacts);
         if (artifacts.Count == 0)
         {
             Empty(html, "No events.json, driver-events.jsonl, screenshot, or dropped-file artifacts were indexed.");
@@ -904,6 +914,175 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
         html.AppendLine("</tbody></table>");
         html.AppendLine("<div class=\"copy-hint\">Safe links are relative to the report artifact root; unsafe or guest-local paths are shown as copyable text only.</div>");
         html.AppendLine("</section>");
+    }
+
+    /// <summary>
+    /// Appends collection-lane status cards for operator triage.
+    /// Inputs are normalized events and indexed artifacts; processing derives
+    /// captured/failed/skipped/disabled status for key evidence lanes; return
+    /// value is none.
+    /// </summary>
+    private static void AppendArtifactCollectionStatusCards(
+        StringBuilder html,
+        AnalysisReport report,
+        IReadOnlyCollection<ArtifactDescriptor> artifacts)
+    {
+        var cards = BuildArtifactCollectionStatusCards(report, artifacts);
+        html.AppendLine("<h3>Artifact collection status</h3>");
+        html.AppendLine("<div class=\"evidence-summary-grid artifact-status-grid\">");
+        foreach (var card in cards)
+        {
+            html.AppendLine($"<article class=\"evidence-summary-card copyable\" data-copy=\"{A(card.CopyText)}\">");
+            html.AppendLine("<div class=\"relationship-title\">");
+            html.AppendLine($"<h3>{E(card.Name)}</h3><span class=\"badge badge-{E(card.Css)}\">{E(card.Status)}</span>");
+            html.AppendLine("</div>");
+            html.AppendLine("<div class=\"relationship-meta\">");
+            html.AppendLine($"<span>Artifacts: {E(card.ArtifactCount.ToString())}</span><span>Events: {E(card.EventCount.ToString())}</span>");
+            html.AppendLine("</div>");
+            html.AppendLine($"<p class=\"muted\">{E(card.Detail)}</p>");
+            html.AppendLine($"<details class=\"relationship-details\"><summary>Collection evidence</summary><pre class=\"copyable\" data-copy=\"{A(card.CopyText)}\">{E(card.CopyText)}</pre></details>");
+            html.AppendLine("</article>");
+        }
+
+        html.AppendLine("</div>");
+    }
+
+    private static IReadOnlyList<ArtifactCollectionStatusCard> BuildArtifactCollectionStatusCards(
+        AnalysisReport report,
+        IReadOnlyCollection<ArtifactDescriptor> artifacts)
+    {
+        return
+        [
+            BuildArtifactCollectionStatusCard(
+                "Dropped files",
+                "dropped-files",
+                ArtifactKind.DroppedFile,
+                artifacts,
+                report.Events,
+                evt => evt.EventType.StartsWith("artifact.dropped_file.", StringComparison.OrdinalIgnoreCase),
+                "Copied files released or modified by the sample when collection was enabled."),
+            BuildArtifactCollectionStatusCard(
+                "Screenshots",
+                "screenshots",
+                ArtifactKind.Screenshot,
+                artifacts,
+                report.Events,
+                evt => evt.EventType.StartsWith("screenshot.", StringComparison.OrdinalIgnoreCase),
+                "Desktop screenshots captured around sample execution when enabled."),
+            BuildArtifactCollectionStatusCard(
+                "Memory dumps",
+                "memory-dumps",
+                ArtifactKind.MemoryDump,
+                artifacts,
+                report.Events,
+                evt => evt.EventType.StartsWith("memory_dump.", StringComparison.OrdinalIgnoreCase),
+                "Opt-in process and child-process memory dump artifacts."),
+            BuildArtifactCollectionStatusCard(
+                "Packet captures",
+                "packet-captures",
+                ArtifactKind.PacketCapture,
+                artifacts,
+                report.Events,
+                evt => evt.EventType.StartsWith("packet_capture.", StringComparison.OrdinalIgnoreCase) || evt.EventType.StartsWith("pcap.", StringComparison.OrdinalIgnoreCase),
+                "Opt-in pktmon/PCAP artifacts and imported DNS/HTTP/TLS/flow rows."),
+            BuildArtifactCollectionStatusCard(
+                "Driver events",
+                "driver-events",
+                ArtifactKind.DriverEventsJsonLines,
+                artifacts,
+                report.Events,
+                IsR0Event,
+                "R0Collector JSONL and driver-originated telemetry.")
+        ];
+    }
+
+    private static ArtifactCollectionStatusCard BuildArtifactCollectionStatusCard(
+        string name,
+        string collectionName,
+        ArtifactKind kind,
+        IReadOnlyCollection<ArtifactDescriptor> artifacts,
+        IReadOnlyCollection<SandboxEvent> events,
+        Func<SandboxEvent, bool> eventPredicate,
+        string defaultDetail)
+    {
+        var collectionArtifacts = artifacts
+            .Where(artifact => artifact.Kind == kind ||
+                string.Equals(artifact.CollectionName, collectionName, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(MetadataValue(artifact.Metadata, "collectionName"), collectionName, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        var collectionEvents = events.Where(eventPredicate).OrderBy(evt => evt.Timestamp).ToList();
+        var status = InferArtifactCollectionStatus(collectionArtifacts, collectionEvents);
+        var css = status switch
+        {
+            "captured" => "low",
+            "failed" => "high",
+            "skipped" => "medium",
+            "partial" => "medium",
+            "observed" => "info",
+            _ => "info"
+        };
+        var reason = collectionEvents
+            .Select(evt => FirstEventDataValue(evt, "reason", "captureState", "status", "diagnosticStage", "commandMessage"))
+            .FirstOrDefault(value => !string.IsNullOrWhiteSpace(value));
+        var phases = collectionArtifacts
+            .Select(artifact => artifact.CapturePhase)
+            .Concat(collectionEvents.Select(evt => FirstEventDataValue(evt, "capturePhase", "phase", "screenshotStage", "memoryDumpPhase", "packetCapturePhase")))
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(8)
+            .ToList();
+        var detail = defaultDetail;
+        if (!string.IsNullOrWhiteSpace(reason))
+        {
+            detail += $" Latest diagnostic: {reason}.";
+        }
+
+        if (phases.Count > 0)
+        {
+            detail += $" Phases: {string.Join(", ", phases)}.";
+        }
+
+        var copy = string.Join(
+            Environment.NewLine,
+            [
+                $"collection={name}",
+                $"collectionName={collectionName}",
+                $"status={status}",
+                $"artifactCount={collectionArtifacts.Count}",
+                $"eventCount={collectionEvents.Count}",
+                $"latestReason={reason ?? "-"}",
+                $"phases={string.Join(",", phases)}",
+                .. collectionArtifacts.Take(8).Select(ArtifactToPlainText),
+                .. collectionEvents.Take(8).Select(EventOneLine)
+            ]);
+        return new ArtifactCollectionStatusCard(name, status, css, collectionArtifacts.Count, collectionEvents.Count, detail, copy);
+    }
+
+    private static string InferArtifactCollectionStatus(
+        IReadOnlyCollection<ArtifactDescriptor> artifacts,
+        IReadOnlyCollection<SandboxEvent> events)
+    {
+        if (artifacts.Any(artifact =>
+                string.Equals(artifact.CaptureState, "failed", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(MetadataValue(artifact.Metadata, "captureState"), "failed", StringComparison.OrdinalIgnoreCase)) ||
+            events.Any(evt => evt.EventType.Contains("failed", StringComparison.OrdinalIgnoreCase)))
+        {
+            return artifacts.Count > 0 ? "partial" : "failed";
+        }
+
+        if (artifacts.Count > 0 ||
+            events.Any(evt => evt.EventType.Contains("captured", StringComparison.OrdinalIgnoreCase) ||
+                evt.EventType.Contains("copied", StringComparison.OrdinalIgnoreCase)))
+        {
+            return "captured";
+        }
+
+        if (events.Any(evt => evt.EventType.Contains("skipped", StringComparison.OrdinalIgnoreCase)))
+        {
+            return "skipped";
+        }
+
+        return events.Count > 0 ? "observed" : "not observed";
     }
 
     /// <summary>
@@ -2634,6 +2813,39 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
         return null;
     }
 
+    /// <summary>
+    /// Reads the first non-empty artifact metadata value from a set of keys.
+    /// Inputs are optional artifact metadata and preferred key names;
+    /// processing performs case-insensitive dictionary lookup when possible;
+    /// the method returns the first non-empty value or null.
+    /// </summary>
+    private static string? MetadataValue(IReadOnlyDictionary<string, string>? metadata, params string[] keys)
+    {
+        if (metadata is null || metadata.Count == 0)
+        {
+            return null;
+        }
+
+        foreach (var key in keys)
+        {
+            if (metadata.TryGetValue(key, out var value) && !string.IsNullOrWhiteSpace(value))
+            {
+                return value;
+            }
+        }
+
+        foreach (var key in keys)
+        {
+            var pair = metadata.FirstOrDefault(item => string.Equals(item.Key, key, StringComparison.OrdinalIgnoreCase));
+            if (!string.IsNullOrWhiteSpace(pair.Value))
+            {
+                return pair.Value;
+            }
+        }
+
+        return null;
+    }
+
     private static bool LooksLikeNetworkIndicatorKey(string key)
     {
         return key.Contains("address", StringComparison.OrdinalIgnoreCase) ||
@@ -2943,6 +3155,14 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
         ("Dynamic analysis", "动态分析"),
         ("Behavior graph / IOC summary", "行为图谱 / IOC 摘要"),
         ("Artifact links", "证据文件链接"),
+        ("Artifact collection status", "证据采集状态"),
+        ("Collection evidence", "采集证据"),
+        ("Dropped files", "落地文件"),
+        ("Screenshots", "截图"),
+        ("Memory dumps", "内存转储"),
+        ("Packet captures", "网络抓包"),
+        ("Driver events", "驱动事件"),
+        ("Artifacts:", "证据文件："),
         ("Timeline", "时间线"),
         ("Process details", "进程详情"),
         ("Dropped files", "落地文件"),
