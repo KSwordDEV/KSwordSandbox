@@ -683,6 +683,7 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
         html.AppendLine("</div>");
 
         AppendEvidenceSummaryCards(html, report, processNodes, edges, fileIocs, registryIocs, networkIocs, artifactIocs);
+        AppendTopBehaviorChain(html, edges);
 
         if (processNodes.Count > 0)
         {
@@ -731,6 +732,57 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
         AppendIocCard(html, "Artifact IOCs", artifactIocs, "No linked artifacts were indexed for this report.");
         html.AppendLine("</div>");
         html.AppendLine("</section>");
+    }
+
+    /// <summary>
+    /// Appends a bounded static behavior chain before the edge table.
+    /// Inputs are derived graph edges; processing ranks lineage/network/storage
+    /// evidence for stable weak-interaction rendering; return is none.
+    /// </summary>
+    private static void AppendTopBehaviorChain(StringBuilder html, IReadOnlyCollection<BehaviorGraphEdge> edges)
+    {
+        if (edges.Count == 0)
+        {
+            return;
+        }
+
+        var chain = edges
+            .OrderBy(edge => BehaviorChainRelationRank(edge.Relation))
+            .ThenBy(edge => edge.From, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(edge => edge.To, StringComparer.OrdinalIgnoreCase)
+            .Take(18)
+            .ToList();
+        if (chain.Count == 0)
+        {
+            return;
+        }
+
+        var copy = string.Join(Environment.NewLine, chain.Select(edge => $"{edge.From} --{edge.Relation}--> {edge.To}"));
+        html.AppendLine("<h3>Top behavior chain</h3>");
+        html.AppendLine("<div class=\"section-note\"><strong>Top behavior chain.</strong> Static lineage-first chain ranked for analyst reading; expand the edge table below for full bounded evidence.</div>");
+        html.AppendLine($"<ol class=\"timeline-list behavior-chain copyable\" data-copy=\"{A(copy)}\">");
+        foreach (var edge in chain)
+        {
+            html.AppendLine("<li>");
+            html.AppendLine($"<code>{E(edge.From)}</code> <span class=\"badge badge-info\">{E(edge.Relation)}</span> <code>{E(edge.To)}</code>");
+            html.AppendLine($"<details><summary>Edge evidence</summary><pre class=\"copyable\" data-copy=\"{A(edge.Evidence)}\">{E(edge.Evidence)}</pre></details>");
+            html.AppendLine("</li>");
+        }
+
+        html.AppendLine("</ol>");
+    }
+
+    private static int BehaviorChainRelationRank(string relation)
+    {
+        return relation.ToLowerInvariant() switch
+        {
+            "spawn" => 0,
+            "network" => 1,
+            "registry" => 2,
+            "file" => 3,
+            "artifact" => 4,
+            _ => 9
+        };
     }
 
     /// <summary>
@@ -1401,21 +1453,22 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
     }
 
     /// <summary>
-    /// Appends a lightweight process tree from process.start events.
+    /// Appends a lightweight process tree from process start/tree events.
     /// Inputs are normalized process events, processing groups by PID/PPID, and
     /// the method returns no value.
     /// </summary>
     private static void AppendProcessTree(StringBuilder html, AnalysisReport report)
     {
         var starts = report.Events
-            .Where(e => string.Equals(e.EventType, "process.start", StringComparison.OrdinalIgnoreCase) && e.ProcessId.HasValue)
+            .Where(e => IsProcessTreeCandidate(e) && e.ProcessId.HasValue)
             .GroupBy(ProcessIdentityKey, StringComparer.OrdinalIgnoreCase)
-            .Select(g => g.OrderBy(e => e.Timestamp).First())
-            .OrderBy(e => e.Timestamp)
+            .Select(g => g.OrderBy(ProcessTreeSortKey).ThenBy(e => e.Timestamp).First())
+            .OrderBy(ProcessTreeSortKey)
+            .ThenBy(e => e.Timestamp)
             .ToList();
         if (starts.Count == 0)
         {
-            Empty(html, "No process start events were available to build a process tree.");
+            Empty(html, "No process start/tree events were available to build a process tree.");
             return;
         }
 
@@ -1434,6 +1487,16 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
 
         html.AppendLine("<h3>Process tree</h3>");
         html.AppendLine("<div class=\"section-note\"><strong>Process relationship tree.</strong> Native expandable process tree grouped by stable process key when available, with PID/PPID fallback.</div>");
+        if (roots.Count == 0)
+        {
+            roots = starts
+                .OrderBy(ProcessTreeSortKey)
+                .ThenBy(evt => evt.Timestamp)
+                .Take(8)
+                .ToList();
+            html.AppendLine("<div class=\"section-note\">No root process was resolved from parent keys; showing earliest/deepest process tree candidates as bounded fallback roots.</div>");
+        }
+
         html.AppendLine("<div class=\"tree process-tree\"><ul>");
         foreach (var root in roots)
         {
@@ -1460,8 +1523,9 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
             .Where(children.ContainsKey)
             .SelectMany(key => children[key])
             .GroupBy(ProcessIdentityKey, StringComparer.OrdinalIgnoreCase)
-            .Select(group => group.OrderBy(child => child.Timestamp).First())
-            .OrderBy(child => child.Timestamp)
+            .Select(group => group.OrderBy(ProcessTreeSortKey).ThenBy(child => child.Timestamp).First())
+            .OrderBy(ProcessTreeSortKey)
+            .ThenBy(child => child.Timestamp)
             .ToList();
         var badges = ProcessTreeBadges(evt, childEvents.Count);
         if (childEvents.Count > 0)
@@ -1493,12 +1557,25 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
         var image = !string.IsNullOrWhiteSpace(evt.Path)
             ? evt.Path
             : evt.CommandLine ?? string.Empty;
-        return $"{ProcessGraphLabel(evt)} ppid:{evt.ParentProcessId?.ToString() ?? "-"} {image}".Trim();
+        return $"{ProcessGraphLabel(evt)} ppid:{ResolveParentProcessId(evt)?.ToString() ?? "-"} {image}".Trim();
+    }
+
+    private static bool IsProcessTreeCandidate(SandboxEvent evt)
+    {
+        return string.Equals(evt.EventType, "process.start", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(evt.EventType, "process.tree", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(evt.EventType, "process.new", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static int ProcessTreeSortKey(SandboxEvent evt)
+    {
+        var depth = FirstEventDataValue(evt, "treeDepth", "depth");
+        return int.TryParse(depth, out var parsedDepth) ? parsedDepth : int.MaxValue;
     }
 
     private static string ProcessTreeBadges(SandboxEvent evt, int childCount)
     {
-        var stableKey = FirstEventDataValue(evt, "processKey", "processGuid");
+        var stableKey = FirstEventDataValue(evt, "processKey", "processGuid", "processUniqueId", "snapshotKey", "processSnapshotKey");
         var keyLabel = string.IsNullOrWhiteSpace(stableKey) ? $"pid:{evt.ProcessId?.ToString() ?? "-"}" : stableKey;
         var badges = new StringBuilder();
         badges.Append("<span class=\"tree-badges\">");
@@ -1589,9 +1666,9 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
     private static IReadOnlyList<ProcessRelationshipCard> BuildProcessRelationshipCards(AnalysisReport report)
     {
         var starts = report.Events
-            .Where(evt => string.Equals(evt.EventType, "process.start", StringComparison.OrdinalIgnoreCase) && evt.ProcessId.HasValue)
+            .Where(evt => IsProcessTreeCandidate(evt) && evt.ProcessId.HasValue)
             .GroupBy(ProcessIdentityKey, StringComparer.OrdinalIgnoreCase)
-            .Select(group => group.OrderBy(evt => evt.Timestamp).First())
+            .Select(group => group.OrderBy(ProcessTreeSortKey).ThenBy(evt => evt.Timestamp).First())
             .ToList();
         var known = starts
             .SelectMany(ProcessLookupKeys)
@@ -1897,12 +1974,7 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
     /// </summary>
     private static string EventOneLine(SandboxEvent evt)
     {
-        var target = ExtractNetworkTarget(evt);
-        var location = !string.IsNullOrWhiteSpace(target)
-            ? target
-            : !string.IsNullOrWhiteSpace(evt.Path)
-                ? evt.Path
-                : evt.CommandLine ?? "-";
+        var location = ExtractReadableEventTarget(evt);
         return $"{evt.Timestamp:u} | {evt.EventType} | {ProcessDisplayName(evt)} | {location}";
     }
 
@@ -1983,7 +2055,7 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
             .ToList();
         var processLabels = BuildProcessLabelLookup(report);
         var known = report.Events
-            .Where(evt => string.Equals(evt.EventType, "process.start", StringComparison.OrdinalIgnoreCase) && evt.ProcessId.HasValue)
+            .Where(evt => IsProcessTreeCandidate(evt) && evt.ProcessId.HasValue)
             .SelectMany(ProcessLookupKeys)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
         var childCounts = report.Events
@@ -2037,7 +2109,7 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
                 from = ResolveProcessLabel(evt, processLabels);
             }
 
-            if (string.Equals(evt.EventType, "process.start", StringComparison.OrdinalIgnoreCase) && evt.ProcessId.HasValue)
+            if (IsProcessTreeCandidate(evt) && evt.ProcessId.HasValue)
             {
                 var parent = ResolveParentProcessLabel(evt, processLabels);
                 if (string.Equals(parent, "-", StringComparison.Ordinal))
@@ -2156,7 +2228,7 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
     /// </summary>
     private static string ProcessIdentityKey(SandboxEvent evt)
     {
-        var stableKey = FirstEventDataValue(evt, "processKey", "processGuid", "processUniqueId");
+        var stableKey = FirstEventDataValue(evt, "processKey", "processGuid", "processUniqueId", "snapshotKey", "processSnapshotKey");
         if (!string.IsNullOrWhiteSpace(stableKey))
         {
             return $"key:{stableKey}";
@@ -2164,7 +2236,7 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
 
         if (evt.ProcessId.HasValue)
         {
-            var startTime = FirstEventDataValue(evt, "processCreateTime", "processStartTime", "createTime", "startTime");
+            var startTime = FirstEventDataValue(evt, "processCreateTime", "processStartTime", "createTime", "startTime", "startTimeUtc", "processStartTimeUtc", "createTimeUtc", "processCreateTimeUtc");
             if (!string.IsNullOrWhiteSpace(startTime))
             {
                 return $"pid:{evt.ProcessId.Value}|start:{startTime}";
@@ -2188,7 +2260,7 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
     {
         var keys = new List<string>();
         AddProcessLookupKey(keys, ProcessIdentityKey(evt));
-        var stableKey = FirstEventDataValue(evt, "processKey", "processGuid", "processUniqueId");
+        var stableKey = FirstEventDataValue(evt, "processKey", "processGuid", "processUniqueId", "snapshotKey", "processSnapshotKey");
         if (!string.IsNullOrWhiteSpace(stableKey))
         {
             AddProcessLookupKey(keys, $"key:{stableKey}");
@@ -2196,7 +2268,7 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
 
         if (evt.ProcessId.HasValue)
         {
-            var startTime = FirstEventDataValue(evt, "processCreateTime", "processStartTime", "createTime", "startTime");
+            var startTime = FirstEventDataValue(evt, "processCreateTime", "processStartTime", "createTime", "startTime", "startTimeUtc", "processStartTimeUtc", "createTimeUtc", "processCreateTimeUtc");
             if (!string.IsNullOrWhiteSpace(startTime))
             {
                 AddProcessLookupKey(keys, $"pid:{evt.ProcessId.Value}|start:{startTime}");
@@ -2224,21 +2296,22 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
     private static IReadOnlyList<string> ParentProcessLookupKeys(SandboxEvent evt)
     {
         var keys = new List<string>();
-        var stableKey = FirstEventDataValue(evt, "parentProcessKey", "parentProcessGuid", "parentProcessUniqueId");
+        var stableKey = FirstEventDataValue(evt, "parentProcessKey", "parentProcessGuid", "parentProcessUniqueId", "parentSnapshotKey", "parentProcessSnapshotKey");
         if (!string.IsNullOrWhiteSpace(stableKey))
         {
             AddProcessLookupKey(keys, $"key:{stableKey}");
         }
 
-        if (evt.ParentProcessId.HasValue)
+        var parentProcessId = ResolveParentProcessId(evt);
+        if (parentProcessId.HasValue)
         {
-            var startTime = FirstEventDataValue(evt, "parentProcessCreateTime", "parentProcessStartTime");
+            var startTime = FirstEventDataValue(evt, "parentProcessCreateTime", "parentProcessStartTime", "parentStartTimeUtc", "parentProcessStartTimeUtc", "parentCreateTimeUtc", "parentProcessCreateTimeUtc");
             if (!string.IsNullOrWhiteSpace(startTime))
             {
-                AddProcessLookupKey(keys, $"pid:{evt.ParentProcessId.Value}|start:{startTime}");
+                AddProcessLookupKey(keys, $"pid:{parentProcessId.Value}|start:{startTime}");
             }
 
-            AddProcessLookupKey(keys, $"pid:{evt.ParentProcessId.Value}");
+            AddProcessLookupKey(keys, $"pid:{parentProcessId.Value}");
         }
 
         var parentName = FirstEventDataValue(evt, "parentProcessName", "parentImageName");
@@ -2254,6 +2327,17 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
         }
 
         return keys;
+    }
+
+    private static int? ResolveParentProcessId(SandboxEvent evt)
+    {
+        if (evt.ParentProcessId.HasValue)
+        {
+            return evt.ParentProcessId.Value;
+        }
+
+        var parentPid = FirstEventDataValue(evt, "parentProcessId", "parentPid", "ppid", "ParentProcessId");
+        return int.TryParse(parentPid, out var parsed) ? parsed : null;
     }
 
     private static void AddProcessLookupKey(List<string> keys, string? key)
@@ -2274,9 +2358,9 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
     {
         var lookup = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var start in report.Events
-            .Where(evt => string.Equals(evt.EventType, "process.start", StringComparison.OrdinalIgnoreCase) && evt.ProcessId.HasValue)
+            .Where(evt => IsProcessTreeCandidate(evt) && evt.ProcessId.HasValue)
             .GroupBy(ProcessIdentityKey, StringComparer.OrdinalIgnoreCase)
-            .Select(group => group.OrderBy(evt => evt.Timestamp).First()))
+            .Select(group => group.OrderBy(ProcessTreeSortKey).ThenBy(evt => evt.Timestamp).First()))
         {
             var label = ProcessGraphLabel(start);
             foreach (var key in ProcessLookupKeys(start))
@@ -2292,9 +2376,9 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
     {
         var lookup = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var start in report.Events
-            .Where(evt => string.Equals(evt.EventType, "process.start", StringComparison.OrdinalIgnoreCase) && evt.ProcessId.HasValue)
+            .Where(evt => IsProcessTreeCandidate(evt) && evt.ProcessId.HasValue)
             .GroupBy(ProcessIdentityKey, StringComparer.OrdinalIgnoreCase)
-            .Select(group => group.OrderBy(evt => evt.Timestamp).First()))
+            .Select(group => group.OrderBy(ProcessTreeSortKey).ThenBy(evt => evt.Timestamp).First()))
         {
             var canonicalKey = ProcessIdentityKey(start);
             foreach (var key in ProcessLookupKeys(start))
@@ -2342,7 +2426,8 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
             }
         }
 
-        return evt.ParentProcessId.HasValue ? $"pid:{evt.ParentProcessId.Value}" : "-";
+        var parentProcessId = ResolveParentProcessId(evt);
+        return parentProcessId.HasValue ? $"pid:{parentProcessId.Value}" : "-";
     }
 
     /// <summary>
@@ -2436,6 +2521,55 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
         return string.IsNullOrWhiteSpace(port) || preferred.Contains(':', StringComparison.Ordinal)
             ? preferred
             : $"{preferred}:{port}";
+    }
+
+    /// <summary>
+    /// Extracts the best one-line target from normalized event fields.
+    /// Inputs are one event; processing prefers network indicators, explicit
+    /// path/command, then common Data payload keys emitted by Guest/R0/PCAP
+    /// collectors; return is a stable analyst-readable target.
+    /// </summary>
+    private static string ExtractReadableEventTarget(SandboxEvent evt)
+    {
+        var networkTarget = ExtractNetworkTarget(evt);
+        if (!string.IsNullOrWhiteSpace(networkTarget))
+        {
+            return networkTarget;
+        }
+
+        if (!string.IsNullOrWhiteSpace(evt.Path))
+        {
+            return evt.Path!;
+        }
+
+        if (!string.IsNullOrWhiteSpace(evt.CommandLine))
+        {
+            return evt.CommandLine!;
+        }
+
+        var preferred = FirstEventDataValue(
+            evt,
+            "target",
+            "targetPath",
+            "filePath",
+            "fullPath",
+            "registryPath",
+            "keyPath",
+            "valueName",
+            "imagePath",
+            "modulePath",
+            "processPath",
+            "artifactPath",
+            "droppedFilePath",
+            "guestPath",
+            "importPath",
+            "flowKey",
+            "sourceEndpoint",
+            "destinationEndpoint",
+            "operation",
+            "objectName",
+            "name");
+        return string.IsNullOrWhiteSpace(preferred) ? "-" : preferred;
     }
 
     private static string? FirstEventDataValue(SandboxEvent evt, params string[] keys)
@@ -3114,7 +3248,7 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
     /// </summary>
     private static string RenderEventPathAndCommand(SandboxEvent evt, IReadOnlyCollection<ArtifactDescriptor> relatedArtifacts)
     {
-        var path = string.IsNullOrWhiteSpace(evt.Path) ? "-" : evt.Path;
+        var path = ExtractReadableEventTarget(evt);
         var html = new StringBuilder();
         html.Append($"<code>{E(path)}</code>");
 
