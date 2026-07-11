@@ -388,6 +388,10 @@ public sealed class HostArtifactIndexBuilder
                 CopyEventDataIfPresent(metadata, evt, "win32Error", "lastWin32Error");
                 CopyEventDataIfPresent(metadata, evt, "commandMessage", "lastCommandMessage");
                 CopyEventDataIfPresent(metadata, evt, "commandExceptionType", "lastCommandExceptionType");
+                CopyEventDataIfPresent(metadata, evt, "zhMessage", "lastZhMessage");
+                CopyEventDataIfPresent(metadata, evt, "zhHint", "lastZhHint");
+                CopyEventDataIfPresent(metadata, evt, "zhStatus", "lastZhStatus");
+                CopyEventDataIfPresent(metadata, evt, "zhReason", "lastZhReason");
 
                 if (string.Equals(evt.EventType, "memory_dump.sweep", StringComparison.OrdinalIgnoreCase))
                 {
@@ -618,6 +622,11 @@ public sealed class HostArtifactIndexBuilder
             eventType.EndsWith(".timeout", StringComparison.OrdinalIgnoreCase))
         {
             return "failed";
+        }
+
+        if (eventType.EndsWith(".disabled", StringComparison.OrdinalIgnoreCase))
+        {
+            return "disabled";
         }
 
         if (eventType.EndsWith(".sweep", StringComparison.OrdinalIgnoreCase))
@@ -888,7 +897,9 @@ public sealed class HostArtifactIndexBuilder
         }
 
         if (relativePath.Contains("/memory-dumps/", StringComparison.OrdinalIgnoreCase) ||
-            relativePath.StartsWith("memory-dumps/", StringComparison.OrdinalIgnoreCase))
+            relativePath.StartsWith("memory-dumps/", StringComparison.OrdinalIgnoreCase) ||
+            relativePath.Contains("/dumps/", StringComparison.OrdinalIgnoreCase) ||
+            relativePath.StartsWith("dumps/", StringComparison.OrdinalIgnoreCase))
         {
             return new ArtifactClassification(
                 ArtifactKind.MemoryDump,
@@ -914,7 +925,9 @@ public sealed class HostArtifactIndexBuilder
         }
 
         if (relativePath.Contains("/artifacts/", StringComparison.OrdinalIgnoreCase) ||
-            relativePath.StartsWith("artifacts/", StringComparison.OrdinalIgnoreCase))
+            relativePath.StartsWith("artifacts/", StringComparison.OrdinalIgnoreCase) ||
+            relativePath.Contains("/dropped-files/", StringComparison.OrdinalIgnoreCase) ||
+            relativePath.StartsWith("dropped-files/", StringComparison.OrdinalIgnoreCase))
         {
             return new ArtifactClassification(
                 ArtifactKind.DroppedFile,

@@ -8,6 +8,7 @@ using KSword.Sandbox.Core.Reporting;
 using KSword.Sandbox.Core.Rules;
 using KSword.Sandbox.Core.Samples;
 using KSword.Sandbox.Core.StaticAnalysis;
+using KSword.Sandbox.Core.Telemetry;
 
 namespace KSword.Sandbox.Core.Jobs;
 
@@ -17,7 +18,7 @@ namespace KSword.Sandbox.Core.Jobs;
 /// loaded configuration, processing creates deterministic local artifacts, and
 /// methods return AnalysisJob records for the Web API.
 /// </summary>
-public sealed class SandboxJobService
+public sealed partial class SandboxJobService
 {
     private const string EnrichmentEventsFileName = "enrichment-events.json";
 
@@ -33,6 +34,7 @@ public sealed class SandboxJobService
     private readonly HtmlReportRenderer reportRenderer;
     private readonly StaticAnalyzer staticAnalyzer;
     private readonly HostArtifactIndexBuilder artifactIndexBuilder = new();
+    private readonly LiveEventFeedService liveEventFeedService = new();
     private readonly Dictionary<Guid, AnalysisJob> jobs = [];
 
     /// <summary>
@@ -53,6 +55,7 @@ public sealed class SandboxJobService
         this.runbookBuilder = runbookBuilder ?? new HyperVRunbookBuilder();
         this.reportRenderer = reportRenderer ?? new HtmlReportRenderer();
         this.staticAnalyzer = staticAnalyzer ?? new StaticAnalyzer();
+        RefreshRecoveredJobs();
     }
 
     /// <summary>
@@ -62,7 +65,11 @@ public sealed class SandboxJobService
     /// </summary>
     public IReadOnlyList<AnalysisJob> ListJobs()
     {
-        return jobs.Values.OrderBy(job => job.CreatedAt).ToList();
+        RefreshRecoveredJobs();
+        lock (jobsSyncRoot)
+        {
+            return jobs.Values.OrderBy(job => job.CreatedAt).ToList();
+        }
     }
 
     /// <summary>
@@ -72,7 +79,15 @@ public sealed class SandboxJobService
     /// </summary>
     public AnalysisJob? GetJob(Guid jobId)
     {
-        return jobs.TryGetValue(jobId, out var job) ? job : null;
+        lock (jobsSyncRoot)
+        {
+            if (jobs.TryGetValue(jobId, out var job))
+            {
+                return job;
+            }
+        }
+
+        return TryRecoverJob(jobId, out var recovered) ? recovered : null;
     }
 
     /// <summary>
@@ -180,7 +195,7 @@ public sealed class SandboxJobService
             ]
         };
 
-        jobs[job.JobId] = job;
+        StoreJob(job);
         return job;
     }
 
@@ -192,7 +207,8 @@ public sealed class SandboxJobService
     /// </summary>
     public AnalysisJob SaveRunbookExecutionResult(Guid jobId, SandboxRunbookExecutionResult result)
     {
-        if (!jobs.TryGetValue(jobId, out var job))
+        var job = GetJob(jobId);
+        if (job is null)
         {
             throw new KeyNotFoundException($"Job {jobId} was not found.");
         }
@@ -213,7 +229,8 @@ public sealed class SandboxJobService
             Messages = AppendMessage(job.Messages, $"Runbook execution result persisted to {resultPath}.")
         }, status, existingGuestEvents, job.GuestEventsPath);
 
-        jobs[jobId] = updated;
+        PersistRunbookProgress(updated, result);
+        StoreJob(updated);
         return updated;
     }
 
@@ -225,7 +242,8 @@ public sealed class SandboxJobService
     /// </summary>
     public AnalysisJob ImportGuestEvents(Guid jobId, string? eventsPath = null)
     {
-        if (!jobs.TryGetValue(jobId, out var job))
+        var job = GetJob(jobId);
+        if (job is null)
         {
             throw new KeyNotFoundException($"Job {jobId} was not found.");
         }
@@ -243,7 +261,8 @@ public sealed class SandboxJobService
             Messages = AppendMessage(job.Messages, message)
         }, status, guestEvents, resolvedEventsPath);
 
-        jobs[jobId] = updated;
+        PersistGuestImportState(updated, resolvedEventsPath, guestEvents.Count, status, message);
+        StoreJob(updated);
         return updated;
     }
 
@@ -306,7 +325,7 @@ public sealed class SandboxJobService
             ]
         };
 
-        jobs[jobId] = job;
+        StoreJob(job);
         var guestEvents = LoadGuestEventsWithDriverJsonl(eventsPath);
         var status = guestEvents.Count == 0 ? AnalysisStatus.Failed : AnalysisStatus.Completed;
         var message = guestEvents.Count == 0
@@ -319,7 +338,8 @@ public sealed class SandboxJobService
             Messages = AppendMessage(job.Messages, message)
         }, status, guestEvents, eventsPath);
 
-        jobs[jobId] = updated;
+        PersistGuestImportState(updated, Path.GetFullPath(eventsPath), guestEvents.Count, status, message);
+        StoreJob(updated);
         return updated;
     }
 
@@ -332,7 +352,8 @@ public sealed class SandboxJobService
     /// </summary>
     public AnalysisJob UpsertEnrichmentEvent(Guid jobId, SandboxEvent enrichmentEvent, string message)
     {
-        if (!jobs.TryGetValue(jobId, out var job))
+        var job = GetJob(jobId);
+        if (job is null)
         {
             throw new KeyNotFoundException($"Job {jobId} was not found.");
         }
@@ -360,7 +381,7 @@ public sealed class SandboxJobService
             Messages = AppendMessage(job.Messages, message)
         }, job.Status, guestEvents, job.GuestEventsPath);
 
-        jobs[jobId] = updated;
+        StoreJob(updated);
         return updated;
     }
 
@@ -373,30 +394,25 @@ public sealed class SandboxJobService
     /// </summary>
     public LiveEventSnapshot GetLiveEvents(Guid jobId, int offset = 0, int take = 100)
     {
-        if (!jobs.TryGetValue(jobId, out var job))
+        var job = GetJob(jobId);
+        if (job is null)
         {
             throw new KeyNotFoundException($"Job {jobId} was not found.");
         }
 
         var normalizedOffset = Math.Max(0, offset);
         var normalizedTake = Math.Clamp(take, 1, 500);
+
+        var livePaths = EnumerateLiveEventFiles(job).ToList();
+        var liveSnapshot = liveEventFeedService.Build(jobId, livePaths, normalizedOffset, normalizedTake);
+        if (liveSnapshot.TotalEvents > 0 || liveSnapshot.Sources.Count > 0)
+        {
+            return liveSnapshot;
+        }
+
         var sources = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var eventKeys = new HashSet<string>(StringComparer.Ordinal);
         var events = new List<SandboxEvent>();
-
-        foreach (var path in EnumerateLiveEventFiles(job))
-        {
-            foreach (var liveEvent in TryLoadEventsForLiveMonitor(path))
-            {
-                var normalized = NormalizeEvent(liveEvent);
-                if (eventKeys.Add(EventKey(normalized)))
-                {
-                    events.Add(normalized);
-                }
-            }
-
-            sources.Add(path);
-        }
 
         if (events.Count == 0)
         {
@@ -494,6 +510,8 @@ public sealed class SandboxJobService
         events.AddRange(LoadEnrichmentEvents(job.JobId));
         events.AddRange(guestEvents.Select(NormalizeEvent));
         AppendGuestImportEvent(events, guestEventsPath, guestEvents.Count);
+        var artifactIndex = artifactIndexBuilder.Build(job.JobId, jobRoot);
+        events.AddRange(BuildHostArtifactImportEvents(jobConfig.ArtifactCollection, jobRoot, guestEventsPath, artifactIndex, events));
 
         var fullEvents = events.OrderBy(evt => evt.Timestamp).ToList();
         var findings = ReportEventSampler.SanitizeFindings(ruleEngine.Classify(fullEvents));
@@ -589,7 +607,7 @@ public sealed class SandboxJobService
 
     private void EnsureJobExists(Guid jobId)
     {
-        if (!jobs.ContainsKey(jobId))
+        if (GetJob(jobId) is null)
         {
             throw new KeyNotFoundException($"Job {jobId:D} was not found in the in-memory job list.");
         }
@@ -664,18 +682,16 @@ public sealed class SandboxJobService
             throw new DirectoryNotFoundException($"Guest output folder was not found: {guestRoot}");
         }
 
-        var eventsJson = Directory
-            .EnumerateFiles(guestRoot, "events.json", SearchOption.AllDirectories)
-            .OrderByDescending(path => File.GetLastWriteTimeUtc(path))
+        var eventsJson = SafeEnumerateFiles(guestRoot, path => string.Equals(Path.GetFileName(path), "events.json", StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(SafeGetLastWriteTimeUtc)
             .FirstOrDefault();
         if (eventsJson is not null)
         {
             return eventsJson;
         }
 
-        var jsonLines = Directory
-            .EnumerateFiles(guestRoot, "*.jsonl", SearchOption.AllDirectories)
-            .OrderByDescending(path => File.GetLastWriteTimeUtc(path))
+        var jsonLines = SafeEnumerateFiles(guestRoot, path => string.Equals(Path.GetExtension(path), ".jsonl", StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(SafeGetLastWriteTimeUtc)
             .FirstOrDefault();
         if (jsonLines is not null)
         {
@@ -707,13 +723,11 @@ public sealed class SandboxJobService
             yield break;
         }
 
-        foreach (var path in Directory
-            .EnumerateFiles(guestRoot, "*.*", SearchOption.AllDirectories)
-            .Where(path =>
+        foreach (var path in SafeEnumerateFiles(guestRoot, path =>
                 string.Equals(Path.GetFileName(path), "events.json", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(Path.GetExtension(path), ".jsonl", StringComparison.OrdinalIgnoreCase) ||
                 ArtifactDescriptorFactory.IsPacketCapturePath(path))
-            .OrderBy(path => File.GetLastWriteTimeUtc(path)))
+            .OrderBy(SafeGetLastWriteTimeUtc))
         {
             var fullPath = Path.GetFullPath(path);
             if (seen.Add(fullPath))
@@ -739,8 +753,10 @@ public sealed class SandboxJobService
             return events.Select(NormalizeEvent).ToList();
         }
 
-        foreach (var jsonlPath in Directory
-            .EnumerateFiles(searchRoot, "driver-events.jsonl", SearchOption.AllDirectories))
+        // Safe equivalent of Directory.EnumerateFiles(searchRoot, "driver-events.jsonl", SearchOption.AllDirectories)
+        // for the static import contract: only canonical driver-events.jsonl
+        // files are imported, while inaccessible/reparse paths are skipped.
+        foreach (var jsonlPath in SafeEnumerateFiles(searchRoot, path => string.Equals(Path.GetFileName(path), "driver-events.jsonl", StringComparison.OrdinalIgnoreCase)))
         {
             foreach (var driverEvent in LoadEventsFromJsonLines(jsonlPath))
             {
@@ -752,15 +768,12 @@ public sealed class SandboxJobService
             }
         }
 
-        foreach (var pcapPath in EnumeratePacketCaptures(searchRoot))
+        foreach (var networkEvent in new NetworkArtifactEventImporter().ImportGuestArtifacts(searchRoot, includeCanonicalDriverJsonl: false))
         {
-            foreach (var pcapEvent in new PcapArtifactEventImporter().Import(pcapPath))
+            var normalized = NormalizeEvent(networkEvent);
+            if (eventKeys.Add(EventKey(normalized)))
             {
-                var normalized = NormalizeImportedPcapEvent(pcapEvent, pcapPath, searchRoot);
-                if (eventKeys.Add(EventKey(normalized)))
-                {
-                    events.Add(normalized);
-                }
+                events.Add(normalized);
             }
         }
 
@@ -776,27 +789,28 @@ public sealed class SandboxJobService
     private static SandboxEvent NormalizeImportedPcapEvent(SandboxEvent evt, string pcapPath, string importRoot)
     {
         var normalized = NormalizeEvent(evt);
-        var data = new Dictionary<string, string>(normalized.Data, StringComparer.OrdinalIgnoreCase)
-        {
-            ["sourceArtifactPath"] = pcapPath,
-            ["sourceArtifactKind"] = ArtifactKind.PacketCapture.ToString(),
-            ["sourceArtifactRelativePath"] = ArtifactDescriptorFactory.SafeRelativePath(importRoot, pcapPath),
-            ["sourceImportRoot"] = importRoot,
-            ["collectionName"] = "packet-captures",
-            ["evidenceRole"] = "packet-capture",
-            ["captureSource"] = "external",
-            ["hostCaptureStarted"] = "false",
-            ["importMode"] = "external-artifact",
-            ["pcapFormat"] = string.Equals(Path.GetExtension(pcapPath), ".pcapng", StringComparison.OrdinalIgnoreCase)
+        var data = new Dictionary<string, string>(normalized.Data, StringComparer.OrdinalIgnoreCase);
+        AddDataIfMissing(data, "sourceArtifactPath", pcapPath);
+        AddDataIfMissing(data, "sourceArtifactKind", ArtifactKind.PacketCapture.ToString());
+        AddDataIfMissing(data, "sourceArtifactRelativePath", ArtifactDescriptorFactory.SafeRelativePath(importRoot, pcapPath));
+        AddDataIfMissing(data, "sourceImportRoot", importRoot);
+        AddDataIfMissing(data, "collectionName", "packet-captures");
+        AddDataIfMissing(data, "evidenceRole", "packet-capture");
+        AddDataIfMissing(data, "captureSource", "external");
+        AddDataIfMissing(data, "hostCaptureStarted", "false");
+        AddDataIfMissing(data, "importMode", "external-artifact");
+        AddDataIfMissing(
+            data,
+            "pcapFormat",
+            string.Equals(Path.GetExtension(pcapPath), ".pcapng", StringComparison.OrdinalIgnoreCase)
                 ? "pcapng"
-                : "pcap"
-        };
+                : "pcap");
 
         try
         {
             var info = new FileInfo(pcapPath);
-            data["sourceArtifactSizeBytes"] = info.Length.ToString();
-            data["sourceArtifactSha256"] = ComputeSha256(info.FullName);
+            AddDataIfMissing(data, "sourceArtifactSizeBytes", info.Length.ToString());
+            AddDataIfMissing(data, "sourceArtifactSha256", ComputeSha256(info.FullName));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException)
         {
@@ -804,6 +818,14 @@ public sealed class SandboxJobService
         }
 
         return normalized with { Data = data };
+    }
+
+    private static void AddDataIfMissing(Dictionary<string, string> data, string key, string value)
+    {
+        if (!data.ContainsKey(key) || string.IsNullOrWhiteSpace(data[key]))
+        {
+            data[key] = value;
+        }
     }
 
     private static string ComputeSha256(string fullPath)
@@ -825,9 +847,7 @@ public sealed class SandboxJobService
             yield break;
         }
 
-        foreach (var path in Directory
-            .EnumerateFiles(searchRoot, "*.*", SearchOption.AllDirectories)
-            .Where(ArtifactDescriptorFactory.IsPacketCapturePath)
+        foreach (var path in SafeEnumerateFiles(searchRoot, ArtifactDescriptorFactory.IsPacketCapturePath)
             .OrderBy(path => path, StringComparer.OrdinalIgnoreCase))
         {
             yield return path;
@@ -1085,19 +1105,14 @@ public sealed class SandboxJobService
             return false;
         }
 
-        var leftHash = ReadEventData(left, "sha256");
-        var rightHash = ReadEventData(right, "sha256");
+        var leftHash = ReadNullableEventData(left, "sha256");
+        var rightHash = ReadNullableEventData(right, "sha256");
         if (!string.IsNullOrWhiteSpace(leftHash) || !string.IsNullOrWhiteSpace(rightHash))
         {
             return string.Equals(leftHash, rightHash, StringComparison.OrdinalIgnoreCase);
         }
 
         return string.Equals(left.Path, right.Path, StringComparison.OrdinalIgnoreCase);
-    }
-
-    private static string ReadEventData(SandboxEvent evt, string key)
-    {
-        return evt.Data.TryGetValue(key, out var value) ? value : string.Empty;
     }
 
     /// <summary>
@@ -1216,8 +1231,8 @@ public sealed class SandboxJobService
     /// </summary>
     private static List<SandboxEvent> CreatePlanningEvents(SampleIdentity sample, SandboxSubmission submission, SandboxRunbook runbook, StaticAnalysisResult staticAnalysis, ArtifactCollectionConfig artifactCollection)
     {
-        return
-        [
+        var events = new List<SandboxEvent>
+        {
             new SandboxEvent
             {
                 EventType = "submission.accepted",
@@ -1243,20 +1258,6 @@ public sealed class SandboxJobService
             },
             new SandboxEvent
             {
-                EventType = "static.analysis.completed",
-                Source = "host",
-                Path = sample.FullPath,
-                Data =
-                {
-                    ["fileFormat"] = staticAnalysis.FileFormat,
-                    ["isPe"] = staticAnalysis.IsPe.ToString(),
-                    ["tags"] = string.Join(",", staticAnalysis.Tags),
-                    ["urls"] = staticAnalysis.Urls.Count.ToString(),
-                    ["interestingStrings"] = staticAnalysis.InterestingStrings.Count.ToString()
-                }
-            },
-            new SandboxEvent
-            {
                 EventType = "hyperv.runbook.created",
                 Source = "host",
                 Path = runbook.TargetVmName,
@@ -1266,7 +1267,14 @@ public sealed class SandboxJobService
                     ["usesTemporaryVm"] = runbook.UsesTemporaryVm.ToString()
                 }
             }
-        ];
+        };
+
+        // Keep host-side static analysis as first-class normalized telemetry so
+        // rules, live views, and reports can consume PE sections, imports,
+        // exports, TLS callbacks, string indicators, packer hints, and
+        // YARA-like matches instead of a single opaque summary row.
+        events.InsertRange(1, StaticAnalyzer.CreateEvents(sample.FullPath, staticAnalysis));
+        return events;
     }
 
     /// <summary>
@@ -1299,6 +1307,7 @@ public sealed class SandboxJobService
             ["events.report"] = events.Count,
             ["events.omittedFromReport"] = omittedReportEvents,
             ["findings.total"] = findings.Count,
+            ["static.events"] = events.Count(evt => evt.EventType.StartsWith("static.", StringComparison.OrdinalIgnoreCase)),
             ["static.tags"] = staticAnalysis.Tags.Count,
             ["static.urls"] = staticAnalysis.Urls.Count,
             ["static.interestingStrings"] = staticAnalysis.InterestingStrings.Count

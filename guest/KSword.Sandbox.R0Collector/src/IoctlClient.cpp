@@ -102,6 +102,15 @@ bool EmitIoctlFailure(
     data.AddUnsigned("win32Error", errorCode);
     data.AddWide("win32Message", Win32ErrorMessage(errorCode));
     data.AddWide("hint", hint);
+    data.AddWide(
+        "zhMessage",
+        L"\u9a71\u52a8 IOCTL \u8c03\u7528\u5931\u8d25\uff1b"
+        L"\u8fd9\u662f\u91c7\u96c6\u5065\u5eb7/\u5c31\u7eea\u8bca\u65ad\uff0c\u4e0d\u4ee3\u8868\u6837\u672c\u884c\u4e3a\u3002");
+    data.AddWide(
+        "zhHint",
+        L"\u9a71\u52a8 IOCTL \u8c03\u7528\u5931\u8d25\uff1b"
+        L"\u8bf7\u786e\u8ba4\u9a71\u52a8\u5df2\u52a0\u8f7d\u3001"
+        L"\u6743\u9650\u8db3\u591f\u4e14\u9a71\u52a8/Collector ABI \u5339\u914d\u3002");
     data.AddUtf8("severity", "error");
     data.AddUtf8("readinessState", "blocked");
     data.AddUtf8("diagnosticCode", "ioctl_failure");
@@ -115,12 +124,28 @@ bool EmitIoctlFailure(
     data.AddUtf8("subjectKind", "collector-diagnostic");
     data.AddUtf8("actorRole", "collector-infrastructure");
     data.AddUtf8("subjectRole", "collector-diagnostic");
+    data.AddUtf8("processIdSource", "top-level");
     data.AddUtf8("schema", KSWORD_SANDBOX_EVENT_SCHEMA_NAME);
     data.AddUtf8("producer", "r0collector");
     data.AddBool("collectionNoise", true);
+    data.AddBool("collectorNoise", true);
+    data.AddBool("collectorSelfNoise", false);
+    data.AddBool("selfProcess", false);
+    data.AddUtf8("collectorNoiseReason", "collectionDiagnostic");
+    data.AddUtf8("collectorNoiseAction", "emit");
+    data.AddBool("collectorSuppressed", false);
+    data.AddBool("selfNoise", false);
+    data.AddUtf8("selfNoiseReason", "none");
+    data.AddUtf8("selfNoiseAction", "emit");
     data.AddBool("noise", false);
     data.AddBool("lost", false);
+    data.AddUnsigned("lostCount", 0);
+    data.AddBool("lossObserved", false);
+    data.AddUtf8("loss", "none");
     data.AddBool("backpressure", false);
+    data.AddBool("backpressureObserved", false);
+    data.AddUtf8("backpressureReason", "none");
+    data.AddUnsigned("highWatermark", 0);
 
     SandboxEventFields event;
     event.eventType = "r0collector.ioctlFailure";
@@ -144,6 +169,12 @@ bool EmitProtocolError(
     data.AddUtf8("ioctl", ioctlName);
     data.AddUnsigned("bytesReturned", bytesReturned);
     data.AddWide("message", message);
+    data.AddWide(
+        "zhMessage",
+        L"\u9a71\u52a8\u8fd4\u56de\u7684\u6570\u636e\u4e0e Collector \u671f\u671b\u7684 ABI \u4e0d\u517c\u5bb9\u3002");
+    data.AddWide(
+        "zhHint",
+        L"\u8bf7\u91cd\u5efa\u5e76\u91cd\u65b0\u52a0\u8f7d\u5339\u914d\u7248\u672c\u7684\u9a71\u52a8\u548c Collector\u3002");
     data.AddUtf8("expectedInterfaceVersionHex", HexUnsignedLongLong(KSWORD_SANDBOX_INTERFACE_VERSION, 8));
     data.AddUtf8("severity", "error");
     data.AddUtf8("readinessState", "blocked");
@@ -158,12 +189,28 @@ bool EmitProtocolError(
     data.AddUtf8("subjectKind", "collector-diagnostic");
     data.AddUtf8("actorRole", "collector-infrastructure");
     data.AddUtf8("subjectRole", "collector-diagnostic");
+    data.AddUtf8("processIdSource", "top-level");
     data.AddUtf8("schema", KSWORD_SANDBOX_EVENT_SCHEMA_NAME);
     data.AddUtf8("producer", "r0collector");
     data.AddBool("collectionNoise", true);
+    data.AddBool("collectorNoise", true);
+    data.AddBool("collectorSelfNoise", false);
+    data.AddBool("selfProcess", false);
+    data.AddUtf8("collectorNoiseReason", "collectionDiagnostic");
+    data.AddUtf8("collectorNoiseAction", "emit");
+    data.AddBool("collectorSuppressed", false);
+    data.AddBool("selfNoise", false);
+    data.AddUtf8("selfNoiseReason", "none");
+    data.AddUtf8("selfNoiseAction", "emit");
     data.AddBool("noise", false);
     data.AddBool("lost", false);
+    data.AddUnsigned("lostCount", 0);
+    data.AddBool("lossObserved", false);
+    data.AddUtf8("loss", "none");
     data.AddBool("backpressure", false);
+    data.AddBool("backpressureObserved", false);
+    data.AddUtf8("backpressureReason", "none");
+    data.AddUnsigned("highWatermark", 0);
 
     SandboxEventFields event;
     event.eventType = "r0collector.driverProtocolError";
@@ -201,6 +248,19 @@ bool EmitOptionalIoctlUnavailable(
     data.AddUnsigned("win32Error", errorCode);
     data.AddWide("win32Message", Win32ErrorMessage(errorCode));
     data.AddWide("compatibilityAction", compatibilityAction);
+    data.AddWide(
+        "zhMessage",
+        L"\u53ef\u9009 IOCTL \u5728\u5f53\u524d\u9a71\u52a8\u4e0a\u4e0d\u53ef\u7528\uff1b"
+        L"Collector \u5c06\u7ee7\u7eed\u517c\u5bb9\u8def\u5f84\u3002");
+    data.AddWide(
+        "zhCompatibilityAction",
+        L"\u8be5\u53ef\u9009 IOCTL \u4e0d\u53ef\u7528\uff0cCollector \u4f1a\u7ee7\u7eed\u4f7f\u7528\u517c\u5bb9\u8def\u5f84\uff1b"
+        L"\u5982\u679c\u9700\u8981\u5b8c\u6574\u961f\u5217/producer-mask \u8bca\u65ad\uff0c\u8bf7\u66f4\u65b0\u9a71\u52a8\u3002");
+    data.AddWide(
+        "zhHint",
+        L"\u53ef\u9009 IOCTL \u4e0d\u53ef\u7528\u65f6 Collector \u4f1a\u5c1d\u8bd5\u7ee7\u7eed\uff1b"
+        L"\u82e5\u9700\u8981\u5b8c\u6574\u961f\u5217\u3001\u80cc\u538b\u548c producer-mask \u5b57\u6bb5\uff0c"
+        L"\u8bf7\u66f4\u65b0\u5230\u5339\u914d\u7684\u9a71\u52a8\u548c Collector\u3002");
     data.AddUtf8("eventSchemaName", KSWORD_SANDBOX_EVENT_SCHEMA_NAME);
     data.AddUnsigned("collectorAbiVersion", KSWORD_SANDBOX_INTERFACE_VERSION);
     data.AddUtf8("collectorAbiVersionHex", HexUnsignedLongLong(KSWORD_SANDBOX_INTERFACE_VERSION, 8));
@@ -217,12 +277,28 @@ bool EmitOptionalIoctlUnavailable(
     data.AddUtf8("subjectKind", "collector-diagnostic");
     data.AddUtf8("actorRole", "collector-infrastructure");
     data.AddUtf8("subjectRole", "collector-diagnostic");
+    data.AddUtf8("processIdSource", "top-level");
     data.AddUtf8("schema", KSWORD_SANDBOX_EVENT_SCHEMA_NAME);
     data.AddUtf8("producer", "r0collector");
     data.AddBool("collectionNoise", true);
+    data.AddBool("collectorNoise", true);
+    data.AddBool("collectorSelfNoise", false);
+    data.AddBool("selfProcess", false);
+    data.AddUtf8("collectorNoiseReason", "collectionDiagnostic");
+    data.AddUtf8("collectorNoiseAction", "emit");
+    data.AddBool("collectorSuppressed", false);
+    data.AddBool("selfNoise", false);
+    data.AddUtf8("selfNoiseReason", "none");
+    data.AddUtf8("selfNoiseAction", "emit");
     data.AddBool("noise", false);
     data.AddBool("lost", false);
+    data.AddUnsigned("lostCount", 0);
+    data.AddBool("lossObserved", false);
+    data.AddUtf8("loss", "none");
     data.AddBool("backpressure", false);
+    data.AddBool("backpressureObserved", false);
+    data.AddUtf8("backpressureReason", "none");
+    data.AddUnsigned("highWatermark", 0);
 
     SandboxEventFields event;
     event.eventType = "r0collector.optionalIoctlUnavailable";
@@ -610,7 +686,11 @@ std::string DriverProcessIdSource(
         if (payloadBytes >= sizeof(KSWORD_SANDBOX_IMAGE_EVENT_PAYLOAD)) {
             const auto* imagePayload =
                 reinterpret_cast<const KSWORD_SANDBOX_IMAGE_EVENT_PAYLOAD*>(payload);
-            return imagePayload->ProcessId != 0 ? "typedPayload.processId" : "eventHeader";
+            const bool processIdPresent =
+                (imagePayload->Flags & KSWORD_SANDBOX_IMAGE_EVENT_FLAG_PROCESS_ID_PRESENT) != 0;
+            return (processIdPresent && imagePayload->ProcessId != 0)
+                ? "typedPayload.processId"
+                : "eventHeader";
         }
         break;
 
@@ -703,14 +783,35 @@ DriverEventAttribution BuildDriverEventAttribution(
     attribution.subjectRole =
         header.Type == KswSandboxEventTypeDriverLoad ? "driver-control-plane" : "sample-or-system";
 
-    std::string reasons;
-    if (event.processId == GetCurrentProcessId()) {
-        AppendSelfNoiseReason(&reasons, "collectorProcessId");
+    std::string selfNoiseReasons;
+    std::string collectorNoiseReasons;
+    const auto appendCollectorNoise = [&](const char* reason) {
+        AppendSelfNoiseReason(&collectorNoiseReasons, reason);
+        AppendSelfNoiseReason(&selfNoiseReasons, reason);
+    };
+
+    if ((header.Flags & KSWORD_SANDBOX_EVENT_FLAG_SELF_NOISE) != 0 ||
+        (header.ProducerMetadataFlags & KSWORD_SANDBOX_EVENT_METADATA_FLAG_SELF_NOISE) != 0) {
+        AppendSelfNoiseReason(&selfNoiseReasons, "producerSelfNoiseFlag");
+    }
+
+    const bool isCurrentCollectorProcessId = event.processId == GetCurrentProcessId();
+    if (isCurrentCollectorProcessId) {
+        attribution.selfProcess = true;
+        appendCollectorNoise("collectorProcessId");
+    }
+
+    const std::wstring eventPathBaseName = BaseNameFromPath(event.path);
+    if (EqualsNormalized(event.processName, L"KSword.Sandbox.R0Collector.exe") ||
+        EqualsNormalized(eventPathBaseName, L"KSword.Sandbox.R0Collector.exe") ||
+        ContainsNormalized(event.commandLine, L"ksword.sandbox.r0collector.exe")) {
+        attribution.selfProcess = true;
+        appendCollectorNoise("collectorExecutable");
     }
 
     if (hasTypedSubjectPath) {
         if (EqualsNormalized(event.path, options.outputPath)) {
-            AppendSelfNoiseReason(&reasons, "collectorOutputPath");
+            appendCollectorNoise("collectorOutputPath");
         }
 
         static constexpr const wchar_t* kInfrastructurePathFragments[] = {
@@ -721,18 +822,17 @@ DriverEventAttribution BuildDriverEventAttribution(
         };
         for (const wchar_t* fragment : kInfrastructurePathFragments) {
             if (ContainsNormalized(event.path, fragment)) {
-                AppendSelfNoiseReason(&reasons, "kswordInfrastructurePath");
+                appendCollectorNoise("kswordInfrastructurePath");
                 break;
             }
         }
 
-        const std::wstring fileName = BaseNameFromPath(event.path);
-        if (EqualsNormalized(fileName, L"driver-events.jsonl") ||
-            EqualsNormalized(fileName, L"r0collector.stdout.log") ||
-            EqualsNormalized(fileName, L"r0collector.stderr.log") ||
-            EqualsNormalized(fileName, L"events.json") ||
-            EqualsNormalized(fileName, L"agent-summary.json")) {
-            AppendSelfNoiseReason(&reasons, "kswordOutputArtifact");
+        if (EqualsNormalized(eventPathBaseName, L"driver-events.jsonl") ||
+            EqualsNormalized(eventPathBaseName, L"r0collector.stdout.log") ||
+            EqualsNormalized(eventPathBaseName, L"r0collector.stderr.log") ||
+            EqualsNormalized(eventPathBaseName, L"events.json") ||
+            EqualsNormalized(eventPathBaseName, L"agent-summary.json")) {
+            appendCollectorNoise("kswordOutputArtifact");
         }
     }
 
@@ -741,17 +841,25 @@ DriverEventAttribution BuildDriverEventAttribution(
             ContainsNormalized(event.commandLine, L"ksword.sandbox.r0collector.exe") ||
             ContainsNormalized(event.path, L"\\ksword.sandbox.agent.exe") ||
             ContainsNormalized(event.commandLine, L"ksword.sandbox.agent.exe")) {
-            AppendSelfNoiseReason(&reasons, "kswordToolProcess");
+            appendCollectorNoise("kswordToolProcess");
         }
     }
 
-    if (!reasons.empty()) {
+    if (!collectorNoiseReasons.empty()) {
+        attribution.collectorNoise = true;
+        attribution.collectorNoiseReason = collectorNoiseReasons;
+        attribution.collectorNoiseAction = options.suppressSelfNoise ? "suppress" : "emit";
+    }
+
+    if (!selfNoiseReasons.empty()) {
         attribution.selfNoise = true;
         attribution.suppressed = options.suppressSelfNoise;
-        attribution.selfNoiseReason = reasons;
+        attribution.selfNoiseReason = selfNoiseReasons;
         attribution.selfNoiseAction = options.suppressSelfNoise ? "suppress" : "emit";
-        attribution.actorRole = "collector-infrastructure";
-        attribution.subjectRole = "collector-infrastructure";
+        if (attribution.collectorNoise) {
+            attribution.actorRole = "collector-infrastructure";
+            attribution.subjectRole = "collector-infrastructure";
+        }
     }
 
     return attribution;

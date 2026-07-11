@@ -24,7 +24,9 @@ internal static class GuestDiagnosticEventFactory
             Data =
             {
                 ["exceptionType"] = exception.GetType().FullName ?? exception.GetType().Name,
-                ["message"] = exception.Message
+                ["message"] = exception.Message,
+                ["zhMessage"] = "Guest 诊断事件捕获到异常；请结合 eventType、path 和 exceptionType/message 判断根因。",
+                ["zhHint"] = "该事件通常表示采集或环境诊断问题，不应直接归类为样本行为。"
             }
         };
     }

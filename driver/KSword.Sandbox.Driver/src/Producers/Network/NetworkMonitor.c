@@ -1,4 +1,4 @@
-#include "Producers/Network/NetworkMonitor.h"
+#include "Producers/Network/NetworkInternal.h"
 
 #if KSWORD_SANDBOX_ENABLE_NETWORK_WFP_ALE
 
@@ -18,39 +18,11 @@
 #include <fwpmk.h>
 #pragma warning(pop)
 
+#include "Producers/Network/NetworkWfpBindings.h"
+
 #ifndef RPC_C_AUTHN_WINNT
 #define RPC_C_AUTHN_WINNT 10U
 #endif
-
-/*
- * Runtime state for the WFP/ALE network event producer.
- *
- * Inputs : initialized by KswInitializeNetworkMonitor after the control device
- *          and event ring exist.
- * Logic  : stores dynamic FWPM engine state, FWPS callout ids, filter ids, and
- *          the shared READ_EVENTS ring owner.  Active gates classify callback
- *          emission during partial initialization and unload.
- * Return : no direct return value; KswInitializeNetworkMonitor exposes setup
- *          failures and KswPushEvent carries telemetry to user mode.
- */
-typedef struct _KSWORD_SANDBOX_NETWORK_WFP_RUNTIME {
-    PDEVICE_OBJECT DeviceObject;
-    PKSWORD_SANDBOX_DEVICE_EXTENSION DeviceExtension;
-    HANDLE EngineHandle;
-    volatile LONG Active;
-    UINT32 ConnectV4CalloutId;
-    UINT32 RecvAcceptV4CalloutId;
-    UINT32 ConnectV6CalloutId;
-    UINT32 RecvAcceptV6CalloutId;
-    UINT64 ConnectV4FilterId;
-    UINT64 RecvAcceptV4FilterId;
-    UINT64 ConnectV6FilterId;
-    UINT64 RecvAcceptV6FilterId;
-    NTSTATUS RegisterStatus;
-    NTSTATUS EngineStatus;
-    volatile LONG64 ClassifyCount;
-    volatile LONG64 EventCount;
-} KSWORD_SANDBOX_NETWORK_WFP_RUNTIME, *PKSWORD_SANDBOX_NETWORK_WFP_RUNTIME;
 
 static KSWORD_SANDBOX_NETWORK_WFP_RUNTIME g_KswNetworkWfpRuntime;
 
@@ -79,78 +51,138 @@ KswNetworkFlowDeleteFn(
     );
 
 /*
- * WFP layer and object GUIDs used by the dynamic ALE event producer.
- *
- * Inputs : consumed by FWPS/FWPM registration helpers.
- * Logic  : standard layer GUID values are stored locally to avoid relying on
- *          GUID object instantiation from WDK headers; KSword-owned GUIDs name
- *          this driver's dynamic sublayer, callouts, and filters.
- * Return : not applicable; WFP copies these values during registration.
+ * Returns the network payload version stamped on emitted ALE records.
+ * Inputs : none; reads the WFP runtime state.
+ * Logic  : classify callbacks can overlap teardown after observing Active, so a
+ *          cleared runtime falls back to the stable ABI v1 payload version.
+ * Return : KSWORD_SANDBOX_NETWORK_EVENT_VERSION for current network payloads.
  */
-static const GUID g_KswFwpmLayerAleAuthConnectV4 = {
-    0xc38d57d1, 0x05a7, 0x4c33,
-    { 0x90, 0x4f, 0x7f, 0xbc, 0xee, 0xe6, 0x0e, 0x82 }
-};
+static
+ULONG
+KswNetworkPayloadVersion(
+    VOID
+    )
+{
+    ULONG version;
 
-static const GUID g_KswFwpmLayerAleAuthRecvAcceptV4 = {
-    0xe1cd9fe7, 0xf4b5, 0x4273,
-    { 0x96, 0xc0, 0x59, 0x2e, 0x48, 0x7b, 0x86, 0x50 }
-};
+    version = g_KswNetworkWfpRuntime.PayloadVersion;
+    return version == 0 ? KSWORD_SANDBOX_NETWORK_EVENT_VERSION : version;
+}
 
-static const GUID g_KswFwpmLayerAleAuthConnectV6 = {
-    0x4a72393b, 0x319f, 0x44bc,
-    { 0x84, 0xc3, 0xba, 0x54, 0xdc, 0xb3, 0xb6, 0xb4 }
-};
+/*
+ * Records the most recent network-specific degradation reason.
+ *
+ * Inputs : Reason is a KSWORD_SANDBOX_NETWORK_STATUS_DEGRADE_REASON value and
+ *          Status is the closest NTSTATUS for the failing WFP or queue step.
+ * Logic  : this is intentionally internal-only today.  GET_STATUS exposes the
+ *          coarse FailedProducerMask/LastNtStatus contract; the draft typed
+ *          payload/status reason must not be treated as implemented until a
+ *          future ABI advertises it.
+ * Return : no return value.
+ */
+static
+VOID
+KswNetworkRecordDegradeStatus(
+    _In_ ULONG Reason,
+    _In_ NTSTATUS Status
+    )
+{
+    (VOID)InterlockedExchange(
+        &g_KswNetworkWfpRuntime.LastDegradeReason,
+        (LONG)Reason);
+    (VOID)InterlockedExchange(
+        &g_KswNetworkWfpRuntime.LastDegradeStatus,
+        (LONG)Status);
+}
 
-static const GUID g_KswFwpmLayerAleAuthRecvAcceptV6 = {
-    0xa3b42c97, 0x9f04, 0x4672,
-    { 0xb8, 0x7e, 0xce, 0xe9, 0xc4, 0x83, 0x25, 0x7f }
-};
+/*
+ * Finds the descriptor row for a WFP ALE layer id.
+ *
+ * Inputs : LayerId is FWPS_INCOMING_VALUES0.layerId.
+ * Logic  : the descriptor table is the single source of truth for the four ALE
+ *          layers implemented in this inspect-only producer.
+ * Return : descriptor pointer, or NULL for a layer outside the current scope.
+ */
+static
+const KSWORD_SANDBOX_NETWORK_ALE_BINDING*
+KswNetworkFindAleBindingByLayer(
+    _In_ UINT16 LayerId
+    )
+{
+    ULONG index;
 
-static const GUID g_KswNetworkWfpSublayer = {
-    0x045d9f2c, 0xd8d7, 0x4e8a,
-    { 0xa1, 0xe4, 0x05, 0x32, 0xfd, 0x03, 0xde, 0x69 }
-};
+    for (index = 0; index < KSWORD_SANDBOX_NETWORK_ALE_BINDING_COUNT; index++) {
+        if (g_KswNetworkAleBindings[index].LayerId == LayerId) {
+            return &g_KswNetworkAleBindings[index];
+        }
+    }
 
-static const GUID g_KswNetworkConnectV4Callout = {
-    0x64f03ec7, 0x7b29, 0x453b,
-    { 0x8c, 0xac, 0x34, 0xa8, 0xf5, 0x4e, 0xa4, 0xa1 }
-};
+    return NULL;
+}
 
-static const GUID g_KswNetworkRecvAcceptV4Callout = {
-    0xbcef729c, 0xf07a, 0x4db4,
-    { 0x89, 0x31, 0x54, 0x99, 0xc0, 0xb8, 0x9e, 0x8f }
-};
+/*
+ * Maps a descriptor row to the runtime FWPS callout-id slot.
+ *
+ * Inputs : BindingId identifies one row from g_KswNetworkAleBindings.
+ * Logic  : keeps table-driven registration/cleanup in one compiled source file
+ *          without using C++ member pointers or spreading globals across files.
+ * Return : address of the runtime slot, or NULL for invalid input.
+ */
+static
+PUINT32
+KswNetworkCalloutIdSlot(
+    _In_ KSWORD_SANDBOX_NETWORK_ALE_BINDING_ID BindingId
+    )
+{
+    switch (BindingId) {
+    case KswNetworkAleBindingConnectV4:
+        return &g_KswNetworkWfpRuntime.ConnectV4CalloutId;
 
-static const GUID g_KswNetworkConnectV6Callout = {
-    0x633b5a9d, 0x14bd, 0x42b5,
-    { 0xa3, 0x5d, 0x21, 0xa8, 0x7e, 0xeb, 0xb4, 0xa8 }
-};
+    case KswNetworkAleBindingRecvAcceptV4:
+        return &g_KswNetworkWfpRuntime.RecvAcceptV4CalloutId;
 
-static const GUID g_KswNetworkRecvAcceptV6Callout = {
-    0x1295009b, 0xb5b5, 0x4d9d,
-    { 0xbd, 0x13, 0x14, 0x80, 0x91, 0xdd, 0x39, 0xf2 }
-};
+    case KswNetworkAleBindingConnectV6:
+        return &g_KswNetworkWfpRuntime.ConnectV6CalloutId;
 
-static const GUID g_KswNetworkConnectV4Filter = {
-    0xf2b09803, 0x0c2c, 0x4269,
-    { 0x9d, 0xc0, 0x16, 0xec, 0xc7, 0x9a, 0xb7, 0x21 }
-};
+    case KswNetworkAleBindingRecvAcceptV6:
+        return &g_KswNetworkWfpRuntime.RecvAcceptV6CalloutId;
 
-static const GUID g_KswNetworkRecvAcceptV4Filter = {
-    0xc32d15b2, 0xc38a, 0x4bd5,
-    { 0xb0, 0xa6, 0xdf, 0x5a, 0x61, 0xce, 0x4b, 0xd4 }
-};
+    default:
+        return NULL;
+    }
+}
 
-static const GUID g_KswNetworkConnectV6Filter = {
-    0x235ba9d5, 0xecb0, 0x441f,
-    { 0xbe, 0x23, 0xe7, 0x96, 0xbe, 0xe0, 0x55, 0x71 }
-};
+/*
+ * Maps a descriptor row to the runtime FWPM filter-id slot.
+ *
+ * Inputs : BindingId identifies one row from g_KswNetworkAleBindings.
+ * Logic  : mirrors KswNetworkCalloutIdSlot for filter cleanup and registration
+ *          while preserving the single source descriptor table.
+ * Return : address of the runtime slot, or NULL for invalid input.
+ */
+static
+PUINT64
+KswNetworkFilterIdSlot(
+    _In_ KSWORD_SANDBOX_NETWORK_ALE_BINDING_ID BindingId
+    )
+{
+    switch (BindingId) {
+    case KswNetworkAleBindingConnectV4:
+        return &g_KswNetworkWfpRuntime.ConnectV4FilterId;
 
-static const GUID g_KswNetworkRecvAcceptV6Filter = {
-    0xcbb030e9, 0x912f, 0x4b6e,
-    { 0x89, 0x03, 0x1b, 0xd2, 0xca, 0x92, 0x13, 0x15 }
-};
+    case KswNetworkAleBindingRecvAcceptV4:
+        return &g_KswNetworkWfpRuntime.RecvAcceptV4FilterId;
+
+    case KswNetworkAleBindingConnectV6:
+        return &g_KswNetworkWfpRuntime.ConnectV6FilterId;
+
+    case KswNetworkAleBindingRecvAcceptV6:
+        return &g_KswNetworkWfpRuntime.RecvAcceptV6FilterId;
+
+    default:
+        return NULL;
+    }
+}
 
 /*
  * Leaves WFP classification as a non-blocking inspection decision.
@@ -397,21 +429,107 @@ KswNetworkCalloutIdFromLayer(
     _In_ UINT16 LayerId
     )
 {
+    const KSWORD_SANDBOX_NETWORK_ALE_BINDING* binding;
+    PUINT32 calloutIdSlot;
+
+    binding = KswNetworkFindAleBindingByLayer(LayerId);
+    if (binding == NULL) {
+        return 0;
+    }
+
+    calloutIdSlot = KswNetworkCalloutIdSlot(binding->Id);
+    return calloutIdSlot == NULL ? 0 : *calloutIdSlot;
+}
+
+typedef struct _KSWORD_SANDBOX_NETWORK_ALE_FIELD_LAYOUT {
+    ULONG AddressFamily;
+    UINT32 ProtocolIndex;
+    UINT32 LocalPortIndex;
+    UINT32 RemotePortIndex;
+    UINT32 LocalAddressIndex;
+    UINT32 RemoteAddressIndex;
+    BOOLEAN IsIpv6;
+} KSWORD_SANDBOX_NETWORK_ALE_FIELD_LAYOUT,
+    *PKSWORD_SANDBOX_NETWORK_ALE_FIELD_LAYOUT;
+
+/*
+ * Selects fixed-field indices for one supported ALE layer.
+ *
+ * Inputs : LayerId is FWPS_INCOMING_VALUES0.layerId.
+ * Logic  : isolates WFP enum fan-out from payload building so future packet,
+ *          stream, or condition-filter TODOs can add new layouts without
+ *          inflating the classify hot path.
+ * Return : TRUE with Layout initialized for supported ALE layers; otherwise
+ *          FALSE.
+ */
+static
+BOOLEAN
+KswNetworkGetAleFieldLayout(
+    _In_ UINT16 LayerId,
+    _Out_ PKSWORD_SANDBOX_NETWORK_ALE_FIELD_LAYOUT Layout
+    )
+{
+    if (Layout == NULL) {
+        return FALSE;
+    }
+
+    RtlZeroMemory(Layout, sizeof(*Layout));
+
     switch (LayerId) {
     case FWPS_LAYER_ALE_AUTH_CONNECT_V4:
-        return g_KswNetworkWfpRuntime.ConnectV4CalloutId;
+        Layout->AddressFamily = KSWORD_SANDBOX_NETWORK_ADDRESS_FAMILY_IPV4;
+        Layout->ProtocolIndex = FWPS_FIELD_ALE_AUTH_CONNECT_V4_IP_PROTOCOL;
+        Layout->LocalPortIndex = FWPS_FIELD_ALE_AUTH_CONNECT_V4_IP_LOCAL_PORT;
+        Layout->RemotePortIndex = FWPS_FIELD_ALE_AUTH_CONNECT_V4_IP_REMOTE_PORT;
+        Layout->LocalAddressIndex =
+            FWPS_FIELD_ALE_AUTH_CONNECT_V4_IP_LOCAL_ADDRESS;
+        Layout->RemoteAddressIndex =
+            FWPS_FIELD_ALE_AUTH_CONNECT_V4_IP_REMOTE_ADDRESS;
+        return TRUE;
 
     case FWPS_LAYER_ALE_AUTH_RECV_ACCEPT_V4:
-        return g_KswNetworkWfpRuntime.RecvAcceptV4CalloutId;
+        Layout->AddressFamily = KSWORD_SANDBOX_NETWORK_ADDRESS_FAMILY_IPV4;
+        Layout->ProtocolIndex =
+            FWPS_FIELD_ALE_AUTH_RECV_ACCEPT_V4_IP_PROTOCOL;
+        Layout->LocalPortIndex =
+            FWPS_FIELD_ALE_AUTH_RECV_ACCEPT_V4_IP_LOCAL_PORT;
+        Layout->RemotePortIndex =
+            FWPS_FIELD_ALE_AUTH_RECV_ACCEPT_V4_IP_REMOTE_PORT;
+        Layout->LocalAddressIndex =
+            FWPS_FIELD_ALE_AUTH_RECV_ACCEPT_V4_IP_LOCAL_ADDRESS;
+        Layout->RemoteAddressIndex =
+            FWPS_FIELD_ALE_AUTH_RECV_ACCEPT_V4_IP_REMOTE_ADDRESS;
+        return TRUE;
 
     case FWPS_LAYER_ALE_AUTH_CONNECT_V6:
-        return g_KswNetworkWfpRuntime.ConnectV6CalloutId;
+        Layout->AddressFamily = KSWORD_SANDBOX_NETWORK_ADDRESS_FAMILY_IPV6;
+        Layout->ProtocolIndex = FWPS_FIELD_ALE_AUTH_CONNECT_V6_IP_PROTOCOL;
+        Layout->LocalPortIndex = FWPS_FIELD_ALE_AUTH_CONNECT_V6_IP_LOCAL_PORT;
+        Layout->RemotePortIndex = FWPS_FIELD_ALE_AUTH_CONNECT_V6_IP_REMOTE_PORT;
+        Layout->LocalAddressIndex =
+            FWPS_FIELD_ALE_AUTH_CONNECT_V6_IP_LOCAL_ADDRESS;
+        Layout->RemoteAddressIndex =
+            FWPS_FIELD_ALE_AUTH_CONNECT_V6_IP_REMOTE_ADDRESS;
+        Layout->IsIpv6 = TRUE;
+        return TRUE;
 
     case FWPS_LAYER_ALE_AUTH_RECV_ACCEPT_V6:
-        return g_KswNetworkWfpRuntime.RecvAcceptV6CalloutId;
+        Layout->AddressFamily = KSWORD_SANDBOX_NETWORK_ADDRESS_FAMILY_IPV6;
+        Layout->ProtocolIndex =
+            FWPS_FIELD_ALE_AUTH_RECV_ACCEPT_V6_IP_PROTOCOL;
+        Layout->LocalPortIndex =
+            FWPS_FIELD_ALE_AUTH_RECV_ACCEPT_V6_IP_LOCAL_PORT;
+        Layout->RemotePortIndex =
+            FWPS_FIELD_ALE_AUTH_RECV_ACCEPT_V6_IP_REMOTE_PORT;
+        Layout->LocalAddressIndex =
+            FWPS_FIELD_ALE_AUTH_RECV_ACCEPT_V6_IP_LOCAL_ADDRESS;
+        Layout->RemoteAddressIndex =
+            FWPS_FIELD_ALE_AUTH_RECV_ACCEPT_V6_IP_REMOTE_ADDRESS;
+        Layout->IsIpv6 = TRUE;
+        return TRUE;
 
     default:
-        return 0;
+        return FALSE;
     }
 }
 
@@ -479,30 +597,26 @@ KswNetworkBuildAlePayload(
     _Out_ PKSWORD_SANDBOX_NETWORK_EVENT_PAYLOAD Payload
     )
 {
-    UINT32 protocolIndex;
-    UINT32 localPortIndex;
-    UINT32 remotePortIndex;
-    UINT32 localAddressIndex;
-    UINT32 remoteAddressIndex;
+    KSWORD_SANDBOX_NETWORK_ALE_FIELD_LAYOUT layout;
     ULONG protocol;
-    BOOLEAN isIpv6;
 
     if (FixedValues == NULL || Payload == NULL) {
         return FALSE;
     }
 
-    protocolIndex = 0;
-    localPortIndex = 0;
-    remotePortIndex = 0;
-    localAddressIndex = 0;
-    remoteAddressIndex = 0;
+    if (!KswNetworkGetAleFieldLayout(FixedValues->layerId, &layout)) {
+        return FALSE;
+    }
+
     protocol = KSWORD_SANDBOX_NETWORK_PROTOCOL_ANY;
-    isIpv6 = FALSE;
 
     RtlZeroMemory(Payload, sizeof(*Payload));
-    Payload->Version = KSWORD_SANDBOX_NETWORK_EVENT_VERSION;
+    Payload->Version = KswNetworkPayloadVersion();
     Payload->Size = sizeof(*Payload);
     Payload->LayerId = FixedValues->layerId;
+    Payload->AddressFamily = layout.AddressFamily;
+    Payload->Operation = KswSandboxNetworkOperationAleAuthorize;
+    Payload->Status = STATUS_SUCCESS;
     Payload->Direction = KswNetworkDirectionFromLayer(FixedValues->layerId);
     Payload->Flags = KSWORD_SANDBOX_NETWORK_EVENT_FLAG_INSPECTION_ONLY;
 
@@ -514,76 +628,33 @@ KswNetworkBuildAlePayload(
         Payload->CalloutId = KswNetworkCalloutIdFromLayer(FixedValues->layerId);
     }
 
-    switch (FixedValues->layerId) {
-    case FWPS_LAYER_ALE_AUTH_CONNECT_V4:
-        Payload->AddressFamily = KSWORD_SANDBOX_NETWORK_ADDRESS_FAMILY_IPV4;
-        protocolIndex = FWPS_FIELD_ALE_AUTH_CONNECT_V4_IP_PROTOCOL;
-        localPortIndex = FWPS_FIELD_ALE_AUTH_CONNECT_V4_IP_LOCAL_PORT;
-        remotePortIndex = FWPS_FIELD_ALE_AUTH_CONNECT_V4_IP_REMOTE_PORT;
-        localAddressIndex = FWPS_FIELD_ALE_AUTH_CONNECT_V4_IP_LOCAL_ADDRESS;
-        remoteAddressIndex = FWPS_FIELD_ALE_AUTH_CONNECT_V4_IP_REMOTE_ADDRESS;
-        break;
-
-    case FWPS_LAYER_ALE_AUTH_RECV_ACCEPT_V4:
-        Payload->AddressFamily = KSWORD_SANDBOX_NETWORK_ADDRESS_FAMILY_IPV4;
-        protocolIndex = FWPS_FIELD_ALE_AUTH_RECV_ACCEPT_V4_IP_PROTOCOL;
-        localPortIndex = FWPS_FIELD_ALE_AUTH_RECV_ACCEPT_V4_IP_LOCAL_PORT;
-        remotePortIndex = FWPS_FIELD_ALE_AUTH_RECV_ACCEPT_V4_IP_REMOTE_PORT;
-        localAddressIndex = FWPS_FIELD_ALE_AUTH_RECV_ACCEPT_V4_IP_LOCAL_ADDRESS;
-        remoteAddressIndex = FWPS_FIELD_ALE_AUTH_RECV_ACCEPT_V4_IP_REMOTE_ADDRESS;
-        break;
-
-    case FWPS_LAYER_ALE_AUTH_CONNECT_V6:
-        Payload->AddressFamily = KSWORD_SANDBOX_NETWORK_ADDRESS_FAMILY_IPV6;
-        protocolIndex = FWPS_FIELD_ALE_AUTH_CONNECT_V6_IP_PROTOCOL;
-        localPortIndex = FWPS_FIELD_ALE_AUTH_CONNECT_V6_IP_LOCAL_PORT;
-        remotePortIndex = FWPS_FIELD_ALE_AUTH_CONNECT_V6_IP_REMOTE_PORT;
-        localAddressIndex = FWPS_FIELD_ALE_AUTH_CONNECT_V6_IP_LOCAL_ADDRESS;
-        remoteAddressIndex = FWPS_FIELD_ALE_AUTH_CONNECT_V6_IP_REMOTE_ADDRESS;
-        isIpv6 = TRUE;
-        break;
-
-    case FWPS_LAYER_ALE_AUTH_RECV_ACCEPT_V6:
-        Payload->AddressFamily = KSWORD_SANDBOX_NETWORK_ADDRESS_FAMILY_IPV6;
-        protocolIndex = FWPS_FIELD_ALE_AUTH_RECV_ACCEPT_V6_IP_PROTOCOL;
-        localPortIndex = FWPS_FIELD_ALE_AUTH_RECV_ACCEPT_V6_IP_LOCAL_PORT;
-        remotePortIndex = FWPS_FIELD_ALE_AUTH_RECV_ACCEPT_V6_IP_REMOTE_PORT;
-        localAddressIndex = FWPS_FIELD_ALE_AUTH_RECV_ACCEPT_V6_IP_LOCAL_ADDRESS;
-        remoteAddressIndex = FWPS_FIELD_ALE_AUTH_RECV_ACCEPT_V6_IP_REMOTE_ADDRESS;
-        isIpv6 = TRUE;
-        break;
-
-    default:
-        return FALSE;
-    }
-
     if (KswNetworkReadIntegerField(
             FixedValues,
-            protocolIndex,
+            layout.ProtocolIndex,
             &protocol)) {
         Payload->Protocol = protocol;
     }
 
     (VOID)KswNetworkReadPortField(
         FixedValues,
-        localPortIndex,
+        layout.LocalPortIndex,
         &Payload->LocalPort);
     (VOID)KswNetworkReadPortField(
         FixedValues,
-        remotePortIndex,
+        layout.RemotePortIndex,
         &Payload->RemotePort);
 
-    if (isIpv6) {
+    if (layout.IsIpv6) {
         if (KswNetworkReadIpv6AddressField(
                 FixedValues,
-                localAddressIndex,
+                layout.LocalAddressIndex,
                 Payload->LocalAddress)) {
             Payload->Flags |=
                 KSWORD_SANDBOX_NETWORK_EVENT_FLAG_LOCAL_ADDRESS_PRESENT;
         }
         if (KswNetworkReadIpv6AddressField(
                 FixedValues,
-                remoteAddressIndex,
+                layout.RemoteAddressIndex,
                 Payload->RemoteAddress)) {
             Payload->Flags |=
                 KSWORD_SANDBOX_NETWORK_EVENT_FLAG_REMOTE_ADDRESS_PRESENT;
@@ -591,14 +662,14 @@ KswNetworkBuildAlePayload(
     } else {
         if (KswNetworkReadIpv4AddressField(
                 FixedValues,
-                localAddressIndex,
+                layout.LocalAddressIndex,
                 Payload->LocalAddress)) {
             Payload->Flags |=
                 KSWORD_SANDBOX_NETWORK_EVENT_FLAG_LOCAL_ADDRESS_PRESENT;
         }
         if (KswNetworkReadIpv4AddressField(
                 FixedValues,
-                remoteAddressIndex,
+                layout.RemoteAddressIndex,
                 Payload->RemoteAddress)) {
             Payload->Flags |=
                 KSWORD_SANDBOX_NETWORK_EVENT_FLAG_REMOTE_ADDRESS_PRESENT;
@@ -658,6 +729,9 @@ KswNetworkClassifyFn(
             InMetaValues,
             Filter,
             &payload)) {
+        KswNetworkRecordDegradeStatus(
+            KswSandboxNetworkStatusDegradeClassifyPayload,
+            STATUS_INVALID_PARAMETER);
         return;
     }
 
@@ -666,10 +740,13 @@ KswNetworkClassifyFn(
         KswSandboxEventTypeNetwork,
         0,
         &payload,
-        sizeof(payload));
+        (ULONG)sizeof(payload));
     if (NT_SUCCESS(status)) {
         InterlockedIncrement64(&g_KswNetworkWfpRuntime.EventCount);
     } else if (status != STATUS_CANCELLED) {
+        KswNetworkRecordDegradeStatus(
+            KswSandboxNetworkStatusDegradeQueuePush,
+            status);
         KswSetLastStatus(deviceExtension, status);
     }
 }
@@ -771,28 +848,17 @@ KswNetworkUnregisterFwpsCallouts(
     VOID
     )
 {
-    if (g_KswNetworkWfpRuntime.ConnectV4CalloutId != 0) {
-        (VOID)FwpsCalloutUnregisterById0(
-            g_KswNetworkWfpRuntime.ConnectV4CalloutId);
-        g_KswNetworkWfpRuntime.ConnectV4CalloutId = 0;
-    }
+    ULONG index;
 
-    if (g_KswNetworkWfpRuntime.RecvAcceptV4CalloutId != 0) {
-        (VOID)FwpsCalloutUnregisterById0(
-            g_KswNetworkWfpRuntime.RecvAcceptV4CalloutId);
-        g_KswNetworkWfpRuntime.RecvAcceptV4CalloutId = 0;
-    }
+    for (index = 0; index < KSWORD_SANDBOX_NETWORK_ALE_BINDING_COUNT; index++) {
+        PUINT32 calloutIdSlot;
 
-    if (g_KswNetworkWfpRuntime.ConnectV6CalloutId != 0) {
-        (VOID)FwpsCalloutUnregisterById0(
-            g_KswNetworkWfpRuntime.ConnectV6CalloutId);
-        g_KswNetworkWfpRuntime.ConnectV6CalloutId = 0;
-    }
-
-    if (g_KswNetworkWfpRuntime.RecvAcceptV6CalloutId != 0) {
-        (VOID)FwpsCalloutUnregisterById0(
-            g_KswNetworkWfpRuntime.RecvAcceptV6CalloutId);
-        g_KswNetworkWfpRuntime.RecvAcceptV6CalloutId = 0;
+        calloutIdSlot = KswNetworkCalloutIdSlot(
+            g_KswNetworkAleBindings[index].Id);
+        if (calloutIdSlot != NULL && *calloutIdSlot != 0) {
+            (VOID)FwpsCalloutUnregisterById0(*calloutIdSlot);
+            *calloutIdSlot = 0;
+        }
     }
 }
 
@@ -922,48 +988,29 @@ KswNetworkDeleteManagementObjects(
     )
 {
     HANDLE engineHandle;
+    ULONG index;
 
     engineHandle = g_KswNetworkWfpRuntime.EngineHandle;
     if (engineHandle == NULL) {
         return;
     }
 
-    if (g_KswNetworkWfpRuntime.ConnectV4FilterId != 0) {
-        (VOID)FwpmFilterDeleteById0(
-            engineHandle,
-            g_KswNetworkWfpRuntime.ConnectV4FilterId);
-        g_KswNetworkWfpRuntime.ConnectV4FilterId = 0;
+    for (index = KSWORD_SANDBOX_NETWORK_ALE_BINDING_COUNT; index > 0; index--) {
+        PUINT64 filterIdSlot;
+
+        filterIdSlot = KswNetworkFilterIdSlot(
+            g_KswNetworkAleBindings[index - 1U].Id);
+        if (filterIdSlot != NULL && *filterIdSlot != 0) {
+            (VOID)FwpmFilterDeleteById0(engineHandle, *filterIdSlot);
+            *filterIdSlot = 0;
+        }
     }
 
-    if (g_KswNetworkWfpRuntime.RecvAcceptV4FilterId != 0) {
-        (VOID)FwpmFilterDeleteById0(
+    for (index = KSWORD_SANDBOX_NETWORK_ALE_BINDING_COUNT; index > 0; index--) {
+        (VOID)FwpmCalloutDeleteByKey0(
             engineHandle,
-            g_KswNetworkWfpRuntime.RecvAcceptV4FilterId);
-        g_KswNetworkWfpRuntime.RecvAcceptV4FilterId = 0;
+            &g_KswNetworkAleBindings[index - 1U].CalloutKey);
     }
-
-    if (g_KswNetworkWfpRuntime.ConnectV6FilterId != 0) {
-        (VOID)FwpmFilterDeleteById0(
-            engineHandle,
-            g_KswNetworkWfpRuntime.ConnectV6FilterId);
-        g_KswNetworkWfpRuntime.ConnectV6FilterId = 0;
-    }
-
-    if (g_KswNetworkWfpRuntime.RecvAcceptV6FilterId != 0) {
-        (VOID)FwpmFilterDeleteById0(
-            engineHandle,
-            g_KswNetworkWfpRuntime.RecvAcceptV6FilterId);
-        g_KswNetworkWfpRuntime.RecvAcceptV6FilterId = 0;
-    }
-
-    (VOID)FwpmCalloutDeleteByKey0(engineHandle, &g_KswNetworkConnectV4Callout);
-    (VOID)FwpmCalloutDeleteByKey0(
-        engineHandle,
-        &g_KswNetworkRecvAcceptV4Callout);
-    (VOID)FwpmCalloutDeleteByKey0(engineHandle, &g_KswNetworkConnectV6Callout);
-    (VOID)FwpmCalloutDeleteByKey0(
-        engineHandle,
-        &g_KswNetworkRecvAcceptV6Callout);
     (VOID)FwpmSubLayerDeleteByKey0(engineHandle, &g_KswNetworkWfpSublayer);
 
     FwpmEngineClose0(engineHandle);
@@ -991,6 +1038,8 @@ KswInitializeNetworkMonitor(
     FWPM_SESSION0 session;
     NTSTATUS status;
     BOOLEAN transactionStarted;
+    ULONG index;
+    ULONG degradeReason;
 
     if (DeviceObject == NULL ||
         DeviceExtension == NULL ||
@@ -998,43 +1047,45 @@ KswInitializeNetworkMonitor(
         return STATUS_INVALID_PARAMETER;
     }
 
+    if (g_KswNetworkWfpRuntime.EngineHandle != NULL ||
+        InterlockedCompareExchange(&g_KswNetworkWfpRuntime.Active, 0, 0) != 0) {
+        return STATUS_DEVICE_BUSY;
+    }
+
     RtlZeroMemory(&g_KswNetworkWfpRuntime, sizeof(g_KswNetworkWfpRuntime));
     g_KswNetworkWfpRuntime.DeviceObject = DeviceObject;
     g_KswNetworkWfpRuntime.DeviceExtension = DeviceExtension;
+    g_KswNetworkWfpRuntime.PayloadVersion =
+        KSWORD_SANDBOX_NETWORK_EVENT_VERSION;
     g_KswNetworkWfpRuntime.RegisterStatus = STATUS_NOT_SUPPORTED;
     g_KswNetworkWfpRuntime.EngineStatus = STATUS_NOT_SUPPORTED;
+    InterlockedExchange(&g_KswNetworkWfpRuntime.Initialized, 1);
+    InterlockedExchange(&g_KswNetworkWfpRuntime.Uninitializing, 0);
+    KswNetworkRecordDegradeStatus(
+        KswSandboxNetworkStatusDegradeNone,
+        STATUS_SUCCESS);
     transactionStarted = FALSE;
+    degradeReason = KswSandboxNetworkStatusDegradeNone;
 
-    status = KswNetworkRegisterFwpsCallout(
-        DeviceObject,
-        &g_KswNetworkConnectV4Callout,
-        &g_KswNetworkWfpRuntime.ConnectV4CalloutId);
-    if (!NT_SUCCESS(status)) {
-        goto Failure;
-    }
+    for (index = 0; index < KSWORD_SANDBOX_NETWORK_ALE_BINDING_COUNT; index++) {
+        PUINT32 calloutIdSlot;
 
-    status = KswNetworkRegisterFwpsCallout(
-        DeviceObject,
-        &g_KswNetworkRecvAcceptV4Callout,
-        &g_KswNetworkWfpRuntime.RecvAcceptV4CalloutId);
-    if (!NT_SUCCESS(status)) {
-        goto Failure;
-    }
+        calloutIdSlot = KswNetworkCalloutIdSlot(
+            g_KswNetworkAleBindings[index].Id);
+        if (calloutIdSlot == NULL) {
+            status = STATUS_INVALID_PARAMETER;
+            degradeReason = KswSandboxNetworkStatusDegradeFwpsCalloutRegister;
+            goto Failure;
+        }
 
-    status = KswNetworkRegisterFwpsCallout(
-        DeviceObject,
-        &g_KswNetworkConnectV6Callout,
-        &g_KswNetworkWfpRuntime.ConnectV6CalloutId);
-    if (!NT_SUCCESS(status)) {
-        goto Failure;
-    }
-
-    status = KswNetworkRegisterFwpsCallout(
-        DeviceObject,
-        &g_KswNetworkRecvAcceptV6Callout,
-        &g_KswNetworkWfpRuntime.RecvAcceptV6CalloutId);
-    if (!NT_SUCCESS(status)) {
-        goto Failure;
+        status = KswNetworkRegisterFwpsCallout(
+            DeviceObject,
+            &g_KswNetworkAleBindings[index].CalloutKey,
+            calloutIdSlot);
+        if (!NT_SUCCESS(status)) {
+            degradeReason = KswSandboxNetworkStatusDegradeFwpsCalloutRegister;
+            goto Failure;
+        }
     }
     g_KswNetworkWfpRuntime.RegisterStatus = STATUS_SUCCESS;
 
@@ -1053,112 +1104,83 @@ KswInitializeNetworkMonitor(
         &g_KswNetworkWfpRuntime.EngineHandle);
     g_KswNetworkWfpRuntime.EngineStatus = status;
     if (!NT_SUCCESS(status)) {
+        degradeReason = KswSandboxNetworkStatusDegradeFwpmEngineOpen;
         goto Failure;
     }
 
     status = FwpmTransactionBegin0(g_KswNetworkWfpRuntime.EngineHandle, 0);
     if (!NT_SUCCESS(status)) {
+        degradeReason = KswSandboxNetworkStatusDegradeFwpmTransaction;
         goto Failure;
     }
     transactionStarted = TRUE;
 
     status = KswNetworkAddSublayer(g_KswNetworkWfpRuntime.EngineHandle);
     if (!NT_SUCCESS(status)) {
+        degradeReason = KswSandboxNetworkStatusDegradeFwpmSublayer;
         goto Failure;
     }
 
-    status = KswNetworkAddManagementCallout(
-        g_KswNetworkWfpRuntime.EngineHandle,
-        &g_KswNetworkConnectV4Callout,
-        &g_KswFwpmLayerAleAuthConnectV4,
-        L"KSword Sandbox ALE connect IPv4 event callout");
-    if (!NT_SUCCESS(status)) {
-        goto Failure;
+    for (index = 0; index < KSWORD_SANDBOX_NETWORK_ALE_BINDING_COUNT; index++) {
+        status = KswNetworkAddManagementCallout(
+            g_KswNetworkWfpRuntime.EngineHandle,
+            &g_KswNetworkAleBindings[index].CalloutKey,
+            &g_KswNetworkAleBindings[index].LayerKey,
+            g_KswNetworkAleBindings[index].CalloutDisplayName);
+        if (!NT_SUCCESS(status)) {
+            degradeReason =
+                KswSandboxNetworkStatusDegradeFwpmManagementCallout;
+            goto Failure;
+        }
     }
 
-    status = KswNetworkAddManagementCallout(
-        g_KswNetworkWfpRuntime.EngineHandle,
-        &g_KswNetworkRecvAcceptV4Callout,
-        &g_KswFwpmLayerAleAuthRecvAcceptV4,
-        L"KSword Sandbox ALE recv-accept IPv4 event callout");
-    if (!NT_SUCCESS(status)) {
-        goto Failure;
-    }
+    for (index = 0; index < KSWORD_SANDBOX_NETWORK_ALE_BINDING_COUNT; index++) {
+        PUINT64 filterIdSlot;
 
-    status = KswNetworkAddManagementCallout(
-        g_KswNetworkWfpRuntime.EngineHandle,
-        &g_KswNetworkConnectV6Callout,
-        &g_KswFwpmLayerAleAuthConnectV6,
-        L"KSword Sandbox ALE connect IPv6 event callout");
-    if (!NT_SUCCESS(status)) {
-        goto Failure;
-    }
+        filterIdSlot = KswNetworkFilterIdSlot(
+            g_KswNetworkAleBindings[index].Id);
+        if (filterIdSlot == NULL) {
+            status = STATUS_INVALID_PARAMETER;
+            degradeReason =
+                KswSandboxNetworkStatusDegradeFwpmInspectionFilter;
+            goto Failure;
+        }
 
-    status = KswNetworkAddManagementCallout(
-        g_KswNetworkWfpRuntime.EngineHandle,
-        &g_KswNetworkRecvAcceptV6Callout,
-        &g_KswFwpmLayerAleAuthRecvAcceptV6,
-        L"KSword Sandbox ALE recv-accept IPv6 event callout");
-    if (!NT_SUCCESS(status)) {
-        goto Failure;
-    }
-
-    status = KswNetworkAddInspectionFilter(
-        g_KswNetworkWfpRuntime.EngineHandle,
-        &g_KswNetworkConnectV4Filter,
-        &g_KswNetworkConnectV4Callout,
-        &g_KswFwpmLayerAleAuthConnectV4,
-        L"KSword Sandbox ALE connect IPv4 event filter",
-        &g_KswNetworkWfpRuntime.ConnectV4FilterId);
-    if (!NT_SUCCESS(status)) {
-        goto Failure;
-    }
-
-    status = KswNetworkAddInspectionFilter(
-        g_KswNetworkWfpRuntime.EngineHandle,
-        &g_KswNetworkRecvAcceptV4Filter,
-        &g_KswNetworkRecvAcceptV4Callout,
-        &g_KswFwpmLayerAleAuthRecvAcceptV4,
-        L"KSword Sandbox ALE recv-accept IPv4 event filter",
-        &g_KswNetworkWfpRuntime.RecvAcceptV4FilterId);
-    if (!NT_SUCCESS(status)) {
-        goto Failure;
-    }
-
-    status = KswNetworkAddInspectionFilter(
-        g_KswNetworkWfpRuntime.EngineHandle,
-        &g_KswNetworkConnectV6Filter,
-        &g_KswNetworkConnectV6Callout,
-        &g_KswFwpmLayerAleAuthConnectV6,
-        L"KSword Sandbox ALE connect IPv6 event filter",
-        &g_KswNetworkWfpRuntime.ConnectV6FilterId);
-    if (!NT_SUCCESS(status)) {
-        goto Failure;
-    }
-
-    status = KswNetworkAddInspectionFilter(
-        g_KswNetworkWfpRuntime.EngineHandle,
-        &g_KswNetworkRecvAcceptV6Filter,
-        &g_KswNetworkRecvAcceptV6Callout,
-        &g_KswFwpmLayerAleAuthRecvAcceptV6,
-        L"KSword Sandbox ALE recv-accept IPv6 event filter",
-        &g_KswNetworkWfpRuntime.RecvAcceptV6FilterId);
-    if (!NT_SUCCESS(status)) {
-        goto Failure;
+        status = KswNetworkAddInspectionFilter(
+            g_KswNetworkWfpRuntime.EngineHandle,
+            &g_KswNetworkAleBindings[index].FilterKey,
+            &g_KswNetworkAleBindings[index].CalloutKey,
+            &g_KswNetworkAleBindings[index].LayerKey,
+            g_KswNetworkAleBindings[index].FilterDisplayName,
+            filterIdSlot);
+        if (!NT_SUCCESS(status)) {
+            degradeReason =
+                KswSandboxNetworkStatusDegradeFwpmInspectionFilter;
+            goto Failure;
+        }
     }
 
     status = FwpmTransactionCommit0(g_KswNetworkWfpRuntime.EngineHandle);
     transactionStarted = FALSE;
     if (!NT_SUCCESS(status)) {
+        degradeReason = KswSandboxNetworkStatusDegradeFwpmTransaction;
         goto Failure;
     }
 
     InterlockedExchange(&g_KswNetworkWfpRuntime.Active, 1);
+    KswNetworkRecordDegradeStatus(
+        KswSandboxNetworkStatusDegradeNone,
+        STATUS_SUCCESS);
     KswSetLastStatus(DeviceExtension, STATUS_SUCCESS);
 
     return STATUS_SUCCESS;
 
 Failure:
+    if (degradeReason == KswSandboxNetworkStatusDegradeNone) {
+        degradeReason = KswSandboxNetworkStatusDegradeFwpmTransaction;
+    }
+    KswNetworkRecordDegradeStatus(degradeReason, status);
+
     if (transactionStarted &&
         g_KswNetworkWfpRuntime.EngineHandle != NULL) {
         (VOID)FwpmTransactionAbort0(g_KswNetworkWfpRuntime.EngineHandle);
@@ -1166,6 +1188,8 @@ Failure:
 
     KswNetworkDeleteManagementObjects();
     KswNetworkUnregisterFwpsCallouts();
+    g_KswNetworkWfpRuntime.PayloadVersion = 0;
+    InterlockedExchange(&g_KswNetworkWfpRuntime.Initialized, 0);
     g_KswNetworkWfpRuntime.DeviceExtension = NULL;
     g_KswNetworkWfpRuntime.DeviceObject = NULL;
     KswSetLastStatus(DeviceExtension, status);
@@ -1187,9 +1211,17 @@ KswUninitializeNetworkMonitor(
     VOID
     )
 {
+    if (InterlockedExchange(
+            &g_KswNetworkWfpRuntime.Uninitializing,
+            1) != 0) {
+        return;
+    }
+
     InterlockedExchange(&g_KswNetworkWfpRuntime.Active, 0);
     KswNetworkDeleteManagementObjects();
     KswNetworkUnregisterFwpsCallouts();
+    g_KswNetworkWfpRuntime.PayloadVersion = 0;
+    InterlockedExchange(&g_KswNetworkWfpRuntime.Initialized, 0);
     g_KswNetworkWfpRuntime.DeviceExtension = NULL;
     g_KswNetworkWfpRuntime.DeviceObject = NULL;
     g_KswNetworkWfpRuntime.RegisterStatus = STATUS_NOT_SUPPORTED;

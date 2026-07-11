@@ -2,6 +2,13 @@
 
 Date: 2026-07-10
 
+> Historical planning note: this file records an earlier R0 landing plan. Use
+> `docs/r0-driver-core.md` for the current ABI source of truth,
+> `docs/r0-collector.md` / `docs/r0-jsonl-schema.md` for collector status and
+> JSONL, and producer-specific docs such as `docs/r0-driver.md`,
+> `docs/r0-file-monitor.md`, `docs/r0-process-registry-image.md`, and
+> `docs/r0-network.md` for current producer notes.
+
 Scope: documentation-only review of the current working-tree snapshot. This
 plan intentionally does not modify `driver/`, `guest/`, `src/`, `tests/`, or
 `scripts/`, so it can run in parallel with the main driver ring-buffer and

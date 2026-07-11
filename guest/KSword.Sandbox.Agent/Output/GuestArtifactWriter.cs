@@ -25,7 +25,9 @@ internal sealed record DroppedFileArtifactMetadata(
     DateTime? OriginalCreationTimeUtc = null,
     DateTime? OriginalLastWriteTimeUtc = null,
     DateTimeOffset? SourceEventTimestampUtc = null,
-    DateTimeOffset? CopiedAtUtc = null);
+    DateTimeOffset? CopiedAtUtc = null,
+    string? OriginalSha256 = null,
+    string? CopiedSha256 = null);
 
 /// <summary>
 /// Carries operator-selected guest artifact collection options into manifest
@@ -307,6 +309,7 @@ internal sealed class GuestArtifactWriter
             {
                 metadata["originalLastWriteTimeUtc"] = droppedFileMetadata.OriginalLastWriteTimeUtc.Value.ToString("O", System.Globalization.CultureInfo.InvariantCulture);
                 AddIfMissing(metadata, "sourceLastWriteUtc", metadata["originalLastWriteTimeUtc"]);
+                AddIfMissing(metadata, "sourceMtimeUtc", metadata["originalLastWriteTimeUtc"]);
             }
 
             if (droppedFileMetadata.SourceEventTimestampUtc is not null)
@@ -317,6 +320,19 @@ internal sealed class GuestArtifactWriter
             if (droppedFileMetadata.CopiedAtUtc is not null)
             {
                 metadata["copiedAtUtc"] = droppedFileMetadata.CopiedAtUtc.Value.ToString("O", System.Globalization.CultureInfo.InvariantCulture);
+            }
+
+            if (!string.IsNullOrWhiteSpace(droppedFileMetadata.OriginalSha256))
+            {
+                metadata["originalSha256"] = droppedFileMetadata.OriginalSha256;
+                AddIfMissing(metadata, "sourceSha256", droppedFileMetadata.OriginalSha256);
+                AddIfMissing(metadata, "sourceHashAlgorithm", "sha256");
+            }
+
+            if (!string.IsNullOrWhiteSpace(droppedFileMetadata.CopiedSha256))
+            {
+                metadata["copiedSha256"] = droppedFileMetadata.CopiedSha256;
+                AddIfMissing(metadata, "artifactSha256", droppedFileMetadata.CopiedSha256);
             }
         }
 
@@ -338,30 +354,30 @@ internal sealed class GuestArtifactWriter
             CreateCollection(descriptors, events, "dropped-files", ArtifactKind.DroppedFile, "dropped-file", "dropped-file",
                 CombineRelative(ArtifactsDirectoryName, DroppedFilesDirectoryName), options.CollectDroppedFiles, implemented: true,
                 capturedEventPrefixes: ["artifact.dropped_file.copied"], skippedEventPrefixes: ["artifact.dropped_file.skipped"],
-                reasonWhenDisabled: "collectDroppedFilesNotRequested"),
+                disabledEventPrefixes: ["artifact.dropped_file.disabled"], reasonWhenDisabled: "collectDroppedFilesNotRequested"),
             CreateCollection(descriptors, events, "screenshots", ArtifactKind.Screenshot, "screenshot", "screenshot",
                 ScreenshotsDirectoryName, options.CaptureScreenshots, implemented: true,
                 capturedEventPrefixes: ["screenshot.captured"], skippedEventPrefixes: ["screenshot.skipped"],
-                reasonWhenDisabled: "screenshotNotRequested"),
+                disabledEventPrefixes: ["screenshot.disabled"], reasonWhenDisabled: "screenshotNotRequested"),
             CreateCollection(descriptors, events, "memory-dumps", ArtifactKind.MemoryDump, "memory-dump", "memory-dump",
                 MemoryDumpsDirectoryName, options.CaptureMemoryDump, implemented: true,
                 capturedEventPrefixes: ["memory_dump.captured"], skippedEventPrefixes: ["memory_dump.skipped"],
-                reasonWhenDisabled: "memoryDumpNotRequested"),
+                disabledEventPrefixes: ["memory_dump.disabled"], reasonWhenDisabled: "memoryDumpNotRequested"),
             CreateCollection(descriptors, events, "driver-events", ArtifactKind.DriverEventsJsonLines, "telemetry", "driver-events",
                 FirstRelativePath(descriptors, "driver-events") ?? "driver-events.jsonl",
                 options.DriverEventsRequested || descriptors.Any(artifact => string.Equals(artifact.CollectionName, "driver-events", StringComparison.OrdinalIgnoreCase)),
                 implemented: true, capturedEventPrefixes: ["driver.load", "driver.process", "driver.file", "driver.registry", "driver.network", "driver.event", "driver.parse_error", "image.load", "r0collector.driver", "r0collector.exited"],
-                skippedEventPrefixes: ["driver.events.missing", "r0collector.failed"], reasonWhenDisabled: "driverEventsNotRequested",
+                skippedEventPrefixes: ["driver.events.missing", "r0collector.failed"], disabledEventPrefixes: [], reasonWhenDisabled: "driverEventsNotRequested",
                 failedEventPrefixes: ["driver.read_error"]),
             CreateCollection(descriptors, events, "r0-logs", ArtifactKind.Log, "log", "diagnostic-log",
                 FirstRelativePath(descriptors, "r0-logs") ?? "r0collector.stdout.log",
                 options.R0CollectorRequested || descriptors.Any(artifact => string.Equals(artifact.CollectionName, "r0-logs", StringComparison.OrdinalIgnoreCase)),
                 implemented: true, capturedEventPrefixes: ["r0collector.started", "r0collector.exited", "r0collector.failed"],
-                skippedEventPrefixes: [], reasonWhenDisabled: "r0CollectorNotRequested"),
+                skippedEventPrefixes: [], disabledEventPrefixes: [], reasonWhenDisabled: "r0CollectorNotRequested"),
             CreateCollection(descriptors, events, "packet-captures", ArtifactKind.PacketCapture, "packet-capture", "packet-capture",
                 PacketCapturesDirectoryName, options.CapturePacketCapture, implemented: true,
                 capturedEventPrefixes: ["packet_capture.captured"], skippedEventPrefixes: ["packet_capture.skipped"],
-                reasonWhenDisabled: "packetCaptureNotRequested", failedEventPrefixes: ["packet_capture.failed"])
+                disabledEventPrefixes: ["packet_capture.disabled"], reasonWhenDisabled: "packetCaptureNotRequested", failedEventPrefixes: ["packet_capture.failed"])
         ];
     }
 
@@ -377,22 +393,34 @@ internal sealed class GuestArtifactWriter
         bool implemented,
         IReadOnlyList<string> capturedEventPrefixes,
         IReadOnlyList<string> skippedEventPrefixes,
+        IReadOnlyList<string> disabledEventPrefixes,
         string reasonWhenDisabled,
         IReadOnlyList<string>? failedEventPrefixes = null)
     {
         var artifactCount = descriptors.Count(artifact => string.Equals(artifact.CollectionName, name, StringComparison.OrdinalIgnoreCase));
         var capturedEventCount = CountEvents(events, capturedEventPrefixes);
         var skippedEventCount = CountEvents(events, skippedEventPrefixes);
+        var disabledEventCount = CountEvents(events, disabledEventPrefixes);
         var failedEventCount = (failedEventPrefixes is null ? 0 : CountEvents(events, failedEventPrefixes)) + CountProbeFailureEvents(events, name);
-        var status = DetermineCollectionStatus(enabled, implemented, artifactCount, capturedEventCount, skippedEventCount, failedEventCount);
+        var status = DetermineCollectionStatus(enabled, implemented, artifactCount, capturedEventCount, skippedEventCount, disabledEventCount, failedEventCount);
         var normalizedRelativePath = NormalizeRelativePath(relativePath);
+        var disabledCount = enabled ? disabledEventCount : Math.Max(1, disabledEventCount);
+        var capturedCount = Math.Max(artifactCount, capturedEventCount);
         var metadata = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
             ["collectionName"] = name,
             ["evidenceRole"] = evidenceRole,
+            ["requested"] = enabled.ToString(System.Globalization.CultureInfo.InvariantCulture).ToLowerInvariant(),
+            ["captureEnabled"] = enabled.ToString(System.Globalization.CultureInfo.InvariantCulture).ToLowerInvariant(),
+            ["implemented"] = implemented.ToString(System.Globalization.CultureInfo.InvariantCulture).ToLowerInvariant(),
             ["artifactCount"] = artifactCount.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["capturedCount"] = capturedCount.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["skippedCount"] = skippedEventCount.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["disabledCount"] = disabledCount.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["failedCount"] = failedEventCount.ToString(System.Globalization.CultureInfo.InvariantCulture),
             ["capturedEventCount"] = capturedEventCount.ToString(System.Globalization.CultureInfo.InvariantCulture),
             ["skippedEventCount"] = skippedEventCount.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["disabledEventCount"] = disabledEventCount.ToString(System.Globalization.CultureInfo.InvariantCulture),
             ["failedEventCount"] = failedEventCount.ToString(System.Globalization.CultureInfo.InvariantCulture),
             ["safeByDefault"] = (!enabled).ToString(System.Globalization.CultureInfo.InvariantCulture)
         };
@@ -403,12 +431,14 @@ internal sealed class GuestArtifactWriter
             name,
             capturedEventPrefixes,
             skippedEventPrefixes,
+            disabledEventPrefixes,
             failedEventPrefixes ?? Array.Empty<string>());
         var concreteStatusReason = LastCollectionReason(
             events,
             name,
             status,
             skippedEventPrefixes,
+            disabledEventPrefixes,
             failedEventPrefixes ?? Array.Empty<string>());
         var reason = status switch
         {
@@ -419,6 +449,9 @@ internal sealed class GuestArtifactWriter
             "enabled-empty" => "noArtifactsProduced",
             _ => string.Empty
         };
+        metadata["zhStatus"] = ZhCollectionStatus(status);
+        metadata["zhReason"] = ZhCollectionReason(reason);
+        metadata["zhHint"] = ZhCollectionHint(name, status, reason);
 
         return new ArtifactCollectionDescriptor
         {
@@ -443,6 +476,7 @@ internal sealed class GuestArtifactWriter
         int artifactCount,
         int capturedEventCount,
         int skippedEventCount,
+        int disabledEventCount,
         int failedEventCount)
     {
         if (artifactCount > 0 || capturedEventCount > 0)
@@ -463,6 +497,11 @@ internal sealed class GuestArtifactWriter
         if (failedEventCount > 0)
         {
             return "failed";
+        }
+
+        if (disabledEventCount > 0)
+        {
+            return "disabled";
         }
 
         if (skippedEventCount > 0)
@@ -732,6 +771,7 @@ internal sealed class GuestArtifactWriter
         string collectionName,
         string status,
         IReadOnlyList<string> skippedEventPrefixes,
+        IReadOnlyList<string> disabledEventPrefixes,
         IReadOnlyList<string> failedEventPrefixes)
     {
         for (var index = events.Count - 1; index >= 0; index--)
@@ -741,6 +781,7 @@ internal sealed class GuestArtifactWriter
             {
                 "failed" => EventTypeMatches(evt, failedEventPrefixes) || IsProbeFailureForCollection(evt, collectionName),
                 "skipped" => EventTypeMatches(evt, skippedEventPrefixes),
+                "disabled" => EventTypeMatches(evt, disabledEventPrefixes),
                 _ => false
             };
             if (!matchesStatus)
@@ -763,34 +804,49 @@ internal sealed class GuestArtifactWriter
         string collectionName,
         IReadOnlyList<string> capturedEventPrefixes,
         IReadOnlyList<string> skippedEventPrefixes,
+        IReadOnlyList<string> disabledEventPrefixes,
         IReadOnlyList<string> failedEventPrefixes)
     {
         SandboxEvent? lastRelevant = null;
         SandboxEvent? lastDiagnostic = null;
+        SandboxEvent? lastAncillary = null;
         for (var index = 0; index < events.Count; index++)
         {
             var evt = events[index];
-            if (!IsCollectionEvent(evt, collectionName, capturedEventPrefixes, skippedEventPrefixes, failedEventPrefixes))
+            if (!IsCollectionEvent(evt, collectionName, capturedEventPrefixes, skippedEventPrefixes, disabledEventPrefixes, failedEventPrefixes))
             {
                 continue;
             }
 
-            lastRelevant = evt;
+            if (IsCollectionStateEvent(evt, collectionName, capturedEventPrefixes, skippedEventPrefixes, disabledEventPrefixes, failedEventPrefixes))
+            {
+                lastRelevant = evt;
+            }
+            else
+            {
+                lastAncillary = evt;
+            }
+
             if (HasDiagnosticData(evt))
             {
                 lastDiagnostic = evt;
             }
         }
 
+        lastRelevant ??= lastAncillary;
         if (lastRelevant is not null)
         {
             CopyEventDataIfPresent(metadata, lastRelevant, "phase", "lastPhase");
             CopyEventDataIfPresent(metadata, lastRelevant, "capturePhase", "lastCapturePhase");
             CopyEventDataIfPresent(metadata, lastRelevant, "status", "lastStatus");
             CopyEventDataIfPresent(metadata, lastRelevant, "captureState", "lastCaptureState");
+            CopyEventDataIfPresent(metadata, lastRelevant, "zhMessage", "lastZhMessage");
+            CopyEventDataIfPresent(metadata, lastRelevant, "zhHint", "lastZhHint");
+            CopyEventDataIfPresent(metadata, lastRelevant, "zhReason", "lastZhReason");
             CopyEventDataIfPresent(metadata, lastRelevant, "nonfatal", "lastNonfatal");
             CopyEventDataIfPresent(metadata, lastRelevant, "artifactRelativePath", "lastArtifactRelativePath");
             CopyEventDataIfPresent(metadata, lastRelevant, "relativePath", "lastRelativePath");
+            CopyArtifactDiagnosticData(metadata, lastRelevant, "last");
             CopyProcessIdentity(metadata, lastRelevant);
         }
 
@@ -798,6 +854,9 @@ internal sealed class GuestArtifactWriter
         {
             metadata["lastEventType"] = lastDiagnostic.EventType;
             CopyEventDataIfPresent(metadata, lastDiagnostic, "reason", "lastReason");
+            CopyEventDataIfPresent(metadata, lastDiagnostic, "zhMessage", "lastDiagnosticZhMessage");
+            CopyEventDataIfPresent(metadata, lastDiagnostic, "zhHint", "lastDiagnosticZhHint");
+            CopyEventDataIfPresent(metadata, lastDiagnostic, "zhReason", "lastDiagnosticZhReason");
             CopyEventDataIfPresent(metadata, lastDiagnostic, "diagnosticStage", "lastDiagnosticStage");
             CopyEventDataIfPresent(metadata, lastDiagnostic, "exceptionType", "lastExceptionType");
             CopyEventDataIfPresent(metadata, lastDiagnostic, "win32Error", "lastWin32Error");
@@ -807,6 +866,7 @@ internal sealed class GuestArtifactWriter
             CopyEventDataIfPresent(metadata, lastDiagnostic, "commandExceptionType", "lastCommandExceptionType");
             CopyEventDataIfPresent(metadata, lastDiagnostic, "commandMessage", "lastCommandMessage");
             CopyEventDataIfPresent(metadata, lastDiagnostic, "probeId", "lastProbeId");
+            CopyArtifactDiagnosticData(metadata, lastDiagnostic, "lastDiagnostic");
             CopyProcessIdentity(metadata, lastDiagnostic);
         }
     }
@@ -816,12 +876,29 @@ internal sealed class GuestArtifactWriter
         string collectionName,
         IReadOnlyList<string> capturedEventPrefixes,
         IReadOnlyList<string> skippedEventPrefixes,
+        IReadOnlyList<string> disabledEventPrefixes,
         IReadOnlyList<string> failedEventPrefixes)
     {
         return HasCollectionName(evt, collectionName) ||
             IsProbeFailureForCollection(evt, collectionName) ||
             EventTypeMatches(evt, capturedEventPrefixes) ||
             EventTypeMatches(evt, skippedEventPrefixes) ||
+            EventTypeMatches(evt, disabledEventPrefixes) ||
+            EventTypeMatches(evt, failedEventPrefixes);
+    }
+
+    private static bool IsCollectionStateEvent(
+        SandboxEvent evt,
+        string collectionName,
+        IReadOnlyList<string> capturedEventPrefixes,
+        IReadOnlyList<string> skippedEventPrefixes,
+        IReadOnlyList<string> disabledEventPrefixes,
+        IReadOnlyList<string> failedEventPrefixes)
+    {
+        return IsProbeFailureForCollection(evt, collectionName) ||
+            EventTypeMatches(evt, capturedEventPrefixes) ||
+            EventTypeMatches(evt, skippedEventPrefixes) ||
+            EventTypeMatches(evt, disabledEventPrefixes) ||
             EventTypeMatches(evt, failedEventPrefixes);
     }
 
@@ -858,6 +935,7 @@ internal sealed class GuestArtifactWriter
             evt.Data.ContainsKey("diagnosticStage") ||
             evt.Data.ContainsKey("exceptionType") ||
             evt.Data.ContainsKey("commandMessage") ||
+            evt.Data.ContainsKey("protocolSummaryAvailable") ||
             IsProbeFailureEvent(evt);
     }
 
@@ -867,6 +945,110 @@ internal sealed class GuestArtifactWriter
         {
             metadata[destinationKey] = value;
         }
+    }
+
+    private static void CopyArtifactDiagnosticData(Dictionary<string, string> metadata, SandboxEvent evt, string prefix)
+    {
+        foreach (var key in new[]
+        {
+            "sourcePath",
+            "guestFullPath",
+            "guestRelativePath",
+            "sourceEventRelativePath",
+            "sourceExists",
+            "sourceMissing",
+            "sourceSizeBytes",
+            "sourceEventSizeBytes",
+            "sourceLastWriteUtc",
+            "sourceMtimeUtc",
+            "sourceEventLastWriteUtc",
+            "sourceSha256",
+            "sourceHashAlgorithm",
+            "sourceHashStatus",
+            "originalSha256",
+            "sha256",
+            "hashAlgorithm",
+            "artifactSha256",
+            "artifactSizeBytes",
+            "artifactHashStatus",
+            "artifactExists",
+            "copiedSha256",
+            "copiedHashAlgorithm",
+            "copiedHashStatus",
+            "sizeBytes",
+            "artifactLastWriteUtc",
+            "mtimeUtc",
+            "etlRelativePath",
+            "pcapRelativePath",
+            "pcapngRelativePath",
+            "packetCaptureRelativePath",
+            "diagnosticRelativePath",
+            "pcapFormat",
+            "protocolSummaryAvailable",
+            "protocolSummaryState",
+            "protocolSummaryStatus",
+            "protocolSummaryReason",
+            "protocolsObserved",
+            "zhMessage",
+            "zhHint",
+            "zhReason"
+        })
+        {
+            CopyEventDataIfPresent(metadata, evt, key, $"{prefix}{char.ToUpperInvariant(key[0])}{key[1..]}");
+        }
+    }
+
+    private static string ZhCollectionStatus(string status)
+    {
+        return status switch
+        {
+            "captured" => "已采集到证据文件或事件。",
+            "disabled" => "该证据通道未启用。",
+            "failed" => "该证据通道执行失败。",
+            "skipped" => "该证据通道被跳过或不可用。",
+            "enabled-empty" => "该证据通道已启用，但未产出文件。",
+            "not-implemented" => "该证据通道尚未实现。",
+            _ => string.Empty
+        };
+    }
+
+    private static string ZhCollectionReason(string reason)
+    {
+        return reason switch
+        {
+            "driverEventsNotRequested" => "未请求 driver-events JSONL。",
+            "r0CollectorNotRequested" => "未请求 R0Collector sidecar。",
+            "packetCaptureNotRequested" => "未请求 packet capture。",
+            "memoryDumpNotRequested" => "未请求 memory dump。",
+            "screenshotNotRequested" => "未请求 screenshot。",
+            "collectDroppedFilesNotRequested" => "未请求 dropped-file 复制。",
+            "collectorNotImplemented" => "采集器尚未实现该通道。",
+            "collectorSkippedOrUnavailable" => "采集器跳过或环境不可用。",
+            "collectorFailed" => "采集器执行失败。",
+            "noArtifactsProduced" => "已启用但没有产出文件。",
+            _ => string.Empty
+        };
+    }
+
+    private static string ZhCollectionHint(string collectionName, string status, string reason)
+    {
+        if (string.Equals(status, "disabled", StringComparison.OrdinalIgnoreCase))
+        {
+            return $"如需 {collectionName} 证据，请显式启用对应采集开关；字段 reason 保持机器可解析，不翻译。";
+        }
+
+        if (string.Equals(status, "failed", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(status, "skipped", StringComparison.OrdinalIgnoreCase))
+        {
+            return $"请查看 collection metadata 的 lastReason/lastDiagnostic* 以及事件中的 zhHint 来定位 {collectionName} 证据缺口。";
+        }
+
+        if (string.Equals(reason, "noArtifactsProduced", StringComparison.OrdinalIgnoreCase))
+        {
+            return $"该通道已启用但没有文件产出；请结合对应事件确认是否没有可采集对象或采集条件未触发。";
+        }
+
+        return string.Empty;
     }
 
     private static void CopyProcessIdentity(Dictionary<string, string> metadata, SandboxEvent evt)
@@ -889,6 +1071,14 @@ internal sealed class GuestArtifactWriter
         CopyEventDataIfPresent(metadata, evt, "targetProcessName", "lastTargetProcessName");
         CopyEventDataIfPresent(metadata, evt, "targetProcessPath", "lastTargetProcessPath");
         CopyEventDataIfPresent(metadata, evt, "processRole", "lastProcessRole");
+        CopyEventDataIfPresent(metadata, evt, "treeDepth", "lastTreeDepth");
+        CopyEventDataIfPresent(metadata, evt, "treeLineage", "lastTreeLineage");
+        CopyEventDataIfPresent(metadata, evt, "childProcessCount", "lastChildProcessCount");
+        CopyEventDataIfPresent(metadata, evt, "processMissing", "lastProcessMissing");
+        CopyEventDataIfPresent(metadata, evt, "exitMissing", "lastExitMissing");
+        CopyEventDataIfPresent(metadata, evt, "processExited", "lastProcessExited");
+        CopyEventDataIfPresent(metadata, evt, "rootMissing", "lastRootMissing");
+        CopyEventDataIfPresent(metadata, evt, "rootExited", "lastRootExited");
     }
 
     private static string? InferCaptureState(ArtifactClassification classification, IReadOnlyDictionary<string, string> metadata)
@@ -919,14 +1109,30 @@ internal sealed class GuestArtifactWriter
         }
 
         var extension = Path.GetExtension(artifactFullPath);
+        var artifactRelativePath = ValueOrEmpty(metadata, "artifactRelativePath", "relativePath", "importPath");
         AddIfMissing(metadata, "pcapFormat", string.Equals(extension, ".pcapng", StringComparison.OrdinalIgnoreCase)
             ? "pcapng"
             : string.Equals(extension, ".pcap", StringComparison.OrdinalIgnoreCase)
                 ? "pcap"
                 : "unknown");
+        AddIfMissing(metadata, "packetCaptureRelativePath", artifactRelativePath);
+        AddIfMissing(metadata, "sourceArtifactRelativePath", artifactRelativePath);
+        if (string.Equals(extension, ".pcapng", StringComparison.OrdinalIgnoreCase))
+        {
+            AddIfMissing(metadata, "pcapngRelativePath", artifactRelativePath);
+        }
+        else if (string.Equals(extension, ".pcap", StringComparison.OrdinalIgnoreCase))
+        {
+            AddIfMissing(metadata, "pcapRelativePath", artifactRelativePath);
+        }
+
         AddIfMissing(metadata, "captureSource", metadata.ContainsKey("collector") ? "guest-pktmon" : "guest-output");
         AddIfMissing(metadata, "hostCaptureStarted", "false");
         AddIfMissing(metadata, "importMode", "guest-artifact");
+        AddIfMissing(metadata, "protocolSummaryAvailable", "false");
+        AddIfMissing(metadata, "protocolSummaryState", "placeholder");
+        AddIfMissing(metadata, "protocolSummaryStatus", "skipped");
+        AddIfMissing(metadata, "protocolSummaryReason", "protocolParserNotImplemented");
     }
 
     private static string? InferCaptureState(string eventType)
@@ -942,6 +1148,11 @@ internal sealed class GuestArtifactWriter
         if (eventType.EndsWith(".skipped", StringComparison.OrdinalIgnoreCase))
         {
             return "skipped";
+        }
+
+        if (eventType.EndsWith(".disabled", StringComparison.OrdinalIgnoreCase))
+        {
+            return "disabled";
         }
 
         if (eventType.EndsWith(".failed", StringComparison.OrdinalIgnoreCase) ||

@@ -3,10 +3,44 @@
 This document describes the behavior rules in `rules/behavior-rules.json`.
 The matrix is intentionally conservative: rules classify normalized sandbox
 events for reporting, but they do not by themselves prove malicious intent.
-The 2026-07-11 v10 static/rule-quality expansion raises coverage to 305 rules.
-It adds exact data-value predicates for status/verdict rules plus static domain,
-download/upload, credential-access, and defense-evasion triage without changing
-the public report model. The previous v9 rules/VT-quality expansion added
+The 2026-07-11 v16 structured-static-event expansion raises coverage to 399
+rules. It keeps the existing `static.analysis.completed` tag contract and adds
+direct rule consumption for `static.pe.import.module`,
+`static.pe.import.cluster`, `static.string.*`, `static.packer.hint`, and
+`static.yara.match` rows as low-confidence static triage. Reference-only static
+URL/domain rows stay evidence-only, and static-only findings remain outside the
+primary runtime behavior bucket. The previous v15 open-source-reference
+expansion raised coverage to 398 rules. It landed a small set of
+Cuckoo/CAPE-style behavior signatures, DRAKVUF/API-monitor dimensions, ATT&CK
+Windows mappings, and public Sigma-style false-positive guards for Odbcconf,
+MMC, and named-pipe impersonation evidence. These rules require
+command/API/path context and retain explicit KSword/R0Collector/VirusTotal
+noise exclusions. The previous v14 combination-rule and MITRE-quality expansion
+raised coverage to 395 rules.
+It added high-signal combinations for Run-key/dropper persistence, Defender
+exclusion dropper evasion, security-tool discovery, credential-file search,
+periodic C2 from user-writable payloads, anti-sandbox VM-check sleep gates,
+and script-download dropped-file artifacts. It also maps hollowing and
+LoadLibrary evidence to more specific process injection subtechniques. The
+previous v13 advanced-predicate and
+Windows-behavior expansion added regex, numeric-range, absent-field, and
+same-field-AND predicates so rules can express command syntax, port/byte/count
+thresholds, no-SNI/no-User-Agent cases, and high-signal field combinations
+without broad substring fallbacks. The previous v12 targeted Windows behavior
+and false-positive-control expansion added focused coverage for remote
+script/proxy execution, NTDS/Kerberos/browser credential access,
+Defender/UAC/PowerShell logging tamper, Office/browser persistence, WinRM
+enablement, TLS dynamic-DNS/onion SNI, and authenticated HTTP exfil metadata.
+New high-risk rules require runtime command, registry, file, HTTP, TLS, DNS,
+or flow evidence and explicitly avoid collection health, R0 unavailable/self
+noise, VirusTotal unset, and static-only weak signals. The previous v11
+behavior expansion added all-of path, command-line, and data predicates so
+high-risk behavior expansion can require concrete combinations instead of
+promoting single weak fields. The previous v10 static/rule-quality expansion
+added exact data-value predicates for status/verdict rules plus static domain,
+download/upload, credential-access, and defense-evasion triage without
+changing the public report model. The previous v9 rules/VT-quality expansion
+added
 targeted Windows persistence, privilege-escalation, process-injection,
 PowerShell/LOLBin, DNS/HTTP/TLS/certificate, anti-analysis, and VirusTotal
 enrichment-quality rules. The previous v8
@@ -14,10 +48,10 @@ report-semantic cleanup separated behavior findings from static triage and
 collection diagnostics, and the v7 placeholder-reduction pass replaced many
 broad placeholder entries with concrete metadata, indicator, or
 normalized-correlation rules for download/execute chains, process trees,
-anti-analysis timing, DNS/TLS/PCAP evidence, and R0 image-load rows. The
-matching predicates remain simple; newer rules may also carry metadata-only
-`confidence`, `tags`, `evidenceFields`, `titleZh`, and `summaryZh` values to
-make report triage and rule reviews more consistent.
+anti-analysis timing, DNS/TLS/PCAP evidence, and R0 image-load rows. Newer
+rules may also carry metadata-only `confidence`, `tags`, `evidenceFields`,
+`titleZh`, and `summaryZh` values to make report triage and rule reviews more
+consistent.
 
 ## Rule schema boundary
 
@@ -25,16 +59,57 @@ The current rule engine supports these stable predicates:
 
 - `eventTypes`: exact, case-insensitive event type match.
 - `containsPath`: case-insensitive substring match against `SandboxEvent.Path`.
+- `allContainsPath`: all configured substrings must appear in
+  `SandboxEvent.Path`. This is used for constrained path pairs such as Startup
+  folder plus executable/script extension.
+- `pathRegex`: at least one timeout-bounded, case-insensitive regular
+  expression must match `SandboxEvent.Path`.
 - `containsCommandLine`: case-insensitive substring match against
   `SandboxEvent.CommandLine`.
-- `dataKeys`: requires at least one configured key in `SandboxEvent.Data`.
+- `allContainsCommandLine`: all configured substrings must appear in
+  `SandboxEvent.CommandLine`. This is used for command patterns such as
+  `net use` plus `/user:` plus an admin share.
+- `commandLineRegex`: at least one timeout-bounded, case-insensitive regular
+  expression must match `SandboxEvent.CommandLine`.
+- `dataKeys`: requires at least one configured field. Fields first resolve
+  against `SandboxEvent.Data`; stable top-level aliases such as `source`,
+  `processName`, `path`, and `commandLine` are also available.
+- `allDataKeys`: requires every configured field, for normalized correlation
+  rows that need both source and target fields.
+- `absentDataKeys`: requires every configured field to be absent. This is used
+  for no-User-Agent, no-SNI, and no-referrer rules.
 - `dataEquals`: case-insensitive exact match against configured data fields.
   This is used for status/verdict values where substring matching would be too
   broad, such as avoiding `not_malicious` matching a `malicious` verdict rule.
+- `allDataEquals`: all configured data fields must exactly match one of their
+  configured values.
 - `dataContains`: case-insensitive substring match against configured data
   fields.
+- `allDataContains`: all configured data fields must contain at least one of
+  their configured substrings. This is used for combinations such as HTTP
+  `POST` plus JSON content type before applying C2 URI labels.
+- `dataContainsAll`: every configured field must contain every substring in
+  that field's list. This is same-field AND for cases such as `wmic` plus
+  `shadowcopy` plus `delete`.
+- `dataRegex`: at least one configured field must match one timeout-bounded,
+  case-insensitive regular expression.
+- `allDataRegex`: every configured field must match one timeout-bounded,
+  case-insensitive regular expression.
+- `dataNumericRanges`: at least one configured field must parse as an
+  invariant-culture finite number and fall within an inclusive range. Ranges
+  can set `min`, `max`, `exclusiveMin`, and `exclusiveMax`.
+- `allDataNumericRanges`: every configured numeric field must be present,
+  parseable, and in range.
+- `excludeProcessNames`: excludes matching process-image names after basename
+  normalization and `.exe` trimming.
+- `excludePathContains`: excludes path substrings.
+- `excludeCommandLineContains`: excludes command-line substrings.
 - `excludeDataEquals`: exact-match exclusion counterpart for `dataEquals`.
 - `excludeDataContains`: substring exclusion counterpart for `dataContains`.
+
+Predicate families are combined with AND. Non-`all*` lists and dictionaries are
+still any-of within that family; `all*` predicates are the conservative
+counterpart for rules that would otherwise be too broad.
 
 Metadata-only fields do not affect matching:
 
@@ -48,9 +123,11 @@ Metadata-only fields do not affect matching:
 - `evidenceFields`: top-level or `data.*` fields analysts should inspect first
   when reviewing the finding.
 
-There is no source-specific predicate yet. Rows that mention driver or R0
-events therefore rely on normalized event names and path/data evidence; report
-readers should still inspect the event `source` field in the evidence table.
+There is still no dedicated source-only predicate, but data-style predicates
+can resolve the top-level `source` alias for exclusions and constrained rules.
+Rows that mention driver or R0 events still rely primarily on normalized event
+names plus path/data evidence; report readers should inspect the event
+`source` field in the evidence table.
 
 ## Event sources
 
@@ -95,31 +172,188 @@ future parser rows.
 | Process behavior | `script-interpreter`, `process-new`, `process-timeout-long-sleep` | `process.start`, `process.new`, `process.timeout` | `low` to `medium` | `T1059`, `T1497.003` | Separates generic new-process evidence from stronger scripting and timeout/evasion indicators. |
 | Full process tree and launch context | `process-tree-observed`, `process-tree-root-unavailable`, `process-start-failed`, `process-tree-child-count-observed`, `lolbin-process-tree-node`, `execution-from-user-writable-tree-path` | `process.tree`, `process.tree_unavailable`, `process.start_failed`, `process.new`, `process.start` | `info` to `medium` | `T1204.002`, `T1218` where specific evidence applies | Surfaces root/depth/lineage/child-count rows from the process-tree probe, rapid-exit collection gaps, launch failures, LOLBin descendants, and execution from user-writable staging paths. |
 | Script execution behavior | `script-interpreter`, `script-file-executed` | `process.start` | `medium` | `T1059` | Matches interpreter names and script-like command-line extensions. |
+| Script/LOLBin proxy expansion | `hh-compiled-help-remote-script-execution`, `msxsl-remote-xsl-script-execution`, `forfiles-script-proxy-execution` | `process.start` | `medium` to `high` | `T1202`, `T1218`, `T1220` | Adds constrained HH, MSXSL, and forfiles proxy-execution rules. Each rule requires the LOLBin plus remote/script or child-command evidence and excludes sandbox agent/R0 collector command self-noise. |
+| Open-source reference LOLBin/API monitor expansion | `odbcconf-regsvr-user-writable-dll-proxy-execution`, `mmc-user-writable-msc-proxy-execution`, `named-pipe-impersonation-api-observed` | `process.start`, `process.new`, `api.call`, `named_pipe.impersonation`, `pipe.impersonation` | `high` | `T1218.008`, `T1218.014`, `T1134.001` | Lands public ATT&CK/Sigma-style ideas with sandbox-safe constraints: Odbcconf must use `REGSVR` plus a user-writable DLL, MMC must load a user-writable `.msc`, and named-pipe impersonation must include an impersonation API plus pipe name. |
+| Advanced PowerShell and command syntax | `powershell-encoded-command-base64-regex`, `powershell-amsi-bypass-scriptblock-field-and`, `wmic-shadowcopy-delete-field-and`, `wevtutil-log-clear-command-regex`, `bcdedit-recovery-ignoreallfailures-command` | `process.start`, `process.new`, `powershell.scriptblock`, `scriptblock.text`, `api.call` | `high` | `T1059.001`, `T1070.001`, `T1490`, `T1562.001` | Uses regex and same-field-AND predicates for EncodedCommand base64 payloads, AMSI bypass script blocks, WMIC shadow-copy deletion, event-log clearing, and recovery-policy tamper. Agent/R0Collector command self-noise and collection-health metadata are excluded. |
 | Persistence behavior | `registry-run-key-persistence`, `service-registry-persistence`, `service-create-command`, `scheduled-task-persistence`, `tasks-folder-file-write`, `startup-folder-persistence`, `ifeo-debugger-persistence`, `winlogon-persistence`, `driver-registry-run-key-typed-persistence`, `driver-registry-service-typed-persistence`, `scheduled-task-registry-cache-persistence`, `driver-registry-taskcache-typed-persistence`, `wmi-event-subscription-persistence`, `wmi-event-subscription-command`, `com-hijack-persistence`, `appinit-dlls-persistence`, `lsa-security-provider-persistence` | `registry.set`, `registry.create`, `driver.registry`, `process.start`, `file.created`, `file.modified`, `driver.file` | `high` | `T1547.001`, `T1547.004`, `T1543.003`, `T1053.005`, `T1546.012`, `T1546`, `T1112` | Covers Run/RunOnce keys, service registry paths and service creation commands, scheduled-task command/folder evidence, Startup folder writes, IFEO and Winlogon helper values, WMI subscription artifacts, COM hijacks, AppInit DLLs, and LSA package paths. |
+| Constrained persistence expansion | `persistence-startup-folder-lnk-or-script`, `persistence-service-script-lolbin-imagepath`, `persistence-shell-open-command-hijack`, `persistence-winlogon-user-writable-payload`, `persistence-scheduled-task-hidden-user-writable` | `file.created`, `file.modified`, `driver.file`, `registry.set`, `registry.create`, `driver.registry`, `service.created`, `service.modified`, `scheduled_task.created`, `scheduled_task.modified` | `high` | `T1547.001`, `T1547.004`, `T1543.003`, `T1053.005`, `T1546` | Uses all-of path/data predicates and query-operation exclusions so Startup, service, shell-open-command, Winlogon, and hidden scheduled-task persistence requires payload or user-writable context rather than a bare registry path. |
+| Regex-constrained service and task persistence | `suspicious-service-imagepath-user-writable-regex`, `suspicious-scheduled-task-payload-regex` | `registry.set`, `registry.create`, `driver.registry`, `scheduled_task.created`, `scheduled_task.modified` | `high` | `T1543.003`, `T1053.005` | Adds regex-backed checks for service ImagePath and scheduled-task payloads under user-writable locations. Query/read registry operations and sandbox/collector metadata remain excluded. |
+| Cross-category combination rules | `combo-persistence-runkey-dropped-payload`, `combo-defense-evasion-defender-exclusion-dropped-payload`, `combo-discovery-security-tool-process-list`, `combo-credential-file-search-user-profile`, `combo-c2-user-writable-payload-periodic-flow`, `combo-anti-sandbox-vm-check-long-sleep`, `combo-dropped-file-script-download-artifact` | `registry.set`, `registry.create`, `driver.registry`, `process.start`, `process.new`, `network.flow`, `pcap.flow`, `antiAnalysis.sandboxCheck`, `api.sleep`, `artifact.dropped_file.copied` | `medium` to `high` | `T1547.001`, `T1562.001`, `T1518.001`, `T1552.001`, `T1071.001`, `T1497.003`, `T1105` | Requires paired path/data/regex/numeric/correlation evidence across persistence, defense evasion, discovery, credential access, C2, anti-sandbox, and dropped-file categories. Agent/R0Collector process names, command lines, collection-health fields, and VT unset rows are excluded. |
+| Office and browser persistence expansion | `office-macro-security-weakened-registry`, `outlook-form-homepage-persistence`, `browser-extension-policy-persistence`, `browser-native-messaging-host-registry`, `browser-native-messaging-host-manifest-file`, `ie-browser-helper-object-user-writable` | `registry.set`, `registry.create`, `driver.registry`, `file.created`, `file.modified`, `driver.file` | `high` | `T1137`, `T1176` | Adds Office macro/Protected View weakening, Outlook forms/homepage persistence, browser extension policy force-install, native-messaging host registration/manifest files, and IE BHO/toolbar hooks. Registry rules exclude query-only operations; file rules exclude sandbox plumbing and normal browser process writes where appropriate. |
 | System inventory diff persistence | `service-system-change-created`, `service-system-change-suspicious-command`, `scheduled-task-system-change-created`, `scheduled-task-suspicious-target`, `startup-item-system-change-created`, `startup-item-executable-value`, `persistence-system-item-deleted`, `system-diff-truncated` | `service.created`, `service.modified`, `service.deleted`, `scheduled_task.created`, `scheduled_task.modified`, `scheduled_task.deleted`, `startup_item.created`, `startup_item.modified`, `startup_item.deleted`, `*.diff_truncated` | `info` to `high` | `T1543.003`, `T1053.005`, `T1547.001`, `T1070.004` | Uses the current system-change probe’s service/task/startup diffs to catch persistence created or changed after launch, suspicious payload targets, deleted persistence entries, and truncation diagnostics. |
 | Registry behavior | `registry-change`, `registry-run-key-persistence`, `service-registry-persistence`, `service-imagepath-or-dll-registry-change`, `scheduled-task-registry-cache-persistence`, `ifeo-debugger-persistence`, `winlogon-persistence`, `wmi-event-subscription-persistence`, `com-hijack-persistence`, `appinit-dlls-persistence`, `lsa-security-provider-persistence`, `r0-driver-registry-change-signal` | `registry.set`, `registry.create`, `registry.delete`, `driver.registry` | `medium` to `high` | `T1112`, `T1547.001`, `T1547.004`, `T1546.012`, `T1546`, `T1543.003` | Generic registry writes remain medium; Run/RunOnce, service, TaskCache, IFEO, Winlogon, WMI subscription, COM, AppInit, and LSA paths are high. |
 | File behavior | `file-drop`, `file-deleted`, `executable-file-write`, `temp-executable-drop`, `script-file-drop`, `system-directory-executable-write`, `tasks-folder-file-write`, `startup-folder-persistence`, `downloaded-file-zone-identifier`, `browser-download-cache-write`, `download-archive-or-script-stage`, `r0-driver-file-write-signal` | `file.created`, `file.modified`, `file.deleted`, `driver.file`, `driver.file.*` | `low` to `high` | `T1070.004`, `T1105`, `T1059`, `T1053.005`, `T1547.001` where specific evidence applies | Executable/script extension, Temp/AppData/System32/Tasks/Startup paths, browser/download cache paths, Zone.Identifier metadata, staged archives/scripts, and driver file-operation metadata make guest and R0 file-write rows easier to triage. |
+| Ransomware and recovery inhibition | `ransomware-shadow-copy-deletion-command`, `ransomware-recovery-configuration-disable-command`, `ransomware-ransom-note-file-created`, `ransomware-encrypted-extension-rename`, `ransomware-encryption-classified-file-event` | `process.start`, `file.created`, `file.modified`, `driver.file`, `driver.file.rename`, `driver.file.setinfo`, `driver.file.write`, `artifact.dropped_file.copied` | `high` | `T1486`, `T1490` | Adds ransomware-specific impact rules for shadow-copy/recovery deletion commands, ransom-note filenames, encrypted-extension rename operations, and explicit ransomware/encryption file classifications. These rules require command, path, operation, or classification evidence and exclude sandbox collection paths. |
+| Numeric burst impact metadata | `ransomware-mass-file-write-burst-numeric`, `registry-mass-runkey-change-burst-numeric` | `file.activity`, `file.burst`, `driver.file.summary`, `registry.activity`, `registry.summary`, `driver.registry.summary` | `high` | `T1486`, `T1547.001` | Uses numeric thresholds plus classification/path-scope regex so high-volume file writes or registry sets are elevated only when paired with ransomware/encryption or Run-key persistence context. |
 | Screenshot, memory, and dropped-file artifacts | `screenshot-captured-artifact`, `screenshot-capture-skipped`, `memory-dump-captured-artifact`, `memory-dump-capture-skipped`, `dropped-file-artifact-copied`, `dropped-file-artifact-skipped`, `dropped-executable-artifact-copied`, `artifact-manifest-written`, `file-masquerading-double-extension` | `screenshot.captured`, `screenshot.skipped`, `memory_dump.captured`, `memory_dump.skipped`, `artifact.dropped_file.copied`, `artifact.dropped_file.skipped`, `artifact.manifest.written`, `file.created`, `file.modified`, `driver.file` | `info` to `medium` | `T1105`, `T1036` where payload or masquerading evidence applies | Keeps opt-in screenshots, minidumps, released dropped files, copied executable/script/archive artifacts, manifest rows, and double-extension masquerading visible without adding new report fields. |
 | Injection behavior | `remote-thread-injection-observed`, `process-injection-memory-primitive`, `process-injection-thread-or-apc-primitive`, `process-hollowing-signal`, `rwx-memory-protection-change`, `dll-injection-loadlibrary-signal` | `process.remote_thread`, `thread.remote`, `driver.thread`, `process.memory`, `process.write_memory`, `memory.protect`, `driver.process`, `api.call`, `image.load` | `medium` to `high` | `T1055`, `T1055.001`, `T1055.012` | Covers normalized remote-thread/APC events plus memory allocation/write, thread/APC, hollowing, RWX protection, and LoadLibrary-style DLL injection primitives. |
+| Constrained injection context | `injection-remote-thread-into-sensitive-process`, `injection-early-bird-apc-primitive`, `injection-section-map-remote-execute`, `injection-loadlibrary-remote-thread-target`, `injection-all-access-sensitive-process-handle` | `process.remote_thread`, `thread.remote`, `driver.thread`, `api.call`, `process.memory`, `driver.process`, `process.open`, `process.access` | `high` | `T1055`, `T1055.001`, `T1055.002` | Requires target-process, target function, section-map, APC, or sensitive-process handle context so static imports or bare API names do not become strong injection findings. |
 | Lateral movement behavior | `psexec-or-remote-service-lateral-command`, `winrm-powershell-remoting-lateral-command`, `admin-share-or-remote-copy-command`, `wmi-remote-execution-command`, `remote-scheduled-task-command`, `smb-network-port-observed`, `winrm-network-port-observed` | `process.start`, `network.tcp`, `network.udp`, `driver.network`, `pcap.tcp`, `pcap.udp`, `network.flow` | `medium` to `high` | `T1021.002`, `T1021.006`, `T1047`, `T1053.005`, `T1569.002`, `T1570` | Covers PsExec/remote service, WinRM/PowerShell remoting, admin-share staging, WMI/CIM remote execution, remote scheduled tasks, SMB ports, and WinRM ports. |
+| Constrained lateral movement commands | `lateral-net-use-admin-share-credentials`, `lateral-wmic-remote-process-create`, `lateral-remote-schtasks-create-or-run`, `lateral-psexec-service-drop-file`, `lateral-remote-registry-run-or-service-add`, `winrm-remote-management-enabled-command` | `process.start`, `file.created`, `file.modified`, `driver.file`, `artifact.dropped_file.copied` | `high` | `T1021.002`, `T1021.006`, `T1047`, `T1053.005`, `T1112`, `T1570` | Adds all-of command/path rules for admin-share credentials, WMIC remote process creation, remote scheduled tasks, PsExec service staging, remote registry persistence, and explicit WinRM/PowerShell remoting enablement. Port-only lateral rules remain triage. |
+| Numeric remote-management ports | `network-smb-outbound-admin-port-numeric`, `network-rdp-outbound-port-numeric`, `network-winrm-outbound-port-numeric`, `network-tor-socks-listener-port-numeric` | `network.tcp`, `driver.network`, `pcap.flow`, `pcap.tcp`, `network.tcp.listener.opened`, `network.udp.listener.opened`, `network.netstat.added` | `medium` | `T1021.001`, `T1021.002`, `T1021.006`, `T1090` | Uses numeric ranges for SMB 445, RDP 3389, WinRM 5985/5986, and Tor/SOCKS 9050/9150 listener ports. These remain medium-confidence network behavior unless paired with command or file evidence. |
 | Extended discovery and lateral movement | `rdp-network-port-observed`, `ssh-network-port-observed`, `ldap-kerberos-network-port-observed`, `tor-or-proxy-port-observed`, `admin-share-file-path-observed`, `remote-desktop-command-observed`, `network-share-discovery-command`, `system-discovery-command`, `process-discovery-command`, `network-discovery-command` | `process.start`, `file.created`, `file.modified`, `file.open`, `driver.file`, `network.tcp`, `network.udp`, `network.netstat`, `network.netstat.added`, `driver.network`, `pcap.tcp`, `pcap.udp`, `network.flow` | `medium` to `high` | `T1016`, `T1018`, `T1021.001`, `T1021.004`, `T1049`, `T1057`, `T1082`, `T1090`, `T1135`, `T1570` | Adds RDP/SSH/LDAP/Kerberos/domain-service ports, proxy/Tor ports, admin-share file paths, Remote Desktop commands, and common system/process/network/share discovery commands. |
 | R0 driver callback signals | `r0-driver-process-event`, `r0-driver-file-write-signal`, `r0-driver-registry-change-signal`, `r0-driver-network-signal`, `driver-load-heartbeat`, `image-load-metadata-observed` | `driver.process`, `driver.file`, `driver.registry`, `driver.network`, `driver.event.reserved`, `driver.load`, `image.load` | `info` to `medium` | `T1105`, `T1112` where specific evidence applies | Keeps typed R0 process/file/registry/network/image callback rows visible in findings before richer source predicates or cross-event correlation exist. |
 | R0 driver heartbeat | `driver-load-heartbeat` | `driver.event.reserved`, `driver.load` | `info` | None | Shows that the R0 event drain path produced the driver startup self-test or future driver-load heartbeat. |
 | Image-load metadata | `image-load-metadata-observed` | `image.load`, `image.loaded`, `driver.imageLoad`, `driver.image.load` | `info` | None | Requires image/module path, process, base-address, or system-image metadata so R0 image callback rows are visible without matching every bare event-type stub. |
 | Download-execute behavior | `powershell-evasion-download-abuse`, `script-interpreter-network-download`, `mshta-script-proxy-execution`, `regsvr32-scriptlet-proxy-execution`, `download-execute-chain-observed`, `execution-from-downloads-or-staging-path` | `process.start`, `behavior.download_execute`, `download.execute`, `file.downloaded.executed` | `high` | `T1059.001`, `T1218.005`, `T1218.010`, `T1105` | Covers script/LOLBin download primitives, mshta/regsvr32 URL/scriptlet execution, process starts from download/staging paths, and normalized correlation rows for downloaded artifacts executed in the same analysis window. |
+| Constrained download-execute expansion | `download-powershell-outfile-user-writable`, `download-curl-to-user-writable-path`, `download-certutil-urlcache-user-writable`, `downloaded-file-executed-with-path-correlation`, `rundll32-remote-scriptlet-execution` | `process.start`, `behavior.download_execute`, `download.execute`, `file.downloaded.executed` | `high` | `T1105`, `T1218.011` | Requires downloader command tokens plus user-writable output paths, or both downloaded/executed path fields on normalized correlation rows. Static URL strings and standalone file writes remain lower-confidence triage. |
 | Network behavior | `network-connection`, `http-network-activity`, `dns-query-observed`, `udp-network-activity`, `tls-or-https-network-activity`, `network-ip-literal-observed`, `driver-network-outbound-connect`, `driver-network-dns-traffic`, `driver-network-web-protocol-or-port`, `r0-driver-network-signal` | `network.tcp`, `network.udp`, `http.request`, `network.http`, `network.tls`, `tls.connection`, `dns.query`, `network.dns`, `driver.network` | `low` to `medium` | `T1105`, `T1071.001`, `T1071.004` | Records outbound TCP/UDP plus protocol-specific HTTP/DNS/TLS rows and driver network payloads when normalized collectors provide them. |
 | Network probe depth | `dns-cache-added`, `dns-cache-txt-or-tunnel`, `dns-cache-dynamic-domain`, `netstat-connection-observed`, `netstat-added-connection`, `network-listener-opened`, `network-nonstandard-listener-port`, `network-connection-closed` | `dns.cache.added`, `network.netstat`, `network.netstat.added`, `network.netstat.removed`, `network.tcp.listener.opened`, `network.udp.listener.opened`, `network.tcp.closed` | `info` to `high` | `T1049`, `T1071.004`, `T1571` where specific evidence applies | Uses current TCP/DNS/netstat/listener probe output to report new DNS cache entries, tunnel-capable records, dynamic domains, opened listeners, suspicious listener ports, and short-lived closed connections. Generic `network.netstat` rows are collection metadata; only `network.netstat.added` carries the netstat discovery behavior mapping. |
 | C2, DNS, TLS, and PCAP metadata | `network-c2-beacon-event`, `network-c2-indicator-fields`, `dns-tunnel-or-dga-indicator`, `http-c2-suspicious-user-agent`, `tls-sni-ja3-metadata-observed`, `pcap-artifact-imported`, `pcap-protocol-summary-placeholder`, `pcap-flow-observed`, `pcap-http-request-observed`, `pcap-dns-query-observed`, `pcap-tls-clienthello-observed`, `dns-dynamic-domain-pattern`, `http-direct-ip-or-nonstandard-port` | `network.c2`, `c2.beacon`, `beacon.observed`, `http.request`, `network.http`, `network.tls`, `tls.connection`, `dns.query`, `network.dns`, `dns.cache.added`, `driver.network`, `pcap.summary`, `pcap.protocol.summary`, `network.pcap`, `pcap.packet`, `pcap.flow`, `pcap.tcp`, `pcap.udp`, `pcap.http`, `pcap.dns`, `pcap.tls`, `network.flow` | `info` to `high` | `T1071.001`, `T1071.004`, `T1573` where protocol-specific evidence exists | Adds explicit C2/beacon event support, C2 indicator fields, DNS tunnel/DGA indicators, suspicious HTTP user agents, TLS SNI/JA3/certificate metadata, direct-IP/nonstandard web port triage, and PCAP artifact/flow/HTTP/DNS/TLS metadata without changing collectors. |
+| Constrained C2 correlation | `c2-http-script-user-agent-beacon-uri`, `c2-http-post-json-tasking`, `c2-dns-txt-high-entropy-label`, `c2-tls-no-sni-with-risky-ja3`, `c2-network-flow-classified-periodic-checkin` | `http.request`, `network.http`, `pcap.http`, `dns.query`, `network.dns`, `pcap.dns`, `network.tls`, `tls.connection`, `pcap.tls`, `network.flow`, `pcap.flow` | `high` | `T1071.001`, `T1071.004`, `T1573` | Uses all-of predicates for user-agent plus beacon URI, POST plus JSON content plus tasking URI, TXT/NULL plus high-entropy classification, no-SNI plus JA3 reputation, and periodicity plus explicit C2 classification. Timing fields, user-agent strings, or packet counters alone are not enough. |
+| Targeted HTTP/TLS exfil and infrastructure | `tls-sni-dynamic-dns-or-onion`, `http-post-auth-cookie-or-token-exfil` | `network.tls`, `tls.connection`, `pcap.tls`, `http.request`, `network.http`, `pcap.http` | `high` | `T1041`, `T1071.001` | Adds TLS SNI/serverName dynamic-DNS or `.onion` infrastructure triage and a constrained HTTP POST rule that requires credential/token material in headers, body, or classification fields. VT unset and collection-health rows are excluded through data exclusions. |
+| Advanced HTTP/TLS/DNS predicates | `pcap-http-large-upload-numeric`, `dns-very-long-nxdomain-query-numeric`, `http-direct-ip-missing-user-agent`, `tls-ja3-without-sni`, `http-uri-api-gate-field-and` | `http.request`, `network.http`, `pcap.http`, `dns.query`, `network.dns`, `pcap.dns`, `dns.cache.added`, `network.tls`, `tls.connection`, `pcap.tls` | `medium` to `high` | `T1041`, `T1071.001`, `T1071.004` | Adds numeric upload/query-length thresholds, IPv4-literal host regex with absent User-Agent, JA3 regex with absent SNI/serverName, and same-field API gate URI matching. These rules exclude VT unset and collection-health metadata. |
 | HTTP/TLS/PCAP deep triage | `http-executable-download`, `http-post-or-checkin-beacon`, `http-doh-request`, `http-proxy-or-tunnel-method`, `tls-invalid-certificate`, `tls-encrypted-clienthello-or-esni`, `pcap-executable-payload`, `pcap-dns-nxdomain-or-dga`, `pcap-upload-or-exfil-indicator`, `pcap-flow-count-metadata-observed` | `http.request`, `network.http`, `pcap.http`, `network.tls`, `tls.connection`, `pcap.tls`, `pcap.dns`, `dns.query`, `network.dns`, `pcap.flow`, `network.flow`, `pcap.packet`, `pcap.summary` | `low` to `high` | `T1041`, `T1071.001`, `T1071.004`, `T1090`, `T1105`, `T1573` where specific evidence applies | Adds executable/script/archive downloads, POST/check-in paths, DNS-over-HTTPS, HTTP tunnel/proxy methods, invalid/self-signed certificates, ECH/ESNI metadata, PE payload markers, NXDOMAIN/DGA DNS, upload/exfil labels, and packet/flow count metadata. |
 | Anti-analysis behavior | `process-timeout-long-sleep`, `anti-analysis-debugger-check`, `anti-analysis-vm-artifact-query`, `anti-analysis-delay-api-observed`, `anti-analysis-system-fingerprint-command`, `anti-analysis-process-enumeration-command`, `anti-analysis-hardware-registry-query`, `anti-analysis-timing-command`, `anti-analysis-sandbox-artifact-command`, `anti-analysis-user-activity-check`, `anti-analysis-cpuid-api-observed`, `anti-analysis-mac-disk-fingerprint-command`, `anti-analysis-sleep-duration-metadata`, `anti-analysis-window-or-tool-check-api`, `anti-analysis-low-resource-check`, `anti-analysis-accelerated-sleep-metadata` | `process.timeout`, `antiAnalysis.debuggerCheck`, `antiAnalysis.sandboxCheck`, `debugger.detected`, `sandbox.detected`, `registry.query`, `file.open`, `process.query`, `api.call`, `process.start`, `driver.registry`, `system.fingerprint`, `antiAnalysis.sleep`, `api.sleep` | `medium` to `high` | `T1497`, `T1497.001`, `T1497.003`, `T1622` | Covers timeout/sleep evasion, explicit debugger/sandbox check events, VM/tool artifact queries, hardware/process enumeration, CPU/hypervisor checks, MAC/disk fingerprinting, duration and sleep-acceleration metadata, user-activity checks, and low-resource telemetry keys. |
+| Constrained anti-analysis expansion | `anti-analysis-sandbox-tool-process-enumeration`, `anti-analysis-debug-object-flags-query`, `anti-analysis-low-resource-classification`, `anti-analysis-sleep-skipped-or-fast-forwarded`, `anti-analysis-human-interaction-gate-api` | `process.query`, `api.call`, `driver.process`, `antiAnalysis.sandboxCheck`, `antiAnalysis.debuggerCheck`, `system.fingerprint`, `antiAnalysis.sleep`, `api.sleep` | `medium` | `T1497.001`, `T1497.003`, `T1622` | Requires runtime tool names, debug flag/object strings, explicit low-resource classifications, explicit sleep-skip/fast-forward fields, or user-interaction APIs. Plain `process.timeout` and generic inventory fields stay low-confidence or unmapped. |
+| Numeric anti-analysis timing | `anti-analysis-long-sleep-duration-numeric`, `process-tree-high-child-count-numeric` | `api.sleep`, `antiAnalysis.sleep`, `process.timeout`, `process.tree` | `medium` | `T1497.003`, `T1059` | Uses numeric thresholds for long sleep durations and unusually large process-tree child counts. These rules are runtime metadata and do not depend on static strings. |
 | Defense evasion and security tooling | `anti-analysis-security-tool-termination-command`, `defender-disable-command`, `defender-policy-registry-disable`, `security-tool-stop-or-kill-command`, `firewall-defense-disable-command`, `event-log-clearing-command`, `amsi-etw-bypass-command-string` | `process.start`, `registry.set`, `registry.create`, `driver.registry` | `high` | `T1562.001`, `T1562.004`, `T1070.001`, `T1497` | Flags Defender disable/exclusion commands, Defender policy registry writes, EDR/security-tool stop or kill tokens, firewall disablement, event-log clearing, and AMSI/ETW bypass strings. |
+| Targeted Defender, UAC, and PowerShell logging controls | `defender-service-disabled-registry-start`, `defender-realtime-disable-registry-value`, `defender-exclusion-registry-user-writable`, `powershell-security-logging-disabled-registry`, `uac-policy-weakened-registry`, `uac-local-account-token-filter-policy`, `uac-silentcleanup-env-hijack` | `registry.set`, `registry.create`, `driver.registry` | `high` | `T1021`, `T1548.002`, `T1562.001` | Adds exact value-name/value constraints for Defender service disablement, Defender realtime-disable policy values, user-writable Defender exclusions, PowerShell logging policy disables, UAC policy weakening, remote UAC token-filter changes, and SilentCleanup windir hijack. Query-only registry operations and sandbox/collector metadata are excluded. |
 | Collection and concealment extras | `screenshot-api-observed`, `hidden-file-attribute-command` | `api.call`, `process.start` | `medium` to `high` | `T1113`, `T1564.001` | Flags screen-capture API primitives and `attrib` hidden/system attribute commands separately from sandbox-generated screenshot artifacts. |
 | Credential and LSASS behavior | `lsa-security-provider-persistence`, `lsass-memory-dump-command`, `lsass-process-access-observed`, `credential-store-access-observed`, `credential-dumping-tool-command`, `credential-lsass-process-access`, `credential-lsass-dump-command`, `credential-sam-system-hive-access`, `credential-hive-save-command`, `credential-browser-store-access`, `credential-vault-dpapi-access` | `registry.set`, `registry.create`, `driver.registry`, `process.start`, `process.open`, `process.access`, `api.call`, `driver.process`, `file.open`, `file.read`, `file.created`, `file.modified`, `registry.query`, `driver.file` | `high` to `critical` | `T1003.001`, `T1003.002`, `T1112`, `T1555`, `T1555.003` | Covers LSA package persistence, LSASS dump commands/access, SAM/SECURITY/SYSTEM/NTDS hive access, hive-save commands, browser credential databases, Vault/Credentials/DPAPI paths, and common credential dumping tool tokens. |
+| Targeted credential access expansion | `credential-ntdsutil-ifm-command`, `credential-esentutl-ntds-copy-command`, `credential-kerberos-ticket-export-command`, `credential-browser-local-state-access`, `credential-chromium-cookie-db-access` | `process.start`, `file.open`, `file.read`, `file.created`, `file.modified`, `driver.file` | `high` to `critical` | `T1003.003`, `T1539`, `T1555.003`, `T1558` | Adds NTDS IFM and esentutl/copy command evidence, Kerberos ticket export tokens, and non-browser Chromium Local State/Cookie database access. Browser-process and sandbox plumbing exclusions keep normal browser startup and collector self-noise out of these findings. |
+| Regex credential-file access | `credential-cookie-file-path-regex`, `credential-ntds-dit-path-access-regex`, `credential-lsass-dump-path-regex` | `file.open`, `file.read`, `file.created`, `file.modified`, `driver.file`, `artifact.dropped_file.copied` | `high` to `critical` | `T1003.001`, `T1003.003`, `T1555.003` | Adds path-regex coverage for Chromium cookie databases, NTDS.dit, and LSASS-like dump files. Normal browser processes, sandbox paths, and collector metadata are excluded. |
 | Static PE traits | `static-pe-known-packer`, `static-pe-high-entropy-sections`, `static-section-writable-executable`, `static-embedded-url`, `static-pe-imports-present`, `static-pe-exports-present`, `static-pe-tls-callbacks`, `static-pe-resources-present` | `static.analysis.completed` | `info` to `medium` | `T1027.002`, `T1027` where structural evidence applies | Uses `dataContains.tags` emitted by static analysis for packers, entropy, RWX/abnormal sections, URL strings, import/export/resource table presence, and TLS directory/callback hints. URL strings are low-confidence static triage and do not imply transfer behavior. |
 | Static resource traits | `static-resource-payload-candidate`, `static-resource-embedded-pe`, `static-resource-high-entropy` | `static.analysis.completed` | `medium` to `high` | `T1027.009`, `T1027` | Maps resource-directory parsing tags such as `resource_payload_candidate`, `resource_embedded_pe`, and `resource_high_entropy_data`. |
 | Static import/API traits | `static-import-suspicious-api`, `static-import-process-injection`, `static-import-network-api`, `static-import-download-api`, `static-import-exfil-api`, `static-import-persistence-api`, `static-import-anti-analysis-api`, `static-import-credential-access-api`, `static-import-defense-evasion-api`, `static-import-dynamic-code`, `static-import-script-execution`, `static-import-file-drop`, `static-import-resource-api`, `static-import-registry-persistence`, `static-import-service-persistence` | `static.analysis.completed` | `low` to `medium` | Technique mappings remain only where import-only triage is specific enough; runtime rules carry primary behavior mappings. | StaticAnalyzer maps parsed imports and fallback API strings into tags such as `import_suspicious_api`, `import_process_injection_api`, `import_network_api`, `import_download_api`, `import_exfil_api`, `import_file_drop_api`, `import_resource_api`, `import_script_execution_api`, credential/defense-evasion groups, and persistence/anti-analysis subgroups. Static import-only evidence is low-confidence triage; runtime process/API/driver evidence is required for primary behavior. |
 | Static export traits | `static-export-registration-entrypoint`, `static-export-service-entrypoint` | `static.analysis.completed` | `low` to `medium` | `T1218.010`, `T1543.003` | Export names are triage-only evidence; registration exports can indicate regsvr32-compatible DLL entry points, and service exports can support service DLL triage. |
 | Static string indicators | `static-domain-indicator`, `static-tor-domain-string`, `static-dynamic-dns-domain-string`, `static-ip-address`, `static-windows-path-string`, `static-registry-path-string`, `static-persistence-string`, `static-script-command-string`, `static-encoded-command-string`, `static-lolbin-string`, `static-download-command-string`, `static-exfil-command-string`, `static-credential-access-string`, `static-defense-evasion-string`, `static-anti-sandbox-string` | `static.analysis.completed` | `info` to `medium` | `T1041`, `T1090`, `T1105`, `T1003`, `T1562.001`, `T1112`, `T1547.001`, `T1059`, `T1059.001`, `T1218`, `T1497` where specific string evidence applies | Covers bare domains (with conservative TLD/reference filtering), IP-like strings, Windows/registry paths, persistence paths, PowerShell encoded commands, living-off-the-land utility names, download/upload command strings, credential/defense-evasion strings, and VM/debugger/sandbox strings. Static indicators are triage metadata unless corroborated by runtime telemetry. |
+
+## 2026-07-11 v15 open-source reference rules
+
+The v15 pass adds 3 rules plus two MITRE seed-map entries
+(`T1218.008` and `T1218.014`) based on Cuckoo/CAPE signature-style behavior,
+DRAKVUF API/plugin dimensions, ATT&CK Windows technique names, and public
+Sigma-style detection hygiene:
+
+- `odbcconf-regsvr-user-writable-dll-proxy-execution` maps to
+  `T1218.008 Odbcconf`. It requires `odbcconf`, `REGSVR`, and a DLL path under
+  a user-writable location in the same command line.
+- `mmc-user-writable-msc-proxy-execution` maps to `T1218.014 MMC`. It requires
+  `mmc`, `.msc`, and a user-writable `.msc` path, so normal control-panel or
+  system snap-in launches do not match.
+- `named-pipe-impersonation-api-observed` maps to `T1134.001 Token
+  Impersonation/Theft`. It requires an impersonation API/operation and a
+  `pipeName` field, with common browser and KSword pipe names excluded.
+- All three rules include `evidenceFields`, bilingual operator metadata,
+  `sigma-style`/`open-source-reference` tags, and collection-health/VT/R0
+  exclusions. They are smoke-tested by `behavior.rules-open-source-reference`.
+
+## 2026-07-11 v14 combination rules and MITRE map quality
+
+The v14 pass adds 7 high-signal combination rules and four MITRE seed-map
+entries (`T1518`, `T1518.001`, `T1552`, and `T1552.001`):
+
+- Persistence plus dropped-file context: Run/RunOnce writes are elevated only
+  when the value points to a user-writable executable/script payload and the
+  same event carries dropped-file or download-execute correlation evidence.
+- Defense evasion plus dropped-file context: Defender exclusion writes require
+  both a Defender exclusion path and a user-writable dropped/staged payload
+  value.
+- Discovery and credential access: process-listing security-tool discovery maps
+  to `T1518.001`, while user-profile credential-themed file searches map to
+  `T1552.001`.
+- Network C2 and anti-sandbox combinations: periodic C2 flow rules require a
+  user-writable process path, destination IP, interval, jitter, and C2/beacon
+  classification; anti-sandbox sleep gates require VM/sandbox check text plus a
+  long sleep duration.
+- Dropped-file artifact quality: script/LOLBin downloaded dropped-file
+  artifacts require source path, downloader process, and HTTP(S) source URL
+  metadata. Collection output paths alone are not enough.
+- MITRE precision: process hollowing now maps to `T1055.012` and
+  LoadLibrary-style DLL injection to `T1055.001` instead of broad `T1055`.
+- False-positive boundary: each primary combination rule excludes
+  Agent/R0Collector process names, command self-noise, collection-health data,
+  and VirusTotal unset/status metadata where applicable.
+
+## 2026-07-11 v13 advanced predicates and Windows behavior
+
+The v13 pass adds 24 rules plus minimal stable predicate support for regex,
+numeric ranges, explicit absent-field checks, and same-field AND:
+
+- Predicate support: `pathRegex`, `commandLineRegex`, `dataRegex`,
+  `allDataRegex`, `dataNumericRanges`, `allDataNumericRanges`,
+  `absentDataKeys`, and `dataContainsAll` let rules express syntax,
+  thresholds, missing telemetry fields, and multiple tokens in one field.
+  Regex matching is case-insensitive, culture-invariant, and timeout-bounded.
+  Numeric parsing uses invariant-culture finite numbers and inclusive bounds by
+  default.
+- Command and script behavior: PowerShell EncodedCommand base64 syntax, AMSI
+  bypass script-block text, WMIC shadow-copy deletion, wevtutil log clearing,
+  and bcdedit recovery-policy tamper move from broad substring checks to regex
+  or same-field-AND constraints.
+- Numeric network and telemetry: SMB/RDP/WinRM/Tor-SOCKS ports, HTTP upload
+  size, DNS query length, long sleep duration, high child-process counts, mass
+  file-write bursts, and registry Run-key set bursts use numeric thresholds
+  rather than string fragments.
+- Exists/not-exists guards: direct-IP HTTP without User-Agent, TLS JA3 without
+  SNI/serverName, and download-execute rows without referrer/browser context
+  use `absentDataKeys` so missing context is explicit and reviewable.
+- Regex file and persistence rules: Chromium Cookie DB access, NTDS.dit access,
+  LSASS-like dump paths, service ImagePath, and scheduled-task payloads use
+  path/data regex while excluding normal browser processes, query-only registry
+  operations, sandbox collection paths, R0Collector self-noise, and VT unset or
+  collection-health rows.
+
+## 2026-07-11 v12 targeted Windows behavior and false-positive controls
+
+The v12 pass adds 24 rules focused on requested high-signal Windows behavior
+gaps without changing collectors or report contracts:
+
+- Download/script execution: HH remote script/CHM, MSXSL remote XSL/script,
+  and forfiles `/c` proxy execution require LOLBin plus remote/script or child
+  command evidence.
+- Credential access: NTDS IFM, esentutl/copy of `ntds.dit`, Kerberos ticket
+  export tokens, and non-browser access to Chromium Local State and Cookie DBs
+  are split from generic credential-store access.
+- Defender, UAC, and logging evasion: Defender service `Start=4`, Defender
+  disable policy values, user-writable Defender exclusions, PowerShell logging
+  disables, UAC policy weakening, `LocalAccountTokenFilterPolicy`, and
+  SilentCleanup `windir` hijacks use exact value-name/value or path-plus-payload
+  constraints.
+- Office/browser persistence: Office macro/Protected View weakening, Outlook
+  forms/homepage, browser extension policy force-install, native-messaging
+  host registry/manifest writes, and IE BHO/toolbar hooks require Office or
+  browser-specific paths plus payload/update URL/user-writable evidence.
+- Lateral/C2/TLS/HTTP: explicit WinRM enablement, TLS SNI dynamic-DNS or
+  `.onion` domains, and HTTP POST with credential/token material add targeted
+  rules without treating port-only, timing-only, or static-only evidence as
+  primary malicious behavior.
+- False-positive boundary: every new registry rule excludes query-only
+  operations; file/browser-credential rules exclude sandbox paths and normal
+  browser processes where appropriate; command rules exclude Agent/R0Collector
+  command self-noise; network rules exclude VT unset and collection-health
+  metadata via data-field exclusions.
+
+## 2026-07-11 v11 behavior expansion and false-positive guards
+
+The v11 pass adds 35 behavior rules, two MITRE impact mappings, and all-of
+predicate families:
+
+- Predicate quality: `allContainsPath`, `allContainsCommandLine`,
+  `allDataKeys`, `allDataEquals`, and `allDataContains` allow conservative
+  high-risk rules that require combined evidence such as downloader command plus
+  user-writable output path, HTTP method plus content type, or both downloaded
+  and executed path fields.
+- Ransomware/impact: shadow-copy deletion, recovery disablement, ransom-note
+  paths, encrypted-extension rename operations, and explicit ransomware file
+  classifications are mapped to `T1490` or `T1486`. Generic file deletion and
+  driver file-write signals are not promoted to ransomware by themselves.
+- Injection and lateral movement: added target-process, target-function,
+  section-map, APC, and sensitive-process handle context for injection; lateral
+  rules now cover admin-share credentials, WMIC remote create, remote
+  scheduled-task actions, PsExec service-file staging, and remote registry
+  persistence using all-of command/path checks.
+- Anti-analysis, download, persistence, and C2: new rules require explicit
+  runtime checks, output paths, correlation fields, payload paths, or C2 labels.
+  Broad single-field rules were tightened: script/library HTTP user agents,
+  generic POST/PUT methods, query-length DNS fields, and PCAP beacon interval
+  metadata no longer act as high-confidence C2 by themselves.
+- False-positive boundary: collection health, R0 unavailable, R0 collector
+  plumbing, VirusTotal `not_configured`/`not_found`/`rate_limited`, and
+  `static.analysis.completed` import/string/domain/IP rules remain metadata or
+  triage. New high-risk rules use runtime event types plus command/path/data
+  evidence and sandbox-agent exclusions where applicable.
 
 ## 2026-07-11 v10 static and rule-quality expansion
 
@@ -208,15 +442,21 @@ metadata boundaries while staying within current `RuleEngine` predicates:
   `anti-analysis-accelerated-sleep-metadata` make clear that numeric duration
   fields are metadata until threshold predicates exist.
 
-Five intentionally broad or future-facing placeholders remain: the legacy R0
-IOCTL protocol row, PCAP protocol summary rollup, low-resource sandbox-check
-keys, HTTP direct-IP/nonstandard-port triage, and PCAP beacon-interval fields.
+The remaining intentionally broad or future-facing placeholders are kept in
+low-confidence lanes: the legacy R0 IOCTL protocol row, PCAP protocol summary
+rollup, HTTP direct-IP/nonstandard-port triage, and PCAP beacon-interval
+metadata. v11 added constrained companion rules for low-resource and periodic
+C2 evidence so those weak fields are not promoted without explicit
+classification.
 
 ## MITRE mapping notes
 
 - `T1016`, `T1049`, `T1057`, `T1082`, and `T1135` cover command-line or
   probe-derived discovery signals for local network configuration, active
   connections, running processes, system identity, and network shares.
+- `T1518` and `T1518.001` cover software and security-software discovery;
+  KSword rules use `T1518.001` only when process-listing commands are paired
+  with security/EDR, packet-capture, VM, or analysis-tool process names.
 - `T1134.001` covers token duplication, impersonation, and sensitive privilege
   enablement telemetry such as `DuplicateTokenEx`, `CreateProcessWithTokenW`,
   `AdjustTokenPrivileges`, and `SeDebugPrivilege`/backup/restore privilege
@@ -224,6 +464,9 @@ keys, HTTP direct-IP/nonstandard-port triage, and PCAP beacon-interval fields.
 - `T1018` is used for LDAP/Kerberos/domain-service port evidence as remote
   system/domain discovery triage; port evidence alone does not prove domain
   compromise.
+- `T1021` is used for broader remote-service enablement or policy changes, such
+  as `LocalAccountTokenFilterPolicy`, when a subtechnique is too narrow for the
+  current event shape.
 - `T1021.001` and `T1021.004` cover RDP/SSH port or command evidence.
   Existing SMB and WinRM mappings remain `T1021.002` and `T1021.006`.
 - `T1036` covers double-extension file names that masquerade as documents,
@@ -237,6 +480,8 @@ keys, HTTP direct-IP/nonstandard-port triage, and PCAP beacon-interval fields.
 - `T1003.001` is reserved for LSASS process access or dump evidence, while
   `T1003.002` is used for SAM/SECURITY/SYSTEM hive access and hive-save
   commands.
+- `T1003.003` is used only for NTDS-specific IFM, `ntds.dit`, esentutl,
+  diskshadow, or shadow-copy copy evidence.
 - `T1021.002` and `T1021.006` cover SMB/admin-share and WinRM/PowerShell
   remoting evidence respectively; network-port rules are triage signals, not
   proof of successful lateral movement.
@@ -260,6 +505,9 @@ keys, HTTP direct-IP/nonstandard-port triage, and PCAP beacon-interval fields.
 - `T1113` covers runtime screen-capture API calls from sample telemetry. The
   sandbox's own `screenshot.captured` artifact rows are intentionally unmapped
   collection evidence.
+- `T1176` covers browser extension persistence surfaces such as forced
+  extension policy, native messaging host manifests, and Browser Helper Object
+  registry hooks.
 - `T1204.002` is used for execution from download/staging paths because the
   rule observes launch context, not the preceding transfer by itself.
 - `T1055` is used only for static import groups that include process-injection
@@ -281,6 +529,16 @@ keys, HTTP direct-IP/nonstandard-port triage, and PCAP beacon-interval fields.
   prove that regsvr32 was actually used.
 - `T1218.002` and `T1218.003` cover Control Panel and CMSTP proxy-execution
   command lines respectively.
+- `T1218.008` covers Odbcconf proxy execution only when `REGSVR` style
+  command evidence points at a user-writable DLL. Generic ODBC configuration
+  usage is not enough.
+- `T1218.014` covers MMC proxy execution only when `mmc.exe` loads a
+  user-writable `.msc` snap-in path. Normal system snap-ins remain outside the
+  rule.
+- `T1202` covers indirect command execution through `forfiles /c` only when a
+  script interpreter, shell, or proxy-execution child command is present.
+- `T1220` covers MSXSL/XSL script processing when the command references a
+  remote or script-capable XSL source.
 - `T1115` covers clipboard API evidence when runtime telemetry explicitly
   records clipboard access primitives.
 - `T1127.001`, `T1218.004`, and `T1218.009` cover MSBuild inline-task,
@@ -288,12 +546,20 @@ keys, HTTP direct-IP/nonstandard-port triage, and PCAP beacon-interval fields.
 - `T1137` covers Office add-in/startup registry and filesystem evidence.
 - `T1482` covers domain trust, domain-controller, and domain group discovery
   commands used before lateral movement.
+- `T1486` is used only for runtime ransomware/encryption artifacts such as
+  ransom-note paths, encrypted-extension rename operations, or explicit
+  ransomware/encryption file classifications; generic file writes/deletes do
+  not qualify.
 - `T1497` covers static VM/sandbox/tool strings; `T1497.003` remains specific
   to time-based evasion and delay/sleep telemetry. Dynamic anti-analysis
   command rules also use `T1497` for VM/tool lookup, user-activity checks, and
   analysis-tool termination evidence.
 - `T1497.001` is used for CPU, hypervisor, hardware, user-activity, and
   low-resource system checks.
+- `T1490` covers recovery-inhibition command evidence such as shadow-copy
+  deletion, backup-catalog deletion, `reagentc /disable`, or boot recovery
+  disablement. It is not used for collection failures or unavailable R0
+  telemetry.
 - `T1546` is used as the broad event-triggered execution mapping for WMI
   event subscriptions, COM hijacks, and AppInit DLL registry evidence because
   the current seed map intentionally does not include every subtechnique.
@@ -303,8 +569,15 @@ keys, HTTP direct-IP/nonstandard-port triage, and PCAP beacon-interval fields.
 - `T1548.002` covers auto-elevate UAC bypass registry paths and LOLBin
   launches such as `fodhelper.exe`, `computerdefaults.exe`, `sdclt.exe`, and
   `eventvwr.exe` when observed in sandbox telemetry.
+- `T1539` covers browser cookie database access or HTTP metadata that contains
+  session-cookie/token material.
 - `T1555` and `T1555.003` cover credential stores broadly and browser
   credential databases specifically.
+- `T1552` and `T1552.001` cover unsecured credentials and credential-themed
+  file searches; the current runtime rule requires user-profile scope plus
+  password/secret/token/key-store filename terms in the same command line.
+- `T1558` covers Kerberos ticket dump/export command evidence such as
+  `sekurlsa::tickets`, `kerberos::list /export`, and Rubeus ticket operations.
 - `T1553.004` covers certificate-root-store modification commands and registry
   paths. TLS certificate reputation remains mapped to encrypted-channel
   network evidence instead of trust-store modification.

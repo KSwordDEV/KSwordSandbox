@@ -41,16 +41,45 @@ internal sealed class GuestProbeRunner
         CancellationToken cancellationToken = default)
     {
         var events = new List<SandboxEvent>();
+        var completedCount = 0;
+        var failedCount = 0;
+        var timedOutCount = 0;
         foreach (var probe in probes)
         {
             var elapsed = Stopwatch.StartNew();
             try
             {
-                events.AddRange(await CollectProbeWithTimeoutAsync(probe, phase, context, cancellationToken));
+                var probeEvents = await CollectProbeWithTimeoutAsync(probe, phase, context, cancellationToken).ConfigureAwait(false);
+                elapsed.Stop();
+                events.AddRange(probeEvents);
+                events.Add(CreateProbeSummaryEvent(
+                    probe,
+                    phase,
+                    context,
+                    status: "completed",
+                    reason: "probeCompleted",
+                    elapsed.Elapsed,
+                    emittedEventCount: probeEvents.Count,
+                    probeTimeout,
+                    exception: null));
+                completedCount++;
             }
             catch (ProbeTimeoutException)
             {
-                events.Add(CreateProbeTimeoutEvent(probe, phase, context, elapsed.Elapsed));
+                elapsed.Stop();
+                var timeoutEvent = CreateProbeTimeoutEvent(probe, phase, context, elapsed.Elapsed);
+                events.Add(timeoutEvent);
+                events.Add(CreateProbeSummaryEvent(
+                    probe,
+                    phase,
+                    context,
+                    status: "timeout",
+                    reason: "probeTimeout",
+                    elapsed.Elapsed,
+                    emittedEventCount: 1,
+                    probeTimeout,
+                    exception: null));
+                timedOutCount++;
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -58,14 +87,47 @@ internal sealed class GuestProbeRunner
             }
             catch (OperationCanceledException ex)
             {
-                events.Add(CreateProbeFailureEvent("probe.canceled", probe, phase, context, elapsed.Elapsed, ex));
+                elapsed.Stop();
+                var failureEvent = CreateProbeFailureEvent("probe.canceled", probe, phase, context, elapsed.Elapsed, ex);
+                events.Add(failureEvent);
+                events.Add(CreateProbeSummaryEvent(
+                    probe,
+                    phase,
+                    context,
+                    status: "canceled",
+                    reason: "probeCanceled",
+                    elapsed.Elapsed,
+                    emittedEventCount: 1,
+                    probeTimeout,
+                    exception: ex));
+                failedCount++;
             }
             catch (Exception ex)
             {
-                events.Add(CreateProbeFailureEvent("probe.failed", probe, phase, context, elapsed.Elapsed, ex));
+                elapsed.Stop();
+                var failureEvent = CreateProbeFailureEvent("probe.failed", probe, phase, context, elapsed.Elapsed, ex);
+                events.Add(failureEvent);
+                events.Add(CreateProbeSummaryEvent(
+                    probe,
+                    phase,
+                    context,
+                    status: "failed",
+                    reason: "probeFailed",
+                    elapsed.Elapsed,
+                    emittedEventCount: 1,
+                    probeTimeout,
+                    exception: ex));
+                failedCount++;
             }
         }
 
+        events.Add(CreateProbePhaseSummaryEvent(
+            phase,
+            context,
+            completedCount,
+            failedCount,
+            timedOutCount,
+            events.Count));
         return events;
     }
 
@@ -140,11 +202,16 @@ internal sealed class GuestProbeRunner
                 ["captureState"] = "failed",
                 ["status"] = "failed",
                 ["nonfatal"] = "true",
+                ["nonbehavior"] = "true",
+                ["collectionHealth"] = "true",
                 ["reason"] = "probeTimeout",
+                ["zhMessage"] = "Guest 探针超时；该探针结果会标记为 failed，但不会中断整体采集。",
+                ["zhHint"] = "请结合 probeId、phase、timeoutMilliseconds 判断是否需要调大探针超时或降低该采集项依赖的系统调用成本。",
                 ["timeoutMilliseconds"] = probeTimeout.TotalMilliseconds.ToString("0", CultureInfo.InvariantCulture),
                 ["elapsedMilliseconds"] = elapsed.TotalMilliseconds.ToString("0", CultureInfo.InvariantCulture)
             }
         };
+        AddProbeRunContextData(evt, context);
         AddProbeCollectionData(evt, probe, context);
         return evt;
     }
@@ -180,14 +247,152 @@ internal sealed class GuestProbeRunner
                 ["captureState"] = "failed",
                 ["status"] = "failed",
                 ["nonfatal"] = "true",
+                ["nonbehavior"] = "true",
+                ["collectionHealth"] = "true",
                 ["reason"] = reason,
                 ["elapsedMilliseconds"] = elapsed.TotalMilliseconds.ToString("0", CultureInfo.InvariantCulture),
                 ["exceptionType"] = exception.GetType().FullName ?? exception.GetType().Name,
-                ["message"] = exception.Message
+                ["message"] = exception.Message,
+                ["zhMessage"] = string.Equals(reason, "probeCanceled", StringComparison.OrdinalIgnoreCase)
+                    ? "Guest 探针被取消；该事件用于说明采集不完整，不代表样本行为。"
+                    : "Guest 探针执行失败；该事件用于说明采集不完整，不代表样本行为。",
+                ["zhHint"] = "请查看 probeId、phase、exceptionType/message 以及 collectionName 来定位受影响的证据通道。"
             }
         };
+        AddProbeRunContextData(evt, context);
         AddProbeCollectionData(evt, probe, context);
         return evt;
+    }
+
+    /// <summary>
+    /// Creates a per-probe collection summary event. Inputs are probe identity,
+    /// phase, elapsed time, emitted-event count, and optional exception;
+    /// processing stores a compact health row consumed by live telemetry and
+    /// reports; the method returns a non-behavior SandboxEvent.
+    /// </summary>
+    private static SandboxEvent CreateProbeSummaryEvent(
+        IGuestProbe probe,
+        ProbePhase phase,
+        GuestProbeContext context,
+        string status,
+        string reason,
+        TimeSpan elapsed,
+        int emittedEventCount,
+        TimeSpan probeTimeout,
+        Exception? exception)
+    {
+        var evt = new SandboxEvent
+        {
+            EventType = "probe.summary",
+            Source = "guest",
+            ProcessName = SampleProcessName(context.SamplePath),
+            ProcessId = context.RootProcessId,
+            Data =
+            {
+                ["probeId"] = probe.ProbeId,
+                ["phase"] = ToPhaseLabel(phase),
+                ["capturePhase"] = ToPhaseLabel(phase),
+                ["captureState"] = status,
+                ["status"] = status,
+                ["reason"] = reason,
+                ["nonbehavior"] = "true",
+                ["collectionHealth"] = "true",
+                ["emittedEventCount"] = emittedEventCount.ToString(CultureInfo.InvariantCulture),
+                ["elapsedMilliseconds"] = elapsed.TotalMilliseconds.ToString("0", CultureInfo.InvariantCulture),
+                ["timeoutMilliseconds"] = probeTimeout.TotalMilliseconds.ToString("0", CultureInfo.InvariantCulture),
+                ["zhMessage"] = ProbeSummaryZhMessage(status),
+                ["zhHint"] = "这是采集通道健康摘要，不代表样本恶意行为；用于解释某个探针是否执行、是否超时、输出了多少事件。"
+            }
+        };
+
+        if (exception is not null)
+        {
+            evt.Data["exceptionType"] = exception.GetType().FullName ?? exception.GetType().Name;
+            evt.Data["message"] = exception.Message;
+        }
+
+        AddProbeRunContextData(evt, context);
+        AddProbeCollectionData(evt, probe, context);
+        return evt;
+    }
+
+    /// <summary>
+    /// Creates a phase-level probe summary after all probes complete.
+    /// </summary>
+    private SandboxEvent CreateProbePhaseSummaryEvent(
+        ProbePhase phase,
+        GuestProbeContext context,
+        int completedCount,
+        int failedCount,
+        int timedOutCount,
+        int emittedEventCount)
+    {
+        var evt = new SandboxEvent
+        {
+            EventType = "probe.phase.summary",
+            Source = "guest",
+            ProcessName = SampleProcessName(context.SamplePath),
+            ProcessId = context.RootProcessId,
+            Data =
+            {
+                ["phase"] = ToPhaseLabel(phase),
+                ["capturePhase"] = ToPhaseLabel(phase),
+                ["captureState"] = failedCount == 0 && timedOutCount == 0 ? "completed" : "partial",
+                ["status"] = failedCount == 0 && timedOutCount == 0 ? "completed" : "partial",
+                ["reason"] = failedCount == 0 && timedOutCount == 0 ? "allProbesCompleted" : "oneOrMoreProbesIncomplete",
+                ["nonbehavior"] = "true",
+                ["collectionHealth"] = "true",
+                ["probeCount"] = probes.Count.ToString(CultureInfo.InvariantCulture),
+                ["completedProbeCount"] = completedCount.ToString(CultureInfo.InvariantCulture),
+                ["failedProbeCount"] = failedCount.ToString(CultureInfo.InvariantCulture),
+                ["timedOutProbeCount"] = timedOutCount.ToString(CultureInfo.InvariantCulture),
+                ["emittedEventCount"] = emittedEventCount.ToString(CultureInfo.InvariantCulture),
+                ["samplePath"] = context.SamplePath,
+                ["workingDirectory"] = context.WorkingDirectory,
+                ["outputDirectory"] = context.OutputDirectory,
+                ["zhMessage"] = failedCount == 0 && timedOutCount == 0
+                    ? "该阶段 Guest 探针已执行完成。"
+                    : "该阶段 Guest 探针部分失败或超时；整体分析仍继续。",
+                ["zhHint"] = "请查看同阶段 probe.summary/probe.timeout/probe.failed 事件定位具体通道。"
+            }
+        };
+        AddProbeRunContextData(evt, context);
+        return evt;
+    }
+
+    /// <summary>
+    /// Adds sample-root attribution to probe health events so summaries remain
+    /// useful even when the actual probe emitted no artifact rows.
+    /// </summary>
+    private static void AddProbeRunContextData(SandboxEvent evt, GuestProbeContext context)
+    {
+        evt.Data["processRole"] = context.RootProcessId is null ? "sample-context" : "sample-root-context";
+        evt.Data["samplePath"] = context.SamplePath;
+        if (context.RootProcessId is not null)
+        {
+            var rootPid = context.RootProcessId.Value.ToString(CultureInfo.InvariantCulture);
+            evt.Data["rootProcessId"] = rootPid;
+            evt.Data.TryAdd("processId", rootPid);
+            evt.Data.TryAdd("treeDepth", "0");
+            evt.Data.TryAdd("treeLineage", rootPid);
+        }
+
+        if (context.RootParentProcessId is not null)
+        {
+            evt.Data["rootParentProcessId"] = context.RootParentProcessId.Value.ToString(CultureInfo.InvariantCulture);
+            evt.Data.TryAdd("parentProcessId", context.RootParentProcessId.Value.ToString(CultureInfo.InvariantCulture));
+        }
+
+        AddIfNotEmpty(evt.Data, "processName", context.RootProcessName ?? evt.ProcessName);
+        AddIfNotEmpty(evt.Data, "rootProcessName", context.RootProcessName);
+        AddIfNotEmpty(evt.Data, "processImagePath", context.RootProcessPath ?? context.SamplePath);
+        AddIfNotEmpty(evt.Data, "rootImagePath", context.RootProcessPath ?? context.SamplePath);
+        AddIfNotEmpty(evt.Data, "commandLine", context.RootCommandLine);
+        AddIfNotEmpty(evt.Data, "rootCommandLine", context.RootCommandLine);
+        if (context.RootProcessStartTimeUtc is not null)
+        {
+            evt.Data["rootProcessStartTimeUtc"] = context.RootProcessStartTimeUtc.Value.ToString("O", CultureInfo.InvariantCulture);
+        }
     }
 
     /// <summary>
@@ -206,6 +411,8 @@ internal sealed class GuestProbeRunner
         evt.Data["collectionName"] = collection.Value.CollectionName;
         evt.Data["evidenceRole"] = collection.Value.EvidenceRole;
         evt.Data["expectedRelativePath"] = collection.Value.ExpectedRelativePath;
+        evt.Data["captureEnabled"] = IsProbeCaptureEnabled(probe.ProbeId, context).ToString(CultureInfo.InvariantCulture).ToLowerInvariant();
+        evt.Data["implemented"] = "true";
         if (context.RootProcessId is not null)
         {
             evt.Data["rootProcessId"] = context.RootProcessId.Value.ToString(CultureInfo.InvariantCulture);
@@ -227,6 +434,36 @@ internal sealed class GuestProbeRunner
             "memory-dump" => new ProbeCollection("memory-dumps", "memory-dump", "memory-dumps/*.dmp"),
             "packet-capture" => new ProbeCollection("packet-captures", "packet-capture", "packet-captures/*.pcapng"),
             _ => null
+        };
+    }
+
+    /// <summary>
+    /// Reads whether an optional artifact probe was requested for failure
+    /// diagnostics.
+    /// </summary>
+    private static bool IsProbeCaptureEnabled(string probeId, GuestProbeContext context)
+    {
+        return probeId switch
+        {
+            "screenshot" => context.CaptureScreenshots,
+            "memory-dump" => context.CaptureMemoryDump,
+            "packet-capture" => context.CapturePacketCapture,
+            _ => true
+        };
+    }
+
+    /// <summary>
+    /// Maps probe health status to Chinese-first summary copy.
+    /// </summary>
+    private static string ProbeSummaryZhMessage(string status)
+    {
+        return status switch
+        {
+            "completed" => "Guest 探针执行完成。",
+            "timeout" => "Guest 探针执行超时；整体采集继续。",
+            "canceled" => "Guest 探针被取消；整体采集可能不完整。",
+            "failed" => "Guest 探针执行失败；整体采集继续。",
+            _ => "Guest 探针状态已记录。"
         };
     }
 

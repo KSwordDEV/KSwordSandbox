@@ -23,7 +23,9 @@ param(
 
     [switch]$RestartGuest,
 
-    [switch]$Force
+    [switch]$Force,
+
+    [switch]$Json
 )
 
 Set-StrictMode -Version 3.0
@@ -39,7 +41,7 @@ function Get-GuestPasswordSecretValue {
         }
     }
 
-    throw "Guest password environment variable '$Name' is not set in Process, User, or Machine scope. Run .\install.ps1 -Mode Install -PromptPassword or -GeneratePassword."
+    throw "错误：未在 Process/User/Machine 环境中找到 guest password secret '$Name'。下一步：普通用户请运行 .\install.ps1 -Mode Install -PromptPassword；如果使用 -GeneratePassword，请确保 VM 内密码也同步。"
 }
 
 function New-GuestCredential {
@@ -63,11 +65,11 @@ function Test-IsAdministrator {
 }
 
 if (-not (Test-IsAdministrator)) {
-    throw 'Set-GuestTestSigning.ps1 must run from an elevated host PowerShell session for Hyper-V PowerShell Direct.'
+    throw '错误：Set-GuestTestSigning.ps1 需要在宿主机管理员 PowerShell 中运行，才能使用 Hyper-V PowerShell Direct。下一步：以管理员身份重新打开 PowerShell 后重试。'
 }
 
 if (-not (Get-Command Invoke-Command -ErrorAction SilentlyContinue)) {
-    throw 'Invoke-Command is unavailable.'
+    throw '错误：Invoke-Command 不可用。下一步：请确认当前是完整 PowerShell/Windows 环境，并启用了 Hyper-V/PowerShell Direct 所需组件。'
 }
 
 $password = Get-GuestPasswordSecretValue -Name $SecretName
@@ -88,14 +90,14 @@ $scriptBlock = {
     if ($RequestedMode -eq 'Enable' -and -not $beforeEnabled) {
         $commandOutput = @(& bcdedit.exe /set testsigning on 2>&1)
         if ($LASTEXITCODE -ne 0) {
-            throw "bcdedit /set testsigning on failed with exit code $LASTEXITCODE. $($commandOutput -join ' ')"
+            throw "错误：来宾内 bcdedit /set testsigning on 失败，退出码 $LASTEXITCODE。下一步：确认来宾系统允许修改启动配置，并以管理员上下文执行。英文输出：$($commandOutput -join ' ')"
         }
         $changed = $true
     }
     elseif ($RequestedMode -eq 'Disable' -and $beforeEnabled) {
         $commandOutput = @(& bcdedit.exe /set testsigning off 2>&1)
         if ($LASTEXITCODE -ne 0) {
-            throw "bcdedit /set testsigning off failed with exit code $LASTEXITCODE. $($commandOutput -join ' ')"
+            throw "错误：来宾内 bcdedit /set testsigning off 失败，退出码 $LASTEXITCODE。下一步：确认来宾系统允许修改启动配置，并以管理员上下文执行。英文输出：$($commandOutput -join ' ')"
         }
         $changed = $true
     }
@@ -105,19 +107,43 @@ $scriptBlock = {
     }
 
     [pscustomobject][ordered]@{
+        Kind = 'KSwordSandbox.GuestTestSigning'
         ComputerName = $env:COMPUTERNAME
         RequestedMode = $RequestedMode
         TestSigningWasEnabled = $beforeEnabled
         Changed = $changed
+        RestartRequired = $changed
         RestartRequested = $ShouldRestart
         CommandOutput = $commandOutput
+        CSignToolUsed = $false
     }
 }
 
 if (-not $Force -and $Mode -ne 'Query' -and $RestartGuest) {
-    throw 'RestartGuest was requested. Pass -Force to make the reboot non-interactive and explicit.'
+    throw '错误：已请求 -RestartGuest，但未提供 -Force。下一步：确认允许来宾重启后，追加 -Force；只查询状态请使用 -Mode Query。'
 }
 
-if ($PSCmdlet.ShouldProcess($VmName, "Run guest bcdedit test-signing mode '$Mode'")) {
+$result = if ($PSCmdlet.ShouldProcess($VmName, "在来宾中运行 bcdedit test-signing 模式 '$Mode' / Run guest bcdedit test-signing mode")) {
     Invoke-Command -VMName $VmName -Credential $credential -ScriptBlock $scriptBlock -ArgumentList $Mode, ([bool]$RestartGuest)
+}
+else {
+    [pscustomobject][ordered]@{
+        Kind = 'KSwordSandbox.GuestTestSigning'
+        ComputerName = $null
+        RequestedMode = $Mode
+        TestSigningWasEnabled = $null
+        Changed = $false
+        RestartRequired = $false
+        RestartRequested = [bool]$RestartGuest
+        WhatIf = [bool]$WhatIfPreference
+        CommandOutput = @()
+        CSignToolUsed = $false
+    }
+}
+
+if ($Json) {
+    $result | ConvertTo-Json -Depth 8
+}
+else {
+    $result
 }

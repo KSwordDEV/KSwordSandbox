@@ -30,6 +30,15 @@ std::string BuildConfigData(const Options& options) {
         "driverEventSampling",
         options.driverEventSampleStride <= 1 ? "none" : "stride");
     data.AddSigned("stressCount", options.stressCount);
+    if (options.stressCount > 0) {
+        data.AddSigned("StressJsonlExpectedDriverRows", options.stressCount);
+        data.AddSigned("StressJsonlSequenceStart", kSyntheticStressSequenceStart);
+        data.AddSigned("StressJsonlSequenceEnd", kSyntheticStressSequenceStart + options.stressCount - 1);
+        data.AddSigned("StressJsonlSequenceGapCount", 0);
+        data.AddUtf8("StressJsonlLossEvidence", kStressJsonlLossEvidence);
+        data.AddUtf8("StressJsonlBackpressureEvidence", kStressJsonlBackpressureEvidence);
+        data.AddUtf8("stressBackpressureMode", "synthetic-no-device-evidence");
+    }
     data.AddBool("mockMode", options.mockMode);
     data.AddBool("syntheticMode", options.mockMode);
     data.AddBool("injectJsonlNoise", options.injectJsonlNoise);
@@ -47,9 +56,23 @@ std::string BuildConfigData(const Options& options) {
     data.AddUtf8("ioctlProtocol", "KSwordSandboxDriverIoctl.h");
     data.AddUtf8("schema", KSWORD_SANDBOX_EVENT_SCHEMA_NAME);
     data.AddUtf8("producer", "r0collector");
+    AddCollectorAttributionFields(data, "collector-lifecycle", "collector-lifecycle");
+    data.AddBool("collectorNoise", false);
+    data.AddBool("collectorSelfNoise", false);
+    data.AddBool("selfProcess", false);
+    data.AddUtf8("collectorNoiseReason", "none");
+    data.AddUtf8("collectorNoiseAction", "emit");
+    data.AddBool("collectorSuppressed", false);
+    data.AddBool("selfNoise", false);
+    data.AddUtf8("selfNoiseReason", "none");
+    data.AddUtf8("selfNoiseAction", "emit");
     data.AddBool("noise", false);
     data.AddBool("lost", false);
+    data.AddUnsigned("lostCount", 0);
+    data.AddBool("lossObserved", false);
     data.AddBool("backpressure", false);
+    data.AddBool("backpressureObserved", false);
+    data.AddUnsigned("highWatermark", 0);
     return data.Build();
 }
 
@@ -57,16 +80,61 @@ std::string BuildConfigData(const Options& options) {
 // Processing: Builds a structured error object while keeping top-level fields
 // compatible with SandboxEvent.
 // Return: JSON object text for SandboxEvent.data.
+std::wstring BuildZhErrorMessage(const DWORD errorCode) {
+    if (errorCode == ERROR_INVALID_PARAMETER) {
+        return L"\u547d\u4ee4\u884c\u53c2\u6570\u65e0\u6548\u3002";
+    }
+
+    if (errorCode == ERROR_OPEN_FAILED) {
+        return L"\u8f93\u51fa JSONL \u6587\u4ef6\u65e0\u6cd5\u6253\u5f00\u3002";
+    }
+
+    return L"Collector \u8fd0\u884c\u65f6\u9519\u8bef\u3002";
+}
+
+std::wstring BuildZhErrorHint(const DWORD errorCode) {
+    if (errorCode == ERROR_INVALID_PARAMETER) {
+        return L"\u8bf7\u4f7f\u7528 --help \u67e5\u770b\u652f\u6301\u7684\u53c2\u6570\uff1b"
+            L"\u786e\u8ba4\u9700\u8981\u503c\u7684\u9009\u9879\u540e\u9762\u8ddf\u4e86\u503c\uff0c"
+            L"\u6570\u503c\u5728\u5141\u8bb8\u8303\u56f4\u5185\u3002";
+    }
+
+    if (errorCode == ERROR_OPEN_FAILED) {
+        return L"\u8bf7\u521b\u5efa\u8f93\u51fa\u6587\u4ef6\u7236\u76ee\u5f55\u3001\u786e\u8ba4\u5199\u6743\u9650\uff0c"
+            L"\u6216\u4f7f\u7528 --output - \u8f93\u51fa\u5230\u6807\u51c6\u8f93\u51fa\u3002";
+    }
+
+    return L"\u8bf7\u68c0\u67e5\u547d\u4ee4\u884c\u53c2\u6570\u6216\u8f93\u51fa\u8def\u5f84\u3002";
+}
+
 std::string BuildErrorData(const std::wstring& message, const DWORD errorCode, const std::wstring& hint) {
     JsonDataObjectBuilder data;
     data.AddWide("message", message);
+    data.AddWide("zhMessage", BuildZhErrorMessage(errorCode));
     data.AddUnsigned("win32Error", errorCode);
     data.AddWide("hint", hint);
+    data.AddWide("zhHint", BuildZhErrorHint(errorCode));
     data.AddUtf8("schema", KSWORD_SANDBOX_EVENT_SCHEMA_NAME);
     data.AddUtf8("producer", "r0collector");
+    AddCollectorAttributionFields(data, "collector-error", "collector-diagnostic");
+    data.AddBool("collectorNoise", true);
+    data.AddBool("collectorSelfNoise", false);
+    data.AddBool("selfProcess", false);
+    data.AddUtf8("collectorNoiseReason", "collectionDiagnostic");
+    data.AddUtf8("collectorNoiseAction", "emit");
+    data.AddBool("collectorSuppressed", false);
+    data.AddBool("selfNoise", false);
+    data.AddUtf8("selfNoiseReason", "none");
+    data.AddUtf8("selfNoiseAction", "emit");
     data.AddBool("noise", false);
     data.AddBool("lost", false);
+    data.AddUnsigned("lostCount", 0);
+    data.AddBool("lossObserved", false);
+    data.AddUtf8("loss", "none");
     data.AddBool("backpressure", false);
+    data.AddBool("backpressureObserved", false);
+    data.AddUtf8("backpressureReason", "none");
+    data.AddUnsigned("highWatermark", 0);
     return data.Build();
 }
 
@@ -119,9 +187,23 @@ bool EmitCollectorHeartbeat(
     data.AddUtf8("enableMaskHex", HexUnsignedLongLong(options.enableMask, 8));
     data.AddUtf8("schema", KSWORD_SANDBOX_EVENT_SCHEMA_NAME);
     data.AddUtf8("producer", "r0collector");
+    AddCollectorAttributionFields(data, "collector-heartbeat", "collector-lifecycle");
+    data.AddBool("collectorNoise", false);
+    data.AddBool("collectorSelfNoise", false);
+    data.AddBool("selfProcess", false);
+    data.AddUtf8("collectorNoiseReason", "none");
+    data.AddUtf8("collectorNoiseAction", "emit");
+    data.AddBool("collectorSuppressed", false);
+    data.AddBool("selfNoise", false);
+    data.AddUtf8("selfNoiseReason", "none");
+    data.AddUtf8("selfNoiseAction", "emit");
     data.AddBool("noise", false);
     data.AddBool("lost", false);
+    data.AddUnsigned("lostCount", 0);
+    data.AddBool("lossObserved", false);
     data.AddBool("backpressure", false);
+    data.AddBool("backpressureObserved", false);
+    data.AddUnsigned("highWatermark", 0);
     event.dataJson = data.Build();
 
     return EmitEvent(writer, event);
@@ -166,9 +248,23 @@ int RunDriverHealthOnly(const UniqueHandle& device, const Options& options, Even
         options.suppressSelfNoise ? "suppress-self-noise" : "emit-self-noise");
     data.AddUtf8("schema", KSWORD_SANDBOX_EVENT_SCHEMA_NAME);
     data.AddUtf8("producer", "r0collector");
+    AddCollectorAttributionFields(data, "collector-stopped", "collector-lifecycle");
+    data.AddBool("collectorNoise", false);
+    data.AddBool("collectorSelfNoise", false);
+    data.AddBool("selfProcess", false);
+    data.AddUtf8("collectorNoiseReason", "none");
+    data.AddUtf8("collectorNoiseAction", "emit");
+    data.AddBool("collectorSuppressed", false);
+    data.AddBool("selfNoise", false);
+    data.AddUtf8("selfNoiseReason", "none");
+    data.AddUtf8("selfNoiseAction", "emit");
     data.AddBool("noise", false);
     data.AddBool("lost", false);
+    data.AddUnsigned("lostCount", 0);
+    data.AddBool("lossObserved", false);
     data.AddBool("backpressure", false);
+    data.AddBool("backpressureObserved", false);
+    data.AddUnsigned("highWatermark", 0);
 
     SandboxEventFields stoppedEvent;
     stoppedEvent.eventType = "r0collector.stopped";
@@ -309,9 +405,23 @@ int RunDriverIoctlLoop(const UniqueHandle& device, const Options& options, Event
         options.suppressSelfNoise ? "suppress-self-noise" : "emit-self-noise");
     data.AddUtf8("schema", KSWORD_SANDBOX_EVENT_SCHEMA_NAME);
     data.AddUtf8("producer", "r0collector");
+    AddCollectorAttributionFields(data, "collector-stopped", "collector-lifecycle");
+    data.AddBool("collectorNoise", false);
+    data.AddBool("collectorSelfNoise", false);
+    data.AddBool("selfProcess", false);
+    data.AddUtf8("collectorNoiseReason", "none");
+    data.AddUtf8("collectorNoiseAction", "emit");
+    data.AddBool("collectorSuppressed", false);
+    data.AddBool("selfNoise", false);
+    data.AddUtf8("selfNoiseReason", "none");
+    data.AddUtf8("selfNoiseAction", "emit");
     data.AddBool("noise", false);
     data.AddBool("lost", false);
+    data.AddUnsigned("lostCount", 0);
+    data.AddBool("lossObserved", false);
     data.AddBool("backpressure", drainStoppedAtBatchLimit);
+    data.AddBool("backpressureObserved", drainStoppedAtBatchLimit);
+    data.AddUnsigned("highWatermark", 0);
 
     SandboxEventFields stoppedEvent;
     stoppedEvent.eventType = "r0collector.stopped";
@@ -394,6 +504,11 @@ int RunCollector(int argc, wchar_t* argv[]) {
         stoppedEvent.path = options.devicePath;
         JsonDataObjectBuilder stoppedData;
         stoppedData.AddUtf8("reason", "mockComplete");
+        stoppedData.AddUnsigned("driverEvents", options.stressCount > 0 ? options.stressCount : 0);
+        stoppedData.AddUnsigned("driverRecordsProcessed", options.stressCount > 0 ? options.stressCount : 0);
+        stoppedData.AddUnsigned("collectorSuppressedEvents", 0);
+        stoppedData.AddUnsigned("collectorSkippedEvents", 0);
+        stoppedData.AddUnsigned("readBatches", options.stressCount > 0 ? 1 : 0);
         stoppedData.AddBool("ioctlIssued", false);
         stoppedData.AddBool("healthOnly", options.healthOnly);
         stoppedData.AddBool("heartbeat", options.heartbeat);
@@ -409,9 +524,23 @@ int RunCollector(int argc, wchar_t* argv[]) {
         stoppedData.AddBool("injectJsonlNoise", options.injectJsonlNoise);
         stoppedData.AddUtf8("schema", KSWORD_SANDBOX_EVENT_SCHEMA_NAME);
         stoppedData.AddUtf8("producer", "r0collector");
+        AddCollectorAttributionFields(stoppedData, "collector-stopped", "collector-lifecycle");
+        stoppedData.AddBool("collectorNoise", false);
+        stoppedData.AddBool("collectorSelfNoise", false);
+        stoppedData.AddBool("selfProcess", false);
+        stoppedData.AddUtf8("collectorNoiseReason", "none");
+        stoppedData.AddUtf8("collectorNoiseAction", "emit");
+        stoppedData.AddBool("collectorSuppressed", false);
+        stoppedData.AddBool("selfNoise", false);
+        stoppedData.AddUtf8("selfNoiseReason", "none");
+        stoppedData.AddUtf8("selfNoiseAction", "emit");
         stoppedData.AddBool("noise", false);
         stoppedData.AddBool("lost", false);
+        stoppedData.AddUnsigned("lostCount", 0);
+        stoppedData.AddBool("lossObserved", false);
         stoppedData.AddBool("backpressure", false);
+        stoppedData.AddBool("backpressureObserved", false);
+        stoppedData.AddUnsigned("highWatermark", 0);
         stoppedEvent.dataJson = stoppedData.Build();
         return EmitEvent(writer, stoppedEvent) ? kExitSuccess : kExitRuntimeFailure;
     }
@@ -445,9 +574,23 @@ int RunCollector(int argc, wchar_t* argv[]) {
     openedData.AddUtf8("ioctlProtocol", "KSwordSandboxDriverIoctl.h");
     openedData.AddUtf8("schema", KSWORD_SANDBOX_EVENT_SCHEMA_NAME);
     openedData.AddUtf8("producer", "r0collector");
+    AddCollectorAttributionFields(openedData, "collector-device-open", "collector-diagnostic");
+    openedData.AddBool("collectorNoise", false);
+    openedData.AddBool("collectorSelfNoise", false);
+    openedData.AddBool("selfProcess", false);
+    openedData.AddUtf8("collectorNoiseReason", "none");
+    openedData.AddUtf8("collectorNoiseAction", "emit");
+    openedData.AddBool("collectorSuppressed", false);
+    openedData.AddBool("selfNoise", false);
+    openedData.AddUtf8("selfNoiseReason", "none");
+    openedData.AddUtf8("selfNoiseAction", "emit");
     openedData.AddBool("noise", false);
     openedData.AddBool("lost", false);
+    openedData.AddUnsigned("lostCount", 0);
+    openedData.AddBool("lossObserved", false);
     openedData.AddBool("backpressure", false);
+    openedData.AddBool("backpressureObserved", false);
+    openedData.AddUnsigned("highWatermark", 0);
     openedEvent.dataJson = openedData.Build();
     if (!EmitEvent(writer, openedEvent)) {
         return kExitRuntimeFailure;

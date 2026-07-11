@@ -30,6 +30,14 @@ std::string CurrentCapabilityFlagNames(const unsigned long long flags) {
     appendName(KSWORD_SANDBOX_CAPABILITY_FLAG_PRODUCER_ENABLE_BITS, "ProducerEnableBits");
     appendName(KSWORD_SANDBOX_CAPABILITY_FLAG_TYPED_EVENT_PAYLOADS, "TypedEventPayloads");
     appendName(KSWORD_SANDBOX_CAPABILITY_FLAG_EVENT_SCHEMA_NAMES, "EventSchemaNames");
+    appendName(KSWORD_SANDBOX_CAPABILITY_FLAG_PROCESS_CREATE_EXIT, "ProcessCreateExit");
+    appendName(KSWORD_SANDBOX_CAPABILITY_FLAG_IMAGE_LOAD, "ImageLoad");
+    appendName(KSWORD_SANDBOX_CAPABILITY_FLAG_FILE_MINIFILTER, "FileMinifilter");
+    appendName(KSWORD_SANDBOX_CAPABILITY_FLAG_REGISTRY_CALLBACK, "RegistryCallback");
+    appendName(KSWORD_SANDBOX_CAPABILITY_FLAG_NETWORK_WFP_ALE, "NetworkWfpAle");
+    appendName(KSWORD_SANDBOX_CAPABILITY_FLAG_EVENT_COMMON_METADATA, "EventCommonMetadata");
+    appendName(KSWORD_SANDBOX_CAPABILITY_FLAG_PRODUCER_METADATA, "ProducerMetadata");
+    appendName(KSWORD_SANDBOX_CAPABILITY_FLAG_SELF_NOISE_METADATA, "SelfNoiseMetadata");
 
     return names.empty() ? "none" : names;
 }
@@ -81,9 +89,23 @@ std::string BuildAbiSelfCheckData(const Options& options) {
     data.AddWide("outputPath", options.outputPath);
     data.AddUtf8("schema", KSWORD_SANDBOX_EVENT_SCHEMA_NAME);
     data.AddUtf8("producer", "r0collector");
+    AddCollectorAttributionFields(data, "collector-abi-self-check", "collector-diagnostic");
+    data.AddBool("collectorNoise", false);
+    data.AddBool("collectorSelfNoise", false);
+    data.AddBool("selfProcess", false);
+    data.AddUtf8("collectorNoiseReason", "none");
+    data.AddUtf8("collectorNoiseAction", "emit");
+    data.AddBool("collectorSuppressed", false);
+    data.AddBool("selfNoise", false);
+    data.AddUtf8("selfNoiseReason", "none");
+    data.AddUtf8("selfNoiseAction", "emit");
     data.AddBool("noise", false);
     data.AddBool("lost", false);
+    data.AddUnsigned("lostCount", 0);
+    data.AddBool("lossObserved", false);
     data.AddBool("backpressure", false);
+    data.AddBool("backpressureObserved", false);
+    data.AddUnsigned("highWatermark", 0);
 
     data.AddUnsigned("collectorAbiVersion", KSWORD_SANDBOX_INTERFACE_VERSION);
     data.AddUtf8("collectorAbiVersionHex", HexUnsignedLongLong(KSWORD_SANDBOX_INTERFACE_VERSION, 8));
@@ -143,6 +165,11 @@ std::string BuildAbiSelfCheckData(const Options& options) {
         options.driverEventSampleStride <= 1
             ? "none; every eligible driver row is emitted unless self-noise suppression applies"
             : "stride; emit the first eligible driver row and every nth eligible row, with skipped rows counted in r0collector.driverReadEvents");
+    data.AddWide(
+        "zhDriverEventSamplingPolicy",
+        options.driverEventSampleStride <= 1
+            ? L"\u65e0\u91c7\u6837\uff1b\u9664\u81ea\u8eab\u566a\u58f0\u6291\u5236\u5916\uff0c\u6bcf\u6761\u7b26\u5408\u6761\u4ef6\u7684 driver \u884c\u90fd\u4f1a\u5199\u51fa\u3002"
+            : L"\u542f\u7528\u6b65\u957f\u91c7\u6837\uff1b\u5199\u51fa\u7b2c\u4e00\u6761\u7b26\u5408\u6761\u4ef6\u7684 driver \u884c\u548c\u6bcf\u7b2c n \u6761\uff0c\u8df3\u8fc7\u6570\u91cf\u8bb0\u5f55\u5728 r0collector.driverReadEvents\u3002");
     data.AddBool("enableMaskSpecified", options.enableMaskSpecified);
     data.AddUnsigned("enableMask", options.enableMask);
     data.AddUtf8("enableMaskHex", HexUnsignedLongLong(options.enableMask, 8));
@@ -154,12 +181,21 @@ std::string BuildAbiSelfCheckData(const Options& options) {
         options.suppressSelfNoise
             ? "default live READ_EVENTS import suppresses collector PID, collector output JSONL, and known KSword infrastructure paths; --emit-self-noise emits those rows with selfNoise=true"
             : "--emit-self-noise active; collector and KSword infrastructure rows are emitted with selfNoise=true instead of being suppressed");
+    data.AddWide(
+        "zhCollectorSelfNoisePolicy",
+        options.suppressSelfNoise
+            ? L"\u9ed8\u8ba4\u6291\u5236 Collector PID\u3001Collector \u8f93\u51fa JSONL \u548c\u5df2\u77e5 KSword \u57fa\u7840\u8bbe\u65bd\u8def\u5f84\uff1b\u9700\u8981\u8bca\u65ad\u6291\u5236\u51b3\u7b56\u65f6\u53ef\u4f7f\u7528 --emit-self-noise\u3002"
+            : L"\u5df2\u542f\u7528 --emit-self-noise\uff1bCollector/KSword \u57fa\u7840\u8bbe\u65bd\u884c\u4f1a\u5199\u51fa\uff0c\u5e76\u6807\u8bb0 selfNoise=true\u3002");
     data.AddUtf8("jsonlNoisePolicy", "blank lines ignored by live reader; malformed lines preserved by host import as driver.parse_error; valid rows with extra fields tolerated");
+    data.AddWide("zhJsonlNoisePolicy", L"\u5b9e\u65f6\u8bfb\u53d6\u5668\u5ffd\u7565\u7a7a\u884c\uff1b\u7578\u5f62 JSONL \u7531 Host import \u4fdd\u7559\u4e3a driver.parse_error\uff1b\u5305\u542b\u989d\u5916\u5b57\u6bb5\u7684\u5408\u6cd5\u884c\u4f1a\u88ab\u5bb9\u5fcd\u3002");
     data.AddUtf8("jsonlMalformedPolicy", "collector never emits malformed rows except when --inject-jsonl-noise is explicitly requested; live readers skip malformed rows and host import preserves them as driver.parse_error evidence");
+    data.AddWide("zhJsonlMalformedPolicy", L"Collector \u4ec5\u5728\u663e\u5f0f --inject-jsonl-noise \u65f6\u53d1\u51fa\u7578\u5f62\u884c\uff1b\u5b9e\u65f6\u8bfb\u53d6\u5668\u8df3\u8fc7\u7578\u5f62\u884c\uff0cHost import \u5c06\u5176\u4fdd\u7559\u4e3a driver.parse_error \u8bc1\u636e\u3002");
     data.AddUtf8("kernelBackpressurePolicy", "nonblocking producers; fixed ring overwrites oldest unread record on overflow");
-    data.AddUtf8("queueLossEvidence", "TotalEventsDropped|EventsDropped|TotalEventsSuppressed|TotalEventsBackpressured|ProducerDroppedMask|ProducerSuppressedMask|ProducerBackpressureMask|NextSequence|sequence|queueHighWatermark");
-    data.AddUtf8("stableJsonlFields", "sequence|lost|loss|backpressure|backpressureObserved|noise|selfNoise|selfNoiseReason|producer|producerCategory|eventOrigin|subjectKind|processIdSource|schema|eventSchemaName|eventSchemaVersion|eligible|processed|emitted|suppressed|skipped|head|tail|sampling|producerDroppedMask|producerSuppressedMask|producerBackpressureMask");
+    data.AddWide("zhKernelBackpressurePolicy", L"\u5185\u6838 producer \u975e\u963b\u585e\uff1b\u56fa\u5b9a\u73af\u5f62\u7f13\u51b2\u533a\u6ea2\u51fa\u65f6\u8986\u76d6\u6700\u65e7\u672a\u8bfb\u8bb0\u5f55\u3002");
+    data.AddUtf8("queueLossEvidence", "lostCount|TotalEventsDropped|EventsDropped|TotalEventsSuppressed|TotalEventsBackpressured|ProducerDroppedMask|ProducerSuppressedMask|ProducerBackpressureMask|NextSequence|sequence|queueHighWatermark|highWatermark");
+    data.AddUtf8("stableJsonlFields", "sequence|sequenceMeaning|lost|lostCount|loss|lossObserved|backpressure|backpressureObserved|backpressureReason|highWatermark|lastEnqueueFailureStatus|noise|collectorNoise|collectorSelfNoise|selfProcess|selfNoise|selfNoiseReason|selfNoiseAction|collectorSuppressed|producer|producerCategory|eventOrigin|subjectKind|actorRole|subjectRole|processIdSource|operationName|status|pathTruncated|schema|eventSchemaName|eventSchemaVersion|eligible|processed|emitted|suppressed|skipped|head|tail|sampling|producerDroppedMask|producerSuppressedMask|producerBackpressureMask|effectiveProducerMask|lastFailureNtStatus");
     data.AddUtf8("collectorSelfCheckContract", "--abi-self-check emits this row and exits before CreateFileW/DeviceIoControl");
+    data.AddWide("zhCollectorSelfCheckContract", L"--abi-self-check \u4f1a\u53d1\u51fa\u8be5\u884c\uff0c\u5e76\u5728 CreateFileW/DeviceIoControl \u4e4b\u524d\u9000\u51fa\u3002");
 
     return data.Build();
 }
@@ -203,9 +239,23 @@ int RunAbiSelfCheckMode(const Options& options, EventWriter& writer) {
         options.suppressSelfNoise ? "suppress-self-noise" : "emit-self-noise");
     data.AddUtf8("schema", KSWORD_SANDBOX_EVENT_SCHEMA_NAME);
     data.AddUtf8("producer", "r0collector");
+    AddCollectorAttributionFields(data, "collector-stopped", "collector-lifecycle");
+    data.AddBool("collectorNoise", false);
+    data.AddBool("collectorSelfNoise", false);
+    data.AddBool("selfProcess", false);
+    data.AddUtf8("collectorNoiseReason", "none");
+    data.AddUtf8("collectorNoiseAction", "emit");
+    data.AddBool("collectorSuppressed", false);
+    data.AddBool("selfNoise", false);
+    data.AddUtf8("selfNoiseReason", "none");
+    data.AddUtf8("selfNoiseAction", "emit");
     data.AddBool("noise", false);
     data.AddBool("lost", false);
+    data.AddUnsigned("lostCount", 0);
+    data.AddBool("lossObserved", false);
     data.AddBool("backpressure", false);
+    data.AddBool("backpressureObserved", false);
+    data.AddUnsigned("highWatermark", 0);
     stoppedEvent.dataJson = data.Build();
 
     return EmitEvent(writer, stoppedEvent) ? kExitSuccess : kExitRuntimeFailure;

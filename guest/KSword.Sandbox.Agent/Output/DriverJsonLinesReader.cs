@@ -60,6 +60,8 @@ internal sealed class DriverJsonLinesReader
                             ["lineNumber"] = lineNumber.ToString(System.Globalization.CultureInfo.InvariantCulture),
                             ["exceptionType"] = ex.GetType().FullName ?? ex.GetType().Name,
                             ["message"] = ex.Message,
+                            ["zhMessage"] = "driver-events JSONL 中有一行无法解析，Host/Agent 会把它保留为 driver.parse_error 证据而不是静默丢弃。",
+                            ["zhHint"] = "请检查该行是否为完整 JSON 对象、是否包含稳定的 eventType 字段；如果来自 --inject-jsonl-noise，可按预期视为噪声测试。",
                             ["eventOrigin"] = "guest-agent-import",
                             ["collectionNoise"] = "true",
                             ["attributionSummary"] = "guest-agent-import:malformed-driver-jsonl"
@@ -79,6 +81,8 @@ internal sealed class DriverJsonLinesReader
                 {
                     ["exceptionType"] = ex.GetType().FullName ?? ex.GetType().Name,
                     ["message"] = ex.Message,
+                    ["zhMessage"] = "Guest Agent 读取 driver-events JSONL 失败。",
+                    ["zhHint"] = "请检查 R0Collector 是否成功写出该文件、路径是否正确，以及文件是否仍被占用或权限不足。",
                     ["eventOrigin"] = "guest-agent-import",
                     ["collectionNoise"] = "true",
                     ["attributionSummary"] = "guest-agent-import:driver-jsonl-read-error"
@@ -99,13 +103,13 @@ internal sealed class DriverJsonLinesReader
     {
         if (root.ValueKind != JsonValueKind.Object)
         {
-            throw new JsonException("Driver JSONL row must be a JSON object.");
+            throw new JsonException("Driver JSONL row must be a JSON object. / Driver JSONL 行必须是 JSON 对象。");
         }
 
         var eventType = GetStringProperty(root, "eventType");
         if (string.IsNullOrWhiteSpace(eventType))
         {
-            throw new JsonException("Driver JSONL row is missing eventType.");
+            throw new JsonException("Driver JSONL row is missing eventType. / Driver JSONL 行缺少稳定的 eventType 字段。");
         }
 
         return new SandboxEvent

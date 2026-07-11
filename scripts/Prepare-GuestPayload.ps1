@@ -363,7 +363,7 @@ function Assert-OutsideRepository {
     )
 
     if (Test-PathUnderRoot -Path $Path -Root $RepositoryRoot) {
-        throw "$Name must stay outside the repository. Refusing path: $Path"
+        throw "错误：$Name 必须位于仓库外，已拒绝路径：$Path。下一步：请选择 D:\Temp\KSwordSandbox 等 ignored runtime 目录。"
     }
 }
 
@@ -466,7 +466,7 @@ function Assert-StagedPayloadFile {
     )
 
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
-        throw "$Name was not staged at expected path: $Path"
+        throw "错误：$Name 未暂存到预期路径：$Path。下一步：查看上方复制/构建输出后重试。"
     }
 }
 
@@ -565,15 +565,15 @@ try {
     $collectorProject = Join-Path $resolvedRepo 'guest\KSword.Sandbox.R0Collector\KSword.Sandbox.R0Collector.vcxproj'
 
     if (-not (Test-Path -LiteralPath $MSBuildPath -PathType Leaf)) {
-        throw "MSBuild was not found: $MSBuildPath"
+        throw "错误：找不到 MSBuild：$MSBuildPath。下一步：安装 Visual Studio Build Tools/WDK，或传入正确 -MSBuildPath。"
     }
 
     if (-not (Test-Path -LiteralPath $agentProject -PathType Leaf)) {
-        throw "Guest Agent project was not found: $agentProject"
+        throw "错误：找不到 Guest Agent 项目：$agentProject。下一步：确认仓库完整并从仓库根目录运行。"
     }
 
     if (-not (Test-Path -LiteralPath $collectorProject -PathType Leaf)) {
-        throw "R0Collector project was not found: $collectorProject"
+        throw "错误：找不到 R0Collector 项目：$collectorProject。下一步：确认仓库完整并从仓库根目录运行。"
     }
 
     Assert-OutsideRepository -Path $resolvedPayload -RepositoryRoot $resolvedRepo -Name 'PayloadRoot'
@@ -603,7 +603,7 @@ try {
         '/v:minimal'
     )
     if ($agentExit -ne 0) {
-        throw "Guest Agent publish failed with exit code $agentExit."
+        throw "错误：Guest Agent publish 失败，退出码 $agentExit。下一步：查看上方 dotnet publish 输出，安装/修复 .NET SDK 后重试。"
     }
 
     Write-PrepStep "Building R0Collector into $collectorOutDir"
@@ -618,12 +618,12 @@ try {
         '/v:minimal'
     )
     if ($collectorExit -ne 0) {
-        throw "R0Collector build failed with exit code $collectorExit."
+        throw "错误：R0Collector build 失败，退出码 $collectorExit。下一步：确认 MSBuild/WDK/native toolchain 可用后重试。"
     }
 
     $collectorExe = Join-Path $collectorOutDir 'KSword.Sandbox.R0Collector.exe'
     if (-not (Test-Path -LiteralPath $collectorExe -PathType Leaf)) {
-        throw "R0Collector executable was not produced at expected path: $collectorExe"
+        throw "错误：R0Collector 可执行文件未生成到预期路径：$collectorExe。下一步：检查 native build 输出。"
     }
 
     Write-PrepStep "Copying Guest Agent runtime files into $agentPayloadDir"
@@ -653,17 +653,17 @@ try {
         -CollectorFileCount $collectorFileCount
 
     Write-Host ''
-    Write-Host 'PASS: guest payload prepared.'
-    Write-Host "  Payload root:  $resolvedPayload"
+    Write-Host '成功：guest payload 已准备完成。 / PASS: guest payload prepared.'
+    Write-Host "  Payload 根目录 / Payload root:  $resolvedPayload"
     Write-Host "  Guest Agent:   $agentPayloadDir"
     Write-Host "  R0Collector:   $collectorPayloadDir"
     Write-Host "  Manifest:      $manifestPath"
-    Write-Host "  Readiness:     pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\Test-HyperVReadiness.ps1 -GuestPayloadRoot '$resolvedPayload' -GuestWorkingDirectory '$GuestWorkingDirectory'"
-    Write-Host '  Git hygiene:   payload files are outside the repository; do not commit copied binaries.'
+    Write-Host "  下一步检查 / Readiness: pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\Test-HyperVReadiness.ps1 -GuestPayloadRoot '$resolvedPayload' -GuestWorkingDirectory '$GuestWorkingDirectory'"
+    Write-Host '  Git 提醒 / Git hygiene: payload 文件位于仓库外；不要提交复制出来的二进制文件。'
     exit 0
 }
 catch {
     Write-Host ''
-    Write-Error "FAIL: guest payload preparation failed. $($_.Exception.Message)"
+    Write-Error "失败：guest payload 准备失败。下一步：确认 .NET SDK、MSBuild/WDK 和路径权限后重试。英文详情：$($_.Exception.Message)"
     exit 1
 }

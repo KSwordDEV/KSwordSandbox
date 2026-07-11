@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
 using KSword.Sandbox.Abstractions;
@@ -24,12 +25,20 @@ public sealed class StaticAnalyzer
     private const int MaxExportNames = 64;
     private const int MaxTlsCallbacks = 32;
     private const int MaxCertificateEntries = 16;
+    private const int MaxDebugEntries = 64;
     private const int MaxResourceEntries = 160;
     private const int MaxResourceEvidence = 96;
     private const int MaxResourceDepth = 4;
     private const int MaxPeStringLength = 180;
+    private const int MaxResourceStringBytes = 64 * 1024;
+    private const int MaxVersionStringEvidence = 16;
     private const int MaxStructuredPeEntries = 128;
     private const int MaxStructuredStringIndicators = 160;
+    private const int MaxStaticYaraRuleFileBytes = 1024 * 1024;
+    private const int MaxStaticYaraRuleMatches = 32;
+    private const int MaxStaticYaraMatchedStringIds = 24;
+    private const int MaxStaticAnalysisEvents = 256;
+    private const int MaxStaticEventDataValueLength = 640;
 
     private static readonly Regex UrlPattern = new(
         @"https?://[^\s""'<>]+",
@@ -54,6 +63,14 @@ public sealed class StaticAnalyzer
     private static readonly Regex RegistryPathPattern = new(
         @"\b(?:HKCU|HKLM|HKCR|HKU|HKCC|HKEY_CURRENT_USER|HKEY_LOCAL_MACHINE|HKEY_CLASSES_ROOT|HKEY_USERS|HKEY_CURRENT_CONFIG)\\[^""'<>|\r\n]{3,}",
         RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
+
+    private static readonly Regex ManifestRequestedExecutionLevelPattern = new(
+        @"requestedExecutionLevel\b[^>]*\blevel\s*=\s*[""'](?<level>[^""']{1,64})[""']",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
+
+    private static readonly Regex StaticYaraRulePattern = new(
+        @"(?ms)^\s*rule\s+(?<name>[A-Za-z_][A-Za-z0-9_]*)\b[^{]*\{(?<body>.*?)^\s*\}",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     private static readonly string[] ProcessInjectionApis =
     [
@@ -339,11 +356,17 @@ public sealed class StaticAnalyzer
         "UPX1",
         "UPX2",
         "ASPack",
+        "ASProtect",
         "MPRESS",
         "Themida",
         "VMProtect",
         "Enigma Protector",
-        "PECompact"
+        "PECompact",
+        "FSG!",
+        "Petite",
+        "Obsidium",
+        "Armadillo",
+        "MoleBox"
     ];
 
     private static readonly string[] PackerSectionNames =
@@ -355,9 +378,15 @@ public sealed class StaticAnalyzer
         ".mpress",
         ".petite",
         ".vmp",
+        ".vmp0",
+        ".vmp1",
         ".packed",
         ".themida",
-        ".enigma"
+        ".enigma",
+        ".fsg",
+        ".mew",
+        ".asprotect",
+        ".boom"
     ];
 
     private static readonly string[] ScriptInterpreterMarkers =
@@ -375,7 +404,17 @@ public sealed class StaticAnalyzer
         "wmic",
         "schtasks",
         "reg.exe",
-        "installutil"
+        "installutil",
+        "msiexec",
+        "msbuild",
+        "regasm",
+        "regsvcs",
+        "cmstp",
+        "odbcconf",
+        "forfiles",
+        "hh.exe",
+        "xwizard",
+        "msxsl"
     ];
 
     private static readonly string[] LolbinCommandMarkers =
@@ -388,7 +427,69 @@ public sealed class StaticAnalyzer
         "wmic",
         "schtasks",
         "reg.exe",
-        "installutil"
+        "installutil",
+        "msiexec",
+        "msbuild",
+        "regasm",
+        "regsvcs",
+        "cmstp",
+        "odbcconf",
+        "forfiles",
+        "hh.exe",
+        "xwizard",
+        "msxsl"
+    ];
+
+    private static readonly string[] ServiceStringMarkers =
+    [
+        "CurrentControlSet\\Services\\",
+        "ControlSet001\\Services\\",
+        "ControlSet002\\Services\\",
+        "CreateService",
+        "ChangeServiceConfig",
+        "OpenSCManager",
+        "ServiceMain",
+        "SvchostPushServiceGlobals",
+        "ServiceDll",
+        "New-Service",
+        "Set-Service",
+        "Start-Service",
+        "Stop-Service",
+        "sc.exe create",
+        "sc.exe config",
+        "sc.exe failure"
+    ];
+
+    private static readonly string[] ScheduledTaskStringMarkers =
+    [
+        "\\System32\\Tasks\\",
+        "\\SysWOW64\\Tasks\\",
+        "Schedule\\TaskCache\\Tree\\",
+        "Schedule\\TaskCache\\Tasks\\",
+        "Windows NT\\CurrentVersion\\Schedule\\TaskCache\\",
+        "Register-ScheduledTask",
+        "New-ScheduledTask",
+        "New-ScheduledTaskAction",
+        "Set-ScheduledTask",
+        "Schedule.Service",
+        "IRegisteredTask",
+        "ITaskService",
+        "schtasks /create",
+        "schtasks.exe /create",
+        "schtasks /change",
+        "schtasks.exe /change"
+    ];
+
+    private static readonly string[] VersionStringKeys =
+    [
+        "CompanyName",
+        "FileDescription",
+        "FileVersion",
+        "InternalName",
+        "OriginalFilename",
+        "ProductName",
+        "ProductVersion",
+        "LegalCopyright"
     ];
 
     private static readonly string[] EncodedCommandMarkers =
@@ -504,6 +605,43 @@ public sealed class StaticAnalyzer
             InterestingStrings = interestingStrings.Take(MaxStrings).ToList(),
             Warnings = warnings
         };
+    }
+
+    /// <summary>
+    /// Runs static analysis and projects the result into normalized events.
+    /// Inputs are a local sample path; processing reuses Analyze so no external
+    /// tools or binary dependencies are required; the method returns bounded
+    /// host-side events for rules, live views, or diagnostics.
+    /// </summary>
+    public IReadOnlyList<SandboxEvent> AnalyzeToEvents(string samplePath)
+    {
+        var result = Analyze(samplePath);
+        return CreateEvents(samplePath, result);
+    }
+
+    /// <summary>
+    /// Projects a StaticAnalysisResult into normalized SandboxEvent rows.
+    /// Inputs are a sample path plus an already computed static-analysis model;
+    /// processing emits bounded PE import/export/TLS/section, string, packer,
+    /// overlay, and built-in YARA-like match events; the method returns a
+    /// backward-compatible event view without mutating the model.
+    /// </summary>
+    public static IReadOnlyList<SandboxEvent> CreateEvents(string samplePath, StaticAnalysisResult result)
+    {
+        var fullPath = Path.GetFullPath(samplePath);
+        var events = new List<SandboxEvent>();
+
+        AddStaticSummaryEvent(fullPath, result, events);
+        AddStaticSectionEvents(fullPath, result, events);
+        AddStaticImportEvents(fullPath, result, events);
+        AddStaticExportEvents(fullPath, result, events);
+        AddStaticTlsEvents(fullPath, result, events);
+        AddStaticOverlayEvent(fullPath, result, events);
+        AddStaticStringEvents(fullPath, result, events);
+        AddStaticPackerEvent(fullPath, result, events);
+        AddStaticYaraEvents(fullPath, result, events);
+
+        return events;
     }
 
     /// <summary>
@@ -700,6 +838,862 @@ public sealed class StaticAnalyzer
                 break;
             }
         }
+
+        ApplyStaticNotesYaraRules(fullPath, buffer, tags, interestingStrings);
+    }
+
+    /// <summary>
+    /// Applies optional static-notes YARA rules with a tiny built-in matcher.
+    /// Inputs are the existing static scan buffer and tag/evidence outputs;
+    /// processing finds rules/static-notes.yar and matches the small supported
+    /// subset; the method silently returns when rules or matcher support are
+    /// unavailable.
+    /// </summary>
+    private static void ApplyStaticNotesYaraRules(
+        string fullPath,
+        byte[] buffer,
+        SortedSet<string> tags,
+        SortedSet<string> interestingStrings)
+    {
+        try
+        {
+            var rulesPath = ResolveStaticNotesYaraPath(fullPath);
+            if (rulesPath is null)
+            {
+                return;
+            }
+
+            var rulesText = TryReadStaticYaraRules(rulesPath);
+            if (string.IsNullOrWhiteSpace(rulesText))
+            {
+                return;
+            }
+
+            var rules = ParseStaticYaraRules(rulesText);
+            if (rules.Count == 0)
+            {
+                return;
+            }
+
+            var context = new StaticYaraScanContext(buffer);
+            var matchCount = 0;
+            foreach (var rule in rules)
+            {
+                var match = MatchStaticYaraRule(rule, context);
+                if (match is null)
+                {
+                    continue;
+                }
+
+                AddStaticYaraMatch(rule, match, tags, interestingStrings);
+                matchCount++;
+                if (matchCount >= MaxStaticYaraRuleMatches)
+                {
+                    break;
+                }
+            }
+        }
+        catch (Exception ex) when (IsStaticYaraDowngradeException(ex))
+        {
+            // Optional YARA support must never make static analysis fail.
+        }
+    }
+
+    /// <summary>
+    /// Locates rules/static-notes.yar from likely repo or app roots.
+    /// </summary>
+    private static string? ResolveStaticNotesYaraPath(string samplePath)
+    {
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var root in CandidateStaticYaraSearchRoots(samplePath))
+        {
+            foreach (var directory in EnumerateSelfAndParents(root))
+            {
+                if (!seen.Add(directory))
+                {
+                    continue;
+                }
+
+                var candidate = Path.Combine(directory, "rules", "static-notes.yar");
+                if (File.Exists(candidate))
+                {
+                    return candidate;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Returns directory roots used to resolve optional static YARA rules.
+    /// </summary>
+    private static IEnumerable<string> CandidateStaticYaraSearchRoots(string samplePath)
+    {
+        yield return Environment.CurrentDirectory;
+        yield return AppContext.BaseDirectory;
+
+        var sampleDirectory = Path.GetDirectoryName(samplePath);
+        if (!string.IsNullOrWhiteSpace(sampleDirectory))
+        {
+            yield return sampleDirectory;
+        }
+    }
+
+    /// <summary>
+    /// Enumerates a directory and its parents.
+    /// </summary>
+    private static IEnumerable<string> EnumerateSelfAndParents(string startDirectory)
+    {
+        var directory = new DirectoryInfo(Path.GetFullPath(startDirectory));
+        while (directory is not null)
+        {
+            yield return directory.FullName;
+            directory = directory.Parent;
+        }
+    }
+
+    /// <summary>
+    /// Reads the optional YARA rule file only when it stays lightweight.
+    /// </summary>
+    private static string? TryReadStaticYaraRules(string rulesPath)
+    {
+        var fileInfo = new FileInfo(rulesPath);
+        if (!fileInfo.Exists ||
+            fileInfo.Length <= 0 ||
+            fileInfo.Length > MaxStaticYaraRuleFileBytes)
+        {
+            return null;
+        }
+
+        using var stream = File.OpenRead(rulesPath);
+        using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+        return reader.ReadToEnd();
+    }
+
+    /// <summary>
+    /// Parses the subset of YARA used by rules/static-notes.yar.
+    /// </summary>
+    private static List<StaticYaraRule> ParseStaticYaraRules(string rulesText)
+    {
+        var rules = new List<StaticYaraRule>();
+        foreach (Match match in StaticYaraRulePattern.Matches(rulesText))
+        {
+            var name = match.Groups["name"].Value.Trim();
+            var body = match.Groups["body"].Value;
+            var rule = ParseStaticYaraRule(name, body);
+            if (!string.IsNullOrWhiteSpace(rule.Condition))
+            {
+                rules.Add(rule);
+            }
+        }
+
+        return rules;
+    }
+
+    /// <summary>
+    /// Parses one rule body into meta, string, and condition sections.
+    /// </summary>
+    private static StaticYaraRule ParseStaticYaraRule(string name, string body)
+    {
+        var meta = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var strings = new List<StaticYaraString>();
+        var condition = new StringBuilder();
+        var section = string.Empty;
+
+        foreach (var rawLine in body.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n'))
+        {
+            var line = StripStaticYaraLineComment(rawLine).Trim();
+            if (line.Length == 0)
+            {
+                continue;
+            }
+
+            if (line.Equals("meta:", StringComparison.OrdinalIgnoreCase))
+            {
+                section = "meta";
+                continue;
+            }
+
+            if (line.Equals("strings:", StringComparison.OrdinalIgnoreCase))
+            {
+                section = "strings";
+                continue;
+            }
+
+            if (line.Equals("condition:", StringComparison.OrdinalIgnoreCase))
+            {
+                section = "condition";
+                continue;
+            }
+
+            if (section.Equals("meta", StringComparison.OrdinalIgnoreCase))
+            {
+                TryParseStaticYaraMeta(line, meta);
+            }
+            else if (section.Equals("strings", StringComparison.OrdinalIgnoreCase))
+            {
+                var yaraString = TryParseStaticYaraString(line);
+                if (yaraString is not null)
+                {
+                    strings.Add(yaraString);
+                }
+            }
+            else if (section.Equals("condition", StringComparison.OrdinalIgnoreCase))
+            {
+                condition.Append(' ').Append(line);
+            }
+        }
+
+        return new StaticYaraRule(name, meta, strings, condition.ToString().Trim());
+    }
+
+    /// <summary>
+    /// Removes // comments while preserving quoted string and regex content.
+    /// </summary>
+    private static string StripStaticYaraLineComment(string line)
+    {
+        var inQuote = false;
+        var inRegex = false;
+        var escaped = false;
+        for (var index = 0; index + 1 < line.Length; index++)
+        {
+            var current = line[index];
+            if (escaped)
+            {
+                escaped = false;
+                continue;
+            }
+
+            if ((inQuote || inRegex) && current == '\\')
+            {
+                escaped = true;
+                continue;
+            }
+
+            if (!inRegex && current == '"')
+            {
+                inQuote = !inQuote;
+                continue;
+            }
+
+            if (!inQuote && current == '/')
+            {
+                if (line[index + 1] == '/')
+                {
+                    return line[..index];
+                }
+
+                inRegex = !inRegex;
+            }
+        }
+
+        return line;
+    }
+
+    /// <summary>
+    /// Parses one YARA meta assignment.
+    /// </summary>
+    private static void TryParseStaticYaraMeta(string line, Dictionary<string, string> meta)
+    {
+        var equalsIndex = line.IndexOf('=');
+        if (equalsIndex <= 0)
+        {
+            return;
+        }
+
+        var key = line[..equalsIndex].Trim();
+        var valueText = line[(equalsIndex + 1)..].Trim().TrimEnd(',');
+        if (key.Length == 0)
+        {
+            return;
+        }
+
+        if (valueText.StartsWith('"') &&
+            TryReadStaticYaraQuotedString(valueText, out var quoted, out _))
+        {
+            meta[key] = quoted;
+            return;
+        }
+
+        if (valueText.Length > 0)
+        {
+            meta[key] = valueText;
+        }
+    }
+
+    /// <summary>
+    /// Parses one YARA string definition.
+    /// </summary>
+    private static StaticYaraString? TryParseStaticYaraString(string line)
+    {
+        if (!line.StartsWith('$'))
+        {
+            return null;
+        }
+
+        var equalsIndex = line.IndexOf('=');
+        if (equalsIndex <= 1)
+        {
+            return null;
+        }
+
+        var identifier = line[1..equalsIndex].Trim();
+        if (!IsStaticYaraIdentifier(identifier))
+        {
+            return null;
+        }
+
+        var valueAndModifiers = line[(equalsIndex + 1)..].Trim();
+        if (valueAndModifiers.StartsWith('"') &&
+            TryReadStaticYaraQuotedString(valueAndModifiers, out var literal, out var literalLength))
+        {
+            return new StaticYaraString(
+                identifier,
+                StaticYaraStringKind.Literal,
+                literal,
+                null,
+                ParseStaticYaraModifiers(valueAndModifiers[literalLength..]));
+        }
+
+        if (valueAndModifiers.StartsWith('/') &&
+            TryReadStaticYaraRegex(valueAndModifiers, out var pattern, out var regexLength))
+        {
+            return new StaticYaraString(
+                identifier,
+                StaticYaraStringKind.Regex,
+                null,
+                pattern,
+                ParseStaticYaraModifiers(valueAndModifiers[regexLength..]));
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Reads a quoted YARA string literal and decodes common escapes.
+    /// </summary>
+    private static bool TryReadStaticYaraQuotedString(string text, out string value, out int consumed)
+    {
+        var builder = new StringBuilder();
+        value = string.Empty;
+        consumed = 0;
+
+        for (var index = 1; index < text.Length; index++)
+        {
+            var current = text[index];
+            if (current == '"')
+            {
+                value = builder.ToString();
+                consumed = index + 1;
+                return true;
+            }
+
+            if (current != '\\' || index + 1 >= text.Length)
+            {
+                builder.Append(current);
+                continue;
+            }
+
+            var next = text[++index];
+            switch (next)
+            {
+                case 'n':
+                    builder.Append('\n');
+                    break;
+                case 'r':
+                    builder.Append('\r');
+                    break;
+                case 't':
+                    builder.Append('\t');
+                    break;
+                case 'x' when index + 2 < text.Length &&
+                              byte.TryParse(text.Substring(index + 1, 2), NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var hexValue):
+                    builder.Append((char)hexValue);
+                    index += 2;
+                    break;
+                default:
+                    builder.Append(next);
+                    break;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Reads a slash-delimited YARA regex pattern.
+    /// </summary>
+    private static bool TryReadStaticYaraRegex(string text, out string pattern, out int consumed)
+    {
+        var builder = new StringBuilder();
+        pattern = string.Empty;
+        consumed = 0;
+        var escaped = false;
+
+        for (var index = 1; index < text.Length; index++)
+        {
+            var current = text[index];
+            if (escaped)
+            {
+                builder.Append('\\').Append(current);
+                escaped = false;
+                continue;
+            }
+
+            if (current == '\\')
+            {
+                escaped = true;
+                continue;
+            }
+
+            if (current == '/')
+            {
+                pattern = builder.ToString();
+                consumed = index + 1;
+                return true;
+            }
+
+            builder.Append(current);
+        }
+
+        if (escaped)
+        {
+            builder.Append('\\');
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Parses supported YARA string modifiers.
+    /// </summary>
+    private static HashSet<string> ParseStaticYaraModifiers(string text)
+    {
+        return text
+            .Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(token => token.Trim().TrimEnd(',').ToLowerInvariant())
+            .Where(token => token.Length > 0)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Tests whether a token is a simple YARA identifier.
+    /// </summary>
+    private static bool IsStaticYaraIdentifier(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value) || !(char.IsLetter(value[0]) || value[0] == '_'))
+        {
+            return false;
+        }
+
+        return value.All(character => char.IsLetterOrDigit(character) || character == '_');
+    }
+
+    /// <summary>
+    /// Matches one parsed static YARA rule against the scan buffer.
+    /// </summary>
+    private static StaticYaraRuleMatch? MatchStaticYaraRule(StaticYaraRule rule, StaticYaraScanContext context)
+    {
+        var matchedStringIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var yaraString in rule.Strings)
+        {
+            if (MatchesStaticYaraString(yaraString, context))
+            {
+                matchedStringIds.Add(yaraString.Identifier);
+            }
+        }
+
+        if (!EvaluateStaticYaraCondition(rule.Condition, rule.Strings, matchedStringIds, context.Buffer))
+        {
+            return null;
+        }
+
+        return new StaticYaraRuleMatch(
+            rule.Name,
+            matchedStringIds
+                .OrderBy(identifier => identifier, StringComparer.OrdinalIgnoreCase)
+                .Take(MaxStaticYaraMatchedStringIds)
+                .ToList());
+    }
+
+    /// <summary>
+    /// Matches one YARA string definition using supported modifiers.
+    /// </summary>
+    private static bool MatchesStaticYaraString(StaticYaraString yaraString, StaticYaraScanContext context)
+    {
+        var ignoreCase = yaraString.Modifiers.Contains("nocase");
+        if (yaraString.Kind == StaticYaraStringKind.Regex)
+        {
+            return MatchesStaticYaraRegex(yaraString, context, ignoreCase);
+        }
+
+        if (string.IsNullOrEmpty(yaraString.Literal))
+        {
+            return false;
+        }
+
+        var ascii = yaraString.Modifiers.Contains("ascii") || !yaraString.Modifiers.Contains("wide");
+        var wide = yaraString.Modifiers.Contains("wide");
+        return ascii && ContainsBytes(context.Buffer, Encoding.ASCII.GetBytes(yaraString.Literal), ignoreCase) ||
+               wide && ContainsWideLiteral(context.Buffer, yaraString.Literal, ignoreCase);
+    }
+
+    /// <summary>
+    /// Matches one YARA regex string against a Latin-1 projection of the bytes.
+    /// </summary>
+    private static bool MatchesStaticYaraRegex(StaticYaraString yaraString, StaticYaraScanContext context, bool ignoreCase)
+    {
+        if (string.IsNullOrWhiteSpace(yaraString.Pattern))
+        {
+            return false;
+        }
+
+        var options = RegexOptions.CultureInvariant;
+        if (ignoreCase)
+        {
+            options |= RegexOptions.IgnoreCase;
+        }
+
+        try
+        {
+            return Regex.IsMatch(context.AsciiText, yaraString.Pattern, options, TimeSpan.FromMilliseconds(200));
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
+        catch (RegexMatchTimeoutException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Evaluates the lightweight YARA condition subset used by static notes.
+    /// </summary>
+    private static bool EvaluateStaticYaraCondition(
+        string condition,
+        IReadOnlyList<StaticYaraString> strings,
+        HashSet<string> matchedStringIds,
+        byte[] buffer)
+    {
+        if (string.IsNullOrWhiteSpace(condition))
+        {
+            return false;
+        }
+
+        var tokens = TokenizeStaticYaraCondition(condition);
+        if (tokens.Count == 0)
+        {
+            return false;
+        }
+
+        var parser = new StaticYaraConditionParser(tokens, strings, matchedStringIds, buffer);
+        return parser.Parse();
+    }
+
+    /// <summary>
+    /// Tokenizes the condition syntax needed by rules/static-notes.yar.
+    /// </summary>
+    private static List<StaticYaraConditionToken> TokenizeStaticYaraCondition(string condition)
+    {
+        var tokens = new List<StaticYaraConditionToken>();
+        var index = 0;
+        while (index < condition.Length)
+        {
+            var current = condition[index];
+            if (char.IsWhiteSpace(current))
+            {
+                index++;
+                continue;
+            }
+
+            if (current == '$')
+            {
+                var start = index++;
+                while (index < condition.Length && (char.IsLetterOrDigit(condition[index]) || condition[index] == '_'))
+                {
+                    index++;
+                }
+
+                if (index < condition.Length && condition[index] == '*')
+                {
+                    index++;
+                }
+
+                tokens.Add(new StaticYaraConditionToken(StaticYaraConditionTokenKind.StringIdentifier, condition[start..index]));
+                continue;
+            }
+
+            if (current == '(')
+            {
+                tokens.Add(new StaticYaraConditionToken(StaticYaraConditionTokenKind.OpenParen, current.ToString()));
+                index++;
+                continue;
+            }
+
+            if (current == ')')
+            {
+                tokens.Add(new StaticYaraConditionToken(StaticYaraConditionTokenKind.CloseParen, current.ToString()));
+                index++;
+                continue;
+            }
+
+            if (current == ',')
+            {
+                tokens.Add(new StaticYaraConditionToken(StaticYaraConditionTokenKind.Comma, current.ToString()));
+                index++;
+                continue;
+            }
+
+            if (current == '=' && index + 1 < condition.Length && condition[index + 1] == '=')
+            {
+                tokens.Add(new StaticYaraConditionToken(StaticYaraConditionTokenKind.Equals, "=="));
+                index += 2;
+                continue;
+            }
+
+            if (char.IsLetter(current) || current == '_')
+            {
+                var start = index++;
+                while (index < condition.Length && (char.IsLetterOrDigit(condition[index]) || condition[index] == '_'))
+                {
+                    index++;
+                }
+
+                tokens.Add(new StaticYaraConditionToken(StaticYaraConditionTokenKind.Identifier, condition[start..index]));
+                continue;
+            }
+
+            if (char.IsDigit(current))
+            {
+                var start = index++;
+                if (current == '0' && index < condition.Length && condition[index] is 'x' or 'X')
+                {
+                    index++;
+                    while (index < condition.Length && Uri.IsHexDigit(condition[index]))
+                    {
+                        index++;
+                    }
+                }
+                else
+                {
+                    while (index < condition.Length && char.IsDigit(condition[index]))
+                    {
+                        index++;
+                    }
+                }
+
+                tokens.Add(new StaticYaraConditionToken(StaticYaraConditionTokenKind.Number, condition[start..index]));
+                continue;
+            }
+
+            index++;
+        }
+
+        return tokens;
+    }
+
+    /// <summary>
+    /// Adds stable rule-facing tags and copyable evidence for a YARA match.
+    /// </summary>
+    private static void AddStaticYaraMatch(
+        StaticYaraRule rule,
+        StaticYaraRuleMatch match,
+        SortedSet<string> tags,
+        SortedSet<string> interestingStrings)
+    {
+        tags.Add("static.yara.match");
+        tags.Add("static.yara.engine.builtin");
+        tags.Add($"static.yara.rule.{NormalizeStaticYaraTag(rule.Name)}");
+
+        if (rule.Meta.TryGetValue("scope", out var scope))
+        {
+            tags.Add($"static.yara.scope.{NormalizeStaticYaraTag(scope)}");
+        }
+
+        if (rule.Meta.TryGetValue("mitre", out var mitre))
+        {
+            foreach (var technique in SplitStaticYaraMetaList(mitre))
+            {
+                tags.Add($"static.yara.mitre.{NormalizeStaticYaraTag(technique)}");
+            }
+        }
+
+        AddInterestingString(interestingStrings, $"static.yara.match:{match.RuleName}");
+        if (match.MatchedStringIds.Count > 0)
+        {
+            AddInterestingString(interestingStrings, $"static.yara.strings:{match.RuleName}:{string.Join(",", match.MatchedStringIds)}");
+        }
+
+        var metadata = new List<string>();
+        if (rule.Meta.TryGetValue("scope", out var metaScope))
+        {
+            metadata.Add($"scope={metaScope}");
+        }
+
+        if (rule.Meta.TryGetValue("mitre", out var metaMitre))
+        {
+            metadata.Add($"mitre={metaMitre}");
+        }
+
+        if (metadata.Count > 0)
+        {
+            AddInterestingString(interestingStrings, $"static.yara.meta:{match.RuleName}:{string.Join(";", metadata)}");
+        }
+    }
+
+    /// <summary>
+    /// Splits comma/semicolon/space separated YARA metadata lists.
+    /// </summary>
+    private static IEnumerable<string> SplitStaticYaraMetaList(string value)
+    {
+        return value
+            .Split([',', ';', ' '], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(item => item.Length > 0);
+    }
+
+    /// <summary>
+    /// Normalizes YARA metadata into comma-safe static tag suffixes.
+    /// </summary>
+    private static string NormalizeStaticYaraTag(string value)
+    {
+        var builder = new StringBuilder(value.Length);
+        var lastWasSeparator = false;
+        foreach (var character in value.Trim())
+        {
+            if (char.IsLetterOrDigit(character))
+            {
+                builder.Append(char.ToLowerInvariant(character));
+                lastWasSeparator = false;
+                continue;
+            }
+
+            if (character == '.')
+            {
+                builder.Append('.');
+                lastWasSeparator = false;
+                continue;
+            }
+
+            if (!lastWasSeparator)
+            {
+                builder.Append('_');
+                lastWasSeparator = true;
+            }
+        }
+
+        var normalized = builder.ToString().Trim('_');
+        return normalized.Length == 0 ? "unknown" : normalized;
+    }
+
+    /// <summary>
+    /// Returns whether one exception should silently disable optional YARA.
+    /// </summary>
+    private static bool IsStaticYaraDowngradeException(Exception ex)
+    {
+        return ex is IOException or UnauthorizedAccessException or InvalidDataException or ArgumentException or FormatException or OverflowException or RegexMatchTimeoutException or NotSupportedException or PathTooLongException;
+    }
+
+    /// <summary>
+    /// Searches for one byte pattern with optional ASCII-only nocase matching.
+    /// </summary>
+    private static bool ContainsBytes(byte[] data, byte[] pattern, bool ignoreCase)
+    {
+        if (pattern.Length == 0 || data.Length < pattern.Length)
+        {
+            return false;
+        }
+
+        if (!ignoreCase)
+        {
+            return data.AsSpan().IndexOf(pattern) >= 0;
+        }
+
+        for (var offset = 0; offset <= data.Length - pattern.Length; offset++)
+        {
+            var matched = true;
+            for (var index = 0; index < pattern.Length; index++)
+            {
+                if (!AsciiBytesEqualIgnoreCase(data[offset + index], pattern[index]))
+                {
+                    matched = false;
+                    break;
+                }
+            }
+
+            if (matched)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Searches for a UTF-16LE YARA wide literal.
+    /// </summary>
+    private static bool ContainsWideLiteral(byte[] data, string literal, bool ignoreCase)
+    {
+        if (literal.Length == 0 || data.Length < literal.Length * 2)
+        {
+            return false;
+        }
+
+        for (var offset = 0; offset <= data.Length - literal.Length * 2; offset++)
+        {
+            var matched = true;
+            for (var index = 0; index < literal.Length; index++)
+            {
+                var low = data[offset + index * 2];
+                var high = data[offset + index * 2 + 1];
+                if (high != 0 || !CharsEqual((char)low, literal[index], ignoreCase))
+                {
+                    matched = false;
+                    break;
+                }
+            }
+
+            if (matched)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Compares two ASCII bytes with ordinal case folding.
+    /// </summary>
+    private static bool AsciiBytesEqualIgnoreCase(byte left, byte right)
+    {
+        if (left == right)
+        {
+            return true;
+        }
+
+        return ToAsciiUpper(left) == ToAsciiUpper(right);
+    }
+
+    /// <summary>
+    /// Converts one lowercase ASCII byte to uppercase.
+    /// </summary>
+    private static byte ToAsciiUpper(byte value)
+    {
+        return value is >= (byte)'a' and <= (byte)'z' ? (byte)(value - 32) : value;
+    }
+
+    /// <summary>
+    /// Compares two literal characters with optional ordinal ignore-case.
+    /// </summary>
+    private static bool CharsEqual(char left, char right, bool ignoreCase)
+    {
+        return ignoreCase
+            ? char.ToUpperInvariant(left) == char.ToUpperInvariant(right)
+            : left == right;
     }
 
     /// <summary>
@@ -906,6 +1900,43 @@ public sealed class StaticAnalyzer
             AddStringFinding(stringEvidence, "persistence-string", trimmed, "persistence_string");
         }
 
+        if (ContainsServicePersistenceString(trimmed))
+        {
+            isInteresting = true;
+            tags.Add("interesting_string");
+            tags.Add("persistence_string");
+            tags.Add("service_string");
+            AddStringFinding(stringEvidence, "service-string", trimmed, "persistence_string", "service_string");
+            if (ContainsAny(trimmed, "sc.exe", "New-Service", "Set-Service", "Start-Service", "Stop-Service", "CreateService", "ChangeServiceConfig"))
+            {
+                AddCommandIndicator(
+                    stringEvidence,
+                    "service-control",
+                    FindFirstMarker(trimmed, ServiceStringMarkers),
+                    trimmed,
+                    "persistence_string",
+                    "service_string");
+            }
+        }
+
+        if (ContainsScheduledTaskString(trimmed))
+        {
+            isInteresting = true;
+            tags.Add("interesting_string");
+            tags.Add("persistence_string");
+            tags.Add("scheduled_task_string");
+            tags.Add("task_string");
+            AddStringFinding(stringEvidence, "scheduled-task-string", trimmed, "persistence_string", "scheduled_task_string", "task_string");
+            AddCommandIndicator(
+                stringEvidence,
+                "scheduled-task",
+                FindFirstMarker(trimmed, ScheduledTaskStringMarkers) ?? FindFirstMarker(trimmed, LolbinCommandMarkers),
+                trimmed,
+                "persistence_string",
+                "scheduled_task_string",
+                "task_string");
+        }
+
         if (ContainsAnyApiToken(trimmed, SuspiciousApiStringMarkers))
         {
             isInteresting = true;
@@ -926,7 +1957,13 @@ public sealed class StaticAnalyzer
         if (ContainsAny(trimmed, PackerStringMarkers))
         {
             isInteresting = true;
+            tags.Add("packer_hint");
             tags.Add("packer_string_hint");
+            if (ContainsAny(trimmed, "UPX!", "UPX0", "UPX1", "UPX2"))
+            {
+                tags.Add("packer_upx");
+            }
+
             AddStringFinding(stringEvidence, "packer-string", trimmed, "packer_string_hint");
         }
 
@@ -1229,7 +2266,21 @@ public sealed class StaticAnalyzer
             {
                 tags.Add("service_registry_path_string");
                 tags.Add("persistence_string");
+                tags.Add("service_string");
                 pathTags.Add("service_registry_path_string");
+                pathTags.Add("persistence_string");
+                pathTags.Add("service_string");
+            }
+
+            if (ContainsAny(path, "Schedule\\TaskCache\\Tree", "Schedule\\TaskCache\\Tasks", "Windows NT\\CurrentVersion\\Schedule\\TaskCache"))
+            {
+                tags.Add("scheduled_task_registry_path_string");
+                tags.Add("scheduled_task_string");
+                tags.Add("task_string");
+                tags.Add("persistence_string");
+                pathTags.Add("scheduled_task_registry_path_string");
+                pathTags.Add("scheduled_task_string");
+                pathTags.Add("task_string");
                 pathTags.Add("persistence_string");
             }
 
@@ -1270,6 +2321,18 @@ public sealed class StaticAnalyzer
                 tags.Add("startup_folder_path_string");
                 tags.Add("persistence_string");
                 pathTags.Add("startup_folder_path_string");
+                pathTags.Add("persistence_string");
+            }
+
+            if (ContainsAny(path, "\\System32\\Tasks\\", "\\SysWOW64\\Tasks\\", "\\Windows\\Tasks\\"))
+            {
+                tags.Add("scheduled_task_path_string");
+                tags.Add("scheduled_task_string");
+                tags.Add("task_string");
+                tags.Add("persistence_string");
+                pathTags.Add("scheduled_task_path_string");
+                pathTags.Add("scheduled_task_string");
+                pathTags.Add("task_string");
                 pathTags.Add("persistence_string");
             }
 
@@ -1319,6 +2382,36 @@ public sealed class StaticAnalyzer
     }
 
     /// <summary>
+    /// Matches service-persistence strings with conservative command/context
+    /// checks so a generic word such as "service" does not become evidence.
+    /// </summary>
+    private static bool ContainsServicePersistenceString(string text)
+    {
+        if (ContainsAny(text, ServiceStringMarkers))
+        {
+            return true;
+        }
+
+        return ContainsToken(text, "sc") &&
+            ContainsAny(text, " create ", " config ", " failure ", " sdset ", " start ", " stop ", " delete ");
+    }
+
+    /// <summary>
+    /// Matches Scheduled Task strings, requiring either specific API/registry
+    /// artifacts or schtasks.exe paired with task-management switches.
+    /// </summary>
+    private static bool ContainsScheduledTaskString(string text)
+    {
+        if (ContainsAny(text, ScheduledTaskStringMarkers))
+        {
+            return true;
+        }
+
+        return ContainsAny(text, "schtasks", "schtasks.exe") &&
+            ContainsAny(text, "/create", "/change", "/run", "/tn ", "/tr ", "/sc ");
+    }
+
+    /// <summary>
     /// Adds high-level PE tags based on optional-header and section metadata.
     /// Inputs are optional-header magic, subsystem, sections, and tag set;
     /// processing adds report-friendly labels, and the method returns no value.
@@ -1338,11 +2431,13 @@ public sealed class StaticAnalyzer
 
         if (sections.Any(section => section.Name.StartsWith("UPX", StringComparison.OrdinalIgnoreCase)))
         {
+            tags.Add("packer_hint");
             tags.Add("packer_upx");
         }
 
         if (sections.Any(section => IsKnownPackerSectionName(section.Name)))
         {
+            tags.Add("packer_hint");
             tags.Add("packer_section_name");
         }
     }
@@ -1362,11 +2457,13 @@ public sealed class StaticAnalyzer
 
         if (name.StartsWith("UPX", StringComparison.OrdinalIgnoreCase))
         {
+            tags.Add("packer_hint");
             tags.Add("packer_upx");
         }
 
         if (IsKnownPackerSectionName(name))
         {
+            tags.Add("packer_hint");
             tags.Add("packer_section_name");
         }
 
@@ -1507,6 +2604,11 @@ public sealed class StaticAnalyzer
         if (directories.Count > 2)
         {
             ReadResources(reader, directories[2], sections, fileLength, tags, interestingStrings, warnings);
+        }
+
+        if (directories.Count > 6)
+        {
+            ReadDebugDirectory(reader, directories[6], sections, fileLength, tags, interestingStrings, warnings);
         }
 
         if (directories.Count > 9)
@@ -1990,6 +3092,194 @@ public sealed class StaticAnalyzer
     }
 
     /// <summary>
+    /// Reads IMAGE_DEBUG_DIRECTORY entries and selected CodeView metadata.
+    /// Inputs are the PE debug data directory and section layouts; processing
+    /// keeps entry and string parsing bounded; the method records debug/PDB
+    /// evidence without treating it as malicious by itself.
+    /// </summary>
+    private static void ReadDebugDirectory(
+        BinaryReader reader,
+        PeDataDirectory debugDirectory,
+        IReadOnlyList<PeSectionLayout> sections,
+        long fileLength,
+        SortedSet<string> tags,
+        SortedSet<string> interestingStrings,
+        List<string> warnings)
+    {
+        if (!debugDirectory.IsPresent || debugDirectory.Size == 0)
+        {
+            return;
+        }
+
+        tags.Add("debug_directory_present");
+        if (!TryRvaToFileOffset(debugDirectory.Rva, sections, fileLength, out var debugOffset))
+        {
+            warnings.Add($"Debug directory RVA 0x{debugDirectory.Rva:X8} could not be mapped to a file offset.");
+            return;
+        }
+
+        const int debugDirectoryEntrySize = 28;
+        if (debugOffset < 0 || debugOffset > fileLength - debugDirectoryEntrySize)
+        {
+            warnings.Add("Debug directory is truncated.");
+            return;
+        }
+
+        var entryLimit = Math.Min(MaxDebugEntries, Math.Max(1, (int)(debugDirectory.Size / debugDirectoryEntrySize)));
+        if (debugDirectory.Size / debugDirectoryEntrySize > MaxDebugEntries)
+        {
+            warnings.Add($"Debug-directory scan truncated at {MaxDebugEntries} entries.");
+        }
+
+        var evidenceCount = 0;
+        AddPeEvidence(interestingStrings, $"debug:directory@rva=0x{debugDirectory.Rva:X8},size={debugDirectory.Size}", ref evidenceCount, MaxDebugEntries);
+        for (var index = 0; index < entryLimit; index++)
+        {
+            var entryOffset = debugOffset + index * debugDirectoryEntrySize;
+            if (entryOffset < 0 || entryOffset > fileLength - debugDirectoryEntrySize)
+            {
+                break;
+            }
+
+            var type = ReadUInt32At(reader, entryOffset + 12, fileLength, warnings);
+            var sizeOfData = ReadUInt32At(reader, entryOffset + 16, fileLength, warnings);
+            var addressOfRawData = ReadUInt32At(reader, entryOffset + 20, fileLength, warnings);
+            var pointerToRawData = ReadUInt32At(reader, entryOffset + 24, fileLength, warnings);
+            var typeText = DescribeDebugType(type);
+            tags.Add($"debug_type_{NormalizeTagComponent(typeText)}");
+
+            if (type == 2)
+            {
+                tags.Add("debug_codeview_present");
+            }
+
+            if (type == 16)
+            {
+                tags.Add("debug_reproducible_build");
+            }
+
+            var dataOffsetText = "unmapped";
+            long? dataOffset = null;
+            if (pointerToRawData > 0 && pointerToRawData < fileLength)
+            {
+                dataOffset = pointerToRawData;
+                dataOffsetText = $"0x{pointerToRawData:X}";
+            }
+            else if (addressOfRawData > 0 && TryRvaToFileOffset(addressOfRawData, sections, fileLength, out var mappedOffset))
+            {
+                dataOffset = mappedOffset;
+                dataOffsetText = $"0x{mappedOffset:X}";
+            }
+
+            AddPeEvidence(
+                interestingStrings,
+                $"debug:entry[{index + 1}],type={typeText},size={sizeOfData},rva=0x{addressOfRawData:X8},file={dataOffsetText}",
+                ref evidenceCount,
+                MaxDebugEntries);
+
+            if (type == 2 && dataOffset is { } codeViewOffset && sizeOfData >= 4)
+            {
+                ReadCodeViewDebugEvidence(reader, codeViewOffset, sizeOfData, fileLength, tags, interestingStrings, warnings, ref evidenceCount);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Reads CodeView RSDS/NB10 records for PDB-path evidence.
+    /// </summary>
+    private static void ReadCodeViewDebugEvidence(
+        BinaryReader reader,
+        long dataOffset,
+        uint dataSize,
+        long fileLength,
+        SortedSet<string> tags,
+        SortedSet<string> interestingStrings,
+        List<string> warnings,
+        ref int evidenceCount)
+    {
+        if (dataOffset < 0 || dataOffset > fileLength - 4)
+        {
+            warnings.Add("CodeView debug data is truncated.");
+            return;
+        }
+
+        var dataEnd = Math.Min(fileLength, dataOffset + dataSize);
+        reader.BaseStream.Position = dataOffset;
+        var signature = Encoding.ASCII.GetString(reader.ReadBytes(4));
+        if (string.Equals(signature, "RSDS", StringComparison.Ordinal))
+        {
+            tags.Add("debug_rsds_present");
+            if (dataEnd - dataOffset < 24)
+            {
+                return;
+            }
+
+            var guidBytes = reader.ReadBytes(16);
+            var pdbGuid = new Guid(guidBytes);
+            var age = TryReadUInt32At(reader, dataOffset + 20, fileLength, out var ageValue) ? ageValue : 0;
+            var pdbPath = ReadAsciiStringAt(reader, dataOffset + 24, fileLength);
+            AddPeEvidence(
+                interestingStrings,
+                string.IsNullOrWhiteSpace(pdbPath)
+                    ? $"debug:codeview=RSDS,guid={pdbGuid:N},age={age}"
+                    : $"debug:codeview=RSDS,guid={pdbGuid:N},age={age},pdb={TrimEvidence(pdbPath)}",
+                ref evidenceCount,
+                MaxDebugEntries);
+            AddPdbPathEvidence(pdbPath, tags, interestingStrings, ref evidenceCount);
+            return;
+        }
+
+        if (string.Equals(signature, "NB10", StringComparison.Ordinal))
+        {
+            tags.Add("debug_nb10_present");
+            if (dataEnd - dataOffset < 16)
+            {
+                return;
+            }
+
+            var timestamp = TryReadUInt32At(reader, dataOffset + 8, fileLength, out var timestampValue) ? timestampValue : 0;
+            var age = TryReadUInt32At(reader, dataOffset + 12, fileLength, out var ageValue) ? ageValue : 0;
+            var pdbPath = ReadAsciiStringAt(reader, dataOffset + 16, fileLength);
+            AddPeEvidence(
+                interestingStrings,
+                string.IsNullOrWhiteSpace(pdbPath)
+                    ? $"debug:codeview=NB10,timestamp=0x{timestamp:X8},age={age}"
+                    : $"debug:codeview=NB10,timestamp=0x{timestamp:X8},age={age},pdb={TrimEvidence(pdbPath)}",
+                ref evidenceCount,
+                MaxDebugEntries);
+            AddPdbPathEvidence(pdbPath, tags, interestingStrings, ref evidenceCount);
+            return;
+        }
+
+        AddPeEvidence(interestingStrings, $"debug:codeview-signature={signature}", ref evidenceCount, MaxDebugEntries);
+    }
+
+    /// <summary>
+    /// Adds bounded PDB-path evidence and coarse path-shape tags.
+    /// </summary>
+    private static void AddPdbPathEvidence(string? pdbPath, SortedSet<string> tags, SortedSet<string> interestingStrings, ref int evidenceCount)
+    {
+        if (string.IsNullOrWhiteSpace(pdbPath))
+        {
+            return;
+        }
+
+        var trimmed = TrimEvidence(pdbPath);
+        tags.Add("debug_pdb_path");
+        if (WindowsPathPattern.IsMatch(trimmed))
+        {
+            tags.Add("debug_pdb_path_absolute");
+        }
+
+        if (ContainsAny(trimmed, "\\Users\\", "\\Documents\\", "\\source\\", "\\src\\", "\\build\\", "\\agent\\_work\\"))
+        {
+            tags.Add("debug_pdb_build_path");
+        }
+
+        AddPeEvidence(interestingStrings, $"debug:pdb-path:{trimmed}", ref evidenceCount, MaxDebugEntries);
+    }
+
+    /// <summary>
     /// Reads the PE resource tree and records type/data-level triage tags.
     /// Inputs are the resource data directory and section layouts, processing
     /// walks bounded IMAGE_RESOURCE_DIRECTORY nodes, and the method records
@@ -2200,6 +3490,234 @@ public sealed class StaticAnalyzer
             tags.Add("resource_payload_candidate");
             AddPeEvidence(interestingStrings, $"resource:{resourceType}:embedded-pe@0x{dataRva:X8}", ref evidenceCount, MaxResourceEvidence);
         }
+
+        if (string.Equals(resourceType, "version", StringComparison.OrdinalIgnoreCase))
+        {
+            ReadVersionResourceEvidence(reader, dataOffset, size, fileLength, tags, interestingStrings, warnings, ref evidenceCount);
+        }
+
+        if (string.Equals(resourceType, "manifest", StringComparison.OrdinalIgnoreCase))
+        {
+            ReadManifestResourceEvidence(reader, dataOffset, size, fileLength, tags, interestingStrings, warnings, ref evidenceCount);
+        }
+    }
+
+    /// <summary>
+    /// Extracts bounded VERSIONINFO key/value strings from an RT_VERSION
+    /// resource. The parser is intentionally heuristic and emits only low-risk
+    /// metadata tags plus copyable evidence strings.
+    /// </summary>
+    private static void ReadVersionResourceEvidence(
+        BinaryReader reader,
+        long dataOffset,
+        uint size,
+        long fileLength,
+        SortedSet<string> tags,
+        SortedSet<string> interestingStrings,
+        List<string> warnings,
+        ref int evidenceCount)
+    {
+        var data = ReadBoundedBytes(reader, dataOffset, size, fileLength, MaxResourceStringBytes, warnings);
+        if (data.Length == 0)
+        {
+            return;
+        }
+
+        tags.Add("version_info_present");
+        var strings = EnumerateUtf16ResourceStrings(data, minimumLength: 2)
+            .Select(TrimEvidence)
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Take(256)
+            .ToList();
+        if (strings.Count == 0)
+        {
+            return;
+        }
+
+        var emitted = 0;
+        for (var index = 0; index < strings.Count && emitted < MaxVersionStringEvidence; index++)
+        {
+            var key = VersionStringKeys.FirstOrDefault(candidate =>
+                string.Equals(strings[index], candidate, StringComparison.OrdinalIgnoreCase));
+            if (key is null)
+            {
+                continue;
+            }
+
+            var value = FindVersionValue(strings, index + 1);
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                continue;
+            }
+
+            tags.Add("version_info_string");
+            tags.Add($"version_{NormalizeTagComponent(key)}");
+            AddPeEvidence(interestingStrings, $"version:{key}={value}", ref evidenceCount, MaxResourceEvidence);
+            emitted++;
+        }
+    }
+
+    /// <summary>
+    /// Extracts selected RT_MANIFEST traits such as requested execution level.
+    /// These are metadata indicators only and are not treated as malicious.
+    /// </summary>
+    private static void ReadManifestResourceEvidence(
+        BinaryReader reader,
+        long dataOffset,
+        uint size,
+        long fileLength,
+        SortedSet<string> tags,
+        SortedSet<string> interestingStrings,
+        List<string> warnings,
+        ref int evidenceCount)
+    {
+        var data = ReadBoundedBytes(reader, dataOffset, size, fileLength, MaxResourceStringBytes, warnings);
+        if (data.Length == 0)
+        {
+            return;
+        }
+
+        var utf8 = Encoding.UTF8.GetString(data);
+        var unicode = data.Length >= 2 ? Encoding.Unicode.GetString(data) : string.Empty;
+        var text = utf8.Contains("assembly", StringComparison.OrdinalIgnoreCase) ||
+            utf8.Contains("requestedExecutionLevel", StringComparison.OrdinalIgnoreCase)
+                ? utf8
+                : unicode;
+
+        if (!text.Contains("assembly", StringComparison.OrdinalIgnoreCase) &&
+            !text.Contains("requestedExecutionLevel", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        tags.Add("manifest_resource_string");
+        if (ManifestRequestedExecutionLevelPattern.Match(text) is { Success: true } levelMatch)
+        {
+            var level = TrimEvidence(levelMatch.Groups["level"].Value);
+            tags.Add("manifest_requested_execution_level");
+            if (level.Contains("requireAdministrator", StringComparison.OrdinalIgnoreCase))
+            {
+                tags.Add("manifest_require_administrator");
+            }
+
+            if (level.Contains("highestAvailable", StringComparison.OrdinalIgnoreCase))
+            {
+                tags.Add("manifest_highest_available");
+            }
+
+            AddPeEvidence(interestingStrings, $"manifest:requestedExecutionLevel={level}", ref evidenceCount, MaxResourceEvidence);
+        }
+
+        if (text.Contains("<autoElevate>true</autoElevate>", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("<autoElevate>true", StringComparison.OrdinalIgnoreCase))
+        {
+            tags.Add("manifest_auto_elevate");
+            AddPeEvidence(interestingStrings, "manifest:autoElevate=true", ref evidenceCount, MaxResourceEvidence);
+        }
+
+        if (text.Contains("uiAccess=\"true\"", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("uiAccess='true'", StringComparison.OrdinalIgnoreCase))
+        {
+            tags.Add("manifest_ui_access");
+            AddPeEvidence(interestingStrings, "manifest:uiAccess=true", ref evidenceCount, MaxResourceEvidence);
+        }
+    }
+
+    /// <summary>
+    /// Reads a bounded resource-data byte slice without seeking outside the file.
+    /// </summary>
+    private static byte[] ReadBoundedBytes(
+        BinaryReader reader,
+        long offset,
+        uint declaredSize,
+        long fileLength,
+        int maxBytes,
+        List<string> warnings)
+    {
+        if (offset < 0 || offset >= fileLength || maxBytes <= 0)
+        {
+            return [];
+        }
+
+        var available = Math.Max(0, fileLength - offset);
+        var readLength = (int)Math.Min(Math.Min(declaredSize, (ulong)available), (ulong)maxBytes);
+        if (readLength <= 0)
+        {
+            return [];
+        }
+
+        if (declaredSize > maxBytes)
+        {
+            warnings.Add($"Resource string scan truncated at {maxBytes} bytes.");
+        }
+
+        reader.BaseStream.Position = offset;
+        return reader.ReadBytes(readLength);
+    }
+
+    /// <summary>
+    /// Enumerates printable UTF-16LE strings with a caller-supplied minimum
+    /// length for resource metadata where values may be shorter than general
+    /// executable strings.
+    /// </summary>
+    private static IEnumerable<string> EnumerateUtf16ResourceStrings(byte[] buffer, int minimumLength)
+    {
+        var builder = new StringBuilder();
+        for (var index = 0; index + 1 < buffer.Length; index += 2)
+        {
+            var low = buffer[index];
+            var high = buffer[index + 1];
+            if (high == 0 && low is >= 0x20 and <= 0x7e)
+            {
+                builder.Append((char)low);
+                continue;
+            }
+
+            if (builder.Length >= minimumLength)
+            {
+                yield return builder.ToString();
+            }
+
+            builder.Clear();
+        }
+
+        if (builder.Length >= minimumLength)
+        {
+            yield return builder.ToString();
+        }
+    }
+
+    /// <summary>
+    /// Finds the next plausible VERSIONINFO value after a known key.
+    /// </summary>
+    private static string? FindVersionValue(IReadOnlyList<string> strings, int startIndex)
+    {
+        for (var index = startIndex; index < strings.Count && index < startIndex + 8; index++)
+        {
+            var candidate = TrimEvidence(strings[index]);
+            if (string.IsNullOrWhiteSpace(candidate) ||
+                IsVersionStructuralString(candidate) ||
+                VersionStringKeys.Contains(candidate, StringComparer.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            return candidate.Length > 120 ? candidate[..120] : candidate;
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Suppresses VERSIONINFO container/language keys when choosing values.
+    /// </summary>
+    private static bool IsVersionStructuralString(string value)
+    {
+        return string.Equals(value, "VS_VERSION_INFO", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(value, "StringFileInfo", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(value, "VarFileInfo", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(value, "Translation", StringComparison.OrdinalIgnoreCase) ||
+            Regex.IsMatch(value, "^[0-9A-Fa-f]{8}$", RegexOptions.CultureInvariant);
     }
 
     /// <summary>
@@ -2834,6 +4352,72 @@ public sealed class StaticAnalyzer
             0x0004 => "ts-stack-signed",
             _ => $"0x{certificateType:X4}"
         };
+    }
+
+    /// <summary>
+    /// Describes IMAGE_DEBUG_TYPE values for report tags and evidence.
+    /// Inputs are numeric PE debug directory type values; processing maps common
+    /// constants and returns a stable lowercase token for unknown values.
+    /// </summary>
+    private static string DescribeDebugType(uint debugType)
+    {
+        return debugType switch
+        {
+            0 => "unknown",
+            1 => "coff",
+            2 => "codeview",
+            3 => "fpo",
+            4 => "misc",
+            5 => "exception",
+            6 => "fixup",
+            7 => "omap-to-src",
+            8 => "omap-from-src",
+            9 => "borland",
+            10 => "reserved10",
+            11 => "clsid",
+            12 => "vc-feature",
+            13 => "pogo",
+            14 => "iltcg",
+            15 => "mpx",
+            16 => "repro",
+            17 => "embedded-portable-pdb",
+            18 => "pdb-checksum",
+            19 => "ex-dllcharacteristics",
+            _ => $"type-{debugType}"
+        };
+    }
+
+    /// <summary>
+    /// Normalizes arbitrary evidence labels into conservative tag components.
+    /// Inputs are short labels; processing keeps alphanumeric runs and replaces
+    /// other characters with single underscores; the method returns a stable
+    /// lowercase token safe for tag names.
+    /// </summary>
+    private static string NormalizeTagComponent(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return "unknown";
+        }
+
+        var builder = new StringBuilder(value.Length);
+        var previousWasSeparator = false;
+        foreach (var ch in value.Trim())
+        {
+            if (char.IsLetterOrDigit(ch))
+            {
+                builder.Append(char.ToLowerInvariant(ch));
+                previousWasSeparator = false;
+            }
+            else if (!previousWasSeparator)
+            {
+                builder.Append('_');
+                previousWasSeparator = true;
+            }
+        }
+
+        var normalized = builder.ToString().Trim('_');
+        return string.IsNullOrWhiteSpace(normalized) ? "unknown" : normalized;
     }
 
     /// <summary>
@@ -3532,6 +5116,1181 @@ public sealed class StaticAnalyzer
             <= 1.0 => "low",
             _ => "normal"
         };
+    }
+
+    /// <summary>
+    /// Adds the backward-compatible static.analysis.completed summary event.
+    /// </summary>
+    private static void AddStaticSummaryEvent(string fullPath, StaticAnalysisResult result, List<SandboxEvent> events)
+    {
+        var yaraMatchCount = result.InterestingStrings.Count(value => value.StartsWith("static.yara.match:", StringComparison.OrdinalIgnoreCase));
+        var tlsCallbackCount = result.Tls?.Callbacks.Count ?? 0;
+        var data = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["fileFormat"] = result.FileFormat,
+            ["magic"] = result.Magic,
+            ["isPe"] = result.IsPe.ToString(),
+            ["sectionCount"] = result.SectionCount.ToString(CultureInfo.InvariantCulture),
+            ["importModuleCount"] = result.Imports.Count.ToString(CultureInfo.InvariantCulture),
+            ["importApiClusterCount"] = result.ImportApiClusters.Count.ToString(CultureInfo.InvariantCulture),
+            ["exportCount"] = result.ExportNames.Count.ToString(CultureInfo.InvariantCulture),
+            ["tlsCallbackCount"] = tlsCallbackCount.ToString(CultureInfo.InvariantCulture),
+            ["networkIndicatorCount"] = result.NetworkIndicators.Count.ToString(CultureInfo.InvariantCulture),
+            ["pathIndicatorCount"] = result.PathIndicators.Count.ToString(CultureInfo.InvariantCulture),
+            ["commandIndicatorCount"] = result.CommandIndicators.Count.ToString(CultureInfo.InvariantCulture),
+            ["suspiciousStringCount"] = result.SuspiciousStrings.Count.ToString(CultureInfo.InvariantCulture),
+            ["yaraMatchCount"] = yaraMatchCount.ToString(CultureInfo.InvariantCulture),
+            ["tagCount"] = result.Tags.Count.ToString(CultureInfo.InvariantCulture),
+            ["urlCount"] = result.Urls.Count.ToString(CultureInfo.InvariantCulture),
+            ["interestingStringCount"] = result.InterestingStrings.Count.ToString(CultureInfo.InvariantCulture),
+            ["warningCount"] = result.Warnings.Count.ToString(CultureInfo.InvariantCulture)
+        };
+
+        AddDataIfNotBlank(data, "architecture", result.Architecture);
+        AddDataIfNotBlank(data, "machine", result.Machine);
+        AddDataIfNotBlank(data, "subsystem", result.Subsystem);
+        AddDataIfNotBlank(data, "entryPointRva", result.EntryPointRva);
+        AddDataList(data, "tags", result.Tags);
+        AddDataList(data, "warnings", result.Warnings);
+
+        TryAddStaticEvent(
+            events,
+            "static.analysis.completed",
+            fullPath,
+            "Static analysis completed.",
+            "静态分析完成。",
+            "该事件汇总主机侧静态分析结果；单个 PE、字符串和 YARA-like 命中会拆成后续事件。",
+            data);
+    }
+
+    /// <summary>
+    /// Adds one event per parsed PE section with entropy and flag metadata.
+    /// </summary>
+    private static void AddStaticSectionEvents(string fullPath, StaticAnalysisResult result, List<SandboxEvent> events)
+    {
+        foreach (var section in result.Sections.Take(MaxStructuredPeEntries))
+        {
+            var sectionTags = GetSectionEventTags(section).ToList();
+            var data = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["name"] = section.Name,
+                ["virtualAddress"] = section.VirtualAddress,
+                ["rawDataOffset"] = section.RawDataOffset,
+                ["virtualSize"] = section.VirtualSize.ToString(CultureInfo.InvariantCulture),
+                ["rawDataSize"] = section.RawDataSize.ToString(CultureInfo.InvariantCulture),
+                ["entropy"] = section.Entropy.ToString("F3", CultureInfo.InvariantCulture),
+                ["entropyLabel"] = section.EntropyLabel,
+                ["characteristics"] = section.Characteristics,
+                ["isExecutable"] = section.IsExecutable.ToString(),
+                ["isWritable"] = section.IsWritable.ToString()
+            };
+            AddDataList(data, "tags", sectionTags);
+
+            TryAddStaticEvent(
+                events,
+                "static.pe.section",
+                fullPath,
+                $"PE section {section.Name} entropy {section.Entropy:F3}.",
+                $"PE 节 {section.Name} 熵值 {section.Entropy:F3}。",
+                "高熵、可写且可执行、虚拟大小异常或壳相关节名只是静态线索，需要结合运行时行为判断。",
+                data);
+        }
+    }
+
+    /// <summary>
+    /// Adds import-module and suspicious API cluster events.
+    /// </summary>
+    private static void AddStaticImportEvents(string fullPath, StaticAnalysisResult result, List<SandboxEvent> events)
+    {
+        foreach (var module in result.Imports.Take(MaxStructuredPeEntries))
+        {
+            var moduleTags = GetImportModuleEventTags(module).ToList();
+            var data = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["moduleName"] = module.ModuleName,
+                ["namedApiCount"] = module.NamedApiCount.ToString(CultureInfo.InvariantCulture),
+                ["ordinalImportCount"] = module.OrdinalImportCount.ToString(CultureInfo.InvariantCulture)
+            };
+            AddDataList(data, "apiNames", module.ApiNames);
+            AddDataList(data, "ordinalImports", module.OrdinalImports);
+            AddDataList(data, "suspiciousApiNames", module.SuspiciousApiNames);
+            AddDataList(data, "suspiciousApiClusters", module.SuspiciousApiClusters);
+            AddDataList(data, "tags", moduleTags);
+
+            TryAddStaticEvent(
+                events,
+                "static.pe.import.module",
+                fullPath,
+                $"PE import module {module.ModuleName} with {module.NamedApiCount} named APIs.",
+                $"PE 导入模块 {module.ModuleName}，命名 API 数 {module.NamedApiCount}。",
+                "导入表代表静态能力面，不等同于运行时调用；优先查看可疑 API 聚类和运行时证据。",
+                data);
+        }
+
+        foreach (var cluster in result.ImportApiClusters.Take(MaxImportApiClusterEvidence))
+        {
+            var clusterTags = TagsForImportCluster(cluster.Name).ToList();
+            var data = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["cluster"] = cluster.Name,
+                ["hitCount"] = cluster.HitCount.ToString(CultureInfo.InvariantCulture)
+            };
+            AddDataList(data, "apiNames", cluster.ApiNames);
+            AddDataList(data, "tags", clusterTags);
+
+            TryAddStaticEvent(
+                events,
+                "static.pe.import.cluster",
+                fullPath,
+                $"Suspicious PE import API cluster {cluster.Name} observed.",
+                $"发现可疑 PE 导入 API 聚类：{cluster.Name}。",
+                "这是静态导入线索；例如注入、下载、凭据或防御规避 API 需要结合行为事件确认。",
+                data);
+        }
+    }
+
+    /// <summary>
+    /// Adds export-name events for DLL registration/service-style triage.
+    /// </summary>
+    private static void AddStaticExportEvents(string fullPath, StaticAnalysisResult result, List<SandboxEvent> events)
+    {
+        foreach (var exportName in result.ExportNames.Take(MaxExportNames))
+        {
+            var exportTags = new SortedSet<string>(StringComparer.OrdinalIgnoreCase) { "exports_present" };
+            AddExportTags(exportName, exportTags);
+            var data = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["exportName"] = exportName
+            };
+            AddDataIfNotBlank(data, "moduleName", result.ExportModuleName);
+            AddDataList(data, "tags", exportTags);
+
+            TryAddStaticEvent(
+                events,
+                "static.pe.export",
+                fullPath,
+                $"PE export {exportName} observed.",
+                $"发现 PE 导出：{exportName}。",
+                "DllRegisterServer、DllInstall、ServiceMain 等导出可用于加载器或服务入口 triage。",
+                data);
+        }
+    }
+
+    /// <summary>
+    /// Adds TLS directory and callback events.
+    /// </summary>
+    private static void AddStaticTlsEvents(string fullPath, StaticAnalysisResult result, List<SandboxEvent> events)
+    {
+        if (result.Tls is not { DirectoryPresent: true } tls)
+        {
+            return;
+        }
+
+        var directoryData = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["directoryPresent"] = "True",
+            ["callbackCount"] = tls.Callbacks.Count.ToString(CultureInfo.InvariantCulture),
+            ["tags"] = tls.Callbacks.Count > 0 ? "tls_directory_present,tls_callbacks" : "tls_directory_present"
+        };
+        AddDataIfNotBlank(directoryData, "callbackTableVa", tls.CallbackTableVa);
+        AddDataIfNotBlank(directoryData, "callbackTableFileOffset", tls.CallbackTableFileOffset);
+
+        TryAddStaticEvent(
+            events,
+            "static.pe.tls.directory",
+            fullPath,
+            "PE TLS directory observed.",
+            "发现 PE TLS 目录。",
+            "TLS callback 可早于入口点执行，是静态 triage 线索；需要结合动态行为确认。",
+            directoryData);
+
+        for (var index = 0; index < tls.Callbacks.Count && index < MaxTlsCallbacks; index++)
+        {
+            var callback = tls.Callbacks[index];
+            var data = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["index"] = index.ToString(CultureInfo.InvariantCulture),
+                ["virtualAddress"] = callback.VirtualAddress,
+                ["tags"] = "tls_directory_present,tls_callback_pointer,tls_callbacks"
+            };
+            AddDataIfNotBlank(data, "relativeVirtualAddress", callback.RelativeVirtualAddress);
+            AddDataIfNotBlank(data, "callbackTableVa", tls.CallbackTableVa);
+            AddDataIfNotBlank(data, "callbackTableFileOffset", tls.CallbackTableFileOffset);
+
+            TryAddStaticEvent(
+                events,
+                "static.pe.tls.callback",
+                fullPath,
+                $"PE TLS callback {callback.VirtualAddress} observed.",
+                $"发现 PE TLS 回调：{callback.VirtualAddress}。",
+                "TLS 回调可能在程序入口点前运行；这是优先复核的静态线索。",
+                data);
+        }
+    }
+
+    /// <summary>
+    /// Adds PE overlay and certificate-table event metadata.
+    /// </summary>
+    private static void AddStaticOverlayEvent(string fullPath, StaticAnalysisResult result, List<SandboxEvent> events)
+    {
+        if (result.Overlay is not { Present: true } overlay)
+        {
+            return;
+        }
+
+        var overlayTags = new List<string> { "overlay_present", "pe_overlay" };
+        if (overlay.ContainsCertificateTable)
+        {
+            overlayTags.Add("overlay_contains_certificate_table");
+        }
+
+        if (overlay.IsCertificateTableOnly)
+        {
+            overlayTags.Add("overlay_certificate_table_only");
+        }
+        else if (overlay.NonCertificateSize > 0)
+        {
+            overlayTags.Add("overlay_non_certificate_data");
+        }
+
+        if (overlay.NonCertificateEntropy >= 7.2)
+        {
+            overlayTags.Add("overlay_high_entropy");
+        }
+
+        var data = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["present"] = overlay.Present.ToString(),
+            ["startOffset"] = overlay.StartOffset,
+            ["size"] = overlay.Size.ToString(CultureInfo.InvariantCulture),
+            ["containsCertificateTable"] = overlay.ContainsCertificateTable.ToString(),
+            ["certificateTableSize"] = overlay.CertificateTableSize.ToString(CultureInfo.InvariantCulture),
+            ["isCertificateTableOnly"] = overlay.IsCertificateTableOnly.ToString(),
+            ["nonCertificateSize"] = overlay.NonCertificateSize.ToString(CultureInfo.InvariantCulture)
+        };
+        AddDataIfNotBlank(data, "certificateTableOffset", overlay.CertificateTableOffset);
+        AddDataIfNotBlank(data, "largestNonCertificateOffset", overlay.LargestNonCertificateOffset);
+        if (overlay.LargestNonCertificateSize > 0)
+        {
+            data["largestNonCertificateSize"] = overlay.LargestNonCertificateSize.ToString(CultureInfo.InvariantCulture);
+        }
+
+        if (overlay.NonCertificateEntropy.HasValue)
+        {
+            data["nonCertificateEntropy"] = overlay.NonCertificateEntropy.Value.ToString("F3", CultureInfo.InvariantCulture);
+        }
+
+        AddDataList(data, "tags", overlayTags);
+
+        TryAddStaticEvent(
+            events,
+            "static.pe.overlay",
+            fullPath,
+            "PE overlay data observed.",
+            "发现 PE overlay 附加数据。",
+            "证书表 overlay 通常是签名结构；非证书高熵 overlay 更适合作为打包或附加载荷线索。",
+            data);
+    }
+
+    /// <summary>
+    /// Adds network/path/command/suspicious-string evidence events.
+    /// </summary>
+    private static void AddStaticStringEvents(string fullPath, StaticAnalysisResult result, List<SandboxEvent> events)
+    {
+        foreach (var indicator in result.NetworkIndicators.Take(MaxStructuredStringIndicators))
+        {
+            var indicatorTags = GetNetworkIndicatorEventTags(indicator).ToList();
+            var data = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["kind"] = indicator.Kind,
+                ["value"] = indicator.Value,
+            };
+            AddDataList(data, "tags", indicatorTags);
+            AddDataIfNotBlank(data, "classification", indicator.Classification);
+
+            TryAddStaticEvent(
+                events,
+                "static.string.indicator",
+                fullPath,
+                $"Static network/string indicator {indicator.Kind} observed.",
+                $"发现静态网络/字符串指标：{indicator.Kind}。",
+                "字符串指标可能来自配置、文档或资源；需结合上下文和网络行为确认。",
+                data);
+        }
+
+        foreach (var path in result.PathIndicators.Take(MaxStructuredStringIndicators))
+        {
+            var data = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["kind"] = path.Kind,
+                ["value"] = path.Value
+            };
+            AddDataList(data, "tags", path.Tags);
+
+            TryAddStaticEvent(
+                events,
+                "static.string.path",
+                fullPath,
+                $"Static path indicator {path.Kind} observed.",
+                $"发现静态路径指标：{path.Kind}。",
+                "注册表、启动目录或可执行路径字符串是能力线索，不代表已修改系统。",
+                data);
+        }
+
+        foreach (var command in result.CommandIndicators.Take(MaxStructuredStringIndicators))
+        {
+            var data = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["category"] = command.Category,
+                ["value"] = command.Value
+            };
+            AddDataIfNotBlank(data, "tool", command.Tool);
+            AddDataList(data, "tags", command.Tags);
+
+            TryAddStaticEvent(
+                events,
+                "static.string.command",
+                fullPath,
+                $"Static command-like string {command.Category} observed.",
+                $"发现静态命令类字符串：{command.Category}。",
+                "LOLBIN、脚本或下载命令字符串需要结合命令行/进程事件确认是否执行。",
+                data);
+        }
+
+        foreach (var finding in result.SuspiciousStrings.Take(MaxStructuredStringIndicators))
+        {
+            var data = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["category"] = finding.Category,
+                ["value"] = finding.Value
+            };
+            AddDataList(data, "tags", finding.Tags);
+
+            TryAddStaticEvent(
+                events,
+                "static.string.suspicious",
+                fullPath,
+                $"Suspicious static string {finding.Category} observed.",
+                $"发现可疑静态字符串：{finding.Category}。",
+                "该事件是静态字符串 triage 线索；优先与导入表、资源、运行时事件交叉验证。",
+                data);
+        }
+    }
+
+    /// <summary>
+    /// Adds a compact packer-hint rollup event.
+    /// </summary>
+    private static void AddStaticPackerEvent(string fullPath, StaticAnalysisResult result, List<SandboxEvent> events)
+    {
+        var packerTags = result.Tags
+            .Where(tag => tag.Contains("packer", StringComparison.OrdinalIgnoreCase))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (packerTags.Count == 0)
+        {
+            return;
+        }
+
+        var evidence = result.InterestingStrings
+            .Where(value =>
+                value.Contains("packer", StringComparison.OrdinalIgnoreCase) ||
+                value.Contains("UPX", StringComparison.OrdinalIgnoreCase) ||
+                value.StartsWith("section:", StringComparison.OrdinalIgnoreCase))
+            .Take(12)
+            .ToList();
+        var data = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["tags"] = JoinBounded(packerTags)
+        };
+        AddDataList(data, "evidence", evidence, " | ");
+
+        TryAddStaticEvent(
+            events,
+            "static.packer.hint",
+            fullPath,
+            "Static packer hint observed.",
+            "发现静态壳/打包线索。",
+            "壳特征应与高熵节、异常节名、TLS callback、overlay 和导入表组合研判；单独命中不代表恶意。",
+            data);
+    }
+
+    /// <summary>
+    /// Adds one event for each built-in lightweight YARA-like rule hit.
+    /// </summary>
+    private static void AddStaticYaraEvents(string fullPath, StaticAnalysisResult result, List<SandboxEvent> events)
+    {
+        var ruleNames = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
+        var stringsByRule = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var metaByRule = new Dictionary<string, Dictionary<string, string>>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var evidence in result.InterestingStrings)
+        {
+            if (evidence.StartsWith("static.yara.match:", StringComparison.OrdinalIgnoreCase))
+            {
+                var ruleName = evidence["static.yara.match:".Length..].Trim();
+                if (ruleName.Length > 0)
+                {
+                    ruleNames.Add(ruleName);
+                }
+
+                continue;
+            }
+
+            if (TrySplitStaticYaraEvidence(evidence, "static.yara.strings:", out var stringRuleName, out var matchedStrings))
+            {
+                stringsByRule[stringRuleName] = matchedStrings;
+                continue;
+            }
+
+            if (TrySplitStaticYaraEvidence(evidence, "static.yara.meta:", out var metaRuleName, out var metadata))
+            {
+                var meta = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var pair in metadata.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                {
+                    var equals = pair.IndexOf('=');
+                    if (equals <= 0)
+                    {
+                        continue;
+                    }
+
+                    meta[pair[..equals].Trim()] = pair[(equals + 1)..].Trim();
+                }
+
+                metaByRule[metaRuleName] = meta;
+            }
+        }
+
+        foreach (var ruleName in ruleNames.Take(MaxStaticYaraRuleMatches))
+        {
+            var tags = new List<string>
+            {
+                "static.yara.match",
+                "static.yara.engine.builtin",
+                $"static.yara.rule.{NormalizeStaticYaraTag(ruleName)}"
+            };
+            var data = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["ruleName"] = ruleName,
+                ["engine"] = "builtin",
+                ["tags"] = JoinBounded(tags)
+            };
+
+            if (stringsByRule.TryGetValue(ruleName, out var matchedStrings))
+            {
+                data["matchedStringIds"] = matchedStrings;
+            }
+
+            if (metaByRule.TryGetValue(ruleName, out var meta))
+            {
+                if (meta.TryGetValue("scope", out var scope))
+                {
+                    data["scope"] = scope;
+                }
+
+                if (meta.TryGetValue("mitre", out var mitre))
+                {
+                    data["mitre"] = mitre;
+                }
+            }
+
+            TryAddStaticEvent(
+                events,
+                "static.yara.match",
+                fullPath,
+                $"Built-in static YARA-like rule {ruleName} matched.",
+                $"内置轻量 YARA-like 规则命中：{ruleName}。",
+                "该匹配由内置轻量解析器完成，不依赖外部 yara 二进制；仅支持项目规则使用的安全子集语法。",
+                data);
+        }
+    }
+
+    /// <summary>
+    /// Builds section anomaly tags for event consumers.
+    /// </summary>
+    private static IEnumerable<string> GetSectionEventTags(PeSectionInfo section)
+    {
+        yield return "pe_section";
+        if (section.Entropy >= 7.2)
+        {
+            yield return "high_entropy_section";
+        }
+
+        if (section.Entropy >= 7.8)
+        {
+            yield return "very_high_entropy_section";
+        }
+
+        if (section.RawDataSize >= 512 && section.Entropy <= 1.0)
+        {
+            yield return "low_entropy_section";
+        }
+
+        if (section.RawDataSize == 0 && section.VirtualSize > 0)
+        {
+            yield return "virtual_only_section";
+        }
+
+        if (section.RawDataSize > 0 && section.VirtualSize > section.RawDataSize * 4 && section.VirtualSize >= 0x2000)
+        {
+            yield return "oversized_virtual_section";
+        }
+
+        if (section.IsExecutable)
+        {
+            yield return "executable_section";
+        }
+
+        if (section.IsWritable)
+        {
+            yield return "writable_section";
+        }
+
+        if (section.IsExecutable && section.IsWritable)
+        {
+            yield return "writable_executable_section";
+        }
+
+        if (section.Name.StartsWith("UPX", StringComparison.OrdinalIgnoreCase))
+        {
+            yield return "packer_hint";
+            yield return "packer_upx";
+        }
+
+        if (IsKnownPackerSectionName(section.Name))
+        {
+            yield return "packer_hint";
+            yield return "packer_section_name";
+        }
+    }
+
+    /// <summary>
+    /// Builds import module tags for event consumers.
+    /// </summary>
+    private static IEnumerable<string> GetImportModuleEventTags(PeImportModuleInfo module)
+    {
+        yield return "imports_present";
+        if (module.SuspiciousApiNames.Count > 0 || module.SuspiciousApiClusters.Count > 0)
+        {
+            yield return "import_suspicious_api";
+        }
+
+        foreach (var cluster in module.SuspiciousApiClusters.SelectMany(TagsForImportCluster))
+        {
+            yield return cluster;
+        }
+    }
+
+    /// <summary>
+    /// Builds stable static network/string indicator tags used by behavior
+    /// rules. Inputs are one structured URL/IP/email/domain indicator;
+    /// processing mirrors the legacy summary tags where possible, and the
+    /// method returns report/rule-friendly tag names for granular events.
+    /// </summary>
+    private static IEnumerable<string> GetNetworkIndicatorEventTags(StaticNetworkIndicator indicator)
+    {
+        yield return "network_indicator_string";
+        switch (indicator.Kind)
+        {
+            case "url":
+                yield return "url";
+                if (!string.Equals(indicator.Classification, "reference", StringComparison.OrdinalIgnoreCase))
+                {
+                    yield return "embedded_url";
+                }
+
+                break;
+            case "ipv4":
+                yield return "ip_address";
+                if (string.Equals(indicator.Classification, "public", StringComparison.OrdinalIgnoreCase))
+                {
+                    yield return "public_ip_address";
+                }
+                else if (string.Equals(indicator.Classification, "private_or_reserved", StringComparison.OrdinalIgnoreCase))
+                {
+                    yield return "private_or_reserved_ip_address";
+                }
+
+                break;
+            case "email":
+                yield return "email_address";
+                break;
+            case "domain":
+                yield return "domain_name";
+                yield return "domain_indicator_string";
+                yield return "domain_string";
+                if (string.Equals(indicator.Classification, "onion", StringComparison.OrdinalIgnoreCase))
+                {
+                    yield return "tor_domain_string";
+                }
+                else if (string.Equals(indicator.Classification, "dynamic_dns", StringComparison.OrdinalIgnoreCase))
+                {
+                    yield return "dynamic_dns_domain_string";
+                }
+
+                break;
+            default:
+                yield return $"{NormalizeStaticYaraTag(indicator.Kind)}_indicator_string";
+                break;
+        }
+    }
+
+    /// <summary>
+    /// Maps import cluster names to stable tags used by behavior rules.
+    /// </summary>
+    private static IEnumerable<string> TagsForImportCluster(string cluster)
+    {
+        yield return "import_suspicious_api_cluster";
+        switch (cluster)
+        {
+            case "process-injection":
+                yield return "import_process_injection_api";
+                break;
+            case "dynamic-code":
+                yield return "import_dynamic_code_api";
+                break;
+            case "registry-persistence":
+                yield return "import_persistence_api";
+                yield return "import_registry_persistence_api";
+                break;
+            case "service-persistence":
+                yield return "import_persistence_api";
+                yield return "import_service_persistence_api";
+                break;
+            case "persistence":
+                yield return "import_persistence_api";
+                break;
+            case "network":
+                yield return "import_network_api";
+                break;
+            case "download":
+                yield return "import_network_api";
+                yield return "import_download_api";
+                break;
+            case "exfiltration":
+                yield return "import_network_api";
+                yield return "import_exfil_api";
+                break;
+            case "file-drop":
+                yield return "import_file_drop_api";
+                break;
+            case "script-execution":
+                yield return "import_script_execution_api";
+                break;
+            case "resource":
+                yield return "import_resource_api";
+                break;
+            case "anti-analysis":
+                yield return "import_anti_analysis_api";
+                break;
+            case "credential-access":
+                yield return "import_credential_access_api";
+                break;
+            case "defense-evasion":
+                yield return "import_defense_evasion_api";
+                break;
+        }
+    }
+
+    /// <summary>
+    /// Adds one normalized static event while respecting the event cap.
+    /// </summary>
+    private static void TryAddStaticEvent(
+        List<SandboxEvent> events,
+        string eventType,
+        string fullPath,
+        string message,
+        string zhMessage,
+        string zhHint,
+        Dictionary<string, string> data)
+    {
+        if (events.Count >= MaxStaticAnalysisEvents)
+        {
+            return;
+        }
+
+        data["message"] = message;
+        data["zhMessage"] = zhMessage;
+        data["zhHint"] = zhHint;
+
+        events.Add(new SandboxEvent
+        {
+            EventType = eventType,
+            Source = "host",
+            Path = fullPath,
+            Data = TrimStaticEventData(data)
+        });
+    }
+
+    /// <summary>
+    /// Adds a non-empty data field with bounded value length.
+    /// </summary>
+    private static void AddDataIfNotBlank(Dictionary<string, string> data, string key, string? value)
+    {
+        if (!string.IsNullOrWhiteSpace(value))
+        {
+            data[key] = value;
+        }
+    }
+
+    /// <summary>
+    /// Adds a comma-separated data list when it contains values.
+    /// </summary>
+    private static void AddDataList(Dictionary<string, string> data, string key, IEnumerable<string> values, string separator = ",")
+    {
+        var joined = JoinBounded(values, separator);
+        if (!string.IsNullOrWhiteSpace(joined))
+        {
+            data[key] = joined;
+        }
+    }
+
+    /// <summary>
+    /// Joins values into a bounded event-data string.
+    /// </summary>
+    private static string JoinBounded(IEnumerable<string> values, string separator = ",")
+    {
+        var builder = new StringBuilder();
+        foreach (var value in values.Where(value => !string.IsNullOrWhiteSpace(value)).Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            var trimmed = TrimStaticEventValue(value);
+            if (trimmed.Length == 0)
+            {
+                continue;
+            }
+
+            var prefixLength = builder.Length == 0 ? 0 : separator.Length;
+            if (builder.Length + prefixLength + trimmed.Length > MaxStaticEventDataValueLength)
+            {
+                if (builder.Length + prefixLength + 3 <= MaxStaticEventDataValueLength)
+                {
+                    if (builder.Length > 0)
+                    {
+                        builder.Append(separator);
+                    }
+
+                    builder.Append("...");
+                }
+
+                break;
+            }
+
+            if (builder.Length > 0)
+            {
+                builder.Append(separator);
+            }
+
+            builder.Append(trimmed);
+        }
+
+        return builder.ToString();
+    }
+
+    /// <summary>
+    /// Trims all event data values to a safe single-line representation.
+    /// </summary>
+    private static Dictionary<string, string> TrimStaticEventData(Dictionary<string, string> data)
+    {
+        var trimmed = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var pair in data)
+        {
+            if (string.IsNullOrWhiteSpace(pair.Key) || string.IsNullOrWhiteSpace(pair.Value))
+            {
+                continue;
+            }
+
+            trimmed[pair.Key] = TrimStaticEventValue(pair.Value);
+        }
+
+        return trimmed;
+    }
+
+    /// <summary>
+    /// Trims one event data value and removes line breaks.
+    /// </summary>
+    private static string TrimStaticEventValue(string value)
+    {
+        var normalized = value
+            .Replace("\r\n", " ", StringComparison.Ordinal)
+            .Replace('\r', ' ')
+            .Replace('\n', ' ')
+            .Trim();
+        return normalized.Length <= MaxStaticEventDataValueLength
+            ? normalized
+            : normalized[..MaxStaticEventDataValueLength];
+    }
+
+    /// <summary>
+    /// Splits static.yara.* evidence into rule name and payload.
+    /// </summary>
+    private static bool TrySplitStaticYaraEvidence(string evidence, string prefix, out string ruleName, out string payload)
+    {
+        ruleName = string.Empty;
+        payload = string.Empty;
+        if (!evidence.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var rest = evidence[prefix.Length..];
+        var separator = rest.IndexOf(':');
+        if (separator <= 0)
+        {
+            return false;
+        }
+
+        ruleName = rest[..separator].Trim();
+        payload = rest[(separator + 1)..].Trim();
+        return ruleName.Length > 0;
+    }
+
+    /// <summary>
+    /// Byte buffer plus lazily materialized text used by the YARA subset
+    /// matcher.
+    /// </summary>
+    private sealed class StaticYaraScanContext
+    {
+        private string? asciiText;
+
+        public StaticYaraScanContext(byte[] buffer)
+        {
+            Buffer = buffer;
+        }
+
+        public byte[] Buffer { get; }
+
+        public string AsciiText => asciiText ??= Encoding.Latin1.GetString(Buffer);
+    }
+
+    /// <summary>
+    /// Parsed lightweight YARA rule.
+    /// </summary>
+    private sealed record StaticYaraRule(
+        string Name,
+        Dictionary<string, string> Meta,
+        List<StaticYaraString> Strings,
+        string Condition);
+
+    /// <summary>
+    /// Parsed YARA string definition.
+    /// </summary>
+    private sealed record StaticYaraString(
+        string Identifier,
+        StaticYaraStringKind Kind,
+        string? Literal,
+        string? Pattern,
+        HashSet<string> Modifiers);
+
+    /// <summary>
+    /// Supported YARA string definition kind.
+    /// </summary>
+    private enum StaticYaraStringKind
+    {
+        Literal,
+        Regex
+    }
+
+    /// <summary>
+    /// Matched YARA rule and bounded matched string identifiers.
+    /// </summary>
+    private sealed record StaticYaraRuleMatch(string RuleName, List<string> MatchedStringIds);
+
+    /// <summary>
+    /// Token kind for the tiny YARA condition parser.
+    /// </summary>
+    private enum StaticYaraConditionTokenKind
+    {
+        Identifier,
+        StringIdentifier,
+        Number,
+        Equals,
+        OpenParen,
+        CloseParen,
+        Comma
+    }
+
+    /// <summary>
+    /// Token value for the tiny YARA condition parser.
+    /// </summary>
+    private readonly record struct StaticYaraConditionToken(StaticYaraConditionTokenKind Kind, string Text);
+
+    /// <summary>
+    /// Evaluates the simple condition grammar used by rules/static-notes.yar.
+    /// </summary>
+    private sealed class StaticYaraConditionParser
+    {
+        private readonly IReadOnlyList<StaticYaraConditionToken> tokens;
+        private readonly IReadOnlyList<StaticYaraString> strings;
+        private readonly HashSet<string> matchedStringIds;
+        private readonly byte[] buffer;
+        private int position;
+
+        public StaticYaraConditionParser(
+            IReadOnlyList<StaticYaraConditionToken> tokens,
+            IReadOnlyList<StaticYaraString> strings,
+            HashSet<string> matchedStringIds,
+            byte[] buffer)
+        {
+            this.tokens = tokens;
+            this.strings = strings;
+            this.matchedStringIds = matchedStringIds;
+            this.buffer = buffer;
+        }
+
+        public bool Parse()
+        {
+            return ParseOr();
+        }
+
+        private bool ParseOr()
+        {
+            var value = ParseAnd();
+            while (MatchIdentifier("or"))
+            {
+                var right = ParseAnd();
+                value = value || right;
+            }
+
+            return value;
+        }
+
+        private bool ParseAnd()
+        {
+            var value = ParseUnary();
+            while (MatchIdentifier("and"))
+            {
+                var right = ParseUnary();
+                value = value && right;
+            }
+
+            return value;
+        }
+
+        private bool ParseUnary()
+        {
+            if (MatchIdentifier("not"))
+            {
+                return !ParseUnary();
+            }
+
+            return ParsePrimary();
+        }
+
+        private bool ParsePrimary()
+        {
+            if (Match(StaticYaraConditionTokenKind.OpenParen))
+            {
+                var value = ParseOr();
+                Match(StaticYaraConditionTokenKind.CloseParen);
+                return value;
+            }
+
+            if (IsIdentifier("uint16"))
+            {
+                return ParseUInt16Comparison();
+            }
+
+            if (IsIdentifier("any") || IsIdentifier("all") || Current.Kind == StaticYaraConditionTokenKind.Number)
+            {
+                return ParseOfExpression();
+            }
+
+            if (Current.Kind == StaticYaraConditionTokenKind.StringIdentifier)
+            {
+                var identifier = Current.Text.TrimStart('$');
+                position++;
+                return matchedStringIds.Contains(identifier);
+            }
+
+            if (!IsAtEnd)
+            {
+                position++;
+            }
+
+            return false;
+        }
+
+        private bool ParseUInt16Comparison()
+        {
+            position++;
+            if (!Match(StaticYaraConditionTokenKind.OpenParen) ||
+                !TryReadNumber(out var offset) ||
+                !Match(StaticYaraConditionTokenKind.CloseParen) ||
+                !Match(StaticYaraConditionTokenKind.Equals) ||
+                !TryReadNumber(out var expected))
+            {
+                return false;
+            }
+
+            if (offset < 0 || offset > int.MaxValue || expected < 0)
+            {
+                return false;
+            }
+
+            var actual = ReadUInt16LittleEndian(buffer, (int)offset);
+            return actual.HasValue && actual.Value == expected;
+        }
+
+        private bool ParseOfExpression()
+        {
+            var mode = string.Empty;
+            var requiredCount = 0L;
+            if (MatchIdentifier("any"))
+            {
+                mode = "any";
+            }
+            else if (MatchIdentifier("all"))
+            {
+                mode = "all";
+            }
+            else if (TryReadNumber(out requiredCount))
+            {
+                mode = "count";
+            }
+
+            if (mode.Length == 0 || !MatchIdentifier("of"))
+            {
+                return false;
+            }
+
+            var candidateIds = ParseStringSet();
+            if (candidateIds.Count == 0)
+            {
+                return false;
+            }
+
+            var matchedCount = candidateIds.Count(identifier => matchedStringIds.Contains(identifier));
+            return mode switch
+            {
+                "any" => matchedCount > 0,
+                "all" => matchedCount == candidateIds.Count,
+                _ => matchedCount >= requiredCount
+            };
+        }
+
+        private List<string> ParseStringSet()
+        {
+            if (MatchIdentifier("them"))
+            {
+                return strings
+                    .Select(yaraString => yaraString.Identifier)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+            }
+
+            var identifiers = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (Match(StaticYaraConditionTokenKind.OpenParen))
+            {
+                while (!IsAtEnd)
+                {
+                    if (Match(StaticYaraConditionTokenKind.CloseParen))
+                    {
+                        break;
+                    }
+
+                    if (Current.Kind == StaticYaraConditionTokenKind.StringIdentifier)
+                    {
+                        AddStringReference(identifiers, Current.Text);
+                        position++;
+                        Match(StaticYaraConditionTokenKind.Comma);
+                        continue;
+                    }
+
+                    position++;
+                }
+
+                return identifiers.ToList();
+            }
+
+            if (Current.Kind == StaticYaraConditionTokenKind.StringIdentifier)
+            {
+                AddStringReference(identifiers, Current.Text);
+                position++;
+            }
+
+            return identifiers.ToList();
+        }
+
+        private void AddStringReference(SortedSet<string> identifiers, string token)
+        {
+            var reference = token.TrimStart('$');
+            if (reference.EndsWith('*'))
+            {
+                var prefix = reference[..^1];
+                foreach (var yaraString in strings.Where(yaraString => yaraString.Identifier.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)))
+                {
+                    identifiers.Add(yaraString.Identifier);
+                }
+
+                return;
+            }
+
+            if (strings.Any(yaraString => string.Equals(yaraString.Identifier, reference, StringComparison.OrdinalIgnoreCase)))
+            {
+                identifiers.Add(reference);
+            }
+        }
+
+        private bool TryReadNumber(out long value)
+        {
+            value = 0;
+            if (Current.Kind != StaticYaraConditionTokenKind.Number)
+            {
+                return false;
+            }
+
+            var token = Current.Text;
+            position++;
+            if (token.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
+            {
+                return long.TryParse(token[2..], NumberStyles.HexNumber, CultureInfo.InvariantCulture, out value);
+            }
+
+            return long.TryParse(token, NumberStyles.Integer, CultureInfo.InvariantCulture, out value);
+        }
+
+        private bool MatchIdentifier(string value)
+        {
+            if (!IsIdentifier(value))
+            {
+                return false;
+            }
+
+            position++;
+            return true;
+        }
+
+        private bool IsIdentifier(string value)
+        {
+            return Current.Kind == StaticYaraConditionTokenKind.Identifier &&
+                   string.Equals(Current.Text, value, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private bool Match(StaticYaraConditionTokenKind kind)
+        {
+            if (Current.Kind != kind)
+            {
+                return false;
+            }
+
+            position++;
+            return true;
+        }
+
+        private bool IsAtEnd => position >= tokens.Count;
+
+        private StaticYaraConditionToken Current => IsAtEnd
+            ? new StaticYaraConditionToken(StaticYaraConditionTokenKind.Identifier, string.Empty)
+            : tokens[position];
+
+        private static int? ReadUInt16LittleEndian(byte[] data, int offset)
+        {
+            if (offset < 0 || offset > data.Length - sizeof(ushort))
+            {
+                return null;
+            }
+
+            return data[offset] | data[offset + 1] << 8;
+        }
     }
 
     /// <summary>

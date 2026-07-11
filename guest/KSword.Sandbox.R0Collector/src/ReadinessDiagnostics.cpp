@@ -231,6 +231,125 @@ std::wstring DeviceOpenHint(const DWORD errorCode, const std::wstring& serviceNa
     }
 }
 
+std::wstring DeviceOpenZhHint(const DWORD errorCode, const std::wstring& serviceName) {
+    const std::wstring serviceText = serviceName.empty() ? L"KSwordSandboxDriver" : serviceName;
+    switch (errorCode) {
+    case ERROR_FILE_NOT_FOUND:
+    case ERROR_PATH_NOT_FOUND:
+    case ERROR_INVALID_NAME:
+    case ERROR_BAD_PATHNAME:
+        return L"\u8bf7\u786e\u8ba4\u5185\u6838\u670d\u52a1 '" + serviceText +
+            L"' \u5df2\u5b58\u5728\u5e76\u6b63\u5728\u8fd0\u884c\uff0c"
+            L"\u4e14\u5df2\u521b\u5efa \\\\DosDevices\\\\KSwordSandboxDriver \u7b26\u53f7\u94fe\u63a5\uff1b"
+            L"\u5982\u679c\u542f\u52a8\u5931\u8d25\uff0c\u8bf7\u68c0\u67e5\u9a71\u52a8\u7b7e\u540d/"
+            L"\u6d4b\u8bd5\u7b7e\u540d\u548c Code Integrity \u65e5\u5fd7\u3002";
+    case ERROR_ACCESS_DENIED:
+    case ERROR_PRIVILEGE_NOT_HELD:
+        return L"\u6253\u5f00\u88ab\u62d2\u7edd\u3002\u8bf7\u5728\u63d0\u6743\u7684 guest \u73af\u5883\u4e2d\u8fd0\u884c Collector\uff0c"
+            L"\u6216\u8c03\u6574\u9a71\u52a8\u63a7\u5236\u8bbe\u5907\u7684\u5b89\u5168\u63cf\u8ff0\u7b26\u3002";
+    case ERROR_SHARING_VIOLATION:
+        return L"\u63a7\u5236\u8bbe\u5907\u5b58\u5728\uff0c\u4f46\u53e6\u4e00\u4e2a\u53e5\u67c4\u62d2\u7edd\u5171\u4eab\uff1b"
+            L"\u8bf7\u5173\u95ed\u5176\u4ed6 Collector \u540e\u91cd\u8bd5\u3002";
+    default:
+        return L"\u8bf7\u68c0\u67e5 SCM \u72b6\u6001\u3001\u9a71\u52a8\u52a0\u8f7d\u4e8b\u4ef6\u3001"
+            L"\u8bbe\u5907\u7b26\u53f7\u94fe\u63a5\u521b\u5efa\uff0c"
+            L"\u4ee5\u53ca\u5df2\u52a0\u8f7d\u9a71\u52a8\u7684 public IOCTL ABI\u3002";
+    }
+}
+
+std::wstring ReadinessZhMessage(const std::string& state) {
+    if (state == "blocked") {
+        return L"R0Collector \u5c31\u7eea\u8bca\u65ad\u53d1\u73b0\u963b\u585e\u9879\uff1b"
+            L"\u8fd9\u662f\u91c7\u96c6\u8bca\u65ad\uff0c\u4e0d\u4ee3\u8868\u6837\u672c\u884c\u4e3a\u3002";
+    }
+
+    if (state == "degraded") {
+        return L"R0Collector \u5c31\u7eea\u8bca\u65ad\u53d1\u73b0\u964d\u7ea7\u9879\uff1b"
+            L"\u53ef\u7ee7\u7eed\u67e5\u770b\u5176\u4ed6\u63a2\u9488\u7ed3\u679c\u3002";
+    }
+
+    return L"R0Collector \u5c31\u7eea\u63a2\u9488\u901a\u8fc7\u3002";
+}
+
+std::wstring ReadinessZhHint(const std::string& stage, const std::string& code) {
+    if (stage == "service") {
+        if (code == "missing_service") {
+            return L"未找到驱动服务。请先在隔离 VM 中注册 KSwordSandboxDriver 服务；Collector 不会自动安装、启动或签名驱动。";
+        }
+
+        if (code == "service_not_running" || code == "service_start_pending") {
+            return L"驱动服务存在但尚未运行。请在 VM 中检查 SCM 失败代码、驱动签名/测试签名状态和 Code Integrity 日志。";
+        }
+
+        if (code == "service_query_denied" || code == "service_manager_denied") {
+            return L"SCM 查询权限不足。请以提升权限运行 Collector；后续设备打开和 ABI 探针仍可作为直接证据。";
+        }
+
+        return L"\u8bf7\u786e\u8ba4\u9a71\u52a8\u670d\u52a1\u540d\u3001\u5b89\u88c5\u72b6\u6001\u548c\u8fd0\u884c\u72b6\u6001\uff1b"
+            L"Collector \u4e0d\u4f1a\u5b89\u88c5\u3001\u542f\u52a8\u3001\u505c\u6b62\u6216\u7b7e\u540d\u9a71\u52a8\u3002";
+    }
+
+    if (stage == "openDevice") {
+        if (code == "open_device_not_found" || code == "read_probe_open_failed") {
+            return L"无法找到控制设备。请确认服务已运行并创建 \\\\DosDevices\\\\KSwordSandboxDriver 符号链接；若启动失败，请检查签名/测试签名和 Code Integrity。";
+        }
+
+        if (code == "open_device_denied") {
+            return L"打开控制设备被拒绝。请以提升权限运行 Collector，或检查驱动控制设备的安全描述符。";
+        }
+
+        if (code == "open_device_sharing_violation") {
+            return L"控制设备存在但共享冲突。请关闭其他 Collector 或占用该设备的句柄后重试。";
+        }
+
+        return L"\u8bf7\u786e\u8ba4\u9a71\u52a8\u670d\u52a1\u5df2\u8fd0\u884c\u3001"
+            L"\u63a7\u5236\u8bbe\u5907\u7b26\u53f7\u94fe\u63a5\u5b58\u5728\uff0c"
+            L"\u5e76\u4e14 Collector \u4ee5\u8db3\u591f\u6743\u9650\u8fd0\u884c\u3002";
+    }
+
+    if (stage == "abiNegotiation" || code == "abi_mismatch") {
+        if (code == "optional_ioctl_unavailable" || code == "abi_capabilities_unavailable") {
+            return L"当前驱动缺少可选 ABI 探针。Collector 会尽量兼容旧路径；如需完整队列、背压和 producer-mask 诊断，请使用同一构建产物的驱动和 Collector。";
+        }
+
+        return L"\u8bf7\u786e\u8ba4\u9a71\u52a8\u548c Collector \u6765\u81ea\u540c\u4e00\u6784\u5efa\uff0c"
+            L"public IOCTL ABI \u5934\u6587\u4ef6\u5339\u914d\u3002";
+    }
+
+    if (stage == "readEvents") {
+        if (code == "read_timeout") {
+            return L"READ_EVENTS 在诊断超时内未返回。请检查驱动分发函数是否挂起、锁是否卡住，以及队列同步路径。";
+        }
+
+        if (code == "driver_no_events") {
+            return L"READ_EVENTS 已完成但没有返回驱动记录。请确认 producer enable mask 未禁用目标 producer，并在 VM 内产生受控样本活动。";
+        }
+
+        if (code == "read_protocol_error" || code == "abi_mismatch") {
+            return L"READ_EVENTS 回复头与 Collector 期望不匹配。请重新构建并加载匹配版本的驱动和 Collector。";
+        }
+
+        return L"\u8bf7\u786e\u8ba4 READ_EVENTS \u5206\u53d1\u4e0d\u4f1a\u6302\u8d77\u3001"
+            L"producer \u5df2\u542f\u7528\uff0c\u5e76\u5728 VM \u5185\u4ea7\u751f\u53d7\u63a7\u6837\u672c\u6d3b\u52a8\u3002";
+    }
+
+    return L"\u8bf7\u7ed3\u5408 diagnosticStage/diagnosticCode \u548c hint \u5b57\u6bb5\u5b9a\u4f4d\u5c31\u7eea\u95ee\u9898\u3002";
+}
+
+std::wstring ReadinessSummaryZhMessage(const ReadinessSummary& summary) {
+    if (summary.blocked) {
+        return L"\u5c31\u7eea\u8bca\u65ad\u53d1\u73b0\u963b\u585e\u9879\uff1b"
+            L"\u8bf7\u4f18\u5148\u67e5\u770b failedStage \u548c\u5404 *DiagnosticCode \u5b57\u6bb5\u3002";
+    }
+
+    if (summary.degraded) {
+        return L"\u5c31\u7eea\u8bca\u65ad\u53d1\u73b0\u964d\u7ea7\u9879\uff1b"
+            L"\u8bf7\u67e5\u770b warning \u884c\u5e76\u786e\u8ba4\u662f\u5426\u5f71\u54cd\u672c\u6b21\u91c7\u96c6\u76ee\u6807\u3002";
+    }
+
+    return L"\u5c31\u7eea\u8bca\u65ad\u901a\u8fc7\uff1bR0Collector \u53ef\u7ee7\u7eed\u8fdb\u5165\u91c7\u96c6\u8def\u5f84\u3002";
+}
+
 // Input: Common readiness event metadata.
 // Processing: Emits a string-valued JSONL diagnostic row that can be consumed by
 // host import/reporting without schema migration.
@@ -258,16 +377,34 @@ bool EmitReadinessDiagnostic(
     data.AddUtf8("subjectKind", "collector-diagnostic");
     data.AddUtf8("actorRole", "collector-infrastructure");
     data.AddUtf8("subjectRole", "collector-diagnostic");
+    data.AddUtf8("processIdSource", "top-level");
     data.AddWide("hint", hint);
+    data.AddWide("zhMessage", ReadinessZhMessage(state));
+    data.AddWide("zhHint", ReadinessZhHint(stage, code));
     data.AddWide("devicePath", options.devicePath);
     data.AddWide("serviceName", options.serviceName);
     data.AddSigned("diagnoseReadTimeoutMs", options.diagnoseReadTimeoutMs);
     data.AddUtf8("schema", KSWORD_SANDBOX_EVENT_SCHEMA_NAME);
     data.AddUtf8("producer", "r0collector");
     data.AddBool("collectionNoise", true);
+    data.AddBool("collectorNoise", true);
+    data.AddBool("collectorSelfNoise", false);
+    data.AddBool("selfProcess", false);
+    data.AddUtf8("collectorNoiseReason", "collectionDiagnostic");
+    data.AddUtf8("collectorNoiseAction", "emit");
+    data.AddBool("collectorSuppressed", false);
+    data.AddBool("selfNoise", false);
+    data.AddUtf8("selfNoiseReason", "none");
+    data.AddUtf8("selfNoiseAction", "emit");
     data.AddBool("noise", false);
     data.AddBool("lost", false);
+    data.AddUnsigned("lostCount", 0);
+    data.AddBool("lossObserved", false);
+    data.AddUtf8("loss", "none");
     data.AddBool("backpressure", false);
+    data.AddBool("backpressureObserved", false);
+    data.AddUtf8("backpressureReason", "none");
+    data.AddUnsigned("highWatermark", 0);
 
     if (extraData != nullptr) {
         const std::string extraJson = extraData->Build();
@@ -721,7 +858,10 @@ bool ProbeReadEventsReadiness(
     extra.AddUnsigned("eventsWritten", reply.EventsWritten);
     extra.AddUnsigned("bytesWritten", reply.BytesWritten);
     extra.AddUnsigned("eventsDropped", reply.EventsDropped);
+    extra.AddUnsigned("lostCount", reply.EventsDropped);
     extra.AddUnsigned("nextSequence", reply.NextSequence);
+    extra.AddUnsigned("sequence", reply.NextSequence);
+    extra.AddUtf8("sequenceMeaning", "nextSequence");
 
     if (reply.EventsWritten == 0 || reply.BytesWritten == 0) {
         RecordProbe(summary, "readEvents", "driver_no_events", "warning", "degraded");
@@ -759,6 +899,11 @@ bool EmitReadinessSummary(
     JsonDataObjectBuilder data;
     data.AddUtf8("severity", summary.highestSeverity);
     data.AddUtf8("readinessState", summary.readinessState);
+    data.AddWide("zhMessage", ReadinessSummaryZhMessage(summary));
+    data.AddWide(
+        "zhHint",
+        L"\u8bf7\u628a readinessSummary \u89c6\u4e3a\u91c7\u96c6\u5065\u5eb7\u72b6\u6001\uff0c"
+        L"\u4e0d\u8981\u5f52\u7c7b\u4e3a\u6837\u672c\u884c\u4e3a\u3002");
     data.AddBool("ready", !summary.blocked);
     data.AddBool("degraded", summary.degraded);
     data.AddUtf8("collectionScope", "r0collector-readiness-summary");
@@ -770,6 +915,7 @@ bool EmitReadinessSummary(
     data.AddUtf8("subjectKind", "collector-diagnostic");
     data.AddUtf8("actorRole", "collector-infrastructure");
     data.AddUtf8("subjectRole", "collector-diagnostic");
+    data.AddUtf8("processIdSource", "top-level");
     data.AddUtf8("failedStage", summary.failedStage);
     data.AddUtf8("serviceDiagnosticCode", summary.serviceDiagnosticCode);
     data.AddUtf8("openDeviceDiagnosticCode", summary.openDeviceDiagnosticCode);
@@ -781,9 +927,24 @@ bool EmitReadinessSummary(
     data.AddUtf8("schema", KSWORD_SANDBOX_EVENT_SCHEMA_NAME);
     data.AddUtf8("producer", "r0collector");
     data.AddBool("collectionNoise", true);
+    data.AddBool("collectorNoise", true);
+    data.AddBool("collectorSelfNoise", false);
+    data.AddBool("selfProcess", false);
+    data.AddUtf8("collectorNoiseReason", "collectionDiagnostic");
+    data.AddUtf8("collectorNoiseAction", "emit");
+    data.AddBool("collectorSuppressed", false);
+    data.AddBool("selfNoise", false);
+    data.AddUtf8("selfNoiseReason", "none");
+    data.AddUtf8("selfNoiseAction", "emit");
     data.AddBool("noise", false);
     data.AddBool("lost", false);
+    data.AddUnsigned("lostCount", 0);
+    data.AddBool("lossObserved", false);
+    data.AddUtf8("loss", "none");
     data.AddBool("backpressure", false);
+    data.AddBool("backpressureObserved", false);
+    data.AddUtf8("backpressureReason", "none");
+    data.AddUnsigned("highWatermark", 0);
 
     SandboxEventFields event;
     event.eventType = "r0collector.readinessSummary";
@@ -825,6 +986,7 @@ bool EmitDeviceUnavailableDiagnostic(
     data.AddUtf8("subjectKind", "collector-diagnostic");
     data.AddUtf8("actorRole", "collector-infrastructure");
     data.AddUtf8("subjectRole", "collector-diagnostic");
+    data.AddUtf8("processIdSource", "top-level");
     data.AddUtf8("sideEffectPolicy", "read-only-open-no-driver-load-no-scm-mutation-no-signing");
     data.AddWide("devicePath", options.devicePath);
     data.AddWide("serviceName", options.serviceName);
@@ -834,12 +996,31 @@ bool EmitDeviceUnavailableDiagnostic(
         "message",
         L"Unable to open driver device " + options.devicePath + L": " + Win32ErrorMessage(openError));
     data.AddWide("hint", DeviceOpenHint(openError, options.serviceName));
+    data.AddWide(
+        "zhMessage",
+        L"\u65e0\u6cd5\u6253\u5f00\u9a71\u52a8\u8bbe\u5907 " + options.devicePath + L": " + Win32ErrorMessage(openError));
+    data.AddWide("zhHint", DeviceOpenZhHint(openError, options.serviceName));
     data.AddUtf8("schema", KSWORD_SANDBOX_EVENT_SCHEMA_NAME);
     data.AddUtf8("producer", "r0collector");
     data.AddBool("collectionNoise", true);
+    data.AddBool("collectorNoise", true);
+    data.AddBool("collectorSelfNoise", false);
+    data.AddBool("selfProcess", false);
+    data.AddUtf8("collectorNoiseReason", "collectionDiagnostic");
+    data.AddUtf8("collectorNoiseAction", "emit");
+    data.AddBool("collectorSuppressed", false);
+    data.AddBool("selfNoise", false);
+    data.AddUtf8("selfNoiseReason", "none");
+    data.AddUtf8("selfNoiseAction", "emit");
     data.AddBool("noise", false);
     data.AddBool("lost", false);
+    data.AddUnsigned("lostCount", 0);
+    data.AddBool("lossObserved", false);
+    data.AddUtf8("loss", "none");
     data.AddBool("backpressure", false);
+    data.AddBool("backpressureObserved", false);
+    data.AddUtf8("backpressureReason", "none");
+    data.AddUnsigned("highWatermark", 0);
 
     SandboxEventFields event;
     event.eventType = "r0collector.deviceUnavailable";
@@ -899,11 +1080,33 @@ int RunReadinessDiagnoseMode(const Options& options, EventWriter& writer) {
     openedData.AddUtf8("diagnosticCode", "device_opened");
     openedData.AddUtf8("severity", "info");
     openedData.AddUtf8("readinessState", "ready");
+    openedData.AddWide(
+        "zhMessage",
+        L"\u9a71\u52a8\u63a7\u5236\u8bbe\u5907\u5df2\u6253\u5f00\uff1b"
+        L"Collector \u5c06\u7ee7\u7eed\u6267\u884c ABI \u548c READ_EVENTS \u5c31\u7eea\u63a2\u9488\u3002");
+    openedData.AddWide(
+        "zhHint",
+        L"\u8bf7\u7ee7\u7eed\u67e5\u770b\u540e\u7eed r0collector.readinessDiagnostic \u884c\uff0c"
+        L"\u786e\u8ba4 ABI\u3001\u961f\u5217\u8bfb\u53d6\u548c\u5065\u5eb7\u72b6\u6001\u5747\u4e3a ready\u3002");
     openedData.AddUtf8("schema", KSWORD_SANDBOX_EVENT_SCHEMA_NAME);
     openedData.AddUtf8("producer", "r0collector");
+    AddCollectorAttributionFields(openedData, "collector-device-open", "collector-diagnostic");
+    openedData.AddBool("collectorNoise", false);
+    openedData.AddBool("collectorSelfNoise", false);
+    openedData.AddBool("selfProcess", false);
+    openedData.AddUtf8("collectorNoiseReason", "none");
+    openedData.AddUtf8("collectorNoiseAction", "emit");
+    openedData.AddBool("collectorSuppressed", false);
+    openedData.AddBool("selfNoise", false);
+    openedData.AddUtf8("selfNoiseReason", "none");
+    openedData.AddUtf8("selfNoiseAction", "emit");
     openedData.AddBool("noise", false);
     openedData.AddBool("lost", false);
+    openedData.AddUnsigned("lostCount", 0);
+    openedData.AddBool("lossObserved", false);
     openedData.AddBool("backpressure", false);
+    openedData.AddBool("backpressureObserved", false);
+    openedData.AddUnsigned("highWatermark", 0);
     openedEvent.dataJson = openedData.Build();
     if (!EmitEvent(writer, openedEvent)) {
         return kExitRuntimeFailure;

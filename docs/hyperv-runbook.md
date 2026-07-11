@@ -1,72 +1,63 @@
-# Hyper-V runbook
+# Hyper-V 运行手册（runbook）
 
-The host service currently generates Hyper-V steps without executing them. This
-keeps the repository safe to build on machines without administrator rights or a
-registered golden VM.
+Canonical scope: this page is the conceptual planned-step list and prerequisites
+for generated runbooks. Use `docs/hyperv-readiness.md` for current read-only
+preflight commands and `docs/hyperv-e2e-runbook.md` for the scripted
+PlanOnly/WhatIf/Live operator flow.
 
-## Planned step groups
+宿主服务会为 sandbox job 生成 Hyper-V runbook。默认执行边界是 dry-run / PlanOnly，便于在没有
+管理员权限或没有注册 golden VM 的机器上安全构建和审阅。当前脚本 live 路径使用同一个 golden VM：
+还原 `Clean` checkpoint、启动 VM、运行样本、收集输出，然后停止并再次还原 checkpoint。
+Temporary differencing-disk VM 属于保留设计方向，不是当前默认脚本路径。
 
-1. Verify Hyper-V PowerShell cmdlets.
-2. Verify the configured golden VM exists.
-3. Load guest credentials from an environment variable.
-4. Restore a clean checkpoint or create a temporary differencing-disk VM.
-5. Stage prepared Guest Agent and R0Collector payload files from
-   `paths.guestPayloadRoot` into the guest through PowerShell Direct.
-6. Optionally copy an external driver `.sys` from `driver.hostDriverPath` into
-   `driver.driverPathInGuest` when that path is configured.
-7. Copy the sample into the guest.
-8. Create a job-specific guest output folder such as
-   `C:\KSwordSandbox\out\<job-id-n>`.
-9. Start `KSword.Sandbox.Agent.exe` asynchronously through PowerShell Direct.
-10. Pass `--driver-events C:\KSwordSandbox\out\<job-id-n>\driver-events.jsonl`,
-   `--r0collector`, and `--driver-device` when driver collection is enabled.
-11. While the guest agent process is running, periodically copy guest output
-   back to `D:\Temp\KSwordSandbox\jobs\<job-id-n>\guest`.
-12. Copy guest JSON/JSONL output one final time.
-13. Stop and optionally remove the temporary VM.
+## 计划步骤组（planned step groups）
 
-## Execution prerequisites
+1. 验证 Hyper-V PowerShell cmdlets。
+2. 验证配置的 golden VM 存在。
+3. 从环境变量加载 guest credential。
+4. 停止 VM（如需要）并还原 clean checkpoint。
+5. 启用来宾服务接口（Guest Service Interface）。
+6. 启动分析 VM，并等待 Hyper-V 报告 `Running`。
+7. 等待 PowerShell Direct，可见 bounded retries 和 heartbeat。
+8. 通过 PowerShell Direct 将 `paths.guestPayloadRoot` 下的 Guest Agent 与 R0Collector payload stage 到 guest。
+9. 当配置了 `driver.hostDriverPath` 时，可选复制外部 `.sys` 到 `driver.driverPathInGuest`。
+10. 将样本复制到 guest。
+11. 创建 job 专属 guest 输出目录，例如 `C:\KSwordSandbox\out\<job-id-n>`。
+12. 可选安装 driver service（`install-driver-service`），仅 real R0 且 `.sys` path 有效时生成。
+13. 通过 PowerShell Direct 异步启动 `KSword.Sandbox.Agent.exe`。
+14. driver collection 启用时传入 `--driver-events C:\KSwordSandbox\out\<job-id-n>\driver-events.jsonl`、
+    `--r0collector`、`--driver-device`；mock mode 会额外加入 `--r0-mock` / R0Collector `--mock`。
+15. Guest Agent 运行期间周期性将 guest output 复制回 `D:\Temp\KSwordSandbox\jobs\<job-id-n>\guest`。
+16. 最终复制 guest JSON/JSONL output，并验证 `events.json`、`agent.pid`、`agent.exit` 到达 host。
+17. 停止 VM，并按配置再次还原 clean checkpoint。
 
-- Elevated host PowerShell.
-- Hyper-V feature installed.
-- Golden VM registered and checkpointed.
-- Guest credentials available through the configured environment variable.
-- Guest Agent and R0Collector host payload prepared under
-  `paths.guestPayloadRoot`, normally by `scripts/Prepare-GuestPayload.ps1`.
-- Optional test-signed driver kept outside git and referenced by
-  `driver.hostDriverPath` only when real driver staging is desired.
+长等待会输出低频 operator heartbeat：VM start 报告 state change；PowerShell Direct 报告已用时间、
+attempt count 和最后连接错误；live-output sync 抑制重复周期性 copy error，只保留首个 warning，最终 copy
+失败时给出一个简洁原因。
 
-## Real R0 driver preflight
+## 执行前提（execution prerequisites）
 
-Real R0 collection requires three config values to agree:
+- Elevated host PowerShell。
+- Hyper-V feature 与 PowerShell module 已安装。
+- Golden VM 已注册，例如 `KSwordSandbox-Win10-Golden`。
+- Clean checkpoint 已存在，例如 `Clean`。
+- Guest credential 可通过配置环境变量读取，默认 `KSWORDBOX_GUEST_PASSWORD`。
+- Guest Service Interface 已启用；中文 Windows 可能显示为 `来宾服务接口`，组件 ID 为
+  `6C09BB55-D683-4DA0-8931-C9BF705F6480`。
+- PowerShell Direct 可用。
+- Guest Agent 和 R0Collector host payload 已在 `paths.guestPayloadRoot` 下准备好，通常通过
+  `scripts/Prepare-GuestPayload.ps1`。
+- 可选 test-signed driver 保持在 git 外，仅 real R0 需要，并通过 `driver.hostDriverPath` 引用。
 
-- `driver.enabled=true`;
-- `driver.useMockCollector=false`;
-- `driver.hostDriverPath` points to an existing built and test-signed `.sys`.
+## Live 前只读门禁
 
-If `driver.enabled=true` and `driver.useMockCollector=false` but
-`driver.hostDriverPath` is empty, the runbook cannot copy a driver into the
-guest and does not generate `install-driver-service`. The staging command would
-otherwise show `$driverSource = ''`, and R0Collector can later fail opening
-`\\.\KSwordSandboxDriver` with `deviceUnavailable` / `win32Error=2`.
-
-The generated runbook now emits an early non-mutating
-`check-r0-driver-config` preflight step, and the script E2E plan records a
-failed `R0 driver host path configuration` check before any live VM mutation.
-Fix the condition by setting `driver.hostDriverPath` in the local config,
-switching to `driver.useMockCollector=true` for payload-only R0 validation, or
-disabling R0 with `driver.enabled=false` / `-NoR0Collector`.
-
-Before live execution, run the read-only preflight. On an installed host, the
-one-command form reuses `Sandbox__ConfigPath` / install state and checks the
-configured VM name, checkpoint, Guest Service Interface, PowerShell Direct,
-guest working directory, payload roots, and repository secret hygiene:
+运行 readiness preflight；它不会启动 VM、还原 checkpoint、复制文件或启用 integration service：
 
 ```powershell
 pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\Test-HyperVReadiness.ps1
 ```
 
-Equivalent fully explicit form:
+完全显式形式：
 
 ```powershell
 pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\Test-HyperVReadiness.ps1 `
@@ -79,32 +70,58 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\Test-HyperVReadiness.ps1
   -RuntimeRoot 'D:\Temp\KSwordSandbox'
 ```
 
-The preflight is intentionally safer than the live runbook. It checks module
-and command availability, Hyper-V feature/service state, VM existence,
-checkpoint existence, Guest Service Interface state, host shared/runtime paths,
-host payload files, PowerShell Direct reachability, test-signing status, and
-guest payload file presence when the VM is already running. It does not restore
-a checkpoint, start a VM, stage payloads, enable Guest Service Interface, or
-create guest folders.
+Elevated PowerShell 中可做只读 Hyper-V 状态确认：
 
-Automation should read the readiness `CheckId`, `RequiredForLive`, `LiveReady`,
-`FailedCheckIds`, and `ReadOnlyAssertions` fields instead of parsing display
-text.
+```powershell
+Get-VM -Name 'KSwordSandbox-Win10-Golden'
+Get-VMSnapshot -VMName 'KSwordSandbox-Win10-Golden' -Name 'Clean'
+Get-VMIntegrationService -VMName 'KSwordSandbox-Win10-Golden'
 
-If the only missing item is the guest password for the current elevated shell,
-use `-PromptForMissingGuestPassword` for a process-only prompt, or rerun
-`install.ps1 -Mode Change -ResetPassword -PromptPassword` for persistent local
-setup. Neither flow should put password values in repository files.
+$guestServiceComponentId = '6C09BB55-D683-4DA0-8931-C9BF705F6480'
+Get-VMIntegrationService -VMName 'KSwordSandbox-Win10-Golden' |
+  Where-Object {
+    ([string]$_.Id).EndsWith('\' + $guestServiceComponentId, [System.StringComparison]::OrdinalIgnoreCase) -or
+    $_.Name -eq 'Guest Service Interface' -or
+    $_.Name -eq '来宾服务接口'
+  } |
+  Select-Object Name, Enabled, PrimaryStatusDescription
+```
 
-## Current local status
+## Real R0 driver preflight（可选）
 
-The host now has dry-run and live execution wiring. Non-elevated checks still
-cannot enumerate Hyper-V state; commands such as `Get-VM` and
-`Get-WindowsOptionalFeature -Online` require elevation. Live execution must be
-started from an elevated host process with a prepared golden VM and guest
-credential secret.
+默认 E2E 不要求真实 kernel driver。Real R0 collection 需要三项配置一致：
 
-If `Test-HyperVReadiness.ps1` reports `PowerShell Direct` as `Warning` because
-the VM is `Off`, either accept that the preflight stayed read-only or start the
-VM manually in an operator-controlled session and re-run the preflight before
-capturing a new clean checkpoint.
+- `driver.enabled=true`
+- `driver.useMockCollector=false`
+- `driver.hostDriverPath` 指向存在的、已本地 test-signed 的 `.sys`
+
+如果 `driver.enabled=true` 且 `driver.useMockCollector=false`，但 `driver.hostDriverPath` 为空，runbook 无法把
+driver 复制进 guest，也不会生成 `install-driver-service`。后续 R0Collector 可能因打开
+`\\.\KSwordSandboxDriver` 失败而返回 `deviceUnavailable` / `win32Error=2`。
+
+生成的 runbook 会先发出非变更 `check-r0-driver-config` preflight；脚本 E2E plan 也会在任何 VM mutation 前
+记录 `R0 driver host path configuration` 失败。修复方式：
+
+```powershell
+# 真实 R0：记录仓库外 test-signed .sys。
+.\install.ps1 -Mode Change -UpdateHyperVConfig -DriverHostPath <test-signed .sys>
+
+# 只验证通路：改用 mock collector。
+# 在 local config 中设置 driver.useMockCollector=true。
+
+# 临时关闭 R0Collector：
+.\scripts\Invoke-HyperVE2E.ps1 -NoR0Collector -PlanOnly
+```
+
+不要把 `CSignTool.exe` 或旧签名 wrapper 加入 runbook/E2E 准备路径。测试证书
+helper 只走普通 Windows SDK `signtool.exe`；找不到 `signtool.exe` 时会明确
+报告跳过签名，而不是调用会弹窗的旧工具。
+
+## 当前本地状态说明
+
+宿主现在具备 dry-run 和 live execution wiring。非 elevated shell 仍无法可靠枚举 Hyper-V 状态；
+`Get-VM`、`Get-WindowsOptionalFeature -Online` 等命令通常需要管理员权限。Live execution 必须从
+elevated host process 启动，并满足 golden VM、checkpoint、guest credential 和 payload 前置条件。
+
+如果 `Test-HyperVReadiness.ps1` 因 VM 为 `Off` 报告 `PowerShell Direct` 为 `Warning`，这表示 preflight
+保持了只读；可以在 operator-controlled session 中手动启动 VM 后再复验，或在 live 前接受该只读限制。

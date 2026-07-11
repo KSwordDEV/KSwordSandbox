@@ -1,10 +1,9 @@
-#include "Driver.h"
+#include "Producers/File/FileFilter.h"
 
 C_ASSERT(sizeof(KSWORD_SANDBOX_FILE_EVENT_PAYLOAD) <=
     KSWORD_SANDBOX_EVENT_MAX_PAYLOAD_SIZE);
 
 static KSWORD_SANDBOX_FILE_FILTER_RUNTIME g_KswFileFilterRuntime;
-static volatile LONG g_KswFileFilterUninitializing;
 
 static NTSTATUS FLTAPI
 KswFileFilterUnloadCallback(
@@ -25,6 +24,25 @@ KswFileFilterPostOperation(
     _In_opt_ PVOID CompletionContext,
     _In_ FLT_POST_OPERATION_FLAGS Flags
     );
+
+/*
+ * Returns the file payload version stamped on emitted records.
+ * Inputs : none; reads the minifilter runtime state.
+ * Logic  : callbacks can overlap teardown after Active was observed, so a
+ *          cleared runtime falls back to the stable ABI v1 payload version.
+ * Return : KSWORD_SANDBOX_FILE_EVENT_VERSION for v1 records.
+ */
+static
+ULONG
+KswFilePayloadVersion(
+    VOID
+    )
+{
+    ULONG version;
+
+    version = g_KswFileFilterRuntime.PayloadVersion;
+    return version == 0 ? KSWORD_SANDBOX_FILE_EVENT_VERSION : version;
+}
 
 /*
  * Minifilter operation table for the file telemetry producer.
@@ -539,6 +557,14 @@ KswCopyFilePathToPayload(
     }
 
     sourceBytes = FileName->Length;
+    if (FileName->MaximumLength != 0 && sourceBytes > FileName->MaximumLength) {
+        sourceBytes = FileName->MaximumLength;
+    }
+    sourceBytes -= sourceBytes % (ULONG)sizeof(WCHAR);
+    if (sourceBytes == 0) {
+        return FALSE;
+    }
+
     maxBytes =
         (KSWORD_SANDBOX_FILE_EVENT_PATH_CHARS - 1U) * (ULONG)sizeof(WCHAR);
     bytesToCopy = sourceBytes;
@@ -780,7 +806,7 @@ KswPushFileEvent(
 
     RtlZeroMemory(&payload, sizeof(payload));
     suppressEvent = FALSE;
-    payload.Version = KSWORD_SANDBOX_FILE_EVENT_VERSION;
+    payload.Version = KswFilePayloadVersion();
     payload.Size = sizeof(payload);
     payload.Operation = Operation;
     payload.ProcessId = (ULONGLONG)(ULONG_PTR)FltGetRequestorProcessId(Data);
@@ -946,13 +972,25 @@ KswInitializeFileFilter(
     NTSTATUS status;
     NTSTATUS registryStatus;
 
-    if (DriverObject == NULL || DeviceExtension == NULL) {
+    if (DriverObject == NULL ||
+        RegistryPath == NULL ||
+        RegistryPath->Buffer == NULL ||
+        RegistryPath->Length == 0 ||
+        DeviceExtension == NULL ||
+        DeviceExtension->Signature != KSWORD_SANDBOX_DEVICE_EXTENSION_SIGNATURE) {
         return STATUS_INVALID_PARAMETER;
     }
 
+    if (g_KswFileFilterRuntime.Filter != NULL ||
+        InterlockedCompareExchange(&g_KswFileFilterRuntime.Active, 0, 0) != 0) {
+        return STATUS_DEVICE_BUSY;
+    }
+
     RtlZeroMemory(&g_KswFileFilterRuntime, sizeof(g_KswFileFilterRuntime));
-    InterlockedExchange(&g_KswFileFilterUninitializing, 0);
+    InterlockedExchange(&g_KswFileFilterRuntime.Initialized, 1);
+    InterlockedExchange(&g_KswFileFilterRuntime.Uninitializing, 0);
     g_KswFileFilterRuntime.DeviceExtension = DeviceExtension;
+    g_KswFileFilterRuntime.PayloadVersion = KSWORD_SANDBOX_FILE_EVENT_VERSION;
     g_KswFileFilterRuntime.RegisterStatus = STATUS_NOT_SUPPORTED;
     g_KswFileFilterRuntime.StartStatus = STATUS_NOT_SUPPORTED;
 
@@ -968,6 +1006,7 @@ KswInitializeFileFilter(
     g_KswFileFilterRuntime.RegisterStatus = status;
     if (!NT_SUCCESS(status)) {
         g_KswFileFilterRuntime.Filter = NULL;
+        g_KswFileFilterRuntime.PayloadVersion = 0;
         g_KswFileFilterRuntime.DeviceExtension = NULL;
         KswSetLastStatus(DeviceExtension, status);
         return status;
@@ -978,6 +1017,7 @@ KswInitializeFileFilter(
     if (!NT_SUCCESS(status)) {
         FltUnregisterFilter(g_KswFileFilterRuntime.Filter);
         g_KswFileFilterRuntime.Filter = NULL;
+        g_KswFileFilterRuntime.PayloadVersion = 0;
         g_KswFileFilterRuntime.DeviceExtension = NULL;
         KswSetLastStatus(DeviceExtension, status);
         return status;
@@ -1005,7 +1045,7 @@ KswUninitializeFileFilter(
 {
     PFLT_FILTER filter;
 
-    if (InterlockedExchange(&g_KswFileFilterUninitializing, 1) != 0) {
+    if (InterlockedExchange(&g_KswFileFilterRuntime.Uninitializing, 1) != 0) {
         return;
     }
 
@@ -1018,7 +1058,9 @@ KswUninitializeFileFilter(
         FltUnregisterFilter(filter);
     }
 
+    g_KswFileFilterRuntime.PayloadVersion = 0;
     g_KswFileFilterRuntime.DeviceExtension = NULL;
     g_KswFileFilterRuntime.RegisterStatus = STATUS_NOT_SUPPORTED;
     g_KswFileFilterRuntime.StartStatus = STATUS_NOT_SUPPORTED;
+    InterlockedExchange(&g_KswFileFilterRuntime.Initialized, 0);
 }

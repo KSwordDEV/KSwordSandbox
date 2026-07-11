@@ -82,6 +82,8 @@
     <ClInclude Include="include\KSwordSandboxDriverIoctl.h" />
     <ClInclude Include="src\Driver.h" />
     <ClInclude Include="src\Common\KernelString.h" />
+    <ClInclude Include="src\Producers\File\FileFilter.h" />
+    <ClInclude Include="src\Producers\Image\ImageMonitor.h" />
     <ClInclude Include="src\Producers\Network\NetworkMonitor.h" />
     <ClInclude Include="src\Producers\Process\ProcessMonitor.h" />
     <ClInclude Include="src\Producers\Registry\RegistryMonitor.h" />
@@ -94,6 +96,7 @@
     <ClCompile Include="src\Eventing\EventQueue.c" />
     <ClCompile Include="src\Eventing\EventRing.c" />
     <ClCompile Include="src\Producers\File\FileFilter.c" />
+    <ClCompile Include="src\Producers\Image\ImageMonitor.c" />
     <ClCompile Include="src\Producers\Network\NetworkMonitor.c" />
     <ClCompile Include="src\Producers\Process\ProcessMonitor.c" />
     <ClCompile Include="src\Producers\Registry\RegistryMonitor.c" />

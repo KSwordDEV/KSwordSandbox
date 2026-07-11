@@ -84,6 +84,7 @@ internal sealed class InstallerContractScenario : ISmokeTestScenario
         RequireContains(installer, "[switch]$ResetPassword", "Installer should support non-interactive password reset.");
         RequireContains(installer, "[switch]$ResetGuestVmPassword", "Installer should support non-interactive actual VM password reset.");
         RequireContains(installer, "[switch]$UpdateHyperVConfig", "Installer should support non-interactive Hyper-V config updates.");
+        RequireContains(installer, "[switch]$ShowTestSigningGuidance", "Installer should support non-interactive host/guest test-signing guidance.");
         RequireContains(installer, "[switch]$ConfigureVTKey", "Installer should support non-interactive VT key updates.");
         RequireContains(installer, "[switch]$PromptVTKey", "Installer should support prompted VT key setup.");
         RequireContains(installer, "[switch]$ClearVTKey", "Installer should support clearing VT key setup.");
@@ -94,6 +95,10 @@ internal sealed class InstallerContractScenario : ISmokeTestScenario
         RequireContains(installer, "elseif ($CheckEnvironment)", "Non-interactive change should support environment checks.");
         RequireContains(installer, "elseif ($ConfigureVTKey -or $PromptVTKey -or $ClearVTKey)", "Non-interactive change should support VT key configuration.");
         RequireContains(installer, "if ($ResetGuestVmPassword)", "Non-interactive change should prioritize actual VM password reset.");
+        RequireContains(installer, "elseif ($ShowTestSigningGuidance)", "Non-interactive change should expose host/guest test-signing guidance.");
+        RequireContains(installer, "Show-TestSigningGuidance", "Installer should provide host/guest test-signing guidance.");
+        RequireContains(installer, "HostTestSigningGuidance", "Installer status should include host test-signing guidance.");
+        RequireContains(installer, "signtool.exe helper", "Installer guidance should point to the ordinary signtool test-certificate helper.");
         RequireContains(installer, "elseif ($UpdateHyperVConfig)", "Non-interactive change should support Hyper-V config updates.");
         RequireContains(installer, "if ($ResetPassword -or $GeneratePassword -or $PromptPassword)", "Non-interactive change should support reset password prompt/generate.");
         RequireNotContains(installer, "CSignTool", "Installer must not call or reference CSignTool.");

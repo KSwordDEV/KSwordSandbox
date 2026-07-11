@@ -1,5 +1,10 @@
 # Driver signing and R0 event export
 
+Canonical scope: this page owns signing/test-mode policy and optional real-R0
+validation boundaries. VM-local service install/start/stop/status commands are
+owned by `docs/driver-install.md`; ABI details are owned by
+`docs/r0-driver-core.md`.
+
 ## Scope
 
 The sandbox repository does not store driver binaries, certificates, private

@@ -9,6 +9,40 @@
 
 The classify callback is telemetry-only.  It returns `FWP_ACTION_CONTINUE` when WFP grants action-write rights, and it does not block, absorb, redirect, or modify traffic.
 
+Current scope is intentionally **ALE inspect-only**, not a complete WFP network
+sensor.  The driver does not register packet/stream/datagram layers, does not
+parse DNS/HTTP/TLS payloads, does not maintain WFP flow contexts, and does not
+install protocol/address conditions.  Those items are explicit TODOs rather
+than hidden implementation claims.
+
+## Code layout and build guards
+
+The network producer is still compiled as one MSBuild translation unit
+(`NetworkMonitor.c`) so the driver project file does not need additional source
+entries.  The implementation is split into network-local headers:
+
+- `NetworkInternal.h`: compile-time feature guard, v1 payload size/offset
+  asserts, draft payload guard, and `KSWORD_SANDBOX_NETWORK_WFP_RUNTIME`
+  internal runtime state, including `Initialized`, `Uninitializing`, and
+  `PayloadVersion`.
+- `NetworkWfpBindings.h`: WFP/ALE layer contract asserts plus the descriptor
+  table for the four supported ALE bindings.
+- `NetworkMonitor.h`: public-in-driver initialization/uninitialization entry
+  points used by `DriverEntry.c`.
+
+Compile-time guardrails:
+
+- `KSWORD_SANDBOX_ENABLE_NETWORK_WFP_ALE` must be exactly `0` or `1`.
+- The enabled WFP path references the specific ALE layer and field identifiers
+  at compile time, so an unsupported WDK header set fails the build instead of
+  silently producing a fake no-op WFP producer.
+- `KSWORD_SANDBOX_NETWORK_WFP_IMPLEMENTATION_ALE_INSPECT_ONLY` documents the
+  current implementation level.
+- `KSWORD_SANDBOX_NETWORK_WFP_TODO_FULL_PACKET_LAYERS`,
+  `KSWORD_SANDBOX_NETWORK_WFP_TODO_FLOW_CONTEXTS`, and
+  `KSWORD_SANDBOX_NETWORK_WFP_TODO_FILTER_CONDITIONS` intentionally remain set
+  as compile-time TODO markers.
+
 The normal Debug/Release build compiles this WFP/ALE producer.  A lab build may
 set `KSWORD_SANDBOX_ENABLE_NETWORK_WFP_ALE=0`; that is an explicit unsupported
 network build, not a fake success path.  In that mode `GET_CAPABILITIES` omits
@@ -19,13 +53,13 @@ not included in `SupportedProducerMask`.
 
 `DriverEntry.c` calls `KswInitializeNetworkMonitor(deviceObject, deviceExtension)` after the file, process, and registry producers are initialized.  Failures are non-fatal: the control device remains available, and `GET_HEALTH.LastNtStatus` records the last producer status.
 
-`KswDriverUnload` calls `KswUninitializeNetworkMonitor()` before the control device is deleted.  Cleanup disables classify emission first, deletes FWPM filters/callouts/sublayer, closes the dynamic FWPM engine session, unregisters FWPS callouts, and clears runtime pointers.
+`KswDriverUnload` calls `KswUninitializeNetworkMonitor()` before the control device is deleted.  Cleanup disables classify emission first, uses the runtime `Uninitializing` guard for idempotent unload, deletes FWPM filters/callouts/sublayer, closes the dynamic FWPM engine session, unregisters FWPS callouts, clears the v1 `PayloadVersion`, and clears runtime pointers.
 
 The driver project links `Fwpkclnt.lib` in both Debug and Release configurations.
 
 ## Event payload
 
-Network events use `KswSandboxEventTypeNetwork` and `KSWORD_SANDBOX_NETWORK_EVENT_PAYLOAD` from `include/KSwordSandboxDriverIoctl.h`.
+Network events use `KswSandboxEventTypeNetwork` and `KSWORD_SANDBOX_NETWORK_EVENT_PAYLOAD` from `include/KSwordSandboxDriverIoctl.h`.  The emitted v1 payload version is `KSWORD_SANDBOX_NETWORK_EVENT_VERSION` (`0x00010000`) and `Size` remains 112 bytes; future growth must negotiate a new version/capability or use an explicit draft/successor structure.
 
 Collector-facing fields include:
 
@@ -37,6 +71,11 @@ Collector-facing fields include:
 - `ProcessId`: copied from WFP metadata when `PROCESS_ID_PRESENT` is set.
 - `LayerId`, `CalloutId`, and `FilterId`: WFP diagnostic correlation values.
 - `FlowHandle` and `TransportEndpointHandle`: optional WFP metadata handles when their flags are set.
+- `Operation`: currently `KswSandboxNetworkOperationAleAuthorize` for emitted
+  ALE authorization records.
+- `Status`: currently `STATUS_SUCCESS` for a successfully built inspect-only
+  network event.  Registration/queue failures are status diagnostics, not
+  synthetic network traffic events.
 
 Presence flags distinguish absent values from zero-valued metadata:
 
@@ -48,6 +87,42 @@ Presence flags distinguish absent values from zero-valued metadata:
 - `KSWORD_SANDBOX_NETWORK_EVENT_FLAG_INSPECTION_ONLY`
 
 `AbiGuards.c` keeps `sizeof(KSWORD_SANDBOX_NETWORK_EVENT_PAYLOAD) <= KSWORD_SANDBOX_EVENT_MAX_PAYLOAD_SIZE`.
+
+### Typed payload draft and degrade reasons
+
+`KSWORD_SANDBOX_NETWORK_EVENT_PAYLOAD` remains the emitted v1 payload.  Its size
+is still guarded at 112 bytes, with `Operation` and `Status` at the end of the
+record.
+
+The ABI header also contains a **draft-only** future layout,
+`KSWORD_SANDBOX_NETWORK_EVENT_PAYLOAD_V2_DRAFT`, with:
+
+- `V1`: the current `KSWORD_SANDBOX_NETWORK_EVENT_PAYLOAD`.
+- `StatusDegradeReason`: one value from
+  `KSWORD_SANDBOX_NETWORK_STATUS_DEGRADE_REASON`.
+- `Reserved0`: alignment/reserved space.
+
+This draft is not emitted by the current driver, has no advertised capability
+bit, and must not be parsed as if it were implemented.  It exists so driver and
+collector work can converge on a typed status-degradation field without
+pretending the current event stream already carries it.
+
+Current internal degradation reasons include:
+
+- `CompileTimeDisabled`
+- `FwpsCalloutRegister`
+- `FwpmEngineOpen`
+- `FwpmTransaction`
+- `FwpmSublayer`
+- `FwpmManagementCallout`
+- `FwpmInspectionFilter`
+- `ClassifyPayload`
+- `QueuePush`
+
+The WFP runtime stores the last internal degrade reason/status for future
+diagnostics, but today `GET_STATUS` only exposes coarse degradation through
+`FailedProducerMask`, `ActiveProducerMask`, `EffectiveProducerMask`,
+`LastNtStatus`, and `LastFailureNtStatus`.
 
 ## Collector output
 
@@ -116,6 +191,7 @@ Use an output directory outside the repository when validating locally, for exam
   driver\KSword.Sandbox.Driver\KSword.Sandbox.Driver.vcxproj `
   /p:Configuration=Debug `
   /p:Platform=x64 `
+  /p:SignMode=Off `
   /p:OutDir=D:\Temp\KSwordSandbox\build\r0-driver\Debug\ `
   /p:IntDir=D:\Temp\KSwordSandbox\build\r0-driver\Debug\obj\ `
   /m `
@@ -127,11 +203,15 @@ Do not place `.sys`, `.pdb`, `.obj`, or other native build outputs under the rep
 ## Operational notes
 
 - The filters have no protocol conditions.  This maximizes early telemetry but can produce high event volume on active hosts.
+- The TODO markers for flow contexts, packet/stream layers, and filter
+  conditions are intentional.  Do not treat ALE inspect-only telemetry as full
+  packet capture or complete WFP coverage.
 - Runtime validation should be performed in a test-signed VM by loading the driver, generating outbound and inbound TCP/UDP activity, draining `READ_EVENTS`, and checking PID, address, port, layer, callout, and filter fields.
 - `GET_STATUS` exposes `ActiveProducerMask`, `FailedProducerMask`,
   `EffectiveProducerMask`, `LastNtStatus`, and `LastFailureNtStatus`.  It does
-  not yet expose WFP classify/event counters or per-callout registration
-  statuses; those remain internal runtime diagnostics.
+  not yet expose WFP classify/event counters, per-callout registration statuses,
+  or the draft network degrade reason; those remain internal runtime
+  diagnostics.
 
 ## Runtime validation gate
 

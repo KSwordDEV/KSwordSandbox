@@ -16,6 +16,9 @@ param(
     # Sandbox JSON config. Defaults to config/sandbox.example.json under RepoRoot.
     [string]$ConfigPath = '',
 
+    # Optional runtime root override. Defaults to paths.runtimeRoot from config.
+    [string]$RuntimeRoot = '',
+
     # Host sample executable to copy into the guest during live execution.
     [string]$SamplePath = 'D:\Temp\KSwordSandbox\samples\KSword.Sandbox.HarmlessSample\KSword.Sandbox.HarmlessSample.exe',
 
@@ -414,7 +417,7 @@ function New-HostTestSigningCheck {
             -RequiredForLive $false `
             -Message 'bcdedit.exe is not available; test-signing state was not recorded.' `
             -Details @{ realDriverMode = $realDriverMode; bcdEditAvailable = $false; guestTestSigningVerified = $false; readOnly = $true } `
-            -Remediation @('For real R0 collection, verify test-signing inside the isolated guest VM before live execution, or use driver.useMockCollector=true.')
+            -Remediation @('下一步：真实 R0 采集前，请在隔离 guest VM 中确认 test-signing；或使用 driver.useMockCollector=true。')
     }
 
     $testSigningValue = ''
@@ -435,16 +438,16 @@ function New-HostTestSigningCheck {
             -RequiredForLive $false `
             -Message "Unable to query host test-signing state: $($_.Exception.Message)" `
             -Details @{ realDriverMode = $realDriverMode; bcdEditAvailable = $true; error = $_.Exception.Message; guestTestSigningVerified = $false; readOnly = $true } `
-            -Remediation @('For real R0 collection, verify guest test-signing manually before live execution, or use mock R0 collection.')
+            -Remediation @('下一步：真实 R0 采集前，请手动确认 guest test-signing；或使用 mock R0 collection。')
     }
 
     $testSigningEnabled = $testSigningValue -match '^(?i:yes|on|true|1)$'
     $status = if ($realDriverMode -and (-not $testSigningEnabled)) { 'Warning' } else { 'Passed' }
     $message = if ($testSigningEnabled) {
-        'Host test-signing is enabled; guest test-signing must still be verified manually for real R0 collection.'
+        '宿主机 test-signing 已启用；真实 R0 采集仍需手动确认 guest test-signing。 / Host test-signing is enabled.'
     }
     elseif ($realDriverMode) {
-        'Host test-signing does not appear enabled; real R0 collection also requires guest test-signing.'
+        '宿主机 test-signing 看起来未启用；真实 R0 采集还需要 guest test-signing。 / Host test-signing does not appear enabled.'
     }
     else {
         'Host test-signing is not enabled; mock/no-driver E2E does not require it.'
@@ -457,7 +460,7 @@ function New-HostTestSigningCheck {
         -RequiredForLive $false `
         -Message $message `
         -Details @{ realDriverMode = $realDriverMode; bcdEditAvailable = $true; bcdEditExitCode = $exitCode; testSigningValue = $testSigningValue; testSigningEnabled = $testSigningEnabled; guestTestSigningVerified = $false; readOnly = $true } `
-        -Remediation $(if ($realDriverMode -and (-not $testSigningEnabled)) { @('Use mock R0 for unsigned-driver smoke tests, or enable Windows test-signing inside the isolated guest and refresh the Clean checkpoint before real R0 live collection.') } else { @() })
+        -Remediation $(if ($realDriverMode -and (-not $testSigningEnabled)) { @('下一步：未签名 driver smoke test 请使用 mock R0；真实 R0 live collection 前，请在隔离 guest 中启用 Windows test-signing 并刷新 Clean checkpoint。') } else { @() })
 }
 
 function New-R0DriverHostPathCheck {
@@ -474,7 +477,7 @@ function New-R0DriverHostPathCheck {
             -Name 'R0 driver host path configuration' `
             -Status 'Passed' `
             -RequiredForLive $false `
-            -Message 'R0 driver collection is disabled; no host driver .sys is required.' `
+            -Message 'R0 driver collection 已禁用，不需要宿主机 driver .sys。 / No host driver .sys required.' `
             -Details @{
                 driverEnabled = $false
                 useMockCollector = $UseMockCollector
@@ -489,7 +492,7 @@ function New-R0DriverHostPathCheck {
             -Name 'R0 driver host path configuration' `
             -Status 'Passed' `
             -RequiredForLive $false `
-            -Message 'R0 mock collector is enabled; live driver .sys staging is not required.' `
+            -Message 'R0 mock collector 已启用，不需要暂存 live driver .sys。 / Live driver staging not required.' `
             -Details @{
                 driverEnabled = $DriverEnabled
                 useMockCollector = $true
@@ -504,7 +507,7 @@ function New-R0DriverHostPathCheck {
             -Name 'R0 driver host path configuration' `
             -Status 'Failed' `
             -RequiredForLive $true `
-            -Message 'Real R0 driver collection is enabled, but driver.hostDriverPath is empty. The plan cannot stage a .sys or generate install-driver-service; R0Collector can fail with deviceUnavailable/win32Error=2.' `
+            -Message '真实 R0 driver collection 已启用，但 driver.hostDriverPath 为空；plan 无法暂存 .sys 或生成 install-driver-service，R0Collector 可能以 deviceUnavailable/win32Error=2 失败。下一步：配置 -DriverHostPath 或启用 driver.useMockCollector=true。' `
             -Details @{
                 driverEnabled = $DriverEnabled
                 useMockCollector = $UseMockCollector
@@ -514,9 +517,9 @@ function New-R0DriverHostPathCheck {
                 expectedRunbookImpact = 'stage-guest-payload uses empty driverSource and install-driver-service is omitted'
             } `
             -Remediation @(
-                "Configure driver.hostDriverPath in the local sandbox config to a built and test-signed driver .sys before live R0 collection.",
-                "For payload-only validation, set driver.useMockCollector=true or run with -NoR0Collector.",
-                "To disable R0 collection entirely, set driver.enabled=false."
+                "下一步：Live R0 collection 前，在本机 sandbox 配置中把 driver.hostDriverPath 指向已构建且测试签名的 driver .sys。",
+                "下一步：仅做 payload 验证时，设置 driver.useMockCollector=true 或运行时加 -NoR0Collector。",
+                "下一步：如需完全禁用 R0 collection，设置 driver.enabled=false。"
             )
     }
 
@@ -525,8 +528,8 @@ function New-R0DriverHostPathCheck {
         -Path $HostDriverPath `
         -RequiredForLive $true `
         -Remediation @(
-            "Build the native driver and set driver.hostDriverPath to the resulting .sys, or correct the configured path: $HostDriverPath",
-            "For payload-only validation, set driver.useMockCollector=true or run with -NoR0Collector."
+            "下一步：构建 native driver 并把 driver.hostDriverPath 指向生成的 .sys，或修正当前路径：$HostDriverPath",
+            "下一步：仅做 payload 验证时，设置 driver.useMockCollector=true 或运行时加 -NoR0Collector。"
         )
 }
 
@@ -564,7 +567,7 @@ function New-CommandAvailabilityCheck {
         -Name $Name `
         -Status 'Failed' `
         -RequiredForLive $RequiredForLive `
-        -Message "Required command(s) are missing: $($missing -join ', ')" `
+        -Message "缺少必需命令：$($missing -join ', ')。下一步：安装/启用 Hyper-V PowerShell 工具后重试。" `
         -Details @{ commands = @($Commands); missing = @($missing) } `
         -Remediation @(
             "Install or enable the Windows Hyper-V PowerShell management tools, then open a new elevated PowerShell session.",
@@ -580,9 +583,12 @@ function New-GuestSecretCheck {
             -Name 'Guest credential secret name' `
             -Status 'Failed' `
             -RequiredForLive $true `
-            -Message 'Guest password secret name is empty.' `
-            -Details @{ secretName = ''; isSet = $false; valuePrinted = $false } `
-            -Remediation @("Set guest.passwordSecretName in the sandbox config, or rerun .\install.ps1 -Mode Change -UpdateHyperVConfig with the intended -SecretName.")
+            -Message '凭据诊断：guest password secret 名称为空；不会打印或猜测密码值。下一步：在本机 sandbox 配置中设置 guest.passwordSecretName。' `
+            -Details @{ secretName = ''; isSet = $false; secretNameConfigured = $false; scopesChecked = @('Process', 'User', 'Machine'); valuePrinted = $false } `
+            -Remediation @(
+                "Set guest.passwordSecretName in the sandbox config, or rerun .\install.ps1 -Mode Change -UpdateHyperVConfig with the intended -SecretName.",
+                "推荐使用 KSWORDBOX_GUEST_PASSWORD，并确认启动 WebUI/runner 的同一个 PowerShell 进程能读取该环境变量。"
+            )
     }
 
     $secretValue = Get-GuestPasswordSecretValue -SecretName $SecretName
@@ -591,11 +597,12 @@ function New-GuestSecretCheck {
             -Name 'Guest credential environment variable' `
             -Status 'Failed' `
             -RequiredForLive $true `
-            -Message "Guest password environment variable '$SecretName' is not set in Process, User, or Machine scope." `
-            -Details @{ secretName = $SecretName; isSet = $false; scope = ''; valuePrinted = $false } `
+            -Message "凭据诊断：未在 Process/User/Machine 环境中找到 guest password secret '$SecretName'；值未打印。下一步：在运行 Live 的同一个管理员 PowerShell 中设置该环境变量，或运行安装向导保存/重置密码。" `
+            -Details @{ secretName = $SecretName; isSet = $false; scope = ''; scopesChecked = @('Process', 'User', 'Machine'); valuePrinted = $false; sameProcessRequiredForLive = $true } `
             -Remediation @(
                 ".\install.ps1 -Mode Install -PromptPassword",
                 ".\install.ps1 -Mode Change -ResetPassword -PromptPassword",
+                "如果环境变量已设置但仍失败，请在同一个 elevated PowerShell 中运行 `[Environment]::GetEnvironmentVariable('$SecretName','Process') -ne `$null` 确认 runner 进程可见；不要打印真实密码值。",
                 "If the host secret and actual VM account are out of sync, use .\install.ps1 -Mode Change -ResetGuestVmPassword -PromptPassword -Force from an elevated shell."
             )
     }
@@ -604,8 +611,8 @@ function New-GuestSecretCheck {
         -Name 'Guest credential environment variable' `
         -Status 'Passed' `
         -RequiredForLive $true `
-        -Message "Guest password environment variable '$SecretName' is set in $($secretValue.Scope) scope; value was not printed." `
-        -Details @{ secretName = $SecretName; isSet = $true; scope = $secretValue.Scope; valuePrinted = $false }
+        -Message "凭据诊断：guest password secret '$SecretName' 已在 $($secretValue.Scope) scope 设置；值未打印。 / Secret is set; value was not printed." `
+        -Details @{ secretName = $SecretName; isSet = $true; scope = $secretValue.Scope; scopesChecked = @('Process', 'User', 'Machine'); valuePrinted = $false }
 }
 
 function New-HostOsCheck {
@@ -629,7 +636,7 @@ function New-HostOsCheck {
         -Name 'Host operating system' `
         -Status 'Failed' `
         -RequiredForLive $true `
-        -Message 'Live Hyper-V E2E requires a Windows host.' `
+        -Message 'Live Hyper-V E2E 需要 Windows 宿主机。下一步：请在带 Hyper-V 的 Windows 主机上运行，或使用 PlanOnly。' `
         -Details @{ isWindows = $false } `
         -Remediation @("Run live Hyper-V analysis on a Windows Pro/Enterprise/Education host with Hyper-V enabled; use -PlanOnly on non-Windows hosts.")
 }
@@ -721,9 +728,9 @@ function New-AdministratorCheck {
         -Name 'Elevated host process' `
         -Status 'Failed' `
         -RequiredForLive $true `
-        -Message 'Live Hyper-V E2E requires an elevated Administrator PowerShell session.' `
+        -Message 'Live Hyper-V E2E 需要管理员 PowerShell。下一步：以管理员身份重新打开 PowerShell，或使用 -PlanOnly/-WhatIf。' `
         -Details @{ isAdministrator = $false } `
-        -Remediation @("Open PowerShell as Administrator for -Live; use -PlanOnly or -WhatIf for non-mutating review from a normal shell.")
+        -Remediation @("下一步：-Live 请以管理员身份打开 PowerShell；普通 shell 只做不修改 VM 的 review 时使用 -PlanOnly 或 -WhatIf。")
 }
 
 function New-HyperVVmCheck {
@@ -734,8 +741,8 @@ function New-HyperVVmCheck {
             -Name 'Golden VM exists' `
             -Status 'Warning' `
             -RequiredForLive $true `
-            -Message 'Get-VM is not available; VM existence could not be checked.' `
-            -Details @{ vmName = $VmName; checked = $false } `
+            -Message 'VM 诊断：Get-VM 不可用，无法只读确认 golden VM 是否存在；Live 会在 VM mutation 前被 Hyper-V command preflight 阻止。' `
+            -Details @{ vmName = $VmName; checked = $false; readOnly = $true; requiredCommand = 'Get-VM' } `
             -Remediation @(
                 "Enable/install Hyper-V PowerShell tools, then rerun .\scripts\Test-HyperVReadiness.ps1.",
                 "Use .\install.ps1 -Mode Change -UpdateHyperVConfig -VmName <existing VM> -CheckpointName <checkpoint> to record the local VM name."
@@ -748,16 +755,16 @@ function New-HyperVVmCheck {
             -Name 'Golden VM exists' `
             -Status 'Passed' `
             -RequiredForLive $true `
-            -Message "VM exists: $VmName (state: $($vm.State))" `
-            -Details @{ vmName = $VmName; exists = $true; state = $vm.State.ToString() }
+            -Message "VM 诊断：已找到 golden VM '$VmName'，当前状态 $($vm.State)；PlanOnly 不会启动或还原它。" `
+            -Details @{ vmName = $VmName; exists = $true; state = $vm.State.ToString(); id = [string]$vm.Id; readOnly = $true }
     }
     catch {
         return New-PlanCheck `
             -Name 'Golden VM exists' `
             -Status 'Failed' `
             -RequiredForLive $true `
-            -Message "VM was not found or could not be queried: $VmName. $($_.Exception.Message)" `
-            -Details @{ vmName = $VmName; exists = $false; error = $_.Exception.Message } `
+            -Message "VM 诊断：找不到或无法查询 golden VM '$VmName'。下一步：确认 VM 名称、Hyper-V 权限和宿主机环境。英文详情：$($_.Exception.Message)" `
+            -Details @{ vmName = $VmName; exists = $false; readOnly = $true; error = $_.Exception.Message } `
             -Remediation @(
                 "Create or import a golden Hyper-V VM named '$VmName', or record the actual VM name with .\install.ps1 -Mode Change -UpdateHyperVConfig -VmName <existing VM> -CheckpointName <checkpoint>.",
                 "Run .\scripts\Test-HyperVReadiness.ps1 after updating the VM name; it is read-only and will not start or restore the VM."
@@ -776,8 +783,8 @@ function New-HyperVCheckpointCheck {
             -Name 'Clean checkpoint exists' `
             -Status 'Warning' `
             -RequiredForLive $true `
-            -Message 'Get-VMSnapshot is not available; checkpoint existence could not be checked.' `
-            -Details @{ vmName = $VmName; checkpointName = $CheckpointName; checked = $false } `
+            -Message 'Checkpoint 诊断：Get-VMSnapshot 不可用，无法只读确认 clean checkpoint；Live 会在 VM mutation 前被 Hyper-V command preflight 阻止。' `
+            -Details @{ vmName = $VmName; checkpointName = $CheckpointName; checked = $false; readOnly = $true; requiredCommand = 'Get-VMSnapshot' } `
             -Remediation @("Enable/install Hyper-V PowerShell tools, then rerun .\scripts\Test-HyperVReadiness.ps1 without starting the VM.")
     }
 
@@ -787,16 +794,24 @@ function New-HyperVCheckpointCheck {
             -Name 'Clean checkpoint exists' `
             -Status 'Passed' `
             -RequiredForLive $true `
-            -Message "Checkpoint exists: $VmName / $CheckpointName" `
-            -Details @{ vmName = $VmName; checkpointName = $CheckpointName; exists = $true; creationTime = $snapshot.CreationTime }
+            -Message "Checkpoint 诊断：已找到 clean checkpoint '$CheckpointName'（VM '$VmName'），创建时间 $($snapshot.CreationTime)。" `
+            -Details @{ vmName = $VmName; checkpointName = $CheckpointName; exists = $true; creationTime = $snapshot.CreationTime; readOnly = $true }
     }
     catch {
+        $availableSnapshots = @()
+        try {
+            $availableSnapshots = @(Get-VMSnapshot -VMName $VmName -ErrorAction Stop | ForEach-Object { [string]$_.Name } | Select-Object -First 20)
+        }
+        catch {
+            $availableSnapshots = @()
+        }
+
         return New-PlanCheck `
             -Name 'Clean checkpoint exists' `
             -Status 'Failed' `
             -RequiredForLive $true `
-            -Message "Checkpoint was not found or could not be queried: $VmName / $CheckpointName. $($_.Exception.Message)" `
-            -Details @{ vmName = $VmName; checkpointName = $CheckpointName; exists = $false; error = $_.Exception.Message } `
+            -Message "Checkpoint 诊断：找不到或无法查询 clean checkpoint '$CheckpointName'（VM '$VmName'）。下一步：创建干净快照或更新 -CheckpointName。英文详情：$($_.Exception.Message)" `
+            -Details @{ vmName = $VmName; checkpointName = $CheckpointName; exists = $false; readOnly = $true; availableCheckpoints = @($availableSnapshots); error = $_.Exception.Message } `
             -Remediation @(
                 "Create a clean checkpoint named '$CheckpointName' on VM '$VmName', or record the correct checkpoint with .\install.ps1 -Mode Change -UpdateHyperVConfig -VmName '$VmName' -CheckpointName <checkpoint>.",
                 "Rerun .\scripts\Test-HyperVReadiness.ps1 to confirm the checkpoint exists; the check is read-only."
@@ -812,14 +827,15 @@ function New-GuestServiceCheck {
             -Name 'Guest Service Interface' `
             -Status 'Warning' `
             -RequiredForLive $true `
-            -Message 'Get-VMIntegrationService is not available; Guest Service Interface could not be checked.' `
-            -Details @{ vmName = $VmName; checked = $false } `
+            -Message 'Guest Service Interface 诊断：Get-VMIntegrationService 不可用，无法只读确认来宾服务接口；Live 会在 VM mutation 前被 Hyper-V command preflight 阻止。' `
+            -Details @{ vmName = $VmName; checked = $false; componentId = $script:GuestServiceInterfaceComponentId; readOnly = $true } `
             -Remediation @("Enable/install Hyper-V PowerShell tools. The live start phase can enable Guest Service Interface when the VM is queryable.")
     }
 
     try {
         $componentSuffix = '\' + $script:GuestServiceInterfaceComponentId
-        $service = @(Get-VMIntegrationService -VMName $VmName -ErrorAction Stop |
+        $services = @(Get-VMIntegrationService -VMName $VmName -ErrorAction Stop)
+        $service = @($services |
             Where-Object {
                 $id = [string]$_.Id
                 $name = [string]$_.Name
@@ -829,15 +845,16 @@ function New-GuestServiceCheck {
             } |
             Select-Object -First 1)[0]
         if ($null -eq $service) {
-            throw "Guest Service Interface integration service was not found on VM '$VmName'. Checked localized names and component id '$script:GuestServiceInterfaceComponentId'."
+            $availableServices = @($services | ForEach-Object { [string]$_.Name } | Select-Object -First 20)
+            throw "错误：VM '$VmName' 未找到 Guest Service Interface integration service（组件 ID $script:GuestServiceInterfaceComponentId）。已发现 integration services：$($availableServices -join ', ')。下一步：在 Hyper-V 设置中启用 Guest Service Interface，或确认 VM 支持该集成服务。"
         }
         $enabled = [bool]$service.Enabled
         $status = if ($enabled) { 'Passed' } else { 'Warning' }
         $message = if ($enabled) {
-            "Guest Service Interface is enabled for $VmName."
+            "Guest Service Interface 诊断：VM '$VmName' 的来宾服务接口已启用，可用于 Copy-VMFile。"
         }
         else {
-            "Guest Service Interface exists but is disabled; live start will enable it before Copy-VMFile."
+            "Guest Service Interface 诊断：VM '$VmName' 存在来宾服务接口但当前禁用；Live start 会在 Copy-VMFile 前尝试启用。"
         }
 
         return New-PlanCheck `
@@ -845,7 +862,7 @@ function New-GuestServiceCheck {
             -Status $status `
             -RequiredForLive $true `
             -Message $message `
-            -Details @{ vmName = $VmName; exists = $true; enabled = $enabled; primaryStatus = $service.PrimaryStatusDescription } `
+            -Details @{ vmName = $VmName; exists = $true; enabled = $enabled; componentId = $script:GuestServiceInterfaceComponentId; serviceName = [string]$service.Name; primaryStatus = $service.PrimaryStatusDescription; readOnly = $true } `
             -Remediation $(if ($enabled) { @() } else { @("No manual VM start is required for planning. For live runs, the start phase attempts to enable Guest Service Interface before Copy-VMFile; you can also enable it in Hyper-V VM settings.") })
     }
     catch {
@@ -853,8 +870,8 @@ function New-GuestServiceCheck {
             -Name 'Guest Service Interface' `
             -Status 'Failed' `
             -RequiredForLive $true `
-            -Message "Guest Service Interface could not be queried for $VmName. $($_.Exception.Message)" `
-            -Details @{ vmName = $VmName; exists = $false; error = $_.Exception.Message } `
+            -Message "Guest Service Interface 诊断：无法查询 VM '$VmName' 的来宾服务接口。下一步：确认 VM 名称、Hyper-V 权限和 integration services。英文详情：$($_.Exception.Message)" `
+            -Details @{ vmName = $VmName; exists = $false; componentId = $script:GuestServiceInterfaceComponentId; readOnly = $true; error = $_.Exception.Message } `
             -Remediation @("Verify the VM name and Hyper-V integration services, then rerun .\scripts\Test-HyperVReadiness.ps1. The readiness check does not start the VM.")
     }
 }
@@ -872,9 +889,9 @@ function New-PowerShellDirectCheck {
             -Name 'PowerShell Direct readiness' `
             -Status 'Warning' `
             -RequiredForLive $true `
-            -Message 'Invoke-Command is not available; PowerShell Direct could not be checked.' `
-            -Details @{ vmName = $VmName; checked = $false } `
-            -Remediation @("Use Windows PowerShell or PowerShell with Hyper-V PowerShell Direct support, then rerun the read-only readiness check.")
+            -Message 'PowerShell Direct 诊断：Invoke-Command 不可用，无法执行只读 probe。下一步：使用支持 Hyper-V PowerShell Direct 的 Windows PowerShell/PowerShell。' `
+            -Details @{ vmName = $VmName; userName = $UserName; checked = $false; readOnly = $true; requiredCommand = 'Invoke-Command'; valuePrinted = $false } `
+            -Remediation @("下一步：使用支持 Hyper-V PowerShell Direct 的 Windows PowerShell/PowerShell，然后重新运行只读 readiness check。")
     }
 
     if ($null -eq (Get-Command -Name Get-VM -ErrorAction SilentlyContinue)) {
@@ -882,9 +899,19 @@ function New-PowerShellDirectCheck {
             -Name 'PowerShell Direct readiness' `
             -Status 'Warning' `
             -RequiredForLive $true `
-            -Message 'Get-VM is not available; VM state could not be checked before PowerShell Direct probe.' `
-            -Details @{ vmName = $VmName; checked = $false } `
+            -Message 'PowerShell Direct 诊断：Get-VM 不可用，无法在 probe 前确认 VM 状态。下一步：安装 Hyper-V PowerShell 工具。' `
+            -Details @{ vmName = $VmName; userName = $UserName; checked = $false; readOnly = $true; requiredCommand = 'Get-VM'; valuePrinted = $false } `
             -Remediation @("Enable/install Hyper-V PowerShell tools so the readiness check can confirm whether the VM is already running.")
+    }
+
+    if ([string]::IsNullOrWhiteSpace($SecretName)) {
+        return New-PlanCheck `
+            -Name 'PowerShell Direct readiness' `
+            -Status 'Warning' `
+            -RequiredForLive $true `
+            -Message 'PowerShell Direct 诊断：已跳过只读 probe，因为 guest password secret 名称为空；不会启动 VM，也不会打印 secret 值。' `
+            -Details @{ vmName = $VmName; userName = $UserName; checked = $false; reason = 'emptyCredentialSecretName'; readOnly = $true; valuePrinted = $false } `
+            -Remediation @('下一步：在本机 sandbox 配置中设置 guest.passwordSecretName，然后重跑只读 readiness 或 PlanOnly。')
     }
 
     $secretValue = Get-GuestPasswordSecretValue -SecretName $SecretName
@@ -893,8 +920,8 @@ function New-PowerShellDirectCheck {
             -Name 'PowerShell Direct readiness' `
             -Status 'Warning' `
             -RequiredForLive $true `
-            -Message "PowerShell Direct probe skipped because guest password environment variable '$SecretName' is not set in Process, User, or Machine scope." `
-            -Details @{ vmName = $VmName; checked = $false; reason = 'missingCredentialSecret'; secretName = $SecretName; valuePrinted = $false } `
+            -Message "PowerShell Direct 诊断：已跳过只读 probe，因为未设置 guest password secret '$SecretName'；不会启动 VM，也不会打印 secret 值。下一步：运行 .\install.ps1 -Mode Install -PromptPassword 或在当前进程设置环境变量。" `
+            -Details @{ vmName = $VmName; userName = $UserName; checked = $false; reason = 'missingCredentialSecret'; secretName = $SecretName; scopesChecked = @('Process', 'User', 'Machine'); readOnly = $true; valuePrinted = $false } `
             -Remediation @("Set the guest password secret with .\install.ps1 -Mode Install -PromptPassword or use .\scripts\Test-HyperVReadiness.ps1 -PromptForMissingGuestPassword for a process-only read-only probe.")
     }
 
@@ -905,9 +932,9 @@ function New-PowerShellDirectCheck {
                 -Name 'PowerShell Direct readiness' `
                 -Status 'Warning' `
                 -RequiredForLive $true `
-                -Message "PowerShell Direct probe skipped because VM is $($vm.State); plan-only mode will not start it." `
-                -Details @{ vmName = $VmName; checked = $false; vmState = $vm.State.ToString(); reason = 'vmNotRunning' } `
-                -Remediation @("This is expected for non-mutating PlanOnly/WhatIf checks. Start the VM manually only if you want the read-only PowerShell Direct probe to run before live execution.")
+                -Message "PowerShell Direct 诊断：已跳过只读 probe，因为 VM '$VmName' 当前为 $($vm.State)；PlanOnly/WhatIf 不会启动 VM。Live start 会在还原 checkpoint 后等待 PowerShell Direct。 / Probe skipped because VM is not running." `
+                -Details @{ vmName = $VmName; userName = $UserName; checked = $false; vmState = $vm.State.ToString(); reason = 'vmNotRunning'; secretName = $SecretName; secretScope = $secretValue.Scope; readOnly = $true; valuePrinted = $false } `
+                -Remediation @("说明：PlanOnly/WhatIf 不修改 VM 时这是预期行为。只有想在 Live 前做只读 PowerShell Direct probe，才需要手动启动 VM；否则直接修复其他 preflight 后让 Live start 阶段等待。")
         }
 
         $securePassword = [System.Security.SecureString]::new()
@@ -935,16 +962,16 @@ function New-PowerShellDirectCheck {
             -Name 'PowerShell Direct readiness' `
             -Status 'Passed' `
             -RequiredForLive $true `
-            -Message "PowerShell Direct read-only probe succeeded for $VmName." `
-            -Details @{ vmName = $VmName; checked = $true; computerName = $firstProbe.ComputerName; userName = $firstProbe.UserName; guestPathResults = $firstProbe.PathResults; valuePrinted = $false }
+            -Message "PowerShell Direct 诊断：只读 probe 对 VM '$VmName' 成功；credential 可用，guest path probe 已记录。 / PowerShell Direct probe succeeded." `
+            -Details @{ vmName = $VmName; configuredUserName = $UserName; checked = $true; computerName = $firstProbe.ComputerName; userName = $firstProbe.UserName; guestPathResults = $firstProbe.PathResults; secretName = $SecretName; secretScope = $secretValue.Scope; readOnly = $true; valuePrinted = $false }
     }
     catch {
         return New-PlanCheck `
             -Name 'PowerShell Direct readiness' `
             -Status 'Failed' `
             -RequiredForLive $true `
-            -Message "PowerShell Direct read-only probe failed for $VmName. $($_.Exception.Message)" `
-            -Details @{ vmName = $VmName; checked = $true; error = $_.Exception.Message; valuePrinted = $false } `
+            -Message "PowerShell Direct 诊断：只读 probe 对 VM '$VmName' 失败。下一步：检查 VM 是否运行、来宾用户 '$UserName' 是否存在、secret 是否与 VM 内密码一致、PowerShell Direct 是否可用。英文详情：$($_.Exception.Message)" `
+            -Details @{ vmName = $VmName; userName = $UserName; checked = $true; secretName = $SecretName; secretScope = $secretValue.Scope; readOnly = $true; error = $_.Exception.Message; valuePrinted = $false } `
             -Remediation @("Confirm the VM is running, the guest user '$UserName' exists, and the host secret '$SecretName' matches the guest password. Use .\install.ps1 -Mode Change -ResetGuestVmPassword -PromptPassword -Force if they are out of sync.")
     }
 }
@@ -1129,7 +1156,8 @@ function Invoke-ChildPowerShellScript {
         [Parameter(Mandatory)][string]$PhaseName,
         [Parameter(Mandatory)][string]$ScriptPath,
         [string[]]$Arguments = @(),
-        [int]$TimeoutSeconds = 900
+        [int]$TimeoutSeconds = 900,
+        [string]$LogDirectory = ''
     )
 
     $startedAtUtc = [DateTimeOffset]::UtcNow
@@ -1163,20 +1191,34 @@ function Invoke-ChildPowerShellScript {
         $process = [Diagnostics.Process]::new()
         $process.StartInfo = $startInfo
         if (-not $process.Start()) {
-            throw 'Process.Start returned false.'
+            throw '错误：Process.Start 返回 false。下一步：确认 powershell 可执行文件和子脚本路径有效。'
         }
 
         $stdoutTask = $process.StandardOutput.ReadToEndAsync()
         $stderrTask = $process.StandardError.ReadToEndAsync()
-        $timeoutMilliseconds = [Math]::Max(1, $TimeoutSeconds) * 1000
-        if (-not $process.WaitForExit($timeoutMilliseconds)) {
+        $effectiveTimeoutSeconds = [Math]::Max(1, $TimeoutSeconds)
+        $deadlineUtc = [DateTimeOffset]::UtcNow.AddSeconds($effectiveTimeoutSeconds)
+        $nextHeartbeatUtc = [DateTimeOffset]::UtcNow.AddSeconds(30)
+        while (-not $process.HasExited -and [DateTimeOffset]::UtcNow -lt $deadlineUtc) {
+            if ($process.WaitForExit(1000)) {
+                break
+            }
+
+            if ([DateTimeOffset]::UtcNow -ge $nextHeartbeatUtc) {
+                $elapsedSeconds = [int]$timer.Elapsed.TotalSeconds
+                Write-HyperVE2EStep "Child $PhaseName phase is still running after ${elapsedSeconds}s (timeout ${effectiveTimeoutSeconds}s)."
+                $nextHeartbeatUtc = [DateTimeOffset]::UtcNow.AddSeconds(30)
+            }
+        }
+
+        if (-not $process.HasExited) {
             $timedOut = $true
             try {
                 $process.Kill()
             }
             catch {
                 $exitCode = 124
-                $launchError = "Child process timeout after $TimeoutSeconds seconds and Kill failed: $($_.Exception.Message)"
+                $launchError = "子进程超时 $effectiveTimeoutSeconds 秒，且 Kill 失败。下一步：手动检查/结束残留 powershell 进程。英文详情：$($_.Exception.Message)"
             }
             $process.WaitForExit()
         }
@@ -1185,7 +1227,7 @@ function Invoke-ChildPowerShellScript {
         $stderr = [string]$stderrTask.GetAwaiter().GetResult()
         if ($timedOut) {
             $exitCode = 124
-            $timeoutMessage = "Child process timeout after $TimeoutSeconds seconds."
+            $timeoutMessage = "子阶段 $PhaseName 超时：$effectiveTimeoutSeconds 秒。下一步：提高超时或查看该阶段日志。"
             $stderr = (($stderr, $timeoutMessage) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }) -join [Environment]::NewLine
         }
         else {
@@ -1205,6 +1247,29 @@ function Invoke-ChildPowerShellScript {
 
     if (-not [string]::IsNullOrWhiteSpace($launchError)) {
         $stderr = (($stderr, "Launcher error: $launchError") | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }) -join [Environment]::NewLine
+    }
+
+    $stdoutLogPath = ''
+    $stderrLogPath = ''
+    if (-not [string]::IsNullOrWhiteSpace($LogDirectory)) {
+        try {
+            New-Item -ItemType Directory -Path $LogDirectory -Force -WhatIf:$false | Out-Null
+            $safePhase = [regex]::Replace($PhaseName.ToLowerInvariant(), '[^a-z0-9]+', '-').Trim('-')
+            if ([string]::IsNullOrWhiteSpace($safePhase)) {
+                $safePhase = 'child'
+            }
+
+            $stdoutLogPath = Join-Path $LogDirectory ("hyperv-e2e-{0}.stdout.log" -f $safePhase)
+            $stderrLogPath = Join-Path $LogDirectory ("hyperv-e2e-{0}.stderr.log" -f $safePhase)
+            Set-Content -LiteralPath $stdoutLogPath -Value $stdout -Encoding UTF8 -WhatIf:$false
+            Set-Content -LiteralPath $stderrLogPath -Value $stderr -Encoding UTF8 -WhatIf:$false
+            Write-HyperVE2EStep "Child $PhaseName full stdout/stderr logs written: $stdoutLogPath ; $stderrLogPath"
+        }
+        catch {
+            $stderr = (($stderr, "Unable to persist child $PhaseName logs: $($_.Exception.Message)") | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }) -join [Environment]::NewLine
+            $stdoutLogPath = ''
+            $stderrLogPath = ''
+        }
     }
 
     $maxCapturedOutputChars = 65536
@@ -1236,6 +1301,8 @@ function Invoke-ChildPowerShellScript {
         exitCode = $exitCode
         standardOutput = $stdout
         standardError = $stderr
+        standardOutputLogPath = $stdoutLogPath
+        standardErrorLogPath = $stderrLogPath
         standardOutputTruncated = $stdoutWasTruncated
         standardErrorTruncated = $stderrWasTruncated
         startedAtUtc = $startedAtUtc.ToString('O')
@@ -1271,7 +1338,7 @@ function Get-RecordPropertyValue {
 
 function Add-UniqueHint {
     param(
-        [Parameter(Mandatory)][System.Collections.Generic.List[string]]$Hints,
+        [Parameter(Mandatory)][AllowEmptyCollection()][System.Collections.Generic.List[string]]$Hints,
         [AllowNull()][string]$Hint
     )
 
@@ -1322,7 +1389,7 @@ function Get-RunbookFailureReason {
         $title = [string](Get-RecordPropertyValue -Object $FailedStep -Name 'Title' -DefaultValue '')
         $stepMessage = [string](Get-RecordPropertyValue -Object $FailedStep -Name 'Message' -DefaultValue '')
         if (-not [string]::IsNullOrWhiteSpace($title)) {
-            [void]$parts.Add("Step failed: $title")
+            [void]$parts.Add("步骤失败：$title")
         }
         if (-not [string]::IsNullOrWhiteSpace($stepMessage)) {
             [void]$parts.Add($stepMessage)
@@ -1340,9 +1407,15 @@ function Get-RunbookFailureReason {
 
         $phase = [string](Get-RecordPropertyValue -Object $invocation -Name 'phaseName' -DefaultValue 'child')
         $exitCode = Get-RecordPropertyValue -Object $invocation -Name 'exitCode' -DefaultValue $null
+        $timedOut = [System.Convert]::ToBoolean((Get-RecordPropertyValue -Object $invocation -Name 'timedOut' -DefaultValue $false))
+        $timeoutSeconds = Get-RecordPropertyValue -Object $invocation -Name 'timeoutSeconds' -DefaultValue $null
         $stderr = [string](Get-RecordPropertyValue -Object $invocation -Name 'standardError' -DefaultValue '')
+        if ($timedOut) {
+            [void]$parts.Add("$phase 阶段在 $timeoutSeconds 秒后超时")
+        }
+
         if ($null -ne $exitCode -and [int]$exitCode -ne 0) {
-            [void]$parts.Add("$phase phase exited with code $exitCode")
+            [void]$parts.Add("$phase 阶段退出码 $exitCode")
         }
         if (-not [string]::IsNullOrWhiteSpace($stderr)) {
             $line = @($stderr -split "`r?`n" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -First 1)
@@ -1358,6 +1431,71 @@ function Get-RunbookFailureReason {
     }
 
     return $reason
+}
+
+function Get-FirstOutputLine {
+    param([AllowNull()][string]$Text)
+
+    if ([string]::IsNullOrWhiteSpace($Text)) {
+        return ''
+    }
+
+    $line = @($Text -split "`r?`n" | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } | Select-Object -First 1)
+    if ($line.Count -eq 0) {
+        return ''
+    }
+
+    $value = [string]$line[0]
+    if ($value.Length -gt 400) {
+        return $value.Substring(0, 400) + '...'
+    }
+
+    return $value
+}
+
+function Get-ChildPhaseFailureMessage {
+    param(
+        [Parameter(Mandatory)][string]$PhaseName,
+        [AllowNull()][object]$Invocation,
+        [string]$Fallback = ''
+    )
+
+    if ($null -eq $Invocation) {
+        if ([string]::IsNullOrWhiteSpace($Fallback)) {
+            return "$PhaseName 阶段没有产生 invocation result。下一步：查看子脚本是否启动成功。"
+        }
+
+        return $Fallback
+    }
+
+    $exitCode = Get-RecordPropertyValue -Object $Invocation -Name 'exitCode' -DefaultValue $null
+    $timedOut = [System.Convert]::ToBoolean((Get-RecordPropertyValue -Object $Invocation -Name 'timedOut' -DefaultValue $false))
+    $timeoutSeconds = Get-RecordPropertyValue -Object $Invocation -Name 'timeoutSeconds' -DefaultValue $null
+    $stderr = [string](Get-RecordPropertyValue -Object $Invocation -Name 'standardError' -DefaultValue '')
+    $stdout = [string](Get-RecordPropertyValue -Object $Invocation -Name 'standardOutput' -DefaultValue '')
+    $firstLine = Get-FirstOutputLine -Text $stderr
+    if ([string]::IsNullOrWhiteSpace($firstLine)) {
+        $firstLine = Get-FirstOutputLine -Text $stdout
+    }
+
+    $prefix = if ($timedOut) {
+        "$PhaseName 阶段在 $timeoutSeconds 秒后超时"
+    }
+    elseif ($null -ne $exitCode) {
+        "$PhaseName 阶段失败，退出码 $exitCode"
+    }
+    elseif (-not [string]::IsNullOrWhiteSpace($Fallback)) {
+        $Fallback
+    }
+    else {
+        "$PhaseName 阶段失败"
+    }
+
+    if ([string]::IsNullOrWhiteSpace($firstLine)) {
+        return "$prefix."
+    }
+
+    return "$prefix。首条捕获输出：$firstLine"
 }
 
 function Get-RunbookRemediationHints {
@@ -1376,38 +1514,38 @@ function Get-RunbookRemediationHints {
     $text = (($FailureReason, $failedStepMessage) | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) }) -join ' '
     if ($text -match "Guest password environment variable '([^']+)' is not set") {
         $secretName = $Matches[1]
-        Add-UniqueHint -Hints $hints -Hint "Set $secretName in the same elevated process that runs live analysis, or run .\install.ps1 -Mode Change -ResetPassword -PromptPassword and restart the WebUI/runner."
+        Add-UniqueHint -Hints $hints -Hint "下一步：在运行 live analysis 的同一个管理员 PowerShell 中设置 $secretName，或运行 .\install.ps1 -Mode Change -ResetPassword -PromptPassword 后重启 WebUI/runner。"
     }
     elseif ($text -match 'missingCredentialSecret|guest password|credential secret') {
-        Add-UniqueHint -Hints $hints -Hint 'Set the configured guest password environment variable before live execution; do not paste the value into config, docs, or reports.'
+        Add-UniqueHint -Hints $hints -Hint '下一步：Live 前设置已配置的 guest password 环境变量；不要把密码值粘贴到配置、文档或报告中。'
     }
 
     if ($text -match 'VM was not found|cannot find.*VM|Get-VM|Hyper-V.*not.*available') {
-        Add-UniqueHint -Hints $hints -Hint "Verify the configured VM name '$($Plan.vm.name)' exists on this Hyper-V host and that Hyper-V PowerShell tools are installed."
+        Add-UniqueHint -Hints $hints -Hint "下一步：确认 Hyper-V 宿主机上存在 VM '$($Plan.vm.name)'，并已安装 Hyper-V PowerShell 工具。"
     }
 
     if ($text -match 'checkpoint|VMSnapshot|Restore-VMSnapshot') {
-        Add-UniqueHint -Hints $hints -Hint "Verify checkpoint '$($Plan.vm.cleanCheckpointName)' exists on VM '$($Plan.vm.name)' and rerun the read-only readiness preflight."
+        Add-UniqueHint -Hints $hints -Hint "下一步：确认 VM '$($Plan.vm.name)' 上存在 checkpoint '$($Plan.vm.cleanCheckpointName)'，然后重新运行只读 readiness preflight。"
     }
 
     if ($text -match 'Guest Service Interface|Copy-VMFile') {
-        Add-UniqueHint -Hints $hints -Hint "Enable Guest Service Interface for VM '$($Plan.vm.name)' in Hyper-V settings, or allow the live start phase to enable it after VM/checkpoint preflight succeeds."
+        Add-UniqueHint -Hints $hints -Hint "下一步：在 Hyper-V 设置中为 VM '$($Plan.vm.name)' 启用 Guest Service Interface，或让 live start 阶段在 VM/checkpoint 预检成功后启用。"
     }
 
     if ($text -match 'PowerShell Direct|New-PSSession|Invoke-Command') {
-        Add-UniqueHint -Hints $hints -Hint "Confirm VM '$($Plan.vm.name)' can run PowerShell Direct with guest user '$($Plan.guest.userName)' and that the host secret matches the guest password."
+        Add-UniqueHint -Hints $hints -Hint "下一步：确认 VM '$($Plan.vm.name)' 可用来宾用户 '$($Plan.guest.userName)' 运行 PowerShell Direct，且宿主机 secret 与来宾密码一致。"
     }
 
     if ($text -match 'driver\.hostDriverPath|R0Collector|deviceUnavailable|win32Error=2') {
-        Add-UniqueHint -Hints $hints -Hint 'Use driver.useMockCollector=true for the minimal executable-analysis path, or configure a built/test-signed driver.hostDriverPath before real R0 collection.'
+        Add-UniqueHint -Hints $hints -Hint '下一步：最小可执行文件分析可设置 driver.useMockCollector=true；真实 R0 采集前请配置已构建/测试签名 driver.hostDriverPath。'
     }
 
     if ($text -match 'Start script was not found|Collect script was not found|Start-SandboxHyperVJob\.ps1|Collect-GuestOutputs\.ps1') {
-        Add-UniqueHint -Hints $hints -Hint 'Verify the repository checkout contains the Hyper-V child scripts and rerun from the repository root; do not continue with partial script copies.'
+        Add-UniqueHint -Hints $hints -Hint '下一步：确认仓库包含 Hyper-V 子脚本，并从仓库根目录重跑；不要继续使用不完整脚本拷贝。'
     }
 
     if ($hints.Count -eq 0 -and -not [string]::IsNullOrWhiteSpace($FailureReason)) {
-        Add-UniqueHint -Hints $hints -Hint 'Rerun .\scripts\Test-HyperVReadiness.ps1 from an elevated shell and fix the first failed required check before trying live execution again.'
+        Add-UniqueHint -Hints $hints -Hint '下一步：在管理员 PowerShell 重新运行 .\scripts\Test-HyperVReadiness.ps1，并先修复第一个失败必需检查后再尝试 Live。'
     }
 
     return @($hints.ToArray())
@@ -1416,7 +1554,7 @@ function Get-RunbookRemediationHints {
 function New-RunbookUiProgress {
     param(
         [Parameter(Mandatory)][object]$Plan,
-        [Parameter(Mandatory)][object[]]$StepResults,
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$StepResults,
         [Parameter(Mandatory)][string]$State,
         [int]$CompletedSteps,
         [int]$ExecutedSteps,
@@ -1477,6 +1615,405 @@ function New-RunbookUiProgress {
         commandTextOmitted = $true
         steps = @($stepRows.ToArray())
     }
+}
+
+function ConvertTo-SkeletonDataValue {
+    param([AllowNull()][object]$Value)
+
+    if ($null -eq $Value) {
+        return ''
+    }
+
+    $text = [string]$Value
+    if ($text.Length -gt 1000) {
+        return $text.Substring(0, 1000) + '...'
+    }
+
+    return $text
+}
+
+function New-RunbookProgressSnapshot {
+    param(
+        [Parameter(Mandatory)][object]$Plan,
+        [Parameter(Mandatory)][string]$ModeName,
+        [Parameter(Mandatory)][string]$State,
+        [bool]$Success,
+        [AllowNull()][string]$Message,
+        [DateTimeOffset]$StartedAtUtc,
+        [TimeSpan]$Duration,
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$StepResults,
+        [AllowNull()][string]$FailureReason,
+        [AllowEmptyCollection()][string[]]$RemediationHints = @()
+    )
+
+    $resultByIndex = @{}
+    foreach ($result in @($StepResults)) {
+        $index = [int](Get-RecordPropertyValue -Object $result -Name 'StepIndex' -DefaultValue -1)
+        if ($index -ge 0) {
+            $resultByIndex[$index] = $result
+        }
+    }
+
+    $steps = New-Object System.Collections.Generic.List[object]
+    $currentStepIndex = $null
+    $currentStepId = $null
+    $currentStepTitle = $null
+    $completedSteps = 0
+    $executedSteps = 0
+    $index = 0
+    foreach ($step in @($Plan.steps)) {
+        $result = $null
+        if ($resultByIndex.ContainsKey($index)) {
+            $result = $resultByIndex[$index]
+        }
+
+        $stepState = Get-StepResultState -StepResult $result
+        if ($stepState -eq 'completed' -or $stepState -eq 'skipped') {
+            $completedSteps++
+        }
+
+        if ($null -ne $result -and (-not [System.Convert]::ToBoolean((Get-RecordPropertyValue -Object $result -Name 'Skipped' -DefaultValue $false)))) {
+            $executedSteps++
+        }
+
+        if ($stepState -eq 'failed' -and $null -eq $currentStepIndex) {
+            $currentStepIndex = $index
+            $currentStepId = [string]$step.id
+            $currentStepTitle = [string]$step.title
+        }
+
+        $startedValue = if ($null -ne $result) { Get-RecordPropertyValue -Object $result -Name 'StartedAtUtc' -DefaultValue $null } else { $null }
+        $durationValue = if ($null -ne $result) { Get-RecordPropertyValue -Object $result -Name 'Duration' -DefaultValue $null } else { $null }
+        $exitCodeValue = if ($null -ne $result) { Get-RecordPropertyValue -Object $result -Name 'ExitCode' -DefaultValue $null } else { $null }
+        $messageValue = if ($null -ne $result) { [string](Get-RecordPropertyValue -Object $result -Name 'Message' -DefaultValue '') } else { '' }
+
+        [void]$steps.Add([ordered]@{
+                StepIndex        = $index
+                StepId           = [string]$step.id
+                Title            = [string]$step.title
+                State            = $stepState
+                RequiresElevation = [bool]$step.requiresLive
+                MutatesVmState   = [bool]$step.mutatesVmState
+                StartedAtUtc     = if ($null -ne $startedValue -and -not [string]::IsNullOrWhiteSpace([string]$startedValue)) { [string]$startedValue } else { $null }
+                Duration         = if ($durationValue -is [TimeSpan]) { $durationValue.ToString('c') } elseif ($null -ne $durationValue -and -not [string]::IsNullOrWhiteSpace([string]$durationValue)) { [string]$durationValue } else { $null }
+                ExitCode         = if ($null -ne $exitCodeValue) { [int]$exitCodeValue } else { $null }
+                Message          = $messageValue
+            })
+        $index++
+    }
+
+    if ((-not $Success) -and $null -eq $currentStepIndex -and @($Plan.steps).Count -gt 0) {
+        $currentStepIndex = 0
+        $currentStepId = [string]$Plan.steps[0].id
+        $currentStepTitle = [string]$Plan.steps[0].title
+    }
+
+    $modeValue = if ($ModeName -eq 'Live') { 1 } else { 0 }
+    $effectiveMessage = if (-not [string]::IsNullOrWhiteSpace($Message)) { $Message } elseif ($Success) { 'Runbook execution completed.' } else { $FailureReason }
+    return [ordered]@{
+        JobId            = [string]$Plan.job.jobId
+        TargetVmName     = [string]$Plan.vm.name
+        Mode             = $modeValue
+        ModeName         = $ModeName
+        State            = $State
+        TotalSteps       = @($Plan.steps).Count
+        CompletedSteps   = $completedSteps
+        ExecutedSteps    = $executedSteps
+        CurrentStepIndex = $currentStepIndex
+        CurrentStepId    = $currentStepId
+        CurrentStepTitle = $currentStepTitle
+        Success          = $Success
+        Message          = $effectiveMessage
+        FailureReason    = $FailureReason
+        RemediationHints = @($RemediationHints)
+        StartedAtUtc     = $StartedAtUtc.ToString('O')
+        UpdatedAtUtc     = [DateTimeOffset]::UtcNow.ToString('O')
+        Duration         = $Duration.ToString('c')
+        Steps            = @($steps.ToArray())
+    }
+}
+
+function Save-RunbookProgressSnapshot {
+    param(
+        [Parameter(Mandatory)][object]$Plan,
+        [Parameter(Mandatory)][object]$Snapshot
+    )
+
+    $jobRoot = [string]$Plan.host.jobRoot
+    New-Item -ItemType Directory -Path $jobRoot -Force -WhatIf:$false | Out-Null
+    $progressPath = Join-Path $jobRoot 'runbook-progress.json'
+    $Snapshot | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $progressPath -Encoding UTF8 -WhatIf:$false
+    Write-HyperVE2EStep "Runbook progress snapshot written: $progressPath"
+    return $progressPath
+}
+
+function Test-ExistingEventsContainRealRows {
+    param([Parameter(Mandatory)][string]$Path)
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        return $false
+    }
+
+    try {
+        $item = Get-Item -LiteralPath $Path
+        if ($item.Length -le 0) {
+            return $false
+        }
+
+        $content = (Get-Content -LiteralPath $Path -Raw).Trim()
+        if ([string]::IsNullOrWhiteSpace($content) -or $content -eq '[]') {
+            return $false
+        }
+
+        try {
+            $parsed = $content | ConvertFrom-Json -ErrorAction Stop
+            return @($parsed).Count -gt 0
+        }
+        catch {
+            Write-Warning "中文提示：现有 events.json 无法解析，将写入 failure skeleton 以保证报告可导入。英文详情：$($_.Exception.Message)"
+            return $false
+        }
+    }
+    catch {
+        return $false
+    }
+}
+
+function Save-GuestOutputSkeleton {
+    param(
+        [Parameter(Mandatory)][object]$Plan,
+        [AllowNull()][string]$FailureReason,
+        [AllowNull()][string]$Message,
+        [AllowNull()][string]$RunbookExecutionPath,
+        [AllowNull()][string]$RunbookProgressPath,
+        [string]$GeneratedBy = 'Invoke-HyperVE2E.ps1'
+    )
+
+    $guestOutputDirectory = [string]$Plan.host.guestOutputDirectory
+    if ([string]::IsNullOrWhiteSpace($guestOutputDirectory)) {
+        $jobIdN = ([string]$Plan.job.jobId) -replace '-', ''
+        $guestOutputDirectory = Join-Path ([string]$Plan.host.outputRoot) $jobIdN
+    }
+
+    New-Item -ItemType Directory -Path $guestOutputDirectory -Force -WhatIf:$false | Out-Null
+    $eventsPath = [string]$Plan.host.eventsJsonPath
+    if ([string]::IsNullOrWhiteSpace($eventsPath)) {
+        $eventsPath = Join-Path $guestOutputDirectory 'events.json'
+    }
+
+    $agentPidPath = Join-Path $guestOutputDirectory 'agent.pid'
+    $agentExitPath = Join-Path $guestOutputDirectory 'agent.exit'
+    $agentStdoutPath = Join-Path $guestOutputDirectory 'agent.stdout.log'
+    $agentStderrPath = Join-Path $guestOutputDirectory 'agent.stderr.log'
+    $metadataPath = Join-Path $guestOutputDirectory 'guest-output-skeleton.json'
+    $driverEventsPath = [string]$Plan.host.driverEventsJsonlPath
+    if ([string]::IsNullOrWhiteSpace($driverEventsPath)) {
+        $driverEventsPath = Join-Path $guestOutputDirectory 'driver-events.jsonl'
+    }
+
+    if (-not (Test-Path -LiteralPath $agentPidPath -PathType Leaf)) {
+        Set-Content -LiteralPath $agentPidPath -Value '0' -Encoding ASCII -WhatIf:$false
+    }
+
+    if (-not (Test-Path -LiteralPath $agentExitPath -PathType Leaf)) {
+        Set-Content -LiteralPath $agentExitPath -Value '-1' -Encoding ASCII -WhatIf:$false
+    }
+
+    if (-not (Test-Path -LiteralPath $agentStdoutPath -PathType Leaf)) {
+        Set-Content -LiteralPath $agentStdoutPath -Value '' -Encoding UTF8 -WhatIf:$false
+    }
+
+    if (-not (Test-Path -LiteralPath $agentStderrPath -PathType Leaf)) {
+        Set-Content -LiteralPath $agentStderrPath -Value (ConvertTo-SkeletonDataValue (($FailureReason, $Message) -join ' | ')) -Encoding UTF8 -WhatIf:$false
+    }
+
+    $now = [DateTimeOffset]::UtcNow
+    $eventsAlreadyPresent = Test-ExistingEventsContainRealRows -Path $eventsPath
+    if (-not $eventsAlreadyPresent) {
+        $skeletonEvents = @(
+            [ordered]@{
+                eventType   = 'hyperv.e2e.failure_skeleton'
+                timestamp   = $now.ToString('O')
+                source      = 'host'
+                processName = $GeneratedBy
+                processId   = $PID
+                path        = [string]$Plan.vm.name
+                commandLine = 'Hyper-V E2E failed before complete guest events were collected.'
+                data        = [ordered]@{
+                    jobId                = ConvertTo-SkeletonDataValue $Plan.job.jobId
+                    vmName               = ConvertTo-SkeletonDataValue $Plan.vm.name
+                    checkpointName       = ConvertTo-SkeletonDataValue $Plan.vm.cleanCheckpointName
+                    guestUserName        = ConvertTo-SkeletonDataValue $Plan.guest.userName
+                    secretName           = ConvertTo-SkeletonDataValue $Plan.guest.passwordSecretName
+                    secretValuePrinted   = 'False'
+                    failureReason        = ConvertTo-SkeletonDataValue $FailureReason
+                    message              = ConvertTo-SkeletonDataValue $Message
+                    runbookExecutionPath = ConvertTo-SkeletonDataValue $RunbookExecutionPath
+                    runbookProgressPath  = ConvertTo-SkeletonDataValue $RunbookProgressPath
+                    guestOutputDirectory = ConvertTo-SkeletonDataValue $guestOutputDirectory
+                    generatedBy          = $GeneratedBy
+                    importable           = 'True'
+                    skeleton             = 'True'
+                }
+            }
+        )
+        ConvertTo-Json -InputObject @($skeletonEvents) -Depth 8 | Set-Content -LiteralPath $eventsPath -Encoding UTF8 -WhatIf:$false
+    }
+
+    if ([System.Convert]::ToBoolean($Plan.driver.enabled) -and -not (Test-Path -LiteralPath $driverEventsPath -PathType Leaf)) {
+        $driverSkeletonEvent = [ordered]@{
+            eventType   = 'r0collector.not_started'
+            timestamp   = $now.ToString('O')
+            source      = 'host'
+            processName = $GeneratedBy
+            path        = ConvertTo-SkeletonDataValue $Plan.driver.devicePath
+            data        = [ordered]@{
+                jobId              = ConvertTo-SkeletonDataValue $Plan.job.jobId
+                collectionMode     = ConvertTo-SkeletonDataValue $Plan.driver.collectionMode
+                failureReason      = ConvertTo-SkeletonDataValue $FailureReason
+                generatedBy        = $GeneratedBy
+                skeleton           = 'True'
+                secretValuePrinted = 'False'
+            }
+        }
+        ($driverSkeletonEvent | ConvertTo-Json -Depth 8 -Compress) | Set-Content -LiteralPath $driverEventsPath -Encoding UTF8 -WhatIf:$false
+    }
+
+    $metadata = [ordered]@{
+        contractVersion     = 1
+        kind                = 'KSwordSandbox.GuestOutputSkeleton'
+        generatedAtUtc      = $now.ToString('O')
+        generatedBy         = $GeneratedBy
+        importable          = $true
+        preservedRealEvents = $eventsAlreadyPresent
+        reason              = 'Hyper-V E2E failed before a complete guest output set was collected.'
+        jobId               = [string]$Plan.job.jobId
+        targetVmName        = [string]$Plan.vm.name
+        cleanCheckpointName = [string]$Plan.vm.cleanCheckpointName
+        secretValuePrinted  = $false
+        failureReason       = $FailureReason
+        message             = $Message
+        paths               = [ordered]@{
+            guestOutputDirectory = $guestOutputDirectory
+            eventsJsonPath       = $eventsPath
+            driverEventsJsonlPath = $driverEventsPath
+            agentPidPath         = $agentPidPath
+            agentExitPath        = $agentExitPath
+            agentStdoutPath      = $agentStdoutPath
+            agentStderrPath      = $agentStderrPath
+            runbookExecutionPath = $RunbookExecutionPath
+            runbookProgressPath  = $RunbookProgressPath
+        }
+        importCommand       = ".\scripts\Import-HyperVJobReport.ps1 -JobId '$($Plan.job.jobId)' -SamplePath '$($Plan.sample.hostPath)' -EventsPath '$eventsPath' -RunbookExecutionPath '$RunbookExecutionPath'"
+        note                = '该 skeleton 仅用于恢复/导入失败诊断，不代表 Guest Agent 已成功运行。'
+    }
+    $metadata | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $metadataPath -Encoding UTF8 -WhatIf:$false
+    Write-HyperVE2EStep "Importable guest output skeleton ready: $eventsPath"
+    Write-HyperVE2EStep "Guest output skeleton metadata written: $metadataPath"
+    return $metadataPath
+}
+
+function Invoke-FailureReportImport {
+    param(
+        [Parameter(Mandatory)][object]$Plan,
+        [Parameter(Mandatory)][string]$ImportReportScript,
+        [AllowNull()][string]$Reason
+    )
+
+    $jobRoot = [string]$Plan.host.jobRoot
+    New-Item -ItemType Directory -Path $jobRoot -Force -WhatIf:$false | Out-Null
+    $resultPath = Join-Path $jobRoot 'hyperv-e2e-failure-report-import.json'
+    $samplePath = [string]$Plan.sample.hostPath
+    $eventsPath = [string]$Plan.host.eventsJsonPath
+    $runbookExecutionPath = [string]$Plan.host.runbookExecutionPath
+    $diagnosticsPath = Join-Path $jobRoot 'report-rebuild-diagnostics.json'
+
+    $skipReasons = New-Object System.Collections.Generic.List[string]
+    if (-not (Test-Path -LiteralPath $ImportReportScript -PathType Leaf)) {
+        [void]$skipReasons.Add("Report import script missing: $ImportReportScript")
+    }
+    if ([string]::IsNullOrWhiteSpace($samplePath) -or -not (Test-Path -LiteralPath $samplePath -PathType Leaf)) {
+        [void]$skipReasons.Add("Sample file missing; cannot rebuild report without the original sample path: $samplePath")
+    }
+    if ([string]::IsNullOrWhiteSpace($eventsPath) -or -not (Test-Path -LiteralPath $eventsPath -PathType Leaf)) {
+        [void]$skipReasons.Add("Events/skeleton file missing before import: $eventsPath")
+    }
+    if ([string]::IsNullOrWhiteSpace($runbookExecutionPath) -or -not (Test-Path -LiteralPath $runbookExecutionPath -PathType Leaf)) {
+        [void]$skipReasons.Add("Runbook execution record missing before import: $runbookExecutionPath")
+    }
+
+    if ($skipReasons.Count -gt 0) {
+        $result = [ordered]@{
+            contractVersion = 1
+            kind = 'KSwordSandbox.FailureReportImportResult'
+            success = $false
+            state = 'skipped'
+            reason = $Reason
+            jobId = [string]$Plan.job.jobId
+            jobRoot = $jobRoot
+            eventsJsonPath = $eventsPath
+            runbookExecutionPath = $runbookExecutionPath
+            reportRebuildDiagnosticsPath = $diagnosticsPath
+            skipReasons = @($skipReasons.ToArray())
+            remediationHints = @(
+                '下一步：确认 sample/events/runbook-execution 都存在后运行 .\scripts\Import-HyperVJobReport.ps1 或 .\scripts\Invoke-OperatorCli.ps1 recover -RebuildReport。',
+                '下一步：若 events.json 缺失，先查看 guest-output-skeleton.json 是否生成；可用 Import-HyperVJobReport 根据 runbook-execution.json 自动生成 skeleton。'
+            )
+            vmAction = 'none'
+            secretValuePrinted = $false
+            completedAtUtc = [DateTimeOffset]::UtcNow.ToString('O')
+        }
+        $result | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $resultPath -Encoding UTF8 -WhatIf:$false
+        Write-HyperVE2EStep "Failure report import skipped; diagnostics written: $resultPath"
+        return [pscustomobject]$result
+    }
+
+    Write-HyperVE2EStep 'Live failure detected; attempting best-effort report import from failure skeleton without VM mutation.'
+    $arguments = @(
+        '-JobId', ([string]$Plan.job.jobId),
+        '-SamplePath', $samplePath,
+        '-EventsPath', $eventsPath,
+        '-RunbookExecutionPath', $runbookExecutionPath,
+        '-ConfigPath', ([string]$Plan.configPath),
+        '-RepoRoot', ([string]$Plan.repositoryRoot),
+        '-RuntimeRoot', ([string]$Plan.host.runtimeRoot),
+        '-DurationSeconds', ([string]$Plan.job.durationSeconds),
+        '-Json'
+    )
+    $invocation = Invoke-ChildPowerShellScript `
+        -PhaseName 'failure-report-import' `
+        -ScriptPath $ImportReportScript `
+        -Arguments $arguments `
+        -TimeoutSeconds 300 `
+        -LogDirectory $jobRoot
+    $success = ([int]$invocation.exitCode -eq 0)
+    $result = [ordered]@{
+        contractVersion = 1
+        kind = 'KSwordSandbox.FailureReportImportResult'
+        success = $success
+        state = if ($success) { 'completed' } else { 'failed' }
+        reason = $Reason
+        jobId = [string]$Plan.job.jobId
+        jobRoot = $jobRoot
+        eventsJsonPath = $eventsPath
+        runbookExecutionPath = $runbookExecutionPath
+        reportRebuildDiagnosticsPath = $diagnosticsPath
+        jsonReportPath = [string]$Plan.host.jsonReportPath
+        htmlReportPath = [string]$Plan.host.htmlReportPath
+        invocation = $invocation
+        remediationHints = if ($success) {
+            @('下一步：打开 report.html/report.json 查看失败 skeleton 和 runbook 失败原因；修复后重新运行 Live。')
+        }
+        else {
+            @('下一步：查看 hyperv-e2e-failure-report-import.json、failure-report-import stdout/stderr log、report-rebuild-diagnostics.json 后，使用 Invoke-OperatorCli recover -RebuildReport 重试。')
+        }
+        vmAction = 'none'
+        secretValuePrinted = $false
+        completedAtUtc = [DateTimeOffset]::UtcNow.ToString('O')
+    }
+    $result | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $resultPath -Encoding UTF8 -WhatIf:$false
+    Write-HyperVE2EStep "Failure report import result written: $resultPath"
+    return [pscustomobject]$result
 }
 
 function New-RunbookStepExecutionResult {
@@ -1570,7 +2107,9 @@ function Convert-PhaseStepsToRunbookStepResults {
     param(
         [Parameter(Mandatory)][object]$Plan,
         [object]$StartResult,
-        [object]$CollectResult
+        [object]$CollectResult,
+        [object]$StartInvocation = $null,
+        [object]$CollectInvocation = $null
     )
 
     $stepMap = @{}
@@ -1583,6 +2122,7 @@ function Convert-PhaseStepsToRunbookStepResults {
     }
 
     $results = New-Object System.Collections.Generic.List[object]
+    $recordedStepIds = New-Object 'System.Collections.Generic.HashSet[string]' -ArgumentList ([StringComparer]::OrdinalIgnoreCase)
     foreach ($phaseResult in @($StartResult, $CollectResult)) {
         if ($null -eq $phaseResult) {
             continue
@@ -1590,6 +2130,7 @@ function Convert-PhaseStepsToRunbookStepResults {
 
         foreach ($childStep in @($phaseResult.steps)) {
             $stepId = [string]$childStep.id
+            [void]$recordedStepIds.Add($stepId)
             $planStep = $stepMap[$stepId]
             $stepIndex = if ($stepIndexMap.ContainsKey($stepId)) { [int]$stepIndexMap[$stepId] } else { -1 }
             $title = if ($null -ne $planStep) { [string]$planStep.title } else { [string]$childStep.title }
@@ -1615,11 +2156,96 @@ function Convert-PhaseStepsToRunbookStepResults {
                         -Duration $duration `
                         -RequiresElevation $true `
                         -MutatesVmState ($(if ($null -ne $planStep) { [bool]$planStep.mutatesVmState } else { $false })) `
-                        -Message ([string]$childStep.message)))
+                        -Message ([string]$childStep.message) `
+                        -RemediationHints @($childStep.remediationHints)))
         }
     }
 
+    Add-SyntheticPhaseFailureStep `
+        -Plan $Plan `
+        -Results $results `
+        -RecordedStepIds $recordedStepIds `
+        -StepMap $stepMap `
+        -StepIndexMap $stepIndexMap `
+        -Phase 'start' `
+        -Invocation $StartInvocation `
+        -PhaseResult $StartResult
+
+    Add-SyntheticPhaseFailureStep `
+        -Plan $Plan `
+        -Results $results `
+        -RecordedStepIds $recordedStepIds `
+        -StepMap $stepMap `
+        -StepIndexMap $stepIndexMap `
+        -Phase 'collect' `
+        -Invocation $CollectInvocation `
+        -PhaseResult $CollectResult
+
     return @($results.ToArray())
+}
+
+function Add-SyntheticPhaseFailureStep {
+    param(
+        [Parameter(Mandatory)][object]$Plan,
+        [Parameter(Mandatory)][System.Collections.Generic.List[object]]$Results,
+        [Parameter(Mandatory)][System.Collections.Generic.HashSet[string]]$RecordedStepIds,
+        [Parameter(Mandatory)][hashtable]$StepMap,
+        [Parameter(Mandatory)][hashtable]$StepIndexMap,
+        [Parameter(Mandatory)][string]$Phase,
+        [AllowNull()][object]$Invocation,
+        [AllowNull()][object]$PhaseResult
+    )
+
+    if ($null -eq $Invocation) {
+        return
+    }
+
+    $exitCodeValue = Get-RecordPropertyValue -Object $Invocation -Name 'exitCode' -DefaultValue $null
+    if ($null -eq $exitCodeValue -or [int]$exitCodeValue -eq 0) {
+        return
+    }
+
+    $hasRecordedFailure = $false
+    if ($null -ne $PhaseResult) {
+        foreach ($step in @($PhaseResult.steps)) {
+            if (-not [bool]$step.success) {
+                $hasRecordedFailure = $true
+                break
+            }
+        }
+    }
+
+    if ($hasRecordedFailure) {
+        return
+    }
+
+    $planStep = @($Plan.steps | Where-Object { [string]$_.phase -eq $Phase } | Select-Object -First 1)
+    if ($planStep.Count -eq 0) {
+        return
+    }
+
+    $step = $planStep[0]
+    $stepId = [string]$step.id
+    if ($RecordedStepIds.Contains($stepId)) {
+        return
+    }
+
+    $stepIndex = if ($StepIndexMap.ContainsKey($stepId)) { [int]$StepIndexMap[$stepId] } else { -1 }
+    $message = Get-ChildPhaseFailureMessage -PhaseName $Phase -Invocation $Invocation
+    [void]$Results.Add((New-RunbookStepExecutionResult `
+                -StepIndex $stepIndex `
+                -StepId $stepId `
+                -Title ([string]$step.title) `
+                -PowerShell ([string]$step.powerShell) `
+                -Skipped $false `
+                -Success $false `
+                -ExitCode ([int]$exitCodeValue) `
+                -StartedAtUtc ([DateTimeOffset]::UtcNow) `
+                -Duration ([TimeSpan]::Zero) `
+                -RequiresElevation ([bool]$step.requiresLive) `
+                -MutatesVmState ([bool]$step.mutatesVmState) `
+                -Message $message `
+                -State 'failed'))
 }
 
 function Save-RunbookExecutionRecord {
@@ -1630,7 +2256,7 @@ function Save-RunbookExecutionRecord {
         [string]$Message = $null,
         [DateTimeOffset]$StartedAtUtc = [DateTimeOffset]::UtcNow,
         [TimeSpan]$Duration = [TimeSpan]::Zero,
-        [object[]]$StepResults = @(),
+        [AllowEmptyCollection()][object[]]$StepResults = @(),
         [object]$StartResult = $null,
         [object]$CollectResult = $null,
         [object]$StartInvocation = $null,
@@ -1678,6 +2304,8 @@ function Save-RunbookExecutionRecord {
         -ProgressPercent $progressPercent `
         -FailureReason $failureReason `
         -RemediationHints @($remediationHints)
+    $runbookProgressPath = Join-Path $jobRoot 'runbook-progress.json'
+    $guestOutputSkeletonMetadataPath = Join-Path ([string]$Plan.host.guestOutputDirectory) 'guest-output-skeleton.json'
 
     $record = [ordered]@{
         contractVersion = 1
@@ -1744,6 +2372,8 @@ function Save-RunbookExecutionRecord {
             eventsJsonPath = [string]$Plan.host.eventsJsonPath
             driverEventsJsonlPath = [string]$Plan.host.driverEventsJsonlPath
             runbookExecutionPath = $executionPath
+            runbookProgressPath = $runbookProgressPath
+            guestOutputSkeletonMetadataPath = $guestOutputSkeletonMetadataPath
             collectedFiles = if ($null -ne $CollectResult) { @($CollectResult.collectedFiles) } else { @() }
         }
         completedAtUtc = [DateTimeOffset]::UtcNow.ToString('O')
@@ -1751,6 +2381,39 @@ function Save-RunbookExecutionRecord {
 
     $record | ConvertTo-Json -Depth 16 | Set-Content -LiteralPath $executionPath -Encoding UTF8 -WhatIf:$false
     Write-HyperVE2EStep "Runbook execution record written: $executionPath"
+
+    try {
+        $progressSnapshot = New-RunbookProgressSnapshot `
+            -Plan $Plan `
+            -ModeName $ModeName `
+            -State $state `
+            -Success $Success `
+            -Message $Message `
+            -StartedAtUtc $StartedAtUtc `
+            -Duration $Duration `
+            -StepResults @($StepResults) `
+            -FailureReason $failureReason `
+            -RemediationHints @($remediationHints)
+        $runbookProgressPath = Save-RunbookProgressSnapshot -Plan $Plan -Snapshot $progressSnapshot
+    }
+    catch {
+        Write-Warning "中文提示：无法写入 runbook-progress.json；runbook-execution.json 已保留。英文详情：$($_.Exception.Message)"
+    }
+
+    if (-not $Success) {
+        try {
+            [void](Save-GuestOutputSkeleton `
+                    -Plan $Plan `
+                    -FailureReason $failureReason `
+                    -Message $Message `
+                    -RunbookExecutionPath $executionPath `
+                    -RunbookProgressPath $runbookProgressPath `
+                    -GeneratedBy 'Invoke-HyperVE2E.ps1')
+        }
+        catch {
+            Write-Warning "中文提示：无法写入可导入 guest-output skeleton；请查看 runbook-execution.json 后手动重建。英文详情：$($_.Exception.Message)"
+        }
+    }
 }
 
 function New-HyperVE2EStep {
@@ -1884,7 +2547,7 @@ try {
     $effectiveDurationSeconds = if ($DurationSeconds -gt 0) { $DurationSeconds } else { $defaultDuration }
     $effectiveExecutionTimeoutSeconds = if ($ExecutionTimeoutSeconds -gt 0) { $ExecutionTimeoutSeconds } else { [Math]::Max($effectiveDurationSeconds + 120, 180) }
 
-    $runtimeRootConfig = Get-ObjectPropertyValue -Object $paths -Name 'runtimeRoot' -DefaultValue 'D:\Temp\KSwordSandbox'
+    $runtimeRootConfig = Get-StringOrDefault -Value $RuntimeRoot -DefaultValue (Get-ObjectPropertyValue -Object $paths -Name 'runtimeRoot' -DefaultValue 'D:\Temp\KSwordSandbox')
     $runtimeRoot = Resolve-ConfiguredPath -Path $runtimeRootConfig -BasePath $resolvedRepoRoot
     $payloadRootConfig = Get-StringOrDefault -Value $GuestPayloadRoot -DefaultValue (Get-ObjectPropertyValue -Object $paths -Name 'guestPayloadRoot' -DefaultValue 'D:\Temp\KSwordSandbox\payload\guest-tools')
     $resolvedPayloadRoot = Resolve-ConfiguredPath -Path $payloadRootConfig -BasePath $resolvedRepoRoot
@@ -1904,7 +2567,7 @@ try {
     $jobIdN = $jobGuid.ToString('N')
     $sampleFileName = [System.IO.Path]::GetFileName($resolvedSamplePath)
     if ([string]::IsNullOrWhiteSpace($sampleFileName)) {
-        throw 'SamplePath must include a file name.'
+        throw '错误：SamplePath 必须包含文件名。下一步：请传入完整 .exe 路径，例如 D:\Temp\sample.exe。'
     }
 
     $guestRoot = $effectiveGuestRoot.TrimEnd('\', '/')
@@ -2081,7 +2744,7 @@ try {
             hostDriverPathExists = if ([string]::IsNullOrWhiteSpace($hostDriverPath)) { $false } else { Test-Path -LiteralPath $hostDriverPath -PathType Leaf }
             willStageDriver = (-not [string]::IsNullOrWhiteSpace($hostDriverPath))
             willInstallDriverService = (-not [string]::IsNullOrWhiteSpace($hostDriverPath))
-            configurationWarning = if ($driverEnabled -and (-not $useMockCollector) -and [string]::IsNullOrWhiteSpace($hostDriverPath)) { 'Real R0 collection is enabled but driver.hostDriverPath is empty; stage-guest-payload will have empty driverSource and install-driver-service is omitted, so R0Collector can fail with deviceUnavailable/win32Error=2.' } else { $null }
+            configurationWarning = if ($driverEnabled -and (-not $useMockCollector) -and [string]::IsNullOrWhiteSpace($hostDriverPath)) { '真实 R0 collection 已启用但 driver.hostDriverPath 为空；stage-guest-payload 将没有 driverSource，install-driver-service 会被省略，R0Collector 可能以 deviceUnavailable/win32Error=2 失败。下一步：配置 -DriverHostPath 或启用 driver.useMockCollector=true。' } else { $null }
             driverPathInGuest = $driverPathInGuest
             eventJsonLinesPath = $driverEventsPath
         }
@@ -2168,13 +2831,14 @@ try {
             -WhatIf ([bool]$WhatIfPreference)
         Write-HyperVE2EStep "Safe $effectiveMode mode: no checkpoint restore, VM start, file copy, guest command, shutdown, or restore was executed."
         if ([int]$plan.preflightSummary.failedRequired -gt 0 -or [int]$plan.preflightSummary.warnings -gt 0) {
-            Write-HyperVE2EStep "Plan recorded $($plan.preflightSummary.failedRequired) failed required check(s) and $($plan.preflightSummary.warnings) warning(s). This is non-fatal in $effectiveMode mode."
+            Write-HyperVE2EStep "Plan 记录了 $($plan.preflightSummary.failedRequired) 个失败的必需检查和 $($plan.preflightSummary.warnings) 个警告；在 $effectiveMode 模式下这不是致命错误。 / Preflight gaps recorded."
             Write-PreflightRepairSuggestions -Suggestions @($plan.preflightSummary.repairSuggestions)
         }
 
         Write-Output ([pscustomobject][ordered]@{
                 PlanPath = $PlanPath
                 RunbookExecutionPath = $runbookExecutionPath
+                RunbookProgressPath = (Join-Path $jobRoot 'runbook-progress.json')
                 Mode = $effectiveMode
                 LiveExecuted = $false
                 TargetVmName = $effectiveVmName
@@ -2191,7 +2855,7 @@ try {
                 ForEach-Object { "$($_.name): $($_.message)" }
         )
         $detailText = if ($failedDetails.Count -gt 0) { ' Details: ' + ($failedDetails -join ' | ') } else { '' }
-        $message = "Live Hyper-V E2E preflight failed before VM mutation. Failed required check(s): $failedNames.$detailText"
+        $message = "错误：Live Hyper-V E2E preflight 在 VM mutation 前失败。失败的必需检查：$failedNames.$detailText。下一步：按 ReviewPlan/RemediationHints 修复第一个失败项后重试。"
         Write-PreflightRepairSuggestions -Suggestions @($plan.preflightSummary.repairSuggestions)
         Save-RunbookExecutionRecord `
             -Plan $plan `
@@ -2202,23 +2866,29 @@ try {
             -Duration ([TimeSpan]::Zero) `
             -StepResults @() `
             -WhatIf $false
+        try {
+            [void](Invoke-FailureReportImport -Plan $plan -ImportReportScript $importReportScript -Reason $message)
+        }
+        catch {
+            Write-Warning "中文提示：Live preflight 失败后无法自动重建 failure report。英文详情：$($_.Exception.Message)"
+        }
         throw $message
     }
 
     if (-not (Test-Path -LiteralPath $startScript -PathType Leaf)) {
-        $message = "Start script was not found: $startScript"
+        $message = "错误：找不到 Start 脚本：$startScript。下一步：确认 scripts\Start-SandboxHyperVJob.ps1 存在，并从仓库根目录运行。"
         Save-RunbookExecutionRecord -Plan $plan -ModeName 'Live' -Success $false -Message $message -StartedAtUtc ([DateTimeOffset]::UtcNow) -Duration ([TimeSpan]::Zero) -StepResults @()
         throw $message
     }
 
     if (-not (Test-Path -LiteralPath $collectScript -PathType Leaf)) {
-        $message = "Collect script was not found: $collectScript"
+        $message = "错误：找不到 Collect 脚本：$collectScript。下一步：确认 scripts\Collect-GuestOutputs.ps1 存在，并从仓库根目录运行。"
         Save-RunbookExecutionRecord -Plan $plan -ModeName 'Live' -Success $false -Message $message -StartedAtUtc ([DateTimeOffset]::UtcNow) -Duration ([TimeSpan]::Zero) -StepResults @()
         throw $message
     }
 
     if (-not (Test-Path -LiteralPath $importReportScript -PathType Leaf)) {
-        $message = "Report import script was not found: $importReportScript"
+        $message = "错误：找不到 Report import 脚本：$importReportScript。下一步：确认 scripts\Import-HyperVJobReport.ps1 存在。"
         Save-RunbookExecutionRecord -Plan $plan -ModeName 'Live' -Success $false -Message $message -StartedAtUtc ([DateTimeOffset]::UtcNow) -Duration ([TimeSpan]::Zero) -StepResults @()
         throw $message
     }
@@ -2234,22 +2904,28 @@ try {
         $collectInvocation = $null
         $liveSuccess = $false
         $liveMessage = ''
+        $startChildTimeoutSeconds = [Math]::Max(
+            900,
+            [int]$plan.timeouts.startupSeconds + [int]$plan.timeouts.guestReadySeconds + 300)
+        $collectChildTimeoutSeconds = [Math]::Max(
+            900,
+            [int]$plan.timeouts.executionSeconds + 300)
 
-        Write-HyperVE2EStep 'Starting live VM phase.'
-        $startInvocation = Invoke-ChildPowerShellScript -PhaseName 'start' -ScriptPath $startScript -Arguments @('-PlanPath', $PlanPath, '-Live')
+        Write-HyperVE2EStep "Starting live VM phase (child timeout ${startChildTimeoutSeconds}s)."
+        $startInvocation = Invoke-ChildPowerShellScript -PhaseName 'start' -ScriptPath $startScript -Arguments @('-PlanPath', $PlanPath, '-Live') -TimeoutSeconds $startChildTimeoutSeconds -LogDirectory $jobRoot
         $startExitCode = [int]$startInvocation.exitCode
         $startResult = Read-JsonFileIfPresent -Path (Join-Path $jobRoot 'hyperv-e2e-start-result.json')
         if ($startExitCode -ne 0) {
-            $liveMessage = "Start phase failed with exit code $startExitCode; collection phase was not launched."
+            $liveMessage = (Get-ChildPhaseFailureMessage -PhaseName 'Start' -Invocation $startInvocation -Fallback "Start 阶段失败，退出码 $startExitCode") + ' Collection 阶段未启动。'
         }
         else {
-            Write-HyperVE2EStep 'Starting live collection/cleanup phase.'
+            Write-HyperVE2EStep "Starting live collection/cleanup phase (child timeout ${collectChildTimeoutSeconds}s)."
             $restoreCheckpointArgument = if ($RestoreCheckpointAfterRun) { '1' } else { '0' }
-            $collectInvocation = Invoke-ChildPowerShellScript -PhaseName 'collect' -ScriptPath $collectScript -Arguments @('-PlanPath', $PlanPath, '-Live', '-RestoreCheckpointAfterRun', $restoreCheckpointArgument)
+            $collectInvocation = Invoke-ChildPowerShellScript -PhaseName 'collect' -ScriptPath $collectScript -Arguments @('-PlanPath', $PlanPath, '-Live', '-RestoreCheckpointAfterRun', $restoreCheckpointArgument) -TimeoutSeconds $collectChildTimeoutSeconds -LogDirectory $jobRoot
             $collectExitCode = [int]$collectInvocation.exitCode
             $collectResult = Read-JsonFileIfPresent -Path (Join-Path $jobRoot 'hyperv-e2e-collect-result.json')
             if ($collectExitCode -ne 0) {
-                $liveMessage = "Collection phase failed with exit code $collectExitCode."
+                $liveMessage = Get-ChildPhaseFailureMessage -PhaseName 'Collection' -Invocation $collectInvocation -Fallback "Collection 阶段失败，退出码 $collectExitCode。"
             }
             else {
                 $liveSuccess = $true
@@ -2257,7 +2933,12 @@ try {
         }
 
         $timer.Stop()
-        $liveStepResults = Convert-PhaseStepsToRunbookStepResults -Plan $plan -StartResult $startResult -CollectResult $collectResult
+        $liveStepResults = Convert-PhaseStepsToRunbookStepResults `
+            -Plan $plan `
+            -StartResult $startResult `
+            -CollectResult $collectResult `
+            -StartInvocation $startInvocation `
+            -CollectInvocation $collectInvocation
         Save-RunbookExecutionRecord `
             -Plan $plan `
             -ModeName 'Live' `
@@ -2287,7 +2968,7 @@ try {
                     -DurationSeconds ([int]$plan.job.durationSeconds)
             }
             catch {
-                Write-Error "FAIL: Hyper-V E2E live execution succeeded, but report import failed. $($_.Exception.Message)"
+                Write-Error "失败：Hyper-V E2E Live 执行已成功，但报告导入失败。下一步：可用 Rebuild-JobReport 重建报告。英文详情：$($_.Exception.Message)"
                 exit 1
             }
 
@@ -2295,7 +2976,13 @@ try {
             exit 0
         }
 
-        Write-Error "FAIL: Hyper-V E2E live execution failed. $liveMessage"
+        try {
+            [void](Invoke-FailureReportImport -Plan $plan -ImportReportScript $importReportScript -Reason $liveMessage)
+        }
+        catch {
+            Write-Warning "中文提示：Live 失败后无法自动重建 failure report。英文详情：$($_.Exception.Message)"
+        }
+        Write-Error "失败：Hyper-V E2E Live 执行失败。下一步：查看 runbook-execution.json 的 RemediationHints、failure report import result 和 report-rebuild-diagnostics.json，修复后重试。英文详情：$liveMessage"
         exit 1
     }
 
@@ -2314,7 +3001,7 @@ try {
     exit 0
 }
 catch {
-    $failureMessage = "FAIL: Hyper-V E2E orchestration failed. $($_.Exception.Message)"
+    $failureMessage = "失败：Hyper-V E2E 编排失败。下一步：查看生成的 fallback runbook execution record 和 RemediationHints。英文详情：$($_.Exception.Message)"
     if ($null -ne $script:LastHyperVE2EPlan) {
         try {
             $fallbackExecutionPath = [string]$script:LastHyperVE2EPlan.host.runbookExecutionPath
@@ -2340,7 +3027,7 @@ catch {
             }
         }
         catch {
-            Write-Warning "Could not write fallback runbook execution record: $($_.Exception.Message)"
+            Write-Warning "中文提示：无法写入 fallback runbook execution record。英文详情：$($_.Exception.Message)"
         }
     }
 

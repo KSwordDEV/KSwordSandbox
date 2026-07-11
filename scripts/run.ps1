@@ -70,7 +70,7 @@ $repositoryRoot = Get-RepositoryRootFromScriptFolder
 $rootRunner = Join-Path $repositoryRoot 'run.ps1'
 
 if (-not (Test-Path -LiteralPath $rootRunner -PathType Leaf)) {
-    throw "Repository-root runtime wrapper was not found: $rootRunner"
+    throw "错误：找不到仓库根目录 run.ps1：$rootRunner。下一步：请从完整仓库/发行包运行，或使用根目录 .\run.ps1。"
 }
 
 & $rootRunner @PSBoundParameters

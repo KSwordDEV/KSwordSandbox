@@ -65,6 +65,7 @@ internal static class AgentProgram
         catch (Exception ex)
         {
             Console.Error.WriteLine(ex.Message);
+            Console.Error.WriteLine($"zhMessage: {AgentCliZhHint(ex)}");
             return 1;
         }
     }
@@ -105,6 +106,10 @@ internal static class AgentProgram
 
         var executionStage = "start";
         int? executionProcessId = null;
+        int? executionParentProcessId = null;
+        string? executionProcessName = null;
+        DateTime? executionProcessStartTimeUtc = null;
+        var executionCommandLine = options.SamplePath;
         try
         {
             var startInfo = new ProcessStartInfo
@@ -117,17 +122,41 @@ internal static class AgentProgram
 
             using var process = Process.Start(startInfo) ?? throw new InvalidOperationException("Failed to start sample process.");
             executionProcessId = process.Id;
+            executionParentProcessId = Environment.ProcessId;
+            executionProcessName = SafeProcessName(process);
+            executionProcessStartTimeUtc = SafeProcessStartTimeUtc(process);
             events.Add(new SandboxEvent
             {
                 EventType = "process.start",
                 Source = "guest",
-                ProcessName = process.ProcessName,
+                ProcessName = executionProcessName,
                 ProcessId = process.Id,
+                ParentProcessId = executionParentProcessId,
                 Path = options.SamplePath,
-                CommandLine = options.SamplePath
+                CommandLine = executionCommandLine,
+                Data =
+                {
+                    ["imagePath"] = options.SamplePath,
+                    ["processImagePath"] = options.SamplePath,
+                    ["commandLine"] = executionCommandLine,
+                    ["parentProcessId"] = executionParentProcessId.Value.ToString(CultureInfo.InvariantCulture)
+                }
             });
+            if (executionProcessStartTimeUtc is not null)
+            {
+                events[^1].Data["startTimeUtc"] = executionProcessStartTimeUtc.Value.ToString("O", CultureInfo.InvariantCulture);
+            }
+
             executionStage = "after-start-probes";
-            var runningProbeContext = CreateGuestProbeContext(options, workingDirectory, process.Id);
+            var runningProbeContext = CreateGuestProbeContext(
+                options,
+                workingDirectory,
+                process.Id,
+                executionParentProcessId,
+                executionProcessName,
+                options.SamplePath,
+                executionCommandLine,
+                executionProcessStartTimeUtc);
             events.AddRange(await probeRunner.CollectAsync(ProbePhase.AfterStart, runningProbeContext));
 
             executionStage = "wait";
@@ -140,8 +169,24 @@ internal static class AgentProgram
                     Source = "guest",
                     ProcessName = SafeProcessName(process),
                     ProcessId = process.Id,
-                    Path = options.SamplePath
+                    ParentProcessId = executionParentProcessId,
+                    Path = options.SamplePath,
+                    CommandLine = executionCommandLine,
+                    Data =
+                    {
+                        ["imagePath"] = options.SamplePath,
+                        ["processImagePath"] = options.SamplePath,
+                        ["commandLine"] = executionCommandLine,
+                        ["parentProcessId"] = executionParentProcessId?.ToString() ?? string.Empty,
+                        ["zhMessage"] = "样本进程超过配置的分析时长未退出，Guest Agent 将终止进程树并继续收集剩余证据。",
+                        ["zhHint"] = "如果这是预期的长驻样本，请调大 --duration；否则重点查看超时前后的进程树、文件和网络事件。"
+                    }
                 });
+                if (executionProcessStartTimeUtc is not null)
+                {
+                    events[^1].Data["startTimeUtc"] = executionProcessStartTimeUtc.Value.ToString("O", CultureInfo.InvariantCulture);
+                }
+
                 executionStage = "kill-timeout";
                 try
                 {
@@ -165,12 +210,22 @@ internal static class AgentProgram
                 Source = "guest",
                 ProcessName = SafeProcessName(process),
                 ProcessId = process.Id,
+                ParentProcessId = executionParentProcessId,
                 Path = options.SamplePath,
+                CommandLine = executionCommandLine,
                 Data =
                 {
-                    ["exitCode"] = SafeExitCode(process)
+                    ["exitCode"] = SafeExitCode(process),
+                    ["imagePath"] = options.SamplePath,
+                    ["processImagePath"] = options.SamplePath,
+                    ["commandLine"] = executionCommandLine,
+                    ["parentProcessId"] = executionParentProcessId?.ToString() ?? string.Empty
                 }
             });
+            if (executionProcessStartTimeUtc is not null)
+            {
+                events[^1].Data["startTimeUtc"] = executionProcessStartTimeUtc.Value.ToString("O", CultureInfo.InvariantCulture);
+            }
 
             var remainingAnalysisWindow = analysisDeadline - DateTimeOffset.UtcNow;
             if (remainingAnalysisWindow > TimeSpan.Zero)
@@ -181,14 +236,26 @@ internal static class AgentProgram
                     Source = "guest",
                     ProcessName = SafeProcessName(process),
                     ProcessId = process.Id,
+                    ParentProcessId = executionParentProcessId,
                     Path = options.SamplePath,
+                    CommandLine = executionCommandLine,
                     Data =
                     {
                         ["remainingSeconds"] = Math.Ceiling(remainingAnalysisWindow.TotalSeconds).ToString(CultureInfo.InvariantCulture),
                         ["reason"] = "sampleExitedBeforeAnalysisDuration",
-                        ["durationSeconds"] = options.DurationSeconds.ToString(CultureInfo.InvariantCulture)
+                        ["durationSeconds"] = options.DurationSeconds.ToString(CultureInfo.InvariantCulture),
+                        ["imagePath"] = options.SamplePath,
+                        ["processImagePath"] = options.SamplePath,
+                        ["commandLine"] = executionCommandLine,
+                        ["parentProcessId"] = executionParentProcessId?.ToString() ?? string.Empty,
+                        ["zhMessage"] = "样本早于配置的分析窗口退出，Guest Agent 会等待剩余时间继续观察后续行为。"
                     }
                 });
+                if (executionProcessStartTimeUtc is not null)
+                {
+                    events[^1].Data["startTimeUtc"] = executionProcessStartTimeUtc.Value.ToString("O", CultureInfo.InvariantCulture);
+                }
+
                 await Task.Delay(remainingAnalysisWindow);
             }
 
@@ -197,7 +264,15 @@ internal static class AgentProgram
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            var diagnosticContext = CreateGuestProbeContext(options, workingDirectory, executionProcessId);
+            var diagnosticContext = CreateGuestProbeContext(
+                options,
+                workingDirectory,
+                executionProcessId,
+                executionParentProcessId,
+                executionProcessName,
+                options.SamplePath,
+                executionCommandLine,
+                executionProcessStartTimeUtc);
             var eventType = string.Equals(executionStage, "start", StringComparison.OrdinalIgnoreCase)
                 ? "process.start_failed"
                 : "process.execution_failed";
@@ -240,7 +315,15 @@ internal static class AgentProgram
     /// id; processing copies values into an immutable context; the method
     /// returns the context consumed by guest probes.
     /// </summary>
-    private static GuestProbeContext CreateGuestProbeContext(AgentOptions options, string workingDirectory, int? rootProcessId)
+    private static GuestProbeContext CreateGuestProbeContext(
+        AgentOptions options,
+        string workingDirectory,
+        int? rootProcessId,
+        int? rootParentProcessId = null,
+        string? rootProcessName = null,
+        string? rootProcessPath = null,
+        string? rootCommandLine = null,
+        DateTime? rootProcessStartTimeUtc = null)
     {
         return new GuestProbeContext
         {
@@ -248,6 +331,11 @@ internal static class AgentProgram
             WorkingDirectory = workingDirectory,
             OutputDirectory = options.OutputDirectory,
             RootProcessId = rootProcessId,
+            RootParentProcessId = rootParentProcessId,
+            RootProcessName = rootProcessName,
+            RootProcessPath = rootProcessPath,
+            RootCommandLine = rootCommandLine,
+            RootProcessStartTimeUtc = rootProcessStartTimeUtc,
             CaptureScreenshots = options.CaptureScreenshots,
             CaptureMemoryDump = options.CaptureMemoryDump,
             CapturePacketCapture = options.CapturePacketCapture
@@ -573,7 +661,9 @@ internal static class AgentProgram
             File.WriteAllText(standardOutputPath, string.Empty);
             var lines = new List<string>
             {
-                $"R0Collector did not start: {reason}"
+                $"R0Collector did not start: {reason}",
+                $"zhMessage: R0Collector 未启动：{R0CollectorReasonZhMessage(reason)}",
+                $"zhHint: {R0CollectorReasonZhHint(reason)}"
             };
 
             if (exception is not null)
@@ -720,7 +810,8 @@ internal static class AgentProgram
                 ["stdoutPath"] = standardOutputPath,
                 ["stderrPath"] = standardErrorPath,
                 ["processId"] = processId.ToString(CultureInfo.InvariantCulture),
-                ["supervisor"] = "guest-agent"
+                ["supervisor"] = "guest-agent",
+                ["zhMessage"] = "R0Collector sidecar 已由 Guest Agent 启动，驱动 JSONL 和诊断日志会作为证据保留。"
             }
         };
         AddR0ArtifactReferenceData(
@@ -762,7 +853,8 @@ internal static class AgentProgram
                 ["forcedStop"] = forcedStop.ToString(),
                 ["diagnosticDrainStatus"] = diagnosticDrainStatus,
                 ["jsonlDrainStatus"] = jsonLinesDrainStatus,
-                ["supervisor"] = "guest-agent"
+                ["supervisor"] = "guest-agent",
+                ["zhMessage"] = "R0Collector sidecar 已正常退出，Guest Agent 已尝试冲刷 stdout/stderr 和 driver-events JSONL。"
             }
         };
         AddR0ArtifactReferenceData(
@@ -813,6 +905,7 @@ internal static class AgentProgram
             standardOutputPath,
             standardErrorPath);
         AddExceptionData(evt, exception);
+        AddR0CollectorLocalizationData(evt, reason, phase);
         return evt;
     }
 
@@ -863,6 +956,7 @@ internal static class AgentProgram
             collector.StandardOutputPath,
             collector.StandardErrorPath);
         AddExceptionData(evt, exception);
+        AddR0CollectorLocalizationData(evt, reason, phase);
         return evt;
     }
 
@@ -902,6 +996,7 @@ internal static class AgentProgram
             standardOutputPath,
             standardErrorPath);
         AddExceptionData(evt, exception);
+        AddR0CollectorLocalizationData(evt, reason, "start");
         return evt;
     }
 
@@ -935,6 +1030,7 @@ internal static class AgentProgram
             collector.StandardOutputPath,
             collector.StandardErrorPath);
         AddExceptionData(evt, exception);
+        AddR0CollectorLocalizationData(evt, "stopException", "stop");
         return evt;
     }
 
@@ -950,6 +1046,62 @@ internal static class AgentProgram
 
         evt.Data["exceptionType"] = exception.GetType().FullName ?? exception.GetType().Name;
         evt.Data["message"] = exception.Message;
+        evt.Data.TryAdd("zhMessage", "操作失败；请结合 exceptionType/message、phase/reason 和相关路径判断是采集诊断问题还是样本行为。");
+    }
+
+    /// <summary>
+    /// Adds Chinese operator-facing text for R0 sidecar supervision events while
+    /// preserving stable machine-readable reason/phase keys.
+    /// </summary>
+    private static void AddR0CollectorLocalizationData(SandboxEvent evt, string reason, string phase)
+    {
+        evt.Data["zhMessage"] = $"R0Collector 在 {phase} 阶段未完成正常路径：{R0CollectorReasonZhMessage(reason)}";
+        evt.Data["zhHint"] = R0CollectorReasonZhHint(reason);
+    }
+
+    private static string R0CollectorReasonZhMessage(string reason)
+    {
+        return reason switch
+        {
+            "collectorPathMissing" => "未提供 R0Collector 可执行文件路径。",
+            "driverEventsPathMissing" => "未提供 driver-events JSONL 输出路径。",
+            "collectorMissing" => "配置的 R0Collector 可执行文件不存在。",
+            "startException" => "启动 R0Collector 进程时发生异常。",
+            "forcedStop" => "R0Collector 未在宽限期内退出，已被 Guest Agent 强制终止。",
+            "nonZeroExit" => "R0Collector 以非零退出码结束。",
+            "stopException" => "停止或回收 R0Collector 进程时发生异常。",
+            _ => "请查看同一事件中的 reason、exitCode、stdout/stderr 和 JSONL drain 状态。"
+        };
+    }
+
+    private static string R0CollectorReasonZhHint(string reason)
+    {
+        return reason switch
+        {
+            "collectorPathMissing" => "请在 Guest Agent 参数中提供 --r0collector/--r0-collector，或关闭 R0 sidecar 采集。",
+            "driverEventsPathMissing" => "请同时提供 --driver-events，确保该路径位于 Guest 输出目录或可被后续拷贝。",
+            "collectorMissing" => "请确认 R0Collector exe 已部署到 guest，路径拼写正确且未被清理。",
+            "startException" => "请查看 r0collector.stderr.log、异常类型和权限/依赖问题；这通常是采集环境问题，不代表样本行为。",
+            "forcedStop" => "如果 JSONL 末尾缺失，请查看 jsonlDrainStatus 和 stdout/stderr；必要时缩短 Collector duration 或增大停止宽限期。",
+            "nonZeroExit" => "请优先查看 r0collector.deviceUnavailable/readinessDiagnostic/ioctlFailure 等行以及 stderr 日志。",
+            "stopException" => "请检查进程权限、句柄状态和诊断日志是否仍可读取。",
+            _ => "请把该事件视为采集诊断信号，并结合 r0collector.*.log 与 driver-events.jsonl 判断根因。"
+        };
+    }
+
+    private static string AgentCliZhHint(Exception exception)
+    {
+        if (exception is ArgumentException && exception.Message.Contains("--sample", StringComparison.OrdinalIgnoreCase))
+        {
+            return "请使用 --sample 指向 guest 内存在的可执行样本文件。";
+        }
+
+        if (exception is ArgumentException && exception.Message.Contains("--out", StringComparison.OrdinalIgnoreCase))
+        {
+            return "请使用 --out 指定 Guest Agent 输出目录。";
+        }
+
+        return "Guest Agent 启动失败；请检查命令行参数、样本路径、输出目录和当前用户权限。";
     }
 
     /// <summary>
@@ -1204,7 +1356,9 @@ internal static class AgentProgram
                 ["stage"] = stage,
                 ["nonfatal"] = "true",
                 ["exceptionType"] = exception.GetType().FullName ?? exception.GetType().Name,
-                ["message"] = exception.Message
+                ["message"] = exception.Message,
+                ["zhMessage"] = $"样本执行在 {stage} 阶段失败；Guest Agent 会尽量继续写出已收集证据。",
+                ["zhHint"] = "请查看 exceptionType/message、样本路径、权限以及后续 process/file/network 事件来定位原因。"
             }
         };
     }
@@ -1483,6 +1637,10 @@ internal static class AgentProgram
         var droppedFileMetadataByRelativePath = options.CollectDroppedFiles
             ? CopyDroppedFileArtifacts(options, events)
             : new Dictionary<string, DroppedFileArtifactMetadata>(StringComparer.OrdinalIgnoreCase);
+        if (!options.CollectDroppedFiles)
+        {
+            events.Add(CreateDroppedFilesDisabledEvent(options, events));
+        }
 
         TryWriteArtifactManifest(options, events, artifactWriter, droppedFileMetadataByRelativePath);
 
@@ -1501,9 +1659,11 @@ internal static class AgentProgram
     private static Dictionary<string, DroppedFileArtifactMetadata> CopyDroppedFileArtifacts(AgentOptions options, List<SandboxEvent> events)
     {
         var metadataByRelativePath = new Dictionary<string, DroppedFileArtifactMetadata>(StringComparer.OrdinalIgnoreCase);
+        var usedArtifactRelativePaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var candidates = events
             .Where(static evt => string.Equals(evt.EventType, "file.created", StringComparison.OrdinalIgnoreCase))
             .ToList();
+        var processContext = CreateDroppedFileProcessContext(options, events);
 
         if (candidates.Count == 0)
         {
@@ -1519,7 +1679,7 @@ internal static class AgentProgram
         {
             if (string.IsNullOrWhiteSpace(candidate.Path))
             {
-                events.Add(CreateDroppedFileSkippedEvent(candidate, reason: "sourcePathMissing"));
+                events.Add(CreateDroppedFileSkippedEvent(candidate, reason: "sourcePathMissing", processContext: processContext));
                 continue;
             }
 
@@ -1530,46 +1690,84 @@ internal static class AgentProgram
             }
             catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
             {
-                events.Add(CreateDroppedFileSkippedEvent(candidate, reason: "sourcePathInvalid", exception: ex));
+                events.Add(CreateDroppedFileSkippedEvent(candidate, reason: "sourcePathInvalid", exception: ex, processContext: processContext));
                 continue;
             }
 
             if (!IsSameOrUnderDirectory(sourcePath, workingDirectory))
             {
-                events.Add(CreateDroppedFileSkippedEvent(candidate, reason: "outsideWorkingDirectory", sourcePath: sourcePath));
+                events.Add(CreateDroppedFileSkippedEvent(
+                    candidate,
+                    reason: "outsideWorkingDirectory",
+                    sourcePath: sourcePath,
+                    sourceEvidence: ReadDroppedFileSourceEvidence(sourcePath, computeHash: false),
+                    processContext: processContext));
                 continue;
             }
 
             if (IsSameOrUnderDirectory(sourcePath, outputDirectory))
             {
-                events.Add(CreateDroppedFileSkippedEvent(candidate, reason: "underOutputDirectory", sourcePath: sourcePath));
+                events.Add(CreateDroppedFileSkippedEvent(
+                    candidate,
+                    reason: "underOutputDirectory",
+                    sourcePath: sourcePath,
+                    sourceEvidence: ReadDroppedFileSourceEvidence(sourcePath, computeHash: false),
+                    processContext: processContext));
                 continue;
             }
 
             if (!File.Exists(sourcePath))
             {
-                events.Add(CreateDroppedFileSkippedEvent(candidate, reason: "sourceFileMissing", sourcePath: sourcePath));
+                events.Add(CreateDroppedFileSkippedEvent(
+                    candidate,
+                    reason: "sourceFileMissing",
+                    sourcePath: sourcePath,
+                    sourceEvidence: ReadDroppedFileSourceEvidence(sourcePath, computeHash: false),
+                    processContext: processContext));
                 continue;
             }
 
             var originalRelativePath = GetOriginalRelativePath(candidate, workingDirectory, sourcePath);
             var safeRelativePath = BuildSafeDroppedFileRelativePath(originalRelativePath, sourcePath);
-            var destinationPath = Path.GetFullPath(Path.Combine(droppedFilesRoot, safeRelativePath));
-            if (!IsSameOrUnderDirectory(destinationPath, droppedFilesRoot))
+            var destination = CreateDroppedFileDestination(
+                droppedFilesRoot,
+                outputDirectory,
+                safeRelativePath,
+                sourcePath,
+                usedArtifactRelativePaths);
+            if (destination is null)
             {
-                events.Add(CreateDroppedFileSkippedEvent(candidate, reason: "destinationPathInvalid", sourcePath: sourcePath));
+                events.Add(CreateDroppedFileSkippedEvent(
+                    candidate,
+                    reason: "destinationPathInvalid",
+                    sourcePath: sourcePath,
+                    sourceEvidence: ReadDroppedFileSourceEvidence(sourcePath, computeHash: false),
+                    processContext: processContext));
                 continue;
             }
 
             try
             {
+                var sourceEvidence = ReadDroppedFileSourceEvidence(sourcePath, computeHash: true);
+                if (sourceEvidence.Exists == false)
+                {
+                    events.Add(CreateDroppedFileSkippedEvent(
+                        candidate,
+                        reason: "sourceFileMissing",
+                        sourcePath: sourcePath,
+                        sourceEvidence: sourceEvidence,
+                        processContext: processContext));
+                    continue;
+                }
+
                 var sourceInfo = new FileInfo(sourcePath);
-                Directory.CreateDirectory(Path.GetDirectoryName(destinationPath) ?? droppedFilesRoot);
-                File.Copy(sourcePath, destinationPath, overwrite: true);
-                var artifactRelativePath = NormalizeArtifactRelativePath(Path.GetRelativePath(outputDirectory, destinationPath));
-                var copiedInfo = new FileInfo(destinationPath);
+                Directory.CreateDirectory(Path.GetDirectoryName(destination.FullPath) ?? droppedFilesRoot);
+                File.Copy(sourcePath, destination.FullPath, overwrite: false);
+                var copiedInfo = new FileInfo(destination.FullPath);
+                var copiedHash = ComputeSha256BestEffort(destination.FullPath);
                 var copiedAtUtc = DateTimeOffset.UtcNow;
-                metadataByRelativePath[artifactRelativePath] = new DroppedFileArtifactMetadata(
+                usedArtifactRelativePaths.Add(destination.ArtifactRelativePath);
+                metadataByRelativePath[destination.ArtifactRelativePath] = new DroppedFileArtifactMetadata(
                     sourcePath,
                     originalRelativePath,
                     candidate.EventType,
@@ -1577,19 +1775,31 @@ internal static class AgentProgram
                     sourceInfo.CreationTimeUtc,
                     sourceInfo.LastWriteTimeUtc,
                     candidate.Timestamp,
-                    copiedAtUtc);
+                    copiedAtUtc,
+                    sourceEvidence.Sha256,
+                    copiedHash.Sha256);
                 events.Add(CreateDroppedFileCopiedEvent(
+                    candidate,
                     sourcePath,
                     originalRelativePath,
-                    destinationPath,
-                    artifactRelativePath,
+                    destination.FullPath,
+                    destination.ArtifactRelativePath,
                     sourceInfo,
                     copiedInfo,
-                    copiedAtUtc));
+                    copiedAtUtc,
+                    processContext,
+                    sourceEvidence,
+                    copiedHash));
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException or PathTooLongException)
             {
-                events.Add(CreateDroppedFileSkippedEvent(candidate, reason: "copyFailed", sourcePath: sourcePath, exception: ex));
+                events.Add(CreateDroppedFileSkippedEvent(
+                    candidate,
+                    reason: "copyFailed",
+                    sourcePath: sourcePath,
+                    sourceEvidence: ReadDroppedFileSourceEvidence(sourcePath, computeHash: true),
+                    exception: ex,
+                    processContext: processContext));
             }
         }
 
@@ -1662,7 +1872,9 @@ internal static class AgentProgram
                     ["screenshotCount"] = options.ScreenshotOptions.CaptureCount.ToString(CultureInfo.InvariantCulture),
                     ["captureMemoryDump"] = options.CaptureMemoryDump.ToString(),
                     ["capturePacketCapture"] = options.CapturePacketCapture.ToString(),
-                    ["reason"] = "writeFailed"
+                    ["reason"] = "writeFailed",
+                    ["zhMessage"] = "Guest artifact manifest 写入失败，但事件 JSON 仍会尽量写出。",
+                    ["zhHint"] = "请检查 --out 目录权限、磁盘空间、路径长度，以及 artifacts/manifest.json 是否被其他进程占用。"
                 }
             };
             AddExceptionData(evt, ex);
@@ -1676,36 +1888,78 @@ internal static class AgentProgram
     /// paths and sizes as strings; the method returns a SandboxEvent.
     /// </summary>
     private static SandboxEvent CreateDroppedFileCopiedEvent(
+        SandboxEvent sourceEvent,
         string sourcePath,
         string originalRelativePath,
         string destinationPath,
         string artifactRelativePath,
         FileInfo sourceInfo,
         FileInfo copiedInfo,
-        DateTimeOffset copiedAtUtc)
+        DateTimeOffset copiedAtUtc,
+        DroppedFileProcessContext processContext,
+        DroppedFileSourceEvidence sourceEvidence,
+        DroppedFileHashResult copiedHash)
     {
-        return new SandboxEvent
+        var evt = new SandboxEvent
         {
             EventType = "artifact.dropped_file.copied",
             Source = "guest",
             Path = destinationPath,
+            ProcessName = processContext.ProcessName,
+            ProcessId = processContext.RootProcessId,
+            ParentProcessId = processContext.ParentProcessId,
+            CommandLine = processContext.CommandLine,
             Data =
             {
+                ["phase"] = "after-run",
+                ["capturePhase"] = "after-run",
                 ["sourcePath"] = sourcePath,
                 ["guestFullPath"] = sourcePath,
                 ["guestRelativePath"] = originalRelativePath,
                 ["artifactRelativePath"] = artifactRelativePath,
                 ["relativePath"] = artifactRelativePath,
+                ["importPath"] = artifactRelativePath,
+                ["artifactFullPath"] = destinationPath,
                 ["sizeBytes"] = copiedInfo.Length.ToString(CultureInfo.InvariantCulture),
+                ["artifactSizeBytes"] = copiedInfo.Length.ToString(CultureInfo.InvariantCulture),
+                ["copiedSizeBytes"] = copiedInfo.Length.ToString(CultureInfo.InvariantCulture),
                 ["sourceSizeBytes"] = sourceInfo.Length.ToString(CultureInfo.InvariantCulture),
                 ["sourceCreatedUtc"] = sourceInfo.CreationTimeUtc.ToString("O", CultureInfo.InvariantCulture),
                 ["sourceLastWriteUtc"] = sourceInfo.LastWriteTimeUtc.ToString("O", CultureInfo.InvariantCulture),
+                ["sourceMtimeUtc"] = sourceInfo.LastWriteTimeUtc.ToString("O", CultureInfo.InvariantCulture),
+                ["copiedCreatedUtc"] = copiedInfo.CreationTimeUtc.ToString("O", CultureInfo.InvariantCulture),
                 ["copiedLastWriteUtc"] = copiedInfo.LastWriteTimeUtc.ToString("O", CultureInfo.InvariantCulture),
+                ["artifactLastWriteUtc"] = copiedInfo.LastWriteTimeUtc.ToString("O", CultureInfo.InvariantCulture),
+                ["mtimeUtc"] = copiedInfo.LastWriteTimeUtc.ToString("O", CultureInfo.InvariantCulture),
                 ["copiedAtUtc"] = copiedAtUtc.ToString("O", CultureInfo.InvariantCulture),
+                ["collectionName"] = "dropped-files",
                 ["evidenceRole"] = "dropped-file",
+                ["captureEnabled"] = "true",
+                ["implemented"] = "true",
+                ["captureState"] = "captured",
+                ["status"] = "captured",
+                ["nonfatal"] = "false",
+                ["artifactExists"] = copiedInfo.Exists.ToString(CultureInfo.InvariantCulture).ToLowerInvariant(),
+                ["processRole"] = processContext.RootProcessId is null ? "sample-context" : "sample-root-context",
+                ["zhMessage"] = "掉落文件已复制为可下载证据文件。",
+                ["zhHint"] = "请使用 artifactRelativePath 下载复制后的文件；sourceSha256/copiedSha256 可用于比对源文件与证据文件。",
+                ["expectedRelativePath"] = "artifacts/dropped-files/**",
                 ["collectDroppedFiles"] = "true"
             }
         };
+
+        AddDroppedFileProcessContext(evt, processContext);
+        AddDroppedFileSourceEventData(evt, sourceEvent);
+        AddDroppedFileSourceEvidenceData(evt, sourceEvidence);
+        AddDroppedFileHashData(evt, copiedHash, prefix: "copied");
+        if (!string.IsNullOrWhiteSpace(copiedHash.Sha256))
+        {
+            evt.Data["sha256"] = copiedHash.Sha256;
+            evt.Data["artifactSha256"] = copiedHash.Sha256;
+            evt.Data["hashAlgorithm"] = "sha256";
+        }
+
+        return evt;
     }
 
     /// <summary>
@@ -1718,29 +1972,505 @@ internal static class AgentProgram
         SandboxEvent sourceEvent,
         string reason,
         string? sourcePath = null,
-        Exception? exception = null)
+        DroppedFileSourceEvidence? sourceEvidence = null,
+        Exception? exception = null,
+        DroppedFileProcessContext? processContext = null)
     {
         var evt = new SandboxEvent
         {
             EventType = "artifact.dropped_file.skipped",
             Source = "guest",
             Path = sourcePath ?? sourceEvent.Path,
+            ProcessName = processContext?.ProcessName,
+            ProcessId = processContext?.RootProcessId,
+            ParentProcessId = processContext?.ParentProcessId,
+            CommandLine = processContext?.CommandLine,
             Data =
             {
+                ["phase"] = "after-run",
+                ["capturePhase"] = "after-run",
                 ["reason"] = reason,
+                ["skipReason"] = reason,
+                ["zhMessage"] = "掉落文件复制被跳过；该事件说明证据缺口，不会中断整体分析。",
+                ["zhHint"] = DroppedFileReasonZhHint(reason),
                 ["sourceEventType"] = sourceEvent.EventType,
                 ["sourcePath"] = sourcePath ?? sourceEvent.Path ?? string.Empty,
+                ["guestFullPath"] = sourcePath ?? sourceEvent.Path ?? string.Empty,
+                ["collectionName"] = "dropped-files",
+                ["evidenceRole"] = "dropped-file",
+                ["captureEnabled"] = "true",
+                ["implemented"] = "true",
+                ["captureState"] = "skipped",
+                ["status"] = "skipped",
+                ["nonfatal"] = "true",
+                ["processRole"] = processContext?.RootProcessId is null ? "sample-context" : "sample-root-context",
+                ["expectedRelativePath"] = "artifacts/dropped-files/**",
                 ["collectDroppedFiles"] = "true"
             }
         };
 
+        AddDroppedFileProcessContext(evt, processContext);
         if (sourceEvent.Data.TryGetValue("relativePath", out var relativePath))
         {
             evt.Data["guestRelativePath"] = relativePath;
         }
 
+        AddDroppedFileSourceEventData(evt, sourceEvent);
+        if (sourceEvidence is not null)
+        {
+            AddDroppedFileSourceEvidenceData(evt, sourceEvidence);
+        }
+
         AddExceptionData(evt, exception);
         return evt;
+    }
+
+    /// <summary>
+    /// Creates a dropped-file lane disabled event when artifact copying was not
+    /// explicitly requested.
+    /// </summary>
+    private static SandboxEvent CreateDroppedFilesDisabledEvent(AgentOptions options, IReadOnlyList<SandboxEvent> events)
+    {
+        var createdFileEventCount = events.Count(static evt => string.Equals(evt.EventType, "file.created", StringComparison.OrdinalIgnoreCase));
+        var processContext = CreateDroppedFileProcessContext(options, events);
+        var evt = new SandboxEvent
+        {
+            EventType = "artifact.dropped_file.disabled",
+            Source = "guest",
+            ProcessName = processContext.ProcessName,
+            ProcessId = processContext.RootProcessId,
+            ParentProcessId = processContext.ParentProcessId,
+            CommandLine = processContext.CommandLine,
+            Data =
+            {
+                ["phase"] = "after-run",
+                ["capturePhase"] = "after-run",
+                ["reason"] = "collectDroppedFilesNotRequested",
+                ["zhMessage"] = "掉落文件复制采集未启用。",
+                ["zhHint"] = "未启用 --collect-dropped-files/--dropped-files，Guest Agent 只记录文件事件，不复制新建文件内容。",
+                ["collectionName"] = "dropped-files",
+                ["evidenceRole"] = "dropped-file",
+                ["captureEnabled"] = "false",
+                ["implemented"] = "true",
+                ["captureState"] = "disabled",
+                ["status"] = "disabled",
+                ["nonfatal"] = "true",
+                ["processRole"] = processContext.RootProcessId is null ? "sample-context" : "sample-root-context",
+                ["expectedRelativePath"] = "artifacts/dropped-files/**",
+                ["collectDroppedFiles"] = "false",
+                ["candidateCreatedFileCount"] = createdFileEventCount.ToString(CultureInfo.InvariantCulture),
+                ["outputDirectory"] = options.OutputDirectory
+            }
+        };
+        AddDroppedFileProcessContext(evt, processContext);
+        return evt;
+    }
+
+    /// <summary>
+    /// Builds best-effort sample-root identity for dropped-file artifact
+    /// events. Inputs are agent options and already-collected events; processing
+    /// prefers process.start and falls back to later root process events; the
+    /// method returns context used only for report attribution.
+    /// </summary>
+    private static DroppedFileProcessContext CreateDroppedFileProcessContext(AgentOptions options, IReadOnlyList<SandboxEvent> events)
+    {
+        var rootEvent = events.FirstOrDefault(static evt => string.Equals(evt.EventType, "process.start", StringComparison.OrdinalIgnoreCase)) ??
+            events.LastOrDefault(static evt =>
+                string.Equals(evt.EventType, "process.exit", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(evt.EventType, "process.timeout", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(evt.EventType, "process.execution_failed", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(evt.EventType, "process.start_failed", StringComparison.OrdinalIgnoreCase));
+        var rootProcessId = rootEvent?.ProcessId ?? ParseNullableInt(FirstEventData(rootEvent, "rootProcessId", "processId"));
+        var parentProcessId = rootEvent?.ParentProcessId ?? ParseNullableInt(FirstEventData(rootEvent, "parentProcessId"));
+        var processName = FirstNonEmpty(
+            rootEvent?.ProcessName,
+            FirstEventData(rootEvent, "processName", "targetProcessName"),
+            SafeFileName(options.SamplePath));
+        var processPath = FirstNonEmpty(
+            rootEvent?.Path,
+            FirstEventData(rootEvent, "processImagePath", "imagePath", "targetProcessPath"),
+            options.SamplePath);
+        var commandLine = FirstNonEmpty(
+            rootEvent?.CommandLine,
+            FirstEventData(rootEvent, "commandLine"),
+            options.SamplePath);
+        var startTimeUtc = ParseNullableDateTimeUtc(FirstEventData(rootEvent, "startTimeUtc", "rootProcessStartTimeUtc"));
+        return new DroppedFileProcessContext(
+            rootProcessId,
+            parentProcessId,
+            string.IsNullOrWhiteSpace(processName) ? null : processName,
+            string.IsNullOrWhiteSpace(processPath) ? null : processPath,
+            string.IsNullOrWhiteSpace(commandLine) ? null : commandLine,
+            startTimeUtc);
+    }
+
+    /// <summary>
+    /// Applies sample-root attribution fields to dropped-file artifact events.
+    /// Inputs are an event and optional process context; processing adds root
+    /// PID, parent PID, root-only lineage, and process-role fields.
+    /// </summary>
+    private static void AddDroppedFileProcessContext(SandboxEvent evt, DroppedFileProcessContext? processContext)
+    {
+        if (processContext is null)
+        {
+            evt.Data.TryAdd("processRole", "sample-context");
+            return;
+        }
+
+        evt.Data["processRole"] = processContext.RootProcessId is null ? "sample-context" : "sample-root-context";
+        if (processContext.RootProcessId is not null)
+        {
+            var rootPid = processContext.RootProcessId.Value.ToString(CultureInfo.InvariantCulture);
+            evt.Data["rootProcessId"] = rootPid;
+            evt.Data.TryAdd("processId", rootPid);
+            evt.Data.TryAdd("treeDepth", "0");
+            evt.Data.TryAdd("treeLineage", rootPid);
+        }
+
+        if (processContext.ParentProcessId is not null)
+        {
+            evt.Data["parentProcessId"] = processContext.ParentProcessId.Value.ToString(CultureInfo.InvariantCulture);
+        }
+
+        AddDataIfNotEmpty(evt.Data, "processName", processContext.ProcessName);
+        AddDataIfNotEmpty(evt.Data, "targetProcessName", processContext.ProcessName);
+        AddDataIfNotEmpty(evt.Data, "processImagePath", processContext.ProcessPath);
+        AddDataIfNotEmpty(evt.Data, "targetProcessPath", processContext.ProcessPath);
+        AddDataIfNotEmpty(evt.Data, "commandLine", processContext.CommandLine);
+        if (processContext.StartTimeUtc is not null)
+        {
+            evt.Data["rootProcessStartTimeUtc"] = processContext.StartTimeUtc.Value.ToString("O", CultureInfo.InvariantCulture);
+        }
+    }
+
+    private static string? FirstEventData(SandboxEvent? evt, params string[] keys)
+    {
+        if (evt is null)
+        {
+            return null;
+        }
+
+        foreach (var key in keys)
+        {
+            if (evt.Data.TryGetValue(key, out var value) && !string.IsNullOrWhiteSpace(value))
+            {
+                return value;
+            }
+        }
+
+        return null;
+    }
+
+    private static int? ParseNullableInt(string? value)
+    {
+        return int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed)
+            ? parsed
+            : null;
+    }
+
+    private static DateTime? ParseNullableDateTimeUtc(string? value)
+    {
+        return DateTime.TryParse(
+            value,
+            CultureInfo.InvariantCulture,
+            DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal,
+            out var parsed)
+            ? parsed
+            : null;
+    }
+
+    private static string DroppedFileReasonZhHint(string reason)
+    {
+        return reason switch
+        {
+            "sourcePathMissing" => "源事件没有可复制路径；请查看原始 file.created 事件。",
+            "sourcePathInvalid" => "源路径无法规范化，可能包含非法路径字符或过长路径。",
+            "sourceFileMissing" => "复制时源文件已经不存在，可能被样本删除或移动。",
+            "outsideWorkingDirectory" => "为避免越界采集，默认只复制样本工作目录下的新建文件。",
+            "underOutputDirectory" => "源文件位于输出目录下，跳过以避免把采集产物再次作为样本掉落物复制。",
+            "destinationPathInvalid" => "无法在 artifacts/dropped-files 下生成安全目标路径。",
+            "copyFailed" => "复制失败；请检查文件锁、权限、路径长度和磁盘空间。",
+            _ => "该掉落文件复制尝试被跳过；请结合 reason、sourcePath 和 exceptionType/message 判断。"
+        };
+    }
+
+    /// <summary>
+    /// Reads source-file evidence for a dropped-file copy or skip event without
+    /// throwing when the file disappears, is locked, or is inaccessible.
+    /// </summary>
+    private static DroppedFileSourceEvidence ReadDroppedFileSourceEvidence(string sourcePath, bool computeHash)
+    {
+        var evidence = new DroppedFileSourceEvidence(sourcePath);
+        try
+        {
+            if (!File.Exists(sourcePath))
+            {
+                return evidence with
+                {
+                    Exists = false,
+                    MetadataStatus = "missing",
+                    HashStatus = computeHash ? "missing" : null
+                };
+            }
+
+            var info = new FileInfo(sourcePath);
+            evidence = evidence with
+            {
+                Exists = true,
+                SizeBytes = info.Length,
+                CreationTimeUtc = info.CreationTimeUtc,
+                LastWriteTimeUtc = info.LastWriteTimeUtc,
+                LastAccessTimeUtc = info.LastAccessTimeUtc
+            };
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException or PathTooLongException)
+        {
+            return evidence with
+            {
+                Exists = null,
+                MetadataStatus = "failed",
+                MetadataExceptionType = ex.GetType().FullName ?? ex.GetType().Name,
+                MetadataMessage = ex.Message
+            };
+        }
+
+        if (!computeHash)
+        {
+            return evidence;
+        }
+
+        var hash = ComputeSha256BestEffort(sourcePath);
+        return evidence with
+        {
+            Sha256 = hash.Sha256,
+            HashStatus = hash.Status,
+            HashExceptionType = hash.ExceptionType,
+            HashMessage = hash.Message
+        };
+    }
+
+    /// <summary>
+    /// Hashes a file for evidence metadata while tolerating write/delete sharing
+    /// races common during malware execution.
+    /// </summary>
+    private static DroppedFileHashResult ComputeSha256BestEffort(string path)
+    {
+        try
+        {
+            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            var hash = System.Security.Cryptography.SHA256.HashData(stream);
+            return new DroppedFileHashResult(Convert.ToHexString(hash).ToLowerInvariant(), "computed", null, null);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException or PathTooLongException)
+        {
+            return new DroppedFileHashResult(null, "failed", ex.GetType().FullName ?? ex.GetType().Name, ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Chooses a non-overwriting destination under artifacts/dropped-files.
+    /// </summary>
+    private static DroppedFileDestination? CreateDroppedFileDestination(
+        string droppedFilesRoot,
+        string outputDirectory,
+        string safeRelativePath,
+        string sourcePath,
+        HashSet<string> usedArtifactRelativePaths)
+    {
+        foreach (var candidateRelativePath in EnumerateDroppedFileDestinationCandidates(safeRelativePath, sourcePath))
+        {
+            string destinationPath;
+            string artifactRelativePath;
+            try
+            {
+                destinationPath = Path.GetFullPath(Path.Combine(droppedFilesRoot, candidateRelativePath));
+                if (!IsSameOrUnderDirectory(destinationPath, droppedFilesRoot))
+                {
+                    continue;
+                }
+
+                artifactRelativePath = NormalizeArtifactRelativePath(Path.GetRelativePath(outputDirectory, destinationPath));
+            }
+            catch (Exception ex) when (ex is ArgumentException or IOException or NotSupportedException or PathTooLongException)
+            {
+                continue;
+            }
+
+            if (usedArtifactRelativePaths.Contains(artifactRelativePath) || File.Exists(destinationPath))
+            {
+                continue;
+            }
+
+            return new DroppedFileDestination(destinationPath, artifactRelativePath);
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Generates deterministic collision-avoidance names for copied drops.
+    /// </summary>
+    private static IEnumerable<string> EnumerateDroppedFileDestinationCandidates(string safeRelativePath, string sourcePath)
+    {
+        yield return safeRelativePath;
+
+        var directory = Path.GetDirectoryName(safeRelativePath);
+        var fileName = Path.GetFileName(safeRelativePath);
+        var stem = Path.GetFileNameWithoutExtension(fileName);
+        var extension = Path.GetExtension(fileName);
+        if (string.IsNullOrWhiteSpace(stem))
+        {
+            stem = "_";
+        }
+
+        var suffix = ShortStableId(sourcePath);
+        for (var index = 1; index <= 1000; index++)
+        {
+            var numberedSuffix = index == 1
+                ? suffix
+                : $"{suffix}.{index.ToString(CultureInfo.InvariantCulture)}";
+            var candidateFileName = $"{stem}.{numberedSuffix}{extension}";
+            yield return string.IsNullOrWhiteSpace(directory)
+                ? candidateFileName
+                : Path.Combine(directory, candidateFileName);
+        }
+    }
+
+    /// <summary>
+    /// Creates a short stable identifier from source path text for name
+    /// collision avoidance without reading source contents.
+    /// </summary>
+    private static string ShortStableId(string value)
+    {
+        var bytes = System.Text.Encoding.UTF8.GetBytes(value);
+        var hash = System.Security.Cryptography.SHA256.HashData(bytes);
+        return Convert.ToHexString(hash.AsSpan(0, 4)).ToLowerInvariant();
+    }
+
+    /// <summary>
+    /// Copies file.created source-event size/time diagnostics onto copy
+    /// outcome events so skips can be explained even if the source vanished.
+    /// </summary>
+    private static void AddDroppedFileSourceEventData(SandboxEvent evt, SandboxEvent sourceEvent)
+    {
+        if (sourceEvent.Data.TryGetValue("relativePath", out var relativePath) && !string.IsNullOrWhiteSpace(relativePath))
+        {
+            evt.Data["sourceEventRelativePath"] = relativePath;
+            evt.Data.TryAdd("guestRelativePath", relativePath);
+        }
+
+        if (sourceEvent.Data.TryGetValue("sizeBytes", out var sizeBytes) && !string.IsNullOrWhiteSpace(sizeBytes))
+        {
+            evt.Data["sourceEventSizeBytes"] = sizeBytes;
+        }
+
+        if (sourceEvent.Data.TryGetValue("lastWriteUtc", out var lastWriteUtc) && !string.IsNullOrWhiteSpace(lastWriteUtc))
+        {
+            evt.Data["sourceEventLastWriteUtc"] = lastWriteUtc;
+        }
+    }
+
+    /// <summary>
+    /// Copies best-effort live source-file evidence onto dropped-file copy or
+    /// skip events.
+    /// </summary>
+    private static void AddDroppedFileSourceEvidenceData(SandboxEvent evt, DroppedFileSourceEvidence evidence)
+    {
+        if (!string.IsNullOrWhiteSpace(evidence.SourcePath))
+        {
+            evt.Data["sourcePath"] = evidence.SourcePath;
+            evt.Data["guestFullPath"] = evidence.SourcePath;
+        }
+
+        if (evidence.Exists is not null)
+        {
+            evt.Data["sourceExists"] = evidence.Exists.Value.ToString(CultureInfo.InvariantCulture).ToLowerInvariant();
+            evt.Data["sourceMissing"] = (!evidence.Exists.Value).ToString(CultureInfo.InvariantCulture).ToLowerInvariant();
+        }
+
+        if (evidence.SizeBytes is not null)
+        {
+            evt.Data["sourceSizeBytes"] = evidence.SizeBytes.Value.ToString(CultureInfo.InvariantCulture);
+        }
+
+        if (evidence.CreationTimeUtc is not null)
+        {
+            evt.Data["sourceCreatedUtc"] = evidence.CreationTimeUtc.Value.ToString("O", CultureInfo.InvariantCulture);
+        }
+
+        if (evidence.LastWriteTimeUtc is not null)
+        {
+            evt.Data["sourceLastWriteUtc"] = evidence.LastWriteTimeUtc.Value.ToString("O", CultureInfo.InvariantCulture);
+            evt.Data["sourceMtimeUtc"] = evidence.LastWriteTimeUtc.Value.ToString("O", CultureInfo.InvariantCulture);
+        }
+
+        if (evidence.LastAccessTimeUtc is not null)
+        {
+            evt.Data["sourceLastAccessUtc"] = evidence.LastAccessTimeUtc.Value.ToString("O", CultureInfo.InvariantCulture);
+        }
+
+        if (!string.IsNullOrWhiteSpace(evidence.MetadataStatus))
+        {
+            evt.Data["sourceMetadataStatus"] = evidence.MetadataStatus;
+        }
+
+        if (!string.IsNullOrWhiteSpace(evidence.MetadataExceptionType))
+        {
+            evt.Data["sourceMetadataExceptionType"] = evidence.MetadataExceptionType;
+        }
+
+        if (!string.IsNullOrWhiteSpace(evidence.MetadataMessage))
+        {
+            evt.Data["sourceMetadataMessage"] = evidence.MetadataMessage;
+        }
+
+        if (!string.IsNullOrWhiteSpace(evidence.Sha256))
+        {
+            evt.Data["sourceSha256"] = evidence.Sha256;
+            evt.Data["sourceHashAlgorithm"] = "sha256";
+        }
+
+        if (!string.IsNullOrWhiteSpace(evidence.HashStatus))
+        {
+            evt.Data["sourceHashStatus"] = evidence.HashStatus;
+        }
+
+        if (!string.IsNullOrWhiteSpace(evidence.HashExceptionType))
+        {
+            evt.Data["sourceHashExceptionType"] = evidence.HashExceptionType;
+        }
+
+        if (!string.IsNullOrWhiteSpace(evidence.HashMessage))
+        {
+            evt.Data["sourceHashMessage"] = evidence.HashMessage;
+        }
+    }
+
+    /// <summary>
+    /// Copies hash status metadata with the requested prefix.
+    /// </summary>
+    private static void AddDroppedFileHashData(SandboxEvent evt, DroppedFileHashResult hash, string prefix)
+    {
+        if (!string.IsNullOrWhiteSpace(hash.Sha256))
+        {
+            evt.Data[$"{prefix}Sha256"] = hash.Sha256;
+            evt.Data[$"{prefix}HashAlgorithm"] = "sha256";
+        }
+
+        if (!string.IsNullOrWhiteSpace(hash.Status))
+        {
+            evt.Data[$"{prefix}HashStatus"] = hash.Status;
+        }
+
+        if (!string.IsNullOrWhiteSpace(hash.ExceptionType))
+        {
+            evt.Data[$"{prefix}HashExceptionType"] = hash.ExceptionType;
+        }
+
+        if (!string.IsNullOrWhiteSpace(hash.Message))
+        {
+            evt.Data[$"{prefix}HashMessage"] = hash.Message;
+        }
     }
 
     /// <summary>
@@ -1842,6 +2572,22 @@ internal static class AgentProgram
     }
 
     /// <summary>
+    /// Reads a process start time without failing if the process exits quickly
+    /// or denies metadata access.
+    /// </summary>
+    private static DateTime? SafeProcessStartTimeUtc(Process process)
+    {
+        try
+        {
+            return process.StartTime.ToUniversalTime();
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or Win32Exception or NotSupportedException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
     /// Reads a process exit code defensively.
     /// The input is a Process object, processing catches invalid state, and the
     /// method returns the exit code as text or "unknown".
@@ -1874,6 +2620,49 @@ internal static class AgentProgram
         Task StandardOutputTask,
         Task StandardErrorTask,
         string CommandLine);
+
+    private sealed record DroppedFileDestination(string FullPath, string ArtifactRelativePath);
+
+    private sealed record DroppedFileProcessContext(
+        int? RootProcessId,
+        int? ParentProcessId,
+        string? ProcessName,
+        string? ProcessPath,
+        string? CommandLine,
+        DateTime? StartTimeUtc);
+
+    private sealed record DroppedFileHashResult(
+        string? Sha256,
+        string Status,
+        string? ExceptionType,
+        string? Message);
+
+    private sealed record DroppedFileSourceEvidence(string SourcePath)
+    {
+        public bool? Exists { get; init; }
+
+        public long? SizeBytes { get; init; }
+
+        public DateTime? CreationTimeUtc { get; init; }
+
+        public DateTime? LastWriteTimeUtc { get; init; }
+
+        public DateTime? LastAccessTimeUtc { get; init; }
+
+        public string? Sha256 { get; init; }
+
+        public string? HashStatus { get; init; }
+
+        public string? HashExceptionType { get; init; }
+
+        public string? HashMessage { get; init; }
+
+        public string? MetadataStatus { get; init; }
+
+        public string? MetadataExceptionType { get; init; }
+
+        public string? MetadataMessage { get; init; }
+    }
 
     private sealed record FileSnapshot(long SizeBytes, DateTime LastWriteUtc);
 
@@ -1985,12 +2774,12 @@ internal sealed record AgentOptions
 
         if (!values.TryGetValue("sample", out var samplePath) || !File.Exists(samplePath))
         {
-            throw new ArgumentException("--sample must point to an existing executable.");
+            throw new ArgumentException("--sample must point to an existing executable. / --sample 必须指向 guest 内存在的可执行样本文件。");
         }
 
         if (!values.TryGetValue("out", out var outputDirectory) || string.IsNullOrWhiteSpace(outputDirectory))
         {
-            throw new ArgumentException("--out is required.");
+            throw new ArgumentException("--out is required. / 必须使用 --out 指定 Guest Agent 输出目录。");
         }
 
         var duration = values.TryGetValue("duration", out var rawDuration) && int.TryParse(rawDuration, out var parsedDuration)

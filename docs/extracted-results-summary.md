@@ -6,6 +6,11 @@
 它不替代详细设计文档，而是把“为什么这样做、当前做到了哪里、后续还
 需要补什么”串成一条清晰主线。
 
+> Canonical status note：本文保留为研究/阐述背景，不再作为当前 MVP 状态的
+> source of truth。当前 operator chain、MVP 状态和文档主次关系见
+> `docs/current-architecture-and-operations.md` 与 `docs/README.md`。下文中的
+> 早期缺口描述如与这些 canonical 文档冲突，以 canonical 文档为准。
+
 相关详细文档：
 
 - `docs/microstep-report-benchmark.md`：微步风格沙箱报告结构提取结果。
@@ -26,8 +31,9 @@ KSwordSandbox 当前已经形成一条可演进的 Windows 沙箱主链路：
 6. Report Renderer 生成本地 `report.json` 和 `report.html`。
 
 这条链路已经具备“从样本到报告”的工程骨架，并且 Host 侧已经完成 Guest
-输出导入、规则重跑、报告再生成和 WebUI live raw events 监控。当前尚未在
-真实 Hyper-V VM 内完成一次带凭据的 live 端到端验证。
+输出导入、规则重跑、报告再生成和 WebUI live raw events 监控。后续本地验证已在
+`docs/webui-real-r0-e2e.md` 记录：WebUI/API + Hyper-V + Guest Agent + real R0Collector
+路径完成过一次 live 端到端导入和默认/中文/英文 HTML 报告生成。
 
 ## 微步报告提取结果
 
@@ -54,7 +60,8 @@ KSwordSandbox 当前已经形成一条可演进的 Windows 沙箱主链路：
 - HTML 报告：封面、目录、风险摘要、行为命中、MITRE、静态、动态、
   进程、落地文件、网络、失败原因和原始事件区块。
 
-后续需要增强的部分：
+原始对标提出的增强方向（其中多项已经部分落地，当前实现状态以
+`docs/current-architecture-and-operations.md`、`docs/progress.md` 和专题文档为准）：
 
 - 截图、DNS/HTTP/TLS、注册表、系统范围文件行为和进程树归因。
 - Yara 扫描、导入表、导出表、TLS 回调、更多 PE 异常标签。
@@ -136,14 +143,19 @@ guest-side `R0Collector.exe` 已经作为 sidecar 接入当前链路：
 4. 重新生成 `report.json` / `report.html`。
 5. 在 WebUI 展示执行结果、失败步骤、live raw events 和最终报告入口。
 
-仍需在真实 VM 中完成验证的点：
+后续真实 VM 验证仍需反复覆盖的点（一次 real-R0 live evidence 已记录在
+`docs/webui-real-r0-e2e.md`，这里保留为复验清单）：
 
 1. PowerShell Direct 或 Guest Service Interface 需要可用 guest 凭据。
 2. Guest Agent、R0Collector、可选测试签名驱动需要预部署到 golden VM。
-3. live runbook 需要使用无害测试 EXE 完成一次启动、执行、回收、导入、
-   报告生成和环境清理。
+3. live runbook 使用无害测试 EXE 完成启动、执行、回收、导入、报告生成和环境清理后，
+   仍需在后续变更中复验，避免 VM/payload/driver drift。
 
-## 当前项目状态
+## 当前项目状态（historical narrative）
+
+> 下面保留早期阐述结构；当前可提交状态请以
+> `docs/current-architecture-and-operations.md`、`docs/progress.md` 和
+> `docs/webui-real-r0-e2e.md` 为准。
 
 已经完成：
 
@@ -158,13 +170,15 @@ guest-side `R0Collector.exe` 已经作为 sidecar 接入当前链路：
 - Driver R0 event ring、file minifilter producer 和 file payload typed parser。
 - 文档化的黄金 VM、驱动签名、报告结构和执行 runbook。
 
-仍未完成：
+仍需持续增强：
 
-- 在真实 Hyper-V VM 上完成端到端验证；当前缺 guest 密码/凭据。
-- R0 process/image callback 和 registry callback 还未合入主工作区。
-- 更完整的网络、截图、进程树归因和报告视觉 polish。
+- 真实 Hyper-V + Guest Agent + real R0 路径已有一次本地 live evidence，但仍需在后续变更中重复
+  readiness、WebUI/API E2E、driver ABI/self-noise 和 artifact/report 验证。
+- R0 process/image/registry/network/file producer 路径已进入当前源码/文档主线；后续重点是 ABI
+  hardening、stress/unload/reload、过滤和降噪质量。
+- 网络、截图、进程树归因、artifact cards 和报告视觉 polish 仍是可继续增强方向。
 
-当前本机 Hyper-V 背景线程结果：
+早期本机 Hyper-V 背景线程结果（historical only）：
 
 - VM 名称：`KSwordSandbox-Win10-Golden`。
 - VM 状态：`Off`。
@@ -200,7 +214,7 @@ Codex UI 会把提示词第一行作为标题。如果第一行都是
 
 ## 可用于阐述的主线
 
-对外阐述时可以按以下顺序表达：
+对外阐述时可以按以下顺序表达（当前状态以 canonical docs 为准）：
 
 1. 目标不是提交恶意样本或 VM 镜像，而是建设本地可控的分析框架。
 2. 参考成熟沙箱报告结构，把输出目标定义为“摘要优先、证据可追溯”。
@@ -208,13 +222,15 @@ Codex UI 会把提示词第一行作为标题。如果第一行都是
 4. 先用 dry-run 保证 Hyper-V 操作可审计，再逐步打开 live 执行。
 5. 所有采集结果统一进入 `SandboxEvent`，减少后续模块耦合。
 6. 报告从 `SandboxEvent + StaticAnalysis + RuleFinding` 生成，便于后续扩展。
-7. 下一阶段重点是做真实 VM live 验证，并合入 R0 process/image/registry
-   producer。
+7. 下一阶段重点是把已经跑通过的 live/R0 链路变成更稳定的 operator experience：
+   readiness、recovery、ABI/stress validation、artifact/report polish 和更安全的 VM isolation。
 
-## 下一阶段优先级
+## 下一阶段优先级（updated direction）
 
-1. 设置 guest 凭据并在 `KSwordSandbox-Win10-Golden` 上跑 live runbook。
-2. 预部署 Guest Agent、R0Collector、可选测试签名 driver 到 golden VM。
-3. 合入 process/image callback，输出 `driver.process` 和 `image.load`。
-4. 合入 registry callback，输出 `driver.registry`。
-5. 用无害测试 EXE 完成真实端到端：启动 VM、运行样本、回收事件、生成报告。
+1. 在目标 host 上重复只读 readiness 和 WebUI/API dry-run；只有 readiness 通过后才从 elevated shell
+   运行 `-Live`。
+2. 用无害测试 EXE 周期性复验真实端到端：启动 VM、运行样本、回收 guest/R0 events、生成 bilingual
+   HTML report，并确认 runtime artifacts 仍在仓库外。
+3. 加强 R0 ABI/self-check、producer stress、unload/reload 和 self-noise filtering。
+4. 继续改进 artifact cards、timeline/process-tree/network evidence 和报告阅读体验。
+5. 从单一 golden VM restore 逐步演进到更安全的 temporary VM 或 differencing-disk isolation。

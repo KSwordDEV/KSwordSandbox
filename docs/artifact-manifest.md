@@ -1,5 +1,15 @@
 # Artifact manifest and host index
 
+Canonical scope: this page owns the `artifacts/manifest.json` and host
+`artifact-index.json` schema/selector contract. `docs/artifacts.md` owns the
+collection lanes and import behavior; `docs/report-schema.md` owns how indexed
+artifacts appear in `AnalysisReport` and HTML reports.
+
+Manifest and index files are generated runtime evidence. They are documented
+here for contract stability but should stay under the runtime root (normally
+`D:\Temp\KSwordSandbox`) and must not be committed with job outputs, samples,
+payload binaries, VM files, reports, packet captures, or dumps.
+
 Artifact evidence uses the shared
 `KSword.Sandbox.Abstractions.Artifacts` contracts.
 

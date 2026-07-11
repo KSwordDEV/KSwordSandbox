@@ -45,6 +45,22 @@ Recommended collector startup:
 7. Use `IOCTL_KSWORD_SANDBOX_POLL` and `IOCTL_KSWORD_SANDBOX_READ_EVENTS` for
    the event stream.
 
+## Installation and live-load boundary
+
+The ABI contract above starts only after an operator has explicitly loaded the
+driver in an isolated test VM. Installation, test-signing, service control, and
+minifilter load/unload are documented in `docs/driver-install.md` and use
+`scripts/Manage-SandboxDriver.ps1` for JSON status. That path intentionally
+does not call CSignTool: a test-signed build must use a trusted local test
+certificate, Windows test-signing mode, and a reboot after `bcdedit` changes.
+
+Static readiness and synthetic stress checks remain no-device checks. They must
+not mutate SCM state, load or unload the minifilter, open
+`\\.\KSwordSandboxDriver`, call DeviceIoControl, or call CSignTool. Live
+collector validation may open the device only after the explicit driver
+install/start step has succeeded and the JSON status reports the expected
+service/minifilter state.
+
 Current `CapabilityFlags` include:
 
 - `KSWORD_SANDBOX_CAPABILITY_FLAG_GET_HEALTH`
@@ -62,6 +78,49 @@ Current `CapabilityFlags` include:
 - `KSWORD_SANDBOX_CAPABILITY_FLAG_FILE_MINIFILTER`
 - `KSWORD_SANDBOX_CAPABILITY_FLAG_REGISTRY_CALLBACK`
 - `KSWORD_SANDBOX_CAPABILITY_FLAG_NETWORK_WFP_ALE`
+- `KSWORD_SANDBOX_CAPABILITY_FLAG_EVENT_COMMON_METADATA`
+- `KSWORD_SANDBOX_CAPABILITY_FLAG_PRODUCER_METADATA`
+- `KSWORD_SANDBOX_CAPABILITY_FLAG_SELF_NOISE_METADATA`
+
+## Producer runtime state and payload versions
+
+Each v1 event producer owns an explicit runtime state structure in the driver
+source instead of scattering loose callback globals:
+
+- process: `KSWORD_SANDBOX_PROCESS_MONITOR_RUNTIME`
+- image: `KSWORD_SANDBOX_IMAGE_MONITOR_RUNTIME`
+- registry: `KSWORD_SANDBOX_REGISTRY_MONITOR_RUNTIME`
+- file: `KSWORD_SANDBOX_FILE_FILTER_RUNTIME`
+- network: `KSWORD_SANDBOX_NETWORK_WFP_RUNTIME`
+
+Initialization validates the shared device extension signature before a producer
+can publish callbacks, stores the v1 payload version in runtime state, and keeps
+registration/start status for health diagnostics. Teardown clears `Active` before
+unregistering callbacks, uses `Uninitializing` guards for idempotent unload paths,
+and drops stale device-extension pointers before the control device is deleted.
+
+Current typed payload versions are fixed at `0x00010000` for process, image,
+registry, file, and network v1 layouts. Those values are producer-stamped on
+emitted records. Future field growth must use a new negotiated version or an
+explicit draft/successor structure; it must not silently change the existing v1
+layout.
+
+V1 typed payload checklist:
+
+- file: `KSWORD_SANDBOX_FILE_EVENT_PAYLOAD`,
+  `KSWORD_SANDBOX_FILE_EVENT_VERSION`, size 128 bytes.
+- process: `KSWORD_SANDBOX_PROCESS_EVENT_PAYLOAD`,
+  `KSWORD_SANDBOX_PROCESS_EVENT_VERSION`, size 128 bytes.
+- image: `KSWORD_SANDBOX_IMAGE_EVENT_PAYLOAD`,
+  `KSWORD_SANDBOX_IMAGE_EVENT_VERSION`, size 128 bytes.
+- registry: `KSWORD_SANDBOX_REGISTRY_EVENT_PAYLOAD`,
+  `KSWORD_SANDBOX_REGISTRY_EVENT_VERSION`, size 128 bytes.
+- network: `KSWORD_SANDBOX_NETWORK_EVENT_PAYLOAD`,
+  `KSWORD_SANDBOX_NETWORK_EVENT_VERSION`, size 112 bytes.
+
+Each payload comment in `KSwordSandboxDriverIoctl.h` states that `Version` must
+match the corresponding `KSWORD_SANDBOX_*_EVENT_VERSION` constant and `Size`
+must match `sizeof(the payload structure)` for the fixed v1 layout.
 
 ## GET_HEALTH producer-mask snapshot
 

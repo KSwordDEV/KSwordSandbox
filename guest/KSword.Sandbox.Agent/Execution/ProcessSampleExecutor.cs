@@ -44,7 +44,9 @@ internal sealed class ProcessSampleExecutor : ISampleExecutor
                 Path = plan.SamplePath,
                 Data =
                 {
-                    ["message"] = "Process.Start returned null."
+                    ["message"] = "Process.Start returned null. / Process.Start 返回空进程对象。",
+                    ["zhMessage"] = "样本进程未能启动，Process.Start 返回空进程对象。",
+                    ["zhHint"] = "请检查样本路径、执行权限、文件完整性以及 guest 安全策略。"
                 }
             });
             return new SampleExecutionResult { Started = false, Events = events };
@@ -86,7 +88,9 @@ internal sealed class ProcessSampleExecutor : ISampleExecutor
                 Path = plan.SamplePath,
                 Data =
                 {
-                    ["timeoutSeconds"] = plan.Duration.TotalSeconds.ToString("0", CultureInfo.InvariantCulture)
+                    ["timeoutSeconds"] = plan.Duration.TotalSeconds.ToString("0", CultureInfo.InvariantCulture),
+                    ["zhMessage"] = "样本超过配置时长仍未退出，执行器将终止进程树。",
+                    ["zhHint"] = "如果这是预期长驻样本，请增加 duration；否则查看超时前后的行为事件。"
                 }
             });
 
@@ -221,7 +225,9 @@ internal sealed class ProcessSampleExecutor : ISampleExecutor
             Data =
             {
                 ["exceptionType"] = exception.GetType().FullName ?? exception.GetType().Name,
-                ["message"] = exception.Message
+                ["message"] = exception.Message,
+                ["zhMessage"] = "样本执行流程发生异常；该事件用于说明执行诊断问题。",
+                ["zhHint"] = "请结合 eventType、exceptionType/message、样本路径和权限判断启动、等待或终止失败原因。"
             }
         };
     }

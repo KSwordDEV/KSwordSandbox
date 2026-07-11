@@ -1,4 +1,26 @@
-# Local install and credential handling
+# 本地安装与凭据处理 / Local install and credential handling
+
+本页中文优先。命令参数名（如 `-Mode`、`-PromptPassword`）和机器可读
+JSON key（如 `RecommendedActions`、`SecretValuePrinted`）保持英文，不翻译。
+
+普通用户遇到错误时，先看脚本输出里的“下一步”。常见修复顺序：
+
+1. 先运行 `.\install.ps1 -Mode CheckEnvironment` 查看缺口；该命令不会启动、
+   还原或停止 VM，也不会打印密码/API key。
+2. 缺少本机配置或密码时，运行
+   `.\install.ps1 -Mode Install -PromptPassword`。
+3. 缺少 VM/快照时，运行
+   `.\install.ps1 -Mode Change -UpdateHyperVConfig -VmName <VM> -CheckpointName <Snapshot>`。
+4. 缺少 Guest Agent/R0Collector payload 时，运行
+   `.\scripts\Prepare-GuestPayload.ps1 -RepoRoot . -PayloadRoot <payloadRoot> -GuestWorkingDirectory <guestRoot> -SelfContained`。
+5. 真实 R0 采集缺少 driver path 时，运行
+   `.\install.ps1 -Mode Change -UpdateHyperVConfig -DriverHostPath <test-signed .sys>`；
+   只验证链路时可在本机 `sandbox.local.json` 设置
+   `driver.useMockCollector=true`。
+
+English summary: this installer prepares local operator state and secrets only;
+it does not sign drivers, does not call `CSignTool.exe`, and does not write
+secrets into git.
 
 `install.ps1` prepares local operator settings for KSwordSandbox. It is meant
 for a lab host or contributor workstation, not for committing secrets.
@@ -53,7 +75,7 @@ The Change menu includes:
 - change the recorded guest username;
 - recreate runtime folders and local config;
 - show Hyper-V readiness/status;
-- manage guest test-signing;
+- manage host/guest test-signing guidance and guest test-signing changes;
 - prepare Guest Agent/R0Collector payload through
   `.\scripts\Prepare-GuestPayload.ps1`;
 - configure optional VirusTotal API key;
@@ -169,9 +191,16 @@ Driver/test-signing notes for release packaging:
   `driver.useMockCollector=true` or `driver.enabled=false`; `install.ps1`
   intentionally keeps the release CLI focused on the driver path and guest
   test-signing switch.
+- `-ShowTestSigningGuidance` prints a read-only host/guest test-signing guide:
+  host test-signing is a host boot setting for isolated lab hosts that must
+  load a test-signed kernel driver, while guest test-signing is the golden VM
+  boot setting normally needed for real R0 analysis.
 - `-EnableGuestTestSigning`, `-DisableGuestTestSigning`, and
   `-QueryGuestTestSigning` delegate to the VM-side test-signing helper and are
   explicit `Change` actions. Non-interactive enable/disable requires `-Force`.
+- Test-signing does not sign the driver. The test-certificate helper uses
+  ordinary Windows SDK `signtool.exe` when available and clearly reports
+  skipped signing if `signtool.exe` is missing.
 - Keep certificates, PFX files, driver binaries, and signing output outside the
   repository. Use status/readiness output to verify path presence without
   printing secrets.
@@ -199,6 +228,9 @@ live execution:
   `driver.hostDriverPath` with
   `.\install.ps1 -Mode Change -UpdateHyperVConfig -DriverHostPath <test-signed .sys>`,
   enable `driver.useMockCollector=true`, or set `driver.enabled=false`.
+- unsure about host/guest test-signing: use
+  `.\install.ps1 -Mode Change -ShowTestSigningGuidance`; this is guidance-only
+  and does not change host or guest boot settings.
 
 Preview local Hyper-V config writes:
 
@@ -270,6 +302,12 @@ warning and still starts for upload, planning, dry-run runbooks, and
 configuration review. Fix the payload before live Hyper-V execution, or run
 `.\run.ps1 -RequirePayloadForWebUI` when you want payload preparation failure to
 stop startup.
+
+If `run.ps1` only finds the repository template `config\sandbox.example.json`,
+it stops with a Chinese "本机配置未就绪" message instead of silently starting
+with placeholder VM/checkpoint values. Re-run the installer menu, choose
+`Install / prepare local settings`, then confirm VM/checkpoint/driver path under
+`Change settings`.
 
 ## Optional VirusTotal key
 
@@ -389,3 +427,38 @@ The installer does not sign drivers and must not call `CSignTool.exe` or the
 legacy `scripts\Sign-SandboxDriverWithKswordCSignTool.ps1` wrapper. Optional
 real-driver lab validation is separate from install/run packaging and should use
 the documented Windows test-signing path outside this repository.
+
+## 产品化安装/状态检查补充
+
+中文优先：`install.ps1` 的 `Status` 和 `CheckEnvironment` 是只读检查入口，默认不启动、
+不还原、不停止 VM，也不打印 guest password 或 VT key 值。建议首次安装或迁移便携包后先运行：
+
+```powershell
+.\install.ps1 -Mode Status
+.\install.ps1 -Mode CheckEnvironment
+```
+
+状态输出会集中展示这些维度：
+
+- Hyper-V：`HyperVModuleAvailable`、`VmExists`、`CheckpointExists`、`VmProfile`、
+  `VmGuestServiceInterfaceEnabled`，并在 `RecommendedActions` 给出缺失 VM、missing checkpoint、
+  Guest Service Interface 等修复命令。
+- 测试签名：`HostTestSigningState` 只读显示宿主 test-signing 状态；guest test-signing 仍必须通过
+  `-QueryGuestTestSigning`、`-EnableGuestTestSigning` 或交互菜单显式执行。
+- driver：`DriverHostPathExists`、`DriverSignatureStatus`、`DriverServiceStatus`、
+  `DriverServiceState`、`DriverMiniFilterLoaded`。普通 WebUI/PlanOnly 不要求加载 driver；真实 R0
+  前再按 `DriverServiceStatusCommand` 或 `scripts\Manage-SandboxDriver.ps1 -Action Status` 查看。
+- guest password：只显示 `ProcessSecretSet`、`UserSecretSet`、`MachineSecretSet` 和
+  `GuestPasswordGuidance`，不会输出、摘要或回显密码值。The password value is never printed.
+
+VM profile 的来源是本机安装状态和 `sandbox.local.json`，不要修改仓库模板保存本机 VM 名称、
+checkpoint、guest path、driver path 或 secret。需要更新时继续使用：
+
+```powershell
+.\install.ps1 -Mode Change -UpdateHyperVConfig -VmName <VM> -CheckpointName <Checkpoint>
+.\install.ps1 -Mode Change -QueryGuestTestSigning
+.\install.ps1 -Mode Change -ShowTestSigningGuidance
+```
+
+打包/发布边界不变：安装器 does not sign drivers and must not call `CSignTool.exe`；便携包也不应包含
+本机 `sandbox.local.json`、`install-state.json`、DPAPI 备份、样本、报告、VM 磁盘/快照或仓库构建二进制。

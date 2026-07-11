@@ -26,7 +26,25 @@ internal static class SmokeTestProgram
     {
         try
         {
+            var scenarioSelection = ScenarioSelection.Parse(args);
             var repositoryRoot = ResolveRepositoryRoot(AppContext.BaseDirectory);
+            if (scenarioSelection.ListScenarios)
+            {
+                foreach (var scenario in CreateScenarioInstances())
+                {
+                    Console.WriteLine(scenario.ScenarioId);
+                }
+
+                return 0;
+            }
+
+            if (scenarioSelection.HasFilters)
+            {
+                AssertScenarioContracts(repositoryRoot, scenarioSelection);
+                Console.WriteLine("Selected smoke scenarios passed.");
+                return 0;
+            }
+
             var rules = RuleEngine.LoadRuleSet(Path.Combine(repositoryRoot, "rules", "behavior-rules.json"));
             Assert(rules.Rules.Count > 0, "rules should load");
             AssertRuleClassification(rules);
@@ -50,7 +68,7 @@ internal static class SmokeTestProgram
     /// root and executes source/docs contract checks; the method returns no
     /// value when every scenario passes.
     /// </summary>
-    private static void AssertScenarioContracts(string repositoryRoot)
+    private static void AssertScenarioContracts(string repositoryRoot, ScenarioSelection? scenarioSelection = null)
     {
         var runtimeRoot = Path.Combine(Path.GetTempPath(), "KSwordSandboxScenarioSmoke", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(runtimeRoot);
@@ -59,7 +77,20 @@ internal static class SmokeTestProgram
             RepositoryRoot = repositoryRoot,
             RuntimeRoot = runtimeRoot
         };
-        var suite = new SmokeTestSuite(CreateScenarioInstances());
+        var scenarios = CreateScenarioInstances();
+        if (scenarioSelection is { HasFilters: true })
+        {
+            var filtered = scenarios
+                .Where(scenario => scenarioSelection.Matches(scenario.ScenarioId))
+                .ToList();
+            Assert(
+                filtered.Count > 0,
+                "No smoke scenarios matched the requested filter(s). Available scenarios: " +
+                string.Join(", ", scenarios.Select(scenario => scenario.ScenarioId)));
+            scenarios = filtered;
+        }
+
+        var suite = new SmokeTestSuite(scenarios);
         var results = suite.RunAsync(context).GetAwaiter().GetResult();
         foreach (var result in results)
         {
@@ -86,6 +117,91 @@ internal static class SmokeTestProgram
             .Select(type => (ISmokeTestScenario)Activator.CreateInstance(type)!)
             .OrderBy(scenario => scenario.ScenarioId, StringComparer.OrdinalIgnoreCase)
             .ToList();
+    }
+
+    /// <summary>
+    /// Describes optional scenario filters for quick quality gates.
+    /// Inputs are smoke-test command-line arguments; processing accepts
+    /// --scenario, --scenario-prefix, and --list-scenarios; the value is used
+    /// to run a targeted subset without invoking broader smoke coverage.
+    /// </summary>
+    private sealed record ScenarioSelection(
+        IReadOnlyList<string> ScenarioIds,
+        IReadOnlyList<string> ScenarioPrefixes,
+        bool ListScenarios)
+    {
+        public bool HasFilters => ScenarioIds.Count > 0 || ScenarioPrefixes.Count > 0;
+
+        public static ScenarioSelection Parse(IReadOnlyList<string> args)
+        {
+            var ids = new List<string>();
+            var prefixes = new List<string>();
+            var listScenarios = false;
+
+            for (var index = 0; index < args.Count; index++)
+            {
+                var arg = args[index];
+                if (string.Equals(arg, "--list-scenarios", StringComparison.OrdinalIgnoreCase))
+                {
+                    listScenarios = true;
+                    continue;
+                }
+
+                if (TryReadOptionValue(args, ref index, arg, "--scenario", out var scenarioValue) ||
+                    TryReadOptionValue(args, ref index, arg, "--scenario-id", out scenarioValue) ||
+                    TryReadOptionValue(args, ref index, arg, "-s", out scenarioValue))
+                {
+                    AddValues(ids, scenarioValue);
+                    continue;
+                }
+
+                if (TryReadOptionValue(args, ref index, arg, "--scenario-prefix", out var prefixValue))
+                {
+                    AddValues(prefixes, prefixValue);
+                }
+            }
+
+            return new ScenarioSelection(ids, prefixes, listScenarios);
+        }
+
+        public bool Matches(string scenarioId)
+        {
+            return ScenarioIds.Any(id => string.Equals(id, scenarioId, StringComparison.OrdinalIgnoreCase)) ||
+                ScenarioPrefixes.Any(prefix => scenarioId.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+        }
+
+        private static bool TryReadOptionValue(
+            IReadOnlyList<string> args,
+            ref int index,
+            string arg,
+            string optionName,
+            out string value)
+        {
+            value = string.Empty;
+            if (arg.StartsWith(optionName + "=", StringComparison.OrdinalIgnoreCase))
+            {
+                value = arg[(optionName.Length + 1)..];
+                return true;
+            }
+
+            if (string.Equals(arg, optionName, StringComparison.OrdinalIgnoreCase) &&
+                index + 1 < args.Count)
+            {
+                index++;
+                value = args[index];
+                return true;
+            }
+
+            return false;
+        }
+
+        private static void AddValues(List<string> values, string rawValue)
+        {
+            foreach (var value in rawValue.Split([',', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            {
+                values.Add(value);
+            }
+        }
     }
 
     /// <summary>

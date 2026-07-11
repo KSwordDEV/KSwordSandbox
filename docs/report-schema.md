@@ -1,9 +1,21 @@
 # Report schema
 
+Canonical scope: this page owns the `AnalysisReport` JSON and rendered HTML
+section contract. Artifact manifest/index schema details live in
+`docs/artifact-manifest.md`; visual and interaction requirements live in
+`docs/report-ux.md`; static-analysis evidence details live in
+`docs/static-analysis.md`.
+
+Generated `report.json`, `report.html`, `report.zh.html`, `report.en.html`,
+raw events, artifact indexes, samples, payload binaries, VM outputs, packet
+captures, and dumps are runtime outputs and must not be committed.
+
 ## JSON artifacts
 
-The host writes `report.json` beside `report.html` for every planned job. The
-JSON model is `AnalysisReport`:
+The host writes `report.json` beside `report.html`, `report.zh.html`, and
+`report.en.html` for every planned job. `report.html` is the compatibility
+Simplified Chinese report, while `report.zh.html` and `report.en.html` are the
+explicit localized report outputs. The JSON model is `AnalysisReport`:
 
 - `jobId`
 - `sample`
@@ -51,6 +63,15 @@ This includes R0Collector mock JSONL rows such as
 `guest.events.imported` marker stores an `eventCount` that includes both
 `events.json` rows and imported JSONL rows so a smoke run can prove the R0 mock
 sidecar was included in the final report.
+
+R0Collector self-noise is metadata, not sample behavior. Driver-originated rows
+whose process identity, data fields, or paths point at
+`KSword.Sandbox.R0Collector.exe`, `KSword.Sandbox.Agent.exe`, collector staging
+directories, or the KSword driver device are preserved in `events` and raw HTML
+evidence, but are excluded from behavior counts, behavior graphs, and
+file/registry/network/process behavior sections. The HTML R0 section reports a
+separate "Collector self-noise hidden" count with examples so evidence quality
+remains auditable without inflating behavior.
 
 ## Artifact manifest evidence
 
@@ -132,11 +153,19 @@ model into operator-facing sections:
 - artifact links with safe relative Open/Download buttons when available, with
   absolute local paths preserved only as copyable text;
 - timeline, process details/tree, dropped files, registry behavior, network
-  behavior, R0/driver events, failure reasons, and raw normalized events.
+  behavior, R0/driver events, failure reasons, and raw normalized events;
+- a bilingual entry bar linking sibling `report.zh.html`, `report.en.html`,
+  and compatibility `report.html` files.
 
 Tables, chips, code fields, timeline entries, and evidence blocks expose
 `data-copy` attributes. The local report script supports right-click copy and
 explicit **Copy event** buttons without external dependencies.
+The Simplified Chinese renderer localizes report chrome and operator guidance,
+including headings, table headers, buttons, hints, section notes, empty states,
+status labels, and evidence expander summaries. Normalized evidence remains in
+its original form: `eventType`, API names, schema keys/values, hashes, paths,
+command lines, stdout/stderr, and JSON/JSONL previews are preserved for
+forensic copy/paste and schema compatibility.
 Raw normalized events are collapsed by default; command/stdout/stderr/
 PowerShell and similarly long technical fields are nested behind additional
-collapsed details so the main report remains readable.
+copyable collapsed `<details>` blocks so the main report remains readable.

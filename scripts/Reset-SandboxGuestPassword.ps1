@@ -104,7 +104,7 @@ function Get-NewGuestPassword {
     }
 
     if ($PromptPassword) {
-        $secure = Read-Host "New password for guest user '$GuestUserName'" -AsSecureString
+        $secure = Read-Host "请输入来宾用户 '$GuestUserName' 的新密码（不会回显） / New password for guest user" -AsSecureString
         return [pscustomobject]@{ Password = (ConvertFrom-SecureStringToPlainText -SecureString $secure); Source = 'prompt' }
     }
 
@@ -154,7 +154,7 @@ function Get-AvailableDriveLetter {
         }
     }
 
-    throw 'No available drive letter was found for mounting the guest Windows volume.'
+    throw '错误：没有可用盘符可挂载来宾 Windows 卷。下一步：请释放一个盘符后重试，或手动检查已挂载 VHD。'
 }
 
 function Get-DiskForVhd {
@@ -183,7 +183,7 @@ function Mount-GuestWindowsVolume {
     $script:TemporaryAccessPaths = New-Object System.Collections.Generic.List[object]
     $disk = Get-DiskForVhd -VhdPath $VhdPath
     if ($null -eq $disk) {
-        throw "Could not resolve mounted disk for VHD: $VhdPath"
+        throw "错误：无法解析已挂载 VHD 对应磁盘：$VhdPath。下一步：确认 VHD/AVHDX 路径有效且 Hyper-V 管理模块可用。"
     }
 
     foreach ($partition in @(Get-Partition -DiskNumber $disk.Number | Where-Object { $_.Type -ne 'Reserved' })) {
@@ -212,7 +212,7 @@ function Mount-GuestWindowsVolume {
         }
     }
 
-    throw "Mounted VHD did not contain a Windows SYSTEM hive: $VhdPath"
+    throw "错误：已挂载 VHD 中未找到 Windows SYSTEM hive：$VhdPath。下一步：确认选择的是 Windows 系统盘而不是数据盘。"
 }
 
 function Dismount-GuestWindowsVolume {
@@ -274,7 +274,7 @@ try {
 
     try { Set-LocalUser -Name `$userName -PasswordNeverExpires `$true -ErrorAction SilentlyContinue } catch { }
     `$result.success = `$true
-    `$result.message = 'Guest account password reset and account enabled.'
+    `$result.message = '来宾账户密码已重置并启用。 / Guest account password reset and account enabled.'
 }
 catch {
     `$result.success = `$false
@@ -312,7 +312,7 @@ function Inject-PasswordResetService {
     try {
         $load = & reg.exe load "HKLM\$script:OfflineHiveName" $SystemHive 2>&1
         if ($LASTEXITCODE -ne 0) {
-            throw "reg load failed: $load"
+            throw "错误：reg load 加载离线 SYSTEM hive 失败。下一步：确认 VHD 未被占用，并以管理员身份运行。英文输出：$load"
         }
         $loaded = $true
 
@@ -349,7 +349,7 @@ function Wait-VMRunning {
         Start-Sleep -Seconds 2
     } while ([DateTimeOffset]::UtcNow -lt $deadline)
 
-    throw "VM '$VmName' did not reach Running state within $TimeoutSeconds seconds."
+    throw "错误：VM '$VmName' 未在 $TimeoutSeconds 秒内进入 Running 状态。下一步：在 Hyper-V 管理器检查 VM 启动错误后重试。"
 }
 
 function Wait-PowerShellDirectCredential {
@@ -376,7 +376,7 @@ function Wait-PowerShellDirectCredential {
         }
     } while ([DateTimeOffset]::UtcNow -lt $deadline)
 
-    throw "PowerShell Direct did not accept the reset credential within $PowerShellDirectTimeoutSeconds seconds. Last error: $lastError"
+    throw "错误：PowerShell Direct 未在 $PowerShellDirectTimeoutSeconds 秒内接受重置后的凭据。下一步：确认 VM 已启动、用户 '$GuestUserName' 已启用、Hyper-V PowerShell Direct 可用。英文详情：$lastError"
 }
 
 function Update-CleanCheckpoint {
@@ -384,44 +384,44 @@ function Update-CleanCheckpoint {
     if ($null -ne $existing) {
         $backupName = '{0}-before-password-reset-{1}' -f $CheckpointName, (Get-Date -Format 'yyyyMMdd-HHmmss')
         Rename-VMSnapshot -VMName $VmName -Name $CheckpointName -NewName $backupName -ErrorAction Stop
-        Write-ResetInfo "Renamed old checkpoint '$CheckpointName' to '$backupName'."
+        Write-ResetInfo "已将旧 checkpoint '$CheckpointName' 重命名为 '$backupName'。 / Renamed old checkpoint."
     }
 
     Checkpoint-VM -Name $VmName -SnapshotName $CheckpointName | Out-Null
-    Write-ResetInfo "Created refreshed checkpoint '$CheckpointName'."
+    Write-ResetInfo "已创建刷新后的 checkpoint '$CheckpointName'。 / Created refreshed checkpoint."
 }
 
 try {
     if (-not (Test-IsAdministrator)) {
-        throw 'Resetting a Hyper-V guest password requires an elevated host PowerShell session.'
+        throw '错误：重置 Hyper-V 来宾密码需要宿主机管理员 PowerShell。下一步：以管理员身份打开 PowerShell 后重试。'
     }
 
     $credentialInput = Get-NewGuestPassword
     if ([string]::IsNullOrEmpty($credentialInput.Password)) {
-        throw 'New guest password must not be empty.'
+        throw '错误：新来宾密码不能为空。下一步：重新运行并输入有效密码，或去掉 -PromptPassword 让脚本生成随机密码。'
     }
 
     $vm = Get-VM -Name $VmName -ErrorAction Stop
     if ($vm.State -ne 'Off') {
-        if (-not $Force -and -not $PSCmdlet.ShouldProcess($VmName, 'Turn off VM before password reset')) { return }
+        if (-not $Force -and -not $PSCmdlet.ShouldProcess($VmName, '密码重置前关闭 VM / Turn off VM before password reset')) { return }
         Stop-VM -Name $VmName -TurnOff -Force -ErrorAction Stop
     }
 
     if (-not $SkipCheckpointRestore) {
         $snapshot = Get-VMSnapshot -VMName $VmName -Name $CheckpointName -ErrorAction Stop
-        if ($Force -or $PSCmdlet.ShouldProcess($VmName, "Restore checkpoint '$CheckpointName' before injecting password reset")) {
+        if ($Force -or $PSCmdlet.ShouldProcess($VmName, "注入密码重置前还原 checkpoint '$CheckpointName' / Restore checkpoint before password reset")) {
             Restore-VMSnapshot -VMName $VmName -Name $CheckpointName -Confirm:$false -ErrorAction Stop
-            Write-ResetInfo "Restored checkpoint '$CheckpointName'."
+            Write-ResetInfo "已还原 checkpoint '$CheckpointName'。 / Restored checkpoint."
         }
     }
 
     $drive = Get-VMHardDiskDrive -VMName $VmName | Select-Object -First 1
     if ($null -eq $drive -or [string]::IsNullOrWhiteSpace($drive.Path)) {
-        throw "VM '$VmName' does not have a resolvable hard disk path."
+        throw "错误：VM '$VmName' 没有可解析的硬盘路径。下一步：在 Hyper-V 中确认 VM 已连接 Windows 系统盘。"
     }
 
     $vhdPath = $drive.Path
-    Write-ResetInfo "Injecting one-shot reset service into: $vhdPath"
+    Write-ResetInfo "正在向 VHD 注入一次性密码重置服务：$vhdPath / Injecting one-shot reset service."
     try {
         $mountedVolume = Mount-GuestWindowsVolume -VhdPath $vhdPath
         Inject-PasswordResetService -WindowsRoot $mountedVolume.Root -SystemHive $mountedVolume.SystemHive -Password $credentialInput.Password
@@ -430,15 +430,15 @@ try {
         Dismount-GuestWindowsVolume -VhdPath $vhdPath
     }
 
-    if ($Force -or $PSCmdlet.ShouldProcess($VmName, 'Boot VM to run one-shot password reset service')) {
+    if ($Force -or $PSCmdlet.ShouldProcess($VmName, '启动 VM 运行一次性密码重置服务 / Boot VM to run reset service')) {
         Start-VM -Name $VmName -ErrorAction Stop
         Wait-VMRunning -TimeoutSeconds $BootTimeoutSeconds
-        Write-ResetInfo 'VM is running; waiting for PowerShell Direct with the reset credential.'
+        Write-ResetInfo 'VM 已运行；正在等待 PowerShell Direct 使用重置后的凭据连通。 / Waiting for PowerShell Direct.'
         $probe = Wait-PowerShellDirectCredential -Password $credentialInput.Password
-        Write-ResetInfo "PowerShell Direct validated with reset credential. Guest identity: $($probe.userName)"
+        Write-ResetInfo "PowerShell Direct 已用重置后的凭据验证通过。来宾身份：$($probe.userName) / PowerShell Direct validated."
 
         Save-HostSecret -Password $credentialInput.Password -PasswordSource $credentialInput.Source
-        Write-ResetInfo "Stored '$SecretName' in current process/User environment and DPAPI backup. Secret value was not printed."
+        Write-ResetInfo "已把 '$SecretName' 保存到当前 Process/User 环境和 DPAPI 备份；secret 值未打印。 / Secret stored; value was not printed."
 
         $secure = ConvertTo-SecureString $credentialInput.Password -AsPlainText -Force
         $credential = [pscredential]::new($GuestUserName, $secure)
@@ -448,16 +448,16 @@ try {
         } -ErrorAction SilentlyContinue | Out-Null
 
         Stop-VM -Name $VmName -TurnOff -Force -ErrorAction Stop
-        Write-ResetInfo 'VM stopped after credential validation.'
+        Write-ResetInfo '凭据验证后已停止 VM。 / VM stopped after credential validation.'
 
         if (-not $SkipCheckpointRefresh) {
-            if ($Force -or $PSCmdlet.ShouldProcess($VmName, "Refresh checkpoint '$CheckpointName' with the reset password")) {
+            if ($Force -or $PSCmdlet.ShouldProcess($VmName, "用重置后的密码刷新 checkpoint '$CheckpointName' / Refresh checkpoint with reset password")) {
                 Update-CleanCheckpoint
             }
         }
     }
 
-    Write-ResetInfo 'Guest password reset completed. Secret value was not printed.'
+    Write-ResetInfo '来宾密码重置完成；secret 值未打印。 / Guest password reset completed.'
     Write-Output ([pscustomobject][ordered]@{
         VmName = $VmName
         CheckpointName = $CheckpointName
@@ -469,6 +469,6 @@ try {
     })
 }
 catch {
-    Write-Error "FAIL: guest password reset failed. $($_.Exception.Message) $($_.ScriptStackTrace)"
+    Write-Error "失败：guest password reset 失败。下一步：查看错误，确认管理员权限、VM/Checkpoint 名称、VHD 路径和 PowerShell Direct 后重试。英文详情：$($_.Exception.Message) $($_.ScriptStackTrace)"
     exit 1
 }

@@ -1,7 +1,22 @@
 # Guest artifacts
 
+Canonical scope: this page describes guest artifact lanes, host discovery, and
+operator import behavior. The manifest/index schema source of truth is
+`docs/artifact-manifest.md`; report rendering and UX are covered by
+`docs/report-schema.md` and `docs/report-ux.md`.
+
+Generated artifacts are runtime evidence. Do not commit guest output folders,
+`artifacts/manifest.json`, `artifact-index.json`, screenshots, memory dumps,
+packet captures, dropped files, reports, samples, payload binaries, or VM
+outputs.
+
 Guest artifact collection is intentionally opt-in for high-sensitivity evidence.
 The stable guest output root is the directory passed with `--out`.
+
+中文说明：高敏证据默认安全关闭，需要显式 opt-in。本文中的
+`relativePath`、`safeLink`、`importPath`、`collectionName`、`captureState`、
+`status`、`reason` 等都是稳定 schema 字段/值，不翻译；中文提示通过事件或
+manifest metadata 中的 `zhMessage`、`zhHint`、`zhStatus`、`zhReason` 表达。
 
 ## Layout
 
@@ -22,6 +37,10 @@ The stable guest output root is the directory passed with `--out`.
   or `--network-capture` is explicitly supplied and Windows `pktmon` can start
   capture inside the guest. Existing external `.pcap` / `.pcapng` files remain
   consumable by the host importer.
+
+中文：截图、内存转储、掉落文件复制和抓包都可能包含敏感内容，因此默认不
+采集。禁用通道会写出 disabled 状态或 manifest metadata，方便区分“未请求”
+和“请求了但失败/跳过”。
 
 ## Host discovery contract
 
@@ -60,6 +79,42 @@ collection normalization rejects absolute, drive-qualified, or traversal
 `safeLink` values and rebuilds links from safe paths under the collected guest
 output root.
 
+中文：Host 只把 guest 输出根目录下的相对 selector 作为下载链接依据；
+`fullPath`、`guestPath`、源事件路径等仅是诊断元数据，不能直接进入 href/src。
+
+## Host import and downloadable index
+
+The host writes `artifact-index.json` as the downloadable artifact index. Each
+downloadable artifact entry carries host-computed `sizeBytes`, `sha256`,
+`hashes.sha256`, `kind`, `collectionName`, `evidenceRole`, `relativePath`,
+`safeLink`, `importPath`, and source-event metadata when guest telemetry or a
+manifest pointed at the file. Download clients must use `relativePath`,
+`safeLink`, or `importPath` as selectors; absolute host and guest paths remain
+diagnostic metadata only.
+
+During report import, the host also emits `artifact.host_imported` rows for
+downloadable dropped files, screenshots, memory dumps, and packet captures.
+Those rows record `sourceArtifactKind`, `sourceArtifactRelativePath`,
+`sourceArtifactSizeBytes`, `sourceArtifactSha256`, `collectionName`,
+`sourceEventType`, `sourceEventPath`, `importMode=host-artifact-index`, and
+`behaviorCounted=false`. These rows are evidence-chain / download metadata and
+must not be interpreted as sample behavior by rules or UI behavior counts.
+
+When a requested or guest-declared sensitive collection has no downloadable
+file, host import emits a `collection.health` diagnostic instead of fabricating
+behavior. The diagnostic keeps stable English machine fields such as
+`collectionName`, `artifactKind`, `status`, `reason`, `healthStatus`, and
+`artifactMissing=true`, plus Chinese operator fields `zhMessage` and `zhHint`.
+This makes missing dropped-files/screenshots/pcap/memory-dump evidence visible
+without turning collection gaps into malicious behavior.
+
+中文：Host 导入会把可下载的掉落文件、截图、内存转储和抓包写入
+`artifact-index.json`，并在报告事件中补充 `artifact.host_imported` 溯源行。
+这些行包含大小、SHA-256、类型、集合名和来源事件，但 `behaviorCounted=false`；
+它们用于下载和审计，不算样本行为。若请求或清单声明了某个敏感集合但没有产物，
+Host 会生成 `collection.health` 中文健康诊断（含 `zhMessage`/`zhHint`），提示
+采集缺口，同样不算行为。
+
 ## Dropped-files manifest
 
 When dropped-file collection is enabled, newly-created files under the sample
@@ -72,14 +127,70 @@ original VM-local path.
 
 Copied dropped-file artifact descriptors always carry
 `artifactRelativePath`, `relativePath`, `collectionName=dropped-files`,
-`evidenceRole=dropped-file`, and `captureState=captured`. Skipped copy
-attempts are nonfatal and keep a compact `reason` such as
-`sourceFileMissing`, `outsideWorkingDirectory`, or `copyFailed`; collection
-metadata keeps `lastReason` so a run with no copied files is diagnosable.
+`evidenceRole=dropped-file`, and `captureState=captured`. Copied and skipped
+copy-attempt events use the same status shape: `captureEnabled`,
+`implemented`, `captureState`, `status`, `nonfatal`, `collectionName`, and
+`evidenceRole`. Captured dropped-file events include copied artifact
+`sha256`/`artifactSha256`, `copiedSha256`, `sourceSha256` when readable,
+source/copied sizes, source/copied mtimes, `copiedAtUtc`,
+`phase`/`capturePhase`, `processRole`, `rootProcessId`, root `treeLineage`,
+and `zhMessage`/`zhHint` for report copy. Skipped and disabled rows keep the
+same phase/process/localized diagnostic shape even when no artifact file is
+created.
+
+Skipped copy attempts are nonfatal and keep a compact `reason` such as
+`sourcePathMissing`, `sourcePathInvalid`, `sourceFileMissing`,
+`outsideWorkingDirectory`, `underOutputDirectory`, `destinationPathInvalid`,
+or `copyFailed`. When available, skipped events preserve `sourceExists`,
+source size/mtime, source-event size/mtime, and best-effort hash status such
+as `sourceHashStatus=failed` without failing the run. Collection metadata
+keeps `lastReason` and last source/hash diagnostics so a run with no copied
+files is diagnosable. When dropped-file collection is not requested, the guest
+emits `artifact.dropped_file.disabled`.
+
+中文：掉落文件复制事件保留机器可解析 `reason`，同时可带 `zhHint` 说明跳过
+原因，例如源文件已消失、越出工作目录、位于输出目录或复制失败。
 
 The manifest never trusts VM-local absolute paths for links. The host resolves
 `relativePath` under the collected guest-output directory and keeps original
 paths as metadata only.
+
+## User-mode behavior snapshots
+
+Several no-R0 evidence sources are represented as `events.json` rows rather
+than separate files. They still use stable field names so host reports can link
+findings back to raw guest telemetry:
+
+- Process snapshots emit `process.snapshot` rows for each sampled visible
+  process at `before-start`, `after-start`, and `after-run`. Rows preserve
+  `snapshotKey`, `processId`, `parentProcessId`, `processName`,
+  `commandLine`, `imagePath` / `processImagePath`, `startTimeUtc`,
+  parent snapshot metadata, and root-relative `treeDepth` / `treeLineage`
+  when the process belongs to the sample tree. Tracked root/tree/new
+  processes that disappear from later snapshots are represented by
+  `process.snapshot` rows with `snapshotState=status=captureState=missing`,
+  `processMissing=true`, `exitMissing=true`, `missingAtUtc`, and
+  first/last-seen phase metadata.
+- Process tree snapshots still emit `process.tree` rows for the sample root
+  and visible descendants, with `rootProcessId`, `parentProcessId`,
+  `treeDepth`, `treeLineage`, and `childProcessCount` metadata. If the root
+  has already exited, the guest keeps `process.tree_unavailable` and can still
+  emit visible orphan child rows whose parent PID is the root process.
+- Each root sweep emits `process.tree.summary` with stable aggregate fields
+  such as `rootProcessId`, `rootVisible`, `visibleProcessCount`,
+  `directChildProcessCount`, `maxTreeDepth`, `orphanedChildProcessCount`,
+  `missingProcessCount`, root image/command-line metadata, and
+  `summaryEvent=true` for report process-tree rendering.
+- Persistence diffs emit `service.*`, `scheduled_task.*`,
+  `startup_item.*`, and `registry.run.*` rows. Service rows include registry
+  configuration metadata such as `imagePath`, `startType`, `serviceType`,
+  `objectName`, and `serviceDll` when readable.
+- DNS/proxy context emits `dns.cache.*`, `network.hosts.*`, and
+  `network.proxy.*` rows. Hosts snapshots keep source path, existence,
+  line/entry counts, content-change state, and bounded address/hostname row
+  deltas. Proxy snapshots cover process environment variables, HKCU Internet
+  Settings, and WinHTTP proxy state with stable `source|scope|settingName`
+  keys and value hashes.
 
 ## Driver JSONL and R0 sidecar logs
 
@@ -100,6 +211,9 @@ classified as `kind=Log`, `evidenceRole=diagnostic-log`, and
 `collectionName=r0-logs`. Both file types receive host-computed `sizeBytes`,
 MIME type, SHA-256, and `hashes.sha256`.
 
+中文：R0 sidecar 的 stdout/stderr 日志和 `driver-events.jsonl` 都是证据文件。
+启动失败时 stderr 可能包含英文原因与 `zhMessage`/`zhHint` 双语提示。
+
 ## Screenshot artifacts
 
 Screenshots are opt-in because they can contain desktop contents unrelated to
@@ -115,10 +229,19 @@ artifact index classify files under `screenshots/` as `kind=Screenshot`,
 
 Screenshot events also carry `phase`/`capturePhase`, `captureState`,
 `status`, `nonfatal`, `expectedRelativePath=screenshots/*.bmp`,
-`artifactRelativePath` when a file is created, and `rootProcessId` /
-`processId` when the sample process identity is known. Skipped screenshots
-preserve `reason`, `diagnosticStage`, optional `exceptionType`, and optional
-`win32Error` without failing the run.
+`artifactRelativePath` when a file is created, event-level `sizeBytes` and
+`sha256` for captured BMP files, plus `processRole`, `rootProcessId`,
+`processId`, and root `treeLineage` when the sample process identity is known.
+Captured and skipped rows include `zhMessage`/`zhHint` for report text.
+Skipped screenshots preserve `reason`, `diagnosticStage`, optional
+`exceptionType`, and optional `win32Error` without failing the run. When
+screenshots are not requested, the guest emits one `screenshot.disabled` event with
+`captureEnabled=false`, `captureState=status=disabled`,
+`implemented=true`, `nonfatal=true`, `collectionName=screenshots`, and
+`reason=screenshotNotRequested`.
+
+中文：截图失败或跳过时保留原始 `reason`、`diagnosticStage` 和 `win32Error`；
+中文 `zhHint` 用于提示是否是无头会话、GDI 调用失败、权限或输出路径问题。
 
 ## Memory dump artifacts
 
@@ -140,13 +263,22 @@ The guest manifest and host artifact index classify `memory-dumps/**` files as
 `collectionName=memory-dumps`.
 
 Memory dump attempt events carry `phase`/`capturePhase`, `captureState`,
-`status`, `nonfatal`, `artifactRelativePath` for captured dumps, and process
-identity fields: `processId`, `rootProcessId`, `parentProcessId`,
+`status`, `nonfatal`, `artifactRelativePath`, event-level `sizeBytes` and
+`sha256` for captured dumps, and process identity fields: `processId`,
+`rootProcessId`, `parentProcessId`,
 `targetProcessName`, `targetProcessPath`, `processRole`, `treeDepth`,
 `treeLineage`, `snapshotKey`, and `dumpType`. Skipped attempts preserve
 `reason`, `diagnosticStage`, optional `exceptionType`, and optional
-`win32Error`. Probe timeouts or exceptions are mapped to the `memory-dumps`
+`win32Error`; captured/skipped/disabled rows include `zhMessage`/`zhHint`.
+Probe timeouts or exceptions are mapped to the `memory-dumps`
 collection as nonfatal failed status instead of becoming `enabled-empty`.
+When memory dumps are not requested, the guest emits one
+`memory_dump.disabled` event with the same disabled status shape. The
+`memory_dump.sweep` event remains a summary (`summaryEvent=true`) and is not
+counted as captured/skipped/failed collection status.
+
+中文：内存转储失败/跳过不会阻止其他证据写出。中文提示用于区分目标进程已退
+出、PID 不可见、`MiniDumpWriteDump` 失败、权限不足或未显式启用。
 
 ## Collection lanes and import paths
 
@@ -162,6 +294,10 @@ collection as nonfatal failed status instead of becoming `enabled-empty`.
 Each collection records `enabled`, `implemented`, `status`, `reason`,
 `relativePath`, `safeLink`, and `importPath`. Disabled lanes are explicit, so a
 host importer can distinguish "not requested" from "requested but unavailable."
+Collection metadata also records normalized `requested`/`captureEnabled`,
+`capturedCount`, `skippedCount`, `disabledCount`, `failedCount`, and the
+corresponding event counters. Disabled lanes have a synthetic
+`disabledCount>=1` even when no disabled event was emitted by older agents.
 `packet-captures` is an implemented opt-in lane for KSword's guest collector.
 When capture is requested but `pktmon` is unavailable, access is denied, or ETL
 conversion fails, the lane is marked `skipped` or `failed` and the run
@@ -182,9 +318,19 @@ dropped files, screenshots, memory dumps, and packet captures. The guest
 manifest records counts plus `lastReason`, `lastDiagnosticStage`,
 `lastExceptionType`, `lastCommandMessage`, `lastArtifactRelativePath`,
 `lastPhase` / `lastCapturePhase`, and `lastProcessId` / `lastRootProcessId`
-when those values were present on related events. Host indexes also retain
+plus `lastProcessRole`, `lastTreeDepth`, `lastTreeLineage`, and
+`lastChildProcessCount` when those values were present on related events.
+Last collection state
+metadata prefers concrete captured/skipped/disabled/failed events over summary
+or placeholder events, while diagnostic metadata still keeps later nonfatal
+details such as dropped-file source hash failures or packet protocol-summary
+placeholders. Host indexes also retain
 guest status aliases such as `guestManifestStatus` / `guestManifestReason`
 and `guestCollectionStatus` / `guestCollectionReason`.
+
+中文：collection metadata 会补充 `zhStatus`、`zhReason`、`zhHint`，并把事件
+中的 `zhMessage`/`zhHint` 汇总为 `lastZh*` / `lastDiagnosticZh*`。这些字段
+仅用于 UI/报告解释，不参与机器规则判断。
 
 Each file descriptor also carries `evidenceRole`, `capturePhase`,
 `captureState`, `guestPath`, `importPath`, and `collectionName` alongside size,
@@ -218,12 +364,32 @@ manifest from being written. Successful runs emit `packet_capture.started`,
 Packet capture lifecycle events carry `collectionName=packet-captures`,
 `evidenceRole=packet-capture`, `phase`/`capturePhase`, `status`,
 `captureState`, `nonfatal`, `expectedRelativePath=packet-captures/*.pcapng`,
-and `artifactRelativePath` for the final PCAPNG path. ETL diagnostics are
-separate from the packet artifact and use `etlRelativePath` /
-`diagnosticRelativePath`. Start/stop/convert command failures retain
-`reason`, command exit/timeout details, and `commandMessage`; a failed
-`pktmon start` is reported as `packet_capture.failed`, while unavailable or
-not-started cases remain `packet_capture.skipped`.
+and `artifactRelativePath` for the final PCAPNG path. Captured PCAPNG rows
+also carry event-level `sizeBytes`, `sha256`, `processRole`, `rootProcessId`,
+root `treeLineage`, and `zhMessage`/`zhHint`. ETL diagnostics are separate
+from the packet artifact and use `etlRelativePath` /
+`diagnosticRelativePath`. Events also include explicit `pcapngPath`,
+`pcapngRelativePath`, `packetCaptureRelativePath`, and
+`sourceArtifactRelativePath` when a PCAPNG path is known. Start/stop/convert
+command failures retain `reason`, command exit/timeout details, and
+`commandMessage`; a failed `pktmon start` is reported as
+`packet_capture.failed`, while unavailable or not-started cases remain
+`packet_capture.skipped`. When packet capture is not requested, the guest emits
+one `packet_capture.disabled` event with
+`captureEnabled=false`, `captureState=status=disabled`, and
+`reason=packetCaptureNotRequested`.
+
+After a successful PCAPNG conversion, the guest also emits
+`packet_capture.protocol_summary`. This is currently a placeholder event tied
+to the PCAPNG/ETL paths with `protocolSummaryAvailable=false`,
+`protocolSummaryState=placeholder`, `protocolSummaryStatus=skipped`,
+`protocolSummaryReason=protocolParserNotImplemented`, and
+`protocolsObserved=unknown`; it does not change the packet-capture collection
+from `captured`.
+
+中文：抓包通道默认不启动。`pktmon` 启动/停止/转换失败会保持英文 reason code
+并附加中文 `zhHint`；协议摘要 placeholder 表示 PCAPNG 已存在，但摘要解析器
+尚未实现。
 
 For import/report purposes, existing packet captures are regular artifacts:
 

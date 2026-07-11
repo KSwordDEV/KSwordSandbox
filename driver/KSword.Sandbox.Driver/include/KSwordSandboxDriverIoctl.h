@@ -48,6 +48,18 @@ extern "C" {
  * version or fixed reply size.  Collectors should first read capabilities,
  * compare the major version, and then gate optional IOCTL use on
  * CapabilityFlags and reply Size.
+ *
+ * Event payload version policy: every current process/image/registry/file/
+ * network payload uses the v1 value 0x00010000.  Producers must continue to
+ * stamp that exact value for the fixed v1 layouts below; future field growth
+ * needs a new version/capability or an explicit *_DRAFT layout, not silent
+ * reuse of the v1 structure with different semantics.
+ *
+ * Sequence/loss/backpressure policy: producers never block on collector
+ * throughput.  Event Sequence, snapshot NextSequence, dropped counters, queue
+ * high-watermark, producer loss/backpressure masks, and per-record
+ * LostEvents/BackpressureEvents are the stable ABI evidence used by collectors
+ * and JSONL smoke tests to diagnose overflow, gaps, and pressure.
  */
 #define KSWORD_SANDBOX_ABI_VERSION_MAJOR   1U
 #define KSWORD_SANDBOX_ABI_VERSION_MINOR   0U
@@ -188,6 +200,9 @@ typedef enum _KSWORD_SANDBOX_DRIVER_STATE {
 #define KSWORD_SANDBOX_CAPABILITY_FLAG_FILE_MINIFILTER        0x0000000000001000ULL
 #define KSWORD_SANDBOX_CAPABILITY_FLAG_REGISTRY_CALLBACK      0x0000000000002000ULL
 #define KSWORD_SANDBOX_CAPABILITY_FLAG_NETWORK_WFP_ALE        0x0000000000004000ULL
+#define KSWORD_SANDBOX_CAPABILITY_FLAG_EVENT_COMMON_METADATA  0x0000000000008000ULL
+#define KSWORD_SANDBOX_CAPABILITY_FLAG_PRODUCER_METADATA      0x0000000000010000ULL
+#define KSWORD_SANDBOX_CAPABILITY_FLAG_SELF_NOISE_METADATA    0x0000000000020000ULL
 
 #define KSWORD_SANDBOX_CAPABILITY_FLAGS_CURRENT \
     (KSWORD_SANDBOX_CAPABILITY_FLAG_GET_HEALTH | \
@@ -204,7 +219,10 @@ typedef enum _KSWORD_SANDBOX_DRIVER_STATE {
      KSWORD_SANDBOX_CAPABILITY_FLAG_IMAGE_LOAD | \
      KSWORD_SANDBOX_CAPABILITY_FLAG_FILE_MINIFILTER | \
      KSWORD_SANDBOX_CAPABILITY_FLAG_REGISTRY_CALLBACK | \
-     KSWORD_SANDBOX_CAPABILITY_FLAG_NETWORK_WFP_ALE)
+     KSWORD_SANDBOX_CAPABILITY_FLAG_NETWORK_WFP_ALE | \
+     KSWORD_SANDBOX_CAPABILITY_FLAG_EVENT_COMMON_METADATA | \
+     KSWORD_SANDBOX_CAPABILITY_FLAG_PRODUCER_METADATA | \
+     KSWORD_SANDBOX_CAPABILITY_FLAG_SELF_NOISE_METADATA)
 
 /*
  * Producer enable bits.
@@ -264,6 +282,27 @@ typedef enum _KSWORD_SANDBOX_EVENT_TYPE {
  */
 #define KSWORD_SANDBOX_EVENT_FLAG_SELF_TEST       0x00000001U
 #define KSWORD_SANDBOX_EVENT_FLAG_DRIVER_STARTED  0x00000002U
+#define KSWORD_SANDBOX_EVENT_FLAG_OPERATION_PRESENT 0x00000004U
+#define KSWORD_SANDBOX_EVENT_FLAG_STATUS_PRESENT  0x00000008U
+#define KSWORD_SANDBOX_EVENT_FLAG_TARGET_PID_PRESENT 0x00000010U
+#define KSWORD_SANDBOX_EVENT_FLAG_PARENT_PID_PRESENT 0x00000020U
+#define KSWORD_SANDBOX_EVENT_FLAG_SUBJECT_PATH_PRESENT 0x00000040U
+#define KSWORD_SANDBOX_EVENT_FLAG_LOST_COUNT_PRESENT 0x00000080U
+#define KSWORD_SANDBOX_EVENT_FLAG_BACKPRESSURE_COUNT_PRESENT 0x00000100U
+#define KSWORD_SANDBOX_EVENT_FLAG_PRODUCER_METADATA_PRESENT 0x00000200U
+#define KSWORD_SANDBOX_EVENT_FLAG_SELF_NOISE       0x00000400U
+
+/*
+ * Producer metadata flag bits carried in
+ * KSWORD_SANDBOX_EVENT_HEADER.ProducerMetadataFlags.
+ *
+ * Inputs : producers may set these bits through common event metadata.
+ * Logic  : v1 reserves an explicit self-noise marker even when a producer elects
+ *          to suppress those records before enqueue; collectors can preserve
+ *          unknown bits for future producer-specific metadata.
+ * Return : not applicable.
+ */
+#define KSWORD_SANDBOX_EVENT_METADATA_FLAG_SELF_NOISE 0x00000001U
 
 /*
  * File event payload version and operation values.
@@ -275,7 +314,7 @@ typedef enum _KSWORD_SANDBOX_EVENT_TYPE {
  * Return : not applicable; unknown operation values are reserved for future
  *          producer expansion.
  */
-#define KSWORD_SANDBOX_FILE_EVENT_VERSION 0x00010000U
+#define KSWORD_SANDBOX_FILE_EVENT_VERSION 0x00010000U /* v1 file payload layout */
 
 typedef enum _KSWORD_SANDBOX_FILE_OPERATION {
     KswSandboxFileOperationNone = 0,
@@ -329,7 +368,7 @@ typedef enum _KSWORD_SANDBOX_FILE_OPERATION {
  *          variable-size output records and collectors can parse fixed layouts.
  * Return : not applicable.
  */
-#define KSWORD_SANDBOX_PROCESS_EVENT_VERSION 0x00010000U
+#define KSWORD_SANDBOX_PROCESS_EVENT_VERSION 0x00010000U /* v1 process payload layout */
 #define KSWORD_SANDBOX_PROCESS_IMAGE_PATH_CHARS 24U
 #define KSWORD_SANDBOX_PROCESS_COMMAND_LINE_CHARS 12U
 
@@ -361,8 +400,13 @@ typedef enum _KSWORD_SANDBOX_PROCESS_OPERATION {
  *          path is a bounded UTF-16 prefix compatible with READ_EVENTS.
  * Return : not applicable.
  */
-#define KSWORD_SANDBOX_IMAGE_EVENT_VERSION 0x00010000U
+#define KSWORD_SANDBOX_IMAGE_EVENT_VERSION 0x00010000U /* v1 image payload layout */
 #define KSWORD_SANDBOX_IMAGE_PATH_CHARS 40U
+
+typedef enum _KSWORD_SANDBOX_IMAGE_OPERATION {
+    KswSandboxImageOperationNone = 0,
+    KswSandboxImageOperationLoad = 1
+} KSWORD_SANDBOX_IMAGE_OPERATION;
 
 #define KSWORD_SANDBOX_IMAGE_EVENT_FLAG_PATH_PRESENT       0x00000001U
 #define KSWORD_SANDBOX_IMAGE_EVENT_FLAG_PATH_TRUNCATED     0x00000002U
@@ -380,7 +424,7 @@ typedef enum _KSWORD_SANDBOX_PROCESS_OPERATION {
  *          leaving enough fixed UTF-16 room for Run/Services path prefixes.
  * Return : not applicable.
  */
-#define KSWORD_SANDBOX_REGISTRY_EVENT_VERSION 0x00010000U
+#define KSWORD_SANDBOX_REGISTRY_EVENT_VERSION 0x00010000U /* v1 registry payload layout */
 #define KSWORD_SANDBOX_REGISTRY_KEY_PATH_CHARS 28U
 #define KSWORD_SANDBOX_REGISTRY_VALUE_NAME_CHARS 14U
 
@@ -417,7 +461,7 @@ typedef enum _KSWORD_SANDBOX_REGISTRY_OPERATION {
  *          [0..3] and IPv6 uses all 16 bytes.
  * Return : not applicable.
  */
-#define KSWORD_SANDBOX_NETWORK_EVENT_VERSION 0x00010000U
+#define KSWORD_SANDBOX_NETWORK_EVENT_VERSION 0x00010000U /* v1 network payload layout */
 #define KSWORD_SANDBOX_NETWORK_ADDRESS_BYTES 16U
 
 #define KSWORD_SANDBOX_NETWORK_PROTOCOL_ANY 0U
@@ -431,6 +475,40 @@ typedef enum _KSWORD_SANDBOX_NETWORK_DIRECTION {
     KswSandboxNetworkDirectionOutbound = 1,
     KswSandboxNetworkDirectionInbound = 2
 } KSWORD_SANDBOX_NETWORK_DIRECTION;
+
+typedef enum _KSWORD_SANDBOX_NETWORK_OPERATION {
+    KswSandboxNetworkOperationNone = 0,
+    KswSandboxNetworkOperationAleAuthorize = 1
+} KSWORD_SANDBOX_NETWORK_OPERATION;
+
+/*
+ * Network producer degradation reasons.
+ *
+ * Inputs : reserved for future status/payload diagnostics around the WFP/ALE
+ *          producer.  The current v1 payload does not carry this field, and
+ *          GET_STATUS still exposes degradation through FailedProducerMask,
+ *          LastNtStatus, and LastFailureNtStatus only.
+ * Logic  : values are stable numeric draft labels for the reason a network
+ *          producer was unavailable, partially initialized, or unable to emit a
+ *          classify event.  A future ABI revision may surface one of these
+ *          values explicitly; until then collectors must not infer this field
+ *          from the v1 network event payload.
+ * Return : not applicable; unknown values are reserved.
+ */
+typedef enum _KSWORD_SANDBOX_NETWORK_STATUS_DEGRADE_REASON {
+    KswSandboxNetworkStatusDegradeNone = 0,
+    KswSandboxNetworkStatusDegradeCompileTimeDisabled = 1,
+    KswSandboxNetworkStatusDegradeFwpsCalloutRegister = 2,
+    KswSandboxNetworkStatusDegradeFwpmEngineOpen = 3,
+    KswSandboxNetworkStatusDegradeFwpmTransaction = 4,
+    KswSandboxNetworkStatusDegradeFwpmSublayer = 5,
+    KswSandboxNetworkStatusDegradeFwpmManagementCallout = 6,
+    KswSandboxNetworkStatusDegradeFwpmInspectionFilter = 7,
+    KswSandboxNetworkStatusDegradeClassifyPayload = 8,
+    KswSandboxNetworkStatusDegradeQueuePush = 9
+} KSWORD_SANDBOX_NETWORK_STATUS_DEGRADE_REASON;
+
+#define KSWORD_SANDBOX_NETWORK_EVENT_PAYLOAD_DRAFT_VERSION 0x00010001U
 
 /*
  * Network address family values.
@@ -478,7 +556,13 @@ typedef enum _KSWORD_SANDBOX_NETWORK_DIRECTION {
  * Inputs : none directly; this is an output record layout.
  * Logic  : Size describes the complete event record, PayloadSize describes the
  *          bytes after this header, and Sequence gives collectors a stable
- *          ordering key for loss detection.
+ *          ordering key for loss detection.  Fields through Reserved preserve
+ *          their v1.0 offsets; the appended common metadata mirrors key fields
+ *          from typed payloads so collectors can index pid/ppid/tid,
+ *          operation/status, producer, loss, and backpressure without parsing
+ *          every payload first.  LostEvents and BackpressureEvents are
+ *          per-record evidence aliases; collectors preserve them even when zero
+ *          so sequence/lost/backpressure JSONL fields remain schema-stable.
  * Return : not applicable; callers validate Size before reading payload bytes.
  */
 typedef struct _KSWORD_SANDBOX_EVENT_HEADER {
@@ -492,6 +576,14 @@ typedef struct _KSWORD_SANDBOX_EVENT_HEADER {
     ULONGLONG ThreadId;
     ULONG PayloadSize;
     ULONG Reserved;
+    ULONGLONG ParentProcessId;
+    ULONGLONG LostEvents;
+    ULONGLONG BackpressureEvents;
+    ULONG Operation;
+    LONG Status;
+    ULONG ProducerId;
+    ULONG ProducerMetadataFlags;
+    LARGE_INTEGER TimestampSystemTime;
 } KSWORD_SANDBOX_EVENT_HEADER, *PKSWORD_SANDBOX_EVENT_HEADER;
 
 /*
@@ -576,11 +668,22 @@ typedef struct _KSWORD_SANDBOX_CAPABILITIES_REPLY {
  * Logic  : The driver returns a stable lifecycle snapshot, current producer
  *          enable mask, active/failed producer registration masks, ring
  *          capacity/depth, and monotonic total counters for enqueued, read,
- *          dropped, suppressed, and queue-backpressure events.  Producer loss
- *          masks occupy previously unused reserved/alignment space so the ABI
- *          1.0 reply size remains stable for older collectors.
+ *          dropped, suppressed, and queue-backpressure events.  Queue stress
+ *          fields are appended only by reusing v1.0 reserved/alignment space:
+ *          QueueHighWatermark reports the maximum observed depth, TotalEventsLost
+ *          aliases the cumulative dropped/lost count, and
+ *          LastEnqueueFailureNtStatus aliases
+ *          the sticky LastFailureNtStatus slot for collectors that want enqueue
+ *          failure wording without a fixed-size ABI change.  QueueHighWatermark
+ *          is the ABI source for collector JSONL `queueHighWatermark` and
+ *          `highWatermark`; TotalEventsDropped and ProducerDroppedMask are the
+ *          durable loss contract.
  * Return : sizeof(KSWORD_SANDBOX_STATUS_REPLY) bytes on success.
  */
+#if defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable: 4201)
+#endif
 typedef struct _KSWORD_SANDBOX_STATUS_REPLY {
     ULONG Version;
     ULONG Size;
@@ -595,7 +698,10 @@ typedef struct _KSWORD_SANDBOX_STATUS_REPLY {
     ULONG ActiveProducerMask;
     ULONG FailedProducerMask;
     ULONGLONG TotalEventsEnqueued;
-    ULONGLONG TotalEventsDropped;
+    union {
+        ULONGLONG TotalEventsDropped;
+        ULONGLONG TotalEventsLost;
+    };
     ULONGLONG TotalEventsRead;
     ULONGLONG TotalEventsSuppressed;
     ULONGLONG NextSequence;
@@ -604,9 +710,15 @@ typedef struct _KSWORD_SANDBOX_STATUS_REPLY {
     ULONG ProducerSuppressedMask;
     ULONG ProducerBackpressureMask;
     ULONG EffectiveProducerMask;
-    LONG LastFailureNtStatus;
+    union {
+        LONG LastFailureNtStatus;
+        LONG LastEnqueueFailureNtStatus;
+    };
     ULONG Reserved0;
 } KSWORD_SANDBOX_STATUS_REPLY, *PKSWORD_SANDBOX_STATUS_REPLY;
+#if defined(_MSC_VER)
+#pragma warning(pop)
+#endif
 
 /*
  * Request for SET_PRODUCER_ENABLE_MASK.
@@ -691,6 +803,8 @@ typedef struct _KSWORD_SANDBOX_DRIVER_LOAD_PAYLOAD {
  * Logic  : carries a compact file operation, requestor PID, final NTSTATUS when
  *          known, the original IRP major/minor function numbers, and a bounded
  *          UTF-16 path copied from the file object without dynamic allocation.
+ *          Version must equal KSWORD_SANDBOX_FILE_EVENT_VERSION and Size must
+ *          equal sizeof(KSWORD_SANDBOX_FILE_EVENT_PAYLOAD) for this v1 layout.
  * Return : not applicable; Size describes this payload and PathLengthBytes does
  *          not include a trailing NUL terminator.
  */
@@ -713,6 +827,8 @@ typedef struct _KSWORD_SANDBOX_FILE_EVENT_PAYLOAD {
  * Inputs : output-only payload following KSWORD_SANDBOX_EVENT_HEADER.
  * Logic  : process callbacks preserve key lineage identifiers, optional exit
  *          status, and bounded image/command prefixes without dynamic output.
+ *          Version must equal KSWORD_SANDBOX_PROCESS_EVENT_VERSION and Size
+ *          must equal sizeof(KSWORD_SANDBOX_PROCESS_EVENT_PAYLOAD) for v1.
  * Return : not applicable.
  */
 typedef struct _KSWORD_SANDBOX_PROCESS_EVENT_PAYLOAD {
@@ -736,6 +852,8 @@ typedef struct _KSWORD_SANDBOX_PROCESS_EVENT_PAYLOAD {
  * Inputs : output-only payload following KSWORD_SANDBOX_EVENT_HEADER.
  * Logic  : carries image load address/size/properties, process id, and a
  *          bounded full image name prefix from the image-load callback.
+ *          Version must equal KSWORD_SANDBOX_IMAGE_EVENT_VERSION and Size must
+ *          equal sizeof(KSWORD_SANDBOX_IMAGE_EVENT_PAYLOAD) for this v1 layout.
  * Return : not applicable.
  */
 typedef struct _KSWORD_SANDBOX_IMAGE_EVENT_PAYLOAD {
@@ -747,7 +865,7 @@ typedef struct _KSWORD_SANDBOX_IMAGE_EVENT_PAYLOAD {
     ULONGLONG ImageBase;
     ULONGLONG ImageSize;
     ULONG ImageProperties;
-    ULONG Reserved0;
+    ULONG Operation;
     WCHAR ImagePath[KSWORD_SANDBOX_IMAGE_PATH_CHARS];
 } KSWORD_SANDBOX_IMAGE_EVENT_PAYLOAD, *PKSWORD_SANDBOX_IMAGE_EVENT_PAYLOAD;
 
@@ -757,7 +875,9 @@ typedef struct _KSWORD_SANDBOX_IMAGE_EVENT_PAYLOAD {
  * Inputs : output-only payload following KSWORD_SANDBOX_EVENT_HEADER.
  * Logic  : registry callbacks preserve operation, status, process id, bounded
  *          key/value names, and set-value type/size metadata for behavior rules
- *          and report evidence.
+ *          and report evidence.  Version must equal
+ *          KSWORD_SANDBOX_REGISTRY_EVENT_VERSION and Size must equal
+ *          sizeof(KSWORD_SANDBOX_REGISTRY_EVENT_PAYLOAD) for this v1 layout.
  * Return : not applicable.
  */
 typedef struct _KSWORD_SANDBOX_REGISTRY_EVENT_PAYLOAD {
@@ -782,7 +902,8 @@ typedef struct _KSWORD_SANDBOX_REGISTRY_EVENT_PAYLOAD {
  * Logic  : carries a normalized ALE authorization event from the WFP callout
  *          producer.  AddressFamily selects how LocalAddress and RemoteAddress
  *          are interpreted; layer, callout, and filter identifiers are
- *          diagnostic hints for WFP registration correlation.
+ *          diagnostic hints for WFP registration correlation.  Version must equal KSWORD_SANDBOX_NETWORK_EVENT_VERSION and Size must equal
+ *          sizeof(KSWORD_SANDBOX_NETWORK_EVENT_PAYLOAD) for this v1 layout.
  * Return : not applicable; Size describes this payload and remains bounded by
  *          KSWORD_SANDBOX_EVENT_MAX_PAYLOAD_SIZE for READ_EVENTS.
  */
@@ -803,8 +924,28 @@ typedef struct _KSWORD_SANDBOX_NETWORK_EVENT_PAYLOAD {
     ULONGLONG FlowHandle;
     ULONGLONG TransportEndpointHandle;
     ULONGLONG FilterId;
-    ULONGLONG Reserved;
+    ULONG Operation;
+    LONG Status;
 } KSWORD_SANDBOX_NETWORK_EVENT_PAYLOAD, *PKSWORD_SANDBOX_NETWORK_EVENT_PAYLOAD;
+
+/*
+ * Draft extension for a future network payload revision.
+ *
+ * Inputs : not emitted by the current driver.  This draft composes the current
+ *          v1 payload and appends a machine-readable StatusDegradeReason.
+ * Logic  : keeping this as a separate *_DRAFT structure prevents the current
+ *          WFP/ALE producer from pretending it already exposes degrade reasons
+ *          in event records, while giving collectors and tests a typed layout
+ *          target for the next ABI negotiation step.
+ * Return : not applicable; parse only when a future capability explicitly
+ *          advertises this draft or a promoted successor.
+ */
+typedef struct _KSWORD_SANDBOX_NETWORK_EVENT_PAYLOAD_V2_DRAFT {
+    KSWORD_SANDBOX_NETWORK_EVENT_PAYLOAD V1;
+    ULONG StatusDegradeReason;
+    ULONG Reserved0;
+} KSWORD_SANDBOX_NETWORK_EVENT_PAYLOAD_V2_DRAFT,
+    *PKSWORD_SANDBOX_NETWORK_EVENT_PAYLOAD_V2_DRAFT;
 
 /*
  * Reply header for READ_EVENTS.
@@ -812,6 +953,9 @@ typedef struct _KSWORD_SANDBOX_NETWORK_EVENT_PAYLOAD {
  * Inputs : output buffer supplied by DeviceIoControl.
  * Logic  : The fixed header is followed by an Events byte stream.  Each record
  *          in that stream starts with KSWORD_SANDBOX_EVENT_HEADER.
+ *          EventsDropped and NextSequence are the batch-level loss/sequence
+ *          summary that lets collectors detect gaps even when no record payload
+ *          survives for an overwritten event.
  * Return : At least KSWORD_SANDBOX_READ_EVENTS_REPLY_HEADER_SIZE bytes on
  *          success.  BytesWritten counts only bytes in the trailing Events
  *          stream; IoStatus.Information includes this fixed header plus those

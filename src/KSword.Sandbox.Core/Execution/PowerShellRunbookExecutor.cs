@@ -16,6 +16,8 @@ public sealed class PowerShellRunbookExecutor : IRunbookExecutor
 {
     private const string DryRunMessage = "Dry-run mode recorded the command without launching PowerShell.";
     private const string ElevationFailureMessage = "Live Hyper-V runbook execution requires the host process to run from an elevated PowerShell session.";
+    private static readonly TimeSpan StepHeartbeatInterval = TimeSpan.FromSeconds(15);
+    private static readonly TimeSpan StreamReadTimeout = TimeSpan.FromSeconds(5);
 
     /// <summary>
     /// Executes or records the supplied runbook.
@@ -96,7 +98,7 @@ public sealed class PowerShellRunbookExecutor : IRunbookExecutor
             [],
             currentStepIndex: null,
             success: null,
-            message: "Live runbook execution started.");
+            message: $"Starting live Hyper-V runbook for VM '{runbook.TargetVmName}'.");
 
         if (options.RequireElevatedPowerShell && requiresElevation && !IsCurrentProcessElevated())
         {
@@ -128,17 +130,45 @@ public sealed class PowerShellRunbookExecutor : IRunbookExecutor
 
         var liveResults = new List<SandboxRunbookStepExecutionResult>();
         int? failedStepIndex = null;
+        SandboxRunbookStepExecutionResult? primaryFailureResult = null;
         var wasCanceled = false;
+        var cleanupMode = false;
+        var vmMutationAttempted = false;
 
         for (var index = 0; index < runbook.Steps.Count; index++)
         {
             var step = runbook.Steps[index];
 
-            if (cancellationToken.IsCancellationRequested)
+            if (failedStepIndex is not null && !IsCleanupStep(step))
+            {
+                liveResults.Add(CreateSkippedAfterFailureStepResult(step, index, primaryFailureResult));
+                continue;
+            }
+
+            if (!cleanupMode && cancellationToken.IsCancellationRequested)
             {
                 failedStepIndex = index;
                 wasCanceled = true;
-                liveResults.Add(CreateCanceledStepResult(step, index, DateTimeOffset.UtcNow, TimeSpan.Zero));
+                var canceledResult = CreateCanceledStepResult(step, index, DateTimeOffset.UtcNow, TimeSpan.Zero);
+                primaryFailureResult = canceledResult;
+                liveResults.Add(canceledResult);
+
+                if (vmMutationAttempted && HasRemainingCleanupSteps(runbook, index + 1))
+                {
+                    cleanupMode = true;
+                    PublishProgress(
+                        runbook,
+                        options,
+                        SandboxRunbookProgressStates.Running,
+                        startedAtUtc,
+                        attemptTimer.Elapsed,
+                        liveResults,
+                        index,
+                        success: null,
+                        message: "Runbook cancellation was recorded; attempting VM cleanup before returning the canceled result.");
+                    continue;
+                }
+
                 PublishProgress(
                     runbook,
                     options,
@@ -161,18 +191,76 @@ public sealed class PowerShellRunbookExecutor : IRunbookExecutor
                 liveResults,
                 index,
                 success: null,
-                message: $"Running step {index + 1} of {runbook.Steps.Count}: {step.Title}");
+                message: cleanupMode
+                    ? BuildRunningCleanupStepMessage(step, index, runbook.Steps.Count, primaryFailureResult)
+                    : BuildRunningStepMessage(step, index, runbook.Steps.Count, options.StepTimeout));
 
-            var stepResult = await ExecutePowerShellStepAsync(step, index, options, cancellationToken).ConfigureAwait(false);
+            if (step.MutatesVmState)
+            {
+                vmMutationAttempted = true;
+            }
+
+            var stepResult = await ExecutePowerShellStepAsync(
+                step,
+                index,
+                options,
+                heartbeatMessage => PublishProgress(
+                    runbook,
+                    options,
+                    SandboxRunbookProgressStates.Running,
+                    startedAtUtc,
+                    attemptTimer.Elapsed,
+                    liveResults,
+                    index,
+                    success: null,
+                    message: heartbeatMessage),
+                cleanupMode ? CancellationToken.None : cancellationToken).ConfigureAwait(false);
             liveResults.Add(stepResult);
 
             if (!stepResult.Success)
             {
-                failedStepIndex = index;
-                wasCanceled = string.Equals(
-                    stepResult.Message,
-                    "PowerShell step was canceled before completion.",
-                    StringComparison.Ordinal);
+                if (failedStepIndex is null)
+                {
+                    failedStepIndex = index;
+                    primaryFailureResult = stepResult;
+                    wasCanceled = string.Equals(
+                        stepResult.Message,
+                        "PowerShell step was canceled before completion.",
+                        StringComparison.Ordinal);
+
+                    if (!IsCleanupStep(step) &&
+                        vmMutationAttempted &&
+                        HasRemainingCleanupSteps(runbook, index + 1))
+                    {
+                        cleanupMode = true;
+                        PublishProgress(
+                            runbook,
+                            options,
+                            SandboxRunbookProgressStates.Running,
+                            startedAtUtc,
+                            attemptTimer.Elapsed,
+                            liveResults,
+                            index,
+                            success: null,
+                            message: $"Step {index + 1} failed; attempting VM cleanup now. Primary failure remains: {stepResult.Message ?? step.Title}");
+                        continue;
+                    }
+                }
+                else if (cleanupMode)
+                {
+                    PublishProgress(
+                        runbook,
+                        options,
+                        SandboxRunbookProgressStates.Running,
+                        startedAtUtc,
+                        attemptTimer.Elapsed,
+                        liveResults,
+                        index,
+                        success: null,
+                        message: $"Cleanup step '{step.Title}' failed after the primary failure and was recorded separately: {stepResult.Message}");
+                    continue;
+                }
+
                 PublishProgress(
                     runbook,
                     options,
@@ -195,7 +283,7 @@ public sealed class PowerShellRunbookExecutor : IRunbookExecutor
                 liveResults,
                 index,
                 success: null,
-                message: $"Completed step {index + 1} of {runbook.Steps.Count}: {step.Title}");
+                message: BuildCompletedStepMessage(step, index, runbook.Steps.Count, stepResult.Duration));
         }
 
         attemptTimer.Stop();
@@ -241,6 +329,7 @@ public sealed class PowerShellRunbookExecutor : IRunbookExecutor
         SandboxRunbookStep step,
         int stepIndex,
         SandboxRunbookExecutionOptions options,
+        Action<string>? heartbeat,
         CancellationToken cancellationToken)
     {
         var startedAtUtc = DateTimeOffset.UtcNow;
@@ -276,11 +365,15 @@ public sealed class PowerShellRunbookExecutor : IRunbookExecutor
 
             if (options.StepTimeout > TimeSpan.Zero)
             {
-                var waitTask = process.WaitForExitAsync(cancellationToken);
-                var timeoutTask = Task.Delay(options.StepTimeout, cancellationToken);
-                var completedTask = await Task.WhenAny(waitTask, timeoutTask).ConfigureAwait(false);
+                var exitedBeforeTimeout = await WaitForProcessExitWithHeartbeatAsync(
+                    process,
+                    step,
+                    options.StepTimeout,
+                    stepTimer,
+                    heartbeat,
+                    cancellationToken).ConfigureAwait(false);
 
-                if (completedTask != waitTask)
+                if (!exitedBeforeTimeout)
                 {
                     TryKillProcessTree(process);
                     await WaitForExitAfterKillAsync(process).ConfigureAwait(false);
@@ -289,7 +382,7 @@ public sealed class PowerShellRunbookExecutor : IRunbookExecutor
                     stepTimer.Stop();
                     var timedOutMessage = cancellationToken.IsCancellationRequested
                         ? "PowerShell step was canceled before completion."
-                        : $"PowerShell step exceeded timeout {options.StepTimeout}.";
+                        : $"Step '{step.Title}' exceeded the per-step timeout of {FormatDuration(options.StepTimeout)}.";
 
                     return CreateStepResult(
                         step,
@@ -304,11 +397,15 @@ public sealed class PowerShellRunbookExecutor : IRunbookExecutor
                         message: timedOutMessage);
                 }
 
-                await waitTask.ConfigureAwait(false);
             }
             else
             {
-                await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
+                await WaitForProcessExitWithoutTimeoutAsync(
+                    process,
+                    step,
+                    stepTimer,
+                    heartbeat,
+                    cancellationToken).ConfigureAwait(false);
             }
 
             var output = await CollectOutputAsync(stdoutTask, stderrTask).ConfigureAwait(false);
@@ -366,6 +463,261 @@ public sealed class PowerShellRunbookExecutor : IRunbookExecutor
                 duration: stepTimer.Elapsed,
                 message: $"PowerShell launch failed: {ex.Message}");
         }
+    }
+
+    /// <summary>
+    /// Waits for a launched PowerShell process and emits low-frequency progress
+    /// heartbeats while the step is still active. Inputs are the process, step,
+    /// timeout, elapsed timer, heartbeat callback, and cancellation token;
+    /// processing polls at a bounded cadence without reading stdout/stderr; the
+    /// return value is false only when the configured timeout elapsed.
+    /// </summary>
+    private static async Task<bool> WaitForProcessExitWithHeartbeatAsync(
+        Process process,
+        SandboxRunbookStep step,
+        TimeSpan timeout,
+        Stopwatch stepTimer,
+        Action<string>? heartbeat,
+        CancellationToken cancellationToken)
+    {
+        var waitTask = process.WaitForExitAsync(cancellationToken);
+        while (true)
+        {
+            var remaining = timeout - stepTimer.Elapsed;
+            if (remaining <= TimeSpan.Zero)
+            {
+                return false;
+            }
+
+            var delay = Min(StepHeartbeatInterval, remaining);
+            var delayTask = Task.Delay(delay, cancellationToken);
+            var completedTask = await Task.WhenAny(waitTask, delayTask).ConfigureAwait(false);
+            if (completedTask == waitTask)
+            {
+                await waitTask.ConfigureAwait(false);
+                return true;
+            }
+
+            await delayTask.ConfigureAwait(false);
+            if (stepTimer.Elapsed < timeout)
+            {
+                heartbeat?.Invoke(BuildStepHeartbeatMessage(step, stepTimer.Elapsed, timeout));
+            }
+        }
+    }
+
+    /// <summary>
+    /// Waits for a launched PowerShell process when the caller disabled the
+    /// per-step timeout. Inputs are the process, step, elapsed timer, heartbeat
+    /// callback, and cancellation token; processing emits sparse progress so
+    /// long VM operations do not look hung; return value is a completed task.
+    /// </summary>
+    private static async Task WaitForProcessExitWithoutTimeoutAsync(
+        Process process,
+        SandboxRunbookStep step,
+        Stopwatch stepTimer,
+        Action<string>? heartbeat,
+        CancellationToken cancellationToken)
+    {
+        var waitTask = process.WaitForExitAsync(cancellationToken);
+        while (true)
+        {
+            var delayTask = Task.Delay(StepHeartbeatInterval, cancellationToken);
+            var completedTask = await Task.WhenAny(waitTask, delayTask).ConfigureAwait(false);
+            if (completedTask == waitTask)
+            {
+                await waitTask.ConfigureAwait(false);
+                return;
+            }
+
+            await delayTask.ConfigureAwait(false);
+            heartbeat?.Invoke(BuildStepHeartbeatMessage(step, stepTimer.Elapsed, timeout: null));
+        }
+    }
+
+    /// <summary>
+    /// Builds the first live-progress sentence for a step.
+    /// Inputs are step metadata, position, total count, and timeout; processing
+    /// adds short operator context for long Hyper-V/PowerShell Direct phases;
+    /// the returned message is safe for dashboard progress.
+    /// </summary>
+    private static string BuildRunningStepMessage(
+        SandboxRunbookStep step,
+        int stepIndex,
+        int totalSteps,
+        TimeSpan stepTimeout)
+    {
+        var timeoutText = stepTimeout > TimeSpan.Zero
+            ? $" Timeout: {FormatDuration(stepTimeout)}."
+            : " No per-step timeout is configured.";
+        return $"Step {stepIndex + 1}/{totalSteps}: {DescribeStepForOperator(step)}{timeoutText}";
+    }
+
+    /// <summary>
+    /// Builds the first progress sentence for a cleanup step that runs after a
+    /// primary failure. Inputs are step metadata, position, total count, and the
+    /// primary failure; processing keeps the original failure visible; the
+    /// returned text is safe for dashboard progress.
+    /// </summary>
+    private static string BuildRunningCleanupStepMessage(
+        SandboxRunbookStep step,
+        int stepIndex,
+        int totalSteps,
+        SandboxRunbookStepExecutionResult? primaryFailure)
+    {
+        var failureText = primaryFailure is null
+            ? "the earlier failure"
+            : $"step {primaryFailure.StepIndex + 1} ({primaryFailure.Title})";
+        return $"Cleanup step {stepIndex + 1}/{totalSteps}: {DescribeStepForOperator(step)}. Preserving primary failure from {failureText}.";
+    }
+
+    /// <summary>
+    /// Builds a sparse heartbeat message for a still-running step.
+    /// Inputs are the step, elapsed time, and optional timeout; processing
+    /// describes the current wait without dumping command text or streams; the
+    /// returned message is safe for WebUI and CLI summaries.
+    /// </summary>
+    private static string BuildStepHeartbeatMessage(
+        SandboxRunbookStep step,
+        TimeSpan elapsed,
+        TimeSpan? timeout)
+    {
+        var timeoutText = timeout is { } value
+            ? $", timeout {FormatDuration(value)}"
+            : ", no per-step timeout";
+        return $"Still working on '{step.Title}' ({FormatDuration(elapsed)} elapsed{timeoutText}). {BuildLongStepHint(step)}";
+    }
+
+    /// <summary>
+    /// Builds the successful completion progress sentence for one step.
+    /// Inputs are step metadata, position, total count, and elapsed duration;
+    /// processing avoids command text and returns a compact status line.
+    /// </summary>
+    private static string BuildCompletedStepMessage(
+        SandboxRunbookStep step,
+        int stepIndex,
+        int totalSteps,
+        TimeSpan duration)
+    {
+        return $"Finished step {stepIndex + 1}/{totalSteps}: {step.Title} ({FormatDuration(duration)}).";
+    }
+
+    /// <summary>
+    /// Converts known runbook step identifiers into human-readable operator
+    /// intent. Inputs are source step metadata; processing keeps unknown steps
+    /// on their title; the returned text avoids PowerShell command details.
+    /// </summary>
+    private static string DescribeStepForOperator(SandboxRunbookStep step)
+    {
+        return step.Id switch
+        {
+            "start-temp-vm" or "start-golden" or "start-vm" =>
+                $"{step.Title}; waiting for Hyper-V to report the VM is running",
+            "wait-powershell-direct" =>
+                $"{step.Title}; waiting for the guest OS to accept PowerShell Direct logon",
+            "sync-live-output" =>
+                $"{step.Title}; copying partial guest output while the Guest Agent runs",
+            "collect-output" =>
+                $"{step.Title}; copying the final guest output tree to the host",
+            "stop-vm" or "remove-temp-vm" =>
+                $"{step.Title}; cleanup is best-effort and any cleanup error will be reported separately",
+            _ => step.Title
+        };
+    }
+
+    /// <summary>
+    /// Builds context shown in heartbeat messages for slow phases.
+    /// Input is a runbook step; processing maps known Hyper-V waits to practical
+    /// operator expectations; the method returns a short sentence.
+    /// </summary>
+    private static string BuildLongStepHint(SandboxRunbookStep step)
+    {
+        return step.Id switch
+        {
+            "start-temp-vm" or "start-golden" or "start-vm" =>
+                "VM boot can take a few minutes after checkpoint restore.",
+            "wait-powershell-direct" =>
+                "The VM may already be running while the guest service and credentials are still becoming ready.",
+            "sync-live-output" =>
+                "Output copy failures are throttled; the final copy will report the first actionable error.",
+            "collect-output" =>
+                "If this fails, check the guest output directory, PowerShell Direct session, and required marker files.",
+            _ => "No command output is streamed here; full stdout/stderr remains in the execution record."
+        };
+    }
+
+    /// <summary>
+    /// Determines whether later steps include VM cleanup work.
+    /// Inputs are a runbook and start index; processing scans stable cleanup
+    /// step identifiers; return value decides whether to continue after a
+    /// primary failure.
+    /// </summary>
+    private static bool HasRemainingCleanupSteps(SandboxRunbook runbook, int startIndex)
+    {
+        for (var index = Math.Max(0, startIndex); index < runbook.Steps.Count; index++)
+        {
+            if (IsCleanupStep(runbook.Steps[index]))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Identifies cleanup steps by stable runbook identifiers.
+    /// Input is one planned step; processing avoids relying on localized title
+    /// text; the returned value is true for stop/remove/restore cleanup steps.
+    /// </summary>
+    private static bool IsCleanupStep(SandboxRunbookStep step)
+    {
+        return IsCleanupStepId(step.Id);
+    }
+
+    /// <summary>
+    /// Identifies cleanup steps by result step id.
+    /// Input is a step id; processing handles both C# and script E2E naming;
+    /// the returned value is true for cleanup/stop/remove/restore tail steps.
+    /// </summary>
+    private static bool IsCleanupStepId(string? stepId)
+    {
+        return stepId is not null &&
+            (stepId.Equals("stop-vm", StringComparison.OrdinalIgnoreCase) ||
+             stepId.Equals("remove-temp-vm", StringComparison.OrdinalIgnoreCase) ||
+             stepId.Equals("stop-vm-after-run", StringComparison.OrdinalIgnoreCase) ||
+             stepId.Equals("restore-checkpoint-after-run", StringComparison.OrdinalIgnoreCase) ||
+             stepId.StartsWith("cleanup-", StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// Formats a duration for operator-facing progress.
+    /// Input is a TimeSpan; processing rounds to seconds and keeps the value
+    /// compact; the returned string is culture-invariant enough for logs.
+    /// </summary>
+    private static string FormatDuration(TimeSpan duration)
+    {
+        if (duration < TimeSpan.Zero)
+        {
+            duration = TimeSpan.Zero;
+        }
+
+        if (duration.TotalHours >= 1)
+        {
+            return $"{(int)duration.TotalHours}h {duration.Minutes}m {duration.Seconds}s";
+        }
+
+        if (duration.TotalMinutes >= 1)
+        {
+            return $"{(int)duration.TotalMinutes}m {duration.Seconds}s";
+        }
+
+        return $"{Math.Max(0, (int)Math.Round(duration.TotalSeconds))}s";
+    }
+
+    private static TimeSpan Min(TimeSpan left, TimeSpan right)
+    {
+        return left <= right ? left : right;
     }
 
     /// <summary>
@@ -526,6 +878,33 @@ public sealed class PowerShellRunbookExecutor : IRunbookExecutor
             startedAtUtc: startedAtUtc,
             duration: duration,
             message: "Runbook execution was canceled before this step started.");
+    }
+
+    /// <summary>
+    /// Creates a skipped result for a non-cleanup step after a primary failure.
+    /// Inputs are the source step, index, and primary failure; processing keeps
+    /// the skipped step visible in progress without converting it into another
+    /// failure; the returned result does not mask the primary failed step.
+    /// </summary>
+    private static SandboxRunbookStepExecutionResult CreateSkippedAfterFailureStepResult(
+        SandboxRunbookStep step,
+        int stepIndex,
+        SandboxRunbookStepExecutionResult? primaryFailure)
+    {
+        var message = primaryFailure is null
+            ? "Skipped because an earlier runbook step failed."
+            : $"Skipped because step {primaryFailure.StepIndex + 1} failed: {primaryFailure.Title}.";
+        return CreateStepResult(
+            step,
+            stepIndex,
+            skipped: true,
+            success: true,
+            exitCode: null,
+            stdout: string.Empty,
+            stderr: string.Empty,
+            startedAtUtc: DateTimeOffset.UtcNow,
+            duration: TimeSpan.Zero,
+            message: message);
     }
 
     /// <summary>
@@ -715,9 +1094,22 @@ public sealed class PowerShellRunbookExecutor : IRunbookExecutor
             prefix += $": {stepTitle}";
         }
 
-        return string.IsNullOrWhiteSpace(reason)
+        var primaryMessage = string.IsNullOrWhiteSpace(reason)
             ? $"{prefix}."
             : $"{prefix}. Failure reason: {reason}";
+        var cleanupFailures = results
+            .Where(result => result.StepIndex != failedStepIndex.Value &&
+                !result.Success &&
+                IsCleanupStepId(result.StepId))
+            .Select(result => string.IsNullOrWhiteSpace(result.Message)
+                ? result.Title
+                : $"{result.Title}: {result.Message}")
+            .Take(3)
+            .ToList();
+
+        return cleanupFailures.Count == 0
+            ? primaryMessage
+            : $"{primaryMessage} Cleanup also reported {cleanupFailures.Count} failure(s), recorded separately: {string.Join("; ", cleanupFailures)}";
     }
 
     /// <summary>
@@ -878,31 +1270,48 @@ public sealed class PowerShellRunbookExecutor : IRunbookExecutor
         Task<string>? stdoutTask,
         Task<string>? stderrTask)
     {
-        var stdout = await ReadStreamTaskAsync(stdoutTask).ConfigureAwait(false);
-        var stderr = await ReadStreamTaskAsync(stderrTask).ConfigureAwait(false);
-        return (stdout, stderr);
+        var stdout = await ReadStreamTaskAsync(stdoutTask, "stdout").ConfigureAwait(false);
+        var stderr = await ReadStreamTaskAsync(stderrTask, "stderr").ConfigureAwait(false);
+        var diagnostics = new[]
+            {
+                stdout.Diagnostic,
+                stderr.Diagnostic
+            }
+            .Where(item => !string.IsNullOrWhiteSpace(item));
+        var standardError = string.Join(
+            Environment.NewLine,
+            new[] { stderr.Text }.Concat(diagnostics).Where(item => !string.IsNullOrWhiteSpace(item)));
+        return (stdout.Text, standardError);
     }
 
     /// <summary>
     /// Reads one redirected process stream task.
     /// Input is a nullable text task; processing awaits it and converts stream
-    /// read failures to an empty string; the returned string is suitable for
-    /// inclusion in the step result.
+    /// read failures to a short diagnostic instead of hiding the reason; the
+    /// returned tuple is suitable for inclusion in the step result.
     /// </summary>
-    private static async Task<string> ReadStreamTaskAsync(Task<string>? streamTask)
+    private static async Task<(string Text, string? Diagnostic)> ReadStreamTaskAsync(
+        Task<string>? streamTask,
+        string streamName)
     {
         if (streamTask is null)
         {
-            return string.Empty;
+            return (string.Empty, null);
         }
 
         try
         {
-            return await streamTask.ConfigureAwait(false);
+            var completedTask = await Task.WhenAny(streamTask, Task.Delay(StreamReadTimeout)).ConfigureAwait(false);
+            if (completedTask != streamTask)
+            {
+                return (string.Empty, $"Timed out while reading PowerShell {streamName} after {FormatDuration(StreamReadTimeout)}.");
+            }
+
+            return (await streamTask.ConfigureAwait(false), null);
         }
-        catch (Exception)
+        catch (Exception ex)
         {
-            return string.Empty;
+            return (string.Empty, $"Unable to read PowerShell {streamName}: {ex.Message}");
         }
     }
 
@@ -966,11 +1375,17 @@ public sealed class PowerShellRunbookExecutor : IRunbookExecutor
     {
         try
         {
-            await process.WaitForExitAsync(CancellationToken.None).ConfigureAwait(false);
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            await process.WaitForExitAsync(timeout.Token).ConfigureAwait(false);
         }
         catch (InvalidOperationException)
         {
             // Process was never started.
+        }
+        catch (OperationCanceledException)
+        {
+            // The kill path is best-effort. Do not let a stuck process obscure
+            // the timeout/cancellation/failure that triggered cleanup.
         }
     }
 

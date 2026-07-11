@@ -21,7 +21,8 @@ internal sealed class R0CollectorReadinessDiagnosticsContractScenario : ISmokeTe
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        await AssertExecutableReadinessUnavailableAsync(context, cancellationToken);
+        await AssertExecutableReadinessUnavailableAsync(context, "--readiness", cancellationToken);
+        await AssertExecutableReadinessUnavailableAsync(context, "--diagnose", cancellationToken);
         await AssertExecutableHealthUnavailableAsync(context, cancellationToken);
         await AssertExecutableSelfTestAliasAsync(context, cancellationToken);
 
@@ -34,22 +35,25 @@ internal sealed class R0CollectorReadinessDiagnosticsContractScenario : ISmokeTe
     }
 
     /// <summary>
-    /// Runs --readiness against a unique missing service/device pair.
+    /// Runs a readiness alias against a unique missing service/device pair.
     /// Inputs are smoke context and cancellation token; processing writes JSONL
     /// under the native smoke output root; return value is none.
     /// </summary>
     private static async Task AssertExecutableReadinessUnavailableAsync(
         SmokeTestContext context,
+        string readinessMode,
         CancellationToken cancellationToken)
     {
         var build = await R0CollectorExecutableSmokeHelper.BuildCollectorAsync(context, cancellationToken);
         var uniqueName = "KSwordSandboxMissing" + Guid.NewGuid().ToString("N");
         var missingDevice = @"\\.\" + uniqueName;
-        var outputPath = R0CollectorExecutableSmokeHelper.CreateRunOutputPath(build, "r0collector-readiness-missing-device.jsonl");
+        var outputPath = R0CollectorExecutableSmokeHelper.CreateRunOutputPath(
+            build,
+            $"r0collector-{readinessMode.TrimStart('-')}-missing-device.jsonl");
         var result = await R0CollectorExecutableSmokeHelper.RunCollectorAsync(
             build.ExecutablePath,
             [
-                "--readiness",
+                readinessMode,
                 "--service-name",
                 uniqueName,
                 "--device",
@@ -71,7 +75,7 @@ internal sealed class R0CollectorReadinessDiagnosticsContractScenario : ISmokeTe
 
         SmokeAssert.True(
             result.ExitCode == DeviceUnavailableExitCode,
-            $"collector --readiness against a missing device should exit {DeviceUnavailableExitCode}. Output: {result.CombinedOutput}");
+            $"collector {readinessMode} against a missing device should exit {DeviceUnavailableExitCode}. Output: {result.CombinedOutput}");
 
         var jsonLines = R0CollectorExecutableSmokeHelper.ReadJsonLines(outputPath);
         SmokeAssert.True(jsonLines.BlankLineCount == 0, "Readiness unavailable output should not contain blank JSONL noise.");
@@ -87,6 +91,8 @@ internal sealed class R0CollectorReadinessDiagnosticsContractScenario : ISmokeTe
         RequireDataPresent(serviceDiagnostic, "diagnosticCode");
         RequireDataPresent(serviceDiagnostic, "severity");
         RequireDataPresent(serviceDiagnostic, "readinessState");
+        RequireDataPresent(serviceDiagnostic, "zhMessage");
+        RequireDataPresent(serviceDiagnostic, "zhHint");
 
         var unavailable = RequireEvent(jsonLines.Events, "r0collector.deviceUnavailable");
         RequireData(unavailable, "diagnosticStage", "openDevice");
@@ -98,6 +104,8 @@ internal sealed class R0CollectorReadinessDiagnosticsContractScenario : ISmokeTe
         RequireDataPresent(unavailable, "win32Error");
         RequireDataPresent(unavailable, "win32Message");
         RequireDataPresent(unavailable, "hint");
+        RequireDataPresent(unavailable, "zhMessage");
+        RequireDataPresent(unavailable, "zhHint");
 
         var summary = RequireEvent(jsonLines.Events, "r0collector.readinessSummary");
         RequireData(summary, "ready", "false");
@@ -106,6 +114,8 @@ internal sealed class R0CollectorReadinessDiagnosticsContractScenario : ISmokeTe
         RequireDataOneOf(summary, "failedStage", "service", "openDevice");
         RequireDataPresent(summary, "serviceDiagnosticCode");
         RequireDataPresent(summary, "openDeviceDiagnosticCode");
+        RequireDataPresent(summary, "zhMessage");
+        RequireDataPresent(summary, "zhHint");
 
         RequireNoEvent(jsonLines.Events, "r0collector.deviceOpened");
         RequireNoEvent(jsonLines.Events, "r0collector.driverHealth");
@@ -161,6 +171,8 @@ internal sealed class R0CollectorReadinessDiagnosticsContractScenario : ISmokeTe
         RequireDataPresent(unavailable, "diagnosticCode");
         RequireDataPresent(unavailable, "win32Error");
         RequireDataPresent(unavailable, "hint");
+        RequireDataPresent(unavailable, "zhMessage");
+        RequireDataPresent(unavailable, "zhHint");
 
         RequireNoEvent(jsonLines.Events, "r0collector.deviceOpened");
         RequireNoEvent(jsonLines.Events, "r0collector.driverHealth");

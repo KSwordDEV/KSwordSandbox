@@ -40,10 +40,196 @@ KswGetProducerMaskForEventType(
 }
 
 /*
- * Updates the last internal status reported through GET_HEALTH.
+ * Mirrors typed payload metadata into the common event header.
+ *
+ * Inputs : Header is the record header being prepared; EventType identifies the
+ *          typed payload layout; Payload/PayloadSize are the bounded producer
+ *          bytes supplied to KswPushEvent.
+ * Logic  : keeps producer modules focused on their native payloads while giving
+ *          collectors stable top-level pid/ppid/operation/status/path-presence
+ *          hints for indexing, loss accounting, and future self-noise metadata.
+ * Return : no return value; unsupported or short payloads leave zero/defaults.
+ */
+static
+VOID
+KswPopulateCommonEventMetadata(
+    _Inout_ PKSWORD_SANDBOX_EVENT_HEADER Header,
+    _In_ ULONG EventType,
+    _In_reads_bytes_opt_(PayloadSize) const VOID* Payload,
+    _In_ ULONG PayloadSize
+    )
+{
+    ULONG producerMask;
+
+    if (Header == NULL) {
+        return;
+    }
+
+    producerMask = KswGetProducerMaskForEventType(EventType);
+    Header->ProducerId = producerMask;
+    if (producerMask != 0) {
+        Header->Flags |=
+            KSWORD_SANDBOX_EVENT_FLAG_PRODUCER_METADATA_PRESENT;
+    }
+    if ((Header->Flags & KSWORD_SANDBOX_EVENT_FLAG_SELF_NOISE) != 0) {
+        Header->ProducerMetadataFlags |=
+            KSWORD_SANDBOX_EVENT_METADATA_FLAG_SELF_NOISE;
+        Header->Flags |=
+            KSWORD_SANDBOX_EVENT_FLAG_PRODUCER_METADATA_PRESENT;
+    }
+
+    switch (EventType) {
+    case KswSandboxEventTypeDriverLoad:
+        Header->Operation = KswSandboxEventTypeDriverLoad;
+        Header->Status = STATUS_SUCCESS;
+        Header->Flags |=
+            KSWORD_SANDBOX_EVENT_FLAG_OPERATION_PRESENT |
+            KSWORD_SANDBOX_EVENT_FLAG_STATUS_PRESENT;
+        break;
+
+    case KswSandboxEventTypeProcess:
+        if (Payload != NULL &&
+            PayloadSize >= (ULONG)sizeof(KSWORD_SANDBOX_PROCESS_EVENT_PAYLOAD)) {
+            const KSWORD_SANDBOX_PROCESS_EVENT_PAYLOAD* processPayload;
+
+            processPayload =
+                (const KSWORD_SANDBOX_PROCESS_EVENT_PAYLOAD*)Payload;
+            Header->ProcessId = processPayload->ProcessId;
+            Header->ParentProcessId = processPayload->ParentProcessId;
+            Header->Operation = processPayload->Operation;
+            Header->Status = processPayload->Status;
+            Header->Flags |=
+                KSWORD_SANDBOX_EVENT_FLAG_TARGET_PID_PRESENT |
+                KSWORD_SANDBOX_EVENT_FLAG_OPERATION_PRESENT;
+            if ((processPayload->Flags &
+                    KSWORD_SANDBOX_PROCESS_EVENT_FLAG_PARENT_ID_PRESENT) != 0 ||
+                processPayload->ParentProcessId != 0) {
+                Header->Flags |=
+                    KSWORD_SANDBOX_EVENT_FLAG_PARENT_PID_PRESENT;
+            }
+            if ((processPayload->Flags &
+                    KSWORD_SANDBOX_PROCESS_EVENT_FLAG_STATUS_PRESENT) != 0) {
+                Header->Flags |= KSWORD_SANDBOX_EVENT_FLAG_STATUS_PRESENT;
+            }
+            if ((processPayload->Flags &
+                    KSWORD_SANDBOX_PROCESS_EVENT_FLAG_IMAGE_PATH_PRESENT) != 0) {
+                Header->Flags |=
+                    KSWORD_SANDBOX_EVENT_FLAG_SUBJECT_PATH_PRESENT;
+            }
+        }
+        break;
+
+    case KswSandboxEventTypeImage:
+        if (Payload != NULL &&
+            PayloadSize >= (ULONG)sizeof(KSWORD_SANDBOX_IMAGE_EVENT_PAYLOAD)) {
+            const KSWORD_SANDBOX_IMAGE_EVENT_PAYLOAD* imagePayload;
+
+            imagePayload = (const KSWORD_SANDBOX_IMAGE_EVENT_PAYLOAD*)Payload;
+            Header->ProcessId = imagePayload->ProcessId;
+            Header->Operation = imagePayload->Operation != 0 ?
+                imagePayload->Operation :
+                KswSandboxImageOperationLoad;
+            Header->Status = STATUS_SUCCESS;
+            Header->Flags |=
+                KSWORD_SANDBOX_EVENT_FLAG_OPERATION_PRESENT |
+                KSWORD_SANDBOX_EVENT_FLAG_STATUS_PRESENT;
+            if ((imagePayload->Flags &
+                    KSWORD_SANDBOX_IMAGE_EVENT_FLAG_PROCESS_ID_PRESENT) != 0 ||
+                imagePayload->ProcessId != 0) {
+                Header->Flags |=
+                    KSWORD_SANDBOX_EVENT_FLAG_TARGET_PID_PRESENT;
+            }
+            if ((imagePayload->Flags &
+                    KSWORD_SANDBOX_IMAGE_EVENT_FLAG_PATH_PRESENT) != 0) {
+                Header->Flags |=
+                    KSWORD_SANDBOX_EVENT_FLAG_SUBJECT_PATH_PRESENT;
+            }
+        }
+        break;
+
+    case KswSandboxEventTypeFile:
+        if (Payload != NULL &&
+            PayloadSize >= (ULONG)sizeof(KSWORD_SANDBOX_FILE_EVENT_PAYLOAD)) {
+            const KSWORD_SANDBOX_FILE_EVENT_PAYLOAD* filePayload;
+
+            filePayload = (const KSWORD_SANDBOX_FILE_EVENT_PAYLOAD*)Payload;
+            Header->ProcessId = filePayload->ProcessId;
+            Header->Operation = filePayload->Operation;
+            Header->Status = filePayload->Status;
+            Header->Flags |=
+                KSWORD_SANDBOX_EVENT_FLAG_TARGET_PID_PRESENT |
+                KSWORD_SANDBOX_EVENT_FLAG_OPERATION_PRESENT;
+            if ((filePayload->Flags &
+                    KSWORD_SANDBOX_FILE_EVENT_FLAG_STATUS_PRESENT) != 0) {
+                Header->Flags |= KSWORD_SANDBOX_EVENT_FLAG_STATUS_PRESENT;
+            }
+            if ((filePayload->Flags &
+                    KSWORD_SANDBOX_FILE_EVENT_FLAG_PATH_PRESENT) != 0) {
+                Header->Flags |=
+                    KSWORD_SANDBOX_EVENT_FLAG_SUBJECT_PATH_PRESENT;
+            }
+        }
+        break;
+
+    case KswSandboxEventTypeRegistry:
+        if (Payload != NULL &&
+            PayloadSize >= (ULONG)sizeof(KSWORD_SANDBOX_REGISTRY_EVENT_PAYLOAD)) {
+            const KSWORD_SANDBOX_REGISTRY_EVENT_PAYLOAD* registryPayload;
+
+            registryPayload =
+                (const KSWORD_SANDBOX_REGISTRY_EVENT_PAYLOAD*)Payload;
+            Header->ProcessId = registryPayload->ProcessId;
+            Header->Operation = registryPayload->Operation;
+            Header->Status = registryPayload->Status;
+            Header->Flags |=
+                KSWORD_SANDBOX_EVENT_FLAG_TARGET_PID_PRESENT |
+                KSWORD_SANDBOX_EVENT_FLAG_OPERATION_PRESENT;
+            if ((registryPayload->Flags &
+                    KSWORD_SANDBOX_REGISTRY_EVENT_FLAG_STATUS_PRESENT) != 0) {
+                Header->Flags |= KSWORD_SANDBOX_EVENT_FLAG_STATUS_PRESENT;
+            }
+            if ((registryPayload->Flags &
+                    KSWORD_SANDBOX_REGISTRY_EVENT_FLAG_KEY_PRESENT) != 0) {
+                Header->Flags |=
+                    KSWORD_SANDBOX_EVENT_FLAG_SUBJECT_PATH_PRESENT;
+            }
+        }
+        break;
+
+    case KswSandboxEventTypeNetwork:
+        if (Payload != NULL &&
+            PayloadSize >= (ULONG)sizeof(KSWORD_SANDBOX_NETWORK_EVENT_PAYLOAD)) {
+            const KSWORD_SANDBOX_NETWORK_EVENT_PAYLOAD* networkPayload;
+
+            networkPayload =
+                (const KSWORD_SANDBOX_NETWORK_EVENT_PAYLOAD*)Payload;
+            Header->ProcessId = networkPayload->ProcessId;
+            Header->Operation = networkPayload->Operation != 0 ?
+                networkPayload->Operation :
+                KswSandboxNetworkOperationAleAuthorize;
+            Header->Status = networkPayload->Status;
+            Header->Flags |=
+                KSWORD_SANDBOX_EVENT_FLAG_OPERATION_PRESENT |
+                KSWORD_SANDBOX_EVENT_FLAG_STATUS_PRESENT;
+            if ((networkPayload->Flags &
+                    KSWORD_SANDBOX_NETWORK_EVENT_FLAG_PROCESS_ID_PRESENT) != 0 ||
+                networkPayload->ProcessId != 0) {
+                Header->Flags |=
+                    KSWORD_SANDBOX_EVENT_FLAG_TARGET_PID_PRESENT;
+            }
+        }
+        break;
+
+    default:
+        break;
+    }
+}
+
+/*
+ * Updates the last internal status reported through GET_HEALTH/GET_STATUS.
  *
  * Inputs : DeviceExtension owns the status field; Status is the newest internal
- *          initialization or producer status to expose to collectors.
+ *          initialization, producer, or enqueue status to expose to collectors.
  * Logic  : acquires StateLock, updates LastStatus, and releases the lock before
  *          returning so callers do not hold state locks across FltMgr calls.
  * Return : no return value.
@@ -209,7 +395,9 @@ KswSetProducerEnableMask(
  * Logic  : validates the bounded payload, prepares the public event header and
  *          inline payload outside the spin lock, then inserts the record under
  *          StateLock.  If the ring is full, the oldest unread event is
- *          overwritten and EventsDropped is incremented.
+ *          overwritten and EventsDropped is incremented.  Validation failures
+ *          and producer-mask suppression update the sticky failure status that
+ *          GET_STATUS exposes as LastFailureNtStatus/LastEnqueueFailureNtStatus.
  * Return : STATUS_SUCCESS on enqueue, STATUS_INVALID_PARAMETER for invalid
  *          inputs, or STATUS_BUFFER_TOO_SMALL for oversized payloads.
  */
@@ -225,6 +413,7 @@ KswPushEvent(
     KIRQL oldIrql;
     KSWORD_SANDBOX_EVENT_RECORD eventRecord;
     ULONG producerMask;
+    ULONG writeIndex;
 
     if (DeviceExtension == NULL ||
         DeviceExtension->Signature != KSWORD_SANDBOX_DEVICE_EXTENSION_SIGNATURE) {
@@ -250,10 +439,16 @@ KswPushEvent(
     eventRecord.Header.Type = EventType;
     eventRecord.Header.Flags = Flags;
     eventRecord.Header.TimestampQpc = KeQueryPerformanceCounter(NULL);
+    KeQuerySystemTime(&eventRecord.Header.TimestampSystemTime);
     eventRecord.Header.ProcessId = (ULONGLONG)(ULONG_PTR)PsGetCurrentProcessId();
     eventRecord.Header.ThreadId = (ULONGLONG)(ULONG_PTR)PsGetCurrentThreadId();
     eventRecord.Header.PayloadSize = PayloadSize;
     eventRecord.Header.Reserved = 0;
+    KswPopulateCommonEventMetadata(
+        &eventRecord.Header,
+        EventType,
+        Payload,
+        PayloadSize);
 
     if (PayloadSize != 0) {
         RtlCopyMemory(eventRecord.Payload, Payload, PayloadSize);
@@ -264,6 +459,8 @@ KswPushEvent(
     if ((DeviceExtension->ProducerEnableMask & producerMask) == 0) {
         DeviceExtension->EventsSuppressed++;
         DeviceExtension->ProducerSuppressedMask |= producerMask;
+        DeviceExtension->LastStatus = STATUS_CANCELLED;
+        DeviceExtension->LastFailureStatus = STATUS_CANCELLED;
         KeReleaseSpinLock(&DeviceExtension->StateLock, oldIrql);
         return STATUS_CANCELLED;
     }
@@ -277,11 +474,18 @@ KswPushEvent(
         DeviceExtension->EventCount--;
         DeviceExtension->EventsDropped++;
         DeviceExtension->ProducerDroppedMask |= producerMask;
+        DeviceExtension->LastStatus = STATUS_BUFFER_OVERFLOW;
+        DeviceExtension->LastFailureStatus = STATUS_BUFFER_OVERFLOW;
     }
 
-    DeviceExtension->EventRing[DeviceExtension->EventWriteIndex] = eventRecord;
-    DeviceExtension->EventWriteIndex =
-        KswAdvanceEventRingIndex(DeviceExtension->EventWriteIndex);
+    eventRecord.Header.LostEvents = DeviceExtension->EventsDropped;
+    if (eventRecord.Header.LostEvents != 0) {
+        eventRecord.Header.Flags |=
+            KSWORD_SANDBOX_EVENT_FLAG_LOST_COUNT_PRESENT;
+    }
+
+    writeIndex = DeviceExtension->EventWriteIndex;
+    DeviceExtension->EventWriteIndex = KswAdvanceEventRingIndex(writeIndex);
     DeviceExtension->EventCount++;
     DeviceExtension->EventsQueued = DeviceExtension->EventCount;
     DeviceExtension->TotalEventsQueued++;
@@ -293,6 +497,12 @@ KswPushEvent(
         DeviceExtension->EventsBackpressured++;
         DeviceExtension->ProducerBackpressureMask |= producerMask;
     }
+    eventRecord.Header.BackpressureEvents = DeviceExtension->EventsBackpressured;
+    if (DeviceExtension->EventsBackpressured != 0) {
+        eventRecord.Header.Flags |=
+            KSWORD_SANDBOX_EVENT_FLAG_BACKPRESSURE_COUNT_PRESENT;
+    }
+    DeviceExtension->EventRing[writeIndex] = eventRecord;
     if (NT_SUCCESS(DeviceExtension->LastStatus)) {
         DeviceExtension->LastStatus = STATUS_SUCCESS;
     }

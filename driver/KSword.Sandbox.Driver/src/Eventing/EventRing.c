@@ -78,13 +78,21 @@ KswDrainEventHeaders(
     ULONG corruptRecordsDropped;
     PKSWORD_SANDBOX_EVENT_RECORD sourceRecord;
 
+    if (EventsWritten == NULL ||
+        BytesWritten == NULL ||
+        EventsDropped == NULL ||
+        NextSequence == NULL) {
+        return;
+    }
+
     *EventsWritten = 0;
     *BytesWritten = 0;
     *EventsDropped = 0;
     *NextSequence = 0;
 
     if (DeviceExtension == NULL ||
-        DeviceExtension->Signature != KSWORD_SANDBOX_DEVICE_EXTENSION_SIGNATURE) {
+        DeviceExtension->Signature != KSWORD_SANDBOX_DEVICE_EXTENSION_SIGNATURE ||
+        (EventCapacityBytes != 0 && EventBuffer == NULL)) {
         return;
     }
 

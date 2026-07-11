@@ -106,7 +106,8 @@ internal sealed class P0P1ValidationGateScenario : ISmokeTestScenario
         RequireContains(jobService, "ImportGuestEvents(Guid jobId, string? eventsPath = null)", "Job service must expose explicit guest import.");
         RequireContains(jobService, "ResolveGuestEventsPath", "Guest import must locate collected events deterministically.");
         RequireContains(jobService, "LoadGuestEventsWithDriverJsonl", "Guest import must merge sibling driver JSONL.");
-        RequireContains(jobService, ".EnumerateFiles(searchRoot, \"driver-events.jsonl\", SearchOption.AllDirectories)", "Guest import must recursively discover canonical driver-events.jsonl files without importing arbitrary live scratch JSONL.");
+        RequireContains(jobService, "SafeEnumerateFiles(searchRoot", "Guest import must use safe recursive discovery for canonical driver-events.jsonl files.");
+        RequireContains(jobService, "string.Equals(Path.GetFileName(path), \"driver-events.jsonl\"", "Guest import must recursively discover only canonical driver-events.jsonl files without importing arbitrary live scratch JSONL.");
         RequireContains(jobService, "driver.parse_error", "Malformed JSONL rows must remain visible as parse-error evidence.");
         RequireContains(jobService, "EventKey", "Guest import must de-duplicate events when merging JSON and JSONL.");
         RequireContains(jobService, "guest.events.imported", "Report regeneration must include an import marker event.");
@@ -400,7 +401,7 @@ internal sealed class P0P1ValidationGateScenario : ISmokeTestScenario
             }
         };
 
-        var html = new HtmlReportRenderer().Render(report);
+        var html = new HtmlReportRenderer().RenderEnglish(report);
         foreach (var (id, title) in new[]
         {
             ("risk", "Risk summary"),

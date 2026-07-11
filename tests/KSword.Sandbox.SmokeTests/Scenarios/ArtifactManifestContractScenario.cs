@@ -38,6 +38,7 @@ internal sealed class ArtifactManifestContractScenario : ISmokeTestScenario
         await AssertHostManifestRoundTripAsync(context, cancellationToken);
         await AssertGuestManifestReaderAsync(context, cancellationToken);
         await AssertHostArtifactIndexAsync(context, cancellationToken);
+        await AssertHostArtifactImportReportEventsAsync(context, cancellationToken);
         await AssertArtifactDownloadSelectorsAsync(context, cancellationToken);
         await AssertReportArtifactLinksAsync(context, cancellationToken);
 
@@ -47,6 +48,251 @@ internal sealed class ArtifactManifestContractScenario : ISmokeTestScenario
             Passed = true,
             Message = "Artifact manifest schema, host index, guest reader, and report artifact links are present."
         };
+    }
+
+    /// <summary>
+    /// Verifies host artifact import events and non-behavior Chinese health
+    /// diagnostics produced during report regeneration.
+    /// </summary>
+    private static async Task AssertHostArtifactImportReportEventsAsync(SmokeTestContext context, CancellationToken cancellationToken)
+    {
+        var runtimeRoot = Path.Combine(context.RuntimeRoot, "artifact-host-import", Guid.NewGuid().ToString("N"));
+        var service = CreateArtifactImportService(context, runtimeRoot);
+        var samplePath = Path.Combine(runtimeRoot, "host-import-sample.exe");
+        Directory.CreateDirectory(runtimeRoot);
+        await File.WriteAllTextAsync(samplePath, "host import sample", cancellationToken);
+
+        var importedJobId = Guid.NewGuid();
+        var importedJobRoot = Path.Combine(runtimeRoot, "jobs", importedJobId.ToString("N"));
+        var importedGuestRoot = Path.Combine(importedJobRoot, "guest", importedJobId.ToString("N"));
+        var droppedRoot = Path.Combine(importedGuestRoot, "artifacts", "dropped-files");
+        var screenshotsRoot = Path.Combine(importedGuestRoot, "screenshots");
+        var memoryRoot = Path.Combine(importedGuestRoot, "memory-dumps");
+        var pcapRoot = Path.Combine(importedGuestRoot, "packet-captures");
+        Directory.CreateDirectory(droppedRoot);
+        Directory.CreateDirectory(screenshotsRoot);
+        Directory.CreateDirectory(memoryRoot);
+        Directory.CreateDirectory(pcapRoot);
+        var droppedPath = Path.Combine(droppedRoot, "downloaded.bin");
+        var screenshotPath = Path.Combine(screenshotsRoot, "after-run.bmp");
+        var memoryPath = Path.Combine(memoryRoot, "after-run-pid4242.dmp");
+        var pcapPath = Path.Combine(pcapRoot, "after-run.pcap");
+        await File.WriteAllTextAsync(droppedPath, "drop", cancellationToken);
+        await File.WriteAllBytesAsync(screenshotPath, [0x42, 0x4d, 0x00, 0x00], cancellationToken);
+        await File.WriteAllBytesAsync(memoryPath, [0x4d, 0x44, 0x4d, 0x50], cancellationToken);
+        await File.WriteAllBytesAsync(pcapPath, BuildMinimalPcapHeader(), cancellationToken);
+        var importedEventsPath = Path.Combine(importedGuestRoot, "events.json");
+        await File.WriteAllTextAsync(
+            importedEventsPath,
+            JsonSerializer.Serialize(new[]
+            {
+                new SandboxEvent
+                {
+                    EventType = "artifact.dropped_file.copied",
+                    Source = "guest",
+                    Path = droppedPath,
+                    Data =
+                    {
+                        ["collectionName"] = "dropped-files",
+                        ["evidenceRole"] = "dropped-file",
+                        ["artifactRelativePath"] = "artifacts/dropped-files/downloaded.bin",
+                        ["guestFullPath"] = @"C:\work\downloaded.bin"
+                    }
+                },
+                new SandboxEvent
+                {
+                    EventType = "screenshot.captured",
+                    Source = "guest",
+                    Path = screenshotPath,
+                    Data =
+                    {
+                        ["collectionName"] = "screenshots",
+                        ["evidenceRole"] = "screenshot",
+                        ["screenshotRelativePath"] = "screenshots/after-run.bmp",
+                        ["capturePhase"] = "after-run"
+                    }
+                },
+                new SandboxEvent
+                {
+                    EventType = "memory_dump.captured",
+                    Source = "guest",
+                    Path = memoryPath,
+                    ProcessId = 4242,
+                    Data =
+                    {
+                        ["collectionName"] = "memory-dumps",
+                        ["evidenceRole"] = "memory-dump",
+                        ["memoryDumpRelativePath"] = "memory-dumps/after-run-pid4242.dmp",
+                        ["rootProcessId"] = "4242"
+                    }
+                },
+                new SandboxEvent
+                {
+                    EventType = "packet_capture.captured",
+                    Source = "guest",
+                    Path = pcapPath,
+                    Data =
+                    {
+                        ["collectionName"] = "packet-captures",
+                        ["evidenceRole"] = "packet-capture",
+                        ["pcapRelativePath"] = "packet-captures/after-run.pcap"
+                    }
+                }
+            }, ManifestJsonOptions),
+            cancellationToken);
+
+        var importedJob = service.ImportExternalRun(
+            importedJobId,
+            CreateArtifactImportSubmission(samplePath),
+            importedEventsPath);
+        var importedReport = await ReadReportAsync(importedJob.JsonReportPath, cancellationToken);
+        var hostImportedEvents = importedReport.Events
+            .Where(evt => string.Equals(evt.EventType, "artifact.host_imported", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        AssertHostImportedArtifactEvent(hostImportedEvents, ArtifactKind.DroppedFile, "dropped-files");
+        AssertHostImportedArtifactEvent(hostImportedEvents, ArtifactKind.Screenshot, "screenshots");
+        AssertHostImportedArtifactEvent(hostImportedEvents, ArtifactKind.MemoryDump, "memory-dumps");
+        AssertHostImportedArtifactEvent(hostImportedEvents, ArtifactKind.PacketCapture, "packet-captures");
+
+        var missingJobId = Guid.NewGuid();
+        var missingJobRoot = Path.Combine(runtimeRoot, "jobs", missingJobId.ToString("N"));
+        var missingGuestRoot = Path.Combine(missingJobRoot, "guest", missingJobId.ToString("N"));
+        Directory.CreateDirectory(missingGuestRoot);
+        var missingEventsPath = Path.Combine(missingGuestRoot, "events.json");
+        await File.WriteAllTextAsync(
+            missingEventsPath,
+            JsonSerializer.Serialize(new[]
+            {
+                new SandboxEvent
+                {
+                    EventType = "memory_dump.failed",
+                    Source = "guest",
+                    Data =
+                    {
+                        ["collectionName"] = "memory-dumps",
+                        ["evidenceRole"] = "memory-dump",
+                        ["captureState"] = "failed",
+                        ["status"] = "failed",
+                        ["reason"] = "targetProcessExited",
+                        ["zhHint"] = "目标进程已退出，未生成内存转储。"
+                    }
+                }
+            }, ManifestJsonOptions),
+            cancellationToken);
+
+        var missingJob = service.ImportExternalRun(
+            missingJobId,
+            CreateArtifactImportSubmission(samplePath),
+            missingEventsPath);
+        var missingReport = await ReadReportAsync(missingJob.JsonReportPath, cancellationToken);
+        var health = missingReport.Events.Single(evt =>
+            string.Equals(evt.EventType, "collection.health", StringComparison.OrdinalIgnoreCase) &&
+            evt.Data.TryGetValue("collectionName", out var collectionName) &&
+            collectionName == "memory-dumps");
+        RequireData(health, "healthStatus", "collection-health");
+        RequireData(health, "behaviorCounted", "false");
+        RequireData(health, "artifactMissing", "true");
+        RequireData(health, "sourceEventType", "memory_dump.failed");
+        SmokeAssert.True(health.Data.TryGetValue("zhMessage", out var zhMessage) && zhMessage.Contains("不代表样本行为", StringComparison.Ordinal), "Missing artifact health should include a Chinese non-behavior diagnostic.");
+        SmokeAssert.True(missingReport.Findings.SelectMany(finding => finding.Evidence).All(evt => !string.Equals(evt.EventType, "collection.health", StringComparison.OrdinalIgnoreCase)), "Collection health diagnostics should not be classified as behavior findings.");
+    }
+
+    private static SandboxJobService CreateArtifactImportService(SmokeTestContext context, string runtimeRoot)
+    {
+        return new SandboxJobService(
+            new SandboxConfig
+            {
+                Analysis = new AnalysisConfig
+                {
+                    DefaultDurationSeconds = 5,
+                    MaxDurationSeconds = 60,
+                    MaxSampleBytes = 1024 * 1024
+                },
+                Paths = new SandboxPaths
+                {
+                    RuntimeRoot = runtimeRoot,
+                    RulesDirectory = context.RulesDirectory,
+                    GuestPayloadRoot = Path.Combine(runtimeRoot, "payload")
+                },
+                ArtifactCollection = new ArtifactCollectionConfig
+                {
+                    CollectDroppedFiles = true,
+                    CaptureScreenshots = true,
+                    CaptureMemoryDumps = true,
+                    CapturePacketCapture = true
+                }
+            },
+            RuleEngine.LoadRuleSet(Path.Combine(context.RulesDirectory, "behavior-rules.json")));
+    }
+
+    private static SandboxSubmission CreateArtifactImportSubmission(string samplePath)
+    {
+        return new SandboxSubmission
+        {
+            SamplePath = samplePath,
+            DurationSeconds = 5,
+            DryRun = false,
+            CollectDroppedFiles = true,
+            CaptureScreenshots = true,
+            CaptureMemoryDumps = true,
+            CapturePacketCapture = true
+        };
+    }
+
+    private static async Task<AnalysisReport> ReadReportAsync(string? reportPath, CancellationToken cancellationToken)
+    {
+        SmokeAssert.True(!string.IsNullOrWhiteSpace(reportPath) && File.Exists(reportPath), "Imported job should write report.json.");
+        return JsonSerializer.Deserialize<AnalysisReport>(
+            await File.ReadAllTextAsync(reportPath!, cancellationToken),
+            new JsonSerializerOptions { PropertyNameCaseInsensitive = true })
+            ?? throw new InvalidOperationException("Imported report should deserialize.");
+    }
+
+    private static void AssertHostImportedArtifactEvent(
+        IReadOnlyCollection<SandboxEvent> events,
+        ArtifactKind kind,
+        string collectionName)
+    {
+        var evt = events.FirstOrDefault(candidate =>
+            candidate.Data.TryGetValue("sourceArtifactKind", out var actualKind) &&
+            actualKind == kind.ToString() &&
+            candidate.Data.TryGetValue("collectionName", out var actualCollection) &&
+            actualCollection == collectionName);
+        SmokeAssert.True(evt is not null, $"{kind} should emit artifact.host_imported.");
+        RequireData(evt!, "behaviorCounted", "false");
+        RequireData(evt!, "sourceArtifactKind", kind.ToString());
+        RequireData(evt!, "collectionName", collectionName);
+        SmokeAssert.True(evt!.Data.TryGetValue("sourceArtifactSizeBytes", out var size) && long.Parse(size) > 0, $"{kind} host import event should include source artifact size.");
+        SmokeAssert.True(evt.Data.TryGetValue("sourceArtifactSha256", out var sha256) && sha256.Length == 64, $"{kind} host import event should include source artifact SHA-256.");
+        SmokeAssert.True(evt.Data.TryGetValue("sourceEventType", out var sourceEventType) && !string.IsNullOrWhiteSpace(sourceEventType), $"{kind} host import event should include source event type.");
+        SmokeAssert.True(evt.Data.TryGetValue("downloadSelector", out var downloadSelector), $"{kind} host import event should include a guarded download selector.");
+        AssertSafeSelectorValue($"{kind} import downloadSelector", downloadSelector);
+        SmokeAssert.True(evt.Data.TryGetValue("downloadSafeLink", out var downloadSafeLink), $"{kind} host import event should include a guarded safe-link selector.");
+        AssertSafeSelectorValue($"{kind} import downloadSafeLink", downloadSafeLink);
+        SmokeAssert.True(
+            !downloadSelector.Contains(':', StringComparison.Ordinal) &&
+            !downloadSelector.Contains('\\', StringComparison.Ordinal),
+            $"{kind} host import download selector should not be an absolute host path.");
+        SmokeAssert.True(evt.Data.TryGetValue("zhMessage", out var zhMessage) && zhMessage.Contains("Host 已索引", StringComparison.Ordinal), $"{kind} host import event should include Chinese import message.");
+    }
+
+    private static void RequireData(SandboxEvent evt, string key, string expected)
+    {
+        SmokeAssert.True(evt.Data.TryGetValue(key, out var actual) && string.Equals(actual, expected, StringComparison.Ordinal), $"{evt.EventType} should include {key}={expected}; actual={actual ?? "<missing>"}.");
+    }
+
+    private static byte[] BuildMinimalPcapHeader()
+    {
+        return
+        [
+            0xd4, 0xc3, 0xb2, 0xa1,
+            0x02, 0x00,
+            0x04, 0x00,
+            0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00,
+            0xff, 0xff, 0x00, 0x00,
+            0x01, 0x00, 0x00, 0x00
+        ];
     }
 
     /// <summary>
@@ -148,6 +394,7 @@ internal sealed class ArtifactManifestContractScenario : ISmokeTestScenario
         var descriptor = await store.WriteManifestAsync(jobId, manifest, cancellationToken);
         SmokeAssert.True(descriptor.Kind == ArtifactKind.ArtifactManifest, "Manifest descriptor should use ArtifactManifest kind.");
         SmokeAssert.True(File.Exists(descriptor.FullPath), "Manifest file should be written.");
+        AssertArtifactManifestJsonShape(descriptor.FullPath, "host artifact manifest");
         SmokeAssert.True(!string.IsNullOrWhiteSpace(descriptor.Sha256), "Manifest descriptor should include SHA-256.");
         SmokeAssert.True(descriptor.SizeBytes > 0, "Manifest descriptor should include size.");
         SmokeAssert.True(descriptor.MimeType == "application/json", "Manifest descriptor should include MIME type.");
@@ -309,6 +556,7 @@ internal sealed class ArtifactManifestContractScenario : ISmokeTestScenario
             ]
         };
         await File.WriteAllTextAsync(manifestPath, JsonSerializer.Serialize(manifest, ManifestJsonOptions), cancellationToken);
+        AssertArtifactManifestJsonShape(manifestPath, "guest artifact manifest");
 
         var reader = new GuestArtifactManifestReader();
         var loaded = await reader.TryReadAsync(guestRoot, cancellationToken)
@@ -371,11 +619,15 @@ internal sealed class ArtifactManifestContractScenario : ISmokeTestScenario
         var packetCapturesRoot = Path.Combine(guestRoot, "packet-captures");
         var artifactsRoot = Path.Combine(guestRoot, "artifacts");
         var droppedFilesRoot = Path.Combine(artifactsRoot, "dropped-files");
+        var legacyDroppedFilesRoot = Path.Combine(guestRoot, "dropped-files");
+        var legacyDumpsRoot = Path.Combine(guestRoot, "dumps");
         Directory.CreateDirectory(screenshotsRoot);
         Directory.CreateDirectory(memoryDumpsRoot);
         Directory.CreateDirectory(packetCapturesRoot);
         Directory.CreateDirectory(artifactsRoot);
         Directory.CreateDirectory(droppedFilesRoot);
+        Directory.CreateDirectory(legacyDroppedFilesRoot);
+        Directory.CreateDirectory(legacyDumpsRoot);
 
         await File.WriteAllTextAsync(Path.Combine(jobRoot, "report.json"), "{}", cancellationToken);
         await File.WriteAllTextAsync(Path.Combine(jobRoot, "report.html"), "<html></html>", cancellationToken);
@@ -494,6 +746,8 @@ internal sealed class ArtifactManifestContractScenario : ISmokeTestScenario
         await File.WriteAllBytesAsync(Path.Combine(packetCapturesRoot, "before-start.pcap"), [0xd4, 0xc3, 0xb2, 0xa1], cancellationToken);
         await File.WriteAllBytesAsync(Path.Combine(packetCapturesRoot, "future.pcapng"), [0x0a, 0x0d, 0x0d, 0x0a], cancellationToken);
         await File.WriteAllTextAsync(Path.Combine(droppedFilesRoot, "drop.bin"), "drop", cancellationToken);
+        await File.WriteAllTextAsync(Path.Combine(legacyDroppedFilesRoot, "legacy-drop.bin"), "legacy-drop", cancellationToken);
+        await File.WriteAllBytesAsync(Path.Combine(legacyDumpsRoot, "legacy-pid321.dmp"), [0x4d, 0x44, 0x4d, 0x50], cancellationToken);
         await File.WriteAllTextAsync(
             Path.Combine(artifactsRoot, "manifest.json"),
             JsonSerializer.Serialize(new ArtifactManifest
@@ -660,6 +914,10 @@ internal sealed class ArtifactManifestContractScenario : ISmokeTestScenario
         SmokeAssert.True(dropped.SafeLink == $"guest/{jobId:N}/artifacts/dropped-files/drop.bin", "Dropped-file index entry should include safe relative link.");
         SmokeAssert.True(dropped.Hashes.ContainsKey("sha256"), "Dropped-file index entry should include hashes map.");
         SmokeAssert.True(dropped.GuestPath == @"C:\work\drop.bin", "Dropped-file index entry should preserve original guest path.");
+        var legacyDropped = AssertIndexedArtifact(index, ArtifactKind.DroppedFile, $"guest/{jobId:N}/dropped-files/legacy-drop.bin");
+        SmokeAssert.True(legacyDropped.CollectionName == "dropped-files", "Host index should cover legacy dropped-files directories outside artifacts/.");
+        var legacyDump = AssertIndexedArtifact(index, ArtifactKind.MemoryDump, $"guest/{jobId:N}/dumps/legacy-pid321.dmp");
+        SmokeAssert.True(legacyDump.CollectionName == "memory-dumps", "Host index should cover legacy dumps directories as memory dumps.");
         SmokeAssert.True(index.Artifacts.All(artifact => !artifact.RelativePath.Contains("escape.bin", StringComparison.OrdinalIgnoreCase)), "Unsafe guest manifest descriptors should not become downloadable host index entries.");
         var memoryDumpCollection = index.Collections.Single(collection => collection.Name == "memory-dumps");
         SmokeAssert.True(memoryDumpCollection.Metadata.TryGetValue("sweepVisibleTargetCount", out var visibleTargetCount) && visibleTargetCount == "2", "Memory dump collection should retain child-process sweep visible target count.");
@@ -671,6 +929,7 @@ internal sealed class ArtifactManifestContractScenario : ISmokeTestScenario
         var indexDescriptor = builder.WriteIndex(jobId, jobRoot);
         SmokeAssert.True(indexDescriptor.Kind == ArtifactKind.ArtifactIndex, "Index descriptor should use ArtifactIndex kind.");
         SmokeAssert.True(File.Exists(indexDescriptor.FullPath), "artifact-index.json should be written.");
+        AssertHostArtifactIndexJsonShape(indexDescriptor.FullPath);
         var loaded = builder.TryReadIndex(jobRoot) ?? throw new InvalidOperationException("artifact-index.json should load.");
         SmokeAssert.True(loaded.Artifacts.Any(artifact => artifact.Kind == ArtifactKind.DriverEventsJsonLines), "Loaded index should include driver JSONL.");
         SmokeAssert.True(loaded.Collections.Any(collection => collection.Name == "packet-captures" && collection.Metadata.ContainsKey("artifactCount")), "Loaded index should preserve packet-capture collection metadata.");
@@ -761,6 +1020,8 @@ internal sealed class ArtifactManifestContractScenario : ISmokeTestScenario
 
         AssertThrows<ArgumentException>(() => service.ResolveDownloadableArtifact(job.JobId, @"C:\Windows\win.ini"), "Absolute download selectors should be rejected.");
         AssertThrows<ArgumentException>(() => service.ResolveDownloadableArtifact(job.JobId, "../escape.bin"), "Traversal download selectors should be rejected.");
+        AssertThrows<ArgumentException>(() => service.ResolveDownloadableArtifact(job.JobId, Uri.EscapeDataString(@"C:\Windows\win.ini")), "URL-encoded absolute download selectors should be rejected.");
+        AssertThrows<ArgumentException>(() => service.ResolveDownloadableArtifact(job.JobId, "%2e%2e%2fescape.bin"), "URL-encoded traversal download selectors should be rejected.");
         AssertThrows<FileNotFoundException>(() => service.ResolveDownloadableArtifact(job.JobId, $"guest/{job.JobId:N}/artifacts/dropped-files/missing.bin"), "Unknown relative download selectors should be rejected.");
     }
 
@@ -833,8 +1094,11 @@ internal sealed class ArtifactManifestContractScenario : ISmokeTestScenario
 
         var report = CreateReport(jobId, eventsPath, screenshotPath, dropPath, memoryDumpPath, packetCapturePath);
         var index = new HostArtifactIndexBuilder().Build(jobId, jobRoot);
-        var html = new HtmlReportRenderer().Render(report, index.Artifacts);
+        var renderer = new HtmlReportRenderer();
+        var html = renderer.RenderEnglish(report, index.Artifacts);
         AssertReportHtmlContainsArtifactLinks(html, jobId);
+        var zhHtml = renderer.RenderChinese(report, index.Artifacts);
+        SmokeAssert.True(zhHtml.Contains("证据文件链接", StringComparison.Ordinal), "Chinese HTML report should include localized artifact links section.");
 
         var stage = new ReportArtifactStage();
         await stage.ExecuteAsync(new AnalysisPipelineContext
@@ -883,11 +1147,184 @@ internal sealed class ArtifactManifestContractScenario : ISmokeTestScenario
 
     private static void AssertSafeSelectorField(ArtifactDescriptor artifact, string fieldName, string value)
     {
-        SmokeAssert.True(!string.IsNullOrWhiteSpace(value), $"{artifact.Kind} {fieldName} should not be empty.");
-        SmokeAssert.True(!value.Contains('\\', StringComparison.Ordinal), $"{artifact.Kind} {fieldName} should use slash-separated paths.");
-        SmokeAssert.True(!value.StartsWith("/", StringComparison.Ordinal), $"{artifact.Kind} {fieldName} should not be absolute.");
-        SmokeAssert.True(!Path.IsPathFullyQualified(Uri.UnescapeDataString(value)), $"{artifact.Kind} {fieldName} should not be a fully-qualified filesystem path.");
-        SmokeAssert.True(!value.Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Any(segment => string.Equals(segment, "..", StringComparison.Ordinal)), $"{artifact.Kind} {fieldName} should not contain parent traversal.");
+        AssertSafeSelectorValue($"{artifact.Kind} {fieldName}", value);
+    }
+
+    private static void AssertSafeSelectorValue(string subject, string value)
+    {
+        SmokeAssert.True(!string.IsNullOrWhiteSpace(value), $"{subject} should not be empty.");
+        SmokeAssert.True(!value.Contains('\\', StringComparison.Ordinal), $"{subject} should use slash-separated paths.");
+        SmokeAssert.True(!value.StartsWith("/", StringComparison.Ordinal), $"{subject} should not be absolute.");
+        SmokeAssert.True(!Path.IsPathFullyQualified(Uri.UnescapeDataString(value)), $"{subject} should not be a fully-qualified filesystem path.");
+        SmokeAssert.True(!value.Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Any(segment => string.Equals(segment, "..", StringComparison.Ordinal)), $"{subject} should not contain parent traversal.");
+    }
+
+    private static void AssertArtifactManifestJsonShape(string manifestPath, string label)
+    {
+        using var document = JsonDocument.Parse(File.ReadAllText(manifestPath));
+        var root = RequireObject(document.RootElement, label);
+        RequireInt(root, "schemaVersion", label, value => value >= 1);
+        RequireGuid(root, "jobId", label);
+        RequireString(root, "producer", label);
+        RequireString(root, "generatedAtUtc", label);
+        RequireArray(root, "collections", label, collection => AssertCollectionJsonShape(collection, label));
+        RequireArray(root, "artifacts", label, artifact => AssertArtifactDescriptorJsonShape(artifact, label, safeSelectorsRequired: false));
+    }
+
+    private static void AssertHostArtifactIndexJsonShape(string indexPath)
+    {
+        using var document = JsonDocument.Parse(File.ReadAllText(indexPath));
+        var label = "host artifact index";
+        var root = RequireObject(document.RootElement, label);
+        RequireInt(root, "schemaVersion", label, value => value >= 1);
+        RequireGuid(root, "jobId", label);
+        RequireString(root, "rootPath", label);
+        RequireString(root, "producer", label);
+        RequireString(root, "generatedAtUtc", label);
+        RequireArray(root, "collections", label, collection => AssertCollectionJsonShape(collection, label));
+        RequireArray(root, "artifacts", label, artifact => AssertArtifactDescriptorJsonShape(artifact, label, safeSelectorsRequired: true));
+    }
+
+    private static void AssertCollectionJsonShape(JsonElement element, string label)
+    {
+        var collection = RequireObject(element, $"{label} collection");
+        RequireString(collection, "name", label);
+        RequireString(collection, "kind", label);
+        RequireString(collection, "category", label, allowEmpty: true);
+        RequireString(collection, "evidenceRole", label, allowEmpty: true);
+        RequireString(collection, "relativePath", label, allowEmpty: true);
+        RequireBoolean(collection, "enabled", label);
+        RequireBoolean(collection, "implemented", label);
+        RequireString(collection, "status", label, allowEmpty: true);
+        RequireObjectProperty(collection, "metadata", label);
+
+        if (TryGetString(collection, "safeLink", out var safeLink) && !string.IsNullOrWhiteSpace(safeLink))
+        {
+            AssertSafeSelectorValue($"{label} collection safeLink", safeLink);
+        }
+
+        if (TryGetString(collection, "importPath", out var importPath) && !string.IsNullOrWhiteSpace(importPath))
+        {
+            AssertSafeSelectorValue($"{label} collection importPath", importPath);
+        }
+    }
+
+    private static void AssertArtifactDescriptorJsonShape(JsonElement element, string label, bool safeSelectorsRequired)
+    {
+        var artifact = RequireObject(element, $"{label} artifact");
+        RequireString(artifact, "kind", label);
+        RequireString(artifact, "name", label, allowEmpty: true);
+        RequireString(artifact, "category", label, allowEmpty: true);
+        RequireString(artifact, "relativePath", label, allowEmpty: !safeSelectorsRequired);
+        RequireString(artifact, "fullPath", label, allowEmpty: true);
+        RequireString(artifact, "mimeType", label, allowEmpty: true);
+        RequireInt64(artifact, "sizeBytes", label, value => value >= 0);
+        RequireObjectProperty(artifact, "hashes", label);
+        RequireObjectProperty(artifact, "metadata", label);
+
+        if (TryGetString(artifact, "relativePath", out var relativePath) && !string.IsNullOrWhiteSpace(relativePath))
+        {
+            if (safeSelectorsRequired)
+            {
+                AssertSafeSelectorValue($"{label} artifact relativePath", relativePath);
+            }
+        }
+
+        if (TryGetString(artifact, "safeLink", out var safeLink) && !string.IsNullOrWhiteSpace(safeLink))
+        {
+            AssertSafeSelectorValue($"{label} artifact safeLink", safeLink);
+        }
+        else
+        {
+            SmokeAssert.True(!safeSelectorsRequired, $"{label} artifact safeLink should not be empty.");
+        }
+
+        if (TryGetString(artifact, "importPath", out var importPath) && !string.IsNullOrWhiteSpace(importPath))
+        {
+            AssertSafeSelectorValue($"{label} artifact importPath", importPath);
+        }
+        else
+        {
+            SmokeAssert.True(!safeSelectorsRequired, $"{label} artifact importPath should not be empty.");
+        }
+    }
+
+    private static JsonElement RequireObject(JsonElement element, string label)
+    {
+        SmokeAssert.True(element.ValueKind == JsonValueKind.Object, $"{label} should be a JSON object.");
+        return element;
+    }
+
+    private static JsonElement RequireObjectProperty(JsonElement root, string propertyName, string label)
+    {
+        SmokeAssert.True(root.TryGetProperty(propertyName, out var property), $"{label} should include '{propertyName}'.");
+        SmokeAssert.True(property.ValueKind == JsonValueKind.Object, $"{label}.{propertyName} should be a JSON object.");
+        return property;
+    }
+
+    private static void RequireString(JsonElement root, string propertyName, string label, bool allowEmpty = false)
+    {
+        SmokeAssert.True(root.TryGetProperty(propertyName, out var property), $"{label} should include '{propertyName}'.");
+        SmokeAssert.True(property.ValueKind == JsonValueKind.String, $"{label}.{propertyName} should be a JSON string.");
+        SmokeAssert.True(allowEmpty || !string.IsNullOrWhiteSpace(property.GetString()), $"{label}.{propertyName} should not be empty.");
+    }
+
+    private static void RequireBoolean(JsonElement root, string propertyName, string label)
+    {
+        SmokeAssert.True(root.TryGetProperty(propertyName, out var property), $"{label} should include '{propertyName}'.");
+        SmokeAssert.True(property.ValueKind is JsonValueKind.True or JsonValueKind.False, $"{label}.{propertyName} should be a JSON boolean.");
+    }
+
+    private static void RequireGuid(JsonElement root, string propertyName, string label)
+    {
+        RequireString(root, propertyName, label);
+        SmokeAssert.True(Guid.TryParse(root.GetProperty(propertyName).GetString(), out _), $"{label}.{propertyName} should be a GUID string.");
+    }
+
+    private static void RequireInt(JsonElement root, string propertyName, string label, Func<int, bool> predicate)
+    {
+        SmokeAssert.True(root.TryGetProperty(propertyName, out var property), $"{label} should include '{propertyName}'.");
+        if (property.ValueKind != JsonValueKind.Number || !property.TryGetInt32(out var value))
+        {
+            SmokeAssert.True(false, $"{label}.{propertyName} should be a JSON integer.");
+            return;
+        }
+
+        SmokeAssert.True(predicate(value), $"{label}.{propertyName} should satisfy its contract.");
+    }
+
+    private static void RequireInt64(JsonElement root, string propertyName, string label, Func<long, bool> predicate)
+    {
+        SmokeAssert.True(root.TryGetProperty(propertyName, out var property), $"{label} should include '{propertyName}'.");
+        if (property.ValueKind != JsonValueKind.Number || !property.TryGetInt64(out var value))
+        {
+            SmokeAssert.True(false, $"{label}.{propertyName} should be a JSON integer.");
+            return;
+        }
+
+        SmokeAssert.True(predicate(value), $"{label}.{propertyName} should satisfy its contract.");
+    }
+
+    private static void RequireArray(JsonElement root, string propertyName, string label, Action<JsonElement> assertElement)
+    {
+        SmokeAssert.True(root.TryGetProperty(propertyName, out var property), $"{label} should include '{propertyName}'.");
+        SmokeAssert.True(property.ValueKind == JsonValueKind.Array, $"{label}.{propertyName} should be a JSON array.");
+        foreach (var item in property.EnumerateArray())
+        {
+            assertElement(item);
+        }
+    }
+
+    private static bool TryGetString(JsonElement root, string propertyName, out string value)
+    {
+        value = string.Empty;
+        if (!root.TryGetProperty(propertyName, out var property) || property.ValueKind != JsonValueKind.String)
+        {
+            return false;
+        }
+
+        value = property.GetString() ?? string.Empty;
+        return true;
     }
 
     private static void AssertThrows<TException>(Action action, string message)
@@ -981,11 +1418,11 @@ internal sealed class ArtifactManifestContractScenario : ISmokeTestScenario
 
     private static void AssertReportHtmlContainsArtifactLinks(string html, Guid jobId)
     {
-        SmokeAssert.True(html.Contains("Artifact links", StringComparison.Ordinal), "HTML report should include artifact links section.");
+        AssertContainsAny(html, ["Artifact links", "证据文件链接"], "HTML report should include artifact links section.");
         SmokeAssert.True(html.Contains("events.json", StringComparison.Ordinal), "HTML report should expose events.json.");
         SmokeAssert.True(html.Contains("driver-events.jsonl", StringComparison.Ordinal), "HTML report should expose driver-events.jsonl.");
         SmokeAssert.True(html.Contains("screenshots/after-run.bmp", StringComparison.Ordinal), "HTML report should expose screenshot path.");
-        SmokeAssert.True(html.Contains("memory-dumps/after-start-pid123.dmp", StringComparison.Ordinal), "HTML report should expose memory dump path.");
+        AssertContainsAny(html, ["memory-dumps/after-start-pid123.dmp", "after-start-pid123.dmp"], "HTML report should expose memory dump path.");
         SmokeAssert.True(html.Contains("packet-captures/future.pcapng", StringComparison.Ordinal), "HTML report should expose packet capture path.");
         SmokeAssert.True(html.Contains("artifacts/dropped-files/drop.bin", StringComparison.Ordinal), "HTML report should expose dropped-file path.");
         SmokeAssert.True(html.Contains($"href=\"guest/{jobId:N}/events.json\"", StringComparison.Ordinal), "HTML report should use safe relative event links.");
@@ -995,12 +1432,17 @@ internal sealed class ArtifactManifestContractScenario : ISmokeTestScenario
         SmokeAssert.True(html.Contains($"href=\"guest/{jobId:N}/packet-captures/future.pcapng\"", StringComparison.Ordinal), "HTML report should link packet captures.");
         SmokeAssert.True(html.Contains($"href=\"guest/{jobId:N}/artifacts/manifest.json\"", StringComparison.Ordinal), "HTML report should link artifact manifest.");
         SmokeAssert.True(html.Contains($"href=\"guest/{jobId:N}/artifacts/dropped-files/drop.bin\"", StringComparison.Ordinal), "HTML report should link dropped files.");
-        SmokeAssert.True(html.Contains("Artifact evidence", StringComparison.Ordinal), "HTML report should render collapsible artifact evidence.");
-        SmokeAssert.True(html.Contains("Related artifacts", StringComparison.Ordinal), "HTML report event evidence should expand related artifacts.");
-        SmokeAssert.True(html.Contains("Screenshot preview", StringComparison.Ordinal), "HTML report should render screenshot evidence preview.");
-        SmokeAssert.True(html.Contains("Driver JSONL preview", StringComparison.Ordinal), "HTML report should render driver-events evidence preview.");
-        SmokeAssert.True(html.Contains("Manifest preview", StringComparison.Ordinal), "HTML report should render artifact manifest evidence preview.");
+        AssertContainsAny(html, ["Artifact evidence", "证据文件证据", "证据文件详情"], "HTML report should render collapsible artifact evidence.");
+        AssertContainsAny(html, ["Related artifacts", "相关证据文件"], "HTML report event evidence should expand related artifacts.");
+        AssertContainsAny(html, ["Screenshot preview", "截图预览"], "HTML report should render screenshot evidence preview.");
+        AssertContainsAny(html, ["Driver JSONL preview", "驱动 JSONL 预览"], "HTML report should render driver-events evidence preview.");
+        AssertContainsAny(html, ["Manifest preview", "清单预览"], "HTML report should render artifact manifest evidence preview.");
         SmokeAssert.True(html.Contains("metadata.guestFullPath", StringComparison.Ordinal), "HTML report should expand original guest artifact paths.");
+    }
+
+    private static void AssertContainsAny(string content, IReadOnlyCollection<string> expectedValues, string message)
+    {
+        SmokeAssert.True(expectedValues.Any(expected => content.Contains(expected, StringComparison.Ordinal)), message);
     }
 
     /// <summary>

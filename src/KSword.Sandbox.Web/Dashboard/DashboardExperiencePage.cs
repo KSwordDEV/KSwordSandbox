@@ -25,16 +25,16 @@ internal static class DashboardExperiencePage
             body { font-family: "Microsoft YaHei UI", Segoe UI, Arial, sans-serif; margin: 0; color: var(--ink); background: radial-gradient(circle at 8% 4%,rgba(67,160,255,.20),transparent 27%),linear-gradient(180deg,#f4f9ff,#f8fafc); }
             header { padding: 28px 36px; color: white; background: radial-gradient(circle at 85% 10%,rgba(67,160,255,.55),transparent 32%),linear-gradient(135deg,#08111f,#123d66 62%,#0d5fa8); }
             .header-row { align-items: flex-start; display: flex; gap: 18px; justify-content: space-between; }
-            .lang-toggle { background: rgba(255,255,255,.22); border: 2px solid rgba(255,255,255,.72); box-shadow: 0 8px 20px rgba(0,0,0,.18); letter-spacing: .02em; white-space: nowrap; }
+            .lang-toggle { background: rgba(255,255,255,.22); border: 2px solid rgba(255,255,255,.72); box-shadow:none; letter-spacing: .02em; white-space: nowrap; }
             .lang-toggle:hover { background: rgba(255,255,255,.32); }
             .topnav { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
-            .topnav a { border: 1px solid rgba(255,255,255,.35); border-radius: 999px; color: white; font-weight: 700; padding: 7px 11px; text-decoration: none; }
+            .topnav a { border: 1px solid rgba(255,255,255,.35); border-radius:2px; color: white; font-weight: 700; padding: 7px 11px; text-decoration: none; }
             main { max-width: 1220px; margin: 24px auto; padding: 0 24px 48px; }
-            section { background: rgba(255,255,255,.96); border: 1px solid var(--line); border-radius: 18px; box-shadow: 0 14px 36px rgba(15, 23, 42, .07); margin-bottom: 18px; padding: 22px; }
+            section { background: rgba(255,255,255,.96); border: 1px solid var(--line); border-radius:2px; box-shadow:none; margin-bottom: 18px; padding: 22px; }
             label { display: block; font-weight: 700; margin: 14px 0 6px; }
-            input { box-sizing: border-box; width: 100%; border: 1px solid #c7dff7; border-radius: 11px; padding: 10px 12px; font: inherit; }
+            input { box-sizing: border-box; width: 100%; border: 1px solid #c7dff7; border-radius:2px; padding: 10px 12px; font: inherit; }
             input[type="checkbox"] { width: auto; }
-            button, a.buttonlink { border: 0; border-radius: 11px; background: var(--blue); color: white; cursor: pointer; display: inline-block; font-weight: 800; margin-top: 14px; padding: 10px 16px; text-decoration: none; }
+            button, a.buttonlink { border: 0; border-radius:2px; background: var(--blue); color: white; cursor: pointer; display: inline-block; font-weight: 800; margin-top: 14px; padding: 10px 16px; text-decoration: none; }
             button.secondary { background: #334155; }
             a.buttonlink.secondary { background: #334155; }
             button:disabled { background: #94a3b8; cursor: wait; }
@@ -43,7 +43,7 @@ internal static class DashboardExperiencePage
             table { border-collapse: collapse; width: 100%; margin-top: 16px; }
             td, th { border-bottom: 1px solid #e5e7eb; padding: 9px; text-align: left; vertical-align: top; }
             th { color: #475569; font-size: 13px; text-transform: uppercase; }
-            code, pre { background: #f1f5f9; border-radius: 8px; }
+            code, pre { background: #f1f5f9; border-radius:2px; }
             code { padding: 2px 5px; }
             pre { overflow: auto; padding: 14px; white-space: pre-wrap; }
             [data-copy], td, th, code, pre { cursor: copy; }
@@ -53,80 +53,108 @@ internal static class DashboardExperiencePage
             .artifact-table td:nth-child(2) { word-break: break-word; }
             .button-row { align-items: center; display: flex; flex-wrap: wrap; gap: 8px; }
             .button-row button, .button-row a.buttonlink { margin-top: 8px; }
-            .mini-form { background: #f8fafc; border: 1px dashed #cbd5e1; border-radius: 10px; margin: 10px 0; padding: 12px; }
-            .toast { background: #0f172a; border-radius: 999px; bottom: 22px; color: white; left: 50%; opacity: 0; padding: 10px 16px; pointer-events: none; position: fixed; transform: translate(-50%, 12px); transition: opacity .15s ease, transform .15s ease; z-index: 20; }
+            .mini-form { background: #f8fafc; border: 1px dashed #cbd5e1; border-radius:2px; margin: 10px 0; padding: 12px; }
+            .toast { background: #0f172a; border-radius:2px; bottom: 22px; color: white; left: 50%; opacity: 0; padding: 10px 16px; pointer-events: none; position: fixed; transform: translate(-50%, 12px); transition: opacity .15s ease, transform .15s ease; z-index: 20; }
             .toast.visible { opacity: .96; transform: translate(-50%, 0); }
             .grid { display: grid; gap: 18px; grid-template-columns: repeat(3, 1fr); }
             .hint { color: var(--muted); font-size: 14px; }
             .status { margin-top: 12px; min-height: 24px; }
             .error { color: #b91c1c; }
             .ok { color: #047857; }
-            .pathbox { background: #f8fbff; border: 1px solid var(--line); border-radius: 12px; margin-top: 10px; padding: 12px; }
-            .callout { background:#f7fbff; border:1px solid rgba(67,160,255,.30); border-radius:14px; margin-top:12px; padding:12px 14px; }
+            .pathbox { background: #f8fbff; border: 1px solid var(--line); border-radius:2px; margin-top: 10px; padding: 12px; }
+            .callout { background:#f7fbff; border:1px solid rgba(67,160,255,.30); border-radius:2px; margin-top:12px; padding:12px 14px; }
             .callout strong { display:block; margin-bottom:4px; }
-            .report-notice { background:#ecfdf5; border:1px solid #86efac; border-radius:14px; color:#065f46; margin:12px 0; padding:14px; }
+            .report-notice { background:#ecfdf5; border:1px solid #86efac; border-radius:2px; color:#065f46; margin:12px 0; padding:14px; }
             .report-notice[hidden] { display:none; }
             .report-notice p { margin:6px 0; }
-            .report-entry { align-items:center; background:#f0fdf4; border:1px solid #86efac; border-radius:14px; display:flex; flex-wrap:wrap; gap:8px; margin-top:12px; padding:12px; }
+            .countdown { background:#fff7ed; border:1px solid #fdba74; color:#9a3412; font-weight:800; padding:8px 10px; }
+            .report-entry { align-items:center; background:#f0fdf4; border:1px solid #86efac; border-radius:2px; display:flex; flex-wrap:wrap; gap:8px; margin-top:12px; padding:12px; }
             .report-entry a.buttonlink { margin-top:0; }
             .report-entry .hint { margin:0; }
             .progress-links { margin:6px 0 10px; }
-            .pill { background: #e7f3ff; border:1px solid rgba(67,160,255,.35); border-radius: 999px; color: #075985; display: inline-block; font-size: 12px; font-weight: 800; padding: 4px 9px; }
+            .pill { background: #e7f3ff; border:1px solid rgba(67,160,255,.35); border-radius:2px; color: #075985; display: inline-block; font-size: 12px; font-weight: 800; padding: 4px 9px; }
             .pill.ready { background:#dcfce7; border-color:#86efac; color:#166534; }
             .workspace-tabs { align-items:center; display:flex; flex-wrap:wrap; gap:10px; margin-bottom:18px; }
             .workspace-tab { background:#e7f3ff; border:1px solid rgba(67,160,255,.35); color:#075985; margin-top:0; }
-            .workspace-tab.active { background:#0B6FCC; color:white; box-shadow:0 8px 18px rgba(11,111,204,.18); }
+            .workspace-tab.active { background:#0B6FCC; color:white; box-shadow:none; }
             .workspace-panel[hidden] { display:none; }
             .tabs { display:flex; flex-wrap:wrap; gap:8px; margin:16px 0 10px; }
             .tab-button { background:#e7f3ff; border:1px solid rgba(67,160,255,.35); color:#075985; margin-top:0; }
             .tab-button.active { background:var(--blue); color:white; }
-            .tab-panel { display:none; border:1px solid var(--line); border-radius:16px; background:#f8fbff; padding:16px; }
+            .tab-panel { display:none; border:1px solid var(--line); border-radius:2px; background:#f8fbff; padding:16px; }
             .tab-panel.active { display:block; }
             .vm-grid { display:grid; gap:12px; grid-template-columns:repeat(3,minmax(0,1fr)); }
-            details.vm-config { background:#f8fbff; border:1px dashed #b9d7f3; border-radius:14px; margin-top:16px; padding:12px 14px; }
+            .config-card { background:#f8fbff; border:1px solid var(--line); border-radius:2px; padding:12px; }
+            .config-card h4 { margin:0 0 8px; }
+            .field-hint { color:var(--muted); font-size:12px; line-height:1.45; margin:5px 0 0; }
+            .toggle-stack { display:grid; gap:8px; margin-top:8px; }
+            .toggle-card { background:white; border:1px solid #e5edf6; border-radius:2px; padding:9px; }
+            .toggle-card label { align-items:flex-start; display:flex; gap:8px; margin:0; }
+            .toggle-card input { margin-top:3px; }
+            .readonly-toggle { opacity:.82; }
+            .config-summary { display:flex; flex-wrap:wrap; gap:6px; margin-top:12px; }
+            .config-summary .pill { max-width:100%; overflow-wrap:anywhere; }
+            .preset-actions { align-items:center; display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
+            .preset-actions button { margin-top:0; }
+            details.vm-config { background:#f8fbff; border:1px dashed #b9d7f3; border-radius:2px; margin-top:16px; padding:12px 14px; }
             details.vm-config summary { cursor:pointer; font-weight:800; }
             .job-card { border-left:5px solid var(--blue); }
             .job-summary { display:grid; gap:12px; grid-template-columns:repeat(4,minmax(0,1fr)); margin-top:12px; }
-            .metric { background:#f8fbff; border:1px solid var(--line); border-radius:14px; padding:12px; }
+            .metric { background:#f8fbff; border:1px solid var(--line); border-radius:2px; padding:12px; }
             .metric strong { color:var(--muted); display:block; font-size:12px; margin-bottom:6px; }
-            .progress-box { background:#f8fbff; border:1px solid var(--line); border-radius:16px; margin-top:14px; padding:14px; }
-            .progress-box.running { border-color:rgba(67,160,255,.55); box-shadow:0 0 0 4px rgba(67,160,255,.10); }
+            .progress-box { background:#f8fbff; border:1px solid var(--line); border-radius:2px; margin-top:14px; padding:14px; }
+            .progress-box.running { border-color:rgba(67,160,255,.55); box-shadow:none; }
             .progress-box.completed { border-color:#86efac; }
             .progress-box.failed { border-color:#fdba74; }
             .progress-head { align-items:center; display:flex; flex-wrap:wrap; gap:8px; justify-content:space-between; margin-bottom:8px; }
             .progress-meta { color:#075985; font-size:12px; font-weight:800; }
-            .progress-bar { background:#dbeafe; border-radius:999px; height:12px; overflow:hidden; }
+            .progress-bar { background:#dbeafe; border-radius:2px; height:12px; overflow:hidden; }
             .progress-fill { background:linear-gradient(90deg,var(--blue),#7dd3fc); height:100%; width:0%; transition:width .25s ease; }
             .progress-fill.failed { background:linear-gradient(90deg,#f97316,#ef4444); }
             .progress-facts { display:grid; gap:10px; grid-template-columns:repeat(3,minmax(0,1fr)); margin-top:10px; }
             .progress-facts .metric { margin-top:0; }
             .stages { display:grid; gap:8px; grid-template-columns:repeat(4,minmax(0,1fr)); margin-top:12px; }
-            .stage { background:white; border:1px solid #e5edf6; border-radius:12px; color:#64748b; padding:9px; }
+            .stage { background:white; border:1px solid #e5edf6; border-radius:2px; color:#64748b; padding:9px; }
             .stage small { color:#94a3b8; display:block; font-size:11px; margin-top:2px; }
-            .stage.active { border-color:var(--blue); box-shadow:0 0 0 3px rgba(67,160,255,.12); color:#075985; font-weight:800; position:relative; }
-            .stage.active::after { animation:pulse 1.2s ease-in-out infinite; background:var(--blue); border-radius:999px; content:""; height:8px; position:absolute; right:10px; top:10px; width:8px; }
+            .stage.active { border-color:var(--blue); box-shadow:none; color:#075985; font-weight:800; position:relative; }
+            .stage.active::after { animation:pulse 1.2s ease-in-out infinite; background:var(--blue); border-radius:2px; content:""; height:8px; position:absolute; right:10px; top:10px; width:8px; }
             .stage.done { background:#ecfdf5; border-color:#bbf7d0; color:#047857; }
             .stage.failed { background:#fff7ed; border-color:#fdba74; color:#c2410c; font-weight:800; }
             .recent-job-list { display:grid; gap:12px; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); margin-top:14px; }
-            .recent-job-card { background:#f8fbff; border:1px solid var(--line); border-radius:14px; padding:14px; }
+            .recent-job-card { background:#f8fbff; border:1px solid var(--line); border-radius:2px; padding:14px; }
             .recent-job-card h3 { margin:0 0 8px; }
             .recent-job-meta { display:flex; flex-wrap:wrap; gap:6px; margin:8px 0; }
             @keyframes pulse { 0%,100% { opacity:.35; transform:scale(.82); } 50% { opacity:1; transform:scale(1.18); } }
             .runbook-step-grid { display:grid; gap:8px; grid-template-columns:repeat(4,minmax(0,1fr)); margin-top:10px; }
-            .runbook-step { background:white; border:1px solid #e5edf6; border-radius:12px; padding:8px; }
+            .runbook-step { background:white; border:1px solid #e5edf6; border-radius:2px; padding:8px; }
             .runbook-step b { display:block; font-size:12px; margin-bottom:3px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
             .runbook-step small { color:#64748b; display:block; font-size:11px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
             .runbook-step.pending { color:#64748b; }
-            .runbook-step.running { border-color:var(--blue); box-shadow:0 0 0 3px rgba(67,160,255,.12); color:#075985; font-weight:800; }
+            .runbook-step.running { border-color:var(--blue); box-shadow:none; color:#075985; font-weight:800; }
             .runbook-step.completed, .runbook-step.skipped { background:#ecfdf5; border-color:#bbf7d0; color:#047857; }
             .runbook-step.failed, .runbook-step.canceled { background:#fff7ed; border-color:#fdba74; color:#c2410c; font-weight:800; }
             .runbook-progress-details { margin-top:10px; }
             .runbook-progress-details summary { cursor:pointer; color:#075985; font-weight:800; }
             .compact-details { margin-top:12px; }
             .compact-details summary { cursor:pointer; color:#075985; font-weight:800; }
-            .empty { border:1px dashed #b9d7f3; border-radius:12px; color:var(--muted); padding:14px; }
+            .empty { border:1px dashed #b9d7f3; border-radius:2px; color:var(--muted); padding:14px; }
             .status-failed { color: #b91c1c; font-weight: 700; }
             .status-ok { color: #047857; font-weight: 700; }
+            .flat-inner, .tab-panel, details.vm-config, .mini-form, .pathbox, .callout, .report-notice, .report-entry, .progress-box, .metric, .stage, .runbook-step, .recent-job-card { box-shadow:none; border-radius:2px; }
+            .tab-panel, details.vm-config, .mini-form, .pathbox, .callout, .report-notice, .report-entry { background:transparent; border-color:var(--line); }
+            .metric { background:transparent; border:0; border-left:3px solid var(--blue); padding:10px 12px; }
+            .progress-box { background:transparent; border:1px solid var(--line); border-left:3px solid var(--blue); }
+            .stage, .runbook-step { background:transparent; border:0; border-left:3px solid #e5edf6; padding:8px 10px; }
+            .stage.active, .runbook-step.running { border-left-color:var(--blue); box-shadow:none; }
+            .stage.done, .runbook-step.completed, .runbook-step.skipped { border-left-color:#22c55e; }
+            .stage.failed, .runbook-step.failed, .runbook-step.canceled { border-left-color:#f97316; }
+            .recent-job-card { background:transparent; border:1px solid var(--line); border-left:3px solid var(--blue); }
+            .workspace-tabs, .tabs, .button-row { gap:6px; }
+
+            /* Square, flat operator theme: keep visual nesting shallow. */
+            section, article, .metric, .pill, button, a.button, a.buttonlink, input, code, pre, .pathbox, .callout, .report-notice, .report-entry, .countdown, .workspace-tab, .tab-button, .tab-panel, details, .config-card, .toggle-card, .progress-box, .progress-bar, .progress-fill, .stage, .recent-job-card, .runbook-step, .empty, .table-wrap, .step-card, .report-ready, .toast, .num { border-radius: 0 !important; }
+            section, article, .metric, .pathbox, .callout, .report-notice, .report-entry, .tab-panel, .config-card, .toggle-card, .progress-box, .stage, .recent-job-card, .runbook-step, .step-card, .report-ready { box-shadow: none !important; }
+            .pill, button, a.button, a.buttonlink { box-shadow: none !important; }
             @media (max-width: 980px) { .grid,.vm-grid,.job-summary,.stages,.progress-facts { grid-template-columns: 1fr; } header { padding:24px; } }
           </style>
         </head>
@@ -135,90 +163,120 @@ internal static class DashboardExperiencePage
             <div class="header-row">
               <div>
                 <h1 data-zh="KSword 沙箱主机" data-en="KSword Sandbox Host">KSword 沙箱主机</h1>
-                <p data-zh="上传样本后会自动生成安全计划、启动动态分析并打开独立监控页；主页面只保留关键状态、报告入口和进度入口，排障细节放在“执行流程”。" data-en="After upload, the UI creates a safe plan, starts dynamic analysis, and opens the standalone monitor automatically. The dashboard keeps only key status, report access, and progress entry points; troubleshooting details live in Execution flow.">上传样本后会自动生成安全计划、启动动态分析并打开独立监控页；主页面只保留关键状态、报告入口和进度入口，排障细节放在“执行流程”。</p>
+              <p data-zh="上传样本后会自动生成安全计划、启动动态分析并进入独立监控页；主页面只保留上传、配置、进度和报告入口，原始事件与下载列表集中在监控页。" data-en="After upload, the UI creates a safe plan, starts dynamic analysis, and enters the standalone monitor. The dashboard keeps only upload, configuration, progress, and report entry points; raw events and downloads stay on the monitor page.">上传样本后会自动生成安全计划、启动动态分析并进入独立监控页；主页面只保留上传、配置、进度和报告入口，原始事件与下载列表集中在监控页。</p>
                 <p><span class="pill" data-zh="提示：右键路径、表格值、证据字段和执行流程视图可复制。" data-en="Tip: right-click paths, table values, evidence fields, and execution-flow details to copy.">提示：右键路径、表格值、证据字段和执行流程视图可复制。</span></p>
               </div>
-              <button class="secondary lang-toggle" type="button" onclick="toggleLanguage()" aria-label="Language switch" data-zh="语言：中文 ⇄ English" data-en="Language: English ⇄ 中文">语言：中文 ⇄ English</button>
+              <button class="secondary lang-toggle" type="button" onclick="toggleLanguage()" aria-label="语言切换 / Language switch" data-zh="语言：中文 ⇄ English" data-en="Language: English ⇄ 中文">语言：中文 ⇄ English</button>
             </div>
-            <nav class="topnav" aria-label="Dashboard navigation">
-              <a href="#workspace-plan" onclick="selectWorkspaceTab('plan')" data-zh="规划" data-en="Plan">规划</a>
-              <a href="#workspace-analysis" onclick="selectWorkspaceTab('analysis')" data-zh="分析" data-en="Analysis">分析</a>
-              <a href="#workspace-results" onclick="selectWorkspaceTab('results')" data-zh="结果" data-en="Results">结果</a>
-              <a href="/settings" data-zh="设置 / VirusTotal" data-en="Settings / VirusTotal">设置 / VirusTotal</a>
+            <nav class="topnav" aria-label="控制台导航 / Dashboard navigation">
+              <a href="#workspace-plan" onclick="selectWorkspaceTab('plan')" data-zh="上传 / 配置" data-en="Upload / config">上传 / 配置</a>
+              <a href="#workspace-analysis" onclick="selectWorkspaceTab('analysis')" data-zh="进度" data-en="Progress">进度</a>
+              <a href="#workspace-results" onclick="selectWorkspaceTab('results')" data-zh="报告" data-en="Reports">报告</a>
+              <a href="/settings" data-zh="设置 / VM / VirusTotal" data-en="Settings / VM / VirusTotal">设置 / VM / VirusTotal</a>
             </nav>
           </header>
           <main>
-            <div class="workspace-tabs" role="tablist" aria-label="Plan analysis results">
-              <button id="workspace-tab-plan" class="workspace-tab active" type="button" role="tab" aria-selected="true" aria-controls="workspace-plan" onclick="selectWorkspaceTab('plan')" data-zh="1. 规划" data-en="1. Plan">1. 规划</button>
-              <button id="workspace-tab-analysis" class="workspace-tab" type="button" role="tab" aria-selected="false" aria-controls="workspace-analysis" onclick="selectWorkspaceTab('analysis')" data-zh="2. 分析" data-en="2. Analysis">2. 分析</button>
-              <button id="workspace-tab-results" class="workspace-tab" type="button" role="tab" aria-selected="false" aria-controls="workspace-results" onclick="selectWorkspaceTab('results')" data-zh="3. 结果" data-en="3. Results">3. 结果</button>
+            <div class="workspace-tabs" role="tablist" aria-label="上传、进度与报告 / Upload progress reports">
+              <button id="workspace-tab-plan" class="workspace-tab active" type="button" role="tab" aria-selected="true" aria-controls="workspace-plan" onclick="selectWorkspaceTab('plan')" data-zh="1. 上传 / 配置" data-en="1. Upload / config">1. 上传 / 配置</button>
+              <button id="workspace-tab-analysis" class="workspace-tab" type="button" role="tab" aria-selected="false" aria-controls="workspace-analysis" onclick="selectWorkspaceTab('analysis')" data-zh="2. 进度" data-en="2. Progress">2. 进度</button>
+              <button id="workspace-tab-results" class="workspace-tab" type="button" role="tab" aria-selected="false" aria-controls="workspace-results" onclick="selectWorkspaceTab('results')" data-zh="3. 报告" data-en="3. Reports">3. 报告</button>
             </div>
             <div id="workspace-plan" class="workspace-panel active" role="tabpanel" aria-labelledby="workspace-tab-plan">
             <section id="plan">
-              <h2 data-zh="提交分析" data-en="Submit analysis">提交分析</h2>
-              <p class="hint"><span data-zh="请选择一种方式：选择已有路径、上传 EXE、或扫描目录。上传流程会一键保存样本、生成计划、打开独立动态监控页并启动虚拟机；选择/扫描入口仍先停在计划复核。" data-en="Choose one input method: select an existing path, upload an EXE, or scan a folder. Upload is a one-click flow that stores the sample, creates the plan, opens the standalone dynamic monitor, and starts the VM; select/scan entries still stop at plan review first.">请选择一种方式：选择已有路径、上传 EXE、或扫描目录。上传流程会一键保存样本、生成计划、打开独立动态监控页并启动虚拟机；选择/扫描入口仍先停在计划复核。</span></p>
-              <div class="tabs" role="tablist">
-                <button id="tab-path" class="tab-button" type="button" role="tab" aria-selected="false" aria-controls="panel-path" onclick="selectPlanTab('path')" data-zh="选择" data-en="Select">选择</button>
-                <button id="tab-upload" class="tab-button active" type="button" role="tab" aria-selected="true" aria-controls="panel-upload" onclick="selectPlanTab('upload')" data-zh="上传" data-en="Upload">上传</button>
-                <button id="tab-scan" class="tab-button" type="button" role="tab" aria-selected="false" aria-controls="panel-scan" onclick="selectPlanTab('scan')" data-zh="目录扫描" data-en="Folder scan">目录扫描</button>
-              </div>
-              <div id="panel-path" class="tab-panel" role="tabpanel" aria-labelledby="tab-path" hidden>
-                  <h3 data-zh="选择已有样本路径" data-en="Select existing sample path">选择已有样本路径</h3>
-                  <p class="hint" data-zh="适用于样本已经位于本机或挂载共享时。服务器会先校验路径，再生成可复核计划；需要动态分析时再点击当前任务里的启动按钮。" data-en="Use when the sample is already on this host or a mounted share. The server validates the path and creates a reviewable plan; start dynamic analysis from the current job card when ready.">适用于样本已经位于本机或挂载共享时。服务器会先校验路径，再生成可复核计划；需要动态分析时再点击当前任务里的启动按钮。</p>
-                  <label for="samplePath" data-zh="主机上的可执行文件路径" data-en="Executable path on host">主机上的可执行文件路径</label>
-                  <input id="samplePath" placeholder="D:\Temp\sample.exe">
-                  <label for="duration" data-zh="分析时长（秒）" data-en="Analysis duration, seconds">分析时长（秒）</label>
-                  <input id="duration" type="number" min="1" max="900" value="120">
-                  <button onclick="planPath()" data-zh="从路径生成计划" data-en="Create plan from path">从路径生成计划</button>
+              <h2 data-zh="上传与配置" data-en="Upload and configuration">上传与配置</h2>
+              <p class="hint"><span data-zh="请选择一种提交方式：上传 EXE 会自动启动动态分析并跳转监控；选择已有路径或扫描目录会先生成可复核计划。" data-en="Choose one submission method: upload starts dynamic analysis and redirects to the monitor; existing path and folder scan create a reviewable plan first.">请选择一种提交方式：上传 EXE 会自动启动动态分析并跳转监控；选择已有路径或扫描目录会先生成可复核计划。</span></p>
+              <input id="duration" type="hidden" value="120">
+              <div class="tabs" role="tablist" aria-label="三种提交方式 / Three submission methods">
+                <button id="tab-upload" class="tab-button active" type="button" role="tab" aria-selected="true" aria-controls="panel-upload" onclick="selectPlanTab('upload')" data-zh="上传 EXE" data-en="Upload EXE">上传 EXE</button>
+                <button id="tab-path" class="tab-button" type="button" role="tab" aria-selected="false" aria-controls="panel-path" onclick="selectPlanTab('path')" data-zh="选择已有路径" data-en="Existing path">选择已有路径</button>
+                <button id="tab-scan" class="tab-button" type="button" role="tab" aria-selected="false" aria-controls="panel-scan" onclick="selectPlanTab('scan')" data-zh="扫描目录" data-en="Scan folder">扫描目录</button>
               </div>
               <div id="panel-upload" class="tab-panel active" role="tabpanel" aria-labelledby="tab-upload">
                   <h3 data-zh="上传 .exe 并自动动态分析" data-en="Upload .exe and run dynamic analysis">上传 .exe 并自动动态分析</h3>
-                  <p class="hint" data-zh="保存文件、生成可检查计划、提交后台虚拟机分析，然后当前页面直接进入动态监控页；后端会继续执行，不需要保持主界面打开。" data-en="Stores the file, creates a reviewable plan, submits background VM analysis, then redirects this page directly into the dynamic monitor; the backend keeps running without the dashboard staying open.">保存文件、生成可检查计划、提交后台虚拟机分析，然后当前页面直接进入动态监控页；后端会继续执行，不需要保持主界面打开。</p>
+                  <p class="hint" data-zh="保存文件、生成可检查计划、提交后台虚拟机分析，然后当前页面直接进入动态监控页；证据/下载（Artifacts）、原始事件和 VirusTotal 均在该独立页查看。" data-en="Stores the file, creates a reviewable plan, submits background VM analysis, then redirects this page directly into the dynamic monitor; artifacts/downloads, raw events, and VirusTotal live on that standalone page.">保存文件、生成可检查计划、提交后台虚拟机分析，然后当前页面直接进入动态监控页；证据/下载（Artifacts）、原始事件和 VirusTotal 均在该独立页查看。</p>
                   <label for="sampleUpload" data-zh="可执行文件（.exe）" data-en="Executable file (.exe)">可执行文件（.exe）</label>
                   <input id="sampleUpload" type="file" accept=".exe,application/vnd.microsoft.portable-executable,application/octet-stream">
                   <label for="uploadDuration" data-zh="分析时长（秒）" data-en="Analysis duration, seconds">分析时长（秒）</label>
                   <input id="uploadDuration" type="number" min="1" max="900" value="120">
+                  <p id="durationHint" class="field-hint" data-copy="" data-copy-label="analysis duration hint" data-zh="后端会按配置限制分析时长；本次任务值会随上传一起提交。" data-en="The backend clamps analysis duration by config; this per-job value is submitted with upload.">后端会按配置限制分析时长；本次任务值会随上传一起提交。</p>
                   <button onclick="uploadAndPlan()" data-zh="上传 .exe → 自动分析并打开监控" data-en="Upload .exe → auto analyze and open monitor">上传 .exe → 自动分析并打开监控</button>
+              </div>
+              <div id="panel-path" class="tab-panel" role="tabpanel" aria-labelledby="tab-path" hidden>
+                  <h3 data-zh="选择已有样本路径" data-en="Select existing sample path">选择已有样本路径</h3>
+                  <p class="hint" data-zh="适用于样本已经位于本机或挂载共享时。服务器会先校验路径，再生成可复核计划；需要动态分析时再点击当前任务里的启动按钮。" data-en="Use this when the sample is already on this host or a mounted share. The server validates the path and creates a reviewable plan; start dynamic analysis from the current job card when ready.">适用于样本已经位于本机或挂载共享时。服务器会先校验路径，再生成可复核计划；需要动态分析时再点击当前任务里的启动按钮。</p>
+                  <label for="samplePath" data-zh="主机上的可执行文件路径" data-en="Executable path on host">主机上的可执行文件路径</label>
+                  <input id="samplePath" placeholder="D:\Temp\sample.exe" data-copy-label="sample path">
+                  <button onclick="planPath()" data-zh="从路径生成计划" data-en="Create plan from path">从路径生成计划</button>
               </div>
               <div id="panel-scan" class="tab-panel" role="tabpanel" aria-labelledby="tab-scan" hidden>
                   <h3 data-zh="扫描文件夹后规划" data-en="Scan folder, then plan">扫描文件夹后规划</h3>
-                  <p class="hint" data-zh="仅基于元数据发现 .exe。可复核候选项，或一键规划排序后的第一个结果。" data-en="Metadata-only .exe discovery. Review candidates or use one-click planning for the first sorted result.">仅基于元数据发现 .exe。可复核候选项，或一键规划排序后的第一个结果。</p>
+                  <p class="hint" data-zh="仅基于元数据发现 .exe。可复核候选项，或一键规划排序后的第一个结果。" data-en="Metadata-only .exe discovery. Review candidates or one-click plan the first sorted result.">仅基于元数据发现 .exe。可复核候选项，或一键规划排序后的第一个结果。</p>
                   <label for="scanPath" data-zh="目录或精确 .exe 路径" data-en="Directory or exact .exe path">目录或精确 .exe 路径</label>
-                  <input id="scanPath" placeholder="D:\Temp\incoming">
+                  <input id="scanPath" placeholder="D:\Temp\incoming" data-copy-label="scan path">
                   <label for="maxDepth" data-zh="最大扫描深度" data-en="Max scan depth">最大扫描深度</label>
-                  <input id="maxDepth" type="number" min="0" max="16" value="4">
-                  <button class="secondary" onclick="scanTargets()" data-zh="查找 .exe 候选项" data-en="Find .exe candidates">查找 .exe 候选项</button>
-                  <button class="secondary" onclick="scanAndPlanFirst()" data-zh="扫描并规划第一个候选项" data-en="Scan and plan first candidate">扫描并规划第一个候选项</button>
+                  <input id="maxDepth" type="number" min="0" max="16" value="4" data-copy-label="max scan depth">
+                  <p class="button-row">
+                    <button class="secondary" onclick="scanTargets()" data-zh="查找 .exe 候选项" data-en="Find .exe candidates">查找 .exe 候选项</button>
+                    <button class="secondary" onclick="scanAndPlanFirst()" data-zh="扫描并规划第一个候选项" data-en="Scan and plan first candidate">扫描并规划第一个候选项</button>
+                  </p>
+                  <p class="hint"><span data-zh="候选项：" data-en="Candidates:">候选项：</span> <span id="candidateCount" data-copy="0">0</span></p>
+                  <div id="candidates" class="hint" data-copy="等待扫描 / waiting for scan" data-zh="等待扫描。" data-en="Waiting for scan.">等待扫描。</div>
               </div>
-              <details class="vm-config">
-                <summary data-zh="高级：虚拟机配置" data-en="Advanced: VM configuration">高级：虚拟机配置</summary>
-                <p class="hint" data-zh="默认从 config 读取；这里的值只覆盖当前任务，不写入配置文件。" data-en="Defaults are loaded from config; these values only override the current job and do not write config files.">默认从 config 读取；这里的值只覆盖当前任务，不写入配置文件。</p>
+              <details class="vm-config" open>
+                <summary data-zh="本次任务：虚拟机运行配置" data-en="This job: VM run configuration">本次任务：虚拟机运行配置</summary>
+                <p class="hint" data-zh="默认从 config 与本机 WebUI 预设读取；这里的值只覆盖当前任务，不写入配置文件，也不展示长命令行。" data-en="Defaults are loaded from config and the local WebUI preset. Values here only override the current job, do not write config files, and do not show long command lines.">默认从 config 与本机 WebUI 预设读取；这里的值只覆盖当前任务，不写入配置文件，也不展示长命令行。</p>
                 <div class="vm-grid">
-                  <div><label for="goldenVmName" data-zh="虚拟机名称" data-en="VM name">虚拟机名称</label><input id="goldenVmName" placeholder="KSwordSandbox-Win10-Golden"></div>
-                  <div><label for="goldenSnapshotName" data-zh="还原点" data-en="Checkpoint">还原点</label><input id="goldenSnapshotName" placeholder="Clean"></div>
-                  <div><label for="guestUserName" data-zh="虚拟机用户" data-en="Guest user">虚拟机用户</label><input id="guestUserName" placeholder="SandboxUser"></div>
-                  <div><label for="guestWorkingDirectory" data-zh="虚拟机工作目录" data-en="Guest working folder">虚拟机工作目录</label><input id="guestWorkingDirectory" placeholder="C:\KSwordSandbox"></div>
-                  <div><label for="guestPayloadRoot" data-zh="工具目录（主机）" data-en="Host tool folder">工具目录（主机）</label><input id="guestPayloadRoot" placeholder="D:\Temp\KSwordSandbox\payload\guest-tools"></div>
-                  <div><label for="useMockCollector"><input id="useMockCollector" type="checkbox"> <span data-zh="使用模拟采集器" data-en="Use mock collector">使用模拟采集器</span></label></div>
+                  <div class="config-card">
+                    <h4 data-zh="VM 与检查点" data-en="VM and checkpoint">VM 与检查点</h4>
+                    <label for="goldenVmName" data-zh="VM 名称" data-en="VM name">VM 名称</label>
+                    <input id="goldenVmName" placeholder="KSwordSandbox-Win10-Golden" data-copy-label="VM name">
+                    <label for="goldenSnapshotName" data-zh="检查点" data-en="Checkpoint">检查点</label>
+                    <input id="goldenSnapshotName" placeholder="Clean" data-copy-label="checkpoint">
+                  </div>
+                  <div class="config-card">
+                    <h4 data-zh="Guest 用户提示" data-en="Guest user hint">Guest 用户提示</h4>
+                    <label for="guestUserName" data-zh="Guest 用户" data-en="Guest user">Guest 用户</label>
+                    <input id="guestUserName" placeholder="SandboxUser" data-copy-label="guest user">
+                    <p id="guestCredentialHint" class="field-hint" data-copy="" data-copy-label="guest credential hint" data-zh="Guest 密码只从本机密钥环境变量读取；WebUI 不输入也不保存密码。" data-en="Guest password is read only from the local secret environment variable; the WebUI does not ask for or store it.">Guest 密码只从本机密钥环境变量读取；WebUI 不输入也不保存密码。</p>
+                    <label for="guestWorkingDirectory" data-zh="Guest 工作目录" data-en="Guest working folder">Guest 工作目录</label>
+                    <input id="guestWorkingDirectory" placeholder="C:\KSwordSandbox" data-copy-label="guest working folder">
+                    <label for="guestPayloadRoot" data-zh="Guest 工具目录（主机）" data-en="Guest tool folder (host)">Guest 工具目录（主机）</label>
+                    <input id="guestPayloadRoot" placeholder="D:\Temp\KSwordSandbox\payload\guest-tools" data-copy-label="guest payload root">
+                  </div>
+                  <div class="config-card">
+                    <h4 data-zh="R0 采集器（collector）" data-en="R0 collector">R0 采集器（collector）</h4>
+                    <div class="toggle-stack">
+                      <div class="toggle-card readonly-toggle">
+                        <label for="r0Enabled"><input id="r0Enabled" type="checkbox" disabled> <span data-zh="R0 总开关来自配置（config）" data-en="R0 master switch comes from config">R0 总开关来自配置（config）</span></label>
+                        <p id="r0EnabledHint" class="field-hint" data-copy="" data-copy-label="R0 enabled hint" data-zh="R0 总开关仍由 config 控制；本页不改 Core 业务。" data-en="The R0 master switch still comes from config; this page does not change Core behavior.">R0 总开关仍由 config 控制；本页不改 Core 业务。</p>
+                      </div>
+                      <div class="toggle-card">
+                        <label for="useMockCollector"><input id="useMockCollector" type="checkbox"> <span data-zh="使用 Mock 采集器（collector，覆盖本次任务）" data-en="Use mock collector (override this job)">使用 Mock 采集器（collector，覆盖本次任务）</span></label>
+                        <p class="field-hint" data-zh="未勾选时使用真实 R0 采集器（collector）和配置（config）默认模式。" data-en="When unchecked, the job uses the real R0 collector/config default mode.">未勾选时使用真实 R0 采集器（collector）和配置（config）默认模式。</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div id="vmConfigSummary" class="config-summary" data-copy="" data-copy-label="VM configuration summary"></div>
+                <div class="preset-actions">
+                  <button class="secondary" type="button" onclick="saveVmPreset()" data-zh="保存为本机 WebUI 预设" data-en="Save as local WebUI preset">保存为本机 WebUI 预设</button>
+                  <button class="secondary" type="button" onclick="clearVmPreset()" data-zh="清除本机预设" data-en="Clear local preset">清除本机预设</button>
+                  <a class="buttonlink secondary" href="/settings" data-zh="设置页也可管理预设" data-en="Manage preset in Settings">设置页也可管理预设</a>
                 </div>
               </details>
-              <details class="vm-config">
-                <summary data-zh="高级：敏感产物采集（显式 opt-in）" data-en="Advanced: sensitive artifact collection (explicit opt-in)">高级：敏感产物采集（显式 opt-in）</summary>
-                <p class="hint" data-zh="这些选项默认关闭；勾选后只影响当前任务，runbook 会把对应 flag 传给 Guest Agent。" data-en="These options are disabled by default. When checked, they only affect the current job and the runbook forwards matching flags to the Guest Agent.">这些选项默认关闭；勾选后只影响当前任务，runbook 会把对应 flag 传给 Guest Agent。</p>
+              <details class="vm-config" open>
+                <summary data-zh="高级：敏感产物采集（显式启用 / opt-in）" data-en="Advanced: sensitive artifact collection (explicit opt-in)">高级：敏感产物采集（显式启用 / opt-in）</summary>
+                <p class="hint" data-zh="这些选项默认关闭；勾选后只影响当前任务，runbook 会把对应参数（flag）传给 Guest Agent。" data-en="These options are disabled by default. When checked, they only affect the current job and the runbook forwards matching flags to the Guest Agent.">这些选项默认关闭；勾选后只影响当前任务，runbook 会把对应参数（flag）传给 Guest Agent。</p>
                 <div class="vm-grid">
-                  <div><label for="collectDroppedFiles"><input id="collectDroppedFiles" type="checkbox"> <span data-zh="采集落地文件" data-en="Collect dropped files">采集落地文件</span></label></div>
-                  <div><label for="captureScreenshots"><input id="captureScreenshots" type="checkbox"> <span data-zh="采集截图" data-en="Capture screenshots">采集截图</span></label></div>
-                  <div><label for="captureMemoryDumps"><input id="captureMemoryDumps" type="checkbox"> <span data-zh="采集内存转储" data-en="Capture memory dumps">采集内存转储</span></label></div>
-                  <div><label for="capturePacketCapture"><input id="capturePacketCapture" type="checkbox"> <span data-zh="采集网络抓包" data-en="Capture packet capture">采集网络抓包</span></label></div>
+                  <div class="toggle-card"><label for="collectDroppedFiles"><input id="collectDroppedFiles" type="checkbox"> <span data-zh="采集落地文件" data-en="Collect dropped files">采集落地文件</span></label></div>
+                  <div class="toggle-card"><label for="captureScreenshots"><input id="captureScreenshots" type="checkbox"> <span data-zh="采集截图" data-en="Capture screenshots">采集截图</span></label></div>
+                  <div class="toggle-card"><label for="captureMemoryDumps"><input id="captureMemoryDumps" type="checkbox"> <span data-zh="采集内存转储" data-en="Capture memory dumps">采集内存转储</span></label></div>
+                  <div class="toggle-card"><label for="capturePacketCapture"><input id="capturePacketCapture" type="checkbox"> <span data-zh="采集 PCAP 抓包" data-en="Capture PCAP">采集 PCAP 抓包</span></label></div>
                 </div>
               </details>
               <div id="status" class="status" role="status" aria-live="polite"></div>
             </section>
 
-            <section>
-              <h2><span data-zh="可执行文件候选项" data-en="Executable candidates">可执行文件候选项</span> <span id="candidateCount" class="pill">0</span></h2>
-              <div id="candidates" class="hint"><span data-zh="尚未运行扫描。" data-en="No scan has been run yet.">尚未运行扫描。</span></div>
-            </section>
             </div>
 
             <div id="workspace-analysis" class="workspace-panel" role="tabpanel" aria-labelledby="workspace-tab-analysis" hidden>
@@ -230,8 +288,8 @@ internal static class DashboardExperiencePage
 
             <div id="workspace-results" class="workspace-panel" role="tabpanel" aria-labelledby="workspace-tab-results" hidden>
             <section id="recent-jobs">
-              <h2 data-zh="结果与近期任务" data-en="Results and recent jobs">结果与近期任务</h2>
-              <p class="hint" data-zh="这里仅列出关键状态、报告入口和执行流程链接；命令行、PowerShell、stdout/stderr 不在主页面展示。" data-en="This tab only lists key status, report access, and execution-flow links; command lines, PowerShell, stdout/stderr are not shown on the dashboard.">这里仅列出关键状态、报告入口和执行流程链接；命令行、PowerShell、stdout/stderr 不在主页面展示。</p>
+              <h2 data-zh="报告与近期任务" data-en="Reports and recent jobs">报告与近期任务</h2>
+              <p class="hint" data-zh="这里仅列出关键状态、报告入口、进度页和独立监控页入口；命令行、PowerShell、stdout/stderr 与下载列表不在主页面展示。" data-en="This tab only lists key status, report access, progress-page links, and standalone monitor links; command lines, PowerShell, stdout/stderr, and download lists are not shown on the dashboard.">这里仅列出关键状态、报告入口、进度页和独立监控页入口；命令行、PowerShell、stdout/stderr 与下载列表不在主页面展示。</p>
               <div id="globalReportNotice" class="report-notice" hidden></div>
               <button class="secondary" onclick="refreshJobs(true)" data-zh="刷新任务列表" data-en="Refresh job list">刷新任务列表</button>
               <div id="jobList" class="hint"><span data-zh="尚未加载任务。" data-en="No jobs loaded yet.">尚未加载任务。</span></div>
@@ -246,20 +304,22 @@ internal static class DashboardExperiencePage
             let progressTimer = null;
             let runbookProgressTimer = null;
             let backgroundExecutionTimer = null;
+            let reportAutoOpenTimer = null;
+            let reportAutoOpenDeadline = 0;
+            let reportAutoOpenJobId = '';
             let progressStageIndex = 0;
             let progressCompleted = false;
             let progressFailed = false;
             let currentJobPayload = null;
             let currentJobListPayload = [];
             let latestRunbookProgressSnapshot = null;
+            let runtimeConfigDefaults = null;
+            const vmPresetStorageKey = 'ksword-vm-overrides';
             const liveStages = [
-              ['任务已规划', 'Job planned', '已生成可复核计划', 'Reviewable plan is ready'],
-              ['检查分析环境', 'Check analysis environment', '确认主机与登录条件', 'Confirm host and logon prerequisites'],
-              ['还原干净环境', 'Restore clean environment', '通常是耗时阶段', 'Usually one of the slower stages'],
-              ['启动分析环境', 'Start analysis environment', '等待来宾通道可用', 'Wait for guest channel readiness'],
-              ['准备样本与工具', 'Prepare sample and tools', '传入样本、Agent 与采集器', 'Copy sample, agent, and collectors'],
-              ['运行样本并采集行为', 'Run sample and collect behavior', '采集运行期行为', 'Collect runtime behavior'],
-              ['回收分析结果', 'Collect analysis results', '从来宾机同步证据', 'Sync evidence from the guest'],
+              ['启动 VM', 'Start VM', '还原干净环境并等待来宾机可用', 'Restore a clean VM and wait for guest readiness'],
+              ['部署 Payload', 'Deploy payload', '传入样本、Agent 与采集器', 'Copy the sample, agent, and collectors'],
+              ['执行样本', 'Execute sample', '运行样本并采集行为', 'Run the sample and collect behavior'],
+              ['收集结果', 'Collect results', '同步事件、截图、转储与 PCAP', 'Sync events, screenshots, dumps, and PCAP'],
               ['生成报告', 'Generate report', '刷新 JSON/HTML 报告', 'Refresh JSON/HTML reports']
             ];
 
@@ -288,6 +348,8 @@ internal static class DashboardExperiencePage
                 element.textContent = currentLanguage === 'en' ? element.getAttribute('data-en') : element.getAttribute('data-zh');
               });
               refreshLocalizedReportLinks();
+              renderConfigDefaultHints();
+              renderVmConfigSummary();
               if (latestRunbookProgressSnapshot) {
                 renderRunbookProgress(latestRunbookProgressSnapshot);
               } else {
@@ -343,6 +405,60 @@ internal static class DashboardExperiencePage
               return String(status);
             }
 
+            function normalizeStatusToken(value) {
+              return String(value ?? '').trim().toLowerCase().replace(/[\s-]+/g, '_');
+            }
+
+            function localizeServerStatus(value) {
+              const raw = String(value ?? '').trim();
+              if (!raw) {
+                return '';
+              }
+
+              const labels = {
+                queued: t('已排队', 'queued'),
+                planning: t('规划中', 'planning'),
+                planned: t('已规划', 'planned'),
+                submitted: t('已提交', 'submitted'),
+                accepted: t('已受理', 'accepted'),
+                not_started: t('未启动', 'not started'),
+                pending: t('等待中', 'pending'),
+                waiting: t('等待中', 'waiting'),
+                running: t('运行中', 'running'),
+                completed: t('已完成', 'completed'),
+                complete: t('已完成', 'complete'),
+                succeeded: t('成功', 'succeeded'),
+                success: t('成功', 'success'),
+                failed: t('失败', 'failed'),
+                failure: t('失败', 'failure'),
+                canceled: t('已取消', 'canceled'),
+                cancelled: t('已取消', 'cancelled'),
+                skipped: t('已跳过', 'skipped'),
+                timeout: t('超时', 'timeout'),
+                timed_out: t('已超时', 'timed out'),
+                not_configured: t('未配置', 'not configured'),
+                lookup_failed: t('查询失败', 'lookup failed'),
+                unavailable: t('不可用', 'unavailable'),
+                ready: t('就绪', 'ready'),
+                missing: t('缺失', 'missing')
+              };
+              return labels[normalizeStatusToken(raw)] || raw;
+            }
+
+            function localizeServerMessage(value) {
+              if (value == null || value === '') {
+                return '';
+              }
+
+              return String(value)
+                .replace(/\bfound no events\b/gi, t('未发现事件', 'found no events'))
+                .replace(/\bnot imported\b/gi, t('未导入', 'not imported'))
+                .replace(/\bnot found\b/gi, t('未找到', 'not found'))
+                .replace(/\bfailed\b/gi, t('失败', 'failed'))
+                .replace(/\bsucceeded\b/gi, t('成功', 'succeeded'))
+                .replace(/\bcompleted\b/gi, t('已完成', 'completed'));
+            }
+
             function selectWorkspaceTab(name) {
               const tabs = ['plan', 'analysis', 'results'];
               const selected = tabs.includes(name) ? name : 'plan';
@@ -367,6 +483,10 @@ internal static class DashboardExperiencePage
               for (const candidate of ['path', 'upload', 'scan']) {
                 const tab = document.getElementById(`tab-${candidate}`);
                 const panel = document.getElementById(`panel-${candidate}`);
+                if (!tab || !panel) {
+                  continue;
+                }
+
                 tab.classList.toggle('active', candidate === name);
                 tab.setAttribute('aria-selected', candidate === name ? 'true' : 'false');
                 tab.tabIndex = candidate === name ? 0 : -1;
@@ -405,20 +525,60 @@ internal static class DashboardExperiencePage
             async function loadConfigDefaults() {
               try {
                 const response = await fetch('/api/config');
-                const config = await requireOk(response, 'Load config');
+                const config = await requireOk(response, t('加载配置', 'Load config'));
+                runtimeConfigDefaults = config;
+                const maxDuration = normalizePositiveInt(config.analysis?.maxDurationSeconds, 900);
+                const defaultDuration = clampDuration(config.analysis?.defaultDurationSeconds, maxDuration);
+                document.getElementById('duration').value = String(defaultDuration);
+                document.getElementById('uploadDuration').value = String(defaultDuration);
+                document.getElementById('uploadDuration').max = String(maxDuration);
                 document.getElementById('goldenVmName').value = config.hyperV?.goldenVmName || '';
                 document.getElementById('goldenSnapshotName').value = config.hyperV?.goldenSnapshotName || '';
                 document.getElementById('guestUserName').value = config.guest?.userName || '';
                 document.getElementById('guestWorkingDirectory').value = config.guest?.workingDirectory || '';
                 document.getElementById('guestPayloadRoot').value = config.paths?.guestPayloadRoot || '';
+                document.getElementById('r0Enabled').checked = Boolean(config.driver?.enabled);
                 document.getElementById('useMockCollector').checked = Boolean(config.driver?.useMockCollector);
                 document.getElementById('collectDroppedFiles').checked = Boolean(config.artifactCollection?.collectDroppedFiles);
                 document.getElementById('captureScreenshots').checked = Boolean(config.artifactCollection?.captureScreenshots);
                 document.getElementById('captureMemoryDumps').checked = Boolean(config.artifactCollection?.captureMemoryDumps);
                 document.getElementById('capturePacketCapture').checked = Boolean(config.artifactCollection?.capturePacketCapture);
+                applyOperatorVmPreset();
+                renderConfigDefaultHints();
+                renderVmConfigSummary();
               } catch {
                 // Keep placeholders when config loading fails; planning still works with server defaults.
+                renderConfigDefaultHints();
+                renderVmConfigSummary();
               }
+            }
+
+            function normalizePositiveInt(value, fallback) {
+              const parsed = Number.parseInt(String(value ?? ''), 10);
+              return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+            }
+
+            function clampDuration(value, maxDuration) {
+              const max = normalizePositiveInt(maxDuration, 900);
+              const parsed = normalizePositiveInt(value, normalizePositiveInt(runtimeConfigDefaults?.analysis?.defaultDurationSeconds, 120));
+              return Math.max(1, Math.min(max, parsed));
+            }
+
+            function getAnalysisDuration() {
+              const input = document.getElementById('uploadDuration');
+              const hidden = document.getElementById('duration');
+              const max = normalizePositiveInt(input?.max || runtimeConfigDefaults?.analysis?.maxDurationSeconds, 900);
+              const fallback = normalizePositiveInt(runtimeConfigDefaults?.analysis?.defaultDurationSeconds || hidden?.value, 120);
+              const duration = clampDuration(input?.value || hidden?.value || fallback, max);
+              if (input) {
+                input.value = String(duration);
+              }
+
+              if (hidden) {
+                hidden.value = String(duration);
+              }
+
+              return duration;
             }
 
             function getVmConfig() {
@@ -444,6 +604,149 @@ internal static class DashboardExperiencePage
                 captureMemoryDumps: document.getElementById('captureMemoryDumps').checked,
                 capturePacketCapture: document.getElementById('capturePacketCapture').checked
               };
+            }
+
+            function readOperatorVmPreset() {
+              try {
+                const raw = localStorage.getItem(vmPresetStorageKey);
+                return raw ? JSON.parse(raw) : null;
+              } catch {
+                return null;
+              }
+            }
+
+            function applyOperatorVmPreset() {
+              const preset = readOperatorVmPreset();
+              if (!preset) {
+                return;
+              }
+
+              const setValue = (id, value) => {
+                if (value !== undefined && value !== null) {
+                  document.getElementById(id).value = String(value);
+                }
+              };
+              const setChecked = (id, value) => {
+                if (typeof value === 'boolean') {
+                  document.getElementById(id).checked = value;
+                }
+              };
+
+              setValue('uploadDuration', preset.durationSeconds);
+              setValue('duration', preset.durationSeconds);
+              setValue('goldenVmName', preset.goldenVmName);
+              setValue('goldenSnapshotName', preset.goldenSnapshotName);
+              setValue('guestUserName', preset.guestUserName);
+              setValue('guestWorkingDirectory', preset.guestWorkingDirectory);
+              setValue('guestPayloadRoot', preset.guestPayloadRoot);
+              setChecked('useMockCollector', preset.useMockCollector);
+              setChecked('collectDroppedFiles', preset.collectDroppedFiles);
+              setChecked('captureScreenshots', preset.captureScreenshots);
+              setChecked('captureMemoryDumps', preset.captureMemoryDumps);
+              setChecked('capturePacketCapture', preset.capturePacketCapture);
+              getAnalysisDuration();
+            }
+
+            function captureVmPreset() {
+              return {
+                durationSeconds: getAnalysisDuration(),
+                ...getVmConfig(),
+                ...getArtifactCollectionConfig()
+              };
+            }
+
+            function saveVmPreset() {
+              const preset = captureVmPreset();
+              localStorage.setItem(vmPresetStorageKey, JSON.stringify(preset));
+              renderConfigDefaultHints();
+              renderVmConfigSummary();
+              setStatus(t('本机 WebUI 预设已保存；后续任务会默认使用这些覆盖值。', 'Local WebUI preset saved; future jobs will default to these override values.'), false);
+            }
+
+            async function clearVmPreset() {
+              localStorage.removeItem(vmPresetStorageKey);
+              await loadConfigDefaults();
+              setStatus(t('本机 WebUI 预设已清除；已恢复 config 默认值。', 'Local WebUI preset cleared; config defaults restored.'), false);
+            }
+
+            function renderConfigDefaultHints() {
+              const secretName = runtimeConfigDefaults?.guest?.passwordSecretName || 'KSWORDBOX_GUEST_PASSWORD';
+              const maxDuration = normalizePositiveInt(runtimeConfigDefaults?.analysis?.maxDurationSeconds, 900);
+              setElementTextAndCopy('durationHint', t(
+                `后端会限制在 1-${maxDuration} 秒；本次任务值会随上传一起提交，也可保存为本机 WebUI 预设。`,
+                `The backend clamps this to 1-${maxDuration} seconds; the per-job value is submitted with upload and can be saved as a local WebUI preset.`));
+              setElementTextAndCopy('guestCredentialHint', t(
+                `Guest 密码只从本机密钥环境变量 ${secretName} 读取；WebUI 不输入也不保存密码。`,
+                `Guest password is read only from the local secret environment variable ${secretName}; the WebUI does not ask for or store it.`));
+              const r0Enabled = Boolean(runtimeConfigDefaults?.driver?.enabled);
+              const r0Text = r0Enabled
+                ? t('R0 已在配置（config）中启用；本页只覆盖本次任务的真实/Mock 采集器（collector）模式。', 'R0 is enabled in config; this page only overrides the real/mock collector mode for this job.')
+                : t('R0 在配置（config）中关闭；本页会保留 Mock 选择，但 Core 仍以 config 总开关为准。', 'R0 is disabled in config; this page keeps the mock selection, but Core still follows the config master switch.');
+              setElementTextAndCopy('r0EnabledHint', r0Text);
+            }
+
+            function renderVmConfigSummary() {
+              const target = document.getElementById('vmConfigSummary');
+              if (!target) {
+                return;
+              }
+
+              const valueOrDefault = (id, fallback) => {
+                const value = (document.getElementById(id)?.value || '').trim();
+                return value || fallback || t('使用默认', 'default');
+              };
+              const duration = getAnalysisDuration();
+              const r0Enabled = document.getElementById('r0Enabled')?.checked;
+              const mock = document.getElementById('useMockCollector')?.checked;
+              const r0Mode = r0Enabled
+                ? (mock ? t('R0：Mock 采集器（collector）', 'R0: mock collector') : t('R0：真实采集器（collector）', 'R0: real collector'))
+                : t('R0：config 已关闭', 'R0: disabled by config');
+              const artifacts = buildArtifactCollectionSummary({ submission: getArtifactCollectionConfig() });
+              const parts = [
+                `${t('VM', 'VM')}: ${valueOrDefault('goldenVmName', runtimeConfigDefaults?.hyperV?.goldenVmName)}`,
+                `${t('检查点', 'Checkpoint')}: ${valueOrDefault('goldenSnapshotName', runtimeConfigDefaults?.hyperV?.goldenSnapshotName)}`,
+                `${t('时长', 'Duration')}: ${duration}s`,
+                `${t('Guest', 'Guest')}: ${valueOrDefault('guestUserName', runtimeConfigDefaults?.guest?.userName)}`,
+                r0Mode,
+                `${t('产物', 'Artifacts')}: ${artifacts}`
+              ];
+              target.setAttribute('data-copy', parts.join(' | '));
+              target.innerHTML = parts.map(part => `<span class="pill" data-copy="${escapeAttribute(part)}" data-copy-label="VM configuration summary item">${escapeHtml(part)}</span>`).join('');
+            }
+
+            function setElementTextAndCopy(id, text) {
+              const element = document.getElementById(id);
+              if (!element) {
+                return;
+              }
+
+              element.textContent = text;
+              element.setAttribute('data-copy', text);
+            }
+
+            function setupConfigSummaryListeners() {
+              const ids = [
+                'uploadDuration',
+                'goldenVmName',
+                'goldenSnapshotName',
+                'guestUserName',
+                'guestWorkingDirectory',
+                'guestPayloadRoot',
+                'useMockCollector',
+                'collectDroppedFiles',
+                'captureScreenshots',
+                'captureMemoryDumps',
+                'capturePacketCapture'
+              ];
+              for (const id of ids) {
+                const element = document.getElementById(id);
+                if (!element) {
+                  continue;
+                }
+
+                element.addEventListener('input', renderVmConfigSummary);
+                element.addEventListener('change', renderVmConfigSummary);
+              }
             }
 
             document.addEventListener('click', event => {
@@ -475,6 +778,13 @@ internal static class DashboardExperiencePage
             });
 
             async function scanTargets() {
+              const scanPath = document.getElementById('scanPath');
+              const maxDepth = document.getElementById('maxDepth');
+              if (!scanPath || !maxDepth) {
+                setStatus(t('目录扫描入口已从主 dashboard 移除；请使用上传入口提交样本。', 'Folder scan is no longer shown on the main dashboard; use the upload entry to submit a sample.'), true);
+                return null;
+              }
+
               setBusy(true);
               setStatus(t('正在扫描路径...', 'Scanning host path...'), false);
               try {
@@ -482,8 +792,8 @@ internal static class DashboardExperiencePage
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({
-                    path: document.getElementById('scanPath').value,
-                    maxDepth: Number(document.getElementById('maxDepth').value || 4),
+                    path: scanPath.value,
+                    maxDepth: Number(maxDepth.value || 4),
                     maxResults: 300
                   })
                 });
@@ -538,7 +848,7 @@ internal static class DashboardExperiencePage
                 const job = payload.job || payload.Job || null;
 
                 document.getElementById('samplePath').value = uploaded.fullPath || uploaded.FullPath || '';
-                document.getElementById('duration').value = document.getElementById('uploadDuration').value || 120;
+                document.getElementById('duration').value = String(getAnalysisDuration());
                 if (job) {
                   renderJob(job);
                   applyLanguage();
@@ -598,7 +908,7 @@ internal static class DashboardExperiencePage
               // Processing copies the same VM/artifact options used by JSON
               // planning into multipart fields, plus the live-run defaults.
               // Return: mutates the FormData in place for /api/files/upload/start.
-              form.append('durationSeconds', document.getElementById('uploadDuration').value || document.getElementById('duration').value || '120');
+              form.append('durationSeconds', String(getAnalysisDuration()));
               form.append('live', 'true');
               form.append('importGuestEvents', 'true');
               form.append('stepTimeoutSeconds', '1800');
@@ -630,7 +940,7 @@ internal static class DashboardExperiencePage
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({
                     samplePath,
-                    durationSeconds: Number(document.getElementById('duration').value || 120),
+                    durationSeconds: getAnalysisDuration(),
                     dryRun: true,
                     ...getVmConfig(),
                     ...getArtifactCollectionConfig()
@@ -665,9 +975,16 @@ internal static class DashboardExperiencePage
             }
 
             function renderCandidates(result) {
-              document.getElementById('candidateCount').textContent = result.candidates.length;
+              const count = document.getElementById('candidateCount');
+              const container = document.getElementById('candidates');
+              if (!count || !container) {
+                setStatus(t('目录扫描入口已从主 dashboard 移除；请使用上传入口提交样本。', 'Folder scan is no longer shown on the main dashboard; use the upload entry to submit a sample.'), true);
+                return;
+              }
+
+              count.textContent = result.candidates.length;
               if (!result.candidates.length) {
-                document.getElementById('candidates').innerHTML = '<p data-zh="没有找到 .exe 候选项。" data-en="No .exe candidates found.">没有找到 .exe 候选项。</p>';
+                container.innerHTML = '<p data-zh="没有找到 .exe 候选项。" data-en="No .exe candidates found.">没有找到 .exe 候选项。</p>';
                 applyLanguage();
                 return;
               }
@@ -681,7 +998,7 @@ internal static class DashboardExperiencePage
                   <td><button onclick="planPath('${escapeJs(candidate.fullPath)}')" data-zh="规划" data-en="Plan">规划</button></td>
                 </tr>`).join('');
               const warnings = (result.warnings || []).map(warning => `<li data-copy="${escapeAttribute(warning)}" data-copy-label="scan warning">${escapeHtml(warning)} ${copyButton(warning, 'scan warning')}</li>`).join('');
-              document.getElementById('candidates').innerHTML = `
+              container.innerHTML = `
                 <table>
                   <thead><tr><th></th><th data-zh="名称" data-en="Name">名称</th><th data-zh="路径" data-en="Path">路径</th><th data-zh="大小" data-en="Size">大小</th><th data-zh="操作" data-en="Action">操作</th></tr></thead>
                   <tbody>${rows}</tbody>
@@ -794,6 +1111,24 @@ internal static class DashboardExperiencePage
                 : t('未启用敏感产物采集', 'no sensitive artifact collection enabled');
             }
 
+            function buildVmRunSummary(job) {
+              // Inputs: normalized job payload plus loaded config defaults.
+              // Processing: summarizes only operator-safe VM choices, avoiding
+              // command-line or executor output details. Return: copyable text.
+              const submission = job.submission || {};
+              const r0Enabled = runtimeConfigDefaults?.driver?.enabled;
+              const r0Mode = r0Enabled === false
+                ? t('R0：config 关闭', 'R0: disabled by config')
+                : (submission.useMockCollector ? t('R0：Mock 采集器（collector）', 'R0: mock collector') : t('R0：真实采集器（collector）', 'R0: real collector'));
+              const parts = [
+                `${t('VM', 'VM')}: ${submission.goldenVmName || runtimeConfigDefaults?.hyperV?.goldenVmName || t('config 默认', 'config default')}`,
+                `${t('检查点', 'Checkpoint')}: ${submission.goldenSnapshotName || runtimeConfigDefaults?.hyperV?.goldenSnapshotName || t('config 默认', 'config default')}`,
+                `${t('Guest', 'Guest')}: ${submission.guestUserName || runtimeConfigDefaults?.guest?.userName || t('config 默认', 'config default')}`,
+                r0Mode
+              ];
+              return parts.join(' · ');
+            }
+
             function renderJob(job) {
               job = normalizeJobPayload(job);
               currentJobPayload = job;
@@ -827,8 +1162,12 @@ internal static class DashboardExperiencePage
                    <a class="buttonlink secondary" target="_blank" rel="noopener" href="${escapeHtml(servedEnReportHref)}" data-zh="英文" data-en="EN">英文</a>`
                 : `<span class="hint" data-zh="报告生成后这里会自动变为中文/英文入口。" data-en="Chinese/English report entries appear here when the report is ready.">报告生成后这里会自动变为中文/英文入口。</span>`;
               const plannedStepCount = job.runbook?.steps?.length || 0;
-              const messages = (job.messages || []).slice(-3).map(message => `<li data-copy="${escapeAttribute(message)}" data-copy-label="job message">${escapeHtml(message)} ${copyButton(message, 'job message')}</li>`).join('');
+              const messages = (job.messages || []).slice(-3).map(message => {
+                const displayMessage = localizeServerMessage(message);
+                return `<li data-copy="${escapeAttribute(message)}" data-copy-label="job message">${escapeHtml(displayMessage)} ${copyButton(message, 'job message')}</li>`;
+              }).join('');
               const artifactCollectionSummary = buildArtifactCollectionSummary(job);
+              const vmRunSummary = buildVmRunSummary(job);
               document.getElementById('jobResult').innerHTML = `
                 <article class="job-card">
                   <h3><span data-zh="任务已创建" data-en="Job created">任务已创建</span> ${copyableCode(jobId, 'job id')}</h3>
@@ -838,7 +1177,8 @@ internal static class DashboardExperiencePage
                     <div class="metric"><strong data-zh="分析时长" data-en="Duration">分析时长</strong><span>${escapeHtml(String(job.submission?.durationSeconds || '-'))}s</span></div>
                     <div class="metric"><strong data-zh="报告" data-en="Report">报告</strong>${reportBadge}</div>
                   </div>
-                  <p class="hint"><strong data-zh="产物采集 opt-in" data-en="Artifact collection opt-in">产物采集 opt-in</strong> <span class="pill" data-copy="${escapeAttribute(artifactCollectionSummary)}" data-copy-label="artifact collection opt-in">${escapeHtml(artifactCollectionSummary)}</span></p>
+                  <p class="hint"><strong>${escapeHtml(t('VM 配置', 'VM configuration'))}</strong> <span class="pill" data-copy="${escapeAttribute(vmRunSummary)}" data-copy-label="VM configuration summary">${escapeHtml(vmRunSummary)}</span></p>
+                  <p class="hint"><strong data-zh="产物采集显式启用（opt-in）" data-en="Artifact collection opt-in">产物采集显式启用（opt-in）</strong> <span class="pill" data-copy="${escapeAttribute(artifactCollectionSummary)}" data-copy-label="artifact collection opt-in">${escapeHtml(artifactCollectionSummary)}</span></p>
                   <p class="button-row">
                     <button onclick="executeRunbook('${escapeJs(jobId)}', true)" data-zh="启动虚拟机分析" data-en="Start VM analysis">启动虚拟机分析</button>
                     <a class="buttonlink secondary" target="_blank" rel="noopener" href="${escapeHtml(executionFlowHref)}" data-zh="打开进度页（执行流程）" data-en="Open progress page (execution flow)">打开进度页（执行流程）</a>
@@ -853,7 +1193,7 @@ internal static class DashboardExperiencePage
                   <div id="reportNotice" class="report-notice" hidden></div>
                   <div class="callout">
                     <strong data-zh="独立页：实时原始事件监控" data-en="Standalone page: Live raw event monitor">独立页：实时原始事件监控</strong>
-                    <p class="hint" data-zh="上传流程会直接跳转到该页；手动规划任务也可从这里打开实时原始事件。最终结论以报告为准。" data-en="The upload flow redirects directly to this page. Manually planned jobs can still open live raw events here; the final report remains the source of truth.">上传流程会直接跳转到该页；手动规划任务也可从这里打开实时原始事件。最终结论以报告为准。</p>
+                    <p class="hint" data-zh="上传流程会直接跳转到该页；实时原始事件、证据/下载（Artifacts）、VirusTotal 和最终报告跳转都集中在这里。最终结论以报告为准。" data-en="The upload flow redirects directly to this page; raw events, artifacts/downloads, VirusTotal, and final report navigation are concentrated there. The final report remains the source of truth.">上传流程会直接跳转到该页；实时原始事件、证据/下载（Artifacts）、VirusTotal 和最终报告跳转都集中在这里。最终结论以报告为准。</p>
                     <p class="button-row"><a class="buttonlink secondary" target="_blank" rel="noopener" href="${escapeHtml(liveEventsHref)}" onclick="openLiveMonitor('${escapeJs(jobId)}', false); return false;" data-zh="打开实时原始事件监控" data-en="Open Live raw event monitor">打开实时原始事件监控</a></p>
                   </div>
                   <div id="liveMonitorNotice" class="report-notice" hidden></div>
@@ -874,7 +1214,7 @@ internal static class DashboardExperiencePage
                     <p id="progressText" class="hint" data-zh="等待启动。虚拟机恢复/启动可能占用大部分时间。" data-en="Waiting to start. VM restore/start usually takes most of the time.">等待启动。虚拟机恢复/启动可能占用大部分时间。</p>
                   </div>
                   <details id="jobReportPaths" class="compact-details">
-                    <summary data-zh="高级详情：事件导入与文件路径" data-en="Advanced details: event import and file paths">高级详情：事件导入与文件路径</summary>
+                    <summary data-zh="高级：手动事件导入（可选）" data-en="Advanced: manual event import (optional)">高级：手动事件导入（可选）</summary>
                     <p class="hint"><strong data-zh="事件导入状态" data-en="Event import status">事件导入状态</strong> <span class="pill" data-copy="${escapeAttribute(guestImportStatus.label)}" data-copy-label="guest import status">${escapeHtml(guestImportStatus.label)}</span> <span>${escapeHtml(guestImportStatus.detail)}</span></p>
                     <div class="mini-form">
                       <label for="guestImportPath" data-zh="手动事件文件（可选）" data-en="Manual event file (optional)">手动事件文件（可选）</label>
@@ -884,18 +1224,7 @@ internal static class DashboardExperiencePage
                         <button class="secondary" onclick="importGuestEvents('${escapeJs(jobId)}')" data-zh="手动导入事件并刷新报告" data-en="Import events manually and refresh report">手动导入事件并刷新报告</button>
                       </p>
                     </div>
-                    <table class="artifact-table">
-                      <thead><tr><th data-zh="文件" data-en="File">文件</th><th data-zh="可复制路径" data-en="Copyable path">可复制路径</th><th data-zh="状态" data-en="Status">状态</th></tr></thead>
-                      <tbody>
-                        <tr><td>report.html</td><td>${copyableCode(artifactPaths.reportHtmlPath, 'report.html path')}</td><td><a target="_blank" rel="noopener" href="${escapeHtml(servedReportHref)}" data-zh="打开服务内报告" data-en="Open served report">打开服务内报告</a> · <a target="_blank" rel="noopener" href="${escapeHtml(fileReportHref)}" data-zh="打开本地文件" data-en="Open local file">打开本地文件</a></td></tr>
-                        <tr><td>report.zh.html</td><td>${copyableCode(zhReportPath, 'report.zh.html path')}</td><td><a target="_blank" rel="noopener" href="${escapeHtml(servedZhReportHref)}" data-zh="中文报告" data-en="Chinese report">中文报告</a></td></tr>
-                        <tr><td>report.en.html</td><td>${copyableCode(enReportPath, 'report.en.html path')}</td><td><a target="_blank" rel="noopener" href="${escapeHtml(servedEnReportHref)}" data-zh="英文报告" data-en="English report">英文报告</a></td></tr>
-                        <tr><td>report.json</td><td>${copyableCode(jsonReportPath, 'report.json path')}</td><td>${artifactStatus(jsonReportPath, t('已记录', 'recorded'))}</td></tr>
-                        <tr><td>events.json</td><td>${copyableCode(artifactPaths.eventsJsonPath, 'events.json path')}</td><td>${artifactStatus(artifactPaths.eventsJsonPath, guestEventsPath ? t('已记录 / 导入来源', 'recorded / import source') : t('虚拟机分析后生成', 'expected after VM analysis'))}</td></tr>
-                        <tr><td>driver-events.jsonl</td><td>${copyableCode(artifactPaths.driverEventsJsonlPath, 'driver-events.jsonl path')}</td><td>${artifactStatus(artifactPaths.driverEventsJsonlPath, t('驱动遥测文件', 'driver telemetry'))}</td></tr>
-                        <tr><td>runbook-execution.json</td><td>${copyableCode(artifactPaths.runbookExecutionPath, 'runbook execution path')}</td><td>${artifactStatus(runbookExecutionPath, runbookExecutionPath ? t('已记录', 'recorded') : t('执行后生成', 'expected after execution'))}</td></tr>
-                      </tbody>
-                    </table>
+                    <p class="hint" data-zh="主页面不再展示证据/下载（artifacts/downloads）路径表；请打开“实时原始事件监控”查看报告、events.json、driver-events.jsonl、截图、转储、PCAP 等下载卡片。" data-en="The dashboard no longer renders an artifacts/downloads path table; open the Live raw event monitor for report, events.json, driver-events.jsonl, screenshots, dumps, PCAP, and other download cards.">主页面不再展示证据/下载（artifacts/downloads）路径表；请打开“实时原始事件监控”查看报告、events.json、driver-events.jsonl、截图、转储、PCAP 等下载卡片。</p>
                   </details>
                   <details class="compact-details">
                     <summary data-zh="最近消息" data-en="Recent messages">最近消息</summary>
@@ -992,13 +1321,14 @@ internal static class DashboardExperiencePage
                 const reportPath = job.htmlReportPath || '';
                 const reportHref = `/api/jobs/${encodeURIComponent(jobId)}/report/html?lang=${currentLanguage === 'en' ? 'en' : 'zh'}`;
                 const flowHref = `/jobs/${encodeURIComponent(jobId)}/execution-flow`;
+                const liveHref = `/jobs/${encodeURIComponent(jobId)}/live-events`;
                 const reportState = buildReportState(job);
                 const reportCell = reportPath
                   ? `<a class="buttonlink" target="_blank" rel="noopener" href="${escapeHtml(reportHref)}" data-report-current="true" data-job-id="${escapeAttribute(jobId)}">${escapeHtml(reportState.link)}</a>`
                   : `<span class="hint">${escapeHtml(t('报告待生成', 'Report not ready'))}</span>`;
                 return `
                 <article class="recent-job-card" data-copy="${escapeAttribute(`job=${jobId}; status=${statusLabel}; report=${reportState.badge}`)}" data-copy-label="recent job summary">
-                  <h3>Job <code data-copy="${escapeAttribute(jobId)}" data-copy-label="job id">${escapeHtml(shortJobId)}</code></h3>
+                  <h3><span data-zh="任务 / Job" data-en="Job">任务 / Job</span> <code data-copy="${escapeAttribute(jobId)}" data-copy-label="job id">${escapeHtml(shortJobId)}</code></h3>
                   <div class="recent-job-meta">
                     <span class="pill" data-copy="${escapeAttribute(statusLabel)}" data-copy-label="job status">${escapeHtml(statusLabel)}</span>
                     <span class="${reportState.badgeClass}" data-copy="${escapeAttribute(reportState.badge)}" data-copy-label="report state">${escapeHtml(reportState.badge)}</span>
@@ -1007,6 +1337,7 @@ internal static class DashboardExperiencePage
                   <p class="button-row">
                     <button class="secondary" onclick="refreshJob('${escapeJs(jobId)}')" data-zh="打开任务" data-en="Open job">打开任务</button>
                     <a class="buttonlink secondary" href="${escapeHtml(flowHref)}" target="_blank" rel="noopener" data-zh="执行流程" data-en="Execution flow">执行流程</a>
+                    <a class="buttonlink secondary" href="${escapeHtml(liveHref)}" target="_blank" rel="noopener" data-zh="监控 / 下载" data-en="Monitor / downloads">监控 / 下载</a>
                     ${reportCell}
                   </p>
                 </article>`;
@@ -1332,7 +1663,7 @@ internal static class DashboardExperiencePage
                     ? 'active'
                     : '';
               const title = `${Number(step.stepIndex) + 1}/${total} ${step.title || step.stepId || ''}`;
-              const subtitle = `${progressStateLabel(state)}${step.duration ? ` · ${formatDuration(step.duration)}` : ''}${step.exitCode !== null && step.exitCode !== undefined ? ` · exit ${step.exitCode}` : ''}${step.message ? ` · ${step.message}` : ''}`;
+              const subtitle = `${progressStateLabel(state)}${step.duration ? ` · ${formatDuration(step.duration)}` : ''}${step.exitCode !== null && step.exitCode !== undefined ? ` · ${t('退出码', 'exit')} ${step.exitCode}` : ''}${step.message ? ` · ${localizeServerMessage(step.message)}` : ''}`;
               return `<div class="stage ${css}" data-copy="${escapeAttribute(`${title} - ${subtitle}`)}" data-copy-label="runbook progress step">${escapeHtml(title)}<small>${escapeHtml(subtitle)}</small></div>`;
             }
 
@@ -1340,7 +1671,7 @@ internal static class DashboardExperiencePage
               const state = normalizeProgressState(step.state);
               const css = ['pending', 'running', 'completed', 'failed', 'skipped', 'canceled'].includes(state) ? state : 'pending';
               const title = `${Number(step.stepIndex) + 1}. ${step.title || step.stepId || ''}`;
-              const detail = `${progressStateLabel(state)}${step.duration ? ` · ${formatDuration(step.duration)}` : ''}${step.exitCode !== null && step.exitCode !== undefined ? ` · exit ${step.exitCode}` : ''}${step.message ? ` · ${step.message}` : ''}`;
+              const detail = `${progressStateLabel(state)}${step.duration ? ` · ${formatDuration(step.duration)}` : ''}${step.exitCode !== null && step.exitCode !== undefined ? ` · ${t('退出码', 'exit')} ${step.exitCode}` : ''}${step.message ? ` · ${localizeServerMessage(step.message)}` : ''}`;
               return `<div class="runbook-step ${css}" data-copy="${escapeAttribute(`${title} - ${detail}`)}" data-copy-label="runbook step status"><b>${escapeHtml(title)}</b><small>${escapeHtml(detail)}</small></div>`;
             }
 
@@ -1349,13 +1680,25 @@ internal static class DashboardExperiencePage
                 return '';
               }
 
-              return failedStep || (snapshot && snapshot.message)
-                ? t('分析未完成；请打开进度页查看失败阶段和诊断详情。', 'Analysis did not complete; open the progress page for the failed stage and diagnostics.')
+              const pieces = [];
+              if (failedStep) {
+                const title = failedStep.title || failedStep.stepId || '';
+                if (title) { pieces.push(`${t('失败步骤', 'Failed step')}: ${title}`); }
+                if (failedStep.message) { pieces.push(localizeServerMessage(failedStep.message)); }
+                if (failedStep.exitCode !== null && failedStep.exitCode !== undefined) { pieces.push(`${t('退出码', 'exit')} ${failedStep.exitCode}`); }
+              }
+
+              if (snapshot && snapshot.message) {
+                pieces.push(localizeServerMessage(snapshot.message));
+              }
+
+              return pieces.length
+                ? pieces.join(' · ')
                 : t('未记录失败原因；请打开进度页查看技术详情。', 'No failure reason was recorded; open the progress page for technical details.');
             }
 
-            function openReport(jobId) {
-              const lang = currentLanguage === 'en' ? 'en' : 'zh';
+            function openReport(jobId, langOverride) {
+              const lang = langOverride || (currentLanguage === 'en' ? 'en' : 'zh');
               window.location.href = `/api/jobs/${encodeURIComponent(jobId)}/report/html?lang=${lang}`;
             }
 
@@ -1444,14 +1787,18 @@ internal static class DashboardExperiencePage
                 return;
               }
 
-              const currentHref = buildReportHref(jobId, currentLanguage === 'en' ? 'en' : 'zh');
+              const currentHref = buildReportHref(jobId, autoOpen ? 'zh' : (currentLanguage === 'en' ? 'en' : 'zh'));
               const zhHref = buildReportHref(jobId, 'zh');
               const enHref = buildReportHref(jobId, 'en');
+              const primaryReportAttributes = autoOpen
+                ? ''
+                : `data-report-current="true" data-job-id="${escapeAttribute(jobId)}"`;
               const html = `
                 <strong data-zh="报告已生成" data-en="Report is ready">报告已生成</strong>
-                <p data-zh="${autoOpen ? '页面即将打开当前语言报告；如果没有跳转，请点击下方按钮。' : '报告已刷新，可直接打开查看。'}" data-en="${autoOpen ? 'The report will open in the current language shortly; if it does not, use the buttons below.' : 'The report has been refreshed and is ready to open.'}">${autoOpen ? '页面即将打开当前语言报告；如果没有跳转，请点击下方按钮。' : '报告已刷新，可直接打开查看。'}</p>
+                <p data-zh="${autoOpen ? '页面即将打开中文报告 report.zh.html；如果没有跳转，请点击下方按钮。' : '报告已刷新，可直接打开查看。'}" data-en="${autoOpen ? 'The Chinese report (report.zh.html) will open shortly; if it does not, use the buttons below.' : 'The report has been refreshed and is ready to open.'}">${autoOpen ? '页面即将打开中文报告 report.zh.html；如果没有跳转，请点击下方按钮。' : '报告已刷新，可直接打开查看。'}</p>
+                ${autoOpen ? '<p class="countdown" data-report-countdown data-copy="" data-copy-label="report auto-open countdown"></p>' : ''}
                 <p class="button-row">
-                  <a class="buttonlink" href="${escapeHtml(currentHref)}" data-report-current="true" data-job-id="${escapeAttribute(jobId)}" data-zh="打开报告" data-en="Open report">打开报告</a>
+                  <a class="buttonlink" href="${escapeHtml(currentHref)}" ${primaryReportAttributes} data-zh="${autoOpen ? '打开中文报告' : '打开报告'}" data-en="${autoOpen ? 'Open Chinese report' : 'Open report'}">${autoOpen ? '打开中文报告' : '打开报告'}</a>
                   <a class="buttonlink secondary" target="_blank" rel="noopener" href="${escapeHtml(zhHref)}" data-zh="新标签打开中文报告" data-en="Open Chinese report in new tab">新标签打开中文报告</a>
                   <a class="buttonlink secondary" target="_blank" rel="noopener" href="${escapeHtml(enHref)}" data-zh="新标签打开英文报告" data-en="Open English report in new tab">新标签打开英文报告</a>
                 </p>`;
@@ -1464,12 +1811,39 @@ internal static class DashboardExperiencePage
               (document.getElementById('globalReportNotice') || notices[0]).scrollIntoView({ behavior: 'smooth', block: 'nearest' });
               setStatus(
                 autoOpen
-                  ? t('报告已生成，正在打开；如果没有跳转，请点击“打开报告”。', 'Report is ready and opening; if it does not navigate, click Open report.')
+                  ? t('报告已生成，正在打开中文报告 report.zh.html；如果没有跳转，请点击“打开中文报告”。', 'Report is ready and opening report.zh.html; if it does not navigate, click Open Chinese report.')
                   : t('报告已生成，可在当前任务卡片中打开。', 'Report is ready; open it from the current job card.'),
                 false);
               if (autoOpen) {
-                setTimeout(() => openReport(jobId), 1600);
+                startReportAutoOpenCountdown(jobId);
               }
+            }
+
+            function startReportAutoOpenCountdown(jobId) {
+              reportAutoOpenJobId = jobId;
+              reportAutoOpenDeadline = Date.now() + 5000;
+              updateReportAutoOpenCountdown();
+              if (reportAutoOpenTimer) {
+                clearInterval(reportAutoOpenTimer);
+              }
+
+              reportAutoOpenTimer = setInterval(() => {
+                updateReportAutoOpenCountdown();
+                if (Date.now() >= reportAutoOpenDeadline) {
+                  clearInterval(reportAutoOpenTimer);
+                  reportAutoOpenTimer = null;
+                  openReport(reportAutoOpenJobId, 'zh');
+                }
+              }, 250);
+            }
+
+            function updateReportAutoOpenCountdown() {
+              const remaining = Math.max(0, Math.ceil((reportAutoOpenDeadline - Date.now()) / 1000));
+              const text = t(`报告就绪，${remaining} 秒后自动跳转到中文报告 report.zh.html。`, `Report ready; auto-opening the Chinese report (report.zh.html) in ${remaining}s.`);
+              document.querySelectorAll('[data-report-countdown]').forEach(element => {
+                element.textContent = text;
+                element.setAttribute('data-copy', text);
+              });
             }
 
             function startBackgroundExecutionPolling(jobId, live) {
@@ -1535,7 +1909,7 @@ internal static class DashboardExperiencePage
               renderStages(liveStages.length - 1, success, !success);
               setStatus(
                 (success ? t('后台分析流程已完成。', 'Background analysis flow completed.') : t('后台分析流程失败。', 'Background analysis flow failed.')) +
-                  (snapshot.guestImportMessage ? ` ${snapshot.guestImportMessage}` : ''),
+                  (snapshot.guestImportMessage ? ` ${localizeServerMessage(snapshot.guestImportMessage)}` : ''),
                 !success);
 
               if (live && success) {
@@ -1628,7 +2002,7 @@ internal static class DashboardExperiencePage
               // not inline the 1~16 runbook steps, PowerShell, stdout, or stderr.
               const jobId = result.jobId || (wrapper && wrapper.job && wrapper.job.jobId) || '';
               const flowHref = jobId ? `/jobs/${encodeURIComponent(jobId)}/execution-flow` : '#';
-              const importMessage = wrapper && wrapper.guestImportMessage ? `<p class="${wrapper.guestImportSucceeded ? 'ok' : 'hint'}">${escapeHtml(wrapper.guestImportMessage)}</p>` : '';
+              const importMessage = wrapper && wrapper.guestImportMessage ? `<p class="${wrapper.guestImportSucceeded ? 'ok' : 'hint'}" data-copy="${escapeAttribute(wrapper.guestImportMessage)}">${escapeHtml(localizeServerMessage(wrapper.guestImportMessage))}</p>` : '';
               const successClass = result.success ? 'status-ok' : 'status-failed';
               document.getElementById('executionResult').innerHTML = `
                 <div class="pathbox" data-copy="mode=${escapeAttribute(result.mode)}; success=${result.success}; executed=${result.executedSteps}/${result.totalSteps}; duration=${escapeAttribute(formatDuration(result.duration))}" data-copy-label="runbook execution summary">
@@ -1754,7 +2128,7 @@ internal static class DashboardExperiencePage
             }
 
             function copyableCode(value, label, emptyText) {
-              const text = value || emptyText || '(not recorded)';
+              const text = value || emptyText || t('未记录', '(not recorded)');
               if (!value) {
                 return `<span class="copy-field"><code>${escapeHtml(text)}</code></span>`;
               }
@@ -1920,9 +2294,44 @@ internal static class DashboardExperiencePage
 
             function formatHttpError(action, response, payload) {
               const statusText = response.statusText ? ` ${response.statusText}` : '';
-              const detail = extractErrorMessage(payload) || t('服务器未返回错误详情。', 'No error detail was returned by the server.');
+              const detail = localizeServerMessage(extractErrorMessage(payload) || t('服务器未返回错误详情。', 'No error detail was returned by the server.'));
               const traceId = payload && (payload.traceId || payload.requestId);
-              return `${action} ${t('失败', 'failed')} (HTTP ${response.status}${statusText}${traceId ? `, trace ${traceId}` : ''}): ${detail}`;
+              const traceText = traceId ? (currentLanguage === 'en' ? `, trace ${traceId}` : `，跟踪 ID ${traceId}`) : '';
+              return `${action} ${t('失败', 'failed')} (HTTP ${response.status}${statusText}${traceText}): ${detail} ${t('下一步：', 'Next step: ')}${suggestNextStep(action, response, payload)}`;
+            }
+
+            function suggestNextStep(action, response, payload) {
+              const actionText = String(action || '');
+              const code = String(payload?.error?.code || payload?.code || payload?.title || '').toLowerCase();
+              if (response.status === 404 || code.includes('not_found') || code.includes('notfound')) {
+                return t('刷新近期任务，确认任务仍在当前 Web Host；如果任务存在，请从任务卡片重新打开监控或报告。', 'Refresh recent jobs and confirm the job still exists in this Web host; if it exists, reopen the monitor or report from the job card.');
+              }
+
+              if (response.status === 401 || response.status === 403) {
+                return t('检查本机权限、API Key 或启动用户后重试；需要 VirusTotal 时可先打开设置页确认 Key。', 'Check local permissions, API key, or the service account, then retry; for VirusTotal, open Settings to confirm the key.');
+              }
+
+              if (/上传|upload/i.test(actionText)) {
+                return t('确认选择的是可访问的 .exe 文件，重新上传；如果任务已创建，请在近期任务中打开监控页。', 'Confirm the selected file is an accessible .exe and upload again; if a job was created, open its monitor from recent jobs.');
+              }
+
+              if (/计划|plan|候选|scan|扫描/i.test(actionText)) {
+                return t('检查样本路径、目录权限和 VM 配置字段，然后重新生成计划。', 'Check the sample path, folder permissions, and VM configuration fields, then create the plan again.');
+              }
+
+              if (/导入|import/i.test(actionText)) {
+                return t('确认 events.json 或 JSONL 路径存在且可读；路径为空时让系统从当前 job guest 目录重新搜索。', 'Confirm the events.json or JSONL path exists and is readable; leave the field empty to let the system search the current job guest folder again.');
+              }
+
+              if (/后台|进度|runbook|progress|background|执行/i.test(actionText)) {
+                return t('打开进度页（执行流程）查看失败阶段，并保留本条状态文本用于排障。', 'Open the progress page (execution flow) to inspect the failed stage, and keep this status text for troubleshooting.');
+              }
+
+              if (/配置|config|settings/i.test(actionText)) {
+                return t('刷新页面重新读取配置；若仍失败，请确认 Web Host 进程仍在运行。', 'Refresh the page to reload config; if it still fails, confirm the Web Host process is running.');
+              }
+
+              return t('按当前输入重试；如果重复失败，请打开进度页或监控页查看上下文，并保留跟踪 ID。', 'Retry with the current input; if it repeats, open the progress or monitor page for context and keep the trace ID.');
             }
 
             function extractErrorMessage(payload) {
@@ -1966,6 +2375,7 @@ internal static class DashboardExperiencePage
             }
 
             setupTabKeyboardNavigation();
+            setupConfigSummaryListeners();
             selectWorkspaceTab('plan');
             selectPlanTab('upload');
             applyLanguage();

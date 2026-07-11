@@ -16,6 +16,18 @@ internal static class DashboardClientScripts
     {
         return """
 <script>
+function kswDashboardLanguage() {
+  try {
+    return localStorage.getItem('ksword-lang') === 'en' ? 'en' : 'zh';
+  } catch {
+    return 'zh';
+  }
+}
+
+function kswT(zh, en) {
+  return kswDashboardLanguage() === 'en' ? en : zh;
+}
+
 function kswFallbackCopyText(value) {
   var textarea = document.createElement('textarea');
   textarea.value = value;
@@ -30,22 +42,22 @@ function kswFallbackCopyText(value) {
 
 function kswCopyDashboardValue(value) {
   if (!value) {
-    kswShowCopyToast('没有可复制的内容 / Nothing to copy');
+    kswShowCopyToast(kswT('没有可复制的内容。', 'Nothing to copy.'));
     return;
   }
 
   if (navigator.clipboard && window.isSecureContext) {
     navigator.clipboard.writeText(value).then(function () {
-      kswShowCopyToast('已复制 / Copied');
+      kswShowCopyToast(kswT('已复制。', 'Copied.'));
     }).catch(function () {
       kswFallbackCopyText(value);
-      kswShowCopyToast('已复制 / Copied');
+      kswShowCopyToast(kswT('已复制。', 'Copied.'));
     });
     return;
   }
 
   kswFallbackCopyText(value);
-  kswShowCopyToast('已复制 / Copied');
+  kswShowCopyToast(kswT('已复制。', 'Copied.'));
 }
 
 function kswShowCopyToast(message) {

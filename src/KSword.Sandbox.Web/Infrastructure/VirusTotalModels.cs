@@ -12,16 +12,29 @@ namespace KSword.Sandbox.Web.Infrastructure;
 internal static class VirusTotalLookupStatuses
 {
     public const string MissingHash = "missing_hash";
+    public const string InvalidHash = "invalid_hash";
     public const string NotConfigured = "not_configured";
     public const string NotFound = "not_found";
     public const string RateLimited = "rate_limited";
     public const string AuthenticationFailed = "authentication_failed";
+    public const string Timeout = "timeout";
     public const string LookupFailed = "lookup_failed";
     public const string Found = "found";
     public const string Malicious = "malicious";
     public const string Suspicious = "suspicious";
     public const string Clean = "clean";
     public const string Unknown = "unknown";
+}
+
+/// <summary>
+/// Stable event names used by VirusTotal enrichment. The report/rule event type
+/// stays compatible with the current rule set, while vt.lookup is carried as a
+/// compact provider event name for downstream enrichment consumers.
+/// </summary>
+internal static class VirusTotalLookupEventNames
+{
+    public const string RuleEngineEventType = "enrichment.virustotal.lookup";
+    public const string CompactLookupName = "vt.lookup";
 }
 
 /// <summary>
@@ -41,6 +54,33 @@ internal sealed record VirusTotalSettingsState(
 /// key is never returned by any response.
 /// </summary>
 internal sealed record VirusTotalSettingsUpdateRequest(string? ApiKey, bool Clear = false);
+
+/// <summary>
+/// Flattened VirusTotal engine counts for browser display. Inputs are
+/// last_analysis_stats from the official file report; processing keeps the
+/// common counters as named fields while preserving the raw stats dictionary on
+/// the lookup result for forward compatibility.
+/// </summary>
+internal sealed record VirusTotalEngineCounts
+{
+    public int Malicious { get; init; }
+
+    public int Suspicious { get; init; }
+
+    public int Harmless { get; init; }
+
+    public int Undetected { get; init; }
+
+    public int Timeout { get; init; }
+
+    public int ConfirmedTimeout { get; init; }
+
+    public int Failure { get; init; }
+
+    public int TypeUnsupported { get; init; }
+
+    public int Total { get; init; }
+}
 
 /// <summary>
 /// Operator-safe VirusTotal lookup result.
@@ -86,6 +126,20 @@ internal sealed record VirusTotalLookupResult
 
     public int TimeoutCount { get; init; }
 
+    public int Score => MaliciousCount + SuspiciousCount;
+
+    public int DetectionCount => Score;
+
+    public int EngineCount => EngineCounts.Total > 0
+        ? EngineCounts.Total
+        : Math.Max(0, MaliciousCount) +
+            Math.Max(0, SuspiciousCount) +
+            Math.Max(0, HarmlessCount) +
+            Math.Max(0, UndetectedCount) +
+            Math.Max(0, TimeoutCount);
+
+    public VirusTotalEngineCounts EngineCounts { get; init; } = new();
+
     public int? HttpStatusCode { get; init; }
 
     public string? ErrorKind { get; init; }
@@ -94,17 +148,53 @@ internal sealed record VirusTotalLookupResult
 
     public Dictionary<string, int> LastAnalysisStats { get; init; } = new(StringComparer.OrdinalIgnoreCase);
 
+    public bool CacheHit { get; init; }
+
+    public DateTimeOffset? CachedAtUtc { get; init; }
+
+    public DateTimeOffset? CacheExpiresAtUtc { get; init; }
+
+    public double? CacheAgeSeconds { get; init; }
+
+    public double? CacheTtlSeconds { get; init; }
+
+    public bool PersistedToEnrichmentEvents { get; init; }
+
+    public bool IsQuietState => Status is
+        VirusTotalLookupStatuses.MissingHash or
+        VirusTotalLookupStatuses.InvalidHash or
+        VirusTotalLookupStatuses.NotConfigured or
+        VirusTotalLookupStatuses.NotFound or
+        VirusTotalLookupStatuses.RateLimited or
+        VirusTotalLookupStatuses.AuthenticationFailed or
+        VirusTotalLookupStatuses.Timeout or
+        VirusTotalLookupStatuses.LookupFailed;
+
+    public bool CanPersistEnrichmentEvent => Configured &&
+        Queried &&
+        (string.Equals(Status, VirusTotalLookupStatuses.Found, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(Status, VirusTotalLookupStatuses.NotFound, StringComparison.OrdinalIgnoreCase));
+
     public IReadOnlyDictionary<string, string> RuleData => BuildRuleData();
 
     /// <summary>
     /// Converts the lookup result into a normalized enrichment event that the
-    /// existing rule engine can classify without numeric predicates.
+    /// existing rule engine can classify without numeric predicates. Only real
+    /// found/not_found query outcomes are eligible; local configuration,
+    /// authentication, rate-limit, and timeout states intentionally stay out of
+    /// behavior rules.
     /// </summary>
     public SandboxEvent ToRuleEvent(DateTimeOffset? timestamp = null)
     {
+        if (!CanPersistEnrichmentEvent)
+        {
+            throw new InvalidOperationException(
+                $"VirusTotal status '{Status}' is not eligible for behavior-rule enrichment persistence.");
+        }
+
         return new SandboxEvent
         {
-            EventType = "enrichment.virustotal.lookup",
+            EventType = VirusTotalLookupEventNames.RuleEngineEventType,
             Timestamp = timestamp ?? DateTimeOffset.UtcNow,
             Source = "virustotal",
             Path = Permalink,
@@ -119,6 +209,8 @@ internal sealed record VirusTotalLookupResult
             ["sha256"] = Sha256,
             ["vtStatus"] = Status,
             ["status"] = Status,
+            ["vtEventName"] = VirusTotalLookupEventNames.CompactLookupName,
+            ["eventName"] = VirusTotalLookupEventNames.CompactLookupName,
             ["vtVerdict"] = Verdict,
             ["verdict"] = Verdict,
             ["configured"] = Configured ? "true" : "false",
@@ -128,13 +220,20 @@ internal sealed record VirusTotalLookupResult
             ["vtSuspicious"] = SuspiciousCount.ToString(CultureInfo.InvariantCulture),
             ["vtHarmless"] = HarmlessCount.ToString(CultureInfo.InvariantCulture),
             ["vtUndetected"] = UndetectedCount.ToString(CultureInfo.InvariantCulture),
-            ["vtTimeout"] = TimeoutCount.ToString(CultureInfo.InvariantCulture)
+            ["vtTimeout"] = TimeoutCount.ToString(CultureInfo.InvariantCulture),
+            ["vtScore"] = Score.ToString(CultureInfo.InvariantCulture),
+            ["score"] = Score.ToString(CultureInfo.InvariantCulture),
+            ["vtDetectionCount"] = DetectionCount.ToString(CultureInfo.InvariantCulture),
+            ["vtEngineCount"] = EngineCount.ToString(CultureInfo.InvariantCulture),
+            ["engineCount"] = EngineCount.ToString(CultureInfo.InvariantCulture),
+            ["cacheHit"] = CacheHit ? "true" : "false"
         };
 
         AddIfPresent(data, "message", Message);
         AddIfPresent(data, "permalink", Permalink);
         AddIfPresent(data, "meaningfulName", MeaningfulName);
         AddIfPresent(data, "errorKind", ErrorKind);
+        AddIfPresent(data, "cacheAgeSeconds", FormatNullableSeconds(CacheAgeSeconds));
         if (HttpStatusCode is not null)
         {
             data["httpStatusCode"] = HttpStatusCode.Value.ToString(CultureInfo.InvariantCulture);
@@ -153,6 +252,32 @@ internal sealed record VirusTotalLookupResult
         return data;
     }
 
+    public VirusTotalLookupResult WithCacheMetadata(
+        bool cacheHit,
+        DateTimeOffset? cachedAtUtc,
+        DateTimeOffset? cacheExpiresAtUtc,
+        TimeSpan? cacheTtl,
+        DateTimeOffset? nowUtc = null)
+    {
+        double? ageSeconds = null;
+        if (cachedAtUtc is not null)
+        {
+            var age = (nowUtc ?? DateTimeOffset.UtcNow) - cachedAtUtc.Value;
+            ageSeconds = Math.Round(Math.Max(0, age.TotalSeconds), 3);
+        }
+
+        return this with
+        {
+            CacheHit = cacheHit,
+            CachedAtUtc = cachedAtUtc?.ToUniversalTime(),
+            CacheExpiresAtUtc = cacheExpiresAtUtc?.ToUniversalTime(),
+            CacheAgeSeconds = ageSeconds,
+            CacheTtlSeconds = cacheTtl is null
+                ? null
+                : Math.Round(Math.Max(0, cacheTtl.Value.TotalSeconds), 3)
+        };
+    }
+
     private static void AddIfPresent(IDictionary<string, string> data, string key, string? value)
     {
         if (!string.IsNullOrWhiteSpace(value))
@@ -161,15 +286,24 @@ internal sealed record VirusTotalLookupResult
         }
     }
 
+    private static string? FormatNullableSeconds(double? seconds)
+    {
+        return seconds is null
+            ? null
+            : seconds.Value.ToString("0.###", CultureInfo.InvariantCulture);
+    }
+
     private static string StatusToVerdict(string? status)
     {
         return status switch
         {
             VirusTotalLookupStatuses.MissingHash => VirusTotalLookupStatuses.MissingHash,
+            VirusTotalLookupStatuses.InvalidHash => VirusTotalLookupStatuses.InvalidHash,
             VirusTotalLookupStatuses.NotConfigured => VirusTotalLookupStatuses.NotConfigured,
             VirusTotalLookupStatuses.NotFound => VirusTotalLookupStatuses.NotFound,
             VirusTotalLookupStatuses.RateLimited => VirusTotalLookupStatuses.RateLimited,
             VirusTotalLookupStatuses.AuthenticationFailed => VirusTotalLookupStatuses.AuthenticationFailed,
+            VirusTotalLookupStatuses.Timeout => VirusTotalLookupStatuses.Timeout,
             VirusTotalLookupStatuses.LookupFailed => VirusTotalLookupStatuses.LookupFailed,
             VirusTotalLookupStatuses.Found => VirusTotalLookupStatuses.Unknown,
             _ => VirusTotalLookupStatuses.Unknown

@@ -1,6 +1,9 @@
 #include "Producers/Registry/RegistryMonitor.h"
 #include "Common/KernelString.h"
 
+C_ASSERT(sizeof(KSWORD_SANDBOX_REGISTRY_EVENT_PAYLOAD) <=
+    KSWORD_SANDBOX_EVENT_MAX_PAYLOAD_SIZE);
+
 /*
  * Registry callback altitude for local KSword sandbox research builds.
  *
@@ -13,10 +16,49 @@
  */
 #define KSWORD_SANDBOX_REGISTRY_CALLBACK_ALTITUDE L"385201.7337"
 
-static PKSWORD_SANDBOX_DEVICE_EXTENSION g_KswRegistryMonitorDeviceExtension;
-static LARGE_INTEGER g_KswRegistryCallbackCookie;
-static volatile LONG g_KswRegistryMonitorActive;
-static volatile LONG g_KswRegistryCallbackRegistered;
+/*
+ * Runtime state for the registry event producer.
+ *
+ * Inputs : initialized by KswInitializeRegistryMonitor before
+ *          CmRegisterCallbackEx succeeds.
+ * Logic  : stores the shared READ_EVENTS ring owner, Configuration Manager
+ *          callback cookie, active/registered initialized/teardown gates, v1
+ *          payload version, and the last registration status in one structured block.
+ * Return : no direct return value; producer health is reported through the
+ *          initializer NTSTATUS and device-extension producer masks.
+ */
+typedef struct _KSWORD_SANDBOX_REGISTRY_MONITOR_RUNTIME {
+    PKSWORD_SANDBOX_DEVICE_EXTENSION DeviceExtension;
+    LARGE_INTEGER CallbackCookie;
+    volatile LONG Active;
+    volatile LONG CallbackRegistered;
+    volatile LONG Initialized;
+    volatile LONG Uninitializing;
+    ULONG PayloadVersion;
+    NTSTATUS RegisterStatus;
+} KSWORD_SANDBOX_REGISTRY_MONITOR_RUNTIME,
+    *PKSWORD_SANDBOX_REGISTRY_MONITOR_RUNTIME;
+
+static KSWORD_SANDBOX_REGISTRY_MONITOR_RUNTIME g_KswRegistryMonitorRuntime;
+
+/*
+ * Returns the registry payload version stamped on emitted records.
+ * Inputs : none; reads module-local runtime state.
+ * Logic  : callbacks can overlap teardown after Active was observed, so a
+ *          cleared runtime falls back to the stable ABI v1 payload version.
+ * Return : KSWORD_SANDBOX_REGISTRY_EVENT_VERSION for v1 records.
+ */
+static
+ULONG
+KswRegistryPayloadVersion(
+    VOID
+    )
+{
+    ULONG version;
+
+    version = g_KswRegistryMonitorRuntime.PayloadVersion;
+    return version == 0 ? KSWORD_SANDBOX_REGISTRY_EVENT_VERSION : version;
+}
 
 /*
  * Builds a bounded, read-only UNICODE_STRING view for registry callback text.
@@ -145,14 +187,14 @@ KswCopyRegistryKeyObjectPath(
 
     if (Payload == NULL ||
         KeyObject == NULL ||
-        g_KswRegistryCallbackCookie.QuadPart == 0 ||
+        g_KswRegistryMonitorRuntime.CallbackCookie.QuadPart == 0 ||
         KeGetCurrentIrql() > APC_LEVEL) {
         return FALSE;
     }
 
     keyName = NULL;
     status = CmCallbackGetKeyObjectIDEx(
-        &g_KswRegistryCallbackCookie,
+        &g_KswRegistryMonitorRuntime.CallbackCookie,
         KeyObject,
         NULL,
         &keyName,
@@ -193,7 +235,7 @@ KswInitializeRegistryPayload(
     )
 {
     RtlZeroMemory(Payload, sizeof(*Payload));
-    Payload->Version = KSWORD_SANDBOX_REGISTRY_EVENT_VERSION;
+    Payload->Version = KswRegistryPayloadVersion();
     Payload->Size = sizeof(*Payload);
     Payload->Operation = Operation;
     Payload->Flags =
@@ -225,11 +267,11 @@ KswQueueRegistryEvent(
     NTSTATUS status;
 
     if (Payload == NULL ||
-        InterlockedCompareExchange(&g_KswRegistryMonitorActive, 0, 0) == 0) {
+        InterlockedCompareExchange(&g_KswRegistryMonitorRuntime.Active, 0, 0) == 0) {
         return;
     }
 
-    deviceExtension = g_KswRegistryMonitorDeviceExtension;
+    deviceExtension = g_KswRegistryMonitorRuntime.DeviceExtension;
     if (deviceExtension == NULL ||
         deviceExtension->Signature != KSWORD_SANDBOX_DEVICE_EXTENSION_SIGNATURE) {
         return;
@@ -518,7 +560,8 @@ KswRegistryCallback(
 
     UNREFERENCED_PARAMETER(CallbackContext);
 
-    if (InterlockedCompareExchange(&g_KswRegistryMonitorActive, 0, 0) == 0) {
+    if (Argument1 == NULL ||
+        InterlockedCompareExchange(&g_KswRegistryMonitorRuntime.Active, 0, 0) == 0) {
         return STATUS_SUCCESS;
     }
 
@@ -594,10 +637,25 @@ KswInitializeRegistryMonitor(
         return STATUS_INVALID_PARAMETER;
     }
 
-    g_KswRegistryMonitorDeviceExtension = DeviceExtension;
-    g_KswRegistryCallbackCookie.QuadPart = 0;
-    InterlockedExchange(&g_KswRegistryCallbackRegistered, 0);
-    InterlockedExchange(&g_KswRegistryMonitorActive, 0);
+    if (InterlockedCompareExchange(
+            &g_KswRegistryMonitorRuntime.CallbackRegistered,
+            0,
+            0) != 0) {
+        return STATUS_DEVICE_BUSY;
+    }
+
+    RtlZeroMemory(
+        &g_KswRegistryMonitorRuntime,
+        sizeof(g_KswRegistryMonitorRuntime));
+    g_KswRegistryMonitorRuntime.DeviceExtension = DeviceExtension;
+    g_KswRegistryMonitorRuntime.CallbackCookie.QuadPart = 0;
+    g_KswRegistryMonitorRuntime.PayloadVersion =
+        KSWORD_SANDBOX_REGISTRY_EVENT_VERSION;
+    g_KswRegistryMonitorRuntime.RegisterStatus = STATUS_NOT_SUPPORTED;
+    InterlockedExchange(&g_KswRegistryMonitorRuntime.Initialized, 1);
+    InterlockedExchange(&g_KswRegistryMonitorRuntime.CallbackRegistered, 0);
+    InterlockedExchange(&g_KswRegistryMonitorRuntime.Active, 0);
+    InterlockedExchange(&g_KswRegistryMonitorRuntime.Uninitializing, 0);
 
     RtlInitUnicodeString(&altitude, KSWORD_SANDBOX_REGISTRY_CALLBACK_ALTITUDE);
     status = CmRegisterCallbackEx(
@@ -605,15 +663,18 @@ KswInitializeRegistryMonitor(
         &altitude,
         DriverObject,
         NULL,
-        &g_KswRegistryCallbackCookie,
+        &g_KswRegistryMonitorRuntime.CallbackCookie,
         NULL);
+    g_KswRegistryMonitorRuntime.RegisterStatus = status;
     if (!NT_SUCCESS(status)) {
-        g_KswRegistryMonitorDeviceExtension = NULL;
+        g_KswRegistryMonitorRuntime.PayloadVersion = 0;
+        g_KswRegistryMonitorRuntime.DeviceExtension = NULL;
+        InterlockedExchange(&g_KswRegistryMonitorRuntime.Initialized, 0);
         return status;
     }
 
-    InterlockedExchange(&g_KswRegistryCallbackRegistered, 1);
-    InterlockedExchange(&g_KswRegistryMonitorActive, 1);
+    InterlockedExchange(&g_KswRegistryMonitorRuntime.CallbackRegistered, 1);
+    InterlockedExchange(&g_KswRegistryMonitorRuntime.Active, 1);
     return STATUS_SUCCESS;
 }
 
@@ -633,15 +694,26 @@ KswUninitializeRegistryMonitor(
     LARGE_INTEGER callbackCookie;
     LONG callbackRegistered;
 
-    InterlockedExchange(&g_KswRegistryMonitorActive, 0);
-    callbackRegistered = InterlockedExchange(&g_KswRegistryCallbackRegistered, 0);
-    callbackCookie = g_KswRegistryCallbackCookie;
+    if (InterlockedExchange(
+            &g_KswRegistryMonitorRuntime.Uninitializing,
+            1) != 0) {
+        return;
+    }
 
-    if (callbackRegistered != 0 ||
+    InterlockedExchange(&g_KswRegistryMonitorRuntime.Active, 0);
+    callbackRegistered = InterlockedExchange(
+        &g_KswRegistryMonitorRuntime.CallbackRegistered,
+        0);
+    callbackCookie = g_KswRegistryMonitorRuntime.CallbackCookie;
+
+    if ((callbackRegistered != 0 || callbackCookie.QuadPart != 0) &&
         callbackCookie.QuadPart != 0) {
         (VOID)CmUnRegisterCallback(callbackCookie);
     }
 
-    g_KswRegistryCallbackCookie.QuadPart = 0;
-    g_KswRegistryMonitorDeviceExtension = NULL;
+    g_KswRegistryMonitorRuntime.CallbackCookie.QuadPart = 0;
+    g_KswRegistryMonitorRuntime.PayloadVersion = 0;
+    g_KswRegistryMonitorRuntime.RegisterStatus = STATUS_NOT_SUPPORTED;
+    g_KswRegistryMonitorRuntime.DeviceExtension = NULL;
+    InterlockedExchange(&g_KswRegistryMonitorRuntime.Initialized, 0);
 }

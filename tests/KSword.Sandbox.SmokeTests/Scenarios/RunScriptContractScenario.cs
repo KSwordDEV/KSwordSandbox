@@ -41,6 +41,9 @@ internal sealed class RunScriptContractScenario : ISmokeTestScenario
         RequireContains(runScript, "http://127.0.0.1:18080", "run.ps1 should default to a localhost port outside common Hyper-V excluded ranges.");
         RequireContains(runScript, "Resolve-WebListenUrl", "run.ps1 should resolve or fall back from blocked localhost ports.");
         RequireContains(runScript, "StrictUrl", "run.ps1 should allow strict URL binding for operators who need it.");
+        RequireContains(runScript, "Assert-RunLocalConfigReadyForInteractiveStartup", "run.ps1 should stop ordinary startup when only the repository example config is available.");
+        RequireContains(runScript, "本机配置未就绪", "run.ps1 should show a Chinese actionable message for missing local config.");
+        RequireContains(runScript, "StartWebUI 模式会自动打开浏览器", "StartWebUI should be the one-click browser-opening WebUI entry point.");
         RequireContains(runScript, "KSWORDBOX_GUEST_PASSWORD", "run.ps1 should default to the guest password secret name.");
         RequireContains(runScript, "KSWORDBOX_VIRUSTOTAL_API_KEY", "run.ps1 should mirror the optional VirusTotal API key into process scope.");
         RequireContains(runScript, "Import-UserOrMachineEnvironmentSecret", "run.ps1 should centralize user/machine secret import.");
@@ -85,7 +88,7 @@ internal sealed class RunScriptContractScenario : ISmokeTestScenario
         RequireContains(runDoc, "The password value is never printed.", "run doc should state that secrets are not printed.");
 
         RequireContains(readme, ".\\run.ps1", "README quick start should show run.ps1.");
-        RequireContains(readme, "docs/run.md", "README should link to run docs.");
+        RequireContains(runDoc, "# 运行入口", "run docs should be present for detailed runtime guidance.");
 
         return Task.FromResult(new SmokeTestResult
         {

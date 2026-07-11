@@ -24,6 +24,11 @@ inline constexpr int kExitRuntimeFailure = 70;
 inline constexpr DWORD kReadEventsBufferBytes = 64U * 1024U;
 inline constexpr ULONG kReadEventsMaxEvents = 64U;
 inline constexpr size_t kMaxPayloadHexBytes = 256U;
+inline constexpr int kSyntheticStressSequenceStart = 1200;
+inline constexpr const char* kStressJsonlLossEvidence =
+    "lost|lostCount|lossObserved|TotalEventsDropped|totalEventsDropped|EventsDropped|eventsDropped|ProducerDroppedMask|producerDroppedMask|NextSequence|nextSequence|sequence|head|tail|loss";
+inline constexpr const char* kStressJsonlBackpressureEvidence =
+    "backpressure|backpressureObserved|highWatermark|QueueCapacity|queueCapacity|QueueHighWatermark|queueHighWatermark|TotalEventsBackpressured|totalEventsBackpressured|ProducerBackpressureMask|producerBackpressureMask|lastEnqueueFailureStatus|drainStoppedAtBatchLimit|requestedMaxEvents|readEventsMaxEvents|maxReadBatches|sampling";
 // GET_HEALTH producer masks were added in ABI-reserved space.  Keep accepting
 // legacy replies that only contain the stable prefix through LastNtStatus, and
 // treat producer mask values as available only when the driver advertises the

@@ -69,7 +69,9 @@ internal sealed class ScreenshotProbe : IGuestProbe
     {
         if (!context.CaptureScreenshots)
         {
-            return [];
+            return phase == ProbePhase.BeforeStart
+                ? [CreateDisabledEvent(context)]
+                : [];
         }
 
         var requests = options.GetCaptureRequests(phase);
@@ -115,11 +117,13 @@ internal sealed class ScreenshotProbe : IGuestProbe
                 ["probePhase"] = ToPhaseLabel(phase),
                 ["screenshotStage"] = request.StageLabel,
                 ["captureEnabled"] = "true",
+                ["implemented"] = "true",
                 ["captureState"] = result.Captured ? "captured" : "skipped",
                 ["status"] = result.Captured ? "captured" : "skipped",
                 ["nonfatal"] = FormatBoolean(!result.Captured),
                 ["evidenceRole"] = "screenshot",
                 ["collectionName"] = "screenshots",
+                ["processRole"] = context.RootProcessId is null ? "sample-context" : "sample-root-context",
                 ["screenshotIndex"] = request.Sequence.ToString(CultureInfo.InvariantCulture),
                 ["screenshotCount"] = request.TotalCount.ToString(CultureInfo.InvariantCulture),
                 ["artifactLabel"] = request.ArtifactLabel,
@@ -132,13 +136,22 @@ internal sealed class ScreenshotProbe : IGuestProbe
         {
             evt.Data["rootProcessId"] = context.RootProcessId.Value.ToString(CultureInfo.InvariantCulture);
             evt.Data["processId"] = context.RootProcessId.Value.ToString(CultureInfo.InvariantCulture);
+            evt.Data["treeDepth"] = "0";
+            evt.Data["treeLineage"] = context.RootProcessId.Value.ToString(CultureInfo.InvariantCulture);
         }
 
         AddIfNotEmpty(evt.Data, "processName", evt.ProcessName);
 
-        if (!string.IsNullOrWhiteSpace(result.Reason))
+        if (result.Captured)
+        {
+            evt.Data["zhMessage"] = "截图已采集为可下载证据文件。";
+            evt.Data["zhHint"] = "请使用 artifactRelativePath 下载截图；sizeBytes/sha256 可用于校验文件完整性。";
+        }
+        else if (!string.IsNullOrWhiteSpace(result.Reason))
         {
             evt.Data["reason"] = result.Reason;
+            evt.Data["zhMessage"] = "截图采集被跳过；该事件说明证据缺口，不会中断整体分析。";
+            evt.Data["zhHint"] = ScreenshotReasonZhHint(result.Reason, result.DiagnosticStage);
         }
 
         if (!string.IsNullOrWhiteSpace(result.ExceptionType))
@@ -171,9 +184,104 @@ internal sealed class ScreenshotProbe : IGuestProbe
             var relativePath = SafeRelativePath(context.OutputDirectory, result.Path);
             evt.Data["relativePath"] = relativePath;
             AddIfNotEmpty(evt.Data, "artifactRelativePath", SafeArtifactRelativePath(context.OutputDirectory, result.Path));
+            AddArtifactFileEvidence(evt, result.Path);
         }
 
         return evt;
+    }
+
+    /// <summary>
+    /// Creates a single disabled event for the opt-in screenshot lane.
+    /// </summary>
+    private static SandboxEvent CreateDisabledEvent(GuestProbeContext context)
+    {
+        var evt = new SandboxEvent
+        {
+            EventType = "screenshot.disabled",
+            Source = "guest",
+            ProcessName = SampleProcessName(context.SamplePath),
+            ProcessId = context.RootProcessId,
+            Data =
+            {
+                ["phase"] = "before-start",
+                ["capturePhase"] = "before-start",
+                ["captureEnabled"] = "false",
+                ["implemented"] = "true",
+                ["reason"] = "screenshotNotRequested",
+                ["zhMessage"] = "截图采集未启用。",
+                ["zhHint"] = "未启用 --screenshot/--screenshots，Guest Agent 不会截取桌面内容。",
+                ["captureState"] = "disabled",
+                ["status"] = "disabled",
+                ["nonfatal"] = "true",
+                ["evidenceRole"] = "screenshot",
+                ["collectionName"] = "screenshots",
+                ["processRole"] = context.RootProcessId is null ? "sample-context" : "sample-root-context",
+                ["expectedRelativePath"] = "screenshots/*.bmp",
+                ["samplePath"] = context.SamplePath
+            }
+        };
+
+        if (context.RootProcessId is not null)
+        {
+            evt.Data["rootProcessId"] = context.RootProcessId.Value.ToString(CultureInfo.InvariantCulture);
+            evt.Data["processId"] = context.RootProcessId.Value.ToString(CultureInfo.InvariantCulture);
+            evt.Data["treeDepth"] = "0";
+            evt.Data["treeLineage"] = context.RootProcessId.Value.ToString(CultureInfo.InvariantCulture);
+        }
+
+        AddIfNotEmpty(evt.Data, "processName", evt.ProcessName);
+        return evt;
+    }
+
+    private static string ScreenshotReasonZhHint(string reason, string? diagnosticStage)
+    {
+        if (reason.Contains("only implemented on Windows", StringComparison.OrdinalIgnoreCase))
+        {
+            return "截图采集当前仅支持 Windows guest；非 Windows 环境会记录 skipped。";
+        }
+
+        if (diagnosticStage is "GetSystemMetrics" or "GetDC" or "CreateCompatibleDC" or "CreateCompatibleBitmap" or "SelectObject" or "BitBlt" or "GetDIBits")
+        {
+            return "Windows 桌面/GDI 截图调用失败；请确认 guest 处于可交互桌面会话、权限足够且不是无头会话。";
+        }
+
+        return "请结合 diagnosticStage、exceptionType 和 win32Error 判断是桌面会话、权限、GDI 还是输出路径问题。";
+    }
+
+    /// <summary>
+    /// Adds event-level size and SHA-256 metadata for a captured screenshot.
+    /// Inputs are a screenshot event and artifact path; processing reads the
+    /// file best-effort with sharing flags; failures become compact diagnostics.
+    /// </summary>
+    private static void AddArtifactFileEvidence(SandboxEvent evt, string path)
+    {
+        try
+        {
+            var info = new FileInfo(path);
+            if (!info.Exists)
+            {
+                evt.Data["artifactHashStatus"] = "missing";
+                evt.Data["artifactExists"] = "false";
+                return;
+            }
+
+            evt.Data["artifactExists"] = "true";
+            evt.Data["sizeBytes"] = info.Length.ToString(CultureInfo.InvariantCulture);
+            evt.Data["artifactSizeBytes"] = info.Length.ToString(CultureInfo.InvariantCulture);
+            evt.Data["artifactLastWriteUtc"] = info.LastWriteTimeUtc.ToString("O", CultureInfo.InvariantCulture);
+            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            var sha256 = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(stream)).ToLowerInvariant();
+            evt.Data["sha256"] = sha256;
+            evt.Data["artifactSha256"] = sha256;
+            evt.Data["hashAlgorithm"] = "sha256";
+            evt.Data["artifactHashStatus"] = "computed";
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException or PathTooLongException)
+        {
+            evt.Data["artifactHashStatus"] = "failed";
+            evt.Data["artifactHashExceptionType"] = ex.GetType().FullName ?? ex.GetType().Name;
+            evt.Data["artifactHashMessage"] = ex.Message;
+        }
     }
 
     /// <summary>

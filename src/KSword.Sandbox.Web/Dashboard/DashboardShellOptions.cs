@@ -20,6 +20,6 @@ internal sealed record DashboardShellOptions(
     /// </summary>
     internal static DashboardShellOptions Default()
     {
-        return new DashboardShellOptions("KSword Sandbox", "Web control surface", null);
+        return new DashboardShellOptions("KSword Sandbox 控制台", "Web 控制台", null);
     }
 }

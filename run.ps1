@@ -77,6 +77,7 @@ $ErrorActionPreference = 'Stop'
 $script:RepositoryRoot = if ([string]::IsNullOrWhiteSpace($PSScriptRoot)) { (Get-Location).ProviderPath } else { $PSScriptRoot }
 $script:InstallStatePath = Join-Path $env:ProgramData 'KSwordSandbox\install-state.json'
 $script:WebConfigPathEnvironmentName = 'Sandbox__ConfigPath'
+$script:ConfigPathWasExplicit = $PSBoundParameters.ContainsKey('ConfigPath')
 
 function Write-RunInfo {
     param([Parameter(Mandatory)][string]$Message)
@@ -92,7 +93,7 @@ function Read-InstallState {
         return Get-Content -LiteralPath $script:InstallStatePath -Raw | ConvertFrom-Json
     }
     catch {
-        Write-RunInfo "Ignoring unreadable install state '$script:InstallStatePath': $($_.Exception.Message)"
+        Write-RunInfo "中文提示：无法读取安装状态 '$script:InstallStatePath'，将忽略并继续。下一步：如配置异常，请重新运行 .\install.ps1 -Mode Install -PromptPassword。英文详情：$($_.Exception.Message)"
         return $null
     }
 }
@@ -147,7 +148,7 @@ function Resolve-NotepadSamplePath {
         }
     }
 
-    throw 'Built-in Notepad sample was not found. Provide -SamplePath <sample.exe> instead.'
+    throw '错误：找不到系统内置 Notepad 样本。下一步：请改用 -SamplePath <sample.exe> 指定一个 .exe，或检查 Windows 系统目录。'
 }
 
 function Resolve-HarmlessSamplePath {
@@ -159,28 +160,28 @@ function Resolve-HarmlessSamplePath {
     $sampleExe = Join-Path $sampleRoot 'KSword.Sandbox.HarmlessSample.exe'
 
     if (-not $ForcePayloadPreparation -and (Test-Path -LiteralPath $sampleExe -PathType Leaf)) {
-        Write-RunInfo "Using built-in harmless sample: $sampleExe"
+        Write-RunInfo "使用内置 harmless sample：$sampleExe / Using built-in harmless sample."
         Write-RunInfo "中文提示：使用已准备好的 harmless sample；如需重新发布样本，请加 -ForcePayloadPreparation。"
         return (Resolve-Path -LiteralPath $sampleExe).ProviderPath
     }
 
     $prepareScript = Join-Path $script:RepositoryRoot 'scripts\Prepare-HarmlessSample.ps1'
     if (-not (Test-Path -LiteralPath $prepareScript -PathType Leaf)) {
-        throw "Harmless sample preparation script is missing: $prepareScript"
+        throw "错误：找不到 harmless sample 准备脚本：$prepareScript。下一步：请确认 scripts\Prepare-HarmlessSample.ps1 存在，并从仓库根目录运行。"
     }
 
     if ($WhatIfPreference) {
         [void]$PSCmdlet.ShouldProcess($sampleExe, "Prepare built-in harmless sample through '$prepareScript'")
-        Write-RunInfo "WhatIf: built-in harmless sample would be published outside git to $sampleRoot."
+        Write-RunInfo "预览：内置 harmless sample 会发布到仓库外：$sampleRoot。 / WhatIf: harmless sample would be published outside git."
         Write-RunInfo "中文提示：预览模式不会生成样本；实际 Analyze harmless sample 时会发布到运行目录，不写入仓库。"
         return [System.IO.Path]::GetFullPath($sampleExe)
     }
 
     if (-not $PSCmdlet.ShouldProcess($sampleExe, "Prepare built-in harmless sample through '$prepareScript'")) {
-        throw 'Built-in harmless sample preparation was declined. Provide -SamplePath <sample.exe> or rerun without declining confirmation.'
+        throw '错误：内置 harmless sample 准备被取消。下一步：请提供 -SamplePath <sample.exe>，或重新运行并在确认提示中选择继续。'
     }
 
-    Write-RunInfo "Preparing built-in harmless sample outside git: $sampleRoot"
+    Write-RunInfo "正在把内置 harmless sample 发布到仓库外：$sampleRoot / Preparing harmless sample outside git."
     Write-RunInfo "中文提示：正在发布内置 harmless sample，输出位于运行目录，不会写入仓库或打印凭据。"
     & powershell `
         -NoProfile `
@@ -192,10 +193,10 @@ function Resolve-HarmlessSamplePath {
         -IntermediateRoot $intermediateRoot `
         -Configuration $Configuration
     if ($LASTEXITCODE -ne 0) {
-        throw "Harmless sample preparation failed with exit code $LASTEXITCODE."
+        throw "错误：harmless sample 准备失败，退出码 $LASTEXITCODE。下一步：确认已安装 .NET SDK，然后运行 .\scripts\Prepare-HarmlessSample.ps1 查看详细错误。"
     }
     if (-not (Test-Path -LiteralPath $sampleExe -PathType Leaf)) {
-        throw "Harmless sample executable was not produced: $sampleExe"
+        throw "错误：harmless sample 可执行文件未生成：$sampleExe。下一步：检查上方 dotnet publish 输出，修复后重试。"
     }
 
     return (Resolve-Path -LiteralPath $sampleExe).ProviderPath
@@ -225,7 +226,7 @@ function Resolve-AnalysisSamplePath {
         switch ($preset.ToLowerInvariant()) {
             'notepad' {
                 $notepadPath = Resolve-NotepadSamplePath
-                Write-RunInfo "Using built-in Notepad sample: $notepadPath"
+                Write-RunInfo "使用系统 Notepad 样本：$notepadPath / Using built-in Notepad sample."
                 Write-RunInfo '中文提示：Analyze Notepad 使用系统 notepad.exe；不加 -Live 时只生成计划，不会启动/还原 VM。'
                 return $notepadPath
             }
@@ -236,7 +237,7 @@ function Resolve-AnalysisSamplePath {
     }
 
     if ([string]::IsNullOrWhiteSpace($SamplePath)) {
-        throw 'Analyze/Plan mode requires -SamplePath or -SamplePreset Notepad|HarmlessSample.'
+        throw '错误：Analyze/Plan 模式需要 -SamplePath，或 -SamplePreset Notepad|HarmlessSample。下一步：例如运行 .\run.ps1 -Mode Analyze -SamplePreset Notepad。'
     }
 
     return Resolve-FullPathIfPresent -Path $SamplePath
@@ -281,6 +282,47 @@ function Get-EffectiveConfigPath {
     }
 
     return [System.IO.Path]::GetFullPath((Join-Path $script:RepositoryRoot 'config\sandbox.example.json'))
+}
+
+function Test-UsingRepositoryExampleConfigFallback {
+    param([Parameter(Mandatory)][string]$EffectiveConfigPath)
+
+    if ($script:ConfigPathWasExplicit) {
+        return $false
+    }
+
+    $exampleConfigPath = [System.IO.Path]::GetFullPath((Join-Path $script:RepositoryRoot 'config\sandbox.example.json'))
+    $effectiveFullPath = [System.IO.Path]::GetFullPath($EffectiveConfigPath)
+    return [System.StringComparer]::OrdinalIgnoreCase.Equals($effectiveFullPath, $exampleConfigPath)
+}
+
+function Assert-RunLocalConfigReadyForInteractiveStartup {
+    param(
+        [Parameter(Mandatory)][string]$EffectiveConfigPath,
+        [Parameter(Mandatory)][string]$ModeName
+    )
+
+    if ($script:ConfigPathWasExplicit) {
+        return
+    }
+
+    $usesExampleFallback = Test-UsingRepositoryExampleConfigFallback -EffectiveConfigPath $EffectiveConfigPath
+    $configExists = Test-Path -LiteralPath $EffectiveConfigPath -PathType Leaf
+    if ($configExists -and -not $usesExampleFallback) {
+        return
+    }
+
+    $reason = if ($usesExampleFallback) {
+        '尚未找到本机 sandbox.local.json；当前只剩仓库模板 config\sandbox.example.json。'
+    }
+    else {
+        "配置文件不存在：$EffectiveConfigPath"
+    }
+
+    Write-RunInfo '中文提示：本机配置未就绪，已停止启动，避免 WebUI/分析误用仓库模板。'
+    Write-RunInfo '下一步：请先打开安装向导，选择“安装/准备本机设置”，填写来宾密码；再在“更改设置”里确认 VM 名称、干净快照和 driver 路径。'
+    Write-RunInfo '完成后重新运行 run.ps1；高级排障可使用 CheckEnvironment 模式。'
+    throw "错误：$ModeName 需要本机 sandbox.local.json。$reason"
 }
 
 function Get-SecretName {
@@ -330,7 +372,7 @@ function Read-SandboxConfig {
     param([Parameter(Mandatory)][string]$EffectiveConfigPath)
 
     if (-not (Test-Path -LiteralPath $EffectiveConfigPath -PathType Leaf)) {
-        throw "Sandbox config was not found: $EffectiveConfigPath. Run .\install.ps1 -Mode Change -UpdateHyperVConfig first."
+        throw "错误：找不到 sandbox 配置：$EffectiveConfigPath。下一步：请先打开安装向导完成本机初始化；如果已经安装，请在更改设置里重新记录 VM 名称和干净快照。"
     }
 
     return Get-Content -LiteralPath $EffectiveConfigPath -Raw | ConvertFrom-Json
@@ -382,6 +424,190 @@ function Resolve-RunConfigPath {
     return [System.IO.Path]::GetFullPath((Join-Path $script:RepositoryRoot $Path))
 }
 
+function Get-WebUiLaunchTarget {
+    param([bool]$ThrowIfMissing = $true)
+
+    $projectPath = Join-Path $script:RepositoryRoot 'src\KSword.Sandbox.Web\KSword.Sandbox.Web.csproj'
+    $publishedRoot = Join-Path $script:RepositoryRoot 'app\host-web'
+    $publishedExe = Join-Path $publishedRoot 'KSword.Sandbox.Web.exe'
+    $publishedDll = Join-Path $publishedRoot 'KSword.Sandbox.Web.dll'
+    $projectExists = Test-Path -LiteralPath $projectPath -PathType Leaf
+    $publishedExeExists = Test-Path -LiteralPath $publishedExe -PathType Leaf
+    $publishedDllExists = Test-Path -LiteralPath $publishedDll -PathType Leaf
+
+    if ($projectExists) {
+        return [pscustomobject][ordered]@{
+            Kind = 'SourceProject'
+            Path = $projectPath
+            SourceProjectPath = $projectPath
+            SourceProjectExists = $true
+            PublishedWebRoot = $publishedRoot
+            PublishedExeExists = $publishedExeExists
+            PublishedDllExists = $publishedDllExists
+            RequiresDotNet = $true
+            SupportsNoBuild = $true
+            RecommendedAction = ''
+        }
+    }
+
+    if ($publishedExeExists) {
+        return [pscustomobject][ordered]@{
+            Kind = 'PublishedExe'
+            Path = $publishedExe
+            SourceProjectPath = $projectPath
+            SourceProjectExists = $false
+            PublishedWebRoot = $publishedRoot
+            PublishedExeExists = $true
+            PublishedDllExists = $publishedDllExists
+            RequiresDotNet = $false
+            SupportsNoBuild = $false
+            RecommendedAction = ''
+        }
+    }
+
+    if ($publishedDllExists) {
+        return [pscustomobject][ordered]@{
+            Kind = 'PublishedDll'
+            Path = $publishedDll
+            SourceProjectPath = $projectPath
+            SourceProjectExists = $false
+            PublishedWebRoot = $publishedRoot
+            PublishedExeExists = $false
+            PublishedDllExists = $true
+            RequiresDotNet = $true
+            SupportsNoBuild = $false
+            RecommendedAction = '下一步：如这是便携包，请确认 app\host-web 来自发布流水线；如这是源码仓库，请确认 src\KSword.Sandbox.Web 项目存在。'
+        }
+    }
+
+    $missing = [pscustomobject][ordered]@{
+        Kind = 'Missing'
+        Path = $null
+        SourceProjectPath = $projectPath
+        SourceProjectExists = $false
+        PublishedWebRoot = $publishedRoot
+        PublishedExeExists = $false
+        PublishedDllExists = $false
+        RequiresDotNet = $null
+        SupportsNoBuild = $false
+        RecommendedAction = '下一步：源码运行请保留 src\KSword.Sandbox.Web；便携运行请把发布输出放在 app\host-web 后再执行 .\run.ps1。'
+    }
+
+    if ($ThrowIfMissing) {
+        throw "错误：找不到 WebUI 启动目标。源码项目缺失：$projectPath；便携发布目录缺失：$publishedRoot。$($missing.RecommendedAction)"
+    }
+
+    return $missing
+}
+
+function Get-RunHostTestSigningStatus {
+    $status = [ordered]@{
+        State = 'Unavailable'
+        Message = ''
+        RawOutput = @()
+    }
+
+    if ($null -eq (Get-Command bcdedit.exe -ErrorAction SilentlyContinue)) {
+        $status.Message = 'bcdedit.exe is not available on this host.'
+        return [pscustomobject]$status
+    }
+
+    try {
+        $rawOutput = @(& bcdedit.exe /enum '{current}' 2>&1)
+        $status.RawOutput = @($rawOutput)
+        $joined = $rawOutput -join "`n"
+        if ($joined -match '(?im)^\s*testsigning\s+(Yes|On|True)\s*$') {
+            $status.State = 'Enabled'
+        }
+        elseif ($joined -match '(?im)^\s*testsigning\s+(No|Off|False)\s*$') {
+            $status.State = 'Disabled'
+        }
+        else {
+            $status.State = 'Disabled'
+            $status.Message = 'testsigning entry was not present in bcdedit output; treating as disabled.'
+        }
+    }
+    catch {
+        $status.State = 'Unknown'
+        $status.Message = $_.Exception.Message
+    }
+
+    return [pscustomobject]$status
+}
+
+function Get-RunVmProfileStatus {
+    param(
+        [Parameter(Mandatory)][string]$VmName,
+        [Parameter(Mandatory)][string]$CheckpointName
+    )
+
+    $hyperVModuleAvailable = $null -ne (Get-Command Get-VM -ErrorAction SilentlyContinue)
+    $actions = [System.Collections.Generic.List[string]]::new()
+    $profile = [ordered]@{
+        VmName = $VmName
+        ExpectedCheckpointName = $CheckpointName
+        HyperVModuleAvailable = $hyperVModuleAvailable
+        Exists = $false
+        State = $null
+        Generation = $null
+        ProcessorCount = $null
+        MemoryStartupBytes = $null
+        DynamicMemoryEnabled = $null
+        GuestServiceInterfaceEnabled = $null
+        CheckpointExists = $false
+        Error = $null
+        RecommendedActions = @()
+    }
+
+    if (-not $hyperVModuleAvailable) {
+        [void]$actions.Add('下一步：启用/安装 Hyper-V PowerShell 工具，然后重新运行 .\run.ps1 -Mode CheckEnvironment；该命令不会启动或还原 VM。')
+        $profile.RecommendedActions = @($actions.ToArray())
+        return [pscustomobject]$profile
+    }
+
+    try {
+        $vm = Get-VM -Name $VmName -ErrorAction Stop
+        $profile.Exists = $true
+        $profile.State = [string]$vm.State
+        foreach ($propertyName in @('Generation', 'ProcessorCount', 'MemoryStartup', 'DynamicMemoryEnabled')) {
+            $property = $vm.PSObject.Properties[$propertyName]
+            if ($null -eq $property) {
+                continue
+            }
+
+            switch ($propertyName) {
+                'MemoryStartup' { $profile.MemoryStartupBytes = $property.Value }
+                default { $profile[$propertyName] = $property.Value }
+            }
+        }
+
+        $snapshot = Get-VMSnapshot -VMName $VmName -Name $CheckpointName -ErrorAction SilentlyContinue
+        $profile.CheckpointExists = $null -ne $snapshot
+        if (-not $profile.CheckpointExists) {
+            [void]$actions.Add("下一步：运行 .\install.ps1 -Mode Change -UpdateHyperVConfig -VmName '$VmName' -CheckpointName <checkpoint> 记录正确 clean checkpoint，或先在 Hyper-V 中创建 checkpoint '$CheckpointName'。")
+        }
+
+        if ($null -ne (Get-Command Get-VMIntegrationService -ErrorAction SilentlyContinue)) {
+            $guestService = Get-VMIntegrationService -VMName $VmName -ErrorAction SilentlyContinue |
+                Where-Object { $_.Name -in @('Guest Service Interface', '来宾服务接口') -or $_.Name -match '(?i)Guest\s+Service|来宾服务' } |
+                Select-Object -First 1
+            if ($null -ne $guestService) {
+                $profile.GuestServiceInterfaceEnabled = [bool]$guestService.Enabled
+                if (-not $profile.GuestServiceInterfaceEnabled) {
+                    [void]$actions.Add("下一步：Live 前建议启用 Guest Service Interface：Enable-VMIntegrationService -VMName '$VmName' -Name 'Guest Service Interface'。")
+                }
+            }
+        }
+    }
+    catch {
+        $profile.Error = $_.Exception.Message
+        [void]$actions.Add("下一步：确认 VM '$VmName' 存在，或运行 .\install.ps1 -Mode Change -UpdateHyperVConfig -VmName <existing VM> -CheckpointName <checkpoint> 更新本机 VM profile。")
+    }
+
+    $profile.RecommendedActions = @($actions.ToArray())
+    return [pscustomobject]$profile
+}
+
 function Get-R0DriverConfigurationStatus {
     param([AllowNull()]$Config)
 
@@ -405,16 +631,16 @@ function Get-R0DriverConfigurationStatus {
     }
     elseif ([string]::IsNullOrWhiteSpace($hostDriverPath)) {
         $status = 'MissingHostDriverPath'
-        $warning = 'Real R0 collection is enabled, but driver.hostDriverPath is empty. Live runbooks will not stage a .sys or generate install-driver-service, and R0Collector can fail with deviceUnavailable/win32Error=2.'
-        [void]$recommendedActions.Add(".\install.ps1 -Mode Change -UpdateHyperVConfig -DriverHostPath <path-to-test-signed-KSword.Sandbox.Driver.sys>")
-        [void]$recommendedActions.Add("Set driver.useMockCollector=true for payload-only R0 validation, or set driver.enabled=false if R0 is not required.")
-        [void]$recommendedActions.Add(".\scripts\Invoke-NativeBuild.ps1 -Configuration Release -Platform x64 builds the native driver; keep signing/test-signing explicit and do not call CSignTool.")
+        $warning = 'R0 提示：已启用真实 R0 采集，但 driver.hostDriverPath 为空。WebUI 仍可用于上传/计划；Live real R0 前请在安装向导中配置 driver path，或临时使用 mock/disabled R0。'
+        [void]$recommendedActions.Add("下一步：运行 .\install.ps1 -Mode Change -UpdateHyperVConfig -DriverHostPath <path-to-test-signed-KSword.Sandbox.Driver.sys> 配置测试签名 driver 路径。")
+        [void]$recommendedActions.Add("下一步：仅验证 payload/R0 链路时设置 driver.useMockCollector=true；不需要 R0 时设置 driver.enabled=false。")
+        [void]$recommendedActions.Add("下一步：如需构建原生 driver，可运行 .\scripts\Invoke-NativeBuild.ps1 -Configuration Release -Platform x64；签名/test-signing 需显式处理，禁止调用 legacy interactive signing tools。")
     }
     elseif (-not $hostDriverPathExists) {
         $status = 'MissingHostDriverFile'
-        $warning = "Real R0 collection is enabled, but configured driver.hostDriverPath does not exist: $hostDriverPath"
-        [void]$recommendedActions.Add("Build the R0 driver or correct driver.hostDriverPath: $hostDriverPath")
-        [void]$recommendedActions.Add("Set driver.useMockCollector=true for payload-only R0 validation.")
+        $warning = "R0 警告：已启用真实 R0 采集，但配置的 driver.hostDriverPath 不存在：$hostDriverPath。下一步：修正路径或改用 driver.useMockCollector=true。"
+        [void]$recommendedActions.Add("下一步：构建 R0 driver，或修正 driver.hostDriverPath：$hostDriverPath。")
+        [void]$recommendedActions.Add("下一步：仅做 payload/R0 链路验证时设置 driver.useMockCollector=true。")
     }
 
     return [pscustomobject][ordered]@{
@@ -435,9 +661,10 @@ function Write-R0DriverConfigurationWarning {
 
     $driverStatus = Get-R0DriverConfigurationStatus -Config $Config
     if (-not [string]::IsNullOrWhiteSpace([string]$driverStatus.Warning)) {
-        Write-RunInfo "R0 warning: $($driverStatus.Warning)"
+        Write-RunInfo "R0 配置提示：$($driverStatus.Warning)"
+        Write-RunInfo '普通启动不需要立即修复 R0；如需 Live real R0，请先在安装向导里配置 driver path，或暂时使用 mock/disabled R0。高级排障请使用 CheckEnvironment 模式。'
         foreach ($action in @($driverStatus.RecommendedActions)) {
-            Write-RunInfo "R0 action: $action"
+            Write-Verbose "R0 detailed remediation: $action"
         }
     }
 }
@@ -574,13 +801,13 @@ function Test-GuestPayloadManifestFileHash {
     )
 
     if (-not (Test-Path -LiteralPath $ExpectedPath -PathType Leaf)) {
-        $Reasons.Add("$Name file is missing: $ExpectedPath")
+        $Reasons.Add("$Name 文件缺失：$ExpectedPath。下一步：重新运行 .\scripts\Prepare-GuestPayload.ps1 -SelfContained。")
         return
     }
 
     $requiredFiles = Get-PayloadManifestProperty -Manifest $Manifest -Name 'requiredHostFiles'
     if ($null -eq $requiredFiles) {
-        $Reasons.Add('payload-manifest.json is missing requiredHostFiles metadata.')
+        $Reasons.Add('payload-manifest.json 缺少 requiredHostFiles 元数据。下一步：重新准备 guest payload。')
         return
     }
 
@@ -589,7 +816,7 @@ function Test-GuestPayloadManifestFileHash {
         [System.StringComparer]::OrdinalIgnoreCase.Equals([string]$entryName, $Name)
     } | Select-Object -First 1)
     if ($entry.Count -eq 0) {
-        $Reasons.Add("payload-manifest.json is missing $Name hash metadata.")
+        $Reasons.Add("payload-manifest.json 缺少 $Name hash 元数据。下一步：重新准备 guest payload。")
         return
     }
 
@@ -600,23 +827,23 @@ function Test-GuestPayloadManifestFileHash {
                 [System.IO.Path]::GetFullPath($manifestPath),
                 [System.IO.Path]::GetFullPath($ExpectedPath))
             if (-not $samePath) {
-                $Reasons.Add("$Name path in payload-manifest.json points to '$manifestPath' instead of '$ExpectedPath'.")
+                $Reasons.Add("payload-manifest.json 中 $Name 路径指向 '$manifestPath'，不是 '$ExpectedPath'。下一步：重新准备 guest payload。")
             }
         }
         catch {
-            $Reasons.Add("$Name path in payload-manifest.json is invalid: $manifestPath")
+            $Reasons.Add("payload-manifest.json 中 $Name 路径无效：$manifestPath。下一步：重新准备 guest payload。")
         }
     }
 
     $expectedHash = [string](Get-PayloadManifestProperty -Manifest $entry[0] -Name 'sha256')
     if ([string]::IsNullOrWhiteSpace($expectedHash)) {
-        $Reasons.Add("$Name hash is absent from payload-manifest.json.")
+        $Reasons.Add("payload-manifest.json 缺少 $Name hash。下一步：重新准备 guest payload。")
         return
     }
 
     $actualHash = Get-FileSha256Hex -Path $ExpectedPath
     if (-not [System.StringComparer]::OrdinalIgnoreCase.Equals($expectedHash, $actualHash)) {
-        $Reasons.Add("$Name hash differs from payload-manifest.json; staged payload may be partially overwritten.")
+        $Reasons.Add("$Name hash 与 payload-manifest.json 不一致；已暂存 payload 可能被部分覆盖。下一步：重新运行 .\scripts\Prepare-GuestPayload.ps1 -SelfContained。")
     }
 }
 
@@ -630,13 +857,13 @@ function Test-GuestPayloadFresh {
 
     $reasons = [System.Collections.Generic.List[string]]::new()
     if (-not (Test-Path -LiteralPath $AgentExe -PathType Leaf)) {
-        $reasons.Add("Guest Agent executable is missing: $AgentExe")
+        $reasons.Add("Guest Agent 可执行文件缺失：$AgentExe。下一步：重新准备 guest payload。")
     }
     if (-not (Test-Path -LiteralPath $CollectorExe -PathType Leaf)) {
-        $reasons.Add("R0Collector executable is missing: $CollectorExe")
+        $reasons.Add("R0Collector 可执行文件缺失：$CollectorExe。下一步：重新准备 guest payload。")
     }
     if (-not (Test-Path -LiteralPath $ManifestPath -PathType Leaf)) {
-        $reasons.Add("payload-manifest.json is missing: $ManifestPath")
+        $reasons.Add("payload-manifest.json 缺失：$ManifestPath。下一步：重新准备 guest payload。")
         return [pscustomobject]@{ Fresh = $false; Reasons = @($reasons) }
     }
 
@@ -644,29 +871,29 @@ function Test-GuestPayloadFresh {
         $manifest = Get-Content -LiteralPath $ManifestPath -Raw | ConvertFrom-Json
     }
     catch {
-        $reasons.Add("payload-manifest.json is unreadable: $($_.Exception.Message)")
+        $reasons.Add("payload-manifest.json 无法读取。下一步：删除损坏的 payload 目录并重新准备。英文详情：$($_.Exception.Message)")
         return [pscustomobject]@{ Fresh = $false; Reasons = @($reasons) }
     }
 
     $contractVersionValue = Get-PayloadManifestProperty -Manifest $manifest -Name 'payloadContractVersion'
     $contractVersion = if ($null -eq $contractVersionValue) { 0 } else { [int]$contractVersionValue }
     if ($contractVersion -lt 2) {
-        $reasons.Add("payload-manifest.json contract version is $contractVersion; version 2+ is required for freshness checks.")
+        $reasons.Add("payload-manifest.json contract version 为 $contractVersion；freshness 检查需要 version 2+。下一步：重新准备 guest payload。")
     }
 
     $manifestConfiguration = [string](Get-PayloadManifestProperty -Manifest $manifest -Name 'configuration')
     if (-not [System.StringComparer]::OrdinalIgnoreCase.Equals($manifestConfiguration, $Configuration)) {
-        $reasons.Add("payload configuration '$manifestConfiguration' does not match requested '$Configuration'.")
+        $reasons.Add("payload configuration '$manifestConfiguration' 与请求的 '$Configuration' 不一致。下一步：用 -Configuration $Configuration 重新准备 payload。")
     }
 
     $sourceFingerprint = [string](Get-PayloadManifestProperty -Manifest $manifest -Name 'sourceFingerprint')
     if ([string]::IsNullOrWhiteSpace($sourceFingerprint)) {
-        $reasons.Add('payload-manifest.json is missing sourceFingerprint.')
+        $reasons.Add('payload-manifest.json 缺少 sourceFingerprint。下一步：重新准备 guest payload。')
     }
     else {
         $currentFingerprint = Get-GuestPayloadSourceFingerprint
         if (-not [System.StringComparer]::OrdinalIgnoreCase.Equals($sourceFingerprint, $currentFingerprint)) {
-            $reasons.Add('guest payload source fingerprint is stale; Guest Agent/R0Collector sources changed after staging.')
+            $reasons.Add('guest payload source fingerprint 已过期；Guest Agent/R0Collector 源码在暂存后发生变化。下一步：重新准备 guest payload。')
         }
     }
 
@@ -683,13 +910,13 @@ function Ensure-GuestPayload {
     )
 
     if ($SkipPayloadPreparation) {
-        Write-RunInfo 'Skipped guest payload preparation by request.'
+        Write-RunInfo '已按请求跳过 guest payload 准备。下一步：Live 前请确认 payload 已存在且最新。 / Skipped guest payload preparation by request.'
         return
     }
 
     if ($WhatIfPreference) {
         [void]$PSCmdlet.ShouldProcess($PayloadRoot, 'Prepare self-contained guest payload if missing or stale')
-        Write-RunInfo "WhatIf: guest payload preparation would be checked/prepared at $PayloadRoot."
+        Write-RunInfo "预览：会检查/准备 guest payload：$PayloadRoot。 / WhatIf: guest payload preparation would be checked/prepared."
         return
     }
 
@@ -712,19 +939,19 @@ function Ensure-GuestPayload {
     if (-not $ForcePayloadPreparation) {
         $freshness = Test-GuestPayloadFresh -PayloadRoot $PayloadRoot -AgentExe $agentExe -CollectorExe $collectorExe -ManifestPath $manifest
         if ($freshness.Fresh) {
-            Write-RunInfo "Guest payload ready and fresh: $PayloadRoot"
+            Write-RunInfo "guest payload 已就绪且最新：$PayloadRoot / Guest payload ready and fresh."
             return
         }
 
-        Write-RunInfo "Guest payload will be rebuilt: $($freshness.Reasons -join '; ')"
+        Write-RunInfo "guest payload 将重建，原因：$($freshness.Reasons -join '; ') / Guest payload will be rebuilt."
     }
     else {
-        Write-RunInfo 'Guest payload rebuild forced by -ForcePayloadPreparation.'
+        Write-RunInfo '已通过 -ForcePayloadPreparation 强制重建 guest payload。 / Guest payload rebuild forced.'
     }
 
     $prepareScript = Join-Path $script:RepositoryRoot 'scripts\Prepare-GuestPayload.ps1'
     if (-not (Test-Path -LiteralPath $prepareScript -PathType Leaf)) {
-        throw "Guest payload preparation script is missing: $prepareScript"
+        throw "错误：找不到 guest payload 准备脚本：$prepareScript。下一步：请确认 scripts\Prepare-GuestPayload.ps1 存在，并从仓库根目录运行。"
     }
 
     $guestRoot = 'C:\KSwordSandbox'
@@ -732,7 +959,7 @@ function Ensure-GuestPayload {
         $guestRoot = [string]$Config.guest.workingDirectory
     }
 
-    Write-RunInfo "Preparing self-contained guest payload: $PayloadRoot"
+    Write-RunInfo "正在准备 self-contained guest payload：$PayloadRoot / Preparing self-contained guest payload."
     $arguments = @(
         '-NoProfile',
         '-ExecutionPolicy', 'Bypass',
@@ -745,12 +972,12 @@ function Ensure-GuestPayload {
     )
     & powershell @arguments
     if ($LASTEXITCODE -ne 0) {
-        throw "Guest payload preparation failed with exit code $LASTEXITCODE."
+        throw "错误：guest payload 准备失败，退出码 $LASTEXITCODE。下一步：确认 .NET SDK、MSBuild/WDK 可用，然后运行 .\scripts\Prepare-GuestPayload.ps1 -SelfContained 查看详细错误。"
     }
 
     $freshnessAfterPrepare = Test-GuestPayloadFresh -PayloadRoot $PayloadRoot -AgentExe $agentExe -CollectorExe $collectorExe -ManifestPath $manifest
     if (-not $freshnessAfterPrepare.Fresh) {
-        throw "Guest payload preparation finished but freshness checks failed: $($freshnessAfterPrepare.Reasons -join '; ')"
+        throw "错误：guest payload 准备完成但 freshness 检查失败：$($freshnessAfterPrepare.Reasons -join '; ')。下一步：删除 payload 目录后重新运行 .\scripts\Prepare-GuestPayload.ps1 -SelfContained。"
     }
 }
 
@@ -760,7 +987,7 @@ function Ensure-GuestPayloadForWebUi {
         [Parameter(Mandatory)][object]$Config
     )
 
-    Write-RunInfo "Checking self-contained guest payload before WebUI launch: $PayloadRoot"
+    Write-RunInfo "启动 WebUI 前检查 self-contained guest payload：$PayloadRoot / Checking guest payload before WebUI launch."
     try {
         Ensure-GuestPayload -PayloadRoot $PayloadRoot -Config $Config
     }
@@ -769,9 +996,9 @@ function Ensure-GuestPayloadForWebUi {
             throw
         }
 
-        Write-RunInfo "Guest payload preparation failed before WebUI startup: $($_.Exception.Message)"
-        Write-RunInfo 'WebUI will still start for upload, planning, dry-run runbooks, and configuration review.'
-        Write-RunInfo 'Fix the payload before live Hyper-V execution, or rerun with -RequirePayloadForWebUI to make this fatal.'
+        Write-RunInfo "中文提示：WebUI 启动前 guest payload 准备失败。下一步：如果只上传/规划可继续；Live 前请修复 payload。英文详情：$($_.Exception.Message)"
+        Write-RunInfo 'WebUI 仍会启动，可用于上传、计划、dry-run runbook 和配置检查。 / WebUI will still start for non-live work.'
+        Write-RunInfo '下一步：Live Hyper-V 前请修复 payload；若希望 payload 失败时阻止 WebUI 启动，请加 -RequirePayloadForWebUI。 / Fix payload before live execution.'
     }
 }
 
@@ -806,7 +1033,7 @@ function Show-RunStatus {
             }
         }
         catch {
-            Write-RunInfo "Status could not read payload root from config '$EffectiveConfigPath': $($_.Exception.Message)"
+            Write-RunInfo "中文提示：Status 无法从配置读取 payload root，将使用默认/安装状态值。配置：$EffectiveConfigPath；英文详情：$($_.Exception.Message)"
         }
     }
     $driverStatus = Get-R0DriverConfigurationStatus -Config $statusConfig
@@ -814,57 +1041,53 @@ function Show-RunStatus {
     $payloadManifest = Join-Path $payloadRoot 'payload-manifest.json'
     $agentPayload = Join-Path (Join-Path $payloadRoot 'agent') $agentName
     $collectorPayload = Join-Path (Join-Path $payloadRoot 'r0collector') $collectorName
-    $hyperVModuleAvailable = $null -ne (Get-Command Get-VM -ErrorAction SilentlyContinue)
     $vmName = Get-StateString -State $State -Name 'vmName' -DefaultValue 'KSwordSandbox-Win10-Golden'
     $checkpointName = Get-StateString -State $State -Name 'checkpointName' -DefaultValue 'Clean'
-    $vmExists = $false
-    $checkpointExists = $false
-    $vmState = $null
-    $hyperVStatusError = $null
-
-    if ($hyperVModuleAvailable) {
-        try {
-            $vm = Get-VM -Name $vmName -ErrorAction Stop
-            $vmExists = $true
-            $vmState = [string]$vm.State
-            $snapshot = Get-VMSnapshot -VMName $vmName -Name $checkpointName -ErrorAction SilentlyContinue
-            $checkpointExists = $null -ne $snapshot
-        }
-        catch {
-            $hyperVStatusError = $_.Exception.Message
-        }
-    }
+    $vmProfile = Get-RunVmProfileStatus -VmName $vmName -CheckpointName $checkpointName
+    $hyperVModuleAvailable = [bool]$vmProfile.HyperVModuleAvailable
+    $vmExists = [bool]$vmProfile.Exists
+    $checkpointExists = [bool]$vmProfile.CheckpointExists
+    $vmState = $vmProfile.State
+    $hyperVStatusError = $vmProfile.Error
+    $hostTestSigningStatus = Get-RunHostTestSigningStatus
+    $webLaunchTarget = Get-WebUiLaunchTarget -ThrowIfMissing $false
 
     $recommendedActions = New-Object System.Collections.Generic.List[string]
+    foreach ($profileAction in @($vmProfile.RecommendedActions)) {
+        [void]$recommendedActions.Add([string]$profileAction)
+    }
+    if ($webLaunchTarget.Kind -eq 'Missing') {
+        [void]$recommendedActions.Add([string]$webLaunchTarget.RecommendedAction)
+    }
     if (-not $configExists) {
-        [void]$recommendedActions.Add(".\install.ps1 -Mode Install -PromptPassword to create the local config, or .\install.ps1 -Mode Change -UpdateHyperVConfig to record VM/checkpoint paths.")
+        [void]$recommendedActions.Add("下一步：运行 .\install.ps1 -Mode Install -PromptPassword 创建本机配置；或运行 .\install.ps1 -Mode Change -UpdateHyperVConfig 记录 VM/checkpoint 路径。")
     }
     if (-not (Test-Path -LiteralPath $EffectiveRuntimeRoot -PathType Container)) {
-        [void]$recommendedActions.Add(".\install.ps1 -Mode Install to create runtime folders under '$EffectiveRuntimeRoot'.")
+        [void]$recommendedActions.Add("下一步：运行 .\install.ps1 -Mode Install，在 '$EffectiveRuntimeRoot' 下创建运行目录。")
     }
     if (-not (Test-Path -LiteralPath $payloadRoot -PathType Container) -or
         -not (Test-Path -LiteralPath $agentPayload -PathType Leaf) -or
         -not (Test-Path -LiteralPath $collectorPayload -PathType Leaf) -or
         -not (Test-Path -LiteralPath $payloadManifest -PathType Leaf)) {
-        [void]$recommendedActions.Add(".\scripts\Prepare-GuestPayload.ps1 -RepoRoot . -PayloadRoot '$payloadRoot' -Configuration $Configuration -SelfContained")
-        [void]$recommendedActions.Add(".\run.ps1 -Mode CheckEnvironment to re-check payload readiness without starting or restoring a VM.")
+        [void]$recommendedActions.Add("下一步：运行 .\scripts\Prepare-GuestPayload.ps1 -RepoRoot . -PayloadRoot '$payloadRoot' -Configuration $Configuration -SelfContained 准备 Guest Agent/R0Collector payload。")
+        [void]$recommendedActions.Add("下一步：运行 .\run.ps1 -Mode CheckEnvironment 重新检查 payload readiness；该命令不会启动或还原 VM。")
     }
     if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($secretName, 'Process')) -and
         [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($secretName, 'User')) -and
         [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($secretName, 'Machine'))) {
-        [void]$recommendedActions.Add(".\install.ps1 -Mode Install -PromptPassword, or .\scripts\Test-HyperVReadiness.ps1 -PromptForMissingGuestPassword for a process-only check.")
+        [void]$recommendedActions.Add("下一步：运行 .\install.ps1 -Mode Install -PromptPassword 保存 guest password secret；如果只做本进程检查，可运行 .\scripts\Test-HyperVReadiness.ps1 -PromptForMissingGuestPassword。")
     }
     foreach ($driverAction in @($driverStatus.RecommendedActions)) {
         [void]$recommendedActions.Add([string]$driverAction)
     }
     if (-not $hyperVModuleAvailable) {
-        [void]$recommendedActions.Add('Enable/install Hyper-V PowerShell tools, then rerun .\run.ps1 -Mode CheckEnvironment.')
+        [void]$recommendedActions.Add('下一步：启用/安装 Hyper-V PowerShell 工具，然后重新运行 .\run.ps1 -Mode CheckEnvironment。')
     }
     elseif (-not $vmExists) {
-        [void]$recommendedActions.Add(".\install.ps1 -Mode Change -UpdateHyperVConfig -VmName <existing VM> -CheckpointName <checkpoint>, or create/import VM '$vmName'.")
+        [void]$recommendedActions.Add("下一步：运行 .\install.ps1 -Mode Change -UpdateHyperVConfig -VmName <existing VM> -CheckpointName <checkpoint> 记录现有 VM，或先创建/导入 VM '$vmName'。")
     }
     elseif (-not $checkpointExists) {
-        [void]$recommendedActions.Add(".\install.ps1 -Mode Change -UpdateHyperVConfig -VmName '$vmName' -CheckpointName <checkpoint>, or create checkpoint '$checkpointName'.")
+        [void]$recommendedActions.Add("下一步：运行 .\install.ps1 -Mode Change -UpdateHyperVConfig -VmName '$vmName' -CheckpointName <checkpoint> 记录快照，或先创建 checkpoint '$checkpointName'。")
     }
 
     [pscustomobject][ordered]@{
@@ -875,6 +1098,12 @@ function Show-RunStatus {
         ConfigExists = $configExists
         WebUrl = $Url
         WebUiCommand = '.\run.ps1'
+        WebUiLaunchKind = $webLaunchTarget.Kind
+        WebUiLaunchPath = $webLaunchTarget.Path
+        WebUiSourceProjectExists = $webLaunchTarget.SourceProjectExists
+        PublishedWebRoot = $webLaunchTarget.PublishedWebRoot
+        PublishedWebExeExists = $webLaunchTarget.PublishedExeExists
+        PublishedWebDllExists = $webLaunchTarget.PublishedDllExists
         RuntimeRoot = $EffectiveRuntimeRoot
         RuntimeRootExists = Test-Path -LiteralPath $EffectiveRuntimeRoot -PathType Container
         GuestPayloadRoot = $payloadRoot
@@ -898,8 +1127,8 @@ function Show-RunStatus {
         VirusTotalSecretName = $virusTotalSecretName
         VirusTotalProcessSecretSet = -not [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($virusTotalSecretName, 'Process'))
         VirusTotalUserSecretSet = -not [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($virusTotalSecretName, 'User'))
-        GuestPasswordGuidance = ".\install.ps1 -Mode Install -PromptPassword, or .\install.ps1 -Mode Change -ResetGuestVmPassword -GeneratePassword -Force"
-        VirusTotalGuidance = ".\install.ps1 -Mode ConfigureVTKey -PromptVTKey, or set $virusTotalSecretName in User environment"
+        GuestPasswordGuidance = "下一步：运行 .\install.ps1 -Mode Install -PromptPassword；如果需要同步 VM 实际密码，可运行 .\install.ps1 -Mode Change -ResetGuestVmPassword -GeneratePassword -Force"
+        VirusTotalGuidance = "下一步：运行 .\install.ps1 -Mode ConfigureVTKey -PromptVTKey，或在 User 环境中设置 $virusTotalSecretName。"
         VmName = $vmName
         CheckpointName = $checkpointName
         HyperVModuleAvailable = $hyperVModuleAvailable
@@ -907,6 +1136,14 @@ function Show-RunStatus {
         VmState = $vmState
         CheckpointExists = $checkpointExists
         HyperVStatusError = $hyperVStatusError
+        VmProfile = $vmProfile
+        VmProfileHealthy = ($vmExists -and $checkpointExists)
+        VmGeneration = $vmProfile.Generation
+        VmProcessorCount = $vmProfile.ProcessorCount
+        VmMemoryStartupBytes = $vmProfile.MemoryStartupBytes
+        VmGuestServiceInterfaceEnabled = $vmProfile.GuestServiceInterfaceEnabled
+        HostTestSigningState = $hostTestSigningStatus.State
+        HostTestSigningMessage = $hostTestSigningStatus.Message
         PayloadGuidance = ".\scripts\Prepare-GuestPayload.ps1 -RepoRoot . -PayloadRoot '$payloadRoot' -Configuration $Configuration -SelfContained"
         VmGuidance = ".\install.ps1 -Mode Change -UpdateHyperVConfig -VmName <existing VM> -CheckpointName <checkpoint>"
         CheckpointGuidance = ".\install.ps1 -Mode Change -UpdateHyperVConfig -VmName '$vmName' -CheckpointName <checkpoint>"
@@ -927,6 +1164,7 @@ function Show-RunEnvironmentCheck {
     $webProject = Join-Path $script:RepositoryRoot 'src\KSword.Sandbox.Web\KSword.Sandbox.Web.csproj'
     $hyperVScript = Join-Path $script:RepositoryRoot 'scripts\Invoke-HyperVE2E.ps1'
     $payloadScript = Join-Path $script:RepositoryRoot 'scripts\Prepare-GuestPayload.ps1'
+    $webLaunchTarget = Get-WebUiLaunchTarget -ThrowIfMissing $false
 
     [pscustomobject][ordered]@{
         DailyStartupCommand = '.\run.ps1'
@@ -948,6 +1186,10 @@ function Show-RunEnvironmentCheck {
         PlanOnlyStartsVm = $false
         DotNetAvailable = $null -ne (Get-Command dotnet -ErrorAction SilentlyContinue)
         WebProjectExists = Test-Path -LiteralPath $webProject -PathType Leaf
+        WebUiLaunchKind = $webLaunchTarget.Kind
+        WebUiLaunchPath = $webLaunchTarget.Path
+        PublishedWebAppExists = ($webLaunchTarget.PublishedExeExists -or $webLaunchTarget.PublishedDllExists)
+        PortableWebUiReady = ($webLaunchTarget.Kind -in @('PublishedExe', 'PublishedDll'))
         HyperVE2EScriptExists = Test-Path -LiteralPath $hyperVScript -PathType Leaf
         PayloadPreparationScriptExists = Test-Path -LiteralPath $payloadScript -PathType Leaf
         SecretValuePrinted = $false
@@ -1001,10 +1243,10 @@ function Resolve-WebListenUrl {
     }
 
     if ($StrictUrl) {
-        throw "Requested WebUI URL '$RequestedUrl' cannot be bound: $($probe.Error)"
+        throw "错误：请求的 WebUI URL '$RequestedUrl' 无法绑定：$($probe.Error)。下一步：换一个 -Url 端口，或关闭占用该端口的进程；也可去掉 -StrictUrl 让脚本自动选备用端口。"
     }
 
-    Write-RunInfo "Requested WebUI URL '$RequestedUrl' cannot be bound: $($probe.Error)"
+    Write-RunInfo "中文提示：请求的 WebUI URL '$RequestedUrl' 无法绑定，将尝试备用端口。英文详情：$($probe.Error)"
     $candidatePorts = @($port, 18080, 18081, 18082, 18083, 28080, 28081, 38080, 49152, 52123, 55000) | Select-Object -Unique
     foreach ($candidatePort in $candidatePorts) {
         if ($candidatePort -eq $port) {
@@ -1016,38 +1258,37 @@ function Resolve-WebListenUrl {
             $builder = [UriBuilder]::new($uri)
             $builder.Port = [int]$candidatePort
             $fallbackUrl = $builder.Uri.GetLeftPart([UriPartial]::Authority)
-            Write-RunInfo "Falling back to WebUI URL: $fallbackUrl"
+            Write-RunInfo "已切换到备用 WebUI URL：$fallbackUrl / Falling back to WebUI URL."
             return $fallbackUrl
         }
     }
 
-    throw "No usable WebUI localhost port was found. Last error for '$RequestedUrl': $($probe.Error)"
+    throw "错误：没有找到可用的 localhost WebUI 端口。'$RequestedUrl' 的最后错误：$($probe.Error)。下一步：关闭占用端口的程序，或用 -Url http://127.0.0.1:<free-port> 指定空闲端口。"
 }
 
 function Invoke-WebUi {
     param([Parameter(Mandatory)][string]$EffectiveConfigPath)
 
-    $projectPath = Join-Path $script:RepositoryRoot 'src\KSword.Sandbox.Web\KSword.Sandbox.Web.csproj'
-    if (-not (Test-Path -LiteralPath $projectPath -PathType Leaf)) {
-        throw "Web project is missing: $projectPath"
-    }
+    $launchTarget = Get-WebUiLaunchTarget
 
     $effectiveUrl = Resolve-WebListenUrl -RequestedUrl $Url
     $script:Url = $effectiveUrl
-    Write-RunInfo "Starting WebUI: $effectiveUrl"
-    Write-RunInfo "Config: $EffectiveConfigPath"
-    Write-RunInfo "Hyper-V live prerequisites: configured VM/checkpoint, prepared self-contained guest payload, and guest password secret."
+    Write-RunInfo "正在启动 WebUI：$effectiveUrl / Starting WebUI."
+    Write-RunInfo "WebUI 启动目标：$($launchTarget.Kind) -> $($launchTarget.Path) / WebUI launch target."
+    Write-RunInfo "配置文件：$EffectiveConfigPath / Config."
+    Write-RunInfo "Live Hyper-V 前置条件：已配置 VM/checkpoint、已准备 self-contained guest payload、已设置 guest password secret。 / Hyper-V live prerequisites."
     Write-RunInfo '中文提示：默认启动 WebUI 不会启动或还原 VM；实时 Hyper-V 执行必须在 WebUI/API 或 CLI 中显式选择 Live。'
-    Write-RunInfo 'Press Ctrl+C to stop the WebUI.'
+    Write-RunInfo '按 Ctrl+C 停止 WebUI。 / Press Ctrl+C to stop the WebUI.'
 
-    if (-not $PSCmdlet.ShouldProcess($effectiveUrl, "Start WebUI with '$projectPath'")) {
-        Write-RunInfo "WhatIf: WebUI would start at $effectiveUrl with config '$EffectiveConfigPath'. No dotnet process or browser was started."
+    if (-not $PSCmdlet.ShouldProcess($effectiveUrl, "Start WebUI with '$($launchTarget.Path)'")) {
+        Write-RunInfo "预览：WebUI 会以配置 '$EffectiveConfigPath' 启动在 $effectiveUrl；当前不会启动 dotnet 或浏览器。 / WhatIf: WebUI would start."
         return
     }
 
     $env:ASPNETCORE_URLS = $effectiveUrl
 
     if ($OpenBrowser) {
+        Write-RunInfo "将自动打开浏览器：$effectiveUrl / Browser will open automatically."
         Start-Job -ScriptBlock {
             param([string]$TargetUrl)
             Start-Sleep -Seconds 2
@@ -1055,12 +1296,30 @@ function Invoke-WebUi {
         } -ArgumentList $effectiveUrl | Out-Null
     }
 
-    $arguments = @('run', '--no-launch-profile', '--project', $projectPath)
-    if ($NoBuild) {
-        $arguments += '--no-build'
+    if ($launchTarget.RequiresDotNet -and $null -eq (Get-Command dotnet -ErrorAction SilentlyContinue)) {
+        throw "错误：WebUI 启动目标 '$($launchTarget.Kind)' 需要 dotnet，但当前 PATH 找不到 dotnet。下一步：安装 .NET SDK/Runtime，或使用包含 self-contained exe 的便携包。"
     }
 
-    & dotnet @arguments
+    if ($NoBuild -and -not $launchTarget.SupportsNoBuild) {
+        Write-RunInfo '中文提示：当前是已发布 WebUI 目标，-NoBuild 无需生效；将直接启动发布产物。 / -NoBuild is ignored for published WebUI.'
+    }
+
+    if ($launchTarget.Kind -eq 'SourceProject') {
+        $arguments = @('run', '--no-launch-profile', '--project', $launchTarget.Path)
+        if ($NoBuild) {
+            $arguments += '--no-build'
+        }
+
+        & dotnet @arguments
+        exit $LASTEXITCODE
+    }
+
+    if ($launchTarget.Kind -eq 'PublishedDll') {
+        & dotnet $launchTarget.Path
+        exit $LASTEXITCODE
+    }
+
+    & $launchTarget.Path
     exit $LASTEXITCODE
 }
 
@@ -1075,19 +1334,19 @@ function Invoke-OneShotAnalysis {
     $resolvedSample = Resolve-AnalysisSamplePath -EffectiveRuntimeRoot $EffectiveRuntimeRoot
     if (-not (Test-Path -LiteralPath $resolvedSample -PathType Leaf)) {
         if ($WhatIfPreference) {
-            Write-RunInfo "WhatIf: sample executable is not present yet, but would be prepared/resolved before a real run: $resolvedSample"
+            Write-RunInfo "预览：样本可执行文件暂不存在，但真实运行前会准备/解析：$resolvedSample。 / WhatIf: sample would be prepared/resolved."
         }
         else {
-            throw "Sample executable was not found: $resolvedSample"
+            throw "错误：找不到样本可执行文件：$resolvedSample。下一步：请检查 -SamplePath，或改用 -SamplePreset Notepad/HarmlessSample。"
         }
     }
     if ([System.IO.Path]::GetExtension($resolvedSample) -ine '.exe') {
-        throw "v1 one-shot analysis only accepts .exe samples: $resolvedSample"
+        throw "错误：v1 单次分析只接受 .exe 样本：$resolvedSample。下一步：请选择 Windows .exe 文件。"
     }
 
     $invokeScript = Join-Path $script:RepositoryRoot 'scripts\Invoke-HyperVE2E.ps1'
     if (-not (Test-Path -LiteralPath $invokeScript -PathType Leaf)) {
-        throw "Hyper-V E2E script is missing: $invokeScript"
+        throw "错误：找不到 Hyper-V E2E 脚本：$invokeScript。下一步：请确认 scripts\Invoke-HyperVE2E.ps1 存在，并从仓库根目录运行。"
     }
 
     $runLive = [bool]$Live -and (-not [bool]$PlanOnly) -and ($Mode -ne 'Plan')
@@ -1097,18 +1356,18 @@ function Invoke-OneShotAnalysis {
         Ensure-GuestPayload -PayloadRoot $payloadRoot -Config $Config
     }
     else {
-        Write-RunInfo "PlanOnly: guest payload preparation skipped at $payloadRoot."
-        Write-RunInfo 'The generated Hyper-V plan will report missing/stale payload files and repair suggestions without building or copying payloads.'
+        Write-RunInfo "PlanOnly: guest payload preparation skipped：$payloadRoot。 / Guest payload preparation skipped."
+        Write-RunInfo '生成的 Hyper-V 计划会报告缺失/过期 payload 文件和修复建议，但不会构建或复制 payload。 / Plan reports payload issues without mutation.'
     }
 
     $analysisAction = if ($runLive) {
-        'Delegate live Hyper-V analysis. This can restore/start/stop the configured VM.'
+        '委托 Live Hyper-V 分析；可能还原/启动/停止已配置 VM。 / Delegate live Hyper-V analysis.'
     }
     else {
-        'Create a non-mutating Hyper-V analysis plan'
+        '创建不修改 VM 的 Hyper-V 分析计划 / Create a non-mutating Hyper-V analysis plan'
     }
     if (-not $PSCmdlet.ShouldProcess($resolvedSample, $analysisAction)) {
-        Write-RunInfo "WhatIf: $analysisAction for '$resolvedSample'. No Hyper-V child script was launched."
+        Write-RunInfo "预览：将对 '$resolvedSample' 执行：$analysisAction；当前不会启动 Hyper-V 子脚本。 / WhatIf: No Hyper-V child script was launched."
         return
     }
 
@@ -1125,13 +1384,13 @@ function Invoke-OneShotAnalysis {
 
     if ($runLive) {
         $arguments += '-Live'
-        Write-RunInfo "Starting live Hyper-V analysis for: $resolvedSample"
+        Write-RunInfo "正在启动 Live Hyper-V 分析：$resolvedSample / Starting live Hyper-V analysis."
         Write-RunInfo '中文提示：这是 Live 模式，可能还原/启动/停止配置的 Hyper-V VM；凭据值不会打印。'
     }
     else {
         $arguments += '-PlanOnly'
-        Write-RunInfo "Planning only, no VM mutation, for: $resolvedSample"
-        Write-RunInfo 'Add -Live to run the sample in the configured Hyper-V VM.'
+        Write-RunInfo "仅生成计划，不修改 VM：$resolvedSample / Planning only, no VM mutation."
+        Write-RunInfo '下一步：如需在配置的 Hyper-V VM 中真实执行样本，请追加 -Live。 / Add -Live for live execution.'
         Write-RunInfo '中文提示：当前为计划模式，不会执行样本或改变 VM。'
     }
 
@@ -1181,11 +1440,11 @@ function Resolve-JobRootFromHyperVOutput {
         Sort-Object LastWriteTimeUtc -Descending |
         Select-Object -First 1
     if ($null -ne $latest) {
-        Write-RunInfo "Could not parse job root from Hyper-V output; falling back to latest job root: $($latest.FullName)"
+        Write-RunInfo "中文提示：无法从 Hyper-V 输出解析 job root，改用最新 job root：$($latest.FullName)。 / Falling back to latest job root."
         return $latest.FullName
     }
 
-    throw 'Could not resolve live job root from Hyper-V output.'
+    throw '错误：无法从 Hyper-V 输出解析 live job root。下一步：检查上方 Hyper-V E2E 输出，确认 runbook-execution.json 是否生成。'
 }
 
 function Invoke-PostProcessJob {
@@ -1197,10 +1456,10 @@ function Invoke-PostProcessJob {
 
     $postProcessProject = Join-Path $script:RepositoryRoot 'tools\KSword.Sandbox.PostProcess\KSword.Sandbox.PostProcess.csproj'
     if (-not (Test-Path -LiteralPath $postProcessProject -PathType Leaf)) {
-        throw "PostProcess project is missing: $postProcessProject"
+        throw "错误：找不到 PostProcess 项目：$postProcessProject。下一步：请确认 tools\KSword.Sandbox.PostProcess 存在，并从完整仓库运行。"
     }
 
-    Write-RunInfo "Post-processing live artifacts into report: $JobRoot"
+    Write-RunInfo "正在把 live 产物后处理为报告：$JobRoot / Post-processing live artifacts into report."
     $arguments = @('run', '--project', $postProcessProject)
     if ($NoBuild) {
         $arguments += '--no-build'
@@ -1215,7 +1474,7 @@ function Invoke-PostProcessJob {
 
     & dotnet @arguments
     if ($LASTEXITCODE -ne 0) {
-        throw "Post-processing failed with exit code $LASTEXITCODE."
+        throw "错误：后处理失败，退出码 $LASTEXITCODE。下一步：检查 job 目录和上方 dotnet 输出；修复后可用 Rebuild-JobReport 重新生成报告。"
     }
 }
 
@@ -1236,6 +1495,7 @@ switch ($Mode) {
         Show-RunEnvironmentCheck -State $state -EffectiveRuntimeRoot $effectiveRuntimeRoot -EffectiveConfigPath $effectiveConfigPath | Format-List
     }
     'WebUI' {
+        Assert-RunLocalConfigReadyForInteractiveStartup -EffectiveConfigPath $effectiveConfigPath -ModeName 'WebUI'
         $config = Read-SandboxConfig -EffectiveConfigPath $effectiveConfigPath
         Write-R0DriverConfigurationWarning -Config $config
         $payloadRoot = Get-GuestPayloadRoot -State $state -Config $config -EffectiveRuntimeRoot $effectiveRuntimeRoot
@@ -1243,6 +1503,11 @@ switch ($Mode) {
         Invoke-WebUi -EffectiveConfigPath $effectiveConfigPath
     }
     'StartWebUI' {
+        Assert-RunLocalConfigReadyForInteractiveStartup -EffectiveConfigPath $effectiveConfigPath -ModeName 'StartWebUI'
+        if (-not $PSBoundParameters.ContainsKey('OpenBrowser')) {
+            $script:OpenBrowser = $true
+            Write-RunInfo 'StartWebUI 模式会自动打开浏览器；如需无浏览器自动化，请使用 WebUI 模式或传入 -OpenBrowser:$false。'
+        }
         $config = Read-SandboxConfig -EffectiveConfigPath $effectiveConfigPath
         Write-R0DriverConfigurationWarning -Config $config
         $payloadRoot = Get-GuestPayloadRoot -State $state -Config $config -EffectiveRuntimeRoot $effectiveRuntimeRoot
@@ -1250,10 +1515,12 @@ switch ($Mode) {
         Invoke-WebUi -EffectiveConfigPath $effectiveConfigPath
     }
     'Plan' {
+        Assert-RunLocalConfigReadyForInteractiveStartup -EffectiveConfigPath $effectiveConfigPath -ModeName 'Plan'
         $config = Read-SandboxConfig -EffectiveConfigPath $effectiveConfigPath
         Invoke-OneShotAnalysis -EffectiveConfigPath $effectiveConfigPath -Config $config -EffectiveRuntimeRoot $effectiveRuntimeRoot -State $state
     }
     'Analyze' {
+        Assert-RunLocalConfigReadyForInteractiveStartup -EffectiveConfigPath $effectiveConfigPath -ModeName 'Analyze'
         $config = Read-SandboxConfig -EffectiveConfigPath $effectiveConfigPath
         Invoke-OneShotAnalysis -EffectiveConfigPath $effectiveConfigPath -Config $config -EffectiveRuntimeRoot $effectiveRuntimeRoot -State $state
     }

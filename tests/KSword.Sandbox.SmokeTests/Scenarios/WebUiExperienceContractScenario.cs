@@ -24,7 +24,10 @@ internal sealed class WebUiExperienceContractScenario : ISmokeTestScenario
         var dashboard = ReadRepositoryText(context, "src", "KSword.Sandbox.Web", "Dashboard", "DashboardExperiencePage.cs");
         var liveEventsPage = ReadRepositoryText(context, "src", "KSword.Sandbox.Web", "Dashboard", "LiveEventsPage.cs");
         var settingsPage = ReadRepositoryText(context, "src", "KSword.Sandbox.Web", "Dashboard", "SettingsPage.cs");
+        var runbookProgressStore = ReadRepositoryText(context, "src", "KSword.Sandbox.Web", "Infrastructure", "RunbookProgressStore.cs");
+        var runbookBackgroundStore = ReadRepositoryText(context, "src", "KSword.Sandbox.Web", "Infrastructure", "RunbookBackgroundExecutionStore.cs");
         var virusTotalLookup = ReadRepositoryText(context, "src", "KSword.Sandbox.Web", "Infrastructure", "VirusTotalLookupService.cs");
+        var virusTotalModels = ReadRepositoryText(context, "src", "KSword.Sandbox.Web", "Infrastructure", "VirusTotalModels.cs");
         var virusTotalSettings = ReadRepositoryText(context, "src", "KSword.Sandbox.Web", "Infrastructure", "VirusTotalSettingsStore.cs");
         var copyScript = ReadRepositoryText(context, "src", "KSword.Sandbox.Web", "Dashboard", "DashboardClientScripts.cs");
         var executionFlow = ReadRepositoryText(context, "src", "KSword.Sandbox.Web", "Dashboard", "RunbookExecutionFlowPage.cs");
@@ -57,6 +60,10 @@ internal sealed class WebUiExperienceContractScenario : ISmokeTestScenario
         RequireContains(dashboard, "onclick=\"toggleLanguage()\"", "Dashboard should expose the top-right Chinese/English switch.");
         RequireContains(dashboard, "data-zh=\"语言：中文 ⇄ English\" data-en=\"Language: English ⇄ 中文\"", "Language switch should toggle between Chinese and English labels.");
         RequireContains(dashboard, "role=\"tablist\"", "Planning entries should be separated by an accessible tablist.");
+        RequireContains(dashboard, "三种提交方式 / Three submission methods", "Dashboard should label the three submission-method tabs.");
+        RequireContains(dashboard, "id=\"tab-upload\"", "Dashboard should expose an upload submission tab.");
+        RequireContains(dashboard, "id=\"tab-path\"", "Dashboard should expose an existing-path submission tab.");
+        RequireContains(dashboard, "id=\"tab-scan\"", "Dashboard should expose a folder-scan submission tab.");
         RequireMinimumCount(dashboard, "role=\"tab\"", 3, "Planning UI should expose three accessible tabs.");
         RequireMinimumCount(dashboard, "role=\"tabpanel\"", 3, "Planning UI should expose one tab panel per planning entry.");
         RequireRegex(
@@ -111,7 +118,8 @@ internal sealed class WebUiExperienceContractScenario : ISmokeTestScenario
         RequireContains(dashboard, "data-report-current", "Dashboard should mark current-language report links for stable language switching.");
         RequireContains(dashboard, "refreshLocalizedReportLinks", "Dashboard should update current-language report links after the language toggle.");
         RequireContains(dashboard, "showReportReadyNotice", "Dashboard should show a stable report-ready notice after generation or import.");
-        RequireContains(dashboard, "setTimeout(() => openReport(jobId)", "Dashboard should auto-open the current-language report after successful live analysis.");
+        RequireContains(dashboard, "startReportAutoOpenCountdown", "Dashboard should schedule automatic report navigation after successful live analysis.");
+        RequireContains(dashboard, "openReport(reportAutoOpenJobId, 'zh')", "Dashboard should auto-open the Chinese report endpoint after the report-ready countdown.");
         RequireContains(dashboard, "buildLiveMonitorHref", "Dashboard should build dynamic monitor links from the job id.");
         RequireContains(program, "\"/api/files/upload/start\"", "Program.cs should expose a one-click upload/start endpoint.");
         RequireContains(dashboard, "fetch('/api/files/upload/start'", "Upload flow should use the one-click upload/start endpoint.");
@@ -125,7 +133,7 @@ internal sealed class WebUiExperienceContractScenario : ISmokeTestScenario
         RequireNotContains(dashboard, "window.open('about:blank', '_blank')", "Upload flow should not depend on about:blank popup windows.");
         RequireAnyContains(
             dashboard,
-            ["Open served HTML report", "Open served report", "打开服务内报告"],
+            ["Open served HTML report", "Open served report", "打开服务内报告", "Open planning report", "打开规划报告", "Open dynamic report", "打开动态报告"],
             "Dashboard should expose an automatic served HTML report link.");
         RequireAnyContains(
             dashboard,
@@ -146,6 +154,10 @@ internal sealed class WebUiExperienceContractScenario : ISmokeTestScenario
         RequireContains(dashboard, "startBackgroundExecutionPolling", "Dashboard should start background execution status polling during execution.");
         RequireContains(dashboard, "renderBackgroundExecutionSnapshot", "Dashboard should render background runbook terminal state and report readiness.");
         RequireContains(dashboard, "renderRunbookProgress", "Dashboard should render exact executor runbook step progress.");
+        foreach (var operatorStage in new[] { "启动 VM", "部署 Payload", "执行样本", "收集结果", "生成报告" })
+        {
+            RequireContains(dashboard, operatorStage, $"Dashboard progress should use operator-facing stage '{operatorStage}'.");
+        }
         RequireContains(dashboard, "id=\"progressFacts\"", "Dashboard progress card should expose current stage/step, elapsed time, and issue/failure context.");
         RequireAnyContains(
             dashboard,
@@ -217,6 +229,12 @@ internal sealed class WebUiExperienceContractScenario : ISmokeTestScenario
         RequireContains(liveEventsPage, "startRunbookProgressPolling", "Live monitor should start runbook progress polling automatically.");
         RequireContains(liveEventsPage, "startBackgroundStatusPolling", "Live monitor should start background status polling automatically.");
         RequireContains(liveEventsPage, "renderRunbookProgress", "Live monitor should render UI-safe runbook step snapshots.");
+        RequireContains(liveEventsPage, "monitorStages", "Live monitor should render an operator-facing stage rail.");
+        RequireContains(liveEventsPage, "monitor-stage-grid", "Live monitor should show a visible staged progress rail.");
+        foreach (var operatorStage in new[] { "启动 VM", "部署 Payload", "执行样本", "收集结果", "生成报告" })
+        {
+            RequireContains(liveEventsPage, operatorStage, $"Live monitor progress should use operator-facing stage '{operatorStage}'.");
+        }
         RequireContains(liveEventsPage, "step.message || ''", "Live monitor step cards should include failed-step messages without exposing command lines.");
         RequireContains(liveEventsPage, "buildProgressFailureReason", "Live monitor should show a concise failure reason from runbook progress.");
         RequireContains(liveEventsPage, "已耗时", "Live monitor progress card should show elapsed time in Chinese.");
@@ -226,16 +244,29 @@ internal sealed class WebUiExperienceContractScenario : ISmokeTestScenario
         RequireContains(liveEventsPage, "background analysis has already been handed to the Web host", "Live monitor should explain that background execution survives dashboard navigation.");
         RequireContains(liveEventsPage, "Open settings", "Live monitor VirusTotal card should link to settings when the API key is missing.");
         RequireContains(liveEventsPage, "result.message ||", "Live monitor VirusTotal card should preserve quiet lookup failure/not-configured messages.");
+        RequireContains(liveEventsPage, "result.isQuietState || result.IsQuietState", "Live monitor should honor backend VirusTotal quiet-state metadata.");
+        RequireContains(liveEventsPage, "'lookup_failed'].includes(status)) { return 'quiet';", "Live monitor should treat VirusTotal lookup failures as quiet non-blocking states.");
         RequireContains(settingsPage, "VirusTotal API Key", "Settings page should allow operators to set the VirusTotal API key.");
         RequireContains(settingsPage, "/api/settings/virustotal", "Settings page should save VirusTotal settings through the API endpoint.");
         RequireContains(settingsPage, "不会提交到仓库", "Settings page should explain that local settings are not committed.");
         RequireContains(settingsPage, "不会产生噪音日志", "Settings page should state that missing VirusTotal keys do not create noisy logs.");
+        RequireContains(settingsPage, "copyToast", "Settings page should show copy feedback.");
+        RequireContains(settingsPage, "fallbackCopyText", "Settings page should support copy fallback outside secure clipboard contexts.");
+        RequireContains(settingsPage, "showToast", "Settings page should show success/failure feedback for right-click copy.");
+        RequireContains(settingsPage, "h1, h2, h3", "Settings page right-click copy should include headings and labels.");
         RequireContains(virusTotalSettings, "KSWORDBOX_VIRUSTOTAL_API_KEY", "VirusTotal settings should support an environment variable override.");
-        RequireContains(virusTotalSettings, "virustotal.key", "VirusTotal settings should persist under the runtime settings folder.");
+        RequireContains(virusTotalSettings, "Environment.SetEnvironmentVariable(EnvironmentVariableName", "VirusTotal settings should store submitted keys only in the current process.");
+        RequireNotContains(virusTotalSettings, "File.WriteAllText", "VirusTotal settings should not persist API keys to disk.");
         RequireContains(virusTotalLookup, "https://www.virustotal.com/api/v3/", "VirusTotal lookup should call the official v3 API base URL.");
         RequireContains(virusTotalLookup, "files/{Uri.EscapeDataString(normalizedHash)}", "VirusTotal lookup should use the files/{hash} endpoint.");
         RequireContains(virusTotalLookup, "x-apikey", "VirusTotal lookup should authenticate with the x-apikey header.");
         RequireContains(virusTotalLookup, "not upload", "VirusTotal lookup code comments should document that it does not upload samples.");
+        RequireContains(virusTotalModels, "IsQuietState", "VirusTotal model should expose quiet-state metadata to the live UI.");
+
+        RequireContains(runbookProgressStore, "AddOrUpdate", "Runbook progress store should not blindly overwrite newer in-memory snapshots.");
+        RequireContains(runbookProgressStore, "ShouldReplaceSnapshot", "Runbook progress store should compare snapshot freshness before replacing memory state.");
+        RequireContains(runbookProgressStore, "candidate.UpdatedAtUtc > existing.UpdatedAtUtc", "Runbook progress store should prefer newer durable or live snapshots.");
+        RequireContains(runbookBackgroundStore, "public TimeSpan Duration", "Background execution snapshots should expose elapsed duration for live progress cards.");
 
         RequireContains(artifactContract, "ReportJsonPath", "Artifact contract should include report.json.");
         RequireContains(artifactContract, "ReportHtmlPath", "Artifact contract should include report.html.");

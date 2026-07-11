@@ -1,5 +1,14 @@
 # Report and WebUI UX contract
 
+Canonical scope: this page owns report/WebUI presentation expectations. Use
+`docs/report-schema.md` for JSON/HTML section data contracts,
+`docs/artifact-manifest.md` for artifact selector/link schema, and
+`docs/virustotal.md` for hash-only reputation behavior.
+
+Do not commit generated reports, raw events, artifact indexes, screenshots,
+dumps, packet captures, samples, payload binaries, or VM outputs used while
+validating these UX requirements.
+
 The v1 report must be useful during a live demo, not merely technically
 complete. The page should let an operator answer three questions quickly:
 
@@ -9,15 +18,17 @@ complete. The page should let an operator answer three questions quickly:
 
 ## Report sections
 
-Required `report.html`, `report.zh.html`, and `report.en.html` sections:
+Required `report.html`, `report.zh.html`, and `report.en.html` sections.
+`report.html` is the default Simplified Chinese compatibility report; the
+explicit English entry remains `report.en.html`.
 
 - Cover / 封面 with job id, generation time, verdict, sample identity, and hashes.
 - Table of contents / 目录.
 - Quick navigation / 快速导航 sticky subnav for high-traffic sections:
   Risk, Process, Files, Network, R0, VT, Artifacts, and Raw events. Counts
   should represent currently embedded evidence and must not imply that R0
-  health or VT lookup status is malicious behavior.
-- Risk summary / 风险摘要 cards.
+  health, collector self-noise, or VT lookup status is malicious behavior.
+- Risk summary / 风险摘要 square summary panels.
 - Behavior detections / 行为命中.
   Each finding should show the evidence count plus a native `<details>` "Top
   evidence" block with copyable high-signal events so analysts can understand a
@@ -37,40 +48,56 @@ Required `report.html`, `report.zh.html`, and `report.en.html` sections:
   weak-interaction graph view that derives process-to-file, process-to-registry,
   process-to-network, and process-to-artifact edges from normalized telemetry.
   It must include a Top behavior chain, Evidence graph edges, and IOC summary
-  cards so the final report feels like an analyst-facing sandbox report rather
-  than only raw tables.
+  summary panels so the final report feels like an analyst-facing sandbox
+  report rather than only raw tables.
 - Timeline. The timeline must use timeline grouping so bursty telemetry is
   readable in chronological order: group by a stable time bucket, show event
   counts and event-family summaries, keep a bounded timeline inline, and point
   to raw events/report JSON for complete evidence.
 - Process details / 进程, including the Process tree, process relationship
-  tree, process relationship cards, and process event table. The tree should
+  tree, process relationship panels, and process event table. The tree should
   prefer a stable process key when present and fall back to PID/PPID so parent,
   child, and orphan relationships remain stable without JavaScript.
   This stable process relationship tree must remain readable without opening
-  raw evidence first.
+  raw evidence first. A Process tree overview should show node/root/edge
+  counts, high-signal default-expanded nodes, and self-noise excluded from the
+  tree before the operator expands the lineage.
 - File behavior / 文件, including dropped files.
 - Artifact links / 证据文件链接 must include `events.json`,
   `driver-events.jsonl`, artifact manifests, screenshots, dropped files,
   opt-in memory dumps, and imported `.pcap` / `.pcapng` packet captures when
   those files exist in the job directory. This section must also include
-  Artifact collection status cards for dropped files, screenshots, memory
-  dumps, packet captures, and driver events. These cards should summarize
+  Artifact collection status panels for dropped files, screenshots, memory
+  dumps, packet captures, and driver events. These panels should summarize
   captured, failed, skipped, partial, observed, or not-observed collection state
   from both indexed artifacts and normalized telemetry, so operators can see
   whether evidence was actually collected even when no artifact file exists.
 - Registry behavior / 注册表.
-- Network behavior / 网络.
+- Network behavior / 网络. A Network category view should summarize endpoint
+  groups plus DNS / HTTP / TLS / flow counts before raw network rows, so
+  operators can read relationships without opening the full raw table.
 - R0 / driver events.
   R0 collection health status must be shown before driver telemetry evidence.
   Device unavailable, driver health, queue backpressure, and dropped-event
   counters describe telemetry quality and must not be counted as sample
   behavior. Health alerts may be highlighted as collection-quality warnings.
+  The R0 availability summary should show available, unavailable/degraded,
+  attention-needed, or absent-health-row states as evidence quality rather than
+  malicious behavior.
+  Driver rows attributed to `KSword.Sandbox.R0Collector.exe`, the sandbox
+  agent, collector staging paths, or the KSword driver device are
+  collection-side self-noise. They must be excluded from behavior counts,
+  behavior graphs, and file/registry/network/process behavior sections, while
+  remaining auditable in the R0 self-noise summary and Raw normalized events.
+  R0 health/unavailable examples should be folded by default and capped to a
+  small representative set, with complete evidence left in raw events and
+  `report.json`.
 - Failure reasons / 失败原因.
 - Raw normalized events / 原始事件.
   This section should remain collapsed and capped, but before the collapsed
   table it should show a small "Raw event distribution" summary for top event
-  types, sources, and event families.
+  types, sources, and event families. Raw evidence height limit should be
+  explicit in the UI so operators know expanded evidence remains bounded.
 
 
 ## Report renderer visual contract
@@ -79,19 +106,23 @@ The final report renderer should use a modern sandbox report layout, not a
 plain diagnostic dump. The visual contract is:
 
 - Primary accent color: `#43A0FF`.
-- Major report areas should render as modern cards/panels with clear spacing,
-  readable typography, and an operator-focused summary-first flow.
-- Each major `section.card` should keep very large evidence sets bounded with a
+- Major report areas should render as square panels with clear spacing,
+  readable typography, and an operator-focused summary-first flow. Corners
+  should be square (`0` or `2px` radius) and shadows should be avoided.
+- Visual nesting should stop at one obvious containment layer. Tables must not
+  contain nested card stacks, rounded pills, or card-like evidence blocks; use
+  inline actions and native flat `<details>` instead.
+- Each major `section.card` panel should keep very large evidence sets bounded with a
   maximum height around `75vh` and `overflow:auto`, so risk, behavior, MITRE,
   static, dynamic, timeline, process, file, registry, network, R0, failure,
   and raw event evidence remain navigable during demos.
-- Each bounded major card should keep a sticky section header so the operator
+- Each bounded major panel should keep a sticky section header so the operator
   never loses the current chapter while scrolling dense evidence. The section
   chrome should follow the Microstep-style bright-blue rhythm with `#43A0FF`
-  accents, compact step markers, rounded cards, and summary-first spacing.
+  accents, compact square step markers, and summary-first spacing.
 - Heavy event tables should also be bounded inside the section, not just by the
-  whole page card. The renderer should inline a representative window (currently
-  250 rows for ordinary event tables), show hidden-row counts, and point to Raw
+  whole page panel. The renderer should inline a representative window (currently
+  80 rows for ordinary event tables), show hidden-row counts, and point to Raw
   normalized events or `report.json` for complete evidence.
 - Large static strings/warnings lists should be capped in the default view
   (currently 200 entries) with a visible hidden-entry count and a pointer to
@@ -106,12 +137,14 @@ plain diagnostic dump. The visual contract is:
   inline only the first 200 raw events. Expanded inline rows must be split into
   50-row native pages so analysts can open a small chunk instead of a long
   table. The section must show total events, inline-rendered events, inline
-  page count, hidden raw events, and clear `report.json` plus raw source
-  artifact path hints for complete evidence.
+  page count, hidden raw events, a Raw evidence height limit (currently
+  `58vh`), and clear `report.json` plus raw source artifact path hints for
+  complete evidence.
 - Raw event details should keep command/stdout/stderr/PowerShell and similarly
-  long technical payloads inside nested collapsed details. The main report must
-  not directly spread full command lines, script blocks, stdout, or stderr
-  across the page; they should stay copyable after deliberate expansion.
+  long technical payloads hidden by default behind deliberate, copyable native
+  `<details>` entries. The main report must not directly spread full command
+  lines, script blocks, stdout, or stderr across the page; they should stay
+  copyable after deliberate expansion.
 - Ordinary event rows must use the same long-field policy: command line,
   stdout/stderr, PowerShell/script-block payloads, encoded commands, and other
   large fields stay collapsed by default even outside the Raw normalized events
@@ -122,10 +155,10 @@ plain diagnostic dump. The visual contract is:
 - The Behavior graph / IOC summary section should remain static HTML/CSS. It
   should prefer stable weak interactions over fragile canvas/SVG rendering:
   process graph nodes, a bounded Top behavior chain, Evidence graph edges, and
-  IOC summary cards for network, file/path, registry, and artifact indicators.
+  IOC summary panels for network, file/path, registry, and artifact indicators.
 - Timeline and process relationship views should also prefer stable weak
   interactions: native HTML/CSS timeline group panels, a bounded process
-  relationship tree, and copyable relationship cards rather than external graph
+  relationship tree, and copyable relationship panels rather than external graph
   JavaScript.
 - The report must support Chinese and English rendering entrypoints, or
   equivalent core renderer support for `report.zh.html` and `report.en.html`.
@@ -133,10 +166,17 @@ plain diagnostic dump. The visual contract is:
   Common operator text such as Quick navigation, VT lookups/status, collection
   health/status rows, health alerts, event-table caps, and hidden evidence
   counts should not remain as large English blocks in `report.zh.html`.
+- The Simplified Chinese report should localize operator-facing chrome such as
+  table headers, buttons, hints, section notes, empty states, status words, and
+  evidence-expander summaries. Raw evidence must stay original: `eventType`,
+  API names, schema keys/values, hashes, paths, command lines, stdout, stderr,
+  and JSON/JSONL previews are not translated.
 - Each generated HTML report should expose an in-report bilingual entry bar
   linking the sibling `report.zh.html`, `report.en.html`, and compatibility
   `report.html` files, so local file viewing and served WebUI viewing behave
-  consistently.
+  consistently. The entry bar should explain that `report.html` is the default
+  Simplified Chinese compatibility report, `report.en.html` keeps English
+  operator chrome, and evidence values stay original in both reports.
 - Jobs should keep report path fields suitable for automatic WebUI links, so a
   completed plan can expose the default report plus localized report clues
   without asking the operator to paste a filesystem path.
@@ -148,7 +188,8 @@ plain diagnostic dump. The visual contract is:
   `/api/jobs/{jobId}/report/html?lang=zh` and
   `/api/jobs/{jobId}/report/html?lang=en` and require `text/html` responses.
   The default `/api/jobs/{jobId}/report/html` endpoint remains the compatibility
-  link for existing report consumers.
+  link for existing report consumers and should serve the Simplified Chinese
+  report chrome by default.
 
 ## Evidence interaction
 
@@ -157,8 +198,9 @@ blocks should support fast copying:
 
 - Right-click a copyable cell or timeline item to copy its evidence text.
 - Click a copy button on raw evidence to copy a complete event block.
-- Raw event fields should be sorted and rendered in a collapsible evidence
-  block so large driver payloads do not overwhelm the page.
+- Raw event fields should be sorted and rendered in a flat collapsible evidence
+  block; command/output/script fields stay in nested copyable `<details>` so
+  large driver payloads do not overwhelm the page.
 - Raw normalized events should default to a closed summary, show only the first
   200 inline rows in 50-row native pages, and tell the operator exactly how
   many events are hidden.
@@ -185,8 +227,7 @@ show:
 - source
 - process id/name
 - path
-- command line
-- data
+- data with command/output fields hidden in copyable details
 
 When a job fails, the main dashboard should keep the report links, artifact
 paths, progress stage status, failed step title/message, exit code, and duration

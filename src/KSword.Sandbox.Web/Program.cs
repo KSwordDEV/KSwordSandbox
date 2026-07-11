@@ -26,6 +26,7 @@ builder.Services.AddSingleton(targetScanner);
 builder.Services.AddSingleton<RunbookProgressStore>();
 builder.Services.AddSingleton<RunbookBackgroundExecutionStore>();
 builder.Services.AddSingleton<VirusTotalSettingsStore>();
+builder.Services.AddSingleton<VirusTotalLookupCache>();
 builder.Services.AddSingleton<IRunbookExecutor, PowerShellRunbookExecutor>();
 builder.Services.AddHttpClient<VirusTotalLookupService>(client =>
 {
@@ -53,7 +54,7 @@ app.MapGet("/jobs/{jobId:guid}/live-events", (Guid jobId, SandboxJobService serv
     var job = service.GetJob(jobId);
     if (job is null)
     {
-        return Results.NotFound(new { error = $"Job {jobId:D} was not found in the in-memory Web host job list." });
+        return Results.NotFound(new { error = $"未找到任务 {jobId:D}；请刷新任务列表或重新上传样本 / Job was not found in the Web host job list." });
     }
 
     return Results.Content(LiveEventsPage.Render(job), "text/html; charset=utf-8");
@@ -66,11 +67,13 @@ app.MapGet("/health", () => Results.Ok(new
 }));
 app.MapGet("/api/config", (SandboxConfig currentConfig) => Results.Ok(currentConfig));
 app.MapGet("/api/settings/virustotal", (VirusTotalSettingsStore settingsStore) => Results.Ok(settingsStore.GetState()));
-app.MapPost("/api/settings/virustotal", (VirusTotalSettingsUpdateRequest request, VirusTotalSettingsStore settingsStore) =>
+app.MapPost("/api/settings/virustotal", (VirusTotalSettingsUpdateRequest request, VirusTotalSettingsStore settingsStore, VirusTotalLookupCache virusTotalCache) =>
 {
     try
     {
-        return Results.Ok(settingsStore.Save(request.ApiKey, request.Clear));
+        var state = settingsStore.Save(request.ApiKey, request.Clear);
+        virusTotalCache.Clear();
+        return Results.Ok(state);
     }
     catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
     {
@@ -83,7 +86,7 @@ app.MapGet("/api/jobs/{jobId:guid}", (Guid jobId, SandboxJobService service) =>
     var job = service.GetJob(jobId);
     return job is null ? Results.NotFound(new { error = $"Job {jobId:D} was not found in the in-memory Web host job list." }) : Results.Ok(job);
 });
-app.MapGet("/api/jobs/{jobId:guid}/virustotal", async Task<IResult> (Guid jobId, SandboxJobService service, VirusTotalLookupService virusTotal, CancellationToken cancellationToken) =>
+app.MapGet("/api/jobs/{jobId:guid}/virustotal", async Task<IResult> (Guid jobId, bool? persist, SandboxJobService service, VirusTotalLookupService virusTotal, CancellationToken cancellationToken) =>
 {
     var job = service.GetJob(jobId);
     if (job is null)
@@ -93,37 +96,76 @@ app.MapGet("/api/jobs/{jobId:guid}/virustotal", async Task<IResult> (Guid jobId,
 
     if (job.Sample is null || string.IsNullOrWhiteSpace(job.Sample.Sha256))
     {
-        return Results.Ok(new VirusTotalLookupResult
-        {
-            Sha256 = string.Empty,
-            Configured = false,
-            Queried = false,
-            Found = false,
-            Status = "missing_hash",
-            Message = "Sample SHA-256 is not available yet."
-        });
+        return Results.Ok(await virusTotal.LookupFileHashAsync(string.Empty, cancellationToken));
     }
 
     var result = await virusTotal.LookupFileHashAsync(job.Sample.Sha256, cancellationToken);
-    if (ShouldPersistVirusTotalResult(result))
+    if (persist == true && ShouldPersistVirusTotalResult(result))
     {
         service.UpsertEnrichmentEvent(
             jobId,
             result.ToRuleEvent(),
             $"VirusTotal hash lookup persisted to report: status={result.Status}, verdict={result.Verdict}.");
+        result = result with { PersistedToEnrichmentEvents = true };
     }
 
     return Results.Ok(result);
 });
+// POST /api/jobs/{jobId}/enrichments/virustotal is the explicit job enrichment
+// path. The live monitor GET stays display-only by default; this endpoint
+// performs the same hash-only lookup and persists only rule-safe VT lookup
+// evidence, leaving missing keys, auth failures, rate limits, and transport
+// failures as friendly non-persistent responses.
+app.MapPost("/api/jobs/{jobId:guid}/enrichments/virustotal", async Task<IResult> (Guid jobId, SandboxJobService service, VirusTotalLookupService virusTotal, CancellationToken cancellationToken) =>
+{
+    var job = service.GetJob(jobId);
+    if (job is null)
+    {
+        return Results.NotFound(new { error = $"Job {jobId:D} was not found in the in-memory Web host job list." });
+    }
+
+    var result = job.Sample is null || string.IsNullOrWhiteSpace(job.Sample.Sha256)
+        ? await virusTotal.LookupFileHashAsync(string.Empty, cancellationToken)
+        : await virusTotal.LookupFileHashAsync(job.Sample.Sha256, cancellationToken);
+    if (!ShouldPersistVirusTotalResult(result))
+    {
+        return Results.Ok(result with { PersistedToEnrichmentEvents = false });
+    }
+
+    try
+    {
+        service.UpsertEnrichmentEvent(
+            jobId,
+            result.ToRuleEvent(),
+            $"VirusTotal job enrichment persisted: status={result.Status}, verdict={result.Verdict}.");
+        return Results.Ok(result with { PersistedToEnrichmentEvents = true });
+    }
+    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or JsonException)
+    {
+        return Results.Problem(
+            title: "VirusTotal enrichment could not be persisted.",
+            detail: $"VirusTotal lookup succeeded but report enrichment for job {jobId:D} could not be updated: {ex.Message}",
+            statusCode: 500);
+    }
+});
 // GET /api/jobs/{jobId}/runbook/progress returns the latest UI-safe runbook
 // progress snapshot while a long live request is still running. Inputs are only
-// a job id; processing reads the Web host's in-memory progress store; the
-// response intentionally excludes PowerShell commands, stdout, and stderr.
+// a job id; processing reads both the Web host's in-memory progress store and
+// the durable runbook-progress.json snapshot, then returns the newest snapshot.
+// A page refresh, WebHost restart, or second Web worker therefore uses durable
+// progress instead of falling back to a fake pending view. The response
+// intentionally excludes PowerShell commands, stdout, and stderr.
 app.MapGet("/api/jobs/{jobId:guid}/runbook/progress", (Guid jobId, SandboxJobService service, RunbookProgressStore progressStore) =>
 {
-    if (progressStore.TryGet(jobId, out var snapshot))
+    var hasMemorySnapshot = progressStore.TryGet(jobId, out var memorySnapshot);
+    var hasDurableSnapshot = service.TryGetRunbookProgress(jobId, out var durableSnapshot);
+    if (hasMemorySnapshot || hasDurableSnapshot)
     {
-        return Results.Ok(snapshot);
+        var selectedSnapshot = SelectLatestRunbookProgressSnapshot(
+            hasMemorySnapshot ? memorySnapshot : null,
+            hasDurableSnapshot ? durableSnapshot : null);
+        progressStore.Update(selectedSnapshot);
+        return Results.Ok(selectedSnapshot);
     }
 
     var job = service.GetJob(jobId);
@@ -134,10 +176,12 @@ app.MapGet("/api/jobs/{jobId:guid}/runbook/progress", (Guid jobId, SandboxJobSer
 
     if (job.Runbook is null)
     {
-        return Results.NotFound(new { error = $"Job {jobId:D} does not have a runbook progress snapshot yet." });
+        return Results.NotFound(new { error = $"任务 {jobId:D} 还没有分析进度快照；请先创建计划并启动分析 / The job does not have a runbook progress snapshot yet." });
     }
 
-    return Results.Ok(progressStore.Begin(job.Runbook, SandboxRunbookExecutionMode.DryRun));
+    var initialSnapshot = progressStore.Begin(job.Runbook, SandboxRunbookExecutionMode.DryRun);
+    UpdateRunbookProgress(service, progressStore, initialSnapshot);
+    return Results.Ok(initialSnapshot);
 });
 // GET /api/jobs/{jobId}/runbook/background returns the WebUI server-side
 // background execution state. It complements the per-step progress endpoint:
@@ -147,7 +191,7 @@ app.MapGet("/api/jobs/{jobId:guid}/runbook/background", (Guid jobId, SandboxJobS
 {
     if (service.GetJob(jobId) is null)
     {
-        return Results.NotFound(new { error = $"Job {jobId:D} was not found in the in-memory Web host job list." });
+        return Results.NotFound(new { error = $"未找到任务 {jobId:D}；请刷新任务列表或重新上传样本 / Job was not found in the Web host job list." });
     }
 
     return Results.Ok(backgroundStore.Get(jobId));
@@ -208,10 +252,11 @@ app.MapGet("/api/jobs/{jobId:guid}/artifacts", (Guid jobId, SandboxJobService se
         {
             index.SchemaVersion,
             index.JobId,
-            index.RootPath,
+            RootPath = string.Empty,
+            RootPathPolicy = "server-owned-not-exposed",
             index.Producer,
             index.GeneratedAtUtc,
-            index.Collections,
+            Collections = index.Collections.Select(ToWebArtifactCollectionDescriptor).ToList(),
             Artifacts = index.Artifacts.Select(artifact => ToWebArtifactDescriptor(jobId, artifact)).ToList()
         });
     }
@@ -296,7 +341,7 @@ app.MapPost("/api/files/upload/start", async Task<IResult> (HttpRequest request,
     }
     catch (Exception ex) when (ex is ArgumentException or FileNotFoundException or InvalidOperationException or IOException or UnauthorizedAccessException)
     {
-        return Results.BadRequest(new { error = $"Upload-and-start analysis failed before a job could be created: {ex.Message}" });
+        return Results.BadRequest(new { error = $"上传并启动分析失败，任务尚未创建：{ex.Message} / Upload-and-start analysis failed before a job could be created." });
     }
 });
 app.MapPost("/api/jobs/plan", (SandboxSubmission submission, SandboxJobService service) =>
@@ -308,7 +353,7 @@ app.MapPost("/api/jobs/plan", (SandboxSubmission submission, SandboxJobService s
     }
     catch (Exception ex) when (ex is ArgumentException or FileNotFoundException or InvalidOperationException)
     {
-        return Results.BadRequest(new { error = $"Dry-run plan could not be created: {ex.Message}" });
+        return Results.BadRequest(new { error = $"无法创建分析计划：{ex.Message} / Dry-run plan could not be created." });
     }
 });
 app.MapPost("/api/jobs/{jobId:guid}/runbook/execute", async (Guid jobId, RunbookExecuteRequest request, SandboxJobService service, IRunbookExecutor executor, SandboxConfig currentConfig, RunbookProgressStore progressStore) =>
@@ -316,15 +361,15 @@ app.MapPost("/api/jobs/{jobId:guid}/runbook/execute", async (Guid jobId, Runbook
     var job = service.GetJob(jobId);
     if (job is null)
     {
-        return Results.NotFound(new { error = $"Job {jobId:D} was not found; create a dry-run plan before running a runbook." });
+        return Results.NotFound(new { error = $"未找到任务 {jobId:D}；请先上传样本并创建分析计划 / Job was not found; create a dry-run plan before running a runbook." });
     }
 
     if (job.Runbook is null)
     {
-        return Results.BadRequest(new { error = $"Job {jobId:D} does not have a runbook; recreate the dry-run plan for the selected executable." });
+        return Results.BadRequest(new { error = $"任务 {jobId:D} 没有可执行流程；请重新上传或重新创建分析计划 / Job does not have a runbook; recreate the dry-run plan for the selected executable." });
     }
 
-    var prepareError = TryPrepareRunbookExecution(job, request, currentConfig, progressStore, out var options);
+    var prepareError = TryPrepareRunbookExecution(job, request, service, currentConfig, progressStore, out var options);
     if (prepareError is not null)
     {
         return prepareError;
@@ -366,7 +411,7 @@ app.MapPost("/api/jobs/{jobId:guid}/guest-events/import", (Guid jobId, GuestEven
     }
     catch (Exception ex) when (ex is DirectoryNotFoundException or FileNotFoundException or InvalidDataException or IOException or UnauthorizedAccessException)
     {
-        return Results.BadRequest(new { error = $"Guest event import failed for job {jobId:D}: {ex.Message}" });
+        return Results.BadRequest(new { error = $"导入来宾事件失败，任务 {jobId:D}：{ex.Message} / Guest event import failed." });
     }
 });
 
@@ -380,7 +425,7 @@ app.Run();
 /// </summary>
 static object ToWebArtifactDescriptor(Guid jobId, ArtifactDescriptor artifact)
 {
-    var selector = FirstNonEmpty(artifact.RelativePath, artifact.SafeLink, artifact.ImportPath);
+    var selector = FirstNonEmpty(artifact.SafeLink, artifact.RelativePath, artifact.ImportPath);
     var href = string.IsNullOrWhiteSpace(selector)
         ? string.Empty
         : $"/api/jobs/{jobId:D}/artifacts/download?path={Uri.EscapeDataString(selector)}";
@@ -402,9 +447,106 @@ static object ToWebArtifactDescriptor(Guid jobId, ArtifactDescriptor artifact)
         artifact.Sha256,
         artifact.Hashes,
         artifact.CreatedAtUtc,
-        artifact.Metadata,
+        Metadata = ToWebArtifactMetadata(artifact.Metadata),
+        DownloadSelector = selector,
         DownloadHref = href
     };
+}
+
+/// <summary>
+/// Converts a host collection descriptor into the Web artifact-index shape.
+/// Inputs are host-side collection metadata that may contain local paths;
+/// processing keeps only safe selector fields and non-local metadata; the
+/// returned DTO is suitable for browser display without granting filesystem
+/// selector authority.
+/// </summary>
+static object ToWebArtifactCollectionDescriptor(ArtifactCollectionDescriptor collection)
+{
+    return new
+    {
+        collection.Name,
+        collection.Kind,
+        collection.Category,
+        collection.EvidenceRole,
+        collection.RelativePath,
+        collection.SafeLink,
+        collection.ImportPath,
+        collection.Enabled,
+        collection.Implemented,
+        collection.Status,
+        collection.Reason,
+        Metadata = ToWebArtifactMetadata(collection.Metadata)
+    };
+}
+
+/// <summary>
+/// Removes local absolute paths from Web-facing artifact metadata.
+/// Inputs are host/guest metadata dictionaries; processing filters explicit
+/// full-path keys and values that look like absolute Windows/URI paths; the
+/// method returns deterministic display metadata that still preserves counts,
+/// roles, statuses, and relative selectors.
+/// </summary>
+static IReadOnlyDictionary<string, string> ToWebArtifactMetadata(IDictionary<string, string>? metadata)
+{
+    var safeMetadata = new SortedDictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+    if (metadata is null)
+    {
+        return safeMetadata;
+    }
+
+    foreach (var pair in metadata)
+    {
+        if (IsWebSafeArtifactMetadata(pair.Key, pair.Value))
+        {
+            safeMetadata[pair.Key] = pair.Value;
+        }
+    }
+
+    return safeMetadata;
+}
+
+static bool IsWebSafeArtifactMetadata(string key, string? value)
+{
+    if (string.IsNullOrWhiteSpace(key))
+    {
+        return false;
+    }
+
+    if (key.Contains("fullPath", StringComparison.OrdinalIgnoreCase) ||
+        key.Equals("fullPath", StringComparison.OrdinalIgnoreCase) ||
+        key.Equals("hostFullPath", StringComparison.OrdinalIgnoreCase) ||
+        key.Equals("indexRoot", StringComparison.OrdinalIgnoreCase))
+    {
+        return false;
+    }
+
+    return !LooksLikeLocalAbsolutePath(value);
+}
+
+static bool LooksLikeLocalAbsolutePath(string? value)
+{
+    if (string.IsNullOrWhiteSpace(value))
+    {
+        return false;
+    }
+
+    var trimmed = value.Trim();
+    if (trimmed.StartsWith(@"\\", StringComparison.Ordinal) ||
+        trimmed.StartsWith("//", StringComparison.Ordinal))
+    {
+        return true;
+    }
+
+    if (trimmed.Length >= 3 &&
+        char.IsLetter(trimmed[0]) &&
+        trimmed[1] == ':' &&
+        (trimmed[2] == '\\' || trimmed[2] == '/'))
+    {
+        return true;
+    }
+
+    return Uri.TryCreate(trimmed, UriKind.Absolute, out var uri) &&
+        string.Equals(uri.Scheme, Uri.UriSchemeFile, StringComparison.OrdinalIgnoreCase);
 }
 
 static string FirstNonEmpty(params string?[] values)
@@ -435,7 +577,11 @@ static IResult StreamIndexedArtifact(Guid jobId, string path, SandboxJobService 
     {
         return Results.NotFound(new { error = ex.Message });
     }
-    catch (Exception ex) when (ex is ArgumentException or FileNotFoundException or IOException or UnauthorizedAccessException)
+    catch (ArgumentException ex)
+    {
+        return Results.BadRequest(new { error = $"Artifact download selector is invalid for job {jobId:D}: {ex.Message}" });
+    }
+    catch (Exception ex) when (ex is FileNotFoundException or IOException or UnauthorizedAccessException)
     {
         return Results.NotFound(new { error = $"Artifact download failed for job {jobId:D}: {ex.Message}" });
     }
@@ -450,13 +596,55 @@ static IResult StreamIndexedArtifact(Guid jobId, string path, SandboxJobService 
 /// </summary>
 static bool ShouldPersistVirusTotalResult(VirusTotalLookupResult result)
 {
-    if (!result.Configured || !result.Queried)
+    return result.CanPersistEnrichmentEvent;
+}
+
+/// <summary>
+/// Chooses the newest known runbook progress snapshot. Inputs are optional
+/// in-memory and durable snapshots; processing compares UpdatedAtUtc so a
+/// durable runbook-progress.json written by a prior host or worker can replace
+/// stale memory, while still keeping live memory if durable writes are behind.
+/// </summary>
+static SandboxRunbookProgressSnapshot SelectLatestRunbookProgressSnapshot(
+    SandboxRunbookProgressSnapshot? memorySnapshot,
+    SandboxRunbookProgressSnapshot? durableSnapshot)
+{
+    if (memorySnapshot is null)
     {
-        return false;
+        return durableSnapshot ?? throw new ArgumentNullException(nameof(durableSnapshot));
     }
 
-    return string.Equals(result.Status, VirusTotalLookupStatuses.Found, StringComparison.OrdinalIgnoreCase) ||
-        string.Equals(result.Status, VirusTotalLookupStatuses.NotFound, StringComparison.OrdinalIgnoreCase);
+    if (durableSnapshot is null)
+    {
+        return memorySnapshot;
+    }
+
+    return durableSnapshot.UpdatedAtUtc >= memorySnapshot.UpdatedAtUtc
+        ? durableSnapshot
+        : memorySnapshot;
+}
+
+/// <summary>
+/// Stores a progress snapshot in memory and best-effort durable state. Inputs
+/// are the job service, in-memory store, and one executor snapshot; processing
+/// writes only the UI-safe snapshot and deliberately ignores persistence
+/// failures so live Hyper-V execution is never aborted by report-folder locks.
+/// </summary>
+static void UpdateRunbookProgress(
+    SandboxJobService service,
+    RunbookProgressStore progressStore,
+    SandboxRunbookProgressSnapshot snapshot)
+{
+    progressStore.Update(snapshot);
+    try
+    {
+        service.SaveRunbookProgressSnapshot(snapshot);
+    }
+    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException or ArgumentException)
+    {
+        // Progress polling remains live from memory; durable progress is a
+        // best-effort recovery aid and must not interrupt VM execution.
+    }
 }
 
 /// <summary>
@@ -469,6 +657,7 @@ static bool ShouldPersistVirusTotalResult(VirusTotalLookupResult result)
 static IResult? TryPrepareRunbookExecution(
     AnalysisJob job,
     RunbookExecuteRequest request,
+    SandboxJobService service,
     SandboxConfig currentConfig,
     RunbookProgressStore progressStore,
     out SandboxRunbookExecutionOptions options)
@@ -476,11 +665,12 @@ static IResult? TryPrepareRunbookExecution(
     options = new SandboxRunbookExecutionOptions();
     if (job.Runbook is null)
     {
-        return Results.BadRequest(new { error = $"Job {job.JobId:D} does not have a runbook; recreate the dry-run plan for the selected executable." });
+        return Results.BadRequest(new { error = $"任务 {job.JobId:D} 没有可执行流程；请重新上传或重新创建分析计划 / Job does not have a runbook; recreate the dry-run plan for the selected executable." });
     }
 
     var mode = request.Live ? SandboxRunbookExecutionMode.Live : SandboxRunbookExecutionMode.DryRun;
-    progressStore.Begin(job.Runbook, mode);
+    var initialSnapshot = progressStore.Begin(job.Runbook, mode);
+    UpdateRunbookProgress(service, progressStore, initialSnapshot);
 
     var environmentVariables = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
     if (request.Live)
@@ -491,13 +681,14 @@ static IResult? TryPrepareRunbookExecution(
 
         if (!TryResolveEnvironmentSecret(secretName, out var guestPassword))
         {
-            progressStore.Fail(
+            var failureSnapshot = progressStore.Fail(
                 job.Runbook,
                 mode,
-                $"Live runbook needs guest credential secret '{secretName}' in the WebUI process, User, or Machine environment.");
+                $"实时虚拟机分析需要来宾密码环境变量 '{secretName}'，请在当前进程、用户或机器环境中设置 / Live runbook needs guest credential secret in the WebUI process, User, or Machine environment.");
+            UpdateRunbookProgress(service, progressStore, failureSnapshot);
             return Results.BadRequest(new
             {
-                error = $"Live runbook needs guest credential secret '{secretName}' in the WebUI process, User, or Machine environment. Run .\\install.ps1, choose the password reset option, then restart .\\run.ps1 -Mode WebUI."
+                error = $"实时虚拟机分析需要来宾密码环境变量 '{secretName}'。最省事的做法：运行 .\\install.ps1，选择重置密码，然后重启 .\\run.ps1 -Mode WebUI / Live runbook needs the guest credential secret. Run install.ps1, choose password reset, then restart run.ps1 -Mode WebUI."
             });
         }
 
@@ -512,7 +703,7 @@ static IResult? TryPrepareRunbookExecution(
         RequireElevatedPowerShell = true,
         WorkingDirectory = Directory.GetCurrentDirectory(),
         EnvironmentVariables = environmentVariables,
-        ProgressSink = new Progress<SandboxRunbookProgressSnapshot>(progressStore.Update)
+        ProgressSink = new Progress<SandboxRunbookProgressSnapshot>(snapshot => UpdateRunbookProgress(service, progressStore, snapshot))
     };
     return null;
 }
@@ -531,10 +722,10 @@ static async Task<RunbookExecutionOutcome> ExecuteRunbookAndImportAsync(
     IRunbookExecutor executor,
     SandboxRunbookExecutionOptions options)
 {
-    var job = service.GetJob(jobId) ?? throw new KeyNotFoundException($"Job {jobId:D} was not found before execution.");
+    var job = service.GetJob(jobId) ?? throw new KeyNotFoundException($"未找到任务 {jobId:D}，无法开始执行 / Job was not found before execution.");
     if (job.Runbook is null)
     {
-        throw new InvalidOperationException($"Job {jobId:D} does not have a runbook.");
+        throw new InvalidOperationException($"任务 {jobId:D} 没有可执行流程 / Job does not have a runbook.");
     }
 
     var result = await executor.ExecuteAsync(job.Runbook, options).ConfigureAwait(false);
@@ -548,11 +739,11 @@ static async Task<RunbookExecutionOutcome> ExecuteRunbookAndImportAsync(
         {
             updatedJob = service.ImportGuestEvents(jobId);
             guestImportSucceeded = true;
-            guestImportMessage = $"Guest events imported from {updatedJob.GuestEventsPath}.";
+            guestImportMessage = $"已导入来宾事件：{updatedJob.GuestEventsPath} / Guest events imported.";
         }
         catch (Exception ex) when (ex is DirectoryNotFoundException or FileNotFoundException or InvalidDataException or IOException or UnauthorizedAccessException)
         {
-            guestImportMessage = $"Runbook completed, but guest events were not imported automatically: {ex.Message}";
+            guestImportMessage = $"分析流程已结束，但未能自动导入来宾事件：{ex.Message} / Runbook completed, but guest events were not imported automatically.";
         }
     }
 
@@ -582,7 +773,7 @@ static RunbookBackgroundStartAttempt TryStartBackgroundRunbook(
             Attempted = true,
             Accepted = false,
             State = RunbookBackgroundExecutionStore.NotStarted,
-            Message = $"Job {jobId:D} was not found; create a dry-run plan before starting a runbook.",
+            Message = $"未找到任务 {jobId:D}；请先上传样本并创建分析计划 / Job was not found; create a dry-run plan before starting a runbook.",
             StatusCode = StatusCodes.Status404NotFound
         };
     }
@@ -594,7 +785,7 @@ static RunbookBackgroundStartAttempt TryStartBackgroundRunbook(
             Attempted = true,
             Accepted = false,
             State = RunbookBackgroundExecutionStore.NotStarted,
-            Message = $"Job {jobId:D} does not have a runbook; recreate the dry-run plan for the selected executable.",
+            Message = $"任务 {jobId:D} 没有可执行流程；请重新上传或重新创建分析计划 / Job does not have a runbook; recreate the dry-run plan for the selected executable.",
             StatusCode = StatusCodes.Status400BadRequest
         };
     }
@@ -606,7 +797,7 @@ static RunbookBackgroundStartAttempt TryStartBackgroundRunbook(
         var activeSnapshot = existingBackground with
         {
             Accepted = false,
-            Message = "Runbook execution is already queued or running for this job."
+            Message = "该任务的分析流程已经在排队或运行中 / Runbook execution is already queued or running for this job."
         };
         return new RunbookBackgroundStartAttempt
         {
@@ -619,16 +810,16 @@ static RunbookBackgroundStartAttempt TryStartBackgroundRunbook(
         };
     }
 
-    var prepareError = TryPrepareRunbookExecution(job, request, currentConfig, progressStore, out var options);
+    var prepareError = TryPrepareRunbookExecution(job, request, service, currentConfig, progressStore, out var options);
     if (prepareError is not null)
     {
-        var modeText = request.Live ? "live VM analysis" : "dry-run verification";
+        var modeText = request.Live ? "实时虚拟机分析 / live VM analysis" : "计划演练 / dry-run verification";
         return new RunbookBackgroundStartAttempt
         {
             Attempted = true,
             Accepted = false,
             State = RunbookBackgroundExecutionStore.Failed,
-            Message = $"Runbook {modeText} preflight failed. For live runs, verify the guest credential secret, Hyper-V readiness, and VM configuration; open the execution-flow page for the UI-safe failed step.",
+            Message = $"分析流程预检查失败（{modeText}）。实时模式请检查来宾密码、Hyper-V 就绪状态和 VM 配置；打开执行流程页查看安全失败步骤 / Runbook preflight failed. Verify guest credential, Hyper-V readiness, and VM configuration.",
             StatusCode = StatusCodes.Status400BadRequest
         };
     }

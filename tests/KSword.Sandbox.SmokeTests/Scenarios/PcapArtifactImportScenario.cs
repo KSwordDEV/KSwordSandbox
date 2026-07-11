@@ -3,6 +3,7 @@ using System.Net;
 using System.Text;
 using System.Text.Json;
 using KSword.Sandbox.Abstractions;
+using KSword.Sandbox.Abstractions.Artifacts;
 using KSword.Sandbox.Core.Jobs;
 using KSword.Sandbox.Core.Network;
 using KSword.Sandbox.Core.Rules;
@@ -26,6 +27,7 @@ internal sealed class PcapArtifactImportScenario : ISmokeTestScenario
         cancellationToken.ThrowIfCancellationRequested();
 
         await AssertDirectPcapImportAsync(context, cancellationToken);
+        await AssertSidecarOnlyNetworkImportAsync(context, cancellationToken);
         await AssertJobImportPcapMergeAsync(context, cancellationToken);
 
         return new SmokeTestResult
@@ -42,21 +44,85 @@ internal sealed class PcapArtifactImportScenario : ISmokeTestScenario
         Directory.CreateDirectory(root);
         var pcapPath = Path.Combine(root, "sample.pcap");
         await File.WriteAllBytesAsync(pcapPath, BuildSyntheticPcap(), cancellationToken);
+        await File.WriteAllLinesAsync(
+            Path.Combine(root, "sample.dns-http-tls.jsonl"),
+            BuildSyntheticSidecarJsonLines(),
+            cancellationToken);
+        await File.WriteAllLinesAsync(
+            Path.Combine(root, "sample.conn.log"),
+            BuildSyntheticSidecarLogLines(),
+            cancellationToken);
 
         var events = new PcapArtifactEventImporter().Import(pcapPath);
+        var importSummary = RequireEvent(events, "network.import.summary");
         var summary = RequireEvent(events, "pcap.summary");
         RequireEvent(events, "pcap.flow");
+        var nativeFlow = RequireEvent(events, "network.flow", "importSource", "pcap-native");
         var dns = RequireEvent(events, "pcap.dns");
         var http = RequireEvent(events, "pcap.http");
         var tls = RequireEvent(events, "pcap.tls");
+        var dnsQuery = RequireEvent(events, "dns.query", "importSource", "pcap-native");
+        var httpRequest = RequireEvent(events, "http.request", "importSource", "pcap-native");
+        var tlsConnection = RequireEvent(events, "tls.connection", "importSource", "pcap-native");
 
+        RequireData(importSummary, "schema", "network.telemetry.v1");
+        RequireData(importSummary, "tsharkRequired", "false");
+        RequireData(importSummary, "sidecarArtifactCount", "2");
+        RequireData(importSummary, "parseErrorCount", "1");
+        RequireData(importSummary, "collectionHealth", "degraded");
+        RequireNonEmpty(importSummary, "zhMessage");
+        RequireNonEmpty(importSummary, "zhHint");
         SmokeAssert.True(summary.Data.TryGetValue("protocols", out var protocols) && protocols.Contains("dns", StringComparison.OrdinalIgnoreCase) && protocols.Contains("http", StringComparison.OrdinalIgnoreCase) && protocols.Contains("tls", StringComparison.OrdinalIgnoreCase), "pcap.summary should expose protocol rollup metadata.");
+        RequireNonEmpty(summary, "zhMessage");
+        RequireData(dns, "schema", "network.telemetry.v1");
+        RequireData(dns, "eventKind", "dns");
+        RequireData(dns, "transportProtocol", "udp");
+        RequireData(dns, "flowKey", "udp|10.0.0.4:53000|8.8.8.8:53");
         RequireData(dns, "queryName", "beacon.example.test");
         RequireData(dns, "queryType", "A");
         RequireData(http, "method", "GET");
         RequireData(http, "host", "download.example.test");
         RequireData(http, "payloadMagic", "MZ");
         RequireData(tls, "sni", "secure.example.test");
+        AssertStandardNetworkEvent(dnsQuery, "dns", "pcap-native", "dns");
+        RequireData(dnsQuery, "queryName", "beacon.example.test");
+        RequireData(dnsQuery, "qname", "beacon.example.test");
+        RequireData(dnsQuery, "domain", "beacon.example.test");
+        RequireData(dnsQuery, "recordType", "A");
+        RequireData(dnsQuery, "serviceHint", "dns");
+        AssertStandardNetworkEvent(httpRequest, "http", "pcap-native", "http");
+        RequireData(httpRequest, "method", "GET");
+        RequireData(httpRequest, "requestUri", "/payload.exe");
+        RequireData(httpRequest, "url", "http://download.example.test/payload.exe");
+        RequireData(httpRequest, "contentType", "application/x-msdownload");
+        AssertStandardNetworkEvent(tlsConnection, "tls", "pcap-native", "tls");
+        RequireData(tlsConnection, "sni", "secure.example.test");
+        RequireData(tlsConnection, "serverName", "secure.example.test");
+        RequireData(tlsConnection, "handshakeType", "client_hello");
+        AssertStandardNetworkEvent(nativeFlow, "connection", "pcap-native", "dns");
+        RequireData(nativeFlow, "packetCount", "1");
+        RequireNonEmpty(nativeFlow, "payloadBytes");
+        RequireNonEmpty(nativeFlow, "byteCount");
+        RequireNonEmpty(nativeFlow, "firstSeenUtc");
+        RequireNonEmpty(nativeFlow, "lastSeenUtc");
+        SmokeAssert.True(events.Any(evt => string.Equals(evt.EventType, "dns.query", StringComparison.OrdinalIgnoreCase) && evt.Data.TryGetValue("queryName", out var sidecarQuery) && sidecarQuery == "sidecar.example.test"), "Sidecar JSONL DNS rows should import as dns.query.");
+        SmokeAssert.True(events.Any(evt => string.Equals(evt.EventType, "http.request", StringComparison.OrdinalIgnoreCase) && evt.Data.TryGetValue("host", out var sidecarHost) && sidecarHost == "api.example.test"), "Sidecar JSONL HTTP rows should import as http.request.");
+        SmokeAssert.True(events.Any(evt => string.Equals(evt.EventType, "tls.connection", StringComparison.OrdinalIgnoreCase) && evt.Data.TryGetValue("sni", out var sidecarSni) && sidecarSni == "sidecar-secure.example.test"), "Sidecar JSONL TLS rows should import as tls.connection.");
+        var sidecarLogFlow = RequireEvent(events, "network.flow", "uid", "loose-flow-1");
+        RequireData(sidecarLogFlow, "sidecarFormat", "log");
+        RequireData(sidecarLogFlow, "sourceIp", "10.0.0.4");
+        RequireData(sidecarLogFlow, "destinationIp", "198.51.100.77");
+        RequireData(sidecarLogFlow, "destinationPort", "8080");
+        RequireData(sidecarLogFlow, "state", "ESTABLISHED");
+        RequireData(sidecarLogFlow, "durationSeconds", "1.25");
+        RequireData(sidecarLogFlow, "byteCount", "512");
+        RequireData(sidecarLogFlow, "collectionHealth", "ok");
+        RequireNonEmpty(sidecarLogFlow, "zhMessage");
+        RequireNonEmpty(sidecarLogFlow, "zhHint");
+        var sidecarParseError = RequireEvent(events, "network.sidecar.parse_error");
+        RequireData(sidecarParseError, "collectionHealth", "degraded");
+        RequireNonEmpty(sidecarParseError, "zhMessage");
+        await AssertGuestManifestNetworkImportAsync(root, cancellationToken);
     }
 
     private static async Task AssertJobImportPcapMergeAsync(SmokeTestContext context, CancellationToken cancellationToken)
@@ -113,6 +179,28 @@ internal sealed class PcapArtifactImportScenario : ISmokeTestScenario
             }),
             cancellationToken);
         await File.WriteAllBytesAsync(Path.Combine(packetRoot, "sample.pcap"), BuildSyntheticPcap(), cancellationToken);
+        await File.WriteAllLinesAsync(
+            Path.Combine(packetRoot, "sample.conn.jsonl"),
+            [
+                JsonSerializer.Serialize(new
+                {
+                    eventType = "network.connection",
+                    timestamp = "2026-07-11T00:00:04Z",
+                    data = new
+                    {
+                        sourceIp = "10.0.0.4",
+                        sourcePort = "50244",
+                        destinationIp = "198.51.100.88",
+                        destinationPort = "8080",
+                        protocol = "tcp",
+                        uid = "job-sidecar-flow-1",
+                        processId = "4242",
+                        processName = "sample.exe",
+                        commandLine = "sample.exe --sidecar-network"
+                    }
+                })
+            ],
+            cancellationToken);
 
         var imported = service.ImportGuestEvents(job.JobId, eventsPath);
         var importedReportPath = imported.JsonReportPath ?? throw new InvalidOperationException("imported report missing");
@@ -120,10 +208,15 @@ internal sealed class PcapArtifactImportScenario : ISmokeTestScenario
             ?? throw new InvalidOperationException("report should deserialize");
 
         SmokeAssert.True(report.Events.Any(evt => string.Equals(evt.EventType, "pcap.summary", StringComparison.OrdinalIgnoreCase)), "Imported report should include pcap.summary.");
+        SmokeAssert.True(report.Events.Any(evt => string.Equals(evt.EventType, "network.import.summary", StringComparison.OrdinalIgnoreCase)), "Imported report should include network.import.summary.");
         SmokeAssert.True(report.Events.Any(evt => string.Equals(evt.EventType, "pcap.flow", StringComparison.OrdinalIgnoreCase)), "Imported report should include pcap.flow.");
+        SmokeAssert.True(report.Events.Any(evt => string.Equals(evt.EventType, "network.flow", StringComparison.OrdinalIgnoreCase)), "Imported report should include standardized network.flow.");
         SmokeAssert.True(report.Events.Any(evt => string.Equals(evt.EventType, "pcap.dns", StringComparison.OrdinalIgnoreCase)), "Imported report should include pcap.dns.");
         SmokeAssert.True(report.Events.Any(evt => string.Equals(evt.EventType, "pcap.http", StringComparison.OrdinalIgnoreCase)), "Imported report should include pcap.http.");
         SmokeAssert.True(report.Events.Any(evt => string.Equals(evt.EventType, "pcap.tls", StringComparison.OrdinalIgnoreCase)), "Imported report should include pcap.tls.");
+        SmokeAssert.True(report.Events.Any(evt => string.Equals(evt.EventType, "dns.query", StringComparison.OrdinalIgnoreCase)), "Imported report should include standardized dns.query.");
+        SmokeAssert.True(report.Events.Any(evt => string.Equals(evt.EventType, "http.request", StringComparison.OrdinalIgnoreCase)), "Imported report should include standardized http.request.");
+        SmokeAssert.True(report.Events.Any(evt => string.Equals(evt.EventType, "tls.connection", StringComparison.OrdinalIgnoreCase)), "Imported report should include standardized tls.connection.");
         var importedPcapSummary = report.Events.First(evt => string.Equals(evt.EventType, "pcap.summary", StringComparison.OrdinalIgnoreCase));
         foreach (var importedPcapEvent in report.Events.Where(evt => evt.EventType.StartsWith("pcap.", StringComparison.OrdinalIgnoreCase)))
         {
@@ -138,10 +231,269 @@ internal sealed class PcapArtifactImportScenario : ISmokeTestScenario
         SmokeAssert.True(importedPcapSummary.Data.TryGetValue("sourceArtifactRelativePath", out var pcapRelativePath) && pcapRelativePath == "packet-captures/sample.pcap", "Imported PCAP events should carry source artifact relative path.");
         SmokeAssert.True(importedPcapSummary.Data.TryGetValue("sourceArtifactSizeBytes", out var pcapSize) && long.Parse(pcapSize) > 0, "Imported PCAP events should carry source artifact size.");
         SmokeAssert.True(importedPcapSummary.Data.TryGetValue("sourceArtifactSha256", out var pcapSha256) && pcapSha256.Length == 64, "Imported PCAP events should carry source artifact SHA-256.");
+        var sidecarFlows = report.Events
+            .Where(evt =>
+                string.Equals(evt.EventType, "network.flow", StringComparison.OrdinalIgnoreCase) &&
+                evt.Data.TryGetValue("uid", out var uid) &&
+                uid == "job-sidecar-flow-1")
+            .ToList();
+        SmokeAssert.True(sidecarFlows.Count == 1, "Job-level network sidecar import should emit exactly one normalized flow without PCAP sidecar duplication.");
+        var sidecarFlow = sidecarFlows[0];
+        SmokeAssert.True(sidecarFlow.ProcessId == 4242, "Sidecar processId should be promoted to SandboxEvent.ProcessId.");
+        SmokeAssert.True(string.Equals(sidecarFlow.ProcessName, "sample.exe", StringComparison.OrdinalIgnoreCase), "Sidecar processName should be promoted to SandboxEvent.ProcessName.");
+        SmokeAssert.True(string.Equals(sidecarFlow.CommandLine, "sample.exe --sidecar-network", StringComparison.Ordinal), "Sidecar commandLine should be promoted to SandboxEvent.CommandLine.");
+        SmokeAssert.True(sidecarFlow.Data.TryGetValue("collectionName", out var sidecarCollection) && sidecarCollection == "network-sidecars", "Sidecar network events should preserve network-sidecars collection context.");
+        SmokeAssert.True(sidecarFlow.Data.TryGetValue("evidenceRole", out var sidecarRole) && sidecarRole == "network-telemetry-sidecar", "Sidecar network events should preserve sidecar evidence role.");
+        SmokeAssert.True(sidecarFlow.Data.TryGetValue("sourceArtifactRelativePath", out var sidecarRelativePath) && sidecarRelativePath == "packet-captures/sample.conn.jsonl", "Sidecar network events should preserve sidecar source artifact relative path.");
         SmokeAssert.True(report.Findings.Any(finding => finding.RuleId == "pcap-http-request-observed"), "PCAP HTTP rule should match imported pcap.http rows.");
         SmokeAssert.True(report.Findings.Any(finding => finding.RuleId == "pcap-dns-query-observed"), "PCAP DNS rule should match imported pcap.dns rows.");
         SmokeAssert.True(report.Findings.Any(finding => finding.RuleId == "pcap-tls-clienthello-observed"), "PCAP TLS rule should match imported pcap.tls rows.");
         SmokeAssert.True(report.Findings.Any(finding => finding.RuleId == "pcap-protocol-summary-placeholder"), "PCAP protocol summary rule should match imported pcap.summary protocol rollups.");
+    }
+
+    private static async Task AssertSidecarOnlyNetworkImportAsync(SmokeTestContext context, CancellationToken cancellationToken)
+    {
+        var root = Path.Combine(context.RuntimeRoot, "network-sidecar-only", Guid.NewGuid().ToString("N"));
+        var sidecarRoot = Path.Combine(root, "network-sidecars");
+        Directory.CreateDirectory(sidecarRoot);
+        var sidecarPath = Path.Combine(sidecarRoot, "events.jsonl");
+        await File.WriteAllLinesAsync(
+            sidecarPath,
+            [
+                JsonSerializer.Serialize(new
+                {
+                    event_type = "dns",
+                    timestamp = "2026-07-11T00:00:00Z",
+                    src_ip = "10.0.0.4",
+                    src_port = "5353",
+                    dest_ip = "8.8.8.8",
+                    dest_port = "53",
+                    proto = "UDP",
+                    dns = new
+                    {
+                        rrname = "eve-sidecar.example.test",
+                        rrtype = "A",
+                        rcode = "NOERROR"
+                    },
+                    process = new
+                    {
+                        pid = 5150,
+                        name = "sidecar-sample.exe",
+                        command_line = "sidecar-sample.exe --dns"
+                    }
+                }),
+                JsonSerializer.Serialize(new
+                {
+                    event_type = "http",
+                    timestamp = "2026-07-11T00:00:01Z",
+                    src_ip = "10.0.0.4",
+                    src_port = "50244",
+                    dest_ip = "198.51.100.90",
+                    dest_port = "8080",
+                    proto = "TCP",
+                    http = new
+                    {
+                        method = "POST",
+                        hostname = "api.sidecar-only.test",
+                        url = "/stage",
+                        user_agent = "SidecarOnlyUA",
+                        content_type = "application/json"
+                    }
+                }),
+                JsonSerializer.Serialize(new
+                {
+                    event_type = "tls",
+                    timestamp = "2026-07-11T00:00:02Z",
+                    src_ip = "10.0.0.4",
+                    src_port = "50245",
+                    dest_ip = "203.0.113.90",
+                    dest_port = "443",
+                    proto = "TCP",
+                    tls = new
+                    {
+                        sni = "tls.sidecar-only.test",
+                        version = "TLS 1.2",
+                        ja3 = new
+                        {
+                            hash = "0123456789abcdef0123456789abcdef"
+                        }
+                    }
+                }),
+                JsonSerializer.Serialize(new
+                {
+                    event_type = "flow",
+                    timestamp = "2026-07-11T00:00:03Z",
+                    src_ip = "10.0.0.4",
+                    src_port = "50246",
+                    dest_ip = "198.51.100.91",
+                    dest_port = "4444",
+                    proto = "TCP",
+                    uid = "sidecar-only-flow-1",
+                    state = "ESTABLISHED",
+                    duration = "3.50",
+                    bytes_toserver = "2048",
+                    pkts_toserver = "8"
+                })
+            ],
+            cancellationToken);
+
+        var events = new NetworkArtifactEventImporter().ImportGuestArtifacts(root, includeCanonicalDriverJsonl: false);
+        var summary = RequireEvent(events, "network.import.summary");
+        RequireData(summary, "pcapArtifactCount", "0");
+        RequireData(summary, "sidecarArtifactCount", "1");
+        RequireData(summary, "dnsEventCount", "1");
+        RequireData(summary, "httpEventCount", "1");
+        RequireData(summary, "tlsEventCount", "1");
+        RequireData(summary, "flowEventCount", "1");
+
+        var dns = RequireEvent(events, "dns.query", "queryName", "eve-sidecar.example.test");
+        RequireData(dns, "sourceIp", "10.0.0.4");
+        RequireData(dns, "destinationIp", "8.8.8.8");
+        RequireData(dns, "destinationPort", "53");
+        RequireData(dns, "queryType", "A");
+        RequireData(dns, "sourceArtifactRelativePath", "network-sidecars/events.jsonl");
+        RequireData(dns, "sourceArtifactKind", ArtifactKind.Log.ToString());
+        RequireData(dns, "collectionName", "network-sidecars");
+        RequireData(dns, "evidenceRole", "network-telemetry-sidecar");
+        RequireData(dns, "importMode", "sidecar-artifact");
+        SmokeAssert.True(dns.ProcessId == 5150, "Sidecar-only DNS process.pid should be promoted to SandboxEvent.ProcessId.");
+        SmokeAssert.True(string.Equals(dns.ProcessName, "sidecar-sample.exe", StringComparison.Ordinal), "Sidecar-only DNS process.name should be promoted to SandboxEvent.ProcessName.");
+        SmokeAssert.True(string.Equals(dns.CommandLine, "sidecar-sample.exe --dns", StringComparison.Ordinal), "Sidecar-only DNS process.command_line should be promoted to SandboxEvent.CommandLine.");
+
+        var http = RequireEvent(events, "http.request", "host", "api.sidecar-only.test");
+        RequireData(http, "method", "POST");
+        RequireData(http, "uri", "/stage");
+        RequireData(http, "url", "http://api.sidecar-only.test/stage");
+        RequireData(http, "destinationPort", "8080");
+        RequireData(http, "userAgent", "SidecarOnlyUA");
+        RequireData(http, "contentType", "application/json");
+
+        var tls = RequireEvent(events, "tls.connection", "sni", "tls.sidecar-only.test");
+        RequireData(tls, "destinationIp", "203.0.113.90");
+        RequireData(tls, "destinationPort", "443");
+        RequireData(tls, "tlsVersion", "TLS 1.2");
+        RequireData(tls, "ja3", "0123456789abcdef0123456789abcdef");
+
+        var flow = RequireEvent(events, "network.flow", "uid", "sidecar-only-flow-1");
+        RequireData(flow, "destinationIp", "198.51.100.91");
+        RequireData(flow, "destinationPort", "4444");
+        RequireData(flow, "state", "ESTABLISHED");
+        RequireData(flow, "durationSeconds", "3.50");
+        RequireData(flow, "byteCount", "2048");
+        RequireData(flow, "packetCount", "8");
+    }
+
+    private static async Task AssertGuestManifestNetworkImportAsync(string parentRoot, CancellationToken cancellationToken)
+    {
+        var guestRoot = Path.Combine(parentRoot, "manifest-import");
+        var packetRoot = Path.Combine(guestRoot, "packet-captures");
+        Directory.CreateDirectory(packetRoot);
+        var artifactsRoot = Path.Combine(guestRoot, "artifacts");
+        Directory.CreateDirectory(artifactsRoot);
+        var pcapPath = Path.Combine(packetRoot, "manifest.pcap");
+        var sidecarPath = Path.Combine(packetRoot, "manifest.conn.jsonl");
+        await File.WriteAllBytesAsync(pcapPath, BuildSyntheticPcap(), cancellationToken);
+        await File.WriteAllLinesAsync(
+            sidecarPath,
+            [
+                JsonSerializer.Serialize(new
+                {
+                    eventType = "network.connection",
+                    timestamp = "2026-07-11T00:00:00Z",
+                    data = new
+                    {
+                        sourceIp = "10.0.0.4",
+                        sourcePort = "50044",
+                        destinationIp = "203.0.113.44",
+                        destinationPort = "4443",
+                        protocol = "tcp",
+                        uid = "sidecar-conn-1"
+                    }
+                })
+            ],
+            cancellationToken);
+        var manifest = new ArtifactManifest
+        {
+            Producer = "KSword.Sandbox.Agent",
+            RuntimeRoot = guestRoot,
+            RootPath = artifactsRoot,
+            ImportRoot = guestRoot,
+            Collections =
+            [
+                new ArtifactCollectionDescriptor
+                {
+                    Name = "packet-captures",
+                    Kind = ArtifactKind.PacketCapture,
+                    Category = "packet-capture",
+                    EvidenceRole = "packet-capture",
+                    RelativePath = "packet-captures",
+                    ImportPath = "packet-captures",
+                    Enabled = true,
+                    Implemented = true,
+                    Status = "captured",
+                    Metadata =
+                    {
+                        ["captureSource"] = "external",
+                        ["importMode"] = "external-artifact"
+                    }
+                },
+                new ArtifactCollectionDescriptor
+                {
+                    Name = "network-sidecars",
+                    Kind = ArtifactKind.Log,
+                    Category = "telemetry",
+                    EvidenceRole = "network-telemetry-sidecar",
+                    RelativePath = "packet-captures",
+                    ImportPath = "packet-captures",
+                    Enabled = true,
+                    Implemented = true,
+                    Status = "captured",
+                    Metadata =
+                    {
+                        ["telemetryDomain"] = "network"
+                    }
+                }
+            ],
+            Artifacts =
+            [
+                new ArtifactDescriptor
+                {
+                    Kind = ArtifactKind.PacketCapture,
+                    Category = "packet-capture",
+                    Name = "manifest.pcap",
+                    RelativePath = "packet-captures/manifest.pcap",
+                    ImportPath = "packet-captures/manifest.pcap",
+                    EvidenceRole = "packet-capture",
+                    CollectionName = "packet-captures"
+                },
+                new ArtifactDescriptor
+                {
+                    Kind = ArtifactKind.Log,
+                    Category = "telemetry",
+                    Name = "manifest.conn.jsonl",
+                    RelativePath = "packet-captures/manifest.conn.jsonl",
+                    ImportPath = "packet-captures/manifest.conn.jsonl",
+                    EvidenceRole = "network-telemetry-sidecar",
+                    CollectionName = "network-sidecars",
+                    Metadata =
+                    {
+                        ["telemetryDomain"] = "network"
+                    }
+                }
+            ]
+        };
+        await File.WriteAllTextAsync(
+            Path.Combine(artifactsRoot, "manifest.json"),
+            JsonSerializer.Serialize(manifest, new JsonSerializerOptions(JsonSerializerDefaults.Web) { WriteIndented = true }),
+            cancellationToken);
+
+        var events = new NetworkArtifactEventImporter().ImportGuestArtifacts(guestRoot);
+        var summary = RequireEvent(events, "network.import.summary");
+        RequireData(summary, "manifestPresent", "true");
+        RequireData(summary, "pcapArtifactCount", "1");
+        RequireData(summary, "sidecarArtifactCount", "1");
+        SmokeAssert.True(events.Any(evt => string.Equals(evt.EventType, "pcap.dns", StringComparison.OrdinalIgnoreCase)), "Manifest PCAP should import pcap.dns.");
+        SmokeAssert.True(events.Any(evt => string.Equals(evt.EventType, "network.flow", StringComparison.OrdinalIgnoreCase) && evt.Data.TryGetValue("uid", out var uid) && uid == "sidecar-conn-1"), "Manifest sidecar JSONL should import connection rows as network.flow.");
     }
 
     private static SandboxEvent RequireEvent(IEnumerable<SandboxEvent> events, string eventType)
@@ -151,9 +503,122 @@ internal sealed class PcapArtifactImportScenario : ISmokeTestScenario
         return evt!;
     }
 
+    private static SandboxEvent RequireEvent(IEnumerable<SandboxEvent> events, string eventType, string dataKey, string expectedDataValue)
+    {
+        var evt = events.FirstOrDefault(candidate =>
+            string.Equals(candidate.EventType, eventType, StringComparison.OrdinalIgnoreCase) &&
+            candidate.Data.TryGetValue(dataKey, out var actual) &&
+            string.Equals(actual, expectedDataValue, StringComparison.Ordinal));
+        SmokeAssert.True(evt is not null, $"Expected {eventType} with {dataKey}={expectedDataValue}.");
+        return evt!;
+    }
+
     private static void RequireData(SandboxEvent evt, string key, string expected)
     {
         SmokeAssert.True(evt.Data.TryGetValue(key, out var actual) && string.Equals(actual, expected, StringComparison.Ordinal), $"{evt.EventType} should include {key}={expected}; actual={actual ?? "<missing>"}.");
+    }
+
+    private static void RequireNonEmpty(SandboxEvent evt, string key)
+    {
+        SmokeAssert.True(evt.Data.TryGetValue(key, out var actual) && !string.IsNullOrWhiteSpace(actual), $"{evt.EventType} should include non-empty {key}.");
+    }
+
+    private static void AssertStandardNetworkEvent(SandboxEvent evt, string eventKind, string importSource, string serviceHint)
+    {
+        RequireData(evt, "schema", "network.telemetry.v1");
+        RequireData(evt, "eventFamily", "network");
+        RequireData(evt, "eventKind", eventKind);
+        RequireData(evt, "importSource", importSource);
+        RequireData(evt, "serviceHint", serviceHint);
+        RequireData(evt, "collectionHealth", "ok");
+        RequireNonEmpty(evt, "sourceIp");
+        RequireNonEmpty(evt, "sourcePort");
+        RequireNonEmpty(evt, "destinationIp");
+        RequireNonEmpty(evt, "destinationPort");
+        RequireNonEmpty(evt, "sourceEndpoint");
+        RequireNonEmpty(evt, "destinationEndpoint");
+        RequireNonEmpty(evt, "flowKey");
+        RequireNonEmpty(evt, "collectionName");
+        RequireNonEmpty(evt, "evidenceRole");
+        RequireNonEmpty(evt, "sourceArtifactRelativePath");
+        RequireNonEmpty(evt, "sourceArtifactSha256");
+        RequireNonEmpty(evt, "zhMessage");
+        RequireNonEmpty(evt, "zhHint");
+    }
+
+    private static string[] BuildSyntheticSidecarJsonLines()
+    {
+        return
+        [
+            JsonSerializer.Serialize(new
+            {
+                eventType = "dns.query",
+                timestamp = "2026-07-11T00:00:00Z",
+                data = new
+                {
+                    sourceIp = "10.0.0.4",
+                    sourcePort = "5353",
+                    destinationIp = "8.8.4.4",
+                    destinationPort = "53",
+                    protocol = "udp",
+                    queryName = "sidecar.example.test",
+                    queryType = "AAAA",
+                    rcode = "NOERROR"
+                }
+            }),
+            JsonSerializer.Serialize(new
+            {
+                _source = new
+                {
+                    layers = new
+                    {
+                        ip = new Dictionary<string, string>
+                        {
+                            ["ip.src"] = "10.0.0.4",
+                            ["ip.dst"] = "198.51.100.30"
+                        },
+                        tcp = new Dictionary<string, string>
+                        {
+                            ["tcp.srcport"] = "50100",
+                            ["tcp.dstport"] = "80"
+                        },
+                        http = new Dictionary<string, string>
+                        {
+                            ["http.request.method"] = "POST",
+                            ["http.host"] = "api.example.test",
+                            ["http.request.uri"] = "/checkin",
+                            ["http.user_agent"] = "SidecarUA"
+                        }
+                    }
+                }
+            }),
+            JsonSerializer.Serialize(new
+            {
+                eventType = "tls",
+                timestamp = "2026-07-11T00:00:02Z",
+                data = new
+                {
+                    sourceIp = "10.0.0.4",
+                    sourcePort = "50101",
+                    destinationIp = "203.0.113.30",
+                    destinationPort = "443",
+                    protocol = "tcp",
+                    sni = "sidecar-secure.example.test",
+                    tlsVersion = "0x0303",
+                    ja3 = "sidecar-ja3"
+                }
+            })
+        ];
+    }
+
+    private static string[] BuildSyntheticSidecarLogLines()
+    {
+        return
+        [
+            "2026-07-11T00:00:03Z flow proto=tcp 10.0.0.4:50200 -> 198.51.100.77:8080 state=ESTABLISHED uid=loose-flow-1 duration=1.25 bytes=512 packets=4",
+            "plain status line without network fields should be ignored",
+            "{not-json"
+        ];
     }
 
     private static byte[] BuildSyntheticPcap()

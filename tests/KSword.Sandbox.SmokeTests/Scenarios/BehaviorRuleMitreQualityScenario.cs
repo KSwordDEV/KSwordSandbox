@@ -189,7 +189,24 @@ internal sealed class BehaviorRuleMitreQualityScenario : ISmokeTestScenario
         SmokeAssert.True(rule.EvidenceFields.Count > 0, $"Rule '{rule.Id}' should document evidence fields used for triage.");
         SmokeAssert.True(
             rule.EventTypes.Count > 0 &&
-            (rule.ContainsPath.Count > 0 || rule.ContainsCommandLine.Count > 0 || rule.DataKeys.Count > 0 || rule.DataContains.Count > 0),
+            (rule.ContainsPath.Count > 0 ||
+                rule.AllContainsPath.Count > 0 ||
+                rule.PathRegex.Count > 0 ||
+                rule.ContainsCommandLine.Count > 0 ||
+                rule.AllContainsCommandLine.Count > 0 ||
+                rule.CommandLineRegex.Count > 0 ||
+                rule.DataKeys.Count > 0 ||
+                rule.AllDataKeys.Count > 0 ||
+                rule.AbsentDataKeys.Count > 0 ||
+                rule.DataEquals.Count > 0 ||
+                rule.AllDataEquals.Count > 0 ||
+                rule.DataContains.Count > 0 ||
+                rule.AllDataContains.Count > 0 ||
+                rule.DataContainsAll.Count > 0 ||
+                rule.DataRegex.Count > 0 ||
+                rule.AllDataRegex.Count > 0 ||
+                rule.DataNumericRanges.Count > 0 ||
+                rule.AllDataNumericRanges.Count > 0),
             $"Rule '{rule.Id}' should be constrained by event type plus path, command-line, or data evidence.");
     }
 

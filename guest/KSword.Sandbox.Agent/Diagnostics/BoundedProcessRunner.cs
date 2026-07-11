@@ -186,7 +186,7 @@ internal sealed record BoundedCommandResult(
             stderr,
             TimedOut: true,
             ExceptionType: typeof(TimeoutException).FullName,
-            Message: $"Command exceeded {timeout.TotalMilliseconds:0} ms.",
+            Message: $"Command exceeded {timeout.TotalMilliseconds:0} ms. / 命令超过 {timeout.TotalMilliseconds:0} 毫秒仍未退出。",
             Timeout: timeout);
     }
 

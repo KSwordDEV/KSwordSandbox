@@ -17,11 +17,16 @@ internal sealed class VirusTotalLookupService
 
     private readonly HttpClient httpClient;
     private readonly VirusTotalSettingsStore settingsStore;
+    private readonly VirusTotalLookupCache cache;
 
-    public VirusTotalLookupService(HttpClient httpClient, VirusTotalSettingsStore settingsStore)
+    public VirusTotalLookupService(
+        HttpClient httpClient,
+        VirusTotalSettingsStore settingsStore,
+        VirusTotalLookupCache cache)
     {
         this.httpClient = httpClient;
         this.settingsStore = settingsStore;
+        this.cache = cache;
     }
 
     /// <summary>
@@ -41,6 +46,16 @@ internal sealed class VirusTotalLookupService
         }
 
         var normalizedHash = sha256.Trim().ToLowerInvariant();
+        if (!IsSha256Hex(normalizedHash))
+        {
+            return NotQueried(
+                normalizedHash,
+                configured: settingsStore.GetState().Configured,
+                VirusTotalLookupStatuses.InvalidHash,
+                "VirusTotal lookup requires a SHA-256 hash.",
+                "invalid_hash");
+        }
+
         var apiKey = settingsStore.ResolveApiKey();
         if (string.IsNullOrWhiteSpace(apiKey))
         {
@@ -51,6 +66,19 @@ internal sealed class VirusTotalLookupService
                 "VirusTotal API key is not configured.");
         }
 
+        var credentialScope = VirusTotalLookupCache.CreateCredentialScope(apiKey);
+        return await cache.GetOrAddAsync(
+            normalizedHash,
+            credentialScope,
+            token => LookupFileHashCoreAsync(normalizedHash, apiKey, token),
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<VirusTotalLookupResult> LookupFileHashCoreAsync(
+        string normalizedHash,
+        string apiKey,
+        CancellationToken cancellationToken)
+    {
         try
         {
             using var request = new HttpRequestMessage(HttpMethod.Get, new Uri(BaseUri, $"files/{Uri.EscapeDataString(normalizedHash)}"));
@@ -109,16 +137,21 @@ internal sealed class VirusTotalLookupService
             using var document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken).ConfigureAwait(false);
             return ParseFileReport(normalizedHash, document.RootElement);
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException or IOException)
         {
+            var timedOut = ex is TaskCanceledException;
             return NotQueried(
                 normalizedHash,
                 configured: true,
-                VirusTotalLookupStatuses.LookupFailed,
-                ex is TaskCanceledException
+                timedOut ? VirusTotalLookupStatuses.Timeout : VirusTotalLookupStatuses.LookupFailed,
+                timedOut
                     ? "VirusTotal lookup failed or timed out."
                     : "VirusTotal lookup failed.",
-                ex is TaskCanceledException ? "timeout" : "transport_or_parse_error");
+                timedOut ? "timeout" : "transport_or_parse_error");
         }
     }
 
@@ -157,6 +190,21 @@ internal sealed class VirusTotalLookupService
         var harmless = ReadStat(stats, "harmless");
         var undetected = ReadStat(stats, "undetected");
         var timeout = ReadStat(stats, "timeout");
+        var confirmedTimeout = ReadStat(stats, "confirmed-timeout");
+        var failure = ReadStat(stats, "failure");
+        var typeUnsupported = ReadStat(stats, "type-unsupported");
+        var engineCounts = new VirusTotalEngineCounts
+        {
+            Malicious = malicious,
+            Suspicious = suspicious,
+            Harmless = harmless,
+            Undetected = undetected,
+            Timeout = timeout,
+            ConfirmedTimeout = confirmedTimeout,
+            Failure = failure,
+            TypeUnsupported = typeUnsupported,
+            Total = stats.Values.Where(value => value > 0).Sum()
+        };
         var verdict = ResolveVerdict(malicious, suspicious, harmless, undetected);
 
         return new VirusTotalLookupResult
@@ -176,6 +224,7 @@ internal sealed class VirusTotalLookupService
             HarmlessCount = harmless,
             UndetectedCount = undetected,
             TimeoutCount = timeout,
+            EngineCounts = engineCounts,
             LastAnalysisStats = stats
         };
     }
@@ -223,6 +272,13 @@ internal sealed class VirusTotalLookupService
     private static int ReadStat(IReadOnlyDictionary<string, int> stats, string key)
     {
         return stats.TryGetValue(key, out var value) ? value : 0;
+    }
+
+    private static bool IsSha256Hex(string value)
+    {
+        return value.Length == 64 && value.All(static ch =>
+            (ch >= '0' && ch <= '9') ||
+            (ch >= 'a' && ch <= 'f'));
     }
 
     private static string ResolveVerdict(int malicious, int suspicious, int harmless, int undetected)

@@ -36,7 +36,7 @@ internal sealed class RunbookProgressStore
             CurrentStepId = null,
             CurrentStepTitle = null,
             Success = null,
-            Message = "Runbook execution has been queued by the WebUI.",
+            Message = "分析任务已进入 WebUI 队列 / Runbook execution has been queued by the WebUI.",
             StartedAtUtc = now,
             UpdatedAtUtc = now,
             Duration = TimeSpan.Zero,
@@ -51,7 +51,7 @@ internal sealed class RunbookProgressStore
             }).ToList()
         };
 
-        snapshots[runbook.JobId] = snapshot;
+        Update(snapshot);
         return snapshot;
     }
 
@@ -63,7 +63,10 @@ internal sealed class RunbookProgressStore
     public void Update(SandboxRunbookProgressSnapshot snapshot)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
-        snapshots[snapshot.JobId] = snapshot;
+        snapshots.AddOrUpdate(
+            snapshot.JobId,
+            snapshot,
+            (_, existing) => ShouldReplaceSnapshot(snapshot, existing) ? snapshot : existing);
     }
 
     /// <summary>
@@ -107,7 +110,7 @@ internal sealed class RunbookProgressStore
             }).ToList()
         };
 
-        snapshots[runbook.JobId] = snapshot;
+        Update(snapshot);
         return snapshot;
     }
 
@@ -119,5 +122,27 @@ internal sealed class RunbookProgressStore
     public bool TryGet(Guid jobId, out SandboxRunbookProgressSnapshot snapshot)
     {
         return snapshots.TryGetValue(jobId, out snapshot!);
+    }
+
+    private static bool ShouldReplaceSnapshot(
+        SandboxRunbookProgressSnapshot candidate,
+        SandboxRunbookProgressSnapshot existing)
+    {
+        if (candidate.UpdatedAtUtc != existing.UpdatedAtUtc)
+        {
+            return candidate.UpdatedAtUtc > existing.UpdatedAtUtc;
+        }
+
+        if (candidate.ExecutedSteps != existing.ExecutedSteps)
+        {
+            return candidate.ExecutedSteps > existing.ExecutedSteps;
+        }
+
+        if (candidate.CompletedSteps != existing.CompletedSteps)
+        {
+            return candidate.CompletedSteps > existing.CompletedSteps;
+        }
+
+        return candidate.Success.HasValue && !existing.Success.HasValue;
     }
 }

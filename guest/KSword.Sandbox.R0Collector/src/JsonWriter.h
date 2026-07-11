@@ -72,6 +72,11 @@ private:
     std::string json_ = "{";
 };
 
+void AddCollectorAttributionFields(
+    JsonDataObjectBuilder& data,
+    const std::string& subjectKind,
+    const std::string& subjectRole);
+
 struct SandboxEventFields {
     std::string eventType;
     std::string source = kCollectorSource;
@@ -101,7 +106,8 @@ public:
         file_.open(std::filesystem::path(outputPath), std::ios::out | std::ios::binary | std::ios::trunc);
         if (!file_.is_open()) {
             if (error != nullptr) {
-                *error = L"Unable to open output JSONL file: " + outputPath;
+                *error = L"Unable to open output JSONL file: " + outputPath +
+                    L" / \u65e0\u6cd5\u6253\u5f00\u8f93\u51fa JSONL \u6587\u4ef6\uff1a" + outputPath;
             }
             return false;
         }

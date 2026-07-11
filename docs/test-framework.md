@@ -1,5 +1,10 @@
 # Smoke test framework
 
+Historical framework note. The current operator-facing smoke overview is
+`docs/testing.md`, and the command source of truth is `docs/verification.md`.
+Keep this page limited to smoke-test project structure; do not add duplicate
+quality-gate command blocks here.
+
 The smoke-test project is a console project, so the first framework layer uses
 small scenario classes instead of adding a test framework dependency.
 

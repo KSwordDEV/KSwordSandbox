@@ -1,18 +1,22 @@
 using System.Globalization;
 using System.Net;
 using System.Net.NetworkInformation;
+using System.Runtime.Versioning;
+using System.Security;
 using System.Security.Cryptography;
 using System.Text;
 using KSword.Sandbox.Agent.Diagnostics;
 using KSword.Sandbox.Abstractions;
+using Microsoft.Win32;
 
 namespace KSword.Sandbox.Agent.Collection;
 
 /// <summary>
-/// Captures TCP connection baselines plus guest DNS/cache/netstat state.
+/// Captures TCP connection baselines plus guest DNS/cache/hosts/proxy/netstat state.
 /// Inputs are BeforeStart and AfterRun probe phases; processing queries
 /// low-privilege network APIs and bounded helper commands; CollectAsync returns
-/// TCP deltas, DNS cache deltas, listener deltas, and netstat diagnostics.
+/// TCP deltas, DNS cache deltas, hosts/proxy snapshots, listener deltas, and
+/// netstat diagnostics.
 /// </summary>
 internal sealed class TcpConnectionDiffProbe : IGuestProbe
 {
@@ -74,6 +78,8 @@ internal sealed class TcpConnectionDiffProbe : IGuestProbe
             var baselineEvents = new List<SandboxEvent>
             {
                 CreateDnsSnapshotEvent(phase, baselineNetworkState.DnsCacheEntries),
+                CreateHostsSnapshotEvent(phase, baselineNetworkState.HostsFile),
+                CreateProxySnapshotEvent(phase, baselineNetworkState.ProxySettings),
                 CreateNetstatSnapshotEvent(phase, baselineNetworkState.NetstatRows, emittedRows: 0, truncated: false),
                 CreateListenerSnapshotEvent(phase, "tcp", baselineNetworkState.TcpListeners.Count),
                 CreateListenerSnapshotEvent(phase, "udp", baselineNetworkState.UdpListeners.Count)
@@ -112,6 +118,12 @@ internal sealed class TcpConnectionDiffProbe : IGuestProbe
         events.Add(CreateDnsSnapshotEvent(phase, currentNetworkState.DnsCacheEntries));
         events.Add(CreateDnsDiffSummaryEvent(baselineNetworkState.DnsCacheEntries, currentNetworkState.DnsCacheEntries, phase));
         events.AddRange(CreateDnsCacheDeltaEvents(baselineNetworkState.DnsCacheEntries, currentNetworkState.DnsCacheEntries, phase));
+        events.Add(CreateHostsSnapshotEvent(phase, currentNetworkState.HostsFile));
+        events.Add(CreateHostsDiffSummaryEvent(baselineNetworkState.HostsFile, currentNetworkState.HostsFile, phase));
+        events.AddRange(CreateHostsDeltaEvents(baselineNetworkState.HostsFile, currentNetworkState.HostsFile, phase));
+        events.Add(CreateProxySnapshotEvent(phase, currentNetworkState.ProxySettings));
+        events.Add(CreateProxyDiffSummaryEvent(baselineNetworkState.ProxySettings, currentNetworkState.ProxySettings, phase));
+        events.AddRange(CreateProxyDeltaEvents(baselineNetworkState.ProxySettings, currentNetworkState.ProxySettings, phase));
         events.Add(CreateNetstatSnapshotEvent(
             phase,
             currentNetworkState.NetstatRows,
@@ -178,6 +190,255 @@ internal sealed class TcpConnectionDiffProbe : IGuestProbe
                 ["sourceTool"] = "ipconfig /displaydns"
             }
         };
+    }
+
+    /// <summary>
+    /// Creates a hosts-file snapshot summary event.
+    /// Inputs are probe phase and hosts snapshot; processing stores stable
+    /// counts and hashes without dumping the full file; the method returns an
+    /// event suitable for events.json diffing.
+    /// </summary>
+    private static SandboxEvent CreateHostsSnapshotEvent(ProbePhase phase, HostsFileSnapshot hostsFile)
+    {
+        return new SandboxEvent
+        {
+            EventType = "network.hosts.snapshot",
+            Source = "guest",
+            Path = hostsFile.Path,
+            Data =
+            {
+                ["phase"] = ToPhaseLabel(phase),
+                ["sourcePath"] = hostsFile.Path,
+                ["exists"] = hostsFile.Exists.ToString(CultureInfo.InvariantCulture).ToLowerInvariant(),
+                ["lineCount"] = hostsFile.LineCount.ToString(CultureInfo.InvariantCulture),
+                ["entryCount"] = hostsFile.Entries.Count.ToString(CultureInfo.InvariantCulture),
+                ["snapshotHash"] = SnapshotHash(hostsFile.Entries.Keys),
+                ["stableKey"] = "address|hostName",
+                ["sourceTool"] = "hosts-file"
+            }
+        };
+    }
+
+    /// <summary>
+    /// Creates a hosts-file diff summary between before and after snapshots.
+    /// Inputs are baseline/current hosts snapshots and phase; processing stores
+    /// counts and hashes; the method returns one summary event.
+    /// </summary>
+    private static SandboxEvent CreateHostsDiffSummaryEvent(HostsFileSnapshot before, HostsFileSnapshot after, ProbePhase phase)
+    {
+        return new SandboxEvent
+        {
+            EventType = "network.hosts.diff",
+            Source = "guest",
+            Path = after.Path,
+            Data =
+            {
+                ["phase"] = ToPhaseLabel(phase),
+                ["sourcePath"] = after.Path,
+                ["beforeExists"] = before.Exists.ToString(CultureInfo.InvariantCulture).ToLowerInvariant(),
+                ["afterExists"] = after.Exists.ToString(CultureInfo.InvariantCulture).ToLowerInvariant(),
+                ["beforeEntryCount"] = before.Entries.Count.ToString(CultureInfo.InvariantCulture),
+                ["afterEntryCount"] = after.Entries.Count.ToString(CultureInfo.InvariantCulture),
+                ["addedCount"] = CountMissing(before.Entries, after.Entries).ToString(CultureInfo.InvariantCulture),
+                ["removedCount"] = CountMissing(after.Entries, before.Entries).ToString(CultureInfo.InvariantCulture),
+                ["beforeSnapshotHash"] = SnapshotHash(before.Entries.Keys),
+                ["afterSnapshotHash"] = SnapshotHash(after.Entries.Keys),
+                ["contentHashChanged"] = (!string.Equals(before.ContentSha256, after.ContentSha256, StringComparison.OrdinalIgnoreCase)).ToString(CultureInfo.InvariantCulture).ToLowerInvariant(),
+                ["stableKey"] = "address|hostName",
+                ["sourceTool"] = "hosts-file"
+            }
+        };
+    }
+
+    /// <summary>
+    /// Creates bounded hosts-file added/removed events.
+    /// Inputs are before/after hosts snapshots and phase; processing compares
+    /// stable address/host keys; the method returns row-level events.
+    /// </summary>
+    private static IReadOnlyList<SandboxEvent> CreateHostsDeltaEvents(HostsFileSnapshot before, HostsFileSnapshot after, ProbePhase phase)
+    {
+        var events = new List<SandboxEvent>();
+        AddBoundedDiffEvents(events, before.Entries, after.Entries, "network.hosts.added", "added", phase, CreateHostsEntryEvent);
+        AddBoundedDiffEvents(events, after.Entries, before.Entries, "network.hosts.removed", "removed", phase, CreateHostsEntryEvent);
+        return events;
+    }
+
+    /// <summary>
+    /// Creates one hosts-file entry event.
+    /// Inputs are event type, change label, entry, and phase; processing copies
+    /// host/address fields and stable hashes; the method returns an event.
+    /// </summary>
+    private static SandboxEvent CreateHostsEntryEvent(string eventType, string change, HostsEntrySnapshot entry, ProbePhase phase)
+    {
+        return new SandboxEvent
+        {
+            EventType = eventType,
+            Source = "guest",
+            Path = entry.SourcePath,
+            Data =
+            {
+                ["phase"] = ToPhaseLabel(phase),
+                ["change"] = change,
+                ["sourcePath"] = entry.SourcePath,
+                ["entryHash"] = entry.Key,
+                ["address"] = entry.Address,
+                ["hostName"] = entry.HostName,
+                ["entry"] = entry.Entry,
+                ["sourceTool"] = "hosts-file"
+            }
+        };
+    }
+
+    /// <summary>
+    /// Creates a proxy settings snapshot summary event.
+    /// Inputs are probe phase and proxy snapshot; processing stores stable
+    /// counts, common setting values, and a hash across registry/environment/
+    /// WinHTTP proxy sources; the method returns one event.
+    /// </summary>
+    private static SandboxEvent CreateProxySnapshotEvent(ProbePhase phase, ProxySettingsSnapshot proxySettings)
+    {
+        var evt = new SandboxEvent
+        {
+            EventType = "network.proxy.snapshot",
+            Source = "guest",
+            Data =
+            {
+                ["phase"] = ToPhaseLabel(phase),
+                ["settingCount"] = proxySettings.Settings.Count.ToString(CultureInfo.InvariantCulture),
+                ["registrySettingCount"] = proxySettings.Settings.Values.Count(static setting => string.Equals(setting.Source, "registry", StringComparison.OrdinalIgnoreCase)).ToString(CultureInfo.InvariantCulture),
+                ["environmentSettingCount"] = proxySettings.Settings.Values.Count(static setting => string.Equals(setting.Source, "environment", StringComparison.OrdinalIgnoreCase)).ToString(CultureInfo.InvariantCulture),
+                ["winHttpSettingCount"] = proxySettings.Settings.Values.Count(static setting => string.Equals(setting.Source, "winhttp", StringComparison.OrdinalIgnoreCase)).ToString(CultureInfo.InvariantCulture),
+                ["snapshotHash"] = ProxySnapshotHash(proxySettings),
+                ["stableKey"] = "source|scope|settingName",
+                ["sourceTool"] = "HKCU Internet Settings; environment; netsh winhttp show proxy"
+            }
+        };
+
+        AddIfNotEmpty(evt.Data, "internetSettingsProxyEnable", FindProxySettingValue(proxySettings, "registry", "ProxyEnable"));
+        AddIfNotEmpty(evt.Data, "internetSettingsProxyServer", FindProxySettingValue(proxySettings, "registry", "ProxyServer"));
+        AddIfNotEmpty(evt.Data, "internetSettingsProxyOverride", FindProxySettingValue(proxySettings, "registry", "ProxyOverride"));
+        AddIfNotEmpty(evt.Data, "internetSettingsAutoConfigUrl", FindProxySettingValue(proxySettings, "registry", "AutoConfigURL"));
+        AddIfNotEmpty(evt.Data, "internetSettingsAutoDetect", FindProxySettingValue(proxySettings, "registry", "AutoDetect"));
+        AddIfNotEmpty(evt.Data, "winHttpProxySummary", FindProxySettingValue(proxySettings, "winhttp", "WinHttpProxy"));
+        AddIfNotEmpty(evt.Data, "httpProxyEnvironment", FindProxySettingValue(proxySettings, "environment", "HTTP_PROXY"));
+        AddIfNotEmpty(evt.Data, "httpsProxyEnvironment", FindProxySettingValue(proxySettings, "environment", "HTTPS_PROXY"));
+        AddIfNotEmpty(evt.Data, "noProxyEnvironment", FindProxySettingValue(proxySettings, "environment", "NO_PROXY"));
+        return evt;
+    }
+
+    /// <summary>
+    /// Creates a proxy-settings diff summary.
+    /// Inputs are before/after proxy snapshots and phase; processing compares
+    /// source/scope/name keys and value signatures; the method returns one
+    /// compact diff summary event.
+    /// </summary>
+    private static SandboxEvent CreateProxyDiffSummaryEvent(ProxySettingsSnapshot before, ProxySettingsSnapshot after, ProbePhase phase)
+    {
+        return new SandboxEvent
+        {
+            EventType = "network.proxy.diff",
+            Source = "guest",
+            Data =
+            {
+                ["phase"] = ToPhaseLabel(phase),
+                ["beforeSettingCount"] = before.Settings.Count.ToString(CultureInfo.InvariantCulture),
+                ["afterSettingCount"] = after.Settings.Count.ToString(CultureInfo.InvariantCulture),
+                ["addedCount"] = CountMissing(before.Settings, after.Settings).ToString(CultureInfo.InvariantCulture),
+                ["removedCount"] = CountMissing(after.Settings, before.Settings).ToString(CultureInfo.InvariantCulture),
+                ["modifiedCount"] = CountModified(before.Settings, after.Settings).ToString(CultureInfo.InvariantCulture),
+                ["beforeSnapshotHash"] = ProxySnapshotHash(before),
+                ["afterSnapshotHash"] = ProxySnapshotHash(after),
+                ["stableKey"] = "source|scope|settingName",
+                ["sourceTool"] = "HKCU Internet Settings; environment; netsh winhttp show proxy"
+            }
+        };
+    }
+
+    /// <summary>
+    /// Creates bounded proxy added/removed/modified events.
+    /// Inputs are before/after proxy snapshots and phase; processing compares
+    /// values by signature and caps row-level volume; the method returns events.
+    /// </summary>
+    private static IReadOnlyList<SandboxEvent> CreateProxyDeltaEvents(ProxySettingsSnapshot before, ProxySettingsSnapshot after, ProbePhase phase)
+    {
+        var events = new List<SandboxEvent>();
+        AddBoundedDiffEvents(events, before.Settings, after.Settings, "network.proxy.added", "added", phase, CreateProxySettingEvent);
+        AddBoundedDiffEvents(events, after.Settings, before.Settings, "network.proxy.removed", "removed", phase, CreateProxySettingEvent);
+
+        var emitted = 0;
+        foreach (var (key, current) in after.Settings.OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase))
+        {
+            if (!before.Settings.TryGetValue(key, out var previous) ||
+                string.Equals(previous.Signature, current.Signature, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            if (emitted >= MaxDeltaEventsPerKind)
+            {
+                events.Add(CreateTruncatedEvent("network.proxy.modified.truncated", "modified", phase, after.Settings.Count, emitted));
+                break;
+            }
+
+            events.Add(CreateProxySettingEvent("network.proxy.modified", "modified", current, phase, previous));
+            emitted++;
+        }
+
+        return events;
+    }
+
+    /// <summary>
+    /// Creates one proxy-setting row event without previous-value context.
+    /// Inputs are event type, change label, current setting, and phase; the
+    /// method delegates to the richer modified-event factory.
+    /// </summary>
+    private static SandboxEvent CreateProxySettingEvent(
+        string eventType,
+        string change,
+        ProxySettingSnapshot setting,
+        ProbePhase phase)
+    {
+        return CreateProxySettingEvent(eventType, change, setting, phase, previous: null);
+    }
+
+    /// <summary>
+    /// Creates one proxy-setting row event.
+    /// Inputs are event type, change label, current setting, phase, and optional
+    /// previous setting; processing copies stable key/value hashes and bounded
+    /// values; the method returns an event.
+    /// </summary>
+    private static SandboxEvent CreateProxySettingEvent(
+        string eventType,
+        string change,
+        ProxySettingSnapshot setting,
+        ProbePhase phase,
+        ProxySettingSnapshot? previous = null)
+    {
+        var evt = new SandboxEvent
+        {
+            EventType = eventType,
+            Source = "guest",
+            Data =
+            {
+                ["phase"] = ToPhaseLabel(phase),
+                ["change"] = change,
+                ["settingKey"] = setting.Key,
+                ["source"] = setting.Source,
+                ["scope"] = setting.Scope,
+                ["settingName"] = setting.Name,
+                ["settingValue"] = Truncate(setting.Value ?? string.Empty, 512),
+                ["valueHash"] = setting.ValueHash,
+                ["sourceTool"] = setting.SourceTool
+            }
+        };
+
+        if (previous is not null)
+        {
+            evt.Data["previousValueHash"] = previous.ValueHash;
+            evt.Data["previousSettingValue"] = Truncate(previous.Value ?? string.Empty, 512);
+        }
+
+        return evt;
     }
 
     /// <summary>
@@ -519,6 +780,55 @@ internal sealed class TcpConnectionDiffProbe : IGuestProbe
     }
 
     /// <summary>
+    /// Counts changed signatures for keys present in both snapshots.
+    /// Inputs are before/after dictionaries; processing compares item
+    /// signatures; the method returns modified item count.
+    /// </summary>
+    private static int CountModified(
+        IReadOnlyDictionary<string, ProxySettingSnapshot> before,
+        IReadOnlyDictionary<string, ProxySettingSnapshot> after)
+    {
+        var count = 0;
+        foreach (var (key, current) in after)
+        {
+            if (before.TryGetValue(key, out var previous) &&
+                !string.Equals(previous.Signature, current.Signature, StringComparison.Ordinal))
+            {
+                count++;
+            }
+        }
+
+        return count;
+    }
+
+    /// <summary>
+    /// Hashes proxy setting keys and value hashes for stable summaries.
+    /// Inputs are a proxy snapshot; processing sorts source/scope/name rows;
+    /// the method returns a SHA-256 snapshot hash.
+    /// </summary>
+    private static string ProxySnapshotHash(ProxySettingsSnapshot proxySettings)
+    {
+        return SnapshotHash(proxySettings.Settings.Values.Select(setting => $"{setting.Key}|{setting.ValueHash}"));
+    }
+
+    /// <summary>
+    /// Reads one proxy setting value from a snapshot by source/name.
+    /// Inputs are snapshot, source, and setting name; processing picks the
+    /// first matching setting in stable scope order; the method returns the
+    /// bounded value or null.
+    /// </summary>
+    private static string? FindProxySettingValue(ProxySettingsSnapshot proxySettings, string source, string name)
+    {
+        return proxySettings.Settings.Values
+            .Where(setting =>
+                string.Equals(setting.Source, source, StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(setting.Name, name, StringComparison.OrdinalIgnoreCase))
+            .OrderBy(setting => setting.Scope, StringComparer.OrdinalIgnoreCase)
+            .Select(setting => Truncate(setting.Value ?? string.Empty, 512))
+            .FirstOrDefault(value => !string.IsNullOrWhiteSpace(value));
+    }
+
+    /// <summary>
     /// Creates a generic truncation diagnostic event.
     /// Inputs are event type, change label, phase, total count, and emitted
     /// count; processing stores cap metadata; the method returns a SandboxEvent.
@@ -566,6 +876,16 @@ internal sealed class TcpConnectionDiffProbe : IGuestProbe
         var material = string.Join("\n", keys.OrderBy(key => key, StringComparer.OrdinalIgnoreCase));
         var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(material));
         return Convert.ToHexString(bytes).ToLowerInvariant();
+    }
+
+    /// <summary>
+    /// Truncates a string for compact event Data.
+    /// Inputs are value and max length; processing appends an ellipsis marker
+    /// when needed; the method returns a bounded string.
+    /// </summary>
+    private static string Truncate(string value, int maxLength)
+    {
+        return value.Length <= maxLength ? value : value[..maxLength] + "...";
     }
 
     /// <summary>
@@ -639,7 +959,8 @@ internal sealed class TcpConnectionSnapshotProvider : ITcpConnectionSnapshotProv
 }
 
 /// <summary>
-/// Captures DNS cache, netstat, and listener state for network-depth events.
+/// Captures DNS cache, hosts, proxy, netstat, and listener state for
+/// network-depth events.
 /// Inputs are none beyond cancellation; processing combines managed network
 /// APIs and bounded helper commands; CaptureAsync returns a full snapshot plus
 /// diagnostic events for unavailable helpers.
@@ -650,15 +971,18 @@ internal interface INetworkStateSnapshotProvider
 }
 
 /// <summary>
-/// Default network-state provider for DNS cache and netstat collection.
+/// Default network-state provider for DNS cache, hosts, proxy, and netstat
+/// collection.
 /// Inputs are a cancellation token; processing uses IPGlobalProperties,
-/// ipconfig /displaydns, and netstat -ano with short timeouts; CaptureAsync
-/// returns parsed snapshots and non-fatal diagnostics.
+/// hosts-file reads, registry/environment proxy reads, ipconfig /displaydns,
+/// netsh winhttp, and netstat -ano with short timeouts; CaptureAsync returns
+/// parsed snapshots and non-fatal diagnostics.
 /// </summary>
 internal sealed class NetworkStateSnapshotProvider : INetworkStateSnapshotProvider
 {
     private static readonly TimeSpan DnsCacheTimeout = TimeSpan.FromSeconds(3);
     private static readonly TimeSpan NetstatTimeout = TimeSpan.FromSeconds(3);
+    private static readonly TimeSpan WinHttpProxyTimeout = TimeSpan.FromSeconds(3);
 
     /// <summary>
     /// Captures all network-state sub-snapshots.
@@ -673,8 +997,10 @@ internal sealed class NetworkStateSnapshotProvider : INetworkStateSnapshotProvid
         var udpListeners = CaptureUdpListeners(diagnostics);
         var dnsEntries = await CaptureDnsCacheAsync(diagnostics, cancellationToken).ConfigureAwait(false);
         var netstatRows = await CaptureNetstatAsync(diagnostics, cancellationToken).ConfigureAwait(false);
+        var hostsFile = CaptureHostsFile(diagnostics, cancellationToken);
+        var proxySettings = await CaptureProxySettingsAsync(diagnostics, cancellationToken).ConfigureAwait(false);
 
-        return new NetworkStateSnapshot(tcpListeners, udpListeners, dnsEntries, netstatRows, diagnostics);
+        return new NetworkStateSnapshot(tcpListeners, udpListeners, dnsEntries, netstatRows, hostsFile, proxySettings, diagnostics);
     }
 
     /// <summary>
@@ -686,10 +1012,14 @@ internal sealed class NetworkStateSnapshotProvider : INetworkStateSnapshotProvid
     {
         try
         {
-            return IPGlobalProperties.GetIPGlobalProperties()
-                .GetActiveTcpListeners()
-                .Select(endpoint => new NetworkEndpointSnapshot("TCP", endpoint, "LISTENING"))
-                .ToDictionary(endpoint => endpoint.Key, StringComparer.OrdinalIgnoreCase);
+            var listeners = new Dictionary<string, NetworkEndpointSnapshot>(StringComparer.OrdinalIgnoreCase);
+            foreach (var endpoint in IPGlobalProperties.GetIPGlobalProperties().GetActiveTcpListeners())
+            {
+                var snapshot = new NetworkEndpointSnapshot("TCP", endpoint, "LISTENING");
+                listeners[snapshot.Key] = snapshot;
+            }
+
+            return listeners;
         }
         catch (NetworkInformationException ex)
         {
@@ -707,10 +1037,14 @@ internal sealed class NetworkStateSnapshotProvider : INetworkStateSnapshotProvid
     {
         try
         {
-            return IPGlobalProperties.GetIPGlobalProperties()
-                .GetActiveUdpListeners()
-                .Select(endpoint => new NetworkEndpointSnapshot("UDP", endpoint, "LISTENING"))
-                .ToDictionary(endpoint => endpoint.Key, StringComparer.OrdinalIgnoreCase);
+            var listeners = new Dictionary<string, NetworkEndpointSnapshot>(StringComparer.OrdinalIgnoreCase);
+            foreach (var endpoint in IPGlobalProperties.GetIPGlobalProperties().GetActiveUdpListeners())
+            {
+                var snapshot = new NetworkEndpointSnapshot("UDP", endpoint, "LISTENING");
+                listeners[snapshot.Key] = snapshot;
+            }
+
+            return listeners;
         }
         catch (NetworkInformationException ex)
         {
@@ -773,6 +1107,245 @@ internal sealed class NetworkStateSnapshotProvider : INetworkStateSnapshotProvid
         }
 
         return ParseNetstat(result.StandardOutput);
+    }
+
+    /// <summary>
+    /// Captures the local hosts file as parsed address/host entries.
+    /// Inputs are diagnostics and cancellation; processing reads the file with
+    /// sharing enabled and tolerates missing/inaccessible hosts files; the
+    /// method returns a compact hosts snapshot.
+    /// </summary>
+    private static HostsFileSnapshot CaptureHostsFile(List<SandboxEvent> diagnostics, CancellationToken cancellationToken)
+    {
+        var path = ResolveHostsPath();
+        try
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!File.Exists(path))
+            {
+                return new HostsFileSnapshot(path, Exists: false, LineCount: 0, ContentSha256: string.Empty, new Dictionary<string, HostsEntrySnapshot>(StringComparer.OrdinalIgnoreCase));
+            }
+
+            string text;
+            using (var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+            using (var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true))
+            {
+                text = reader.ReadToEnd();
+            }
+
+            var lines = text.Split(['\r', '\n'], StringSplitOptions.None);
+            var entries = ParseHostsEntries(path, lines);
+            return new HostsFileSnapshot(
+                path,
+                Exists: true,
+                LineCount: lines.Length,
+                ContentSha256: Sha256Hex(text),
+                entries);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or SecurityException or ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            diagnostics.Add(CreateCaptureFailureEvent("network.hosts.capture_failed", path, ex));
+            return new HostsFileSnapshot(path, Exists: false, LineCount: 0, ContentSha256: string.Empty, new Dictionary<string, HostsEntrySnapshot>(StringComparer.OrdinalIgnoreCase));
+        }
+    }
+
+    /// <summary>
+    /// Captures proxy settings from environment, HKCU Internet Settings, and
+    /// WinHTTP. Inputs are diagnostics and cancellation; processing isolates
+    /// each source; the method returns a combined proxy snapshot.
+    /// </summary>
+    private static async Task<ProxySettingsSnapshot> CaptureProxySettingsAsync(
+        List<SandboxEvent> diagnostics,
+        CancellationToken cancellationToken)
+    {
+        var settings = new Dictionary<string, ProxySettingSnapshot>(StringComparer.OrdinalIgnoreCase);
+        CaptureEnvironmentProxySettings(settings, cancellationToken);
+        if (OperatingSystem.IsWindows())
+        {
+            CaptureInternetSettingsProxy(settings, diagnostics, cancellationToken);
+            await CaptureWinHttpProxyAsync(settings, diagnostics, cancellationToken).ConfigureAwait(false);
+        }
+        else
+        {
+            diagnostics.Add(CreateUnsupportedEvent("network.proxy.winhttp.capture_skipped", "netsh winhttp show proxy"));
+        }
+
+        return new ProxySettingsSnapshot(settings);
+    }
+
+    /// <summary>
+    /// Resolves the platform hosts-file path.
+    /// Inputs are none; processing prefers the Windows system directory when
+    /// present and falls back to /etc/hosts on non-Windows platforms; returns
+    /// the path used in events.
+    /// </summary>
+    private static string ResolveHostsPath()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            var systemDirectory = Environment.SystemDirectory;
+            if (!string.IsNullOrWhiteSpace(systemDirectory))
+            {
+                return Path.Combine(systemDirectory, "drivers", "etc", "hosts");
+            }
+
+            var windir = Environment.GetEnvironmentVariable("WINDIR");
+            if (!string.IsNullOrWhiteSpace(windir))
+            {
+                return Path.Combine(windir, "System32", "drivers", "etc", "hosts");
+            }
+        }
+
+        return "/etc/hosts";
+    }
+
+    /// <summary>
+    /// Parses hosts-file lines into per-host entries.
+    /// Inputs are a source path and raw lines; processing skips comments/blank
+    /// lines and expands one address with multiple names into multiple stable
+    /// entries; the method returns a keyed dictionary.
+    /// </summary>
+    private static Dictionary<string, HostsEntrySnapshot> ParseHostsEntries(string sourcePath, IEnumerable<string> lines)
+    {
+        var entries = new Dictionary<string, HostsEntrySnapshot>(StringComparer.OrdinalIgnoreCase);
+        foreach (var rawLine in lines)
+        {
+            var effectiveLine = rawLine;
+            var commentIndex = effectiveLine.IndexOf('#', StringComparison.Ordinal);
+            if (commentIndex >= 0)
+            {
+                effectiveLine = effectiveLine[..commentIndex];
+            }
+
+            var tokens = effectiveLine.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            if (tokens.Length < 2)
+            {
+                continue;
+            }
+
+            var address = tokens[0];
+            foreach (var hostName in tokens.Skip(1))
+            {
+                var entry = new HostsEntrySnapshot(sourcePath, address, hostName, Truncate($"{address} {hostName}", 512));
+                entries[entry.Key] = entry;
+            }
+        }
+
+        return entries;
+    }
+
+    /// <summary>
+    /// Captures process environment proxy variables.
+    /// Inputs are output settings and cancellation; processing reads common
+    /// upper/lower-case variables without expanding the full environment block.
+    /// </summary>
+    private static void CaptureEnvironmentProxySettings(Dictionary<string, ProxySettingSnapshot> settings, CancellationToken cancellationToken)
+    {
+        foreach (var name in new[] { "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "all_proxy", "no_proxy" })
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var value = Environment.GetEnvironmentVariable(name);
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                continue;
+            }
+
+            AddProxySetting(settings, "environment", "process", name.ToUpperInvariant(), value, "process environment");
+        }
+    }
+
+    /// <summary>
+    /// Captures HKCU Internet Settings proxy values.
+    /// Inputs are output settings, diagnostics, and cancellation; processing
+    /// reads common low-privilege proxy registry values; the method returns no
+    /// value.
+    /// </summary>
+    [SupportedOSPlatform("windows")]
+    private static void CaptureInternetSettingsProxy(
+        Dictionary<string, ProxySettingSnapshot> settings,
+        List<SandboxEvent> diagnostics,
+        CancellationToken cancellationToken)
+    {
+        const string subKeyPath = @"Software\Microsoft\Windows\CurrentVersion\Internet Settings";
+        try
+        {
+            using var key = Registry.CurrentUser.OpenSubKey(subKeyPath);
+            if (key is null)
+            {
+                return;
+            }
+
+            foreach (var valueName in new[] { "ProxyEnable", "ProxyServer", "ProxyOverride", "AutoConfigURL", "AutoDetect" })
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var value = key.GetValue(valueName, null, RegistryValueOptions.DoNotExpandEnvironmentNames);
+                if (value is null)
+                {
+                    continue;
+                }
+
+                AddProxySetting(
+                    settings,
+                    "registry",
+                    $@"HKCU\{subKeyPath}",
+                    valueName,
+                    FormatRegistryValue(value),
+                    "HKCU Internet Settings");
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or SecurityException or ArgumentException)
+        {
+            diagnostics.Add(CreateCaptureFailureEvent("network.proxy.capture_failed", $@"HKCU\{subKeyPath}", ex));
+        }
+    }
+
+    /// <summary>
+    /// Captures machine WinHTTP proxy state through netsh.
+    /// Inputs are output settings, diagnostics, and cancellation; processing
+    /// runs a bounded helper and records the compact output summary.
+    /// </summary>
+    private static async Task CaptureWinHttpProxyAsync(
+        Dictionary<string, ProxySettingSnapshot> settings,
+        List<SandboxEvent> diagnostics,
+        CancellationToken cancellationToken)
+    {
+        var result = await BoundedProcessRunner.RunAsync(
+            "netsh.exe",
+            ["winhttp", "show", "proxy"],
+            WinHttpProxyTimeout,
+            cancellationToken).ConfigureAwait(false);
+        if (!result.Succeeded)
+        {
+            diagnostics.Add(CreateCommandFailureEvent("network.proxy.winhttp.capture_failed", result));
+        }
+
+        var summary = Truncate(NormalizeWhitespace(result.StandardOutput), 512);
+        if (!string.IsNullOrWhiteSpace(summary))
+        {
+            AddProxySetting(settings, "winhttp", "machine", "WinHttpProxy", summary, "netsh winhttp show proxy");
+        }
+    }
+
+    /// <summary>
+    /// Adds one proxy setting to a keyed dictionary.
+    /// Inputs are setting identity and value; processing normalizes empty
+    /// values and stores a stable row; the method returns no value.
+    /// </summary>
+    private static void AddProxySetting(
+        Dictionary<string, ProxySettingSnapshot> settings,
+        string source,
+        string scope,
+        string name,
+        string? value,
+        string sourceTool)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return;
+        }
+
+        var setting = new ProxySettingSnapshot(source, scope, name, value, sourceTool);
+        settings[setting.Key] = setting;
     }
 
     /// <summary>
@@ -961,7 +1534,8 @@ internal sealed class NetworkStateSnapshotProvider : INetworkStateSnapshotProvid
             Data =
             {
                 ["sourceTool"] = sourceTool,
-                ["reason"] = "Network helper is only available on Windows."
+                ["reason"] = "Network helper is only available on Windows.",
+                ["zhHint"] = "该网络 helper 仅在 Windows guest 中可用；在非 Windows 或受限环境中会跳过，不代表样本行为。"
             }
         };
     }
@@ -1006,6 +1580,9 @@ internal sealed class NetworkStateSnapshotProvider : INetworkStateSnapshotProvid
             evt.Data["commandMessage"] = result.Message;
         }
 
+        AddIfNotEmpty(evt.Data, "zhMessage", CommandFailureZhMessage(result));
+        AddIfNotEmpty(evt.Data, "zhHint", "网络 helper 命令失败；请检查命令是否存在、权限是否足够，以及 stderr/exitCode/timeoutMilliseconds。");
+
         if (!string.IsNullOrWhiteSpace(result.StandardOutput))
         {
             var stdout = result.StandardOutput.Trim();
@@ -1038,9 +1615,44 @@ internal sealed class NetworkStateSnapshotProvider : INetworkStateSnapshotProvid
             {
                 ["sourceApi"] = sourceApi,
                 ["exceptionType"] = exception.GetType().FullName ?? exception.GetType().Name,
-                ["message"] = exception.Message
+                ["message"] = exception.Message,
+                ["zhMessage"] = "读取网络状态时发生异常；该诊断不会中断整体采集。",
+                ["zhHint"] = "请结合 sourceApi、exceptionType/message 判断是权限、系统 API 还是网络栈状态问题。"
             }
         };
+    }
+
+    private static string CommandFailureZhMessage(BoundedCommandResult result)
+    {
+        if (result.TimedOut)
+        {
+            return "网络 helper 命令超时。";
+        }
+
+        if (!string.IsNullOrWhiteSpace(result.ExceptionType))
+        {
+            return "网络 helper 命令启动或读取输出失败。";
+        }
+
+        if (result.ExitCode is not null)
+        {
+            return $"网络 helper 命令以非零退出码 {result.ExitCode.Value.ToString(CultureInfo.InvariantCulture)} 结束。";
+        }
+
+        return string.Empty;
+    }
+
+    /// <summary>
+    /// Adds a non-empty diagnostic field to a network-state event.
+    /// Inputs are Data dictionary, key, and value; processing skips blank
+    /// strings; the method returns no value.
+    /// </summary>
+    private static void AddIfNotEmpty(Dictionary<string, string> data, string key, string? value)
+    {
+        if (!string.IsNullOrWhiteSpace(value))
+        {
+            data[key] = value;
+        }
     }
 
     /// <summary>
@@ -1072,6 +1684,32 @@ internal sealed class NetworkStateSnapshotProvider : INetworkStateSnapshotProvid
     private static string Truncate(string value, int maxLength)
     {
         return value.Length <= maxLength ? value : value[..maxLength] + "...";
+    }
+
+    /// <summary>
+    /// Formats registry values as compact strings.
+    /// Inputs are registry payload values; processing supports arrays and
+    /// binary values; the method returns a display string.
+    /// </summary>
+    private static string? FormatRegistryValue(object? value)
+    {
+        return value switch
+        {
+            null => null,
+            string[] values => string.Join(";", values),
+            byte[] bytes => Convert.ToHexString(bytes),
+            _ => value.ToString()
+        };
+    }
+
+    /// <summary>
+    /// Normalizes helper output to a single compact line.
+    /// Inputs are raw command output; processing collapses whitespace; the
+    /// method returns bounded-friendly summary text.
+    /// </summary>
+    private static string NormalizeWhitespace(string value)
+    {
+        return string.Join(" ", value.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
     }
 }
 
@@ -1129,6 +1767,46 @@ internal sealed record DnsCacheEntrySnapshot(
     string RawSummary);
 
 /// <summary>
+/// Stores one parsed hosts-file entry.
+/// Inputs are source path, IP address, and hostname; processing exposes a
+/// stable key for before/after hosts diffs.
+/// </summary>
+internal sealed record HostsEntrySnapshot(
+    string SourcePath,
+    string Address,
+    string HostName,
+    string Entry)
+{
+    public string Key => StableHash($"{Address.ToLowerInvariant()}|{HostName.ToLowerInvariant()}");
+
+    private static string StableHash(string value)
+    {
+        var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(value));
+        return Convert.ToHexString(bytes).ToLowerInvariant();
+    }
+}
+
+/// <summary>
+/// Stores the parsed hosts-file snapshot for one probe phase.
+/// Inputs are path, existence flag, line count, content hash, and entries;
+/// processing is immutable storage for events and diffs.
+/// </summary>
+internal sealed record HostsFileSnapshot(
+    string Path,
+    bool Exists,
+    int LineCount,
+    string ContentSha256,
+    Dictionary<string, HostsEntrySnapshot> Entries)
+{
+    public static HostsFileSnapshot Empty { get; } = new(
+        string.Empty,
+        Exists: false,
+        LineCount: 0,
+        ContentSha256: string.Empty,
+        new Dictionary<string, HostsEntrySnapshot>(StringComparer.OrdinalIgnoreCase));
+}
+
+/// <summary>
 /// Stores one parsed netstat row.
 /// Inputs are protocol, local/remote endpoints, connection state, and optional
 /// owning PID; processing exposes a stable diff key.
@@ -1144,15 +1822,52 @@ internal sealed record NetstatRowSnapshot(
 }
 
 /// <summary>
+/// Stores one proxy setting from registry, environment, or WinHTTP.
+/// Inputs are source/scope/name/value/source-tool fields; processing exposes
+/// stable key/signature values for proxy snapshot diffs.
+/// </summary>
+internal sealed record ProxySettingSnapshot(
+    string Source,
+    string Scope,
+    string Name,
+    string? Value,
+    string SourceTool)
+{
+    public string Key => $"{Source}:{Scope}:{Name}";
+
+    public string ValueHash => StableHash(Value ?? string.Empty);
+
+    public string Signature => ValueHash;
+
+    private static string StableHash(string value)
+    {
+        var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(value));
+        return Convert.ToHexString(bytes).ToLowerInvariant();
+    }
+}
+
+/// <summary>
+/// Stores combined proxy settings for one probe phase.
+/// Inputs are keyed proxy settings; processing is immutable storage for
+/// snapshot and diff events.
+/// </summary>
+internal sealed record ProxySettingsSnapshot(Dictionary<string, ProxySettingSnapshot> Settings)
+{
+    public static ProxySettingsSnapshot Empty { get; } = new(new Dictionary<string, ProxySettingSnapshot>(StringComparer.OrdinalIgnoreCase));
+}
+
+/// <summary>
 /// Stores all network-depth snapshots captured for one phase.
-/// Inputs are listener, DNS cache, netstat, and diagnostic data; processing is
-/// immutable storage returned from INetworkStateSnapshotProvider.
+/// Inputs are listener, DNS cache, netstat, hosts, proxy, and diagnostic data;
+/// processing is immutable storage returned from INetworkStateSnapshotProvider.
 /// </summary>
 internal sealed record NetworkStateSnapshot(
     Dictionary<string, NetworkEndpointSnapshot> TcpListeners,
     Dictionary<string, NetworkEndpointSnapshot> UdpListeners,
     Dictionary<string, DnsCacheEntrySnapshot> DnsCacheEntries,
     Dictionary<string, NetstatRowSnapshot> NetstatRows,
+    HostsFileSnapshot HostsFile,
+    ProxySettingsSnapshot ProxySettings,
     IReadOnlyList<SandboxEvent> Diagnostics)
 {
     public static NetworkStateSnapshot Empty { get; } = new(
@@ -1160,5 +1875,7 @@ internal sealed record NetworkStateSnapshot(
         new Dictionary<string, NetworkEndpointSnapshot>(StringComparer.OrdinalIgnoreCase),
         new Dictionary<string, DnsCacheEntrySnapshot>(StringComparer.OrdinalIgnoreCase),
         new Dictionary<string, NetstatRowSnapshot>(StringComparer.OrdinalIgnoreCase),
+        HostsFileSnapshot.Empty,
+        ProxySettingsSnapshot.Empty,
         []);
 }

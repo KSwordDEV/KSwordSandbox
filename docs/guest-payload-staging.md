@@ -6,6 +6,11 @@ It keeps every generated binary, report, sample publish output, and VM artifact
 under `D:\Temp\KSwordSandbox` by default. Do not commit anything from that
 runtime tree.
 
+Canonical scope: this page owns Guest Agent/R0Collector payload staging and
+manifest freshness. Golden VM baseline details live in `docs/golden-vm.md`;
+current read-only preflight details live in `docs/hyperv-readiness.md`; full
+PlanOnly/WhatIf/Live script flow lives in `docs/hyperv-e2e-runbook.md`.
+
 ## 1. Build and stage guest tools on the host
 
 Use `scripts/Prepare-GuestPayload.ps1` from the repository root. The script uses

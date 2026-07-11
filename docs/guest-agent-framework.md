@@ -1,5 +1,10 @@
 # Guest Agent framework
 
+Canonical scope: this page is internal probe/framework design. The public Guest
+Agent CLI, event coverage, optional R0 sidecar flags, and artifact outputs are
+owned by `docs/guest-agent.md`; artifact lane/schema details are owned by
+`docs/artifacts.md` and `docs/artifact-manifest.md`.
+
 The Guest Agent is still a compact executable, but dynamic collection now flows
 through explicit probe boundaries:
 
@@ -57,6 +62,13 @@ this context without changing the public agent CLI.
 faulted collector is isolated from later collectors so live output and final
 artifact writing remain stable even when a Windows helper command hangs or a
 platform API fails.
+
+The runner also emits `probe.summary` for every probe and `probe.phase.summary`
+after each phase. These rows carry `collectionHealth=true` and
+`nonbehavior=true` so the host can show progress/diagnostics without letting
+collection failures become behavior detections. Summary rows include
+`probeId`, phase, status, reason, elapsed time, timeout, emitted-event count,
+and Chinese-first `zhMessage` / `zhHint` fields for operator-facing reports.
 
 `Diagnostics.BoundedProcessRunner` is the shared helper for short-lived Windows
 commands. It starts processes without a shell, redirects stdout/stderr, kills

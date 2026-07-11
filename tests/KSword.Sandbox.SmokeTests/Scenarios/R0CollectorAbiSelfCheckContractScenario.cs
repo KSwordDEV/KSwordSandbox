@@ -63,8 +63,18 @@ internal sealed class R0CollectorAbiSelfCheckContractScenario : ISmokeTestScenar
             "schema",
             "producer",
             "noise",
+            "collectorNoise",
+            "collectorSelfNoise",
+            "selfProcess",
+            "collectorNoiseReason",
+            "collectorNoiseAction",
+            "collectorSuppressed",
             "lost",
+            "lostCount",
+            "lossObserved",
             "backpressure",
+            "backpressureObserved",
+            "highWatermark",
             "capabilityFlagsCurrentHex",
             "producerMaskCurrentHex",
             "producerMaskDefaultHex",
@@ -185,10 +195,21 @@ internal sealed class R0CollectorAbiSelfCheckContractScenario : ISmokeTestScenar
         RequireData(abiSelfCheck, "eventHeaderVersion", "65536");
         RequireData(abiSelfCheck, "eventSchemaName", "ksword.sandbox.r0.event");
         RequireData(abiSelfCheck, "eventSchemaVersion", "65536");
-        RequireData(abiSelfCheck, "capabilityFlagsCurrentHex", "0x0000000000007FFF");
+        RequireData(abiSelfCheck, "collectorNoise", "false");
+        RequireData(abiSelfCheck, "collectorSelfNoise", "false");
+        RequireData(abiSelfCheck, "selfProcess", "false");
+        RequireData(abiSelfCheck, "collectorNoiseReason", "none");
+        RequireData(abiSelfCheck, "collectorSuppressed", "false");
+        RequireData(abiSelfCheck, "lost", "false");
+        RequireData(abiSelfCheck, "lostCount", "0");
+        RequireData(abiSelfCheck, "lossObserved", "false");
+        RequireData(abiSelfCheck, "backpressure", "false");
+        RequireData(abiSelfCheck, "backpressureObserved", "false");
+        RequireData(abiSelfCheck, "highWatermark", "0");
+        RequireData(abiSelfCheck, "capabilityFlagsCurrentHex", "0x000000000003FFFF");
         RequireData(abiSelfCheck, "producerMaskCurrentHex", "0x0000003F");
         RequireData(abiSelfCheck, "producerMaskDefaultHex", "0x0000003F");
-        RequireData(abiSelfCheck, "eventHeaderSize", "56");
+        RequireData(abiSelfCheck, "eventHeaderSize", "104");
         RequireData(abiSelfCheck, "healthReplySize", "80");
         RequireData(abiSelfCheck, "healthReplyLegacyMinimumBytes", "44");
         RequireData(abiSelfCheck, "healthReplyProducerMaskBytes", "60");
@@ -205,6 +226,14 @@ internal sealed class R0CollectorAbiSelfCheckContractScenario : ISmokeTestScenar
             abiSelfCheck.Data["capabilityFlagNames"],
             "EventSchemaNames",
             "ABI self-check should advertise event-schema-name support.");
+        RequireContains(
+            abiSelfCheck.Data["capabilityFlagNames"],
+            "EventCommonMetadata",
+            "ABI self-check should advertise common event metadata support.");
+        RequireContains(
+            abiSelfCheck.Data["capabilityFlagNames"],
+            "SelfNoiseMetadata",
+            "ABI self-check should advertise self-noise metadata support.");
         RequireContains(
             abiSelfCheck.Data["producerMaskCurrentNames"],
             "network",

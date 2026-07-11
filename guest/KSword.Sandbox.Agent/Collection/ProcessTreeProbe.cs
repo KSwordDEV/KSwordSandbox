@@ -6,6 +6,7 @@ using System.Runtime.Versioning;
 using System.Security;
 using System.Security.Principal;
 using System.Text;
+using System.Text.Json;
 using KSword.Sandbox.Agent.Diagnostics;
 using KSword.Sandbox.Abstractions;
 using Microsoft.Win32;
@@ -37,6 +38,9 @@ internal sealed class ProcessTreeProbe : IGuestProbe
     private readonly IProcessSnapshotProvider snapshotProvider;
     private readonly ISystemChangeSnapshotProvider systemChangeSnapshotProvider;
     private readonly HashSet<string> emittedNewProcessKeys = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, ProcessTreeObservation> observedSnapshots = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> monitoredProcessKeys = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> emittedMissingProcessKeys = new(StringComparer.OrdinalIgnoreCase);
     private Dictionary<int, ProcessTreeSnapshot> baselineByPid = [];
     private SystemChangeSnapshot baselineSystemState = SystemChangeSnapshot.Empty;
 
@@ -85,26 +89,43 @@ internal sealed class ProcessTreeProbe : IGuestProbe
     {
         cancellationToken.ThrowIfCancellationRequested();
 
+        var capturedAtUtc = DateTimeOffset.UtcNow;
         var current = snapshotProvider.Capture(cancellationToken);
         var events = new List<SandboxEvent>();
         if (phase == ProbePhase.BeforeStart)
         {
             emittedNewProcessKeys.Clear();
+            observedSnapshots.Clear();
+            monitoredProcessKeys.Clear();
+            emittedMissingProcessKeys.Clear();
+            RememberVisibleProcesses(current, phase, capturedAtUtc);
             baselineByPid = current;
             baselineSystemState = await systemChangeSnapshotProvider.CaptureAsync(cancellationToken).ConfigureAwait(false);
 
             events.Add(CreateEnvironmentDetailEvent(context));
             events.AddRange(CreateSystemSnapshotEvents(baselineSystemState, phase));
             events.AddRange(WithPhase(baselineSystemState.Diagnostics, phase));
+            events.AddRange(CreateCurrentProcessSnapshotEvents(current, phase, context, capturedAtUtc));
 
             foreach (var process in current.Values.OrderBy(process => process.ProcessId).ThenBy(process => process.ProcessName, StringComparer.OrdinalIgnoreCase))
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                events.Add(CreateProcessSnapshotEvent("process.observed", process, phase, rootProcessId: null, depth: null));
+                events.Add(CreateProcessSnapshotEvent(
+                    "process.observed",
+                    process,
+                    phase,
+                    rootProcessId: null,
+                    depth: null,
+                    snapshotLookup: current,
+                    capturedAtUtc: capturedAtUtc));
             }
         }
         else if (phase is ProbePhase.AfterStart or ProbePhase.AfterRun)
         {
+            TrackRootProcess(context, current, phase, capturedAtUtc);
+            RememberVisibleProcesses(current, phase, capturedAtUtc);
+            events.AddRange(CreateCurrentProcessSnapshotEvents(current, phase, context, capturedAtUtc));
+
             foreach (var process in current.Values.OrderBy(process => process.ProcessId).ThenBy(process => process.ProcessName, StringComparer.OrdinalIgnoreCase))
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -119,12 +140,34 @@ internal sealed class ProcessTreeProbe : IGuestProbe
                     continue;
                 }
 
-                events.Add(CreateProcessSnapshotEvent("process.new", process, phase, context.RootProcessId, depth: null));
+                monitoredProcessKeys.Add(process.Key);
+                events.Add(CreateProcessSnapshotEvent(
+                    "process.new",
+                    process,
+                    phase,
+                    context.RootProcessId,
+                    depth: null,
+                    snapshotLookup: current,
+                    capturedAtUtc: capturedAtUtc));
             }
 
+            ProcessTreeEventResult? treeResult = null;
             if (context.RootProcessId is not null)
             {
-                events.AddRange(CreateTreeEvents(current, context.RootProcessId.Value, phase));
+                treeResult = CreateTreeEvents(current, context.RootProcessId.Value, phase, context, capturedAtUtc);
+                foreach (var processKey in treeResult.ProcessKeys)
+                {
+                    monitoredProcessKeys.Add(processKey);
+                }
+
+                events.AddRange(treeResult.Events);
+            }
+
+            var missingSnapshotEvents = CreateMissingProcessSnapshotEvents(current, phase, context, capturedAtUtc);
+            events.AddRange(missingSnapshotEvents);
+            if (treeResult is not null)
+            {
+                events.Add(CreateProcessTreeSummaryEvent(treeResult, current, missingSnapshotEvents.Count, phase, context, capturedAtUtc));
             }
 
             if (phase == ProbePhase.AfterRun)
@@ -140,45 +183,221 @@ internal sealed class ProcessTreeProbe : IGuestProbe
     }
 
     /// <summary>
-    /// Creates process.tree events for the root process and visible descendants.
-    /// Inputs are a process snapshot, root process id, and probe phase;
-    /// processing walks parent identifiers breadth-first and annotates lineage;
-    /// the method returns deterministic tree events or an empty list.
+    /// Records visible process snapshots so later phases can mark tracked
+    /// processes as missing when they exit before the final process sweep.
     /// </summary>
-    private static IReadOnlyList<SandboxEvent> CreateTreeEvents(
+    private void RememberVisibleProcesses(
         IReadOnlyDictionary<int, ProcessTreeSnapshot> snapshot,
-        int rootProcessId,
-        ProbePhase phase)
+        ProbePhase phase,
+        DateTimeOffset capturedAtUtc)
     {
-        if (!snapshot.TryGetValue(rootProcessId, out var root))
+        foreach (var process in snapshot.Values)
         {
-            return
-            [
-                new SandboxEvent
-                {
-                    EventType = "process.tree_unavailable",
-                    Source = "guest",
-                    ProcessId = rootProcessId,
-                    Data =
-                    {
-                        ["phase"] = ToPhaseLabel(phase),
-                        ["rootProcessId"] = rootProcessId.ToString(CultureInfo.InvariantCulture),
-                        ["reason"] = "Root process was not visible in the current process snapshot."
-                    }
-                }
-            ];
+            RememberProcessObservation(process, phase, capturedAtUtc, visibleInSnapshot: true);
+        }
+    }
+
+    /// <summary>
+    /// Records one process observation while preserving first/last seen phase
+    /// and timestamps.
+    /// </summary>
+    private void RememberProcessObservation(
+        ProcessTreeSnapshot process,
+        ProbePhase phase,
+        DateTimeOffset capturedAtUtc,
+        bool visibleInSnapshot)
+    {
+        if (observedSnapshots.TryGetValue(process.Key, out var existing))
+        {
+            observedSnapshots[process.Key] = existing with
+            {
+                Snapshot = MergeProcessSnapshot(existing.Snapshot, process),
+                LastSeenPhase = visibleInSnapshot ? phase : existing.LastSeenPhase,
+                LastSeenAtUtc = visibleInSnapshot ? capturedAtUtc : existing.LastSeenAtUtc,
+                VisibleInAnySnapshot = existing.VisibleInAnySnapshot || visibleInSnapshot
+            };
+            return;
         }
 
+        observedSnapshots[process.Key] = new ProcessTreeObservation(
+            process,
+            FirstSeenPhase: phase,
+            FirstSeenAtUtc: capturedAtUtc,
+            LastSeenPhase: phase,
+            LastSeenAtUtc: capturedAtUtc,
+            VisibleInAnySnapshot: visibleInSnapshot);
+    }
+
+    /// <summary>
+    /// Ensures the launched root process is tracked even when it exits before a
+    /// probe snapshot can still see the PID.
+    /// </summary>
+    private void TrackRootProcess(
+        GuestProbeContext context,
+        Dictionary<int, ProcessTreeSnapshot> current,
+        ProbePhase phase,
+        DateTimeOffset capturedAtUtc)
+    {
+        if (context.RootProcessId is null)
+        {
+            return;
+        }
+
+        if (current.TryGetValue(context.RootProcessId.Value, out var visibleRoot) &&
+            IsSameRootProcess(visibleRoot, context))
+        {
+            var enriched = MergeRootContext(visibleRoot, context);
+            current[context.RootProcessId.Value] = enriched;
+            monitoredProcessKeys.Add(enriched.Key);
+            return;
+        }
+
+        var knownRoot = observedSnapshots.Values
+            .Where(observation => observation.Snapshot.ProcessId == context.RootProcessId.Value)
+            .OrderByDescending(observation => observation.LastSeenAtUtc)
+            .FirstOrDefault();
+        if (knownRoot is not null)
+        {
+            monitoredProcessKeys.Add(knownRoot.Snapshot.Key);
+            return;
+        }
+
+        var fallback = CreateRootFallbackSnapshot(context);
+        RememberProcessObservation(fallback, phase, capturedAtUtc, visibleInSnapshot: false);
+        monitoredProcessKeys.Add(fallback.Key);
+    }
+
+    /// <summary>
+    /// Creates process.snapshot rows for every currently visible process.
+    /// </summary>
+    private static IEnumerable<SandboxEvent> CreateCurrentProcessSnapshotEvents(
+        IReadOnlyDictionary<int, ProcessTreeSnapshot> snapshot,
+        ProbePhase phase,
+        GuestProbeContext context,
+        DateTimeOffset capturedAtUtc)
+    {
+        var treeMetadata = CreateRootTreeMetadata(snapshot, context);
+        foreach (var process in snapshot.Values.OrderBy(process => process.ProcessId).ThenBy(process => process.ProcessName, StringComparer.OrdinalIgnoreCase))
+        {
+            treeMetadata.TryGetValue(process.ProcessId, out var metadata);
+            yield return CreateProcessSnapshotEvent(
+                "process.snapshot",
+                process,
+                phase,
+                context.RootProcessId,
+                metadata?.Depth,
+                metadata?.ChildCount,
+                metadata?.Lineage,
+                snapshot,
+                snapshotState: "present",
+                capturedAtUtc: capturedAtUtc,
+                context: context);
+        }
+    }
+
+    /// <summary>
+    /// Creates process.snapshot rows for tracked root/tree/new processes that
+    /// are no longer visible in the current process list.
+    /// </summary>
+    private IReadOnlyList<SandboxEvent> CreateMissingProcessSnapshotEvents(
+        IReadOnlyDictionary<int, ProcessTreeSnapshot> current,
+        ProbePhase phase,
+        GuestProbeContext context,
+        DateTimeOffset capturedAtUtc)
+    {
+        var currentKeys = current.Values.Select(process => process.Key).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var events = new List<SandboxEvent>();
+        foreach (var key in monitoredProcessKeys.OrderBy(key => key, StringComparer.OrdinalIgnoreCase))
+        {
+            if (currentKeys.Contains(key) || !observedSnapshots.TryGetValue(key, out var observation))
+            {
+                continue;
+            }
+
+            if (!emittedMissingProcessKeys.Add(key))
+            {
+                continue;
+            }
+
+            var missingDepth = context.RootProcessId == observation.Snapshot.ProcessId ? 0 : (int?)null;
+            var missingLineage = context.RootProcessId == observation.Snapshot.ProcessId
+                ? observation.Snapshot.ProcessId.ToString(CultureInfo.InvariantCulture)
+                : null;
+            var evt = CreateProcessSnapshotEvent(
+                "process.snapshot",
+                observation.Snapshot,
+                phase,
+                context.RootProcessId,
+                depth: missingDepth,
+                childCount: null,
+                lineage: missingLineage,
+                snapshotLookup: null,
+                snapshotState: "missing",
+                capturedAtUtc: capturedAtUtc,
+                context: context);
+            evt.Data["processMissing"] = "true";
+            evt.Data["exitMissing"] = "true";
+            evt.Data["processExited"] = "true";
+            evt.Data["exitedBeforeSnapshot"] = "true";
+            evt.Data["captureState"] = "missing";
+            evt.Data["status"] = "missing";
+            evt.Data["reason"] = "processNotVisibleInCurrentSnapshot";
+            evt.Data["missingAtPhase"] = ToPhaseLabel(phase);
+            evt.Data["missingAtUtc"] = capturedAtUtc.ToString("O", CultureInfo.InvariantCulture);
+            evt.Data["firstSeenPhase"] = ToPhaseLabel(observation.FirstSeenPhase);
+            evt.Data["firstSeenUtc"] = observation.FirstSeenAtUtc.ToString("O", CultureInfo.InvariantCulture);
+            evt.Data["lastSeenPhase"] = ToPhaseLabel(observation.LastSeenPhase);
+            evt.Data["lastSeenUtc"] = observation.LastSeenAtUtc.ToString("O", CultureInfo.InvariantCulture);
+            evt.Data["visibleInAnySnapshot"] = observation.VisibleInAnySnapshot.ToString(CultureInfo.InvariantCulture).ToLowerInvariant();
+            events.Add(evt);
+        }
+
+        return events;
+    }
+
+    /// <summary>
+    /// Creates process.tree rows for the root process and visible descendants.
+    /// Inputs are a process snapshot, root process id, probe phase, and launch
+    /// context; processing walks parent identifiers breadth-first and keeps
+    /// partial child trees when the root already exited; the method returns
+    /// deterministic tree rows plus summary metadata.
+    /// </summary>
+    private static ProcessTreeEventResult CreateTreeEvents(
+        IReadOnlyDictionary<int, ProcessTreeSnapshot> snapshot,
+        int rootProcessId,
+        ProbePhase phase,
+        GuestProbeContext context,
+        DateTimeOffset capturedAtUtc)
+    {
         var childrenByParent = snapshot.Values
             .Where(process => process.ParentProcessId is not null)
             .GroupBy(process => process.ParentProcessId!.Value)
             .ToDictionary(group => group.Key, group => group.OrderBy(process => process.ProcessId).ToList());
 
         var events = new List<SandboxEvent>();
-        var queue = new Queue<(ProcessTreeSnapshot Process, int Depth, string Lineage)>();
-        var visited = new HashSet<int>();
-        queue.Enqueue((root, 0, root.ProcessId.ToString(CultureInfo.InvariantCulture)));
+        var processKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var rootVisible = snapshot.TryGetValue(rootProcessId, out var root) && IsSameRootProcess(root, context);
+        var rootProcess = rootVisible ? root : null;
+        if (!rootVisible)
+        {
+            events.Add(CreateRootUnavailableEvent(rootProcessId, phase, context, capturedAtUtc, root));
+        }
 
+        var queue = new Queue<(ProcessTreeSnapshot Process, int Depth, string Lineage)>();
+        if (rootVisible && rootProcess is not null)
+        {
+            queue.Enqueue((rootProcess, 0, rootProcess.ProcessId.ToString(CultureInfo.InvariantCulture)));
+        }
+        else if (childrenByParent.TryGetValue(rootProcessId, out var orphanedChildren))
+        {
+            foreach (var child in orphanedChildren)
+            {
+                queue.Enqueue((child, 1, $"{rootProcessId.ToString(CultureInfo.InvariantCulture)}>{child.ProcessId.ToString(CultureInfo.InvariantCulture)}"));
+            }
+        }
+
+        var visited = new HashSet<int>();
+        var maxDepth = 0;
         while (queue.Count != 0)
         {
             var (process, depth, lineage) = queue.Dequeue();
@@ -187,8 +406,21 @@ internal sealed class ProcessTreeProbe : IGuestProbe
                 continue;
             }
 
+            maxDepth = Math.Max(maxDepth, depth);
+            processKeys.Add(process.Key);
             var childCount = childrenByParent.TryGetValue(process.ProcessId, out var children) ? children.Count : 0;
-            events.Add(CreateProcessSnapshotEvent("process.tree", process, phase, rootProcessId, depth, childCount, lineage));
+            events.Add(CreateProcessSnapshotEvent(
+                "process.tree",
+                process,
+                phase,
+                rootProcessId,
+                depth,
+                childCount,
+                lineage,
+                snapshot,
+                snapshotState: "present",
+                capturedAtUtc: capturedAtUtc,
+                context: context));
 
             if (childCount == 0 || children is null)
             {
@@ -201,7 +433,17 @@ internal sealed class ProcessTreeProbe : IGuestProbe
             }
         }
 
-        return events;
+        var directChildCount = childrenByParent.TryGetValue(rootProcessId, out var directChildren) ? directChildren.Count : 0;
+        return new ProcessTreeEventResult(
+            events,
+            processKeys.ToList(),
+            RootVisible: rootVisible,
+            RootProcess: rootProcess,
+            RootProcessId: rootProcessId,
+            VisibleProcessCount: visited.Count,
+            DirectChildProcessCount: directChildCount,
+            MaxDepth: maxDepth,
+            OrphanedChildProcessCount: rootVisible ? 0 : directChildCount);
     }
 
     /// <summary>
@@ -217,8 +459,15 @@ internal sealed class ProcessTreeProbe : IGuestProbe
         int? rootProcessId,
         int? depth,
         int? childCount = null,
-        string? lineage = null)
+        string? lineage = null,
+        IReadOnlyDictionary<int, ProcessTreeSnapshot>? snapshotLookup = null,
+        string snapshotState = "present",
+        DateTimeOffset? capturedAtUtc = null,
+        GuestProbeContext? context = null)
     {
+        var parent = process.ParentProcessId is not null && snapshotLookup is not null && snapshotLookup.TryGetValue(process.ParentProcessId.Value, out var parentProcess)
+            ? parentProcess
+            : null;
         var evt = new SandboxEvent
         {
             EventType = eventType,
@@ -227,21 +476,65 @@ internal sealed class ProcessTreeProbe : IGuestProbe
             ProcessId = process.ProcessId,
             ParentProcessId = process.ParentProcessId,
             Path = process.Path,
+            CommandLine = process.CommandLine,
             Data =
             {
                 ["phase"] = ToPhaseLabel(phase),
-                ["snapshotKey"] = process.Key
+                ["capturePhase"] = ToPhaseLabel(phase),
+                ["snapshotKey"] = process.Key,
+                ["processSnapshotKey"] = process.Key,
+                ["processId"] = process.ProcessId.ToString(CultureInfo.InvariantCulture),
+                ["processName"] = process.ProcessName,
+                ["snapshotState"] = snapshotState,
+                ["captureState"] = snapshotState,
+                ["status"] = snapshotState,
+                ["processMissing"] = string.Equals(snapshotState, "missing", StringComparison.OrdinalIgnoreCase).ToString(CultureInfo.InvariantCulture).ToLowerInvariant(),
+                ["exitMissing"] = string.Equals(snapshotState, "missing", StringComparison.OrdinalIgnoreCase).ToString(CultureInfo.InvariantCulture).ToLowerInvariant(),
+                ["processExited"] = string.Equals(snapshotState, "missing", StringComparison.OrdinalIgnoreCase).ToString(CultureInfo.InvariantCulture).ToLowerInvariant(),
+                ["exitedBeforeSnapshot"] = string.Equals(snapshotState, "missing", StringComparison.OrdinalIgnoreCase).ToString(CultureInfo.InvariantCulture).ToLowerInvariant(),
+                ["zhMessage"] = ProcessSnapshotZhMessage(eventType, snapshotState),
+                ["zhHint"] = ProcessSnapshotZhHint(snapshotState)
             }
         };
+
+        if (capturedAtUtc is not null)
+        {
+            evt.Data["snapshotTimeUtc"] = capturedAtUtc.Value.ToString("O", CultureInfo.InvariantCulture);
+            evt.Data["capturedAtUtc"] = capturedAtUtc.Value.ToString("O", CultureInfo.InvariantCulture);
+        }
 
         if (process.StartTimeUtc is not null)
         {
             evt.Data["startTimeUtc"] = process.StartTimeUtc.Value.ToString("O", CultureInfo.InvariantCulture);
+            evt.Data["processStartTimeUtc"] = process.StartTimeUtc.Value.ToString("O", CultureInfo.InvariantCulture);
         }
 
         if (process.ParentProcessId is not null)
         {
             evt.Data["parentProcessId"] = process.ParentProcessId.Value.ToString(CultureInfo.InvariantCulture);
+        }
+
+        AddIfNotEmpty(evt.Data, "imagePath", process.Path);
+        AddIfNotEmpty(evt.Data, "processImagePath", process.Path);
+        AddIfNotEmpty(evt.Data, "commandLine", process.CommandLine);
+        AddIfNotEmpty(evt.Data, "toolhelpImageName", process.ToolhelpImageName);
+        AddIfNotEmpty(evt.Data, "parentSnapshotKey", parent?.Key);
+        AddIfNotEmpty(evt.Data, "parentProcessSnapshotKey", parent?.Key);
+        AddIfNotEmpty(evt.Data, "parentProcessName", parent?.ProcessName);
+        AddIfNotEmpty(evt.Data, "parentImagePath", parent?.Path);
+        AddIfNotEmpty(evt.Data, "parentCommandLine", parent?.CommandLine);
+        if (parent?.StartTimeUtc is not null)
+        {
+            evt.Data["parentStartTimeUtc"] = parent.StartTimeUtc.Value.ToString("O", CultureInfo.InvariantCulture);
+            evt.Data["parentProcessStartTimeUtc"] = parent.StartTimeUtc.Value.ToString("O", CultureInfo.InvariantCulture);
+        }
+
+        if (context is not null &&
+            process.ParentProcessId == context.RootParentProcessId &&
+            context.RootProcessId == process.ProcessId &&
+            !string.IsNullOrWhiteSpace(context.RootCommandLine))
+        {
+            evt.Data["launchedByAgent"] = "true";
         }
 
         if (process.SessionId is not null)
@@ -259,11 +552,18 @@ internal sealed class ProcessTreeProbe : IGuestProbe
             evt.Data["basePriority"] = process.BasePriority.Value.ToString(CultureInfo.InvariantCulture);
         }
 
-        AddIfNotEmpty(evt.Data, "toolhelpImageName", process.ToolhelpImageName);
-
         if (rootProcessId is not null)
         {
             evt.Data["rootProcessId"] = rootProcessId.Value.ToString(CultureInfo.InvariantCulture);
+            evt.Data["processRole"] = process.ProcessId == rootProcessId.Value
+                ? "root"
+                : depth is not null
+                    ? "child"
+                    : "process-snapshot";
+        }
+        else
+        {
+            evt.Data["processRole"] = "process-snapshot";
         }
 
         if (depth is not null)
@@ -276,8 +576,338 @@ internal sealed class ProcessTreeProbe : IGuestProbe
             evt.Data["childProcessCount"] = childCount.Value.ToString(CultureInfo.InvariantCulture);
         }
 
+        if (string.IsNullOrWhiteSpace(lineage) &&
+            rootProcessId is not null &&
+            process.ProcessId == rootProcessId.Value)
+        {
+            lineage = rootProcessId.Value.ToString(CultureInfo.InvariantCulture);
+        }
+
         AddIfNotEmpty(evt.Data, "treeLineage", lineage);
         return evt;
+    }
+
+    /// <summary>
+    /// Creates a stable root-missing diagnostic while preserving known launch
+    /// metadata so reports can still render an exited root.
+    /// </summary>
+    private static SandboxEvent CreateRootUnavailableEvent(
+        int rootProcessId,
+        ProbePhase phase,
+        GuestProbeContext context,
+        DateTimeOffset capturedAtUtc,
+        ProcessTreeSnapshot? visiblePidReuse)
+    {
+        var evt = new SandboxEvent
+        {
+            EventType = "process.tree_unavailable",
+            Source = "guest",
+            ProcessName = context.RootProcessName,
+            ProcessId = rootProcessId,
+            ParentProcessId = context.RootParentProcessId,
+            Path = context.RootProcessPath ?? context.SamplePath,
+            CommandLine = context.RootCommandLine,
+            Data =
+            {
+                ["phase"] = ToPhaseLabel(phase),
+                ["capturePhase"] = ToPhaseLabel(phase),
+                ["processId"] = rootProcessId.ToString(CultureInfo.InvariantCulture),
+                ["rootProcessId"] = rootProcessId.ToString(CultureInfo.InvariantCulture),
+                ["snapshotTimeUtc"] = capturedAtUtc.ToString("O", CultureInfo.InvariantCulture),
+                ["capturedAtUtc"] = capturedAtUtc.ToString("O", CultureInfo.InvariantCulture),
+                ["rootVisible"] = "false",
+                ["rootMissing"] = "true",
+                ["rootExited"] = "true",
+                ["processMissing"] = "true",
+                ["exitMissing"] = "true",
+                ["processExited"] = "true",
+                ["exitedBeforeSnapshot"] = "true",
+                ["snapshotState"] = "missing",
+                ["captureState"] = "missing",
+                ["status"] = "missing",
+                ["processRole"] = "root",
+                ["treeDepth"] = "0",
+                ["treeLineage"] = rootProcessId.ToString(CultureInfo.InvariantCulture),
+                ["reason"] = "Root process was not visible in the current process snapshot.",
+                ["zhMessage"] = "样本根进程在当前进程快照中不可见，可能已经退出。",
+                ["zhHint"] = "该事件保留 rootProcessId/treeLineage 和已知启动信息；请结合 process.exit、process.timeout 或 missingAtUtc 判断退出时机。"
+            }
+        };
+
+        if (context.RootParentProcessId is not null)
+        {
+            evt.Data["parentProcessId"] = context.RootParentProcessId.Value.ToString(CultureInfo.InvariantCulture);
+        }
+
+        if (context.RootProcessStartTimeUtc is not null)
+        {
+            evt.Data["startTimeUtc"] = context.RootProcessStartTimeUtc.Value.ToString("O", CultureInfo.InvariantCulture);
+            evt.Data["processStartTimeUtc"] = context.RootProcessStartTimeUtc.Value.ToString("O", CultureInfo.InvariantCulture);
+        }
+
+        AddIfNotEmpty(evt.Data, "rootProcessName", context.RootProcessName);
+        AddIfNotEmpty(evt.Data, "rootImagePath", context.RootProcessPath ?? context.SamplePath);
+        AddIfNotEmpty(evt.Data, "imagePath", context.RootProcessPath ?? context.SamplePath);
+        AddIfNotEmpty(evt.Data, "processImagePath", context.RootProcessPath ?? context.SamplePath);
+        AddIfNotEmpty(evt.Data, "rootCommandLine", context.RootCommandLine);
+        AddIfNotEmpty(evt.Data, "commandLine", context.RootCommandLine);
+        if (visiblePidReuse is not null)
+        {
+            evt.Data["pidReuseSuspected"] = "true";
+            evt.Data["visiblePidSnapshotKey"] = visiblePidReuse.Key;
+            AddIfNotEmpty(evt.Data, "visiblePidProcessName", visiblePidReuse.ProcessName);
+            AddIfNotEmpty(evt.Data, "visiblePidImagePath", visiblePidReuse.Path);
+            if (visiblePidReuse.StartTimeUtc is not null)
+            {
+                evt.Data["visiblePidStartTimeUtc"] = visiblePidReuse.StartTimeUtc.Value.ToString("O", CultureInfo.InvariantCulture);
+            }
+        }
+
+        return evt;
+    }
+
+    /// <summary>
+    /// Creates a compact process.tree.summary event for report process-tree
+    /// sections without changing the row-level process.tree contract.
+    /// </summary>
+    private SandboxEvent CreateProcessTreeSummaryEvent(
+        ProcessTreeEventResult tree,
+        IReadOnlyDictionary<int, ProcessTreeSnapshot> snapshot,
+        int missingProcessCount,
+        ProbePhase phase,
+        GuestProbeContext context,
+        DateTimeOffset capturedAtUtc)
+    {
+        var root = tree.RootProcess ?? observedSnapshots.Values
+            .Where(observation => observation.Snapshot.ProcessId == tree.RootProcessId)
+            .OrderByDescending(observation => observation.LastSeenAtUtc)
+            .Select(observation => observation.Snapshot)
+            .FirstOrDefault();
+        var evt = new SandboxEvent
+        {
+            EventType = "process.tree.summary",
+            Source = "guest",
+            ProcessName = root?.ProcessName ?? context.RootProcessName,
+            ProcessId = tree.RootProcessId,
+            ParentProcessId = root?.ParentProcessId ?? context.RootParentProcessId,
+            Path = root?.Path ?? context.RootProcessPath ?? context.SamplePath,
+            CommandLine = root?.CommandLine ?? context.RootCommandLine,
+            Data =
+            {
+                ["phase"] = ToPhaseLabel(phase),
+                ["capturePhase"] = ToPhaseLabel(phase),
+                ["snapshotTimeUtc"] = capturedAtUtc.ToString("O", CultureInfo.InvariantCulture),
+                ["capturedAtUtc"] = capturedAtUtc.ToString("O", CultureInfo.InvariantCulture),
+                ["rootProcessId"] = tree.RootProcessId.ToString(CultureInfo.InvariantCulture),
+                ["processId"] = tree.RootProcessId.ToString(CultureInfo.InvariantCulture),
+                ["processRole"] = "root",
+                ["treeDepth"] = "0",
+                ["treeLineage"] = tree.RootProcessId.ToString(CultureInfo.InvariantCulture),
+                ["rootVisible"] = tree.RootVisible.ToString(CultureInfo.InvariantCulture).ToLowerInvariant(),
+                ["rootMissing"] = (!tree.RootVisible).ToString(CultureInfo.InvariantCulture).ToLowerInvariant(),
+                ["rootExited"] = (!tree.RootVisible).ToString(CultureInfo.InvariantCulture).ToLowerInvariant(),
+                ["processMissing"] = (!tree.RootVisible).ToString(CultureInfo.InvariantCulture).ToLowerInvariant(),
+                ["exitMissing"] = (!tree.RootVisible).ToString(CultureInfo.InvariantCulture).ToLowerInvariant(),
+                ["processExited"] = (!tree.RootVisible).ToString(CultureInfo.InvariantCulture).ToLowerInvariant(),
+                ["visibleProcessCount"] = tree.VisibleProcessCount.ToString(CultureInfo.InvariantCulture),
+                ["treeProcessCount"] = tree.VisibleProcessCount.ToString(CultureInfo.InvariantCulture),
+                ["snapshotProcessCount"] = snapshot.Count.ToString(CultureInfo.InvariantCulture),
+                ["directChildProcessCount"] = tree.DirectChildProcessCount.ToString(CultureInfo.InvariantCulture),
+                ["childProcessCount"] = tree.DirectChildProcessCount.ToString(CultureInfo.InvariantCulture),
+                ["maxTreeDepth"] = tree.MaxDepth.ToString(CultureInfo.InvariantCulture),
+                ["orphanedChildProcessCount"] = tree.OrphanedChildProcessCount.ToString(CultureInfo.InvariantCulture),
+                ["missingProcessCount"] = missingProcessCount.ToString(CultureInfo.InvariantCulture),
+                ["trackedProcessCount"] = monitoredProcessKeys.Count.ToString(CultureInfo.InvariantCulture),
+                ["summaryEvent"] = "true",
+                ["captureState"] = tree.RootVisible ? "complete" : "partial",
+                ["status"] = tree.RootVisible ? "complete" : "partial",
+                ["zhMessage"] = tree.RootVisible
+                    ? "进程树快照已采集，根进程仍可见。"
+                    : "进程树快照已采集，但根进程当前不可见，可能已经退出。",
+                ["zhHint"] = "请使用 rootProcessId/treeLineage 关联 process.tree、process.snapshot missing 行和最终 process.exit 事件。"
+            }
+        };
+
+        if (evt.ParentProcessId is not null)
+        {
+            evt.Data["parentProcessId"] = evt.ParentProcessId.Value.ToString(CultureInfo.InvariantCulture);
+        }
+
+        AddIfNotEmpty(evt.Data, "rootProcessName", evt.ProcessName);
+        AddIfNotEmpty(evt.Data, "rootImagePath", evt.Path);
+        AddIfNotEmpty(evt.Data, "imagePath", evt.Path);
+        AddIfNotEmpty(evt.Data, "processImagePath", evt.Path);
+        AddIfNotEmpty(evt.Data, "rootCommandLine", evt.CommandLine);
+        AddIfNotEmpty(evt.Data, "commandLine", evt.CommandLine);
+        AddIfNotEmpty(evt.Data, "rootSnapshotKey", root?.Key);
+        if (root?.StartTimeUtc is not null)
+        {
+            evt.Data["startTimeUtc"] = root.StartTimeUtc.Value.ToString("O", CultureInfo.InvariantCulture);
+            evt.Data["processStartTimeUtc"] = root.StartTimeUtc.Value.ToString("O", CultureInfo.InvariantCulture);
+        }
+
+        return evt;
+    }
+
+    /// <summary>
+    /// Maps process snapshot state into short report text.
+    /// </summary>
+    private static string ProcessSnapshotZhMessage(string eventType, string snapshotState)
+    {
+        if (string.Equals(snapshotState, "missing", StringComparison.OrdinalIgnoreCase))
+        {
+            return "进程此前被跟踪，但当前快照中已不可见，可能已经退出。";
+        }
+
+        return string.Equals(eventType, "process.tree", StringComparison.OrdinalIgnoreCase)
+            ? "进程树节点已采集。"
+            : "进程快照行已采集。";
+    }
+
+    /// <summary>
+    /// Maps process snapshot state into operator guidance.
+    /// </summary>
+    private static string ProcessSnapshotZhHint(string snapshotState)
+    {
+        return string.Equals(snapshotState, "missing", StringComparison.OrdinalIgnoreCase)
+            ? "missing/exited 标记用于解释短生命周期进程；请结合 firstSeen/lastSeen、rootProcessId 和 treeLineage 还原时序。"
+            : "请使用 rootProcessId、parentProcessId、treeDepth 和 treeLineage 还原样本进程关系。";
+    }
+
+    /// <summary>
+    /// Builds root-relative process tree metadata used by process.snapshot
+    /// rows so each row can be consumed independently by host reports.
+    /// </summary>
+    private static Dictionary<int, ProcessTreeMetadata> CreateRootTreeMetadata(
+        IReadOnlyDictionary<int, ProcessTreeSnapshot> snapshot,
+        GuestProbeContext context)
+    {
+        var metadata = new Dictionary<int, ProcessTreeMetadata>();
+        if (context.RootProcessId is null ||
+            !snapshot.TryGetValue(context.RootProcessId.Value, out var root) ||
+            !IsSameRootProcess(root, context))
+        {
+            return metadata;
+        }
+
+        var childrenByParent = snapshot.Values
+            .Where(process => process.ParentProcessId is not null)
+            .GroupBy(process => process.ParentProcessId!.Value)
+            .ToDictionary(group => group.Key, group => group.OrderBy(process => process.ProcessId).ToList());
+        var queue = new Queue<(ProcessTreeSnapshot Process, int Depth, string Lineage)>();
+        var visited = new HashSet<int>();
+        queue.Enqueue((root, 0, root.ProcessId.ToString(CultureInfo.InvariantCulture)));
+
+        while (queue.Count != 0)
+        {
+            var (process, depth, lineage) = queue.Dequeue();
+            if (!visited.Add(process.ProcessId))
+            {
+                continue;
+            }
+
+            var childCount = childrenByParent.TryGetValue(process.ProcessId, out var children) ? children.Count : 0;
+            metadata[process.ProcessId] = new ProcessTreeMetadata(depth, childCount, lineage);
+            if (childCount == 0 || children is null)
+            {
+                continue;
+            }
+
+            foreach (var child in children)
+            {
+                queue.Enqueue((child, depth + 1, $"{lineage}>{child.ProcessId.ToString(CultureInfo.InvariantCulture)}"));
+            }
+        }
+
+        return metadata;
+    }
+
+    /// <summary>
+    /// Merges later process data with earlier metadata so missing rows keep the
+    /// richest known command line, image path, and start time.
+    /// </summary>
+    private static ProcessTreeSnapshot MergeProcessSnapshot(ProcessTreeSnapshot existing, ProcessTreeSnapshot current)
+    {
+        return current with
+        {
+            ParentProcessId = current.ParentProcessId ?? existing.ParentProcessId,
+            ProcessName = IsUnknownProcessName(current.ProcessName) ? existing.ProcessName : current.ProcessName,
+            Path = current.Path ?? existing.Path,
+            StartTimeUtc = current.StartTimeUtc ?? existing.StartTimeUtc,
+            SessionId = current.SessionId ?? existing.SessionId,
+            ThreadCount = current.ThreadCount ?? existing.ThreadCount,
+            BasePriority = current.BasePriority ?? existing.BasePriority,
+            ToolhelpImageName = current.ToolhelpImageName ?? existing.ToolhelpImageName,
+            CommandLine = current.CommandLine ?? existing.CommandLine
+        };
+    }
+
+    private static ProcessTreeSnapshot MergeRootContext(ProcessTreeSnapshot process, GuestProbeContext context)
+    {
+        return process with
+        {
+            ParentProcessId = process.ParentProcessId ?? context.RootParentProcessId,
+            ProcessName = IsUnknownProcessName(process.ProcessName)
+                ? context.RootProcessName ?? SafeProcessNameFromPath(context.RootProcessPath ?? context.SamplePath) ?? process.ProcessName
+                : process.ProcessName,
+            Path = process.Path ?? context.RootProcessPath ?? context.SamplePath,
+            StartTimeUtc = process.StartTimeUtc ?? context.RootProcessStartTimeUtc,
+            ToolhelpImageName = process.ToolhelpImageName ?? SafeFileName(context.RootProcessPath ?? context.SamplePath),
+            CommandLine = process.CommandLine ?? context.RootCommandLine
+        };
+    }
+
+    private static ProcessTreeSnapshot CreateRootFallbackSnapshot(GuestProbeContext context)
+    {
+        var rootPath = context.RootProcessPath ?? context.SamplePath;
+        return new ProcessTreeSnapshot(
+            context.RootProcessId!.Value,
+            context.RootParentProcessId,
+            context.RootProcessName ?? SafeProcessNameFromPath(rootPath) ?? "unknown",
+            rootPath,
+            context.RootProcessStartTimeUtc,
+            SessionId: null,
+            ThreadCount: null,
+            BasePriority: null,
+            ToolhelpImageName: SafeFileName(rootPath),
+            CommandLine: context.RootCommandLine);
+    }
+
+    private static bool IsSameRootProcess(ProcessTreeSnapshot process, GuestProbeContext context)
+    {
+        if (context.RootProcessStartTimeUtc is null || process.StartTimeUtc is null)
+        {
+            return true;
+        }
+
+        var delta = process.StartTimeUtc.Value - context.RootProcessStartTimeUtc.Value;
+        return Math.Abs(delta.TotalSeconds) <= 1;
+    }
+
+    private static bool IsUnknownProcessName(string? processName)
+    {
+        return string.IsNullOrWhiteSpace(processName) ||
+            string.Equals(processName, "unknown", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string? SafeProcessNameFromPath(string? path)
+    {
+        var fileName = SafeFileName(path);
+        return string.IsNullOrWhiteSpace(fileName)
+            ? null
+            : Path.GetFileNameWithoutExtension(fileName);
+    }
+
+    private static string? SafeFileName(string? path)
+    {
+        try
+        {
+            return string.IsNullOrWhiteSpace(path) ? null : Path.GetFileName(path);
+        }
+        catch (ArgumentException)
+        {
+            return null;
+        }
     }
 
     /// <summary>
@@ -520,8 +1150,8 @@ internal sealed class ProcessTreeProbe : IGuestProbe
     /// <summary>
     /// Creates one service diff event.
     /// Inputs are event type, change label, current/previous service snapshots,
-    /// and phase; processing copies service identity, state, and PID metadata;
-    /// the method returns a SandboxEvent.
+    /// and phase; processing copies service identity, state, PID, and registry
+    /// configuration metadata; the method returns a SandboxEvent.
     /// </summary>
     private static SandboxEvent CreateServiceEvent(
         string eventType,
@@ -548,6 +1178,11 @@ internal sealed class ProcessTreeProbe : IGuestProbe
         AddIfNotEmpty(evt.Data, "displayName", service.DisplayName);
         AddIfNotEmpty(evt.Data, "stateCode", service.StateCode);
         AddIfNotEmpty(evt.Data, "rawSummary", service.RawSummary);
+        AddIfNotEmpty(evt.Data, "imagePath", service.ImagePath);
+        AddIfNotEmpty(evt.Data, "startType", service.StartType);
+        AddIfNotEmpty(evt.Data, "serviceType", service.ServiceType);
+        AddIfNotEmpty(evt.Data, "objectName", service.ObjectName);
+        AddIfNotEmpty(evt.Data, "serviceDll", service.ServiceDll);
         if (service.ProcessId is not null)
         {
             evt.Data["serviceProcessId"] = service.ProcessId.Value.ToString(CultureInfo.InvariantCulture);
@@ -556,6 +1191,11 @@ internal sealed class ProcessTreeProbe : IGuestProbe
         if (previous is not null)
         {
             AddIfNotEmpty(evt.Data, "previousState", previous.State);
+            AddIfNotEmpty(evt.Data, "previousImagePath", previous.ImagePath);
+            AddIfNotEmpty(evt.Data, "previousStartType", previous.StartType);
+            AddIfNotEmpty(evt.Data, "previousServiceType", previous.ServiceType);
+            AddIfNotEmpty(evt.Data, "previousObjectName", previous.ObjectName);
+            AddIfNotEmpty(evt.Data, "previousServiceDll", previous.ServiceDll);
             if (previous.ProcessId is not null)
             {
                 evt.Data["previousServiceProcessId"] = previous.ProcessId.Value.ToString(CultureInfo.InvariantCulture);
@@ -794,6 +1434,7 @@ internal interface IProcessSnapshotProvider
 internal sealed class ProcessSnapshotProvider : IProcessSnapshotProvider
 {
     private const uint Th32CsSnapProcess = 0x00000002;
+    private static readonly TimeSpan CommandLineQueryTimeout = TimeSpan.FromSeconds(4);
 
     /// <summary>
     /// Captures the current visible process list.
@@ -806,8 +1447,11 @@ internal sealed class ProcessSnapshotProvider : IProcessSnapshotProvider
         var toolhelpByPid = OperatingSystem.IsWindows()
             ? CaptureToolhelpProcessInfo()
             : new Dictionary<int, ToolhelpProcessInfo>();
+        var commandLineMetadataByPid = OperatingSystem.IsWindows()
+            ? CaptureCommandLineMetadata()
+            : new Dictionary<int, ProcessCommandLineInfo>();
 
-        return CaptureWithProcessApi(toolhelpByPid, cancellationToken);
+        return CaptureWithProcessApi(toolhelpByPid, commandLineMetadataByPid, cancellationToken);
     }
 
     /// <summary>
@@ -856,6 +1500,110 @@ internal sealed class ProcessSnapshotProvider : IProcessSnapshotProvider
     }
 
     /// <summary>
+    /// Captures process command lines with a bounded PowerShell CIM helper.
+    /// Inputs are none; processing reads Win32_Process rows without elevation
+    /// where permitted and returns PID-command-line mappings; failures are
+    /// ignored so the primary process snapshot path remains non-fatal.
+    /// </summary>
+    private static Dictionary<int, ProcessCommandLineInfo> CaptureCommandLineMetadata()
+    {
+        try
+        {
+            var result = BoundedProcessRunner.RunAsync(
+                "powershell.exe",
+                [
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-Command",
+                    "Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,Name,ExecutablePath,CommandLine | ConvertTo-Json -Compress -Depth 2"
+                ],
+                CommandLineQueryTimeout).GetAwaiter().GetResult();
+            return result.Succeeded
+                ? ParseCommandLineJson(result.StandardOutput)
+                : new Dictionary<int, ProcessCommandLineInfo>();
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or Win32Exception or IOException or UnauthorizedAccessException or JsonException or NotSupportedException)
+        {
+            return new Dictionary<int, ProcessCommandLineInfo>();
+        }
+    }
+
+    /// <summary>
+    /// Parses compact PowerShell JSON from Win32_Process into PID-command-line
+    /// mappings while tolerating either a single object or an array.
+    /// </summary>
+    private static Dictionary<int, ProcessCommandLineInfo> ParseCommandLineJson(string json)
+    {
+        var values = new Dictionary<int, ProcessCommandLineInfo>();
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return values;
+        }
+
+        using var document = JsonDocument.Parse(json);
+        if (document.RootElement.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var element in document.RootElement.EnumerateArray())
+            {
+                AddCommandLineJsonRow(values, element);
+            }
+        }
+        else if (document.RootElement.ValueKind == JsonValueKind.Object)
+        {
+            AddCommandLineJsonRow(values, document.RootElement);
+        }
+
+        return values;
+    }
+
+    private static void AddCommandLineJsonRow(Dictionary<int, ProcessCommandLineInfo> values, JsonElement element)
+    {
+        if (!TryGetJsonInt32(element, "ProcessId", out var processId) || processId <= 0)
+        {
+            return;
+        }
+
+        _ = TryGetJsonInt32(element, "ParentProcessId", out var parentProcessId);
+        _ = TryGetJsonString(element, "Name", out var name);
+        _ = TryGetJsonString(element, "ExecutablePath", out var executablePath);
+        _ = TryGetJsonString(element, "CommandLine", out var commandLine);
+        values[processId] = new ProcessCommandLineInfo(
+            parentProcessId > 0 ? parentProcessId : null,
+            name,
+            executablePath,
+            commandLine);
+    }
+
+    private static bool TryGetJsonInt32(JsonElement element, string propertyName, out int value)
+    {
+        value = 0;
+        if (!element.TryGetProperty(propertyName, out var property))
+        {
+            return false;
+        }
+
+        if (property.ValueKind == JsonValueKind.Number && property.TryGetInt32(out value))
+        {
+            return true;
+        }
+
+        return property.ValueKind == JsonValueKind.String &&
+            int.TryParse(property.GetString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out value);
+    }
+
+    private static bool TryGetJsonString(JsonElement element, string propertyName, out string? value)
+    {
+        value = null;
+        if (!element.TryGetProperty(propertyName, out var property) || property.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
+        {
+            return false;
+        }
+
+        value = property.ValueKind == JsonValueKind.String ? property.GetString() : property.ToString();
+        return !string.IsNullOrWhiteSpace(value);
+    }
+
+    /// <summary>
     /// Enriches process snapshots with names, executable paths, start times, and
     /// sessions. Inputs are optional Toolhelp metadata and cancellation token;
     /// processing reads each Process defensively because protected/exited
@@ -863,6 +1611,7 @@ internal sealed class ProcessSnapshotProvider : IProcessSnapshotProvider
     /// </summary>
     private static Dictionary<int, ProcessTreeSnapshot> CaptureWithProcessApi(
         IReadOnlyDictionary<int, ToolhelpProcessInfo> toolhelpByPid,
+        IReadOnlyDictionary<int, ProcessCommandLineInfo> commandLineMetadataByPid,
         CancellationToken cancellationToken)
     {
         var snapshot = new Dictionary<int, ProcessTreeSnapshot>();
@@ -874,25 +1623,34 @@ internal sealed class ProcessSnapshotProvider : IProcessSnapshotProvider
                 cancellationToken.ThrowIfCancellationRequested();
                 using (process)
                 {
+                    commandLineMetadataByPid.TryGetValue(process.Id, out var commandLineMetadata);
                     var processName = TryReadProcessValue(process, static p => p.ProcessName, "unknown");
-                    var path = TryReadProcessValue<string?>(process, static p => p.MainModule?.FileName, null);
+                    var cimName = commandLineMetadata?.Name;
+                    if (IsUnknownProcessNameValue(processName) && !string.IsNullOrWhiteSpace(cimName))
+                    {
+                        processName = Path.GetFileNameWithoutExtension(cimName) ?? cimName;
+                    }
+
+                    processName ??= "unknown";
+                    var path = TryReadProcessValue<string?>(process, static p => p.MainModule?.FileName, null) ?? commandLineMetadata?.ExecutablePath;
                     var startTimeUtc = TryReadProcessValue<DateTime?>(process, static p => p.StartTime.ToUniversalTime(), null);
                     var sessionId = TryReadProcessValue<int?>(process, static p => p.SessionId, null);
                     toolhelpByPid.TryGetValue(process.Id, out var toolhelp);
                     var parentProcessId = toolhelp is not null && toolhelp.ParentProcessId > 0
                         ? toolhelp.ParentProcessId
-                        : (int?)null;
+                        : commandLineMetadata?.ParentProcessId;
 
                     snapshot[process.Id] = new ProcessTreeSnapshot(
                         process.Id,
                         parentProcessId,
-                        processName,
+                        string.IsNullOrWhiteSpace(processName) ? "unknown" : processName,
                         path,
                         startTimeUtc,
                         sessionId,
                         toolhelp?.ThreadCount,
                         toolhelp?.BasePriority,
-                        toolhelp?.ImageName);
+                        toolhelp?.ImageName,
+                        commandLineMetadata?.CommandLine);
                 }
             }
         }
@@ -932,6 +1690,17 @@ internal sealed class ProcessSnapshotProvider : IProcessSnapshotProvider
         }
     }
 
+    /// <summary>
+    /// Checks whether a process name from System.Diagnostics is missing or only
+    /// a placeholder. Kept local to the provider so the provider remains
+    /// self-contained when used by memory-dump and process-tree probes.
+    /// </summary>
+    private static bool IsUnknownProcessNameValue(string? processName)
+    {
+        return string.IsNullOrWhiteSpace(processName) ||
+            string.Equals(processName, "unknown", StringComparison.OrdinalIgnoreCase);
+    }
+
     private static readonly IntPtr InvalidHandleValue = new(-1);
 
     [DllImport("kernel32.dll", SetLastError = true)]
@@ -951,6 +1720,12 @@ internal sealed class ProcessSnapshotProvider : IProcessSnapshotProvider
         int ThreadCount,
         int BasePriority,
         string? ImageName);
+
+    private sealed record ProcessCommandLineInfo(
+        int? ParentProcessId,
+        string? Name,
+        string? ExecutablePath,
+        string? CommandLine);
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
     private struct ProcessEntry32
@@ -1008,9 +1783,10 @@ internal sealed class SystemChangeSnapshotProvider : ISystemChangeSnapshotProvid
     }
 
     /// <summary>
-    /// Captures service state through sc.exe queryex.
-    /// Inputs are diagnostics and cancellation token; processing parses service
-    /// names, display names, states, and PIDs; returns a keyed dictionary.
+    /// Captures service state through sc.exe queryex plus service registry
+    /// configuration. Inputs are diagnostics and cancellation token; processing
+    /// parses service names, display names, states, PIDs, ImagePath/Start/Type,
+    /// ObjectName, and Parameters\ServiceDll; returns a keyed dictionary.
     /// </summary>
     private static async Task<Dictionary<string, ServiceStateSnapshot>> CaptureServicesAsync(
         List<SandboxEvent> diagnostics,
@@ -1032,7 +1808,9 @@ internal sealed class SystemChangeSnapshotProvider : ISystemChangeSnapshotProvid
             diagnostics.Add(CreateCommandFailureEvent("service.capture_failed", result));
         }
 
-        return ParseServices(result.StandardOutput);
+        var services = ParseServices(result.StandardOutput);
+        EnrichServiceRegistryMetadata(services, diagnostics, cancellationToken);
+        return services;
     }
 
     /// <summary>
@@ -1165,8 +1943,63 @@ internal sealed class SystemChangeSnapshotProvider : ISystemChangeSnapshotProvid
             state ?? "unknown",
             stateCode,
             processId is > 0 ? processId : null,
-            Truncate(string.Join(" | ", rawLines.Take(6)), 512));
+            Truncate(string.Join(" | ", rawLines.Take(6)), 512),
+            ImagePath: null,
+            StartType: null,
+            ServiceType: null,
+            ObjectName: null,
+            ServiceDll: null);
         services[service.Key] = service;
+    }
+
+    /// <summary>
+    /// Adds low-privilege service registry configuration metadata to parsed
+    /// service rows. Inputs are parsed service snapshots, diagnostics, and
+    /// cancellation; processing reads HKLM service keys defensively; the method
+    /// returns no value and preserves sc.exe state when registry reads fail.
+    /// </summary>
+    [SupportedOSPlatform("windows")]
+    private static void EnrichServiceRegistryMetadata(
+        Dictionary<string, ServiceStateSnapshot> services,
+        List<SandboxEvent> diagnostics,
+        CancellationToken cancellationToken)
+    {
+        foreach (var serviceName in services.Keys.OrderBy(name => name, StringComparer.OrdinalIgnoreCase).ToList())
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var service = services[serviceName];
+            try
+            {
+                using var key = Registry.LocalMachine.OpenSubKey($@"SYSTEM\CurrentControlSet\Services\{service.ServiceName}");
+                if (key is null)
+                {
+                    continue;
+                }
+
+                var imagePath = FormatRegistryValue(key.GetValue("ImagePath", null, RegistryValueOptions.DoNotExpandEnvironmentNames));
+                var startType = FormatRegistryValue(key.GetValue("Start", null, RegistryValueOptions.None));
+                var serviceType = FormatRegistryValue(key.GetValue("Type", null, RegistryValueOptions.None));
+                var objectName = FormatRegistryValue(key.GetValue("ObjectName", null, RegistryValueOptions.DoNotExpandEnvironmentNames));
+                string? serviceDll = null;
+                using (var parameters = key.OpenSubKey("Parameters"))
+                {
+                    serviceDll = FormatRegistryValue(parameters?.GetValue("ServiceDll", null, RegistryValueOptions.DoNotExpandEnvironmentNames));
+                }
+
+                services[serviceName] = service with
+                {
+                    ImagePath = imagePath,
+                    StartType = startType,
+                    ServiceType = serviceType,
+                    ObjectName = objectName,
+                    ServiceDll = serviceDll
+                };
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or SecurityException or ArgumentException)
+            {
+                diagnostics.Add(CreateExceptionEvent("service.registry.capture_failed", service.ServiceName, ex));
+            }
+        }
     }
 
     /// <summary>
@@ -1493,7 +2326,8 @@ internal sealed class SystemChangeSnapshotProvider : ISystemChangeSnapshotProvid
             Data =
             {
                 ["source"] = source,
-                ["reason"] = "System inventory source is only available on Windows."
+                ["reason"] = "System inventory source is only available on Windows.",
+                ["zhHint"] = "该系统清单来源仅在 Windows guest 中可用；在非 Windows 或受限环境中会跳过，不代表样本行为。"
             }
         };
     }
@@ -1530,6 +2364,8 @@ internal sealed class SystemChangeSnapshotProvider : ISystemChangeSnapshotProvid
         AddIfNotEmpty(evt.Data, "commandExceptionType", result.ExceptionType);
         AddIfNotEmpty(evt.Data, "message", result.Message);
         AddIfNotEmpty(evt.Data, "commandMessage", result.Message);
+        AddIfNotEmpty(evt.Data, "zhMessage", CommandFailureZhMessage(result));
+        AddIfNotEmpty(evt.Data, "zhHint", "系统清单 helper 命令失败；请检查命令是否存在、权限是否足够，以及 stderr/exitCode/timeoutMilliseconds。");
         if (!string.IsNullOrWhiteSpace(result.StandardOutput))
         {
             evt.Data["stdout"] = Truncate(result.StandardOutput.Trim(), 512);
@@ -1573,9 +2409,31 @@ internal sealed class SystemChangeSnapshotProvider : ISystemChangeSnapshotProvid
             Data =
             {
                 ["exceptionType"] = exception.GetType().FullName ?? exception.GetType().Name,
-                ["message"] = exception.Message
+                ["message"] = exception.Message,
+                ["zhMessage"] = "读取系统清单时发生异常；该诊断不会中断整体采集。",
+                ["zhHint"] = "请结合 eventType、path、exceptionType/message 判断是权限、注册表、服务或文件系统访问问题。"
             }
         };
+    }
+
+    private static string CommandFailureZhMessage(BoundedCommandResult result)
+    {
+        if (result.TimedOut)
+        {
+            return "系统清单 helper 命令超时。";
+        }
+
+        if (result.ExceptionType is not null)
+        {
+            return "系统清单 helper 命令启动或读取输出失败。";
+        }
+
+        if (result.ExitCode is not null)
+        {
+            return $"系统清单 helper 命令以非零退出码 {result.ExitCode.Value.ToString(CultureInfo.InvariantCulture)} 结束。";
+        }
+
+        return string.Empty;
     }
 
     /// <summary>
@@ -1603,12 +2461,50 @@ internal sealed record ProcessTreeSnapshot(
     int? SessionId,
     int? ThreadCount,
     int? BasePriority,
-    string? ToolhelpImageName)
+    string? ToolhelpImageName,
+    string? CommandLine)
 {
     public string Key => StartTimeUtc is null
         ? $"{ProcessId}:{ProcessName}"
         : $"{ProcessId}:{StartTimeUtc.Value.Ticks}:{ProcessName}";
 }
+
+/// <summary>
+/// Stores the first and latest process snapshot seen by the probe so
+/// short-lived or exited sample processes can still be represented in the
+/// final event stream.
+/// </summary>
+internal sealed record ProcessTreeObservation(
+    ProcessTreeSnapshot Snapshot,
+    ProbePhase FirstSeenPhase,
+    DateTimeOffset FirstSeenAtUtc,
+    ProbePhase LastSeenPhase,
+    DateTimeOffset LastSeenAtUtc,
+    bool VisibleInAnySnapshot);
+
+/// <summary>
+/// Carries row-level process tree events plus counters for a single root
+/// process sweep.
+/// </summary>
+internal sealed record ProcessTreeEventResult(
+    IReadOnlyList<SandboxEvent> Events,
+    IReadOnlyList<string> ProcessKeys,
+    bool RootVisible,
+    ProcessTreeSnapshot? RootProcess,
+    int RootProcessId,
+    int VisibleProcessCount,
+    int DirectChildProcessCount,
+    int MaxDepth,
+    int OrphanedChildProcessCount);
+
+/// <summary>
+/// Root-relative process relationship metadata attached to process.snapshot
+/// events for report rendering.
+/// </summary>
+internal sealed record ProcessTreeMetadata(
+    int Depth,
+    int ChildCount,
+    string Lineage);
 
 /// <summary>
 /// Common contract for system-state inventory records.
@@ -1633,11 +2529,26 @@ internal sealed record ServiceStateSnapshot(
     string State,
     string? StateCode,
     int? ProcessId,
-    string RawSummary) : ISystemStateItemSnapshot
+    string RawSummary,
+    string? ImagePath,
+    string? StartType,
+    string? ServiceType,
+    string? ObjectName,
+    string? ServiceDll) : ISystemStateItemSnapshot
 {
     public string Key => ServiceName;
 
-    public string Signature => string.Join("|", DisplayName, State, StateCode, ProcessId?.ToString(CultureInfo.InvariantCulture));
+    public string Signature => string.Join(
+        "|",
+        DisplayName,
+        State,
+        StateCode,
+        ProcessId?.ToString(CultureInfo.InvariantCulture),
+        ImagePath,
+        StartType,
+        ServiceType,
+        ObjectName,
+        ServiceDll);
 }
 
 /// <summary>

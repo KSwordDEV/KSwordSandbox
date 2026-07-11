@@ -16,7 +16,7 @@ start a VM by itself.
 #>
 [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'Medium')]
 param(
-    [ValidateSet('Interactive', 'Install', 'Change', 'Uninstall', 'Status', 'CheckEnvironment', 'ConfigureVTKey', 'StartWebUI')]
+    [ValidateSet('Interactive', 'Install', 'Change', 'Uninstall', 'Status', 'CheckEnvironment', 'ConfigureVTKey', 'StartWebUI', 'Driver')]
     [string]$Mode = 'Interactive',
 
     [string]$GuestUserName = 'SandboxUser',
@@ -73,6 +73,26 @@ param(
 
     [switch]$RestartGuestAfterTestSigning,
 
+    [ValidateSet('Status', 'Install', 'Start', 'Stop', 'Restart', 'Uninstall')]
+    [string]$DriverAction = 'Status',
+
+    [string]$DriverServiceName = 'KSwordSandboxDriver',
+
+    [string]$DriverPath = '',
+
+    [string]$DriverInfPath = '',
+
+    [ValidateSet('Auto', 'Kernel', 'MiniFilter')]
+    [string]$DriverKind = 'MiniFilter',
+
+    [string]$MiniFilterAltitude = '385201',
+
+    [string]$MiniFilterInstanceName = '',
+
+    [string]$DriverPublishedName = '',
+
+    [switch]$SkipDriverTestSigningCheck,
+
     [switch]$CurrentProcessOnly,
 
     [switch]$SkipDpapiBackup,
@@ -109,13 +129,25 @@ $repositoryRoot = Get-RepositoryRootFromScriptFolder
 $rootInstaller = Join-Path $repositoryRoot 'install.ps1'
 
 if (-not (Test-Path -LiteralPath $rootInstaller -PathType Leaf)) {
-    throw "Repository-root installer was not found: $rootInstaller"
+    throw "错误：找不到仓库根目录 install.ps1：$rootInstaller。下一步：请从完整仓库/发行包运行，或使用根目录 .\install.ps1。"
 }
 
 $script:InitialWrapperBoundParameters = @{}
 foreach ($parameterName in $PSBoundParameters.Keys) {
     $script:InitialWrapperBoundParameters[$parameterName] = $PSBoundParameters[$parameterName]
 }
+
+$script:DriverWrapperParameterNames = @(
+    'DriverAction',
+    'DriverServiceName',
+    'DriverPath',
+    'DriverInfPath',
+    'DriverKind',
+    'MiniFilterAltitude',
+    'MiniFilterInstanceName',
+    'DriverPublishedName',
+    'SkipDriverTestSigningCheck'
+)
 
 function Write-ScriptInstallInfo {
     param([Parameter(Mandatory)][string]$Message)
@@ -165,7 +197,7 @@ function Read-ScriptInstallState {
         return Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json
     }
     catch {
-        Write-ScriptInstallInfo "Ignoring unreadable install state '$statePath': $($_.Exception.Message)"
+        Write-ScriptInstallInfo "中文提示：无法读取安装状态 '$statePath'，将忽略并继续。下一步：如配置异常，请重新运行 .\scripts\install.ps1 -Mode Install -PromptPassword。英文详情：$($_.Exception.Message)"
         return $null
     }
 }
@@ -231,6 +263,10 @@ function New-RootInstallerParameterTable {
             continue
         }
 
+        if ($script:DriverWrapperParameterNames -contains $key) {
+            continue
+        }
+
         $parameters[$key] = $script:InitialWrapperBoundParameters[$key]
     }
 
@@ -250,21 +286,65 @@ function Invoke-RootInstaller {
     & $rootInstaller @Parameters
 }
 
+function Invoke-ScriptDriverAction {
+    $driverScript = Join-Path $PSScriptRoot 'Manage-SandboxDriver.ps1'
+    if (-not (Test-Path -LiteralPath $driverScript -PathType Leaf)) {
+        throw "错误：找不到驱动 service 管理脚本：$driverScript。下一步：请确认 scripts\Manage-SandboxDriver.ps1 存在。"
+    }
+
+    $parameters = @{
+        Action = $DriverAction
+        ServiceName = $DriverServiceName
+        DriverKind = $DriverKind
+        MiniFilterAltitude = $MiniFilterAltitude
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($DriverPath)) {
+        $parameters['DriverPath'] = $DriverPath
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($DriverInfPath)) {
+        $parameters['InfPath'] = $DriverInfPath
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($MiniFilterInstanceName)) {
+        $parameters['MiniFilterInstanceName'] = $MiniFilterInstanceName
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($DriverPublishedName)) {
+        $parameters['PublishedName'] = $DriverPublishedName
+    }
+
+    if ($SkipDriverTestSigningCheck) {
+        $parameters['SkipTestSigningCheck'] = $true
+    }
+
+    if ($Force) {
+        $parameters['Force'] = $true
+    }
+
+    if ($WhatIfPreference) {
+        $parameters['WhatIf'] = $true
+    }
+
+    & $driverScript @parameters
+}
+
 function Invoke-ScriptPayloadPreparation {
     $prepareScript = Join-Path $PSScriptRoot 'Prepare-GuestPayload.ps1'
     if (-not (Test-Path -LiteralPath $prepareScript -PathType Leaf)) {
-        throw "Guest payload preparation script was not found: $prepareScript"
+        throw "错误：找不到 guest payload 准备脚本：$prepareScript。下一步：请确认 scripts\Prepare-GuestPayload.ps1 存在。"
     }
 
     $target = [System.IO.Path]::GetFullPath($GuestPayloadRoot)
     if ($WhatIfPreference) {
         [void]$PSCmdlet.ShouldProcess($target, "Prepare self-contained guest payload with '$prepareScript'")
-        Write-ScriptInstallInfo "WhatIf: guest payload would be prepared at $target. No build or copy was executed."
+        Write-ScriptInstallInfo "预览：会在 $target 准备 guest payload；当前未构建或复制任何文件。 / WhatIf: guest payload would be prepared."
         return
     }
 
     if (-not $PSCmdlet.ShouldProcess($target, "Prepare self-contained guest payload with '$prepareScript'")) {
-        Write-ScriptInstallInfo 'Guest payload preparation declined by ShouldProcess/Confirm.'
+        Write-ScriptInstallInfo '已通过 ShouldProcess/Confirm 取消 guest payload 准备。下一步：需要 Live 前请重新运行并确认。 / Guest payload preparation declined.'
         return
     }
 
@@ -278,19 +358,19 @@ function Invoke-ScriptPayloadPreparation {
         '-SelfContained'
     )
 
-    Write-ScriptInstallInfo "Preparing guest payload under $GuestPayloadRoot. Build output remains outside git."
+    Write-ScriptInstallInfo "正在 $GuestPayloadRoot 下准备 guest payload；构建输出保留在 git 仓库外。 / Preparing guest payload outside git."
     & powershell @arguments
     if ($LASTEXITCODE -ne 0) {
-        throw "Guest payload preparation failed with exit code $LASTEXITCODE."
+        throw "错误：guest payload 准备失败，退出码 $LASTEXITCODE。下一步：确认 .NET SDK/MSBuild/WDK 可用，并查看上方输出。"
     }
 }
 
 function Read-ScriptPasswordMode {
     Write-Host ''
-    Write-Host 'Password handling / 密码处理:'
-    Write-Host '  1) Prompt for password（交互输入密码）'
-    Write-Host '  2) Generate password locally（生成本机随机密码）'
-    $choice = Read-ScriptMenuChoice -Prompt 'Choose [1-2] / 请选择 [1-2]' -Allowed @('1', '2')
+    Write-Host '密码处理 / Password handling:'
+    Write-Host '  1) 交互输入密码 / Prompt for password'
+    Write-Host '  2) 生成本机随机密码 / Generate password locally'
+    $choice = Read-ScriptMenuChoice -Prompt '请选择 [1-2] / Choose [1-2]' -Allowed @('1', '2')
     return @{
         PromptPassword = ($choice -eq '1')
         GeneratePassword = ($choice -eq '2')
@@ -298,15 +378,15 @@ function Read-ScriptPasswordMode {
 }
 
 function Invoke-ScriptHyperVConfigPrompt {
-    Write-ScriptInstallInfo 'Configuring local Hyper-V metadata only; no VM is started or restored.'
-    $script:VmName = Read-ScriptOptionalText -Prompt 'Hyper-V golden VM name / Hyper-V 黄金 VM 名称' -CurrentValue $VmName
-    $script:CheckpointName = Read-ScriptOptionalText -Prompt 'Clean checkpoint name / 干净快照名称' -CurrentValue $CheckpointName
-    $script:GuestUserName = Read-ScriptOptionalText -Prompt 'Guest username / 来宾用户名' -CurrentValue $GuestUserName
-    $script:GuestWorkingDirectory = Read-ScriptOptionalText -Prompt 'Guest working directory / 来宾工作目录' -CurrentValue $GuestWorkingDirectory
-    $script:RuntimeRoot = Read-ScriptOptionalText -Prompt 'Host runtime root / 宿主机运行目录' -CurrentValue $RuntimeRoot
-    $script:GuestPayloadRoot = Read-ScriptOptionalText -Prompt 'Host guest payload root / 宿主机 guest payload 目录' -CurrentValue $GuestPayloadRoot
-    $script:DriverHostPath = Read-ScriptOptionalText -Prompt 'Host test-signed R0 driver .sys path (blank = preserve/none) / 宿主机测试签名驱动路径（留空=保留/不配置）' -CurrentValue $DriverHostPath
-    $script:LocalConfigPath = Read-ScriptOptionalText -Prompt 'Local sandbox config path / 本机配置路径' -CurrentValue $LocalConfigPath
+    Write-ScriptInstallInfo '仅配置本机 Hyper-V 元数据；不会启动或还原 VM。 / Configuring local Hyper-V metadata only.'
+    $script:VmName = Read-ScriptOptionalText -Prompt 'Hyper-V 黄金 VM 名称 / Hyper-V golden VM name' -CurrentValue $VmName
+    $script:CheckpointName = Read-ScriptOptionalText -Prompt '干净快照名称 / Clean checkpoint name' -CurrentValue $CheckpointName
+    $script:GuestUserName = Read-ScriptOptionalText -Prompt '来宾用户名 / Guest username' -CurrentValue $GuestUserName
+    $script:GuestWorkingDirectory = Read-ScriptOptionalText -Prompt '来宾工作目录 / Guest working directory' -CurrentValue $GuestWorkingDirectory
+    $script:RuntimeRoot = Read-ScriptOptionalText -Prompt '宿主机运行目录 / Host runtime root' -CurrentValue $RuntimeRoot
+    $script:GuestPayloadRoot = Read-ScriptOptionalText -Prompt '宿主机 guest payload 目录 / Host guest payload root' -CurrentValue $GuestPayloadRoot
+    $script:DriverHostPath = Read-ScriptOptionalText -Prompt '宿主机测试签名 R0 driver .sys 路径（留空=保留/不配置） / Host test-signed R0 driver path' -CurrentValue $DriverHostPath
+    $script:LocalConfigPath = Read-ScriptOptionalText -Prompt '本机 sandbox 配置路径 / Local sandbox config path' -CurrentValue $LocalConfigPath
 
     Invoke-RootInstaller -Parameters (New-RootInstallerParameterTable -RootMode 'Change' -Additional @{
         UpdateHyperVConfig = $true
@@ -324,13 +404,13 @@ function Invoke-ScriptHyperVConfigPrompt {
 function Invoke-ScriptGuestTestSigningMenu {
     while ($true) {
         Write-Host ''
-        Write-Host 'Guest test-signing options / 来宾 test signing 选项:'
-        Write-Host '  1) Query current guest test-signing state（查询当前状态）'
-        Write-Host '  2) Enable guest test-signing（启用）'
-        Write-Host '  3) Enable guest test-signing and reboot guest if changed（启用并在变化时重启）'
-        Write-Host '  4) Disable guest test-signing（禁用）'
-        Write-Host '  5) Back（返回）'
-        $choice = Read-ScriptMenuChoice -Prompt 'Choose [1-5] / 请选择 [1-5]' -Allowed @('1', '2', '3', '4', '5')
+        Write-Host '来宾 test-signing 选项 / Guest test-signing options:'
+        Write-Host '  1) 查询当前 guest test-signing 状态 / Query current state'
+        Write-Host '  2) 启用 guest test-signing / Enable guest test-signing'
+        Write-Host '  3) 启用 guest test-signing，并在状态变化时重启 / Enable and reboot if changed'
+        Write-Host '  4) 禁用 guest test-signing / Disable guest test-signing'
+        Write-Host '  5) 返回 / Back'
+        $choice = Read-ScriptMenuChoice -Prompt '请选择 [1-5] / Choose [1-5]' -Allowed @('1', '2', '3', '4', '5')
         switch ($choice) {
             '1' { Invoke-RootInstaller -Parameters (New-RootInstallerParameterTable -RootMode 'Change' -Additional @{ QueryGuestTestSigning = $true }) }
             '2' { Invoke-RootInstaller -Parameters (New-RootInstallerParameterTable -RootMode 'Change' -Additional @{ EnableGuestTestSigning = $true; Force = $true }) }
@@ -344,15 +424,16 @@ function Invoke-ScriptGuestTestSigningMenu {
 function Invoke-ScriptChangeMenu {
     while ($true) {
         Write-Host ''
-        Write-Host 'Change options: / 更改选项:'
-        Write-Host '  1) Reset password secret（重置宿主机 guest 密码 secret）'
-        Write-Host '  2) Reset actual VM guest password（重置 VM 中实际来宾密码）'
-        Write-Host '  3) Configure Hyper-V VM/checkpoint/guest paths（配置 Hyper-V VM 名称/快照/路径）'
-        Write-Host '  4) Manage guest test-signing（查询/启用/提示来宾 test signing）'
-        Write-Host '  5) Prepare guest payload（准备 Guest Agent/R0Collector payload）'
-        Write-Host '  6) Show status/readiness guidance（显示状态/就绪提示）'
-        Write-Host '  7) Back（返回）'
-        $choice = Read-ScriptMenuChoice -Prompt 'Choose [1-7] / 请选择 [1-7]' -Allowed @('1', '2', '3', '4', '5', '6', '7')
+        Write-Host '更改选项 / Change options:'
+        Write-Host '  1) 重置宿主机 guest password secret / Reset password secret'
+        Write-Host '  2) 重置 VM 中实际来宾密码 / Reset actual VM guest password'
+        Write-Host '  3) 配置 Hyper-V VM 名称、快照和路径 / Configure Hyper-V VM/checkpoint/paths'
+        Write-Host '  4) 管理 guest test-signing（查询/启用/禁用） / Manage guest test-signing'
+        Write-Host '  5) 准备 Guest Agent/R0Collector payload / Prepare guest payload'
+        Write-Host '  6) 查看驱动 service/minifilter JSON 状态 / Driver JSON status'
+        Write-Host '  7) 显示状态和就绪修复建议 / Show status/readiness guidance'
+        Write-Host '  8) 返回 / Back'
+        $choice = Read-ScriptMenuChoice -Prompt '请选择 [1-8] / Choose [1-8]' -Allowed @('1', '2', '3', '4', '5', '6', '7', '8')
         switch ($choice) {
             '1' {
                 $passwordMode = Read-ScriptPasswordMode
@@ -365,8 +446,8 @@ function Invoke-ScriptChangeMenu {
             '2' {
                 $passwordMode = Read-ScriptPasswordMode
                 Write-Host ''
-                Write-Host 'This can restore/start/stop the configured VM. Continue only from an elevated lab host shell.'
-                $continue = Read-ScriptMenuChoice -Prompt 'Continue actual VM guest password reset? [y/n] / 是否继续？[y/n]' -Allowed @('y', 'Y', 'n', 'N')
+                Write-Host '中文提示：此操作可能还原/启动/停止已配置 VM；请只在隔离实验宿主机的管理员 PowerShell 中继续。 / This can restore/start/stop the configured VM.'
+                $continue = Read-ScriptMenuChoice -Prompt '是否继续重置 VM 实际来宾密码？[y/n] / Continue actual VM guest password reset? [y/n]' -Allowed @('y', 'Y', 'n', 'N')
                 if ($continue -in @('y', 'Y')) {
                     Invoke-RootInstaller -Parameters (New-RootInstallerParameterTable -RootMode 'Change' -Additional @{
                         ResetGuestVmPassword = $true
@@ -379,8 +460,12 @@ function Invoke-ScriptChangeMenu {
             '3' { Invoke-ScriptHyperVConfigPrompt }
             '4' { Invoke-ScriptGuestTestSigningMenu }
             '5' { Invoke-ScriptPayloadPreparation }
-            '6' { Invoke-RootInstaller -Parameters (New-RootInstallerParameterTable -RootMode 'Status') }
-            '7' { return }
+            '6' {
+                $script:DriverAction = 'Status'
+                Invoke-ScriptDriverAction
+            }
+            '7' { Invoke-RootInstaller -Parameters (New-RootInstallerParameterTable -RootMode 'Status') }
+            '8' { return }
         }
     }
 }
@@ -388,23 +473,23 @@ function Invoke-ScriptChangeMenu {
 function Invoke-ScriptInstallerMenu {
     while ($true) {
         Write-Host ''
-        Write-Host 'KSwordSandbox script-folder installer / scripts 目录安装向导'
-        Write-Host '  1) Install / prepare local settings（安装/准备本机设置）'
-        Write-Host '  2) Change settings（更改设置）'
-        Write-Host '  3) Uninstall local settings（卸载本机设置）'
-        Write-Host '  4) Check environment（检查环境）'
-        Write-Host '  5) Start WebUI（启动 WebUI）'
-        Write-Host '  6) Status（状态）'
-        Write-Host '  7) Exit（退出）'
-        $choice = Read-ScriptMenuChoice -Prompt 'Choose [1-7] / 请选择 [1-7]' -Allowed @('1', '2', '3', '4', '5', '6', '7')
+        Write-Host 'KSwordSandbox scripts 目录安装向导 / script-folder installer'
+        Write-Host '  1) 安装/准备本机设置 / Install or prepare local settings'
+        Write-Host '  2) 更改设置 / Change settings'
+        Write-Host '  3) 卸载本机设置 / Uninstall local settings'
+        Write-Host '  4) 检查环境 / Check environment'
+        Write-Host '  5) 启动 WebUI / Start WebUI'
+        Write-Host '  6) 状态 / Status'
+        Write-Host '  7) 退出 / Exit'
+        $choice = Read-ScriptMenuChoice -Prompt '请选择 [1-7] / Choose [1-7]' -Allowed @('1', '2', '3', '4', '5', '6', '7')
         switch ($choice) {
             '1' {
                 Write-Host ''
-                Write-Host 'Install password handling / 安装密码处理:'
-                Write-Host '  1) Prompt for guest password now（现在输入 guest password secret）'
-                Write-Host '  2) Generate password locally（生成本机随机密码）'
-                Write-Host '  3) Prepare folders/config only（仅准备目录和配置）'
-                $installChoice = Read-ScriptMenuChoice -Prompt 'Choose [1-3] / 请选择 [1-3]' -Allowed @('1', '2', '3')
+                Write-Host '安装密码处理 / Install password handling:'
+                Write-Host '  1) 现在输入 guest password secret / Prompt for guest password now'
+                Write-Host '  2) 生成本机随机密码 / Generate password locally'
+                Write-Host '  3) 仅准备目录和配置 / Prepare folders/config only'
+                $installChoice = Read-ScriptMenuChoice -Prompt '请选择 [1-3] / Choose [1-3]' -Allowed @('1', '2', '3')
                 $extra = @{}
                 if ($installChoice -eq '1') { $extra['PromptPassword'] = $true }
                 if ($installChoice -eq '2') { $extra['GeneratePassword'] = $true }
@@ -412,7 +497,7 @@ function Invoke-ScriptInstallerMenu {
             }
             '2' { Invoke-ScriptChangeMenu }
             '3' {
-                $continue = Read-ScriptMenuChoice -Prompt 'Continue uninstall local settings? [y/n] / 继续卸载本机设置？[y/n]' -Allowed @('y', 'Y', 'n', 'N')
+                $continue = Read-ScriptMenuChoice -Prompt '继续卸载本机设置？[y/n] / Continue uninstall local settings? [y/n]' -Allowed @('y', 'Y', 'n', 'N')
                 if ($continue -in @('y', 'Y')) {
                     Invoke-RootInstaller -Parameters (New-RootInstallerParameterTable -RootMode 'Uninstall' -Additional @{ Force = $true })
                 }
@@ -430,6 +515,16 @@ Initialize-ScriptEffectiveParameters -State $scriptInstallState -BoundParameters
 
 if ($PreparePayload) {
     Invoke-ScriptPayloadPreparation
+    return
+}
+
+if ($Mode -eq 'Driver' -or
+    $PSBoundParameters.ContainsKey('DriverAction') -or
+    $PSBoundParameters.ContainsKey('DriverPath') -or
+    $PSBoundParameters.ContainsKey('DriverInfPath') -or
+    $PSBoundParameters.ContainsKey('DriverPublishedName') -or
+    $PSBoundParameters.ContainsKey('SkipDriverTestSigningCheck')) {
+    Invoke-ScriptDriverAction
     return
 }
 

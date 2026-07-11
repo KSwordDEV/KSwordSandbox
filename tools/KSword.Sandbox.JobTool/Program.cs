@@ -1,18 +1,14 @@
 using System.Text.Json;
-using KSword.Sandbox.Abstractions;
-using KSword.Sandbox.Core.Configuration;
-using KSword.Sandbox.Core.Jobs;
-using KSword.Sandbox.Core.Rules;
 
 var exitCode = ProgramMain.Run(args);
 return exitCode;
 
-internal static class ProgramMain
+internal static partial class ProgramMain
 {
-    private static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        WriteIndented = true
-    };
+    private const string ToolPrefix = "[ksword-jobtool]";
+    private const string DefaultRuntimeRoot = "D:\\Temp\\KSwordSandbox";
+
+    private static readonly JsonSerializerOptions JsonOptions = CreateJsonOptions();
 
     public static int Run(string[] args)
     {
@@ -24,177 +20,55 @@ internal static class ProgramMain
                 return args.Length == 0 ? 1 : 0;
             }
 
-            var command = args[0];
-            var options = ParseOptions(args.Skip(1));
-            return command.Equals("import-live", StringComparison.OrdinalIgnoreCase)
-                ? ImportLive(options)
-                : UnknownCommand(command);
+            var command = NormalizeCommand(args, out var optionStartIndex);
+            var options = ParseOptions(args.Skip(optionStartIndex).ToArray());
+            return command.ToLowerInvariant() switch
+            {
+                "plan" => PlanJob(options),
+                "list" or "list-jobs" => ListJobs(options),
+                "status" or "show-job" => ShowJob(options),
+                "report" or "report-rebuild" or "rebuild-report" => RebuildReport(options, "rebuild-report"),
+                "import" or "import-live" => RebuildReport(options, "import-live"),
+                "artifacts" or "artifacts-inspect" or "inspect-artifacts" => InspectArtifacts(options),
+                "recover" => RecoverJob(options),
+                "readiness" => CheckReadiness(options),
+                _ => UnknownCommand(command)
+            };
         }
-        catch (Exception ex) when (ex is ArgumentException or FileNotFoundException or DirectoryNotFoundException or InvalidOperationException or JsonException or IOException or UnauthorizedAccessException)
+        catch (Exception ex) when (ex is ArgumentException or FileNotFoundException or DirectoryNotFoundException or InvalidOperationException or JsonException or IOException or UnauthorizedAccessException or KeyNotFoundException or FormatException)
         {
-            Console.Error.WriteLine($"[ksword-jobtool] failed: {ex.Message}");
+            Console.Error.WriteLine($"{ToolPrefix} 失败 / failed: {Safe(ex.Message)}");
             return 2;
         }
     }
 
-    private static int ImportLive(IReadOnlyDictionary<string, string> options)
-    {
-        var repositoryRoot = Path.GetFullPath(GetOption(options, "repo-root", Directory.GetCurrentDirectory()));
-        var configPath = GetOption(options, "config", Path.Combine(repositoryRoot, "config", "sandbox.example.json"));
-        var samplePath = RequireFile(options, "sample");
-        var eventsPath = RequireFile(options, "events");
-        var runbookExecutionPath = OptionalFile(options, "runbook-execution");
-        var jobIdText = RequireOption(options, "job-id");
-        if (!Guid.TryParse(jobIdText, out var jobId))
-        {
-            throw new ArgumentException($"--job-id must be a GUID. Value: {jobIdText}");
-        }
-
-        var duration = ParseInt(GetOption(options, "duration", "120"), "duration");
-        var displayName = GetOption(options, "display-name", Path.GetFileName(samplePath));
-        var config = SandboxConfigLoader.Load(configPath, repositoryRoot);
-        var rulesPath = Path.Combine(config.Paths.RulesDirectory, "behavior-rules.json");
-        var rules = RuleEngine.LoadRuleSet(rulesPath);
-        var service = new SandboxJobService(config, rules);
-        var job = service.ImportExternalRun(
-            jobId,
-            new SandboxSubmission
-            {
-                SamplePath = samplePath,
-                DisplayName = displayName,
-                DurationSeconds = duration,
-                DryRun = false,
-                GoldenVmName = GetOption(options, "vm", string.Empty),
-                GoldenSnapshotName = GetOption(options, "checkpoint", string.Empty)
-            },
-            eventsPath,
-            runbookExecutionPath);
-
-        var result = new
-        {
-            status = job.Status.ToString(),
-            jobId = job.JobId,
-            jsonReportPath = job.JsonReportPath,
-            htmlReportPath = job.HtmlReportPath,
-            htmlReportZhPath = job.HtmlReportZhPath,
-            htmlReportEnPath = job.HtmlReportEnPath,
-            guestEventsPath = job.GuestEventsPath,
-            runbookExecutionResultPath = job.RunbookExecutionResultPath,
-            messages = job.Messages
-        };
-        Console.WriteLine(JsonSerializer.Serialize(result, JsonOptions));
-        return 0;
-    }
-
     private static int UnknownCommand(string command)
     {
-        Console.Error.WriteLine($"[ksword-jobtool] unknown command: {command}");
+        Console.Error.WriteLine($"{ToolPrefix} 未知命令 / unknown command: {Safe(command)}");
         PrintUsage();
         return 1;
     }
 
-    private static Dictionary<string, string> ParseOptions(IEnumerable<string> args)
+    private static string NormalizeCommand(string[] args, out int optionStartIndex)
     {
-        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        using var enumerator = args.GetEnumerator();
-        while (enumerator.MoveNext())
+        optionStartIndex = 1;
+        var command = args[0];
+        if (args.Length < 2 || args[1].StartsWith("--", StringComparison.Ordinal))
         {
-            var token = enumerator.Current;
-            if (string.IsNullOrWhiteSpace(token))
-            {
-                continue;
-            }
-
-            if (!token.StartsWith("--", StringComparison.Ordinal))
-            {
-                throw new ArgumentException($"Unexpected positional argument: {token}");
-            }
-
-            var name = token[2..];
-            if (string.IsNullOrWhiteSpace(name))
-            {
-                throw new ArgumentException("Empty option name is not valid.");
-            }
-
-            if (!enumerator.MoveNext())
-            {
-                throw new ArgumentException($"Option --{name} requires a value.");
-            }
-
-            result[name] = enumerator.Current;
+            return command;
         }
 
-        return result;
-    }
-
-    private static string RequireOption(IReadOnlyDictionary<string, string> options, string name)
-    {
-        var value = GetOption(options, name, string.Empty);
-        if (string.IsNullOrWhiteSpace(value))
+        var action = args[1];
+        var normalizedCommand = command.ToLowerInvariant();
+        var normalizedAction = action.ToLowerInvariant();
+        if ((normalizedCommand == "report" && normalizedAction == "rebuild") ||
+            (normalizedCommand == "artifacts" && normalizedAction == "inspect") ||
+            (normalizedCommand == "import" && normalizedAction == "live"))
         {
-            throw new ArgumentException($"Missing required option --{name}.");
+            optionStartIndex = 2;
+            return $"{normalizedCommand}-{normalizedAction}";
         }
 
-        return value;
-    }
-
-    private static string GetOption(IReadOnlyDictionary<string, string> options, string name, string defaultValue)
-    {
-        return options.TryGetValue(name, out var value) && !string.IsNullOrWhiteSpace(value)
-            ? value
-            : defaultValue;
-    }
-
-    private static string RequireFile(IReadOnlyDictionary<string, string> options, string name)
-    {
-        var path = RequireOption(options, name);
-        if (!File.Exists(path))
-        {
-            throw new FileNotFoundException($"Required file for --{name} was not found.", path);
-        }
-
-        return Path.GetFullPath(path);
-    }
-
-    private static string? OptionalFile(IReadOnlyDictionary<string, string> options, string name)
-    {
-        if (!options.TryGetValue(name, out var path) || string.IsNullOrWhiteSpace(path))
-        {
-            return null;
-        }
-
-        if (!File.Exists(path))
-        {
-            throw new FileNotFoundException($"Optional file for --{name} was not found.", path);
-        }
-
-        return Path.GetFullPath(path);
-    }
-
-    private static int ParseInt(string value, string name)
-    {
-        if (!int.TryParse(value, out var parsed) || parsed < 0)
-        {
-            throw new ArgumentException($"--{name} must be a non-negative integer. Value: {value}");
-        }
-
-        return parsed;
-    }
-
-    private static bool IsHelp(string value)
-    {
-        return value.Equals("help", StringComparison.OrdinalIgnoreCase) ||
-            value.Equals("--help", StringComparison.OrdinalIgnoreCase) ||
-            value.Equals("-h", StringComparison.OrdinalIgnoreCase) ||
-            value.Equals("/?", StringComparison.OrdinalIgnoreCase);
-    }
-
-    private static void PrintUsage()
-    {
-        Console.WriteLine("KSword Sandbox JobTool");
-        Console.WriteLine("Usage:");
-        Console.WriteLine("  KSword.Sandbox.JobTool import-live --job-id <guid> --sample <exe> --events <events.json> [--runbook-execution <runbook-execution.json>] [--config <sandbox.json>] [--repo-root <path>] [--duration <seconds>]");
-        Console.WriteLine();
-        Console.WriteLine("Generates report.json/report.html/report.zh.html/report.en.html for a collected Hyper-V job without requiring the WebUI in-memory job list.");
+        return command;
     }
 }

@@ -11,6 +11,8 @@ namespace KSword.Sandbox.Core.Telemetry;
 /// </summary>
 public sealed class FileLiveEventSource
 {
+    private const long MaxJsonArrayBytes = 8L * 1024 * 1024;
+
     private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true };
 
     /// <summary>
@@ -82,6 +84,15 @@ public sealed class FileLiveEventSource
         }
 
         var info = new FileInfo(path);
+        if (stream.Length > MaxJsonArrayBytes)
+        {
+            return new LiveSourceReadState(
+                "too-large",
+                "json",
+                SizeBytes: stream.Length,
+                Message: $"JSON array live parsing skipped because the file is larger than {MaxJsonArrayBytes} bytes; use JSONL or import the report for full processing.");
+        }
+
         try
         {
             using var document = JsonDocument.Parse(stream);

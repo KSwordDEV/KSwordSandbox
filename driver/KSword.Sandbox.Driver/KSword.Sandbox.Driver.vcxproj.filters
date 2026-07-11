@@ -24,6 +24,9 @@
     <Filter Include="Source Files\Producers\File">
       <UniqueIdentifier>{2546E742-57F5-4077-9B6F-27B2ED9325BD}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Source Files\Producers\Image">
+      <UniqueIdentifier>{EF9F5C0C-82A0-4E72-8A35-E29BF4EC115F}</UniqueIdentifier>
+    </Filter>
     <Filter Include="Source Files\Producers\Process">
       <UniqueIdentifier>{699474F8-27A5-4E7B-942D-7598CD401F51}</UniqueIdentifier>
     </Filter>
@@ -42,6 +45,12 @@
     </Filter>
     <Filter Include="Header Files\Producers">
       <UniqueIdentifier>{30B6890E-EE63-4055-B57D-087ACD2A694A}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\Producers\File">
+      <UniqueIdentifier>{AA9B589C-4E31-44D8-BB4C-356493923D43}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\Producers\Image">
+      <UniqueIdentifier>{0C1A2EB0-0B0D-42C0-93AA-30AE4369208D}</UniqueIdentifier>
     </Filter>
     <Filter Include="Header Files\Producers\Process">
       <UniqueIdentifier>{7A257324-D46F-40D7-8E06-E09C1DFAD65A}</UniqueIdentifier>
@@ -73,6 +82,9 @@
     <ClCompile Include="src\Producers\File\FileFilter.c">
       <Filter>Source Files\Producers\File</Filter>
     </ClCompile>
+    <ClCompile Include="src\Producers\Image\ImageMonitor.c">
+      <Filter>Source Files\Producers\Image</Filter>
+    </ClCompile>
     <ClCompile Include="src\Common\AbiGuards.c">
       <Filter>Source Files\Common</Filter>
     </ClCompile>
@@ -98,6 +110,12 @@
     </ClInclude>
     <ClInclude Include="src\Common\KernelString.h">
       <Filter>Header Files\Common</Filter>
+    </ClInclude>
+    <ClInclude Include="src\Producers\File\FileFilter.h">
+      <Filter>Header Files\Producers\File</Filter>
+    </ClInclude>
+    <ClInclude Include="src\Producers\Image\ImageMonitor.h">
+      <Filter>Header Files\Producers\Image</Filter>
     </ClInclude>
     <ClInclude Include="src\Producers\Process\ProcessMonitor.h">
       <Filter>Header Files\Producers\Process</Filter>

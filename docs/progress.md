@@ -1,5 +1,11 @@
 # KSwordSandbox progress snapshot
 
+> Historical snapshot: this file preserves a point-in-time planning estimate and
+> may lag newer implementation/documentation. Use
+> `docs/current-architecture-and-operations.md` for the current MVP operator
+> chain, `docs/webui-real-r0-e2e.md` for recorded live E2E evidence, and
+> `docs/behavior-rule-matrix.md` for the current rule-count/source of truth.
+
 This snapshot is intentionally conservative. It measures distance to the
 requested v1 deliverable: open WebUI, submit an EXE, run a Windows 10 Hyper-V
 guest, see raw R0/guest events live, import events, classify behavior, and open
@@ -109,7 +115,9 @@ a final HTML report.
   blocks directly in each rule-hit row instead of forcing analysts to jump to
   raw events first. Raw events also show a compact distribution summary for top
   event types, sources, and event families before the collapsed raw table.
-- Behavior rules have been expanded to 257 rules with added coverage for
+- Behavior rules have been expanded substantially; see
+  `docs/behavior-rule-matrix.md` for the current exact count and matrix. Current
+  coverage includes
   persistence, service/task abuse, PowerShell/script launch, download-execute,
   process injection signals, credential/LSASS/browser-store access, lateral
   movement, anti-sandbox checks, firewall/tool tampering, DNS/HTTP/TLS/C2,

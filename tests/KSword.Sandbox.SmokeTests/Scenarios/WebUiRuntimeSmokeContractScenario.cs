@@ -46,13 +46,15 @@ internal sealed class WebUiRuntimeSmokeContractScenario : ISmokeTestScenario
         await ProbeServedReportLinkAsync(httpClient, baseUri, jobId, cancellationToken);
         await ProbeServedReportLinkAsync(httpClient, baseUri, jobId, cancellationToken, "zh");
         await ProbeServedReportLinkAsync(httpClient, baseUri, jobId, cancellationToken, "en");
+        await ProbeArtifactIndexEndpointAsync(httpClient, baseUri, jobId, cancellationToken);
+        await ProbeInvalidArtifactDownloadSelectorAsync(httpClient, baseUri, jobId, cancellationToken);
         await ProbeManualGuestImportEndpointAsync(httpClient, baseUri, jobId, cancellationToken);
 
         return new SmokeTestResult
         {
             ScenarioId = ScenarioId,
             Passed = true,
-            Message = "Runtime WebUI smoke checked live events, live raw monitor/settings pages, localized report links, and manual guest import endpoint."
+            Message = "Runtime WebUI smoke checked live events, live raw monitor/settings pages, localized report links, artifact index/download routes, and manual guest import endpoint."
         };
     }
 
@@ -74,6 +76,20 @@ internal sealed class WebUiRuntimeSmokeContractScenario : ISmokeTestScenario
         RequireContains(program, "\"/jobs/{jobId:guid}/live-events\"", "Web source should expose the live raw monitor page route.");
         RequireContains(program, "\"/api/jobs/{jobId:guid}/events/live\"", "Web source should expose the live-event polling endpoint.");
         RequireContains(program, "\"/api/jobs/{jobId:guid}/report/html\"", "Web source should expose the served HTML report endpoint.");
+        RequireContains(program, "\"/api/jobs/{jobId:guid}/artifacts\"", "Web source should expose the Web artifact index endpoint.");
+        RequireContains(program, "\"/api/jobs/{jobId:guid}/artifacts/download\"", "Web source should expose the guarded artifact download endpoint.");
+        RequireContains(program, "\"/api/jobs/{jobId:guid}/report/{**artifactPath}\"", "Web source should expose report-relative artifact download links.");
+        RequireContains(program, "ToWebArtifactDescriptor", "Web artifact endpoint should map host descriptors through an explicit safe DTO.");
+        RequireContains(program, "ToWebArtifactCollectionDescriptor", "Web artifact endpoint should map host collections through an explicit safe DTO.");
+        RequireContains(program, "ToWebArtifactMetadata", "Web artifact endpoint should sanitize path-bearing metadata.");
+        RequireContains(program, "RootPathPolicy", "Web artifact endpoint should document that root paths are server-owned and not exposed.");
+        RequireContains(program, "DownloadSelector", "Web artifact endpoint should expose a stable safe download selector.");
+        RequireContains(program, "DownloadHref", "Web artifact endpoint should expose a guarded download href.");
+        RequireContains(program, "Uri.EscapeDataString(selector)", "Web artifact endpoint should URL-encode download selectors.");
+        RequireContains(program, "StreamIndexedArtifact", "Web source should centralize artifact streaming through the index resolver.");
+        RequireContains(program, "ResolveDownloadableArtifact", "Web source should resolve downloads only through the job artifact index.");
+        RequireContains(program, "Results.BadRequest", "Web download endpoint should reject invalid selectors with HTTP 400.");
+        RequireContains(program, "enableRangeProcessing: true", "Web download endpoint should support ranged downloads for large dumps and PCAPs.");
         RequireContains(program, "string? lang", "Served report endpoint should accept a language query.");
         RequireContains(program, "ResolveLocalizedReportPath", "Web source should resolve localized report paths.");
         RequireContains(program, "HtmlReportZhPath", "Served report endpoint should know the Chinese report path.");
@@ -87,12 +103,10 @@ internal sealed class WebUiRuntimeSmokeContractScenario : ISmokeTestScenario
         RequireContains(dashboard, "/report/html?lang=en", "Dashboard should build the English served report endpoint.");
         RequireAnyContains(
             dashboard,
-            ["Open served HTML report", "Open served report", "打开服务内报告"],
+            ["Open served HTML report", "Open served report", "打开服务内报告", "Open planning report", "打开规划报告", "Open dynamic report", "打开动态报告"],
             "Dashboard should render the served report link.");
-        RequireAnyContains(
-            dashboard,
-            ["Open local file:// report", "Open local file", "打开本地文件"],
-            "Dashboard should render the local report fallback link.");
+        RequireContains(dashboard, "data-report-current", "Dashboard should mark the current-language served report link.");
+        RequireContains(dashboard, "buildReportHref", "Dashboard should build served report links instead of relying on file:// navigation.");
         RequireContains(dashboard, "guestImportPath", "Dashboard should render a manual guest import path input.");
         RequireContains(dashboard, "guest-events/import", "Dashboard should call the manual guest import endpoint.");
         RequireContains(dashboard, "JSON.stringify(explicitPath ? { eventsPath: explicitPath } : {})", "Dashboard should send optional manual import path JSON.");
@@ -105,6 +119,8 @@ internal sealed class WebUiRuntimeSmokeContractScenario : ISmokeTestScenario
         RequireContains(liveEventsPage, "已耗时", "Live raw monitor page should expose elapsed runbook progress.");
         RequireContains(liveEventsPage, "buildProgressFailureReason", "Live raw monitor page should expose runbook failure reasons.");
         RequireContains(liveEventsPage, "Open settings", "Live raw monitor page should link to settings for missing VirusTotal keys.");
+        RequireContains(liveEventsPage, "result.isQuietState || result.IsQuietState", "Live raw monitor page should honor VirusTotal quiet-state metadata.");
+        RequireContains(liveEventsPage, "not configured, not found, rate limits", "Live raw monitor page should explain quiet VirusTotal states in English.");
 
         RequireContains(settingsPage, "VirusTotal API Key", "Settings page should expose the VirusTotal API key form.");
         RequireContains(settingsPage, "does not upload samples", "Settings page should clearly state that samples are not uploaded.");
@@ -256,6 +272,72 @@ internal sealed class WebUiRuntimeSmokeContractScenario : ISmokeTestScenario
     }
 
     /// <summary>
+    /// Probes the Web artifact index endpoint. Inputs are an HTTP client, base
+    /// URI, job ID, and cancellation token; processing validates that the JSON
+    /// response exposes browser-safe selectors and guarded download hrefs
+    /// without exposing host-local full paths; the method returns no value.
+    /// </summary>
+    private static async Task ProbeArtifactIndexEndpointAsync(HttpClient httpClient, Uri baseUri, Guid jobId, CancellationToken cancellationToken)
+    {
+        using var response = await httpClient.GetAsync(BuildUri(baseUri, $"/api/jobs/{jobId:D}/artifacts"), cancellationToken);
+        var body = await response.Content.ReadAsStringAsync(cancellationToken);
+        SmokeAssert.True(response.IsSuccessStatusCode, $"Artifact index endpoint returned HTTP {(int)response.StatusCode}: {Truncate(body)}");
+
+        using var document = JsonDocument.Parse(body);
+        var root = document.RootElement;
+        SmokeAssert.True(root.TryGetProperty("jobId", out var responseJobId) && Guid.Parse(responseJobId.GetString() ?? string.Empty) == jobId, "Artifact index response jobId mismatch.");
+        SmokeAssert.True(root.TryGetProperty("schemaVersion", out _), "Artifact index response is missing schemaVersion.");
+        SmokeAssert.True(root.TryGetProperty("generatedAtUtc", out _), "Artifact index response is missing generatedAtUtc.");
+        SmokeAssert.True(root.TryGetProperty("rootPathPolicy", out var rootPathPolicy) && rootPathPolicy.GetString() == "server-owned-not-exposed", "Artifact index response should mark root paths as server-owned.");
+        if (root.TryGetProperty("rootPath", out var rootPath))
+        {
+            var rootPathValue = rootPath.GetString() ?? string.Empty;
+            SmokeAssert.True(string.IsNullOrWhiteSpace(rootPathValue) || !LooksLikeLocalAbsolutePath(rootPathValue), "Artifact index response should not expose the host job root path.");
+        }
+
+        SmokeAssert.True(root.TryGetProperty("collections", out var collections) && collections.ValueKind == JsonValueKind.Array, "Artifact index response is missing collections array.");
+        SmokeAssert.True(root.TryGetProperty("artifacts", out var artifacts) && artifacts.ValueKind == JsonValueKind.Array, "Artifact index response is missing artifacts array.");
+
+        foreach (var artifact in artifacts.EnumerateArray())
+        {
+            SmokeAssert.True(!artifact.TryGetProperty("fullPath", out _), "Web artifact descriptors must not expose host-local fullPath.");
+            SmokeAssert.True(artifact.TryGetProperty("downloadSelector", out var selector), "Web artifact descriptors should expose downloadSelector.");
+            AssertSafeSelector("artifact downloadSelector", selector.GetString() ?? string.Empty);
+            SmokeAssert.True(artifact.TryGetProperty("downloadHref", out var href), "Web artifact descriptors should expose downloadHref.");
+            var hrefText = href.GetString() ?? string.Empty;
+            SmokeAssert.True(hrefText.StartsWith($"/api/jobs/{jobId:D}/artifacts/download?path=", StringComparison.Ordinal), "Artifact download href should target the guarded download endpoint.");
+            SmokeAssert.True(!LooksLikeLocalAbsolutePath(hrefText), "Artifact download href should not embed an absolute host path.");
+            if (artifact.TryGetProperty("metadata", out var metadata))
+            {
+                AssertNoAbsolutePathMetadata(metadata, "artifact metadata");
+            }
+        }
+
+        foreach (var collection in collections.EnumerateArray())
+        {
+            SmokeAssert.True(!collection.TryGetProperty("fullPath", out _), "Web artifact collections must not expose host-local fullPath.");
+            if (collection.TryGetProperty("metadata", out var metadata))
+            {
+                AssertNoAbsolutePathMetadata(metadata, "collection metadata");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Probes the guarded download endpoint with a known-bad selector. Inputs
+    /// are an HTTP client, base URI, job ID, and cancellation token; processing
+    /// sends URL-encoded traversal and expects a validation response rather
+    /// than arbitrary filesystem resolution; the method returns no value.
+    /// </summary>
+    private static async Task ProbeInvalidArtifactDownloadSelectorAsync(HttpClient httpClient, Uri baseUri, Guid jobId, CancellationToken cancellationToken)
+    {
+        using var response = await httpClient.GetAsync(BuildUri(baseUri, $"/api/jobs/{jobId:D}/artifacts/download?path=..%2Fescape.bin"), cancellationToken);
+        var body = await response.Content.ReadAsStringAsync(cancellationToken);
+        SmokeAssert.True(response.StatusCode == HttpStatusCode.BadRequest, $"Invalid artifact download selector should return HTTP 400; got HTTP {(int)response.StatusCode}: {Truncate(body)}");
+        SmokeAssert.True(body.Contains("selector", StringComparison.OrdinalIgnoreCase) || body.Contains("relative", StringComparison.OrdinalIgnoreCase), $"Invalid artifact download response should explain selector validation: {Truncate(body)}");
+    }
+
+    /// <summary>
     /// Probes the manual guest import endpoint without importing real artifacts.
     /// Inputs are an HTTP client, base URI, job ID, and cancellation token;
     /// processing posts an explicit missing events path and expects the endpoint
@@ -279,6 +361,57 @@ internal sealed class WebUiRuntimeSmokeContractScenario : ISmokeTestScenario
             body.Contains("Guest event import failed", StringComparison.OrdinalIgnoreCase) ||
             body.Contains("Guest events file was not found", StringComparison.OrdinalIgnoreCase),
             $"Manual guest import endpoint returned an unexpected validation body: {Truncate(body)}");
+    }
+
+    private static void AssertSafeSelector(string label, string value)
+    {
+        SmokeAssert.True(!string.IsNullOrWhiteSpace(value), $"{label} should not be empty.");
+        SmokeAssert.True(!value.Contains('\\', StringComparison.Ordinal), $"{label} should use slash-separated paths.");
+        SmokeAssert.True(!value.StartsWith("/", StringComparison.Ordinal), $"{label} should be relative.");
+        SmokeAssert.True(!Path.IsPathFullyQualified(Uri.UnescapeDataString(value)), $"{label} should not be a fully-qualified filesystem path.");
+        SmokeAssert.True(!value.Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Any(segment => string.Equals(segment, "..", StringComparison.Ordinal)), $"{label} should not contain parent traversal.");
+    }
+
+    private static void AssertNoAbsolutePathMetadata(JsonElement metadata, string label)
+    {
+        SmokeAssert.True(metadata.ValueKind == JsonValueKind.Object, $"{label} should be a JSON object.");
+        foreach (var property in metadata.EnumerateObject())
+        {
+            if (property.Value.ValueKind != JsonValueKind.String)
+            {
+                continue;
+            }
+
+            var value = property.Value.GetString() ?? string.Empty;
+            SmokeAssert.True(!property.Name.Contains("fullPath", StringComparison.OrdinalIgnoreCase), $"{label} should not expose full-path key '{property.Name}'.");
+            SmokeAssert.True(!LooksLikeLocalAbsolutePath(value), $"{label} property '{property.Name}' should not expose an absolute local path.");
+        }
+    }
+
+    private static bool LooksLikeLocalAbsolutePath(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        var trimmed = value.Trim();
+        if (trimmed.StartsWith(@"\\", StringComparison.Ordinal) ||
+            trimmed.StartsWith("//", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        if (trimmed.Length >= 3 &&
+            char.IsLetter(trimmed[0]) &&
+            trimmed[1] == ':' &&
+            (trimmed[2] == '\\' || trimmed[2] == '/'))
+        {
+            return true;
+        }
+
+        return Uri.TryCreate(trimmed, UriKind.Absolute, out var uri) &&
+            string.Equals(uri.Scheme, Uri.UriSchemeFile, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>

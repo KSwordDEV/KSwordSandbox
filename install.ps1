@@ -23,6 +23,7 @@ Automation examples:
   .\install.ps1 -Mode CheckEnvironment
   .\install.ps1 -Mode StartWebUI
   .\install.ps1 -Mode Change -ResetGuestVmPassword -GeneratePassword -Force
+  .\install.ps1 -Mode Change -ShowTestSigningGuidance
   .\install.ps1 -Mode Change -EnableGuestTestSigning -Force
   .\install.ps1 -Mode Uninstall
 
@@ -87,6 +88,8 @@ param(
 
     [switch]$QueryGuestTestSigning,
 
+    [switch]$ShowTestSigningGuidance,
+
     [switch]$RestartGuestAfterTestSigning,
 
     [switch]$CurrentProcessOnly,
@@ -143,7 +146,7 @@ function Read-InstallState {
         return Get-Content -LiteralPath $script:InstallStatePath -Raw | ConvertFrom-Json
     }
     catch {
-        Write-InstallInfo "Ignoring unreadable install state '$script:InstallStatePath': $($_.Exception.Message)"
+        Write-InstallInfo "中文提示：无法读取安装状态文件 '$script:InstallStatePath'，将忽略它并继续。下一步：如状态异常，请重新运行 .\install.ps1 -Mode Install -PromptPassword。英文详情：$($_.Exception.Message)"
         return $null
     }
 }
@@ -253,7 +256,7 @@ function Read-GuestPassword {
     }
 
     if ($UsePrompt) {
-        $secure = Read-Host "Enter guest password for $ExistingSecretName" -AsSecureString
+        $secure = Read-Host "请输入来宾密码（secret: $ExistingSecretName；不会回显） / Enter guest password" -AsSecureString
         return [pscustomobject]@{
             Password = ConvertFrom-SecureStringToPlainText -SecureString $secure
             Source = 'prompt'
@@ -261,14 +264,14 @@ function Read-GuestPassword {
     }
 
     if ($Mode -ne 'Interactive') {
-        throw 'Non-interactive install/change requires -GeneratePassword or -PromptPassword when setting/resetting the password.'
+        throw '错误：非交互安装/更改在设置或重置密码时需要 -GeneratePassword 或 -PromptPassword。下一步：普通用户请运行 .\install.ps1 -Mode Install -PromptPassword，或明确使用 -GeneratePassword。'
     }
 
     Write-Host ''
-    Write-Host 'Guest password option / 来宾密码选项:'
-    Write-Host '  1) Generate a new random password and store it locally（生成随机密码并仅保存在本机）'
-    Write-Host '  2) Type the existing VM SandboxUser password（输入 VM 中现有 SandboxUser 密码）'
-    $choice = Read-MenuChoice -Prompt 'Choose [1-2] / 请选择 [1-2]' -Allowed @('1', '2')
+    Write-Host '来宾密码选项 / Guest password options:'
+    Write-Host '  1) 生成随机密码并仅保存在本机 / Generate a new random password locally'
+    Write-Host '  2) 输入 VM 中现有 SandboxUser 密码 / Type the existing VM SandboxUser password'
+    $choice = Read-MenuChoice -Prompt '请选择 [1-2] / Choose [1-2]' -Allowed @('1', '2')
     if ($choice -eq '1') {
         return [pscustomobject]@{
             Password = New-RandomPassword
@@ -276,7 +279,7 @@ function Read-GuestPassword {
         }
     }
 
-    $secure = Read-Host "Enter guest password for $ExistingSecretName" -AsSecureString
+    $secure = Read-Host "请输入来宾密码（secret: $ExistingSecretName；不会回显） / Enter guest password" -AsSecureString
     return [pscustomobject]@{
         Password = ConvertFrom-SecureStringToPlainText -SecureString $secure
         Source = 'prompt'
@@ -290,7 +293,7 @@ function Save-DpapiSecretBackup {
     )
 
     if (-not $PSCmdlet.ShouldProcess($Path, 'Write DPAPI-protected guest password backup')) {
-        Write-InstallInfo "WhatIf: DPAPI backup would be written for this Windows account: $Path"
+        Write-InstallInfo "预览：会为当前 Windows 帐户写入 DPAPI 备份：$Path / WhatIf: DPAPI backup would be written."
         return
     }
 
@@ -340,7 +343,7 @@ function Resolve-DriverHostPath {
             }
         }
         catch {
-            Write-InstallInfo "Ignoring unreadable existing driver.hostDriverPath from '$existingConfigPath': $($_.Exception.Message)"
+            Write-InstallInfo "中文提示：无法读取现有 driver.hostDriverPath，将继续自动检测。下一步：如需真实 R0，请稍后用 -DriverHostPath 明确配置。路径：$existingConfigPath；英文详情：$($_.Exception.Message)"
         }
     }
 
@@ -363,7 +366,7 @@ function Write-LocalSandboxConfig {
     $targetPath = Get-LocalSandboxConfigPath
     $templatePath = Join-Path $PSScriptRoot 'config\sandbox.example.json'
     if (-not (Test-Path -LiteralPath $templatePath -PathType Leaf)) {
-        throw "Sandbox config template is missing: $templatePath"
+        throw "错误：找不到 sandbox 配置模板：$templatePath。下一步：请确认在仓库根目录运行，或重新获取缺失的 config\sandbox.example.json。"
     }
 
     $config = Get-Content -LiteralPath $templatePath -Raw | ConvertFrom-Json
@@ -396,16 +399,16 @@ function Write-LocalSandboxConfig {
         }
 
         $config | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $targetPath -Encoding UTF8
-        Write-InstallInfo "Local sandbox config written: $targetPath"
+        Write-InstallInfo "本机 sandbox 配置已写入：$targetPath / Local sandbox config written."
         if ([string]::IsNullOrWhiteSpace([string]$config.driver.hostDriverPath)) {
-            Write-InstallInfo 'R0 warning: real R0 collection needs driver.hostDriverPath. No built driver .sys was auto-detected; live preflight will ask you to set -DriverHostPath, enable driver.useMockCollector, or disable driver.enabled.'
+            Write-InstallInfo 'R0 警告：真实 R0 采集需要 driver.hostDriverPath，但未自动发现已构建的 .sys。下一步：用 -DriverHostPath 指向测试签名 .sys，或在本机配置中启用 driver.useMockCollector=true/driver.enabled=false。 / R0 warning: driver.hostDriverPath is missing.'
         }
         else {
-            Write-InstallInfo "Configured driver.hostDriverPath: $($config.driver.hostDriverPath)"
+            Write-InstallInfo "已配置 driver.hostDriverPath：$($config.driver.hostDriverPath) / Configured driver.hostDriverPath."
         }
     }
     else {
-        Write-InstallInfo "WhatIf: local sandbox config would be written: $targetPath"
+        Write-InstallInfo "预览：会写入本机 sandbox 配置：$targetPath / WhatIf: local sandbox config would be written."
     }
 
     return $targetPath
@@ -415,22 +418,22 @@ function Set-WebConfigPathEnvironment {
     param([Parameter(Mandatory)][string]$ConfigPath)
 
     if ($SkipWebConfigEnvironment) {
-        Write-InstallInfo "Skipped '$script:WebConfigPathEnvironmentName' environment update."
+        Write-InstallInfo "已按请求跳过 '$script:WebConfigPathEnvironmentName' 环境变量更新。下一步：如 WebUI 找不到配置，请手动设置该变量或去掉 -SkipWebConfigEnvironment。 / Skipped environment update."
         return
     }
 
     if (-not $PSCmdlet.ShouldProcess($script:WebConfigPathEnvironmentName, "Set Web/API config path environment variable to '$ConfigPath'")) {
-        Write-InstallInfo "WhatIf: '$script:WebConfigPathEnvironmentName' would point at '$ConfigPath'."
+        Write-InstallInfo "预览：'$script:WebConfigPathEnvironmentName' 会指向 '$ConfigPath'。 / WhatIf: environment variable would be set."
         return
     }
 
     [Environment]::SetEnvironmentVariable($script:WebConfigPathEnvironmentName, $ConfigPath, 'Process')
     if (-not $CurrentProcessOnly) {
         [Environment]::SetEnvironmentVariable($script:WebConfigPathEnvironmentName, $ConfigPath, 'User')
-        Write-InstallInfo "Set User environment '$script:WebConfigPathEnvironmentName' to the local sandbox config."
+        Write-InstallInfo "已把 User 环境变量 '$script:WebConfigPathEnvironmentName' 指向本机 sandbox 配置。下一步：新开的 PowerShell 也能继承该配置。 / User environment set."
     }
     else {
-        Write-InstallInfo "Set current process '$script:WebConfigPathEnvironmentName' to the local sandbox config."
+        Write-InstallInfo "已把当前 PowerShell 进程的 '$script:WebConfigPathEnvironmentName' 指向本机 sandbox 配置。 / Current process environment set."
     }
 }
 
@@ -440,10 +443,10 @@ function Read-VirusTotalApiKey {
     }
 
     if (-not $PromptVTKey -and $Mode -notin @('Interactive', 'ConfigureVTKey') -and -not $ConfigureVTKey) {
-        throw 'Non-interactive VirusTotal key configuration requires -PromptVTKey or -ClearVTKey.'
+        throw '错误：非交互配置 VirusTotal key 需要 -PromptVTKey 或 -ClearVTKey。下一步：要保存 key 请加 -PromptVTKey；要清除本机设置请加 -ClearVTKey。'
     }
 
-    $secure = Read-Host "Enter optional VirusTotal API key for $VirusTotalSecretName" -AsSecureString
+    $secure = Read-Host "请输入可选 VirusTotal API key（secret: $VirusTotalSecretName；不会回显） / Enter optional VirusTotal API key" -AsSecureString
     return ConvertFrom-SecureStringToPlainText -SecureString $secure
 }
 
@@ -451,27 +454,27 @@ function Set-VirusTotalApiKeySecret {
     param([AllowNull()][string]$ApiKey)
 
     if ([string]::IsNullOrWhiteSpace($VirusTotalSecretName)) {
-        throw 'VirusTotal secret environment variable name must not be empty.'
+        throw '错误：VirusTotal secret 环境变量名不能为空。下一步：请保留默认 -VirusTotalSecretName，或传入非空名称。'
     }
 
     if ($ClearVTKey) {
         if (-not $PSCmdlet.ShouldProcess($VirusTotalSecretName, 'Clear optional VirusTotal API key from process/User environment')) {
-            Write-InstallInfo "WhatIf: optional VirusTotal API key '$VirusTotalSecretName' would be cleared from process/User environment."
+            Write-InstallInfo "预览：会从 Process/User 环境清除可选 VirusTotal API key '$VirusTotalSecretName'。 / WhatIf: optional VT key would be cleared."
             return
         }
 
         [Environment]::SetEnvironmentVariable($VirusTotalSecretName, $null, 'Process')
         [Environment]::SetEnvironmentVariable($VirusTotalSecretName, $null, 'User')
-        Write-InstallInfo "Optional VirusTotal API key '$VirusTotalSecretName' cleared from process/User environment."
+        Write-InstallInfo "已从 Process/User 环境清除可选 VirusTotal API key '$VirusTotalSecretName'。 / Optional VT key cleared."
         return
     }
 
     if ([string]::IsNullOrWhiteSpace($ApiKey)) {
-        throw 'VirusTotal API key must not be empty. Use -ClearVTKey to remove the local setting.'
+        throw '错误：VirusTotal API key 不能为空。下一步：要移除本机设置请使用 -ClearVTKey；要保存 key 请重新运行并输入有效值。'
     }
 
     if (-not $PSCmdlet.ShouldProcess($VirusTotalSecretName, 'Store optional VirusTotal API key in local environment without printing it')) {
-        Write-InstallInfo "WhatIf: optional VirusTotal API key '$VirusTotalSecretName' would be stored locally. Value was not printed."
+        Write-InstallInfo "预览：会在本机保存可选 VirusTotal API key '$VirusTotalSecretName'，不会打印值。 / WhatIf: optional VT key would be stored."
         return
     }
 
@@ -479,30 +482,30 @@ function Set-VirusTotalApiKeySecret {
     [Environment]::SetEnvironmentVariable($VirusTotalSecretName, $trimmed, 'Process')
     if (-not $CurrentProcessOnly) {
         [Environment]::SetEnvironmentVariable($VirusTotalSecretName, $trimmed, 'User')
-        Write-InstallInfo "Optional VirusTotal API key '$VirusTotalSecretName' stored in current User environment. Value was not printed."
+        Write-InstallInfo "可选 VirusTotal API key '$VirusTotalSecretName' 已保存到当前 User 环境，值未打印。下一步：重新启动 WebUI 后会继承该值。 / Optional VT key stored in User environment."
     }
     else {
-        Write-InstallInfo "Optional VirusTotal API key '$VirusTotalSecretName' stored only in current process. Value was not printed."
+        Write-InstallInfo "可选 VirusTotal API key '$VirusTotalSecretName' 仅保存到当前进程，值未打印。下一步：只在当前 PowerShell 启动 WebUI 时有效。 / Optional VT key stored only in current process."
     }
 }
 
 function Invoke-VirusTotalKeyConfiguration {
     if ($WhatIfPreference) {
         [void]$PSCmdlet.ShouldProcess($VirusTotalSecretName, 'Configure optional VirusTotal API key')
-        Write-InstallInfo "WhatIf: optional VirusTotal API key '$VirusTotalSecretName' would be configured or cleared. Value was not printed."
+        Write-InstallInfo "预览：会配置或清除可选 VirusTotal API key '$VirusTotalSecretName'，不会打印值。 / WhatIf: optional VT key would be configured or cleared."
         return
     }
 
     $effectiveClear = [bool]$ClearVTKey
     if ($Mode -eq 'Interactive' -and -not $PromptVTKey -and -not $ClearVTKey) {
         Write-Host ''
-        Write-Host 'VirusTotal API key option:'
-        Write-Host '  1) Prompt and store optional key in the local environment'
-        Write-Host '  2) Clear local key from process/User environment'
-        Write-Host '  3) Back'
-        $choice = Read-MenuChoice -Prompt 'Choose [1-3]' -Allowed @('1', '2', '3')
+        Write-Host 'VirusTotal API key 选项 / VirusTotal API key options:'
+        Write-Host '  1) 提示输入并保存可选 key 到本机环境 / Prompt and store optional key locally'
+        Write-Host '  2) 从 Process/User 环境清除本机 key / Clear local key'
+        Write-Host '  3) 返回 / Back'
+        $choice = Read-MenuChoice -Prompt '请选择 [1-3] / Choose [1-3]' -Allowed @('1', '2', '3')
         if ($choice -eq '3') {
-            Write-InstallInfo 'VirusTotal key configuration cancelled.'
+            Write-InstallInfo '已取消 VirusTotal key 配置。 / VirusTotal key configuration cancelled.'
             return
         }
 
@@ -564,7 +567,7 @@ function Save-InstallState {
     }
 
     if (-not $PSCmdlet.ShouldProcess($script:InstallStatePath, "Write install state for action '$Action'")) {
-        Write-InstallInfo "WhatIf: install state would be written: $script:InstallStatePath"
+        Write-InstallInfo "预览：会写入安装状态：$script:InstallStatePath / WhatIf: install state would be written."
         return
     }
 
@@ -580,15 +583,15 @@ function Set-GuestPasswordSecret {
     )
 
     if ([string]::IsNullOrWhiteSpace($Name)) {
-        throw 'Secret name must not be empty.'
+        throw '错误：SecretName 不能为空。下一步：请保留默认 KSWORDBOX_GUEST_PASSWORD，或传入非空 -SecretName。'
     }
 
     if ([string]::IsNullOrEmpty($Password)) {
-        throw 'Guest password must not be empty.'
+        throw '错误：来宾密码不能为空。下一步：请重新运行 -PromptPassword 并输入 VM 中 SandboxUser 的密码，或使用 -GeneratePassword 后同步 VM 密码。'
     }
 
     if (-not $PSCmdlet.ShouldProcess($Name, "Store guest password secret from source '$PasswordSource'")) {
-        Write-InstallInfo "WhatIf: guest password secret '$Name' would be stored locally. Value was not printed."
+        Write-InstallInfo "预览：会在本机保存 guest password secret '$Name'，不会打印值。 / WhatIf: guest password secret would be stored."
         return
     }
 
@@ -616,16 +619,17 @@ function Set-GuestPasswordSecret {
         -PersistedToProcess $true `
         -DpapiBackup $dpapiBackup
 
-    Write-InstallInfo "Guest password secret '$Name' stored. Value was not printed."
+    Write-InstallInfo "guest password secret '$Name' 已保存，值未打印。 / Guest password secret stored."
+    Write-InstallInfo 'Value was not printed. / 密码值未打印。'
     if ($persistedUser) {
-        Write-InstallInfo 'Stored in current User environment; new shells/Codex sessions can inherit it.'
+        Write-InstallInfo '已保存到当前 User 环境；新开的 PowerShell/Codex session 可继承。 / Stored in current User environment.'
     }
     else {
-        Write-InstallInfo 'Stored only in the current PowerShell process.'
+        Write-InstallInfo '仅保存到当前 PowerShell 进程；关闭窗口后不会保留。 / Stored only in current process.'
     }
 
     if ($dpapiBackup) {
-        Write-InstallInfo "DPAPI backup written for this Windows account: $script:SecretBackupPath"
+        Write-InstallInfo "已为当前 Windows 帐户写入 DPAPI 备份：$script:SecretBackupPath / DPAPI backup written."
     }
 }
 
@@ -650,13 +654,13 @@ function Set-HyperVConfigState {
     param([string]$Action = 'hyperv-config-updated')
 
     if ([string]::IsNullOrWhiteSpace($VmName)) {
-        throw 'Hyper-V VM name must not be empty.'
+        throw '错误：Hyper-V VM 名称不能为空。下一步：请用 -VmName <existing VM> 指定现有黄金 VM。'
     }
     if ([string]::IsNullOrWhiteSpace($CheckpointName)) {
-        throw 'Hyper-V checkpoint name must not be empty.'
+        throw '错误：Hyper-V checkpoint 名称不能为空。下一步：请用 -CheckpointName <checkpoint> 指定干净快照。'
     }
     if ([string]::IsNullOrWhiteSpace($GuestWorkingDirectory)) {
-        throw 'Guest working directory must not be empty.'
+        throw '错误：来宾工作目录不能为空。下一步：请保留默认 C:\KSwordSandbox 或用 -GuestWorkingDirectory 指定。'
     }
 
     Initialize-KSwordSandboxRuntimeFolders
@@ -675,8 +679,8 @@ function Set-HyperVConfigState {
         -DpapiBackup (Test-Path -LiteralPath $script:SecretBackupPath -PathType Leaf) `
         -LocalConfig $configPath
 
-    Write-InstallInfo "Hyper-V VM config recorded: VM='$VmName', checkpoint='$CheckpointName', guestRoot='$GuestWorkingDirectory'."
-    Write-InstallInfo "Web/API can use it via '$script:WebConfigPathEnvironmentName=$configPath'."
+    Write-InstallInfo "已记录 Hyper-V 配置：VM='$VmName'，checkpoint='$CheckpointName'，guestRoot='$GuestWorkingDirectory'。 / Hyper-V VM config recorded."
+    Write-InstallInfo "Web/API 可通过 '$script:WebConfigPathEnvironmentName=$configPath' 使用该配置。 / Web/API config path ready."
 }
 
 function Install-KSwordSandboxLocal {
@@ -684,15 +688,15 @@ function Install-KSwordSandboxLocal {
 
     Initialize-KSwordSandboxRuntimeFolders
 
-    Write-InstallInfo "Runtime root ready: $RuntimeRoot"
-    Write-InstallInfo "Guest payload root ready: $GuestPayloadRoot"
+    Write-InstallInfo "运行目录已就绪：$RuntimeRoot / Runtime root ready."
+    Write-InstallInfo "Guest payload 目录已就绪：$GuestPayloadRoot / Guest payload root ready."
     $configPath = Write-LocalSandboxConfig
     Set-WebConfigPathEnvironment -ConfigPath $configPath
 
     if ($SetPassword) {
         if ($WhatIfPreference) {
             [void]$PSCmdlet.ShouldProcess($SecretName, 'Store guest password secret')
-            Write-InstallInfo "WhatIf: guest password secret '$SecretName' would be set without printing the value."
+            Write-InstallInfo "预览：会设置 guest password secret '$SecretName'，不会打印值。 / WhatIf: guest password secret would be set."
             return
         }
 
@@ -717,13 +721,13 @@ function Install-KSwordSandboxLocal {
 function Reset-GuestPasswordSecret {
     if ($WhatIfPreference) {
         [void]$PSCmdlet.ShouldProcess($SecretName, 'Reset host-side guest password secret')
-        Write-InstallInfo "WhatIf: host-side guest password secret '$SecretName' would be reset locally. Value was not printed."
+        Write-InstallInfo "预览：会在本机重置 host-side guest password secret '$SecretName'，不会打印值。 / WhatIf: password secret would be reset locally."
         return
     }
 
     $credential = Read-GuestPassword -UseGenerated ([bool]$GeneratePassword) -UsePrompt ([bool]$PromptPassword) -ExistingSecretName $SecretName
     Set-GuestPasswordSecret -Name $SecretName -Password $credential.Password -PasswordSource "reset-$($credential.Source)"
-    Write-InstallInfo 'Password secret reset locally. If you generated a new password, make sure the VM SandboxUser account is changed to the same value before live Hyper-V runs.'
+    Write-InstallInfo '密码 secret 已在本机重置。下一步：如果刚生成了新密码，请先把 VM 中 SandboxUser 帐户改成同一个值，再运行 Live Hyper-V。 / Password secret reset locally.'
 }
 
 function Read-OptionalText {
@@ -742,53 +746,53 @@ function Read-OptionalText {
 
 function Invoke-HyperVConfigPrompt {
     Write-InstallInfo '中文提示：配置只写入本机状态和本机 sandbox.local.json；不会把 VM 名称、密码或本机路径写入 git。'
-    $script:VmName = Read-OptionalText -Prompt 'Hyper-V golden VM name / Hyper-V 黄金 VM 名称' -CurrentValue $VmName
-    $script:CheckpointName = Read-OptionalText -Prompt 'Clean checkpoint name / 干净快照名称' -CurrentValue $CheckpointName
-    $script:GuestUserName = Read-OptionalText -Prompt 'Guest username / 来宾用户名' -CurrentValue $GuestUserName
-    $script:GuestWorkingDirectory = Read-OptionalText -Prompt 'Guest working directory / 来宾工作目录' -CurrentValue $GuestWorkingDirectory
-    $script:RuntimeRoot = Read-OptionalText -Prompt 'Host runtime root / 宿主机运行目录' -CurrentValue $RuntimeRoot
-    $script:GuestPayloadRoot = Read-OptionalText -Prompt 'Host guest payload root / 宿主机 guest payload 目录' -CurrentValue $GuestPayloadRoot
-    $script:DriverHostPath = Read-OptionalText -Prompt 'Host R0 driver .sys path (blank = auto-detect/none) / 宿主机 R0 驱动 .sys 路径（留空=自动检测/不配置）' -CurrentValue (Resolve-DriverHostPath)
-    $script:LocalConfigPath = Read-OptionalText -Prompt 'Local sandbox config path / 本机 sandbox 配置路径' -CurrentValue (Get-LocalSandboxConfigPath)
+    $script:VmName = Read-OptionalText -Prompt 'Hyper-V 黄金 VM 名称 / Hyper-V golden VM name' -CurrentValue $VmName
+    $script:CheckpointName = Read-OptionalText -Prompt '干净快照名称 / Clean checkpoint name' -CurrentValue $CheckpointName
+    $script:GuestUserName = Read-OptionalText -Prompt '来宾用户名 / Guest username' -CurrentValue $GuestUserName
+    $script:GuestWorkingDirectory = Read-OptionalText -Prompt '来宾工作目录 / Guest working directory' -CurrentValue $GuestWorkingDirectory
+    $script:RuntimeRoot = Read-OptionalText -Prompt '宿主机运行目录 / Host runtime root' -CurrentValue $RuntimeRoot
+    $script:GuestPayloadRoot = Read-OptionalText -Prompt '宿主机 guest payload 目录 / Host guest payload root' -CurrentValue $GuestPayloadRoot
+    $script:DriverHostPath = Read-OptionalText -Prompt '宿主机 R0 驱动 .sys 路径（留空=自动检测/不配置） / Host R0 driver .sys path (blank=auto-detect/none)' -CurrentValue (Resolve-DriverHostPath)
+    $script:LocalConfigPath = Read-OptionalText -Prompt '本机 sandbox 配置路径 / Local sandbox config path' -CurrentValue (Get-LocalSandboxConfigPath)
     Set-HyperVConfigState
 }
 
 function Invoke-GuestVmPasswordReset {
     $resetScript = Join-Path $PSScriptRoot 'scripts\Reset-SandboxGuestPassword.ps1'
     if (-not (Test-Path -LiteralPath $resetScript -PathType Leaf)) {
-        throw "Guest VM password reset script is missing: $resetScript"
+        throw "错误：找不到 VM 来宾密码重置脚本：$resetScript。下一步：请确认 scripts\Reset-SandboxGuestPassword.ps1 存在，并从仓库根目录运行。"
     }
 
     if ($WhatIfPreference) {
         [void]$PSCmdlet.ShouldProcess($VmName, "Reset actual VM guest password for '$GuestUserName'")
-        Write-InstallInfo "WhatIf: actual VM guest password reset would be delegated to '$resetScript'. No checkpoint restore, disk mount, VM boot, or checkpoint refresh was executed."
+        Write-InstallInfo "预览：会委托 '$resetScript' 重置 VM 内实际密码；当前不会还原快照、挂载磁盘、启动 VM 或刷新快照。 / WhatIf: actual VM password reset would be delegated."
         return
     }
 
     if (-not (Test-IsAdministrator)) {
-        throw 'Resetting the actual VM guest password requires an elevated PowerShell session because it restores checkpoints and mounts the VM disk.'
+        throw '错误：重置 VM 内实际密码需要管理员 PowerShell，因为会还原快照并挂载 VM 磁盘。下一步：请以管理员身份打开 PowerShell 后重试；只想保存本机 secret 时请选择 Reset password secret。'
     }
 
     $usePromptPassword = [bool]$PromptPassword
     if ($Mode -eq 'Interactive') {
         Write-Host ''
-        Write-Host "This will restore checkpoint '$CheckpointName', mount the VM disk, boot '$VmName', reset '$GuestUserName', validate PowerShell Direct, and refresh the checkpoint."
+        Write-Host "中文提示：将还原快照 '$CheckpointName'、挂载 VM 磁盘、启动 '$VmName'、重置 '$GuestUserName'、验证 PowerShell Direct，并刷新快照。 / This will restore checkpoint, mount disk, boot VM, reset password, validate PowerShell Direct, and refresh the checkpoint."
         Write-Host "中文提示：这会操作 Hyper-V VM 和快照；密码值不会显示，完成后宿主机 secret 与 VM 来宾密码保持一致。"
         $continue = Read-MenuChoice -Prompt 'Continue actual VM password reset? [y/n] / 继续重置 VM 来宾密码？[y/n]' -Allowed @('y', 'Y', 'n', 'N')
         if ($continue -in @('n', 'N')) {
-            Write-InstallInfo 'Actual VM password reset cancelled.'
+            Write-InstallInfo '已取消 VM 实际密码重置。 / Actual VM password reset cancelled.'
             return
         }
 
         Write-Host ''
-        Write-Host 'Actual VM password option / VM 实际密码选项:'
-        Write-Host '  1) Generate a new random password inside the reset script（在重置脚本中生成随机密码）'
-        Write-Host '  2) Prompt for a new VM password inside the reset script（在重置脚本中提示输入新密码）'
-        $passwordChoice = Read-MenuChoice -Prompt 'Choose [1-2] / 请选择 [1-2]' -Allowed @('1', '2')
+        Write-Host 'VM 实际密码选项 / Actual VM password options:'
+        Write-Host '  1) 在重置脚本中生成随机密码 / Generate a new random password inside the reset script'
+        Write-Host '  2) 在重置脚本中提示输入新密码 / Prompt for a new VM password inside the reset script'
+        $passwordChoice = Read-MenuChoice -Prompt '请选择 [1-2] / Choose [1-2]' -Allowed @('1', '2')
         $usePromptPassword = ($passwordChoice -eq '2')
     }
     elseif (-not $Force) {
-        throw 'Non-interactive actual VM password reset requires -Force to avoid hanging on Hyper-V confirmation prompts.'
+        throw '错误：非交互重置 VM 实际密码需要 -Force，避免停在 Hyper-V 确认提示。下一步：确认这是隔离实验 VM 后，加 -Force 重试。'
     }
 
     $arguments = @(
@@ -816,14 +820,14 @@ function Invoke-GuestVmPasswordReset {
     }
 
     if (-not $PSCmdlet.ShouldProcess($VmName, "Launch actual VM password reset for '$GuestUserName'")) {
-        Write-InstallInfo 'Actual VM password reset declined by ShouldProcess/Confirm.'
+        Write-InstallInfo '已通过 ShouldProcess/Confirm 拒绝 VM 实际密码重置。 / Actual VM password reset declined.'
         return
     }
 
-    Write-InstallInfo "Launching actual VM password reset for '$VmName'. Secret value will not be printed."
+    Write-InstallInfo "正在为 '$VmName' 启动 VM 实际密码重置；secret 值不会打印。 / Launching actual VM password reset."
     & powershell @arguments
     if ($LASTEXITCODE -ne 0) {
-        throw "Actual VM password reset failed with exit code $LASTEXITCODE."
+        throw "错误：VM 实际密码重置失败，退出码 $LASTEXITCODE。下一步：查看上方 Reset-SandboxGuestPassword 输出，确认管理员权限、VM 名称、快照和 PowerShell Direct 后重试。"
     }
 
     $userSecret = [Environment]::GetEnvironmentVariable($SecretName, 'User')
@@ -833,14 +837,14 @@ function Invoke-GuestVmPasswordReset {
 
     $configPath = Write-LocalSandboxConfig
     Set-WebConfigPathEnvironment -ConfigPath $configPath
-    Write-InstallInfo 'Actual VM password reset completed. Host secret and local sandbox config are synchronized.'
+    Write-InstallInfo 'VM 实际密码重置完成；宿主机 secret 与本机 sandbox 配置已同步。 / Actual VM password reset completed.'
 }
 
 function Set-GuestUserNameState {
     param([string]$NewGuestUserName)
 
     if ([string]::IsNullOrWhiteSpace($NewGuestUserName)) {
-        throw 'Guest user name must not be empty.'
+        throw '错误：来宾用户名不能为空。下一步：请传入 -GuestUserName <name>，通常为 SandboxUser。'
     }
 
     $script:GuestUserName = $NewGuestUserName
@@ -856,8 +860,148 @@ function Set-GuestUserNameState {
         -PersistedToProcess (-not [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($SecretName, 'Process'))) `
         -DpapiBackup (Test-Path -LiteralPath $script:SecretBackupPath -PathType Leaf)
 
-    Write-InstallInfo "Recorded guest user name in install state: $NewGuestUserName"
+    Write-InstallInfo "已在安装状态中记录来宾用户名：$NewGuestUserName / Recorded guest user name."
     Set-HyperVConfigState -Action 'guest-user-changed'
+}
+
+function Get-InstallVmProfileStatus {
+    param([bool]$HyperVModuleAvailable)
+
+    $actions = [System.Collections.Generic.List[string]]::new()
+    $profile = [ordered]@{
+        VmName = $VmName
+        ExpectedCheckpointName = $CheckpointName
+        Exists = $false
+        State = $null
+        Generation = $null
+        ProcessorCount = $null
+        MemoryStartupBytes = $null
+        DynamicMemoryEnabled = $null
+        GuestServiceInterfaceEnabled = $null
+        CheckpointExists = $false
+        Error = $null
+        RecommendedActions = @()
+    }
+
+    if (-not $HyperVModuleAvailable) {
+        [void]$actions.Add('下一步：启用/安装 Hyper-V PowerShell 模块后重新运行 .\install.ps1 -Mode CheckEnvironment；该检查不会启动或还原 VM。')
+        $profile.RecommendedActions = @($actions.ToArray())
+        return [pscustomobject]$profile
+    }
+
+    try {
+        $vm = Get-VM -Name $VmName -ErrorAction Stop
+        $profile.Exists = $true
+        $profile.State = [string]$vm.State
+
+        foreach ($propertyName in @('Generation', 'ProcessorCount', 'MemoryStartup', 'DynamicMemoryEnabled')) {
+            $property = $vm.PSObject.Properties[$propertyName]
+            if ($null -eq $property) {
+                continue
+            }
+
+            switch ($propertyName) {
+                'MemoryStartup' { $profile.MemoryStartupBytes = $property.Value }
+                default { $profile[$propertyName] = $property.Value }
+            }
+        }
+
+        $snapshot = Get-VMSnapshot -VMName $VmName -Name $CheckpointName -ErrorAction SilentlyContinue
+        $profile.CheckpointExists = $null -ne $snapshot
+        if (-not $profile.CheckpointExists) {
+            [void]$actions.Add("下一步：为 VM '$VmName' 创建或选择干净 checkpoint '$CheckpointName'，然后运行 .\install.ps1 -Mode Change -UpdateHyperVConfig -VmName '$VmName' -CheckpointName <checkpoint>。")
+        }
+
+        $guestServiceCommand = Get-Command Get-VMIntegrationService -ErrorAction SilentlyContinue
+        if ($null -ne $guestServiceCommand) {
+            $guestService = Get-VMIntegrationService -VMName $VmName -ErrorAction SilentlyContinue |
+                Where-Object { $_.Name -in @('Guest Service Interface', '来宾服务接口') -or $_.Name -match '(?i)Guest\s+Service|来宾服务' } |
+                Select-Object -First 1
+            if ($null -ne $guestService) {
+                $profile.GuestServiceInterfaceEnabled = [bool]$guestService.Enabled
+                if (-not $profile.GuestServiceInterfaceEnabled) {
+                    [void]$actions.Add("下一步：如需 Live Hyper-V 文件复制/Guest Service Interface，请在管理员 PowerShell 执行 Enable-VMIntegrationService -VMName '$VmName' -Name 'Guest Service Interface'。")
+                }
+            }
+        }
+    }
+    catch {
+        $profile.Error = $_.Exception.Message
+        [void]$actions.Add("下一步：确认 Hyper-V VM '$VmName' 已创建/导入，或运行 .\install.ps1 -Mode Change -UpdateHyperVConfig -VmName <existing VM> -CheckpointName <checkpoint> 记录正确 profile。")
+    }
+
+    $profile.RecommendedActions = @($actions.ToArray())
+    return [pscustomobject]$profile
+}
+
+function Get-InstallDriverServiceStatusSnapshot {
+    param([AllowNull()][string]$ResolvedDriverPath)
+
+    $driverScript = Join-Path $PSScriptRoot 'scripts\Manage-SandboxDriver.ps1'
+    $summary = [ordered]@{
+        Command = '.\scripts\Manage-SandboxDriver.ps1 -Action Status'
+        ScriptExists = Test-Path -LiteralPath $driverScript -PathType Leaf
+        Queried = $false
+        Success = $null
+        ServiceExists = $null
+        ServiceState = $null
+        MiniFilterLoaded = $null
+        TestSigningEnabled = $null
+        DriverFileExists = $null
+        DriverSignatureStatus = $null
+        Error = $null
+    }
+
+    if (-not $summary.ScriptExists) {
+        $summary.Error = "错误：找不到 driver 状态脚本：$driverScript。下一步：确认 scripts\Manage-SandboxDriver.ps1 存在。"
+        return [pscustomobject]$summary
+    }
+
+    $arguments = @(
+        '-NoProfile',
+        '-ExecutionPolicy', 'Bypass',
+        '-File', $driverScript,
+        '-Action', 'Status',
+        '-JsonDepth', '8'
+    )
+
+    if (-not [string]::IsNullOrWhiteSpace($ResolvedDriverPath)) {
+        $arguments += @('-DriverPath', $ResolvedDriverPath)
+    }
+
+    try {
+        $output = @(& powershell @arguments)
+        $lines = @($output | ForEach-Object { [string]$_ })
+        $startIndex = -1
+        $endIndex = -1
+        for ($index = 0; $index -lt $lines.Count; $index++) {
+            if ($startIndex -lt 0 -and $lines[$index].TrimStart().StartsWith('{', [StringComparison]::Ordinal)) {
+                $startIndex = $index
+            }
+            if ($lines[$index].TrimEnd().EndsWith('}', [StringComparison]::Ordinal)) {
+                $endIndex = $index
+            }
+        }
+
+        if ($startIndex -lt 0 -or $endIndex -lt $startIndex) {
+            throw 'driver status JSON was not found in child process output.'
+        }
+
+        $parsed = ($lines[$startIndex..$endIndex] -join "`n") | ConvertFrom-Json
+        $summary.Queried = $true
+        $summary.Success = [bool]$parsed.Success
+        $summary.ServiceExists = [bool]$parsed.After.Service.Exists
+        $summary.ServiceState = $parsed.After.Service.State
+        $summary.MiniFilterLoaded = $parsed.After.MiniFilter.Loaded
+        $summary.TestSigningEnabled = $parsed.After.TestSigning.Enabled
+        $summary.DriverFileExists = [bool]$parsed.After.DriverFile.Exists
+        $summary.DriverSignatureStatus = $parsed.After.DriverFile.Signature.Status
+    }
+    catch {
+        $summary.Error = "错误：driver 状态检查失败。下一步：可直接运行 .\scripts\Manage-SandboxDriver.ps1 -Action Status 查看 JSON 详情。英文详情：$($_.Exception.Message)"
+    }
+
+    return [pscustomobject]$summary
 }
 
 function Show-KSwordSandboxInstallStatus {
@@ -873,11 +1017,18 @@ function Show-KSwordSandboxInstallStatus {
     $vmState = $null
     $checkpointExists = $false
     $hyperVStatusError = $null
+    $vmProfile = Get-InstallVmProfileStatus -HyperVModuleAvailable $hyperVModuleAvailable
+    $vmExists = [bool]$vmProfile.Exists
+    $vmState = $vmProfile.State
+    $checkpointExists = [bool]$vmProfile.CheckpointExists
+    $hyperVStatusError = $vmProfile.Error
+    $hostTestSigningStatus = Get-HostTestSigningStatus
     $guestAgentPayload = Join-Path (Join-Path $GuestPayloadRoot 'agent') 'KSword.Sandbox.Agent.exe'
     $r0CollectorPayload = Join-Path (Join-Path $GuestPayloadRoot 'r0collector') 'KSword.Sandbox.R0Collector.exe'
     $payloadManifest = Join-Path $GuestPayloadRoot 'payload-manifest.json'
     $driverHost = Resolve-DriverHostPath
     $driverHostExists = -not [string]::IsNullOrWhiteSpace($driverHost) -and (Test-Path -LiteralPath $driverHost -PathType Leaf)
+    $driverServiceStatus = Get-InstallDriverServiceStatusSnapshot -ResolvedDriverPath $driverHost
     $driverSignatureStatus = $null
     if ($driverHostExists) {
         try {
@@ -888,52 +1039,45 @@ function Show-KSwordSandboxInstallStatus {
         }
     }
 
-    if ($hyperVModuleAvailable) {
-        try {
-            $vm = Get-VM -Name $VmName -ErrorAction Stop
-            $vmExists = $true
-            $vmState = [string]$vm.State
-            $snapshot = Get-VMSnapshot -VMName $VmName -Name $CheckpointName -ErrorAction SilentlyContinue
-            $checkpointExists = $null -ne $snapshot
-        }
-        catch {
-            $hyperVStatusError = $_.Exception.Message
-        }
-    }
-
     $recommendedActions = New-Object System.Collections.Generic.List[string]
+    foreach ($profileAction in @($vmProfile.RecommendedActions)) {
+        [void]$recommendedActions.Add([string]$profileAction)
+    }
     if (-not (Test-Path -LiteralPath $RuntimeRoot -PathType Container)) {
-        [void]$recommendedActions.Add(".\install.ps1 -Mode Install to create runtime folders under '$RuntimeRoot'.")
+        [void]$recommendedActions.Add("下一步：运行 .\install.ps1 -Mode Install，在 '$RuntimeRoot' 下创建运行目录。 / Run install to create runtime folders.")
     }
     if (-not (Test-Path -LiteralPath $localConfig -PathType Leaf)) {
-        [void]$recommendedActions.Add(".\install.ps1 -Mode Install -PromptPassword to create local config, or .\install.ps1 -Mode Change -UpdateHyperVConfig to record VM/checkpoint paths.")
+        [void]$recommendedActions.Add("下一步：运行 .\install.ps1 -Mode Install -PromptPassword 创建本机配置，或运行 .\install.ps1 -Mode Change -UpdateHyperVConfig 记录 VM/checkpoint 路径。")
     }
     if (-not (Test-Path -LiteralPath $GuestPayloadRoot -PathType Container) -or
         -not (Test-Path -LiteralPath $guestAgentPayload -PathType Leaf) -or
         -not (Test-Path -LiteralPath $r0CollectorPayload -PathType Leaf) -or
         -not (Test-Path -LiteralPath $payloadManifest -PathType Leaf)) {
-        [void]$recommendedActions.Add(".\scripts\Prepare-GuestPayload.ps1 -RepoRoot . -PayloadRoot '$GuestPayloadRoot' -GuestWorkingDirectory '$GuestWorkingDirectory' -SelfContained")
+        [void]$recommendedActions.Add("下一步：运行 .\scripts\Prepare-GuestPayload.ps1 -RepoRoot . -PayloadRoot '$GuestPayloadRoot' -GuestWorkingDirectory '$GuestWorkingDirectory' -SelfContained 准备 Guest Agent/R0Collector payload。")
     }
     if ([string]::IsNullOrWhiteSpace($processValue) -and [string]::IsNullOrWhiteSpace($userValue) -and [string]::IsNullOrWhiteSpace($machineValue)) {
-        [void]$recommendedActions.Add(".\install.ps1 -Mode Install -PromptPassword, or .\scripts\Test-HyperVReadiness.ps1 -PromptForMissingGuestPassword for a process-only check.")
+        [void]$recommendedActions.Add("下一步：运行 .\install.ps1 -Mode Install -PromptPassword 保存 guest password secret；如果只做本进程检查，可运行 .\scripts\Test-HyperVReadiness.ps1 -PromptForMissingGuestPassword。")
     }
     if ([string]::IsNullOrWhiteSpace($driverHost)) {
-        [void]$recommendedActions.Add(".\install.ps1 -Mode Change -UpdateHyperVConfig -DriverHostPath <path-to-test-signed-KSword.Sandbox.Driver.sys>, or set driver.useMockCollector=true for plumbing-only tests.")
+        [void]$recommendedActions.Add("下一步：运行 .\install.ps1 -Mode Change -UpdateHyperVConfig -DriverHostPath <path-to-test-signed-KSword.Sandbox.Driver.sys>；仅验证链路时可在本机配置中设置 driver.useMockCollector=true。")
     }
     elseif (-not $driverHostExists) {
-        [void]$recommendedActions.Add("Build the R0 driver or correct DriverHostPath: $driverHost")
+        [void]$recommendedActions.Add("下一步：构建 R0 driver，或修正 DriverHostPath：$driverHost。")
     }
     elseif ($driverSignatureStatus -eq 'NotSigned') {
-        [void]$recommendedActions.Add("Test-sign the configured driver and enable guest test-signing before live R0 collection: $driverHost")
+        [void]$recommendedActions.Add("下一步：在隔离 VM 中对已配置 driver 做测试签名，并启用 guest test-signing 后再运行真实 R0 采集：$driverHost。")
+    }
+    if ($driverServiceStatus.ScriptExists -and $driverServiceStatus.Queried -and $driverHostExists -and -not $driverServiceStatus.ServiceExists) {
+        [void]$recommendedActions.Add('下一步：如需在宿主加载 driver/minifilter，请先确认测试签名和管理员权限，再运行 .\scripts\Manage-SandboxDriver.ps1 -Action Install；普通 WebUI/PlanOnly 不需要加载 driver。')
     }
     if (-not $hyperVModuleAvailable) {
-        [void]$recommendedActions.Add('Enable/install Hyper-V PowerShell tools, then rerun .\install.ps1 -Mode CheckEnvironment.')
+        [void]$recommendedActions.Add('下一步：启用/安装 Hyper-V PowerShell 工具，然后重新运行 .\install.ps1 -Mode CheckEnvironment。')
     }
     elseif (-not $vmExists) {
-        [void]$recommendedActions.Add(".\install.ps1 -Mode Change -UpdateHyperVConfig -VmName <existing VM> -CheckpointName <checkpoint>, or create/import VM '$VmName'.")
+        [void]$recommendedActions.Add("下一步：运行 .\install.ps1 -Mode Change -UpdateHyperVConfig -VmName <existing VM> -CheckpointName <checkpoint> 记录现有 VM，或先创建/导入 VM '$VmName'。")
     }
     elseif (-not $checkpointExists) {
-        [void]$recommendedActions.Add(".\install.ps1 -Mode Change -UpdateHyperVConfig -VmName '$VmName' -CheckpointName <checkpoint>, or create checkpoint '$CheckpointName'.")
+        [void]$recommendedActions.Add("下一步：运行 .\install.ps1 -Mode Change -UpdateHyperVConfig -VmName '$VmName' -CheckpointName <checkpoint> 记录快照，或先创建 checkpoint '$CheckpointName'。")
     }
 
     [pscustomobject][ordered]@{
@@ -959,6 +1103,12 @@ function Show-KSwordSandboxInstallStatus {
         DriverHostPath = $driverHost
         DriverHostPathExists = $driverHostExists
         DriverSignatureStatus = $driverSignatureStatus
+        DriverServiceStatusCommand = $driverServiceStatus.Command
+        DriverServiceStatus = $driverServiceStatus
+        DriverServiceExists = $driverServiceStatus.ServiceExists
+        DriverServiceState = $driverServiceStatus.ServiceState
+        DriverMiniFilterLoaded = $driverServiceStatus.MiniFilterLoaded
+        DriverServiceTestSigningEnabled = $driverServiceStatus.TestSigningEnabled
         VmName = $VmName
         CheckpointName = $CheckpointName
         GuestWorkingDirectory = $GuestWorkingDirectory
@@ -968,6 +1118,14 @@ function Show-KSwordSandboxInstallStatus {
         VmState = $vmState
         CheckpointExists = $checkpointExists
         HyperVStatusError = $hyperVStatusError
+        VmProfile = $vmProfile
+        VmProfileHealthy = ($vmExists -and $checkpointExists)
+        VmGeneration = $vmProfile.Generation
+        VmProcessorCount = $vmProfile.ProcessorCount
+        VmMemoryStartupBytes = $vmProfile.MemoryStartupBytes
+        VmGuestServiceInterfaceEnabled = $vmProfile.GuestServiceInterfaceEnabled
+        HostTestSigningState = $hostTestSigningStatus.State
+        HostTestSigningMessage = $hostTestSigningStatus.Message
         LocalConfigPath = $localConfig
         LocalConfigExists = Test-Path -LiteralPath $localConfig -PathType Leaf
         WebConfigPathProcess = [Environment]::GetEnvironmentVariable($script:WebConfigPathEnvironmentName, 'Process')
@@ -981,6 +1139,8 @@ function Show-KSwordSandboxInstallStatus {
         CheckpointGuidance = ".\install.ps1 -Mode Change -UpdateHyperVConfig -VmName '$VmName' -CheckpointName <checkpoint>"
         DriverHostPathGuidance = '.\install.ps1 -Mode Change -UpdateHyperVConfig -DriverHostPath <test-signed .sys>'
         GuestTestSigningGuidance = '.\install.ps1 -Mode Change -QueryGuestTestSigning; .\install.ps1 -Mode Change -EnableGuestTestSigning -RestartGuestAfterTestSigning -Force'
+        HostTestSigningGuidance = 'Host test-signing is a host boot setting for isolated lab hosts that load test-signed kernel drivers; use the Change menu guidance before enabling it and reboot after changes.'
+        TestSigningGuidance = 'Guest test-signing is managed from the Change menu; host test-signing is guidance-only here and is needed only when the host itself loads a test-signed driver.'
         ReadinessGuidance = '.\scripts\Test-HyperVReadiness.ps1'
         ChineseGuidance = '中文提示：Status/CheckEnvironment 不打印密码值，不启动/还原 VM；RecommendedActions 给出下一步修复命令。'
         RecommendedActions = @($recommendedActions.ToArray())
@@ -1014,6 +1174,7 @@ function Show-KSwordSandboxEnvironmentCheck {
         ConfigureDriverHostPathCommand = '.\install.ps1 -Mode Change -UpdateHyperVConfig -DriverHostPath <test-signed .sys>'
         GuestTestSigningQueryCommand = '.\install.ps1 -Mode Change -QueryGuestTestSigning'
         GuestTestSigningEnableCommand = '.\install.ps1 -Mode Change -EnableGuestTestSigning -RestartGuestAfterTestSigning -Force'
+        TestSigningGuidanceCommand = '.\install.ps1 -Mode Change -ShowTestSigningGuidance'
         WebUiUrl = $WebUiUrl
         RunScriptExists = Test-Path -LiteralPath $runScript -PathType Leaf
         ReadinessScriptExists = Test-Path -LiteralPath $readinessScript -PathType Leaf
@@ -1040,18 +1201,18 @@ function Invoke-KSwordSandboxEnvironmentCheck {
     if ($RunHyperVReadiness) {
         $readinessScript = Join-Path $PSScriptRoot 'scripts\Test-HyperVReadiness.ps1'
         if (-not (Test-Path -LiteralPath $readinessScript -PathType Leaf)) {
-            throw "Hyper-V readiness script is missing: $readinessScript"
+            throw "错误：找不到 Hyper-V readiness 脚本：$readinessScript。下一步：请确认 scripts\Test-HyperVReadiness.ps1 存在，并从仓库根目录运行。"
         }
 
         if (-not $PSCmdlet.ShouldProcess($readinessScript, 'Run read-only Hyper-V readiness preflight')) {
-            Write-InstallInfo "WhatIf: read-only Hyper-V readiness preflight would run: $readinessScript"
+            Write-InstallInfo "预览：会运行只读 Hyper-V readiness 预检：$readinessScript。 / WhatIf: readiness preflight would run."
             return
         }
 
-        Write-InstallInfo 'Running read-only Hyper-V readiness preflight. It must not restore/start/stop a VM.'
+        Write-InstallInfo '正在运行只读 Hyper-V readiness 预检；它不得还原/启动/停止 VM。 / Running read-only readiness preflight.'
         & powershell -NoProfile -ExecutionPolicy Bypass -File $readinessScript
         if ($LASTEXITCODE -ne 0) {
-            throw "Hyper-V readiness preflight failed with exit code $LASTEXITCODE."
+            throw "错误：Hyper-V readiness 预检失败，退出码 $LASTEXITCODE。下一步：查看上方 RecommendedActions，先修复第一个失败项后重试。"
         }
     }
 }
@@ -1059,11 +1220,11 @@ function Invoke-KSwordSandboxEnvironmentCheck {
 function Invoke-KSwordSandboxWebUi {
     $runScript = Join-Path $PSScriptRoot 'run.ps1'
     if (-not (Test-Path -LiteralPath $runScript -PathType Leaf)) {
-        throw "run.ps1 was not found: $runScript"
+        throw "错误：找不到 run.ps1：$runScript。下一步：请从完整仓库/发行包根目录运行，确认 run.ps1 存在。"
     }
 
     if (-not $PSCmdlet.ShouldProcess($WebUiUrl, 'Start KSwordSandbox WebUI without starting or restoring a VM')) {
-        Write-InstallInfo "WhatIf: WebUI would be started via '$runScript -Mode WebUI -Url $WebUiUrl'. No VM would be started by this wrapper."
+        Write-InstallInfo "预览：会通过 '$runScript -Mode WebUI -Url $WebUiUrl' 启动 WebUI；此包装器不会启动 VM。 / WhatIf: WebUI would start, no VM."
         return
     }
 
@@ -1079,27 +1240,90 @@ function Invoke-KSwordSandboxWebUi {
         $arguments += '-OpenBrowser'
     }
 
-    Write-InstallInfo "Starting WebUI through run.ps1 at $WebUiUrl. This wrapper does not start or restore a VM."
+    Write-InstallInfo "正在通过 run.ps1 启动 WebUI：$WebUiUrl；此包装器不会启动或还原 VM。 / Starting WebUI through run.ps1."
     & powershell @arguments
     if ($LASTEXITCODE -ne 0) {
-        throw "run.ps1 WebUI launch failed with exit code $LASTEXITCODE."
+        throw "错误：run.ps1 启动 WebUI 失败，退出码 $LASTEXITCODE。下一步：确认已安装 .NET SDK、端口未被占用，然后运行 .\run.ps1 -Mode CheckEnvironment。"
     }
+}
+
+function Get-HostTestSigningStatus {
+    $rawOutput = @()
+    $state = 'Unavailable'
+    $message = ''
+
+    if ($null -eq (Get-Command bcdedit.exe -ErrorAction SilentlyContinue)) {
+        return [pscustomobject][ordered]@{
+            State = $state
+            Message = 'bcdedit.exe is not available on this host.'
+            RawOutput = @()
+        }
+    }
+
+    try {
+        $rawOutput = @(& bcdedit.exe /enum '{current}' 2>&1)
+        $joined = $rawOutput -join "`n"
+        if ($joined -match '(?im)^\s*testsigning\s+(Yes|On|True)\s*$') {
+            $state = 'Enabled'
+        }
+        elseif ($joined -match '(?im)^\s*testsigning\s+(No|Off|False)\s*$') {
+            $state = 'Disabled'
+        }
+        else {
+            $state = 'Disabled'
+            $message = 'testsigning entry was not present in bcdedit output; treating as disabled.'
+        }
+    }
+    catch {
+        $state = 'Unknown'
+        $message = $_.Exception.Message
+    }
+
+    [pscustomobject][ordered]@{
+        State = $state
+        Message = $message
+        RawOutput = @($rawOutput)
+    }
+}
+
+function Show-TestSigningGuidance {
+    $hostStatus = Get-HostTestSigningStatus
+    Write-Host ''
+    Write-Host 'host/guest test-signing 指引 / host and guest test-signing guidance:'
+    Write-Host "  Host test-signing state: $($hostStatus.State)"
+    if (-not [string]::IsNullOrWhiteSpace([string]$hostStatus.Message)) {
+        Write-Host "  Host query note: $($hostStatus.Message)"
+    }
+    Write-Host '  1) Host test-signing 是宿主 Windows boot 设置；只在隔离 lab 宿主需要加载测试签名 kernel driver 时启用，变更后需要重启宿主。'
+    Write-Host '  2) Guest test-signing 是黄金 VM 内部 Windows boot 设置；真实 R0 分析通常需要在 guest 中启用，变更后需要重启 guest。'
+    Write-Host '  3) test-signing 只允许加载测试签名 driver，不会替你签名 driver；测试签名请使用普通 Windows SDK signtool.exe helper，或改用 mock/disabled R0。'
+    Write-Host '  4) 普通发布路径：安装/更改只记录 driver path 和指导 test-signing，不在无人值守流程中运行会弹窗的旧签名工具。'
+
+    [pscustomobject][ordered]@{
+        HostTestSigningState = $hostStatus.State
+        HostTestSigningGuidance = 'Enable host Windows test mode only on an isolated lab host that must load a test-signed kernel driver; reboot after changing it and disable it after validation.'
+        GuestTestSigningGuidance = 'Use the Change menu to query or enable guest test-signing for the configured golden VM; enable/disable changes are explicit and require confirmation or -Force.'
+        DriverSigningGuidance = 'Use scripts\Sign-SandboxDriverWithTestCertificate.ps1, which uses ordinary signtool.exe when available or clearly skips signing when signtool.exe is absent.'
+        ChangesDriverFile = $false
+        ChangesHostBootEntry = $false
+        ChangesGuestBootEntry = $false
+    } | Format-List
 }
 
 function Uninstall-KSwordSandboxLocal {
     if (-not $Force -and $Mode -eq 'Interactive') {
         Write-Host ''
-        Write-Host "This removes local credential metadata for '$SecretName'. Runtime job outputs under '$RuntimeRoot' are not deleted."
-        $choice = Read-MenuChoice -Prompt 'Continue uninstall? [y/n]' -Allowed @('y', 'Y', 'n', 'N')
+        Write-Host "中文提示：这会移除本机 credential 元数据 '$SecretName'；不会删除 '$RuntimeRoot' 下的运行 job 输出。 / This removes local credential metadata only."
+        $choice = Read-MenuChoice -Prompt '继续卸载？[y/n] / Continue uninstall? [y/n]' -Allowed @('y', 'Y', 'n', 'N')
         if ($choice -in @('n', 'N')) {
-            Write-InstallInfo 'Uninstall cancelled.'
+            Write-InstallInfo '已取消卸载。 / Uninstall cancelled.'
             return
         }
     }
 
     if (-not $PSCmdlet.ShouldProcess($script:InstallStateDirectory, "Uninstall local KSwordSandbox settings and clear '$SecretName' from process/User environment")) {
-        Write-InstallInfo "WhatIf: local installer metadata and '$SecretName' process/User environment entries would be removed."
-        Write-InstallInfo 'Runtime output folders would be left intact.'
+        Write-InstallInfo "预览：会移除本机安装器元数据和 '$SecretName' 的 Process/User 环境项。 / WhatIf: local installer metadata and secret env entries would be removed."
+        Write-InstallInfo '运行输出目录会保留不删除。 / Runtime output folders would be left intact.'
         return
     }
 
@@ -1107,8 +1331,8 @@ function Uninstall-KSwordSandboxLocal {
     [Environment]::SetEnvironmentVariable($SecretName, $null, 'User')
     Remove-Item -LiteralPath $script:SecretBackupPath -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $script:InstallStatePath -Force -ErrorAction SilentlyContinue
-    Write-InstallInfo "Removed current process/User environment secret '$SecretName' and local DPAPI backup if present."
-    Write-InstallInfo 'Runtime output folders were left intact.'
+    Write-InstallInfo "已移除当前 Process/User 环境 secret '$SecretName'，并删除本机 DPAPI 备份（如存在）。 / Removed local secret metadata."
+    Write-InstallInfo '运行输出目录已保留不删除。 / Runtime output folders were left intact.'
 }
 
 function Invoke-GuestTestSigningMode {
@@ -1122,30 +1346,30 @@ function Invoke-GuestTestSigningMode {
 
     $testSigningScript = Join-Path $PSScriptRoot 'scripts\Set-GuestTestSigning.ps1'
     if (-not (Test-Path -LiteralPath $testSigningScript -PathType Leaf)) {
-        throw "Guest test-signing script is missing: $testSigningScript"
+        throw "错误：找不到 guest test-signing 脚本：$testSigningScript。下一步：请确认 scripts\Set-GuestTestSigning.ps1 存在。"
     }
 
     if ($WhatIfPreference) {
         [void]$PSCmdlet.ShouldProcess($VmName, "Run guest test-signing '$TestSigningMode'")
-        Write-InstallInfo "WhatIf: guest test-signing '$TestSigningMode' would be delegated to '$testSigningScript'. No guest command or reboot was executed."
+        Write-InstallInfo "预览：guest test-signing '$TestSigningMode' 会委托给 '$testSigningScript'；当前不会执行来宾命令或重启。 / WhatIf: guest test-signing would be delegated."
         return
     }
 
     if ($TestSigningMode -ne 'Query' -and -not $Force -and $Mode -ne 'Interactive') {
-        throw 'Non-interactive guest test-signing changes require -Force.'
+        throw '错误：非交互修改 guest test-signing 需要 -Force。下一步：确认这是隔离实验 VM 后，加 -Force 重试；只查询状态可用 -QueryGuestTestSigning。'
     }
 
     if ($TestSigningMode -ne 'Query' -and $Mode -eq 'Interactive') {
         Write-Host ''
-        Write-Host "This will run bcdedit /set testsigning $($TestSigningMode.ToLowerInvariant()) inside '$VmName'."
+        Write-Host "中文提示：将在 '$VmName' 来宾系统内运行 bcdedit /set testsigning $($TestSigningMode.ToLowerInvariant())。 / This will change guest test-signing state."
         Write-Host '中文提示：test signing 是 VM 内部开关，仅用于隔离实验环境中的测试签名驱动；不会签名驱动文件。'
         if ($RestartAfterChange) {
-            Write-Host 'The guest may reboot if the state changes. / 如果状态变化，来宾系统可能会重启。'
+            Write-Host '如果状态变化，来宾系统可能会重启。 / The guest may reboot if the state changes.'
         }
 
         $continue = Read-MenuChoice -Prompt 'Continue guest test-signing change? [y/n] / 继续修改来宾 test signing？[y/n]' -Allowed @('y', 'Y', 'n', 'N')
         if ($continue -in @('n', 'N')) {
-            Write-InstallInfo 'Guest test-signing change cancelled.'
+            Write-InstallInfo '已取消 guest test-signing 修改。 / Guest test-signing change cancelled.'
             return
         }
     }
@@ -1169,33 +1393,35 @@ function Invoke-GuestTestSigningMode {
     }
 
     if (-not $PSCmdlet.ShouldProcess($VmName, "Run guest test-signing '$TestSigningMode'")) {
-        Write-InstallInfo "Guest test-signing '$TestSigningMode' declined by ShouldProcess/Confirm."
+        Write-InstallInfo "guest test-signing '$TestSigningMode' 已通过 ShouldProcess/Confirm 拒绝。 / Guest test-signing declined."
         return
     }
 
-    Write-InstallInfo "Running guest test-signing '$TestSigningMode' for VM '$VmName'."
+    Write-InstallInfo "正在对 VM '$VmName' 执行 guest test-signing '$TestSigningMode'。 / Running guest test-signing."
     & powershell @arguments
     if ($LASTEXITCODE -ne 0) {
-        throw "Guest test-signing '$TestSigningMode' failed with exit code $LASTEXITCODE."
+        throw "错误：guest test-signing '$TestSigningMode' 失败，退出码 $LASTEXITCODE。下一步：确认管理员权限、VM 正在可访问、guest password secret 正确后重试。"
     }
 }
 
 function Invoke-GuestTestSigningMenu {
     while ($true) {
         Write-Host ''
-        Write-Host 'Guest test-signing options / 来宾 test signing 选项:'
-        Write-Host '  1) Query current guest test-signing state（查询当前状态）'
-        Write-Host '  2) Enable guest test-signing（启用）'
-        Write-Host '  3) Enable guest test-signing and reboot guest if changed（启用并在变化时重启来宾）'
-        Write-Host '  4) Disable guest test-signing（禁用）'
-        Write-Host '  5) Back（返回）'
-        $choice = Read-MenuChoice -Prompt 'Choose [1-5] / 请选择 [1-5]' -Allowed @('1', '2', '3', '4', '5')
+        Write-Host 'host/guest test-signing 选项 / Host and guest test-signing options:'
+        Write-Host '  1) 查询当前 guest test-signing 状态 / Query current guest test-signing state'
+        Write-Host '  2) 启用 guest test-signing / Enable guest test-signing'
+        Write-Host '  3) 启用 guest test-signing，并在状态变化时重启来宾 / Enable and reboot if changed'
+        Write-Host '  4) 禁用 guest test-signing / Disable guest test-signing'
+        Write-Host '  5) 查看 host/guest test-signing 指引 / Show host/guest test-signing guidance'
+        Write-Host '  6) 返回 / Back'
+        $choice = Read-MenuChoice -Prompt '请选择 [1-6] / Choose [1-6]' -Allowed @('1', '2', '3', '4', '5', '6')
         switch ($choice) {
             '1' { Invoke-GuestTestSigningMode -TestSigningMode Query }
             '2' { Invoke-GuestTestSigningMode -TestSigningMode Enable }
             '3' { Invoke-GuestTestSigningMode -TestSigningMode Enable -RestartAfterChange $true }
             '4' { Invoke-GuestTestSigningMode -TestSigningMode Disable }
-            '5' { return }
+            '5' { Show-TestSigningGuidance }
+            '6' { return }
         }
     }
 }
@@ -1203,11 +1429,11 @@ function Invoke-GuestTestSigningMenu {
 function Invoke-GuestPasswordMenu {
     while ($true) {
         Write-Host ''
-        Write-Host 'Guest password options / 来宾密码选项:'
-        Write-Host '  1) Reset host-side password secret only（仅重置宿主机保存的 secret）'
-        Write-Host '  2) Reset actual VM guest password (elevated, explicit confirmation)（重置 VM 内实际密码，需要管理员和确认）'
-        Write-Host '  3) Back（返回）'
-        $choice = Read-MenuChoice -Prompt 'Choose [1-3] / 请选择 [1-3]' -Allowed @('1', '2', '3')
+        Write-Host '来宾密码选项 / Guest password options:'
+        Write-Host '  1) 仅重置宿主机保存的 password secret / Reset host-side password secret only'
+        Write-Host '  2) 重置 VM 内实际密码（需要管理员和确认） / Reset actual VM guest password'
+        Write-Host '  3) 返回 / Back'
+        $choice = Read-MenuChoice -Prompt '请选择 [1-3] / Choose [1-3]' -Allowed @('1', '2', '3')
         switch ($choice) {
             '1' { Reset-GuestPasswordSecret }
             '2' { Invoke-GuestVmPasswordReset }
@@ -1219,24 +1445,24 @@ function Invoke-GuestPasswordMenu {
 function Invoke-ChangeMenu {
     while ($true) {
         Write-Host ''
-        Write-Host 'Change options: / 更改选项:'
-        Write-Host '  1) Reset password secret（重置宿主机 guest 密码 secret）'
-        Write-Host '  2) Reset actual VM guest password（重置 VM 中实际来宾密码）'
-        Write-Host '  3) Change Hyper-V VM/checkpoint/guest paths（配置黄金 VM、干净快照、来宾路径）'
-        Write-Host '  4) Change recorded guest username（更改记录的来宾用户名）'
-        Write-Host '  5) Recreate runtime folders and local config（重建运行目录和本机配置）'
-        Write-Host '  6) Show Hyper-V readiness/status（查看 Hyper-V 就绪状态）'
-        Write-Host '  7) Manage guest test-signing（管理来宾 test signing）'
-        Write-Host '  8) Configure optional VirusTotal API key（配置可选 VT key）'
-        Write-Host '  9) Check local environment（检查本机环境）'
-        Write-Host '  10) Back（返回）'
-        $choice = Read-MenuChoice -Prompt 'Choose [1-10] / 请选择 [1-10]' -Allowed @('1', '2', '3', '4', '5', '6', '7', '8', '9', '10')
+        Write-Host '更改选项 / Change options:'
+        Write-Host '  1) 重置宿主机 guest password secret / Reset password secret'
+        Write-Host '  2) 重置 VM 中实际来宾密码 / Reset actual VM guest password'
+        Write-Host '  3) 配置黄金 VM、干净快照和来宾路径 / Change Hyper-V VM/checkpoint/guest paths'
+        Write-Host '  4) 更改记录的来宾用户名 / Change recorded guest username'
+        Write-Host '  5) 重建运行目录和本机配置 / Recreate runtime folders and local config'
+        Write-Host '  6) 查看 Hyper-V readiness/status / Show Hyper-V readiness/status'
+        Write-Host '  7) 管理 host/guest test-signing 指引 / Manage host/guest test-signing guidance'
+        Write-Host '  8) 配置可选 VirusTotal API key / Configure optional VT key'
+        Write-Host '  9) 检查本机环境 / Check local environment'
+        Write-Host '  10) 返回 / Back'
+        $choice = Read-MenuChoice -Prompt '请选择 [1-10] / Choose [1-10]' -Allowed @('1', '2', '3', '4', '5', '6', '7', '8', '9', '10')
         switch ($choice) {
             '1' { Reset-GuestPasswordSecret }
             '2' { Invoke-GuestVmPasswordReset }
             '3' { Invoke-HyperVConfigPrompt }
             '4' {
-                $name = Read-Host 'Guest username'
+                $name = Read-Host '来宾用户名 / Guest username'
                 Set-GuestUserNameState -NewGuestUserName $name
             }
             '5' { Set-HyperVConfigState -Action 'runtime-folders-and-config-refreshed' }
@@ -1253,24 +1479,24 @@ function Invoke-InteractiveInstaller {
     while ($true) {
         Write-Host ''
         Write-Host 'KSwordSandbox local installer / 本地安装向导'
-        Write-Host '  1) Install / prepare local settings（安装/准备本机设置）'
-        Write-Host '  2) Change settings（更改设置）'
-        Write-Host '  3) Uninstall local settings（卸载本机设置）'
-        Write-Host '  4) Reset Guest password（重置来宾密码/secret）'
-        Write-Host '  5) Configure Hyper-V（配置 Hyper-V 黄金 VM/快照）'
-        Write-Host '  6) Configure VT key（配置可选 VT key）'
-        Write-Host '  7) Check environment（检查环境）'
-        Write-Host '  8) Start WebUI（启动 WebUI）'
-        Write-Host '  9) Status（状态）'
-        Write-Host '  10) Exit（退出）'
-        $choice = Read-MenuChoice -Prompt 'Choose [1-10] / 请选择 [1-10]' -Allowed @('1', '2', '3', '4', '5', '6', '7', '8', '9', '10')
+        Write-Host '  1) Install / prepare local settings / 安装/准备本机设置'
+        Write-Host '  2) Change settings / 更改设置'
+        Write-Host '  3) Uninstall local settings / 卸载本机设置'
+        Write-Host '  4) Reset Guest password/secret / 重置来宾密码/secret'
+        Write-Host '  5) Configure Hyper-V / 配置 Hyper-V 黄金 VM/快照'
+        Write-Host '  6) Configure VT key / 配置可选 VirusTotal key'
+        Write-Host '  7) Check environment / 检查环境'
+        Write-Host '  8) Start WebUI / 启动 WebUI'
+        Write-Host '  9) Status / 状态'
+        Write-Host '  10) Exit / 退出'
+        $choice = Read-MenuChoice -Prompt '请选择 [1-10] / Choose [1-10]' -Allowed @('1', '2', '3', '4', '5', '6', '7', '8', '9', '10')
         switch ($choice) {
             '1' {
                 Write-Host ''
-                Write-Host 'Install password handling / 安装时密码处理:'
-                Write-Host '  1) Set/reset password now（现在设置/重置 guest password secret）'
-                Write-Host '  2) Prepare folders only（仅准备目录和本机配置）'
-                $installChoice = Read-MenuChoice -Prompt 'Choose [1-2] / 请选择 [1-2]' -Allowed @('1', '2')
+                Write-Host '安装时密码处理 / Install password handling:'
+                Write-Host '  1) 现在设置/重置 guest password secret / Set or reset password now'
+                Write-Host '  2) 仅准备目录和本机配置 / Prepare folders only'
+                $installChoice = Read-MenuChoice -Prompt '请选择 [1-2] / Choose [1-2]' -Allowed @('1', '2')
                 Install-KSwordSandboxLocal -SetPassword:($installChoice -eq '1')
             }
             '2' { Invoke-ChangeMenu }
@@ -1309,6 +1535,9 @@ switch ($Mode) {
         }
         elseif ($ResetGuestVmPassword) {
             Invoke-GuestVmPasswordReset
+        }
+        elseif ($ShowTestSigningGuidance) {
+            Show-TestSigningGuidance
         }
         elseif ($EnableGuestTestSigning) {
             Invoke-GuestTestSigningMode -TestSigningMode Enable -RestartAfterChange ([bool]$RestartGuestAfterTestSigning)

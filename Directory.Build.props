@@ -1,0 +1,16 @@
+<Project>
+  <PropertyGroup>
+    <!--
+      Keep SDK-style projects from accidentally compiling generated/intermediate
+      .cs files when a worker uses custom output paths under the repository or
+      D:\Temp. This is a guardrail for long-running multi-agent development and
+      does not change product source layout.
+    -->
+    <DefaultItemExcludes>$(DefaultItemExcludes);**\bin\**;**\obj\**;**\.vs\**;**\x64\**;D:\Temp\**</DefaultItemExcludes>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Remove="**\bin\**\*.cs;**\obj\**\*.cs;**\.vs\**\*.cs;**\x64\**\*.cs;D:\Temp\**\*.cs" />
+    <None Remove="**\bin\**;**\obj\**;**\.vs\**;**\x64\**;D:\Temp\**" />
+  </ItemGroup>
+</Project>

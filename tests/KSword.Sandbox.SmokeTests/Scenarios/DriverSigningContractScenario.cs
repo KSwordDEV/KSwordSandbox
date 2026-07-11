@@ -35,7 +35,11 @@ internal sealed class DriverSigningContractScenario : ISmokeTestScenario
 
         var testCertificateScript = File.ReadAllText(testCertificateScriptPath);
         SmokeAssert.True(testCertificateScript.Contains("New-SelfSignedCertificate", StringComparison.Ordinal), "Test-certificate helper should create or reuse a local test cert.");
-        SmokeAssert.True(testCertificateScript.Contains("Set-AuthenticodeSignature", StringComparison.Ordinal), "Test-certificate helper should use non-CSignTool Authenticode signing.");
+        SmokeAssert.True(testCertificateScript.Contains("signtool.exe", StringComparison.Ordinal), "Test-certificate helper should use ordinary signtool.exe when signing.");
+        SmokeAssert.True(testCertificateScript.Contains("Resolve-SignTool", StringComparison.Ordinal), "Test-certificate helper should resolve Windows SDK/PATH signtool.exe.");
+        SmokeAssert.True(testCertificateScript.Contains("SignatureAttempted = $false", StringComparison.Ordinal), "Test-certificate helper should clearly skip when signtool.exe is absent.");
+        SmokeAssert.True(testCertificateScript.Contains("Skipped = $true", StringComparison.Ordinal), "Test-certificate helper should report skipped signing when signtool.exe is absent.");
+        SmokeAssert.True(!testCertificateScript.Contains("Set-AuthenticodeSignature", StringComparison.Ordinal), "Test-certificate helper should not use PowerShell Authenticode fallback signing.");
         SmokeAssert.True(testCertificateScript.Contains("CSignToolUsed = $false", StringComparison.Ordinal), "Test-certificate helper should make the no-CSignTool path explicit.");
 
         var nativeBuildScript = File.ReadAllText(nativeBuildScriptPath);
@@ -46,6 +50,23 @@ internal sealed class DriverSigningContractScenario : ISmokeTestScenario
         var fullValidationScript = File.ReadAllText(fullValidationScriptPath);
         SmokeAssert.True(fullValidationScript.Contains("SignNativeDriver", StringComparison.Ordinal), "Full validation should keep signing opt-in explicit.");
         SmokeAssert.True(fullValidationScript.Contains("default validation path is compile-only", StringComparison.Ordinal), "Full validation should document compile-only default.");
+
+        foreach (var unattendedScriptName in new[]
+        {
+            "Invoke-NativeBuild.ps1",
+            "Invoke-FullValidation.ps1",
+            "Invoke-LocalPipelineSmoke.ps1",
+            "Invoke-HyperVE2E.ps1",
+            "Invoke-WebUIApiE2E.ps1",
+            "Start-SandboxHyperVJob.ps1",
+            "Set-GuestTestSigning.ps1"
+        })
+        {
+            var unattendedScript = File.ReadAllText(Path.Combine(context.RepositoryRoot, "scripts", unattendedScriptName));
+            SmokeAssert.True(!unattendedScript.Contains("Sign-SandboxDriverWithKswordCSignTool.ps1", StringComparison.Ordinal), $"{unattendedScriptName} must not call the legacy CSignTool wrapper.");
+            SmokeAssert.True(!unattendedScript.Contains(".cert\\CSignTool.exe", StringComparison.Ordinal), $"{unattendedScriptName} must not call a bundled CSignTool binary.");
+            SmokeAssert.True(!unattendedScript.Contains("& CSignTool", StringComparison.Ordinal), $"{unattendedScriptName} must not invoke CSignTool by command name.");
+        }
 
         var driverProject = File.ReadAllText(driverProjectPath);
         SmokeAssert.True(driverProject.Contains("<SignMode>Off</SignMode>", StringComparison.Ordinal), "Driver project must keep SignMode=Off.");

@@ -60,6 +60,18 @@ public static class ReportEventSampler
         "capturePhase",
         "captureState",
         "importMode",
+        "uid",
+        "protocol",
+        "sourceIp",
+        "sourcePort",
+        "destinationIp",
+        "destinationPort",
+        "flowKey",
+        "method",
+        "host",
+        "uri",
+        "queryName",
+        "sni",
         "sourceArtifactRelativePath",
         "sourceArtifactSha256",
         "sourceArtifactSizeBytes",
@@ -75,6 +87,12 @@ public static class ReportEventSampler
         "queueCapacity",
         "queueDepth",
         "queueHighWatermark",
+        "lostCount",
+        "highWatermark",
+        "lastEnqueueFailureStatus",
+        "lastEnqueueFailureStatusHex",
+        "sequence",
+        "sequenceMeaning",
         "totalEventsDropped",
         "totalEventsSuppressed",
         "totalEventsBackpressured",
@@ -87,11 +105,131 @@ public static class ReportEventSampler
         "operationName",
         "operation",
         "queryName",
+        "qname",
+        "domain",
+        "queryType",
+        "recordType",
+        "rcode",
+        "isResponse",
+        "protocol",
+        "transportProtocol",
+        "protocolName",
+        "sourceIp",
+        "sourcePort",
+        "sourceEndpoint",
+        "destinationIp",
+        "destinationPort",
+        "destinationEndpoint",
+        "flowKey",
+        "direction",
+        "method",
+        "uri",
+        "requestUri",
         "host",
         "url",
+        "userAgent",
+        "contentType",
+        "statusCode",
+        "payloadMagic",
         "sni",
+        "serverName",
+        "tlsVersion",
+        "ja3",
+        "ja3s",
+        "alpn",
+        "cipherSuite",
         "remoteAddress",
-        "remotePort"
+        "remotePort",
+        "state",
+        "durationSeconds",
+        "packetCount",
+        "byteCount",
+        "uid",
+        "fileFormat",
+        "magic",
+        "isPe",
+        "architecture",
+        "machine",
+        "subsystem",
+        "sectionCount",
+        "sectionName",
+        "entropy",
+        "entropyLabel",
+        "moduleName",
+        "apiCount",
+        "clusterName",
+        "exportName",
+        "tlsCallback",
+        "yaraRule",
+        "matchedStrings",
+        "tags",
+        "collectionHealth",
+        "nonbehavior",
+        "zhMessage",
+        "zhHint"
+    ];
+
+    private static readonly string[] NetworkCommonPriorityDataKeys =
+    [
+        "collectionName",
+        "evidenceRole",
+        "sourceArtifactRelativePath",
+        "sourceArtifactSha256",
+        "sourceArtifactSizeBytes",
+        "importMode",
+        "uid",
+        "protocol",
+        "sourceIp",
+        "sourcePort",
+        "destinationIp",
+        "destinationPort",
+        "flowKey"
+    ];
+
+    private static readonly string[] DnsPriorityDataKeys =
+    [
+        "queryName",
+        "queryType",
+        "rcode",
+        "isResponse",
+        "qname",
+        "domain",
+        "recordType"
+    ];
+
+    private static readonly string[] HttpPriorityDataKeys =
+    [
+        "method",
+        "host",
+        "uri",
+        "requestUri",
+        "url",
+        "userAgent",
+        "contentType",
+        "statusCode",
+        "payloadMagic"
+    ];
+
+    private static readonly string[] TlsPriorityDataKeys =
+    [
+        "sni",
+        "serverName",
+        "tlsVersion",
+        "ja3",
+        "ja3s",
+        "alpn",
+        "cipherSuite"
+    ];
+
+    private static readonly string[] FlowPriorityDataKeys =
+    [
+        "state",
+        "durationSeconds",
+        "byteCount",
+        "packetCount",
+        "sourceEndpoint",
+        "destinationEndpoint",
+        "direction"
     ];
 
     /// <summary>
@@ -159,7 +297,7 @@ public static class ReportEventSampler
             Source = string.IsNullOrWhiteSpace(evt.Source) ? "guest" : evt.Source,
             Path = Truncate(evt.Path, resolvedOptions.MaxPathCharacters),
             CommandLine = Truncate(evt.CommandLine, resolvedOptions.MaxPathCharacters),
-            Data = SanitizeData(evt.Data, resolvedOptions)
+            Data = SanitizeData(evt, resolvedOptions)
         };
     }
 
@@ -252,6 +390,9 @@ public static class ReportEventSampler
     {
         var eventType = evt.EventType ?? string.Empty;
         return eventType.Contains("process", StringComparison.OrdinalIgnoreCase) ||
+            eventType.StartsWith("static.", StringComparison.OrdinalIgnoreCase) ||
+            eventType.StartsWith("probe.", StringComparison.OrdinalIgnoreCase) ||
+            eventType.Contains("artifact", StringComparison.OrdinalIgnoreCase) ||
             eventType.Contains("network", StringComparison.OrdinalIgnoreCase) ||
             eventType.Contains("tcp", StringComparison.OrdinalIgnoreCase) ||
             eventType.Contains("dns", StringComparison.OrdinalIgnoreCase) ||
@@ -266,16 +407,23 @@ public static class ReportEventSampler
     private static string NormalizeEventType(string? eventType) =>
         string.IsNullOrWhiteSpace(eventType) ? "unknown" : eventType.Trim();
 
-    private static Dictionary<string, string> SanitizeData(Dictionary<string, string>? data, ReportEventSamplingOptions options)
+    private static Dictionary<string, string> SanitizeData(SandboxEvent evt, ReportEventSamplingOptions options)
     {
         var sanitized = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var data = evt.Data;
         if (data is null || data.Count == 0)
         {
             return sanitized;
         }
 
-        foreach (var key in PriorityDataKeys)
+        var prioritySeen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var key in BuildPriorityDataKeys(evt))
         {
+            if (!prioritySeen.Add(key))
+            {
+                continue;
+            }
+
             if (sanitized.Count >= options.MaxEventDataPairs)
             {
                 break;
@@ -308,6 +456,78 @@ public static class ReportEventSampler
         }
 
         return sanitized;
+    }
+
+    private static IEnumerable<string> BuildPriorityDataKeys(SandboxEvent evt)
+    {
+        if (IsNetworkReportDataEvent(evt))
+        {
+            foreach (var key in NetworkCommonPriorityDataKeys)
+            {
+                yield return key;
+            }
+
+            var eventKind = DataValue(evt.Data, "eventKind");
+            var serviceHint = DataValue(evt.Data, "serviceHint");
+            var eventType = evt.EventType ?? string.Empty;
+            foreach (var key in NetworkKindPriorityKeys(eventType, eventKind, serviceHint))
+            {
+                yield return key;
+            }
+        }
+
+        foreach (var key in PriorityDataKeys)
+        {
+            yield return key;
+        }
+    }
+
+    private static IEnumerable<string> NetworkKindPriorityKeys(string eventType, string eventKind, string serviceHint)
+    {
+        if (IsNetworkKind(eventType, eventKind, serviceHint, "dns"))
+        {
+            return DnsPriorityDataKeys;
+        }
+
+        if (IsNetworkKind(eventType, eventKind, serviceHint, "http"))
+        {
+            return HttpPriorityDataKeys;
+        }
+
+        if (IsNetworkKind(eventType, eventKind, serviceHint, "tls") ||
+            eventType.Contains("ssl", StringComparison.OrdinalIgnoreCase))
+        {
+            return TlsPriorityDataKeys;
+        }
+
+        return FlowPriorityDataKeys;
+    }
+
+    private static bool IsNetworkReportDataEvent(SandboxEvent evt)
+    {
+        var eventType = evt.EventType ?? string.Empty;
+        return eventType.StartsWith("network.", StringComparison.OrdinalIgnoreCase) ||
+            eventType.StartsWith("pcap.", StringComparison.OrdinalIgnoreCase) ||
+            eventType.StartsWith("dns.", StringComparison.OrdinalIgnoreCase) ||
+            eventType.StartsWith("http.", StringComparison.OrdinalIgnoreCase) ||
+            eventType.StartsWith("tls.", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(DataValue(evt.Data, "eventFamily"), "network", StringComparison.OrdinalIgnoreCase) ||
+            IsNetworkKind(eventType, DataValue(evt.Data, "eventKind"), DataValue(evt.Data, "serviceHint"), "dns") ||
+            IsNetworkKind(eventType, DataValue(evt.Data, "eventKind"), DataValue(evt.Data, "serviceHint"), "http") ||
+            IsNetworkKind(eventType, DataValue(evt.Data, "eventKind"), DataValue(evt.Data, "serviceHint"), "tls") ||
+            IsNetworkKind(eventType, DataValue(evt.Data, "eventKind"), DataValue(evt.Data, "serviceHint"), "connection");
+    }
+
+    private static bool IsNetworkKind(string eventType, string eventKind, string serviceHint, string expected)
+    {
+        return eventType.Contains(expected, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(eventKind, expected, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(serviceHint, expected, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string DataValue(IReadOnlyDictionary<string, string> data, string key)
+    {
+        return data.TryGetValue(key, out var value) ? value : string.Empty;
     }
 
     private static string? Truncate(string? value, int maxCharacters)

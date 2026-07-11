@@ -106,7 +106,7 @@ public sealed class HyperVRunbookBuilder
         steps.Add(Step("make-diff-disk", "Create differencing disk", $"New-VHD -Path {Q(diffDisk)} -ParentPath {Q(config.HyperV.BaseVhdxPath!)} -Differencing | Out-Null"));
         steps.Add(Step("create-temp-vm", "Create temporary analysis VM", $"New-VM -Name {Q(targetVmName)} -Generation 2 -MemoryStartupBytes {config.HyperV.MemoryStartupBytes} -VHDPath {Q(diffDisk)}{switchPart} | Out-Null"));
         steps.Add(Step("enable-guest-service", "Enable Guest Service Interface", BuildEnableGuestServiceCommand(targetVmName)));
-        steps.Add(Step("start-temp-vm", "Start temporary analysis VM", $"Start-VM -Name {Q(targetVmName)}"));
+        steps.Add(Step("start-temp-vm", "Start temporary analysis VM and wait for Running", BuildStartVmAndWaitCommand(targetVmName)));
         steps.Add(Step("wait-powershell-direct", "Wait for PowerShell Direct in guest", BuildWaitPowerShellDirectCommand(config, targetVmName), mutatesVmState: false));
     }
 
@@ -120,8 +120,37 @@ public sealed class HyperVRunbookBuilder
         steps.Add(Step("stop-golden", "Stop golden VM before restore", $"Stop-VM -Name {Q(config.HyperV.GoldenVmName)} -TurnOff -Force -ErrorAction SilentlyContinue"));
         steps.Add(Step("restore-golden", "Restore clean checkpoint", $"Restore-VMSnapshot -VMName {Q(config.HyperV.GoldenVmName)} -Name {Q(config.HyperV.GoldenSnapshotName)} -Confirm:$false"));
         steps.Add(Step("enable-guest-service", "Enable Guest Service Interface", BuildEnableGuestServiceCommand(config.HyperV.GoldenVmName)));
-        steps.Add(Step("start-golden", "Start restored golden VM", $"Start-VM -Name {Q(config.HyperV.GoldenVmName)}"));
+        steps.Add(Step("start-golden", "Start restored golden VM and wait for Running", BuildStartVmAndWaitCommand(config.HyperV.GoldenVmName)));
         steps.Add(Step("wait-powershell-direct", "Wait for PowerShell Direct in guest", BuildWaitPowerShellDirectCommand(config, config.HyperV.GoldenVmName), mutatesVmState: false));
+    }
+
+    /// <summary>
+    /// Builds a bounded VM start loop. Inputs are the VM name; processing starts
+    /// the VM, polls Hyper-V state with sparse human-readable heartbeats, and
+    /// fails with the last state when the VM never reaches Running; the method
+    /// returns a PowerShell command string for one runbook step.
+    /// </summary>
+    private static string BuildStartVmAndWaitCommand(string targetVmName)
+    {
+        const int startupTimeoutSeconds = 180;
+        return string.Join(" ", new[]
+        {
+            $"$vmName = {Q(targetVmName)};",
+            $"$deadline = (Get-Date).AddSeconds({startupTimeoutSeconds});",
+            "$lastState = '';",
+            "$ready = $false;",
+            "Write-Host \"Starting VM '$vmName' and waiting for Hyper-V to report Running.\";",
+            "Start-VM -Name $vmName -ErrorAction Stop;",
+            "do {",
+            "$vm = Get-VM -Name $vmName -ErrorAction Stop;",
+            "$state = $vm.State.ToString();",
+            "if ($state -ne $lastState) { Write-Host \"VM '$vmName' state: $state\"; $lastState = $state };",
+            "if ($state -eq 'Running') { $ready = $true; break };",
+            "Start-Sleep -Seconds 2;",
+            "} while ((Get-Date) -lt $deadline);",
+            $"if (-not $ready) {{ throw \"VM '$vmName' did not reach Running state within {startupTimeoutSeconds} seconds. Last state: $lastState\" }};",
+            "Write-Host \"VM '$vmName' is running.\""
+        });
     }
 
     /// <summary>
@@ -214,18 +243,26 @@ public sealed class HyperVRunbookBuilder
     {
         var command = string.Join(" ", new[]
         {
+            "$timeoutSeconds = 300;",
             "$deadline = (Get-Date).AddSeconds(300);",
+            "$nextHeartbeat = (Get-Date).AddSeconds(15);",
+            "$lastError = '';",
             "$ready = $false;",
+            "$attempt = 0;",
+            $"Write-Host 'Waiting for PowerShell Direct in VM {targetVmName}.';",
             "do {",
+            "$attempt++;",
             "try {",
             $"Invoke-Command -VMName {Q(targetVmName)} -Credential $guestCredential -ScriptBlock {{ $env:COMPUTERNAME }} | Out-Null;",
             "$ready = $true;",
             "}",
             "catch {",
+            "$lastError = $_.Exception.Message;",
+            "if ((Get-Date) -ge $nextHeartbeat) { Write-Host \"PowerShell Direct is still not ready after $attempt attempt(s). Last error: $lastError\"; $nextHeartbeat = (Get-Date).AddSeconds(15) };",
             "Start-Sleep -Seconds 3;",
             "}",
             "} while (-not $ready -and (Get-Date) -lt $deadline);",
-            $"if (-not $ready) {{ throw 'PowerShell Direct did not become ready for VM {targetVmName} within 300 seconds.' }};",
+            $"if (-not $ready) {{ throw \"PowerShell Direct did not become ready for VM {targetVmName} within $timeoutSeconds seconds. Last error: $lastError\" }};",
             "Write-Host 'PowerShell Direct is ready.'"
         });
 
@@ -283,7 +320,7 @@ public sealed class HyperVRunbookBuilder
 
         commands.Add($"Invoke-Command -Session $session -ScriptBlock {{ foreach ($path in @({string.Join(", ", requiredGuestPaths.Select(Q))})) {{ if (-not (Test-Path -LiteralPath $path)) {{ throw \"Required guest payload path is missing: $path\" }} }} }};");
         commands.Add("}");
-        commands.Add("finally { if ($session) { Remove-PSSession $session } }");
+        commands.Add("finally { if ($session) { try { Remove-PSSession $session -ErrorAction Stop } catch { Write-Warning \"PowerShell Direct session cleanup failed after payload staging; primary step status is preserved: $($_.Exception.Message)\" } } }");
 
         return WithGuestCredential(config, string.Join(" ", commands));
     }
@@ -460,27 +497,37 @@ public sealed class HyperVRunbookBuilder
         var maxSyncSeconds = Math.Max(config.Analysis.DefaultDurationSeconds + 60, 90);
         var command = string.Join(" ", new[]
         {
-            $"$session = New-PSSession -VMName {Q(targetVmName)} -Credential $guestCredential;",
+            $"$session = New-PSSession -VMName {Q(targetVmName)} -Credential $guestCredential -ErrorAction Stop;",
             "try {",
             $"$guestOut = {Q(guestOut)};",
             $"$hostOut = {Q(hostOut)};",
             $"$pidPath = {Q(agentPidPath)};",
             $"$exitPath = {Q(agentExitPath)};",
             $"$deadline = (Get-Date).AddSeconds({maxSyncSeconds});",
+            "$nextHeartbeat = (Get-Date).AddSeconds(15);",
+            "$copyWarningCount = 0;",
+            "$firstCopyWarning = '';",
             "New-Item -ItemType Directory -Force -Path $hostOut | Out-Null;",
-            "$guestAgentPid = Invoke-Command -Session $session -ScriptBlock { param($path) if (Test-Path -LiteralPath $path) { [int](Get-Content -LiteralPath $path -Raw) } else { 0 } } -ArgumentList $pidPath;",
+            "$pidText = Invoke-Command -Session $session -ScriptBlock { param($path) if (Test-Path -LiteralPath $path -PathType Leaf) { (Get-Content -LiteralPath $path -Raw).Trim() } else { '' } } -ArgumentList $pidPath -ErrorAction Stop;",
+            "if ([string]::IsNullOrWhiteSpace([string]$pidText)) { throw \"Guest Agent pid marker was not found: $pidPath. The run-agent step may not have started the guest wrapper.\" };",
+            "$guestAgentPid = 0;",
+            "if (-not [int]::TryParse([string]$pidText, [ref]$guestAgentPid)) { throw \"Guest Agent pid marker was not an integer: '$pidText' ($pidPath)\" };",
+            "Write-Host \"Live output sync is watching Guest Agent pid $guestAgentPid.\";",
             "do {",
-            "Copy-Item -FromSession $session -Path $guestOut -Destination $hostOut -Recurse -Force -ErrorAction SilentlyContinue;",
-            "$running = Invoke-Command -Session $session -ScriptBlock { param($processId) if ($processId -le 0) { $false } else { [bool](Get-Process -Id $processId -ErrorAction SilentlyContinue) } } -ArgumentList $guestAgentPid;",
+            "try { Copy-Item -FromSession $session -Path $guestOut -Destination $hostOut -Recurse -Force -ErrorAction Stop } catch { if ($copyWarningCount -eq 0) { $firstCopyWarning = $_.Exception.Message }; $copyWarningCount++ };",
+            "$running = Invoke-Command -Session $session -ScriptBlock { param($processId) if ($processId -le 0) { $false } else { [bool](Get-Process -Id $processId -ErrorAction SilentlyContinue) } } -ArgumentList $guestAgentPid -ErrorAction Stop;",
+            "if ($running -and (Get-Date) -ge $nextHeartbeat) { Write-Host \"Guest Agent pid $guestAgentPid is still running; suppressed copy warning count: $copyWarningCount\"; $nextHeartbeat = (Get-Date).AddSeconds(15) };",
             "if ($running) { Start-Sleep -Seconds 2 }",
             "} while ($running -and (Get-Date) -lt $deadline);",
-            "Copy-Item -FromSession $session -Path $guestOut -Destination $hostOut -Recurse -Force -ErrorAction SilentlyContinue;",
-            "if ($running) { throw \"Guest Agent did not exit before live-sync deadline.\" }",
-            "$exitText = Invoke-Command -Session $session -ScriptBlock { param($path) if (Test-Path -LiteralPath $path) { (Get-Content -LiteralPath $path -Raw).Trim() } else { '0' } } -ArgumentList $exitPath;",
-            "$exitCode = [int]$exitText;",
-            "if ($exitCode -ne 0) { throw \"Guest Agent exited with code $exitCode.\" }",
+            "try { Copy-Item -FromSession $session -Path $guestOut -Destination $hostOut -Recurse -Force -ErrorAction Stop } catch { $copyContext = if ([string]::IsNullOrWhiteSpace($firstCopyWarning)) { '' } else { \" First periodic copy warning: $firstCopyWarning\" }; throw \"Final live output copy failed from '$guestOut' to '$hostOut': $($_.Exception.Message).$copyContext\" };",
+            $"if ($running) {{ throw \"Guest Agent process $guestAgentPid did not exit before the live-sync deadline ({maxSyncSeconds} seconds). Suppressed copy warning count: $copyWarningCount\" }}",
+            "$exitText = Invoke-Command -Session $session -ScriptBlock { param($path) if (Test-Path -LiteralPath $path -PathType Leaf) { (Get-Content -LiteralPath $path -Raw).Trim() } else { throw \"Guest Agent exit marker was not found: $path\" } } -ArgumentList $exitPath -ErrorAction Stop;",
+            "$exitCode = 0;",
+            "if (-not [int]::TryParse([string]$exitText, [ref]$exitCode)) { throw \"Guest Agent exit marker was not an integer: '$exitText' ($exitPath)\" };",
+            "if ($exitCode -ne 0) { throw \"Guest Agent exited with code $exitCode. Check collected agent stdout/stderr and events.json under $hostOut.\" };",
+            "if ($copyWarningCount -gt 0) { Write-Warning \"Live output sync suppressed $copyWarningCount periodic copy warning(s); final copy succeeded. First warning: $firstCopyWarning\" }",
             "}",
-            "finally { if ($session) { Remove-PSSession $session } }"
+            "finally { if ($session) { try { Remove-PSSession $session -ErrorAction Stop } catch { Write-Warning \"PowerShell Direct session cleanup failed after live output sync; primary step status is preserved: $($_.Exception.Message)\" } } }"
         });
 
         return WithGuestCredential(config, command);
@@ -494,7 +541,28 @@ public sealed class HyperVRunbookBuilder
     /// </summary>
     private static string BuildCollectOutputCommand(SandboxConfig config, string targetVmName, string guestOut, string hostOut)
     {
-        return WithGuestCredential(config, $"$session = New-PSSession -VMName {Q(targetVmName)} -Credential $guestCredential; try {{ Copy-Item -FromSession $session -Path {Q(guestOut)} -Destination {Q(hostOut)} -Recurse -Force }} finally {{ if ($session) {{ Remove-PSSession $session }} }}");
+        var command = string.Join(" ", new[]
+        {
+            $"$session = New-PSSession -VMName {Q(targetVmName)} -Credential $guestCredential -ErrorAction Stop;",
+            "try {",
+            $"$guestOut = {Q(guestOut)};",
+            $"$hostOut = {Q(hostOut)};",
+            "New-Item -ItemType Directory -Force -Path $hostOut | Out-Null;",
+            "$guestOutputExists = Invoke-Command -Session $session -ScriptBlock { param($path) Test-Path -LiteralPath $path -PathType Container } -ArgumentList $guestOut -ErrorAction Stop;",
+            "if (-not [bool]$guestOutputExists) { throw \"Guest output directory does not exist in the VM: $guestOut\" };",
+            "Copy-Item -FromSession $session -Path $guestOut -Destination $hostOut -Recurse -Force -ErrorAction Stop;",
+            "$hostGuestOut = Join-Path $hostOut (Split-Path -Leaf $guestOut);",
+            "if (-not (Test-Path -LiteralPath $hostGuestOut -PathType Container) -and (Test-Path -LiteralPath (Join-Path $hostOut 'events.json') -PathType Leaf)) { $hostGuestOut = $hostOut };",
+            "foreach ($requiredName in @('events.json', 'agent.pid', 'agent.exit')) {",
+            "$requiredPath = Join-Path $hostGuestOut $requiredName;",
+            "if (-not (Test-Path -LiteralPath $requiredPath -PathType Leaf)) { throw \"Final guest output copy completed but required artifact is missing: $requiredName ($requiredPath)\" }",
+            "};",
+            "Write-Host \"Final guest output collected under $hostGuestOut.\"",
+            "}",
+            "finally { if ($session) { try { Remove-PSSession $session -ErrorAction Stop } catch { Write-Warning \"PowerShell Direct session cleanup failed after final output collection; primary step status is preserved: $($_.Exception.Message)\" } } }"
+        });
+
+        return WithGuestCredential(config, command);
     }
 
     /// <summary>

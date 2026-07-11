@@ -1,170 +1,159 @@
-# Hyper-V readiness preflight
+# Hyper-V 就绪预检（readiness preflight）
 
-`scripts/Test-HyperVReadiness.ps1` verifies the minimum host and golden-VM
-state needed before the live Hyper-V runner starts a VM and imports a behavior
-report. The script is intentionally read-only: it does not create runtime probe
-files, create or restore checkpoints, start or stop VMs, copy files, or change
-integration-service settings.
+`scripts/Test-HyperVReadiness.ps1` 用于在 live Hyper-V runbook 启动 VM、运行样本和导入报告前，验证
+宿主机与 golden VM 的最低前置条件。脚本设计为只读：不创建 runtime probe 文件，不创建/还原 checkpoint，
+不启动/停止 VM，不复制文件，也不修改 integration service 设置。
 
-## Run the check
+## 运行预检
 
-Run from an elevated PowerShell session on the Hyper-V host:
+在 Hyper-V host 的 elevated PowerShell 中运行：
 
 ```powershell
 pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\Test-HyperVReadiness.ps1
 ```
 
-Windows PowerShell also works:
+Windows PowerShell 也可用：
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\Test-HyperVReadiness.ps1
 ```
 
-After `.\install.ps1` or its wrapper `.\scripts\install.ps1` has been run, the
-no-argument command automatically tries the same local config path used by
-`run.ps1`:
+完成 `./install.ps1` 或兼容包装器 `./scripts/install.ps1` 后，无参数命令会复用与 `run.ps1` 相同的本机
+配置。配置路径解析顺序为：
 
-1. `Sandbox__ConfigPath` from Process/User/Machine scope;
-2. `%ProgramData%\KSwordSandbox\install-state.json` -> `localConfigPath`;
-3. repository fallback `config/sandbox.example.json`.
+1. 显式 `-ConfigPath`；
+2. `Sandbox__ConfigPath`（Process/User/Machine scope）；
+3. `%ProgramData%\KSwordSandbox\install-state.json` 中的 `localConfigPath`；
+4. 仓库 fallback：`config/sandbox.example.json`。
 
-Use `-IgnoreInstalledConfig` when you deliberately want only explicit
-parameters plus the repository example fallback.
+读取到 config/install state 后，未显式绑定的 VM、checkpoint、guest、payload、runtime 参数会用本机状态或
+配置值补齐。使用 `-IgnoreInstalledConfig` 可忽略 installed config，只使用显式参数和 repository example
+fallback。
 
-If your release bundle starts from `scripts\`, the compatibility wrappers
-`.\scripts\install.ps1` and `.\scripts\run.ps1` write/read the same install
-state and local config as the repository-root `.\install.ps1` and `.\run.ps1`.
-Readiness resolution is therefore identical for either entry point.
-
-Defaults match `config/sandbox.example.json` when no installed config is found:
+完全显式命令：
 
 ```powershell
-.\scripts\Test-HyperVReadiness.ps1 `
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\Test-HyperVReadiness.ps1 `
   -VmName 'KSwordSandbox-Win10-Golden' `
   -CheckpointName 'Clean' `
-  -GuestPasswordSecretName 'KSWORDBOX_GUEST_PASSWORD' `
   -GuestUserName 'SandboxUser' `
+  -GuestPasswordSecretName 'KSWORDBOX_GUEST_PASSWORD' `
   -GuestPayloadRoot 'D:\Temp\KSwordSandbox\payload\guest-tools' `
   -GuestWorkingDirectory 'C:\KSwordSandbox' `
   -RuntimeRoot 'D:\Temp\KSwordSandbox'
 ```
 
-If the password is missing and you only want a one-shot process-scoped value for
-this readiness run, opt in to a secure prompt:
+如果只想为本次预检输入一次 guest password，而不持久化到 User/Machine 环境：
 
 ```powershell
-.\scripts\Test-HyperVReadiness.ps1 -PromptForMissingGuestPassword
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\Test-HyperVReadiness.ps1 `
+  -PromptForMissingGuestPassword
 ```
 
-The prompt stores the value in the current PowerShell process only. It does not
-write `%ProgramData%`, user environment, config JSON, reports, or any repository
-file. For repeatable setup, prefer `install.ps1 -Mode Install -PromptPassword`
-or `install.ps1 -Mode Change -ResetPassword -PromptPassword`.
+该 prompt 只写当前 PowerShell Process scope，不写 `%ProgramData%`、User environment、config JSON、report 或
+仓库文件。可重复部署请优先使用：
 
-The script writes structured PowerShell objects:
+```powershell
+.\install.ps1 -Mode Install -PromptPassword
+.\install.ps1 -Mode Change -ResetPassword -PromptPassword
+```
 
-- `ReadinessCheck` objects for each check. Every check includes stable
-  machine-readable fields: `CheckId`, `Category`, `Status`,
-  `RequiredForLive`, `MachineReadable`, `Details`, and `Remediation`.
-- One `ReadinessSummary` object with `ContractVersion`, `Kind`,
-  `OverallStatus`, counts, `FailedCheckIds`, `WarningCheckIds`, `LiveReady`,
-  `ReadOnlyAssertions`, `RecommendedActions`, and `ExitCode`.
+## 输出契约（output contract）
 
-Exit code behavior:
+脚本输出结构化 PowerShell objects：
 
-- `0`: no check has `Status = Failed`.
-- `1`: at least one check has `Status = Failed`.
+- 多个 `ReadinessCheck`：每项包含 `CheckId`、`Category`、`Status`、`RequiredForLive`、
+  `MachineReadable`、`Details`、`Remediation`。
+- 一个 `ReadinessSummary`：包含 `ContractVersion`、`Kind`、`OverallStatus`、counts、
+  `FailedCheckIds`、`WarningCheckIds`、`LiveReady`、`ReadOnlyAssertions`、`RecommendedActions`、
+  `RemediationHints` 和 `ExitCode`。
 
-Warnings are still printed as objects. A non-administrator run usually emits a
-failed Administrator check and warning objects for VM state that cannot be read
-reliably from a non-elevated process.
+Exit code：
 
-The preflight is still non-destructive when it runs as Administrator. It may
-query Hyper-V and, only when the VM is already running and a guest password is
-visible to the current process, run read-only `Invoke-Command -VMName ...`
-probes. It never starts the VM, restores a checkpoint, enables services, copies
-files, creates guest folders, or writes probe files.
+- `0`：没有 check 的 `Status = Failed`。
+- `1`：至少一个 check 失败。
 
-## Checks
+自动化不要解析展示文本，应优先读取：
 
-### Readiness input resolution
+```powershell
+$results = & .\scripts\Test-HyperVReadiness.ps1
+$summary = $results | Where-Object { $_.ResultType -eq 'ReadinessSummary' }
+$summary | Select-Object OverallStatus, LiveReady, FailedCheckIds, WarningCheckIds, ReadOnlyAssertions
+```
 
-Reports the config source used for effective VM/checkpoint/guest settings. This
-is the bridge between `install.ps1`, `run.ps1`, and the standalone readiness
-script: operators can run the preflight without retyping local VM names after
-the installer has written `Sandbox__ConfigPath` or install state.
+`ReadOnlyAssertions` 会明确记录：没有写 probe file、没有执行 VM mutation command、没有启动 VM、没有还原
+checkpoint、没有启用 Guest Service Interface、没有打印 secret value。
 
-### Administrator privilege
+## 只读保证
 
-Confirms that the current PowerShell process is elevated. Live Hyper-V actions
-such as `Restore-VMSnapshot`, `Start-VM`, `Copy-VMFile`, and PowerShell Direct
-must run from an elevated host process.
+即使以 Administrator 身份运行，preflight 也只查询状态。它可能调用 Hyper-V read APIs；只有当 VM 已经是
+`Running` 且当前进程可见 guest password 时，才会通过 PowerShell Direct 运行只读 probe。它不会为了预检而
+启动 VM，也不会 restore checkpoint、enable service、copy files、create guest folders 或写入 probe files。
 
-Fix: reopen PowerShell with "Run as administrator" and run the preflight again.
+非管理员运行通常会得到 Administrator check failed，并且 VM 相关 check 因无法可靠读取状态而 warning/skipped。
+
+## 检查项
+
+### 输入解析（Readiness input resolution）
+
+报告有效 VM/checkpoint/guest settings 的来源。这是 `install.ps1`、`run.ps1` 与独立 readiness script 之间的
+桥：安装器写入 `Sandbox__ConfigPath` 或 install state 后，operator 不必重复输入本机 VM 名称。
+
+### 管理员权限（Administrator privilege）
+
+确认当前 PowerShell process 是 elevated。Live Hyper-V 操作如 `Restore-VMSnapshot`、`Start-VM`、
+`Copy-VMFile` 和 PowerShell Direct 必须由 elevated host process 执行。
+
+修复：重新以 “Run as administrator” 打开 PowerShell。
 
 ### Hyper-V PowerShell module
 
-Checks that the `Hyper-V` PowerShell module is installed and that the required
-cmdlets are available. The preflight checks command availability only; it does
-not call mutation-capable commands such as `Copy-VMFile`.
+检查 `Hyper-V` PowerShell module 和必要 cmdlets 是否存在。preflight 只检查可用性，不调用 mutation-capable
+命令如 `Copy-VMFile`。
 
-- `Get-VM`
-- `Get-VMSnapshot`
-- `Get-VMIntegrationService`
-- `Copy-VMFile`
+需要的 cmdlets：
 
-Fix: enable/install Hyper-V management tools for the host OS, then open a new
-PowerShell session.
+```text
+Get-VM
+Get-VMSnapshot
+Get-VMIntegrationService
+Copy-VMFile
+```
 
 ### Hyper-V feature enabled
 
-Checks whether the host appears to have Hyper-V enabled without mutating the
-machine. The check records Windows optional-feature state when
-`Get-WindowsOptionalFeature` is available and also records the `vmms` service
-state. It does not enable Hyper-V, start services, reboot, or start a VM.
-
-Machine-readable details include `FeatureStates`, `AnyFeatureEnabled`,
-`VmmsServiceExists`, `VmmsServiceStatus`, and `ReadOnly=true`.
+非变更地检查宿主是否启用 Hyper-V。会记录 `Get-WindowsOptionalFeature` 可见的 optional-feature state 和
+`vmms` service state，但不会启用 Hyper-V、启动 service、reboot 或 start VM。
 
 ### Guest password environment variable
 
-Checks that the environment variable named by `-GuestPasswordSecretName` exists
-and is non-empty in the current process. The default is
-`KSWORDBOX_GUEST_PASSWORD`. The script never prints the secret value.
+检查 `-GuestPasswordSecretName` 指向的环境变量是否在当前 process 中非空。默认是
+`KSWORDBOX_GUEST_PASSWORD`。脚本永远不打印 secret value。
 
-Fix for the current session:
+当前 session 临时设置：
 
 ```powershell
 $env:KSWORDBOX_GUEST_PASSWORD = '<local guest password>'
 ```
 
-For deployment and repeat use, prefer the local installer:
+部署/重复使用推荐：
 
 ```powershell
 .\install.ps1 -Mode Install -PromptPassword
 ```
 
-or generate/reset a local value:
-
-```powershell
-.\install.ps1 -Mode Change -ResetPassword -GeneratePassword
-```
-
-The readiness and live scripts read Process, User, then Machine scope. If a
-value exists at User or Machine scope, a newly opened elevated PowerShell
-session inherits it; the scripts also check those scopes directly.
+readiness/live 脚本读取 Process、User、Machine scope。新 elevated PowerShell 通常继承 User/Machine scope；
+脚本也会直接检查这些 scope。
 
 ### Guest working directory
 
-Checks that `-GuestWorkingDirectory` is a non-empty absolute Windows path such
-as:
+检查 `-GuestWorkingDirectory` 是非空绝对 Windows path，例如：
 
 ```text
 C:\KSwordSandbox
 ```
 
-The check is syntax-only and does not create guest folders. It also reports the
-derived guest paths expected by the live runbook:
+该 check 只做语法检查，不创建 guest folder。它还会报告 live runbook 派生路径：
 
 ```text
 C:\KSwordSandbox\agent\KSword.Sandbox.Agent.exe
@@ -175,14 +164,13 @@ C:\KSwordSandbox\out
 
 ### Host payload files
 
-Checks the host-staged payload root without building or copying anything. The
-default root is:
+检查 host-staged payload root，不 build、不 copy。默认：
 
 ```text
 D:\Temp\KSwordSandbox\payload\guest-tools
 ```
 
-Required files:
+必需文件：
 
 ```text
 agent\KSword.Sandbox.Agent.exe
@@ -190,75 +178,76 @@ r0collector\KSword.Sandbox.R0Collector.exe
 payload-manifest.json
 ```
 
-Fix: run `scripts/Prepare-GuestPayload.ps1` from the repository root and keep
-the generated payload under `D:\Temp\KSwordSandbox` or another non-repository
-runtime directory.
+修复：从仓库根运行 payload 准备脚本，并保持输出在仓库外：
 
-The readiness script is intentionally a presence and path-contract preflight;
-it does not rebuild payloads and it does not decide payload freshness on its
-own. For payload freshness, open `payload-manifest.json` and compare
-`generatedAtUtc`, `repositoryHead`, `sourceFingerprint`, and
-`sourceLatestWriteUtc` with the current repository and guest source changes. If
-the manifest is stale, rerun `scripts/Prepare-GuestPayload.ps1` before live
-execution or before refreshing the golden checkpoint.
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\Prepare-GuestPayload.ps1 `
+  -PayloadRoot 'D:\Temp\KSwordSandbox\payload\guest-tools' `
+  -SelfContained
+```
+
+readiness 不判断 payload freshness。需要时查看 `payload-manifest.json` 的 `generatedAtUtc`、
+`repositoryHead`、`sourceFingerprint`、`sourceLatestWriteUtc`，若 stale 再重新 prepare。
 
 ### Runtime root writable
 
-Checks that `-RuntimeRoot` exists as a directory and appears writable from
-read-only ACL inspection. The check does not create a temporary file, so it is
-conservative: if the directory does not exist or ACLs cannot prove write access,
-the check fails.
-
-Fix: create the runtime directory outside git and grant the account running the
-host service permission to create job folders under it. The default path is:
+检查 `-RuntimeRoot` 是否存在且从只读 ACL inspection 看起来可写。不会创建临时文件。默认：
 
 ```text
 D:\Temp\KSwordSandbox
 ```
 
+Runtime root 必须在仓库外，用于 plans、jobs、reports、collected output。
+
 ### Host shared path configuration
 
-Checks the host paths used for VM exchange:
+检查 host/guest 交换路径：
 
-- `paths.runtimeRoot` for plans, jobs, reports, and collected output;
-- `paths.guestPayloadRoot` for the staged Guest Agent/R0Collector payload.
+- `paths.runtimeRoot`：plans、jobs、reports、collected output；
+- `paths.guestPayloadRoot`：staged Guest Agent/R0Collector payload。
 
-The paths must be absolute and outside the repository. The check also records
-the live copy mechanisms (`Copy-VMFile` plus PowerShell Direct
-`Copy-Item -ToSession/-FromSession`) so automation can understand how host and
-guest exchange files. It does not create directories or write probe files.
+路径必须是绝对路径并在仓库外。check 会记录 copy mechanisms：`Copy-VMFile` 和 PowerShell Direct 的
+`Copy-Item -ToSession/-FromSession`，但不创建目录或 probe file。
 
 ### Target VM
 
-Checks that `-VmName` exists and is readable through `Get-VM`. The default is:
+用 `Get-VM` 只读检查 `-VmName` 是否存在。默认：
 
 ```text
 KSwordSandbox-Win10-Golden
 ```
 
-Fix: register or rename the golden VM so it matches local configuration, or pass
-the correct `-VmName` value.
-
 ### Clean checkpoint
 
-Checks that `-CheckpointName` exists on the target VM through `Get-VMSnapshot`.
-The default is:
+用 `Get-VMSnapshot` 检查目标 VM 是否存在 `-CheckpointName`。默认：
 
 ```text
 Clean
 ```
 
-Fix: prepare the VM, shut it down into the desired clean baseline, and create a
-checkpoint with the configured name.
-
 ### Guest Service Interface
 
-Checks that the target VM has the Hyper-V integration service named
-`Guest Service Interface` and that it is enabled. This is required when the
-runner uses `Copy-VMFile` to move files between host and guest.
+检查目标 VM 是否存在并启用了 Hyper-V integration service：`Guest Service Interface`。中文系统可能显示为
+`来宾服务接口`；脚本同时兼容稳定组件 ID：
 
-Fix: enable the integration service in Hyper-V Manager or with an elevated
-operator command such as:
+```text
+6C09BB55-D683-4DA0-8931-C9BF705F6480
+```
+
+只读查看命令：
+
+```powershell
+$guestServiceComponentId = '6C09BB55-D683-4DA0-8931-C9BF705F6480'
+Get-VMIntegrationService -VMName 'KSwordSandbox-Win10-Golden' |
+  Where-Object {
+    ([string]$_.Id).EndsWith('\' + $guestServiceComponentId, [System.StringComparison]::OrdinalIgnoreCase) -or
+    $_.Name -eq 'Guest Service Interface' -or
+    $_.Name -eq '来宾服务接口'
+  } |
+  Select-Object Name, Enabled, PrimaryStatusDescription
+```
+
+需要修复时，在明确准备修改 VM 后才运行：
 
 ```powershell
 Enable-VMIntegrationService -VMName 'KSwordSandbox-Win10-Golden' -Name 'Guest Service Interface'
@@ -266,9 +255,8 @@ Enable-VMIntegrationService -VMName 'KSwordSandbox-Win10-Golden' -Name 'Guest Se
 
 ### PowerShell Direct
 
-When the process is elevated, Hyper-V is queryable, the VM exists, the VM state
-is `Running`, and the guest password is visible, the script runs a read-only
-PowerShell Direct probe:
+当 process elevated、Hyper-V 可查询、VM 存在且 state 为 `Running`、guest password 可见时，脚本运行只读
+PowerShell Direct probe：
 
 ```powershell
 Invoke-Command -VMName '<vm>' -Credential '<in-memory credential>' -ScriptBlock {
@@ -276,54 +264,43 @@ Invoke-Command -VMName '<vm>' -Credential '<in-memory credential>' -ScriptBlock 
 }
 ```
 
-If the VM is `Off`, the check is reported as `Warning` with
-`RequiresRunning = true`; the preflight does not start the VM just to test
-PowerShell Direct. If the password is missing, the password check fails and the
-PowerShell Direct check is skipped with an explicit warning.
+如果 VM 为 `Off`，check 报 `Warning` 和 `RequiresRunning=true`；preflight 不会启动 VM。缺少 password 时，
+password check failed，PowerShell Direct check 会明确跳过。
 
 ### Guest deployed payload files
 
-When the PowerShell Direct probe passes, the script also checks whether the
-golden VM already contains the expected deployed files:
+当 PowerShell Direct probe 通过时，脚本检查 golden VM 内是否已有：
 
 ```text
 C:\KSwordSandbox\agent\KSword.Sandbox.Agent.exe
 C:\KSwordSandbox\r0collector\KSword.Sandbox.R0Collector.exe
 ```
 
-This check uses `Test-Path` inside the guest only. Missing deployed files are a
-warning, not a hard failure, because the live runbook can stage tools from the
-host payload root immediately before execution. Treat the warning as actionable
-when refreshing the golden `Clean` checkpoint.
+这是 guest 内 `Test-Path`，不执行文件。缺失是 warning，不是 hard failure，因为 live runbook 可以在运行前
+从 host payload root stage tools。刷新 golden `Clean` checkpoint 时应处理该 warning。
 
 ### Repository secret hygiene
 
-When `KSWORDBOX_GUEST_PASSWORD` or the configured secret is visible and at least
-8 characters long, readiness scans git tracked/untracked candidate text files
-for that exact value. A match fails the preflight and lists only file names; the
-secret value is not printed.
+当 `KSWORDBOX_GUEST_PASSWORD` 或配置的 secret 在当前进程可见且长度至少 8 字符时，readiness 会扫描 git
+tracked/untracked candidate text files 是否包含该 exact value。命中会 fail，并只列文件名，不打印 secret。
 
-Use this as a final guard before staging local changes:
+提交前也运行：
 
 ```powershell
 .\scripts\Test-RepositoryPolicy.ps1 -StagedOnly
 ```
 
-`Test-RepositoryPolicy.ps1` also blocks VM disks, samples, reports, binaries,
-DPAPI backups, `install-state.json`, and other local artifacts. Use
-`-SkipRepositorySecretScan` on readiness only when the current shell should not
-read repository text files.
+`Test-RepositoryPolicy.ps1` 还会阻止 VM disks、samples、reports、binaries、DPAPI backups、
+`install-state.json` 和其他本地产物入库。仅当当前 shell 不应读取仓库文本文件时，才对 readiness 使用
+`-SkipRepositorySecretScan`。
 
 ### Test signing status
 
-Records the host current boot entry test-signing value with a read-only
-`bcdedit.exe /enum {current}` query. This is informational for the default
-mock/no-driver flow. For real R0 collection, treat a warning here as a reminder
-to verify Windows test-signing inside the isolated guest VM manually; the
-readiness script does not start the VM just to inspect guest boot state.
+通过只读 `bcdedit.exe /enum {current}` 记录 host boot entry 的 test-signing 值。默认 mock/no-driver 流程下
+该项只是信息。Real R0 时，需要在隔离 guest VM 内单独验证 Windows test-signing；readiness 不会为了检查
+而启动 VM。
 
-Use the installer change menu or the explicit helper only when you are ready to
-touch the configured guest VM:
+当准备触碰配置的 guest VM 时才使用：
 
 ```powershell
 .\install.ps1 -Mode Change -QueryGuestTestSigning
@@ -331,48 +308,43 @@ touch the configured guest VM:
 .\scripts\Set-GuestTestSigning.ps1 -Mode Query
 ```
 
-Driver signing is outside readiness. If a real R0 driver is required, use an
-already test-signed `.sys` or the documented test-certificate helper
-`.\scripts\Sign-SandboxDriverWithTestCertificate.ps1`; the readiness/install/run
-path does not sign drivers or invoke legacy signing tools.
+Driver signing 不属于 readiness。真实 R0 需要已 test-signed `.sys`。可在隔离
+lab VM 中使用 `./scripts/Sign-SandboxDriverWithTestCertificate.ps1`；该 helper
+只使用普通 Windows SDK `signtool.exe`，如果找不到 `signtool.exe` 会明确输出
+`SignatureAttempted=false` / `Skipped=true`，不会回退到 legacy signing tools。
+readiness/install/run 默认不签名、不调用 legacy signing tools。
+
+### Real R0 host driver path
+
+当 `driver.enabled=true` 且 `driver.useMockCollector=false` 时，`driver.hostDriverPath` 必须指向存在的 `.sys`。
+否则 live preflight 会在 VM mutation 前失败，避免后续 R0Collector 才报 `deviceUnavailable` / `win32Error=2`。
 
 ## Payload staging dependency
 
-This preflight verifies host/VM readiness only. It does not build or copy guest
-tools. Before refreshing the golden `Clean` checkpoint for a live run, prepare
-the payload outside the repository and deploy it into the guest:
+readiness 只验证 host/VM readiness，不 build、不复制 guest tools。Live 前准备 payload：
 
 ```powershell
-pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\Prepare-GuestPayload.ps1
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\Prepare-GuestPayload.ps1 -SelfContained
 ```
 
-Then follow `docs/guest-payload-staging.md` to copy the staged files into:
+然后按 `docs/guest-payload-staging.md` 将 staged files 放入 golden VM 的：
 
 ```text
 C:\KSwordSandbox\agent
 C:\KSwordSandbox\r0collector
 ```
 
-At minimum, the configured guest agent path must exist before a live runbook can
-produce `events.json`.
+至少配置的 guest agent path 必须存在，live runbook 才能产出 `events.json`。
 
-## Reporting and automation
+## 保存机器可读输出
 
-To save machine-readable output while preserving the script exit code:
+保留脚本 exit code 并保存 JSON：
 
 ```powershell
 $results = & .\scripts\Test-HyperVReadiness.ps1
 $code = $LASTEXITCODE
-$results | ConvertTo-Json -Depth 6 | Set-Content -Encoding UTF8 .\hyperv-readiness.json
+$results | ConvertTo-Json -Depth 6 | Set-Content -Encoding UTF8 D:\Temp\KSwordSandbox\hyperv-readiness.json
 exit $code
 ```
 
-Automation should prefer `CheckId` and `RequiredForLive` over display names.
-Use `ReadinessSummary.LiveReady` for the go/no-go gate and
-`ReadinessSummary.RemediationHints` / `RecommendedActions` for operator repair
-text. The summary `ReadOnlyAssertions` block explicitly records that no VM was
-started, no checkpoint was restored, Guest Service Interface was not enabled,
-and no probe files were written.
-
-Do not commit generated readiness JSON files, runtime job folders, VM images, or
-guest output. These are local operator artifacts.
+不要把 readiness JSON、runtime job folders、VM images 或 guest output 提交到仓库。

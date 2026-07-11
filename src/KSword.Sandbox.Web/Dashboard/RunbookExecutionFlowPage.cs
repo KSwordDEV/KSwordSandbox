@@ -44,25 +44,30 @@ internal static class RunbookExecutionFlowPage
             main { max-width: 1080px; margin: 22px auto 54px; padding: 0 22px; }
             .topbar { align-items: center; display: flex; gap: 12px; justify-content: space-between; }
             .actions { align-items: center; display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
-            a.button, button { background: var(--blue); border: 0; border-radius: 10px; color: white; cursor: pointer; display: inline-block; font-weight: 700; padding: 9px 14px; text-decoration: none; }
+            a.button, button { background: var(--blue); border: 0; border-radius:2px; color: white; cursor: pointer; display: inline-block; font-weight: 700; padding: 9px 14px; text-decoration: none; }
             a.secondary, button.secondary { background: #334155; }
-            section, article.step { background: white; border: 1px solid var(--line); border-radius: 14px; box-shadow: 0 8px 24px rgba(15, 23, 42, .06); margin-bottom: 14px; padding: 18px; }
+            section, article.step { background: white; border: 1px solid var(--line); border-radius:2px; box-shadow:none; margin-bottom: 14px; padding: 18px; }
             .grid { display: grid; gap: 12px; grid-template-columns: repeat(4, minmax(0, 1fr)); }
-            .metric { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 12px; }
+            .metric { background: #f8fafc; border: 1px solid #e2e8f0; border-radius:2px; padding: 12px; }
             .metric strong { display: block; font-size: 12px; color: #64748b; margin-bottom: 6px; }
             .step { align-items: flex-start; display: grid; gap: 14px; grid-template-columns: 64px minmax(0, 1fr) 150px; }
-            .num { align-items: center; background: #e7f3ff; border: 1px solid rgba(67,160,255,.35); border-radius: 999px; color: #075985; display: inline-flex; font-weight: 800; height: 42px; justify-content: center; width: 42px; }
-            .pill { background: #e7f3ff; border: 1px solid rgba(67,160,255,.35); border-radius: 999px; color: #075985; display: inline-block; font-size: 12px; font-weight: 800; padding: 4px 9px; }
+            .num { align-items: center; background: #e7f3ff; border: 1px solid rgba(67,160,255,.35); border-radius:2px; color: #075985; display: inline-flex; font-weight: 800; height: 42px; justify-content: center; width: 42px; }
+            .pill { background: #e7f3ff; border: 1px solid rgba(67,160,255,.35); border-radius:2px; color: #075985; display: inline-block; font-size: 12px; font-weight: 800; padding: 4px 9px; }
             .ok { background: #dcfce7; color: #166534; }
             .failed { background: #fee2e2; color: #991b1b; }
             .skipped { background: #fef3c7; color: #92400e; }
             .pending { background: #e2e8f0; color: #475569; }
             .muted { color: #64748b; }
-            code { background: #f1f5f9; border-radius: 7px; padding: 2px 5px; word-break: break-all; }
+            code { background: #f1f5f9; border-radius:2px; padding: 2px 5px; word-break: break-all; }
             [data-copy], code { cursor: copy; }
             [data-copy]:hover, code:hover { outline: 1px dashed var(--blue); outline-offset: 2px; }
-            .toast { background: #0f172a; border-radius: 999px; bottom: 22px; color: white; left: 50%; opacity: 0; padding: 10px 16px; pointer-events: none; position: fixed; transform: translate(-50%, 12px); transition: opacity .15s ease, transform .15s ease; }
+            .toast { background: #0f172a; border-radius:2px; bottom: 22px; color: white; left: 50%; opacity: 0; padding: 10px 16px; pointer-events: none; position: fixed; transform: translate(-50%, 12px); transition: opacity .15s ease, transform .15s ease; }
             .toast.visible { opacity: .96; transform: translate(-50%, 0); }
+
+            /* Square, flat operator theme: keep visual nesting shallow. */
+            section, article, .metric, .pill, button, a.button, a.buttonlink, input, code, pre, .pathbox, .callout, .report-notice, .report-entry, .workspace-tab, .tab-button, .tab-panel, details, .progress-box, .progress-bar, .progress-fill, .stage, .recent-job-card, .runbook-step, .empty, .table-wrap, .step-card, .report-ready, .toast, .num { border-radius: 0 !important; }
+            section, article, .metric, .pathbox, .callout, .report-notice, .report-entry, .tab-panel, .progress-box, .stage, .recent-job-card, .runbook-step, .step-card, .report-ready { box-shadow: none !important; }
+            .pill, button, a.button, a.buttonlink { box-shadow: none !important; }
             @media (max-width: 820px) { .grid { grid-template-columns: 1fr; } .step { grid-template-columns: 48px minmax(0, 1fr); } .step-status { grid-column: 2; } }
           </style>
         </head>
@@ -130,15 +135,15 @@ internal static class RunbookExecutionFlowPage
             }
             function copyText(text) {
               if (navigator.clipboard && navigator.clipboard.writeText) {
-                navigator.clipboard.writeText(text).then(() => showToast('已复制 / copied')).catch(() => {
+                navigator.clipboard.writeText(text).then(() => showToast(localStorage.getItem('ksword-lang') === 'en' ? 'Copied.' : '已复制。')).catch(() => {
                   fallbackCopyText(text);
-                  showToast('已复制 / copied');
+                  showToast(localStorage.getItem('ksword-lang') === 'en' ? 'Copied.' : '已复制。');
                 });
                 return;
               }
 
               fallbackCopyText(text);
-              showToast('已复制 / copied');
+              showToast(localStorage.getItem('ksword-lang') === 'en' ? 'Copied.' : '已复制。');
             }
             function showToast(text) {
               const toast = document.getElementById('copyToast');
@@ -158,6 +163,7 @@ internal static class RunbookExecutionFlowPage
         var jobId = job.JobId.ToString("D");
         var runbookSteps = job.Runbook?.Steps.Count ?? 0;
         var executionPath = job.RunbookExecutionResultPath ?? string.Empty;
+        var jobStatus = FormatAnalysisStatus(job.Status);
         var executionState = execution is null
             ? "未执行 / not executed"
             : execution.Success ? "成功 / success" : "失败 / failed";
@@ -165,9 +171,9 @@ internal static class RunbookExecutionFlowPage
 
         return $$"""
           <div class="grid">
-            <div class="metric"><strong>Job</strong><code data-copy="{{Attr(jobId)}}">{{Html(jobId)}}</code></div>
+            <div class="metric"><strong data-zh="任务 / Job" data-en="Job">任务 / Job</strong><code data-copy="{{Attr(jobId)}}">{{Html(jobId)}}</code></div>
             <div class="metric"><strong data-zh="样本" data-en="Sample">样本</strong><code data-copy="{{Attr(samplePath)}}">{{Html(samplePath)}}</code></div>
-            <div class="metric"><strong data-zh="任务状态" data-en="Job status">任务状态</strong><span class="pill" data-copy="{{Attr(job.Status.ToString())}}">{{Html(job.Status.ToString())}}</span></div>
+            <div class="metric"><strong data-zh="任务状态" data-en="Job status">任务状态</strong><span class="pill" data-copy="{{Attr(jobStatus)}}">{{Html(jobStatus)}}</span></div>
             <div class="metric"><strong data-zh="执行状态" data-en="Execution status">执行状态</strong><span class="pill {{StatusClass(execution)}}">{{Html(executionState)}}</span></div>
             <div class="metric"><strong data-zh="计划步骤" data-en="Planned steps">计划步骤</strong><span>{{runbookSteps}}</span></div>
             <div class="metric"><strong data-zh="已执行" data-en="Executed">已执行</strong><span>{{(execution?.ExecutedSteps.ToString() ?? "-")}}</span></div>
@@ -212,7 +218,7 @@ internal static class RunbookExecutionFlowPage
                 <div class="step-status">
                   <span class="pill {{css}}" data-copy="{{Attr(statusText)}}">{{Html(statusText)}}</span>
                   <p class="muted">{{Html(FormatDuration(result?.Duration))}}</p>
-                  {{(result?.ExitCode is null ? string.Empty : $"<p class=\"muted\">Exit: {result.ExitCode}</p>")}}
+                  {{(result?.ExitCode is null ? string.Empty : $"<p class=\"muted\">退出码 / Exit: {result.ExitCode}</p>")}}
                 </div>
               </article>
             """);
@@ -236,6 +242,20 @@ internal static class RunbookExecutionFlowPage
         return duration.Value.TotalSeconds < 1
             ? $"{duration.Value.TotalMilliseconds:N0} ms"
             : $"{duration.Value.TotalSeconds:N1} s";
+    }
+
+    private static string FormatAnalysisStatus(AnalysisStatus status)
+    {
+        return status switch
+        {
+            AnalysisStatus.Queued => "排队中 / queued",
+            AnalysisStatus.Planning => "规划中 / planning",
+            AnalysisStatus.Planned => "已规划 / planned",
+            AnalysisStatus.Running => "运行中 / running",
+            AnalysisStatus.Completed => "已完成 / completed",
+            AnalysisStatus.Failed => "失败 / failed",
+            _ => $"{status}"
+        };
     }
 
     private static string Html(string? value)

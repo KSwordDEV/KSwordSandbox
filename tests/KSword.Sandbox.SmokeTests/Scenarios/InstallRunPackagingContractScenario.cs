@@ -36,6 +36,8 @@ internal sealed class InstallRunPackagingContractScenario : ISmokeTestScenario
 
         RequireContains(runScript, "Ensure-GuestPayloadForWebUi", "run.ps1 should have a WebUI-specific payload wrapper.");
         RequireContains(runScript, "StartWebUI", "run.ps1 should provide an explicit StartWebUI mode.");
+        RequireContains(runScript, "Assert-RunLocalConfigReadyForInteractiveStartup", "run.ps1 should block ordinary startup from silently using the example config.");
+        RequireContains(runScript, "本机配置未就绪", "run.ps1 should explain missing local config in Chinese.");
         RequireContains(runScript, "CheckEnvironment", "run.ps1 should provide a non-mutating environment-check mode.");
         RequireContains(runScript, "RequirePayloadForWebUI", "run.ps1 should allow strict WebUI payload enforcement.");
         RequireContains(runScript, "WebUI will still start", "WebUI mode should remain launchable when payload build prerequisites are missing.");
@@ -57,9 +59,9 @@ internal sealed class InstallRunPackagingContractScenario : ISmokeTestScenario
         RequireContains(readme, ".\\run.ps1", "README quick start should show the runtime wrapper.");
         RequireContains(readme, ".\\install.ps1 -Mode CheckEnvironment", "README quick start should show the environment-check wrapper.");
         RequireContains(readme, ".\\install.ps1 -Mode ConfigureVTKey -PromptVTKey", "README should document optional VT key setup.");
-        RequireContains(readme, "self-contained guest payload", "README should explain payload preparation in the wrapper path.");
+        RequireContains(readme, "Guest Agent/R0Collector payload", "README should explain payload preparation in the wrapper path.");
         RequireContains(readme, "RequirePayloadForWebUI", "README should document strict WebUI payload preparation.");
-        RequireContains(readme, "do not call", "README should preserve the no-CSignTool install/run boundary.");
+        RequireContains(readme, "不调用 `CSignTool.exe`", "README should preserve the no-CSignTool install/run boundary.");
 
         return Task.FromResult(new SmokeTestResult
         {

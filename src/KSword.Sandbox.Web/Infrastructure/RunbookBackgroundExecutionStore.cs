@@ -39,7 +39,7 @@ internal sealed class RunbookBackgroundExecutionStore
             snapshot = existing with
             {
                 Accepted = false,
-                Message = "Runbook execution is already queued or running for this job.",
+                Message = "该任务的分析流程已经在排队或运行中；下一步：打开监控页或进度页查看当前状态，不要重复提交 / Runbook execution is already queued or running for this job. Next step: open the monitor or progress page to view the current state instead of submitting again.",
                 UpdatedAtUtc = DateTimeOffset.UtcNow
             };
             return false;
@@ -53,7 +53,7 @@ internal sealed class RunbookBackgroundExecutionStore
             ImportGuestEvents = importGuestEvents,
             Accepted = true,
             State = Queued,
-            Message = "Runbook execution has been accepted by the WebUI background runner.",
+            Message = "WebUI 已接收后台分析任务；下一步：进入监控页查看安全进度 / Runbook execution has been accepted by the WebUI background runner. Next step: open the monitor page for UI-safe progress.",
             StartedAtUtc = now,
             UpdatedAtUtc = now
         };
@@ -65,7 +65,7 @@ internal sealed class RunbookBackgroundExecutionStore
             Update(queuedSnapshot with
             {
                 State = Running,
-                Message = "Runbook execution is running in the WebUI background runner.",
+                Message = "后台正在执行虚拟机分析流程；下一步：保持监控页打开等待报告入口 / Runbook execution is running in the WebUI background runner. Next step: keep the monitor page open until report links appear.",
                 UpdatedAtUtc = DateTimeOffset.UtcNow
             });
 
@@ -88,8 +88,8 @@ internal sealed class RunbookBackgroundExecutionStore
                     GuestImportSucceeded = outcome.GuestImportSucceeded,
                     GuestImportMessage = outcome.GuestImportMessage,
                     Message = success
-                        ? "Runbook execution completed."
-                        : outcome.Execution.Message ?? outcome.GuestImportMessage ?? "Runbook execution failed.",
+                        ? "分析流程已完成；下一步：打开中文或英文报告 / Runbook execution completed. Next step: open the Chinese or English report."
+                        : outcome.Execution.Message ?? outcome.GuestImportMessage ?? "分析流程失败；下一步：打开进度页查看失败阶段并保留本条状态 / Runbook execution failed. Next step: open the progress page for the failed stage and keep this status text.",
                     StartedAtUtc = now,
                     UpdatedAtUtc = DateTimeOffset.UtcNow
                 });
@@ -104,7 +104,7 @@ internal sealed class RunbookBackgroundExecutionStore
                     Accepted = true,
                     State = Failed,
                     Success = false,
-                    Message = $"Runbook background execution failed: {ex.Message}",
+                    Message = $"后台分析执行失败；下一步：打开进度页查看失败阶段并检查 Web Host 日志 / Runbook background execution failed. Next step: open the progress page for the failed stage and check Web Host logs: {ex.Message}",
                     StartedAtUtc = now,
                     UpdatedAtUtc = DateTimeOffset.UtcNow
                 });
@@ -125,7 +125,7 @@ internal sealed class RunbookBackgroundExecutionStore
             {
                 JobId = jobId,
                 State = NotStarted,
-                Message = "No WebUI background runbook execution has started for this job.",
+                Message = "此任务尚未启动 WebUI 后台分析；下一步：在主界面点击启动虚拟机分析 / No WebUI background runbook execution has started for this job. Next step: start VM analysis from the dashboard.",
                 StartedAtUtc = DateTimeOffset.UtcNow,
                 UpdatedAtUtc = DateTimeOffset.UtcNow
             };
@@ -165,6 +165,10 @@ internal sealed record RunbookBackgroundExecutionSnapshot
     public DateTimeOffset StartedAtUtc { get; init; }
 
     public DateTimeOffset UpdatedAtUtc { get; init; }
+
+    public TimeSpan Duration => UpdatedAtUtc >= StartedAtUtc
+        ? UpdatedAtUtc - StartedAtUtc
+        : TimeSpan.Zero;
 
     public SandboxRunbookExecutionResult? Execution { get; init; }
 

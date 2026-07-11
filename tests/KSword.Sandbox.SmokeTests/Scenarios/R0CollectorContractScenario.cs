@@ -53,14 +53,25 @@ internal sealed class R0CollectorContractScenario : ISmokeTestScenario
         RequireContains(ReadText(Path.Combine(sourceRoot, "Options.cpp")), "--abi-self-check", "ABI self-check mode should be parsed.");
         RequireContains(ReadText(Path.Combine(sourceRoot, "Options.cpp")), "--contract-self-check", "contract self-check alias should be parsed.");
         RequireContains(ReadText(Path.Combine(sourceRoot, "Options.cpp")), "--diagnose", "diagnose mode should be parsed.");
+        RequireContains(ReadText(Path.Combine(sourceRoot, "Options.cpp")), "--readiness", "readiness alias should be parsed.");
         RequireContains(ReadText(Path.Combine(sourceRoot, "Options.cpp")), "--service-name", "diagnose service name should be parsed.");
         RequireContains(ReadText(Path.Combine(sourceRoot, "Options.cpp")), "--read-timeout-ms", "diagnose read timeout should be parsed.");
+        RequireContains(ReadText(Path.Combine(sourceRoot, "Options.cpp")), "--stress-count", "stress-count should be parsed.");
+        RequireContains(ReadText(Path.Combine(sourceRoot, "Options.cpp")), "--inject-jsonl-noise", "JSONL noise injection should be parsed.");
+        RequireContains(ReadText(Path.Combine(sourceRoot, "Options.cpp")), "--driver-event-sample-stride", "driver event sample stride should be parsed.");
+        RequireContains(ReadText(Path.Combine(sourceRoot, "Options.cpp")), "--event-sample-stride", "event sample stride alias should be parsed.");
+        RequireContains(ReadText(Path.Combine(sourceRoot, "Options.cpp")), "--suppress-self-noise", "self-noise suppression option should be parsed.");
+        RequireContains(ReadText(Path.Combine(sourceRoot, "Options.cpp")), "--emit-self-noise", "self-noise emit option should be parsed.");
+        RequireContains(ReadText(Path.Combine(sourceRoot, "Options.cpp")), "--no-suppress-self-noise", "self-noise emit alias should be parsed.");
         var ioctlClient = ReadText(Path.Combine(sourceRoot, "IoctlClient.cpp"));
         var eventParser = ReadText(Path.Combine(sourceRoot, "EventParser.cpp"));
         var runtimeLoop = ReadText(Path.Combine(sourceRoot, "RuntimeLoop.cpp"));
         var abiSelfCheck = ReadText(Path.Combine(sourceRoot, "AbiSelfCheck.cpp"));
         var readinessDiagnostics = ReadText(Path.Combine(sourceRoot, "ReadinessDiagnostics.cpp"));
         var healthData = ExtractFunctionBody(eventParser, "BuildHealthData");
+        var statusData = ExtractFunctionBody(eventParser, "BuildStatusData");
+        var pollData = ExtractFunctionBody(eventParser, "BuildPollData");
+        var readEventsBatchData = ExtractFunctionBody(eventParser, "BuildReadEventsBatchData");
         RequireContains(runtimeLoop, "RunAbiSelfCheckMode", "Runtime loop should support no-device ABI self-check mode.");
         RequireContains(runtimeLoop, "RunReadinessDiagnoseMode(options, writer)", "Runtime loop should support live readiness diagnose mode before opening the normal device path.");
         RequireContains(runtimeLoop, "EmitDeviceUnavailableDiagnostic(writer, options, openError, \"openDevice\")", "Runtime loop should emit structured device-unavailable diagnostics.");
@@ -91,8 +102,12 @@ internal sealed class R0CollectorContractScenario : ISmokeTestScenario
         RequireContains(ioctlClient, "\"diagnosticCode\", \"ioctl_failure\"", "IOCTL failures should include a machine-readable diagnostic code.");
         RequireContains(ioctlClient, "\"diagnosticCode\", \"abi_mismatch\"", "Protocol errors should classify ABI mismatch.");
         RequireContains(ioctlClient, "\"diagnosticCode\", \"optional_ioctl_unavailable\"", "Optional IOCTL failures should classify degraded compatibility.");
+        RequireContains(ioctlClient, "zhMessage", "IOCTL diagnostics should emit Chinese diagnostic messages.");
+        RequireContains(ioctlClient, "zhHint", "IOCTL diagnostics should emit Chinese remediation hints.");
         RequireContains(readinessDiagnostics, "r0collector.readinessDiagnostic", "Readiness diagnostics should emit dedicated JSONL probe rows.");
         RequireContains(readinessDiagnostics, "r0collector.readinessSummary", "Readiness diagnostics should emit a final summary row.");
+        RequireContains(readinessDiagnostics, "zhMessage", "Readiness diagnostics should emit Chinese diagnostic messages.");
+        RequireContains(readinessDiagnostics, "zhHint", "Readiness diagnostics should emit Chinese remediation hints.");
         RequireContains(readinessDiagnostics, "missing_service", "Readiness diagnostics should distinguish missing driver services.");
         RequireContains(readinessDiagnostics, "open_device_not_found", "Readiness diagnostics should distinguish missing device symbolic links.");
         RequireContains(readinessDiagnostics, "open_device_denied", "Readiness diagnostics should distinguish device ACL/elevation failures.");
@@ -101,6 +116,9 @@ internal sealed class R0CollectorContractScenario : ISmokeTestScenario
         RequireContains(readinessDiagnostics, "driver_no_events", "Readiness diagnostics should classify empty driver queues.");
         RequireContains(readinessDiagnostics, "FILE_FLAG_OVERLAPPED", "Readiness diagnostics should use bounded overlapped READ_EVENTS probes.");
         RequireContains(eventParser, "capabilityFlagsHex", "Capabilities row should preserve capability flags.");
+        RequireContains(eventParser, "ProcessCreateExit", "Capabilities row should name process create/exit support.");
+        RequireContains(eventParser, "EventCommonMetadata", "Capabilities row should name common event metadata support.");
+        RequireContains(eventParser, "SelfNoiseMetadata", "Capabilities row should name self-noise metadata support.");
         RequireContains(eventParser, "supportedProducerMaskHex", "Capabilities/status rows should preserve supported producer mask.");
         RequireContains(eventParser, "KSWORD_SANDBOX_HEALTH_FLAG_PRODUCER_MASKS_AVAILABLE", "Health flag names should decode producer-mask availability.");
         RequireContains(eventParser, "ProducerMasksAvailable", "Health flag names should print producer-mask availability.");
@@ -111,12 +129,27 @@ internal sealed class R0CollectorContractScenario : ISmokeTestScenario
         RequireContains(healthData, "activeProducerMaskHex", "Health row should preserve active producer mask when available.");
         RequireContains(healthData, "failedProducerMaskHex", "Health row should preserve failed producer mask when available.");
         RequireContains(healthData, "legacy-or-not-advertised", "Health row should mark old ABI compatibility when masks are unavailable.");
+        RequireContains(healthData, "lostCount", "Health row should expose a stable lost-count alias.");
+        RequireContains(healthData, "sequence", "Health row should expose a stable next-sequence alias.");
+        RequireContains(healthData, "sequenceMeaning", "Health row should distinguish nextSequence from a concrete event sequence.");
         RequireContains(eventParser, "queueCapacity", "Status row should preserve queue capacity.");
         RequireContains(eventParser, "queueDepth", "Status row should preserve queue depth.");
         RequireContains(eventParser, "producerEnableMaskHex", "Status row should preserve producer enable mask.");
         RequireContains(eventParser, "activeProducerMaskHex", "Status row should preserve active producer mask.");
         RequireContains(eventParser, "failedProducerMaskHex", "Status row should preserve failed producer mask.");
+        RequireContains(eventParser, "effectiveProducerMaskHex", "Status row should preserve effective producer mask.");
+        RequireContains(eventParser, "lastFailureNtStatusHex", "Status row should preserve last failure status.");
         RequireContains(eventParser, "totalEventsSuppressed", "Status row should preserve suppressed event counter.");
+        RequireContains(statusData, "lostCount", "Status row should expose a stable lost-count alias.");
+        RequireContains(statusData, "highWatermark", "Status row should expose a stable high-watermark alias.");
+        RequireContains(statusData, "lastEnqueueFailureStatus", "Status row should expose enqueue failure status.");
+        RequireContains(statusData, "sequenceMeaning", "Status row should distinguish nextSequence from a concrete event sequence.");
+        RequireContains(pollData, "lostCount", "Poll row should expose a stable lost-count alias.");
+        RequireContains(pollData, "sequenceMeaning", "Poll row should distinguish nextSequence from a concrete event sequence.");
+        RequireContains(readEventsBatchData, "lostCount", "READ_EVENTS batch row should expose a stable lost-count alias.");
+        RequireContains(readEventsBatchData, "highWatermark", "READ_EVENTS batch row should expose a stable high-watermark alias even when the live reply has no queue watermark.");
+        RequireContains(readEventsBatchData, "lastEnqueueFailureStatus", "READ_EVENTS batch row should expose a stable enqueue failure alias even when the live reply has no status slot.");
+        RequireContains(readEventsBatchData, "sequenceMeaning", "READ_EVENTS batch row should distinguish nextSequence from a concrete event sequence.");
         RequireContains(eventParser, "requestedEnableMaskHex", "Producer-mask row should preserve requested mask.");
         RequireContains(eventParser, "effectiveEnableMaskHex", "Producer-mask row should preserve effective mask.");
         RequireContains(eventParser, "producer", "Event parser rows should preserve stable producer metadata.");
@@ -124,12 +157,14 @@ internal sealed class R0CollectorContractScenario : ISmokeTestScenario
         RequireContains(eventParser, "lost", "Event parser rows should preserve stable loss metadata.");
         RequireContains(eventParser, "backpressure", "Event parser rows should preserve stable backpressure metadata.");
         RequireContains(eventParser, "noise", "Event parser rows should preserve stable noise metadata.");
+        RequireContains(eventParser, "collectorSelfNoise", "Event parser rows should mark collector self-noise explicitly.");
+        RequireContains(eventParser, "selfProcess", "Event parser rows should mark collector process self-noise explicitly.");
         RequireContains(runtimeLoop, "EmitDriverCapabilities", "Runtime loop should call capabilities before drain.");
         RequireContains(runtimeLoop, "EmitDriverSetProducerEnableMask", "Runtime loop should apply requested producer mask before drain.");
         RequireContains(runtimeLoop, "EmitDriverStatus", "Runtime loop should capture status before/after drain.");
         RequireContains(runtimeLoop, "r0collector.heartbeat", "heartbeat rows should be emitted by the runtime loop.");
 
-        foreach (var option in new[] { "--self-test", "--synthetic", "--enable-mask", "--max-events", "--max-read-batches", "--heartbeat", "--duration", "--poll-ms" })
+        foreach (var option in new[] { "--self-test", "--synthetic", "--enable-mask", "--max-events", "--max-read-batches", "--heartbeat", "--duration", "--poll-ms", "--stress-count", "--inject-jsonl-noise", "--driver-event-sample-stride", "--event-sample-stride", "--suppress-self-noise", "--emit-self-noise" })
         {
             RequireContains(collectorDoc, option, $"{option} should be documented in r0-collector.md.");
             RequireContains(schemaDoc, option, $"{option} should be documented in r0-jsonl-schema.md.");

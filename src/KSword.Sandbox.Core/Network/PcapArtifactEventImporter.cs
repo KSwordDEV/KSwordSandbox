@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Globalization;
 using System.Net;
 using System.Text;
 using KSword.Sandbox.Abstractions;
@@ -27,6 +28,19 @@ public sealed class PcapArtifactEventImporter
     /// </summary>
     public IReadOnlyList<SandboxEvent> Import(string path)
     {
+        return string.IsNullOrWhiteSpace(path)
+            ? []
+            : Import(path, NetworkArtifactSource.FromPath(path), includeSidecars: true);
+    }
+
+    /// <summary>
+    /// Parses one packet-capture artifact with caller-supplied artifact
+    /// identity. Inputs are a .pcap/.pcapng path, source identity, and sidecar
+    /// inclusion flag; processing keeps native parsing bounded and optionally
+    /// imports adjacent sidecars; return value is report-ready network events.
+    /// </summary>
+    internal IReadOnlyList<SandboxEvent> Import(string path, NetworkArtifactSource source, bool includeSidecars)
+    {
         if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
         {
             return [];
@@ -36,23 +50,67 @@ public sealed class PcapArtifactEventImporter
         {
             using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
             var packets = ReadPackets(stream, path).Take(MaxPackets).ToList();
-            return BuildEvents(path, packets);
+            var events = BuildEvents(path, packets, source).ToList();
+            var sidecarEvents = includeSidecars ? ImportSidecarEvents(path, source).ToList() : [];
+            var allImportedEvents = events.Concat(sidecarEvents).ToList();
+            return
+            [
+                NetworkTelemetrySchema.CreateImportSummary(
+                    path,
+                    source,
+                    allImportedEvents,
+                    new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                    {
+                        ["importer"] = nameof(PcapArtifactEventImporter),
+                        ["parser"] = "native-pcap",
+                        ["tsharkRequired"] = "false",
+                        ["tsharkAvailable"] = IsTsharkAvailable().ToString(CultureInfo.InvariantCulture).ToLowerInvariant(),
+                        ["tsharkStatus"] = IsTsharkAvailable() ? "available-not-required" : "not-found-native-parser-used",
+                        ["pcapArtifactCount"] = "1",
+                        ["sidecarArtifactCount"] = includeSidecars ? CountSidecarArtifacts(path).ToString(CultureInfo.InvariantCulture) : "0",
+                        ["packetCount"] = packets.Count.ToString(CultureInfo.InvariantCulture),
+                        ["pcapFormat"] = Path.GetExtension(path).Equals(".pcapng", StringComparison.OrdinalIgnoreCase) ? "pcapng" : "pcap"
+                    }),
+                .. events,
+                .. sidecarEvents
+            ];
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException or ArgumentException)
         {
+            var parseError = new SandboxEvent
+            {
+                EventType = "pcap.parse_error",
+                Source = "host",
+                Path = path,
+                Data =
+                {
+                    ["schema"] = NetworkTelemetrySchema.SchemaVersion,
+                    ["eventFamily"] = "network",
+                    ["eventKind"] = "parse_error",
+                    ["exceptionType"] = ex.GetType().Name,
+                    ["message"] = ex.Message,
+                    ["parser"] = "native-pcap"
+                }
+            };
+            NetworkTelemetrySchema.AddArtifactData(parseError.Data, source);
+            NetworkTelemetrySchema.ApplyHealthAndLocalization(parseError.Data);
             return
             [
-                new SandboxEvent
-                {
-                    EventType = "pcap.parse_error",
-                    Source = "host",
-                    Path = path,
-                    Data =
+                NetworkTelemetrySchema.CreateImportSummary(
+                    path,
+                    source,
+                    [parseError],
+                    new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
                     {
-                        ["exceptionType"] = ex.GetType().Name,
-                        ["message"] = ex.Message
-                    }
-                }
+                        ["status"] = "parse_error",
+                        ["importer"] = nameof(PcapArtifactEventImporter),
+                        ["parser"] = "native-pcap",
+                        ["tsharkRequired"] = "false",
+                        ["tsharkAvailable"] = IsTsharkAvailable().ToString(CultureInfo.InvariantCulture).ToLowerInvariant(),
+                        ["tsharkStatus"] = IsTsharkAvailable() ? "available-not-required" : "not-found-native-parser-used",
+                        ["exceptionType"] = ex.GetType().Name
+                    }),
+                parseError
             ];
         }
     }
@@ -201,7 +259,7 @@ public sealed class PcapArtifactEventImporter
         }
     }
 
-    private static IReadOnlyList<SandboxEvent> BuildEvents(string path, IReadOnlyList<PcapPacket> packets)
+    private static IReadOnlyList<SandboxEvent> BuildEvents(string path, IReadOnlyList<PcapPacket> packets, NetworkArtifactSource source)
     {
         var events = new List<SandboxEvent>();
         var flows = new Dictionary<string, FlowSummary>(StringComparer.OrdinalIgnoreCase);
@@ -233,7 +291,7 @@ public sealed class PcapArtifactEventImporter
                 continue;
             }
 
-            foreach (var protocolEvent in BuildProtocolEvents(path, decoded))
+            foreach (var protocolEvent in BuildProtocolEvents(path, decoded, source))
             {
                 if (protocolEvent.EventType.StartsWith("pcap.", StringComparison.OrdinalIgnoreCase))
                 {
@@ -249,32 +307,41 @@ public sealed class PcapArtifactEventImporter
             }
         }
 
+        var summaryData = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["schema"] = NetworkTelemetrySchema.SchemaVersion,
+            ["eventFamily"] = "network",
+            ["eventKind"] = "summary",
+            ["importSource"] = "pcap-native",
+            ["parser"] = "native-pcap",
+            ["packetCount"] = packets.Count.ToString(CultureInfo.InvariantCulture),
+            ["parsedPacketCount"] = parsedPackets.ToString(CultureInfo.InvariantCulture),
+            ["flowCount"] = flows.Count.ToString(CultureInfo.InvariantCulture),
+            ["byteCount"] = bytes.ToString(CultureInfo.InvariantCulture),
+            ["protocol"] = string.Join(",", protocols.OrderBy(protocol => protocol, StringComparer.OrdinalIgnoreCase)),
+            ["protocols"] = string.Join(",", protocols.OrderBy(protocol => protocol, StringComparer.OrdinalIgnoreCase)),
+            ["format"] = Path.GetExtension(path).Equals(".pcapng", StringComparison.OrdinalIgnoreCase) ? "pcapng" : "pcap"
+        };
+        NetworkTelemetrySchema.AddArtifactData(summaryData, source);
+        NetworkTelemetrySchema.ApplyHealthAndLocalization(summaryData);
         events.Insert(0, new SandboxEvent
         {
             EventType = "pcap.summary",
             Source = "host",
             Path = path,
-            Data =
-            {
-                ["packetCount"] = packets.Count.ToString(),
-                ["parsedPacketCount"] = parsedPackets.ToString(),
-                ["flowCount"] = flows.Count.ToString(),
-                ["byteCount"] = bytes.ToString(),
-                ["protocol"] = string.Join(",", protocols.OrderBy(protocol => protocol, StringComparer.OrdinalIgnoreCase)),
-                ["protocols"] = string.Join(",", protocols.OrderBy(protocol => protocol, StringComparer.OrdinalIgnoreCase)),
-                ["format"] = Path.GetExtension(path).Equals(".pcapng", StringComparison.OrdinalIgnoreCase) ? "pcapng" : "pcap"
-            }
+            Data = summaryData
         });
 
         foreach (var flow in flows.Values.OrderBy(flow => flow.FirstSeenUtc).Take(MaxFlowEvents))
         {
-            events.Add(flow.ToEvent(path));
+            events.Add(flow.ToEvent(path, "pcap.flow", source));
+            events.Add(flow.ToEvent(path, "network.flow", source));
         }
 
         return events;
     }
 
-    private static IEnumerable<SandboxEvent> BuildProtocolEvents(string path, DecodedPacket packet)
+    private static IEnumerable<SandboxEvent> BuildProtocolEvents(string path, DecodedPacket packet, NetworkArtifactSource source)
     {
         if (packet.TransportProtocol == "UDP" && (packet.SourcePort == 53 || packet.DestinationPort == 53))
         {
@@ -290,12 +357,38 @@ public sealed class PcapArtifactEventImporter
                     Data = packet.BaseData(new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
                     {
                         ["queryName"] = dns.QueryName,
+                        ["qname"] = dns.QueryName,
+                        ["domain"] = dns.QueryName,
                         ["queryType"] = dns.QueryType,
+                        ["recordType"] = dns.QueryType,
                         ["rcode"] = dns.RCode,
-                        ["isResponse"] = dns.IsResponse.ToString(),
+                        ["isResponse"] = dns.IsResponse.ToString(CultureInfo.InvariantCulture).ToLowerInvariant(),
                         ["classification"] = dns.RCode.Equals("NXDOMAIN", StringComparison.OrdinalIgnoreCase) ? "nxdomain" : string.Empty
-                    })
+                    }, "dns", source)
                 };
+                yield return NetworkTelemetrySchema.CreateNetworkEvent(
+                    "dns.query",
+                    packet.Timestamp,
+                    null,
+                    "dns",
+                    "pcap-native",
+                    packet.TransportProtocol,
+                    packet.SourceIp,
+                    packet.SourcePort,
+                    packet.DestinationIp,
+                    packet.DestinationPort,
+                    source,
+                    new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                    {
+                        ["queryName"] = dns.QueryName,
+                        ["qname"] = dns.QueryName,
+                        ["domain"] = dns.QueryName,
+                        ["queryType"] = dns.QueryType,
+                        ["recordType"] = dns.QueryType,
+                        ["rcode"] = dns.RCode,
+                        ["isResponse"] = dns.IsResponse.ToString(CultureInfo.InvariantCulture).ToLowerInvariant(),
+                        ["classification"] = dns.RCode.Equals("NXDOMAIN", StringComparison.OrdinalIgnoreCase) ? "nxdomain" : string.Empty
+                    });
             }
         }
 
@@ -314,12 +407,37 @@ public sealed class PcapArtifactEventImporter
                     {
                         ["method"] = http.Method,
                         ["uri"] = http.Uri,
+                        ["requestUri"] = http.Uri,
                         ["host"] = http.Host,
+                        ["url"] = string.IsNullOrWhiteSpace(http.Host) ? http.Uri : $"http://{http.Host}{http.Uri}",
                         ["userAgent"] = http.UserAgent,
                         ["contentType"] = http.ContentType,
                         ["payloadMagic"] = http.PayloadMagic
-                    })
+                    }, "http", source)
                 };
+                yield return NetworkTelemetrySchema.CreateNetworkEvent(
+                    "http.request",
+                    packet.Timestamp,
+                    null,
+                    "http",
+                    "pcap-native",
+                    packet.TransportProtocol,
+                    packet.SourceIp,
+                    packet.SourcePort,
+                    packet.DestinationIp,
+                    packet.DestinationPort,
+                    source,
+                    new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                    {
+                        ["method"] = http.Method,
+                        ["uri"] = http.Uri,
+                        ["requestUri"] = http.Uri,
+                        ["host"] = http.Host,
+                        ["url"] = string.IsNullOrWhiteSpace(http.Host) ? http.Uri : $"http://{http.Host}{http.Uri}",
+                        ["userAgent"] = http.UserAgent,
+                        ["contentType"] = http.ContentType,
+                        ["payloadMagic"] = http.PayloadMagic
+                    });
             }
 
             var tls = TryParseTlsClientHello(packet.Payload.AsSpan());
@@ -334,11 +452,32 @@ public sealed class PcapArtifactEventImporter
                     Data = packet.BaseData(new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
                     {
                         ["sni"] = tls.Sni,
+                        ["serverName"] = tls.Sni,
                         ["tlsVersion"] = tls.Version,
                         ["handshakeType"] = tls.HandshakeType,
                         ["ja3"] = string.Empty
-                    })
+                    }, "tls", source)
                 };
+                yield return NetworkTelemetrySchema.CreateNetworkEvent(
+                    "tls.connection",
+                    packet.Timestamp,
+                    null,
+                    "tls",
+                    "pcap-native",
+                    packet.TransportProtocol,
+                    packet.SourceIp,
+                    packet.SourcePort,
+                    packet.DestinationIp,
+                    packet.DestinationPort,
+                    source,
+                    new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                    {
+                        ["sni"] = tls.Sni,
+                        ["serverName"] = tls.Sni,
+                        ["tlsVersion"] = tls.Version,
+                        ["handshakeType"] = tls.HandshakeType,
+                        ["ja3"] = string.Empty
+                    });
             }
         }
     }
@@ -651,6 +790,85 @@ public sealed class PcapArtifactEventImporter
         };
     }
 
+    private static IEnumerable<SandboxEvent> ImportSidecarEvents(string pcapPath, NetworkArtifactSource pcapSource)
+    {
+        var sidecarImporter = new NetworkSidecarEventImporter();
+        foreach (var sidecarPath in EnumerateSidecarPaths(pcapPath))
+        {
+            var sidecarSource = NetworkArtifactSource.FromPath(
+                sidecarPath,
+                pcapSource.ImportRoot,
+                artifactKind: "Log",
+                collectionName: "network-sidecars",
+                evidenceRole: "network-telemetry-sidecar",
+                importMode: "sidecar-artifact");
+            foreach (var evt in sidecarImporter.ImportEvents(sidecarPath, sidecarSource))
+            {
+                yield return evt;
+            }
+        }
+    }
+
+    private static int CountSidecarArtifacts(string pcapPath)
+    {
+        return EnumerateSidecarPaths(pcapPath).Count();
+    }
+
+    private static IEnumerable<string> EnumerateSidecarPaths(string pcapPath)
+    {
+        var directory = Path.GetDirectoryName(pcapPath);
+        if (string.IsNullOrWhiteSpace(directory) || !Directory.Exists(directory))
+        {
+            yield break;
+        }
+
+        var baseName = Path.GetFileNameWithoutExtension(pcapPath);
+        foreach (var candidate in Directory.EnumerateFiles(directory)
+            .Where(path => !string.Equals(path, pcapPath, StringComparison.OrdinalIgnoreCase))
+            .Where(NetworkSidecarEventImporter.IsLikelyNetworkSidecarPath)
+            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase))
+        {
+            var candidateBase = Path.GetFileNameWithoutExtension(candidate);
+            if (candidateBase.StartsWith(baseName, StringComparison.OrdinalIgnoreCase) ||
+                candidateBase.Contains(".dns", StringComparison.OrdinalIgnoreCase) ||
+                candidateBase.Contains(".http", StringComparison.OrdinalIgnoreCase) ||
+                candidateBase.Contains(".tls", StringComparison.OrdinalIgnoreCase) ||
+                candidateBase.Contains(".conn", StringComparison.OrdinalIgnoreCase) ||
+                candidateBase.Contains(".flow", StringComparison.OrdinalIgnoreCase) ||
+                Path.GetFileName(candidate).Contains("tshark", StringComparison.OrdinalIgnoreCase))
+            {
+                yield return candidate;
+            }
+        }
+    }
+
+    private static bool IsTsharkAvailable()
+    {
+        var executableNames = OperatingSystem.IsWindows()
+            ? new[] { "tshark.exe", "tshark.cmd", "tshark.bat" }
+            : ["tshark"];
+        var pathValue = Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
+        foreach (var directory in pathValue.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            foreach (var executableName in executableNames)
+            {
+                try
+                {
+                    if (File.Exists(Path.Combine(directory, executableName)))
+                    {
+                        return true;
+                    }
+                }
+                catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+                {
+                    // Ignore malformed PATH entries; native parser remains the fallback.
+                }
+            }
+        }
+
+        return false;
+    }
+
     private sealed record PcapPacket(int Index, uint LinkType, DateTimeOffset Timestamp, byte[] Data);
 
     private sealed record DnsInfo(string QueryName, string QueryType, string RCode, bool IsResponse);
@@ -670,26 +888,33 @@ public sealed class PcapArtifactEventImporter
     {
         public string FlowKey => $"{TransportProtocol}|{SourceIp}:{SourcePort}|{DestinationIp}:{DestinationPort}";
 
-        public Dictionary<string, string> BaseData(Dictionary<string, string>? extra = null)
+        public Dictionary<string, string> BaseData(
+            Dictionary<string, string>? extra = null,
+            string eventKind = "packet",
+            NetworkArtifactSource? source = null)
         {
-            var data = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            var merged = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
             {
-                ["protocol"] = TransportProtocol,
-                ["sourceIp"] = SourceIp,
-                ["sourcePort"] = SourcePort.ToString(),
-                ["destinationIp"] = DestinationIp,
-                ["destinationPort"] = DestinationPort.ToString(),
                 ["payloadBytes"] = Payload.Length.ToString()
             };
             if (extra is not null)
             {
                 foreach (var pair in extra)
                 {
-                    data[pair.Key] = pair.Value;
+                    merged[pair.Key] = pair.Value;
                 }
             }
 
-            return data;
+            return NetworkTelemetrySchema.CreateEndpointData(
+                TransportProtocol,
+                SourceIp,
+                SourcePort,
+                DestinationIp,
+                DestinationPort,
+                eventKind,
+                "pcap-native",
+                source,
+                merged);
         }
     }
 
@@ -739,26 +964,33 @@ public sealed class PcapArtifactEventImporter
             PayloadBytes += packet.Payload.Length;
         }
 
-        public SandboxEvent ToEvent(string path)
+        public SandboxEvent ToEvent(string path, string eventType, NetworkArtifactSource source)
         {
+            var data = NetworkTelemetrySchema.CreateEndpointData(
+                Protocol,
+                SourceIp,
+                SourcePort,
+                DestinationIp,
+                DestinationPort,
+                "connection",
+                "pcap-native",
+                source,
+                new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["packetCount"] = PacketCount.ToString(CultureInfo.InvariantCulture),
+                    ["byteCount"] = PayloadBytes.ToString(CultureInfo.InvariantCulture),
+                    ["payloadBytes"] = PayloadBytes.ToString(CultureInfo.InvariantCulture),
+                    ["payloadByteCount"] = PayloadBytes.ToString(CultureInfo.InvariantCulture),
+                    ["firstSeenUtc"] = FirstSeenUtc.ToString("O"),
+                    ["lastSeenUtc"] = LastSeenUtc.ToString("O")
+                });
             return new SandboxEvent
             {
-                EventType = "pcap.flow",
+                EventType = eventType,
                 Timestamp = FirstSeenUtc,
                 Source = "host",
                 Path = path,
-                Data =
-                {
-                    ["protocol"] = Protocol,
-                    ["sourceIp"] = SourceIp,
-                    ["sourcePort"] = SourcePort.ToString(),
-                    ["destinationIp"] = DestinationIp,
-                    ["destinationPort"] = DestinationPort.ToString(),
-                    ["packetCount"] = PacketCount.ToString(),
-                    ["payloadBytes"] = PayloadBytes.ToString(),
-                    ["firstSeenUtc"] = FirstSeenUtc.ToString("O"),
-                    ["lastSeenUtc"] = LastSeenUtc.ToString("O")
-                }
+                Data = data
             };
         }
     }

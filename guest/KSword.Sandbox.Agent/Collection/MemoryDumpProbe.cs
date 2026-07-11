@@ -67,7 +67,9 @@ internal sealed class MemoryDumpProbe : IGuestProbe
     {
         if (!context.CaptureMemoryDump)
         {
-            return [];
+            return phase == ProbePhase.BeforeStart
+                ? [CreateDisabledEvent(context)]
+                : [];
         }
 
         var phaseLabel = ToPhaseLabel(phase);
@@ -113,9 +115,9 @@ internal sealed class MemoryDumpProbe : IGuestProbe
 
         var target = new MemoryDumpTarget(
             rememberedRootProcessId.Value,
-            ParentProcessId: null,
-            ProcessName: SampleProcessName(context.SamplePath) ?? "root",
-            Path: context.SamplePath,
+            ParentProcessId: context.RootParentProcessId,
+            ProcessName: context.RootProcessName ?? SampleProcessName(context.SamplePath) ?? "root",
+            Path: context.RootProcessPath ?? context.SamplePath,
             Depth: 0,
             Lineage: rememberedRootProcessId.Value.ToString(CultureInfo.InvariantCulture),
             IsRoot: true,
@@ -263,9 +265,12 @@ internal sealed class MemoryDumpProbe : IGuestProbe
         evt.Data["captureState"] = "captured";
         evt.Data["status"] = "captured";
         evt.Data["nonfatal"] = "false";
+        evt.Data["zhMessage"] = "内存转储已采集为可下载证据文件。";
+        evt.Data["zhHint"] = "内存转储可能包含敏感内容；请使用 artifactRelativePath 下载，并用 sizeBytes/sha256 校验完整性。";
         if (result.SizeBytes is not null)
         {
             evt.Data["sizeBytes"] = result.SizeBytes.Value.ToString(CultureInfo.InvariantCulture);
+            evt.Data["artifactSizeBytes"] = result.SizeBytes.Value.ToString(CultureInfo.InvariantCulture);
         }
 
         if (!string.IsNullOrWhiteSpace(result.Path))
@@ -273,6 +278,7 @@ internal sealed class MemoryDumpProbe : IGuestProbe
             var relativePath = SafeRelativePathForEvent(result.Path);
             evt.Data["relativePath"] = relativePath;
             AddOptionalData(evt, "artifactRelativePath", relativePath);
+            AddArtifactFileEvidence(evt, result.Path);
         }
 
         return evt;
@@ -294,8 +300,16 @@ internal sealed class MemoryDumpProbe : IGuestProbe
         evt.Data["nonfatal"] = "true";
         evt.Data["duplicate"] = duplicate.ToString(CultureInfo.InvariantCulture).ToLowerInvariant();
         AddOptionalData(evt, "reason", result.Reason);
+        AddOptionalData(evt, "zhMessage", "内存转储采集被跳过；该事件说明证据缺口，不会中断整体分析。");
+        AddOptionalData(evt, "zhHint", MemoryDumpReasonZhHint(result.Reason, result.DiagnosticStage, duplicate));
         AddOptionalData(evt, "exceptionType", result.ExceptionType);
         AddOptionalData(evt, "diagnosticStage", result.DiagnosticStage);
+        if (IsExitedBeforeDump(result.Reason, result.DiagnosticStage))
+        {
+            evt.Data["processExited"] = "true";
+            evt.Data["exitMissing"] = "true";
+            evt.Data["exitedBeforeDump"] = "true";
+        }
 
         if (result.Win32Error is not null)
         {
@@ -329,6 +343,7 @@ internal sealed class MemoryDumpProbe : IGuestProbe
                 ["phase"] = phaseLabel,
                 ["capturePhase"] = phaseLabel,
                 ["captureEnabled"] = "true",
+                ["implemented"] = "true",
                 ["dumpType"] = result.DumpType,
                 ["evidenceRole"] = "memory-dump",
                 ["collectionName"] = "memory-dumps",
@@ -387,20 +402,122 @@ internal sealed class MemoryDumpProbe : IGuestProbe
                 ["phase"] = phaseLabel,
                 ["capturePhase"] = phaseLabel,
                 ["captureEnabled"] = "true",
+                ["implemented"] = "true",
                 ["captureState"] = "summary",
                 ["status"] = "summary",
+                ["summaryEvent"] = "true",
                 ["nonfatal"] = "false",
                 ["dumpType"] = MemoryDumpCaptureResult.MiniDumpTypeName,
                 ["evidenceRole"] = "memory-dump",
                 ["collectionName"] = "memory-dumps",
                 ["rootProcessId"] = rootProcessId.ToString(CultureInfo.InvariantCulture),
+                ["processId"] = rootProcessId.ToString(CultureInfo.InvariantCulture),
+                ["processRole"] = "root",
+                ["treeDepth"] = "0",
+                ["treeLineage"] = rootProcessId.ToString(CultureInfo.InvariantCulture),
                 ["visibleTargetCount"] = visibleTargetCount.ToString(CultureInfo.InvariantCulture),
                 ["attemptedCount"] = attemptedCount.ToString(CultureInfo.InvariantCulture),
                 ["capturedCount"] = capturedCount.ToString(CultureInfo.InvariantCulture),
                 ["skippedCount"] = skippedCount.ToString(CultureInfo.InvariantCulture),
-                ["alreadyCapturedCount"] = alreadyCapturedCount.ToString(CultureInfo.InvariantCulture)
+                ["alreadyCapturedCount"] = alreadyCapturedCount.ToString(CultureInfo.InvariantCulture),
+                ["zhMessage"] = "内存转储 sweep 已完成并记录根/子进程覆盖情况。",
+                ["zhHint"] = "请结合 rootProcessId/treeLineage、capturedCount、skippedCount 和 alreadyCapturedCount 判断转储覆盖面。"
             }
         };
+    }
+
+    /// <summary>
+    /// Creates a single disabled event for the opt-in memory-dump lane.
+    /// </summary>
+    private static SandboxEvent CreateDisabledEvent(GuestProbeContext context)
+    {
+        var evt = new SandboxEvent
+        {
+            EventType = "memory_dump.disabled",
+            Source = "guest",
+            ProcessName = SampleProcessName(context.SamplePath),
+            ProcessId = context.RootProcessId,
+            Data =
+            {
+                ["phase"] = "before-start",
+                ["capturePhase"] = "before-start",
+                ["captureEnabled"] = "false",
+                ["implemented"] = "true",
+                ["reason"] = "memoryDumpNotRequested",
+                ["zhMessage"] = "内存转储采集未启用。",
+                ["zhHint"] = "未启用 --memory-dump/--memory-dumps，Guest Agent 不会生成进程 minidump。",
+                ["captureState"] = "disabled",
+                ["status"] = "disabled",
+                ["nonfatal"] = "true",
+                ["dumpType"] = MemoryDumpCaptureResult.MiniDumpTypeName,
+                ["evidenceRole"] = "memory-dump",
+                ["collectionName"] = "memory-dumps",
+                ["processRole"] = context.RootProcessId is null ? "sample-context" : "sample-root-context",
+                ["expectedRelativePath"] = "memory-dumps/*.dmp",
+                ["samplePath"] = context.SamplePath
+            }
+        };
+
+        if (context.RootProcessId is not null)
+        {
+            evt.Data["rootProcessId"] = context.RootProcessId.Value.ToString(CultureInfo.InvariantCulture);
+            evt.Data["processId"] = context.RootProcessId.Value.ToString(CultureInfo.InvariantCulture);
+            evt.Data["treeDepth"] = "0";
+            evt.Data["treeLineage"] = context.RootProcessId.Value.ToString(CultureInfo.InvariantCulture);
+        }
+
+        AddOptionalData(evt, "processName", evt.ProcessName);
+        return evt;
+    }
+
+    private static string MemoryDumpReasonZhHint(string? reason, string? diagnosticStage, bool duplicate)
+    {
+        if (duplicate)
+        {
+            return "同一进程已在本次运行中采集过转储，重复目标被跳过。";
+        }
+
+        if (string.IsNullOrWhiteSpace(reason))
+        {
+            return string.Empty;
+        }
+
+        if (reason.Contains("only implemented on Windows", StringComparison.OrdinalIgnoreCase))
+        {
+            return "内存转储当前仅支持 Windows guest；非 Windows 环境会记录 skipped。";
+        }
+
+        if (reason.Contains("root process ID is not available", StringComparison.OrdinalIgnoreCase))
+        {
+            return "样本根进程 ID 不可用，无法定位要转储的进程。";
+        }
+
+        if (reason.Contains("exited before memory dump", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(diagnosticStage, "process-state", StringComparison.OrdinalIgnoreCase))
+        {
+            return "目标进程在转储前已经退出；可尝试延长样本运行时间或更早启用 after-start 转储。";
+        }
+
+        if (reason.Contains("not found", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(diagnosticStage, "process-lookup", StringComparison.OrdinalIgnoreCase))
+        {
+            return "无法通过 PID 找到目标进程；它可能已经退出或权限不可见。";
+        }
+
+        if (string.Equals(diagnosticStage, "MiniDumpWriteDump", StringComparison.OrdinalIgnoreCase))
+        {
+            return "MiniDumpWriteDump 调用失败；请检查进程权限、位数匹配、DbgHelp 可用性和输出路径。";
+        }
+
+        return "请结合 diagnosticStage、exceptionType/message 和 win32Error 判断是权限、进程状态、DbgHelp 还是输出路径问题。";
+    }
+
+    private static bool IsExitedBeforeDump(string? reason, string? diagnosticStage)
+    {
+        return (!string.IsNullOrWhiteSpace(reason) &&
+                reason.Contains("exited before memory dump", StringComparison.OrdinalIgnoreCase)) ||
+            string.Equals(diagnosticStage, "process-state", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(diagnosticStage, "process-lookup", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>
@@ -521,6 +638,42 @@ internal sealed class MemoryDumpProbe : IGuestProbe
         catch (Exception ex) when (ex is ArgumentException or NotSupportedException)
         {
             return path;
+        }
+    }
+
+    /// <summary>
+    /// Adds event-level file size/hash metadata for captured minidumps.
+    /// Inputs are an event and dump path; processing reads the file best-effort
+    /// with sharing flags; failures are retained as diagnostics.
+    /// </summary>
+    private static void AddArtifactFileEvidence(SandboxEvent evt, string path)
+    {
+        try
+        {
+            var info = new FileInfo(path);
+            if (!info.Exists)
+            {
+                evt.Data["artifactHashStatus"] = "missing";
+                evt.Data["artifactExists"] = "false";
+                return;
+            }
+
+            evt.Data["artifactExists"] = "true";
+            evt.Data["sizeBytes"] = info.Length.ToString(CultureInfo.InvariantCulture);
+            evt.Data["artifactSizeBytes"] = info.Length.ToString(CultureInfo.InvariantCulture);
+            evt.Data["artifactLastWriteUtc"] = info.LastWriteTimeUtc.ToString("O", CultureInfo.InvariantCulture);
+            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            var sha256 = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(stream)).ToLowerInvariant();
+            evt.Data["sha256"] = sha256;
+            evt.Data["artifactSha256"] = sha256;
+            evt.Data["hashAlgorithm"] = "sha256";
+            evt.Data["artifactHashStatus"] = "computed";
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException or PathTooLongException)
+        {
+            evt.Data["artifactHashStatus"] = "failed";
+            evt.Data["artifactHashExceptionType"] = ex.GetType().FullName ?? ex.GetType().Name;
+            evt.Data["artifactHashMessage"] = ex.Message;
         }
     }
 

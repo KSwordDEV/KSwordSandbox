@@ -19,7 +19,7 @@ internal static class LiveEventsPage
         <html lang="zh-CN">
         <head>
           <meta charset="utf-8">
-          <title>Live raw event monitor - KSword Sandbox</title>
+          <title>实时原始事件监控 - KSword Sandbox</title>
           <style>
             :root { --blue:#43A0FF; --ink:#0f172a; --muted:#64748b; --line:#dbeafe; color-scheme: light; }
             * { box-sizing: border-box; }
@@ -28,36 +28,72 @@ internal static class LiveEventsPage
             main { max-width: 1280px; margin: 22px auto 54px; padding: 0 22px; }
             .topbar { align-items: flex-start; display:flex; justify-content:space-between; gap:16px; }
             .actions { display:flex; flex-wrap:wrap; gap:10px; margin-top:14px; }
-            a.button, button { background: var(--blue); border: 0; border-radius: 11px; color: white; cursor: pointer; display:inline-block; font-weight:800; padding:9px 14px; text-decoration:none; }
+            a.button, button { background: var(--blue); border: 0; border-radius:2px; color: white; cursor: pointer; display:inline-block; font-weight:800; padding:9px 14px; text-decoration:none; }
             a.secondary, button.secondary { background:#334155; }
-            section { background: rgba(255,255,255,.96); border:1px solid var(--line); border-radius:18px; box-shadow:0 16px 42px rgba(15,23,42,.08); margin-bottom:16px; padding:18px; }
+            section { background: rgba(255,255,255,.96); border:1px solid var(--line); border-radius:2px; box-shadow:none; margin-bottom:16px; padding:18px; }
             .grid { display:grid; gap:12px; grid-template-columns: repeat(4,minmax(0,1fr)); }
-            .metric { background:#f8fbff; border:1px solid var(--line); border-radius:14px; padding:12px; }
+            .metric { background:#f8fbff; border:1px solid var(--line); border-radius:2px; padding:12px; }
             .metric strong { color:var(--muted); display:block; font-size:12px; margin-bottom:6px; }
             .artifact-table td:nth-child(2) { min-width:280px; }
             .artifact-table td:nth-child(4) { min-width:160px; }
+            .artifact-card-grid { display:grid; gap:12px; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); margin-top:12px; }
+            .artifact-card-grid .artifact-group { grid-column:1/-1; }
+            .artifact-group { border:1px solid var(--line); border-left:3px solid var(--blue); margin-top:12px; padding:12px; }
+            .artifact-group-title { align-items:center; display:flex; flex-wrap:wrap; gap:8px; justify-content:space-between; margin-bottom:6px; }
+            .artifact-group-title h3 { margin:0; }
+            .artifact-group .artifact-card-grid { margin-top:8px; }
+            .artifact-card { background:#f8fbff; border:1px solid var(--line); border-left:3px solid var(--blue); padding:12px; }
+            .artifact-card.waiting { border-left-color:#cbd5e1; }
+            .artifact-card.ready { border-left-color:#22c55e; }
+            .artifact-card.endpoint { border-left-color:var(--blue); }
+            .artifact-card-title { align-items:flex-start; display:flex; gap:8px; justify-content:space-between; }
+            .artifact-card-title strong { overflow-wrap:anywhere; }
+            .artifact-card p { margin:8px 0; }
             .artifact-action { align-items:center; display:flex; flex-wrap:wrap; gap:8px; }
             .artifact-action .path-only { color:var(--muted); font-size:12px; font-weight:700; }
-            .report-ready { background:#eff6ff; border:1px solid rgba(67,160,255,.35); border-radius:14px; margin-top:12px; padding:12px; }
+            .report-ready { background:#eff6ff; border:1px solid rgba(67,160,255,.35); border-radius:2px; margin-top:12px; padding:12px; }
             .muted { color:var(--muted); }
-            code { background:#eef7ff; border-radius:7px; padding:2px 5px; word-break:break-all; }
-            .table-wrap { max-height:75vh; overflow:auto; border:1px solid var(--line); border-radius:14px; }
+            code { background:#eef7ff; border-radius:2px; padding:2px 5px; word-break:break-all; }
+            .table-wrap { max-height:75vh; overflow:auto; border:1px solid var(--line); border-radius:2px; }
             table { border-collapse:separate; border-spacing:0; width:100%; }
             td, th { border-bottom:1px solid #e5edf6; padding:9px; text-align:left; vertical-align:top; }
             th { background:#f7fbff; color:#475569; font-size:12px; position:sticky; top:0; text-transform:uppercase; z-index:1; }
             td:nth-child(5),td:nth-child(6) { max-width:360px; word-break:break-word; }
-            .progressbar { background:#e2e8f0; border-radius:999px; height:12px; margin:12px 0; overflow:hidden; }
-            .progressbar-fill { background:linear-gradient(90deg,var(--blue),#78c0ff); border-radius:999px; height:100%; transition:width .2s ease; }
+            .progressbar { background:#e2e8f0; border-radius:2px; height:12px; margin:12px 0; overflow:hidden; }
+            .progressbar.compact { height:8px; margin:8px 0; }
+            .progressbar-fill { background:linear-gradient(90deg,var(--blue),#78c0ff); border-radius:2px; height:100%; transition:width .2s ease; }
+            .progressbar-fill.failed { background:linear-gradient(90deg,#f97316,#ef4444); }
+            .monitor-stage-grid { display:grid; gap:8px; grid-template-columns:repeat(5,minmax(0,1fr)); margin:12px 0; }
+            .monitor-stage { background:#f8fbff; border:1px solid #e5edf6; border-left:3px solid #cbd5e1; color:#64748b; padding:9px; }
+            .monitor-stage small { color:#94a3b8; display:block; font-size:11px; margin-top:3px; }
+            .monitor-stage.active { border-left-color:var(--blue); color:#075985; font-weight:900; }
+            .monitor-stage.done { border-left-color:#22c55e; color:#047857; }
+            .monitor-stage.failed { background:#fff7ed; border-left-color:#f97316; color:#c2410c; font-weight:900; }
+            .card-status { align-items:center; display:flex; flex-wrap:wrap; gap:8px; justify-content:space-between; margin-bottom:8px; }
+            .card-status strong { margin-right:auto; }
+            .percent-label { color:#075985; font-size:12px; font-weight:900; }
+            .countdown { background:#fff7ed; border:1px solid #fdba74; color:#9a3412; font-weight:800; padding:8px 10px; }
             .step-list { display:grid; gap:8px; grid-template-columns:repeat(auto-fit,minmax(230px,1fr)); max-height:34vh; overflow:auto; padding:2px; }
-            .step-card { background:#f8fbff; border:1px solid var(--line); border-radius:12px; padding:10px; }
-            .step-card.running { border-color:var(--blue); box-shadow:0 0 0 2px rgba(67,160,255,.12); }
+            .step-card { background:#f8fbff; border:1px solid var(--line); border-radius:2px; padding:10px; }
+            .step-card summary { cursor:pointer; list-style:none; }
+            .step-card summary::-webkit-details-marker { display:none; }
+            .step-card summary::after { color:var(--muted); content:"＋"; float:right; font-weight:900; }
+            .step-card[open] summary::after { content:"－"; }
+            .step-card.running { border-color:var(--blue); box-shadow:none; }
             .step-card.failed { border-color:#fecaca; background:#fff7f7; }
             .step-card.completed { border-color:#bbf7d0; background:#f7fff9; }
             .step-card strong { display:block; margin-bottom:5px; }
-            .pill { background:#e7f3ff; border:1px solid rgba(67,160,255,.45); border-radius:999px; color:#075985; display:inline-block; font-size:12px; font-weight:800; padding:4px 9px; }
+            .step-output-details { border-top:1px solid #e5edf6; margin-top:8px; padding-top:8px; }
+            .step-output-details summary, .output-details summary { color:#075985; cursor:pointer; font-weight:800; }
+            .output-details { border:1px dashed var(--line); margin-top:12px; padding:10px; }
+            .output-details pre { background:#0f172a; color:#e5e7eb; max-height:28vh; overflow:auto; padding:10px; white-space:pre-wrap; word-break:break-word; }
+            .output-empty { color:var(--muted); font-style:italic; }
+            .pill { background:#e7f3ff; border:1px solid rgba(67,160,255,.45); border-radius:2px; color:#075985; display:inline-block; font-size:12px; font-weight:800; padding:4px 9px; }
             .pill.waiting { background:#f1f5f9; border-color:#cbd5e1; color:#475569; }
             .pill.ready { background:#dcfce7; border-color:#86efac; color:#047857; }
             .pill.endpoint { background:#e0f2fe; border-color:#7dd3fc; color:#0369a1; }
+            .pill.failed { background:#fee2e2; border-color:#fca5a5; color:#b91c1c; }
+            .pill.quiet { background:#f8fafc; border-color:#cbd5e1; color:#475569; }
             .status { min-height:24px; margin-top:10px; }
             .ok { color:#047857; }
             .error { color:#b91c1c; }
@@ -65,7 +101,7 @@ internal static class LiveEventsPage
             .vt-card .vt-head { align-items:flex-start; display:flex; justify-content:space-between; gap:14px; }
             .vt-card .vt-score { font-size:30px; font-weight:900; line-height:1; }
             .vt-card .vt-stats { display:grid; gap:8px; grid-template-columns:repeat(auto-fit,minmax(110px,1fr)); margin-top:12px; }
-            .vt-card .vt-stats span { background:rgba(255,255,255,.72); border:1px solid rgba(148,163,184,.28); border-radius:10px; padding:8px; }
+            .vt-card .vt-stats span { background:rgba(255,255,255,.72); border:1px solid rgba(148,163,184,.28); border-radius:2px; padding:8px; }
             .vt-danger { background:#fff7f7; border-color:#fca5a5; }
             .vt-danger .vt-score { color:#b91c1c; }
             .vt-warning { background:#fff8ed; border-color:#fdba74; }
@@ -74,10 +110,23 @@ internal static class LiveEventsPage
             .vt-ok .vt-score { color:#047857; }
             .vt-neutral { background:#f8fbff; border-color:#bae6fd; }
             .vt-quiet { background:#f8fafc; border-color:#cbd5e1; }
-            .toast { background:#0f172a; border-radius:999px; bottom:22px; color:white; left:50%; opacity:0; padding:10px 16px; pointer-events:none; position:fixed; transform:translate(-50%,12px); transition:.15s; z-index:20; }
+            .toast { background:#0f172a; border-radius:2px; bottom:22px; color:white; left:50%; opacity:0; padding:10px 16px; pointer-events:none; position:fixed; transform:translate(-50%,12px); transition:.15s; z-index:20; }
             .toast.visible { opacity:.96; transform:translate(-50%,0); }
             [data-copy], code, td, th { cursor: copy; }
             [data-copy]:hover, code:hover, td:hover, th:hover { outline:1px dashed var(--blue); outline-offset:2px; }
+            .metric, .step-card, .report-ready, .table-wrap, .artifact-group, .artifact-card, .vt-card .vt-stats span { box-shadow:none; border-radius:2px; }
+            .metric { background:transparent; border:0; border-left:3px solid var(--blue); padding:10px 12px; }
+            .step-card { background:transparent; border:0; border-left:3px solid var(--line); padding:8px 10px; }
+            .step-card.running { border-left-color:var(--blue); box-shadow:none; }
+            .step-card.failed { border-left-color:#ef4444; }
+            .step-card.completed { border-left-color:#22c55e; }
+            .table-wrap { border:0; border-top:1px solid var(--line); }
+            .report-ready { background:transparent; border-color:var(--line); }
+
+            /* Square, flat operator theme: keep visual nesting shallow. */
+            section, article, .metric, .pill, button, a.button, a.buttonlink, input, code, pre, .pathbox, .callout, .report-notice, .report-entry, .workspace-tab, .tab-button, .tab-panel, details, .progress-box, .progress-bar, .progress-fill, .stage, .recent-job-card, .runbook-step, .empty, .table-wrap, .step-card, .artifact-group, .artifact-card, .report-ready, .countdown, .toast, .num { border-radius: 0 !important; }
+            section, article, .metric, .pathbox, .callout, .report-notice, .report-entry, .tab-panel, .progress-box, .stage, .recent-job-card, .runbook-step, .step-card, .artifact-group, .artifact-card, .report-ready { box-shadow: none !important; }
+            .pill, button, a.button, a.buttonlink { box-shadow: none !important; }
             @media(max-width:900px){ .grid{grid-template-columns:1fr;} header{padding:24px;} }
           </style>
         </head>
@@ -88,9 +137,9 @@ internal static class LiveEventsPage
                 <h1 data-zh="实时原始事件监控" data-en="Live raw event monitor">实时原始事件监控</h1>
                 <p data-zh="这是独立动态监控页，可与主界面并行打开；这里只显示未归类原始事件，最终结论请看报告。" data-en="This standalone dynamic monitor can stay open beside the dashboard; it shows unclassified raw events only, and final conclusions stay in the report.">这是独立动态监控页，可与主界面并行打开；这里只显示未归类原始事件，最终结论请看报告。</p>
                 <p data-zh="如果此页由上传流程进入，后台分析已经交给 Web Host 执行；你可以停留在这里查看真实 runbook 进度、原始事件、VirusTotal 和证据下载。" data-en="If this page was entered from upload, background analysis has already been handed to the Web host; stay here to watch real runbook progress, raw events, VirusTotal, and evidence downloads.">如果此页由上传流程进入，后台分析已经交给 Web Host 执行；你可以停留在这里查看真实 runbook 进度、原始事件、VirusTotal 和证据下载。</p>
-                <p><span class="pill">Job</span> <code data-copy="{{Attr(jobId)}}">{{Html(jobId)}}</code></p>
+                <p><span class="pill" data-zh="任务 / Job" data-en="Job">任务 / Job</span> <code data-copy="{{Attr(jobId)}}">{{Html(jobId)}}</code></p>
               </div>
-              <button class="secondary" id="langToggle" type="button">English</button>
+              <button class="secondary" id="langToggle" type="button">切换到 English</button>
             </div>
             <div class="actions">
               <a class="button secondary" href="/" data-zh="返回主界面" data-en="Back to dashboard">返回主界面</a>
@@ -107,34 +156,31 @@ internal static class LiveEventsPage
               <h2 data-zh="任务概览" data-en="Job summary">任务概览</h2>
               <div class="grid">
                 <div class="metric"><strong data-zh="样本" data-en="Sample">样本</strong><code data-copy="{{Attr(samplePath)}}">{{Html(samplePath)}}</code></div>
-                <div class="metric"><strong data-zh="状态" data-en="Status">状态</strong><span class="pill" data-copy="{{Attr(job.Status.ToString())}}">{{Html(job.Status.ToString())}}</span></div>
-                <div class="metric"><strong data-zh="事件文件" data-en="Event file">事件文件</strong><code data-copy="{{Attr(job.GuestEventsPath ?? string.Empty)}}">{{Html(string.IsNullOrWhiteSpace(job.GuestEventsPath) ? "等待回收 / waiting" : job.GuestEventsPath)}}</code></div>
+                <div class="metric"><strong data-zh="状态" data-en="Status">状态</strong><span class="pill" data-copy="{{Attr(FormatAnalysisStatus(job.Status))}}">{{Html(FormatAnalysisStatus(job.Status))}}</span></div>
+                <div class="metric"><strong data-zh="事件文件" data-en="Event file">事件文件</strong><code data-copy="{{Attr(job.GuestEventsPath ?? string.Empty)}}">{{Html(string.IsNullOrWhiteSpace(job.GuestEventsPath) ? "等待回收" : job.GuestEventsPath)}}</code></div>
                 <div class="metric"><strong data-zh="报告" data-en="Report">报告</strong><code data-copy="{{Attr(job.HtmlReportPath ?? string.Empty)}}">{{Html(job.HtmlReportPath ?? "report.html")}}</code></div>
               </div>
               <div id="status" class="status muted" data-zh="等待连接实时事件流。" data-en="Waiting to connect live event stream.">等待连接实时事件流。</div>
               <div id="sources" class="muted"></div>
             </section>
             <section>
-              <h2 data-zh="Artifacts / 下载" data-en="Artifacts / downloads">Artifacts / 下载</h2>
-              <p class="muted" data-zh="证据文件来自真实 artifact index；可下载的文件走安全下载 endpoint，尚未回收的采集项显示等待状态。" data-en="Evidence files come from the real artifact index; downloadable files use the guarded download endpoint, and collection lanes not yet recovered show a waiting state.">证据文件来自真实 artifact index；可下载的文件走安全下载 endpoint，尚未回收的采集项显示等待状态。</p>
-              <div id="reportReadyActions" class="report-ready muted" data-copy="reports pending">报告按钮会在运行结束后保持可用 / report buttons remain available after the run finishes</div>
-              <div class="table-wrap">
-                <table class="artifact-table">
-                  <thead><tr><th data-zh="证据" data-en="Evidence">证据</th><th data-zh="路径" data-en="Path">路径</th><th data-zh="打开 / 下载" data-en="Open / download">打开 / 下载</th><th data-zh="状态" data-en="Status">状态</th></tr></thead>
-                  <tbody id="artifactRows"><tr><td colspan="4" class="muted" data-zh="正在解析 artifact 路径。" data-en="Resolving artifact paths.">正在解析 artifact 路径。</td></tr></tbody>
-                </table>
+              <h2 data-zh="证据 / 下载（Artifacts）" data-en="Artifacts / downloads">证据 / 下载（Artifacts）</h2>
+              <p class="muted" data-zh="证据文件来自真实证据索引（artifact index）；可下载的文件走安全下载端点（endpoint），尚未回收的采集项显示等待状态。" data-en="Evidence files come from the real artifact index; downloadable files use the guarded download endpoint, and collection lanes not yet recovered show a waiting state.">证据文件来自真实证据索引（artifact index）；可下载的文件走安全下载端点（endpoint），尚未回收的采集项显示等待状态。</p>
+              <div id="reportReadyActions" class="report-ready muted" data-copy="报告待生成 / reports pending">报告按钮会在运行结束后保持可用。</div>
+              <div id="artifactCards" class="artifact-card-grid">
+                <article class="artifact-card waiting muted" data-copy="证据路径解析中 / artifacts pending" data-zh="正在解析证据（artifact）路径。" data-en="Resolving artifact paths.">正在解析证据（artifact）路径。</article>
               </div>
             </section>
             <section>
               <h2 data-zh="虚拟机分析进度" data-en="Runbook progress">虚拟机分析进度</h2>
-              <p class="muted" data-zh="这里同步主界面的真实 runbook step，只展示安全的步骤状态，不展示命令行、stdout 或 stderr。" data-en="This panel mirrors the real runbook steps from the dashboard and only shows UI-safe status, not command lines, stdout, or stderr.">这里同步主界面的真实 runbook step，只展示安全的步骤状态，不展示命令行、stdout 或 stderr。</p>
-              <div id="runbookProgress" class="metric muted" data-copy="runbook progress pending">等待主界面启动分析 / waiting for dashboard analysis</div>
-              <div id="backgroundStatus" class="metric muted" data-copy="background execution pending">后台执行状态：等待启动 / background execution: waiting</div>
+              <p class="muted" data-zh="这里同步 durable runbook-progress.json 中的真实 runbook step，只展示安全的步骤状态，不展示命令行；终端 stdout/stderr 仅在完成后的排障展开项中折叠显示。" data-en="This panel mirrors real runbook steps from durable runbook-progress.json and only shows UI-safe status, not command lines, stdout, or stderr; terminal stdout/stderr stay collapsed in troubleshooting details after completion.">这里同步 durable runbook-progress.json 中的真实 runbook step，只展示安全的步骤状态，不展示命令行；终端 stdout/stderr 仅在完成后的排障展开项中折叠显示。</p>
+              <div id="runbookProgress" class="metric muted" data-copy="等待执行进度 / runbook progress pending" data-zh="等待主界面启动分析。" data-en="Waiting for dashboard analysis.">等待主界面启动分析。</div>
+              <div id="backgroundStatus" class="metric muted" data-copy="后台执行等待启动 / background execution pending" data-zh="后台执行状态：等待启动。" data-en="Background execution: waiting.">后台执行状态：等待启动。</div>
             </section>
             <section>
               <h2 data-zh="VirusTotal 官方结果" data-en="VirusTotal official result">VirusTotal 官方结果</h2>
-              <p class="muted" data-zh="只查询 SHA-256 文件报告，不上传样本；未配置或失败时不影响沙箱流程。" data-en="SHA-256 file-report lookup only; samples are not uploaded. Missing keys or failures do not affect sandbox execution.">只查询 SHA-256 文件报告，不上传样本；未配置或失败时不影响沙箱流程。</p>
-              <div id="vtResult" class="metric muted" data-copy="VirusTotal: pending">VirusTotal：等待查询 / waiting</div>
+              <p class="muted" data-zh="只查询 SHA-256 文件报告，不上传样本；未配置、未收录、限速、鉴权失败或超时都作为 quiet state 展示，不影响沙箱流程，也不会写 job 日志；只有显式 persist 才落盘。" data-en="SHA-256 file-report lookup only; samples are not uploaded. Not configured, not found, rate-limited, auth-failed, and timeout outcomes are shown as quiet states; they do not affect sandbox execution or write job logs, and only explicit persist writes durable enrichment evidence.">只查询 SHA-256 文件报告，不上传样本；未配置、未收录、限速、鉴权失败或超时都作为 quiet state 展示，不影响沙箱流程，也不会写 job 日志；只有显式 persist 才落盘。</p>
+              <div id="vtResult" class="metric muted" data-copy="VirusTotal：等待查询 / pending">VirusTotal：等待查询。</div>
               <button class="secondary" type="button" onclick="refreshVirusTotal()" data-zh="刷新 VirusTotal" data-en="Refresh VirusTotal">刷新 VirusTotal</button>
             </section>
             <section>
@@ -177,20 +223,32 @@ internal static class LiveEventsPage
             let latestArtifactIndex = null;
             let latestArtifactSignals = {};
             let reportAutoOpenScheduled = false;
+            let reportAutoOpenTimer = null;
+            let reportAutoOpenDeadline = 0;
+            let reportAutoOpenHref = '';
+            let reportAutoOpenRemainingSeconds = 0;
             const autoOpenReportFromMonitor = new URLSearchParams(window.location.search).get('fromUpload') === '1';
+            const monitorStages = [
+              ['启动 VM', 'Start VM', '还原快照并等待来宾机可用', 'Restore checkpoint and wait for guest readiness'],
+              ['部署 Payload', 'Deploy payload', '传入样本、Agent 与采集器', 'Copy sample, agent, and collectors'],
+              ['执行样本', 'Execute sample', '运行样本并采集行为', 'Run the sample and collect behavior'],
+              ['收集结果', 'Collect results', '同步事件、截图、转储与 PCAP', 'Sync events, screenshots, dumps, and PCAP'],
+              ['生成报告', 'Generate report', '刷新 JSON/HTML 报告并开放入口', 'Refresh JSON/HTML reports and expose links']
+            ];
             const seen = new Set();
 
             function t(zh, en) { return currentLanguage === 'en' ? en : zh; }
             function applyLanguage() {
               document.documentElement.lang = currentLanguage === 'en' ? 'en' : 'zh-CN';
               document.querySelectorAll('[data-zh][data-en]').forEach(el => {
-                if (el.id === 'status' || el.id === 'sources' || el.id === 'eventRows' || el.id === 'artifactRows' || el.id === 'reportReadyActions' || el.id === 'vtResult') { return; }
+                if (el.id === 'status' || el.id === 'sources' || el.id === 'eventRows' || el.id === 'artifactCards' || el.id === 'reportReadyActions' || el.id === 'vtResult') { return; }
                 el.textContent = t(el.getAttribute('data-zh'), el.getAttribute('data-en'));
               });
-              document.getElementById('langToggle').textContent = currentLanguage === 'en' ? '中文' : 'English';
+              document.getElementById('langToggle').textContent = currentLanguage === 'en' ? '切换到中文' : '切换到 English';
               if (lastProgressSnapshot) { renderRunbookProgress(lastProgressSnapshot); }
               if (lastBackgroundSnapshot) { renderBackgroundStatus(lastBackgroundSnapshot); }
               if (lastVirusTotalResult) { renderVirusTotal(lastVirusTotalResult); }
+              if (reportAutoOpenScheduled) { updateReportAutoOpenNotice(); }
               renderArtifactPanel();
             }
             document.getElementById('langToggle').addEventListener('click', () => {
@@ -198,6 +256,55 @@ internal static class LiveEventsPage
               localStorage.setItem('ksword-lang', currentLanguage);
               applyLanguage();
             });
+
+            function normalizeStatusToken(value) {
+              return String(value ?? '').trim().toLowerCase().replace(/[\s-]+/g, '_');
+            }
+
+            function localizeServerStatus(value) {
+              const raw = String(value ?? '').trim();
+              if (!raw) {
+                return '';
+              }
+
+              const labels = {
+                not_started: t('未启动', 'not started'),
+                queued: t('已排队', 'queued'),
+                pending: t('等待中', 'pending'),
+                waiting: t('等待中', 'waiting'),
+                running: t('运行中', 'running'),
+                completed: t('已完成', 'completed'),
+                complete: t('已完成', 'complete'),
+                succeeded: t('成功', 'succeeded'),
+                success: t('成功', 'success'),
+                failed: t('失败', 'failed'),
+                failure: t('失败', 'failure'),
+                canceled: t('已取消', 'canceled'),
+                cancelled: t('已取消', 'cancelled'),
+                skipped: t('已跳过', 'skipped'),
+                not_configured: t('未配置', 'not configured'),
+                lookup_failed: t('查询失败', 'lookup failed'),
+                not_found: t('未收录', 'not found'),
+                unavailable: t('不可用', 'unavailable'),
+                ready: t('就绪', 'ready')
+              };
+              return labels[normalizeStatusToken(raw)] || raw;
+            }
+
+            function localizeServerMessage(value) {
+              if (value == null || value === '') {
+                return '';
+              }
+
+              return String(value)
+                .replace(/\bnot configured\b/gi, t('未配置', 'not configured'))
+                .replace(/\bapi key\b/gi, t('API Key', 'API key'))
+                .replace(/\bnot found\b/gi, t('未找到', 'not found'))
+                .replace(/\blookup failed\b/gi, t('查询失败', 'lookup failed'))
+                .replace(/\bfailed\b/gi, t('失败', 'failed'))
+                .replace(/\bsucceeded\b/gi, t('成功', 'succeeded'))
+                .replace(/\bcompleted\b/gi, t('已完成', 'completed'));
+            }
 
             function connectSse() {
               stopLive();
@@ -288,9 +395,12 @@ internal static class LiveEventsPage
               if (!target || !snapshot) { return; }
               const state = String(snapshot.state || 'not_started').toLowerCase();
               const stateLabel = formatBackgroundState(state);
-              const message = snapshot.message || '';
+              const message = localizeServerMessage(snapshot.message || '');
               const job = snapshot.job || {};
               const hasReport = Boolean(job.htmlReportPath || job.htmlReportZhPath || job.htmlReportEnPath);
+              const progress = summarizeProgressForStatus(lastProgressSnapshot, state);
+              const elapsed = formatDuration(snapshot.duration || snapshot.Duration) || formatElapsedBetween(snapshot.startedAtUtc || snapshot.StartedAtUtc, snapshot.updatedAtUtc || snapshot.UpdatedAtUtc) || '-';
+              const currentStep = progress.currentStep || t('等待执行器更新', 'waiting for executor update');
               const reportButtons = hasReport || state === 'completed'
                 ? `<p class="actions">
                     <a class="button" href="/api/jobs/${encodeURIComponent(jobId)}/report/html?lang=zh" target="_blank" rel="noopener">${t('打开中文报告', 'Open Chinese report')}</a>
@@ -298,37 +408,118 @@ internal static class LiveEventsPage
                   </p>`
                 : '';
               const importMessage = snapshot.guestImportMessage
-                ? `<p class="${snapshot.guestImportSucceeded ? 'ok' : 'muted'}">${escapeHtml(snapshot.guestImportMessage)}</p>`
+                ? `<p class="${snapshot.guestImportSucceeded ? 'ok' : 'muted'}" data-copy="${escapeAttr(snapshot.guestImportMessage)}">${escapeHtml(localizeServerMessage(snapshot.guestImportMessage))}</p>`
                 : '';
+              const outputDetails = renderExecutionOutputDetails(snapshot);
               target.innerHTML = `
-                <div><span class="pill">${escapeHtml(stateLabel)}</span>
-                  <strong>${escapeHtml(snapshot.live ? t('虚拟机分析', 'VM analysis') : t('流程验证', 'flow verification'))}</strong></div>
+                <div class="card-status"><span class="pill ${backgroundStateTone(state)}">${escapeHtml(stateLabel)}</span>
+                  <strong>${escapeHtml(snapshot.live ? t('虚拟机分析', 'VM analysis') : t('流程验证', 'flow verification'))}</strong>
+                  <span class="percent-label" data-copy="${escapeAttr(progress.percentText)}">${escapeHtml(progress.percentText)}</span></div>
+                <div class="progressbar compact" aria-label="${escapeAttr(t('后台执行进度', 'background execution progress'))}"><div class="progressbar-fill ${state === 'failed' ? 'failed' : ''}" style="width:${progress.percent}%"></div></div>
+                <p>${t('当前步骤', 'Current step')}：<strong>${escapeHtml(currentStep)}</strong></p>
+                <p>${t('已耗时', 'Elapsed')}：<strong>${escapeHtml(elapsed)}</strong></p>
                 ${message ? `<p>${escapeHtml(message)}</p>` : ''}
                 ${importMessage}
-                ${reportButtons}`;
-              target.setAttribute('data-copy', `background ${stateLabel}: ${message}`);
-              if (autoOpenReportFromMonitor && state === 'completed' && (hasReport || job.htmlReportPath !== '') && !reportAutoOpenScheduled) {
+                ${reportButtons}
+                ${outputDetails}`;
+              target.setAttribute('data-copy', `background ${stateLabel}; progress=${progress.percentText}; current=${currentStep}; elapsed=${elapsed}; message=${message}`);
+              if (autoOpenReportFromMonitor && state === 'completed' && !reportAutoOpenScheduled) {
                 scheduleReportAutoOpen();
               }
             }
 
+            function renderExecutionOutputDetails(snapshot) {
+              // Inputs: optional terminal background snapshot. Processing:
+              // renders captured step stdout/stderr only inside collapsed
+              // details after execution has produced a terminal result; command
+              // lines remain hidden from this live monitor. Return: HTML.
+              const execution = snapshot?.execution || snapshot?.Execution;
+              const stepResults = Array.isArray(execution?.stepResults)
+                ? execution.stepResults
+                : (Array.isArray(execution?.StepResults) ? execution.StepResults : []);
+              if (!stepResults.length) { return ''; }
+
+              const stepOutput = stepResults.slice(0, 48).map(result => renderStepOutputDetails(result)).join('');
+              return `<details class="output-details">
+                <summary>${escapeHtml(t('排障输出（stdout/stderr，默认隐藏）', 'Troubleshooting output (stdout/stderr, collapsed by default)'))}</summary>
+                <p class="muted">${escapeHtml(t('这些输出来自终端 runbook-execution 结果，仅用于本机排障；命令行仍不在 Live 页展示。', 'These outputs come from the terminal runbook-execution result for local troubleshooting only; command lines are still not shown on the Live page.'))}</p>
+                ${stepOutput}
+              </details>`;
+            }
+
+            function renderStepOutputDetails(result) {
+              const title = result.title || result.Title || result.stepId || result.StepId || t('未命名步骤', 'unnamed step');
+              const index = Number(result.stepIndex ?? result.StepIndex ?? 0) + 1;
+              const status = Boolean(result.success ?? result.Success)
+                ? t('成功', 'success')
+                : t('未完成或失败', 'not completed or failed');
+              const stdout = String(result.standardOutput ?? result.StandardOutput ?? '');
+              const stderr = String(result.standardError ?? result.StandardError ?? '');
+              const exitCode = result.exitCode ?? result.ExitCode;
+              const duration = formatDuration(result.duration ?? result.Duration) || '-';
+              const stdoutHtml = stdout
+                ? `<pre data-copy="${escapeAttr(truncateOutputForCopy(stdout))}">${escapeHtml(truncateOutputForDisplay(stdout))}</pre>`
+                : `<p class="output-empty">${escapeHtml(t('stdout 为空', 'stdout is empty'))}</p>`;
+              const stderrHtml = stderr
+                ? `<pre data-copy="${escapeAttr(truncateOutputForCopy(stderr))}">${escapeHtml(truncateOutputForDisplay(stderr))}</pre>`
+                : `<p class="output-empty">${escapeHtml(t('stderr 为空', 'stderr is empty'))}</p>`;
+              return `<details class="step-output-details">
+                <summary data-copy="${escapeAttr(`${index}. ${title} ${status}`)}">${escapeHtml(`${index}. ${title}`)} <span class="pill">${escapeHtml(status)}</span></summary>
+                <p class="muted" data-copy="${escapeAttr(`exit=${exitCode ?? '-'}; duration=${duration}`)}">exit=${escapeHtml(exitCode ?? '-')} · ${escapeHtml(duration)}</p>
+                <details><summary>stdout</summary>${stdoutHtml}</details>
+                <details><summary>stderr</summary>${stderrHtml}</details>
+              </details>`;
+            }
+
+            function truncateOutputForDisplay(value) {
+              const text = String(value || '');
+              const max = 12000;
+              return text.length > max
+                ? `${text.slice(0, max)}\n… ${text.length - max} more characters hidden …`
+                : text;
+            }
+
+            function truncateOutputForCopy(value) {
+              const text = String(value || '');
+              const max = 12000;
+              return text.length > max ? text.slice(0, max) : text;
+            }
+
             function scheduleReportAutoOpen() {
               reportAutoOpenScheduled = true;
-              const href = `/api/jobs/${encodeURIComponent(jobId)}/report/html?lang=${currentLanguage === 'en' ? 'en' : 'zh'}`;
+              const href = `/api/jobs/${encodeURIComponent(jobId)}/report/html?lang=zh`;
+              reportAutoOpenHref = href;
+              reportAutoOpenDeadline = Date.now() + 5000;
+              updateReportAutoOpenNotice();
+              if (reportAutoOpenTimer) { clearInterval(reportAutoOpenTimer); }
+              reportAutoOpenTimer = setInterval(updateReportAutoOpenNotice, 250);
+              setTimeout(() => {
+                if (reportAutoOpenTimer) {
+                  clearInterval(reportAutoOpenTimer);
+                  reportAutoOpenTimer = null;
+                }
+                window.location.href = href;
+              }, 5000);
+            }
+
+            function updateReportAutoOpenNotice() {
+              const href = reportAutoOpenHref || `/api/jobs/${encodeURIComponent(jobId)}/report/html?lang=zh`;
+              const remaining = Math.max(0, Math.ceil(((reportAutoOpenDeadline || Date.now()) - Date.now()) / 1000));
+              reportAutoOpenRemainingSeconds = remaining;
+              const countdown = t(`${remaining} 秒后自动跳转`, `auto-open in ${remaining}s`);
               const target = document.getElementById('reportReadyActions');
               if (target) {
                 target.className = 'report-ready ok';
-                target.innerHTML = `<strong>${escapeHtml(t('报告已生成，正在自动打开。', 'Report is ready and opening automatically.'))}</strong>
+                target.innerHTML = `<strong>${escapeHtml(t('报告已生成，正在准备自动打开中文报告 report.zh.html。', 'Report is ready and preparing to open the Chinese report (report.zh.html).'))}</strong>
+                  <p class="countdown" data-copy="${escapeAttr(countdown)}">${escapeHtml(countdown)}</p>
                   <div class="artifact-action">
-                    <a class="button" href="${escapeAttr(href)}">${escapeHtml(t('打开报告', 'Open report'))}</a>
+                    <a class="button" href="${escapeAttr(href)}">${escapeHtml(t('立即打开中文报告', 'Open Chinese report now'))}</a>
                     <a class="button secondary" href="/api/jobs/${encodeURIComponent(jobId)}/report/html?lang=zh" target="_blank" rel="noopener">${escapeHtml(t('中文报告', 'Chinese report'))}</a>
                     <a class="button secondary" href="/api/jobs/${encodeURIComponent(jobId)}/report/html?lang=en" target="_blank" rel="noopener">${escapeHtml(t('英文报告', 'English report'))}</a>
                   </div>`;
+                target.setAttribute('data-copy', `${href} ${countdown}`);
               }
-              setStatus(t('报告已生成，页面即将跳转；如果没有跳转，请点击打开报告。', 'Report is ready; this page will navigate shortly. If it does not, click Open report.'), false);
-              setTimeout(() => {
-                window.location.href = href;
-              }, 1600);
+              setStatus(t(`报告已生成，页面将在 ${remaining} 秒后跳转到中文报告 report.zh.html；如果没有跳转，请点击立即打开中文报告。`, `Report is ready; this page will navigate to report.zh.html in ${remaining}s. If it does not, click Open Chinese report now.`), false);
             }
 
             function formatBackgroundState(state) {
@@ -340,6 +531,58 @@ internal static class LiveEventsPage
                 failed: t('失败', 'failed')
               };
               return labels[state] || state;
+            }
+
+            function backgroundStateTone(state) {
+              switch (String(state || '').toLowerCase()) {
+                case 'completed': return 'ready';
+                case 'failed': return 'failed';
+                case 'quiet': return 'quiet';
+                case 'queued':
+                case 'running': return 'endpoint';
+                default: return 'waiting';
+              }
+            }
+
+            function summarizeProgressForStatus(snapshot, backgroundState) {
+              const state = String(backgroundState || snapshot?.state || '').toLowerCase();
+              const percent = state === 'completed'
+                ? 100
+                : state === 'failed'
+                  ? progressPercent(snapshot || {})
+                  : Math.max(state === 'running' ? 5 : 0, progressPercent(snapshot || {}));
+              const currentStep = snapshot?.currentStepTitle ||
+                currentStepFromSnapshot(snapshot) ||
+                (state === 'queued' ? t('后台任务已排队', 'background task queued') : '');
+              return {
+                percent,
+                percentText: `${percent}%`,
+                currentStep
+              };
+            }
+
+            function currentStepFromSnapshot(snapshot) {
+              const steps = Array.isArray(snapshot?.steps) ? snapshot.steps : [];
+              if (!steps.length) { return ''; }
+              const index = snapshot.currentStepIndex === null || snapshot.currentStepIndex === undefined ? -1 : Number(snapshot.currentStepIndex);
+              const indexed = index >= 0 && index < steps.length ? steps[index] : null;
+              const running = steps.find(step => String(step.state || '').toLowerCase() === 'running');
+              const step = running || indexed || steps.find(step => String(step.state || '').toLowerCase() === 'pending') || steps[steps.length - 1];
+              return step ? (step.title || step.stepId || '') : '';
+            }
+
+            function formatElapsedBetween(start, end) {
+              const started = Date.parse(start || '');
+              const updated = Date.parse(end || '');
+              if (!Number.isFinite(started)) { return ''; }
+              const finish = Number.isFinite(updated) ? updated : Date.now();
+              const seconds = Math.max(0, Math.round((finish - started) / 1000));
+              if (seconds < 60) { return `${seconds}s`; }
+              const minutes = Math.floor(seconds / 60);
+              const rest = seconds % 60;
+              if (minutes < 60) { return `${minutes}m ${rest}s`; }
+              const hours = Math.floor(minutes / 60);
+              return `${hours}h ${minutes % 60}m`;
             }
 
             function normalizeJobSnapshot(raw) {
@@ -370,20 +613,98 @@ internal static class LiveEventsPage
             }
 
             function renderArtifactPanel() {
-              const body = document.getElementById('artifactRows');
+              const body = document.getElementById('artifactCards');
               if (!body) { return; }
               latestJobSnapshot = normalizeJobSnapshot(latestJobSnapshot || initialJob);
               const paths = buildArtifactPaths(latestJobSnapshot, latestArtifactSources);
               const rows = buildIndexedArtifactRows(paths);
-              body.innerHTML = rows.join('');
+              body.innerHTML = renderArtifactGroups(rows);
               renderReportReadyActions(paths);
+            }
+
+            function renderArtifactGroups(cards) {
+              cards = Array.isArray(cards) ? cards : [];
+              if (!cards.length) {
+                return `<article class="artifact-card waiting muted" data-copy="证据路径解析中 / artifacts pending">${escapeHtml(t('正在解析证据（artifact）路径。', 'Resolving artifact paths.'))}</article>`;
+              }
+
+              const order = ['reports', 'telemetry', 'execution', 'files', 'screenshots', 'memory', 'network', 'other'];
+              const groups = new Map();
+              for (const card of cards) {
+                const key = card.groupKey || 'other';
+                if (!groups.has(key)) {
+                  groups.set(key, {
+                    key,
+                    label: card.groupLabel || artifactGroupLabel(key),
+                    cards: []
+                  });
+                }
+                groups.get(key).cards.push(card);
+              }
+
+              return [...groups.values()]
+                .sort((a, b) => groupOrderIndex(order, a.key) - groupOrderIndex(order, b.key))
+                .map(group => {
+                  const readyCount = group.cards.filter(card => card.ready).length;
+                  const countText = t(`${readyCount}/${group.cards.length} 项就绪`, `${readyCount}/${group.cards.length} ready`);
+                  return `<article class="artifact-group" data-copy="${escapeAttr(`${group.label}: ${countText}`)}">
+                    <div class="artifact-group-title">
+                      <h3>${escapeHtml(group.label)}</h3>
+                      <span class="pill ${readyCount > 0 ? 'ready' : 'waiting'}">${escapeHtml(countText)}</span>
+                    </div>
+                    <div class="artifact-card-grid">${group.cards.map(card => card.html).join('')}</div>
+                  </article>`;
+                })
+                .join('');
+            }
+
+            function groupOrderIndex(order, key) {
+              const index = order.indexOf(key);
+              return index < 0 ? order.length : index;
+            }
+
+            function artifactGroupLabel(key) {
+              const labels = {
+                reports: t('报告', 'Reports'),
+                telemetry: t('事件与遥测', 'Events and telemetry'),
+                execution: t('执行记录', 'Execution records'),
+                files: t('文件证据', 'File evidence'),
+                screenshots: t('截图', 'Screenshots'),
+                memory: t('内存转储', 'Memory dumps'),
+                network: t('网络抓包', 'Network captures'),
+                other: t('其他证据', 'Other evidence')
+              };
+              return labels[key] || labels.other;
             }
 
             function buildIndexedArtifactRows(paths) {
               const artifacts = Array.isArray(latestArtifactIndex?.artifacts) ? latestArtifactIndex.artifacts : [];
               const rows = [];
-              rows.push(artifactRow(t('中文报告', 'Chinese report'), 'report.zh.html', paths.zhReportPath, `/api/jobs/${encodeURIComponent(jobId)}/report/html?lang=zh`, paths.hasAnyReport, t('使用报告 endpoint 打开', 'opens through report endpoint')));
-              rows.push(artifactRow(t('英文报告', 'English report'), 'report.en.html', paths.enReportPath, `/api/jobs/${encodeURIComponent(jobId)}/report/html?lang=en`, paths.hasAnyReport, t('使用报告 endpoint 打开', 'opens through report endpoint')));
+              const seen = new Set();
+              const reportReady = paths.hasAnyReport || isRunTerminal();
+              const reportHtmlArtifact = findArtifact(artifacts, artifact => fileNameEquals(artifactPath(artifact), 'report.html') || fileNameEquals(artifact.name || artifact.Name, 'report.html'));
+              const zhReportArtifact = findArtifact(artifacts, artifact => fileNameEquals(artifactPath(artifact), 'report.zh.html') || fileNameEquals(artifact.name || artifact.Name, 'report.zh.html'));
+              const enReportArtifact = findArtifact(artifacts, artifact => fileNameEquals(artifactPath(artifact), 'report.en.html') || fileNameEquals(artifact.name || artifact.Name, 'report.en.html'));
+              const jsonReportArtifact = findArtifact(artifacts, artifact => fileNameEquals(artifactPath(artifact), 'report.json') || fileNameEquals(artifact.name || artifact.Name, 'report.json'));
+              const eventsArtifact = findArtifact(artifacts, artifact => fileNameEquals(artifactPath(artifact), 'events.json') || fileNameEquals(artifact.name || artifact.Name, 'events.json'));
+              const driverArtifact = findArtifact(artifacts, artifact => fileNameEquals(artifactPath(artifact), 'driver-events.jsonl') || fileNameEquals(artifact.name || artifact.Name, 'driver-events.jsonl'));
+              const runbookArtifact = findArtifact(artifacts, artifact => fileNameEquals(artifactPath(artifact), 'runbook-execution.json') || fileNameEquals(artifact.name || artifact.Name, 'runbook-execution.json'));
+              const droppedArtifact = findArtifact(artifacts, artifact => artifactMatches(artifact, 'dropped-file', 'dropped-files'));
+              const screenshotArtifact = findArtifact(artifacts, artifact => artifactMatches(artifact, 'screenshot', 'screenshots'));
+              const dumpArtifact = findArtifact(artifacts, artifact => artifactMatches(artifact, 'memory-dump', 'memory-dumps'));
+              const pcapArtifact = findArtifact(artifacts, artifact => artifactMatches(artifact, 'packet-capture', 'packet-captures') || isPacketCapturePath(artifactPath(artifact)));
+
+              pushArtifactCard(rows, seen, t('默认 HTML 报告', 'Default HTML report'), 'report.html', artifactPath(reportHtmlArtifact) || paths.reportHtmlPath, `/api/jobs/${encodeURIComponent(jobId)}/report/html`, reportReady || Boolean(reportHtmlArtifact), t('兼容报告端点（endpoint）', 'compatibility report endpoint'));
+              pushArtifactCard(rows, seen, t('中文报告', 'Chinese report'), 'report.zh.html', artifactPath(zhReportArtifact) || paths.zhReportPath, `/api/jobs/${encodeURIComponent(jobId)}/report/html?lang=zh`, reportReady || Boolean(zhReportArtifact), t('打开 report.zh.html', 'opens report.zh.html'));
+              pushArtifactCard(rows, seen, t('英文报告', 'English report'), 'report.en.html', artifactPath(enReportArtifact) || paths.enReportPath, `/api/jobs/${encodeURIComponent(jobId)}/report/html?lang=en`, reportReady || Boolean(enReportArtifact), t('打开 report.en.html', 'opens report.en.html'));
+              pushArtifactCard(rows, seen, t('JSON 报告', 'JSON report'), 'report.json', artifactPath(jsonReportArtifact) || paths.reportJsonPath, artifactDownloadHref(jsonReportArtifact), Boolean(jsonReportArtifact || paths.reportJsonPath), jsonReportArtifact ? artifactDetail(jsonReportArtifact, t('已索引，可下载', 'indexed and downloadable')) : t('等待证据索引（artifact index）下载链接', 'waiting for artifact-index download link'));
+              pushArtifactCard(rows, seen, 'events.json', 'events.json', artifactPath(eventsArtifact) || paths.eventsJsonPath, artifactDownloadHref(eventsArtifact), Boolean(eventsArtifact || paths.eventsCollected), eventsArtifact ? artifactDetail(eventsArtifact, t('已索引，可下载', 'indexed and downloadable')) : (paths.eventsCollected ? t('已记录事件来源', 'event source recorded') : t('等待回收', 'waiting for collection')));
+              pushArtifactCard(rows, seen, 'driver-events.jsonl', 'driver-events.jsonl', artifactPath(driverArtifact) || paths.driverEventsJsonlPath, artifactDownloadHref(driverArtifact), Boolean(driverArtifact || paths.driverCollected), driverArtifact ? artifactDetail(driverArtifact, t('已索引，可下载', 'indexed and downloadable')) : (paths.driverCollected ? t('已发现驱动遥测', 'driver telemetry found') : t('等待回收', 'waiting for collection')));
+              pushArtifactCard(rows, seen, t('执行记录', 'Runbook execution'), 'runbook-execution.json', artifactPath(runbookArtifact) || paths.runbookExecutionPath, artifactDownloadHref(runbookArtifact), Boolean(runbookArtifact || paths.runbookExecutionPath), runbookArtifact ? artifactDetail(runbookArtifact, t('已索引，可下载', 'indexed and downloadable')) : t('执行后生成', 'expected after execution'));
+              pushArtifactCard(rows, seen, t('落地文件', 'Dropped files'), 'artifacts/dropped-files', artifactPath(droppedArtifact) || paths.droppedFilesPath, artifactDownloadHref(droppedArtifact), Boolean(droppedArtifact || latestArtifactSignals.droppedFiles), droppedArtifact ? artifactDetail(droppedArtifact, t('已索引，可下载', 'indexed and downloadable')) : (latestArtifactSignals.droppedFiles ? t('事件中已出现落地文件证据', 'dropped-file evidence observed in events') : t('等待回收', 'waiting for collection')));
+              pushArtifactCard(rows, seen, t('截图', 'Screenshots'), 'screenshots', artifactPath(screenshotArtifact) || paths.screenshotsPath, artifactDownloadHref(screenshotArtifact), Boolean(screenshotArtifact || latestArtifactSignals.screenshots), screenshotArtifact ? artifactDetail(screenshotArtifact, t('已索引，可下载', 'indexed and downloadable')) : (latestArtifactSignals.screenshots ? t('事件中已出现截图证据', 'screenshot evidence observed in events') : t('等待回收', 'waiting for collection')));
+              pushArtifactCard(rows, seen, t('内存转储', 'Memory dumps'), 'memory-dumps', artifactPath(dumpArtifact) || paths.memoryDumpsPath, artifactDownloadHref(dumpArtifact), Boolean(dumpArtifact || latestArtifactSignals.memoryDumps), dumpArtifact ? artifactDetail(dumpArtifact, t('已索引，可下载', 'indexed and downloadable')) : (latestArtifactSignals.memoryDumps ? t('事件中已出现内存转储证据', 'memory-dump evidence observed in events') : t('等待回收', 'waiting for collection')));
+              pushArtifactCard(rows, seen, t('PCAP 抓包', 'PCAP captures'), 'packet-captures', artifactPath(pcapArtifact) || paths.packetCapturePath, artifactDownloadHref(pcapArtifact), Boolean(pcapArtifact || paths.pcapCollected || latestArtifactSignals.packetCaptures), pcapArtifact ? artifactDetail(pcapArtifact, t('已索引，可下载', 'indexed and downloadable')) : (paths.pcapCollected || latestArtifactSignals.packetCaptures ? t('已发现 PCAP/PCAPNG 证据', 'PCAP/PCAPNG evidence found') : t('等待回收', 'waiting for collection')));
 
               if (artifacts.length > 0) {
                 const sorted = [...artifacts].sort((a, b) => artifactRank(a) - artifactRank(b) || artifactPath(a).localeCompare(artifactPath(b)));
@@ -391,23 +712,55 @@ internal static class LiveEventsPage
                   const label = artifactLabel(artifact);
                   const type = artifactTypeText(artifact);
                   const path = artifactPath(artifact);
-                  const detail = [type, formatBytes(artifact.sizeBytes), artifact.sha256 ? `sha256 ${artifact.sha256.slice(0, 12)}…` : ''].filter(Boolean).join(' · ');
-                  rows.push(artifactRow(label, type, path, artifact.downloadHref || '', Boolean(artifact.downloadHref || path), detail || t('已索引', 'indexed')));
+                  pushArtifactCard(rows, seen, label, type, path, artifactDownloadHref(artifact), Boolean(artifactDownloadHref(artifact) || path), artifactDetail(artifact, t('已索引', 'indexed')));
                 }
-
-                appendMissingCollectionRows(rows, artifacts, paths);
-                return rows;
               }
 
-              rows.push(artifactRow(t('默认 HTML 报告', 'Default HTML report'), 'report.html', paths.reportHtmlPath, `/api/jobs/${encodeURIComponent(jobId)}/report/html`, Boolean(paths.reportHtmlPath), t('兼容报告 endpoint', 'compatibility report endpoint')));
-              rows.push(artifactRow(t('JSON 报告', 'JSON report'), 'report.json', paths.reportJsonPath, '', Boolean(paths.reportJsonPath), t('等待 artifact index 下载链接', 'waiting for artifact-index download link')));
-              rows.push(artifactRow('events.json', 'events.json', paths.eventsJsonPath, '', paths.eventsCollected, paths.eventsCollected ? t('已记录事件来源', 'event source recorded') : t('等待回收', 'waiting for collection')));
-              rows.push(artifactRow('driver-events.jsonl', 'driver-events.jsonl', paths.driverEventsJsonlPath, '', paths.driverCollected, paths.driverCollected ? t('已发现驱动遥测', 'driver telemetry found') : t('等待回收', 'waiting for collection')));
-              rows.push(artifactRow(t('落地文件', 'Dropped files'), 'artifacts/dropped-files', paths.droppedFilesPath, '', Boolean(latestArtifactSignals.droppedFiles), latestArtifactSignals.droppedFiles ? t('事件中已出现落地文件证据', 'dropped-file evidence observed in events') : t('等待回收', 'waiting for collection')));
-              rows.push(artifactRow(t('截图', 'Screenshots'), 'screenshots', paths.screenshotsPath, '', Boolean(latestArtifactSignals.screenshots), latestArtifactSignals.screenshots ? t('事件中已出现截图证据', 'screenshot evidence observed in events') : t('等待回收', 'waiting for collection')));
-              rows.push(artifactRow(t('内存转储', 'Memory dumps'), 'memory-dumps', paths.memoryDumpsPath, '', Boolean(latestArtifactSignals.memoryDumps), latestArtifactSignals.memoryDumps ? t('事件中已出现内存转储证据', 'memory-dump evidence observed in events') : t('等待回收', 'waiting for collection')));
-              rows.push(artifactRow(t('PCAP 抓包', 'PCAP captures'), 'packet-captures', paths.packetCapturePath, '', paths.pcapCollected || Boolean(latestArtifactSignals.packetCaptures), paths.pcapCollected || latestArtifactSignals.packetCaptures ? t('已发现 PCAP/PCAPNG 证据', 'PCAP/PCAPNG evidence found') : t('等待回收', 'waiting for collection')));
               return rows;
+            }
+
+            function pushArtifactCard(rows, seen, displayName, fileName, path, href, ready, detail) {
+              const key = artifactCardKey(displayName, fileName, path);
+              if (seen.has(key)) { return; }
+              seen.add(key);
+              const groupKey = artifactGroupKey(displayName, fileName, path);
+              rows.push({
+                groupKey,
+                groupLabel: artifactGroupLabel(groupKey),
+                ready: Boolean(ready),
+                html: artifactRow(displayName, fileName, path, href, ready, detail)
+              });
+            }
+
+            function artifactGroupKey(displayName, fileName, path) {
+              const text = `${displayName || ''} ${fileName || ''} ${path || ''}`.toLowerCase();
+              if (text.includes('report') || text.includes('报告')) { return 'reports'; }
+              if (text.includes('events.json') || text.includes('driver-events') || text.includes('telemetry') || text.includes('遥测')) { return 'telemetry'; }
+              if (text.includes('runbook') || text.includes('execution') || text.includes('执行')) { return 'execution'; }
+              if (text.includes('dropped') || text.includes('落地')) { return 'files'; }
+              if (text.includes('screenshot') || text.includes('截图')) { return 'screenshots'; }
+              if (text.includes('memory-dump') || text.includes('memory dump') || text.includes('内存')) { return 'memory'; }
+              if (text.includes('packet') || text.includes('pcap') || text.includes('network') || text.includes('抓包')) { return 'network'; }
+              return 'other';
+            }
+
+            function artifactCardKey(displayName, fileName, path) {
+              return String(path || `${displayName}|${fileName}`).replace(/\\/g, '/').toLowerCase();
+            }
+
+            function findArtifact(artifacts, predicate) {
+              return (artifacts || []).find(artifact => {
+                try { return predicate(artifact || {}); } catch { return false; }
+              }) || null;
+            }
+
+            function artifactDownloadHref(artifact) {
+              return artifact ? (artifact.downloadHref || artifact.DownloadHref || '') : '';
+            }
+
+            function artifactDetail(artifact, fallback) {
+              if (!artifact) { return fallback || ''; }
+              return [artifactTypeText(artifact), formatBytes(artifact.sizeBytes ?? artifact.SizeBytes), (artifact.sha256 || artifact.Sha256) ? `sha256 ${String(artifact.sha256 || artifact.Sha256).slice(0, 12)}…` : ''].filter(Boolean).join(' · ') || fallback || '';
             }
 
             function appendMissingCollectionRows(rows, artifacts, paths) {
@@ -422,12 +775,12 @@ internal static class LiveEventsPage
             }
 
             function artifactMatches(artifact, category, collectionName) {
-              const text = `${artifact.category || ''} ${artifact.collectionName || ''} ${artifact.evidenceRole || ''} ${artifact.relativePath || ''}`.toLowerCase();
+              const text = `${artifact.category || artifact.Category || ''} ${artifact.collectionName || artifact.CollectionName || ''} ${artifact.evidenceRole || artifact.EvidenceRole || ''} ${artifact.relativePath || artifact.RelativePath || ''}`.toLowerCase();
               return text.includes(category) || text.includes(collectionName);
             }
 
             function artifactRank(artifact) {
-              const text = `${artifact.category || ''} ${artifact.collectionName || ''} ${artifact.relativePath || ''}`.toLowerCase();
+              const text = `${artifact.category || artifact.Category || ''} ${artifact.collectionName || artifact.CollectionName || ''} ${artifact.relativePath || artifact.RelativePath || ''}`.toLowerCase();
               if (text.includes('report')) { return 10; }
               if (text.includes('telemetry') || text.includes('events.json') || text.includes('jsonl')) { return 20; }
               if (text.includes('dropped-file') || text.includes('dropped-files')) { return 30; }
@@ -439,7 +792,7 @@ internal static class LiveEventsPage
             }
 
             function artifactLabel(artifact) {
-              const text = `${artifact.category || ''} ${artifact.collectionName || ''} ${artifact.relativePath || ''}`.toLowerCase();
+              const text = `${artifact.category || artifact.Category || ''} ${artifact.collectionName || artifact.CollectionName || ''} ${artifact.relativePath || artifact.RelativePath || ''}`.toLowerCase();
               if (text.includes('report')) { return t('报告文件', 'Report file'); }
               if (text.includes('driver-events') || text.includes('jsonl')) { return 'driver-events.jsonl'; }
               if (text.includes('events.json')) { return 'events.json'; }
@@ -448,15 +801,46 @@ internal static class LiveEventsPage
               if (text.includes('memory-dump') || text.includes('memory-dumps')) { return t('内存转储', 'Memory dump'); }
               if (text.includes('packet-capture') || text.includes('packet-captures') || text.includes('.pcap')) { return t('PCAP 抓包', 'PCAP capture'); }
               if (text.includes('runbook')) { return t('执行记录', 'Runbook record'); }
-              return artifact.name || artifact.category || t('证据文件', 'Evidence file');
+              return artifact.name || artifact.Name || artifact.category || artifact.Category || t('证据文件', 'Evidence file');
+            }
+
+            function localizeArtifactToken(value) {
+              const raw = String(value || '').trim();
+              if (!raw) { return ''; }
+              const key = raw.toLowerCase().replace(/[\s_]+/g, '-');
+              const labels = {
+                report: t('报告', 'report'),
+                reports: t('报告', 'reports'),
+                telemetry: t('遥测', 'telemetry'),
+                event: t('事件', 'event'),
+                events: t('事件', 'events'),
+                execution: t('执行', 'execution'),
+                runbook: t('执行记录', 'runbook'),
+                artifact: t('证据', 'artifact'),
+                artifacts: t('证据', 'artifacts'),
+                evidence: t('证据', 'evidence'),
+                'dropped-file': t('落地文件', 'dropped file'),
+                'dropped-files': t('落地文件', 'dropped files'),
+                screenshot: t('截图', 'screenshot'),
+                screenshots: t('截图', 'screenshots'),
+                'memory-dump': t('内存转储', 'memory dump'),
+                'memory-dumps': t('内存转储', 'memory dumps'),
+                'packet-capture': t('抓包', 'packet capture'),
+                'packet-captures': t('抓包', 'packet captures')
+              };
+              return labels[key] || raw;
             }
 
             function artifactTypeText(artifact) {
-              return [artifact.category || '', artifact.collectionName || '', artifact.name || ''].filter(Boolean).join(' / ') || 'artifact';
+              const category = localizeArtifactToken(artifact.category || artifact.Category || '');
+              const collection = localizeArtifactToken(artifact.collectionName || artifact.CollectionName || '');
+              const name = artifact.name || artifact.Name || '';
+              return [category, collection, name].filter(Boolean).join(' / ') || t('证据文件', 'artifact');
             }
 
             function artifactPath(artifact) {
-              return artifact.relativePath || artifact.safeLink || artifact.importPath || artifact.fullPath || artifact.name || '';
+              if (!artifact) { return ''; }
+              return artifact.relativePath || artifact.RelativePath || artifact.safeLink || artifact.SafeLink || artifact.importPath || artifact.ImportPath || artifact.fullPath || artifact.FullPath || artifact.name || artifact.Name || '';
             }
 
             function formatBytes(value) {
@@ -472,18 +856,14 @@ internal static class LiveEventsPage
               const target = document.getElementById('reportReadyActions');
               if (!target) { return; }
               if (reportAutoOpenScheduled) {
-                const href = `/api/jobs/${encodeURIComponent(jobId)}/report/html?lang=${currentLanguage === 'en' ? 'en' : 'zh'}`;
-                target.innerHTML = `<strong>${escapeHtml(t('报告已生成，正在自动打开。', 'Report is ready and opening automatically.'))}</strong>
-                  <div class="artifact-action"><a class="button" href="${escapeAttr(href)}">${escapeHtml(t('打开报告', 'Open report'))}</a></div>`;
-                target.className = 'report-ready ok';
-                target.setAttribute('data-copy', href);
+                updateReportAutoOpenNotice();
                 return;
               }
               const terminal = isRunTerminal();
               const hasReport = paths.hasAnyReport || terminal;
               const label = terminal
                 ? t('运行已结束：可打开中文或英文报告。', 'Run finished: Chinese and English reports are available to open.')
-                : t('报告将在计划或运行结束后通过现有 endpoint 打开。', 'Reports open through the existing endpoint after planning or run completion.');
+                : t('报告将在计划或运行结束后通过现有端点（endpoint）打开。', 'Reports open through the existing endpoint after planning or run completion.');
               const actions = hasReport
                 ? `<div class="artifact-action">
                     <a class="button" href="/api/jobs/${encodeURIComponent(jobId)}/report/html?lang=zh" target="_blank" rel="noopener">${t('打开中文报告', 'Open Chinese report')}</a>
@@ -508,12 +888,15 @@ internal static class LiveEventsPage
                 ? `<button class="secondary" type="button" data-copy="${escapeAttr(path)}" onclick="copyText(this.getAttribute('data-copy'))">${escapeHtml(t('复制路径', 'Copy path'))}</button>`
                 : '';
               const copy = [displayName, fileName, path || statusText, statusText].join(' | ');
-              return `<tr data-copy="${escapeAttr(copy)}">
-                <td><strong>${escapeHtml(displayName)}</strong><br><span class="muted">${escapeHtml(fileName)}</span></td>
-                <td>${pathHtml}</td>
-                <td><div class="artifact-action">${openAction}${copyAction}</div></td>
-                <td><span class="pill ${statusClass}" data-copy="${escapeAttr(statusText)}">${escapeHtml(statusText)}</span></td>
-              </tr>`;
+              return `<article class="artifact-card ${statusClass}" data-copy="${escapeAttr(copy)}">
+                <div class="artifact-card-title">
+                  <strong>${escapeHtml(displayName)}</strong>
+                  <span class="pill ${statusClass}" data-copy="${escapeAttr(statusText)}">${escapeHtml(statusText)}</span>
+                </div>
+                <p class="muted">${escapeHtml(fileName)}</p>
+                <p>${pathHtml}</p>
+                <div class="artifact-action">${openAction}${copyAction}</div>
+              </article>`;
             }
 
             function buildArtifactPaths(job, sources) {
@@ -548,6 +931,7 @@ internal static class LiveEventsPage
                 reportHtmlPath: reportHtmlPath || (jobRoot ? combineHostPath(jobRoot, 'report.html') : ''),
                 zhReportPath: zhReportPath || (jobRoot ? combineHostPath(jobRoot, 'report.zh.html') : ''),
                 enReportPath: enReportPath || (jobRoot ? combineHostPath(jobRoot, 'report.en.html') : ''),
+                runbookExecutionPath: runbookPath || (jobRoot ? combineHostPath(jobRoot, 'runbook-execution.json') : ''),
                 hasAnyReport: Boolean(reportHtmlPath || zhReportPath || enReportPath || reportJsonPath),
                 guestSourceDirectory,
                 eventsJsonPath,
@@ -645,37 +1029,80 @@ internal static class LiveEventsPage
               const total = Number(snapshot.totalSteps || 0);
               const completed = Number(snapshot.completedSteps || 0);
               const percent = progressPercent(snapshot);
-              const state = formatProgressState(snapshot.state);
+              const rawState = String(snapshot.state || 'pending').toLowerCase();
+              const state = formatProgressState(rawState);
+              const done = rawState === 'completed';
+              const failed = rawState === 'failed' || rawState === 'canceled';
+              const stageIndex = estimateMonitorStageIndex(percent, done, failed);
               const current = snapshot.currentStepTitle || t('等待下一步', 'waiting for next step');
               const elapsed = formatDuration(snapshot.duration) || '-';
               const failedStep = (snapshot.steps || []).find(step => ['failed', 'canceled'].includes(String(step.state || '').toLowerCase()));
               const failureReason = buildProgressFailureReason(snapshot, failedStep);
               const message = snapshot.message ? `<p class="muted">${escapeHtml(snapshot.message)}</p>` : '';
               const failure = failureReason ? `<p class="error">${t('失败原因：', 'Failure reason: ')}${escapeHtml(failureReason)}</p>` : '';
+              const stageRail = renderMonitorStages(stageIndex, done, failed);
               const steps = (snapshot.steps || []).slice(0, 24).map(step => {
                 const stepState = String(step.state || 'pending').toLowerCase();
                 const line = `${Number(step.stepIndex ?? 0) + 1}. ${step.title || step.stepId || ''}`;
+                const stepMessage = step.message || '';
                 const detail = [
                   formatProgressState(stepState),
                   step.exitCode == null ? '' : `exit ${step.exitCode}`,
                   step.duration ? formatDuration(step.duration) : '',
-                  step.message || ''
+                  stepMessage
                 ].filter(Boolean).join(' · ');
-                return `<div class="step-card ${escapeAttr(stepState)}" data-copy="${escapeAttr(line + ' ' + detail)}">
-                  <strong>${escapeHtml(line)}</strong>
-                  <span class="pill">${escapeHtml(detail || formatProgressState('pending'))}</span>
-                </div>`;
+                const duration = step.duration ? formatDuration(step.duration) : '-';
+                const diagnosticHint = t(
+                  '进度快照只包含 UI-safe 状态；stdout/stderr 不在进度流中，完成后如有终端执行结果会折叠在后台执行状态排障输出里。',
+                  'Progress snapshots contain UI-safe status only; stdout/stderr are not in the progress stream and, when terminal execution output exists, stay collapsed under background-status troubleshooting output.');
+                return `<details class="step-card ${escapeAttr(stepState)}" data-copy="${escapeAttr(line + ' ' + detail)}">
+                  <summary>
+                    <strong>${escapeHtml(line)}</strong>
+                    <span class="pill">${escapeHtml(detail || formatProgressState('pending'))}</span>
+                  </summary>
+                  <p>${t('Step status', 'Step status')}：<strong>${escapeHtml(formatProgressState(stepState))}</strong></p>
+                  <p>${t('已耗时', 'Elapsed')}：<strong>${escapeHtml(duration)}</strong></p>
+                  ${step.exitCode == null ? '' : `<p>exit：<strong>${escapeHtml(step.exitCode)}</strong></p>`}
+                  ${stepMessage ? `<p class="muted">${escapeHtml(stepMessage)}</p>` : ''}
+                  <p class="muted">${escapeHtml(diagnosticHint)}</p>
+                </details>`;
               }).join('');
               target.innerHTML = `
                 <div><span class="pill" data-copy="${escapeAttr(state)}">${escapeHtml(state)}</span>
                 <strong>${escapeHtml(completed)} / ${escapeHtml(total)} ${t('步骤完成', 'steps completed')}</strong></div>
-                <div class="progressbar" aria-label="runbook progress"><div class="progressbar-fill" style="width:${percent}%"></div></div>
+                <div class="progressbar" aria-label="runbook progress"><div class="progressbar-fill ${failed ? 'failed' : ''}" style="width:${percent}%"></div></div>
                 <p>${t('当前步骤', 'Current step')}：<strong>${escapeHtml(current)}</strong></p>
                 <p>${t('已耗时', 'Elapsed')}：<strong>${escapeHtml(elapsed)}</strong></p>
                 ${message}
                 ${failure}
+                <div class="monitor-stage-grid" aria-label="${escapeAttr(t('分析阶段进度', 'analysis stage progress'))}">${stageRail}</div>
                 <div class="step-list">${steps || `<p class="muted">${t('尚无步骤快照。', 'No step snapshot yet.')}</p>`}</div>`;
               target.setAttribute('data-copy', `runbook ${state} ${completed}/${total} ${current}; elapsed=${elapsed}; failure=${failureReason || '-'}`);
+            }
+
+            function estimateMonitorStageIndex(percent, done, failed) {
+              if (done) { return monitorStages.length - 1; }
+              const bounded = Math.max(0, Math.min(99, Number(percent) || 0));
+              const index = Math.floor((bounded / 100) * monitorStages.length);
+              return Math.max(0, Math.min(monitorStages.length - 1, failed ? Math.max(index, 1) : index));
+            }
+
+            function renderMonitorStages(activeIndex, done, failed) {
+              const bounded = Math.max(0, Math.min(monitorStages.length - 1, Number(activeIndex) || 0));
+              return monitorStages.map((stage, index) => {
+                const css = done
+                  ? 'done'
+                  : failed && index === bounded
+                    ? 'failed'
+                    : index < bounded
+                      ? 'done'
+                      : index === bounded
+                        ? 'active'
+                        : '';
+                const label = t(stage[0], stage[1]);
+                const detail = t(stage[2], stage[3]);
+                return `<div class="monitor-stage ${css}" data-copy="${escapeAttr(`${label} - ${detail}`)}"><strong>${escapeHtml(label)}</strong><small>${escapeHtml(detail)}</small></div>`;
+              }).join('');
             }
 
             function buildProgressFailureReason(snapshot, failedStep) {
@@ -748,11 +1175,13 @@ internal static class LiveEventsPage
             }
 
             async function refreshVirusTotal() {
-              const target = document.getElementById('vtResult');
-              if (target) {
-                target.textContent = t('VirusTotal：正在查询...', 'VirusTotal: querying...');
-                target.setAttribute('data-copy', target.textContent);
-              }
+              renderVirusTotal({
+                status: 'running',
+                configured: true,
+                queried: false,
+                found: false,
+                message: t('VirusTotal：正在查询 SHA-256 文件报告...', 'VirusTotal: querying SHA-256 file report...')
+              });
               try {
                 const response = await fetch(`/api/jobs/${encodeURIComponent(jobId)}/virustotal`, { cache: 'no-store' });
                 const payload = await requireOk(response, 'VirusTotal');
@@ -771,35 +1200,61 @@ internal static class LiveEventsPage
               const target = document.getElementById('vtResult');
               if (!target) { return; }
               const stats = result.lastAnalysisStats || {};
-              const malicious = Number(stats.malicious || 0);
-              const suspicious = Number(stats.suspicious || 0);
-              const harmless = Number(stats.harmless || 0);
-              const undetected = Number(stats.undetected || 0);
+              const engineCounts = result.engineCounts || {};
+              const malicious = vtNumber(stats.malicious, result.maliciousCount, engineCounts.malicious);
+              const suspicious = vtNumber(stats.suspicious, result.suspiciousCount, engineCounts.suspicious);
+              const harmless = vtNumber(stats.harmless, result.harmlessCount, engineCounts.harmless);
+              const undetected = vtNumber(stats.undetected, result.undetectedCount, engineCounts.undetected);
+              const timeoutEngines = vtNumber(stats.timeout, result.timeoutCount, engineCounts.timeout);
               let label;
               let className = 'metric vt-card vt-quiet';
               let score = t('未查询', 'not queried');
               let status = result.status || '';
-              if (!result.configured) {
-                label = t('未配置 API Key，已跳过官方结果。', 'API key not configured; official result skipped.');
-              } else if (!result.queried) {
-                label = result.message || t('查询失败或被限速，沙箱流程继续。', 'Lookup failed or was rate-limited; sandbox flow continues.');
-              } else if (!result.found) {
-                label = t('VirusTotal 未收录该 SHA-256。', 'VirusTotal has no report for this SHA-256.');
+              const vtStatus = normalizeVirusTotalStatus(result);
+              const workflowState = virusTotalWorkflowState(result);
+              const workflowLabel = virusTotalWorkflowLabel(workflowState);
+              const progress = virusTotalProgressPercent(workflowState, result);
+              const currentStep = virusTotalCurrentStep(workflowState, result);
+              const statusLabel = virusTotalStatusLabel(vtStatus, result);
+              if (workflowState === 'running') {
+                label = result.message || t('正在查询 VirusTotal 官方文件报告。', 'Querying the official VirusTotal file report.');
                 className = 'metric vt-card vt-neutral';
-                score = t('未收录', 'not found');
-              } else {
+                score = t('查询中', 'querying');
+              } else if (vtStatus === 'found' || result.found) {
                 label = t(`已收录：恶意 ${malicious} / 可疑 ${suspicious} / 无害 ${harmless} / 未检出 ${undetected}`, `Found: malicious ${malicious} / suspicious ${suspicious} / harmless ${harmless} / undetected ${undetected}`);
                 score = `${malicious + suspicious}`;
                 status = malicious > 0 ? t('命中恶意', 'malicious hits') : (suspicious > 0 ? t('可疑命中', 'suspicious hits') : t('未见恶意命中', 'no malicious hits'));
                 className = malicious > 0 ? 'metric vt-card vt-danger' : (suspicious > 0 ? 'metric vt-card vt-warning' : 'metric vt-card vt-ok');
+              } else {
+                const quiet = virusTotalQuietDisplay(vtStatus, result);
+                label = quiet.label;
+                score = quiet.score;
+                status = quiet.status;
+                className = quiet.className;
               }
 
               const link = result.permalink ? `<a class="button secondary" href="${escapeAttr(result.permalink)}" target="_blank" rel="noopener">VirusTotal</a>` : '';
-              const settingsLink = !result.configured ? ` <a href="/settings">${t('打开设置', 'Open settings')}</a>` : '';
+              const settingsLink = ['not_configured', 'authentication_failed'].includes(vtStatus) ? ` <a href="/settings">${t('打开设置', 'Open settings')}</a>` : '';
               const name = result.meaningfulName ? `<p>${escapeHtml(result.meaningfulName)}</p>` : '';
               const sha = result.sha256 ? `<p><code data-copy="${escapeAttr(result.sha256)}">${escapeHtml(result.sha256)}</code></p>` : '';
+              const cache = virusTotalCacheText(result);
+              const cacheHtml = cache ? `<p class="muted" data-copy="${escapeAttr(cache)}">${escapeHtml(cache)}</p>` : '';
+              const retry = result.retryAfterUtc ? `${t('重试时间', 'Retry after')}: ${result.retryAfterUtc}` : '';
+              const retryHtml = retry ? `<p class="muted" data-copy="${escapeAttr(retry)}">${escapeHtml(retry)}</p>` : '';
+              const isQuiet = Boolean(result.isQuietState || result.IsQuietState || workflowState === 'quiet');
+              const quietNote = isQuiet
+                ? `<p class="muted">${escapeHtml(t('静默状态卡：未配置、未收录、限速、鉴权失败、超时或查询失败不会写入报告噪声，也不会中断分析。', 'Quiet status card: not configured, not found, rate limits, auth failures, timeouts, or lookup failures do not write report noise and do not interrupt analysis.'))}</p>`
+                : '';
+              const statusCopy = `${vtStatus}${result.errorKind ? ` / ${result.errorKind}` : ''}`;
               target.className = className;
               target.innerHTML = `
+                <div class="card-status">
+                  <span class="pill ${backgroundStateTone(workflowState)}" data-copy="${escapeAttr(workflowLabel)}">${escapeHtml(workflowLabel)}</span>
+                  <strong>${escapeHtml(t('官方查询状态', 'Official lookup status'))}</strong>
+                  <span class="percent-label" data-copy="${progress}%">${progress}%</span>
+                </div>
+                <div class="progressbar compact" aria-label="VirusTotal lookup progress"><div class="progressbar-fill ${workflowState === 'failed' ? 'failed' : ''}" style="width:${progress}%"></div></div>
+                <p>${t('当前步骤', 'Current step')}：<strong>${escapeHtml(currentStep)}</strong></p>
                 <div class="vt-head">
                   <div>
                     <strong>${escapeHtml(label)}</strong>
@@ -807,15 +1262,175 @@ internal static class LiveEventsPage
                   </div>
                   <div class="vt-score" data-copy="${escapeAttr(score)}">${escapeHtml(score)}</div>
                 </div>
+                ${quietNote}
                 <div class="vt-stats">
                   <span data-copy="${malicious}"><strong>${t('恶意', 'Malicious')}</strong>${malicious}</span>
                   <span data-copy="${suspicious}"><strong>${t('可疑', 'Suspicious')}</strong>${suspicious}</span>
                   <span data-copy="${harmless}"><strong>${t('无害', 'Harmless')}</strong>${harmless}</span>
                   <span data-copy="${undetected}"><strong>${t('未检出', 'Undetected')}</strong>${undetected}</span>
+                  <span data-copy="${timeoutEngines}"><strong>${t('引擎超时', 'Engine timeout')}</strong>${timeoutEngines}</span>
                 </div>
                 ${sha}
-                <p class="artifact-action"><span class="pill ${result.found ? 'ready' : 'waiting'}">${escapeHtml(status || result.status || 'VirusTotal')}</span>${link}${settingsLink}</p>`;
-              target.setAttribute('data-copy', `VirusTotal ${result.status || ''}: ${label} ${result.sha256 || ''}`);
+                ${cacheHtml}
+                ${retryHtml}
+                <p class="artifact-action"><span class="pill ${virusTotalStatusPillTone(vtStatus, result)}" data-copy="${escapeAttr(statusCopy)}">${escapeHtml(status || statusLabel)}</span><span class="pill quiet" data-copy="${escapeAttr(vtStatus)}">${escapeHtml(vtStatus)}</span>${link}${settingsLink}</p>`;
+              target.setAttribute('data-copy', `VirusTotal ${workflowLabel}; progress=${progress}%; current=${currentStep}; ${vtStatus}: ${label} ${result.sha256 || ''}`);
+            }
+
+            function vtNumber(...values) {
+              for (const value of values) {
+                const number = Number(value);
+                if (Number.isFinite(number)) { return number; }
+              }
+              return 0;
+            }
+
+            function normalizeVirusTotalStatus(result) {
+              const raw = String(result?.status || '').toLowerCase();
+              const errorKind = String(result?.errorKind || '').toLowerCase();
+              const httpStatus = Number(result?.httpStatusCode || 0);
+              if (raw === 'running' || raw === 'querying' || raw === 'queued') { return raw; }
+              if (raw === 'timeout' || errorKind === 'timeout') { return 'timeout'; }
+              if (raw === 'rate_limited' || httpStatus === 429) { return 'rate_limited'; }
+              if (raw === 'authentication_failed' || httpStatus === 401 || httpStatus === 403) { return 'authentication_failed'; }
+              if (raw === 'found' || result?.found === true) { return 'found'; }
+              if (raw === 'not_found' || httpStatus === 404) { return 'not_found'; }
+              if (!result?.configured) { return 'not_configured'; }
+              return raw || 'lookup_failed';
+            }
+
+            function virusTotalQuietDisplay(status, result) {
+              const message = result?.message || '';
+              const displays = {
+                not_configured: {
+                  label: t('未配置 API Key，官方结果已安静跳过。', 'API key not configured; official result skipped quietly.'),
+                  score: t('未配置', 'not configured'),
+                  status: t('未配置', 'not configured')
+                },
+                not_found: {
+                  label: t('VirusTotal 未收录该 SHA-256；这是信誉查询状态，不代表样本恶意。', 'VirusTotal has no report for this SHA-256; this is reputation status, not malicious behavior.'),
+                  score: t('未收录', 'not found'),
+                  status: t('未收录', 'not found')
+                },
+                rate_limited: {
+                  label: t('VirusTotal 限速，已安静停止本次查询；沙箱流程继续。', 'VirusTotal rate-limited the lookup; this query stopped quietly and sandbox execution continues.'),
+                  score: t('限速', 'rate limited'),
+                  status: t('限速', 'rate limited')
+                },
+                authentication_failed: {
+                  label: t('VirusTotal API Key 被拒绝；请检查设置，沙箱流程继续。', 'VirusTotal rejected the API key; check settings. Sandbox execution continues.'),
+                  score: t('鉴权失败', 'auth failed'),
+                  status: t('鉴权失败', 'auth failed')
+                },
+                timeout: {
+                  label: t('VirusTotal 查询超时；已作为 quiet state 处理，不写 job 日志。', 'VirusTotal lookup timed out; it is handled as a quiet state and does not write job logs.'),
+                  score: t('超时', 'timeout'),
+                  status: t('超时', 'timeout')
+                },
+                missing_hash: {
+                  label: t('样本 SHA-256 不可用，已跳过官方查询。', 'Sample SHA-256 is unavailable; official lookup skipped.'),
+                  score: t('无哈希', 'missing hash'),
+                  status: t('无哈希', 'missing hash')
+                },
+                invalid_hash: {
+                  label: t('样本 SHA-256 格式无效，未调用 VirusTotal。', 'Sample SHA-256 is malformed; VirusTotal was not called.'),
+                  score: t('哈希无效', 'invalid hash'),
+                  status: t('哈希无效', 'invalid hash')
+                }
+              };
+              const display = displays[status] || {
+                label: t('VirusTotal 查询失败，已安静处理；沙箱流程继续。', 'VirusTotal lookup failed quietly; sandbox execution continues.'),
+                score: t('失败', 'failed'),
+                status: t('查询失败', 'lookup failed')
+              };
+              return {
+                label: message || display.label,
+                score: display.score,
+                status: display.status,
+                className: status === 'lookup_failed' ? 'metric vt-card vt-warning' : 'metric vt-card vt-quiet'
+              };
+            }
+
+            function virusTotalStatusPillTone(status, result) {
+              if (status === 'found' && result?.found) { return 'ready'; }
+              if (['not_configured', 'not_found', 'rate_limited', 'authentication_failed', 'timeout', 'missing_hash', 'invalid_hash', 'lookup_failed'].includes(status)) { return 'quiet'; }
+              return 'waiting';
+            }
+
+            function virusTotalStatusLabel(status, result) {
+              const labels = {
+                found: result?.verdict ? `${t('已收录', 'found')} / ${result.verdict}` : t('已收录', 'found'),
+                not_found: t('未收录', 'not found'),
+                not_configured: t('未配置', 'not configured'),
+                rate_limited: t('限速', 'rate limited'),
+                authentication_failed: t('鉴权失败', 'auth failed'),
+                timeout: t('超时', 'timeout'),
+                lookup_failed: t('查询失败', 'lookup failed'),
+                missing_hash: t('无 SHA-256', 'missing SHA-256'),
+                invalid_hash: t('SHA-256 无效', 'invalid SHA-256'),
+                running: t('查询中', 'querying'),
+                queued: t('已排队', 'queued')
+              };
+              return labels[status] || status || 'VirusTotal';
+            }
+
+            function virusTotalCacheText(result) {
+              if (!result) { return ''; }
+              const pieces = [];
+              if (result.cacheHit) { pieces.push(t('缓存命中', 'cache hit')); }
+              if (result.cacheAgeSeconds !== null && result.cacheAgeSeconds !== undefined) { pieces.push(`${t('缓存年龄', 'cache age')} ${result.cacheAgeSeconds}s`); }
+              if (result.cacheTtlSeconds !== null && result.cacheTtlSeconds !== undefined) { pieces.push(`${t('缓存 TTL', 'cache TTL')} ${result.cacheTtlSeconds}s`); }
+              if (result.cacheExpiresAtUtc) { pieces.push(`${t('过期', 'expires')} ${result.cacheExpiresAtUtc}`); }
+              return pieces.join(' · ');
+            }
+
+            function virusTotalWorkflowState(result) {
+              const status = normalizeVirusTotalStatus(result);
+              if (status === 'queued') { return 'queued'; }
+              if (status === 'running' || status === 'querying') { return 'running'; }
+              if (status === 'found') { return 'completed'; }
+              if (['not_found', 'not_configured', 'rate_limited', 'authentication_failed', 'timeout', 'missing_hash', 'invalid_hash', 'lookup_failed'].includes(status)) { return 'quiet'; }
+              if (status.includes('fail')) { return 'failed'; }
+              return 'quiet';
+            }
+
+            function virusTotalWorkflowLabel(state) {
+              const labels = {
+                queued: t('已排队', 'queued'),
+                running: t('运行中', 'running'),
+                completed: t('已完成', 'completed'),
+                quiet: t('安静状态', 'quiet state'),
+                failed: t('失败', 'failed')
+              };
+              return labels[state] || state;
+            }
+
+            function virusTotalProgressPercent(state, result) {
+              if (state === 'completed' || state === 'quiet' || state === 'failed') { return 100; }
+              if (state === 'running') { return 60; }
+              if (state === 'queued') { return 10; }
+              if (!result?.configured) { return 100; }
+              return 100;
+            }
+
+            function virusTotalCurrentStep(state, result) {
+              const status = normalizeVirusTotalStatus(result);
+              if (state === 'queued') { return t('等待查询 SHA-256 报告', 'waiting to query SHA-256 report'); }
+              if (state === 'running') { return t('调用 VirusTotal 文件报告 API', 'calling VirusTotal file report API'); }
+              if (state === 'completed') { return result?.found ? t('解析官方引擎统计', 'parsing official engine stats') : t('确认官方未收录', 'confirmed not found in official report'); }
+              if (state === 'quiet') {
+                const steps = {
+                  not_configured: t('等待配置 API Key；未写 job 日志', 'waiting for API key configuration; no job log was written'),
+                  not_found: t('确认未收录；默认仅展示不落盘', 'confirmed not found; display-only by default'),
+                  rate_limited: t('收到限速响应；等待后再查', 'received rate limit; wait before retrying'),
+                  authentication_failed: t('API Key 鉴权失败；请到设置页检查', 'API key authentication failed; check Settings'),
+                  timeout: t('查询超时；保持低噪音', 'lookup timed out; staying low-noise'),
+                  missing_hash: t('缺少 SHA-256；跳过查询', 'missing SHA-256; lookup skipped'),
+                  invalid_hash: t('SHA-256 格式无效；跳过查询', 'invalid SHA-256; lookup skipped')
+                };
+                return steps[status] || (result?.message || t('查询状态已安静处理', 'lookup state handled quietly'));
+              }
+              return result?.message || t('查询失败，沙箱流程继续', 'lookup failed; sandbox flow continues');
             }
 
             function renderSnapshot(snapshot, transport) {
@@ -897,8 +1512,60 @@ internal static class LiveEventsPage
               const text = await response.text();
               let payload;
               try { payload = text ? JSON.parse(text) : {}; } catch { payload = { error: text }; }
-              if (!response.ok) { throw new Error(`${label} ${t('失败', 'failed')}: ${payload.error || response.status}`); }
+              if (!response.ok) { throw new Error(formatHttpError(label, response, payload)); }
               return payload;
+            }
+
+            function formatHttpError(label, response, payload) {
+              const statusText = response.statusText ? ` ${response.statusText}` : '';
+              const detail = localizeServerMessage(extractErrorMessage(payload) || t('服务器未返回错误详情。', 'No error detail was returned by the server.'));
+              const traceId = payload && (payload.traceId || payload.requestId);
+              const traceText = traceId ? (currentLanguage === 'en' ? `, trace ${traceId}` : `，跟踪 ID ${traceId}`) : '';
+              return `${label} ${t('失败', 'failed')} (HTTP ${response.status}${statusText}${traceText}): ${detail} ${t('下一步：', 'Next step: ')}${suggestNextStep(label, response, payload)}`;
+            }
+
+            function extractErrorMessage(payload) {
+              if (!payload) { return ''; }
+              if (typeof payload === 'string') { return payload; }
+              if (payload.error) {
+                if (typeof payload.error === 'string') { return payload.error; }
+                if (payload.error.message) { return payload.error.message; }
+              }
+              if (payload.title || payload.detail) { return [payload.title, payload.detail].filter(Boolean).join(': '); }
+              if (payload.message) { return payload.message; }
+              if (payload.errors) {
+                return Object.entries(payload.errors)
+                  .map(([field, values]) => `${field}: ${Array.isArray(values) ? values.join('; ') : values}`)
+                  .join(' | ');
+              }
+              if (payload.raw) { return payload.raw; }
+              return '';
+            }
+
+            function suggestNextStep(label, response, payload) {
+              const labelText = String(label || '');
+              const code = String(payload?.error?.code || payload?.code || payload?.title || '').toLowerCase();
+              if (response.status === 404 || code.includes('not_found') || code.includes('notfound')) {
+                return t('返回主界面刷新近期任务，确认此 job 仍在当前 Web Host；如任务存在，请重新打开监控页。', 'Go back to the dashboard and refresh recent jobs to confirm this job still exists in this Web host; if it exists, reopen the monitor.');
+              }
+
+              if (/VirusTotal/i.test(labelText)) {
+                return t('打开设置页确认 API Key；缺失、限速或超时不会阻断沙箱分析。', 'Open Settings to confirm the API key; missing keys, rate limits, or timeouts do not block sandbox analysis.');
+              }
+
+              if (/证据|artifact/i.test(labelText)) {
+                return t('等待采集回收后重试，或打开报告链接查看当前已生成的证据。', 'Wait for collection recovery and retry, or open the report link to view evidence already generated.');
+              }
+
+              if (/进度|后台|runbook|progress|background/i.test(labelText)) {
+                return t('打开执行流程页查看失败阶段；本页会继续轮询安全进度快照。', 'Open the execution-flow page to inspect the failed stage; this page will keep polling UI-safe progress snapshots.');
+              }
+
+              if (/事件|events/i.test(labelText)) {
+                return t('保持本页打开并稍后手动刷新；若仍无事件，请检查 events.json 或 driver-events.jsonl 是否已回收。', 'Keep this page open and refresh again shortly; if events still do not appear, check whether events.json or driver-events.jsonl has been recovered.');
+              }
+
+              return t('稍后重试；如果重复失败，请复制本状态并打开执行流程页排障。', 'Retry shortly; if it repeats, copy this status and open the execution-flow page for troubleshooting.');
             }
 
             function setStatus(message, isError) {
@@ -976,5 +1643,19 @@ internal static class LiveEventsPage
             .Replace("'", "\\'", StringComparison.Ordinal)
             .Replace("\r", string.Empty, StringComparison.Ordinal)
             .Replace("\n", "\\n", StringComparison.Ordinal);
+    }
+
+    private static string FormatAnalysisStatus(AnalysisStatus status)
+    {
+        return status switch
+        {
+            AnalysisStatus.Queued => "排队中",
+            AnalysisStatus.Planning => "规划中",
+            AnalysisStatus.Planned => "已规划",
+            AnalysisStatus.Running => "运行中",
+            AnalysisStatus.Completed => "已完成",
+            AnalysisStatus.Failed => "失败",
+            _ => status.ToString()
+        };
     }
 }

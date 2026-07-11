@@ -1,4 +1,29 @@
-# Runtime entry point
+# 运行入口 / Runtime entry point
+
+本页中文优先。命令参数名（如 `-Mode`、`-Live`、`-SamplePath`）和机器可读
+JSON key（如 `RecommendedActions`、`SecretValuePrinted`）保持英文，不翻译。
+
+日常使用最短路径：
+
+```powershell
+.\install.ps1 -Mode Install -PromptPassword   # 首次或配置变化时运行
+.\run.ps1                                     # 日常启动 WebUI；不会启动/还原 VM
+```
+
+出错时先按输出中的“下一步”处理。常见路径：
+
+- WebUI 端口不可用：去掉 `-StrictUrl` 让脚本自动换端口，或传
+  `-Url http://127.0.0.1:<free-port>`。
+- 找不到配置：普通启动会显示“本机配置未就绪”，请先打开安装向导完成
+  `Install / prepare local settings`，再在 `Change settings` 里确认 VM/checkpoint/driver path。
+- payload 缺失/过期：运行 `.\scripts\Prepare-GuestPayload.ps1 -SelfContained`。
+- `Analyze` 没有样本：使用 `-SamplePreset Notepad` / `-SamplePreset HarmlessSample`
+  或传入 `-SamplePath <sample.exe>`。
+- 真实 R0 缺少 driver：配置 `-DriverHostPath <test-signed .sys>`，或仅做链路验证时
+  设置 `driver.useMockCollector=true`。
+
+English summary: `.\run.ps1` defaults to WebUI/PlanOnly-safe behavior. VM
+mutation requires an explicit `-Live`.
 
 Use `run.ps1` after `install.ps1` has prepared local settings.
 
@@ -8,6 +33,10 @@ The intended operator flow is:
 .\install.ps1   # one-time or when VM/password/config changes
 .\run.ps1       # each time you want to use the local WebUI
 ```
+
+`.\run.ps1 -Mode StartWebUI` 是一键 WebUI 入口：未显式传
+`-OpenBrowser:$false` 时会自动打开浏览器。默认 `.\run.ps1` 仍只启动本地
+WebUI 服务，不会启动、还原或停止 VM。
 
 Release bundles may also expose the same entry points from `scripts\`:
 
@@ -47,6 +76,15 @@ Equivalent explicit form:
 .\run.ps1 -Mode StartWebUI
 .\scripts\run.ps1 -Mode StartWebUI
 ```
+
+In interactive packaging use, `StartWebUI` opens the browser automatically unless
+`-OpenBrowser:$false` is supplied.
+
+If no installed local config exists and the resolver would fall back to
+`config\sandbox.example.json`, ordinary `WebUI`/`StartWebUI`/`Analyze`/`Plan`
+startup stops with the Chinese message `本机配置未就绪`. This avoids launching
+with placeholder VM/checkpoint values. Explicit `-ConfigPath` remains supported
+for developers who intentionally want the example or a custom config.
 
 Preview startup without building payloads, starting dotnet, opening a browser,
 or touching a VM:
@@ -139,6 +177,49 @@ single command therefore ends with:
 - `report.json`
 - `report.html`
 
+## Rebuild reports and inspect artifacts without rerunning the VM
+
+Operators can rebuild reports or inspect collected artifacts after a live run
+without starting, restoring, stopping, or mutating Hyper-V:
+
+```powershell
+# List runtime jobs.
+dotnet run --project .\tools\KSword.Sandbox.JobTool\KSword.Sandbox.JobTool.csproj -- list-jobs
+
+# Show one job summary.
+dotnet run --project .\tools\KSword.Sandbox.JobTool\KSword.Sandbox.JobTool.csproj -- show-job --job-id <job-guid>
+
+# Rebuild report.json/report.html/report.zh.html/report.en.html and artifact-index.json.
+.\scripts\Rebuild-JobReport.ps1 -JobId <job-guid>
+
+# Inspect artifacts in memory without rewriting artifact-index.json.
+.\scripts\Inspect-JobArtifacts.ps1 -JobId <job-guid>
+
+# Explicitly refresh artifact-index.json when desired.
+.\scripts\Inspect-JobArtifacts.ps1 -JobId <job-guid> -WriteIndex
+```
+
+中文提示：这些命令只读取已有 job 目录、`events.json`、`driver-events.jsonl`、
+`runbook-execution.json`、PCAP 和其他产物；不会重跑样本，也不会操作 VM。
+`Rebuild-JobReport.ps1` 会调用 JobTool 的 `rebuild-report`，可在已有
+`report.json` 中推断原始样本路径；若样本无法推断，请追加 `-SamplePath`。
+
+JobTool also supports JSON output for automation:
+
+```powershell
+dotnet run --project .\tools\KSword.Sandbox.JobTool\KSword.Sandbox.JobTool.csproj -- inspect-artifacts --job-id <job-guid> --json
+.\scripts\Rebuild-JobReport.ps1 -JobId <job-guid> -Json
+```
+
+The wrapper scripts accept `-NoBuild` when the JobTool project has already been
+built and you want to avoid an implicit `dotnet run` build during triage.
+
+All JobTool and wrapper output is designed to be operator friendly in English
+and Chinese and to redact password/API-key/token-like fields before printing.
+Do not commit regenerated runtime artifacts; keep job folders, reports, samples,
+payload binaries, VM disks, and local secrets under `D:\Temp\KSwordSandbox` or
+another ignored runtime root.
+
 Before invoking `scripts/Invoke-HyperVE2E.ps1`, `run.ps1` checks the staged Guest
 Agent/R0Collector payload under the configured `guestPayloadRoot`. If it is
 missing, it calls `scripts/Prepare-GuestPayload.ps1 -SelfContained` so a fresh
@@ -210,3 +291,29 @@ launched.
 
 Keep runtime outputs under `D:\Temp\KSwordSandbox`; do not commit generated
 reports, samples, payload binaries, VM disks, or local secrets.
+
+## 便携包一键 WebUI 启动
+
+中文优先：`run.ps1` 现在会自动选择 WebUI 启动目标。源码仓库中优先使用
+`src\KSword.Sandbox.Web\KSword.Sandbox.Web.csproj`；便携包中如果没有源码项目，则使用
+`app\host-web\KSword.Sandbox.Web.exe`，或退回到 `app\host-web\KSword.Sandbox.Web.dll` + `dotnet`。
+日常入口仍然是一条命令：
+
+```powershell
+.\run.ps1
+.\run.ps1 -Mode StartWebUI -OpenBrowser
+.\run.ps1 -Mode Status
+```
+
+`Status`/`CheckEnvironment` 会展示 `WebUiLaunchKind`、`WebUiLaunchPath`、`PublishedWebAppExists`、
+`PortableWebUiReady`、`VmProfile`、`HostTestSigningState`、guest password presence 和 R0 driver
+配置状态。缺失本机配置、payload、VM profile、driver path 或 published WebUI 时，先看
+`RecommendedActions`；这些检查不会启动、还原或停止 Hyper-V VM。
+
+便携包运行要求：
+
+- `install.ps1`/`run.ps1` 位于包根目录，`scripts\run.ps1` 只是等价 wrapper。
+- `app\host-web` 来自外部发布目录，不从仓库 `bin/`、`obj/`、`x64/` 复制。
+- 本机 `sandbox.local.json`、guest password、VT key、样本、报告和 VM 输出继续保存在 runtime root
+  或 Windows 环境/DPAPI 中，不进入 zip。
+- 默认 WebUI 不执行 Live；Live Hyper-V 仍必须在 WebUI/API 或 CLI 中显式选择。

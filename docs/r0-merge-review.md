@@ -1,6 +1,12 @@
 # R0 Driver Merge Review
 
 Date: 2026-07-10
+
+> Historical merge-coordination note. It is not an operator runbook and should
+> not be used as current implementation status without checking the source and
+> the canonical R0 docs: `docs/r0-driver-core.md`, `docs/r0-collector.md`,
+> `docs/r0-jsonl-schema.md`, and the producer-specific `docs/r0-*.md` files.
+
 Project baseline: D:\Projects\KswordSandbox at babd9f95f6f36c98754b0d2e4bc8a4daabb2482b.
 
 ## Reviewed candidate worktrees

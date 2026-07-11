@@ -1,5 +1,10 @@
 # Golden VM preparation
 
+Canonical scope: this page owns baseline golden-VM preparation. Current
+readiness must be checked with `docs/hyperv-readiness.md` /
+`scripts/Test-HyperVReadiness.ps1`; dated host observations below are evidence,
+not a substitute for a fresh preflight.
+
 ## Required baseline
 
 - Windows 10 x64 VM on local Hyper-V.
@@ -21,6 +26,10 @@
 Observed on the local Hyper-V host on 2026-07-10 from an elevated shell. Keep
 this section factual and do not paste guest passwords, VM disks, payload
 binaries, or generated run outputs into git.
+
+Historical only: rerun the read-only readiness preflight before any `-Live`
+analysis, because VM state, checkpoint state, payload freshness, and process
+environment secrets can drift.
 
 - [x] Golden VM exists: `KSwordSandbox-Win10-Golden`.
   - Current observed state: `Off`.

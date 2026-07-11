@@ -112,7 +112,7 @@ function Assert-OutsideRepository {
     )
 
     if (Test-PathUnderRoot -Path $Path -Root $RepositoryRoot) {
-        throw "$Name must stay outside the repository. Refusing path: $Path"
+        throw "错误：$Name 必须位于仓库外，已拒绝路径：$Path。下一步：请选择 D:\Temp\KSwordSandbox 等 ignored runtime 目录。"
     }
 }
 
@@ -162,7 +162,7 @@ function Invoke-DotNetPublish {
     & dotnet @arguments
     $exitCode = if ($LASTEXITCODE -is [int]) { $LASTEXITCODE } else { 0 }
     if ($exitCode -ne 0) {
-        throw "dotnet publish failed with exit code $exitCode."
+        throw "错误：dotnet publish 失败，退出码 $exitCode。下一步：安装/修复 .NET SDK 后重试。"
     }
 }
 
@@ -221,11 +221,11 @@ try {
     $resolvedIntermediate = Get-NormalizedFullPath -Path $IntermediateRoot
 
     if (-not (Test-Path -LiteralPath (Join-Path $RepositoryRoot 'KSwordSandbox.sln') -PathType Leaf)) {
-        throw "Repository root does not contain KSwordSandbox.sln: $RepositoryRoot"
+        throw "错误：RepositoryRoot 下没有 KSwordSandbox.sln：$RepositoryRoot。下一步：请从仓库根目录运行。"
     }
 
     if (-not (Test-Path -LiteralPath $resolvedProject -PathType Leaf)) {
-        throw "Harmless sample project was not found: $resolvedProject"
+        throw "错误：找不到 harmless sample 项目：$resolvedProject。下一步：确认仓库完整。"
     }
 
     Assert-OutsideRepository -Path $resolvedOutput -RepositoryRoot $RepositoryRoot -Name 'OutputRoot'
@@ -251,7 +251,7 @@ try {
 
     $sampleExe = Join-Path $resolvedOutput 'KSword.Sandbox.HarmlessSample.exe'
     if (-not (Test-Path -LiteralPath $sampleExe -PathType Leaf)) {
-        throw "Published harmless sample executable was not produced: $sampleExe"
+        throw "错误：harmless sample 可执行文件未发布：$sampleExe。下一步：查看 dotnet publish 输出。"
     }
 
     $manifestPath = Join-Path $resolvedOutput 'harmless-sample-manifest.json'
@@ -261,17 +261,17 @@ try {
         -ResolvedProjectPath $resolvedProject
 
     Write-Host ''
-    Write-Host 'PASS: harmless sample prepared.'
-    Write-Host "  Project:      $resolvedProject"
-    Write-Host "  Output root:  $resolvedOutput"
-    Write-Host "  Executable:   $sampleExe"
+    Write-Host '成功：harmless sample 已准备完成。 / PASS: harmless sample prepared.'
+    Write-Host "  项目 / Project:      $resolvedProject"
+    Write-Host "  输出目录 / Output root:  $resolvedOutput"
+    Write-Host "  可执行文件 / Executable:   $sampleExe"
     Write-Host "  Manifest:     $manifestPath"
-    Write-Host "  Plan check:   pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\Invoke-HyperVE2E.ps1 -SamplePath '$sampleExe' -PlanOnly"
-    Write-Host '  Git hygiene:  published files are outside the repository; do not commit copied binaries.'
+    Write-Host "  下一步计划检查 / Plan check: pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\Invoke-HyperVE2E.ps1 -SamplePath '$sampleExe' -PlanOnly"
+    Write-Host '  Git 提醒 / Git hygiene: 发布文件位于仓库外；不要提交复制出来的二进制文件。'
     exit 0
 }
 catch {
     Write-Host ''
-    Write-Error "FAIL: harmless sample preparation failed. $($_.Exception.Message)"
+    Write-Error "失败：harmless sample 准备失败。下一步：确认 .NET SDK 可用并查看上方输出。英文详情：$($_.Exception.Message)"
     exit 1
 }

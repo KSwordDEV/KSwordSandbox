@@ -124,6 +124,18 @@ The current guest collector emits these host-reportable event groups:
   `afterSnapshotHash`; the stable key excludes TTL so normal resolver-cache
   countdowns do not create false add/remove noise. `dns.cache.diff` summarizes
   added/removed counts before bounded row-level events are emitted.
+- `network.hosts.snapshot`, `network.hosts.diff`,
+  `network.hosts.added`, and `network.hosts.removed` for the local hosts file.
+  The agent records the source path, existence flag, line/entry counts, content
+  change state, and stable entry hashes while row events expose bounded
+  `address` / `hostName` pairs instead of dumping the entire file.
+- `network.proxy.snapshot`, `network.proxy.diff`,
+  `network.proxy.added`, `network.proxy.removed`, and
+  `network.proxy.modified` for process environment proxy variables, HKCU
+  Internet Settings, and machine WinHTTP proxy state from bounded
+  `netsh winhttp show proxy`. Proxy row events use the stable
+  `source|scope|settingName` key, value hashes, and truncated setting values so
+  reports can explain proxy/PAC changes without blocking collection.
 - `network.netstat.snapshot`, `network.netstat`,
   `network.netstat.added`, and `network.netstat.removed` from bounded
   `netstat -ano` collection. Rows include protocol, local/remote endpoints,
@@ -136,7 +148,10 @@ The current guest collector emits these host-reportable event groups:
   `network.tcp.listener.opened` / `.closed`, and
   `network.udp.listener.opened` / `.closed` for managed listener diffs.
 - `service.snapshot`, `service.created`, `service.modified`, and
-  `service.deleted` from bounded `sc queryex state= all` inventory.
+  `service.deleted` from bounded `sc queryex state= all` inventory. When the
+  service registry key is readable, service diff events also include
+  `imagePath`, `startType`, `serviceType`, `objectName`, and `serviceDll`
+  metadata so user-mode collection can explain service persistence without R0.
 - `scheduled_task.snapshot`, `scheduled_task.created`,
   `scheduled_task.modified`, and `scheduled_task.deleted` from bounded
   `schtasks /query /fo csv /v` inventory.
@@ -153,19 +168,23 @@ The current guest collector emits these host-reportable event groups:
 - `screenshot.captured` when `--screenshot` successfully writes a desktop BMP.
   The event path points at the BMP file and `Data` includes `phase`,
   `screenshotStage`, `screenshotIndex`, `screenshotCount`, `widthPixels`, and
-  `heightPixels`.
+  `heightPixels`, `artifactRelativePath`, `sizeBytes`, `sha256`,
+  `processRole`, `rootProcessId`, `treeLineage`, and `zhMessage`/`zhHint`
+  when those values are available.
 - `screenshot.skipped` when screenshot capture was requested but the platform or
   guest session cannot expose a desktop surface. This is non-fatal and includes
-  `diagnosticStage`, `exceptionType`, and `win32Error` when available, keeping
-  smoke tests usable on headless hosts.
+  structured `reason`, `diagnosticStage`, `exceptionType`, and `win32Error`
+  when available, keeping smoke tests usable on headless hosts.
 - `memory_dump.captured` when `--memory-dump` successfully writes a
   `memory-dumps/*.dmp` minidump for the launched sample process or a visible
   child process. The event path points at the `.dmp` file and `Data` includes
-  `phase`, `dumpType`, `sizeBytes`, `relativePath`, `processRole`,
-  `rootProcessId`, `treeDepth`, and `treeLineage` when available.
+  `phase`, `capturePhase`, `dumpType`, `sizeBytes`, `sha256`, `relativePath`,
+  `artifactRelativePath`, `processRole`, `rootProcessId`, `treeDepth`,
+  `treeLineage`, and `zhMessage`/`zhHint` when available.
 - `memory_dump.skipped` when memory dump capture was requested but the platform,
   process state, or access rights prevent capture. This is non-fatal and
-  includes `diagnosticStage`, `exceptionType`, and `win32Error` when available.
+  includes structured `reason`, `diagnosticStage`, `exceptionType`, and
+  `win32Error` when available.
 - `memory_dump.sweep` after the final `after-run` process-tree sweep. It records
   visible target count, attempted count, captured count, skipped count, and
   already-captured count so the report can explain why a run has fewer dump
@@ -174,7 +193,8 @@ The current guest collector emits these host-reportable event groups:
   `packet_capture.captured` when `--packet-capture` / `--pcap` /
   `--network-capture` starts `pktmon`, stops it after the run, converts ETL to
   `packet-captures/*.pcapng`, and records size/path metadata for host PCAP
-  import.
+  import. Captured PCAPNG events also include `sha256`, `processRole`,
+  `rootProcessId`, `treeLineage`, and `zhMessage`/`zhHint` when available.
 - `packet_capture.skipped` and `packet_capture.failed` when packet capture was
   requested but Windows, rights, an existing capture session, `pktmon start`,
   `pktmon stop`, or `pktmon etl2pcap` prevents usable output. These events are
@@ -182,7 +202,14 @@ The current guest collector emits these host-reportable event groups:
   timeout, and reason fields.
 - `probe.timeout`, `probe.failed`, and `probe.canceled` for per-probe isolation.
   A slow DNS/netstat/service/task query is bounded and converted to an event so
-  later probes and final JSON artifact writing can continue.
+  later probes and final JSON artifact writing can continue. These diagnostic
+  rows are explicitly marked `collectionHealth=true` and `nonbehavior=true`
+  so reports do not treat collection failures as sample behavior.
+- `probe.summary` after each probe and `probe.phase.summary` after each phase.
+  These events are marked with `collectionHealth=true` and `nonbehavior=true`;
+  they explain which collection channel ran, how long it took, how many events
+  it emitted, and whether it completed, failed, timed out, or was canceled.
+  They are intentionally health/progress evidence, not sample behavior.
 - `process.start_failed`, `process.kill_failed`, and
   `process.execution_failed` for sample-launch, timeout-kill, or execution
   orchestration exceptions. These are non-fatal diagnostics with exception
@@ -208,11 +235,15 @@ When dropped-file extraction is enabled, the agent emits:
 
 - `artifact.dropped_file.copied` for each copied `file.created` path. The event
   path points at the copied artifact under `--out\artifacts\dropped-files`, and
-  `Data` includes the original guest path, guest-relative path,
-  artifact-relative path, copied/source sizes, source creation/last-write time,
-  copy time, and `evidenceRole=dropped-file`.
+  `Data` includes `phase`/`capturePhase`, the original guest path,
+  guest-relative path, `artifactRelativePath`, copied/source sizes,
+  source creation/last-write time, copy time, source/copied SHA-256 values
+  when readable, hash status fields, `processRole`, `rootProcessId`,
+  root `treeLineage`, `zhMessage`/`zhHint`, and `evidenceRole=dropped-file`.
 - `artifact.dropped_file.skipped` when a candidate path disappeared, is outside
-  the sample working directory, is under `--out`, or cannot be copied.
+  the sample working directory, is under `--out`, or cannot be copied. Skipped
+  rows preserve the same `phase`/`capturePhase`, process attribution, reason
+  code, and `zhMessage`/`zhHint` shape for report explanations.
 - `artifact.manifest.written` after `artifacts/manifest.json` is written. The
   event records the manifest-relative path, manifest artifact count, and copied
   dropped-file count.
@@ -273,9 +304,10 @@ failing the run.
 The manifest hashes the copied artifact bytes and preserves the original
 VM-local path in descriptor metadata (`guestFullPath`). It also carries
 `guestRelativePath`, `sourceEventType`, original source size/timestamps,
-`sourceEventTimestampUtc`, and `copiedAtUtc` so reports can distinguish the
-observed guest file from the copied artifact. This option does not collect
-memory dumps; memory dump collection remains a separate explicit opt-in.
+`sourceEventTimestampUtc`, `copiedAtUtc`, `sourceSha256`, `originalSha256`, and
+`copiedSha256` so reports can distinguish the observed guest file from the
+copied artifact. This option does not collect memory dumps; memory dump
+collection remains a separate explicit opt-in.
 
 ## Optional memory dumps
 

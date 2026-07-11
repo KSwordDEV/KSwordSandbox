@@ -296,6 +296,22 @@ std::wstring CurrentProcessName() {
     }
 }
 
+// Input: A collector-owned row data object plus stable subject labels.
+// Processing: Appends attribution fields shared by lifecycle, diagnostic, and
+// IOCTL summary rows so report sampling does not have to infer collector origin.
+// Return: No return value; data is mutated in-place.
+void AddCollectorAttributionFields(
+    JsonDataObjectBuilder& data,
+    const std::string& subjectKind,
+    const std::string& subjectRole) {
+    data.AddUtf8("eventOrigin", "collector-sidecar");
+    data.AddUtf8("producerCategory", "r0collector");
+    data.AddUtf8("subjectKind", subjectKind);
+    data.AddUtf8("actorRole", "collector-infrastructure");
+    data.AddUtf8("subjectRole", subjectRole);
+    data.AddUtf8("processIdSource", "top-level");
+}
+
 // Input: Fully populated event fields.
 // Processing: Serializes fields in a stable SandboxEvent-compatible order:
 // timestamp/eventType/source/processId/processName/path/commandLine/data.

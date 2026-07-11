@@ -4,7 +4,8 @@
  * Guards fixed-size IOCTL replies that have historically been consumed by
  * user-mode collectors.
  * Inputs : public reply layouts from KSwordSandboxDriverIoctl.h.
- * Logic  : C_ASSERT pins the v1.0 GET_HEALTH size and producer-mask offsets so
+ * Logic  : C_ASSERT pins the v1.0 GET_HEALTH/GET_STATUS sizes, producer-mask
+ *          offsets, queue stress aliases, and event metadata offsets so
  *          additions can safely reuse reserved space without silently changing
  *          the METHOD_BUFFERED ABI.
  * Return : no runtime value; build fails if the layout drifts.
@@ -18,11 +19,28 @@ C_ASSERT(sizeof(KSWORD_SANDBOX_STATUS_REPLY) == 120U);
 C_ASSERT(FIELD_OFFSET(KSWORD_SANDBOX_STATUS_REPLY, LastNtStatus) == 36U);
 C_ASSERT(FIELD_OFFSET(KSWORD_SANDBOX_STATUS_REPLY, ActiveProducerMask) == 40U);
 C_ASSERT(FIELD_OFFSET(KSWORD_SANDBOX_STATUS_REPLY, FailedProducerMask) == 44U);
+C_ASSERT(FIELD_OFFSET(KSWORD_SANDBOX_STATUS_REPLY, TotalEventsDropped) == 56U);
+C_ASSERT(FIELD_OFFSET(KSWORD_SANDBOX_STATUS_REPLY, TotalEventsLost) == 56U);
+C_ASSERT(FIELD_OFFSET(KSWORD_SANDBOX_STATUS_REPLY, QueueHighWatermark) == 24U);
+C_ASSERT(FIELD_OFFSET(KSWORD_SANDBOX_STATUS_REPLY, TotalEventsBackpressured) == 88U);
 C_ASSERT(FIELD_OFFSET(KSWORD_SANDBOX_STATUS_REPLY, ProducerDroppedMask) == 96U);
 C_ASSERT(FIELD_OFFSET(KSWORD_SANDBOX_STATUS_REPLY, ProducerSuppressedMask) == 100U);
 C_ASSERT(FIELD_OFFSET(KSWORD_SANDBOX_STATUS_REPLY, ProducerBackpressureMask) == 104U);
 C_ASSERT(FIELD_OFFSET(KSWORD_SANDBOX_STATUS_REPLY, EffectiveProducerMask) == 108U);
 C_ASSERT(FIELD_OFFSET(KSWORD_SANDBOX_STATUS_REPLY, LastFailureNtStatus) == 112U);
+C_ASSERT(FIELD_OFFSET(KSWORD_SANDBOX_STATUS_REPLY, LastEnqueueFailureNtStatus) == 112U);
+C_ASSERT(sizeof(KSWORD_SANDBOX_EVENT_HEADER) == 104U);
+C_ASSERT(FIELD_OFFSET(KSWORD_SANDBOX_EVENT_HEADER, Sequence) == 16U);
+C_ASSERT(FIELD_OFFSET(KSWORD_SANDBOX_EVENT_HEADER, ProcessId) == 32U);
+C_ASSERT(FIELD_OFFSET(KSWORD_SANDBOX_EVENT_HEADER, ThreadId) == 40U);
+C_ASSERT(FIELD_OFFSET(KSWORD_SANDBOX_EVENT_HEADER, ParentProcessId) == 56U);
+C_ASSERT(FIELD_OFFSET(KSWORD_SANDBOX_EVENT_HEADER, LostEvents) == 64U);
+C_ASSERT(FIELD_OFFSET(KSWORD_SANDBOX_EVENT_HEADER, BackpressureEvents) == 72U);
+C_ASSERT(FIELD_OFFSET(KSWORD_SANDBOX_EVENT_HEADER, Operation) == 80U);
+C_ASSERT(FIELD_OFFSET(KSWORD_SANDBOX_EVENT_HEADER, Status) == 84U);
+C_ASSERT(FIELD_OFFSET(KSWORD_SANDBOX_EVENT_HEADER, ProducerId) == 88U);
+C_ASSERT(FIELD_OFFSET(KSWORD_SANDBOX_EVENT_HEADER, ProducerMetadataFlags) == 92U);
+C_ASSERT(FIELD_OFFSET(KSWORD_SANDBOX_EVENT_HEADER, TimestampSystemTime) == 96U);
 
 /*
  * Verifies that every public producer payload fits the READ_EVENTS contract.

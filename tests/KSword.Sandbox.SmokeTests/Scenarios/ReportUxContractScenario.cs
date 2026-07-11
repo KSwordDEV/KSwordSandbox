@@ -44,6 +44,10 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(rendererSource, "AppendProcessTree", "Report renderer should include a process tree.");
         RequireContains(rendererSource, "process-tree", "Report renderer should render a bounded stable process tree.");
         RequireContains(rendererSource, "Process relationship tree", "Report renderer should explain the process relationship tree.");
+        RequireContains(rendererSource, "Process tree default expansion", "Report renderer should explain process tree default expansion.");
+        RequireContains(rendererSource, "Process tree nodes", "Report renderer should expose process tree overview cards.");
+        RequireContains(rendererSource, "Self-noise excluded", "Report renderer should explain process-tree self-noise exclusion.");
+        RequireContains(rendererSource, "overview-strip", "Report renderer should expose flat overview panels for dense evidence.");
         RequireContains(rendererSource, "ProcessLookupKeys", "Report renderer should resolve process relationships with stable lookup keys.");
         RequireContains(rendererSource, "ParentProcessLookupKeys", "Report renderer should resolve parent process relationships with stable lookup keys.");
         RequireContains(rendererSource, "AppendBehaviorGraph", "Report renderer should include a behavior graph and IOC summary section.");
@@ -67,6 +71,8 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(rendererSource, "parentProcess=", "Report renderer should include parent process evidence in process cards.");
         RequireContains(rendererSource, "AppendNetworkRelationshipCards", "Report renderer should expose network relationship cards.");
         RequireContains(rendererSource, "Network relationship cards", "Report renderer should expose network relationship card title.");
+        RequireContains(rendererSource, "Endpoint groups", "Report renderer should summarize endpoint relationship groups.");
+        RequireContains(rendererSource, "Network category view", "Report renderer should explain DNS/HTTP/TLS/flow network lanes.");
         RequireContains(rendererSource, "relationship-details", "Report renderer should use bounded expandable evidence cards.");
         RequireContains(rendererSource, "Copy process card", "Report renderer should expose copyable process relationship cards.");
         RequireContains(rendererSource, "Copy network card", "Report renderer should expose copyable network relationship cards.");
@@ -82,6 +88,7 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(rendererSource, "AppendRawEventPages", "Report renderer should render native raw event pages.");
         RequireContains(rendererSource, "raw-events-shell", "Report renderer should collapse raw events with native HTML.");
         RequireContains(rendererSource, "raw-events-panel", "Report renderer should bound expanded raw event height.");
+        RequireContains(rendererSource, "Raw evidence height limit: 58vh", "Report renderer should state the raw evidence panel height limit.");
         RequireContains(rendererSource, "raw-event-page", "Report renderer should split expanded raw events into page panels.");
         RequireContains(rendererSource, "raw-technical-field", "Report renderer should hide long raw technical fields behind nested details.");
         RequireContains(rendererSource, "Command/stdout/stderr/PowerShell fields hidden by default", "Report renderer should collapse long command/output/script fields.");
@@ -110,6 +117,10 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(rendererSource, "RenderBilingualReports", "Report renderer should provide a bilingual report generation entrypoint.");
         RequireContains(rendererSource, "AppendLanguageEntrypoints", "Report renderer should expose in-report bilingual navigation links.");
         RequireContains(rendererSource, "Report language", "Report renderer should label the bilingual report entry bar.");
+        RequireContains(rendererSource, "Default report.html uses Simplified Chinese", "Report renderer should explain the default Chinese compatibility report.");
+        RequireContains(rendererSource, "R0 noise policy", "Report renderer should explain R0 health/self-noise separation.");
+        RequireContains(rendererSource, "R0 availability", "Report renderer should summarize R0 health availability.");
+        RequireContains(rendererSource, "R0 health evidence examples", "Report renderer should fold R0 health evidence examples.");
         RequireContains(rendererSource, "id=\\\"cover\\\"", "Report renderer should expose a cover anchor.");
         RequireContains(rendererSource, "id=\\\"toc\\\"", "Report renderer should expose a table-of-contents anchor.");
         RequireContains(analysisModels, "HtmlReportZhPath", "Analysis job model should have a Chinese HTML report path for automatic report links.");
@@ -129,11 +140,14 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(doc, "Process tree", "Report UX doc should list the process tree.");
         RequireContains(doc, "process relationship tree", "Report UX doc should require a stable process relationship tree.");
         RequireContains(doc, "stable process key", "Report UX doc should require stable process key fallback behavior.");
+        RequireContains(doc, "Process tree overview", "Report UX doc should require process tree overview panels.");
+        RequireContains(doc, "self-noise excluded", "Report UX doc should document process tree self-noise exclusion.");
         RequireContains(doc, "Registry behavior", "Report UX doc should list registry behavior.");
         RequireContains(doc, "Right-click", "Report UX doc should describe right-click copy.");
         RequireContains(doc, "raw events only", "Report UX doc should distinguish live raw events from final classification.");
         RequireContains(doc, "first 200 raw events", "Report UX doc should require a raw event inline limit.");
         RequireContains(doc, "50-row native pages", "Report UX doc should require bounded raw event pages.");
+        RequireContains(doc, "Raw evidence height limit", "Report UX doc should require a raw evidence height limit.");
         RequireContains(doc, "hidden raw events", "Report UX doc should require hidden raw event counts.");
         RequireContains(doc, "report.json", "Report UX doc should require report.json source hints.");
         RequireContains(doc, "raw source artifact path hints", "Report UX doc should require raw source path hints.");
@@ -148,6 +162,9 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(doc, "command/stdout/stderr/PowerShell", "Report UX doc should require long technical raw fields to stay folded.");
         RequireContains(doc, "Chinese and English", "Report UX doc should require Chinese and English report rendering support.");
         RequireContains(doc, "bilingual entry bar", "Report UX doc should require stable in-report bilingual entry links.");
+        RequireContains(doc, "default Simplified Chinese compatibility report", "Report UX doc should describe report.html default language.");
+        RequireContains(doc, "R0 availability", "Report UX doc should require R0 availability summaries.");
+        RequireContains(doc, "Network category view", "Report UX doc should require network category summaries.");
         RequireContains(doc, "report.zh.html", "Report UX doc should mention report.zh.html.");
         RequireContains(doc, "report.en.html", "Report UX doc should mention report.en.html.");
         RequireContains(doc, "/api/jobs/{jobId}/report/html?lang=zh", "Report UX doc should describe the Chinese served report endpoint validation.");
@@ -233,10 +250,14 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         var report = BuildContractReport();
         var artifacts = BuildContractArtifacts();
         var renderer = new HtmlReportRenderer();
+        var defaultHtml = renderer.Render(report, artifacts);
         var englishHtml = renderer.RenderEnglish(report, artifacts);
         var chineseHtml = renderer.RenderChinese(report, artifacts);
         var documents = renderer.RenderBilingualReports(report, artifacts);
 
+        RequireContains(defaultHtml, "<html lang=\"zh-CN\">", "Default rendered HTML should use the Simplified Chinese compatibility report.");
+        RequireContains(defaultHtml, "href=\"report.zh.html\"", "Default rendered HTML should link to report.zh.html.");
+        RequireContains(defaultHtml, "href=\"report.en.html\"", "Default rendered HTML should link to report.en.html.");
         RequireContains(englishHtml, "#43A0FF", "Rendered HTML should include the required bright-blue accent color.");
         RequireContainsNormalized(englishHtml, "max-height:75vh", "Rendered major sections should be bounded to around 75vh.");
         RequireContainsNormalized(englishHtml, "overflow:auto", "Rendered major sections should scroll overflowing evidence.");
@@ -264,6 +285,7 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(englishHtml, "Command/stdout/stderr/PowerShell fields hidden by default", "Rendered raw event details should fold long technical fields.");
         RequireContains(englishHtml, "Hidden technical field: stdout", "Rendered raw event details should hide stdout fields.");
         RequireContains(englishHtml, "Hidden technical field: powershellCommand", "Rendered raw event details should hide PowerShell fields.");
+        RequireContains(englishHtml, "<details class=\"raw-technical-field\"><summary>Hidden technical field: stderr", "Rendered raw event details should keep stderr in copyable details.");
         RequireNotContains(englishHtml, "<br><span class=\"muted\">cmd.exe /c whoami</span>", "Rendered event tables should not inline command lines directly.");
         RequireContains(englishHtml, "<section id=\"graph\" class=\"card\"><h2>Behavior graph / IOC summary</h2>", "Rendered HTML should include the behavior graph section.");
         RequireContains(englishHtml, "Evidence graph edges", "Rendered HTML should include graph edge evidence.");
@@ -286,11 +308,17 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(englishHtml, "Network relationship cards", "Rendered HTML should include network relationship cards.");
         RequireContains(englishHtml, "Copy network card", "Rendered HTML should include copyable network relationship cards.");
         RequireContains(englishHtml, "Endpoint-centric view.", "Rendered HTML should include cloud-sandbox-style network relationship guidance.");
+        RequireContains(englishHtml, "Network category view.", "Rendered HTML should include network category guidance.");
+        RequireContains(englishHtml, "Endpoint groups", "Rendered HTML should include endpoint overview cards.");
+        RequireContains(englishHtml, "DNS / HTTP / TLS", "Rendered HTML should include protocol category counts.");
         RequireContains(englishHtml, "<section id=\"timeline\" class=\"card\"><h2>Timeline</h2>", "Rendered HTML should include the timeline section.");
         RequireContains(englishHtml, "Timeline grouping.", "Rendered HTML should explain timeline grouping.");
         RequireContains(englishHtml, "timeline-group", "Rendered HTML should include grouped timeline buckets.");
         RequireContains(englishHtml, "Event families:", "Rendered timeline groups should summarize event families.");
         RequireContains(englishHtml, "Process relationship tree.", "Rendered HTML should explain stable process tree rendering.");
+        RequireContains(englishHtml, "Process tree nodes", "Rendered HTML should include process-tree overview cards.");
+        RequireContains(englishHtml, "High-signal nodes", "Rendered HTML should include high-signal process overview cards.");
+        RequireContains(englishHtml, "Self-noise excluded", "Rendered HTML should include process self-noise exclusion summary.");
         RequireContains(englishHtml, "process-tree-node", "Rendered HTML should include expandable process tree nodes.");
         RequireContains(englishHtml, "launcher.exe pid:4100 ppid:-", "Rendered process tree should include the launcher root.");
         RequireContains(englishHtml, "contract-sample.exe pid:4242 ppid:4100", "Rendered process tree should include the sample child.");
@@ -304,6 +332,11 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(englishHtml, "child=cmd.exe pid:4243", "Rendered process card relationship map should include child process evidence.");
         RequireBefore(englishHtml, "launcher.exe pid:4100 ppid:-", "contract-sample.exe pid:4242 ppid:4100", "Rendered process lineage should show parent before child.");
         RequireBefore(englishHtml, "contract-sample.exe pid:4242 ppid:4100", "cmd.exe pid:4243 ppid:4242", "Rendered process lineage should show sample before spawned child.");
+        RequireContains(englishHtml, "R0 noise policy.", "Rendered R0 section should explain health/self-noise separation.");
+        RequireContains(englishHtml, "R0 availability", "Rendered R0 section should include availability overview.");
+        RequireContains(englishHtml, "No R0 health rows", "Rendered R0 section should distinguish absent health rows from driver telemetry.");
+        RequireContains(englishHtml, "Raw evidence height limit: 58vh", "Rendered raw section should state the raw evidence height limit.");
+        RequireContains(englishHtml, "Default report.html uses Simplified Chinese", "Rendered language bar should explain the default compatibility report.");
 
         foreach (var expected in RequiredEnglishSectionFragments())
         {
@@ -313,6 +346,11 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(chineseHtml, "<html lang=\"zh-CN\">", "Chinese HTML should set the zh-CN language metadata.");
         RequireContains(chineseHtml, "时间线分组", "Chinese HTML should localize timeline grouping guidance.");
         RequireContains(chineseHtml, "进程关系树", "Chinese HTML should localize process relationship tree guidance.");
+        RequireContains(chineseHtml, "进程树节点", "Chinese HTML should localize process-tree overview cards.");
+        RequireContains(chineseHtml, "R0 可用性", "Chinese HTML should localize R0 availability.");
+        RequireContains(chineseHtml, "端点分组", "Chinese HTML should localize network endpoint overview cards.");
+        RequireContains(chineseHtml, "原始证据高度限制", "Chinese HTML should localize raw evidence height guidance.");
+        RequireContains(chineseHtml, "默认 report.html 使用简体中文", "Chinese HTML should localize the bilingual default-report hint.");
         RequireContains(chineseHtml, "打开", "Chinese HTML should localize artifact open buttons.");
         RequireContains(chineseHtml, "下载", "Chinese HTML should localize artifact download buttons.");
         RequireContains(chineseHtml, "命令行默认隐藏", "Chinese HTML should localize folded command-line details.");

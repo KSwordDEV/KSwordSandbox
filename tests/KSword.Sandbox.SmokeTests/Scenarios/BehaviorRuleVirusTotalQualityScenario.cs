@@ -137,8 +137,17 @@ internal sealed class BehaviorRuleVirusTotalQualityScenario : ISmokeTestScenario
     {
         var models = ReadRepositoryText(context, "src", "KSword.Sandbox.Web", "Infrastructure", "VirusTotalModels.cs");
         var lookup = ReadRepositoryText(context, "src", "KSword.Sandbox.Web", "Infrastructure", "VirusTotalLookupService.cs");
+        var cache = ReadRepositoryText(context, "src", "KSword.Sandbox.Web", "Infrastructure", "VirusTotalLookupCache.cs");
+        var settings = ReadRepositoryText(context, "src", "KSword.Sandbox.Web", "Infrastructure", "VirusTotalSettingsStore.cs");
+        var program = ReadRepositoryText(context, "src", "KSword.Sandbox.Web", "Program.cs");
+        var settingsPage = ReadRepositoryText(context, "src", "KSword.Sandbox.Web", "Dashboard", "SettingsPage.cs");
+        var liveEventsPage = ReadRepositoryText(context, "src", "KSword.Sandbox.Web", "Dashboard", "LiveEventsPage.cs");
+        var docs = ReadRepositoryText(context, "docs", "virustotal.md");
 
         RequireContains(models, "VirusTotalLookupStatuses", "VirusTotal status constants should prevent ad-hoc verdict strings.");
+        RequireContains(models, "InvalidHash", "VirusTotal result should distinguish malformed hash inputs without calling the provider.");
+        RequireContains(models, "VirusTotalLookupEventNames", "VirusTotal models should centralize rule-facing lookup event names.");
+        RequireContains(models, "vt.lookup", "VirusTotal event data should expose the compact vt.lookup event name.");
         RequireContains(models, "public string Verdict", "VirusTotal result should expose a stable Verdict field.");
         RequireContains(models, "MaliciousCount", "VirusTotal result should flatten malicious engine counts for reports.");
         RequireContains(models, "SuspiciousCount", "VirusTotal result should flatten suspicious engine counts for reports.");
@@ -146,15 +155,62 @@ internal sealed class BehaviorRuleVirusTotalQualityScenario : ISmokeTestScenario
         RequireContains(models, "RetryAfterUtc", "VirusTotal result should expose Retry-After timing for rate limits.");
         RequireContains(models, "RuleData", "VirusTotal result should expose rule-facing one-level string fields.");
         RequireContains(models, "ToRuleEvent", "VirusTotal result should be convertible to a rule-facing enrichment event.");
+        RequireContains(models, "CanPersistEnrichmentEvent", "VirusTotal result should expose whether an event is report-safe to persist.");
 
+        RequireContains(lookup, "IsSha256Hex", "VirusTotal lookup should validate SHA-256 shape before a provider call.");
         RequireContains(lookup, "HttpStatusCode.TooManyRequests", "VirusTotal lookup should distinguish HTTP 429 rate limits.");
         RequireContains(lookup, "VirusTotalLookupStatuses.RateLimited", "VirusTotal lookup should return a rate_limited status.");
         RequireContains(lookup, "VirusTotalLookupStatuses.NotFound", "VirusTotal lookup should return a not_found status for 404.");
         RequireContains(lookup, "VirusTotalLookupStatuses.AuthenticationFailed", "VirusTotal lookup should distinguish invalid API keys.");
+        RequireContains(lookup, "VirusTotalLookupStatuses.Timeout", "VirusTotal lookup should expose timeouts as a first-class quiet status.");
         RequireContains(lookup, "ResolveVerdict", "VirusTotal lookup should derive malicious/suspicious/clean verdicts from stats.");
         RequireContains(lookup, "malicious > 0", "VirusTotal verdict should treat malicious hits as malicious.");
         RequireContains(lookup, "suspicious > 0", "VirusTotal verdict should treat suspicious hits as suspicious when malicious is zero.");
         RequireContains(lookup, "ParseRetryAfterUtc", "VirusTotal lookup should parse Retry-After for rate limits.");
+
+        RequireContains(cache, "FoundTtl = TimeSpan.FromHours(24)", "VirusTotal cache should keep found reports for a bounded TTL.");
+        RequireContains(cache, "NotFoundTtl = TimeSpan.FromHours(6)", "VirusTotal cache should keep not-found reports for a shorter bounded TTL.");
+        RequireContains(cache, "RateLimitedTtl = TimeSpan.FromMinutes(5)", "VirusTotal cache should throttle repeated rate-limited lookups.");
+        RequireContains(cache, "AuthenticationFailureTtl = TimeSpan.FromMinutes(5)", "VirusTotal cache should avoid hammering invalid-key responses.");
+        RequireContains(cache, "CreateCredentialScope", "VirusTotal cache should scope entries by a non-secret API-key fingerprint.");
+        RequireContains(cache, "WithCacheMetadata", "VirusTotal cache should annotate responses with cache metadata.");
+
+        RequireContains(settings, "Environment.SetEnvironmentVariable(EnvironmentVariableName", "VirusTotal settings endpoint should keep submitted keys process-local.");
+        RequireContains(settings, "SettingsPath: null", "VirusTotal settings state should not expose a runtime key file path.");
+        RequireNotContains(settings, "File.WriteAllText", "VirusTotal settings should not persist API keys to disk.");
+        RequireNotContains(settings, "Convert.ToBase64String", "VirusTotal settings should not encode API keys into a file.");
+        RequireNotContains(settings, "File.ReadAllText", "VirusTotal settings should not read API keys from a runtime key file.");
+        RequireNotContains(settings, "virustotal.key", "VirusTotal settings should not name a runtime API-key file.");
+
+        RequireContains(settingsPage, "current process environment variable", "Settings page should explain that WebUI key updates are process-only.");
+        RequireContains(settingsPage, "WebUI 不落盘", "Settings page should show a clear no-disk-persistence state.");
+        RequireContains(settingsPage, "不会写入配置文件", "Settings page should state that VT key updates do not write config.");
+        RequireContains(settingsPage, "runtime settings", "Settings page should state that VT key updates do not write runtime settings.");
+        RequireContains(settingsPage, "job 日志", "Settings page should state that VT key updates do not write job logs.");
+        RequireContains(settingsPage, "不会提交到仓库", "Settings page should state that VT key updates are not committed to the repository.");
+        RequireContains(settingsPage, "Set process environment", "Settings page action should avoid implying durable save.");
+        RequireNotContains(settingsPage, "本机设置文件", "Settings page should not imply a local key settings file exists.");
+        RequireNotContains(settingsPage, "保存 / 更新", "Settings page should not label process-only key updates as durable saves.");
+
+        RequireContains(liveEventsPage, "normalizeVirusTotalStatus", "Live monitor should normalize VT status before rendering.");
+        RequireContains(liveEventsPage, "rate_limited", "Live monitor should explicitly render VT rate-limit quiet state.");
+        RequireContains(liveEventsPage, "authentication_failed", "Live monitor should explicitly render VT authentication quiet state.");
+        RequireContains(liveEventsPage, "timeout", "Live monitor should explicitly render VT timeout quiet state.");
+        RequireContains(liveEventsPage, "quiet state", "Live monitor should label non-behavior VT outcomes as quiet states.");
+        RequireContains(liveEventsPage, "job logs", "Live monitor should state that quiet VT outcomes do not write job logs.");
+        RequireContains(liveEventsPage, "/virustotal`, { cache: 'no-store' }", "Live monitor should use the display-only VT GET endpoint by default.");
+        RequireNotContains(liveEventsPage, "persist=true", "Live monitor should not request implicit VirusTotal persistence.");
+
+        RequireContains(program, "AddSingleton<VirusTotalLookupCache>", "Program.cs should register the in-memory VirusTotal cache.");
+        RequireContains(program, "\"/api/jobs/{jobId:guid}/enrichments/virustotal\"", "Program.cs should expose a dedicated VirusTotal job enrichment endpoint.");
+        RequireContains(program, "PersistedToEnrichmentEvents = true", "VirusTotal enrichment endpoint should report successful persistence.");
+        RequireContains(program, "ShouldPersistVirusTotalResult", "VirusTotal endpoint should gate persistence to report-safe outcomes.");
+
+        RequireContains(docs, "never", "VirusTotal docs should state that API keys are never written by the Web backend.");
+        RequireContains(docs, "process-only", "VirusTotal docs should document process-only WebUI key updates.");
+        RequireContains(docs, "timeout", "VirusTotal docs should document timeout as a quiet display state.");
+        RequireContains(docs, "POST /api/jobs/{jobId}/enrichments/virustotal", "VirusTotal docs should document the dedicated enrichment endpoint.");
+        RequireContains(docs, "vt.lookup", "VirusTotal docs should document the compact vt.lookup event name.");
     }
 
     private static void AssertVirusTotalReportPersistence(SmokeTestContext context, BehaviorRuleSet rules)
@@ -224,5 +280,10 @@ internal sealed class BehaviorRuleVirusTotalQualityScenario : ISmokeTestScenario
     private static void RequireContains(string text, string expected, string message)
     {
         SmokeAssert.True(text.Contains(expected, StringComparison.Ordinal), message);
+    }
+
+    private static void RequireNotContains(string text, string forbidden, string message)
+    {
+        SmokeAssert.True(!text.Contains(forbidden, StringComparison.Ordinal), message);
     }
 }

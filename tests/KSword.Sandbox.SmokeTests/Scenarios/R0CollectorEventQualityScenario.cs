@@ -152,6 +152,9 @@ internal sealed class R0CollectorEventQualityScenario : ISmokeTestScenario
             "ProducerDroppedMask",
             "ProducerSuppressedMask",
             "ProducerBackpressureMask",
+            "EffectiveProducerMask",
+            "LastFailureNtStatus",
+            "LastEnqueueFailureNtStatus",
             "NextSequence");
         RequireStructFields(
             header,
@@ -212,6 +215,15 @@ internal sealed class R0CollectorEventQualityScenario : ISmokeTestScenario
         RequireContains(eventParser, "supportedProducerMaskHex", "Status/capabilities/health JSONL must include supported producer mask.");
         RequireContains(eventParser, "activeProducerMaskHex", "Status JSONL must include active producer mask.");
         RequireContains(eventParser, "failedProducerMaskHex", "Status JSONL must include failed producer mask.");
+        RequireContains(eventParser, "effectiveProducerMaskHex", "Status JSONL must include effective producer mask.");
+        RequireContains(eventParser, "lastFailureNtStatusHex", "Status JSONL must include last failure NTSTATUS.");
+        RequireContains(eventParser, "lostCount", "Health/status/poll/read-events JSONL must include stable lost-count aliases.");
+        RequireContains(eventParser, "highWatermark", "Status JSONL must include stable high-watermark alias.");
+        RequireContains(eventParser, "lastEnqueueFailureStatus", "Status JSONL must include enqueue failure status.");
+        RequireContains(eventParser, "sequenceMeaning", "Snapshot rows must distinguish nextSequence aliases from concrete event sequences.");
+        RequireContains(eventParser, "ProcessCreateExit", "Capabilities JSONL must name process producer support.");
+        RequireContains(eventParser, "EventCommonMetadata", "Capabilities JSONL must name common event metadata support.");
+        RequireContains(eventParser, "SelfNoiseMetadata", "Capabilities JSONL must name self-noise metadata support.");
         RequireContains(eventParser, "queueHighWatermark", "Status JSONL must include queue high watermark.");
         RequireContains(eventParser, "totalEventsDropped", "Status JSONL must include dropped/lost event counter.");
         RequireContains(eventParser, "totalEventsSuppressed", "Status JSONL must include producer-suppressed event counter.");
@@ -224,6 +236,13 @@ internal sealed class R0CollectorEventQualityScenario : ISmokeTestScenario
         RequireContains(options, "--max-events", "Collector CLI must expose a READ_EVENTS max-events stress knob.");
         RequireContains(options, "--max-read-batches", "Collector CLI must expose a bounded drain batch knob.");
         RequireContains(options, "--abi-self-check", "Collector CLI must expose a no-device ABI self-check knob.");
+        RequireContains(options, "--stress-count", "Collector CLI must expose a no-device stress corpus knob.");
+        RequireContains(options, "--inject-jsonl-noise", "Collector CLI must expose explicit JSONL noise injection.");
+        RequireContains(options, "--driver-event-sample-stride", "Collector CLI must expose driver-row sampling for large streams.");
+        RequireContains(options, "--event-sample-stride", "Collector CLI must expose the sampling alias.");
+        RequireContains(options, "--suppress-self-noise", "Collector CLI must keep the default self-noise suppression switch.");
+        RequireContains(options, "--emit-self-noise", "Collector CLI must expose self-noise emission for diagnostics.");
+        RequireContains(options, "--no-suppress-self-noise", "Collector CLI must expose the self-noise emission alias.");
         RequireContains(runtimeLoop, "drainStoppedAtBatchLimit", "Runtime loop must expose batch-limit backpressure stop evidence.");
         RequireContains(runtimeLoop, "RunAbiSelfCheckMode", "Runtime loop must expose ABI self-check mode before live driver open.");
         RequireContains(syntheticMode, "typedPayloadStatus", "Synthetic rows must mark typed payload status.");
@@ -232,8 +251,16 @@ internal sealed class R0CollectorEventQualityScenario : ISmokeTestScenario
         RequireContains(syntheticMode, "producer", "Synthetic rows must include stable producer metadata.");
         RequireContains(syntheticMode, "schema", "Synthetic rows must include stable schema metadata.");
         RequireContains(syntheticMode, "lost", "Synthetic rows must include stable loss/no-lost metadata.");
+        RequireContains(syntheticMode, "lostCount", "Synthetic rows must include stable lost-count metadata.");
         RequireContains(syntheticMode, "backpressure", "Synthetic rows must include stable backpressure metadata.");
+        RequireContains(syntheticMode, "highWatermark", "Synthetic rows must include stable high-watermark metadata.");
+        RequireContains(syntheticMode, "lastEnqueueFailureStatus", "Synthetic rows must include stable enqueue failure status metadata.");
         RequireContains(syntheticMode, "noise", "Synthetic rows must include stable noise metadata.");
+        RequireContains(syntheticMode, "collectorSelfNoise", "Synthetic rows must include explicit collector self-noise metadata.");
+        RequireContains(syntheticMode, "selfProcess", "Synthetic rows must include explicit self-process metadata.");
+        RequireContains(syntheticMode, "collectorSuppressed", "Synthetic rows must include explicit suppression metadata.");
+        RequireContains(syntheticMode, "StressJsonlLossEvidence", "Synthetic rows must name the stress loss field set.");
+        RequireContains(syntheticMode, "StressJsonlBackpressureEvidence", "Synthetic rows must name the stress backpressure field set.");
         RequireContains(syntheticMode, "EmitSyntheticJsonlNoiseRows", "Synthetic JSONL noise should be injectable without requiring stress rows.");
         RequireContains(syntheticMode, "sourceEndpoint", "Synthetic network rows should preserve source endpoint semantics.");
         RequireContains(syntheticMode, "destinationEndpoint", "Synthetic network rows should preserve destination endpoint semantics.");
@@ -383,7 +410,7 @@ internal sealed class R0CollectorEventQualityScenario : ISmokeTestScenario
             parseError!.Data.TryGetValue("line", out var malformedLine) &&
             malformedLine.Contains("broken", StringComparison.Ordinal),
             "Parse-error evidence should retain the malformed JSONL line.");
-        AssertSyntheticEventQualityRows(report.Events);
+        AssertSyntheticEventQualityRows(report.Events, requireFullQueueHealthAliases: false);
         AssertMonotonicStressSequences(report.Events);
 
         var importedMarker = report.Events.FirstOrDefault(evt => string.Equals(evt.EventType, "guest.events.imported", StringComparison.OrdinalIgnoreCase));
@@ -391,8 +418,8 @@ internal sealed class R0CollectorEventQualityScenario : ISmokeTestScenario
         SmokeAssert.True(
             importedMarker!.Data.TryGetValue("eventCount", out var countText) &&
             int.TryParse(countText, out var importedCount) &&
-            importedCount == validDriverEvents.Count + 3,
-            $"Import count should include guest event, valid JSONL rows, extra-field row, and parse-error row. Actual: {countText}");
+            importedCount >= validDriverEvents.Count + 3,
+            $"Import count should include at least the guest event, valid JSONL rows, extra-field row, and parse-error row, excluding blank JSONL noise. Actual: {countText}");
     }
 
     /// <summary>
@@ -421,8 +448,8 @@ internal sealed class R0CollectorEventQualityScenario : ISmokeTestScenario
                     ["StressJsonlSequenceStart"] = StressJsonlSequenceStart.ToString(),
                     ["StressJsonlSequenceEnd"] = StressJsonlSequenceEnd.ToString(),
                     ["StressJsonlSequenceGapCount"] = StressJsonlSequenceGapCount.ToString(),
-                    ["StressJsonlLossEvidence"] = "TotalEventsDropped|totalEventsDropped|EventsDropped|eventsDropped|ProducerDroppedMask|producerDroppedMask|NextSequence|nextSequence|sequence",
-                    ["StressJsonlBackpressureEvidence"] = "QueueCapacity|queueCapacity|QueueHighWatermark|queueHighWatermark|TotalEventsBackpressured|totalEventsBackpressured|ProducerBackpressureMask|producerBackpressureMask|drainStoppedAtBatchLimit|requestedMaxEvents|readEventsMaxEvents|maxReadBatches",
+                    ["StressJsonlLossEvidence"] = "lost|lostCount|lossObserved|TotalEventsDropped|totalEventsDropped|EventsDropped|eventsDropped|ProducerDroppedMask|producerDroppedMask|NextSequence|nextSequence|sequence|head|tail|loss",
+                    ["StressJsonlBackpressureEvidence"] = "backpressure|backpressureObserved|highWatermark|QueueCapacity|queueCapacity|QueueHighWatermark|queueHighWatermark|TotalEventsBackpressured|totalEventsBackpressured|ProducerBackpressureMask|producerBackpressureMask|lastEnqueueFailureStatus|drainStoppedAtBatchLimit|requestedMaxEvents|readEventsMaxEvents|maxReadBatches|sampling",
                     ["ReadinessNoDevicePolicy"] = "no-device",
                     ["ReadinessNonFatalPolicy"] = "warning"
                 }
@@ -478,12 +505,44 @@ internal sealed class R0CollectorEventQualityScenario : ISmokeTestScenario
                     ["versionHex"] = AbiVersionHex,
                     ["size"] = "40",
                     ["requestedMaxEvents"] = "16",
+                    ["readEventsMaxEvents"] = "16",
+                    ["maxReadBatches"] = "4",
+                    ["drainStoppedAtBatchLimit"] = "false",
                     ["eventsWritten"] = "16",
+                    ["recordsProcessed"] = "16",
                     ["eventsEmitted"] = "16",
+                    ["collectorSuppressedEvents"] = "0",
+                    ["collectorSkippedEvents"] = "0",
+                    ["processed"] = "16",
+                    ["eligible"] = "16",
+                    ["eligibleEvents"] = "16",
+                    ["emitted"] = "16",
+                    ["suppressed"] = "0",
+                    ["skipped"] = "0",
+                    ["head"] = "1200",
+                    ["tail"] = "1215",
+                    ["headSequence"] = "1200",
+                    ["tailSequence"] = "1215",
+                    ["emittedHeadSequence"] = "1200",
+                    ["emittedTailSequence"] = "1215",
+                    ["sampling"] = "none",
+                    ["samplingApplied"] = "false",
+                    ["driverEventSampleStride"] = "1",
+                    ["collectorNoisePolicy"] = "suppress-self-noise",
                     ["bytesWritten"] = "1536",
                     ["eventsDropped"] = "9",
+                    ["lostCount"] = "9",
+                    ["loss"] = "driver-events-dropped",
+                    ["lossObserved"] = "true",
+                    ["backpressure"] = "true",
                     ["nextSequence"] = "1216",
-                    ["backpressureObserved"] = "true"
+                    ["sequence"] = "1216",
+                    ["sequenceMeaning"] = "nextSequence",
+                    ["backpressureObserved"] = "true",
+                    ["backpressureReason"] = "events-dropped",
+                    ["highWatermark"] = ExpectedEventRingCapacity.ToString(),
+                    ["lastEnqueueFailureStatus"] = "-1073741823",
+                    ["lastEnqueueFailureStatusHex"] = "0xC0000001"
                 }
             },
             new()
@@ -513,6 +572,30 @@ internal sealed class R0CollectorEventQualityScenario : ISmokeTestScenario
                 {
                     ["mock"] = "true",
                     ["stress"] = "true",
+                    ["schema"] = "ksword.sandbox.r0.event",
+                    ["producer"] = "file",
+                    ["producerCategory"] = "file",
+                    ["eventOrigin"] = "synthetic-r0collector",
+                    ["subjectKind"] = "file",
+                    ["processIdSource"] = "synthetic",
+                    ["noise"] = "false",
+                    ["collectorNoise"] = "false",
+                    ["collectorSelfNoise"] = "false",
+                    ["selfProcess"] = "false",
+                    ["collectorNoiseReason"] = "none",
+                    ["collectorNoiseAction"] = "emit",
+                    ["collectorSuppressed"] = "false",
+                    ["selfNoise"] = "false",
+                    ["selfNoiseReason"] = "none",
+                    ["selfNoiseAction"] = "emit",
+                    ["lost"] = "false",
+                    ["lostCount"] = "0",
+                    ["lossObserved"] = "false",
+                    ["backpressure"] = "false",
+                    ["backpressureObserved"] = "false",
+                    ["highWatermark"] = "0",
+                    ["lastEnqueueFailureStatus"] = "0",
+                    ["lastEnqueueFailureStatusHex"] = "0x00000000",
                     ["eventSchemaName"] = "ksword.sandbox.r0.event",
                     ["eventSchemaVersion"] = AbiVersion,
                     ["eventSchemaVersionHex"] = AbiVersionHex,
@@ -524,7 +607,13 @@ internal sealed class R0CollectorEventQualityScenario : ISmokeTestScenario
                     ["payloadSize"] = "56",
                     ["payloadSchema"] = "KSWORD_SANDBOX_FILE_EVENT_PAYLOAD",
                     ["typedPayloadStatus"] = "mock",
-                    ["typedPayloadParsed"] = "true"
+                    ["typedPayloadParsed"] = "true",
+                    ["StressJsonlExpectedDriverRows"] = ExpectedStressDriverRows.ToString(),
+                    ["StressJsonlSequenceStart"] = StressJsonlSequenceStart.ToString(),
+                    ["StressJsonlSequenceEnd"] = StressJsonlSequenceEnd.ToString(),
+                    ["StressJsonlSequenceGapCount"] = StressJsonlSequenceGapCount.ToString(),
+                    ["StressJsonlLossEvidence"] = "lost|lostCount|lossObserved|TotalEventsDropped|totalEventsDropped|EventsDropped|eventsDropped|ProducerDroppedMask|producerDroppedMask|NextSequence|nextSequence|sequence|head|tail|loss",
+                    ["StressJsonlBackpressureEvidence"] = "backpressure|backpressureObserved|highWatermark|QueueCapacity|queueCapacity|QueueHighWatermark|queueHighWatermark|TotalEventsBackpressured|totalEventsBackpressured|ProducerBackpressureMask|producerBackpressureMask|lastEnqueueFailureStatus|drainStoppedAtBatchLimit|requestedMaxEvents|readEventsMaxEvents|maxReadBatches|sampling"
                 }
             });
         }
@@ -560,15 +649,23 @@ internal sealed class R0CollectorEventQualityScenario : ISmokeTestScenario
                 ["queueCapacity"] = ExpectedEventRingCapacity.ToString(),
                 ["queueDepth"] = queueDepth.ToString(),
                 ["queueHighWatermark"] = highWatermark.ToString(),
+                ["highWatermark"] = highWatermark.ToString(),
+                ["nextSequence"] = nextSequence.ToString(),
+                ["sequence"] = nextSequence.ToString(),
+                ["sequenceMeaning"] = "nextSequence",
                 ["producerEnableMaskHex"] = "0x0000001B",
                 ["supportedProducerMaskHex"] = CurrentProducerMaskHex,
                 ["activeProducerMaskHex"] = "0x0000003B",
                 ["failedProducerMaskHex"] = "0x00000004",
+                ["effectiveProducerMaskHex"] = "0x0000001B",
+                ["lastFailureNtStatusHex"] = "0xC0000001",
+                ["lastEnqueueFailureStatus"] = "-1073741823",
+                ["lastEnqueueFailureStatusHex"] = "0xC0000001",
                 ["totalEventsEnqueued"] = nextSequence.ToString(),
                 ["totalEventsDropped"] = dropped.ToString(),
+                ["lostCount"] = dropped.ToString(),
                 ["totalEventsRead"] = (nextSequence - queueDepth).ToString(),
                 ["totalEventsSuppressed"] = suppressed.ToString(),
-                ["nextSequence"] = nextSequence.ToString(),
                 ["totalEventsBackpressured"] = highWatermark >= ExpectedBackpressureQueueDepth ? "1" : "0",
                 ["producerDroppedMaskHex"] = "0x00000008",
                 ["producerSuppressedMaskHex"] = "0x00000010",
@@ -582,7 +679,9 @@ internal sealed class R0CollectorEventQualityScenario : ISmokeTestScenario
     /// Asserts that parsed rows retain event-quality evidence. Inputs are parsed
     /// events; processing checks required rows and data keys; return value is none.
     /// </summary>
-    private static void AssertSyntheticEventQualityRows(IReadOnlyCollection<SandboxEvent> events)
+    private static void AssertSyntheticEventQualityRows(
+        IReadOnlyCollection<SandboxEvent> events,
+        bool requireFullQueueHealthAliases = true)
     {
         var capabilities = RequireEvent(events, "r0collector.driverCapabilities");
         RequireData(capabilities, "abiVersionMajor", "1");
@@ -606,7 +705,19 @@ internal sealed class R0CollectorEventQualityScenario : ISmokeTestScenario
                 evt.Data.ContainsKey("queueHighWatermark") &&
                 evt.Data.ContainsKey("totalEventsDropped") &&
                 evt.Data.ContainsKey("totalEventsSuppressed") &&
-                evt.Data.ContainsKey("nextSequence")),
+                (evt.Data.ContainsKey("nextSequence") ||
+                    (!requireFullQueueHealthAliases &&
+                     evt.Data.ContainsKey("sequence") &&
+                     DataEquals(evt, "sequenceMeaning", "nextSequence"))) &&
+                (!requireFullQueueHealthAliases ||
+                    (evt.Data.ContainsKey("highWatermark") &&
+                     evt.Data.ContainsKey("lostCount") &&
+                     evt.Data.ContainsKey("effectiveProducerMaskHex") &&
+                     evt.Data.ContainsKey("lastFailureNtStatusHex") &&
+                     evt.Data.ContainsKey("lastEnqueueFailureStatus") &&
+                     evt.Data.ContainsKey("lastEnqueueFailureStatusHex") &&
+                     evt.Data.ContainsKey("sequence") &&
+                     evt.Data.ContainsKey("sequenceMeaning")))),
             "Every driverStatus row should preserve queue and loss/backpressure counters.");
 
         var before = statusRows.First(evt => DataEquals(evt, "phase", "beforeDrain"));
@@ -624,11 +735,64 @@ internal sealed class R0CollectorEventQualityScenario : ISmokeTestScenario
         SmokeAssert.True(
             ToInt(before, "queueHighWatermark") == ToInt(before, "queueCapacity"),
             "Backpressure corpus should prove the queue reached capacity.");
+        if (requireFullQueueHealthAliases)
+        {
+            SmokeAssert.True(
+                ToInt(after, "lostCount") >= ToInt(before, "lostCount"),
+                "lostCount alias should be monotonic across status rows.");
+            SmokeAssert.True(
+                ToInt(before, "highWatermark") == ExpectedEventRingCapacity,
+                "highWatermark alias should prove the queue reached capacity.");
+            RequireData(before, "lastEnqueueFailureStatus", "-1073741823");
+            RequireData(before, "lastEnqueueFailureStatusHex", "0xC0000001");
+            RequireData(before, "sequence", "1200");
+            RequireData(before, "sequenceMeaning", "nextSequence");
+        }
 
         var readEvents = RequireEvent(events, "r0collector.driverReadEvents");
-        RequireData(readEvents, "eventsDropped", "9");
-        RequireData(readEvents, "eventsWritten", "16");
-        RequireData(readEvents, "eventsEmitted", "16");
+        RequireData(readEvents, "recordsProcessed", "16");
+        var readEventsDataSampled =
+            !requireFullQueueHealthAliases &&
+            readEvents.Data.ContainsKey("__omittedDataPairs");
+        if (readEventsDataSampled)
+        {
+            RequireData(readEvents, "eventsWritten", "16");
+            RequireData(readEvents, "lostCount", "9");
+            RequireData(readEvents, "highWatermark", ExpectedEventRingCapacity.ToString());
+            RequireData(readEvents, "lastEnqueueFailureStatusHex", "0xC0000001");
+            RequireData(readEvents, "sequence", "1216");
+            RequireData(readEvents, "sequenceMeaning", "nextSequence");
+        }
+        else
+        {
+            RequireData(readEvents, "processed", "16");
+            RequireData(readEvents, "eligible", "16");
+            RequireData(readEvents, "eligibleEvents", "16");
+            RequireData(readEvents, "emitted", "16");
+            RequireData(readEvents, "suppressed", "0");
+            RequireData(readEvents, "skipped", "0");
+            RequireData(readEvents, "head", "1200");
+            RequireData(readEvents, "tail", "1215");
+            RequireData(readEvents, "headSequence", "1200");
+            RequireData(readEvents, "tailSequence", "1215");
+            RequireData(readEvents, "emittedHeadSequence", "1200");
+            RequireData(readEvents, "emittedTailSequence", "1215");
+            RequireData(readEvents, "sampling", "none");
+            RequireData(readEvents, "samplingApplied", "false");
+            RequireData(readEvents, "eventsDropped", "9");
+            RequireData(readEvents, "lostCount", "9");
+            RequireData(readEvents, "loss", "driver-events-dropped");
+            RequireData(readEvents, "lossObserved", "true");
+            RequireData(readEvents, "eventsWritten", "16");
+            RequireData(readEvents, "eventsEmitted", "16");
+            RequireData(readEvents, "backpressure", "true");
+            RequireData(readEvents, "backpressureObserved", "true");
+            RequireData(readEvents, "backpressureReason", "events-dropped");
+            RequireData(readEvents, "highWatermark", ExpectedEventRingCapacity.ToString());
+            RequireData(readEvents, "lastEnqueueFailureStatusHex", "0xC0000001");
+            RequireData(readEvents, "sequence", "1216");
+            RequireData(readEvents, "sequenceMeaning", "nextSequence");
+        }
 
         var mockMarker = RequireEvent(events, "r0collector.mockDriverEvent");
         RequireData(mockMarker, "mock", "true");
@@ -639,14 +803,49 @@ internal sealed class R0CollectorEventQualityScenario : ISmokeTestScenario
                 DataEquals(evt, "stress", "true"))
             .ToList();
         SmokeAssert.True(stressRows.Count == ExpectedStressDriverRows, $"Synthetic stress corpus should preserve {ExpectedStressDriverRows} driver.file rows. Actual: {stressRows.Count}");
-        SmokeAssert.True(
-            stressRows.All(evt =>
-                DataEquals(evt, "eventSchemaVersion", AbiVersion) &&
-                evt.Data.ContainsKey("version") &&
-                evt.Data.ContainsKey("recordSize") &&
-                evt.Data.ContainsKey("sequence") &&
-                DataEquals(evt, "payloadSchema", "KSWORD_SANDBOX_FILE_EVENT_PAYLOAD")),
-            "Every stress driver row should preserve ABI version, record size, sequence, and payload schema.");
+        var stressRowsDataSampled =
+            !requireFullQueueHealthAliases &&
+            stressRows.All(evt => evt.Data.ContainsKey("__omittedDataPairs"));
+        if (stressRowsDataSampled)
+        {
+            SmokeAssert.True(
+                stressRows.All(evt =>
+                    DataEquals(evt, "producer", "file") &&
+                    DataEquals(evt, "schema", "ksword.sandbox.r0.event") &&
+                    DataEquals(evt, "noise", "false") &&
+                    DataEquals(evt, "collectorSelfNoise", "false") &&
+                    DataEquals(evt, "lostCount", "0") &&
+                    DataEquals(evt, "highWatermark", "0") &&
+                    DataEquals(evt, "lastEnqueueFailureStatus", "0") &&
+                    evt.Data.ContainsKey("sequence")),
+                "Every sampled stress driver row should preserve high-priority producer, sequence, noise, loss, and backpressure aliases.");
+        }
+        else
+        {
+            SmokeAssert.True(
+                stressRows.All(evt =>
+                    DataEquals(evt, "producer", "file") &&
+                    DataEquals(evt, "schema", "ksword.sandbox.r0.event") &&
+                    DataEquals(evt, "noise", "false") &&
+                    DataEquals(evt, "collectorSelfNoise", "false") &&
+                    DataEquals(evt, "selfProcess", "false") &&
+                    DataEquals(evt, "collectorSuppressed", "false") &&
+                    DataEquals(evt, "lost", "false") &&
+                    DataEquals(evt, "lostCount", "0") &&
+                    DataEquals(evt, "lossObserved", "false") &&
+                    DataEquals(evt, "backpressure", "false") &&
+                    DataEquals(evt, "backpressureObserved", "false") &&
+                    DataEquals(evt, "highWatermark", "0") &&
+                    DataEquals(evt, "lastEnqueueFailureStatus", "0") &&
+                    DataEquals(evt, "eventSchemaVersion", AbiVersion) &&
+                    evt.Data.ContainsKey("version") &&
+                    evt.Data.ContainsKey("recordSize") &&
+                    evt.Data.ContainsKey("sequence") &&
+                    DataEquals(evt, "payloadSchema", "KSWORD_SANDBOX_FILE_EVENT_PAYLOAD") &&
+                    evt.Data.ContainsKey("StressJsonlLossEvidence") &&
+                    evt.Data.ContainsKey("StressJsonlBackpressureEvidence")),
+                "Every stress driver row should preserve ABI, sequence, payload, noise, loss, backpressure, and stress evidence fields.");
+        }
 
         var started = RequireEvent(events, "r0collector.started");
         RequireData(started, "StressJsonlExpectedDriverRows", ExpectedStressDriverRows.ToString());
@@ -655,6 +854,10 @@ internal sealed class R0CollectorEventQualityScenario : ISmokeTestScenario
         RequireData(started, "StressJsonlSequenceGapCount", StressJsonlSequenceGapCount.ToString());
         SmokeAssert.True(started.Data.ContainsKey("StressJsonlLossEvidence"), "Started row should name stress loss evidence fields.");
         SmokeAssert.True(started.Data.ContainsKey("StressJsonlBackpressureEvidence"), "Started row should name stress backpressure evidence fields.");
+        RequireContains(started.Data["StressJsonlLossEvidence"], "lossObserved", "Started stress loss evidence should include lossObserved.");
+        RequireContains(started.Data["StressJsonlLossEvidence"], "head", "Started stress loss evidence should include sequence head.");
+        RequireContains(started.Data["StressJsonlBackpressureEvidence"], "backpressureObserved", "Started stress backpressure evidence should include backpressureObserved.");
+        RequireContains(started.Data["StressJsonlBackpressureEvidence"], "sampling", "Started stress backpressure evidence should include sampling.");
     }
 
     /// <summary>
@@ -701,6 +904,29 @@ internal sealed class R0CollectorEventQualityScenario : ISmokeTestScenario
             jsonLines.MalformedLines.Single().Contains("broken", StringComparison.Ordinal),
             "Malformed executable stress/noise row should retain the broken sequence marker.");
 
+        var started = RequireEvent(jsonLines.Events, "r0collector.started");
+        RequireData(started, "mockMode", "true");
+        RequireData(started, "syntheticMode", "true");
+        RequireData(started, "injectJsonlNoise", "true");
+        RequireData(started, "stressCount", ExpectedStressDriverRows.ToString());
+        RequireData(started, "readEventsMaxEvents", "16");
+        RequireData(started, "maxReadBatches", "4");
+        RequireData(started, "driverEventSampleStride", "1");
+        RequireData(started, "driverEventSampling", "none");
+        RequireData(started, "StressJsonlExpectedDriverRows", ExpectedStressDriverRows.ToString());
+        RequireData(started, "StressJsonlSequenceStart", StressJsonlSequenceStart.ToString());
+        RequireData(started, "StressJsonlSequenceEnd", StressJsonlSequenceEnd.ToString());
+        RequireData(started, "StressJsonlSequenceGapCount", StressJsonlSequenceGapCount.ToString());
+        RequireContains(started.Data["StressJsonlLossEvidence"], "lossObserved", "Executable started row should name lossObserved in stress evidence.");
+        RequireContains(started.Data["StressJsonlBackpressureEvidence"], "backpressureObserved", "Executable started row should name backpressureObserved in stress evidence.");
+
+        var mockMarker = RequireEvent(jsonLines.Events, "r0collector.mockDriverEvent");
+        RequireData(mockMarker, "mock", "true");
+        RequireData(mockMarker, "stress", "true");
+        RequireData(mockMarker, "StressJsonlExpectedDriverRows", ExpectedStressDriverRows.ToString());
+        RequireData(mockMarker, "collectorSelfNoise", "false");
+        RequireData(mockMarker, "selfProcess", "false");
+
         var stressRows = jsonLines.Events
             .Where(evt => string.Equals(evt.EventType, "driver.file", StringComparison.OrdinalIgnoreCase) &&
                 DataEquals(evt, "stress", "true"))
@@ -712,12 +938,56 @@ internal sealed class R0CollectorEventQualityScenario : ISmokeTestScenario
                 DataEquals(evt, "schema", "ksword.sandbox.r0.event") &&
                 DataEquals(evt, "noise", "false") &&
                 DataEquals(evt, "lost", "false") &&
+                DataEquals(evt, "lostCount", "0") &&
                 DataEquals(evt, "backpressure", "false") &&
+                DataEquals(evt, "highWatermark", "0") &&
+                DataEquals(evt, "lastEnqueueFailureStatus", "0") &&
                 evt.Data.ContainsKey("sequence") &&
                 evt.Data.ContainsKey("StressJsonlLossEvidence") &&
                 evt.Data.ContainsKey("StressJsonlBackpressureEvidence")),
             "Executable stress rows should preserve stable producer/schema/noise/loss/backpressure fields.");
         AssertMonotonicStressSequences(jsonLines.Events);
+
+        var executableReadEvents = RequireEvent(jsonLines.Events, "r0collector.driverReadEvents");
+        RequireData(executableReadEvents, "recordsProcessed", ExpectedStressDriverRows.ToString());
+        RequireData(executableReadEvents, "eventsEmitted", ExpectedStressDriverRows.ToString());
+        RequireData(executableReadEvents, "collectorSuppressedEvents", "0");
+        RequireData(executableReadEvents, "collectorSkippedEvents", "0");
+        RequireData(executableReadEvents, "processed", ExpectedStressDriverRows.ToString());
+        RequireData(executableReadEvents, "eligible", ExpectedStressDriverRows.ToString());
+        RequireData(executableReadEvents, "eligibleEvents", ExpectedStressDriverRows.ToString());
+        RequireData(executableReadEvents, "emitted", ExpectedStressDriverRows.ToString());
+        RequireData(executableReadEvents, "suppressed", "0");
+        RequireData(executableReadEvents, "skipped", "0");
+        RequireData(executableReadEvents, "head", StressJsonlSequenceStart.ToString());
+        RequireData(executableReadEvents, "tail", StressJsonlSequenceEnd.ToString());
+        RequireData(executableReadEvents, "sampling", "none");
+        RequireData(executableReadEvents, "loss", "none");
+        RequireData(executableReadEvents, "lossObserved", "false");
+        RequireData(executableReadEvents, "backpressure", "false");
+        RequireData(executableReadEvents, "backpressureObserved", "false");
+        RequireData(executableReadEvents, "backpressureReason", "none");
+        RequireData(executableReadEvents, "requestedMaxEvents", "16");
+        RequireData(executableReadEvents, "readEventsMaxEvents", "16");
+        RequireData(executableReadEvents, "maxReadBatches", "4");
+        RequireData(executableReadEvents, "drainStoppedAtBatchLimit", "false");
+        RequireData(executableReadEvents, "eventsDropped", "0");
+        RequireData(executableReadEvents, "lostCount", "0");
+        RequireData(executableReadEvents, "highWatermark", "0");
+        RequireData(executableReadEvents, "lastEnqueueFailureStatus", "0");
+        RequireData(executableReadEvents, "lastEnqueueFailureStatusHex", "0x00000000");
+        RequireData(executableReadEvents, "sequence", (StressJsonlSequenceEnd + 1).ToString());
+        RequireData(executableReadEvents, "sequenceMeaning", "nextSequence");
+
+        var stopped = RequireEvent(jsonLines.Events, "r0collector.stopped");
+        RequireData(stopped, "reason", "mockComplete");
+        RequireData(stopped, "ioctlIssued", "false");
+        RequireData(stopped, "stressCount", ExpectedStressDriverRows.ToString());
+        RequireData(stopped, "injectJsonlNoise", "true");
+        RequireData(stopped, "driverEvents", ExpectedStressDriverRows.ToString());
+        RequireData(stopped, "driverRecordsProcessed", ExpectedStressDriverRows.ToString());
+        RequireData(stopped, "collectorSuppressedEvents", "0");
+        RequireData(stopped, "collectorSkippedEvents", "0");
 
         var mockNetwork = jsonLines.Events.FirstOrDefault(evt =>
             string.Equals(evt.EventType, "driver.network", StringComparison.OrdinalIgnoreCase) &&

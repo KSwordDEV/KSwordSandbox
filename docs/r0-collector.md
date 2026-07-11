@@ -3,6 +3,16 @@
 `guest/KSword.Sandbox.R0Collector` is the Windows user-mode sidecar that runs
 inside the guest VM and drains events from `KSword.Sandbox.Driver`.
 
+Canonical scope: this page owns collector CLI/runtime/readiness integration.
+The kernel/user ABI source of truth is `docs/r0-driver-core.md`, JSONL field
+schema is `docs/r0-jsonl-schema.md`, and driver install/test-signing operator
+steps live in `docs/driver-install.md`.
+
+中文说明：`R0Collector` 是 guest VM 内的用户态 sidecar，负责通过 public
+IOCTL 从内核驱动读取事件并写出 JSONL。所有 `eventType`、JSON key、
+`diagnosticCode`、`reason`、`readinessState` 等机器字段保持英文稳定值；
+中文只作为附加 `zhMessage`、`zhHint`、`zhNote`、`zh*Policy` 字段出现。
+
 Current status:
 
 - Opens the driver Win32 path `\\.\KSwordSandboxDriver` with `CreateFileW`.
@@ -27,6 +37,8 @@ Current status:
   `diagnosticStage`, and `diagnosticCode` fields so service missing, device open
   denied/not found, ABI mismatch, READ_EVENTS timeout, and no-event conditions
   are not collapsed into a generic informational unavailable row.
+  中文：这些就绪行是“采集健康诊断”，不是样本行为。新增中文字段仅帮助操
+  作者理解下一步排查，不能替代稳定 code。
 - Issues `IOCTL_KSWORD_SANDBOX_POLL` and `IOCTL_KSWORD_SANDBOX_READ_EVENTS`
   in a one-shot or timed polling loop.
 - Converts driver event records into `SandboxEvent` JSON Lines for the Guest
@@ -43,6 +55,9 @@ Current status:
 ## Source layout
 
 `guest/KSword.Sandbox.R0Collector/src` is split by runtime responsibility:
+
+中文：源码按职责拆分；中文化只添加显示/诊断文本，不改变 IOCTL 协议、
+事件类型或字段名。
 
 - `main.cpp`: minimal `wmain` entry point.
 - `AbiSelfCheck.*`: no-device ABI/event-quality self-check row for CI and
@@ -103,9 +118,10 @@ Initial IOCTLs:
   - Input: none.
   - Output: `KSWORD_SANDBOX_STATUS_REPLY`.
   - Purpose: Queue and status counters, lifecycle state, `ProducerEnableMask`,
-    `ActiveProducerMask`, `FailedProducerMask`, `TotalEventsSuppressed`,
-    `TotalEventsBackpressured`, producer dropped/suppressed/backpressure masks,
-    queue capacity, high watermark, and last NTSTATUS.
+    `ActiveProducerMask`, `FailedProducerMask`, `EffectiveProducerMask`,
+    `TotalEventsSuppressed`, `TotalEventsBackpressured`, producer
+    dropped/suppressed/backpressure masks, queue capacity, high watermark,
+    `LastNtStatus`, and `LastFailureNtStatus`.
 - `IOCTL_KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK`
   - Input: `KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK_REQUEST`.
   - Output: `KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK_REPLY`.
@@ -118,20 +134,27 @@ Initial IOCTLs:
 `IOCTL_KSWORD_SANDBOX_GET_CAPABILITIES` succeeds. The row preserves ABI
 major/minor, capability flag names, producer-mask support/names, event schema
 name/version, event header version, ring capacity, reply sizes, and max payload
-size for later diagnostics.
+size for later diagnostics.  `capabilityFlagNames` covers every current
+capability bit including `ProcessCreateExit`, `ImageLoad`, `FileMinifilter`,
+`RegistryCallback`, `NetworkWfpAle`, `EventCommonMetadata`,
+`ProducerMetadata`, and `SelfNoiseMetadata`; the row also emits boolean
+`*Capable` fields for those capabilities.
 
 `R0Collector` emits `r0collector.driverStatus` for
 `IOCTL_KSWORD_SANDBOX_GET_STATUS` before draining and again after the final drain.
 These rows preserve queue depth/capacity, high watermark, `ProducerEnableMask`,
 `SupportedProducerMask`, `ActiveProducerMask`, `FailedProducerMask`,
-`TotalEventsEnqueued`, `TotalEventsDropped`, `TotalEventsRead`,
-`TotalEventsSuppressed`, `TotalEventsBackpressured`, `ProducerDroppedMask`,
-`ProducerSuppressedMask`, `ProducerBackpressureMask`, `NextSequence`, and
-`LastNtStatus`.  The JSON field names are `activeProducerMask`,
+`EffectiveProducerMask`, `TotalEventsEnqueued`, `TotalEventsDropped`,
+`TotalEventsRead`, `TotalEventsSuppressed`, `TotalEventsBackpressured`,
+`ProducerDroppedMask`, `ProducerSuppressedMask`, `ProducerBackpressureMask`,
+`NextSequence`, `LastNtStatus`, and `LastFailureNtStatus`.  The JSON field names
+are `activeProducerMask`,
 `activeProducerMaskHex`,
 `activeProducerMaskNames`, `failedProducerMask`, `failedProducerMaskHex`, and
-`failedProducerMaskNames`; producer loss masks also emit decimal, hex, and
-name forms.
+`failedProducerMaskNames`; `effectiveProducerMask`, `effectiveProducerMaskHex`,
+`effectiveProducerMaskNames`, `lastFailureNtStatus`, and
+`lastFailureNtStatusHex` mirror the newly populated status fields. Producer
+loss masks also emit decimal, hex, and name forms.
 
 The active/failed producer masks are published without an ABI minor bump by
 using the previously unused reserved/alignment space in
@@ -206,6 +229,9 @@ KSword.Sandbox.R0Collector.exe `
 ```
 
 Supported options:
+
+中文：CLI help 现在按英文 / 中文并列输出；flag 名、枚举值和路径参数不翻
+译，方便脚本和 smoke tests 继续匹配。
 
 - `--device`, `-d`: Win32 symbolic-link path for the driver device.
 - `--output`, `--out`, `-o`: JSON Lines output path, or `-` for stdout.
@@ -282,6 +308,10 @@ and `operatorInterpretation=collection_diagnostic_not_sample_behavior` so a
 missing or inaccessible device is clearly a collection/readiness issue rather
 than evidence of malicious sample behavior.
 
+中文：设备不可用时，`message`/`hint` 保留英文原文，同时新增
+`zhMessage`/`zhHint`。排查顺序通常是服务是否安装并运行、设备符号链接是
+否创建、Collector 是否提权、驱动和 Collector ABI 是否匹配。
+
 Live readiness diagnostic after a driver is expected to be installed and
 started:
 
@@ -314,6 +344,11 @@ Expected diagnostic rows:
   `openDeviceDiagnosticCode`, `abiDiagnosticCode`, and
   `readEventsDiagnosticCode`.
 
+中文：每条 `readinessDiagnostic` 都会保留 `hint` 并附加 `zhHint`；
+`readinessSummary` 会附加 `zhMessage`/`zhHint`，提示是否阻塞、降级或可
+继续采集。不要翻译 `missing_service`、`abi_mismatch`、`read_timeout` 等
+诊断 code。
+
 `driver_no_events` is a warning/degraded condition rather than a protocol
 failure: `READ_EVENTS` completed, but the queue was empty. It usually means the
 startup heartbeat was already drained or producers have not observed sample
@@ -342,10 +377,18 @@ KSword.Sandbox.R0Collector.exe `
 
 Expected stress evidence:
 
+- `r0collector.started` and `r0collector.mockDriverEvent` rows with
+  `stressCount`, `stress=true`, and the `StressJsonl*` field set so automation
+  can verify the intended corpus before scanning all rows.
 - 32 `driver.file` rows with `stress=true`.
 - `sequence` range `1200..1231` and `StressJsonlSequenceGapCount=0`.
+- a mock `r0collector.driverReadEvents` summary with
+  `recordsProcessed`/`eventsEmitted`, `processed`/`eligible`/`emitted`,
+  `suppressed`/`skipped`, `head`/`tail`, `sampling`, `sequenceMeaning`,
+  `lostCount`, `lossObserved`, `highWatermark`, `backpressure`,
+  `backpressureObserved`, and `backpressureReason`.
 - loss/backpressure fields such as `totalEventsDropped`, `queueHighWatermark`,
-  `readEventsMaxEvents`, and `maxReadBatches`.
+  `readEventsMaxEvents`, `maxReadBatches`, and `lastEnqueueFailureStatus`.
 - one blank line, one malformed JSON row, and one valid extra-field row when
   `--inject-jsonl-noise` is supplied.
 
@@ -383,27 +426,39 @@ Every collector-owned row keeps the event-quality fields stable under `data`:
 - `noise` is `false` for normal rows. It is `true` for the valid synthetic
   extra-field row emitted by `--inject-jsonl-noise` and for self-noise rows only
   when the operator explicitly uses `--emit-self-noise`.
-- `selfNoise`, `selfNoiseReason`, `selfNoiseAction`, and
-  `collectorNoisePolicy` explain collector/KSword infrastructure attribution.
+- `selfNoise`, `collectorNoise`, `collectorSelfNoise`, `selfProcess`,
+  `selfNoiseReason`, `selfNoiseAction`, `collectorNoisePolicy`, and
+  `collectorSuppressed` explain collector/KSword infrastructure attribution.
   With the default suppression policy those noisy driver rows are not emitted;
   counts remain in `collectorSuppressedEvents`.
 - `eventOrigin`, `producerCategory`, `subjectKind`, `processIdSource`,
   `actorRole`, and `subjectRole` make driver-row ownership readable without
   relying on report-generation heuristics.
-- `lost` is `true` only when the row itself reports drop/loss counters; delivered
-  driver rows keep `lost=false` and use `sequence` plus status/read counters for
-  gap analysis.
+- `sequence` is a concrete driver event sequence on driver rows and a
+  `nextSequence` alias on snapshot/summary rows. Snapshot rows set
+  `sequenceMeaning=nextSequence` so reports do not confuse a future sequence
+  with an already delivered event.
+- `lost` is `true` only when the row itself reports drop/loss counters;
+  `lostCount` preserves the numeric drop count and `lossObserved` mirrors the
+  boolean loss classification. Delivered driver rows keep `lost=false` and use
+  `sequence` plus status/read counters for gap analysis.
+- `highWatermark` is the stable JSONL alias for
+  `QueueHighWatermark`/`queueHighWatermark`; rows without a live queue snapshot
+  emit `0` rather than omitting the field in mock/schema smoke output.
 - `backpressure` / `backpressureObserved` are set on status/read rows when the
   queue reached capacity, a batch filled the requested cap, or drop counters are
-  non-zero. Synthetic stress rows keep `backpressure=false` but name the
+  non-zero. `backpressureReason` carries the machine-readable reason such as
+  `events-dropped`, `requested-max-events-reached`, `output-buffer-full`, or
+  `none`. Synthetic stress rows keep `backpressure=false` but name the
   `StressJsonlBackpressureEvidence` field set.
 - `r0collector.driverReadEvents` keeps both old and concise batch counters near
   the front of `data`: `recordsProcessed`, `eventsEmitted`,
   `collectorSuppressedEvents`, `collectorSkippedEvents`, `eligibleEvents`, plus
   aliases `processed`, `eligible`, `emitted`, `suppressed`, `skipped`,
-  `head`, `tail`, `sampling`, `loss`, and `backpressureObserved`. This order is
-  deliberate so host report sampling keeps the important accounting fields even
-  when raw JSONL contains many additional diagnostics.
+  `head`, `tail`, `sampling`, `loss`, `lossObserved`,
+  `backpressureObserved`, and `backpressureReason`. This order is deliberate so
+  host report sampling keeps the important accounting fields even when raw JSONL
+  contains many additional diagnostics.
 - `collectionDiagnostic=true`, `sampleBehavior=false`, and
   `operatorInterpretation=collection_diagnostic_not_sample_behavior` are used
   on device/readiness/IOCTL diagnostic rows to separate collector health from
@@ -461,8 +516,8 @@ Important `r0collector.abiSelfCheck` evidence fields:
   `producerMaskDefaultHex`, and producer/capability name fields: prove the
   collector knows the current process/image/file/registry/network producer
   families and optional IOCTL capability bits.
-- `schema`, `producer`, `noise`, `selfNoise`, `selfNoiseReason`, `lost`,
-  `backpressure`, and
+- `schema`, `producer`, `noise`, `selfNoise`, `collectorSelfNoise`,
+  `selfProcess`, `selfNoiseReason`, `lost`, `backpressure`, and
   `stableJsonlFields`: prove the collector binary knows the stable event-quality
   field names used by live, mock, stress, and noise rows.
 - `eventHeaderSize`, `healthReplySize`, `capabilitiesReplySize`,
@@ -612,8 +667,12 @@ Expected script rows for the live VM path:
 
 Every output line is a single `SandboxEvent`-compatible JSON object:
 
+中文：JSONL 仍保持单行一个 `SandboxEvent`。`data` 里所有值按字符串写出；
+新增中文字段也遵守这一规则。Host/Report 可以展示 `zhMessage`/`zhHint`，
+但规则匹配和聚合仍应使用英文稳定字段。
+
 ```json
-{"eventType":"driver.load","source":"driver","timestamp":"2026-07-10T00:00:00.000Z","processId":1234,"processName":"","path":"\\\\.\\KSwordSandboxDriver","commandLine":"","data":{"sequence":"1","driverEventTypeName":"driverLoad","producerCategory":"driver","eventOrigin":"kernel-driver-control-plane","subjectKind":"driver","processIdSource":"eventHeader","selfNoise":"false","flagsHex":"0x00000003","driverLoadEventName":"driver.load"}}
+{"eventType":"driver.load","source":"driver","timestamp":"2026-07-10T00:00:00.000Z","processId":1234,"processName":"","path":"\\\\.\\KSwordSandboxDriver","commandLine":"","data":{"sequence":"1","driverEventTypeName":"driverLoad","producerCategory":"driver","eventOrigin":"kernel-driver-control-plane","subjectKind":"driver","processIdSource":"eventHeader","selfNoise":"false","flagsHex":"0x00000003","driverLoadEventName":"driver.load","zhDriverLoadEventDescription":"..."}}
 ```
 
 Top-level field rules:
@@ -671,7 +730,8 @@ Required synthetic coverage:
   live display skips or defers bad partial rows without dropping valid rows.
 - Attribution/self-noise evidence: mock and ABI self-check rows preserve
   `eventOrigin`, `producerCategory`, `subjectKind`, `processIdSource`,
-  `selfNoise`, `selfNoiseReason`, `collectorNoisePolicy`, and
+  `selfNoise`, `collectorSelfNoise`, `selfProcess`, `selfNoiseReason`,
+  `collectorNoisePolicy`, and
   `collectorSuppressedEvents` field names so no-device smoke can validate the
   readable ownership contract.
 - Mock/stress inputs: use `--self-test`, `--synthetic`, `--mock`,

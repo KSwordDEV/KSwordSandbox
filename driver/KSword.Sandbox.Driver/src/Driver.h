@@ -23,8 +23,8 @@
  *          telemetry without materially increasing non-paged pool pressure.
  * Logic  : keeping the array inside the IoCreateDevice extension places it in
  *          non-paged kernel memory and avoids dynamic allocation in callbacks.
- *          At the current 184-byte event record size, 1024 slots consume about
- *          184 KiB of non-paged memory; the guard rails below prevent accidental
+ *          At the current 232-byte event record size, 1024 slots consume about
+ *          232 KiB of non-paged memory; the guard rails below prevent accidental
  *          multi-megabyte lab builds.
  * Return : not applicable.
  */
@@ -63,27 +63,47 @@
 /*
  * Compile-time producer capability switches.
  *
- * Inputs : build definitions may set KSWORD_SANDBOX_ENABLE_NETWORK_WFP_ALE=0
- *          when a lab image wants an explicit "not supported" network producer
- *          instead of registering WFP/ALE callouts.
+ * Inputs : build definitions may set individual KSWORD_SANDBOX_ENABLE_* values
+ *          to 0 when a lab image wants an explicit "not supported" producer
+ *          instead of registering that callback family.
  * Logic  : SupportedProducerMask and GET_CAPABILITIES are derived from the
  *          compiled producer set, so a disabled producer is not advertised as
  *          active or supported.  Runtime registration failures still appear in
  *          FailedProducerMask and LastNtStatus.
  * Return : not applicable.
  */
+#if !defined(KSWORD_SANDBOX_ENABLE_PROCESS_CREATE)
+#define KSWORD_SANDBOX_ENABLE_PROCESS_CREATE 1
+#endif
+
+#if !defined(KSWORD_SANDBOX_ENABLE_IMAGE_LOAD)
+#define KSWORD_SANDBOX_ENABLE_IMAGE_LOAD 1
+#endif
+
+#if !defined(KSWORD_SANDBOX_ENABLE_FILE_MINIFILTER)
+#define KSWORD_SANDBOX_ENABLE_FILE_MINIFILTER 1
+#endif
+
+#if !defined(KSWORD_SANDBOX_ENABLE_REGISTRY_CALLBACK)
+#define KSWORD_SANDBOX_ENABLE_REGISTRY_CALLBACK 1
+#endif
+
 #if !defined(KSWORD_SANDBOX_ENABLE_NETWORK_WFP_ALE)
 #define KSWORD_SANDBOX_ENABLE_NETWORK_WFP_ALE 1
 #endif
 
-#if KSWORD_SANDBOX_ENABLE_NETWORK_WFP_ALE
 #define KSWORD_SANDBOX_COMPILED_PRODUCER_MASK \
-    KSWORD_SANDBOX_PRODUCER_MASK_CURRENT
-#else
-#define KSWORD_SANDBOX_COMPILED_PRODUCER_MASK \
-    (KSWORD_SANDBOX_PRODUCER_MASK_CURRENT & \
-        ~KSWORD_SANDBOX_PRODUCER_FLAG_NETWORK)
-#endif
+    (KSWORD_SANDBOX_PRODUCER_FLAG_DRIVER | \
+     (KSWORD_SANDBOX_ENABLE_PROCESS_CREATE ? \
+        KSWORD_SANDBOX_PRODUCER_FLAG_PROCESS : 0U) | \
+     (KSWORD_SANDBOX_ENABLE_IMAGE_LOAD ? \
+        KSWORD_SANDBOX_PRODUCER_FLAG_IMAGE : 0U) | \
+     (KSWORD_SANDBOX_ENABLE_FILE_MINIFILTER ? \
+        KSWORD_SANDBOX_PRODUCER_FLAG_FILE : 0U) | \
+     (KSWORD_SANDBOX_ENABLE_REGISTRY_CALLBACK ? \
+        KSWORD_SANDBOX_PRODUCER_FLAG_REGISTRY : 0U) | \
+     (KSWORD_SANDBOX_ENABLE_NETWORK_WFP_ALE ? \
+        KSWORD_SANDBOX_PRODUCER_FLAG_NETWORK : 0U))
 
 /*
  * Internal event record stored in the fixed non-paged ring.
@@ -169,24 +189,6 @@ typedef struct _KSWORD_SANDBOX_STATE_SNAPSHOT {
     ULONG QueueHighWatermark;
 } KSWORD_SANDBOX_STATE_SNAPSHOT, *PKSWORD_SANDBOX_STATE_SNAPSHOT;
 
-/*
- * Runtime state for the minimal file minifilter producer.
- *
- * Inputs : initialized from DriverEntry and read by minifilter callbacks.
- * Logic  : stores the FltMgr filter handle, the existing READ_EVENTS device
- *          extension, and registration/start statuses.  Active gates callback
- *          event emission before the filter is unregistered during unload.
- * Return : no direct return value; failures are summarized through the device
- *          extension LastStatus field exposed by health.
- */
-typedef struct _KSWORD_SANDBOX_FILE_FILTER_RUNTIME {
-    PFLT_FILTER Filter;
-    PKSWORD_SANDBOX_DEVICE_EXTENSION DeviceExtension;
-    volatile LONG Active;
-    NTSTATUS RegisterStatus;
-    NTSTATUS StartStatus;
-} KSWORD_SANDBOX_FILE_FILTER_RUNTIME, *PKSWORD_SANDBOX_FILE_FILTER_RUNTIME;
-
 VOID
 KswSetLastStatus(
     _Inout_ PKSWORD_SANDBOX_DEVICE_EXTENSION DeviceExtension,
@@ -260,18 +262,6 @@ KswDrainEventHeaders(
     _Out_ PULONG BytesWritten,
     _Out_ PULONGLONG EventsDropped,
     _Out_ PULONGLONG NextSequence
-    );
-
-NTSTATUS
-KswInitializeFileFilter(
-    _In_ PDRIVER_OBJECT DriverObject,
-    _In_ PUNICODE_STRING RegistryPath,
-    _In_ PKSWORD_SANDBOX_DEVICE_EXTENSION DeviceExtension
-    );
-
-VOID
-KswUninitializeFileFilter(
-    VOID
     );
 
 DRIVER_INITIALIZE DriverEntry;

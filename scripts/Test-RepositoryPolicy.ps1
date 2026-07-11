@@ -9,6 +9,7 @@ returns exit code 0 when policy passes and 1 when violations are found.
 #>
 [CmdletBinding()]
 param(
+    [string]$RepositoryRoot,
     [int64]$MaxBytes = 25000000,
     [switch]$StagedOnly,
     [string[]]$SecretEnvironmentNames = @('KSWORDBOX_GUEST_PASSWORD'),
@@ -17,6 +18,21 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$scriptRoot = if (-not [string]::IsNullOrWhiteSpace($PSScriptRoot)) {
+    $PSScriptRoot
+}
+elseif (-not [string]::IsNullOrWhiteSpace($PSCommandPath)) {
+    Split-Path -Parent $PSCommandPath
+}
+else {
+    Split-Path -Parent $MyInvocation.MyCommand.Path
+}
+
+if ([string]::IsNullOrWhiteSpace($RepositoryRoot)) {
+    $RepositoryRoot = Join-Path $scriptRoot '..'
+}
+
+$RepositoryRoot = (Resolve-Path -LiteralPath $RepositoryRoot).Path
 
 # Get-CandidateFiles gathers either staged files or all addable files.
 # Inputs are the StagedOnly switch; processing calls git without modifying the
@@ -25,10 +41,10 @@ function Get-CandidateFiles {
     param([bool]$OnlyStaged)
 
     if ($OnlyStaged) {
-        return @(git diff --cached --name-only --diff-filter=ACMR)
+        return @(git -C $RepositoryRoot diff --cached --name-only --diff-filter=ACMR)
     }
 
-    return @(git ls-files --cached --others --exclude-standard)
+    return @(git -C $RepositoryRoot ls-files --cached --others --exclude-standard)
 }
 
 # Test-ForbiddenPath checks whether a path should never enter git.
@@ -43,7 +59,10 @@ function Test-ForbiddenPath {
         '.vhd', '.vhdx', '.avhd', '.avhdx', '.iso', '.wim', '.esd',
         '.exe', '.dll', '.sys', '.pdb', '.lib', '.obj', '.ilk', '.exp',
         '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.zip', '.7z', '.rar',
-        '.pfx', '.p12', '.cer', '.key', '.dpapi'
+        '.pfx', '.p12', '.cer', '.key', '.dpapi',
+        '.msi', '.msix', '.appx', '.cab', '.ova', '.ovf', '.tar', '.gz',
+        '.crt', '.pem', '.der', '.csr', '.snk',
+        '.etl', '.dmp', '.evtx', '.pcap', '.pcapng', '.bmp'
     )
     $forbiddenFragments = @('/bin/', '/obj/', '/x64/', '/.vs/', '/dist/')
     $forbiddenRootPrefixes = @('runtime/', 'reports/', 'samples/', 'captures/', 'logs/')
@@ -129,7 +148,8 @@ function Test-SecretScanCandidate {
         '.exe', '.dll', '.sys', '.pdb', '.lib', '.obj', '.ilk', '.exp',
         '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.zip', '.7z', '.rar',
         '.pfx', '.p12', '.cer', '.key', '.dpapi', '.png', '.jpg', '.jpeg',
-        '.gif', '.ico', '.bmp', '.snk'
+        '.gif', '.ico', '.bmp', '.snk', '.pcap', '.pcapng', '.etl', '.dmp',
+        '.evtx'
     )
 
     return ($binaryExtensions -notcontains $extension)
@@ -151,8 +171,9 @@ foreach ($file in Get-CandidateFiles -OnlyStaged:$StagedOnly.IsPresent) {
         continue
     }
 
-    if (Test-Path -LiteralPath $file -PathType Leaf) {
-        $item = Get-Item -LiteralPath $file
+    $fullPath = Join-Path $RepositoryRoot $file
+    if (Test-Path -LiteralPath $fullPath -PathType Leaf) {
+        $item = Get-Item -LiteralPath $fullPath
         $length = $item.Length
         if ($length -gt $MaxBytes) {
             $violations.Add("File exceeds $MaxBytes bytes: $file ($length)")
@@ -160,7 +181,7 @@ foreach ($file in Get-CandidateFiles -OnlyStaged:$StagedOnly.IsPresent) {
 
         if ($secretValues.Count -gt 0 -and (Test-SecretScanCandidate -Path $file -Item $item)) {
             try {
-                $content = Get-Content -LiteralPath $file -Raw -ErrorAction Stop
+                $content = Get-Content -LiteralPath $fullPath -Raw -ErrorAction Stop
                 foreach ($secret in $secretValues) {
                     if ($content.IndexOf([string]$secret.Value, [System.StringComparison]::Ordinal) -ge 0) {
                         $violations.Add("Secret value from environment variable '$($secret.Name)' appears in candidate file: $file. Value was not printed.")

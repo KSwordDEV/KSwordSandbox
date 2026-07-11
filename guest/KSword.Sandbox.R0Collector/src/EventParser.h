@@ -15,9 +15,13 @@ struct DriverEventAttribution {
     std::string subjectRole = "sample-or-system";
     std::string processIdSource = "eventHeader";
     std::string collectorNoisePolicy = "suppress-self-noise";
+    std::string collectorNoiseReason = "none";
+    std::string collectorNoiseAction = "emit";
     std::string selfNoiseReason = "none";
     std::string selfNoiseAction = "emit";
+    bool collectorNoise = false;
     bool selfNoise = false;
+    bool selfProcess = false;
     bool suppressed = false;
 };
 

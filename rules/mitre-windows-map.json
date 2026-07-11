@@ -1,6 +1,6 @@
 {
   "matrix": "enterprise-windows",
-  "version": "2026-07-11-rules-vt-quality-v9",
+  "version": "2026-07-11-v15-open-source-reference-rules",
   "techniques": [
     {
       "id": "T1003",
@@ -24,6 +24,13 @@
       ]
     },
     {
+      "id": "T1003.003",
+      "name": "NTDS",
+      "categories": [
+        "credential-access"
+      ]
+    },
+    {
       "id": "T1016",
       "name": "System Network Configuration Discovery",
       "categories": [
@@ -35,6 +42,13 @@
       "name": "Remote System Discovery",
       "categories": [
         "discovery",
+        "lateral-movement"
+      ]
+    },
+    {
+      "id": "T1021",
+      "name": "Remote Services",
+      "categories": [
         "lateral-movement"
       ]
     },
@@ -325,11 +339,25 @@
       ]
     },
     {
+      "id": "T1176",
+      "name": "Browser Extensions",
+      "categories": [
+        "persistence"
+      ]
+    },
+    {
       "id": "T1197",
       "name": "BITS Jobs",
       "categories": [
         "defense-evasion",
         "persistence"
+      ]
+    },
+    {
+      "id": "T1202",
+      "name": "Indirect Command Execution",
+      "categories": [
+        "defense-evasion"
       ]
     },
     {
@@ -383,6 +411,13 @@
       ]
     },
     {
+      "id": "T1218.008",
+      "name": "Odbcconf",
+      "categories": [
+        "defense-evasion"
+      ]
+    },
+    {
       "id": "T1218.009",
       "name": "Regsvcs/Regasm",
       "categories": [
@@ -405,10 +440,39 @@
       ]
     },
     {
+      "id": "T1218.014",
+      "name": "MMC",
+      "categories": [
+        "defense-evasion"
+      ]
+    },
+    {
+      "id": "T1220",
+      "name": "XSL Script Processing",
+      "categories": [
+        "defense-evasion",
+        "execution"
+      ]
+    },
+    {
       "id": "T1482",
       "name": "Domain Trust Discovery",
       "categories": [
         "discovery"
+      ]
+    },
+    {
+      "id": "T1486",
+      "name": "Data Encrypted for Impact",
+      "categories": [
+        "impact"
+      ]
+    },
+    {
+      "id": "T1490",
+      "name": "Inhibit System Recovery",
+      "categories": [
+        "impact"
       ]
     },
     {
@@ -430,6 +494,27 @@
       "name": "Time Based Evasion",
       "categories": [
         "defense-evasion"
+      ]
+    },
+    {
+      "id": "T1518",
+      "name": "Software Discovery",
+      "categories": [
+        "discovery"
+      ]
+    },
+    {
+      "id": "T1518.001",
+      "name": "Security Software Discovery",
+      "categories": [
+        "discovery"
+      ]
+    },
+    {
+      "id": "T1539",
+      "name": "Steal Web Session Cookie",
+      "categories": [
+        "credential-access"
       ]
     },
     {
@@ -529,6 +614,20 @@
       ]
     },
     {
+      "id": "T1552",
+      "name": "Unsecured Credentials",
+      "categories": [
+        "credential-access"
+      ]
+    },
+    {
+      "id": "T1552.001",
+      "name": "Credentials In Files",
+      "categories": [
+        "credential-access"
+      ]
+    },
+    {
       "id": "T1553",
       "name": "Subvert Trust Controls",
       "categories": [
@@ -552,6 +651,13 @@
     {
       "id": "T1555.003",
       "name": "Credentials from Web Browsers",
+      "categories": [
+        "credential-access"
+      ]
+    },
+    {
+      "id": "T1558",
+      "name": "Steal or Forge Kerberos Tickets",
       "categories": [
         "credential-access"
       ]

@@ -123,15 +123,47 @@ Common attribution fields are additive and string-valued:
   `typedPayload.processId`, `eventHeader`, `top-level`, or `synthetic`.
 - `actorRole` / `subjectRole`: readable origin labels used to separate sample
   or system activity from collector infrastructure diagnostics.
-- `selfNoise`, `selfNoiseReason`, `selfNoiseAction`, and
-  `collectorNoisePolicy`: collector-side classification for KSword
-  infrastructure rows. With the default policy, self-noise driver records are
-  suppressed and counted in the `r0collector.driverReadEvents` summary.
+- `selfNoise`, `collectorNoise`, `collectorSelfNoise`, `selfProcess`,
+  `selfNoiseReason`, `selfNoiseAction`, and `collectorNoisePolicy`:
+  collector-side classification for KSword infrastructure rows. With the
+  default policy, self-noise driver records are suppressed and counted in the
+  `r0collector.driverReadEvents` summary. `collectorSelfNoise=true` means the
+  row matched collector/KSword infrastructure criteria; `selfProcess=true`
+  means the row was attributed to the collector process identity.
+  `collectorSuppressed=true` is present only on rows that were classified for
+  suppression before policy was applied; emitted mock/schema rows keep it
+  `false`.
+
+Stable event-quality aliases are present across live, mock, stress, and schema
+smoke rows:
+
+- `sequence`: concrete event sequence on driver rows, or the snapshot
+  `nextSequence` alias when `sequenceMeaning=nextSequence` is present.
+- `lost`, `lostCount`, and `lossObserved`: boolean and numeric loss evidence.
+  Loss can come from per-record metadata, `TotalEventsDropped`, or
+  `READ_EVENTS.EventsDropped`.
+- `highWatermark`: stable alias for `QueueHighWatermark` /
+  `queueHighWatermark`; rows without a queue snapshot emit `0` in mock/schema
+  output instead of omitting the key.
+- `backpressure`, `backpressureObserved`, and `backpressureReason`: queue or
+  batch pressure evidence. Reasons include `events-dropped`,
+  `requested-max-events-reached`, `output-buffer-full`, and `none`.
+- `processed`, `eligible`, `emitted`, `suppressed`, `skipped`, `head`, `tail`,
+  and `sampling`: compact `r0collector.driverReadEvents` aliases used by
+  report sampling and large-stream smoke tests.
 
 Negotiation and queue rows must preserve these event-quality keys:
 
 - `r0collector.driverCapabilities.data`: `version`, `versionHex`, `size`,
   `abiVersionMajor`, `abiVersionMinor`, `capabilityFlagsHex`,
+  `capabilityFlagNames`, `getHealthCapable`, `pollCapable`,
+  `readEventsCapable`, `getCapabilitiesCapable`, `getStatusCapable`,
+  `setProducerEnableMaskCapable`, `queueStatusCountersCapable`,
+  `producerEnableBitsCapable`, `typedEventPayloadsCapable`,
+  `eventSchemaNamesCapable`, `processCreateExitCapable`, `imageLoadCapable`,
+  `fileMinifilterCapable`, `registryCallbackCapable`, `networkWfpAleCapable`,
+  `eventCommonMetadataCapable`, `producerMetadataCapable`,
+  `selfNoiseMetadataCapable`,
   `supportedProducerMask`, `supportedProducerMaskHex`,
   `defaultProducerMask`, `defaultProducerMaskHex`, `eventSchemaName`,
   `eventSchemaVersion`, `eventSchemaVersionHex`, `eventHeaderVersion`,
@@ -141,10 +173,15 @@ Negotiation and queue rows must preserve these event-quality keys:
   `setProducerEnableMaskReplySize`.
 - `r0collector.driverStatus.data`: `version`, `versionHex`, `size`,
   `queueCapacity`, `queueDepth`, `QueueHighWatermark` as JSON key
-  `queueHighWatermark`, `producerEnableMaskHex`, `supportedProducerMaskHex`,
-  `activeProducerMaskHex`, `failedProducerMaskHex`, `TotalEventsDropped` as
-  JSON key `totalEventsDropped`, `totalEventsSuppressed`,
-  `totalEventsRead`, `totalEventsEnqueued`, and `nextSequence`.
+  `queueHighWatermark`, stable alias `highWatermark`,
+  `producerEnableMaskHex`, `supportedProducerMaskHex`,
+  `activeProducerMaskHex`, `failedProducerMaskHex`,
+  `effectiveProducerMaskHex`, `lastNtStatusHex`, `lastFailureNtStatusHex`,
+  `TotalEventsDropped` as JSON key `totalEventsDropped`, `totalEventsSuppressed`,
+  `totalEventsRead`, `totalEventsEnqueued`, `lostCount`, `lost`,
+  `lossObserved`, `backpressure`, `backpressureObserved`,
+  `backpressureReason`, `nextSequence`, `sequence`, and
+  `sequenceMeaning=nextSequence`.
 - `r0collector.driverProducerMask.data`: `requestedEnableMaskHex`,
   `previousEnableMaskHex`, `effectiveEnableMaskHex`,
   `supportedProducerMaskHex`, and the matching `*MaskNames` fields.
@@ -157,9 +194,11 @@ Negotiation and queue rows must preserve these event-quality keys:
   `eventsDropped`, `nextSequence`, `loss`, `lossObserved`, `backpressure`,
   `backpressureObserved`, `backpressureReason`, `headSequence`,
   `tailSequence`, `emittedHeadSequence`, `emittedTailSequence`,
-  `driverEventSampleStride`, and `samplingApplied`. Drain continuation uses
-  `recordsProcessed`, not `eventsEmitted`, so default self-noise suppression or
-  opt-in collector sampling cannot stop a batch early.
+  `driverEventSampleStride`, `samplingApplied`, `lostCount`, `highWatermark`,
+  `lastEnqueueFailureStatus`, `sequence`, and
+  `sequenceMeaning=nextSequence`. Drain continuation uses `recordsProcessed`,
+  not `eventsEmitted`, so default self-noise suppression or opt-in collector
+  sampling cannot stop a batch early.
 
 Typed payload parsers add category-specific fields such as `operationName`,
 `filePath`, `imagePath`, `keyPath`, `valueName`, `protocolName`,
@@ -181,12 +220,21 @@ PIDs when the public payload carries a subject process ID.
 - synthetic `driver.file`
 - synthetic `driver.registry`
 - synthetic `driver.network`
+- optional stress `driver.file` corpus plus one
+  `r0collector.driverReadEvents` mock summary when `--stress-count <n>` is
+  supplied. The summary carries `processed`/`eligible`/`emitted`/
+  `suppressed`/`skipped`, `head`/`tail`, `sampling`, `sequenceMeaning`,
+  `lostCount`, `highWatermark`, and `backpressureReason` just like live batch
+  summaries.
 - optional `r0collector.heartbeat`
 - `r0collector.stopped`
 
 Synthetic driver-category rows have `data.mock:"true"` and
 `data.typedPayloadStatus:"mock"` so host reports can distinguish plumbing tests
-from real R0 telemetry.
+from real R0 telemetry. The `r0collector.mockDriverEvent` marker also carries
+`stress=true` and the `StressJsonl*` evidence fields in stress mode so a quick
+schema smoke can validate row count and sequence range before reading all
+driver-category rows.
 
 ## CLI fields that affect JSONL
 
@@ -227,6 +275,14 @@ from real R0 telemetry.
   stress input for proving smaller batches.
 - `--max-read-batches` bounds a drain loop and records
   `drainStoppedAtBatchLimit` on `r0collector.stopped`.
+- `--stress-count <n>` implies `--mock` and emits a deterministic synthetic
+  stress corpus with `StressJsonlExpectedDriverRows`,
+  `StressJsonlSequenceStart`, `StressJsonlSequenceEnd`,
+  `StressJsonlSequenceGapCount`, `StressJsonlLossEvidence`, and
+  `StressJsonlBackpressureEvidence`.
+- `--inject-jsonl-noise` is valid only in mock/stress mode. It appends exactly
+  one blank line, one malformed `sequence=broken` row, and one valid
+  extra-field `driver.network` row with `noise=true`.
 
 ## Synthetic event-quality and backpressure contract
 
@@ -253,9 +309,9 @@ corpus includes:
   `sequence` values;
 - malformed, truncated, blank, or extra-field rows to verify robust parsing;
 - attribution and self-noise fields (`eventOrigin`, `producerCategory`,
-  `subjectKind`, `processIdSource`, `selfNoise`, `selfNoiseReason`,
-  `collectorSuppressedEvents`) so no-device smoke can validate readable event
-  ownership before a live driver is installed.
+  `subjectKind`, `processIdSource`, `selfNoise`, `collectorSelfNoise`,
+  `selfProcess`, `selfNoiseReason`, `collectorSuppressedEvents`) so no-device
+  smoke can validate readable event ownership before a live driver is installed.
 
 Backpressure is represented as evidence, not as kernel blocking. When the ring
 overflows, the driver preserves loss through `TotalEventsDropped`,

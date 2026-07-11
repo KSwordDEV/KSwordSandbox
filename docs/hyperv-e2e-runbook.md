@@ -1,144 +1,134 @@
-# Hyper-V one-command E2E runbook
+# Hyper-V 一键 E2E 运行手册（one-command E2E runbook）
 
-This runbook covers the script-only E2E path for a prepared KSword Sandbox
-Hyper-V golden VM. It is intentionally safe by default: the top-level command
-writes a JSON plan and exits unless `-Live` is explicitly supplied from an
-elevated host PowerShell session.
+本文覆盖已准备 KSword Sandbox Hyper-V golden VM 的脚本式 E2E 路径。默认安全：顶层命令只写 JSON
+计划并退出；只有在 elevated host PowerShell 中显式传入 `-Live` 才会触碰 VM。
 
-## Safety contract
+## 安全契约（safety contract）
 
-`scripts/Invoke-HyperVE2E.ps1` is the only entry point operators should need.
-Its default mode is `PlanOnly`:
+`scripts/Invoke-HyperVE2E.ps1` 是 operator 的主要脚本入口；the default mode is `PlanOnly`：
 
-- writes a reviewable plan JSON;
-- does not restore checkpoints;
-- does not start, stop, create, delete, or restore any VM;
-- does not copy host files into the guest;
-- does not run Guest Agent, R0Collector, driver code, or samples;
-- does not sign drivers or call `CSignTool.exe`.
+- 写出可审阅 plan JSON；
+- 不还原 checkpoint；
+- 不启动、停止、创建、删除或还原任何 VM；
+- 不向 guest 复制 host 文件；
+- 不运行 Guest Agent、R0Collector、driver code 或样本；
+- 不签名 driver，不调用 `CSignTool.exe`。
 
-`-WhatIf` has the same no-mutation guarantee even when combined with `-Live`.
-Live execution requires all of these conditions:
+`-WhatIf` 即使与 `-Live` 同时使用，也保持 no-mutation。Live execution 需要同时满足：
 
-1. `-Live` is present and `-PlanOnly` is absent.
-2. The shell is running as Administrator.
-3. `-WhatIf` is not present.
-4. The guest password environment variable is visible to the process.
-5. The sample and staged guest payload files exist outside the repository.
-6. The generated `preflightSummary.liveReady` is `true` before any child script
-   is launched.
+1. 存在 `-Live`，且没有 `-PlanOnly`。
+2. 当前 shell 是 Administrator。
+3. 没有 `-WhatIf`。
+4. guest password 环境变量在当前进程可见。
+5. 样本和 staged guest payload 文件存在，并且位于仓库外。
+6. 生成的 `preflightSummary.liveReady` 在任何 child script 启动前为 `true`。
 
-Before switching from PlanOnly/WhatIf to live, also run the standalone
-readiness helper. It is read-only and catches installed-config drift plus local
-secret hygiene issues that should be fixed before committing. Keep driver
-signing out of this path: the default E2E flow validates compilation and mock R0
-wiring only, and must not run `CSignTool.exe` or the legacy signing wrapper:
+Live 前还应运行只读 readiness 和仓库策略检查。默认 E2E 只验证 compile/mock R0 wiring，不签名、不调用
+`CSignTool.exe` 或旧 KSword signing wrapper：
 
 ```powershell
 pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\Test-HyperVReadiness.ps1
 pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\Test-RepositoryPolicy.ps1 -StagedOnly
 ```
 
-## Current local go/no-go checklist
+## 推荐主路径
 
-Use this checklist as the current executable state for the local host. It was
-observed on 2026-07-10 from an elevated PowerShell session with non-mutating
-Hyper-V/readiness probes.
+```powershell
+# 1. 准备 Guest Agent/R0Collector payload，输出在仓库外。
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\Prepare-GuestPayload.ps1 `
+  -RepoRoot 'D:\Projects\KswordSandbox' `
+  -PayloadRoot 'D:\Temp\KSwordSandbox\payload\guest-tools' `
+  -Configuration Release `
+  -GuestWorkingDirectory 'C:\KSwordSandbox' `
+  -SelfContained
 
-- [x] Host shell is elevated.
-- [x] VM exists: `KSwordSandbox-Win10-Golden`.
-- [x] VM currently reads as `Off`.
-- [x] Clean checkpoint exists: `Clean`.
-- [x] Guest Service Interface is enabled even though the local display name is
-  `来宾服务接口`; scripts accept the stable component id
-  `6C09BB55-D683-4DA0-8931-C9BF705F6480`, English display name, and localized
-  display name.
-- [x] Runtime root exists: `D:\Temp\KSwordSandbox`.
-- [x] Host payload root exists:
-  `D:\Temp\KSwordSandbox\payload\guest-tools`.
-- [x] Host payload files exist:
-  `payload-manifest.json`, `agent\KSword.Sandbox.Agent.exe`, and
-  `r0collector\KSword.Sandbox.R0Collector.exe`.
-- [ ] Set `KSWORDBOX_GUEST_PASSWORD` in the same elevated process that will run
-  readiness/PlanOnly/live.
-- [ ] Confirm PowerShell Direct with `SandboxUser` after the password is set.
-  Readiness will still skip the probe while the VM is `Off`; it will not start
-  the VM for you.
+# 2. 准备 harmless sample，输出在仓库外。
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\Prepare-HarmlessSample.ps1 `
+  -RepositoryRoot 'D:\Projects\KswordSandbox' `
+  -OutputRoot 'D:\Temp\KSwordSandbox\samples\KSword.Sandbox.HarmlessSample'
 
-Current readiness result summary:
+# 3. 只读 readiness。
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\Test-HyperVReadiness.ps1
+
+# 4. PlanOnly：只写 plan/runbook-execution 记录。
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\Invoke-HyperVE2E.ps1 `
+  -SamplePath 'D:\Temp\KSwordSandbox\samples\KSword.Sandbox.HarmlessSample\KSword.Sandbox.HarmlessSample.exe' `
+  -PlanOnly
+
+# 5. WhatIf：审阅 Live 意图但不修改 VM。
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\Invoke-HyperVE2E.ps1 `
+  -SamplePath 'D:\Temp\KSwordSandbox\samples\KSword.Sandbox.HarmlessSample\KSword.Sandbox.HarmlessSample.exe' `
+  -Live `
+  -WhatIf
+
+# 6. Live：必须在同一个 elevated PowerShell 进程内设置密码。
+$env:KSWORDBOX_GUEST_PASSWORD = '<SandboxUser password>'
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\Invoke-HyperVE2E.ps1 `
+  -SamplePath 'D:\Temp\KSwordSandbox\samples\KSword.Sandbox.HarmlessSample\KSword.Sandbox.HarmlessSample.exe' `
+  -Live
+```
+
+`Prepare-GuestPayload.ps1`、`Prepare-HarmlessSample.ps1` 会生成 payload/sample/build 输出；这些都必须保持在
+`D:\Temp\KSwordSandbox` 等仓库外路径，不要提交。
+
+## 历史 go/no-go 快照
+
+以下状态来自 2026-07-10 的本地非变更 Hyper-V/readiness 观察。当前日期已晚于该快照；在 2026-07-11
+或之后执行 live 前，必须重新从 elevated PowerShell 运行 `Test-HyperVReadiness.ps1`。
+
+- [x] Host shell 当时为 elevated。
+- [x] VM 存在：`KSwordSandbox-Win10-Golden`。
+- [x] VM 当时读取为 `Off`。
+- [x] Clean checkpoint 存在：`Clean`。
+- [x] Guest Service Interface 已启用；中文显示名可能是 `来宾服务接口`，脚本也接受组件 ID
+  `6C09BB55-D683-4DA0-8931-C9BF705F6480`。
+- [x] Runtime root 存在：`D:\Temp\KSwordSandbox`。
+- [x] Host payload root 存在：`D:\Temp\KSwordSandbox\payload\guest-tools`。
+- [x] Host payload files 存在：`payload-manifest.json`、`agent\KSword.Sandbox.Agent.exe`、
+  `r0collector\KSword.Sandbox.R0Collector.exe`。
+- [ ] 需要在同一个 elevated process 设置 `KSWORDBOX_GUEST_PASSWORD`。
+- [ ] 设置密码后确认 PowerShell Direct；VM 为 `Off` 时 readiness 不会为你启动 VM。
+
+历史 summary：
 
 ```text
 Passed: 7
 Warnings: 2
 Failed: 1
 Required failure: KSWORDBOX_GUEST_PASSWORD is missing from the current process.
-Warnings: PowerShell Direct and guest payload probes were skipped because the
-password secret is missing.
-Read-only guarantee: no probe files were written and no VM mutation commands
-were executed.
+Warnings: PowerShell Direct and guest payload probes were skipped because the password secret is missing.
+Read-only guarantee: no probe files were written and no VM mutation commands were executed.
 ```
 
 ## Harmless behavior sample contract
 
-The preferred live smoke input is the harmless behavior sample source project
-`tools/KSword.Sandbox.HarmlessSample/KSword.Sandbox.HarmlessSample.csproj`.
-If a worker places the project elsewhere, it must still be a same-name
-`KSword.Sandbox.HarmlessSample.csproj` project so smoke tests can discover it.
+首选 live smoke input 是 harmless behavior sample：
+`tools/KSword.Sandbox.HarmlessSample/KSword.Sandbox.HarmlessSample.csproj`。如项目移动，仍应保留同名
+`KSword.Sandbox.HarmlessSample.csproj`，便于 smoke tests 发现。
 
-Build and publish the sample through `Prepare-HarmlessSample.ps1`. The script is
-expected to keep all build output outside this repository, with publish output
-under:
+构建/发布使用 `Prepare-HarmlessSample.ps1`，输出必须在仓库外，例如：
 
 ```text
 D:\Temp\KSwordSandbox\samples\KSword.Sandbox.HarmlessSample
 ```
 
-The published `KSword.Sandbox.HarmlessSample.exe`, generated `bin`/`obj`
-directories, and any helper `.dll`/`.bin` files are local lab artifacts and must
-stay out of git. The repository should contain only source, the preparation
-script, docs, and smoke contracts.
+发布出的 `KSword.Sandbox.HarmlessSample.exe`、`bin`/`obj`、helper `.dll`/`.bin` 都是本地 lab artifacts，
+不得入库。
 
-For a live Hyper-V run, prepare the sample first, verify the plan, then pass the
-published executable to the one-command E2E script:
-
-```powershell
-pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\Prepare-HarmlessSample.ps1 `
-  -RepositoryRoot 'D:\Projects\KswordSandbox' `
-  -OutputRoot 'D:\Temp\KSwordSandbox\samples\KSword.Sandbox.HarmlessSample'
-
-pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\Invoke-HyperVE2E.ps1 `
-  -SamplePath 'D:\Temp\KSwordSandbox\samples\KSword.Sandbox.HarmlessSample\KSword.Sandbox.HarmlessSample.exe' `
-  -PlanOnly
-
-$env:KSWORDBOX_GUEST_PASSWORD = '<local guest password>'
-pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\Invoke-HyperVE2E.ps1 `
-  -SamplePath 'D:\Temp\KSwordSandbox\samples\KSword.Sandbox.HarmlessSample\KSword.Sandbox.HarmlessSample.exe' `
-  -Live
-```
-
-If you do not want to persist the password in User scope for a one-off elevated
-session, run `Test-HyperVReadiness.ps1 -PromptForMissingGuestPassword` first.
-That prompt writes only Process scope and never writes config/report/repository
-files.
-
-Use the existing `PlanOnly` and `-WhatIf` review modes before live execution;
-the live command is only for the isolated golden VM workflow described below.
-
-## Generate a plan JSON only
+## 生成 plan JSON
 
 ```powershell
 pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\Invoke-HyperVE2E.ps1 `
   -SamplePath 'D:\Temp\KSwordSandbox\samples\KSword.Sandbox.HarmlessSample\KSword.Sandbox.HarmlessSample.exe'
 ```
 
-The default plan path is outside git:
+默认 plan path 在仓库外：
 
 ```text
 D:\Temp\KSwordSandbox\plans\hyperv-e2e-<job-id-n>.json
 ```
 
-Use an explicit path when handing the plan to another worker or archiving local
-operator evidence:
+显式 plan path：
 
 ```powershell
 pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\Invoke-HyperVE2E.ps1 `
@@ -147,47 +137,38 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\Invoke-HyperVE2E.ps1 `
   -PlanOnly
 ```
 
-The generated JSON includes:
+Plan JSON 包含：
 
-- `safeDefault`, `requestedMode`, `effectiveMode`, and `willMutateVm`;
-- VM name and clean checkpoint name;
-- host environment checks for Windows, Administrator, Hyper-V cmdlets,
-  `Get-VM`, `Get-VMSnapshot`, Guest Service Interface, credential env var, and
-  non-mutating PowerShell Direct probes when the VM is already running;
-- host sample path and guest sample path;
-- host payload root and expected Guest Agent/R0Collector payload files;
-- R0 driver host-path readiness, including a failed live preflight when
-  `driver.enabled=true`, `driver.useMockCollector=false`, and
-  `driver.hostDriverPath` is empty or points at a missing `.sys`;
-- guest output paths for `events.json`, `driver-events.jsonl`, `agent.pid`, and
-  `agent.exit`;
-- resolved Guest Agent command line and R0Collector mock/live sidecar arguments;
-- ordered `steps` with `mutatesVmState` flags;
-- preflight summary and live-only failures;
-- the planned `runbook-execution.json` path under the job root.
+- `safeDefault`、`requestedMode`、`effectiveMode`、`willMutateVm`；
+- VM name 与 clean checkpoint name；
+- host checks：Windows、Administrator、Hyper-V cmdlets、`Get-VM`、`Get-VMSnapshot`、Guest Service
+  Interface、credential env var，以及 VM 已运行时的非变更 PowerShell Direct probes；
+- host sample path 与 guest sample path；
+- host payload root 与 Guest Agent/R0Collector payload 文件；
+- R0 driver host-path readiness；当 `driver.enabled=true`、`driver.useMockCollector=false` 且
+  `driver.hostDriverPath` 为空或 `.sys` 不存在时，live preflight 会失败；
+- guest output paths：`events.json`、`driver-events.jsonl`、`agent.pid`、`agent.exit`；
+- Guest Agent command line 与 R0Collector mock/live sidecar arguments；
+- ordered `steps` 和 `mutatesVmState` flags；
+- preflight summary 与 live-only failures；
+- job root 下计划的 `runbook-execution.json` path。
 
-The top-level script also writes `runbook-execution.json` in `PlanOnly` and
-`WhatIf` modes. Those records mark all steps as skipped and prove that no child
-script or VM command was launched.
+PlanOnly 与 WhatIf 也会写出 `runbook-execution.json`，其中所有 steps 标记 skipped，证明没有 child script
+或 VM command 被启动；脚本同时写出 UI-safe `runbook-progress.json`，主页面/恢复工具可直接读取，不需要解析
+PowerShell command、stdout 或 stderr。
 
-## Review live intent without mutation
+审阅 plan/progress 时请确认：
 
-```powershell
-pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\Invoke-HyperVE2E.ps1 `
-  -SamplePath 'D:\Temp\KSwordSandbox\samples\KSword.Sandbox.HarmlessSample\KSword.Sandbox.HarmlessSample.exe' `
-  -Live `
-  -WhatIf
-```
-
-This still writes a plan, but `effectiveMode` is `WhatIf` and
-`willMutateVm=false`. It also writes a safe `runbook-execution.json` beside the
-planned job output.
+- safe review run 显示 `willMutateVm=false`；
+- `runbook-progress.json` 中的 `ProgressPercent`、`FailureReason`、`RemediationHints`、phase result paths 和
+  skipped/executed step records 可用于 UI/恢复视图；
+- 如果不想把 guest password 持久化到 User scope，先用 `Test-HyperVReadiness.ps1 -PromptForMissingGuestPassword`
+  仅写入当前 Process scope。
 
 ## Mock R0 live flow
 
-Use mock R0 when the live Guest Agent/R0Collector path should be exercised but
-no signed kernel driver is loaded. This is the preferred E2E mode while driver
-signing is frozen. The config must stay outside git:
+当要验证 live Guest Agent/R0Collector 通路但不加载 signed kernel driver 时，使用 Mock R0。这是 driver
+signing 冻结时的首选 E2E 模式。配置必须留在仓库外：
 
 ```powershell
 $mockConfigPath = 'D:\Temp\KSwordSandbox\mock-r0.live.json'
@@ -197,7 +178,7 @@ $config.driver.useMockCollector = $true
 $config | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $mockConfigPath -Encoding UTF8
 ```
 
-Review the exact mock intent without touching the VM:
+先审阅：
 
 ```powershell
 pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\Invoke-HyperVE2E.ps1 `
@@ -206,153 +187,135 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\Invoke-HyperVE2E.ps1 `
   -PlanOnly
 ```
 
-Before live execution, inspect the plan JSON and verify:
+确认 `driver.collectionMode` 为 `Mock`、`driver.useMockCollector=true`、Guest Agent 参数含 `--r0-mock`、
+R0Collector 参数含 `--mock` 后，再在 elevated process 设置密码并 live。
 
-- `willMutateVm=false` for the review run;
-- `driver.collectionMode` is `Mock`;
-- `driver.useMockCollector` is `true`;
-- `execution.guestAgentArguments` contains `--r0-mock`;
-- `execution.r0CollectorArguments` contains `--mock`.
+Mock run 仍会还原 `Clean`、启动 VM、stage payload、复制样本、运行 Guest Agent/R0Collector、收集输出、
+停止 VM 并再次还原 `Clean`。只 mock R0Collector device dependency。
 
-Then set the guest password in the same elevated process and run live:
-
-```powershell
-$env:KSWORDBOX_GUEST_PASSWORD = '<local guest password>'
-
-pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\Invoke-HyperVE2E.ps1 `
-  -ConfigPath $mockConfigPath `
-  -SamplePath 'D:\Temp\KSwordSandbox\samples\KSword.Sandbox.HarmlessSample\KSword.Sandbox.HarmlessSample.exe' `
-  -Live
-```
-
-The mock run still restores `Clean`, starts the VM, stages payloads, copies the
-sample, runs Guest Agent/R0Collector, collects outputs, stops the VM, and
-restores `Clean` again. Only the R0Collector device dependency is mocked.
+English contract note: the live flow restores the clean checkpoint again before the VM is treated as golden.
 
 ## Optional real R0 driver flow
 
-Real R0 loading is outside the default E2E path. Do not add `CSignTool.exe` or
-`scripts\Sign-SandboxDriverWithKswordCSignTool.ps1` to E2E preparation. If a
-real driver load is explicitly required, first complete compile-only validation,
-then use Windows test mode plus a local test certificate as described in
-`docs/driver-signing.md`. Stage the resulting test-signed `.sys` under a
-guest-only path such as `C:\KSwordSandbox\driver`, keep all signing material
-outside git, set `driver.useMockCollector=false`, and run the non-mutating R0
-readiness pass before `-Live`.
+Real R0 loading 不属于默认 E2E path。不要把 `CSignTool.exe` 或
+`scripts\Sign-SandboxDriverWithKswordCSignTool.ps1` 加入 E2E preparation。确需真实 driver load 时，先完成
+compile-only validation，再按 `docs/driver-signing.md` 在 Windows test mode + local test certificate 下处理。
 
-For real R0, also set `driver.hostDriverPath` to the host-side `.sys`. Leaving
-it empty makes `stage-guest-payload` use an empty `driverSource` and omits
-`install-driver-service`; the plan preflight now stops live execution with a
-clear diagnostic instead of letting R0Collector fail later with
-`deviceUnavailable` / `win32Error=2`.
+Real R0 需要：
+
+- `driver.useMockCollector=false`；
+- `driver.hostDriverPath` 指向 host-side `.sys`；
+- test-signed `.sys` staged 到 `C:\KSwordSandbox\driver` 等 guest-only path；
+- 签名材料、`.sys`、symbols 全部保持在 git 外；
+- live 前运行 non-mutating R0 readiness。
 
 ## Live execution sequence
 
-Only run live mode on an isolated lab host with the prepared golden VM. Start an
-elevated PowerShell session, expose the guest password to that session, then run:
+只在隔离 lab host 上运行 live。`-Live` 会修改配置 VM：restore/start/copy/run/collect/stop/restore。
 
-```powershell
-$env:KSWORDBOX_GUEST_PASSWORD = '<local guest password>'
-
-pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\Invoke-HyperVE2E.ps1 `
-  -SamplePath 'D:\Temp\KSwordSandbox\samples\KSword.Sandbox.HarmlessSample\KSword.Sandbox.HarmlessSample.exe' `
-  -Live
-```
-
-Live mode calls two child scripts:
+Live mode 调用两个 child scripts：
 
 1. `scripts/Start-SandboxHyperVJob.ps1`
-   - validates elevation, Hyper-V commands, VM existence, clean checkpoint,
-     Guest Service Interface, sample, payload folders/files, and optional
-     payload manifest before the first VM mutation;
-   - loads the guest credential from `KSWORDBOX_GUEST_PASSWORD` without printing
-     the secret value;
-   - stops the golden VM if needed;
-   - restores the clean checkpoint;
-   - enables Guest Service Interface;
-   - starts the VM;
-   - waits for PowerShell Direct;
-   - copies Guest Agent and R0Collector payload with `Copy-Item -ToSession`;
-   - copies the sample with `Copy-VMFile`;
-   - creates a clean guest output folder;
-   - starts Guest Agent asynchronously with `--sample`, `--out`, `--duration`,
-     and, when driver collection is enabled, `--driver-events`, `--r0collector`,
-     `--driver-device`; `driver.useMockCollector=true` adds `--r0-mock`, which
-     makes the agent forward `--mock` to R0Collector.
+   - 在首次 VM mutation 前验证 elevation、Hyper-V commands、VM、clean checkpoint、Guest Service Interface、
+     sample、payload folders/files 和可选 payload manifest；
+   - 从 `KSWORDBOX_GUEST_PASSWORD` 加载 credential，不打印 secret；
+   - 必要时停止 golden VM；
+   - 还原 clean checkpoint；
+   - 启用 Guest Service Interface；
+   - 启动 VM，并在等待 `Running` 时输出低频 heartbeat；
+   - 等待 PowerShell Direct，bounded retry heartbeat 包括 elapsed time、attempt count、last connection error；
+   - 使用 `Copy-Item -ToSession` 复制 Guest Agent 与 R0Collector payload；
+   - 使用 `Copy-VMFile` 复制样本；
+   - 创建干净 guest output folder；
+   - 异步启动 Guest Agent。
 
 2. `scripts/Collect-GuestOutputs.ps1`
-   - opens a PowerShell Direct session;
-   - reads `agent.pid`;
-   - repeatedly copies the guest output folder to the host with
-     `Copy-Item -FromSession`;
-   - requires `agent.exit` and fails on a non-zero Guest Agent exit code;
-   - indexes collected events/artifacts with size, kind, and SHA-256 when
-     hashing succeeds;
-   - requires `events.json`, `agent.pid`, and `agent.exit` on the host; warns
-     when driver collection is enabled but `driver-events.jsonl` is absent;
-   - stops the VM;
-   - restores the clean checkpoint again by default.
+   - 打开 PowerShell Direct session；
+   - 读取 `agent.pid`；
+   - 周期性使用 `Copy-Item -FromSession` 复制 guest output folder 到 host；
+   - 要求 `agent.exit` 存在，并在 Guest Agent exit code 非 0 时失败；
+   - 索引收集到的 events/artifacts，尽可能计算 size、kind、SHA-256；
+   - 要求 host 侧存在 `events.json`、`agent.pid`、`agent.exit`；启用 driver collection 但缺少
+     `driver-events.jsonl` 时 warning；
+   - 停止 VM；
+   - 默认再次还原 clean checkpoint。
 
-After child scripts finish, `Invoke-HyperVE2E.ps1` writes one aggregate
-`runbook-execution.json` containing the requested/effective mode, preflight
-results, child exit codes, phase result paths, skipped/executed step records,
-cleanup errors, and collected artifact paths.
+顶层 orchestrator 为每个 child process 设置 phase timeout；约每 30 秒输出一次 heartbeat。timeout 时在 JSON
+中记录 `timedOut=true` 和 `timeoutSeconds`，stdout/stderr 保存在 JSON record，不直接刷屏。
 
-The persisted execution record is also shaped for WebUI/report consumers:
+Live 成功后，`Invoke-HyperVE2E.ps1` 会自动调用 `Import-HyperVJobReport.ps1` 导入 guest events 并生成
+`report.json` / `report.html` / 本地化 HTML。失败或需要重建时可手动使用该脚本导入。
 
-- `State`, `CompletedSteps`, `ExecutedSteps`, and `ProgressPercent` summarize
-  the terminal progress state.
-- `FailureReason` contains a short operator-facing reason without dumping long
-  PowerShell command text.
-- `RemediationHints` lists actionable recovery hints such as setting
-  `KSWORDBOX_GUEST_PASSWORD`, correcting a missing VM/checkpoint, enabling
-  Guest Service Interface, or fixing PowerShell Direct credentials.
-- `UiSafeProgress` mirrors step `state`, `phase`, `title`, and message with
-  `commandTextOmitted=true`; full command text remains in `StepResults` for the
-  dedicated execution-flow/debug view.
+## 失败诊断与可导入 skeleton
 
-## Output locations
+为让 install 后的单次 `run.ps1 -Mode Analyze -Live` 更容易恢复，所有脚本式 E2E 失败都会尽量留下两个
+operator 可读 sidecar：
 
-For job `<job-id-n>`, live output is written under:
+- `runbook-progress.json`：UI-safe 进度快照，包含每个 step 的 `state`、`message`、`FailureReason` 和
+  `RemediationHints`；不包含 PowerShell command text、stdout/stderr 或 secret。
+- `guest\<job-id-n>\guest-output-skeleton.json` 与同目录 `events.json`：当真实 guest output 缺失或为空时，
+  写入 `hyperv.e2e.failure_skeleton` 事件、`agent.pid=0`、`agent.exit=-1`、stdout/stderr 占位文件。
+  该 skeleton 是“可导入诊断证据”，不表示 Guest Agent 已成功运行。
+
+脚本优先保留真实 guest `events.json`：如果 collection 已复制到非空 events，失败 skeleton 不覆盖真实事件，
+只补充 metadata/marker 文件。手动导入命令：
+
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\Import-HyperVJobReport.ps1 `
+  -JobId '<job-guid>' `
+  -SamplePath 'D:\Temp\KSwordSandbox\samples\KSword.Sandbox.HarmlessSample\KSword.Sandbox.HarmlessSample.exe' `
+  -EventsPath 'D:\Temp\KSwordSandbox\jobs\<job-id-n>\guest\<job-id-n>\events.json' `
+  -RunbookExecutionPath 'D:\Temp\KSwordSandbox\jobs\<job-id-n>\runbook-execution.json'
+```
+
+如果 `events.json` 已缺失但 `runbook-execution.json` 存在，`Import-HyperVJobReport.ps1` 会先生成同样的
+failure skeleton 再调用 JobTool；整个 import 仍然只读 VM，不启动、停止或还原 VM。
+
+常见失败的中文优先诊断：
+
+- 凭据：检查 `guest.passwordSecretName`、Process/User/Machine scope、runner 是否与设置 secret 的
+  PowerShell 是同一进程；脚本只记录 secret 名称/scope，永不打印值。
+- VM：检查 golden VM 名称、Hyper-V PowerShell 工具、管理员权限；PlanOnly/WhatIf 只做只读查询。
+- checkpoint：检查 `cleanCheckpointName`，失败时记录最多 20 个可见 checkpoint 名称帮助比对。
+- Guest Service Interface：脚本按组件 ID `6C09BB55-D683-4DA0-8931-C9BF705F6480`、英文名和中文名
+  `来宾服务接口` 匹配；Live start 可在 VM/checkpoint 预检成功后启用它。
+- PowerShell Direct：heartbeat 会记录 elapsed、attempt count、最后 VM state 和首条连接错误；优先提示凭据不同步、
+  VM 未 Running 或 Hyper-V/PowerShell Direct 不可用。
+
+## 输出位置（output locations）
+
+对于 job `<job-id-n>`：
 
 ```text
 D:\Temp\KSwordSandbox\jobs\<job-id-n>\
   runbook-execution.json
+  runbook-progress.json
   hyperv-e2e-start-result.json
   hyperv-e2e-collect-result.json
+  report.json
+  report.html
+  report.zh.html
+  report.en.html
   guest\<job-id-n>\events.json
+  guest\<job-id-n>\guest-output-skeleton.json
   guest\<job-id-n>\driver-events.jsonl
   guest\<job-id-n>\agent.pid
   guest\<job-id-n>\agent.exit
 ```
 
-Keep these outputs, samples, payload binaries, driver files, VM disks, and build
-products out of git.
+这些 outputs、samples、payload binaries、driver files、VM disks、build products 都不得入库。
 
-## Recovery notes
+## 恢复说明（recovery notes）
 
-If live execution fails during the start phase after VM mutation,
-`Start-SandboxHyperVJob.ps1` attempts stop/restore cleanup. If the collection
-phase starts, `Collect-GuestOutputs.ps1` still tries to stop the VM and restore
-the clean checkpoint in `finally`. If cleanup reports errors, fix the VM
-manually from Hyper-V Manager or an elevated shell, then rerun the read-only
-readiness preflight before attempting another live E2E:
+如果 live 在 start phase 修改 VM 后失败，`Start-SandboxHyperVJob.ps1` 会尝试 stop/restore cleanup。如果进入
+collection phase，`Collect-GuestOutputs.ps1` 仍会在 `finally` 中尝试 stop VM 并还原 clean checkpoint。
+Cleanup errors 会记录在 `cleanupErrors` 和 warnings 中，但不应覆盖 primary failure reason。
 
-```powershell
-pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\Test-HyperVReadiness.ps1 `
-  -VmName 'KSwordSandbox-Win10-Golden' `
-  -CheckpointName 'Clean' `
-  -GuestUserName 'SandboxUser' `
-  -GuestPasswordSecretName 'KSWORDBOX_GUEST_PASSWORD' `
-  -GuestPayloadRoot 'D:\Temp\KSwordSandbox\payload\guest-tools' `
-  -GuestWorkingDirectory 'C:\KSwordSandbox' `
-  -RuntimeRoot 'D:\Temp\KSwordSandbox'
-```
+修复 VM 后，从 elevated shell 重新运行只读 readiness，再尝试下一次 live。
 
-## PowerShell Direct confirmation
+## PowerShell Direct 手动确认
 
-PowerShell Direct cannot be fully confirmed while the password secret is absent
-or the VM is stopped. To confirm it explicitly:
+当 password secret 缺失或 VM 停止时，PowerShell Direct 不能完全确认。仅在 VM 已运行或你明确手动启动后执行：
 
 ```powershell
 $env:KSWORDBOX_GUEST_PASSWORD = '<local guest password>'
@@ -360,8 +323,6 @@ $vmName = 'KSwordSandbox-Win10-Golden'
 $guestPassword = ConvertTo-SecureString $env:KSWORDBOX_GUEST_PASSWORD -AsPlainText -Force
 $guestCredential = [pscredential]::new('SandboxUser', $guestPassword)
 
-# Run this only when the VM is already running, or after intentionally starting
-# it for manual validation.
 Invoke-Command -VMName $vmName -Credential $guestCredential -ScriptBlock {
   [pscustomobject][ordered]@{
     ComputerName = $env:COMPUTERNAME
@@ -372,5 +333,4 @@ Invoke-Command -VMName $vmName -Credential $guestCredential -ScriptBlock {
 }
 ```
 
-After manual validation, restore the `Clean` checkpoint before treating
-`KSwordSandbox-Win10-Golden` as the golden baseline again.
+手动验证后，在再次把 `KSwordSandbox-Win10-Golden` 视为 golden baseline 前，还原 `Clean` checkpoint。

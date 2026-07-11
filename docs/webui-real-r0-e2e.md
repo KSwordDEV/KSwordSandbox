@@ -11,6 +11,11 @@ collect basic guest/R0 behavior -> import/classify -> open HTML report
 Runtime files listed here are local lab artifacts under `D:\Temp\KSwordSandbox`
 and must not be committed.
 
+Any sample path shown under repository `bin\` / `obj\` output is historical
+local generated output only. Future live runs should prefer a published sample
+under `D:\Temp\KSwordSandbox\samples\...`; never commit the generated EXE/DLL,
+job outputs, VM files, signed drivers, certificates, or reports.
+
 ## Current local result
 
 Observed from `D:\Projects\KswordSandbox` on 2026-07-11 local time.

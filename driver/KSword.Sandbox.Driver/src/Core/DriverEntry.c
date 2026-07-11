@@ -1,4 +1,6 @@
 #include "Driver.h"
+#include "Producers/File/FileFilter.h"
+#include "Producers/Image/ImageMonitor.h"
 #include "Producers/Network/NetworkMonitor.h"
 #include "Producers/Process/ProcessMonitor.h"
 #include "Producers/Registry/RegistryMonitor.h"
@@ -75,6 +77,7 @@ DriverEntry(
      * the original IOCTL and READ_EVENTS path alive and expose the failure
      * through GET_HEALTH.LastNtStatus.
      */
+#if KSWORD_SANDBOX_ENABLE_FILE_MINIFILTER
     status = KswInitializeFileFilter(
         DriverObject,
         RegistryPath,
@@ -86,23 +89,37 @@ DriverEntry(
     if (!NT_SUCCESS(status)) {
         KswSetLastStatus(deviceExtension, status);
     }
+#endif
 
     /*
-     * Process and image callbacks are core R0 behavior producers.  Registration
-     * failures are non-fatal because unsigned or improperly signed lab builds
-     * may reject the Ex callback; the collector can still use health and other
-     * producers.
+     * Process callbacks are core R0 behavior producers.  Registration failures
+     * are non-fatal because unsigned or improperly signed lab builds may reject
+     * the Ex callback; the collector can still use health and other producers.
      */
+#if KSWORD_SANDBOX_ENABLE_PROCESS_CREATE
     status = KswInitializeProcessMonitor(deviceExtension);
     if (!NT_SUCCESS(status)) {
         KswSetLastStatus(deviceExtension, status);
     }
+#endif
+
+    /*
+     * Image-load telemetry is separate from process create/exit telemetry so
+     * health and producer masks can report partial callback availability.
+     */
+#if KSWORD_SANDBOX_ENABLE_IMAGE_LOAD
+    status = KswInitializeImageMonitor(deviceExtension);
+    if (!NT_SUCCESS(status)) {
+        KswSetLastStatus(deviceExtension, status);
+    }
+#endif
 
     /*
      * Registry telemetry is independent from the other producer modules.
      * Altitude collisions or policy failures are useful health data, but they
      * must not prevent the control device or other telemetry from loading.
      */
+#if KSWORD_SANDBOX_ENABLE_REGISTRY_CALLBACK
     status = KswInitializeRegistryMonitor(DriverObject, deviceExtension);
     KswRecordProducerStatus(
         deviceExtension,
@@ -111,12 +128,14 @@ DriverEntry(
     if (!NT_SUCCESS(status)) {
         KswSetLastStatus(deviceExtension, status);
     }
+#endif
 
     /*
      * Network telemetry registers inspect-only WFP/ALE callouts over the same
      * READ_EVENTS ring.  Registration failures are non-fatal because lab VMs
      * may lack usable WFP state during early driver bring-up.
      */
+#if KSWORD_SANDBOX_ENABLE_NETWORK_WFP_ALE
     status = KswInitializeNetworkMonitor(deviceObject, deviceExtension);
     KswRecordProducerStatus(
         deviceExtension,
@@ -125,6 +144,7 @@ DriverEntry(
     if (!NT_SUCCESS(status)) {
         KswSetLastStatus(deviceExtension, status);
     }
+#endif
 
     deviceObject->Flags &= ~DO_DEVICE_INITIALIZING;
 
@@ -169,10 +189,21 @@ KswDriverUnload(
         }
     }
 
+#if KSWORD_SANDBOX_ENABLE_NETWORK_WFP_ALE
     KswUninitializeNetworkMonitor();
+#endif
+#if KSWORD_SANDBOX_ENABLE_IMAGE_LOAD
+    KswUninitializeImageMonitor();
+#endif
+#if KSWORD_SANDBOX_ENABLE_PROCESS_CREATE
     KswUninitializeProcessMonitor();
+#endif
+#if KSWORD_SANDBOX_ENABLE_REGISTRY_CALLBACK
     KswUninitializeRegistryMonitor();
+#endif
+#if KSWORD_SANDBOX_ENABLE_FILE_MINIFILTER
     KswUninitializeFileFilter();
+#endif
 
     RtlInitUnicodeString(&symbolicLinkName, KSWORD_SANDBOX_DOS_DEVICE_NAME);
     IoDeleteSymbolicLink(&symbolicLinkName);
