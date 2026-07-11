@@ -38,6 +38,7 @@ public sealed class HtmlReportRenderer
     private const int ArtifactPreviewCharacterLimit = 12_000;
     private const int TimelineEventInlineLimit = 120;
     private const int TimelineGroupEventInlineLimit = 12;
+    private const int EventTableInlineLimit = 250;
     private const int RawEventInlineLimit = 200;
     private const int RawEventPageSize = 50;
 
@@ -202,6 +203,7 @@ public sealed class HtmlReportRenderer
         AppendCover(html, report);
         AppendLanguageEntrypoints(html);
         AppendTableOfContents(html);
+        AppendQuickNavigation(html, report, artifactLinks);
         html.AppendLine("<main>");
         AppendRiskSummary(html, report);
         AppendBehaviorDetections(html, report);
@@ -209,6 +211,7 @@ public sealed class HtmlReportRenderer
         AppendRuleHits(html, report);
         AppendStaticAnalysis(html, report);
         AppendDynamicAnalysis(html, report);
+        AppendVirusTotalSummary(html, report, artifactLookup, artifactLinks);
         AppendBehaviorGraph(html, report, artifactLookup, artifactLinks);
         AppendArtifactLinks(html, report, artifactLinks);
         AppendTimeline(html, report, artifactLookup, artifactLinks);
@@ -246,6 +249,7 @@ header table{background:rgba(8,17,31,.32);border:1px solid rgba(255,255,255,.16)
 main,nav{max-width:1280px;margin:24px auto;padding:0 24px}main{counter-reset:report-section}.card{background:rgba(255,255,255,.94);border:1px solid var(--line);border-radius:22px;box-shadow:0 18px 48px rgba(15,23,42,.08);margin:22px 0;padding:24px;position:relative}
 section.card{counter-increment:report-section;max-height:75vh;overflow:auto;scrollbar-color:var(--primary) #eaf4ff;scrollbar-width:thin}.card:before{background:linear-gradient(180deg,var(--primary),rgba(67,160,255,0));border-radius:22px 0 0 22px;content:'';height:100%;left:0;opacity:.9;position:absolute;top:0;width:4px}
 .language-entry{align-items:center;display:flex;flex-wrap:wrap;gap:10px}.language-entry strong{color:#075985}.language-entry .hint{color:var(--muted);font-size:13px}.language-entry a{background:var(--primary);border-radius:999px;color:white;font-weight:800;padding:8px 12px;text-decoration:none}.language-entry a.secondary{background:#334155}.language-entry a:hover{box-shadow:0 0 0 4px rgba(67,160,255,.14)}
+.quick-nav{border-color:#b9ddff;position:sticky;top:8px;z-index:20}.quick-nav:before{background:linear-gradient(180deg,#43A0FF,#0ea5e9)}.quick-nav h2{font-size:16px;margin-bottom:8px}.quick-nav .hint{color:var(--muted);font-size:12px;margin:0 0 10px}.quick-links{display:flex;flex-wrap:wrap;gap:8px}.quick-link{align-items:center;background:linear-gradient(180deg,#fff,#eef7ff);border:1px solid #cfe6fb;border-radius:14px;color:#075985;display:inline-flex;gap:8px;min-height:42px;padding:7px 10px;text-decoration:none}.quick-link strong{font-size:13px}.quick-link small{background:#dff0ff;border-radius:999px;color:#075985;font-weight:900;min-width:24px;padding:3px 7px;text-align:center}.quick-link:hover{border-color:var(--primary);box-shadow:0 0 0 4px rgba(67,160,255,.14)}
 .card h2{align-items:center;display:flex;gap:10px;margin:0 0 14px}.card h2:before{background:var(--primary);box-shadow:0 0 0 6px rgba(67,160,255,.14);border-radius:999px;content:'';display:inline-block;height:12px;width:12px}section.card>h2{backdrop-filter:blur(10px);background:linear-gradient(90deg,rgba(255,255,255,.98),rgba(231,243,255,.95));border-bottom:1px solid #dbeafe;margin:-24px -24px 16px;padding:16px 24px;position:sticky;top:-24px;z-index:3}section.card>h2:after{background:var(--primary);border-radius:999px;color:white;content:'Step ' counter(report-section);font-size:11px;font-weight:900;margin-left:auto;padding:5px 9px;text-transform:uppercase}
 .grid{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(170px,1fr))}.metric{background:linear-gradient(180deg,#fff,#f7fbff);border:1px solid var(--line);border-top:3px solid var(--primary);border-radius:16px;padding:15px}.metric b{display:block;font-size:26px;margin-top:4px}
 .muted{color:var(--muted)}.risk-high{color:#b91c1c}.risk-medium{color:#b45309}.risk-low{color:#047857}.risk-info{color:var(--primary-deep)}
@@ -326,6 +330,7 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
             ("rules", "Engine and rule hits"),
             ("static", "Static analysis"),
             ("dynamic", "Dynamic analysis"),
+            ("vt", "VirusTotal / reputation"),
             ("graph", "Behavior graph / IOC summary"),
             ("artifacts", "Artifact links"),
             ("timeline", "Timeline"),
@@ -345,6 +350,35 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
     }
 
     /// <summary>
+    /// Appends a sticky subnav for high-traffic operator sections.
+    /// Inputs are report counts and indexed artifacts; processing writes quick
+    /// Process / Files / Network / R0 / VT / Artifacts quick navigation links;
+    /// the method returns no value.
+    /// </summary>
+    private static void AppendQuickNavigation(StringBuilder html, AnalysisReport report, IReadOnlyCollection<ArtifactDescriptor> artifacts)
+    {
+        html.AppendLine("<nav id=\"quick-nav\" class=\"card quick-nav\" aria-label=\"Sticky subnav\">");
+        html.AppendLine("<h2>Quick navigation</h2>");
+        html.AppendLine("<p class=\"hint\">Sticky subnav for Process / Files / Network / R0 / VT / Artifacts quick navigation; counts show currently embedded representative evidence.</p>");
+        html.AppendLine("<div class=\"quick-links\">");
+        QuickLink(html, "risk", "Risk summary", PrimaryBehaviorFindings(report).Count().ToString());
+        QuickLink(html, "process", "Process details", report.Events.Count(evt => evt.EventType.StartsWith("process.", StringComparison.OrdinalIgnoreCase)).ToString());
+        QuickLink(html, "files", "File system activity", report.Events.Count(IsFileEvent).ToString());
+        QuickLink(html, "network", "Network behavior", report.Events.Count(IsNetworkEvent).ToString());
+        QuickLink(html, "r0", "R0 health", report.Events.Count(IsR0Event).ToString());
+        QuickLink(html, "vt", "VT lookups", report.Events.Count(IsVirusTotalEvent).ToString());
+        QuickLink(html, "artifacts", "Artifact links", artifacts.Count.ToString());
+        QuickLink(html, "events", "Raw normalized events", report.Events.Count.ToString());
+        html.AppendLine("</div>");
+        html.AppendLine("</nav>");
+    }
+
+    private static void QuickLink(StringBuilder html, string href, string label, string count)
+    {
+        html.AppendLine($"<a class=\"quick-link\" href=\"#{E(href)}\"><strong>{E(label)}</strong><small>{E(count)}</small></a>");
+    }
+
+    /// <summary>
     /// Appends high-level metrics similar to cloud sandbox summary cards.
     /// Inputs are a report, processing counts findings, MITRE hits, and event
     /// classes, and the method returns no value.
@@ -360,9 +394,11 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
         Metric(html, "General / info", (CountSeverity(primaryFindings, "low") + CountSeverity(primaryFindings, "info")).ToString(), "risk-info");
         Metric(html, "Static triage", staticFindings.Count.ToString(), staticFindings.Any(f => SeverityRank(f.Severity) <= SeverityRank("medium")) ? "risk-medium" : "risk-info");
         Metric(html, "Collection diagnostics", diagnosticFindings.Count.ToString(), diagnosticFindings.Count > 0 ? "risk-info" : "risk-low");
+        Metric(html, "Collection health", report.Events.Count(IsCollectionHealthEvent).ToString(), report.Events.Any(IsCollectionHealthAlertEvent) ? "risk-medium" : "risk-info");
         Metric(html, "MITRE techniques", primaryFindings.Where(f => !string.IsNullOrWhiteSpace(f.MitreTechniqueId)).Select(f => f.MitreTechniqueId).Distinct().Count().ToString(), "risk-low");
         Metric(html, "Events", report.Events.Count.ToString(), "risk-info");
         Metric(html, "Rule hits", report.Findings.Count.ToString(), "risk-info");
+        Metric(html, "VT lookups", report.Events.Count(IsVirusTotalEvent).ToString(), "risk-info");
         Metric(html, "Static tags", (report.StaticAnalysis?.Tags.Count ?? 0).ToString(), "risk-info");
         Metric(html, "Static URL refs", (report.StaticAnalysis?.Urls.Count ?? 0).ToString(), "risk-info");
         Metric(html, "File events", report.Events.Count(IsFileEvent).ToString(), "risk-medium");
@@ -691,8 +727,62 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
         Metric(html, "File events", report.Events.Count(IsFileEvent).ToString(), "risk-medium");
         Metric(html, "Network events", report.Events.Count(IsNetworkEvent).ToString(), "risk-medium");
         Metric(html, "R0 / driver events", report.Events.Count(IsR0Event).ToString(), "risk-info");
-        Metric(html, "Failure markers", report.Events.Count(IsFailureEvent).ToString(), "risk-high");
+        Metric(html, "Collection health", report.Events.Count(IsCollectionHealthEvent).ToString(), "risk-info");
+        Metric(html, "VT lookups", report.Events.Count(IsVirusTotalEvent).ToString(), "risk-info");
+        Metric(html, "Failure markers", report.Events.Count(IsOperationalFailureEvent).ToString(), "risk-high");
         html.AppendLine("</div></section>");
+    }
+
+    /// <summary>
+    /// Appends optional VirusTotal hash-reputation enrichment separately from
+    /// sandbox behavior. Inputs are normalized VT events/findings; processing
+    /// summarizes verdict/status quality and renders bounded evidence rows.
+    /// </summary>
+    private static void AppendVirusTotalSummary(
+        StringBuilder html,
+        AnalysisReport report,
+        IReadOnlyDictionary<string, List<ArtifactDescriptor>> artifactLookup,
+        IReadOnlyCollection<ArtifactDescriptor> artifacts)
+    {
+        var vtEvents = report.Events
+            .Where(IsVirusTotalEvent)
+            .OrderBy(evt => evt.Timestamp)
+            .ToList();
+        var vtFindings = report.Findings
+            .Where(IsVirusTotalFinding)
+            .OrderBy(finding => SeverityRank(finding.Severity))
+            .ThenBy(finding => finding.RuleId, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        html.AppendLine("<section id=\"vt\" class=\"card\"><h2>VirusTotal / reputation</h2>");
+        html.AppendLine("<div class=\"section-note\"><strong>Hash-only enrichment.</strong> VirusTotal (VT) results are optional reputation evidence and are separated from sandbox behavior. Missing keys, rate limits, or not-found responses are enrichment status, not malicious sample behavior.</div>");
+        html.AppendLine("<div class=\"grid\">");
+        Metric(html, "VT lookups", vtEvents.Count.ToString(), "risk-info");
+        Metric(html, "VT malicious", vtEvents.Count(evt => EventDataEqualsAny(evt, "vtVerdict", "verdict", "malicious")).ToString(), "risk-high");
+        Metric(html, "VT suspicious", vtEvents.Count(evt => EventDataEqualsAny(evt, "vtVerdict", "verdict", "suspicious")).ToString(), "risk-medium");
+        Metric(html, "VT status issues", vtEvents.Count(IsVirusTotalStatusIssue).ToString(), "risk-info");
+        Metric(html, "VT rule hits", vtFindings.Count.ToString(), vtFindings.Any(finding => NormalizeSeverity(finding.Severity) == "high") ? "risk-high" : "risk-info");
+        html.AppendLine("</div>");
+
+        if (vtFindings.Count > 0)
+        {
+            AppendSecondaryFindingGroup(
+                html,
+                "VirusTotal rule hits",
+                "External reputation rules are shown here so VT quality does not get mixed into local behavior evidence.",
+                vtFindings);
+        }
+
+        if (vtEvents.Count == 0)
+        {
+            Empty(html, "No VirusTotal enrichment events were recorded. VT is optional, hash-only, and does not upload samples.");
+        }
+        else
+        {
+            AppendEventRows(html, vtEvents, artifactLookup, artifacts);
+        }
+
+        html.AppendLine("</section>");
     }
 
     /// <summary>
@@ -1323,6 +1413,8 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
         IReadOnlyCollection<ArtifactDescriptor> artifacts)
     {
         var r0Events = report.Events.Where(IsR0Event).ToList();
+        var healthEvents = r0Events.Where(IsR0CollectionHealthEvent).ToList();
+        var telemetryEvents = r0Events.Where(evt => !IsR0CollectionHealthEvent(evt)).ToList();
         html.AppendLine("<section id=\"r0\" class=\"card\"><h2>R0 / driver events</h2>");
         if (r0Events.Count == 0)
         {
@@ -1333,14 +1425,56 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
 
         html.AppendLine("<div class=\"grid\">");
         Metric(html, "Collector lifecycle", r0Events.Count(e => e.EventType.StartsWith("r0collector.", StringComparison.OrdinalIgnoreCase)).ToString(), "risk-info");
-        Metric(html, "Driver payloads", r0Events.Count(e => e.EventType.StartsWith("driver.", StringComparison.OrdinalIgnoreCase) || e.Source.Contains("driver", StringComparison.OrdinalIgnoreCase)).ToString(), "risk-info");
-        Metric(html, "Kernel file rows", r0Events.Count(IsFileEvent).ToString(), "risk-medium");
-        Metric(html, "Kernel registry rows", r0Events.Count(IsRegistryEvent).ToString(), "risk-medium");
-        Metric(html, "Kernel network rows", r0Events.Count(IsNetworkEvent).ToString(), "risk-medium");
-        Metric(html, "R0 failures", r0Events.Count(IsFailureEvent).ToString(), "risk-high");
+        Metric(html, "Collection health rows", healthEvents.Count.ToString(), healthEvents.Any(IsCollectionHealthAlertEvent) ? "risk-medium" : "risk-info");
+        Metric(html, "Driver telemetry rows", telemetryEvents.Count.ToString(), "risk-info");
+        Metric(html, "Kernel file rows", telemetryEvents.Count(IsFileEvent).ToString(), "risk-medium");
+        Metric(html, "Kernel registry rows", telemetryEvents.Count(IsRegistryEvent).ToString(), "risk-medium");
+        Metric(html, "Kernel network rows", telemetryEvents.Count(IsNetworkEvent).ToString(), "risk-medium");
+        Metric(html, "Health alerts", healthEvents.Count(IsCollectionHealthAlertEvent).ToString(), healthEvents.Any(IsCollectionHealthAlertEvent) ? "risk-medium" : "risk-info");
         html.AppendLine("</div>");
-        AppendEventRows(html, r0Events, artifactLookup, artifacts);
+
+        AppendR0CollectionHealthStatus(html, healthEvents, artifactLookup, artifacts);
+
+        html.AppendLine("<h3>Driver telemetry evidence</h3>");
+        if (telemetryEvents.Count == 0)
+        {
+            Empty(html, "No non-health R0 driver telemetry rows were imported. Collection health rows above describe evidence quality rather than sample behavior.");
+        }
+        else
+        {
+            AppendEventRows(html, telemetryEvents, artifactLookup, artifacts);
+        }
+
         html.AppendLine("</section>");
+    }
+
+    /// <summary>
+    /// Appends R0 collection health separately from driver telemetry so
+    /// unavailable devices, driver health, backpressure, and dropped counters
+    /// are not presented as malicious behavior.
+    /// </summary>
+    private static void AppendR0CollectionHealthStatus(
+        StringBuilder html,
+        IReadOnlyCollection<SandboxEvent> healthEvents,
+        IReadOnlyDictionary<string, List<ArtifactDescriptor>> artifactLookup,
+        IReadOnlyCollection<ArtifactDescriptor> artifacts)
+    {
+        html.AppendLine("<h3 id=\"collection-health\" class=\"anchor-offset\">Collection health status</h3>");
+        html.AppendLine("<div class=\"section-note\"><strong>Collection health status.</strong> R0 unavailable, driver health, queue backpressure, and dropped-event counters describe collection quality and are not malicious sample behavior.</div>");
+        html.AppendLine("<div class=\"grid\">");
+        Metric(html, "Health/status rows", healthEvents.Count.ToString(), "risk-info");
+        Metric(html, "Device unavailable", healthEvents.Count(IsDeviceUnavailableHealthEvent).ToString(), healthEvents.Any(IsDeviceUnavailableHealthEvent) ? "risk-medium" : "risk-info");
+        Metric(html, "Backpressure/drop", healthEvents.Count(IsBackpressureOrDropHealthEvent).ToString(), healthEvents.Any(IsBackpressureOrDropHealthEvent) ? "risk-medium" : "risk-info");
+        Metric(html, "Driver health polls", healthEvents.Count(IsDriverHealthPollEvent).ToString(), "risk-info");
+        html.AppendLine("</div>");
+
+        if (healthEvents.Count == 0)
+        {
+            Empty(html, "No R0 collection health rows were imported.");
+            return;
+        }
+
+        AppendEventRows(html, healthEvents, artifactLookup, artifacts);
     }
 
     /// <summary>
@@ -3059,6 +3193,387 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
         return evt.EventType.Contains("fail", StringComparison.OrdinalIgnoreCase) ||
             evt.EventType.Contains("timeout", StringComparison.OrdinalIgnoreCase) ||
             evt.EventType.Contains("error", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Determines whether an event belongs to VirusTotal hash-reputation
+    /// enrichment. Inputs are normalized events; processing checks VT-specific
+    /// event/source tokens and well-known enrichment data keys; the method
+    /// returns true for reputation evidence rather than sandbox behavior.
+    /// </summary>
+    private static bool IsVirusTotalEvent(SandboxEvent evt)
+    {
+        if (TextContainsAny(evt.EventType, "virustotal", "virus-total") ||
+            TextContainsAny(evt.Source, "virustotal", "virus-total", "threat-intel", "reputation"))
+        {
+            return true;
+        }
+
+        return evt.Data.Keys.Any(key =>
+            string.Equals(key, "vtStatus", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(key, "vtVerdict", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(key, "virusTotalStatus", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(key, "virusTotalVerdict", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(key, "positives", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(key, "malicious", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(key, "suspicious", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(key, "harmless", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(key, "undetected", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(key, "permalink", StringComparison.OrdinalIgnoreCase) ||
+            key.Contains("virustotal", StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// Determines whether a finding came from VirusTotal/reputation enrichment.
+    /// Inputs are one finding; processing checks rule id, title, summary, and
+    /// tags; the method returns true when the finding should be shown in the
+    /// dedicated reputation section.
+    /// </summary>
+    private static bool IsVirusTotalFinding(BehaviorFinding finding)
+    {
+        if (TextContainsAny(finding.RuleId, "virustotal", "virus-total", "vt-") ||
+            TextContainsAny(finding.Title, "virustotal", "VirusTotal") ||
+            TextContainsAny(finding.Summary, "virustotal", "VirusTotal"))
+        {
+            return true;
+        }
+
+        return finding.Tags.Any(tag =>
+            TextContainsAny(tag, "virustotal", "virus-total", "threat-intel", "reputation", "vt"));
+    }
+
+    /// <summary>
+    /// Checks whether any event data key equals an expected value.
+    /// Inputs are an event plus one or more key names followed by the expected
+    /// value; processing performs case-insensitive exact comparison; the
+    /// method returns true when any key matches.
+    /// </summary>
+    private static bool EventDataEqualsAny(SandboxEvent evt, params string[] keysAndExpectedValue)
+    {
+        if (keysAndExpectedValue.Length < 2)
+        {
+            return false;
+        }
+
+        var expected = keysAndExpectedValue[^1];
+        foreach (var key in keysAndExpectedValue.Take(keysAndExpectedValue.Length - 1))
+        {
+            if (evt.Data.TryGetValue(key, out var value) &&
+                string.Equals(value, expected, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Determines whether a VirusTotal lookup row describes lookup health rather
+    /// than a usable verdict. Inputs are one event; processing treats found and
+    /// not_found as normal and flags auth/rate/transport/config failures.
+    /// </summary>
+    private static bool IsVirusTotalStatusIssue(SandboxEvent evt)
+    {
+        if (!IsVirusTotalEvent(evt))
+        {
+            return false;
+        }
+
+        var status = FirstEventDataValue(
+            evt,
+            "vtStatus",
+            "virusTotalStatus",
+            "lookupStatus",
+            "status",
+            "resultStatus",
+            "enrichmentStatus");
+        if (string.IsNullOrWhiteSpace(status))
+        {
+            return EventTextContainsAny(
+                evt,
+                "rate_limited",
+                "authentication_failed",
+                "lookup_failed",
+                "not_configured",
+                "quota_exceeded");
+        }
+
+        if (TextEqualsAny(status, "found", "not_found", "not-found", "ok", "success", "completed"))
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Determines whether an event describes telemetry collection quality.
+    /// Inputs are normalized events; processing recognizes R0 health rows,
+    /// runbook/collector diagnostics, queue counters, and readiness rows; the
+    /// method returns true for plumbing quality evidence.
+    /// </summary>
+    private static bool IsCollectionHealthEvent(SandboxEvent evt)
+    {
+        if (IsR0CollectionHealthEvent(evt))
+        {
+            return true;
+        }
+
+        if (EventTextContainsAny(
+                evt,
+                "collection.health",
+                "collector.health",
+                "collector.status",
+                "diagnostic",
+                "readiness",
+                "unavailable",
+                "ioctlFailure",
+                "protocolError",
+                "driverHealth",
+                "driverPoll",
+                "driverReadEvents"))
+        {
+            return true;
+        }
+
+        return EventDataHasAnyKey(
+            evt,
+            "driverStateName",
+            "queueDepth",
+            "queueCapacity",
+            "queueHighWatermark",
+            "eventsDropped",
+            "totalEventsDropped",
+            "totalEventsBackpressured",
+            "backpressureObserved",
+            "captureState",
+            "diagnosticStage",
+            "readinessState");
+    }
+
+    /// <summary>
+    /// Determines whether a collection-health row should be highlighted.
+    /// Inputs are one event; processing flags unavailable devices, failures,
+    /// protocol errors, queue backpressure, and dropped counters.
+    /// </summary>
+    private static bool IsCollectionHealthAlertEvent(SandboxEvent evt)
+    {
+        if (IsDeviceUnavailableHealthEvent(evt) || IsBackpressureOrDropHealthEvent(evt))
+        {
+            return true;
+        }
+
+        return IsCollectionHealthEvent(evt) &&
+            (IsFailureEvent(evt) ||
+                EventTextContainsAny(
+                    evt,
+                    "failed",
+                    "failure",
+                    "error",
+                    "denied",
+                    "missing",
+                    "mismatch",
+                    "unhealthy",
+                    "protocolError"));
+    }
+
+    /// <summary>
+    /// Determines whether an event should count as an operator-visible failure
+    /// marker. Inputs are one event; processing excludes benign VT lookup
+    /// status rows and only highlights collection health when an alert is
+    /// present; the method returns true for actionable failures.
+    /// </summary>
+    private static bool IsOperationalFailureEvent(SandboxEvent evt)
+    {
+        if (IsVirusTotalStatusIssue(evt))
+        {
+            return false;
+        }
+
+        if (IsCollectionHealthEvent(evt))
+        {
+            return IsCollectionHealthAlertEvent(evt);
+        }
+
+        return IsFailureEvent(evt);
+    }
+
+    /// <summary>
+    /// Determines whether an R0 event is collection health rather than sample
+    /// telemetry. Inputs are R0/driver rows; processing recognizes IOCTL health
+    /// events, batch status, readiness, protocol errors, and queue counters.
+    /// </summary>
+    private static bool IsR0CollectionHealthEvent(SandboxEvent evt)
+    {
+        if (!IsR0Event(evt))
+        {
+            return false;
+        }
+
+        if (evt.EventType.StartsWith("r0collector.driverHealth", StringComparison.OrdinalIgnoreCase) ||
+            evt.EventType.StartsWith("r0collector.driverStatus", StringComparison.OrdinalIgnoreCase) ||
+            evt.EventType.StartsWith("r0collector.driverPoll", StringComparison.OrdinalIgnoreCase) ||
+            evt.EventType.StartsWith("r0collector.driverReadEvents", StringComparison.OrdinalIgnoreCase) ||
+            evt.EventType.StartsWith("r0collector.ioctlFailure", StringComparison.OrdinalIgnoreCase) ||
+            evt.EventType.StartsWith("r0collector.driverProtocolError", StringComparison.OrdinalIgnoreCase) ||
+            EventTextContainsAny(evt, "readiness", "diagnose", "diagnostic", "unavailable"))
+        {
+            return true;
+        }
+
+        return EventDataHasAnyKey(
+            evt,
+            "driverState",
+            "driverStateName",
+            "queueDepth",
+            "queueCapacity",
+            "queueHighWatermark",
+            "producerEnableMask",
+            "supportedProducerMask",
+            "totalEventsDropped",
+            "totalEventsBackpressured",
+            "backpressureObserved");
+    }
+
+    /// <summary>
+    /// Determines whether a collection-health event says the driver service or
+    /// device endpoint was unavailable. Inputs are one event; processing checks
+    /// event text and selected diagnostic fields.
+    /// </summary>
+    private static bool IsDeviceUnavailableHealthEvent(SandboxEvent evt)
+    {
+        if (!IsCollectionHealthEvent(evt) && !IsR0Event(evt))
+        {
+            return false;
+        }
+
+        return EventTextContainsAny(
+            evt,
+            "unavailable",
+            "missing_service",
+            "open_device_not_found",
+            "open_device_denied",
+            "device_not_found",
+            "service_not_found",
+            "driver_not_loaded",
+            "not found",
+            "denied",
+            "not loaded");
+    }
+
+    /// <summary>
+    /// Determines whether queue backpressure or dropped events were observed.
+    /// Inputs are one event; processing checks boolean flags, counters, producer
+    /// masks, and flag names; the method returns true on evidence loss.
+    /// </summary>
+    private static bool IsBackpressureOrDropHealthEvent(SandboxEvent evt)
+    {
+        if (EventTextContainsAny(evt, "QueueBackpressure", "EventsDropped", "backpressure", "dropped"))
+        {
+            return true;
+        }
+
+        if (EventDataBoolTrue(evt, "backpressureObserved", "backpressure", "lost"))
+        {
+            return true;
+        }
+
+        return EventDataLongGreaterThanZero(
+            evt,
+            "eventsDropped",
+            "totalEventsDropped",
+            "eventsBackpressured",
+            "totalEventsBackpressured",
+            "producerDroppedMask",
+            "producerBackpressureMask");
+    }
+
+    /// <summary>
+    /// Determines whether an R0 health row is a poll/status/read batch marker.
+    /// Inputs are one event; processing checks high-frequency health event
+    /// names; the method returns true for driver lifecycle snapshots.
+    /// </summary>
+    private static bool IsDriverHealthPollEvent(SandboxEvent evt)
+    {
+        return IsR0Event(evt) &&
+            EventTextContainsAny(evt, "driverHealth", "driverPoll", "driverStatus", "driverReadEvents");
+    }
+
+    private static bool EventDataHasAnyKey(SandboxEvent evt, params string[] keys)
+    {
+        return keys.Any(key => evt.Data.ContainsKey(key));
+    }
+
+    private static bool EventDataBoolTrue(SandboxEvent evt, params string[] keys)
+    {
+        foreach (var key in keys)
+        {
+            if (evt.Data.TryGetValue(key, out var value) &&
+                TextEqualsAny(value, "true", "1", "yes", "y"))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool EventDataLongGreaterThanZero(SandboxEvent evt, params string[] keys)
+    {
+        foreach (var key in keys)
+        {
+            if (!evt.Data.TryGetValue(key, out var value) || string.IsNullOrWhiteSpace(value))
+            {
+                continue;
+            }
+
+            var trimmed = value.Trim();
+            if (trimmed.StartsWith("0x", StringComparison.OrdinalIgnoreCase) &&
+                long.TryParse(trimmed[2..], System.Globalization.NumberStyles.HexNumber, null, out var hexValue) &&
+                hexValue > 0)
+            {
+                return true;
+            }
+
+            if (long.TryParse(trimmed, out var decimalValue) && decimalValue > 0)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool EventTextContainsAny(SandboxEvent evt, params string[] tokens)
+    {
+        if (TextContainsAny(evt.EventType, tokens) ||
+            TextContainsAny(evt.Source, tokens) ||
+            TextContainsAny(evt.Path ?? string.Empty, tokens) ||
+            TextContainsAny(evt.CommandLine ?? string.Empty, tokens))
+        {
+            return true;
+        }
+
+        foreach (var pair in evt.Data)
+        {
+            if (TextContainsAny(pair.Key, tokens) || TextContainsAny(pair.Value, tokens))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool TextContainsAny(string value, params string[] tokens)
+    {
+        return tokens.Any(token => value.Contains(token, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool TextEqualsAny(string value, params string[] candidates)
+    {
+        return candidates.Any(candidate => string.Equals(value, candidate, StringComparison.OrdinalIgnoreCase));
     }
 
     /// <summary>
