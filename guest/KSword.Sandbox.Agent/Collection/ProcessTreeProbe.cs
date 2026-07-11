@@ -23,6 +23,7 @@ namespace KSword.Sandbox.Agent.Collection;
 internal sealed class ProcessTreeProbe : IGuestProbe
 {
     private const int MaxSystemDiffEventsPerKind = 256;
+    private const int MaxProcessTreeSummaryItems = 16;
     private const string ServiceCreatedEventType = "service.created";
     private const string ServiceModifiedEventType = "service.modified";
     private const string ServiceDeletedEventType = "service.deleted";
@@ -306,6 +307,7 @@ internal sealed class ProcessTreeProbe : IGuestProbe
         DateTimeOffset capturedAtUtc)
     {
         var currentKeys = current.Values.Select(process => process.Key).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var observedLookup = CreateLatestObservedSnapshotByPid(context);
         var events = new List<SandboxEvent>();
         foreach (var key in monitoredProcessKeys.OrderBy(key => key, StringComparer.OrdinalIgnoreCase))
         {
@@ -330,7 +332,7 @@ internal sealed class ProcessTreeProbe : IGuestProbe
                 depth: missingDepth,
                 childCount: null,
                 lineage: missingLineage,
-                snapshotLookup: null,
+                snapshotLookup: observedLookup,
                 snapshotState: "missing",
                 capturedAtUtc: capturedAtUtc,
                 context: context);
@@ -352,6 +354,31 @@ internal sealed class ProcessTreeProbe : IGuestProbe
         }
 
         return events;
+    }
+
+    /// <summary>
+    /// Builds the richest known pid lookup from observations plus launch
+    /// context so missing/exited rows can keep parent, child, and lineage
+    /// display metadata even after a process disappears.
+    /// </summary>
+    private Dictionary<int, ProcessTreeSnapshot> CreateLatestObservedSnapshotByPid(GuestProbeContext context)
+    {
+        var lookup = observedSnapshots.Values
+            .GroupBy(observation => observation.Snapshot.ProcessId)
+            .ToDictionary(
+                group => group.Key,
+                group => group
+                    .OrderByDescending(observation => observation.LastSeenAtUtc)
+                    .ThenByDescending(observation => observation.Snapshot.StartTimeUtc ?? DateTime.MinValue)
+                    .First()
+                    .Snapshot);
+
+        if (context.RootProcessId is not null && !lookup.ContainsKey(context.RootProcessId.Value))
+        {
+            lookup[context.RootProcessId.Value] = CreateRootFallbackSnapshot(context);
+        }
+
+        return lookup;
     }
 
     /// <summary>
@@ -546,8 +573,10 @@ internal sealed class ProcessTreeProbe : IGuestProbe
                 ["exitMissing"] = string.Equals(snapshotState, "missing", StringComparison.OrdinalIgnoreCase).ToString(CultureInfo.InvariantCulture).ToLowerInvariant(),
                 ["processExited"] = string.Equals(snapshotState, "missing", StringComparison.OrdinalIgnoreCase).ToString(CultureInfo.InvariantCulture).ToLowerInvariant(),
                 ["exitedBeforeSnapshot"] = string.Equals(snapshotState, "missing", StringComparison.OrdinalIgnoreCase).ToString(CultureInfo.InvariantCulture).ToLowerInvariant(),
-                ["zhMessage"] = ProcessSnapshotZhMessage(eventType, snapshotState),
-                ["zhHint"] = ProcessSnapshotZhHint(snapshotState)
+                ["zhMessage"] = string.Equals(snapshotState, "missing", StringComparison.OrdinalIgnoreCase)
+                    ? "进程此前被跟踪，但当前快照中已不可见，可能已经退出。"
+                    : "进程快照行已采集。",
+                ["zhHint"] = "请使用 rootProcessId、parentProcessId、treeDepth 和 treeLineage 还原样本进程关系。"
             }
         };
 
@@ -638,7 +667,312 @@ internal sealed class ProcessTreeProbe : IGuestProbe
         }
 
         AddIfNotEmpty(evt.Data, "treeLineage", lineage);
+        AddProcessTreeSemanticFields(
+            evt,
+            eventType,
+            process,
+            rootProcessId,
+            depth,
+            childCount,
+            lineage,
+            snapshotLookup,
+            snapshotState,
+            context);
         return evt;
+    }
+
+    /// <summary>
+    /// Adds process-tree completeness fields that reports can copy without
+    /// recomputing relationships: stable lineage keys, role markers, direct
+    /// child summaries, descendant counts, and Chinese operator text.
+    /// </summary>
+    private static void AddProcessTreeSemanticFields(
+        SandboxEvent evt,
+        string eventType,
+        ProcessTreeSnapshot process,
+        int? rootProcessId,
+        int? depth,
+        int? childCount,
+        string? lineage,
+        IReadOnlyDictionary<int, ProcessTreeSnapshot>? snapshotLookup,
+        string snapshotState,
+        GuestProbeContext? context)
+    {
+        var isMissing = string.Equals(snapshotState, "missing", StringComparison.OrdinalIgnoreCase);
+        var isRoot = rootProcessId is not null && process.ProcessId == rootProcessId.Value;
+        var isTreeNode = string.Equals(eventType, "process.tree", StringComparison.OrdinalIgnoreCase) ||
+            depth is not null ||
+            !string.IsNullOrWhiteSpace(lineage);
+        var isChild = rootProcessId is not null && !isRoot && isTreeNode;
+
+        evt.Data["isRootProcess"] = ToLowerInvariantString(isRoot);
+        evt.Data["isChildProcess"] = ToLowerInvariantString(isChild);
+        evt.Data["isDescendantOfRoot"] = ToLowerInvariantString(isChild);
+        evt.Data["processTreeNode"] = ToLowerInvariantString(isTreeNode);
+        evt.Data["treeNodeState"] = snapshotState;
+        evt.Data["treeScope"] = rootProcessId is null
+            ? "global-snapshot"
+            : isTreeNode
+                ? "sample-root-tree"
+                : "sample-root-context";
+        evt.Data["lineageStable"] = ToLowerInvariantString(!string.IsNullOrWhiteSpace(lineage));
+        evt.Data["lineageIncludesRoot"] = ToLowerInvariantString(rootProcessId is not null &&
+            !string.IsNullOrWhiteSpace(lineage) &&
+            LineageContainsPid(lineage, rootProcessId.Value));
+
+        if (snapshotLookup is not null && rootProcessId is not null)
+        {
+            var rootVisible = snapshotLookup.TryGetValue(rootProcessId.Value, out var visibleRoot) &&
+                (context is null || IsSameRootProcess(visibleRoot, context));
+            evt.Data["rootVisibleInSnapshot"] = ToLowerInvariantString(rootVisible);
+        }
+
+        AddLineagePresentationFields(evt, process, rootProcessId, lineage, snapshotLookup, context);
+        AddChildSummaryFields(evt, process, childCount, snapshotLookup);
+
+        var roleZh = isRoot ? "根进程" : isChild ? "子进程" : "进程快照";
+        evt.Data["zhProcessRole"] = roleZh;
+        evt.Data["zhMessage"] = ProcessSnapshotZhMessage(eventType, snapshotState, isRoot, isChild);
+        evt.Data["zhHint"] = ProcessSnapshotZhHint(snapshotState, isTreeNode, isMissing);
+
+        var copyText = CreateProcessTreeCopyText(evt, process, rootProcessId, lineage);
+        evt.Data["processTreeCopyText"] = copyText;
+        evt.Data["copyText"] = copyText;
+    }
+
+    /// <summary>
+    /// Adds human-readable and stable-key lineage variants from a pid lineage.
+    /// </summary>
+    private static void AddLineagePresentationFields(
+        SandboxEvent evt,
+        ProcessTreeSnapshot process,
+        int? rootProcessId,
+        string? lineage,
+        IReadOnlyDictionary<int, ProcessTreeSnapshot>? snapshotLookup,
+        GuestProbeContext? context)
+    {
+        var lineagePids = ParseLineagePids(lineage);
+        if (lineagePids.Count == 0 && rootProcessId is not null && process.ProcessId == rootProcessId.Value)
+        {
+            lineagePids.Add(process.ProcessId);
+        }
+
+        if (lineagePids.Count == 0)
+        {
+            return;
+        }
+
+        var names = new List<string>(lineagePids.Count);
+        var keys = new List<string>(lineagePids.Count);
+        foreach (var pid in lineagePids)
+        {
+            names.Add(ProcessLineageDisplayName(pid, snapshotLookup, context));
+            keys.Add(ProcessLineageStableKey(pid, snapshotLookup, context));
+        }
+
+        evt.Data["treeLineageDisplay"] = string.Join(" > ", names);
+        evt.Data["treeLineageNames"] = string.Join(" > ", names);
+        evt.Data["treeLineageProcessKeys"] = string.Join(" > ", keys);
+        evt.Data["treeLineageStableKeys"] = string.Join(" > ", keys);
+        evt.Data["treeLineageCopy"] = $"{evt.Data.GetValueOrDefault("treeLineage", string.Join(">", lineagePids.Select(pid => pid.ToString(CultureInfo.InvariantCulture))))} | {string.Join(" > ", names)}";
+    }
+
+    /// <summary>
+    /// Adds direct-child and descendant summaries for report process-tree cards.
+    /// </summary>
+    private static void AddChildSummaryFields(
+        SandboxEvent evt,
+        ProcessTreeSnapshot process,
+        int? childCount,
+        IReadOnlyDictionary<int, ProcessTreeSnapshot>? snapshotLookup)
+    {
+        if (snapshotLookup is null)
+        {
+            if (childCount is not null)
+            {
+                evt.Data.TryAdd("directChildProcessCount", childCount.Value.ToString(CultureInfo.InvariantCulture));
+            }
+
+            return;
+        }
+
+        var directChildren = snapshotLookup.Values
+            .Where(candidate => candidate.ParentProcessId == process.ProcessId)
+            .OrderBy(candidate => candidate.ProcessId)
+            .ThenBy(candidate => candidate.ProcessName, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var directChildCount = childCount ?? directChildren.Count;
+        evt.Data["directChildProcessCount"] = directChildCount.ToString(CultureInfo.InvariantCulture);
+        evt.Data["childProcessCount"] = directChildCount.ToString(CultureInfo.InvariantCulture);
+
+        if (directChildren.Count == 0)
+        {
+            evt.Data["childSummary"] = "none";
+            evt.Data["childSummaryTruncated"] = "false";
+            evt.Data["descendantProcessCount"] = "0";
+            return;
+        }
+
+        var limited = directChildren.Take(MaxProcessTreeSummaryItems).ToList();
+        var childNames = limited.Select(ProcessDisplayName).ToList();
+        evt.Data["childProcessIds"] = string.Join(",", limited.Select(child => child.ProcessId.ToString(CultureInfo.InvariantCulture)));
+        evt.Data["childProcessNames"] = string.Join(" > ", childNames);
+        evt.Data["childProcessSnapshotKeys"] = string.Join(" > ", limited.Select(child => child.Key));
+        evt.Data["childSummary"] = string.Join("; ", limited.Select(child => $"{child.ProcessName}({child.ProcessId.ToString(CultureInfo.InvariantCulture)})"));
+        evt.Data["childSummaryTruncated"] = ToLowerInvariantString(directChildren.Count > MaxProcessTreeSummaryItems);
+        evt.Data["descendantProcessCount"] = CountDescendants(process.ProcessId, snapshotLookup).ToString(CultureInfo.InvariantCulture);
+    }
+
+    private static List<int> ParseLineagePids(string? lineage)
+    {
+        if (string.IsNullOrWhiteSpace(lineage))
+        {
+            return [];
+        }
+
+        var pids = new List<int>();
+        foreach (var token in lineage.Split('>', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (int.TryParse(token, NumberStyles.Integer, CultureInfo.InvariantCulture, out var pid))
+            {
+                pids.Add(pid);
+            }
+        }
+
+        return pids;
+    }
+
+    private static bool LineageContainsPid(string lineage, int pid)
+    {
+        return ParseLineagePids(lineage).Contains(pid);
+    }
+
+    private static string ProcessLineageDisplayName(
+        int pid,
+        IReadOnlyDictionary<int, ProcessTreeSnapshot>? snapshotLookup,
+        GuestProbeContext? context)
+    {
+        if (snapshotLookup is not null && snapshotLookup.TryGetValue(pid, out var snapshot))
+        {
+            return ProcessDisplayName(snapshot);
+        }
+
+        if (context?.RootProcessId == pid)
+        {
+            var rootName = context.RootProcessName ??
+                SafeProcessNameFromPath(context.RootProcessPath ?? context.SamplePath) ??
+                "root";
+            return $"{rootName}({pid.ToString(CultureInfo.InvariantCulture)})";
+        }
+
+        return $"pid:{pid.ToString(CultureInfo.InvariantCulture)}";
+    }
+
+    private static string ProcessLineageStableKey(
+        int pid,
+        IReadOnlyDictionary<int, ProcessTreeSnapshot>? snapshotLookup,
+        GuestProbeContext? context)
+    {
+        if (snapshotLookup is not null && snapshotLookup.TryGetValue(pid, out var snapshot))
+        {
+            return snapshot.Key;
+        }
+
+        if (context?.RootProcessId == pid)
+        {
+            return CreateRootFallbackSnapshot(context).Key;
+        }
+
+        return $"pid:{pid.ToString(CultureInfo.InvariantCulture)}";
+    }
+
+    private static string ProcessDisplayName(ProcessTreeSnapshot process)
+    {
+        return $"{process.ProcessName}({process.ProcessId.ToString(CultureInfo.InvariantCulture)})";
+    }
+
+    private static int CountDescendants(
+        int processId,
+        IReadOnlyDictionary<int, ProcessTreeSnapshot> snapshotLookup)
+    {
+        var childrenByParent = snapshotLookup.Values
+            .Where(process => process.ParentProcessId is not null)
+            .GroupBy(process => process.ParentProcessId!.Value)
+            .ToDictionary(group => group.Key, group => group.ToList());
+        var visited = new HashSet<int>();
+        var queue = new Queue<int>();
+        if (childrenByParent.TryGetValue(processId, out var children))
+        {
+            foreach (var child in children)
+            {
+                queue.Enqueue(child.ProcessId);
+            }
+        }
+
+        while (queue.Count != 0)
+        {
+            var childPid = queue.Dequeue();
+            if (!visited.Add(childPid))
+            {
+                continue;
+            }
+
+            if (!childrenByParent.TryGetValue(childPid, out var grandchildren))
+            {
+                continue;
+            }
+
+            foreach (var grandchild in grandchildren)
+            {
+                queue.Enqueue(grandchild.ProcessId);
+            }
+        }
+
+        return visited.Count;
+    }
+
+    private static string CreateProcessTreeCopyText(
+        SandboxEvent evt,
+        ProcessTreeSnapshot process,
+        int? rootProcessId,
+        string? lineage)
+    {
+        var parts = new List<string>
+        {
+            $"event={evt.EventType}",
+            $"pid={process.ProcessId.ToString(CultureInfo.InvariantCulture)}",
+            $"name={process.ProcessName}"
+        };
+        if (process.ParentProcessId is not null)
+        {
+            parts.Add($"ppid={process.ParentProcessId.Value.ToString(CultureInfo.InvariantCulture)}");
+        }
+
+        if (rootProcessId is not null)
+        {
+            parts.Add($"root={rootProcessId.Value.ToString(CultureInfo.InvariantCulture)}");
+        }
+
+        AddCopyPart(parts, "role", evt.Data.GetValueOrDefault("processRole"));
+        AddCopyPart(parts, "state", evt.Data.GetValueOrDefault("snapshotState"));
+        AddCopyPart(parts, "depth", evt.Data.GetValueOrDefault("treeDepth"));
+        AddCopyPart(parts, "lineage", lineage);
+        AddCopyPart(parts, "lineageDisplay", evt.Data.GetValueOrDefault("treeLineageDisplay"));
+        AddCopyPart(parts, "children", evt.Data.GetValueOrDefault("childSummary"));
+        return string.Join(" | ", parts);
+    }
+
+    private static void AddCopyPart(List<string> parts, string name, string? value)
+    {
+        if (!string.IsNullOrWhiteSpace(value))
+        {
+            parts.Add($"{name}={value}");
+        }
+    }
+
+    private static string ToLowerInvariantString(bool value)
+    {
+        return value.ToString(CultureInfo.InvariantCulture).ToLowerInvariant();
     }
 
     /// <summary>
@@ -717,6 +1051,33 @@ internal sealed class ProcessTreeProbe : IGuestProbe
             }
         }
 
+        var rootSnapshot = CreateRootFallbackSnapshot(context);
+        AddLineagePresentationFields(
+            evt,
+            rootSnapshot,
+            rootProcessId,
+            rootProcessId.ToString(CultureInfo.InvariantCulture),
+            snapshotLookup: null,
+            context);
+        evt.Data["isRootProcess"] = "true";
+        evt.Data["isChildProcess"] = "false";
+        evt.Data["isDescendantOfRoot"] = "false";
+        evt.Data["processTreeNode"] = "true";
+        evt.Data["treeNodeState"] = "missing";
+        evt.Data["treeScope"] = "sample-root-tree";
+        evt.Data["lineageStable"] = "true";
+        evt.Data["lineageIncludesRoot"] = "true";
+        evt.Data["childSummary"] = "none";
+        evt.Data["childSummaryTruncated"] = "false";
+        evt.Data["directChildProcessCount"] = "0";
+        evt.Data["descendantProcessCount"] = "0";
+        var copyText = CreateProcessTreeCopyText(
+            evt,
+            rootSnapshot,
+            rootProcessId,
+            rootProcessId.ToString(CultureInfo.InvariantCulture));
+        evt.Data["processTreeCopyText"] = copyText;
+        evt.Data["copyText"] = copyText;
         return evt;
     }
 
@@ -800,32 +1161,128 @@ internal sealed class ProcessTreeProbe : IGuestProbe
             evt.Data["processStartTimeUtc"] = root.StartTimeUtc.Value.ToString("O", CultureInfo.InvariantCulture);
         }
 
+        var rootSnapshot = root ?? CreateRootFallbackSnapshot(context);
+        AddLineagePresentationFields(
+            evt,
+            rootSnapshot,
+            tree.RootProcessId,
+            tree.RootProcessId.ToString(CultureInfo.InvariantCulture),
+            snapshot,
+            context);
+        AddChildSummaryFields(
+            evt,
+            rootSnapshot,
+            tree.DirectChildProcessCount,
+            snapshot);
+        AddObservedRootChildSummaryFields(evt, tree.RootProcessId, context);
+        evt.Data["isRootProcess"] = "true";
+        evt.Data["isChildProcess"] = "false";
+        evt.Data["isDescendantOfRoot"] = "false";
+        evt.Data["processTreeNode"] = "true";
+        evt.Data["treeNodeState"] = tree.RootVisible ? "present" : "missing";
+        evt.Data["treeScope"] = "sample-root-tree";
+        evt.Data["lineageStable"] = "true";
+        evt.Data["lineageIncludesRoot"] = "true";
+        evt.Data["zhProcessRole"] = "根进程";
+        var copyText = CreateProcessTreeCopyText(
+            evt,
+            rootSnapshot,
+            tree.RootProcessId,
+            tree.RootProcessId.ToString(CultureInfo.InvariantCulture));
+        evt.Data["processTreeCopyText"] = copyText;
+        evt.Data["copyText"] = copyText;
         return evt;
+    }
+
+    /// <summary>
+    /// Adds observed child summary fields for root summaries so reports can
+    /// show exited children even when the final live snapshot is empty.
+    /// </summary>
+    private void AddObservedRootChildSummaryFields(
+        SandboxEvent evt,
+        int rootProcessId,
+        GuestProbeContext context)
+    {
+        var observedLookup = CreateLatestObservedSnapshotByPid(context);
+        var children = observedLookup.Values
+            .Where(process => process.ParentProcessId == rootProcessId)
+            .OrderBy(process => process.ProcessId)
+            .ThenBy(process => process.ProcessName, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        evt.Data["observedChildProcessCount"] = children.Count.ToString(CultureInfo.InvariantCulture);
+        evt.Data["observedDescendantProcessCount"] = CountDescendants(rootProcessId, observedLookup).ToString(CultureInfo.InvariantCulture);
+        if (children.Count == 0)
+        {
+            evt.Data["observedChildSummary"] = "none";
+            evt.Data["observedChildSummaryTruncated"] = "false";
+            return;
+        }
+
+        var limited = children.Take(MaxProcessTreeSummaryItems).ToList();
+        evt.Data["observedChildProcessIds"] = string.Join(",", limited.Select(child => child.ProcessId.ToString(CultureInfo.InvariantCulture)));
+        evt.Data["observedChildProcessNames"] = string.Join(" > ", limited.Select(ProcessDisplayName));
+        evt.Data["observedChildProcessSnapshotKeys"] = string.Join(" > ", limited.Select(child => child.Key));
+        evt.Data["observedChildSummary"] = string.Join("; ", limited.Select(child => $"{child.ProcessName}({child.ProcessId.ToString(CultureInfo.InvariantCulture)})"));
+        evt.Data["observedChildSummaryTruncated"] = ToLowerInvariantString(children.Count > MaxProcessTreeSummaryItems);
     }
 
     /// <summary>
     /// Maps process snapshot state into short report text.
     /// </summary>
-    private static string ProcessSnapshotZhMessage(string eventType, string snapshotState)
+    private static string ProcessSnapshotZhMessage(
+        string eventType,
+        string snapshotState,
+        bool isRootProcess,
+        bool isChildProcess)
     {
         if (string.Equals(snapshotState, "missing", StringComparison.OrdinalIgnoreCase))
         {
+            if (isRootProcess)
+            {
+                return "样本根进程此前被跟踪，但当前快照中已不可见，可能已经退出。";
+            }
+
+            if (isChildProcess)
+            {
+                return "样本子进程此前被跟踪，但当前快照中已不可见，可能已经退出。";
+            }
+
             return "进程此前被跟踪，但当前快照中已不可见，可能已经退出。";
         }
 
-        return string.Equals(eventType, "process.tree", StringComparison.OrdinalIgnoreCase)
-            ? "进程树节点已采集。"
+        if (string.Equals(eventType, "process.tree", StringComparison.OrdinalIgnoreCase))
+        {
+            return isRootProcess
+                ? "样本根进程树节点已采集。"
+                : "样本子进程树节点已采集。";
+        }
+
+        if (isRootProcess)
+        {
+            return "样本根进程快照行已采集。";
+        }
+
+        return isChildProcess
+            ? "样本子进程快照行已采集。"
             : "进程快照行已采集。";
     }
 
     /// <summary>
     /// Maps process snapshot state into operator guidance.
     /// </summary>
-    private static string ProcessSnapshotZhHint(string snapshotState)
+    private static string ProcessSnapshotZhHint(
+        string snapshotState,
+        bool isTreeNode,
+        bool isMissing)
     {
-        return string.Equals(snapshotState, "missing", StringComparison.OrdinalIgnoreCase)
-            ? "missing/exited 标记用于解释短生命周期进程；请结合 firstSeen/lastSeen、rootProcessId 和 treeLineage 还原时序。"
-            : "请使用 rootProcessId、parentProcessId、treeDepth 和 treeLineage 还原样本进程关系。";
+        if (isMissing || string.Equals(snapshotState, "missing", StringComparison.OrdinalIgnoreCase))
+        {
+            return "missing/exited 标记用于解释短生命周期进程；请结合 firstSeen/lastSeen、rootProcessId、treeLineageDisplay 和 treeLineageProcessKeys 还原时序。";
+        }
+
+        return isTreeNode
+            ? "请使用 rootProcessId、parentProcessId、treeDepth、treeLineageDisplay、treeLineageProcessKeys 和 childSummary 还原样本进程关系。"
+            : "请使用 parentProcessId、snapshotKey 和 childSummary 还原当前可见进程关系。";
     }
 
     /// <summary>
@@ -837,9 +1294,7 @@ internal sealed class ProcessTreeProbe : IGuestProbe
         GuestProbeContext context)
     {
         var metadata = new Dictionary<int, ProcessTreeMetadata>();
-        if (context.RootProcessId is null ||
-            !snapshot.TryGetValue(context.RootProcessId.Value, out var root) ||
-            !IsSameRootProcess(root, context))
+        if (context.RootProcessId is null)
         {
             return metadata;
         }
@@ -850,7 +1305,17 @@ internal sealed class ProcessTreeProbe : IGuestProbe
             .ToDictionary(group => group.Key, group => group.OrderBy(process => process.ProcessId).ToList());
         var queue = new Queue<(ProcessTreeSnapshot Process, int Depth, string Lineage)>();
         var visited = new HashSet<int>();
-        queue.Enqueue((root, 0, root.ProcessId.ToString(CultureInfo.InvariantCulture)));
+        if (snapshot.TryGetValue(context.RootProcessId.Value, out var root) && IsSameRootProcess(root, context))
+        {
+            queue.Enqueue((root, 0, root.ProcessId.ToString(CultureInfo.InvariantCulture)));
+        }
+        else if (childrenByParent.TryGetValue(context.RootProcessId.Value, out var orphanedChildren))
+        {
+            foreach (var child in orphanedChildren)
+            {
+                queue.Enqueue((child, 1, $"{context.RootProcessId.Value.ToString(CultureInfo.InvariantCulture)}>{child.ProcessId.ToString(CultureInfo.InvariantCulture)}"));
+            }
+        }
 
         while (queue.Count != 0)
         {

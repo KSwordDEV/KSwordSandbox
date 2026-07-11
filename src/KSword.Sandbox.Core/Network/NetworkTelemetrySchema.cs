@@ -42,36 +42,56 @@ public static class NetworkTelemetrySchema
         AddIfNotEmpty(data, "sourceIp", sourceIp);
         AddIfNotEmpty(data, "src", sourceIp);
         AddIfNotEmpty(data, "srcIp", sourceIp);
+        AddIfNotEmpty(data, "sourceAddress", sourceIp);
+        AddIfNotEmpty(data, "clientIp", sourceIp);
         AddIfNotEmpty(data, "localAddress", sourceIp);
         AddIfNotEmpty(data, "destinationIp", destinationIp);
+        AddIfNotEmpty(data, "dest", destinationIp);
         AddIfNotEmpty(data, "dst", destinationIp);
         AddIfNotEmpty(data, "dstIp", destinationIp);
+        AddIfNotEmpty(data, "destIp", destinationIp);
+        AddIfNotEmpty(data, "destinationAddress", destinationIp);
+        AddIfNotEmpty(data, "serverIp", destinationIp);
         AddIfNotEmpty(data, "remoteAddress", destinationIp);
         AddPort(data, "sourcePort", sourcePort);
         AddPort(data, "srcPort", sourcePort);
+        AddPort(data, "clientPort", sourcePort);
         AddPort(data, "localPort", sourcePort);
         AddPort(data, "destinationPort", destinationPort);
         AddPort(data, "dstPort", destinationPort);
+        AddPort(data, "destPort", destinationPort);
+        AddPort(data, "serverPort", destinationPort);
         AddPort(data, "remotePort", destinationPort);
 
         var sourceEndpoint = Endpoint(sourceIp, sourcePort);
         var destinationEndpoint = Endpoint(destinationIp, destinationPort);
         AddIfNotEmpty(data, "sourceEndpoint", sourceEndpoint);
         AddIfNotEmpty(data, "srcEndpoint", sourceEndpoint);
+        AddIfNotEmpty(data, "clientEndpoint", sourceEndpoint);
         AddIfNotEmpty(data, "localEndpoint", sourceEndpoint);
         AddIfNotEmpty(data, "destinationEndpoint", destinationEndpoint);
         AddIfNotEmpty(data, "dstEndpoint", destinationEndpoint);
+        AddIfNotEmpty(data, "destEndpoint", destinationEndpoint);
+        AddIfNotEmpty(data, "serverEndpoint", destinationEndpoint);
         AddIfNotEmpty(data, "remoteEndpoint", destinationEndpoint);
         AddIfNotEmpty(data, "ports", Ports(sourcePort, destinationPort));
+        AddIfNotEmpty(data, "endpointPair", !string.IsNullOrWhiteSpace(sourceEndpoint) && !string.IsNullOrWhiteSpace(destinationEndpoint)
+            ? $"{sourceEndpoint}->{destinationEndpoint}"
+            : string.Empty);
         if (!string.IsNullOrWhiteSpace(normalizedProtocol) &&
             !string.IsNullOrWhiteSpace(sourceEndpoint) &&
             !string.IsNullOrWhiteSpace(destinationEndpoint))
         {
             data["flowKey"] = $"{normalizedProtocol}|{sourceEndpoint}|{destinationEndpoint}";
+            data["flowKeyVersion"] = "network.telemetry.v1.endpoint-pair";
         }
 
         AddIfNotEmpty(data, "direction", "outbound");
-        AddIfNotEmpty(data, "serviceHint", ServiceHint(eventKind, normalizedProtocol, sourcePort, destinationPort));
+        var serviceHint = ServiceHint(eventKind, normalizedProtocol, sourcePort, destinationPort);
+        AddIfNotEmpty(data, "serviceHint", serviceHint);
+        AddIfNotEmpty(data, "serviceName", serviceHint);
+        AddIfNotEmpty(data, "applicationProtocol", serviceHint is "dns" or "http" or "tls" ? serviceHint : string.Empty);
+        AddIfNotEmpty(data, "serviceHintSource", string.Equals(serviceHint, eventKind, StringComparison.OrdinalIgnoreCase) ? "event-kind" : "port-or-protocol");
         AddArtifactData(data, source);
         if (extra is not null)
         {
@@ -569,24 +589,59 @@ public static class NetworkTelemetrySchema
 
         if (string.Equals(eventKind, "dns", StringComparison.OrdinalIgnoreCase))
         {
-            return $"观察到 DNS 查询：{DisplayValue(FirstDataValue(data, "queryName", "qname", "domain"), "未知域名")}。";
+            var domain = DisplayValue(FirstDataValue(data, "queryName", "qname", "domain"), "未知域名");
+            var rcode = FirstDataValue(data, "rcode", "rcodeName", "responseCode");
+            var answers = FirstDataValue(data, "answers", "answer", "resolvedIps");
+            var dnsClassification = FirstDataValue(data, "isNxDomain", "classification", "dnsOutcome");
+            if (string.Equals(dnsClassification, "true", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(dnsClassification, "nxdomain", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(rcode, "NXDOMAIN", StringComparison.OrdinalIgnoreCase))
+            {
+                return $"观察到 DNS NXDOMAIN：{domain}。";
+            }
+
+            return !string.IsNullOrWhiteSpace(answers)
+                ? $"观察到 DNS 解析：{domain} -> {answers}。"
+                : $"观察到 DNS 查询：{domain}。";
         }
 
         if (string.Equals(eventKind, "http", StringComparison.OrdinalIgnoreCase))
         {
             var method = DisplayValue(ValueOrEmpty(data, "method"), "HTTP");
             var target = FirstDataValue(data, "url", "host", "uri", "requestUri");
-            return $"观察到 HTTP 请求：{method} {DisplayValue(target, "未知目标")}。";
+            var status = FirstDataValue(data, "statusCode", "responseStatusCode");
+            var upload = FirstDataValue(data, "uploadCandidate");
+            if (string.Equals(upload, "true", StringComparison.OrdinalIgnoreCase))
+            {
+                return $"观察到 HTTP 上传候选：{method} {DisplayValue(target, "未知目标")}。";
+            }
+
+            return !string.IsNullOrWhiteSpace(status)
+                ? $"观察到 HTTP 请求/响应：{method} {DisplayValue(target, "未知目标")}，状态 {status}。"
+                : $"观察到 HTTP 请求：{method} {DisplayValue(target, "未知目标")}。";
         }
 
         if (string.Equals(eventKind, "tls", StringComparison.OrdinalIgnoreCase))
         {
-            return $"观察到 TLS 连接：{DisplayValue(FirstDataValue(data, "sni", "serverName", "destinationEndpoint"), "未知服务端")}。";
+            var endpoint = DisplayValue(FirstDataValue(data, "sni", "serverName", "destinationEndpoint"), "未知服务端");
+            var ja3 = FirstDataValue(data, "ja3", "ja3Hash");
+            var certRisk = FirstDataValue(data, "tlsCertificateRisk", "certificateStatus", "validationStatus");
+            if (!string.IsNullOrWhiteSpace(certRisk) && !string.Equals(certRisk, "ok", StringComparison.OrdinalIgnoreCase))
+            {
+                return $"观察到 TLS 连接：{endpoint}，证书状态 {certRisk}。";
+            }
+
+            return !string.IsNullOrWhiteSpace(ja3)
+                ? $"观察到 TLS 连接：{endpoint}，JA3 {ja3}。"
+                : $"观察到 TLS 连接：{endpoint}。";
         }
 
         if (string.Equals(eventKind, "connection", StringComparison.OrdinalIgnoreCase))
         {
-            return $"观察到网络连接：{DisplayValue(ValueOrEmpty(data, "sourceEndpoint"), "未知源")} -> {DisplayValue(ValueOrEmpty(data, "destinationEndpoint"), "未知目的")}。";
+            var bytes = FirstDataValue(data, "byteCount", "bytesToServer", "bytesToClient");
+            return !string.IsNullOrWhiteSpace(bytes)
+                ? $"观察到网络连接：{DisplayValue(ValueOrEmpty(data, "sourceEndpoint"), "未知源")} -> {DisplayValue(ValueOrEmpty(data, "destinationEndpoint"), "未知目的")}，字节 {bytes}。"
+                : $"观察到网络连接：{DisplayValue(ValueOrEmpty(data, "sourceEndpoint"), "未知源")} -> {DisplayValue(ValueOrEmpty(data, "destinationEndpoint"), "未知目的")}。";
         }
 
         return "观察到网络证据。";
@@ -618,16 +673,34 @@ public static class NetworkTelemetrySchema
 
         if (string.Equals(eventKind, "dns", StringComparison.OrdinalIgnoreCase))
         {
+            var dnsClassification = FirstDataValue(data, "isNxDomain", "classification", "dnsOutcome");
+            if (string.Equals(dnsClassification, "true", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(dnsClassification, "nxdomain", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(FirstDataValue(data, "rcode", "rcodeName"), "NXDOMAIN", StringComparison.OrdinalIgnoreCase))
+            {
+                return "关注 NXDOMAIN 突增、长随机子域、动态域名和后续 HTTP/TLS 失败重试。";
+            }
+
             return "关注异常域名、NXDOMAIN、动态域名或与后续 HTTP/TLS 连接的关联。";
         }
 
         if (string.Equals(eventKind, "http", StringComparison.OrdinalIgnoreCase))
         {
+            if (string.Equals(FirstDataValue(data, "uploadCandidate"), "true", StringComparison.OrdinalIgnoreCase))
+            {
+                return "该 HTTP 行包含上传候选元数据；重点看 uploadBytes、认证/Cookie 标记、Host、URI 与进程 lineage。";
+            }
+
             return "关注下载路径、Host、User-Agent、Content-Type 和 payloadMagic。";
         }
 
         if (string.Equals(eventKind, "tls", StringComparison.OrdinalIgnoreCase))
         {
+            if (!string.IsNullOrWhiteSpace(FirstDataValue(data, "tlsCertificateRisk", "certificateStatus", "validationStatus")))
+            {
+                return "关注异常证书状态、自签名/过期证书、SNI 与 JA3/JA3S 是否匹配威胁情报。";
+            }
+
             return "关注 SNI、TLS 版本、JA3/JA3S 和目标端口。";
         }
 

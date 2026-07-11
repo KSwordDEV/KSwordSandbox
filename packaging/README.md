@@ -27,7 +27,11 @@ local-only and intentionally has no push/publish step.
   `bin/`、`obj/`、`x64/` 二进制会被拒绝。
 - `package-manifest.generated.json` 会写入 staged package 根目录，包含版本、
   git revision/branch、dirty-state preview、payload 文件列表、`sizeBytes`、
-  `sha256`、可选 runtime payload 跳过原因和安全合约。
+  `sha256`、可选 runtime payload 跳过原因、安全合约，以及面向审阅者的
+  `operatorDiagnostics`。
+- `operatorDiagnostics` 会列出 `RuntimePublishRoot` 是否提供、是否应在仓库外、
+  runtime publish entry（`host-web`、`guest-tools`、`tools/job-tool`、
+  `tools/postprocess`）是否存在，以及缺失 payload 的修复建议。
 - readiness/package 脚本不启动、不还原、不停止 VM，不签名 driver，不调用
   `CSignTool.exe`，也不执行 `git push` 或发布网络动作。
 - manifest 和脚本现在显式排除截图、PCAP/PCAPNG、JSONL 事件流、dump、
@@ -42,5 +46,7 @@ gate from the repository root:
 
 The readiness wrapper calls repository policy, parses operational PowerShell
 scripts, validates package manifests, and scans normal release paths for legacy
-`CSignTool.exe` references. It does not start Hyper-V, sign drivers, or publish
-artifacts.
+`CSignTool.exe` references. It also checks that install/run/package scripts keep
+Hyper-V prerequisite、VM profile、guest payload、VT key、runtime root 和 package
+safety diagnostics visible to operators. It does not start Hyper-V, sign
+drivers, or publish artifacts.

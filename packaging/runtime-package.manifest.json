@@ -11,7 +11,7 @@
     "noDriverSigningByPackageScript": true,
     "legacyCSignToolDefaultPath": "forbidden",
     "runtimePayloadSource": "external RuntimePublishRoot only; repository bin/obj/x64 binaries are rejected",
-    "operatorDiagnostics": "optional runtime publish entries are recorded in package-manifest.generated.json when skipped"
+    "operatorDiagnostics": "install/run expose read-only Hyper-V prerequisite, VM profile, guest payload, VT key, runtime-root, and RuntimePublishRoot guidance; optional runtime publish entries are recorded in package-manifest.generated.json when skipped"
   },
   "stagedMetadata": {
     "generatedManifest": "package-manifest.generated.json",

@@ -273,11 +273,13 @@ internal sealed class PcapArtifactImportScenario : ISmokeTestScenario
                     {
                         rrname = "eve-sidecar.example.test",
                         rrtype = "A",
-                        rcode = "NOERROR"
+                        rcode = "3"
                     },
                     process = new
                     {
                         pid = 5150,
+                        rootProcessId = 5150,
+                        treeLineage = "5150:sidecar-sample.exe",
                         name = "sidecar-sample.exe",
                         command_line = "sidecar-sample.exe --dns"
                     }
@@ -297,7 +299,15 @@ internal sealed class PcapArtifactImportScenario : ISmokeTestScenario
                         hostname = "api.sidecar-only.test",
                         url = "/stage",
                         user_agent = "SidecarOnlyUA",
-                        content_type = "application/json"
+                        content_type = "application/json",
+                        requestBodyBytes = "1536",
+                        responseBodyBytes = "256",
+                        authorization = "Bearer redacted",
+                        cookie = "sid=redacted",
+                        response = new
+                        {
+                            status_code = "202"
+                        }
                     }
                 }),
                 JsonSerializer.Serialize(new
@@ -316,7 +326,18 @@ internal sealed class PcapArtifactImportScenario : ISmokeTestScenario
                         ja3 = new
                         {
                             hash = "0123456789abcdef0123456789abcdef"
-                        }
+                        },
+                        alpn = "h2",
+                        cert = new
+                        {
+                            subject = "CN=tls.sidecar-only.test",
+                            issuer = "CN=Untrusted Test CA",
+                            fingerprint = new
+                            {
+                                sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                            }
+                        },
+                        validationStatus = "self-signed"
                     }
                 }),
                 JsonSerializer.Serialize(new
@@ -332,7 +353,10 @@ internal sealed class PcapArtifactImportScenario : ISmokeTestScenario
                     state = "ESTABLISHED",
                     duration = "3.50",
                     bytes_toserver = "2048",
-                    pkts_toserver = "8"
+                    bytes_toclient = "1024",
+                    pkts_toserver = "8",
+                    pkts_toclient = "4",
+                    community_id = "1:sidecar-community"
                 })
             ],
             cancellationToken);
@@ -359,6 +383,11 @@ internal sealed class PcapArtifactImportScenario : ISmokeTestScenario
         SmokeAssert.True(dns.ProcessId == 5150, "Sidecar-only DNS process.pid should be promoted to SandboxEvent.ProcessId.");
         SmokeAssert.True(string.Equals(dns.ProcessName, "sidecar-sample.exe", StringComparison.Ordinal), "Sidecar-only DNS process.name should be promoted to SandboxEvent.ProcessName.");
         SmokeAssert.True(string.Equals(dns.CommandLine, "sidecar-sample.exe --dns", StringComparison.Ordinal), "Sidecar-only DNS process.command_line should be promoted to SandboxEvent.CommandLine.");
+        RequireData(dns, "rcode", "NXDOMAIN");
+        RequireData(dns, "classification", "nxdomain");
+        RequireData(dns, "isNxDomain", "true");
+        RequireData(dns, "rootProcessId", "5150");
+        RequireData(dns, "treeLineage", "5150:sidecar-sample.exe");
 
         var http = RequireEvent(events, "http.request", "host", "api.sidecar-only.test");
         RequireData(http, "method", "POST");
@@ -367,20 +396,35 @@ internal sealed class PcapArtifactImportScenario : ISmokeTestScenario
         RequireData(http, "destinationPort", "8080");
         RequireData(http, "userAgent", "SidecarOnlyUA");
         RequireData(http, "contentType", "application/json");
+        RequireData(http, "statusCode", "202");
+        RequireData(http, "statusFamily", "2xx");
+        RequireData(http, "uploadCandidate", "true");
+        RequireData(http, "uploadBytes", "1536");
+        RequireData(http, "responseBodyBytes", "256");
+        RequireData(http, "authorizationHeaderPresent", "true");
+        RequireData(http, "cookiePresent", "true");
 
         var tls = RequireEvent(events, "tls.connection", "sni", "tls.sidecar-only.test");
         RequireData(tls, "destinationIp", "203.0.113.90");
         RequireData(tls, "destinationPort", "443");
         RequireData(tls, "tlsVersion", "TLS 1.2");
         RequireData(tls, "ja3", "0123456789abcdef0123456789abcdef");
+        RequireData(tls, "alpn", "h2");
+        RequireData(tls, "certSubject", "CN=tls.sidecar-only.test");
+        RequireData(tls, "certIssuer", "CN=Untrusted Test CA");
+        RequireData(tls, "certSha256", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+        RequireData(tls, "tlsCertificateRisk", "suspicious");
 
         var flow = RequireEvent(events, "network.flow", "uid", "sidecar-only-flow-1");
         RequireData(flow, "destinationIp", "198.51.100.91");
         RequireData(flow, "destinationPort", "4444");
         RequireData(flow, "state", "ESTABLISHED");
         RequireData(flow, "durationSeconds", "3.50");
-        RequireData(flow, "byteCount", "2048");
-        RequireData(flow, "packetCount", "8");
+        RequireData(flow, "byteCount", "3072");
+        RequireData(flow, "packetCount", "12");
+        RequireData(flow, "bytesToServer", "2048");
+        RequireData(flow, "bytesToClient", "1024");
+        RequireData(flow, "communityId", "1:sidecar-community");
     }
 
     private static async Task AssertGuestManifestNetworkImportAsync(string parentRoot, CancellationToken cancellationToken)

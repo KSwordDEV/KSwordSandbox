@@ -42,7 +42,13 @@ Recommended collector startup:
    `IOCTL_KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK` with a subset of that mask.
 6. Call `IOCTL_KSWORD_SANDBOX_GET_STATUS` for queue capacity, lifecycle state,
    enable-mask state, and total counters before or after draining events.
-7. Use `IOCTL_KSWORD_SANDBOX_POLL` and `IOCTL_KSWORD_SANDBOX_READ_EVENTS` for
+7. If `CapabilityFlags` includes
+   `KSWORD_SANDBOX_CAPABILITY_FLAG_GET_NETWORK_STATUS`, optionally call
+   `IOCTL_KSWORD_SANDBOX_GET_NETWORK_STATUS` to retrieve read-only WFP/ALE
+   implementation level, layer masks, TODO mask, classify/event counters, and
+   network-specific degrade reason.  This call must not register WFP objects or
+   imply DNS/HTTP/TLS packet parsing support.
+8. Use `IOCTL_KSWORD_SANDBOX_POLL` and `IOCTL_KSWORD_SANDBOX_READ_EVENTS` for
    the event stream.
 
 ## Installation and live-load boundary
@@ -81,6 +87,7 @@ Current `CapabilityFlags` include:
 - `KSWORD_SANDBOX_CAPABILITY_FLAG_EVENT_COMMON_METADATA`
 - `KSWORD_SANDBOX_CAPABILITY_FLAG_PRODUCER_METADATA`
 - `KSWORD_SANDBOX_CAPABILITY_FLAG_SELF_NOISE_METADATA`
+- `KSWORD_SANDBOX_CAPABILITY_FLAG_GET_NETWORK_STATUS`
 
 ## Producer runtime state and payload versions
 
@@ -104,6 +111,13 @@ registry, file, and network v1 layouts. Those values are producer-stamped on
 emitted records. Future field growth must use a new negotiated version or an
 explicit draft/successor structure; it must not silently change the existing v1
 layout.
+
+The network producer also exposes a separate
+`KSWORD_SANDBOX_NETWORK_STATUS_REPLY` through
+`IOCTL_KSWORD_SANDBOX_GET_NETWORK_STATUS`.  That reply is status metadata, not
+an event payload.  It intentionally keeps network readiness diagnostics outside
+`KSWORD_SANDBOX_NETWORK_EVENT_PAYLOAD` so the v1 event layout remains stable
+while operators can still inspect WFP/ALE setup progress and known gaps.
 
 V1 typed payload checklist:
 
@@ -210,6 +224,37 @@ Legacy `GET_HEALTH` and `POLL` remain fixed-size compatibility calls. New queue
 capacity and total counters are intentionally exposed through `GET_STATUS` so old
 collectors do not need larger health/poll output buffers.
 
+## Network WFP/ALE status diagnostics
+
+`IOCTL_KSWORD_SANDBOX_GET_NETWORK_STATUS` returns
+`KSWORD_SANDBOX_NETWORK_STATUS_REPLY` when the control device is loaded.  The
+call is read-only and bounded: it does not open a WFP engine transaction, add
+filters, change producer enable masks, sign the driver, start a service, or
+drain events.
+
+The reply gives readiness gates stronger evidence than the coarse producer masks
+alone:
+
+- `ImplementationLevel`: current build scope, presently ALE inspect-only.
+- `Flags`: compiled/active/degraded/inspect-only plus queue/payload failure
+  bits.
+- `SupportedLayerMask`: the supported ALE connect and recv-accept IPv4/IPv6
+  layers.
+- `LastRegisteredCalloutMask` and `LastAddedFilterMask`: partial WFP setup
+  progress retained after a non-fatal initialization failure.
+- `ActiveLayerMask`: layers currently active for classify callbacks.
+- `TodoMask`: explicit remaining network scope gaps, including packet/stream
+  WFP layers, flow contexts, protocol/address filter conditions, and in-driver
+  DNS/HTTP/TLS payload parsing.
+- `LastDegradeReason`, `LastDegradeNtStatus`, `RegisterNtStatus`, and
+  `EngineNtStatus`: setup and runtime diagnostics.
+- `ClassifyCount`, `EventCount`, `QueueFailureCount`, and
+  `ClassifyPayloadFailureCount`: runtime counters for stress/readiness triage.
+
+This reduces the network readiness blind spot without redefining the v1 R0
+network event as a packet sensor.  Reports should still merge richer protocol
+semantics from Guest/PCAP imports.
+
 ## Synthetic event-quality and backpressure contract
 
 The event ring is bounded and non-blocking. The default capacity is 1024 records,
@@ -279,6 +324,11 @@ Public handlers return standard NTSTATUS values:
   invalid.
 - `STATUS_INVALID_PARAMETER`: request `Version`, `Size`, reserved `Flags`, or
   producer bits failed contract validation.
+
+`IOCTL_KSWORD_SANDBOX_GET_NETWORK_STATUS` follows the same fixed-buffer rules:
+`STATUS_BUFFER_TOO_SMALL` for undersized output, `STATUS_INVALID_USER_BUFFER`
+for a missing METHOD_BUFFERED buffer, and `STATUS_DEVICE_NOT_READY` if the
+control device extension is not valid.
 
 Internal producer enqueue suppression uses `STATUS_CANCELLED` from `KswPushEvent`
 so producer telemetry counters do not count disabled events as queued. The public

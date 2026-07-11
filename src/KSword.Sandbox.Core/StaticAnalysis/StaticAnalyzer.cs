@@ -252,6 +252,20 @@ public sealed class StaticAnalyzer
         "Sleep"
     ];
 
+    private static readonly string[] AntiDebugApis =
+    [
+        "IsDebuggerPresent",
+        "CheckRemoteDebuggerPresent",
+        "NtQueryInformationProcess",
+        "ZwQueryInformationProcess",
+        "NtSetInformationThread",
+        "OutputDebugString",
+        "DebugActiveProcess",
+        "DebugBreak",
+        "ContinueDebugEvent",
+        "WaitForDebugEvent"
+    ];
+
     private static readonly string[] CredentialAccessApis =
     [
         "MiniDumpWriteDump",
@@ -299,6 +313,7 @@ public sealed class StaticAnalyzer
             .Concat(ScriptExecutionApis)
             .Concat(ResourceApis)
             .Concat(AntiAnalysisApis)
+            .Concat(AntiDebugApis)
             .Concat(CredentialAccessApis)
             .Concat(DefenseEvasionApis)
             .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -528,6 +543,32 @@ public sealed class StaticAnalyzer
         "InternetWriteFile"
     ];
 
+    private static readonly string[] DownloadExecuteCommandMarkers =
+    [
+        ".exe",
+        ".dll",
+        ".scr",
+        ".com",
+        ".msi",
+        ".ps1",
+        ".bat",
+        ".cmd",
+        ".vbs",
+        ".hta",
+        "Start-Process",
+        "Invoke-Expression",
+        "iex ",
+        "cmd /c",
+        "powershell -",
+        "pwsh -",
+        "rundll32",
+        "regsvr32",
+        "mshta",
+        "CreateProcess",
+        "ShellExecute",
+        "WinExec"
+    ];
+
     private static readonly string[] CredentialStringMarkers =
     [
         "mimikatz",
@@ -556,6 +597,25 @@ public sealed class StaticAnalyzer
         "sc stop WinDefend",
         "taskkill /im MsMpEng",
         "netsh advfirewall set"
+    ];
+
+    private static readonly string[] AntiDebugStringMarkers =
+    [
+        "IsDebuggerPresent",
+        "CheckRemoteDebuggerPresent",
+        "NtQueryInformationProcess",
+        "NtSetInformationThread",
+        "ProcessDebugPort",
+        "ProcessDebugFlags",
+        "ProcessDebugObjectHandle",
+        "BeingDebugged",
+        "KdDebuggerEnabled",
+        "OutputDebugString",
+        "x64dbg",
+        "ollydbg",
+        "windbg",
+        "idaq",
+        "ida64"
     ];
 
     private static readonly string[] AntiSandboxStringMarkers =
@@ -1863,6 +1923,23 @@ public sealed class StaticAnalyzer
                 "download_command_string");
         }
 
+        if (IsDownloadExecuteString(trimmed))
+        {
+            isInteresting = true;
+            tags.Add("interesting_string");
+            tags.Add("download_command_string");
+            tags.Add("download_execute_string");
+            tags.Add("download_exec_candidate");
+            AddCommandIndicator(
+                stringEvidence,
+                "download-execute",
+                FindFirstMarker(trimmed, DownloadCommandMarkers) ?? FindFirstMarker(trimmed, ScriptInterpreterMarkers),
+                trimmed,
+                "download_command_string",
+                "download_execute_string",
+                "download_exec_candidate");
+        }
+
         if (ContainsAny(trimmed, ExfilCommandMarkers))
         {
             isInteresting = true;
@@ -1952,6 +2029,22 @@ public sealed class StaticAnalyzer
             tags.Add("anti_analysis_string");
             tags.Add("sandbox_evasion_string");
             AddStringFinding(stringEvidence, "anti-analysis-string", trimmed, "anti_analysis_string", "sandbox_evasion_string");
+        }
+
+        if (ContainsAnyApiToken(trimmed, AntiDebugApis) || ContainsAny(trimmed, AntiDebugStringMarkers))
+        {
+            isInteresting = true;
+            tags.Add("interesting_string");
+            tags.Add("anti_analysis_string");
+            tags.Add("debugger_evasion_string");
+            tags.Add("anti_debug_string");
+            AddStringFinding(
+                stringEvidence,
+                "anti-debug-string",
+                trimmed,
+                "anti_analysis_string",
+                "debugger_evasion_string",
+                "anti_debug_string");
         }
 
         if (ContainsAny(trimmed, PackerStringMarkers))
@@ -2409,6 +2502,27 @@ public sealed class StaticAnalyzer
 
         return ContainsAny(text, "schtasks", "schtasks.exe") &&
             ContainsAny(text, "/create", "/change", "/run", "/tn ", "/tr ", "/sc ");
+    }
+
+    /// <summary>
+    /// Detects static command strings that combine retrieval and execution
+    /// clues. Inputs are one extracted string; processing requires both a
+    /// download marker/URL and an executable/script or process-launch clue; the
+    /// method returns true for low-confidence download-execute triage.
+    /// </summary>
+    private static bool IsDownloadExecuteString(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return false;
+        }
+
+        var hasDownload = ContainsAny(text, DownloadCommandMarkers) ||
+            (UrlPattern.IsMatch(text) && ContainsAny(text, "http://", "https://"));
+        var hasExecution = ContainsAny(text, DownloadExecuteCommandMarkers) ||
+            ContainsAny(text, ScriptInterpreterMarkers) ||
+            ContainsScriptExecutionApi(text);
+        return hasDownload && hasExecution;
     }
 
     /// <summary>
@@ -4105,6 +4219,16 @@ public sealed class StaticAnalyzer
             tags.Add("debugger_evasion_string");
         }
 
+        if (ContainsAnyApiToken(apiName, AntiDebugApis))
+        {
+            tags.Add("import_suspicious_api");
+            tags.Add("import_anti_analysis_api");
+            tags.Add("import_anti_debug_api");
+            tags.Add("anti_analysis_string");
+            tags.Add("debugger_evasion_string");
+            tags.Add("anti_debug_string");
+        }
+
         if (ContainsAnyApiToken(apiName, CredentialAccessApis))
         {
             tags.Add("import_suspicious_api");
@@ -4184,6 +4308,11 @@ public sealed class StaticAnalyzer
         if (ContainsAnyApiToken(apiName, AntiAnalysisApis))
         {
             yield return "anti-analysis";
+        }
+
+        if (ContainsAnyApiToken(apiName, AntiDebugApis))
+        {
+            yield return "anti-debug";
         }
 
         if (ContainsAnyApiToken(apiName, CredentialAccessApis))
@@ -5152,6 +5281,13 @@ public sealed class StaticAnalyzer
         AddDataIfNotBlank(data, "entryPointRva", result.EntryPointRva);
         AddDataList(data, "tags", result.Tags);
         AddDataList(data, "warnings", result.Warnings);
+        AddStaticRuleFacingFields(
+            data,
+            "static-analysis-summary",
+            "static.analysis.completed",
+            "static.summary",
+            "static-summary",
+            result.Tags.Count > 0 ? "info" : "none");
 
         TryAddStaticEvent(
             events,
@@ -5185,6 +5321,21 @@ public sealed class StaticAnalyzer
                 ["isWritable"] = section.IsWritable.ToString()
             };
             AddDataList(data, "tags", sectionTags);
+            AddStaticRuleFacingFields(
+                data,
+                "pe-section",
+                "static.pe.section",
+                $"section.{NormalizeStaticYaraTag(section.Name)}",
+                section.IsExecutable && section.IsWritable ? "memory-permissions" : "pe-section-layout",
+                section.Entropy >= 7.2 || (section.IsExecutable && section.IsWritable) ? "medium" : "info");
+            data["sectionRole"] = section.IsExecutable && section.IsWritable
+                ? "writable-executable"
+                : section.Entropy >= 7.2
+                    ? "high-entropy"
+                    : IsKnownPackerSectionName(section.Name)
+                        ? "packer-section"
+                        : "normal";
+            data["packedCandidate"] = sectionTags.Contains("packer_hint", StringComparer.OrdinalIgnoreCase).ToString();
 
             TryAddStaticEvent(
                 events,
@@ -5216,6 +5367,7 @@ public sealed class StaticAnalyzer
             AddDataList(data, "suspiciousApiNames", module.SuspiciousApiNames);
             AddDataList(data, "suspiciousApiClusters", module.SuspiciousApiClusters);
             AddDataList(data, "tags", moduleTags);
+            AddImportModuleRuleFacingFields(data, module);
 
             TryAddStaticEvent(
                 events,
@@ -5237,14 +5389,15 @@ public sealed class StaticAnalyzer
             };
             AddDataList(data, "apiNames", cluster.ApiNames);
             AddDataList(data, "tags", clusterTags);
+            AddImportClusterRuleFacingFields(data, cluster);
 
             TryAddStaticEvent(
                 events,
                 "static.pe.import.cluster",
                 fullPath,
                 $"Suspicious PE import API cluster {cluster.Name} observed.",
-                $"发现可疑 PE 导入 API 聚类：{cluster.Name}。",
-                "这是静态导入线索；例如注入、下载、凭据或防御规避 API 需要结合行为事件确认。",
+                $"发现静态 API 能力聚类：{cluster.Name}。",
+                DescribeImportClusterZhHint(cluster.Name),
                 data);
         }
     }
@@ -5264,6 +5417,26 @@ public sealed class StaticAnalyzer
             };
             AddDataIfNotBlank(data, "moduleName", result.ExportModuleName);
             AddDataList(data, "tags", exportTags);
+            var exportRole = DescribeExportRole(exportName);
+            AddStaticRuleFacingFields(
+                data,
+                "pe-export",
+                "static.pe.export",
+                $"export.{NormalizeStaticYaraTag(exportRole)}",
+                exportRole == "generic-export" ? "pe-export" : "persistence-or-loader-entrypoint",
+                exportRole == "generic-export" ? "info" : "low");
+            data["exportRole"] = exportRole;
+            data["loaderEntryCandidate"] = (exportRole != "generic-export").ToString();
+            data["persistenceCandidate"] = (exportRole is "com-registration-entrypoint" or "service-entrypoint").ToString();
+            AddDataList(
+                data,
+                "mitreCandidates",
+                exportRole switch
+                {
+                    "com-registration-entrypoint" => ["T1117", "T1218.010"],
+                    "service-entrypoint" => ["T1543.003"],
+                    _ => []
+                });
 
             TryAddStaticEvent(
                 events,
@@ -5294,6 +5467,17 @@ public sealed class StaticAnalyzer
         };
         AddDataIfNotBlank(directoryData, "callbackTableVa", tls.CallbackTableVa);
         AddDataIfNotBlank(directoryData, "callbackTableFileOffset", tls.CallbackTableFileOffset);
+        AddStaticRuleFacingFields(
+            directoryData,
+            "pe-tls-directory",
+            "static.pe.tls.directory",
+            "tls.directory",
+            "early-execution",
+            tls.Callbacks.Count > 0 ? "medium" : "info");
+        directoryData["executionPhase"] = "pre-entrypoint";
+        directoryData["earlyExecutionCandidate"] = (tls.Callbacks.Count > 0).ToString();
+        directoryData["antiAnalysisCandidate"] = (tls.Callbacks.Count > 0).ToString();
+        AddDataList(directoryData, "mitreCandidates", tls.Callbacks.Count > 0 ? ["T1497", "T1622"] : []);
 
         TryAddStaticEvent(
             events,
@@ -5316,6 +5500,17 @@ public sealed class StaticAnalyzer
             AddDataIfNotBlank(data, "relativeVirtualAddress", callback.RelativeVirtualAddress);
             AddDataIfNotBlank(data, "callbackTableVa", tls.CallbackTableVa);
             AddDataIfNotBlank(data, "callbackTableFileOffset", tls.CallbackTableFileOffset);
+            AddStaticRuleFacingFields(
+                data,
+                "pe-tls-callback",
+                "static.pe.tls.callback",
+                "tls.callback",
+                "early-execution",
+                "medium");
+            data["executionPhase"] = "pre-entrypoint";
+            data["earlyExecutionCandidate"] = "True";
+            data["antiAnalysisCandidate"] = "True";
+            AddDataList(data, "mitreCandidates", ["T1497", "T1622"]);
 
             TryAddStaticEvent(
                 events,
@@ -5381,6 +5576,21 @@ public sealed class StaticAnalyzer
         }
 
         AddDataList(data, "tags", overlayTags);
+        var overlayRole = DescribeOverlayRole(overlay);
+        AddStaticRuleFacingFields(
+            data,
+            "pe-overlay",
+            "static.pe.overlay",
+            $"overlay.{NormalizeStaticYaraTag(overlayRole)}",
+            overlay.NonCertificateSize > 0 ? "packed-or-embedded-payload" : "pe-signature-metadata",
+            overlay.NonCertificateEntropy >= 7.2 || overlay.NonCertificateSize >= 1024 * 1024 ? "medium" : "info");
+        data["overlayRole"] = overlayRole;
+        data["payloadCandidate"] = (overlay.NonCertificateSize > 0).ToString();
+        data["certificateOnly"] = overlay.IsCertificateTableOnly.ToString();
+        data["nonCertificateEntropyLabel"] = overlay.NonCertificateEntropy.HasValue
+            ? DescribeEntropy(overlay.NonCertificateEntropy.Value, (uint)Math.Min(uint.MaxValue, overlay.NonCertificateSize))
+            : "unknown";
+        AddDataList(data, "mitreCandidates", overlay.NonCertificateSize > 0 ? ["T1027", "T1027.009"] : []);
 
         TryAddStaticEvent(
             events,
@@ -5407,6 +5617,19 @@ public sealed class StaticAnalyzer
             };
             AddDataList(data, "tags", indicatorTags);
             AddDataIfNotBlank(data, "classification", indicator.Classification);
+            var indicatorRole = DescribeNetworkIndicatorRole(indicator);
+            AddStaticRuleFacingFields(
+                data,
+                "static-network-indicator",
+                "static.string.indicator",
+                $"network.{NormalizeStaticYaraTag(indicator.Kind)}.{NormalizeStaticYaraTag(indicator.Classification ?? "unclassified")}",
+                indicatorRole == "reference" ? "reference-metadata" : "network-indicator",
+                indicatorRole is "download-url-candidate" or "tor-hidden-service" or "dynamic-dns" ? "low" : "info");
+            data["indicatorRole"] = indicatorRole;
+            data["iocConfidence"] = indicatorRole == "reference" ? "reference" : indicatorRole is "download-url-candidate" or "tor-hidden-service" or "dynamic-dns" ? "medium" : "low";
+            data["isReference"] = string.Equals(indicator.Classification, "reference", StringComparison.OrdinalIgnoreCase).ToString();
+            data["downloadPayloadCandidate"] = IsPotentialExecutableDownloadValue(indicator.Value).ToString();
+            AddDataList(data, "mitreCandidates", IsPotentialExecutableDownloadValue(indicator.Value) ? ["T1105"] : []);
 
             TryAddStaticEvent(
                 events,
@@ -5426,6 +5649,31 @@ public sealed class StaticAnalyzer
                 ["value"] = path.Value
             };
             AddDataList(data, "tags", path.Tags);
+            var pathRole = DescribePathRole(path);
+            var persistenceCandidate = path.Tags.Contains("persistence_string", StringComparer.OrdinalIgnoreCase);
+            var dropLocationCandidate = path.Tags.Contains("temp_path_string", StringComparer.OrdinalIgnoreCase) ||
+                path.Tags.Contains("appdata_path_string", StringComparer.OrdinalIgnoreCase) ||
+                path.Tags.Contains("executable_path_string", StringComparer.OrdinalIgnoreCase);
+            AddStaticRuleFacingFields(
+                data,
+                "static-path-string",
+                "static.string.path",
+                $"path.{NormalizeStaticYaraTag(pathRole)}",
+                persistenceCandidate ? "persistence" : dropLocationCandidate ? "dropped-file" : "path-indicator",
+                persistenceCandidate || dropLocationCandidate ? "low" : "info");
+            data["pathRole"] = pathRole;
+            data["persistenceCandidate"] = persistenceCandidate.ToString();
+            data["dropLocationCandidate"] = dropLocationCandidate.ToString();
+            data["executionCandidate"] = (path.Tags.Contains("executable_path_string", StringComparer.OrdinalIgnoreCase) ||
+                path.Tags.Contains("script_path_string", StringComparer.OrdinalIgnoreCase)).ToString();
+            AddDataList(
+                data,
+                "mitreCandidates",
+                persistenceCandidate
+                    ? ["T1547.001", "T1053.005", "T1543.003"]
+                    : dropLocationCandidate
+                        ? ["T1105"]
+                        : []);
 
             TryAddStaticEvent(
                 events,
@@ -5446,6 +5694,32 @@ public sealed class StaticAnalyzer
             };
             AddDataIfNotBlank(data, "tool", command.Tool);
             AddDataList(data, "tags", command.Tags);
+            var commandBehaviorFamily = DescribeCommandBehaviorFamily(command);
+            var downloadExecuteCandidate = string.Equals(command.Category, "download-execute", StringComparison.OrdinalIgnoreCase) ||
+                IsDownloadExecuteString(command.Value);
+            AddStaticRuleFacingFields(
+                data,
+                "static-command-string",
+                "static.string.command",
+                $"command.{NormalizeStaticYaraTag(command.Category)}",
+                commandBehaviorFamily,
+                downloadExecuteCandidate || command.Tags.Contains("encoded_command_string", StringComparer.OrdinalIgnoreCase) ? "medium" : "low");
+            data["commandRole"] = command.Category;
+            data["downloadExecCandidate"] = downloadExecuteCandidate.ToString();
+            data["antiDebugCandidate"] = (ContainsAnyApiToken(command.Value, AntiDebugApis) ||
+                ContainsAny(command.Value, AntiDebugStringMarkers)).ToString();
+            AddDataList(
+                data,
+                "mitreCandidates",
+                commandBehaviorFamily switch
+                {
+                    "download-execute" => ["T1105", "T1059"],
+                    "script-obfuscation" => ["T1059", "T1027"],
+                    "living-off-the-land" => ["T1218", "T1059"],
+                    "persistence" => ["T1547", "T1053"],
+                    "exfiltration" => ["T1041"],
+                    _ => ["T1059"]
+                });
 
             TryAddStaticEvent(
                 events,
@@ -5465,6 +5739,33 @@ public sealed class StaticAnalyzer
                 ["value"] = finding.Value
             };
             AddDataList(data, "tags", finding.Tags);
+            var suspiciousFamily = DescribeSuspiciousStringBehaviorFamily(finding);
+            var antiDebugCandidate = string.Equals(finding.Category, "anti-debug-string", StringComparison.OrdinalIgnoreCase) ||
+                finding.Tags.Contains("anti_debug_string", StringComparer.OrdinalIgnoreCase) ||
+                ContainsAnyApiToken(finding.Value, AntiDebugApis) ||
+                ContainsAny(finding.Value, AntiDebugStringMarkers);
+            AddStaticRuleFacingFields(
+                data,
+                "static-suspicious-string",
+                "static.string.suspicious",
+                $"string.{NormalizeStaticYaraTag(finding.Category)}",
+                suspiciousFamily,
+                suspiciousFamily is "credential-access" or "defense-evasion" or "anti-analysis" ? "low" : "info");
+            data["stringRole"] = finding.Category;
+            data["antiDebugCandidate"] = antiDebugCandidate.ToString();
+            data["downloadExecCandidate"] = IsDownloadExecuteString(finding.Value).ToString();
+            AddDataList(
+                data,
+                "mitreCandidates",
+                suspiciousFamily switch
+                {
+                    "anti-analysis" => antiDebugCandidate ? ["T1622", "T1497.001"] : ["T1497"],
+                    "credential-access" => ["T1003", "T1555"],
+                    "defense-evasion" => ["T1562"],
+                    "persistence" => ["TA0003"],
+                    "packer" => ["T1027"],
+                    _ => []
+                });
 
             TryAddStaticEvent(
                 events,
@@ -5503,6 +5804,15 @@ public sealed class StaticAnalyzer
             ["tags"] = JoinBounded(packerTags)
         };
         AddDataList(data, "evidence", evidence, " | ");
+        AddStaticRuleFacingFields(
+            data,
+            "static-packer-hint",
+            "static.packer.hint",
+            "packer.hint",
+            "packing-or-obfuscation",
+            packerTags.Contains("packer_upx", StringComparer.OrdinalIgnoreCase) ? "medium" : "low");
+        data["packedCandidate"] = "True";
+        AddDataList(data, "mitreCandidates", ["T1027", "T1027.002"]);
 
         TryAddStaticEvent(
             events,
@@ -5574,6 +5884,13 @@ public sealed class StaticAnalyzer
                 ["engine"] = "builtin",
                 ["tags"] = JoinBounded(tags)
             };
+            AddStaticRuleFacingFields(
+                data,
+                "static-yara-like-match",
+                "static.yara.match",
+                $"yara.{NormalizeStaticYaraTag(ruleName)}",
+                "static-signature",
+                "low");
 
             if (stringsByRule.TryGetValue(ruleName, out var matchedStrings))
             {
@@ -5782,6 +6099,12 @@ public sealed class StaticAnalyzer
             case "anti-analysis":
                 yield return "import_anti_analysis_api";
                 break;
+            case "anti-debug":
+                yield return "import_anti_analysis_api";
+                yield return "import_anti_debug_api";
+                yield return "debugger_evasion_string";
+                yield return "anti_debug_string";
+                break;
             case "credential-access":
                 yield return "import_credential_access_api";
                 break;
@@ -5789,6 +6112,367 @@ public sealed class StaticAnalyzer
                 yield return "import_defense_evasion_api";
                 break;
         }
+    }
+
+    /// <summary>
+    /// Adds common rule-consumer metadata to every granular static event.
+    /// </summary>
+    private static void AddStaticRuleFacingFields(
+        Dictionary<string, string> data,
+        string evidenceKind,
+        string ruleScope,
+        string ruleKey,
+        string behaviorFamily,
+        string triageLevel)
+    {
+        data["staticOnly"] = "True";
+        data["evidenceOrigin"] = "host-static-analysis";
+        data["evidenceKind"] = evidenceKind;
+        data["ruleScope"] = ruleScope;
+        data["ruleKey"] = ruleKey;
+        data["behaviorFamily"] = behaviorFamily;
+        data["triageLevel"] = triageLevel;
+    }
+
+    /// <summary>
+    /// Adds PE import-module capability fields for rules and reports.
+    /// </summary>
+    private static void AddImportModuleRuleFacingFields(Dictionary<string, string> data, PeImportModuleInfo module)
+    {
+        var clusters = module.SuspiciousApiClusters
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var hasDownload = HasImportCluster(module, "download");
+        var hasExecution = HasAnyImportCluster(module, "script-execution", "dynamic-code", "file-drop");
+        var hasAntiDebug = HasImportCluster(module, "anti-debug") ||
+            module.SuspiciousApiNames.Any(api => ContainsAnyApiToken(api, AntiDebugApis));
+
+        AddStaticRuleFacingFields(
+            data,
+            "pe-import-module",
+            "static.pe.import.module",
+            $"import.module.{NormalizeStaticYaraTag(module.ModuleName)}",
+            clusters.Count > 0 ? "capability-imports" : "pe-imports",
+            clusters.Count >= 2 ? "medium" : clusters.Count == 1 ? "low" : "info");
+        data["hasSuspiciousApis"] = (module.SuspiciousApiNames.Count > 0 || clusters.Count > 0).ToString();
+        data["hasProcessInjectionApi"] = HasImportCluster(module, "process-injection").ToString();
+        data["hasDynamicCodeApi"] = HasImportCluster(module, "dynamic-code").ToString();
+        data["hasNetworkApi"] = HasImportCluster(module, "network").ToString();
+        data["hasDownloadApi"] = hasDownload.ToString();
+        data["hasExfiltrationApi"] = HasImportCluster(module, "exfiltration").ToString();
+        data["hasPersistenceApi"] = HasAnyImportCluster(module, "persistence", "registry-persistence", "service-persistence").ToString();
+        data["hasAntiAnalysisApi"] = HasImportCluster(module, "anti-analysis").ToString();
+        data["hasAntiDebugApi"] = hasAntiDebug.ToString();
+        data["hasCredentialAccessApi"] = HasImportCluster(module, "credential-access").ToString();
+        data["hasDefenseEvasionApi"] = HasImportCluster(module, "defense-evasion").ToString();
+        data["downloadExecCandidate"] = (hasDownload && hasExecution).ToString();
+        AddDataList(data, "behaviorFamilies", clusters.Select(DescribeImportClusterFamily));
+        AddDataList(data, "mitreCandidates", clusters.SelectMany(GetImportClusterMitreCandidates));
+        AddDataIfNotBlank(data, "primaryCapability", clusters.Select(DescribeImportClusterCapability).FirstOrDefault());
+    }
+
+    /// <summary>
+    /// Adds suspicious import-cluster fields for rules and reports.
+    /// </summary>
+    private static void AddImportClusterRuleFacingFields(Dictionary<string, string> data, PeImportApiClusterInfo cluster)
+    {
+        AddStaticRuleFacingFields(
+            data,
+            "pe-import-capability-cluster",
+            "static.pe.import.cluster",
+            $"import.cluster.{NormalizeStaticYaraTag(cluster.Name)}",
+            DescribeImportClusterFamily(cluster.Name),
+            cluster.HitCount >= 3 ? "medium" : "low");
+        data["behaviorLane"] = DescribeImportClusterLane(cluster.Name);
+        data["primaryCapability"] = DescribeImportClusterCapability(cluster.Name);
+        data["antiDebugCandidate"] = string.Equals(cluster.Name, "anti-debug", StringComparison.OrdinalIgnoreCase).ToString();
+        data["downloadExecCandidate"] = string.Equals(cluster.Name, "download", StringComparison.OrdinalIgnoreCase).ToString();
+        AddDataList(data, "mitreCandidates", GetImportClusterMitreCandidates(cluster.Name));
+    }
+
+    /// <summary>
+    /// Tests whether an import module has a named suspicious cluster.
+    /// </summary>
+    private static bool HasImportCluster(PeImportModuleInfo module, string cluster)
+    {
+        return module.SuspiciousApiClusters.Contains(cluster, StringComparer.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Tests whether an import module has any of the named clusters.
+    /// </summary>
+    private static bool HasAnyImportCluster(PeImportModuleInfo module, params string[] clusters)
+    {
+        return clusters.Any(cluster => HasImportCluster(module, cluster));
+    }
+
+    /// <summary>
+    /// Maps static import clusters to broad behavior families.
+    /// </summary>
+    private static string DescribeImportClusterFamily(string cluster)
+    {
+        return cluster switch
+        {
+            "process-injection" => "process-injection",
+            "dynamic-code" => "code-injection-or-unpack",
+            "registry-persistence" or "service-persistence" or "persistence" => "persistence",
+            "network" or "download" or "exfiltration" => "network",
+            "file-drop" => "dropped-file",
+            "script-execution" => "execution-chain",
+            "resource" => "embedded-resource",
+            "anti-analysis" or "anti-debug" => "anti-analysis",
+            "credential-access" => "credential-access",
+            "defense-evasion" => "defense-evasion",
+            _ => "static-capability"
+        };
+    }
+
+    /// <summary>
+    /// Maps import clusters to report lanes used by evidence story sections.
+    /// </summary>
+    private static string DescribeImportClusterLane(string cluster)
+    {
+        return cluster switch
+        {
+            "process-injection" or "dynamic-code" => "code-injection",
+            "registry-persistence" or "service-persistence" or "persistence" => "persistence",
+            "network" or "download" or "exfiltration" => "network",
+            "file-drop" or "resource" => "payload-and-artifacts",
+            "script-execution" => "execution-chain",
+            "anti-analysis" or "anti-debug" => "anti-analysis",
+            "credential-access" => "credential-access",
+            "defense-evasion" => "defense-evasion",
+            _ => "static-triage"
+        };
+    }
+
+    /// <summary>
+    /// Maps import clusters to concise analyst capability labels.
+    /// </summary>
+    private static string DescribeImportClusterCapability(string cluster)
+    {
+        return cluster switch
+        {
+            "process-injection" => "remote-process-memory/thread primitives",
+            "dynamic-code" => "dynamic memory protection/loading",
+            "registry-persistence" => "registry persistence primitives",
+            "service-persistence" => "service-control persistence primitives",
+            "persistence" => "generic persistence primitives",
+            "network" => "network client primitives",
+            "download" => "download/read-from-network primitives",
+            "exfiltration" => "upload/write-to-network primitives",
+            "file-drop" => "file creation/drop primitives",
+            "script-execution" => "process or script launch primitives",
+            "resource" => "resource extraction/update primitives",
+            "anti-analysis" => "sandbox/debug/time/environment checks",
+            "anti-debug" => "debugger detection or hiding primitives",
+            "credential-access" => "credential or LSASS access primitives",
+            "defense-evasion" => "security tooling or logging interaction",
+            _ => "static capability cluster"
+        };
+    }
+
+    /// <summary>
+    /// Maps import clusters to ATT&CK candidates for downstream rules.
+    /// </summary>
+    private static IEnumerable<string> GetImportClusterMitreCandidates(string cluster)
+    {
+        return cluster switch
+        {
+            "process-injection" => ["T1055"],
+            "dynamic-code" => ["T1027", "T1106"],
+            "registry-persistence" => ["T1112", "T1547.001"],
+            "service-persistence" => ["T1543.003"],
+            "persistence" => ["TA0003"],
+            "network" => ["T1105", "T1071"],
+            "download" => ["T1105"],
+            "exfiltration" => ["T1041"],
+            "file-drop" => ["T1105"],
+            "script-execution" => ["T1059"],
+            "resource" => ["T1027.009"],
+            "anti-analysis" => ["T1497", "T1622"],
+            "anti-debug" => ["T1622", "T1497.001"],
+            "credential-access" => ["T1003", "T1555"],
+            "defense-evasion" => ["T1562"],
+            _ => []
+        };
+    }
+
+    /// <summary>
+    /// Returns a Chinese triage hint for a suspicious import cluster.
+    /// </summary>
+    private static string DescribeImportClusterZhHint(string cluster)
+    {
+        return cluster switch
+        {
+            "process-injection" => "导入表包含远程进程内存/线程原语；请在动态事件里确认是否真的写入或创建远程线程。",
+            "dynamic-code" => "导入表包含动态内存保护或加载原语；可能用于 unpack、shellcode 或插件加载。",
+            "registry-persistence" => "导入表包含注册表写入原语；需要结合 Run/Service/Task 路径或运行时 registry.set 判断。",
+            "service-persistence" => "导入表包含服务控制原语；请关注后续是否创建/修改服务。",
+            "network" => "导入表包含网络客户端原语；静态能力不代表已联网，优先结合 DNS/HTTP/TLS/PCAP。",
+            "download" => "导入表包含下载/读取网络数据原语；若同时有进程启动或落地路径，可作为下载执行候选。",
+            "exfiltration" => "导入表包含上传/发送数据原语；需结合网络流量、文件读取或凭据访问证据确认。",
+            "file-drop" => "导入表包含创建/写入文件原语；请关注 dropped files 和 artifact hash。",
+            "script-execution" => "导入表包含进程/脚本启动原语；请结合命令行和子进程树确认执行链。",
+            "resource" => "导入表包含资源提取/更新原语；可能释放内嵌 payload，需结合资源和 dropped files。",
+            "anti-analysis" => "导入表包含环境、时间或调试检测原语；需要区分正常兼容性检查和沙箱规避。",
+            "anti-debug" => "导入表包含明确反调试原语；请优先关联早期退出、异常延迟或调试器探测事件。",
+            "credential-access" => "导入表包含凭据或 LSASS 访问相关原语；需结合进程句柄、dump 或文件访问证据确认。",
+            "defense-evasion" => "导入表包含安全工具/日志/AMSI/ETW 相关原语；需结合配置修改或命令执行确认。",
+            _ => "该导入聚类是静态能力线索，不等同于已发生行为。"
+        };
+    }
+
+    /// <summary>
+    /// Classifies an export name for rule-facing metadata.
+    /// </summary>
+    private static string DescribeExportRole(string exportName)
+    {
+        if (ContainsAny(exportName, "DllRegisterServer", "DllUnregisterServer", "DllInstall"))
+        {
+            return "com-registration-entrypoint";
+        }
+
+        if (ContainsAny(exportName, "ServiceMain", "SvchostPushServiceGlobals"))
+        {
+            return "service-entrypoint";
+        }
+
+        return "generic-export";
+    }
+
+    /// <summary>
+    /// Classifies overlay evidence for rule-facing metadata.
+    /// </summary>
+    private static string DescribeOverlayRole(PeOverlayInfo overlay)
+    {
+        if (overlay.IsCertificateTableOnly)
+        {
+            return "certificate-table-only";
+        }
+
+        if (overlay.ContainsCertificateTable && overlay.NonCertificateSize > 0)
+        {
+            return "certificate-plus-appended-data";
+        }
+
+        return overlay.NonCertificateSize > 0 ? "appended-non-certificate-data" : "overlay-metadata";
+    }
+
+    /// <summary>
+    /// Maps static network indicators to a concise role.
+    /// </summary>
+    private static string DescribeNetworkIndicatorRole(StaticNetworkIndicator indicator)
+    {
+        if (string.Equals(indicator.Classification, "reference", StringComparison.OrdinalIgnoreCase))
+        {
+            return "reference";
+        }
+
+        if (string.Equals(indicator.Classification, "onion", StringComparison.OrdinalIgnoreCase))
+        {
+            return "tor-hidden-service";
+        }
+
+        if (string.Equals(indicator.Classification, "dynamic_dns", StringComparison.OrdinalIgnoreCase))
+        {
+            return "dynamic-dns";
+        }
+
+        if (string.Equals(indicator.Kind, "url", StringComparison.OrdinalIgnoreCase) &&
+            IsPotentialExecutableDownloadValue(indicator.Value))
+        {
+            return "download-url-candidate";
+        }
+
+        return string.Equals(indicator.Kind, "ipv4", StringComparison.OrdinalIgnoreCase) ? "ip-literal" : $"{indicator.Kind}-indicator";
+    }
+
+    /// <summary>
+    /// Tests whether a URL/string looks like a retrievable executable payload.
+    /// </summary>
+    private static bool IsPotentialExecutableDownloadValue(string value)
+    {
+        return ContainsAny(value, ".exe", ".dll", ".scr", ".com", ".msi", ".ps1", ".bat", ".cmd", ".vbs", ".hta", ".zip", ".rar", ".7z");
+    }
+
+    /// <summary>
+    /// Maps static path tags to a concise role.
+    /// </summary>
+    private static string DescribePathRole(StaticPathIndicator path)
+    {
+        if (path.Tags.Contains("run_key_path_string", StringComparer.OrdinalIgnoreCase))
+        {
+            return "run-key";
+        }
+
+        if (path.Tags.Contains("service_registry_path_string", StringComparer.OrdinalIgnoreCase))
+        {
+            return "service-registry";
+        }
+
+        if (path.Tags.Contains("scheduled_task_registry_path_string", StringComparer.OrdinalIgnoreCase) ||
+            path.Tags.Contains("scheduled_task_path_string", StringComparer.OrdinalIgnoreCase))
+        {
+            return "scheduled-task";
+        }
+
+        if (path.Tags.Contains("startup_folder_path_string", StringComparer.OrdinalIgnoreCase))
+        {
+            return "startup-folder";
+        }
+
+        if (path.Tags.Contains("script_path_string", StringComparer.OrdinalIgnoreCase))
+        {
+            return "script-path";
+        }
+
+        if (path.Tags.Contains("executable_path_string", StringComparer.OrdinalIgnoreCase))
+        {
+            return "executable-path";
+        }
+
+        if (path.Tags.Contains("temp_path_string", StringComparer.OrdinalIgnoreCase) ||
+            path.Tags.Contains("appdata_path_string", StringComparer.OrdinalIgnoreCase))
+        {
+            return "user-writable-location";
+        }
+
+        return path.Kind;
+    }
+
+    /// <summary>
+    /// Maps command indicator categories to broad behavior families.
+    /// </summary>
+    private static string DescribeCommandBehaviorFamily(StaticCommandIndicator command)
+    {
+        return command.Category switch
+        {
+            "download-command" or "download-execute" => "download-execute",
+            "exfil-command" => "exfiltration",
+            "encoded-command" => "script-obfuscation",
+            "lolbin" => "living-off-the-land",
+            "service-control" or "scheduled-task" => "persistence",
+            "script-interpreter" => "script-execution",
+            _ => "command-string"
+        };
+    }
+
+    /// <summary>
+    /// Maps suspicious string categories to broad behavior families.
+    /// </summary>
+    private static string DescribeSuspiciousStringBehaviorFamily(StaticStringFinding finding)
+    {
+        return finding.Category switch
+        {
+            "anti-debug-string" or "anti-analysis-string" => "anti-analysis",
+            "credential-access-string" => "credential-access",
+            "defense-evasion-string" => "defense-evasion",
+            "persistence-string" or "service-string" or "scheduled-task-string" => "persistence",
+            "packer-string" => "packer",
+            "suspicious-api-string" => "api-capability",
+            _ => "suspicious-string"
+        };
     }
 
     /// <summary>

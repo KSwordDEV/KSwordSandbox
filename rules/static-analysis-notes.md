@@ -67,6 +67,18 @@ triage events, not as observed guest behavior.
   `matchedStringIds`, and optional metadata such as `scope`/`mitre`.
 - Chinese diagnostics may be placed in `Data.zhMessage` and `Data.zhHint`; do
   not add new report schema fields for localization-only text.
+- Rule-facing fields are string-valued and shared across static rows:
+  `staticOnly`, `evidenceOrigin`, `evidenceKind`, `ruleScope`, `ruleKey`,
+  `behaviorFamily`, and `triageLevel`. Rules should use these machine fields
+  instead of parsing `message`/`zhMessage`.
+- PE import rows may expose `hasProcessInjectionApi`, `hasDownloadApi`,
+  `hasAntiDebugApi`, `hasCredentialAccessApi`, `hasDefenseEvasionApi`,
+  `downloadExecCandidate`, `behaviorFamilies`, `primaryCapability`, and
+  `mitreCandidates`.
+- Export, TLS, overlay, and string rows may expose role fields such as
+  `exportRole`, `executionPhase`, `overlayRole`, `indicatorRole`, `pathRole`,
+  `commandRole`, `stringRole`, `antiDebugCandidate`, and
+  `downloadExecCandidate`.
 
 ## Behavior-rule consumption guardrails
 
@@ -88,6 +100,10 @@ triage events, not as observed guest behavior.
 - Static-only rules should include explicit `confidence` and `evidenceFields`
   so analysts can distinguish host-side capability evidence from observed
   guest behavior.
+- Do not promote `downloadExecCandidate` or `antiDebugCandidate` to high
+  severity by itself. These fields mean the static string/import surface has
+  enough structure for analyst attention; runtime command, process, file, R0,
+  or network evidence should provide the confirming behavior.
 
 The built-in YARA-like matcher intentionally supports only the small subset
 used by `rules/static-notes.yar`: literal/regex strings, `ascii`, `wide`,

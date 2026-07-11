@@ -28,3 +28,17 @@ VOID
 KswUninitializeNetworkMonitor(
     VOID
     );
+
+/*
+ * Copies read-only WFP/ALE network producer diagnostics.
+ * Inputs : Reply receives a public KSWORD_SANDBOX_NETWORK_STATUS_REPLY.
+ * Logic  : reports compile-time scope, supported ALE layers, partial
+ *          registration progress, active layer mask, internal degrade reason,
+ *          classify/event counters, and queue/build failures without mutating
+ *          WFP state or requiring packet-layer capture.
+ * Return : no return value; Reply is zeroed and filled with safe defaults.
+ */
+VOID
+KswQueryNetworkStatus(
+    _Out_ PKSWORD_SANDBOX_NETWORK_STATUS_REPLY Reply
+    );

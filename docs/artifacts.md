@@ -92,6 +92,33 @@ manifest pointed at the file. Download clients must use `relativePath`,
 `safeLink`, or `importPath` as selectors; absolute host and guest paths remain
 diagnostic metadata only.
 
+For WebUI download UX, host descriptors also carry presentation and safety
+metadata: `previewLabel`, `previewLabelZh`, `contentType`,
+`downloadContentType`, `downloadFileName`, `downloadSelector`,
+`downloadSafeLink`, `sizeDisplay`, `sha256Short`, `isDownloadable`, and the
+`downloadSecurityPolicy=server-indexed-relative-selector` /
+`downloadRejectionPolicy=reject-empty-absolute-traversal-unindexed-missing`
+contract. These fields are derived from the host-side index and are safe for
+browser DTOs; they are not new filesystem authority.
+
+Duplicate artifacts are grouped by host-computed SHA-256 plus byte size. Index
+metadata records `duplicateGroupKey`, `duplicateGroupId`,
+`duplicateGroupCount`, `duplicateOrdinal`, `duplicateRole`,
+`duplicatePrimarySelector`, `duplicatePrimarySafeLink`,
+`duplicateOfArtifactRelativePath`, and `duplicateGroupMemberSelectors`. The
+first stable relative path in the group is the primary; later entries remain
+downloadable but are marked as duplicates so UI/report surfaces can collapse or
+label repeated dropped files, screenshots, dumps, or captures.
+
+If a guest manifest declares an unsafe, absolute, traversal, missing, or
+otherwise non-downloadable artifact reference, the host does not turn it into a
+link. Instead, collection metadata records `rejectionDiagnosticsAvailable`,
+`rejectedArtifactCount`, `lastRejectedArtifactReason`,
+`lastRejectedArtifactName`, `lastRejectedArtifactSelector`,
+`lastRejectedArtifactKind`, `artifactRejectionReasons`, and `zhRejectionHint`.
+This keeps operator diagnostics visible while preserving the invariant that
+only existing files under the job output root can be streamed.
+
 During report import, the host also emits `artifact.host_imported` rows for
 downloadable dropped files, screenshots, memory dumps, and packet captures.
 Those rows record `sourceArtifactKind`, `sourceArtifactRelativePath`,
@@ -321,16 +348,26 @@ manifest records counts plus `lastReason`, `lastDiagnosticStage`,
 plus `lastProcessRole`, `lastTreeDepth`, `lastTreeLineage`, and
 `lastChildProcessCount` when those values were present on related events.
 Last collection state
-metadata prefers concrete captured/skipped/disabled/failed events over summary
-or placeholder events, while diagnostic metadata still keeps later nonfatal
+metadata prefers concrete captured/skipped/disabled/failed events over
+ancillary diagnostic summaries. Diagnostic metadata still keeps later nonfatal
 details such as dropped-file source hash failures or packet protocol-summary
-placeholders. Host indexes also retain
-guest status aliases such as `guestManifestStatus` / `guestManifestReason`
-and `guestCollectionStatus` / `guestCollectionReason`.
+diagnostics so operators can explain collection health without treating those
+diagnostics as sample behavior. For packet captures, concrete evidence is
+anchored by `lastArtifactRelativePath` plus
+`lastDiagnosticPcapngRelativePath`, `lastDiagnosticPcapngSizeBytes`,
+`lastDiagnosticPcapngSha256`, `lastDiagnosticPacketCount`, and
+`lastDiagnosticPcapngBlockCount` when those fields are present. Host indexes
+also retain guest status aliases such as `guestManifestStatus` /
+`guestManifestReason` and `guestCollectionStatus` /
+`guestCollectionReason`.
 
 中文：collection metadata 会补充 `zhStatus`、`zhReason`、`zhHint`，并把事件
-中的 `zhMessage`/`zhHint` 汇总为 `lastZh*` / `lastDiagnosticZh*`。这些字段
-仅用于 UI/报告解释，不参与机器规则判断。
+中的 `zhMessage`/`zhHint` 汇总为 `lastZh*` / `lastDiagnosticZh*`。抓包诊断请
+优先看 `lastArtifactRelativePath`、`lastDiagnosticPcapngRelativePath`、
+`lastDiagnosticPacketCountStatus`/`lastDiagnosticPacketCount`、
+`lastDiagnosticPcapngBlockCount`、`lastDiagnosticPcapngSha256` 等字段；它们
+证明具体 PCAPNG 证据或诊断状态，`protocolSummary*` 只说明协议解析是否可用。
+这些字段仅用于 UI/报告解释，不参与机器规则判断。
 
 Each file descriptor also carries `evidenceRole`, `capturePhase`,
 `captureState`, `guestPath`, `importPath`, and `collectionName` alongside size,
@@ -343,6 +380,14 @@ root. The guarded download endpoint accepts any of those selectors after URL
 decoding, but rejects empty, absolute, traversal, missing, or unindexed paths.
 `safeLink` URL-encodes path segments for report anchors; API download hrefs use
 that selector text as a query value rather than embedding `fullPath`.
+
+The `/api/jobs/{jobId}/artifacts` DTO keeps `fullPath` and other host-local
+paths out of the browser response. Each artifact exposes a `Download` block
+with `available`, safe selector, guarded href, sanitized filename, content
+type, size, SHA-256, short hash, and a rejection code/message when no safe
+selector exists. Collection DTOs expose rejection diagnostics separately so
+operators can see why a manifest entry was ignored without receiving a
+clickable unsafe path.
 
 ## Optional packet capture and external import
 
@@ -379,17 +424,31 @@ one `packet_capture.disabled` event with
 `captureEnabled=false`, `captureState=status=disabled`, and
 `reason=packetCaptureNotRequested`.
 
+中文优先提示：`packet_capture.protocol_summary` 是抓包诊断摘要，不是
+DNS/HTTP/TLS 行为证据。看到 `protocolSummaryAvailable=false`、
+`protocolSummaryState=capture-metadata-only`、
+`protocolSummaryReason=protocolParserNotImplemented` 时，表示 PCAPNG 已采集，
+但内置协议摘要解析尚未接入；请用 `artifactRelativePath` 下载 PCAPNG，并用
+`sizeBytes`/`pcapngSizeBytes`、`sha256`/`pcapngSha256`、`packetCount`、
+`packetCountStatus`、`pcapngBlockCount`、`pcapngEnhancedPacketBlockCount`、
+`pcapngSimplePacketBlockCount`、`pcapngSectionHeaderCount` 校验证据是否具体。
+
 After a successful PCAPNG conversion, the guest also emits
-`packet_capture.protocol_summary`. This is currently a placeholder event tied
-to the PCAPNG/ETL paths with `protocolSummaryAvailable=false`,
-`protocolSummaryState=placeholder`, `protocolSummaryStatus=skipped`,
-`protocolSummaryReason=protocolParserNotImplemented`, and
-`protocolsObserved=unknown`; it does not change the packet-capture collection
-from `captured`.
+`packet_capture.protocol_summary` as a capture-metadata diagnostic row. The
+row remains for schema/report compatibility with protocol-summary consumers
+until inline protocol parsing is integrated. It is tied to concrete PCAPNG/ETL
+paths with `protocolSummaryAvailable=false`,
+`protocolSummaryState=capture-metadata-only`,
+`protocolSummaryStatus=skipped`,
+`protocolSummaryReason=protocolParserNotImplemented`,
+`protocolSummaryFormat=capture-metadata`, and
+`protocolsObserved=not-parsed`; it does not fabricate protocol findings,
+change the packet-capture collection from `captured`, or count as sample
+behavior.
 
 中文：抓包通道默认不启动。`pktmon` 启动/停止/转换失败会保持英文 reason code
-并附加中文 `zhHint`；协议摘要 placeholder 表示 PCAPNG 已存在，但摘要解析器
-尚未实现。
+并附加中文 `zhHint`；协议摘要诊断只说明解析能力和文件健康状态，具体证据由
+路径、大小、哈希和 PCAPNG packet/block 计数字段证明。
 
 For import/report purposes, existing packet captures are regular artifacts:
 

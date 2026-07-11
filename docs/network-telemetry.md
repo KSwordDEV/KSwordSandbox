@@ -39,6 +39,26 @@ Malformed or unsupported captures emit `pcap.parse_error` plus a
 `network.import.summary` row with `status=parse_error`; they do not fail the
 whole guest event import.
 
+## Guest capture diagnostics vs imported evidence
+
+中文优先：guest 端的 `packet_capture.protocol_summary` 是抓包文件诊断摘要，
+不是 DNS/HTTP/TLS 行为证据。若字段显示
+`protocolSummaryState=capture-metadata-only`、
+`protocolSummaryStatus=skipped`、
+`protocolSummaryReason=protocolParserNotImplemented`，含义是 PCAP/PCAPNG
+文件已经可追溯，但内置协议摘要解析尚未接入；请用
+`artifactRelativePath` / `sourceArtifactRelativePath`、`sizeBytes` /
+`sourceArtifactSizeBytes`、`sha256` / `sourceArtifactSha256`、`packetCount`、
+`pcapngBlockCount`、`pcapngEnhancedPacketBlockCount`、
+`pcapngSimplePacketBlockCount` 和 `pcapngSectionHeaderCount` 判断证据是否具体。
+
+The capture diagnostic row remains as a stable report/search anchor until
+inline protocol parsing is available. It should not be used as a substitute
+for imported `dns.query`, `http.request`, `tls.connection`, `network.flow`, or
+`pcap.*` rows. Concrete protocol evidence comes from the native PCAP importer
+or sidecar importers described below, each carrying artifact traceability
+fields back to the capture file.
+
 ## Event types
 
 Compatibility PCAP rows are still emitted:
@@ -92,13 +112,50 @@ All imported network rows carry string-valued `data` fields:
 
 Protocol-specific fields:
 
-- DNS: `queryName`, `qname`, `domain`, `queryType`, `recordType`, `rcode`,
-  `isResponse`
+- DNS: `queryName`, `qname`, `domain`, `dnsQueryName`, `queryType`,
+  `recordType`, `dnsRecordType`, `rcode`, `rcodeName`, `responseCode`,
+  `dnsRcode`, `isResponse`, `answer`, `answers`, `resolvedIps`,
+  `answerCount`, `ttl`, `recordClass`, `dnsTransactionId`, `dnsOutcome`,
+  `classification`, `isNxDomain`
 - HTTP: `method`, `uri`, `requestUri`, `host`, `url`, `userAgent`,
-  `contentType`, `statusCode`, `payloadMagic`
+  `contentType`, `statusCode`, `responseStatusCode`, `httpStatusCode`,
+  `statusFamily`, `payloadMagic`, `referer`, `contentEncoding`,
+  `requestBodyBytes`, `requestBytes`, `responseBodyBytes`, `responseBytes`,
+  `requestContentLength`, `responseContentLength`, `uploadBytes`,
+  `downloadBytes`, `uploadCandidate`, `transferDirection`,
+  `authorizationHeaderPresent`, `cookiePresent`
 - TLS: `sni`, `serverName`, `tlsVersion`, `handshakeType`, `ja3`, `ja3s`,
-  `alpn`, `cipherSuite`
-- Connection: `state`, `durationSeconds`, `packetCount`, `byteCount`, `uid`
+  `ja3Hash`, `ja3sHash`, `alpn`, `cipherSuite`, `certSubject`, `certIssuer`,
+  `certSerial`, `certSha256`, `certificateSha256`,
+  `certificateFingerprintSha256`, `certSha1`, `certNotBefore`,
+  `certNotAfter`, `certificateStatus`, `validationStatus`,
+  `certSelfSigned`, `certExpired`, `tlsCertificateRisk`
+- Connection: `state`, `durationSeconds`, `packetCount`, `byteCount`,
+  `packetsToServer`, `packetsToClient`, `bytesToServer`, `bytesToClient`,
+  `uid`, `externalFlowKey`, `communityId`, `applicationProtocol`,
+  `flowReason`
+
+Sidecar process / lineage fields are propagated when the source row exposes
+them:
+
+- `processId`, `pid`, `parentProcessId`
+- `rootProcessId`, `rootPid`, `processRootId`
+- `treeLineage`, `processTreeLineage`
+- `processName`, `imageName`, `processImage`, `processPath`,
+  `commandLine`, `processRole`
+- `rootProcessName`, `rootCommandLine`
+
+中文：sidecar 归一化会尽量保留样本根进程和进程树 lineage。报告里若同时看到
+`rootProcessId` / `treeLineage` 与 HTTP 上传、NXDOMAIN、TLS JA3/证书异常，
+可以把网络行为直接挂到样本进程树，而不是只把它当作孤立网络流量。
+
+Sidecar alias coverage intentionally accepts common Zeek/ECS/tshark/R0 field
+families such as `id.orig_h`, `id.resp_h`, `orig_bytes`, `resp_bytes`,
+`dns.rrname`, `dns.answers`, `http.response.status_code`,
+`http.request.body.bytes`, `tls.ja3.hash`, `tls.cert.fingerprint.sha256`,
+`network.community_id`, and `process.entry_leader.*`. Sensitive HTTP headers
+are not copied verbatim; the importer records `authorizationHeaderPresent` and
+`cookiePresent` booleans instead.
 
 Sidecar-specific fields:
 

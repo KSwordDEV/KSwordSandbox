@@ -74,6 +74,34 @@ internal static class DashboardExperiencePage
             .progress-links { margin:6px 0 10px; }
             .pill { background: #e7f3ff; border:1px solid rgba(67,160,255,.35); border-radius:2px; color: #075985; display: inline-block; font-size: 12px; font-weight: 800; padding: 4px 9px; }
             .pill.ready { background:#dcfce7; border-color:#86efac; color:#166534; }
+            .operator-hero { background:linear-gradient(135deg,#f8fbff,#eef7ff); border-left:4px solid var(--blue); }
+            .operator-hero h2 { margin-top:0; }
+            .operator-hero-grid { display:grid; gap:12px; grid-template-columns:1.15fr .85fr; margin-top:14px; }
+            .operator-brief { background:white; border:1px solid var(--line); padding:14px; }
+            .operator-brief strong { display:block; font-size:15px; margin-bottom:6px; }
+            .operator-flow { display:grid; gap:8px; grid-template-columns:repeat(3,minmax(0,1fr)); }
+            .operator-step { background:white; border:1px solid #dbeafe; border-left:3px solid var(--blue); padding:10px; }
+            .operator-step b { display:block; margin-bottom:4px; }
+            .readiness-strip { display:flex; flex-wrap:wrap; gap:8px; margin:12px 0 4px; }
+            .readiness-chip { background:#f8fafc; border:1px solid #cbd5e1; color:#334155; cursor:copy; display:inline-flex; flex-direction:column; gap:2px; max-width:260px; padding:8px 10px; }
+            .readiness-chip b { font-size:12px; }
+            .readiness-chip span { font-size:12px; line-height:1.35; overflow-wrap:anywhere; }
+            .readiness-chip.good { background:#ecfdf5; border-color:#86efac; color:#065f46; }
+            .readiness-chip.warn { background:#fff7ed; border-color:#fdba74; color:#9a3412; }
+            .readiness-chip.neutral { background:#eef7ff; border-color:#93c5fd; color:#075985; }
+            .readiness-chip.error { background:#fef2f2; border-color:#fecaca; color:#991b1b; }
+            .upload-card { background:white; border:1px solid var(--line); border-left:4px solid var(--blue); padding:14px; }
+            .upload-dropzone { background:#f8fbff; border:2px dashed #93c5fd; cursor:pointer; margin:12px 0; padding:16px; transition:background .15s ease,border-color .15s ease; }
+            .upload-dropzone.dragging { background:#e7f3ff; border-color:var(--blue-dark); }
+            .upload-dropzone input { background:white; cursor:pointer; margin-top:8px; }
+            .selected-sample { background:#f8fbff; border:1px solid var(--line); margin:10px 0 0; min-height:44px; padding:10px; }
+            .selected-sample.empty { border-style:dashed; color:var(--muted); }
+            .preset-row { display:flex; flex-wrap:wrap; gap:8px; margin:10px 0; }
+            .preset-row button { background:#e7f3ff; border:1px solid rgba(67,160,255,.45); color:#075985; margin-top:0; padding:8px 10px; }
+            .primary-cta { align-items:center; background:linear-gradient(90deg,var(--blue-dark),var(--blue)); display:inline-flex; font-size:16px; gap:8px; justify-content:center; min-height:46px; min-width:320px; }
+            .primary-cta::before { content:"▶"; font-size:13px; }
+            .primary-cta:disabled::before { content:"…"; }
+            .microcopy { color:#475569; font-size:13px; line-height:1.5; margin:8px 0 0; }
             .workspace-tabs { align-items:center; display:flex; flex-wrap:wrap; gap:10px; margin-bottom:18px; }
             .workspace-tab { background:#e7f3ff; border:1px solid rgba(67,160,255,.35); color:#075985; margin-top:0; }
             .workspace-tab.active { background:#0B6FCC; color:white; box-shadow:none; }
@@ -155,7 +183,7 @@ internal static class DashboardExperiencePage
             section, article, .metric, .pill, button, a.button, a.buttonlink, input, code, pre, .pathbox, .callout, .report-notice, .report-entry, .countdown, .workspace-tab, .tab-button, .tab-panel, details, .config-card, .toggle-card, .progress-box, .progress-bar, .progress-fill, .stage, .recent-job-card, .runbook-step, .empty, .table-wrap, .step-card, .report-ready, .toast, .num { border-radius: 0 !important; }
             section, article, .metric, .pathbox, .callout, .report-notice, .report-entry, .tab-panel, .config-card, .toggle-card, .progress-box, .stage, .recent-job-card, .runbook-step, .step-card, .report-ready { box-shadow: none !important; }
             .pill, button, a.button, a.buttonlink { box-shadow: none !important; }
-            @media (max-width: 980px) { .grid,.vm-grid,.job-summary,.stages,.progress-facts { grid-template-columns: 1fr; } header { padding:24px; } }
+            @media (max-width: 980px) { .grid,.vm-grid,.job-summary,.stages,.progress-facts,.operator-hero-grid,.operator-flow { grid-template-columns: 1fr; } header { padding:24px; } .primary-cta { min-width:0; width:100%; } }
           </style>
         </head>
         <body>
@@ -182,6 +210,22 @@ internal static class DashboardExperiencePage
               <button id="workspace-tab-results" class="workspace-tab" type="button" role="tab" aria-selected="false" aria-controls="workspace-results" onclick="selectWorkspaceTab('results')" data-zh="3. 报告" data-en="3. Reports">3. 报告</button>
             </div>
             <div id="workspace-plan" class="workspace-panel active" role="tabpanel" aria-labelledby="workspace-tab-plan">
+            <section class="operator-hero" id="operator-start">
+              <h2 data-zh="从这里开始：上传后自动进 VM" data-en="Start here: upload and enter VM automatically">从这里开始：上传后自动进 VM</h2>
+              <p class="hint" data-zh="首屏按云沙箱操作习惯组织：先选择样本，再看 VM / VirusTotal / 证据采集就绪状态，最后点击一个主按钮。上传成功后页面会立即跳转到动态监控页，不需要再找“启动”按钮。" data-en="The first screen follows a polished cloud-sandbox flow: choose a sample, review VM / VirusTotal / evidence readiness, then press one primary button. After upload succeeds, the page redirects to the dynamic monitor immediately; no extra Start button hunting.">首屏按云沙箱操作习惯组织：先选择样本，再看 VM / VirusTotal / 证据采集就绪状态，最后点击一个主按钮。上传成功后页面会立即跳转到动态监控页，不需要再找“启动”按钮。</p>
+              <div id="operatorReadinessChips" class="readiness-strip" data-copy="等待配置加载 / waiting for readiness" data-copy-label="operator readiness summary"></div>
+              <div class="operator-hero-grid">
+                <div class="operator-brief" data-copy="KSword WebUI one-click run: upload exe, plan, start VM, open live monitor">
+                  <strong data-zh="本地安全边界" data-en="Local safety boundary">本地安全边界</strong>
+                  <span data-zh="样本只保存到本机 runtime root；VirusTotal 只查 SHA-256，不上传样本字节。若 VT 未配置或调用失败，主流程保持安静并继续。" data-en="Samples are saved only to the local runtime root; VirusTotal performs SHA-256 lookup only and never uploads sample bytes. If VT is missing or fails, the main flow stays quiet and continues.">样本只保存到本机 runtime root；VirusTotal 只查 SHA-256，不上传样本字节。若 VT 未配置或调用失败，主流程保持安静并继续。</span>
+                </div>
+                <div class="operator-flow" aria-label="上传执行路径 / Upload execution path">
+                  <div class="operator-step" data-copy="1. Choose local EXE"><b data-zh="1. 选择 EXE" data-en="1. Choose EXE">1. 选择 EXE</b><span data-zh="支持点击或拖拽到上传区域。" data-en="Click or drag into the upload zone.">支持点击或拖拽到上传区域。</span></div>
+                  <div class="operator-step" data-copy="2. Review VM VT artifact readiness"><b data-zh="2. 看就绪态" data-en="2. Review readiness">2. 看就绪态</b><span data-zh="VM、检查点、R0、VT 和产物选项都可右键复制。" data-en="VM, checkpoint, R0, VT, and artifact options are right-click copyable.">VM、检查点、R0、VT 和产物选项都可右键复制。</span></div>
+                  <div class="operator-step" data-copy="3. Upload starts VM analysis and opens monitor"><b data-zh="3. 自动分析" data-en="3. Auto analyze">3. 自动分析</b><span data-zh="提交后直接进入动态监控页。" data-en="Submission opens the dynamic monitor directly.">提交后直接进入动态监控页。</span></div>
+                </div>
+              </div>
+            </section>
             <section id="plan">
               <h2 data-zh="上传与配置" data-en="Upload and configuration">上传与配置</h2>
               <p class="hint"><span data-zh="请选择一种提交方式：上传 EXE 会自动启动动态分析并跳转监控；选择已有路径或扫描目录会先生成可复核计划。" data-en="Choose one submission method: upload starts dynamic analysis and redirects to the monitor; existing path and folder scan create a reviewable plan first.">请选择一种提交方式：上传 EXE 会自动启动动态分析并跳转监控；选择已有路径或扫描目录会先生成可复核计划。</span></p>
@@ -192,14 +236,27 @@ internal static class DashboardExperiencePage
                 <button id="tab-scan" class="tab-button" type="button" role="tab" aria-selected="false" aria-controls="panel-scan" onclick="selectPlanTab('scan')" data-zh="扫描目录" data-en="Scan folder">扫描目录</button>
               </div>
               <div id="panel-upload" class="tab-panel active" role="tabpanel" aria-labelledby="tab-upload">
-                  <h3 data-zh="上传 .exe 并自动动态分析" data-en="Upload .exe and run dynamic analysis">上传 .exe 并自动动态分析</h3>
-                  <p class="hint" data-zh="保存文件、生成可检查计划、提交后台虚拟机分析，然后当前页面直接进入动态监控页；证据/下载（Artifacts）、原始事件和 VirusTotal 均在该独立页查看。" data-en="Stores the file, creates a reviewable plan, submits background VM analysis, then redirects this page directly into the dynamic monitor; artifacts/downloads, raw events, and VirusTotal live on that standalone page.">保存文件、生成可检查计划、提交后台虚拟机分析，然后当前页面直接进入动态监控页；证据/下载（Artifacts）、原始事件和 VirusTotal 均在该独立页查看。</p>
-                  <label for="sampleUpload" data-zh="可执行文件（.exe）" data-en="Executable file (.exe)">可执行文件（.exe）</label>
-                  <input id="sampleUpload" type="file" accept=".exe,application/vnd.microsoft.portable-executable,application/octet-stream">
-                  <label for="uploadDuration" data-zh="分析时长（秒）" data-en="Analysis duration, seconds">分析时长（秒）</label>
-                  <input id="uploadDuration" type="number" min="1" max="900" value="120">
-                  <p id="durationHint" class="field-hint" data-copy="" data-copy-label="analysis duration hint" data-zh="后端会按配置限制分析时长；本次任务值会随上传一起提交。" data-en="The backend clamps analysis duration by config; this per-job value is submitted with upload.">后端会按配置限制分析时长；本次任务值会随上传一起提交。</p>
-                  <button onclick="uploadAndPlan()" data-zh="上传 .exe → 自动分析并打开监控" data-en="Upload .exe → auto analyze and open monitor">上传 .exe → 自动分析并打开监控</button>
+                  <div class="upload-card">
+                    <h3 data-zh="一键动态分析" data-en="One-click dynamic analysis">一键动态分析</h3>
+                    <p class="hint" data-zh="保存文件、生成可检查计划、提交后台虚拟机分析，然后当前页面直接进入动态监控页；证据/下载（Artifacts）、原始事件和 VirusTotal 均在该独立页查看。" data-en="Stores the file, creates a reviewable plan, submits background VM analysis, then redirects this page directly into the dynamic monitor; artifacts/downloads, raw events, and VirusTotal live on that standalone page.">保存文件、生成可检查计划、提交后台虚拟机分析，然后当前页面直接进入动态监控页；证据/下载（Artifacts）、原始事件和 VirusTotal 均在该独立页查看。</p>
+                    <div id="uploadDropZone" class="upload-dropzone" data-copy="上传区域：点击或拖拽 .exe / Upload zone: click or drag .exe" data-copy-label="upload drop zone">
+                      <label for="sampleUpload" data-zh="可执行文件（.exe）" data-en="Executable file (.exe)">可执行文件（.exe）</label>
+                      <input id="sampleUpload" type="file" accept=".exe,application/vnd.microsoft.portable-executable,application/octet-stream" data-copy-label="selected sample">
+                      <p class="microcopy" data-zh="当前只接受 .exe。选择后下方会显示文件名、大小、运行时长和产物采集摘要；这些可见字段均支持右键复制。" data-en="Only .exe files are accepted for now. After selection, file name, size, duration, and artifact collection summary are shown below; visible fields support right-click copy.">当前只接受 .exe。选择后下方会显示文件名、大小、运行时长和产物采集摘要；这些可见字段均支持右键复制。</p>
+                    </div>
+                    <div id="selectedSampleSummary" class="selected-sample empty" data-copy="尚未选择样本 / no sample selected" data-copy-label="selected sample summary"></div>
+                    <label for="uploadDuration" data-zh="分析时长（秒）" data-en="Analysis duration, seconds">分析时长（秒）</label>
+                    <input id="uploadDuration" type="number" min="1" max="900" value="120" data-copy-label="analysis duration">
+                    <p id="durationHint" class="field-hint" data-copy="" data-copy-label="analysis duration hint" data-zh="后端会按配置限制分析时长；本次任务值会随上传一起提交。" data-en="The backend clamps analysis duration by config; this per-job value is submitted with upload.">后端会按配置限制分析时长；本次任务值会随上传一起提交。</p>
+                    <div class="preset-row" aria-label="样本运行预设 / Sample run presets">
+                      <button type="button" onclick="applySamplePreset('quick')" data-copy="快速观察：30s，关闭敏感产物采集 / Quick observe: 30s, sensitive artifact collection off" data-zh="快速观察 30s" data-en="Quick 30s">快速观察 30s</button>
+                      <button type="button" onclick="applySamplePreset('standard')" data-copy="标准动态：120s，落地文件+截图+PCAP / Standard dynamic: 120s, dropped files + screenshots + PCAP" data-zh="标准动态 120s" data-en="Standard 120s">标准动态 120s</button>
+                      <button type="button" onclick="applySamplePreset('evidence')" data-copy="证据优先：180s，强化落地文件、截图、PCAP / Evidence-first: 180s with dropped files, screenshots, PCAP" data-zh="证据优先" data-en="Evidence-first">证据优先</button>
+                      <button type="button" onclick="applySamplePreset('memory')" data-copy="内存取证：180s，启用内存 dump（支持时含子进程） / Memory forensic: 180s, memory dumps including children when supported" data-zh="内存取证" data-en="Memory forensic">内存取证</button>
+                    </div>
+                    <button class="primary-cta" onclick="uploadAndPlan()" data-zh="开始分析：上传 → 进 VM → 打开实时监控" data-en="Start analysis: upload → VM → live monitor">开始分析：上传 → 进 VM → 打开实时监控</button>
+                    <p class="microcopy" data-copy="Upload starts analysis automatically and redirects to live monitor" data-zh="点击后若后端预检失败，仍会尽量保留已创建任务、错误原因和监控/近期任务入口，避免丢上下文。" data-en="If backend preflight fails, the UI still tries to preserve the created job, failure reason, and monitor/recent-job entry points so context is not lost.">点击后若后端预检失败，仍会尽量保留已创建任务、错误原因和监控/近期任务入口，避免丢上下文。</p>
+                  </div>
               </div>
               <div id="panel-path" class="tab-panel" role="tabpanel" aria-labelledby="tab-path" hidden>
                   <h3 data-zh="选择已有样本路径" data-en="Select existing sample path">选择已有样本路径</h3>
@@ -314,6 +371,9 @@ internal static class DashboardExperiencePage
             let currentJobListPayload = [];
             let latestRunbookProgressSnapshot = null;
             let runtimeConfigDefaults = null;
+            let runtimeConfigLoadError = '';
+            let virusTotalSettingsState = null;
+            let virusTotalReadinessError = '';
             const vmPresetStorageKey = 'ksword-vm-overrides';
             const liveStages = [
               ['启动 VM', 'Start VM', '还原干净环境并等待来宾机可用', 'Restore a clean VM and wait for guest readiness'],
@@ -527,6 +587,7 @@ internal static class DashboardExperiencePage
                 const response = await fetch('/api/config');
                 const config = await requireOk(response, t('加载配置', 'Load config'));
                 runtimeConfigDefaults = config;
+                runtimeConfigLoadError = '';
                 const maxDuration = normalizePositiveInt(config.analysis?.maxDurationSeconds, 900);
                 const defaultDuration = clampDuration(config.analysis?.defaultDurationSeconds, maxDuration);
                 document.getElementById('duration').value = String(defaultDuration);
@@ -546,10 +607,28 @@ internal static class DashboardExperiencePage
                 applyOperatorVmPreset();
                 renderConfigDefaultHints();
                 renderVmConfigSummary();
+                renderSelectedSample();
+                renderOperatorReadinessChips();
               } catch {
                 // Keep placeholders when config loading fails; planning still works with server defaults.
+                runtimeConfigLoadError = t('配置读取失败；上传时仍由后端做最终预检。', 'Config loading failed; backend preflight still makes the final decision during upload.');
                 renderConfigDefaultHints();
                 renderVmConfigSummary();
+                renderSelectedSample();
+                renderOperatorReadinessChips();
+              }
+            }
+
+            async function loadVirusTotalReadiness() {
+              try {
+                const response = await fetch('/api/settings/virustotal');
+                virusTotalSettingsState = await requireOk(response, t('读取 VirusTotal 状态', 'Load VirusTotal status'));
+                virusTotalReadinessError = '';
+              } catch (error) {
+                virusTotalSettingsState = null;
+                virusTotalReadinessError = error && error.message ? error.message : t('VirusTotal 状态不可用。', 'VirusTotal status is unavailable.');
+              } finally {
+                renderOperatorReadinessChips();
               }
             }
 
@@ -714,6 +793,237 @@ internal static class DashboardExperiencePage
               target.innerHTML = parts.map(part => `<span class="pill" data-copy="${escapeAttribute(part)}" data-copy-label="VM configuration summary item">${escapeHtml(part)}</span>`).join('');
             }
 
+            function renderOperatorReadinessChips() {
+              const target = document.getElementById('operatorReadinessChips');
+              if (!target) {
+                return;
+              }
+
+              const file = document.getElementById('sampleUpload')?.files?.[0] || null;
+              const vmName = (document.getElementById('goldenVmName')?.value || runtimeConfigDefaults?.hyperV?.goldenVmName || '').trim();
+              const checkpoint = (document.getElementById('goldenSnapshotName')?.value || runtimeConfigDefaults?.hyperV?.goldenSnapshotName || '').trim();
+              const secretName = runtimeConfigDefaults?.guest?.passwordSecretName || 'KSWORDBOX_GUEST_PASSWORD';
+              const r0Enabled = document.getElementById('r0Enabled')?.checked;
+              const mock = document.getElementById('useMockCollector')?.checked;
+              const artifactConfig = getArtifactCollectionConfig();
+              const artifacts = buildArtifactCollectionSummary({ submission: artifactConfig });
+              const artifactsEnabled = Object.values(artifactConfig).some(value => Boolean(value));
+              const vtConfigured = Boolean(virusTotalSettingsState?.configured ?? virusTotalSettingsState?.Configured);
+              const vtSource = virusTotalSettingsState?.source || virusTotalSettingsState?.Source || (vtConfigured ? 'configured' : 'not-configured');
+
+              const chips = [];
+              chips.push({
+                state: file ? 'good' : 'warn',
+                label: t('样本', 'Sample'),
+                value: file ? `${file.name} · ${formatBytes(file.size || 0)}` : t('等待选择 .exe', 'Waiting for .exe'),
+                hint: file ? t('将上传后自动进 VM', 'Will enter VM after upload') : t('点击或拖拽到上传区域', 'Click or drag into upload zone')
+              });
+              chips.push({
+                state: runtimeConfigLoadError ? 'warn' : (vmName ? 'good' : 'warn'),
+                label: t('VM', 'VM'),
+                value: runtimeConfigLoadError || (vmName ? vmName : t('未从配置读取 VM 名称', 'VM name not loaded from config')),
+                hint: checkpoint ? `${t('检查点', 'Checkpoint')}: ${checkpoint}` : t('上传时后端会做最终预检', 'Backend preflight checks this during upload')
+              });
+              chips.push({
+                state: 'neutral',
+                label: t('Guest 密钥', 'Guest secret'),
+                value: secretName,
+                hint: t('WebUI 不输入密码；后端预检存在性', 'WebUI does not accept passwords; backend checks presence')
+              });
+              chips.push({
+                state: r0Enabled ? (mock ? 'warn' : 'good') : 'neutral',
+                label: t('R0', 'R0'),
+                value: r0Enabled ? (mock ? t('Mock 采集器', 'Mock collector') : t('真实采集器', 'Real collector')) : t('config 已关闭', 'disabled by config'),
+                hint: t('本页只覆盖本次任务模式', 'This page only overrides this job mode')
+              });
+              chips.push({
+                state: virusTotalReadinessError ? 'warn' : (vtConfigured ? 'good' : 'neutral'),
+                label: 'VirusTotal',
+                value: virusTotalReadinessError ? t('状态读取失败', 'status load failed') : (vtConfigured ? t('已配置', 'configured') : t('未配置，安静跳过', 'not configured, quiet skip')),
+                hint: virusTotalReadinessError || `${t('来源', 'Source')}: ${vtSource}`
+              });
+              chips.push({
+                state: artifactsEnabled ? 'good' : 'neutral',
+                label: t('证据采集', 'Evidence capture'),
+                value: artifacts,
+                hint: t('右键复制当前采集选项', 'Right-click to copy current capture options')
+              });
+
+              const copyTextValue = chips.map(chip => `${chip.label}: ${chip.value} (${chip.hint})`).join(' | ');
+              target.setAttribute('data-copy', copyTextValue);
+              target.innerHTML = chips.map(chip => `
+                <span class="readiness-chip ${chip.state}" data-copy="${escapeAttribute(`${chip.label}: ${chip.value} (${chip.hint})`)}" data-copy-label="readiness chip">
+                  <b>${escapeHtml(chip.label)}</b>
+                  <span>${escapeHtml(chip.value)}</span>
+                  <span>${escapeHtml(chip.hint)}</span>
+                </span>`).join('');
+            }
+
+            function renderSelectedSample() {
+              const input = document.getElementById('sampleUpload');
+              const target = document.getElementById('selectedSampleSummary');
+              if (!target) {
+                return;
+              }
+
+              const file = input?.files?.[0] || null;
+              if (!file) {
+                const emptyText = t('尚未选择样本。请选择一个本机 .exe；上传后会自动提交 VM 动态分析并跳转监控页。', 'No sample selected. Choose one local .exe; upload automatically submits VM dynamic analysis and opens the monitor.');
+                target.className = 'selected-sample empty';
+                target.textContent = emptyText;
+                target.setAttribute('data-copy', emptyText);
+                renderOperatorReadinessChips();
+                return;
+              }
+
+              const duration = getAnalysisDuration();
+              const artifacts = buildArtifactCollectionSummary({ submission: getArtifactCollectionConfig() });
+              const isExe = /\.exe$/i.test(file.name || '');
+              const parts = [
+                `${t('文件', 'File')}: ${file.name}`,
+                `${t('大小', 'Size')}: ${formatBytes(file.size || 0)}`,
+                `${t('时长', 'Duration')}: ${duration}s`,
+                `${t('证据采集', 'Evidence')}: ${artifacts}`,
+                isExe ? t('扩展名检查：通过', 'Extension check: pass') : t('扩展名检查：不是 .exe，后端会拒绝', 'Extension check: not .exe, backend will reject')
+              ];
+              target.className = `selected-sample${isExe ? '' : ' error'}`;
+              target.setAttribute('data-copy', parts.join(' | '));
+              target.innerHTML = parts.map(part => `<span class="pill ${isExe ? '' : 'warn'}" data-copy="${escapeAttribute(part)}">${escapeHtml(part)}</span>`).join(' ');
+              renderOperatorReadinessChips();
+            }
+
+            function applySamplePreset(name) {
+              const setChecked = (id, value) => {
+                const element = document.getElementById(id);
+                if (element) {
+                  element.checked = Boolean(value);
+                }
+              };
+              const duration = document.getElementById('uploadDuration');
+              const hiddenDuration = document.getElementById('duration');
+              const presets = {
+                quick: {
+                  seconds: 30,
+                  collectDroppedFiles: false,
+                  captureScreenshots: false,
+                  captureMemoryDumps: false,
+                  capturePacketCapture: false,
+                  message: t('已应用“快速观察”：30 秒，敏感产物采集关闭。', 'Applied Quick observe: 30 seconds, sensitive artifact collection off.')
+                },
+                standard: {
+                  seconds: 120,
+                  collectDroppedFiles: true,
+                  captureScreenshots: true,
+                  captureMemoryDumps: false,
+                  capturePacketCapture: true,
+                  message: t('已应用“标准动态”：120 秒，采集落地文件、截图和 PCAP。', 'Applied Standard dynamic: 120 seconds with dropped files, screenshots, and PCAP.')
+                },
+                evidence: {
+                  seconds: 180,
+                  collectDroppedFiles: true,
+                  captureScreenshots: true,
+                  captureMemoryDumps: false,
+                  capturePacketCapture: true,
+                  message: t('已应用“证据优先”：180 秒，强化报告可见证据。', 'Applied Evidence-first: 180 seconds with stronger report-visible evidence.')
+                },
+                memory: {
+                  seconds: 180,
+                  collectDroppedFiles: true,
+                  captureScreenshots: true,
+                  captureMemoryDumps: true,
+                  capturePacketCapture: true,
+                  message: t('已应用“内存取证”：180 秒，启用内存 dump；Guest 支持时包含子进程。', 'Applied Memory forensic: 180 seconds with memory dumps; child processes included when Guest supports it.')
+                }
+              };
+              const preset = presets[name] || presets.standard;
+              if (duration) {
+                duration.value = String(preset.seconds);
+              }
+
+              if (hiddenDuration) {
+                hiddenDuration.value = String(preset.seconds);
+              }
+
+              setChecked('collectDroppedFiles', preset.collectDroppedFiles);
+              setChecked('captureScreenshots', preset.captureScreenshots);
+              setChecked('captureMemoryDumps', preset.captureMemoryDumps);
+              setChecked('capturePacketCapture', preset.capturePacketCapture);
+              getAnalysisDuration();
+              renderVmConfigSummary();
+              renderSelectedSample();
+              renderOperatorReadinessChips();
+              setStatus(preset.message, false);
+            }
+
+            function setupOperatorReadinessListeners() {
+              const ids = [
+                'sampleUpload',
+                'uploadDuration',
+                'goldenVmName',
+                'goldenSnapshotName',
+                'guestUserName',
+                'guestWorkingDirectory',
+                'guestPayloadRoot',
+                'useMockCollector',
+                'collectDroppedFiles',
+                'captureScreenshots',
+                'captureMemoryDumps',
+                'capturePacketCapture'
+              ];
+              for (const id of ids) {
+                const element = document.getElementById(id);
+                if (!element) {
+                  continue;
+                }
+
+                element.addEventListener('input', () => {
+                  renderSelectedSample();
+                  renderOperatorReadinessChips();
+                });
+                element.addEventListener('change', () => {
+                  renderSelectedSample();
+                  renderOperatorReadinessChips();
+                });
+              }
+            }
+
+            function setupUploadDropZone() {
+              const zone = document.getElementById('uploadDropZone');
+              const input = document.getElementById('sampleUpload');
+              if (!zone || !input) {
+                return;
+              }
+
+              zone.addEventListener('click', event => {
+                if (event.target === input || event.target.closest('button')) {
+                  return;
+                }
+
+                input.click();
+              });
+              zone.addEventListener('dragover', event => {
+                event.preventDefault();
+                zone.classList.add('dragging');
+              });
+              zone.addEventListener('dragleave', () => zone.classList.remove('dragging'));
+              zone.addEventListener('drop', event => {
+                event.preventDefault();
+                zone.classList.remove('dragging');
+                if (!event.dataTransfer || !event.dataTransfer.files || event.dataTransfer.files.length === 0) {
+                  return;
+                }
+
+                try {
+                  input.files = event.dataTransfer.files;
+                } catch {
+                  setStatus(t('浏览器不允许直接写入拖拽文件列表；请点击上传区域手动选择该 .exe。', 'The browser did not allow assigning dropped files; click the upload zone and choose the .exe manually.'), true);
+                  return;
+                }
+
+                input.dispatchEvent(new Event('change', { bubbles: true }));
+              });
+            }
+
             function setElementTextAndCopy(id, text) {
               const element = document.getElementById(id);
               if (!element) {
@@ -830,10 +1140,20 @@ internal static class DashboardExperiencePage
               const input = document.getElementById('sampleUpload');
               if (!input.files || input.files.length === 0) {
                 setStatus(t('请选择一个 .exe 文件上传。', 'Select one .exe file to upload.'), true);
+                renderSelectedSample();
+                return;
+              }
+
+              const file = input.files[0];
+              if (!/\.exe$/i.test(file.name || '')) {
+                setStatus(t('当前 WebUI 只接受 .exe 文件；请选择可执行样本后重试。', 'The current WebUI accepts only .exe files; choose an executable sample and retry.'), true);
+                renderSelectedSample();
                 return;
               }
 
               setBusy(true);
+              renderSelectedSample();
+              renderOperatorReadinessChips();
               setStatus(t('正在上传样本、生成计划并提交后台虚拟机分析；完成提交后会进入动态监控页...', 'Uploading sample, creating a plan, and submitting background VM analysis; the page will enter the dynamic monitor after submission...'), false);
               try {
                 const form = new FormData();
@@ -2376,10 +2696,15 @@ internal static class DashboardExperiencePage
 
             setupTabKeyboardNavigation();
             setupConfigSummaryListeners();
+            setupOperatorReadinessListeners();
+            setupUploadDropZone();
             selectWorkspaceTab('plan');
             selectPlanTab('upload');
             applyLanguage();
+            renderSelectedSample();
+            renderOperatorReadinessChips();
             loadConfigDefaults();
+            loadVirusTotalReadiness();
             refreshJobs(false);
           </script>
         </body>

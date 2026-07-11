@@ -11,7 +11,7 @@
     "noDriverSigningByPackageScript": true,
     "legacyCSignToolDefaultPath": "forbidden",
     "runtimePayloadSource": "not applicable; source package is source-only",
-    "operatorDiagnostics": "package-portable.ps1 writes generated metadata and prints stage/archive/safety diagnostics without VM or signing side effects"
+    "operatorDiagnostics": "install/run expose read-only Hyper-V prerequisite, VM profile, guest payload, VT key, runtime-root, and RuntimePublishRoot guidance; package-portable.ps1 writes generated metadata and prints stage/archive/safety diagnostics without VM or signing side effects"
   },
   "stagedMetadata": {
     "generatedManifest": "package-manifest.generated.json",

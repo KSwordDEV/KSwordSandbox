@@ -52,8 +52,8 @@ targeted Windows persistence, privilege-escalation, process-injection,
 PowerShell/LOLBin, DNS/HTTP/TLS/certificate, anti-analysis, and VirusTotal
 enrichment-quality rules. The previous v8
 report-semantic cleanup separated behavior findings from static triage and
-collection diagnostics, and the v7 placeholder-reduction pass replaced many
-broad placeholder entries with concrete metadata, indicator, or
+collection diagnostics, and the v7 diagnostic-metadata reduction pass replaced
+broad compatibility entries with concrete metadata, indicator, or
 normalized-correlation rules for download/execute chains, process trees,
 anti-analysis timing, DNS/TLS/PCAP evidence, and R0 image-load rows. Newer
 rules may also carry metadata-only `confidence`, `tags`, `evidenceFields`,
@@ -210,7 +210,7 @@ future parser rows.
 | 2026-07-12 download-execute expansion | `download-execute-certutil-urlcache-split`, `download-execute-bitsadmin-transfer`, `download-execute-powershell-webclient-to-user-writable`, `download-execute-mshta-or-regsvr32-remote-scriptlet`, `download-execute-rundll32-url-dll-entrypoint` | `process.start`, `process.new` | `high` | `T1105`, `T1197`, `T1218.005`, `T1218.011` | Adds concrete downloader/LOLBin command shapes for Certutil URL cache staging, BITS transfers, PowerShell WebClient downloads to user-writable paths, remote scriptlets, and Rundll32 URL/DLL entrypoint execution. |
 | Network behavior | `network-connection`, `http-network-activity`, `dns-query-observed`, `udp-network-activity`, `tls-or-https-network-activity`, `network-ip-literal-observed`, `driver-network-outbound-connect`, `driver-network-dns-traffic`, `driver-network-web-protocol-or-port`, `r0-driver-network-signal` | `network.tcp`, `network.udp`, `http.request`, `network.http`, `network.tls`, `tls.connection`, `dns.query`, `network.dns`, `driver.network` | `low` to `medium` | `T1105`, `T1071.001`, `T1071.004` | Records outbound TCP/UDP plus protocol-specific HTTP/DNS/TLS rows and driver network payloads when normalized collectors provide them. |
 | Network probe depth | `dns-cache-added`, `dns-cache-txt-or-tunnel`, `dns-cache-dynamic-domain`, `netstat-connection-observed`, `netstat-added-connection`, `network-listener-opened`, `network-nonstandard-listener-port`, `network-connection-closed` | `dns.cache.added`, `network.netstat`, `network.netstat.added`, `network.netstat.removed`, `network.tcp.listener.opened`, `network.udp.listener.opened`, `network.tcp.closed` | `info` to `high` | `T1049`, `T1071.004`, `T1571` where specific evidence applies | Uses current TCP/DNS/netstat/listener probe output to report new DNS cache entries, tunnel-capable records, dynamic domains, opened listeners, suspicious listener ports, and short-lived closed connections. Generic `network.netstat` rows are collection metadata; only `network.netstat.added` carries the netstat discovery behavior mapping. |
-| C2, DNS, TLS, and PCAP metadata | `network-c2-beacon-event`, `network-c2-indicator-fields`, `dns-tunnel-or-dga-indicator`, `http-c2-suspicious-user-agent`, `tls-sni-ja3-metadata-observed`, `pcap-artifact-imported`, `pcap-protocol-summary-placeholder`, `pcap-flow-observed`, `pcap-http-request-observed`, `pcap-dns-query-observed`, `pcap-tls-clienthello-observed`, `dns-dynamic-domain-pattern`, `http-direct-ip-or-nonstandard-port` | `network.c2`, `c2.beacon`, `beacon.observed`, `http.request`, `network.http`, `network.tls`, `tls.connection`, `dns.query`, `network.dns`, `dns.cache.added`, `driver.network`, `pcap.summary`, `pcap.protocol.summary`, `network.pcap`, `pcap.packet`, `pcap.flow`, `pcap.tcp`, `pcap.udp`, `pcap.http`, `pcap.dns`, `pcap.tls`, `network.flow` | `info` to `high` | `T1071.001`, `T1071.004`, `T1573` where protocol-specific evidence exists | Adds explicit C2/beacon event support, C2 indicator fields, DNS tunnel/DGA indicators, suspicious HTTP user agents, TLS SNI/JA3/certificate metadata, direct-IP/nonstandard web port triage, and PCAP artifact/flow/HTTP/DNS/TLS metadata without changing collectors. |
+| C2, DNS, TLS, and PCAP metadata | `network-c2-beacon-event`, `network-c2-indicator-fields`, `dns-tunnel-or-dga-indicator`, `http-c2-suspicious-user-agent`, `tls-sni-ja3-metadata-observed`, `pcap-artifact-imported`, `pcap-protocol-summary-placeholder`, `pcap-flow-observed`, `pcap-http-request-observed`, `pcap-dns-query-observed`, `pcap-tls-clienthello-observed`, `dns-dynamic-domain-pattern`, `http-direct-ip-or-nonstandard-port` | `network.c2`, `c2.beacon`, `beacon.observed`, `http.request`, `network.http`, `network.tls`, `tls.connection`, `dns.query`, `network.dns`, `dns.cache.added`, `driver.network`, `pcap.summary`, `pcap.protocol.summary`, `network.pcap`, `pcap.packet`, `pcap.flow`, `pcap.tcp`, `pcap.udp`, `pcap.http`, `pcap.dns`, `pcap.tls`, `network.flow` | `info` to `high` | `T1071.001`, `T1071.004`, `T1573` where protocol-specific evidence exists | Adds explicit C2/beacon event support, C2 indicator fields, DNS tunnel/DGA indicators, suspicious HTTP user agents, TLS SNI/JA3/certificate metadata, direct-IP/nonstandard web port triage, and PCAP artifact/flow/HTTP/DNS/TLS metadata without changing collectors. Compatibility IDs such as `pcap-protocol-summary-placeholder` are retained because existing report/smoke contracts reference them, but their titles, tags, and Chinese summaries now describe concrete diagnostic metadata. |
 | Constrained C2 correlation | `c2-http-script-user-agent-beacon-uri`, `c2-http-post-json-tasking`, `c2-dns-txt-high-entropy-label`, `c2-tls-no-sni-with-risky-ja3`, `c2-network-flow-classified-periodic-checkin` | `http.request`, `network.http`, `pcap.http`, `dns.query`, `network.dns`, `pcap.dns`, `network.tls`, `tls.connection`, `pcap.tls`, `network.flow`, `pcap.flow` | `high` | `T1071.001`, `T1071.004`, `T1573` | Uses all-of predicates for user-agent plus beacon URI, POST plus JSON content plus tasking URI, TXT/NULL plus high-entropy classification, no-SNI plus JA3 reputation, and periodicity plus explicit C2 classification. Timing fields, user-agent strings, or packet counters alone are not enough. |
 | Targeted HTTP/TLS exfil and infrastructure | `tls-sni-dynamic-dns-or-onion`, `http-post-auth-cookie-or-token-exfil` | `network.tls`, `tls.connection`, `pcap.tls`, `http.request`, `network.http`, `pcap.http` | `high` | `T1041`, `T1071.001` | Adds TLS SNI/serverName dynamic-DNS or `.onion` infrastructure triage and a constrained HTTP POST rule that requires credential/token material in headers, body, or classification fields. VT unset and collection-health rows are excluded through data exclusions. |
 | Advanced HTTP/TLS/DNS predicates | `pcap-http-large-upload-numeric`, `dns-very-long-nxdomain-query-numeric`, `http-direct-ip-missing-user-agent`, `tls-ja3-without-sni`, `http-uri-api-gate-field-and` | `http.request`, `network.http`, `pcap.http`, `dns.query`, `network.dns`, `pcap.dns`, `dns.cache.added`, `network.tls`, `tls.connection`, `pcap.tls` | `medium` to `high` | `T1041`, `T1071.001`, `T1071.004` | Adds numeric upload/query-length thresholds, IPv4-literal host regex with absent User-Agent, JA3 regex with absent SNI/serverName, and same-field API gate URI matching. These rules exclude VT unset and collection-health metadata. |
@@ -472,9 +472,9 @@ the PCAP importer:
 - Process trees: Office-to-script/LOLBin and browser-to-script/LOLBin lineage
   patterns emitted by `process.tree` rows.
 
-## 2026-07-11 v7 placeholder reduction
+## 2026-07-11 v7 diagnostic metadata reduction
 
-The v7 pass replaces 15 placeholder-labeled rules with concrete names and
+The v7 pass replaced 15 broad compatibility rules with concrete names and
 metadata boundaries while staying within current `RuleEngine` predicates:
 
 - R0/image and process context: `image-load-metadata-observed` requires
@@ -493,11 +493,14 @@ metadata boundaries while staying within current `RuleEngine` predicates:
   `anti-analysis-accelerated-sleep-metadata` make clear that numeric duration
   fields are metadata until threshold predicates exist.
 
-The remaining intentionally broad or future-facing placeholders are kept in
-low-confidence lanes: the legacy R0 IOCTL protocol row, PCAP protocol summary
+The remaining broad compatibility IDs are deliberately low-confidence
+diagnostic lanes: the legacy R0 IOCTL protocol row, PCAP protocol-summary
 rollup, HTTP direct-IP/nonstandard-port triage, and PCAP beacon-interval
-metadata. v11 added constrained companion rules for low-resource and periodic
-C2 evidence so those weak fields are not promoted without explicit
+metadata. They keep older identifiers only for report/smoke-test
+compatibility; titles, summaries, tags, and `evidenceFields` now point to the
+具体证据字段（协议、端口、packet/flow 计数、资源盘点和分类字段）that analysts
+should inspect. v11 added constrained companion rules for low-resource and
+periodic C2 evidence so weak metadata fields are not promoted without explicit
 classification.
 
 ## MITRE mapping notes

@@ -409,7 +409,12 @@ app.Run();
 /// </summary>
 static object ToWebArtifactDescriptor(Guid jobId, ArtifactDescriptor artifact)
 {
-    var selector = FirstNonEmpty(artifact.SafeLink, artifact.RelativePath, artifact.ImportPath);
+    var selectors = BuildWebArtifactSelectors(artifact);
+    var selector = FirstNonEmpty(selectors.SafeLink, selectors.RelativePath, selectors.ImportPath);
+    var contentType = ResolveArtifactContentType(artifact);
+    var fileName = SanitizeDownloadFileName(FirstNonEmpty(artifact.Name, artifact.RelativePath, "artifact.bin"));
+    var sha256 = FirstNonEmpty(artifact.Sha256, artifact.Hashes.GetValueOrDefault("sha256"));
+    var safeMetadata = ToWebArtifactMetadata(artifact.Metadata);
     var href = string.IsNullOrWhiteSpace(selector)
         ? string.Empty
         : $"/api/jobs/{jobId:D}/artifacts/download?path={Uri.EscapeDataString(selector)}";
@@ -418,23 +423,153 @@ static object ToWebArtifactDescriptor(Guid jobId, ArtifactDescriptor artifact)
         artifact.Kind,
         artifact.Category,
         artifact.Name,
-        artifact.RelativePath,
-        artifact.SafeLink,
+        RelativePath = selectors.RelativePath,
+        SafeLink = selectors.SafeLink,
         artifact.EvidenceRole,
         artifact.CapturePhase,
         artifact.CaptureState,
         artifact.GuestPath,
-        artifact.ImportPath,
+        ImportPath = selectors.ImportPath,
         artifact.CollectionName,
         artifact.MimeType,
+        ContentType = contentType,
         artifact.SizeBytes,
-        artifact.Sha256,
+        Sha256 = sha256,
+        Sha256Short = ShortHash(sha256),
         artifact.Hashes,
         artifact.CreatedAtUtc,
-        Metadata = ToWebArtifactMetadata(artifact.Metadata),
+        PreviewLabel = FirstNonEmpty(safeMetadata.GetValueOrDefault("previewLabel"), BuildPreviewLabel(artifact.Kind, fileName, english: true)),
+        PreviewLabelZh = FirstNonEmpty(safeMetadata.GetValueOrDefault("previewLabelZh"), BuildPreviewLabel(artifact.Kind, fileName, english: false)),
+        Selectors = new
+        {
+            selectors.RelativePath,
+            selectors.SafeLink,
+            selectors.ImportPath,
+            Policy = "relative-index-selectors-only"
+        },
+        Duplicate = new
+        {
+            IsDuplicate = string.Equals(safeMetadata.GetValueOrDefault("isDuplicate"), "true", StringComparison.OrdinalIgnoreCase),
+            Role = FirstNonEmpty(safeMetadata.GetValueOrDefault("duplicateRole"), "unique"),
+            GroupKey = safeMetadata.GetValueOrDefault("duplicateGroupKey") ?? string.Empty,
+            GroupId = safeMetadata.GetValueOrDefault("duplicateGroupId") ?? string.Empty,
+            GroupCount = safeMetadata.GetValueOrDefault("duplicateGroupCount") ?? string.Empty,
+            PrimarySelector = safeMetadata.GetValueOrDefault("duplicatePrimarySelector") ?? string.Empty
+        },
+        Download = new
+        {
+            Available = !string.IsNullOrWhiteSpace(selector),
+            Selector = selector,
+            Href = href,
+            FileName = fileName,
+            ContentType = contentType,
+            artifact.SizeBytes,
+            Sha256 = sha256,
+            Sha256Short = ShortHash(sha256),
+            RejectionCode = string.IsNullOrWhiteSpace(selector) ? "missing-safe-selector" : string.Empty,
+            RejectionMessage = string.IsNullOrWhiteSpace(selector)
+                ? "Artifact is indexed but has no safe relative selector; server will not stream it."
+                : string.Empty,
+            RejectionMessageZh = string.IsNullOrWhiteSpace(selector)
+                ? "产物已被索引，但缺少安全相对 selector，Web 端不会下载。"
+                : string.Empty
+        },
+        Metadata = safeMetadata,
         DownloadSelector = selector,
         DownloadHref = href
     };
+}
+
+static (string RelativePath, string SafeLink, string ImportPath) BuildWebArtifactSelectors(ArtifactDescriptor artifact)
+{
+    var relativePath = NormalizeWebArtifactSelector(artifact.RelativePath, encode: false);
+    var safeLink = NormalizeWebArtifactSelector(artifact.SafeLink, encode: true);
+    var importPath = NormalizeWebArtifactSelector(artifact.ImportPath, encode: false);
+    if (string.IsNullOrWhiteSpace(safeLink))
+    {
+        safeLink = ArtifactDescriptorFactory.BuildSafeLink(FirstNonEmpty(relativePath, importPath));
+    }
+
+    return (relativePath, safeLink, importPath);
+}
+
+static string NormalizeWebArtifactSelector(string? value, bool encode)
+{
+    if (string.IsNullOrWhiteSpace(value))
+    {
+        return string.Empty;
+    }
+
+    try
+    {
+        var decoded = Uri.UnescapeDataString(value.Trim());
+        var normalized = ArtifactDescriptorFactory.NormalizeRelativePath(decoded);
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return string.Empty;
+        }
+
+        return encode ? ArtifactDescriptorFactory.BuildSafeLink(normalized) : normalized;
+    }
+    catch (UriFormatException)
+    {
+        return string.Empty;
+    }
+}
+
+static string ResolveArtifactContentType(ArtifactDescriptor artifact)
+{
+    return FirstNonEmpty(
+        artifact.MimeType,
+        artifact.Metadata.GetValueOrDefault("contentType"),
+        artifact.Metadata.GetValueOrDefault("downloadContentType"),
+        ArtifactDescriptorFactory.MimeTypeForPath(FirstNonEmpty(artifact.FullPath, artifact.Name, artifact.RelativePath)));
+}
+
+static string SanitizeDownloadFileName(string value)
+{
+    var fileName = Path.GetFileName(value.Replace('\\', '/'));
+    if (string.IsNullOrWhiteSpace(fileName))
+    {
+        fileName = "artifact.bin";
+    }
+
+    foreach (var invalid in Path.GetInvalidFileNameChars())
+    {
+        fileName = fileName.Replace(invalid, '_');
+    }
+
+    return new string(fileName.Select(ch => char.IsControl(ch) ? '_' : ch).ToArray());
+}
+
+static string ShortHash(string? value)
+{
+    return string.IsNullOrWhiteSpace(value)
+        ? string.Empty
+        : value[..Math.Min(value.Length, 12)];
+}
+
+static string BuildPreviewLabel(ArtifactKind kind, string fileName, bool english)
+{
+    var label = english
+        ? kind switch
+        {
+            ArtifactKind.DroppedFile => "Dropped file",
+            ArtifactKind.Screenshot => "Screenshot",
+            ArtifactKind.MemoryDump => "Memory dump",
+            ArtifactKind.PacketCapture => "Packet capture",
+            _ => "Artifact"
+        }
+        : kind switch
+        {
+            ArtifactKind.DroppedFile => "掉落文件",
+            ArtifactKind.Screenshot => "截图",
+            ArtifactKind.MemoryDump => "内存转储",
+            ArtifactKind.PacketCapture => "抓包文件",
+            _ => "产物"
+        };
+
+    return english ? $"{label}: {fileName}" : $"{label}：{fileName}";
 }
 
 /// <summary>
@@ -446,20 +581,32 @@ static object ToWebArtifactDescriptor(Guid jobId, ArtifactDescriptor artifact)
 /// </summary>
 static object ToWebArtifactCollectionDescriptor(ArtifactCollectionDescriptor collection)
 {
+    var relativePath = NormalizeWebArtifactSelector(collection.RelativePath, encode: false);
+    var safeLink = NormalizeWebArtifactSelector(collection.SafeLink, encode: true);
+    var importPath = NormalizeWebArtifactSelector(collection.ImportPath, encode: false);
+    var metadata = ToWebArtifactMetadata(collection.Metadata);
     return new
     {
         collection.Name,
         collection.Kind,
         collection.Category,
         collection.EvidenceRole,
-        collection.RelativePath,
-        collection.SafeLink,
-        collection.ImportPath,
+        RelativePath = relativePath,
+        SafeLink = safeLink,
+        ImportPath = importPath,
         collection.Enabled,
         collection.Implemented,
         collection.Status,
         collection.Reason,
-        Metadata = ToWebArtifactMetadata(collection.Metadata)
+        RejectionDiagnostics = new
+        {
+            Available = string.Equals(metadata.GetValueOrDefault("rejectionDiagnosticsAvailable"), "true", StringComparison.OrdinalIgnoreCase),
+            RejectedArtifactCount = metadata.GetValueOrDefault("rejectedArtifactCount") ?? string.Empty,
+            LastRejectedReason = metadata.GetValueOrDefault("lastRejectedArtifactReason") ?? string.Empty,
+            LastRejectedSelector = metadata.GetValueOrDefault("lastRejectedArtifactSelector") ?? string.Empty,
+            ZhHint = metadata.GetValueOrDefault("zhRejectionHint") ?? string.Empty
+        },
+        Metadata = metadata
     };
 }
 
@@ -551,23 +698,62 @@ static IResult StreamIndexedArtifact(Guid jobId, string path, SandboxJobService 
     try
     {
         var artifact = service.ResolveDownloadableArtifact(jobId, path);
-        var contentType = string.IsNullOrWhiteSpace(artifact.MimeType)
-            ? ArtifactDescriptorFactory.MimeTypeForPath(artifact.FullPath)
-            : artifact.MimeType;
-        var fileName = string.IsNullOrWhiteSpace(artifact.Name) ? Path.GetFileName(artifact.FullPath) : artifact.Name;
+        var contentType = ResolveArtifactContentType(artifact);
+        var fileName = SanitizeDownloadFileName(FirstNonEmpty(artifact.Name, artifact.FullPath, artifact.RelativePath, "artifact.bin"));
         return Results.File(artifact.FullPath, contentType, fileName, enableRangeProcessing: true);
     }
     catch (KeyNotFoundException ex)
     {
-        return Results.NotFound(new { error = ex.Message });
+        return Results.NotFound(new
+        {
+            error = ex.Message,
+            rejectionCode = "job-not-found",
+            selectorPolicy = "relative-index-selectors-only"
+        });
     }
     catch (ArgumentException ex)
     {
-        return Results.BadRequest(new { error = $"Artifact download selector is invalid for job {jobId:D}: {ex.Message}" });
+        return Results.BadRequest(new
+        {
+            error = $"Artifact download selector is invalid for job {jobId:D}: {ex.Message}",
+            rejectionCode = "invalid-selector",
+            selectorPolicy = "reject-empty-absolute-traversal",
+            selectorPreview = SafeSelectorPreview(path)
+        });
     }
     catch (Exception ex) when (ex is FileNotFoundException or IOException or UnauthorizedAccessException)
     {
-        return Results.NotFound(new { error = $"Artifact download failed for job {jobId:D}: {ex.Message}" });
+        return Results.NotFound(new
+        {
+            error = $"Artifact download failed for job {jobId:D}: {ex.Message}",
+            rejectionCode = ex is FileNotFoundException ? "unindexed-or-missing-artifact" : "artifact-stream-failed",
+            selectorPolicy = "must-match-artifact-index",
+            selectorPreview = SafeSelectorPreview(path)
+        });
+    }
+}
+
+static string SafeSelectorPreview(string? value)
+{
+    if (string.IsNullOrWhiteSpace(value))
+    {
+        return string.Empty;
+    }
+
+    try
+    {
+        var decoded = Uri.UnescapeDataString(value.Trim()).Replace('\\', '/');
+        if (LooksLikeLocalAbsolutePath(decoded))
+        {
+            return "<absolute-path-redacted>";
+        }
+
+        var normalized = ArtifactDescriptorFactory.NormalizeRelativePath(decoded);
+        return string.IsNullOrWhiteSpace(normalized) ? "<unsafe-selector-redacted>" : normalized;
+    }
+    catch (UriFormatException)
+    {
+        return "<invalid-uri-encoding>";
     }
 }
 

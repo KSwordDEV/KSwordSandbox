@@ -259,15 +259,32 @@ internal sealed class ArtifactManifestContractScenario : ISmokeTestScenario
             candidate.Data.TryGetValue("collectionName", out var actualCollection) &&
             actualCollection == collectionName);
         SmokeAssert.True(evt is not null, $"{kind} should emit artifact.host_imported.");
-        RequireData(evt!, "behaviorCounted", "false");
+        SmokeAssert.True(
+            evt!.Data.TryGetValue("behaviorCounted", out var behaviorCounted) && behaviorCounted == "false" ||
+            evt.Data.TryGetValue("nonbehavior", out var nonbehavior) && nonbehavior == "true",
+            $"{kind} host import event should remain marked as non-behavior even after report sampling.");
         RequireData(evt!, "sourceArtifactKind", kind.ToString());
         RequireData(evt!, "collectionName", collectionName);
         SmokeAssert.True(evt!.Data.TryGetValue("sourceArtifactSizeBytes", out var size) && long.Parse(size) > 0, $"{kind} host import event should include source artifact size.");
         SmokeAssert.True(evt.Data.TryGetValue("sourceArtifactSha256", out var sha256) && sha256.Length == 64, $"{kind} host import event should include source artifact SHA-256.");
-        SmokeAssert.True(evt.Data.TryGetValue("sourceEventType", out var sourceEventType) && !string.IsNullOrWhiteSpace(sourceEventType), $"{kind} host import event should include source event type.");
-        SmokeAssert.True(evt.Data.TryGetValue("downloadSelector", out var downloadSelector), $"{kind} host import event should include a guarded download selector.");
+        SmokeAssert.True(
+            evt.Data.TryGetValue("sourceEventType", out var sourceEventType) && !string.IsNullOrWhiteSpace(sourceEventType) ||
+            evt.Data.TryGetValue("__omittedDataPairs", out var omittedPairs) && int.TryParse(omittedPairs, out var omittedCount) && omittedCount > 0,
+            $"{kind} host import event should include source event type or report sampler omission diagnostics.");
+        SmokeAssert.True(
+            evt.Data.TryGetValue("downloadSelector", out var downloadSelector) ||
+            evt.Data.TryGetValue("artifactRelativePath", out downloadSelector) ||
+            evt.Data.TryGetValue("sourceArtifactRelativePath", out downloadSelector),
+            $"{kind} host import event should include a guarded download selector or sampled artifact-relative selector.");
+        downloadSelector ??= string.Empty;
         AssertSafeSelectorValue($"{kind} import downloadSelector", downloadSelector);
-        SmokeAssert.True(evt.Data.TryGetValue("downloadSafeLink", out var downloadSafeLink), $"{kind} host import event should include a guarded safe-link selector.");
+        SmokeAssert.True(
+            evt.Data.TryGetValue("downloadSafeLink", out var downloadSafeLink) ||
+            evt.Data.TryGetValue("safeLink", out downloadSafeLink) ||
+            evt.Data.TryGetValue("artifactRelativePath", out downloadSafeLink) ||
+            evt.Data.TryGetValue("sourceArtifactRelativePath", out downloadSafeLink),
+            $"{kind} host import event should include a guarded safe-link selector or sampled artifact-relative selector.");
+        downloadSafeLink ??= string.Empty;
         AssertSafeSelectorValue($"{kind} import downloadSafeLink", downloadSafeLink);
         SmokeAssert.True(
             !downloadSelector.Contains(':', StringComparison.Ordinal) &&
@@ -306,7 +323,9 @@ internal sealed class ArtifactManifestContractScenario : ISmokeTestScenario
         var guestDoc = ReadRepositoryText(context, "docs", "guest-agent.md");
         var reportDoc = ReadRepositoryText(context, "docs", "report-schema.md");
         var artifactDoc = ReadRepositoryText(context, "docs", "artifact-manifest.md");
+        var artifactsDoc = ReadRepositoryText(context, "docs", "artifacts.md");
         var reportStage = ReadRepositoryText(context, "src", "KSword.Sandbox.Core", "Pipeline", "Stages", "ReportArtifactStage.cs");
+        var webProgram = ReadRepositoryText(context, "src", "KSword.Sandbox.Web", "Program.cs");
 
         SmokeAssert.True(guestWriter.Contains("WriteArtifactManifest", StringComparison.Ordinal), "Guest writer should expose artifact manifest output.");
         SmokeAssert.True(guestWriter.Contains("artifacts", StringComparison.Ordinal), "Guest writer should use the artifacts directory.");
@@ -332,7 +351,13 @@ internal sealed class ArtifactManifestContractScenario : ISmokeTestScenario
         SmokeAssert.True(artifactDoc.Contains("collections", StringComparison.OrdinalIgnoreCase), "Artifact manifest doc should describe collection lanes.");
         SmokeAssert.True(artifactDoc.Contains("PacketCapture", StringComparison.Ordinal), "Artifact manifest doc should describe packet-capture artifacts.");
         SmokeAssert.True(artifactDoc.Contains("external-pcap-artifacts-indexed", StringComparison.OrdinalIgnoreCase), "Artifact manifest doc should describe external PCAP consumption.");
+        SmokeAssert.True(artifactsDoc.Contains("duplicateGroupId", StringComparison.Ordinal), "Artifacts doc should describe duplicate grouping metadata.");
+        SmokeAssert.True(artifactsDoc.Contains("rejectionDiagnosticsAvailable", StringComparison.Ordinal), "Artifacts doc should describe manifest rejection diagnostics.");
+        SmokeAssert.True(artifactsDoc.Contains("downloadSecurityPolicy=server-indexed-relative-selector", StringComparison.Ordinal), "Artifacts doc should describe Web-safe download selector policy.");
         SmokeAssert.True(reportStage.Contains("HostArtifactIndexBuilder", StringComparison.Ordinal), "Report artifact stage should write host artifact index.");
+        SmokeAssert.True(webProgram.Contains("BuildWebArtifactSelectors", StringComparison.Ordinal), "Web artifact endpoint should normalize safe selector DTO fields.");
+        SmokeAssert.True(webProgram.Contains("SafeSelectorPreview", StringComparison.Ordinal), "Web artifact download helper should return safe rejection diagnostics.");
+        SmokeAssert.True(webProgram.Contains("RejectionDiagnostics", StringComparison.Ordinal), "Web artifact collection DTO should expose safe rejection diagnostics.");
     }
 
     /// <summary>
@@ -746,6 +771,7 @@ internal sealed class ArtifactManifestContractScenario : ISmokeTestScenario
         await File.WriteAllBytesAsync(Path.Combine(packetCapturesRoot, "before-start.pcap"), [0xd4, 0xc3, 0xb2, 0xa1], cancellationToken);
         await File.WriteAllBytesAsync(Path.Combine(packetCapturesRoot, "future.pcapng"), [0x0a, 0x0d, 0x0d, 0x0a], cancellationToken);
         await File.WriteAllTextAsync(Path.Combine(droppedFilesRoot, "drop.bin"), "drop", cancellationToken);
+        await File.WriteAllTextAsync(Path.Combine(droppedFilesRoot, "drop-copy.bin"), "drop", cancellationToken);
         await File.WriteAllTextAsync(Path.Combine(legacyDroppedFilesRoot, "legacy-drop.bin"), "legacy-drop", cancellationToken);
         await File.WriteAllBytesAsync(Path.Combine(legacyDumpsRoot, "legacy-pid321.dmp"), [0x4d, 0x44, 0x4d, 0x50], cancellationToken);
         await File.WriteAllTextAsync(
@@ -849,6 +875,16 @@ internal sealed class ArtifactManifestContractScenario : ISmokeTestScenario
                         ImportPath = "../escape.bin",
                         CollectionName = "dropped-files",
                         EvidenceRole = "dropped-file"
+                    },
+                    new ArtifactDescriptor
+                    {
+                        Kind = ArtifactKind.PacketCapture,
+                        Category = "packet-capture",
+                        Name = "missing.pcapng",
+                        RelativePath = "packet-captures/missing.pcapng",
+                        ImportPath = "packet-captures/missing.pcapng",
+                        CollectionName = "packet-captures",
+                        EvidenceRole = "packet-capture"
                     }
                 ]
             }, ManifestJsonOptions),
@@ -914,6 +950,19 @@ internal sealed class ArtifactManifestContractScenario : ISmokeTestScenario
         SmokeAssert.True(dropped.SafeLink == $"guest/{jobId:N}/artifacts/dropped-files/drop.bin", "Dropped-file index entry should include safe relative link.");
         SmokeAssert.True(dropped.Hashes.ContainsKey("sha256"), "Dropped-file index entry should include hashes map.");
         SmokeAssert.True(dropped.GuestPath == @"C:\work\drop.bin", "Dropped-file index entry should preserve original guest path.");
+        SmokeAssert.True(dropped.Metadata.TryGetValue("previewLabel", out var droppedPreview) && droppedPreview.Contains("Dropped file", StringComparison.Ordinal), "Dropped-file index entry should include an English preview label.");
+        SmokeAssert.True(dropped.Metadata.TryGetValue("previewLabelZh", out var droppedPreviewZh) && droppedPreviewZh.Contains("掉落文件", StringComparison.Ordinal), "Dropped-file index entry should include a Chinese preview label.");
+        SmokeAssert.True(dropped.Metadata.TryGetValue("contentType", out var droppedContentType) && droppedContentType == "application/octet-stream", "Dropped-file index entry should include content type metadata.");
+        SmokeAssert.True(dropped.Metadata.TryGetValue("downloadSelector", out var droppedDownloadSelector) && droppedDownloadSelector == dropped.RelativePath, "Dropped-file index entry should include a safe download selector.");
+        SmokeAssert.True(dropped.Metadata.TryGetValue("sha256Short", out var droppedShaShort) && droppedShaShort.Length == 12, "Dropped-file index entry should include a short SHA-256 preview.");
+        var droppedCopy = AssertIndexedArtifact(index, ArtifactKind.DroppedFile, $"guest/{jobId:N}/artifacts/dropped-files/drop-copy.bin");
+        SmokeAssert.True(dropped.Metadata.TryGetValue("duplicateGroupCount", out var duplicateGroupCount) && duplicateGroupCount == "2", "Duplicate dropped files should be grouped by hash and size.");
+        var duplicatePair = new[] { dropped, droppedCopy };
+        SmokeAssert.True(duplicatePair.Count(artifact => artifact.Metadata.TryGetValue("duplicateRole", out var role) && role == "primary") == 1, "Duplicate group should have exactly one primary member.");
+        SmokeAssert.True(duplicatePair.Count(artifact => artifact.Metadata.TryGetValue("isDuplicate", out var duplicate) && duplicate == "true") == 1, "Duplicate group should have exactly one duplicate member.");
+        var primaryDuplicate = duplicatePair.Single(artifact => artifact.Metadata.TryGetValue("duplicateRole", out var role) && role == "primary");
+        var secondaryDuplicate = duplicatePair.Single(artifact => artifact.Metadata.TryGetValue("isDuplicate", out var duplicate) && duplicate == "true");
+        SmokeAssert.True(secondaryDuplicate.Metadata.TryGetValue("duplicatePrimarySelector", out var duplicatePrimarySelector) && duplicatePrimarySelector == primaryDuplicate.RelativePath, "Duplicate entries should point at the stable primary selector.");
         var legacyDropped = AssertIndexedArtifact(index, ArtifactKind.DroppedFile, $"guest/{jobId:N}/dropped-files/legacy-drop.bin");
         SmokeAssert.True(legacyDropped.CollectionName == "dropped-files", "Host index should cover legacy dropped-files directories outside artifacts/.");
         var legacyDump = AssertIndexedArtifact(index, ArtifactKind.MemoryDump, $"guest/{jobId:N}/dumps/legacy-pid321.dmp");
@@ -925,6 +974,12 @@ internal sealed class ArtifactManifestContractScenario : ISmokeTestScenario
         var screenshotCollection = index.Collections.Single(collection => collection.Name == "screenshots");
         SmokeAssert.True(screenshotCollection.Metadata.TryGetValue("skippedEventCount", out var screenshotSkippedCount) && screenshotSkippedCount == "1", "Screenshot collection should retain skipped capture event count.");
         SmokeAssert.True(screenshotCollection.Metadata.TryGetValue("lastReason", out var screenshotReason) && screenshotReason == "desktopUnavailable", "Screenshot collection should retain concrete skipped reason.");
+        var droppedCollection = index.Collections.Single(collection => collection.Name == "dropped-files");
+        SmokeAssert.True(droppedCollection.Metadata.TryGetValue("rejectionDiagnosticsAvailable", out var droppedRejectionAvailable) && droppedRejectionAvailable == "true", "Dropped-files collection should expose manifest rejection diagnostics.");
+        SmokeAssert.True(droppedCollection.Metadata.TryGetValue("rejectedArtifactCount", out var droppedRejectedCount) && droppedRejectedCount == "1", "Dropped-files collection should count unsafe guest manifest descriptors.");
+        SmokeAssert.True(droppedCollection.Metadata.TryGetValue("lastRejectedArtifactReason", out var droppedRejectedReason) && droppedRejectedReason == "unsafeGuestArtifactPath", "Dropped-files collection should preserve unsafe path rejection reason.");
+        SmokeAssert.True(packetCaptureCollection.Metadata.TryGetValue("rejectionDiagnosticsAvailable", out var pcapRejectionAvailable) && pcapRejectionAvailable == "true", "Packet-captures collection should expose missing manifest artifact diagnostics.");
+        SmokeAssert.True(packetCaptureCollection.Metadata.TryGetValue("lastRejectedArtifactReason", out var pcapRejectedReason) && pcapRejectedReason == "missingGuestArtifactFile", "Packet-captures collection should preserve missing file rejection reason.");
 
         var indexDescriptor = builder.WriteIndex(jobId, jobRoot);
         SmokeAssert.True(indexDescriptor.Kind == ArtifactKind.ArtifactIndex, "Index descriptor should use ArtifactIndex kind.");

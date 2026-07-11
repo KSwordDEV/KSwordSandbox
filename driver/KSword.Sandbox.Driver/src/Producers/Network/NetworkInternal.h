@@ -22,7 +22,10 @@
 #error KSWORD_SANDBOX_ENABLE_NETWORK_WFP_ALE must be 0 or 1.
 #endif
 
+#if !defined(KSWORD_SANDBOX_NETWORK_WFP_IMPLEMENTATION_ALE_INSPECT_ONLY)
 #define KSWORD_SANDBOX_NETWORK_WFP_IMPLEMENTATION_ALE_INSPECT_ONLY 1U
+#endif
+
 #define KSWORD_SANDBOX_NETWORK_WFP_TODO_FULL_PACKET_LAYERS 1U
 #define KSWORD_SANDBOX_NETWORK_WFP_TODO_FLOW_CONTEXTS 1U
 #define KSWORD_SANDBOX_NETWORK_WFP_TODO_FILTER_CONDITIONS 1U
@@ -48,9 +51,9 @@ C_ASSERT(FIELD_OFFSET(
  *          and event ring exist.
  * Logic  : stores dynamic FWPM engine state, FWPS callout ids, filter ids, the
  *          shared READ_EVENTS ring owner, initialized/teardown guards, and v1
- *          payload version.  LastDegradeReason/Status are internal diagnostics only;
- *          GET_STATUS still exposes only producer masks and NTSTATUS values
- *          until the draft payload/status ABI is promoted.
+ *          payload version.  LastDegradeReason/Status remain separate from the
+ *          v1 event payload, but GET_NETWORK_STATUS now exposes them as
+ *          read-only producer diagnostics for readiness checks.
  * Return : no direct return value; KswInitializeNetworkMonitor exposes setup
  *          failures and KswPushEvent carries telemetry to user mode.
  */
@@ -76,4 +79,13 @@ typedef struct _KSWORD_SANDBOX_NETWORK_WFP_RUNTIME {
     volatile LONG LastDegradeStatus;
     volatile LONG64 ClassifyCount;
     volatile LONG64 EventCount;
+    volatile LONG64 QueueFailureCount;
+    volatile LONG64 ClassifyPayloadFailureCount;
+    volatile LONG LastRegisteredCalloutMask;
+    volatile LONG LastAddedFilterMask;
+    volatile LONG ActiveLayerMask;
+    volatile LONG LastClassifyLayerId;
+    volatile LONG LastQueueFailureLayerId;
+    volatile LONG LastQueueFailureStatus;
+    volatile LONG LastClassifyPayloadFailureLayerId;
 } KSWORD_SANDBOX_NETWORK_WFP_RUNTIME, *PKSWORD_SANDBOX_NETWORK_WFP_RUNTIME;

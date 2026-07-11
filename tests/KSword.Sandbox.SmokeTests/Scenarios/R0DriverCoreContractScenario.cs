@@ -108,9 +108,12 @@ internal sealed class R0DriverCoreContractScenario : ISmokeTestScenario
         RequireContains(header, "IOCTL_KSWORD_SANDBOX_GET_CAPABILITIES", "Header must define capabilities IOCTL.");
         RequireContains(header, "IOCTL_KSWORD_SANDBOX_GET_STATUS", "Header must define status IOCTL.");
         RequireContains(header, "IOCTL_KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK", "Header must define producer enable-mask IOCTL.");
+        RequireContains(header, "IOCTL_KSWORD_SANDBOX_GET_NETWORK_STATUS", "Header must define network status diagnostics IOCTL.");
         RequireContains(header, "KSWORD_SANDBOX_CAPABILITIES_REPLY", "Header must define capabilities reply.");
         RequireContains(header, "KSWORD_SANDBOX_STATUS_REPLY", "Header must define status reply.");
+        RequireContains(header, "KSWORD_SANDBOX_NETWORK_STATUS_REPLY", "Header must define network status diagnostics reply.");
         RequireContains(header, "KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK_REQUEST", "Header must define enable-mask request.");
+        RequireContains(header, "KSWORD_SANDBOX_CAPABILITY_FLAG_GET_NETWORK_STATUS", "Header must expose the network-status capability flag.");
         RequireContains(header, "KSWORD_SANDBOX_PRODUCER_FLAG_PROCESS", "Header must expose process producer bit.");
         RequireContains(header, "KSWORD_SANDBOX_PRODUCER_FLAG_FILE", "Header must expose file producer bit.");
         RequireContains(header, "KSWORD_SANDBOX_PRODUCER_FLAG_NETWORK", "Header must expose network producer bit.");
@@ -134,6 +137,7 @@ internal sealed class R0DriverCoreContractScenario : ISmokeTestScenario
         RequireContains(header, "KSWORD_SANDBOX_IMAGE_EVENT_PAYLOAD", "Header must define image typed payload.");
         RequireContains(header, "KSWORD_SANDBOX_REGISTRY_EVENT_PAYLOAD", "Header must define registry typed payload.");
         RequireContains(header, "KSWORD_SANDBOX_NETWORK_EVENT_PAYLOAD", "Header must define network typed payload.");
+        RequireContains(header, "KSWORD_SANDBOX_NETWORK_WFP_TODO_MASK_CURRENT", "Header must expose network TODO diagnostics mask.");
         RequireContains(header, "Version must equal KSWORD_SANDBOX_FILE_EVENT_VERSION", "File payload comment must pin v1 Version.");
         RequireContains(header, "Version must equal KSWORD_SANDBOX_NETWORK_EVENT_VERSION", "Network payload comment must pin v1 Version.");
         RequireContains(header, "ProducerEnableMask", "Health/status replies must include producer enable mask.");
@@ -142,7 +146,9 @@ internal sealed class R0DriverCoreContractScenario : ISmokeTestScenario
 
         RequireContains(dispatch, "case IOCTL_KSWORD_SANDBOX_GET_CAPABILITIES", "Dispatch must route capabilities IOCTL.");
         RequireContains(dispatch, "case IOCTL_KSWORD_SANDBOX_GET_STATUS", "Dispatch must route status IOCTL.");
+        RequireContains(dispatch, "case IOCTL_KSWORD_SANDBOX_GET_NETWORK_STATUS", "Dispatch must route network status diagnostics IOCTL.");
         RequireContains(dispatch, "case IOCTL_KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK", "Dispatch must route enable-mask IOCTL.");
+        RequireContains(dispatch, "KswHandleGetNetworkStatus", "Network status diagnostics handler must be implemented.");
         RequireContains(dispatch, "KswHandleSetProducerEnableMask", "Enable-mask handler must be implemented.");
         RequireContains(dispatch, "STATUS_INVALID_PARAMETER", "Dispatch must reject malformed requests.");
         RequireContains(dispatch, "KSWORD_SANDBOX_HEALTH_FLAG_PRODUCER_MASKS_AVAILABLE", "GET_HEALTH flags must expose producer-mask availability.");
@@ -175,10 +181,15 @@ internal sealed class R0DriverCoreContractScenario : ISmokeTestScenario
         RequireContains(fileProducer, "DeviceExtension->Signature", "File producer init must validate device-extension signature.");
         RequireContains(networkProducerHeader, "KSWORD_SANDBOX_NETWORK_WFP_RUNTIME", "Network producer must keep structured runtime state.");
         RequireContains(networkProducerHeader, "PayloadVersion", "Network runtime must store payload version state.");
+        RequireContains(networkProducerHeader, "LastRegisteredCalloutMask", "Network runtime must track partial callout registration diagnostics.");
         RequireContains(networkProducer, "KswNetworkPayloadVersion", "Network producer must stamp v1 payload version through a guarded helper.");
+        RequireContains(networkProducer, "KswQueryNetworkStatus", "Network producer must expose read-only WFP/ALE diagnostics.");
+        RequireContains(networkProducer, "ClassifyPayloadFailureCount", "Network producer must count classify payload build failures.");
+        RequireContains(networkProducer, "QueueFailureCount", "Network producer must count queue push failures.");
         RequireContains(networkProducer, "Uninitializing", "Network producer must guard teardown.");
 
         RequireContains(abiGuards, "sizeof(KSWORD_SANDBOX_HEALTH_REPLY) == 80U", "ABI guards must pin GET_HEALTH reply size.");
+        RequireContains(abiGuards, "sizeof(KSWORD_SANDBOX_NETWORK_STATUS_REPLY) == 128U", "ABI guards must pin GET_NETWORK_STATUS reply size.");
         RequireContains(abiGuards, "FIELD_OFFSET(KSWORD_SANDBOX_HEALTH_REPLY, ProducerEnableMask)", "ABI guards must pin health producer-mask offsets.");
         RequireContains(abiGuards, "sizeof(KSWORD_SANDBOX_FILE_EVENT_PAYLOAD) == 128U", "ABI guards must pin file payload size.");
         RequireContains(abiGuards, "sizeof(KSWORD_SANDBOX_PROCESS_EVENT_PAYLOAD) == 128U", "ABI guards must pin process payload size.");
@@ -190,6 +201,7 @@ internal sealed class R0DriverCoreContractScenario : ISmokeTestScenario
         RequireContains(contract, "Producer enable mask", "Core contract doc must describe producer enable mask.");
         RequireContains(contract, "GET_HEALTH producer-mask snapshot", "Core contract doc must describe health producer-mask diagnostics.");
         RequireContains(contract, "Queue and status counters", "Core contract doc must describe queue/status counters.");
+        RequireContains(contract, "Network WFP/ALE status diagnostics", "Core contract doc must describe network status diagnostics.");
         RequireContains(contract, "Producer runtime state and payload versions", "Core contract doc must describe producer runtime state and payload versions.");
         RequireContains(contract, "V1 typed payload checklist", "Core contract doc must include v1 typed payload checklist.");
         RequireContains(contract, "KSWORD_SANDBOX_NETWORK_EVENT_VERSION", "Core contract doc must name network payload version.");

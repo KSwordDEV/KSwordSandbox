@@ -556,7 +556,80 @@ function Add-PackageDiagnostic {
             severity = $Severity
             message  = $Message
             details  = $Details
-        })
+    })
+}
+
+function Get-RuntimePublishEntryDiagnostics {
+    param([Parameter(Mandatory)][object]$Manifest)
+
+    $entries = New-Object System.Collections.Generic.List[object]
+    foreach ($entry in (Get-ObjectArrayProperty -InputObject $Manifest -Name 'include')) {
+        $sourceType = [string](Get-ObjectPropertyValue -InputObject $entry -Name 'sourceType' -DefaultValue 'repository')
+        if ($sourceType -ne 'runtimePublish') {
+            continue
+        }
+
+        $source = [string](Get-ObjectPropertyValue -InputObject $entry -Name 'source' -DefaultValue '')
+        $target = Get-EntryTargetRelativePath -Entry $entry -Source $source
+        $required = [bool](Get-ObjectPropertyValue -InputObject $entry -Name 'required' -DefaultValue $true)
+        $note = [string](Get-ObjectPropertyValue -InputObject $entry -Name 'note' -DefaultValue '')
+        $sourcePath = $null
+        $exists = $false
+        if (-not [string]::IsNullOrWhiteSpace($RuntimePublishRoot) -and -not [string]::IsNullOrWhiteSpace($source)) {
+            $sourcePath = Join-SafePath -Root $RuntimePublishRoot -RelativePath $source
+            $exists = Test-Path -LiteralPath $sourcePath
+        }
+
+        [void]$entries.Add([pscustomobject][ordered]@{
+                source = $source
+                target = $target
+                required = $required
+                sourcePath = $sourcePath
+                exists = $exists
+                note = $note
+                remediation = if ($exists) {
+                    ''
+                }
+                elseif ([string]::IsNullOrWhiteSpace($RuntimePublishRoot)) {
+                    "Provide -RuntimePublishRoot outside the repository when building a runtime package if this payload should be included: $source"
+                }
+                else {
+                    "Publish or copy '$source' under RuntimePublishRoot before cutting a portable runtime package."
+                }
+            })
+    }
+
+    return @($entries.ToArray())
+}
+
+function Update-PackageOperatorDiagnostics {
+    param([Parameter(Mandatory)][object]$Manifest)
+
+    $runtimeEntries = @(Get-RuntimePublishEntryDiagnostics -Manifest $Manifest)
+    $missingRuntimeEntries = @($runtimeEntries | Where-Object { -not [bool]$_.exists })
+    $script:operatorDiagnostics = [ordered]@{
+        packageKind = $PackageKind
+        runtimePublishRootProvided = -not [string]::IsNullOrWhiteSpace($RuntimePublishRoot)
+        runtimePublishRoot = if ([string]::IsNullOrWhiteSpace($RuntimePublishRoot)) { $null } else { $RuntimePublishRoot }
+        runtimePublishRootRequiredForCompleteRuntime = ($PackageKind -eq 'runtime')
+        runtimePublishRootMustBeOutsideRepository = $true
+        runtimePublishEntries = @($runtimeEntries)
+        missingRuntimePublishEntries = @($missingRuntimeEntries | ForEach-Object { $_.source })
+        runtimePublishReady = if ($PackageKind -ne 'runtime') { $true } else { $missingRuntimeEntries.Count -eq 0 }
+        nonMutating = [ordered]@{
+            vmMutation = $false
+            driverSigning = $false
+            csignTool = $false
+            gitPush = $false
+            networkPublish = $false
+        }
+        operatorGuidance = @(
+            'RuntimePublishRoot must point to external published payloads such as host-web, guest-tools, tools/job-tool, and tools/postprocess.',
+            'The package script stages and zips locally only; it does not build, sign, push, publish, start Hyper-V, or copy files into a VM.',
+            'Inspect package-manifest.generated.json before handoff; verify fileInventory sha256/sizeBytes and packageDiagnostics.'
+        )
+        chineseGuidance = '中文提示：runtime 便携包如果没有 RuntimePublishRoot 也可做 layout dry-run，但完整交付前必须把 host-web/guest-tools/tools payload 发布到仓库外目录。'
+    }
 }
 
 # Assert-CleanSourcePackage enforces clean source releases unless explicitly bypassed.
@@ -812,6 +885,7 @@ function Write-GeneratedPackageManifest {
         }
         manifestRequiredChecks = @(Get-ObjectArrayProperty -InputObject $Manifest -Name 'requiredChecks')
         packageDiagnostics = @($script:packageDiagnostics.ToArray())
+        operatorDiagnostics = $script:operatorDiagnostics
         exclusionSummary = [ordered]@{
             samples = 'excluded'
             virtualMachines = 'excluded'
@@ -878,6 +952,9 @@ $stageRoot = Join-SafePath -Root $stagingRoot -RelativePath $packageDirectoryNam
 $script:copiedFiles = [System.Collections.Generic.List[string]]::new()
 $script:copiedFileRecords = [System.Collections.Generic.List[object]]::new()
 $script:packageDiagnostics = [System.Collections.Generic.List[object]]::new()
+$script:operatorDiagnostics = [ordered]@{}
+
+Update-PackageOperatorDiagnostics -Manifest $manifest
 
 if (Test-Path -LiteralPath $stageRoot) {
     if (-not $Force.IsPresent) {
@@ -924,6 +1001,17 @@ Write-Host "[package] Stage: $stageRoot"
 Write-Host "[package] Metadata: $(Join-SafePath -Root $stageRoot -RelativePath 'package-manifest.generated.json')"
 Write-Host "[package] Payload bytes: $([Int64](($script:copiedFileRecords | Where-Object { $_.sourceType -ne 'generated' } | ForEach-Object { $_.sizeBytes } | Measure-Object -Sum).Sum))"
 Write-Host "[package] Optional/skipped entries: $($script:packageDiagnostics.Count)"
+if ($PackageKind -eq 'runtime') {
+    $runtimeRootDisplay = if ([string]::IsNullOrWhiteSpace($RuntimePublishRoot)) { '<not provided>' } else { $RuntimePublishRoot }
+    Write-Host "[package] RuntimePublishRoot: $runtimeRootDisplay"
+    foreach ($entry in @($script:operatorDiagnostics.runtimePublishEntries)) {
+        $entryState = if ([bool]$entry.exists) { 'present' } elseif ([bool]$entry.required) { 'missing-required' } else { 'missing-optional' }
+        Write-Host "[package] Runtime entry: $entryState source=$($entry.source) target=$($entry.target)"
+    }
+    if (-not [bool]$script:operatorDiagnostics.runtimePublishReady) {
+        Write-Host '[package] 中文提示：runtime 包存在缺失的 published payload；本次可作为 layout/safety dry-run，完整交付前请补齐 RuntimePublishRoot。'
+    }
+}
 Write-Host '[package] 中文提示：已排除本机 secret、install-state、DPAPI 备份、样本、报告、VM 磁盘/快照、仓库二进制和签名材料。'
 Write-Host '[package] Safety: no VM mutation, no driver signing, no CSignTool, no git push/publish.'
 if ($StageOnly.IsPresent) {

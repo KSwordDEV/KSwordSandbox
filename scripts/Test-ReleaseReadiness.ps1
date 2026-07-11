@@ -465,6 +465,85 @@ function Test-ReadinessNoVmMutationCommands {
         -Details @{ issues = @($issues.ToArray()) }
 }
 
+function Test-DeploymentOperatorDiagnosticsContract {
+    $requiredMarkers = [ordered]@{
+        'install.ps1' = @(
+            'Get-InstallHyperVPrerequisiteStatus',
+            'Get-InstallGuestPayloadStatus',
+            'Get-InstallVirusTotalStatus',
+            'RuntimeRootUnderRepository',
+            'StartsOrMutatesVm = $false'
+        )
+        'run.ps1' = @(
+            'Get-RunHyperVPrerequisiteStatus',
+            'GuestPayloadFreshnessReasons',
+            'VirusTotalMissingKeyBehavior',
+            'RuntimeRootUnderRepository',
+            'StartsOrMutatesVm = $false'
+        )
+        'scripts/package-portable.ps1' = @(
+            'operatorDiagnostics',
+            'runtimePublishEntries',
+            'runtimePublishRootMustBeOutsideRepository',
+            'no VM mutation, no driver signing, no CSignTool'
+        )
+    }
+
+    $issues = New-Object System.Collections.Generic.List[string]
+    foreach ($relative in $requiredMarkers.Keys) {
+        $path = Join-Path $RepositoryRoot $relative
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+            [void]$issues.Add("Missing diagnostic file: $relative")
+            continue
+        }
+
+        $raw = Get-Content -LiteralPath $path -Raw
+        foreach ($marker in $requiredMarkers[$relative]) {
+            if ($raw.IndexOf($marker, [StringComparison]::OrdinalIgnoreCase) -lt 0) {
+                [void]$issues.Add("Missing deployment diagnostic marker '$marker' in $relative")
+            }
+        }
+    }
+
+    foreach ($relative in @('packaging/source-package.manifest.json', 'packaging/runtime-package.manifest.json')) {
+        $path = Join-Path $RepositoryRoot $relative
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+            [void]$issues.Add("Missing packaging manifest for diagnostics contract: $relative")
+            continue
+        }
+
+        $manifest = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json -ErrorAction Stop
+        $releaseContract = Get-ObjectPropertyValue -InputObject $manifest -Name 'releaseContract' -DefaultValue $null
+        if ($null -eq $releaseContract) {
+            [void]$issues.Add("releaseContract missing in $relative")
+            continue
+        }
+
+        $operatorDiagnostics = [string](Get-ObjectPropertyValue -InputObject $releaseContract -Name 'operatorDiagnostics' -DefaultValue '')
+        if ($operatorDiagnostics.IndexOf('Hyper-V', [StringComparison]::OrdinalIgnoreCase) -lt 0 -or
+            $operatorDiagnostics.IndexOf('RuntimePublishRoot', [StringComparison]::OrdinalIgnoreCase) -lt 0) {
+            [void]$issues.Add("releaseContract.operatorDiagnostics should mention Hyper-V and RuntimePublishRoot in $relative")
+        }
+    }
+
+    if ($issues.Count -eq 0) {
+        Add-ReleaseCheckResult `
+            -Id 'deployment-operator-diagnostics' `
+            -Title 'Deployment operator diagnostics / 部署诊断契约' `
+            -Status Passed `
+            -Message 'Install/run/package paths expose non-mutating diagnostics for Hyper-V prerequisites, VM profile, guest payload, VT key, RuntimePublishRoot, and package safety.'
+        return
+    }
+
+    Add-ReleaseCheckResult `
+        -Id 'deployment-operator-diagnostics' `
+        -Title 'Deployment operator diagnostics / 部署诊断契约' `
+        -Status Failed `
+        -Message "Deployment diagnostic contract found $($issues.Count) issue(s)." `
+        -Remediation @('Keep install/run/readiness/package diagnostics explicit, bilingual, and non-mutating before release handoff.') `
+        -Details @{ issues = @($issues.ToArray()) }
+}
+
 function Invoke-RepositoryPolicy {
     $scriptPath = Join-Path $RepositoryRoot 'scripts\Test-RepositoryPolicy.ps1'
     Invoke-ReleaseCommand `
@@ -546,6 +625,7 @@ Test-PackageManifests
 Test-PowerShellScriptSyntax
 Test-CSignToolNotInReleasePath
 Test-ReadinessNoVmMutationCommands
+Test-DeploymentOperatorDiagnosticsContract
 Invoke-RepositoryPolicy
 Invoke-SourcePackageStage
 Invoke-LightBuild

@@ -138,6 +138,12 @@ plain diagnostic dump. The visual contract is:
   page count, hidden raw events, a Raw evidence height limit (currently
   `58vh`), and clear `report.json` plus raw source artifact path hints for
   complete evidence.
+- Raw normalized events should also include a static `Raw event page index /
+  原始事件页索引` that covers every normalized event, including rows hidden from
+  inline rendering. The index should group by event type, source, and event
+  family, show first row / first inline page or `report.json only`, and provide
+  copyable row ranges. This keeps large reports navigable without adding
+  JavaScript or turning the final report into an app.
 - Raw event details should keep command/stdout/stderr/PowerShell and similarly
   long technical payloads hidden by default behind deliberate, copyable native
   `<details>` entries. The main report must not directly spread full command

@@ -1,5 +1,5 @@
 {
-  "version": "2026-07-11-v15-open-source-reference-rules",
+  "version": "2026-07-12-v16-diagnostic-metadata-rules",
   "rules": [
     {
       "id": "host-submission",
@@ -85,12 +85,23 @@
     },
     {
       "id": "r0collector-ioctl-protocol-pending",
-      "title": "Legacy R0 collector protocol placeholder",
+      "title": "Legacy R0 collector IOCTL pending diagnostic",
+      "titleZh": "旧版 R0 采集器 IOCTL 待读诊断",
       "severity": "info",
       "confidence": "low",
-      "summary": "A legacy R0Collector build opened the driver device without issuing the read-events IOCTL; current builds should emit driverHealth, driverPoll, and driverReadEvents rows instead.",
+      "summary": "A legacy R0Collector build opened the driver device without issuing the read-events IOCTL; current builds should emit driverHealth, driverPoll, and driverReadEvents rows instead. The rule ID is retained only for compatibility with older reports and smoke contracts.",
+      "summaryZh": "旧版 R0Collector 已打开驱动设备但尚未发出 read-events IOCTL；当前版本应改为产生 driverHealth、driverPoll 和 driverReadEvents 行。该规则 ID 仅为兼容旧报告和 smoke 契约保留。",
       "eventTypes": [
         "r0collector.ioctlProtocolPending"
+      ],
+      "evidenceFields": [
+        "eventType",
+        "data.devicePath",
+        "data.ioctlName",
+        "data.driverHealth",
+        "data.readEventsIssued",
+        "data.sequence",
+        "data.zhHint"
       ],
       "tags": [
         "r0collector",
@@ -4614,9 +4625,12 @@
     },
     {
       "id": "pcap-protocol-summary-placeholder",
-      "title": "PCAP protocol summary placeholder",
+      "title": "PCAP protocol summary metadata observed",
+      "titleZh": "PCAP 协议摘要元数据",
       "severity": "info",
-      "summary": "A PCAP protocol summary referenced DNS, HTTP, TLS, TCP, or UDP evidence for report visibility before first-class packet parsing is available.",
+      "confidence": "low",
+      "summary": "A PCAP summary or native import rollup reported DNS, HTTP, TLS, TCP, or UDP protocol metadata. This is diagnostic/report evidence; prefer protocol-specific pcap.dns, pcap.http, pcap.tls, pcap.flow, or network.* rows for behavior scoring. The legacy rule ID is retained for compatibility.",
+      "summaryZh": "PCAP 摘要或本地导入汇总报告了 DNS、HTTP、TLS、TCP 或 UDP 协议元数据。该命中属于诊断/报告证据；行为评分应优先查看更具体的 pcap.dns、pcap.http、pcap.tls、pcap.flow 或 network.* 行。旧规则 ID 为兼容保留。",
       "eventTypes": [
         "pcap.protocol.summary",
         "pcap.summary"
@@ -4637,10 +4651,25 @@
           "udp"
         ]
       },
+      "evidenceFields": [
+        "eventType",
+        "data.protocol",
+        "data.protocols",
+        "data.protocolSummaryState",
+        "data.protocolSummaryStatus",
+        "data.protocolSummaryReason",
+        "data.parser",
+        "data.packetCount",
+        "data.flowCount",
+        "data.pcapngPacketCount",
+        "data.pcapngSectionHeaderCount",
+        "data.artifactRelativePath"
+      ],
       "tags": [
         "network",
         "pcap",
-        "placeholder",
+        "diagnostic",
+        "metadata",
         "protocol-summary"
       ]
     },
@@ -5112,9 +5141,12 @@
     },
     {
       "id": "anti-analysis-low-resource-check",
-      "title": "Low-resource sandbox check placeholder",
+      "title": "Low-resource sandbox resource inventory observed",
+      "titleZh": "低资源沙箱环境盘点",
       "severity": "medium",
-      "summary": "A system-fingerprint or sandbox-check event referenced CPU, memory, disk, uptime, or display resource fields used in sandbox heuristics.",
+      "confidence": "low",
+      "summary": "A system-fingerprint or sandbox-check event exposed CPU, memory, disk, uptime, display, or user fields commonly inspected by sandbox-evasion logic. Treat this as low-confidence context unless paired with anti-analysis-low-resource-classification or an explicit API/check string.",
+      "summaryZh": "系统指纹或沙箱检查事件暴露了 CPU、内存、磁盘、运行时间、显示器或用户字段，这些字段常被反沙箱逻辑检查。除非同时出现 anti-analysis-low-resource-classification 或明确 API/检查字符串，否则按低置信上下文处理。",
       "mitreTechniqueId": "T1497.001",
       "mitreTechniqueName": "System Checks",
       "eventTypes": [
@@ -5131,10 +5163,24 @@
         "screenHeight",
         "userName"
       ],
+      "evidenceFields": [
+        "eventType",
+        "processName",
+        "data.processorCount",
+        "data.physicalMemoryMb",
+        "data.diskSizeGb",
+        "data.uptimeSeconds",
+        "data.screenWidth",
+        "data.screenHeight",
+        "data.userName",
+        "data.classification",
+        "data.check"
+      ],
       "tags": [
         "anti-analysis",
         "sandbox-evasion",
-        "resource-check"
+        "resource-check",
+        "metadata"
       ]
     },
     {
@@ -5518,9 +5564,12 @@
     },
     {
       "id": "http-direct-ip-or-nonstandard-port",
-      "title": "HTTP direct-IP or nonstandard-port placeholder",
+      "title": "HTTP direct-IP or nonstandard-port triage",
+      "titleZh": "HTTP 直连 IP 或非常规端口线索",
       "severity": "medium",
-      "summary": "A web protocol event referenced direct-IP hosts or nonstandard web ports often worth surfacing in sandbox reports.",
+      "confidence": "low",
+      "summary": "A web protocol event referenced literal-IP hosts or nonstandard web ports worth surfacing in sandbox reports. This broad compatibility rule is triage metadata; prefer constrained rules such as http-direct-ip-missing-user-agent, pcap-http-host-header-ip-or-suspicious-tld, or explicit C2 labels when present.",
+      "summaryZh": "Web 协议事件引用了 IP 字面量主机或非常规 Web 端口，值得在沙箱报告中展示。该兼容规则属于宽泛分诊元数据；若存在 http-direct-ip-missing-user-agent、pcap-http-host-header-ip-or-suspicious-tld 或明确 C2 标签，应优先采用这些更强证据。",
       "mitreTechniqueId": "T1071.001",
       "mitreTechniqueName": "Web Protocols",
       "eventTypes": [
@@ -5564,10 +5613,23 @@
           "1337"
         ]
       },
+      "evidenceFields": [
+        "eventType",
+        "data.host",
+        "data.url",
+        "data.uri",
+        "data.remoteIp",
+        "data.remotePort",
+        "data.destinationIp",
+        "data.destinationPort",
+        "data.userAgent",
+        "data.classification"
+      ],
       "tags": [
         "network",
         "http",
-        "triage"
+        "triage",
+        "metadata"
       ]
     },
     {
@@ -8297,10 +8359,12 @@
       ]
     },
     {
-      "id": "pcap-beacon-interval-placeholder",
-      "title": "PCAP beacon interval placeholder",
+      "id": "pcap-beacon-timing-metadata-observed",
+      "title": "PCAP beacon timing metadata observed",
+      "titleZh": "PCAP 周期信标时间元数据",
       "severity": "low",
-      "summary": "Flow metadata included beacon interval, jitter, or periodicity fields. Without numeric threshold predicates or explicit C2 classification this remains low-confidence metadata instead of primary C2 behavior.",
+      "summary": "Flow metadata included beacon interval, jitter, or periodicity fields. Without explicit C2 classification or stronger constrained rules, this remains low-confidence timing context rather than primary C2 behavior.",
+      "summaryZh": "流量元数据包含信标间隔、抖动或周期性字段。若没有明确 C2 分类或更严格的关联规则，该命中仅作为低置信时间上下文，而不是主要 C2 行为。",
       "mitreTechniqueId": "T1071.001",
       "mitreTechniqueName": "Web Protocols",
       "eventTypes": [
@@ -8318,7 +8382,6 @@
         "network",
         "pcap",
         "beacon",
-        "placeholder",
         "metadata"
       ],
       "confidence": "low",

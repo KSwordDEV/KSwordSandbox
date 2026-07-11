@@ -83,6 +83,24 @@ internal sealed record VirusTotalEngineCounts
 }
 
 /// <summary>
+/// Flattened VirusTotal community vote counts. Inputs are total_votes from the
+/// official file object; processing keeps nullable counters so the WebUI can
+/// distinguish "zero votes" from "field not present".
+/// </summary>
+internal sealed record VirusTotalCommunityVotes
+{
+    public int? Harmless { get; init; }
+
+    public int? Malicious { get; init; }
+
+    public bool HasVotes => Harmless is not null || Malicious is not null;
+
+    public int Total => Math.Max(0, Harmless ?? 0) + Math.Max(0, Malicious ?? 0);
+
+    public int Score => Math.Max(0, Harmless ?? 0) - Math.Max(0, Malicious ?? 0);
+}
+
+/// <summary>
 /// Operator-safe VirusTotal lookup result.
 /// Inputs are local sample hash plus optional VirusTotal API response;
 /// processing extracts summary fields only; the record returned to WebUI never
@@ -112,9 +130,25 @@ internal sealed record VirusTotalLookupResult
 
     public string? Permalink { get; init; }
 
+    public string? DetectionPermalink { get; init; }
+
+    public string? OfficialApiSelfLink { get; init; }
+
     public string? MeaningfulName { get; init; }
 
     public DateTimeOffset? LastAnalysisDateUtc { get; init; }
+
+    public int? Reputation { get; init; }
+
+    public VirusTotalCommunityVotes CommunityVotes { get; init; } = new();
+
+    public int? CommunityScore => Reputation ?? (CommunityVotes.HasVotes ? CommunityVotes.Score : null);
+
+    public string? CommunityScoreSource => Reputation is not null
+        ? "reputation"
+        : CommunityVotes.HasVotes
+            ? "total_votes"
+            : null;
 
     public int MaliciousCount { get; init; }
 
@@ -169,6 +203,12 @@ internal sealed record VirusTotalLookupResult
         VirusTotalLookupStatuses.AuthenticationFailed or
         VirusTotalLookupStatuses.Timeout or
         VirusTotalLookupStatuses.LookupFailed;
+
+    public string? QuietFailureReason => IsQuietState ? Status : null;
+
+    public string? QuietFailureExplanation => IsQuietState
+        ? BuildQuietFailureExplanation(Status, ErrorKind, HttpStatusCode, Message)
+        : null;
 
     public bool CanPersistEnrichmentEvent => Configured &&
         Queried &&
@@ -231,9 +271,33 @@ internal sealed record VirusTotalLookupResult
 
         AddIfPresent(data, "message", Message);
         AddIfPresent(data, "permalink", Permalink);
+        AddIfPresent(data, "detectionPermalink", DetectionPermalink);
+        AddIfPresent(data, "officialApiSelfLink", OfficialApiSelfLink);
         AddIfPresent(data, "meaningfulName", MeaningfulName);
         AddIfPresent(data, "errorKind", ErrorKind);
         AddIfPresent(data, "cacheAgeSeconds", FormatNullableSeconds(CacheAgeSeconds));
+        AddIfPresent(data, "quietFailureReason", QuietFailureReason);
+        AddIfPresent(data, "quietFailureExplanation", QuietFailureExplanation);
+        if (Reputation is not null)
+        {
+            data["vtReputation"] = Reputation.Value.ToString(CultureInfo.InvariantCulture);
+            data["reputation"] = data["vtReputation"];
+        }
+
+        if (CommunityScore is not null)
+        {
+            data["vtCommunityScore"] = CommunityScore.Value.ToString(CultureInfo.InvariantCulture);
+            data["communityScore"] = data["vtCommunityScore"];
+        }
+
+        AddIfPresent(data, "communityScoreSource", CommunityScoreSource);
+        if (CommunityVotes.HasVotes)
+        {
+            data["vtCommunityHarmlessVotes"] = Math.Max(0, CommunityVotes.Harmless ?? 0).ToString(CultureInfo.InvariantCulture);
+            data["vtCommunityMaliciousVotes"] = Math.Max(0, CommunityVotes.Malicious ?? 0).ToString(CultureInfo.InvariantCulture);
+            data["vtCommunityVoteCount"] = CommunityVotes.Total.ToString(CultureInfo.InvariantCulture);
+        }
+
         if (HttpStatusCode is not null)
         {
             data["httpStatusCode"] = HttpStatusCode.Value.ToString(CultureInfo.InvariantCulture);
@@ -308,5 +372,36 @@ internal sealed record VirusTotalLookupResult
             VirusTotalLookupStatuses.Found => VirusTotalLookupStatuses.Unknown,
             _ => VirusTotalLookupStatuses.Unknown
         };
+    }
+
+    private static string BuildQuietFailureExplanation(string? status, string? errorKind, int? httpStatusCode, string? message)
+    {
+        var baseMessage = string.IsNullOrWhiteSpace(message) ? null : message.Trim();
+        var explanation = status switch
+        {
+            VirusTotalLookupStatuses.MissingHash => "Sample SHA-256 is unavailable; the official VirusTotal API was not called.",
+            VirusTotalLookupStatuses.InvalidHash => "Sample SHA-256 is malformed; the official VirusTotal API was not called.",
+            VirusTotalLookupStatuses.NotConfigured => "VirusTotal API key is not configured; lookup is skipped without writing job logs.",
+            VirusTotalLookupStatuses.NotFound => "VirusTotal returned 404 for this SHA-256; this is reputation status, not sample behavior.",
+            VirusTotalLookupStatuses.RateLimited => "VirusTotal returned a rate-limit response; lookup is quiet and can be retried later.",
+            VirusTotalLookupStatuses.AuthenticationFailed => "VirusTotal rejected the configured API key; check Settings before retrying.",
+            VirusTotalLookupStatuses.Timeout => "VirusTotal lookup timed out; sandbox execution continues and no job log is written.",
+            VirusTotalLookupStatuses.LookupFailed => "VirusTotal lookup failed during transport, HTTP, or response parsing; the failure stays display-only.",
+            _ => "VirusTotal lookup is in a quiet non-blocking state."
+        };
+
+        if (httpStatusCode is not null && !explanation.Contains(httpStatusCode.Value.ToString(CultureInfo.InvariantCulture), StringComparison.Ordinal))
+        {
+            explanation = $"{explanation} HTTP {httpStatusCode.Value.ToString(CultureInfo.InvariantCulture)}.";
+        }
+
+        if (!string.IsNullOrWhiteSpace(errorKind))
+        {
+            explanation = $"{explanation} errorKind={errorKind.Trim()}.";
+        }
+
+        return baseMessage is null
+            ? explanation
+            : $"{baseMessage} {explanation}";
     }
 }

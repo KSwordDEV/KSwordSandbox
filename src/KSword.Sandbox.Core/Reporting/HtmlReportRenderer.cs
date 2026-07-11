@@ -1,4 +1,5 @@
 using System.Net;
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -2007,6 +2008,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         html.AppendLine($"<div class=\"section-note\"><strong>Slim raw event sample.</strong> Raw events are collapsed by default. Raw events shown inline: {inlineEvents.Count}/{orderedEvents.Count}. Inline page size: {RawEventPageSize}. Raw evidence height limit: 58vh. Hidden raw events: {hiddenCount}. Open report.json or raw source artifacts for complete evidence.</div>");
         AppendRawSourceHints(html, report, artifacts);
         AppendRawEventDistribution(html, orderedEvents);
+        AppendRawEventPageIndex(html, orderedEvents);
 
         if (orderedEvents.Count == 0)
         {
@@ -2118,6 +2120,114 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         html.AppendLine("</div>");
     }
 
+    /// <summary>
+    /// Appends a static index for all raw rows so analysts can navigate dense
+    /// report.json evidence without expanding every page.
+    /// </summary>
+    private static void AppendRawEventPageIndex(StringBuilder html, IReadOnlyList<SandboxEvent> orderedEvents)
+    {
+        if (orderedEvents.Count == 0)
+        {
+            return;
+        }
+
+        var indexed = orderedEvents
+            .Select((evt, index) => new RawEventIndexRow(index + 1, evt))
+            .ToList();
+
+        html.AppendLine("<details class=\"raw-event-index\"><summary>Raw event page index / 原始事件索引</summary>");
+        html.AppendLine("<div class=\"section-note\"><strong>Raw event page index.</strong> This static index covers every normalized event, even rows hidden from inline rendering. Use event type, source, or family rows to decide whether to open inline pages, report.json, or original source artifacts.</div>");
+        html.AppendLine("<div class=\"evidence-summary-grid\">");
+        AppendRawIndexCard(html, "Index by event type", BuildRawIndexGroups(indexed, row => string.IsNullOrWhiteSpace(row.Event.EventType) ? "(empty)" : row.Event.EventType));
+        AppendRawIndexCard(html, "Index by source", BuildRawIndexGroups(indexed, row => string.IsNullOrWhiteSpace(row.Event.Source) ? "(empty)" : row.Event.Source));
+        AppendRawIndexCard(html, "Index by event family", BuildRawIndexGroups(indexed, row => EventFamilyLabel(row.Event)));
+        html.AppendLine("</div>");
+        html.AppendLine("</details>");
+    }
+
+    private static IReadOnlyList<RawEventIndexGroup> BuildRawIndexGroups(
+        IReadOnlyCollection<RawEventIndexRow> rows,
+        Func<RawEventIndexRow, string> keySelector)
+    {
+        return rows
+            .GroupBy(keySelector, StringComparer.OrdinalIgnoreCase)
+            .OrderByDescending(group => group.Count())
+            .ThenBy(group => group.Key, StringComparer.OrdinalIgnoreCase)
+            .Take(16)
+            .Select(group =>
+            {
+                var ordinals = group.Select(row => row.Ordinal).OrderBy(value => value).ToList();
+                return new RawEventIndexGroup(
+                    group.Key,
+                    ordinals.Count,
+                    ordinals[0],
+                    RawEventPageNumber(ordinals[0]),
+                    CompactOrdinalRanges(ordinals));
+            })
+            .ToList();
+    }
+
+    private static void AppendRawIndexCard(StringBuilder html, string title, IReadOnlyCollection<RawEventIndexGroup> groups)
+    {
+        var copy = title + Environment.NewLine + string.Join(Environment.NewLine, groups.Select(group =>
+            $"{group.Label}: count={group.Count}; firstRow={group.FirstRow}; firstInlinePage={group.FirstInlinePage}; rows={group.RowRanges}"));
+        html.AppendLine($"<article class=\"evidence-summary-card copyable\" data-copy=\"{A(copy)}\">");
+        html.AppendLine($"<h3>{E(title)}</h3>");
+        html.AppendLine($"<span class=\"summary-value\">{E(groups.Sum(group => group.Count).ToString())}</span>");
+        html.AppendLine("<ol class=\"compact-list raw-index-list\">");
+        foreach (var group in groups)
+        {
+            var inlinePage = group.FirstRow <= RawEventInlineLimit
+                ? $"inline page {group.FirstInlinePage}"
+                : "report.json only";
+            html.AppendLine($"<li><span class=\"chip chip-info copyable\" data-copy=\"{A(group.Label)}\">{E(group.Label)}</span> <strong>{E(group.Count.ToString())}</strong> <span class=\"muted\">first row {E(group.FirstRow.ToString())}; {E(inlinePage)}; rows {E(group.RowRanges)}</span></li>");
+        }
+
+        html.AppendLine("</ol>");
+        html.AppendLine("</article>");
+    }
+
+    private static int RawEventPageNumber(int oneBasedRow)
+    {
+        return oneBasedRow <= 0
+            ? 0
+            : (int)Math.Ceiling(oneBasedRow / (double)RawEventPageSize);
+    }
+
+    private static string CompactOrdinalRanges(IReadOnlyList<int> ordinals)
+    {
+        if (ordinals.Count == 0)
+        {
+            return string.Empty;
+        }
+
+        var ranges = new List<string>();
+        var start = ordinals[0];
+        var previous = ordinals[0];
+        foreach (var ordinal in ordinals.Skip(1))
+        {
+            if (ordinal == previous + 1)
+            {
+                previous = ordinal;
+                continue;
+            }
+
+            ranges.Add(FormatRange(start, previous));
+            start = ordinal;
+            previous = ordinal;
+        }
+
+        ranges.Add(FormatRange(start, previous));
+        return string.Join(", ", ranges.Take(12)) + (ranges.Count > 12 ? ", ..." : string.Empty);
+    }
+
+    private static string FormatRange(int start, int end)
+    {
+        return start == end
+            ? start.ToString(CultureInfo.InvariantCulture)
+            : $"{start.ToString(CultureInfo.InvariantCulture)}-{end.ToString(CultureInfo.InvariantCulture)}";
+    }
+
     private static void AppendDistributionCard(StringBuilder html, string title, IReadOnlyCollection<(string Label, int Count)> rows)
     {
         var copy = title + Environment.NewLine + string.Join(Environment.NewLine, rows.Select(row => $"{row.Label}: {row.Count}"));
@@ -2133,6 +2243,15 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         html.AppendLine("</ol>");
         html.AppendLine("</article>");
     }
+
+    private sealed record RawEventIndexRow(int Ordinal, SandboxEvent Event);
+
+    private sealed record RawEventIndexGroup(
+        string Label,
+        int Count,
+        int FirstRow,
+        int FirstInlinePage,
+        string RowRanges);
 
     /// <summary>
     /// Appends a standard event table section.
@@ -5142,6 +5261,15 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         ("Open report.json or raw source artifacts for complete evidence.", "打开 report.json 或原始来源证据查看完整证据。"),
         ("Show inline raw events", "显示内联原始事件"),
         ("Raw event distribution", "原始事件分布"),
+        ("Raw event page index.", "原始事件页索引。"),
+        ("Raw event page index", "原始事件页索引"),
+        ("This static index covers every normalized event, even rows hidden from inline rendering. Use event type, source, or family rows to decide whether to open inline pages, report.json, or original source artifacts.", "此静态索引覆盖每一条规范化事件，包括未内联渲染的隐藏行。可按事件类型、来源或事件族判断应打开内联页、report.json 还是原始来源证据。"),
+        ("Index by event type", "按事件类型索引"),
+        ("Index by source", "按来源索引"),
+        ("Index by event family", "按事件族索引"),
+        ("first row", "首行"),
+        ("inline page", "内联页"),
+        ("report.json only", "仅 report.json"),
         ("Top event types", "主要事件类型"),
         ("Event families", "事件族"),
         ("Sources", "来源"),

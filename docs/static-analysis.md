@@ -241,6 +241,42 @@ parses `behavior-rules.json`, checks rule ID uniqueness, classifies synthetic
 `static.yara.match` rows, and verifies that these static-only findings stay
 non-high-risk triage.
 
+## Structured `static.*` event depth
+
+Granular `StaticAnalyzer.CreateEvents()` rows now carry a shared rule-facing
+field set so reports and future behavior rules can consume PE and string
+evidence without parsing human-readable messages:
+
+- `staticOnly=True`, `evidenceOrigin=host-static-analysis`,
+  `evidenceKind`, `ruleScope`, `ruleKey`, `behaviorFamily`, and
+  `triageLevel` are present on summary and granular static rows.
+- Import-module rows add booleans such as `hasProcessInjectionApi`,
+  `hasDownloadApi`, `hasAntiDebugApi`, `hasCredentialAccessApi`,
+  `hasDefenseEvasionApi`, and `downloadExecCandidate`, plus
+  `behaviorFamilies`, `primaryCapability`, and `mitreCandidates`.
+- Import-cluster rows add `behaviorLane`, `primaryCapability`,
+  `antiDebugCandidate`, `downloadExecCandidate`, and Chinese `zhHint` text
+  tailored to injection, persistence, download, credential, evasion, and
+  anti-debug API families.
+- Export rows add `exportRole`, `loaderEntryCandidate`,
+  `persistenceCandidate`, and MITRE candidates for COM registration and service
+  entry-point exports.
+- TLS rows add `executionPhase=pre-entrypoint`,
+  `earlyExecutionCandidate`, `antiAnalysisCandidate`, and ATT&CK candidate
+  fields so TLS callbacks can be shown as early-execution evidence without
+  claiming runtime execution.
+- Overlay rows add `overlayRole`, `payloadCandidate`, `certificateOnly`, and
+  `nonCertificateEntropyLabel` so report cards can separate signature-table
+  bytes from appended payload-like data.
+- Network/path/command/suspicious-string rows add indicator roles, path roles,
+  download-execute candidates, anti-debug candidates, IOC confidence, and
+  MITRE candidate fields while preserving the legacy `tags` vocabulary.
+
+These fields remain string-valued because `SandboxEvent.Data` is the stable
+cross-component envelope. The Chinese `zhMessage`/`zhHint` values are
+operator-facing explanations; rules should prefer the concrete machine fields
+above and continue to treat static-only rows as capability/triage evidence.
+
 ## False-positive guardrails
 
 Static tags are triage evidence, not a verdict. The analyzer avoids adding

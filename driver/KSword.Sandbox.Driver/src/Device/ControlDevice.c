@@ -1,4 +1,5 @@
 #include "Driver.h"
+#include "Producers/Network/NetworkMonitor.h"
 
 /*
  * Completes an IRP with the supplied status and byte count.
@@ -175,6 +176,7 @@ KswBuildCapabilityFlags(
         KSWORD_SANDBOX_CAPABILITY_FLAG_GET_CAPABILITIES |
         KSWORD_SANDBOX_CAPABILITY_FLAG_GET_STATUS |
         KSWORD_SANDBOX_CAPABILITY_FLAG_SET_PRODUCER_ENABLE_MASK |
+        KSWORD_SANDBOX_CAPABILITY_FLAG_GET_NETWORK_STATUS |
         KSWORD_SANDBOX_CAPABILITY_FLAG_QUEUE_STATUS_COUNTERS |
         KSWORD_SANDBOX_CAPABILITY_FLAG_PRODUCER_ENABLE_BITS |
         KSWORD_SANDBOX_CAPABILITY_FLAG_TYPED_EVENT_PAYLOADS |
@@ -403,6 +405,45 @@ KswHandleGetStatus(
     reply->EffectiveProducerMask =
         snapshot.ActiveProducerMask & snapshot.ProducerEnableMask;
     reply->LastFailureNtStatus = snapshot.LastFailureStatus;
+
+    return KswCompleteIrp(Irp, STATUS_SUCCESS, sizeof(*reply));
+}
+
+/*
+ * Handles IOCTL_KSWORD_SANDBOX_GET_NETWORK_STATUS.
+ *
+ * Inputs : DeviceObject identifies the skeleton device; Irp carries a buffered
+ *          output buffer; OutputBufferLength is the caller's output size.
+ * Logic  : validates the control device and returns read-only WFP/ALE producer
+ *          diagnostics without mutating WFP state or starting capture.
+ * Return : STATUS_SUCCESS with sizeof(KSWORD_SANDBOX_NETWORK_STATUS_REPLY)
+ *          bytes, or a failure status.
+ */
+static
+NTSTATUS
+KswHandleGetNetworkStatus(
+    _In_ PDEVICE_OBJECT DeviceObject,
+    _Inout_ PIRP Irp,
+    _In_ ULONG OutputBufferLength
+    )
+{
+    PKSWORD_SANDBOX_NETWORK_STATUS_REPLY reply;
+
+    if (OutputBufferLength < sizeof(*reply)) {
+        return KswCompleteIrp(Irp, STATUS_BUFFER_TOO_SMALL, 0);
+    }
+
+    reply =
+        (PKSWORD_SANDBOX_NETWORK_STATUS_REPLY)Irp->AssociatedIrp.SystemBuffer;
+    if (reply == NULL) {
+        return KswCompleteIrp(Irp, STATUS_INVALID_USER_BUFFER, 0);
+    }
+
+    if (KswGetDeviceExtension(DeviceObject) == NULL) {
+        return KswCompleteIrp(Irp, STATUS_DEVICE_NOT_READY, 0);
+    }
+
+    KswQueryNetworkStatus(reply);
 
     return KswCompleteIrp(Irp, STATUS_SUCCESS, sizeof(*reply));
 }
@@ -809,6 +850,12 @@ KswDispatchDeviceControl(
 
     case IOCTL_KSWORD_SANDBOX_GET_STATUS:
         return KswHandleGetStatus(DeviceObject, Irp, outputBufferLength);
+
+    case IOCTL_KSWORD_SANDBOX_GET_NETWORK_STATUS:
+        return KswHandleGetNetworkStatus(
+            DeviceObject,
+            Irp,
+            outputBufferLength);
 
     case IOCTL_KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK:
         return KswHandleSetProducerEnableMask(

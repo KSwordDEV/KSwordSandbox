@@ -133,6 +133,12 @@ MVP package.
   -SamplePreset Notepad`, `Status`, `CheckEnvironment`, `Plan`, `WhatIf`, and
   package creation do not start, restore, stop, or mutate a VM. Live execution
   requires explicit `-Live` or the WebUI/API live action.
+- **Operator diagnostics are explicit:** `install.ps1` and `run.ps1` expose
+  read-only `HyperVPrerequisites`, `VmProfile`, `GuestPayloadStatus` /
+  `GuestPayloadFreshnessReasons`, `VirusTotalMissingKeyBehavior`, and
+  `RuntimeRootUnderRepository`. Reviewers should inspect `RecommendedActions`
+  before live execution instead of discovering missing prerequisites during a
+  sample run.
 - **Real Notepad 5s report path is documented and tested on a lab machine:** see
   the command sequence below. The resulting job/report remains under the runtime
   root, not the repository.
@@ -220,11 +226,20 @@ Release-manager diagnostics are printed at the end of each package run:
 
 - package kind/version, staging path, generated metadata path, copied file count
   and payload byte count;
+- `RuntimePublishRoot` state and each expected runtime publish entry
+  (`host-web`, `guest-tools`, `tools/job-tool`, `tools/postprocess`) as
+  present/missing; missing optional entries remain useful for layout dry-runs
+  but must be resolved before a complete portable runtime handoff;
 - skipped optional runtime publish entries, for example when `guest-tools` or
   `tools/postprocess` has not yet been published into `RuntimePublishRoot`;
 - archive path and SHA-256 when `-StageOnly` is not used;
 - explicit safety line: no VM mutation, no driver signing, no `CSignTool`, no
   `git push`, and no network publish.
+
+`package-manifest.generated.json` now includes `operatorDiagnostics` with
+runtime publish readiness, missing payload names, non-mutating guarantees, and
+package safety guidance. It is a reviewer-facing handoff artifact, not a file to
+commit back into the source tree.
 
 The generated metadata is intended to be committed only as part of a built
 release artifact, never back into the source repository. Keep staged packages

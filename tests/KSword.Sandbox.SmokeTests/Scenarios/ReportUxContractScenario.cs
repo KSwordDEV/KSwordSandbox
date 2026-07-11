@@ -97,6 +97,12 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(rendererSource, "raw-events-panel", "Report renderer should bound expanded raw event height.");
         RequireContains(rendererSource, "Raw evidence height limit: 58vh", "Report renderer should state the raw evidence panel height limit.");
         RequireContains(rendererSource, "raw-event-page", "Report renderer should split expanded raw events into page panels.");
+        RequireContains(rendererSource, "Raw event page index", "Report renderer should expose a static raw event page index.");
+        RequireContains(rendererSource, "AppendRawEventPageIndex", "Report renderer should build a raw event page index.");
+        RequireContains(rendererSource, "Index by event type", "Raw event index should group by event type.");
+        RequireContains(rendererSource, "Index by source", "Raw event index should group by source.");
+        RequireContains(rendererSource, "Index by event family", "Raw event index should group by event family.");
+        RequireContains(rendererSource, "report.json only", "Raw event index should identify rows outside the inline cap.");
         RequireContains(rendererSource, "raw-technical-field", "Report renderer should hide long raw technical fields behind nested details.");
         RequireContains(rendererSource, "Command/stdout/stderr/PowerShell fields hidden by default", "Report renderer should collapse long command/output/script fields.");
         RequireContains(rendererSource, "Hidden raw events", "Report renderer should expose hidden raw event counts.");
@@ -156,6 +162,8 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(doc, "first 75 raw events", "Report UX doc should require a slim raw event inline limit.");
         RequireContains(doc, "25-row native pages", "Report UX doc should require compact bounded raw event pages.");
         RequireContains(doc, "Raw evidence height limit", "Report UX doc should require a raw evidence height limit.");
+        RequireContains(doc, "Raw event page index", "Report UX doc should require a static raw event page index.");
+        RequireContains(doc, "copyable row ranges", "Report UX doc should require copyable row ranges.");
         RequireContains(doc, "hidden raw events", "Report UX doc should require hidden raw event counts.");
         RequireContains(doc, "report.json", "Report UX doc should require report.json source hints.");
         RequireContains(doc, "raw source artifact path hints", "Report UX doc should require raw source path hints.");
@@ -278,6 +286,11 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(englishHtml, "Raw event page 1: rows 1-25 of 213", "Rendered raw event panel should show the first native page.");
         RequireContains(englishHtml, "Raw event page 3: rows 51-75 of 213", "Rendered raw event panel should show the final inline page.");
         RequireContains(englishHtml, "raw-event-page", "Rendered raw event panel should use bounded page containers.");
+        RequireContains(englishHtml, "Raw event page index", "Rendered raw event overview should include a static page index.");
+        RequireContains(englishHtml, "Index by event type", "Rendered raw event index should include event type grouping.");
+        RequireContains(englishHtml, "Index by source", "Rendered raw event index should include source grouping.");
+        RequireContains(englishHtml, "Index by event family", "Rendered raw event index should include family grouping.");
+        RequireContains(englishHtml, "report.json only", "Rendered raw event index should point beyond inline rows to report.json.");
         RequireContains(englishHtml, "Total events", "Rendered raw event overview should show the total count label.");
         RequireContains(englishHtml, "Hidden raw events", "Rendered raw event overview should show the hidden count label.");
         RequireContains(englishHtml, "Raw source paths", "Rendered raw event section should show source path hints.");

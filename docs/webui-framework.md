@@ -48,6 +48,14 @@ WebUI/UX 工作不得修改 `driver/`、`guest/` 或
 根 dashboard 是短路径操作者入口（operator launcher），只应保留以下可见且
 可复制区域：
 
+- 首屏必须像成熟云沙箱的 cockpit：顶部先说明“上传后自动进 VM”，再展示可复制的
+  readiness chips。chips 至少覆盖样本选择状态、VM/checkpoint、Guest 密钥环境变量名、
+  R0 real/mock/config 状态、VirusTotal hash-only quiet 状态，以及本次敏感产物采集摘要。
+  chip 只表达“可见配置/等待后端预检”，不能伪造 Hyper-V live readiness。
+- `上传 EXE` 默认面板应提供清晰 primary CTA：`开始分析：上传 → 进 VM → 打开实时监控`。
+  选择样本前显示空态；选择后显示文件名、大小、分析时长、扩展名检查和 artifact 采集摘要。
+  可选运行预设（例如快速观察、标准动态、证据优先、内存取证）只能修改当前表单字段，不写配置。
+  拖拽上传区、样本摘要、预设按钮、状态文本和错误提示都必须支持右键复制。
 - 顶层工作区分为 `上传 / 配置`、`进度`、`报告` 三个 tab。上传/配置 tab
   是 default selected tab；上传/启动成功后按需切换到进度/报告区域；报告
   就绪通知必须在自动打开报告前显示。
@@ -56,67 +64,56 @@ WebUI/UX 工作不得修改 `driver/`、`guest/` 或
   会在 `.exe` 保存后创建计划、提交后台 VM 分析，并把当前页面跳到 live
   monitor；host-path planning 和 directory scan 只生成可复核计划，不展示
   runbook 命令长列表。
-- VM configuration fields 在上传前可见，并随每次 dry-run 或 one-click
-  upload/start planning request 提交：`goldenVmName`,
-  `goldenSnapshotName`, `durationSeconds`, `guestUserName`,
-  `guestWorkingDirectory`, `guestPayloadRoot`, and `useMockCollector`. The UI
-  shows a Guest credential hint instead of asking for a password: credentials
-  are still resolved from the configured secret environment variable by the Web
-  host. R0 `driver.enabled` remains a config-level Core switch; the WebUI shows
-  that state read-only and exposes the existing per-job
-  real-vs-`useMockCollector` override without changing Core business logic;
+- VM 配置字段在上传前可见，并随每次 dry-run 或一键 upload/start planning request
+  提交：`goldenVmName`、`goldenSnapshotName`、`durationSeconds`、
+  `guestUserName`、`guestWorkingDirectory`、`guestPayloadRoot` 和
+  `useMockCollector`。UI 只展示 Guest 凭据提示，不要求操作者输入密码；凭据仍由
+  Web host 从配置的 secret 环境变量解析。R0 `driver.enabled` 仍是 Core 配置开关；
+  WebUI 只读展示该状态，并保留每任务 real-vs-`useMockCollector` 覆盖，不改变 Core
+  业务逻辑。
 - 敏感产物采集字段为显式启用（opt-in），随每次 dry-run planning request
-  提交并保存在 job submission 中：`collectDroppedFiles`,
-  `captureScreenshots`, `captureMemoryDumps`, and `capturePacketCapture`. These
-  are disabled by default unless explicitly enabled in config or checked in the
-  WebUI, and the runbook forwards them to the Guest Agent as
-  `--collect-dropped-files`, `--screenshot`, `--memory-dump`, and
-  `--packet-capture`;
-- 明确展示 job status、job ID、sample path、recent job list、progress-page
-  entry、live-monitor entry 和 report entry。
+  提交并保存在 job submission 中：`collectDroppedFiles`、`captureScreenshots`、
+  `captureMemoryDumps` 和 `capturePacketCapture`。默认禁用；只有配置显式启用或
+  WebUI 勾选时才打开。runbook 转发给 Guest Agent 的参数为
+  `--collect-dropped-files`、`--screenshot`、`--memory-dump` 和
+  `--packet-capture`。
+- 明确展示任务状态、任务 ID、样本路径、近期任务列表、进度页入口、实时监控入口和报告入口。
 - 可选高级手动 guest import input 只用于修复。根 dashboard 不再渲染
   artifact/download 路径表；报告与证据下载统一集中在 live monitor。
-- 操作者可见结果文件使用 artifact index 和 download endpoints：
+- 操作者可见结果文件使用证据索引（artifact index）和下载端点（download endpoints）：
   `GET /api/jobs/{jobId}/artifacts` 返回当前宿主侧 `artifact-index` 视图；
-  `GET /api/jobs/{jobId}/artifacts/download?path=<relative>` 只 stream 该索引中存在的文件。
+  `GET /api/jobs/{jobId}/artifacts/download?path=<relative>` 只流式返回该索引中存在的文件。
   下载 path 必须是规范化的 relative/safe-link 值，绝不能是任意宿主绝对路径。
   `GET /api/jobs/{jobId}/report/{relativeArtifactPath}` 复用同一个受保护 resolver，
   使 served HTML report 内的链接可以打开 `events.json`、`driver-events.jsonl`、
-  dropped files、screenshots、memory dumps 或 PCAP artifacts，而不把本地文件系统路径暴露给浏览器；
-- 计划创建后自动给出报告链接，包括 served
-  `/api/jobs/{jobId}/report/html` link. Manual report buttons follow the
-  current Chinese/English dashboard language, while compact `zh` / `en` alternatives
-  remain visible so operators never need to paste a report path. Automatic
-  completion navigation defaults to the Chinese report endpoint
-  `/api/jobs/{jobId}/report/html?lang=zh`, which resolves to `report.zh.html`.
-  If no report path is available yet, the main button must be visibly
-  disabled/pending instead of navigating to a likely 404;
-- stage progress 必须展示有序且用户可理解的阶段：`启动 VM`、
+  落地文件、截图、内存转储或 PCAP 证据，而不把本地文件系统路径暴露给浏览器；
+- 计划创建后自动给出报告链接，包括 served `/api/jobs/{jobId}/report/html` 链接。
+  手动报告按钮跟随当前中文/英文 dashboard 语言，同时保留紧凑 `zh` / `en` 备选入口，
+  避免操作者手动粘贴报告路径。完成后自动导航默认使用中文报告端点
+  `/api/jobs/{jobId}/report/html?lang=zh`，解析到 `report.zh.html`。如果报告路径尚不可用，
+  主按钮必须显示禁用/等待状态，而不是跳到可能的 404；
+- 阶段进度必须展示有序且用户可理解的阶段：`启动 VM`、
   `部署 Payload`、`执行样本`、`收集结果`、`生成报告`，并保留稳定 ID 和
-  human-readable status。进度卡片还必须在主 dashboard 直接展示
-  current step, elapsed time, and failure reason，让操作者无需展开高级详情也能判断
-  运行是否推进。较长的 Hyper-V restore/start 阶段即使 executor step 尚未
-  前进，也应保持可见 running/pulse 状态。
-- 真实 executor 进度来自
-  `GET /api/jobs/{jobId}/runbook/progress` after `/runbook/start` accepts a
-  background run or when tooling uses the legacy executor path. The endpoint is
-  backed by `RunbookProgressStore`, receives `SandboxRunbookProgressSnapshot`
-  values through the executor `ProgressSink`, writes the same UI-safe snapshot
-  to durable `runbook-progress.json`, and returns the newest durable/in-memory
-  snapshot so refreshes or another Web worker do not regress to fake progress.
-  Progress snapshots intentionally omit PowerShell command text, `stdout`, and
-  `stderr` from the main dashboard;
-- live VM analysis 应通过服务端 background path 启动：
-  `POST /api/jobs/{jobId}/runbook/start` returns immediately after accepting
-  the job, and `GET /api/jobs/{jobId}/runbook/background` exposes queued,
-  running, completed, or failed state plus the terminal execution/import result.
-  The legacy blocking `/runbook/execute` endpoint remains available for tools,
-  but the browser experience must not depend on one long fetch staying alive;
-- 上传流程应保持 one-click：`.exe` 上传并保存后创建 plan，dashboard 必须把 live VM
-  analysis 提交给 Web host background runner，并将当前浏览器页重定向到
+  人类可读状态。进度卡片还必须在主 dashboard 直接展示当前步骤、已耗时和失败原因，
+  让操作者无需展开高级详情也能判断运行是否推进。较长的 Hyper-V restore/start 阶段即使
+  executor step 尚未前进，也应保持可见运行/脉冲状态。
+- 真实 executor 进度来自 `GET /api/jobs/{jobId}/runbook/progress`：当
+  `/runbook/start` 已接受后台运行，或工具仍使用 legacy executor path 时可读取。
+  该端点由 `RunbookProgressStore` 支撑，通过 executor `ProgressSink` 接收
+  `SandboxRunbookProgressSnapshot`，把同一份 UI-safe 快照写入持久化
+  `runbook-progress.json`，并返回最新 durable/in-memory 快照，避免刷新或另一个
+  Web worker 退回假进度。进度快照有意省略 PowerShell 命令文本、标准输出
+  `stdout` 和标准错误 `stderr`；
+- 实时 VM 分析应通过服务端后台路径启动：
+  `POST /api/jobs/{jobId}/runbook/start` 接受任务后立即返回；
+  `GET /api/jobs/{jobId}/runbook/background` 暴露 queued/running/completed/failed
+  状态以及终端执行/导入结果。legacy blocking `/runbook/execute` endpoint 仍可供工具使用，
+  但浏览器体验不得依赖一个长 fetch 持续存活；
+- 上传流程应保持一键（one-click）：`.exe` 上传并保存后创建 plan，dashboard 必须把实时
+  VM analysis 提交给 Web host background runner，并将当前浏览器页重定向到
   `/jobs/{jobId}/live-events`。动态监控页（dynamic monitor）是操作者查看真实
-  runbook 进度、原始事件、VirusTotal 状态和 artifact/download 卡片的主入口；
-  不需要 popup 或额外 dashboard tab。首选 API 路径是
+  runbook 进度、原始事件、VirusTotal 状态和证据/下载卡片的主入口；
+  不需要弹窗或额外 dashboard tab。首选 API 路径是
   `POST /api/files/upload/start`，它在一个服务端操作中保存上传、创建 job、提交后台
   runbook 执行，避免早期三段请求链（`upload` -> `plan` -> `runbook/start`）在浏览器
   fetch 中途失败时丢失上下文；
@@ -128,45 +125,45 @@ WebUI/UX 工作不得修改 `driver/`、`guest/` 或
   `KSWORDBOX_VIRUSTOTAL_API_KEY` 读取，也可来自 settings 页的 process-local 更新；
   WebUI 不得把 API key 写入 repo、config 或 runtime 文件。Job 页提供
   `GET /api/jobs/{jobId}/virustotal`，使用 `x-apikey` 查询官方 v3 `files/{sha256}`
-  endpoint，不上传样本；缺失或不可用时返回 quiet `not_configured` / `lookup_failed`
-  状态，而不是中断分析。缺失 API key 应保持为带 settings 链接的 quiet UI 状态，
+  endpoint，不上传样本；缺失或不可用时返回静默 `not_configured` / `lookup_failed`
+  状态，而不是中断分析。缺失 API key 应保持为带设置链接的静默 UI 状态，
   不应成为重复 warning/noisy log 或自动 report-enrichment write；
-- 提供 dedicated live raw monitor page / dynamic monitor page 链接，用于在最终报告
-  classification 前展示 source files 和未归类 raw event rows。若页面由 upload 自动打开，
+- 提供专用实时原始事件监控页（dedicated live raw monitor page / dynamic monitor page）
+  链接，用于在最终报告 classification 前展示 source files 和未归类 raw event rows。若页面由 upload 自动打开，
   Web host 已经接受后台运行，原 dashboard 页不必继续打开。Monitor 页还应轮询
-  `GET /api/jobs/{jobId}/runbook/progress`，只展示 UI-safe 的 runbook step state、
-  current step 和 progress percentage，不内联 command lines、`stdout` 或 `stderr`。
+  `GET /api/jobs/{jobId}/runbook/progress`，只展示界面安全的 runbook step 状态、
+  当前步骤和进度百分比，不内联命令行、`stdout` 或 `stderr`。
   如果 `/runbook/background` 上存在终端执行结果，per-step `stdout`/`stderr` 只能放在折叠的
-  troubleshooting `<details>` 中；command lines 仍保持隐藏。页面也轮询
+  排障 `<details>` 中；命令行仍保持隐藏。页面也轮询
   `GET /api/jobs/{jobId}/runbook/background`，以便主 dashboard tab 在后台任务接受后关闭时，
-  monitor 仍能显示 terminal completed/failed state 和报告链接。Upload-launched monitor
-  会在完成后先显示短 report-ready notice，再自动导航到中文报告
+  monitor 仍能显示终态 completed/failed 状态和报告链接。上传启动的 monitor
+  会在完成后先显示短“报告已就绪”通知，再自动导航到中文报告
   `/api/jobs/{jobId}/report/html?lang=zh`（`report.zh.html`）。操作者仍可使用右上角语言切换
   和显式英文报告按钮进入英文报告；
 - dynamic monitor page 应优先服务真实产品使用，而不只服务 smoke 覆盖；页面展示
-  **证据 / 下载（Artifacts / downloads）** 卡片面板。面板列出
+  **证据 / 下载** 卡片面板。面板列出
   `report.html`、`report.zh.html`、`report.en.html`、`report.json`、`events.json`、
-  `driver-events.jsonl`、dropped files、screenshots、memory dumps 和 packet captures。
+  `driver-events.jsonl`、落地文件、截图、内存转储和 PCAP packet captures。
   如果存在安全 Web endpoint（包括 `/api/jobs/{jobId}/artifacts/download?path=<relative>`
-  或 served report endpoint），卡片应渲染双语打开/下载按钮。没有 download endpoint 的证据，
+  或 served report endpoint），卡片应渲染双语打开/下载按钮。没有下载 endpoint 的证据，
   应显示可复制 host path 或 derived expected path，并显示双语 `等待回收` / `waiting for collection`
   状态，而不是隐藏该 lane。同一 monitor 应突出展示 VirusTotal 结果，并清晰区分
-  malicious/suspicious/clean/missing/not-configured 状态；后台运行进入 terminal state 后，
+  恶意/可疑/无害/缺失/未配置状态；后台运行进入 terminal state 后，
   仍保持显式中文和英文报告按钮可见；
-- 为 runbook step status 提供自然的 progress-page link，指向 dedicated
-  execution-flow page，并同时出现在 job actions 与 progress summary 中。
+- 为 runbook step status 提供自然的进度页链接，指向 dedicated execution-flow page，
+  并同时出现在任务操作与进度摘要中。
   根 dashboard 不得内联长 runbook PowerShell commands、command-line details、`stdout`、
-  `stderr`、raw event rows 或 artifact/download lists。Recent job cards 应保持紧凑，
-  只展示 status、report readiness、`执行流程 / Execution flow` 链接，以及用于技术跟进的
-  live monitor/download 入口。
+  `stderr`、raw event rows 或 artifact/download lists。近期任务卡应保持紧凑，
+  只展示状态、报告就绪度、`执行流程 / Execution flow` 链接，以及用于技术跟进的
+  实时监控/下载入口。
 
-所有表格、路径值、raw telemetry evidence、job messages、status text、inputs
+所有表格、路径值、原始遥测证据、任务消息、状态文本、输入框
 和 section text 都必须支持显式 `复制 / Copy` 按钮，或通过 `data-copy`、
 `code`、`pre`、`td`、`th`、`p`、`li`、heading、`label`、`span`、`a`、
 `button`、`input` 元素支持右键复制（right-click copy）。复制成功或失败后 WebUI 应显示小
 toast，告知操作者剪贴板捕获是否成功。
 
-Guest import status 应具体且中文优先：
+Guest 导入状态应具体且中文优先：
 
 - `等待导入 / waiting for import`：job 已有 report paths，但尚无 imported
   event source。
@@ -205,38 +202,34 @@ Dry-run plan could not be created: <specific path validation detail>`.
 ## Dashboard 约定 / Dashboard conventions
 
 Dashboard components 只渲染本地拥有的 HTML fragments。普通文本必须经过
-`DashboardHtml.Encode` 或 `DashboardHtml.Attribute`。当文本、badges、cards
+`DashboardHtml.Encode` 或 `DashboardHtml.Attribute`。当文本、徽章、卡片
 或未来表格中的值需要复制时，使用 `data-copy` attribute 渲染，使标准
-context-copy script 能一致处理右键复制（right-click copy）行为。
+右键复制脚本（context-copy script）能一致处理复制行为。
 
 敏感产物采集控制必须位于高级/显式启用（advanced/explicit opt-in）区域。UI
 可从以下配置预勾选：
-`config.artifactCollection.collectDroppedFiles`,
-`config.artifactCollection.captureScreenshots`,
-`config.artifactCollection.captureMemoryDumps`, and
-`config.artifactCollection.capturePacketCapture`, but operators must be able to
-override them per job before planning. The job card should summarize which
-lanes were requested without implying that artifacts already exist.
+`config.artifactCollection.collectDroppedFiles`、
+`config.artifactCollection.captureScreenshots`、
+`config.artifactCollection.captureMemoryDumps` 和
+`config.artifactCollection.capturePacketCapture`，但操作者必须能在规划前按 job 覆盖。
+任务卡只汇总请求了哪些证据 lane，不暗示证据已经存在。
 
-VM controls should remain operator-facing but compact: VM name, checkpoint,
-analysis duration, Guest user/working-directory hints, R0 config state,
-real/mock collector mode, and artifact toggles are shown in square, flat cards
-on the upload page. `/settings` may save the same values as a local browser
-preset so repeated jobs do not require retyping, but the preset is not a Core
-configuration writer. The main dashboard must continue to avoid a command-line
-wall: progress cards and job cards summarize human-readable state and link to
-the dedicated execution-flow page for deeper diagnostics instead of inlining
-long commands or process output.
+VM controls 应保持面向操作者但紧凑：VM 名称、checkpoint、分析时长、Guest
+用户/工作目录提示、R0 配置状态、real/mock collector mode 和 artifact toggles
+都在上传页以方角扁平卡片展示。`/settings` 可以把同一组值保存为浏览器本地预设，
+减少重复输入，但该预设不是 Core configuration writer。主 dashboard 必须继续避免
+命令墙：进度卡和任务卡汇总人类可读状态，并链接到专用 execution-flow page 做深入诊断，
+而不是内联长命令或进程输出。
 
-当 JavaScript 渲染动态表格行时，每个 path 或 evidence cell 应调用本地
-copy-button helper，或把 `data-copy` 设置为 raw value。对于 planned jobs，UI
-可从 recorded job root 推导预期 guest paths：`guest\<job-id-n>\events.json`
+当 JavaScript 渲染动态表格行时，每个路径或证据单元格应调用本地
+copy-button helper，或把 `data-copy` 设置为原始值。对于 planned jobs，UI
+可从记录的 job root 推导预期 guest paths：`guest\<job-id-n>\events.json`
 和
-`guest\<job-id-n>\driver-events.jsonl`. These derived paths are display hints;
-the import endpoint still resolves actual files server-side.
+`guest\<job-id-n>\driver-events.jsonl`。这些派生路径只是显示提示；导入 endpoint
+仍在服务端解析真实文件。
 
-当前根页面也从 `/api/jobs` 渲染紧凑 recent-job cards。这些卡片刻意只读：
-`打开 / Open` action 获取所选 job detail 并复用主 job panel；artifact/download
+当前根页面也从 `/api/jobs` 渲染紧凑近期任务卡。这些卡片刻意只读：
+`打开 / Open` action 获取所选 job detail 并复用主 job panel；证据/下载
 渲染保留在 `/jobs/{jobId}/live-events`。
 
 ## 可选运行时 WebUI smoke / Optional runtime WebUI smoke
@@ -261,27 +254,22 @@ dotnet run --project .\tests\KSword.Sandbox.SmokeTests\KSword.Sandbox.SmokeTests
 runtime WebUI smoke contract 刻意保持 API-level，便于 headless workers 运行。
 它探测：
 
-- `GET /jobs/{jobId}/live-events` and requires a successful `text/html` page
-  containing the live raw monitor title plus references to both raw event
-  transports;
-- `GET /api/jobs/{jobId}/events/live?offset=0&take=1` and requires the live raw
-  telemetry JSON cursor fields: `jobId`, `retrievedAt`, `totalEvents`,
+- `GET /jobs/{jobId}/live-events`：要求返回成功的 `text/html` 页面，页面包含实时原始监控标题，
+  并引用两种 raw event transport；
+- `GET /api/jobs/{jobId}/events/live?offset=0&take=1`：要求返回实时原始遥测 JSON cursor 字段：
+  `jobId`、`retrievedAt`、`totalEvents`、
   `nextOffset`, `hasMore`, `sources`, and `events`;
-- the root dashboard source must link to the dedicated live raw monitor page;
-- `GET /api/jobs/{jobId}/report/html` and requires a successful `text/html`
-  served report response, which is the same safe report link rendered by the
-  dashboard;
-- bilingual report endpoints: `GET /api/jobs/{jobId}/report/html?lang=zh` and
-  `GET /api/jobs/{jobId}/report/html?lang=en` should both return `text/html`
-  from the recorded job report paths, falling back to the compatibility
-  `report.html` only when a localized report file is not recorded;
-- `POST /api/jobs/{jobId}/guest-events/import` with an explicit missing
-  `eventsPath` and requires a controlled HTTP 400 validation response. This
-  proves the manual guest import endpoint and payload contract without importing
-  or rewriting real guest artifacts during smoke.
+- root dashboard source 必须链接到专用 live raw monitor page；
+- `GET /api/jobs/{jobId}/report/html`：要求返回成功的 `text/html` served report response，
+  也就是 dashboard 渲染的同一个安全报告链接；
+- 双语报告端点 `GET /api/jobs/{jobId}/report/html?lang=zh` 与
+  `GET /api/jobs/{jobId}/report/html?lang=en` 都应从记录的 job report path 返回
+  `text/html`；只有没有记录本地化报告文件时才回退到兼容 `report.html`；
+- `POST /api/jobs/{jobId}/guest-events/import` 携带显式缺失的 `eventsPath` 时，
+  要求返回受控 HTTP 400 validation response。这样可证明手动 guest import endpoint
+  与 payload contract，而不在 smoke 中导入或重写真实 guest artifacts。
 
-The PowerShell gate also accepts the same environment variables when `-BaseUrl`
-and `-JobId` are omitted:
+当省略 `-BaseUrl` 和 `-JobId` 时，PowerShell gate 也接受同一组环境变量：
 
 ```powershell
 .\scripts\Test-LiveTelemetryFramework.ps1 -UsePollingFallback
@@ -289,14 +277,13 @@ and `-JobId` are omitted:
 
 端到端操作者验证：启动 Web host 后创建或选择一个 job，手动在浏览器打开
 dashboard，并确认 served HTML report link 可打开、live raw monitor page 通过
-SSE 或 polling 刷新、monitor 显示 artifacts/download cards、中文报告 endpoint
+SSE 或 polling 刷新、monitor 显示证据/下载卡片、中文报告 endpoint
 `/api/jobs/{jobId}/report/html?lang=zh` 与英文报告 endpoint
 `/api/jobs/{jobId}/report/html?lang=en` 都返回 HTML、upload-launched completion
 会导航到中文报告（`report.zh.html`），并且根 dashboard 不展示长 runbook command/output blocks
-或 artifact/download lists。 The optional manual guest import field can be left blank or filled with a
-specific `events.json` / `.jsonl` path. Do not commit generated reports,
-imported guest output, browser screenshots, or build binaries from this
-validation.
+或 artifact/download lists。可选手动 guest import 字段可以留空，也可以填写具体
+`events.json` / `.jsonl` path。不要提交该验证生成的报告、导入的 guest output、
+浏览器截图或构建二进制。
 
 ## 验证指引 / Verification guidance
 

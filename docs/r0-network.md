@@ -42,6 +42,11 @@ Compile-time guardrails:
   `KSWORD_SANDBOX_NETWORK_WFP_TODO_FLOW_CONTEXTS`, and
   `KSWORD_SANDBOX_NETWORK_WFP_TODO_FILTER_CONDITIONS` intentionally remain set
   as compile-time TODO markers.
+- `IOCTL_KSWORD_SANDBOX_GET_NETWORK_STATUS` exposes those remaining gaps as a
+  public `TodoMask` instead of leaving the operator to infer them from comments.
+  The current mask names packet/stream/datagram layers, flow contexts, protocol
+  filter conditions, and in-driver DNS/HTTP/TLS payload parsing as not yet
+  implemented.
 
 The normal Debug/Release build compiles this WFP/ALE producer.  A lab build may
 set `KSWORD_SANDBOX_ENABLE_NETWORK_WFP_ALE=0`; that is an explicit unsupported
@@ -120,9 +125,51 @@ Current internal degradation reasons include:
 - `QueuePush`
 
 The WFP runtime stores the last internal degrade reason/status for future
-diagnostics, but today `GET_STATUS` only exposes coarse degradation through
+diagnostics.  `GET_STATUS` still exposes coarse producer degradation through
 `FailedProducerMask`, `ActiveProducerMask`, `EffectiveProducerMask`,
-`LastNtStatus`, and `LastFailureNtStatus`.
+`LastNtStatus`, and `LastFailureNtStatus`; the dedicated
+`IOCTL_KSWORD_SANDBOX_GET_NETWORK_STATUS` now exposes the network-specific
+degrade reason/status without changing the v1 event payload.
+
+### Read-only network status IOCTL
+
+`IOCTL_KSWORD_SANDBOX_GET_NETWORK_STATUS` returns
+`KSWORD_SANDBOX_NETWORK_STATUS_REPLY`.  It is a read-only diagnostics call: it
+does not register callouts, start packet capture, mutate WFP, sign the driver, or
+load the service by itself.  Operators can query it after a live driver load, and
+static readiness checks can verify the ABI without requiring a signed driver.
+
+Stable fields:
+
+- `ImplementationLevel`: `KSWORD_SANDBOX_NETWORK_WFP_IMPLEMENTATION_ALE_INSPECT_ONLY`
+  for the current enabled build, or `NONE` when the network producer is compiled
+  out.
+- `SupportedLayerMask`: the four ALE v1 layers:
+  `ALE_CONNECT_V4`, `ALE_RECV_ACCEPT_V4`, `ALE_CONNECT_V6`, and
+  `ALE_RECV_ACCEPT_V6`.
+- `LastRegisteredCalloutMask`: the last FWPS callout registration progress,
+  preserved even after non-fatal partial initialization cleanup.
+- `LastAddedFilterMask`: the last FWPM inspect-filter creation progress.
+- `ActiveLayerMask`: non-zero only while the WFP classify path is currently
+  active.
+- `TodoMask`: machine-readable scope gaps for packet/stream/datagram layers,
+  flow contexts, protocol/address filter conditions, and DNS/HTTP/TLS payload
+  parsing in the driver.
+- `LastDegradeReason` / `LastDegradeNtStatus`: network-specific setup or
+  enqueue failure cause.
+- `RegisterNtStatus` / `EngineNtStatus`: coarse FWPS registration and FWPM
+  engine-open status.
+- `ClassifyCount` / `EventCount`: classify invocations observed and events
+  successfully queued.
+- `QueueFailureCount`, `ClassifyPayloadFailureCount`,
+  `LastQueueFailureNtStatus`, `LastQueueFailureLayerId`, and
+  `LastClassifyPayloadFailureLayerId`: counters and context for lossy queue or
+  payload-build diagnostics.
+
+The status reply reduces the old "internal diagnostics only" gap while keeping
+the evidence contract honest: DNS query names, HTTP request metadata, TLS SNI,
+and PCAP packet details still come from user/guest packet capture imports, not
+from the R0 ALE authorization payload.
 
 ## Collector output
 
@@ -208,10 +255,10 @@ Do not place `.sys`, `.pdb`, `.obj`, or other native build outputs under the rep
   packet capture or complete WFP coverage.
 - Runtime validation should be performed in a test-signed VM by loading the driver, generating outbound and inbound TCP/UDP activity, draining `READ_EVENTS`, and checking PID, address, port, layer, callout, and filter fields.
 - `GET_STATUS` exposes `ActiveProducerMask`, `FailedProducerMask`,
-  `EffectiveProducerMask`, `LastNtStatus`, and `LastFailureNtStatus`.  It does
-  not yet expose WFP classify/event counters, per-callout registration statuses,
-  or the draft network degrade reason; those remain internal runtime
-  diagnostics.
+  `EffectiveProducerMask`, `LastNtStatus`, and `LastFailureNtStatus`.
+  `GET_NETWORK_STATUS` adds network-specific classify/event counters, partial
+  callout/filter registration masks, and the last network degrade reason without
+  changing `GET_STATUS` size or the v1 event payload.
 
 ## Runtime validation gate
 

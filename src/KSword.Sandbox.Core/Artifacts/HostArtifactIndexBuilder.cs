@@ -36,7 +36,7 @@ public sealed class HostArtifactIndexBuilder
         var guestEventContexts = Directory.Exists(fullJobRoot)
             ? LoadGuestEventContexts(fullJobRoot, guestManifests)
             : [];
-        var guestArtifactsByFullPath = BuildGuestArtifactLookup(guestManifests);
+        var guestArtifactsByFullPath = BuildGuestArtifactLookup(guestManifests, out var guestArtifactRejections);
         var eventMetadataByFullPath = BuildEventMetadataLookup(guestEventContexts);
         var collectionEventMetadata = BuildCollectionEventMetadataLookup(guestEventContexts);
         var artifacts = new List<ArtifactDescriptor>();
@@ -147,7 +147,7 @@ public sealed class HostArtifactIndexBuilder
             JobId = jobId,
             RootPath = fullJobRoot,
             GeneratedAtUtc = DateTimeOffset.UtcNow,
-            Collections = BuildCollections(artifacts, guestManifests, collectionEventMetadata, fullJobRoot),
+            Collections = BuildCollections(artifacts, guestManifests, collectionEventMetadata, guestArtifactRejections, fullJobRoot),
             Artifacts = artifacts
         };
     }
@@ -235,9 +235,12 @@ public sealed class HostArtifactIndexBuilder
         return manifests;
     }
 
-    private static Dictionary<string, ArtifactDescriptor> BuildGuestArtifactLookup(IReadOnlyList<GuestManifestContext> guestManifests)
+    private static Dictionary<string, ArtifactDescriptor> BuildGuestArtifactLookup(
+        IReadOnlyList<GuestManifestContext> guestManifests,
+        out List<ArtifactIndexRejection> rejections)
     {
         var artifacts = new Dictionary<string, ArtifactDescriptor>(StringComparer.OrdinalIgnoreCase);
+        rejections = [];
         foreach (var context in guestManifests)
         {
             foreach (var artifact in context.Manifest.Artifacts ?? [])
@@ -245,6 +248,13 @@ public sealed class HostArtifactIndexBuilder
                 var fullPath = ResolveGuestArtifactFullPath(context.GuestRoot, artifact);
                 if (string.IsNullOrWhiteSpace(fullPath))
                 {
+                    rejections.Add(CreateArtifactRejection(context, artifact, "unsafeGuestArtifactPath"));
+                    continue;
+                }
+
+                if (!File.Exists(fullPath))
+                {
+                    rejections.Add(CreateArtifactRejection(context, artifact with { FullPath = fullPath }, "missingGuestArtifactFile"));
                     continue;
                 }
 
@@ -698,6 +708,32 @@ public sealed class HostArtifactIndexBuilder
         return string.Empty;
     }
 
+    private static ArtifactIndexRejection CreateArtifactRejection(
+        GuestManifestContext context,
+        ArtifactDescriptor artifact,
+        string reason)
+    {
+        var collectionName = FirstNonEmpty(
+            artifact.CollectionName,
+            MetadataValue(artifact.Metadata, "collectionName"),
+            CollectionNameForKind(artifact.Kind),
+            "unclassified-artifacts");
+        var attemptedSelector = FirstNonEmpty(
+            artifact.RelativePath,
+            artifact.ImportPath,
+            artifact.SafeLink,
+            artifact.Name,
+            artifact.FullPath);
+
+        return new ArtifactIndexRejection(
+            collectionName,
+            artifact.Kind,
+            artifact.Name,
+            attemptedSelector,
+            reason,
+            context.HostRelativeGuestRoot);
+    }
+
     private static ArtifactDescriptor MergeGuestDescriptor(
         ArtifactDescriptor scanned,
         ArtifactDescriptor guest,
@@ -987,6 +1023,7 @@ public sealed class HostArtifactIndexBuilder
         IReadOnlyList<ArtifactDescriptor> artifacts,
         IReadOnlyList<GuestManifestContext> guestManifests,
         IReadOnlyDictionary<string, Dictionary<string, string>> collectionEventMetadata,
+        IReadOnlyList<ArtifactIndexRejection> guestArtifactRejections,
         string jobRoot)
     {
         var collections = artifacts
@@ -1022,6 +1059,20 @@ public sealed class HostArtifactIndexBuilder
                 {
                     collections[collection.Name] = normalized;
                 }
+            }
+        }
+
+        foreach (var group in guestArtifactRejections
+            .Where(rejection => !string.IsNullOrWhiteSpace(rejection.CollectionName))
+            .GroupBy(rejection => rejection.CollectionName, StringComparer.OrdinalIgnoreCase))
+        {
+            if (collections.TryGetValue(group.Key, out var existing))
+            {
+                collections[group.Key] = AddArtifactRejectionDiagnostics(existing, group.ToList());
+            }
+            else
+            {
+                collections[group.Key] = BuildRejectedCollection(group.Key, group.ToList());
             }
         }
 
@@ -1168,6 +1219,92 @@ public sealed class HostArtifactIndexBuilder
         };
     }
 
+    private static ArtifactCollectionDescriptor AddArtifactRejectionDiagnostics(
+        ArtifactCollectionDescriptor collection,
+        IReadOnlyList<ArtifactIndexRejection> rejections)
+    {
+        if (rejections.Count == 0)
+        {
+            return collection;
+        }
+
+        var metadata = CopyMetadata(collection.Metadata);
+        AddRejectionMetadata(metadata, rejections);
+        return collection with
+        {
+            Reason = string.IsNullOrWhiteSpace(collection.Reason)
+                ? FirstNonEmpty(rejections[^1].Reason, "guestManifestArtifactRejected")
+                : collection.Reason,
+            Metadata = metadata
+        };
+    }
+
+    private static ArtifactCollectionDescriptor BuildRejectedCollection(
+        string collectionName,
+        IReadOnlyList<ArtifactIndexRejection> rejections)
+    {
+        var kind = rejections.Select(rejection => rejection.Kind).FirstOrDefault(kind => kind != ArtifactKind.Unknown);
+        if (kind == ArtifactKind.Unknown)
+        {
+            kind = KindForCollection(collectionName);
+        }
+
+        var relativePath = FirstNonEmpty(
+            rejections.Select(rejection => ArtifactDescriptorFactory.NormalizeRelativePath(rejection.AttemptedSelector))
+                .FirstOrDefault(value => !string.IsNullOrWhiteSpace(value)),
+            collectionName);
+        var metadata = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["origin"] = "guest-manifest",
+            ["hrefPolicy"] = "relative-safe-link-only",
+            ["downloadableArtifactCount"] = "0"
+        };
+        AddRejectionMetadata(metadata, rejections);
+
+        return new ArtifactCollectionDescriptor
+        {
+            Name = collectionName,
+            Kind = kind,
+            Category = ArtifactDescriptorFactory.CategoryForKind(kind),
+            EvidenceRole = EvidenceRoleForKind(kind),
+            RelativePath = ArtifactDescriptorFactory.NormalizeRelativePath(relativePath),
+            SafeLink = ArtifactDescriptorFactory.BuildSafeLink(relativePath),
+            ImportPath = ArtifactDescriptorFactory.NormalizeRelativePath(relativePath),
+            Enabled = true,
+            Implemented = true,
+            Status = "rejected",
+            Reason = FirstNonEmpty(rejections[^1].Reason, "guestManifestArtifactRejected"),
+            Metadata = metadata
+        };
+    }
+
+    private static void AddRejectionMetadata(
+        Dictionary<string, string> metadata,
+        IReadOnlyList<ArtifactIndexRejection> rejections)
+    {
+        if (rejections.Count == 0)
+        {
+            return;
+        }
+
+        var last = rejections[^1];
+        metadata["rejectionDiagnosticsAvailable"] = "true";
+        metadata["rejectedArtifactCount"] = rejections.Count.ToString(CultureInfo.InvariantCulture);
+        metadata["lastRejectedArtifactReason"] = last.Reason;
+        AddIfNotEmpty(metadata, "lastRejectedArtifactName", last.Name);
+        AddIfNotEmpty(metadata, "lastRejectedArtifactSelector", last.AttemptedSelector);
+        AddIfNotEmpty(metadata, "lastRejectedArtifactKind", last.Kind == ArtifactKind.Unknown ? string.Empty : last.Kind.ToString());
+        AddIfNotEmpty(metadata, "lastRejectedGuestRoot", last.HostRelativeGuestRoot);
+        metadata["artifactRejectionReasons"] = string.Join(
+            ",",
+            rejections
+                .Select(rejection => rejection.Reason)
+                .Where(reason => !string.IsNullOrWhiteSpace(reason))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(reason => reason, StringComparer.OrdinalIgnoreCase));
+        metadata["zhRejectionHint"] = "Host 已拒绝不安全、缺失或不可下载的 guest manifest 产物引用；只有 job 输出目录下的已索引相对路径可以下载。";
+    }
+
     private static string InferCollectionRelativePath(string collectionName, IReadOnlyList<ArtifactDescriptor> artifacts)
     {
         foreach (var artifact in artifacts)
@@ -1237,6 +1374,57 @@ public sealed class HostArtifactIndexBuilder
         };
     }
 
+    private static string CollectionNameForKind(ArtifactKind kind)
+    {
+        return kind switch
+        {
+            ArtifactKind.DroppedFile => "dropped-files",
+            ArtifactKind.Screenshot => "screenshots",
+            ArtifactKind.MemoryDump => "memory-dumps",
+            ArtifactKind.PacketCapture => "packet-captures",
+            ArtifactKind.DriverEventsJsonLines => "driver-events",
+            ArtifactKind.GuestEventsJson => "guest-events",
+            ArtifactKind.GuestSummaryJson => "guest-summary",
+            ArtifactKind.ArtifactManifest => "artifact-manifests",
+            ArtifactKind.ArtifactIndex => "artifact-index",
+            _ => string.Empty
+        };
+    }
+
+    private static ArtifactKind KindForCollection(string collectionName)
+    {
+        return collectionName.ToLowerInvariant() switch
+        {
+            "dropped-files" => ArtifactKind.DroppedFile,
+            "screenshots" => ArtifactKind.Screenshot,
+            "memory-dumps" => ArtifactKind.MemoryDump,
+            "packet-captures" => ArtifactKind.PacketCapture,
+            "driver-events" => ArtifactKind.DriverEventsJsonLines,
+            "guest-events" => ArtifactKind.GuestEventsJson,
+            "guest-summary" => ArtifactKind.GuestSummaryJson,
+            "artifact-manifests" => ArtifactKind.ArtifactManifest,
+            "artifact-index" => ArtifactKind.ArtifactIndex,
+            _ => ArtifactKind.Unknown
+        };
+    }
+
+    private static string EvidenceRoleForKind(ArtifactKind kind)
+    {
+        return kind switch
+        {
+            ArtifactKind.DroppedFile => "dropped-file",
+            ArtifactKind.Screenshot => "screenshot",
+            ArtifactKind.MemoryDump => "memory-dump",
+            ArtifactKind.PacketCapture => "packet-capture",
+            ArtifactKind.DriverEventsJsonLines => "driver-events",
+            ArtifactKind.GuestEventsJson => "guest-events",
+            ArtifactKind.GuestSummaryJson => "guest-summary",
+            ArtifactKind.ArtifactManifest => "artifact-manifest",
+            ArtifactKind.ArtifactIndex => "artifact-index",
+            _ => string.Empty
+        };
+    }
+
 
     private static List<ArtifactDescriptor> MarkDuplicateArtifacts(IReadOnlyList<ArtifactDescriptor> artifacts)
     {
@@ -1247,22 +1435,39 @@ public sealed class HostArtifactIndexBuilder
         var result = new ArtifactDescriptor[artifacts.Count];
         foreach (var group in grouped.Values)
         {
+            var primary = group[0].artifact;
+            var duplicateKey = DuplicateKey(primary);
+            var duplicateGroupId = DuplicateGroupId(primary, duplicateKey);
+            var memberSelectors = string.Join(
+                ",",
+                group
+                    .Select(item => item.artifact.RelativePath)
+                    .Where(path => !string.IsNullOrWhiteSpace(path)));
             for (var ordinal = 0; ordinal < group.Count; ordinal++)
             {
                 var artifact = group[ordinal].artifact;
                 var metadata = CopyMetadata(artifact.Metadata);
                 AddArtifactIdentityMetadata(metadata, artifact);
+                AddArtifactPresentationMetadata(metadata, artifact);
                 if (group.Count > 1 && !string.IsNullOrWhiteSpace(DuplicateKey(artifact)))
                 {
                     metadata["duplicateGroupKey"] = DuplicateKey(artifact);
+                    metadata["duplicateGroupId"] = duplicateGroupId;
                     metadata["duplicateGroupCount"] = group.Count.ToString(CultureInfo.InvariantCulture);
                     metadata["duplicateOrdinal"] = ordinal.ToString(CultureInfo.InvariantCulture);
                     metadata["isDuplicate"] = (ordinal > 0).ToString(CultureInfo.InvariantCulture).ToLowerInvariant();
-                    metadata["duplicateOfArtifactRelativePath"] = group[0].artifact.RelativePath;
+                    metadata["duplicateRole"] = ordinal == 0 ? "primary" : "duplicate";
+                    metadata["duplicatePrimarySelector"] = primary.RelativePath;
+                    metadata["duplicatePrimarySafeLink"] = primary.SafeLink;
+                    metadata["duplicateOfArtifactRelativePath"] = primary.RelativePath;
+                    metadata["duplicateGroupMemberSelectors"] = memberSelectors;
+                    metadata["duplicateSetLabel"] = $"{group.Count.ToString(CultureInfo.InvariantCulture)} files share the same SHA-256 and size";
+                    metadata["duplicateSetLabelZh"] = $"{group.Count.ToString(CultureInfo.InvariantCulture)} 个产物具有相同 SHA-256 和大小";
                 }
                 else
                 {
                     AddIfMissing(metadata, "isDuplicate", "false");
+                    AddIfMissing(metadata, "duplicateRole", "unique");
                 }
 
                 result[group[ordinal].index] = artifact with { Metadata = metadata };
@@ -1278,6 +1483,19 @@ public sealed class HostArtifactIndexBuilder
         return !string.IsNullOrWhiteSpace(sha256) && artifact.SizeBytes > 0
             ? $"sha256:{sha256};size:{artifact.SizeBytes.ToString(CultureInfo.InvariantCulture)}"
             : string.Empty;
+    }
+
+    private static string DuplicateGroupId(ArtifactDescriptor artifact, string duplicateKey)
+    {
+        var sha256 = FirstNonEmpty(artifact.Sha256, MetadataValue(artifact.Metadata, "sha256", "sourceArtifactSha256", "hash.sha256"));
+        if (!string.IsNullOrWhiteSpace(sha256))
+        {
+            return $"sha256:{sha256[..Math.Min(16, sha256.Length)]}";
+        }
+
+        return string.IsNullOrWhiteSpace(duplicateKey)
+            ? string.Empty
+            : duplicateKey;
     }
 
     private static bool IsDuplicateArtifact(ArtifactDescriptor artifact)
@@ -1302,6 +1520,89 @@ public sealed class HostArtifactIndexBuilder
         AddIfMissing(metadata, "sha256", artifact.Sha256);
         AddIfMissing(metadata, "sourceArtifactSha256", artifact.Sha256);
         AddIfMissing(metadata, "hash.sha256", artifact.Hashes.TryGetValue("sha256", out var hash) ? hash : artifact.Sha256);
+    }
+
+    private static void AddArtifactPresentationMetadata(Dictionary<string, string> metadata, ArtifactDescriptor artifact)
+    {
+        var contentType = FirstNonEmpty(artifact.MimeType, ArtifactDescriptorFactory.MimeTypeForPath(FirstNonEmpty(artifact.FullPath, artifact.Name)));
+        var fileName = string.IsNullOrWhiteSpace(artifact.Name)
+            ? Path.GetFileName(artifact.RelativePath)
+            : artifact.Name;
+        AddIfMissing(metadata, "contentType", contentType);
+        AddIfMissing(metadata, "downloadContentType", contentType);
+        AddIfMissing(metadata, "downloadFileName", fileName);
+        AddIfMissing(metadata, "downloadSelector", artifact.RelativePath);
+        AddIfMissing(metadata, "downloadSafeLink", artifact.SafeLink);
+        AddIfMissing(metadata, "safeRelativeSelector", artifact.RelativePath);
+        AddIfMissing(metadata, "downloadSecurityPolicy", "server-indexed-relative-selector");
+        AddIfMissing(metadata, "downloadRejectionPolicy", "reject-empty-absolute-traversal-unindexed-missing");
+        AddIfMissing(metadata, "isDownloadable", "true");
+        if (artifact.SizeBytes > 0)
+        {
+            AddIfMissing(metadata, "sizeDisplay", FormatByteCount(artifact.SizeBytes));
+        }
+
+        var sha256 = FirstNonEmpty(artifact.Sha256, MetadataValue(artifact.Metadata, "sha256", "sourceArtifactSha256", "hash.sha256"));
+        if (!string.IsNullOrWhiteSpace(sha256))
+        {
+            AddIfMissing(metadata, "sha256Short", sha256[..Math.Min(12, sha256.Length)]);
+        }
+
+        AddIfMissing(metadata, "previewLabel", PreviewLabel(artifact.Kind, fileName));
+        AddIfMissing(metadata, "previewLabelZh", PreviewLabelZh(artifact.Kind, fileName));
+    }
+
+    private static string FormatByteCount(long bytes)
+    {
+        if (bytes < 1024)
+        {
+            return $"{bytes.ToString(CultureInfo.InvariantCulture)} B";
+        }
+
+        var kib = bytes / 1024d;
+        if (kib < 1024)
+        {
+            return $"{kib.ToString("0.#", CultureInfo.InvariantCulture)} KiB";
+        }
+
+        var mib = kib / 1024d;
+        return $"{mib.ToString("0.#", CultureInfo.InvariantCulture)} MiB";
+    }
+
+    private static string PreviewLabel(ArtifactKind kind, string fileName)
+    {
+        var label = kind switch
+        {
+            ArtifactKind.DroppedFile => "Dropped file",
+            ArtifactKind.Screenshot => "Screenshot",
+            ArtifactKind.MemoryDump => "Memory dump",
+            ArtifactKind.PacketCapture => "Packet capture",
+            ArtifactKind.DriverEventsJsonLines => "Driver events",
+            ArtifactKind.GuestEventsJson => "Guest events",
+            ArtifactKind.ArtifactManifest => "Artifact manifest",
+            ArtifactKind.ArtifactIndex => "Artifact index",
+            _ => "Artifact"
+        };
+
+        return string.IsNullOrWhiteSpace(fileName) ? label : $"{label}: {fileName}";
+    }
+
+    private static string PreviewLabelZh(ArtifactKind kind, string fileName)
+    {
+        var label = kind switch
+        {
+            ArtifactKind.DroppedFile => "掉落文件",
+            ArtifactKind.Screenshot => "截图",
+            ArtifactKind.MemoryDump => "内存转储",
+            ArtifactKind.PacketCapture => "抓包文件",
+            ArtifactKind.DriverEventsJsonLines => "R0 事件",
+            ArtifactKind.GuestEventsJson => "Guest 事件",
+            ArtifactKind.ArtifactManifest => "产物清单",
+            ArtifactKind.ArtifactIndex => "产物索引",
+            _ => "产物"
+        };
+
+        return string.IsNullOrWhiteSpace(fileName) ? label : $"{label}：{fileName}";
     }
 
     private static string PrefixGuestRelativePath(GuestManifestContext context, string relativePath)
@@ -1428,6 +1729,14 @@ public sealed class HostArtifactIndexBuilder
         string HostRelativeGuestRoot,
         string EventsPath,
         IReadOnlyList<SandboxEvent> Events);
+
+    private sealed record ArtifactIndexRejection(
+        string CollectionName,
+        ArtifactKind Kind,
+        string Name,
+        string AttemptedSelector,
+        string Reason,
+        string HostRelativeGuestRoot);
 
     private sealed record ArtifactClassification(
         ArtifactKind Kind,

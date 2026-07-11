@@ -500,6 +500,117 @@ function Get-WebUiLaunchTarget {
     return $missing
 }
 
+function Test-RunIsAdministrator {
+    $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $principal = [Security.Principal.WindowsPrincipal]::new($identity)
+    return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
+function Test-RunPathUnderRoot {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$Root
+    )
+
+    try {
+        $fullPath = [System.IO.Path]::GetFullPath($Path).TrimEnd('\', '/')
+        $fullRoot = [System.IO.Path]::GetFullPath($Root).TrimEnd('\', '/')
+        $rootPrefix = $fullRoot + [System.IO.Path]::DirectorySeparatorChar
+        return $fullPath.Equals($fullRoot, [System.StringComparison]::OrdinalIgnoreCase) -or
+            $fullPath.StartsWith($rootPrefix, [System.StringComparison]::OrdinalIgnoreCase)
+    }
+    catch {
+        return $false
+    }
+}
+
+function Get-RunHyperVPrerequisiteStatus {
+    $actions = [System.Collections.Generic.List[string]]::new()
+    $featureStates = [ordered]@{}
+    $inspectionErrors = [System.Collections.Generic.List[string]]::new()
+    $osIsWindows = [System.StringComparer]::OrdinalIgnoreCase.Equals([string]$env:OS, 'Windows_NT')
+    $powerShellModuleAvailable = $null -ne (Get-Command Get-VM -ErrorAction SilentlyContinue)
+    $optionalFeatureCommandAvailable = $null -ne (Get-Command Get-WindowsOptionalFeature -ErrorAction SilentlyContinue)
+    $hypervisorPresent = $null
+    $virtualizationFirmwareEnabled = $null
+    $slatSupported = $null
+
+    if (-not $osIsWindows) {
+        [void]$actions.Add('下一步：Live Hyper-V 需要 Windows 宿主机；当前环境只能做 WebUI/报告/打包/PlanOnly。')
+    }
+    if (-not $powerShellModuleAvailable) {
+        [void]$actions.Add('下一步：启用 Hyper-V PowerShell 管理工具，然后运行 .\run.ps1 -Mode CheckEnvironment；本检查不会启动或还原 VM。')
+    }
+
+    if ($optionalFeatureCommandAvailable) {
+        foreach ($featureName in @('Microsoft-Hyper-V-All', 'Microsoft-Hyper-V-Management-PowerShell')) {
+            try {
+                $feature = Get-WindowsOptionalFeature -Online -FeatureName $featureName -ErrorAction Stop
+                $featureStates[$featureName] = [string]$feature.State
+                if ([string]$feature.State -ne 'Enabled') {
+                    [void]$actions.Add("下一步：启用 Windows Optional Feature '$featureName'（管理员权限/重启），再重新检查。")
+                }
+            }
+            catch {
+                $featureStates[$featureName] = 'Unknown'
+                [void]$inspectionErrors.Add("无法读取 Windows feature $featureName：$($_.Exception.Message)")
+            }
+        }
+    }
+
+    if ($null -ne (Get-Command Get-CimInstance -ErrorAction SilentlyContinue)) {
+        try {
+            $computerSystem = Get-CimInstance -ClassName Win32_ComputerSystem -ErrorAction Stop
+            $hypervisorPresent = [bool]$computerSystem.HypervisorPresent
+        }
+        catch {
+            [void]$inspectionErrors.Add("无法读取 HypervisorPresent：$($_.Exception.Message)")
+        }
+
+        try {
+            $processor = Get-CimInstance -ClassName Win32_Processor -ErrorAction Stop | Select-Object -First 1
+            if ($null -ne $processor) {
+                $virtualizationProperty = $processor.PSObject.Properties['VirtualizationFirmwareEnabled']
+                if ($null -ne $virtualizationProperty) {
+                    $virtualizationFirmwareEnabled = [bool]$virtualizationProperty.Value
+                    if (-not $virtualizationFirmwareEnabled) {
+                        [void]$actions.Add('下一步：在 BIOS/UEFI 启用 Intel VT-x/AMD-V 虚拟化，冷重启后再运行 CheckEnvironment。')
+                    }
+                }
+
+                $slatProperty = $processor.PSObject.Properties['SecondLevelAddressTranslationExtensions']
+                if ($null -ne $slatProperty) {
+                    $slatSupported = [bool]$slatProperty.Value
+                    if (-not $slatSupported) {
+                        [void]$actions.Add('下一步：Hyper-V 需要 SLAT/EPT/NPT；请换用支持二级地址转换的宿主 CPU。')
+                    }
+                }
+            }
+        }
+        catch {
+            [void]$inspectionErrors.Add("无法读取 CPU virtualization readiness：$($_.Exception.Message)")
+        }
+    }
+    else {
+        [void]$inspectionErrors.Add('Get-CimInstance 不可用；无法读取 BIOS/CPU 虚拟化状态。')
+    }
+
+    [pscustomobject][ordered]@{
+        OsIsWindows = $osIsWindows
+        IsAdministrator = Test-RunIsAdministrator
+        PowerShellModuleAvailable = $powerShellModuleAvailable
+        OptionalFeatureCommandAvailable = $optionalFeatureCommandAvailable
+        FeatureStates = [pscustomobject]$featureStates
+        HypervisorPresent = $hypervisorPresent
+        VirtualizationFirmwareEnabled = $virtualizationFirmwareEnabled
+        SecondLevelAddressTranslationSupported = $slatSupported
+        InspectionErrors = @($inspectionErrors.ToArray())
+        RecommendedActions = @($actions.ToArray())
+        StartsOrMutatesVm = $false
+        ChineseGuidance = '中文提示：运行时 Hyper-V 前置诊断只读；不会启动、还原、停止或修改 VM。'
+    }
+}
+
 function Get-RunHostTestSigningStatus {
     $status = [ordered]@{
         State = 'Unavailable'
@@ -1012,6 +1123,8 @@ function Show-RunStatus {
     $secretName = Get-SecretName -State $State
     $virusTotalSecretName = Get-VirusTotalSecretName -State $State
     $configExists = Test-Path -LiteralPath $EffectiveConfigPath -PathType Leaf
+    $hyperVPrerequisites = Get-RunHyperVPrerequisiteStatus
+    $runtimeRootUnderRepository = Test-RunPathUnderRoot -Path $EffectiveRuntimeRoot -Root $script:RepositoryRoot
     $payloadRoot = [System.IO.Path]::GetFullPath((Get-StateString -State $State -Name 'guestPayloadRoot' -DefaultValue (Join-Path $EffectiveRuntimeRoot 'payload\guest-tools')))
     $agentName = 'KSword.Sandbox.Agent.exe'
     $collectorName = 'KSword.Sandbox.R0Collector.exe'
@@ -1041,6 +1154,20 @@ function Show-RunStatus {
     $payloadManifest = Join-Path $payloadRoot 'payload-manifest.json'
     $agentPayload = Join-Path (Join-Path $payloadRoot 'agent') $agentName
     $collectorPayload = Join-Path (Join-Path $payloadRoot 'r0collector') $collectorName
+    $payloadFreshness = $null
+    if ((Test-Path -LiteralPath $agentPayload -PathType Leaf) -and
+        (Test-Path -LiteralPath $collectorPayload -PathType Leaf) -and
+        (Test-Path -LiteralPath $payloadManifest -PathType Leaf)) {
+        try {
+            $payloadFreshness = Test-GuestPayloadFresh -PayloadRoot $payloadRoot -AgentExe $agentPayload -CollectorExe $collectorPayload -ManifestPath $payloadManifest
+        }
+        catch {
+            $payloadFreshness = [pscustomobject]@{
+                Fresh = $false
+                Reasons = @("payload freshness 检查异常：$($_.Exception.Message)")
+            }
+        }
+    }
     $vmName = Get-StateString -State $State -Name 'vmName' -DefaultValue 'KSwordSandbox-Win10-Golden'
     $checkpointName = Get-StateString -State $State -Name 'checkpointName' -DefaultValue 'Clean'
     $vmProfile = Get-RunVmProfileStatus -VmName $vmName -CheckpointName $checkpointName
@@ -1053,6 +1180,9 @@ function Show-RunStatus {
     $webLaunchTarget = Get-WebUiLaunchTarget -ThrowIfMissing $false
 
     $recommendedActions = New-Object System.Collections.Generic.List[string]
+    foreach ($prereqAction in @($hyperVPrerequisites.RecommendedActions)) {
+        [void]$recommendedActions.Add([string]$prereqAction)
+    }
     foreach ($profileAction in @($vmProfile.RecommendedActions)) {
         [void]$recommendedActions.Add([string]$profileAction)
     }
@@ -1065,12 +1195,20 @@ function Show-RunStatus {
     if (-not (Test-Path -LiteralPath $EffectiveRuntimeRoot -PathType Container)) {
         [void]$recommendedActions.Add("下一步：运行 .\install.ps1 -Mode Install，在 '$EffectiveRuntimeRoot' 下创建运行目录。")
     }
+    if ($runtimeRootUnderRepository) {
+        [void]$recommendedActions.Add("下一步：RuntimeRoot 当前位于仓库下，建议移到 D:\Temp\KSwordSandbox 或其他仓库外目录，避免 job/report/capture 误提交。")
+    }
     if (-not (Test-Path -LiteralPath $payloadRoot -PathType Container) -or
         -not (Test-Path -LiteralPath $agentPayload -PathType Leaf) -or
         -not (Test-Path -LiteralPath $collectorPayload -PathType Leaf) -or
         -not (Test-Path -LiteralPath $payloadManifest -PathType Leaf)) {
         [void]$recommendedActions.Add("下一步：运行 .\scripts\Prepare-GuestPayload.ps1 -RepoRoot . -PayloadRoot '$payloadRoot' -Configuration $Configuration -SelfContained 准备 Guest Agent/R0Collector payload。")
         [void]$recommendedActions.Add("下一步：运行 .\run.ps1 -Mode CheckEnvironment 重新检查 payload readiness；该命令不会启动或还原 VM。")
+    }
+    elseif ($null -ne $payloadFreshness -and -not [bool]$payloadFreshness.Fresh) {
+        foreach ($reason in @($payloadFreshness.Reasons)) {
+            [void]$recommendedActions.Add([string]$reason)
+        }
     }
     if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($secretName, 'Process')) -and
         [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($secretName, 'User')) -and
@@ -1106,6 +1244,8 @@ function Show-RunStatus {
         PublishedWebDllExists = $webLaunchTarget.PublishedDllExists
         RuntimeRoot = $EffectiveRuntimeRoot
         RuntimeRootExists = Test-Path -LiteralPath $EffectiveRuntimeRoot -PathType Container
+        RuntimeRootUnderRepository = $runtimeRootUnderRepository
+        RuntimeRootGuidance = '运行目录建议放在仓库外，例如 D:\Temp\KSwordSandbox；jobs/uploads/reports/PCAP/dump 不应进入 git。'
         GuestPayloadRoot = $payloadRoot
         GuestPayloadRootExists = Test-Path -LiteralPath $payloadRoot -PathType Container
         GuestPayloadManifest = $payloadManifest
@@ -1114,6 +1254,8 @@ function Show-RunStatus {
         GuestAgentPayloadExists = Test-Path -LiteralPath $agentPayload -PathType Leaf
         R0CollectorPayload = $collectorPayload
         R0CollectorPayloadExists = Test-Path -LiteralPath $collectorPayload -PathType Leaf
+        GuestPayloadFresh = if ($null -eq $payloadFreshness) { $false } else { [bool]$payloadFreshness.Fresh }
+        GuestPayloadFreshnessReasons = if ($null -eq $payloadFreshness) { @('payload freshness 未检查：缺少 Agent/R0Collector/payload-manifest.json 中至少一个文件。') } else { @($payloadFreshness.Reasons) }
         R0DriverConfigurationStatus = $driverStatus.Status
         R0DriverConfigurationWarning = $driverStatus.Warning
         DriverEnabled = $driverStatus.DriverEnabled
@@ -1127,10 +1269,16 @@ function Show-RunStatus {
         VirusTotalSecretName = $virusTotalSecretName
         VirusTotalProcessSecretSet = -not [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($virusTotalSecretName, 'Process'))
         VirusTotalUserSecretSet = -not [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($virusTotalSecretName, 'User'))
+        VirusTotalConfigured = (-not [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($virusTotalSecretName, 'Process'))) -or (-not [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($virusTotalSecretName, 'User'))) -or (-not [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($virusTotalSecretName, 'Machine')))
+        VirusTotalMissingKeyBehavior = 'optional hash-only enrichment is skipped quietly when key is absent or lookup fails'
         GuestPasswordGuidance = "下一步：运行 .\install.ps1 -Mode Install -PromptPassword；如果需要同步 VM 实际密码，可运行 .\install.ps1 -Mode Change -ResetGuestVmPassword -GeneratePassword -Force"
         VirusTotalGuidance = "下一步：运行 .\install.ps1 -Mode ConfigureVTKey -PromptVTKey，或在 User 环境中设置 $virusTotalSecretName。"
         VmName = $vmName
         CheckpointName = $checkpointName
+        HyperVPrerequisites = $hyperVPrerequisites
+        HyperVFeatureStates = $hyperVPrerequisites.FeatureStates
+        HyperVVirtualizationFirmwareEnabled = $hyperVPrerequisites.VirtualizationFirmwareEnabled
+        HyperVSecondLevelAddressTranslationSupported = $hyperVPrerequisites.SecondLevelAddressTranslationSupported
         HyperVModuleAvailable = $hyperVModuleAvailable
         VmExists = $vmExists
         VmState = $vmState
@@ -1148,7 +1296,7 @@ function Show-RunStatus {
         VmGuidance = ".\install.ps1 -Mode Change -UpdateHyperVConfig -VmName <existing VM> -CheckpointName <checkpoint>"
         CheckpointGuidance = ".\install.ps1 -Mode Change -UpdateHyperVConfig -VmName '$vmName' -CheckpointName <checkpoint>"
         ReadinessGuidance = '.\scripts\Test-HyperVReadiness.ps1'
-        RecommendedActions = @($recommendedActions.ToArray())
+        RecommendedActions = @($recommendedActions.ToArray() | Select-Object -Unique)
         SecretValuePrinted = $false
     }
 }
@@ -1277,6 +1425,19 @@ function Invoke-WebUi {
     Write-RunInfo "WebUI 启动目标：$($launchTarget.Kind) -> $($launchTarget.Path) / WebUI launch target."
     Write-RunInfo "配置文件：$EffectiveConfigPath / Config."
     Write-RunInfo "Live Hyper-V 前置条件：已配置 VM/checkpoint、已准备 self-contained guest payload、已设置 guest password secret。 / Hyper-V live prerequisites."
+    $vtSecretName = 'KSWORDBOX_VIRUSTOTAL_API_KEY'
+    if ($null -ne (Get-Variable -Name state -Scope Script -ErrorAction SilentlyContinue)) {
+        $vtSecretName = Get-VirusTotalSecretName -State $script:state
+    }
+    $vtConfigured = (-not [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($vtSecretName, 'Process'))) -or
+        (-not [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($vtSecretName, 'User'))) -or
+        (-not [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($vtSecretName, 'Machine')))
+    if ($vtConfigured) {
+        Write-RunInfo "VirusTotal：已检测到可选 hash-only enrichment key（值不打印）。 / VT optional key configured."
+    }
+    else {
+        Write-RunInfo "VirusTotal：未配置可选 key；WebUI 会静默跳过 hash 查询，不把失败噪声写入 job log。 / VT optional key missing; skipped quietly."
+    }
     Write-RunInfo '中文提示：默认启动 WebUI 不会启动或还原 VM；实时 Hyper-V 执行必须在 WebUI/API 或 CLI 中显式选择 Live。'
     Write-RunInfo '按 Ctrl+C 停止 WebUI。 / Press Ctrl+C to stop the WebUI.'
 

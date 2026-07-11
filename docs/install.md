@@ -201,6 +201,18 @@ release packaging 的 driver/test-signing 注意事项：
 `CheckEnvironment` 和 `Status` 不会启动、还原或停止 VM。它们会打印
 `RecommendedActions`，方便新工作站在尝试 live execution 前先补齐 packaging 缺口：
 
+- Hyper-V 前置条件：`HyperVPrerequisites` 会只读展示 Windows Optional Feature、
+  Hyper-V PowerShell module、BIOS/UEFI 虚拟化、SLAT/EPT/NPT、管理员上下文和
+  inspection error；缺失项会给出下一步启用/重启/换机建议。
+- runtime root 安全性：`RuntimeRootStatus` / `RuntimeRootUnderRepository`
+  会提示运行目录是否错误地放在仓库下。建议始终使用 `D:\Temp\KSwordSandbox`
+  或其他仓库外目录，避免 `jobs/`、上传样本、报告、截图、PCAP、dump 被误提交。
+- Guest payload 成熟度：`GuestPayloadStatus` 会检查 `agent/KSword.Sandbox.Agent.exe`、
+  `r0collector/KSword.Sandbox.R0Collector.exe` 和 `payload-manifest.json` 是否存在，
+  以及 manifest 是否包含 contract version、`sourceFingerprint` 和 host file hash。
+- VirusTotal 状态：`VirusTotalStatus` 只显示 key 是否存在于 Process/User/Machine
+  scope，永不打印 key。未配置或调用失败时，WebUI 应静默跳过 hash-only enrichment，
+  不把失败噪声写入 job log。
 - 缺少 VM：创建/导入 golden VM，或用以下命令记录真实名称：
   `.\install.ps1 -Mode Change -UpdateHyperVConfig -VmName <existing VM> -CheckpointName <checkpoint>`;
 - 缺少 checkpoint：创建 clean checkpoint，或更新已记录的 checkpoint name；

@@ -98,6 +98,7 @@ internal sealed class VirusTotalLookupService
                     Verdict = VirusTotalLookupStatuses.NotFound,
                     Message = "Hash was not found by VirusTotal.",
                     Permalink = BuildFilePermalink(normalizedHash),
+                    DetectionPermalink = BuildDetectionPermalink(normalizedHash),
                     HttpStatusCode = (int)response.StatusCode
                 };
             }
@@ -160,6 +161,10 @@ internal sealed class VirusTotalLookupService
         var attributes = root.TryGetProperty("data", out var data) && data.TryGetProperty("attributes", out var attr)
             ? attr
             : default;
+        var officialApiSelfLink = data.ValueKind == JsonValueKind.Object &&
+            data.TryGetProperty("links", out var links)
+                ? ReadString(links, "self")
+                : null;
         var stats = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         if (attributes.ValueKind == JsonValueKind.Object &&
             attributes.TryGetProperty("last_analysis_stats", out var statsElement) &&
@@ -185,6 +190,8 @@ internal sealed class VirusTotalLookupService
             lastAnalysis = DateTimeOffset.FromUnixTimeSeconds(unixSeconds);
         }
 
+        var reputation = ReadNullableInt(attributes, "reputation");
+        var communityVotes = ReadCommunityVotes(attributes);
         var malicious = ReadStat(stats, "malicious");
         var suspicious = ReadStat(stats, "suspicious");
         var harmless = ReadStat(stats, "harmless");
@@ -217,8 +224,12 @@ internal sealed class VirusTotalLookupService
             Verdict = verdict,
             Message = BuildFoundMessage(verdict, malicious, suspicious),
             Permalink = BuildFilePermalink(sha256),
+            DetectionPermalink = BuildDetectionPermalink(sha256),
+            OfficialApiSelfLink = officialApiSelfLink,
             MeaningfulName = name,
             LastAnalysisDateUtc = lastAnalysis,
+            Reputation = reputation,
+            CommunityVotes = communityVotes,
             MaliciousCount = malicious,
             SuspiciousCount = suspicious,
             HarmlessCount = harmless,
@@ -231,6 +242,7 @@ internal sealed class VirusTotalLookupService
 
     private static VirusTotalLookupResult NotQueried(string sha256, bool configured, string status, string message, string? errorKind = null)
     {
+        var hasValidHash = IsSha256Hex(sha256);
         return new VirusTotalLookupResult
         {
             Sha256 = sha256,
@@ -240,7 +252,8 @@ internal sealed class VirusTotalLookupService
             Status = status,
             Verdict = status,
             Message = message,
-            Permalink = string.IsNullOrWhiteSpace(sha256) ? null : BuildFilePermalink(sha256),
+            Permalink = hasValidHash ? BuildFilePermalink(sha256) : null,
+            DetectionPermalink = hasValidHash ? BuildDetectionPermalink(sha256) : null,
             ErrorKind = errorKind
         };
     }
@@ -263,6 +276,7 @@ internal sealed class VirusTotalLookupService
             Verdict = status,
             Message = message,
             Permalink = BuildFilePermalink(sha256),
+            DetectionPermalink = BuildDetectionPermalink(sha256),
             HttpStatusCode = (int)httpStatusCode,
             ErrorKind = errorKind,
             RetryAfterUtc = retryAfterUtc
@@ -332,6 +346,8 @@ internal sealed class VirusTotalLookupService
 
     private static string BuildFilePermalink(string sha256) => $"https://www.virustotal.com/gui/file/{sha256}";
 
+    private static string BuildDetectionPermalink(string sha256) => $"{BuildFilePermalink(sha256)}/detection";
+
     private static string? ReadString(JsonElement element, string propertyName)
     {
         return element.ValueKind == JsonValueKind.Object &&
@@ -359,5 +375,43 @@ internal sealed class VirusTotalLookupService
         }
 
         return null;
+    }
+
+    private static int? ReadNullableInt(JsonElement element, string propertyName)
+    {
+        if (element.ValueKind != JsonValueKind.Object ||
+            !element.TryGetProperty(propertyName, out var value))
+        {
+            return null;
+        }
+
+        if (value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out var number))
+        {
+            return number;
+        }
+
+        if (value.ValueKind == JsonValueKind.String &&
+            int.TryParse(value.GetString(), out var stringNumber))
+        {
+            return stringNumber;
+        }
+
+        return null;
+    }
+
+    private static VirusTotalCommunityVotes ReadCommunityVotes(JsonElement attributes)
+    {
+        if (attributes.ValueKind != JsonValueKind.Object ||
+            !attributes.TryGetProperty("total_votes", out var votes) ||
+            votes.ValueKind != JsonValueKind.Object)
+        {
+            return new VirusTotalCommunityVotes();
+        }
+
+        return new VirusTotalCommunityVotes
+        {
+            Harmless = ReadNullableInt(votes, "harmless"),
+            Malicious = ReadNullableInt(votes, "malicious")
+        };
     }
 }

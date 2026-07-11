@@ -1,6 +1,7 @@
-# Windows sandbox behavior rules
+# Windows 沙箱行为规则 / Windows sandbox behavior rules
 
-This note summarizes the practical Windows sandbox rule expansion in
+本文档概述 `rules/behavior-rules.json` 中面向 Windows 沙箱的规则扩容与
+发布口径。This note summarizes the practical Windows sandbox rule expansion in
 `rules/behavior-rules.json`.
 
 For exact current rule count, schema details, and the full matrix, use
@@ -40,6 +41,14 @@ Newer rules may include metadata-only `confidence`, `tags`, `evidenceFields`,
 `titleZh`, and `summaryZh` values; those fields do not change matching, but
 they document expected triage confidence, bilingual operator text, report
 grouping intent, and the evidence fields analysts should inspect first.
+
+中文提示：少数旧规则 ID 仍保留 `placeholder` 字样，例如
+`pcap-protocol-summary-placeholder`。这是为了兼容既有报告、smoke contract 和
+下游链接；规则标题、摘要、标签和 `evidenceFields` 已改为“诊断元数据/低置信
+上下文”表述。没有仓库兼容引用的旧 ID 已改名，例如 PCAP 周期信标时间规则现在
+使用 `pcap-beacon-timing-metadata-observed`。操作者应优先查看更具体的
+`pcap.dns`、`pcap.http`、`pcap.tls`、`pcap.flow`、`network.*`、
+`anti-analysis-low-resource-classification` 或显式 C2 分类规则。
 
 ## Added coverage
 
@@ -220,6 +229,9 @@ triage text.
   - DNS tunnel/DGA labels, TLS SNI/JA3/certificate metadata, PCAP artifact
     import rows, PCAP endpoint flows, upload/exfil labels, and PCAP flow-count
     metadata now use concrete rule names and documented evidence fields.
+  - 兼容性规则 `pcap-protocol-summary-placeholder` 现在表示 PCAP 协议摘要
+    元数据已被导入；`pcap-beacon-timing-metadata-observed` 表示周期信标时间
+    字段已被记录。它们是低置信诊断线索，不单独提升为 C2 行为。
 - Network/lateral movement:
   - Netstat observed/added/removed rows, listener-opened deltas, suspicious
     non-standard listener ports, RDP/SSH/LDAP/Kerberos/domain ports, and

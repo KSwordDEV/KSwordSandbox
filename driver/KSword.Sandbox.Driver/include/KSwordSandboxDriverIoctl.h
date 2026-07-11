@@ -148,6 +148,17 @@ extern "C" {
     IOCTL_KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK
 
 /*
+ * IOCTL_KSWORD_SANDBOX_GET_NETWORK_STATUS
+ *   Input : none.
+ *   Output: KSWORD_SANDBOX_NETWORK_STATUS_REPLY.
+ *   Return: STATUS_SUCCESS with read-only WFP/ALE runtime diagnostics.  This
+ *           does not load WFP state by itself and does not imply packet-layer
+ *           or DNS/HTTP/TLS payload parsing support.
+ */
+#define IOCTL_KSWORD_SANDBOX_GET_NETWORK_STATUS \
+    CTL_CODE(KSWORD_SANDBOX_DEVICE_TYPE, KSWORD_SANDBOX_IOCTL_BASE + 0x06U, METHOD_BUFFERED, FILE_READ_DATA)
+
+/*
  * Alias kept for local experiments that used the DrainEvents name.  The public
  * skeleton contract remains IOCTL_KSWORD_SANDBOX_READ_EVENTS.
  */
@@ -203,6 +214,7 @@ typedef enum _KSWORD_SANDBOX_DRIVER_STATE {
 #define KSWORD_SANDBOX_CAPABILITY_FLAG_EVENT_COMMON_METADATA  0x0000000000008000ULL
 #define KSWORD_SANDBOX_CAPABILITY_FLAG_PRODUCER_METADATA      0x0000000000010000ULL
 #define KSWORD_SANDBOX_CAPABILITY_FLAG_SELF_NOISE_METADATA    0x0000000000020000ULL
+#define KSWORD_SANDBOX_CAPABILITY_FLAG_GET_NETWORK_STATUS     0x0000000000040000ULL
 
 #define KSWORD_SANDBOX_CAPABILITY_FLAGS_CURRENT \
     (KSWORD_SANDBOX_CAPABILITY_FLAG_GET_HEALTH | \
@@ -222,7 +234,8 @@ typedef enum _KSWORD_SANDBOX_DRIVER_STATE {
      KSWORD_SANDBOX_CAPABILITY_FLAG_NETWORK_WFP_ALE | \
      KSWORD_SANDBOX_CAPABILITY_FLAG_EVENT_COMMON_METADATA | \
      KSWORD_SANDBOX_CAPABILITY_FLAG_PRODUCER_METADATA | \
-     KSWORD_SANDBOX_CAPABILITY_FLAG_SELF_NOISE_METADATA)
+     KSWORD_SANDBOX_CAPABILITY_FLAG_SELF_NOISE_METADATA | \
+     KSWORD_SANDBOX_CAPABILITY_FLAG_GET_NETWORK_STATUS)
 
 /*
  * Producer enable bits.
@@ -511,6 +524,49 @@ typedef enum _KSWORD_SANDBOX_NETWORK_STATUS_DEGRADE_REASON {
 #define KSWORD_SANDBOX_NETWORK_EVENT_PAYLOAD_DRAFT_VERSION 0x00010001U
 
 /*
+ * Network/WFP status IOCTL constants.
+ *
+ * Inputs : returned by IOCTL_KSWORD_SANDBOX_GET_NETWORK_STATUS.
+ * Logic  : the current implementation level is ALE inspect-only.  The TODO
+ *          bits are intentionally machine-readable so readiness gates can show
+ *          exactly which WFP/network gaps remain without implying the v1 event
+ *          payload already contains packet, stream, flow-context, or protocol
+ *          parser evidence.
+ * Return : not applicable.
+ */
+#define KSWORD_SANDBOX_NETWORK_STATUS_REPLY_VERSION KSWORD_SANDBOX_ABI_VERSION
+#define KSWORD_SANDBOX_NETWORK_WFP_IMPLEMENTATION_NONE 0U
+#define KSWORD_SANDBOX_NETWORK_WFP_IMPLEMENTATION_ALE_INSPECT_ONLY 1U
+
+#define KSWORD_SANDBOX_NETWORK_STATUS_FLAG_COMPILED              0x00000001U
+#define KSWORD_SANDBOX_NETWORK_STATUS_FLAG_ACTIVE                0x00000002U
+#define KSWORD_SANDBOX_NETWORK_STATUS_FLAG_DEGRADED              0x00000004U
+#define KSWORD_SANDBOX_NETWORK_STATUS_FLAG_INSPECT_ONLY          0x00000008U
+#define KSWORD_SANDBOX_NETWORK_STATUS_FLAG_QUEUE_FAILURE         0x00000010U
+#define KSWORD_SANDBOX_NETWORK_STATUS_FLAG_CLASSIFY_PAYLOAD_FAILURE 0x00000020U
+#define KSWORD_SANDBOX_NETWORK_STATUS_FLAG_COMPILE_TIME_DISABLED 0x00000040U
+
+#define KSWORD_SANDBOX_NETWORK_WFP_LAYER_FLAG_ALE_CONNECT_V4     0x00000001U
+#define KSWORD_SANDBOX_NETWORK_WFP_LAYER_FLAG_ALE_RECV_ACCEPT_V4 0x00000002U
+#define KSWORD_SANDBOX_NETWORK_WFP_LAYER_FLAG_ALE_CONNECT_V6     0x00000004U
+#define KSWORD_SANDBOX_NETWORK_WFP_LAYER_FLAG_ALE_RECV_ACCEPT_V6 0x00000008U
+#define KSWORD_SANDBOX_NETWORK_WFP_LAYER_MASK_ALE_V1 \
+    (KSWORD_SANDBOX_NETWORK_WFP_LAYER_FLAG_ALE_CONNECT_V4 | \
+     KSWORD_SANDBOX_NETWORK_WFP_LAYER_FLAG_ALE_RECV_ACCEPT_V4 | \
+     KSWORD_SANDBOX_NETWORK_WFP_LAYER_FLAG_ALE_CONNECT_V6 | \
+     KSWORD_SANDBOX_NETWORK_WFP_LAYER_FLAG_ALE_RECV_ACCEPT_V6)
+
+#define KSWORD_SANDBOX_NETWORK_WFP_TODO_FLAG_PACKET_STREAM_LAYERS 0x00000001U
+#define KSWORD_SANDBOX_NETWORK_WFP_TODO_FLAG_FLOW_CONTEXTS        0x00000002U
+#define KSWORD_SANDBOX_NETWORK_WFP_TODO_FLAG_FILTER_CONDITIONS    0x00000004U
+#define KSWORD_SANDBOX_NETWORK_WFP_TODO_FLAG_PROTOCOL_PAYLOADS    0x00000008U
+#define KSWORD_SANDBOX_NETWORK_WFP_TODO_MASK_CURRENT \
+    (KSWORD_SANDBOX_NETWORK_WFP_TODO_FLAG_PACKET_STREAM_LAYERS | \
+     KSWORD_SANDBOX_NETWORK_WFP_TODO_FLAG_FLOW_CONTEXTS | \
+     KSWORD_SANDBOX_NETWORK_WFP_TODO_FLAG_FILTER_CONDITIONS | \
+     KSWORD_SANDBOX_NETWORK_WFP_TODO_FLAG_PROTOCOL_PAYLOADS)
+
+/*
  * Network address family values.
  *
  * Inputs : written before LocalAddress and RemoteAddress are interpreted.
@@ -719,6 +775,47 @@ typedef struct _KSWORD_SANDBOX_STATUS_REPLY {
 #if defined(_MSC_VER)
 #pragma warning(pop)
 #endif
+
+/*
+ * Read-only WFP/ALE runtime diagnostics returned by
+ * IOCTL_KSWORD_SANDBOX_GET_NETWORK_STATUS.
+ *
+ * Inputs : output buffer supplied by DeviceIoControl.
+ * Logic  : exposes machine-readable network readiness evidence without
+ *          changing the v1 network event payload.  LastRegisteredCalloutMask
+ *          and LastAddedFilterMask preserve partial setup progress after a
+ *          non-fatal registration failure; ActiveLayerMask is non-zero only
+ *          while the WFP classify path is currently active.  TodoMask is not an
+ *          error by itself; it distinguishes ALE inspect-only telemetry from a
+ *          full packet/protocol sensor.
+ * Return : sizeof(KSWORD_SANDBOX_NETWORK_STATUS_REPLY) bytes on success.
+ */
+typedef struct _KSWORD_SANDBOX_NETWORK_STATUS_REPLY {
+    ULONG Version;
+    ULONG Size;
+    ULONG Flags;
+    ULONG ImplementationLevel;
+    ULONG SupportedLayerMask;
+    ULONG LastRegisteredCalloutMask;
+    ULONG LastAddedFilterMask;
+    ULONG ActiveLayerMask;
+    ULONG TodoMask;
+    ULONG PayloadVersion;
+    LONG LastDegradeReason;
+    LONG LastDegradeNtStatus;
+    LONG RegisterNtStatus;
+    LONG EngineNtStatus;
+    ULONGLONG ClassifyCount;
+    ULONGLONG EventCount;
+    ULONGLONG QueueFailureCount;
+    ULONGLONG ClassifyPayloadFailureCount;
+    ULONG LastClassifyLayerId;
+    LONG LastQueueFailureNtStatus;
+    ULONG LastQueueFailureLayerId;
+    ULONG LastClassifyPayloadFailureLayerId;
+    ULONGLONG Reserved[3];
+} KSWORD_SANDBOX_NETWORK_STATUS_REPLY,
+    *PKSWORD_SANDBOX_NETWORK_STATUS_REPLY;
 
 /*
  * Request for SET_PRODUCER_ENABLE_MASK.

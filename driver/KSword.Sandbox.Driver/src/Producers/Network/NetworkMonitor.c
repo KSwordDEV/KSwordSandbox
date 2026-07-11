@@ -185,6 +185,56 @@ KswNetworkFilterIdSlot(
 }
 
 /*
+ * Maps a descriptor row to a public network-status layer bit.
+ *
+ * Inputs : BindingId identifies one row from g_KswNetworkAleBindings.
+ * Logic  : GET_NETWORK_STATUS reports setup progress with stable public layer
+ *          bits rather than volatile FWPS layer ids.
+ * Return : KSWORD_SANDBOX_NETWORK_WFP_LAYER_FLAG_* bit or zero.
+ */
+static
+ULONG
+KswNetworkLayerMaskFromBindingId(
+    _In_ KSWORD_SANDBOX_NETWORK_ALE_BINDING_ID BindingId
+    )
+{
+    switch (BindingId) {
+    case KswNetworkAleBindingConnectV4:
+        return KSWORD_SANDBOX_NETWORK_WFP_LAYER_FLAG_ALE_CONNECT_V4;
+
+    case KswNetworkAleBindingRecvAcceptV4:
+        return KSWORD_SANDBOX_NETWORK_WFP_LAYER_FLAG_ALE_RECV_ACCEPT_V4;
+
+    case KswNetworkAleBindingConnectV6:
+        return KSWORD_SANDBOX_NETWORK_WFP_LAYER_FLAG_ALE_CONNECT_V6;
+
+    case KswNetworkAleBindingRecvAcceptV6:
+        return KSWORD_SANDBOX_NETWORK_WFP_LAYER_FLAG_ALE_RECV_ACCEPT_V6;
+
+    default:
+        return 0;
+    }
+}
+
+/*
+ * Returns the machine-readable network TODO mask for the current producer.
+ *
+ * Inputs : none.
+ * Logic  : ALE inspect-only is implemented, while packet/stream/datagram WFP
+ *          layers, WFP flow contexts, filter conditions, and DNS/HTTP/TLS
+ *          payload parsing are explicitly not implemented in the driver.
+ * Return : KSWORD_SANDBOX_NETWORK_WFP_TODO_FLAG_* mask.
+ */
+static
+ULONG
+KswNetworkTodoMask(
+    VOID
+    )
+{
+    return KSWORD_SANDBOX_NETWORK_WFP_TODO_MASK_CURRENT;
+}
+
+/*
  * Leaves WFP classification as a non-blocking inspection decision.
  *
  * Inputs : ClassifyOut is the WFP classify output supplied to the callout.
@@ -682,6 +732,155 @@ KswNetworkBuildAlePayload(
 }
 
 /*
+ * Builds public network-status flags from the runtime snapshot.
+ *
+ * Inputs : none; reads only primitive fields from g_KswNetworkWfpRuntime.
+ * Logic  : exposes readiness state without adding fields to the v1 network
+ *          event payload or attempting live WFP mutation.
+ * Return : KSWORD_SANDBOX_NETWORK_STATUS_FLAG_* bitmask.
+ */
+static
+ULONG
+KswNetworkStatusFlags(
+    VOID
+    )
+{
+    ULONG flags;
+
+    flags =
+        KSWORD_SANDBOX_NETWORK_STATUS_FLAG_COMPILED |
+        KSWORD_SANDBOX_NETWORK_STATUS_FLAG_INSPECT_ONLY;
+
+    if (InterlockedCompareExchange(&g_KswNetworkWfpRuntime.Active, 0, 0) != 0) {
+        flags |= KSWORD_SANDBOX_NETWORK_STATUS_FLAG_ACTIVE;
+    }
+
+    if (InterlockedCompareExchange(
+            &g_KswNetworkWfpRuntime.LastDegradeReason,
+            0,
+            0) != KswSandboxNetworkStatusDegradeNone ||
+        !NT_SUCCESS((NTSTATUS)InterlockedCompareExchange(
+            &g_KswNetworkWfpRuntime.LastDegradeStatus,
+            0,
+            0))) {
+        flags |= KSWORD_SANDBOX_NETWORK_STATUS_FLAG_DEGRADED;
+    }
+
+    if (InterlockedCompareExchange64(
+            &g_KswNetworkWfpRuntime.QueueFailureCount,
+            0,
+            0) != 0) {
+        flags |= KSWORD_SANDBOX_NETWORK_STATUS_FLAG_QUEUE_FAILURE;
+    }
+
+    if (InterlockedCompareExchange64(
+            &g_KswNetworkWfpRuntime.ClassifyPayloadFailureCount,
+            0,
+            0) != 0) {
+        flags |= KSWORD_SANDBOX_NETWORK_STATUS_FLAG_CLASSIFY_PAYLOAD_FAILURE;
+    }
+
+    return flags;
+}
+
+/*
+ * Copies read-only WFP/ALE network producer diagnostics.
+ *
+ * Inputs : Reply receives a public fixed-size network status record.
+ * Logic  : reports runtime counters, partial setup masks, and internal
+ *          degradation state through a dedicated IOCTL status layout.  This is
+ *          diagnostic metadata only; the v1 network event payload remains an
+ *          ALE authorization record and does not claim DNS/HTTP/TLS parsing.
+ * Return : no return value.
+ */
+VOID
+KswQueryNetworkStatus(
+    _Out_ PKSWORD_SANDBOX_NETWORK_STATUS_REPLY Reply
+    )
+{
+    if (Reply == NULL) {
+        return;
+    }
+
+    RtlZeroMemory(Reply, sizeof(*Reply));
+    Reply->Version = KSWORD_SANDBOX_NETWORK_STATUS_REPLY_VERSION;
+    Reply->Size = sizeof(*Reply);
+    Reply->Flags = KswNetworkStatusFlags();
+    Reply->ImplementationLevel =
+        KSWORD_SANDBOX_NETWORK_WFP_IMPLEMENTATION_ALE_INSPECT_ONLY;
+    Reply->SupportedLayerMask = KSWORD_SANDBOX_NETWORK_WFP_LAYER_MASK_ALE_V1;
+    Reply->LastRegisteredCalloutMask =
+        (ULONG)InterlockedCompareExchange(
+            &g_KswNetworkWfpRuntime.LastRegisteredCalloutMask,
+            0,
+            0);
+    Reply->LastAddedFilterMask =
+        (ULONG)InterlockedCompareExchange(
+            &g_KswNetworkWfpRuntime.LastAddedFilterMask,
+            0,
+            0);
+    Reply->ActiveLayerMask =
+        (ULONG)InterlockedCompareExchange(
+            &g_KswNetworkWfpRuntime.ActiveLayerMask,
+            0,
+            0);
+    Reply->TodoMask = KswNetworkTodoMask();
+    Reply->PayloadVersion = g_KswNetworkWfpRuntime.PayloadVersion;
+    Reply->LastDegradeReason =
+        InterlockedCompareExchange(
+            &g_KswNetworkWfpRuntime.LastDegradeReason,
+            0,
+            0);
+    Reply->LastDegradeNtStatus =
+        InterlockedCompareExchange(
+            &g_KswNetworkWfpRuntime.LastDegradeStatus,
+            0,
+            0);
+    Reply->RegisterNtStatus = g_KswNetworkWfpRuntime.RegisterStatus;
+    Reply->EngineNtStatus = g_KswNetworkWfpRuntime.EngineStatus;
+    Reply->ClassifyCount =
+        (ULONGLONG)InterlockedCompareExchange64(
+            &g_KswNetworkWfpRuntime.ClassifyCount,
+            0,
+            0);
+    Reply->EventCount =
+        (ULONGLONG)InterlockedCompareExchange64(
+            &g_KswNetworkWfpRuntime.EventCount,
+            0,
+            0);
+    Reply->QueueFailureCount =
+        (ULONGLONG)InterlockedCompareExchange64(
+            &g_KswNetworkWfpRuntime.QueueFailureCount,
+            0,
+            0);
+    Reply->ClassifyPayloadFailureCount =
+        (ULONGLONG)InterlockedCompareExchange64(
+            &g_KswNetworkWfpRuntime.ClassifyPayloadFailureCount,
+            0,
+            0);
+    Reply->LastClassifyLayerId =
+        (ULONG)InterlockedCompareExchange(
+            &g_KswNetworkWfpRuntime.LastClassifyLayerId,
+            0,
+            0);
+    Reply->LastQueueFailureNtStatus =
+        InterlockedCompareExchange(
+            &g_KswNetworkWfpRuntime.LastQueueFailureStatus,
+            0,
+            0);
+    Reply->LastQueueFailureLayerId =
+        (ULONG)InterlockedCompareExchange(
+            &g_KswNetworkWfpRuntime.LastQueueFailureLayerId,
+            0,
+            0);
+    Reply->LastClassifyPayloadFailureLayerId =
+        (ULONG)InterlockedCompareExchange(
+            &g_KswNetworkWfpRuntime.LastClassifyPayloadFailureLayerId,
+            0,
+            0);
+}
+
+/*
  * WFP classify callback for the ALE network event producer.
  *
  * Inputs : WFP supplies fixed fields, metadata, layer data, the matching filter,
@@ -713,6 +912,11 @@ KswNetworkClassifyFn(
 
     KswNetworkSetInspectionAction(ClassifyOut);
     InterlockedIncrement64(&g_KswNetworkWfpRuntime.ClassifyCount);
+    if (InFixedValues != NULL) {
+        (VOID)InterlockedExchange(
+            &g_KswNetworkWfpRuntime.LastClassifyLayerId,
+            (LONG)InFixedValues->layerId);
+    }
 
     if (InterlockedCompareExchange(&g_KswNetworkWfpRuntime.Active, 0, 0) == 0) {
         return;
@@ -729,6 +933,13 @@ KswNetworkClassifyFn(
             InMetaValues,
             Filter,
             &payload)) {
+        InterlockedIncrement64(
+            &g_KswNetworkWfpRuntime.ClassifyPayloadFailureCount);
+        if (InFixedValues != NULL) {
+            (VOID)InterlockedExchange(
+                &g_KswNetworkWfpRuntime.LastClassifyPayloadFailureLayerId,
+                (LONG)InFixedValues->layerId);
+        }
         KswNetworkRecordDegradeStatus(
             KswSandboxNetworkStatusDegradeClassifyPayload,
             STATUS_INVALID_PARAMETER);
@@ -744,6 +955,13 @@ KswNetworkClassifyFn(
     if (NT_SUCCESS(status)) {
         InterlockedIncrement64(&g_KswNetworkWfpRuntime.EventCount);
     } else if (status != STATUS_CANCELLED) {
+        InterlockedIncrement64(&g_KswNetworkWfpRuntime.QueueFailureCount);
+        (VOID)InterlockedExchange(
+            &g_KswNetworkWfpRuntime.LastQueueFailureStatus,
+            (LONG)status);
+        (VOID)InterlockedExchange(
+            &g_KswNetworkWfpRuntime.LastQueueFailureLayerId,
+            (LONG)payload.LayerId);
         KswNetworkRecordDegradeStatus(
             KswSandboxNetworkStatusDegradeQueuePush,
             status);
@@ -1083,9 +1301,14 @@ KswInitializeNetworkMonitor(
             &g_KswNetworkAleBindings[index].CalloutKey,
             calloutIdSlot);
         if (!NT_SUCCESS(status)) {
+            g_KswNetworkWfpRuntime.RegisterStatus = status;
             degradeReason = KswSandboxNetworkStatusDegradeFwpsCalloutRegister;
             goto Failure;
         }
+        (VOID)InterlockedOr(
+            &g_KswNetworkWfpRuntime.LastRegisteredCalloutMask,
+            (LONG)KswNetworkLayerMaskFromBindingId(
+                g_KswNetworkAleBindings[index].Id));
     }
     g_KswNetworkWfpRuntime.RegisterStatus = STATUS_SUCCESS;
 
@@ -1158,6 +1381,10 @@ KswInitializeNetworkMonitor(
                 KswSandboxNetworkStatusDegradeFwpmInspectionFilter;
             goto Failure;
         }
+        (VOID)InterlockedOr(
+            &g_KswNetworkWfpRuntime.LastAddedFilterMask,
+            (LONG)KswNetworkLayerMaskFromBindingId(
+                g_KswNetworkAleBindings[index].Id));
     }
 
     status = FwpmTransactionCommit0(g_KswNetworkWfpRuntime.EngineHandle);
@@ -1168,6 +1395,9 @@ KswInitializeNetworkMonitor(
     }
 
     InterlockedExchange(&g_KswNetworkWfpRuntime.Active, 1);
+    (VOID)InterlockedExchange(
+        &g_KswNetworkWfpRuntime.ActiveLayerMask,
+        g_KswNetworkWfpRuntime.LastAddedFilterMask);
     KswNetworkRecordDegradeStatus(
         KswSandboxNetworkStatusDegradeNone,
         STATUS_SUCCESS);
@@ -1188,6 +1418,7 @@ Failure:
 
     KswNetworkDeleteManagementObjects();
     KswNetworkUnregisterFwpsCallouts();
+    (VOID)InterlockedExchange(&g_KswNetworkWfpRuntime.ActiveLayerMask, 0);
     g_KswNetworkWfpRuntime.PayloadVersion = 0;
     InterlockedExchange(&g_KswNetworkWfpRuntime.Initialized, 0);
     g_KswNetworkWfpRuntime.DeviceExtension = NULL;
@@ -1218,6 +1449,7 @@ KswUninitializeNetworkMonitor(
     }
 
     InterlockedExchange(&g_KswNetworkWfpRuntime.Active, 0);
+    (VOID)InterlockedExchange(&g_KswNetworkWfpRuntime.ActiveLayerMask, 0);
     KswNetworkDeleteManagementObjects();
     KswNetworkUnregisterFwpsCallouts();
     g_KswNetworkWfpRuntime.PayloadVersion = 0;
@@ -1263,6 +1495,41 @@ KswUninitializeNetworkMonitor(
     VOID
     )
 {
+}
+
+/*
+ * Copies network diagnostics for an explicit unsupported WFP/ALE build.
+ *
+ * Inputs : Reply receives a fixed-size public network status record.
+ * Logic  : exposes the compile-time-disabled state without advertising runtime
+ *          WFP callouts, loading a driver service, or mutating WFP.
+ * Return : no return value.
+ */
+VOID
+KswQueryNetworkStatus(
+    _Out_ PKSWORD_SANDBOX_NETWORK_STATUS_REPLY Reply
+    )
+{
+    if (Reply == NULL) {
+        return;
+    }
+
+    RtlZeroMemory(Reply, sizeof(*Reply));
+    Reply->Version = KSWORD_SANDBOX_NETWORK_STATUS_REPLY_VERSION;
+    Reply->Size = sizeof(*Reply);
+    Reply->Flags =
+        KSWORD_SANDBOX_NETWORK_STATUS_FLAG_DEGRADED |
+        KSWORD_SANDBOX_NETWORK_STATUS_FLAG_COMPILE_TIME_DISABLED;
+    Reply->ImplementationLevel = KSWORD_SANDBOX_NETWORK_WFP_IMPLEMENTATION_NONE;
+    Reply->SupportedLayerMask = 0;
+    Reply->TodoMask = KSWORD_SANDBOX_NETWORK_WFP_TODO_MASK_CURRENT;
+    Reply->PayloadVersion = 0;
+    Reply->LastDegradeReason =
+        KswSandboxNetworkStatusDegradeCompileTimeDisabled;
+    Reply->LastDegradeNtStatus = STATUS_NOT_SUPPORTED;
+    Reply->RegisterNtStatus = STATUS_NOT_SUPPORTED;
+    Reply->EngineNtStatus = STATUS_NOT_SUPPORTED;
+    Reply->LastQueueFailureNtStatus = STATUS_SUCCESS;
 }
 
 #endif

@@ -36,6 +36,7 @@ internal sealed class StaticAnalysisPeEvidenceContractScenario : ISmokeTestScena
             "import_suspicious_api",
             "import_process_injection_api",
             "import_dynamic_code_api",
+            "import_anti_debug_api",
             "import_network_api",
             "import_network_library",
             "import_suspicious_api_cluster",
@@ -63,6 +64,8 @@ internal sealed class StaticAnalysisPeEvidenceContractScenario : ISmokeTestScena
             "run_key_path_string",
             "windows_path_string",
             "lolbin_string",
+            "download_execute_string",
+            "download_exec_candidate",
             "packer_hint",
             "packer_string_hint",
             "packer_upx",
@@ -79,9 +82,10 @@ internal sealed class StaticAnalysisPeEvidenceContractScenario : ISmokeTestScena
         SmokeAssert.True(
             result.Imports.Any(module =>
                 string.Equals(module.ModuleName, "KERNEL32.dll", StringComparison.OrdinalIgnoreCase) &&
-                module.NamedApiCount == 3 &&
+                module.NamedApiCount == 4 &&
                 module.ApiNames.Contains("WriteProcessMemory", StringComparer.OrdinalIgnoreCase) &&
-                module.SuspiciousApiClusters.Contains("process-injection", StringComparer.OrdinalIgnoreCase)),
+                module.SuspiciousApiClusters.Contains("process-injection", StringComparer.OrdinalIgnoreCase) &&
+                module.SuspiciousApiClusters.Contains("anti-debug", StringComparer.OrdinalIgnoreCase)),
             "StaticAnalyzer should expose structured import module/API fields.");
         SmokeAssert.True(
             result.ImportApiClusters.Any(cluster =>
@@ -89,6 +93,11 @@ internal sealed class StaticAnalysisPeEvidenceContractScenario : ISmokeTestScena
                 cluster.HitCount == 2 &&
                 cluster.ApiNames.Contains("CreateRemoteThread", StringComparer.OrdinalIgnoreCase)),
             "StaticAnalyzer should expose structured suspicious import API clusters.");
+        SmokeAssert.True(
+            result.ImportApiClusters.Any(cluster =>
+                string.Equals(cluster.Name, "anti-debug", StringComparison.OrdinalIgnoreCase) &&
+                cluster.ApiNames.Contains("DebugBreak", StringComparer.OrdinalIgnoreCase)),
+            "StaticAnalyzer should expose anti-debug import API clusters.");
         SmokeAssert.True(
             string.Equals(result.ExportModuleName, "SmokeDll.dll", StringComparison.OrdinalIgnoreCase) &&
             result.ExportNames.Contains("DllRegisterServer", StringComparer.OrdinalIgnoreCase) &&
@@ -115,16 +124,19 @@ internal sealed class StaticAnalysisPeEvidenceContractScenario : ISmokeTestScena
             result.CommandIndicators.Any(indicator => indicator.Category == "lolbin" && string.Equals(indicator.Tool, "certutil", StringComparison.OrdinalIgnoreCase)),
             "StaticAnalyzer should expose structured LOLBIN command indicators.");
         SmokeAssert.True(
+            result.CommandIndicators.Any(indicator => indicator.Category == "download-execute" && indicator.Tags.Contains("download_exec_candidate", StringComparer.OrdinalIgnoreCase)),
+            "StaticAnalyzer should expose static download-execute command candidates.");
+        SmokeAssert.True(
             result.InterestingStrings.Any(value => value.StartsWith("overlay:", StringComparison.OrdinalIgnoreCase)),
             "StaticAnalyzer should emit overlay-prefixed evidence.");
         SmokeAssert.True(
             result.InterestingStrings.Any(value => value.StartsWith("signature:certificate-table", StringComparison.OrdinalIgnoreCase)),
             "StaticAnalyzer should emit certificate-table evidence.");
         SmokeAssert.True(
-            result.InterestingStrings.Any(value => value.StartsWith("import-summary:modules=2,namedApis=4,ordinals=0", StringComparison.OrdinalIgnoreCase)),
+            result.InterestingStrings.Any(value => value.StartsWith("import-summary:modules=2,namedApis=5,ordinals=0", StringComparison.OrdinalIgnoreCase)),
             "StaticAnalyzer should emit aggregate import-table summary evidence.");
         SmokeAssert.True(
-            result.InterestingStrings.Any(value => value.StartsWith("import-module:KERNEL32.dll,namedApis=3,ordinals=0", StringComparison.OrdinalIgnoreCase)),
+            result.InterestingStrings.Any(value => value.StartsWith("import-module:KERNEL32.dll,namedApis=4,ordinals=0", StringComparison.OrdinalIgnoreCase)),
             "StaticAnalyzer should emit per-module import count evidence.");
         SmokeAssert.True(
             result.InterestingStrings.Any(value => value.StartsWith("import-api-cluster:process-injection,hits=2", StringComparison.OrdinalIgnoreCase)),
@@ -168,7 +180,9 @@ internal sealed class StaticAnalysisPeEvidenceContractScenario : ISmokeTestScena
             events.Any(evt =>
                 string.Equals(evt.EventType, "static.pe.import.module", StringComparison.OrdinalIgnoreCase) &&
                 DataEquals(evt, "moduleName", "KERNEL32.dll") &&
-                DataContains(evt, "apiNames", "WriteProcessMemory")),
+                DataContains(evt, "apiNames", "WriteProcessMemory") &&
+                DataEquals(evt, "hasAntiDebugApi", "True") &&
+                evt.Data.ContainsKey("ruleKey")),
             "StaticAnalyzer should project PE import module/API events.");
         SmokeAssert.True(
             events.Any(evt =>
@@ -176,6 +190,13 @@ internal sealed class StaticAnalysisPeEvidenceContractScenario : ISmokeTestScena
                 DataEquals(evt, "cluster", "process-injection") &&
                 DataContains(evt, "tags", "import_process_injection_api")),
             "StaticAnalyzer should project suspicious import cluster events.");
+        SmokeAssert.True(
+            events.Any(evt =>
+                string.Equals(evt.EventType, "static.pe.import.cluster", StringComparison.OrdinalIgnoreCase) &&
+                DataEquals(evt, "cluster", "anti-debug") &&
+                DataEquals(evt, "antiDebugCandidate", "True") &&
+                DataContains(evt, "mitreCandidates", "T1622")),
+            "StaticAnalyzer should project anti-debug import cluster events.");
         SmokeAssert.True(
             events.Any(evt =>
                 string.Equals(evt.EventType, "static.pe.export", StringComparison.OrdinalIgnoreCase) &&
@@ -202,8 +223,16 @@ internal sealed class StaticAnalysisPeEvidenceContractScenario : ISmokeTestScena
             events.Any(evt =>
                 string.Equals(evt.EventType, "static.string.command", StringComparison.OrdinalIgnoreCase) &&
                 DataEquals(evt, "category", "lolbin") &&
-                DataEquals(evt, "tool", "certutil")),
+                DataEquals(evt, "tool", "certutil") &&
+                evt.Data.ContainsKey("ruleScope")),
             "StaticAnalyzer should project command/LOLBIN string events.");
+        SmokeAssert.True(
+            events.Any(evt =>
+                string.Equals(evt.EventType, "static.string.command", StringComparison.OrdinalIgnoreCase) &&
+                DataEquals(evt, "category", "download-execute") &&
+                DataEquals(evt, "downloadExecCandidate", "True") &&
+                DataContains(evt, "mitreCandidates", "T1105")),
+            "StaticAnalyzer should project download-execute command string evidence.");
         SmokeAssert.True(
             events.Any(evt =>
                 string.Equals(evt.EventType, "static.packer.hint", StringComparison.OrdinalIgnoreCase) &&
@@ -438,9 +467,9 @@ internal sealed class StaticAnalysisPeEvidenceContractScenario : ISmokeTestScena
         WriteUInt32(buffer, 0x300, 0x1160);
         WriteUInt32(buffer, 0x300 + 12, 0x1140);
         WriteUInt32(buffer, 0x300 + 16, 0x1160);
-        WriteUInt32(buffer, 0x314, 0x1180);
+        WriteUInt32(buffer, 0x314, 0x1190);
         WriteUInt32(buffer, 0x314 + 12, 0x114d);
-        WriteUInt32(buffer, 0x314 + 16, 0x1180);
+        WriteUInt32(buffer, 0x314 + 16, 0x1190);
 
         WriteAsciiString(buffer, 0x340, "KERNEL32.dll");
         WriteAsciiString(buffer, 0x34d, "WININET.dll");
@@ -448,14 +477,16 @@ internal sealed class StaticAnalysisPeEvidenceContractScenario : ISmokeTestScena
         WriteUInt64(buffer, 0x360, 0x11a0);
         WriteUInt64(buffer, 0x368, 0x11b0);
         WriteUInt64(buffer, 0x370, 0x11c8);
-        WriteUInt64(buffer, 0x378, 0);
-        WriteUInt64(buffer, 0x380, 0x11e0);
-        WriteUInt64(buffer, 0x388, 0);
+        WriteUInt64(buffer, 0x378, 0x11f0);
+        WriteUInt64(buffer, 0x380, 0);
+        WriteUInt64(buffer, 0x390, 0x11e0);
+        WriteUInt64(buffer, 0x398, 0);
 
         WriteImportByName(buffer, 0x3a0, "VirtualAlloc");
         WriteImportByName(buffer, 0x3b0, "WriteProcessMemory");
         WriteImportByName(buffer, 0x3c8, "CreateRemoteThread");
         WriteImportByName(buffer, 0x3e0, "InternetOpenA");
+        WriteImportByName(buffer, 0x3f0, "DebugBreak");
     }
 
     /// <summary>
