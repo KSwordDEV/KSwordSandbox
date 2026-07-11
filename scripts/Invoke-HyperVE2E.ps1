@@ -215,6 +215,18 @@ function Test-IsAdministrator {
     }
 }
 
+function ConvertTo-PlanCheckId {
+    param([AllowNull()][string]$Name)
+
+    $value = if ([string]::IsNullOrWhiteSpace($Name)) { 'plan-check' } else { $Name.Trim() }
+    $slug = [regex]::Replace($value.ToLowerInvariant(), '[^a-z0-9]+', '-').Trim('-')
+    if ([string]::IsNullOrWhiteSpace($slug)) {
+        return 'plan-check'
+    }
+
+    return $slug
+}
+
 function New-PlanCheck {
     param(
         [Parameter(Mandatory)][string]$Name,
@@ -222,7 +234,8 @@ function New-PlanCheck {
         [bool]$RequiredForLive,
         [Parameter(Mandatory)][string]$Message,
         [System.Collections.IDictionary]$Details = @{},
-        [string[]]$Remediation = @()
+        [string[]]$Remediation = @(),
+        [string]$Category = 'general'
     )
 
     $orderedDetails = [ordered]@{}
@@ -231,9 +244,12 @@ function New-PlanCheck {
     }
 
     return [ordered]@{
+        checkId         = ConvertTo-PlanCheckId -Name $Name
+        category        = $Category
         name            = $Name
         status          = $Status
         requiredForLive = $RequiredForLive
+        machineReadable = $true
         message         = $Message
         remediation     = @($Remediation)
         details         = $orderedDetails
@@ -314,6 +330,134 @@ function New-DirectoryPresenceCheck {
         -Message $missingMessage `
         -Details @{ path = $Path; exists = $false } `
         -Remediation $effectiveRemediation
+}
+
+function Test-IsPlanPathUnderRoot {
+    param(
+        [AllowNull()][string]$Path,
+        [AllowNull()][string]$Root
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Path) -or [string]::IsNullOrWhiteSpace($Root)) {
+        return $false
+    }
+
+    try {
+        $fullPath = [System.IO.Path]::GetFullPath($Path).TrimEnd('\', '/')
+        $fullRoot = [System.IO.Path]::GetFullPath($Root).TrimEnd('\', '/')
+        return $fullPath.Equals($fullRoot, [System.StringComparison]::OrdinalIgnoreCase) -or
+            $fullPath.StartsWith($fullRoot + [System.IO.Path]::DirectorySeparatorChar, [System.StringComparison]::OrdinalIgnoreCase)
+    }
+    catch {
+        return $false
+    }
+}
+
+function New-HostSharedPathCheck {
+    param(
+        [Parameter(Mandatory)][string]$RuntimeRoot,
+        [Parameter(Mandatory)][string]$GuestPayloadRoot,
+        [Parameter(Mandatory)][string]$RepositoryRoot
+    )
+
+    $runtimeIsAbsolute = [System.IO.Path]::IsPathRooted($RuntimeRoot)
+    $payloadIsAbsolute = [System.IO.Path]::IsPathRooted($GuestPayloadRoot)
+    $runtimeUnderRepo = Test-IsPlanPathUnderRoot -Path $RuntimeRoot -Root $RepositoryRoot
+    $payloadUnderRepo = Test-IsPlanPathUnderRoot -Path $GuestPayloadRoot -Root $RepositoryRoot
+    $details = @{
+        runtimeRoot = $RuntimeRoot
+        runtimeRootIsAbsolute = $runtimeIsAbsolute
+        runtimeRootExists = (Test-Path -LiteralPath $RuntimeRoot -PathType Container)
+        runtimeRootUnderRepository = $runtimeUnderRepo
+        guestPayloadRoot = $GuestPayloadRoot
+        guestPayloadRootIsAbsolute = $payloadIsAbsolute
+        guestPayloadRootExists = (Test-Path -LiteralPath $GuestPayloadRoot -PathType Container)
+        guestPayloadRootUnderRepository = $payloadUnderRepo
+        repositoryRoot = $RepositoryRoot
+        copyMechanisms = @('Copy-VMFile', 'PowerShell Direct Copy-Item -ToSession', 'PowerShell Direct Copy-Item -FromSession')
+        readOnly = $true
+    }
+
+    if ((-not $runtimeIsAbsolute) -or (-not $payloadIsAbsolute) -or $runtimeUnderRepo -or $payloadUnderRepo) {
+        return New-PlanCheck `
+            -Name 'Host shared path configuration' `
+            -Category 'paths' `
+            -Status 'Failed' `
+            -RequiredForLive $true `
+            -Message 'Runtime and payload exchange paths must be absolute host paths outside the repository.' `
+            -Details $details `
+            -Remediation @('Move runtimeRoot and guestPayloadRoot outside the git checkout, rerun payload preparation, then rerun the non-mutating plan/readiness checks.')
+    }
+
+    return New-PlanCheck `
+        -Name 'Host shared path configuration' `
+        -Category 'paths' `
+        -Status 'Passed' `
+        -RequiredForLive $true `
+        -Message 'Host runtime and guest payload exchange paths are absolute and outside the repository.' `
+        -Details $details
+}
+
+function New-HostTestSigningCheck {
+    param(
+        [bool]$DriverEnabled,
+        [bool]$UseMockCollector
+    )
+
+    $realDriverMode = $DriverEnabled -and (-not $UseMockCollector)
+    $bcdedit = Get-Command -Name 'bcdedit.exe' -ErrorAction SilentlyContinue
+    if ($null -eq $bcdedit) {
+        return New-PlanCheck `
+            -Name 'Test signing status' `
+            -Category 'driver' `
+            -Status 'Warning' `
+            -RequiredForLive $false `
+            -Message 'bcdedit.exe is not available; test-signing state was not recorded.' `
+            -Details @{ realDriverMode = $realDriverMode; bcdEditAvailable = $false; guestTestSigningVerified = $false; readOnly = $true } `
+            -Remediation @('For real R0 collection, verify test-signing inside the isolated guest VM before live execution, or use driver.useMockCollector=true.')
+    }
+
+    $testSigningValue = ''
+    $exitCode = $null
+    try {
+        $output = & $bcdedit.Source /enum '{current}' 2>&1
+        $exitCode = $LASTEXITCODE
+        $text = (@($output) | ForEach-Object { [string]$_ }) -join [Environment]::NewLine
+        if ($text -match '(?im)^\s*testsigning\s+(?<value>\S+)\s*$') {
+            $testSigningValue = $Matches['value']
+        }
+    }
+    catch {
+        return New-PlanCheck `
+            -Name 'Test signing status' `
+            -Category 'driver' `
+            -Status 'Warning' `
+            -RequiredForLive $false `
+            -Message "Unable to query host test-signing state: $($_.Exception.Message)" `
+            -Details @{ realDriverMode = $realDriverMode; bcdEditAvailable = $true; error = $_.Exception.Message; guestTestSigningVerified = $false; readOnly = $true } `
+            -Remediation @('For real R0 collection, verify guest test-signing manually before live execution, or use mock R0 collection.')
+    }
+
+    $testSigningEnabled = $testSigningValue -match '^(?i:yes|on|true|1)$'
+    $status = if ($realDriverMode -and (-not $testSigningEnabled)) { 'Warning' } else { 'Passed' }
+    $message = if ($testSigningEnabled) {
+        'Host test-signing is enabled; guest test-signing must still be verified manually for real R0 collection.'
+    }
+    elseif ($realDriverMode) {
+        'Host test-signing does not appear enabled; real R0 collection also requires guest test-signing.'
+    }
+    else {
+        'Host test-signing is not enabled; mock/no-driver E2E does not require it.'
+    }
+
+    return New-PlanCheck `
+        -Name 'Test signing status' `
+        -Category 'driver' `
+        -Status $status `
+        -RequiredForLive $false `
+        -Message $message `
+        -Details @{ realDriverMode = $realDriverMode; bcdEditAvailable = $true; bcdEditExitCode = $exitCode; testSigningValue = $testSigningValue; testSigningEnabled = $testSigningEnabled; guestTestSigningVerified = $false; readOnly = $true } `
+        -Remediation $(if ($realDriverMode -and (-not $testSigningEnabled)) { @('Use mock R0 for unsigned-driver smoke tests, or enable Windows test-signing inside the isolated guest and refresh the Clean checkpoint before real R0 live collection.') } else { @() })
 }
 
 function New-R0DriverHostPathCheck {
@@ -488,6 +632,78 @@ function New-HostOsCheck {
         -Message 'Live Hyper-V E2E requires a Windows host.' `
         -Details @{ isWindows = $false } `
         -Remediation @("Run live Hyper-V analysis on a Windows Pro/Enterprise/Education host with Hyper-V enabled; use -PlanOnly on non-Windows hosts.")
+}
+
+function New-HyperVFeatureCheck {
+    try {
+        $hostIsWindows = [System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform([System.Runtime.InteropServices.OSPlatform]::Windows)
+    }
+    catch {
+        $hostIsWindows = $false
+    }
+
+    if (-not $hostIsWindows) {
+        return New-PlanCheck `
+            -Name 'Hyper-V feature enabled' `
+            -Category 'host' `
+            -Status 'Failed' `
+            -RequiredForLive $true `
+            -Message 'Hyper-V feature state is unavailable because the host is not Windows.' `
+            -Details @{ isWindows = $false; readOnly = $true } `
+            -Remediation @("Run live Hyper-V analysis on a Windows host with Hyper-V enabled; keep this command in -PlanOnly on non-Windows hosts.")
+    }
+
+    $vmmsServiceExists = $false
+    $vmmsServiceStatus = ''
+    $featureQueryAttempted = $false
+    $anyFeatureEnabled = $false
+    $featureStates = New-Object System.Collections.Generic.List[object]
+
+    if ($null -ne (Get-Command -Name Get-WindowsOptionalFeature -ErrorAction SilentlyContinue)) {
+        $featureQueryAttempted = $true
+        foreach ($featureName in @('Microsoft-Hyper-V-All', 'Microsoft-Hyper-V', 'Microsoft-Hyper-V-Hypervisor')) {
+            try {
+                $feature = Get-WindowsOptionalFeature -Online -FeatureName $featureName -ErrorAction Stop
+                $state = [string]$feature.State
+                if ($state -eq 'Enabled') {
+                    $anyFeatureEnabled = $true
+                }
+
+                [void]$featureStates.Add([ordered]@{ featureName = $featureName; state = $state; querySucceeded = $true })
+            }
+            catch {
+                [void]$featureStates.Add([ordered]@{ featureName = $featureName; state = ''; querySucceeded = $false; error = $_.Exception.Message })
+            }
+        }
+    }
+
+    try {
+        $service = Get-Service -Name 'vmms' -ErrorAction Stop
+        $vmmsServiceExists = $true
+        $vmmsServiceStatus = [string]$service.Status
+    }
+    catch {
+        $vmmsServiceExists = $false
+    }
+
+    if ($anyFeatureEnabled -or $vmmsServiceExists) {
+        return New-PlanCheck `
+            -Name 'Hyper-V feature enabled' `
+            -Category 'host' `
+            -Status 'Passed' `
+            -RequiredForLive $true `
+            -Message 'Hyper-V feature/service state appears available for live execution.' `
+            -Details @{ featureQueryAttempted = $featureQueryAttempted; anyFeatureEnabled = $anyFeatureEnabled; featureStates = @($featureStates.ToArray()); vmmsServiceExists = $vmmsServiceExists; vmmsServiceStatus = $vmmsServiceStatus; readOnly = $true }
+    }
+
+    return New-PlanCheck `
+        -Name 'Hyper-V feature enabled' `
+        -Category 'host' `
+        -Status 'Failed' `
+        -RequiredForLive $true `
+        -Message 'Hyper-V feature/service state was not detected; live VM execution is not ready.' `
+        -Details @{ featureQueryAttempted = $featureQueryAttempted; anyFeatureEnabled = $anyFeatureEnabled; featureStates = @($featureStates.ToArray()); vmmsServiceExists = $vmmsServiceExists; vmmsServiceStatus = $vmmsServiceStatus; readOnly = $true } `
+        -Remediation @("Enable Hyper-V and Hyper-V management tools, reboot if required, then rerun .\scripts\Test-HyperVReadiness.ps1.")
 }
 
 function New-AdministratorCheck {
@@ -782,7 +998,9 @@ function New-PreflightSummary {
         warnings = $warnings.Count
         liveReady = ($failedRequired.Count -eq 0)
         failedRequiredNames = @($failedRequired | ForEach-Object { $_.name })
+        failedRequiredCheckIds = @($failedRequired | ForEach-Object { $_.checkId })
         warningNames = @($warnings | ForEach-Object { $_.name })
+        warningCheckIds = @($warnings | ForEach-Object { $_.checkId })
         repairSuggestionCount = $repairSuggestions.Count
         repairSuggestions = @($repairSuggestions.ToArray())
     }
@@ -1028,6 +1246,239 @@ function Invoke-ChildPowerShellScript {
     }
 }
 
+function Get-RecordPropertyValue {
+    param(
+        [AllowNull()][object]$Object,
+        [Parameter(Mandatory)][string]$Name,
+        [object]$DefaultValue = $null
+    )
+
+    if ($null -eq $Object) {
+        return $DefaultValue
+    }
+
+    if ($Object -is [System.Collections.IDictionary] -and $Object.Contains($Name)) {
+        return $Object[$Name]
+    }
+
+    $property = $Object.PSObject.Properties[$Name]
+    if ($null -ne $property) {
+        return $property.Value
+    }
+
+    return $DefaultValue
+}
+
+function Add-UniqueHint {
+    param(
+        [Parameter(Mandatory)][System.Collections.Generic.List[string]]$Hints,
+        [AllowNull()][string]$Hint
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Hint)) {
+        return
+    }
+
+    if (-not $Hints.Contains($Hint)) {
+        [void]$Hints.Add($Hint)
+    }
+}
+
+function Get-StepResultState {
+    param([AllowNull()][object]$StepResult)
+
+    if ($null -eq $StepResult) {
+        return 'pending'
+    }
+
+    $existingState = [string](Get-RecordPropertyValue -Object $StepResult -Name 'State' -DefaultValue '')
+    if (-not [string]::IsNullOrWhiteSpace($existingState)) {
+        return $existingState.ToLowerInvariant()
+    }
+
+    $skipped = [System.Convert]::ToBoolean((Get-RecordPropertyValue -Object $StepResult -Name 'Skipped' -DefaultValue $false))
+    $success = [System.Convert]::ToBoolean((Get-RecordPropertyValue -Object $StepResult -Name 'Success' -DefaultValue $false))
+    if ($skipped) {
+        return 'skipped'
+    }
+
+    if ($success) {
+        return 'completed'
+    }
+
+    return 'failed'
+}
+
+function Get-RunbookFailureReason {
+    param(
+        [AllowNull()][object]$FailedStep,
+        [AllowNull()][string]$Message,
+        [AllowNull()][object]$StartInvocation,
+        [AllowNull()][object]$CollectInvocation
+    )
+
+    $parts = New-Object System.Collections.Generic.List[string]
+    if ($null -ne $FailedStep) {
+        $title = [string](Get-RecordPropertyValue -Object $FailedStep -Name 'Title' -DefaultValue '')
+        $stepMessage = [string](Get-RecordPropertyValue -Object $FailedStep -Name 'Message' -DefaultValue '')
+        if (-not [string]::IsNullOrWhiteSpace($title)) {
+            [void]$parts.Add("Step failed: $title")
+        }
+        if (-not [string]::IsNullOrWhiteSpace($stepMessage)) {
+            [void]$parts.Add($stepMessage)
+        }
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($Message)) {
+        [void]$parts.Add($Message)
+    }
+
+    foreach ($invocation in @($StartInvocation, $CollectInvocation)) {
+        if ($null -eq $invocation) {
+            continue
+        }
+
+        $phase = [string](Get-RecordPropertyValue -Object $invocation -Name 'phaseName' -DefaultValue 'child')
+        $exitCode = Get-RecordPropertyValue -Object $invocation -Name 'exitCode' -DefaultValue $null
+        $stderr = [string](Get-RecordPropertyValue -Object $invocation -Name 'standardError' -DefaultValue '')
+        if ($null -ne $exitCode -and [int]$exitCode -ne 0) {
+            [void]$parts.Add("$phase phase exited with code $exitCode")
+        }
+        if (-not [string]::IsNullOrWhiteSpace($stderr)) {
+            $line = @($stderr -split "`r?`n" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -First 1)
+            if ($line.Count -gt 0) {
+                [void]$parts.Add([string]$line[0])
+            }
+        }
+    }
+
+    $reason = ($parts | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } | Select-Object -Unique) -join ' | '
+    if ($reason.Length -gt 1200) {
+        return $reason.Substring(0, 1200) + '...'
+    }
+
+    return $reason
+}
+
+function Get-RunbookRemediationHints {
+    param(
+        [Parameter(Mandatory)][object]$Plan,
+        [AllowNull()][string]$FailureReason,
+        [AllowNull()][object]$FailedStep
+    )
+
+    $hints = New-Object System.Collections.Generic.List[string]
+    foreach ($suggestion in @($Plan.preflightSummary.repairSuggestions)) {
+        Add-UniqueHint -Hints $hints -Hint ([string]$suggestion)
+    }
+
+    $failedStepMessage = if ($null -eq $FailedStep) { '' } else { [string](Get-RecordPropertyValue -Object $FailedStep -Name 'Message' -DefaultValue '') }
+    $text = (($FailureReason, $failedStepMessage) | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) }) -join ' '
+    if ($text -match "Guest password environment variable '([^']+)' is not set") {
+        $secretName = $Matches[1]
+        Add-UniqueHint -Hints $hints -Hint "Set $secretName in the same elevated process that runs live analysis, or run .\install.ps1 -Mode Change -ResetPassword -PromptPassword and restart the WebUI/runner."
+    }
+    elseif ($text -match 'missingCredentialSecret|guest password|credential secret') {
+        Add-UniqueHint -Hints $hints -Hint 'Set the configured guest password environment variable before live execution; do not paste the value into config, docs, or reports.'
+    }
+
+    if ($text -match 'VM was not found|cannot find.*VM|Get-VM|Hyper-V.*not.*available') {
+        Add-UniqueHint -Hints $hints -Hint "Verify the configured VM name '$($Plan.vm.name)' exists on this Hyper-V host and that Hyper-V PowerShell tools are installed."
+    }
+
+    if ($text -match 'checkpoint|VMSnapshot|Restore-VMSnapshot') {
+        Add-UniqueHint -Hints $hints -Hint "Verify checkpoint '$($Plan.vm.cleanCheckpointName)' exists on VM '$($Plan.vm.name)' and rerun the read-only readiness preflight."
+    }
+
+    if ($text -match 'Guest Service Interface|Copy-VMFile') {
+        Add-UniqueHint -Hints $hints -Hint "Enable Guest Service Interface for VM '$($Plan.vm.name)' in Hyper-V settings, or allow the live start phase to enable it after VM/checkpoint preflight succeeds."
+    }
+
+    if ($text -match 'PowerShell Direct|New-PSSession|Invoke-Command') {
+        Add-UniqueHint -Hints $hints -Hint "Confirm VM '$($Plan.vm.name)' can run PowerShell Direct with guest user '$($Plan.guest.userName)' and that the host secret matches the guest password."
+    }
+
+    if ($text -match 'driver\.hostDriverPath|R0Collector|deviceUnavailable|win32Error=2') {
+        Add-UniqueHint -Hints $hints -Hint 'Use driver.useMockCollector=true for the minimal executable-analysis path, or configure a built/test-signed driver.hostDriverPath before real R0 collection.'
+    }
+
+    if ($text -match 'Start script was not found|Collect script was not found|Start-SandboxHyperVJob\.ps1|Collect-GuestOutputs\.ps1') {
+        Add-UniqueHint -Hints $hints -Hint 'Verify the repository checkout contains the Hyper-V child scripts and rerun from the repository root; do not continue with partial script copies.'
+    }
+
+    if ($hints.Count -eq 0 -and -not [string]::IsNullOrWhiteSpace($FailureReason)) {
+        Add-UniqueHint -Hints $hints -Hint 'Rerun .\scripts\Test-HyperVReadiness.ps1 from an elevated shell and fix the first failed required check before trying live execution again.'
+    }
+
+    return @($hints.ToArray())
+}
+
+function New-RunbookUiProgress {
+    param(
+        [Parameter(Mandatory)][object]$Plan,
+        [Parameter(Mandatory)][object[]]$StepResults,
+        [Parameter(Mandatory)][string]$State,
+        [int]$CompletedSteps,
+        [int]$ExecutedSteps,
+        [int]$ProgressPercent,
+        [AllowNull()][string]$FailureReason,
+        [AllowEmptyCollection()][string[]]$RemediationHints
+    )
+
+    $resultByIndex = @{}
+    foreach ($result in @($StepResults)) {
+        $index = [int](Get-RecordPropertyValue -Object $result -Name 'StepIndex' -DefaultValue -1)
+        if ($index -ge 0) {
+            $resultByIndex[$index] = $result
+        }
+    }
+
+    $stepRows = New-Object System.Collections.Generic.List[object]
+    $currentStepIndex = $null
+    $currentStepId = $null
+    $currentStepTitle = $null
+    $index = 0
+    foreach ($step in @($Plan.steps)) {
+        $result = $null
+        if ($resultByIndex.ContainsKey($index)) {
+            $result = $resultByIndex[$index]
+        }
+
+        $stepState = Get-StepResultState -StepResult $result
+        if ($stepState -eq 'failed' -and $null -eq $currentStepIndex) {
+            $currentStepIndex = $index
+            $currentStepId = [string]$step.id
+            $currentStepTitle = [string]$step.title
+        }
+
+        [void]$stepRows.Add([ordered]@{
+                stepIndex = $index
+                stepId = [string]$step.id
+                title = [string]$step.title
+                phase = [string]$step.phase
+                state = $stepState
+                mutatesVmState = [bool]$step.mutatesVmState
+                message = if ($null -ne $result) { [string](Get-RecordPropertyValue -Object $result -Name 'Message' -DefaultValue '') } else { '' }
+            })
+        $index++
+    }
+
+    return [ordered]@{
+        state = $State
+        progressPercent = $ProgressPercent
+        completedSteps = $CompletedSteps
+        executedSteps = $ExecutedSteps
+        totalSteps = @($Plan.steps).Count
+        currentStepIndex = $currentStepIndex
+        currentStepId = $currentStepId
+        currentStepTitle = $currentStepTitle
+        failureReason = $FailureReason
+        remediationHints = @($RemediationHints)
+        commandTextOmitted = $true
+        steps = @($stepRows.ToArray())
+    }
+}
+
 function New-RunbookStepExecutionResult {
     param(
         [int]$StepIndex,
@@ -1043,13 +1494,34 @@ function New-RunbookStepExecutionResult {
         [TimeSpan]$Duration = [TimeSpan]::Zero,
         [bool]$RequiresElevation = $true,
         [bool]$MutatesVmState = $false,
-        [string]$Message = $null
+        [string]$Message = $null,
+        [string]$State = '',
+        [string[]]$RemediationHints = @()
     )
+
+    $effectiveState = if (-not [string]::IsNullOrWhiteSpace($State)) {
+        $State.ToLowerInvariant()
+    }
+    elseif ($Skipped) {
+        'skipped'
+    }
+    elseif ($Success) {
+        'completed'
+    }
+    else {
+        'failed'
+    }
+    $failureReason = if ((-not $Success) -and (-not $Skipped)) { $Message } else { $null }
+    $displayMessage = $Message
+    if (-not [string]::IsNullOrWhiteSpace($displayMessage) -and $displayMessage.Length -gt 600) {
+        $displayMessage = $displayMessage.Substring(0, 600) + '...'
+    }
 
     return [pscustomobject][ordered]@{
         StepIndex = $StepIndex
         StepId = $StepId
         Title = $Title
+        State = $effectiveState
         PowerShell = $PowerShell
         Skipped = $Skipped
         Success = $Success
@@ -1061,6 +1533,9 @@ function New-RunbookStepExecutionResult {
         RequiresElevation = $RequiresElevation
         MutatesVmState = $MutatesVmState
         Message = $Message
+        DisplayMessage = $displayMessage
+        FailureReason = $failureReason
+        RemediationHints = @($RemediationHints)
     }
 }
 
@@ -1176,6 +1651,33 @@ function Save-RunbookExecutionRecord {
     $failedStep = @($StepResults | Where-Object { -not [bool]$_.Success } | Select-Object -First 1)
     $failedStepIndex = if ($failedStep.Count -gt 0) { [int]$failedStep[0].StepIndex } else { $null }
     $executedSteps = @($StepResults | Where-Object { (-not [bool]$_.Skipped) -and [int]$_.StepIndex -ge 0 }).Count
+    $completedSteps = @($StepResults | Where-Object {
+            $state = Get-StepResultState -StepResult $_
+            $state -eq 'completed' -or $state -eq 'skipped'
+        }).Count
+    $totalSteps = @($Plan.steps).Count
+    $progressPercent = if ($totalSteps -le 0) {
+        if ($Success) { 100 } else { 0 }
+    }
+    else {
+        [int][Math]::Max(0, [Math]::Min(100, [Math]::Round(($completedSteps / [double]$totalSteps) * 100)))
+    }
+    if ($Success -and $progressPercent -lt 100) {
+        $progressPercent = 100
+    }
+
+    $state = if ($Success) { 'completed' } elseif ($ModeName -eq 'WhatIf') { 'completed' } else { 'failed' }
+    $failureReason = if ($Success) { $null } else { Get-RunbookFailureReason -FailedStep ($(if ($failedStep.Count -gt 0) { $failedStep[0] } else { $null })) -Message $Message -StartInvocation $StartInvocation -CollectInvocation $CollectInvocation }
+    $remediationHints = if ($Success) { @() } else { @(Get-RunbookRemediationHints -Plan $Plan -FailureReason $failureReason -FailedStep ($(if ($failedStep.Count -gt 0) { $failedStep[0] } else { $null }))) }
+    $uiSafeProgress = New-RunbookUiProgress `
+        -Plan $Plan `
+        -StepResults @($StepResults) `
+        -State $state `
+        -CompletedSteps $completedSteps `
+        -ExecutedSteps $executedSteps `
+        -ProgressPercent $progressPercent `
+        -FailureReason $failureReason `
+        -RemediationHints @($remediationHints)
 
     $record = [ordered]@{
         contractVersion = 1
@@ -1185,14 +1687,27 @@ function Save-RunbookExecutionRecord {
         Mode = $modeValue
         ModeName = $ModeName
         Success = $Success
-        TotalSteps = @($Plan.steps).Count
+        State = $state
+        TotalSteps = $totalSteps
+        CompletedSteps = $completedSteps
         ExecutedSteps = $executedSteps
+        ProgressPercent = $progressPercent
         FailedStepIndex = $failedStepIndex
         StartedAtUtc = $StartedAtUtc.ToString('O')
         Duration = $Duration.ToString('c')
         RequiresElevation = $true
         StepResults = @($StepResults)
         Message = $Message
+        FailureReason = $failureReason
+        RemediationHints = @($remediationHints)
+        UiSafeProgress = $uiSafeProgress
+        failure = [ordered]@{
+            reason = $failureReason
+            failedStepIndex = $failedStepIndex
+            failedStepId = if ($failedStep.Count -gt 0) { [string]$failedStep[0].StepId } else { $null }
+            failedStepTitle = if ($failedStep.Count -gt 0) { [string]$failedStep[0].Title } else { $null }
+            remediationHints = @($remediationHints)
+        }
         planPath = [string]$Plan.planPath
         requestedMode = [string]$Plan.requestedMode
         effectiveMode = [string]$Plan.effectiveMode
@@ -1458,9 +1973,12 @@ try {
     [void]$checks.Add((New-PlanCheck -Name 'Live execution is explicit' -Status 'Passed' -RequiredForLive $true -Message 'No VM mutation is possible unless -Live is supplied and -WhatIf is not supplied.' -Details @{ liveSwitchPresent = [bool]$Live; planOnlySwitchPresent = [bool]$PlanOnly; whatIf = [bool]$WhatIfPreference; willMutateVm = $willRunLive }))
     [void]$checks.Add((New-HostOsCheck))
     [void]$checks.Add((New-AdministratorCheck))
+    [void]$checks.Add((New-HyperVFeatureCheck))
     [void]$checks.Add((New-CommandAvailabilityCheck -Name 'PowerShell Direct commands' -Commands @('New-PSSession', 'Invoke-Command', 'Copy-Item') -RequiredForLive $true))
     [void]$checks.Add((New-CommandAvailabilityCheck -Name 'Hyper-V commands' -Commands @('Get-VM', 'Get-VMSnapshot', 'Get-VMIntegrationService', 'Enable-VMIntegrationService', 'Start-VM', 'Stop-VM', 'Restore-VMSnapshot', 'Copy-VMFile') -RequiredForLive $true))
     [void]$checks.Add((New-GuestSecretCheck -SecretName $effectiveGuestSecretName))
+    [void]$checks.Add((New-HostSharedPathCheck -RuntimeRoot $runtimeRoot -GuestPayloadRoot $resolvedPayloadRoot -RepositoryRoot $resolvedRepoRoot))
+    [void]$checks.Add((New-HostTestSigningCheck -DriverEnabled $driverEnabled -UseMockCollector $useMockCollector))
     [void]$checks.Add((New-HyperVVmCheck -VmName $effectiveVmName))
     [void]$checks.Add((New-HyperVCheckpointCheck -VmName $effectiveVmName -CheckpointName $effectiveCheckpointName))
     [void]$checks.Add((New-GuestServiceCheck -VmName $effectiveVmName))

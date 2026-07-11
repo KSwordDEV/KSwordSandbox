@@ -250,12 +250,45 @@ app.MapPost("/api/files/upload", async (HttpRequest request, SandboxConfig curre
 {
     try
     {
-        var candidate = await SaveUploadedExecutableAsync(request, currentConfig);
+        var form = await request.ReadFormAsync();
+        var candidate = await SaveUploadedExecutableAsync(form, currentConfig);
         return Results.Ok(candidate);
     }
     catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or IOException or UnauthorizedAccessException)
     {
         return Results.BadRequest(new { error = $"Executable upload failed validation or storage: {ex.Message}" });
+    }
+});
+// POST /api/files/upload/start is the WebUI one-click path: save an uploaded
+// .exe, create a normal plan, and immediately submit the runbook to the
+// background VM runner. The response always includes the created job when
+// upload/planning succeeds, even if live-run preflight fails, so the operator
+// keeps monitor/report links instead of losing context after a credential or VM
+// readiness problem.
+app.MapPost("/api/files/upload/start", async Task<IResult> (HttpRequest request, SandboxConfig currentConfig, SandboxJobService service, IRunbookExecutor executor, RunbookProgressStore progressStore, RunbookBackgroundExecutionStore backgroundStore) =>
+{
+    try
+    {
+        var form = await request.ReadFormAsync();
+        var candidate = await SaveUploadedExecutableAsync(form, currentConfig);
+        var submission = BuildSubmissionFromUploadForm(candidate, form, currentConfig);
+        var job = service.Plan(submission);
+        var runbookRequest = BuildRunbookExecuteRequestFromUploadForm(form);
+        var runbookStart = TryStartBackgroundRunbook(job.JobId, runbookRequest, service, executor, currentConfig, progressStore, backgroundStore);
+        return Results.Ok(new
+        {
+            Uploaded = candidate,
+            Job = job,
+            MonitorHref = $"/jobs/{job.JobId:D}/live-events",
+            ExecutionFlowHref = $"/jobs/{job.JobId:D}/execution-flow",
+            ReportHref = $"/api/jobs/{job.JobId:D}/report/html",
+            BackgroundHref = $"/api/jobs/{job.JobId:D}/runbook/background",
+            RunbookStart = runbookStart
+        });
+    }
+    catch (Exception ex) when (ex is ArgumentException or FileNotFoundException or InvalidOperationException or IOException or UnauthorizedAccessException)
+    {
+        return Results.BadRequest(new { error = $"Upload-and-start analysis failed before a job could be created: {ex.Message}" });
     }
 });
 app.MapPost("/api/jobs/plan", (SandboxSubmission submission, SandboxJobService service) =>
@@ -297,42 +330,20 @@ app.MapPost("/api/jobs/{jobId:guid}/runbook/execute", async (Guid jobId, Runbook
 // long PowerShell/Hyper-V request lifetime.
 app.MapPost("/api/jobs/{jobId:guid}/runbook/start", (Guid jobId, RunbookExecuteRequest request, SandboxJobService service, IRunbookExecutor executor, SandboxConfig currentConfig, RunbookProgressStore progressStore, RunbookBackgroundExecutionStore backgroundStore) =>
 {
-    var job = service.GetJob(jobId);
-    if (job is null)
+    var start = TryStartBackgroundRunbook(jobId, request, service, executor, currentConfig, progressStore, backgroundStore);
+    if (start.StatusCode == StatusCodes.Status404NotFound)
     {
-        return Results.NotFound(new { error = $"Job {jobId:D} was not found; create a dry-run plan before starting a runbook." });
+        return Results.NotFound(new { error = start.Message });
     }
 
-    if (job.Runbook is null)
+    if (start.StatusCode == StatusCodes.Status400BadRequest)
     {
-        return Results.BadRequest(new { error = $"Job {jobId:D} does not have a runbook; recreate the dry-run plan for the selected executable." });
+        return Results.BadRequest(new { error = start.Message });
     }
 
-    var existingBackground = backgroundStore.Get(jobId);
-    if (string.Equals(existingBackground.State, RunbookBackgroundExecutionStore.Queued, StringComparison.OrdinalIgnoreCase) ||
-        string.Equals(existingBackground.State, RunbookBackgroundExecutionStore.Running, StringComparison.OrdinalIgnoreCase))
-    {
-        return Results.Ok(existingBackground with
-        {
-            Accepted = false,
-            Message = "Runbook execution is already queued or running for this job."
-        });
-    }
-
-    var prepareError = TryPrepareRunbookExecution(job, request, currentConfig, progressStore, out var options);
-    if (prepareError is not null)
-    {
-        return prepareError;
-    }
-
-    var accepted = backgroundStore.TryStart(
-        jobId,
-        request.Live,
-        request.ImportGuestEvents,
-        () => ExecuteRunbookAndImportAsync(jobId, request, service, executor, options),
-        out var snapshot);
-
-    return accepted ? Results.Accepted($"/api/jobs/{jobId:D}/runbook/background", snapshot) : Results.Ok(snapshot);
+    return start.Accepted
+        ? Results.Accepted($"/api/jobs/{jobId:D}/runbook/background", start.Snapshot)
+        : Results.Ok(start.Snapshot);
 });
 app.MapPost("/api/jobs/{jobId:guid}/guest-events/import", (Guid jobId, GuestEventImportRequest request, SandboxJobService service) =>
 {
@@ -520,6 +531,98 @@ static async Task<RunbookExecutionOutcome> ExecuteRunbookAndImportAsync(
     }
 
     return new RunbookExecutionOutcome(result, updatedJob, guestImportSucceeded, guestImportMessage);
+}
+
+/// <summary>
+/// Starts one runbook in the WebUI background runner and returns a serializable
+/// summary instead of an HTTP result. Inputs mirror the public start endpoint;
+/// processing keeps all validation and active-run handling in one place so the
+/// upload-and-start endpoint cannot drift from manual job start behavior.
+/// </summary>
+static RunbookBackgroundStartAttempt TryStartBackgroundRunbook(
+    Guid jobId,
+    RunbookExecuteRequest request,
+    SandboxJobService service,
+    IRunbookExecutor executor,
+    SandboxConfig currentConfig,
+    RunbookProgressStore progressStore,
+    RunbookBackgroundExecutionStore backgroundStore)
+{
+    var job = service.GetJob(jobId);
+    if (job is null)
+    {
+        return new RunbookBackgroundStartAttempt
+        {
+            Attempted = true,
+            Accepted = false,
+            State = RunbookBackgroundExecutionStore.NotStarted,
+            Message = $"Job {jobId:D} was not found; create a dry-run plan before starting a runbook.",
+            StatusCode = StatusCodes.Status404NotFound
+        };
+    }
+
+    if (job.Runbook is null)
+    {
+        return new RunbookBackgroundStartAttempt
+        {
+            Attempted = true,
+            Accepted = false,
+            State = RunbookBackgroundExecutionStore.NotStarted,
+            Message = $"Job {jobId:D} does not have a runbook; recreate the dry-run plan for the selected executable.",
+            StatusCode = StatusCodes.Status400BadRequest
+        };
+    }
+
+    var existingBackground = backgroundStore.Get(jobId);
+    if (string.Equals(existingBackground.State, RunbookBackgroundExecutionStore.Queued, StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(existingBackground.State, RunbookBackgroundExecutionStore.Running, StringComparison.OrdinalIgnoreCase))
+    {
+        var activeSnapshot = existingBackground with
+        {
+            Accepted = false,
+            Message = "Runbook execution is already queued or running for this job."
+        };
+        return new RunbookBackgroundStartAttempt
+        {
+            Attempted = true,
+            Accepted = false,
+            State = activeSnapshot.State,
+            Message = activeSnapshot.Message,
+            StatusCode = StatusCodes.Status200OK,
+            Snapshot = activeSnapshot
+        };
+    }
+
+    var prepareError = TryPrepareRunbookExecution(job, request, currentConfig, progressStore, out var options);
+    if (prepareError is not null)
+    {
+        var modeText = request.Live ? "live VM analysis" : "dry-run verification";
+        return new RunbookBackgroundStartAttempt
+        {
+            Attempted = true,
+            Accepted = false,
+            State = RunbookBackgroundExecutionStore.Failed,
+            Message = $"Runbook {modeText} preflight failed. For live runs, verify the guest credential secret, Hyper-V readiness, and VM configuration; open the execution-flow page for the UI-safe failed step.",
+            StatusCode = StatusCodes.Status400BadRequest
+        };
+    }
+
+    var accepted = backgroundStore.TryStart(
+        jobId,
+        request.Live,
+        request.ImportGuestEvents,
+        () => ExecuteRunbookAndImportAsync(jobId, request, service, executor, options),
+        out var snapshot);
+
+    return new RunbookBackgroundStartAttempt
+    {
+        Attempted = true,
+        Accepted = accepted,
+        State = snapshot.State,
+        Message = snapshot.Message,
+        StatusCode = accepted ? StatusCodes.Status202Accepted : StatusCodes.Status200OK,
+        Snapshot = snapshot
+    };
 }
 
 /// <summary>
@@ -767,19 +870,109 @@ static string? ResolveLocalizedReportPath(AnalysisJob job, string? lang)
 }
 
 /// <summary>
+/// Builds a normal sandbox submission from the one-click upload form.
+/// Inputs are the saved sample plus multipart fields; processing applies the
+/// same VM/artifact overrides as the JSON planning endpoint; the returned
+/// submission is ready for SandboxJobService.Plan.
+/// </summary>
+static SandboxSubmission BuildSubmissionFromUploadForm(ExecutableCandidate candidate, IFormCollection form, SandboxConfig config)
+{
+    return new SandboxSubmission
+    {
+        SamplePath = candidate.FullPath,
+        DisplayName = candidate.FileName,
+        DurationSeconds = ReadFormInt(form, "durationSeconds", config.Analysis.DefaultDurationSeconds, 1, config.Analysis.MaxDurationSeconds),
+        DryRun = true,
+        GoldenVmName = ReadFormString(form, "goldenVmName"),
+        GoldenSnapshotName = ReadFormString(form, "goldenSnapshotName"),
+        GuestUserName = ReadFormString(form, "guestUserName"),
+        GuestWorkingDirectory = ReadFormString(form, "guestWorkingDirectory"),
+        GuestPayloadRoot = ReadFormString(form, "guestPayloadRoot"),
+        UseMockCollector = ReadFormBoolNullable(form, "useMockCollector"),
+        CollectDroppedFiles = ReadFormBoolNullable(form, "collectDroppedFiles"),
+        CaptureScreenshots = ReadFormBoolNullable(form, "captureScreenshots"),
+        CaptureMemoryDumps = ReadFormBoolNullable(form, "captureMemoryDumps"),
+        CapturePacketCapture = ReadFormBoolNullable(form, "capturePacketCapture")
+    };
+}
+
+/// <summary>
+/// Builds the background execution request for one-click upload analysis.
+/// Inputs are multipart fields from the browser; processing defaults to live
+/// VM mode with guest import enabled; the returned request is shared with the
+/// normal background runbook start endpoint.
+/// </summary>
+static RunbookExecuteRequest BuildRunbookExecuteRequestFromUploadForm(IFormCollection form)
+{
+    return new RunbookExecuteRequest
+    {
+        Live = ReadFormBool(form, "live", true),
+        StepTimeoutSeconds = ReadFormInt(form, "stepTimeoutSeconds", 1800, 1, 7200),
+        ImportGuestEvents = ReadFormBool(form, "importGuestEvents", true)
+    };
+}
+
+static string? ReadFormString(IFormCollection form, string key)
+{
+    return form.TryGetValue(key, out var values) && !string.IsNullOrWhiteSpace(values.ToString())
+        ? values.ToString().Trim()
+        : null;
+}
+
+static int ReadFormInt(IFormCollection form, string key, int fallback, int min, int max)
+{
+    if (form.TryGetValue(key, out var values) &&
+        int.TryParse(values.ToString(), out var parsed))
+    {
+        return Math.Clamp(parsed, min, max);
+    }
+
+    return Math.Clamp(fallback, min, max);
+}
+
+static bool? ReadFormBoolNullable(IFormCollection form, string key)
+{
+    return form.TryGetValue(key, out var values)
+        ? ParseFormBool(values.ToString())
+        : null;
+}
+
+static bool ReadFormBool(IFormCollection form, string key, bool fallback)
+{
+    return form.TryGetValue(key, out var values)
+        ? ParseFormBool(values.ToString()) ?? fallback
+        : fallback;
+}
+
+static bool? ParseFormBool(string? value)
+{
+    if (string.IsNullOrWhiteSpace(value))
+    {
+        return null;
+    }
+
+    var normalized = value.Trim().ToLowerInvariant();
+    return normalized switch
+    {
+        "1" or "true" or "yes" or "on" => true,
+        "0" or "false" or "no" or "off" => false,
+        _ => null
+    };
+}
+
+/// <summary>
 /// Saves one uploaded executable into the configured runtime upload folder.
 /// Inputs are the HTTP multipart request and sandbox config, processing
 /// validates extension and size limits, and the function returns candidate
 /// metadata with a host-visible path suitable for job planning.
 /// </summary>
-static async Task<ExecutableCandidate> SaveUploadedExecutableAsync(HttpRequest request, SandboxConfig config)
+static async Task<ExecutableCandidate> SaveUploadedExecutableAsync(IFormCollection form, SandboxConfig config)
 {
-    if (!request.HasFormContentType)
+    if (form.Files.Count == 0)
     {
         throw new ArgumentException("Upload must use multipart/form-data with an executable file field named 'sample'.");
     }
 
-    var form = await request.ReadFormAsync();
     var file = form.Files.GetFile("sample") ?? form.Files.FirstOrDefault();
     if (file is null)
     {
@@ -846,6 +1039,27 @@ internal sealed record RunbookExecuteRequest
     public int StepTimeoutSeconds { get; init; } = 1800;
 
     public bool ImportGuestEvents { get; init; } = true;
+}
+
+/// <summary>
+/// Compact outcome returned by helper code that starts a runbook in the WebUI
+/// background runner. Inputs are produced by validation/background-store code;
+/// processing serializes this into upload-and-start responses and maps it back
+/// to HTTP status for the manual start endpoint.
+/// </summary>
+internal sealed record RunbookBackgroundStartAttempt
+{
+    public bool Attempted { get; init; }
+
+    public bool Accepted { get; init; }
+
+    public string State { get; init; } = RunbookBackgroundExecutionStore.NotStarted;
+
+    public string? Message { get; init; }
+
+    public int StatusCode { get; init; } = StatusCodes.Status200OK;
+
+    public RunbookBackgroundExecutionSnapshot? Snapshot { get; init; }
 }
 
 /// <summary>

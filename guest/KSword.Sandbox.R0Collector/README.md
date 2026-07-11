@@ -37,6 +37,13 @@ Options:
 - `--output`, `--out`, `-o`: JSONL output path, or `-` for stdout. Default: `-`.
 - `--duration`, `-t`: Poll duration in seconds. `0` performs one health/poll/read-events pass.
 - `--poll-ms`, `--poll-interval`, `--poll-interval-ms`, `-p`: poll interval in milliseconds.
+- `--diagnose`, `--readiness`, `--readiness-check`: emit live non-mutating
+  readiness diagnostics for service state, device open, ABI negotiation, and a
+  bounded `READ_EVENTS` probe.
+- `--service-name <name>`: driver service name used by `--diagnose`. Default:
+  `KSwordSandboxDriver`.
+- `--read-timeout-ms <ms>`, `--diagnose-read-timeout-ms <ms>`: timeout for the
+  `--diagnose` `READ_EVENTS` probe. Default: `2000`.
 - `--enable-mask <mask>`: pass a decimal or `0x` 32-bit mask through
   `IOCTL_KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK` before draining events and
   record requested/effective producer masks in lifecycle JSONL. `READ_EVENTS`
@@ -68,7 +75,16 @@ Options:
   - optional `r0collector.heartbeat`
   - `r0collector.stopped`
 - If the device cannot be opened, the collector emits
-  `r0collector.deviceUnavailable` and exits with code `66`.
+  `r0collector.deviceUnavailable` with `severity=error`,
+  `readinessState=blocked`, `diagnosticStage=openDevice`, and a concrete
+  `diagnosticCode` such as `open_device_not_found` or `open_device_denied`, then
+  exits with code `66`.
+- `--diagnose` additionally emits `r0collector.readinessDiagnostic` rows and a
+  final `r0collector.readinessSummary`. These rows distinguish
+  `missing_service`, `service_not_running`, `open_device_not_found`,
+  `open_device_denied`, `abi_mismatch`, `read_timeout`, and
+  `driver_no_events` so readiness failures do not collapse into an
+  informational message.
 - If the device opens, the collector emits:
   - `r0collector.deviceOpened`
   - `r0collector.driverHealth`
@@ -93,7 +109,7 @@ Options:
 Every line is a `SandboxEvent` object with stable top-level fields:
 
 ```json
-{"timestamp":"2026-07-10T00:00:00.000Z","eventType":"r0collector.deviceUnavailable","source":"r0collector","processId":1234,"processName":"KSword.Sandbox.R0Collector.exe","path":"\\\\.\\KSwordSandboxDriver","commandLine":"KSword.Sandbox.R0Collector.exe --out -","data":{"message":"...","win32Error":"2","hint":"..."}}
+{"timestamp":"2026-07-10T00:00:00.000Z","eventType":"r0collector.deviceUnavailable","source":"r0collector","processId":1234,"processName":"KSword.Sandbox.R0Collector.exe","path":"\\\\.\\KSwordSandboxDriver","commandLine":"KSword.Sandbox.R0Collector.exe --out -","data":{"severity":"error","readinessState":"blocked","diagnosticStage":"openDevice","diagnosticCode":"open_device_not_found","message":"...","win32Error":"2","hint":"..."}}
 ```
 
 The `data` object is string-valued because the shared host model currently uses

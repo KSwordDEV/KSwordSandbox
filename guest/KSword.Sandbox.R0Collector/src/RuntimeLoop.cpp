@@ -4,6 +4,7 @@
 #include "IoctlClient.h"
 #include "JsonWriter.h"
 #include "Options.h"
+#include "ReadinessDiagnostics.h"
 #include "SyntheticMode.h"
 
 #include <chrono>
@@ -17,9 +18,11 @@ namespace KSword::Sandbox::R0Collector {
 std::string BuildConfigData(const Options& options) {
     JsonDataObjectBuilder data;
     data.AddWide("devicePath", options.devicePath);
+    data.AddWide("serviceName", options.serviceName);
     data.AddWide("outputPath", options.outputPath);
     data.AddSigned("durationSeconds", options.durationSeconds);
     data.AddSigned("pollIntervalMs", options.pollIntervalMs);
+    data.AddSigned("diagnoseReadTimeoutMs", options.diagnoseReadTimeoutMs);
     data.AddSigned("maxReadBatches", options.maxReadBatches);
     data.AddUnsigned("readEventsMaxEvents", options.readEventsMaxEvents);
     data.AddSigned("stressCount", options.stressCount);
@@ -27,6 +30,7 @@ std::string BuildConfigData(const Options& options) {
     data.AddBool("syntheticMode", options.mockMode);
     data.AddBool("injectJsonlNoise", options.injectJsonlNoise);
     data.AddBool("abiSelfCheck", options.abiSelfCheck);
+    data.AddBool("diagnose", options.diagnose);
     data.AddBool("healthOnly", options.healthOnly);
     data.AddBool("heartbeat", options.heartbeat);
     data.AddBool("suppressSelfNoise", options.suppressSelfNoise);
@@ -343,6 +347,10 @@ int RunCollector(int argc, wchar_t* argv[]) {
         return RunAbiSelfCheckMode(options, writer);
     }
 
+    if (options.diagnose) {
+        return RunReadinessDiagnoseMode(options, writer);
+    }
+
     if (options.mockMode) {
         const int mockExitCode = RunSyntheticMode(options, writer);
         if (mockExitCode != kExitSuccess) {
@@ -379,15 +387,7 @@ int RunCollector(int argc, wchar_t* argv[]) {
     DWORD openError = ERROR_SUCCESS;
     UniqueHandle device = OpenDriverDevice(options.devicePath, &openError);
     if (!device.IsValid()) {
-        const std::wstring message = L"Unable to open driver device " + options.devicePath + L": " + Win32ErrorMessage(openError);
-        SandboxEventFields deviceEvent;
-        deviceEvent.eventType = "r0collector.deviceUnavailable";
-        deviceEvent.path = options.devicePath;
-        deviceEvent.dataJson = BuildErrorData(
-            message,
-            openError,
-            L"Install/start the KSword driver, verify the symbolic link, or run with --mock/--synthetic/--self-test for plumbing tests.");
-        EmitEvent(writer, deviceEvent);
+        EmitDeviceUnavailableDiagnostic(writer, options, openError, "openDevice");
         return kExitDeviceUnavailable;
     }
 
@@ -396,6 +396,7 @@ int RunCollector(int argc, wchar_t* argv[]) {
     openedEvent.path = options.devicePath;
     JsonDataObjectBuilder openedData;
     openedData.AddWide("devicePath", options.devicePath);
+    openedData.AddWide("serviceName", options.serviceName);
     openedData.AddBool("ioctlIssued", false);
     openedData.AddBool("healthOnly", options.healthOnly);
     openedData.AddBool("suppressSelfNoise", options.suppressSelfNoise);

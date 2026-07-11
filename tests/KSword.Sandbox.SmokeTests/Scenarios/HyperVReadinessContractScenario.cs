@@ -39,6 +39,15 @@ internal sealed class HyperVReadinessContractScenario : ISmokeTestScenario
         RequireContains(readinessScript, "Repository secret hygiene", "Readiness should guard against committing the current guest password value.");
         RequireContains(readinessScript, "SecretValuePrinted = $false", "Readiness should explicitly avoid printing password values.");
         RequireContains(readinessScript, "Remediation", "Readiness checks should include human-readable remediation suggestions.");
+        RequireContains(readinessScript, "CheckId", "Readiness checks should expose stable machine-readable check ids.");
+        RequireContains(readinessScript, "RequiredForLive", "Readiness checks should expose a live-required flag for automation.");
+        RequireContains(readinessScript, "MachineReadable", "Readiness output should explicitly mark machine-readable objects.");
+        RequireContains(readinessScript, "Test-HyperVFeatureState", "Readiness should explicitly check whether Hyper-V is enabled/available.");
+        RequireContains(readinessScript, "Test-HostSharedPathConfiguration", "Readiness should validate host shared/runtime payload paths without writing probe files.");
+        RequireContains(readinessScript, "Test-HostTestSigningStatus", "Readiness should record test-signing status for real R0 operator decisions.");
+        RequireContains(readinessScript, "ReadOnlyAssertions", "Readiness summary should machine-report that no VM mutation or probe-file writes occurred.");
+        RequireContains(readinessScript, "FailedCheckIds", "Readiness summary should expose failed check ids.");
+        RequireContains(readinessScript, "LiveReady", "Readiness summary should expose live readiness as a Boolean.");
         RequireContains(readinessScript, "Get-ReadinessRecommendedActions", "Readiness summary should aggregate recommended repair actions.");
         RequireContains(readinessScript, "RecommendedActions", "Readiness summary should expose recommended actions.");
         RequireContains(readinessScript, "ErrorMessage", "Readiness details should include useful error messages, not only exception types.");
@@ -66,6 +75,11 @@ internal sealed class HyperVReadinessContractScenario : ISmokeTestScenario
         RequireContains(readinessDoc, "does not start the VM", "Readiness doc should state that off VMs are not started.");
         RequireContains(readinessDoc, "Readiness input resolution", "Readiness doc should describe install/run config resolution.");
         RequireContains(readinessDoc, "Repository secret hygiene", "Readiness doc should describe no-secret-in-git checks.");
+        RequireContains(readinessDoc, "CheckId", "Readiness doc should describe machine-readable check ids.");
+        RequireContains(readinessDoc, "LiveReady", "Readiness doc should describe the live-ready summary flag.");
+        RequireContains(readinessDoc, "Hyper-V feature enabled", "Readiness doc should describe the Hyper-V feature/service check.");
+        RequireContains(readinessDoc, "Host shared path configuration", "Readiness doc should describe shared/runtime path checks.");
+        RequireContains(readinessDoc, "Test signing status", "Readiness doc should describe test-signing status.");
         RequireContains(goldenVmDoc, "Readiness preflight", "Golden VM doc should reference the readiness preflight.");
         RequireContains(runbookDoc, "The preflight is intentionally safer than the live runbook", "Runbook doc should distinguish preflight from live execution.");
         RequireContains(runbookDoc, "PromptForMissingGuestPassword", "Runbook doc should document the process-only password prompt.");

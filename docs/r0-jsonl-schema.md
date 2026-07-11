@@ -58,6 +58,14 @@ Example:
 - `r0collector.driverPoll`: successful `IOCTL_KSWORD_SANDBOX_POLL` reply.
 - `r0collector.driverReadEvents`: batch summary for successful
   `IOCTL_KSWORD_SANDBOX_READ_EVENTS`.
+- `r0collector.readinessDiagnostic`: one live `--diagnose` probe result for the
+  `service`, `openDevice`, `abiNegotiation`, or `readEvents` stage. Important
+  fields are `severity`, `readinessState`, `diagnosticStage`,
+  `diagnosticCode`, `serviceName`, `devicePath`, and `hint`.
+- `r0collector.readinessSummary`: final live `--diagnose` summary with
+  `ready`, `degraded`, `severity`, `readinessState`, `failedStage`,
+  `serviceDiagnosticCode`, `openDeviceDiagnosticCode`, `abiDiagnosticCode`, and
+  `readEventsDiagnosticCode`.
 - `r0collector.stopped`: final row on successful synthetic, one-shot, or timed
   completion. Live drain rows include `drainMode`, `drainStoppedAtDeadline`,
   and `readEventsMaxEvents`.
@@ -66,10 +74,14 @@ Error rows:
 
 - `r0collector.argumentError`: invalid CLI.
 - `r0collector.outputUnavailable`: selected JSONL sink could not be opened.
-- `r0collector.deviceUnavailable`: driver device could not be opened.
+- `r0collector.deviceUnavailable`: driver device could not be opened. The row
+  includes `severity=error`, `readinessState=blocked`,
+  `diagnosticStage=openDevice`, and a concrete `diagnosticCode` such as
+  `open_device_not_found` or `open_device_denied`.
 - `r0collector.ioctlFailure`: `DeviceIoControl` returned a Win32 failure.
 - `r0collector.driverProtocolError`: an IOCTL succeeded but returned malformed
-  or incompatible bytes.
+  or incompatible bytes. ABI/protocol failures include `severity=error` and
+  `diagnosticCode=abi_mismatch`.
 
 ## Driver event rows
 
@@ -171,6 +183,15 @@ from real R0 telemetry.
   iterations.
 - `--health` opens the live device, emits health, and exits without poll/read
   drain so readiness checks do not consume queued telemetry.
+- `--diagnose` / `--readiness` opens the live device only after output is ready,
+  performs read-only service diagnostics for `--service-name`, validates
+  `GET_CAPABILITIES`, emits health/status evidence, and runs an overlapped
+  `READ_EVENTS` probe bounded by `--read-timeout-ms`.
+- `--service-name` records the expected driver service in lifecycle and
+  readiness rows; default is `KSwordSandboxDriver`.
+- `--read-timeout-ms` / `--diagnose-read-timeout-ms` controls only the
+  `--diagnose` `READ_EVENTS` timeout and emits `diagnosticCode=read_timeout`
+  instead of hanging when the driver does not complete the request.
 - `--enable-mask <mask>` accepts decimal or `0x` 32-bit values, applies the
   value through `IOCTL_KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK`, and records
   requested/effective masks in lifecycle and heartbeat rows. The reserved

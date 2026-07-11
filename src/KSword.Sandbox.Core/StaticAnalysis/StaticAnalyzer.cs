@@ -28,6 +28,8 @@ public sealed class StaticAnalyzer
     private const int MaxResourceEvidence = 96;
     private const int MaxResourceDepth = 4;
     private const int MaxPeStringLength = 180;
+    private const int MaxStructuredPeEntries = 128;
+    private const int MaxStructuredStringIndicators = 160;
 
     private static readonly Regex UrlPattern = new(
         @"https?://[^\s""'<>]+",
@@ -36,6 +38,10 @@ public sealed class StaticAnalyzer
     private static readonly Regex Ipv4Pattern = new(
         @"(?<![\d.])(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(?![\d.])",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+    private static readonly Regex EmailPattern = new(
+        @"(?<![A-Z0-9._%+\-])(?:[A-Z0-9._%+\-]{1,64})@(?:[A-Z0-9\-]{1,63}\.)+[A-Z]{2,63}(?![A-Z0-9._%+\-])",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
 
     private static readonly Regex WindowsPathPattern = new(
         @"(?<![A-Za-z0-9])(?:[A-Za-z]:\\|\\\\)[^""'<>|\r\n]{3,}",
@@ -257,6 +263,19 @@ public sealed class StaticAnalyzer
         "installutil"
     ];
 
+    private static readonly string[] LolbinCommandMarkers =
+    [
+        "rundll32",
+        "regsvr32",
+        "mshta",
+        "certutil",
+        "bitsadmin",
+        "wmic",
+        "schtasks",
+        "reg.exe",
+        "installutil"
+    ];
+
     private static readonly string[] EncodedCommandMarkers =
     [
         "-enc",
@@ -295,14 +314,19 @@ public sealed class StaticAnalyzer
         var tags = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
         var urls = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
         var interestingStrings = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
+        var stringEvidence = new StaticStringEvidence();
 
         using var stream = File.OpenRead(fullPath);
         using var reader = new BinaryReader(stream, Encoding.UTF8, leaveOpen: true);
         var header = ParsePe(reader, stream.Length, tags, interestingStrings, warnings);
-        ExtractStrings(fullPath, tags, urls, interestingStrings, warnings);
+        ExtractStrings(fullPath, tags, urls, interestingStrings, warnings, stringEvidence);
 
         return header with
         {
+            NetworkIndicators = stringEvidence.NetworkIndicators,
+            PathIndicators = stringEvidence.PathIndicators,
+            CommandIndicators = stringEvidence.CommandIndicators,
+            SuspiciousStrings = stringEvidence.SuspiciousStrings,
             Tags = tags.ToList(),
             Urls = urls.Take(MaxUrls).ToList(),
             InterestingStrings = interestingStrings.Take(MaxStrings).ToList(),
@@ -365,12 +389,13 @@ public sealed class StaticAnalyzer
         var sectionHeadersOffset = optionalHeaderOffset + optionalHeaderSize;
 
         var sectionLayouts = new List<PeSectionLayout>();
+        var peEvidence = new PeAnalysisEvidence();
         var sections = ReadSections(reader, sectionHeadersOffset, sectionCount, fileLength, tags, warnings, sectionLayouts, interestingStrings);
         var architecture = DescribeArchitecture(machine, optionalMagic);
         var subsystemText = DescribeSubsystem(subsystem);
         AddPeTags(optionalMagic, subsystemText, sections, tags);
-        AnalyzePeDataDirectories(reader, dataDirectories, sectionLayouts, optionalMagic, imageBase, fileLength, tags, interestingStrings, warnings);
-        AnalyzePeOverlayAndSignature(reader, dataDirectories, sectionLayouts, fileLength, tags, interestingStrings, warnings);
+        AnalyzePeDataDirectories(reader, dataDirectories, sectionLayouts, optionalMagic, imageBase, fileLength, tags, interestingStrings, warnings, peEvidence);
+        AnalyzePeOverlayAndSignature(reader, dataDirectories, sectionLayouts, fileLength, tags, interestingStrings, warnings, peEvidence);
 
         return new StaticAnalysisResult
         {
@@ -382,7 +407,13 @@ public sealed class StaticAnalyzer
             Subsystem = subsystemText,
             EntryPointRva = $"0x{entryPoint:X8}",
             SectionCount = sectionCount,
-            Sections = sections
+            Sections = sections,
+            Imports = peEvidence.Imports,
+            ImportApiClusters = peEvidence.ImportApiClusters,
+            ExportModuleName = peEvidence.ExportModuleName,
+            ExportNames = peEvidence.ExportNames,
+            Tls = peEvidence.Tls,
+            Overlay = peEvidence.Overlay
         };
     }
 
@@ -438,9 +469,14 @@ public sealed class StaticAnalyzer
             {
                 Name = name,
                 VirtualAddress = $"0x{virtualAddress:X8}",
+                RawDataOffset = $"0x{rawPointer:X8}",
                 VirtualSize = virtualSize,
                 RawDataSize = rawSize,
-                Entropy = Math.Round(entropy, 3)
+                Entropy = Math.Round(entropy, 3),
+                EntropyLabel = DescribeEntropy(entropy, rawSize),
+                Characteristics = $"0x{characteristics:X8}",
+                IsExecutable = (characteristics & 0x20000000) != 0,
+                IsWritable = (characteristics & 0x80000000) != 0
             });
         }
 
@@ -452,7 +488,13 @@ public sealed class StaticAnalyzer
     /// Inputs are a file path and output collections, processing scans up to a
     /// fixed byte limit, and the method returns no value.
     /// </summary>
-    private static void ExtractStrings(string fullPath, SortedSet<string> tags, SortedSet<string> urls, SortedSet<string> interestingStrings, List<string> warnings)
+    private static void ExtractStrings(
+        string fullPath,
+        SortedSet<string> tags,
+        SortedSet<string> urls,
+        SortedSet<string> interestingStrings,
+        List<string> warnings,
+        StaticStringEvidence stringEvidence)
     {
         var fileInfo = new FileInfo(fullPath);
         var readLength = (int)Math.Min(fileInfo.Length, MaxStringScanBytes);
@@ -480,7 +522,7 @@ public sealed class StaticAnalyzer
 
         foreach (var text in EnumerateAsciiStrings(buffer).Concat(EnumerateUtf16Strings(buffer)))
         {
-            AddStringClassifications(text, tags, urls, interestingStrings);
+            AddStringClassifications(text, tags, urls, interestingStrings, stringEvidence);
             if (urls.Count >= MaxUrls && interestingStrings.Count >= MaxStrings)
             {
                 break;
@@ -556,7 +598,12 @@ public sealed class StaticAnalyzer
     /// Inputs are text and output collections, processing applies token-bounded
     /// heuristics and benign manifest suppression, and the method returns no value.
     /// </summary>
-    private static void AddStringClassifications(string text, SortedSet<string> tags, SortedSet<string> urls, SortedSet<string> interestingStrings)
+    private static void AddStringClassifications(
+        string text,
+        SortedSet<string> tags,
+        SortedSet<string> urls,
+        SortedSet<string> interestingStrings,
+        StaticStringEvidence stringEvidence)
     {
         var trimmed = text.Trim();
         if (trimmed.Length > 240)
@@ -565,7 +612,7 @@ public sealed class StaticAnalyzer
         }
 
         var isInteresting = false;
-        if (AddUrlClassifications(trimmed, tags, urls, interestingStrings))
+        if (AddUrlClassifications(trimmed, tags, urls, interestingStrings, stringEvidence))
         {
             if (!IsBenignManifestOrMicrosoftReference(trimmed))
             {
@@ -573,12 +620,17 @@ public sealed class StaticAnalyzer
             }
         }
 
-        if (AddIpClassifications(trimmed, tags, interestingStrings))
+        if (AddIpClassifications(trimmed, tags, interestingStrings, stringEvidence))
         {
             isInteresting = true;
         }
 
-        if (AddPathClassifications(trimmed, tags, interestingStrings))
+        if (AddEmailClassifications(trimmed, tags, interestingStrings, stringEvidence))
+        {
+            isInteresting = true;
+        }
+
+        if (AddPathClassifications(trimmed, tags, interestingStrings, stringEvidence))
         {
             isInteresting = true;
         }
@@ -593,9 +645,23 @@ public sealed class StaticAnalyzer
                 tags.Add("powershell_string");
             }
 
-            if (ContainsAny(trimmed, "rundll32", "regsvr32", "mshta", "certutil", "bitsadmin", "wmic", "installutil"))
+            AddCommandIndicator(
+                stringEvidence,
+                "script-interpreter",
+                FindFirstMarker(trimmed, ScriptInterpreterMarkers),
+                trimmed,
+                "script_execution_string");
+
+            if (ContainsAny(trimmed, LolbinCommandMarkers))
             {
                 tags.Add("lolbin_string");
+                AddCommandIndicator(
+                    stringEvidence,
+                    "lolbin",
+                    FindFirstMarker(trimmed, LolbinCommandMarkers),
+                    trimmed,
+                    "script_execution_string",
+                    "lolbin_string");
             }
         }
 
@@ -604,6 +670,13 @@ public sealed class StaticAnalyzer
             isInteresting = true;
             tags.Add("interesting_string");
             tags.Add("encoded_command_string");
+            AddCommandIndicator(
+                stringEvidence,
+                "encoded-command",
+                FindFirstMarker(trimmed, ScriptInterpreterMarkers),
+                trimmed,
+                "script_execution_string",
+                "encoded_command_string");
         }
 
         if (ContainsAny(trimmed, "Run\\", "RunOnce\\", "Software\\Microsoft\\Windows\\CurrentVersion\\Run"))
@@ -611,6 +684,7 @@ public sealed class StaticAnalyzer
             isInteresting = true;
             tags.Add("interesting_string");
             tags.Add("persistence_string");
+            AddStringFinding(stringEvidence, "persistence-string", trimmed, "persistence_string");
         }
 
         if (ContainsAnyApiToken(trimmed, SuspiciousApiStringMarkers))
@@ -618,6 +692,7 @@ public sealed class StaticAnalyzer
             isInteresting = true;
             tags.Add("suspicious_api_string");
             AddSuspiciousApiTags(trimmed, tags);
+            AddStringFinding(stringEvidence, "suspicious-api-string", trimmed, "suspicious_api_string");
         }
 
         if (ContainsAny(trimmed, AntiSandboxStringMarkers))
@@ -626,12 +701,14 @@ public sealed class StaticAnalyzer
             tags.Add("interesting_string");
             tags.Add("anti_analysis_string");
             tags.Add("sandbox_evasion_string");
+            AddStringFinding(stringEvidence, "anti-analysis-string", trimmed, "anti_analysis_string", "sandbox_evasion_string");
         }
 
         if (ContainsAny(trimmed, PackerStringMarkers))
         {
             isInteresting = true;
             tags.Add("packer_string_hint");
+            AddStringFinding(stringEvidence, "packer-string", trimmed, "packer_string_hint");
         }
 
         if (isInteresting)
@@ -645,7 +722,12 @@ public sealed class StaticAnalyzer
     /// Inputs are text plus output tag and URL collections, processing trims
     /// common delimiters, and the method returns whether any URL was found.
     /// </summary>
-    private static bool AddUrlClassifications(string text, SortedSet<string> tags, SortedSet<string> urls, SortedSet<string> interestingStrings)
+    private static bool AddUrlClassifications(
+        string text,
+        SortedSet<string> tags,
+        SortedSet<string> urls,
+        SortedSet<string> interestingStrings,
+        StaticStringEvidence stringEvidence)
     {
         var found = false;
         foreach (Match match in UrlPattern.Matches(text))
@@ -660,10 +742,12 @@ public sealed class StaticAnalyzer
             if (IsBenignManifestOrMicrosoftReference(url))
             {
                 AddInterestingString(interestingStrings, $"url-reference:{url}");
+                AddNetworkIndicator(stringEvidence, "url", url, "reference");
             }
             else
             {
                 AddInterestingString(interestingStrings, $"url:{url}");
+                AddNetworkIndicator(stringEvidence, "url", url, "embedded");
                 found = true;
             }
 
@@ -698,7 +782,11 @@ public sealed class StaticAnalyzer
     /// Inputs are text plus output collections, processing validates octets,
     /// suppresses version-like manifest values, and returns whether an IOC hit.
     /// </summary>
-    private static bool AddIpClassifications(string text, SortedSet<string> tags, SortedSet<string> interestingStrings)
+    private static bool AddIpClassifications(
+        string text,
+        SortedSet<string> tags,
+        SortedSet<string> interestingStrings,
+        StaticStringEvidence stringEvidence)
     {
         var found = false;
         foreach (Match match in Ipv4Pattern.Matches(text))
@@ -712,9 +800,46 @@ public sealed class StaticAnalyzer
             }
 
             tags.Add("ip_address");
-            tags.Add(IsPrivateOrReservedIpv4(octets) ? "private_or_reserved_ip_address" : "public_ip_address");
+            var classification = IsPrivateOrReservedIpv4(octets) ? "private_or_reserved" : "public";
+            tags.Add(classification == "private_or_reserved" ? "private_or_reserved_ip_address" : "public_ip_address");
             tags.Add("network_indicator_string");
             AddInterestingString(interestingStrings, $"ip:{ip}");
+            AddNetworkIndicator(stringEvidence, "ipv4", ip, classification);
+            found = true;
+        }
+
+        return found;
+    }
+
+    /// <summary>
+    /// Extracts email-like static indicators while suppressing common manifest
+    /// references. Inputs are one string and output collections; processing
+    /// emits both legacy evidence and structured network indicators.
+    /// </summary>
+    private static bool AddEmailClassifications(
+        string text,
+        SortedSet<string> tags,
+        SortedSet<string> interestingStrings,
+        StaticStringEvidence stringEvidence)
+    {
+        if (IsBenignManifestOrMicrosoftReference(text))
+        {
+            return false;
+        }
+
+        var found = false;
+        foreach (Match match in EmailPattern.Matches(text))
+        {
+            var email = TrimEvidence(match.Value).TrimEnd('.', ',', ';', ')', ']', '}', '!');
+            if (string.IsNullOrWhiteSpace(email))
+            {
+                continue;
+            }
+
+            tags.Add("email_address");
+            tags.Add("network_indicator_string");
+            AddInterestingString(interestingStrings, $"email:{email}");
+            AddNetworkIndicator(stringEvidence, "email", email, "embedded");
             found = true;
         }
 
@@ -737,10 +862,19 @@ public sealed class StaticAnalyzer
             return true;
         }
 
-        return context.Contains("version", StringComparison.OrdinalIgnoreCase) ||
-            context.Contains("supportedOS", StringComparison.OrdinalIgnoreCase) ||
-            context.Contains("compatibility", StringComparison.OrdinalIgnoreCase) ||
-            context.Contains("manifest", StringComparison.OrdinalIgnoreCase);
+        var index = context.IndexOf(ip, StringComparison.OrdinalIgnoreCase);
+        if (index < 0)
+        {
+            return false;
+        }
+
+        var start = Math.Max(0, index - 32);
+        var length = Math.Min(context.Length - start, ip.Length + 64);
+        var localContext = context.Substring(start, length);
+        return localContext.Contains("version", StringComparison.OrdinalIgnoreCase) ||
+            localContext.Contains("supportedOS", StringComparison.OrdinalIgnoreCase) ||
+            localContext.Contains("compatibility", StringComparison.OrdinalIgnoreCase) ||
+            localContext.Contains("manifest", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>
@@ -748,7 +882,11 @@ public sealed class StaticAnalyzer
     /// Inputs are text plus output collections, processing applies bounded
     /// regex matches and path marker checks, and the method returns true on hit.
     /// </summary>
-    private static bool AddPathClassifications(string text, SortedSet<string> tags, SortedSet<string> interestingStrings)
+    private static bool AddPathClassifications(
+        string text,
+        SortedSet<string> tags,
+        SortedSet<string> interestingStrings,
+        StaticStringEvidence stringEvidence)
     {
         var found = false;
         foreach (Match match in RegistryPathPattern.Matches(text))
@@ -760,19 +898,28 @@ public sealed class StaticAnalyzer
             }
 
             tags.Add("registry_path_string");
+            var pathTags = new SortedSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                "registry_path_string"
+            };
             if (ContainsAny(path, "CurrentVersion\\Run", "CurrentVersion\\RunOnce", "Policies\\Explorer\\Run"))
             {
                 tags.Add("run_key_path_string");
                 tags.Add("persistence_string");
+                pathTags.Add("run_key_path_string");
+                pathTags.Add("persistence_string");
             }
 
             if (ContainsAny(path, "CurrentControlSet\\Services", "\\Services\\"))
             {
                 tags.Add("service_registry_path_string");
                 tags.Add("persistence_string");
+                pathTags.Add("service_registry_path_string");
+                pathTags.Add("persistence_string");
             }
 
             AddInterestingString(interestingStrings, $"registry-path:{path}");
+            AddPathIndicator(stringEvidence, "registry", path, pathTags);
             found = true;
         }
 
@@ -786,50 +933,70 @@ public sealed class StaticAnalyzer
 
             tags.Add("windows_path_string");
             tags.Add("file_path_string");
+            var pathTags = new SortedSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                "windows_path_string",
+                "file_path_string"
+            };
             if (ContainsAny(path, "\\Temp\\", "\\Windows\\Temp\\", "%TEMP%", "%TMP%"))
             {
                 tags.Add("temp_path_string");
+                pathTags.Add("temp_path_string");
             }
 
             if (ContainsAny(path, "\\AppData\\", "%APPDATA%", "%LOCALAPPDATA%"))
             {
                 tags.Add("appdata_path_string");
+                pathTags.Add("appdata_path_string");
             }
 
             if (ContainsAny(path, "\\Startup\\", "\\Start Menu\\Programs\\Startup", "Microsoft\\Windows\\Start Menu\\Programs\\Startup"))
             {
                 tags.Add("startup_folder_path_string");
                 tags.Add("persistence_string");
+                pathTags.Add("startup_folder_path_string");
+                pathTags.Add("persistence_string");
             }
 
             if (ContainsAny(path, ".exe", ".dll", ".sys", ".scr", ".com"))
             {
                 tags.Add("executable_path_string");
+                pathTags.Add("executable_path_string");
             }
 
             if (ContainsAny(path, ".ps1", ".bat", ".cmd", ".vbs", ".js", ".jse", ".hta", ".wsf"))
             {
                 tags.Add("script_path_string");
                 tags.Add("script_execution_string");
+                pathTags.Add("script_path_string");
+                pathTags.Add("script_execution_string");
             }
 
             AddInterestingString(interestingStrings, $"path:{path}");
+            AddPathIndicator(stringEvidence, "filesystem", path, pathTags);
             found = true;
         }
 
         if (ContainsAny(text, "%TEMP%", "%TMP%", "%APPDATA%", "%LOCALAPPDATA%", "%PROGRAMDATA%", "%USERPROFILE%"))
         {
             tags.Add("environment_path_string");
+            var pathTags = new SortedSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                "environment_path_string"
+            };
             if (ContainsAny(text, "%TEMP%", "%TMP%"))
             {
                 tags.Add("temp_path_string");
+                pathTags.Add("temp_path_string");
             }
 
             if (ContainsAny(text, "%APPDATA%", "%LOCALAPPDATA%"))
             {
                 tags.Add("appdata_path_string");
+                pathTags.Add("appdata_path_string");
             }
 
+            AddPathIndicator(stringEvidence, "environment", text, pathTags);
             found = true;
         }
 
@@ -1009,16 +1176,17 @@ public sealed class StaticAnalyzer
         long fileLength,
         SortedSet<string> tags,
         SortedSet<string> interestingStrings,
-        List<string> warnings)
+        List<string> warnings,
+        PeAnalysisEvidence peEvidence)
     {
         if (directories.Count > 0)
         {
-            ReadExports(reader, directories[0], sections, fileLength, tags, interestingStrings, warnings);
+            ReadExports(reader, directories[0], sections, fileLength, tags, interestingStrings, warnings, peEvidence);
         }
 
         if (directories.Count > 1)
         {
-            ReadImports(reader, directories[1], sections, optionalMagic, fileLength, tags, interestingStrings, warnings);
+            ReadImports(reader, directories[1], sections, optionalMagic, fileLength, tags, interestingStrings, warnings, peEvidence);
         }
 
         if (directories.Count > 2)
@@ -1028,7 +1196,7 @@ public sealed class StaticAnalyzer
 
         if (directories.Count > 9)
         {
-            ReadTlsDirectory(reader, directories[9], sections, optionalMagic, imageBase, fileLength, tags, interestingStrings, warnings);
+            ReadTlsDirectory(reader, directories[9], sections, optionalMagic, imageBase, fileLength, tags, interestingStrings, warnings, peEvidence);
         }
     }
 
@@ -1046,11 +1214,12 @@ public sealed class StaticAnalyzer
         long fileLength,
         SortedSet<string> tags,
         SortedSet<string> interestingStrings,
-        List<string> warnings)
+        List<string> warnings,
+        PeAnalysisEvidence peEvidence)
     {
         var securityDirectory = directories.Count > 4 ? directories[4] : new PeDataDirectory(0, 0);
         var certificateTable = ReadCertificateTable(reader, securityDirectory, fileLength, tags, interestingStrings, warnings);
-        ReadOverlayEvidence(reader, sections, fileLength, certificateTable, tags, interestingStrings, warnings);
+        ReadOverlayEvidence(reader, sections, fileLength, certificateTable, tags, interestingStrings, warnings, peEvidence);
     }
 
     /// <summary>
@@ -1150,7 +1319,8 @@ public sealed class StaticAnalyzer
         FileInterval? certificateTable,
         SortedSet<string> tags,
         SortedSet<string> interestingStrings,
-        List<string> warnings)
+        List<string> warnings,
+        PeAnalysisEvidence peEvidence)
     {
         if (!TryGetRawImageEnd(sections, fileLength, out var rawImageEnd) || rawImageEnd >= fileLength)
         {
@@ -1164,9 +1334,15 @@ public sealed class StaticAnalyzer
         AddInterestingString(interestingStrings, $"overlay:start=0x{overlay.Start:X},size={overlaySize}");
 
         FileInterval? certificateOverlay = null;
+        var containsCertificateTable = false;
+        long certificateTableSize = 0;
+        string? certificateTableOffset = null;
         if (certificateTable is { } certificate && certificate.Overlaps(overlay))
         {
             certificateOverlay = certificate.Intersect(overlay);
+            containsCertificateTable = true;
+            certificateTableOffset = $"0x{certificateOverlay.Value.Start:X}";
+            certificateTableSize = certificateOverlay.Value.Length;
             tags.Add("overlay_contains_certificate_table");
             AddInterestingString(
                 interestingStrings,
@@ -1178,6 +1354,17 @@ public sealed class StaticAnalyzer
         if (nonCertificateSize == 0)
         {
             tags.Add("overlay_certificate_table_only");
+            peEvidence.Overlay = new PeOverlayInfo
+            {
+                Present = true,
+                StartOffset = $"0x{overlay.Start:X}",
+                Size = overlaySize,
+                ContainsCertificateTable = containsCertificateTable,
+                CertificateTableOffset = certificateTableOffset,
+                CertificateTableSize = certificateTableSize,
+                IsCertificateTableOnly = true,
+                NonCertificateSize = 0
+            };
             return;
         }
 
@@ -1193,6 +1380,17 @@ public sealed class StaticAnalyzer
             .First();
         if (largestSegment.Length <= 0)
         {
+            peEvidence.Overlay = new PeOverlayInfo
+            {
+                Present = true,
+                StartOffset = $"0x{overlay.Start:X}",
+                Size = overlaySize,
+                ContainsCertificateTable = containsCertificateTable,
+                CertificateTableOffset = certificateTableOffset,
+                CertificateTableSize = certificateTableSize,
+                IsCertificateTableOnly = false,
+                NonCertificateSize = nonCertificateSize
+            };
             return;
         }
 
@@ -1205,6 +1403,20 @@ public sealed class StaticAnalyzer
         AddInterestingString(
             interestingStrings,
             $"overlay:non-certificate@0x{largestSegment.Start:X},size={largestSegment.Length},entropy={Math.Round(entropy, 3):F3}");
+        peEvidence.Overlay = new PeOverlayInfo
+        {
+            Present = true,
+            StartOffset = $"0x{overlay.Start:X}",
+            Size = overlaySize,
+            ContainsCertificateTable = containsCertificateTable,
+            CertificateTableOffset = certificateTableOffset,
+            CertificateTableSize = certificateTableSize,
+            IsCertificateTableOnly = false,
+            NonCertificateSize = nonCertificateSize,
+            LargestNonCertificateOffset = $"0x{largestSegment.Start:X}",
+            LargestNonCertificateSize = largestSegment.Length,
+            NonCertificateEntropy = Math.Round(entropy, 3)
+        };
     }
 
     /// <summary>
@@ -1221,7 +1433,8 @@ public sealed class StaticAnalyzer
         long fileLength,
         SortedSet<string> tags,
         SortedSet<string> interestingStrings,
-        List<string> warnings)
+        List<string> warnings,
+        PeAnalysisEvidence peEvidence)
     {
         if (!importDirectory.IsPresent)
         {
@@ -1240,7 +1453,7 @@ public sealed class StaticAnalyzer
             : MaxImportDescriptors;
         var evidenceCount = 0;
         var moduleSummaries = new List<ImportModuleSummary>();
-        var suspiciousApiClusters = new SortedDictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var suspiciousApiClusters = new SortedDictionary<string, ImportApiClusterSummary>(StringComparer.OrdinalIgnoreCase);
         for (var index = 0; index < descriptorLimit; index++)
         {
             var descriptorOffset = importOffset + index * 20;
@@ -1284,7 +1497,7 @@ public sealed class StaticAnalyzer
             }
         }
 
-        AddImportSummaryEvidence(moduleSummaries, suspiciousApiClusters, tags, interestingStrings);
+        AddImportSummaryEvidence(moduleSummaries, suspiciousApiClusters, tags, interestingStrings, peEvidence);
     }
 
     /// <summary>
@@ -1302,7 +1515,7 @@ public sealed class StaticAnalyzer
         SortedSet<string> tags,
         SortedSet<string> interestingStrings,
         ImportModuleSummary moduleSummary,
-        SortedDictionary<string, int> suspiciousApiClusters,
+        SortedDictionary<string, ImportApiClusterSummary> suspiciousApiClusters,
         ref int evidenceCount)
     {
         if (!TryRvaToFileOffset(thunkRva, sections, fileLength, out var thunkOffset))
@@ -1332,7 +1545,9 @@ public sealed class StaticAnalyzer
             if ((rawEntry & ordinalMask) != 0)
             {
                 moduleSummary.OrdinalImportCount++;
-                AddPeEvidence(interestingStrings, $"import:{dllName}!#ordinal{rawEntry & 0xffff}", ref evidenceCount, MaxImportEvidence);
+                var ordinalName = $"#ordinal{rawEntry & 0xffff}";
+                AddBounded(moduleSummary.OrdinalImports, ordinalName, MaxStructuredPeEntries);
+                AddPeEvidence(interestingStrings, $"import:{dllName}!{ordinalName}", ref evidenceCount, MaxImportEvidence);
                 continue;
             }
 
@@ -1348,12 +1563,21 @@ public sealed class StaticAnalyzer
             }
 
             moduleSummary.NamedApiCount++;
+            AddBounded(moduleSummary.ApiNames, apiName, MaxStructuredPeEntries);
             AddPeEvidence(interestingStrings, $"import:{dllName}!{apiName}", ref evidenceCount, MaxImportEvidence);
             AddSuspiciousApiTags(apiName, tags);
             foreach (var cluster in GetSuspiciousApiClusters(apiName))
             {
-                suspiciousApiClusters.TryGetValue(cluster, out var hitCount);
-                suspiciousApiClusters[cluster] = hitCount + 1;
+                if (!suspiciousApiClusters.TryGetValue(cluster, out var summary))
+                {
+                    summary = new ImportApiClusterSummary(cluster);
+                    suspiciousApiClusters[cluster] = summary;
+                }
+
+                summary.HitCount++;
+                summary.ApiNames.Add(apiName);
+                moduleSummary.SuspiciousApiNames.Add(apiName);
+                moduleSummary.SuspiciousApiClusters.Add(cluster);
             }
         }
     }
@@ -1365,9 +1589,10 @@ public sealed class StaticAnalyzer
     /// </summary>
     private static void AddImportSummaryEvidence(
         IReadOnlyList<ImportModuleSummary> moduleSummaries,
-        IReadOnlyDictionary<string, int> suspiciousApiClusters,
+        IReadOnlyDictionary<string, ImportApiClusterSummary> suspiciousApiClusters,
         SortedSet<string> tags,
-        SortedSet<string> interestingStrings)
+        SortedSet<string> interestingStrings,
+        PeAnalysisEvidence peEvidence)
     {
         if (moduleSummaries.Count == 0)
         {
@@ -1387,6 +1612,32 @@ public sealed class StaticAnalyzer
                 $"import-module:{summary.DllName},namedApis={summary.NamedApiCount},ordinals={summary.OrdinalImportCount}");
         }
 
+        peEvidence.Imports = moduleSummaries
+            .Take(MaxStructuredPeEntries)
+            .Select(summary => new PeImportModuleInfo
+            {
+                ModuleName = summary.DllName,
+                NamedApiCount = summary.NamedApiCount,
+                OrdinalImportCount = summary.OrdinalImportCount,
+                ApiNames = summary.ApiNames
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .Take(MaxStructuredPeEntries)
+                    .ToList(),
+                OrdinalImports = summary.OrdinalImports
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .Take(MaxStructuredPeEntries)
+                    .ToList(),
+                SuspiciousApiNames = summary.SuspiciousApiNames
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .Take(MaxStructuredPeEntries)
+                    .ToList(),
+                SuspiciousApiClusters = summary.SuspiciousApiClusters
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .Take(MaxStructuredPeEntries)
+                    .ToList()
+            })
+            .ToList();
+
         if (suspiciousApiClusters.Count == 0)
         {
             return;
@@ -1399,12 +1650,28 @@ public sealed class StaticAnalyzer
         }
 
         foreach (var cluster in suspiciousApiClusters
-            .OrderByDescending(cluster => cluster.Value)
+            .OrderByDescending(cluster => cluster.Value.HitCount)
             .ThenBy(cluster => cluster.Key, StringComparer.OrdinalIgnoreCase)
             .Take(MaxImportApiClusterEvidence))
         {
-            AddInterestingString(interestingStrings, $"import-api-cluster:{cluster.Key},hits={cluster.Value}");
+            AddInterestingString(interestingStrings, $"import-api-cluster:{cluster.Key},hits={cluster.Value.HitCount}");
         }
+
+        peEvidence.ImportApiClusters = suspiciousApiClusters
+            .Values
+            .OrderByDescending(cluster => cluster.HitCount)
+            .ThenBy(cluster => cluster.Name, StringComparer.OrdinalIgnoreCase)
+            .Take(MaxStructuredPeEntries)
+            .Select(cluster => new PeImportApiClusterInfo
+            {
+                Name = cluster.Name,
+                HitCount = cluster.HitCount,
+                ApiNames = cluster.ApiNames
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .Take(MaxStructuredPeEntries)
+                    .ToList()
+            })
+            .ToList();
     }
 
     /// <summary>
@@ -1727,7 +1994,8 @@ public sealed class StaticAnalyzer
         long fileLength,
         SortedSet<string> tags,
         SortedSet<string> interestingStrings,
-        List<string> warnings)
+        List<string> warnings,
+        PeAnalysisEvidence peEvidence)
     {
         if (!exportDirectory.IsPresent)
         {
@@ -1753,6 +2021,7 @@ public sealed class StaticAnalyzer
         if (!string.IsNullOrWhiteSpace(dllName))
         {
             AddPeEvidence(interestingStrings, $"export-module:{dllName}", ref evidenceCount, MaxExportNames);
+            peEvidence.ExportModuleName = dllName;
         }
 
         var numberOfNames = ReadUInt32At(reader, exportOffset + 24, fileLength, warnings);
@@ -1782,6 +2051,7 @@ public sealed class StaticAnalyzer
             }
 
             AddPeEvidence(interestingStrings, $"export:{name}", ref evidenceCount, MaxExportNames);
+            AddBounded(peEvidence.ExportNames, name, MaxStructuredPeEntries);
             AddExportTags(name, tags);
         }
     }
@@ -1800,7 +2070,8 @@ public sealed class StaticAnalyzer
         long fileLength,
         SortedSet<string> tags,
         SortedSet<string> interestingStrings,
-        List<string> warnings)
+        List<string> warnings,
+        PeAnalysisEvidence peEvidence)
     {
         if (!tlsDirectory.IsPresent)
         {
@@ -1809,10 +2080,14 @@ public sealed class StaticAnalyzer
 
         tags.Add("tls_directory_present");
         var evidenceCount = 0;
+        string? callbackTableText = null;
+        string? callbackTableFileOffset = null;
+        var callbacks = new List<PeTlsCallbackInfo>();
         AddPeEvidence(interestingStrings, "tls:directory", ref evidenceCount, MaxTlsCallbacks);
         if (!TryRvaToFileOffset(tlsDirectory.Rva, sections, fileLength, out var tlsOffset))
         {
             warnings.Add($"TLS directory RVA 0x{tlsDirectory.Rva:X8} could not be mapped to a file offset.");
+            peEvidence.Tls = new PeTlsInfo { DirectoryPresent = true };
             return;
         }
 
@@ -1823,16 +2098,24 @@ public sealed class StaticAnalyzer
             : ReadUInt32At(reader, callbackVaOffset, fileLength, warnings);
         if (callbacksVa == 0)
         {
+            peEvidence.Tls = new PeTlsInfo { DirectoryPresent = true };
             return;
         }
 
         tags.Add("tls_callback_pointer");
+        callbackTableText = $"0x{callbacksVa:X}";
         if (!TryVaToFileOffset(callbacksVa, imageBase, sections, fileLength, out var callbacksOffset))
         {
             AddPeEvidence(interestingStrings, $"tls:callback-table@0x{callbacksVa:X}", ref evidenceCount, MaxTlsCallbacks);
+            peEvidence.Tls = new PeTlsInfo
+            {
+                DirectoryPresent = true,
+                CallbackTableVa = callbackTableText
+            };
             return;
         }
 
+        callbackTableFileOffset = $"0x{callbacksOffset:X}";
         var pointerSize = isPe32Plus ? sizeof(ulong) : sizeof(uint);
         for (var index = 0; index < MaxTlsCallbacks; index++)
         {
@@ -1852,7 +2135,22 @@ public sealed class StaticAnalyzer
 
             tags.Add("tls_callbacks");
             AddPeEvidence(interestingStrings, $"tls:callback@0x{callbackVa:X}", ref evidenceCount, MaxTlsCallbacks);
+            callbacks.Add(new PeTlsCallbackInfo
+            {
+                VirtualAddress = $"0x{callbackVa:X}",
+                RelativeVirtualAddress = imageBase != 0 && callbackVa >= imageBase
+                    ? $"0x{callbackVa - imageBase:X}"
+                    : null
+            });
         }
+
+        peEvidence.Tls = new PeTlsInfo
+        {
+            DirectoryPresent = true,
+            CallbackTableVa = callbackTableText,
+            CallbackTableFileOffset = callbackTableFileOffset,
+            Callbacks = callbacks
+        };
     }
 
     /// <summary>
@@ -2662,6 +2960,155 @@ public sealed class StaticAnalyzer
     }
 
     /// <summary>
+    /// Adds a deduplicated structured network indicator.
+    /// </summary>
+    private static void AddNetworkIndicator(StaticStringEvidence evidence, string kind, string value, string? classification)
+    {
+        if (evidence.NetworkIndicators.Count >= MaxStructuredStringIndicators || string.IsNullOrWhiteSpace(value))
+        {
+            return;
+        }
+
+        var trimmed = TrimEvidence(value);
+        var key = $"{kind}\0{trimmed}\0{classification}";
+        if (!evidence.NetworkIndicatorKeys.Add(key))
+        {
+            return;
+        }
+
+        evidence.NetworkIndicators.Add(new StaticNetworkIndicator
+        {
+            Kind = kind,
+            Value = trimmed,
+            Classification = classification
+        });
+    }
+
+    /// <summary>
+    /// Adds a deduplicated structured path indicator.
+    /// </summary>
+    private static void AddPathIndicator(StaticStringEvidence evidence, string kind, string value, IEnumerable<string> tags)
+    {
+        if (evidence.PathIndicators.Count >= MaxStructuredStringIndicators || string.IsNullOrWhiteSpace(value))
+        {
+            return;
+        }
+
+        var trimmed = TrimEvidence(value);
+        var key = $"{kind}\0{trimmed}";
+        if (!evidence.PathIndicatorKeys.Add(key))
+        {
+            return;
+        }
+
+        evidence.PathIndicators.Add(new StaticPathIndicator
+        {
+            Kind = kind,
+            Value = trimmed,
+            Tags = tags.Distinct(StringComparer.OrdinalIgnoreCase).ToList()
+        });
+    }
+
+    /// <summary>
+    /// Adds a deduplicated structured command indicator.
+    /// </summary>
+    private static void AddCommandIndicator(StaticStringEvidence evidence, string category, string? tool, string value, params string[] tags)
+    {
+        if (evidence.CommandIndicators.Count >= MaxStructuredStringIndicators || string.IsNullOrWhiteSpace(value))
+        {
+            return;
+        }
+
+        var trimmed = TrimEvidence(value);
+        var key = $"{category}\0{tool}\0{trimmed}";
+        if (!evidence.CommandIndicatorKeys.Add(key))
+        {
+            return;
+        }
+
+        evidence.CommandIndicators.Add(new StaticCommandIndicator
+        {
+            Category = category,
+            Tool = tool,
+            Value = trimmed,
+            Tags = tags
+                .Where(tag => !string.IsNullOrWhiteSpace(tag))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList()
+        });
+    }
+
+    /// <summary>
+    /// Adds a deduplicated suspicious-string finding.
+    /// </summary>
+    private static void AddStringFinding(StaticStringEvidence evidence, string category, string value, params string[] tags)
+    {
+        if (evidence.SuspiciousStrings.Count >= MaxStructuredStringIndicators || string.IsNullOrWhiteSpace(value))
+        {
+            return;
+        }
+
+        var trimmed = TrimEvidence(value);
+        var key = $"{category}\0{trimmed}";
+        if (!evidence.SuspiciousStringKeys.Add(key))
+        {
+            return;
+        }
+
+        evidence.SuspiciousStrings.Add(new StaticStringFinding
+        {
+            Category = category,
+            Value = trimmed,
+            Tags = tags
+                .Where(tag => !string.IsNullOrWhiteSpace(tag))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList()
+        });
+    }
+
+    /// <summary>
+    /// Returns the first configured marker contained in a string.
+    /// </summary>
+    private static string? FindFirstMarker(string text, IEnumerable<string> markers)
+    {
+        return markers.FirstOrDefault(marker => text.Contains(marker, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// Adds a value to a bounded list when not already present.
+    /// </summary>
+    private static void AddBounded(List<string> values, string value, int limit)
+    {
+        if (values.Count >= limit ||
+            string.IsNullOrWhiteSpace(value) ||
+            values.Contains(value, StringComparer.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        values.Add(value);
+    }
+
+    /// <summary>
+    /// Converts entropy into a stable coarse label for report/rule consumers.
+    /// </summary>
+    private static string DescribeEntropy(double entropy, uint rawSize)
+    {
+        if (rawSize == 0)
+        {
+            return "empty";
+        }
+
+        return entropy switch
+        {
+            >= 7.2 => "very_high",
+            >= 6.8 => "high",
+            <= 1.0 => "low",
+            _ => "normal"
+        };
+    }
+
+    /// <summary>
     /// Internal PE data-directory pointer used by lightweight parsing.
     /// Inputs are parsed RVA and size values; processing is simple storage; the
     /// value returns whether a directory is present.
@@ -2688,6 +3135,71 @@ public sealed class StaticAnalyzer
         public int NamedApiCount { get; set; }
 
         public int OrdinalImportCount { get; set; }
+
+        public List<string> ApiNames { get; } = [];
+
+        public List<string> OrdinalImports { get; } = [];
+
+        public List<string> SuspiciousApiNames { get; } = [];
+
+        public List<string> SuspiciousApiClusters { get; } = [];
+    }
+
+    /// <summary>
+    /// Mutable PE parse evidence accumulated before creating the public model.
+    /// </summary>
+    private sealed class PeAnalysisEvidence
+    {
+        public List<PeImportModuleInfo> Imports { get; set; } = [];
+
+        public List<PeImportApiClusterInfo> ImportApiClusters { get; set; } = [];
+
+        public string? ExportModuleName { get; set; }
+
+        public List<string> ExportNames { get; } = [];
+
+        public PeTlsInfo? Tls { get; set; }
+
+        public PeOverlayInfo? Overlay { get; set; }
+    }
+
+    /// <summary>
+    /// Mutable suspicious import API cluster rollup.
+    /// </summary>
+    private sealed class ImportApiClusterSummary
+    {
+        public ImportApiClusterSummary(string name)
+        {
+            Name = name;
+        }
+
+        public string Name { get; }
+
+        public int HitCount { get; set; }
+
+        public SortedSet<string> ApiNames { get; } = new(StringComparer.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Mutable string-indicator evidence accumulated before creating the public model.
+    /// </summary>
+    private sealed class StaticStringEvidence
+    {
+        public List<StaticNetworkIndicator> NetworkIndicators { get; } = [];
+
+        public HashSet<string> NetworkIndicatorKeys { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+        public List<StaticPathIndicator> PathIndicators { get; } = [];
+
+        public HashSet<string> PathIndicatorKeys { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+        public List<StaticCommandIndicator> CommandIndicators { get; } = [];
+
+        public HashSet<string> CommandIndicatorKeys { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+        public List<StaticStringFinding> SuspiciousStrings { get; } = [];
+
+        public HashSet<string> SuspiciousStringKeys { get; } = new(StringComparer.OrdinalIgnoreCase);
     }
 
     /// <summary>

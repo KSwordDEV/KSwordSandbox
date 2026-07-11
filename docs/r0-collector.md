@@ -20,6 +20,13 @@ Current status:
   records `collectorAbiVersion`, `capabilityFlagsCurrentHex`,
   `producerMaskCurrentHex`, `jsonlNoisePolicy`, `kernelBackpressurePolicy`, and
   `queueLossEvidence`, then exits before `CreateFileW` or `DeviceIoControl`.
+- Supports `--diagnose` / `--readiness` / `--readiness-check` for live, non-
+  mutating readiness output after the service is expected to be installed and
+  started in a VM. This mode emits `r0collector.readinessDiagnostic` and
+  `r0collector.readinessSummary` rows with `severity`, `readinessState`,
+  `diagnosticStage`, and `diagnosticCode` fields so service missing, device open
+  denied/not found, ABI mismatch, READ_EVENTS timeout, and no-event conditions
+  are not collapsed into a generic informational unavailable row.
 - Issues `IOCTL_KSWORD_SANDBOX_POLL` and `IOCTL_KSWORD_SANDBOX_READ_EVENTS`
   in a one-shot or timed polling loop.
 - Converts driver event records into `SandboxEvent` JSON Lines for the Guest
@@ -46,6 +53,10 @@ Current status:
 - `EventParser.*`: public driver ABI decoding and typed payload JSON mapping.
 - `IoctlClient.*`: device open, `DeviceIoControl` wrappers, health,
   capabilities, status, producer-mask, poll, drain calls, and protocol error
+  rows.
+- `ReadinessDiagnostics.*`: live `--diagnose` orchestration, read-only SCM
+  service inspection, device-unavailable classification, ABI compatibility
+  probe, bounded overlapped `READ_EVENTS` timeout probe, and readiness summary
   rows.
 - `SyntheticMode.*`: deterministic synthetic driver-category rows for local
   plumbing tests.
@@ -198,6 +209,15 @@ Supported options:
   health, poll, and read-events.
 - `--poll-ms`, `--poll-interval`, `--poll-interval-ms`, `-p`: poll interval in
   milliseconds.
+- `--diagnose`, `--readiness`, `--readiness-check`: run a live non-mutating
+  readiness diagnostic pass. The collector queries SCM state for `--service-name`,
+  opens the device, checks `GET_CAPABILITIES` ABI compatibility, emits
+  health/status rows, and runs a bounded `READ_EVENTS` probe without installing,
+  starting, stopping, or signing the driver.
+- `--service-name <name>`: kernel service name used by `--diagnose` service
+  diagnostics. Default is `KSwordSandboxDriver`.
+- `--read-timeout-ms <ms>` / `--diagnose-read-timeout-ms <ms>`: timeout for the
+  `--diagnose` overlapped `READ_EVENTS` probe. Default is `2000`.
 - `--max-events <count>`: cap each `READ_EVENTS` request to 1..1024 events.
   Use small values in synthetic stress checks to prove batching and sequence
   continuity.
@@ -241,7 +261,47 @@ Supported options:
 
 Device-unavailable behavior is explicit: the collector writes
 `r0collector.deviceUnavailable` to the selected JSONL sink and exits with code
-`66`.
+`66`. The row now includes `severity=error`, `readinessState=blocked`,
+`diagnosticStage=openDevice`, and a concrete `diagnosticCode` such as
+`open_device_not_found`, `open_device_denied`, `open_device_sharing_violation`,
+or `open_device_failed`.
+
+Live readiness diagnostic after a driver is expected to be installed and
+started:
+
+```powershell
+KSword.Sandbox.R0Collector.exe `
+  --diagnose `
+  --service-name KSwordSandboxDriver `
+  --device \\.\KSwordSandboxDriver `
+  --read-timeout-ms 2000 `
+  --out C:\Sandbox\r0collector-readiness.jsonl
+```
+
+Expected diagnostic rows:
+
+- `r0collector.readinessDiagnostic` with `diagnosticStage=service`. Codes include
+  `missing_service`, `service_not_running`, `service_query_denied`, and
+  `service_running`.
+- `r0collector.deviceUnavailable` when `CreateFileW` fails. `win32Error` and
+  `win32Message` are preserved, and the hint distinguishes service/load/symbolic-
+  link problems from permission failures.
+- `r0collector.readinessDiagnostic` with `diagnosticStage=abiNegotiation`. Codes
+  include `abi_compatible`, `abi_capabilities_unavailable`,
+  `abi_ioctl_failed`, and `abi_mismatch`.
+- `r0collector.readinessDiagnostic` with `diagnosticStage=readEvents`. Codes
+  include `read_timeout`, `read_ioctl_failed`, `read_protocol_error`,
+  `driver_no_events`, and `read_events_ready`.
+- `r0collector.readinessSummary` with `ready`, `degraded`, `severity`,
+  `readinessState`, `failedStage`, `serviceDiagnosticCode`,
+  `openDeviceDiagnosticCode`, `abiDiagnosticCode`, and
+  `readEventsDiagnosticCode`.
+
+`driver_no_events` is a warning/degraded condition rather than a protocol
+failure: `READ_EVENTS` completed, but the queue was empty. It usually means the
+startup heartbeat was already drained or producers have not observed sample
+activity. `read_timeout`, `abi_mismatch`, `open_device_denied`, and
+`open_device_not_found` are hard blocked readiness states.
 
 Quick self-test without a driver:
 

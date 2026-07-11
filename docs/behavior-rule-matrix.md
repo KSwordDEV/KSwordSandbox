@@ -3,14 +3,18 @@
 This document describes the behavior rules in `rules/behavior-rules.json`.
 The matrix is intentionally conservative: rules classify normalized sandbox
 events for reporting, but they do not by themselves prove malicious intent.
-The 2026-07-11 v8 report-semantic cleanup keeps coverage at 257 rules
-while separating behavior findings from static triage and collection diagnostics.
-The previous v7 placeholder-reduction pass replaced many broad placeholder
-entries with concrete metadata, indicator, or normalized-correlation rules for
-download/execute chains, process trees, anti-analysis timing, DNS/TLS/PCAP
-evidence, and R0 image-load rows. The matching predicates remain simple; newer
-rules may also carry metadata-only `confidence`, `tags`, and `evidenceFields`
-values to make report triage and rule reviews more consistent.
+The 2026-07-11 v9 rules/VT-quality expansion raises coverage to 294 rules.
+It adds targeted Windows persistence, privilege-escalation, process-injection,
+PowerShell/LOLBin, DNS/HTTP/TLS/certificate, anti-analysis, and VirusTotal
+enrichment-quality rules while preserving the existing schema. The previous v8
+report-semantic cleanup separated behavior findings from static triage and
+collection diagnostics, and the v7 placeholder-reduction pass replaced many
+broad placeholder entries with concrete metadata, indicator, or
+normalized-correlation rules for download/execute chains, process trees,
+anti-analysis timing, DNS/TLS/PCAP evidence, and R0 image-load rows. The
+matching predicates remain simple; newer rules may also carry metadata-only
+`confidence`, `tags`, `evidenceFields`, `titleZh`, and `summaryZh` values to
+make report triage and rule reviews more consistent.
 
 ## Rule schema boundary
 
@@ -28,6 +32,9 @@ Metadata-only fields do not affect matching:
 
 - `confidence`: expected triage confidence (`low`, `medium`, or `high`) for
   the rule evidence shape.
+- `titleZh` and `summaryZh`: Simplified Chinese operator text for new rule
+  metadata. Older rules may not have these fields; the JSON stays compatible
+  because the rule engine ignores unknown metadata fields.
 - `tags`: report grouping hints such as `static`, `triage`, `collection`,
   `diagnostic`, and `metadata`; tags do not affect rule matching.
 - `evidenceFields`: top-level or `data.*` fields analysts should inspect first
@@ -106,6 +113,32 @@ future parser rows.
 | Static export traits | `static-export-registration-entrypoint`, `static-export-service-entrypoint` | `static.analysis.completed` | `low` to `medium` | `T1218.010`, `T1543.003` | Export names are triage-only evidence; registration exports can indicate regsvr32-compatible DLL entry points, and service exports can support service DLL triage. |
 | Static string indicators | `static-ip-address`, `static-windows-path-string`, `static-registry-path-string`, `static-persistence-string`, `static-script-command-string`, `static-encoded-command-string`, `static-lolbin-string`, `static-anti-sandbox-string` | `static.analysis.completed` | `info` to `medium` | `T1112`, `T1547.001`, `T1059`, `T1059.001`, `T1218`, `T1497` where specific string evidence applies | Covers IP-like strings, Windows/registry paths, persistence paths, PowerShell encoded commands, living-off-the-land utility names, and VM/debugger/sandbox strings. Version/resource-shaped IPs are static triage metadata unless corroborated by runtime network telemetry. |
 
+## 2026-07-11 v9 rules and VT quality expansion
+
+The v9 pass adds 37 rules:
+
+- Persistence/autostart: user-writable and script/LOLBin Run-key payloads,
+  `StartupApproved` state changes, service binary/failure-command/driver
+  installs, weak service ACL metadata, TaskCache COM handlers, and scheduled
+  task XML targets pointing at user-writable paths.
+- Execution/injection/privilege: user-writable payload launch, archive or
+  installer process-tree launch chains, DLL image loads from user-writable
+  paths, debug/all-access process opens, token impersonation APIs,
+  auto-elevate UAC registry/LOLBin evidence, sensitive privilege enablement,
+  PowerShell in-memory reflection loaders, PowerShell-to-LOLBin child
+  processes, CMSTP, and Control Panel proxy execution.
+- Network/certificate/anti-analysis: periodic beacon metadata, DNS reputation
+  and high-entropy metadata, HTTP JSON tasking/gate URI and host-header
+  mismatch labels, TLS certificate reputation, root certificate store
+  modification command/registry evidence, debug-register checks, and host
+  identity sandbox checks.
+- VirusTotal enrichment quality: explicit `malicious`, `suspicious`,
+  `not_found`, `rate_limited`, and `not_configured` rules consume
+  `enrichment.virustotal.lookup`/`reputation.virustotal.file` rows when a
+  caller converts lookup results to normalized events. These rules are tagged
+  as enrichment metadata and intentionally have no ATT&CK technique ID because
+  external reputation is not local adversary behavior.
+
 ## 2026-07-11 v6 quality expansion
 
 The v6 quality expansion added 21 high-value detections that only use fields
@@ -157,6 +190,10 @@ keys, HTTP direct-IP/nonstandard-port triage, and PCAP beacon-interval fields.
 - `T1016`, `T1049`, `T1057`, `T1082`, and `T1135` cover command-line or
   probe-derived discovery signals for local network configuration, active
   connections, running processes, system identity, and network shares.
+- `T1134.001` covers token duplication, impersonation, and sensitive privilege
+  enablement telemetry such as `DuplicateTokenEx`, `CreateProcessWithTokenW`,
+  `AdjustTokenPrivileges`, and `SeDebugPrivilege`/backup/restore privilege
+  enablement.
 - `T1018` is used for LDAP/Kerberos/domain-service port evidence as remote
   system/domain discovery triage; port evidence alone does not prove domain
   compromise.
@@ -215,6 +252,8 @@ keys, HTTP direct-IP/nonstandard-port triage, and PCAP beacon-interval fields.
 - `T1218.010` is used for static COM registration exports because those names
   are compatible with regsvr32-style execution, but the static rule does not
   prove that regsvr32 was actually used.
+- `T1218.002` and `T1218.003` cover Control Panel and CMSTP proxy-execution
+  command lines respectively.
 - `T1115` covers clipboard API evidence when runtime telemetry explicitly
   records clipboard access primitives.
 - `T1127.001`, `T1218.004`, and `T1218.009` cover MSBuild inline-task,
@@ -234,8 +273,14 @@ keys, HTTP direct-IP/nonstandard-port triage, and PCAP beacon-interval fields.
 - `T1546.012` is used for Image File Execution Options debugger registry paths.
 - `T1547.004` is used for Winlogon Shell/Userinit/Notify/GinaDLL persistence
   paths.
+- `T1548.002` covers auto-elevate UAC bypass registry paths and LOLBin
+  launches such as `fodhelper.exe`, `computerdefaults.exe`, `sdclt.exe`, and
+  `eventvwr.exe` when observed in sandbox telemetry.
 - `T1555` and `T1555.003` cover credential stores broadly and browser
   credential databases specifically.
+- `T1553.004` covers certificate-root-store modification commands and registry
+  paths. TLS certificate reputation remains mapped to encrypted-channel
+  network evidence instead of trust-store modification.
 - `T1562.001` covers attempts to disable or modify security tools, Defender,
   AMSI, or ETW; `T1562.004` covers firewall disablement.
 - `T1564.001` is used for `attrib +h/+s` command-line evidence that attempts
@@ -246,6 +291,9 @@ keys, HTTP direct-IP/nonstandard-port triage, and PCAP beacon-interval fields.
   metadata is available but content is not inspected.
 - `T1571` covers listener or endpoint metadata that uses non-standard ports
   often associated with reverse shells, proxies, Tor, or custom C2 channels.
+- `T1574.009` covers service ImagePath values that need unquoted-space hijack
+  review. `T1574.011` covers weak service permissions or service registry ACL
+  metadata that can permit service hijacking.
 - `T1620` is used for dynamic code loading and memory-protection import groups
   as a triage hint, not as proof of reflective loading at runtime.
 - `T1622` is used for debugger/timing import strings where static evidence

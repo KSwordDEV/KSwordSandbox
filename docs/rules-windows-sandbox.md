@@ -9,15 +9,14 @@ substrings. Rules therefore favor stable evidence already emitted by guest
 events and typed R0 collector rows rather than requiring correlation that the
 engine does not support yet.
 
-The current rule set has 257 behavior rules. The v8 report-semantic cleanup
-keeps the v7 placeholder-reduction coverage while tagging static triage and
-collection diagnostics so report verdicts can distinguish them from primary
-sample behavior. The v7 pass replaced many broad placeholder labels with
-concrete metadata, indicator, or normalized-correlation rules while staying
-within existing rule-engine predicates. Newer high-value rules may include
-metadata-only `confidence`, `tags`, and `evidenceFields` values; those fields do
-not change matching, but they document expected triage confidence, report
-grouping intent, and the evidence fields analysts should inspect first.
+The current rule set has 294 behavior/enrichment rules. The v9 rules and
+VirusTotal-quality pass keeps the v8 report-semantic cleanup while adding
+high-value Windows persistence, privilege-escalation, injection, LOLBin,
+network, certificate, anti-analysis, and VT enrichment states. Newer rules may
+include metadata-only `confidence`, `tags`, `evidenceFields`, `titleZh`, and
+`summaryZh` values; those fields do not change matching, but they document
+expected triage confidence, bilingual operator text, report grouping intent,
+and the evidence fields analysts should inspect first.
 
 ## Added coverage
 
@@ -36,11 +35,18 @@ grouping intent, and the evidence fields analysts should inspect first.
     and Public.
 - Registry persistence:
   - Run, RunOnce, RunOnceEx, policy Run, and StartupApproved autostart paths.
+  - Run/RunOnce values that point to user-writable payload paths or launch
+    script interpreters/LOLBins, plus StartupApproved state changes.
   - Service configuration hives, including typed `driver.registry` `keyPath`
     / `path` fields.
   - Service `ImagePath`, `ServiceDll`, failure-command, and account/value
     changes when paired with a service registry path.
+  - User-writable service binaries, service failure-command persistence,
+    kernel-driver service installs, weak service ACL metadata, and unquoted
+    Program Files style ImagePath values for hijack review.
   - Scheduled TaskCache registry paths, including typed driver payload fields.
+  - Scheduled-task COM handlers and task XML/actions that target user-writable
+    payload paths.
   - Office add-in/startup registry paths, accessibility IFEO debugger hijacks,
     and logon-script registry/file locations.
 - System inventory diff persistence:
@@ -66,6 +72,10 @@ grouping intent, and the evidence fields analysts should inspect first.
     proxy-execution command evidence.
   - Certutil, bitsadmin, curl/wget, BITS, and PowerShell web-request staging.
   - Windows Script Host script execution.
+  - PowerShell in-memory reflection/shellcode loaders and PowerShell process
+    trees that spawn LOLBins such as rundll32, regsvr32, mshta, certutil,
+    bitsadmin, or installutil.
+  - CMSTP and Control Panel proxy-execution command lines.
 - DNS/HTTP/TLS/PCAP:
   - DNS cache additions, TXT/NULL/CNAME/tunnel-style entries, and dynamic DNS
     domain fragments from the current network probe.
@@ -86,6 +96,10 @@ grouping intent, and the evidence fields analysts should inspect first.
     indicators, and flow-count metadata.
   - `.onion` domains, long/encoded HTTP URIs, domain-fronting labels, and TLS
     C2 classification fields when emitted by guest, PCAP, or enrichment rows.
+  - Periodic beacon interval/jitter metadata, DNS reputation-risk labels,
+    high-entropy DNS metadata, HTTP JSON tasking/gate URIs, host-header
+    mismatch labels, and TLS certificate reputation labels.
+  - Root certificate store modification commands and registry/file paths.
   - DNS tunnel/DGA labels, TLS SNI/JA3/certificate metadata, PCAP artifact
     import rows, PCAP endpoint flows, upload/exfil labels, and PCAP flow-count
     metadata now use concrete rule names and documented evidence fields.
@@ -106,6 +120,8 @@ grouping intent, and the evidence fields analysts should inspect first.
   - Command-line delay primitives such as `timeout`, ping-delay, `Start-Sleep`,
     and wait APIs.
   - Uptime/boot-time checks and parent-process/PEB inspection API evidence.
+  - Debug-register/hardware-breakpoint API checks and host identity
+    hostname/username/domain sandbox checks.
   - Sleep-duration and accelerated/skipped-sleep telemetry fields now carry
     explicit confidence and evidence-field metadata until numeric thresholds are
     supported by the rule engine.
@@ -115,6 +131,28 @@ grouping intent, and the evidence fields analysts should inspect first.
   - Clipboard access APIs and screenshot-like files created by the sample.
   - Double-extension masquerading drops and `attrib` hidden/system file
     attribute commands.
+  - Token impersonation, sensitive privilege enablement, auto-elevate UAC
+    registry/LOLBin chains, debug/all-access process opens, and user-writable
+    DLL image-load evidence.
+
+## VirusTotal enrichment quality
+
+VirusTotal lookups remain optional and do not upload samples. The lookup model
+now derives clear statuses/verdicts for report or rule use without requiring a
+real API key during local builds:
+
+- `not_configured` and `missing_hash` mean no lookup was attempted.
+- `not_found` records HTTP 404 as coverage metadata.
+- `rate_limited` records HTTP 429 and exposes `RetryAfterUtc` when available.
+- `authentication_failed` distinguishes invalid keys from transport failures.
+- successful reports derive `malicious`, `suspicious`, `clean`, or `unknown`
+  from flattened engine counts.
+
+If a caller converts `VirusTotalLookupResult.ToRuleEvent()` into normalized
+events, VT rules consume one-level fields such as `vtVerdict`, `vtStatus`,
+`vtMalicious`, `vtSuspicious`, `httpStatusCode`, and `retryAfterUtc`. These
+rules are tagged as enrichment metadata and intentionally have no MITRE
+technique because external reputation is not local sample behavior.
 
 ## Triage notes
 

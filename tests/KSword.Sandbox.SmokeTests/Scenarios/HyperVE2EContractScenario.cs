@@ -39,10 +39,20 @@ internal sealed class HyperVE2EContractScenario : ISmokeTestScenario
         RequireContains(invokeScript, "phase", "Top-level plan should tag each step with a phase for operator progress.");
         RequireContains(invokeScript, "phaseResults", "Runbook execution record should persist per-phase progress results.");
         RequireContains(invokeScript, "TotalSteps", "Runbook execution record should persist total planned steps.");
+        RequireContains(invokeScript, "CompletedSteps", "Runbook execution record should persist completed/skipped step count for WebUI progress.");
         RequireContains(invokeScript, "ExecutedSteps", "Runbook execution record should persist executed step count.");
+        RequireContains(invokeScript, "ProgressPercent", "Runbook execution record should persist progress percentage for WebUI/report consumers.");
+        RequireContains(invokeScript, "FailureReason", "Runbook execution record should persist a concise failure reason.");
+        RequireContains(invokeScript, "RemediationHints", "Runbook execution record should persist actionable remediation hints.");
+        RequireContains(invokeScript, "UiSafeProgress", "Runbook execution record should persist a command-free progress view for WebUI consumers.");
+        RequireContains(invokeScript, "commandTextOmitted", "UI-safe progress should explicitly omit command text.");
         RequireContains(invokeScript, "StepResults", "Runbook execution record should persist per-step progress results.");
         RequireContains(invokeScript, "Convert-PhaseStepsToRunbookStepResults", "Top-level script should merge child phase steps into runbook progress.");
         RequireContains(invokeScript, "remediation", "Top-level preflight checks should carry human-readable remediation suggestions.");
+        RequireContains(invokeScript, "checkId", "Top-level preflight checks should carry stable machine-readable check ids.");
+        RequireContains(invokeScript, "New-HyperVFeatureCheck", "Top-level preflight should include Hyper-V enabled/service state.");
+        RequireContains(invokeScript, "New-HostSharedPathCheck", "Top-level preflight should include host shared/runtime path validation.");
+        RequireContains(invokeScript, "New-HostTestSigningCheck", "Top-level preflight should include test-signing status.");
         RequireContains(invokeScript, "repairSuggestions", "Top-level preflight summary should aggregate repair suggestions.");
         RequireContains(invokeScript, "operatorGuidance", "Top-level plan should include operator guidance commands.");
         RequireContains(invokeScript, "Preflight repair suggestions", "Top-level script should print repair suggestions in safe and failed-live paths.");
@@ -65,6 +75,8 @@ internal sealed class HyperVE2EContractScenario : ISmokeTestScenario
         RequireContains(startScript, "Start phase failed after VM mutation", "Start script should attempt stop/restore cleanup after partial live mutation.");
         RequireContains(startScript, "cleanupErrors", "Start script should persist cleanup failures for operators.");
         RequireContains(startScript, "StepResults", "Start script should persist per-step progress for the parent runbook record.");
+        RequireContains(startScript, "failureReason", "Start phase result should persist a concise failure reason.");
+        RequireContains(startScript, "remediationHints", "Start phase result should persist remediation hints.");
         RequireContains(startScript, "phase = 'start'", "Start script should label its result as the start phase.");
 
         RequireContains(collectScript, "SupportsShouldProcess", "Collect script should support -WhatIf/-Confirm semantics.");
@@ -89,6 +101,9 @@ internal sealed class HyperVE2EContractScenario : ISmokeTestScenario
         RequireContains(e2eDoc, "Test-RepositoryPolicy.ps1 -StagedOnly", "E2E runbook should include a staged repository policy check.");
         RequireContains(e2eDoc, "PromptForMissingGuestPassword", "E2E runbook should document the process-only readiness password prompt.");
         RequireContains(e2eDoc, "runbook-execution.json", "E2E runbook should document the persisted progress record.");
+        RequireContains(e2eDoc, "ProgressPercent", "E2E runbook should document persisted progress percentage.");
+        RequireContains(e2eDoc, "FailureReason", "E2E runbook should document persisted failure reasons.");
+        RequireContains(e2eDoc, "RemediationHints", "E2E runbook should document persisted remediation hints.");
         RequireContains(e2eDoc, "phase result paths", "E2E runbook should document per-phase progress result paths.");
         RequireContains(e2eDoc, "skipped/executed step records", "E2E runbook should document skipped/executed step records.");
         RequireContains(goldenDoc, "One-command Hyper-V E2E script", "Golden VM doc should point to the one-command E2E script.");

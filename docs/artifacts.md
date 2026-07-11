@@ -44,6 +44,25 @@ The manifest never trusts VM-local absolute paths for links. The host resolves
 `relativePath` under the collected guest-output directory and keeps original
 paths as metadata only.
 
+## Driver JSONL and R0 sidecar logs
+
+When `--driver-events <path>` is supplied, `driver-events.jsonl` is treated as
+durable telemetry, not just an input used to enrich `events.json`. R0 sidecar
+supervision events record both absolute diagnostic paths for evidence and
+output-relative selectors such as `driverEventsRelativePath`,
+`jsonlRelativePath`, `stdoutRelativePath`, and `stderrRelativePath`. The guest
+manifest and host index use those relative selectors to attach metadata to
+`driver-events.jsonl` and `r0collector.*.log` without ever turning VM-local or
+host-local absolute paths into browser hrefs.
+
+The host classifies `driver-events.jsonl` as
+`kind=DriverEventsJsonLines`, `category=telemetry`,
+`evidenceRole=driver-events`, `collectionName=driver-events`, and
+`telemetryFormat=jsonl`. R0 diagnostic files named `r0collector.*.log` are
+classified as `kind=Log`, `evidenceRole=diagnostic-log`, and
+`collectionName=r0-logs`. Both file types receive host-computed `sizeBytes`,
+MIME type, SHA-256, and `hashes.sha256`.
+
 ## Screenshot artifacts
 
 Screenshots are opt-in because they can contain desktop contents unrelated to
@@ -134,6 +153,13 @@ Each file descriptor also carries `evidenceRole`, `capturePhase`,
 `captureState`, `guestPath`, `importPath`, and `collectionName` alongside size,
 MIME type, and hashes. `guestPath` is evidence only; clickable links and import
 paths are derived from safe paths under the collected guest output root.
+
+WebUI download selectors are intentionally redundant and relative:
+`relativePath`, `safeLink`, and `importPath` all point under the job output
+root. The guarded download endpoint accepts any of those selectors after URL
+decoding, but rejects empty, absolute, traversal, missing, or unindexed paths.
+`safeLink` URL-encodes path segments for report anchors; API download hrefs use
+that selector text as a query value rather than embedding `fullPath`.
 
 ## Optional packet capture and external import
 

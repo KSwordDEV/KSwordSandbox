@@ -414,7 +414,7 @@ internal static class AgentProgram
             if (!await WaitForExitAsync(collector.Process, R0CollectorGracefulStopTimeout))
             {
                 forcedStop = true;
-                events.Add(new SandboxEvent
+                var forcedStopEvent = new SandboxEvent
                 {
                     EventType = "r0collector.stop_forced",
                     Source = "guest",
@@ -430,7 +430,14 @@ internal static class AgentProgram
                         ["stderrPath"] = collector.StandardErrorPath,
                         ["gracefulStopTimeoutSeconds"] = R0CollectorGracefulStopTimeout.TotalSeconds.ToString(CultureInfo.InvariantCulture)
                     }
-                });
+                };
+                AddR0ArtifactReferenceData(
+                    forcedStopEvent,
+                    InferR0OutputDirectory(collector),
+                    collector.DriverEventsPath,
+                    collector.StandardOutputPath,
+                    collector.StandardErrorPath);
+                events.Add(forcedStopEvent);
 
                 if (!HasProcessExited(collector.Process))
                 {
@@ -665,7 +672,7 @@ internal static class AgentProgram
         string standardErrorPath,
         string commandLine)
     {
-        return new SandboxEvent
+        var evt = new SandboxEvent
         {
             EventType = "r0collector.started",
             Source = "guest",
@@ -688,6 +695,13 @@ internal static class AgentProgram
                 ["supervisor"] = "guest-agent"
             }
         };
+        AddR0ArtifactReferenceData(
+            evt,
+            options.OutputDirectory,
+            options.DriverEventsPath,
+            standardOutputPath,
+            standardErrorPath);
+        return evt;
     }
 
     /// <summary>
@@ -701,7 +715,7 @@ internal static class AgentProgram
         string diagnosticDrainStatus,
         string jsonLinesDrainStatus)
     {
-        return new SandboxEvent
+        var evt = new SandboxEvent
         {
             EventType = "r0collector.exited",
             Source = "guest",
@@ -723,6 +737,13 @@ internal static class AgentProgram
                 ["supervisor"] = "guest-agent"
             }
         };
+        AddR0ArtifactReferenceData(
+            evt,
+            InferR0OutputDirectory(collector),
+            collector.DriverEventsPath,
+            collector.StandardOutputPath,
+            collector.StandardErrorPath);
+        return evt;
     }
 
     /// <summary>
@@ -757,6 +778,12 @@ internal static class AgentProgram
             }
         };
 
+        AddR0ArtifactReferenceData(
+            evt,
+            options.OutputDirectory,
+            options.DriverEventsPath,
+            standardOutputPath,
+            standardErrorPath);
         AddExceptionData(evt, exception);
         return evt;
     }
@@ -801,6 +828,12 @@ internal static class AgentProgram
             }
         };
 
+        AddR0ArtifactReferenceData(
+            evt,
+            InferR0OutputDirectory(collector),
+            collector.DriverEventsPath,
+            collector.StandardOutputPath,
+            collector.StandardErrorPath);
         AddExceptionData(evt, exception);
         return evt;
     }
@@ -834,6 +867,12 @@ internal static class AgentProgram
             }
         };
 
+        AddR0ArtifactReferenceData(
+            evt,
+            options.OutputDirectory,
+            options.DriverEventsPath,
+            standardOutputPath,
+            standardErrorPath);
         AddExceptionData(evt, exception);
         return evt;
     }
@@ -861,6 +900,12 @@ internal static class AgentProgram
             }
         };
 
+        AddR0ArtifactReferenceData(
+            evt,
+            InferR0OutputDirectory(collector),
+            collector.DriverEventsPath,
+            collector.StandardOutputPath,
+            collector.StandardErrorPath);
         AddExceptionData(evt, exception);
         return evt;
     }
@@ -877,6 +922,101 @@ internal static class AgentProgram
 
         evt.Data["exceptionType"] = exception.GetType().FullName ?? exception.GetType().Name;
         evt.Data["message"] = exception.Message;
+    }
+
+    /// <summary>
+    /// Adds output-relative artifact selectors for R0 sidecar JSONL and logs.
+    /// Inputs are a sidecar event, output root, and known artifact paths;
+    /// processing records relative selectors that the guest manifest and host
+    /// index can later resolve without exposing absolute paths as href values.
+    /// </summary>
+    private static void AddR0ArtifactReferenceData(
+        SandboxEvent evt,
+        string? outputDirectory,
+        string? driverEventsPath,
+        string? standardOutputPath,
+        string? standardErrorPath)
+    {
+        var driverEventsRelativePath = TryGetOutputRelativePath(outputDirectory, driverEventsPath);
+        var stdoutRelativePath = TryGetOutputRelativePath(outputDirectory, standardOutputPath);
+        var stderrRelativePath = TryGetOutputRelativePath(outputDirectory, standardErrorPath);
+
+        AddDataIfNotEmpty(evt.Data, "driverEventsRelativePath", driverEventsRelativePath);
+        AddDataIfNotEmpty(evt.Data, "jsonlRelativePath", driverEventsRelativePath);
+        AddDataIfNotEmpty(evt.Data, "stdoutRelativePath", stdoutRelativePath);
+        AddDataIfNotEmpty(evt.Data, "stderrRelativePath", stderrRelativePath);
+        AddDataIfNotEmpty(evt.Data, "artifactRelativePath", driverEventsRelativePath);
+        AddDataIfNotEmpty(evt.Data, "diagnosticRelativePath", FirstNonEmpty(stdoutRelativePath, stderrRelativePath));
+    }
+
+    private static string InferR0OutputDirectory(R0CollectorProcess collector)
+    {
+        return FirstNonEmpty(
+            SafeDirectoryName(collector.DriverEventsPath),
+            SafeDirectoryName(collector.StandardOutputPath),
+            SafeDirectoryName(collector.StandardErrorPath));
+    }
+
+    private static string TryGetOutputRelativePath(string? outputDirectory, string? path)
+    {
+        if (string.IsNullOrWhiteSpace(outputDirectory) || string.IsNullOrWhiteSpace(path))
+        {
+            return string.Empty;
+        }
+
+        try
+        {
+            var fullOutputDirectory = Path.GetFullPath(outputDirectory);
+            var fullPath = Path.GetFullPath(path);
+            if (!IsSameOrUnderDirectory(fullPath, fullOutputDirectory))
+            {
+                return string.Empty;
+            }
+
+            return NormalizeArtifactRelativePath(Path.GetRelativePath(fullOutputDirectory, fullPath));
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return string.Empty;
+        }
+    }
+
+    private static string SafeDirectoryName(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return string.Empty;
+        }
+
+        try
+        {
+            return Path.GetDirectoryName(path) ?? string.Empty;
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return string.Empty;
+        }
+    }
+
+    private static string FirstNonEmpty(params string?[] values)
+    {
+        foreach (var value in values)
+        {
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                return value;
+            }
+        }
+
+        return string.Empty;
+    }
+
+    private static void AddDataIfNotEmpty(Dictionary<string, string> data, string key, string? value)
+    {
+        if (!string.IsNullOrWhiteSpace(value))
+        {
+            data[key] = value;
+        }
     }
 
     /// <summary>

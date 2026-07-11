@@ -243,10 +243,10 @@ header{background:radial-gradient(circle at 80% 15%,rgba(67,160,255,.55),transpa
 header:after{border:1px solid rgba(255,255,255,.18);border-radius:999px;content:'';height:220px;position:absolute;right:-70px;top:-80px;width:220px}
 header h1{font-size:34px;letter-spacing:-.03em;margin:0 0 8px}header .muted{color:#dbeafe}
 header table{background:rgba(8,17,31,.32);border:1px solid rgba(255,255,255,.16);border-radius:16px;overflow:hidden}header td,header th{border-bottom:1px solid rgba(255,255,255,.14);color:white}header th{background:rgba(255,255,255,.08);position:static}
-main,nav{max-width:1280px;margin:24px auto;padding:0 24px}.card{background:rgba(255,255,255,.94);border:1px solid var(--line);border-radius:22px;box-shadow:0 18px 48px rgba(15,23,42,.08);margin:22px 0;padding:24px;position:relative}
-section.card{max-height:75vh;overflow:auto;scrollbar-color:var(--primary) #eaf4ff;scrollbar-width:thin}.card:before{background:linear-gradient(180deg,var(--primary),rgba(67,160,255,0));border-radius:22px 0 0 22px;content:'';height:100%;left:0;opacity:.9;position:absolute;top:0;width:4px}
+main,nav{max-width:1280px;margin:24px auto;padding:0 24px}main{counter-reset:report-section}.card{background:rgba(255,255,255,.94);border:1px solid var(--line);border-radius:22px;box-shadow:0 18px 48px rgba(15,23,42,.08);margin:22px 0;padding:24px;position:relative}
+section.card{counter-increment:report-section;max-height:75vh;overflow:auto;scrollbar-color:var(--primary) #eaf4ff;scrollbar-width:thin}.card:before{background:linear-gradient(180deg,var(--primary),rgba(67,160,255,0));border-radius:22px 0 0 22px;content:'';height:100%;left:0;opacity:.9;position:absolute;top:0;width:4px}
 .language-entry{align-items:center;display:flex;flex-wrap:wrap;gap:10px}.language-entry strong{color:#075985}.language-entry .hint{color:var(--muted);font-size:13px}.language-entry a{background:var(--primary);border-radius:999px;color:white;font-weight:800;padding:8px 12px;text-decoration:none}.language-entry a.secondary{background:#334155}.language-entry a:hover{box-shadow:0 0 0 4px rgba(67,160,255,.14)}
-.card h2{align-items:center;display:flex;gap:10px;margin:0 0 14px}.card h2:before{background:var(--primary);box-shadow:0 0 0 6px rgba(67,160,255,.14);border-radius:999px;content:'';display:inline-block;height:12px;width:12px}
+.card h2{align-items:center;display:flex;gap:10px;margin:0 0 14px}.card h2:before{background:var(--primary);box-shadow:0 0 0 6px rgba(67,160,255,.14);border-radius:999px;content:'';display:inline-block;height:12px;width:12px}section.card>h2{backdrop-filter:blur(10px);background:linear-gradient(90deg,rgba(255,255,255,.98),rgba(231,243,255,.95));border-bottom:1px solid #dbeafe;margin:-24px -24px 16px;padding:16px 24px;position:sticky;top:-24px;z-index:3}section.card>h2:after{background:var(--primary);border-radius:999px;color:white;content:'Step ' counter(report-section);font-size:11px;font-weight:900;margin-left:auto;padding:5px 9px;text-transform:uppercase}
 .grid{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(170px,1fr))}.metric{background:linear-gradient(180deg,#fff,#f7fbff);border:1px solid var(--line);border-top:3px solid var(--primary);border-radius:16px;padding:15px}.metric b{display:block;font-size:26px;margin-top:4px}
 .muted{color:var(--muted)}.risk-high{color:#b91c1c}.risk-medium{color:#b45309}.risk-low{color:#047857}.risk-info{color:var(--primary-deep)}
 .badge,.chip{border-radius:999px;display:inline-block;font-weight:700;padding:6px 12px}.chip{font-size:12px;margin:2px 4px 2px 0;padding:3px 8px}
@@ -263,7 +263,8 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
 .tree{font-family:Consolas,monospace;line-height:1.5;margin:12px 0}.tree ul{border-left:1px dashed #b9d7f3;list-style:none;margin:0 0 0 18px;padding-left:14px}.tree li{margin:5px 0}.process-tree{background:#fbfdff;border:1px solid var(--line);border-radius:16px;max-height:46vh;overflow:auto;padding:12px}.process-tree details.process-tree-node{margin:4px 0}.process-tree summary,.process-tree-leaf{align-items:center;cursor:pointer;display:flex;flex-wrap:wrap;gap:8px;list-style:none}.process-tree summary::-webkit-details-marker{display:none}.process-tree summary:before{color:var(--primary-deep);content:'▶';font-weight:900}.process-tree details[open]>summary:before{content:'▼'}.tree-badges{display:flex;flex-wrap:wrap;gap:5px}.tree-badge{background:#eef7ff;border:1px solid #cfe6fb;border-radius:999px;color:#075985;font-family:Segoe UI,Arial,sans-serif;font-size:11px;font-weight:800;padding:2px 7px}
 .evidence{max-width:560px}.evidence details{background:#f7fbff;border:1px solid var(--line);border-radius:12px;padding:8px}.evidence summary{cursor:pointer;font-weight:700}.evidence pre{white-space:pre-wrap;word-break:break-word}
 .toolbar{display:flex;gap:8px;justify-content:flex-end}.columns{display:grid;gap:14px;grid-template-columns:1fr 1fr}.compact-list{margin:8px 0 0 0;padding-left:18px}.compact-list li{margin:4px 0}
-.artifact-ref{font-weight:700}.artifact-list{list-style:none;margin:8px 0 0 0;padding:0}.artifact-list li{border-top:1px solid #e2e8f0;margin-top:8px;padding-top:8px}.artifact-preview img{border:1px solid #cbd5e1;border-radius:10px;max-height:260px;max-width:100%}
+.artifact-ref{font-weight:700}.artifact-location{display:grid;gap:8px}.artifact-actions{display:flex;flex-wrap:wrap;gap:7px;margin-top:6px}.artifact-actions-inline{display:inline-flex;margin-left:6px;margin-top:0;vertical-align:middle}.artifact-btn{background:var(--primary);border:1px solid rgba(67,160,255,.72);border-radius:999px;box-shadow:0 8px 18px rgba(67,160,255,.18);color:white;display:inline-block;font-size:12px;font-weight:900;padding:6px 10px;text-decoration:none}.artifact-btn.download{background:#eef7ff;color:#075985}.artifact-btn:hover{box-shadow:0 0 0 4px rgba(67,160,255,.14)}.artifact-no-link{background:#f8fafc;border:1px dashed #cbd5e1;border-radius:999px;color:var(--muted);display:inline-block;font-size:12px;font-weight:800;padding:5px 9px}.artifact-copy-path{background:#fbfdff;border:1px solid var(--line);border-radius:10px;padding:8px}.artifact-list{list-style:none;margin:8px 0 0 0;padding:0}.artifact-list li{border-top:1px solid #e2e8f0;margin-top:8px;padding-top:8px}.artifact-preview img{border:1px solid #cbd5e1;border-radius:10px;max-height:260px;max-width:100%}
+.technical-field,.raw-technical-fields{background:#fbfdff;border:1px solid var(--line);border-radius:12px;margin-top:8px;padding:8px}.technical-field summary,.raw-technical-fields summary,.raw-technical-field summary{cursor:pointer;font-weight:800}.technical-field pre,.raw-technical-field pre{max-height:30vh;overflow:auto;white-space:pre-wrap;word-break:break-word}.raw-field-list{margin:6px 0 0 0;padding-left:18px}.raw-field-list li{margin:4px 0;word-break:break-word}.raw-technical-field{background:#fff;border:1px solid #dbeafe;border-radius:10px;margin-top:8px;padding:7px}
 .raw-events-shell{background:#f9fcff;border:1px solid var(--line);border-radius:16px;margin-top:14px;overflow:hidden}.raw-events-shell>summary{cursor:pointer;font-weight:800;list-style:none;padding:12px 14px}.raw-events-shell>summary::-webkit-details-marker{display:none}.raw-events-shell>summary:before{color:var(--primary-deep);content:'▶';display:inline-block;margin-right:8px}.raw-events-shell[open]>summary:before{content:'▼'}.raw-events-panel{border-top:1px solid var(--line);max-height:58vh;overflow:auto;padding:12px}.raw-event-pages{display:grid;gap:12px}.raw-event-page{background:#fff;border:1px solid #dbeafe;border-radius:14px;overflow:hidden}.raw-event-page>summary{background:linear-gradient(90deg,#eef7ff,#ffffff);color:#075985;cursor:pointer;font-weight:900;list-style:none;padding:10px 12px}.raw-event-page>summary::-webkit-details-marker{display:none}.raw-event-page>summary:before{content:'▶';display:inline-block;margin-right:8px}.raw-event-page[open]>summary:before{content:'▼'}.raw-event-page table{margin:0}.raw-source-hints{background:#f8fbff;border:1px solid var(--line);border-radius:14px;margin-top:12px;padding:12px}.raw-source-hints ul{list-style:none;margin:8px 0 0 0;padding:0}.raw-source-hints li{border-top:1px solid #e2e8f0;margin-top:8px;padding-top:8px}.raw-source-hints li:first-child{border-top:0;margin-top:0;padding-top:0}.raw-source-hints .hint-label{font-weight:800}
 @media(max-width:900px){.grid,.columns{grid-template-columns:1fr 1fr}table{display:block;overflow-x:auto}}@media(max-width:640px){header{padding:28px 24px}.grid,.columns{grid-template-columns:1fr}main,nav{padding:0 14px}}
 """);
@@ -1566,7 +1567,6 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
         foreach (var evt in events.OrderBy(e => e.Timestamp))
         {
             var plain = EventToPlainText(evt);
-            var data = EventDataToText(evt);
             var relatedArtifacts = FindRelatedArtifacts(evt, artifactLookup, artifacts);
             html.AppendLine("<tr>");
             html.AppendLine($"<td class=\"copyable\" data-copy=\"{A(evt.Timestamp.ToString("u"))}\">{E(evt.Timestamp.ToString("u"))}</td>");
@@ -1574,7 +1574,7 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
             html.AppendLine($"<td class=\"copyable\" data-copy=\"{A(evt.Source)}\">{E(evt.Source)}</td>");
             html.AppendLine($"<td class=\"copyable\" data-copy=\"{A((evt.ProcessName ?? "-") + " (" + (evt.ProcessId?.ToString() ?? "-") + ")")}\">{E(evt.ProcessName ?? "-")} ({E(evt.ProcessId?.ToString() ?? "-")})</td>");
             html.AppendLine($"<td class=\"copyable\" data-copy=\"{A((evt.Path ?? string.Empty) + Environment.NewLine + (evt.CommandLine ?? string.Empty))}\">{RenderEventPathAndCommand(evt, relatedArtifacts)}</td>");
-            html.AppendLine($"<td class=\"evidence\"><div class=\"toolbar\">{CopyButton("Copy event", plain)}{RenderCopyArtifactsButton(relatedArtifacts)}</div><details><summary>Evidence fields</summary><pre class=\"copyable\" data-copy=\"{A(data)}\">{E(data)}</pre></details>{RenderRelatedArtifacts(relatedArtifacts)}</td>");
+            html.AppendLine($"<td class=\"evidence\"><div class=\"toolbar\">{CopyButton("Copy event", plain)}{RenderCopyArtifactsButton(relatedArtifacts)}</div>{RenderEventEvidenceDetails(evt)}{RenderRelatedArtifacts(relatedArtifacts)}</td>");
             html.AppendLine("</tr>");
         }
 
@@ -1629,7 +1629,7 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
                     label,
                     display,
                     note,
-                    string.IsNullOrWhiteSpace(artifact.SafeLink) ? null : artifact.SafeLink,
+                    ArtifactHref(artifact),
                     copy);
             }
 
@@ -1663,7 +1663,7 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
         }
         else
         {
-            html.Append($"<a href=\"{A(link)}\">{E(display)}</a>");
+            html.Append($"<code>{E(display)}</code>{RenderSafeLinkActions(link, display)}");
         }
 
         if (!string.IsNullOrWhiteSpace(note))
@@ -1897,7 +1897,7 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
 
                 if (!string.IsNullOrWhiteSpace(card.CommandLine))
                 {
-                    html.AppendLine($"<strong>Command line</strong><br><code class=\"copyable\" data-copy=\"{A(card.CommandLine)}\">{E(card.CommandLine)}</code>");
+                    html.AppendLine($"<strong>Command line</strong>{RenderTechnicalField("Command line", card.CommandLine)}");
                 }
 
                 html.AppendLine("</div>");
@@ -3204,6 +3204,232 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
     }
 
     /// <summary>
+    /// Renders report-local open/download controls for a safe artifact link.
+    /// Inputs are an artifact descriptor and display mode; processing validates
+    /// the href as report-relative before writing anchors; the method returns
+    /// an empty-state chip when only copyable paths are available.
+    /// </summary>
+    private static string RenderArtifactActionButtons(ArtifactDescriptor artifact, bool inline = false)
+    {
+        var href = ArtifactHref(artifact);
+        if (string.IsNullOrWhiteSpace(href))
+        {
+            return inline
+                ? "<span class=\"artifact-no-link\">Copy path only</span>"
+                : "<span class=\"artifact-no-link\">Copy path only</span>";
+        }
+
+        return RenderSafeLinkActions(href, ArtifactDisplayName(artifact), inline);
+    }
+
+    /// <summary>
+    /// Renders open/download buttons for one already-safe report-relative link.
+    /// Inputs are href, download label, and display mode; processing re-checks
+    /// link safety and emits no absolute filesystem href; returns HTML.
+    /// </summary>
+    private static string RenderSafeLinkActions(string href, string downloadName, bool inline = false)
+    {
+        if (!IsSafeReportRelativeHref(href))
+        {
+            return inline
+                ? "<span class=\"artifact-no-link\">Copy path only</span>"
+                : "<span class=\"artifact-no-link\">Copy path only</span>";
+        }
+
+        var css = inline ? " artifact-actions-inline" : string.Empty;
+        var safeName = SafeDownloadFileName(downloadName);
+        return $"<span class=\"artifact-actions{css}\"><a class=\"artifact-btn artifact-open\" href=\"{A(href)}\">Open</a><a class=\"artifact-btn download\" href=\"{A(href)}\" download=\"{A(safeName)}\">Download</a></span>";
+    }
+
+    /// <summary>
+    /// Returns a report-relative artifact href, preferring a validated safeLink
+    /// and falling back to a safe relative path. Inputs are one descriptor;
+    /// processing rejects absolute paths, schemes, and traversal; returns an
+    /// empty string when no safe local href exists.
+    /// </summary>
+    private static string ArtifactHref(ArtifactDescriptor artifact)
+    {
+        if (IsSafeReportRelativeHref(artifact.SafeLink))
+        {
+            return artifact.SafeLink;
+        }
+
+        var fallback = ArtifactDescriptorFactory.BuildSafeLink(artifact.RelativePath);
+        return IsSafeReportRelativeHref(fallback) ? fallback : string.Empty;
+    }
+
+    /// <summary>
+    /// Validates links before placing them in href/src attributes.
+    /// Inputs are arbitrary descriptor links; processing rejects absolute
+    /// filesystem paths, URL schemes, rooted paths, and decoded traversal; the
+    /// method returns true only for report-local relative links.
+    /// </summary>
+    private static bool IsSafeReportRelativeHref(string? href)
+    {
+        if (string.IsNullOrWhiteSpace(href))
+        {
+            return false;
+        }
+
+        var trimmed = href.Trim();
+        if (Uri.TryCreate(trimmed, UriKind.Absolute, out _))
+        {
+            return false;
+        }
+
+        var unified = trimmed.Replace('\\', '/');
+        if (unified.StartsWith("/", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        string decoded;
+        try
+        {
+            decoded = Uri.UnescapeDataString(unified);
+        }
+        catch (UriFormatException)
+        {
+            return false;
+        }
+
+        if (decoded.StartsWith("/", StringComparison.Ordinal) ||
+            decoded.Contains(':', StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        try
+        {
+            if (Path.IsPathFullyQualified(decoded))
+            {
+                return false;
+            }
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return false;
+        }
+
+        return !string.IsNullOrWhiteSpace(ArtifactDescriptorFactory.NormalizeRelativePath(decoded));
+    }
+
+    /// <summary>
+    /// Builds a conservative download filename.
+    /// Inputs are artifact display text; processing keeps only a file name
+    /// segment when present; return is safe text for the download attribute.
+    /// </summary>
+    private static string SafeDownloadFileName(string displayName)
+    {
+        try
+        {
+            var normalized = displayName.Replace('\\', '/');
+            var name = Path.GetFileName(normalized);
+            return string.IsNullOrWhiteSpace(name) ? "artifact" : name;
+        }
+        catch (ArgumentException)
+        {
+            return "artifact";
+        }
+    }
+
+    /// <summary>
+    /// Renders a long technical field as a collapsed block.
+    /// Inputs are a label and value; processing keeps command/output text out
+    /// of the main table flow while preserving copyable detail; returns HTML.
+    /// </summary>
+    private static string RenderTechnicalField(string label, string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        return $"<details class=\"technical-field\"><summary>{E(label)} hidden by default ({E(value.Length.ToString())} chars)</summary><pre class=\"copyable\" data-copy=\"{A(value)}\">{E(value)}</pre></details>";
+    }
+
+    /// <summary>
+    /// Renders event data with long command/stdout/stderr/PowerShell payloads
+    /// hidden in nested details. Inputs are one event; processing keeps compact
+    /// keys visible and technical payloads closed by default; returns HTML.
+    /// </summary>
+    private static string RenderEventEvidenceDetails(SandboxEvent evt)
+    {
+        var compactFields = evt.Data
+            .Where(pair => !IsLongTechnicalEventField(pair.Key, pair.Value))
+            .OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var technicalFields = evt.Data
+            .Where(pair => IsLongTechnicalEventField(pair.Key, pair.Value))
+            .OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase)
+            .Select(pair => (Label: pair.Key, Value: pair.Value))
+            .ToList();
+
+        if (!string.IsNullOrWhiteSpace(evt.CommandLine))
+        {
+            technicalFields.Insert(0, ("commandLine", evt.CommandLine!));
+        }
+
+        var html = new StringBuilder();
+        html.Append($"<details class=\"event-evidence-fields\" data-copy=\"{A(EventToPlainText(evt))}\"><summary>Evidence fields</summary>");
+        if (compactFields.Count == 0 && technicalFields.Count == 0)
+        {
+            html.Append("<pre>-</pre>");
+        }
+        else
+        {
+            if (compactFields.Count > 0)
+            {
+                html.Append("<ul class=\"raw-field-list\">");
+                foreach (var pair in compactFields)
+                {
+                    var copy = $"{pair.Key}={pair.Value}";
+                    html.Append($"<li><code class=\"copyable\" data-copy=\"{A(copy)}\">{E(pair.Key)}={E(pair.Value)}</code></li>");
+                }
+
+                html.Append("</ul>");
+            }
+
+            if (technicalFields.Count > 0)
+            {
+                html.Append($"<details class=\"raw-technical-fields\"><summary>Command/stdout/stderr/PowerShell fields hidden by default ({technicalFields.Count})</summary>");
+                foreach (var field in technicalFields)
+                {
+                    var copy = $"{field.Label}={field.Value}";
+                    html.Append($"<details class=\"raw-technical-field\"><summary>Hidden technical field: {E(field.Label)} ({E(field.Value.Length.ToString())} chars)</summary><pre class=\"copyable\" data-copy=\"{A(copy)}\">{E(copy)}</pre></details>");
+                }
+
+                html.Append("</details>");
+            }
+        }
+
+        html.Append("</details>");
+        return html.ToString();
+    }
+
+    /// <summary>
+    /// Classifies raw event fields that should not be expanded inline.
+    /// Inputs are one key/value pair; processing matches command/output/script
+    /// field names plus long PowerShell payloads; returns true when nested
+    /// collapse is required.
+    /// </summary>
+    private static bool IsLongTechnicalEventField(string key, string value)
+    {
+        var normalizedKey = key.Replace("_", string.Empty, StringComparison.Ordinal)
+            .Replace("-", string.Empty, StringComparison.Ordinal)
+            .Replace(".", string.Empty, StringComparison.Ordinal);
+        return normalizedKey.Contains("command", StringComparison.OrdinalIgnoreCase) ||
+            normalizedKey.Contains("cmdline", StringComparison.OrdinalIgnoreCase) ||
+            normalizedKey.Contains("stdout", StringComparison.OrdinalIgnoreCase) ||
+            normalizedKey.Contains("stderr", StringComparison.OrdinalIgnoreCase) ||
+            normalizedKey.Contains("powershell", StringComparison.OrdinalIgnoreCase) ||
+            normalizedKey.Contains("scriptblock", StringComparison.OrdinalIgnoreCase) ||
+            normalizedKey.Contains("encodedcommand", StringComparison.OrdinalIgnoreCase) ||
+            (value.Length > 80 && value.Contains("powershell", StringComparison.OrdinalIgnoreCase)) ||
+            value.Length > 500;
+    }
+
+    /// <summary>
     /// Localizes the static report shell to Simplified Chinese.
     /// Inputs are renderer-owned English HTML; processing replaces only known
     /// report chrome strings and language metadata; the method returns the
@@ -3353,6 +3579,10 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
         ("Evidence fields", "证据字段"),
         ("Artifact evidence", "证据文件详情"),
         ("Related artifacts", "相关证据文件"),
+        ("Open", "打开"),
+        ("Download", "下载"),
+        ("Copy path only", "仅复制路径"),
+        ("Host/local path (copy only)", "主机/本地路径（仅复制）"),
         ("Screenshot preview", "截图预览"),
         ("Driver JSONL preview", "驱动 JSONL 预览"),
         ("Manifest preview", "清单预览"),
@@ -3364,6 +3594,10 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
         ("Copy process card", "复制进程卡"),
         ("Copy network card", "复制网络卡"),
         ("Copied", "已复制"),
+        ("Command line hidden by default", "命令行默认隐藏"),
+        ("Command/stdout/stderr/PowerShell fields hidden by default", "command/stdout/stderr/PowerShell 字段默认隐藏"),
+        ("Hidden technical field", "隐藏技术字段"),
+        ("chars", "字符"),
         ("Process tree", "进程树"),
         ("Process relationship tree.", "进程关系树。"),
         ("Native expandable process tree grouped by stable process key when available, with PID/PPID fallback.", "使用原生可展开进程树；有稳定进程键时按键分组，否则回退到 PID/PPID。"),
@@ -3604,13 +3838,13 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
             return string.Empty;
         }
 
-        var link = relatedArtifacts.FirstOrDefault(artifact => !string.IsNullOrWhiteSpace(artifact.SafeLink));
+        var link = relatedArtifacts.FirstOrDefault(artifact => !string.IsNullOrWhiteSpace(ArtifactHref(artifact)));
         if (link is null)
         {
             return E(label);
         }
 
-        return $"{E(label)} <a class=\"artifact-ref\" href=\"{A(link.SafeLink)}\">artifact: {E(ArtifactDisplayName(link))}</a>";
+        return $"{E(label)} {RenderArtifactActionButtons(link, inline: true)}";
     }
 
     /// <summary>
@@ -3625,17 +3859,17 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
         html.Append($"<code>{E(path)}</code>");
 
         var links = relatedArtifacts
-            .Where(artifact => !string.IsNullOrWhiteSpace(artifact.SafeLink))
+            .Where(artifact => !string.IsNullOrWhiteSpace(ArtifactHref(artifact)))
             .Take(4)
             .ToList();
         foreach (var artifact in links)
         {
-            html.Append($"<br><a class=\"artifact-ref\" href=\"{A(artifact.SafeLink)}\">Open {E(ArtifactDisplayName(artifact))}</a>");
+            html.Append($"<br>{RenderArtifactActionButtons(artifact, inline: true)}");
         }
 
         if (!string.IsNullOrWhiteSpace(evt.CommandLine))
         {
-            html.Append($"<br><span class=\"muted\">{E(evt.CommandLine)}</span>");
+            html.Append(RenderTechnicalField("Command line", evt.CommandLine!));
         }
 
         return html.ToString();
@@ -4149,23 +4383,27 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
     {
         var displayPath = !string.IsNullOrWhiteSpace(artifact.RelativePath)
             ? artifact.RelativePath
-            : artifact.FullPath;
-        if (!string.IsNullOrWhiteSpace(artifact.SafeLink))
+            : ArtifactDisplayName(artifact);
+        var html = new StringBuilder();
+        html.Append("<div class=\"artifact-location\">");
+        html.Append($"<code class=\"copyable\" data-copy=\"{A(displayPath)}\">{E(string.IsNullOrWhiteSpace(displayPath) ? "-" : displayPath)}</code>");
+        html.Append(RenderArtifactActionButtons(artifact));
+
+        if (!string.IsNullOrWhiteSpace(artifact.FullPath))
         {
-            var fullPath = string.IsNullOrWhiteSpace(artifact.FullPath)
-                ? string.Empty
-                : $"<br><code>{E(artifact.FullPath)}</code>";
-            return $"<a href=\"{A(artifact.SafeLink)}\">{E(displayPath)}</a>{fullPath}";
+            html.Append($"<div class=\"artifact-copy-path\"><span class=\"muted\">Host/local path (copy only)</span><br><code class=\"copyable\" data-copy=\"{A(artifact.FullPath)}\">{E(artifact.FullPath)}</code></div>");
         }
 
-        return $"<code>{E(string.IsNullOrWhiteSpace(displayPath) ? "-" : displayPath)}</code>";
+        html.Append("</div>");
+        return html.ToString();
     }
 
     private static string RenderArtifactPreview(ArtifactDescriptor artifact)
     {
-        if (artifact.Kind == ArtifactKind.Screenshot && !string.IsNullOrWhiteSpace(artifact.SafeLink))
+        var href = ArtifactHref(artifact);
+        if (artifact.Kind == ArtifactKind.Screenshot && !string.IsNullOrWhiteSpace(href))
         {
-            return $"<details class=\"artifact-preview\"><summary>Screenshot preview</summary><a href=\"{A(artifact.SafeLink)}\"><img alt=\"{A(artifact.Name)}\" src=\"{A(artifact.SafeLink)}\"></a></details>";
+            return $"<details class=\"artifact-preview\"><summary>Screenshot preview</summary><a href=\"{A(href)}\"><img alt=\"{A(artifact.Name)}\" src=\"{A(href)}\"></a></details>";
         }
 
         var preview = TryReadTextArtifactPreview(artifact);

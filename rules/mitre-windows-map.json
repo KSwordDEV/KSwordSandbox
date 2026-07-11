@@ -1,6 +1,6 @@
 {
   "matrix": "enterprise-windows",
-  "version": "2026-07-11-behavior-coverage-expansion-v4",
+  "version": "2026-07-11-rules-vt-quality-v9",
   "techniques": [
     {
       "id": "T1003",
@@ -288,6 +288,22 @@
       ]
     },
     {
+      "id": "T1134",
+      "name": "Access Token Manipulation",
+      "categories": [
+        "defense-evasion",
+        "privilege-escalation"
+      ]
+    },
+    {
+      "id": "T1134.001",
+      "name": "Token Impersonation/Theft",
+      "categories": [
+        "defense-evasion",
+        "privilege-escalation"
+      ]
+    },
+    {
       "id": "T1135",
       "name": "Network Share Discovery",
       "categories": [
@@ -326,6 +342,20 @@
     {
       "id": "T1218",
       "name": "System Binary Proxy Execution",
+      "categories": [
+        "defense-evasion"
+      ]
+    },
+    {
+      "id": "T1218.002",
+      "name": "Control Panel",
+      "categories": [
+        "defense-evasion"
+      ]
+    },
+    {
+      "id": "T1218.003",
+      "name": "CMSTP",
       "categories": [
         "defense-evasion"
       ]
@@ -491,6 +521,28 @@
       ]
     },
     {
+      "id": "T1548.002",
+      "name": "Bypass User Account Control",
+      "categories": [
+        "defense-evasion",
+        "privilege-escalation"
+      ]
+    },
+    {
+      "id": "T1553",
+      "name": "Subvert Trust Controls",
+      "categories": [
+        "defense-evasion"
+      ]
+    },
+    {
+      "id": "T1553.004",
+      "name": "Install Root Certificate",
+      "categories": [
+        "defense-evasion"
+      ]
+    },
+    {
       "id": "T1555",
       "name": "Credentials from Password Stores",
       "categories": [
@@ -552,6 +604,31 @@
       "name": "Encrypted Channel",
       "categories": [
         "command-and-control"
+      ]
+    },
+    {
+      "id": "T1574",
+      "name": "Hijack Execution Flow",
+      "categories": [
+        "persistence",
+        "privilege-escalation",
+        "defense-evasion"
+      ]
+    },
+    {
+      "id": "T1574.009",
+      "name": "Path Interception by Unquoted Path",
+      "categories": [
+        "persistence",
+        "privilege-escalation"
+      ]
+    },
+    {
+      "id": "T1574.011",
+      "name": "Services Registry Permissions Weakness",
+      "categories": [
+        "persistence",
+        "privilege-escalation"
       ]
     },
     {

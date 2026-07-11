@@ -426,7 +426,31 @@ public sealed class HostArtifactIndexBuilder
 
     private static IEnumerable<string> CandidateEventRelativePaths(SandboxEvent evt)
     {
-        foreach (var key in new[] { "artifactRelativePath", "relativePath", "importPath", "expectedRelativePath" })
+        foreach (var key in new[]
+        {
+            "artifactRelativePath",
+            "relativePath",
+            "importPath",
+            "expectedRelativePath",
+            "sourceArtifactRelativePath",
+            "sourceArtifactImportPath",
+            "driverEventPath",
+            "driverEventsPath",
+            "driverEventsRelativePath",
+            "jsonlPath",
+            "jsonlRelativePath",
+            "stdoutPath",
+            "stdoutRelativePath",
+            "stderrPath",
+            "stderrRelativePath",
+            "screenshotRelativePath",
+            "memoryDumpRelativePath",
+            "dumpRelativePath",
+            "pcapRelativePath",
+            "pcapngRelativePath",
+            "etlRelativePath",
+            "diagnosticRelativePath"
+        })
         {
             if (!evt.Data.TryGetValue(key, out var raw) || string.IsNullOrWhiteSpace(raw) || raw.Contains('*', StringComparison.Ordinal))
             {
@@ -448,7 +472,23 @@ public sealed class HostArtifactIndexBuilder
             yield return evt.Path;
         }
 
-        foreach (var key in new[] { "artifactFullPath", "pcapngPath", "etlPath" })
+        foreach (var key in new[]
+        {
+            "artifactFullPath",
+            "sourceArtifactFullPath",
+            "driverEventPath",
+            "driverEventsPath",
+            "jsonlPath",
+            "stdoutPath",
+            "stderrPath",
+            "screenshotPath",
+            "memoryDumpPath",
+            "dumpPath",
+            "pcapPath",
+            "pcapngPath",
+            "packetCapturePath",
+            "etlPath"
+        })
         {
             if (evt.Data.TryGetValue(key, out var raw) && !string.IsNullOrWhiteSpace(raw))
             {
@@ -538,6 +578,22 @@ public sealed class HostArtifactIndexBuilder
         if (evt.EventType.StartsWith("packet_capture.", StringComparison.OrdinalIgnoreCase))
         {
             return "packet-captures";
+        }
+
+        if (evt.EventType.StartsWith("pcap.", StringComparison.OrdinalIgnoreCase))
+        {
+            return "packet-captures";
+        }
+
+        if (evt.EventType.StartsWith("driver.", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(evt.EventType, "image.load", StringComparison.OrdinalIgnoreCase))
+        {
+            return "driver-events";
+        }
+
+        if (evt.EventType.StartsWith("r0collector.", StringComparison.OrdinalIgnoreCase))
+        {
+            return "r0-logs";
         }
 
         return string.Empty;
@@ -757,37 +813,65 @@ public sealed class HostArtifactIndexBuilder
 
         if (string.Equals(fileName, "events.json", StringComparison.OrdinalIgnoreCase))
         {
-            return new ArtifactClassification(ArtifactKind.GuestEventsJson);
+            return new ArtifactClassification(
+                ArtifactKind.GuestEventsJson,
+                EvidenceRole: "guest-events",
+                CaptureState: "available");
         }
 
         if (string.Equals(fileName, "agent-summary.json", StringComparison.OrdinalIgnoreCase))
         {
-            return new ArtifactClassification(ArtifactKind.GuestSummaryJson);
+            return new ArtifactClassification(
+                ArtifactKind.GuestSummaryJson,
+                EvidenceRole: "guest-summary",
+                CaptureState: "available");
         }
 
         if (string.Equals(fileName, "artifact-manifest.json", StringComparison.OrdinalIgnoreCase) ||
             relativePath.EndsWith("/artifacts/manifest.json", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(relativePath, "artifacts/manifest.json", StringComparison.OrdinalIgnoreCase))
         {
-            return new ArtifactClassification(ArtifactKind.ArtifactManifest);
+            return new ArtifactClassification(
+                ArtifactKind.ArtifactManifest,
+                EvidenceRole: "artifact-manifest",
+                CaptureState: "available");
         }
 
         if (string.Equals(Path.GetExtension(path), ".jsonl", StringComparison.OrdinalIgnoreCase) &&
             fileName.Contains("driver", StringComparison.OrdinalIgnoreCase))
         {
-            return new ArtifactClassification(ArtifactKind.DriverEventsJsonLines, EvidenceRole: "driver-events", CollectionName: "driver-events");
+            return new ArtifactClassification(
+                ArtifactKind.DriverEventsJsonLines,
+                EvidenceRole: "driver-events",
+                CollectionName: "driver-events",
+                CaptureState: "available",
+                Metadata: new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["telemetryFormat"] = "jsonl"
+                });
         }
 
         if (relativePath.Contains("/screenshots/", StringComparison.OrdinalIgnoreCase) ||
             relativePath.StartsWith("screenshots/", StringComparison.OrdinalIgnoreCase))
         {
-            return new ArtifactClassification(ArtifactKind.Screenshot, EvidenceRole: "screenshot", CollectionName: "screenshots", CapturePhase: InferCapturePhase(fileName));
+            return new ArtifactClassification(
+                ArtifactKind.Screenshot,
+                EvidenceRole: "screenshot",
+                CollectionName: "screenshots",
+                CapturePhase: InferCapturePhase(fileName),
+                CaptureState: "captured");
         }
 
         if (relativePath.Contains("/memory-dumps/", StringComparison.OrdinalIgnoreCase) ||
             relativePath.StartsWith("memory-dumps/", StringComparison.OrdinalIgnoreCase))
         {
-            return new ArtifactClassification(ArtifactKind.MemoryDump, Category: "memory-dump", EvidenceRole: "memory-dump", CollectionName: "memory-dumps", CapturePhase: InferCapturePhase(fileName));
+            return new ArtifactClassification(
+                ArtifactKind.MemoryDump,
+                Category: "memory-dump",
+                EvidenceRole: "memory-dump",
+                CollectionName: "memory-dumps",
+                CapturePhase: InferCapturePhase(fileName),
+                CaptureState: "captured");
         }
 
         if (relativePath.Contains("/packet-captures/", StringComparison.OrdinalIgnoreCase) ||
@@ -807,13 +891,32 @@ public sealed class HostArtifactIndexBuilder
         if (relativePath.Contains("/artifacts/", StringComparison.OrdinalIgnoreCase) ||
             relativePath.StartsWith("artifacts/", StringComparison.OrdinalIgnoreCase))
         {
-            return new ArtifactClassification(ArtifactKind.DroppedFile, EvidenceRole: "dropped-file", CollectionName: "dropped-files");
+            return new ArtifactClassification(
+                ArtifactKind.DroppedFile,
+                EvidenceRole: "dropped-file",
+                CollectionName: "dropped-files",
+                CaptureState: "captured");
+        }
+
+        if (fileName.StartsWith("r0collector.", StringComparison.OrdinalIgnoreCase) &&
+            (string.Equals(Path.GetExtension(path), ".log", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(Path.GetExtension(path), ".txt", StringComparison.OrdinalIgnoreCase)))
+        {
+            return new ArtifactClassification(
+                ArtifactKind.Log,
+                EvidenceRole: "diagnostic-log",
+                CollectionName: "r0-logs",
+                CaptureState: "available");
         }
 
         if (string.Equals(Path.GetExtension(path), ".log", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(Path.GetExtension(path), ".txt", StringComparison.OrdinalIgnoreCase))
         {
-            return new ArtifactClassification(ArtifactKind.Log, CollectionName: "logs");
+            return new ArtifactClassification(
+                ArtifactKind.Log,
+                EvidenceRole: "log",
+                CollectionName: "logs",
+                CaptureState: "available");
         }
 
         return new ArtifactClassification(ArtifactKind.Unknown);

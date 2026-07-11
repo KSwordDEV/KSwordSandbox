@@ -278,6 +278,7 @@ internal sealed class GuestArtifactWriter
         AddIfNotEmpty(metadata, "artifactFullPath", artifactFullPath);
         AddIfNotEmpty(metadata, "guestFullPath", FirstNonEmpty(droppedFileMetadata?.OriginalFullPath, ValueOrEmpty(metadata, "guestFullPath", "guestPath"), artifactFullPath));
         AddIfNotEmpty(metadata, "captureState", InferCaptureState(classification, metadata));
+        AddPacketCaptureMetadataDefaults(classification, metadata, artifactFullPath);
 
         if (droppedFileMetadata is not null)
         {
@@ -490,8 +491,35 @@ internal sealed class GuestArtifactWriter
             }
         }
 
-        if (evt.Data.TryGetValue("relativePath", out var relative) && !string.IsNullOrWhiteSpace(relative))
+        foreach (var key in new[]
         {
+            "relativePath",
+            "artifactRelativePath",
+            "sourceArtifactRelativePath",
+            "sourceArtifactImportPath",
+            "driverEventPath",
+            "driverEventsPath",
+            "driverEventsRelativePath",
+            "jsonlPath",
+            "jsonlRelativePath",
+            "stdoutPath",
+            "stdoutRelativePath",
+            "stderrPath",
+            "stderrRelativePath",
+            "screenshotRelativePath",
+            "memoryDumpRelativePath",
+            "dumpRelativePath",
+            "pcapRelativePath",
+            "pcapngRelativePath",
+            "etlRelativePath",
+            "diagnosticRelativePath"
+        })
+        {
+            if (!evt.Data.TryGetValue(key, out var relative) || string.IsNullOrWhiteSpace(relative))
+            {
+                continue;
+            }
+
             var normalized = NormalizeRelativePath(relative);
             if (!string.IsNullOrWhiteSpace(normalized))
             {
@@ -499,16 +527,23 @@ internal sealed class GuestArtifactWriter
             }
         }
 
-        if (evt.Data.TryGetValue("artifactRelativePath", out var artifactRelativePath) && !string.IsNullOrWhiteSpace(artifactRelativePath))
+        foreach (var key in new[]
         {
-            var normalized = NormalizeRelativePath(artifactRelativePath);
-            if (!string.IsNullOrWhiteSpace(normalized))
-            {
-                yield return normalized;
-            }
-        }
-
-        foreach (var key in new[] { "driverEventsPath", "stdoutPath", "stderrPath", "jsonlPath" })
+            "artifactFullPath",
+            "sourceArtifactFullPath",
+            "driverEventPath",
+            "driverEventsPath",
+            "jsonlPath",
+            "stdoutPath",
+            "stderrPath",
+            "screenshotPath",
+            "memoryDumpPath",
+            "dumpPath",
+            "pcapPath",
+            "pcapngPath",
+            "packetCapturePath",
+            "etlPath"
+        })
         {
             if (evt.Data.TryGetValue(key, out var eventPath) && !string.IsNullOrWhiteSpace(eventPath))
             {
@@ -839,6 +874,27 @@ internal sealed class GuestArtifactWriter
             : "captured";
     }
 
+    private static void AddPacketCaptureMetadataDefaults(
+        ArtifactClassification classification,
+        Dictionary<string, string> metadata,
+        string artifactFullPath)
+    {
+        if (classification.Kind != ArtifactKind.PacketCapture)
+        {
+            return;
+        }
+
+        var extension = Path.GetExtension(artifactFullPath);
+        AddIfMissing(metadata, "pcapFormat", string.Equals(extension, ".pcapng", StringComparison.OrdinalIgnoreCase)
+            ? "pcapng"
+            : string.Equals(extension, ".pcap", StringComparison.OrdinalIgnoreCase)
+                ? "pcap"
+                : "unknown");
+        AddIfMissing(metadata, "captureSource", metadata.ContainsKey("collector") ? "guest-pktmon" : "guest-output");
+        AddIfMissing(metadata, "hostCaptureStarted", "false");
+        AddIfMissing(metadata, "importMode", "guest-artifact");
+    }
+
     private static string? InferCaptureState(string eventType)
     {
         if (eventType.EndsWith(".captured", StringComparison.OrdinalIgnoreCase) ||
@@ -1001,6 +1057,15 @@ internal sealed class GuestArtifactWriter
     private static void AddIfNotEmpty(Dictionary<string, string> metadata, string key, string? value)
     {
         if (!string.IsNullOrWhiteSpace(value))
+        {
+            metadata[key] = value;
+        }
+    }
+
+    private static void AddIfMissing(Dictionary<string, string> metadata, string key, string? value)
+    {
+        if ((!metadata.ContainsKey(key) || string.IsNullOrWhiteSpace(metadata[key])) &&
+            !string.IsNullOrWhiteSpace(value))
         {
             metadata[key] = value;
         }

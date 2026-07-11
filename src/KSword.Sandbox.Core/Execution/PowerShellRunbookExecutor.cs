@@ -128,6 +128,7 @@ public sealed class PowerShellRunbookExecutor : IRunbookExecutor
 
         var liveResults = new List<SandboxRunbookStepExecutionResult>();
         int? failedStepIndex = null;
+        var wasCanceled = false;
 
         for (var index = 0; index < runbook.Steps.Count; index++)
         {
@@ -136,6 +137,7 @@ public sealed class PowerShellRunbookExecutor : IRunbookExecutor
             if (cancellationToken.IsCancellationRequested)
             {
                 failedStepIndex = index;
+                wasCanceled = true;
                 liveResults.Add(CreateCanceledStepResult(step, index, DateTimeOffset.UtcNow, TimeSpan.Zero));
                 PublishProgress(
                     runbook,
@@ -167,6 +169,10 @@ public sealed class PowerShellRunbookExecutor : IRunbookExecutor
             if (!stepResult.Success)
             {
                 failedStepIndex = index;
+                wasCanceled = string.Equals(
+                    stepResult.Message,
+                    "PowerShell step was canceled before completion.",
+                    StringComparison.Ordinal);
                 PublishProgress(
                     runbook,
                     options,
@@ -194,12 +200,17 @@ public sealed class PowerShellRunbookExecutor : IRunbookExecutor
 
         attemptTimer.Stop();
         var success = failedStepIndex is null && liveResults.Count == runbook.Steps.Count;
-        var message = success ? null : BuildLiveFailureMessage(failedStepIndex);
+        var message = success ? null : BuildLiveFailureMessage(runbook, liveResults, failedStepIndex, wasCanceled);
+        var terminalState = success
+            ? SandboxRunbookProgressStates.Completed
+            : wasCanceled
+                ? SandboxRunbookProgressStates.Canceled
+                : SandboxRunbookProgressStates.Failed;
 
         PublishProgress(
             runbook,
             options,
-            success ? SandboxRunbookProgressStates.Completed : SandboxRunbookProgressStates.Failed,
+            terminalState,
             startedAtUtc,
             attemptTimer.Elapsed,
             liveResults,
@@ -315,7 +326,7 @@ public sealed class PowerShellRunbookExecutor : IRunbookExecutor
                 stderr: output.StandardError,
                 startedAtUtc: startedAtUtc,
                 duration: stepTimer.Elapsed,
-                message: success ? null : $"PowerShell exited with code {exitCode}.");
+                message: success ? null : BuildStepFailureMessage(exitCode, output.StandardError, output.StandardOutput));
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -616,15 +627,97 @@ public sealed class PowerShellRunbookExecutor : IRunbookExecutor
     }
 
     /// <summary>
-    /// Builds the aggregate live-mode failure message.
-    /// Input is the failed source step index; processing distinguishes pre-step
-    /// failures from step failures; the returned string is stored on the result.
+    /// Builds a concise per-step failure message for WebUI/report display.
+    /// Inputs are exit status and captured streams; processing extracts a short
+    /// first actionable output line without including the PowerShell command
+    /// text; the returned message remains suitable for the main dashboard while
+    /// full stdout/stderr stay in the execution-flow record.
     /// </summary>
-    private static string? BuildLiveFailureMessage(int? failedStepIndex)
+    private static string BuildStepFailureMessage(int? exitCode, string standardError, string standardOutput)
     {
-        return failedStepIndex is null
-            ? null
-            : $"Live runbook execution stopped after step index {failedStepIndex.Value} failed.";
+        var outputReason = ExtractFirstUsefulOutputLine(standardError);
+        if (string.IsNullOrWhiteSpace(outputReason))
+        {
+            outputReason = ExtractFirstUsefulOutputLine(standardOutput);
+        }
+
+        var exitText = exitCode is null
+            ? "PowerShell failed before a process exit code was available"
+            : $"PowerShell exited with code {exitCode.Value}";
+        return string.IsNullOrWhiteSpace(outputReason)
+            ? $"{exitText}."
+            : $"{exitText}: {outputReason}";
+    }
+
+    /// <summary>
+    /// Extracts one short output line for UI-safe failure summaries.
+    /// Input is stdout/stderr text; processing removes empty lines and truncates
+    /// long output; the returned value does not include command text generated
+    /// by the runbook itself unless PowerShell emitted it as an error.
+    /// </summary>
+    private static string ExtractFirstUsefulOutputLine(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return string.Empty;
+        }
+
+        var line = text
+            .Replace("\r\n", "\n", StringComparison.Ordinal)
+            .Replace('\r', '\n')
+            .Split('\n')
+            .Select(item => item.Trim())
+            .FirstOrDefault(item => !string.IsNullOrWhiteSpace(item));
+        if (string.IsNullOrWhiteSpace(line))
+        {
+            return string.Empty;
+        }
+
+        const int maxLength = 320;
+        return line.Length <= maxLength
+            ? line
+            : string.Concat(line.Substring(0, maxLength), "...");
+    }
+
+    /// <summary>
+    /// Builds the aggregate live-mode failure message.
+    /// Inputs are the source runbook, collected results, failure index, and
+    /// cancellation flag; processing includes the failed step title and concise
+    /// reason without exposing long commands; the returned string is stored on
+    /// the aggregate result and terminal progress snapshot.
+    /// </summary>
+    private static string? BuildLiveFailureMessage(
+        SandboxRunbook runbook,
+        IReadOnlyList<SandboxRunbookStepExecutionResult> results,
+        int? failedStepIndex,
+        bool wasCanceled)
+    {
+        if (failedStepIndex is null)
+        {
+            return wasCanceled ? "Live runbook execution was canceled." : null;
+        }
+
+        var failedResult = results.LastOrDefault(result => result.StepIndex == failedStepIndex.Value);
+        var stepTitle = failedResult?.Title;
+        if (string.IsNullOrWhiteSpace(stepTitle) &&
+            failedStepIndex.Value >= 0 &&
+            failedStepIndex.Value < runbook.Steps.Count)
+        {
+            stepTitle = runbook.Steps[failedStepIndex.Value].Title;
+        }
+
+        var reason = failedResult?.Message;
+        var prefix = wasCanceled
+            ? $"Live runbook execution was canceled at step {failedStepIndex.Value + 1}"
+            : $"Live runbook execution stopped at step {failedStepIndex.Value + 1}";
+        if (!string.IsNullOrWhiteSpace(stepTitle))
+        {
+            prefix += $": {stepTitle}";
+        }
+
+        return string.IsNullOrWhiteSpace(reason)
+            ? $"{prefix}."
+            : $"{prefix}. Failure reason: {reason}";
     }
 
     /// <summary>
@@ -727,16 +820,19 @@ public sealed class PowerShellRunbookExecutor : IRunbookExecutor
     {
         if (resultByIndex.TryGetValue(stepIndex, out var result))
         {
+            var resultState = result.Skipped
+                ? SandboxRunbookProgressStates.Skipped
+                : result.Success
+                    ? SandboxRunbookProgressStates.Completed
+                    : IsCanceledStepResult(result)
+                        ? SandboxRunbookProgressStates.Canceled
+                        : SandboxRunbookProgressStates.Failed;
             return new SandboxRunbookStepProgressSnapshot
             {
                 StepIndex = stepIndex,
                 StepId = step.Id,
                 Title = step.Title,
-                State = result.Skipped
-                    ? SandboxRunbookProgressStates.Skipped
-                    : result.Success
-                        ? SandboxRunbookProgressStates.Completed
-                        : SandboxRunbookProgressStates.Failed,
+                State = resultState,
                 RequiresElevation = step.RequiresElevation,
                 MutatesVmState = step.MutatesVmState,
                 StartedAtUtc = result.StartedAtUtc,
@@ -758,6 +854,18 @@ public sealed class PowerShellRunbookExecutor : IRunbookExecutor
             RequiresElevation = step.RequiresElevation,
             MutatesVmState = step.MutatesVmState
         };
+    }
+
+    /// <summary>
+    /// Determines whether a failed step represents cancellation rather than an
+    /// ordinary PowerShell failure. Input is one step result; processing checks
+    /// the normalized executor messages; the returned value lets progress rows
+    /// display canceled instead of failed.
+    /// </summary>
+    private static bool IsCanceledStepResult(SandboxRunbookStepExecutionResult result)
+    {
+        return result.Message is not null &&
+            result.Message.Contains("canceled", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>

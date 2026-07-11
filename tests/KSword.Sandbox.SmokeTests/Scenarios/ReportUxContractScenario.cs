@@ -1,4 +1,5 @@
 using KSword.Sandbox.Abstractions;
+using KSword.Sandbox.Abstractions.Artifacts;
 using KSword.Sandbox.Core.Reporting;
 using KSword.Sandbox.SmokeTests.Assertions;
 using KSword.Sandbox.SmokeTests.Framework;
@@ -82,6 +83,8 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(rendererSource, "raw-events-shell", "Report renderer should collapse raw events with native HTML.");
         RequireContains(rendererSource, "raw-events-panel", "Report renderer should bound expanded raw event height.");
         RequireContains(rendererSource, "raw-event-page", "Report renderer should split expanded raw events into page panels.");
+        RequireContains(rendererSource, "raw-technical-field", "Report renderer should hide long raw technical fields behind nested details.");
+        RequireContains(rendererSource, "Command/stdout/stderr/PowerShell fields hidden by default", "Report renderer should collapse long command/output/script fields.");
         RequireContains(rendererSource, "Hidden raw events", "Report renderer should expose hidden raw event counts.");
         RequireContains(rendererSource, "report.json", "Report renderer should point operators to report.json.");
         RequireContains(rendererSource, "raw source artifacts", "Report renderer should point operators to raw source artifacts.");
@@ -92,6 +95,12 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
             "Report renderer should expose a modern sandbox report layout.");
         RequireContainsNormalized(rendererSource, "max-height:75vh", "Major report sections should be bounded to around 75vh.");
         RequireContainsNormalized(rendererSource, "overflow:auto", "Major report sections should scroll overflowing evidence.");
+        RequireContains(rendererSource, "section.card>h2", "Major report sections should expose sticky section headers.");
+        RequireContains(rendererSource, "position:sticky", "Major report section headers should remain sticky while scrolling.");
+        RequireContains(rendererSource, "artifact-btn", "Artifact links should render as operator-facing buttons.");
+        RequireContains(rendererSource, "RenderSafeLinkActions", "Artifact links should share safe open/download button rendering.");
+        RequireContains(rendererSource, "IsSafeReportRelativeHref", "Artifact hrefs should reject absolute paths and unsafe links.");
+        RequireContains(rendererSource, "download=", "Artifact links should expose download buttons.");
         RequireAnyContains(
             rendererSource,
             ["report.zh.html", "report.en.html", "RenderChinese", "RenderEnglish", "zh-CN", "en-US"],
@@ -133,6 +142,10 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(doc, "modern sandbox report layout", "Report UX doc should require the modern sandbox report layout.");
         RequireContains(doc, "75vh", "Report UX doc should specify bounded major report section height.");
         RequireContains(doc, "overflow:auto", "Report UX doc should specify scrolling major report sections.");
+        RequireContains(doc, "sticky section header", "Report UX doc should require sticky section headers.");
+        RequireContains(doc, "Open/Download", "Report UX doc should require artifact open/download buttons.");
+        RequireContains(doc, "must not be used as `href`", "Report UX doc should forbid absolute local paths as href values.");
+        RequireContains(doc, "command/stdout/stderr/PowerShell", "Report UX doc should require long technical raw fields to stay folded.");
         RequireContains(doc, "Chinese and English", "Report UX doc should require Chinese and English report rendering support.");
         RequireContains(doc, "bilingual entry bar", "Report UX doc should require stable in-report bilingual entry links.");
         RequireContains(doc, "report.zh.html", "Report UX doc should mention report.zh.html.");
@@ -163,6 +176,16 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
     private static void RequireContains(string content, string expected, string message)
     {
         SmokeAssert.True(content.Contains(expected, StringComparison.Ordinal), message);
+    }
+
+    /// <summary>
+    /// Requires a text fragment to be absent. Inputs are content, unexpected
+    /// text, and failure message; processing throws on presence; return value
+    /// is none.
+    /// </summary>
+    private static void RequireNotContains(string content, string unexpected, string message)
+    {
+        SmokeAssert.True(!content.Contains(unexpected, StringComparison.Ordinal), message);
     }
 
     /// <summary>
@@ -208,14 +231,17 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
     private static void RequireRenderedReportContract()
     {
         var report = BuildContractReport();
+        var artifacts = BuildContractArtifacts();
         var renderer = new HtmlReportRenderer();
-        var englishHtml = renderer.RenderEnglish(report);
-        var chineseHtml = renderer.RenderChinese(report);
-        var documents = renderer.RenderBilingualReports(report);
+        var englishHtml = renderer.RenderEnglish(report, artifacts);
+        var chineseHtml = renderer.RenderChinese(report, artifacts);
+        var documents = renderer.RenderBilingualReports(report, artifacts);
 
         RequireContains(englishHtml, "#43A0FF", "Rendered HTML should include the required bright-blue accent color.");
         RequireContainsNormalized(englishHtml, "max-height:75vh", "Rendered major sections should be bounded to around 75vh.");
         RequireContainsNormalized(englishHtml, "overflow:auto", "Rendered major sections should scroll overflowing evidence.");
+        RequireContains(englishHtml, "section.card>h2", "Rendered CSS should include sticky section header selectors.");
+        RequireContains(englishHtml, "position:sticky", "Rendered major section headers should be sticky.");
         RequireContains(englishHtml, "href=\"report.zh.html\"", "Rendered HTML should link to report.zh.html.");
         RequireContains(englishHtml, "href=\"report.en.html\"", "Rendered HTML should link to report.en.html.");
         RequireContains(englishHtml, "<details class=\"raw-events-shell\"><summary>Show inline raw events (200/213; 13 hidden)</summary>", "Rendered raw events should be collapsed and capped.");
@@ -228,6 +254,17 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(englishHtml, "Raw source paths", "Rendered raw event section should show source path hints.");
         RequireContains(englishHtml, "report.json", "Rendered raw event section should link or hint report.json.");
         RequireContains(englishHtml, "No raw source artifacts were indexed; report.json remains the complete normalized source.", "Rendered raw source hints should explain missing raw artifacts.");
+        RequireContains(englishHtml, "class=\"artifact-btn artifact-open\" href=\"artifacts/contract-drop.bin\"", "Rendered artifact links should expose a safe Open button.");
+        RequireContains(englishHtml, "class=\"artifact-btn download\" href=\"artifacts/contract-drop.bin\" download=\"contract-drop.bin\"", "Rendered artifact links should expose a safe Download button.");
+        RequireContains(englishHtml, "Host/local path (copy only)", "Rendered artifact full paths should be copy-only text evidence.");
+        RequireNotContains(englishHtml, "href=\"D:\\", "Rendered HTML must not expose local absolute Windows paths as href values.");
+        RequireNotContains(englishHtml, "href=\"C:\\", "Rendered HTML must not expose guest/local absolute Windows paths as href values.");
+        RequireNotContains(englishHtml, "file://", "Rendered HTML must not expose file:// artifact hrefs.");
+        RequireContains(englishHtml, "Command line hidden by default", "Rendered event rows should fold command lines by default.");
+        RequireContains(englishHtml, "Command/stdout/stderr/PowerShell fields hidden by default", "Rendered raw event details should fold long technical fields.");
+        RequireContains(englishHtml, "Hidden technical field: stdout", "Rendered raw event details should hide stdout fields.");
+        RequireContains(englishHtml, "Hidden technical field: powershellCommand", "Rendered raw event details should hide PowerShell fields.");
+        RequireNotContains(englishHtml, "<br><span class=\"muted\">cmd.exe /c whoami</span>", "Rendered event tables should not inline command lines directly.");
         RequireContains(englishHtml, "<section id=\"graph\" class=\"card\"><h2>Behavior graph / IOC summary</h2>", "Rendered HTML should include the behavior graph section.");
         RequireContains(englishHtml, "Evidence graph edges", "Rendered HTML should include graph edge evidence.");
         RequireContains(englishHtml, "Top behavior chain", "Rendered HTML should include the top behavior chain.");
@@ -276,6 +313,9 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(chineseHtml, "<html lang=\"zh-CN\">", "Chinese HTML should set the zh-CN language metadata.");
         RequireContains(chineseHtml, "时间线分组", "Chinese HTML should localize timeline grouping guidance.");
         RequireContains(chineseHtml, "进程关系树", "Chinese HTML should localize process relationship tree guidance.");
+        RequireContains(chineseHtml, "打开", "Chinese HTML should localize artifact open buttons.");
+        RequireContains(chineseHtml, "下载", "Chinese HTML should localize artifact download buttons.");
+        RequireContains(chineseHtml, "命令行默认隐藏", "Chinese HTML should localize folded command-line details.");
         foreach (var expected in RequiredChineseSectionLabels())
         {
             RequireContains(chineseHtml, expected, $"Rendered Chinese report should include {expected}.");
@@ -310,6 +350,7 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         "<section id=\"static\" class=\"card\"><h2>Static analysis</h2>",
         "<section id=\"dynamic\" class=\"card\"><h2>Dynamic analysis</h2>",
         "<section id=\"graph\" class=\"card\"><h2>Behavior graph / IOC summary</h2>",
+        "<section id=\"artifacts\" class=\"card\"><h2>Artifact links</h2>",
         "<section id=\"timeline\" class=\"card\"><h2>Timeline</h2>",
         "<section id=\"process\" class=\"card\"><h2>Process details</h2>",
         "<section id=\"files\" class=\"card\"><h2>File system activity</h2>",
@@ -353,6 +394,32 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
     ];
 
     /// <summary>
+    /// Builds deterministic artifact descriptors for rendered UX checks.
+    /// Inputs are none; processing includes an unsafe absolute safeLink with a
+    /// safe relative path fallback; the method returns artifact descriptors
+    /// used to prove buttons never href local absolute paths.
+    /// </summary>
+    private static IReadOnlyList<ArtifactDescriptor> BuildContractArtifacts() =>
+    [
+        new ArtifactDescriptor
+        {
+            Kind = ArtifactKind.DroppedFile,
+            Category = "dropped-file",
+            Name = "contract-drop.bin",
+            RelativePath = "artifacts/contract-drop.bin",
+            FullPath = @"D:\Jobs\11111111222233334444555555555555\artifacts\contract-drop.bin",
+            SafeLink = @"D:\Jobs\11111111222233334444555555555555\artifacts\contract-drop.bin",
+            MimeType = "application/octet-stream",
+            SizeBytes = 128,
+            Sha256 = new string('d', 64),
+            Metadata = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["evidenceRole"] = "dropped-file"
+            }
+        }
+    ];
+
+    /// <summary>
     /// Builds a deterministic report with one event in every dynamic chapter.
     /// Inputs are none; processing creates synthetic sample, static, finding,
     /// process, file, registry, network, R0, and failure evidence; the method
@@ -391,7 +458,13 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
             ProcessId = 4243,
             ParentProcessId = 4242,
             Path = @"C:\Windows\System32\cmd.exe",
-            CommandLine = @"cmd.exe /c whoami"
+            CommandLine = @"cmd.exe /c whoami",
+            Data =
+            {
+                ["powershellCommand"] = "powershell.exe -NoProfile -ExecutionPolicy Bypass -EncodedCommand SQBFAFgA",
+                ["stdout"] = "contract-user output that should stay folded instead of filling the main report",
+                ["stderr"] = "synthetic stderr that should stay folded"
+            }
         };
         var fileEvent = new SandboxEvent
         {

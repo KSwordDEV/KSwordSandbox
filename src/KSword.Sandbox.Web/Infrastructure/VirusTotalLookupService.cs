@@ -33,14 +33,22 @@ internal sealed class VirusTotalLookupService
     {
         if (string.IsNullOrWhiteSpace(sha256))
         {
-            return NotQueried(string.Empty, configured: settingsStore.GetState().Configured, "missing_hash", "Sample SHA-256 is not available.");
+            return NotQueried(
+                string.Empty,
+                configured: settingsStore.GetState().Configured,
+                VirusTotalLookupStatuses.MissingHash,
+                "Sample SHA-256 is not available.");
         }
 
         var normalizedHash = sha256.Trim().ToLowerInvariant();
         var apiKey = settingsStore.ResolveApiKey();
         if (string.IsNullOrWhiteSpace(apiKey))
         {
-            return NotQueried(normalizedHash, configured: false, "not_configured", "VirusTotal API key is not configured.");
+            return NotQueried(
+                normalizedHash,
+                configured: false,
+                VirusTotalLookupStatuses.NotConfigured,
+                "VirusTotal API key is not configured.");
         }
 
         try
@@ -58,15 +66,43 @@ internal sealed class VirusTotalLookupService
                     Configured = true,
                     Queried = true,
                     Found = false,
-                    Status = "not_found",
+                    Status = VirusTotalLookupStatuses.NotFound,
+                    Verdict = VirusTotalLookupStatuses.NotFound,
                     Message = "Hash was not found by VirusTotal.",
-                    Permalink = BuildFilePermalink(normalizedHash)
+                    Permalink = BuildFilePermalink(normalizedHash),
+                    HttpStatusCode = (int)response.StatusCode
                 };
+            }
+
+            if (response.StatusCode == HttpStatusCode.TooManyRequests)
+            {
+                return QueriedFailure(
+                    normalizedHash,
+                    response.StatusCode,
+                    VirusTotalLookupStatuses.RateLimited,
+                    "VirusTotal lookup was rate-limited.",
+                    "rate_limited",
+                    ParseRetryAfterUtc(response));
+            }
+
+            if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
+            {
+                return QueriedFailure(
+                    normalizedHash,
+                    response.StatusCode,
+                    VirusTotalLookupStatuses.AuthenticationFailed,
+                    "VirusTotal API key was rejected by the service.",
+                    "authentication_failed");
             }
 
             if (!response.IsSuccessStatusCode)
             {
-                return NotQueried(normalizedHash, configured: true, "lookup_failed", "VirusTotal lookup failed or was rate-limited.");
+                return QueriedFailure(
+                    normalizedHash,
+                    response.StatusCode,
+                    VirusTotalLookupStatuses.LookupFailed,
+                    "VirusTotal lookup failed.",
+                    "http_error");
             }
 
             await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
@@ -75,7 +111,14 @@ internal sealed class VirusTotalLookupService
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException or IOException)
         {
-            return NotQueried(normalizedHash, configured: true, "lookup_failed", "VirusTotal lookup failed or timed out.");
+            return NotQueried(
+                normalizedHash,
+                configured: true,
+                VirusTotalLookupStatuses.LookupFailed,
+                ex is TaskCanceledException
+                    ? "VirusTotal lookup failed or timed out."
+                    : "VirusTotal lookup failed.",
+                ex is TaskCanceledException ? "timeout" : "transport_or_parse_error");
         }
     }
 
@@ -109,22 +152,35 @@ internal sealed class VirusTotalLookupService
             lastAnalysis = DateTimeOffset.FromUnixTimeSeconds(unixSeconds);
         }
 
+        var malicious = ReadStat(stats, "malicious");
+        var suspicious = ReadStat(stats, "suspicious");
+        var harmless = ReadStat(stats, "harmless");
+        var undetected = ReadStat(stats, "undetected");
+        var timeout = ReadStat(stats, "timeout");
+        var verdict = ResolveVerdict(malicious, suspicious, harmless, undetected);
+
         return new VirusTotalLookupResult
         {
             Sha256 = sha256,
             Configured = true,
             Queried = true,
             Found = true,
-            Status = "found",
-            Message = "VirusTotal hash report found.",
+            Status = VirusTotalLookupStatuses.Found,
+            Verdict = verdict,
+            Message = BuildFoundMessage(verdict, malicious, suspicious),
             Permalink = BuildFilePermalink(sha256),
             MeaningfulName = name,
             LastAnalysisDateUtc = lastAnalysis,
+            MaliciousCount = malicious,
+            SuspiciousCount = suspicious,
+            HarmlessCount = harmless,
+            UndetectedCount = undetected,
+            TimeoutCount = timeout,
             LastAnalysisStats = stats
         };
     }
 
-    private static VirusTotalLookupResult NotQueried(string sha256, bool configured, string status, string message)
+    private static VirusTotalLookupResult NotQueried(string sha256, bool configured, string status, string message, string? errorKind = null)
     {
         return new VirusTotalLookupResult
         {
@@ -133,9 +189,89 @@ internal sealed class VirusTotalLookupService
             Queried = false,
             Found = false,
             Status = status,
+            Verdict = status,
             Message = message,
-            Permalink = string.IsNullOrWhiteSpace(sha256) ? null : BuildFilePermalink(sha256)
+            Permalink = string.IsNullOrWhiteSpace(sha256) ? null : BuildFilePermalink(sha256),
+            ErrorKind = errorKind
         };
+    }
+
+    private static VirusTotalLookupResult QueriedFailure(
+        string sha256,
+        HttpStatusCode httpStatusCode,
+        string status,
+        string message,
+        string errorKind,
+        DateTimeOffset? retryAfterUtc = null)
+    {
+        return new VirusTotalLookupResult
+        {
+            Sha256 = sha256,
+            Configured = true,
+            Queried = true,
+            Found = false,
+            Status = status,
+            Verdict = status,
+            Message = message,
+            Permalink = BuildFilePermalink(sha256),
+            HttpStatusCode = (int)httpStatusCode,
+            ErrorKind = errorKind,
+            RetryAfterUtc = retryAfterUtc
+        };
+    }
+
+    private static int ReadStat(IReadOnlyDictionary<string, int> stats, string key)
+    {
+        return stats.TryGetValue(key, out var value) ? value : 0;
+    }
+
+    private static string ResolveVerdict(int malicious, int suspicious, int harmless, int undetected)
+    {
+        if (malicious > 0)
+        {
+            return VirusTotalLookupStatuses.Malicious;
+        }
+
+        if (suspicious > 0)
+        {
+            return VirusTotalLookupStatuses.Suspicious;
+        }
+
+        return harmless > 0 || undetected > 0
+            ? VirusTotalLookupStatuses.Clean
+            : VirusTotalLookupStatuses.Unknown;
+    }
+
+    private static string BuildFoundMessage(string verdict, int malicious, int suspicious)
+    {
+        return verdict switch
+        {
+            VirusTotalLookupStatuses.Malicious => $"VirusTotal hash report found: {malicious} malicious engine hits.",
+            VirusTotalLookupStatuses.Suspicious => $"VirusTotal hash report found: {suspicious} suspicious engine hits.",
+            VirusTotalLookupStatuses.Clean => "VirusTotal hash report found with no malicious or suspicious engine hits.",
+            _ => "VirusTotal hash report found, but no decisive analysis verdict was available."
+        };
+    }
+
+    private static DateTimeOffset? ParseRetryAfterUtc(HttpResponseMessage response)
+    {
+        var retryAfter = response.Headers.RetryAfter;
+        if (retryAfter is null)
+        {
+            return null;
+        }
+
+        if (retryAfter.Date is not null)
+        {
+            return retryAfter.Date.Value.ToUniversalTime();
+        }
+
+        if (retryAfter.Delta is not null)
+        {
+            return DateTimeOffset.UtcNow.Add(retryAfter.Delta.Value);
+        }
+
+        return null;
     }
 
     private static string BuildFilePermalink(string sha256) => $"https://www.virustotal.com/gui/file/{sha256}";

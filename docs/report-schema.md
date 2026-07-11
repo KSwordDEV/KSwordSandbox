@@ -111,8 +111,10 @@ records `name=packet-captures`, `kind=PacketCapture`,
 `captureSource=external`, `hostCaptureStarted=false`,
 `importMode=external-artifact`, artifact count, total bytes, and MIME types.
 The HTML report has an **Artifact links** section that exposes indexed
-artifacts with safe relative links when available, and falls back to copyable
-paths from events when a link cannot be trusted.
+artifacts with safe relative links when available. Safe `safeLink` /
+`relativePath` values render as Open/Download buttons. Absolute host or guest
+filesystem paths remain copyable evidence text only and are not emitted as
+`href` values when a link cannot be trusted.
 
 ## HTML sections
 
@@ -127,10 +129,14 @@ model into operator-facing sections:
   indicators, registry/path indicators, resources/TLS, tags, warnings, and the
   complete bounded interesting-string list;
 - dynamic analysis metrics;
-- artifact links with safe relative links when available;
+- artifact links with safe relative Open/Download buttons when available, with
+  absolute local paths preserved only as copyable text;
 - timeline, process details/tree, dropped files, registry behavior, network
   behavior, R0/driver events, failure reasons, and raw normalized events.
 
 Tables, chips, code fields, timeline entries, and evidence blocks expose
 `data-copy` attributes. The local report script supports right-click copy and
 explicit **Copy event** buttons without external dependencies.
+Raw normalized events are collapsed by default; command/stdout/stderr/
+PowerShell and similarly long technical fields are nested behind additional
+collapsed details so the main report remains readable.

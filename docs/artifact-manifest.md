@@ -131,6 +131,19 @@ concrete `lastReason`, `lastDiagnosticStage`, or command fields, and
 `sweepAttemptedCount`, `sweepCapturedCount`, `sweepSkippedCount`, and
 `sweepAlreadyCapturedCount`.
 
+Artifact references in events may be relative or absolute. The stable relative
+keys are `artifactRelativePath`, `relativePath`, `importPath`,
+`sourceArtifactRelativePath`, `driverEventsRelativePath`, `jsonlRelativePath`,
+`stdoutRelativePath`, `stderrRelativePath`, `screenshotRelativePath`,
+`memoryDumpRelativePath`, `dumpRelativePath`, `pcapRelativePath`,
+`pcapngRelativePath`, `etlRelativePath`, and `diagnosticRelativePath`.
+Absolute evidence keys such as `artifactFullPath`, `sourceArtifactFullPath`,
+`driverEventsPath`, `stdoutPath`, `stderrPath`, `screenshotPath`,
+`memoryDumpPath`, `dumpPath`, `pcapPath`, `pcapngPath`, `packetCapturePath`,
+and `etlPath` are used only when they resolve under the collected guest output
+root. R0 sidecar events use those fields so `driver-events.jsonl` and
+`r0collector.*.log` receive metadata and hashes in the host index.
+
 The scan also classifies any discovered `.pcap` or `.pcapng` file as
 `PacketCapture` even when only the file is available and the manifest metadata
 is missing. Packet capture descriptors include deterministic MIME
@@ -146,6 +159,15 @@ metadata such as artifact count, total bytes, MIME types, and
 `external-pcap-artifacts-indexed`. The host-side indexer itself still does not
 run a packet sniffer; capture is performed by the explicit guest-side pktmon
 probe when requested.
+
+Downloadable descriptor selectors are always job-relative. `relativePath` is
+the canonical selector, `safeLink` is the URL-encoded report-link form, and
+`importPath` is accepted as a compatibility selector for importers. WebUI
+download URLs pass one of these values to the guarded
+`/api/jobs/{jobId}/artifacts/download?path=...` endpoint. `fullPath` remains a
+server-side stream source only and must not be emitted as an href. Absolute
+paths, `..` traversal, and descriptors that cannot be resolved under the job
+root are not downloadable.
 
 The HTML report consumes this index when available. If no index has been
 provided, it still exposes artifact paths inferred from report events, but only

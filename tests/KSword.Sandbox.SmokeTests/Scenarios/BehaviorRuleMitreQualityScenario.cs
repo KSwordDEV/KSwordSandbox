@@ -35,16 +35,91 @@ internal sealed class BehaviorRuleMitreQualityScenario : ISmokeTestScenario
         "http-domain-fronting-indicator",
         "tls-c2-indicator-fields",
         "process-tree-office-spawned-script",
-        "process-tree-browser-spawned-script-or-lolbin"
+        "process-tree-browser-spawned-script-or-lolbin",
+        "run-key-user-writable-payload",
+        "run-key-script-interpreter-payload",
+        "startupapproved-run-reenabled",
+        "service-binary-user-writable-path",
+        "service-unquoted-imagepath-risk",
+        "service-failure-command-persistence",
+        "service-weak-permission-hijack-metadata",
+        "scheduled-task-com-handler-persistence",
+        "scheduled-task-xml-user-writable-payload",
+        "kernel-driver-service-install",
+        "dropped-executable-launched-from-user-writable-path",
+        "archive-or-installer-spawns-user-writable-payload",
+        "image-load-user-writable-dll",
+        "process-access-debug-privilege",
+        "token-impersonation-api-observed",
+        "uac-bypass-auto-elevate-registry",
+        "uac-bypass-auto-elevate-lolbin-command",
+        "powershell-in-memory-reflection-loader",
+        "powershell-lolbin-child-process-tree",
+        "cmstp-profile-proxy-execution-command",
+        "control-panel-proxy-execution-command",
+        "privilege-debug-backup-restore-enabled",
+        "network-periodic-beacon-metadata",
+        "dns-reputation-risk-domain",
+        "dns-high-entropy-subdomain-metadata",
+        "http-json-tasking-or-gate-uri",
+        "http-host-header-mismatch-indicator",
+        "tls-certificate-reputation-risk",
+        "certificate-root-store-command",
+        "certificate-root-store-registry-change",
+        "anti-analysis-debug-register-check-api",
+        "anti-analysis-host-identity-check"
     ];
 
     private static readonly string[] RequiredTechniqueIds =
     [
         "T1115",
+        "T1134.001",
         "T1127.001",
         "T1218.004",
         "T1218.009",
-        "T1482"
+        "T1218.002",
+        "T1218.003",
+        "T1482",
+        "T1548.002",
+        "T1553.004",
+        "T1574.009",
+        "T1574.011"
+    ];
+
+    private static readonly string[] BilingualRuleIds =
+    [
+        "run-key-user-writable-payload",
+        "run-key-script-interpreter-payload",
+        "startupapproved-run-reenabled",
+        "service-binary-user-writable-path",
+        "service-unquoted-imagepath-risk",
+        "service-failure-command-persistence",
+        "service-weak-permission-hijack-metadata",
+        "scheduled-task-com-handler-persistence",
+        "scheduled-task-xml-user-writable-payload",
+        "kernel-driver-service-install",
+        "dropped-executable-launched-from-user-writable-path",
+        "archive-or-installer-spawns-user-writable-payload",
+        "image-load-user-writable-dll",
+        "process-access-debug-privilege",
+        "token-impersonation-api-observed",
+        "uac-bypass-auto-elevate-registry",
+        "uac-bypass-auto-elevate-lolbin-command",
+        "powershell-in-memory-reflection-loader",
+        "powershell-lolbin-child-process-tree",
+        "cmstp-profile-proxy-execution-command",
+        "control-panel-proxy-execution-command",
+        "privilege-debug-backup-restore-enabled",
+        "network-periodic-beacon-metadata",
+        "dns-reputation-risk-domain",
+        "dns-high-entropy-subdomain-metadata",
+        "http-json-tasking-or-gate-uri",
+        "http-host-header-mismatch-indicator",
+        "tls-certificate-reputation-risk",
+        "certificate-root-store-command",
+        "certificate-root-store-registry-change",
+        "anti-analysis-debug-register-check-api",
+        "anti-analysis-host-identity-check"
     ];
 
     private static readonly HashSet<string> AllowedSeverities = new(StringComparer.OrdinalIgnoreCase)
@@ -82,6 +157,7 @@ internal sealed class BehaviorRuleMitreQualityScenario : ISmokeTestScenario
             SmokeAssert.True(indexedRules.TryGetValue(ruleId, out var rule), $"Behavior quality rule '{ruleId}' is missing.");
             AssertRuleMetadata(rule!);
         }
+        AssertBilingualRuleMetadata(behaviorRulesPath, BilingualRuleIds);
 
         var findings = new RuleEngine(rules).Classify(CreateSyntheticEvents());
         var findingIds = findings.Select(finding => finding.RuleId).ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -115,6 +191,38 @@ internal sealed class BehaviorRuleMitreQualityScenario : ISmokeTestScenario
             rule.EventTypes.Count > 0 &&
             (rule.ContainsPath.Count > 0 || rule.ContainsCommandLine.Count > 0 || rule.DataKeys.Count > 0 || rule.DataContains.Count > 0),
             $"Rule '{rule.Id}' should be constrained by event type plus path, command-line, or data evidence.");
+    }
+
+    private static void AssertBilingualRuleMetadata(string behaviorRulesPath, IEnumerable<string> ruleIds)
+    {
+        using var document = JsonDocument.Parse(File.ReadAllText(behaviorRulesPath));
+        var required = ruleIds.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        SmokeAssert.True(document.RootElement.TryGetProperty("rules", out var rulesElement), "behavior-rules.json should contain a rules array.");
+        foreach (var ruleElement in rulesElement.EnumerateArray())
+        {
+            if (!ruleElement.TryGetProperty("id", out var idElement))
+            {
+                continue;
+            }
+
+            var id = idElement.GetString();
+            if (string.IsNullOrWhiteSpace(id) || !required.Contains(id))
+            {
+                continue;
+            }
+
+            SmokeAssert.True(HasNonEmptyString(ruleElement, "title"), $"Rule '{id}' should include an English title.");
+            SmokeAssert.True(HasNonEmptyString(ruleElement, "summary"), $"Rule '{id}' should include an English summary.");
+            SmokeAssert.True(HasNonEmptyString(ruleElement, "titleZh"), $"Rule '{id}' should include a Chinese title.");
+            SmokeAssert.True(HasNonEmptyString(ruleElement, "summaryZh"), $"Rule '{id}' should include a Chinese summary.");
+        }
+    }
+
+    private static bool HasNonEmptyString(JsonElement element, string propertyName)
+    {
+        return element.TryGetProperty(propertyName, out var property) &&
+            property.ValueKind == JsonValueKind.String &&
+            !string.IsNullOrWhiteSpace(property.GetString());
     }
 
     private static IReadOnlyList<SandboxEvent> CreateSyntheticEvents()
@@ -291,6 +399,308 @@ internal sealed class BehaviorRuleMitreQualityScenario : ISmokeTestScenario
                 Data =
                 {
                     ["treeLineage"] = "chrome.exe -> mshta.exe"
+                }
+            },
+            new SandboxEvent
+            {
+                EventType = "registry.set",
+                Source = "driver",
+                Path = @"HKCU\Software\Microsoft\Windows\CurrentVersion\Run\Smoke",
+                Data =
+                {
+                    ["value"] = @"C:\Users\Public\payload.exe"
+                }
+            },
+            new SandboxEvent
+            {
+                EventType = "registry.set",
+                Source = "driver",
+                Path = @"HKCU\Software\Microsoft\Windows\CurrentVersion\RunOnce\SmokeScript",
+                Data =
+                {
+                    ["value"] = @"powershell.exe -WindowStyle Hidden -File C:\Users\Public\payload.ps1"
+                }
+            },
+            new SandboxEvent
+            {
+                EventType = "registry.set",
+                Source = "driver",
+                Path = @"HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run\Smoke",
+                Data =
+                {
+                    ["value"] = "02,00,00,00"
+                }
+            },
+            new SandboxEvent
+            {
+                EventType = "registry.set",
+                Source = "driver",
+                Path = @"HKLM\SYSTEM\CurrentControlSet\Services\SmokeSvc",
+                Data =
+                {
+                    ["value"] = @"C:\Users\Public\svc.exe"
+                }
+            },
+            new SandboxEvent
+            {
+                EventType = "registry.set",
+                Source = "driver",
+                Path = @"HKLM\SYSTEM\CurrentControlSet\Services\QuotedRiskSvc",
+                Data =
+                {
+                    ["imagePath"] = @"C:\Program Files\Quoted Risk\svc.exe"
+                }
+            },
+            new SandboxEvent
+            {
+                EventType = "registry.set",
+                Source = "driver",
+                Path = @"HKLM\SYSTEM\CurrentControlSet\Services\FailSvc",
+                Data =
+                {
+                    ["valueName"] = "FailureCommand",
+                    ["value"] = @"cmd.exe /c C:\Users\Public\recover.cmd"
+                }
+            },
+            new SandboxEvent
+            {
+                EventType = "service.acl",
+                Source = "guest",
+                Data =
+                {
+                    ["serviceName"] = "WeakSvc",
+                    ["serviceAclWeak"] = "true",
+                    ["writableBy"] = "Authenticated Users"
+                }
+            },
+            new SandboxEvent
+            {
+                EventType = "registry.set",
+                Source = "driver",
+                Path = @"HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Schedule\TaskCache\Tasks\{00000000-0000-0000-0000-000000000000}",
+                Data =
+                {
+                    ["value"] = "ComHandler CLSID {11111111-1111-1111-1111-111111111111}"
+                }
+            },
+            new SandboxEvent
+            {
+                EventType = "file.modified",
+                Source = "guest",
+                Path = @"C:\Windows\System32\Tasks\SmokeTask",
+                Data =
+                {
+                    ["target"] = @"C:\Users\Public\payload.exe"
+                }
+            },
+            new SandboxEvent
+            {
+                EventType = "registry.set",
+                Source = "driver",
+                Path = @"HKLM\SYSTEM\CurrentControlSet\Services\SmokeDrv",
+                Data =
+                {
+                    ["imagePath"] = @"C:\Users\Public\smokedrv.sys",
+                    ["serviceType"] = "SERVICE_KERNEL_DRIVER"
+                }
+            },
+            new SandboxEvent
+            {
+                EventType = "process.start",
+                Source = "guest",
+                ProcessName = "payload.exe",
+                CommandLine = @"C:\Users\Smoke\AppData\Local\Temp\payload.exe"
+            },
+            new SandboxEvent
+            {
+                EventType = "process.tree",
+                Source = "guest",
+                Data =
+                {
+                    ["treeLineage"] = @"setup.exe -> C:\Users\Public\payload.exe"
+                }
+            },
+            new SandboxEvent
+            {
+                EventType = "image.load",
+                Source = "driver",
+                Data =
+                {
+                    ["imagePath"] = @"C:\Users\Public\payload.dll"
+                }
+            },
+            new SandboxEvent
+            {
+                EventType = "process.access",
+                Source = "driver",
+                Data =
+                {
+                    ["targetProcessName"] = "lsass.exe",
+                    ["desiredAccess"] = "PROCESS_ALL_ACCESS",
+                    ["privilege"] = "SeDebugPrivilege"
+                }
+            },
+            new SandboxEvent
+            {
+                EventType = "api.call",
+                Source = "guest",
+                Data =
+                {
+                    ["api"] = "DuplicateTokenEx"
+                }
+            },
+            new SandboxEvent
+            {
+                EventType = "registry.set",
+                Source = "driver",
+                Path = @"HKCU\Software\Classes\ms-settings\Shell\Open\command",
+                Data =
+                {
+                    ["valueName"] = "DelegateExecute",
+                    ["value"] = @"C:\Users\Public\elevate.exe"
+                }
+            },
+            new SandboxEvent
+            {
+                EventType = "process.start",
+                Source = "guest",
+                ProcessName = "fodhelper.exe",
+                CommandLine = "fodhelper.exe"
+            },
+            new SandboxEvent
+            {
+                EventType = "process.start",
+                Source = "guest",
+                ProcessName = "powershell.exe",
+                CommandLine = "powershell.exe -nop -c [Reflection.Assembly]::Load([Convert]::FromBase64String('AA=='))"
+            },
+            new SandboxEvent
+            {
+                EventType = "process.tree",
+                Source = "guest",
+                Data =
+                {
+                    ["treeLineage"] = "powershell.exe -> regsvr32.exe"
+                }
+            },
+            new SandboxEvent
+            {
+                EventType = "process.start",
+                Source = "guest",
+                ProcessName = "cmstp.exe",
+                CommandLine = @"cmstp.exe /s C:\Users\Public\profile.inf"
+            },
+            new SandboxEvent
+            {
+                EventType = "process.start",
+                Source = "guest",
+                ProcessName = "control.exe",
+                CommandLine = @"control.exe C:\Users\Public\payload.cpl"
+            },
+            new SandboxEvent
+            {
+                EventType = "api.call",
+                Source = "guest",
+                Data =
+                {
+                    ["api"] = "AdjustTokenPrivileges",
+                    ["privilege"] = "SeBackupPrivilege"
+                }
+            },
+            new SandboxEvent
+            {
+                EventType = "network.flow",
+                Source = "guest",
+                Data =
+                {
+                    ["beaconIntervalMs"] = "60000",
+                    ["jitterPercent"] = "15",
+                    ["behavior"] = "periodic beacon"
+                }
+            },
+            new SandboxEvent
+            {
+                EventType = "dns.query",
+                Source = "guest",
+                Data =
+                {
+                    ["queryName"] = "new-c2.example.invalid",
+                    ["domainReputation"] = "newly-registered suspicious"
+                }
+            },
+            new SandboxEvent
+            {
+                EventType = "pcap.dns",
+                Source = "host",
+                Data =
+                {
+                    ["queryName"] = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.example.invalid",
+                    ["labelEntropy"] = "high",
+                    ["queryLength"] = "96",
+                    ["classification"] = "high-entropy"
+                }
+            },
+            new SandboxEvent
+            {
+                EventType = "http.request",
+                Source = "guest",
+                Data =
+                {
+                    ["host"] = "gate.example.invalid",
+                    ["uri"] = "/api/gate",
+                    ["contentType"] = "application/json"
+                }
+            },
+            new SandboxEvent
+            {
+                EventType = "pcap.http",
+                Source = "host",
+                Data =
+                {
+                    ["host"] = "front.example.invalid",
+                    ["classification"] = "host-header-mismatch"
+                }
+            },
+            new SandboxEvent
+            {
+                EventType = "network.tls",
+                Source = "guest",
+                Data =
+                {
+                    ["sni"] = "c2.example.invalid",
+                    ["certReputation"] = "malicious"
+                }
+            },
+            new SandboxEvent
+            {
+                EventType = "process.start",
+                Source = "guest",
+                ProcessName = "certutil.exe",
+                CommandLine = @"certutil.exe -addstore root C:\Users\Public\ca.cer"
+            },
+            new SandboxEvent
+            {
+                EventType = "registry.set",
+                Source = "driver",
+                Path = @"HKLM\SOFTWARE\Microsoft\SystemCertificates\Root\Certificates\SmokeThumbprint"
+            },
+            new SandboxEvent
+            {
+                EventType = "api.call",
+                Source = "guest",
+                Data =
+                {
+                    ["api"] = "GetThreadContext",
+                    ["operation"] = "debug register DR7 hardware breakpoint check"
+                }
+            },
+            new SandboxEvent
+            {
+                EventType = "antiAnalysis.sandboxCheck",
+                Source = "guest",
+                Data =
+                {
+                    ["check"] = "hostname username SandboxUser"
                 }
             }
         ];

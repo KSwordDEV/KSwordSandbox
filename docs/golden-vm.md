@@ -100,6 +100,11 @@ Service Interface, host payload files, and, when the VM is already running,
 PowerShell Direct plus guest-deployed payload files. The script does not start,
 stop, create, delete, or restore any VM.
 
+The current readiness contract also records `CheckId`, `RequiredForLive`,
+`LiveReady`, `FailedCheckIds`, host shared path configuration, Hyper-V
+feature/service state, and test-signing status. Use those machine-readable
+fields for automation instead of scraping localized display text.
+
 The one-command E2E script also performs non-mutating preflight while writing
 its plan. In `PlanOnly`/`WhatIf` it records Windows/Admin/Hyper-V command
 availability, VM/checkpoint/Guest Service state, credential env var presence,

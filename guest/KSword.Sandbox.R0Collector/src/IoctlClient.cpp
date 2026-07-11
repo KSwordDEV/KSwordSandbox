@@ -14,14 +14,17 @@ namespace KSword::Sandbox::R0Collector {
 // Processing: Opens the KSword driver control device with read/write access so
 // the caller can issue GET_HEALTH, POLL, and READ_EVENTS IOCTLs.
 // Return: A valid UniqueHandle on success; invalid handle and error code on failure.
-UniqueHandle OpenDriverDevice(const std::wstring& devicePath, DWORD* errorCode) {
+UniqueHandle OpenDriverDeviceWithFlags(
+    const std::wstring& devicePath,
+    const DWORD flagsAndAttributes,
+    DWORD* errorCode) {
     const HANDLE handle = CreateFileW(
         devicePath.c_str(),
         GENERIC_READ | GENERIC_WRITE,
         FILE_SHARE_READ | FILE_SHARE_WRITE,
         nullptr,
         OPEN_EXISTING,
-        FILE_ATTRIBUTE_NORMAL,
+        flagsAndAttributes,
         nullptr);
 
     if (handle == INVALID_HANDLE_VALUE && errorCode != nullptr) {
@@ -29,6 +32,14 @@ UniqueHandle OpenDriverDevice(const std::wstring& devicePath, DWORD* errorCode) 
     }
 
     return UniqueHandle(handle);
+}
+
+// Input: Device path supplied by the user.
+// Processing: Opens the KSword driver control device with synchronous IOCTL
+// semantics used by the normal collector loop.
+// Return: A valid UniqueHandle on success; invalid handle and error code on failure.
+UniqueHandle OpenDriverDevice(const std::wstring& devicePath, DWORD* errorCode) {
+    return OpenDriverDeviceWithFlags(devicePath, FILE_ATTRIBUTE_NORMAL, errorCode);
 }
 
 // Input: Device handle, IOCTL code, optional input buffer, and output buffer.
@@ -91,6 +102,15 @@ bool EmitIoctlFailure(
     data.AddUnsigned("win32Error", errorCode);
     data.AddWide("win32Message", Win32ErrorMessage(errorCode));
     data.AddWide("hint", hint);
+    data.AddUtf8("severity", "error");
+    data.AddUtf8("readinessState", "blocked");
+    data.AddUtf8("diagnosticCode", "ioctl_failure");
+    data.AddUtf8("diagnosticStage", "ioctl");
+    data.AddUtf8("schema", KSWORD_SANDBOX_EVENT_SCHEMA_NAME);
+    data.AddUtf8("producer", "r0collector");
+    data.AddBool("noise", false);
+    data.AddBool("lost", false);
+    data.AddBool("backpressure", false);
 
     SandboxEventFields event;
     event.eventType = "r0collector.ioctlFailure";
@@ -115,6 +135,15 @@ bool EmitProtocolError(
     data.AddUnsigned("bytesReturned", bytesReturned);
     data.AddWide("message", message);
     data.AddUtf8("expectedInterfaceVersionHex", HexUnsignedLongLong(KSWORD_SANDBOX_INTERFACE_VERSION, 8));
+    data.AddUtf8("severity", "error");
+    data.AddUtf8("readinessState", "blocked");
+    data.AddUtf8("diagnosticCode", "abi_mismatch");
+    data.AddUtf8("diagnosticStage", "abiNegotiation");
+    data.AddUtf8("schema", KSWORD_SANDBOX_EVENT_SCHEMA_NAME);
+    data.AddUtf8("producer", "r0collector");
+    data.AddBool("noise", false);
+    data.AddBool("lost", false);
+    data.AddBool("backpressure", false);
 
     SandboxEventFields event;
     event.eventType = "r0collector.driverProtocolError";
@@ -155,6 +184,15 @@ bool EmitOptionalIoctlUnavailable(
     data.AddUtf8("eventSchemaName", KSWORD_SANDBOX_EVENT_SCHEMA_NAME);
     data.AddUnsigned("collectorAbiVersion", KSWORD_SANDBOX_INTERFACE_VERSION);
     data.AddUtf8("collectorAbiVersionHex", HexUnsignedLongLong(KSWORD_SANDBOX_INTERFACE_VERSION, 8));
+    data.AddUtf8("severity", "warning");
+    data.AddUtf8("readinessState", "degraded");
+    data.AddUtf8("diagnosticCode", "optional_ioctl_unavailable");
+    data.AddUtf8("diagnosticStage", "abiNegotiation");
+    data.AddUtf8("schema", KSWORD_SANDBOX_EVENT_SCHEMA_NAME);
+    data.AddUtf8("producer", "r0collector");
+    data.AddBool("noise", false);
+    data.AddBool("lost", false);
+    data.AddBool("backpressure", false);
 
     SandboxEventFields event;
     event.eventType = "r0collector.optionalIoctlUnavailable";

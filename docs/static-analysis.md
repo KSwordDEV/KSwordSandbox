@@ -10,6 +10,26 @@ external tools and intentionally writes findings into the stable
 - `InterestingStrings`: bounded human-readable evidence such as imports,
   exports, section summaries, resources, overlay/signature hints, paths, URLs,
   IPs, and command strings.
+- `Imports`: structured import modules with bounded API names, ordinal import
+  samples, suspicious API names, and per-module suspicious cluster names.
+- `ImportApiClusters`: structured rollups such as `process-injection`,
+  `dynamic-code`, `network`, `registry-persistence`, and
+  `script-execution` with hit counts and API samples.
+- `ExportModuleName` and `ExportNames`: bounded export-table names suitable for
+  report JSON grouping and future rule predicates.
+- `Tls`: TLS directory, callback-table VA/file offset, and callback VA/RVA
+  evidence.
+- `Overlay`: PE overlay offset/size, certificate-table overlap,
+  non-certificate appended size, and bounded entropy.
+- `NetworkIndicators`: structured URL, IPv4, and email indicators with coarse
+  classification (`embedded`, `reference`, `public`,
+  `private_or_reserved`).
+- `PathIndicators`: structured registry, filesystem, and environment-path
+  indicators with the same stable tag vocabulary used by rules.
+- `CommandIndicators`: structured script interpreter, encoded command, and
+  LOLBIN command-string evidence.
+- `SuspiciousStrings`: structured anti-analysis, packer, persistence, and
+  suspicious API-like string findings.
 - `Warnings`: parse-boundary and truncation notes.
 
 ## PE coverage
@@ -17,7 +37,8 @@ external tools and intentionally writes findings into the stable
 The analyzer parses these PE structures best-effort with hard limits:
 
 - DOS/PE headers, architecture, subsystem, entry point, and section count.
-- Section names, raw sizes, virtual sizes, entropy, and characteristics.
+- Section names, raw offsets, raw sizes, virtual sizes, entropy,
+  coarse entropy labels, characteristics, and executable/writable flags.
 - Copyable section evidence strings in the form
   `section:<name>,va=<rva>,vsize=<n>,raw=<n>,entropy=<n>` for report grouping.
 - Imports by module/API, including ordinal fallback evidence.
@@ -25,13 +46,18 @@ The analyzer parses these PE structures best-effort with hard limits:
   `import-summary:modules=<n>,namedApis=<n>,ordinals=<n>`,
   `import-module:<dll>,namedApis=<n>,ordinals=<n>`, and suspicious API
   cluster rollups such as `import-api-cluster:process-injection,hits=<n>`.
+  The same data is also exposed in `Imports` and `ImportApiClusters`.
 - Exports and registration/service-style entry points.
+  Parsed names are also exposed in `ExportModuleName` and `ExportNames`.
 - PE security directory / Authenticode certificate table presence and bounded
   WIN_CERTIFICATE entry metadata.
 - TLS directory and callback-table pointers.
+  Callback table and callback VA/RVA values are also exposed in `Tls`.
 - Resource directory types and resource data entries.
 - Overlay bytes after the last mapped section raw-data end, with certificate
   table bytes separated from appended non-certificate data where possible.
+  The normalized overlay offsets, sizes, certificate overlap, and entropy are
+  also exposed in `Overlay`.
 
 Resource tags include `resources_present`, `resource_type_rcdata`,
 `resource_manifest`, `resource_version_info`, `resource_icon`,
@@ -60,7 +86,7 @@ String scanning is capped at 32 MiB and extracts printable ASCII plus simple
 UTF-16LE strings. Current labels include:
 
 - URLs and network indicators: `url`, `embedded_url`, `ip_address`,
-  `public_ip_address`, `private_or_reserved_ip_address`.
+  `public_ip_address`, `private_or_reserved_ip_address`, `email_address`.
 - Paths: `windows_path_string`, `file_path_string`, `temp_path_string`,
   `appdata_path_string`, `registry_path_string`,
   `run_key_path_string`, `service_registry_path_string`,
@@ -90,7 +116,9 @@ When suspicious imported APIs are present, aggregate rollups add
 `import_suspicious_api_cluster`; two or more behavior clusters add
 `import_multi_suspicious_api_cluster`. These tags are intentionally broad and
 the copyable `import-api-cluster:*` evidence carries the cluster hit counts for
-report triage.
+report triage. Report JSON consumers should prefer the structured
+`ImportApiClusters` field when available and fall back to legacy prefixed
+`InterestingStrings` for older reports.
 
 ## Static notes / YARA boundary
 
@@ -103,6 +131,8 @@ plus the `static.analysis.completed` event consumed by `RuleEngine`.
 When a future YARA runner is added, it should write matched rule IDs or mapped
 tags into `StaticAnalysisResult.Tags` and the `static.analysis.completed`
 `Data["tags"]` field so existing behavior rules and reports remain compatible.
+Structured indicator fields should remain additive and optional so older JSON
+reports continue to deserialize.
 
 ## Rule integration
 
@@ -121,3 +151,7 @@ validates that:
 4. Synthetic files produce URL/IP/path/script/anti-analysis/resource tags.
 5. A synthetic PE contract sample emits overlay and certificate-table evidence
    without requiring Authenticode validation libraries.
+6. A synthetic PE contract sample exposes structured imports, suspicious API
+   clusters, exports, TLS callbacks, overlay details, section entropy/flags,
+   URL/IP/email indicators, registry/filesystem paths, and LOLBIN command
+   strings.

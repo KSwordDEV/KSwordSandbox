@@ -87,7 +87,7 @@ internal static class LiveEventsPage
               <div>
                 <h1 data-zh="实时原始事件监控" data-en="Live raw event monitor">实时原始事件监控</h1>
                 <p data-zh="这是独立动态监控页，可与主界面并行打开；这里只显示未归类原始事件，最终结论请看报告。" data-en="This standalone dynamic monitor can stay open beside the dashboard; it shows unclassified raw events only, and final conclusions stay in the report.">这是独立动态监控页，可与主界面并行打开；这里只显示未归类原始事件，最终结论请看报告。</p>
-                <p data-zh="如果此页由上传流程自动打开，请保持主界面标签页继续运行分析；完成后主界面会进入当前语言报告。" data-en="If this page was opened automatically by the upload flow, keep the dashboard tab running analysis; when complete, the dashboard enters the report in the current language.">如果此页由上传流程自动打开，请保持主界面标签页继续运行分析；完成后主界面会进入当前语言报告。</p>
+                <p data-zh="如果此页由上传流程进入，后台分析已经交给 Web Host 执行；你可以停留在这里查看真实 runbook 进度、原始事件、VirusTotal 和证据下载。" data-en="If this page was entered from upload, background analysis has already been handed to the Web host; stay here to watch real runbook progress, raw events, VirusTotal, and evidence downloads.">如果此页由上传流程进入，后台分析已经交给 Web Host 执行；你可以停留在这里查看真实 runbook 进度、原始事件、VirusTotal 和证据下载。</p>
                 <p><span class="pill">Job</span> <code data-copy="{{Attr(jobId)}}">{{Html(jobId)}}</code></p>
               </div>
               <button class="secondary" id="langToggle" type="button">English</button>

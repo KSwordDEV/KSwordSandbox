@@ -9,9 +9,13 @@ namespace KSword.Sandbox.Abstractions.Storage;
 /// </summary>
 public sealed record JobArtifactIndex
 {
+    public int SchemaVersion { get; init; } = 1;
+
     public Guid JobId { get; init; }
 
     public DateTimeOffset UpdatedAtUtc { get; init; } = DateTimeOffset.UtcNow;
+
+    public List<ArtifactCollectionDescriptor> Collections { get; init; } = [];
 
     public List<ArtifactDescriptor> Artifacts { get; init; } = [];
 }

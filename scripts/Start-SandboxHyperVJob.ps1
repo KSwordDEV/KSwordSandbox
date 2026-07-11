@@ -189,6 +189,66 @@ function Get-GuestCredential {
     return [pscredential]::new($UserName, $securePassword)
 }
 
+function Add-UniqueRemediationHint {
+    param(
+        [Parameter(Mandatory)][System.Collections.Generic.List[string]]$Hints,
+        [AllowNull()][string]$Hint
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Hint)) {
+        return
+    }
+
+    if (-not $Hints.Contains($Hint)) {
+        [void]$Hints.Add($Hint)
+    }
+}
+
+function Get-StartRemediationHints {
+    param(
+        [AllowNull()][string]$Message,
+        [AllowNull()][object]$Plan
+    )
+
+    $hints = New-Object System.Collections.Generic.List[string]
+    if ([string]::IsNullOrWhiteSpace($Message)) {
+        return @()
+    }
+
+    if ($Message -match "Guest password environment variable '([^']+)' is not set") {
+        Add-UniqueRemediationHint -Hints $hints -Hint "Set $($Matches[1]) in the same elevated process that launches live Hyper-V execution, or run .\install.ps1 -Mode Change -ResetPassword -PromptPassword and restart the runner."
+    }
+    elseif ($Message -match 'Guest password secret name is empty') {
+        Add-UniqueRemediationHint -Hints $hints -Hint 'Configure guest.passwordSecretName in the local sandbox config before live execution.'
+    }
+
+    if ($Message -match 'Guest Service Interface|Copy-VMFile') {
+        Add-UniqueRemediationHint -Hints $hints -Hint "Enable Guest Service Interface for VM '$($Plan.vm.name)' or fix VM integration services before retrying live execution."
+    }
+
+    if ($Message -match 'Get-VM|VM .*not.*found|cannot find.*VM') {
+        Add-UniqueRemediationHint -Hints $hints -Hint "Verify the configured VM '$($Plan.vm.name)' exists on this Hyper-V host and rerun .\scripts\Test-HyperVReadiness.ps1."
+    }
+
+    if ($Message -match 'checkpoint|VMSnapshot|Restore-VMSnapshot') {
+        Add-UniqueRemediationHint -Hints $hints -Hint "Verify checkpoint '$($Plan.vm.cleanCheckpointName)' exists on VM '$($Plan.vm.name)' before live execution."
+    }
+
+    if ($Message -match 'PowerShell Direct|New-PSSession|Invoke-Command') {
+        Add-UniqueRemediationHint -Hints $hints -Hint "Confirm PowerShell Direct works for VM '$($Plan.vm.name)' with guest user '$($Plan.guest.userName)' and the configured password secret."
+    }
+
+    if ($Message -match 'driver\.hostDriverPath|R0Collector|deviceUnavailable|win32Error=2') {
+        Add-UniqueRemediationHint -Hints $hints -Hint 'Use driver.useMockCollector=true for the minimal E2E path, or configure a built/test-signed driver.hostDriverPath before real R0 collection.'
+    }
+
+    if ($hints.Count -eq 0) {
+        Add-UniqueRemediationHint -Hints $hints -Hint 'Rerun .\scripts\Test-HyperVReadiness.ps1 from an elevated shell and fix the first failed required check before retrying live execution.'
+    }
+
+    return @($hints.ToArray())
+}
+
 function New-StepResult {
     param(
         [Parameter(Mandatory)][string]$Id,
@@ -197,17 +257,22 @@ function New-StepResult {
         [bool]$Skipped,
         [DateTimeOffset]$StartedAtUtc,
         [TimeSpan]$Duration,
-        [string]$Message = ''
+        [string]$Message = '',
+        [string[]]$RemediationHints = @()
     )
 
+    $state = if ($Skipped) { 'skipped' } elseif ($Success) { 'completed' } else { 'failed' }
     return [ordered]@{
         id = $Id
         title = $Title
+        state = $state
         success = $Success
         skipped = $Skipped
         startedAtUtc = $StartedAtUtc.ToString('O')
         durationSeconds = [Math]::Round($Duration.TotalSeconds, 3)
         message = $Message
+        failureReason = if ((-not $Success) -and (-not $Skipped)) { $Message } else { '' }
+        remediationHints = @($RemediationHints)
     }
 }
 
@@ -229,7 +294,8 @@ function Invoke-RecordedStep {
     }
     catch {
         $timer.Stop()
-        [void]$script:StepResults.Add((New-StepResult -Id $Id -Title $Title -Success $false -Skipped $false -StartedAtUtc $started -Duration $timer.Elapsed -Message $_.Exception.Message))
+        $hints = @(Get-StartRemediationHints -Message $_.Exception.Message -Plan $plan)
+        [void]$script:StepResults.Add((New-StepResult -Id $Id -Title $Title -Success $false -Skipped $false -StartedAtUtc $started -Duration $timer.Elapsed -Message $_.Exception.Message -RemediationHints $hints))
         throw
     }
 }
@@ -620,6 +686,7 @@ function Save-StartResult {
     $jobRoot = [string]$Plan.host.jobRoot
     New-Item -ItemType Directory -Path $jobRoot -Force -WhatIf:$false | Out-Null
     $resultPath = Join-Path $jobRoot 'hyperv-e2e-start-result.json'
+    $remediationHints = if ($Success) { @() } else { @(Get-StartRemediationHints -Message $Message -Plan $Plan) }
     $result = [ordered]@{
         contractVersion = 1
         phase = 'start'
@@ -627,7 +694,10 @@ function Save-StartResult {
         jobId = $Plan.job.jobId
         targetVmName = $Plan.vm.name
         success = $Success
+        state = if ($Success) { 'completed' } else { 'failed' }
         message = $Message
+        failureReason = if ($Success) { '' } else { $Message }
+        remediationHints = @($remediationHints)
         guestAgentProcessId = $script:GuestAgentProcessId
         guestAgentCommandLine = $script:GuestAgentCommandLine
         guestAgentArguments = @($script:GuestAgentArguments)

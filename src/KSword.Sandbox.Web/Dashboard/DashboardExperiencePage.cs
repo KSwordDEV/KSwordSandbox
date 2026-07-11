@@ -153,7 +153,7 @@ internal static class DashboardExperiencePage
               </div>
               <div id="panel-upload" class="tab-panel active" role="tabpanel" aria-labelledby="tab-upload">
                   <h3 data-zh="上传 .exe 并自动动态分析" data-en="Upload .exe and run dynamic analysis">上传 .exe 并自动动态分析</h3>
-                  <p class="hint" data-zh="保存文件、生成可检查计划，然后自动进入动态监控页并启动虚拟机分析；若浏览器阻止新标签页，当前任务卡片会保留“进入动态监控页”链接。" data-en="Stores the file, creates a reviewable plan, then automatically enters the dynamic monitor page and starts VM analysis. If the browser blocks the new tab, the current job card keeps an Enter dynamic monitor link.">保存文件、生成可检查计划，然后自动进入动态监控页并启动虚拟机分析；若浏览器阻止新标签页，当前任务卡片会保留“进入动态监控页”链接。</p>
+                  <p class="hint" data-zh="保存文件、生成可检查计划、提交后台虚拟机分析，然后当前页面直接进入动态监控页；后端会继续执行，不需要保持主界面打开。" data-en="Stores the file, creates a reviewable plan, submits background VM analysis, then redirects this page directly into the dynamic monitor; the backend keeps running without the dashboard staying open.">保存文件、生成可检查计划、提交后台虚拟机分析，然后当前页面直接进入动态监控页；后端会继续执行，不需要保持主界面打开。</p>
                   <label for="sampleUpload" data-zh="可执行文件（.exe）" data-en="Executable file (.exe)">可执行文件（.exe）</label>
                   <input id="sampleUpload" type="file" accept=".exe,application/vnd.microsoft.portable-executable,application/octet-stream">
                   <label for="uploadDuration" data-zh="分析时长（秒）" data-en="Analysis duration, seconds">分析时长（秒）</label>
@@ -449,37 +449,94 @@ internal static class DashboardExperiencePage
                 return;
               }
 
-              const monitorWindow = openLiveMonitorPlaceholder();
               setBusy(true);
-              setStatus(t('正在上传样本并保存...', 'Uploading sample into storage...'), false);
+              setStatus(t('正在上传样本、生成计划并提交后台虚拟机分析；完成提交后会进入动态监控页...', 'Uploading sample, creating a plan, and submitting background VM analysis; the page will enter the dynamic monitor after submission...'), false);
               try {
                 const form = new FormData();
                 form.append('sample', input.files[0]);
-                const uploadResponse = await fetch('/api/files/upload', {
+                appendOneClickAnalysisOptions(form);
+                const uploadResponse = await fetch('/api/files/upload/start', {
                   method: 'POST',
                   body: form
                 });
-                const uploaded = await requireOk(uploadResponse, t('上传样本', 'Upload executable'));
+                const payload = await requireOk(uploadResponse, t('上传并启动分析', 'Upload and start analysis'));
+                const uploaded = payload.uploaded || payload.Uploaded || {};
+                const job = payload.job || payload.Job || null;
 
-                document.getElementById('samplePath').value = uploaded.fullPath;
+                document.getElementById('samplePath').value = uploaded.fullPath || uploaded.FullPath || '';
                 document.getElementById('duration').value = document.getElementById('uploadDuration').value || 120;
-                setStatus(t('上传完成，正在生成分析计划...', `Uploaded to ${uploaded.fullPath}; creating analysis plan...`), false);
-                const job = await planPath(uploaded.fullPath);
-                const jobId = job && (job.jobId || job.id);
+                if (job) {
+                  renderJob(job);
+                  applyLanguage();
+                  refreshJobs(false);
+                }
+
+                const jobId = job && (job.jobId || job.id || job.JobId);
                 if (jobId) {
-                  setStatus(t('上传完成，正在打开实时原始事件监控并启动虚拟机分析。', 'Upload completed; opening the Live raw event monitor and starting VM analysis.'), false);
-                  openLiveMonitor(String(jobId), true, monitorWindow);
-                  await executeRunbook(String(jobId), true);
-                } else if (monitorWindow && !monitorWindow.closed) {
-                  monitorWindow.close();
+                  const runbookStart = payload.runbookStart || payload.RunbookStart || {};
+                  startEstimatedProgress(true);
+                  startRunbookProgressPolling(String(jobId));
+                  startBackgroundExecutionPolling(String(jobId), true);
+                  if (runbookStart.snapshot || runbookStart.Snapshot) {
+                    renderBackgroundExecutionSnapshot(runbookStart.snapshot || runbookStart.Snapshot, true);
+                  } else {
+                    await refreshRunbookProgress(String(jobId), true);
+                  }
+
+                  const accepted = Boolean(runbookStart.accepted ?? runbookStart.Accepted);
+                  const statusCode = Number(runbookStart.statusCode ?? runbookStart.StatusCode ?? 0);
+                  const message = runbookStart.message || runbookStart.Message || '';
+                  if (!accepted && statusCode >= 400) {
+                    renderStages(progressStageIndex, false, true);
+                    setStatus(
+                      message || t('任务已创建，但后台虚拟机分析预检失败；请打开进度页查看原因。', 'Job was created, but background VM analysis preflight failed; open the progress page for details.'),
+                      true);
+                  } else {
+                    setStatus(t('上传完成，后台虚拟机分析已提交；正在进入动态监控页。', 'Upload completed and background VM analysis has been submitted; entering the dynamic monitor.'), false);
+                  }
+                  redirectToLiveMonitor(String(jobId), runbookStart);
+                } else {
+                  setStatus(t('上传完成但未返回任务 ID；请查看近期任务列表。', 'Upload completed but no job id was returned; check the recent jobs list.'), true);
                 }
               } catch (error) {
-                if (monitorWindow && !monitorWindow.closed) {
-                  monitorWindow.close();
-                }
                 setStatus(error.message, true);
               } finally {
                 setBusy(false);
+              }
+            }
+
+            function redirectToLiveMonitor(jobId, runbookStart) {
+              // Inputs: created job id plus the server-side background-start
+              // result. Processing navigates the current page to the dedicated
+              // dynamic monitor because /api/files/upload/start already handed
+              // execution to the Web host background runner; return: none.
+              const accepted = Boolean(runbookStart && (runbookStart.accepted ?? runbookStart.Accepted));
+              const state = encodeURIComponent(String((runbookStart && (runbookStart.state || runbookStart.State)) || 'submitted'));
+              const monitorHref = `${buildLiveMonitorHref(jobId)}?fromUpload=1&accepted=${accepted ? '1' : '0'}&state=${state}`;
+              setTimeout(() => {
+                window.location.href = monitorHref;
+              }, 450);
+            }
+
+            function appendOneClickAnalysisOptions(form) {
+              // Inputs: an upload FormData object and current UI controls.
+              // Processing copies the same VM/artifact options used by JSON
+              // planning into multipart fields, plus the live-run defaults.
+              // Return: mutates the FormData in place for /api/files/upload/start.
+              form.append('durationSeconds', document.getElementById('uploadDuration').value || document.getElementById('duration').value || '120');
+              form.append('live', 'true');
+              form.append('importGuestEvents', 'true');
+              form.append('stepTimeoutSeconds', '1800');
+              const vm = getVmConfig();
+              for (const [key, value] of Object.entries(vm)) {
+                if (value !== undefined && value !== null) {
+                  form.append(key, String(value));
+                }
+              }
+
+              const artifacts = getArtifactCollectionConfig();
+              for (const [key, value] of Object.entries(artifacts)) {
+                form.append(key, value ? 'true' : 'false');
               }
             }
 
@@ -714,7 +771,7 @@ internal static class DashboardExperiencePage
                   <div id="reportNotice" class="report-notice" hidden></div>
                   <div class="callout">
                     <strong data-zh="独立页：实时原始事件监控" data-en="Standalone page: Live raw event monitor">独立页：实时原始事件监控</strong>
-                    <p class="hint" data-zh="上传流程会自动尝试打开该页；分析运行时可在新标签页查看原始事件。主页面保持简洁，最终结论以报告为准。" data-en="The upload flow automatically tries to open this page. Keep it in a separate tab to watch raw events while analysis runs. The dashboard stays simple and the final report remains the source of truth.">上传流程会自动尝试打开该页；分析运行时可在新标签页查看原始事件。主页面保持简洁，最终结论以报告为准。</p>
+                    <p class="hint" data-zh="上传流程会直接跳转到该页；手动规划任务也可从这里打开实时原始事件。最终结论以报告为准。" data-en="The upload flow redirects directly to this page. Manually planned jobs can still open live raw events here; the final report remains the source of truth.">上传流程会直接跳转到该页；手动规划任务也可从这里打开实时原始事件。最终结论以报告为准。</p>
                     <p class="button-row"><a class="buttonlink secondary" target="_blank" rel="noopener" href="${escapeHtml(liveEventsHref)}" onclick="openLiveMonitor('${escapeJs(jobId)}', false); return false;" data-zh="打开实时原始事件监控" data-en="Open Live raw event monitor">打开实时原始事件监控</a></p>
                   </div>
                   <div id="liveMonitorNotice" class="report-notice" hidden></div>
@@ -1221,32 +1278,13 @@ internal static class DashboardExperiencePage
               });
             }
 
-            function openLiveMonitorPlaceholder() {
-              // Inputs: user-click initiated upload flow. Processing opens a
-              // blank monitor tab before the first await so browser popup
-              // policies treat it as a direct user gesture; return is the window
-              // handle, or null when blocked. The page is navigated after jobId
-              // exists.
-              let opened = null;
-              try {
-                opened = window.open('about:blank', '_blank');
-                if (opened) {
-                  opened.document.title = 'KSword Sandbox monitor';
-                  opened.document.body.innerHTML = '<div style="font-family:Segoe UI,Arial,sans-serif;padding:24px;line-height:1.5"><h2>KSword Sandbox：实时原始事件监控准备中 / Preparing Live raw event monitor</h2><p>正在上传并创建任务。/ Uploading and creating the job.</p><p>如果此页一直空白或没有跳转，请回到主界面点击“实时原始事件监控”。/ If this page stays blank or does not navigate, return to the dashboard and click Live raw event monitor.</p></div>';
-                  opened.opener = null;
-                }
-              } catch {
-                opened = null;
-              }
-              return opened;
-            }
-
             function openLiveMonitor(jobId, autoOpenedFromUpload, existingWindow) {
-              // Inputs: current job id and whether this was triggered by the
-              // upload one-click flow. Processing opens the standalone dynamic
-              // monitor in a new tab and leaves the dashboard alive so the long
-              // runbook execute request can continue. Return: true when the
-              // browser provided a window handle, false when it likely blocked.
+              // Inputs: current job id and optional existing window. Processing
+              // opens the standalone dynamic monitor in a new tab for manual
+              // job cards only; upload/start uses redirectToLiveMonitor because
+              // the Web host background runner owns the long runbook execution.
+              // Return: true when the browser provided a window handle, false
+              // when it likely blocked.
               if (!jobId) {
                 return false;
               }

@@ -3,9 +3,11 @@ using System.Text.Json.Serialization;
 using KSword.Sandbox.Abstractions;
 using KSword.Sandbox.Abstractions.Artifacts;
 using KSword.Sandbox.Core.Artifacts;
+using KSword.Sandbox.Core.Jobs;
 using KSword.Sandbox.Core.Pipeline;
 using KSword.Sandbox.Core.Pipeline.Stages;
 using KSword.Sandbox.Core.Reporting;
+using KSword.Sandbox.Core.Rules;
 using KSword.Sandbox.SmokeTests.Assertions;
 using KSword.Sandbox.SmokeTests.Framework;
 
@@ -36,6 +38,7 @@ internal sealed class ArtifactManifestContractScenario : ISmokeTestScenario
         await AssertHostManifestRoundTripAsync(context, cancellationToken);
         await AssertGuestManifestReaderAsync(context, cancellationToken);
         await AssertHostArtifactIndexAsync(context, cancellationToken);
+        await AssertArtifactDownloadSelectorsAsync(context, cancellationToken);
         await AssertReportArtifactLinksAsync(context, cancellationToken);
 
         return new SmokeTestResult
@@ -462,11 +465,30 @@ internal sealed class ArtifactManifestContractScenario : ISmokeTestScenario
                         ["reason"] = "pktmonStartFailed",
                         ["commandMessage"] = "pktmon unavailable"
                     }
+                },
+                new SandboxEvent
+                {
+                    EventType = "r0collector.exited",
+                    Source = "guest",
+                    Path = @"C:\KSwordSandbox\agent\KSword.Sandbox.R0Collector.exe",
+                    Data =
+                    {
+                        ["driverEventsPath"] = Path.Combine(guestRoot, "driver-events.jsonl"),
+                        ["driverEventsRelativePath"] = "driver-events.jsonl",
+                        ["stdoutPath"] = Path.Combine(guestRoot, "r0collector.stdout.log"),
+                        ["stdoutRelativePath"] = "r0collector.stdout.log",
+                        ["stderrPath"] = Path.Combine(guestRoot, "r0collector.stderr.log"),
+                        ["stderrRelativePath"] = "r0collector.stderr.log",
+                        ["artifactRelativePath"] = "driver-events.jsonl",
+                        ["diagnosticRelativePath"] = "r0collector.stdout.log"
+                    }
                 }
             }, ManifestJsonOptions),
             cancellationToken);
         await File.WriteAllTextAsync(Path.Combine(guestRoot, "agent-summary.json"), "{}", cancellationToken);
         await File.WriteAllTextAsync(Path.Combine(guestRoot, "driver-events.jsonl"), "{}", cancellationToken);
+        await File.WriteAllTextAsync(Path.Combine(guestRoot, "r0collector.stdout.log"), "collector out", cancellationToken);
+        await File.WriteAllTextAsync(Path.Combine(guestRoot, "r0collector.stderr.log"), "collector err", cancellationToken);
         await File.WriteAllBytesAsync(Path.Combine(screenshotsRoot, "after-run.bmp"), [0x42, 0x4d, 0x00, 0x00], cancellationToken);
         await File.WriteAllBytesAsync(Path.Combine(memoryDumpsRoot, "after-start-pid123.dmp"), [0x4d, 0x44, 0x4d, 0x50], cancellationToken);
         await File.WriteAllBytesAsync(Path.Combine(packetCapturesRoot, "before-start.pcap"), [0xd4, 0xc3, 0xb2, 0xa1], cancellationToken);
@@ -562,6 +584,17 @@ internal sealed class ArtifactManifestContractScenario : ISmokeTestScenario
                             ["processRole"] = "root",
                             ["treeLineage"] = "123"
                         }
+                    },
+                    new ArtifactDescriptor
+                    {
+                        Kind = ArtifactKind.DroppedFile,
+                        Category = "dropped-file",
+                        Name = "escape.bin",
+                        RelativePath = "../escape.bin",
+                        FullPath = @"C:\KSwordSandbox\escape.bin",
+                        ImportPath = "../escape.bin",
+                        CollectionName = "dropped-files",
+                        EvidenceRole = "dropped-file"
                     }
                 ]
             }, ManifestJsonOptions),
@@ -575,10 +608,18 @@ internal sealed class ArtifactManifestContractScenario : ISmokeTestScenario
         AssertIndexedArtifact(index, ArtifactKind.RunbookExecutionJson, "runbook-execution.json");
         AssertIndexedArtifact(index, ArtifactKind.GuestEventsJson, $"guest/{jobId:N}/events.json");
         AssertIndexedArtifact(index, ArtifactKind.GuestSummaryJson, $"guest/{jobId:N}/agent-summary.json");
-        AssertIndexedArtifact(index, ArtifactKind.DriverEventsJsonLines, $"guest/{jobId:N}/driver-events.jsonl");
+        var driverEvents = AssertIndexedArtifact(index, ArtifactKind.DriverEventsJsonLines, $"guest/{jobId:N}/driver-events.jsonl");
+        SmokeAssert.True(driverEvents.CollectionName == "driver-events", "Driver JSONL index entry should include driver-events collection name.");
+        SmokeAssert.True(driverEvents.EvidenceRole == "driver-events", "Driver JSONL index entry should include evidence role.");
+        SmokeAssert.True(driverEvents.Metadata.TryGetValue("telemetryFormat", out var telemetryFormat) && telemetryFormat == "jsonl", "Driver JSONL index entry should include stable telemetry format metadata.");
+        SmokeAssert.True(driverEvents.Metadata.TryGetValue("driverEventsRelativePath", out var driverEventsRelativePath) && driverEventsRelativePath == "driver-events.jsonl", "Driver JSONL index entry should preserve event-provided relative artifact reference.");
+        var r0Log = AssertIndexedArtifact(index, ArtifactKind.Log, $"guest/{jobId:N}/r0collector.stdout.log");
+        SmokeAssert.True(r0Log.CollectionName == "r0-logs", "R0 stdout log should be indexed into the r0-logs collection.");
+        SmokeAssert.True(r0Log.EvidenceRole == "diagnostic-log", "R0 stdout log should include diagnostic-log evidence role.");
         var screenshot = AssertIndexedArtifact(index, ArtifactKind.Screenshot, $"guest/{jobId:N}/screenshots/after-run.bmp");
         SmokeAssert.True(screenshot.CapturePhase == "after-run", "Screenshot index entry should include capture phase.");
         SmokeAssert.True(screenshot.CollectionName == "screenshots", "Screenshot index entry should include collection name.");
+        SmokeAssert.True(screenshot.CaptureState == "captured", "Screenshot index entry should mark existing screenshots as captured.");
         var memoryDump = AssertIndexedArtifact(index, ArtifactKind.MemoryDump, $"guest/{jobId:N}/memory-dumps/after-start-pid123.dmp");
         SmokeAssert.True(memoryDump.Category == "memory-dump", "Memory dump index entry should include memory-dump category.");
         SmokeAssert.True(memoryDump.MimeType == "application/vnd.microsoft.minidump", "Memory dump index entry should include minidump MIME type.");
@@ -619,6 +660,7 @@ internal sealed class ArtifactManifestContractScenario : ISmokeTestScenario
         SmokeAssert.True(dropped.SafeLink == $"guest/{jobId:N}/artifacts/dropped-files/drop.bin", "Dropped-file index entry should include safe relative link.");
         SmokeAssert.True(dropped.Hashes.ContainsKey("sha256"), "Dropped-file index entry should include hashes map.");
         SmokeAssert.True(dropped.GuestPath == @"C:\work\drop.bin", "Dropped-file index entry should preserve original guest path.");
+        SmokeAssert.True(index.Artifacts.All(artifact => !artifact.RelativePath.Contains("escape.bin", StringComparison.OrdinalIgnoreCase)), "Unsafe guest manifest descriptors should not become downloadable host index entries.");
         var memoryDumpCollection = index.Collections.Single(collection => collection.Name == "memory-dumps");
         SmokeAssert.True(memoryDumpCollection.Metadata.TryGetValue("sweepVisibleTargetCount", out var visibleTargetCount) && visibleTargetCount == "2", "Memory dump collection should retain child-process sweep visible target count.");
         SmokeAssert.True(memoryDumpCollection.Metadata.TryGetValue("sweepAlreadyCapturedCount", out var duplicateDumpCount) && duplicateDumpCount == "1", "Memory dump collection should retain duplicate root/child dump suppression count.");
@@ -632,6 +674,94 @@ internal sealed class ArtifactManifestContractScenario : ISmokeTestScenario
         var loaded = builder.TryReadIndex(jobRoot) ?? throw new InvalidOperationException("artifact-index.json should load.");
         SmokeAssert.True(loaded.Artifacts.Any(artifact => artifact.Kind == ArtifactKind.DriverEventsJsonLines), "Loaded index should include driver JSONL.");
         SmokeAssert.True(loaded.Collections.Any(collection => collection.Name == "packet-captures" && collection.Metadata.ContainsKey("artifactCount")), "Loaded index should preserve packet-capture collection metadata.");
+    }
+
+    /// <summary>
+    /// Verifies the selectors consumed by the WebUI download endpoint through
+    /// SandboxJobService.ResolveDownloadableArtifact.
+    /// </summary>
+    private static async Task AssertArtifactDownloadSelectorsAsync(SmokeTestContext context, CancellationToken cancellationToken)
+    {
+        var runtimeRoot = Path.Combine(context.RuntimeRoot, "artifact-download-selectors", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(runtimeRoot);
+        var samplePath = Path.Combine(runtimeRoot, "selector-sample.exe");
+        await File.WriteAllTextAsync(samplePath, "selector sample", cancellationToken);
+
+        var service = new SandboxJobService(
+            new SandboxConfig
+            {
+                Analysis = new AnalysisConfig
+                {
+                    DefaultDurationSeconds = 5,
+                    MaxDurationSeconds = 60,
+                    MaxSampleBytes = 1024 * 1024
+                },
+                Paths = new SandboxPaths
+                {
+                    RuntimeRoot = runtimeRoot,
+                    RulesDirectory = context.RulesDirectory,
+                    GuestPayloadRoot = Path.Combine(runtimeRoot, "payload")
+                }
+            },
+            RuleEngine.LoadRuleSet(Path.Combine(context.RulesDirectory, "behavior-rules.json")));
+
+        var job = service.Plan(new SandboxSubmission
+        {
+            SamplePath = samplePath,
+            DurationSeconds = 5,
+            DryRun = true
+        });
+        var jobRoot = Path.GetDirectoryName(job.JsonReportPath) ?? throw new InvalidOperationException("job root should be discoverable");
+        var guestRoot = Path.Combine(jobRoot, "guest", job.JobId.ToString("N"));
+        var droppedFilesRoot = Path.Combine(guestRoot, "artifacts", "dropped-files");
+        Directory.CreateDirectory(droppedFilesRoot);
+        var droppedFileName = "drop space # 零.bin";
+        var droppedPath = Path.Combine(droppedFilesRoot, droppedFileName);
+        await File.WriteAllTextAsync(droppedPath, "drop", cancellationToken);
+        await File.WriteAllTextAsync(
+            Path.Combine(guestRoot, "events.json"),
+            JsonSerializer.Serialize(new[]
+            {
+                new SandboxEvent
+                {
+                    EventType = "artifact.dropped_file.copied",
+                    Source = "guest",
+                    Path = droppedPath,
+                    Data =
+                    {
+                        ["collectionName"] = "dropped-files",
+                        ["evidenceRole"] = "dropped-file",
+                        ["relativePath"] = $"artifacts/dropped-files/{droppedFileName}",
+                        ["artifactRelativePath"] = $"artifacts/dropped-files/{droppedFileName}",
+                        ["guestFullPath"] = $@"C:\work\{droppedFileName}"
+                    }
+                }
+            }, ManifestJsonOptions),
+            cancellationToken);
+
+        var index = service.BuildArtifactIndex(job.JobId);
+        var descriptor = index.Artifacts.Single(artifact =>
+            artifact.Kind == ArtifactKind.DroppedFile &&
+            string.Equals(artifact.Name, droppedFileName, StringComparison.Ordinal));
+        AssertDownloadSelectorShape(descriptor);
+        SmokeAssert.True(descriptor.RelativePath == $"guest/{job.JobId:N}/artifacts/dropped-files/{droppedFileName}", "Download selector test should use host-relative artifact path.");
+        SmokeAssert.True(!descriptor.SafeLink.Contains(" ", StringComparison.Ordinal) && !descriptor.SafeLink.Contains("#", StringComparison.Ordinal), "SafeLink should URL-encode spaces and fragment characters.");
+        SmokeAssert.True(descriptor.SafeLink.Contains("%20", StringComparison.Ordinal) && descriptor.SafeLink.Contains("%23", StringComparison.Ordinal), "SafeLink should contain encoded path characters.");
+
+        var relativeResolved = service.ResolveDownloadableArtifact(job.JobId, descriptor.RelativePath);
+        SmokeAssert.True(string.Equals(relativeResolved.FullPath, droppedPath, StringComparison.OrdinalIgnoreCase), "Download resolver should accept RelativePath selectors.");
+        var safeLinkResolved = service.ResolveDownloadableArtifact(job.JobId, descriptor.SafeLink);
+        SmokeAssert.True(string.Equals(safeLinkResolved.FullPath, droppedPath, StringComparison.OrdinalIgnoreCase), "Download resolver should accept SafeLink selectors.");
+        var importPathResolved = service.ResolveDownloadableArtifact(job.JobId, descriptor.ImportPath);
+        SmokeAssert.True(string.Equals(importPathResolved.FullPath, droppedPath, StringComparison.OrdinalIgnoreCase), "Download resolver should accept ImportPath selectors.");
+
+        var downloadHref = $"/api/jobs/{job.JobId:D}/artifacts/download?path={Uri.EscapeDataString(descriptor.RelativePath)}";
+        SmokeAssert.True(downloadHref.Contains("/artifacts/download?path=", StringComparison.Ordinal), "WebUI download href should use the guarded artifact download endpoint.");
+        SmokeAssert.True(!downloadHref.Contains(droppedPath, StringComparison.OrdinalIgnoreCase), "WebUI download href should not embed absolute host paths.");
+
+        AssertThrows<ArgumentException>(() => service.ResolveDownloadableArtifact(job.JobId, @"C:\Windows\win.ini"), "Absolute download selectors should be rejected.");
+        AssertThrows<ArgumentException>(() => service.ResolveDownloadableArtifact(job.JobId, "../escape.bin"), "Traversal download selectors should be rejected.");
+        AssertThrows<FileNotFoundException>(() => service.ResolveDownloadableArtifact(job.JobId, $"guest/{job.JobId:N}/artifacts/dropped-files/missing.bin"), "Unknown relative download selectors should be rejected.");
     }
 
     /// <summary>
@@ -739,7 +869,40 @@ internal sealed class ArtifactManifestContractScenario : ISmokeTestScenario
             item.Kind == kind &&
             string.Equals(item.RelativePath, relativePath, StringComparison.OrdinalIgnoreCase));
         SmokeAssert.True(artifact is not null, $"{kind} artifact should be indexed at {relativePath}.");
+        AssertDownloadSelectorShape(artifact!);
         return artifact!;
+    }
+
+    private static void AssertDownloadSelectorShape(ArtifactDescriptor artifact)
+    {
+        AssertSafeSelectorField(artifact, "relativePath", artifact.RelativePath);
+        AssertSafeSelectorField(artifact, "safeLink", artifact.SafeLink);
+        AssertSafeSelectorField(artifact, "importPath", artifact.ImportPath);
+        SmokeAssert.True(!string.IsNullOrWhiteSpace(artifact.FullPath), $"{artifact.Kind} artifact should retain a host-local full path for guarded streaming.");
+    }
+
+    private static void AssertSafeSelectorField(ArtifactDescriptor artifact, string fieldName, string value)
+    {
+        SmokeAssert.True(!string.IsNullOrWhiteSpace(value), $"{artifact.Kind} {fieldName} should not be empty.");
+        SmokeAssert.True(!value.Contains('\\', StringComparison.Ordinal), $"{artifact.Kind} {fieldName} should use slash-separated paths.");
+        SmokeAssert.True(!value.StartsWith("/", StringComparison.Ordinal), $"{artifact.Kind} {fieldName} should not be absolute.");
+        SmokeAssert.True(!Path.IsPathFullyQualified(Uri.UnescapeDataString(value)), $"{artifact.Kind} {fieldName} should not be a fully-qualified filesystem path.");
+        SmokeAssert.True(!value.Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Any(segment => string.Equals(segment, "..", StringComparison.Ordinal)), $"{artifact.Kind} {fieldName} should not contain parent traversal.");
+    }
+
+    private static void AssertThrows<TException>(Action action, string message)
+        where TException : Exception
+    {
+        try
+        {
+            action();
+        }
+        catch (TException)
+        {
+            return;
+        }
+
+        throw new InvalidOperationException(message);
     }
 
     private static AnalysisReport CreateReport(Guid jobId, string eventsPath, string screenshotPath, string dropPath, string memoryDumpPath, string packetCapturePath)

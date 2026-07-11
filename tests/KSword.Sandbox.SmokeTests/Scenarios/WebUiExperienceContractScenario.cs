@@ -113,18 +113,16 @@ internal sealed class WebUiExperienceContractScenario : ISmokeTestScenario
         RequireContains(dashboard, "showReportReadyNotice", "Dashboard should show a stable report-ready notice after generation or import.");
         RequireContains(dashboard, "setTimeout(() => openReport(jobId)", "Dashboard should auto-open the current-language report after successful live analysis.");
         RequireContains(dashboard, "buildLiveMonitorHref", "Dashboard should build dynamic monitor links from the job id.");
-        RequireContains(dashboard, "openLiveMonitorPlaceholder", "Upload flow should open a user-gesture monitor placeholder before async upload work.");
-        RequireContains(dashboard, "window.open('about:blank', '_blank')", "Upload flow should open the placeholder synchronously to avoid popup blocking.");
+        RequireContains(program, "\"/api/files/upload/start\"", "Program.cs should expose a one-click upload/start endpoint.");
+        RequireContains(dashboard, "fetch('/api/files/upload/start'", "Upload flow should use the one-click upload/start endpoint.");
+        RequireContains(dashboard, "redirectToLiveMonitor", "Upload flow should redirect the current page into the dynamic monitor after background start.");
+        RequireContains(dashboard, "window.location.href = monitorHref", "Upload flow should navigate the current page instead of relying on a popup.");
         RequireAnyContains(
             dashboard,
-            ["动态监控页准备中 / Preparing dynamic monitor", "实时原始事件监控准备中 / Preparing Live raw event monitor"],
-            "Upload monitor placeholder should show a visible bilingual loading page.");
-        RequireContains(dashboard, "openLiveMonitor(String(jobId), true, monitorWindow)", "Upload flow should navigate the placeholder into the dynamic monitor after planning.");
-        RequireContains(dashboard, "showLiveMonitorNotice", "Dashboard should render a bilingual fallback when automatic monitor opening is blocked.");
-        RequireContains(dashboard, "未获得新标签页句柄，浏览器可能阻止了自动打开", "Dashboard should explain automatic monitor fallback clearly in Chinese.");
-        RequireContains(dashboard, "No new-tab handle was returned, so the browser may have blocked automatic opening", "Dashboard should explain automatic monitor fallback clearly in English.");
-        RequireContains(dashboard, "当前任务无需重新上传", "Dashboard monitor fallback should tell operators the job does not need another upload.");
-        RequireContains(dashboard, "window.open(href, '_blank')", "Automatic dynamic monitor entry should keep the dashboard tab alive by opening a separate tab.");
+            ["后台虚拟机分析已提交；正在进入动态监控页", "entering the dynamic monitor"],
+            "Upload flow should tell the operator it is entering the dynamic monitor.");
+        RequireNotContains(dashboard, "openLiveMonitorPlaceholder", "Upload flow should no longer depend on popup placeholder tabs.");
+        RequireNotContains(dashboard, "window.open('about:blank', '_blank')", "Upload flow should not depend on about:blank popup windows.");
         RequireAnyContains(
             dashboard,
             ["Open served HTML report", "Open served report", "打开服务内报告"],
@@ -171,7 +169,10 @@ internal sealed class WebUiExperienceContractScenario : ISmokeTestScenario
             dashboard,
             ["不含命令行", "never renders PowerShell", "not inline the 1~16 runbook steps, PowerShell, stdout, or stderr"],
             "Dashboard should state or document that main-page runbook progress omits command lines.");
-        RequireContains(dashboard, "executeRunbook(String(jobId), true)", "Upload flow should automatically start live VM analysis after planning.");
+        RequireAnyContains(
+            dashboard,
+            ["executeRunbook(String(jobId), true)", "/api/files/upload/start"],
+            "Upload flow should automatically start live VM analysis after planning or use the one-click upload/start endpoint.");
         RequireNotContains(dashboard, "fetch(`/api/jobs/${encodeURIComponent(jobId)}/runbook/execute`", "Dashboard should not depend on the legacy blocking runbook execute endpoint.");
         RequireContains(dashboard, "href=\"/settings\"", "Dashboard should link to the settings page.");
         RequireContains(dashboard, "events.json", "Dashboard should display events.json path.");
@@ -221,8 +222,8 @@ internal sealed class WebUiExperienceContractScenario : ISmokeTestScenario
         RequireContains(liveEventsPage, "已耗时", "Live monitor progress card should show elapsed time in Chinese.");
         RequireContains(liveEventsPage, "不展示命令行", "Live monitor progress panel should hide command-line details.");
         RequireContains(liveEventsPage, "not command lines, stdout, or stderr", "Live monitor progress panel should hide stdout/stderr details.");
-        RequireContains(liveEventsPage, "如果此页由上传流程自动打开", "Live monitor should explain the automatic upload-flow opening behavior.");
-        RequireContains(liveEventsPage, "keep the dashboard tab running analysis", "Live monitor should have an English hint to keep the dashboard request alive.");
+        RequireContains(liveEventsPage, "如果此页由上传流程进入", "Live monitor should explain upload-flow redirect behavior.");
+        RequireContains(liveEventsPage, "background analysis has already been handed to the Web host", "Live monitor should explain that background execution survives dashboard navigation.");
         RequireContains(liveEventsPage, "Open settings", "Live monitor VirusTotal card should link to settings when the API key is missing.");
         RequireContains(liveEventsPage, "result.message ||", "Live monitor VirusTotal card should preserve quiet lookup failure/not-configured messages.");
         RequireContains(settingsPage, "VirusTotal API Key", "Settings page should allow operators to set the VirusTotal API key.");
@@ -269,8 +270,8 @@ internal sealed class WebUiExperienceContractScenario : ISmokeTestScenario
         RequireContains(doc, "WebUI experience contract", "WebUI framework doc should describe the experience contract.");
         RequireContains(doc, "default selected tab", "WebUI framework doc should require the upload tab as the default planning tab.");
         RequireContains(doc, "dedicated live raw monitor page", "WebUI framework doc should require live raw telemetry on a separate page.");
-        RequireRegex(doc, @"automatically opens the dedicated\s+dynamic monitor page", "WebUI framework doc should require automatic monitor entry after upload.");
-        RequireContains(doc, "Enter dynamic monitor", "WebUI framework doc should require a fallback link when automatic monitor opening is blocked.");
+        RequireRegex(doc, @"redirect the current browser page to\s+`/jobs/\{jobId\}/live-events`", "WebUI framework doc should require current-page dynamic monitor entry after upload.");
+        RequireContains(doc, "no popup or extra dashboard tab is required", "WebUI framework doc should remove popup-based upload monitor behavior.");
         RequireContains(doc, "progress-page link", "WebUI framework doc should describe natural progress-page navigation.");
         RequireRegex(doc, @"current Chinese/English\s+dashboard language", "WebUI framework doc should describe current-language report links.");
         RequireContains(doc, "VM configuration fields", "WebUI framework doc should document VM configuration fields.");

@@ -97,6 +97,7 @@
     <ClCompile Include="src\JsonWriter.cpp" />
     <ClCompile Include="src\main.cpp" />
     <ClCompile Include="src\Options.cpp" />
+    <ClCompile Include="src\ReadinessDiagnostics.cpp" />
     <ClCompile Include="src\RuntimeLoop.cpp" />
     <ClCompile Include="src\SyntheticMode.cpp" />
   </ItemGroup>
@@ -107,6 +108,7 @@
     <ClInclude Include="src\IoctlClient.h" />
     <ClInclude Include="src\JsonWriter.h" />
     <ClInclude Include="src\Options.h" />
+    <ClInclude Include="src\ReadinessDiagnostics.h" />
     <ClInclude Include="src\RuntimeLoop.h" />
     <ClInclude Include="src\SyntheticMode.h" />
   </ItemGroup>

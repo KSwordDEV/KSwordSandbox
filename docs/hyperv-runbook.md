@@ -80,10 +80,16 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\Test-HyperVReadiness.ps1
 ```
 
 The preflight is intentionally safer than the live runbook. It checks module
-and command availability, VM existence, checkpoint existence, Guest Service
-Interface state, host payload files, PowerShell Direct reachability, and guest
-payload file presence when the VM is already running. It does not restore a
-checkpoint, start a VM, stage payloads, or create guest folders.
+and command availability, Hyper-V feature/service state, VM existence,
+checkpoint existence, Guest Service Interface state, host shared/runtime paths,
+host payload files, PowerShell Direct reachability, test-signing status, and
+guest payload file presence when the VM is already running. It does not restore
+a checkpoint, start a VM, stage payloads, enable Guest Service Interface, or
+create guest folders.
+
+Automation should read the readiness `CheckId`, `RequiredForLive`, `LiveReady`,
+`FailedCheckIds`, and `ReadOnlyAssertions` fields instead of parsing display
+text.
 
 If the only missing item is the guest password for the current elevated shell,
 use `-PromptForMissingGuestPassword` for a process-only prompt, or rerun

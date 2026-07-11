@@ -70,6 +70,15 @@ plain diagnostic dump. The visual contract is:
   maximum height around `75vh` and `overflow:auto`, so risk, behavior, MITRE,
   static, dynamic, timeline, process, file, registry, network, R0, failure,
   and raw event evidence remain navigable during demos.
+- Each bounded major card should keep a sticky section header so the operator
+  never loses the current chapter while scrolling dense evidence. The section
+  chrome should follow the Microstep-style bright-blue rhythm with `#43A0FF`
+  accents, compact step markers, rounded cards, and summary-first spacing.
+- Artifact evidence with a trusted `safeLink` or safe relative path should
+  render as explicit Open/Download buttons. Arbitrary host or guest absolute
+  filesystem paths must remain copyable evidence text only and must not be used
+  as `href` values.
+  Absolute paths must not be used as `href` values.
 - The Raw normalized events section should be slim by default: render a native
   collapsed `<details>` block, bound the expanded raw event panel height, and
   inline only the first 200 raw events. Expanded inline rows must be split into
@@ -77,6 +86,10 @@ plain diagnostic dump. The visual contract is:
   table. The section must show total events, inline-rendered events, inline
   page count, hidden raw events, and clear `report.json` plus raw source
   artifact path hints for complete evidence.
+- Raw event details should keep command/stdout/stderr/PowerShell and similarly
+  long technical payloads inside nested collapsed details. The main report must
+  not directly spread full command lines, script blocks, stdout, or stderr
+  across the page; they should stay copyable after deliberate expansion.
 - Raw event expansion and layout stability must use native HTML/CSS rather than
   JavaScript. Copy affordances may enhance the static HTML but must not be
   required to reveal evidence.
@@ -123,6 +136,9 @@ blocks should support fast copying:
   `driver-events.jsonl`, and/or artifact manifests when indexed, so operators
   have raw source artifact path hints and can open or copy the full raw source
   instead of relying on an oversized HTML table.
+- Indexed artifacts should be opened or downloaded through safe relative report
+  links. If only an absolute host/guest path is known, show it as copyable text
+  evidence rather than a clickable link.
 
 ## Live UI expectations
 

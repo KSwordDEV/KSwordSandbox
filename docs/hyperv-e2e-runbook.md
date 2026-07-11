@@ -298,6 +298,19 @@ After child scripts finish, `Invoke-HyperVE2E.ps1` writes one aggregate
 results, child exit codes, phase result paths, skipped/executed step records,
 cleanup errors, and collected artifact paths.
 
+The persisted execution record is also shaped for WebUI/report consumers:
+
+- `State`, `CompletedSteps`, `ExecutedSteps`, and `ProgressPercent` summarize
+  the terminal progress state.
+- `FailureReason` contains a short operator-facing reason without dumping long
+  PowerShell command text.
+- `RemediationHints` lists actionable recovery hints such as setting
+  `KSWORDBOX_GUEST_PASSWORD`, correcting a missing VM/checkpoint, enabling
+  Guest Service Interface, or fixing PowerShell Direct credentials.
+- `UiSafeProgress` mirrors step `state`, `phase`, `title`, and message with
+  `commandTextOmitted=true`; full command text remains in `StepResults` for the
+  dedicated execution-flow/debug view.
+
 ## Output locations
 
 For job `<job-id-n>`, live output is written under:

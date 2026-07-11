@@ -57,8 +57,12 @@ or `install.ps1 -Mode Change -ResetPassword -PromptPassword`.
 
 The script writes structured PowerShell objects:
 
-- `ReadinessCheck` objects for each check.
-- One `ReadinessSummary` object with `OverallStatus`, counts, and `ExitCode`.
+- `ReadinessCheck` objects for each check. Every check includes stable
+  machine-readable fields: `CheckId`, `Category`, `Status`,
+  `RequiredForLive`, `MachineReadable`, `Details`, and `Remediation`.
+- One `ReadinessSummary` object with `ContractVersion`, `Kind`,
+  `OverallStatus`, counts, `FailedCheckIds`, `WarningCheckIds`, `LiveReady`,
+  `ReadOnlyAssertions`, `RecommendedActions`, and `ExitCode`.
 
 Exit code behavior:
 
@@ -105,6 +109,16 @@ not call mutation-capable commands such as `Copy-VMFile`.
 
 Fix: enable/install Hyper-V management tools for the host OS, then open a new
 PowerShell session.
+
+### Hyper-V feature enabled
+
+Checks whether the host appears to have Hyper-V enabled without mutating the
+machine. The check records Windows optional-feature state when
+`Get-WindowsOptionalFeature` is available and also records the `vmms` service
+state. It does not enable Hyper-V, start services, reboot, or start a VM.
+
+Machine-readable details include `FeatureStates`, `AnyFeatureEnabled`,
+`VmmsServiceExists`, `VmmsServiceStatus`, and `ReadOnly=true`.
 
 ### Guest password environment variable
 
@@ -196,6 +210,18 @@ host service permission to create job folders under it. The default path is:
 D:\Temp\KSwordSandbox
 ```
 
+### Host shared path configuration
+
+Checks the host paths used for VM exchange:
+
+- `paths.runtimeRoot` for plans, jobs, reports, and collected output;
+- `paths.guestPayloadRoot` for the staged Guest Agent/R0Collector payload.
+
+The paths must be absolute and outside the repository. The check also records
+the live copy mechanisms (`Copy-VMFile` plus PowerShell Direct
+`Copy-Item -ToSession/-FromSession`) so automation can understand how host and
+guest exchange files. It does not create directories or write probe files.
+
 ### Target VM
 
 Checks that `-VmName` exists and is readable through `Get-VM`. The default is:
@@ -282,6 +308,14 @@ DPAPI backups, `install-state.json`, and other local artifacts. Use
 `-SkipRepositorySecretScan` on readiness only when the current shell should not
 read repository text files.
 
+### Test signing status
+
+Records the host current boot entry test-signing value with a read-only
+`bcdedit.exe /enum {current}` query. This is informational for the default
+mock/no-driver flow. For real R0 collection, treat a warning here as a reminder
+to verify Windows test-signing inside the isolated guest VM manually; the
+readiness script does not start the VM just to inspect guest boot state.
+
 ## Payload staging dependency
 
 This preflight verifies host/VM readiness only. It does not build or copy guest
@@ -312,6 +346,13 @@ $code = $LASTEXITCODE
 $results | ConvertTo-Json -Depth 6 | Set-Content -Encoding UTF8 .\hyperv-readiness.json
 exit $code
 ```
+
+Automation should prefer `CheckId` and `RequiredForLive` over display names.
+Use `ReadinessSummary.LiveReady` for the go/no-go gate and
+`ReadinessSummary.RemediationHints` / `RecommendedActions` for operator repair
+text. The summary `ReadOnlyAssertions` block explicitly records that no VM was
+started, no checkpoint was restored, Guest Service Interface was not enabled,
+and no probe files were written.
 
 Do not commit generated readiness JSON files, runtime job folders, VM images, or
 guest output. These are local operator artifacts.

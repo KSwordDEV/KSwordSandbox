@@ -1,5 +1,5 @@
 {
-  "version": "2026-07-11-v8-report-semantic-cleanup",
+  "version": "2026-07-11-v9-rules-vt-quality",
   "rules": [
     {
       "id": "host-submission",
@@ -7832,6 +7832,1818 @@
         "download-execute",
         "script",
         "lolbin"
+      ]
+    },
+    {
+      "id": "run-key-user-writable-payload",
+      "title": "Run key points to user-writable payload",
+      "titleZh": "Run 启动项指向用户可写载荷",
+      "severity": "high",
+      "confidence": "high",
+      "summary": "A Run/RunOnce autostart registry value points at Temp, AppData, ProgramData, Public, Downloads, or another user-writable staging path.",
+      "summaryZh": "Run/RunOnce 自启动注册表值指向 Temp、AppData、ProgramData、Public、Downloads 或其他用户可写暂存路径。",
+      "mitreTechniqueId": "T1547.001",
+      "mitreTechniqueName": "Registry Run Keys / Startup Folder",
+      "eventTypes": [
+        "registry.set",
+        "registry.create",
+        "driver.registry"
+      ],
+      "containsPath": [
+        "CurrentVersion\\Run",
+        "CurrentVersion\\RunOnce",
+        "CurrentVersion\\RunOnceEx",
+        "Policies\\Explorer\\Run"
+      ],
+      "dataContains": {
+        "value": [
+          "\\AppData\\",
+          "\\Temp\\",
+          "\\Users\\Public\\",
+          "\\ProgramData\\",
+          "\\Downloads\\",
+          "%APPDATA%",
+          "%TEMP%",
+          "%PUBLIC%"
+        ],
+        "data": [
+          "\\AppData\\",
+          "\\Temp\\",
+          "\\Users\\Public\\",
+          "\\ProgramData\\",
+          "\\Downloads\\"
+        ],
+        "details": [
+          "\\AppData\\",
+          "\\Temp\\",
+          "\\Users\\Public\\",
+          "\\ProgramData\\",
+          "\\Downloads\\"
+        ]
+      },
+      "evidenceFields": [
+        "eventType",
+        "path",
+        "data.valueName",
+        "data.value",
+        "data.data",
+        "data.details"
+      ],
+      "tags": [
+        "persistence",
+        "registry",
+        "run-key",
+        "user-writable"
+      ]
+    },
+    {
+      "id": "run-key-script-interpreter-payload",
+      "title": "Run key launches script interpreter or LOLBin",
+      "titleZh": "Run 启动项启动脚本解释器或 LOLBin",
+      "severity": "high",
+      "confidence": "high",
+      "summary": "A Run/RunOnce autostart value launches PowerShell, Windows Script Host, mshta, rundll32, regsvr32, cmd, or another proxy-execution utility.",
+      "summaryZh": "Run/RunOnce 自启动值启动 PowerShell、Windows Script Host、mshta、rundll32、regsvr32、cmd 或其他代理执行工具。",
+      "mitreTechniqueId": "T1547.001",
+      "mitreTechniqueName": "Registry Run Keys / Startup Folder",
+      "eventTypes": [
+        "registry.set",
+        "registry.create",
+        "driver.registry"
+      ],
+      "containsPath": [
+        "CurrentVersion\\Run",
+        "CurrentVersion\\RunOnce",
+        "CurrentVersion\\RunOnceEx",
+        "Policies\\Explorer\\Run"
+      ],
+      "dataContains": {
+        "value": [
+          "powershell",
+          "pwsh",
+          "wscript",
+          "cscript",
+          "mshta",
+          "rundll32",
+          "regsvr32",
+          "cmd.exe",
+          ".ps1",
+          ".vbs",
+          ".js",
+          ".hta"
+        ],
+        "data": [
+          "powershell",
+          "pwsh",
+          "wscript",
+          "cscript",
+          "mshta",
+          "rundll32",
+          "regsvr32",
+          "cmd.exe",
+          ".ps1",
+          ".vbs",
+          ".js",
+          ".hta"
+        ]
+      },
+      "evidenceFields": [
+        "eventType",
+        "path",
+        "data.valueName",
+        "data.value",
+        "data.data"
+      ],
+      "tags": [
+        "persistence",
+        "registry",
+        "run-key",
+        "script",
+        "lolbin"
+      ]
+    },
+    {
+      "id": "startupapproved-run-reenabled",
+      "title": "StartupApproved autostart state modified",
+      "titleZh": "StartupApproved 自启动状态被修改",
+      "severity": "medium",
+      "confidence": "medium",
+      "summary": "A registry event touched StartupApproved Run/Run32 state, which can re-enable disabled autostart entries or hide Run-key state changes.",
+      "summaryZh": "注册表事件触及 StartupApproved Run/Run32 状态，可能重新启用被禁用的自启动项或隐藏 Run 键状态变化。",
+      "mitreTechniqueId": "T1547.001",
+      "mitreTechniqueName": "Registry Run Keys / Startup Folder",
+      "eventTypes": [
+        "registry.set",
+        "registry.create",
+        "driver.registry"
+      ],
+      "containsPath": [
+        "StartupApproved\\Run",
+        "StartupApproved\\Run32",
+        "StartupApproved\\StartupFolder"
+      ],
+      "dataKeys": [
+        "value",
+        "valueName",
+        "data",
+        "details"
+      ],
+      "evidenceFields": [
+        "eventType",
+        "path",
+        "data.valueName",
+        "data.value",
+        "data.data",
+        "data.details"
+      ],
+      "tags": [
+        "persistence",
+        "registry",
+        "startupapproved",
+        "autostart"
+      ]
+    },
+    {
+      "id": "service-binary-user-writable-path",
+      "title": "Service binary path points to user-writable location",
+      "titleZh": "服务二进制路径指向用户可写位置",
+      "severity": "high",
+      "confidence": "high",
+      "summary": "A service configuration path references an executable or DLL under Temp, AppData, ProgramData, Public, or Downloads, indicating service persistence or hijack risk.",
+      "summaryZh": "服务配置路径引用 Temp、AppData、ProgramData、Public 或 Downloads 下的 EXE/DLL，提示服务持久化或劫持风险。",
+      "mitreTechniqueId": "T1543.003",
+      "mitreTechniqueName": "Windows Service",
+      "eventTypes": [
+        "registry.set",
+        "registry.create",
+        "driver.registry",
+        "service.created",
+        "service.modified"
+      ],
+      "containsPath": [
+        "CurrentControlSet\\Services\\",
+        "\\Services\\"
+      ],
+      "dataContains": {
+        "value": [
+          "\\AppData\\",
+          "\\Temp\\",
+          "\\Users\\Public\\",
+          "\\ProgramData\\",
+          "\\Downloads\\",
+          "%APPDATA%",
+          "%TEMP%",
+          "%PUBLIC%"
+        ],
+        "imagePath": [
+          "\\AppData\\",
+          "\\Temp\\",
+          "\\Users\\Public\\",
+          "\\ProgramData\\",
+          "\\Downloads\\"
+        ],
+        "serviceDll": [
+          "\\AppData\\",
+          "\\Temp\\",
+          "\\Users\\Public\\",
+          "\\ProgramData\\",
+          "\\Downloads\\"
+        ],
+        "rawCommand": [
+          "\\AppData\\",
+          "\\Temp\\",
+          "\\Users\\Public\\",
+          "\\ProgramData\\",
+          "\\Downloads\\"
+        ]
+      },
+      "evidenceFields": [
+        "eventType",
+        "path",
+        "data.valueName",
+        "data.value",
+        "data.imagePath",
+        "data.serviceDll",
+        "data.rawCommand"
+      ],
+      "tags": [
+        "persistence",
+        "privilege-escalation",
+        "service",
+        "user-writable"
+      ]
+    },
+    {
+      "id": "service-unquoted-imagepath-risk",
+      "title": "Service ImagePath has unquoted-space hijack risk",
+      "titleZh": "服务 ImagePath 存在未加引号空格劫持风险",
+      "severity": "medium",
+      "confidence": "medium",
+      "summary": "A service ImagePath-like value references Program Files style paths; analysts should verify quoting because unquoted service paths enable path interception.",
+      "summaryZh": "服务 ImagePath 类值引用 Program Files 风格路径；分析员应确认是否正确加引号，因为未加引号服务路径可能导致路径拦截。",
+      "mitreTechniqueId": "T1574.009",
+      "mitreTechniqueName": "Path Interception by Unquoted Path",
+      "eventTypes": [
+        "registry.set",
+        "registry.create",
+        "driver.registry",
+        "service.created",
+        "service.modified"
+      ],
+      "containsPath": [
+        "CurrentControlSet\\Services\\",
+        "\\Services\\"
+      ],
+      "dataContains": {
+        "value": [
+          "C:\\Program Files\\",
+          "C:\\Program Files (x86)\\"
+        ],
+        "imagePath": [
+          "C:\\Program Files\\",
+          "C:\\Program Files (x86)\\"
+        ],
+        "rawCommand": [
+          "C:\\Program Files\\",
+          "C:\\Program Files (x86)\\"
+        ]
+      },
+      "evidenceFields": [
+        "eventType",
+        "path",
+        "data.valueName",
+        "data.value",
+        "data.imagePath",
+        "data.rawCommand"
+      ],
+      "tags": [
+        "privilege-escalation",
+        "service",
+        "hijack",
+        "path-interception"
+      ]
+    },
+    {
+      "id": "service-failure-command-persistence",
+      "title": "Service failure command persistence",
+      "titleZh": "服务失败命令持久化",
+      "severity": "high",
+      "confidence": "medium",
+      "summary": "A service registry or inventory event modified failure-command settings, which can execute attacker-controlled commands when a service fails.",
+      "summaryZh": "服务注册表或清单事件修改失败命令设置，服务失败时可能执行攻击者控制的命令。",
+      "mitreTechniqueId": "T1543.003",
+      "mitreTechniqueName": "Windows Service",
+      "eventTypes": [
+        "registry.set",
+        "registry.create",
+        "driver.registry",
+        "service.created",
+        "service.modified"
+      ],
+      "containsPath": [
+        "CurrentControlSet\\Services\\",
+        "\\Services\\"
+      ],
+      "dataContains": {
+        "valueName": [
+          "FailureCommand",
+          "FailureActions"
+        ],
+        "value": [
+          "FailureCommand",
+          "cmd.exe",
+          "powershell",
+          "rundll32",
+          "regsvr32",
+          "mshta"
+        ],
+        "rawCommand": [
+          "FailureCommand",
+          "cmd.exe",
+          "powershell",
+          "rundll32",
+          "regsvr32",
+          "mshta"
+        ]
+      },
+      "evidenceFields": [
+        "eventType",
+        "path",
+        "data.valueName",
+        "data.value",
+        "data.rawCommand"
+      ],
+      "tags": [
+        "persistence",
+        "service",
+        "failure-command"
+      ]
+    },
+    {
+      "id": "service-weak-permission-hijack-metadata",
+      "title": "Weak service permission hijack metadata",
+      "titleZh": "弱服务权限劫持元数据",
+      "severity": "high",
+      "confidence": "medium",
+      "summary": "Service inventory or ACL telemetry indicated that low-privilege users can change service configuration, binary path, or DACL values.",
+      "summaryZh": "服务清单或 ACL 遥测显示低权限用户可修改服务配置、二进制路径或 DACL。",
+      "mitreTechniqueId": "T1574.011",
+      "mitreTechniqueName": "Services Registry Permissions Weakness",
+      "eventTypes": [
+        "service.acl",
+        "service.created",
+        "service.modified",
+        "registry.set",
+        "driver.registry"
+      ],
+      "dataContains": {
+        "serviceAclWeak": [
+          "true",
+          "weak",
+          "writable"
+        ],
+        "writableBy": [
+          "Everyone",
+          "Authenticated Users",
+          "Builtin\\Users",
+          "Users"
+        ],
+        "permission": [
+          "SERVICE_CHANGE_CONFIG",
+          "WRITE_DAC",
+          "GENERIC_WRITE",
+          "KEY_SET_VALUE"
+        ],
+        "details": [
+          "weak service permission",
+          "writable service",
+          "service acl weak"
+        ]
+      },
+      "evidenceFields": [
+        "eventType",
+        "path",
+        "data.serviceName",
+        "data.serviceAclWeak",
+        "data.writableBy",
+        "data.permission",
+        "data.details"
+      ],
+      "tags": [
+        "privilege-escalation",
+        "service",
+        "acl",
+        "hijack"
+      ]
+    },
+    {
+      "id": "scheduled-task-com-handler-persistence",
+      "title": "Scheduled task COM handler persistence",
+      "titleZh": "计划任务 COM Handler 持久化",
+      "severity": "high",
+      "confidence": "medium",
+      "summary": "A scheduled-task registry or inventory event referenced a COM handler action or CLSID-backed task execution path.",
+      "summaryZh": "计划任务注册表或清单事件引用 COM handler 动作或基于 CLSID 的任务执行路径。",
+      "mitreTechniqueId": "T1053.005",
+      "mitreTechniqueName": "Scheduled Task",
+      "eventTypes": [
+        "registry.set",
+        "registry.create",
+        "driver.registry",
+        "scheduled_task.created",
+        "scheduled_task.modified"
+      ],
+      "containsPath": [
+        "Schedule\\TaskCache",
+        "TaskCache\\Tasks",
+        "TaskCache\\Tree",
+        "\\System32\\Tasks\\"
+      ],
+      "dataContains": {
+        "actionType": [
+          "ComHandler"
+        ],
+        "handler": [
+          "CLSID",
+          "ComHandler"
+        ],
+        "value": [
+          "ComHandler",
+          "CLSID",
+          "InprocServer32"
+        ],
+        "rawXml": [
+          "<ComHandler",
+          "CLSID"
+        ]
+      },
+      "evidenceFields": [
+        "eventType",
+        "path",
+        "data.taskName",
+        "data.actionType",
+        "data.handler",
+        "data.value",
+        "data.rawXml"
+      ],
+      "tags": [
+        "persistence",
+        "scheduled-task",
+        "com-handler"
+      ]
+    },
+    {
+      "id": "scheduled-task-xml-user-writable-payload",
+      "title": "Scheduled task XML targets user-writable payload",
+      "titleZh": "计划任务 XML 指向用户可写载荷",
+      "severity": "high",
+      "confidence": "high",
+      "summary": "A scheduled-task file, registry, or inventory event references a task target under Temp, AppData, ProgramData, Public, or Downloads.",
+      "summaryZh": "计划任务文件、注册表或清单事件引用 Temp、AppData、ProgramData、Public 或 Downloads 下的任务目标。",
+      "mitreTechniqueId": "T1053.005",
+      "mitreTechniqueName": "Scheduled Task",
+      "eventTypes": [
+        "file.created",
+        "file.modified",
+        "driver.file",
+        "scheduled_task.created",
+        "scheduled_task.modified"
+      ],
+      "containsPath": [
+        "\\System32\\Tasks\\",
+        "\\Tasks\\"
+      ],
+      "dataContains": {
+        "target": [
+          "\\AppData\\",
+          "\\Temp\\",
+          "\\Users\\Public\\",
+          "\\ProgramData\\",
+          "\\Downloads\\"
+        ],
+        "action": [
+          "\\AppData\\",
+          "\\Temp\\",
+          "\\Users\\Public\\",
+          "\\ProgramData\\",
+          "\\Downloads\\"
+        ],
+        "rawXml": [
+          "\\AppData\\",
+          "\\Temp\\",
+          "\\Users\\Public\\",
+          "\\ProgramData\\",
+          "\\Downloads\\"
+        ]
+      },
+      "evidenceFields": [
+        "eventType",
+        "path",
+        "data.taskName",
+        "data.target",
+        "data.action",
+        "data.rawXml"
+      ],
+      "tags": [
+        "persistence",
+        "scheduled-task",
+        "user-writable"
+      ]
+    },
+    {
+      "id": "kernel-driver-service-install",
+      "title": "Kernel driver service install evidence",
+      "titleZh": "内核驱动服务安装证据",
+      "severity": "high",
+      "confidence": "medium",
+      "summary": "Service registry or inventory telemetry referenced a kernel-driver service type or .sys ImagePath, which can indicate privileged driver installation.",
+      "summaryZh": "服务注册表或清单遥测引用内核驱动服务类型或 .sys ImagePath，可能表示安装了高权限驱动。",
+      "mitreTechniqueId": "T1543.003",
+      "mitreTechniqueName": "Windows Service",
+      "eventTypes": [
+        "registry.set",
+        "registry.create",
+        "driver.registry",
+        "service.created",
+        "service.modified"
+      ],
+      "containsPath": [
+        "CurrentControlSet\\Services\\",
+        "\\Services\\"
+      ],
+      "dataContains": {
+        "value": [
+          ".sys",
+          "SERVICE_KERNEL_DRIVER",
+          "kernel driver",
+          "Type=1"
+        ],
+        "imagePath": [
+          ".sys"
+        ],
+        "serviceType": [
+          "SERVICE_KERNEL_DRIVER",
+          "kernel",
+          "driver"
+        ],
+        "rawCommand": [
+          "type= kernel",
+          "SERVICE_KERNEL_DRIVER",
+          ".sys"
+        ]
+      },
+      "evidenceFields": [
+        "eventType",
+        "path",
+        "data.valueName",
+        "data.value",
+        "data.imagePath",
+        "data.serviceType",
+        "data.rawCommand"
+      ],
+      "tags": [
+        "persistence",
+        "privilege-escalation",
+        "service",
+        "driver",
+        "kernel"
+      ]
+    },
+    {
+      "id": "dropped-executable-launched-from-user-writable-path",
+      "title": "Executable launched from user-writable staging path",
+      "titleZh": "从用户可写暂存路径启动可执行文件",
+      "severity": "high",
+      "confidence": "high",
+      "summary": "A process start command line launched from Temp, AppData, Downloads, ProgramData, Public, or Recycle Bin style staging locations.",
+      "summaryZh": "进程启动命令行来自 Temp、AppData、Downloads、ProgramData、Public 或回收站等暂存位置。",
+      "mitreTechniqueId": "T1204.002",
+      "mitreTechniqueName": "Malicious File",
+      "eventTypes": [
+        "process.start",
+        "process.new"
+      ],
+      "containsCommandLine": [
+        "\\AppData\\Local\\Temp\\",
+        "\\AppData\\Roaming\\",
+        "\\Downloads\\",
+        "\\Users\\Public\\",
+        "\\ProgramData\\",
+        "\\$Recycle.Bin\\",
+        "%TEMP%",
+        "%APPDATA%",
+        "%PUBLIC%"
+      ],
+      "evidenceFields": [
+        "eventType",
+        "processName",
+        "processId",
+        "parentProcessId",
+        "commandLine",
+        "path"
+      ],
+      "tags": [
+        "execution",
+        "dropper",
+        "user-writable",
+        "download-execute"
+      ]
+    },
+    {
+      "id": "archive-or-installer-spawns-user-writable-payload",
+      "title": "Archive or installer spawned user-writable payload",
+      "titleZh": "压缩包或安装器衍生用户可写载荷进程",
+      "severity": "high",
+      "confidence": "medium",
+      "summary": "Process-tree telemetry shows an archive, self-extractor, or installer launching a child from a user-writable staging location.",
+      "summaryZh": "进程树遥测显示压缩工具、自解压程序或安装器启动了用户可写暂存位置中的子进程。",
+      "mitreTechniqueId": "T1204.002",
+      "mitreTechniqueName": "Malicious File",
+      "eventTypes": [
+        "process.tree"
+      ],
+      "dataContains": {
+        "treeLineage": [
+          "setup.exe -> C:\\Users\\Public",
+          "setup.exe -> C:\\Users",
+          "7z.exe -> C:\\Users",
+          "winrar.exe -> C:\\Users",
+          "msiexec.exe -> C:\\Users\\Public",
+          "installer.exe -> C:\\Users",
+          "sfx.exe -> C:\\Users"
+        ]
+      },
+      "evidenceFields": [
+        "eventType",
+        "processName",
+        "processId",
+        "parentProcessId",
+        "data.treeLineage"
+      ],
+      "tags": [
+        "execution",
+        "process-tree",
+        "dropper",
+        "installer"
+      ]
+    },
+    {
+      "id": "image-load-user-writable-dll",
+      "title": "DLL image loaded from user-writable path",
+      "titleZh": "从用户可写路径加载 DLL 镜像",
+      "severity": "high",
+      "confidence": "medium",
+      "summary": "Image-load telemetry referenced a DLL or module path under Temp, AppData, ProgramData, Public, or Downloads, supporting DLL injection or hijack triage.",
+      "summaryZh": "镜像加载遥测引用了 Temp、AppData、ProgramData、Public 或 Downloads 下的 DLL/模块路径，可辅助 DLL 注入或劫持排查。",
+      "mitreTechniqueId": "T1055.001",
+      "mitreTechniqueName": "Dynamic-link library injection",
+      "eventTypes": [
+        "image.load",
+        "image.loaded",
+        "driver.imageLoad",
+        "driver.image.load"
+      ],
+      "dataContains": {
+        "imagePath": [
+          "\\AppData\\",
+          "\\Temp\\",
+          "\\Users\\Public\\",
+          "\\ProgramData\\",
+          "\\Downloads\\"
+        ],
+        "modulePath": [
+          "\\AppData\\",
+          "\\Temp\\",
+          "\\Users\\Public\\",
+          "\\ProgramData\\",
+          "\\Downloads\\"
+        ],
+        "filePath": [
+          "\\AppData\\",
+          "\\Temp\\",
+          "\\Users\\Public\\",
+          "\\ProgramData\\",
+          "\\Downloads\\"
+        ]
+      },
+      "evidenceFields": [
+        "eventType",
+        "path",
+        "processName",
+        "processId",
+        "data.imagePath",
+        "data.modulePath",
+        "data.filePath"
+      ],
+      "tags": [
+        "process",
+        "image-load",
+        "dll",
+        "injection",
+        "user-writable"
+      ]
+    },
+    {
+      "id": "process-access-debug-privilege",
+      "title": "Process access with debug or all-access rights",
+      "titleZh": "使用调试或全访问权限访问进程",
+      "severity": "high",
+      "confidence": "high",
+      "summary": "Process-access telemetry requested debug privilege, PROCESS_ALL_ACCESS, VM write, or thread creation rights against another process.",
+      "summaryZh": "进程访问遥测请求调试权限、PROCESS_ALL_ACCESS、VM 写入或远程线程创建权限。",
+      "mitreTechniqueId": "T1055",
+      "mitreTechniqueName": "Process Injection",
+      "eventTypes": [
+        "process.access",
+        "driver.process",
+        "api.call"
+      ],
+      "dataContains": {
+        "desiredAccess": [
+          "PROCESS_ALL_ACCESS",
+          "PROCESS_VM_WRITE",
+          "PROCESS_VM_OPERATION",
+          "PROCESS_CREATE_THREAD",
+          "0x1f0fff"
+        ],
+        "accessMask": [
+          "PROCESS_ALL_ACCESS",
+          "PROCESS_VM_WRITE",
+          "PROCESS_CREATE_THREAD",
+          "0x1f0fff"
+        ],
+        "privilege": [
+          "SeDebugPrivilege"
+        ],
+        "operation": [
+          "OpenProcess",
+          "NtOpenProcess",
+          "debug privilege"
+        ]
+      },
+      "evidenceFields": [
+        "eventType",
+        "processName",
+        "processId",
+        "data.targetProcessName",
+        "data.desiredAccess",
+        "data.accessMask",
+        "data.privilege",
+        "data.operation"
+      ],
+      "tags": [
+        "process",
+        "injection",
+        "debug-privilege",
+        "access"
+      ]
+    },
+    {
+      "id": "token-impersonation-api-observed",
+      "title": "Token impersonation or duplication API observed",
+      "titleZh": "观察到令牌模拟或复制 API",
+      "severity": "high",
+      "confidence": "medium",
+      "summary": "API telemetry referenced token duplication, impersonation, or token-based process creation primitives used for privilege escalation and lateral movement.",
+      "summaryZh": "API 遥测引用令牌复制、模拟或基于令牌创建进程的原语，可用于提权和横向移动。",
+      "mitreTechniqueId": "T1134.001",
+      "mitreTechniqueName": "Token Impersonation/Theft",
+      "eventTypes": [
+        "api.call",
+        "process.token",
+        "driver.process"
+      ],
+      "dataContains": {
+        "api": [
+          "OpenProcessToken",
+          "OpenThreadToken",
+          "DuplicateToken",
+          "DuplicateTokenEx",
+          "ImpersonateLoggedOnUser",
+          "ImpersonateNamedPipeClient",
+          "SetThreadToken",
+          "CreateProcessWithTokenW",
+          "CreateProcessAsUserW"
+        ],
+        "operation": [
+          "token impersonation",
+          "DuplicateTokenEx",
+          "Impersonate",
+          "CreateProcessWithToken",
+          "CreateProcessAsUser"
+        ]
+      },
+      "evidenceFields": [
+        "eventType",
+        "processName",
+        "processId",
+        "data.api",
+        "data.operation",
+        "data.targetProcessName"
+      ],
+      "tags": [
+        "privilege-escalation",
+        "token",
+        "impersonation",
+        "api"
+      ]
+    },
+    {
+      "id": "uac-bypass-auto-elevate-registry",
+      "title": "Auto-elevate UAC bypass registry path",
+      "titleZh": "自动提权 UAC 绕过注册表路径",
+      "severity": "high",
+      "confidence": "high",
+      "summary": "A registry event touched ms-settings, mscfile, exefile runas, or shell open command paths used by auto-elevate UAC bypass chains.",
+      "summaryZh": "注册表事件触及 ms-settings、mscfile、exefile runas 或 shell open command 等自动提权 UAC 绕过链常用路径。",
+      "mitreTechniqueId": "T1548.002",
+      "mitreTechniqueName": "Bypass User Account Control",
+      "eventTypes": [
+        "registry.set",
+        "registry.create",
+        "driver.registry"
+      ],
+      "containsPath": [
+        "Software\\Classes\\ms-settings\\Shell\\Open\\command",
+        "Software\\Classes\\mscfile\\shell\\open\\command",
+        "Software\\Classes\\exefile\\shell\\runas\\command",
+        "Software\\Classes\\Folder\\shell\\open\\command",
+        "Software\\Classes\\AppX82a6gwre4fdg3bt635tn5ctqjf8msdd2\\Shell\\Open\\command"
+      ],
+      "dataContains": {
+        "valueName": [
+          "DelegateExecute",
+          "(Default)",
+          "Default"
+        ],
+        "value": [
+          "cmd.exe",
+          "powershell",
+          "rundll32",
+          "regsvr32",
+          "mshta",
+          ".exe",
+          ".dll"
+        ]
+      },
+      "evidenceFields": [
+        "eventType",
+        "path",
+        "data.valueName",
+        "data.value"
+      ],
+      "tags": [
+        "privilege-escalation",
+        "uac-bypass",
+        "registry",
+        "auto-elevate"
+      ]
+    },
+    {
+      "id": "uac-bypass-auto-elevate-lolbin-command",
+      "title": "Auto-elevate UAC bypass LOLBin launched",
+      "titleZh": "启动自动提权 UAC 绕过 LOLBin",
+      "severity": "high",
+      "confidence": "medium",
+      "summary": "A command line launched auto-elevating Windows binaries commonly paired with registry hijacks for UAC bypass.",
+      "summaryZh": "命令行启动常与注册表劫持配合绕过 UAC 的自动提权 Windows 二进制。",
+      "mitreTechniqueId": "T1548.002",
+      "mitreTechniqueName": "Bypass User Account Control",
+      "eventTypes": [
+        "process.start"
+      ],
+      "containsCommandLine": [
+        "fodhelper.exe",
+        "computerdefaults.exe",
+        "sdclt.exe",
+        "eventvwr.exe",
+        "slui.exe",
+        "CompMgmtLauncher.exe",
+        "UserAccountControlSettings.exe"
+      ],
+      "evidenceFields": [
+        "eventType",
+        "processName",
+        "processId",
+        "parentProcessId",
+        "commandLine"
+      ],
+      "tags": [
+        "privilege-escalation",
+        "uac-bypass",
+        "lolbin",
+        "auto-elevate"
+      ]
+    },
+    {
+      "id": "powershell-in-memory-reflection-loader",
+      "title": "PowerShell in-memory reflection loader",
+      "titleZh": "PowerShell 内存反射加载器",
+      "severity": "high",
+      "confidence": "high",
+      "summary": "A PowerShell command line referenced reflection, shellcode, PE injection, or memory-protection primitives used for in-memory execution.",
+      "summaryZh": "PowerShell 命令行引用反射、shellcode、PE 注入或内存保护原语，常用于内存执行。",
+      "mitreTechniqueId": "T1059.001",
+      "mitreTechniqueName": "PowerShell",
+      "eventTypes": [
+        "process.start"
+      ],
+      "containsCommandLine": [
+        "[Reflection.Assembly]::Load",
+        "System.Reflection.Assembly",
+        "Invoke-ReflectivePEInjection",
+        "Invoke-Shellcode",
+        "VirtualProtect",
+        "VirtualAlloc",
+        "GetDelegateForFunctionPointer",
+        "Add-Type -TypeDefinition",
+        "FromBase64String"
+      ],
+      "evidenceFields": [
+        "eventType",
+        "processName",
+        "processId",
+        "parentProcessId",
+        "commandLine"
+      ],
+      "tags": [
+        "execution",
+        "powershell",
+        "in-memory",
+        "reflection",
+        "script"
+      ]
+    },
+    {
+      "id": "powershell-lolbin-child-process-tree",
+      "title": "PowerShell spawned LOLBin child",
+      "titleZh": "PowerShell 衍生 LOLBin 子进程",
+      "severity": "high",
+      "confidence": "medium",
+      "summary": "Process-tree telemetry shows PowerShell spawning proxy-execution utilities such as rundll32, regsvr32, mshta, certutil, bitsadmin, or installutil.",
+      "summaryZh": "进程树遥测显示 PowerShell 启动 rundll32、regsvr32、mshta、certutil、bitsadmin 或 installutil 等代理执行工具。",
+      "mitreTechniqueId": "T1059.001",
+      "mitreTechniqueName": "PowerShell",
+      "eventTypes": [
+        "process.tree"
+      ],
+      "dataContains": {
+        "treeLineage": [
+          "powershell.exe -> rundll32",
+          "powershell.exe -> regsvr32",
+          "powershell.exe -> mshta",
+          "powershell.exe -> certutil",
+          "powershell.exe -> bitsadmin",
+          "powershell.exe -> installutil",
+          "pwsh.exe -> rundll32",
+          "pwsh.exe -> regsvr32",
+          "pwsh.exe -> mshta"
+        ]
+      },
+      "evidenceFields": [
+        "eventType",
+        "processName",
+        "processId",
+        "parentProcessId",
+        "data.treeLineage"
+      ],
+      "tags": [
+        "execution",
+        "powershell",
+        "lolbin",
+        "process-tree"
+      ]
+    },
+    {
+      "id": "cmstp-profile-proxy-execution-command",
+      "title": "CMSTP profile proxy execution command",
+      "titleZh": "CMSTP 配置文件代理执行命令",
+      "severity": "high",
+      "confidence": "medium",
+      "summary": "A command line invoked cmstp.exe with INF/profile installation flags commonly abused for signed binary proxy execution and UAC bypass chains.",
+      "summaryZh": "命令行调用 cmstp.exe 及 INF/配置文件安装参数，常被用于签名二进制代理执行和 UAC 绕过链。",
+      "mitreTechniqueId": "T1218.003",
+      "mitreTechniqueName": "CMSTP",
+      "eventTypes": [
+        "process.start"
+      ],
+      "containsCommandLine": [
+        "cmstp.exe",
+        "cmstp ",
+        " /s ",
+        " /au ",
+        ".inf"
+      ],
+      "evidenceFields": [
+        "eventType",
+        "processName",
+        "processId",
+        "parentProcessId",
+        "commandLine"
+      ],
+      "tags": [
+        "execution",
+        "defense-evasion",
+        "lolbin",
+        "cmstp"
+      ]
+    },
+    {
+      "id": "control-panel-proxy-execution-command",
+      "title": "Control Panel item proxy execution command",
+      "titleZh": "控制面板项代理执行命令",
+      "severity": "medium",
+      "confidence": "medium",
+      "summary": "A command line invoked control.exe, rundll32 shell32 Control_RunDLL, or a CPL payload path, which can proxy execution through Control Panel components.",
+      "summaryZh": "命令行调用 control.exe、rundll32 shell32 Control_RunDLL 或 CPL 载荷路径，可能通过控制面板组件代理执行。",
+      "mitreTechniqueId": "T1218.002",
+      "mitreTechniqueName": "Control Panel",
+      "eventTypes": [
+        "process.start"
+      ],
+      "containsCommandLine": [
+        "control.exe",
+        "control ",
+        "Control_RunDLL",
+        ".cpl"
+      ],
+      "evidenceFields": [
+        "eventType",
+        "processName",
+        "processId",
+        "parentProcessId",
+        "commandLine"
+      ],
+      "tags": [
+        "execution",
+        "defense-evasion",
+        "lolbin",
+        "control-panel"
+      ]
+    },
+    {
+      "id": "privilege-debug-backup-restore-enabled",
+      "title": "Sensitive privilege enabled",
+      "titleZh": "敏感权限被启用",
+      "severity": "high",
+      "confidence": "medium",
+      "summary": "Token or API telemetry enabled SeDebugPrivilege, SeBackupPrivilege, SeRestorePrivilege, SeTakeOwnershipPrivilege, or related privileges commonly used for credential theft or escalation.",
+      "summaryZh": "令牌或 API 遥测启用了 SeDebugPrivilege、SeBackupPrivilege、SeRestorePrivilege、SeTakeOwnershipPrivilege 等常用于凭据窃取或提权的权限。",
+      "mitreTechniqueId": "T1134.001",
+      "mitreTechniqueName": "Token Impersonation/Theft",
+      "eventTypes": [
+        "api.call",
+        "process.token",
+        "privilege.enabled"
+      ],
+      "dataContains": {
+        "privilege": [
+          "SeDebugPrivilege",
+          "SeBackupPrivilege",
+          "SeRestorePrivilege",
+          "SeTakeOwnershipPrivilege",
+          "SeImpersonatePrivilege",
+          "SeAssignPrimaryTokenPrivilege"
+        ],
+        "operation": [
+          "AdjustTokenPrivileges",
+          "privilege enabled",
+          "enable privilege"
+        ],
+        "api": [
+          "AdjustTokenPrivileges",
+          "LookupPrivilegeValue"
+        ]
+      },
+      "evidenceFields": [
+        "eventType",
+        "processName",
+        "processId",
+        "data.api",
+        "data.operation",
+        "data.privilege"
+      ],
+      "tags": [
+        "privilege-escalation",
+        "token",
+        "sensitive-privilege",
+        "api"
+      ]
+    },
+    {
+      "id": "network-periodic-beacon-metadata",
+      "title": "Periodic network beacon metadata",
+      "titleZh": "周期性网络 Beacon 元数据",
+      "severity": "high",
+      "confidence": "medium",
+      "summary": "Network, HTTP, C2, or PCAP metadata carried beacon interval, jitter, or periodic-check-in fields suitable for C2 triage.",
+      "summaryZh": "网络、HTTP、C2 或 PCAP 元数据携带 beacon 间隔、抖动或周期性 check-in 字段，可用于 C2 排查。",
+      "mitreTechniqueId": "T1071.001",
+      "mitreTechniqueName": "Web Protocols",
+      "eventTypes": [
+        "network.flow",
+        "network.http",
+        "http.request",
+        "pcap.flow",
+        "pcap.http",
+        "c2.beacon",
+        "beacon.observed"
+      ],
+      "dataKeys": [
+        "beaconIntervalMs",
+        "beaconIntervalSeconds",
+        "jitterPercent",
+        "periodicScore",
+        "checkinInterval"
+      ],
+      "dataContains": {
+        "classification": [
+          "periodic-beacon",
+          "beacon",
+          "c2"
+        ],
+        "behavior": [
+          "periodic",
+          "beacon",
+          "checkin"
+        ]
+      },
+      "evidenceFields": [
+        "eventType",
+        "data.host",
+        "data.remoteAddress",
+        "data.beaconIntervalMs",
+        "data.jitterPercent",
+        "data.periodicScore",
+        "data.classification",
+        "data.behavior"
+      ],
+      "tags": [
+        "network",
+        "c2",
+        "beacon",
+        "metadata"
+      ]
+    },
+    {
+      "id": "dns-reputation-risk-domain",
+      "title": "DNS query to reputation-risk domain",
+      "titleZh": "DNS 查询命中信誉风险域名",
+      "severity": "high",
+      "confidence": "medium",
+      "summary": "DNS telemetry carried reputation labels for newly registered, suspicious, DGA, malware, or C2 domains.",
+      "summaryZh": "DNS 遥测携带新注册、可疑、DGA、恶意软件或 C2 域名信誉标签。",
+      "mitreTechniqueId": "T1071.004",
+      "mitreTechniqueName": "DNS",
+      "eventTypes": [
+        "dns.query",
+        "network.dns",
+        "pcap.dns",
+        "dns.cache.added"
+      ],
+      "dataContains": {
+        "domainReputation": [
+          "newly-registered",
+          "suspicious",
+          "malicious",
+          "dga",
+          "c2"
+        ],
+        "reputation": [
+          "newly-registered",
+          "suspicious",
+          "malicious",
+          "dga",
+          "c2"
+        ],
+        "classification": [
+          "newly-registered",
+          "suspicious-domain",
+          "dga",
+          "c2",
+          "malware"
+        ],
+        "threat": [
+          "malware",
+          "c2",
+          "phishing",
+          "dga"
+        ]
+      },
+      "evidenceFields": [
+        "eventType",
+        "data.queryName",
+        "data.qname",
+        "data.domain",
+        "data.domainReputation",
+        "data.reputation",
+        "data.classification",
+        "data.threat"
+      ],
+      "tags": [
+        "network",
+        "dns",
+        "reputation",
+        "c2"
+      ]
+    },
+    {
+      "id": "dns-high-entropy-subdomain-metadata",
+      "title": "DNS high-entropy subdomain metadata",
+      "titleZh": "DNS 高熵子域名元数据",
+      "severity": "medium",
+      "confidence": "medium",
+      "summary": "DNS telemetry included label entropy, long-label, or query-length fields used to triage DGA or DNS-tunnel behavior.",
+      "summaryZh": "DNS 遥测包含标签熵、长标签或查询长度字段，可用于排查 DGA 或 DNS 隧道行为。",
+      "mitreTechniqueId": "T1071.004",
+      "mitreTechniqueName": "DNS",
+      "eventTypes": [
+        "dns.query",
+        "network.dns",
+        "pcap.dns"
+      ],
+      "dataKeys": [
+        "labelEntropy",
+        "queryEntropy",
+        "queryLength",
+        "longestLabelLength",
+        "subdomainLength"
+      ],
+      "dataContains": {
+        "classification": [
+          "high-entropy",
+          "long-label",
+          "dns-tunnel",
+          "dga"
+        ],
+        "behavior": [
+          "high-entropy",
+          "long-label",
+          "dns-tunnel",
+          "dga"
+        ]
+      },
+      "evidenceFields": [
+        "eventType",
+        "data.queryName",
+        "data.qname",
+        "data.labelEntropy",
+        "data.queryEntropy",
+        "data.queryLength",
+        "data.longestLabelLength",
+        "data.classification"
+      ],
+      "tags": [
+        "network",
+        "dns",
+        "dga",
+        "tunnel",
+        "metadata"
+      ]
+    },
+    {
+      "id": "http-json-tasking-or-gate-uri",
+      "title": "HTTP JSON tasking or gate URI",
+      "titleZh": "HTTP JSON 任务或 Gate URI",
+      "severity": "medium",
+      "confidence": "medium",
+      "summary": "HTTP metadata referenced JSON tasking, gate, panel, check-in, command, or polling URI patterns often seen in C2 protocols.",
+      "summaryZh": "HTTP 元数据引用 JSON tasking、gate、panel、check-in、command 或 polling URI 模式，常见于 C2 协议。",
+      "mitreTechniqueId": "T1071.001",
+      "mitreTechniqueName": "Web Protocols",
+      "eventTypes": [
+        "http.request",
+        "network.http",
+        "pcap.http"
+      ],
+      "dataContains": {
+        "uri": [
+          "/gate",
+          "/panel",
+          "/task",
+          "/tasks",
+          "/command",
+          "/cmd",
+          "/checkin",
+          "/poll"
+        ],
+        "requestUri": [
+          "/gate",
+          "/panel",
+          "/task",
+          "/tasks",
+          "/command",
+          "/cmd",
+          "/checkin",
+          "/poll"
+        ],
+        "contentType": [
+          "application/json",
+          "application/octet-stream"
+        ],
+        "behavior": [
+          "tasking",
+          "checkin",
+          "poll",
+          "command"
+        ]
+      },
+      "evidenceFields": [
+        "eventType",
+        "data.host",
+        "data.method",
+        "data.uri",
+        "data.requestUri",
+        "data.contentType",
+        "data.behavior"
+      ],
+      "tags": [
+        "network",
+        "http",
+        "c2",
+        "tasking"
+      ]
+    },
+    {
+      "id": "http-host-header-mismatch-indicator",
+      "title": "HTTP host header mismatch indicator",
+      "titleZh": "HTTP Host 头不匹配指示",
+      "severity": "medium",
+      "confidence": "medium",
+      "summary": "HTTP metadata indicated Host/header, SNI, absolute URI, or upstream destination mismatch, useful for proxy, fronting, or evasive C2 triage.",
+      "summaryZh": "HTTP 元数据指示 Host/header、SNI、绝对 URI 或上游目的地不匹配，可用于代理、域前置或规避型 C2 排查。",
+      "mitreTechniqueId": "T1090",
+      "mitreTechniqueName": "Proxy",
+      "eventTypes": [
+        "http.request",
+        "network.http",
+        "pcap.http"
+      ],
+      "dataContains": {
+        "classification": [
+          "host-header-mismatch",
+          "host-destination-mismatch",
+          "absolute-uri-proxy",
+          "sni-host-mismatch"
+        ],
+        "details": [
+          "Host header mismatch",
+          "host-header-mismatch",
+          "absolute URI proxy",
+          "destination mismatch"
+        ],
+        "behavior": [
+          "proxy",
+          "fronting",
+          "host-header-mismatch"
+        ]
+      },
+      "evidenceFields": [
+        "eventType",
+        "data.host",
+        "data.uri",
+        "data.destinationIp",
+        "data.sni",
+        "data.classification",
+        "data.details"
+      ],
+      "tags": [
+        "network",
+        "http",
+        "proxy",
+        "fronting"
+      ]
+    },
+    {
+      "id": "tls-certificate-reputation-risk",
+      "title": "TLS certificate reputation risk",
+      "titleZh": "TLS 证书信誉风险",
+      "severity": "high",
+      "confidence": "medium",
+      "summary": "TLS metadata labeled a certificate, thumbprint, issuer, or chain as malicious, suspicious, revoked, abused, or newly observed.",
+      "summaryZh": "TLS 元数据将证书、指纹、签发者或证书链标记为恶意、可疑、吊销、滥用或新近出现。",
+      "mitreTechniqueId": "T1573",
+      "mitreTechniqueName": "Encrypted Channel",
+      "eventTypes": [
+        "network.tls",
+        "tls.connection",
+        "pcap.tls",
+        "driver.network"
+      ],
+      "dataContains": {
+        "certReputation": [
+          "malicious",
+          "suspicious",
+          "revoked",
+          "abused",
+          "newly-observed"
+        ],
+        "certificateReputation": [
+          "malicious",
+          "suspicious",
+          "revoked",
+          "abused",
+          "newly-observed"
+        ],
+        "thumbprintReputation": [
+          "malicious",
+          "suspicious",
+          "revoked",
+          "abused"
+        ],
+        "classification": [
+          "malicious-certificate",
+          "suspicious-certificate",
+          "revoked-certificate",
+          "rare-certificate"
+        ]
+      },
+      "evidenceFields": [
+        "eventType",
+        "data.sni",
+        "data.certSubject",
+        "data.certIssuer",
+        "data.certThumbprint",
+        "data.certReputation",
+        "data.classification"
+      ],
+      "tags": [
+        "network",
+        "tls",
+        "certificate",
+        "reputation",
+        "c2"
+      ]
+    },
+    {
+      "id": "certificate-root-store-command",
+      "title": "Root certificate store modification command",
+      "titleZh": "根证书存储修改命令",
+      "severity": "high",
+      "confidence": "high",
+      "summary": "A command line attempted to add or import a certificate into LocalMachine or CurrentUser Root certificate stores.",
+      "summaryZh": "命令行尝试向 LocalMachine 或 CurrentUser Root 根证书存储添加或导入证书。",
+      "mitreTechniqueId": "T1553.004",
+      "mitreTechniqueName": "Install Root Certificate",
+      "eventTypes": [
+        "process.start"
+      ],
+      "containsCommandLine": [
+        "certutil -addstore root",
+        "certutil.exe -addstore root",
+        "Import-Certificate",
+        "Cert:\\LocalMachine\\Root",
+        "Cert:\\CurrentUser\\Root",
+        "-CertStoreLocation Cert:\\LocalMachine\\Root",
+        "-CertStoreLocation Cert:\\CurrentUser\\Root"
+      ],
+      "evidenceFields": [
+        "eventType",
+        "processName",
+        "processId",
+        "parentProcessId",
+        "commandLine"
+      ],
+      "tags": [
+        "defense-evasion",
+        "certificate",
+        "trust-store",
+        "root-ca"
+      ]
+    },
+    {
+      "id": "certificate-root-store-registry-change",
+      "title": "Root certificate store registry change",
+      "titleZh": "根证书存储注册表变更",
+      "severity": "high",
+      "confidence": "medium",
+      "summary": "A registry or file event touched Windows Root/SystemCertificates certificate store paths.",
+      "summaryZh": "注册表或文件事件触及 Windows Root/SystemCertificates 证书存储路径。",
+      "mitreTechniqueId": "T1553.004",
+      "mitreTechniqueName": "Install Root Certificate",
+      "eventTypes": [
+        "registry.set",
+        "registry.create",
+        "driver.registry",
+        "file.created",
+        "file.modified"
+      ],
+      "containsPath": [
+        "SystemCertificates\\Root\\Certificates",
+        "SystemCertificates\\AuthRoot\\Certificates",
+        "Microsoft\\SystemCertificates\\Root",
+        "\\Crypto\\RSA\\MachineKeys\\"
+      ],
+      "evidenceFields": [
+        "eventType",
+        "path",
+        "data.valueName",
+        "data.value",
+        "processName",
+        "processId"
+      ],
+      "tags": [
+        "defense-evasion",
+        "certificate",
+        "trust-store",
+        "root-ca",
+        "registry"
+      ]
+    },
+    {
+      "id": "anti-analysis-debug-register-check-api",
+      "title": "Debug register or breakpoint check API",
+      "titleZh": "调试寄存器或断点检查 API",
+      "severity": "medium",
+      "confidence": "medium",
+      "summary": "API telemetry referenced thread context, debug registers, hardware breakpoints, or trap flag checks used to detect debuggers.",
+      "summaryZh": "API 遥测引用线程上下文、调试寄存器、硬件断点或陷阱标志检查，用于检测调试器。",
+      "mitreTechniqueId": "T1622",
+      "mitreTechniqueName": "Debugger Evasion",
+      "eventTypes": [
+        "api.call",
+        "antiAnalysis.debuggerCheck",
+        "process.query"
+      ],
+      "dataContains": {
+        "api": [
+          "GetThreadContext",
+          "Wow64GetThreadContext",
+          "NtGetContextThread",
+          "SetUnhandledExceptionFilter",
+          "AddVectoredExceptionHandler"
+        ],
+        "operation": [
+          "debug register",
+          "hardware breakpoint",
+          "trap flag",
+          "single-step",
+          "DR0",
+          "DR7"
+        ],
+        "details": [
+          "debug register",
+          "hardware breakpoint",
+          "trap flag",
+          "single-step",
+          "DR0",
+          "DR7"
+        ]
+      },
+      "evidenceFields": [
+        "eventType",
+        "processName",
+        "processId",
+        "data.api",
+        "data.operation",
+        "data.details"
+      ],
+      "tags": [
+        "anti-analysis",
+        "debugger-evasion",
+        "api",
+        "breakpoint"
+      ]
+    },
+    {
+      "id": "anti-analysis-host-identity-check",
+      "title": "Host identity sandbox check",
+      "titleZh": "主机身份沙箱检查",
+      "severity": "medium",
+      "confidence": "medium",
+      "summary": "Sandbox-check or fingerprint telemetry referenced hostnames, usernames, domains, or sandbox-user defaults used to gate execution.",
+      "summaryZh": "沙箱检查或指纹遥测引用主机名、用户名、域名或沙箱默认用户，用于决定是否执行。",
+      "mitreTechniqueId": "T1497.001",
+      "mitreTechniqueName": "System Checks",
+      "eventTypes": [
+        "antiAnalysis.sandboxCheck",
+        "system.fingerprint",
+        "api.call",
+        "process.query"
+      ],
+      "dataContains": {
+        "check": [
+          "hostname",
+          "computername",
+          "username",
+          "domain",
+          "sandbox user",
+          "SandboxUser"
+        ],
+        "operation": [
+          "hostname check",
+          "username check",
+          "domain check",
+          "sandbox identity"
+        ],
+        "details": [
+          "hostname",
+          "computername",
+          "username",
+          "SandboxUser",
+          "analysis user"
+        ]
+      },
+      "evidenceFields": [
+        "eventType",
+        "processName",
+        "processId",
+        "data.check",
+        "data.operation",
+        "data.details",
+        "data.userName",
+        "data.computerName"
+      ],
+      "tags": [
+        "anti-analysis",
+        "sandbox-evasion",
+        "identity",
+        "system-check"
+      ]
+    },
+    {
+      "id": "virustotal-malicious-verdict",
+      "title": "VirusTotal malicious verdict",
+      "titleZh": "VirusTotal 恶意判定",
+      "severity": "high",
+      "confidence": "high",
+      "summary": "VirusTotal enrichment returned a malicious verdict for the submitted SHA-256. This is external reputation evidence, not a local ATT&CK behavior by itself.",
+      "summaryZh": "VirusTotal 富化对提交的 SHA-256 返回恶意判定。这是外部信誉证据，本身不是本地 ATT&CK 行为。",
+      "eventTypes": [
+        "enrichment.virustotal.lookup",
+        "reputation.virustotal.file"
+      ],
+      "dataContains": {
+        "vtVerdict": [
+          "malicious"
+        ],
+        "verdict": [
+          "malicious"
+        ]
+      },
+      "evidenceFields": [
+        "eventType",
+        "data.sha256",
+        "data.vtVerdict",
+        "data.vtMalicious",
+        "data.vtSuspicious",
+        "data.permalink"
+      ],
+      "tags": [
+        "enrichment",
+        "virustotal",
+        "reputation",
+        "malicious"
+      ]
+    },
+    {
+      "id": "virustotal-suspicious-verdict",
+      "title": "VirusTotal suspicious verdict",
+      "titleZh": "VirusTotal 可疑判定",
+      "severity": "medium",
+      "confidence": "medium",
+      "summary": "VirusTotal enrichment returned a suspicious verdict without malicious detections; use it as external reputation triage evidence.",
+      "summaryZh": "VirusTotal 富化返回可疑判定但无恶意命中；应作为外部信誉排查证据使用。",
+      "eventTypes": [
+        "enrichment.virustotal.lookup",
+        "reputation.virustotal.file"
+      ],
+      "dataContains": {
+        "vtVerdict": [
+          "suspicious"
+        ],
+        "verdict": [
+          "suspicious"
+        ]
+      },
+      "evidenceFields": [
+        "eventType",
+        "data.sha256",
+        "data.vtVerdict",
+        "data.vtMalicious",
+        "data.vtSuspicious",
+        "data.permalink"
+      ],
+      "tags": [
+        "enrichment",
+        "virustotal",
+        "reputation",
+        "suspicious"
+      ]
+    },
+    {
+      "id": "virustotal-not-found",
+      "title": "VirusTotal hash not found",
+      "titleZh": "VirusTotal 未收录哈希",
+      "severity": "info",
+      "confidence": "low",
+      "summary": "VirusTotal returned 404/not_found for the SHA-256. This documents enrichment coverage, not malicious or benign behavior.",
+      "summaryZh": "VirusTotal 对该 SHA-256 返回 404/not_found。这记录富化覆盖情况，不表示恶意或良性行为。",
+      "eventTypes": [
+        "enrichment.virustotal.lookup",
+        "reputation.virustotal.file"
+      ],
+      "dataContains": {
+        "vtVerdict": [
+          "not_found"
+        ],
+        "vtStatus": [
+          "not_found"
+        ],
+        "status": [
+          "not_found"
+        ]
+      },
+      "evidenceFields": [
+        "eventType",
+        "data.sha256",
+        "data.vtStatus",
+        "data.vtVerdict",
+        "data.httpStatusCode",
+        "data.permalink"
+      ],
+      "tags": [
+        "enrichment",
+        "virustotal",
+        "reputation",
+        "metadata"
+      ]
+    },
+    {
+      "id": "virustotal-rate-limited",
+      "title": "VirusTotal lookup rate-limited",
+      "titleZh": "VirusTotal 查询被限速",
+      "severity": "info",
+      "confidence": "low",
+      "summary": "VirusTotal returned a rate-limit status. Reports should show this as enrichment quality metadata instead of a lookup failure with ambiguous meaning.",
+      "summaryZh": "VirusTotal 返回限速状态。报告应将其显示为富化质量元数据，而不是语义不清的查询失败。",
+      "eventTypes": [
+        "enrichment.virustotal.lookup",
+        "reputation.virustotal.file"
+      ],
+      "dataContains": {
+        "vtVerdict": [
+          "rate_limited"
+        ],
+        "vtStatus": [
+          "rate_limited"
+        ],
+        "status": [
+          "rate_limited"
+        ]
+      },
+      "evidenceFields": [
+        "eventType",
+        "data.sha256",
+        "data.vtStatus",
+        "data.vtVerdict",
+        "data.httpStatusCode",
+        "data.retryAfterUtc"
+      ],
+      "tags": [
+        "enrichment",
+        "virustotal",
+        "rate-limit",
+        "metadata",
+        "diagnostic"
+      ]
+    },
+    {
+      "id": "virustotal-not-configured",
+      "title": "VirusTotal API key not configured",
+      "titleZh": "未配置 VirusTotal API Key",
+      "severity": "info",
+      "confidence": "low",
+      "summary": "VirusTotal enrichment was skipped because no API key is configured. This quiet diagnostic should not affect maliciousness verdicts.",
+      "summaryZh": "由于未配置 API Key，VirusTotal 富化被跳过。此静默诊断不应影响恶意性判定。",
+      "eventTypes": [
+        "enrichment.virustotal.lookup",
+        "reputation.virustotal.file"
+      ],
+      "dataContains": {
+        "vtVerdict": [
+          "not_configured"
+        ],
+        "vtStatus": [
+          "not_configured"
+        ],
+        "status": [
+          "not_configured"
+        ]
+      },
+      "evidenceFields": [
+        "eventType",
+        "data.sha256",
+        "data.vtStatus",
+        "data.vtVerdict",
+        "data.configured"
+      ],
+      "tags": [
+        "enrichment",
+        "virustotal",
+        "configuration",
+        "metadata",
+        "diagnostic"
       ]
     }
   ]

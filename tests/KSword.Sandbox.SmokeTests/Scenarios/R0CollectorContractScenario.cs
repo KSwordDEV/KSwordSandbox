@@ -29,6 +29,7 @@ internal sealed class R0CollectorContractScenario : ISmokeTestScenario
             "IoctlClient",
             "EventParser",
             "JsonWriter",
+            "ReadinessDiagnostics",
             "SyntheticMode",
             "RuntimeLoop"
         })
@@ -51,12 +52,18 @@ internal sealed class R0CollectorContractScenario : ISmokeTestScenario
         RequireContains(ReadText(Path.Combine(sourceRoot, "Options.cpp")), "--heartbeat", "heartbeat should be parsed.");
         RequireContains(ReadText(Path.Combine(sourceRoot, "Options.cpp")), "--abi-self-check", "ABI self-check mode should be parsed.");
         RequireContains(ReadText(Path.Combine(sourceRoot, "Options.cpp")), "--contract-self-check", "contract self-check alias should be parsed.");
+        RequireContains(ReadText(Path.Combine(sourceRoot, "Options.cpp")), "--diagnose", "diagnose mode should be parsed.");
+        RequireContains(ReadText(Path.Combine(sourceRoot, "Options.cpp")), "--service-name", "diagnose service name should be parsed.");
+        RequireContains(ReadText(Path.Combine(sourceRoot, "Options.cpp")), "--read-timeout-ms", "diagnose read timeout should be parsed.");
         var ioctlClient = ReadText(Path.Combine(sourceRoot, "IoctlClient.cpp"));
         var eventParser = ReadText(Path.Combine(sourceRoot, "EventParser.cpp"));
         var runtimeLoop = ReadText(Path.Combine(sourceRoot, "RuntimeLoop.cpp"));
         var abiSelfCheck = ReadText(Path.Combine(sourceRoot, "AbiSelfCheck.cpp"));
+        var readinessDiagnostics = ReadText(Path.Combine(sourceRoot, "ReadinessDiagnostics.cpp"));
         var healthData = ExtractFunctionBody(eventParser, "BuildHealthData");
         RequireContains(runtimeLoop, "RunAbiSelfCheckMode", "Runtime loop should support no-device ABI self-check mode.");
+        RequireContains(runtimeLoop, "RunReadinessDiagnoseMode(options, writer)", "Runtime loop should support live readiness diagnose mode before opening the normal device path.");
+        RequireContains(runtimeLoop, "EmitDeviceUnavailableDiagnostic(writer, options, openError, \"openDevice\")", "Runtime loop should emit structured device-unavailable diagnostics.");
         RequireContains(abiSelfCheck, "r0collector.abiSelfCheck", "ABI self-check should emit a dedicated JSONL row.");
         RequireContains(abiSelfCheck, "collectorAbiVersion", "ABI self-check should preserve collector ABI version.");
         RequireContains(abiSelfCheck, "capabilityFlagsCurrentHex", "ABI self-check should preserve capability flags.");
@@ -79,6 +86,20 @@ internal sealed class R0CollectorContractScenario : ISmokeTestScenario
         RequireContains(ioctlClient, "kHealthReplyLegacyMinimumBytes", "GET_HEALTH should tolerate the legacy health reply prefix.");
         RequireContains(ioctlClient, "KSWORD_SANDBOX_HEALTH_FLAG_PRODUCER_MASKS_AVAILABLE", "GET_HEALTH should gate producer masks on the health flag.");
         RequireContains(ioctlClient, "advertised producer masks without returning", "GET_HEALTH should reject flagged replies that omit producer mask bytes.");
+        RequireContains(ioctlClient, "\"severity\", \"error\"", "IOCTL failures should include error severity.");
+        RequireContains(ioctlClient, "\"readinessState\", \"blocked\"", "IOCTL failures should include blocked readiness state.");
+        RequireContains(ioctlClient, "\"diagnosticCode\", \"ioctl_failure\"", "IOCTL failures should include a machine-readable diagnostic code.");
+        RequireContains(ioctlClient, "\"diagnosticCode\", \"abi_mismatch\"", "Protocol errors should classify ABI mismatch.");
+        RequireContains(ioctlClient, "\"diagnosticCode\", \"optional_ioctl_unavailable\"", "Optional IOCTL failures should classify degraded compatibility.");
+        RequireContains(readinessDiagnostics, "r0collector.readinessDiagnostic", "Readiness diagnostics should emit dedicated JSONL probe rows.");
+        RequireContains(readinessDiagnostics, "r0collector.readinessSummary", "Readiness diagnostics should emit a final summary row.");
+        RequireContains(readinessDiagnostics, "missing_service", "Readiness diagnostics should distinguish missing driver services.");
+        RequireContains(readinessDiagnostics, "open_device_not_found", "Readiness diagnostics should distinguish missing device symbolic links.");
+        RequireContains(readinessDiagnostics, "open_device_denied", "Readiness diagnostics should distinguish device ACL/elevation failures.");
+        RequireContains(readinessDiagnostics, "abi_mismatch", "Readiness diagnostics should classify ABI mismatches.");
+        RequireContains(readinessDiagnostics, "read_timeout", "Readiness diagnostics should classify READ_EVENTS timeouts.");
+        RequireContains(readinessDiagnostics, "driver_no_events", "Readiness diagnostics should classify empty driver queues.");
+        RequireContains(readinessDiagnostics, "FILE_FLAG_OVERLAPPED", "Readiness diagnostics should use bounded overlapped READ_EVENTS probes.");
         RequireContains(eventParser, "capabilityFlagsHex", "Capabilities row should preserve capability flags.");
         RequireContains(eventParser, "supportedProducerMaskHex", "Capabilities/status rows should preserve supported producer mask.");
         RequireContains(eventParser, "KSWORD_SANDBOX_HEALTH_FLAG_PRODUCER_MASKS_AVAILABLE", "Health flag names should decode producer-mask availability.");
@@ -118,6 +139,14 @@ internal sealed class R0CollectorContractScenario : ISmokeTestScenario
         RequireContains(collectorDoc, "requestedMaxEvents", "r0-collector.md should describe the requested max-events field.");
         RequireContains(collectorDoc, "drainStoppedAtBatchLimit", "r0-collector.md should describe the batch-limit exit field.");
         RequireContains(collectorDoc, "--abi-self-check", "r0-collector.md should describe the ABI self-check mode.");
+        RequireContains(collectorDoc, "--diagnose", "r0-collector.md should describe live readiness diagnose mode.");
+        RequireContains(collectorDoc, "r0collector.readinessDiagnostic", "r0-collector.md should document readiness diagnostic output.");
+        RequireContains(collectorDoc, "r0collector.readinessSummary", "r0-collector.md should document readiness summary output.");
+        RequireContains(collectorDoc, "diagnosticCode", "r0-collector.md should document machine-readable diagnostic codes.");
+        RequireContains(schemaDoc, "--diagnose", "r0-jsonl-schema.md should document diagnose CLI JSONL behavior.");
+        RequireContains(schemaDoc, "r0collector.readinessDiagnostic", "r0-jsonl-schema.md should document readiness diagnostic rows.");
+        RequireContains(schemaDoc, "r0collector.readinessSummary", "r0-jsonl-schema.md should document readiness summary rows.");
+        RequireContains(schemaDoc, "open_device_denied", "r0-jsonl-schema.md should document device-open diagnostic codes.");
         RequireContains(collectorDoc, "r0collector.abiSelfCheck", "r0-collector.md should document ABI self-check output.");
         RequireContains(collectorDoc, "JSONL quality and noise contract", "r0-collector.md should document stable JSONL quality fields.");
 

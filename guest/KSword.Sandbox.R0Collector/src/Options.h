@@ -8,15 +8,18 @@ namespace KSword::Sandbox::R0Collector {
 
 struct Options {
     std::wstring devicePath = LR"(\\.\KSwordSandboxDriver)";
+    std::wstring serviceName = L"KSwordSandboxDriver";
     std::wstring outputPath = L"-";
     int durationSeconds = 0;
     int pollIntervalMs = 500;
+    int diagnoseReadTimeoutMs = 2000;
     int maxReadBatches = 0;
     unsigned long readEventsMaxEvents = kReadEventsMaxEvents;
     unsigned long enableMask = 0;
     int stressCount = 0;
     bool enableMaskSpecified = false;
     bool abiSelfCheck = false;
+    bool diagnose = false;
     bool mockMode = false;
     bool injectJsonlNoise = false;
     bool healthOnly = false;

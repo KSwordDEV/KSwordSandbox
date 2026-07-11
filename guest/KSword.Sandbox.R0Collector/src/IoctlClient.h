@@ -53,6 +53,10 @@ private:
     HANDLE handle_ = INVALID_HANDLE_VALUE;
 };
 
+UniqueHandle OpenDriverDeviceWithFlags(
+    const std::wstring& devicePath,
+    DWORD flagsAndAttributes,
+    DWORD* errorCode);
 UniqueHandle OpenDriverDevice(const std::wstring& devicePath, DWORD* errorCode);
 bool EmitDriverHealth(const UniqueHandle& device, const Options& options, EventWriter& writer);
 bool EmitDriverCapabilities(const UniqueHandle& device, const Options& options, EventWriter& writer);

@@ -135,6 +135,11 @@ bool ParseArguments(int argc, wchar_t* argv[], Options* options, std::wstring* e
             continue;
         }
 
+        if (arg == L"--diagnose" || arg == L"--readiness" || arg == L"--readiness-check") {
+            options->diagnose = true;
+            continue;
+        }
+
         if (arg == L"--health") {
             options->healthOnly = true;
             continue;
@@ -146,6 +151,17 @@ bool ParseArguments(int argc, wchar_t* argv[], Options* options, std::wstring* e
                 return false;
             }
             options->devicePath = value;
+        } else if (arg == L"--service-name") {
+            if (!readValue(arg, &value)) {
+                return false;
+            }
+            if (value.empty()) {
+                if (error != nullptr) {
+                    *error = arg + L" requires a non-empty service name.";
+                }
+                return false;
+            }
+            options->serviceName = value;
         } else if (arg == L"--output" || arg == L"--out" || arg == L"-o") {
             if (!readValue(arg, &value)) {
                 return false;
@@ -163,6 +179,13 @@ bool ParseArguments(int argc, wchar_t* argv[], Options* options, std::wstring* e
                 return false;
             }
             if (!ParseBoundedInt(value, 1, 600000, arg, &options->pollIntervalMs, error)) {
+                return false;
+            }
+        } else if (arg == L"--diagnose-read-timeout-ms" || arg == L"--read-timeout-ms") {
+            if (!readValue(arg, &value)) {
+                return false;
+            }
+            if (!ParseBoundedInt(value, 1, 600000, arg, &options->diagnoseReadTimeoutMs, error)) {
                 return false;
             }
         } else if (arg == L"--max-read-batches") {
@@ -224,10 +247,15 @@ void PrintUsage(const wchar_t* programName) {
         << L"\n"
         << L"Options:\n"
         << L"  -d, --device <path>          Win32 device path (default: \\\\.\\KSwordSandboxDriver)\n"
+        << L"      --service-name <name>    Driver service name for --diagnose (default: KSwordSandboxDriver)\n"
         << L"  -o, --output, --out <path>   JSON Lines output path, or '-' for stdout (default: -)\n"
         << L"  -t, --duration <seconds>     Poll duration; 0 opens once and exits (default: 0)\n"
         << L"  -p, --poll-ms <ms>           Poll interval in milliseconds (default: 500)\n"
         << L"      --poll-interval-ms <ms>  Alias for --poll-ms\n"
+        << L"      --diagnose               Emit service/device/ABI/READ_EVENTS readiness diagnostics\n"
+        << L"      --readiness              Alias for --diagnose\n"
+        << L"      --readiness-check        Alias for --diagnose\n"
+        << L"      --read-timeout-ms <ms>   READ_EVENTS timeout used by --diagnose (default: 2000)\n"
         << L"      --max-events <count>     READ_EVENTS MaxEvents request cap 1..1024 (default: 64)\n"
         << L"      --max-read-batches <n>   Stop after n READ_EVENTS batches; 0 means unlimited\n"
         << L"      --enable-mask <mask>     Set producer enable mask through SET_PRODUCER_ENABLE_MASK\n"

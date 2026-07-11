@@ -523,6 +523,22 @@ function Import-GuestPasswordFromPrompt {
     }
 }
 
+# ConvertTo-ReadinessCheckId converts a display name into a stable machine id.
+# Inputs are a human-readable check name; processing lowercases and replaces
+# non-alphanumeric runs with hyphens. Return behavior is one short string for
+# JSON consumers that should not key off localized/user-facing text.
+function ConvertTo-ReadinessCheckId {
+    param([AllowNull()][string]$Name)
+
+    $value = if ([string]::IsNullOrWhiteSpace($Name)) { 'readiness-check' } else { $Name.Trim() }
+    $slug = [regex]::Replace($value.ToLowerInvariant(), '[^a-z0-9]+', '-').Trim('-')
+    if ([string]::IsNullOrWhiteSpace($slug)) {
+        return 'readiness-check'
+    }
+
+    return $slug
+}
+
 # New-ReadinessResult builds one structured result row.
 # Inputs are the check name, status, requirement flag, operator-facing message,
 # and optional machine-readable details. Processing copies details into a
@@ -536,7 +552,8 @@ function New-ReadinessResult {
         [bool]$Required,
         [string]$Message,
         [System.Collections.IDictionary]$Details = @{},
-        [string[]]$Remediation = @()
+        [string[]]$Remediation = @(),
+        [string]$Category = 'general'
     )
 
     $orderedDetails = [ordered]@{}
@@ -545,13 +562,17 @@ function New-ReadinessResult {
     }
 
     return [pscustomobject][ordered]@{
-        ResultType = 'ReadinessCheck'
-        Name       = $Name
-        Status     = $Status
-        Required   = $Required
-        Message    = $Message
+        ResultType      = 'ReadinessCheck'
+        CheckId         = ConvertTo-ReadinessCheckId -Name $Name
+        Category        = $Category
+        Name            = $Name
+        Status          = $Status
+        Required        = $Required
+        RequiredForLive = $Required
+        MachineReadable = $true
+        Message         = $Message
         Remediation = @($Remediation)
-        Details    = [pscustomobject]$orderedDetails
+        Details         = [pscustomobject]$orderedDetails
     }
 }
 
@@ -672,6 +693,137 @@ function Test-AdministratorPrivilege {
             } `
             -Remediation @('Open a new PowerShell session and rerun .\scripts\Test-HyperVReadiness.ps1; live VM operations require an elevated Windows shell.')
     }
+}
+
+# Test-HyperVFeatureState checks whether the host appears to have Hyper-V
+# installed/enabled without changing Windows optional features or services.
+# Inputs are none; processing queries Windows optional-feature metadata and the
+# VMMS service when available. Return behavior is one machine-readable readiness
+# object; no service start or feature enable action is attempted.
+function Test-HyperVFeatureState {
+    try {
+        $hostIsWindows = [System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform(
+            [System.Runtime.InteropServices.OSPlatform]::Windows)
+    }
+    catch {
+        $hostIsWindows = $false
+    }
+
+    if (-not $hostIsWindows) {
+        return New-ReadinessResult `
+            -Name 'Hyper-V feature enabled' `
+            -Category 'host' `
+            -Status 'Failed' `
+            -Required $true `
+            -Message 'Live Hyper-V runs require a Windows host with Hyper-V enabled.' `
+            -Details @{
+                IsWindows = $false
+                FeatureQueryAttempted = $false
+                VmmsServiceQueryAttempted = $false
+                ReadOnly = $true
+            } `
+            -Remediation @('Run live Hyper-V analysis on a Windows Pro/Enterprise/Education host with Hyper-V enabled; use PlanOnly/WhatIf on non-Windows hosts.')
+    }
+
+    $featureNames = @('Microsoft-Hyper-V-All', 'Microsoft-Hyper-V', 'Microsoft-Hyper-V-Hypervisor')
+    $featureStates = New-Object System.Collections.Generic.List[object]
+    $featureQueryAttempted = $false
+    $featureQueryError = ''
+    $anyFeatureEnabled = $false
+
+    if ($null -ne (Get-Command -Name Get-WindowsOptionalFeature -ErrorAction SilentlyContinue)) {
+        $featureQueryAttempted = $true
+        foreach ($featureName in $featureNames) {
+            try {
+                $feature = Get-WindowsOptionalFeature -Online -FeatureName $featureName -ErrorAction Stop
+                $stateText = [string]$feature.State
+                if ($stateText -eq 'Enabled') {
+                    $anyFeatureEnabled = $true
+                }
+
+                [void]$featureStates.Add([pscustomobject][ordered]@{
+                        FeatureName = $featureName
+                        State = $stateText
+                        QuerySucceeded = $true
+                    })
+            }
+            catch {
+                $featureQueryError = $_.Exception.Message
+                [void]$featureStates.Add([pscustomobject][ordered]@{
+                        FeatureName = $featureName
+                        State = ''
+                        QuerySucceeded = $false
+                        ErrorMessage = $_.Exception.Message
+                    })
+            }
+        }
+    }
+
+    $vmmsServiceExists = $false
+    $vmmsServiceStatus = ''
+    $vmmsServiceStartType = ''
+    $vmmsQueryError = ''
+    try {
+        $service = Get-Service -Name 'vmms' -ErrorAction Stop
+        $vmmsServiceExists = $true
+        $vmmsServiceStatus = [string]$service.Status
+        $vmmsServiceStartType = [string]$service.StartType
+    }
+    catch {
+        $vmmsQueryError = $_.Exception.Message
+    }
+
+    $details = @{
+        IsWindows = $true
+        FeatureNames = $featureNames
+        FeatureQueryAttempted = $featureQueryAttempted
+        FeatureStates = @($featureStates.ToArray())
+        FeatureQueryError = $featureQueryError
+        AnyFeatureEnabled = $anyFeatureEnabled
+        VmmsServiceName = 'vmms'
+        VmmsServiceExists = $vmmsServiceExists
+        VmmsServiceStatus = $vmmsServiceStatus
+        VmmsServiceStartType = $vmmsServiceStartType
+        VmmsQueryError = $vmmsQueryError
+        ReadOnly = $true
+    }
+
+    if ($anyFeatureEnabled -or $vmmsServiceExists) {
+        $message = if ($anyFeatureEnabled) {
+            'Hyper-V optional feature appears enabled.'
+        }
+        else {
+            "Hyper-V optional-feature state was not conclusive, but the VMMS service exists with status '$vmmsServiceStatus'."
+        }
+
+        return New-ReadinessResult `
+            -Name 'Hyper-V feature enabled' `
+            -Category 'host' `
+            -Status 'Passed' `
+            -Required $true `
+            -Message $message `
+            -Details $details
+    }
+
+    if ($featureQueryAttempted -and @($featureStates | Where-Object { $_.QuerySucceeded }).Count -gt 0) {
+        return New-ReadinessResult `
+            -Name 'Hyper-V feature enabled' `
+            -Category 'host' `
+            -Status 'Failed' `
+            -Required $true `
+            -Message 'Hyper-V optional feature was queryable but does not appear enabled, and the VMMS service was not found.' `
+            -Details $details `
+            -Remediation @('Enable the Hyper-V Windows optional feature and Hyper-V management tools, reboot if required, then rerun the read-only readiness check.')
+    }
+
+    return New-ReadinessResult `
+        -Name 'Hyper-V feature enabled' `
+        -Category 'host' `
+        -Status 'Warning' `
+        -Required $true `
+        -Message 'Hyper-V feature/service state could not be proven from this session.' `
+        -Details $details `
+        -Remediation @('Open an elevated Windows PowerShell session and rerun .\scripts\Test-HyperVReadiness.ps1 so Hyper-V feature and VMMS service state can be queried.')
 }
 
 # Test-HyperVModule checks for the management module and required commands.
@@ -1014,6 +1166,106 @@ function Test-RuntimeRootWritableReadOnly {
             MatchingDenyRuleCount  = $matchingDenyRules
             WriteProbeCreated      = $false
         }
+}
+
+# Test-IsPathUnderRoot checks whether one full path is nested under a root.
+# Inputs are candidate/root paths; processing normalizes full paths and performs
+# ordinal-ignore-case prefix comparison with a trailing separator. Return
+# behavior is false for invalid or empty paths.
+function Test-IsPathUnderRoot {
+    param(
+        [AllowNull()][string]$Path,
+        [AllowNull()][string]$Root
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Path) -or [string]::IsNullOrWhiteSpace($Root)) {
+        return $false
+    }
+
+    try {
+        $fullPath = [System.IO.Path]::GetFullPath($Path).TrimEnd('\', '/')
+        $fullRoot = [System.IO.Path]::GetFullPath($Root).TrimEnd('\', '/')
+        $rootWithSeparator = $fullRoot + [System.IO.Path]::DirectorySeparatorChar
+        return $fullPath.Equals($fullRoot, [System.StringComparison]::OrdinalIgnoreCase) -or
+            $fullPath.StartsWith($rootWithSeparator, [System.StringComparison]::OrdinalIgnoreCase)
+    }
+    catch {
+        return $false
+    }
+}
+
+# Test-HostSharedPathConfiguration validates host-side paths used to exchange
+# plans, payloads, samples, and output with the VM. Inputs are resolved runtime,
+# payload, and repository roots. Processing is read-only; it checks path shape
+# and whether local artifact paths accidentally point inside the git checkout.
+# Return behavior is one readiness object with copy mechanisms for automation.
+function Test-HostSharedPathConfiguration {
+    param(
+        [AllowNull()][string]$RuntimeRootPath,
+        [AllowNull()][string]$GuestPayloadRootPath,
+        [AllowNull()][string]$RepositoryRootPath
+    )
+
+    $runtimeRootIsAbsolute = -not [string]::IsNullOrWhiteSpace($RuntimeRootPath) -and [System.IO.Path]::IsPathRooted($RuntimeRootPath)
+    $payloadRootIsAbsolute = -not [string]::IsNullOrWhiteSpace($GuestPayloadRootPath) -and [System.IO.Path]::IsPathRooted($GuestPayloadRootPath)
+    $runtimeUnderRepo = Test-IsPathUnderRoot -Path $RuntimeRootPath -Root $RepositoryRootPath
+    $payloadUnderRepo = Test-IsPathUnderRoot -Path $GuestPayloadRootPath -Root $RepositoryRootPath
+    $runtimeExists = -not [string]::IsNullOrWhiteSpace($RuntimeRootPath) -and (Test-Path -LiteralPath $RuntimeRootPath -PathType Container)
+    $payloadExists = -not [string]::IsNullOrWhiteSpace($GuestPayloadRootPath) -and (Test-Path -LiteralPath $GuestPayloadRootPath -PathType Container)
+    $details = @{
+        RuntimeRoot = $RuntimeRootPath
+        RuntimeRootIsAbsolute = $runtimeRootIsAbsolute
+        RuntimeRootExists = $runtimeExists
+        RuntimeRootUnderRepository = $runtimeUnderRepo
+        GuestPayloadRoot = $GuestPayloadRootPath
+        GuestPayloadRootIsAbsolute = $payloadRootIsAbsolute
+        GuestPayloadRootExists = $payloadExists
+        GuestPayloadRootUnderRepository = $payloadUnderRepo
+        RepositoryRoot = $RepositoryRootPath
+        CopyMechanisms = @('Copy-VMFile for submitted sample', 'PowerShell Direct Copy-Item -ToSession/-FromSession for guest tools and outputs')
+        WriteProbeCreated = $false
+        MutatedVm = $false
+        ReadOnly = $true
+    }
+
+    if (-not $runtimeRootIsAbsolute -or -not $payloadRootIsAbsolute) {
+        return New-ReadinessResult `
+            -Name 'Host shared path configuration' `
+            -Category 'paths' `
+            -Status 'Failed' `
+            -Required $true `
+            -Message 'Runtime root and guest payload root must be absolute host paths for repeatable Hyper-V live runs.' `
+            -Details $details `
+            -Remediation @('Set paths.runtimeRoot and paths.guestPayloadRoot to absolute paths outside the repository, for example D:\Temp\KSwordSandbox and D:\Temp\KSwordSandbox\payload\guest-tools.')
+    }
+
+    if ($runtimeUnderRepo -or $payloadUnderRepo) {
+        return New-ReadinessResult `
+            -Name 'Host shared path configuration' `
+            -Category 'paths' `
+            -Status 'Failed' `
+            -Required $true `
+            -Message 'Runtime and payload exchange paths must stay outside the repository so samples, reports, payload binaries, and VM outputs are not committed.' `
+            -Details $details `
+            -Remediation @('Move runtimeRoot/guestPayloadRoot outside the git checkout, rerun payload preparation, and keep generated run outputs out of source control.')
+    }
+
+    $status = if ($runtimeExists -and $payloadExists) { 'Passed' } else { 'Warning' }
+    $message = if ($status -eq 'Passed') {
+        'Host runtime and payload exchange paths are absolute, outside the repository, and currently exist.'
+    }
+    else {
+        'Host exchange paths are absolute and outside the repository, but one or more directories do not exist yet.'
+    }
+
+    return New-ReadinessResult `
+        -Name 'Host shared path configuration' `
+        -Category 'paths' `
+        -Status $status `
+        -Required $true `
+        -Message $message `
+        -Details $details `
+        -Remediation $(if ($status -eq 'Passed') { @() } else { @('Create the runtime root and prepare the guest payload root before live execution; the readiness check does not create directories.') })
 }
 
 # Join-GuestPath joins Windows guest path fragments without touching the guest.
@@ -2076,6 +2328,106 @@ function Test-R0DriverHostPathConfiguration {
         -Remediation $(if ($signatureStatus -eq 'NotSigned') { @("Test-sign the driver and enable guest test-signing before live R0 collection.") } else { @() })
 }
 
+# Test-HostTestSigningStatus records the host boot test-signing state with a
+# read-only bcdedit query. Inputs are driver mode flags so the result can state
+# whether the value is relevant to the current run. Processing never changes
+# boot configuration. Return behavior is a readiness row; guest test-signing is
+# explicitly not verified unless the VM is deliberately inspected elsewhere.
+function Test-HostTestSigningStatus {
+    param(
+        [bool]$DriverEnabled,
+        [bool]$UseMockCollector
+    )
+
+    $realDriverMode = $DriverEnabled -and (-not $UseMockCollector)
+    $bcdedit = Get-Command -Name 'bcdedit.exe' -ErrorAction SilentlyContinue
+    if ($null -eq $bcdedit) {
+        return New-ReadinessResult `
+            -Name 'Test signing status' `
+            -Category 'driver' `
+            -Status 'Warning' `
+            -Required $false `
+            -Message 'bcdedit.exe is not available, so host test-signing state could not be recorded.' `
+            -Details @{
+                DriverEnabled = $DriverEnabled
+                UseMockCollector = $UseMockCollector
+                RealDriverMode = $realDriverMode
+                BcdEditAvailable = $false
+                TestSigningEnabled = $null
+                GuestTestSigningVerified = $false
+                Scope = 'host-current-boot-entry'
+                ReadOnly = $true
+            } `
+            -Remediation @('For real R0 collection, verify Windows test-signing inside the isolated guest VM manually; the readiness script does not start the VM to inspect guest boot state.')
+    }
+
+    $outputText = ''
+    $exitCode = $null
+    try {
+        $output = & $bcdedit.Source /enum '{current}' 2>&1
+        $exitCode = $LASTEXITCODE
+        $outputText = (@($output) | ForEach-Object { [string]$_ }) -join [Environment]::NewLine
+    }
+    catch {
+        return New-ReadinessResult `
+            -Name 'Test signing status' `
+            -Category 'driver' `
+            -Status 'Warning' `
+            -Required $false `
+            -Message "Unable to query host test-signing state with bcdedit.exe: $($_.Exception.Message)" `
+            -Details @{
+                DriverEnabled = $DriverEnabled
+                UseMockCollector = $UseMockCollector
+                RealDriverMode = $realDriverMode
+                BcdEditAvailable = $true
+                ErrorType = $_.Exception.GetType().FullName
+                ErrorMessage = $_.Exception.Message
+                TestSigningEnabled = $null
+                GuestTestSigningVerified = $false
+                Scope = 'host-current-boot-entry'
+                ReadOnly = $true
+            } `
+            -Remediation @('Open an elevated shell if you need to inspect host boot configuration; for real R0 collection, verify guest test-signing manually before live execution.')
+    }
+
+    $testSigningValue = ''
+    if ($outputText -match '(?im)^\s*testsigning\s+(?<value>\S+)\s*$') {
+        $testSigningValue = $Matches['value']
+    }
+
+    $testSigningEnabled = $testSigningValue -match '^(?i:yes|on|true|1)$'
+    $status = if ($realDriverMode -and (-not $testSigningEnabled)) { 'Warning' } else { 'Passed' }
+    $message = if ($testSigningEnabled) {
+        'Host current boot entry has test-signing enabled. Guest test-signing still must be verified inside the golden VM for real R0 driver runs.'
+    }
+    elseif ($realDriverMode) {
+        'Host current boot entry does not show test-signing enabled. Real R0 collection also requires guest test-signing to be enabled and verified manually.'
+    }
+    else {
+        'Host current boot entry does not show test-signing enabled; this is acceptable for mock/no-driver readiness.'
+    }
+
+    return New-ReadinessResult `
+        -Name 'Test signing status' `
+        -Category 'driver' `
+        -Status $status `
+        -Required $false `
+        -Message $message `
+        -Details @{
+            DriverEnabled = $DriverEnabled
+            UseMockCollector = $UseMockCollector
+            RealDriverMode = $realDriverMode
+            BcdEditAvailable = $true
+            BcdEditExitCode = $exitCode
+            TestSigningValue = $testSigningValue
+            TestSigningEnabled = $testSigningEnabled
+            GuestTestSigningVerified = $false
+            Scope = 'host-current-boot-entry'
+            ReadOnly = $true
+        } `
+        -Remediation $(if ($realDriverMode -and (-not $testSigningEnabled)) { @('For real R0 collection, enable Windows test-signing inside the isolated guest VM, reboot it, and recreate/restore the Clean checkpoint; use mock R0 when signing is not in scope.') } else { @() })
+}
+
 $script:ReadinessInputMetadata = Resolve-ReadinessInputConfiguration
 $promptMetadata = Import-GuestPasswordFromPrompt `
     -SecretName $GuestPasswordSecretName `
@@ -2092,8 +2444,16 @@ $r0DriverHostPathResult = Test-R0DriverHostPathConfiguration `
     -Metadata $script:ReadinessInputMetadata
 [void]$results.Add($r0DriverHostPathResult)
 
+$testSigningResult = Test-HostTestSigningStatus `
+    -DriverEnabled ([bool]$script:ReadinessInputMetadata.DriverEnabled) `
+    -UseMockCollector ([bool]$script:ReadinessInputMetadata.DriverUseMockCollector)
+[void]$results.Add($testSigningResult)
+
 $administratorResult = Test-AdministratorPrivilege
 [void]$results.Add($administratorResult)
+
+$hyperVFeatureResult = Test-HyperVFeatureState
+[void]$results.Add($hyperVFeatureResult)
 
 $hyperVModuleResult = Test-HyperVModule
 [void]$results.Add($hyperVModuleResult)
@@ -2103,6 +2463,12 @@ $guestSecretResult = Test-GuestPasswordSecret -SecretName $GuestPasswordSecretNa
 
 $runtimeRootResult = Test-RuntimeRootWritableReadOnly -Path $RuntimeRoot
 [void]$results.Add($runtimeRootResult)
+
+$sharedPathResult = Test-HostSharedPathConfiguration `
+    -RuntimeRootPath $RuntimeRoot `
+    -GuestPayloadRootPath $GuestPayloadRoot `
+    -RepositoryRootPath $script:ReadinessInputMetadata.RepositoryRoot
+[void]$results.Add($sharedPathResult)
 
 $guestWorkingDirectoryResult = Test-GuestWorkingDirectoryPath `
     -GuestRoot $GuestWorkingDirectory `
@@ -2118,7 +2484,7 @@ $hostPayloadResult = Test-HostPayloadFiles `
 [void]$results.Add($hostPayloadResult)
 
 $isAdministrator = $administratorResult.Status -eq 'Passed'
-$isHyperVAvailable = $hyperVModuleResult.Status -eq 'Passed'
+$isHyperVAvailable = ($hyperVModuleResult.Status -eq 'Passed') -and ($hyperVFeatureResult.Status -ne 'Failed')
 
 $vmResult = Test-HyperVVm `
     -Name $VmName `
@@ -2182,6 +2548,9 @@ $secretHygieneResult = Test-RepositorySecretHygiene `
 $failedCount = @($results | Where-Object { $_.Status -eq 'Failed' }).Count
 $warningCount = @($results | Where-Object { $_.Status -eq 'Warning' }).Count
 $passedCount = @($results | Where-Object { $_.Status -eq 'Passed' }).Count
+$failedRequiredCount = @($results | Where-Object { $_.Status -eq 'Failed' -and [bool]$_.RequiredForLive }).Count
+$failedCheckIds = @($results | Where-Object { $_.Status -eq 'Failed' } | ForEach-Object { [string]$_.CheckId })
+$warningCheckIds = @($results | Where-Object { $_.Status -eq 'Warning' } | ForEach-Object { [string]$_.CheckId })
 $recommendedActions = @(Get-ReadinessRecommendedActions -Results @($results.ToArray()))
 $exitCode = if ($failedCount -gt 0) { 1 } else { 0 }
 $overallStatus = if ($failedCount -gt 0) {
@@ -2199,12 +2568,20 @@ foreach ($result in $results) {
 }
 
 Write-Output ([pscustomobject][ordered]@{
+        ContractVersion = 2
+        Kind           = 'KSwordSandbox.HyperVReadiness'
         ResultType     = 'ReadinessSummary'
+        MachineReadable = $true
+        GeneratedAtUtc = [DateTimeOffset]::UtcNow.ToString('O')
         OverallStatus  = $overallStatus
         ExitCode       = $exitCode
         PassedCount    = $passedCount
         WarningCount   = $warningCount
         FailedCount    = $failedCount
+        FailedRequiredCount = $failedRequiredCount
+        FailedCheckIds = $failedCheckIds
+        WarningCheckIds = $warningCheckIds
+        LiveReady      = ($failedRequiredCount -eq 0)
         ConfigPath     = $script:ReadinessInputMetadata.ConfigPath
         ConfigSource   = $script:ReadinessInputMetadata.ConfigSource
         InstallStatePath = $script:ReadinessInputMetadata.InstallStatePath
@@ -2218,7 +2595,25 @@ Write-Output ([pscustomobject][ordered]@{
         DriverUseMockCollector = $script:ReadinessInputMetadata.DriverUseMockCollector
         DriverHostPath = $script:ReadinessInputMetadata.DriverHostPath
         ReadOnly       = $true
+        ReadOnlyAssertions = [pscustomobject][ordered]@{
+            NoProbeFilesWritten = $true
+            NoVmMutationCommandsExecuted = $true
+            DidNotStartVm = $true
+            DidNotRestoreCheckpoint = $true
+            DidNotEnableGuestService = $true
+            SecretValuePrinted = $false
+        }
         RecommendedActions = $recommendedActions
+        RemediationHints = $recommendedActions
+        Checks = @($results | ForEach-Object {
+                [pscustomobject][ordered]@{
+                    CheckId = [string]$_.CheckId
+                    Name = [string]$_.Name
+                    Category = [string]$_.Category
+                    Status = [string]$_.Status
+                    RequiredForLive = [bool]$_.RequiredForLive
+                }
+            })
         Note           = 'No probe files were written and no VM mutation commands were executed; PowerShell Direct and guest payload probes run only when the VM is already running and credentials are visible.'
     })
 

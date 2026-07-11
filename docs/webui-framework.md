@@ -88,18 +88,16 @@ The root dashboard must keep these operator-facing areas visible and copyable:
   The legacy blocking `/runbook/execute` endpoint remains available for tools,
   but the browser experience must not depend on one long fetch staying alive;
 - upload flow should be one-click for operators: after an `.exe` upload is
-  stored and a plan is created, the dashboard automatically opens the dedicated
-  dynamic monitor page in a new tab, starts live VM analysis, and switches the
-  progress panel from estimated stages to real runbook step status. The click
-  handler opens a same-gesture `about:blank` monitor placeholder before the
-  first asynchronous upload/plan `await`, then navigates that existing window to
-  `/jobs/{jobId}/live-events` once the job exists; this reduces popup-blocker
-  failures compared with opening the monitor only after upload completes. If
-  the browser blocks the new tab or leaves the placeholder blank, the current
-  job card must show an explicit bilingual `Enter dynamic monitor` fallback link
-  and explain that the already-created job does not need to be uploaded again,
-  while keeping the dashboard usable while the Web host background runner owns
-  the long-running Hyper-V execution;
+  stored and a plan is created, the dashboard must submit live VM analysis to
+  the Web host background runner and redirect the current browser page to
+  `/jobs/{jobId}/live-events`. The dynamic monitor becomes the primary
+  operator surface for real runbook progress, raw events, VirusTotal status,
+  and artifact downloads; no popup or extra dashboard tab is required. The
+  preferred API path is
+  `POST /api/files/upload/start`, which saves the upload, creates the job, and
+  submits background runbook execution in one server-side operation. This avoids
+  the earlier three-request chain (`upload` -> `plan` -> `runbook/start`) losing
+  context if a browser fetch fails between steps;
 - VirusTotal official result integration is optional and hash-only. Operators
   can open `/settings` to save or clear a local API key; the key is read from
   `KSWORDBOX_VIRUSTOTAL_API_KEY` first or from the runtime settings file under
