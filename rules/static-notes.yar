@@ -1,8 +1,8 @@
-rule KSwordSandbox_Placeholder_Static_Executable
+rule KSwordSandbox_Static_PE_Header
 {
     meta:
-        description = "Placeholder static rule file for future host-side YARA scanning"
-        scope = "benign scaffold"
+        description = "Built-in lightweight static scanner confirms PE/MZ header presence"
+        scope = "static-triage"
     condition:
         uint16(0) == 0x5A4D
 }

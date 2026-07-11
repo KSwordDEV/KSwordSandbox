@@ -53,6 +53,16 @@ internal static class LiveEventsPage
             .artifact-card p { margin:8px 0; }
             .artifact-action { align-items:center; display:flex; flex-wrap:wrap; gap:8px; }
             .artifact-action .path-only { color:var(--muted); font-size:12px; font-weight:700; }
+            .artifact-chip-row { align-items:center; display:flex; flex-wrap:wrap; gap:6px; margin:8px 0; }
+            .artifact-kv-grid { display:grid; gap:6px; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); margin-top:8px; }
+            .artifact-kv { background:#ffffff; border:1px dashed #bfdbfe; padding:7px; }
+            .artifact-kv span { color:var(--muted); display:block; font-size:11px; font-weight:900; margin-bottom:3px; text-transform:uppercase; }
+            .artifact-kv code { display:inline-block; max-width:100%; }
+            .artifact-selector { border-left:3px solid var(--blue); }
+            .artifact-mini, .artifact-diagnostics { border:1px dashed var(--line); margin-top:8px; padding:8px; }
+            .artifact-mini summary, .artifact-diagnostics summary { color:#075985; cursor:pointer; font-weight:900; }
+            .artifact-warning { background:#fff7ed; border-color:#fdba74; color:#9a3412; }
+            .artifact-warning code { background:#ffedd5; }
             .report-ready { background:#eff6ff; border:1px solid rgba(67,160,255,.35); border-radius:2px; margin-top:12px; padding:12px; }
             .muted { color:var(--muted); }
             code { background:#eef7ff; border-radius:2px; padding:2px 5px; word-break:break-all; }
@@ -182,7 +192,7 @@ internal static class LiveEventsPage
             </section>
             <section>
               <h2 data-zh="证据 / 下载" data-en="Artifacts / downloads">证据 / 下载</h2>
-              <p class="muted" data-zh="证据文件来自真实证据索引（artifact index）；可下载的文件走安全下载端点（endpoint），尚未回收的采集项显示等待状态。" data-en="Evidence files come from the real artifact index; downloadable files use the guarded download endpoint, and collection lanes not yet recovered show a waiting state.">证据文件来自真实证据索引（artifact index）；可下载的文件走安全下载端点（endpoint），尚未回收的采集项显示等待状态。</p>
+              <p class="muted" data-zh="证据文件来自真实证据索引（artifact index）；可下载的文件走安全下载端点（endpoint），并明确展示安全 selector、重复组和拒绝诊断；尚未回收的采集项显示等待状态。" data-en="Evidence files come from the real artifact index; downloadable files use the guarded download endpoint and expose safe selectors, duplicate groups, and rejection diagnostics; collection lanes not yet recovered show a waiting state.">证据文件来自真实证据索引（artifact index）；可下载的文件走安全下载端点（endpoint），并明确展示安全 selector、重复组和拒绝诊断；尚未回收的采集项显示等待状态。</p>
               <div id="reportReadyActions" class="report-ready muted" data-copy="报告待生成 / reports pending">报告按钮会在运行结束后保持可用。</div>
               <div id="artifactCards" class="artifact-card-grid">
                 <article class="artifact-card waiting muted" data-copy="证据路径解析中 / artifacts pending" data-zh="正在解析证据（artifact）路径。" data-en="Resolving artifact paths.">正在解析证据（artifact）路径。</article>
@@ -804,8 +814,54 @@ internal static class LiveEventsPage
               latestJobSnapshot = normalizeJobSnapshot(latestJobSnapshot || initialJob);
               const paths = buildArtifactPaths(latestJobSnapshot, latestArtifactSources);
               const rows = buildIndexedArtifactRows(paths);
-              body.innerHTML = renderArtifactGroups(rows);
+              body.innerHTML = renderArtifactIndexSummary() + renderArtifactGroups(rows);
               renderReportReadyActions(paths);
+            }
+
+            function renderArtifactIndexSummary() {
+              const index = latestArtifactIndex || {};
+              const artifacts = artifactArray(index, 'artifacts', 'Artifacts');
+              const collections = artifactArray(index, 'collections', 'Collections');
+              if (!latestArtifactIndex) {
+                return `<article class="artifact-card waiting muted" data-copy="${escapeAttr(t('证据索引尚未返回；等待 Web Host 构建 artifact index。', 'Artifact index has not returned yet; waiting for the Web host to build it.'))}">
+                  <div class="artifact-card-title">
+                    <strong data-copy="${escapeAttr(t('证据索引状态', 'Artifact index status'))}">${escapeHtml(t('证据索引状态', 'Artifact index status'))}</strong>
+                    <span class="pill waiting">${escapeHtml(t('等待索引', 'waiting for index'))}</span>
+                  </div>
+                  <p class="muted">${escapeHtml(t('尚未拿到 /api/jobs/{jobId}/artifacts 响应；下方仍会显示可推断的报告与采集路径。', 'No /api/jobs/{jobId}/artifacts response yet; inferred report and collection paths are still shown below.'))}</p>
+                </article>`;
+              }
+
+              const generatedAt = artifactField(index, 'generatedAtUtc', 'GeneratedAtUtc');
+              const producer = artifactField(index, 'producer', 'Producer');
+              const rootPolicy = artifactField(index, 'rootPathPolicy', 'RootPathPolicy') || 'server-owned-not-exposed';
+              const rejectionCount = collections.reduce((count, collection) => count + artifactCollectionRejectedCount(collection), 0);
+              const copy = [
+                t('证据索引已加载', 'Artifact index loaded'),
+                `${t('文件', 'artifacts')}=${artifacts.length}`,
+                `${t('采集项', 'collections')}=${collections.length}`,
+                `${t('拒绝诊断', 'rejections')}=${rejectionCount}`,
+                `policy=${rootPolicy}`,
+                generatedAt || ''
+              ].filter(Boolean).join(' | ');
+              return `<article class="artifact-card ready" data-copy="${escapeAttr(copy)}">
+                <div class="artifact-card-title">
+                  <strong data-copy="${escapeAttr(t('证据索引已加载', 'Artifact index loaded'))}">${escapeHtml(t('证据索引已加载', 'Artifact index loaded'))}</strong>
+                  <span class="pill ready" data-copy="${escapeAttr(`${artifacts.length} artifacts / ${collections.length} collections`)}">${escapeHtml(t(`${artifacts.length} 个文件`, `${artifacts.length} artifacts`))}</span>
+                </div>
+                <div class="artifact-chip-row">
+                  <span class="pill" data-copy="${escapeAttr(rootPolicy)}">${escapeHtml(t('根路径不暴露', 'root not exposed'))}</span>
+                  <span class="pill ${rejectionCount > 0 ? 'failed' : 'ready'}" data-copy="${escapeAttr(String(rejectionCount))}">${escapeHtml(t(`拒绝诊断 ${rejectionCount}`, `rejection diagnostics ${rejectionCount}`))}</span>
+                  ${generatedAt ? `<span class="pill quiet" data-copy="${escapeAttr(generatedAt)}">${escapeHtml(generatedAt)}</span>` : ''}
+                </div>
+                <p class="muted">${escapeHtml(t('下载只接受 artifact index 中的相对 selector；本页不会复制或打开 host 绝对路径。', 'Downloads only accept relative selectors from the artifact index; this page does not copy or open host absolute paths.'))}</p>
+                <div class="artifact-kv-grid">
+                  ${artifactKeyValue(t('Selector 策略', 'Selector policy'), 'relative-index-selectors-only')}
+                  ${artifactKeyValue(t('RootPathPolicy', 'RootPathPolicy'), rootPolicy)}
+                  ${producer ? artifactKeyValue(t('索引生成器', 'Producer'), producer) : ''}
+                </div>
+                ${renderCollectionRejectionDiagnostics(collections)}
+              </article>`;
             }
 
             function renderArtifactGroups(cards) {
@@ -880,17 +936,17 @@ internal static class LiveEventsPage
               const dumpArtifact = findArtifact(artifacts, artifact => artifactMatches(artifact, 'memory-dump', 'memory-dumps'));
               const pcapArtifact = findArtifact(artifacts, artifact => artifactMatches(artifact, 'packet-capture', 'packet-captures') || isPacketCapturePath(artifactPath(artifact)));
 
-              pushArtifactCard(rows, seen, t('默认 HTML 报告', 'Default HTML report'), 'report.html', artifactPath(reportHtmlArtifact) || paths.reportHtmlPath, `/api/jobs/${encodeURIComponent(jobId)}/report/html`, reportReady || Boolean(reportHtmlArtifact), t('兼容报告端点（endpoint）', 'compatibility report endpoint'));
-              pushArtifactCard(rows, seen, t('中文报告', 'Chinese report'), 'report.zh.html', artifactPath(zhReportArtifact) || paths.zhReportPath, `/api/jobs/${encodeURIComponent(jobId)}/report/html?lang=zh`, reportReady || Boolean(zhReportArtifact), t('打开 report.zh.html', 'opens report.zh.html'));
-              pushArtifactCard(rows, seen, t('英文报告', 'English report'), 'report.en.html', artifactPath(enReportArtifact) || paths.enReportPath, `/api/jobs/${encodeURIComponent(jobId)}/report/html?lang=en`, reportReady || Boolean(enReportArtifact), t('打开 report.en.html', 'opens report.en.html'));
-              pushArtifactCard(rows, seen, t('JSON 报告', 'JSON report'), 'report.json', artifactPath(jsonReportArtifact) || paths.reportJsonPath, artifactDownloadHref(jsonReportArtifact), Boolean(jsonReportArtifact || paths.reportJsonPath), jsonReportArtifact ? artifactDetail(jsonReportArtifact, t('已索引，可下载', 'indexed and downloadable')) : t('等待证据索引（artifact index）下载链接', 'waiting for artifact-index download link'));
-              pushArtifactCard(rows, seen, 'events.json', 'events.json', artifactPath(eventsArtifact) || paths.eventsJsonPath, artifactDownloadHref(eventsArtifact), Boolean(eventsArtifact || paths.eventsCollected), eventsArtifact ? artifactDetail(eventsArtifact, t('已索引，可下载', 'indexed and downloadable')) : (paths.eventsCollected ? t('已记录事件来源', 'event source recorded') : t('等待回收', 'waiting for collection')));
-              pushArtifactCard(rows, seen, 'driver-events.jsonl', 'driver-events.jsonl', artifactPath(driverArtifact) || paths.driverEventsJsonlPath, artifactDownloadHref(driverArtifact), Boolean(driverArtifact || paths.driverCollected), driverArtifact ? artifactDetail(driverArtifact, t('已索引，可下载', 'indexed and downloadable')) : (paths.driverCollected ? t('已发现驱动遥测', 'driver telemetry found') : t('等待回收', 'waiting for collection')));
-              pushArtifactCard(rows, seen, t('执行记录', 'Runbook execution'), 'runbook-execution.json', artifactPath(runbookArtifact) || paths.runbookExecutionPath, artifactDownloadHref(runbookArtifact), Boolean(runbookArtifact || paths.runbookExecutionPath), runbookArtifact ? artifactDetail(runbookArtifact, t('已索引，可下载', 'indexed and downloadable')) : t('执行后生成', 'expected after execution'));
-              pushArtifactCard(rows, seen, t('落地文件', 'Dropped files'), 'artifacts/dropped-files', artifactPath(droppedArtifact) || paths.droppedFilesPath, artifactDownloadHref(droppedArtifact), Boolean(droppedArtifact || latestArtifactSignals.droppedFiles), droppedArtifact ? artifactDetail(droppedArtifact, t('已索引，可下载', 'indexed and downloadable')) : (latestArtifactSignals.droppedFiles ? t('事件中已出现落地文件证据', 'dropped-file evidence observed in events') : t('等待回收', 'waiting for collection')));
-              pushArtifactCard(rows, seen, t('截图', 'Screenshots'), 'screenshots', artifactPath(screenshotArtifact) || paths.screenshotsPath, artifactDownloadHref(screenshotArtifact), Boolean(screenshotArtifact || latestArtifactSignals.screenshots), screenshotArtifact ? artifactDetail(screenshotArtifact, t('已索引，可下载', 'indexed and downloadable')) : (latestArtifactSignals.screenshots ? t('事件中已出现截图证据', 'screenshot evidence observed in events') : t('等待回收', 'waiting for collection')));
-              pushArtifactCard(rows, seen, t('内存转储', 'Memory dumps'), 'memory-dumps', artifactPath(dumpArtifact) || paths.memoryDumpsPath, artifactDownloadHref(dumpArtifact), Boolean(dumpArtifact || latestArtifactSignals.memoryDumps), dumpArtifact ? artifactDetail(dumpArtifact, t('已索引，可下载', 'indexed and downloadable')) : (latestArtifactSignals.memoryDumps ? t('事件中已出现内存转储证据', 'memory-dump evidence observed in events') : t('等待回收', 'waiting for collection')));
-              pushArtifactCard(rows, seen, t('PCAP 抓包', 'PCAP captures'), 'packet-captures', artifactPath(pcapArtifact) || paths.packetCapturePath, artifactDownloadHref(pcapArtifact), Boolean(pcapArtifact || paths.pcapCollected || latestArtifactSignals.packetCaptures), pcapArtifact ? artifactDetail(pcapArtifact, t('已索引，可下载', 'indexed and downloadable')) : (paths.pcapCollected || latestArtifactSignals.packetCaptures ? t('已发现 PCAP/PCAPNG 证据', 'PCAP/PCAPNG evidence found') : t('等待回收', 'waiting for collection')));
+              pushArtifactCard(rows, seen, t('默认 HTML 报告', 'Default HTML report'), 'report.html', artifactPath(reportHtmlArtifact) || paths.reportHtmlPath, `/api/jobs/${encodeURIComponent(jobId)}/report/html`, reportReady || Boolean(reportHtmlArtifact), t('兼容报告端点（endpoint）', 'compatibility report endpoint'), reportHtmlArtifact);
+              pushArtifactCard(rows, seen, t('中文报告', 'Chinese report'), 'report.zh.html', artifactPath(zhReportArtifact) || paths.zhReportPath, `/api/jobs/${encodeURIComponent(jobId)}/report/html?lang=zh`, reportReady || Boolean(zhReportArtifact), t('打开 report.zh.html', 'opens report.zh.html'), zhReportArtifact);
+              pushArtifactCard(rows, seen, t('英文报告', 'English report'), 'report.en.html', artifactPath(enReportArtifact) || paths.enReportPath, `/api/jobs/${encodeURIComponent(jobId)}/report/html?lang=en`, reportReady || Boolean(enReportArtifact), t('打开 report.en.html', 'opens report.en.html'), enReportArtifact);
+              pushArtifactCard(rows, seen, t('JSON 报告', 'JSON report'), 'report.json', artifactPath(jsonReportArtifact) || paths.reportJsonPath, artifactDownloadHref(jsonReportArtifact), Boolean(jsonReportArtifact || paths.reportJsonPath), jsonReportArtifact ? artifactDetail(jsonReportArtifact, t('已索引，可下载', 'indexed and downloadable')) : t('等待证据索引（artifact index）下载链接', 'waiting for artifact-index download link'), jsonReportArtifact);
+              pushArtifactCard(rows, seen, 'events.json', 'events.json', artifactPath(eventsArtifact) || paths.eventsJsonPath, artifactDownloadHref(eventsArtifact), Boolean(eventsArtifact || paths.eventsCollected), eventsArtifact ? artifactDetail(eventsArtifact, t('已索引，可下载', 'indexed and downloadable')) : (paths.eventsCollected ? t('已记录事件来源', 'event source recorded') : t('等待回收', 'waiting for collection')), eventsArtifact);
+              pushArtifactCard(rows, seen, 'driver-events.jsonl', 'driver-events.jsonl', artifactPath(driverArtifact) || paths.driverEventsJsonlPath, artifactDownloadHref(driverArtifact), Boolean(driverArtifact || paths.driverCollected), driverArtifact ? artifactDetail(driverArtifact, t('已索引，可下载', 'indexed and downloadable')) : (paths.driverCollected ? t('已发现驱动遥测', 'driver telemetry found') : t('等待回收', 'waiting for collection')), driverArtifact);
+              pushArtifactCard(rows, seen, t('执行记录', 'Runbook execution'), 'runbook-execution.json', artifactPath(runbookArtifact) || paths.runbookExecutionPath, artifactDownloadHref(runbookArtifact), Boolean(runbookArtifact || paths.runbookExecutionPath), runbookArtifact ? artifactDetail(runbookArtifact, t('已索引，可下载', 'indexed and downloadable')) : t('执行后生成', 'expected after execution'), runbookArtifact);
+              pushArtifactCard(rows, seen, t('落地文件', 'Dropped files'), 'artifacts/dropped-files', artifactPath(droppedArtifact) || paths.droppedFilesPath, artifactDownloadHref(droppedArtifact), Boolean(droppedArtifact || latestArtifactSignals.droppedFiles), droppedArtifact ? artifactDetail(droppedArtifact, t('已索引，可下载', 'indexed and downloadable')) : (latestArtifactSignals.droppedFiles ? t('事件中已出现落地文件证据', 'dropped-file evidence observed in events') : t('等待回收', 'waiting for collection')), droppedArtifact);
+              pushArtifactCard(rows, seen, t('截图', 'Screenshots'), 'screenshots', artifactPath(screenshotArtifact) || paths.screenshotsPath, artifactDownloadHref(screenshotArtifact), Boolean(screenshotArtifact || latestArtifactSignals.screenshots), screenshotArtifact ? artifactDetail(screenshotArtifact, t('已索引，可下载', 'indexed and downloadable')) : (latestArtifactSignals.screenshots ? t('事件中已出现截图证据', 'screenshot evidence observed in events') : t('等待回收', 'waiting for collection')), screenshotArtifact);
+              pushArtifactCard(rows, seen, t('内存转储', 'Memory dumps'), 'memory-dumps', artifactPath(dumpArtifact) || paths.memoryDumpsPath, artifactDownloadHref(dumpArtifact), Boolean(dumpArtifact || latestArtifactSignals.memoryDumps), dumpArtifact ? artifactDetail(dumpArtifact, t('已索引，可下载', 'indexed and downloadable')) : (latestArtifactSignals.memoryDumps ? t('事件中已出现内存转储证据', 'memory-dump evidence observed in events') : t('等待回收', 'waiting for collection')), dumpArtifact);
+              pushArtifactCard(rows, seen, t('PCAP 抓包', 'PCAP captures'), 'packet-captures', artifactPath(pcapArtifact) || paths.packetCapturePath, artifactDownloadHref(pcapArtifact), Boolean(pcapArtifact || paths.pcapCollected || latestArtifactSignals.packetCaptures), pcapArtifact ? artifactDetail(pcapArtifact, t('已索引，可下载', 'indexed and downloadable')) : (paths.pcapCollected || latestArtifactSignals.packetCaptures ? t('已发现 PCAP/PCAPNG 证据', 'PCAP/PCAPNG evidence found') : t('等待回收', 'waiting for collection')), pcapArtifact);
 
               if (artifacts.length > 0) {
                 const sorted = [...artifacts].sort((a, b) => artifactRank(a) - artifactRank(b) || artifactPath(a).localeCompare(artifactPath(b)));
@@ -898,14 +954,14 @@ internal static class LiveEventsPage
                   const label = artifactLabel(artifact);
                   const type = artifactTypeText(artifact);
                   const path = artifactPath(artifact);
-                  pushArtifactCard(rows, seen, label, type, path, artifactDownloadHref(artifact), Boolean(artifactDownloadHref(artifact) || path), artifactDetail(artifact, t('已索引', 'indexed')));
+                  pushArtifactCard(rows, seen, label, type, path, artifactDownloadHref(artifact), Boolean(artifactDownloadHref(artifact) || path), artifactDetail(artifact, t('已索引', 'indexed')), artifact);
                 }
               }
 
               return rows;
             }
 
-            function pushArtifactCard(rows, seen, displayName, fileName, path, href, ready, detail) {
+            function pushArtifactCard(rows, seen, displayName, fileName, path, href, ready, detail, artifact) {
               const key = artifactCardKey(displayName, fileName, path);
               if (seen.has(key)) { return; }
               seen.add(key);
@@ -914,7 +970,7 @@ internal static class LiveEventsPage
                 groupKey,
                 groupLabel: artifactGroupLabel(groupKey),
                 ready: Boolean(ready),
-                html: artifactRow(displayName, fileName, path, href, ready, detail)
+                html: artifactRow(displayName, fileName, path, href, ready, detail, artifact)
               });
             }
 
@@ -940,13 +996,184 @@ internal static class LiveEventsPage
               }) || null;
             }
 
+            function artifactArray(source, ...names) {
+              const value = artifactField(source, ...names);
+              return Array.isArray(value) ? value : [];
+            }
+
+            function artifactField(source, ...names) {
+              if (!source || typeof source !== 'object') { return ''; }
+              for (const name of names) {
+                if (Object.prototype.hasOwnProperty.call(source, name)) { return source[name]; }
+              }
+
+              const lookup = new Map(Object.keys(source).map(key => [key.toLowerCase(), key]));
+              for (const name of names) {
+                const key = lookup.get(String(name).toLowerCase());
+                if (key !== undefined) { return source[key]; }
+              }
+
+              return '';
+            }
+
+            function artifactObject(source, ...names) {
+              const value = artifactField(source, ...names);
+              return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+            }
+
+            function artifactString(value) {
+              if (value === null || value === undefined) { return ''; }
+              return String(value).trim();
+            }
+
+            function artifactBool(value) {
+              if (typeof value === 'boolean') { return value; }
+              if (typeof value === 'number') { return value !== 0; }
+              const text = artifactString(value).toLowerCase();
+              return text === 'true' || text === '1' || text === 'yes' || text === 'y';
+            }
+
+            function firstArtifactText(...values) {
+              for (const value of values) {
+                const text = artifactString(value);
+                if (text) { return text; }
+              }
+              return '';
+            }
+
+            function artifactMetadata(artifact) {
+              return artifactObject(artifact, 'metadata', 'Metadata');
+            }
+
+            function artifactKeyValue(label, value, extraClass) {
+              const text = artifactString(value);
+              if (!text) { return ''; }
+              const copy = `${label}: ${text}`;
+              return `<div class="artifact-kv ${extraClass || ''}" data-copy="${escapeAttr(copy)}"><span>${escapeHtml(label)}</span><code data-copy="${escapeAttr(text)}">${escapeHtml(text)}</code></div>`;
+            }
+
             function artifactDownloadHref(artifact) {
-              return artifact ? (artifact.downloadHref || artifact.DownloadHref || '') : '';
+              const download = artifactDownloadInfo(artifact);
+              return download.href || firstArtifactText(artifactField(artifact, 'downloadHref', 'DownloadHref'));
             }
 
             function artifactDetail(artifact, fallback) {
               if (!artifact) { return fallback || ''; }
-              return [artifactTypeText(artifact), formatBytes(artifact.sizeBytes ?? artifact.SizeBytes), (artifact.sha256 || artifact.Sha256) ? `SHA-256 ${String(artifact.sha256 || artifact.Sha256).slice(0, 12)}…` : ''].filter(Boolean).join(' · ') || fallback || '';
+              const download = artifactDownloadInfo(artifact);
+              const sha256 = firstArtifactText(download.sha256, artifactField(artifact, 'sha256', 'Sha256'));
+              const selector = download.selector || artifactSelectorInfo(artifact).primary;
+              return [
+                artifactTypeText(artifact),
+                formatBytes(download.sizeBytes || artifactField(artifact, 'sizeBytes', 'SizeBytes')),
+                sha256 ? `SHA-256 ${sha256.slice(0, 12)}…` : '',
+                selector ? t('安全 selector 已就绪', 'safe selector ready') : ''
+              ].filter(Boolean).join(' · ') || fallback || '';
+            }
+
+            function artifactDownloadInfo(artifact) {
+              const download = artifactObject(artifact, 'download', 'Download');
+              const selector = firstArtifactText(
+                artifactField(download, 'selector', 'Selector'),
+                artifactField(artifact, 'downloadSelector', 'DownloadSelector'));
+              const href = firstArtifactText(
+                artifactField(download, 'href', 'Href'),
+                artifactField(artifact, 'downloadHref', 'DownloadHref'));
+              const availableField = artifactField(download, 'available', 'Available');
+              const rejectionCode = firstArtifactText(artifactField(download, 'rejectionCode', 'RejectionCode'));
+              const rejectionMessage = firstArtifactText(
+                artifactField(download, currentLanguage === 'en' ? 'rejectionMessage' : 'rejectionMessageZh', currentLanguage === 'en' ? 'RejectionMessage' : 'RejectionMessageZh'),
+                artifactField(download, 'rejectionMessageZh', 'RejectionMessageZh'),
+                artifactField(download, 'rejectionMessage', 'RejectionMessage'));
+              return {
+                available: availableField === '' ? Boolean(selector || href) : artifactBool(availableField),
+                selector,
+                href,
+                fileName: firstArtifactText(artifactField(download, 'fileName', 'FileName')),
+                contentType: firstArtifactText(artifactField(download, 'contentType', 'ContentType')),
+                sizeBytes: artifactField(download, 'sizeBytes', 'SizeBytes'),
+                sha256: firstArtifactText(artifactField(download, 'sha256', 'Sha256')),
+                sha256Short: firstArtifactText(artifactField(download, 'sha256Short', 'Sha256Short')),
+                rejectionCode,
+                rejectionMessage
+              };
+            }
+
+            function artifactSelectorInfo(artifact) {
+              const hasArtifact = artifact && typeof artifact === 'object';
+              const selectors = artifactObject(artifact, 'selectors', 'Selectors');
+              const relativePath = firstArtifactText(artifactField(selectors, 'relativePath', 'RelativePath'), artifactField(artifact, 'relativePath', 'RelativePath'));
+              const safeLink = firstArtifactText(artifactField(selectors, 'safeLink', 'SafeLink'), artifactField(artifact, 'safeLink', 'SafeLink'));
+              const importPath = firstArtifactText(artifactField(selectors, 'importPath', 'ImportPath'), artifactField(artifact, 'importPath', 'ImportPath'));
+              const policy = firstArtifactText(artifactField(selectors, 'policy', 'Policy'), hasArtifact ? 'relative-index-selectors-only' : '');
+              return {
+                relativePath,
+                safeLink,
+                importPath,
+                policy,
+                primary: firstArtifactText(artifactDownloadInfo(artifact).selector, safeLink, relativePath, importPath)
+              };
+            }
+
+            function artifactDuplicateInfo(artifact) {
+              const duplicate = artifactObject(artifact, 'duplicate', 'Duplicate');
+              const metadata = artifactMetadata(artifact);
+              const groupCountText = firstArtifactText(artifactField(duplicate, 'groupCount', 'GroupCount'), artifactField(metadata, 'duplicateGroupCount'));
+              const groupCount = Number(groupCountText || 0);
+              const role = firstArtifactText(artifactField(duplicate, 'role', 'Role'), artifactField(metadata, 'duplicateRole'), 'unique');
+              const isDuplicate = artifactBool(firstArtifactText(artifactField(duplicate, 'isDuplicate', 'IsDuplicate'), artifactField(metadata, 'isDuplicate')));
+              const primarySelector = firstArtifactText(
+                artifactField(duplicate, 'primarySelector', 'PrimarySelector'),
+                artifactField(metadata, 'duplicatePrimarySelector'),
+                artifactField(metadata, 'duplicatePrimarySafeLink'));
+              return {
+                role,
+                isDuplicate,
+                groupKey: firstArtifactText(artifactField(duplicate, 'groupKey', 'GroupKey'), artifactField(metadata, 'duplicateGroupKey')),
+                groupId: firstArtifactText(artifactField(duplicate, 'groupId', 'GroupId'), artifactField(metadata, 'duplicateGroupId')),
+                groupCountText,
+                groupCount: Number.isFinite(groupCount) ? groupCount : 0,
+                primarySelector
+              };
+            }
+
+            function artifactCollectionRejectedCount(collection) {
+              const diagnostics = artifactObject(collection, 'rejectionDiagnostics', 'RejectionDiagnostics');
+              const count = Number(firstArtifactText(artifactField(diagnostics, 'rejectedArtifactCount', 'RejectedArtifactCount'), artifactField(artifactMetadata(collection), 'rejectedArtifactCount')) || 0);
+              return Number.isFinite(count) ? count : 0;
+            }
+
+            function renderCollectionRejectionDiagnostics(collections) {
+              const cards = [];
+              for (const collection of collections || []) {
+                const diagnostics = artifactObject(collection, 'rejectionDiagnostics', 'RejectionDiagnostics');
+                const count = artifactCollectionRejectedCount(collection);
+                const available = artifactBool(artifactField(diagnostics, 'available', 'Available')) || count > 0;
+                const reason = firstArtifactText(artifactField(diagnostics, 'lastRejectedReason', 'LastRejectedReason'));
+                const selector = firstArtifactText(artifactField(diagnostics, 'lastRejectedSelector', 'LastRejectedSelector'));
+                const hint = firstArtifactText(
+                  artifactField(diagnostics, currentLanguage === 'en' ? 'hint' : 'zhHint', currentLanguage === 'en' ? 'Hint' : 'ZhHint'),
+                  artifactField(diagnostics, 'zhHint', 'ZhHint'));
+                if (!available && !reason && !selector && !hint) { continue; }
+                const name = firstArtifactText(artifactField(collection, 'name', 'Name'), artifactField(collection, 'category', 'Category'), t('采集项', 'collection'));
+                const copy = [name, `${t('拒绝数量', 'rejected')}=${count}`, reason, selector, hint].filter(Boolean).join(' | ');
+                cards.push(`<article class="artifact-card artifact-warning" data-copy="${escapeAttr(copy)}">
+                  <div class="artifact-card-title">
+                    <strong data-copy="${escapeAttr(name)}">${escapeHtml(name)}</strong>
+                    <span class="pill failed" data-copy="${escapeAttr(String(count))}">${escapeHtml(t(`拒绝 ${count}`, `${count} rejected`))}</span>
+                  </div>
+                  <div class="artifact-kv-grid">
+                    ${artifactKeyValue(t('最后原因', 'Last reason'), reason || t('未记录原因', 'not recorded'))}
+                    ${artifactKeyValue(t('被拒 selector', 'Rejected selector'), selector)}
+                    ${artifactKeyValue(t('中文提示', 'Hint'), hint)}
+                  </div>
+                </article>`);
+              }
+
+              if (!cards.length) { return ''; }
+              return `<details class="artifact-diagnostics" open data-copy="${escapeAttr(t('存在被拒绝的证据条目；仅展示安全摘要，不暴露 host 路径。', 'Rejected artifact entries exist; only safe summaries are shown, without host paths.'))}">
+                <summary>${escapeHtml(t('拒绝诊断 / 被忽略的证据条目', 'Rejection diagnostics / ignored artifacts'))}</summary>
+                <div class="artifact-card-grid">${cards.join('')}</div>
+              </details>`;
             }
 
             function appendMissingCollectionRows(rows, artifacts, paths) {
@@ -1061,7 +1288,13 @@ internal static class LiveEventsPage
               target.setAttribute('data-copy', `${label} /api/jobs/${jobId}/report/html?lang=zh /api/jobs/${jobId}/report/html?lang=en`);
             }
 
-            function artifactRow(displayName, fileName, path, href, ready, detail) {
+            function artifactRow(displayName, fileName, path, href, ready, detail, artifact) {
+              const hasIndexedArtifact = artifact && typeof artifact === 'object';
+              const download = artifactDownloadInfo(artifact);
+              const selectors = artifactSelectorInfo(artifact);
+              const duplicate = artifactDuplicateInfo(artifact);
+              href = href || download.href || '';
+              const safeSelector = download.selector || selectors.primary || '';
               const statusText = ready ? detail : t('等待回收', 'waiting for collection');
               const statusClass = ready ? (href ? 'endpoint' : 'ready') : 'waiting';
               const pathHtml = path
@@ -1073,16 +1306,116 @@ internal static class LiveEventsPage
               const copyAction = path
                 ? `<button class="secondary" type="button" data-copy="${escapeAttr(path)}" onclick="copyText(this.getAttribute('data-copy'))">${escapeHtml(t('复制路径', 'Copy path'))}</button>`
                 : '';
-              const copy = [displayName, fileName, path || statusText, statusText].join(' | ');
+              const selectorAction = safeSelector
+                ? `<button class="secondary" type="button" data-copy="${escapeAttr(safeSelector)}" onclick="copyText(this.getAttribute('data-copy'))">${escapeHtml(t('复制 selector', 'Copy selector'))}</button>`
+                : '';
+              const hrefCopyAction = href
+                ? `<button class="secondary" type="button" data-copy="${escapeAttr(href)}" onclick="copyText(this.getAttribute('data-copy'))">${escapeHtml(t('复制下载链接', 'Copy download link'))}</button>`
+                : '';
+              const previewLabel = artifactPreviewLabel(artifact, displayName);
+              const selectorBlock = renderArtifactSelectorBlock(download, selectors, href, hasIndexedArtifact);
+              const duplicateBlock = renderArtifactDuplicateBlock(duplicate);
+              const rejectionBlock = renderArtifactDownloadRejection(download, ready, safeSelector, hasIndexedArtifact);
+              const chipRow = renderArtifactChipRow(download, selectors, duplicate);
+              const copy = [previewLabel, fileName, path || statusText, safeSelector ? `selector=${safeSelector}` : '', statusText].filter(Boolean).join(' | ');
               return `<article class="artifact-card ${statusClass}" data-copy="${escapeAttr(copy)}">
                 <div class="artifact-card-title">
-                  <strong>${escapeHtml(displayName)}</strong>
+                  <strong data-copy="${escapeAttr(previewLabel)}">${escapeHtml(displayName)}</strong>
                   <span class="pill ${statusClass}" data-copy="${escapeAttr(statusText)}">${escapeHtml(statusText)}</span>
                 </div>
                 <p class="muted">${escapeHtml(fileName)}</p>
                 <p>${pathHtml}</p>
-                <div class="artifact-action">${openAction}${copyAction}</div>
+                ${chipRow}
+                ${selectorBlock}
+                ${duplicateBlock}
+                ${rejectionBlock}
+                <div class="artifact-action">${openAction}${copyAction}${selectorAction}${hrefCopyAction}</div>
               </article>`;
+            }
+
+            function artifactPreviewLabel(artifact, fallback) {
+              return firstArtifactText(
+                artifactField(artifact, currentLanguage === 'en' ? 'previewLabel' : 'previewLabelZh', currentLanguage === 'en' ? 'PreviewLabel' : 'PreviewLabelZh'),
+                artifactField(artifact, 'previewLabelZh', 'PreviewLabelZh'),
+                artifactField(artifact, 'previewLabel', 'PreviewLabel'),
+                fallback);
+            }
+
+            function renderArtifactChipRow(download, selectors, duplicate) {
+              const chips = [];
+              if (download.available || download.selector) {
+                chips.push(`<span class="pill ready" data-copy="${escapeAttr(download.selector || '')}">${escapeHtml(t('安全下载', 'safe download'))}</span>`);
+              } else if (download.rejectionCode) {
+                chips.push(`<span class="pill failed" data-copy="${escapeAttr(download.rejectionCode)}">${escapeHtml(t('不可下载', 'not downloadable'))}</span>`);
+              }
+
+              if (selectors.policy) {
+                chips.push(`<span class="pill quiet" data-copy="${escapeAttr(selectors.policy)}">${escapeHtml(t('相对 selector', 'relative selector'))}</span>`);
+              }
+
+              if (duplicate.groupCount > 1 || duplicate.isDuplicate) {
+                const label = duplicate.isDuplicate ? t('重复副本', 'duplicate copy') : t('重复主项', 'duplicate primary');
+                chips.push(`<span class="pill ${duplicate.isDuplicate ? 'waiting' : 'ready'}" data-copy="${escapeAttr(`${duplicate.role} ${duplicate.groupCountText}`)}">${escapeHtml(`${label} ${duplicate.groupCountText || ''}`.trim())}</span>`);
+              }
+
+              return chips.length ? `<div class="artifact-chip-row">${chips.join('')}</div>` : '';
+            }
+
+            function renderArtifactSelectorBlock(download, selectors, href, hasIndexedArtifact) {
+              const primary = download.selector || selectors.primary || '';
+              const rows = [
+                artifactKeyValue(t('安全下载 selector', 'Safe download selector'), primary, 'artifact-selector'),
+                artifactKeyValue(t('RelativePath', 'RelativePath'), selectors.relativePath),
+                artifactKeyValue(t('SafeLink', 'SafeLink'), selectors.safeLink),
+                artifactKeyValue(t('ImportPath', 'ImportPath'), selectors.importPath),
+                artifactKeyValue(t('下载端点', 'Download endpoint'), href),
+                artifactKeyValue(t('文件名', 'File name'), download.fileName),
+                artifactKeyValue(t('类型', 'Content type'), download.contentType),
+                artifactKeyValue('SHA-256', download.sha256 || download.sha256Short)
+              ].filter(Boolean);
+              if (!rows.length) { return ''; }
+              const summary = !hasIndexedArtifact
+                ? t('服务端端点 / 下载元数据', 'Server endpoint / download metadata')
+                : primary
+                ? t('安全 selector / 下载元数据', 'Safe selector / download metadata')
+                : t('下载元数据（缺少安全 selector）', 'Download metadata (missing safe selector)');
+              return `<details class="artifact-mini" ${primary ? '' : 'open'} data-copy="${escapeAttr([summary, primary, href].filter(Boolean).join(' | '))}">
+                <summary>${escapeHtml(summary)}</summary>
+                <div class="artifact-kv-grid">${rows.join('')}</div>
+              </details>`;
+            }
+
+            function renderArtifactDuplicateBlock(duplicate) {
+              if (!(duplicate.groupCount > 1 || duplicate.isDuplicate || duplicate.groupKey || duplicate.groupId)) { return ''; }
+              const roleLabel = duplicate.isDuplicate ? t('重复副本', 'duplicate copy') : (duplicate.role === 'primary' ? t('重复组主项', 'duplicate primary') : duplicate.role);
+              const rows = [
+                artifactKeyValue(t('重复角色', 'Duplicate role'), roleLabel),
+                artifactKeyValue(t('重复组数量', 'Duplicate group count'), duplicate.groupCountText),
+                artifactKeyValue(t('主项 selector', 'Primary selector'), duplicate.primarySelector),
+                artifactKeyValue(t('重复组 ID', 'Duplicate group ID'), duplicate.groupId),
+                artifactKeyValue(t('重复组 Key', 'Duplicate group key'), duplicate.groupKey)
+              ].filter(Boolean);
+              const copy = [roleLabel, duplicate.groupCountText, duplicate.primarySelector, duplicate.groupId || duplicate.groupKey].filter(Boolean).join(' | ');
+              return `<details class="artifact-mini" data-copy="${escapeAttr(copy)}">
+                <summary>${escapeHtml(t('重复组信息', 'Duplicate group info'))}</summary>
+                <div class="artifact-kv-grid">${rows.join('')}</div>
+              </details>`;
+            }
+
+            function renderArtifactDownloadRejection(download, ready, safeSelector, hasIndexedArtifact) {
+              if (!hasIndexedArtifact) { return ''; }
+              if (ready && (safeSelector || download.available)) { return ''; }
+              if (!download.rejectionCode && !download.rejectionMessage && safeSelector) { return ''; }
+              const message = download.rejectionMessage || (safeSelector ? '' : t('缺少安全相对 selector；Web 端不会直接下载。', 'Missing a safe relative selector; the Web UI will not stream it directly.'));
+              const rows = [
+                artifactKeyValue(t('拒绝代码', 'Rejection code'), download.rejectionCode || (safeSelector ? '' : 'missing-safe-selector')),
+                artifactKeyValue(t('说明', 'Message'), message)
+              ].filter(Boolean);
+              if (!rows.length) { return ''; }
+              return `<details class="artifact-mini artifact-warning" open data-copy="${escapeAttr(message)}">
+                <summary>${escapeHtml(t('下载拒绝诊断', 'Download rejection diagnostics'))}</summary>
+                <div class="artifact-kv-grid">${rows.join('')}</div>
+              </details>`;
             }
 
             function buildArtifactPaths(job, sources) {

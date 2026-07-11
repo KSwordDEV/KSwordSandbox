@@ -337,12 +337,230 @@ std::string CapabilityFlagNames(const ULONGLONG flags) {
         appendName("SelfNoiseMetadata");
         knownFlags |= KSWORD_SANDBOX_CAPABILITY_FLAG_SELF_NOISE_METADATA;
     }
+    if ((flags & KSWORD_SANDBOX_CAPABILITY_FLAG_GET_NETWORK_STATUS) != 0) {
+        appendName("GetNetworkStatus");
+        knownFlags |= KSWORD_SANDBOX_CAPABILITY_FLAG_GET_NETWORK_STATUS;
+    }
 
     const ULONGLONG unknownFlags = flags & ~knownFlags;
     if (unknownFlags != 0) {
         appendName("Unknown(" + HexUnsignedLongLong(unknownFlags, 16) + ")");
     }
     return names.empty() ? "none" : names;
+}
+
+// Input: Implementation level from KSWORD_SANDBOX_NETWORK_STATUS_REPLY.
+// Processing: Names the current network/WFP implementation tier without
+// implying packet-layer or protocol parser support.
+// Return: Stable ASCII implementation name.
+std::string NetworkImplementationLevelName(const ULONG implementationLevel) {
+    switch (implementationLevel) {
+    case KSWORD_SANDBOX_NETWORK_WFP_IMPLEMENTATION_NONE:
+        return "none";
+    case KSWORD_SANDBOX_NETWORK_WFP_IMPLEMENTATION_ALE_INSPECT_ONLY:
+        return "ale-inspect-only";
+    default:
+        return "unrecognized";
+    }
+}
+
+// Input: GET_NETWORK_STATUS flag bits.
+// Processing: Names public WFP/ALE readiness bits and preserves unknown bits
+// for forward-compatible diagnostics.
+// Return: Pipe-delimited flag names, or "none".
+std::string NetworkStatusFlagNames(const ULONG flags) {
+    std::string names;
+    ULONG knownFlags = 0;
+    const auto appendName = [&names](const std::string& name) {
+        if (!names.empty()) {
+            names += "|";
+        }
+        names += name;
+    };
+
+    if ((flags & KSWORD_SANDBOX_NETWORK_STATUS_FLAG_COMPILED) != 0) {
+        appendName("Compiled");
+        knownFlags |= KSWORD_SANDBOX_NETWORK_STATUS_FLAG_COMPILED;
+    }
+    if ((flags & KSWORD_SANDBOX_NETWORK_STATUS_FLAG_ACTIVE) != 0) {
+        appendName("Active");
+        knownFlags |= KSWORD_SANDBOX_NETWORK_STATUS_FLAG_ACTIVE;
+    }
+    if ((flags & KSWORD_SANDBOX_NETWORK_STATUS_FLAG_DEGRADED) != 0) {
+        appendName("Degraded");
+        knownFlags |= KSWORD_SANDBOX_NETWORK_STATUS_FLAG_DEGRADED;
+    }
+    if ((flags & KSWORD_SANDBOX_NETWORK_STATUS_FLAG_INSPECT_ONLY) != 0) {
+        appendName("InspectOnly");
+        knownFlags |= KSWORD_SANDBOX_NETWORK_STATUS_FLAG_INSPECT_ONLY;
+    }
+    if ((flags & KSWORD_SANDBOX_NETWORK_STATUS_FLAG_QUEUE_FAILURE) != 0) {
+        appendName("QueueFailure");
+        knownFlags |= KSWORD_SANDBOX_NETWORK_STATUS_FLAG_QUEUE_FAILURE;
+    }
+    if ((flags & KSWORD_SANDBOX_NETWORK_STATUS_FLAG_CLASSIFY_PAYLOAD_FAILURE) != 0) {
+        appendName("ClassifyPayloadFailure");
+        knownFlags |= KSWORD_SANDBOX_NETWORK_STATUS_FLAG_CLASSIFY_PAYLOAD_FAILURE;
+    }
+    if ((flags & KSWORD_SANDBOX_NETWORK_STATUS_FLAG_COMPILE_TIME_DISABLED) != 0) {
+        appendName("CompileTimeDisabled");
+        knownFlags |= KSWORD_SANDBOX_NETWORK_STATUS_FLAG_COMPILE_TIME_DISABLED;
+    }
+
+    const ULONG unknownFlags = flags & ~knownFlags;
+    if (unknownFlags != 0) {
+        appendName("Unknown(" + HexUnsignedLongLong(unknownFlags, 8) + ")");
+    }
+    return names.empty() ? "none" : names;
+}
+
+// Input: WFP/ALE layer mask returned by GET_NETWORK_STATUS.
+// Processing: Names the public ALE v4/v6 connect/recv-accept bits and keeps
+// unknown future layers visible.
+// Return: Pipe-delimited layer names, or "none".
+std::string NetworkLayerMaskNames(const ULONG mask) {
+    std::string names;
+    ULONG knownFlags = 0;
+    const auto appendName = [&names](const std::string& name) {
+        if (!names.empty()) {
+            names += "|";
+        }
+        names += name;
+    };
+
+    if ((mask & KSWORD_SANDBOX_NETWORK_WFP_LAYER_FLAG_ALE_CONNECT_V4) != 0) {
+        appendName("AleConnectV4");
+        knownFlags |= KSWORD_SANDBOX_NETWORK_WFP_LAYER_FLAG_ALE_CONNECT_V4;
+    }
+    if ((mask & KSWORD_SANDBOX_NETWORK_WFP_LAYER_FLAG_ALE_RECV_ACCEPT_V4) != 0) {
+        appendName("AleRecvAcceptV4");
+        knownFlags |= KSWORD_SANDBOX_NETWORK_WFP_LAYER_FLAG_ALE_RECV_ACCEPT_V4;
+    }
+    if ((mask & KSWORD_SANDBOX_NETWORK_WFP_LAYER_FLAG_ALE_CONNECT_V6) != 0) {
+        appendName("AleConnectV6");
+        knownFlags |= KSWORD_SANDBOX_NETWORK_WFP_LAYER_FLAG_ALE_CONNECT_V6;
+    }
+    if ((mask & KSWORD_SANDBOX_NETWORK_WFP_LAYER_FLAG_ALE_RECV_ACCEPT_V6) != 0) {
+        appendName("AleRecvAcceptV6");
+        knownFlags |= KSWORD_SANDBOX_NETWORK_WFP_LAYER_FLAG_ALE_RECV_ACCEPT_V6;
+    }
+
+    const ULONG unknownFlags = mask & ~knownFlags;
+    if (unknownFlags != 0) {
+        appendName("Unknown(" + HexUnsignedLongLong(unknownFlags, 8) + ")");
+    }
+    return names.empty() ? "none" : names;
+}
+
+// Input: WFP/ALE TODO mask returned by GET_NETWORK_STATUS.
+// Processing: Names intentional capability gaps so report/readiness consumers
+// can distinguish ALE inspect-only telemetry from missing runtime state.
+// Return: Pipe-delimited gap names, or "none".
+std::string NetworkTodoMaskNames(const ULONG mask) {
+    std::string names;
+    ULONG knownFlags = 0;
+    const auto appendName = [&names](const std::string& name) {
+        if (!names.empty()) {
+            names += "|";
+        }
+        names += name;
+    };
+
+    if ((mask & KSWORD_SANDBOX_NETWORK_WFP_TODO_FLAG_PACKET_STREAM_LAYERS) != 0) {
+        appendName("PacketStreamLayers");
+        knownFlags |= KSWORD_SANDBOX_NETWORK_WFP_TODO_FLAG_PACKET_STREAM_LAYERS;
+    }
+    if ((mask & KSWORD_SANDBOX_NETWORK_WFP_TODO_FLAG_FLOW_CONTEXTS) != 0) {
+        appendName("FlowContexts");
+        knownFlags |= KSWORD_SANDBOX_NETWORK_WFP_TODO_FLAG_FLOW_CONTEXTS;
+    }
+    if ((mask & KSWORD_SANDBOX_NETWORK_WFP_TODO_FLAG_FILTER_CONDITIONS) != 0) {
+        appendName("FilterConditions");
+        knownFlags |= KSWORD_SANDBOX_NETWORK_WFP_TODO_FLAG_FILTER_CONDITIONS;
+    }
+    if ((mask & KSWORD_SANDBOX_NETWORK_WFP_TODO_FLAG_PROTOCOL_PAYLOADS) != 0) {
+        appendName("ProtocolPayloads");
+        knownFlags |= KSWORD_SANDBOX_NETWORK_WFP_TODO_FLAG_PROTOCOL_PAYLOADS;
+    }
+
+    const ULONG unknownFlags = mask & ~knownFlags;
+    if (unknownFlags != 0) {
+        appendName("Unknown(" + HexUnsignedLongLong(unknownFlags, 8) + ")");
+    }
+    return names.empty() ? "none" : names;
+}
+
+// Input: KSWORD_SANDBOX_NETWORK_STATUS_DEGRADE_REASON value.
+// Processing: Maps public degradation reasons to stable text for diagnostics.
+// Return: Stable ASCII reason name.
+std::string NetworkDegradeReasonName(const LONG reason) {
+    switch (reason) {
+    case KswSandboxNetworkStatusDegradeNone:
+        return "none";
+    case KswSandboxNetworkStatusDegradeCompileTimeDisabled:
+        return "compile-time-disabled";
+    case KswSandboxNetworkStatusDegradeFwpsCalloutRegister:
+        return "fwps-callout-register";
+    case KswSandboxNetworkStatusDegradeFwpmEngineOpen:
+        return "fwpm-engine-open";
+    case KswSandboxNetworkStatusDegradeFwpmTransaction:
+        return "fwpm-transaction";
+    case KswSandboxNetworkStatusDegradeFwpmSublayer:
+        return "fwpm-sublayer";
+    case KswSandboxNetworkStatusDegradeFwpmManagementCallout:
+        return "fwpm-management-callout";
+    case KswSandboxNetworkStatusDegradeFwpmInspectionFilter:
+        return "fwpm-inspection-filter";
+    case KswSandboxNetworkStatusDegradeClassifyPayload:
+        return "classify-payload";
+    case KswSandboxNetworkStatusDegradeQueuePush:
+        return "queue-push";
+    default:
+        return "unrecognized";
+    }
+}
+
+// Input: Derived network readiness state.
+// Processing: Provides Chinese operator wording while keeping stable machine
+// fields English.
+// Return: UTF-16 Chinese message suitable for zhMessage.
+std::wstring NetworkStatusZhMessage(const bool active, const bool degraded, const bool compileTimeDisabled) {
+    if (compileTimeDisabled) {
+        return L"R0 网络 WFP/ALE producer 在当前驱动构建中被编译期禁用；该行是采集能力诊断，不代表样本行为。";
+    }
+
+    if (degraded) {
+        return L"R0 网络 WFP/ALE producer 可诊断但处于降级状态；请查看 mask、计数器和 NTSTATUS 字段。";
+    }
+
+    if (active) {
+        return L"R0 网络 WFP/ALE producer 已处于活动状态；当前仍是 ALE inspect-only 诊断能力。";
+    }
+
+    return L"R0 网络 WFP/ALE producer 已编译但当前未处于活动状态；该行用于 readiness 诊断。";
+}
+
+// Input: GET_NETWORK_STATUS TODO mask and readiness bits.
+// Processing: Provides concrete Chinese remediation guidance for operators.
+// Return: UTF-16 Chinese hint.
+std::wstring NetworkStatusZhHint(const bool active, const bool degraded, const bool compileTimeDisabled, const ULONG todoMask) {
+    if (compileTimeDisabled) {
+        return L"请使用启用 WFP/ALE producer 的驱动构建，并确认 WDK/WFP 依赖可用；Collector 会继续采集其他 R0 producer。";
+    }
+
+    if (degraded) {
+        return L"请优先检查 lastDegradeReasonName、registerNtStatusHex、engineNtStatusHex、lastQueueFailureNtStatusHex，以及 active/registered/filter layer mask。";
+    }
+
+    if (todoMask != 0) {
+        return L"TodoMask 表示当前仅覆盖 ALE inspect-only；packet/stream、flow context、filter condition 和协议 payload 解析仍由 sidecar/PCAP 路径补足。";
+    }
+
+    if (!active) {
+        return L"若需要网络 R0 事件，请确认 network producer 已启用、驱动初始化 WFP 成功，并在 VM 内产生连接活动。";
+    }
+
+    return L"请结合 driver.network 事件、PCAP/sidecar 归一化和该状态行的计数器判断网络证据覆盖面。";
 }
 
 // Input: Producer enable/support mask bits.
@@ -2593,6 +2811,9 @@ std::string BuildCapabilitiesData(const KSWORD_SANDBOX_CAPABILITIES_REPLY& reply
         (reply.CapabilityFlags & KSWORD_SANDBOX_CAPABILITY_FLAG_REGISTRY_CALLBACK) != 0);
     data.AddBool("networkWfpAleCapable", (reply.CapabilityFlags & KSWORD_SANDBOX_CAPABILITY_FLAG_NETWORK_WFP_ALE) != 0);
     data.AddBool(
+        "getNetworkStatusCapable",
+        (reply.CapabilityFlags & KSWORD_SANDBOX_CAPABILITY_FLAG_GET_NETWORK_STATUS) != 0);
+    data.AddBool(
         "eventCommonMetadataCapable",
         (reply.CapabilityFlags & KSWORD_SANDBOX_CAPABILITY_FLAG_EVENT_COMMON_METADATA) != 0);
     data.AddBool(
@@ -2743,6 +2964,134 @@ std::string BuildStatusData(const KSWORD_SANDBOX_STATUS_REPLY& reply, const DWOR
     data.AddUtf8(
         "lastEnqueueFailureStatusHex",
         HexUnsignedLongLong(static_cast<unsigned long>(reply.LastEnqueueFailureNtStatus), 8));
+    return data.Build();
+}
+
+// Input: GET_NETWORK_STATUS reply plus byte count returned by DeviceIoControl.
+// Processing: Copies WFP/ALE readiness masks, implementation gaps, counters,
+// and error/status fields into a collector-diagnostic JSON object.
+// Return: JSON object text for SandboxEvent.data.
+std::string BuildNetworkStatusData(const KSWORD_SANDBOX_NETWORK_STATUS_REPLY& reply, const DWORD bytesReturned) {
+    JsonDataObjectBuilder data;
+    const bool active = (reply.Flags & KSWORD_SANDBOX_NETWORK_STATUS_FLAG_ACTIVE) != 0;
+    const bool compileTimeDisabled =
+        (reply.Flags & KSWORD_SANDBOX_NETWORK_STATUS_FLAG_COMPILE_TIME_DISABLED) != 0 ||
+        reply.ImplementationLevel == KSWORD_SANDBOX_NETWORK_WFP_IMPLEMENTATION_NONE;
+    const bool degraded =
+        compileTimeDisabled ||
+        (reply.Flags & KSWORD_SANDBOX_NETWORK_STATUS_FLAG_DEGRADED) != 0 ||
+        (reply.Flags & KSWORD_SANDBOX_NETWORK_STATUS_FLAG_QUEUE_FAILURE) != 0 ||
+        (reply.Flags & KSWORD_SANDBOX_NETWORK_STATUS_FLAG_CLASSIFY_PAYLOAD_FAILURE) != 0 ||
+        reply.LastDegradeReason != KswSandboxNetworkStatusDegradeNone ||
+        reply.LastDegradeNtStatus != 0 ||
+        reply.RegisterNtStatus != 0 ||
+        reply.EngineNtStatus != 0 ||
+        reply.QueueFailureCount != 0 ||
+        reply.ClassifyPayloadFailureCount != 0;
+    const std::string readinessState = degraded ? "degraded" : (active ? "ready" : "degraded");
+    const std::string severity = degraded || !active ? "warning" : "info";
+    const std::string diagnosticCode = compileTimeDisabled
+        ? "network_status_compile_time_disabled"
+        : (degraded
+            ? "network_status_degraded"
+            : (active ? "network_status_ready" : "network_status_inactive"));
+    const bool todoRemaining = reply.TodoMask != 0;
+
+    data.AddUtf8("ioctl", "IOCTL_KSWORD_SANDBOX_GET_NETWORK_STATUS");
+    data.AddUnsigned("ioctlCode", IOCTL_KSWORD_SANDBOX_GET_NETWORK_STATUS);
+    data.AddUnsigned("bytesReturned", bytesReturned);
+    data.AddUtf8("schema", KSWORD_SANDBOX_EVENT_SCHEMA_NAME);
+    data.AddUtf8("producer", "r0collector");
+    AddCollectorAttributionFields(data, "driver-network-status", "collector-diagnostic");
+    data.AddUtf8("diagnosticStage", "networkStatus");
+    data.AddUtf8("diagnosticCode", diagnosticCode);
+    data.AddUtf8("severity", severity);
+    data.AddUtf8("readinessState", readinessState);
+    data.AddUtf8("collectionScope", "r0collector-network-status");
+    data.AddBool("collectionDiagnostic", true);
+    data.AddBool("sampleBehavior", false);
+    data.AddUtf8("operatorInterpretation", "collection_diagnostic_not_sample_behavior");
+    data.AddWide("zhMessage", NetworkStatusZhMessage(active, degraded, compileTimeDisabled));
+    data.AddWide("zhHint", NetworkStatusZhHint(active, degraded, compileTimeDisabled, reply.TodoMask));
+    data.AddBool("collectorNoise", false);
+    data.AddBool("collectorSelfNoise", false);
+    data.AddBool("selfProcess", false);
+    data.AddUtf8("collectorNoiseReason", "none");
+    data.AddUtf8("collectorNoiseAction", "emit");
+    data.AddBool("collectorSuppressed", false);
+    data.AddBool("selfNoise", false);
+    data.AddUtf8("selfNoiseReason", "none");
+    data.AddUtf8("selfNoiseAction", "emit");
+    data.AddBool("noise", false);
+    data.AddBool("lost", reply.QueueFailureCount != 0);
+    data.AddUnsigned("lostCount", reply.QueueFailureCount);
+    data.AddBool("lossObserved", reply.QueueFailureCount != 0);
+    data.AddUtf8("loss", reply.QueueFailureCount != 0 ? "network-queue-failure" : "none");
+    data.AddBool("backpressure", reply.QueueFailureCount != 0);
+    data.AddBool("backpressureObserved", reply.QueueFailureCount != 0);
+    data.AddUtf8("backpressureReason", reply.QueueFailureCount != 0 ? "network-queue-failure" : "none");
+    data.AddUnsigned("highWatermark", 0);
+
+    data.AddBool("networkStatusAvailable", true);
+    data.AddBool("getNetworkStatusCapable", true);
+    data.AddBool("networkWfpAleCapable", !compileTimeDisabled);
+    data.AddBool("networkWfpAleActive", active);
+    data.AddBool("networkWfpAleDegraded", degraded);
+    data.AddBool("networkWfpAleInspectOnly", reply.ImplementationLevel == KSWORD_SANDBOX_NETWORK_WFP_IMPLEMENTATION_ALE_INSPECT_ONLY);
+    data.AddBool("networkTodoRemaining", todoRemaining);
+    data.AddUtf8("networkStatusCapability", "ioctl-available");
+    data.AddUtf8("networkStatusKind", "wfp-ale-runtime-diagnostics");
+    data.AddUtf8("networkStatusInterpretation", "collector_readiness_not_sample_behavior");
+    data.AddUnsigned("version", reply.Version);
+    data.AddUtf8("versionHex", HexUnsignedLongLong(reply.Version, 8));
+    data.AddUnsigned("size", reply.Size);
+    data.AddUnsigned("flags", reply.Flags);
+    data.AddUtf8("flagsHex", HexUnsignedLongLong(reply.Flags, 8));
+    data.AddUtf8("flagNames", NetworkStatusFlagNames(reply.Flags));
+    data.AddUnsigned("implementationLevel", reply.ImplementationLevel);
+    data.AddUtf8("implementationLevelName", NetworkImplementationLevelName(reply.ImplementationLevel));
+    data.AddUnsigned("supportedLayerMask", reply.SupportedLayerMask);
+    data.AddUtf8("supportedLayerMaskHex", HexUnsignedLongLong(reply.SupportedLayerMask, 8));
+    data.AddUtf8("supportedLayerMaskNames", NetworkLayerMaskNames(reply.SupportedLayerMask));
+    data.AddUnsigned("lastRegisteredCalloutMask", reply.LastRegisteredCalloutMask);
+    data.AddUtf8("lastRegisteredCalloutMaskHex", HexUnsignedLongLong(reply.LastRegisteredCalloutMask, 8));
+    data.AddUtf8("lastRegisteredCalloutMaskNames", NetworkLayerMaskNames(reply.LastRegisteredCalloutMask));
+    data.AddUnsigned("lastAddedFilterMask", reply.LastAddedFilterMask);
+    data.AddUtf8("lastAddedFilterMaskHex", HexUnsignedLongLong(reply.LastAddedFilterMask, 8));
+    data.AddUtf8("lastAddedFilterMaskNames", NetworkLayerMaskNames(reply.LastAddedFilterMask));
+    data.AddUnsigned("activeLayerMask", reply.ActiveLayerMask);
+    data.AddUtf8("activeLayerMaskHex", HexUnsignedLongLong(reply.ActiveLayerMask, 8));
+    data.AddUtf8("activeLayerMaskNames", NetworkLayerMaskNames(reply.ActiveLayerMask));
+    data.AddUnsigned("todoMask", reply.TodoMask);
+    data.AddUtf8("todoMaskHex", HexUnsignedLongLong(reply.TodoMask, 8));
+    data.AddUtf8("todoMaskNames", NetworkTodoMaskNames(reply.TodoMask));
+    data.AddUtf8("todoMaskMeaning", "remaining-gap-mask-for-ale-inspect-only-coverage");
+    data.AddUnsigned("payloadVersion", reply.PayloadVersion);
+    data.AddUtf8("payloadVersionHex", HexUnsignedLongLong(reply.PayloadVersion, 8));
+    data.AddSigned("lastDegradeReason", reply.LastDegradeReason);
+    data.AddUtf8("lastDegradeReasonName", NetworkDegradeReasonName(reply.LastDegradeReason));
+    data.AddSigned("lastDegradeNtStatus", reply.LastDegradeNtStatus);
+    data.AddUtf8("lastDegradeNtStatusHex", HexUnsignedLongLong(static_cast<unsigned long>(reply.LastDegradeNtStatus), 8));
+    data.AddSigned("registerNtStatus", reply.RegisterNtStatus);
+    data.AddUtf8("registerNtStatusHex", HexUnsignedLongLong(static_cast<unsigned long>(reply.RegisterNtStatus), 8));
+    data.AddSigned("engineNtStatus", reply.EngineNtStatus);
+    data.AddUtf8("engineNtStatusHex", HexUnsignedLongLong(static_cast<unsigned long>(reply.EngineNtStatus), 8));
+    data.AddUnsigned("classifyCount", reply.ClassifyCount);
+    data.AddUnsigned("eventCount", reply.EventCount);
+    data.AddUnsigned("queueFailureCount", reply.QueueFailureCount);
+    data.AddUnsigned("classifyPayloadFailureCount", reply.ClassifyPayloadFailureCount);
+    data.AddUnsigned("lastClassifyLayerId", reply.LastClassifyLayerId);
+    data.AddUtf8("lastClassifyLayerIdHex", HexUnsignedLongLong(reply.LastClassifyLayerId, 8));
+    data.AddSigned("lastQueueFailureNtStatus", reply.LastQueueFailureNtStatus);
+    data.AddUtf8(
+        "lastQueueFailureNtStatusHex",
+        HexUnsignedLongLong(static_cast<unsigned long>(reply.LastQueueFailureNtStatus), 8));
+    data.AddUnsigned("lastQueueFailureLayerId", reply.LastQueueFailureLayerId);
+    data.AddUtf8("lastQueueFailureLayerIdHex", HexUnsignedLongLong(reply.LastQueueFailureLayerId, 8));
+    data.AddUnsigned("lastClassifyPayloadFailureLayerId", reply.LastClassifyPayloadFailureLayerId);
+    data.AddUtf8(
+        "lastClassifyPayloadFailureLayerIdHex",
+        HexUnsignedLongLong(reply.LastClassifyPayloadFailureLayerId, 8));
     return data.Build();
 }
 

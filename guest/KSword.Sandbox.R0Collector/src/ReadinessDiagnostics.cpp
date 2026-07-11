@@ -1129,6 +1129,12 @@ int RunReadinessDiagnoseMode(const Options& options, EventWriter& writer) {
         return kExitRuntimeFailure;
     }
 
+    if (!EmitDriverNetworkStatus(device, options, writer)) {
+        RecordProbe(&summary, "abiNegotiation", "network_status_emit_failed", "error", "blocked");
+        EmitReadinessSummary(writer, options, summary);
+        return kExitRuntimeFailure;
+    }
+
     if (!ProbeReadEventsReadiness(writer, options, &summary)) {
         EmitReadinessSummary(writer, options, summary);
         return kExitRuntimeFailure;

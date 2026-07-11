@@ -4,6 +4,24 @@ Canonical scope: this page owns the host-side analyzer contract. Rule-author
 tag vocabulary notes live in `rules/static-analysis-notes.md`, and full rule
 coverage/counts live in `docs/behavior-rule-matrix.md`.
 
+## 当前审阅结论（中文优先）
+
+`StaticAnalyzer` 现在是发布前可依赖的 host-side triage 组件：它不需要外部
+PE/YARA 二进制，输出兼容的 `StaticAnalysisResult`，同时通过
+`CreateEvents()` / `AnalyzeToEvents()` 拆出 granular `static.*` 事件供规则、
+报告和 Web/API 消费。
+
+审阅边界：
+
+- `static.*` 是静态能力/指标证据，不是已观察到的 guest runtime 行为。
+- `static.analysis.completed` 保留旧 summary；新规则应优先消费
+  `static.pe.*`、`static.string.*`、`static.packer.hint` 和
+  `static.yara.match` 的机器字段。
+- `rules/static-notes.yar` 走内置轻量 YARA-like matcher；不调用外部 YARA。
+  其中基线 PE/MZ 类规则只能视为 scaffold/triage，不能单独形成恶意判断。
+- 样本、分析输出、报告和导入事件必须留在 runtime root 或其他 ignored lab
+  路径，不得提交到 git。
+
 Static analysis may inspect local executable samples, but samples and generated
 analysis/report artifacts must stay under the runtime root or another ignored
 lab path. Do not commit samples, `bin/`, `obj/`, native build outputs, reports,
@@ -26,7 +44,7 @@ external tools and intentionally writes findings into the stable
   `registry-persistence`, `credential-access`, `defense-evasion`, and
   `script-execution` with hit counts and API samples.
 - `ExportModuleName` and `ExportNames`: bounded export-table names suitable for
-  report JSON grouping and future rule predicates.
+  report JSON grouping and rule predicates.
 - `Tls`: TLS directory, callback-table VA/file offset, and callback
   VA/RVA/target-file-offset evidence.
 - `Overlay`: PE overlay offset/size, certificate-table overlap,
@@ -66,7 +84,8 @@ The analyzer parses these PE structures best-effort with hard limits:
   values are also exposed in `Tls` plus prefixed `tls:*` strings.
 - Resource directory types and resource data entries, including data RVA, raw
   file offset, size, bounded entropy, and entropy labels where bytes are
-  available.
+  available. These are exposed in `StaticAnalysisResult.Resources` and
+  projected as `static.pe.resource` events for rule/report consumers.
 - RT_VERSION key/value strings such as `CompanyName`, `FileDescription`,
   `FileVersion`, `OriginalFilename`, and `ProductName`, emitted as
   `version:<key>=<value>` evidence and low-risk `version_*` tags.
@@ -183,6 +202,12 @@ required. If the rule file is missing, too large, unreadable, or uses syntax
 outside the supported subset, static analysis silently falls back to the
 built-in PE/string heuristics without adding warnings.
 
+当前仓库的 `rules/static-notes.yar` 包含 PE/MZ baseline、packer、Windows API、
+registration export、network indicator、script execution、dropper/resource、
+persistence、anti-analysis、credential-access 和 defense-evasion triage 规则。
+这些命中用于把静态证据带入报告/规则引擎；即使命中 MITRE metadata，也仍然是
+低置信静态线索，必须结合 runtime、artifact、R0、network 或 VT 证据复核。
+
 The built-in matcher intentionally supports only the static-notes subset:
 
 - `rule`, `meta`, `strings`, and `condition` sections.
@@ -244,8 +269,8 @@ non-high-risk triage.
 ## Structured `static.*` event depth
 
 Granular `StaticAnalyzer.CreateEvents()` rows now carry a shared rule-facing
-field set so reports and future behavior rules can consume PE and string
-evidence without parsing human-readable messages:
+field set so reports and behavior rules can consume PE and string evidence
+without parsing human-readable messages:
 
 - `staticOnly=True`, `evidenceOrigin=host-static-analysis`,
   `evidenceKind`, `ruleScope`, `ruleKey`, `behaviorFamily`, and

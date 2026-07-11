@@ -696,6 +696,7 @@ public sealed class StaticAnalyzer
         AddStaticImportEvents(fullPath, result, events);
         AddStaticExportEvents(fullPath, result, events);
         AddStaticTlsEvents(fullPath, result, events);
+        AddStaticResourceEvents(fullPath, result, events);
         AddStaticOverlayEvent(fullPath, result, events);
         AddStaticStringEvents(fullPath, result, events);
         AddStaticPackerEvent(fullPath, result, events);
@@ -783,7 +784,8 @@ public sealed class StaticAnalyzer
             ExportModuleName = peEvidence.ExportModuleName,
             ExportNames = peEvidence.ExportNames,
             Tls = peEvidence.Tls,
-            Overlay = peEvidence.Overlay
+            Overlay = peEvidence.Overlay,
+            Resources = peEvidence.Resources
         };
     }
 
@@ -2717,7 +2719,7 @@ public sealed class StaticAnalyzer
 
         if (directories.Count > 2)
         {
-            ReadResources(reader, directories[2], sections, fileLength, tags, interestingStrings, warnings);
+            ReadResources(reader, directories[2], sections, fileLength, tags, interestingStrings, warnings, peEvidence);
         }
 
         if (directories.Count > 6)
@@ -3406,7 +3408,8 @@ public sealed class StaticAnalyzer
         long fileLength,
         SortedSet<string> tags,
         SortedSet<string> interestingStrings,
-        List<string> warnings)
+        List<string> warnings,
+        PeAnalysisEvidence peEvidence)
     {
         if (!resourceDirectory.IsPresent)
         {
@@ -3433,6 +3436,7 @@ public sealed class StaticAnalyzer
             tags,
             interestingStrings,
             warnings,
+            peEvidence,
             visitedDirectories,
             ref evidenceCount);
     }
@@ -3453,6 +3457,7 @@ public sealed class StaticAnalyzer
         SortedSet<string> tags,
         SortedSet<string> interestingStrings,
         List<string> warnings,
+        PeAnalysisEvidence peEvidence,
         HashSet<long> visitedDirectories,
         ref int evidenceCount)
     {
@@ -3514,6 +3519,7 @@ public sealed class StaticAnalyzer
                     tags,
                     interestingStrings,
                     warnings,
+                    peEvidence,
                     visitedDirectories,
                     ref evidenceCount);
                 continue;
@@ -3528,6 +3534,7 @@ public sealed class StaticAnalyzer
                 tags,
                 interestingStrings,
                 warnings,
+                peEvidence,
                 ref evidenceCount);
         }
     }
@@ -3546,6 +3553,7 @@ public sealed class StaticAnalyzer
         SortedSet<string> tags,
         SortedSet<string> interestingStrings,
         List<string> warnings,
+        PeAnalysisEvidence peEvidence,
         ref int evidenceCount)
     {
         if (dataEntryOffset < 0 || dataEntryOffset > fileLength - 16)
@@ -3556,64 +3564,138 @@ public sealed class StaticAnalyzer
 
         var dataRva = ReadUInt32At(reader, dataEntryOffset, fileLength, warnings);
         var size = ReadUInt32At(reader, dataEntryOffset + sizeof(uint), fileLength, warnings);
+        var resourceTags = new SortedSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "resources_present",
+            "resource_data_entry",
+            $"resource_type_{NormalizeStaticYaraTag(resourceType)}"
+        };
         AddPeEvidence(interestingStrings, $"resource:{resourceType},rva=0x{dataRva:X8},size={size}", ref evidenceCount, MaxResourceEvidence);
         if (size >= 1024 * 1024)
         {
             tags.Add("resource_large_data");
+            resourceTags.Add("resource_large_data");
         }
 
-        if (string.Equals(resourceType, "rcdata", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(resourceType, "html", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(resourceType, "unknown", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(resourceType, "named", StringComparison.OrdinalIgnoreCase))
+        if (IsPayloadResourceType(resourceType))
         {
             tags.Add("resource_payload_candidate");
+            resourceTags.Add("resource_payload_candidate");
         }
 
-        if (!TryRvaToFileOffset(dataRva, sections, fileLength, out var dataOffset))
+        var mapped = TryRvaToFileOffset(dataRva, sections, fileLength, out var dataOffset);
+        double? entropy = null;
+        var embeddedPe = false;
+        if (mapped)
+        {
+            if (size >= 256)
+            {
+                entropy = CalculateEntropy(reader, dataOffset, size, fileLength, warnings);
+                if (entropy >= 7.2)
+                {
+                    tags.Add("resource_high_entropy_data");
+                    resourceTags.Add("resource_high_entropy_data");
+                }
+
+                if (entropy >= 7.8)
+                {
+                    tags.Add("resource_very_high_entropy_data");
+                    resourceTags.Add("resource_very_high_entropy_data");
+                }
+            }
+
+            AddPeEvidence(
+                interestingStrings,
+                entropy.HasValue
+                    ? $"resource:{resourceType}@file=0x{dataOffset:X},rva=0x{dataRva:X8},size={size},entropy={Math.Round(entropy.Value, 3):F3},entropyLabel={DescribeEntropy(entropy.Value, size)}"
+                    : $"resource:{resourceType}@file=0x{dataOffset:X},rva=0x{dataRva:X8},size={size}",
+                ref evidenceCount,
+                MaxResourceEvidence);
+
+            if (TryReadUInt16At(reader, dataOffset, fileLength, out var magic) && magic == 0x5a4d)
+            {
+                embeddedPe = true;
+                tags.Add("resource_embedded_pe");
+                tags.Add("resource_payload_candidate");
+                resourceTags.Add("resource_embedded_pe");
+                resourceTags.Add("resource_payload_candidate");
+                AddPeEvidence(interestingStrings, $"resource:{resourceType}:embedded-pe@0x{dataRva:X8}", ref evidenceCount, MaxResourceEvidence);
+            }
+
+            if (string.Equals(resourceType, "version", StringComparison.OrdinalIgnoreCase))
+            {
+                ReadVersionResourceEvidence(reader, dataOffset, size, fileLength, tags, interestingStrings, warnings, ref evidenceCount);
+            }
+
+            if (string.Equals(resourceType, "manifest", StringComparison.OrdinalIgnoreCase))
+            {
+                ReadManifestResourceEvidence(reader, dataOffset, size, fileLength, tags, interestingStrings, warnings, ref evidenceCount);
+            }
+        }
+        else
+        {
+            resourceTags.Add("resource_unmapped_rva");
+        }
+
+        AddPeResourceInfo(
+            peEvidence,
+            resourceType,
+            dataRva,
+            mapped ? dataOffset : null,
+            size,
+            entropy,
+            embeddedPe,
+            resourceTags);
+    }
+
+    /// <summary>
+    /// Adds one structured PE resource data-entry record for reports and rules.
+    /// </summary>
+    private static void AddPeResourceInfo(
+        PeAnalysisEvidence peEvidence,
+        string resourceType,
+        uint dataRva,
+        long? dataOffset,
+        uint size,
+        double? entropy,
+        bool embeddedPe,
+        IEnumerable<string> resourceTags)
+    {
+        if (peEvidence.Resources.Count >= MaxStructuredPeEntries)
         {
             return;
         }
 
-        double? entropy = null;
-        if (size >= 256)
+        var tags = resourceTags
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Order(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var payloadCandidate = tags.Contains("resource_payload_candidate", StringComparer.OrdinalIgnoreCase);
+        peEvidence.Resources.Add(new PeResourceInfo
         {
-            entropy = CalculateEntropy(reader, dataOffset, size, fileLength, warnings);
-            if (entropy >= 7.2)
-            {
-                tags.Add("resource_high_entropy_data");
-            }
+            ResourceType = resourceType,
+            DataRva = $"0x{dataRva:X8}",
+            DataFileOffset = dataOffset.HasValue ? $"0x{dataOffset.Value:X}" : null,
+            Size = size,
+            Entropy = entropy,
+            EntropyLabel = entropy.HasValue ? DescribeEntropy(entropy.Value, size) : "unknown",
+            IsPayloadCandidate = payloadCandidate,
+            IsEmbeddedPe = embeddedPe,
+            IsLarge = size >= 1024 * 1024,
+            Tags = tags
+        });
+    }
 
-            if (entropy >= 7.8)
-            {
-                tags.Add("resource_very_high_entropy_data");
-            }
-        }
-
-        AddPeEvidence(
-            interestingStrings,
-            entropy.HasValue
-                ? $"resource:{resourceType}@file=0x{dataOffset:X},rva=0x{dataRva:X8},size={size},entropy={Math.Round(entropy.Value, 3):F3},entropyLabel={DescribeEntropy(entropy.Value, size)}"
-                : $"resource:{resourceType}@file=0x{dataOffset:X},rva=0x{dataRva:X8},size={size}",
-            ref evidenceCount,
-            MaxResourceEvidence);
-
-        if (TryReadUInt16At(reader, dataOffset, fileLength, out var magic) && magic == 0x5a4d)
-        {
-            tags.Add("resource_embedded_pe");
-            tags.Add("resource_payload_candidate");
-            AddPeEvidence(interestingStrings, $"resource:{resourceType}:embedded-pe@0x{dataRva:X8}", ref evidenceCount, MaxResourceEvidence);
-        }
-
-        if (string.Equals(resourceType, "version", StringComparison.OrdinalIgnoreCase))
-        {
-            ReadVersionResourceEvidence(reader, dataOffset, size, fileLength, tags, interestingStrings, warnings, ref evidenceCount);
-        }
-
-        if (string.Equals(resourceType, "manifest", StringComparison.OrdinalIgnoreCase))
-        {
-            ReadManifestResourceEvidence(reader, dataOffset, size, fileLength, tags, interestingStrings, warnings, ref evidenceCount);
-        }
+    /// <summary>
+    /// Identifies resource types that often carry staged payloads.
+    /// </summary>
+    private static bool IsPayloadResourceType(string resourceType)
+    {
+        return string.Equals(resourceType, "rcdata", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(resourceType, "html", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(resourceType, "unknown", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(resourceType, "named", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>
@@ -5264,6 +5346,7 @@ public sealed class StaticAnalyzer
             ["importApiClusterCount"] = result.ImportApiClusters.Count.ToString(CultureInfo.InvariantCulture),
             ["exportCount"] = result.ExportNames.Count.ToString(CultureInfo.InvariantCulture),
             ["tlsCallbackCount"] = tlsCallbackCount.ToString(CultureInfo.InvariantCulture),
+            ["resourceCount"] = result.Resources.Count.ToString(CultureInfo.InvariantCulture),
             ["networkIndicatorCount"] = result.NetworkIndicators.Count.ToString(CultureInfo.InvariantCulture),
             ["pathIndicatorCount"] = result.PathIndicators.Count.ToString(CultureInfo.InvariantCulture),
             ["commandIndicatorCount"] = result.CommandIndicators.Count.ToString(CultureInfo.InvariantCulture),
@@ -5519,6 +5602,60 @@ public sealed class StaticAnalyzer
                 $"PE TLS callback {callback.VirtualAddress} observed.",
                 $"发现 PE TLS 回调：{callback.VirtualAddress}。",
                 "TLS 回调可能在程序入口点前运行；这是优先复核的静态线索。",
+                data);
+        }
+    }
+
+    /// <summary>
+    /// Adds one event per parsed PE resource data entry with payload/entropy hints.
+    /// </summary>
+    private static void AddStaticResourceEvents(string fullPath, StaticAnalysisResult result, List<SandboxEvent> events)
+    {
+        foreach (var resource in result.Resources.Take(MaxStructuredPeEntries))
+        {
+            var data = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["resourceType"] = resource.ResourceType,
+                ["dataRva"] = resource.DataRva,
+                ["size"] = resource.Size.ToString(CultureInfo.InvariantCulture),
+                ["entropyLabel"] = resource.EntropyLabel,
+                ["isPayloadCandidate"] = resource.IsPayloadCandidate.ToString(),
+                ["isEmbeddedPe"] = resource.IsEmbeddedPe.ToString(),
+                ["isLarge"] = resource.IsLarge.ToString()
+            };
+            AddDataIfNotBlank(data, "dataFileOffset", resource.DataFileOffset);
+            if (resource.Entropy.HasValue)
+            {
+                data["entropy"] = resource.Entropy.Value.ToString("F3", CultureInfo.InvariantCulture);
+            }
+
+            AddDataList(data, "tags", resource.Tags);
+            var resourceRole = DescribeResourceRole(resource);
+            AddStaticRuleFacingFields(
+                data,
+                "pe-resource-data-entry",
+                "static.pe.resource",
+                $"resource.{NormalizeStaticYaraTag(resourceRole)}",
+                resourceRole is "embedded-pe" or "payload-candidate" ? "embedded-payload" : "pe-resource",
+                resource.IsEmbeddedPe || resource.Entropy >= 7.2 || resource.IsLarge ? "medium" : resource.IsPayloadCandidate ? "low" : "info");
+            data["resourceRole"] = resourceRole;
+            data["payloadCandidate"] = resource.IsPayloadCandidate.ToString();
+            AddDataList(
+                data,
+                "mitreCandidates",
+                resource.IsEmbeddedPe || resource.IsPayloadCandidate
+                    ? ["T1027.009"]
+                    : resource.Entropy >= 7.2
+                        ? ["T1027"]
+                        : []);
+
+            TryAddStaticEvent(
+                events,
+                "static.pe.resource",
+                fullPath,
+                $"PE resource {resource.ResourceType} data entry observed.",
+                $"发现 PE 资源数据项：{resource.ResourceType}。",
+                "资源数据项是静态载荷线索；RCDATA/HTML/命名资源、高熵或嵌入 MZ 需要与 dropped files 和运行时行为交叉验证。",
                 data);
         }
     }
@@ -6342,6 +6479,41 @@ public sealed class StaticAnalyzer
     }
 
     /// <summary>
+    /// Classifies PE resource data entries for rule-facing metadata.
+    /// </summary>
+    private static string DescribeResourceRole(PeResourceInfo resource)
+    {
+        if (resource.IsEmbeddedPe)
+        {
+            return "embedded-pe";
+        }
+
+        if (resource.IsPayloadCandidate)
+        {
+            return "payload-candidate";
+        }
+
+        if (resource.Entropy >= 7.2)
+        {
+            return "high-entropy-resource";
+        }
+
+        if (resource.IsLarge)
+        {
+            return "large-resource";
+        }
+
+        if (string.Equals(resource.ResourceType, "manifest", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(resource.ResourceType, "version", StringComparison.OrdinalIgnoreCase) ||
+            resource.ResourceType.Contains("icon", StringComparison.OrdinalIgnoreCase))
+        {
+            return "metadata-resource";
+        }
+
+        return "resource-data";
+    }
+
+    /// <summary>
     /// Classifies overlay evidence for rule-facing metadata.
     /// </summary>
     private static string DescribeOverlayRole(PeOverlayInfo overlay)
@@ -7030,6 +7202,8 @@ public sealed class StaticAnalyzer
         public PeTlsInfo? Tls { get; set; }
 
         public PeOverlayInfo? Overlay { get; set; }
+
+        public List<PeResourceInfo> Resources { get; } = [];
     }
 
     /// <summary>

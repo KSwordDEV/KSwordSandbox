@@ -72,6 +72,7 @@ internal sealed class BehaviorRuleStaticEventConsumptionScenario : ISmokeTestSce
         "static.pe.export",
         "static.pe.tls.directory",
         "static.pe.tls.callback",
+        "static.pe.resource",
         "static.pe.overlay",
         "static.string.indicator",
         "static.string.path",
@@ -411,6 +412,26 @@ internal sealed class BehaviorRuleStaticEventConsumptionScenario : ISmokeTestSce
                     ["interestingStringCount"] = "4",
                     ["warningCount"] = "0",
                     ["tags"] = "resources_present,resource_payload_candidate,resource_embedded_pe,resource_high_entropy_data"
+                }
+            },
+            new SandboxEvent
+            {
+                EventType = "static.pe.resource",
+                Source = "host",
+                Path = "synthetic-static-events.exe",
+                Data =
+                {
+                    ["resourceType"] = "rcdata",
+                    ["dataRva"] = "0x00001580",
+                    ["dataFileOffset"] = "0x780",
+                    ["size"] = "288",
+                    ["entropy"] = "7.612",
+                    ["entropyLabel"] = "very_high",
+                    ["isPayloadCandidate"] = "True",
+                    ["isEmbeddedPe"] = "True",
+                    ["payloadCandidate"] = "True",
+                    ["resourceRole"] = "embedded-pe",
+                    ["tags"] = "resources_present,resource_data_entry,resource_type_rcdata,resource_payload_candidate,resource_embedded_pe,resource_high_entropy_data"
                 }
             },
             new SandboxEvent

@@ -9,6 +9,35 @@ packages. It is intentionally conservative: packages are staged outside the
 repository, release artifacts are not pushed by the packaging script, and
 sensitive/runtime material is excluded by manifest policy.
 
+## 当前发布 handoff（21a81ac 后）
+
+面向审阅者的当前结论：源码层 MVP 主链路已经成形，但正式 tag 前仍应由
+release manager 在候选提交上重新跑低副作用门禁。本文档刷新没有重跑
+Hyper-V live、重 smoke 或驱动签名。
+
+已落地并可在代码/文档中审阅的 release-ready 能力：
+
+- WebUI 上传/选择 `.exe` 后进入 live monitor；真实进度优先走
+  `/api/jobs/{jobId}/progress/stream`，fallback 到 durable
+  `runbook-progress.json`，主视图不展示命令/stdout/stderr。
+- Host 静态分析已输出 granular `static.*` 事件，行为规则消费
+  `static.pe.*`、`static.string.*`、`static.packer.hint` 和
+  `static.yara.match`；静态命中仍是 triage，不等同 guest 行为。
+- Artifact index/download 走 job 内安全 selector，Web DTO 暴露
+  duplicate/rejection/download 诊断；包策略继续拒绝 runtime 产物入库。
+- VirusTotal 是 process-memory only 配置入口和 hash-only 查询；quiet
+  status 不写成主行为噪音。
+- 报告输出中英 HTML，区分本地行为、R0 health/noise、VT reputation 和
+  artifacts，raw events 默认折叠/分页/限高。
+- R0 driver/collector 只作为可选 lab 路径发布；默认 package/readiness
+  不签名、不加载驱动、不调用 `CSignTool.exe`。
+
+审阅者优先看：
+
+1. [`v1-release-gap-audit.md`](v1-release-gap-audit.md) 的组件百分比和剩余差距。
+2. 本页的 package/checklist；确认 staging 输出在仓库外。
+3. `docs/README.md` 的 canonical 文档地图，避免引用历史 planning 文件作为当前事实。
+
 ## Package types
 
 - Source package: repository source, rules, docs, tests, packaging metadata, and
@@ -139,9 +168,11 @@ MVP package.
   `RuntimeRootUnderRepository`. Reviewers should inspect `RecommendedActions`
   before live execution instead of discovering missing prerequisites during a
   sample run.
-- **Real Notepad 5s report path is documented and tested on a lab machine:** see
-  the command sequence below. The resulting job/report remains under the runtime
-  root, not the repository.
+- **Real Notepad 5s report path is documented; fresh evidence is a lab action:**
+  see the command sequence below. Historical live evidence is recorded in
+  `docs/webui-real-r0-e2e.md`, but a release note must not claim a fresh Notepad
+  run unless the release manager reruns it on the prepared lab host. The
+  resulting job/report remains under the runtime root, not the repository.
 
 ## Real Notepad 5s report runbook
 

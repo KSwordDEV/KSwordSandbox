@@ -56,6 +56,14 @@ Example:
   reply. Driver mode emits it before draining and again after the final drain so
   queue depth, counters, active/failed producer masks, and last NTSTATUS are
   preserved.
+- `r0collector.driverNetworkStatus`: read-only
+  `IOCTL_KSWORD_SANDBOX_GET_NETWORK_STATUS` diagnostics. Successful rows expose
+  WFP/ALE implementation level, layer masks, TODO gaps, classify/event counters,
+  queue/classify failure counters, NTSTATUS fields, `readinessState`, and
+  Chinese `zhMessage`/`zhHint`. Unsupported older drivers emit the same event
+  type with `networkStatusAvailable=false`,
+  `diagnosticCode=network_status_ioctl_unavailable`, and
+  `readinessState=degraded` without failing collection.
 - `r0collector.driverPoll`: successful `IOCTL_KSWORD_SANDBOX_POLL` reply.
 - `r0collector.driverReadEvents`: batch summary for successful
   `IOCTL_KSWORD_SANDBOX_READ_EVENTS`.
@@ -162,7 +170,7 @@ Negotiation and queue rows must preserve these event-quality keys:
   `producerEnableBitsCapable`, `typedEventPayloadsCapable`,
   `eventSchemaNamesCapable`, `processCreateExitCapable`, `imageLoadCapable`,
   `fileMinifilterCapable`, `registryCallbackCapable`, `networkWfpAleCapable`,
-  `eventCommonMetadataCapable`, `producerMetadataCapable`,
+  `getNetworkStatusCapable`, `eventCommonMetadataCapable`, `producerMetadataCapable`,
   `selfNoiseMetadataCapable`,
   `supportedProducerMask`, `supportedProducerMaskHex`,
   `defaultProducerMask`, `defaultProducerMaskHex`, `eventSchemaName`,
@@ -182,6 +190,17 @@ Negotiation and queue rows must preserve these event-quality keys:
   `lossObserved`, `backpressure`, `backpressureObserved`,
   `backpressureReason`, `nextSequence`, `sequence`, and
   `sequenceMeaning=nextSequence`.
+- `r0collector.driverNetworkStatus.data`: `diagnosticStage=networkStatus`,
+  `diagnosticCode`, `severity`, `readinessState`, `networkStatusAvailable`,
+  `getNetworkStatusCapable`, `networkWfpAleCapable`, `networkWfpAleActive`,
+  `networkWfpAleDegraded`, `networkWfpAleInspectOnly`, `implementationLevelName`,
+  `flagsHex`, `flagNames`, `supportedLayerMaskHex`,
+  `lastRegisteredCalloutMaskHex`, `lastAddedFilterMaskHex`,
+  `activeLayerMaskHex`, `todoMaskHex`, `todoMaskNames`, `payloadVersionHex`,
+  `lastDegradeReasonName`, `lastDegradeNtStatusHex`, `registerNtStatusHex`,
+  `engineNtStatusHex`, `classifyCount`, `eventCount`, `queueFailureCount`,
+  `classifyPayloadFailureCount`, `lastQueueFailureNtStatusHex`, `zhMessage`,
+  and `zhHint`.
 - `r0collector.driverProducerMask.data`: `requestedEnableMaskHex`,
   `previousEnableMaskHex`, `effectiveEnableMaskHex`,
   `supportedProducerMaskHex`, and the matching `*MaskNames` fields.

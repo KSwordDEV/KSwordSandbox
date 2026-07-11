@@ -24,6 +24,12 @@ IOCTL 从内核驱动读取事件并写出 JSONL。所有 `eventType`、JSON key
 - drain 前后执行 `IOCTL_KSWORD_SANDBOX_GET_STATUS`，捕获 queue depth、
   `ProducerEnableMask`、`ActiveProducerMask`、`FailedProducerMask`、supported producer bits
   和 total counters。
+- drain 前执行可选 `IOCTL_KSWORD_SANDBOX_GET_NETWORK_STATUS`，输出
+  `r0collector.driverNetworkStatus`，记录 WFP/ALE implementation level、layer masks、
+  TODO gaps、classify/event counters、queue/classify failure counters、NTSTATUS/error
+  字段和中文 `zhMessage`/`zhHint`。旧驱动不支持该 IOCTL 时，该行会以
+  `diagnosticCode=network_status_ioctl_unavailable`、`readinessState=degraded`
+  降级输出，并继续采集其他 producer。
 - 支持 `--abi-self-check` / `--contract-self-check`，用于 no-device ABI 和 event-quality
   自检输出。该模式输出 `r0collector.abiSelfCheck`，记录 `collectorAbiVersion`、
   `capabilityFlagsCurrentHex`、`producerMaskCurrentHex`、`jsonlNoisePolicy`、
@@ -113,6 +119,16 @@ driver/KSword.Sandbox.Driver/include/KSwordSandboxDriverIoctl.h
     `TotalEventsSuppressed`, `TotalEventsBackpressured`, producer
     dropped/suppressed/backpressure masks, queue capacity, high watermark,
     `LastNtStatus`, and `LastFailureNtStatus`.
+- `IOCTL_KSWORD_SANDBOX_GET_NETWORK_STATUS`
+  - Input：none。
+  - Output：`KSWORD_SANDBOX_NETWORK_STATUS_REPLY`。
+  - Purpose：read-only WFP/ALE runtime diagnostics。Collector 输出
+    `r0collector.driverNetworkStatus`，字段包括 `supportedLayerMask*`,
+    `lastRegisteredCalloutMask*`, `lastAddedFilterMask*`, `activeLayerMask*`,
+    `todoMask*`, `implementationLevelName`, `classifyCount`, `eventCount`,
+    `queueFailureCount`, `classifyPayloadFailureCount`, `lastDegradeReasonName`,
+    `registerNtStatusHex`, `engineNtStatusHex`, and
+    `lastQueueFailureNtStatusHex`。该行是 collector/readiness diagnostic，不是样本行为。
 - `IOCTL_KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK`
   - Input：`KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK_REQUEST`。
   - Output：`KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK_REPLY`。
@@ -126,8 +142,9 @@ driver/KSword.Sandbox.Driver/include/KSwordSandboxDriverIoctl.h
 producer-mask support/names、event schema name/version、event header version、ring
 capacity、reply sizes 和 max payload size，供后续诊断使用。`capabilityFlagNames`
 覆盖当前每个 capability bit，包括 `ProcessCreateExit`、`ImageLoad`、`FileMinifilter`、
-`RegistryCallback`、`NetworkWfpAle`、`EventCommonMetadata`、`ProducerMetadata` 和
-`SelfNoiseMetadata`；同时为这些能力输出 boolean `*Capable` 字段。
+`RegistryCallback`、`NetworkWfpAle`、`GetNetworkStatus`、`EventCommonMetadata`、
+`ProducerMetadata` 和 `SelfNoiseMetadata`；同时为这些能力输出 boolean
+`*Capable` 字段，包括 `getNetworkStatusCapable`。
 
 `R0Collector` 会在 drain 前和 final drain 后，为
 `IOCTL_KSWORD_SANDBOX_GET_STATUS` 输出 `r0collector.driverStatus`。这些行保留
@@ -152,6 +169,15 @@ ABI minor bump；`KSWORD_SANDBOX_STATUS_REPLY` 的 reply `Size` 对 ABI 1.0 coll
 `r0collector.driverProducerMask`。该行记录 requested mask，以及
 `KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK_REPLY` 返回的 previous、effective、supported
 masks 和 producer names。
+
+`R0Collector` 还会在 drain 前尝试 `IOCTL_KSWORD_SANDBOX_GET_NETWORK_STATUS`。
+成功时输出 `r0collector.driverNetworkStatus`，用于向 WebUI/report/readiness 暴露
+WFP/ALE 覆盖面：`networkStatusAvailable=true`、`networkWfpAleActive`、
+`networkWfpAleDegraded`、`supportedLayerMaskNames`、`activeLayerMaskNames`、
+`todoMaskNames`、`classifyCount`、`eventCount`、`queueFailureCount`、
+`classifyPayloadFailureCount`、`lastDegradeReasonName` 和相关 NTSTATUS hex 字段。
+不支持该可选 IOCTL 的旧驱动会输出同一 event type 的 unavailable/degraded 行，
+保留 zero-valued mask/counter 字段，并继续 normal collection。
 
 当 live driver 只实现早期 health/poll/read-events 子集时，新的 optional negotiation
 调用可能以 `STATUS_INVALID_DEVICE_REQUEST` 或 `STATUS_NOT_SUPPORTED` 的 Win32 映射失败。
@@ -307,6 +333,11 @@ KSword.Sandbox.R0Collector.exe `
 - `r0collector.readinessDiagnostic` with `diagnosticStage=abiNegotiation`. Codes
   include `abi_compatible`, `abi_capabilities_unavailable`,
   `abi_ioctl_failed`, and `abi_mismatch`.
+- `r0collector.driverNetworkStatus` when the device opens far enough to issue
+  GET_NETWORK_STATUS. Successful rows include WFP/ALE masks/counters and
+  `diagnosticStage=networkStatus`; unsupported older drivers produce
+  `network_status_ioctl_unavailable` with `readinessState=degraded` and do not
+  block READ_EVENTS diagnostics.
 - `r0collector.readinessDiagnostic` with `diagnosticStage=readEvents`. Codes
   include `read_timeout`, `read_ioctl_failed`, `read_protocol_error`,
   `driver_no_events`, and `read_events_ready`.
@@ -487,9 +518,9 @@ KSword.Sandbox.R0Collector.exe `
   `stableJsonlFields`: prove the collector binary knows the stable event-quality
   field names used by live, mock, stress, and noise rows.
 - `eventHeaderSize`, `healthReplySize`, `capabilitiesReplySize`,
-  `statusReplySize`, `readEventsRequestSize`, `readEventsReplyHeaderSize`, and
-  payload-size fields: capture fixed structure layout assumptions used by the
-  collector parser.
+  `statusReplySize`, `networkStatusReplySize`, `readEventsRequestSize`,
+  `readEventsReplyHeaderSize`, network-status offset fields, and payload-size
+  fields: capture fixed structure layout assumptions used by the collector parser.
 - `requestedMaxEvents`, `readEventsMaxEvents`, `maxEventsBounds`,
   `maxReadBatches`, `driverEventSampleStride`, and
   `driverEventSamplingPolicy`: capture the batch/backpressure/sampling knobs
@@ -591,7 +622,7 @@ New-Item -ItemType Directory -Force C:\KSwordSandbox\out | Out-Null
 ```
 
 drain path 使用 `--duration 0` 调用 R0Collector，因此它会打开 driver，输出
-health/capabilities/status/poll/read-events lifecycle rows，drain 所有 queued driver records
+health/capabilities/status/network-status/poll/read-events lifecycle rows，drain 所有 queued driver records
 并退出。首次 load 通常应暴露 typed driver-start heartbeat row（`driver.load`），除非已被其他
 reader 消费。较旧本地 build 仍可能显示 legacy `driver.event.reserved` heartbeat。
 
@@ -608,7 +639,7 @@ live VM 路径的预期脚本行 / Expected script rows for the live VM path：
 - `R0Collector health`: proves `--health --out` output is valid.
 - `R0Collector drain`: proves `--out --duration 0` output includes health,
   `r0collector.driverCapabilities`, at least one `r0collector.driverStatus`,
-  poll, read-events, and queued driver rows.
+  `r0collector.driverNetworkStatus`, poll, read-events, and queued driver rows.
 - `r0collector.driverProducerMask`: expected when a VM operator invokes
   R0Collector with `--enable-mask <mask>` to exercise
   `IOCTL_KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK`.

@@ -1220,7 +1220,8 @@
       "severity": "info",
       "summary": "Static analysis parsed a PE resource directory; resource type and payload hints may appear in static evidence.",
       "eventTypes": [
-        "static.analysis.completed"
+        "static.analysis.completed",
+        "static.pe.resource"
       ],
       "dataContains": {
         "tags": [
@@ -1233,7 +1234,12 @@
         "data.tags",
         "data.tagCount",
         "data.interestingStringCount",
-        "data.warningCount"
+        "data.warningCount",
+        "data.resourceType",
+        "data.dataRva",
+        "data.size",
+        "data.entropyLabel",
+        "data.resourceRole"
       ],
       "tags": [
         "static",
@@ -1241,7 +1247,8 @@
         "resources",
         "triage"
       ],
-      "confidence": "low"
+      "confidence": "low",
+      "summaryZh": "静态分析解析到 PE 资源目录；资源类型、大小、熵值和载荷线索会在 granular resource 事件中展开。"
     },
     {
       "id": "static-resource-payload-candidate",
@@ -1251,7 +1258,8 @@
       "mitreTechniqueId": "T1027.009",
       "mitreTechniqueName": "Embedded Payloads",
       "eventTypes": [
-        "static.analysis.completed"
+        "static.analysis.completed",
+        "static.pe.resource"
       ],
       "dataContains": {
         "tags": [
@@ -1267,7 +1275,13 @@
         "data.tags",
         "data.tagCount",
         "data.interestingStringCount",
-        "data.warningCount"
+        "data.warningCount",
+        "data.resourceType",
+        "data.dataRva",
+        "data.size",
+        "data.isPayloadCandidate",
+        "data.payloadCandidate",
+        "data.resourceRole"
       ],
       "tags": [
         "static",
@@ -1275,7 +1289,8 @@
         "payload",
         "triage"
       ],
-      "confidence": "low"
+      "confidence": "low",
+      "summaryZh": "静态分析发现 RCDATA、HTML、命名、未知、大体积或嵌入型资源数据，可能承载暂存 payload。"
     },
     {
       "id": "static-resource-embedded-pe",
@@ -1286,7 +1301,8 @@
       "mitreTechniqueId": "T1027.009",
       "mitreTechniqueName": "Embedded Payloads",
       "eventTypes": [
-        "static.analysis.completed"
+        "static.analysis.completed",
+        "static.pe.resource"
       ],
       "dataContains": {
         "tags": [
@@ -1299,13 +1315,20 @@
         "data.tags",
         "data.tagCount",
         "data.interestingStringCount",
-        "data.warningCount"
+        "data.warningCount",
+        "data.resourceType",
+        "data.dataRva",
+        "data.dataFileOffset",
+        "data.size",
+        "data.isEmbeddedPe",
+        "data.resourceRole"
       ],
       "tags": [
         "static",
         "resources",
         "embedded-pe"
-      ]
+      ],
+      "summaryZh": "静态分析在 PE 资源数据项中发现 MZ/PE 样式字节。"
     },
     {
       "id": "static-resource-high-entropy",
@@ -1316,7 +1339,8 @@
       "mitreTechniqueId": "T1027",
       "mitreTechniqueName": "Obfuscated Files or Information",
       "eventTypes": [
-        "static.analysis.completed"
+        "static.analysis.completed",
+        "static.pe.resource"
       ],
       "dataContains": {
         "tags": [
@@ -1329,13 +1353,21 @@
         "data.tags",
         "data.tagCount",
         "data.interestingStringCount",
-        "data.warningCount"
+        "data.warningCount",
+        "data.resourceType",
+        "data.dataRva",
+        "data.dataFileOffset",
+        "data.size",
+        "data.entropy",
+        "data.entropyLabel",
+        "data.resourceRole"
       ],
       "tags": [
         "static",
         "resources",
         "entropy"
-      ]
+      ],
+      "summaryZh": "静态分析发现高熵资源数据，可能表示压缩、加密或混淆的内嵌内容。"
     },
     {
       "id": "static-section-writable-executable",

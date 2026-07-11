@@ -56,6 +56,10 @@ internal sealed class StaticAnalysisPeEvidenceContractScenario : ISmokeTestScena
             "tls_directory_present",
             "tls_callback_pointer",
             "tls_callbacks",
+            "resources_present",
+            "resource_payload_candidate",
+            "resource_embedded_pe",
+            "resource_high_entropy_data",
             "url",
             "ip_address",
             "public_ip_address",
@@ -111,6 +115,14 @@ internal sealed class StaticAnalysisPeEvidenceContractScenario : ISmokeTestScena
         SmokeAssert.True(
             result.Overlay is { Present: true, ContainsCertificateTable: true, NonCertificateSize: > 0, NonCertificateEntropy: not null },
             "StaticAnalyzer should expose structured overlay offsets, sizes, and entropy.");
+        SmokeAssert.True(
+            result.Resources.Any(resource =>
+                string.Equals(resource.ResourceType, "rcdata", StringComparison.OrdinalIgnoreCase) &&
+                resource.IsPayloadCandidate &&
+                resource.IsEmbeddedPe &&
+                resource.Entropy is >= 7.2 &&
+                resource.Tags.Contains("resource_high_entropy_data", StringComparer.OrdinalIgnoreCase)),
+            "StaticAnalyzer should expose structured resource data entries with payload, embedded-PE, and entropy fields.");
         SmokeAssert.True(
             result.NetworkIndicators.Any(indicator => indicator.Kind == "url" && indicator.Value.StartsWith("https://overlay.example.invalid/", StringComparison.OrdinalIgnoreCase)) &&
             result.NetworkIndicators.Any(indicator => indicator.Kind == "ipv4" && indicator.Classification == "public") &&
@@ -215,6 +227,14 @@ internal sealed class StaticAnalysisPeEvidenceContractScenario : ISmokeTestScena
             "StaticAnalyzer should project PE overlay events.");
         SmokeAssert.True(
             events.Any(evt =>
+                string.Equals(evt.EventType, "static.pe.resource", StringComparison.OrdinalIgnoreCase) &&
+                DataEquals(evt, "resourceType", "rcdata") &&
+                DataEquals(evt, "isEmbeddedPe", "True") &&
+                DataEquals(evt, "payloadCandidate", "True") &&
+                DataContains(evt, "tags", "resource_high_entropy_data")),
+            "StaticAnalyzer should project PE resource data-entry events.");
+        SmokeAssert.True(
+            events.Any(evt =>
                 string.Equals(evt.EventType, "static.string.indicator", StringComparison.OrdinalIgnoreCase) &&
                 DataEquals(evt, "kind", "url") &&
                 DataContains(evt, "value", "overlay.example.invalid")),
@@ -268,6 +288,8 @@ internal sealed class StaticAnalysisPeEvidenceContractScenario : ISmokeTestScena
             "static-import-process-injection",
             "static-import-network-api",
             "static-pe-tls-callbacks",
+            "static-resource-embedded-pe",
+            "static-resource-high-entropy",
             "static-export-registration-entrypoint",
             "static-embedded-url",
             "static-ip-address",
@@ -387,6 +409,8 @@ internal sealed class StaticAnalysisPeEvidenceContractScenario : ISmokeTestScena
         WriteUInt32(buffer, dataDirectoryOffset + 4, 0x80);
         WriteUInt32(buffer, dataDirectoryOffset + 1 * 8, 0x1100);
         WriteUInt32(buffer, dataDirectoryOffset + 1 * 8 + 4, 0x3c);
+        WriteUInt32(buffer, dataDirectoryOffset + 2 * 8, 0x1500);
+        WriteUInt32(buffer, dataDirectoryOffset + 2 * 8 + 4, 0x80);
         WriteUInt32(buffer, dataDirectoryOffset + 4 * 8, 0x500);
         WriteUInt32(buffer, dataDirectoryOffset + 4 * 8 + 4, 0x100);
         WriteUInt32(buffer, dataDirectoryOffset + 9 * 8, 0x10b0);
@@ -419,8 +443,39 @@ internal sealed class StaticAnalysisPeEvidenceContractScenario : ISmokeTestScena
         WriteUInt16(buffer, 0x506, 0x0002);
         FillDeterministicBytes(buffer, 0x508, 0x600, 0x13579bdf);
         FillDeterministicBytes(buffer, 0x600, buffer.Length, 0x2468ace0);
+        WriteSyntheticResourceDirectory(buffer);
 
         File.WriteAllBytes(path, buffer);
+    }
+
+    /// <summary>
+    /// Writes a bounded RCDATA resource tree with high-entropy embedded MZ data.
+    /// </summary>
+    private static void WriteSyntheticResourceDirectory(byte[] buffer)
+    {
+        // IMAGE_RESOURCE_DIRECTORY root at RVA 0x1500 / file 0x700.
+        WriteUInt16(buffer, 0x700 + 14, 1);
+        WriteUInt32(buffer, 0x710, 10); // RT_RCDATA
+        WriteUInt32(buffer, 0x714, 0x80000020);
+
+        // Name/id directory.
+        WriteUInt16(buffer, 0x720 + 14, 1);
+        WriteUInt32(buffer, 0x730, 1);
+        WriteUInt32(buffer, 0x734, 0x80000040);
+
+        // Language directory.
+        WriteUInt16(buffer, 0x740 + 14, 1);
+        WriteUInt32(buffer, 0x750, 0x409);
+        WriteUInt32(buffer, 0x754, 0x60);
+
+        // IMAGE_RESOURCE_DATA_ENTRY -> RVA 0x1580 / file 0x780.
+        WriteUInt32(buffer, 0x760, 0x1580);
+        WriteUInt32(buffer, 0x764, 0x120);
+        WriteUInt32(buffer, 0x768, 0);
+        WriteUInt32(buffer, 0x76c, 0);
+
+        WriteUInt16(buffer, 0x780, 0x5a4d);
+        FillDeterministicBytes(buffer, 0x782, 0x8a0, 0x5eedc0de);
     }
 
     /// <summary>

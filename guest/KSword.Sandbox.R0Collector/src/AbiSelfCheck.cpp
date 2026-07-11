@@ -38,6 +38,7 @@ std::string CurrentCapabilityFlagNames(const unsigned long long flags) {
     appendName(KSWORD_SANDBOX_CAPABILITY_FLAG_EVENT_COMMON_METADATA, "EventCommonMetadata");
     appendName(KSWORD_SANDBOX_CAPABILITY_FLAG_PRODUCER_METADATA, "ProducerMetadata");
     appendName(KSWORD_SANDBOX_CAPABILITY_FLAG_SELF_NOISE_METADATA, "SelfNoiseMetadata");
+    appendName(KSWORD_SANDBOX_CAPABILITY_FLAG_GET_NETWORK_STATUS, "GetNetworkStatus");
 
     return names.empty() ? "none" : names;
 }
@@ -143,6 +144,16 @@ std::string BuildAbiSelfCheckData(const Options& options) {
     data.AddUnsigned("statusLastEnqueueFailureOffset", kAbiGuardStatusLastEnqueueFailureOffset);
     data.AddUnsigned("readEventsEventsDroppedOffset", kAbiGuardReadEventsEventsDroppedOffset);
     data.AddUnsigned("readEventsEventsOffset", kAbiGuardReadEventsEventsOffset);
+    data.AddUnsigned("networkStatusReplySize", sizeof(KSWORD_SANDBOX_NETWORK_STATUS_REPLY));
+    data.AddUnsigned("networkStatusTodoMaskOffset", kAbiGuardNetworkStatusTodoMaskOffset);
+    data.AddUnsigned("networkStatusPayloadVersionOffset", kAbiGuardNetworkStatusPayloadVersionOffset);
+    data.AddUnsigned("networkStatusLastDegradeReasonOffset", kAbiGuardNetworkStatusLastDegradeReasonOffset);
+    data.AddUnsigned("networkStatusClassifyCountOffset", kAbiGuardNetworkStatusClassifyCountOffset);
+    data.AddUnsigned("networkStatusEventCountOffset", kAbiGuardNetworkStatusEventCountOffset);
+    data.AddUnsigned("networkStatusQueueFailureCountOffset", kAbiGuardNetworkStatusQueueFailureCountOffset);
+    data.AddUnsigned("networkStatusLastQueueFailureOffset", kAbiGuardNetworkStatusLastQueueFailureOffset);
+    data.AddUtf8("networkStatusIoctlPolicy", "IOCTL_KSWORD_SANDBOX_GET_NETWORK_STATUS is optional read-only WFP/ALE diagnostics; unavailable drivers emit r0collector.driverNetworkStatus with readinessState=degraded and collection continues");
+    data.AddWide("zhNetworkStatusIoctlPolicy", L"GET_NETWORK_STATUS 是可选只读 WFP/ALE 诊断；驱动不支持时输出降级状态行并继续采集。");
     data.AddUnsigned("healthReplySize", sizeof(KSWORD_SANDBOX_HEALTH_REPLY));
     data.AddUnsigned("healthReplyLegacyMinimumBytes", kHealthReplyLegacyMinimumBytes);
     data.AddUnsigned("healthReplyProducerMaskBytes", kHealthReplyProducerMaskBytes);
@@ -221,7 +232,7 @@ std::string BuildAbiSelfCheckData(const Options& options) {
     data.AddUtf8("typedPayloadSemanticFields", "semanticFamily|behaviorLane|activityKind|evidenceReady|zhMessage|zhHint plus process/file/registry/network family-specific hints");
     data.AddUtf8("stressBackpressureDiagnostics", "observedSequenceSpan|expectedContiguousEvents|sequenceGapReason|lossDiagnostic|backpressureSeverity|backpressureDiagnostics|zhBackpressureHint");
     data.AddUtf8("queueLossEvidence", "lostCount|TotalEventsDropped|EventsDropped|TotalEventsSuppressed|TotalEventsBackpressured|ProducerDroppedMask|ProducerSuppressedMask|ProducerBackpressureMask|NextSequence|sequence|sequenceGapObserved|sequenceGapEstimate|queueHighWatermark|highWatermark");
-    data.AddUtf8("stableJsonlFields", "sequence|sequenceMeaning|sequenceScope|sequenceConcrete|lost|lostCount|loss|lossObserved|backpressure|backpressureObserved|backpressureReason|backpressureSeverity|highWatermark|lastEnqueueFailureStatus|noise|noiseClass|selfNoiseClass|collectorNoiseClass|collectorNoise|collectorSelfNoise|selfProcess|selfNoise|selfNoiseReason|selfNoiseAction|collectorSuppressed|sampleBehaviorCandidate|producer|producerCategory|eventOrigin|subjectKind|actorRole|subjectRole|processIdSource|semanticFamily|behaviorLane|activityKind|serviceHint|flowKey|sourceEndpoint|destinationEndpoint|zhMessage|zhHint|operationName|status|pathTruncated|schema|eventSchemaName|eventSchemaVersion|eligible|processed|emitted|suppressed|skipped|head|tail|sampling|sequenceGapReason|observedSequenceSpan|producerDroppedMask|producerSuppressedMask|producerBackpressureMask|effectiveProducerMask|lastFailureNtStatus");
+    data.AddUtf8("stableJsonlFields", "sequence|sequenceMeaning|sequenceScope|sequenceConcrete|lost|lostCount|loss|lossObserved|backpressure|backpressureObserved|backpressureReason|backpressureSeverity|highWatermark|lastEnqueueFailureStatus|noise|noiseClass|selfNoiseClass|collectorNoiseClass|collectorNoise|collectorSelfNoise|selfProcess|selfNoise|selfNoiseReason|selfNoiseAction|collectorSuppressed|sampleBehaviorCandidate|producer|producerCategory|eventOrigin|subjectKind|actorRole|subjectRole|processIdSource|semanticFamily|behaviorLane|activityKind|serviceHint|flowKey|sourceEndpoint|destinationEndpoint|zhMessage|zhHint|operationName|status|pathTruncated|schema|eventSchemaName|eventSchemaVersion|eligible|processed|emitted|suppressed|skipped|head|tail|sampling|sequenceGapReason|observedSequenceSpan|producerDroppedMask|producerSuppressedMask|producerBackpressureMask|effectiveProducerMask|lastFailureNtStatus|networkStatusAvailable|networkStatusCapability|supportedLayerMask|activeLayerMask|todoMask|classifyCount|eventCount|queueFailureCount|classifyPayloadFailureCount|lastDegradeReasonName");
     data.AddUtf8("collectorSelfCheckContract", "--abi-self-check emits this row and exits before CreateFileW/DeviceIoControl");
     data.AddWide("zhCollectorSelfCheckContract", L"--abi-self-check \u4f1a\u53d1\u51fa\u8be5\u884c\uff0c\u5e76\u5728 CreateFileW/DeviceIoControl \u4e4b\u524d\u9000\u51fa\u3002");
 

@@ -38,6 +38,8 @@ public sealed record StaticAnalysisResult
 
     public PeOverlayInfo? Overlay { get; init; }
 
+    public List<PeResourceInfo> Resources { get; init; } = [];
+
     public List<StaticNetworkIndicator> NetworkIndicators { get; init; } = [];
 
     public List<StaticPathIndicator> PathIndicators { get; init; } = [];
@@ -169,6 +171,36 @@ public sealed record PeOverlayInfo
     public long LargestNonCertificateSize { get; init; }
 
     public double? NonCertificateEntropy { get; init; }
+}
+
+
+/// <summary>
+/// Structured PE resource data-entry summary.
+/// Inputs are parsed from IMAGE_RESOURCE_DIRECTORY/IMAGE_RESOURCE_DATA_ENTRY,
+/// processing records bounded payload, entropy, and embedded-PE hints, and the
+/// record is returned as static triage evidence for rules and reports.
+/// </summary>
+public sealed record PeResourceInfo
+{
+    public required string ResourceType { get; init; }
+
+    public string DataRva { get; init; } = "0x0";
+
+    public string? DataFileOffset { get; init; }
+
+    public long Size { get; init; }
+
+    public double? Entropy { get; init; }
+
+    public string EntropyLabel { get; init; } = "unknown";
+
+    public bool IsPayloadCandidate { get; init; }
+
+    public bool IsEmbeddedPe { get; init; }
+
+    public bool IsLarge { get; init; }
+
+    public List<string> Tags { get; init; } = [];
 }
 
 /// <summary>

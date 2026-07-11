@@ -194,6 +194,25 @@ Older ABI drivers that do not advertise the flag remain accepted. In that path
 bytes were present, and the mask fields are emitted as zero-valued compatibility
 diagnostics rather than failing the health check.
 
+### `r0collector.driverNetworkStatus` WFP/ALE diagnostics
+
+Live collection and `--diagnose` now attempt the optional read-only
+`IOCTL_KSWORD_SANDBOX_GET_NETWORK_STATUS`.  When available, the collector emits
+`r0collector.driverNetworkStatus` with `diagnosticStage=networkStatus`,
+`networkStatusAvailable=true`, WFP/ALE layer masks (`supportedLayerMask*`,
+`lastRegisteredCalloutMask*`, `lastAddedFilterMask*`, `activeLayerMask*`),
+`todoMask*`, `implementationLevelName`, `classifyCount`, `eventCount`,
+`queueFailureCount`, `classifyPayloadFailureCount`, `lastDegradeReasonName`,
+and NTSTATUS hex fields such as `registerNtStatusHex`, `engineNtStatusHex`, and
+`lastQueueFailureNtStatusHex`.
+
+Older drivers that do not expose the IOCTL are non-fatal.  The same event type
+is emitted with `networkStatusAvailable=false`,
+`diagnosticCode=network_status_ioctl_unavailable`,
+`readinessState=degraded`, zero-valued mask/counter fields, and
+`zhMessage`/`zhHint`; collection continues for health/status/poll/read-events
+and other producer families.
+
 ## Exit codes
 
 - `0`: success.

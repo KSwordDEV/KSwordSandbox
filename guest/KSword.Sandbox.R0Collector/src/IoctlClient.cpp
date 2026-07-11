@@ -307,6 +307,129 @@ bool EmitOptionalIoctlUnavailable(
     return EmitEvent(writer, event);
 }
 
+// Input: Failed GET_NETWORK_STATUS details from an otherwise opened device.
+// Processing: Emits a network-specific degraded diagnostic with the same mask
+// and counter keys used by successful replies so reports can render one stable
+// shape even when older drivers do not implement the optional IOCTL.
+// Return: true if the JSONL sink accepted the unavailable status event.
+bool EmitNetworkStatusUnavailable(
+    EventWriter& writer,
+    const Options& options,
+    const DWORD errorCode,
+    const DWORD bytesReturned,
+    const bool optionalUnavailable) {
+    JsonDataObjectBuilder data;
+    data.AddUtf8("ioctl", "IOCTL_KSWORD_SANDBOX_GET_NETWORK_STATUS");
+    data.AddUnsigned("ioctlCode", IOCTL_KSWORD_SANDBOX_GET_NETWORK_STATUS);
+    data.AddUnsigned("bytesReturned", bytesReturned);
+    data.AddUnsigned("win32Error", errorCode);
+    data.AddWide("win32Message", Win32ErrorMessage(errorCode));
+    data.AddUtf8("diagnosticStage", "networkStatus");
+    data.AddUtf8(
+        "diagnosticCode",
+        optionalUnavailable ? "network_status_ioctl_unavailable" : "network_status_ioctl_failed");
+    data.AddUtf8("severity", optionalUnavailable ? "warning" : "error");
+    data.AddUtf8("readinessState", "degraded");
+    data.AddUtf8("availabilityState", "unavailable");
+    data.AddUtf8("collectionScope", "r0collector-network-status");
+    data.AddBool("collectionDiagnostic", true);
+    data.AddBool("sampleBehavior", false);
+    data.AddUtf8("operatorInterpretation", "collection_diagnostic_not_sample_behavior");
+    data.AddWide(
+        "hint",
+        optionalUnavailable
+            ? L"Loaded driver does not expose the optional GET_NETWORK_STATUS diagnostics IOCTL; continuing without WFP/ALE runtime status."
+            : L"GET_NETWORK_STATUS failed. Continue collecting other driver evidence, then verify the loaded driver/collector ABI if network status is required.");
+    data.AddWide(
+        "zhMessage",
+        L"R0 网络状态诊断 IOCTL 当前不可用；Collector 会继续采集其他 R0 证据。");
+    data.AddWide(
+        "zhHint",
+        optionalUnavailable
+            ? L"当前驱动可能是旧 ABI 或未包含 GET_NETWORK_STATUS；如需 WFP/ALE mask、counter 和错误字段，请使用同一构建产物的驱动与 Collector。"
+            : L"GET_NETWORK_STATUS 调用失败；请检查驱动/Collector ABI、权限和驱动日志。该失败不会中断其他 producer 采集。");
+    data.AddUtf8("schema", KSWORD_SANDBOX_EVENT_SCHEMA_NAME);
+    data.AddUtf8("producer", "r0collector");
+    AddCollectorAttributionFields(data, "driver-network-status", "collector-diagnostic");
+    data.AddBool("collectionNoise", true);
+    data.AddBool("collectorNoise", true);
+    data.AddBool("collectorSelfNoise", false);
+    data.AddBool("selfProcess", false);
+    data.AddUtf8("collectorNoiseReason", "collectionDiagnostic");
+    data.AddUtf8("collectorNoiseAction", "emit");
+    data.AddBool("collectorSuppressed", false);
+    data.AddBool("selfNoise", false);
+    data.AddUtf8("selfNoiseReason", "none");
+    data.AddUtf8("selfNoiseAction", "emit");
+    data.AddBool("noise", false);
+    data.AddBool("lost", false);
+    data.AddUnsigned("lostCount", 0);
+    data.AddBool("lossObserved", false);
+    data.AddUtf8("loss", "none");
+    data.AddBool("backpressure", false);
+    data.AddBool("backpressureObserved", false);
+    data.AddUtf8("backpressureReason", "none");
+    data.AddUnsigned("highWatermark", 0);
+    data.AddBool("networkStatusAvailable", false);
+    data.AddBool("getNetworkStatusCapable", false);
+    data.AddBool("networkWfpAleCapable", false);
+    data.AddBool("networkWfpAleActive", false);
+    data.AddBool("networkWfpAleDegraded", true);
+    data.AddBool("networkWfpAleInspectOnly", false);
+    data.AddBool("networkTodoRemaining", false);
+    data.AddUtf8("networkStatusCapability", optionalUnavailable ? "ioctl-unavailable" : "ioctl-failed");
+    data.AddUtf8("networkStatusKind", "wfp-ale-runtime-diagnostics");
+    data.AddUtf8("networkStatusInterpretation", "collector_readiness_not_sample_behavior");
+    data.AddUnsigned("flags", 0);
+    data.AddUtf8("flagsHex", "0x00000000");
+    data.AddUtf8("flagNames", "none");
+    data.AddUnsigned("implementationLevel", KSWORD_SANDBOX_NETWORK_WFP_IMPLEMENTATION_NONE);
+    data.AddUtf8("implementationLevelName", "none");
+    data.AddUnsigned("supportedLayerMask", 0);
+    data.AddUtf8("supportedLayerMaskHex", "0x00000000");
+    data.AddUtf8("supportedLayerMaskNames", "none");
+    data.AddUnsigned("lastRegisteredCalloutMask", 0);
+    data.AddUtf8("lastRegisteredCalloutMaskHex", "0x00000000");
+    data.AddUtf8("lastRegisteredCalloutMaskNames", "none");
+    data.AddUnsigned("lastAddedFilterMask", 0);
+    data.AddUtf8("lastAddedFilterMaskHex", "0x00000000");
+    data.AddUtf8("lastAddedFilterMaskNames", "none");
+    data.AddUnsigned("activeLayerMask", 0);
+    data.AddUtf8("activeLayerMaskHex", "0x00000000");
+    data.AddUtf8("activeLayerMaskNames", "none");
+    data.AddUnsigned("todoMask", 0);
+    data.AddUtf8("todoMaskHex", "0x00000000");
+    data.AddUtf8("todoMaskNames", "none");
+    data.AddUnsigned("payloadVersion", 0);
+    data.AddUtf8("payloadVersionHex", "0x00000000");
+    data.AddSigned("lastDegradeReason", optionalUnavailable ? KswSandboxNetworkStatusDegradeNone : KswSandboxNetworkStatusDegradeQueuePush);
+    data.AddUtf8("lastDegradeReasonName", optionalUnavailable ? "none" : "queue-push");
+    data.AddSigned("lastDegradeNtStatus", 0);
+    data.AddUtf8("lastDegradeNtStatusHex", "0x00000000");
+    data.AddSigned("registerNtStatus", 0);
+    data.AddUtf8("registerNtStatusHex", "0x00000000");
+    data.AddSigned("engineNtStatus", 0);
+    data.AddUtf8("engineNtStatusHex", "0x00000000");
+    data.AddUnsigned("classifyCount", 0);
+    data.AddUnsigned("eventCount", 0);
+    data.AddUnsigned("queueFailureCount", 0);
+    data.AddUnsigned("classifyPayloadFailureCount", 0);
+    data.AddUnsigned("lastClassifyLayerId", 0);
+    data.AddUtf8("lastClassifyLayerIdHex", "0x00000000");
+    data.AddSigned("lastQueueFailureNtStatus", 0);
+    data.AddUtf8("lastQueueFailureNtStatusHex", "0x00000000");
+    data.AddUnsigned("lastQueueFailureLayerId", 0);
+    data.AddUtf8("lastQueueFailureLayerIdHex", "0x00000000");
+    data.AddUnsigned("lastClassifyPayloadFailureLayerId", 0);
+    data.AddUtf8("lastClassifyPayloadFailureLayerIdHex", "0x00000000");
+
+    SandboxEventFields event;
+    event.eventType = "r0collector.driverNetworkStatus";
+    event.path = options.devicePath;
+    event.dataJson = data.Build();
+    return EmitEvent(writer, event);
+}
+
 // Input: Open driver handle, collector options, and JSONL sink.
 // Processing: Issues IOCTL_KSWORD_SANDBOX_GET_HEALTH and writes a
 // r0collector.driverHealth row with the public health reply fields.
@@ -483,6 +606,52 @@ bool EmitDriverStatus(const UniqueHandle& device, const Options& options, EventW
     event.eventType = "r0collector.driverStatus";
     event.path = options.devicePath;
     event.dataJson = BuildStatusData(reply, bytesReturned);
+    return EmitEvent(writer, event);
+}
+
+// Input: Open driver handle, collector options, and JSONL sink.
+// Processing: Issues optional IOCTL_KSWORD_SANDBOX_GET_NETWORK_STATUS and
+// writes a r0collector.driverNetworkStatus row with WFP/ALE masks, counters,
+// capability state, and last error fields. Older drivers that do not implement
+// this IOCTL produce a degraded unavailable row and normal collection continues.
+// Return: true when a success/unavailable diagnostic row was emitted.
+bool EmitDriverNetworkStatus(const UniqueHandle& device, const Options& options, EventWriter& writer) {
+    KSWORD_SANDBOX_NETWORK_STATUS_REPLY reply {};
+    DWORD bytesReturned = 0;
+    DWORD errorCode = ERROR_SUCCESS;
+
+    if (!CallDriverIoctl(
+            device,
+            IOCTL_KSWORD_SANDBOX_GET_NETWORK_STATUS,
+            nullptr,
+            0,
+            &reply,
+            static_cast<DWORD>(sizeof(reply)),
+            &bytesReturned,
+            &errorCode)) {
+        return EmitNetworkStatusUnavailable(
+            writer,
+            options,
+            errorCode,
+            bytesReturned,
+            IsOptionalIoctlUnavailable(errorCode));
+    }
+
+    if (bytesReturned < static_cast<DWORD>(sizeof(reply)) ||
+        reply.Version != KSWORD_SANDBOX_NETWORK_STATUS_REPLY_VERSION ||
+        reply.Size < sizeof(reply)) {
+        return EmitNetworkStatusUnavailable(
+            writer,
+            options,
+            ERROR_REVISION_MISMATCH,
+            bytesReturned,
+            false);
+    }
+
+    SandboxEventFields event;
+    event.eventType = "r0collector.driverNetworkStatus";
+    event.path = options.devicePath;
+    event.dataJson = BuildNetworkStatusData(reply, bytesReturned);
     return EmitEvent(writer, event);
 }
 

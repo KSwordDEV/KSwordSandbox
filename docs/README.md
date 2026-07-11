@@ -17,6 +17,21 @@ WebUI 展示实时进度和原始事件；可选 VirusTotal 只做 hash-only 查
 该端到端路径的本地记录证据见 [`webui-real-r0-e2e.md`](webui-real-r0-e2e.md)。
 默认安全路径仍是 PlanOnly/dry-run，不会修改 VM。
 
+## 发布就绪快照 / Release-readiness snapshot
+
+截至 `21a81ac` 后的文档刷新，release-review 的当前事实入口是
+[`v1-release-gap-audit.md`](v1-release-gap-audit.md)：它维护组件完成百分比、
+剩余差距和低副作用验收命令。简要状态：
+
+- WebUI live 已有真实进度 SSE、durable progress fallback、上传后监控页、
+  artifact/download 卡片和 VT quiet state；命令/stdout/stderr 不在主视图展开。
+- 静态分析已拆出 `static.*` 结构化事件并进入规则消费；`rules/static-notes.yar`
+  由内置轻量 YARA-like matcher 处理，仍只作为 triage。
+- 网络/PCAP/sidecar、artifact index/download、R0 health/noise、VT reputation
+  和中英 HTML 报告已形成可审阅闭环。
+- 默认 release/readiness/package 不签名、不加载驱动、不调用 `CSignTool.exe`、
+  不 push，也不把 runtime 产物带入 git。
+
 ## 仓库卫生提醒 / Repository hygiene reminder
 
 只提交源码、规则、配置模板和文档。**不要**提交样本、VM 磁盘/检查点/导出、

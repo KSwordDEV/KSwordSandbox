@@ -70,6 +70,7 @@ internal sealed class R0CollectorContractScenario : ISmokeTestScenario
         var readinessDiagnostics = ReadText(Path.Combine(sourceRoot, "ReadinessDiagnostics.cpp"));
         var healthData = ExtractFunctionBody(eventParser, "BuildHealthData");
         var statusData = ExtractFunctionBody(eventParser, "BuildStatusData");
+        var networkStatusData = ExtractFunctionBody(eventParser, "BuildNetworkStatusData");
         var pollData = ExtractFunctionBody(eventParser, "BuildPollData");
         var readEventsBatchData = ExtractFunctionBody(eventParser, "BuildReadEventsBatchData");
         RequireContains(runtimeLoop, "RunAbiSelfCheckMode", "Runtime loop should support no-device ABI self-check mode.");
@@ -85,15 +86,20 @@ internal sealed class R0CollectorContractScenario : ISmokeTestScenario
         RequireContains(abiSelfCheck, "stableJsonlFields", "ABI self-check should name stable JSONL event-quality fields.");
         RequireContains(ioctlClient, "EmitDriverCapabilities", "R0Collector should negotiate capabilities.");
         RequireContains(ioctlClient, "EmitDriverStatus", "R0Collector should emit status snapshots.");
+        RequireContains(ioctlClient, "EmitDriverNetworkStatus", "R0Collector should emit network WFP/ALE status snapshots.");
         RequireContains(ioctlClient, "EmitDriverSetProducerEnableMask", "R0Collector should support producer-mask IOCTL negotiation.");
         RequireContains(ioctlClient, "IOCTL_KSWORD_SANDBOX_GET_CAPABILITIES", "R0Collector should issue capabilities IOCTL.");
         RequireContains(ioctlClient, "IOCTL_KSWORD_SANDBOX_GET_STATUS", "R0Collector should issue status IOCTL.");
+        RequireContains(ioctlClient, "IOCTL_KSWORD_SANDBOX_GET_NETWORK_STATUS", "R0Collector should issue network status diagnostics IOCTL.");
         RequireContains(ioctlClient, "IOCTL_KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK", "R0Collector should issue producer-mask IOCTL.");
         RequireContains(ioctlClient, "request->EnableMask = options.enableMask", "enable-mask should flow to SET_PRODUCER_ENABLE_MASK request.");
         RequireContains(ioctlClient, "request->Flags = 0", "producer-mask request reserved flags should be zero.");
         RequireContains(ioctlClient, "r0collector.driverCapabilities", "R0Collector should emit capabilities JSONL rows.");
         RequireContains(ioctlClient, "r0collector.driverStatus", "R0Collector should emit status JSONL rows.");
+        RequireContains(ioctlClient, "r0collector.driverNetworkStatus", "R0Collector should emit network status JSONL rows.");
         RequireContains(ioctlClient, "r0collector.driverProducerMask", "R0Collector should emit producer-mask JSONL rows.");
+        RequireContains(ioctlClient, "network_status_ioctl_unavailable", "GET_NETWORK_STATUS unavailable should be classified without failing collection.");
+        RequireContains(ioctlClient, "networkStatusAvailable", "GET_NETWORK_STATUS unavailable rows should preserve stable network status fields.");
         RequireContains(ioctlClient, "kHealthReplyLegacyMinimumBytes", "GET_HEALTH should tolerate the legacy health reply prefix.");
         RequireContains(ioctlClient, "KSWORD_SANDBOX_HEALTH_FLAG_PRODUCER_MASKS_AVAILABLE", "GET_HEALTH should gate producer masks on the health flag.");
         RequireContains(ioctlClient, "advertised producer masks without returning", "GET_HEALTH should reject flagged replies that omit producer mask bytes.");
@@ -117,6 +123,8 @@ internal sealed class R0CollectorContractScenario : ISmokeTestScenario
         RequireContains(readinessDiagnostics, "FILE_FLAG_OVERLAPPED", "Readiness diagnostics should use bounded overlapped READ_EVENTS probes.");
         RequireContains(eventParser, "capabilityFlagsHex", "Capabilities row should preserve capability flags.");
         RequireContains(eventParser, "ProcessCreateExit", "Capabilities row should name process create/exit support.");
+        RequireContains(eventParser, "NetworkWfpAle", "Capabilities row should name network WFP/ALE support.");
+        RequireContains(eventParser, "GetNetworkStatus", "Capabilities row should name network status diagnostics support.");
         RequireContains(eventParser, "EventCommonMetadata", "Capabilities row should name common event metadata support.");
         RequireContains(eventParser, "SelfNoiseMetadata", "Capabilities row should name self-noise metadata support.");
         RequireContains(eventParser, "supportedProducerMaskHex", "Capabilities/status rows should preserve supported producer mask.");
@@ -144,6 +152,16 @@ internal sealed class R0CollectorContractScenario : ISmokeTestScenario
         RequireContains(statusData, "highWatermark", "Status row should expose a stable high-watermark alias.");
         RequireContains(statusData, "lastEnqueueFailureStatus", "Status row should expose enqueue failure status.");
         RequireContains(statusData, "sequenceMeaning", "Status row should distinguish nextSequence from a concrete event sequence.");
+        RequireContains(networkStatusData, "supportedLayerMaskHex", "Network status row should preserve supported WFP/ALE layer mask.");
+        RequireContains(networkStatusData, "activeLayerMaskHex", "Network status row should preserve active WFP/ALE layer mask.");
+        RequireContains(networkStatusData, "todoMaskNames", "Network status row should preserve named WFP/ALE TODO mask gaps.");
+        RequireContains(networkStatusData, "classifyCount", "Network status row should preserve WFP classify counter.");
+        RequireContains(networkStatusData, "queueFailureCount", "Network status row should preserve queue failure counter.");
+        RequireContains(networkStatusData, "classifyPayloadFailureCount", "Network status row should preserve classify payload failure counter.");
+        RequireContains(networkStatusData, "lastDegradeReasonName", "Network status row should preserve degradation reason name.");
+        RequireContains(networkStatusData, "lastQueueFailureNtStatusHex", "Network status row should preserve queue failure NTSTATUS.");
+        RequireContains(networkStatusData, "zhMessage", "Network status row should include Chinese operator message.");
+        RequireContains(networkStatusData, "zhHint", "Network status row should include Chinese operator hint.");
         RequireContains(pollData, "lostCount", "Poll row should expose a stable lost-count alias.");
         RequireContains(pollData, "sequenceMeaning", "Poll row should distinguish nextSequence from a concrete event sequence.");
         RequireContains(readEventsBatchData, "lostCount", "READ_EVENTS batch row should expose a stable lost-count alias.");
@@ -162,6 +180,8 @@ internal sealed class R0CollectorContractScenario : ISmokeTestScenario
         RequireContains(runtimeLoop, "EmitDriverCapabilities", "Runtime loop should call capabilities before drain.");
         RequireContains(runtimeLoop, "EmitDriverSetProducerEnableMask", "Runtime loop should apply requested producer mask before drain.");
         RequireContains(runtimeLoop, "EmitDriverStatus", "Runtime loop should capture status before/after drain.");
+        RequireContains(runtimeLoop, "EmitDriverNetworkStatus", "Runtime loop should capture WFP/ALE status before drain.");
+        RequireContains(readinessDiagnostics, "EmitDriverNetworkStatus", "Readiness diagnostics should include WFP/ALE network status when the device opens.");
         RequireContains(runtimeLoop, "r0collector.heartbeat", "heartbeat rows should be emitted by the runtime loop.");
 
         foreach (var option in new[] { "--self-test", "--synthetic", "--enable-mask", "--max-events", "--max-read-batches", "--heartbeat", "--duration", "--poll-ms", "--stress-count", "--inject-jsonl-noise", "--driver-event-sample-stride", "--event-sample-stride", "--suppress-self-noise", "--emit-self-noise" })
@@ -177,6 +197,7 @@ internal sealed class R0CollectorContractScenario : ISmokeTestScenario
         RequireContains(collectorDoc, "--diagnose", "r0-collector.md should describe live readiness diagnose mode.");
         RequireContains(collectorDoc, "r0collector.readinessDiagnostic", "r0-collector.md should document readiness diagnostic output.");
         RequireContains(collectorDoc, "r0collector.readinessSummary", "r0-collector.md should document readiness summary output.");
+        RequireContains(collectorDoc, "r0collector.driverNetworkStatus", "r0-collector.md should document network status diagnostics output.");
         RequireContains(collectorDoc, "diagnosticCode", "r0-collector.md should document machine-readable diagnostic codes.");
         RequireContains(schemaDoc, "--diagnose", "r0-jsonl-schema.md should document diagnose CLI JSONL behavior.");
         RequireContains(schemaDoc, "r0collector.readinessDiagnostic", "r0-jsonl-schema.md should document readiness diagnostic rows.");

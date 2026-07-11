@@ -90,10 +90,11 @@ triage events, not as observed guest behavior.
   When a rule consumes both the summary and a granular event, report rendering
   should treat them as evidence for one rule finding rather than as separate
   findings.
-- Resource-directory tags are currently summary-only: consume
-  `resources_present`, `resource_payload_candidate`, `resource_embedded_pe`,
-  and `resource_high_entropy_data` from `static.analysis.completed` until a
-  concrete resource event projection exists.
+- Resource-directory tags are available both in `static.analysis.completed`
+  and granular `static.pe.resource` rows. Prefer `static.pe.resource` when the
+  rule needs resource type, data RVA/file offset, size, entropy label,
+  `resourceRole`, `isPayloadCandidate`, or `isEmbeddedPe`; keep the summary
+  row only for backward-compatible rollups.
 - YARA-like results should normally have one generic low-confidence consumer
   for `static.yara.match`. Add per-rule YARA behavior rules only when they are
   scoped by `Data.ruleName` and do not duplicate tag-based PE/string rules.

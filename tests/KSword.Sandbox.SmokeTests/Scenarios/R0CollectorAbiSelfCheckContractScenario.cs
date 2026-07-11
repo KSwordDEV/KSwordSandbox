@@ -94,6 +94,15 @@ internal sealed class R0CollectorAbiSelfCheckContractScenario : ISmokeTestScenar
             "statusLastEnqueueFailureOffset",
             "readEventsEventsDroppedOffset",
             "readEventsEventsOffset",
+            "networkStatusReplySize",
+            "networkStatusTodoMaskOffset",
+            "networkStatusPayloadVersionOffset",
+            "networkStatusLastDegradeReasonOffset",
+            "networkStatusClassifyCountOffset",
+            "networkStatusEventCountOffset",
+            "networkStatusQueueFailureCountOffset",
+            "networkStatusLastQueueFailureOffset",
+            "networkStatusIoctlPolicy",
             "healthReplySize",
             "healthReplyLegacyMinimumBytes",
             "healthReplyProducerMaskBytes",
@@ -234,7 +243,7 @@ internal sealed class R0CollectorAbiSelfCheckContractScenario : ISmokeTestScenar
         RequireData(abiSelfCheck, "backpressure", "false");
         RequireData(abiSelfCheck, "backpressureObserved", "false");
         RequireData(abiSelfCheck, "highWatermark", "0");
-        RequireData(abiSelfCheck, "capabilityFlagsCurrentHex", "0x000000000003FFFF");
+        RequireData(abiSelfCheck, "capabilityFlagsCurrentHex", "0x000000000007FFFF");
         RequireData(abiSelfCheck, "producerMaskCurrentHex", "0x0000003F");
         RequireData(abiSelfCheck, "producerMaskDefaultHex", "0x0000003F");
         RequireData(abiSelfCheck, "abiGuardPassed", "true");
@@ -259,6 +268,14 @@ internal sealed class R0CollectorAbiSelfCheckContractScenario : ISmokeTestScenar
         RequireData(abiSelfCheck, "capabilitiesReplySize", "104");
         RequireData(abiSelfCheck, "statusReplySize", "120");
         RequireData(abiSelfCheck, "readEventsReplyHeaderSize", "40");
+        RequireData(abiSelfCheck, "networkStatusReplySize", "128");
+        RequireData(abiSelfCheck, "networkStatusTodoMaskOffset", "32");
+        RequireData(abiSelfCheck, "networkStatusPayloadVersionOffset", "36");
+        RequireData(abiSelfCheck, "networkStatusLastDegradeReasonOffset", "40");
+        RequireData(abiSelfCheck, "networkStatusClassifyCountOffset", "56");
+        RequireData(abiSelfCheck, "networkStatusEventCountOffset", "64");
+        RequireData(abiSelfCheck, "networkStatusQueueFailureCountOffset", "72");
+        RequireData(abiSelfCheck, "networkStatusLastQueueFailureOffset", "92");
         RequireData(abiSelfCheck, "networkPayloadSize", "112");
         RequireData(abiSelfCheck, "requestedMaxEvents", "16");
         RequireData(abiSelfCheck, "maxReadBatches", "4");
@@ -275,6 +292,10 @@ internal sealed class R0CollectorAbiSelfCheckContractScenario : ISmokeTestScenar
             abiSelfCheck.Data["capabilityFlagNames"],
             "SelfNoiseMetadata",
             "ABI self-check should advertise self-noise metadata support.");
+        RequireContains(
+            abiSelfCheck.Data["capabilityFlagNames"],
+            "GetNetworkStatus",
+            "ABI self-check should advertise network status diagnostics support.");
         RequireContains(
             abiSelfCheck.Data["producerMaskCurrentNames"],
             "network",

@@ -46,6 +46,13 @@ inline constexpr size_t kAbiGuardStatusTotalEventsBackpressuredOffset = offsetof
 inline constexpr size_t kAbiGuardStatusLastEnqueueFailureOffset = offsetof(KSWORD_SANDBOX_STATUS_REPLY, LastEnqueueFailureNtStatus);
 inline constexpr size_t kAbiGuardReadEventsEventsDroppedOffset = offsetof(KSWORD_SANDBOX_READ_EVENTS_REPLY, EventsDropped);
 inline constexpr size_t kAbiGuardReadEventsEventsOffset = offsetof(KSWORD_SANDBOX_READ_EVENTS_REPLY, Events);
+inline constexpr size_t kAbiGuardNetworkStatusTodoMaskOffset = offsetof(KSWORD_SANDBOX_NETWORK_STATUS_REPLY, TodoMask);
+inline constexpr size_t kAbiGuardNetworkStatusPayloadVersionOffset = offsetof(KSWORD_SANDBOX_NETWORK_STATUS_REPLY, PayloadVersion);
+inline constexpr size_t kAbiGuardNetworkStatusLastDegradeReasonOffset = offsetof(KSWORD_SANDBOX_NETWORK_STATUS_REPLY, LastDegradeReason);
+inline constexpr size_t kAbiGuardNetworkStatusClassifyCountOffset = offsetof(KSWORD_SANDBOX_NETWORK_STATUS_REPLY, ClassifyCount);
+inline constexpr size_t kAbiGuardNetworkStatusEventCountOffset = offsetof(KSWORD_SANDBOX_NETWORK_STATUS_REPLY, EventCount);
+inline constexpr size_t kAbiGuardNetworkStatusQueueFailureCountOffset = offsetof(KSWORD_SANDBOX_NETWORK_STATUS_REPLY, QueueFailureCount);
+inline constexpr size_t kAbiGuardNetworkStatusLastQueueFailureOffset = offsetof(KSWORD_SANDBOX_NETWORK_STATUS_REPLY, LastQueueFailureNtStatus);
 
 static_assert(sizeof(KSWORD_SANDBOX_EVENT_HEADER) == 104U,
     "KSWORD_SANDBOX_EVENT_HEADER size changed; update R0Collector ABI diagnostics and tests.");
@@ -73,6 +80,22 @@ static_assert(kAbiGuardReadEventsEventsDroppedOffset == 24U,
     "KSWORD_SANDBOX_READ_EVENTS_REPLY.EventsDropped offset changed.");
 static_assert(kAbiGuardReadEventsEventsOffset == KSWORD_SANDBOX_READ_EVENTS_REPLY_HEADER_SIZE,
     "KSWORD_SANDBOX_READ_EVENTS_REPLY_HEADER_SIZE must point at Events.");
+static_assert(sizeof(KSWORD_SANDBOX_NETWORK_STATUS_REPLY) == 128U,
+    "KSWORD_SANDBOX_NETWORK_STATUS_REPLY size changed; update R0Collector network diagnostics and tests.");
+static_assert(kAbiGuardNetworkStatusTodoMaskOffset == 32U,
+    "KSWORD_SANDBOX_NETWORK_STATUS_REPLY.TodoMask offset changed.");
+static_assert(kAbiGuardNetworkStatusPayloadVersionOffset == 36U,
+    "KSWORD_SANDBOX_NETWORK_STATUS_REPLY.PayloadVersion offset changed.");
+static_assert(kAbiGuardNetworkStatusLastDegradeReasonOffset == 40U,
+    "KSWORD_SANDBOX_NETWORK_STATUS_REPLY.LastDegradeReason offset changed.");
+static_assert(kAbiGuardNetworkStatusClassifyCountOffset == 56U,
+    "KSWORD_SANDBOX_NETWORK_STATUS_REPLY.ClassifyCount offset changed.");
+static_assert(kAbiGuardNetworkStatusEventCountOffset == 64U,
+    "KSWORD_SANDBOX_NETWORK_STATUS_REPLY.EventCount offset changed.");
+static_assert(kAbiGuardNetworkStatusQueueFailureCountOffset == 72U,
+    "KSWORD_SANDBOX_NETWORK_STATUS_REPLY.QueueFailureCount offset changed.");
+static_assert(kAbiGuardNetworkStatusLastQueueFailureOffset == 92U,
+    "KSWORD_SANDBOX_NETWORK_STATUS_REPLY.LastQueueFailureNtStatus offset changed.");
 
 // GET_HEALTH producer masks were added in ABI-reserved space.  Keep accepting
 // legacy replies that only contain the stable prefix through LastNtStatus, and
