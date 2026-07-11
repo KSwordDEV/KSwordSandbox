@@ -152,6 +152,34 @@ public sealed partial class SandboxJobService
             .Where(name => !string.IsNullOrWhiteSpace(name))
             .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
             .ToList();
+        var collectionStats = ArtifactImportExpectations
+            .Select(expectation => new ArtifactImportCollectionStat(
+                expectation.CollectionName,
+                expectation.Kind,
+                expectation.ChineseName,
+                CountArtifactsForExpectation(artifactIndex.Artifacts, expectation),
+                SumArtifactBytesForExpectation(artifactIndex.Artifacts, expectation),
+                SelectorsForExpectation(artifactIndex.Artifacts, expectation)))
+            .ToList();
+        var readyCollectionNames = collectionStats
+            .Where(stat => stat.Count > 0)
+            .Select(stat => stat.CollectionName)
+            .ToList();
+        var missingCollectionNames = collectionStats
+            .Where(stat => stat.Count == 0)
+            .Select(stat => stat.CollectionName)
+            .ToList();
+        var evidenceMatrix = string.Join(
+            ";",
+            collectionStats.Select(stat =>
+                $"{stat.CollectionName}={stat.Count.ToString(CultureInfo.InvariantCulture)}:{(stat.Count > 0 ? "ready" : "missing")}:{stat.TotalBytes.ToString(CultureInfo.InvariantCulture)}"));
+        var evidenceMatrixZh = string.Join(
+            "，",
+            collectionStats.Select(stat => $"{stat.ChineseName}={stat.Count.ToString(CultureInfo.InvariantCulture)}"));
+        var primarySelectors = collectionStats
+            .SelectMany(stat => stat.Selectors.Select(selector => $"{stat.CollectionName}:{selector}"))
+            .Take(16)
+            .ToList();
 
         return new SandboxEvent
         {
@@ -181,12 +209,29 @@ public sealed partial class SandboxJobService
                 ["downloadSecurityPolicy"] = "server-indexed-relative-selector",
                 ["downloadRejectionPolicy"] = "reject-empty-absolute-traversal-unindexed-missing",
                 ["collectionNames"] = string.Join(",", collectionNames),
+                ["artifactEvidenceMatrix"] = evidenceMatrix,
+                ["artifactEvidenceSummaryZh"] = evidenceMatrixZh,
+                ["artifactEvidenceCollectionsReady"] = string.Join(",", readyCollectionNames),
+                ["artifactEvidenceCollectionsMissing"] = string.Join(",", missingCollectionNames),
+                ["primaryArtifactSelectors"] = string.Join(",", primarySelectors),
+                ["hasDroppedFileArtifacts"] = HasArtifactsForKind(collectionStats, ArtifactKind.DroppedFile),
+                ["hasScreenshotArtifacts"] = HasArtifactsForKind(collectionStats, ArtifactKind.Screenshot),
+                ["hasMemoryDumpArtifacts"] = HasArtifactsForKind(collectionStats, ArtifactKind.MemoryDump),
+                ["hasPacketCaptureArtifacts"] = HasArtifactsForKind(collectionStats, ArtifactKind.PacketCapture),
+                ["droppedFileArtifactCount"] = CountForKind(collectionStats, ArtifactKind.DroppedFile),
+                ["screenshotArtifactCount"] = CountForKind(collectionStats, ArtifactKind.Screenshot),
+                ["memoryDumpArtifactCount"] = CountForKind(collectionStats, ArtifactKind.MemoryDump),
+                ["packetCaptureArtifactCount"] = CountForKind(collectionStats, ArtifactKind.PacketCapture),
+                ["droppedFileBytes"] = BytesForKind(collectionStats, ArtifactKind.DroppedFile),
+                ["screenshotBytes"] = BytesForKind(collectionStats, ArtifactKind.Screenshot),
+                ["memoryDumpBytes"] = BytesForKind(collectionStats, ArtifactKind.MemoryDump),
+                ["packetCaptureBytes"] = BytesForKind(collectionStats, ArtifactKind.PacketCapture),
                 ["rejectionDiagnosticCollections"] = string.Join(",", rejectedCollections),
                 ["sourceEventType"] = "host.artifact.index",
                 ["sourceEventPath"] = FirstNonEmpty(guestEventsPath, jobRoot),
                 ["indexRoot"] = jobRoot,
-                ["zhMessage"] = $"Host 产物导入完成：{sensitiveImportCount.ToString(CultureInfo.InvariantCulture)} 个敏感证据产物可用于报告下载。",
-                ["zhHint"] = "这是 artifact-index 导入摘要，用于报告状态、下载和诊断；不作为样本行为判定。"
+                ["zhMessage"] = $"Host 产物导入完成：{sensitiveImportCount.ToString(CultureInfo.InvariantCulture)} 个敏感证据产物可用于报告下载；{evidenceMatrixZh}。",
+                ["zhHint"] = "这是 artifact-index 导入摘要，用于报告状态、下载和诊断；不作为样本行为判定。artifactEvidenceMatrix 以 collection=count:state:bytes 形式概览 dropped files、截图、内存转储和抓包证据。"
             }
         };
     }
@@ -503,6 +548,59 @@ public sealed partial class SandboxJobService
         return int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out count) && count > 0;
     }
 
+    private static int CountArtifactsForExpectation(IEnumerable<ArtifactDescriptor> artifacts, ArtifactImportExpectation expectation)
+    {
+        return artifacts.Count(artifact =>
+            artifact.Kind == expectation.Kind ||
+            string.Equals(artifact.CollectionName, expectation.CollectionName, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static long SumArtifactBytesForExpectation(IEnumerable<ArtifactDescriptor> artifacts, ArtifactImportExpectation expectation)
+    {
+        return artifacts
+            .Where(artifact =>
+                artifact.Kind == expectation.Kind ||
+                string.Equals(artifact.CollectionName, expectation.CollectionName, StringComparison.OrdinalIgnoreCase))
+            .Sum(artifact => Math.Max(0, artifact.SizeBytes));
+    }
+
+    private static IReadOnlyList<string> SelectorsForExpectation(IEnumerable<ArtifactDescriptor> artifacts, ArtifactImportExpectation expectation)
+    {
+        return artifacts
+            .Where(artifact =>
+                artifact.Kind == expectation.Kind ||
+                string.Equals(artifact.CollectionName, expectation.CollectionName, StringComparison.OrdinalIgnoreCase))
+            .Select(artifact => FirstNonEmpty(artifact.RelativePath, artifact.SafeLink, artifact.ImportPath))
+            .Where(selector => !string.IsNullOrWhiteSpace(selector))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(selector => selector, StringComparer.OrdinalIgnoreCase)
+            .Take(8)
+            .ToList();
+    }
+
+    private static string HasArtifactsForKind(IEnumerable<ArtifactImportCollectionStat> stats, ArtifactKind kind)
+    {
+        return (stats.Any(stat => stat.Kind == kind && stat.Count > 0))
+            .ToString(CultureInfo.InvariantCulture)
+            .ToLowerInvariant();
+    }
+
+    private static string CountForKind(IEnumerable<ArtifactImportCollectionStat> stats, ArtifactKind kind)
+    {
+        return stats
+            .Where(stat => stat.Kind == kind)
+            .Sum(stat => stat.Count)
+            .ToString(CultureInfo.InvariantCulture);
+    }
+
+    private static string BytesForKind(IEnumerable<ArtifactImportCollectionStat> stats, ArtifactKind kind)
+    {
+        return stats
+            .Where(stat => stat.Kind == kind)
+            .Sum(stat => stat.TotalBytes)
+            .ToString(CultureInfo.InvariantCulture);
+    }
+
     private static string ChineseKindName(ArtifactKind kind)
     {
         return kind switch
@@ -567,4 +665,12 @@ public sealed partial class SandboxJobService
         string DefaultRelativePath,
         string ChineseHint,
         Func<ArtifactCollectionConfig, bool> IsRequested);
+
+    private sealed record ArtifactImportCollectionStat(
+        string CollectionName,
+        ArtifactKind Kind,
+        string ChineseName,
+        int Count,
+        long TotalBytes,
+        IReadOnlyList<string> Selectors);
 }

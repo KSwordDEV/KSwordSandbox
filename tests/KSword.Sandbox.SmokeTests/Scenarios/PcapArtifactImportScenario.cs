@@ -76,6 +76,7 @@ internal sealed class PcapArtifactImportScenario : ISmokeTestScenario
         RequireData(importSummary, "sidecarArtifactCount", "2");
         RequireData(importSummary, "parseErrorCount", "1");
         RequireData(importSummary, "collectionHealth", "degraded");
+        RequireData(importSummary, "protocolHealth", "degraded");
         RequireNonEmpty(importSummary, "zhMessage");
         RequireNonEmpty(importSummary, "zhHint");
         SmokeAssert.True(summary.Data.TryGetValue("protocols", out var protocols) && protocols.Contains("dns", StringComparison.OrdinalIgnoreCase) && protocols.Contains("http", StringComparison.OrdinalIgnoreCase) && protocols.Contains("tls", StringComparison.OrdinalIgnoreCase), "pcap.summary should expose protocol rollup metadata.");
@@ -84,6 +85,7 @@ internal sealed class PcapArtifactImportScenario : ISmokeTestScenario
         RequireData(summary, "pcapDownloadSelector", "sample.pcap");
         RequireData(summary, "pcapParser", "native-pcap");
         RequireData(summary, "pcapParserMode", "bounded-native");
+        RequireData(summary, "protocolHealth", "ok");
         RequireNonEmpty(summary, "pcapSourceDiagnostic");
         RequireData(summary, "parentArtifactRelativePath", "sample.pcap");
         RequireData(summary, "parentArtifactKind", "PacketCapture");
@@ -119,6 +121,11 @@ internal sealed class PcapArtifactImportScenario : ISmokeTestScenario
         RequireData(http, "httpMessageType", "request");
         RequireData(http, "requestBodyBytes", "2");
         RequireData(http, "bodySizeBytes", "2");
+        RequireData(http, "uploadCandidate", "true");
+        RequireData(http, "downloadCandidate", "true");
+        RequireData(http, "uploadReason", "body-bytes");
+        RequireData(http, "downloadReason", "file-extension");
+        RequireData(http, "transferDirection", "bidirectional");
         RequireData(http, "downloadSelector", "sample.pcap");
         RequireData(http, "pcapSourceArtifactRelativePath", "sample.pcap");
         RequireData(http, "destinationAddressScope", "documentation");
@@ -132,6 +139,9 @@ internal sealed class PcapArtifactImportScenario : ISmokeTestScenario
         RequireData(httpResponse, "responseBodyBytes", "2");
         RequireData(httpResponse, "bodySizeBytes", "2");
         RequireData(httpResponse, "contentLength", "2");
+        RequireData(httpResponse, "downloadCandidate", "true");
+        RequireData(httpResponse, "downloadReason", "body-bytes");
+        RequireData(httpResponse, "transferDirection", "download");
         RequireData(tls, "sni", "secure.example.test");
         RequireData(tls, "tlsSni", "secure.example.test");
         RequireData(tls, "tls.server_name", "secure.example.test");
@@ -154,6 +164,9 @@ internal sealed class PcapArtifactImportScenario : ISmokeTestScenario
         RequireNonEmpty(tlsCertificate, "certificateFingerprintSha256");
         RequireNonEmpty(tlsCertificate, "serverCertificateSha256");
         RequireNonEmpty(tlsCertificate, "tls.cert.sha256");
+        RequireData(tlsCertificate, "certificateSubjectCn", "secure.example.test");
+        RequireData(tlsCertificate, "certificateIssuerCn", "secure.example.test");
+        RequireNonEmpty(tlsCertificate, "certificateValidityDays");
         AssertStandardNetworkEvent(dnsQuery, "dns", "pcap-native", "dns");
         RequireData(dnsQuery, "queryName", "beacon.example.test");
         RequireData(dnsQuery, "qname", "beacon.example.test");
@@ -169,10 +182,14 @@ internal sealed class PcapArtifactImportScenario : ISmokeTestScenario
         RequireData(httpRequest, "url", "http://download.example.test/payload.exe");
         RequireData(httpRequest, "contentType", "application/x-msdownload");
         RequireData(httpRequest, "httpMessageType", "request");
+        RequireData(httpRequest, "downloadCandidate", "true");
+        RequireData(httpRequest, "transferDirection", "bidirectional");
         RequireData(httpResponseEvent, "statusCode", "200");
         RequireData(httpResponseEvent, "httpStatusCode", "200");
         RequireData(httpResponseEvent, "http.response.status_code", "200");
         RequireData(httpResponseEvent, "responseBodyBytes", "2");
+        RequireData(httpResponseEvent, "downloadCandidate", "true");
+        RequireData(httpResponseEvent, "transferDirection", "download");
         AssertStandardNetworkEvent(tlsConnection, "tls", "pcap-native", "tls");
         RequireData(tlsConnection, "sni", "secure.example.test");
         RequireData(tlsConnection, "serverName", "secure.example.test");
@@ -183,6 +200,8 @@ internal sealed class PcapArtifactImportScenario : ISmokeTestScenario
         RequireNonEmpty(tlsConnection, "ja3Fingerprint");
         RequireData(tlsCertificateEvent, "certificateStatus", "self-signed");
         RequireNonEmpty(tlsCertificateEvent, "certificateSha256");
+        RequireData(tlsCertificateEvent, "certificateSubjectCn", "secure.example.test");
+        RequireNonEmpty(tlsCertificateEvent, "tlsCertificateValidityDays");
         AssertStandardNetworkEvent(nativeFlow, "connection", "pcap-native", "dns");
         RequireData(nativeFlow, "packetCount", "1");
         RequireNonEmpty(nativeFlow, "payloadBytes");
@@ -194,6 +213,10 @@ internal sealed class PcapArtifactImportScenario : ISmokeTestScenario
         RequireData(sidecarDns, "dns.answers.data", "2001:db8::44");
         RequireData(sidecarDns, "answerAddress", "2001:db8::44");
         RequireData(sidecarDns, "answersNormalized", "2001:db8::44");
+        RequireData(sidecarDns, "dnsAnswerIps", "2001:db8::44");
+        RequireData(sidecarDns, "dnsAnswerIpScopes", "documentation");
+        RequireData(sidecarDns, "dnsAnswerHasDocumentationIp", "true");
+        RequireData(sidecarDns, "dnsAnswerHasPublicIp", "false");
         SmokeAssert.True(events.Any(evt => string.Equals(evt.EventType, "http.request", StringComparison.OrdinalIgnoreCase) && evt.Data.TryGetValue("host", out var sidecarHost) && sidecarHost == "api.example.test"), "Sidecar JSONL HTTP rows should import as http.request.");
         SmokeAssert.True(events.Any(evt => string.Equals(evt.EventType, "tls.connection", StringComparison.OrdinalIgnoreCase) && evt.Data.TryGetValue("sni", out var sidecarSni) && sidecarSni == "sidecar-secure.example.test"), "Sidecar JSONL TLS rows should import as tls.connection.");
         var sidecarLogFlow = RequireEvent(events, "network.flow", "uid", "loose-flow-1");
@@ -205,6 +228,7 @@ internal sealed class PcapArtifactImportScenario : ISmokeTestScenario
         RequireData(sidecarLogFlow, "durationSeconds", "1.25");
         RequireData(sidecarLogFlow, "byteCount", "512");
         RequireData(sidecarLogFlow, "collectionHealth", "ok");
+        RequireData(sidecarLogFlow, "protocolHealth", "ok");
         RequireData(sidecarLogFlow, "pcapSourceArtifactRelativePath", "sample.pcap");
         RequireData(sidecarLogFlow, "sourcePcapArtifactRelativePath", "sample.pcap");
         RequireData(sidecarLogFlow, "pcapDownloadSelector", "sample.pcap");

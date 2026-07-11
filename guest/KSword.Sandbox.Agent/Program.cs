@@ -2073,7 +2073,10 @@ internal static class AgentProgram
                 ["sizeBytesStatus"] = "computed",
                 ["sha256Status"] = copiedHash.Status,
                 ["artifactSelector"] = artifactRelativePath,
+                ["stableArtifactSelector"] = artifactRelativePath,
+                ["canonicalArtifactSelector"] = artifactRelativePath,
                 ["downloadSelector"] = artifactRelativePath,
+                ["artifactSafeLink"] = BuildArtifactSafeLink(artifactRelativePath),
                 ["artifactSelectorKind"] = "safe-output-relative-path",
                 ["artifactSelectorVersion"] = DroppedFileSelectorVersion,
                 ["artifactSelectionReason"] = "copied-dropped-file",
@@ -2910,6 +2913,19 @@ internal static class AgentProgram
         if (sourceEvent.Data.TryGetValue("hashStatus", out var hashStatus) && !string.IsNullOrWhiteSpace(hashStatus))
         {
             evt.Data["sourceEventHashStatus"] = hashStatus;
+        }
+
+        AddDataIfNotEmpty(evt.Data, "sourceEventProcessId", FirstEventData(sourceEvent, "processId", "targetProcessId"));
+        AddDataIfNotEmpty(evt.Data, "sourceEventParentProcessId", FirstEventData(sourceEvent, "parentProcessId", "targetParentProcessId"));
+        AddDataIfNotEmpty(evt.Data, "sourceEventRootProcessId", FirstEventData(sourceEvent, "rootProcessId"));
+        AddDataIfNotEmpty(evt.Data, "sourceEventTreeLineage", FirstEventData(sourceEvent, "treeLineage", "targetTreeLineage"));
+        AddDataIfNotEmpty(evt.Data, "sourceEventProcessRole", FirstEventData(sourceEvent, "processRole", "targetProcessRole"));
+        if (!evt.Data.ContainsKey("treeLineage") &&
+            sourceEvent.Data.TryGetValue("treeLineage", out var sourceLineage) &&
+            !string.IsNullOrWhiteSpace(sourceLineage))
+        {
+            evt.Data["treeLineage"] = sourceLineage;
+            evt.Data["treeLineageStatus"] = "source-event";
         }
     }
 

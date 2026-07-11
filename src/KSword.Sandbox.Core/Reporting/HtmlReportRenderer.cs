@@ -1601,6 +1601,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
             html.AppendLine(CopyButton("Copy story lane", card.CopyText));
             html.AppendLine("</div>");
             html.AppendLine($"<details class=\"evidence-expansion-card\"><summary>Expand bounded story evidence ({E(shownEvidenceCount.ToString(CultureInfo.InvariantCulture))}/{E(observedEvidenceCount.ToString(CultureInfo.InvariantCulture))} observed rows)</summary><ol class=\"story-evidence-list\">");
+            AppendEvidenceExpansionSummary(html, "Story evidence expansion summary", shownEvidenceCount, observedEvidenceCount, "Raw normalized events/report.json and Artifact links", card.EvidenceLines);
             foreach (var line in card.EvidenceLines.Take(12))
             {
                 html.AppendLine($"<li><code class=\"copyable\" data-copy=\"{A(line)}\">{E(line)}</code></li>");
@@ -1788,6 +1789,44 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
                 .. lines
             ]);
         return new EvidenceStoryCard(title, status, css, lead, metrics, lines, sourceEvidenceCount, copy);
+    }
+
+    /// <summary>
+    /// Appends a compact visible summary at the top of an evidence expansion.
+    /// Inputs are rendered/source counts, a complete-source hint, and sample
+    /// evidence lines; processing emits copyable chips before dense pre/list
+    /// payloads so collapsed details have an immediately readable story.
+    /// </summary>
+    private static void AppendEvidenceExpansionSummary(
+        StringBuilder html,
+        string title,
+        int renderedCount,
+        int sourceCount,
+        string completeSource,
+        IReadOnlyCollection<string> evidenceLines)
+    {
+        var hiddenCount = Math.Max(0, sourceCount - renderedCount);
+        var firstEvidence = evidenceLines.FirstOrDefault(line => !string.IsNullOrWhiteSpace(line)) ?? "-";
+        var copy = string.Join(
+            Environment.NewLine,
+            [
+                title,
+                $"renderedEvidence={renderedCount}",
+                $"sourceEvidence={sourceCount}",
+                $"hiddenEvidence={hiddenCount}",
+                $"completeSource={completeSource}",
+                $"firstEvidence={firstEvidence}"
+            ]);
+        html.AppendLine($"<div class=\"evidence-expansion-summary copyable\" data-copy=\"{A(copy)}\">");
+        html.AppendLine($"<strong>{E(title)}</strong>");
+        html.AppendLine("<div class=\"relationship-tags\">");
+        html.AppendLine($"<span class=\"chip chip-info\">shown {E(renderedCount.ToString(CultureInfo.InvariantCulture))}/{E(sourceCount.ToString(CultureInfo.InvariantCulture))}</span>");
+        html.AppendLine($"<span class=\"chip chip-medium\">hidden {E(hiddenCount.ToString(CultureInfo.InvariantCulture))}</span>");
+        html.AppendLine($"<span class=\"chip chip-low\">complete source: {E(completeSource)}</span>");
+        html.AppendLine("</div>");
+        html.AppendLine($"<div class=\"copy-hint\">First evidence: <code>{E(firstEvidence)}</code></div>");
+        html.AppendLine($"<div class=\"toolbar\">{CopyButton("Copy evidence expansion summary", copy)}</div>");
+        html.AppendLine("</div>");
     }
 
     private static IReadOnlyList<string> BuildStoryEvidenceLines(
@@ -2704,6 +2743,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         html.AppendLine("</div>");
         html.AppendLine($"<div class=\"section-note\"><strong>Slim raw event sample.</strong> Raw events are collapsed by default. Raw events shown inline: {inlineEvents.Count}/{orderedEvents.Count}. Inline page size: {RawEventPageSize}. Raw evidence height limit: 58vh. Hidden raw events: {hiddenCount}. Inline raw pages use native details; command, stdout, stderr, PowerShell, script blocks, and oversized payloads stay folded in every row. Open report.json or raw source artifacts for complete evidence. Native details work without JavaScript and print labels call out folded evidence.</div>");
         AppendRawEventReadingGuide(html, orderedEvents, inlineEvents.Count, hiddenCount);
+        AppendRawEventSlimmingCards(html, orderedEvents, inlineEvents.Count, hiddenCount);
         AppendRawSourceHints(html, report, artifacts);
         AppendRawEventDistribution(html, orderedEvents);
         AppendRawEventPageIndex(html, orderedEvents);
@@ -2779,6 +2819,77 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
             "Rows beyond the inline cap stay out of HTML tables; the page index shows report.json-only row ranges.",
             hiddenCount > 0 ? "risk-medium" : "risk-low");
         html.AppendLine("</div>");
+    }
+
+    /// <summary>
+    /// Appends low-interaction raw-event slimming cards.
+    /// Inputs are all ordered events plus inline/hidden counts; processing
+    /// summarizes what is visible, folded, report-only, and artifact-backed so
+    /// analysts can understand evidence coverage before expanding raw pages.
+    /// </summary>
+    private static void AppendRawEventSlimmingCards(
+        StringBuilder html,
+        IReadOnlyList<SandboxEvent> orderedEvents,
+        int inlineEventCount,
+        int hiddenCount)
+    {
+        if (orderedEvents.Count == 0)
+        {
+            return;
+        }
+
+        var inlineEvents = orderedEvents.Take(inlineEventCount).ToList();
+        var foldedTechnicalFields = inlineEvents.Sum(RawEventFoldedTechnicalFieldCount);
+        var artifactReferenceCount = orderedEvents.Count(EventHasArtifactReference);
+        var networkCount = orderedEvents.Count(IsNetworkEvent);
+        var r0Count = orderedEvents.Count(IsR0Event);
+        var hiddenRange = hiddenCount == 0
+            ? "none"
+            : $"{inlineEventCount + 1}-{orderedEvents.Count}";
+        var copy = string.Join(
+            Environment.NewLine,
+            [
+                "Raw event slimming story",
+                $"totalEvents={orderedEvents.Count}",
+                $"inlineRendered={inlineEventCount}",
+                $"hiddenReportJsonOnly={hiddenCount}",
+                $"hiddenRowRange={hiddenRange}",
+                $"inlineFoldedTechnicalFields={foldedTechnicalFields}",
+                $"artifactReferencedEvents={artifactReferenceCount}",
+                $"networkEvents={networkCount}",
+                $"r0Events={r0Count}",
+                "policy=HTML keeps bounded representative rows; report.json and source artifacts remain complete evidence."
+            ]);
+
+        html.AppendLine("<h3>Raw event slimming story</h3>");
+        html.AppendLine("<div class=\"section-note\"><strong>Raw event slimming story.</strong> These cards explain the renderer's weak-interaction policy before any dense row expansion: visible pages are bounded, long technical payloads stay folded, and report.json/source artifacts remain the complete record.</div>");
+        html.AppendLine("<div class=\"overview-strip raw-slimming-story\">");
+        AppendOverviewItem(
+            html,
+            "Visible HTML rows",
+            $"{inlineEventCount}/{orderedEvents.Count}",
+            $"Rows are split into {RawEventPageCount(inlineEventCount)} native page(s), {RawEventPageSize} rows per page.",
+            "risk-info");
+        AppendOverviewItem(
+            html,
+            "Folded technical payloads",
+            foldedTechnicalFields.ToString(CultureInfo.InvariantCulture),
+            "Command lines, stdout/stderr, PowerShell, script blocks, and bulky values stay behind nested details.",
+            foldedTechnicalFields > 0 ? "risk-medium" : "risk-low");
+        AppendOverviewItem(
+            html,
+            "Report-only tail",
+            hiddenCount.ToString(CultureInfo.InvariantCulture),
+            hiddenCount == 0 ? "No raw rows exceed the inline cap." : $"Rows {hiddenRange} are intentionally kept in report.json/source artifacts only.",
+            hiddenCount > 0 ? "risk-medium" : "risk-low");
+        AppendOverviewItem(
+            html,
+            "Artifact / network / R0 anchors",
+            $"{artifactReferenceCount} / {networkCount} / {r0Count}",
+            "Counts expose evidence anchors before opening raw pages: artifact references, network rows, and R0/driver rows.",
+            artifactReferenceCount + networkCount + r0Count > 0 ? "risk-info" : "risk-low");
+        html.AppendLine("</div>");
+        html.AppendLine($"<div class=\"toolbar\">{CopyButton("Copy raw slimming story", copy)}</div>");
     }
 
     /// <summary>
@@ -3683,7 +3794,9 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
             html.AppendLine("<div class=\"toolbar\">");
             html.AppendLine(CopyButton("Copy process card", card.CopyText));
             html.AppendLine("</div>");
-            html.AppendLine($"<details class=\"evidence-expansion-card\"><summary>Expand top process evidence</summary><pre class=\"copyable\" data-copy=\"{A(string.Join(Environment.NewLine, card.EvidenceLines))}\">{E(string.Join(Environment.NewLine, card.EvidenceLines))}</pre></details>");
+            html.AppendLine("<details class=\"evidence-expansion-card\"><summary>Expand top process evidence</summary>");
+            AppendEvidenceExpansionSummary(html, "Process evidence expansion summary", card.EvidenceLines.Count, card.EventCount, "Raw normalized events/report.json", card.EvidenceLines);
+            html.AppendLine($"<pre class=\"copyable\" data-copy=\"{A(string.Join(Environment.NewLine, card.EvidenceLines))}\">{E(string.Join(Environment.NewLine, card.EvidenceLines))}</pre></details>");
             html.AppendLine("</article>");
         }
 
@@ -3888,7 +4001,9 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
             html.AppendLine("<div class=\"toolbar\">");
             html.AppendLine(CopyButton("Copy network card", card.CopyText));
             html.AppendLine("</div>");
-            html.AppendLine($"<details class=\"evidence-expansion-card\"><summary>Expand top network evidence</summary><pre class=\"copyable\" data-copy=\"{A(string.Join(Environment.NewLine, card.EvidenceLines))}\">{E(string.Join(Environment.NewLine, card.EvidenceLines))}</pre></details>");
+            html.AppendLine("<details class=\"evidence-expansion-card\"><summary>Expand top network evidence</summary>");
+            AppendEvidenceExpansionSummary(html, "Network evidence expansion summary", card.EvidenceLines.Count, card.EventCount, "Raw normalized events/report.json and packet artifacts", card.EvidenceLines);
+            html.AppendLine($"<pre class=\"copyable\" data-copy=\"{A(string.Join(Environment.NewLine, card.EvidenceLines))}\">{E(string.Join(Environment.NewLine, card.EvidenceLines))}</pre></details>");
             html.AppendLine("</article>");
         }
 
@@ -6537,6 +6652,12 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         ("Copy story lane", "复制故事通道"),
         ("Expand story evidence", "展开故事证据"),
         ("Expand bounded story evidence", "展开有界故事证据"),
+        ("Story evidence expansion summary", "故事证据展开摘要"),
+        ("Process evidence expansion summary", "进程证据展开摘要"),
+        ("Network evidence expansion summary", "网络证据展开摘要"),
+        ("Copy evidence expansion summary", "复制证据展开摘要"),
+        ("complete source:", "完整来源："),
+        ("First evidence:", "首条证据："),
         ("Evidence examples shown:", "已显示证据示例："),
         ("observed; lane includes guidance only.", "条已观察；此通道仅包含指引。"),
         ("observed; expand stays bounded and full source remains in Raw normalized events/report.json.", "条已观察；展开内容保持有界，完整来源保留在原始事件/report.json 中。"),
@@ -6714,6 +6835,15 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         (" of ", " / "),
         ("Hidden raw events", "隐藏原始事件"),
         ("Raw source paths", "原始来源路径"),
+        ("Raw event slimming story", "原始事件瘦身叙事"),
+        ("These cards explain the renderer's weak-interaction policy before any dense row expansion: visible pages are bounded, long technical payloads stay folded, and report.json/source artifacts remain the complete record.", "这些卡片会在展开密集行之前解释渲染器的弱交互策略：可见分页有界，长技术载荷保持折叠，report.json/来源证据仍是完整记录。"),
+        ("Visible HTML rows", "可见 HTML 行"),
+        ("Folded technical payloads", "已折叠技术载荷"),
+        ("Report-only tail", "仅报告 JSON 尾部"),
+        ("Artifact / network / R0 anchors", "证据文件 / 网络 / R0 锚点"),
+        ("Copy raw slimming story", "复制原始事件瘦身叙事"),
+        ("Counts expose evidence anchors before opening raw pages: artifact references, network rows, and R0/driver rows.", "计数会在打开原始分页前暴露证据锚点：证据文件引用、网络行和 R0/驱动行。"),
+        ("No raw rows exceed the inline cap.", "没有原始行超过内联上限。"),
         ("Complete normalized report JSON", "完整规范化报告 JSON"),
         ("(all events)", "（全部事件）"),
         ("Raw source guide.", "原始来源指南。"),
@@ -7625,6 +7755,16 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         {
             related[ArtifactKey(artifact)] = artifact;
         }
+    }
+
+    private static bool EventHasArtifactReference(SandboxEvent evt)
+    {
+        if (LooksLikeArtifactReference(evt.Path))
+        {
+            return true;
+        }
+
+        return evt.Data.Any(pair => IsArtifactReferenceKey(pair.Key) || LooksLikeArtifactReference(pair.Value));
     }
 
     private static bool IsArtifactReferenceKey(string key)

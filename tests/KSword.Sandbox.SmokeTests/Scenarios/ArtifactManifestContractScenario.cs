@@ -158,6 +158,35 @@ internal sealed class ArtifactManifestContractScenario : ISmokeTestScenario
         SmokeAssert.True(importSummary is not null, "Imported report should include a report-ready host artifact import summary event.");
         RequireData(importSummary!, "behaviorCounted", "false");
         RequireData(importSummary!, "downloadPolicy", "relative-index-selectors-only");
+        RequireData(importSummary!, "droppedFileArtifactCount", "1");
+        RequireData(importSummary!, "screenshotArtifactCount", "1");
+        RequireData(importSummary!, "memoryDumpArtifactCount", "1");
+        RequireData(importSummary!, "packetCaptureArtifactCount", "1");
+        RequireData(importSummary!, "hasDroppedFileArtifacts", "true");
+        RequireData(importSummary!, "hasScreenshotArtifacts", "true");
+        RequireData(importSummary!, "hasMemoryDumpArtifacts", "true");
+        RequireData(importSummary!, "hasPacketCaptureArtifacts", "true");
+        SmokeAssert.True(
+            importSummary!.Data.TryGetValue("artifactEvidenceMatrix", out var artifactEvidenceMatrix) &&
+            artifactEvidenceMatrix.Contains("dropped-files=1:ready", StringComparison.Ordinal) &&
+            artifactEvidenceMatrix.Contains("screenshots=1:ready", StringComparison.Ordinal) &&
+            artifactEvidenceMatrix.Contains("memory-dumps=1:ready", StringComparison.Ordinal) &&
+            artifactEvidenceMatrix.Contains("packet-captures=1:ready", StringComparison.Ordinal),
+            "Artifact import summary should expose a four-lane evidence matrix for report story cards.");
+        SmokeAssert.True(
+            importSummary.Data.TryGetValue("artifactEvidenceSummaryZh", out var artifactEvidenceSummaryZh) &&
+            artifactEvidenceSummaryZh.Contains("掉落文件=1", StringComparison.Ordinal) &&
+            artifactEvidenceSummaryZh.Contains("截图=1", StringComparison.Ordinal) &&
+            artifactEvidenceSummaryZh.Contains("内存转储=1", StringComparison.Ordinal) &&
+            artifactEvidenceSummaryZh.Contains("抓包=1", StringComparison.Ordinal),
+            "Artifact import summary should expose a Chinese evidence-lane summary.");
+        SmokeAssert.True(
+            importSummary.Data.TryGetValue("primaryArtifactSelectors", out var primaryArtifactSelectors) &&
+            primaryArtifactSelectors.Contains("dropped-files:", StringComparison.Ordinal) &&
+            primaryArtifactSelectors.Contains("screenshots:", StringComparison.Ordinal) &&
+            primaryArtifactSelectors.Contains("memory-dumps:", StringComparison.Ordinal) &&
+            primaryArtifactSelectors.Contains("packet-captures:", StringComparison.Ordinal),
+            "Artifact import summary should include copyable primary selectors grouped by collection.");
         SmokeAssert.True(
             importSummary!.Data.TryGetValue("importedSensitiveArtifactCount", out var importedSensitiveArtifactCount) &&
             int.Parse(importedSensitiveArtifactCount) >= 4,

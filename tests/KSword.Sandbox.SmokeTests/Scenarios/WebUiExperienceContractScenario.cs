@@ -267,6 +267,11 @@ internal sealed class WebUiExperienceContractScenario : ISmokeTestScenario
         RequireContains(liveEventsPage, "复制 selector", "Live monitor artifact cards should expose explicit selector copy actions.");
         RequireContains(liveEventsPage, "function cockpitCopyButton", "Live monitor cockpit should expose explicit copy buttons for important status cards.");
         RequireContains(liveEventsPage, "复制卡片", "Live monitor cockpit should provide Chinese-first card summary copy affordances.");
+        RequireContains(liveEventsPage, "operatorHints", "Live monitor should expose a dedicated Chinese-first copyable operator hint panel.");
+        RequireContains(liveEventsPage, "renderOperatorHints", "Live monitor should synthesize current step, VT, artifact/download, and handoff hints.");
+        RequireContains(liveEventsPage, "VT 查询/持久化状态", "Live monitor hints should make VirusTotal quiet/persistence state copyable.");
+        RequireContains(liveEventsPage, "证据/下载状态", "Live monitor hints should make current evidence/download readiness copyable.");
+        RequireContains(liveEventsPage, "复制提示", "Live monitor hints should expose explicit Chinese-first copy actions.");
         RequireContains(program, "DisplayText = BuildRunbookCurrentStepDisplay", "Progress SSE payload should include a safe current-step display label.");
         RequireContains(program, "StateMeaning", "Progress SSE payload should explain that command/stdout/stderr are excluded.");
         RequireContains(settingsPage, "VirusTotal API Key", "Settings page should allow operators to set the VirusTotal API key.");

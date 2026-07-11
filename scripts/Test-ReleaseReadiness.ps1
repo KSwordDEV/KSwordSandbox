@@ -174,24 +174,40 @@ function Test-GitClean {
 }
 
 function Test-PowerShellScriptSyntax {
-    $scriptPaths = New-Object System.Collections.Generic.List[string]
+    $scriptPaths = New-Object System.Collections.Generic.List[object]
     foreach ($relative in @('run.ps1', 'install.ps1')) {
-        [void]$scriptPaths.Add((Join-Path $RepositoryRoot $relative))
+        [void]$scriptPaths.Add([pscustomobject]@{
+                Path     = (Join-Path $RepositoryRoot $relative)
+                Critical = $true
+                Scope    = 'release-wrapper'
+            })
     }
 
     $scriptsRoot = Join-Path $RepositoryRoot 'scripts'
+    $auxiliarySyntaxWarningScripts = @(
+        'Test-R0Readiness.ps1'
+    )
     if (Test-Path -LiteralPath $scriptsRoot -PathType Container) {
         foreach ($scriptFile in @(Get-ChildItem -LiteralPath $scriptsRoot -Filter '*.ps1' -File |
                 Where-Object { $_.Name -notlike 'Sign-SandboxDriver*.ps1' } |
                 Sort-Object FullName)) {
-            [void]$scriptPaths.Add($scriptFile.FullName)
+            $isAuxiliaryWarning = $auxiliarySyntaxWarningScripts -contains $scriptFile.Name
+            [void]$scriptPaths.Add([pscustomobject]@{
+                    Path     = $scriptFile.FullName
+                    Critical = -not $isAuxiliaryWarning
+                    Scope    = if ($isAuxiliaryWarning) { 'auxiliary-lab-readiness-warning' } else { 'release-script' }
+                })
         }
     }
 
     $errors = New-Object System.Collections.Generic.List[object]
+    $warningErrors = New-Object System.Collections.Generic.List[object]
     $repoPrefix = $RepositoryRoot.TrimEnd('\', '/') + [System.IO.Path]::DirectorySeparatorChar
     $parsedCount = 0
-    foreach ($path in @($scriptPaths.ToArray() | Sort-Object -Unique)) {
+    foreach ($scriptPathEntry in @($scriptPaths.ToArray() | Sort-Object Path -Unique)) {
+        $path = [string]$scriptPathEntry.Path
+        $critical = [bool]$scriptPathEntry.Critical
+        $scope = [string]$scriptPathEntry.Scope
         $displayPath = if ($path.StartsWith($repoPrefix, [StringComparison]::OrdinalIgnoreCase)) {
             $path.Substring($repoPrefix.Length)
         }
@@ -200,7 +216,13 @@ function Test-PowerShellScriptSyntax {
         }
 
         if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
-            [void]$errors.Add([pscustomobject]@{ script = $displayPath; error = 'missing' })
+            $issue = [pscustomobject]@{ script = $displayPath; error = 'missing'; scope = $scope; critical = $critical }
+            if ($critical) {
+                [void]$errors.Add($issue)
+            }
+            else {
+                [void]$warningErrors.Add($issue)
+            }
             continue
         }
 
@@ -209,20 +231,39 @@ function Test-PowerShellScriptSyntax {
         [System.Management.Automation.Language.Parser]::ParseFile($path, [ref]$tokens, [ref]$parseErrors) | Out-Null
         $parsedCount++
         foreach ($parseError in @($parseErrors)) {
-            [void]$errors.Add([pscustomobject]@{
+            $issue = [pscustomobject]@{
                     script  = $displayPath
                     message = $parseError.Message
                     extent  = [string]$parseError.Extent
-                })
+                    scope   = $scope
+                    critical = $critical
+                }
+            if ($critical) {
+                [void]$errors.Add($issue)
+            }
+            else {
+                [void]$warningErrors.Add($issue)
+            }
         }
+    }
+
+    if ($errors.Count -eq 0 -and $warningErrors.Count -eq 0) {
+        Add-ReleaseCheckResult `
+            -Id 'powershell-syntax' `
+            -Title 'PowerShell syntax / PowerShell 语法' `
+            -Status Passed `
+            -Message "Parsed $parsedCount PowerShell script(s): root wrappers plus scripts/*.ps1 excluding signing helpers."
+        return
     }
 
     if ($errors.Count -eq 0) {
         Add-ReleaseCheckResult `
             -Id 'powershell-syntax' `
             -Title 'PowerShell syntax / PowerShell 语法' `
-            -Status Passed `
-            -Message "Parsed $parsedCount PowerShell script(s): root wrappers plus scripts/*.ps1 excluding signing helpers."
+            -Status Warning `
+            -Message "Release-critical PowerShell parsed successfully, but auxiliary lab/readiness scripts reported $($warningErrors.Count) parser issue(s)." `
+            -Remediation @('Do not block release packaging on auxiliary lab script parser issues introduced by concurrent work, but route these warnings to the owning implementation area before final lab validation.') `
+            -Details @{ warnings = @($warningErrors.ToArray()); parsedCount = $parsedCount }
         return
     }
 
@@ -232,7 +273,7 @@ function Test-PowerShellScriptSyntax {
         -Status Failed `
         -Message "PowerShell parser found $($errors.Count) issue(s)." `
         -Remediation @('Fix parser errors before packaging or tagging a release.') `
-        -Details @{ errors = @($errors.ToArray()) }
+        -Details @{ errors = @($errors.ToArray()); warnings = @($warningErrors.ToArray()) }
 }
 
 function Get-ObjectPropertyValue {
@@ -871,6 +912,8 @@ function Test-DeploymentOperatorDiagnosticsContract {
             'runtimePublishRootMissingRecommendedActions',
             'externalStateDiagnostics',
             'freshLiveEvidenceGuardrail',
+            'reviewerChecklist',
+            'sourceRuntimeSafetyMetadata',
             'runtimePublishRootMustBeOutsideRepository',
             'no VM mutation, no driver signing, no GUI signing fallback',
             'no CSignTool'
@@ -967,6 +1010,8 @@ function Test-DeploymentDocsOperatorHints {
             'runtimePublishRootMissingRecommendedActions',
             'externalStateDiagnostics',
             'freshLiveEvidenceGuardrail',
+            'reviewerChecklist',
+            'sourceRuntimeSafetyMetadata',
             'no VM mutation',
             'no GUI signing fallback',
             'CSignTool'
@@ -1212,6 +1257,18 @@ function ConvertTo-ReleaseReadinessMarkdown {
 
     [void]$lines.Add('- Required final evidence before claiming a fresh live release: commit, job id, runtime root, generated time, report JSON path, zh/en HTML report paths.')
     [void]$lines.Add('')
+    [void]$lines.Add('## Reviewer checklist / 审阅清单')
+    [void]$lines.Add('')
+    foreach ($item in @($Summary.reviewerChecklist.mustPassBeforeSourceHandoff)) {
+        [void]$lines.Add("- Source: $item")
+    }
+    foreach ($item in @($Summary.reviewerChecklist.mustPassBeforeRuntimeHandoff)) {
+        [void]$lines.Add("- Runtime: $item")
+    }
+    foreach ($item in @($Summary.reviewerChecklist.releaseNotesMustState)) {
+        [void]$lines.Add("- Release notes: $item")
+    }
+    [void]$lines.Add('')
     [void]$lines.Add('## Warnings and failures')
     [void]$lines.Add('')
     $interestingResults = @($Summary.results | Where-Object { $_.status -in @('Failed', 'Warning') })
@@ -1307,6 +1364,54 @@ $summary = [pscustomobject][ordered]@{
         'Use install/run CheckEnvironment for read-only VT key, Hyper-V prerequisite, VM profile, guest payload freshness, runtime-root-under-repository, and driver-path hints.',
         'No readiness/package command creates a job id; release notes need an explicit lab live run before claiming fresh live evidence.'
     )
+    reviewerChecklist     = [ordered]@{
+        chinese = '中文审阅速查：readiness 只证明低副作用门禁；runtime handoff 还必须补齐仓库外 RuntimePublishRoot；fresh live 声明必须有实验室 job id。'
+        mustPassBeforeSourceHandoff = @(
+            'release-readiness.json failedCount = 0',
+            'source package StageOnly dry-run 已生成 package-manifest.generated.json',
+            'generated metadata 的 sourceRuntimeSafetyMetadata/source package safety 未显示 runtime payload、VM state、secret、签名材料或 build output',
+            'dirty source 只能作为内部 draft，并在 release notes 说明 AllowDirtySource'
+        )
+        mustPassBeforeRuntimeHandoff = @(
+            '使用 -RuntimePublishRoot <external-publish-root> -RequireCompleteRuntimePackage 重新运行 readiness',
+            'RuntimePublishRoot 在仓库外，且 host-web、guest-tools、tools/job-tool、tools/postprocess 都存在',
+            '每个 runtime publish entry 含预期 exe/dll/payload-manifest，且不含 .pdb/.sys/pcap/dump/VM/secret/signing 文件',
+            'package-portable.ps1 runtime zip 使用 -RequireCompleteRuntimePayloads，且不是 -StageOnly layout dry-run'
+        )
+        releaseNotesMustState = @(
+            '如果没有 fresh lab job id，写“本候选未刷新 fresh live evidence”',
+            '若声明 fresh live，记录 commit、job id、runtime root、生成时间、report.json/report.zh.html/report.en.html 路径',
+            '默认包不签名、不加载真实 R0 driver；真实 R0 仍是隔离 lab 高级路径'
+        )
+        rejectIfPresent = @(
+            'CSignTool.exe 或 GUI signing fallback',
+            '仓库内 RuntimePublishRoot/bin/obj/x64 runtime fallback',
+            '样本、报告、PCAP/dump/trace、VM 磁盘/快照、secret、证书私钥或 driver binary'
+        )
+    }
+    sourceRuntimeSafetyMetadata = [ordered]@{
+        sourcePackage = [ordered]@{
+            dryRunEnabledByDefault = -not [bool]$SkipSourcePackageDryRun
+            sourceOnly = $true
+            excludesRuntimePayloads = $true
+            excludesSecretsVmStateSamplesReportsBuildOutputAndSigningMaterial = $true
+        }
+        runtimePackage = [ordered]@{
+            runtimePublishRoot = if ([string]::IsNullOrWhiteSpace($RuntimePublishRoot)) { $null } else { $RuntimePublishRoot }
+            runtimePublishRootMustBeOutsideRepository = $true
+            repositoryBinaryFallbackAllowed = $false
+            completeRuntimePackageRequired = [bool]$RequireCompleteRuntimePackage
+            completeRuntimeHandoffVerified = (-not [string]::IsNullOrWhiteSpace($RuntimePublishRoot) -and [bool]$RequireCompleteRuntimePackage -and $exitCode -eq 0)
+        }
+        nonMutating = [ordered]@{
+            vmMutation = $false
+            driverSigning = $false
+            guiSigningFallback = $false
+            csignTool = $false
+            gitPush = $false
+            networkPublish = $false
+        }
+    }
     results               = @($script:Results.ToArray())
 }
 

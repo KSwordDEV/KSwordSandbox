@@ -3611,7 +3611,6 @@ std::string BuildReadEventsBatchData(
     const bool cappedByMaxEvents =
         requestedMaxEvents != 0 && counters.recordsProcessed >= requestedMaxEvents;
     const bool outputBufferFull = bytesReturned >= kReadEventsBufferBytes;
-    const bool backpressure = lost || cappedByMaxEvents || outputBufferFull;
     const std::string loss = lost ? "driver-events-dropped" : "none";
     const std::string sampling =
         driverEventSampleStride <= 1
@@ -3636,6 +3635,7 @@ std::string BuildReadEventsBatchData(
     const bool sequenceGapObserved = sequenceGapEstimate != 0;
     const std::string sequenceGapReason =
         sequenceGapObserved ? "non-contiguous-consumed-driver-sequence" : "none";
+    const bool backpressure = lost || cappedByMaxEvents || outputBufferFull || sequenceGapObserved;
     const std::string backpressureSeverity =
         lost ? "loss" : (sequenceGapObserved ? "sequence-gap" : (backpressure ? "bounded-drain" : "none"));
 

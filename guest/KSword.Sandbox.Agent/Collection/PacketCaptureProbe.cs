@@ -17,6 +17,8 @@ internal sealed class PacketCaptureProbe : IGuestProbe
 {
     private const string CollectionName = "packet-captures";
     private const string PktmonExecutable = "pktmon.exe";
+    private const string ArtifactSelectorVersion = "artifact-selectors-v1";
+    private const string ReasonTaxonomy = "guest-artifact.packet-capture.reason.v1";
     private static readonly TimeSpan CommandTimeout = TimeSpan.FromSeconds(15);
     private PacketCaptureSession? activeSession;
 
@@ -114,6 +116,9 @@ internal sealed class PacketCaptureProbe : IGuestProbe
                 ["phase"] = "before-start",
                 ["capturePhase"] = "before-start",
                 ["captureEnabled"] = "true",
+                ["captureRequested"] = "true",
+                ["explicitOptInRequired"] = "true",
+                ["explicitOptInOption"] = "--packet-capture/--pcap/--network-capture",
                 ["implemented"] = "true",
                 ["capturePolicy"] = "explicit-opt-in-network-packet-capture",
                 ["collector"] = "pktmon",
@@ -150,6 +155,7 @@ internal sealed class PacketCaptureProbe : IGuestProbe
             }
         };
         AddCaptureSourceToolData(started.Data);
+        AddPacketCaptureSelectorAliases(started.Data);
         AddExpectedArtifactEvidence(started.Data, "conversion-pending");
         AddRootProcessData(started, context);
         return [started];
@@ -197,6 +203,9 @@ internal sealed class PacketCaptureProbe : IGuestProbe
                 ["phase"] = "after-run",
                 ["capturePhase"] = "after-run",
                 ["captureEnabled"] = "true",
+                ["captureRequested"] = "true",
+                ["explicitOptInRequired"] = "true",
+                ["explicitOptInOption"] = "--packet-capture/--pcap/--network-capture",
                 ["implemented"] = "true",
                 ["capturePolicy"] = "explicit-opt-in-network-packet-capture",
                 ["collector"] = "pktmon",
@@ -235,6 +244,7 @@ internal sealed class PacketCaptureProbe : IGuestProbe
             }
         };
         AddCaptureSourceToolData(stopped.Data);
+        AddPacketCaptureSelectorAliases(stopped.Data);
         AddExpectedArtifactEvidence(stopped.Data, "conversion-pending");
         AddNamedFileEvidence(stopped.Data, "etl", session.EtlPath);
         AddRootProcessData(stopped, context);
@@ -270,6 +280,9 @@ internal sealed class PacketCaptureProbe : IGuestProbe
                 ["phase"] = "after-run",
                 ["capturePhase"] = "after-run",
                 ["captureEnabled"] = "true",
+                ["captureRequested"] = "true",
+                ["explicitOptInRequired"] = "true",
+                ["explicitOptInOption"] = "--packet-capture/--pcap/--network-capture",
                 ["implemented"] = "true",
                 ["capturePolicy"] = "explicit-opt-in-network-packet-capture",
                 ["collector"] = "pktmon",
@@ -312,6 +325,7 @@ internal sealed class PacketCaptureProbe : IGuestProbe
             }
         };
         AddCaptureSourceToolData(captured.Data);
+        AddPacketCaptureSelectorAliases(captured.Data);
         AddArtifactFileEvidence(captured, session.PcapngPath);
         AddNamedFileEvidence(captured.Data, "pcapng", session.PcapngPath);
         AddNamedFileEvidence(captured.Data, "etl", session.EtlPath);
@@ -351,9 +365,16 @@ internal sealed class PacketCaptureProbe : IGuestProbe
                 ["phase"] = phase,
                 ["capturePhase"] = phase,
                 ["captureEnabled"] = "true",
+                ["captureRequested"] = "true",
+                ["explicitOptInRequired"] = "true",
+                ["explicitOptInOption"] = "--packet-capture/--pcap/--network-capture",
                 ["implemented"] = implemented.ToString(CultureInfo.InvariantCulture).ToLowerInvariant(),
                 ["capturePolicy"] = "explicit-opt-in-network-packet-capture",
                 ["reason"] = reason,
+                ["reasonCode"] = reason,
+                ["reasonCategory"] = PacketCaptureReasonCategory(reason),
+                ["reasonTaxonomy"] = ReasonTaxonomy,
+                ["reasonTaxonomyVersion"] = "v1",
                 ["zhMessage"] = "网络抓包采集被跳过；该事件说明证据缺口，不会中断整体分析。",
                 ["zhHint"] = PacketCaptureReasonZhHint(reason),
                 ["collector"] = "pktmon",
@@ -378,6 +399,7 @@ internal sealed class PacketCaptureProbe : IGuestProbe
         };
         AddCaptureSourceToolData(evt.Data);
         AddIfNotEmpty(evt.Data, "artifactRelativePath", artifactRelativePath);
+        AddPacketCaptureSelectorAliases(evt.Data);
         AddRootProcessData(evt, context);
         if (session is not null)
         {
@@ -409,9 +431,16 @@ internal sealed class PacketCaptureProbe : IGuestProbe
                 ["phase"] = "before-start",
                 ["capturePhase"] = "before-start",
                 ["captureEnabled"] = "false",
+                ["captureRequested"] = "false",
+                ["explicitOptInRequired"] = "true",
+                ["explicitOptInOption"] = "--packet-capture/--pcap/--network-capture",
                 ["implemented"] = "true",
                 ["capturePolicy"] = "explicit-opt-in-network-packet-capture",
                 ["reason"] = "packetCaptureNotRequested",
+                ["reasonCode"] = "packetCaptureNotRequested",
+                ["reasonCategory"] = "disabled",
+                ["reasonTaxonomy"] = ReasonTaxonomy,
+                ["reasonTaxonomyVersion"] = "v1",
                 ["zhMessage"] = "网络抓包采集未启用。",
                 ["zhHint"] = "未启用 --packet-capture/--pcap/--network-capture，Guest Agent 不会启动 pktmon 抓包。",
                 ["collector"] = "pktmon",
@@ -455,6 +484,9 @@ internal sealed class PacketCaptureProbe : IGuestProbe
                 ["phase"] = "after-run",
                 ["capturePhase"] = "after-run",
                 ["captureEnabled"] = "true",
+                ["captureRequested"] = "true",
+                ["explicitOptInRequired"] = "true",
+                ["explicitOptInOption"] = "--packet-capture/--pcap/--network-capture",
                 ["implemented"] = "true",
                 ["capturePolicy"] = "explicit-opt-in-network-packet-capture",
                 ["collector"] = "pktmon",
@@ -505,6 +537,7 @@ internal sealed class PacketCaptureProbe : IGuestProbe
         };
 
         AddCaptureSourceToolData(evt.Data);
+        AddPacketCaptureSelectorAliases(evt.Data);
         AddArtifactFileEvidence(evt, session.PcapngPath);
         AddNamedFileEvidence(evt.Data, "pcapng", session.PcapngPath);
         AddNamedFileEvidence(evt.Data, "etl", session.EtlPath);
@@ -541,9 +574,16 @@ internal sealed class PacketCaptureProbe : IGuestProbe
                 ["phase"] = phase,
                 ["capturePhase"] = phase,
                 ["captureEnabled"] = "true",
+                ["captureRequested"] = "true",
+                ["explicitOptInRequired"] = "true",
+                ["explicitOptInOption"] = "--packet-capture/--pcap/--network-capture",
                 ["implemented"] = "true",
                 ["capturePolicy"] = "explicit-opt-in-network-packet-capture",
                 ["reason"] = reason,
+                ["reasonCode"] = reason,
+                ["reasonCategory"] = PacketCaptureReasonCategory(reason),
+                ["reasonTaxonomy"] = ReasonTaxonomy,
+                ["reasonTaxonomyVersion"] = "v1",
                 ["zhMessage"] = "pktmon 命令失败，网络抓包通道未完整产出。",
                 ["zhHint"] = PacketCaptureReasonZhHint(reason),
                 ["collector"] = "pktmon",
@@ -581,6 +621,7 @@ internal sealed class PacketCaptureProbe : IGuestProbe
         };
 
         AddCaptureSourceToolData(evt.Data);
+        AddPacketCaptureSelectorAliases(evt.Data);
         AddNamedFileEvidence(evt.Data, "etl", session.EtlPath);
         AddRootProcessData(evt, context);
         AddArtifactFileEvidence(evt, session.PcapngPath);
@@ -602,6 +643,20 @@ internal sealed class PacketCaptureProbe : IGuestProbe
             "packetCaptureNotRequested" => "未请求网络抓包；如需 PCAPNG，请显式传入 --packet-capture、--pcap 或 --network-capture。",
             "protocolParserNotImplemented" => "协议摘要尚未实现；原始 PCAPNG 仍可作为证据下载分析。",
             _ => "请结合 reason、commandExitCode、commandTimedOut、commandMessage 和 diagnosticRelativePath 判断 pktmon 失败原因。"
+        };
+    }
+
+    private static string PacketCaptureReasonCategory(string reason)
+    {
+        return reason switch
+        {
+            "packetCaptureNotRequested" => "disabled",
+            "notWindows" => "platform",
+            "captureAlreadyActive" => "state",
+            "captureWasNotStarted" => "state",
+            "pktmonStartFailed" or "pktmonStopFailed" or "pktmonConvertFailed" => "tool",
+            "protocolParserNotImplemented" => "protocol-summary",
+            _ => "unknown"
         };
     }
 
@@ -636,6 +691,27 @@ internal sealed class PacketCaptureProbe : IGuestProbe
     }
 
     /// <summary>
+    /// Adds stable selector aliases for the PCAPNG artifact path when present.
+    /// </summary>
+    private static void AddPacketCaptureSelectorAliases(Dictionary<string, string> data)
+    {
+        if (!data.TryGetValue("artifactRelativePath", out var artifactRelativePath) ||
+            string.IsNullOrWhiteSpace(artifactRelativePath))
+        {
+            return;
+        }
+
+        AddIfNotEmpty(data, "artifactSelector", artifactRelativePath);
+        AddIfNotEmpty(data, "stableArtifactSelector", artifactRelativePath);
+        AddIfNotEmpty(data, "canonicalArtifactSelector", artifactRelativePath);
+        AddIfNotEmpty(data, "downloadSelector", artifactRelativePath);
+        AddIfNotEmpty(data, "artifactSafeLink", BuildSafeLink(artifactRelativePath));
+        AddIfNotEmpty(data, "artifactSelectorKind", "safe-output-relative-path");
+        AddIfNotEmpty(data, "artifactSelectorVersion", ArtifactSelectorVersion);
+        AddIfNotEmpty(data, "artifactSelectionReason", "packet-capture-pcapng");
+    }
+
+    /// <summary>
     /// Marks expected-but-not-yet-created PCAPNG evidence without treating the
     /// pending file as a capture failure.
     /// </summary>
@@ -657,13 +733,40 @@ internal sealed class PacketCaptureProbe : IGuestProbe
         evt.Data["processRole"] = context.RootProcessId is null ? "sample-context" : "sample-root-context";
         if (context.RootProcessId is not null)
         {
-            evt.Data["rootProcessId"] = context.RootProcessId.Value.ToString(CultureInfo.InvariantCulture);
-            evt.Data["processId"] = context.RootProcessId.Value.ToString(CultureInfo.InvariantCulture);
+            var rootProcessId = context.RootProcessId.Value.ToString(CultureInfo.InvariantCulture);
+            evt.Data["rootProcessId"] = rootProcessId;
+            evt.Data["processId"] = rootProcessId;
             evt.Data["treeDepth"] = "0";
-            evt.Data["treeLineage"] = context.RootProcessId.Value.ToString(CultureInfo.InvariantCulture);
+            evt.Data["treeLineage"] = rootProcessId;
+            evt.Data["rootProcessIdStatus"] = "available";
+            evt.Data["treeLineageStatus"] = "stable";
+            evt.Data["lineageIncludesRoot"] = "true";
+        }
+        else
+        {
+            evt.Data["rootProcessIdStatus"] = "unavailable";
+            evt.Data["treeLineageStatus"] = "unavailable";
+            evt.Data["lineageIncludesRoot"] = "false";
         }
 
-        AddIfNotEmpty(evt.Data, "processName", evt.ProcessName);
+        if (context.RootParentProcessId is not null)
+        {
+            var parentProcessId = context.RootParentProcessId.Value.ToString(CultureInfo.InvariantCulture);
+            evt.Data["rootParentProcessId"] = parentProcessId;
+            evt.Data.TryAdd("parentProcessId", parentProcessId);
+        }
+
+        if (context.RootProcessStartTimeUtc is not null)
+        {
+            evt.Data["rootProcessStartTimeUtc"] = context.RootProcessStartTimeUtc.Value.ToString("O", CultureInfo.InvariantCulture);
+        }
+
+        AddIfNotEmpty(evt.Data, "processName", context.RootProcessName ?? evt.ProcessName);
+        AddIfNotEmpty(evt.Data, "rootProcessName", context.RootProcessName);
+        AddIfNotEmpty(evt.Data, "processImagePath", context.RootProcessPath ?? context.SamplePath);
+        AddIfNotEmpty(evt.Data, "rootImagePath", context.RootProcessPath ?? context.SamplePath);
+        AddIfNotEmpty(evt.Data, "commandLine", context.RootCommandLine);
+        AddIfNotEmpty(evt.Data, "rootCommandLine", context.RootCommandLine);
         AddIfNotEmpty(evt.Data, "samplePath", context.SamplePath);
     }
 
@@ -682,6 +785,9 @@ internal sealed class PacketCaptureProbe : IGuestProbe
                 evt.Data["hashStatus"] = "missing";
                 evt.Data["artifactHashStatus"] = "missing";
                 evt.Data["artifactExists"] = "false";
+                evt.Data["artifactIntegrityState"] = "missing";
+                evt.Data["sizeBytesStatus"] = "missing";
+                evt.Data["sha256Status"] = "missing";
                 return;
             }
 
@@ -697,11 +803,16 @@ internal sealed class PacketCaptureProbe : IGuestProbe
             evt.Data["hashStatus"] = "computed";
             evt.Data["artifactHashAlgorithm"] = "sha256";
             evt.Data["artifactHashStatus"] = "computed";
+            evt.Data["artifactIntegrityState"] = "verified";
+            evt.Data["sizeBytesStatus"] = "computed";
+            evt.Data["sha256Status"] = "computed";
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException or PathTooLongException)
         {
             evt.Data["hashStatus"] = "failed";
             evt.Data["artifactHashStatus"] = "failed";
+            evt.Data["artifactIntegrityState"] = "hash-failed";
+            evt.Data["sha256Status"] = "failed";
             evt.Data["artifactHashExceptionType"] = ex.GetType().FullName ?? ex.GetType().Name;
             evt.Data["artifactHashMessage"] = ex.Message;
         }
@@ -941,6 +1052,16 @@ internal sealed class PacketCaptureProbe : IGuestProbe
     private static string FormatExitCode(int? exitCode)
     {
         return exitCode?.ToString(CultureInfo.InvariantCulture) ?? string.Empty;
+    }
+
+    private static string BuildSafeLink(string relativePath)
+    {
+        return string.Join(
+            "/",
+            relativePath
+                .Replace('\\', '/')
+                .Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Select(Uri.EscapeDataString));
     }
 
     /// <summary>

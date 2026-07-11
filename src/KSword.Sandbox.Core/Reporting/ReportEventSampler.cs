@@ -86,6 +86,23 @@ public static class ReportEventSampler
         "safeRelativeSelector",
         "importPath",
         "downloadRejectionPolicy",
+        "artifactEvidenceMatrix",
+        "artifactEvidenceSummaryZh",
+        "artifactEvidenceCollectionsReady",
+        "artifactEvidenceCollectionsMissing",
+        "primaryArtifactSelectors",
+        "hasDroppedFileArtifacts",
+        "hasScreenshotArtifacts",
+        "hasMemoryDumpArtifacts",
+        "hasPacketCaptureArtifacts",
+        "droppedFileArtifactCount",
+        "screenshotArtifactCount",
+        "memoryDumpArtifactCount",
+        "packetCaptureArtifactCount",
+        "droppedFileBytes",
+        "screenshotBytes",
+        "memoryDumpBytes",
+        "packetCaptureBytes",
         "rejectionDiagnosticsAvailable",
         "rejectedArtifactCount",
         "lastRejectedArtifactSelector",
@@ -336,7 +353,40 @@ public static class ReportEventSampler
         "safeLink",
         "artifactRelativePath",
         "artifactKind",
+        "artifactEvidenceMatrix",
+        "artifactEvidenceSummaryZh",
+        "artifactEvidenceCollectionsReady",
+        "artifactEvidenceCollectionsMissing",
+        "primaryArtifactSelectors",
+        "hasDroppedFileArtifacts",
+        "hasScreenshotArtifacts",
+        "hasMemoryDumpArtifacts",
+        "hasPacketCaptureArtifacts",
+        "droppedFileArtifactCount",
+        "screenshotArtifactCount",
+        "memoryDumpArtifactCount",
+        "packetCaptureArtifactCount",
         "importMode"
+    ];
+
+    private static readonly string[] ArtifactImportSummaryPriorityDataKeys =
+    [
+        "behaviorCounted",
+        "downloadPolicy",
+        "artifactEvidenceMatrix",
+        "artifactEvidenceSummaryZh",
+        "primaryArtifactSelectors",
+        "hasDroppedFileArtifacts",
+        "hasScreenshotArtifacts",
+        "hasMemoryDumpArtifacts",
+        "hasPacketCaptureArtifacts",
+        "droppedFileArtifactCount",
+        "screenshotArtifactCount",
+        "memoryDumpArtifactCount",
+        "packetCaptureArtifactCount",
+        "importedSensitiveArtifactCount",
+        "downloadableArtifactCount",
+        "sensitiveArtifactCount"
     ];
 
     private static readonly string[] DnsPriorityDataKeys =
@@ -618,7 +668,14 @@ public static class ReportEventSampler
 
     private static IEnumerable<string> BuildPriorityDataKeys(SandboxEvent evt)
     {
-        if (string.Equals(evt.EventType, "artifact.host_imported", StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(evt.EventType, "artifact.import_summary", StringComparison.OrdinalIgnoreCase))
+        {
+            foreach (var key in ArtifactImportSummaryPriorityDataKeys)
+            {
+                yield return key;
+            }
+        }
+        else if (string.Equals(evt.EventType, "artifact.host_imported", StringComparison.OrdinalIgnoreCase))
         {
             foreach (var key in ArtifactImportPriorityDataKeys)
             {

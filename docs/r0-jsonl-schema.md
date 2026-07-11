@@ -181,7 +181,10 @@ smoke rows:
   output instead of omitting the key.
 - `backpressure`, `backpressureObserved`, and `backpressureReason`: queue or
   batch pressure evidence. Reasons include `events-dropped`,
-  `requested-max-events-reached`, `output-buffer-full`, and `none`.
+  `requested-max-events-reached`, `output-buffer-full`,
+  `sequence-gap-without-drop-counter`, and `none`. A READ_EVENTS sequence gap is
+  treated as backpressure/loss-quality evidence even if the driver drop counter
+  is still zero.
 - `processed`, `eligible`, `emitted`, `suppressed`, `skipped`, `head`, `tail`,
   and `sampling`: compact `r0collector.driverReadEvents` aliases used by
   report sampling and large-stream smoke tests.

@@ -183,13 +183,13 @@ These should be landed before or alongside their first producer callback:
   - drivers must never emit records larger than the documented maximum drain
     record size unless the ABI version changes.
 
-## Minimal landing sequence
+## 最小落地顺序 / Minimal landing sequence
 
-The fastest path to "start VM, report behavior" is to keep the existing
-`READ_EVENTS` stream and add one producer class at a time. Do not add new
-Ark-style control/drain IOCTLs for the first behavior milestone.
+最快达成 “start VM, report behavior / 启动 VM 并报告行为” 的路径，是保留现有
+`READ_EVENTS` stream，并一次只新增一个 producer class。第一个行为里程碑不要新增
+Ark-style control/drain IOCTL。
 
-Recommended order:
+推荐顺序 / Recommended order:
 
 1. Process callback
 2. Image load callback

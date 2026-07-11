@@ -418,7 +418,7 @@ function Test-R0CollectorEventQualityStaticContract {
             'TotalEventsDropped',
             'EventsDropped',
             'NextSequence',
-            'sequence gaps',
+            'gap count',
             'without CSignTool',
             'loading the driver'
         ) `
@@ -1105,8 +1105,16 @@ function Get-JsonLineEventSummary {
         SequenceFirst              = $null
         SequenceLast               = $null
         SequenceGapCount           = 0
+        SequenceScope              = 'all-jsonl-sequence-fields'
+        CountedStressSequenceCount = 0
+        CountedStressSequenceFirst = $null
+        CountedStressSequenceLast  = $null
+        CountedStressSequenceGapCount = 0
         LossEvidenceFields         = @()
         BackpressureEvidenceFields = @()
+        NoiseRowCount              = 0
+        ValidNoiseRowCount         = 0
+        MalformedLineCount         = 0
         ParseErrorCount            = 0
         ParseErrorSample           = @()
     }
@@ -1122,6 +1130,7 @@ function Get-JsonLineEventSummary {
     $eventTypes = New-Object System.Collections.Generic.List[string]
     $parseErrors = New-Object System.Collections.Generic.List[string]
     $sequenceValues = New-Object System.Collections.Generic.List[Int64]
+    $countedStressSequenceValues = New-Object System.Collections.Generic.List[Int64]
     $lossEvidenceFields = New-Object System.Collections.Generic.List[string]
     $backpressureEvidenceFields = New-Object System.Collections.Generic.List[string]
     foreach ($line in (Get-Content -LiteralPath $Path -ErrorAction Stop)) {
@@ -1134,6 +1143,7 @@ function Get-JsonLineEventSummary {
         $summary.LineCount = [int]$summary.LineCount + 1
         try {
             $row = $line | ConvertFrom-Json -ErrorAction Stop
+            $eventType = $null
             if ($null -ne $row.eventType -and -not [string]::IsNullOrWhiteSpace([string]$row.eventType)) {
                 $eventType = [string]$row.eventType
                 [void]$eventTypes.Add($eventType)
@@ -1142,7 +1152,8 @@ function Get-JsonLineEventSummary {
                 [void]$parseErrors.Add("Line $($summary.LineCount): missing eventType")
             }
 
-            if ($null -ne $row.source -and [string]$row.source -eq 'driver') {
+            $isDriverRow = $null -ne $row.source -and [string]$row.source -eq 'driver'
+            if ($isDriverRow) {
                 $summary.DriverRowCount = [int]$summary.DriverRowCount + 1
             }
 
@@ -1160,16 +1171,36 @@ function Get-JsonLineEventSummary {
                 }
 
                 $sequenceProperty = $row.data.PSObject.Properties['sequence']
+                $sequenceValue = [Int64]0
+                $hasNumericSequence = $false
                 if ($null -ne $sequenceProperty) {
-                    $sequenceValue = [Int64]0
                     if ([Int64]::TryParse([string]$sequenceProperty.Value, [ref]$sequenceValue)) {
                         [void]$sequenceValues.Add($sequenceValue)
+                        $hasNumericSequence = $true
                     }
                 }
 
                 $stressProperty = $row.data.PSObject.Properties['stress']
-                if ($null -ne $stressProperty -and [string]$stressProperty.Value -eq 'true') {
+                $isStressRow = $null -ne $stressProperty -and [string]$stressProperty.Value -eq 'true'
+                if ($isStressRow) {
                     $summary.StressRowCount = [int]$summary.StressRowCount + 1
+                }
+
+                $semanticRowCountedInStressProperty = $row.data.PSObject.Properties['semanticRowCountedInStress']
+                $isCountedStressDriverRow =
+                    $isDriverRow -and
+                    $eventType -eq 'driver.file' -and
+                    $isStressRow -and
+                    $null -ne $semanticRowCountedInStressProperty -and
+                    [string]$semanticRowCountedInStressProperty.Value -eq 'true'
+                if ($isCountedStressDriverRow -and $hasNumericSequence) {
+                    [void]$countedStressSequenceValues.Add($sequenceValue)
+                }
+
+                $noiseProperty = $row.data.PSObject.Properties['noise']
+                if ($null -ne $noiseProperty -and [string]$noiseProperty.Value -eq 'true') {
+                    $summary.NoiseRowCount = [int]$summary.NoiseRowCount + 1
+                    $summary.ValidNoiseRowCount = [int]$summary.ValidNoiseRowCount + 1
                 }
 
                 $mockProperty = $row.data.PSObject.Properties['mock']
@@ -1186,7 +1217,29 @@ function Get-JsonLineEventSummary {
     }
 
     $summary.EventTypes = @($eventTypes.ToArray())
-    $sortedSequences = @($sequenceValues.ToArray() | Sort-Object)
+    $sortedStressSequences = @($countedStressSequenceValues.ToArray() | Sort-Object)
+    if ($sortedStressSequences.Count -gt 0) {
+        $summary.SequenceScope = 'counted-stress-driver-file-rows'
+        $summary.CountedStressSequenceCount = $sortedStressSequences.Count
+        $summary.CountedStressSequenceFirst = [Int64]$sortedStressSequences[0]
+        $summary.CountedStressSequenceLast = [Int64]$sortedStressSequences[$sortedStressSequences.Count - 1]
+        $stressGapCount = 0
+        for ($index = 1; $index -lt $sortedStressSequences.Count; $index++) {
+            if ([Int64]$sortedStressSequences[$index] -ne ([Int64]$sortedStressSequences[$index - 1] + 1)) {
+                $stressGapCount++
+            }
+        }
+        $summary.CountedStressSequenceGapCount = $stressGapCount
+    }
+
+    $sortedSequences = @(
+        if ($sortedStressSequences.Count -gt 0) {
+            $sortedStressSequences
+        }
+        else {
+            $sequenceValues.ToArray() | Sort-Object
+        }
+    )
     $summary.SequenceCount = $sortedSequences.Count
     if ($sortedSequences.Count -gt 0) {
         $summary.SequenceFirst = [Int64]$sortedSequences[0]
@@ -1202,6 +1255,8 @@ function Get-JsonLineEventSummary {
     $summary.LossEvidenceFields = @($lossEvidenceFields.ToArray())
     $summary.BackpressureEvidenceFields = @($backpressureEvidenceFields.ToArray())
     $summary.ParseErrorCount = $parseErrors.Count
+    $summary.MalformedLineCount = $parseErrors.Count
+    $summary.NoiseRowCount = [int]$summary.NoiseRowCount + [int]$summary.MalformedLineCount + [int]$summary.BlankLineCount
     $summary.ParseErrorSample = @($parseErrors.ToArray() | Select-Object -First 5)
     return $summary
 }
@@ -1281,11 +1336,19 @@ function Invoke-R0CollectorAbiSelfCheck {
                 StressRowCount  = [int]$summary.StressRowCount
                 MockRowCount    = [int]$summary.MockRowCount
                 SequenceCount   = [int]$summary.SequenceCount
+                SequenceScope   = [string]$summary.SequenceScope
+                CountedStressSequenceCount = [int]$summary.CountedStressSequenceCount
                 StressJsonlSequenceStart = $summary.SequenceFirst
                 StressJsonlSequenceEnd = $summary.SequenceLast
                 StressJsonlSequenceGapCount = [int]$summary.SequenceGapCount
+                CountedStressSequenceStart = $summary.CountedStressSequenceFirst
+                CountedStressSequenceEnd = $summary.CountedStressSequenceLast
+                CountedStressSequenceGapCount = [int]$summary.CountedStressSequenceGapCount
                 StressJsonlLossEvidence = @($summary.LossEvidenceFields)
                 StressJsonlBackpressureEvidence = @($summary.BackpressureEvidenceFields)
+                NoiseRowCount  = [int]$summary.NoiseRowCount
+                ValidNoiseRowCount = [int]$summary.ValidNoiseRowCount
+                MalformedLineCount = [int]$summary.MalformedLineCount
                 ParseErrorCount = $parseErrorCount
                 ParseErrors     = @($summary.ParseErrorSample)
                 ConsoleLineCount = @($output).Count
@@ -1369,11 +1432,19 @@ function Invoke-R0CollectorHealth {
                 HasDriverHealth = $hasDriverHealth
                 DriverRowCount  = [int]$summary.DriverRowCount
                 SequenceCount   = [int]$summary.SequenceCount
+                SequenceScope   = [string]$summary.SequenceScope
+                CountedStressSequenceCount = [int]$summary.CountedStressSequenceCount
                 StressJsonlSequenceStart = $summary.SequenceFirst
                 StressJsonlSequenceEnd = $summary.SequenceLast
                 StressJsonlSequenceGapCount = [int]$summary.SequenceGapCount
+                CountedStressSequenceStart = $summary.CountedStressSequenceFirst
+                CountedStressSequenceEnd = $summary.CountedStressSequenceLast
+                CountedStressSequenceGapCount = [int]$summary.CountedStressSequenceGapCount
                 StressJsonlLossEvidence = @($summary.LossEvidenceFields)
                 StressJsonlBackpressureEvidence = @($summary.BackpressureEvidenceFields)
+                NoiseRowCount   = [int]$summary.NoiseRowCount
+                ValidNoiseRowCount = [int]$summary.ValidNoiseRowCount
+                MalformedLineCount = [int]$summary.MalformedLineCount
                 ParseErrorCount = $parseErrorCount
                 ParseErrors     = @($summary.ParseErrorSample)
                 ConsoleOutput   = (($output | Out-String).Trim())
@@ -1456,11 +1527,19 @@ function Invoke-R0CollectorDrain {
                 StressRowCount     = [int]$summary.StressRowCount
                 MockRowCount       = [int]$summary.MockRowCount
                 SequenceCount      = [int]$summary.SequenceCount
+                SequenceScope      = [string]$summary.SequenceScope
+                CountedStressSequenceCount = [int]$summary.CountedStressSequenceCount
                 StressJsonlSequenceStart = $summary.SequenceFirst
                 StressJsonlSequenceEnd = $summary.SequenceLast
                 StressJsonlSequenceGapCount = [int]$summary.SequenceGapCount
+                CountedStressSequenceStart = $summary.CountedStressSequenceFirst
+                CountedStressSequenceEnd = $summary.CountedStressSequenceLast
+                CountedStressSequenceGapCount = [int]$summary.CountedStressSequenceGapCount
                 StressJsonlLossEvidence = @($summary.LossEvidenceFields)
                 StressJsonlBackpressureEvidence = @($summary.BackpressureEvidenceFields)
+                NoiseRowCount      = [int]$summary.NoiseRowCount
+                ValidNoiseRowCount = [int]$summary.ValidNoiseRowCount
+                MalformedLineCount = [int]$summary.MalformedLineCount
                 ParseErrorCount    = $parseErrorCount
                 ParseErrors        = @($summary.ParseErrorSample)
                 ExitCode           = $exitCode

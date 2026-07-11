@@ -861,9 +861,35 @@ function Update-PackageOperatorDiagnostics {
             requiredReleaseNoteFields = @('commit', 'jobId', 'runtimeRoot', 'generatedAtUtc/localTime', 'report.json/report.zh.html/report.en.html paths')
             chinese = '中文提示：本脚本只做本机 staging/zip，不启动 Hyper-V live；没有记录 live job id 时，release notes 必须写“本候选未刷新 fresh live evidence”。'
         }
+        reviewerChecklist = [ordered]@{
+            chinese = '中文审阅速查：先确认 handoffAllowed；再核对 RuntimePublishRoot 在仓库外、runtime payload 完整、source/runtime safety metadata 无红灯；最后确认 release notes 没有冒充 fresh live。'
+            mustPassBeforeSourceHandoff = @(
+                'gitStatus.dirty = false，或 release notes 明确说明 AllowDirtySource/internal draft',
+                'sourceRuntimeSafetyMetadata.sourcePackage.sourceOnly = true',
+                'safetyContract 确认 secrets、VM state、samples、reports、build output、signing material 未打包',
+                'reviewer 运行 .\scripts\Test-ReleaseReadiness.ps1 -AllowDirtySource 并检查 failedCount=0'
+            )
+            mustPassBeforeRuntimeHandoff = @(
+                'operatorDiagnostics.runtimeDryRunGuardrail.handoffAllowed = true',
+                'runtimePublishRoot 不为空且位于仓库外',
+                'runtimePublishSummary.missingCount = 0 且 incompleteCount = 0',
+                'sourceRuntimeSafetyMetadata.runtimePackage.runtimePayloadSource = external RuntimePublishRoot only',
+                '非 StageOnly runtime zip 必须使用 -RequireCompleteRuntimePayloads'
+            )
+            releaseNotesMustState = @(
+                '是否有 fresh live job id；没有则写“本候选未刷新 fresh live evidence”',
+                'runtimeRoot、RuntimePublishRoot、commit、生成时间、report.json/report.zh.html/report.en.html 路径',
+                '默认不签名、不加载真实 R0 driver；真实 R0 是隔离 lab 高级路径'
+            )
+            rejectIfPresent = @(
+                'CSignTool.exe 或 GUI signing fallback',
+                '仓库内 RuntimePublishRoot/bin/obj/x64 runtime fallback',
+                '样本、报告、PCAP/dump/trace、VM 磁盘/快照、secret、证书私钥或 driver binary'
+            )
+        }
         recommendedActions = @($recommendedActions)
         operatorGuidance = @(
-            '中文：先看 runtimePublishSummary、runtimeDryRunGuardrail、safeExclusionCategories、externalStateDiagnostics、freshLiveEvidenceGuardrail；这些字段告诉审阅者本包是否可 handoff，以及是否不能声称 fresh live。',
+            '中文：先看 reviewerChecklist、sourceRuntimeSafetyMetadata、runtimePublishSummary、runtimeDryRunGuardrail、safeExclusionCategories、externalStateDiagnostics、freshLiveEvidenceGuardrail；这些字段告诉审阅者本包是否可 handoff，以及是否不能声称 fresh live。',
             '中文：完整 runtime handoff 必须提供仓库外 RuntimePublishRoot、传入 -RequireCompleteRuntimePayloads，并确保所有 runtime publish entries 存在。',
             'RuntimePublishRoot must point to external published payloads such as host-web, guest-tools, tools/job-tool, and tools/postprocess.',
             'Use -RequireCompleteRuntimePayloads for handoff builds; omit it only for explicit layout/safety dry-runs.',
@@ -1157,6 +1183,28 @@ function Write-GeneratedPackageManifest {
         manifestRequiredChecks = @(Get-ObjectArrayProperty -InputObject $Manifest -Name 'requiredChecks')
         packageDiagnostics = @($script:packageDiagnostics.ToArray())
         operatorDiagnostics = $script:operatorDiagnostics
+        reviewerChecklist = $script:operatorDiagnostics.reviewerChecklist
+        sourceRuntimeSafetyMetadata = [ordered]@{
+            chinese = '中文提示：source 包只交付源码/规则/文档/测试/脚本；runtime 包只从仓库外 RuntimePublishRoot 复制已发布 payload。两类包都不得包含本机 secret、VM 状态、样本、报告、dump/pcap/trace、签名材料或仓库 build output。'
+            sourcePackage = [ordered]@{
+                sourceOnly = ($PackageKind -eq 'source')
+                includesRuntimePayloads = $false
+                includesRepositoryBuildOutput = $false
+                includesSamplesOrReports = $false
+                includesVmState = $false
+                includesSigningMaterial = $false
+            }
+            runtimePackage = [ordered]@{
+                runtimePayloadSource = if ($PackageKind -eq 'runtime') { 'external RuntimePublishRoot only' } else { 'not applicable' }
+                repositoryBinaryFallbackAllowed = $false
+                requireCompleteRuntimePayloadsForArchive = ($PackageKind -eq 'runtime')
+                runtimePublishRoot = if ([string]::IsNullOrWhiteSpace($RuntimePublishRoot)) { $null } else { $RuntimePublishRoot }
+                runtimePublishRootMustBeOutsideRepository = $true
+                handoffAllowed = if ($PackageKind -eq 'runtime') { [bool]$script:operatorDiagnostics.runtimeDryRunGuardrail.handoffAllowed } else { $true }
+            }
+            nonMutating = $script:operatorDiagnostics.nonMutating
+            safeExclusionCategories = $script:operatorDiagnostics.safeExclusionCategories
+        }
         exclusionSummary = [ordered]@{
             samples = 'excluded'
             virtualMachines = 'excluded'

@@ -121,6 +121,14 @@ internal static class LiveEventsPage
             .cockpit-card h3 { margin:0 0 8px; }
             .cockpit-main { font-size:18px; font-weight:900; overflow-wrap:anywhere; }
             .cockpit-meta { align-items:center; display:flex; flex-wrap:wrap; gap:6px; margin-top:10px; }
+            .operator-hints { border:1px dashed #bfdbfe; margin-top:12px; padding:12px; }
+            .operator-hint-list { display:grid; gap:8px; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); margin-top:8px; }
+            .operator-hint { background:#f8fbff; border:1px solid var(--line); border-left:3px solid var(--blue); padding:10px; }
+            .operator-hint.ready { border-left-color:#22c55e; }
+            .operator-hint.waiting { border-left-color:#cbd5e1; }
+            .operator-hint.quiet { border-left-color:#94a3b8; background:#f8fafc; }
+            .operator-hint.failed { border-left-color:#ef4444; background:#fff7f7; }
+            .operator-hint strong { display:block; margin-bottom:5px; }
             .step-list { display:grid; gap:8px; grid-template-columns:repeat(auto-fit,minmax(230px,1fr)); max-height:34vh; overflow:auto; padding:2px; }
             .step-card { background:#f8fbff; border:1px solid var(--line); border-radius:2px; padding:10px; }
             .step-card summary { cursor:pointer; list-style:none; }
@@ -183,8 +191,8 @@ internal static class LiveEventsPage
             .report-ready { background:transparent; border-color:var(--line); }
 
             /* Square, flat operator theme: keep visual nesting shallow. */
-            section, article, .metric, .pill, button, a.button, a.buttonlink, input, code, pre, .pathbox, .callout, .report-notice, .report-entry, .workspace-tab, .tab-button, .tab-panel, details, .progress-box, .progress-bar, .progress-fill, .stage, .recent-job-card, .runbook-step, .empty, .table-wrap, .step-card, .artifact-group, .artifact-card, .cockpit-card, .vt-state-banner, .report-ready, .handoff-notice, .countdown, .toast, .num, .stream-status, .event-toolbar, .event-page-status, .selected-event-summary, select { border-radius: 0 !important; }
-            section, article, .metric, .pathbox, .callout, .report-notice, .report-entry, .tab-panel, .progress-box, .stage, .recent-job-card, .runbook-step, .step-card, .artifact-group, .artifact-card, .cockpit-card, .report-ready, .handoff-notice, .stream-status, .event-toolbar { box-shadow: none !important; }
+            section, article, .metric, .pill, button, a.button, a.buttonlink, input, code, pre, .pathbox, .callout, .report-notice, .report-entry, .workspace-tab, .tab-button, .tab-panel, details, .progress-box, .progress-bar, .progress-fill, .stage, .recent-job-card, .runbook-step, .empty, .table-wrap, .step-card, .artifact-group, .artifact-card, .cockpit-card, .operator-hints, .operator-hint, .vt-state-banner, .report-ready, .handoff-notice, .countdown, .toast, .num, .stream-status, .event-toolbar, .event-page-status, .selected-event-summary, select { border-radius: 0 !important; }
+            section, article, .metric, .pathbox, .callout, .report-notice, .report-entry, .tab-panel, .progress-box, .stage, .recent-job-card, .runbook-step, .step-card, .artifact-group, .artifact-card, .cockpit-card, .operator-hints, .operator-hint, .report-ready, .handoff-notice, .stream-status, .event-toolbar { box-shadow: none !important; }
             .pill, button, a.button, a.buttonlink { box-shadow: none !important; }
             @media(max-width:900px){ .grid{grid-template-columns:1fr;} header{padding:24px;} }
           </style>
@@ -231,6 +239,10 @@ internal static class LiveEventsPage
                   <h3>当前步骤</h3>
                   <p class="cockpit-main">等待真实进度流</p>
                 </article>
+              </div>
+              <div id="operatorHints" class="operator-hints" data-copy="值守提示加载中 / operator hints loading">
+                <strong data-zh="值守提示" data-en="Operator hints">值守提示</strong>
+                <p class="muted" data-zh="这里会把当前步骤、VT 静默/持久化策略、证据下载状态整理成可复制的中文优先提示。" data-en="This area turns the current step, VT quiet/persistence policy, and evidence/download readiness into copyable Chinese-first hints.">这里会把当前步骤、VT 静默/持久化策略、证据下载状态整理成可复制的中文优先提示。</p>
               </div>
             </section>
             <section>
@@ -1074,6 +1086,65 @@ internal static class LiveEventsPage
               ];
               target.innerHTML = cards.map(card => card.html).join('');
               target.setAttribute('data-copy', cards.map(card => card.copy).filter(Boolean).join(' | '));
+              renderOperatorHints();
+            }
+
+            function renderOperatorHints() {
+              const target = document.getElementById('operatorHints');
+              if (!target) { return; }
+
+              const snapshot = lastProgressSnapshot || {};
+              const streamStep = lastProgressStreamEnvelope?.currentStep || null;
+              const currentInfo = normalizeRunbookStepInfo(streamStep, snapshot) || currentStepInfoFromSnapshot(snapshot);
+              const rawState = lastProgressStreamEnvelope?.state || String(snapshot.state || 'pending').toLowerCase();
+              const stepTitle = currentInfo?.title || snapshot.currentStepTitle || (rawState === 'completed' ? t('所有 runbook 步骤已完成', 'all runbook steps completed') : t('等待真实 runbook 步骤', 'waiting for real runbook step'));
+              const stepState = currentInfo?.state ? formatProgressState(currentInfo.state) : (localizeServerStatus(rawState) || formatProgressState(rawState));
+              const stepCopy = `当前真实步骤=${stepTitle}; 状态=${stepState}; 来源=${progressStreamLabel()}; 提示=无需查看命令/stdout/stderr，失败时打开执行流程页`;
+
+              const vt = lastVirusTotalResult;
+              const vtStatus = vt ? normalizeVirusTotalStatus(vt) : 'pending';
+              const vtQuiet = vt ? Boolean(vt.isQuietState || vt.IsQuietState || virusTotalWorkflowState(vt) === 'quiet') : true;
+              const vtPolicy = vt ? virusTotalPolicyText(vtValue(vt, 'liveLogPolicy') || vtValue(vt, 'persistencePolicy')) : t('等待查询；默认页面展示，不上传样本', 'waiting; display-only by default and no sample upload');
+              const vtAction = vtStatus === 'found'
+                ? t('VT 官方已收录：如需要写入报告，请使用显式信誉增强入口；实时页默认仍是展示态。', 'VT found: use the explicit reputation-enrichment entry if it must be written to the report; the live page stays display-only by default.')
+                : t('VT 为静默状态：未配置、未收录、限速、鉴权失败、超时或失败都不阻断分析，也不写任务/行为日志。', 'VT is quiet: not configured, not found, rate limit, auth failure, timeout, or failure does not block analysis or write job/behavior logs.');
+              const vtCopy = `VirusTotal=${vtStatus}; quiet=${vtQuiet}; policy=${vtPolicy}; action=${vtAction}`;
+
+              const artifactSummary = summarizeArtifactReadiness();
+              const artifactAction = artifactSummary.downloadableCount > 0
+                ? t('证据下载已就绪：优先复制卡片中的安全 selector 或点击下载端点，不复制 host 绝对路径。', 'Evidence downloads are ready: copy the safe selector from cards or click the download endpoint; do not copy host absolute paths.')
+                : artifactSummary.indexLoaded
+                  ? t('证据索引已返回但下载 lane 仍在等待：保持页面打开或稍后刷新证据卡片。', 'Artifact index returned but download lanes are still waiting: keep this page open or refresh artifact cards shortly.')
+                  : t('证据索引仍在等待：运行中属于正常状态，报告、events、driver-events 和采集项会逐步出现。', 'Artifact index is still pending: during execution this is expected; reports, events, driver-events, and collection items appear progressively.');
+              const artifactCopy = `证据=${artifactSummary.readyCount}/${artifactSummary.totalCount}; downloadable=${artifactSummary.downloadableCount}; rejected=${artifactSummary.rejectionCount}; action=${artifactAction}`;
+
+              const reportReady = isRunTerminal();
+              const reportAction = reportReady
+                ? t('运行已进入终态：可打开中文报告，并把本提示/卡片摘要复制给排障或交接人员。', 'Run is terminal: open the Chinese report and copy this hint/card summary for troubleshooting or handoff.')
+                : t('运行未结束：先看当前真实步骤和原始事件；报告按钮会在终态后保持可用。', 'Run is not terminal: watch the current real step and raw events first; report buttons remain available after terminal state.');
+              const reportCopy = `报告=${reportReady ? 'ready-or-terminal' : 'pending'}; action=${reportAction}`;
+
+              const hints = [
+                { title: t('当前步骤怎么处理', 'How to handle current step'), body: t(`当前真实步骤：${stepTitle}；状态：${stepState}。失败时打开“执行流程”，实时页不展开命令/stdout/stderr。`, `Current real step: ${stepTitle}; state: ${stepState}. If it fails, open Execution flow; the live page does not expand commands/stdout/stderr.`), tone: rawState === 'failed' || rawState === 'canceled' ? 'failed' : 'ready', copy: stepCopy },
+                { title: t('VT 查询/持久化状态', 'VT lookup/persistence state'), body: vtAction, tone: vtStatus === 'found' ? 'ready' : 'quiet', copy: vtCopy },
+                { title: t('证据/下载状态', 'Evidence/download status'), body: artifactAction, tone: artifactSummary.downloadableCount > 0 ? 'ready' : artifactSummary.indexLoaded ? 'waiting' : 'quiet', copy: artifactCopy },
+                { title: t('交接提示', 'Handoff hint'), body: reportAction, tone: reportReady ? 'ready' : 'waiting', copy: reportCopy }
+              ];
+
+              const allCopy = hints.map(hint => hint.copy).join(' | ');
+              target.setAttribute('data-copy', allCopy);
+              target.innerHTML = `
+                <div class="artifact-group-title">
+                  <strong>${escapeHtml(t('值守提示（右键或按钮复制）', 'Operator hints (right-click or button copy)'))}</strong>
+                  ${cockpitCopyButton(allCopy)}
+                </div>
+                <div class="operator-hint-list">
+                  ${hints.map(hint => `<article class="operator-hint ${hint.tone}" data-copy="${escapeAttr(hint.copy)}">
+                    <strong>${escapeHtml(hint.title)}</strong>
+                    <p>${escapeHtml(hint.body)}</p>
+                    <button class="secondary" type="button" data-copy="${escapeAttr(hint.copy)}" onclick="copyText(this.getAttribute('data-copy'))">${escapeHtml(t('复制提示', 'Copy hint'))}</button>
+                  </article>`).join('')}
+                </div>`;
             }
 
             function renderRunbookCockpitCard() {

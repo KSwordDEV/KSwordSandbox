@@ -123,6 +123,9 @@ internal sealed class ScreenshotProbe : IGuestProbe
                 ["probePhase"] = ToPhaseLabel(phase),
                 ["screenshotStage"] = request.StageLabel,
                 ["captureEnabled"] = "true",
+                ["captureRequested"] = "true",
+                ["explicitOptInRequired"] = "true",
+                ["explicitOptInOption"] = "--screenshot/--screenshots",
                 ["implemented"] = "true",
                 ["capturePolicy"] = "explicit-opt-in-screenshot",
                 ["captureState"] = result.Captured ? "captured" : "skipped",
@@ -154,15 +157,7 @@ internal sealed class ScreenshotProbe : IGuestProbe
             }
         };
 
-        if (context.RootProcessId is not null)
-        {
-            evt.Data["rootProcessId"] = context.RootProcessId.Value.ToString(CultureInfo.InvariantCulture);
-            evt.Data["processId"] = context.RootProcessId.Value.ToString(CultureInfo.InvariantCulture);
-            evt.Data["treeDepth"] = "0";
-            evt.Data["treeLineage"] = context.RootProcessId.Value.ToString(CultureInfo.InvariantCulture);
-        }
-
-        AddIfNotEmpty(evt.Data, "processName", evt.ProcessName);
+        AddRunContext(evt, context);
 
         if (result.Captured)
         {
@@ -223,6 +218,7 @@ internal sealed class ScreenshotProbe : IGuestProbe
             AddIfNotEmpty(evt.Data, "artifactSafeLink", string.IsNullOrWhiteSpace(artifactRelativePath) ? null : BuildSafeLink(artifactRelativePath));
             AddIfNotEmpty(evt.Data, "artifactSelectorKind", string.IsNullOrWhiteSpace(artifactRelativePath) ? null : "safe-output-relative-path");
             AddIfNotEmpty(evt.Data, "artifactSelectorVersion", string.IsNullOrWhiteSpace(artifactRelativePath) ? null : ArtifactSelectorVersion);
+            AddIfNotEmpty(evt.Data, "artifactSelectionReason", string.IsNullOrWhiteSpace(artifactRelativePath) ? null : $"screenshot-{request.ProbePhaseLabel}");
             evt.Data["artifactRelativePathStatus"] = string.IsNullOrWhiteSpace(artifactRelativePath) ? "outside-output-root" : "captured";
             AddArtifactFileEvidence(evt, result.Path);
         }
@@ -271,6 +267,9 @@ internal sealed class ScreenshotProbe : IGuestProbe
                 ["screenshotStage"] = string.Join(",", requests.Select(static request => request.StageLabel).Distinct(StringComparer.OrdinalIgnoreCase)),
                 ["screenshotPhaseSummaryVersion"] = PhaseSummaryVersion,
                 ["captureEnabled"] = "true",
+                ["captureRequested"] = "true",
+                ["explicitOptInRequired"] = "true",
+                ["explicitOptInOption"] = "--screenshot/--screenshots",
                 ["implemented"] = "true",
                 ["capturePolicy"] = "explicit-opt-in-screenshot",
                 ["captureState"] = status,
@@ -329,6 +328,9 @@ internal sealed class ScreenshotProbe : IGuestProbe
                 ["phase"] = "before-start",
                 ["capturePhase"] = "before-start",
                 ["captureEnabled"] = "false",
+                ["captureRequested"] = "false",
+                ["explicitOptInRequired"] = "true",
+                ["explicitOptInOption"] = "--screenshot/--screenshots",
                 ["implemented"] = "true",
                 ["capturePolicy"] = "explicit-opt-in-screenshot",
                 ["reason"] = "screenshotNotRequested",

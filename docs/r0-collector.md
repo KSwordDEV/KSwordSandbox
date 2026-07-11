@@ -485,6 +485,9 @@ KSword.Sandbox.R0Collector.exe `
   companion corpus enriches semantics without altering the 32 counted
   `driver.file` stress rows.
 - `sequence` range `1200..1231` and `StressJsonlSequenceGapCount=0`.
+  Readiness summaries scope this range to counted `driver.file` stress rows
+  (`SequenceScope=counted-stress-driver-file-rows`) so semantic companion rows
+  and the summary `nextSequence` alias do not create false stress gaps.
 - a mock `r0collector.driverReadEvents` summary with
   `recordsProcessed`/`eventsEmitted`, `processed`/`eligible`/`emitted`,
   `suppressed`/`skipped`, `head`/`tail`, `sampling`, `sequenceMeaning`,
@@ -583,10 +586,12 @@ Every collector-owned row keeps the event-quality fields stable under `data`:
   emit `0` rather than omitting the field in mock/schema smoke output.
 - `backpressure` / `backpressureObserved` are set on status/read rows when the
   queue reached capacity, a batch filled the requested cap, or drop counters are
-  non-zero. `backpressureReason` carries the machine-readable reason such as
-  `events-dropped`, `requested-max-events-reached`, `output-buffer-full`, or
-  `none`. Synthetic stress rows keep `backpressure=false` but name the
-  `StressJsonlBackpressureEvidence` field set.
+  non-zero. READ_EVENTS sequence gaps also set these fields because they are
+  loss-quality evidence even when the driver drop counter is not incremented.
+  `backpressureReason` carries the machine-readable reason such as
+  `events-dropped`, `requested-max-events-reached`, `output-buffer-full`,
+  `sequence-gap-without-drop-counter`, or `none`. Synthetic stress rows keep
+  `backpressure=false` but name the `StressJsonlBackpressureEvidence` field set.
 - `r0collector.driverReadEvents` keeps both old and concise batch counters near
   the front of `data`: `recordsProcessed`, `eventsEmitted`,
   `collectorSuppressedEvents`, `collectorSkippedEvents`, `eligibleEvents`, plus

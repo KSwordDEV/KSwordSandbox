@@ -54,29 +54,26 @@ represented by `artifacts/manifest.json`, screenshots may be present under
 `pktmon`. Externally generated `.pcap` or `.pcapng` files may also be present
 under `packet-captures/` or elsewhere in the collected job folder.
 
-When `events.json` is imported, sibling `*.jsonl` files under the same guest
-output root are merged into the regenerated `report.json` and `report.html`.
-This includes R0Collector mock JSONL rows such as
-`r0collector.mockDriverEvent`; they remain raw events with
-`source=r0collector`, keep `data.mock=true` / `data.driverEventPath`, and trigger the
-`r0collector-mock-driver-event` informational rule. The host
-`guest.events.imported` marker stores an `eventCount` that includes both
-`events.json` rows and imported JSONL rows so a smoke run can prove the R0 mock
-sidecar was included in the final report.
+导入 `events.json` 时，同一 guest 输出根目录下的相邻 `*.jsonl` 文件会合并进重新生成的
+`report.json` 和 `report.html`。这包括 `r0collector.mockDriverEvent` 等 R0Collector
+mock JSONL 行；它们保留为原始事件（raw events），带 `source=r0collector`，
+保留 `data.mock=true` / `data.driverEventPath`，并触发
+`r0collector-mock-driver-event` informational rule。Host 写出的
+`guest.events.imported` 标记会把 `events.json` 行和导入的 JSONL 行都计入
+`eventCount`，因此 smoke run 能证明最终报告确实包含 R0 mock sidecar。
 
-R0Collector self-noise is metadata, not sample behavior. Driver-originated rows
-whose process identity, data fields, or paths point at
-`KSword.Sandbox.R0Collector.exe`, `KSword.Sandbox.Agent.exe`, collector staging
-directories, or the KSword driver device are preserved in `events` and raw HTML
-evidence, but are excluded from behavior counts, behavior graphs, and
-file/registry/network/process behavior sections. The HTML R0 section reports a
-separate "Collector self-noise hidden" count with examples so evidence quality
-remains auditable without inflating behavior.
+R0Collector 自噪声是元数据，不是样本行为。若 driver-originated rows 的进程身份、
+data 字段或路径指向 `KSword.Sandbox.R0Collector.exe`、
+`KSword.Sandbox.Agent.exe`、collector staging directories 或 KSword driver
+device，这些行会保留在 `events` 和 raw HTML evidence 中，但会从 behavior counts、
+behavior graphs 以及 file/registry/network/process behavior sections 中排除。
+HTML R0 section 会单独报告 “Collector self-noise hidden / 已隐藏采集器自噪声”
+计数并附示例，保证证据质量可审计，同时不会抬高行为数量。
 
 ## Artifact manifest evidence
 
-Dropped files and other copied evidence use
-`KSword.Sandbox.Abstractions.Artifacts.ArtifactManifest`. The schema is:
+Dropped files 和其他已复制证据使用
+`KSword.Sandbox.Abstractions.Artifacts.ArtifactManifest`。Schema 如下：
 
 - `schemaVersion`: manifest contract version, currently `1`.
 - `jobId`: host job ID when known; guest-side manifests may leave this empty.

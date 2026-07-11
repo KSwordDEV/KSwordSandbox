@@ -442,6 +442,11 @@ PowerShell Direct 需要 guest Windows credential 来暂存样本、运行 Guest
 - VirusTotal：`VirusTotalStatus` 只显示可选 hash-only API key 是否存在、设置来源和缺失时的
   quiet-skip 行为；不会打印 key。VirusTotal key 与 BIOS/UEFI 里的 Intel VT-x / AMD-V
   硬件虚拟化不是同一件事。
+- release reviewer：如果来自 portable package，先看包根
+  `package-manifest.generated.json` 的 generated `reviewerChecklist` 和
+  `sourceRuntimeSafetyMetadata`。它们会明确 runtime payload 是否只来自仓库外
+  `RuntimePublishRoot`、本包是否只是 layout dry-run，以及是否仍满足 no VM mutation /
+  no signing / no `CSignTool.exe` 安全边界。
 
 常见故障定位顺序 / Troubleshooting order：
 

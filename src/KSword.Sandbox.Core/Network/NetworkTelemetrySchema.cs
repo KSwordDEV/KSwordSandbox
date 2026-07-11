@@ -292,9 +292,9 @@ public static class NetworkTelemetrySchema
                     data["sourcePcapArtifactSha256"] = sha256;
                     data["pcapArtifactSizeBytes"] = sizeText;
                     data["pcapArtifactSha256"] = sha256;
-            data["parentArtifactSizeBytes"] = sizeText;
-            data["parentArtifactSha256"] = sha256;
-            data["parentHashSha256"] = sha256;
+                    data["parentArtifactSizeBytes"] = sizeText;
+                    data["parentArtifactSha256"] = sha256;
+                    data["parentHashSha256"] = sha256;
                 }
             }
         }
@@ -309,6 +309,11 @@ public static class NetworkTelemetrySchema
         if (!data.ContainsKey("collectionHealth"))
         {
             data["collectionHealth"] = InferCollectionHealth(data);
+        }
+
+        if (!data.ContainsKey("protocolHealth"))
+        {
+            data["protocolHealth"] = data["collectionHealth"];
         }
 
         if (!data.ContainsKey("zhMessage"))
@@ -819,6 +824,7 @@ public static class NetworkTelemetrySchema
                 "dns.cname",
                 "answersNormalized");
             AddIfNotEmpty(data, "answerCount", CountDelimitedValues(answers));
+            AddDnsAnswerScopeFields(data, answers);
         }
 
         if (string.Equals(rcode, "NXDOMAIN", StringComparison.OrdinalIgnoreCase))
@@ -986,6 +992,111 @@ public static class NetworkTelemetrySchema
                 : FirstNonEmpty(requestBodyBytes, responseBodyBytes, requestContentLength, responseContentLength);
         AddAliases(data, bodyBytes, "bodyBytes", "bodySizeBytes", "httpBodyBytes", "http.body.bytes");
         AddIfNotEmpty(data, "contentLength", FirstNonEmpty(FirstDataValue(data, "contentLength"), requestContentLength, responseContentLength));
+        ApplyHttpTransferHints(data, method, statusCode, uri, requestBodyBytes, responseBodyBytes, requestContentLength, responseContentLength);
+    }
+
+    private static void AddDnsAnswerScopeFields(Dictionary<string, string> data, string answers)
+    {
+        var scopes = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
+        var ipAnswers = new List<string>();
+        foreach (var answer in answers.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (!IPAddress.TryParse(answer, out var parsed))
+            {
+                continue;
+            }
+
+            var normalized = NormalizeAddress(answer);
+            if (!string.IsNullOrWhiteSpace(normalized))
+            {
+                ipAnswers.Add(normalized);
+            }
+
+            scopes.Add(AddressScope(parsed));
+        }
+
+        if (ipAnswers.Count == 0)
+        {
+            return;
+        }
+
+        var distinctIps = ipAnswers.Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        AddIfNotEmpty(data, "dnsAnswerIps", string.Join(",", distinctIps));
+        AddIfNotEmpty(data, "resolvedIpList", string.Join(",", distinctIps));
+        AddIfNotEmpty(data, "dnsAnswerIpCount", distinctIps.Length.ToString(CultureInfo.InvariantCulture));
+        AddIfNotEmpty(data, "dnsAnswerIpScopes", string.Join(",", scopes));
+        AddIfNotEmpty(data, "dnsAnswerHasPrivateIp", BoolString(scopes.Contains("private")));
+        AddIfNotEmpty(data, "dnsAnswerHasPublicIp", BoolString(scopes.Contains("public")));
+        AddIfNotEmpty(data, "dnsAnswerHasDocumentationIp", BoolString(scopes.Contains("documentation")));
+        AddIfNotEmpty(data, "dnsAnswerHasLoopbackIp", BoolString(scopes.Contains("loopback")));
+        AddIfNotEmpty(data, "dnsAnswerHasLinkLocalIp", BoolString(scopes.Contains("link-local")));
+    }
+
+    private static void ApplyHttpTransferHints(
+        Dictionary<string, string> data,
+        string method,
+        string statusCode,
+        string uri,
+        string requestBodyBytes,
+        string responseBodyBytes,
+        string requestContentLength,
+        string responseContentLength)
+    {
+        var uploadBytes = FirstNonEmpty(requestBodyBytes, requestContentLength);
+        var downloadBytes = FirstNonEmpty(responseBodyBytes, responseContentLength);
+        var methodImpliesUpload = method is "POST" or "PUT" or "PATCH";
+        if (methodImpliesUpload || IsPositiveByteCount(uploadBytes))
+        {
+            data["uploadCandidate"] = "true";
+            data["httpUploadCandidate"] = "true";
+            AddIfNotEmpty(data, "uploadReason", methodImpliesUpload ? "method" : "body-bytes");
+        }
+
+        var extension = Path.GetExtension((uri ?? string.Empty).Split('?', '#')[0]).TrimStart('.').ToLowerInvariant();
+        var downloadReason = FirstNonEmpty(
+            IsPositiveByteCount(downloadBytes) ? "body-bytes" : string.Empty,
+            !string.IsNullOrWhiteSpace(statusCode) ? "response-status" : string.Empty,
+            IsLikelyDownloadExtension(extension) ? "file-extension" : string.Empty);
+        if (!string.IsNullOrWhiteSpace(downloadReason))
+        {
+            data["downloadCandidate"] = "true";
+            data["httpDownloadCandidate"] = "true";
+            AddIfNotEmpty(data, "downloadReason", downloadReason);
+        }
+
+        if (string.Equals(ValueOrEmpty(data, "uploadCandidate"), "true", StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(ValueOrEmpty(data, "downloadCandidate"), "true", StringComparison.OrdinalIgnoreCase))
+        {
+            data["transferDirection"] = "bidirectional";
+        }
+        else if (string.Equals(ValueOrEmpty(data, "uploadCandidate"), "true", StringComparison.OrdinalIgnoreCase))
+        {
+            data["transferDirection"] = "upload";
+        }
+        else if (string.Equals(ValueOrEmpty(data, "downloadCandidate"), "true", StringComparison.OrdinalIgnoreCase))
+        {
+            data["transferDirection"] = "download";
+        }
+
+        AddIfNotEmpty(data, "httpTransferSummary", FirstNonEmpty(ValueOrEmpty(data, "transferDirection"), "metadata-only"));
+    }
+
+    private static void AddTlsCertificateValidityFields(
+        Dictionary<string, string> data,
+        string certSubject,
+        string certIssuer,
+        string certNotBefore,
+        string certNotAfter)
+    {
+        AddIfNotEmpty(data, "certificateSubjectCn", ExtractDistinguishedNameValue(certSubject, "CN"));
+        AddIfNotEmpty(data, "certificateIssuerCn", ExtractDistinguishedNameValue(certIssuer, "CN"));
+        if (DateTimeOffset.TryParse(certNotBefore, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var notBefore) &&
+            DateTimeOffset.TryParse(certNotAfter, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var notAfter))
+        {
+            var days = Math.Max(0, (int)Math.Ceiling((notAfter.ToUniversalTime() - notBefore.ToUniversalTime()).TotalDays));
+            data["certificateValidityDays"] = days.ToString(CultureInfo.InvariantCulture);
+            data["tlsCertificateValidityDays"] = data["certificateValidityDays"];
+        }
     }
 
     private static void AddEndpointAddressScope(Dictionary<string, string> data, string prefix, string address)
@@ -1065,6 +1176,7 @@ public static class NetworkTelemetrySchema
         AddAliases(data, certNotBefore, "certNotBefore", "certificateNotBefore", "x509.not_before", "tls.cert.not_before");
         var certNotAfter = FirstDataValue(data, "certNotAfter", "certificateNotAfter", "x509.not_after", "tls.cert.not_after");
         AddAliases(data, certNotAfter, "certNotAfter", "certificateNotAfter", "x509.not_after", "tls.cert.not_after");
+        AddTlsCertificateValidityFields(data, certSubject, certIssuer, certNotBefore, certNotAfter);
         var certificateStatus = FirstDataValue(data, "certificateStatus", "validationStatus", "tls.validation_status", "tls.cert.validation_status");
         AddAliases(data, certificateStatus, "certificateStatus", "validationStatus", "tls.validation_status", "tls.cert.validation_status");
         var certSelfSigned = NormalizeBoolean(FirstDataValue(data, "certSelfSigned", "certificateSelfSigned", "selfSigned", "tls.cert.self_signed"));
@@ -1150,6 +1262,36 @@ public static class NetworkTelemetrySchema
 
         status = string.Empty;
         return false;
+    }
+
+    private static bool IsPositiveByteCount(string? value)
+    {
+        return long.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed) &&
+            parsed > 0;
+    }
+
+    private static bool IsLikelyDownloadExtension(string extension)
+    {
+        return extension is "exe" or "dll" or "zip" or "7z" or "rar" or "msi" or "ps1" or "bat" or "cmd" or "vbs" or "js" or "jar" or "scr" or "dat" or "bin";
+    }
+
+    private static string ExtractDistinguishedNameValue(string? distinguishedName, string key)
+    {
+        if (string.IsNullOrWhiteSpace(distinguishedName))
+        {
+            return string.Empty;
+        }
+
+        foreach (var part in distinguishedName.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var separator = part.IndexOf('=');
+            if (separator > 0 && string.Equals(part[..separator].Trim(), key, StringComparison.OrdinalIgnoreCase))
+            {
+                return part[(separator + 1)..].Trim().Trim('"');
+            }
+        }
+
+        return string.Empty;
     }
 
     private static string HttpStatusFamily(string? statusCode)

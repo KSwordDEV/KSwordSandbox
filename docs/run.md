@@ -347,7 +347,8 @@ reports, samples, payload binaries, VM disks, or local secrets.
   layout/safety dry-run。
 - 包根的 `package-manifest.generated.json` 是本次 staging 的审计索引，包含
   文件 hash/size、git revision、runtime publish root、跳过的可选 payload
-  和安全合约。排障时先看这个文件里的 `runtimePublishSummary.incompleteCount`、
+  和安全合约。排障时先看这个文件里的 generated `reviewerChecklist`、
+  `sourceRuntimeSafetyMetadata`、`runtimePublishSummary.incompleteCount`、
   expected leaf gaps、forbidden-file previews，再看 `Status`/`CheckEnvironment`。
 - 本机 `sandbox.local.json`、guest password、VT key、样本、报告和 VM 输出继续保存在 runtime root
   或 Windows 环境/DPAPI 中，不进入 zip。

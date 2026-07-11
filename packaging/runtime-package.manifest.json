@@ -13,7 +13,7 @@
     "legacyCSignToolDefaultPath": "forbidden",
     "completeRuntimePayloadsRequiredForHandoff": true,
     "runtimePayloadSource": "external RuntimePublishRoot only; repository bin/obj/x64 binaries are rejected",
-    "operatorDiagnostics": "install/run expose read-only Hyper-V prerequisite, VM profile, guest payload, VT key, runtime-root, and RuntimePublishRoot guidance; optional runtime publish entries are recorded in package-manifest.generated.json when skipped for layout dry-runs, while handoff uses -RequireCompleteRuntimePayloads; package/readiness do not use GUI signing fallback or CSignTool"
+    "operatorDiagnostics": "install/run expose read-only Hyper-V prerequisite, VM profile, guest payload, VT key, runtime-root, and RuntimePublishRoot guidance; optional runtime publish entries are recorded in package-manifest.generated.json when skipped for layout dry-runs, while handoff uses -RequireCompleteRuntimePayloads; generated reviewerChecklist and sourceRuntimeSafetyMetadata identify source/runtime safety boundaries; package/readiness do not use GUI signing fallback or CSignTool"
   },
   "stagedMetadata": {
     "generatedManifest": "package-manifest.generated.json",
@@ -22,6 +22,8 @@
       "runtime publish root provenance when supplied",
       "staged file inventory with sizeBytes and sha256 for payload files",
       "skipped optional runtime publish entries and remediation context",
+      "generated reviewerChecklist for source/runtime handoff, release-note fields, and hard reject conditions",
+      "sourceRuntimeSafetyMetadata declaring source-only/source exclusions, external RuntimePublishRoot-only runtime payloads, and non-mutating safety state",
       "safety contract for secrets, VM state, runtime evidence, signing, GUI signing fallback, push/publish, and CSignTool"
     ],
     "selfHashNote": "The generated manifest lists itself in files but omits a recursive self-hash from fileInventory."

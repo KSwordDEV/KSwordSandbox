@@ -189,14 +189,15 @@ Stable fields:
   `LastClassifyPayloadFailureLayerId`: counters and context for lossy queue or
   payload-build diagnostics.
 
-The status reply reduces the old "internal diagnostics only" gap while keeping
-the evidence contract honest: DNS query names, HTTP request metadata, TLS SNI,
-and PCAP packet details still come from user/guest packet capture imports, not
-from the R0 ALE authorization payload.
+Status reply 会缩小过去 “internal diagnostics only / 只有内部诊断” 的缺口，同时保持
+evidence contract 真实可信：DNS query names、HTTP request metadata、TLS SNI 和
+PCAP packet details 仍来自 user/guest packet capture imports，而不是来自 R0 ALE
+authorization payload。
 
-## Collector output
+## Collector 输出 / Collector output
 
-`guest/KSword.Sandbox.R0Collector` parses network payloads into string-valued JSON `data` fields, including:
+`guest/KSword.Sandbox.R0Collector` 会把 network payloads 解析为 string-valued JSON
+`data` fields，包括：
 
 - `protocolName`
 - `transportProtocol`

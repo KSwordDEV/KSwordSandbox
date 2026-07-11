@@ -564,6 +564,11 @@ internal sealed class MemoryDumpProbe : IGuestProbe
                 ["phase"] = phaseLabel,
                 ["capturePhase"] = phaseLabel,
                 ["captureEnabled"] = "true",
+                ["captureRequested"] = "true",
+                ["explicitOptInRequired"] = "true",
+                ["explicitOptInOption"] = "--memory-dump/--memory-dumps",
+                ["sensitiveArtifact"] = "true",
+                ["sensitiveArtifactReason"] = "process-memory-dump",
                 ["implemented"] = "true",
                 ["capturePolicy"] = "explicit-opt-in-sensitive-memory-dump",
                 ["childProcessDumpEnabled"] = "true",
@@ -606,6 +611,10 @@ internal sealed class MemoryDumpProbe : IGuestProbe
             evt.Data["directChildProcessDumpTarget"] = (!target.IsRoot && target.Depth == 1).ToString(CultureInfo.InvariantCulture).ToLowerInvariant();
             evt.Data["deeperDescendantProcessDumpTarget"] = (!target.IsRoot && target.Depth > 1).ToString(CultureInfo.InvariantCulture).ToLowerInvariant();
             evt.Data["memoryDumpCoverageRole"] = targetRole;
+            evt.Data["childProcessScope"] = target.IsRoot ? "root-only" : target.Depth == 1 ? "direct-child" : "deeper-descendant";
+            evt.Data["childProcessScopeSummary"] = target.IsRoot
+                ? "target=root"
+                : $"target={targetRole};depth={target.Depth.ToString(CultureInfo.InvariantCulture)};lineage={target.Lineage}";
             evt.Data["targetProcessId"] = target.ProcessId.ToString(CultureInfo.InvariantCulture);
             evt.Data["targetProcessName"] = target.ProcessName;
             evt.Data["targetSelectionSource"] = target.SelectionSource;
@@ -712,6 +721,11 @@ internal sealed class MemoryDumpProbe : IGuestProbe
                 ["phase"] = phaseLabel,
                 ["capturePhase"] = phaseLabel,
                 ["captureEnabled"] = "true",
+                ["captureRequested"] = "true",
+                ["explicitOptInRequired"] = "true",
+                ["explicitOptInOption"] = "--memory-dump/--memory-dumps",
+                ["sensitiveArtifact"] = "true",
+                ["sensitiveArtifactReason"] = "process-memory-dump",
                 ["implemented"] = "true",
                 ["capturePolicy"] = "explicit-opt-in-sensitive-memory-dump",
                 ["childProcessDumpEnabled"] = "true",
@@ -794,6 +808,7 @@ internal sealed class MemoryDumpProbe : IGuestProbe
                 ["memoryDumpCoverageState"] = DetermineDumpCoverageState(visibleTargetCount, attemptedCount, capturedCount, skippedCount, alreadyCapturedCount),
                 ["rootDescendantCoverageState"] = DetermineRootDescendantCoverageState(rootTargetCount, childTargetCount, rootCapturedCount, childCapturedCount, rootAlreadyCapturedCount, childAlreadyCapturedCount),
                 ["descendantCoverageCompleteness"] = DetermineDescendantCoverageCompleteness(childTargetCount, directChildTargetCount, deeperDescendantTargetCount, childCapturedCount, childAlreadyCapturedCount, directChildCapturedCount, directChildAlreadyCapturedCount, deeperDescendantCapturedCount, deeperDescendantAlreadyCapturedCount),
+                ["childProcessScopeSummary"] = BuildChildProcessScopeSummary(childTargetCount, directChildTargetCount, deeperDescendantTargetCount, childAttemptedCount, childCapturedCount, childSkippedCount, childAlreadyCapturedCount),
                 ["zhMessage"] = "内存转储 sweep 已完成并记录根/子进程覆盖情况。",
                 ["zhHint"] = "内存转储为显式 opt-in；启用后会尽力覆盖可见根进程树中的子进程。请结合 rootProcessId/treeLineage、capturedCount、skippedCount 和 alreadyCapturedCount 判断覆盖面。"
             }
@@ -816,6 +831,11 @@ internal sealed class MemoryDumpProbe : IGuestProbe
                 ["phase"] = "before-start",
                 ["capturePhase"] = "before-start",
                 ["captureEnabled"] = "false",
+                ["captureRequested"] = "false",
+                ["explicitOptInRequired"] = "true",
+                ["explicitOptInOption"] = "--memory-dump/--memory-dumps",
+                ["sensitiveArtifact"] = "true",
+                ["sensitiveArtifactReason"] = "process-memory-dump",
                 ["implemented"] = "true",
                 ["capturePolicy"] = "explicit-opt-in-sensitive-memory-dump",
                 ["childProcessDumpEnabled"] = "false",
@@ -1085,6 +1105,29 @@ internal sealed class MemoryDumpProbe : IGuestProbe
         }
 
         return "descendants-not-covered";
+    }
+
+    private static string BuildChildProcessScopeSummary(
+        int childTargetCount,
+        int directChildTargetCount,
+        int deeperDescendantTargetCount,
+        int childAttemptedCount,
+        int childCapturedCount,
+        int childSkippedCount,
+        int childAlreadyCapturedCount)
+    {
+        return string.Join(
+            ";",
+            [
+                $"mode=visible-root-tree",
+                $"children={childTargetCount.ToString(CultureInfo.InvariantCulture)}",
+                $"direct={directChildTargetCount.ToString(CultureInfo.InvariantCulture)}",
+                $"deeper={deeperDescendantTargetCount.ToString(CultureInfo.InvariantCulture)}",
+                $"attempted={childAttemptedCount.ToString(CultureInfo.InvariantCulture)}",
+                $"captured={childCapturedCount.ToString(CultureInfo.InvariantCulture)}",
+                $"skipped={childSkippedCount.ToString(CultureInfo.InvariantCulture)}",
+                $"alreadyCaptured={childAlreadyCapturedCount.ToString(CultureInfo.InvariantCulture)}"
+            ]);
     }
 
     /// <summary>

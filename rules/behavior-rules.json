@@ -1,5 +1,5 @@
 {
-  "version": "2026-07-12-v22-defensive-behavior-expansion",
+  "version": "2026-07-12-v23-high-signal-behavior-expansion",
   "rules": [
     {
       "id": "host-submission",
@@ -31919,6 +31919,678 @@
       ],
       "excludeDataContains": {
         "source": [
+          "virustotal",
+          "r0collector"
+        ],
+        "healthStatus": [
+          "collection-health"
+        ],
+        "vtStatus": [
+          "not_configured",
+          "not_found",
+          "rate_limited",
+          "unset"
+        ],
+        "collectorSelfNoise": [
+          "true"
+        ],
+        "noise": [
+          "true"
+        ],
+        "selfNoise": [
+          "true"
+        ]
+      }
+    },
+    {
+      "id": "persistence-time-provider-user-writable-dll",
+      "title": "Windows Time Provider DLL from user-writable path",
+      "titleZh": "Windows 时间提供程序加载用户可写 DLL",
+      "severity": "high",
+      "confidence": "high",
+      "summary": "A registry or driver registry event configured a Windows Time Provider DLL under W32Time to a user-writable DLL path, a durable service-hosted persistence point.",
+      "summaryZh": "注册表事件将 W32Time 时间提供程序 DLL 指向用户可写路径，属于服务宿主持久化入口。",
+      "mitreTechniqueId": "T1547.003",
+      "mitreTechniqueName": "Boot or Logon Autostart Execution: Time Providers",
+      "eventTypes": [
+        "registry.set",
+        "registry.create",
+        "driver.registry"
+      ],
+      "allDataRegex": {
+        "path": [
+          "(?i)\\\\Services\\\\W32Time\\\\TimeProviders\\\\[^\\\\]+"
+        ],
+        "valueName": [
+          "(?i)^(DllName|Enabled)$"
+        ],
+        "value": [
+          "(?i)(?:Users|ProgramData|AppData|Temp|Downloads|Public)\\\\[^\\r\\n]+\\.dll$"
+        ]
+      },
+      "evidenceFields": [
+        "path",
+        "data.valueName",
+        "data.value"
+      ],
+      "tags": [
+        "mitre",
+        "persistence",
+        "registry",
+        "windows-service"
+      ],
+      "excludeProcessNames": [
+        "KSword.Sandbox.Agent.exe",
+        "KSword.Sandbox.R0Collector.exe"
+      ],
+      "excludeDataContains": {
+        "source": [
+          "collection-health",
+          "virustotal",
+          "r0collector"
+        ],
+        "healthStatus": [
+          "collection-health"
+        ],
+        "vtStatus": [
+          "not_configured",
+          "not_found",
+          "rate_limited",
+          "unset"
+        ],
+        "collectorSelfNoise": [
+          "true"
+        ],
+        "noise": [
+          "true"
+        ],
+        "selfNoise": [
+          "true"
+        ]
+      }
+    },
+    {
+      "id": "persistence-netsh-helper-user-writable-dll",
+      "title": "Netsh helper DLL registered from user-writable path",
+      "titleZh": "Netsh Helper 注册用户可写 DLL",
+      "severity": "high",
+      "confidence": "high",
+      "summary": "Netsh helper registration pointed HelperDll or equivalent helper data to a user-writable DLL path, a command-shell extension persistence technique.",
+      "summaryZh": "Netsh helper 注册将 HelperDll 等数据指向用户可写 DLL，可作为命令扩展持久化。",
+      "mitreTechniqueId": "T1546",
+      "mitreTechniqueName": "Event Triggered Execution",
+      "eventTypes": [
+        "registry.set",
+        "registry.create",
+        "driver.registry"
+      ],
+      "allDataRegex": {
+        "path": [
+          "(?i)\\\\Microsoft\\\\NetSh\\\\"
+        ],
+        "value": [
+          "(?i)(?:Users|ProgramData|AppData|Temp|Downloads|Public)\\\\[^\\r\\n]+\\.dll$"
+        ]
+      },
+      "dataRegex": {
+        "valueName": [
+          "(?i)(HelperDll|DllPath|Library|Path)"
+        ]
+      },
+      "evidenceFields": [
+        "path",
+        "data.valueName",
+        "data.value"
+      ],
+      "tags": [
+        "mitre",
+        "persistence",
+        "registry",
+        "lolbin"
+      ],
+      "excludeProcessNames": [
+        "KSword.Sandbox.Agent.exe",
+        "KSword.Sandbox.R0Collector.exe"
+      ],
+      "excludeDataContains": {
+        "source": [
+          "collection-health",
+          "virustotal",
+          "r0collector"
+        ],
+        "healthStatus": [
+          "collection-health"
+        ],
+        "vtStatus": [
+          "not_configured",
+          "not_found",
+          "rate_limited",
+          "unset"
+        ],
+        "collectorSelfNoise": [
+          "true"
+        ],
+        "noise": [
+          "true"
+        ],
+        "selfNoise": [
+          "true"
+        ]
+      }
+    },
+    {
+      "id": "persistence-screensaver-executable-user-writable",
+      "title": "Screen saver executable set to user-writable payload",
+      "titleZh": "屏保程序设置为用户可写载荷",
+      "severity": "medium",
+      "confidence": "medium",
+      "summary": "A screen-saver registry value was configured to launch an executable or script from a user-writable location.",
+      "summaryZh": "屏保注册表值被设置为从用户可写位置启动可执行文件或脚本。",
+      "mitreTechniqueId": "T1546.002",
+      "mitreTechniqueName": "Event Triggered Execution: Screensaver",
+      "eventTypes": [
+        "registry.set",
+        "registry.create",
+        "driver.registry"
+      ],
+      "allDataRegex": {
+        "path": [
+          "(?i)Control Panel\\\\Desktop\\\\SCRNSAVE\\.EXE|\\\\SCRNSAVE\\.EXE$"
+        ],
+        "value": [
+          "(?i)(?:Users|ProgramData|AppData|Temp|Downloads|Public)\\\\[^\\r\\n]+\\.(?:exe|scr|com|bat|cmd|ps1|vbs|js)$"
+        ]
+      },
+      "evidenceFields": [
+        "path",
+        "data.valueName",
+        "data.value"
+      ],
+      "tags": [
+        "mitre",
+        "persistence",
+        "registry"
+      ],
+      "excludeProcessNames": [
+        "KSword.Sandbox.Agent.exe",
+        "KSword.Sandbox.R0Collector.exe"
+      ],
+      "excludeDataContains": {
+        "source": [
+          "collection-health",
+          "virustotal",
+          "r0collector"
+        ],
+        "healthStatus": [
+          "collection-health"
+        ],
+        "vtStatus": [
+          "not_configured",
+          "not_found",
+          "rate_limited",
+          "unset"
+        ],
+        "collectorSelfNoise": [
+          "true"
+        ],
+        "noise": [
+          "true"
+        ],
+        "selfNoise": [
+          "true"
+        ]
+      }
+    },
+    {
+      "id": "injection-process-doppelganging-transaction-sequence",
+      "title": "Process doppelgänging transaction and section execution sequence",
+      "titleZh": "Process Doppelgänging 事务和节执行序列",
+      "severity": "high",
+      "confidence": "high",
+      "summary": "API or normalized injection evidence contained transactional file creation plus section creation and process creation context consistent with process doppelgänging-style execution.",
+      "summaryZh": "API 或注入证据同时包含事务文件、节创建和进程创建上下文，符合 Process Doppelgänging 类执行链。",
+      "mitreTechniqueId": "T1055",
+      "mitreTechniqueName": "Process Injection",
+      "eventTypes": [
+        "api.call",
+        "api.sequence",
+        "behavior.injection",
+        "process.hollowing"
+      ],
+      "dataContainsAll": {
+        "operation": [
+          "CreateTransaction",
+          "CreateFileTransacted",
+          "CreateSection",
+          "CreateProcess"
+        ]
+      },
+      "dataRegex": {
+        "targetProcessName": [
+          "(?i)^[a-z0-9_.-]+\\.exe$"
+        ],
+        "imagePath": [
+          "(?i)\\.(?:exe|dll)$"
+        ]
+      },
+      "evidenceFields": [
+        "data.operation",
+        "data.targetProcessName",
+        "data.imagePath"
+      ],
+      "tags": [
+        "mitre",
+        "injection",
+        "process"
+      ],
+      "excludeProcessNames": [
+        "KSword.Sandbox.Agent.exe",
+        "KSword.Sandbox.R0Collector.exe"
+      ],
+      "excludeDataContains": {
+        "source": [
+          "collection-health",
+          "virustotal",
+          "r0collector"
+        ],
+        "healthStatus": [
+          "collection-health"
+        ],
+        "vtStatus": [
+          "not_configured",
+          "not_found",
+          "rate_limited",
+          "unset"
+        ],
+        "collectorSelfNoise": [
+          "true"
+        ],
+        "noise": [
+          "true"
+        ],
+        "selfNoise": [
+          "true"
+        ]
+      }
+    },
+    {
+      "id": "injection-process-ghosting-delete-pending-section",
+      "title": "Process ghosting delete-pending image section",
+      "titleZh": "Process Ghosting 删除挂起映像节",
+      "severity": "high",
+      "confidence": "high",
+      "summary": "Process/image evidence showed a delete-pending executable file being converted into an image section or launched process, consistent with process ghosting-style injection.",
+      "summaryZh": "进程或映像证据显示删除挂起的可执行文件被转换为映像节或启动进程，符合 Process Ghosting 类注入。",
+      "mitreTechniqueId": "T1055",
+      "mitreTechniqueName": "Process Injection",
+      "eventTypes": [
+        "process.image",
+        "api.call",
+        "api.sequence",
+        "behavior.injection"
+      ],
+      "dataContainsAll": {
+        "operation": [
+          "delete-pending",
+          "CreateSection",
+          "SEC_IMAGE"
+        ]
+      },
+      "dataRegex": {
+        "imagePath": [
+          "(?i)(?:Users|ProgramData|AppData|Temp|Downloads|Public)\\\\[^\\r\\n]+\\.exe$"
+        ]
+      },
+      "evidenceFields": [
+        "data.operation",
+        "data.imagePath",
+        "data.targetProcessName"
+      ],
+      "tags": [
+        "mitre",
+        "injection",
+        "process"
+      ],
+      "excludeProcessNames": [
+        "KSword.Sandbox.Agent.exe",
+        "KSword.Sandbox.R0Collector.exe"
+      ],
+      "excludeDataContains": {
+        "source": [
+          "collection-health",
+          "virustotal",
+          "r0collector"
+        ],
+        "healthStatus": [
+          "collection-health"
+        ],
+        "vtStatus": [
+          "not_configured",
+          "not_found",
+          "rate_limited",
+          "unset"
+        ],
+        "collectorSelfNoise": [
+          "true"
+        ],
+        "noise": [
+          "true"
+        ],
+        "selfNoise": [
+          "true"
+        ]
+      }
+    },
+    {
+      "id": "lateral-dcom-excel-application-remote-launch",
+      "title": "Remote DCOM Excel.Application launch command",
+      "titleZh": "远程 DCOM Excel.Application 启动命令",
+      "severity": "high",
+      "confidence": "high",
+      "summary": "A command line invoked DCOM/COM object creation against a remote host using Excel.Application or related Office automation to start code remotely.",
+      "summaryZh": "命令行通过远程主机上的 DCOM/COM Excel.Application 或 Office 自动化对象启动代码。",
+      "mitreTechniqueId": "T1021.003",
+      "mitreTechniqueName": "Remote Services: Distributed Component Object Model",
+      "eventTypes": [
+        "process.start",
+        "process.new"
+      ],
+      "commandLineRegex": [
+        "(?i)((Excel\\.Application|MMC20\\.Application|ShellWindows).*(/node:|-ComputerName|GetTypeFromProgID|\\\\\\\\[A-Za-z0-9_.-]+)|GetTypeFromProgID.*(Excel\\.Application|MMC20\\.Application|ShellWindows).*[A-Za-z0-9_.-]{2,})"
+      ],
+      "dataRegex": {
+        "remoteHost": [
+          "(?i)^[A-Za-z0-9_.-]{2,}$"
+        ],
+        "comClass": [
+          "(?i)(Excel\\.Application|MMC20\\.Application|ShellWindows)"
+        ]
+      },
+      "evidenceFields": [
+        "processName",
+        "commandLine",
+        "data.remoteHost",
+        "data.comClass"
+      ],
+      "tags": [
+        "mitre",
+        "lateral-movement",
+        "dcom"
+      ],
+      "excludeProcessNames": [
+        "KSword.Sandbox.Agent.exe",
+        "KSword.Sandbox.R0Collector.exe"
+      ],
+      "excludeDataContains": {
+        "source": [
+          "collection-health",
+          "virustotal",
+          "r0collector"
+        ],
+        "healthStatus": [
+          "collection-health"
+        ],
+        "vtStatus": [
+          "not_configured",
+          "not_found",
+          "rate_limited",
+          "unset"
+        ],
+        "collectorSelfNoise": [
+          "true"
+        ],
+        "noise": [
+          "true"
+        ],
+        "selfNoise": [
+          "true"
+        ]
+      }
+    },
+    {
+      "id": "lateral-smb-psexesvc-pipe-or-service",
+      "title": "PsExec-style SMB service pipe or service evidence",
+      "titleZh": "PsExec 风格 SMB 服务管道或服务证据",
+      "severity": "high",
+      "confidence": "high",
+      "summary": "SMB pipe telemetry referenced PSEXESVC-style or service-control named pipes used by remote service execution over SMB.",
+      "summaryZh": "SMB 管道遥测出现 PSEXESVC 或服务控制命名管道，常见于通过 SMB 进行远程服务执行。",
+      "mitreTechniqueId": "T1021.002",
+      "mitreTechniqueName": "Remote Services: SMB/Windows Admin Shares",
+      "eventTypes": [
+        "smb.pipe.open",
+        "pcap.smb"
+      ],
+      "evidenceFields": [
+        "path",
+        "data.pipeName",
+        "data.serviceName",
+        "data.shareName"
+      ],
+      "tags": [
+        "mitre",
+        "lateral-movement",
+        "smb",
+        "service"
+      ],
+      "excludeProcessNames": [
+        "KSword.Sandbox.Agent.exe",
+        "KSword.Sandbox.R0Collector.exe"
+      ],
+      "excludeDataContains": {
+        "source": [
+          "collection-health",
+          "virustotal",
+          "r0collector"
+        ],
+        "healthStatus": [
+          "collection-health"
+        ],
+        "vtStatus": [
+          "not_configured",
+          "not_found",
+          "rate_limited",
+          "unset"
+        ],
+        "collectorSelfNoise": [
+          "true"
+        ],
+        "noise": [
+          "true"
+        ],
+        "selfNoise": [
+          "true"
+        ]
+      },
+      "allDataRegex": {
+        "pipeName": [
+          "(?i)\\\\PIPE\\\\(?:PSEXESVC|svcctl|atsvc)"
+        ]
+      }
+    },
+    {
+      "id": "anti-sandbox-human-interaction-gated-exit",
+      "title": "Human interaction checks gate execution or exit",
+      "titleZh": "人机交互检查控制执行或退出",
+      "severity": "medium",
+      "confidence": "medium",
+      "summary": "Anti-analysis evidence reported mouse, keyboard, click, cursor, or foreground-window checks tied to an exit or delayed-execution gate.",
+      "summaryZh": "反分析证据报告鼠标、键盘、点击、光标或前台窗口检查，并与退出或延迟执行门控相关。",
+      "mitreTechniqueId": "T1497.001",
+      "mitreTechniqueName": "Virtualization/Sandbox Evasion: System Checks",
+      "eventTypes": [
+        "antiAnalysis.sandboxCheck",
+        "anti_sandbox.check",
+        "api.call",
+        "behavior.anti_analysis"
+      ],
+      "allDataRegex": {
+        "check": [
+          "(?i)(mouse|keyboard|cursor|foreground|GetCursorPos|GetLastInputInfo|GetAsyncKeyState|click)"
+        ],
+        "action": [
+          "(?i)(exit|gate|delay|sleep|abort|suppress)"
+        ]
+      },
+      "evidenceFields": [
+        "data.check",
+        "data.action",
+        "data.threshold"
+      ],
+      "tags": [
+        "mitre",
+        "anti-sandbox",
+        "anti-analysis"
+      ],
+      "excludeProcessNames": [
+        "KSword.Sandbox.Agent.exe",
+        "KSword.Sandbox.R0Collector.exe"
+      ],
+      "excludeDataContains": {
+        "source": [
+          "collection-health",
+          "virustotal",
+          "r0collector"
+        ],
+        "healthStatus": [
+          "collection-health"
+        ],
+        "vtStatus": [
+          "not_configured",
+          "not_found",
+          "rate_limited",
+          "unset"
+        ],
+        "collectorSelfNoise": [
+          "true"
+        ],
+        "noise": [
+          "true"
+        ],
+        "selfNoise": [
+          "true"
+        ]
+      }
+    },
+    {
+      "id": "anti-sandbox-vm-service-registry-probe-gate",
+      "title": "VM service or registry artifact probe gates execution",
+      "titleZh": "虚拟机服务或注册表痕迹探测控制执行",
+      "severity": "medium",
+      "confidence": "medium",
+      "summary": "Anti-sandbox evidence checked VMware, VirtualBox, QEMU, Hyper-V, or sandbox service/registry artifacts and used the result to exit or gate behavior.",
+      "summaryZh": "反沙箱证据检查 VMware、VirtualBox、QEMU、Hyper-V 或沙箱服务/注册表痕迹，并据此退出或门控行为。",
+      "mitreTechniqueId": "T1497.001",
+      "mitreTechniqueName": "Virtualization/Sandbox Evasion: System Checks",
+      "eventTypes": [
+        "antiAnalysis.sandboxCheck",
+        "anti_sandbox.check",
+        "api.call",
+        "process.start",
+        "process.new"
+      ],
+      "allDataRegex": {
+        "check": [
+          "(?i)(vmware|virtualbox|vbox|qemu|hyper-v|sandbox|service|registry)"
+        ],
+        "action": [
+          "(?i)(exit|gate|abort|suppress|terminate)"
+        ]
+      },
+      "dataRegex": {
+        "artifact": [
+          "(?i)(VBoxService|VBoxGuest|vmtools|qemu-ga|Hyper-V|SbieDll|\\\\Services\\\\VBox|\\\\Services\\\\vm)"
+        ],
+        "commandLine": [
+          "(?i)(reg query|sc query|Get-Service).*(VBox|VMware|qemu|Hyper-V|Sbie)"
+        ]
+      },
+      "evidenceFields": [
+        "commandLine",
+        "data.check",
+        "data.artifact",
+        "data.action"
+      ],
+      "tags": [
+        "mitre",
+        "anti-sandbox",
+        "anti-analysis"
+      ],
+      "excludeProcessNames": [
+        "KSword.Sandbox.Agent.exe",
+        "KSword.Sandbox.R0Collector.exe"
+      ],
+      "excludeDataContains": {
+        "source": [
+          "collection-health",
+          "virustotal",
+          "r0collector"
+        ],
+        "healthStatus": [
+          "collection-health"
+        ],
+        "vtStatus": [
+          "not_configured",
+          "not_found",
+          "rate_limited",
+          "unset"
+        ],
+        "collectorSelfNoise": [
+          "true"
+        ],
+        "noise": [
+          "true"
+        ],
+        "selfNoise": [
+          "true"
+        ]
+      }
+    },
+    {
+      "id": "download-execute-office-remote-template-launch",
+      "title": "Office remote template or add-in launch chain",
+      "titleZh": "Office 远程模板或加载项启动链",
+      "severity": "high",
+      "confidence": "high",
+      "summary": "Office or script host execution referenced a remote template, add-in, or document relationship and then a user-writable payload launch path.",
+      "summaryZh": "Office 或脚本宿主执行引用远程模板、加载项或文档关系，并随后启动用户可写路径载荷。",
+      "mitreTechniqueId": "T1105",
+      "mitreTechniqueName": "Ingress Tool Transfer",
+      "eventTypes": [
+        "process.start",
+        "process.new",
+        "download.execute",
+        "behavior.download_execute"
+      ],
+      "commandLineRegex": [
+        "(?i)(winword|excel|powerpnt|rundll32|mshta|wscript|cscript).*(https?://|\\\\\\\\).*(template|dotm|xlam|xll|docm|relationship|_rels)"
+      ],
+      "allDataRegex": {
+        "executedPath": [
+          "(?i)(?:Users|ProgramData|AppData|Temp|Downloads|Public)\\\\[^\\r\\n]+\\.(?:exe|dll|ps1|vbs|js|hta)$"
+        ],
+        "sourceUrl": [
+          "(?i)^(?:https?|file)://|^\\\\\\\\"
+        ]
+      },
+      "evidenceFields": [
+        "processName",
+        "commandLine",
+        "data.sourceUrl",
+        "data.executedPath"
+      ],
+      "tags": [
+        "mitre",
+        "download-execute",
+        "office"
+      ],
+      "excludeProcessNames": [
+        "KSword.Sandbox.Agent.exe",
+        "KSword.Sandbox.R0Collector.exe"
+      ],
+      "excludeDataContains": {
+        "source": [
+          "collection-health",
           "virustotal",
           "r0collector"
         ],
