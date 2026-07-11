@@ -689,8 +689,8 @@ function Get-PackageOperatorRecommendedActions {
         [void]$actions.Add('下一步：source package 必须保持 source-only；不要加入 runtime payload、报告、样本、VM state 或 build output。')
     }
 
-    [void]$actions.Add('发布前只读检查：.\scripts\Test-ReleaseReadiness.ps1 -AllowDirtySource -StageSourcePackage；该命令不启动/还原 VM，不签名，不调用 CSignTool.exe。')
-    [void]$actions.Add('Hyper-V/guest payload/VT key 缺口请用 .\scripts\install.ps1 -Mode CheckEnvironment 或 .\scripts\run.ps1 -Mode CheckEnvironment 查看；这些状态检查不打印 secret，不执行 live。')
+    [void]$actions.Add('发布前只读检查：.\scripts\Test-ReleaseReadiness.ps1 -AllowDirtySource；该命令默认执行 source package StageOnly dry-run，不启动/还原 VM，不签名，不调用 CSignTool.exe。')
+    [void]$actions.Add('Hyper-V/VM profile/guest payload/VT key 缺口请用 .\scripts\install.ps1 -Mode CheckEnvironment 或 .\scripts\run.ps1 -Mode CheckEnvironment 查看；这些状态检查不打印 secret，不执行 live。')
     [void]$actions.Add('fresh live 证据护栏：package/readiness 不会生成新的 Notepad 5s job；release notes 若要声明当前候选已有 fresh live evidence，必须在实验室主机显式运行 live 并记录 commit、job id、runtime root 和报告路径。')
     [void]$actions.Add('缺少 guest payload 时运行 .\scripts\Prepare-GuestPayload.ps1 -RepoRoot . -PayloadRoot <external-payload-root> -SelfContained；输出必须在仓库外。')
     [void]$actions.Add('可选 VirusTotal key 用 .\scripts\install.ps1 -Mode ConfigureVTKey -PromptVTKey 配置；未配置或查询失败应静默跳过 hash-only enrichment。')
@@ -758,7 +758,7 @@ function Update-PackageOperatorDiagnostics {
         }
         runtimePublishRootMissingRecommendedActions = @($recommendedActions | Where-Object { $_ -match 'RuntimePublishRoot|runtime 便携包|payload' })
         preflightCommands = [ordered]@{
-            releaseReadiness = '.\scripts\Test-ReleaseReadiness.ps1 -AllowDirtySource -StageSourcePackage'
+            releaseReadiness = '.\scripts\Test-ReleaseReadiness.ps1 -AllowDirtySource'
             completeRuntimeReadiness = '.\scripts\Test-ReleaseReadiness.ps1 -AllowDirtySource -RuntimePublishRoot <external-publish-root> -RequireCompleteRuntimePackage'
             installCheckEnvironment = '.\scripts\install.ps1 -Mode CheckEnvironment'
             runCheckEnvironment = '.\scripts\run.ps1 -Mode CheckEnvironment'
@@ -767,11 +767,21 @@ function Update-PackageOperatorDiagnostics {
             runtimePackage = '.\scripts\package-portable.ps1 -PackageKind runtime -RuntimePublishRoot <external-publish-root> -RequireCompleteRuntimePayloads -OutputRoot <external-output-root> -Force'
         }
         externalStateDiagnostics = [ordered]@{
-            HyperV = 'not checked or mutated by packaging; run install/run CheckEnvironment for read-only prerequisite diagnostics'
-            GuestPayload = 'runtime payload is copied only from RuntimePublishRoot or prepared explicitly under an external PayloadRoot'
-            VirusTotal = 'optional hash-only key is never packaged; configure in process/user environment or installer local state'
+            HyperV = 'not checked or mutated by packaging; run install/run CheckEnvironment for read-only prerequisite diagnostics including Hyper-V module, elevation, hardware virtualization hints, VM/checkpoint presence, and Guest Service Interface'
+            VmProfile = 'local VM name, checkpoint, guest working directory, driver host path, and runtime roots are operator-local profile values; they are diagnosed by install/run status and are not packaged as sandbox.local.json'
+            GuestPayload = 'runtime payload is copied only from RuntimePublishRoot or prepared explicitly under an external PayloadRoot; packaging records present/missing payload folders but does not build them'
+            VirusTotal = 'optional hash-only VirusTotal API key is never packaged or printed; configure in process/user environment or installer local state; this is unrelated to Intel VT-x/AMD-V virtualization'
             RuntimeRoot = 'job outputs, reports, screenshots, PCAP, dumps, samples, and secrets must remain outside the repository and package source tree'
         }
+        safeExclusionCategories = @(
+            'local secrets and environment files',
+            'install-state and DPAPI backups',
+            'submitted samples and generated harmless samples',
+            'runtime job outputs, reports, events, screenshots, PCAP/captures, dumps, traces, and databases',
+            'Hyper-V disks, checkpoints, snapshots, and VM export/state files',
+            'repository build outputs, symbols, packages, archives, and native intermediates',
+            'driver binaries, certificates, private keys, signing material, GUI signing fallback, and CSignTool'
+        )
         nonMutating = [ordered]@{
             vmMutation = $false
             driverSigning = $false
@@ -790,7 +800,7 @@ function Update-PackageOperatorDiagnostics {
         }
         recommendedActions = @($recommendedActions)
         operatorGuidance = @(
-            '中文：先看 runtimePublishSummary、runtimeDryRunGuardrail、freshLiveEvidenceGuardrail；这些字段告诉审阅者本包是否可 handoff，以及是否不能声称 fresh live。',
+            '中文：先看 runtimePublishSummary、runtimeDryRunGuardrail、safeExclusionCategories、externalStateDiagnostics、freshLiveEvidenceGuardrail；这些字段告诉审阅者本包是否可 handoff，以及是否不能声称 fresh live。',
             '中文：完整 runtime handoff 必须提供仓库外 RuntimePublishRoot、传入 -RequireCompleteRuntimePayloads，并确保所有 runtime publish entries 存在。',
             'RuntimePublishRoot must point to external published payloads such as host-web, guest-tools, tools/job-tool, and tools/postprocess.',
             'Use -RequireCompleteRuntimePayloads for handoff builds; omit it only for explicit layout/safety dry-runs.',

@@ -27,6 +27,8 @@ param(
 
     [switch]$StageSourcePackage,
 
+    [switch]$SkipSourcePackageDryRun,
+
     [string]$RuntimePublishRoot,
 
     [switch]$RequireCompleteRuntimePackage,
@@ -465,6 +467,14 @@ function Test-RuntimePublishCompleteness {
         return
     }
 
+    $expectedSources = @($runtimeEntries | ForEach-Object { [string](Get-ObjectPropertyValue -InputObject $_ -Name 'source' -DefaultValue '') })
+    $operatorHints = @(
+        'Runtime payload completeness is a handoff gate only when -RuntimePublishRoot and -RequireCompleteRuntimePackage are supplied.',
+        'Expected external payload folders: host-web, guest-tools, tools/job-tool, tools/postprocess.',
+        'Read-only environment hints: run .\scripts\install.ps1 -Mode CheckEnvironment and .\scripts\run.ps1 -Mode CheckEnvironment for Hyper-V prerequisites, VM profile, guest payload freshness, and optional VT key status.',
+        'This readiness script does not build payloads, copy from repository bin/obj/x64, start/restore/stop VMs, sign drivers, or generate fresh live evidence.'
+    )
+
     if ([string]::IsNullOrWhiteSpace($RuntimePublishRoot)) {
         if ($RequireCompleteRuntimePackage) {
             Add-ReleaseCheckResult `
@@ -473,7 +483,7 @@ function Test-RuntimePublishCompleteness {
                 -Status Failed `
                 -Message '完整 runtime 便携包要求 -RuntimePublishRoot；当前未提供。' `
                 -Remediation @('先把 host-web、guest-tools、tools/job-tool、tools/postprocess 发布到仓库外目录，再重跑：.\scripts\Test-ReleaseReadiness.ps1 -RuntimePublishRoot <external-publish-root> -RequireCompleteRuntimePackage。') `
-                -Details @{ expectedSources = @($runtimeEntries | ForEach-Object { [string](Get-ObjectPropertyValue -InputObject $_ -Name 'source' -DefaultValue '') }) }
+                -Details @{ expectedSources = $expectedSources; operatorHints = $operatorHints; dryRunOnly = $true }
             return
         }
 
@@ -482,11 +492,12 @@ function Test-RuntimePublishCompleteness {
             -Title 'Runtime publish completeness / runtime payload 完整性' `
             -Status Skipped `
             -Message 'Skipped complete runtime payload gate. This is acceptable for source/layout readiness only; use -RuntimePublishRoot with -RequireCompleteRuntimePackage before runtime handoff.' `
-            -Details @{ expectedSources = @($runtimeEntries | ForEach-Object { [string](Get-ObjectPropertyValue -InputObject $_ -Name 'source' -DefaultValue '') }) }
+            -Details @{ expectedSources = $expectedSources; operatorHints = $operatorHints; dryRunOnly = $true; handoffAllowed = $false }
         return
     }
 
     $issues = New-Object System.Collections.Generic.List[string]
+    $entryDiagnostics = New-Object System.Collections.Generic.List[object]
     $rootFull = [System.IO.Path]::GetFullPath($RuntimePublishRoot)
     $repoPrefix = ([System.IO.Path]::GetFullPath($RepositoryRoot)).TrimEnd('\', '/') + [System.IO.Path]::DirectorySeparatorChar
     $rootPrefix = $rootFull.TrimEnd('\', '/') + [System.IO.Path]::DirectorySeparatorChar
@@ -508,12 +519,44 @@ function Test-RuntimePublishCompleteness {
             $sourcePath = [System.IO.Path]::GetFullPath((Join-Path $rootFull $source))
             if (($sourcePath -ne $rootFull) -and (-not $sourcePath.StartsWith($rootPrefix, [StringComparison]::OrdinalIgnoreCase))) {
                 [void]$issues.Add("Runtime publish entry escapes RuntimePublishRoot: $source")
+                [void]$entryDiagnostics.Add([pscustomobject][ordered]@{
+                        source = $source
+                        sourcePath = $sourcePath
+                        exists = $false
+                        fileCount = 0
+                        totalBytes = 0
+                        error = 'path escapes RuntimePublishRoot'
+                    })
                 continue
             }
 
             if (-not (Test-Path -LiteralPath $sourcePath -PathType Container)) {
                 [void]$issues.Add("Missing runtime publish payload directory: $source")
+                [void]$entryDiagnostics.Add([pscustomobject][ordered]@{
+                        source = $source
+                        sourcePath = $sourcePath
+                        exists = $false
+                        fileCount = 0
+                        totalBytes = 0
+                        error = 'missing directory'
+                    })
+                continue
             }
+
+            $files = @(Get-ChildItem -LiteralPath $sourcePath -Recurse -File -Force)
+            $totalBytes = [Int64](($files | ForEach-Object { $_.Length } | Measure-Object -Sum).Sum)
+            if ($files.Count -eq 0) {
+                [void]$issues.Add("Runtime publish payload directory is empty: $source")
+            }
+
+            [void]$entryDiagnostics.Add([pscustomobject][ordered]@{
+                    source = $source
+                    sourcePath = $sourcePath
+                    exists = $true
+                    fileCount = $files.Count
+                    totalBytes = $totalBytes
+                    error = if ($files.Count -eq 0) { 'empty directory' } else { '' }
+                })
         }
     }
 
@@ -522,7 +565,8 @@ function Test-RuntimePublishCompleteness {
             -Id 'runtime-publish-completeness' `
             -Title 'Runtime publish completeness / runtime payload 完整性' `
             -Status Passed `
-            -Message 'RuntimePublishRoot is outside the repository and contains all expected runtime payload directories.'
+            -Message 'RuntimePublishRoot is outside the repository and contains non-empty expected runtime payload directories.' `
+            -Details @{ runtimePublishRoot = $RuntimePublishRoot; expectedSources = $expectedSources; entries = @($entryDiagnostics.ToArray()); operatorHints = $operatorHints; handoffAllowed = [bool]$RequireCompleteRuntimePackage }
         return
     }
 
@@ -533,7 +577,7 @@ function Test-RuntimePublishCompleteness {
         -Status $status `
         -Message "Runtime publish completeness found $($issues.Count) issue(s)." `
         -Remediation @('完整 runtime handoff 前必须补齐仓库外 RuntimePublishRoot；package/readiness 不会从仓库 bin/obj/x64 回退复制，也不会构建、签名或操作 VM。') `
-        -Details @{ issues = @($issues.ToArray()); runtimePublishRoot = $RuntimePublishRoot; requireCompleteRuntimePackage = [bool]$RequireCompleteRuntimePackage }
+        -Details @{ issues = @($issues.ToArray()); runtimePublishRoot = $RuntimePublishRoot; expectedSources = $expectedSources; entries = @($entryDiagnostics.ToArray()); operatorHints = $operatorHints; requireCompleteRuntimePackage = [bool]$RequireCompleteRuntimePackage; handoffAllowed = $false }
 }
 
 function Test-CSignToolNotInReleasePath {
@@ -990,12 +1034,12 @@ function Invoke-RepositoryPolicy {
 }
 
 function Invoke-SourcePackageStage {
-    if (-not $StageSourcePackage) {
+    if ($SkipSourcePackageDryRun) {
         Add-ReleaseCheckResult `
             -Id 'source-package-stage' `
             -Title 'Source package stage / 源码包预暂存' `
             -Status Skipped `
-            -Message 'Skipped by default. Rerun with -StageSourcePackage for a local source-package dry run.'
+            -Message 'Skipped by explicit -SkipSourcePackageDryRun. Default readiness performs a local StageOnly source-package dry run because it is non-mutating and catches exclusion regressions.'
         return
     }
 
@@ -1025,7 +1069,7 @@ function Invoke-SourcePackageStage {
         -Title 'Source package stage / 源码包预暂存' `
         -FilePath 'powershell.exe' `
         -Arguments $arguments `
-        -Remediation @('Inspect package-manifest.generated.json and remove any unintended runtime/build artifacts.')
+        -Remediation @('Inspect package-manifest.generated.json and remove any unintended runtime/build artifacts, secrets, reports, samples, VM state, signing material, or repository binaries.')
 }
 
 function Invoke-LightBuild {
@@ -1087,6 +1131,8 @@ $summary = [pscustomobject][ordered]@{
     passedCount           = @($script:Results | Where-Object { $_.status -eq 'Passed' }).Count
     allowDirtySource      = [bool]$AllowDirtySource
     stageSourcePackage    = [bool]$StageSourcePackage
+    sourcePackageDryRun   = -not [bool]$SkipSourcePackageDryRun
+    skipSourcePackageDryRun = [bool]$SkipSourcePackageDryRun
     runtimePublishRoot    = if ([string]::IsNullOrWhiteSpace($RuntimePublishRoot)) { $null } else { $RuntimePublishRoot }
     requireCompleteRuntimePackage = [bool]$RequireCompleteRuntimePackage
     includeBuild          = [bool]$IncludeBuild
@@ -1097,6 +1143,12 @@ $summary = [pscustomobject][ordered]@{
     freshLiveEvidenceGenerated = $false
     freshLiveEvidenceRequiresExplicitLabRun = $true
     freshLiveEvidenceLabCommand = '.\run.ps1 -Mode Analyze -SamplePreset Notepad -DurationSeconds 5 -Live'
+    releaseNotesFreshLiveFallback = '本候选未刷新 fresh live evidence'
+    operatorReadinessHints = @(
+        'Runtime handoff requires a complete external RuntimePublishRoot; source/package dry-runs do not prove runtime payload completeness.',
+        'Use install/run CheckEnvironment for read-only VT key, Hyper-V prerequisite, VM profile, guest payload freshness, runtime-root-under-repository, and driver-path hints.',
+        'No readiness/package command creates a job id; release notes need an explicit lab live run before claiming fresh live evidence.'
+    )
     results               = @($script:Results.ToArray())
 }
 

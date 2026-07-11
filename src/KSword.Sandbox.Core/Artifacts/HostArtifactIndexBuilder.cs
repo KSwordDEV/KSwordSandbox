@@ -27,7 +27,7 @@ public sealed class HostArtifactIndexBuilder
     /// Inputs are a job ID and job root; processing recursively scans files and
     /// classifies known artifact names; the method returns a stable index.
     /// </summary>
-    public HostArtifactIndex Build(Guid jobId, string jobRoot)
+    public HostArtifactIndex Build(Guid jobId, string jobRoot, ArtifactCollectionConfig? artifactCollection = null)
     {
         var fullJobRoot = Path.GetFullPath(jobRoot);
         var guestManifests = Directory.Exists(fullJobRoot)
@@ -142,6 +142,9 @@ public sealed class HostArtifactIndexBuilder
             .OrderBy(artifact => artifact.RelativePath, StringComparer.OrdinalIgnoreCase)
             .ToList();
         var collections = BuildCollections(artifacts, guestManifests, collectionEventMetadata, guestArtifactRejections, fullJobRoot);
+        collections = AddExpectedArtifactCollections(collections, artifactCollection, collectionEventMetadata)
+            .OrderBy(collection => collection.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
 
         return new HostArtifactIndex
         {
@@ -164,11 +167,11 @@ public sealed class HostArtifactIndexBuilder
     /// Inputs are a job ID and job root; processing builds and serializes the
     /// index; the method returns a descriptor for the index artifact.
     /// </summary>
-    public ArtifactDescriptor WriteIndex(Guid jobId, string jobRoot)
+    public ArtifactDescriptor WriteIndex(Guid jobId, string jobRoot, ArtifactCollectionConfig? artifactCollection = null)
     {
         var fullJobRoot = Path.GetFullPath(jobRoot);
         Directory.CreateDirectory(fullJobRoot);
-        var index = Build(jobId, fullJobRoot);
+        var index = Build(jobId, fullJobRoot, artifactCollection);
         var indexPath = Path.Combine(fullJobRoot, IndexFileName);
         File.WriteAllText(indexPath, JsonSerializer.Serialize(index, JsonOptions));
         return ArtifactDescriptorFactory.FromExistingFile(
@@ -1296,6 +1299,80 @@ public sealed class HostArtifactIndexBuilder
         return merged with { Metadata = metadata };
     }
 
+    private static List<ArtifactCollectionDescriptor> AddExpectedArtifactCollections(
+        IReadOnlyList<ArtifactCollectionDescriptor> collections,
+        ArtifactCollectionConfig? artifactCollection,
+        IReadOnlyDictionary<string, Dictionary<string, string>> collectionEventMetadata)
+    {
+        var byName = collections.ToDictionary(collection => collection.Name, StringComparer.OrdinalIgnoreCase);
+        foreach (var expectation in ExpectedArtifactCollections)
+        {
+            if (byName.ContainsKey(expectation.CollectionName))
+            {
+                continue;
+            }
+
+            var requested = artifactCollection is not null && expectation.IsRequested(artifactCollection);
+            var eventMetadata = collectionEventMetadata.GetValueOrDefault(expectation.CollectionName);
+            var hasEventSignal = eventMetadata is not null && eventMetadata.Count > 0;
+            if (artifactCollection is null && !hasEventSignal)
+            {
+                continue;
+            }
+
+            var status = FirstNonEmpty(
+                MetadataValue(eventMetadata, "lastStatus", "lastCaptureState"),
+                requested ? "missing" : "disabled");
+            var reason = FirstNonEmpty(
+                MetadataValue(eventMetadata, "lastReason", "guestManifestReason"),
+                requested ? "noDownloadableArtifacts" : expectation.NotRequestedReason);
+
+            var metadata = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["origin"] = "host-expected-collection",
+                ["discoveredBy"] = nameof(HostArtifactIndexBuilder),
+                ["hrefPolicy"] = "relative-safe-link-only",
+                ["artifactCount"] = "0",
+                ["downloadableArtifactCount"] = "0",
+                ["hasDownloadableArtifacts"] = "false",
+                ["expectedRelativePath"] = expectation.RelativePath,
+                ["expectedArtifactKind"] = expectation.Kind.ToString(),
+                ["requested"] = requested.ToString(CultureInfo.InvariantCulture).ToLowerInvariant(),
+                ["diagnosticCategory"] = "artifact-import",
+                ["diagnosticCode"] = requested ? "artifact-collection-missing" : "artifact-collection-disabled",
+                ["downloadResolutionState"] = requested ? "missing" : "unavailable",
+                ["downloadRejectionCode"] = requested ? "missing-artifact-file" : "collection-not-requested",
+                ["downloadUnavailableReason"] = reason,
+                ["downloadAvailable"] = "false",
+                ["isDownloadable"] = "false"
+            };
+
+            foreach (var pair in eventMetadata ?? EmptyMetadata)
+            {
+                AddIfMissing(metadata, pair.Key, pair.Value);
+            }
+
+            AddCollectionPresentationMetadata(metadata, expectation.CollectionName, expectation.Kind, status, reason, 0);
+            byName[expectation.CollectionName] = new ArtifactCollectionDescriptor
+            {
+                Name = expectation.CollectionName,
+                Kind = expectation.Kind,
+                Category = ArtifactDescriptorFactory.CategoryForKind(expectation.Kind),
+                EvidenceRole = EvidenceRoleForKind(expectation.Kind),
+                RelativePath = expectation.RelativePath,
+                SafeLink = ArtifactDescriptorFactory.BuildSafeLink(expectation.RelativePath),
+                ImportPath = expectation.RelativePath,
+                Enabled = requested,
+                Implemented = true,
+                Status = status,
+                Reason = reason,
+                Metadata = metadata
+            };
+        }
+
+        return byName.Values.ToList();
+    }
+
     private static ArtifactCollectionDescriptor BuildCollection(
         string collectionName,
         IReadOnlyList<ArtifactDescriptor> artifacts,
@@ -1932,6 +2009,7 @@ public sealed class HostArtifactIndexBuilder
         AddIfMissing(metadata, "contentType", contentType);
         AddIfMissing(metadata, "downloadContentType", contentType);
         AddIfMissing(metadata, "downloadFileName", fileName);
+        AddIfMissing(metadata, "safeDownloadFileName", SafeDownloadFileName(fileName));
         AddIfMissing(metadata, "downloadSelector", artifact.RelativePath);
         AddIfMissing(metadata, "downloadSafeLink", artifact.SafeLink);
         AddIfMissing(metadata, "safeRelativeSelector", artifact.RelativePath);
@@ -2111,6 +2189,22 @@ public sealed class HostArtifactIndexBuilder
         return null;
     }
 
+    private static string SafeDownloadFileName(string value)
+    {
+        var fileName = Path.GetFileName(value.Replace('\\', '/'));
+        if (string.IsNullOrWhiteSpace(fileName))
+        {
+            fileName = "artifact.bin";
+        }
+
+        foreach (var invalid in Path.GetInvalidFileNameChars())
+        {
+            fileName = fileName.Replace(invalid, '_');
+        }
+
+        return new string(fileName.Select(ch => char.IsControl(ch) ? '_' : ch).ToArray());
+    }
+
     private static bool IsScreenshotNamedImage(string path, string relativePath)
     {
         if (!ArtifactDescriptorFactory.IsScreenshotImagePath(path))
@@ -2217,4 +2311,39 @@ public sealed class HostArtifactIndexBuilder
         string? CapturePhase = null,
         string? CaptureState = null,
         IReadOnlyDictionary<string, string>? Metadata = null);
+
+    private sealed record ExpectedArtifactCollection(
+        string CollectionName,
+        ArtifactKind Kind,
+        string RelativePath,
+        string NotRequestedReason,
+        Func<ArtifactCollectionConfig, bool> IsRequested);
+
+    private static readonly ExpectedArtifactCollection[] ExpectedArtifactCollections =
+    [
+        new(
+            "dropped-files",
+            ArtifactKind.DroppedFile,
+            "artifacts/dropped-files",
+            "droppedFilesNotRequested",
+            config => config.CollectDroppedFiles),
+        new(
+            "screenshots",
+            ArtifactKind.Screenshot,
+            "screenshots",
+            "screenshotNotRequested",
+            config => config.CaptureScreenshots),
+        new(
+            "memory-dumps",
+            ArtifactKind.MemoryDump,
+            "memory-dumps",
+            "memoryDumpNotRequested",
+            config => config.CaptureMemoryDumps),
+        new(
+            "packet-captures",
+            ArtifactKind.PacketCapture,
+            "packet-captures",
+            "packetCaptureNotRequested",
+            config => config.CapturePacketCapture)
+    ];
 }

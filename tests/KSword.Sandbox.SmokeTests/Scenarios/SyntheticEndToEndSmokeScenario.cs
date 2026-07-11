@@ -244,8 +244,15 @@ internal sealed class SyntheticEndToEndSmokeScenario : ISmokeTestScenario
         SmokeAssert.True(File.Exists(job.RunbookExecutionResultPath), "Synthetic runbook execution should be persisted.");
         SmokeAssert.True(service.TryGetRunbookProgress(job.JobId, out var snapshot), "Synthetic runbook progress should be available for the live UI.");
         SmokeAssert.True(snapshot.State == SandboxRunbookProgressStates.Completed, "Synthetic runbook progress should be completed.");
+        SmokeAssert.True(snapshot.ProgressPercent == 100, "Terminal synthetic runbook progress should expose a 100 percent display hint.");
         SmokeAssert.True(snapshot.TotalSteps == job.Runbook!.Steps.Count, "Synthetic runbook progress should cover every runbook step.");
         SmokeAssert.True(snapshot.Steps.Count == job.Runbook.Steps.Count, "Synthetic runbook progress should expose one UI-safe row per runbook step.");
+        SmokeAssert.True(snapshot.Steps.All(step => !string.IsNullOrWhiteSpace(step.Ordinal)), "Every progress row should expose a stable ordinal for WebUI display.");
+        SmokeAssert.True(snapshot.Steps.All(step => !string.IsNullOrWhiteSpace(step.Phase)), "Every progress row should expose a derived phase for WebUI grouping.");
+        SmokeAssert.True(snapshot.Steps.All(step => !string.IsNullOrWhiteSpace(step.Category)), "Every progress row should expose a derived category for operator diagnostics.");
+        SmokeAssert.True(snapshot.Steps.Any(step => string.Equals(step.Phase, "analysis", StringComparison.OrdinalIgnoreCase)), "Runbook progress should identify the guest-analysis phase.");
+        SmokeAssert.True(!string.IsNullOrWhiteSpace(snapshot.CurrentPhase), "Aggregate runbook progress should copy the current phase from the current row.");
+        SmokeAssert.True(!string.IsNullOrWhiteSpace(snapshot.CurrentCategory), "Aggregate runbook progress should copy the current category from the current row.");
 
         var progressJson = JsonSerializer.Serialize(snapshot, new JsonSerializerOptions(JsonSerializerDefaults.Web));
         SmokeAssert.True(!progressJson.Contains("\"powerShell\"", StringComparison.Ordinal), "Live UI progress JSON should not expose a PowerShell command field.");

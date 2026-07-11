@@ -55,11 +55,13 @@ WebUI/UX 工作不得修改 `driver/`、`guest/` 或
   拖拽上传区、样本摘要、预设按钮、状态文本和错误提示都必须支持右键复制。
   主按钮附近必须保留可复制的 one-click handoff 提示，明确
   `/api/files/upload/start` 会保存样本、创建 job、提交后台 VM 分析，并将当前浏览器页
-  导航到 `/jobs/{jobId}/live-events`；上传中、启动接受或预检失败时，该提示应更新为
+  导航到 `/jobs/{jobId}/live-events`；英文契约必须明确写作 redirect the current browser page to
+  `/jobs/{jobId}/live-events`，并说明 no popup or extra dashboard tab is required；上传中、启动接受或预检失败时，该提示应更新为
   可复制的 job/monitor/progress 摘要。
 - 顶层工作区分为 `上传 / 配置`、`进度`、`报告` 三个 tab。上传/配置 tab
   是 default selected tab；上传/启动成功后按需切换到进度/报告区域；报告
-  就绪通知必须在自动打开报告前显示。
+  就绪通知必须在自动打开报告前显示。报告主链接必须跟随 current Chinese/English
+  dashboard language，并保留中文/英文备用入口。
 - 上传/配置工作区内部按用户输入方式再分为三种 submission tabs：
   `上传 EXE`、`选择已有路径`、`扫描目录`。上传 EXE 是默认选中的短路径，
   会在 `.exe` 保存后创建计划、提交后台 VM 分析，并把当前页面跳到 live

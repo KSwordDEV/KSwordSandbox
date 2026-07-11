@@ -1,5 +1,5 @@
 {
-  "version": "2026-07-12-v20-high-signal-windows-behavior",
+  "version": "2026-07-12-v21-defensive-behavior-expansion",
   "rules": [
     {
       "id": "host-submission",
@@ -30640,6 +30640,565 @@
         "ja3",
         "c2",
         "encrypted-channel",
+        "mitre"
+      ]
+    },
+    {
+      "id": "persistence-runonceex-depend-dll-value",
+      "title": "RunOnceEx Depend DLL persistence value",
+      "titleZh": "RunOnceEx Depend DLL 持久化值",
+      "severity": "medium",
+      "confidence": "medium",
+      "summary": "A registry write targets a RunOnceEx Depend value that can load a DLL during legacy logon/install processing.",
+      "summaryZh": "注册表写入指向 RunOnceEx Depend 值，该值可在旧版登录或安装处理期间加载 DLL。",
+      "mitreTechniqueId": "T1547.001",
+      "mitreTechniqueName": "Registry Run Keys / Startup Folder",
+      "eventTypes": [
+        "registry.set",
+        "registry.create"
+      ],
+      "dataContainsAll": {
+        "path": [
+          "CurrentVersion\\RunOnceEx",
+          "Depend"
+        ]
+      },
+      "dataRegex": {
+        "value": [
+          ".*\\\\Users\\\\[^\\\\]+\\\\.*\\.(?:dll|cpl)(?:\\b|$)",
+          ".*\\\\ProgramData\\\\.*\\.(?:dll|cpl)(?:\\b|$)"
+        ]
+      },
+      "evidenceFields": [
+        "eventType",
+        "path",
+        "data.path",
+        "data.valueName",
+        "data.value"
+      ],
+      "tags": [
+        "persistence",
+        "registry",
+        "runonceex",
+        "mitre"
+      ]
+    },
+    {
+      "id": "persistence-svchost-servicedll-user-writable",
+      "title": "Svchost ServiceDll points to user-writable DLL",
+      "titleZh": "Svchost ServiceDll 指向用户可写 DLL",
+      "severity": "medium",
+      "confidence": "medium",
+      "summary": "A service Parameters\\ServiceDll registry value points at a user-writable path, a pattern used by service DLL persistence.",
+      "summaryZh": "服务 Parameters\\ServiceDll 注册表值指向用户可写路径，这是服务 DLL 持久化常见模式。",
+      "mitreTechniqueId": "T1543.003",
+      "mitreTechniqueName": "Windows Service",
+      "eventTypes": [
+        "registry.set",
+        "registry.create"
+      ],
+      "dataContainsAll": {
+        "path": [
+          "CurrentControlSet\\Services",
+          "Parameters\\ServiceDll"
+        ]
+      },
+      "dataRegex": {
+        "value": [
+          ".*\\\\Users\\\\[^\\\\]+\\\\.*\\.dll(?:\\b|$)",
+          ".*\\\\ProgramData\\\\.*\\.dll(?:\\b|$)",
+          ".*\\\\Temp\\\\.*\\.dll(?:\\b|$)"
+        ]
+      },
+      "evidenceFields": [
+        "eventType",
+        "path",
+        "data.path",
+        "data.valueName",
+        "data.value"
+      ],
+      "tags": [
+        "persistence",
+        "service",
+        "registry",
+        "mitre"
+      ]
+    },
+    {
+      "id": "persistence-ifeo-globalflag-silentprocessexit",
+      "title": "IFEO GlobalFlag enables SilentProcessExit persistence",
+      "titleZh": "IFEO GlobalFlag 启用 SilentProcessExit 持久化",
+      "severity": "medium",
+      "confidence": "medium",
+      "summary": "A registry write enables IFEO GlobalFlag silent-exit monitoring, often paired with SilentProcessExit MonitorProcess persistence.",
+      "summaryZh": "注册表写入启用 IFEO GlobalFlag 静默退出监控，常与 SilentProcessExit MonitorProcess 持久化配合使用。",
+      "mitreTechniqueId": "T1546.012",
+      "mitreTechniqueName": "Image File Execution Options Injection",
+      "eventTypes": [
+        "registry.set",
+        "registry.create"
+      ],
+      "dataContainsAll": {
+        "path": [
+          "Image File Execution Options",
+          "GlobalFlag"
+        ]
+      },
+      "dataContains": {
+        "value": [
+          "0x200",
+          "512",
+          "FLG_MONITOR_SILENT_PROCESS_EXIT"
+        ]
+      },
+      "evidenceFields": [
+        "eventType",
+        "path",
+        "data.path",
+        "data.valueName",
+        "data.value"
+      ],
+      "tags": [
+        "persistence",
+        "ifeo",
+        "silent-process-exit",
+        "mitre"
+      ]
+    },
+    {
+      "id": "injection-atom-bombing-api-sequence",
+      "title": "AtomBombing-style APC atom API sequence",
+      "titleZh": "AtomBombing 风格 APC/Atom API 序列",
+      "severity": "medium",
+      "confidence": "medium",
+      "summary": "API telemetry records atom-table writes paired with APC or remote thread execution primitives, a defensive signal for AtomBombing-style injection.",
+      "summaryZh": "API 遥测记录 Atom 表写入并伴随 APC 或远程线程执行原语，是 AtomBombing 风格注入的防御信号。",
+      "mitreTechniqueId": "T1055.004",
+      "mitreTechniqueName": "Create or Modify System Process: APC Injection",
+      "eventTypes": [
+        "api.call",
+        "api.sequence",
+        "behavior.injection"
+      ],
+      "dataContainsAll": {
+        "apiSequence": [
+          "GlobalAddAtom",
+          "NtQueueApcThread"
+        ]
+      },
+      "evidenceFields": [
+        "eventType",
+        "processName",
+        "data.apiSequence",
+        "data.targetProcessName"
+      ],
+      "tags": [
+        "injection",
+        "apc",
+        "atom-bombing",
+        "mitre"
+      ]
+    },
+    {
+      "id": "injection-writeprocessmemory-followed-by-protect-execute",
+      "title": "Remote memory write followed by executable protection",
+      "titleZh": "远程内存写入后设置可执行保护",
+      "severity": "medium",
+      "confidence": "medium",
+      "summary": "A normalized injection sequence shows WriteProcessMemory into another process followed by executable memory protection.",
+      "summaryZh": "规范化注入序列显示对其他进程 WriteProcessMemory 后设置可执行内存保护。",
+      "mitreTechniqueId": "T1055",
+      "mitreTechniqueName": "Process Injection",
+      "eventTypes": [
+        "api.sequence",
+        "behavior.injection",
+        "memory.remote_write"
+      ],
+      "allDataContains": {
+        "targetIsRemote": [
+          "true"
+        ]
+      },
+      "dataContainsAll": {
+        "operation": [
+          "WriteProcessMemory",
+          "PAGE_EXECUTE"
+        ]
+      },
+      "evidenceFields": [
+        "eventType",
+        "processName",
+        "data.operation",
+        "data.targetProcessName",
+        "data.targetProcessId"
+      ],
+      "tags": [
+        "injection",
+        "memory",
+        "mitre"
+      ]
+    },
+    {
+      "id": "injection-setthreadcontext-suspended-target",
+      "title": "SetThreadContext against suspended target process",
+      "titleZh": "对挂起目标进程调用 SetThreadContext",
+      "severity": "medium",
+      "confidence": "medium",
+      "summary": "Telemetry shows a suspended process or thread context modification sequence consistent with hollowing preparation.",
+      "summaryZh": "遥测显示挂起进程或线程上下文修改序列，符合进程镂空准备行为。",
+      "mitreTechniqueId": "T1055.012",
+      "mitreTechniqueName": "Process Hollowing",
+      "eventTypes": [
+        "api.sequence",
+        "process.injection",
+        "behavior.injection"
+      ],
+      "dataContainsAll": {
+        "operation": [
+          "CREATE_SUSPENDED",
+          "SetThreadContext"
+        ]
+      },
+      "evidenceFields": [
+        "eventType",
+        "processName",
+        "data.operation",
+        "data.targetProcessName"
+      ],
+      "tags": [
+        "injection",
+        "process-hollowing",
+        "mitre"
+      ]
+    },
+    {
+      "id": "lateral-smb-admin-share-executable-write",
+      "title": "Executable written to SMB administrative share",
+      "titleZh": "可执行文件写入 SMB 管理共享",
+      "severity": "medium",
+      "confidence": "medium",
+      "summary": "A file write targets an ADMIN$, C$, or IPC-adjacent administrative share path with an executable or script payload extension.",
+      "summaryZh": "文件写入指向 ADMIN$、C$ 等管理共享路径，且具有可执行或脚本载荷扩展名。",
+      "mitreTechniqueId": "T1021.002",
+      "mitreTechniqueName": "SMB/Windows Admin Shares",
+      "eventTypes": [
+        "file.created",
+        "file.modified",
+        "smb.file.write"
+      ],
+      "pathRegex": [
+        "^\\\\\\\\[^\\\\]+\\\\(?:ADMIN\\$|C\\$|D\\$)\\\\.*\\.(?:exe|dll|ps1|bat|cmd|vbs|js|scr)(?:\\b|$)"
+      ],
+      "evidenceFields": [
+        "eventType",
+        "path",
+        "processName",
+        "commandLine"
+      ],
+      "tags": [
+        "lateral-movement",
+        "smb",
+        "admin-share",
+        "mitre"
+      ]
+    },
+    {
+      "id": "lateral-winrm-wsman-create-shell-soap",
+      "title": "WinRM WSMan CreateShell SOAP action",
+      "titleZh": "WinRM WSMan CreateShell SOAP 动作",
+      "severity": "medium",
+      "confidence": "medium",
+      "summary": "HTTP or PCAP metadata shows a WinRM WSMan CreateShell action over a remote management endpoint.",
+      "summaryZh": "HTTP 或 PCAP 元数据展示通过远程管理端点执行 WinRM WSMan CreateShell 动作。",
+      "mitreTechniqueId": "T1021.006",
+      "mitreTechniqueName": "Windows Remote Management",
+      "eventTypes": [
+        "http.request",
+        "pcap.http",
+        "network.http"
+      ],
+      "allDataContains": {
+        "uri": [
+          "/wsman"
+        ],
+        "headers": [
+          "CreateShell"
+        ]
+      },
+      "evidenceFields": [
+        "eventType",
+        "data.host",
+        "data.uri",
+        "data.method",
+        "data.headers",
+        "destinationIp"
+      ],
+      "tags": [
+        "lateral-movement",
+        "winrm",
+        "wsman",
+        "mitre"
+      ]
+    },
+    {
+      "id": "lateral-smb-svcctl-pipe-open",
+      "title": "SMB svcctl named pipe opened",
+      "titleZh": "打开 SMB svcctl 命名管道",
+      "severity": "medium",
+      "confidence": "medium",
+      "summary": "SMB metadata records access to the svcctl named pipe, commonly used for remote service control and PsExec-like movement.",
+      "summaryZh": "SMB 元数据记录访问 svcctl 命名管道，该管道常用于远程服务控制和 PsExec 类横向移动。",
+      "mitreTechniqueId": "T1569.002",
+      "mitreTechniqueName": "Service Execution",
+      "eventTypes": [
+        "smb.pipe.open",
+        "pcap.smb",
+        "network.smb"
+      ],
+      "dataContains": {
+        "pipeName": [
+          "\\svcctl",
+          "svcctl"
+        ]
+      },
+      "evidenceFields": [
+        "eventType",
+        "data.share",
+        "data.pipeName",
+        "data.destinationIp",
+        "processName"
+      ],
+      "tags": [
+        "lateral-movement",
+        "smb",
+        "service-control",
+        "mitre"
+      ]
+    },
+    {
+      "id": "anti-sandbox-low-interaction-count-gate",
+      "title": "Low user interaction count gates execution",
+      "titleZh": "低用户交互计数触发执行门控",
+      "severity": "medium",
+      "confidence": "medium",
+      "summary": "Behavior metadata indicates execution was gated on a low mouse, keyboard, or foreground-window interaction count.",
+      "summaryZh": "行为元数据显示执行受到低鼠标、键盘或前台窗口交互计数的门控。",
+      "mitreTechniqueId": "T1497.001",
+      "mitreTechniqueName": "System Checks",
+      "eventTypes": [
+        "anti_sandbox.check",
+        "behavior.anti_analysis",
+        "api.sequence"
+      ],
+      "dataContainsAll": {
+        "check": [
+          "user-interaction",
+          "threshold"
+        ]
+      },
+      "dataNumericRanges": {
+        "observedCount": [
+          {
+            "max": 2
+          }
+        ]
+      },
+      "evidenceFields": [
+        "eventType",
+        "processName",
+        "data.check",
+        "data.observedCount",
+        "data.threshold"
+      ],
+      "tags": [
+        "anti-sandbox",
+        "anti-analysis",
+        "user-interaction",
+        "mitre"
+      ]
+    },
+    {
+      "id": "anti-sandbox-vm-mac-oui-check",
+      "title": "Virtual machine MAC OUI check",
+      "titleZh": "虚拟机 MAC OUI 检查",
+      "severity": "low",
+      "confidence": "medium",
+      "summary": "Process or API telemetry references virtualization MAC address OUIs such as VMware, VirtualBox, Hyper-V, or QEMU vendors.",
+      "summaryZh": "进程或 API 遥测引用 VMware、VirtualBox、Hyper-V 或 QEMU 等虚拟化 MAC 地址 OUI。",
+      "mitreTechniqueId": "T1497.001",
+      "mitreTechniqueName": "System Checks",
+      "eventTypes": [
+        "process.start",
+        "api.call",
+        "anti_sandbox.check"
+      ],
+      "commandLineRegex": [
+        "(?i)(00:05:69|00:0c:29|00:1c:14|00:50:56|08:00:27|00:15:5d|52:54:00)"
+      ],
+      "dataRegex": {
+        "indicator": [
+          "(?i)(00:05:69|00:0c:29|00:1c:14|00:50:56|08:00:27|00:15:5d|52:54:00)"
+        ]
+      },
+      "evidenceFields": [
+        "eventType",
+        "processName",
+        "commandLine",
+        "data.indicator"
+      ],
+      "tags": [
+        "anti-sandbox",
+        "anti-analysis",
+        "vm-check",
+        "mitre"
+      ]
+    },
+    {
+      "id": "anti-sandbox-resource-threshold-exit",
+      "title": "Resource threshold check before exit or delay",
+      "titleZh": "退出或延迟前进行资源阈值检查",
+      "severity": "medium",
+      "confidence": "medium",
+      "summary": "A normalized anti-analysis event reports low CPU, memory, or disk thresholds coupled with an exit, sleep, or delay action.",
+      "summaryZh": "规范化反分析事件报告低 CPU、内存或磁盘阈值，并伴随退出、睡眠或延迟动作。",
+      "mitreTechniqueId": "T1497.001",
+      "mitreTechniqueName": "System Checks",
+      "eventTypes": [
+        "anti_sandbox.check",
+        "behavior.anti_analysis"
+      ],
+      "dataContainsAll": {
+        "check": [
+          "resource",
+          "threshold"
+        ]
+      },
+      "dataContains": {
+        "action": [
+          "exit",
+          "sleep",
+          "delay"
+        ]
+      },
+      "evidenceFields": [
+        "eventType",
+        "processName",
+        "data.check",
+        "data.action",
+        "data.cpuCount",
+        "data.memoryMb",
+        "data.diskGb"
+      ],
+      "tags": [
+        "anti-sandbox",
+        "anti-analysis",
+        "resource-check",
+        "mitre"
+      ]
+    },
+    {
+      "id": "download-execute-webdav-lolbin-url",
+      "title": "LOLBin executes payload from WebDAV URL",
+      "titleZh": "LOLBin 从 WebDAV URL 执行载荷",
+      "severity": "medium",
+      "confidence": "medium",
+      "summary": "A command line uses a Windows LOLBin to execute or load content from an http(s) WebDAV path or davwwwroot UNC path.",
+      "summaryZh": "命令行使用 Windows LOLBin 从 http(s) WebDAV 路径或 davwwwroot UNC 路径执行或加载内容。",
+      "mitreTechniqueId": "T1105",
+      "mitreTechniqueName": "Ingress Tool Transfer",
+      "eventTypes": [
+        "process.start",
+        "process.new"
+      ],
+      "commandLineRegex": [
+        "(?i)\\b(?:rundll32|regsvr32|mshta|wscript|cscript|msiexec)(?:\\.exe)?\\b.*(?:https?://[^\\s]+|\\\\\\\\[^\\\\]+@(?:SSL\\\\)?DavWWWRoot\\\\).*(?:\\.dll|\\.sct|\\.hta|\\.js|\\.vbs|\\.msi)(?:\\b|$)"
+      ],
+      "evidenceFields": [
+        "eventType",
+        "processName",
+        "commandLine",
+        "path"
+      ],
+      "tags": [
+        "download-execute",
+        "lolbin",
+        "webdav",
+        "mitre"
+      ]
+    },
+    {
+      "id": "download-execute-temp-cab-msi-chain",
+      "title": "Downloaded CAB or MSI launched from temp staging",
+      "titleZh": "从临时目录启动下载的 CAB/MSI 暂存文件",
+      "severity": "medium",
+      "confidence": "medium",
+      "summary": "Download-execute metadata ties a CAB/MSI/MSP package in a user temp or download cache path to package execution.",
+      "summaryZh": "download-execute 元数据将用户临时或下载缓存路径中的 CAB/MSI/MSP 包与包执行关联。",
+      "mitreTechniqueId": "T1218.007",
+      "mitreTechniqueName": "Msiexec",
+      "eventTypes": [
+        "download.execute",
+        "file.downloaded.executed",
+        "process.start"
+      ],
+      "dataRegex": {
+        "downloadPath": [
+          ".*\\\\Users\\\\[^\\\\]+\\\\(?:AppData\\\\Local\\\\Temp|Downloads|AppData\\\\Local\\\\Microsoft\\\\Windows\\\\INetCache)\\\\.*\\.(?:cab|msi|msp)(?:\\b|$)"
+        ],
+        "executedPath": [
+          ".*\\.(?:cab|msi|msp)(?:\\b|$)"
+        ]
+      },
+      "evidenceFields": [
+        "eventType",
+        "processName",
+        "commandLine",
+        "data.downloadPath",
+        "data.executedPath"
+      ],
+      "tags": [
+        "download-execute",
+        "msiexec",
+        "staging",
+        "mitre"
+      ]
+    },
+    {
+      "id": "download-execute-ads-zoneidentifier-executable-launch",
+      "title": "Executable with Zone.Identifier alternate stream launched",
+      "titleZh": "启动带 Zone.Identifier 备用流的可执行文件",
+      "severity": "medium",
+      "confidence": "medium",
+      "summary": "A process launch references an executable or script while event data records Zone.Identifier Mark-of-the-Web evidence.",
+      "summaryZh": "进程启动引用可执行文件或脚本，同时事件数据记录 Zone.Identifier Mark-of-the-Web 证据。",
+      "mitreTechniqueId": "T1204.002",
+      "mitreTechniqueName": "Malicious File",
+      "eventTypes": [
+        "process.start",
+        "process.new",
+        "download.execute"
+      ],
+      "commandLineRegex": [
+        "(?i).*\\\\Users\\\\[^\\\\]+\\\\(?:Downloads|Desktop|Documents|AppData\\\\Local\\\\Temp)\\\\.*\\.(?:exe|scr|ps1|vbs|js|hta|lnk)(?:\\b|$)"
+      ],
+      "dataContains": {
+        "zoneIdentifier": [
+          "ZoneId=3",
+          "Mark-of-the-Web",
+          "MOTW"
+        ]
+      },
+      "evidenceFields": [
+        "eventType",
+        "processName",
+        "commandLine",
+        "data.zoneIdentifier",
+        "path"
+      ],
+      "tags": [
+        "download-execute",
+        "motw",
+        "execution",
         "mitre"
       ]
     }

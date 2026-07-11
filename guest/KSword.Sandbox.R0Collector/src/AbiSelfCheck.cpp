@@ -150,6 +150,7 @@ std::string BuildAbiSelfCheckData(const Options& options) {
     data.AddUtf8("eventSchemaName", KSWORD_SANDBOX_EVENT_SCHEMA_NAME);
     data.AddUnsigned("eventSchemaVersion", KSWORD_SANDBOX_EVENT_SCHEMA_VERSION);
     data.AddUtf8("eventSchemaVersionHex", HexUnsignedLongLong(KSWORD_SANDBOX_EVENT_SCHEMA_VERSION, 8));
+    data.AddUtf8("stableAbiVersionFields", kStableAbiVersionFields);
 
     data.AddUnsigned("capabilityFlagsCurrent", KSWORD_SANDBOX_CAPABILITY_FLAGS_CURRENT);
     data.AddUtf8("capabilityFlagsCurrentHex", HexUnsignedLongLong(KSWORD_SANDBOX_CAPABILITY_FLAGS_CURRENT, 16));
@@ -252,6 +253,12 @@ std::string BuildAbiSelfCheckData(const Options& options) {
         options.suppressSelfNoise
             ? "default live READ_EVENTS import suppresses collector PID, collector output JSONL, and known KSword infrastructure paths; --emit-self-noise emits those rows with selfNoise=true"
             : "--emit-self-noise active; collector and KSword infrastructure rows are emitted with selfNoise=true instead of being suppressed");
+    data.AddUtf8(
+        "selfNoiseFilterPolicy",
+        "synthetic/no-device rows use kSyntheticSampleProcessId with collectorSelfNoise=false; live rows classify collector PID, collector output JSONL, and KSword infrastructure paths before emission");
+    data.AddUtf8(
+        "selfNoiseFilterFields",
+        "selfNoiseFilterMode|selfNoiseFilterPolicy|selfNoiseFilterMatched|selfNoiseFilterAction|syntheticSampleProcessId|collectorSelfNoise|selfProcess|collectorSuppressed");
     data.AddWide(
         "zhCollectorSelfNoisePolicy",
         options.suppressSelfNoise

@@ -46,6 +46,8 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(rendererSource, "Process relationship tree", "Report renderer should explain the process relationship tree.");
         RequireContains(rendererSource, "Process tree default expansion", "Report renderer should explain process tree default expansion.");
         RequireContains(rendererSource, "Process tree nodes", "Report renderer should expose process tree overview cards.");
+        RequireContains(rendererSource, "ProcessTreeSparkline", "Report renderer should expose static process-tree activity sparklines.");
+        RequireContains(rendererSource, "process-tree-sparkline", "Report renderer should style process-tree activity sparklines.");
         RequireContains(rendererSource, "Self-noise excluded", "Report renderer should explain process-tree self-noise exclusion.");
         RequireContains(rendererSource, "overview-strip", "Report renderer should expose flat overview panels for dense evidence.");
         RequireContains(rendererSource, "ProcessLookupKeys", "Report renderer should resolve process relationships with stable lookup keys.");
@@ -57,6 +59,9 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(rendererSource, "Evidence summary cards", "Report renderer should expose evidence summary cards title.");
         RequireContains(rendererSource, "AppendEvidenceStoryBoard", "Report renderer should expose a narrative evidence story board.");
         RequireContains(rendererSource, "Evidence story board", "Report renderer should expose the evidence story board title.");
+        RequireContains(rendererSource, "AppendEvidenceHealthNarrative", "Report renderer should expose R0/VT/artifact evidence health narrative cards.");
+        RequireContains(rendererSource, "Evidence health narrative", "Report renderer should expose the evidence health narrative title.");
+        RequireContains(rendererSource, "R0 / VT / Artifact health narrative", "Report renderer should narrate evidence health separately from behavior risk.");
         RequireContains(rendererSource, "Dropped-file evidence", "Report renderer should keep dropped-file story evidence visible.");
         RequireContains(rendererSource, "Screenshot evidence", "Report renderer should keep screenshot story evidence visible.");
         RequireContains(rendererSource, "Memory dump evidence", "Report renderer should keep memory dump story evidence visible.");
@@ -80,6 +85,8 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(rendererSource, "Network relationship cards", "Report renderer should expose network relationship card title.");
         RequireContains(rendererSource, "Endpoint groups", "Report renderer should summarize endpoint relationship groups.");
         RequireContains(rendererSource, "Network category view", "Report renderer should explain DNS/HTTP/TLS/flow network lanes.");
+        RequireContains(rendererSource, "AppendNetworkRelationFlow", "Report renderer should expose static network relation paths.");
+        RequireContains(rendererSource, "Network relation path", "Report renderer should make network relation paths visible.");
         RequireContains(rendererSource, "relationship-details", "Report renderer should use bounded expandable evidence cards.");
         RequireContains(rendererSource, "Copy process card", "Report renderer should expose copyable process relationship cards.");
         RequireContains(rendererSource, "Copy network card", "Report renderer should expose copyable network relationship cards.");
@@ -101,6 +108,8 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(rendererSource, "folded technical fields", "Raw event page summaries should expose folded technical field counts.");
         RequireContains(rendererSource, "RawEventFoldedTechnicalFieldCount", "Raw event pagination should compute folded technical field counts per page.");
         RequireContains(rendererSource, "raw-event-page", "Report renderer should split expanded raw events into page panels.");
+        RequireContains(rendererSource, "AppendRawPageNavigation", "Report renderer should provide native raw-event page shortcuts.");
+        RequireContains(rendererSource, "raw-page-nav", "Report renderer should style native raw-event page shortcuts.");
         RequireContains(rendererSource, "Raw event page index", "Report renderer should expose a static raw event page index.");
         RequireContains(rendererSource, "AppendRawEventPageIndex", "Report renderer should build a raw event page index.");
         RequireContains(rendererSource, "Index by event type", "Raw event index should group by event type.");

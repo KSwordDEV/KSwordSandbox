@@ -290,6 +290,9 @@ public static class NetworkTelemetrySchema
                     data["sourcePcapArtifactSha256"] = sha256;
                     data["pcapArtifactSizeBytes"] = sizeText;
                     data["pcapArtifactSha256"] = sha256;
+            data["parentArtifactSizeBytes"] = sizeText;
+            data["parentArtifactSha256"] = sha256;
+            data["parentHashSha256"] = sha256;
                 }
             }
         }
@@ -660,19 +663,19 @@ public static class NetworkTelemetrySchema
     {
         var eventKind = ValueOrEmpty(data, "eventKind");
         if (string.Equals(eventKind, "dns", StringComparison.OrdinalIgnoreCase) ||
-            HasAnyDataValue(data, "queryName", "qname", "dnsQueryName", "domain", "rcode", "answers"))
+            HasAnyDataValue(data, "queryName", "qname", "dnsQueryName", "domain", "rcode", "answers", "answer", "dns.answers", "dns.a", "dns.aaaa"))
         {
             ApplyDnsNormalization(data);
         }
 
         if (string.Equals(eventKind, "http", StringComparison.OrdinalIgnoreCase) ||
-            HasAnyDataValue(data, "method", "httpMethod", "url", "host", "requestUri", "statusCode"))
+            HasAnyDataValue(data, "method", "httpMethod", "url", "host", "requestUri", "statusCode", "userAgent", "http.user_agent", "http.request.headers.user-agent"))
         {
             ApplyHttpNormalization(data);
         }
 
         if (string.Equals(eventKind, "tls", StringComparison.OrdinalIgnoreCase) ||
-            HasAnyDataValue(data, "sni", "serverName", "tlsVersion", "ja3", "certificateStatus", "certSubject"))
+            HasAnyDataValue(data, "sni", "serverName", "tlsVersion", "ja3", "ja3.hash", "ja3s", "certificateStatus", "certSubject", "certSha256"))
         {
             ApplyTlsNormalization(data);
         }
@@ -769,10 +772,50 @@ public static class NetworkTelemetrySchema
                 "dns.response_code");
         }
 
-        var answers = NormalizeDnsAnswerList(FirstDataValue(data, "answers", "answer", "resolvedIp", "resolvedIps", "dnsAnswers", "dns.answer", "dns.answers", "dns.answers.data"));
+        var answers = NormalizeDnsAnswerList(FirstDataValue(
+            data,
+            "answers",
+            "answer",
+            "dnsAnswer",
+            "dnsAnswers",
+            "resolvedIp",
+            "resolvedIps",
+            "resolvedAddress",
+            "resolvedAddresses",
+            "answerIp",
+            "answerAddress",
+            "dns.answer",
+            "dns.answers",
+            "dns.answers.data",
+            "dns.answers.name",
+            "dns.resp.name",
+            "dns.a",
+            "dns.aaaa",
+            "dns.cname"));
         if (!string.IsNullOrWhiteSpace(answers))
         {
-            AddAliases(data, answers, "answer", "answers", "resolvedIp", "resolvedIps", "dnsAnswers", "dns.answer", "dns.answers", "dns.answers.data");
+            AddAliases(
+                data,
+                answers,
+                "answer",
+                "answers",
+                "dnsAnswer",
+                "dnsAnswers",
+                "resolvedIp",
+                "resolvedIps",
+                "resolvedAddress",
+                "resolvedAddresses",
+                "answerIp",
+                "answerAddress",
+                "dns.answer",
+                "dns.answers",
+                "dns.answers.data",
+                "dns.answers.name",
+                "dns.resp.name",
+                "dns.a",
+                "dns.aaaa",
+                "dns.cname",
+                "answersNormalized");
             AddIfNotEmpty(data, "answerCount", CountDelimitedValues(answers));
         }
 
@@ -801,10 +844,10 @@ public static class NetworkTelemetrySchema
             AddAliases(data, method, "method", "httpMethod", "requestMethod", "httpRequestMethod", "http.method", "http.request.method");
         }
 
-        var url = FirstDataValue(data, "url", "requestUrl", "httpUrl");
-        var scheme = NormalizeHttpScheme(FirstDataValue(data, "scheme", "httpScheme"));
-        var host = NormalizeHttpHost(FirstDataValue(data, "host", "hostname", "httpHost"));
-        var uri = NormalizeHttpUri(FirstDataValue(data, "uri", "requestUri", "path"));
+        var url = FirstDataValue(data, "url", "requestUrl", "httpUrl", "url.full", "url.original", "http.url", "http.request.full_uri");
+        var scheme = NormalizeHttpScheme(FirstDataValue(data, "scheme", "httpScheme", "url.scheme", "http.scheme"));
+        var host = NormalizeHttpHost(FirstDataValue(data, "host", "hostname", "httpHost", "authority", "url.host", "url.domain", "server.domain", "http.host", "http.hostname", "http.request.headers.host", "request.headers.host"));
+        var uri = NormalizeHttpUri(FirstDataValue(data, "uri", "requestUri", "path", "url.path", "http.request.uri", "http.target", "cs-uri-stem"));
 
         var hasAbsoluteUrl = Uri.TryCreate(url, UriKind.Absolute, out var parsedUrl);
         if (hasAbsoluteUrl && parsedUrl is not null)
@@ -832,17 +875,12 @@ public static class NetworkTelemetrySchema
 
         if (!string.IsNullOrWhiteSpace(host))
         {
-            data["host"] = host;
-            data["hostname"] = host;
-            data["httpHost"] = host;
-            data["hostNormalized"] = host;
+            AddAliases(data, host, "host", "hostname", "httpHost", "authority", "url.host", "url.domain", "server.domain", "http.host", "http.hostname", "http.request.headers.host", "request.headers.host", "hostNormalized");
         }
 
         if (!string.IsNullOrWhiteSpace(uri))
         {
-            data["uri"] = uri;
-            data["requestUri"] = uri;
-            data["path"] = uri;
+            AddAliases(data, uri, "uri", "requestUri", "path", "url.path", "http.request.uri", "http.target", "cs-uri-stem", "pathNormalized");
         }
 
         AddIfNotEmpty(data, "scheme", scheme);
@@ -880,9 +918,16 @@ public static class NetworkTelemetrySchema
                 "responseCode",
                 "http.response.status_code",
                 "http.response.code",
-                "http.status_code");
+                "http.status_code",
+                "http.status",
+                "status_code",
+                "response.status_code",
+                "sc-status");
             AddIfNotEmpty(data, "statusFamily", HttpStatusFamily(statusCode));
         }
+
+        var userAgent = FirstDataValue(data, "userAgent", "user_agent", "httpUserAgent", "http.user_agent", "http.user_agent.original", "http.request.headers.user-agent", "request.headers.user-agent", "user-agent");
+        AddAliases(data, userAgent, "userAgent", "user_agent", "httpUserAgent", "http.user_agent", "http.user_agent.original", "http.request.headers.user-agent", "request.headers.user-agent", "user-agent");
 
         var requestBodyBytes = NormalizeByteCount(FirstDataValue(
             data,
@@ -942,10 +987,10 @@ public static class NetworkTelemetrySchema
 
     private static void ApplyTlsNormalization(Dictionary<string, string> data)
     {
-        var sni = NormalizeDnsName(FirstDataValue(data, "sni", "serverName", "tlsServerName", "tlsSni", "server_name", "tls.server_name", "tls.handshake.extensions_server_name", "ssl.handshake.extensions_server_name"));
+        var sni = NormalizeDnsName(FirstDataValue(data, "sni", "serverName", "tlsServerName", "tlsSni", "server_name", "tls.sni", "tls.server_name", "ssl.server_name", "tls.handshake.extensions_server_name", "ssl.handshake.extensions_server_name"));
         if (!string.IsNullOrWhiteSpace(sni))
         {
-            AddAliases(data, sni, "sni", "serverName", "tlsServerName", "tlsSni", "server_name", "tls.server_name", "tls.handshake.extensions_server_name", "ssl.handshake.extensions_server_name", "sniNormalized");
+            AddAliases(data, sni, "sni", "serverName", "tlsServerName", "tlsSni", "server_name", "tls.sni", "tls.server_name", "ssl.server_name", "tls.handshake.extensions_server_name", "ssl.handshake.extensions_server_name", "sniNormalized");
         }
 
         var tlsVersion = NormalizeTlsVersion(FirstDataValue(data, "tlsVersion", "version"));
@@ -957,10 +1002,10 @@ public static class NetworkTelemetrySchema
             data["tlsHandshakeType"] = handshakeType;
         }
 
-        var ja3 = NormalizeHashText(FirstDataValue(data, "ja3", "ja3Hash", "tlsJa3", "ja3.hash", "tls.ja3", "tls.ja3.hash", "tls.handshake.ja3_hash"));
-        AddAliases(data, ja3, "ja3", "ja3Hash", "tlsJa3", "ja3Fingerprint", "ja3.hash", "tls.ja3", "tls.ja3.hash", "tls.handshake.ja3_hash");
-        var ja3s = NormalizeHashText(FirstDataValue(data, "ja3s", "ja3sHash", "tlsJa3s", "ja3s.hash", "tls.ja3s", "tls.ja3s.hash", "tls.handshake.ja3s_hash"));
-        AddAliases(data, ja3s, "ja3s", "ja3sHash", "tlsJa3s", "ja3sFingerprint", "ja3s.hash", "tls.ja3s", "tls.ja3s.hash", "tls.handshake.ja3s_hash");
+        var ja3 = NormalizeHashText(FirstDataValue(data, "ja3", "ja3Hash", "tlsJa3", "ja3Fingerprint", "ja3Digest", "ja3Md5", "ja3.hash", "tls.ja3", "tls.ja3.hash", "tls.handshake.ja3", "tls.handshake.ja3_hash", "ssl.ja3", "ssl.ja3_hash"));
+        AddAliases(data, ja3, "ja3", "ja3Hash", "tlsJa3", "ja3Fingerprint", "ja3Digest", "ja3Md5", "ja3.hash", "tls.ja3", "tls.ja3.hash", "tls.handshake.ja3", "tls.handshake.ja3_hash", "ssl.ja3", "ssl.ja3_hash");
+        var ja3s = NormalizeHashText(FirstDataValue(data, "ja3s", "ja3sHash", "tlsJa3s", "ja3sFingerprint", "ja3sDigest", "ja3sMd5", "ja3s.hash", "tls.ja3s", "tls.ja3s.hash", "tls.handshake.ja3s", "tls.handshake.ja3s_hash", "ssl.ja3s", "ssl.ja3s_hash"));
+        AddAliases(data, ja3s, "ja3s", "ja3sHash", "tlsJa3s", "ja3sFingerprint", "ja3sDigest", "ja3sMd5", "ja3s.hash", "tls.ja3s", "tls.ja3s.hash", "tls.handshake.ja3s", "tls.handshake.ja3s_hash", "ssl.ja3s", "ssl.ja3s_hash");
 
         var certSubject = FirstDataValue(data, "certSubject", "certificateSubject", "x509Subject", "x509.subject", "tls.cert.subject", "tls.certificate.subject");
         AddAliases(data, certSubject, "certSubject", "certificateSubject", "x509Subject", "x509.subject", "tls.cert.subject", "tls.certificate.subject");
@@ -968,8 +1013,8 @@ public static class NetworkTelemetrySchema
         AddAliases(data, certIssuer, "certIssuer", "certificateIssuer", "x509Issuer", "x509.issuer", "tls.cert.issuer", "tls.certificate.issuer");
         var certSerial = FirstDataValue(data, "certSerial", "certificateSerial", "x509Serial", "x509.serial_number", "tls.cert.serial", "tls.certificate.serial");
         AddAliases(data, certSerial, "certSerial", "certificateSerial", "x509Serial", "x509.serial_number", "tls.cert.serial", "tls.certificate.serial");
-        var certSha256 = NormalizeHashText(FirstDataValue(data, "certSha256", "certificateSha256", "certificateFingerprintSha256", "x509.fingerprint.sha256", "cert.fingerprint.sha256", "tls.cert.fingerprint.sha256", "tls.certificate.fingerprint.sha256"));
-        AddAliases(data, certSha256, "certSha256", "certificateSha256", "certificateFingerprintSha256", "x509.fingerprint.sha256", "cert.fingerprint.sha256", "tls.cert.fingerprint.sha256", "tls.certificate.fingerprint.sha256");
+        var certSha256 = NormalizeHashText(FirstDataValue(data, "certSha256", "certificateSha256", "certificateFingerprintSha256", "serverCertificateSha256", "x509.fingerprint.sha256", "cert.sha256", "cert.fingerprint.sha256", "tls.cert.sha256", "tls.cert.fingerprint.sha256", "tls.certificate.sha256", "tls.certificate.fingerprint.sha256"));
+        AddAliases(data, certSha256, "certSha256", "certificateSha256", "certificateFingerprintSha256", "serverCertificateSha256", "x509.fingerprint.sha256", "cert.sha256", "cert.fingerprint.sha256", "tls.cert.sha256", "tls.cert.fingerprint.sha256", "tls.certificate.sha256", "tls.certificate.fingerprint.sha256");
         var certSha1 = NormalizeHashText(FirstDataValue(data, "certSha1", "certificateSha1", "certificateFingerprintSha1", "x509.fingerprint.sha1", "cert.fingerprint.sha1", "tls.cert.fingerprint.sha1"));
         AddAliases(data, certSha1, "certSha1", "certificateSha1", "certificateFingerprintSha1", "x509.fingerprint.sha1", "cert.fingerprint.sha1", "tls.cert.fingerprint.sha1");
         var certNotBefore = FirstDataValue(data, "certNotBefore", "certificateNotBefore", "x509.not_before", "tls.cert.not_before");
@@ -1380,6 +1425,13 @@ public static class NetworkTelemetrySchema
         AddIfNotEmpty(data, "sourcePcapArtifactSelector", pcapRelativePath);
         AddIfNotEmpty(data, "pcapDownloadSelector", pcapRelativePath);
         AddIfNotEmpty(data, "sourcePcapDownloadSelector", pcapRelativePath);
+        AddIfNotEmpty(data, "parentArtifactPath", pcapPath);
+        AddIfNotEmpty(data, "parentArtifactName", pcapName);
+        AddIfNotEmpty(data, "parentArtifactRelativePath", pcapRelativePath);
+        AddIfNotEmpty(data, "parentArtifactSelector", pcapRelativePath);
+        AddIfNotEmpty(data, "parentDownloadSelector", pcapRelativePath);
+        AddIfNotEmpty(data, "parentArtifactKind", "PacketCapture");
+        AddIfNotEmpty(data, "parentEvidenceRole", "packet-capture");
 
         if (string.IsNullOrWhiteSpace(pcapPath))
         {
@@ -1402,6 +1454,9 @@ public static class NetworkTelemetrySchema
             data["pcapSourceArtifactSha256"] = sha256;
             data["sourcePcapArtifactSha256"] = sha256;
             data["pcapArtifactSha256"] = sha256;
+            data["parentArtifactSizeBytes"] = sizeText;
+            data["parentArtifactSha256"] = sha256;
+            data["parentHashSha256"] = sha256;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException)
         {

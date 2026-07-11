@@ -104,6 +104,11 @@ internal sealed class GuestAgentCollectionDepthScenario : ISmokeTestScenario
         AssertFileContains(Path.Combine(collectionRoot, "MemoryDumpProbe.cs"), "childTargetCount", "Memory dump sweep must report child-process coverage.");
         AssertFileContains(Path.Combine(collectionRoot, "MemoryDumpProbe.cs"), "memoryDumpCoverageState", "Memory dump sweep must expose a report-ready coverage state.");
         AssertFileContains(Path.Combine(collectionRoot, "MemoryDumpProbe.cs"), "artifactRelativePath", "Memory dump captured events must expose artifact-relative paths.");
+        AssertFileContains(Path.Combine(collectionRoot, "MemoryDumpProbe.cs"), "existingArtifactSelector", "Duplicate memory dump rows must reference the already-captured artifact selector.");
+        AssertFileContains(Path.Combine(collectionRoot, "MemoryDumpProbe.cs"), "artifactReferenceEvent", "Duplicate memory dump rows must be explicit artifact-reference events.");
+        AssertFileContains(Path.Combine(collectionRoot, "MemoryDumpProbe.cs"), "selectorArtifactCount", "Memory dump sweep summaries must count selector-ready dump artifacts.");
+        AssertFileContains(Path.Combine(collectionRoot, "MemoryDumpProbe.cs"), "firstArtifactSelector", "Memory dump sweep summaries must expose first artifact selectors.");
+        AssertFileContains(Path.Combine(collectionRoot, "MemoryDumpProbe.cs"), "largestArtifactSelector", "Memory dump sweep summaries must expose largest artifact selectors.");
         AssertFileContains(Path.Combine(collectionRoot, "MemoryDumpProbe.cs"), "sha256", "Memory dump captured events must expose event-level SHA-256 metadata.");
         AssertFileContains(Path.Combine(collectionRoot, "MemoryDumpProbe.cs"), "treeLineage", "Memory dump events must preserve child lineage metadata.");
         AssertFileContains(Path.Combine(collectionRoot, "MemoryDumpProbe.cs"), "zhMessage", "Memory dump events must include Chinese report text.");

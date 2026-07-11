@@ -324,12 +324,18 @@ public sealed partial class SandboxJobService
         {
             resultByIndex.TryGetValue(index, out var stepResult);
             var state = RunbookProgressFacts.ResolveStepState(index, stepResult, failedIndex);
+            var facts = RunbookProgressFacts.DescribeStep(step, index, runbook.Steps.Count);
             return new SandboxRunbookStepProgressSnapshot
             {
                 StepIndex = index,
+                Ordinal = facts.Ordinal,
                 StepId = step.Id,
                 Title = step.Title,
                 State = state,
+                Phase = facts.Phase,
+                Category = facts.Category,
+                RemediationHintZh = facts.RemediationHintZh,
+                IsCleanup = facts.IsCleanup,
                 RequiresElevation = step.RequiresElevation,
                 MutatesVmState = step.MutatesVmState,
                 StartedAtUtc = stepResult?.StartedAtUtc,
@@ -360,6 +366,9 @@ public sealed partial class SandboxJobService
             CurrentStepIndex = currentStep?.StepIndex,
             CurrentStepId = currentStep?.StepId,
             CurrentStepTitle = currentStep?.Title,
+            CurrentPhase = currentStep?.Phase,
+            CurrentCategory = currentStep?.Category,
+            ProgressPercent = RunbookProgressFacts.ComputeProgressPercent(steps, state, result.Success, result.TotalSteps > 0 ? result.TotalSteps : runbook.Steps.Count),
             Success = result.Success,
             Message = RunbookProgressFacts.BuildAggregateProgressMessage(runbook, result, freshnessDiagnostic),
             StartedAtUtc = startedAt,

@@ -74,11 +74,15 @@ internal static class SettingsPage
           <main>
             <section id="vtSettingsSection" data-copy="VirusTotal status={{Attr(virusTotal.Configured ? "configured" : "not-configured")}}; source={{Attr(virusTotal.Source)}}; persistence=process-only-no-file; no sample upload">
               <h2 data-zh="VirusTotal 官方结果" data-en="VirusTotal official results">VirusTotal 官方结果</h2>
-              <p class="muted" data-zh="当前只做哈希查询（hash lookup），不上传样本。不配置、限速、鉴权失败或超时时，主流程继续运行且不会产生噪音日志。" data-en="Current integration performs hash lookup only and does not upload samples. Missing keys, rate limits, auth failures, or timeouts keep the main flow running without noisy logs.">当前只做哈希查询（hash lookup），不上传样本。不配置、限速、鉴权失败或超时时，主流程继续运行且不会产生噪音日志。</p>
+              <p class="muted" data-zh="当前只做哈希查询（hash lookup），不上传样本。不配置、未收录、限速、鉴权失败或超时时，主流程继续运行且不会产生噪音日志；状态只在动态监控页/API 中静默展示，不写任务日志或行为日志。" data-en="Current integration performs hash lookup only and does not upload samples. Missing keys, not-found, rate limits, auth failures, or timeouts keep the main flow running without noisy logs; status is shown quietly on the live monitor/API without job or behavior logs.">当前只做哈希查询（hash lookup），不上传样本。不配置、未收录、限速、鉴权失败或超时时，主流程继续运行且不会产生噪音日志；状态只在动态监控页/API 中静默展示，不写任务日志或行为日志。</p>
               <button class="copy-btn" type="button" data-copy="VirusTotal status={{Attr(virusTotal.Configured ? "configured" : "not-configured")}}; source={{Attr(virusTotal.Source)}}; persistence=process-only-no-file; hash-only; does not upload samples" data-copy-label="VirusTotal settings summary" data-zh="复制本卡摘要" data-en="Copy card summary">复制本卡摘要</button>
               <div class="metric">
                 <strong data-zh="安全提示" data-en="Security note">安全提示</strong>
                 <p class="muted" data-copy="VirusTotal API key WebUI updates are process-only and never persisted to disk." data-zh="在本页输入的 API Key 只写入当前进程环境变量 KSWORDBOX_VIRUSTOTAL_API_KEY；WebUI 不落盘。需要重启后仍生效时，请在启动 Web Host 之前设置 User/Machine 环境变量。" data-en="Keys entered here are written only to the current process environment variable KSWORDBOX_VIRUSTOTAL_API_KEY; the WebUI never persists them to disk. For restart-stable use, set a User/Machine environment variable before starting the Web Host.">在本页输入的 API Key 只写入当前进程环境变量 KSWORDBOX_VIRUSTOTAL_API_KEY；WebUI 不落盘。需要重启后仍生效时，请在启动 Web Host 之前设置 User/Machine 环境变量。</p>
+              </div>
+              <div class="metric">
+                <strong data-zh="动态监控页展示策略" data-en="Live monitor display policy">动态监控页展示策略</strong>
+                <p class="muted" data-copy="VT quiet statuses are display-only on /jobs/{jobId}/live-events and do not write job/behavior logs." data-zh="上传 EXE 后会进入 /jobs/{jobId}/live-events；VirusTotal 未配置、未收录或调用失败时，该页只显示“静默状态”，不阻断分析、不写任务/行为日志。" data-en="After EXE upload, the UI enters /jobs/{jobId}/live-events; if VirusTotal is missing, not found, or fails, that page shows a quiet status only, without blocking analysis or writing job/behavior logs.">上传 EXE 后会进入 /jobs/{jobId}/live-events；VirusTotal 未配置、未收录或调用失败时，该页只显示“静默状态”，不阻断分析、不写任务/行为日志。</p>
               </div>
               <div class="metric">
                 <strong data-zh="状态" data-en="Status">状态</strong>

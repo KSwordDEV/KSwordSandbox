@@ -17,6 +17,16 @@ namespace KSword::Sandbox::R0Collector {
 // Return: JSON object text for SandboxEvent.data.
 std::string BuildConfigData(const Options& options) {
     JsonDataObjectBuilder data;
+    data.AddUnsigned("collectorAbiVersion", KSWORD_SANDBOX_INTERFACE_VERSION);
+    data.AddUtf8("collectorAbiVersionHex", HexUnsignedLongLong(KSWORD_SANDBOX_INTERFACE_VERSION, 8));
+    data.AddUnsigned("abiVersionMajor", KSWORD_SANDBOX_ABI_VERSION_MAJOR);
+    data.AddUnsigned("abiVersionMinor", KSWORD_SANDBOX_ABI_VERSION_MINOR);
+    data.AddUnsigned("eventHeaderVersion", KSWORD_SANDBOX_EVENT_HEADER_VERSION);
+    data.AddUtf8("eventHeaderVersionHex", HexUnsignedLongLong(KSWORD_SANDBOX_EVENT_HEADER_VERSION, 8));
+    data.AddUtf8("eventSchemaName", KSWORD_SANDBOX_EVENT_SCHEMA_NAME);
+    data.AddUnsigned("eventSchemaVersion", KSWORD_SANDBOX_EVENT_SCHEMA_VERSION);
+    data.AddUtf8("eventSchemaVersionHex", HexUnsignedLongLong(KSWORD_SANDBOX_EVENT_SCHEMA_VERSION, 8));
+    data.AddUtf8("stableAbiVersionFields", kStableAbiVersionFields);
     data.AddWide("devicePath", options.devicePath);
     data.AddWide("serviceName", options.serviceName);
     data.AddWide("outputPath", options.outputPath);
@@ -67,6 +77,11 @@ std::string BuildConfigData(const Options& options) {
     data.AddBool("healthOnly", options.healthOnly);
     data.AddBool("heartbeat", options.heartbeat);
     data.AddBool("suppressSelfNoise", options.suppressSelfNoise);
+    data.AddUtf8(
+        "selfNoiseFilterPolicy",
+        options.mockMode
+            ? "synthetic/no-device rows use kSyntheticSampleProcessId and explicit collectorSelfNoise=false"
+            : "live READ_EVENTS rows classify collector PID/output-path/KSword infrastructure before emission");
     data.AddUtf8(
         "collectorNoisePolicy",
         options.suppressSelfNoise ? "suppress-self-noise" : "emit-self-noise");

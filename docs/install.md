@@ -425,6 +425,10 @@ PowerShell Direct 需要 guest Windows credential 来暂存样本、运行 Guest
 - Hyper-V：`HyperVModuleAvailable`、`VmExists`、`CheckpointExists`、`VmProfile`、
   `VmGuestServiceInterfaceEnabled`，并在 `RecommendedActions` 给出缺失 VM、missing checkpoint、
   Guest Service Interface 等修复命令。
+- VM profile：`VmProfile` 是本机操作者画像，不是 release artifact；它应回答“当前
+  shell 会使用哪个 VM、checkpoint、guest working directory、runtime root、guest payload root
+  和 driver host path”。如果 profile 仍是示例值，先用 `-UpdateHyperVConfig` 修正，不要把
+  `sandbox.local.json` 提交或打包。
 - 测试签名：`HostTestSigningState` 只读显示宿主 test-signing 状态；guest test-signing 仍必须通过
   `-QueryGuestTestSigning`、`-EnableGuestTestSigning` 或交互菜单显式执行。
 - driver：`DriverHostPathExists`、`DriverSignatureStatus`、`DriverServiceStatus`、
@@ -432,6 +436,9 @@ PowerShell Direct 需要 guest Windows credential 来暂存样本、运行 Guest
   前再按 `DriverServiceStatusCommand` 或 `scripts\Manage-SandboxDriver.ps1 -Action Status` 查看。
 - guest password：只显示 `ProcessSecretSet`、`UserSecretSet`、`MachineSecretSet` 和
   `GuestPasswordGuidance`，不会输出、摘要或回显密码值。密码值永不打印 / The password value is never printed.
+- VirusTotal：`VirusTotalStatus` 只显示可选 hash-only API key 是否存在、设置来源和缺失时的
+  quiet-skip 行为；不会打印 key。VirusTotal key 与 BIOS/UEFI 里的 Intel VT-x / AMD-V
+  硬件虚拟化不是同一件事。
 
 VM profile 的来源是本机安装状态和 `sandbox.local.json`，不要修改仓库模板保存本机 VM 名称、
 checkpoint、guest path、driver path 或 secret。需要更新时继续使用：

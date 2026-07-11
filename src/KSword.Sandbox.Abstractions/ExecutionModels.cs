@@ -98,11 +98,40 @@ public sealed record SandboxRunbookStepProgressSnapshot
 {
     public required int StepIndex { get; init; }
 
+    /// <summary>
+    /// Human ordinal such as 3/14. This is persisted so WebUI/report consumers
+    /// do not need to recompute display labels from partial historical data.
+    /// </summary>
+    public string? Ordinal { get; init; }
+
     public required string StepId { get; init; }
 
     public required string Title { get; init; }
 
     public required string State { get; init; }
+
+    /// <summary>
+    /// Coarse runbook phase derived from the stable step id, for example
+    /// preflight, vm-prepare, analysis, collection, or cleanup.
+    /// </summary>
+    public string? Phase { get; init; }
+
+    /// <summary>
+    /// Operator-facing category derived from the stable step id, for example
+    /// powershell-direct, guest-agent, driver-service, or guest-output.
+    /// </summary>
+    public string? Category { get; init; }
+
+    /// <summary>
+    /// Chinese remediation hint for the step. This is intentionally generic
+    /// and does not include command text, stdout, or stderr.
+    /// </summary>
+    public string? RemediationHintZh { get; init; }
+
+    /// <summary>
+    /// True for cleanup/recovery steps that may run after the primary failure.
+    /// </summary>
+    public bool IsCleanup { get; init; }
 
     public bool RequiresElevation { get; init; }
 
@@ -145,6 +174,22 @@ public sealed record SandboxRunbookProgressSnapshot
     public string? CurrentStepId { get; init; }
 
     public string? CurrentStepTitle { get; init; }
+
+    /// <summary>
+    /// Current-step phase copied from the UI-safe step row.
+    /// </summary>
+    public string? CurrentPhase { get; init; }
+
+    /// <summary>
+    /// Current-step category copied from the UI-safe step row.
+    /// </summary>
+    public string? CurrentCategory { get; init; }
+
+    /// <summary>
+    /// Bounded 0-100 progress percentage derived from completed/running step
+    /// state. This is a display hint only; the canonical state remains Steps.
+    /// </summary>
+    public int ProgressPercent { get; init; }
 
     public bool? Success { get; init; }
 

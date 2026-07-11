@@ -1169,6 +1169,17 @@ static bool IsRunbookProgressStreamTerminal(
 
 static int ComputeRunbookProgressPercent(SandboxRunbookProgressSnapshot progress)
 {
+    if (progress.ProgressPercent > 0)
+    {
+        return Math.Clamp(progress.ProgressPercent, 0, 100);
+    }
+
+    if (string.Equals(progress.State, SandboxRunbookProgressStates.Completed, StringComparison.OrdinalIgnoreCase) ||
+        progress.Success == true)
+    {
+        return 100;
+    }
+
     var total = Math.Max(progress.TotalSteps, progress.Steps.Count);
     if (total <= 0)
     {

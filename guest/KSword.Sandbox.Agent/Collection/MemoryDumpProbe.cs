@@ -24,6 +24,7 @@ internal sealed class MemoryDumpProbe : IGuestProbe
     private readonly IProcessMemoryDumpCapture dumpCapture;
     private readonly IProcessSnapshotProvider snapshotProvider;
     private readonly HashSet<int> capturedProcessIds = [];
+    private readonly Dictionary<int, CapturedMemoryDumpArtifact> capturedArtifactsByProcessId = [];
     private int? rememberedRootProcessId;
 
     public MemoryDumpProbe()
@@ -331,7 +332,7 @@ internal sealed class MemoryDumpProbe : IGuestProbe
                 duplicate: false));
         }
 
-        events.Add(CreateSweepEvent(
+        var sweepEvent = CreateSweepEvent(
             phaseLabel,
             rootProcessId.Value,
             targets.Count,
@@ -359,7 +360,9 @@ internal sealed class MemoryDumpProbe : IGuestProbe
             deeperDescendantSkipped,
             directChildAlreadyCaptured,
             deeperDescendantAlreadyCaptured,
-            rootPidReuseSkipped));
+            rootPidReuseSkipped);
+        AddMemoryDumpSweepArtifactSelectors(sweepEvent, events);
+        events.Add(sweepEvent);
         return events;
     }
 
@@ -383,14 +386,20 @@ internal sealed class MemoryDumpProbe : IGuestProbe
                 target.ProcessId,
                 diagnosticStage: "duplicate")
             : await dumpCapture.CaptureAsync(context.OutputDirectory, target.ProcessId, phaseLabel, cancellationToken).ConfigureAwait(false);
+        var evt = result.Captured
+            ? CreateCapturedEvent(result, phaseLabel, target, rootProcessId, context.OutputDirectory)
+            : CreateSkippedEvent(result, phaseLabel, target, rootProcessId, duplicate);
         if (result.Captured && result.ProcessId is not null)
         {
             capturedProcessIds.Add(result.ProcessId.Value);
+            RememberCapturedArtifact(result.ProcessId.Value, evt);
+        }
+        else if (duplicate && target is not null)
+        {
+            AddCapturedArtifactReference(evt, target.ProcessId);
         }
 
-        return result.Captured
-            ? CreateCapturedEvent(result, phaseLabel, target, rootProcessId, context.OutputDirectory)
-            : CreateSkippedEvent(result, phaseLabel, target, rootProcessId, duplicate);
+        return evt;
     }
 
     /// <summary>
@@ -441,6 +450,7 @@ internal sealed class MemoryDumpProbe : IGuestProbe
                 AddOptionalData(evt, "artifactRelativePath", artifactPath.DisplayPath);
                 AddOptionalData(evt, "artifactSelector", artifactPath.DisplayPath);
                 AddOptionalData(evt, "downloadSelector", artifactPath.DisplayPath);
+                AddOptionalData(evt, "artifactSafeLink", BuildSafeLink(artifactPath.DisplayPath));
                 evt.Data["artifactSelectorKind"] = "safe-output-relative-path";
                 evt.Data["artifactSelectionReason"] = target is null ? "memory-dump-captured" : $"memory-dump-{evt.Data["targetProcessRole"]}";
             }
@@ -484,6 +494,13 @@ internal sealed class MemoryDumpProbe : IGuestProbe
         evt.Data["duplicate"] = duplicate.ToString(CultureInfo.InvariantCulture).ToLowerInvariant();
         evt.Data["alreadyCaptured"] = duplicate.ToString(CultureInfo.InvariantCulture).ToLowerInvariant();
         evt.Data["childProcessDumpTarget"] = (target is not null && !target.IsRoot).ToString(CultureInfo.InvariantCulture).ToLowerInvariant();
+        if (duplicate)
+        {
+            evt.Data["artifactReferenceEvent"] = "true";
+            evt.Data["artifactSelectorState"] = "references-existing-capture";
+            evt.Data["zhHint"] = "该进程的内存转储已在本次运行中采集过；请使用 existingArtifactSelector/artifactRelativePath 下载已存在的转储，并用 sizeBytes/sha256 校验完整性。";
+        }
+
         AddOptionalData(evt, "reason", result.Reason);
         evt.Data["reasonCode"] = MemoryDumpReasonCode(result, duplicate);
         evt.Data["reasonCategory"] = MemoryDumpReasonCategory(result, duplicate);
@@ -1044,6 +1061,82 @@ internal sealed class MemoryDumpProbe : IGuestProbe
         return "descendants-not-covered";
     }
 
+    /// <summary>
+    /// Adds stable first/last/largest selectors to the memory dump sweep row,
+    /// including already-captured duplicate references, so report generators can
+    /// resolve root/child dump artifacts from the summary alone.
+    /// </summary>
+    private static void AddMemoryDumpSweepArtifactSelectors(SandboxEvent sweepEvent, IReadOnlyList<SandboxEvent> attemptEvents)
+    {
+        var artifacts = attemptEvents
+            .Where(static evt =>
+                string.Equals(evt.EventType, "memory_dump.captured", StringComparison.OrdinalIgnoreCase) ||
+                (string.Equals(evt.EventType, "memory_dump.skipped", StringComparison.OrdinalIgnoreCase) &&
+                 evt.Data.TryGetValue("artifactSelectorState", out var selectorState) &&
+                 string.Equals(selectorState, "references-existing-capture", StringComparison.OrdinalIgnoreCase)))
+            .Select(static evt => new MemoryDumpArtifactSummary(
+                FirstData(evt, "artifactRelativePath", "relativePath", "memoryDumpRelativePath", "dumpRelativePath"),
+                ParseLong(FirstData(evt, "artifactSizeBytes", "sizeBytes")),
+                FirstData(evt, "artifactSha256", "sha256", "existingArtifactSha256"),
+                FirstData(evt, "targetProcessId", "processId"),
+                FirstData(evt, "targetProcessRole", "processRole"),
+                FirstData(evt, "targetTreeLineage", "treeLineage")))
+            .Where(static artifact => !string.IsNullOrWhiteSpace(artifact.RelativePath))
+            .GroupBy(static artifact => artifact.RelativePath, StringComparer.OrdinalIgnoreCase)
+            .Select(static group => group.First())
+            .ToList();
+
+        if (artifacts.Count == 0)
+        {
+            sweepEvent.Data["artifactSelectorState"] = "none-captured";
+            return;
+        }
+
+        sweepEvent.Data["artifactSelectorState"] = "available";
+        sweepEvent.Data["artifactSelectorMode"] = "sweep-event-order-and-size";
+        sweepEvent.Data["selectorArtifactCount"] = artifacts.Count.ToString(CultureInfo.InvariantCulture);
+        AddMemoryDumpArtifactSelector(sweepEvent.Data, "first", artifacts.First(), "first-sweep-artifact");
+        AddMemoryDumpArtifactSelector(sweepEvent.Data, "last", artifacts.Last(), "last-sweep-artifact");
+        AddMemoryDumpArtifactSelector(
+            sweepEvent.Data,
+            "largest",
+            artifacts
+                .OrderByDescending(static artifact => artifact.SizeBytes)
+                .ThenBy(static artifact => artifact.RelativePath, StringComparer.OrdinalIgnoreCase)
+                .First(),
+            "largest-size-bytes");
+    }
+
+    private static void AddMemoryDumpArtifactSelector(
+        Dictionary<string, string> data,
+        string prefix,
+        MemoryDumpArtifactSummary artifact,
+        string selectionReason)
+    {
+        var titlePrefix = char.ToUpperInvariant(prefix[0]) + prefix[1..];
+        data[MemoryDumpArtifactSelectorKey(prefix)] = artifact.RelativePath;
+        data[$"{prefix}ArtifactRelativePath"] = artifact.RelativePath;
+        data[$"{prefix}ArtifactSafeLink"] = BuildSafeLink(artifact.RelativePath);
+        data[$"{prefix}ArtifactSizeBytes"] = artifact.SizeBytes.ToString(CultureInfo.InvariantCulture);
+        AddDataIfNotEmpty(data, $"{prefix}ArtifactSha256", artifact.Sha256);
+        AddDataIfNotEmpty(data, $"{prefix}ArtifactProcessId", artifact.ProcessId);
+        AddDataIfNotEmpty(data, $"{prefix}ArtifactProcessRole", artifact.ProcessRole);
+        AddDataIfNotEmpty(data, $"{prefix}ArtifactTreeLineage", artifact.TreeLineage);
+        data[$"{prefix}ArtifactSelectionReason"] = selectionReason;
+        data[$"has{titlePrefix}ArtifactSelector"] = "true";
+    }
+
+    private static string MemoryDumpArtifactSelectorKey(string prefix)
+    {
+        return prefix switch
+        {
+            "first" => "firstArtifactSelector",
+            "last" => "lastArtifactSelector",
+            "largest" => "largestArtifactSelector",
+            _ => $"{prefix}ArtifactSelector"
+        };
+    }
+
     private static bool IsExitedBeforeDump(string? reason, string? diagnosticStage)
     {
         return (!string.IsNullOrWhiteSpace(reason) &&
@@ -1090,6 +1183,80 @@ internal sealed class MemoryDumpProbe : IGuestProbe
 
         evt.Data["zhHint"] = "检测到 root PID 可能已复用；为避免转储无关进程，已跳过该 PID 的 root dump，但仍会尝试可见的 root 子孙进程。";
         return evt;
+    }
+
+    /// <summary>
+    /// Remembers the first captured artifact for a PID so later duplicate
+    /// sweep rows can still expose stable selectors, size, and hash metadata.
+    /// </summary>
+    private void RememberCapturedArtifact(int processId, SandboxEvent capturedEvent)
+    {
+        if (!capturedEvent.Data.TryGetValue("artifactRelativePath", out var relativePath) ||
+            string.IsNullOrWhiteSpace(relativePath))
+        {
+            return;
+        }
+
+        capturedArtifactsByProcessId.TryAdd(
+            processId,
+            new CapturedMemoryDumpArtifact(
+                relativePath,
+                FirstData(capturedEvent, "artifactSelector", "artifactRelativePath"),
+                FirstData(capturedEvent, "downloadSelector", "artifactRelativePath"),
+                FirstData(capturedEvent, "artifactSafeLink"),
+                FirstData(capturedEvent, "sizeBytes", "artifactSizeBytes"),
+                FirstData(capturedEvent, "sha256", "artifactSha256"),
+                FirstData(capturedEvent, "artifactHashStatus", "hashStatus"),
+                FirstData(capturedEvent, "artifactIntegrityState"),
+                FirstData(capturedEvent, "targetProcessRole", "processRole"),
+                FirstData(capturedEvent, "targetTreeLineage", "treeLineage")));
+    }
+
+    /// <summary>
+    /// Adds a download reference to duplicate memory_dump.skipped rows. The
+    /// skipped row remains non-behavior collection evidence, but reports can
+    /// resolve the already-captured root/child dump by selector without reading
+    /// previous events.
+    /// </summary>
+    private void AddCapturedArtifactReference(SandboxEvent evt, int processId)
+    {
+        if (!capturedArtifactsByProcessId.TryGetValue(processId, out var artifact))
+        {
+            evt.Data.TryAdd("artifactSelectorState", "already-captured-reference-missing");
+            evt.Data.TryAdd("existingArtifactSelectorStatus", "missing");
+            return;
+        }
+
+        evt.Data["artifactExists"] = "true";
+        evt.Data["artifactRelativePath"] = artifact.RelativePath;
+        evt.Data["relativePath"] = artifact.RelativePath;
+        evt.Data["memoryDumpRelativePath"] = artifact.RelativePath;
+        evt.Data["dumpRelativePath"] = artifact.RelativePath;
+        evt.Data["artifactSelector"] = artifact.Selector;
+        evt.Data["downloadSelector"] = artifact.DownloadSelector;
+        evt.Data["existingArtifactRelativePath"] = artifact.RelativePath;
+        evt.Data["existingArtifactSelector"] = artifact.Selector;
+        evt.Data["existingDownloadSelector"] = artifact.DownloadSelector;
+        evt.Data["artifactSelectorKind"] = "safe-output-relative-path";
+        evt.Data["artifactSelectorVersion"] = ArtifactSelectorVersion;
+        evt.Data["artifactRelativePathStatus"] = "already-captured";
+        evt.Data["artifactSelectorState"] = "references-existing-capture";
+        evt.Data["existingArtifactSelectorStatus"] = "available";
+        evt.Data["artifactSelectionReason"] = "already-captured-duplicate-pid";
+        AddOptionalData(evt, "artifactSafeLink", artifact.SafeLink);
+        AddOptionalData(evt, "existingArtifactSafeLink", artifact.SafeLink);
+        AddOptionalData(evt, "sizeBytes", artifact.SizeBytes);
+        AddOptionalData(evt, "artifactSizeBytes", artifact.SizeBytes);
+        AddOptionalData(evt, "sha256", artifact.Sha256);
+        AddOptionalData(evt, "artifactSha256", artifact.Sha256);
+        AddOptionalData(evt, "existingArtifactSha256", artifact.Sha256);
+        AddOptionalData(evt, "artifactHashStatus", artifact.HashStatus);
+        AddOptionalData(evt, "hashStatus", artifact.HashStatus);
+        AddOptionalData(evt, "artifactIntegrityState", artifact.IntegrityState);
+        AddOptionalData(evt, "referencedArtifactProcessRole", artifact.ProcessRole);
+        AddOptionalData(evt, "referencedArtifactTreeLineage", artifact.TreeLineage);
+        evt.Data["sizeBytesStatus"] = string.IsNullOrWhiteSpace(artifact.SizeBytes) ? "missing" : "computed";
+        evt.Data["sha256Status"] = string.IsNullOrWhiteSpace(artifact.Sha256) ? "missing" : "computed";
     }
 
     /// <summary>
@@ -1200,6 +1367,44 @@ internal sealed class MemoryDumpProbe : IGuestProbe
         }
 
         return false;
+    }
+
+    private static string FirstData(SandboxEvent evt, params string[] keys)
+    {
+        foreach (var key in keys)
+        {
+            if (evt.Data.TryGetValue(key, out var value) && !string.IsNullOrWhiteSpace(value))
+            {
+                return value;
+            }
+        }
+
+        return string.Empty;
+    }
+
+    private static string BuildSafeLink(string relativePath)
+    {
+        return string.Join(
+            "/",
+            relativePath
+                .Replace('\\', '/')
+                .Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Select(Uri.EscapeDataString));
+    }
+
+    private static long ParseLong(string value)
+    {
+        return long.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed)
+            ? parsed
+            : 0;
+    }
+
+    private static void AddDataIfNotEmpty(Dictionary<string, string> data, string key, string? value)
+    {
+        if (!string.IsNullOrWhiteSpace(value))
+        {
+            data[key] = value;
+        }
     }
 
     private static void AddOptionalData(SandboxEvent evt, string key, string? value)
@@ -1341,6 +1546,26 @@ internal sealed class MemoryDumpProbe : IGuestProbe
         string DisplayPath,
         bool IsOutputRelative,
         string Status);
+
+    private sealed record CapturedMemoryDumpArtifact(
+        string RelativePath,
+        string Selector,
+        string DownloadSelector,
+        string SafeLink,
+        string SizeBytes,
+        string Sha256,
+        string HashStatus,
+        string IntegrityState,
+        string ProcessRole,
+        string TreeLineage);
+
+    private sealed record MemoryDumpArtifactSummary(
+        string RelativePath,
+        long SizeBytes,
+        string Sha256,
+        string ProcessId,
+        string ProcessRole,
+        string TreeLineage);
 }
 
 /// <summary>

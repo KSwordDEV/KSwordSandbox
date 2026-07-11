@@ -276,6 +276,7 @@ internal static class RunbookProgressFacts
         var steps = snapshot.Steps.Select(step =>
         {
             var sourceStep = ResolveSourceStep(runbook, step);
+            var facts = DescribePersistedStep(sourceStep, step, totalSteps);
             var isCurrent = explicitCurrent == step.StepIndex;
             var safeMessage = sourceStep is null
                 ? BuildFallbackStepMessage(step, totalSteps, isCurrent)
@@ -285,7 +286,15 @@ internal static class RunbookProgressFacts
                 safeMessage = BuildFallbackStepMessage(step, totalSteps, isCurrent);
             }
 
-            return step with { Message = safeMessage };
+            return step with
+            {
+                Ordinal = facts.Ordinal,
+                Phase = facts.Phase,
+                Category = facts.Category,
+                RemediationHintZh = facts.RemediationHintZh,
+                IsCleanup = facts.IsCleanup,
+                Message = safeMessage
+            };
         }).ToList();
 
         var currentIndex = ResolveCurrentStepIndex(steps, explicitCurrent, snapshot.State, snapshot.Success);
@@ -302,10 +311,47 @@ internal static class RunbookProgressFacts
             CurrentStepIndex = currentStep?.StepIndex,
             CurrentStepId = currentStep?.StepId,
             CurrentStepTitle = currentStep?.Title,
+            CurrentPhase = currentStep?.Phase,
+            CurrentCategory = currentStep?.Category,
+            ProgressPercent = ComputeProgressPercent(steps, snapshot.State, snapshot.Success, totalSteps),
             Message = message,
             UpdatedAtUtc = bumpUpdatedAt ? DateTimeOffset.UtcNow : snapshot.UpdatedAtUtc,
             Steps = steps
         };
+    }
+
+    /// <summary>
+    /// Computes a bounded display percentage for a UI progress snapshot.
+    /// Completed/skipped steps count as full units, a running current step earns
+    /// a half unit so operators can see forward motion, and terminal states are
+    /// pinned to 100/0 as appropriate.
+    /// </summary>
+    public static int ComputeProgressPercent(
+        IReadOnlyList<SandboxRunbookStepProgressSnapshot> steps,
+        string? aggregateState,
+        bool? success,
+        int totalSteps)
+    {
+        if (success == true || StateEquals(aggregateState, SandboxRunbookProgressStates.Completed))
+        {
+            return 100;
+        }
+
+        var denominator = Math.Max(totalSteps, steps.Count);
+        if (denominator <= 0)
+        {
+            return 0;
+        }
+
+        var completed = steps.Count(step => CountsAsCompletedStep(step.State));
+        var runningCredit = steps.Any(step => StateEquals(step.State, SandboxRunbookProgressStates.Running)) ? 0.5d : 0d;
+        var percent = (int)Math.Floor(((completed + runningCredit) / denominator) * 100d);
+        if (success == false || StateEquals(aggregateState, SandboxRunbookProgressStates.Failed) || StateEquals(aggregateState, SandboxRunbookProgressStates.Canceled))
+        {
+            return Math.Clamp(percent, 0, 99);
+        }
+
+        return Math.Clamp(percent, 0, 99);
     }
 
     /// <summary>
@@ -471,6 +517,27 @@ internal static class RunbookProgressFacts
 
         return runbook.Steps.FirstOrDefault(candidate =>
             string.Equals(candidate.Id, step.StepId, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static RunbookStepProgressDescriptor DescribePersistedStep(
+        SandboxRunbookStep? sourceStep,
+        SandboxRunbookStepProgressSnapshot step,
+        int totalSteps)
+    {
+        if (sourceStep is not null)
+        {
+            return DescribeStep(sourceStep, step.StepIndex, totalSteps);
+        }
+
+        var fallback = new SandboxRunbookStep
+        {
+            Id = string.IsNullOrWhiteSpace(step.StepId) ? $"step-{step.StepIndex + 1}" : step.StepId,
+            Title = string.IsNullOrWhiteSpace(step.Title) ? $"Step {step.StepIndex + 1}" : step.Title,
+            PowerShell = string.Empty,
+            RequiresElevation = step.RequiresElevation,
+            MutatesVmState = step.MutatesVmState
+        };
+        return DescribeStep(fallback, step.StepIndex, totalSteps);
     }
 
     private static string BuildFallbackStepMessage(

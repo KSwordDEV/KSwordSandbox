@@ -13,7 +13,7 @@ namespace KSword.Sandbox.SmokeTests.Scenarios;
 /// </summary>
 internal sealed class BehaviorRuleArtifactCorrelationScenario : ISmokeTestScenario
 {
-    private const string ExpectedVersion = "2026-07-12-v20-high-signal-windows-behavior";
+    private const string ExpectedVersion = "2026-07-12-v21-defensive-behavior-expansion";
 
     private static readonly string[] RequiredRuleIds =
     [
@@ -38,7 +38,7 @@ internal sealed class BehaviorRuleArtifactCorrelationScenario : ISmokeTestScenar
         var rules = RuleEngine.LoadRuleSet(behaviorRulesPath);
         SmokeAssert.True(
             string.Equals(rules.Version, ExpectedVersion, StringComparison.OrdinalIgnoreCase),
-            "Behavior rules should carry the v20 high-signal Windows behavior version while retaining v19 artifact-correlation rules.");
+            "Behavior rules should carry the v21 defensive behavior expansion version while retaining v19 artifact-correlation rules.");
 
         var indexedRules = rules.Rules.ToDictionary(rule => rule.Id, StringComparer.OrdinalIgnoreCase);
         foreach (var ruleId in RequiredRuleIds)

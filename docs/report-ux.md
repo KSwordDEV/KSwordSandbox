@@ -13,6 +13,12 @@ v1 报告必须在 live demo 中对操作者有用，而不只是技术上完整
 2. 哪些行为证明该风险？（What behavior proves that risk?）
 3. 原始 artifacts 和 original events 在哪里？（Where are the raw artifacts and original events?）
 
+WebUI 与报告联动契约：上传流程创建 job 并进入 live monitor 后，动态分析完成时应提供
+automatic current-language report navigation，按当前中/英文 dashboard 语言打开对应报告。
+该报告入口应由 upload flow opened automatically by the upload flow，但 dashboard/request
+仍应 leave the dashboard tab running the analysis request；操作者也必须能从监控页和
+progress-page 重新进入报告，避免自动打开失败时丢失上下文。
+
 ## 报告章节 / Report sections
 
 `report.html`、`report.zh.html` 和 `report.en.html` 必须包含以下章节。

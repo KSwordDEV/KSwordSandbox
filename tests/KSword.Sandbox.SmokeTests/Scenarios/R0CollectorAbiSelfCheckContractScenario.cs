@@ -60,6 +60,7 @@ internal sealed class R0CollectorAbiSelfCheckContractScenario : ISmokeTestScenar
             "eventHeaderVersion",
             "eventSchemaName",
             "eventSchemaVersion",
+            "stableAbiVersionFields",
             "schema",
             "producer",
             "noise",
@@ -137,6 +138,8 @@ internal sealed class R0CollectorAbiSelfCheckContractScenario : ISmokeTestScenar
             "networkCorrelationStableFields",
             "pcapCorrelationJoinFieldsPolicy",
             "selfNoiseClassificationFields",
+            "selfNoiseFilterPolicy",
+            "selfNoiseFilterFields",
             "typedPayloadSemanticFields",
             "stressBackpressureDiagnostics",
             "queueLossEvidence",
@@ -240,6 +243,10 @@ internal sealed class R0CollectorAbiSelfCheckContractScenario : ISmokeTestScenar
         RequireData(abiSelfCheck, "eventHeaderVersion", "65536");
         RequireData(abiSelfCheck, "eventSchemaName", "ksword.sandbox.r0.event");
         RequireData(abiSelfCheck, "eventSchemaVersion", "65536");
+        RequireContains(
+            abiSelfCheck.Data["stableAbiVersionFields"],
+            "collectorAbiVersion|collectorAbiVersionHex",
+            "ABI self-check should publish stable ABI/version field names.");
         RequireData(abiSelfCheck, "collectorNoise", "false");
         RequireData(abiSelfCheck, "collectorSelfNoise", "false");
         RequireData(abiSelfCheck, "selfProcess", "false");
@@ -366,6 +373,14 @@ internal sealed class R0CollectorAbiSelfCheckContractScenario : ISmokeTestScenar
             abiSelfCheck.Data["selfNoiseClassificationFields"],
             "noiseDecision",
             "ABI self-check should list noise decision fields.");
+        RequireContains(
+            abiSelfCheck.Data["selfNoiseFilterPolicy"],
+            "synthetic/no-device rows use kSyntheticSampleProcessId",
+            "ABI self-check should document synthetic/no-device self-noise filtering.");
+        RequireContains(
+            abiSelfCheck.Data["selfNoiseFilterFields"],
+            "selfNoiseFilterMatched",
+            "ABI self-check should list stable self-noise filter evidence fields.");
         RequireData(abiSelfCheck, "noiseTaxonomyVersion", "1");
         RequireData(abiSelfCheck, "noiseDecision", "collector-diagnostic");
         RequireData(abiSelfCheck, "sampleBehaviorCandidateReason", "abi-self-check-is-collection-diagnostic");

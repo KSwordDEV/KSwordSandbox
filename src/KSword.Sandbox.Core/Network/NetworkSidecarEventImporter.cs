@@ -439,7 +439,7 @@ public sealed class NetworkSidecarEventImporter
             "_source.layers.dns.dns.a",
             "_source.layers.dns.dns.aaaa",
             "_source.layers.dns.dns.cname");
-        AddAliases(extra, answer, "answer", "answers", "resolvedIp", "resolvedIps", "dnsAnswers", "dns.answer", "dns.answers", "dns.answers.data");
+        AddAliases(extra, answer, "answer", "answers", "dnsAnswer", "dnsAnswers", "resolvedIp", "resolvedIps", "resolvedAddress", "resolvedAddresses", "answerIp", "answerAddress", "dns.answer", "dns.answers", "dns.answers.data", "dns.answers.name", "dns.resp.name", "dns.a", "dns.aaaa", "dns.cname");
         NetworkTelemetrySchema.AddIfNotEmpty(extra, "answerCount", FirstNonEmpty(FirstValue(fields, "answerCount", "answersCount", "dns.answers.count", "dns.count.answers"), CountDelimitedValues(answer)));
         NetworkTelemetrySchema.AddIfNotEmpty(extra, "ttl", FirstValue(fields, "ttl", "dns.ttl", "dns.resp.ttl", "dns.answers.ttl"));
         NetworkTelemetrySchema.AddIfNotEmpty(extra, "recordClass", FirstValue(fields, "recordClass", "queryClass", "dns.qry.class", "dns.question.class"));
@@ -480,8 +480,8 @@ public sealed class NetworkSidecarEventImporter
         scheme = InferHttpScheme(scheme, fields);
         var method = FirstValue(fields, "method", "httpMethod", "requestMethod", "httpRequestMethod", "http.method", "http.request.method", "request.method", "cs-method", "_source.layers.http.http.request.method");
         AddAliases(extra, method, "method", "httpMethod", "requestMethod", "httpRequestMethod", "http.method", "http.request.method");
-        AddAliases(extra, uri, "uri", "requestUri", "path");
-        AddAliases(extra, host, "host", "hostname", "httpHost");
+        AddAliases(extra, uri, "uri", "requestUri", "path", "url.path", "http.request.uri", "http.target", "cs-uri-stem");
+        AddAliases(extra, host, "host", "hostname", "httpHost", "authority", "url.host", "url.domain", "server.domain", "http.host", "http.hostname", "http.request.headers.host", "request.headers.host");
         NetworkTelemetrySchema.AddIfNotEmpty(extra, "scheme", scheme);
         NetworkTelemetrySchema.AddIfNotEmpty(extra, "httpScheme", scheme);
         if (!string.IsNullOrWhiteSpace(absoluteUrl))
@@ -493,10 +493,11 @@ public sealed class NetworkSidecarEventImporter
             NetworkTelemetrySchema.AddIfNotEmpty(extra, "url", $"{(string.IsNullOrWhiteSpace(scheme) ? "http" : scheme)}://{host}{(string.IsNullOrWhiteSpace(uri) ? "/" : uri)}");
         }
 
-        NetworkTelemetrySchema.AddIfNotEmpty(extra, "userAgent", FirstValue(fields, "userAgent", "user_agent", "http.user_agent", "http.user_agent.original", "http.request.headers.user-agent", "request.headers.user-agent", "_source.layers.http.http.user_agent"));
+        var userAgent = FirstValue(fields, "userAgent", "user_agent", "httpUserAgent", "http.user_agent", "http.user_agent.original", "http.request.headers.user-agent", "request.headers.user-agent", "user-agent", "_source.layers.http.http.user_agent");
+        AddAliases(extra, userAgent, "userAgent", "user_agent", "httpUserAgent", "http.user_agent", "http.user_agent.original", "http.request.headers.user-agent", "request.headers.user-agent", "user-agent");
         NetworkTelemetrySchema.AddIfNotEmpty(extra, "contentType", FirstValue(fields, "contentType", "mimeType", "http.content_type", "http.request.content_type", "http.response.mime_type", "http.response.content_type", "_source.layers.http.http.content_type"));
         var statusCode = FirstValue(fields, "statusCode", "httpStatusCode", "responseStatusCode", "httpStatus", "status", "status_code", "responseCode", "response.status_code", "http.status", "http.response.code", "http.response.status_code", "http.status_code", "sc-status", "_source.layers.http.http.response.code");
-        AddAliases(extra, statusCode, "statusCode", "responseStatusCode", "httpStatusCode", "httpStatus", "status", "responseCode", "http.response.status_code", "http.response.code", "http.status_code");
+        AddAliases(extra, statusCode, "statusCode", "responseStatusCode", "httpStatusCode", "httpStatus", "status", "responseCode", "http.response.status_code", "http.response.code", "http.status_code", "http.status", "status_code", "response.status_code", "sc-status");
         NetworkTelemetrySchema.AddIfNotEmpty(extra, "statusFamily", StatusFamily(statusCode));
         NetworkTelemetrySchema.AddIfNotEmpty(extra, "payloadMagic", FirstValue(fields, "payloadMagic", "file.magic"));
         NetworkTelemetrySchema.AddIfNotEmpty(extra, "referer", FirstValue(fields, "referer", "referrer", "http.referer", "http.request.referrer", "request.headers.referer"));
@@ -534,13 +535,13 @@ public sealed class NetworkSidecarEventImporter
     private static void AddTlsFields(IReadOnlyDictionary<string, string> fields, Dictionary<string, string> extra)
     {
         var sni = FirstValue(fields, "sni", "serverName", "server_name", "tls.sni", "tls.server_name", "ssl.server_name", "tls.handshake.extensions_server_name", "ssl.handshake.extensions_server_name", "_source.layers.tls.tls.handshake.extensions_server_name");
-        AddAliases(extra, sni, "sni", "serverName", "tlsServerName", "tlsSni", "server_name", "tls.server_name", "tls.handshake.extensions_server_name", "ssl.handshake.extensions_server_name");
+        AddAliases(extra, sni, "sni", "serverName", "tlsServerName", "tlsSni", "server_name", "tls.sni", "tls.server_name", "ssl.server_name", "tls.handshake.extensions_server_name", "ssl.handshake.extensions_server_name");
         NetworkTelemetrySchema.AddIfNotEmpty(extra, "tlsVersion", FirstValue(fields, "tlsVersion", "version", "ssl.version", "tls.version", "tls.version.name", "tls.record.version", "tls.handshake.version", "_source.layers.tls.tls.record.version"));
         NetworkTelemetrySchema.AddIfNotEmpty(extra, "handshakeType", FirstValue(fields, "handshakeType", "tls.handshake.type", "tls.handshake.type_name", "_source.layers.tls.tls.handshake.type"));
         var ja3 = FirstValue(fields, "ja3", "ja3.hash", "tls.ja3", "tls.ja3.hash", "tls.handshake.ja3", "tls.handshake.ja3_hash", "ssl.ja3", "ssl.ja3_hash");
         var ja3s = FirstValue(fields, "ja3s", "ja3s.hash", "tls.ja3s", "tls.ja3s.hash", "tls.handshake.ja3s", "tls.handshake.ja3s_hash", "ssl.ja3s", "ssl.ja3s_hash");
-        AddAliases(extra, ja3, "ja3", "ja3Hash", "tlsJa3", "ja3Fingerprint", "ja3.hash", "tls.ja3", "tls.ja3.hash", "tls.handshake.ja3_hash");
-        AddAliases(extra, ja3s, "ja3s", "ja3sHash", "tlsJa3s", "ja3sFingerprint", "ja3s.hash", "tls.ja3s", "tls.ja3s.hash", "tls.handshake.ja3s_hash");
+        AddAliases(extra, ja3, "ja3", "ja3Hash", "tlsJa3", "ja3Fingerprint", "ja3Digest", "ja3Md5", "ja3.hash", "tls.ja3", "tls.ja3.hash", "tls.handshake.ja3", "tls.handshake.ja3_hash", "ssl.ja3", "ssl.ja3_hash");
+        AddAliases(extra, ja3s, "ja3s", "ja3sHash", "tlsJa3s", "ja3sFingerprint", "ja3sDigest", "ja3sMd5", "ja3s.hash", "tls.ja3s", "tls.ja3s.hash", "tls.handshake.ja3s", "tls.handshake.ja3s_hash", "ssl.ja3s", "ssl.ja3s_hash");
         NetworkTelemetrySchema.AddIfNotEmpty(extra, "alpn", FirstValue(fields, "alpn", "applicationLayerProtocol", "tls.alpn", "tls.handshake.extensions_alpn", "tls.handshake.extensions_alpn_str", "ssl.alpn"));
         NetworkTelemetrySchema.AddIfNotEmpty(extra, "cipherSuite", FirstValue(fields, "cipherSuite", "cipher", "tls.cipher", "tls.cipher_suite", "tls.handshake.ciphersuite", "ssl.cipher"));
         var certSubject = FirstValue(fields, "certSubject", "certificateSubject", "subject", "x509.subject", "cert.subject", "tls.cert.subject", "tls.certificate.subject", "tls.handshake.certificate.subject", "ssl.subject");
@@ -550,7 +551,7 @@ public sealed class NetworkSidecarEventImporter
         var certSerial = FirstValue(fields, "certSerial", "certificateSerial", "x509.serial_number", "cert.serial", "tls.cert.serial", "tls.certificate.serial");
         AddAliases(extra, certSerial, "certSerial", "certificateSerial", "x509Serial", "x509.serial_number", "tls.cert.serial", "tls.certificate.serial");
         var certSha256 = FirstValue(fields, "certSha256", "certificateSha256", "certificateFingerprintSha256", "x509.fingerprint.sha256", "cert.sha256", "cert.fingerprint.sha256", "tls.cert.fingerprint.sha256", "tls.certificate.fingerprint.sha256");
-        AddAliases(extra, certSha256, "certSha256", "certificateSha256", "certificateFingerprintSha256", "x509.fingerprint.sha256", "cert.fingerprint.sha256", "tls.cert.fingerprint.sha256", "tls.certificate.fingerprint.sha256");
+        AddAliases(extra, certSha256, "certSha256", "certificateSha256", "certificateFingerprintSha256", "serverCertificateSha256", "x509.fingerprint.sha256", "cert.sha256", "cert.fingerprint.sha256", "tls.cert.sha256", "tls.cert.fingerprint.sha256", "tls.certificate.sha256", "tls.certificate.fingerprint.sha256");
         NetworkTelemetrySchema.AddIfNotEmpty(extra, "certSha1", FirstValue(fields, "certSha1", "certificateSha1", "x509.fingerprint.sha1", "cert.sha1", "cert.fingerprint.sha1", "tls.cert.fingerprint.sha1"));
         NetworkTelemetrySchema.AddIfNotEmpty(extra, "certNotBefore", FirstValue(fields, "certNotBefore", "certificateNotBefore", "x509.not_before", "tls.cert.not_before"));
         NetworkTelemetrySchema.AddIfNotEmpty(extra, "certNotAfter", FirstValue(fields, "certNotAfter", "certificateNotAfter", "x509.not_after", "tls.cert.not_after"));

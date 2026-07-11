@@ -11,6 +11,7 @@ namespace KSword.Sandbox.Web.Infrastructure;
 internal sealed class VirusTotalSettingsStore
 {
     internal const string EnvironmentVariableName = "KSWORDBOX_VIRUSTOTAL_API_KEY";
+    private const string NotConfiguredSource = "未配置 / not-configured";
 
     public VirusTotalSettingsStore(SandboxConfig config)
     {
@@ -70,13 +71,27 @@ internal sealed class VirusTotalSettingsStore
             var candidate = Environment.GetEnvironmentVariable(EnvironmentVariableName, scope);
             if (!string.IsNullOrWhiteSpace(candidate))
             {
-                source = $"environment:{scope}";
+                source = DescribeEnvironmentSource(scope);
                 return candidate.Trim();
             }
         }
 
-        source = "not-configured";
+        source = NotConfiguredSource;
         return null;
+    }
+
+    private static string DescribeEnvironmentSource(EnvironmentVariableTarget scope)
+    {
+        return scope switch
+        {
+            EnvironmentVariableTarget.Process =>
+                $"当前 Web Host 进程环境变量 {EnvironmentVariableName} / current process environment",
+            EnvironmentVariableTarget.User =>
+                $"当前 Windows 用户环境变量 {EnvironmentVariableName} / current user environment",
+            EnvironmentVariableTarget.Machine =>
+                $"本机系统环境变量 {EnvironmentVariableName} / local machine environment",
+            _ => $"环境变量 {EnvironmentVariableName} / environment"
+        };
     }
 
     private static string? MaskApiKey(string? apiKey)

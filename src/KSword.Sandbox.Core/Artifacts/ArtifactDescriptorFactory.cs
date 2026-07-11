@@ -425,6 +425,8 @@ public static class ArtifactDescriptorFactory
 
         AddDefault(metadata, "sourceArtifactPath", fullPath);
         AddDefault(metadata, "fullPath", fullPath);
+        AddDefault(metadata, "downloadFileName", SafeDownloadFileName(FirstNonEmpty(Path.GetFileName(fullPath), Path.GetFileName(relativePath), "artifact.bin")));
+        AddDefault(metadata, "safeDownloadFileName", SafeDownloadFileName(FirstNonEmpty(Path.GetFileName(fullPath), Path.GetFileName(relativePath), "artifact.bin")));
         if (sizeBytes is > 0)
         {
             var sizeText = sizeBytes.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
@@ -497,6 +499,22 @@ public static class ArtifactDescriptorFactory
         {
             AddDefault(metadata, "captureState", "available");
         }
+    }
+
+    private static string SafeDownloadFileName(string value)
+    {
+        var fileName = Path.GetFileName(value.Replace('\\', '/'));
+        if (string.IsNullOrWhiteSpace(fileName))
+        {
+            fileName = "artifact.bin";
+        }
+
+        foreach (var invalid in Path.GetInvalidFileNameChars())
+        {
+            fileName = fileName.Replace(invalid, '_');
+        }
+
+        return new string(fileName.Select(ch => char.IsControl(ch) ? '_' : ch).ToArray());
     }
 
     private static void AddDefault(Dictionary<string, string> metadata, string key, string value)

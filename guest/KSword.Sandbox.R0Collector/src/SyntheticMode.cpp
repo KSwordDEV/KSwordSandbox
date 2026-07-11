@@ -15,6 +15,29 @@ std::string BoolText(const bool value) {
     return value ? "true" : "false";
 }
 
+void AddSyntheticAbiVersionFields(JsonDataObjectBuilder& data) {
+    data.AddUnsigned("collectorAbiVersion", KSWORD_SANDBOX_INTERFACE_VERSION);
+    data.AddUtf8("collectorAbiVersionHex", HexUnsignedLongLong(KSWORD_SANDBOX_INTERFACE_VERSION, 8));
+    data.AddUnsigned("abiVersionMajor", KSWORD_SANDBOX_ABI_VERSION_MAJOR);
+    data.AddUnsigned("abiVersionMinor", KSWORD_SANDBOX_ABI_VERSION_MINOR);
+    data.AddUnsigned("eventHeaderVersion", KSWORD_SANDBOX_EVENT_HEADER_VERSION);
+    data.AddUtf8("eventHeaderVersionHex", HexUnsignedLongLong(KSWORD_SANDBOX_EVENT_HEADER_VERSION, 8));
+    data.AddUtf8("eventSchemaName", KSWORD_SANDBOX_EVENT_SCHEMA_NAME);
+    data.AddUnsigned("eventSchemaVersion", KSWORD_SANDBOX_EVENT_SCHEMA_VERSION);
+    data.AddUtf8("eventSchemaVersionHex", HexUnsignedLongLong(KSWORD_SANDBOX_EVENT_SCHEMA_VERSION, 8));
+    data.AddUtf8("stableAbiVersionFields", kStableAbiVersionFields);
+}
+
+void AddSyntheticSelfNoiseFilterFields(JsonDataObjectBuilder& data) {
+    data.AddUtf8("selfNoiseFilterMode", "synthetic-no-device-sample-pid");
+    data.AddUtf8(
+        "selfNoiseFilterPolicy",
+        "synthetic driver rows use kSyntheticSampleProcessId and are not collector PID/path self-noise");
+    data.AddBool("selfNoiseFilterMatched", false);
+    data.AddUtf8("selfNoiseFilterAction", "emit-as-synthetic-sample-or-system");
+    data.AddUnsigned("syntheticSampleProcessId", kSyntheticSampleProcessId);
+}
+
 // Input: Ordinal within the no-device semantic self-check corpus.
 // Processing: Allocates a concrete sequence outside the stress range so mock
 // semantic rows can be validated independently of StressJsonlExpectedDriverRows.
@@ -352,17 +375,20 @@ bool EmitMockDriverCategoryEvent(
     const std::string& operation,
     const std::vector<std::pair<std::string, std::string>>& extraData) {
     bool hasSequence = false;
+    bool hasVersion = false;
     for (const auto& item : extraData) {
         if (item.first == "sequence") {
             hasSequence = true;
-            break;
+        }
+        if (item.first == "version") {
+            hasVersion = true;
         }
     }
 
     SandboxEventFields event;
     event.eventType = eventType;
     event.source = "driver";
-    event.processId = GetCurrentProcessId();
+    event.processId = kSyntheticSampleProcessId;
     event.processName = L"notepad.exe";
     event.path = path;
     event.commandLine = commandLine;
@@ -371,10 +397,12 @@ bool EmitMockDriverCategoryEvent(
     data.AddBool("mock", true);
     data.AddWide("devicePath", options.devicePath);
     data.AddBool("healthOnly", options.healthOnly);
-    data.AddUtf8("eventSchemaName", KSWORD_SANDBOX_EVENT_SCHEMA_NAME);
-    data.AddUnsigned("eventSchemaVersion", KSWORD_SANDBOX_EVENT_SCHEMA_VERSION);
-    data.AddUtf8("eventSchemaVersionHex", HexUnsignedLongLong(KSWORD_SANDBOX_EVENT_SCHEMA_VERSION, 8));
+    AddSyntheticAbiVersionFields(data);
     data.AddUtf8("schema", KSWORD_SANDBOX_EVENT_SCHEMA_NAME);
+    if (!hasVersion) {
+        data.AddUnsigned("version", KSWORD_SANDBOX_EVENT_HEADER_VERSION);
+        data.AddUtf8("versionHex", HexUnsignedLongLong(KSWORD_SANDBOX_EVENT_HEADER_VERSION, 8));
+    }
     data.AddUnsigned("driverEventType", MockDriverEventTypeValue(driverEventTypeName));
     data.AddUtf8("driverEventTypeName", driverEventTypeName);
     data.AddUtf8("producer", driverEventTypeName);
@@ -384,6 +412,7 @@ bool EmitMockDriverCategoryEvent(
     data.AddUtf8("actorRole", "synthetic-sample-process");
     data.AddUtf8("subjectRole", "synthetic-sample-or-system");
     data.AddUtf8("processIdSource", "synthetic");
+    AddSyntheticSelfNoiseFilterFields(data);
     data.AddUtf8("semanticFamily", driverEventTypeName);
     data.AddUtf8("behaviorLane", MockSubjectKind(driverEventTypeName));
     data.AddUtf8("activityKind", MockActivityKind(driverEventTypeName, operation));
@@ -446,6 +475,7 @@ bool EmitMockDriverCategoryEvent(
     data.AddBool("lossObserved", false);
     data.AddBool("backpressure", false);
     data.AddBool("backpressureObserved", false);
+    data.AddUnsigned("queueHighWatermark", 0);
     data.AddUnsigned("highWatermark", 0);
     data.AddSigned("lastEnqueueFailureStatus", 0);
     data.AddUtf8("lastEnqueueFailureStatusHex", "0x00000000");
@@ -712,10 +742,10 @@ bool EmitSyntheticJsonlNoiseRows(EventWriter& writer) {
 
     JsonDataObjectBuilder data;
     data.AddUtf8("sequence", "9999");
-    data.AddUtf8("eventSchemaName", KSWORD_SANDBOX_EVENT_SCHEMA_NAME);
-    data.AddUnsigned("eventSchemaVersion", KSWORD_SANDBOX_EVENT_SCHEMA_VERSION);
-    data.AddUtf8("eventSchemaVersionHex", HexUnsignedLongLong(KSWORD_SANDBOX_EVENT_SCHEMA_VERSION, 8));
+    AddSyntheticAbiVersionFields(data);
     data.AddUtf8("schema", KSWORD_SANDBOX_EVENT_SCHEMA_NAME);
+    data.AddUnsigned("version", KSWORD_SANDBOX_EVENT_HEADER_VERSION);
+    data.AddUtf8("versionHex", HexUnsignedLongLong(KSWORD_SANDBOX_EVENT_HEADER_VERSION, 8));
     data.AddUtf8("producer", "network");
     data.AddUtf8("producerCategory", "network");
     data.AddUtf8("eventOrigin", "synthetic-r0collector");
@@ -723,6 +753,7 @@ bool EmitSyntheticJsonlNoiseRows(EventWriter& writer) {
     data.AddUtf8("actorRole", "synthetic-sample-process");
     data.AddUtf8("subjectRole", "synthetic-jsonl-noise");
     data.AddUtf8("processIdSource", "synthetic");
+    AddSyntheticSelfNoiseFilterFields(data);
     data.AddUtf8("semanticFamily", "network");
     data.AddUtf8("behaviorLane", "network-flow");
     data.AddUtf8("activityKind", "network.aleAuthorize");
@@ -770,7 +801,14 @@ bool EmitSyntheticJsonlNoiseRows(EventWriter& writer) {
     data.AddUtf8("selfNoiseAction", "emit");
     data.AddBool("collectorSuppressed", false);
     data.AddBool("lost", false);
+    data.AddUnsigned("lostCount", 0);
+    data.AddBool("lossObserved", false);
     data.AddBool("backpressure", false);
+    data.AddBool("backpressureObserved", false);
+    data.AddUnsigned("queueHighWatermark", 0);
+    data.AddUnsigned("highWatermark", 0);
+    data.AddSigned("lastEnqueueFailureStatus", 0);
+    data.AddUtf8("lastEnqueueFailureStatusHex", "0x00000000");
     data.AddUtf8("protocolName", "tcp");
     data.AddUtf8("transportProtocol", "tcp");
     data.AddUtf8("directionName", "outbound");
@@ -783,6 +821,9 @@ bool EmitSyntheticJsonlNoiseRows(EventWriter& writer) {
     data.AddUtf8("remoteEndpoint", "203.0.113.10:443");
     data.AddUtf8("sourceEndpoint", "192.0.2.10:51515");
     data.AddUtf8("destinationEndpoint", "203.0.113.10:443");
+    data.AddUtf8("sourcePort", "51515");
+    data.AddUtf8("destinationPort", "443");
+    data.AddUnsigned("processId", kSyntheticSampleProcessId);
     data.AddUtf8("flowKey", "tcp|192.0.2.10:51515|203.0.113.10:443");
     data.AddUnsigned("flowKeyVersion", 1);
     data.AddUtf8("flowKeyDirection", "outbound");
@@ -891,8 +932,7 @@ bool EmitSyntheticStressEvents(EventWriter& writer, const Options& options, cons
         return true;
     }
 
-    const DWORD currentProcessId = GetCurrentProcessId();
-    const std::string currentProcessIdText = std::to_string(currentProcessId);
+    const std::string currentProcessIdText = std::to_string(kSyntheticSampleProcessId);
     const std::string stressSequenceStartText = std::to_string(kSyntheticStressSequenceStart);
     const std::string stressSequenceEndText = std::to_string(kSyntheticStressSequenceStart + options.stressCount - 1);
 
@@ -986,6 +1026,9 @@ bool EmitSyntheticStressSummary(EventWriter& writer, const Options& options) {
     event.path = options.devicePath;
 
     JsonDataObjectBuilder data;
+    AddSyntheticAbiVersionFields(data);
+    data.AddUnsigned("version", KSWORD_SANDBOX_INTERFACE_VERSION);
+    data.AddUtf8("versionHex", HexUnsignedLongLong(KSWORD_SANDBOX_INTERFACE_VERSION, 8));
     data.AddBool("mock", true);
     data.AddBool("syntheticStress", true);
     data.AddUtf8("semanticSelfCheckScenarios", kSyntheticSemanticSelfCheckScenarios);
@@ -1063,6 +1106,7 @@ bool EmitSyntheticStressSummary(EventWriter& writer, const Options& options) {
     data.AddUtf8("sampleBehaviorCandidateReason", "collector-summary-not-sample-behavior");
     data.AddBool("collectionDiagnostic", true);
     data.AddBool("collectionNoise", false);
+    AddSyntheticSelfNoiseFilterFields(data);
     data.AddUtf8("operatorInterpretation", "collection_diagnostic_not_sample_behavior");
     data.AddWide("zhNoiseHint", L"该行是合成压测摘要，不是样本行为。");
     data.AddWide("zhNoiseClassificationHint", L"噪声分类为 synthetic-stress-summary；仅用于核对行数、序列、丢失和背压合同。");
@@ -1109,8 +1153,8 @@ bool EmitSyntheticStressSummary(EventWriter& writer, const Options& options) {
 // a signed kernel driver is installed in the guest VM.
 // Return: Process exit code.
 int RunSyntheticMode(const Options& options, EventWriter& writer) {
-    const DWORD currentProcessId = GetCurrentProcessId();
-    const std::string currentProcessIdText = std::to_string(currentProcessId);
+    const DWORD currentProcessId = kSyntheticSampleProcessId;
+    const std::string currentProcessIdText = std::to_string(kSyntheticSampleProcessId);
     const std::wstring mockProcessPath = LR"(C:\Windows\System32\notepad.exe)";
     const std::wstring mockCommandLine = LR"("C:\Windows\System32\notepad.exe" --ksword-mock)";
     const bool stressMode = options.stressCount > 0;
@@ -1126,6 +1170,7 @@ int RunSyntheticMode(const Options& options, EventWriter& writer) {
     mockEvent.path = mockProcessPath;
     mockEvent.commandLine = mockCommandLine;
     JsonDataObjectBuilder mockData;
+    AddSyntheticAbiVersionFields(mockData);
     mockData.AddBool("mock", true);
     mockData.AddWide("devicePath", options.devicePath);
     mockData.AddBool("healthOnly", options.healthOnly);
@@ -1135,6 +1180,7 @@ int RunSyntheticMode(const Options& options, EventWriter& writer) {
         options.suppressSelfNoise ? "suppress-self-noise" : "emit-self-noise");
     mockData.AddUtf8("schema", KSWORD_SANDBOX_EVENT_SCHEMA_NAME);
     mockData.AddUtf8("producer", "r0collector");
+    AddSyntheticSelfNoiseFilterFields(mockData);
     AddCollectorAttributionFields(mockData, "synthetic-mock-marker", "collector-diagnostic");
     mockData.AddBool("collectorNoise", false);
     mockData.AddBool("collectorSelfNoise", false);

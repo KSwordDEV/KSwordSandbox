@@ -208,6 +208,8 @@ internal sealed class R0CollectorEventQualityScenario : ISmokeTestScenario
         RequireContains(eventParser, "eventHeaderVersion", "Capabilities JSONL must include event header version.");
         RequireContains(eventParser, "eventSchemaName", "Driver JSONL rows must include event schema name.");
         RequireContains(eventParser, "eventSchemaVersion", "Driver JSONL rows must include event schema version.");
+        RequireContains(eventParser, "collectorAbiVersion", "Driver and summary JSONL rows must include stable collector ABI version.");
+        RequireContains(eventParser, "stableAbiVersionFields", "Driver and summary JSONL rows must name the stable ABI/version field set.");
         RequireContains(eventParser, "ProducerMasksAvailable", "Health JSONL flag names must print producer-mask availability.");
         RequireContains(eventParser, "producerMasksAvailable", "Health JSONL must expose whether GET_HEALTH producer masks are valid.");
         RequireContains(eventParser, "producerMaskFieldsReturned", "Health JSONL must expose old/new GET_HEALTH byte compatibility.");
@@ -274,6 +276,8 @@ internal sealed class R0CollectorEventQualityScenario : ISmokeTestScenario
         RequireContains(syntheticMode, "typedPayloadStatus", "Synthetic rows must mark typed payload status.");
         RequireContains(syntheticMode, "mock", "Synthetic rows must mark mock mode.");
         RequireContains(syntheticMode, "eventSchemaVersion", "Synthetic rows must include event schema version.");
+        RequireContains(syntheticMode, "collectorAbiVersion", "Synthetic/no-device rows must include collector ABI version.");
+        RequireContains(syntheticMode, "stableAbiVersionFields", "Synthetic/no-device rows must name the stable ABI/version field set.");
         RequireContains(syntheticMode, "producer", "Synthetic rows must include stable producer metadata.");
         RequireContains(syntheticMode, "schema", "Synthetic rows must include stable schema metadata.");
         RequireContains(syntheticMode, "lost", "Synthetic rows must include stable loss/no-lost metadata.");
@@ -285,6 +289,8 @@ internal sealed class R0CollectorEventQualityScenario : ISmokeTestScenario
         RequireContains(syntheticMode, "collectorSelfNoise", "Synthetic rows must include explicit collector self-noise metadata.");
         RequireContains(syntheticMode, "selfProcess", "Synthetic rows must include explicit self-process metadata.");
         RequireContains(syntheticMode, "collectorSuppressed", "Synthetic rows must include explicit suppression metadata.");
+        RequireContains(syntheticMode, "selfNoiseFilterMatched", "Synthetic rows must include explicit no-device self-noise filter evidence.");
+        RequireContains(syntheticMode, "kSyntheticSampleProcessId", "Synthetic rows must avoid current collector PID self-noise by using a stable sample PID.");
         RequireContains(syntheticMode, "noiseClass", "Synthetic rows must include stable noise class metadata.");
         RequireContains(syntheticMode, "sampleBehaviorCandidate", "Synthetic rows must include behavior-candidate metadata.");
         RequireContains(syntheticMode, "semanticFamily", "Synthetic rows must include semantic family metadata.");
@@ -986,6 +992,10 @@ internal sealed class R0CollectorEventQualityScenario : ISmokeTestScenario
         RequireData(started, "injectJsonlNoise", "true");
         RequireData(started, "stressCount", ExpectedStressDriverRows.ToString());
         RequireData(started, "readEventsMaxEvents", "16");
+        RequireData(started, "collectorAbiVersion", AbiVersion);
+        RequireData(started, "collectorAbiVersionHex", AbiVersionHex);
+        RequireContains(started.Data["stableAbiVersionFields"], "eventHeaderVersion", "Executable started row should name stable ABI/version fields.");
+        RequireContains(started.Data["selfNoiseFilterPolicy"], "synthetic/no-device rows", "Executable started row should document synthetic self-noise filtering.");
         RequireData(started, "maxReadBatches", "4");
         RequireData(started, "driverEventSampleStride", "1");
         RequireData(started, "driverEventSampling", "none");
@@ -1002,6 +1012,9 @@ internal sealed class R0CollectorEventQualityScenario : ISmokeTestScenario
         RequireData(mockMarker, "StressJsonlExpectedDriverRows", ExpectedStressDriverRows.ToString());
         RequireData(mockMarker, "collectorSelfNoise", "false");
         RequireData(mockMarker, "selfProcess", "false");
+        RequireData(mockMarker, "collectorAbiVersion", AbiVersion);
+        RequireData(mockMarker, "syntheticSampleProcessId", "4242");
+        RequireData(mockMarker, "selfNoiseFilterMatched", "false");
 
         var stressRows = jsonLines.Events
             .Where(evt => string.Equals(evt.EventType, "driver.file", StringComparison.OrdinalIgnoreCase) &&
@@ -1012,6 +1025,9 @@ internal sealed class R0CollectorEventQualityScenario : ISmokeTestScenario
             stressRows.All(evt =>
                 DataEquals(evt, "producer", "file") &&
                 DataEquals(evt, "schema", "ksword.sandbox.r0.event") &&
+                DataEquals(evt, "collectorAbiVersion", AbiVersion) &&
+                DataEquals(evt, "syntheticSampleProcessId", "4242") &&
+                DataEquals(evt, "selfNoiseFilterMatched", "false") &&
                 DataEquals(evt, "noise", "false") &&
                 DataEquals(evt, "noiseClass", "sample-or-system") &&
                 DataEquals(evt, "sampleBehaviorCandidate", "true") &&
@@ -1034,6 +1050,8 @@ internal sealed class R0CollectorEventQualityScenario : ISmokeTestScenario
 
         var executableReadEvents = RequireEvent(jsonLines.Events, "r0collector.driverReadEvents");
         RequireData(executableReadEvents, "recordsProcessed", ExpectedStressDriverRows.ToString());
+        RequireData(executableReadEvents, "collectorAbiVersion", AbiVersion);
+        RequireData(executableReadEvents, "selfNoiseFilterMatched", "false");
         RequireData(executableReadEvents, "eventsEmitted", ExpectedStressDriverRows.ToString());
         RequireData(executableReadEvents, "collectorSuppressedEvents", "0");
         RequireData(executableReadEvents, "collectorSkippedEvents", "0");
@@ -1139,6 +1157,13 @@ internal sealed class R0CollectorEventQualityScenario : ISmokeTestScenario
         RequireData(validNoise!, "destinationEndpoint", "203.0.113.10:443");
         RequireData(validNoise!, "flowKey", "tcp|192.0.2.10:51515|203.0.113.10:443");
         RequireData(validNoise!, "flowKeyVersion", "1");
+        RequireData(validNoise!, "collectorAbiVersion", AbiVersion);
+        RequireData(validNoise!, "syntheticSampleProcessId", "4242");
+        RequireData(validNoise!, "selfNoiseFilterMatched", "false");
+        RequireData(validNoise!, "lostCount", "0");
+        RequireData(validNoise!, "lossObserved", "false");
+        RequireData(validNoise!, "backpressureObserved", "false");
+        RequireData(validNoise!, "highWatermark", "0");
         RequireData(validNoise!, "serviceHint", "tls");
         RequireData(validNoise!, "serviceHintTls", "true");
         RequireData(validNoise!, "noiseClass", "jsonl-noise");

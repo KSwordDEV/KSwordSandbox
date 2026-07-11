@@ -27,9 +27,12 @@ inline constexpr size_t kMaxPayloadHexBytes = 256U;
 inline constexpr int kSyntheticStressSequenceStart = 1200;
 inline constexpr int kSyntheticSemanticSequenceStart = 1100;
 inline constexpr int kSyntheticSemanticSelfCheckRows = 6;
+inline constexpr DWORD kSyntheticSampleProcessId = 4242U;
 inline constexpr const char* kSyntheticSemanticSelfCheckScenarios =
     "process-lineage|dns|http|tls|lateral-movement|download-execute";
 inline constexpr unsigned long kAbiSelfCheckDiagnosticsVersion = 2U;
+inline constexpr const char* kStableAbiVersionFields =
+    "collectorAbiVersion|collectorAbiVersionHex|abiVersionMajor|abiVersionMinor|eventHeaderVersion|eventHeaderVersionHex|eventSchemaName|eventSchemaVersion|eventSchemaVersionHex|version|versionHex";
 inline constexpr const char* kStressJsonlLossEvidence =
     "lost|lostCount|lossObserved|TotalEventsDropped|totalEventsDropped|EventsDropped|eventsDropped|ProducerDroppedMask|producerDroppedMask|NextSequence|nextSequence|sequence|sequenceGapObserved|sequenceGapEstimate|head|tail|loss";
 inline constexpr const char* kStressJsonlBackpressureEvidence =

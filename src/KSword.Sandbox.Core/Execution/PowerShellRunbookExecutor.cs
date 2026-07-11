@@ -1158,8 +1158,8 @@ public sealed class PowerShellRunbookExecutor : IRunbookExecutor
             .Select((step, index) => CreateStepProgressSnapshot(step, index, runbook.Steps.Count, resultByIndex, state, currentStepIndex))
             .ToList();
         var resolvedCurrentStepIndex = RunbookProgressFacts.ResolveCurrentStepIndex(steps, currentStepIndex, state, success);
-        var currentStep = resolvedCurrentStepIndex is >= 0 && resolvedCurrentStepIndex.Value < runbook.Steps.Count
-            ? runbook.Steps[resolvedCurrentStepIndex.Value]
+        var currentStep = resolvedCurrentStepIndex is >= 0
+            ? steps.FirstOrDefault(step => step.StepIndex == resolvedCurrentStepIndex.Value)
             : null;
 
         return new SandboxRunbookProgressSnapshot
@@ -1172,8 +1172,11 @@ public sealed class PowerShellRunbookExecutor : IRunbookExecutor
             CompletedSteps = steps.Count(step => RunbookProgressFacts.CountsAsCompletedStep(step.State)),
             ExecutedSteps = results.Count(step => !step.Skipped && step.StepIndex >= 0),
             CurrentStepIndex = currentStep is null ? null : resolvedCurrentStepIndex,
-            CurrentStepId = currentStep?.Id,
+            CurrentStepId = currentStep?.StepId,
             CurrentStepTitle = currentStep?.Title,
+            CurrentPhase = currentStep?.Phase,
+            CurrentCategory = currentStep?.Category,
+            ProgressPercent = RunbookProgressFacts.ComputeProgressPercent(steps, state, success, runbook.Steps.Count),
             Success = success,
             Message = message,
             StartedAtUtc = startedAtUtc,
@@ -1197,15 +1200,21 @@ public sealed class PowerShellRunbookExecutor : IRunbookExecutor
         string aggregateState,
         int? currentStepIndex)
     {
+        var facts = RunbookProgressFacts.DescribeStep(step, stepIndex, totalSteps);
         if (resultByIndex.TryGetValue(stepIndex, out var result))
         {
             var resultState = RunbookProgressFacts.ResolveStepState(stepIndex, result, failedIndex: null);
             return new SandboxRunbookStepProgressSnapshot
             {
                 StepIndex = stepIndex,
+                Ordinal = facts.Ordinal,
                 StepId = step.Id,
                 Title = step.Title,
                 State = resultState,
+                Phase = facts.Phase,
+                Category = facts.Category,
+                RemediationHintZh = facts.RemediationHintZh,
+                IsCleanup = facts.IsCleanup,
                 RequiresElevation = step.RequiresElevation,
                 MutatesVmState = step.MutatesVmState,
                 StartedAtUtc = result.StartedAtUtc,
@@ -1221,9 +1230,14 @@ public sealed class PowerShellRunbookExecutor : IRunbookExecutor
         return new SandboxRunbookStepProgressSnapshot
         {
             StepIndex = stepIndex,
+            Ordinal = facts.Ordinal,
             StepId = step.Id,
             Title = step.Title,
             State = isCurrent ? SandboxRunbookProgressStates.Running : SandboxRunbookProgressStates.Pending,
+            Phase = facts.Phase,
+            Category = facts.Category,
+            RemediationHintZh = facts.RemediationHintZh,
+            IsCleanup = facts.IsCleanup,
             RequiresElevation = step.RequiresElevation,
             MutatesVmState = step.MutatesVmState,
             Message = isCurrent

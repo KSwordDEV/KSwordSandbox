@@ -38,6 +38,12 @@ internal sealed class ReportEvidenceStoryContractScenario : ISmokeTestScenario
         RequireContains(html, "VT reputation/community", "VT section should expose reputation/community score.");
         RequireContains(html, "vtEngineCount=71", "VT official evidence should include engine count.");
         RequireContains(html, "https://www.virustotal.com/gui/file/", "VT permalink should remain copyable evidence.");
+        RequireContains(html, "Evidence health narrative", "Report should narrate evidence health before dense evidence.");
+        RequireContains(html, "R0 / VT / Artifact health narrative", "Report should separate evidence health from sample behavior.");
+        RequireContains(html, "Copy health narrative", "Evidence health narrative should be explicitly copyable.");
+        RequireContains(html, "process-tree-sparkline", "Process tree should expose weak-interaction activity sparklines.");
+        RequireContains(html, "Network relation path", "Network cards should expose readable process-to-endpoint relation paths.");
+        RequireContains(html, "raw-page-nav", "Raw event expansion should expose native page shortcuts.");
         RequireContains(html, "data-copy=", "New evidence cards should remain copyable.");
 
         return Task.FromResult(new SmokeTestResult
@@ -70,6 +76,30 @@ internal sealed class ReportEvidenceStoryContractScenario : ISmokeTestScenario
                 ["queueFailureCount"] = "0",
                 ["classifyPayloadFailureCount"] = "0",
                 ["lastDegradeReasonName"] = "wfpAleConnectTodo"
+            }
+        };
+        var processStart = new SandboxEvent
+        {
+            EventType = "process.start",
+            Timestamp = timestamp.AddMilliseconds(100),
+            Source = "guest",
+            ProcessName = "story.exe",
+            ProcessId = 5000,
+            Path = @"C:\Samples\story.exe",
+            CommandLine = @"C:\Samples\story.exe"
+        };
+        var networkFlow = new SandboxEvent
+        {
+            EventType = "network.tcp",
+            Timestamp = timestamp.AddSeconds(4),
+            Source = "guest",
+            ProcessName = "story.exe",
+            ProcessId = 5000,
+            Data =
+            {
+                ["remoteAddress"] = "203.0.113.55",
+                ["remotePort"] = "443",
+                ["protocol"] = "tcp"
             }
         };
         var staticResource = new SandboxEvent
@@ -113,6 +143,24 @@ internal sealed class ReportEvidenceStoryContractScenario : ISmokeTestScenario
             }
         };
 
+        var events = new List<SandboxEvent> { processStart, r0NetworkStatus, staticResource, vt, networkFlow };
+        for (var index = 0; index < 30; index++)
+        {
+            events.Add(new SandboxEvent
+            {
+                EventType = $"story.raw.{index:D2}",
+                Timestamp = timestamp.AddSeconds(10 + index),
+                Source = "guest",
+                ProcessName = "story.exe",
+                ProcessId = 5000,
+                Data =
+                {
+                    ["rawSource"] = "events.json",
+                    ["index"] = index.ToString()
+                }
+            });
+        }
+
         return new AnalysisReport
         {
             JobId = Guid.Parse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"),
@@ -154,7 +202,7 @@ internal sealed class ReportEvidenceStoryContractScenario : ISmokeTestScenario
                 Tags = ["resource_embedded_pe"],
                 InterestingStrings = ["resource:RCDATA@file=0x2000"]
             },
-            Events = [r0NetworkStatus, staticResource, vt],
+            Events = events,
             Findings = []
         };
     }

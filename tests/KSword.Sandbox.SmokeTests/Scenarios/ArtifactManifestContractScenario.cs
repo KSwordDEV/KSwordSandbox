@@ -1044,6 +1044,13 @@ internal sealed class ArtifactManifestContractScenario : ISmokeTestScenario
                     RuntimeRoot = runtimeRoot,
                     RulesDirectory = context.RulesDirectory,
                     GuestPayloadRoot = Path.Combine(runtimeRoot, "payload")
+                },
+                ArtifactCollection = new ArtifactCollectionConfig
+                {
+                    CollectDroppedFiles = true,
+                    CaptureScreenshots = true,
+                    CaptureMemoryDumps = true,
+                    CapturePacketCapture = true
                 }
             },
             RuleEngine.LoadRuleSet(Path.Combine(context.RulesDirectory, "behavior-rules.json")));
@@ -1087,6 +1094,7 @@ internal sealed class ArtifactManifestContractScenario : ISmokeTestScenario
             artifact.Kind == ArtifactKind.DroppedFile &&
             string.Equals(artifact.Name, droppedFileName, StringComparison.Ordinal));
         AssertDownloadSelectorShape(descriptor);
+        SmokeAssert.True(descriptor.Metadata.TryGetValue("safeDownloadFileName", out var safeDownloadFileName) && safeDownloadFileName == droppedFileName, "Artifact index should expose a safe download file name for dropped files.");
         SmokeAssert.True(descriptor.RelativePath == $"guest/{job.JobId:N}/artifacts/dropped-files/{droppedFileName}", "Download selector test should use host-relative artifact path.");
         SmokeAssert.True(!descriptor.SafeLink.Contains(" ", StringComparison.Ordinal) && !descriptor.SafeLink.Contains("#", StringComparison.Ordinal), "SafeLink should URL-encode spaces and fragment characters.");
         SmokeAssert.True(descriptor.SafeLink.Contains("%20", StringComparison.Ordinal) && descriptor.SafeLink.Contains("%23", StringComparison.Ordinal), "SafeLink should contain encoded path characters.");
@@ -1098,6 +1106,20 @@ internal sealed class ArtifactManifestContractScenario : ISmokeTestScenario
         var importPathResolved = service.ResolveDownloadableArtifact(job.JobId, descriptor.ImportPath);
         SmokeAssert.True(string.Equals(importPathResolved.FullPath, droppedPath, StringComparison.OrdinalIgnoreCase), "Download resolver should accept ImportPath selectors.");
 
+        var configAwareIndex = new HostArtifactIndexBuilder().Build(
+            job.JobId,
+            jobRoot,
+            new ArtifactCollectionConfig
+            {
+                CollectDroppedFiles = true,
+                CaptureScreenshots = true,
+                CaptureMemoryDumps = true,
+                CapturePacketCapture = true
+            });
+        AssertExpectedMissingCollection(configAwareIndex, "screenshots", ArtifactKind.Screenshot);
+        AssertExpectedMissingCollection(configAwareIndex, "memory-dumps", ArtifactKind.MemoryDump);
+        AssertExpectedMissingCollection(configAwareIndex, "packet-captures", ArtifactKind.PacketCapture);
+
         var downloadHref = $"/api/jobs/{job.JobId:D}/artifacts/download?path={Uri.EscapeDataString(descriptor.RelativePath)}";
         SmokeAssert.True(downloadHref.Contains("/artifacts/download?path=", StringComparison.Ordinal), "WebUI download href should use the guarded artifact download endpoint.");
         SmokeAssert.True(!downloadHref.Contains(droppedPath, StringComparison.OrdinalIgnoreCase), "WebUI download href should not embed absolute host paths.");
@@ -1107,6 +1129,17 @@ internal sealed class ArtifactManifestContractScenario : ISmokeTestScenario
         AssertThrows<ArgumentException>(() => service.ResolveDownloadableArtifact(job.JobId, Uri.EscapeDataString(@"C:\Windows\win.ini")), "URL-encoded absolute download selectors should be rejected.");
         AssertThrows<ArgumentException>(() => service.ResolveDownloadableArtifact(job.JobId, "%2e%2e%2fescape.bin"), "URL-encoded traversal download selectors should be rejected.");
         AssertThrows<FileNotFoundException>(() => service.ResolveDownloadableArtifact(job.JobId, $"guest/{job.JobId:N}/artifacts/dropped-files/missing.bin"), "Unknown relative download selectors should be rejected.");
+    }
+
+    private static void AssertExpectedMissingCollection(HostArtifactIndex index, string collectionName, ArtifactKind kind)
+    {
+        var collection = index.Collections.Single(candidate => string.Equals(candidate.Name, collectionName, StringComparison.OrdinalIgnoreCase));
+        SmokeAssert.True(collection.Kind == kind, $"{collectionName} expected collection should use the stable artifact kind.");
+        SmokeAssert.True(collection.Status == "missing", $"{collectionName} expected collection should be marked missing when requested but no artifact file exists.");
+        SmokeAssert.True(collection.Reason == "noDownloadableArtifacts", $"{collectionName} expected collection should explain that no downloadable artifact was indexed.");
+        SmokeAssert.True(collection.Metadata.TryGetValue("downloadResolutionState", out var state) && state == "missing", $"{collectionName} expected collection should expose missing download diagnostics.");
+        SmokeAssert.True(collection.Metadata.TryGetValue("downloadRejectionCode", out var code) && code == "missing-artifact-file", $"{collectionName} expected collection should expose a missing-artifact rejection code.");
+        SmokeAssert.True(collection.Metadata.TryGetValue("hasDownloadableArtifacts", out var hasDownloadable) && hasDownloadable == "false", $"{collectionName} expected collection should declare no downloadable artifacts.");
     }
 
     /// <summary>
