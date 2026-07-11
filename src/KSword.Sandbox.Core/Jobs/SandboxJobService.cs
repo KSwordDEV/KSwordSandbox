@@ -19,6 +19,8 @@ namespace KSword.Sandbox.Core.Jobs;
 /// </summary>
 public sealed class SandboxJobService
 {
+    private const string EnrichmentEventsFileName = "enrichment-events.json";
+
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNameCaseInsensitive = true,
@@ -246,6 +248,47 @@ public sealed class SandboxJobService
     }
 
     /// <summary>
+    /// Upserts one host-side enrichment event and regenerates the report. Inputs
+    /// are a known job id, a normalized event such as a VirusTotal lookup, and
+    /// an operator-safe message; processing persists the event under the job
+    /// root so future report regenerations keep it, then re-runs rules and
+    /// report rendering. The method returns updated job metadata.
+    /// </summary>
+    public AnalysisJob UpsertEnrichmentEvent(Guid jobId, SandboxEvent enrichmentEvent, string message)
+    {
+        if (!jobs.TryGetValue(jobId, out var job))
+        {
+            throw new KeyNotFoundException($"Job {jobId} was not found.");
+        }
+
+        var jobRoot = GetJobRoot(jobId);
+        Directory.CreateDirectory(jobRoot);
+        var enrichmentPath = GetEnrichmentEventsPath(jobId);
+        var existing = LoadEventsIfPresent(enrichmentPath);
+        var normalized = NormalizeEvent(enrichmentEvent);
+        var nextEvents = existing
+            .Where(evt => !SameEnrichmentIdentity(evt, normalized))
+            .Select(NormalizeEvent)
+            .ToList();
+        nextEvents.Add(normalized);
+        nextEvents = nextEvents
+            .OrderBy(evt => evt.Timestamp)
+            .ThenBy(evt => evt.EventType, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(evt => evt.Source, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        File.WriteAllText(enrichmentPath, JsonSerializer.Serialize(nextEvents, JsonOptions));
+
+        var guestEvents = LoadGuestEventsIfPresent(job.GuestEventsPath);
+        var updated = RegenerateReport(job with
+        {
+            Messages = AppendMessage(job.Messages, message)
+        }, job.Status, guestEvents, job.GuestEventsPath);
+
+        jobs[jobId] = updated;
+        return updated;
+    }
+
+    /// <summary>
     /// Returns raw events for the WebUI live monitor without rule classification.
     /// Inputs are a job ID plus offset/take paging values; processing reads any
     /// current guest JSON/JSONL artifacts and falls back to the persisted report
@@ -372,6 +415,7 @@ public sealed class SandboxJobService
         var jobConfig = BuildJobConfig(job.Submission, job.Submission.DurationSeconds);
         var events = CreatePlanningEvents(sample, job.Submission, runbook, staticAnalysis, jobConfig.ArtifactCollection);
         AppendRunbookExecutionEvent(events, job.RunbookExecutionResultPath);
+        events.AddRange(LoadEnrichmentEvents(job.JobId));
         events.AddRange(guestEvents.Select(NormalizeEvent));
         AppendGuestImportEvent(events, guestEventsPath, guestEvents.Count);
 
@@ -436,6 +480,11 @@ public sealed class SandboxJobService
     private string GetJobRoot(Guid jobId)
     {
         return Path.Combine(config.Paths.RuntimeRoot, "jobs", jobId.ToString("N"));
+    }
+
+    private string GetEnrichmentEventsPath(Guid jobId)
+    {
+        return Path.Combine(GetJobRoot(jobId), EnrichmentEventsFileName);
     }
 
     private void EnsureJobExists(Guid jobId)
@@ -717,6 +766,44 @@ public sealed class SandboxJobService
     }
 
     /// <summary>
+    /// Loads durable host-side enrichment events for report regeneration.
+    /// Inputs are a job id; processing reads enrichment-events.json when it
+    /// exists and tolerates corrupt/missing files by returning a diagnostic
+    /// host event only for corrupt readable files; the method returns
+    /// normalized events.
+    /// </summary>
+    private List<SandboxEvent> LoadEnrichmentEvents(Guid jobId)
+    {
+        var path = GetEnrichmentEventsPath(jobId);
+        if (!File.Exists(path))
+        {
+            return [];
+        }
+
+        try
+        {
+            return LoadEventsFromFile(path).Select(NormalizeEvent).ToList();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or InvalidDataException)
+        {
+            return
+            [
+                new SandboxEvent
+                {
+                    EventType = "enrichment.events.read_error",
+                    Source = "host",
+                    Path = path,
+                    Data =
+                    {
+                        ["exceptionType"] = ex.GetType().Name,
+                        ["message"] = ex.Message
+                    }
+                }
+            ];
+        }
+    }
+
+    /// <summary>
     /// Loads events from either events.json or JSON Lines.
     /// The input is a file path, processing selects the parser by extension,
     /// and the method returns normalized events.
@@ -882,6 +969,35 @@ public sealed class SandboxJobService
     {
         var data = string.Join(";", evt.Data.OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase).Select(pair => $"{pair.Key}={pair.Value}"));
         return string.Join("|", evt.EventType, evt.Source, evt.Timestamp.ToString("O"), evt.ProcessId?.ToString() ?? string.Empty, evt.Path ?? string.Empty, evt.CommandLine ?? string.Empty, data);
+    }
+
+    /// <summary>
+    /// Compares enrichment identity for upsert semantics. Inputs are two
+    /// enrichment events; processing prefers provider/hash identity and falls
+    /// back to source/event/path; the method returns true when a newer result
+    /// should replace an older one instead of duplicating it.
+    /// </summary>
+    private static bool SameEnrichmentIdentity(SandboxEvent left, SandboxEvent right)
+    {
+        if (!string.Equals(left.EventType, right.EventType, StringComparison.OrdinalIgnoreCase) ||
+            !string.Equals(left.Source, right.Source, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var leftHash = ReadEventData(left, "sha256");
+        var rightHash = ReadEventData(right, "sha256");
+        if (!string.IsNullOrWhiteSpace(leftHash) || !string.IsNullOrWhiteSpace(rightHash))
+        {
+            return string.Equals(leftHash, rightHash, StringComparison.OrdinalIgnoreCase);
+        }
+
+        return string.Equals(left.Path, right.Path, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string ReadEventData(SandboxEvent evt, string key)
+    {
+        return evt.Data.TryGetValue(key, out var value) ? value : string.Empty;
     }
 
     /// <summary>

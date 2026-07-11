@@ -105,6 +105,14 @@ app.MapGet("/api/jobs/{jobId:guid}/virustotal", async Task<IResult> (Guid jobId,
     }
 
     var result = await virusTotal.LookupFileHashAsync(job.Sample.Sha256, cancellationToken);
+    if (ShouldPersistVirusTotalResult(result))
+    {
+        service.UpsertEnrichmentEvent(
+            jobId,
+            result.ToRuleEvent(),
+            $"VirusTotal hash lookup persisted to report: status={result.Status}, verdict={result.Verdict}.");
+    }
+
     return Results.Ok(result);
 });
 // GET /api/jobs/{jobId}/runbook/progress returns the latest UI-safe runbook
@@ -431,6 +439,24 @@ static IResult StreamIndexedArtifact(Guid jobId, string path, SandboxJobService 
     {
         return Results.NotFound(new { error = $"Artifact download failed for job {jobId:D}: {ex.Message}" });
     }
+}
+
+/// <summary>
+/// Decides whether a VirusTotal lookup result should become durable report
+/// evidence. Inputs are the operator-safe lookup result; processing persists
+/// only real query outcomes that are not local configuration or transport
+/// failures, preserving the requirement that missing API keys and failed calls
+/// stay quiet and do not write report/log noise.
+/// </summary>
+static bool ShouldPersistVirusTotalResult(VirusTotalLookupResult result)
+{
+    if (!result.Configured || !result.Queried)
+    {
+        return false;
+    }
+
+    return string.Equals(result.Status, VirusTotalLookupStatuses.Found, StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(result.Status, VirusTotalLookupStatuses.NotFound, StringComparison.OrdinalIgnoreCase);
 }
 
 /// <summary>

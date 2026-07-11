@@ -1,5 +1,6 @@
 using System.Text.Json;
 using KSword.Sandbox.Abstractions;
+using KSword.Sandbox.Core.Jobs;
 using KSword.Sandbox.Core.Rules;
 using KSword.Sandbox.SmokeTests.Assertions;
 using KSword.Sandbox.SmokeTests.Framework;
@@ -45,12 +46,13 @@ internal sealed class BehaviorRuleVirusTotalQualityScenario : ISmokeTestScenario
         AssertBilingualRuleMetadata(behaviorRulesPath);
         AssertSyntheticVirusTotalRuleMatches(rules);
         AssertVirusTotalInfrastructureContracts(context);
+        AssertVirusTotalReportPersistence(context, rules);
 
         return Task.FromResult(new SmokeTestResult
         {
             ScenarioId = ScenarioId,
             Passed = true,
-            Message = "VirusTotal enrichment rules match synthetic verdict events and infrastructure exposes clear local verdict/status fields."
+            Message = "VirusTotal enrichment rules match synthetic verdict events, persist successful lookup evidence into reports, and infrastructure exposes clear local verdict/status fields."
         });
     }
 
@@ -153,6 +155,58 @@ internal sealed class BehaviorRuleVirusTotalQualityScenario : ISmokeTestScenario
         RequireContains(lookup, "malicious > 0", "VirusTotal verdict should treat malicious hits as malicious.");
         RequireContains(lookup, "suspicious > 0", "VirusTotal verdict should treat suspicious hits as suspicious when malicious is zero.");
         RequireContains(lookup, "ParseRetryAfterUtc", "VirusTotal lookup should parse Retry-After for rate limits.");
+    }
+
+    private static void AssertVirusTotalReportPersistence(SmokeTestContext context, BehaviorRuleSet rules)
+    {
+        var runtimeRoot = Path.Combine(context.RuntimeRoot, "smoke-vt-report-persistence");
+        if (Directory.Exists(runtimeRoot))
+        {
+            Directory.Delete(runtimeRoot, recursive: true);
+        }
+
+        var samplePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "System32", "notepad.exe");
+        SmokeAssert.True(File.Exists(samplePath), "notepad.exe should exist for VirusTotal report persistence smoke.");
+        var service = new SandboxJobService(
+            new SandboxConfig
+            {
+                Paths = new SandboxPaths
+                {
+                    RuntimeRoot = runtimeRoot,
+                    RulesDirectory = context.RulesDirectory,
+                    GuestPayloadRoot = Path.Combine(context.RuntimeRoot, "payload", "guest-tools")
+                }
+            },
+            rules);
+
+        var job = service.Plan(new SandboxSubmission
+        {
+            SamplePath = samplePath,
+            DurationSeconds = 5,
+            DryRun = true,
+            UseMockCollector = true
+        });
+        var vtEvent = CreateVirusTotalEvent("malicious", "found", malicious: "7", suspicious: "0") with
+        {
+            Data = new Dictionary<string, string>(CreateVirusTotalEvent("malicious", "found", malicious: "7").Data, StringComparer.OrdinalIgnoreCase)
+            {
+                ["sha256"] = job.Sample!.Sha256
+            }
+        };
+
+        var updated = service.UpsertEnrichmentEvent(job.JobId, vtEvent, "VirusTotal lookup persisted for smoke.");
+        SmokeAssert.True(File.Exists(Path.Combine(runtimeRoot, "jobs", job.JobId.ToString("N"), "enrichment-events.json")), "enrichment-events.json should be persisted beside the job report.");
+        var report = JsonSerializer.Deserialize<AnalysisReport>(File.ReadAllText(updated.JsonReportPath!), new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+        SmokeAssert.True(report is not null, "Updated report.json should deserialize after VT enrichment.");
+        SmokeAssert.True(report!.Events.Any(evt => evt.EventType == "enrichment.virustotal.lookup" &&
+            evt.Data.TryGetValue("vtVerdict", out var verdict) &&
+            string.Equals(verdict, "malicious", StringComparison.OrdinalIgnoreCase)), "VT enrichment event should be present in report events.");
+        SmokeAssert.True(report.Findings.Any(finding => finding.RuleId == "virustotal-malicious-verdict"), "VT malicious verdict should be classified in regenerated report findings.");
+
+        var artifactIndex = service.BuildArtifactIndex(job.JobId);
+        SmokeAssert.True(artifactIndex.Artifacts.Any(artifact =>
+            artifact.RelativePath.EndsWith("enrichment-events.json", StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(artifact.EvidenceRole, "enrichment-events", StringComparison.OrdinalIgnoreCase)), "enrichment-events.json should be indexed as downloadable enrichment evidence.");
     }
 
     private static bool HasNonEmptyString(JsonElement element, string propertyName)

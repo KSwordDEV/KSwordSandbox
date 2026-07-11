@@ -819,6 +819,21 @@ public sealed class HostArtifactIndexBuilder
                 CaptureState: "available");
         }
 
+        if (string.Equals(fileName, "enrichment-events.json", StringComparison.OrdinalIgnoreCase))
+        {
+            return new ArtifactClassification(
+                ArtifactKind.GuestEventsJson,
+                EvidenceRole: "enrichment-events",
+                CollectionName: "enrichment",
+                CapturePhase: "host-enrichment",
+                CaptureState: "available",
+                Metadata: new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["telemetrySource"] = "host-enrichment",
+                    ["containsVirusTotalLookup"] = "true"
+                });
+        }
+
         if (string.Equals(fileName, "agent-summary.json", StringComparison.OrdinalIgnoreCase))
         {
             return new ArtifactClassification(
