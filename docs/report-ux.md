@@ -67,9 +67,11 @@ plain diagnostic dump. The visual contract is:
   and raw event evidence remain navigable during demos.
 - The Raw normalized events section should be slim by default: render a native
   collapsed `<details>` block, bound the expanded raw event panel height, and
-  inline only the first 200 raw events. The section must show total events,
-  inline-rendered events, hidden raw events, and clear `report.json` plus raw
-  source artifact path hints for complete evidence.
+  inline only the first 200 raw events. Expanded inline rows must be split into
+  50-row native pages so analysts can open a small chunk instead of a long
+  table. The section must show total events, inline-rendered events, inline
+  page count, hidden raw events, and clear `report.json` plus raw source
+  artifact path hints for complete evidence.
 - Raw event expansion and layout stability must use native HTML/CSS rather than
   JavaScript. Copy affordances may enhance the static HTML but must not be
   required to reveal evidence.
@@ -110,7 +112,8 @@ blocks should support fast copying:
 - Raw event fields should be sorted and rendered in a collapsible evidence
   block so large driver payloads do not overwhelm the page.
 - Raw normalized events should default to a closed summary, show only the first
-  200 inline rows, and tell the operator exactly how many events are hidden.
+  200 inline rows in 50-row native pages, and tell the operator exactly how
+  many events are hidden.
 - The raw section should point to `report.json`, `events.json`,
   `driver-events.jsonl`, and/or artifact manifests when indexed, so operators
   have raw source artifact path hints and can open or copy the full raw source

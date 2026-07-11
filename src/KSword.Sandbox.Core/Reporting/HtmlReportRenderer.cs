@@ -39,6 +39,7 @@ public sealed class HtmlReportRenderer
     private const int TimelineEventInlineLimit = 120;
     private const int TimelineGroupEventInlineLimit = 12;
     private const int RawEventInlineLimit = 200;
+    private const int RawEventPageSize = 50;
 
     private sealed record TimelineGroup(
         string Window,
@@ -254,7 +255,7 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
 .evidence{max-width:560px}.evidence details{background:#f7fbff;border:1px solid var(--line);border-radius:12px;padding:8px}.evidence summary{cursor:pointer;font-weight:700}.evidence pre{white-space:pre-wrap;word-break:break-word}
 .toolbar{display:flex;gap:8px;justify-content:flex-end}.columns{display:grid;gap:14px;grid-template-columns:1fr 1fr}.compact-list{margin:8px 0 0 0;padding-left:18px}.compact-list li{margin:4px 0}
 .artifact-ref{font-weight:700}.artifact-list{list-style:none;margin:8px 0 0 0;padding:0}.artifact-list li{border-top:1px solid #e2e8f0;margin-top:8px;padding-top:8px}.artifact-preview img{border:1px solid #cbd5e1;border-radius:10px;max-height:260px;max-width:100%}
-.raw-events-shell{background:#f9fcff;border:1px solid var(--line);border-radius:16px;margin-top:14px;overflow:hidden}.raw-events-shell>summary{cursor:pointer;font-weight:800;list-style:none;padding:12px 14px}.raw-events-shell>summary::-webkit-details-marker{display:none}.raw-events-shell>summary:before{color:var(--primary-deep);content:'▶';display:inline-block;margin-right:8px}.raw-events-shell[open]>summary:before{content:'▼'}.raw-events-panel{border-top:1px solid var(--line);max-height:58vh;overflow:auto;padding:0 12px 12px}.raw-source-hints{background:#f8fbff;border:1px solid var(--line);border-radius:14px;margin-top:12px;padding:12px}.raw-source-hints ul{list-style:none;margin:8px 0 0 0;padding:0}.raw-source-hints li{border-top:1px solid #e2e8f0;margin-top:8px;padding-top:8px}.raw-source-hints li:first-child{border-top:0;margin-top:0;padding-top:0}.raw-source-hints .hint-label{font-weight:800}
+.raw-events-shell{background:#f9fcff;border:1px solid var(--line);border-radius:16px;margin-top:14px;overflow:hidden}.raw-events-shell>summary{cursor:pointer;font-weight:800;list-style:none;padding:12px 14px}.raw-events-shell>summary::-webkit-details-marker{display:none}.raw-events-shell>summary:before{color:var(--primary-deep);content:'▶';display:inline-block;margin-right:8px}.raw-events-shell[open]>summary:before{content:'▼'}.raw-events-panel{border-top:1px solid var(--line);max-height:58vh;overflow:auto;padding:12px}.raw-event-pages{display:grid;gap:12px}.raw-event-page{background:#fff;border:1px solid #dbeafe;border-radius:14px;overflow:hidden}.raw-event-page>summary{background:linear-gradient(90deg,#eef7ff,#ffffff);color:#075985;cursor:pointer;font-weight:900;list-style:none;padding:10px 12px}.raw-event-page>summary::-webkit-details-marker{display:none}.raw-event-page>summary:before{content:'▶';display:inline-block;margin-right:8px}.raw-event-page[open]>summary:before{content:'▼'}.raw-event-page table{margin:0}.raw-source-hints{background:#f8fbff;border:1px solid var(--line);border-radius:14px;margin-top:12px;padding:12px}.raw-source-hints ul{list-style:none;margin:8px 0 0 0;padding:0}.raw-source-hints li{border-top:1px solid #e2e8f0;margin-top:8px;padding-top:8px}.raw-source-hints li:first-child{border-top:0;margin-top:0;padding-top:0}.raw-source-hints .hint-label{font-weight:800}
 @media(max-width:900px){.grid,.columns{grid-template-columns:1fr 1fr}table{display:block;overflow-x:auto}}@media(max-width:640px){header{padding:28px 24px}.grid,.columns{grid-template-columns:1fr}main,nav{padding:0 14px}}
 """);
         html.AppendLine("</style></head>");
@@ -1170,9 +1171,10 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
         html.AppendLine("<div class=\"grid\">");
         Metric(html, "Total events", orderedEvents.Count.ToString(), "risk-info");
         Metric(html, "Inline rendered", inlineEvents.Count.ToString(), "risk-low");
+        Metric(html, "Inline pages", RawEventPageCount(inlineEvents.Count).ToString(), "risk-info");
         Metric(html, "Hidden raw events", hiddenCount.ToString(), hiddenCount > 0 ? "risk-medium" : "risk-info");
         html.AppendLine("</div>");
-        html.AppendLine($"<div class=\"section-note\"><strong>Raw events are collapsed by default.</strong> Raw events shown inline: {inlineEvents.Count}/{orderedEvents.Count}. Hidden raw events: {hiddenCount}. Open report.json or raw source artifacts for complete evidence.</div>");
+        html.AppendLine($"<div class=\"section-note\"><strong>Raw events are collapsed by default.</strong> Raw events shown inline: {inlineEvents.Count}/{orderedEvents.Count}. Inline page size: {RawEventPageSize}. Hidden raw events: {hiddenCount}. Open report.json or raw source artifacts for complete evidence.</div>");
         AppendRawSourceHints(html, report, artifacts);
         AppendRawEventDistribution(html, orderedEvents);
 
@@ -1184,12 +1186,59 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
         {
             html.AppendLine($"<details class=\"raw-events-shell\"><summary>Show inline raw events ({inlineEvents.Count}/{orderedEvents.Count}; {hiddenCount} hidden)</summary>");
             html.AppendLine("<div class=\"raw-events-panel\">");
-            AppendEventRows(html, inlineEvents, artifactLookup, artifacts);
+            AppendRawEventPages(html, inlineEvents, orderedEvents.Count, artifactLookup, artifacts);
             html.AppendLine("</div>");
             html.AppendLine("</details>");
         }
 
         html.AppendLine("</section>");
+    }
+
+    /// <summary>
+    /// Appends native paged raw-event tables to keep evidence readable.
+    /// Inputs are already-capped raw events and total event count; processing
+    /// groups inline rows into deterministic native details panels; return is
+    /// none.
+    /// </summary>
+    private static void AppendRawEventPages(
+        StringBuilder html,
+        IReadOnlyList<SandboxEvent> inlineEvents,
+        int totalEventCount,
+        IReadOnlyDictionary<string, List<ArtifactDescriptor>> artifactLookup,
+        IReadOnlyCollection<ArtifactDescriptor> artifacts)
+    {
+        if (inlineEvents.Count == 0)
+        {
+            Empty(html, "No events were collected for this section.");
+            return;
+        }
+
+        html.AppendLine("<div class=\"raw-event-pages\">");
+        var pageNumber = 1;
+        for (var index = 0; index < inlineEvents.Count; index += RawEventPageSize)
+        {
+            var pageEvents = inlineEvents
+                .Skip(index)
+                .Take(RawEventPageSize)
+                .ToList();
+            var first = index + 1;
+            var last = index + pageEvents.Count;
+            var open = pageNumber == 1 ? " open" : string.Empty;
+            var copy = string.Join(Environment.NewLine, pageEvents.Select(EventOneLine));
+            html.AppendLine($"<details class=\"raw-event-page copyable\" data-copy=\"{A(copy)}\"{open}><summary>Raw event page {pageNumber}: rows {first}-{last} of {totalEventCount}</summary>");
+            AppendEventRows(html, pageEvents, artifactLookup, artifacts);
+            html.AppendLine("</details>");
+            pageNumber++;
+        }
+
+        html.AppendLine("</div>");
+    }
+
+    private static int RawEventPageCount(int inlineEventCount)
+    {
+        return inlineEventCount == 0
+            ? 0
+            : (int)Math.Ceiling(inlineEventCount / (double)RawEventPageSize);
     }
 
     /// <summary>
@@ -2904,6 +2953,11 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
         ("Raw normalized events", "原始事件"),
         ("Total events", "事件总数"),
         ("Inline rendered", "内联渲染"),
+        ("Inline pages", "内联分页"),
+        ("Inline page size:", "内联分页大小："),
+        ("Raw event page", "原始事件页"),
+        ("rows", "行"),
+        (" of ", " / "),
         ("Hidden raw events", "隐藏原始事件"),
         ("Raw source paths", "原始来源路径"),
         ("Complete normalized report JSON", "完整规范化报告 JSON"),

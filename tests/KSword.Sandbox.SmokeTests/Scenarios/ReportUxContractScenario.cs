@@ -71,8 +71,11 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(rendererSource, "Copy event", "Report renderer should provide explicit copy buttons.");
         RequireContains(rendererSource, "Raw normalized events", "Report renderer should include raw event evidence.");
         RequireContains(rendererSource, "RawEventInlineLimit = 200", "Report renderer should cap inline raw event rendering.");
+        RequireContains(rendererSource, "RawEventPageSize = 50", "Report renderer should page inline raw events into bounded chunks.");
+        RequireContains(rendererSource, "AppendRawEventPages", "Report renderer should render native raw event pages.");
         RequireContains(rendererSource, "raw-events-shell", "Report renderer should collapse raw events with native HTML.");
         RequireContains(rendererSource, "raw-events-panel", "Report renderer should bound expanded raw event height.");
+        RequireContains(rendererSource, "raw-event-page", "Report renderer should split expanded raw events into page panels.");
         RequireContains(rendererSource, "Hidden raw events", "Report renderer should expose hidden raw event counts.");
         RequireContains(rendererSource, "report.json", "Report renderer should point operators to report.json.");
         RequireContains(rendererSource, "raw source artifacts", "Report renderer should point operators to raw source artifacts.");
@@ -114,6 +117,7 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(doc, "Right-click", "Report UX doc should describe right-click copy.");
         RequireContains(doc, "raw events only", "Report UX doc should distinguish live raw events from final classification.");
         RequireContains(doc, "first 200 raw events", "Report UX doc should require a raw event inline limit.");
+        RequireContains(doc, "50-row native pages", "Report UX doc should require bounded raw event pages.");
         RequireContains(doc, "hidden raw events", "Report UX doc should require hidden raw event counts.");
         RequireContains(doc, "report.json", "Report UX doc should require report.json source hints.");
         RequireContains(doc, "raw source artifact path hints", "Report UX doc should require raw source path hints.");
@@ -208,6 +212,10 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(englishHtml, "href=\"report.zh.html\"", "Rendered HTML should link to report.zh.html.");
         RequireContains(englishHtml, "href=\"report.en.html\"", "Rendered HTML should link to report.en.html.");
         RequireContains(englishHtml, "<details class=\"raw-events-shell\"><summary>Show inline raw events (200/213; 13 hidden)</summary>", "Rendered raw events should be collapsed and capped.");
+        RequireContains(englishHtml, "Inline pages", "Rendered raw event overview should show page counts.");
+        RequireContains(englishHtml, "Raw event page 1: rows 1-50 of 213", "Rendered raw event panel should show the first native page.");
+        RequireContains(englishHtml, "Raw event page 4: rows 151-200 of 213", "Rendered raw event panel should show the final inline page.");
+        RequireContains(englishHtml, "raw-event-page", "Rendered raw event panel should use bounded page containers.");
         RequireContains(englishHtml, "Total events", "Rendered raw event overview should show the total count label.");
         RequireContains(englishHtml, "Hidden raw events", "Rendered raw event overview should show the hidden count label.");
         RequireContains(englishHtml, "Raw source paths", "Rendered raw event section should show source path hints.");
@@ -326,7 +334,8 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         "网络关系卡",
         "R0 / 驱动事件",
         "失败原因",
-        "原始事件"
+        "原始事件",
+        "原始事件页"
     ];
 
     /// <summary>
