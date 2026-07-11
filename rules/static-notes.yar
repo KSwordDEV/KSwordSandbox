@@ -42,6 +42,16 @@ rule KSwordSandbox_Static_Suspicious_Windows_Apis
         $persist2 = "CreateService" ascii wide
         $net1 = "InternetOpen" ascii wide
         $net2 = "WinHttpOpen" ascii wide
+        $download1 = "URLDownloadToFile" ascii wide
+        $download2 = "WinHttpReadData" ascii wide
+        $exfil1 = "InternetWriteFile" ascii wide
+        $exfil2 = "WinHttpWriteData" ascii wide
+        $cred1 = "MiniDumpWriteDump" ascii wide
+        $cred2 = "CryptUnprotectData" ascii wide
+        $cred3 = "VaultEnumerateVaults" ascii wide
+        $defense1 = "AmsiScanBuffer" ascii wide
+        $defense2 = "EtwEventWrite" ascii wide
+        $defense3 = "ClearEventLog" ascii wide
         $anti1 = "IsDebuggerPresent" ascii wide
         $anti2 = "NtQueryInformationProcess" ascii wide
     condition:
@@ -75,6 +85,10 @@ rule KSwordSandbox_Static_Network_Indicators
         $api_winhttp = "WinHttpSendRequest" ascii wide
         $api_wininet = "HttpSendRequest" ascii wide
         $ipv4 = /(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])\.(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])\.(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])\.(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])/ ascii
+        $domain = /[A-Za-z0-9][A-Za-z0-9-]{0,61}(\.[A-Za-z0-9][A-Za-z0-9-]{0,61})+\.(com|net|org|ru|cn|top|xyz|io|cc|onion)/ ascii nocase
+        $dynamic_dns1 = "duckdns.org" ascii wide nocase
+        $dynamic_dns2 = "ddns." ascii wide nocase
+        $dynamic_dns3 = "no-ip." ascii wide nocase
     condition:
         any of them
 }
@@ -225,6 +239,47 @@ rule KSwordSandbox_Static_Dropper_Network_Indicator_Depth
         $net3 = "WinHttpSendRequest" ascii wide
         $net4 = "WSAStartup" ascii wide
         $net5 = "getaddrinfo" ascii wide
+    condition:
+        any of them
+}
+
+rule KSwordSandbox_Static_Credential_Access_Triage
+{
+    meta:
+        description = "Credential-access API and string markers mirrored by StaticAnalyzer credential tags"
+        scope = "triage"
+        mitre = "T1003"
+    strings:
+        $api1 = "MiniDumpWriteDump" ascii wide
+        $api2 = "CryptUnprotectData" ascii wide
+        $api3 = "CredEnumerate" ascii wide
+        $api4 = "VaultEnumerateItems" ascii wide
+        $api5 = "LsaEnumerateLogonSessions" ascii wide
+        $api6 = "SamOpenDomain" ascii wide
+        $tool1 = "mimikatz" ascii wide nocase
+        $tool2 = "sekurlsa" ascii wide nocase
+        $tool3 = "lsadump" ascii wide nocase
+        $target1 = "lsass.exe" ascii wide nocase
+        $target2 = "NTDS.dit" ascii wide nocase
+    condition:
+        any of them
+}
+
+rule KSwordSandbox_Static_Defense_Evasion_Triage
+{
+    meta:
+        description = "Defender, AMSI, ETW, event-log, and firewall strings mirrored by StaticAnalyzer defense-evasion tags"
+        scope = "triage"
+        mitre = "T1562.001"
+    strings:
+        $amsi1 = "AmsiScanBuffer" ascii wide
+        $amsi2 = "AMSI" ascii wide nocase
+        $etw1 = "EtwEventWrite" ascii wide
+        $event1 = "ClearEventLog" ascii wide
+        $event2 = "wevtutil cl" ascii wide nocase
+        $defender1 = "Set-MpPreference" ascii wide nocase
+        $defender2 = "DisableRealtimeMonitoring" ascii wide nocase
+        $firewall1 = "netsh advfirewall set" ascii wide nocase
     condition:
         any of them
 }

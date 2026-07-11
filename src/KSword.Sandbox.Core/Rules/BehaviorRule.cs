@@ -14,8 +14,9 @@ public sealed record BehaviorRuleSet
 
 /// <summary>
 /// Declarative rule for matching normalized sandbox events.
-/// Inputs are event type and substring criteria, processing performs
-/// case-insensitive matching, and matching rules return behavior findings.
+/// Inputs are event type, exact data, and substring criteria; processing
+/// performs case-insensitive matching, and matching rules return behavior
+/// findings.
 /// </summary>
 public sealed record BehaviorRule
 {
@@ -41,6 +42,8 @@ public sealed record BehaviorRule
 
     public List<string> DataKeys { get; init; } = [];
 
+    public Dictionary<string, List<string>> DataEquals { get; init; } = new(StringComparer.OrdinalIgnoreCase);
+
     public Dictionary<string, List<string>> DataContains { get; init; } = new(StringComparer.OrdinalIgnoreCase);
 
     public List<string> ExcludeProcessNames { get; init; } = [];
@@ -48,6 +51,8 @@ public sealed record BehaviorRule
     public List<string> ExcludePathContains { get; init; } = [];
 
     public List<string> ExcludeCommandLineContains { get; init; } = [];
+
+    public Dictionary<string, List<string>> ExcludeDataEquals { get; init; } = new(StringComparer.OrdinalIgnoreCase);
 
     public Dictionary<string, List<string>> ExcludeDataContains { get; init; } = new(StringComparer.OrdinalIgnoreCase);
 

@@ -1,5 +1,7 @@
 #include "Producers/Network/NetworkMonitor.h"
 
+#if KSWORD_SANDBOX_ENABLE_NETWORK_WFP_ALE
+
 #if !defined(NDIS630)
 #define NDIS630 1
 #endif
@@ -502,6 +504,7 @@ KswNetworkBuildAlePayload(
     Payload->Size = sizeof(*Payload);
     Payload->LayerId = FixedValues->layerId;
     Payload->Direction = KswNetworkDirectionFromLayer(FixedValues->layerId);
+    Payload->Flags = KSWORD_SANDBOX_NETWORK_EVENT_FLAG_INSPECTION_ONLY;
 
     if (Filter != NULL) {
         Payload->FilterId = Filter->filterId;
@@ -666,6 +669,8 @@ KswNetworkClassifyFn(
         sizeof(payload));
     if (NT_SUCCESS(status)) {
         InterlockedIncrement64(&g_KswNetworkWfpRuntime.EventCount);
+    } else if (status != STATUS_CANCELLED) {
+        KswSetLastStatus(deviceExtension, status);
     }
 }
 
@@ -1190,3 +1195,42 @@ KswUninitializeNetworkMonitor(
     g_KswNetworkWfpRuntime.RegisterStatus = STATUS_NOT_SUPPORTED;
     g_KswNetworkWfpRuntime.EngineStatus = STATUS_NOT_SUPPORTED;
 }
+
+#else
+
+/*
+ * Explicit unsupported network producer build.
+ *
+ * Inputs : build-time KSWORD_SANDBOX_ENABLE_NETWORK_WFP_ALE=0.
+ * Logic  : do not register any WFP state and return STATUS_NOT_SUPPORTED so the
+ *          core driver can keep the control device online while capabilities do
+ *          not advertise the NETWORK producer bit.
+ * Return : STATUS_NOT_SUPPORTED after preserving diagnostics in LastNtStatus.
+ */
+NTSTATUS
+KswInitializeNetworkMonitor(
+    _In_ PDEVICE_OBJECT DeviceObject,
+    _In_ PKSWORD_SANDBOX_DEVICE_EXTENSION DeviceExtension
+    )
+{
+    UNREFERENCED_PARAMETER(DeviceObject);
+
+    if (DeviceExtension != NULL &&
+        DeviceExtension->Signature == KSWORD_SANDBOX_DEVICE_EXTENSION_SIGNATURE) {
+        KswSetLastStatus(DeviceExtension, STATUS_NOT_SUPPORTED);
+    }
+
+    return STATUS_NOT_SUPPORTED;
+}
+
+/*
+ * No-op cleanup for explicit unsupported network producer builds.
+ */
+VOID
+KswUninitializeNetworkMonitor(
+    VOID
+    )
+{
+}
+
+#endif

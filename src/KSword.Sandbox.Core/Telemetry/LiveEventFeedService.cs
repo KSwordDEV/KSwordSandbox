@@ -19,9 +19,16 @@ public sealed class LiveEventFeedService
     /// </summary>
     public LiveEventSnapshot Build(Guid jobId, IEnumerable<string> paths, int offset, int take)
     {
-        var files = paths.Where(File.Exists).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-        var events = deduplicator.Deduplicate(files.SelectMany(source.Read))
+        var files = paths
+            .Where(File.Exists)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var events = deduplicator.Deduplicate(files.SelectMany(source.ReadForLiveMonitor))
             .OrderBy(evt => evt.Timestamp)
+            .ThenBy(evt => evt.EventType, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(evt => evt.Source, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(evt => evt.Path, StringComparer.OrdinalIgnoreCase)
             .ToList();
         var safeOffset = Math.Max(0, offset);
         var safeTake = Math.Clamp(take, 1, 500);

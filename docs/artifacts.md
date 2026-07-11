@@ -23,6 +23,43 @@ The stable guest output root is the directory passed with `--out`.
   capture inside the guest. Existing external `.pcap` / `.pcapng` files remain
   consumable by the host importer.
 
+## Host discovery contract
+
+Host-side discovery treats the collected guest output root as the only link
+root. `GuestOutputLocator.EnumerateArtifacts` and `HostArtifactIndexBuilder`
+classify the same stable lanes:
+
+- `events.json`: `kind=GuestEventsJson`, `category=telemetry`,
+  `evidenceRole=guest-events`, `collectionName=guest-events`,
+  `telemetryFormat=json`.
+- `driver-events.jsonl` and driver-named JSONL fallbacks:
+  `kind=DriverEventsJsonLines`, `category=telemetry`,
+  `evidenceRole=driver-events`, `collectionName=driver-events`,
+  `telemetryFormat=jsonl`.
+- `artifacts/manifest.json`: `kind=ArtifactManifest`,
+  `evidenceRole=artifact-manifest`, `collectionName=artifact-manifests`.
+- `screenshots/**`: `kind=Screenshot`, `evidenceRole=screenshot`,
+  `collectionName=screenshots`, with phase inferred from file names such as
+  `before-start`, `after-start`, or `after-run`.
+- `memory-dumps/**`: `kind=MemoryDump`, `evidenceRole=memory-dump`,
+  `collectionName=memory-dumps`, MIME type
+  `application/vnd.microsoft.minidump`.
+- `packet-captures/**/*.pcap` and `*.pcapng`: `kind=PacketCapture`,
+  `evidenceRole=packet-capture`, `collectionName=packet-captures`,
+  `captureSource=external`, `hostCaptureStarted=false`, and
+  `importMode=external-artifact`.
+- `artifacts/dropped-files/**` and other non-manifest files under
+  `artifacts/**`: `kind=DroppedFile`, `evidenceRole=dropped-file`,
+  `collectionName=dropped-files`.
+
+Descriptors expose `relativePath`, URL-segment encoded `safeLink`, and
+`importPath` as browser/download selectors. `fullPath`, `guestPath`,
+`indexRoot`, and event source paths are metadata or copy-only diagnostics; they
+must never be placed directly in `href` or `src` attributes. Manifest and
+collection normalization rejects absolute, drive-qualified, or traversal
+`safeLink` values and rebuilds links from safe paths under the collected guest
+output root.
+
 ## Dropped-files manifest
 
 When dropped-file collection is enabled, newly-created files under the sample

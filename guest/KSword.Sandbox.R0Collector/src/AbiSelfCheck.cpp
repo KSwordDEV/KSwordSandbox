@@ -137,6 +137,12 @@ std::string BuildAbiSelfCheckData(const Options& options) {
     data.AddUtf8("maxEventsBounds", "1..1024");
     data.AddSigned("maxReadBatches", options.maxReadBatches);
     data.AddUtf8("maxReadBatchesMode", "0=unbounded;n=stop-after-n-successful-READ_EVENTS-batches");
+    data.AddUnsigned("driverEventSampleStride", options.driverEventSampleStride);
+    data.AddUtf8(
+        "driverEventSamplingPolicy",
+        options.driverEventSampleStride <= 1
+            ? "none; every eligible driver row is emitted unless self-noise suppression applies"
+            : "stride; emit the first eligible driver row and every nth eligible row, with skipped rows counted in r0collector.driverReadEvents");
     data.AddBool("enableMaskSpecified", options.enableMaskSpecified);
     data.AddUnsigned("enableMask", options.enableMask);
     data.AddUtf8("enableMaskHex", HexUnsignedLongLong(options.enableMask, 8));
@@ -152,7 +158,7 @@ std::string BuildAbiSelfCheckData(const Options& options) {
     data.AddUtf8("jsonlMalformedPolicy", "collector never emits malformed rows except when --inject-jsonl-noise is explicitly requested; live readers skip malformed rows and host import preserves them as driver.parse_error evidence");
     data.AddUtf8("kernelBackpressurePolicy", "nonblocking producers; fixed ring overwrites oldest unread record on overflow");
     data.AddUtf8("queueLossEvidence", "TotalEventsDropped|EventsDropped|TotalEventsSuppressed|TotalEventsBackpressured|ProducerDroppedMask|ProducerSuppressedMask|ProducerBackpressureMask|NextSequence|sequence|queueHighWatermark");
-    data.AddUtf8("stableJsonlFields", "sequence|lost|backpressure|noise|selfNoise|selfNoiseReason|producer|producerCategory|eventOrigin|subjectKind|processIdSource|schema|eventSchemaName|eventSchemaVersion|producerDroppedMask|producerSuppressedMask|producerBackpressureMask");
+    data.AddUtf8("stableJsonlFields", "sequence|lost|loss|backpressure|backpressureObserved|noise|selfNoise|selfNoiseReason|producer|producerCategory|eventOrigin|subjectKind|processIdSource|schema|eventSchemaName|eventSchemaVersion|eligible|processed|emitted|suppressed|skipped|head|tail|sampling|producerDroppedMask|producerSuppressedMask|producerBackpressureMask");
     data.AddUtf8("collectorSelfCheckContract", "--abi-self-check emits this row and exits before CreateFileW/DeviceIoControl");
 
     return data.Build();

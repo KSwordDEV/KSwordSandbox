@@ -39,6 +39,7 @@ public sealed class HtmlReportRenderer
     private const int TimelineEventInlineLimit = 120;
     private const int TimelineGroupEventInlineLimit = 12;
     private const int EventTableInlineLimit = 250;
+    private const int StaticStringInlineLimit = 200;
     private const int RawEventInlineLimit = 200;
     private const int RawEventPageSize = 50;
 
@@ -260,6 +261,7 @@ table{border-collapse:separate;border-spacing:0;width:100%;margin-top:14px}td,th
 code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.toc a{background:#f7fbff;border:1px solid var(--line);border-radius:999px;color:#075985;display:inline-block;font-weight:700;margin:4px 8px 4px 0;padding:7px 12px;text-decoration:none}.toc a:hover{border-color:var(--primary);box-shadow:0 0 0 4px rgba(67,160,255,.14)}
 .empty{background:linear-gradient(180deg,#fff,#f7fbff);border:1px dashed #b9d7f3;border-radius:12px;color:var(--muted);padding:14px}
 .copy-btn{background:rgba(67,160,255,.12);border:1px solid rgba(67,160,255,.45);border-radius:999px;color:#075985;cursor:pointer;font-size:12px;font-weight:700;margin:2px 0;padding:5px 10px}.copyable{cursor:copy}.copy-hint{color:var(--muted);font-size:12px;margin-top:8px}
+.event-table-wrap{border:1px solid var(--line);border-radius:14px;margin-top:14px;max-height:60vh;overflow:auto}.event-table-wrap table{margin-top:0}.event-table-wrap th{top:0}.bounded-list{max-height:42vh;overflow:auto}
 .event-table td:first-child{white-space:nowrap}.event-table td:nth-child(2){min-width:140px}.event-table td:nth-child(4){min-width:140px}.event-table td:nth-child(5){min-width:260px}.event-table .evidence{min-width:280px}
 .timeline-groups{display:grid;gap:12px;margin-top:14px}.timeline-group{background:#fbfdff;border:1px solid var(--line);border-radius:16px;overflow:hidden}.timeline-group>summary{align-items:flex-start;cursor:pointer;display:flex;gap:10px;justify-content:space-between;list-style:none;padding:12px 14px}.timeline-group>summary::-webkit-details-marker{display:none}.timeline-group>summary:before{color:var(--primary-deep);content:'▶';font-weight:900;margin-top:2px}.timeline-group[open]>summary:before{content:'▼'}.timeline-group small{color:var(--muted);display:block;line-height:1.4;margin-top:3px}.timeline{border-left:3px solid rgba(67,160,255,.45);margin:0 14px 14px 20px;padding:12px 0 0 18px}.timeline-item{background:#f9fcff;border:1px solid var(--line);border-radius:12px;margin:0 0 12px;padding:10px 12px;position:relative}.timeline-item:before{background:var(--primary);border:3px solid var(--primary-soft);border-radius:999px;content:'';height:11px;left:-26px;position:absolute;top:13px;width:11px}.timeline-overflow{background:#f1f7ff;border:1px dashed #b9d7f3;border-radius:12px;color:var(--muted);margin:0 0 12px;padding:9px 11px}
 .graph-map{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));margin-top:12px}.graph-node{background:#f8fbff;border:1px solid var(--line);border-left:4px solid var(--primary);border-radius:14px;padding:12px}.graph-node strong{display:block;margin-bottom:4px}.graph-node small{color:var(--muted);display:block;line-height:1.4}.behavior-chain{background:linear-gradient(180deg,#fbfdff,#f1f7ff);border:1px solid var(--line);border-radius:16px;counter-reset:chain;margin:12px 0;max-height:42vh;overflow:auto;padding:10px 12px}.behavior-chain li{align-items:flex-start;background:#fff;border:1px solid #dbeafe;border-radius:13px;counter-increment:chain;display:grid;gap:8px;grid-template-columns:auto 1fr;margin:8px 0;padding:10px}.behavior-chain li:before{align-items:center;background:var(--primary);border-radius:999px;color:white;content:counter(chain);display:inline-flex;font-weight:900;height:24px;justify-content:center;width:24px}.behavior-chain details{grid-column:2;background:#f8fbff;border:1px solid var(--line);border-radius:10px;padding:6px}.behavior-chain pre{max-height:24vh;overflow:auto;white-space:pre-wrap;word-break:break-word}.edge-table td:nth-child(1),.edge-table td:nth-child(3){min-width:170px}.ioc-grid{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));margin-top:14px}.ioc-card{background:#ffffff;border:1px solid var(--line);border-radius:14px;padding:12px}.ioc-card h3{font-size:15px;margin:0 0 8px}.ioc-card ul{margin:0;padding-left:18px}.ioc-card li{margin:5px 0;word-break:break-word}
@@ -704,8 +706,26 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
             return;
         }
 
-        html.AppendLine("<ul>");
-        foreach (var value in values)
+        var nonEmptyValues = values
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .ToList();
+        if (nonEmptyValues.Count == 0)
+        {
+            Empty(html, $"No {title.ToLowerInvariant()} recorded.");
+            return;
+        }
+
+        var inlineValues = nonEmptyValues
+            .Take(StaticStringInlineLimit)
+            .ToList();
+        var hiddenCount = Math.Max(0, nonEmptyValues.Count - inlineValues.Count);
+        if (hiddenCount > 0)
+        {
+            html.AppendLine($"<div class=\"section-note\"><strong>Static list capped for readability.</strong> Inline entries: {E(inlineValues.Count.ToString())}/{E(nonEmptyValues.Count.ToString())}. Hidden entries: {E(hiddenCount.ToString())}. Open report.json for complete static evidence.</div>");
+        }
+
+        html.AppendLine("<ul class=\"bounded-list compact-list\">");
+        foreach (var value in inlineValues)
         {
             html.AppendLine($"<li><code class=\"copyable\" data-copy=\"{A(value)}\">{E(value)}</code></li>");
         }
@@ -1488,7 +1508,7 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
         IReadOnlyDictionary<string, List<ArtifactDescriptor>> artifactLookup,
         IReadOnlyCollection<ArtifactDescriptor> artifacts)
     {
-        var failures = report.Events.Where(IsFailureEvent).ToList();
+        var failures = report.Events.Where(IsOperationalFailureEvent).ToList();
         html.AppendLine("<section id=\"failure\" class=\"card\"><h2>Failure reasons</h2>");
         if (report.Status != AnalysisStatus.Failed && failures.Count == 0)
         {
@@ -1697,8 +1717,21 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
             return;
         }
 
+        var orderedEvents = events
+            .OrderBy(e => e.Timestamp)
+            .ToList();
+        var inlineEvents = orderedEvents
+            .Take(EventTableInlineLimit)
+            .ToList();
+        var hiddenCount = Math.Max(0, orderedEvents.Count - inlineEvents.Count);
+        if (hiddenCount > 0)
+        {
+            html.AppendLine($"<div class=\"section-note\"><strong>Event table capped for readability.</strong> Inline rows: {E(inlineEvents.Count.ToString())}/{E(orderedEvents.Count.ToString())}. Hidden rows: {E(hiddenCount.ToString())}. Open Raw normalized events or report.json for complete evidence.</div>");
+        }
+
+        html.AppendLine("<div class=\"event-table-wrap\">");
         html.AppendLine("<table class=\"event-table\"><thead><tr><th>Time</th><th>Type</th><th>Source</th><th>Process</th><th>Path / Command</th><th>Data</th></tr></thead><tbody>");
-        foreach (var evt in events.OrderBy(e => e.Timestamp))
+        foreach (var evt in inlineEvents)
         {
             var plain = EventToPlainText(evt);
             var relatedArtifacts = FindRelatedArtifacts(evt, artifactLookup, artifacts);
@@ -1713,6 +1746,7 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
         }
 
         html.AppendLine("</tbody></table>");
+        html.AppendLine("</div>");
     }
 
     /// <summary>
@@ -3604,7 +3638,10 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
 
     private static IEnumerable<BehaviorFinding> PrimaryBehaviorFindings(AnalysisReport report)
     {
-        return report.Findings.Where(finding => !IsDiagnosticFinding(finding) && !IsStaticTriageFinding(finding));
+        return report.Findings.Where(finding =>
+            !IsDiagnosticFinding(finding) &&
+            !IsStaticTriageFinding(finding) &&
+            !IsVirusTotalFinding(finding));
     }
 
     private static IEnumerable<BehaviorFinding> StaticTriageFindings(AnalysisReport report)
@@ -3976,17 +4013,63 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
         ("English report", "英文报告"),
         ("Default report", "默认报告"),
         ("The WebUI also serves these through /api/jobs/{jobId}/report/html?lang=zh and ?lang=en.", "WebUI 也通过 /api/jobs/{jobId}/report/html?lang=zh 和 ?lang=en 提供这些报告。"),
+        ("Quick navigation", "快速导航"),
+        ("Sticky subnav", "固定子导航"),
+        ("Sticky subnav for Process / Files / Network / R0 / VT / Artifacts quick navigation; counts show currently embedded representative evidence.", "固定子导航用于快速跳转进程 / 文件 / 网络 / R0 / VT / 证据文件；计数表示当前内联的代表性证据。"),
+        ("R0 health", "R0 健康状态"),
+        ("VT lookups", "VT 查询"),
         ("Risk summary", "风险摘要"),
         ("Behavior detections", "行为命中"),
+        ("Static triage", "静态分诊"),
+        ("Collection diagnostics", "采集诊断"),
+        ("Collection health", "采集健康状态"),
+        ("No primary sample behavior rules matched. Static triage and collection diagnostics are separated below so operational health does not inflate the verdict.", "未命中主要样本行为规则。静态分诊和采集诊断已在下方分离展示，避免运行健康状态抬高判定。"),
+        ("Static triage indicators", "静态分诊指标"),
+        ("Static-only findings are useful triage signals, but they do not by themselves prove runtime malicious behavior.", "仅静态发现可作为有用分诊信号，但本身不能证明运行时恶意行为。"),
+        ("Collection and pipeline diagnostics", "采集与流水线诊断"),
+        ("Collector health, runbook, import, and timing diagnostics explain evidence quality and are not sample behavior.", "采集器健康、运行手册、导入和时序诊断用于说明证据质量，不属于样本行为。"),
+        ("Copy behavior evidence", "复制行为证据"),
+        ("None.", "无。"),
         ("Multi-dimensional / MITRE detections", "多维 / MITRE 检测"),
         ("Multi-dimensional / MITRE", "多维 / MITRE"),
         ("Engine and rule hits", "引擎和规则命中"),
         ("Static analysis", "静态分析"),
+        ("Static rule tags", "静态规则标签"),
+        ("Static list capped for readability.", "静态列表已为可读性限制数量。"),
+        ("Inline entries:", "内联条目："),
+        ("Hidden entries:", "隐藏条目："),
+        ("Open report.json for complete static evidence.", "打开 report.json 查看完整静态证据。"),
+        ("No static tags were emitted.", "未输出静态标签。"),
+        ("No interesting strings recorded.", "未记录可疑字符串。"),
+        ("No static warnings recorded.", "未记录静态警告。"),
         ("Dynamic analysis", "动态分析"),
+        ("VirusTotal / reputation", "VirusTotal / 信誉"),
+        ("Hash-only enrichment.", "仅哈希增强。"),
+        ("VirusTotal (VT) results are optional reputation evidence and are separated from sandbox behavior. Missing keys, rate limits, or not-found responses are enrichment status, not malicious sample behavior.", "VirusTotal (VT) 结果是可选信誉证据，已与沙箱行为分离。缺少密钥、限速或未找到响应属于增强状态，不是恶意样本行为。"),
+        ("VT malicious", "VT 恶意"),
+        ("VT suspicious", "VT 可疑"),
+        ("VT status issues", "VT 状态问题"),
+        ("VT rule hits", "VT 规则命中"),
+        ("VirusTotal rule hits", "VirusTotal 规则命中"),
+        ("External reputation rules are shown here so VT quality does not get mixed into local behavior evidence.", "外部信誉规则在此单独展示，避免 VT 质量状态混入本地行为证据。"),
+        ("No VirusTotal enrichment events were recorded. VT is optional, hash-only, and does not upload samples.", "未记录 VirusTotal 增强事件。VT 为可选哈希查询，不上传样本。"),
         ("Behavior graph / IOC summary", "行为图谱 / IOC 摘要"),
         ("Artifact links", "证据文件链接"),
         ("Artifact collection status", "证据采集状态"),
         ("Collection evidence", "采集证据"),
+        ("Copied files released or modified by the sample when collection was enabled.", "启用采集时，样本释放或修改并被复制的文件。"),
+        ("Desktop screenshots captured around sample execution when enabled.", "启用时在样本执行前后捕获的桌面截图。"),
+        ("Opt-in process and child-process memory dump artifacts.", "按需启用的进程及子进程内存转储证据。"),
+        ("Opt-in pktmon/PCAP artifacts and imported DNS/HTTP/TLS/flow rows.", "按需启用的 pktmon/PCAP 证据及导入的 DNS/HTTP/TLS/流量行。"),
+        ("R0Collector JSONL and driver-originated telemetry.", "R0Collector JSONL 与驱动来源遥测。"),
+        ("Latest diagnostic:", "最新诊断："),
+        ("Phases:", "阶段："),
+        (">captured<", ">已采集<"),
+        (">failed<", ">失败<"),
+        (">skipped<", ">已跳过<"),
+        (">partial<", ">部分采集<"),
+        (">observed<", ">已观察<"),
+        (">not observed<", ">未观察<"),
         ("Dropped files", "落地文件"),
         ("File system activity", "文件系统活动"),
         ("Screenshots", "截图"),
@@ -4001,8 +4084,25 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
         ("Registry behavior", "注册表行为"),
         ("Network behavior", "网络行为"),
         ("R0 / driver events", "R0 / 驱动事件"),
+        ("Collection health rows", "采集健康行"),
+        ("Driver telemetry rows", "驱动遥测行"),
+        ("Health alerts", "健康告警"),
+        ("Collection health status", "采集健康状态"),
+        ("Collection health status.", "采集健康状态。"),
+        ("R0 unavailable, driver health, queue backpressure, and dropped-event counters describe collection quality and are not malicious sample behavior.", "R0 不可用、驱动健康、队列背压和丢弃事件计数描述采集质量，不是恶意样本行为。"),
+        ("Health/status rows", "健康/状态行"),
+        ("Device unavailable", "设备不可用"),
+        ("Backpressure/drop", "背压/丢弃"),
+        ("Driver health polls", "驱动健康轮询"),
+        ("Driver telemetry evidence", "驱动遥测证据"),
+        ("No non-health R0 driver telemetry rows were imported. Collection health rows above describe evidence quality rather than sample behavior.", "未导入非健康类 R0 驱动遥测行。上方采集健康行描述证据质量，而不是样本行为。"),
+        ("No R0 collection health rows were imported.", "未导入 R0 采集健康行。"),
         ("Failure reasons", "失败原因"),
         ("Raw normalized events", "原始事件"),
+        ("Event table capped for readability.", "事件表已为可读性限制行数。"),
+        ("Inline rows:", "内联行："),
+        ("Hidden rows:", "隐藏行："),
+        ("Open Raw normalized events or report.json for complete evidence.", "打开原始事件或 report.json 查看完整证据。"),
         ("Total events", "事件总数"),
         ("Inline rendered", "内联渲染"),
         ("Inline pages", "内联分页"),
@@ -4151,6 +4251,18 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
         ("File/path indicators", "文件/路径指标"),
         ("Severity", "严重级别"),
         ("Technique", "技术"),
+        ("<th>Name</th>", "<th>名称</th>"),
+        ("<th>Title</th>", "<th>标题</th>"),
+        ("<th>Type</th>", "<th>类型</th>"),
+        ("<th>Process</th>", "<th>进程</th>"),
+        ("<th>Data</th>", "<th>数据</th>"),
+        ("<th>Evidence</th>", "<th>证据</th>"),
+        ("<th>Indicator</th>", "<th>指标</th>"),
+        ("<th>VA</th>", "<th>VA</th>"),
+        ("<th>Virtual size</th>", "<th>虚拟大小</th>"),
+        ("<th>Raw size</th>", "<th>原始大小</th>"),
+        ("<th>Entropy</th>", "<th>熵</th>"),
+        ("<th>Signal</th>", "<th>信号</th>"),
         ("Rules", "规则"),
         ("Rule ID", "规则 ID"),
         ("Engine", "引擎"),

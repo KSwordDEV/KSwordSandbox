@@ -29,6 +29,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "KSword.Sandbox.HarmlessSamp
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "KSword.Sandbox.PostProcess", "tools\KSword.Sandbox.PostProcess\KSword.Sandbox.PostProcess.csproj", "{E35EEA46-1152-46BA-8A24-7A5D6507FC06}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "KSword.Sandbox.JobTool", "tools\KSword.Sandbox.JobTool\KSword.Sandbox.JobTool.csproj", "{D6AD7683-FAA8-4A48-B261-353A8B38DFFF}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -139,6 +141,18 @@ Global
 		{E35EEA46-1152-46BA-8A24-7A5D6507FC06}.Release|x64.Build.0 = Release|Any CPU
 		{E35EEA46-1152-46BA-8A24-7A5D6507FC06}.Release|x86.ActiveCfg = Release|Any CPU
 		{E35EEA46-1152-46BA-8A24-7A5D6507FC06}.Release|x86.Build.0 = Release|Any CPU
+		{D6AD7683-FAA8-4A48-B261-353A8B38DFFF}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{D6AD7683-FAA8-4A48-B261-353A8B38DFFF}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{D6AD7683-FAA8-4A48-B261-353A8B38DFFF}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{D6AD7683-FAA8-4A48-B261-353A8B38DFFF}.Debug|x64.Build.0 = Debug|Any CPU
+		{D6AD7683-FAA8-4A48-B261-353A8B38DFFF}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{D6AD7683-FAA8-4A48-B261-353A8B38DFFF}.Debug|x86.Build.0 = Debug|Any CPU
+		{D6AD7683-FAA8-4A48-B261-353A8B38DFFF}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{D6AD7683-FAA8-4A48-B261-353A8B38DFFF}.Release|Any CPU.Build.0 = Release|Any CPU
+		{D6AD7683-FAA8-4A48-B261-353A8B38DFFF}.Release|x64.ActiveCfg = Release|Any CPU
+		{D6AD7683-FAA8-4A48-B261-353A8B38DFFF}.Release|x64.Build.0 = Release|Any CPU
+		{D6AD7683-FAA8-4A48-B261-353A8B38DFFF}.Release|x86.ActiveCfg = Release|Any CPU
+		{D6AD7683-FAA8-4A48-B261-353A8B38DFFF}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -153,5 +167,6 @@ Global
 		{E8C3DCE9-E60B-4A0F-8D8F-620E1182635A} = {D499D332-CF34-4B0B-8D74-F8F7907A5C3D}
 		{4F9CD9F7-EAF3-47AC-A895-E7CEB0CF180C} = {07C2787E-EAC7-C090-1BA3-A61EC2A24D84}
 		{E35EEA46-1152-46BA-8A24-7A5D6507FC06} = {07C2787E-EAC7-C090-1BA3-A61EC2A24D84}
+		{D6AD7683-FAA8-4A48-B261-353A8B38DFFF} = {07C2787E-EAC7-C090-1BA3-A61EC2A24D84}
 	EndGlobalSection
 EndGlobal

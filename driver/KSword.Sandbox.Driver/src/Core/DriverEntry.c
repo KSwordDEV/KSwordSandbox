@@ -159,6 +159,13 @@ KswDriverUnload(
             KeAcquireSpinLock(&deviceExtension->StateLock, &oldIrql);
             deviceExtension->DriverState = KswSandboxDriverStateStopping;
             KeReleaseSpinLock(&deviceExtension->StateLock, oldIrql);
+            KswClearProducerActiveMask(
+                deviceExtension,
+                KSWORD_SANDBOX_PRODUCER_FLAG_PROCESS |
+                    KSWORD_SANDBOX_PRODUCER_FLAG_IMAGE |
+                    KSWORD_SANDBOX_PRODUCER_FLAG_FILE |
+                    KSWORD_SANDBOX_PRODUCER_FLAG_REGISTRY |
+                    KSWORD_SANDBOX_PRODUCER_FLAG_NETWORK);
         }
     }
 

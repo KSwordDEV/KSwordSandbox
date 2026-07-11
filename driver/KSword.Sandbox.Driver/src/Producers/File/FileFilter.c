@@ -795,6 +795,15 @@ KswPushFileEvent(
         payload.Flags |=
             KSWORD_SANDBOX_FILE_EVENT_FLAG_STATUS_PRESENT |
             KSWORD_SANDBOX_FILE_EVENT_FLAG_POST_OPERATION;
+        if (!NT_SUCCESS(payload.Status)) {
+            payload.Flags |= KSWORD_SANDBOX_FILE_EVENT_FLAG_OPERATION_FAILED;
+        }
+    }
+
+    if (Operation == KswSandboxFileOperationDelete) {
+        payload.Flags |= KSWORD_SANDBOX_FILE_EVENT_FLAG_DELETE_INTENT;
+    } else if (Operation == KswSandboxFileOperationRename) {
+        payload.Flags |= KSWORD_SANDBOX_FILE_EVENT_FLAG_RENAME_INTENT;
     }
 
     (VOID)KswCopyBestFilePathToPayload(

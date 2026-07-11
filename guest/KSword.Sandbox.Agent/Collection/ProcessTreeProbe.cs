@@ -31,6 +31,9 @@ internal sealed class ProcessTreeProbe : IGuestProbe
     private const string StartupItemCreatedEventType = "startup_item.created";
     private const string StartupItemModifiedEventType = "startup_item.modified";
     private const string StartupItemDeletedEventType = "startup_item.deleted";
+    private const string RegistryRunCreatedEventType = "registry.run.created";
+    private const string RegistryRunModifiedEventType = "registry.run.modified";
+    private const string RegistryRunDeletedEventType = "registry.run.deleted";
     private readonly IProcessSnapshotProvider snapshotProvider;
     private readonly ISystemChangeSnapshotProvider systemChangeSnapshotProvider;
     private readonly HashSet<string> emittedNewProcessKeys = new(StringComparer.OrdinalIgnoreCase);
@@ -344,6 +347,7 @@ internal sealed class ProcessTreeProbe : IGuestProbe
         yield return CreateInventorySnapshotEvent("service.snapshot", "service", snapshot.Services.Count, phase);
         yield return CreateInventorySnapshotEvent("scheduled_task.snapshot", "scheduled_task", snapshot.ScheduledTasks.Count, phase);
         yield return CreateInventorySnapshotEvent("startup_item.snapshot", "startup_item", snapshot.StartupItems.Count, phase);
+        yield return CreateInventorySnapshotEvent("registry.run.snapshot", "registry.run", snapshot.RegistryRunValues.Count, phase);
     }
 
     /// <summary>
@@ -408,6 +412,16 @@ internal sealed class ProcessTreeProbe : IGuestProbe
             StartupItemDeletedEventType,
             phase,
             CreateStartupItemEvent);
+        AddStateDiffEvents(
+            events,
+            baseline.RegistryRunValues,
+            current.RegistryRunValues,
+            "registry.run",
+            RegistryRunCreatedEventType,
+            RegistryRunModifiedEventType,
+            RegistryRunDeletedEventType,
+            phase,
+            CreateRegistryRunEvent);
         return events;
     }
 
@@ -637,6 +651,51 @@ internal sealed class ProcessTreeProbe : IGuestProbe
         if (previous is not null)
         {
             AddIfNotEmpty(evt.Data, "previousValue", previous.Value);
+            AddIfNotEmpty(evt.Data, "previousValueKind", previous.ValueKind);
+        }
+
+        return evt;
+    }
+
+    /// <summary>
+    /// Creates one registry Run/RunOnce value diff event.
+    /// Inputs are event type, change label, current/previous registry snapshots,
+    /// and phase; processing copies hive, view, key, value name, and payload
+    /// details into string Data; the method returns a SandboxEvent.
+    /// </summary>
+    private static SandboxEvent CreateRegistryRunEvent(
+        string eventType,
+        string change,
+        RegistryRunValueSnapshot item,
+        RegistryRunValueSnapshot? previous,
+        ProbePhase phase)
+    {
+        var evt = new SandboxEvent
+        {
+            EventType = eventType,
+            Source = "guest",
+            Path = item.Location,
+            Data =
+            {
+                ["phase"] = ToPhaseLabel(phase),
+                ["change"] = change,
+                ["hive"] = item.Hive,
+                ["keyPath"] = item.KeyPath,
+                ["keyName"] = item.KeyName,
+                ["view"] = item.View,
+                ["location"] = item.Location,
+                ["valueName"] = item.ValueName,
+                ["signature"] = item.Signature
+            }
+        };
+
+        AddIfNotEmpty(evt.Data, "value", item.Value);
+        AddIfNotEmpty(evt.Data, "expandedValue", item.ExpandedValue);
+        AddIfNotEmpty(evt.Data, "valueKind", item.ValueKind);
+        if (previous is not null)
+        {
+            AddIfNotEmpty(evt.Data, "previousValue", previous.Value);
+            AddIfNotEmpty(evt.Data, "previousExpandedValue", previous.ExpandedValue);
             AddIfNotEmpty(evt.Data, "previousValueKind", previous.ValueKind);
         }
 
@@ -943,8 +1002,9 @@ internal sealed class SystemChangeSnapshotProvider : ISystemChangeSnapshotProvid
         var diagnostics = new List<SandboxEvent>();
         var services = await CaptureServicesAsync(diagnostics, cancellationToken).ConfigureAwait(false);
         var scheduledTasks = await CaptureScheduledTasksAsync(diagnostics, cancellationToken).ConfigureAwait(false);
-        var startupItems = CaptureStartupItems(diagnostics, cancellationToken);
-        return new SystemChangeSnapshot(services, scheduledTasks, startupItems, diagnostics);
+        var registryRunValues = new Dictionary<string, RegistryRunValueSnapshot>(StringComparer.OrdinalIgnoreCase);
+        var startupItems = CaptureStartupItems(registryRunValues, diagnostics, cancellationToken);
+        return new SystemChangeSnapshot(services, scheduledTasks, startupItems, registryRunValues, diagnostics);
     }
 
     /// <summary>
@@ -1009,6 +1069,7 @@ internal sealed class SystemChangeSnapshotProvider : ISystemChangeSnapshotProvid
     /// Run/RunOnce keys and startup folders defensively; returns a dictionary.
     /// </summary>
     private static Dictionary<string, StartupItemStateSnapshot> CaptureStartupItems(
+        Dictionary<string, RegistryRunValueSnapshot> registryRunValues,
         List<SandboxEvent> diagnostics,
         CancellationToken cancellationToken)
     {
@@ -1016,10 +1077,11 @@ internal sealed class SystemChangeSnapshotProvider : ISystemChangeSnapshotProvid
         if (!OperatingSystem.IsWindows())
         {
             diagnostics.Add(CreateUnsupportedEvent("startup_item.capture_skipped", "registry and Startup folders"));
+            diagnostics.Add(CreateUnsupportedEvent("registry.run.capture_skipped", "Run/RunOnce registry keys"));
             return items;
         }
 
-        CaptureRegistryStartupItems(items, diagnostics, cancellationToken);
+        CaptureRegistryStartupItems(items, registryRunValues, diagnostics, cancellationToken);
         CaptureStartupFolderItems(items, diagnostics, Environment.SpecialFolder.Startup, "user-startup-folder", cancellationToken);
         CaptureStartupFolderItems(items, diagnostics, Environment.SpecialFolder.CommonStartup, "common-startup-folder", cancellationToken);
         return items;
@@ -1164,6 +1226,7 @@ internal sealed class SystemChangeSnapshotProvider : ISystemChangeSnapshotProvid
     [SupportedOSPlatform("windows")]
     private static void CaptureRegistryStartupItems(
         Dictionary<string, StartupItemStateSnapshot> items,
+        Dictionary<string, RegistryRunValueSnapshot> registryRunValues,
         List<SandboxEvent> diagnostics,
         CancellationToken cancellationToken)
     {
@@ -1172,15 +1235,15 @@ internal sealed class SystemChangeSnapshotProvider : ISystemChangeSnapshotProvid
             : new[] { RegistryView.Default };
         var keys = new[]
         {
-            (RegistryHive.CurrentUser, "HKCU", @"Software\Microsoft\Windows\CurrentVersion\Run"),
-            (RegistryHive.CurrentUser, "HKCU", @"Software\Microsoft\Windows\CurrentVersion\RunOnce"),
-            (RegistryHive.LocalMachine, "HKLM", @"Software\Microsoft\Windows\CurrentVersion\Run"),
-            (RegistryHive.LocalMachine, "HKLM", @"Software\Microsoft\Windows\CurrentVersion\RunOnce")
+            (RegistryHive.CurrentUser, "HKCU", @"Software\Microsoft\Windows\CurrentVersion\Run", "Run"),
+            (RegistryHive.CurrentUser, "HKCU", @"Software\Microsoft\Windows\CurrentVersion\RunOnce", "RunOnce"),
+            (RegistryHive.LocalMachine, "HKLM", @"Software\Microsoft\Windows\CurrentVersion\Run", "Run"),
+            (RegistryHive.LocalMachine, "HKLM", @"Software\Microsoft\Windows\CurrentVersion\RunOnce", "RunOnce")
         };
 
         foreach (var view in views)
         {
-            foreach (var (hive, hiveLabel, subKeyPath) in keys)
+            foreach (var (hive, hiveLabel, subKeyPath, keyName) in keys)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 try
@@ -1196,14 +1259,26 @@ internal sealed class SystemChangeSnapshotProvider : ISystemChangeSnapshotProvid
                     {
                         cancellationToken.ThrowIfCancellationRequested();
                         var value = key.GetValue(valueName, null, RegistryValueOptions.DoNotExpandEnvironmentNames);
+                        var expandedValue = key.GetValue(valueName, null, RegistryValueOptions.None);
                         var valueKind = SafeGetValueKind(key, valueName);
                         var name = string.IsNullOrWhiteSpace(valueName) ? "(Default)" : valueName;
                         var location = $"{hiveLabel}\\{subKeyPath} ({view})";
+                        var registryRunValue = new RegistryRunValueSnapshot(
+                            hiveLabel,
+                            subKeyPath,
+                            keyName,
+                            view.ToString(),
+                            name,
+                            FormatRegistryValue(value),
+                            FormatRegistryValue(expandedValue),
+                            valueKind);
+                        registryRunValues[registryRunValue.Key] = registryRunValue;
+
                         var item = new StartupItemStateSnapshot(
                             "registry",
                             location,
                             name,
-                            FormatRegistryValue(value),
+                            registryRunValue.Value,
                             valueKind,
                             LastWriteUtc: null,
                             SizeBytes: null);
@@ -1212,6 +1287,7 @@ internal sealed class SystemChangeSnapshotProvider : ISystemChangeSnapshotProvid
                 }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or SecurityException or ArgumentException)
                 {
+                    diagnostics.Add(CreateExceptionEvent("registry.run.capture_failed", $"{hiveLabel}\\{subKeyPath} ({view})", ex));
                     diagnostics.Add(CreateExceptionEvent("startup_item.capture_failed", $"{hiveLabel}\\{subKeyPath} ({view})", ex));
                 }
             }
@@ -1435,8 +1511,11 @@ internal sealed class SystemChangeSnapshotProvider : ISystemChangeSnapshotProvid
             Source = "guest",
             Data =
             {
-                ["command"] = string.IsNullOrWhiteSpace(result.Arguments) ? result.FileName : $"{result.FileName} {result.Arguments}",
+                ["command"] = Truncate(string.IsNullOrWhiteSpace(result.Arguments) ? result.FileName : $"{result.FileName} {result.Arguments}", 1200),
+                ["commandFileName"] = result.FileName,
+                ["commandArguments"] = Truncate(result.Arguments, 1024),
                 ["timedOut"] = result.TimedOut.ToString(CultureInfo.InvariantCulture),
+                ["commandTimedOut"] = result.TimedOut.ToString(CultureInfo.InvariantCulture),
                 ["timeoutMilliseconds"] = result.Timeout.TotalMilliseconds.ToString("0", CultureInfo.InvariantCulture)
             }
         };
@@ -1444,13 +1523,23 @@ internal sealed class SystemChangeSnapshotProvider : ISystemChangeSnapshotProvid
         if (result.ExitCode is not null)
         {
             evt.Data["exitCode"] = result.ExitCode.Value.ToString(CultureInfo.InvariantCulture);
+            evt.Data["commandExitCode"] = result.ExitCode.Value.ToString(CultureInfo.InvariantCulture);
         }
 
         AddIfNotEmpty(evt.Data, "exceptionType", result.ExceptionType);
+        AddIfNotEmpty(evt.Data, "commandExceptionType", result.ExceptionType);
         AddIfNotEmpty(evt.Data, "message", result.Message);
+        AddIfNotEmpty(evt.Data, "commandMessage", result.Message);
+        if (!string.IsNullOrWhiteSpace(result.StandardOutput))
+        {
+            evt.Data["stdout"] = Truncate(result.StandardOutput.Trim(), 512);
+            evt.Data["stdoutTruncated"] = (result.StandardOutput.Trim().Length > 512).ToString(CultureInfo.InvariantCulture);
+        }
+
         if (!string.IsNullOrWhiteSpace(result.StandardError))
         {
             evt.Data["stderr"] = Truncate(result.StandardError.Trim(), 512);
+            evt.Data["stderrTruncated"] = (result.StandardError.Trim().Length > 512).ToString(CultureInfo.InvariantCulture);
         }
 
         return evt;
@@ -1595,6 +1684,28 @@ internal sealed record StartupItemStateSnapshot(
 }
 
 /// <summary>
+/// Stores one value from a key Windows Run/RunOnce autostart registry path.
+/// Inputs are registry hive/path/view/value fields; processing exposes a stable
+/// key/signature for dedicated registry.run diff events.
+/// </summary>
+internal sealed record RegistryRunValueSnapshot(
+    string Hive,
+    string KeyPath,
+    string KeyName,
+    string View,
+    string ValueName,
+    string? Value,
+    string? ExpandedValue,
+    string? ValueKind) : ISystemStateItemSnapshot
+{
+    public string Location => $"{Hive}\\{KeyPath} ({View})";
+
+    public string Key => $"{Hive}:{KeyPath}:{View}:{ValueName}";
+
+    public string Signature => string.Join("|", Value, ExpandedValue, ValueKind);
+}
+
+/// <summary>
 /// Stores all system-change snapshots captured for one phase.
 /// Inputs are services, scheduled tasks, startup items, and diagnostics;
 /// processing is immutable storage returned by ISystemChangeSnapshotProvider.
@@ -1603,11 +1714,13 @@ internal sealed record SystemChangeSnapshot(
     Dictionary<string, ServiceStateSnapshot> Services,
     Dictionary<string, ScheduledTaskStateSnapshot> ScheduledTasks,
     Dictionary<string, StartupItemStateSnapshot> StartupItems,
+    Dictionary<string, RegistryRunValueSnapshot> RegistryRunValues,
     IReadOnlyList<SandboxEvent> Diagnostics)
 {
     public static SystemChangeSnapshot Empty { get; } = new(
         new Dictionary<string, ServiceStateSnapshot>(StringComparer.OrdinalIgnoreCase),
         new Dictionary<string, ScheduledTaskStateSnapshot>(StringComparer.OrdinalIgnoreCase),
         new Dictionary<string, StartupItemStateSnapshot>(StringComparer.OrdinalIgnoreCase),
+        new Dictionary<string, RegistryRunValueSnapshot>(StringComparer.OrdinalIgnoreCase),
         []);
 }

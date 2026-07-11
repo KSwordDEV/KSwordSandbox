@@ -201,6 +201,10 @@ KswInitializeRegistryPayload(
         KSWORD_SANDBOX_REGISTRY_EVENT_FLAG_POST_OPERATION;
     Payload->ProcessId = (ULONGLONG)(ULONG_PTR)PsGetCurrentProcessId();
     Payload->Status = Status;
+    if (!NT_SUCCESS(Status)) {
+        Payload->Flags |=
+            KSWORD_SANDBOX_REGISTRY_EVENT_FLAG_OPERATION_FAILED;
+    }
 }
 
 /*
@@ -366,6 +370,9 @@ KswCapturePostSetValue(
     payload.Flags |=
         KSWORD_SANDBOX_REGISTRY_EVENT_FLAG_VALUE_TYPE_PRESENT |
         KSWORD_SANDBOX_REGISTRY_EVENT_FLAG_VALUE_SIZE_PRESENT;
+    if (payload.ValueDataSizeBytes == 0) {
+        payload.Flags |= KSWORD_SANDBOX_REGISTRY_EVENT_FLAG_VALUE_DATA_EMPTY;
+    }
     KswCopyRegistryKeyObjectPath(keyObject, &payload);
     KswCopyRegistryPayloadString(
         payload.ValueName,

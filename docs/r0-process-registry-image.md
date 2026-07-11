@@ -37,7 +37,10 @@ Create and exit events use `KswSandboxEventTypeProcess` with
 - `Status`: create status or exit status when safe to query.
 - `ImagePath` and `CommandLine`: bounded UTF-16 prefixes for Ex create events.
 - Flags distinguish Ex versus legacy callbacks, present strings, truncation, and
-  status presence.
+  status presence.  Create failures set
+  `KSWORD_SANDBOX_PROCESS_EVENT_FLAG_OPERATION_FAILED`, and Ex callbacks mark
+  `KSWORD_SANDBOX_PROCESS_EVENT_FLAG_FILE_OPEN_NAME_AVAILABLE` when Windows says
+  the supplied image name is the opened file name.
 
 The lineage cache is fixed-size, non-paged, protected by a spin lock, and uses
 round-robin replacement rather than allocating in callback paths.  Entries are
@@ -54,7 +57,9 @@ with `PsRemoveLoadImageNotifyRoutine` during driver unload.  Events use
   loads may report a system or zero process context depending on Windows.
 - `ImageBase` and `ImageSize`: numeric image mapping metadata from `PIMAGE_INFO`.
 - `ImagePath`: bounded UTF-16 prefix of `FullImageName` when supplied.
-- Flags identify path presence, path truncation, and system-mode images.
+- Flags identify path presence, path truncation, system-mode images,
+  image-properties presence, images mapped to all PIDs, and extended image-info
+  presence.
 
 ## Registry producer
 
@@ -83,7 +88,8 @@ Registry fields:
   `CmCallbackReleaseKeyObjectIDEx`.
 - `ValueName`: bounded UTF-16 value name for set/delete-value.  For rename-key,
   this compact v1 ABI stores the new key name in `ValueName`.
-- Flags identify key/value presence, truncation, and status presence.
+- Flags identify key/value presence, truncation, status presence, failed
+  operation status, and empty set-value data.
 
 Value data bytes are intentionally not copied in this version.  The producer
 records operation, key, value name, process ID, and status so behavior rules can

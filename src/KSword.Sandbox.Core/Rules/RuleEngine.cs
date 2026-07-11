@@ -6,7 +6,8 @@ namespace KSword.Sandbox.Core.Rules;
 /// <summary>
 /// Loads behavior rules and classifies normalized sandbox events.
 /// Inputs are JSON rule files and SandboxEvent records, processing applies
-/// simple deterministic predicates, and methods return behavior findings.
+/// deterministic exact-match and substring predicates, and methods return
+/// behavior findings.
 /// </summary>
 public sealed class RuleEngine
 {
@@ -131,6 +132,11 @@ public sealed class RuleEngine
             return false;
         }
 
+        if (rule.DataEquals.Count > 0 && !MatchesDataEquals(rule.DataEquals, evt))
+        {
+            return false;
+        }
+
         if (rule.DataContains.Count > 0 && !MatchesDataContains(rule, evt))
         {
             return false;
@@ -147,6 +153,11 @@ public sealed class RuleEngine
         }
 
         if (rule.ExcludeCommandLineContains.Count > 0 && ContainsAny(evt.CommandLine, rule.ExcludeCommandLineContains))
+        {
+            return false;
+        }
+
+        if (rule.ExcludeDataEquals.Count > 0 && MatchesDataEquals(rule.ExcludeDataEquals, evt))
         {
             return false;
         }
@@ -168,6 +179,31 @@ public sealed class RuleEngine
     private static bool MatchesDataContains(BehaviorRule rule, SandboxEvent evt)
     {
         return MatchesDataContains(rule.DataContains, evt);
+    }
+
+    /// <summary>
+    /// Tests whether one event data dictionary exactly equals configured
+    /// values. Inputs are a predicate dictionary and event, processing checks
+    /// each key with case-insensitive exact matching, and the method returns
+    /// true when any key/value pair matches.
+    /// </summary>
+    private static bool MatchesDataEquals(IReadOnlyDictionary<string, List<string>> dataEquals, SandboxEvent evt)
+    {
+        foreach (var (key, expectedValues) in dataEquals)
+        {
+            if (!evt.Data.TryGetValue(key, out var value))
+            {
+                continue;
+            }
+
+            if (expectedValues.Count == 0 ||
+                expectedValues.Any(expected => string.Equals(value, expected, StringComparison.OrdinalIgnoreCase)))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>

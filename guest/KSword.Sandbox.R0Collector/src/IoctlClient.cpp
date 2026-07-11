@@ -106,8 +106,18 @@ bool EmitIoctlFailure(
     data.AddUtf8("readinessState", "blocked");
     data.AddUtf8("diagnosticCode", "ioctl_failure");
     data.AddUtf8("diagnosticStage", "ioctl");
+    data.AddUtf8("collectionScope", "r0collector-ioctl");
+    data.AddBool("collectionDiagnostic", true);
+    data.AddBool("sampleBehavior", false);
+    data.AddUtf8("operatorInterpretation", "collection_diagnostic_not_sample_behavior");
+    data.AddUtf8("eventOrigin", "collector-sidecar");
+    data.AddUtf8("producerCategory", "r0collector");
+    data.AddUtf8("subjectKind", "collector-diagnostic");
+    data.AddUtf8("actorRole", "collector-infrastructure");
+    data.AddUtf8("subjectRole", "collector-diagnostic");
     data.AddUtf8("schema", KSWORD_SANDBOX_EVENT_SCHEMA_NAME);
     data.AddUtf8("producer", "r0collector");
+    data.AddBool("collectionNoise", true);
     data.AddBool("noise", false);
     data.AddBool("lost", false);
     data.AddBool("backpressure", false);
@@ -139,8 +149,18 @@ bool EmitProtocolError(
     data.AddUtf8("readinessState", "blocked");
     data.AddUtf8("diagnosticCode", "abi_mismatch");
     data.AddUtf8("diagnosticStage", "abiNegotiation");
+    data.AddUtf8("collectionScope", "r0collector-abi");
+    data.AddBool("collectionDiagnostic", true);
+    data.AddBool("sampleBehavior", false);
+    data.AddUtf8("operatorInterpretation", "collection_diagnostic_not_sample_behavior");
+    data.AddUtf8("eventOrigin", "collector-sidecar");
+    data.AddUtf8("producerCategory", "r0collector");
+    data.AddUtf8("subjectKind", "collector-diagnostic");
+    data.AddUtf8("actorRole", "collector-infrastructure");
+    data.AddUtf8("subjectRole", "collector-diagnostic");
     data.AddUtf8("schema", KSWORD_SANDBOX_EVENT_SCHEMA_NAME);
     data.AddUtf8("producer", "r0collector");
+    data.AddBool("collectionNoise", true);
     data.AddBool("noise", false);
     data.AddBool("lost", false);
     data.AddBool("backpressure", false);
@@ -188,8 +208,18 @@ bool EmitOptionalIoctlUnavailable(
     data.AddUtf8("readinessState", "degraded");
     data.AddUtf8("diagnosticCode", "optional_ioctl_unavailable");
     data.AddUtf8("diagnosticStage", "abiNegotiation");
+    data.AddUtf8("collectionScope", "r0collector-abi");
+    data.AddBool("collectionDiagnostic", true);
+    data.AddBool("sampleBehavior", false);
+    data.AddUtf8("operatorInterpretation", "collection_diagnostic_not_sample_behavior");
+    data.AddUtf8("eventOrigin", "collector-sidecar");
+    data.AddUtf8("producerCategory", "r0collector");
+    data.AddUtf8("subjectKind", "collector-diagnostic");
+    data.AddUtf8("actorRole", "collector-infrastructure");
+    data.AddUtf8("subjectRole", "collector-diagnostic");
     data.AddUtf8("schema", KSWORD_SANDBOX_EVENT_SCHEMA_NAME);
     data.AddUtf8("producer", "r0collector");
+    data.AddBool("collectionNoise", true);
     data.AddBool("noise", false);
     data.AddBool("lost", false);
     data.AddBool("backpressure", false);
@@ -748,13 +778,85 @@ void SetDriverEventRecordCounts(
     }
 }
 
+// Input: Output pointers from the caller plus the richer batch counter object.
+// Processing: Preserves the legacy three-counter outputs while making the full
+// batch telemetry available to the JSON summary builder.
+// Return: No return value.
+void SetDriverEventBatchCounters(
+    unsigned long long* eventsEmitted,
+    unsigned long long* recordsProcessed,
+    unsigned long long* collectorSuppressedEvents,
+    DriverReadEventsBatchCounters* batchCounters,
+    const DriverReadEventsBatchCounters& counters) {
+    SetDriverEventRecordCounts(
+        eventsEmitted,
+        recordsProcessed,
+        collectorSuppressedEvents,
+        counters.eventsEmitted,
+        counters.recordsProcessed,
+        counters.collectorSuppressedEvents);
+
+    if (batchCounters != nullptr) {
+        *batchCounters = counters;
+    }
+}
+
+// Input: Mutable batch counters and one driver event sequence value.
+// Processing: Tracks the first and last consumed record sequence values without
+// assuming the stream is contiguous.
+// Return: No return value.
+void ObserveProcessedSequence(
+    DriverReadEventsBatchCounters* counters,
+    const unsigned long long sequence) {
+    if (counters == nullptr) {
+        return;
+    }
+
+    if (!counters->hasSequenceRange) {
+        counters->hasSequenceRange = true;
+        counters->headSequence = sequence;
+    }
+    counters->tailSequence = sequence;
+}
+
+// Input: Mutable batch counters and one emitted driver event sequence value.
+// Processing: Tracks the first and last JSONL-emitted sequence values so
+// optional collector sampling remains diagnosable.
+// Return: No return value.
+void ObserveEmittedSequence(
+    DriverReadEventsBatchCounters* counters,
+    const unsigned long long sequence) {
+    if (counters == nullptr) {
+        return;
+    }
+
+    if (!counters->hasEmittedSequenceRange) {
+        counters->hasEmittedSequenceRange = true;
+        counters->emittedHeadSequence = sequence;
+    }
+    counters->emittedTailSequence = sequence;
+}
+
+// Input: Collector options and the 1-based eligible-record ordinal.
+// Processing: Implements the opt-in stride sampler.  The first eligible record
+// is always emitted, then every nth eligible record is emitted.
+// Return: true when the eligible record should be skipped by collector sampling.
+bool ShouldSkipEligibleDriverEvent(
+    const Options& options,
+    const unsigned long long eligibleOrdinal) {
+    return options.driverEventSampleStride > 1 &&
+        eligibleOrdinal > 1 &&
+        ((eligibleOrdinal - 1ULL) % options.driverEventSampleStride) != 0ULL;
+}
+
 // Input: READ_EVENTS output bytes and public reply header metadata.
 // Processing: Walks the byte stream after the fixed reply header, validates each
 // KSWORD_SANDBOX_EVENT_HEADER, and emits one driver-originated JSONL row per
 // event header unless the row is classified as collector/guest self-noise.
 // Return: true when all advertised event records were processed; false when the
 // stream is malformed or the sink fails. Counter outputs distinguish emitted
-// rows, consumed records, and rows suppressed by the collector policy.
+// rows, consumed records, rows suppressed by policy, and rows skipped by optional
+// collector sampling.
 bool EmitDriverEventRecords(
     EventWriter& writer,
     const Options& options,
@@ -764,15 +866,14 @@ bool EmitDriverEventRecords(
     const ULONG eventsWritten,
     unsigned long long* eventsEmitted,
     unsigned long long* recordsProcessed,
-    unsigned long long* collectorSuppressedEvents) {
+    unsigned long long* collectorSuppressedEvents,
+    DriverReadEventsBatchCounters* batchCounters) {
     size_t offset = 0;
-    unsigned long long emitted = 0;
-    unsigned long long processed = 0;
-    unsigned long long suppressed = 0;
+    DriverReadEventsBatchCounters counters;
 
-    while (processed < eventsWritten) {
+    while (counters.recordsProcessed < eventsWritten) {
         if (eventByteCount - offset < sizeof(KSWORD_SANDBOX_EVENT_HEADER)) {
-            SetDriverEventRecordCounts(eventsEmitted, recordsProcessed, collectorSuppressedEvents, emitted, processed, suppressed);
+            SetDriverEventBatchCounters(eventsEmitted, recordsProcessed, collectorSuppressedEvents, batchCounters, counters);
             return EmitProtocolError(
                 writer,
                 options,
@@ -787,7 +888,7 @@ bool EmitDriverEventRecords(
         if (header.Version != KSWORD_SANDBOX_EVENT_HEADER_VERSION ||
             header.Size < sizeof(header) ||
             static_cast<size_t>(header.Size) > eventByteCount - offset) {
-            SetDriverEventRecordCounts(eventsEmitted, recordsProcessed, collectorSuppressedEvents, emitted, processed, suppressed);
+            SetDriverEventBatchCounters(eventsEmitted, recordsProcessed, collectorSuppressedEvents, batchCounters, counters);
             return EmitProtocolError(
                 writer,
                 options,
@@ -798,7 +899,7 @@ bool EmitDriverEventRecords(
 
         const size_t payloadCapacity = static_cast<size_t>(header.Size) - sizeof(header);
         if (static_cast<size_t>(header.PayloadSize) > payloadCapacity) {
-            SetDriverEventRecordCounts(eventsEmitted, recordsProcessed, collectorSuppressedEvents, emitted, processed, suppressed);
+            SetDriverEventBatchCounters(eventsEmitted, recordsProcessed, collectorSuppressedEvents, batchCounters, counters);
             return EmitProtocolError(
                 writer,
                 options,
@@ -845,9 +946,19 @@ bool EmitDriverEventRecords(
             hasTypedSubjectPath);
 
         if (attribution.suppressed) {
+            ObserveProcessedSequence(&counters, header.Sequence);
             offset += header.Size;
-            ++processed;
-            ++suppressed;
+            ++counters.recordsProcessed;
+            ++counters.collectorSuppressedEvents;
+            continue;
+        }
+
+        ++counters.eligibleEvents;
+        if (ShouldSkipEligibleDriverEvent(options, counters.eligibleEvents)) {
+            ObserveProcessedSequence(&counters, header.Sequence);
+            offset += header.Size;
+            ++counters.recordsProcessed;
+            ++counters.collectorSkippedEvents;
             continue;
         }
 
@@ -860,17 +971,19 @@ bool EmitDriverEventRecords(
             attribution);
 
         if (!EmitEvent(writer, event)) {
-            SetDriverEventRecordCounts(eventsEmitted, recordsProcessed, collectorSuppressedEvents, emitted, processed, suppressed);
+            SetDriverEventBatchCounters(eventsEmitted, recordsProcessed, collectorSuppressedEvents, batchCounters, counters);
             return false;
         }
 
+        ObserveProcessedSequence(&counters, header.Sequence);
+        ObserveEmittedSequence(&counters, header.Sequence);
         offset += header.Size;
-        ++emitted;
-        ++processed;
+        ++counters.eventsEmitted;
+        ++counters.recordsProcessed;
     }
 
     if (offset != eventByteCount) {
-        SetDriverEventRecordCounts(eventsEmitted, recordsProcessed, collectorSuppressedEvents, emitted, processed, suppressed);
+        SetDriverEventBatchCounters(eventsEmitted, recordsProcessed, collectorSuppressedEvents, batchCounters, counters);
         return EmitProtocolError(
             writer,
             options,
@@ -879,7 +992,7 @@ bool EmitDriverEventRecords(
             static_cast<DWORD>(eventByteCount));
     }
 
-    SetDriverEventRecordCounts(eventsEmitted, recordsProcessed, collectorSuppressedEvents, emitted, processed, suppressed);
+    SetDriverEventBatchCounters(eventsEmitted, recordsProcessed, collectorSuppressedEvents, batchCounters, counters);
     return true;
 }
 
@@ -963,9 +1076,7 @@ bool EmitDriverReadEvents(
             bytesReturned);
     }
 
-    unsigned long long emitted = 0;
-    unsigned long long processed = 0;
-    unsigned long long suppressed = 0;
+    DriverReadEventsBatchCounters counters;
     const size_t eventByteCount = static_cast<size_t>(reply.BytesWritten);
     const unsigned char* eventBytes = buffer.data() + reply.Size;
     if (!EmitDriverEventRecords(
@@ -975,10 +1086,11 @@ bool EmitDriverReadEvents(
             eventBytes,
             eventByteCount,
             reply.EventsWritten,
-            &emitted,
-            &processed,
-            &suppressed)) {
-        SetDriverEventRecordCounts(eventsEmitted, recordsProcessed, collectorSuppressedEvents, emitted, processed, suppressed);
+            nullptr,
+            nullptr,
+            nullptr,
+            &counters)) {
+        SetDriverEventBatchCounters(eventsEmitted, recordsProcessed, collectorSuppressedEvents, nullptr, counters);
         return false;
     }
 
@@ -989,16 +1101,15 @@ bool EmitDriverReadEvents(
         reply,
         bytesReturned,
         options.readEventsMaxEvents,
-        emitted,
-        processed,
-        suppressed,
+        counters,
+        options.driverEventSampleStride,
         options.suppressSelfNoise);
     if (!EmitEvent(writer, event)) {
-        SetDriverEventRecordCounts(eventsEmitted, recordsProcessed, collectorSuppressedEvents, emitted, processed, suppressed);
+        SetDriverEventBatchCounters(eventsEmitted, recordsProcessed, collectorSuppressedEvents, nullptr, counters);
         return false;
     }
 
-    SetDriverEventRecordCounts(eventsEmitted, recordsProcessed, collectorSuppressedEvents, emitted, processed, suppressed);
+    SetDriverEventBatchCounters(eventsEmitted, recordsProcessed, collectorSuppressedEvents, nullptr, counters);
     return true;
 }
 

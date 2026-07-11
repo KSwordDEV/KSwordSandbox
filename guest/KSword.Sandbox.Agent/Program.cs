@@ -103,6 +103,8 @@ internal static class AgentProgram
         var r0Collector = StartR0Collector(options, events);
         var analysisDeadline = DateTimeOffset.UtcNow.AddSeconds(options.DurationSeconds);
 
+        var executionStage = "start";
+        int? executionProcessId = null;
         try
         {
             var startInfo = new ProcessStartInfo
@@ -114,6 +116,7 @@ internal static class AgentProgram
             };
 
             using var process = Process.Start(startInfo) ?? throw new InvalidOperationException("Failed to start sample process.");
+            executionProcessId = process.Id;
             events.Add(new SandboxEvent
             {
                 EventType = "process.start",
@@ -123,9 +126,11 @@ internal static class AgentProgram
                 Path = options.SamplePath,
                 CommandLine = options.SamplePath
             });
+            executionStage = "after-start-probes";
             var runningProbeContext = CreateGuestProbeContext(options, workingDirectory, process.Id);
             events.AddRange(await probeRunner.CollectAsync(ProbePhase.AfterStart, runningProbeContext));
 
+            executionStage = "wait";
             var exited = await WaitForExitAsync(process, TimeSpan.FromSeconds(options.DurationSeconds));
             if (!exited)
             {
@@ -137,10 +142,23 @@ internal static class AgentProgram
                     ProcessId = process.Id,
                     Path = options.SamplePath
                 });
-                process.Kill(entireProcessTree: true);
-                await process.WaitForExitAsync();
+                executionStage = "kill-timeout";
+                try
+                {
+                    if (!HasProcessExited(process))
+                    {
+                        process.Kill(entireProcessTree: true);
+                    }
+
+                    await process.WaitForExitAsync();
+                }
+                catch (Exception ex) when (ex is InvalidOperationException or Win32Exception)
+                {
+                    events.Add(CreateSampleExecutionFailureEvent("process.kill_failed", options.SamplePath, process.Id, executionStage, ex));
+                }
             }
 
+            executionStage = "exit";
             events.Add(new SandboxEvent
             {
                 EventType = "process.exit",
@@ -174,7 +192,17 @@ internal static class AgentProgram
                 await Task.Delay(remainingAnalysisWindow);
             }
 
+            executionStage = "after-run-probes";
             events.AddRange(await probeRunner.CollectAsync(ProbePhase.AfterRun, runningProbeContext));
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            var diagnosticContext = CreateGuestProbeContext(options, workingDirectory, executionProcessId);
+            var eventType = string.Equals(executionStage, "start", StringComparison.OrdinalIgnoreCase)
+                ? "process.start_failed"
+                : "process.execution_failed";
+            events.Add(CreateSampleExecutionFailureEvent(eventType, options.SamplePath, executionProcessId, executionStage, ex));
+            events.AddRange(await probeRunner.CollectAsync(ProbePhase.AfterRun, diagnosticContext));
         }
         finally
         {
@@ -1152,6 +1180,51 @@ internal static class AgentProgram
     }
 
     /// <summary>
+    /// Creates a non-fatal sample execution diagnostic event.
+    /// Inputs are event type, sample path, optional process id, execution stage,
+    /// and exception; processing stores all error detail in Data so artifact
+    /// writing can continue; the method returns a SandboxEvent.
+    /// </summary>
+    private static SandboxEvent CreateSampleExecutionFailureEvent(
+        string eventType,
+        string samplePath,
+        int? processId,
+        string stage,
+        Exception exception)
+    {
+        return new SandboxEvent
+        {
+            EventType = eventType,
+            Source = "guest",
+            ProcessName = SafeFileName(samplePath),
+            ProcessId = processId,
+            Path = samplePath,
+            Data =
+            {
+                ["stage"] = stage,
+                ["nonfatal"] = "true",
+                ["exceptionType"] = exception.GetType().FullName ?? exception.GetType().Name,
+                ["message"] = exception.Message
+            }
+        };
+    }
+
+    /// <summary>
+    /// Reads a filename for diagnostics without throwing on malformed paths.
+    /// </summary>
+    private static string? SafeFileName(string path)
+    {
+        try
+        {
+            return string.IsNullOrWhiteSpace(path) ? null : Path.GetFileName(path);
+        }
+        catch (ArgumentException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
     /// Captures visible process metadata for before/after comparison.
     /// There are no inputs; processing enumerates Process.GetProcesses and
     /// reads names, executable paths, and start times defensively because some
@@ -1490,20 +1563,29 @@ internal static class AgentProgram
 
             try
             {
+                var sourceInfo = new FileInfo(sourcePath);
                 Directory.CreateDirectory(Path.GetDirectoryName(destinationPath) ?? droppedFilesRoot);
                 File.Copy(sourcePath, destinationPath, overwrite: true);
                 var artifactRelativePath = NormalizeArtifactRelativePath(Path.GetRelativePath(outputDirectory, destinationPath));
                 var copiedInfo = new FileInfo(destinationPath);
+                var copiedAtUtc = DateTimeOffset.UtcNow;
                 metadataByRelativePath[artifactRelativePath] = new DroppedFileArtifactMetadata(
                     sourcePath,
                     originalRelativePath,
-                    candidate.EventType);
+                    candidate.EventType,
+                    sourceInfo.Length,
+                    sourceInfo.CreationTimeUtc,
+                    sourceInfo.LastWriteTimeUtc,
+                    candidate.Timestamp,
+                    copiedAtUtc);
                 events.Add(CreateDroppedFileCopiedEvent(
                     sourcePath,
                     originalRelativePath,
                     destinationPath,
                     artifactRelativePath,
-                    copiedInfo.Length));
+                    sourceInfo,
+                    copiedInfo,
+                    copiedAtUtc));
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException or PathTooLongException)
             {
@@ -1598,7 +1680,9 @@ internal static class AgentProgram
         string originalRelativePath,
         string destinationPath,
         string artifactRelativePath,
-        long sizeBytes)
+        FileInfo sourceInfo,
+        FileInfo copiedInfo,
+        DateTimeOffset copiedAtUtc)
     {
         return new SandboxEvent
         {
@@ -1612,7 +1696,12 @@ internal static class AgentProgram
                 ["guestRelativePath"] = originalRelativePath,
                 ["artifactRelativePath"] = artifactRelativePath,
                 ["relativePath"] = artifactRelativePath,
-                ["sizeBytes"] = sizeBytes.ToString(CultureInfo.InvariantCulture),
+                ["sizeBytes"] = copiedInfo.Length.ToString(CultureInfo.InvariantCulture),
+                ["sourceSizeBytes"] = sourceInfo.Length.ToString(CultureInfo.InvariantCulture),
+                ["sourceCreatedUtc"] = sourceInfo.CreationTimeUtc.ToString("O", CultureInfo.InvariantCulture),
+                ["sourceLastWriteUtc"] = sourceInfo.LastWriteTimeUtc.ToString("O", CultureInfo.InvariantCulture),
+                ["copiedLastWriteUtc"] = copiedInfo.LastWriteTimeUtc.ToString("O", CultureInfo.InvariantCulture),
+                ["copiedAtUtc"] = copiedAtUtc.ToString("O", CultureInfo.InvariantCulture),
                 ["evidenceRole"] = "dropped-file",
                 ["collectDroppedFiles"] = "true"
             }

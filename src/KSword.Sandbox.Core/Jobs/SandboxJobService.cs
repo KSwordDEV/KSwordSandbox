@@ -248,6 +248,82 @@ public sealed class SandboxJobService
     }
 
     /// <summary>
+    /// Imports an already executed Hyper-V job that was produced outside the
+    /// in-memory WebUI process. Inputs are the deterministic job id, original
+    /// sample submission, collected guest events path, and optional
+    /// runbook-execution record; processing reconstructs the same runbook,
+    /// merges guest/driver JSONL events, classifies behavior, and writes
+    /// report.json/report.html/report.zh.html/report.en.html under the job
+    /// directory. The method returns the regenerated job metadata.
+    /// </summary>
+    public AnalysisJob ImportExternalRun(
+        Guid jobId,
+        SandboxSubmission submission,
+        string eventsPath,
+        string? runbookExecutionResultPath = null)
+    {
+        if (jobId == Guid.Empty)
+        {
+            throw new ArgumentException("Job id is required.", nameof(jobId));
+        }
+
+        if (string.IsNullOrWhiteSpace(eventsPath))
+        {
+            throw new ArgumentException("Guest events path is required.", nameof(eventsPath));
+        }
+
+        var duration = ClampDuration(submission.DurationSeconds);
+        var normalizedSubmission = NormalizeSubmission(submission, duration);
+        var jobRoot = GetJobRoot(jobId);
+        Directory.CreateDirectory(jobRoot);
+
+        var sample = SampleHasher.Compute(normalizedSubmission.SamplePath, config.Analysis.MaxSampleBytes);
+        var staticAnalysis = AnalyzeSample(sample);
+        var jobConfig = BuildJobConfig(normalizedSubmission, duration);
+        var runbook = runbookBuilder.Build(jobConfig, jobId, sample);
+        var jsonPath = Path.Combine(jobRoot, "report.json");
+        var htmlPath = Path.Combine(jobRoot, "report.html");
+        var zhHtmlPath = Path.Combine(jobRoot, "report.zh.html");
+        var enHtmlPath = Path.Combine(jobRoot, "report.en.html");
+        var resultPath = NormalizeExternalRunbookExecutionPath(jobRoot, runbookExecutionResultPath);
+
+        var job = new AnalysisJob
+        {
+            JobId = jobId,
+            Submission = normalizedSubmission,
+            Status = AnalysisStatus.Running,
+            Sample = sample,
+            Runbook = runbook,
+            JsonReportPath = jsonPath,
+            HtmlReportPath = htmlPath,
+            HtmlReportZhPath = zhHtmlPath,
+            HtmlReportEnPath = enHtmlPath,
+            RunbookExecutionResultPath = resultPath,
+            Messages =
+            [
+                "Imported external Hyper-V execution.",
+                $"Guest event import source: {eventsPath}."
+            ]
+        };
+
+        jobs[jobId] = job;
+        var guestEvents = LoadGuestEventsWithDriverJsonl(eventsPath);
+        var status = guestEvents.Count == 0 ? AnalysisStatus.Failed : AnalysisStatus.Completed;
+        var message = guestEvents.Count == 0
+            ? $"External guest event import found no events in {eventsPath}."
+            : $"Imported {guestEvents.Count} external guest/driver event(s) from {eventsPath}.";
+        var updated = RegenerateReport(job with
+        {
+            Status = status,
+            GuestEventsPath = Path.GetFullPath(eventsPath),
+            Messages = AppendMessage(job.Messages, message)
+        }, status, guestEvents, eventsPath);
+
+        jobs[jobId] = updated;
+        return updated;
+    }
+
+    /// <summary>
     /// Upserts one host-side enrichment event and regenerates the report. Inputs
     /// are a known job id, a normalized event such as a VirusTotal lookup, and
     /// an operator-safe message; processing persists the event under the job
@@ -485,6 +561,30 @@ public sealed class SandboxJobService
     private string GetEnrichmentEventsPath(Guid jobId)
     {
         return Path.Combine(GetJobRoot(jobId), EnrichmentEventsFileName);
+    }
+
+    private static string? NormalizeExternalRunbookExecutionPath(string jobRoot, string? runbookExecutionResultPath)
+    {
+        if (string.IsNullOrWhiteSpace(runbookExecutionResultPath))
+        {
+            return null;
+        }
+
+        var fullPath = Path.GetFullPath(runbookExecutionResultPath);
+        if (!File.Exists(fullPath))
+        {
+            throw new FileNotFoundException("Runbook execution record was not found.", fullPath);
+        }
+
+        if (IsSameOrUnderDirectory(jobRoot, fullPath))
+        {
+            return fullPath;
+        }
+
+        Directory.CreateDirectory(jobRoot);
+        var destination = Path.Combine(jobRoot, "runbook-execution.json");
+        File.Copy(fullPath, destination, overwrite: true);
+        return destination;
     }
 
     private void EnsureJobExists(Guid jobId)

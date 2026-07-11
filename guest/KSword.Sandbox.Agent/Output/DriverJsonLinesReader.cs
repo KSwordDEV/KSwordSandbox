@@ -42,11 +42,8 @@ internal sealed class DriverJsonLinesReader
                     var hasSource = document.RootElement.ValueKind == JsonValueKind.Object &&
                         document.RootElement.EnumerateObject().Any(property =>
                             string.Equals(property.Name, "source", StringComparison.OrdinalIgnoreCase));
-                    var evt = JsonSerializer.Deserialize<SandboxEvent>(line, JsonOptions);
-                    if (evt is not null)
-                    {
-                        events.Add(NormalizeParsedEvent(evt, hasSource, lineNumber, path));
-                    }
+                    var evt = ParseSandboxEvent(document.RootElement);
+                    events.Add(NormalizeParsedEvent(evt, hasSource, lineNumber, path));
                 }
                 catch (JsonException ex)
                 {
@@ -57,7 +54,9 @@ internal sealed class DriverJsonLinesReader
                         Path = path,
                         Data =
                         {
-                            ["line"] = line,
+                            ["line"] = Truncate(line, 2048),
+                            ["lineLength"] = line.Length.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                            ["lineTruncated"] = (line.Length > 2048).ToString(System.Globalization.CultureInfo.InvariantCulture),
                             ["lineNumber"] = lineNumber.ToString(System.Globalization.CultureInfo.InvariantCulture),
                             ["exceptionType"] = ex.GetType().FullName ?? ex.GetType().Name,
                             ["message"] = ex.Message,
@@ -88,6 +87,39 @@ internal sealed class DriverJsonLinesReader
         }
 
         return events;
+    }
+
+    /// <summary>
+    /// Parses one JSON object into SandboxEvent while coercing Data values to
+    /// strings. Inputs are a JSON element from one JSONL row; processing accepts
+    /// camelCase/PascalCase fields and scalar/non-scalar Data values; the
+    /// method returns a SandboxEvent or throws JsonException for invalid rows.
+    /// </summary>
+    private static SandboxEvent ParseSandboxEvent(JsonElement root)
+    {
+        if (root.ValueKind != JsonValueKind.Object)
+        {
+            throw new JsonException("Driver JSONL row must be a JSON object.");
+        }
+
+        var eventType = GetStringProperty(root, "eventType");
+        if (string.IsNullOrWhiteSpace(eventType))
+        {
+            throw new JsonException("Driver JSONL row is missing eventType.");
+        }
+
+        return new SandboxEvent
+        {
+            EventType = eventType,
+            Timestamp = GetDateTimeOffsetProperty(root, "timestamp") ?? DateTimeOffset.UtcNow,
+            Source = GetStringProperty(root, "source") ?? "driver",
+            ProcessName = GetStringProperty(root, "processName"),
+            ProcessId = GetIntProperty(root, "processId"),
+            ParentProcessId = GetIntProperty(root, "parentProcessId"),
+            Path = GetStringProperty(root, "path"),
+            CommandLine = GetStringProperty(root, "commandLine"),
+            Data = GetDataProperty(root)
+        };
     }
 
     /// <summary>
@@ -132,6 +164,101 @@ internal sealed class DriverJsonLinesReader
 
         AddIfMissing(data, "attributionSummary", BuildAttributionSummary(evt, source, data));
         return evt with { Source = source, Data = data };
+    }
+
+    private static Dictionary<string, string> GetDataProperty(JsonElement root)
+    {
+        var data = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (!TryGetProperty(root, "data", out var dataElement))
+        {
+            return data;
+        }
+
+        if (dataElement.ValueKind != JsonValueKind.Object)
+        {
+            data["data"] = JsonElementToString(dataElement);
+            return data;
+        }
+
+        foreach (var property in dataElement.EnumerateObject())
+        {
+            data[property.Name] = JsonElementToString(property.Value);
+        }
+
+        return data;
+    }
+
+    private static string? GetStringProperty(JsonElement root, string name)
+    {
+        if (!TryGetProperty(root, name, out var property))
+        {
+            return null;
+        }
+
+        return JsonElementToString(property);
+    }
+
+    private static int? GetIntProperty(JsonElement root, string name)
+    {
+        if (!TryGetProperty(root, name, out var property))
+        {
+            return null;
+        }
+
+        if (property.ValueKind == JsonValueKind.Number && property.TryGetInt32(out var numericValue))
+        {
+            return numericValue;
+        }
+
+        var text = JsonElementToString(property);
+        return int.TryParse(text, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var parsed)
+            ? parsed
+            : null;
+    }
+
+    private static DateTimeOffset? GetDateTimeOffsetProperty(JsonElement root, string name)
+    {
+        if (!TryGetProperty(root, name, out var property))
+        {
+            return null;
+        }
+
+        if (property.ValueKind == JsonValueKind.String &&
+            DateTimeOffset.TryParse(property.GetString(), System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.RoundtripKind, out var parsed))
+        {
+            return parsed;
+        }
+
+        return null;
+    }
+
+    private static bool TryGetProperty(JsonElement root, string name, out JsonElement property)
+    {
+        foreach (var candidate in root.EnumerateObject())
+        {
+            if (string.Equals(candidate.Name, name, StringComparison.OrdinalIgnoreCase))
+            {
+                property = candidate.Value;
+                return true;
+            }
+        }
+
+        property = default;
+        return false;
+    }
+
+    private static string JsonElementToString(JsonElement element)
+    {
+        return element.ValueKind switch
+        {
+            JsonValueKind.String => element.GetString() ?? string.Empty,
+            JsonValueKind.Number => element.GetRawText(),
+            JsonValueKind.True => "true",
+            JsonValueKind.False => "false",
+            JsonValueKind.Null => string.Empty,
+            JsonValueKind.Undefined => string.Empty,
+            _ => element.GetRawText()
+        };
     }
 
     private static void AddIfMissing(Dictionary<string, string> data, string key, string? value)
@@ -231,6 +358,11 @@ internal sealed class DriverJsonLinesReader
         var subjectPath = FirstNonEmpty(evt.Path, ValueOrNull(data, "filePath"), ValueOrNull(data, "imagePath"), ValueOrNull(data, "keyPath"), ValueOrNull(data, "remoteEndpoint"), "-");
         var selfNoise = IsTrue(ValueOrNull(data, "selfNoise")) ? " selfNoise=true" : string.Empty;
         return $"{origin}:{category} subject={subject} pid={pid} path={subjectPath}{selfNoise}";
+    }
+
+    private static string Truncate(string value, int maxLength)
+    {
+        return value.Length <= maxLength ? value : value[..maxLength] + "...";
     }
 
     /// <summary>

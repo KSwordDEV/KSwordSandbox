@@ -176,6 +176,8 @@ internal static class LiveEventsPage
             let latestArtifactSources = [];
             let latestArtifactIndex = null;
             let latestArtifactSignals = {};
+            let reportAutoOpenScheduled = false;
+            const autoOpenReportFromMonitor = new URLSearchParams(window.location.search).get('fromUpload') === '1';
             const seen = new Set();
 
             function t(zh, en) { return currentLanguage === 'en' ? en : zh; }
@@ -305,6 +307,28 @@ internal static class LiveEventsPage
                 ${importMessage}
                 ${reportButtons}`;
               target.setAttribute('data-copy', `background ${stateLabel}: ${message}`);
+              if (autoOpenReportFromMonitor && state === 'completed' && (hasReport || job.htmlReportPath !== '') && !reportAutoOpenScheduled) {
+                scheduleReportAutoOpen();
+              }
+            }
+
+            function scheduleReportAutoOpen() {
+              reportAutoOpenScheduled = true;
+              const href = `/api/jobs/${encodeURIComponent(jobId)}/report/html?lang=${currentLanguage === 'en' ? 'en' : 'zh'}`;
+              const target = document.getElementById('reportReadyActions');
+              if (target) {
+                target.className = 'report-ready ok';
+                target.innerHTML = `<strong>${escapeHtml(t('报告已生成，正在自动打开。', 'Report is ready and opening automatically.'))}</strong>
+                  <div class="artifact-action">
+                    <a class="button" href="${escapeAttr(href)}">${escapeHtml(t('打开报告', 'Open report'))}</a>
+                    <a class="button secondary" href="/api/jobs/${encodeURIComponent(jobId)}/report/html?lang=zh" target="_blank" rel="noopener">${escapeHtml(t('中文报告', 'Chinese report'))}</a>
+                    <a class="button secondary" href="/api/jobs/${encodeURIComponent(jobId)}/report/html?lang=en" target="_blank" rel="noopener">${escapeHtml(t('英文报告', 'English report'))}</a>
+                  </div>`;
+              }
+              setStatus(t('报告已生成，页面即将跳转；如果没有跳转，请点击打开报告。', 'Report is ready; this page will navigate shortly. If it does not, click Open report.'), false);
+              setTimeout(() => {
+                window.location.href = href;
+              }, 1600);
             }
 
             function formatBackgroundState(state) {
@@ -447,6 +471,14 @@ internal static class LiveEventsPage
             function renderReportReadyActions(paths) {
               const target = document.getElementById('reportReadyActions');
               if (!target) { return; }
+              if (reportAutoOpenScheduled) {
+                const href = `/api/jobs/${encodeURIComponent(jobId)}/report/html?lang=${currentLanguage === 'en' ? 'en' : 'zh'}`;
+                target.innerHTML = `<strong>${escapeHtml(t('报告已生成，正在自动打开。', 'Report is ready and opening automatically.'))}</strong>
+                  <div class="artifact-action"><a class="button" href="${escapeAttr(href)}">${escapeHtml(t('打开报告', 'Open report'))}</a></div>`;
+                target.className = 'report-ready ok';
+                target.setAttribute('data-copy', href);
+                return;
+              }
               const terminal = isRunTerminal();
               const hasReport = paths.hasAnyReport || terminal;
               const label = terminal

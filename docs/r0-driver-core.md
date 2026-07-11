@@ -56,6 +56,12 @@ Current `CapabilityFlags` include:
 - `KSWORD_SANDBOX_CAPABILITY_FLAG_QUEUE_STATUS_COUNTERS`
 - `KSWORD_SANDBOX_CAPABILITY_FLAG_PRODUCER_ENABLE_BITS`
 - `KSWORD_SANDBOX_CAPABILITY_FLAG_TYPED_EVENT_PAYLOADS`
+- `KSWORD_SANDBOX_CAPABILITY_FLAG_EVENT_SCHEMA_NAMES`
+- `KSWORD_SANDBOX_CAPABILITY_FLAG_PROCESS_CREATE_EXIT`
+- `KSWORD_SANDBOX_CAPABILITY_FLAG_IMAGE_LOAD`
+- `KSWORD_SANDBOX_CAPABILITY_FLAG_FILE_MINIFILTER`
+- `KSWORD_SANDBOX_CAPABILITY_FLAG_REGISTRY_CALLBACK`
+- `KSWORD_SANDBOX_CAPABILITY_FLAG_NETWORK_WFP_ALE`
 
 ## GET_HEALTH producer-mask snapshot
 
@@ -90,6 +96,12 @@ Current producer bits:
 - `KSWORD_SANDBOX_PRODUCER_FLAG_REGISTRY`
 - `KSWORD_SANDBOX_PRODUCER_FLAG_NETWORK`
 
+`SupportedProducerMask` is now derived from the compiled producer set.  The
+normal build includes all producer bits.  A lab build can define
+`KSWORD_SANDBOX_ENABLE_NETWORK_WFP_ALE=0`; in that case the network bit and the
+`NETWORK_WFP_ALE` capability are intentionally omitted rather than advertised as
+a fake/stub success.
+
 The request `EnableMask` must be a subset of `SupportedProducerMask`. The driver
 rejects unsupported bits with `STATUS_INVALID_PARAMETER`. Disabling a producer
 suppresses future enqueue attempts for that event type and increments
@@ -108,15 +120,21 @@ remove events that were already queued.
   `KSWORD_SANDBOX_STATUS_FLAG_LAST_STATUS_FAILURE`. Queue pressure and loss are
   surfaced through `KSWORD_SANDBOX_STATUS_FLAG_QUEUE_BACKPRESSURE`,
   `KSWORD_SANDBOX_STATUS_FLAG_EVENTS_DROPPED`, and
-  `KSWORD_SANDBOX_STATUS_FLAG_EVENTS_SUPPRESSED`.
+  `KSWORD_SANDBOX_STATUS_FLAG_EVENTS_SUPPRESSED`.  Producer registration
+  degradation is also surfaced through
+  `KSWORD_SANDBOX_STATUS_FLAG_PRODUCERS_DEGRADED`.
 - `QueueCapacity`: fixed ring slot capacity.
 - `QueueDepth`: currently unread event count.
 - `QueueHighWatermark`: highest observed queue depth since load.
 - `ProducerEnableMask` and `SupportedProducerMask`.
 - `ActiveProducerMask` and `FailedProducerMask`, used to distinguish producers
   that are registered and emitting from producers that failed initialization.
-- `LastNtStatus`: most recent internal initialization/producer status surfaced
-  for diagnostics.
+- `EffectiveProducerMask`: active producers after the operator enable mask is
+  applied (`ActiveProducerMask & ProducerEnableMask`).
+- `LastNtStatus`: public sticky diagnostic status.  A producer failure is not
+  hidden by a later successful producer initialization.
+- `LastFailureNtStatus`: sticky failure status preserved separately from
+  ordinary success paths.
 - `TotalEventsEnqueued`: successful enqueue count.
 - `TotalEventsDropped`: overwrite count when the ring was full.
 - `TotalEventsRead`: records returned through `READ_EVENTS`.

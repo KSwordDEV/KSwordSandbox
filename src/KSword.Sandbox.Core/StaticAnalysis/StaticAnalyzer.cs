@@ -43,6 +43,10 @@ public sealed class StaticAnalyzer
         @"(?<![A-Z0-9._%+\-])(?:[A-Z0-9._%+\-]{1,64})@(?:[A-Z0-9\-]{1,63}\.)+[A-Z]{2,63}(?![A-Z0-9._%+\-])",
         RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
 
+    private static readonly Regex DomainPattern = new(
+        @"(?<![A-Z0-9_\-@])(?:[A-Z0-9](?:[A-Z0-9\-]{0,61}[A-Z0-9])?\.)+(?:[A-Z]{2,63}|XN--[A-Z0-9\-]{2,59})(?![A-Z0-9_\-])",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
+
     private static readonly Regex WindowsPathPattern = new(
         @"(?<![A-Za-z0-9])(?:[A-Za-z]:\\|\\\\)[^""'<>|\r\n]{3,}",
         RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
@@ -119,6 +123,7 @@ public sealed class StaticAnalyzer
         "HttpOpenRequest",
         "HttpSendRequest",
         "InternetReadFile",
+        "InternetWriteFile",
         "InternetCrackUrl",
         "URLDownloadToFile",
         "URLDownloadToCacheFile",
@@ -127,12 +132,37 @@ public sealed class StaticAnalyzer
         "WinHttpSendRequest",
         "WinHttpReceiveResponse",
         "WinHttpReadData",
+        "WinHttpWriteData",
         "WSAStartup",
+        "WSASend",
+        "WSARecv",
         "socket",
         "getaddrinfo",
         "connect",
         "send",
         "recv"
+    ];
+
+    private static readonly string[] DownloadApis =
+    [
+        "URLDownloadToFile",
+        "URLDownloadToCacheFile",
+        "InternetReadFile",
+        "WinHttpReadData",
+        "HttpSendRequest",
+        "WinHttpSendRequest",
+        "URLOpenBlockingStream",
+        "URLOpenStream",
+        "CoInternetCombineUrl"
+    ];
+
+    private static readonly string[] ExfiltrationApis =
+    [
+        "InternetWriteFile",
+        "WinHttpWriteData",
+        "send",
+        "WSASend",
+        "FtpPutFile"
     ];
 
     private static readonly string[] FileDropApis =
@@ -186,13 +216,59 @@ public sealed class StaticAnalyzer
         "NtSetInformationThread",
         "OutputDebugString",
         "FindWindow",
+        "EnumWindows",
+        "CreateToolhelp32Snapshot",
+        "Process32First",
+        "Process32Next",
+        "GetAdaptersInfo",
+        "GetAdaptersAddresses",
         "GetComputerName",
         "GetUserName",
+        "GetLastInputInfo",
         "GlobalMemoryStatusEx",
+        "GetDiskFreeSpaceEx",
         "GetSystemInfo",
         "GetTickCount",
+        "GetTickCount64",
         "QueryPerformanceCounter",
+        "NtDelayExecution",
         "Sleep"
+    ];
+
+    private static readonly string[] CredentialAccessApis =
+    [
+        "MiniDumpWriteDump",
+        "CredEnumerate",
+        "CredRead",
+        "CredWrite",
+        "CryptUnprotectData",
+        "PStoreCreateInstance",
+        "VaultEnumerateVaults",
+        "VaultEnumerateItems",
+        "VaultGetItem",
+        "LsaEnumerateLogonSessions",
+        "LsaGetLogonSessionData",
+        "LsaOpenPolicy",
+        "SamConnect",
+        "SamOpenDomain",
+        "OpenProcessToken",
+        "DuplicateTokenEx",
+        "ImpersonateLoggedOnUser",
+        "LogonUser"
+    ];
+
+    private static readonly string[] DefenseEvasionApis =
+    [
+        "AmsiScanBuffer",
+        "AmsiInitialize",
+        "EtwEventWrite",
+        "EventRegister",
+        "OpenEventLog",
+        "ClearEventLog",
+        "ControlService",
+        "DeleteService",
+        "SetFileAttributes",
+        "Wow64DisableWow64FsRedirection"
     ];
 
     private static readonly string[] SuspiciousApiStrings =
@@ -200,10 +276,14 @@ public sealed class StaticAnalyzer
             .Concat(DynamicCodeApis)
             .Concat(PersistenceApis)
             .Concat(NetworkApis)
+            .Concat(DownloadApis)
+            .Concat(ExfiltrationApis)
             .Concat(FileDropApis)
             .Concat(ScriptExecutionApis)
             .Concat(ResourceApis)
             .Concat(AntiAnalysisApis)
+            .Concat(CredentialAccessApis)
+            .Concat(DefenseEvasionApis)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
 
@@ -216,6 +296,41 @@ public sealed class StaticAnalyzer
             .Where(api => !string.Equals(api, "system", StringComparison.OrdinalIgnoreCase))
             .Where(api => !string.Equals(api, "_wsystem", StringComparison.OrdinalIgnoreCase))
             .ToArray();
+
+    private static readonly string[] CommonDomainTlds =
+    [
+        "com", "net", "org", "info", "biz", "ru", "cn", "top", "xyz", "online",
+        "site", "club", "cc", "tk", "ml", "ga", "cf", "gq", "co", "io",
+        "me", "dev", "app", "cloud", "tech", "win", "work", "live", "link",
+        "click", "stream", "shop", "store", "pw", "su", "ws", "pro", "us",
+        "uk", "de", "fr", "nl", "br", "jp", "kr", "in", "au", "ca",
+        "eu", "pl", "tr", "it", "es", "ch", "se", "no", "fi", "dk",
+        "cz", "ro", "ua", "by", "ir", "vn", "tw", "hk", "sg", "th",
+        "id", "my", "ph", "nz", "za", "mx", "ar", "cl", "be", "at",
+        "pt", "gr", "il", "ae", "sa", "onion"
+    ];
+
+    private static readonly string[] ReferenceDomainSuffixes =
+    [
+        "microsoft.com",
+        "windows.com",
+        "w3.org",
+        "schemas.xmlsoap.org",
+        "ietf.org"
+    ];
+
+    private static readonly string[] DynamicDnsDomainMarkers =
+    [
+        "duckdns.org",
+        "no-ip.",
+        "noip.",
+        "ddns.",
+        "dynu.",
+        "hopto.org",
+        "serveftp.",
+        "sytes.net",
+        "myqnapcloud.com"
+    ];
 
     private static readonly string[] PackerStringMarkers =
     [
@@ -283,6 +398,63 @@ public sealed class StaticAnalyzer
         "frombase64string",
         "iex ",
         "invoke-expression"
+    ];
+
+    private static readonly string[] DownloadCommandMarkers =
+    [
+        "invoke-webrequest",
+        "invoke-restmethod",
+        "start-bitstransfer",
+        "bitsadmin",
+        "certutil -urlcache",
+        "certutil.exe -urlcache",
+        "curl ",
+        "curl.exe",
+        "wget ",
+        "wget.exe",
+        "msiexec /i http",
+        "msiexec.exe /i http"
+    ];
+
+    private static readonly string[] ExfilCommandMarkers =
+    [
+        "--upload-file",
+        "-F file=",
+        "curl -F",
+        "curl.exe -F",
+        "ftp -s:",
+        "WinHttpWriteData",
+        "InternetWriteFile"
+    ];
+
+    private static readonly string[] CredentialStringMarkers =
+    [
+        "mimikatz",
+        "sekurlsa",
+        "lsadump",
+        "MiniDumpWriteDump",
+        "procdump",
+        "lsass.exe",
+        "\\SAM",
+        "\\SECURITY",
+        "\\NTDS.dit",
+        "CryptUnprotectData",
+        "VaultEnumerate",
+        "CredEnumerate"
+    ];
+
+    private static readonly string[] DefenseEvasionStringMarkers =
+    [
+        "Set-MpPreference",
+        "Add-MpPreference",
+        "DisableRealtimeMonitoring",
+        "AMSI",
+        "EtwEventWrite",
+        "wevtutil cl",
+        "Clear-EventLog",
+        "sc stop WinDefend",
+        "taskkill /im MsMpEng",
+        "netsh advfirewall set"
     ];
 
     private static readonly string[] AntiSandboxStringMarkers =
@@ -630,6 +802,11 @@ public sealed class StaticAnalyzer
             isInteresting = true;
         }
 
+        if (AddDomainClassifications(trimmed, tags, interestingStrings, stringEvidence))
+        {
+            isInteresting = true;
+        }
+
         if (AddPathClassifications(trimmed, tags, interestingStrings, stringEvidence))
         {
             isInteresting = true;
@@ -677,6 +854,48 @@ public sealed class StaticAnalyzer
                 trimmed,
                 "script_execution_string",
                 "encoded_command_string");
+        }
+
+        if (ContainsAny(trimmed, DownloadCommandMarkers))
+        {
+            isInteresting = true;
+            tags.Add("interesting_string");
+            tags.Add("download_command_string");
+            AddCommandIndicator(
+                stringEvidence,
+                "download-command",
+                FindFirstMarker(trimmed, DownloadCommandMarkers),
+                trimmed,
+                "download_command_string");
+        }
+
+        if (ContainsAny(trimmed, ExfilCommandMarkers))
+        {
+            isInteresting = true;
+            tags.Add("interesting_string");
+            tags.Add("exfil_command_string");
+            AddCommandIndicator(
+                stringEvidence,
+                "exfil-command",
+                FindFirstMarker(trimmed, ExfilCommandMarkers),
+                trimmed,
+                "exfil_command_string");
+        }
+
+        if (ContainsAny(trimmed, CredentialStringMarkers))
+        {
+            isInteresting = true;
+            tags.Add("interesting_string");
+            tags.Add("credential_access_string");
+            AddStringFinding(stringEvidence, "credential-access-string", trimmed, "credential_access_string");
+        }
+
+        if (ContainsAny(trimmed, DefenseEvasionStringMarkers))
+        {
+            isInteresting = true;
+            tags.Add("interesting_string");
+            tags.Add("defense_evasion_string");
+            AddStringFinding(stringEvidence, "defense-evasion-string", trimmed, "defense_evasion_string");
         }
 
         if (ContainsAny(trimmed, "Run\\", "RunOnce\\", "Software\\Microsoft\\Windows\\CurrentVersion\\Run"))
@@ -844,6 +1063,102 @@ public sealed class StaticAnalyzer
         }
 
         return found;
+    }
+
+    /// <summary>
+    /// Extracts bare domain indicators with conservative TLD filtering.
+    /// Inputs are one string and output collections, processing suppresses PE
+    /// file-extension and framework-reference false positives, and the method
+    /// returns true when a reportable domain indicator is found.
+    /// </summary>
+    private static bool AddDomainClassifications(
+        string text,
+        SortedSet<string> tags,
+        SortedSet<string> interestingStrings,
+        StaticStringEvidence stringEvidence)
+    {
+        if (IsBenignManifestOrMicrosoftReference(text))
+        {
+            return false;
+        }
+
+        var found = false;
+        foreach (Match match in DomainPattern.Matches(text))
+        {
+            var domain = TrimEvidence(match.Value).TrimEnd('.', ',', ';', ')', ']', '}', '!');
+            if (!IsLikelyDomainIndicator(domain))
+            {
+                continue;
+            }
+
+            var normalizedDomain = domain.ToLowerInvariant();
+            var isReference = IsReferenceDomain(normalizedDomain);
+            var isOnion = normalizedDomain.EndsWith(".onion", StringComparison.OrdinalIgnoreCase);
+            var isDynamicDns = ContainsAny(normalizedDomain, DynamicDnsDomainMarkers);
+            var classification = isReference
+                ? "reference"
+                : isOnion
+                    ? "onion"
+                    : isDynamicDns
+                        ? "dynamic_dns"
+                        : "public";
+
+            AddNetworkIndicator(stringEvidence, "domain", normalizedDomain, classification);
+            if (isReference)
+            {
+                AddInterestingString(interestingStrings, $"domain-reference:{normalizedDomain}");
+                continue;
+            }
+
+            tags.Add("domain_name");
+            tags.Add("domain_indicator_string");
+            tags.Add("network_indicator_string");
+            if (isOnion)
+            {
+                tags.Add("tor_domain_string");
+            }
+
+            if (isDynamicDns)
+            {
+                tags.Add("dynamic_dns_domain_string");
+            }
+
+            AddInterestingString(interestingStrings, $"domain:{normalizedDomain}");
+            found = true;
+        }
+
+        return found;
+    }
+
+    /// <summary>
+    /// Applies conservative shape and TLD checks for static domain strings.
+    /// </summary>
+    private static bool IsLikelyDomainIndicator(string domain)
+    {
+        if (string.IsNullOrWhiteSpace(domain) || domain.Length > 253)
+        {
+            return false;
+        }
+
+        var labels = domain.Split('.', StringSplitOptions.RemoveEmptyEntries);
+        if (labels.Length < 2 || labels.Any(label => label.Length is 0 or > 63))
+        {
+            return false;
+        }
+
+        var tld = labels[^1].TrimEnd('.').ToLowerInvariant();
+        return CommonDomainTlds.Contains(tld, StringComparer.OrdinalIgnoreCase) ||
+            tld.StartsWith("xn--", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Returns whether a domain is a common framework/documentation reference.
+    /// </summary>
+    private static bool IsReferenceDomain(string normalizedDomain)
+    {
+        return ReferenceDomainSuffixes.Any(suffix =>
+            string.Equals(normalizedDomain, suffix, StringComparison.OrdinalIgnoreCase) ||
+            normalizedDomain.EndsWith($".{suffix}", StringComparison.OrdinalIgnoreCase));
     }
 
     /// <summary>
@@ -1837,7 +2152,7 @@ public sealed class StaticAnalyzer
 
         var dataRva = ReadUInt32At(reader, dataEntryOffset, fileLength, warnings);
         var size = ReadUInt32At(reader, dataEntryOffset + sizeof(uint), fileLength, warnings);
-        AddPeEvidence(interestingStrings, $"resource:{resourceType},size={size}", ref evidenceCount, MaxResourceEvidence);
+        AddPeEvidence(interestingStrings, $"resource:{resourceType},rva=0x{dataRva:X8},size={size}", ref evidenceCount, MaxResourceEvidence);
         if (size >= 1024 * 1024)
         {
             tags.Add("resource_large_data");
@@ -1856,14 +2171,28 @@ public sealed class StaticAnalyzer
             return;
         }
 
+        double? entropy = null;
         if (size >= 256)
         {
-            var entropy = CalculateEntropy(reader, dataOffset, size, fileLength, warnings);
+            entropy = CalculateEntropy(reader, dataOffset, size, fileLength, warnings);
             if (entropy >= 7.2)
             {
                 tags.Add("resource_high_entropy_data");
             }
+
+            if (entropy >= 7.8)
+            {
+                tags.Add("resource_very_high_entropy_data");
+            }
         }
+
+        AddPeEvidence(
+            interestingStrings,
+            entropy.HasValue
+                ? $"resource:{resourceType}@file=0x{dataOffset:X},rva=0x{dataRva:X8},size={size},entropy={Math.Round(entropy.Value, 3):F3},entropyLabel={DescribeEntropy(entropy.Value, size)}"
+                : $"resource:{resourceType}@file=0x{dataOffset:X},rva=0x{dataRva:X8},size={size}",
+            ref evidenceCount,
+            MaxResourceEvidence);
 
         if (TryReadUInt16At(reader, dataOffset, fileLength, out var magic) && magic == 0x5a4d)
         {
@@ -2116,6 +2445,11 @@ public sealed class StaticAnalyzer
         }
 
         callbackTableFileOffset = $"0x{callbacksOffset:X}";
+        AddPeEvidence(
+            interestingStrings,
+            $"tls:callback-table@0x{callbacksVa:X},file=0x{callbacksOffset:X}",
+            ref evidenceCount,
+            MaxTlsCallbacks);
         var pointerSize = isPe32Plus ? sizeof(ulong) : sizeof(uint);
         for (var index = 0; index < MaxTlsCallbacks; index++)
         {
@@ -2134,13 +2468,28 @@ public sealed class StaticAnalyzer
             }
 
             tags.Add("tls_callbacks");
-            AddPeEvidence(interestingStrings, $"tls:callback@0x{callbackVa:X}", ref evidenceCount, MaxTlsCallbacks);
+            var relativeVirtualAddress = TryVaToRva(callbackVa, imageBase, out var callbackRva)
+                ? $"0x{callbackRva:X8}"
+                : null;
+            var targetOffsetText = TryVaToFileOffset(callbackVa, imageBase, sections, fileLength, out var callbackTargetOffset)
+                ? $"0x{callbackTargetOffset:X}"
+                : "unmapped";
+            if (string.Equals(targetOffsetText, "unmapped", StringComparison.OrdinalIgnoreCase))
+            {
+                tags.Add("tls_callback_target_unmapped");
+            }
+
+            AddPeEvidence(
+                interestingStrings,
+                relativeVirtualAddress is null
+                    ? $"tls:callback@0x{callbackVa:X},file={targetOffsetText}"
+                    : $"tls:callback@0x{callbackVa:X},rva={relativeVirtualAddress},file={targetOffsetText}",
+                ref evidenceCount,
+                MaxTlsCallbacks);
             callbacks.Add(new PeTlsCallbackInfo
             {
                 VirtualAddress = $"0x{callbackVa:X}",
-                RelativeVirtualAddress = imageBase != 0 && callbackVa >= imageBase
-                    ? $"0x{callbackVa - imageBase:X}"
-                    : null
+                RelativeVirtualAddress = relativeVirtualAddress
             });
         }
 
@@ -2198,6 +2547,20 @@ public sealed class StaticAnalyzer
             tags.Add("import_network_api");
         }
 
+        if (ContainsAnyApiToken(apiName, DownloadApis))
+        {
+            tags.Add("import_suspicious_api");
+            tags.Add("import_network_api");
+            tags.Add("import_download_api");
+        }
+
+        if (ContainsAnyApiToken(apiName, ExfiltrationApis))
+        {
+            tags.Add("import_suspicious_api");
+            tags.Add("import_network_api");
+            tags.Add("import_exfil_api");
+        }
+
         if (ContainsAnyApiToken(apiName, FileDropApis))
         {
             tags.Add("import_suspicious_api");
@@ -2222,6 +2585,18 @@ public sealed class StaticAnalyzer
             tags.Add("import_anti_analysis_api");
             tags.Add("anti_analysis_string");
             tags.Add("debugger_evasion_string");
+        }
+
+        if (ContainsAnyApiToken(apiName, CredentialAccessApis))
+        {
+            tags.Add("import_suspicious_api");
+            tags.Add("import_credential_access_api");
+        }
+
+        if (ContainsAnyApiToken(apiName, DefenseEvasionApis))
+        {
+            tags.Add("import_suspicious_api");
+            tags.Add("import_defense_evasion_api");
         }
     }
 
@@ -2263,6 +2638,16 @@ public sealed class StaticAnalyzer
             yield return "network";
         }
 
+        if (ContainsAnyApiToken(apiName, DownloadApis))
+        {
+            yield return "download";
+        }
+
+        if (ContainsAnyApiToken(apiName, ExfiltrationApis))
+        {
+            yield return "exfiltration";
+        }
+
         if (ContainsAnyApiToken(apiName, FileDropApis))
         {
             yield return "file-drop";
@@ -2281,6 +2666,16 @@ public sealed class StaticAnalyzer
         if (ContainsAnyApiToken(apiName, AntiAnalysisApis))
         {
             yield return "anti-analysis";
+        }
+
+        if (ContainsAnyApiToken(apiName, CredentialAccessApis))
+        {
+            yield return "credential-access";
+        }
+
+        if (ContainsAnyApiToken(apiName, DefenseEvasionApis))
+        {
+            yield return "defense-evasion";
         }
     }
 
@@ -2309,6 +2704,16 @@ public sealed class StaticAnalyzer
         if (ContainsAny(dllName, "wincrypt", "bcrypt", "crypt32", "ncrypt"))
         {
             tags.Add("import_crypto_library");
+        }
+
+        if (ContainsAny(dllName, "dbghelp", "vaultcli", "credui", "samlib", "ntdsapi"))
+        {
+            tags.Add("import_credential_access_library");
+        }
+
+        if (ContainsAny(dllName, "amsi", "wevtapi", "wscapi"))
+        {
+            tags.Add("import_defense_evasion_library");
         }
     }
 
@@ -2489,6 +2894,27 @@ public sealed class StaticAnalyzer
         }
 
         offset = 0;
+        return false;
+    }
+
+    /// <summary>
+    /// Converts a PE virtual address to an RVA without checking file mapping.
+    /// </summary>
+    private static bool TryVaToRva(ulong va, ulong imageBase, out uint rva)
+    {
+        if (imageBase != 0 && va >= imageBase && va - imageBase <= uint.MaxValue)
+        {
+            rva = (uint)(va - imageBase);
+            return true;
+        }
+
+        if (va <= uint.MaxValue)
+        {
+            rva = (uint)va;
+            return true;
+        }
+
+        rva = 0;
         return false;
     }
 

@@ -119,12 +119,19 @@ The current guest collector emits these host-reportable event groups:
 - `dns.cache.snapshot`, `dns.cache.added`, and `dns.cache.removed` from a
   bounded `ipconfig /displaydns` query. DNS entries include parsed
   `name`/`recordType`/`data`/`timeToLive` when English labels are present and a
-  hash plus `rawSummary` fallback when output is localized.
+  hash plus `rawSummary` fallback when output is localized. Snapshot and diff
+  events also carry `snapshotHash` / `beforeSnapshotHash` /
+  `afterSnapshotHash`; the stable key excludes TTL so normal resolver-cache
+  countdowns do not create false add/remove noise. `dns.cache.diff` summarizes
+  added/removed counts before bounded row-level events are emitted.
 - `network.netstat.snapshot`, `network.netstat`,
   `network.netstat.added`, and `network.netstat.removed` from bounded
   `netstat -ano` collection. Rows include protocol, local/remote endpoints,
   state, and owning PID when present. Large row sets are capped and emit
   `network.netstat.truncated` rather than blocking live output.
+  `network.netstat.diff` records before/after row counts, added/removed counts,
+  and snapshot hashes for stable report summaries even when row output is
+  truncated.
 - `network.tcp.listener.snapshot`, `network.udp.listener.snapshot`,
   `network.tcp.listener.opened` / `.closed`, and
   `network.udp.listener.opened` / `.closed` for managed listener diffs.
@@ -137,6 +144,12 @@ The current guest collector emits these host-reportable event groups:
   `startup_item.modified`, and `startup_item.deleted` for common Run/RunOnce
   registry values and Startup folder entries. Registry and folder access errors
   become `startup_item.capture_failed` diagnostics instead of failing the run.
+- `registry.run.snapshot`, `registry.run.created`,
+  `registry.run.modified`, and `registry.run.deleted` for dedicated HKCU/HKLM
+  Run/RunOnce registry value diffs across 32-bit and 64-bit views where
+  available. Events include `hive`, `keyPath`, `keyName`, `view`, `valueName`,
+  `value`, optional `expandedValue`, and `valueKind`. Registry access errors
+  become `registry.run.capture_failed` diagnostics.
 - `screenshot.captured` when `--screenshot` successfully writes a desktop BMP.
   The event path points at the BMP file and `Data` includes `phase`,
   `screenshotStage`, `screenshotIndex`, `screenshotCount`, `widthPixels`, and
@@ -170,6 +183,11 @@ The current guest collector emits these host-reportable event groups:
 - `probe.timeout`, `probe.failed`, and `probe.canceled` for per-probe isolation.
   A slow DNS/netstat/service/task query is bounded and converted to an event so
   later probes and final JSON artifact writing can continue.
+- `process.start_failed`, `process.kill_failed`, and
+  `process.execution_failed` for sample-launch, timeout-kill, or execution
+  orchestration exceptions. These are non-fatal diagnostics with exception
+  details in `Data`; the agent still runs final probes, merges driver JSONL when
+  configured, and writes artifacts where possible.
 - Driver JSONL events from `--driver-events`, preserving driver-provided fields
   and defaulting missing sources to `driver`.
 - `r0collector.start_failed` if the optional sidecar process could not be
@@ -191,7 +209,8 @@ When dropped-file extraction is enabled, the agent emits:
 - `artifact.dropped_file.copied` for each copied `file.created` path. The event
   path points at the copied artifact under `--out\artifacts\dropped-files`, and
   `Data` includes the original guest path, guest-relative path,
-  artifact-relative path, size, and `evidenceRole=dropped-file`.
+  artifact-relative path, copied/source sizes, source creation/last-write time,
+  copy time, and `evidenceRole=dropped-file`.
 - `artifact.dropped_file.skipped` when a candidate path disappeared, is outside
   the sample working directory, is under `--out`, or cannot be copied.
 - `artifact.manifest.written` after `artifacts/manifest.json` is written. The
@@ -252,8 +271,11 @@ recursively collecting its own output and records skip diagnostics instead of
 failing the run.
 
 The manifest hashes the copied artifact bytes and preserves the original
-VM-local path in descriptor metadata (`guestFullPath`). This option does not
-collect memory dumps; memory dump collection remains a separate explicit opt-in.
+VM-local path in descriptor metadata (`guestFullPath`). It also carries
+`guestRelativePath`, `sourceEventType`, original source size/timestamps,
+`sourceEventTimestampUtc`, and `copiedAtUtc` so reports can distinguish the
+observed guest file from the copied artifact. This option does not collect
+memory dumps; memory dump collection remains a separate explicit opt-in.
 
 ## Optional memory dumps
 
@@ -298,7 +320,7 @@ Driver sidecars such as `KSword.Sandbox.R0Collector` should write one
 events case-insensitively, so both `eventType` and `EventType` are accepted.
 
 The current shared model keeps `Data` as `Dictionary<string,string>`. Driver
-JSONL producers must therefore serialize values inside `data` as strings, for
+JSONL producers should therefore serialize values inside `data` as strings, for
 example:
 
 ```json
@@ -306,3 +328,7 @@ example:
 ```
 
 Top-level numeric fields such as `processId` may remain JSON numbers.
+For MVP robustness, the guest import path also coerces non-string JSON scalar
+or object/array values under `data` into strings instead of failing the whole
+run; malformed JSONL rows become `driver.parse_error` events with bounded line
+text and parse diagnostics in `Data`.

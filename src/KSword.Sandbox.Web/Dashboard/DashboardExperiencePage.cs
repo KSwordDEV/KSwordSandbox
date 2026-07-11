@@ -25,7 +25,8 @@ internal static class DashboardExperiencePage
             body { font-family: "Microsoft YaHei UI", Segoe UI, Arial, sans-serif; margin: 0; color: var(--ink); background: radial-gradient(circle at 8% 4%,rgba(67,160,255,.20),transparent 27%),linear-gradient(180deg,#f4f9ff,#f8fafc); }
             header { padding: 28px 36px; color: white; background: radial-gradient(circle at 85% 10%,rgba(67,160,255,.55),transparent 32%),linear-gradient(135deg,#08111f,#123d66 62%,#0d5fa8); }
             .header-row { align-items: flex-start; display: flex; gap: 18px; justify-content: space-between; }
-            .lang-toggle { background: rgba(255,255,255,.16); border: 1px solid rgba(255,255,255,.35); white-space: nowrap; }
+            .lang-toggle { background: rgba(255,255,255,.22); border: 2px solid rgba(255,255,255,.72); box-shadow: 0 8px 20px rgba(0,0,0,.18); letter-spacing: .02em; white-space: nowrap; }
+            .lang-toggle:hover { background: rgba(255,255,255,.32); }
             .topnav { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
             .topnav a { border: 1px solid rgba(255,255,255,.35); border-radius: 999px; color: white; font-weight: 700; padding: 7px 11px; text-decoration: none; }
             main { max-width: 1220px; margin: 24px auto; padding: 0 24px 48px; }
@@ -72,6 +73,10 @@ internal static class DashboardExperiencePage
             .progress-links { margin:6px 0 10px; }
             .pill { background: #e7f3ff; border:1px solid rgba(67,160,255,.35); border-radius: 999px; color: #075985; display: inline-block; font-size: 12px; font-weight: 800; padding: 4px 9px; }
             .pill.ready { background:#dcfce7; border-color:#86efac; color:#166534; }
+            .workspace-tabs { align-items:center; display:flex; flex-wrap:wrap; gap:10px; margin-bottom:18px; }
+            .workspace-tab { background:#e7f3ff; border:1px solid rgba(67,160,255,.35); color:#075985; margin-top:0; }
+            .workspace-tab.active { background:#0B6FCC; color:white; box-shadow:0 8px 18px rgba(11,111,204,.18); }
+            .workspace-panel[hidden] { display:none; }
             .tabs { display:flex; flex-wrap:wrap; gap:8px; margin:16px 0 10px; }
             .tab-button { background:#e7f3ff; border:1px solid rgba(67,160,255,.35); color:#075985; margin-top:0; }
             .tab-button.active { background:var(--blue); color:white; }
@@ -85,6 +90,9 @@ internal static class DashboardExperiencePage
             .metric { background:#f8fbff; border:1px solid var(--line); border-radius:14px; padding:12px; }
             .metric strong { color:var(--muted); display:block; font-size:12px; margin-bottom:6px; }
             .progress-box { background:#f8fbff; border:1px solid var(--line); border-radius:16px; margin-top:14px; padding:14px; }
+            .progress-box.running { border-color:rgba(67,160,255,.55); box-shadow:0 0 0 4px rgba(67,160,255,.10); }
+            .progress-box.completed { border-color:#86efac; }
+            .progress-box.failed { border-color:#fdba74; }
             .progress-head { align-items:center; display:flex; flex-wrap:wrap; gap:8px; justify-content:space-between; margin-bottom:8px; }
             .progress-meta { color:#075985; font-size:12px; font-weight:800; }
             .progress-bar { background:#dbeafe; border-radius:999px; height:12px; overflow:hidden; }
@@ -95,9 +103,15 @@ internal static class DashboardExperiencePage
             .stages { display:grid; gap:8px; grid-template-columns:repeat(4,minmax(0,1fr)); margin-top:12px; }
             .stage { background:white; border:1px solid #e5edf6; border-radius:12px; color:#64748b; padding:9px; }
             .stage small { color:#94a3b8; display:block; font-size:11px; margin-top:2px; }
-            .stage.active { border-color:var(--blue); box-shadow:0 0 0 3px rgba(67,160,255,.12); color:#075985; font-weight:800; }
+            .stage.active { border-color:var(--blue); box-shadow:0 0 0 3px rgba(67,160,255,.12); color:#075985; font-weight:800; position:relative; }
+            .stage.active::after { animation:pulse 1.2s ease-in-out infinite; background:var(--blue); border-radius:999px; content:""; height:8px; position:absolute; right:10px; top:10px; width:8px; }
             .stage.done { background:#ecfdf5; border-color:#bbf7d0; color:#047857; }
             .stage.failed { background:#fff7ed; border-color:#fdba74; color:#c2410c; font-weight:800; }
+            .recent-job-list { display:grid; gap:12px; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); margin-top:14px; }
+            .recent-job-card { background:#f8fbff; border:1px solid var(--line); border-radius:14px; padding:14px; }
+            .recent-job-card h3 { margin:0 0 8px; }
+            .recent-job-meta { display:flex; flex-wrap:wrap; gap:6px; margin:8px 0; }
+            @keyframes pulse { 0%,100% { opacity:.35; transform:scale(.82); } 50% { opacity:1; transform:scale(1.18); } }
             .runbook-step-grid { display:grid; gap:8px; grid-template-columns:repeat(4,minmax(0,1fr)); margin-top:10px; }
             .runbook-step { background:white; border:1px solid #e5edf6; border-radius:12px; padding:8px; }
             .runbook-step b { display:block; font-size:12px; margin-bottom:3px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
@@ -124,16 +138,22 @@ internal static class DashboardExperiencePage
                 <p data-zh="上传样本后会自动生成安全计划、启动动态分析并打开独立监控页；主页面只保留关键状态、报告入口和进度入口，排障细节放在“执行流程”。" data-en="After upload, the UI creates a safe plan, starts dynamic analysis, and opens the standalone monitor automatically. The dashboard keeps only key status, report access, and progress entry points; troubleshooting details live in Execution flow.">上传样本后会自动生成安全计划、启动动态分析并打开独立监控页；主页面只保留关键状态、报告入口和进度入口，排障细节放在“执行流程”。</p>
                 <p><span class="pill" data-zh="提示：右键路径、表格值、证据字段和执行流程视图可复制。" data-en="Tip: right-click paths, table values, evidence fields, and execution-flow details to copy.">提示：右键路径、表格值、证据字段和执行流程视图可复制。</span></p>
               </div>
-              <button class="secondary lang-toggle" type="button" onclick="toggleLanguage()" data-zh="English" data-en="中文">English</button>
+              <button class="secondary lang-toggle" type="button" onclick="toggleLanguage()" aria-label="Language switch" data-zh="语言：中文 ⇄ English" data-en="Language: English ⇄ 中文">语言：中文 ⇄ English</button>
             </div>
             <nav class="topnav" aria-label="Dashboard navigation">
-              <a href="#plan" data-zh="提交样本" data-en="Submit sample">提交样本</a>
-              <a href="#current-job" data-zh="当前任务" data-en="Current job">当前任务</a>
-              <a href="#recent-jobs" data-zh="历史任务" data-en="Recent jobs">历史任务</a>
+              <a href="#workspace-plan" onclick="selectWorkspaceTab('plan')" data-zh="规划" data-en="Plan">规划</a>
+              <a href="#workspace-analysis" onclick="selectWorkspaceTab('analysis')" data-zh="分析" data-en="Analysis">分析</a>
+              <a href="#workspace-results" onclick="selectWorkspaceTab('results')" data-zh="结果" data-en="Results">结果</a>
               <a href="/settings" data-zh="设置 / VirusTotal" data-en="Settings / VirusTotal">设置 / VirusTotal</a>
             </nav>
           </header>
           <main>
+            <div class="workspace-tabs" role="tablist" aria-label="Plan analysis results">
+              <button id="workspace-tab-plan" class="workspace-tab active" type="button" role="tab" aria-selected="true" aria-controls="workspace-plan" onclick="selectWorkspaceTab('plan')" data-zh="1. 规划" data-en="1. Plan">1. 规划</button>
+              <button id="workspace-tab-analysis" class="workspace-tab" type="button" role="tab" aria-selected="false" aria-controls="workspace-analysis" onclick="selectWorkspaceTab('analysis')" data-zh="2. 分析" data-en="2. Analysis">2. 分析</button>
+              <button id="workspace-tab-results" class="workspace-tab" type="button" role="tab" aria-selected="false" aria-controls="workspace-results" onclick="selectWorkspaceTab('results')" data-zh="3. 结果" data-en="3. Results">3. 结果</button>
+            </div>
+            <div id="workspace-plan" class="workspace-panel active" role="tabpanel" aria-labelledby="workspace-tab-plan">
             <section id="plan">
               <h2 data-zh="提交分析" data-en="Submit analysis">提交分析</h2>
               <p class="hint"><span data-zh="请选择一种方式：选择已有路径、上传 EXE、或扫描目录。上传流程会一键保存样本、生成计划、打开独立动态监控页并启动虚拟机；选择/扫描入口仍先停在计划复核。" data-en="Choose one input method: select an existing path, upload an EXE, or scan a folder. Upload is a one-click flow that stores the sample, creates the plan, opens the standalone dynamic monitor, and starts the VM; select/scan entries still stop at plan review first.">请选择一种方式：选择已有路径、上传 EXE、或扫描目录。上传流程会一键保存样本、生成计划、打开独立动态监控页并启动虚拟机；选择/扫描入口仍先停在计划复核。</span></p>
@@ -199,23 +219,30 @@ internal static class DashboardExperiencePage
               <h2><span data-zh="可执行文件候选项" data-en="Executable candidates">可执行文件候选项</span> <span id="candidateCount" class="pill">0</span></h2>
               <div id="candidates" class="hint"><span data-zh="尚未运行扫描。" data-en="No scan has been run yet.">尚未运行扫描。</span></div>
             </section>
+            </div>
 
+            <div id="workspace-analysis" class="workspace-panel" role="tabpanel" aria-labelledby="workspace-tab-analysis" hidden>
             <section id="current-job">
               <h2 data-zh="当前任务" data-en="Current job">当前任务</h2>
               <div id="jobResult" class="hint"><span data-zh="尚未规划任务。" data-en="No job planned yet.">尚未规划任务。</span></div>
             </section>
+            </div>
 
+            <div id="workspace-results" class="workspace-panel" role="tabpanel" aria-labelledby="workspace-tab-results" hidden>
             <section id="recent-jobs">
-              <h2 data-zh="近期任务" data-en="Recent jobs">近期任务</h2>
-              <p class="hint" data-zh="这里仅列出关键状态和入口；详细执行流程和原始事件流在独立页面查看。" data-en="Only key status and entry points are listed here; execution flow and raw event streams live on separate pages.">这里仅列出关键状态和入口；详细执行流程和原始事件流在独立页面查看。</p>
+              <h2 data-zh="结果与近期任务" data-en="Results and recent jobs">结果与近期任务</h2>
+              <p class="hint" data-zh="这里仅列出关键状态、报告入口和执行流程链接；命令行、PowerShell、stdout/stderr 不在主页面展示。" data-en="This tab only lists key status, report access, and execution-flow links; command lines, PowerShell, stdout/stderr are not shown on the dashboard.">这里仅列出关键状态、报告入口和执行流程链接；命令行、PowerShell、stdout/stderr 不在主页面展示。</p>
+              <div id="globalReportNotice" class="report-notice" hidden></div>
               <button class="secondary" onclick="refreshJobs(true)" data-zh="刷新任务列表" data-en="Refresh job list">刷新任务列表</button>
               <div id="jobList" class="hint"><span data-zh="尚未加载任务。" data-en="No jobs loaded yet.">尚未加载任务。</span></div>
             </section>
+            </div>
           </main>
           <div id="copyToast" class="toast" role="status" aria-live="polite"></div>
           <script>
             let copyToastTimer = null;
-            let currentLanguage = 'zh';
+            let currentLanguage = localStorage.getItem('ksword-lang') === 'en' ? 'en' : 'zh';
+            let activeWorkspaceTab = 'plan';
             let progressTimer = null;
             let runbookProgressTimer = null;
             let backgroundExecutionTimer = null;
@@ -316,6 +343,26 @@ internal static class DashboardExperiencePage
               return String(status);
             }
 
+            function selectWorkspaceTab(name) {
+              const tabs = ['plan', 'analysis', 'results'];
+              const selected = tabs.includes(name) ? name : 'plan';
+              activeWorkspaceTab = selected;
+              for (const candidate of tabs) {
+                const tab = document.getElementById(`workspace-tab-${candidate}`);
+                const panel = document.getElementById(`workspace-${candidate}`);
+                if (!tab || !panel) {
+                  continue;
+                }
+
+                const active = candidate === selected;
+                tab.classList.toggle('active', active);
+                tab.setAttribute('aria-selected', active ? 'true' : 'false');
+                tab.tabIndex = active ? 0 : -1;
+                panel.classList.toggle('active', active);
+                panel.hidden = !active;
+              }
+            }
+
             function selectPlanTab(name) {
               for (const candidate of ['path', 'upload', 'scan']) {
                 const tab = document.getElementById(`tab-${candidate}`);
@@ -325,6 +372,33 @@ internal static class DashboardExperiencePage
                 tab.tabIndex = candidate === name ? 0 : -1;
                 panel.classList.toggle('active', candidate === name);
                 panel.hidden = candidate !== name;
+              }
+            }
+
+            function setupTabKeyboardNavigation() {
+              for (const tablist of document.querySelectorAll('[role="tablist"]')) {
+                tablist.addEventListener('keydown', event => {
+                  if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) {
+                    return;
+                  }
+
+                  const tabs = Array.from(tablist.querySelectorAll('[role="tab"]'));
+                  const current = tabs.indexOf(document.activeElement);
+                  if (current < 0 || tabs.length === 0) {
+                    return;
+                  }
+
+                  event.preventDefault();
+                  const next = event.key === 'Home'
+                    ? 0
+                    : event.key === 'End'
+                      ? tabs.length - 1
+                      : event.key === 'ArrowRight'
+                        ? (current + 1) % tabs.length
+                        : (current - 1 + tabs.length) % tabs.length;
+                  tabs[next].focus();
+                  tabs[next].click();
+                });
               }
             }
 
@@ -468,6 +542,7 @@ internal static class DashboardExperiencePage
                 if (job) {
                   renderJob(job);
                   applyLanguage();
+                  selectWorkspaceTab('analysis');
                   refreshJobs(false);
                 }
 
@@ -565,7 +640,8 @@ internal static class DashboardExperiencePage
 
                 renderJob(payload);
                 applyLanguage();
-            refreshJobs(false);
+                refreshJobs(false);
+                selectWorkspaceTab('analysis');
                 setStatus(t('计划已生成。确认当前任务卡片后，可启动虚拟机分析。', 'Plan created. Review the current job card, then start VM analysis when ready.'), false);
                 document.getElementById('current-job').scrollIntoView({ behavior: 'smooth', block: 'start' });
                 return payload;
@@ -743,6 +819,13 @@ internal static class DashboardExperiencePage
               const liveEventsHref = jobId ? `/jobs/${encodeURIComponent(jobId)}/live-events` : '';
               const reportState = buildReportState(job);
               const reportBadge = `<span class="${reportState.badgeClass}" data-copy="${escapeAttribute(reportState.badge)}" data-copy-label="report state">${escapeHtml(reportState.badge)}</span>`;
+              const primaryReportAction = reportState.ready
+                ? `<a class="buttonlink" target="_blank" rel="noopener" href="${escapeHtml(currentReportHref)}" data-report-current="true" data-job-id="${escapeAttribute(jobId)}">${escapeHtml(reportState.link)}</a>`
+                : `<button type="button" disabled data-copy="${escapeAttribute(reportState.hint)}" data-copy-label="report pending">${escapeHtml(reportState.link)}</button>`;
+              const fallbackReportActions = reportState.ready
+                ? `<a class="buttonlink secondary" target="_blank" rel="noopener" href="${escapeHtml(servedZhReportHref)}" data-zh="中文" data-en="ZH">中文</a>
+                   <a class="buttonlink secondary" target="_blank" rel="noopener" href="${escapeHtml(servedEnReportHref)}" data-zh="英文" data-en="EN">英文</a>`
+                : `<span class="hint" data-zh="报告生成后这里会自动变为中文/英文入口。" data-en="Chinese/English report entries appear here when the report is ready.">报告生成后这里会自动变为中文/英文入口。</span>`;
               const plannedStepCount = job.runbook?.steps?.length || 0;
               const messages = (job.messages || []).slice(-3).map(message => `<li data-copy="${escapeAttribute(message)}" data-copy-label="job message">${escapeHtml(message)} ${copyButton(message, 'job message')}</li>`).join('');
               const artifactCollectionSummary = buildArtifactCollectionSummary(job);
@@ -763,9 +846,8 @@ internal static class DashboardExperiencePage
                   </p>
                   <div class="report-entry" data-copy="${escapeAttribute([servedReportHref, servedZhReportHref, servedEnReportHref].filter(Boolean).join('\n'))}" data-copy-label="served report links">
                     <strong data-zh="报告页" data-en="Report page">报告页</strong>
-                    <a class="buttonlink" target="_blank" rel="noopener" href="${escapeHtml(currentReportHref)}" data-report-current="true" data-job-id="${escapeAttribute(jobId)}">${escapeHtml(reportState.link)}</a>
-                    <a class="buttonlink secondary" target="_blank" rel="noopener" href="${escapeHtml(servedZhReportHref)}" data-zh="中文" data-en="ZH">中文</a>
-                    <a class="buttonlink secondary" target="_blank" rel="noopener" href="${escapeHtml(servedEnReportHref)}" data-zh="英文" data-en="EN">英文</a>
+                    ${primaryReportAction}
+                    ${fallbackReportActions}
                     <span class="hint">${escapeHtml(reportState.hint)} <span data-zh="主按钮始终跟随右上角语言；动态分析成功后会自动打开当前语言报告，中文/英文备用入口保留在旁边。" data-en="The primary button follows the language toggle. After successful dynamic analysis, the current-language report opens automatically, with Chinese and English fallbacks beside it.">主按钮始终跟随右上角语言；动态分析成功后会自动打开当前语言报告，中文/英文备用入口保留在旁边。</span></span>
                   </div>
                   <div id="reportNotice" class="report-notice" hidden></div>
@@ -778,7 +860,7 @@ internal static class DashboardExperiencePage
                   <div id="analysisProgress" class="progress-box stage-progress">
                     <div class="progress-head">
                       <strong data-zh="进度页摘要" data-en="Progress summary">进度页摘要</strong>
-                      <span id="progressMeta" class="progress-meta" data-copy-label="progress stage">1/8</span>
+                      <span id="progressMeta" class="progress-meta" data-copy-label="progress stage">1/6</span>
                     </div>
                     <p class="button-row progress-links">
                       <a class="buttonlink secondary" target="_blank" rel="noopener" href="${escapeHtml(executionFlowHref)}" data-zh="打开进度页（执行流程）" data-en="Open progress page (execution flow)">打开进度页（执行流程）</a>
@@ -846,7 +928,8 @@ internal static class DashboardExperiencePage
 
                 renderJob(job);
                 applyLanguage();
-            refreshJobs(false);
+                refreshJobs(false);
+                selectWorkspaceTab('analysis');
                 setStatus(t(`任务已刷新。状态：${formatJobStatus(job.status)}。`, `Job refreshed. Status: ${formatJobStatus(job.status)}.`), false);
               } catch (error) {
                 setStatus(error.message, true);
@@ -883,8 +966,10 @@ internal static class DashboardExperiencePage
             }
 
             function renderJobList(jobs) {
-              // Inputs: job array from /api/jobs. Processing: renders a compact
-              // copyable table with status, sample, and report path fields.
+              // Inputs: job array from /api/jobs. Processing: renders compact
+              // copyable cards with status, report access, and an execution-flow
+              // link only. Command lines and raw telemetry stay on their
+              // dedicated pages/details.
               // Return: no value.
               const container = document.getElementById('jobList');
               if (!container) {
@@ -899,32 +984,36 @@ internal static class DashboardExperiencePage
                 return;
               }
 
-              const rows = jobs.slice().reverse().map(rawJob => {
+              const cards = jobs.slice().reverse().map(rawJob => {
                 const job = normalizeJobPayload(rawJob);
                 const jobId = String(job.jobId || '');
+                const shortJobId = jobId.length > 14 ? `${jobId.slice(0, 8)}…${jobId.slice(-4)}` : jobId;
                 const statusLabel = formatJobStatus(job.status);
-                const samplePath = job.sample?.fullPath || job.submission?.samplePath || '';
                 const reportPath = job.htmlReportPath || '';
                 const reportHref = `/api/jobs/${encodeURIComponent(jobId)}/report/html?lang=${currentLanguage === 'en' ? 'en' : 'zh'}`;
+                const flowHref = `/jobs/${encodeURIComponent(jobId)}/execution-flow`;
                 const reportState = buildReportState(job);
                 const reportCell = reportPath
-                  ? `<a target="_blank" rel="noopener" href="${escapeHtml(reportHref)}" data-report-current="true" data-job-id="${escapeAttribute(jobId)}">${escapeHtml(reportState.link)}</a><br><span class="hint">${escapeHtml(reportState.badge)}</span>`
-                  : '<span class="hint" data-zh="待生成" data-en="Not ready">待生成</span>';
+                  ? `<a class="buttonlink" target="_blank" rel="noopener" href="${escapeHtml(reportHref)}" data-report-current="true" data-job-id="${escapeAttribute(jobId)}">${escapeHtml(reportState.link)}</a>`
+                  : `<span class="hint">${escapeHtml(t('报告待生成', 'Report not ready'))}</span>`;
                 return `
-                <tr>
-                  <td>${copyableCode(jobId, 'job id')}</td>
-                  <td data-copy="${escapeAttribute(statusLabel)}" data-copy-label="job status">${escapeHtml(statusLabel)}</td>
-                  <td>${copyableCode(samplePath, 'job sample path', '-')}</td>
-                  <td>${reportCell}</td>
-                  <td><button class="secondary" onclick="refreshJob('${escapeJs(jobId)}')" data-zh="打开任务" data-en="Open job">打开任务</button> <a class="buttonlink secondary" href="/jobs/${encodeURIComponent(jobId)}/execution-flow" target="_blank" rel="noopener" data-zh="进度页" data-en="Progress page">进度页</a> <a class="buttonlink secondary" href="/jobs/${encodeURIComponent(jobId)}/live-events" target="_blank" rel="noopener" data-zh="实时原始事件监控" data-en="Live raw monitor">实时原始事件监控</a></td>
-                </tr>`;
+                <article class="recent-job-card" data-copy="${escapeAttribute(`job=${jobId}; status=${statusLabel}; report=${reportState.badge}`)}" data-copy-label="recent job summary">
+                  <h3>Job <code data-copy="${escapeAttribute(jobId)}" data-copy-label="job id">${escapeHtml(shortJobId)}</code></h3>
+                  <div class="recent-job-meta">
+                    <span class="pill" data-copy="${escapeAttribute(statusLabel)}" data-copy-label="job status">${escapeHtml(statusLabel)}</span>
+                    <span class="${reportState.badgeClass}" data-copy="${escapeAttribute(reportState.badge)}" data-copy-label="report state">${escapeHtml(reportState.badge)}</span>
+                  </div>
+                  <p class="hint">${escapeHtml(reportState.hint)}</p>
+                  <p class="button-row">
+                    <button class="secondary" onclick="refreshJob('${escapeJs(jobId)}')" data-zh="打开任务" data-en="Open job">打开任务</button>
+                    <a class="buttonlink secondary" href="${escapeHtml(flowHref)}" target="_blank" rel="noopener" data-zh="执行流程" data-en="Execution flow">执行流程</a>
+                    ${reportCell}
+                  </p>
+                </article>`;
               }).join('');
 
               container.innerHTML = `
-                <table>
-                  <thead><tr><th>Job ID</th><th data-zh="状态" data-en="Status">状态</th><th data-zh="样本" data-en="Sample">样本</th><th data-zh="报告" data-en="Report">报告</th><th data-zh="入口" data-en="Links">入口</th></tr></thead>
-                  <tbody>${rows}</tbody>
-                </table>`;
+                <div class="recent-job-list">${cards}</div>`;
               applyLanguage();
             }
 
@@ -944,6 +1033,7 @@ internal static class DashboardExperiencePage
               const list = document.getElementById('stageList');
               const fill = document.getElementById('progressFill');
               const meta = document.getElementById('progressMeta');
+              const box = document.getElementById('analysisProgress');
               if (!list || !fill) {
                 return;
               }
@@ -952,6 +1042,11 @@ internal static class DashboardExperiencePage
               progressStageIndex = boundedActive;
               progressCompleted = Boolean(completed);
               progressFailed = Boolean(failed);
+              if (box) {
+                box.classList.toggle('running', !progressCompleted && !progressFailed && boundedActive > 0);
+                box.classList.toggle('completed', progressCompleted);
+                box.classList.toggle('failed', progressFailed);
+              }
               list.innerHTML = liveStages.map((stage, index) => {
                 const css = progressCompleted
                   ? 'done'
@@ -969,9 +1064,9 @@ internal static class DashboardExperiencePage
               fill.classList.toggle('failed', progressFailed);
               if (meta) {
                 const label = progressCompleted
-                  ? t('完成 / 8 阶段', 'Complete / 8 stages')
+                  ? t(`完成 / ${liveStages.length} 阶段`, `Complete / ${liveStages.length} stages`)
                   : progressFailed
-                    ? t(`停在 ${boundedActive + 1}/8`, `Stopped at ${boundedActive + 1}/8`)
+                    ? t(`停在 ${boundedActive + 1}/${liveStages.length}`, `Stopped at ${boundedActive + 1}/${liveStages.length}`)
                     : `${boundedActive + 1}/${liveStages.length}`;
                 meta.textContent = label;
                 meta.setAttribute('data-copy', `${label}: ${t(liveStages[boundedActive][0], liveStages[boundedActive][1])}`);
@@ -1129,6 +1224,7 @@ internal static class DashboardExperiencePage
               const meta = document.getElementById('progressMeta');
               const text = document.getElementById('progressText');
               const details = document.getElementById('runbookProgressDetails');
+              const box = document.getElementById('analysisProgress');
               if (!snapshot || !list || !fill) {
                 return;
               }
@@ -1159,6 +1255,11 @@ internal static class DashboardExperiencePage
               progressCompleted = done;
               progressFailed = failed;
               progressStageIndex = friendlyStageIndex;
+              if (box) {
+                box.classList.toggle('running', !done && !failed);
+                box.classList.toggle('completed', done);
+                box.classList.toggle('failed', failed);
+              }
 
               if (meta) {
                 const label = done
@@ -1336,16 +1437,17 @@ internal static class DashboardExperiencePage
             }
 
             function showReportReadyNotice(jobId, autoOpen) {
-              const notice = document.getElementById('reportNotice');
-              if (!notice || !jobId) {
+              const notices = ['reportNotice', 'globalReportNotice']
+                .map(id => document.getElementById(id))
+                .filter(Boolean);
+              if (!notices.length || !jobId) {
                 return;
               }
 
               const currentHref = buildReportHref(jobId, currentLanguage === 'en' ? 'en' : 'zh');
               const zhHref = buildReportHref(jobId, 'zh');
               const enHref = buildReportHref(jobId, 'en');
-              notice.hidden = false;
-              notice.innerHTML = `
+              const html = `
                 <strong data-zh="报告已生成" data-en="Report is ready">报告已生成</strong>
                 <p data-zh="${autoOpen ? '页面即将打开当前语言报告；如果没有跳转，请点击下方按钮。' : '报告已刷新，可直接打开查看。'}" data-en="${autoOpen ? 'The report will open in the current language shortly; if it does not, use the buttons below.' : 'The report has been refreshed and is ready to open.'}">${autoOpen ? '页面即将打开当前语言报告；如果没有跳转，请点击下方按钮。' : '报告已刷新，可直接打开查看。'}</p>
                 <p class="button-row">
@@ -1353,8 +1455,13 @@ internal static class DashboardExperiencePage
                   <a class="buttonlink secondary" target="_blank" rel="noopener" href="${escapeHtml(zhHref)}" data-zh="新标签打开中文报告" data-en="Open Chinese report in new tab">新标签打开中文报告</a>
                   <a class="buttonlink secondary" target="_blank" rel="noopener" href="${escapeHtml(enHref)}" data-zh="新标签打开英文报告" data-en="Open English report in new tab">新标签打开英文报告</a>
                 </p>`;
+              for (const notice of notices) {
+                notice.hidden = false;
+                notice.innerHTML = html;
+              }
               applyLanguage();
-              notice.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+              selectWorkspaceTab('results');
+              (document.getElementById('globalReportNotice') || notices[0]).scrollIntoView({ behavior: 'smooth', block: 'nearest' });
               setStatus(
                 autoOpen
                   ? t('报告已生成，正在打开；如果没有跳转，请点击“打开报告”。', 'Report is ready and opening; if it does not navigate, click Open report.')
@@ -1505,7 +1612,7 @@ internal static class DashboardExperiencePage
 
                 renderJob(job);
                 applyLanguage();
-            refreshJobs(false);
+                refreshJobs(false);
                 showReportReadyNotice(jobId, false);
               } catch (error) {
                 setStatus(error.message, true);
@@ -1858,8 +1965,10 @@ internal static class DashboardExperiencePage
               return '';
             }
 
-            applyLanguage();
+            setupTabKeyboardNavigation();
+            selectWorkspaceTab('plan');
             selectPlanTab('upload');
+            applyLanguage();
             loadConfigDefaults();
             refreshJobs(false);
           </script>

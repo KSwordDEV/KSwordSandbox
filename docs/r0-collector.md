@@ -229,6 +229,12 @@ Supported options:
   batches; `0` means unlimited until the duration deadline or an empty batch.
   This is the bounded batch limit and stress/backpressure input for safe local
   tests.
+- `--driver-event-sample-stride <n>` / `--event-sample-stride <n>`: optional
+  collector-side large-stream throttle for live driver rows. The default `1`
+  emits every eligible driver row. Values greater than `1` emit the first
+  eligible row and every nth eligible row after self-noise suppression; skipped
+  rows remain counted in `r0collector.driverReadEvents.data.skipped` and
+  `collectorSkippedEvents`.
 - `--abi-self-check`: emit an ABI/event-quality contract row and exit without
   opening `\\.\KSwordSandboxDriver`. The collector does not open the driver
   device and does not call `DeviceIoControl` in this mode.
@@ -268,7 +274,13 @@ Device-unavailable behavior is explicit: the collector writes
 `66`. The row now includes `severity=error`, `readinessState=blocked`,
 `diagnosticStage=openDevice`, and a concrete `diagnosticCode` such as
 `open_device_not_found`, `open_device_denied`, `open_device_sharing_violation`,
-or `open_device_failed`.
+or `open_device_failed`. It also records `deviceAvailability=unavailable`,
+`collectionDiagnostic=true`, `sampleBehavior=false`, `ioctlIssued=false`,
+`driverLoadedByCollector=false`, `mutatesDriver=false`,
+`sideEffectPolicy=read-only-open-no-driver-load-no-scm-mutation-no-signing`,
+and `operatorInterpretation=collection_diagnostic_not_sample_behavior` so a
+missing or inaccessible device is clearly a collection/readiness issue rather
+than evidence of malicious sample behavior.
 
 Live readiness diagnostic after a driver is expected to be installed and
 started:
@@ -289,7 +301,8 @@ Expected diagnostic rows:
   `service_running`.
 - `r0collector.deviceUnavailable` when `CreateFileW` fails. `win32Error` and
   `win32Message` are preserved, and the hint distinguishes service/load/symbolic-
-  link problems from permission failures.
+  link problems from permission failures. The row is marked
+  `collectionDiagnostic=true` and `sampleBehavior=false`.
 - `r0collector.readinessDiagnostic` with `diagnosticStage=abiNegotiation`. Codes
   include `abi_compatible`, `abi_capabilities_unavailable`,
   `abi_ioctl_failed`, and `abi_mismatch`.
@@ -384,6 +397,17 @@ Every collector-owned row keeps the event-quality fields stable under `data`:
   queue reached capacity, a batch filled the requested cap, or drop counters are
   non-zero. Synthetic stress rows keep `backpressure=false` but name the
   `StressJsonlBackpressureEvidence` field set.
+- `r0collector.driverReadEvents` keeps both old and concise batch counters near
+  the front of `data`: `recordsProcessed`, `eventsEmitted`,
+  `collectorSuppressedEvents`, `collectorSkippedEvents`, `eligibleEvents`, plus
+  aliases `processed`, `eligible`, `emitted`, `suppressed`, `skipped`,
+  `head`, `tail`, `sampling`, `loss`, and `backpressureObserved`. This order is
+  deliberate so host report sampling keeps the important accounting fields even
+  when raw JSONL contains many additional diagnostics.
+- `collectionDiagnostic=true`, `sampleBehavior=false`, and
+  `operatorInterpretation=collection_diagnostic_not_sample_behavior` are used
+  on device/readiness/IOCTL diagnostic rows to separate collector health from
+  sample activity.
 
 Malformed-line handling is deliberate and bounded. The collector emits only
 valid JSONL unless `--inject-jsonl-noise` is explicitly requested in mock/stress
@@ -400,6 +424,8 @@ fragments such as `\KSwordSandbox\agent\`, `\KSwordSandbox\r0collector\`,
 `\KSwordSandbox\driver\`, and `\KSwordSandbox\out\`. Drain-loop continuation is
 based on `recordsProcessed`, not emitted row count, so suppressing a full noisy
 batch cannot make the collector stop before the driver queue is empty.
+Optional stride sampling is applied only after this self-noise classification;
+it is disabled by default and never changes `recordsProcessed`.
 
 ## ABI self-check mode
 
@@ -412,6 +438,7 @@ KSword.Sandbox.R0Collector.exe `
   --heartbeat `
   --max-events 16 `
   --max-read-batches 4 `
+  --driver-event-sample-stride 1 `
   --enable-mask 0x3f `
   --out C:\Sandbox\r0collector-abi-self-check.jsonl
 ```
@@ -442,8 +469,11 @@ Important `r0collector.abiSelfCheck` evidence fields:
   `statusReplySize`, `readEventsRequestSize`, `readEventsReplyHeaderSize`, and
   payload-size fields: capture fixed structure layout assumptions used by the
   collector parser.
-- `requestedMaxEvents`, `readEventsMaxEvents`, `maxEventsBounds`, and
-  `maxReadBatches`: capture the batch/backpressure knobs the run will use.
+- `requestedMaxEvents`, `readEventsMaxEvents`, `maxEventsBounds`,
+  `maxReadBatches`, `driverEventSampleStride`, and
+  `driverEventSamplingPolicy`: capture the batch/backpressure/sampling knobs
+  the run will use. The default sample stride is `1`, meaning no collector-side
+  driver-row sampling.
 - `readEventsRequestFlagsPolicy`: documents that `READ_EVENTS.Flags` must remain
   zero.
 - `producerSelectionPolicy`: documents that producer selection belongs only to
@@ -570,6 +600,10 @@ Expected script rows for the live VM path:
   `IOCTL_KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK`.
 - `requestedMaxEvents` on `r0collector.driverReadEvents`: records the exact
   `READ_EVENTS` batch cap used for that collector run.
+- `processed`/`eligible`/`emitted`/`suppressed`/`skipped`,
+  `head`/`tail`, `sampling`, `loss`, and `backpressureObserved` on
+  `r0collector.driverReadEvents`: preserve batch accounting and sequence
+  bounds in both raw JSONL and sampled reports.
 - `drainStoppedAtBatchLimit` on `r0collector.stopped`: indicates the runtime
   loop exited because `--max-read-batches` was reached instead of waiting for
   the duration deadline.
@@ -629,7 +663,8 @@ Required synthetic coverage:
   `ProducerDroppedMask`/`producerDroppedMask`,
   `ProducerSuppressedMask`/`producerSuppressedMask`,
   `ProducerBackpressureMask`/`producerBackpressureMask`, `nextSequence`, and
-  per-driver-row `sequence` so lost records can be diagnosed from counters and
+  per-driver-row `sequence` plus read-batch `head`/`tail`, `loss`, and
+  `backpressureObserved` so lost records can be diagnosed from counters and
   gaps.
 - Noise evidence: blank, truncated, malformed, and extra-field JSONL rows are
   expected in the corpus. Import keeps malformed rows as `driver.parse_error`;
@@ -642,8 +677,9 @@ Required synthetic coverage:
 - Mock/stress inputs: use `--self-test`, `--synthetic`, `--mock`,
   `--stress-count`, `--inject-jsonl-noise`, `--abi-self-check`,
   `--max-events`, `--max-read-batches`, `--duration 0`, `--poll-ms`, and
-  `--heartbeat` to exercise bounded drains, no-device ABI evidence, JSONL
-  tolerance, sequence continuity, and heartbeat evidence.
+  `--driver-event-sample-stride`, and `--heartbeat` to exercise bounded drains,
+  no-device ABI evidence, JSONL tolerance, sequence continuity, optional
+  collector sampling, and heartbeat evidence.
 
 Backpressure is intentionally non-blocking. Kernel producers should not wait on
 collector throughput. If the fixed ring overflows, the oldest unread records can
@@ -690,13 +726,15 @@ stay stable in docs, the readiness script, and smoke tests:
 - `StressJsonlLossEvidence`: the loss fields that must be preserved in JSONL:
   `TotalEventsDropped`, `totalEventsDropped`, `EventsDropped`,
   `eventsDropped`, `ProducerDroppedMask`, `producerDroppedMask`,
-  `NextSequence`, `nextSequence`, and per-driver-row `sequence`.
+  `NextSequence`, `nextSequence`, per-driver-row `sequence`, batch `head`,
+  batch `tail`, and `loss`.
 - `StressJsonlBackpressureEvidence`: the queue-pressure fields that prove
   non-blocking behavior: `QueueCapacity`, `queueCapacity`,
   `QueueHighWatermark`, `queueHighWatermark`, `TotalEventsBackpressured`,
   `totalEventsBackpressured`, `ProducerBackpressureMask`,
   `producerBackpressureMask`, `drainStoppedAtBatchLimit`, `requestedMaxEvents`,
-  `readEventsMaxEvents`, and `maxReadBatches`.
+  `readEventsMaxEvents`, `maxReadBatches`, `backpressureObserved`, and
+  `sampling`.
 - `ReadinessNoDevicePolicy`: default readiness emits only static/no-device
   evidence and must set `OpensDevice=false`, `LoadsDriver=false`, and
   `CallsCSignTool=false` for the ABI self-check row.

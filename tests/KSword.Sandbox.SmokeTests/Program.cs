@@ -242,6 +242,7 @@ internal static class SmokeTestProgram
         Assert(importedJob.Status == AnalysisStatus.Completed, "imported job should be completed");
         Assert(File.Exists(importedJob.JsonReportPath), "refreshed json report should exist");
         Assert(File.Exists(importedJob.HtmlReportPath), "refreshed html report should exist");
+        AssertBilingualHtmlReports(importedJob);
         AssertRefreshedReportJson(importedJob);
         var refreshedExecutionJob = service.SaveRunbookExecutionResult(importedJob.JobId, new SandboxRunbookExecutionResult
         {
@@ -256,6 +257,7 @@ internal static class SmokeTestProgram
             RequiresElevation = true
         });
         AssertRefreshedReportJson(refreshedExecutionJob);
+        AssertBilingualHtmlReports(refreshedExecutionJob);
 
         var htmlReportPath = importedJob.HtmlReportPath ?? throw new InvalidOperationException("html report path should be set");
         var html = File.ReadAllText(htmlReportPath);
@@ -273,6 +275,31 @@ internal static class SmokeTestProgram
         Assert(html.Contains("r0collector.mockDriverEvent", StringComparison.Ordinal), "html report should include raw R0 event type");
         Assert(html.Contains("driver-events.jsonl", StringComparison.Ordinal), "html report should include the imported R0 mock JSONL source path");
         Assert(html.Contains("Raw normalized events", StringComparison.Ordinal), "html report should include raw events section");
+    }
+
+    /// <summary>
+    /// Verifies that report regeneration writes explicit Chinese and English
+    /// HTML variants beside the default compatibility report.
+    /// </summary>
+    private static void AssertBilingualHtmlReports(AnalysisJob job)
+    {
+        Assert(!string.IsNullOrWhiteSpace(job.HtmlReportZhPath), "job should expose report.zh.html path");
+        Assert(!string.IsNullOrWhiteSpace(job.HtmlReportEnPath), "job should expose report.en.html path");
+        var zhPath = job.HtmlReportZhPath ?? throw new InvalidOperationException("job should expose report.zh.html path");
+        var enPath = job.HtmlReportEnPath ?? throw new InvalidOperationException("job should expose report.en.html path");
+        Assert(string.Equals(Path.GetFileName(zhPath), "report.zh.html", StringComparison.OrdinalIgnoreCase), "Chinese report file name should be report.zh.html");
+        Assert(string.Equals(Path.GetFileName(enPath), "report.en.html", StringComparison.OrdinalIgnoreCase), "English report file name should be report.en.html");
+        Assert(File.Exists(zhPath), "refreshed Chinese html report should exist");
+        Assert(File.Exists(enPath), "refreshed English html report should exist");
+
+        var chineseHtml = File.ReadAllText(zhPath);
+        var englishHtml = File.ReadAllText(enPath);
+        Assert(chineseHtml.Contains("<html lang=\"zh-CN\">", StringComparison.Ordinal), "Chinese html report should set zh-CN metadata");
+        Assert(englishHtml.Contains("<html lang=\"en\">", StringComparison.Ordinal), "English html report should set English language metadata");
+        Assert(chineseHtml.Contains("driver-events.jsonl", StringComparison.Ordinal), "Chinese html report should include imported driver JSONL evidence");
+        Assert(englishHtml.Contains("driver-events.jsonl", StringComparison.Ordinal), "English html report should include imported driver JSONL evidence");
+        Assert(chineseHtml.Contains("原始事件", StringComparison.Ordinal), "Chinese html report should include localized raw events section");
+        Assert(englishHtml.Contains("Raw normalized events", StringComparison.Ordinal), "English html report should include raw events section");
     }
 
     /// <summary>

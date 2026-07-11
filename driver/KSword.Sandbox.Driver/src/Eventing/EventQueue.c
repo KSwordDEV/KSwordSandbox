@@ -121,6 +121,37 @@ KswRecordProducerStatus(
 }
 
 /*
+ * Clears producer active bits without turning a normal stop into a failure.
+ *
+ * Inputs : DeviceExtension owns the producer bitmaps; ProducerMask names the
+ *          producer families being stopped.
+ * Logic  : removes the bits from ActiveProducerMask while preserving
+ *          FailedProducerMask and LastFailureStatus.  Driver unload uses this
+ *          before unregistering callbacks so a concurrent status reader sees a
+ *          stopping/deactivated producer instead of a false failure.
+ * Return : no return value.
+ */
+VOID
+KswClearProducerActiveMask(
+    _Inout_ PKSWORD_SANDBOX_DEVICE_EXTENSION DeviceExtension,
+    _In_ ULONG ProducerMask
+    )
+{
+    KIRQL oldIrql;
+
+    if (DeviceExtension == NULL ||
+        DeviceExtension->Signature != KSWORD_SANDBOX_DEVICE_EXTENSION_SIGNATURE ||
+        ProducerMask == 0) {
+        return;
+    }
+
+    KeAcquireSpinLock(&DeviceExtension->StateLock, &oldIrql);
+    DeviceExtension->ActiveProducerMask &=
+        ~(ProducerMask & DeviceExtension->SupportedProducerMask);
+    KeReleaseSpinLock(&DeviceExtension->StateLock, oldIrql);
+}
+
+/*
  * Updates the producer event emission mask.
  *
  * Inputs : DeviceExtension owns the shared mask; EnableMask is the collector's
@@ -332,8 +363,8 @@ KswInitializeDeviceExtension(
     DeviceExtension->NextSequence = 1;
     DeviceExtension->LastStatus = STATUS_SUCCESS;
     DeviceExtension->LastFailureStatus = STATUS_SUCCESS;
-    DeviceExtension->ProducerEnableMask = KSWORD_SANDBOX_PRODUCER_MASK_DEFAULT;
-    DeviceExtension->SupportedProducerMask = KSWORD_SANDBOX_PRODUCER_MASK_CURRENT;
+    DeviceExtension->SupportedProducerMask = KSWORD_SANDBOX_COMPILED_PRODUCER_MASK;
+    DeviceExtension->ProducerEnableMask = DeviceExtension->SupportedProducerMask;
     DeviceExtension->ActiveProducerMask = KSWORD_SANDBOX_PRODUCER_FLAG_DRIVER;
     DeviceExtension->FailedProducerMask = 0;
     DeviceExtension->ProducerDroppedMask = 0;

@@ -36,7 +36,9 @@ public sealed class EventDeduplicator
     /// </summary>
     private static string BuildKey(SandboxEvent evt)
     {
-        var data = string.Join(";", evt.Data.OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase).Select(pair => $"{pair.Key}={pair.Value}"));
+        var data = evt.Data is null
+            ? string.Empty
+            : string.Join(";", evt.Data.OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase).Select(pair => $"{pair.Key}={pair.Value}"));
         return string.Join("|", evt.EventType, evt.Source, evt.Timestamp.ToString("O"), evt.ProcessId?.ToString() ?? string.Empty, evt.Path ?? string.Empty, data);
     }
 }

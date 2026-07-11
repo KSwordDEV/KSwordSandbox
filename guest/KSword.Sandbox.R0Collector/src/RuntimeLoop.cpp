@@ -25,6 +25,10 @@ std::string BuildConfigData(const Options& options) {
     data.AddSigned("diagnoseReadTimeoutMs", options.diagnoseReadTimeoutMs);
     data.AddSigned("maxReadBatches", options.maxReadBatches);
     data.AddUnsigned("readEventsMaxEvents", options.readEventsMaxEvents);
+    data.AddUnsigned("driverEventSampleStride", options.driverEventSampleStride);
+    data.AddUtf8(
+        "driverEventSampling",
+        options.driverEventSampleStride <= 1 ? "none" : "stride");
     data.AddSigned("stressCount", options.stressCount);
     data.AddBool("mockMode", options.mockMode);
     data.AddBool("syntheticMode", options.mockMode);
@@ -78,7 +82,8 @@ bool EmitCollectorHeartbeat(
     const unsigned long long readBatches,
     const unsigned long long driverEvents,
     const unsigned long long driverRecordsProcessed,
-    const unsigned long long collectorSuppressedEvents) {
+    const unsigned long long collectorSuppressedEvents,
+    const unsigned long long collectorSkippedEvents) {
     if (!options.heartbeat) {
         return true;
     }
@@ -94,6 +99,11 @@ bool EmitCollectorHeartbeat(
     data.AddUnsigned("driverEvents", driverEvents);
     data.AddUnsigned("driverRecordsProcessed", driverRecordsProcessed);
     data.AddUnsigned("collectorSuppressedEvents", collectorSuppressedEvents);
+    data.AddUnsigned("collectorSkippedEvents", collectorSkippedEvents);
+    data.AddUnsigned("driverEventSampleStride", options.driverEventSampleStride);
+    data.AddUtf8(
+        "driverEventSampling",
+        options.driverEventSampleStride <= 1 ? "none" : "stride");
     data.AddSigned("durationSeconds", options.durationSeconds);
     data.AddSigned("pollIntervalMs", options.pollIntervalMs);
     data.AddBool("mockMode", options.mockMode);
@@ -131,7 +141,7 @@ int RunDriverHealthOnly(const UniqueHandle& device, const Options& options, Even
         return kExitRuntimeFailure;
     }
 
-    if (!EmitCollectorHeartbeat(writer, options, "healthComplete", 0, 0, 0, 0, 0)) {
+    if (!EmitCollectorHeartbeat(writer, options, "healthComplete", 0, 0, 0, 0, 0, 0)) {
         return kExitRuntimeFailure;
     }
 
@@ -140,10 +150,17 @@ int RunDriverHealthOnly(const UniqueHandle& device, const Options& options, Even
     data.AddUnsigned("polls", 0);
     data.AddUnsigned("readBatches", 0);
     data.AddUnsigned("driverEvents", 0);
+    data.AddUnsigned("driverRecordsProcessed", 0);
+    data.AddUnsigned("collectorSuppressedEvents", 0);
+    data.AddUnsigned("collectorSkippedEvents", 0);
     data.AddBool("ioctlIssued", true);
     data.AddBool("healthOnly", true);
     data.AddBool("heartbeat", options.heartbeat);
     data.AddBool("suppressSelfNoise", options.suppressSelfNoise);
+    data.AddUnsigned("driverEventSampleStride", options.driverEventSampleStride);
+    data.AddUtf8(
+        "driverEventSampling",
+        options.driverEventSampleStride <= 1 ? "none" : "stride");
     data.AddUtf8(
         "collectorNoisePolicy",
         options.suppressSelfNoise ? "suppress-self-noise" : "emit-self-noise");
@@ -192,6 +209,7 @@ int RunDriverIoctlLoop(const UniqueHandle& device, const Options& options, Event
     unsigned long long driverEvents = 0;
     unsigned long long driverRecordsProcessed = 0;
     unsigned long long collectorSuppressedEvents = 0;
+    unsigned long long collectorSkippedEvents = 0;
     bool drainStoppedAtDeadline = false;
     bool drainStoppedAtBatchLimit = false;
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(options.durationSeconds);
@@ -226,6 +244,10 @@ int RunDriverIoctlLoop(const UniqueHandle& device, const Options& options, Event
             driverEvents += eventsEmitted;
             driverRecordsProcessed += recordsProcessed;
             collectorSuppressedEvents += suppressedEvents;
+            const unsigned long long accountedEvents = eventsEmitted + suppressedEvents;
+            if (recordsProcessed > accountedEvents) {
+                collectorSkippedEvents += recordsProcessed - accountedEvents;
+            }
 
             if (recordsProcessed < options.readEventsMaxEvents) {
                 break;
@@ -245,7 +267,8 @@ int RunDriverIoctlLoop(const UniqueHandle& device, const Options& options, Event
                 readBatches,
                 driverEvents,
                 driverRecordsProcessed,
-                collectorSuppressedEvents)) {
+                collectorSuppressedEvents,
+                collectorSkippedEvents)) {
             return kExitRuntimeFailure;
         }
 
@@ -267,6 +290,7 @@ int RunDriverIoctlLoop(const UniqueHandle& device, const Options& options, Event
     data.AddUnsigned("driverEvents", driverEvents);
     data.AddUnsigned("driverRecordsProcessed", driverRecordsProcessed);
     data.AddUnsigned("collectorSuppressedEvents", collectorSuppressedEvents);
+    data.AddUnsigned("collectorSkippedEvents", collectorSkippedEvents);
     data.AddBool("ioctlIssued", true);
     data.AddBool("healthOnly", false);
     data.AddUtf8("drainMode", "batchUntilEmpty");
@@ -274,6 +298,10 @@ int RunDriverIoctlLoop(const UniqueHandle& device, const Options& options, Event
     data.AddBool("drainStoppedAtBatchLimit", drainStoppedAtBatchLimit);
     data.AddSigned("maxReadBatches", options.maxReadBatches);
     data.AddUnsigned("readEventsMaxEvents", options.readEventsMaxEvents);
+    data.AddUnsigned("driverEventSampleStride", options.driverEventSampleStride);
+    data.AddUtf8(
+        "driverEventSampling",
+        options.driverEventSampleStride <= 1 ? "none" : "stride");
     data.AddBool("heartbeat", options.heartbeat);
     data.AddBool("suppressSelfNoise", options.suppressSelfNoise);
     data.AddUtf8(
@@ -339,7 +367,7 @@ int RunCollector(int argc, wchar_t* argv[]) {
         return kExitRuntimeFailure;
     }
 
-    if (!EmitCollectorHeartbeat(writer, options, "collectorStarted", 0, 0, 0, 0, 0)) {
+    if (!EmitCollectorHeartbeat(writer, options, "collectorStarted", 0, 0, 0, 0, 0, 0)) {
         return kExitRuntimeFailure;
     }
 
@@ -357,7 +385,7 @@ int RunCollector(int argc, wchar_t* argv[]) {
             return mockExitCode;
         }
 
-        if (!EmitCollectorHeartbeat(writer, options, "syntheticComplete", 0, 0, 0, 0, 0)) {
+        if (!EmitCollectorHeartbeat(writer, options, "syntheticComplete", 0, 0, 0, 0, 0, 0)) {
             return kExitRuntimeFailure;
         }
 
@@ -373,6 +401,10 @@ int RunCollector(int argc, wchar_t* argv[]) {
         stoppedData.AddUtf8(
             "collectorNoisePolicy",
             options.suppressSelfNoise ? "suppress-self-noise" : "emit-self-noise");
+        stoppedData.AddUnsigned("driverEventSampleStride", options.driverEventSampleStride);
+        stoppedData.AddUtf8(
+            "driverEventSampling",
+            options.driverEventSampleStride <= 1 ? "none" : "stride");
         stoppedData.AddSigned("stressCount", options.stressCount);
         stoppedData.AddBool("injectJsonlNoise", options.injectJsonlNoise);
         stoppedData.AddUtf8("schema", KSWORD_SANDBOX_EVENT_SCHEMA_NAME);
@@ -406,6 +438,10 @@ int RunCollector(int argc, wchar_t* argv[]) {
     openedData.AddBool("enableMaskSpecified", options.enableMaskSpecified);
     openedData.AddUnsigned("enableMask", options.enableMask);
     openedData.AddUtf8("enableMaskHex", HexUnsignedLongLong(options.enableMask, 8));
+    openedData.AddUnsigned("driverEventSampleStride", options.driverEventSampleStride);
+    openedData.AddUtf8(
+        "driverEventSampling",
+        options.driverEventSampleStride <= 1 ? "none" : "stride");
     openedData.AddUtf8("ioctlProtocol", "KSwordSandboxDriverIoctl.h");
     openedData.AddUtf8("schema", KSWORD_SANDBOX_EVENT_SCHEMA_NAME);
     openedData.AddUtf8("producer", "r0collector");

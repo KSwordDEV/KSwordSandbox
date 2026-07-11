@@ -17,7 +17,15 @@ internal sealed record GuestArtifactManifestWriteResult(string ManifestPath, int
 /// Inputs are the VM-local source path, source-relative path, and source event;
 /// processing stores strings for manifest metadata only.
 /// </summary>
-internal sealed record DroppedFileArtifactMetadata(string OriginalFullPath, string OriginalRelativePath, string SourceEventType);
+internal sealed record DroppedFileArtifactMetadata(
+    string OriginalFullPath,
+    string OriginalRelativePath,
+    string SourceEventType,
+    long? OriginalSizeBytes = null,
+    DateTime? OriginalCreationTimeUtc = null,
+    DateTime? OriginalLastWriteTimeUtc = null,
+    DateTimeOffset? SourceEventTimestampUtc = null,
+    DateTimeOffset? CopiedAtUtc = null);
 
 /// <summary>
 /// Carries operator-selected guest artifact collection options into manifest
@@ -284,6 +292,32 @@ internal sealed class GuestArtifactWriter
         {
             metadata["guestRelativePath"] = droppedFileMetadata.OriginalRelativePath;
             metadata["sourceEventType"] = droppedFileMetadata.SourceEventType;
+            if (droppedFileMetadata.OriginalSizeBytes is not null)
+            {
+                metadata["originalSizeBytes"] = droppedFileMetadata.OriginalSizeBytes.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                AddIfMissing(metadata, "sourceSizeBytes", metadata["originalSizeBytes"]);
+            }
+
+            if (droppedFileMetadata.OriginalCreationTimeUtc is not null)
+            {
+                metadata["originalCreationTimeUtc"] = droppedFileMetadata.OriginalCreationTimeUtc.Value.ToString("O", System.Globalization.CultureInfo.InvariantCulture);
+            }
+
+            if (droppedFileMetadata.OriginalLastWriteTimeUtc is not null)
+            {
+                metadata["originalLastWriteTimeUtc"] = droppedFileMetadata.OriginalLastWriteTimeUtc.Value.ToString("O", System.Globalization.CultureInfo.InvariantCulture);
+                AddIfMissing(metadata, "sourceLastWriteUtc", metadata["originalLastWriteTimeUtc"]);
+            }
+
+            if (droppedFileMetadata.SourceEventTimestampUtc is not null)
+            {
+                metadata["sourceEventTimestampUtc"] = droppedFileMetadata.SourceEventTimestampUtc.Value.ToString("O", System.Globalization.CultureInfo.InvariantCulture);
+            }
+
+            if (droppedFileMetadata.CopiedAtUtc is not null)
+            {
+                metadata["copiedAtUtc"] = droppedFileMetadata.CopiedAtUtc.Value.ToString("O", System.Globalization.CultureInfo.InvariantCulture);
+            }
         }
 
         if (metadata.TryGetValue("phase", out var phase))

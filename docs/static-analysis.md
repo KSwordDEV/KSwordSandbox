@@ -13,23 +13,24 @@ external tools and intentionally writes findings into the stable
 - `Imports`: structured import modules with bounded API names, ordinal import
   samples, suspicious API names, and per-module suspicious cluster names.
 - `ImportApiClusters`: structured rollups such as `process-injection`,
-  `dynamic-code`, `network`, `registry-persistence`, and
+  `dynamic-code`, `network`, `download`, `exfiltration`,
+  `registry-persistence`, `credential-access`, `defense-evasion`, and
   `script-execution` with hit counts and API samples.
 - `ExportModuleName` and `ExportNames`: bounded export-table names suitable for
   report JSON grouping and future rule predicates.
-- `Tls`: TLS directory, callback-table VA/file offset, and callback VA/RVA
-  evidence.
+- `Tls`: TLS directory, callback-table VA/file offset, and callback
+  VA/RVA/target-file-offset evidence.
 - `Overlay`: PE overlay offset/size, certificate-table overlap,
   non-certificate appended size, and bounded entropy.
-- `NetworkIndicators`: structured URL, IPv4, and email indicators with coarse
-  classification (`embedded`, `reference`, `public`,
-  `private_or_reserved`).
+- `NetworkIndicators`: structured URL, domain, IPv4, and email indicators with
+  coarse classification (`embedded`, `reference`, `public`,
+  `private_or_reserved`, `dynamic_dns`, `onion`).
 - `PathIndicators`: structured registry, filesystem, and environment-path
   indicators with the same stable tag vocabulary used by rules.
-- `CommandIndicators`: structured script interpreter, encoded command, and
-  LOLBIN command-string evidence.
-- `SuspiciousStrings`: structured anti-analysis, packer, persistence, and
-  suspicious API-like string findings.
+- `CommandIndicators`: structured script interpreter, encoded command, LOLBIN,
+  download, and upload/exfil command-string evidence.
+- `SuspiciousStrings`: structured anti-analysis, packer, persistence,
+  credential-access, defense-evasion, and suspicious API-like string findings.
 - `Warnings`: parse-boundary and truncation notes.
 
 ## PE coverage
@@ -52,8 +53,11 @@ The analyzer parses these PE structures best-effort with hard limits:
 - PE security directory / Authenticode certificate table presence and bounded
   WIN_CERTIFICATE entry metadata.
 - TLS directory and callback-table pointers.
-  Callback table and callback VA/RVA values are also exposed in `Tls`.
-- Resource directory types and resource data entries.
+  Callback table VA/file-offset values and callback VA/RVA/target-file-offset
+  values are also exposed in `Tls` plus prefixed `tls:*` strings.
+- Resource directory types and resource data entries, including data RVA, raw
+  file offset, size, bounded entropy, and entropy labels where bytes are
+  available.
 - Overlay bytes after the last mapped section raw-data end, with certificate
   table bytes separated from appended non-certificate data where possible.
   The normalized overlay offsets, sizes, certificate overlap, and entropy are
@@ -62,7 +66,8 @@ The analyzer parses these PE structures best-effort with hard limits:
 Resource tags include `resources_present`, `resource_type_rcdata`,
 `resource_manifest`, `resource_version_info`, `resource_icon`,
 `resource_payload_candidate`, `resource_large_data`,
-`resource_high_entropy_data`, and `resource_embedded_pe`.
+`resource_high_entropy_data`, `resource_very_high_entropy_data`, and
+`resource_embedded_pe`.
 
 Section tags include `high_entropy_section`, `very_high_entropy_section`,
 `low_entropy_section`, `virtual_only_section`, `oversized_virtual_section`,
@@ -85,14 +90,19 @@ emitted as prefixed strings such as `overlay:start=...`,
 String scanning is capped at 32 MiB and extracts printable ASCII plus simple
 UTF-16LE strings. Current labels include:
 
-- URLs and network indicators: `url`, `embedded_url`, `ip_address`,
-  `public_ip_address`, `private_or_reserved_ip_address`, `email_address`.
+- URLs and network indicators: `url`, `embedded_url`, `domain_name`,
+  `domain_indicator_string`, `tor_domain_string`,
+  `dynamic_dns_domain_string`, `ip_address`, `public_ip_address`,
+  `private_or_reserved_ip_address`, `email_address`.
 - Paths: `windows_path_string`, `file_path_string`, `temp_path_string`,
   `appdata_path_string`, `registry_path_string`,
   `run_key_path_string`, `service_registry_path_string`,
   `startup_folder_path_string`, `environment_path_string`.
 - Execution strings: `script_execution_string`, `powershell_string`,
-  `encoded_command_string`, `lolbin_string`.
+  `encoded_command_string`, `lolbin_string`, `download_command_string`,
+  `exfil_command_string`.
+- Credential and defense-evasion strings: `credential_access_string`,
+  `defense_evasion_string`.
 - Anti-analysis strings: `anti_analysis_string`,
   `sandbox_evasion_string`, `debugger_evasion_string`.
 - Packer strings: `packer_string_hint`.
@@ -103,13 +113,18 @@ Import and fallback API-string tags are grouped to keep rules concise:
 
 - Injection: `import_process_injection_api`
 - Dynamic code: `import_dynamic_code_api`
-- Network/download: `import_network_api`, `import_network_library`
+- Network/download/upload: `import_network_api`, `import_network_library`,
+  `import_download_api`, `import_exfil_api`
 - Persistence: `import_persistence_api`,
   `import_registry_persistence_api`, `import_service_persistence_api`
 - File drop/release: `import_file_drop_api`
 - Script/process launch: `import_script_execution_api`
 - Resource extraction: `import_resource_api`
 - Anti-analysis: `import_anti_analysis_api`
+- Credential access: `import_credential_access_api`,
+  `import_credential_access_library`
+- Defense evasion: `import_defense_evasion_api`,
+  `import_defense_evasion_library`
 
 All grouped API hits also set `import_suspicious_api` for broad triage.
 When suspicious imported APIs are present, aggregate rollups add
@@ -148,10 +163,10 @@ validates that:
 1. Static and dynamic behavior rules load.
 2. Rule-referenced MITRE IDs exist in `rules/mitre-windows-map.json`.
 3. Synthetic static tags classify into expected findings.
-4. Synthetic files produce URL/IP/path/script/anti-analysis/resource tags.
+4. Synthetic files produce URL/domain/IP/path/script/anti-analysis/resource tags.
 5. A synthetic PE contract sample emits overlay and certificate-table evidence
    without requiring Authenticode validation libraries.
 6. A synthetic PE contract sample exposes structured imports, suspicious API
    clusters, exports, TLS callbacks, overlay details, section entropy/flags,
-   URL/IP/email indicators, registry/filesystem paths, and LOLBIN command
-   strings.
+   URL/domain/IP/email indicators, registry/filesystem paths,
+   LOLBIN/download command strings, and credential/defense-evasion string tags.

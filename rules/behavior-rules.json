@@ -1,5 +1,5 @@
 {
-  "version": "2026-07-11-v9-rules-vt-quality",
+  "version": "2026-07-11-v10-static-rule-quality",
   "rules": [
     {
       "id": "host-submission",
@@ -679,6 +679,20 @@
         "registry",
         "persistence",
         "service"
+      ],
+      "excludeDataEquals": {
+        "operationName": [
+          "openKey",
+          "queryKey",
+          "queryValue",
+          "enumerateKey",
+          "enumerateValue",
+          "closeKey"
+        ]
+      },
+      "excludeProcessNames": [
+        "KSword.Sandbox.R0Collector.exe",
+        "KSword.Sandbox.Agent.exe"
       ]
     },
     {
@@ -1304,6 +1318,268 @@
       "confidence": "low"
     },
     {
+      "id": "static-domain-indicator",
+      "title": "Embedded domain string observed",
+      "severity": "info",
+      "confidence": "low",
+      "summary": "Static analysis extracted a bare domain-like string after suppressing common framework references and file-extension false positives. This is triage metadata unless runtime DNS/HTTP/TLS activity corroborates it.",
+      "eventTypes": [
+        "static.analysis.completed"
+      ],
+      "dataContains": {
+        "tags": [
+          "domain_name",
+          "domain_indicator_string"
+        ]
+      },
+      "tags": [
+        "static",
+        "strings",
+        "domain",
+        "indicator",
+        "triage"
+      ]
+    },
+    {
+      "id": "static-tor-domain-string",
+      "title": "Tor hidden-service domain string",
+      "severity": "medium",
+      "confidence": "low",
+      "summary": "Static analysis extracted a .onion domain string. This can support proxy/C2 triage but does not prove a Tor connection occurred at runtime.",
+      "mitreTechniqueId": "T1090",
+      "mitreTechniqueName": "Proxy",
+      "eventTypes": [
+        "static.analysis.completed"
+      ],
+      "dataContains": {
+        "tags": [
+          "tor_domain_string"
+        ]
+      },
+      "tags": [
+        "static",
+        "strings",
+        "domain",
+        "tor",
+        "proxy",
+        "triage"
+      ]
+    },
+    {
+      "id": "static-dynamic-dns-domain-string",
+      "title": "Dynamic DNS domain string",
+      "severity": "low",
+      "confidence": "low",
+      "summary": "Static analysis extracted a domain containing common dynamic-DNS markers. Treat this as infrastructure triage until runtime DNS or network behavior is observed.",
+      "eventTypes": [
+        "static.analysis.completed"
+      ],
+      "dataContains": {
+        "tags": [
+          "dynamic_dns_domain_string"
+        ]
+      },
+      "tags": [
+        "static",
+        "strings",
+        "domain",
+        "dynamic-dns",
+        "triage"
+      ]
+    },
+    {
+      "id": "static-import-download-api",
+      "title": "Download-capable API imports",
+      "severity": "low",
+      "confidence": "low",
+      "summary": "Static analysis found imports commonly used to retrieve remote content through URLMon, WinINet, or WinHTTP. This is import-only triage, not observed download behavior.",
+      "mitreTechniqueId": "T1105",
+      "mitreTechniqueName": "Ingress Tool Transfer",
+      "eventTypes": [
+        "static.analysis.completed"
+      ],
+      "dataContains": {
+        "tags": [
+          "import_download_api"
+        ]
+      },
+      "tags": [
+        "static",
+        "imports",
+        "download",
+        "network",
+        "triage"
+      ]
+    },
+    {
+      "id": "static-import-exfil-api",
+      "title": "Upload or exfil-capable API imports",
+      "severity": "low",
+      "confidence": "low",
+      "summary": "Static analysis found socket, FTP, WinHTTP, or WinINet write/send imports that can support upload or exfiltration paths. Runtime flow or HTTP evidence is required before treating it as exfiltration behavior.",
+      "mitreTechniqueId": "T1041",
+      "mitreTechniqueName": "Exfiltration Over C2 Channel",
+      "eventTypes": [
+        "static.analysis.completed"
+      ],
+      "dataContains": {
+        "tags": [
+          "import_exfil_api"
+        ]
+      },
+      "tags": [
+        "static",
+        "imports",
+        "network",
+        "exfiltration",
+        "triage"
+      ]
+    },
+    {
+      "id": "static-import-credential-access-api",
+      "title": "Credential-access API imports",
+      "severity": "low",
+      "confidence": "low",
+      "summary": "Static analysis found imports associated with minidumps, Windows credential APIs, DPAPI, Vault, LSA, SAM, or token impersonation. This is import-only triage, not observed credential theft.",
+      "mitreTechniqueId": "T1003",
+      "mitreTechniqueName": "OS Credential Dumping",
+      "eventTypes": [
+        "static.analysis.completed"
+      ],
+      "dataContains": {
+        "tags": [
+          "import_credential_access_api",
+          "import_credential_access_library"
+        ]
+      },
+      "tags": [
+        "static",
+        "imports",
+        "credentials",
+        "credential-access",
+        "triage"
+      ]
+    },
+    {
+      "id": "static-import-defense-evasion-api",
+      "title": "Defense-evasion API imports",
+      "severity": "low",
+      "confidence": "low",
+      "summary": "Static analysis found imports associated with AMSI/ETW/event-log, service-control, file-attribute, or filesystem-redirection tampering. This is import-only triage, not proof of defense evasion.",
+      "mitreTechniqueId": "T1562.001",
+      "mitreTechniqueName": "Disable or Modify Tools",
+      "eventTypes": [
+        "static.analysis.completed"
+      ],
+      "dataContains": {
+        "tags": [
+          "import_defense_evasion_api",
+          "import_defense_evasion_library"
+        ]
+      },
+      "tags": [
+        "static",
+        "imports",
+        "defense-evasion",
+        "triage"
+      ]
+    },
+    {
+      "id": "static-download-command-string",
+      "title": "Embedded download command string",
+      "severity": "medium",
+      "confidence": "low",
+      "summary": "Static analysis extracted command strings for PowerShell, BITS, certutil, curl, wget, or msiexec download staging. This is string triage unless matching runtime process activity is observed.",
+      "mitreTechniqueId": "T1105",
+      "mitreTechniqueName": "Ingress Tool Transfer",
+      "eventTypes": [
+        "static.analysis.completed"
+      ],
+      "dataContains": {
+        "tags": [
+          "download_command_string"
+        ]
+      },
+      "tags": [
+        "static",
+        "strings",
+        "download",
+        "command",
+        "triage"
+      ]
+    },
+    {
+      "id": "static-exfil-command-string",
+      "title": "Embedded upload or exfil command string",
+      "severity": "medium",
+      "confidence": "low",
+      "summary": "Static analysis extracted upload-oriented command strings such as curl form upload, FTP script mode, or WinHTTP/WinINet write markers. Treat this as triage until runtime network evidence confirms data transfer.",
+      "mitreTechniqueId": "T1041",
+      "mitreTechniqueName": "Exfiltration Over C2 Channel",
+      "eventTypes": [
+        "static.analysis.completed"
+      ],
+      "dataContains": {
+        "tags": [
+          "exfil_command_string"
+        ]
+      },
+      "tags": [
+        "static",
+        "strings",
+        "exfiltration",
+        "command",
+        "triage"
+      ]
+    },
+    {
+      "id": "static-credential-access-string",
+      "title": "Embedded credential-access string",
+      "severity": "medium",
+      "confidence": "low",
+      "summary": "Static analysis extracted strings associated with LSASS, SAM/SECURITY/NTDS material, DPAPI, Vault, or credential dumping tools. This is static triage unless corroborated by runtime access.",
+      "mitreTechniqueId": "T1003",
+      "mitreTechniqueName": "OS Credential Dumping",
+      "eventTypes": [
+        "static.analysis.completed"
+      ],
+      "dataContains": {
+        "tags": [
+          "credential_access_string"
+        ]
+      },
+      "tags": [
+        "static",
+        "strings",
+        "credentials",
+        "credential-access",
+        "triage"
+      ]
+    },
+    {
+      "id": "static-defense-evasion-string",
+      "title": "Embedded defense-evasion string",
+      "severity": "medium",
+      "confidence": "low",
+      "summary": "Static analysis extracted strings associated with Defender, AMSI, ETW, event-log, firewall, or security-tool tampering. This is static triage unless matching runtime behavior is observed.",
+      "mitreTechniqueId": "T1562.001",
+      "mitreTechniqueName": "Disable or Modify Tools",
+      "eventTypes": [
+        "static.analysis.completed"
+      ],
+      "dataContains": {
+        "tags": [
+          "defense_evasion_string"
+        ]
+      },
+      "tags": [
+        "static",
+        "strings",
+        "defense-evasion",
+        "triage"
+      ]
+    },
+    {
       "id": "r0collector-lifecycle",
       "title": "R0 collector lifecycle event",
       "severity": "info",
@@ -1529,6 +1805,20 @@
         "registry",
         "persistence",
         "ifeo"
+      ],
+      "excludeDataEquals": {
+        "operationName": [
+          "openKey",
+          "queryKey",
+          "queryValue",
+          "enumerateKey",
+          "enumerateValue",
+          "closeKey"
+        ]
+      },
+      "excludeProcessNames": [
+        "KSword.Sandbox.R0Collector.exe",
+        "KSword.Sandbox.Agent.exe"
       ]
     },
     {
@@ -1553,6 +1843,20 @@
         "registry",
         "persistence",
         "winlogon"
+      ],
+      "excludeDataEquals": {
+        "operationName": [
+          "openKey",
+          "queryKey",
+          "queryValue",
+          "enumerateKey",
+          "enumerateValue",
+          "closeKey"
+        ]
+      },
+      "excludeProcessNames": [
+        "KSword.Sandbox.R0Collector.exe",
+        "KSword.Sandbox.Agent.exe"
       ]
     },
     {
@@ -1808,6 +2112,20 @@
         "registry",
         "persistence",
         "autostart"
+      ],
+      "excludeDataEquals": {
+        "operationName": [
+          "openKey",
+          "queryKey",
+          "queryValue",
+          "enumerateKey",
+          "enumerateValue",
+          "closeKey"
+        ]
+      },
+      "excludeProcessNames": [
+        "KSword.Sandbox.R0Collector.exe",
+        "KSword.Sandbox.Agent.exe"
       ]
     },
     {
@@ -1840,6 +2158,20 @@
         "registry",
         "persistence",
         "service"
+      ],
+      "excludeDataEquals": {
+        "operationName": [
+          "openKey",
+          "queryKey",
+          "queryValue",
+          "enumerateKey",
+          "enumerateValue",
+          "closeKey"
+        ]
+      },
+      "excludeProcessNames": [
+        "KSword.Sandbox.R0Collector.exe",
+        "KSword.Sandbox.Agent.exe"
       ]
     },
     {
@@ -1873,6 +2205,20 @@
         "persistence",
         "service",
         "service-config"
+      ],
+      "excludeDataEquals": {
+        "operationName": [
+          "openKey",
+          "queryKey",
+          "queryValue",
+          "enumerateKey",
+          "enumerateValue",
+          "closeKey"
+        ]
+      },
+      "excludeProcessNames": [
+        "KSword.Sandbox.R0Collector.exe",
+        "KSword.Sandbox.Agent.exe"
       ]
     },
     {
@@ -1896,6 +2242,20 @@
         "registry",
         "persistence",
         "scheduled-task"
+      ],
+      "excludeDataEquals": {
+        "operationName": [
+          "openKey",
+          "queryKey",
+          "queryValue",
+          "enumerateKey",
+          "enumerateValue",
+          "closeKey"
+        ]
+      },
+      "excludeProcessNames": [
+        "KSword.Sandbox.R0Collector.exe",
+        "KSword.Sandbox.Agent.exe"
       ]
     },
     {
@@ -1926,6 +2286,20 @@
         "registry",
         "persistence",
         "scheduled-task"
+      ],
+      "excludeDataEquals": {
+        "operationName": [
+          "openKey",
+          "queryKey",
+          "queryValue",
+          "enumerateKey",
+          "enumerateValue",
+          "closeKey"
+        ]
+      },
+      "excludeProcessNames": [
+        "KSword.Sandbox.R0Collector.exe",
+        "KSword.Sandbox.Agent.exe"
       ]
     },
     {
@@ -2681,6 +3055,20 @@
         "persistence",
         "wmi",
         "event-subscription"
+      ],
+      "excludeDataEquals": {
+        "operationName": [
+          "openKey",
+          "queryKey",
+          "queryValue",
+          "enumerateKey",
+          "enumerateValue",
+          "closeKey"
+        ]
+      },
+      "excludeProcessNames": [
+        "KSword.Sandbox.R0Collector.exe",
+        "KSword.Sandbox.Agent.exe"
       ]
     },
     {
@@ -2734,6 +3122,20 @@
         "registry",
         "persistence",
         "com-hijack"
+      ],
+      "excludeDataEquals": {
+        "operationName": [
+          "openKey",
+          "queryKey",
+          "queryValue",
+          "enumerateKey",
+          "enumerateValue",
+          "closeKey"
+        ]
+      },
+      "excludeProcessNames": [
+        "KSword.Sandbox.R0Collector.exe",
+        "KSword.Sandbox.Agent.exe"
       ]
     },
     {
@@ -2758,6 +3160,20 @@
         "registry",
         "persistence",
         "dll-load"
+      ],
+      "excludeDataEquals": {
+        "operationName": [
+          "openKey",
+          "queryKey",
+          "queryValue",
+          "enumerateKey",
+          "enumerateValue",
+          "closeKey"
+        ]
+      },
+      "excludeProcessNames": [
+        "KSword.Sandbox.R0Collector.exe",
+        "KSword.Sandbox.Agent.exe"
       ]
     },
     {
@@ -2783,6 +3199,20 @@
         "persistence",
         "credentials",
         "lsa"
+      ],
+      "excludeDataEquals": {
+        "operationName": [
+          "openKey",
+          "queryKey",
+          "queryValue",
+          "enumerateKey",
+          "enumerateValue",
+          "closeKey"
+        ]
+      },
+      "excludeProcessNames": [
+        "KSword.Sandbox.R0Collector.exe",
+        "KSword.Sandbox.Agent.exe"
       ]
     },
     {
@@ -3074,7 +3504,21 @@
         "filesystem"
       ],
       "mitreTechniqueId": "T1555",
-      "mitreTechniqueName": "Credentials from Password Stores"
+      "mitreTechniqueName": "Credentials from Password Stores",
+      "excludeDataEquals": {
+        "operationName": [
+          "openKey",
+          "queryKey",
+          "queryValue",
+          "enumerateKey",
+          "enumerateValue",
+          "closeKey"
+        ]
+      },
+      "excludeProcessNames": [
+        "KSword.Sandbox.R0Collector.exe",
+        "KSword.Sandbox.Agent.exe"
+      ]
     },
     {
       "id": "credential-dumping-tool-command",
@@ -3480,6 +3924,20 @@
         "credential-access",
         "registry",
         "hive"
+      ],
+      "excludeDataEquals": {
+        "operationName": [
+          "openKey",
+          "queryKey",
+          "queryValue",
+          "enumerateKey",
+          "enumerateValue",
+          "closeKey"
+        ]
+      },
+      "excludeProcessNames": [
+        "KSword.Sandbox.R0Collector.exe",
+        "KSword.Sandbox.Agent.exe"
       ]
     },
     {
@@ -3565,6 +4023,20 @@
         "credential-access",
         "vault",
         "dpapi"
+      ],
+      "excludeDataEquals": {
+        "operationName": [
+          "openKey",
+          "queryKey",
+          "queryValue",
+          "enumerateKey",
+          "enumerateValue",
+          "closeKey"
+        ]
+      },
+      "excludeProcessNames": [
+        "KSword.Sandbox.R0Collector.exe",
+        "KSword.Sandbox.Agent.exe"
       ]
     },
     {
@@ -3916,6 +4388,20 @@
         "security-tools",
         "defender",
         "registry"
+      ],
+      "excludeDataEquals": {
+        "operationName": [
+          "openKey",
+          "queryKey",
+          "queryValue",
+          "enumerateKey",
+          "enumerateValue",
+          "closeKey"
+        ]
+      },
+      "excludeProcessNames": [
+        "KSword.Sandbox.R0Collector.exe",
+        "KSword.Sandbox.Agent.exe"
       ]
     },
     {
@@ -5974,6 +6460,20 @@
         "persistence",
         "registry",
         "run-key"
+      ],
+      "excludeDataEquals": {
+        "operationName": [
+          "openKey",
+          "queryKey",
+          "queryValue",
+          "enumerateKey",
+          "enumerateValue",
+          "closeKey"
+        ]
+      },
+      "excludeProcessNames": [
+        "KSword.Sandbox.R0Collector.exe",
+        "KSword.Sandbox.Agent.exe"
       ]
     },
     {
@@ -5996,6 +6496,20 @@
         "persistence",
         "appcert-dlls",
         "registry"
+      ],
+      "excludeDataEquals": {
+        "operationName": [
+          "openKey",
+          "queryKey",
+          "queryValue",
+          "enumerateKey",
+          "enumerateValue",
+          "closeKey"
+        ]
+      },
+      "excludeProcessNames": [
+        "KSword.Sandbox.R0Collector.exe",
+        "KSword.Sandbox.Agent.exe"
       ]
     },
     {
@@ -6056,6 +6570,20 @@
         "persistence",
         "active-setup",
         "registry"
+      ],
+      "excludeDataEquals": {
+        "operationName": [
+          "openKey",
+          "queryKey",
+          "queryValue",
+          "enumerateKey",
+          "enumerateValue",
+          "closeKey"
+        ]
+      },
+      "excludeProcessNames": [
+        "KSword.Sandbox.R0Collector.exe",
+        "KSword.Sandbox.Agent.exe"
       ]
     },
     {
@@ -6081,6 +6609,20 @@
         "persistence",
         "logon-script",
         "registry"
+      ],
+      "excludeDataEquals": {
+        "operationName": [
+          "openKey",
+          "queryKey",
+          "queryValue",
+          "enumerateKey",
+          "enumerateValue",
+          "closeKey"
+        ]
+      },
+      "excludeProcessNames": [
+        "KSword.Sandbox.R0Collector.exe",
+        "KSword.Sandbox.Agent.exe"
       ]
     },
     {
@@ -6131,6 +6673,20 @@
         "persistence",
         "screensaver",
         "registry"
+      ],
+      "excludeDataEquals": {
+        "operationName": [
+          "openKey",
+          "queryKey",
+          "queryValue",
+          "enumerateKey",
+          "enumerateValue",
+          "closeKey"
+        ]
+      },
+      "excludeProcessNames": [
+        "KSword.Sandbox.R0Collector.exe",
+        "KSword.Sandbox.Agent.exe"
       ]
     },
     {
@@ -6995,6 +7551,20 @@
         "office",
         "registry",
         "add-in"
+      ],
+      "excludeDataEquals": {
+        "operationName": [
+          "openKey",
+          "queryKey",
+          "queryValue",
+          "enumerateKey",
+          "enumerateValue",
+          "closeKey"
+        ]
+      },
+      "excludeProcessNames": [
+        "KSword.Sandbox.R0Collector.exe",
+        "KSword.Sandbox.Agent.exe"
       ]
     },
     {
@@ -7079,6 +7649,20 @@
         "registry",
         "ifeo",
         "accessibility"
+      ],
+      "excludeDataEquals": {
+        "operationName": [
+          "openKey",
+          "queryKey",
+          "queryValue",
+          "enumerateKey",
+          "enumerateValue",
+          "closeKey"
+        ]
+      },
+      "excludeProcessNames": [
+        "KSword.Sandbox.R0Collector.exe",
+        "KSword.Sandbox.Agent.exe"
       ]
     },
     {
@@ -7894,6 +8478,20 @@
         "registry",
         "run-key",
         "user-writable"
+      ],
+      "excludeDataEquals": {
+        "operationName": [
+          "openKey",
+          "queryKey",
+          "queryValue",
+          "enumerateKey",
+          "enumerateValue",
+          "closeKey"
+        ]
+      },
+      "excludeProcessNames": [
+        "KSword.Sandbox.R0Collector.exe",
+        "KSword.Sandbox.Agent.exe"
       ]
     },
     {
@@ -7960,6 +8558,20 @@
         "run-key",
         "script",
         "lolbin"
+      ],
+      "excludeDataEquals": {
+        "operationName": [
+          "openKey",
+          "queryKey",
+          "queryValue",
+          "enumerateKey",
+          "enumerateValue",
+          "closeKey"
+        ]
+      },
+      "excludeProcessNames": [
+        "KSword.Sandbox.R0Collector.exe",
+        "KSword.Sandbox.Agent.exe"
       ]
     },
     {
@@ -8001,6 +8613,20 @@
         "registry",
         "startupapproved",
         "autostart"
+      ],
+      "excludeDataEquals": {
+        "operationName": [
+          "openKey",
+          "queryKey",
+          "queryValue",
+          "enumerateKey",
+          "enumerateValue",
+          "closeKey"
+        ]
+      },
+      "excludeProcessNames": [
+        "KSword.Sandbox.R0Collector.exe",
+        "KSword.Sandbox.Agent.exe"
       ]
     },
     {
@@ -8071,6 +8697,20 @@
         "privilege-escalation",
         "service",
         "user-writable"
+      ],
+      "excludeDataEquals": {
+        "operationName": [
+          "openKey",
+          "queryKey",
+          "queryValue",
+          "enumerateKey",
+          "enumerateValue",
+          "closeKey"
+        ]
+      },
+      "excludeProcessNames": [
+        "KSword.Sandbox.R0Collector.exe",
+        "KSword.Sandbox.Agent.exe"
       ]
     },
     {
@@ -8177,6 +8817,20 @@
         "persistence",
         "service",
         "failure-command"
+      ],
+      "excludeDataEquals": {
+        "operationName": [
+          "openKey",
+          "queryKey",
+          "queryValue",
+          "enumerateKey",
+          "enumerateValue",
+          "closeKey"
+        ]
+      },
+      "excludeProcessNames": [
+        "KSword.Sandbox.R0Collector.exe",
+        "KSword.Sandbox.Agent.exe"
       ]
     },
     {
@@ -8234,6 +8888,20 @@
         "service",
         "acl",
         "hijack"
+      ],
+      "excludeDataEquals": {
+        "operationName": [
+          "openKey",
+          "queryKey",
+          "queryValue",
+          "enumerateKey",
+          "enumerateValue",
+          "closeKey"
+        ]
+      },
+      "excludeProcessNames": [
+        "KSword.Sandbox.R0Collector.exe",
+        "KSword.Sandbox.Agent.exe"
       ]
     },
     {
@@ -8290,6 +8958,20 @@
         "persistence",
         "scheduled-task",
         "com-handler"
+      ],
+      "excludeDataEquals": {
+        "operationName": [
+          "openKey",
+          "queryKey",
+          "queryValue",
+          "enumerateKey",
+          "enumerateValue",
+          "closeKey"
+        ]
+      },
+      "excludeProcessNames": [
+        "KSword.Sandbox.R0Collector.exe",
+        "KSword.Sandbox.Agent.exe"
       ]
     },
     {
@@ -8407,6 +9089,20 @@
         "service",
         "driver",
         "kernel"
+      ],
+      "excludeDataEquals": {
+        "operationName": [
+          "openKey",
+          "queryKey",
+          "queryValue",
+          "enumerateKey",
+          "enumerateValue",
+          "closeKey"
+        ]
+      },
+      "excludeProcessNames": [
+        "KSword.Sandbox.R0Collector.exe",
+        "KSword.Sandbox.Agent.exe"
       ]
     },
     {
@@ -8697,6 +9393,20 @@
         "uac-bypass",
         "registry",
         "auto-elevate"
+      ],
+      "excludeDataEquals": {
+        "operationName": [
+          "openKey",
+          "queryKey",
+          "queryValue",
+          "enumerateKey",
+          "enumerateValue",
+          "closeKey"
+        ]
+      },
+      "excludeProcessNames": [
+        "KSword.Sandbox.R0Collector.exe",
+        "KSword.Sandbox.Agent.exe"
       ]
     },
     {
@@ -9348,6 +10058,20 @@
         "trust-store",
         "root-ca",
         "registry"
+      ],
+      "excludeDataEquals": {
+        "operationName": [
+          "openKey",
+          "queryKey",
+          "queryValue",
+          "enumerateKey",
+          "enumerateValue",
+          "closeKey"
+        ]
+      },
+      "excludeProcessNames": [
+        "KSword.Sandbox.R0Collector.exe",
+        "KSword.Sandbox.Agent.exe"
       ]
     },
     {
@@ -9494,7 +10218,15 @@
         "virustotal",
         "reputation",
         "malicious"
-      ]
+      ],
+      "dataEquals": {
+        "vtVerdict": [
+          "malicious"
+        ],
+        "verdict": [
+          "malicious"
+        ]
+      }
     },
     {
       "id": "virustotal-suspicious-verdict",
@@ -9529,7 +10261,15 @@
         "virustotal",
         "reputation",
         "suspicious"
-      ]
+      ],
+      "dataEquals": {
+        "vtVerdict": [
+          "suspicious"
+        ],
+        "verdict": [
+          "suspicious"
+        ]
+      }
     },
     {
       "id": "virustotal-not-found",
@@ -9567,7 +10307,18 @@
         "virustotal",
         "reputation",
         "metadata"
-      ]
+      ],
+      "dataEquals": {
+        "vtVerdict": [
+          "not_found"
+        ],
+        "vtStatus": [
+          "not_found"
+        ],
+        "status": [
+          "not_found"
+        ]
+      }
     },
     {
       "id": "virustotal-rate-limited",
@@ -9606,7 +10357,18 @@
         "rate-limit",
         "metadata",
         "diagnostic"
-      ]
+      ],
+      "dataEquals": {
+        "vtVerdict": [
+          "rate_limited"
+        ],
+        "vtStatus": [
+          "rate_limited"
+        ],
+        "status": [
+          "rate_limited"
+        ]
+      }
     },
     {
       "id": "virustotal-not-configured",
@@ -9644,7 +10406,18 @@
         "configuration",
         "metadata",
         "diagnostic"
-      ]
+      ],
+      "dataEquals": {
+        "vtVerdict": [
+          "not_configured"
+        ],
+        "vtStatus": [
+          "not_configured"
+        ],
+        "status": [
+          "not_configured"
+        ]
+      }
     }
   ]
 }

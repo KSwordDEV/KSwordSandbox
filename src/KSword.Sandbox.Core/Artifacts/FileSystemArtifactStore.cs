@@ -110,15 +110,19 @@ public sealed class FileSystemArtifactStore : IArtifactStore
     private static ArtifactCollectionDescriptor NormalizeCollection(ArtifactCollectionDescriptor collection)
     {
         var relativePath = ArtifactDescriptorFactory.NormalizeRelativePath(collection.RelativePath);
+        var safeLink = ArtifactDescriptorFactory.BuildSafeLink(relativePath);
+        if (string.IsNullOrWhiteSpace(safeLink))
+        {
+            safeLink = ArtifactDescriptorFactory.NormalizeSafeLink(collection.SafeLink);
+        }
+
         return collection with
         {
             Category = string.IsNullOrWhiteSpace(collection.Category)
                 ? ArtifactDescriptorFactory.CategoryForKind(collection.Kind)
                 : collection.Category,
             RelativePath = relativePath,
-            SafeLink = string.IsNullOrWhiteSpace(collection.SafeLink)
-                ? ArtifactDescriptorFactory.BuildSafeLink(relativePath)
-                : collection.SafeLink,
+            SafeLink = safeLink,
             ImportPath = string.IsNullOrWhiteSpace(collection.ImportPath)
                 ? relativePath
                 : ArtifactDescriptorFactory.NormalizeRelativePath(collection.ImportPath),

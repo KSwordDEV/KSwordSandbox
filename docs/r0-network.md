@@ -9,6 +9,12 @@
 
 The classify callback is telemetry-only.  It returns `FWP_ACTION_CONTINUE` when WFP grants action-write rights, and it does not block, absorb, redirect, or modify traffic.
 
+The normal Debug/Release build compiles this WFP/ALE producer.  A lab build may
+set `KSWORD_SANDBOX_ENABLE_NETWORK_WFP_ALE=0`; that is an explicit unsupported
+network build, not a fake success path.  In that mode `GET_CAPABILITIES` omits
+`KSWORD_SANDBOX_CAPABILITY_FLAG_NETWORK_WFP_ALE` and the network producer bit is
+not included in `SupportedProducerMask`.
+
 ## Driver integration
 
 `DriverEntry.c` calls `KswInitializeNetworkMonitor(deviceObject, deviceExtension)` after the file, process, and registry producers are initialized.  Failures are non-fatal: the control device remains available, and `GET_HEALTH.LastNtStatus` records the last producer status.
@@ -39,6 +45,7 @@ Presence flags distinguish absent values from zero-valued metadata:
 - `KSWORD_SANDBOX_NETWORK_EVENT_FLAG_PROCESS_ID_PRESENT`
 - `KSWORD_SANDBOX_NETWORK_EVENT_FLAG_FLOW_HANDLE_PRESENT`
 - `KSWORD_SANDBOX_NETWORK_EVENT_FLAG_ENDPOINT_HANDLE_PRESENT`
+- `KSWORD_SANDBOX_NETWORK_EVENT_FLAG_INSPECTION_ONLY`
 
 `AbiGuards.c` keeps `sizeof(KSWORD_SANDBOX_NETWORK_EVENT_PAYLOAD) <= KSWORD_SANDBOX_EVENT_MAX_PAYLOAD_SIZE`.
 
@@ -121,7 +128,10 @@ Do not place `.sys`, `.pdb`, `.obj`, or other native build outputs under the rep
 
 - The filters have no protocol conditions.  This maximizes early telemetry but can produce high event volume on active hosts.
 - Runtime validation should be performed in a test-signed VM by loading the driver, generating outbound and inbound TCP/UDP activity, draining `READ_EVENTS`, and checking PID, address, port, layer, callout, and filter fields.
-- The health IOCTL still exposes a single `LastNtStatus`; it does not yet expose separate per-producer status or WFP classify/event counters.
+- `GET_STATUS` exposes `ActiveProducerMask`, `FailedProducerMask`,
+  `EffectiveProducerMask`, `LastNtStatus`, and `LastFailureNtStatus`.  It does
+  not yet expose WFP classify/event counters or per-callout registration
+  statuses; those remain internal runtime diagnostics.
 
 ## Runtime validation gate
 

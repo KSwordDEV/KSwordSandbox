@@ -9,12 +9,30 @@ The intended operator flow is:
 .\run.ps1       # each time you want to use the local WebUI
 ```
 
+Release bundles may also expose the same entry points from `scripts\`:
+
+```powershell
+.\scripts\install.ps1
+.\scripts\run.ps1
+```
+
+The script-folder wrappers forward to the repository-root wrappers in the same
+PowerShell process. They are aliases for packaging convenience, not a second
+configuration system. Use either root or `scripts\` form consistently in a
+session; both read `%ProgramData%\KSwordSandbox\install-state.json`, use the
+same `Sandbox__ConfigPath`, and keep secrets out of command output.
+Because the root scripts remain the implementation owner, diagnostic output and
+`RecommendedActions` can still show canonical commands such as `.\run.ps1` and
+`.\install.ps1`; those commands are expected and are equivalent to the wrapper
+form.
+
 ## Start the WebUI
 
 Default mode starts the local WebUI and loads the installed local config:
 
 ```powershell
 .\run.ps1
+.\scripts\run.ps1
 ```
 
 Equivalent explicit form:
@@ -27,6 +45,7 @@ Equivalent explicit form:
 
 ```powershell
 .\run.ps1 -Mode StartWebUI
+.\scripts\run.ps1 -Mode StartWebUI
 ```
 
 Preview startup without building payloads, starting dotnet, opening a browser,
@@ -47,6 +66,8 @@ or touching a VM:
   User/Machine environment value if one exists.
 
 The password value is never printed. Optional VT key values are never printed.
+The WebUI startup path intentionally prints only concise status, the selected
+URL, and repair hints. It does not dump a long command sequence to the operator.
 
 If the requested localhost port is blocked by Windows/Hyper-V TCP port
 exclusions or another process, `run.ps1` automatically falls back to a nearby

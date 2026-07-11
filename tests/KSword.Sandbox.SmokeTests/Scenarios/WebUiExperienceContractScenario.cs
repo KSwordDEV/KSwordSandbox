@@ -55,7 +55,7 @@ internal sealed class WebUiExperienceContractScenario : ISmokeTestScenario
 
         RequireContains(dashboard, "<html lang=\"zh-CN\">", "Dashboard should default to Chinese.");
         RequireContains(dashboard, "onclick=\"toggleLanguage()\"", "Dashboard should expose the top-right Chinese/English switch.");
-        RequireContains(dashboard, "data-zh=\"English\" data-en=\"中文\"", "Language switch should toggle between Chinese and English labels.");
+        RequireContains(dashboard, "data-zh=\"语言：中文 ⇄ English\" data-en=\"Language: English ⇄ 中文\"", "Language switch should toggle between Chinese and English labels.");
         RequireContains(dashboard, "role=\"tablist\"", "Planning entries should be separated by an accessible tablist.");
         RequireMinimumCount(dashboard, "role=\"tab\"", 3, "Planning UI should expose three accessible tabs.");
         RequireMinimumCount(dashboard, "role=\"tabpanel\"", 3, "Planning UI should expose one tab panel per planning entry.");

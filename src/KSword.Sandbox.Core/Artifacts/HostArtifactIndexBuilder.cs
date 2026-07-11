@@ -57,7 +57,8 @@ public sealed class HostArtifactIndexBuilder
                 {
                     ["origin"] = "host",
                     ["indexRoot"] = fullJobRoot,
-                    ["importPath"] = ArtifactDescriptorFactory.SafeRelativePath(fullJobRoot, path)
+                    ["importPath"] = ArtifactDescriptorFactory.SafeRelativePath(fullJobRoot, path),
+                    ["hrefPolicy"] = "relative-safe-link-only"
                 };
                 if (!string.IsNullOrWhiteSpace(classification.EvidenceRole))
                 {
@@ -725,6 +726,7 @@ public sealed class HostArtifactIndexBuilder
         _ = jobRoot;
         var metadata = CopyMetadata(guest.Metadata);
         AddIfMissing(metadata, "origin", "guest");
+        AddIfMissing(metadata, "hrefPolicy", "relative-safe-link-only");
         AddIfNotEmpty(metadata, "guestManifestRelativePath", guest.RelativePath);
         AddIfNotEmpty(metadata, "guestManifestImportPath", guest.ImportPath);
         AddIfNotEmpty(metadata, "guestManifestFullPath", guest.FullPath);
@@ -816,7 +818,13 @@ public sealed class HostArtifactIndexBuilder
             return new ArtifactClassification(
                 ArtifactKind.GuestEventsJson,
                 EvidenceRole: "guest-events",
-                CaptureState: "available");
+                CollectionName: "guest-events",
+                CaptureState: "available",
+                Metadata: new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["telemetryFormat"] = "json",
+                    ["telemetrySource"] = "guest-agent"
+                });
         }
 
         if (string.Equals(fileName, "enrichment-events.json", StringComparison.OrdinalIgnoreCase))
@@ -839,6 +847,7 @@ public sealed class HostArtifactIndexBuilder
             return new ArtifactClassification(
                 ArtifactKind.GuestSummaryJson,
                 EvidenceRole: "guest-summary",
+                CollectionName: "guest-summary",
                 CaptureState: "available");
         }
 
@@ -849,6 +858,7 @@ public sealed class HostArtifactIndexBuilder
             return new ArtifactClassification(
                 ArtifactKind.ArtifactManifest,
                 EvidenceRole: "artifact-manifest",
+                CollectionName: "artifact-manifests",
                 CaptureState: "available");
         }
 
@@ -1020,6 +1030,7 @@ public sealed class HostArtifactIndexBuilder
         }
 
         AddIfMissing(metadata, "origin", "guest-manifest");
+        AddIfMissing(metadata, "hrefPolicy", "relative-safe-link-only");
         AddIfNotEmpty(metadata, "guestManifestRoot", context.HostRelativeGuestRoot);
         AddIfNotEmpty(metadata, "guestManifestCollectionPath", guestRelativePath);
         AddIfNotEmpty(metadata, "guestManifestStatus", collection.Status);
@@ -1091,6 +1102,7 @@ public sealed class HostArtifactIndexBuilder
         {
             ["origin"] = "host",
             ["discoveredBy"] = nameof(HostArtifactIndexBuilder),
+            ["hrefPolicy"] = "relative-safe-link-only",
             ["artifactCount"] = artifacts.Count.ToString(CultureInfo.InvariantCulture),
             ["totalBytes"] = artifacts.Sum(artifact => artifact.SizeBytes).ToString(CultureInfo.InvariantCulture)
         };

@@ -1874,49 +1874,88 @@ std::string BuildPollData(const KSWORD_SANDBOX_POLL_REPLY& reply, const DWORD by
     return data.Build();
 }
 
-// Input: READ_EVENTS reply header, byte count, and the number of event records
-// actually emitted by this collector.
-// Processing: Records the batch-level metadata with string values so zero-event
-// skeleton replies still leave evidence that the IOCTL was called.
+// Input: READ_EVENTS reply header, byte count, and collector-side batch
+// accounting produced while walking the returned event stream.
+// Processing: Records batch metadata with the old field names plus concise
+// aliases near the front of data so report sampling keeps the most useful
+// counters even when many diagnostic fields are present.
 // Return: JSON object text for SandboxEvent.data.
 std::string BuildReadEventsBatchData(
     const KSWORD_SANDBOX_READ_EVENTS_REPLY& reply,
     const DWORD bytesReturned,
     const unsigned long requestedMaxEvents,
-    const unsigned long long eventsEmitted,
-    const unsigned long long recordsProcessed,
-    const unsigned long long collectorSuppressedEvents,
+    const DriverReadEventsBatchCounters& counters,
+    const unsigned long driverEventSampleStride,
     const bool suppressSelfNoise) {
     JsonDataObjectBuilder data;
     const bool lost = reply.EventsDropped != 0;
-    const bool backpressure = lost || recordsProcessed >= requestedMaxEvents;
+    const bool cappedByMaxEvents =
+        requestedMaxEvents != 0 && counters.recordsProcessed >= requestedMaxEvents;
+    const bool outputBufferFull = bytesReturned >= kReadEventsBufferBytes;
+    const bool backpressure = lost || cappedByMaxEvents || outputBufferFull;
+    const std::string loss = lost ? "driver-events-dropped" : "none";
+    const std::string sampling =
+        driverEventSampleStride <= 1
+            ? "none"
+            : (counters.collectorSkippedEvents == 0 ? "stride:no-skip-in-batch" : "stride:applied");
+    const std::string head = counters.hasSequenceRange ? std::to_string(counters.headSequence) : "";
+    const std::string tail = counters.hasSequenceRange ? std::to_string(counters.tailSequence) : "";
+    const std::string emittedHead =
+        counters.hasEmittedSequenceRange ? std::to_string(counters.emittedHeadSequence) : "";
+    const std::string emittedTail =
+        counters.hasEmittedSequenceRange ? std::to_string(counters.emittedTailSequence) : "";
+
+    data.AddUnsigned("requestedMaxEvents", requestedMaxEvents);
+    data.AddUnsigned("recordsProcessed", counters.recordsProcessed);
+    data.AddUnsigned("eventsEmitted", counters.eventsEmitted);
+    data.AddUnsigned("collectorSuppressedEvents", counters.collectorSuppressedEvents);
+    data.AddUnsigned("collectorSkippedEvents", counters.collectorSkippedEvents);
+    data.AddUnsigned("processed", counters.recordsProcessed);
+    data.AddUnsigned("eligible", counters.eligibleEvents);
+    data.AddUnsigned("emitted", counters.eventsEmitted);
+    data.AddUnsigned("suppressed", counters.collectorSuppressedEvents);
+    data.AddUnsigned("skipped", counters.collectorSkippedEvents);
+    data.AddUtf8("head", head);
+    data.AddUtf8("tail", tail);
+    data.AddUtf8("sampling", sampling);
+    data.AddUtf8("loss", loss);
+    data.AddUnsigned("eligibleEvents", counters.eligibleEvents);
     data.AddUtf8("ioctl", "IOCTL_KSWORD_SANDBOX_READ_EVENTS");
     data.AddUnsigned("ioctlCode", IOCTL_KSWORD_SANDBOX_READ_EVENTS);
     data.AddUnsigned("bytesReturned", bytesReturned);
-    data.AddUnsigned("requestedMaxEvents", requestedMaxEvents);
-    data.AddUtf8("schema", KSWORD_SANDBOX_EVENT_SCHEMA_NAME);
-    data.AddUtf8("producer", "r0collector");
-    data.AddBool("noise", false);
-    data.AddBool("lost", lost);
-    data.AddBool("backpressure", backpressure);
-    data.AddBool("backpressureObserved", backpressure);
     data.AddUnsigned("version", reply.Version);
     data.AddUtf8("versionHex", HexUnsignedLongLong(reply.Version, 8));
     data.AddUnsigned("size", reply.Size);
     data.AddUnsigned("eventsWritten", reply.EventsWritten);
-    data.AddUnsigned("eventsEmitted", eventsEmitted);
-    data.AddUnsigned("recordsProcessed", recordsProcessed);
-    data.AddUnsigned("collectorSuppressedEvents", collectorSuppressedEvents);
+    data.AddUnsigned("driverEventSampleStride", driverEventSampleStride);
+    data.AddBool("samplingApplied", counters.collectorSkippedEvents != 0);
+    data.AddUtf8("headSequence", head);
+    data.AddUtf8("tailSequence", tail);
+    data.AddUtf8("emittedHeadSequence", emittedHead);
+    data.AddUtf8("emittedTailSequence", emittedTail);
+    data.AddBool("hasSequenceRange", counters.hasSequenceRange);
     data.AddUtf8(
         "collectorNoisePolicy",
         suppressSelfNoise
-            ? (collectorSuppressedEvents == 0 ? "suppress-self-noise" : "suppress-self-noise:applied")
+            ? (counters.collectorSuppressedEvents == 0 ? "suppress-self-noise" : "suppress-self-noise:applied")
             : "emit-self-noise");
+    data.AddBool("noise", false);
+    data.AddBool("lost", lost);
+    data.AddBool("lossObserved", lost);
+    data.AddBool("backpressure", backpressure);
+    data.AddBool("backpressureObserved", backpressure);
+    data.AddUtf8(
+        "backpressureReason",
+        lost ? "events-dropped" : (cappedByMaxEvents ? "requested-max-events-reached" : (outputBufferFull ? "output-buffer-full" : "none")));
+    data.AddBool("cappedByMaxEvents", cappedByMaxEvents);
+    data.AddBool("outputBufferFull", outputBufferFull);
     data.AddUnsigned("flags", reply.Flags);
     data.AddUtf8("flagsHex", HexUnsignedLongLong(reply.Flags, 8));
     data.AddUnsigned("bytesWritten", reply.BytesWritten);
     data.AddUnsigned("eventsDropped", reply.EventsDropped);
     data.AddUnsigned("nextSequence", reply.NextSequence);
+    data.AddUtf8("schema", KSWORD_SANDBOX_EVENT_SCHEMA_NAME);
+    data.AddUtf8("producer", "r0collector");
     return data.Build();
 }
 

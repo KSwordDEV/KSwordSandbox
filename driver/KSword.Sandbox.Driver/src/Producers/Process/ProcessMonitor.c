@@ -517,6 +517,14 @@ KswProcessCreateNotifyEx(
         payload.CreatingProcessId = (ULONGLONG)(ULONG_PTR)PsGetCurrentProcessId();
         payload.Status = CreateInfo->CreationStatus;
         payload.Flags |= KSWORD_SANDBOX_PROCESS_EVENT_FLAG_STATUS_PRESENT;
+        if (!NT_SUCCESS(payload.Status)) {
+            payload.Flags |=
+                KSWORD_SANDBOX_PROCESS_EVENT_FLAG_OPERATION_FAILED;
+        }
+        if (CreateInfo->FileOpenNameAvailable != 0) {
+            payload.Flags |=
+                KSWORD_SANDBOX_PROCESS_EVENT_FLAG_FILE_OPEN_NAME_AVAILABLE;
+        }
         if (payload.ParentProcessId != 0) {
             payload.Flags |= KSWORD_SANDBOX_PROCESS_EVENT_FLAG_PARENT_ID_PRESENT;
         }
@@ -639,6 +647,13 @@ KswLoadImageNotify(
     }
     if (ImageInfo->SystemModeImage != 0) {
         payload.Flags |= KSWORD_SANDBOX_IMAGE_EVENT_FLAG_SYSTEM_MODE_IMAGE;
+    }
+    if (ImageInfo->ImageMappedToAllPids != 0) {
+        payload.Flags |= KSWORD_SANDBOX_IMAGE_EVENT_FLAG_MAPPED_TO_ALL_PIDS;
+    }
+    if (ImageInfo->ExtendedInfoPresent != 0) {
+        payload.Flags |=
+            KSWORD_SANDBOX_IMAGE_EVENT_FLAG_EXTENDED_INFO_PRESENT;
     }
 
     (VOID)KswCopyProcessPayloadString(

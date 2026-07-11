@@ -15,6 +15,7 @@ struct Options {
     int diagnoseReadTimeoutMs = 2000;
     int maxReadBatches = 0;
     unsigned long readEventsMaxEvents = kReadEventsMaxEvents;
+    unsigned long driverEventSampleStride = 1;
     unsigned long enableMask = 0;
     int stressCount = 0;
     bool enableMaskSpecified = false;

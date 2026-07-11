@@ -36,11 +36,20 @@ by WebUI/UX work.
 
 ## WebUI experience contract
 
+The root dashboard defaults to Chinese (`zh-CN`) and keeps a prominent
+top-right language toggle. First-time visits open the Chinese experience; if an
+operator switches to English, the browser-local choice is reused until changed
+again.
+
 The root dashboard must keep these operator-facing areas visible and copyable:
 
-- three tab-separated planning entry points for upload-and-plan, host-path
-  planning, and directory scan plus first-candidate or selected-candidate
-  planning; the upload tab is the default selected tab;
+- a top-level workspace split into `规划 / Plan`, `分析 / Analysis`, and
+  `结果 / Results` tabs. The planning tab is selected by default, successful
+  planning switches to the analysis tab, and report-ready notifications are
+  surfaced on the results tab before the current-language report opens;
+- three tab-separated planning entry points inside the planning workspace for
+  upload-and-plan, host-path planning, and directory scan plus first-candidate
+  or selected-candidate planning; the upload tab is the default selected tab;
 - VM configuration fields that are sent with every dry-run planning request:
   `goldenVmName`, `goldenSnapshotName`, `guestUserName`,
   `guestWorkingDirectory`, `guestPayloadRoot`, and `useMockCollector`;
@@ -69,12 +78,15 @@ The root dashboard must keep these operator-facing areas visible and copyable:
   `/api/jobs/{jobId}/report/html` link and the local-file fallback when a path
   is recorded. The primary report button follows the current Chinese/English
   dashboard language, while compact `zh` / `en` alternatives remain visible so
-  operators never need to paste a report path;
+  operators never need to paste a report path. If no report path is available
+  yet, the main button must be visibly disabled/pending instead of navigating to
+  a likely 404;
 - stage progress that shows ordered planning/execution/import/report steps with
   stable IDs and human-readable status. The progress card must also surface the
   current step, elapsed time, and failure reason directly on the main dashboard
   so an operator can understand whether the run is moving without expanding
-  advanced details;
+  advanced details. Long Hyper-V restore/start phases should keep a visible
+  running/pulse state even when the exact executor step has not advanced yet;
 - real executor progress from
   `GET /api/jobs/{jobId}/runbook/progress` after `/runbook/start` accepts a
   background run or when tooling uses the legacy executor path. The endpoint is
@@ -109,14 +121,18 @@ The root dashboard must keep these operator-facing areas visible and copyable:
   a quiet UI state with a settings link, not a repeated warning/noisy log path;
 - a link to a dedicated live raw monitor page / dynamic monitor page that shows
   source files and unclassified raw event rows before final report
-  classification. The page should explain that, when opened automatically from
-  upload, the dashboard tab must stay open to continue the analysis request.
-  The monitor page also polls `GET /api/jobs/{jobId}/runbook/progress` and shows
-  UI-safe runbook step state, current step, and progress percentage without
-  command lines, `stdout`, or `stderr`. It also polls
+  classification. When opened automatically from upload, the Web host has
+  already accepted the background run, so the original dashboard page does not
+  need to remain open. The monitor page also polls
+  `GET /api/jobs/{jobId}/runbook/progress` and shows UI-safe runbook step state,
+  current step, and progress percentage without command lines, `stdout`, or
+  `stderr`. It also polls
   `GET /api/jobs/{jobId}/runbook/background` so the monitor can show terminal
   completed/failed state and report links even if the main dashboard tab is
-  closed after the server accepted the background task;
+  closed after the server accepted the background task. For upload-launched
+  monitor sessions, a completed run with a recorded report should automatically
+  navigate to the current-language report after displaying a short report-ready
+  notice;
 - the dynamic monitor page should prioritize real product utility over smoke
   coverage by showing an **Artifacts / downloads** panel. The panel lists
   `report.html`, `report.zh.html`, `report.en.html`, `report.json`,
@@ -133,7 +149,9 @@ The root dashboard must keep these operator-facing areas visible and copyable:
 - a natural progress-page link to the dedicated execution-flow page for runbook
   step status, available both from the job actions and the progress summary.
   The root dashboard must not inline long runbook PowerShell commands,
-  command-line details, `stdout`, or `stderr`.
+  command-line details, `stdout`, or `stderr`. Recent job cards should remain
+  compact and show only status, report readiness, and an `执行流程 / Execution
+  flow` link for technical follow-up.
 
 All tables, path values, raw telemetry evidence, job messages, status text,
 inputs, and section text must support either an

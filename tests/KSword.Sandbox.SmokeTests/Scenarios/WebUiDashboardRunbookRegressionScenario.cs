@@ -37,6 +37,14 @@ internal sealed class WebUiDashboardRunbookRegressionScenario : ISmokeTestScenar
             executionFlow,
             "dashboard no longer expands all steps inline",
             "Execution-flow page should document that full runbook details are off the main dashboard.");
+        RequireContains(
+            dashboard,
+            "not inline the 1~16 runbook steps, PowerShell, stdout, or stderr",
+            "Dashboard source should explicitly document that the main page does not show the long 16-step runbook flow.");
+        RequireContains(
+            executionFlow,
+            "主界面不再铺开 1~16 步",
+            "Execution-flow page should tell operators the full 16-step flow is not expanded on the main dashboard.");
 
         RequireNotContains(
             dashboard,

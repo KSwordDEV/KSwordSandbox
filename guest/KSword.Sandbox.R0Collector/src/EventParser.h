@@ -21,6 +21,20 @@ struct DriverEventAttribution {
     bool suppressed = false;
 };
 
+struct DriverReadEventsBatchCounters {
+    unsigned long long eventsEmitted = 0;
+    unsigned long long recordsProcessed = 0;
+    unsigned long long collectorSuppressedEvents = 0;
+    unsigned long long collectorSkippedEvents = 0;
+    unsigned long long eligibleEvents = 0;
+    bool hasSequenceRange = false;
+    unsigned long long headSequence = 0;
+    unsigned long long tailSequence = 0;
+    bool hasEmittedSequenceRange = false;
+    unsigned long long emittedHeadSequence = 0;
+    unsigned long long emittedTailSequence = 0;
+};
+
 std::string DriverEventJsonType(ULONG eventType);
 std::string DriverEventTypeName(ULONG eventType);
 std::wstring ExtractTypedPayloadPath(ULONG eventType, const unsigned char* payload, size_t payloadBytes);
@@ -43,9 +57,8 @@ std::string BuildReadEventsBatchData(
     const KSWORD_SANDBOX_READ_EVENTS_REPLY& reply,
     DWORD bytesReturned,
     unsigned long requestedMaxEvents,
-    unsigned long long eventsEmitted,
-    unsigned long long recordsProcessed,
-    unsigned long long collectorSuppressedEvents,
+    const DriverReadEventsBatchCounters& counters,
+    unsigned long driverEventSampleStride,
     bool suppressSelfNoise);
 std::string BuildDriverEventData(
     const KSWORD_SANDBOX_EVENT_HEADER& header,

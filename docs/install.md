@@ -17,6 +17,22 @@ Run from the repository root:
 .\install.ps1
 ```
 
+Packaging-compatible script-folder entry point:
+
+```powershell
+.\scripts\install.ps1
+```
+
+`.\scripts\install.ps1` exists for release bundles or operator habits that
+start from the `scripts\` folder. Non-interactive modes forward to the
+repository-root installer in the same PowerShell process. Its interactive menu
+is a compact packaging menu that delegates password, Hyper-V, guest
+test-signing, status, uninstall, and WebUI work to the root installer and adds
+a direct `Prepare guest payload` action for Guest Agent/R0Collector staging.
+It does not create a second process for installer state changes, so
+Process-scope environment values set by the installer remain visible to
+commands launched from the current PowerShell session.
+
 The menu provides:
 
 - Install / prepare local settings
@@ -38,8 +54,17 @@ The Change menu includes:
 - recreate runtime folders and local config;
 - show Hyper-V readiness/status;
 - manage guest test-signing;
+- prepare Guest Agent/R0Collector payload through
+  `.\scripts\Prepare-GuestPayload.ps1`;
 - configure optional VirusTotal API key;
 - check local environment.
+
+The compact `.\scripts\install.ps1 -Mode Change` menu covers the release
+packaging subset directly: reset host/guest password, configure Hyper-V VM
+name/checkpoint/paths, query or enable guest test-signing, prepare payload,
+and show status. Diagnostic output and `RecommendedActions` may still show
+canonical root commands such as `.\install.ps1` and `.\run.ps1`; those remain
+valid and equivalent to the script-folder wrappers.
 
 Every mutating path supports `-WhatIf` because `install.ps1` uses
 PowerShell `ShouldProcess`. `-WhatIf` previews local environment/config writes,
@@ -55,6 +80,13 @@ Shortest path for an existing golden VM:
 .\run.ps1
 ```
 
+Equivalent script-folder form:
+
+```powershell
+.\scripts\install.ps1 -Mode Install -PromptPassword
+.\scripts\run.ps1
+```
+
 After this one-time setup, the daily startup is just:
 
 ```powershell
@@ -64,6 +96,7 @@ After this one-time setup, the daily startup is just:
 中文速查：
 
 - 首次安装：`.\install.ps1 -Mode Install -PromptPassword`
+- scripts 目录等价入口：`.\scripts\install.ps1 -Mode Install -PromptPassword`
 - 配置黄金 VM/干净快照：`.\install.ps1 -Mode Change -UpdateHyperVConfig -VmName <VM> -CheckpointName <Snapshot>`
 - 配置测试签名驱动路径：`.\install.ps1 -Mode Change -UpdateHyperVConfig -DriverHostPath <test-signed .sys>`
 - 查询/启用来宾 test signing：
@@ -207,6 +240,8 @@ Equivalent explicit startup wrappers:
 ```powershell
 .\install.ps1 -Mode StartWebUI
 .\run.ps1 -Mode StartWebUI
+.\scripts\install.ps1 -Mode StartWebUI
+.\scripts\run.ps1 -Mode StartWebUI
 ```
 
 Preview startup without launching dotnet:

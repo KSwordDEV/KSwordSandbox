@@ -73,8 +73,8 @@ internal sealed class TcpConnectionDiffProbe : IGuestProbe
 
             var baselineEvents = new List<SandboxEvent>
             {
-                CreateDnsSnapshotEvent(phase, baselineNetworkState.DnsCacheEntries.Count),
-                CreateNetstatSnapshotEvent(phase, baselineNetworkState.NetstatRows.Count, emittedRows: 0, truncated: false),
+                CreateDnsSnapshotEvent(phase, baselineNetworkState.DnsCacheEntries),
+                CreateNetstatSnapshotEvent(phase, baselineNetworkState.NetstatRows, emittedRows: 0, truncated: false),
                 CreateListenerSnapshotEvent(phase, "tcp", baselineNetworkState.TcpListeners.Count),
                 CreateListenerSnapshotEvent(phase, "udp", baselineNetworkState.UdpListeners.Count)
             };
@@ -109,14 +109,16 @@ internal sealed class TcpConnectionDiffProbe : IGuestProbe
             }
         }
 
-        events.Add(CreateDnsSnapshotEvent(phase, currentNetworkState.DnsCacheEntries.Count));
+        events.Add(CreateDnsSnapshotEvent(phase, currentNetworkState.DnsCacheEntries));
+        events.Add(CreateDnsDiffSummaryEvent(baselineNetworkState.DnsCacheEntries, currentNetworkState.DnsCacheEntries, phase));
         events.AddRange(CreateDnsCacheDeltaEvents(baselineNetworkState.DnsCacheEntries, currentNetworkState.DnsCacheEntries, phase));
         events.Add(CreateNetstatSnapshotEvent(
             phase,
-            currentNetworkState.NetstatRows.Count,
+            currentNetworkState.NetstatRows,
             Math.Min(currentNetworkState.NetstatRows.Count, MaxNetstatRows),
             currentNetworkState.NetstatRows.Count > MaxNetstatRows));
         events.AddRange(CreateNetstatRowEvents(currentNetworkState.NetstatRows, phase));
+        events.Add(CreateNetstatDiffSummaryEvent(baselineNetworkState.NetstatRows, currentNetworkState.NetstatRows, phase));
         events.AddRange(CreateNetstatDeltaEvents(baselineNetworkState.NetstatRows, currentNetworkState.NetstatRows, phase));
         events.Add(CreateListenerSnapshotEvent(phase, "tcp", currentNetworkState.TcpListeners.Count));
         events.Add(CreateListenerSnapshotEvent(phase, "udp", currentNetworkState.UdpListeners.Count));
@@ -159,7 +161,9 @@ internal sealed class TcpConnectionDiffProbe : IGuestProbe
     /// Inputs are probe phase and entry count; processing stores source-tool and
     /// count metadata; the method returns a SandboxEvent.
     /// </summary>
-    private static SandboxEvent CreateDnsSnapshotEvent(ProbePhase phase, int entryCount)
+    private static SandboxEvent CreateDnsSnapshotEvent(
+        ProbePhase phase,
+        IReadOnlyDictionary<string, DnsCacheEntrySnapshot> entries)
     {
         return new SandboxEvent
         {
@@ -168,7 +172,9 @@ internal sealed class TcpConnectionDiffProbe : IGuestProbe
             Data =
             {
                 ["phase"] = ToPhaseLabel(phase),
-                ["entryCount"] = entryCount.ToString(CultureInfo.InvariantCulture),
+                ["entryCount"] = entries.Count.ToString(CultureInfo.InvariantCulture),
+                ["snapshotHash"] = SnapshotHash(entries.Keys),
+                ["stableKey"] = "name|recordType|data|rawSummary",
                 ["sourceTool"] = "ipconfig /displaydns"
             }
         };
@@ -179,7 +185,11 @@ internal sealed class TcpConnectionDiffProbe : IGuestProbe
     /// Inputs are phase, row count, emitted row count, and truncation flag;
     /// processing stores stable count metadata; the method returns an event.
     /// </summary>
-    private static SandboxEvent CreateNetstatSnapshotEvent(ProbePhase phase, int rowCount, int emittedRows, bool truncated)
+    private static SandboxEvent CreateNetstatSnapshotEvent(
+        ProbePhase phase,
+        IReadOnlyDictionary<string, NetstatRowSnapshot> rows,
+        int emittedRows,
+        bool truncated)
     {
         return new SandboxEvent
         {
@@ -188,9 +198,67 @@ internal sealed class TcpConnectionDiffProbe : IGuestProbe
             Data =
             {
                 ["phase"] = ToPhaseLabel(phase),
-                ["rowCount"] = rowCount.ToString(CultureInfo.InvariantCulture),
+                ["rowCount"] = rows.Count.ToString(CultureInfo.InvariantCulture),
                 ["emittedRows"] = emittedRows.ToString(CultureInfo.InvariantCulture),
                 ["truncated"] = truncated.ToString(CultureInfo.InvariantCulture),
+                ["snapshotHash"] = SnapshotHash(rows.Keys),
+                ["sourceTool"] = "netstat -ano"
+            }
+        };
+    }
+
+    /// <summary>
+    /// Creates a bounded DNS diff summary event before row-level DNS deltas.
+    /// Inputs are before/after dictionaries and phase; processing stores stable
+    /// counts and snapshot hashes; the method returns a SandboxEvent.
+    /// </summary>
+    private static SandboxEvent CreateDnsDiffSummaryEvent(
+        IReadOnlyDictionary<string, DnsCacheEntrySnapshot> before,
+        IReadOnlyDictionary<string, DnsCacheEntrySnapshot> after,
+        ProbePhase phase)
+    {
+        return new SandboxEvent
+        {
+            EventType = "dns.cache.diff",
+            Source = "guest",
+            Data =
+            {
+                ["phase"] = ToPhaseLabel(phase),
+                ["beforeEntryCount"] = before.Count.ToString(CultureInfo.InvariantCulture),
+                ["afterEntryCount"] = after.Count.ToString(CultureInfo.InvariantCulture),
+                ["addedCount"] = CountMissing(before, after).ToString(CultureInfo.InvariantCulture),
+                ["removedCount"] = CountMissing(after, before).ToString(CultureInfo.InvariantCulture),
+                ["beforeSnapshotHash"] = SnapshotHash(before.Keys),
+                ["afterSnapshotHash"] = SnapshotHash(after.Keys),
+                ["stableKey"] = "name|recordType|data|rawSummary",
+                ["sourceTool"] = "ipconfig /displaydns"
+            }
+        };
+    }
+
+    /// <summary>
+    /// Creates a bounded netstat diff summary event before row-level deltas.
+    /// Inputs are before/after dictionaries and phase; processing stores counts
+    /// and hashes without expanding every row; the method returns an event.
+    /// </summary>
+    private static SandboxEvent CreateNetstatDiffSummaryEvent(
+        IReadOnlyDictionary<string, NetstatRowSnapshot> before,
+        IReadOnlyDictionary<string, NetstatRowSnapshot> after,
+        ProbePhase phase)
+    {
+        return new SandboxEvent
+        {
+            EventType = "network.netstat.diff",
+            Source = "guest",
+            Data =
+            {
+                ["phase"] = ToPhaseLabel(phase),
+                ["beforeRowCount"] = before.Count.ToString(CultureInfo.InvariantCulture),
+                ["afterRowCount"] = after.Count.ToString(CultureInfo.InvariantCulture),
+                ["addedCount"] = CountMissing(before, after).ToString(CultureInfo.InvariantCulture),
+                ["removedCount"] = CountMissing(after, before).ToString(CultureInfo.InvariantCulture),
+                ["beforeSnapshotHash"] = SnapshotHash(before.Keys),
+                ["afterSnapshotHash"] = SnapshotHash(after.Keys),
                 ["sourceTool"] = "netstat -ano"
             }
         };
@@ -430,6 +498,27 @@ internal sealed class TcpConnectionDiffProbe : IGuestProbe
     }
 
     /// <summary>
+    /// Counts candidate keys missing from an existing dictionary.
+    /// Inputs are existing and candidate dictionaries; processing performs a
+    /// case-insensitive key-set comparison; the method returns a total count.
+    /// </summary>
+    private static int CountMissing<TSnapshot>(
+        IReadOnlyDictionary<string, TSnapshot> existing,
+        IReadOnlyDictionary<string, TSnapshot> candidate)
+    {
+        var count = 0;
+        foreach (var key in candidate.Keys)
+        {
+            if (!existing.ContainsKey(key))
+            {
+                count++;
+            }
+        }
+
+        return count;
+    }
+
+    /// <summary>
     /// Creates a generic truncation diagnostic event.
     /// Inputs are event type, change label, phase, total count, and emitted
     /// count; processing stores cap metadata; the method returns a SandboxEvent.
@@ -465,6 +554,18 @@ internal sealed class TcpConnectionDiffProbe : IGuestProbe
             };
             yield return diagnostic with { Data = data };
         }
+    }
+
+    /// <summary>
+    /// Hashes a case-insensitive snapshot key set for compact diff summaries.
+    /// Inputs are snapshot keys; processing sorts and joins keys before SHA-256;
+    /// the method returns a lower-case hex digest.
+    /// </summary>
+    private static string SnapshotHash(IEnumerable<string> keys)
+    {
+        var material = string.Join("\n", keys.OrderBy(key => key, StringComparer.OrdinalIgnoreCase));
+        var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(material));
+        return Convert.ToHexString(bytes).ToLowerInvariant();
     }
 
     /// <summary>
@@ -695,11 +796,14 @@ internal sealed class NetworkStateSnapshotProvider : INetworkStateSnapshotProvid
             }
 
             var rawSummary = Truncate(string.Join(" | ", lines.Take(8)), 512);
+            var stableRawSummary = Truncate(
+                string.Join(" | ", lines.Where(line => !line.StartsWith("Time To Live", StringComparison.OrdinalIgnoreCase)).Take(8)),
+                512);
             var name = FindLabelValue(lines, "Record Name") ?? FindLikelyDnsName(lines);
             var recordType = FindLabelValue(lines, "Record Type");
             var ttl = FindLabelValue(lines, "Time To Live");
             var data = FindRecordData(lines);
-            var keyMaterial = string.Join("|", name, recordType, data, ttl, rawSummary);
+            var keyMaterial = string.Join("|", name, recordType, data, stableRawSummary);
             var key = Sha256Hex(keyMaterial);
             entries[key] = new DnsCacheEntrySnapshot(key, name, recordType, data, ttl, rawSummary);
         }
@@ -875,8 +979,11 @@ internal sealed class NetworkStateSnapshotProvider : INetworkStateSnapshotProvid
             Source = "guest",
             Data =
             {
-                ["command"] = string.IsNullOrWhiteSpace(result.Arguments) ? result.FileName : $"{result.FileName} {result.Arguments}",
+                ["command"] = Truncate(string.IsNullOrWhiteSpace(result.Arguments) ? result.FileName : $"{result.FileName} {result.Arguments}", 1200),
+                ["commandFileName"] = result.FileName,
+                ["commandArguments"] = Truncate(result.Arguments, 1024),
                 ["timedOut"] = result.TimedOut.ToString(CultureInfo.InvariantCulture),
+                ["commandTimedOut"] = result.TimedOut.ToString(CultureInfo.InvariantCulture),
                 ["timeoutMilliseconds"] = result.Timeout.TotalMilliseconds.ToString("0", CultureInfo.InvariantCulture)
             }
         };
@@ -884,21 +991,33 @@ internal sealed class NetworkStateSnapshotProvider : INetworkStateSnapshotProvid
         if (result.ExitCode is not null)
         {
             evt.Data["exitCode"] = result.ExitCode.Value.ToString(CultureInfo.InvariantCulture);
+            evt.Data["commandExitCode"] = result.ExitCode.Value.ToString(CultureInfo.InvariantCulture);
         }
 
         if (!string.IsNullOrWhiteSpace(result.ExceptionType))
         {
             evt.Data["exceptionType"] = result.ExceptionType;
+            evt.Data["commandExceptionType"] = result.ExceptionType;
         }
 
         if (!string.IsNullOrWhiteSpace(result.Message))
         {
             evt.Data["message"] = result.Message;
+            evt.Data["commandMessage"] = result.Message;
+        }
+
+        if (!string.IsNullOrWhiteSpace(result.StandardOutput))
+        {
+            var stdout = result.StandardOutput.Trim();
+            evt.Data["stdout"] = Truncate(stdout, 512);
+            evt.Data["stdoutTruncated"] = (stdout.Length > 512).ToString(CultureInfo.InvariantCulture);
         }
 
         if (!string.IsNullOrWhiteSpace(result.StandardError))
         {
-            evt.Data["stderr"] = Truncate(result.StandardError.Trim(), 512);
+            var stderr = result.StandardError.Trim();
+            evt.Data["stderr"] = Truncate(stderr, 512);
+            evt.Data["stderrTruncated"] = (stderr.Length > 512).ToString(CultureInfo.InvariantCulture);
         }
 
         return evt;
@@ -933,6 +1052,16 @@ internal sealed class NetworkStateSnapshotProvider : INetworkStateSnapshotProvid
     {
         var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(value));
         return Convert.ToHexString(bytes).ToLowerInvariant();
+    }
+
+    /// <summary>
+    /// Hashes a case-insensitive snapshot key set for compact diff summaries.
+    /// Inputs are snapshot keys; processing sorts and joins keys before SHA-256;
+    /// the method returns a lower-case hex digest.
+    /// </summary>
+    private static string SnapshotHash(IEnumerable<string> keys)
+    {
+        return Sha256Hex(string.Join("\n", keys.OrderBy(key => key, StringComparer.OrdinalIgnoreCase)));
     }
 
     /// <summary>

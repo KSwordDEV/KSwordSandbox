@@ -118,15 +118,19 @@ public static class ArtifactDescriptorFactory
             hashes["sha256"] = descriptor.Sha256;
         }
 
+        var safeLink = BuildSafeLink(relativePath);
+        if (string.IsNullOrWhiteSpace(safeLink))
+        {
+            safeLink = NormalizeSafeLink(descriptor.SafeLink);
+        }
+
         return descriptor with
         {
             Category = string.IsNullOrWhiteSpace(descriptor.Category)
                 ? CategoryForKind(descriptor.Kind)
                 : descriptor.Category,
             RelativePath = relativePath,
-            SafeLink = string.IsNullOrWhiteSpace(descriptor.SafeLink)
-                ? BuildSafeLink(relativePath)
-                : descriptor.SafeLink,
+            SafeLink = safeLink,
             EvidenceRole = FirstNonEmpty(descriptor.EvidenceRole, MetadataValue(metadata, "evidenceRole")),
             CapturePhase = FirstNonEmpty(descriptor.CapturePhase, MetadataValue(metadata, "capturePhase", "phase")),
             CaptureState = FirstNonEmpty(descriptor.CaptureState, MetadataValue(metadata, "captureState")),
@@ -220,6 +224,29 @@ public static class ArtifactDescriptorFactory
         return string.Join(
             "/",
             normalized.Split('/').Select(segment => Uri.EscapeDataString(segment)));
+    }
+
+    /// <summary>
+    /// Validates and normalizes a previously supplied link target.
+    /// Inputs may be URL-encoded manifest values; processing decodes, rejects
+    /// absolute or traversal paths, and re-encodes each safe path segment; the
+    /// method returns an empty string when the value is unsafe.
+    /// </summary>
+    public static string NormalizeSafeLink(string? safeLink)
+    {
+        if (string.IsNullOrWhiteSpace(safeLink))
+        {
+            return string.Empty;
+        }
+
+        try
+        {
+            return BuildSafeLink(Uri.UnescapeDataString(safeLink.Trim()));
+        }
+        catch (UriFormatException)
+        {
+            return string.Empty;
+        }
     }
 
     /// <summary>
@@ -325,13 +352,55 @@ public static class ArtifactDescriptorFactory
 
     private static void ApplyKindMetadataDefaults(ArtifactKind kind, Dictionary<string, string> metadata, bool includeAvailability)
     {
-        if (kind != ArtifactKind.PacketCapture)
+        switch (kind)
         {
-            return;
+            case ArtifactKind.ArtifactIndex:
+                AddDefault(metadata, "evidenceRole", "artifact-index");
+                AddDefault(metadata, "collectionName", "artifact-index");
+                break;
+            case ArtifactKind.ArtifactManifest:
+                AddDefault(metadata, "evidenceRole", "artifact-manifest");
+                AddDefault(metadata, "collectionName", "artifact-manifests");
+                break;
+            case ArtifactKind.GuestEventsJson:
+                AddDefault(metadata, "evidenceRole", "guest-events");
+                AddDefault(metadata, "collectionName", "guest-events");
+                AddDefault(metadata, "telemetryFormat", "json");
+                AddDefault(metadata, "captureState", "available");
+                break;
+            case ArtifactKind.DriverEventsJsonLines:
+                AddDefault(metadata, "evidenceRole", "driver-events");
+                AddDefault(metadata, "collectionName", "driver-events");
+                AddDefault(metadata, "telemetryFormat", "jsonl");
+                AddDefault(metadata, "captureState", "available");
+                break;
+            case ArtifactKind.GuestSummaryJson:
+                AddDefault(metadata, "evidenceRole", "guest-summary");
+                AddDefault(metadata, "collectionName", "guest-summary");
+                AddDefault(metadata, "captureState", "available");
+                break;
+            case ArtifactKind.DroppedFile:
+                AddDefault(metadata, "evidenceRole", "dropped-file");
+                AddDefault(metadata, "collectionName", "dropped-files");
+                AddDefault(metadata, "captureState", "captured");
+                break;
+            case ArtifactKind.Screenshot:
+                AddDefault(metadata, "evidenceRole", "screenshot");
+                AddDefault(metadata, "collectionName", "screenshots");
+                AddDefault(metadata, "captureState", "captured");
+                break;
+            case ArtifactKind.MemoryDump:
+                AddDefault(metadata, "evidenceRole", "memory-dump");
+                AddDefault(metadata, "collectionName", "memory-dumps");
+                AddDefault(metadata, "captureState", "captured");
+                break;
+            case ArtifactKind.PacketCapture:
+                AddDefault(metadata, "evidenceRole", "packet-capture");
+                AddDefault(metadata, "collectionName", "packet-captures");
+                AddDefault(metadata, "captureState", "available");
+                break;
         }
 
-        AddDefault(metadata, "evidenceRole", "packet-capture");
-        AddDefault(metadata, "collectionName", "packet-captures");
         if (includeAvailability)
         {
             AddDefault(metadata, "captureState", "available");

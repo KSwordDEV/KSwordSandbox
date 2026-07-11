@@ -120,7 +120,8 @@ internal sealed class P0P1ValidationGateScenario : ISmokeTestScenario
         RequireContains(agentProgram, "events.json", "Guest Agent must continue writing canonical events.json.");
         RequireContains(agentProgram, "DriverEventsPath", "Guest Agent must consume the host-supplied driver JSONL path.");
         RequireContains(driverReader, "Read(string? path)", "Driver JSONL reader must expose a reader method.");
-        RequireContains(driverReader, "JsonSerializer.Deserialize<SandboxEvent>", "Driver JSONL reader must parse normalized SandboxEvent rows.");
+        RequireContains(driverReader, "ParseSandboxEvent", "Driver JSONL reader must parse normalized SandboxEvent rows.");
+        RequireContains(driverReader, "GetDataProperty", "Driver JSONL reader must preserve normalized SandboxEvent data fields.");
         RequireContains(driverReader, "driver.parse_error", "Driver JSONL reader must preserve malformed line evidence.");
 
         RequireContains(reportDoc, "events.json", "Report schema doc must describe imported guest events.");

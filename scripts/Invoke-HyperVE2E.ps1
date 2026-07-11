@@ -2003,6 +2003,7 @@ try {
 
     $startScript = Join-Path $resolvedRepoRoot 'scripts\Start-SandboxHyperVJob.ps1'
     $collectScript = Join-Path $resolvedRepoRoot 'scripts\Collect-GuestOutputs.ps1'
+    $importReportScript = Join-Path $resolvedRepoRoot 'scripts\Import-HyperVJobReport.ps1'
     $plan = [ordered]@{
         contractVersion = 1
         kind = 'KSwordSandbox.HyperVE2EPlan'
@@ -2018,6 +2019,7 @@ try {
             orchestrator = $MyInvocation.MyCommand.Path
             startJob = $startScript
             collectOutputs = $collectScript
+            importReport = $importReportScript
         }
         job = [ordered]@{
             jobId = $jobGuid.ToString('D')
@@ -2054,6 +2056,10 @@ try {
             eventsJsonPath = $hostEventsPath
             driverEventsJsonlPath = $hostDriverEventsPath
             runbookExecutionPath = $runbookExecutionPath
+            jsonReportPath = (Join-Path $jobRoot 'report.json')
+            htmlReportPath = (Join-Path $jobRoot 'report.html')
+            htmlReportZhPath = (Join-Path $jobRoot 'report.zh.html')
+            htmlReportEnPath = (Join-Path $jobRoot 'report.en.html')
             agentPayloadPath = $agentHostPath
             r0CollectorPayloadPath = $collectorHostPath
             payloadManifestPath = $payloadManifestPath
@@ -2211,6 +2217,12 @@ try {
         throw $message
     }
 
+    if (-not (Test-Path -LiteralPath $importReportScript -PathType Leaf)) {
+        $message = "Report import script was not found: $importReportScript"
+        Save-RunbookExecutionRecord -Plan $plan -ModeName 'Live' -Success $false -Message $message -StartedAtUtc ([DateTimeOffset]::UtcNow) -Duration ([TimeSpan]::Zero) -StepResults @()
+        throw $message
+    }
+
     if ($PSCmdlet.ShouldProcess($effectiveVmName, "Execute live Hyper-V E2E plan $PlanPath")) {
         $liveStartedAtUtc = [DateTimeOffset]::UtcNow
         $timer = [Diagnostics.Stopwatch]::StartNew()
@@ -2263,6 +2275,23 @@ try {
             -WhatIf $false
 
         if ($liveSuccess) {
+            Write-HyperVE2EStep 'Importing collected guest events and regenerating report artifacts.'
+            try {
+                & $importReportScript `
+                    -JobId ([string]$plan.job.jobId) `
+                    -SamplePath ([string]$plan.sample.hostPath) `
+                    -EventsPath ([string]$plan.host.eventsJsonPath) `
+                    -RunbookExecutionPath ([string]$plan.host.runbookExecutionPath) `
+                    -ConfigPath ([string]$plan.configPath) `
+                    -RepoRoot ([string]$plan.repositoryRoot) `
+                    -DurationSeconds ([int]$plan.job.durationSeconds)
+            }
+            catch {
+                Write-Error "FAIL: Hyper-V E2E live execution succeeded, but report import failed. $($_.Exception.Message)"
+                exit 1
+            }
+
+            Write-HyperVE2EStep "Report artifacts ready: $($plan.host.htmlReportPath)"
             exit 0
         }
 

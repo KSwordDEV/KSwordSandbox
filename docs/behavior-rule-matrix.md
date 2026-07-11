@@ -3,10 +3,13 @@
 This document describes the behavior rules in `rules/behavior-rules.json`.
 The matrix is intentionally conservative: rules classify normalized sandbox
 events for reporting, but they do not by themselves prove malicious intent.
-The 2026-07-11 v9 rules/VT-quality expansion raises coverage to 294 rules.
-It adds targeted Windows persistence, privilege-escalation, process-injection,
+The 2026-07-11 v10 static/rule-quality expansion raises coverage to 305 rules.
+It adds exact data-value predicates for status/verdict rules plus static domain,
+download/upload, credential-access, and defense-evasion triage without changing
+the public report model. The previous v9 rules/VT-quality expansion added
+targeted Windows persistence, privilege-escalation, process-injection,
 PowerShell/LOLBin, DNS/HTTP/TLS/certificate, anti-analysis, and VirusTotal
-enrichment-quality rules while preserving the existing schema. The previous v8
+enrichment-quality rules. The previous v8
 report-semantic cleanup separated behavior findings from static triage and
 collection diagnostics, and the v7 placeholder-reduction pass replaced many
 broad placeholder entries with concrete metadata, indicator, or
@@ -25,8 +28,13 @@ The current rule engine supports these stable predicates:
 - `containsCommandLine`: case-insensitive substring match against
   `SandboxEvent.CommandLine`.
 - `dataKeys`: requires at least one configured key in `SandboxEvent.Data`.
+- `dataEquals`: case-insensitive exact match against configured data fields.
+  This is used for status/verdict values where substring matching would be too
+  broad, such as avoiding `not_malicious` matching a `malicious` verdict rule.
 - `dataContains`: case-insensitive substring match against configured data
   fields.
+- `excludeDataEquals`: exact-match exclusion counterpart for `dataEquals`.
+- `excludeDataContains`: substring exclusion counterpart for `dataContains`.
 
 Metadata-only fields do not affect matching:
 
@@ -109,9 +117,28 @@ future parser rows.
 | Credential and LSASS behavior | `lsa-security-provider-persistence`, `lsass-memory-dump-command`, `lsass-process-access-observed`, `credential-store-access-observed`, `credential-dumping-tool-command`, `credential-lsass-process-access`, `credential-lsass-dump-command`, `credential-sam-system-hive-access`, `credential-hive-save-command`, `credential-browser-store-access`, `credential-vault-dpapi-access` | `registry.set`, `registry.create`, `driver.registry`, `process.start`, `process.open`, `process.access`, `api.call`, `driver.process`, `file.open`, `file.read`, `file.created`, `file.modified`, `registry.query`, `driver.file` | `high` to `critical` | `T1003.001`, `T1003.002`, `T1112`, `T1555`, `T1555.003` | Covers LSA package persistence, LSASS dump commands/access, SAM/SECURITY/SYSTEM/NTDS hive access, hive-save commands, browser credential databases, Vault/Credentials/DPAPI paths, and common credential dumping tool tokens. |
 | Static PE traits | `static-pe-known-packer`, `static-pe-high-entropy-sections`, `static-section-writable-executable`, `static-embedded-url`, `static-pe-imports-present`, `static-pe-exports-present`, `static-pe-tls-callbacks`, `static-pe-resources-present` | `static.analysis.completed` | `info` to `medium` | `T1027.002`, `T1027` where structural evidence applies | Uses `dataContains.tags` emitted by static analysis for packers, entropy, RWX/abnormal sections, URL strings, import/export/resource table presence, and TLS directory/callback hints. URL strings are low-confidence static triage and do not imply transfer behavior. |
 | Static resource traits | `static-resource-payload-candidate`, `static-resource-embedded-pe`, `static-resource-high-entropy` | `static.analysis.completed` | `medium` to `high` | `T1027.009`, `T1027` | Maps resource-directory parsing tags such as `resource_payload_candidate`, `resource_embedded_pe`, and `resource_high_entropy_data`. |
-| Static import/API traits | `static-import-suspicious-api`, `static-import-process-injection`, `static-import-network-api`, `static-import-persistence-api`, `static-import-anti-analysis-api`, `static-import-dynamic-code`, `static-import-script-execution`, `static-import-file-drop`, `static-import-resource-api`, `static-import-registry-persistence`, `static-import-service-persistence` | `static.analysis.completed` | `low` to `medium` | Technique mappings remain only where import-only triage is specific enough; runtime rules carry primary behavior mappings. | StaticAnalyzer maps parsed imports and fallback API strings into tags such as `import_suspicious_api`, `import_process_injection_api`, `import_network_api`, `import_file_drop_api`, `import_resource_api`, `import_script_execution_api`, and persistence/anti-analysis subgroups. Static import-only evidence is low-confidence triage; runtime process/API/driver evidence is required for primary behavior. |
+| Static import/API traits | `static-import-suspicious-api`, `static-import-process-injection`, `static-import-network-api`, `static-import-download-api`, `static-import-exfil-api`, `static-import-persistence-api`, `static-import-anti-analysis-api`, `static-import-credential-access-api`, `static-import-defense-evasion-api`, `static-import-dynamic-code`, `static-import-script-execution`, `static-import-file-drop`, `static-import-resource-api`, `static-import-registry-persistence`, `static-import-service-persistence` | `static.analysis.completed` | `low` to `medium` | Technique mappings remain only where import-only triage is specific enough; runtime rules carry primary behavior mappings. | StaticAnalyzer maps parsed imports and fallback API strings into tags such as `import_suspicious_api`, `import_process_injection_api`, `import_network_api`, `import_download_api`, `import_exfil_api`, `import_file_drop_api`, `import_resource_api`, `import_script_execution_api`, credential/defense-evasion groups, and persistence/anti-analysis subgroups. Static import-only evidence is low-confidence triage; runtime process/API/driver evidence is required for primary behavior. |
 | Static export traits | `static-export-registration-entrypoint`, `static-export-service-entrypoint` | `static.analysis.completed` | `low` to `medium` | `T1218.010`, `T1543.003` | Export names are triage-only evidence; registration exports can indicate regsvr32-compatible DLL entry points, and service exports can support service DLL triage. |
-| Static string indicators | `static-ip-address`, `static-windows-path-string`, `static-registry-path-string`, `static-persistence-string`, `static-script-command-string`, `static-encoded-command-string`, `static-lolbin-string`, `static-anti-sandbox-string` | `static.analysis.completed` | `info` to `medium` | `T1112`, `T1547.001`, `T1059`, `T1059.001`, `T1218`, `T1497` where specific string evidence applies | Covers IP-like strings, Windows/registry paths, persistence paths, PowerShell encoded commands, living-off-the-land utility names, and VM/debugger/sandbox strings. Version/resource-shaped IPs are static triage metadata unless corroborated by runtime network telemetry. |
+| Static string indicators | `static-domain-indicator`, `static-tor-domain-string`, `static-dynamic-dns-domain-string`, `static-ip-address`, `static-windows-path-string`, `static-registry-path-string`, `static-persistence-string`, `static-script-command-string`, `static-encoded-command-string`, `static-lolbin-string`, `static-download-command-string`, `static-exfil-command-string`, `static-credential-access-string`, `static-defense-evasion-string`, `static-anti-sandbox-string` | `static.analysis.completed` | `info` to `medium` | `T1041`, `T1090`, `T1105`, `T1003`, `T1562.001`, `T1112`, `T1547.001`, `T1059`, `T1059.001`, `T1218`, `T1497` where specific string evidence applies | Covers bare domains (with conservative TLD/reference filtering), IP-like strings, Windows/registry paths, persistence paths, PowerShell encoded commands, living-off-the-land utility names, download/upload command strings, credential/defense-evasion strings, and VM/debugger/sandbox strings. Static indicators are triage metadata unless corroborated by runtime telemetry. |
+
+## 2026-07-11 v10 static and rule-quality expansion
+
+The v10 pass adds 11 rules and one exact-match predicate family:
+
+- Static network strings: bare domain indicators, `.onion` domains, and common
+  dynamic-DNS markers are emitted as low-confidence static triage. Runtime DNS,
+  HTTP, TLS, or PCAP evidence remains required for primary network behavior.
+- Static import clusters: download-capable APIs, upload/exfil-capable APIs,
+  credential-access APIs/libraries, and defense-evasion APIs/libraries now map
+  to dedicated low-confidence static rules instead of only the broad
+  `import_suspicious_api` bucket.
+- Static command/string indicators: download command strings, upload/exfil
+  command strings, credential-access strings, and defense-evasion strings have
+  separate rules so reports can explain why the static triage fired.
+- `dataEquals` / `excludeDataEquals` were added to the rule engine for exact
+  status/verdict predicates. VirusTotal verdict/status rules now use
+  `dataEquals` so strings such as `not_malicious` cannot satisfy the
+  `malicious` verdict rule through substring matching.
 
 ## 2026-07-11 v9 rules and VT quality expansion
 
@@ -304,32 +331,35 @@ keys, HTTP direct-IP/nonstandard-port triage, and PCAP beacon-interval fields.
 
 ## Static-analysis tag contract
 
-The current report model does not have first-class `imports`, `exports`, or
-`tls` fields. StaticAnalyzer therefore records lightweight static depth through
-existing fields:
+`StaticAnalysisResult` now carries structured imports, suspicious API clusters,
+exports, TLS, overlay, and string-indicator fields, but rule matching still uses
+the stable `static.analysis.completed.Data["tags"]` contract so older reports
+and rules remain compatible. StaticAnalyzer therefore records lightweight static
+depth through both structured fields and existing tag/evidence fields:
 
 - `Tags`: rule-facing tokens such as `imports_present`, `exports_present`,
   `resources_present`, `tls_directory_present`, `tls_callbacks`,
   `resource_payload_candidate`, `resource_embedded_pe`,
   `writable_executable_section`, `import_suspicious_api`,
   `import_process_injection_api`, `import_network_api`,
-  `import_file_drop_api`, `import_resource_api`,
+  `import_download_api`, `import_exfil_api`, `import_file_drop_api`,
+  `import_resource_api`, `import_credential_access_api`,
+  `import_defense_evasion_api`,
   `import_script_execution_api`, `registry_path_string`,
-  `script_execution_string`, `ip_address`,
+  `script_execution_string`, `domain_name`, `ip_address`,
   `export_registration_entrypoint`, `packer_section_name`, and
   `packer_string_hint`.
 - `InterestingStrings`: bounded human-readable evidence such as
   `section:.text,va=...`, `import:kernel32.dll!VirtualAllocEx`,
   `export:DllRegisterServer`, `resource:rcdata,size=...`,
-  `url:https://...`, `path:C:\...`, `ip:8.8.8.8`, and
+  `url:https://...`, `domain:example.com`, `path:C:\...`, `ip:8.8.8.8`, and
   `tls:callback@0x...`.
 - `static.analysis.completed.Data["tags"]`: comma-joined `Tags` used by
   `dataContains.tags` predicates in `rules/behavior-rules.json`.
 
-This keeps static coverage useful without changing public report contracts.
-If a future Abstractions model adds structured `Imports`, `Exports`, or `Tls`
-fields, keep these tags for backward-compatible rule matching and add structured
-predicates separately.
+This keeps static coverage useful without requiring new rule predicates.
+If future rules consume structured static fields directly, keep these tags for
+backward-compatible matching and add structured predicates separately.
 
 ## Future R0 expansion
 

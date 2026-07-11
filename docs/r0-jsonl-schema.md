@@ -37,6 +37,7 @@ Example:
 - `r0collector.started`: first normal row after options and output are valid.
   `data` includes `devicePath`, `outputPath`, `durationSeconds`,
   `pollIntervalMs`, `mockMode`, `syntheticMode`, `healthOnly`, `heartbeat`,
+  `readEventsMaxEvents`, `driverEventSampleStride`, `driverEventSampling`,
   `enableMaskSpecified`, `enableMask`, `enableMaskHex`, and `ioctlProtocol`.
 - `r0collector.heartbeat`: emitted only with `--heartbeat`. `data.reason` is
   `collectorStarted`, `pollComplete`, `healthComplete`, or `syntheticComplete`.
@@ -61,7 +62,8 @@ Example:
 - `r0collector.readinessDiagnostic`: one live `--diagnose` probe result for the
   `service`, `openDevice`, `abiNegotiation`, or `readEvents` stage. Important
   fields are `severity`, `readinessState`, `diagnosticStage`,
-  `diagnosticCode`, `serviceName`, `devicePath`, and `hint`.
+  `diagnosticCode`, `collectionDiagnostic`, `sampleBehavior`,
+  `operatorInterpretation`, `serviceName`, `devicePath`, and `hint`.
 - `r0collector.readinessSummary`: final live `--diagnose` summary with
   `ready`, `degraded`, `severity`, `readinessState`, `failedStage`,
   `serviceDiagnosticCode`, `openDeviceDiagnosticCode`, `abiDiagnosticCode`, and
@@ -77,7 +79,12 @@ Error rows:
 - `r0collector.deviceUnavailable`: driver device could not be opened. The row
   includes `severity=error`, `readinessState=blocked`,
   `diagnosticStage=openDevice`, and a concrete `diagnosticCode` such as
-  `open_device_not_found` or `open_device_denied`.
+  `open_device_not_found` or `open_device_denied`. It also includes stable
+  diagnostic fields such as `deviceAvailability=unavailable`,
+  `collectionDiagnostic=true`, `sampleBehavior=false`, `ioctlIssued=false`,
+  `driverLoadedByCollector=false`, and
+  `operatorInterpretation=collection_diagnostic_not_sample_behavior` so readers
+  do not treat a missing driver device as sample behavior.
 - `r0collector.ioctlFailure`: `DeviceIoControl` returned a Win32 failure.
 - `r0collector.driverProtocolError`: an IOCTL succeeded but returned malformed
   or incompatible bytes. ABI/protocol failures include `severity=error` and
@@ -141,12 +148,18 @@ Negotiation and queue rows must preserve these event-quality keys:
 - `r0collector.driverProducerMask.data`: `requestedEnableMaskHex`,
   `previousEnableMaskHex`, `effectiveEnableMaskHex`,
   `supportedProducerMaskHex`, and the matching `*MaskNames` fields.
-- `r0collector.driverReadEvents.data`: `requestedMaxEvents`,
-  `eventsWritten`, `eventsEmitted`, `recordsProcessed`,
-  `collectorSuppressedEvents`, `bytesWritten`, `EventsDropped` as JSON key
-  `eventsDropped`, and `nextSequence`. Drain continuation uses
-  `recordsProcessed`, not `eventsEmitted`, so default self-noise suppression
-  cannot stop a batch early.
+- `r0collector.driverReadEvents.data`: the first fields are intentionally kept
+  report-sampling friendly: `requestedMaxEvents`, `recordsProcessed`,
+  `eventsEmitted`, `collectorSuppressedEvents`, `collectorSkippedEvents`,
+  `eligibleEvents`, and concise aliases `processed`, `eligible`, `emitted`,
+  `suppressed`, `skipped`, `head`, `tail`, and `sampling`. The row also keeps
+  `eventsWritten`, `bytesWritten`, `EventsDropped` as JSON key
+  `eventsDropped`, `nextSequence`, `loss`, `lossObserved`, `backpressure`,
+  `backpressureObserved`, `backpressureReason`, `headSequence`,
+  `tailSequence`, `emittedHeadSequence`, `emittedTailSequence`,
+  `driverEventSampleStride`, and `samplingApplied`. Drain continuation uses
+  `recordsProcessed`, not `eventsEmitted`, so default self-noise suppression or
+  opt-in collector sampling cannot stop a batch early.
 
 Typed payload parsers add category-specific fields such as `operationName`,
 `filePath`, `imagePath`, `keyPath`, `valueName`, `protocolName`,
@@ -196,6 +209,12 @@ from real R0 telemetry.
   value through `IOCTL_KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK`, and records
   requested/effective masks in lifecycle and heartbeat rows. The reserved
   `KSWORD_SANDBOX_READ_EVENTS_REQUEST.Flags` field remains zero.
+- `--driver-event-sample-stride <n>` / `--event-sample-stride <n>` is an
+  optional collector-side large-stream throttle. The default `1` emits every
+  eligible driver row. Values greater than `1` emit the first eligible row and
+  every nth eligible row after self-noise suppression; skipped eligible rows are
+  counted in `collectorSkippedEvents` / `skipped` and sequence `head` / `tail`
+  remains visible in the batch summary.
 - `--suppress-self-noise` is the default. It suppresses live driver rows for
   the collector PID, the exact collector output JSONL, and documented KSword
   infrastructure paths before writing JSONL. Suppressed counts remain visible in
@@ -225,7 +244,9 @@ corpus includes:
   `totalEventsDropped`, `totalEventsSuppressed`, active/failed masks, and
   `nextSequence`;
 - at least one `r0collector.driverReadEvents` row with batch
-  `EventsDropped`/`eventsDropped`;
+  `EventsDropped`/`eventsDropped`, `processed`/`eligible`/`emitted`/
+  `suppressed`/`skipped`, `head`/`tail`, `sampling`, `loss`, and
+  `backpressureObserved`;
 - mock or stress driver rows with `mock:"true"`, `stress:"true"`,
   `eventSchemaName`, `eventSchemaVersion`, `version`, `recordSize`,
   `payloadSize`, `payloadSchema`, `typedPayloadStatus`, and monotonic

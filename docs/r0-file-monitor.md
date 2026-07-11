@@ -25,7 +25,9 @@ callbacks for these major operations:
 Every emitted file payload is queued from the post-operation callback and sets
 `KSWORD_SANDBOX_FILE_EVENT_FLAG_STATUS_PRESENT` plus
 `KSWORD_SANDBOX_FILE_EVENT_FLAG_POST_OPERATION`, so `Status` is the final
-operation `NTSTATUS` observed by the minifilter.
+operation `NTSTATUS` observed by the minifilter.  Failed operations also set
+`KSWORD_SANDBOX_FILE_EVENT_FLAG_OPERATION_FAILED`, which lets rules distinguish
+failed probes from successful writes/deletes without reinterpreting NTSTATUS.
 
 ## Path normalization and truncation
 
@@ -50,6 +52,12 @@ The producer marks path provenance with compatible flag bits:
   normalized-name resolution.
 - `KSWORD_SANDBOX_FILE_EVENT_FLAG_PATH_FALLBACK`: the path came from
   `FILE_OBJECT.FileName` fallback.
+- `KSWORD_SANDBOX_FILE_EVENT_FLAG_DELETE_INTENT`: the operation was normalized
+  from a disposition-style `SET_INFORMATION`.
+- `KSWORD_SANDBOX_FILE_EVENT_FLAG_RENAME_INTENT`: the operation was normalized
+  from a rename/link-style `SET_INFORMATION`.
+- `KSWORD_SANDBOX_FILE_EVENT_FLAG_OPERATION_FAILED`: the post-operation status
+  was a failure.
 
 Older collectors that do not know the new bits still preserve them in `flagsHex`
 and unknown flag diagnostics.

@@ -15,14 +15,14 @@ through explicit probe boundaries:
 `GuestProbeRunner` and runs these phases:
 
 1. `BeforeStart` - baseline process list, file tree, TCP connections, DNS cache,
-   netstat rows, listeners, services, scheduled tasks, startup items,
-   environment details, optional before-stage screenshot, and optional pktmon
-   packet-capture start.
+   netstat rows, listeners, services, scheduled tasks, startup items, dedicated
+   Run/RunOnce registry values, environment details, optional before-stage
+   screenshot, and optional pktmon packet-capture start.
 2. `AfterStart` - process deltas, process tree, optional during-stage
    screenshot, and opt-in memory dump.
 3. `AfterRun` - final process deltas, file diffs, TCP/DNS/netstat/listener
-   diffs, service/task/startup diffs, optional after-stage screenshot, and
-   optional pktmon stop/PCAPNG conversion.
+   diffs, service/task/startup/Run-key diffs, optional after-stage screenshot,
+   and optional pktmon stop/PCAPNG conversion.
 
 The CLI remains backward compatible:
 
@@ -69,9 +69,9 @@ throwing for expected launch/exit failures.
   parent process IDs, image names, thread counts, and base priorities without
   WMI or elevation. It preserves `process.observed` and `process.new`, then adds
   `process.tree` for the launched sample process and visible descendants. It
-  also emits `environment.detail`, service diffs, scheduled task diffs, and
-  startup item diffs using bounded `sc.exe`, `schtasks.exe`, registry, and
-  Startup-folder collection.
+  also emits `environment.detail`, service diffs, scheduled task diffs,
+  startup item diffs, and dedicated `registry.run.*` Run/RunOnce diffs using
+  bounded `sc.exe`, `schtasks.exe`, registry, and Startup-folder collection.
 - `FileDiffProbe` compares file size and UTC last-write time below the sample
   working directory and emits `file.created`, `file.modified`, and
   `file.deleted` with relative-path metadata.
@@ -81,7 +81,9 @@ throwing for expected launch/exit failures.
   `network.tcp.closed` with `change=closed`. The same probe also captures
   DNS cache entries through `ipconfig /displaydns`, `netstat -ano` rows, and
   managed TCP/UDP listener snapshots with bounded command timeouts and
-  truncation events for high-volume outputs.
+  truncation events for high-volume outputs. DNS keys exclude TTL to reduce
+  resolver-cache countdown noise; `dns.cache.diff` and `network.netstat.diff`
+  provide stable count/hash summaries before bounded row-level events.
 - `ScreenshotProbe` is opt-in through `--screenshot`. `ScreenshotProbeOptions`
   plans the default `before,during,after` cadence or the operator-selected
   `--screenshot-phases` / `--screenshot-count` configuration without changing
@@ -120,8 +122,10 @@ metadata.
 The copy step emits `artifact.dropped_file.copied` or
 `artifact.dropped_file.skipped`; manifest output emits
 `artifact.manifest.written` or `artifact.manifest.failed`. Dropped-file
-extraction is independent from memory dump and packet capture; all three remain
-disabled unless their explicit CLI flags are supplied.
+descriptors preserve original guest path, relative path, source event,
+source timestamps, source size, copy timestamp, and copied-artifact hashes.
+Dropped-file extraction is independent from memory dump and packet capture; all
+three remain disabled unless their explicit CLI flags are supplied.
 
 ## Smoke strategy
 

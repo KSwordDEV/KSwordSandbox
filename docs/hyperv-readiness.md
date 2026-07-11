@@ -20,8 +20,9 @@ Windows PowerShell also works:
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\Test-HyperVReadiness.ps1
 ```
 
-After `install.ps1` has been run, the no-argument command automatically tries
-the same local config path used by `run.ps1`:
+After `.\install.ps1` or its wrapper `.\scripts\install.ps1` has been run, the
+no-argument command automatically tries the same local config path used by
+`run.ps1`:
 
 1. `Sandbox__ConfigPath` from Process/User/Machine scope;
 2. `%ProgramData%\KSwordSandbox\install-state.json` -> `localConfigPath`;
@@ -29,6 +30,11 @@ the same local config path used by `run.ps1`:
 
 Use `-IgnoreInstalledConfig` when you deliberately want only explicit
 parameters plus the repository example fallback.
+
+If your release bundle starts from `scripts\`, the compatibility wrappers
+`.\scripts\install.ps1` and `.\scripts\run.ps1` write/read the same install
+state and local config as the repository-root `.\install.ps1` and `.\run.ps1`.
+Readiness resolution is therefore identical for either entry point.
 
 Defaults match `config/sandbox.example.json` when no installed config is found:
 
@@ -315,6 +321,20 @@ Records the host current boot entry test-signing value with a read-only
 mock/no-driver flow. For real R0 collection, treat a warning here as a reminder
 to verify Windows test-signing inside the isolated guest VM manually; the
 readiness script does not start the VM just to inspect guest boot state.
+
+Use the installer change menu or the explicit helper only when you are ready to
+touch the configured guest VM:
+
+```powershell
+.\install.ps1 -Mode Change -QueryGuestTestSigning
+.\install.ps1 -Mode Change -EnableGuestTestSigning -RestartGuestAfterTestSigning -Force
+.\scripts\Set-GuestTestSigning.ps1 -Mode Query
+```
+
+Driver signing is outside readiness. If a real R0 driver is required, use an
+already test-signed `.sys` or the documented test-certificate helper
+`.\scripts\Sign-SandboxDriverWithTestCertificate.ps1`; the readiness/install/run
+path does not sign drivers or invoke legacy signing tools.
 
 ## Payload staging dependency
 

@@ -7,21 +7,21 @@ a final HTML report.
 
 ## Current estimated completion
 
-- Overall v1 deliverable: **70%**
-- Minimum usable E2E chain on this host: **82%**
-- Repository architecture, docs, module boundaries, policy: **82%**
-- Core job/event/rule/report models: **74%**
-- Web/API/WebUI submission and job UX: **80%**
-- Live raw telemetry contract: **83%**
-- Hyper-V runbook generation and execution recording: **71%**
-- Golden VM / payload staging / operator readiness: **58%**
-- Guest Agent dynamic collection: **74%**
-- R0 Driver + R0Collector: **63%**
-- Static analysis and behavior rules: **66%**
-- HTML report generation: **81%**
-- Artifact manifest and dropped-file plumbing: **75%**
-- Tests and quality gates: **75%**
-- Install/operations/security hardening: **32%**
+- Overall v1 deliverable: **64%**
+- Minimum usable E2E chain on this host: **72%**
+- Repository architecture, docs, module boundaries, policy: **80%**
+- Core job/event/rule/report models: **72%**
+- Web/API/WebUI submission and job UX: **76%**
+- Live raw telemetry contract: **78%**
+- Hyper-V runbook generation and execution recording: **68%**
+- Golden VM / payload staging / operator readiness: **55%**
+- Guest Agent dynamic collection: **70%**
+- R0 Driver + R0Collector: **58%**
+- Static analysis and behavior rules: **64%**
+- HTML report generation: **76%**
+- Artifact manifest and dropped-file plumbing: **70%**
+- Tests and quality gates: **72%**
+- Install/operations/security hardening: **30%**
 
 ## Evidence already present
 

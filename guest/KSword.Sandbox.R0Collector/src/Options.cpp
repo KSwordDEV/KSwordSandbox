@@ -212,6 +212,13 @@ bool ParseArguments(int argc, wchar_t* argv[], Options* options, std::wstring* e
             if (!ParseUnsignedMask(value, arg, 1, 1024, &options->readEventsMaxEvents, error)) {
                 return false;
             }
+        } else if (arg == L"--driver-event-sample-stride" || arg == L"--event-sample-stride") {
+            if (!readValue(arg, &value)) {
+                return false;
+            }
+            if (!ParseUnsignedMask(value, arg, 1, 1000000, &options->driverEventSampleStride, error)) {
+                return false;
+            }
         } else if (arg == L"--enable-mask") {
             if (!readValue(arg, &value)) {
                 return false;
@@ -258,6 +265,7 @@ void PrintUsage(const wchar_t* programName) {
         << L"      --read-timeout-ms <ms>   READ_EVENTS timeout used by --diagnose (default: 2000)\n"
         << L"      --max-events <count>     READ_EVENTS MaxEvents request cap 1..1024 (default: 64)\n"
         << L"      --max-read-batches <n>   Stop after n READ_EVENTS batches; 0 means unlimited\n"
+        << L"      --driver-event-sample-stride <n>  Emit first and every nth eligible driver row; 1 emits all\n"
         << L"      --enable-mask <mask>     Set producer enable mask through SET_PRODUCER_ENABLE_MASK\n"
         << L"      --abi-self-check         Emit ABI/event-quality contract row and exit without opening the driver\n"
         << L"      --contract-self-check    Alias for --abi-self-check\n"

@@ -96,17 +96,30 @@ KswBuildStatusFlags(
     )
 {
     ULONG flags;
+    ULONG enabledSupportedMask;
+    ULONG activeEnabledMask;
 
     flags = 0;
+    enabledSupportedMask =
+        Snapshot->ProducerEnableMask & Snapshot->SupportedProducerMask;
+    activeEnabledMask =
+        Snapshot->ActiveProducerMask & enabledSupportedMask;
 
     if (Snapshot->EventCount != 0) {
         flags |= KSWORD_SANDBOX_STATUS_FLAG_HAS_EVENTS;
     }
 
-    if (Snapshot->ProducerEnableMask == 0) {
+    if (enabledSupportedMask == 0) {
         flags |= KSWORD_SANDBOX_STATUS_FLAG_PRODUCERS_ALL_DISABLED;
-    } else if (Snapshot->ProducerEnableMask != Snapshot->SupportedProducerMask) {
+    } else if (Snapshot->ProducerEnableMask != Snapshot->SupportedProducerMask ||
+        Snapshot->FailedProducerMask != 0 ||
+        activeEnabledMask != enabledSupportedMask) {
         flags |= KSWORD_SANDBOX_STATUS_FLAG_PRODUCERS_PARTIAL;
+    }
+
+    if (Snapshot->FailedProducerMask != 0 ||
+        activeEnabledMask != enabledSupportedMask) {
+        flags |= KSWORD_SANDBOX_STATUS_FLAG_PRODUCERS_DEGRADED;
     }
 
     if (!NT_SUCCESS(Snapshot->LastStatus) ||
@@ -138,6 +151,47 @@ KswBuildStatusFlags(
 }
 
 /*
+ * Builds capability bits from compile-time producer configuration.
+ *
+ * Inputs : none; uses KSWORD_SANDBOX_ENABLE_* build switches from Driver.h.
+ * Logic  : core IOCTL capabilities are always present in this build, while the
+ *          network WFP/ALE flag is omitted when that producer was compiled as an
+ *          explicit unsupported placeholder.  Runtime registration success or
+ *          failure is reported separately by GET_STATUS masks.
+ * Return : KSWORD_SANDBOX_CAPABILITY_FLAG_* bitmask.
+ */
+static
+ULONGLONG
+KswBuildCapabilityFlags(
+    VOID
+    )
+{
+    ULONGLONG flags;
+
+    flags =
+        KSWORD_SANDBOX_CAPABILITY_FLAG_GET_HEALTH |
+        KSWORD_SANDBOX_CAPABILITY_FLAG_POLL |
+        KSWORD_SANDBOX_CAPABILITY_FLAG_READ_EVENTS |
+        KSWORD_SANDBOX_CAPABILITY_FLAG_GET_CAPABILITIES |
+        KSWORD_SANDBOX_CAPABILITY_FLAG_GET_STATUS |
+        KSWORD_SANDBOX_CAPABILITY_FLAG_SET_PRODUCER_ENABLE_MASK |
+        KSWORD_SANDBOX_CAPABILITY_FLAG_QUEUE_STATUS_COUNTERS |
+        KSWORD_SANDBOX_CAPABILITY_FLAG_PRODUCER_ENABLE_BITS |
+        KSWORD_SANDBOX_CAPABILITY_FLAG_TYPED_EVENT_PAYLOADS |
+        KSWORD_SANDBOX_CAPABILITY_FLAG_EVENT_SCHEMA_NAMES |
+        KSWORD_SANDBOX_CAPABILITY_FLAG_PROCESS_CREATE_EXIT |
+        KSWORD_SANDBOX_CAPABILITY_FLAG_IMAGE_LOAD |
+        KSWORD_SANDBOX_CAPABILITY_FLAG_FILE_MINIFILTER |
+        KSWORD_SANDBOX_CAPABILITY_FLAG_REGISTRY_CALLBACK;
+
+#if KSWORD_SANDBOX_ENABLE_NETWORK_WFP_ALE
+    flags |= KSWORD_SANDBOX_CAPABILITY_FLAG_NETWORK_WFP_ALE;
+#endif
+
+    return flags;
+}
+
+/*
  * Fills a GET_CAPABILITIES reply.
  *
  * Inputs : Reply points to a caller-sized output buffer already validated by
@@ -149,6 +203,7 @@ KswBuildStatusFlags(
 static
 VOID
 KswFillCapabilitiesReply(
+    _In_ const KSWORD_SANDBOX_STATE_SNAPSHOT* Snapshot,
     _Out_ PKSWORD_SANDBOX_CAPABILITIES_REPLY Reply
     )
 {
@@ -157,9 +212,9 @@ KswFillCapabilitiesReply(
     Reply->Size = sizeof(*Reply);
     Reply->AbiVersionMajor = KSWORD_SANDBOX_ABI_VERSION_MAJOR;
     Reply->AbiVersionMinor = KSWORD_SANDBOX_ABI_VERSION_MINOR;
-    Reply->CapabilityFlags = KSWORD_SANDBOX_CAPABILITY_FLAGS_CURRENT;
-    Reply->SupportedProducerMask = KSWORD_SANDBOX_PRODUCER_MASK_CURRENT;
-    Reply->DefaultProducerMask = KSWORD_SANDBOX_PRODUCER_MASK_DEFAULT;
+    Reply->CapabilityFlags = KswBuildCapabilityFlags();
+    Reply->SupportedProducerMask = Snapshot->SupportedProducerMask;
+    Reply->DefaultProducerMask = KSWORD_SANDBOX_COMPILED_PRODUCER_MASK;
     Reply->EventHeaderVersion = KSWORD_SANDBOX_EVENT_HEADER_VERSION;
     Reply->EventMaxPayloadSize = KSWORD_SANDBOX_EVENT_MAX_PAYLOAD_SIZE;
     Reply->EventRingCapacity = KSWORD_SANDBOX_EVENT_RING_CAPACITY;
@@ -248,6 +303,7 @@ KswHandleGetCapabilities(
 {
     PKSWORD_SANDBOX_DEVICE_EXTENSION deviceExtension;
     PKSWORD_SANDBOX_CAPABILITIES_REPLY reply;
+    KSWORD_SANDBOX_STATE_SNAPSHOT snapshot;
 
     if (OutputBufferLength < sizeof(*reply)) {
         return KswCompleteIrp(Irp, STATUS_BUFFER_TOO_SMALL, 0);
@@ -263,7 +319,8 @@ KswHandleGetCapabilities(
         return KswCompleteIrp(Irp, STATUS_DEVICE_NOT_READY, 0);
     }
 
-    KswFillCapabilitiesReply(reply);
+    KswSnapshotState(deviceExtension, &snapshot);
+    KswFillCapabilitiesReply(&snapshot, reply);
 
     return KswCompleteIrp(Irp, STATUS_SUCCESS, sizeof(*reply));
 }
@@ -328,6 +385,9 @@ KswHandleGetStatus(
     reply->ProducerDroppedMask = snapshot.ProducerDroppedMask;
     reply->ProducerSuppressedMask = snapshot.ProducerSuppressedMask;
     reply->ProducerBackpressureMask = snapshot.ProducerBackpressureMask;
+    reply->EffectiveProducerMask =
+        snapshot.ActiveProducerMask & snapshot.ProducerEnableMask;
+    reply->LastFailureNtStatus = snapshot.LastFailureStatus;
 
     return KswCompleteIrp(Irp, STATUS_SUCCESS, sizeof(*reply));
 }
@@ -537,7 +597,7 @@ KswHandleSetProducerEnableMask(
     reply->Size = sizeof(*reply);
     reply->PreviousEnableMask = previousEnableMask;
     reply->EffectiveEnableMask = effectiveEnableMask;
-    reply->SupportedProducerMask = KSWORD_SANDBOX_PRODUCER_MASK_CURRENT;
+    reply->SupportedProducerMask = deviceExtension->SupportedProducerMask;
     reply->Flags = 0;
 
     return KswCompleteIrp(Irp, STATUS_SUCCESS, sizeof(*reply));

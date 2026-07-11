@@ -185,7 +185,7 @@ internal sealed class R0CollectorAbiSelfCheckContractScenario : ISmokeTestScenar
         RequireData(abiSelfCheck, "eventHeaderVersion", "65536");
         RequireData(abiSelfCheck, "eventSchemaName", "ksword.sandbox.r0.event");
         RequireData(abiSelfCheck, "eventSchemaVersion", "65536");
-        RequireData(abiSelfCheck, "capabilityFlagsCurrentHex", "0x00000000000003FF");
+        RequireData(abiSelfCheck, "capabilityFlagsCurrentHex", "0x0000000000007FFF");
         RequireData(abiSelfCheck, "producerMaskCurrentHex", "0x0000003F");
         RequireData(abiSelfCheck, "producerMaskDefaultHex", "0x0000003F");
         RequireData(abiSelfCheck, "eventHeaderSize", "56");

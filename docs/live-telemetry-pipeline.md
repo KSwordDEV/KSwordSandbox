@@ -34,6 +34,32 @@ process is running, and performs one final copy after the process exits. This
 keeps v1 deployable in a default Hyper-V Windows 10 guest without installing a
 guest TCP/WebSocket service.
 
+## File-source tolerance and status rows
+
+Live reads use shared file access because `events.json` and
+`driver-events.jsonl` may be copied or appended while the UI is polling. The
+file source handles these states without failing the endpoint:
+
+- missing or temporarily locked files produce an empty result for event-only
+  readers, or a `live.events.source_status` row with `status=missing` /
+  `status=pending` for live-monitor readers;
+- empty files produce a stable `live.events.source_status` row with
+  `status=empty`;
+- partial `events.json` arrays produce `status=pending` until the JSON array is
+  complete;
+- JSONL blank lines are ignored, complete malformed lines are counted in
+  `parseErrorCount`, and a trailing half-line is counted in
+  `partialLineCount` with `status=pending`;
+- duplicate event rows are removed after all sources are read.
+
+`live.events.source_status` rows are host-generated raw events. They use the
+constant timestamp `1970-01-01T00:00:00Z` plus deterministic event ordering so
+cursor positions do not churn when a file is reread in the same state. The row
+contains `format`, `sourceFileName`, `eventCount`, `recordCount`,
+`blankLineCount`, `parseErrorCount`, `partialLineCount`, `sizeBytes`,
+`lastWriteTimeUtc`, and `cursorStable=true`. It is diagnostic only; final
+report classification still uses imported durable events.
+
 ## API surface
 
 The live monitor has two browser-facing surfaces:

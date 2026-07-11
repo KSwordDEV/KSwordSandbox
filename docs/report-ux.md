@@ -13,15 +13,26 @@ Required `report.html`, `report.zh.html`, and `report.en.html` sections:
 
 - Cover / 封面 with job id, generation time, verdict, sample identity, and hashes.
 - Table of contents / 目录.
+- Quick navigation / 快速导航 sticky subnav for high-traffic sections:
+  Risk, Process, Files, Network, R0, VT, Artifacts, and Raw events. Counts
+  should represent currently embedded evidence and must not imply that R0
+  health or VT lookup status is malicious behavior.
 - Risk summary / 风险摘要 cards.
 - Behavior detections / 行为命中.
   Each finding should show the evidence count plus a native `<details>` "Top
   evidence" block with copyable high-signal events so analysts can understand a
   rule hit without opening the full raw table first.
+  Primary behavior verdicts must exclude static-only triage, collection
+  diagnostics, R0 unavailable/health rows, and VirusTotal/reputation findings.
+  Those signals belong in their dedicated quality or reputation sections.
 - MITRE mapping / MITRE 映射.
 - Engine/rule hits.
 - Static analysis / 静态分析 with PE sections, URLs, strings, warnings, and tags.
 - Dynamic summary / 动态分析.
+- VirusTotal / reputation / VirusTotal / 信誉. VT is optional hash-only
+  reputation enrichment. Missing API keys, rate limits, not-found responses, or
+  lookup transport status are enrichment quality/status, not sandbox-observed
+  malicious behavior.
 - Behavior graph / IOC summary / 行为图谱与 IOC 摘要. This is a stable,
   weak-interaction graph view that derives process-to-file, process-to-registry,
   process-to-network, and process-to-artifact edges from normalized telemetry.
@@ -51,6 +62,10 @@ Required `report.html`, `report.zh.html`, and `report.en.html` sections:
 - Registry behavior / 注册表.
 - Network behavior / 网络.
 - R0 / driver events.
+  R0 collection health status must be shown before driver telemetry evidence.
+  Device unavailable, driver health, queue backpressure, and dropped-event
+  counters describe telemetry quality and must not be counted as sample
+  behavior. Health alerts may be highlighted as collection-quality warnings.
 - Failure reasons / 失败原因.
 - Raw normalized events / 原始事件.
   This section should remain collapsed and capped, but before the collapsed
@@ -74,6 +89,13 @@ plain diagnostic dump. The visual contract is:
   never loses the current chapter while scrolling dense evidence. The section
   chrome should follow the Microstep-style bright-blue rhythm with `#43A0FF`
   accents, compact step markers, rounded cards, and summary-first spacing.
+- Heavy event tables should also be bounded inside the section, not just by the
+  whole page card. The renderer should inline a representative window (currently
+  250 rows for ordinary event tables), show hidden-row counts, and point to Raw
+  normalized events or `report.json` for complete evidence.
+- Large static strings/warnings lists should be capped in the default view
+  (currently 200 entries) with a visible hidden-entry count and a pointer to
+  `report.json`.
 - Artifact evidence with a trusted `safeLink` or safe relative path should
   render as explicit Open/Download buttons. Arbitrary host or guest absolute
   filesystem paths must remain copyable evidence text only and must not be used
@@ -90,6 +112,10 @@ plain diagnostic dump. The visual contract is:
   long technical payloads inside nested collapsed details. The main report must
   not directly spread full command lines, script blocks, stdout, or stderr
   across the page; they should stay copyable after deliberate expansion.
+- Ordinary event rows must use the same long-field policy: command line,
+  stdout/stderr, PowerShell/script-block payloads, encoded commands, and other
+  large fields stay collapsed by default even outside the Raw normalized events
+  section.
 - Raw event expansion and layout stability must use native HTML/CSS rather than
   JavaScript. Copy affordances may enhance the static HTML but must not be
   required to reveal evidence.
@@ -103,6 +129,10 @@ plain diagnostic dump. The visual contract is:
   JavaScript.
 - The report must support Chinese and English rendering entrypoints, or
   equivalent core renderer support for `report.zh.html` and `report.en.html`.
+- New report chrome must have Simplified Chinese mappings before release.
+  Common operator text such as Quick navigation, VT lookups/status, collection
+  health/status rows, health alerts, event-table caps, and hidden evidence
+  counts should not remain as large English blocks in `report.zh.html`.
 - Each generated HTML report should expose an in-report bilingual entry bar
   linking the sibling `report.zh.html`, `report.en.html`, and compatibility
   `report.html` files, so local file viewing and served WebUI viewing behave

@@ -61,6 +61,31 @@
 #define KSWORD_SANDBOX_FILE_FILTER_ALTITUDE_TEXT L"385240"
 
 /*
+ * Compile-time producer capability switches.
+ *
+ * Inputs : build definitions may set KSWORD_SANDBOX_ENABLE_NETWORK_WFP_ALE=0
+ *          when a lab image wants an explicit "not supported" network producer
+ *          instead of registering WFP/ALE callouts.
+ * Logic  : SupportedProducerMask and GET_CAPABILITIES are derived from the
+ *          compiled producer set, so a disabled producer is not advertised as
+ *          active or supported.  Runtime registration failures still appear in
+ *          FailedProducerMask and LastNtStatus.
+ * Return : not applicable.
+ */
+#if !defined(KSWORD_SANDBOX_ENABLE_NETWORK_WFP_ALE)
+#define KSWORD_SANDBOX_ENABLE_NETWORK_WFP_ALE 1
+#endif
+
+#if KSWORD_SANDBOX_ENABLE_NETWORK_WFP_ALE
+#define KSWORD_SANDBOX_COMPILED_PRODUCER_MASK \
+    KSWORD_SANDBOX_PRODUCER_MASK_CURRENT
+#else
+#define KSWORD_SANDBOX_COMPILED_PRODUCER_MASK \
+    (KSWORD_SANDBOX_PRODUCER_MASK_CURRENT & \
+        ~KSWORD_SANDBOX_PRODUCER_FLAG_NETWORK)
+#endif
+
+/*
  * Internal event record stored in the fixed non-paged ring.
  *
  * Inputs : filled by KswPushEvent from a typed event id, flags, and an optional
@@ -173,6 +198,12 @@ KswRecordProducerStatus(
     _Inout_ PKSWORD_SANDBOX_DEVICE_EXTENSION DeviceExtension,
     _In_ ULONG ProducerMask,
     _In_ NTSTATUS Status
+    );
+
+VOID
+KswClearProducerActiveMask(
+    _Inout_ PKSWORD_SANDBOX_DEVICE_EXTENSION DeviceExtension,
+    _In_ ULONG ProducerMask
     );
 
 VOID

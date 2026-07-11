@@ -5,7 +5,7 @@ Enables or disables Windows test-signing inside the configured Hyper-V guest VM.
 .DESCRIPTION
 Inputs are a VM name, guest user, and host environment secret containing the
 guest password. Processing uses PowerShell Direct to run bcdedit inside the
-guest. The script is non-interactive and never calls CSignTool.
+guest. The script is non-interactive and never invokes driver-signing tools.
 
 Use this only for isolated analysis VMs/checkpoints that need a test-signed R0
 driver. A reboot is required after changing test-signing state.
