@@ -40,7 +40,16 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(rendererSource, "AppendBehaviorGraph", "Report renderer should include a behavior graph and IOC summary section.");
         RequireContains(rendererSource, "Behavior graph / IOC summary", "Report renderer should expose a graph/IOC section title.");
         RequireContains(rendererSource, "Evidence graph edges", "Report renderer should expose graph edge evidence.");
+        RequireContains(rendererSource, "AppendEvidenceSummaryCards", "Report renderer should expose evidence summary cards.");
+        RequireContains(rendererSource, "Evidence summary cards", "Report renderer should expose evidence summary cards title.");
         RequireContains(rendererSource, "IOC summary", "Report renderer should expose IOC summary cards.");
+        RequireContains(rendererSource, "AppendProcessRelationshipCards", "Report renderer should expose process relationship cards.");
+        RequireContains(rendererSource, "Process relationship cards", "Report renderer should expose process relationship card title.");
+        RequireContains(rendererSource, "AppendNetworkRelationshipCards", "Report renderer should expose network relationship cards.");
+        RequireContains(rendererSource, "Network relationship cards", "Report renderer should expose network relationship card title.");
+        RequireContains(rendererSource, "relationship-details", "Report renderer should use bounded expandable evidence cards.");
+        RequireContains(rendererSource, "Copy process card", "Report renderer should expose copyable process relationship cards.");
+        RequireContains(rendererSource, "Copy network card", "Report renderer should expose copyable network relationship cards.");
         RequireContains(rendererSource, "tls.", "Report renderer should classify TLS events as network behavior.");
         RequireContains(rendererSource, "pcap.", "Report renderer should classify PCAP-derived events as network behavior.");
         RequireContains(rendererSource, "AppendRegistryBehavior", "Report renderer should include registry behavior.");
@@ -176,8 +185,17 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(englishHtml, "No raw source artifacts were indexed; report.json remains the complete normalized source.", "Rendered raw source hints should explain missing raw artifacts.");
         RequireContains(englishHtml, "<section id=\"graph\" class=\"card\"><h2>Behavior graph / IOC summary</h2>", "Rendered HTML should include the behavior graph section.");
         RequireContains(englishHtml, "Evidence graph edges", "Rendered HTML should include graph edge evidence.");
+        RequireContains(englishHtml, "id=\"evidence-summary-cards\"", "Rendered HTML should include evidence summary card anchor.");
+        RequireContains(englishHtml, "Evidence summary cards", "Rendered HTML should include evidence summary cards.");
         RequireContains(englishHtml, "IOC summary", "Rendered HTML should include IOC summary cards.");
         RequireContains(englishHtml, "Network IOCs", "Rendered HTML should include network IOC cards.");
+        RequireContains(englishHtml, "id=\"process-relationship-cards\"", "Rendered HTML should include process relationship card anchor.");
+        RequireContains(englishHtml, "Process relationship cards", "Rendered HTML should include process relationship cards.");
+        RequireContains(englishHtml, "Copy process card", "Rendered HTML should include copyable process relationship cards.");
+        RequireContains(englishHtml, "id=\"network-relationship-cards\"", "Rendered HTML should include network relationship card anchor.");
+        RequireContains(englishHtml, "Network relationship cards", "Rendered HTML should include network relationship cards.");
+        RequireContains(englishHtml, "Copy network card", "Rendered HTML should include copyable network relationship cards.");
+        RequireContains(englishHtml, "Endpoint-centric view.", "Rendered HTML should include cloud-sandbox-style network relationship guidance.");
 
         foreach (var expected in RequiredEnglishSectionFragments())
         {
@@ -243,10 +261,13 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         "静态分析",
         "动态分析",
         "行为图谱 / IOC 摘要",
+        "证据摘要卡",
         "进程详情",
+        "进程关系卡",
         "落地文件",
         "注册表行为",
         "网络行为",
+        "网络关系卡",
         "R0 / 驱动事件",
         "失败原因",
         "原始事件"

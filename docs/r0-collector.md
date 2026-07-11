@@ -15,6 +15,11 @@ Current status:
 - Issues `IOCTL_KSWORD_SANDBOX_GET_STATUS` before and after draining to capture
   queue depth, `ProducerEnableMask`, `ActiveProducerMask`,
   `FailedProducerMask`, supported producer bits, and total counters.
+- Supports `--abi-self-check` / `--contract-self-check` for no-device ABI and
+  event-quality self-check output. This mode emits `r0collector.abiSelfCheck`,
+  records `collectorAbiVersion`, `capabilityFlagsCurrentHex`,
+  `producerMaskCurrentHex`, `jsonlNoisePolicy`, `kernelBackpressurePolicy`, and
+  `queueLossEvidence`, then exits before `CreateFileW` or `DeviceIoControl`.
 - Issues `IOCTL_KSWORD_SANDBOX_POLL` and `IOCTL_KSWORD_SANDBOX_READ_EVENTS`
   in a one-shot or timed polling loop.
 - Converts driver event records into `SandboxEvent` JSON Lines for the Guest
@@ -28,6 +33,8 @@ Current status:
 `guest/KSword.Sandbox.R0Collector/src` is split by runtime responsibility:
 
 - `main.cpp`: minimal `wmain` entry point.
+- `AbiSelfCheck.*`: no-device ABI/event-quality self-check row for CI and
+  operator preflight runs before the driver is installed.
 - `Options.*`: command-line parsing and usage text.
 - `JsonWriter.*`: UTF-8 conversion, JSON escaping, `SandboxEvent` JSONL writer,
   and fallback stderr output.
@@ -186,6 +193,10 @@ Supported options:
   batches; `0` means unlimited until the duration deadline or an empty batch.
   This is the bounded batch limit and stress/backpressure input for safe local
   tests.
+- `--abi-self-check`: emit an ABI/event-quality contract row and exit without
+  opening `\\.\KSwordSandboxDriver`. The collector does not open the driver
+  device and does not call `DeviceIoControl` in this mode.
+- `--contract-self-check`: alias for `--abi-self-check`.
 - `--enable-mask <mask>`: pass an unsigned 32-bit decimal or `0x` hexadecimal
   mask through `IOCTL_KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK`, then record the
   requested/effective mask in `r0collector.driverProducerMask`. The collector
@@ -213,6 +224,64 @@ KSword.Sandbox.R0Collector.exe `
   --enable-mask 0x3 `
   --out -
 ```
+
+## ABI self-check mode
+
+Use `--abi-self-check` before a signed/test-signed driver is available, before
+VM image bake, or in CI where loading a kernel driver is intentionally forbidden:
+
+```powershell
+KSword.Sandbox.R0Collector.exe `
+  --abi-self-check `
+  --heartbeat `
+  --max-events 16 `
+  --max-read-batches 4 `
+  --enable-mask 0x3f `
+  --out C:\Sandbox\r0collector-abi-self-check.jsonl
+```
+
+The mode emits normal `r0collector.started` / optional heartbeat rows, then a
+single `r0collector.abiSelfCheck` row followed by `r0collector.stopped` with
+`reason=abiSelfCheckComplete`. It does not open `\\.\KSwordSandboxDriver`, does
+not require Administrator, and does not issue `DeviceIoControl`; it is purely a
+collector/header contract check.
+
+Important `r0collector.abiSelfCheck` evidence fields:
+
+- `selfCheckPassed`, `opensDriverDevice`, `ioctlIssued`: prove this was a
+  no-device source/ABI self-check instead of a live driver drain.
+- `collectorAbiVersion`, `collectorAbiVersionHex`, `abiVersionMajor`,
+  `abiVersionMinor`, `eventHeaderVersion`, `eventSchemaName`, and
+  `eventSchemaVersion`: prove the collector binary was compiled against the
+  expected public ABI/schema version.
+- `capabilityFlagsCurrentHex`, `producerMaskCurrentHex`,
+  `producerMaskDefaultHex`, and producer/capability name fields: prove the
+  collector knows the current process/image/file/registry/network producer
+  families and optional IOCTL capability bits.
+- `eventHeaderSize`, `healthReplySize`, `capabilitiesReplySize`,
+  `statusReplySize`, `readEventsRequestSize`, `readEventsReplyHeaderSize`, and
+  payload-size fields: capture fixed structure layout assumptions used by the
+  collector parser.
+- `requestedMaxEvents`, `readEventsMaxEvents`, `maxEventsBounds`, and
+  `maxReadBatches`: capture the batch/backpressure knobs the run will use.
+- `readEventsRequestFlagsPolicy`: documents that `READ_EVENTS.Flags` must remain
+  zero.
+- `producerSelectionPolicy`: documents that producer selection belongs only to
+  `IOCTL_KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK`.
+- `jsonlNoisePolicy`: documents that blank live rows are ignored, malformed
+  imported rows must remain visible as `driver.parse_error`, and valid rows with
+  extra fields are tolerated.
+- `kernelBackpressurePolicy`: documents the non-blocking kernel ring behavior:
+  producers do not wait for the collector; overflow overwrites the oldest unread
+  record.
+- `queueLossEvidence`: names the diagnostic fields that must be preserved for
+  lost-record analysis: `TotalEventsDropped`, `EventsDropped`,
+  `TotalEventsSuppressed`, `NextSequence`, per-event `sequence`, and
+  `QueueHighWatermark`.
+
+Treat `--abi-self-check` as a cheap preflight. It proves the collector and public
+headers agree about ABI/event-quality assumptions, but it does not prove that the
+driver service is installed, signed, loaded, or returning live events.
 
 ## VM readiness and one-shot drain
 
@@ -355,8 +424,9 @@ Required synthetic coverage:
   expected in the corpus. Import keeps malformed rows as `driver.parse_error`;
   live display skips or defers bad partial rows without dropping valid rows.
 - Mock/stress inputs: use `--self-test`, `--synthetic`, `--mock`,
-  `--max-events`, `--max-read-batches`, `--duration 0`, `--poll-ms`, and
-  `--heartbeat` to exercise bounded drains and heartbeat evidence.
+  `--abi-self-check`, `--max-events`, `--max-read-batches`, `--duration 0`,
+  `--poll-ms`, and `--heartbeat` to exercise bounded drains, no-device ABI
+  evidence, and heartbeat evidence.
 
 Backpressure is intentionally non-blocking. Kernel producers should not wait on
 collector throughput. If the fixed ring overflows, the oldest unread records can

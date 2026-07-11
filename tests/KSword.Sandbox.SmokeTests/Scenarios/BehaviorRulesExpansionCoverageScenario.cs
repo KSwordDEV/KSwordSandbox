@@ -44,6 +44,16 @@ internal sealed class BehaviorRulesExpansionCoverageScenario : ISmokeTestScenari
         "network-listener-opened",
         "network-nonstandard-listener-port",
         "network-connection-closed",
+        "network-c2-indicator-fields",
+        "dns-c2-tunnel-placeholder",
+        "pcap-artifact-placeholder",
+        "pcap-protocol-summary-placeholder",
+        "pcap-flow-observed-placeholder",
+        "pcap-http-request-observed",
+        "pcap-dns-query-observed",
+        "pcap-tls-clienthello-observed",
+        "smb-network-port-observed",
+        "winrm-network-port-observed",
         "http-executable-download",
         "http-post-or-checkin-beacon",
         "http-doh-request",
@@ -69,6 +79,16 @@ internal sealed class BehaviorRulesExpansionCoverageScenario : ISmokeTestScenari
         "hidden-file-attribute-command"
     ];
 
+    private static readonly IReadOnlyDictionary<string, string[]> PcapImporterDataKeyContract =
+        new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["pcap.summary"] = ["flowCount", "packetCount"],
+            ["pcap.flow"] = ["sourceIp", "sourcePort", "destinationIp", "destinationPort", "protocol"],
+            ["pcap.dns"] = ["sourceIp", "sourcePort", "destinationIp", "destinationPort", "protocol", "queryName", "rcode"],
+            ["pcap.http"] = ["sourceIp", "sourcePort", "destinationIp", "destinationPort", "protocol", "host", "method", "uri", "contentType", "payloadMagic"],
+            ["pcap.tls"] = ["sourceIp", "sourcePort", "destinationIp", "destinationPort", "protocol", "sni"]
+        };
+
     public string ScenarioId => "behavior.rules-expansion-coverage-v2";
 
     /// <inheritdoc />
@@ -81,6 +101,7 @@ internal sealed class BehaviorRulesExpansionCoverageScenario : ISmokeTestScenari
 
         var rules = RuleEngine.LoadRuleSet(behaviorRulesPath);
         var ruleIds = rules.Rules.Select(rule => rule.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        AssertPcapImporterDataKeyContract(rules);
         foreach (var ruleId in RequiredRuleIds)
         {
             SmokeAssert.True(ruleIds.Contains(ruleId), $"Expanded behavior rule '{ruleId}' is missing.");
@@ -100,6 +121,24 @@ internal sealed class BehaviorRulesExpansionCoverageScenario : ISmokeTestScenari
             Passed = true,
             Message = $"Expanded behavior coverage rules load and match {RequiredRuleIds.Length} representative synthetic rules."
         });
+    }
+
+    private static void AssertPcapImporterDataKeyContract(BehaviorRuleSet rules)
+    {
+        foreach (var (eventType, expectedKeys) in PcapImporterDataKeyContract)
+        {
+            var coveredKeys = rules.Rules
+                .Where(rule => rule.EventTypes.Any(candidate => string.Equals(candidate, eventType, StringComparison.OrdinalIgnoreCase)))
+                .SelectMany(rule => rule.DataKeys.Concat(rule.DataContains.Keys))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var expectedKey in expectedKeys)
+            {
+                SmokeAssert.True(
+                    coveredKeys.Contains(expectedKey),
+                    $"PCAP importer field '{eventType}.{expectedKey}' should be covered by a behavior rule data predicate.");
+            }
+        }
     }
 
     /// <summary>
@@ -397,10 +436,31 @@ internal sealed class BehaviorRulesExpansionCoverageScenario : ISmokeTestScenari
             },
             new SandboxEvent
             {
+                EventType = "pcap.flow",
+                Source = "host",
+                Data =
+                {
+                    ["sourceIp"] = "10.0.0.4",
+                    ["sourcePort"] = "445",
+                    ["destinationIp"] = "198.51.100.20",
+                    ["destinationPort"] = "5985",
+                    ["protocol"] = "tcp"
+                }
+            },
+            new SandboxEvent
+            {
                 EventType = "pcap.http",
                 Source = "host",
                 Data =
                 {
+                    ["sourceIp"] = "10.0.0.4",
+                    ["sourcePort"] = "51516",
+                    ["destinationIp"] = "198.51.100.21",
+                    ["destinationPort"] = "443",
+                    ["protocol"] = "http",
+                    ["host"] = "download.example",
+                    ["method"] = "POST",
+                    ["uri"] = "/api/checkin/payload.exe",
                     ["payloadMagic"] = "MZ",
                     ["filename"] = "payload.exe",
                     ["contentType"] = "application/x-msdownload",
@@ -413,8 +473,28 @@ internal sealed class BehaviorRulesExpansionCoverageScenario : ISmokeTestScenari
                 Source = "host",
                 Data =
                 {
+                    ["sourceIp"] = "10.0.0.4",
+                    ["sourcePort"] = "51517",
+                    ["destinationIp"] = "198.51.100.53",
+                    ["destinationPort"] = "53",
+                    ["protocol"] = "dns",
+                    ["queryName"] = "entropy-high.smoke.example",
                     ["rcode"] = "NXDOMAIN",
                     ["classification"] = "dga"
+                }
+            },
+            new SandboxEvent
+            {
+                EventType = "pcap.tls",
+                Source = "host",
+                Data =
+                {
+                    ["sourceIp"] = "10.0.0.4",
+                    ["sourcePort"] = "51518",
+                    ["destinationIp"] = "198.51.100.22",
+                    ["destinationPort"] = "443",
+                    ["protocol"] = "tls",
+                    ["sni"] = "c2.smoke.example"
                 }
             },
             new SandboxEvent
@@ -424,7 +504,17 @@ internal sealed class BehaviorRulesExpansionCoverageScenario : ISmokeTestScenari
                 Data =
                 {
                     ["flowCount"] = "512",
+                    ["packetCount"] = "4096",
                     ["uniqueDestinationCount"] = "120"
+                }
+            },
+            new SandboxEvent
+            {
+                EventType = "pcap.protocol.summary",
+                Source = "host",
+                Data =
+                {
+                    ["protocol"] = "tls"
                 }
             },
             new SandboxEvent

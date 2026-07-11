@@ -1,5 +1,6 @@
 #include "RuntimeLoop.h"
 
+#include "AbiSelfCheck.h"
 #include "IoctlClient.h"
 #include "JsonWriter.h"
 #include "Options.h"
@@ -23,6 +24,7 @@ std::string BuildConfigData(const Options& options) {
     data.AddUnsigned("readEventsMaxEvents", options.readEventsMaxEvents);
     data.AddBool("mockMode", options.mockMode);
     data.AddBool("syntheticMode", options.mockMode);
+    data.AddBool("abiSelfCheck", options.abiSelfCheck);
     data.AddBool("healthOnly", options.healthOnly);
     data.AddBool("heartbeat", options.heartbeat);
     data.AddBool("enableMaskSpecified", options.enableMaskSpecified);
@@ -72,6 +74,7 @@ bool EmitCollectorHeartbeat(
     data.AddSigned("pollIntervalMs", options.pollIntervalMs);
     data.AddBool("mockMode", options.mockMode);
     data.AddBool("syntheticMode", options.mockMode);
+    data.AddBool("abiSelfCheck", options.abiSelfCheck);
     data.AddBool("healthOnly", options.healthOnly);
     data.AddBool("enableMaskSpecified", options.enableMaskSpecified);
     data.AddUnsigned("enableMask", options.enableMask);
@@ -264,6 +267,10 @@ int RunCollector(int argc, wchar_t* argv[]) {
 
     if (!EmitCollectorHeartbeat(writer, options, "collectorStarted", 0, 0, 0)) {
         return kExitRuntimeFailure;
+    }
+
+    if (options.abiSelfCheck) {
+        return RunAbiSelfCheckMode(options, writer);
     }
 
     if (options.mockMode) {

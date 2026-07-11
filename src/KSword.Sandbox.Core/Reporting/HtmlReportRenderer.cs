@@ -42,6 +42,36 @@ public sealed class HtmlReportRenderer
 
     private sealed record ProcessGraphNode(string Label, string Detail, string CopyText);
 
+    private sealed record EvidenceSummaryCard(string Title, string Value, string Detail, string Css, string CopyText);
+
+    private sealed record ProcessRelationshipCard(
+        string Label,
+        string RiskCss,
+        int EventCount,
+        int ChildCount,
+        int FileCount,
+        int RegistryCount,
+        int NetworkCount,
+        string FirstSeen,
+        string LastSeen,
+        string Path,
+        string CommandLine,
+        IReadOnlyList<string> ChildLabels,
+        IReadOnlyList<string> EvidenceLines,
+        string CopyText);
+
+    private sealed record NetworkRelationshipCard(
+        string Target,
+        string RiskCss,
+        int EventCount,
+        string Protocols,
+        string FirstSeen,
+        string LastSeen,
+        IReadOnlyList<string> Processes,
+        IReadOnlyList<string> EventTypes,
+        IReadOnlyList<string> EvidenceLines,
+        string CopyText);
+
     private static readonly JsonSerializerOptions ArtifactJsonOptions = new(JsonSerializerDefaults.Web)
     {
         PropertyNameCaseInsensitive = true,
@@ -208,6 +238,7 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
 .event-table td:first-child{white-space:nowrap}.event-table td:nth-child(2){min-width:140px}.event-table td:nth-child(4){min-width:140px}.event-table td:nth-child(5){min-width:260px}.event-table .evidence{min-width:280px}
 .timeline{border-left:3px solid rgba(67,160,255,.45);margin:14px 0 0 8px;padding-left:18px}.timeline-item{background:#f9fcff;border:1px solid var(--line);border-radius:12px;margin:0 0 12px;padding:10px 12px;position:relative}.timeline-item:before{background:var(--primary);border:3px solid var(--primary-soft);border-radius:999px;content:'';height:11px;left:-26px;position:absolute;top:13px;width:11px}
 .graph-map{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));margin-top:12px}.graph-node{background:#f8fbff;border:1px solid var(--line);border-left:4px solid var(--primary);border-radius:14px;padding:12px}.graph-node strong{display:block;margin-bottom:4px}.graph-node small{color:var(--muted);display:block;line-height:1.4}.edge-table td:nth-child(1),.edge-table td:nth-child(3){min-width:170px}.ioc-grid{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));margin-top:14px}.ioc-card{background:#ffffff;border:1px solid var(--line);border-radius:14px;padding:12px}.ioc-card h3{font-size:15px;margin:0 0 8px}.ioc-card ul{margin:0;padding-left:18px}.ioc-card li{margin:5px 0;word-break:break-word}
+.evidence-summary-grid,.relation-grid{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));margin-top:14px}.evidence-summary-card,.relation-card{background:linear-gradient(180deg,#ffffff,#f7fbff);border:1px solid var(--line);border-radius:18px;box-shadow:0 10px 28px rgba(15,23,42,.06);max-height:46vh;overflow:auto;padding:14px;position:relative}.evidence-summary-card:before,.relation-card:before{background:linear-gradient(180deg,var(--primary),#93c5fd);border-radius:18px 0 0 18px;content:'';height:100%;left:0;position:absolute;top:0;width:3px}.evidence-summary-card h3,.relation-card h3{font-size:15px;margin:0 0 8px;padding-left:4px}.summary-value{color:#075985;display:block;font-size:26px;font-weight:900;letter-spacing:-.04em}.relationship-meta{display:grid;gap:6px;grid-template-columns:repeat(2,minmax(0,1fr));margin:10px 0}.relationship-meta span{background:#eef7ff;border:1px solid #cfe6fb;border-radius:10px;color:#075985;font-size:12px;font-weight:700;padding:7px}.relationship-tags{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}.relationship-tags .chip{margin:0}.relationship-details{background:#fbfdff;border:1px solid var(--line);border-radius:12px;margin-top:10px;padding:8px}.relationship-details summary{cursor:pointer;font-weight:800}.relationship-details pre{max-height:30vh;overflow:auto;white-space:pre-wrap;word-break:break-word}.relationship-title{display:flex;align-items:flex-start;gap:8px;justify-content:space-between}.relationship-title code{max-width:100%;overflow-wrap:anywhere}.anchor-offset{scroll-margin-top:18px}.mono-list{font-family:Consolas,monospace;font-size:12px;line-height:1.45;margin:6px 0 0 0;padding-left:18px}.mono-list li{margin:3px 0;word-break:break-word}
 .tree{font-family:Consolas,monospace;line-height:1.5;margin:12px 0}.tree ul{border-left:1px dashed #b9d7f3;list-style:none;margin:0 0 0 18px;padding-left:14px}.tree li{margin:5px 0}
 .evidence{max-width:560px}.evidence details{background:#f7fbff;border:1px solid var(--line);border-radius:12px;padding:8px}.evidence summary{cursor:pointer;font-weight:700}.evidence pre{white-space:pre-wrap;word-break:break-word}
 .toolbar{display:flex;gap:8px;justify-content:flex-end}.columns{display:grid;gap:14px;grid-template-columns:1fr 1fr}.compact-list{margin:8px 0 0 0;padding-left:18px}.compact-list li{margin:4px 0}
@@ -610,6 +641,8 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
         Metric(html, "Artifact IOCs", artifactIocs.Count.ToString(), "risk-info");
         html.AppendLine("</div>");
 
+        AppendEvidenceSummaryCards(html, report, processNodes, edges, fileIocs, registryIocs, networkIocs, artifactIocs);
+
         if (processNodes.Count > 0)
         {
             html.AppendLine("<h3>Process graph nodes</h3><div class=\"graph-map\">");
@@ -657,6 +690,90 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
         AppendIocCard(html, "Artifact IOCs", artifactIocs, "No linked artifacts were indexed for this report.");
         html.AppendLine("</div>");
         html.AppendLine("</section>");
+    }
+
+    /// <summary>
+    /// Appends operator-facing evidence summary cards for fast triage.
+    /// Inputs are graph nodes, edges, IOC lists, and artifacts already derived
+    /// for the graph; processing emits bounded copyable cards; return is none.
+    /// </summary>
+    private static void AppendEvidenceSummaryCards(
+        StringBuilder html,
+        AnalysisReport report,
+        IReadOnlyCollection<ProcessGraphNode> processNodes,
+        IReadOnlyCollection<BehaviorGraphEdge> edges,
+        IReadOnlyCollection<string> fileIocs,
+        IReadOnlyCollection<string> registryIocs,
+        IReadOnlyCollection<string> networkIocs,
+        IReadOnlyCollection<string> artifactIocs)
+    {
+        var cards = BuildEvidenceSummaryCards(report, processNodes, edges, fileIocs, registryIocs, networkIocs, artifactIocs);
+        html.AppendLine("<h3 id=\"evidence-summary-cards\" class=\"anchor-offset\">Evidence summary cards</h3>");
+        html.AppendLine("<div class=\"evidence-summary-grid\">");
+        foreach (var card in cards)
+        {
+            html.AppendLine($"<article class=\"evidence-summary-card copyable\" data-copy=\"{A(card.CopyText)}\">");
+            html.AppendLine("<div class=\"relationship-title\">");
+            html.AppendLine($"<h3>{E(card.Title)}</h3><span class=\"badge badge-{E(card.Css)}\">{E(card.Value)}</span>");
+            html.AppendLine("</div>");
+            html.AppendLine($"<span class=\"summary-value\">{E(card.Value)}</span>");
+            html.AppendLine($"<p class=\"muted\">{E(card.Detail)}</p>");
+            html.AppendLine($"<details class=\"relationship-details\"><summary>Evidence summary</summary><pre class=\"copyable\" data-copy=\"{A(card.CopyText)}\">{E(card.CopyText)}</pre></details>");
+            html.AppendLine("</article>");
+        }
+
+        html.AppendLine("</div>");
+    }
+
+    /// <summary>
+    /// Builds high-level evidence summary cards without changing report schema.
+    /// Inputs are derived graph and IOC values; processing turns counts and top
+    /// evidence into copyable card payloads; return is a stable card list.
+    /// </summary>
+    private static IReadOnlyList<EvidenceSummaryCard> BuildEvidenceSummaryCards(
+        AnalysisReport report,
+        IReadOnlyCollection<ProcessGraphNode> processNodes,
+        IReadOnlyCollection<BehaviorGraphEdge> edges,
+        IReadOnlyCollection<string> fileIocs,
+        IReadOnlyCollection<string> registryIocs,
+        IReadOnlyCollection<string> networkIocs,
+        IReadOnlyCollection<string> artifactIocs)
+    {
+        var highestSeverity = report.Findings
+            .OrderBy(finding => SeverityRank(finding.Severity))
+            .Select(finding => $"{finding.Severity}: {finding.Title}")
+            .FirstOrDefault() ?? "No behavior rules matched";
+        var topNetwork = networkIocs.Take(5).ToList();
+        var topStorage = fileIocs.Concat(registryIocs).Take(5).ToList();
+        var topArtifacts = artifactIocs.Take(5).ToList();
+
+        return
+        [
+            new EvidenceSummaryCard(
+                "Process evidence",
+                processNodes.Count.ToString(),
+                $"Process nodes and {edges.Count(edge => string.Equals(edge.Relation, "spawn", StringComparison.OrdinalIgnoreCase))} spawn edges. Highest finding: {highestSeverity}.",
+                processNodes.Count > 0 ? "info" : "low",
+                string.Join(Environment.NewLine, ["Process evidence", $"nodes={processNodes.Count}", $"spawnEdges={edges.Count(edge => string.Equals(edge.Relation, "spawn", StringComparison.OrdinalIgnoreCase))}", $"highestFinding={highestSeverity}", .. processNodes.Take(8).Select(node => node.CopyText)])),
+            new EvidenceSummaryCard(
+                "Network evidence",
+                networkIocs.Count.ToString(),
+                topNetwork.Count == 0 ? "No network indicators were extracted." : $"Top endpoints: {string.Join(", ", topNetwork)}",
+                networkIocs.Count > 0 ? "medium" : "low",
+                string.Join(Environment.NewLine, ["Network evidence", $"iocCount={networkIocs.Count}", .. topNetwork])),
+            new EvidenceSummaryCard(
+                "File and registry evidence",
+                (fileIocs.Count + registryIocs.Count).ToString(),
+                topStorage.Count == 0 ? "No file or registry indicators were extracted." : $"Top paths: {string.Join(", ", topStorage)}",
+                fileIocs.Count + registryIocs.Count > 0 ? "medium" : "low",
+                string.Join(Environment.NewLine, ["File and registry evidence", $"fileIocCount={fileIocs.Count}", $"registryIocCount={registryIocs.Count}", .. topStorage])),
+            new EvidenceSummaryCard(
+                "Artifact evidence",
+                artifactIocs.Count.ToString(),
+                topArtifacts.Count == 0 ? "No report artifact indicators were indexed." : $"Top artifacts: {string.Join(", ", topArtifacts)}",
+                artifactIocs.Count > 0 ? "info" : "low",
+                string.Join(Environment.NewLine, ["Artifact evidence", $"artifactIocCount={artifactIocs.Count}", .. topArtifacts]))
+        ];
     }
 
     /// <summary>
@@ -742,6 +859,7 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
     {
         html.AppendLine("<section id=\"process\" class=\"card\"><h2>Process details</h2>");
         AppendProcessTree(html, report);
+        AppendProcessRelationshipCards(html, report);
         AppendEventRows(html, report.Events.Where(e => e.EventType.StartsWith("process.", StringComparison.OrdinalIgnoreCase)).ToList(), artifactLookup, artifacts);
         html.AppendLine("</section>");
     }
@@ -785,7 +903,11 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
         IReadOnlyDictionary<string, List<ArtifactDescriptor>> artifactLookup,
         IReadOnlyCollection<ArtifactDescriptor> artifacts)
     {
-        AppendEventTable(html, "network", "Network behavior", report.Events.Where(IsNetworkEvent), artifactLookup, artifacts);
+        var networkEvents = report.Events.Where(IsNetworkEvent).ToList();
+        html.AppendLine("<section id=\"network\" class=\"card\"><h2>Network behavior</h2>");
+        AppendNetworkRelationshipCards(html, networkEvents);
+        AppendEventRows(html, networkEvents, artifactLookup, artifacts);
+        html.AppendLine("</section>");
     }
 
     /// <summary>
@@ -1149,6 +1271,363 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
         }
 
         html.AppendLine("</li>");
+    }
+
+    /// <summary>
+    /// Appends bounded process relationship cards for cloud-sandbox-like triage.
+    /// Inputs are normalized process-related events; processing groups by
+    /// process identity and summarizes child/file/registry/network evidence;
+    /// return is none.
+    /// </summary>
+    private static void AppendProcessRelationshipCards(StringBuilder html, AnalysisReport report)
+    {
+        var cards = BuildProcessRelationshipCards(report).Take(24).ToList();
+        html.AppendLine("<h3 id=\"process-relationship-cards\" class=\"anchor-offset\">Process relationship cards</h3>");
+        if (cards.Count == 0)
+        {
+            Empty(html, "No process relationship cards could be derived from normalized telemetry.");
+            return;
+        }
+
+        html.AppendLine("<div class=\"relation-grid\">");
+        foreach (var card in cards)
+        {
+            html.AppendLine($"<article class=\"relation-card copyable\" data-copy=\"{A(card.CopyText)}\">");
+            html.AppendLine("<div class=\"relationship-title\">");
+            html.AppendLine($"<h3><code>{E(card.Label)}</code></h3><span class=\"badge badge-{E(card.RiskCss)}\">{E(card.EventCount.ToString())} events</span>");
+            html.AppendLine("</div>");
+            html.AppendLine("<div class=\"relationship-meta\">");
+            html.AppendLine($"<span>Children: {E(card.ChildCount.ToString())}</span><span>Files: {E(card.FileCount.ToString())}</span>");
+            html.AppendLine($"<span>Registry: {E(card.RegistryCount.ToString())}</span><span>Network: {E(card.NetworkCount.ToString())}</span>");
+            html.AppendLine($"<span>First seen: {E(card.FirstSeen)}</span><span>Last seen: {E(card.LastSeen)}</span>");
+            html.AppendLine("</div>");
+            if (!string.IsNullOrWhiteSpace(card.Path) || !string.IsNullOrWhiteSpace(card.CommandLine))
+            {
+                html.AppendLine("<div class=\"section-note\">");
+                if (!string.IsNullOrWhiteSpace(card.Path))
+                {
+                    html.AppendLine($"<strong>Path</strong><br><code class=\"copyable\" data-copy=\"{A(card.Path)}\">{E(card.Path)}</code><br>");
+                }
+
+                if (!string.IsNullOrWhiteSpace(card.CommandLine))
+                {
+                    html.AppendLine($"<strong>Command line</strong><br><code class=\"copyable\" data-copy=\"{A(card.CommandLine)}\">{E(card.CommandLine)}</code>");
+                }
+
+                html.AppendLine("</div>");
+            }
+
+            if (card.ChildLabels.Count > 0)
+            {
+                html.AppendLine("<details class=\"relationship-details\"><summary>Child processes</summary><ul class=\"mono-list\">");
+                foreach (var child in card.ChildLabels.Take(12))
+                {
+                    html.AppendLine($"<li><code class=\"copyable\" data-copy=\"{A(child)}\">{E(child)}</code></li>");
+                }
+
+                html.AppendLine("</ul></details>");
+            }
+
+            html.AppendLine("<div class=\"toolbar\">");
+            html.AppendLine(CopyButton("Copy process card", card.CopyText));
+            html.AppendLine("</div>");
+            html.AppendLine($"<details class=\"relationship-details\"><summary>Top evidence</summary><pre class=\"copyable\" data-copy=\"{A(string.Join(Environment.NewLine, card.EvidenceLines))}\">{E(string.Join(Environment.NewLine, card.EvidenceLines))}</pre></details>");
+            html.AppendLine("</article>");
+        }
+
+        html.AppendLine("</div>");
+    }
+
+    /// <summary>
+    /// Builds process relationship cards from normalized events.
+    /// Inputs are an analysis report; processing groups by stable process key
+    /// and computes child/event category counters; returns copyable cards.
+    /// </summary>
+    private static IReadOnlyList<ProcessRelationshipCard> BuildProcessRelationshipCards(AnalysisReport report)
+    {
+        var starts = report.Events
+            .Where(evt => string.Equals(evt.EventType, "process.start", StringComparison.OrdinalIgnoreCase) && evt.ProcessId.HasValue)
+            .GroupBy(evt => evt.ProcessId!.Value)
+            .Select(group => group.OrderBy(evt => evt.Timestamp).First())
+            .ToList();
+        var childrenByParent = starts
+            .Where(evt => evt.ParentProcessId.HasValue)
+            .GroupBy(evt => evt.ParentProcessId!.Value)
+            .ToDictionary(group => group.Key, group => group.OrderBy(evt => evt.Timestamp).Select(ProcessGraphLabel).Distinct(StringComparer.OrdinalIgnoreCase).ToList());
+
+        return report.Events
+            .Where(evt => evt.ProcessId.HasValue || !string.IsNullOrWhiteSpace(evt.ProcessName))
+            .GroupBy(ProcessIdentityKey, StringComparer.OrdinalIgnoreCase)
+            .Select(group =>
+            {
+                var events = group.OrderBy(evt => evt.Timestamp).ToList();
+                var first = events.First();
+                var last = events.Last();
+                IReadOnlyList<string> childLabels = first.ProcessId.HasValue && childrenByParent.TryGetValue(first.ProcessId.Value, out var children)
+                    ? children
+                    : [];
+                var fileCount = events.Count(IsFileEvent);
+                var registryCount = events.Count(IsRegistryEvent);
+                var networkCount = events.Count(IsNetworkEvent);
+                var label = ProcessGraphLabel(first);
+                var path = events.Select(evt => evt.Path).FirstOrDefault(value => !string.IsNullOrWhiteSpace(value)) ?? string.Empty;
+                var commandLine = events.Select(evt => evt.CommandLine).FirstOrDefault(value => !string.IsNullOrWhiteSpace(value)) ?? string.Empty;
+                var evidenceLines = events.Take(12).Select(EventOneLine).ToList();
+                var copyText = string.Join(
+                    Environment.NewLine,
+                    [
+                        $"process={label}",
+                        $"events={events.Count}",
+                        $"children={childLabels.Count}",
+                        $"files={fileCount}",
+                        $"registry={registryCount}",
+                        $"network={networkCount}",
+                        $"firstSeen={first.Timestamp:u}",
+                        $"lastSeen={last.Timestamp:u}",
+                        $"path={path}",
+                        $"commandLine={commandLine}",
+                        "childProcesses:",
+                        .. childLabels.Take(12),
+                        "evidence:",
+                        .. evidenceLines
+                    ]);
+                return new ProcessRelationshipCard(
+                    label,
+                    ProcessCardRisk(fileCount, registryCount, networkCount, childLabels.Count),
+                    events.Count,
+                    childLabels.Count,
+                    fileCount,
+                    registryCount,
+                    networkCount,
+                    first.Timestamp.ToString("u"),
+                    last.Timestamp.ToString("u"),
+                    path,
+                    commandLine,
+                    childLabels,
+                    evidenceLines,
+                    copyText);
+            })
+            .OrderByDescending(card => card.NetworkCount + card.FileCount + card.RegistryCount + card.ChildCount)
+            .ThenBy(card => card.Label, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    /// <summary>
+    /// Appends network relationship cards before the detailed event table.
+    /// Inputs are network events; processing groups by endpoint/domain/SNI and
+    /// emits protocol/process/evidence cards; return is none.
+    /// </summary>
+    private static void AppendNetworkRelationshipCards(StringBuilder html, IReadOnlyCollection<SandboxEvent> networkEvents)
+    {
+        var cards = BuildNetworkRelationshipCards(networkEvents).Take(24).ToList();
+        html.AppendLine("<h3 id=\"network-relationship-cards\" class=\"anchor-offset\">Network relationship cards</h3>");
+        if (cards.Count == 0)
+        {
+            Empty(html, "No network relationship cards could be derived from DNS, HTTP, TLS, PCAP, TCP, or UDP telemetry.");
+            return;
+        }
+
+        html.AppendLine("<div class=\"section-note\"><strong>Endpoint-centric view.</strong> Network events are grouped by domain, SNI, URL, IP, or endpoint so analysts can read the relationship map without opening raw events first.</div>");
+        html.AppendLine("<div class=\"relation-grid\">");
+        foreach (var card in cards)
+        {
+            html.AppendLine($"<article class=\"relation-card copyable\" data-copy=\"{A(card.CopyText)}\">");
+            html.AppendLine("<div class=\"relationship-title\">");
+            html.AppendLine($"<h3><code>{E(card.Target)}</code></h3><span class=\"badge badge-{E(card.RiskCss)}\">{E(card.Protocols)}</span>");
+            html.AppendLine("</div>");
+            html.AppendLine("<div class=\"relationship-meta\">");
+            html.AppendLine($"<span>Events: {E(card.EventCount.ToString())}</span><span>Processes: {E(card.Processes.Count.ToString())}</span>");
+            html.AppendLine($"<span>First seen: {E(card.FirstSeen)}</span><span>Last seen: {E(card.LastSeen)}</span>");
+            html.AppendLine("</div>");
+            html.AppendLine("<div class=\"relationship-tags\">");
+            foreach (var process in card.Processes.Take(8))
+            {
+                html.AppendLine($"<span class=\"chip chip-info copyable\" data-copy=\"{A(process)}\">{E(process)}</span>");
+            }
+
+            foreach (var eventType in card.EventTypes.Take(8))
+            {
+                html.AppendLine($"<span class=\"chip chip-medium copyable\" data-copy=\"{A(eventType)}\">{E(eventType)}</span>");
+            }
+
+            html.AppendLine("</div>");
+            html.AppendLine("<div class=\"toolbar\">");
+            html.AppendLine(CopyButton("Copy network card", card.CopyText));
+            html.AppendLine("</div>");
+            html.AppendLine($"<details class=\"relationship-details\"><summary>Top evidence</summary><pre class=\"copyable\" data-copy=\"{A(string.Join(Environment.NewLine, card.EvidenceLines))}\">{E(string.Join(Environment.NewLine, card.EvidenceLines))}</pre></details>");
+            html.AppendLine("</article>");
+        }
+
+        html.AppendLine("</div>");
+    }
+
+    /// <summary>
+    /// Builds endpoint-centric network relationship cards.
+    /// Inputs are network events; processing groups by extracted target and
+    /// summarizes protocols/process actors; returns copyable cards.
+    /// </summary>
+    private static IReadOnlyList<NetworkRelationshipCard> BuildNetworkRelationshipCards(IReadOnlyCollection<SandboxEvent> networkEvents)
+    {
+        return networkEvents
+            .Select(evt => new
+            {
+                Event = evt,
+                Target = ExtractNetworkTarget(evt) ?? $"unresolved:{evt.EventType}"
+            })
+            .GroupBy(item => item.Target, StringComparer.OrdinalIgnoreCase)
+            .Select(group =>
+            {
+                var events = group.Select(item => item.Event).OrderBy(evt => evt.Timestamp).ToList();
+                var first = events.First();
+                var last = events.Last();
+                var protocols = events.Select(NetworkProtocolLabel).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(value => value, StringComparer.OrdinalIgnoreCase).ToList();
+                var processes = events.Select(ProcessDisplayName).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(value => value, StringComparer.OrdinalIgnoreCase).ToList();
+                var eventTypes = events.Select(evt => evt.EventType).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(value => value, StringComparer.OrdinalIgnoreCase).ToList();
+                var evidenceLines = events.Take(12).Select(EventOneLine).ToList();
+                var copyText = string.Join(
+                    Environment.NewLine,
+                    [
+                        $"target={group.Key}",
+                        $"events={events.Count}",
+                        $"protocols={string.Join(",", protocols)}",
+                        $"firstSeen={first.Timestamp:u}",
+                        $"lastSeen={last.Timestamp:u}",
+                        "processes:",
+                        .. processes.Take(12),
+                        "eventTypes:",
+                        .. eventTypes.Take(12),
+                        "evidence:",
+                        .. evidenceLines
+                    ]);
+                return new NetworkRelationshipCard(
+                    group.Key,
+                    NetworkCardRisk(events),
+                    events.Count,
+                    protocols.Count == 0 ? "network" : string.Join(" / ", protocols),
+                    first.Timestamp.ToString("u"),
+                    last.Timestamp.ToString("u"),
+                    processes,
+                    eventTypes,
+                    evidenceLines,
+                    copyText);
+            })
+            .OrderByDescending(card => card.EventCount)
+            .ThenBy(card => card.Target, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    /// <summary>
+    /// Chooses a process-card visual severity from relationship counts.
+    /// </summary>
+    private static string ProcessCardRisk(int fileCount, int registryCount, int networkCount, int childCount)
+    {
+        if (networkCount > 0 || registryCount > 0)
+        {
+            return "medium";
+        }
+
+        if (fileCount > 0 || childCount > 0)
+        {
+            return "info";
+        }
+
+        return "low";
+    }
+
+    /// <summary>
+    /// Chooses a network-card visual severity from protocol/error events.
+    /// </summary>
+    private static string NetworkCardRisk(IReadOnlyCollection<SandboxEvent> events)
+    {
+        if (events.Any(evt => IsFailureEvent(evt) || evt.EventType.Contains("parse_error", StringComparison.OrdinalIgnoreCase)))
+        {
+            return "high";
+        }
+
+        if (events.Any(evt => evt.EventType.Contains("http", StringComparison.OrdinalIgnoreCase) ||
+            evt.EventType.Contains("dns", StringComparison.OrdinalIgnoreCase) ||
+            evt.EventType.Contains("tls", StringComparison.OrdinalIgnoreCase) ||
+            evt.EventType.Contains("pcap", StringComparison.OrdinalIgnoreCase)))
+        {
+            return "medium";
+        }
+
+        return "info";
+    }
+
+    /// <summary>
+    /// Returns a compact process display label for relationship cards.
+    /// </summary>
+    private static string ProcessDisplayName(SandboxEvent evt)
+    {
+        if (!string.IsNullOrWhiteSpace(evt.ProcessName) && evt.ProcessId.HasValue)
+        {
+            return $"{evt.ProcessName} ({evt.ProcessId.Value})";
+        }
+
+        if (!string.IsNullOrWhiteSpace(evt.ProcessName))
+        {
+            return evt.ProcessName!;
+        }
+
+        return evt.ProcessId.HasValue ? $"pid:{evt.ProcessId.Value}" : evt.Source;
+    }
+
+    /// <summary>
+    /// Returns a compact protocol label for a network event.
+    /// </summary>
+    private static string NetworkProtocolLabel(SandboxEvent evt)
+    {
+        if (evt.Data.TryGetValue("protocol", out var protocol) && !string.IsNullOrWhiteSpace(protocol))
+        {
+            return protocol.ToUpperInvariant();
+        }
+
+        if (evt.EventType.Contains("dns", StringComparison.OrdinalIgnoreCase))
+        {
+            return "DNS";
+        }
+
+        if (evt.EventType.Contains("http", StringComparison.OrdinalIgnoreCase))
+        {
+            return "HTTP";
+        }
+
+        if (evt.EventType.Contains("tls", StringComparison.OrdinalIgnoreCase))
+        {
+            return "TLS";
+        }
+
+        if (evt.EventType.Contains("pcap", StringComparison.OrdinalIgnoreCase))
+        {
+            return "PCAP";
+        }
+
+        if (evt.EventType.Contains("udp", StringComparison.OrdinalIgnoreCase))
+        {
+            return "UDP";
+        }
+
+        if (evt.EventType.Contains("tcp", StringComparison.OrdinalIgnoreCase))
+        {
+            return "TCP";
+        }
+
+        return "NET";
+    }
+
+    /// <summary>
+    /// Converts one event to a terse relationship-card evidence line.
+    /// </summary>
+    private static string EventOneLine(SandboxEvent evt)
+    {
+        var target = ExtractNetworkTarget(evt);
+        var location = !string.IsNullOrWhiteSpace(target)
+            ? target
+            : !string.IsNullOrWhiteSpace(evt.Path)
+                ? evt.Path
+                : evt.CommandLine ?? "-";
+        return $"{evt.Timestamp:u} | {evt.EventType} | {ProcessDisplayName(evt)} | {location}";
     }
 
     /// <summary>
@@ -1818,6 +2297,16 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
         ("Artifact IOCs", "证据文件 IOC"),
         ("Weak-interaction graph.", "弱交互图谱。"),
         ("This section summarizes process, file, registry, network, and artifact relationships from normalized telemetry so the report remains stable without client-side graph libraries.", "本节从规范化遥测汇总进程、文件、注册表、网络和证据文件关系，不依赖客户端图谱库也能稳定呈现。"),
+        ("Evidence summary cards", "证据摘要卡"),
+        ("Process evidence", "进程证据"),
+        ("Network evidence", "网络证据"),
+        ("File and registry evidence", "文件和注册表证据"),
+        ("Artifact evidence", "证据文件证据"),
+        ("Process nodes and", "进程节点和"),
+        ("spawn edges. Highest finding:", "条启动边。最高命中："),
+        ("Top endpoints:", "主要端点："),
+        ("Top paths:", "主要路径："),
+        ("Top artifacts:", "主要证据文件："),
         ("Process graph nodes", "进程图谱节点"),
         ("Evidence graph edges", "证据图谱边"),
         ("IOC summary", "IOC 摘要"),
@@ -1839,8 +2328,27 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
         ("Copy artifact", "复制证据文件"),
         ("Copy artifacts", "复制证据文件"),
         ("Copy event", "复制事件"),
+        ("Copy process card", "复制进程卡"),
+        ("Copy network card", "复制网络卡"),
         ("Copied", "已复制"),
         ("Process tree", "进程树"),
+        ("Process relationship cards", "进程关系卡"),
+        ("Network relationship cards", "网络关系卡"),
+        ("No process relationship cards could be derived from normalized telemetry.", "无法从规范化遥测生成进程关系卡。"),
+        ("No network relationship cards could be derived from DNS, HTTP, TLS, PCAP, TCP, or UDP telemetry.", "无法从 DNS、HTTP、TLS、PCAP、TCP 或 UDP 遥测生成网络关系卡。"),
+        ("Endpoint-centric view.", "端点中心视图。"),
+        ("Network events are grouped by domain, SNI, URL, IP, or endpoint so analysts can read the relationship map without opening raw events first.", "网络事件按域名、SNI、URL、IP 或端点分组，分析人员无需先打开原始事件即可阅读关系图。"),
+        ("Children:", "子进程："),
+        ("Files:", "文件："),
+        ("Registry:", "注册表："),
+        ("Network:", "网络："),
+        ("Events:", "事件："),
+        ("Processes:", "进程："),
+        ("First seen:", "首次出现："),
+        ("Last seen:", "最后出现："),
+        ("Command line", "命令行"),
+        ("Child processes", "子进程"),
+        ("Top evidence", "关键证据"),
         ("PE sections", "PE 节区"),
         ("Static evidence map", "静态证据图"),
         ("Interesting strings", "可疑字符串"),

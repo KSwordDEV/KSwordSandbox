@@ -23,6 +23,7 @@ internal sealed class R0CollectorContractScenario : ISmokeTestScenario
 
         foreach (var module in new[]
         {
+            "AbiSelfCheck",
             "Options",
             "IoctlClient",
             "EventParser",
@@ -47,9 +48,19 @@ internal sealed class R0CollectorContractScenario : ISmokeTestScenario
         RequireContains(ReadText(Path.Combine(sourceRoot, "Options.cpp")), "--max-events", "max-events should be parsed.");
         RequireContains(ReadText(Path.Combine(sourceRoot, "Options.cpp")), "--max-read-batches", "max-read-batches should be parsed.");
         RequireContains(ReadText(Path.Combine(sourceRoot, "Options.cpp")), "--heartbeat", "heartbeat should be parsed.");
+        RequireContains(ReadText(Path.Combine(sourceRoot, "Options.cpp")), "--abi-self-check", "ABI self-check mode should be parsed.");
+        RequireContains(ReadText(Path.Combine(sourceRoot, "Options.cpp")), "--contract-self-check", "contract self-check alias should be parsed.");
         var ioctlClient = ReadText(Path.Combine(sourceRoot, "IoctlClient.cpp"));
         var eventParser = ReadText(Path.Combine(sourceRoot, "EventParser.cpp"));
         var runtimeLoop = ReadText(Path.Combine(sourceRoot, "RuntimeLoop.cpp"));
+        var abiSelfCheck = ReadText(Path.Combine(sourceRoot, "AbiSelfCheck.cpp"));
+        RequireContains(runtimeLoop, "RunAbiSelfCheckMode", "Runtime loop should support no-device ABI self-check mode.");
+        RequireContains(abiSelfCheck, "r0collector.abiSelfCheck", "ABI self-check should emit a dedicated JSONL row.");
+        RequireContains(abiSelfCheck, "collectorAbiVersion", "ABI self-check should preserve collector ABI version.");
+        RequireContains(abiSelfCheck, "capabilityFlagsCurrentHex", "ABI self-check should preserve capability flags.");
+        RequireContains(abiSelfCheck, "producerMaskCurrentHex", "ABI self-check should preserve producer mask.");
+        RequireContains(abiSelfCheck, "jsonlNoisePolicy", "ABI self-check should describe JSONL noise policy.");
+        RequireContains(abiSelfCheck, "kernelBackpressurePolicy", "ABI self-check should describe kernel backpressure policy.");
         RequireContains(ioctlClient, "EmitDriverCapabilities", "R0Collector should negotiate capabilities.");
         RequireContains(ioctlClient, "EmitDriverStatus", "R0Collector should emit status snapshots.");
         RequireContains(ioctlClient, "EmitDriverSetProducerEnableMask", "R0Collector should support producer-mask IOCTL negotiation.");
@@ -85,6 +96,8 @@ internal sealed class R0CollectorContractScenario : ISmokeTestScenario
         RequireContains(collectorDoc, "batch limit", "r0-collector.md should describe the batch limit option.");
         RequireContains(collectorDoc, "requestedMaxEvents", "r0-collector.md should describe the requested max-events field.");
         RequireContains(collectorDoc, "drainStoppedAtBatchLimit", "r0-collector.md should describe the batch-limit exit field.");
+        RequireContains(collectorDoc, "--abi-self-check", "r0-collector.md should describe the ABI self-check mode.");
+        RequireContains(collectorDoc, "r0collector.abiSelfCheck", "r0-collector.md should document ABI self-check output.");
 
         return Task.FromResult(new SmokeTestResult
         {

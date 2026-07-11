@@ -194,10 +194,24 @@ internal sealed class R0CollectorEventQualityScenario : ISmokeTestScenario
 
         RequireContains(options, "--max-events", "Collector CLI must expose a READ_EVENTS max-events stress knob.");
         RequireContains(options, "--max-read-batches", "Collector CLI must expose a bounded drain batch knob.");
+        RequireContains(options, "--abi-self-check", "Collector CLI must expose a no-device ABI self-check knob.");
         RequireContains(runtimeLoop, "drainStoppedAtBatchLimit", "Runtime loop must expose batch-limit backpressure stop evidence.");
+        RequireContains(runtimeLoop, "RunAbiSelfCheckMode", "Runtime loop must expose ABI self-check mode before live driver open.");
         RequireContains(syntheticMode, "typedPayloadStatus", "Synthetic rows must mark typed payload status.");
         RequireContains(syntheticMode, "mock", "Synthetic rows must mark mock mode.");
         RequireContains(syntheticMode, "eventSchemaVersion", "Synthetic rows must include event schema version.");
+        var abiSelfCheck = ReadRepositoryText(
+            context,
+            "guest",
+            "KSword.Sandbox.R0Collector",
+            "src",
+            "AbiSelfCheck.cpp");
+        RequireContains(abiSelfCheck, "r0collector.abiSelfCheck", "ABI self-check must emit a dedicated JSONL event.");
+        RequireContains(abiSelfCheck, "capabilityFlagsCurrentHex", "ABI self-check must include capability flags.");
+        RequireContains(abiSelfCheck, "producerMaskCurrentHex", "ABI self-check must include producer mask.");
+        RequireContains(abiSelfCheck, "jsonlNoisePolicy", "ABI self-check must describe JSONL noise filtering.");
+        RequireContains(abiSelfCheck, "kernelBackpressurePolicy", "ABI self-check must describe non-blocking ring backpressure.");
+        RequireContains(abiSelfCheck, "queueLossEvidence", "ABI self-check must name loss evidence fields.");
 
         foreach (var doc in new[] { collectorDoc, schemaDoc, coreDoc, driverReadme })
         {

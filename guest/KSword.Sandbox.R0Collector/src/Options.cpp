@@ -115,6 +115,11 @@ bool ParseArguments(int argc, wchar_t* argv[], Options* options, std::wstring* e
             continue;
         }
 
+        if (arg == L"--abi-self-check" || arg == L"--contract-self-check") {
+            options->abiSelfCheck = true;
+            continue;
+        }
+
         if (arg == L"--health") {
             options->healthOnly = true;
             continue;
@@ -194,6 +199,8 @@ void PrintUsage(const wchar_t* programName) {
         << L"      --max-events <count>     READ_EVENTS MaxEvents request cap 1..1024 (default: 64)\n"
         << L"      --max-read-batches <n>   Stop after n READ_EVENTS batches; 0 means unlimited\n"
         << L"      --enable-mask <mask>     Set producer enable mask through SET_PRODUCER_ENABLE_MASK\n"
+        << L"      --abi-self-check         Emit ABI/event-quality contract row and exit without opening the driver\n"
+        << L"      --contract-self-check    Alias for --abi-self-check\n"
         << L"      --health                 Open the device, emit GET_HEALTH, and exit without draining\n"
         << L"      --heartbeat              Emit r0collector.heartbeat lifecycle rows\n"
         << L"      --mock                   Emit synthetic rows without opening a device\n"

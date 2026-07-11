@@ -1,5 +1,7 @@
 using System.Text.Json;
 using KSword.Sandbox.Abstractions;
+using KSword.Sandbox.Core.Artifacts;
+using KSword.Sandbox.Core.Network;
 using KSword.Sandbox.Core.Orchestration;
 using KSword.Sandbox.Core.Reporting;
 using KSword.Sandbox.Core.Rules;
@@ -277,6 +279,11 @@ public sealed class SandboxJobService
     {
         try
         {
+            if (ArtifactDescriptorFactory.IsPacketCapturePath(path))
+            {
+                return new PcapArtifactEventImporter().Import(path).Select(NormalizeEvent).ToList();
+            }
+
             return LoadEventsIfPresent(path);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or InvalidDataException)
@@ -465,7 +472,8 @@ public sealed class SandboxJobService
             .EnumerateFiles(guestRoot, "*.*", SearchOption.AllDirectories)
             .Where(path =>
                 string.Equals(Path.GetFileName(path), "events.json", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(Path.GetExtension(path), ".jsonl", StringComparison.OrdinalIgnoreCase))
+                string.Equals(Path.GetExtension(path), ".jsonl", StringComparison.OrdinalIgnoreCase) ||
+                ArtifactDescriptorFactory.IsPacketCapturePath(path))
             .OrderBy(path => File.GetLastWriteTimeUtc(path)))
         {
             var fullPath = Path.GetFullPath(path);
@@ -485,11 +493,6 @@ public sealed class SandboxJobService
     private static List<SandboxEvent> LoadGuestEventsWithDriverJsonl(string eventsPath)
     {
         var events = LoadEventsFromFile(eventsPath);
-        if (!string.Equals(Path.GetExtension(eventsPath), ".json", StringComparison.OrdinalIgnoreCase))
-        {
-            return events.Select(NormalizeEvent).ToList();
-        }
-
         var eventKeys = events.Select(EventKey).ToHashSet(StringComparer.Ordinal);
         var searchRoot = Path.GetDirectoryName(eventsPath);
         if (string.IsNullOrWhiteSpace(searchRoot))
@@ -510,7 +513,40 @@ public sealed class SandboxJobService
             }
         }
 
+        foreach (var pcapPath in EnumeratePacketCaptures(searchRoot))
+        {
+            foreach (var pcapEvent in new PcapArtifactEventImporter().Import(pcapPath))
+            {
+                var normalized = NormalizeEvent(pcapEvent);
+                if (eventKeys.Add(EventKey(normalized)))
+                {
+                    events.Add(normalized);
+                }
+            }
+        }
+
         return events.Select(NormalizeEvent).ToList();
+    }
+
+    /// <summary>
+    /// Enumerates PCAP/PCAPNG artifacts near a guest import path.
+    /// Inputs are the primary guest output directory; processing searches
+    /// recursively for packet-capture artifacts; the method returns stable paths.
+    /// </summary>
+    private static IEnumerable<string> EnumeratePacketCaptures(string searchRoot)
+    {
+        if (!Directory.Exists(searchRoot))
+        {
+            yield break;
+        }
+
+        foreach (var path in Directory
+            .EnumerateFiles(searchRoot, "*.*", SearchOption.AllDirectories)
+            .Where(ArtifactDescriptorFactory.IsPacketCapturePath)
+            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase))
+        {
+            yield return path;
+        }
     }
 
     /// <summary>
@@ -551,6 +587,11 @@ public sealed class SandboxJobService
     /// </summary>
     private static List<SandboxEvent> LoadEventsFromFile(string path)
     {
+        if (ArtifactDescriptorFactory.IsPacketCapturePath(path))
+        {
+            return new PcapArtifactEventImporter().Import(path).Select(NormalizeEvent).ToList();
+        }
+
         return string.Equals(Path.GetExtension(path), ".jsonl", StringComparison.OrdinalIgnoreCase)
             ? LoadEventsFromJsonLines(path)
             : (JsonSerializer.Deserialize<List<SandboxEvent>>(File.ReadAllText(path), JsonOptions) ?? []).Select(NormalizeEvent).ToList();

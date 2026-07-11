@@ -59,6 +59,15 @@ engine does not support yet.
     DNS-over-HTTPS requests, and CONNECT/WebSocket/proxy tunnel indicators.
   - TLS invalid/self-signed certificate evidence plus ECH/ESNI metadata
     placeholders.
+  - Baseline PCAP import placeholders for `pcap.summary`,
+    `pcap.protocol.summary`, `pcap.flow`, `pcap.tcp`, `pcap.udp`,
+    `pcap.http`, `pcap.dns`, `pcap.tls`, `network.pcap`, `pcap.packet`, and
+    `network.flow`.
+  - PCAP importer field aliases for summary counts (`flowCount`,
+    `packetCount`), flow endpoints (`sourceIp`, `sourcePort`,
+    `destinationIp`, `destinationPort`, `protocol`), HTTP metadata (`host`,
+    `method`, `uri`, `contentType`, `payloadMagic`), DNS metadata
+    (`queryName`, `rcode`), and TLS SNI (`sni`).
   - PCAP executable payload, NXDOMAIN/DGA DNS, upload/exfiltration, and
     high-fan-out flow placeholders.
 - Network/lateral movement:

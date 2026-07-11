@@ -15,6 +15,7 @@ struct Options {
     unsigned long readEventsMaxEvents = kReadEventsMaxEvents;
     unsigned long enableMask = 0;
     bool enableMaskSpecified = false;
+    bool abiSelfCheck = false;
     bool mockMode = false;
     bool healthOnly = false;
     bool heartbeat = false;

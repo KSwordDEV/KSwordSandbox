@@ -90,6 +90,7 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="src\AbiSelfCheck.cpp" />
     <ClCompile Include="src\Common.cpp" />
     <ClCompile Include="src\EventParser.cpp" />
     <ClCompile Include="src\IoctlClient.cpp" />
@@ -100,6 +101,7 @@
     <ClCompile Include="src\SyntheticMode.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="src\AbiSelfCheck.h" />
     <ClInclude Include="src\Common.h" />
     <ClInclude Include="src\EventParser.h" />
     <ClInclude Include="src\IoctlClient.h" />

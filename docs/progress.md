@@ -7,20 +7,20 @@ a final HTML report.
 
 ## Current estimated completion
 
-- Overall v1 deliverable: **65%**
-- Minimum usable E2E chain on this host: **78%**
+- Overall v1 deliverable: **67%**
+- Minimum usable E2E chain on this host: **80%**
 - Repository architecture, docs, module boundaries, policy: **82%**
-- Core job/event/rule/report models: **72%**
+- Core job/event/rule/report models: **74%**
 - Web/API/WebUI submission and job UX: **76%**
 - Live raw telemetry contract: **80%**
 - Hyper-V runbook generation and execution recording: **69%**
 - Golden VM / payload staging / operator readiness: **58%**
 - Guest Agent dynamic collection: **72%**
-- R0 Driver + R0Collector: **57%**
-- Static analysis and behavior rules: **64%**
-- HTML report generation: **75%**
-- Artifact manifest and dropped-file plumbing: **70%**
-- Tests and quality gates: **71%**
+- R0 Driver + R0Collector: **60%**
+- Static analysis and behavior rules: **66%**
+- HTML report generation: **79%**
+- Artifact manifest and dropped-file plumbing: **72%**
+- Tests and quality gates: **74%**
 - Install/operations/security hardening: **32%**
 
 ## Evidence already present
@@ -33,7 +33,11 @@ a final HTML report.
 - R0 driver project is in the main solution and has control-device, ring-buffer,
   health/poll/read-events, process/image, file, registry, and WFP source paths.
 - R0Collector builds as a native x64 console application and emits
-  `SandboxEvent`-compatible JSONL in mock and driver modes.
+  `SandboxEvent`-compatible JSONL in mock and driver modes. It also has a
+  no-device `--abi-self-check` / `--contract-self-check` mode that records ABI
+  version, capability flags, producer masks, structure sizes, JSONL noise
+  policy, kernel backpressure policy, and queue-loss evidence without opening
+  the driver device.
 - Report renderer has cloud-sandbox-style sections for risk, behavior, MITRE,
   static, dynamic, behavior graph / IOC summary, artifact links, process, file,
   registry, network, failures, and raw events.
@@ -101,9 +105,16 @@ a final HTML report.
 - Host artifact indexing now exposes collection summaries and can consume
   externally generated `.pcap` / `.pcapng` artifacts without starting a sniffer;
   packet captures appear in report artifact links when present.
+- PCAP artifacts are now parsed into bounded normalized `pcap.summary`,
+  `pcap.flow`, `pcap.dns`, `pcap.http`, and `pcap.tls` events for Ethernet /
+  IPv4 / TCP / UDP captures. Guest event import merges sibling PCAP files into
+  report regeneration, and smoke coverage verifies DNS, HTTP, TLS/SNI, flow,
+  protocol summary, and rule hits.
 - The report now includes a static HTML/CSS weak-interaction behavior graph and
   IOC summary cards, deriving process-to-file, process-to-registry,
-  process-to-network, and process-to-artifact edges from normalized events.
+  process-to-network, and process-to-artifact edges from normalized events. It
+  now also has bounded evidence summary cards, process relationship cards, and
+  network relationship cards with folded evidence blocks and copy-friendly text.
 - Current validation evidence for this snapshot:
   `dotnet build .\KSwordSandbox.sln`, native driver/collector compile-only
   build, smoke tests, local pipeline smoke, and repository policy all pass.
@@ -118,28 +129,32 @@ a final HTML report.
 1. Turn the currently single-job/single-golden-VM flow into an operator-safe
    packaged experience: clearer install/run checks, better failure recovery, and
    one-click defaults that do not require reading runbook internals.
-2. Harden the real R0 path beyond the successful smoke: ABI versioning,
-   backpressure, producer-specific stress tests, unload/reload reliability, and
-   better event filtering.
-3. Continue report evidence polish beyond the new graph/IOC cards: add better
-   visual process-tree layout, network relationship grouping, and richer
-   artifact cards.
-4. Finish real screenshot cadence and PCAP/network-flow capture, then connect
-   packet-derived DNS/HTTP/TLS rows to the final report.
+2. Harden the real R0 path beyond the successful smoke: producer-specific
+   stress tests, unload/reload reliability, tighter event filtering, and live
+   ABI self-check execution in the guest image.
+3. Continue report evidence polish beyond the new relationship cards: improve
+   visual process-tree layout, timeline grouping, artifact cards, and screenshot
+   evidence placement.
+4. Finish real screenshot capture validation and PCAP/network-flow capture. The
+   host importer can parse existing packet captures, but the guest still needs a
+   reliable opt-in sniffer path that produces those artifacts automatically.
 5. Move from single golden VM restore to safer temporary VM or differencing-disk
    isolation before any broader sample testing.
-6. Add VirusTotal settings/hash lookup and keep failures silent unless the
-   operator opens the settings/status page.
+6. Broaden VirusTotal and external intelligence presentation beyond the first
+   hash-only lookup while keeping missing keys and API failures quiet by default.
 
 ## Next best work
 
-- Finish R0 ABI/capability negotiation and typed payload parsing.
+- Run the new R0Collector no-device ABI self-check inside the prepared guest
+  image and wire its output into operator readiness checks.
+- Finish deeper R0 typed payload parsing, producer-specific stress tests, and
+  unload/reload reliability checks.
 - Run the Hyper-V E2E PlanOnly/full-validation gates on the target host after
   each script change, then run the live mode only from an elevated test session.
 - Use `Prepare-HarmlessSample.ps1` and the runbook checklist to build the
   executable outside git for live Hyper-V validation.
-- Promote packet-capture placeholder into a real opt-in PCAP collection path or
-  a host-side importer that can consume `.pcap/.pcapng` artifacts.
-- Add visual process-tree polish and network relationship grouping to the final
-  report graph.
+- Promote packet-capture placeholder into a real opt-in PCAP collection path in
+  the guest; the host-side `.pcap/.pcapng` importer is now present.
+- Add richer visual process-tree layout, timeline grouping, and artifact cards
+  on top of the new process/network relationship cards.
 - Run native build and full smoke after each R0/collector merge.

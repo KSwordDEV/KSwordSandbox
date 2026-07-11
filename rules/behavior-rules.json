@@ -2956,6 +2956,7 @@
       "eventTypes": [
         "network.http",
         "http.request",
+        "pcap.http",
         "network.tls",
         "tls.connection",
         "driver.network"
@@ -3018,6 +3019,7 @@
       "eventTypes": [
         "dns.query",
         "network.dns",
+        "pcap.dns",
         "driver.network"
       ],
       "dataContains": {
@@ -3094,6 +3096,7 @@
       "eventTypes": [
         "network.tls",
         "tls.connection",
+        "pcap.tls",
         "driver.network"
       ],
       "dataKeys": [
@@ -3381,10 +3384,15 @@
         "driver.network",
         "pcap.tcp",
         "pcap.udp",
+        "pcap.flow",
         "network.flow"
       ],
       "dataContains": {
         "remotePort": [
+          "445",
+          "139"
+        ],
+        "sourcePort": [
           "445",
           "139"
         ],
@@ -3418,10 +3426,15 @@
         "network.tcp",
         "driver.network",
         "pcap.tcp",
+        "pcap.flow",
         "network.flow"
       ],
       "dataContains": {
         "remotePort": [
+          "5985",
+          "5986"
+        ],
+        "sourcePort": [
           "5985",
           "5986"
         ],
@@ -3793,9 +3806,12 @@
         "srcIp",
         "dstIp",
         "sourceIp",
+        "sourcePort",
         "destinationIp",
+        "destinationPort",
         "remoteAddress",
         "remotePort",
+        "protocol",
         "protocolName"
       ],
       "tags": [
@@ -3808,7 +3824,7 @@
       "id": "pcap-http-request-observed",
       "title": "PCAP HTTP request observed",
       "severity": "medium",
-      "summary": "A normalized HTTP or PCAP HTTP event included host, URL, method, or user-agent metadata.",
+      "summary": "A normalized HTTP or PCAP HTTP event included endpoint, host, URI, method, content-type, user-agent, or payload metadata.",
       "mitreTechniqueId": "T1071.001",
       "mitreTechniqueName": "Web Protocols",
       "eventTypes": [
@@ -3817,11 +3833,19 @@
         "network.http"
       ],
       "dataKeys": [
+        "sourceIp",
+        "sourcePort",
+        "destinationIp",
+        "destinationPort",
+        "protocol",
         "host",
         "url",
+        "uri",
         "method",
         "userAgent",
-        "requestUri"
+        "requestUri",
+        "contentType",
+        "payloadMagic"
       ],
       "tags": [
         "network",
@@ -3833,7 +3857,7 @@
       "id": "pcap-dns-query-observed",
       "title": "PCAP DNS query observed",
       "severity": "medium",
-      "summary": "A normalized DNS or PCAP DNS event included query metadata.",
+      "summary": "A normalized DNS or PCAP DNS event included endpoint, query, or response-code metadata.",
       "mitreTechniqueId": "T1071.004",
       "mitreTechniqueName": "DNS",
       "eventTypes": [
@@ -3842,11 +3866,17 @@
         "network.dns"
       ],
       "dataKeys": [
+        "sourceIp",
+        "sourcePort",
+        "destinationIp",
+        "destinationPort",
+        "protocol",
         "queryName",
         "qname",
         "domain",
         "rrname",
-        "recordType"
+        "recordType",
+        "rcode"
       ],
       "tags": [
         "network",
@@ -3858,7 +3888,7 @@
       "id": "pcap-tls-clienthello-observed",
       "title": "PCAP TLS ClientHello observed",
       "severity": "medium",
-      "summary": "A normalized TLS or PCAP TLS event included SNI, JA3, ALPN, or TLS version metadata.",
+      "summary": "A normalized TLS or PCAP TLS event included endpoint, SNI, JA3, ALPN, or TLS version metadata.",
       "mitreTechniqueId": "T1573",
       "mitreTechniqueName": "Encrypted Channel",
       "eventTypes": [
@@ -3867,6 +3897,11 @@
         "tls.connection"
       ],
       "dataKeys": [
+        "sourceIp",
+        "sourcePort",
+        "destinationIp",
+        "destinationPort",
+        "protocol",
         "sni",
         "ja3",
         "ja3s",
@@ -3955,6 +3990,14 @@
           "https://"
         ],
         "remotePort": [
+          "8080",
+          "8000",
+          "8443",
+          "9001",
+          "4444",
+          "1337"
+        ],
+        "sourcePort": [
           "8080",
           "8000",
           "8443",
@@ -4768,6 +4811,14 @@
           ".hta",
           ".zip"
         ],
+        "uri": [
+          ".exe",
+          ".dll",
+          ".ps1",
+          ".vbs",
+          ".hta",
+          ".zip"
+        ],
         "contentType": [
           "application/x-msdownload",
           "application/octet-stream",
@@ -4775,6 +4826,10 @@
           "application/x-dosexec"
         ],
         "responseBodyMagic": [
+          "MZ",
+          "PK"
+        ],
+        "payloadMagic": [
           "MZ",
           "PK"
         ],
@@ -4825,6 +4880,14 @@
           "/api/",
           "/tasks"
         ],
+        "uri": [
+          "/gate",
+          "/panel",
+          "/checkin",
+          "/beacon",
+          "/api/",
+          "/tasks"
+        ],
         "behavior": [
           "beacon",
           "checkin",
@@ -4862,6 +4925,9 @@
           "application/dns-message"
         ],
         "requestUri": [
+          "/dns-query"
+        ],
+        "uri": [
           "/dns-query"
         ],
         "contentType": [
@@ -5020,6 +5086,12 @@
           ".dll",
           ".ps1",
           ".zip"
+        ],
+        "uri": [
+          ".exe",
+          ".dll",
+          ".ps1",
+          ".zip"
         ]
       },
       "tags": [
@@ -5146,10 +5218,14 @@
         "network.netstat.added",
         "driver.network",
         "pcap.tcp",
+        "pcap.flow",
         "network.flow"
       ],
       "dataContains": {
         "remotePort": [
+          "3389"
+        ],
+        "sourcePort": [
           "3389"
         ],
         "destinationPort": [
@@ -5185,10 +5261,14 @@
         "network.netstat.added",
         "driver.network",
         "pcap.tcp",
+        "pcap.flow",
         "network.flow"
       ],
       "dataContains": {
         "remotePort": [
+          "22"
+        ],
+        "sourcePort": [
           "22"
         ],
         "destinationPort": [
@@ -5225,10 +5305,19 @@
         "driver.network",
         "pcap.tcp",
         "pcap.udp",
+        "pcap.flow",
         "network.flow"
       ],
       "dataContains": {
         "remotePort": [
+          "389",
+          "636",
+          "88",
+          "464",
+          "3268",
+          "3269"
+        ],
+        "sourcePort": [
           "389",
           "636",
           "88",
@@ -5279,11 +5368,20 @@
         "network.netstat.added",
         "driver.network",
         "pcap.tcp",
+        "pcap.flow",
         "network.flow",
         "network.tcp.listener.opened"
       ],
       "dataContains": {
         "remotePort": [
+          "9050",
+          "9051",
+          "9150",
+          "1080",
+          "3128",
+          "8080"
+        ],
+        "sourcePort": [
           "9050",
           "9051",
           "9150",
