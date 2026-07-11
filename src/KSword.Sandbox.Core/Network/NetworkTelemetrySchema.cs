@@ -28,6 +28,8 @@ public static class NetworkTelemetrySchema
         IDictionary<string, string>? extra = null)
     {
         var normalizedProtocol = NormalizeProtocol(protocol);
+        var normalizedSourceIp = NormalizeAddress(sourceIp);
+        var normalizedDestinationIp = NormalizeAddress(destinationIp);
         var data = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
             ["schema"] = SchemaVersion,
@@ -39,20 +41,21 @@ public static class NetworkTelemetrySchema
             ["protocolName"] = normalizedProtocol
         };
 
-        AddIfNotEmpty(data, "sourceIp", sourceIp);
-        AddIfNotEmpty(data, "src", sourceIp);
-        AddIfNotEmpty(data, "srcIp", sourceIp);
-        AddIfNotEmpty(data, "sourceAddress", sourceIp);
-        AddIfNotEmpty(data, "clientIp", sourceIp);
-        AddIfNotEmpty(data, "localAddress", sourceIp);
-        AddIfNotEmpty(data, "destinationIp", destinationIp);
-        AddIfNotEmpty(data, "dest", destinationIp);
-        AddIfNotEmpty(data, "dst", destinationIp);
-        AddIfNotEmpty(data, "dstIp", destinationIp);
-        AddIfNotEmpty(data, "destIp", destinationIp);
-        AddIfNotEmpty(data, "destinationAddress", destinationIp);
-        AddIfNotEmpty(data, "serverIp", destinationIp);
-        AddIfNotEmpty(data, "remoteAddress", destinationIp);
+        AddIfNotEmpty(data, "ipFamily", IpFamily(normalizedSourceIp, normalizedDestinationIp));
+        AddIfNotEmpty(data, "sourceIp", normalizedSourceIp);
+        AddIfNotEmpty(data, "src", normalizedSourceIp);
+        AddIfNotEmpty(data, "srcIp", normalizedSourceIp);
+        AddIfNotEmpty(data, "sourceAddress", normalizedSourceIp);
+        AddIfNotEmpty(data, "clientIp", normalizedSourceIp);
+        AddIfNotEmpty(data, "localAddress", normalizedSourceIp);
+        AddIfNotEmpty(data, "destinationIp", normalizedDestinationIp);
+        AddIfNotEmpty(data, "dest", normalizedDestinationIp);
+        AddIfNotEmpty(data, "dst", normalizedDestinationIp);
+        AddIfNotEmpty(data, "dstIp", normalizedDestinationIp);
+        AddIfNotEmpty(data, "destIp", normalizedDestinationIp);
+        AddIfNotEmpty(data, "destinationAddress", normalizedDestinationIp);
+        AddIfNotEmpty(data, "serverIp", normalizedDestinationIp);
+        AddIfNotEmpty(data, "remoteAddress", normalizedDestinationIp);
         AddPort(data, "sourcePort", sourcePort);
         AddPort(data, "srcPort", sourcePort);
         AddPort(data, "clientPort", sourcePort);
@@ -63,8 +66,8 @@ public static class NetworkTelemetrySchema
         AddPort(data, "serverPort", destinationPort);
         AddPort(data, "remotePort", destinationPort);
 
-        var sourceEndpoint = Endpoint(sourceIp, sourcePort);
-        var destinationEndpoint = Endpoint(destinationIp, destinationPort);
+        var sourceEndpoint = Endpoint(normalizedSourceIp, sourcePort);
+        var destinationEndpoint = Endpoint(normalizedDestinationIp, destinationPort);
         AddIfNotEmpty(data, "sourceEndpoint", sourceEndpoint);
         AddIfNotEmpty(data, "srcEndpoint", sourceEndpoint);
         AddIfNotEmpty(data, "clientEndpoint", sourceEndpoint);
@@ -207,10 +210,18 @@ public static class NetworkTelemetrySchema
         AddIfNotEmpty(data, "collectionName", source.CollectionName);
         AddIfNotEmpty(data, "evidenceRole", source.EvidenceRole);
         AddIfNotEmpty(data, "importMode", source.ImportMode);
+        if (IsPacketCaptureSource(source))
+        {
+            AddIfNotEmpty(data, "pcapSourceArtifactPath", source.FullPath);
+            AddIfNotEmpty(data, "pcapSourceArtifactName", source.Name);
+            AddIfNotEmpty(data, "pcapSourceArtifactRelativePath", source.RelativePath);
+        }
+
         foreach (var pair in source.Metadata ?? EmptyMetadata)
         {
             if (pair.Key.StartsWith("network.", StringComparison.OrdinalIgnoreCase) ||
                 pair.Key.StartsWith("pcap", StringComparison.OrdinalIgnoreCase) ||
+                pair.Key.StartsWith("sourcePcap", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(pair.Key, "captureState", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(pair.Key, "capturePhase", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(pair.Key, "sha256", StringComparison.OrdinalIgnoreCase) ||
@@ -236,6 +247,8 @@ public static class NetworkTelemetrySchema
             }
         }
 
+        AddMetadataAliases(data, source.Metadata);
+
         try
         {
             var info = new FileInfo(source.FullPath);
@@ -248,6 +261,11 @@ public static class NetworkTelemetrySchema
                 data["sourceArtifactSha256"] = sha256;
                 data["sha256"] = sha256;
                 data["hash.sha256"] = sha256;
+                if (IsPacketCaptureSource(source))
+                {
+                    data["pcapSourceArtifactSizeBytes"] = sizeText;
+                    data["pcapSourceArtifactSha256"] = sha256;
+                }
             }
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException)
@@ -324,22 +342,23 @@ public static class NetworkTelemetrySchema
 
     public static string Endpoint(string? address, int? port)
     {
-        if (string.IsNullOrWhiteSpace(address))
+        var normalizedAddress = NormalizeAddress(address);
+        if (string.IsNullOrWhiteSpace(normalizedAddress))
         {
             return string.Empty;
         }
 
         if (!port.HasValue)
         {
-            return address;
+            return normalizedAddress;
         }
 
-        var normalizedAddress = address.Contains(':', StringComparison.Ordinal) &&
-            !address.StartsWith("[", StringComparison.Ordinal) &&
-            !address.EndsWith("]", StringComparison.Ordinal)
-                ? $"[{address}]"
-                : address;
-        return $"{normalizedAddress}:{port.Value.ToString(CultureInfo.InvariantCulture)}";
+        var endpointAddress = normalizedAddress.Contains(':', StringComparison.Ordinal) &&
+            !normalizedAddress.StartsWith("[", StringComparison.Ordinal) &&
+            !normalizedAddress.EndsWith("]", StringComparison.Ordinal)
+                ? $"[{normalizedAddress}]"
+                : normalizedAddress;
+        return $"{endpointAddress}:{port.Value.ToString(CultureInfo.InvariantCulture)}";
     }
 
     public static void AddIfNotEmpty(Dictionary<string, string> data, string key, string? value)
@@ -395,6 +414,91 @@ public static class NetworkTelemetrySchema
         {
             data[key] = port.Value.ToString(CultureInfo.InvariantCulture);
         }
+    }
+
+    private static string NormalizeAddress(string? address)
+    {
+        if (string.IsNullOrWhiteSpace(address))
+        {
+            return string.Empty;
+        }
+
+        var trimmed = address.Trim().Trim('"', '\'');
+        if (trimmed.StartsWith("[", StringComparison.Ordinal) &&
+            trimmed.EndsWith("]", StringComparison.Ordinal) &&
+            trimmed.Length > 2)
+        {
+            trimmed = trimmed[1..^1];
+        }
+
+        return trimmed;
+    }
+
+    private static string IpFamily(string sourceIp, string destinationIp)
+    {
+        if (sourceIp.Contains(':', StringComparison.Ordinal) ||
+            destinationIp.Contains(':', StringComparison.Ordinal))
+        {
+            return "ipv6";
+        }
+
+        if (!string.IsNullOrWhiteSpace(sourceIp) || !string.IsNullOrWhiteSpace(destinationIp))
+        {
+            return "ipv4";
+        }
+
+        return string.Empty;
+    }
+
+    private static bool IsPacketCaptureSource(NetworkArtifactSource source)
+    {
+        return string.Equals(source.ArtifactKind, "PacketCapture", StringComparison.OrdinalIgnoreCase) ||
+            source.FullPath.EndsWith(".pcap", StringComparison.OrdinalIgnoreCase) ||
+            source.FullPath.EndsWith(".pcapng", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static void AddMetadataAliases(Dictionary<string, string> data, IReadOnlyDictionary<string, string>? metadata)
+    {
+        if (metadata is null)
+        {
+            return;
+        }
+
+        var processId = MetadataValue(metadata, "processId", "pid", "proc.pid", "process.pid", "process_id");
+        var parentProcessId = MetadataValue(metadata, "parentProcessId", "ppid", "process.parent.pid", "parent_pid");
+        var rootProcessId = MetadataValue(metadata, "rootProcessId", "rootPid", "root.pid", "process.root.pid", "process.rootProcessId", "processRootId", "process.entry_leader.pid");
+        var lineage = MetadataValue(metadata, "treeLineage", "lineage", "process.lineage", "process.treeLineage", "processTreeLineage", "process.parent.entity_id", "process.Ext.ancestry");
+        var processName = MetadataValue(metadata, "processName", "imageName", "process.name", "process.executable", "proc.name", "application", "app", "image", "exe");
+        var imageName = MetadataValue(metadata, "imageName", "processName", "process.name", "process.executable", "process.path", "proc.name", "image", "exe");
+        var commandLine = MetadataValue(metadata, "commandLine", "cmdline", "process.command_line", "process.commandLine", "process.cmdline", "process.args");
+
+        AddIfNotEmpty(data, "processId", processId);
+        AddIfNotEmpty(data, "pid", processId);
+        AddIfNotEmpty(data, "parentProcessId", parentProcessId);
+        AddIfNotEmpty(data, "rootProcessId", rootProcessId);
+        AddIfNotEmpty(data, "rootPid", rootProcessId);
+        AddIfNotEmpty(data, "processRootId", rootProcessId);
+        AddIfNotEmpty(data, "treeLineage", lineage);
+        AddIfNotEmpty(data, "processTreeLineage", lineage);
+        AddIfNotEmpty(data, "processName", processName);
+        AddIfNotEmpty(data, "process.name", processName);
+        AddIfNotEmpty(data, "imageName", imageName);
+        AddIfNotEmpty(data, "processImage", imageName);
+        AddIfNotEmpty(data, "processPath", imageName);
+        AddIfNotEmpty(data, "commandLine", commandLine);
+    }
+
+    private static string? MetadataValue(IReadOnlyDictionary<string, string> metadata, params string[] keys)
+    {
+        foreach (var key in keys)
+        {
+            if (metadata.TryGetValue(key, out var value) && !string.IsNullOrWhiteSpace(value))
+            {
+                return value;
+            }
+        }
+
+        return null;
     }
 
     private static string Ports(int? sourcePort, int? destinationPort)

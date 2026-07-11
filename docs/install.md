@@ -78,9 +78,9 @@ driver，不调用 `CSignTool.exe`，也不会把 secret 写进 git。
 
 紧凑入口 `.\scripts\install.ps1 -Mode Change` 直接覆盖 release packaging
 所需的子集：重置 host/guest 密码、配置 Hyper-V VM 名称/checkpoint/路径、查询或开启
-guest test-signing、准备 payload、查看状态。诊断输出和 `RecommendedActions`
-仍可能展示规范的仓库根命令，例如 `.\install.ps1` 和 `.\run.ps1`；这些命令与
-`scripts\` 包装器等价且仍然有效。
+guest test-signing、显示只读 `ShowTestSigningGuidance`、准备 payload、查看状态。
+诊断输出和 `RecommendedActions` 仍可能展示规范的仓库根命令，例如 `.\install.ps1`
+和 `.\run.ps1`；这些命令与 `scripts\` 包装器等价且仍然有效。
 
 所有会修改状态的路径都支持 `-WhatIf`，因为 `install.ps1` 使用 PowerShell
 `ShouldProcess`。`-WhatIf` 只预览本机 environment/config 写入、Guest 密码重置委托、

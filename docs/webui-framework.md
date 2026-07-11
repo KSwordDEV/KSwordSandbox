@@ -64,7 +64,7 @@ WebUI/UX 工作不得修改 `driver/`、`guest/` 或
   会在 `.exe` 保存后创建计划、提交后台 VM 分析，并把当前页面跳到 live
   monitor；host-path planning 和 directory scan 只生成可复核计划，不展示
   runbook 命令长列表。
-- VM 配置字段在上传前可见，并随每次 dry-run 或一键 upload/start planning request
+- VM configuration fields / VM 配置字段在上传前可见，并随每次 dry-run 或一键 upload/start planning request
   提交：`goldenVmName`、`goldenSnapshotName`、`durationSeconds`、
   `guestUserName`、`guestWorkingDirectory`、`guestPayloadRoot` 和
   `useMockCollector`。UI 只展示 Guest 凭据提示，不要求操作者输入密码；凭据仍由
@@ -89,12 +89,14 @@ WebUI/UX 工作不得修改 `driver/`、`guest/` 或
   落地文件、截图、内存转储或 PCAP 证据，而不把本地文件系统路径暴露给浏览器；
 - 计划创建后自动给出报告链接，包括 served `/api/jobs/{jobId}/report/html` 链接。
   手动报告按钮跟随当前中文/英文 dashboard 语言，同时保留紧凑 `zh` / `en` 备选入口，
+  report buttons must follow the current Chinese/English dashboard language，
   避免操作者手动粘贴报告路径。完成后自动导航默认使用中文报告端点
   `/api/jobs/{jobId}/report/html?lang=zh`，解析到 `report.zh.html`。如果报告路径尚不可用，
   主按钮必须显示禁用/等待状态，而不是跳到可能的 404；
-- 阶段进度必须展示有序且用户可理解的阶段：`启动 VM`、
+- stage progress / 阶段进度必须展示有序且用户可理解的阶段：`启动 VM`、
   `部署 Payload`、`执行样本`、`收集结果`、`生成报告`，并保留稳定 ID 和
-  人类可读状态。进度卡片还必须在主 dashboard 直接展示当前步骤、已耗时和失败原因，
+  人类可读状态。进度卡片还必须在主 dashboard 直接展示 current step, elapsed time, and failure reason
+  / 当前步骤、已耗时和失败原因，
   让操作者无需展开高级详情也能判断运行是否推进。较长的 Hyper-V restore/start 阶段即使
   executor step 尚未前进，也应保持可见运行/脉冲状态。
 - 真实 executor 进度来自 `GET /api/jobs/{jobId}/runbook/progress`：当
@@ -113,7 +115,9 @@ WebUI/UX 工作不得修改 `driver/`、`guest/` 或
   VM analysis 提交给 Web host background runner，并将当前浏览器页重定向到
   `/jobs/{jobId}/live-events`。动态监控页（dynamic monitor）是操作者查看真实
   runbook 进度、原始事件、VirusTotal 状态和证据/下载卡片的主入口；
-  不需要弹窗或额外 dashboard tab。首选 API 路径是
+  upload flow must redirect the current browser page to
+  `/jobs/{jobId}/live-events`; no popup or extra dashboard tab is required。
+  首选 API 路径是
   `POST /api/files/upload/start`，它在一个服务端操作中保存上传、创建 job、提交后台
   runbook 执行，避免早期三段请求链（`upload` -> `plan` -> `runbook/start`）在浏览器
   fetch 中途失败时丢失上下文；
@@ -151,7 +155,8 @@ WebUI/UX 工作不得修改 `driver/`、`guest/` 或
   恶意/可疑/无害/缺失/未配置状态；后台运行进入 terminal state 后，
   仍保持显式中文和英文报告按钮可见；
 - 为 runbook step status 提供自然的进度页链接，指向 dedicated execution-flow page，
-  并同时出现在任务操作与进度摘要中。
+  并同时出现在任务操作与进度摘要中。该入口在 UI 文案中称为 progress-page link，
+  让操作者自然进入 execution-flow 诊断页，而不是在 dashboard 内展开命令墙。
   根 dashboard 不得内联长 runbook PowerShell commands、command-line details、`stdout`、
   `stderr`、raw event rows 或 artifact/download lists。近期任务卡应保持紧凑，
   只展示状态、报告就绪度、`执行流程 / Execution flow` 链接，以及用于技术跟进的

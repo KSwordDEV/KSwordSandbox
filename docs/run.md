@@ -283,6 +283,19 @@ files are visible from this host. `CheckEnvironmentStartsVm=False` and
 `PlanOnlyStartsVm=False`; these paths are meant to be safe on another
 developer's computer before they try `-Live`.
 
+Release-readiness reviewers should also look for these fields in Status /
+CheckEnvironment output:
+
+- `GuestPayloadFreshnessReasons`: why the prepared Guest Agent/R0Collector
+  payload is fresh, stale, or missing, plus the `Prepare-GuestPayload.ps1`
+  repair command.
+- `VirusTotalMissingKeyBehavior`: confirms that absent or failing optional
+  VirusTotal hash-only enrichment is skipped quietly instead of polluting job
+  logs.
+- `RequirePayloadForWebUI`: use `.\run.ps1 -RequirePayloadForWebUI` when a
+  release candidate must fail fast rather than starting WebUI with a missing
+  guest payload.
+
 `-WhatIf` is supported on `run.ps1`. In WebUI modes it skips payload
 preparation and dotnet startup. In `Plan` / `Analyze` modes it stops before
 delegating to `scripts\Invoke-HyperVE2E.ps1`, so no Hyper-V child script is

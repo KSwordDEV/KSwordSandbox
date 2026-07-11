@@ -231,7 +231,7 @@ internal static class DashboardExperiencePage
               <p class="hint"><span data-zh="请选择一种提交方式：上传 EXE 会自动启动动态分析并跳转监控；选择已有路径或扫描目录会先生成可复核计划。" data-en="Choose one submission method: upload starts dynamic analysis and redirects to the monitor; existing path and folder scan create a reviewable plan first.">请选择一种提交方式：上传 EXE 会自动启动动态分析并跳转监控；选择已有路径或扫描目录会先生成可复核计划。</span></p>
               <input id="duration" type="hidden" value="120">
               <div class="tabs" role="tablist" aria-label="三种提交方式 / Three submission methods">
-                <button id="tab-upload" class="tab-button active" type="button" role="tab" aria-selected="true" aria-controls="panel-upload" onclick="selectPlanTab('upload')" data-zh="上传 EXE" data-en="Upload EXE">上传 EXE</button>
+                <button id="tab-upload" class="tab-button active" type="button" role="tab" aria-selected="true" aria-controls="panel-upload" onclick="selectPlanTab('upload')" data-zh="上传 .exe → 自动分析并打开监控" data-en="Upload .exe → auto analyze and open monitor">上传 .exe → 自动分析并打开监控</button>
                 <button id="tab-path" class="tab-button" type="button" role="tab" aria-selected="false" aria-controls="panel-path" onclick="selectPlanTab('path')" data-zh="选择已有路径" data-en="Existing path">选择已有路径</button>
                 <button id="tab-scan" class="tab-button" type="button" role="tab" aria-selected="false" aria-controls="panel-scan" onclick="selectPlanTab('scan')" data-zh="扫描目录" data-en="Scan folder">扫描目录</button>
               </div>

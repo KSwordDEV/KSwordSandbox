@@ -126,6 +126,7 @@ internal sealed class ProcessTreeProbe : IGuestProbe
             TrackRootProcess(context, current, phase, capturedAtUtc);
             RememberVisibleProcesses(current, phase, capturedAtUtc);
             events.AddRange(CreateCurrentProcessSnapshotEvents(current, phase, context, capturedAtUtc));
+            var rootTreeMetadata = CreateRootTreeMetadata(current, context);
 
             foreach (var process in current.Values.OrderBy(process => process.ProcessId).ThenBy(process => process.ProcessName, StringComparer.OrdinalIgnoreCase))
             {
@@ -142,12 +143,15 @@ internal sealed class ProcessTreeProbe : IGuestProbe
                 }
 
                 monitoredProcessKeys.Add(process.Key);
+                rootTreeMetadata.TryGetValue(process.ProcessId, out var metadata);
                 events.Add(CreateProcessSnapshotEvent(
                     "process.new",
                     process,
                     phase,
                     context.RootProcessId,
-                    depth: null,
+                    depth: metadata?.Depth,
+                    childCount: metadata?.ChildCount,
+                    lineage: metadata?.Lineage,
                     snapshotLookup: current,
                     capturedAtUtc: capturedAtUtc));
             }

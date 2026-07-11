@@ -7,7 +7,7 @@ This script lives under scripts/ for packaging layouts that expose operational
 helpers from one folder. It forwards parameters to the repository-root run.ps1
 in the same PowerShell process so WebUI startup, one-shot Plan/Analyze modes,
 environment import, payload checks, -WhatIf behavior, and exit-code behavior
-remain identical to the primary release wrapper.
+remain identical to the primary root runtime wrapper.
 
 Default behavior is still a single WebUI launch path. Live Hyper-V execution is
 never implicit; it requires an explicit -Live option passed through to the root

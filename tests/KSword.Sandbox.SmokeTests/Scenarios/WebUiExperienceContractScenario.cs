@@ -229,6 +229,12 @@ internal sealed class WebUiExperienceContractScenario : ISmokeTestScenario
         RequireContains(liveEventsPage, "startRunbookProgressPolling", "Live monitor should start runbook progress polling automatically.");
         RequireContains(liveEventsPage, "startBackgroundStatusPolling", "Live monitor should start background status polling automatically.");
         RequireContains(liveEventsPage, "renderRunbookProgress", "Live monitor should render UI-safe runbook step snapshots.");
+        RequireContains(liveEventsPage, "运营态势驾驶舱", "Live monitor should include a Chinese-first operator cockpit summary.");
+        RequireContains(liveEventsPage, "renderOperatorCockpit", "Live monitor should render a compact operator cockpit without giant tables.");
+        RequireContains(liveEventsPage, "lastProgressStreamEnvelope", "Live monitor should retain the latest real progress stream envelope.");
+        RequireContains(liveEventsPage, "payload.currentStep || payload.CurrentStep", "Live monitor should consume the stream currentStep payload directly.");
+        RequireContains(liveEventsPage, "当前步骤状态", "Live monitor should show the current runbook step status explicitly.");
+        RequireContains(liveEventsPage, "Artifact readiness", "Live monitor cockpit should summarize artifact readiness.");
         RequireContains(liveEventsPage, "monitorStages", "Live monitor should render an operator-facing stage rail.");
         RequireContains(liveEventsPage, "monitor-stage-grid", "Live monitor should show a visible staged progress rail.");
         foreach (var operatorStage in new[] { "启动 VM", "部署 Payload", "执行样本", "收集结果", "生成报告" })
@@ -246,6 +252,9 @@ internal sealed class WebUiExperienceContractScenario : ISmokeTestScenario
         RequireContains(liveEventsPage, "result.message ||", "Live monitor VirusTotal card should preserve quiet lookup failure/not-configured messages.");
         RequireContains(liveEventsPage, "result.isQuietState || result.IsQuietState", "Live monitor should honor backend VirusTotal quiet-state metadata.");
         RequireContains(liveEventsPage, "'lookup_failed'].includes(status)) { return 'quiet';", "Live monitor should treat VirusTotal lookup failures as quiet non-blocking states.");
+        RequireContains(liveEventsPage, "默认不写日志噪音", "Live monitor should make quiet VirusTotal no-log policy visible.");
+        RequireContains(program, "DisplayText = BuildRunbookCurrentStepDisplay", "Progress SSE payload should include a safe current-step display label.");
+        RequireContains(program, "StateMeaning", "Progress SSE payload should explain that command/stdout/stderr are excluded.");
         RequireContains(settingsPage, "VirusTotal API Key", "Settings page should allow operators to set the VirusTotal API key.");
         RequireContains(settingsPage, "/api/settings/virustotal", "Settings page should save VirusTotal settings through the API endpoint.");
         RequireContains(settingsPage, "不会提交到仓库", "Settings page should explain that local settings are not committed.");
@@ -262,6 +271,8 @@ internal sealed class WebUiExperienceContractScenario : ISmokeTestScenario
         RequireContains(virusTotalLookup, "x-apikey", "VirusTotal lookup should authenticate with the x-apikey header.");
         RequireContains(virusTotalLookup, "not upload", "VirusTotal lookup code comments should document that it does not upload samples.");
         RequireContains(virusTotalModels, "IsQuietState", "VirusTotal model should expose quiet-state metadata to the live UI.");
+        RequireContains(virusTotalModels, "LiveLogPolicy", "VirusTotal model should expose a stable live no-log policy.");
+        RequireContains(virusTotalModels, "display_only_no_job_log_by_default", "VirusTotal model should make live display-only behavior explicit.");
 
         RequireContains(runbookProgressStore, "AddOrUpdate", "Runbook progress store should not blindly overwrite newer in-memory snapshots.");
         RequireContains(runbookProgressStore, "ShouldReplaceSnapshot", "Runbook progress store should compare snapshot freshness before replacing memory state.");

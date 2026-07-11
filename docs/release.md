@@ -269,8 +269,20 @@ Release-manager diagnostics are printed at the end of each package run:
 
 `package-manifest.generated.json` now includes `operatorDiagnostics` with
 runtime publish readiness, missing payload names, non-mutating guarantees, and
-package safety guidance. It is a reviewer-facing handoff artifact, not a file to
-commit back into the source tree.
+package safety guidance. Newer staging output should expose:
+
+- `runtimePublishSummary`: present/missing counts, missing required vs optional
+  runtime payloads, and whether this is a layout dry-run or complete runtime
+  handoff.
+- `runtimePublishRootMissingRecommendedActions`: concise next commands when
+  `RuntimePublishRoot` is absent, under the repository, or missing expected
+  folders.
+- `externalStateDiagnostics`: reminders that Hyper-V prerequisites, guest
+  payload freshness, optional VT key state, and runtime job outputs are checked
+  by read-only install/run status commands rather than by the package script.
+
+It is a reviewer-facing handoff artifact, not a file to commit back into the
+source tree.
 
 The generated metadata is intended to be committed only as part of a built
 release artifact, never back into the source repository. Keep staged packages

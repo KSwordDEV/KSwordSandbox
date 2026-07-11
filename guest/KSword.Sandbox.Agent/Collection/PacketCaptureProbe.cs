@@ -147,6 +147,8 @@ internal sealed class PacketCaptureProbe : IGuestProbe
                 ["zhHint"] = "started 事件保留预期 artifactRelativePath；最终完整性请以 packet_capture.captured 的 sizeBytes/sha256 为准。"
             }
         };
+        AddCaptureSourceToolData(started.Data);
+        AddExpectedArtifactEvidence(started.Data, "conversion-pending");
         AddRootProcessData(started, context);
         return [started];
     }
@@ -228,6 +230,8 @@ internal sealed class PacketCaptureProbe : IGuestProbe
                 ["zhHint"] = "stopped 事件保留 ETL 诊断路径；最终 artifactRelativePath、sizeBytes、sha256 以 captured 事件为准。"
             }
         };
+        AddCaptureSourceToolData(stopped.Data);
+        AddExpectedArtifactEvidence(stopped.Data, "conversion-pending");
         AddNamedFileEvidence(stopped.Data, "etl", session.EtlPath);
         AddRootProcessData(stopped, context);
         events.Add(stopped);
@@ -301,6 +305,7 @@ internal sealed class PacketCaptureProbe : IGuestProbe
                 ["commandOutputSuppressed"] = "true"
             }
         };
+        AddCaptureSourceToolData(captured.Data);
         AddArtifactFileEvidence(captured, session.PcapngPath);
         AddNamedFileEvidence(captured.Data, "pcapng", session.PcapngPath);
         AddNamedFileEvidence(captured.Data, "etl", session.EtlPath);
@@ -359,6 +364,7 @@ internal sealed class PacketCaptureProbe : IGuestProbe
                 ["expectedRelativePath"] = $"{CollectionName}/*.pcapng"
             }
         };
+        AddCaptureSourceToolData(evt.Data);
         AddIfNotEmpty(evt.Data, "artifactRelativePath", artifactRelativePath);
         AddRootProcessData(evt, context);
         if (session is not null)
@@ -406,6 +412,7 @@ internal sealed class PacketCaptureProbe : IGuestProbe
             }
         };
 
+        AddCaptureSourceToolData(evt.Data);
         AddRootProcessData(evt, context);
         return evt;
     }
@@ -477,6 +484,7 @@ internal sealed class PacketCaptureProbe : IGuestProbe
             }
         };
 
+        AddCaptureSourceToolData(evt.Data);
         AddArtifactFileEvidence(evt, session.PcapngPath);
         AddNamedFileEvidence(evt.Data, "pcapng", session.PcapngPath);
         AddNamedFileEvidence(evt.Data, "etl", session.EtlPath);
@@ -550,6 +558,7 @@ internal sealed class PacketCaptureProbe : IGuestProbe
             }
         };
 
+        AddCaptureSourceToolData(evt.Data);
         AddNamedFileEvidence(evt.Data, "etl", session.EtlPath);
         AddRootProcessData(evt, context);
         AddArtifactFileEvidence(evt, session.PcapngPath);
@@ -587,6 +596,34 @@ internal sealed class PacketCaptureProbe : IGuestProbe
         {
             return null;
         }
+    }
+
+    /// <summary>
+    /// Adds stable source-tool aliases so reports can identify the artifact
+    /// producer even when pktmon is missing, conversion fails, or only a
+    /// lifecycle event is available.
+    /// </summary>
+    private static void AddCaptureSourceToolData(Dictionary<string, string> data)
+    {
+        AddIfNotEmpty(data, "captureTool", PktmonExecutable);
+        AddIfNotEmpty(data, "sourceTool", PktmonExecutable);
+        AddIfNotEmpty(data, "artifactSourceTool", PktmonExecutable);
+        AddIfNotEmpty(data, "packetCaptureSourceTool", PktmonExecutable);
+        AddIfNotEmpty(data, "sourceToolMode", "windows-pktmon-etw");
+        AddIfNotEmpty(data, "packetCaptureSource", "guest-pktmon");
+    }
+
+    /// <summary>
+    /// Marks expected-but-not-yet-created PCAPNG evidence without treating the
+    /// pending file as a capture failure.
+    /// </summary>
+    private static void AddExpectedArtifactEvidence(Dictionary<string, string> data, string status)
+    {
+        AddIfNotEmpty(data, "artifactIntegrityState", status);
+        AddIfNotEmpty(data, "hashStatus", status);
+        AddIfNotEmpty(data, "artifactHashStatus", status);
+        AddIfNotEmpty(data, "sizeBytesStatus", status);
+        AddIfNotEmpty(data, "artifactSizeStatus", status);
     }
 
     /// <summary>

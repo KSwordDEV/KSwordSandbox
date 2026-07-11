@@ -635,6 +635,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         }
 
         AppendSectionTable(html, staticAnalysis);
+        AppendStaticResourceStory(html, staticAnalysis, report.Events);
         AppendStaticEvidenceGroups(html, staticAnalysis);
         AppendStringList(html, "Interesting strings", staticAnalysis.InterestingStrings);
         AppendStringList(html, "Static warnings", staticAnalysis.Warnings);
@@ -663,6 +664,170 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         }
 
         html.AppendLine("</tbody></table>");
+    }
+
+    /// <summary>
+    /// Appends a resource-oriented static payload story before the legacy
+    /// string map. Inputs are structured PE resources and matching
+    /// static.pe.resource events; processing highlights embedded PE,
+    /// high-entropy, large, and payload-candidate resources as copyable rows
+    /// while keeping the report schema unchanged.
+    /// </summary>
+    private static void AppendStaticResourceStory(
+        StringBuilder html,
+        StaticAnalysisResult staticAnalysis,
+        IReadOnlyCollection<SandboxEvent> events)
+    {
+        var resourceEvents = events
+            .Where(evt => string.Equals(evt.EventType, "static.pe.resource", StringComparison.OrdinalIgnoreCase))
+            .OrderBy(evt => evt.Timestamp)
+            .ToList();
+        var resources = staticAnalysis.Resources
+            .OrderByDescending(resource => resource.IsEmbeddedPe)
+            .ThenByDescending(resource => resource.IsPayloadCandidate)
+            .ThenByDescending(resource => resource.Entropy ?? -1)
+            .ThenBy(resource => resource.ResourceType, StringComparer.OrdinalIgnoreCase)
+            .Take(40)
+            .ToList();
+
+        html.AppendLine("<h3>Static PE resource story</h3>");
+        html.AppendLine("<div class=\"section-note\"><strong>Resource payload triage.</strong> Structured <code>static.pe.resource</code> evidence highlights resourceRole, embedded-PE markers, entropy, and size so payload candidates are visible before opening raw static events.</div>");
+        html.AppendLine("<div class=\"overview-strip static-resource-overview\">");
+        AppendOverviewItem(
+            html,
+            "Resource entries",
+            staticAnalysis.Resources.Count.ToString(CultureInfo.InvariantCulture),
+            $"Embedded PE: {staticAnalysis.Resources.Count(resource => resource.IsEmbeddedPe)}; payload candidates: {staticAnalysis.Resources.Count(resource => resource.IsPayloadCandidate)}.",
+            staticAnalysis.Resources.Any(resource => resource.IsEmbeddedPe || resource.IsPayloadCandidate) ? "risk-medium" : "risk-info");
+        AppendOverviewItem(
+            html,
+            "High-entropy resources",
+            staticAnalysis.Resources.Count(resource => resource.Entropy >= 7.2).ToString(CultureInfo.InvariantCulture),
+            "High entropy can indicate compressed/encrypted payload bytes; correlate with dropped files and runtime execution.",
+            staticAnalysis.Resources.Any(resource => resource.Entropy >= 7.2) ? "risk-medium" : "risk-low");
+        AppendOverviewItem(
+            html,
+            "Resource events",
+            resourceEvents.Count.ToString(CultureInfo.InvariantCulture),
+            "Normalized static.pe.resource rows are preserved for behavior rules and raw evidence expansion.",
+            resourceEvents.Count > 0 ? "risk-info" : "risk-low");
+        html.AppendLine("</div>");
+
+        if (resources.Count == 0 && resourceEvents.Count == 0)
+        {
+            Empty(html, "No structured PE resource entries or static.pe.resource events were recorded.");
+            return;
+        }
+
+        if (resources.Count > 0)
+        {
+            html.AppendLine("<table><thead><tr><th>Type</th><th>Role</th><th>RVA / file offset</th><th>Size</th><th>Entropy</th><th>Flags</th></tr></thead><tbody>");
+            foreach (var resource in resources)
+            {
+                var role = DescribeReportResourceRole(resource);
+                var flags = StaticResourceFlags(resource);
+                var copy = StaticResourceToPlainText(resource, role, flags);
+                html.AppendLine($"<tr class=\"copyable\" data-copy=\"{A(copy)}\"><td><code>{E(resource.ResourceType)}</code></td><td><span class=\"chip chip-info\">{E(role)}</span></td><td><code>{E(resource.DataRva)}</code><br><span class=\"muted\">{E(resource.DataFileOffset ?? "-")}</span></td><td>{E(FormatBytes(resource.Size))}</td><td>{E(resource.Entropy?.ToString("F3", CultureInfo.InvariantCulture) ?? "-")}<br><span class=\"muted\">{E(resource.EntropyLabel)}</span></td><td>{E(flags)}</td></tr>");
+            }
+
+            html.AppendLine("</tbody></table>");
+        }
+
+        if (resourceEvents.Count > 0)
+        {
+            var evidenceText = string.Join(Environment.NewLine, resourceEvents.Take(12).Select(EventOneLine));
+            html.AppendLine($"<details class=\"evidence-expansion-card\"><summary>static.pe.resource normalized evidence ({E(Math.Min(resourceEvents.Count, 12).ToString(CultureInfo.InvariantCulture))}/{E(resourceEvents.Count.ToString(CultureInfo.InvariantCulture))})</summary><pre class=\"copyable\" data-copy=\"{A(evidenceText)}\">{E(evidenceText)}</pre></details>");
+        }
+    }
+
+    private static string DescribeReportResourceRole(PeResourceInfo resource)
+    {
+        if (resource.IsEmbeddedPe)
+        {
+            return "embedded-pe";
+        }
+
+        if (resource.IsPayloadCandidate)
+        {
+            return "payload-candidate";
+        }
+
+        if (resource.Entropy >= 7.8)
+        {
+            return "very-high-entropy-resource";
+        }
+
+        if (resource.Entropy >= 7.2)
+        {
+            return "high-entropy-resource";
+        }
+
+        if (resource.IsLarge)
+        {
+            return "large-resource";
+        }
+
+        return resource.ResourceType.Contains("manifest", StringComparison.OrdinalIgnoreCase)
+            ? "manifest"
+            : "metadata-resource";
+    }
+
+    private static string StaticResourceFlags(PeResourceInfo resource)
+    {
+        var flags = new List<string>();
+        if (resource.IsEmbeddedPe)
+        {
+            flags.Add("embedded PE");
+        }
+
+        if (resource.IsPayloadCandidate)
+        {
+            flags.Add("payload candidate");
+        }
+
+        if (resource.IsLarge)
+        {
+            flags.Add("large");
+        }
+
+        if (resource.Entropy >= 7.8)
+        {
+            flags.Add("very high entropy");
+        }
+        else if (resource.Entropy >= 7.2)
+        {
+            flags.Add("high entropy");
+        }
+
+        foreach (var tag in resource.Tags.Take(6))
+        {
+            if (!flags.Contains(tag, StringComparer.OrdinalIgnoreCase))
+            {
+                flags.Add(tag);
+            }
+        }
+
+        return flags.Count == 0 ? "-" : string.Join(", ", flags);
+    }
+
+    private static string StaticResourceToPlainText(PeResourceInfo resource, string role, string flags)
+    {
+        return string.Join(
+            Environment.NewLine,
+            [
+                $"resourceType={resource.ResourceType}",
+                $"resourceRole={role}",
+                $"dataRva={resource.DataRva}",
+                $"dataFileOffset={resource.DataFileOffset ?? "-"}",
+                $"size={resource.Size}",
+                $"entropy={resource.Entropy?.ToString("F3", CultureInfo.InvariantCulture) ?? "-"}",
+                $"entropyLabel={resource.EntropyLabel}",
+                $"isPayloadCandidate={resource.IsPayloadCandidate}",
+                $"isEmbeddedPe={resource.IsEmbeddedPe}",
+                $"isLarge={resource.IsLarge}",
+                $"flags={flags}",
+                $"tags={string.Join(",", resource.Tags)}"
+            ]);
     }
 
     /// <summary>
@@ -823,6 +988,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         Metric(html, "VT status issues", vtEvents.Count(IsVirusTotalStatusIssue).ToString(), "risk-info");
         Metric(html, "VT rule hits", vtFindings.Count.ToString(), vtFindings.Any(finding => NormalizeSeverity(finding.Severity) == "high") ? "risk-high" : "risk-info");
         html.AppendLine("</div>");
+        AppendVirusTotalReputationStory(html, vtEvents);
 
         if (vtFindings.Count > 0)
         {
@@ -843,6 +1009,109 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         }
 
         html.AppendLine("</section>");
+    }
+
+    /// <summary>
+    /// Appends a compact VT reputation story. Inputs are persisted VT lookup
+    /// events; processing surfaces official file-object fields such as
+    /// reputation/community score, engine stats, last analysis time, and
+    /// permalink in copyable cards without mixing them into local behavior.
+    /// </summary>
+    private static void AppendVirusTotalReputationStory(StringBuilder html, IReadOnlyCollection<SandboxEvent> vtEvents)
+    {
+        if (vtEvents.Count == 0)
+        {
+            return;
+        }
+
+        var latest = vtEvents
+            .OrderBy(evt => evt.Timestamp)
+            .Last();
+        var verdict = FirstEventDataValue(latest, "vtVerdict", "verdict", "status", "vtStatus") ?? "-";
+        var reputation = FirstEventDataValue(latest, "vtReputation", "reputation", "vtCommunityScore", "communityScore") ?? "-";
+        var scoreSource = FirstEventDataValue(latest, "communityScoreSource") ?? "-";
+        var engineStats = FormatVirusTotalEngineStats(latest);
+        var community = FormatVirusTotalCommunity(latest);
+        var lastAnalysis = FirstEventDataValue(latest, "lastAnalysisDateUtc", "lastAnalysisDate", "analysisDate") ?? "-";
+        var permalink = FirstEventDataValue(latest, "permalink", "detectionPermalink", "officialApiSelfLink") ?? "-";
+        var copy = string.Join(
+            Environment.NewLine,
+            [
+                "VirusTotal official hash reputation",
+                $"verdict={verdict}",
+                $"reputation={reputation}",
+                $"communityScoreSource={scoreSource}",
+                engineStats,
+                community,
+                $"lastAnalysisDateUtc={lastAnalysis}",
+                $"permalink={permalink}",
+                EventDataToText(latest)
+            ]);
+
+        html.AppendLine("<h3>VirusTotal official evidence</h3>");
+        html.AppendLine("<div class=\"section-note\"><strong>Official file-object fields.</strong> Engine stats, reputation/community score, last analysis date, and permalink are displayed as external hash reputation only; VT never uploads the sample from this report path.</div>");
+        html.AppendLine("<div class=\"overview-strip vt-reputation-overview\">");
+        AppendOverviewItem(
+            html,
+            "VT verdict",
+            verdict,
+            $"{engineStats}; last analysis: {lastAnalysis}.",
+            TextEqualsAny(verdict, "malicious") ? "risk-high" : TextEqualsAny(verdict, "suspicious") ? "risk-medium" : "risk-info");
+        AppendOverviewItem(
+            html,
+            "VT reputation/community",
+            reputation,
+            $"{community}; source: {scoreSource}.",
+            TryParseSignedInt(reputation, out var reputationValue) && reputationValue < 0 ? "risk-medium" : "risk-info");
+        AppendOverviewItem(
+            html,
+            "VT permalink",
+            ShortenMiddle(permalink, 64),
+            "Copy-only external VirusTotal GUI/API link; use it for analyst pivoting outside the local report.",
+            string.Equals(permalink, "-", StringComparison.Ordinal) ? "risk-low" : "risk-info");
+        html.AppendLine("</div>");
+        html.AppendLine($"<details class=\"evidence-expansion-card\"><summary>Copy VirusTotal official evidence</summary><pre class=\"copyable\" data-copy=\"{A(copy)}\">{E(copy)}</pre></details>");
+    }
+
+    private static string FormatVirusTotalEngineStats(SandboxEvent evt)
+    {
+        return string.Join(
+            "; ",
+            [
+                $"vtMalicious={FirstEventDataValue(evt, "vtMalicious", "malicious") ?? "-"}",
+                $"vtSuspicious={FirstEventDataValue(evt, "vtSuspicious", "suspicious") ?? "-"}",
+                $"vtHarmless={FirstEventDataValue(evt, "vtHarmless", "harmless") ?? "-"}",
+                $"vtUndetected={FirstEventDataValue(evt, "vtUndetected", "undetected") ?? "-"}",
+                $"vtEngineCount={FirstEventDataValue(evt, "vtEngineCount", "engineCount") ?? "-"}"
+            ]);
+    }
+
+    private static string FormatVirusTotalCommunity(SandboxEvent evt)
+    {
+        return string.Join(
+            "; ",
+            [
+                $"communityScore={FirstEventDataValue(evt, "vtCommunityScore", "communityScore") ?? "-"}",
+                $"harmlessVotes={FirstEventDataValue(evt, "vtCommunityHarmlessVotes") ?? "-"}",
+                $"maliciousVotes={FirstEventDataValue(evt, "vtCommunityMaliciousVotes") ?? "-"}",
+                $"voteCount={FirstEventDataValue(evt, "vtCommunityVoteCount") ?? "-"}"
+            ]);
+    }
+
+    private static bool TryParseSignedInt(string value, out int parsed)
+    {
+        return int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out parsed);
+    }
+
+    private static string ShortenMiddle(string value, int maxLength)
+    {
+        if (string.IsNullOrWhiteSpace(value) || value.Length <= maxLength)
+        {
+            return value;
+        }
+
+        var keep = Math.Max(8, (maxLength - 1) / 2);
+        return value[..keep] + "…" + value[^keep..];
     }
 
     /// <summary>
@@ -1169,15 +1438,19 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         var flowCount = Math.Max(0, networkEvents.Count - dnsCount - httpCount - tlsCount);
 
         var r0Events = report.Events.Where(IsR0Event).OrderBy(evt => evt.Timestamp).ToList();
-        var r0HealthEvents = r0Events.Where(IsR0CollectionHealthEvent).ToList();
-        var r0SelfNoiseEvents = r0Events.Where(evt => !IsR0CollectionHealthEvent(evt) && IsCollectorSelfNoiseEvent(evt)).ToList();
-        var r0TelemetryEvents = r0Events.Where(evt => !IsR0CollectionHealthEvent(evt) && !IsCollectorSelfNoiseEvent(evt)).ToList();
+        var r0NetworkStatusEvents = r0Events.Where(IsR0DriverNetworkStatusEvent).ToList();
+        var r0HealthEvents = r0Events.Where(IsR0HealthRowEvent).ToList();
+        var r0SelfNoiseEvents = r0Events.Where(evt => !IsR0HealthRowEvent(evt) && !IsR0DriverNetworkStatusEvent(evt) && IsCollectorSelfNoiseEvent(evt)).ToList();
+        var r0TelemetryEvents = r0Events.Where(evt => !IsR0HealthRowEvent(evt) && !IsR0DriverNetworkStatusEvent(evt) && !IsCollectorSelfNoiseEvent(evt)).ToList();
         var r0State = R0AvailabilityStoryState(r0HealthEvents);
-        var r0Evidence = r0HealthEvents
+        var r0Evidence = r0NetworkStatusEvents
+            .Take(3)
+            .Select(R0NetworkStatusStoryLine)
+            .Concat(r0HealthEvents
             .Take(6)
             .Concat(r0TelemetryEvents.Take(4))
             .Concat(r0SelfNoiseEvents.Take(4))
-            .Select(EventOneLine)
+            .Select(EventOneLine))
             .ToList();
 
         return
@@ -1249,6 +1522,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
                 "R0 availability, queue loss, and collector self-noise are called out as evidence-quality context, not sample behavior.",
                 [
                     $"R0 health rows: {r0HealthEvents.Count}",
+                    $"R0 network status rows: {r0NetworkStatusEvents.Count}",
                     $"R0 telemetry rows: {r0TelemetryEvents.Count}",
                     $"Self-noise hidden: {r0SelfNoiseEvents.Count}",
                     $"Health alerts: {r0HealthEvents.Count(IsCollectionHealthAlertEvent)}"
@@ -1319,7 +1593,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         var hash = ArtifactSha256(artifact);
         var size = FormatArtifactSize(artifact.SizeBytes);
         var role = string.IsNullOrWhiteSpace(artifact.Category) ? artifact.Kind.ToString() : artifact.Category;
-        return $"artifact={display} | role={role} | size={size} | sha256={hash} | path={artifact.RelativePath}";
+        return $"artifact={display} | role={role} | size={size} | sha256={hash} | path={artifact.RelativePath} | selector={FirstNonEmpty(MetadataValue(artifact.Metadata, "downloadSelector"), artifact.RelativePath, "-")} | duplicate={DuplicateArtifactLabel(artifact) ?? "false"} | rejection={ArtifactRejectionLabel(artifact) ?? "none"}";
     }
 
     private static bool HasParentProcessEvidence(SandboxEvent evt)
@@ -1405,6 +1679,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
     {
         html.AppendLine("<section id=\"artifacts\" class=\"card\"><h2>Artifact links</h2>");
         AppendArtifactCollectionStatusCards(html, report, artifacts);
+        AppendArtifactIndexStory(html, artifacts);
         if (artifacts.Count == 0)
         {
             Empty(html, "No events.json, driver-events.jsonl, screenshot, or dropped-file artifacts were indexed.");
@@ -1423,13 +1698,73 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
             html.AppendLine($"<td>{E(FormatArtifactSize(artifact.SizeBytes))}</td>");
             html.AppendLine($"<td><code>{E(ArtifactSha256(artifact))}</code></td>");
             html.AppendLine($"<td>{E(string.IsNullOrWhiteSpace(artifact.MimeType) ? "-" : artifact.MimeType)}</td>");
-            html.AppendLine($"<td class=\"evidence\"><span class=\"inline-actions\">{CopyButton("Copy artifact", plain)}</span><details class=\"evidence-expansion-card\"><summary>Expand artifact evidence</summary><pre class=\"copyable\" data-copy=\"{A(plain)}\">{E(plain)}</pre></details>{RenderArtifactPreview(artifact)}</td>");
+            html.AppendLine($"<td class=\"evidence\"><span class=\"inline-actions\">{CopyButton("Copy artifact", plain)}</span>{RenderArtifactIndexEvidence(artifact)}<details class=\"evidence-expansion-card\"><summary>Expand artifact evidence</summary><pre class=\"copyable\" data-copy=\"{A(plain)}\">{E(plain)}</pre></details>{RenderArtifactPreview(artifact)}</td>");
             html.AppendLine("</tr>");
         }
 
         html.AppendLine("</tbody></table>");
         html.AppendLine("<div class=\"copy-hint\">Safe links are relative to the report artifact root; unsafe or guest-local paths are shown as copyable text only.</div>");
         html.AppendLine("</section>");
+    }
+
+    /// <summary>
+    /// Appends host artifact-index safety and duplicate diagnostics before the
+    /// dense artifact table. Inputs are normalized artifact descriptors;
+    /// processing summarizes safe download selectors, duplicate groups, and
+    /// manifest rejection diagnostics in copyable square cards.
+    /// </summary>
+    private static void AppendArtifactIndexStory(StringBuilder html, IReadOnlyCollection<ArtifactDescriptor> artifacts)
+    {
+        var downloadable = artifacts.Count(artifact => !string.IsNullOrWhiteSpace(ArtifactHref(artifact)));
+        var selectorCount = artifacts.Count(HasDownloadSelectorEvidence);
+        var duplicateMembers = artifacts.Count(IsDuplicateArtifactDescriptor);
+        var duplicateGroups = artifacts
+            .Select(artifact => MetadataValue(artifact.Metadata, "duplicateGroupId", "duplicateGroupKey"))
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Count();
+        var rejectionArtifacts = artifacts
+            .Where(HasArtifactRejectionDiagnostics)
+            .OrderBy(artifact => artifact.CollectionName, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(artifact => artifact.RelativePath, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var rejectedCount = rejectionArtifacts.Sum(ArtifactRejectedCount);
+        var copy = string.Join(
+            Environment.NewLine,
+            [
+                "Artifact index evidence",
+                $"artifactCount={artifacts.Count}",
+                $"downloadableArtifacts={downloadable}",
+                $"selectorEvidenceArtifacts={selectorCount}",
+                $"duplicateGroups={duplicateGroups}",
+                $"duplicateMembers={duplicateMembers}",
+                $"rejectedArtifactReferences={rejectedCount}",
+                .. artifacts.Take(12).Select(ArtifactIndexEvidenceLine)
+            ]);
+
+        html.AppendLine("<h3>Artifact index evidence</h3>");
+        html.AppendLine("<div class=\"section-note\"><strong>Host artifact index.</strong> Download buttons use safe report-relative selectors only; duplicate grouping and rejection diagnostics explain why guest manifest references were accepted, deduplicated, or rejected.</div>");
+        html.AppendLine("<div class=\"overview-strip artifact-index-overview\">");
+        AppendOverviewItem(
+            html,
+            "Safe download selectors",
+            $"{downloadable}/{artifacts.Count}",
+            $"Artifacts with explicit selector evidence: {selectorCount}. Unsafe or guest-local paths remain copy-only.",
+            downloadable == artifacts.Count && artifacts.Count > 0 ? "risk-low" : "risk-info");
+        AppendOverviewItem(
+            html,
+            "Duplicate artifact groups",
+            duplicateGroups.ToString(CultureInfo.InvariantCulture),
+            $"Duplicate members: {duplicateMembers}; primary selectors are preserved in each artifact evidence block.",
+            duplicateGroups > 0 ? "risk-info" : "risk-low");
+        AppendOverviewItem(
+            html,
+            "Rejected artifact references",
+            rejectedCount.ToString(CultureInfo.InvariantCulture),
+            rejectionArtifacts.Count == 0 ? "No host-side manifest rejection diagnostics are attached to indexed artifacts." : $"Collections with rejection diagnostics: {rejectionArtifacts.Count}.",
+            rejectedCount > 0 ? "risk-medium" : "risk-low");
+        html.AppendLine("</div>");
+        html.AppendLine($"<details class=\"evidence-expansion-card\"><summary>Artifact index selector/duplicate/rejection evidence</summary><pre class=\"copyable\" data-copy=\"{A(copy)}\">{E(copy)}</pre></details>");
     }
 
     /// <summary>
@@ -1794,9 +2129,10 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         IReadOnlyCollection<ArtifactDescriptor> artifacts)
     {
         var r0Events = report.Events.Where(IsR0Event).ToList();
-        var healthEvents = r0Events.Where(IsR0CollectionHealthEvent).ToList();
-        var selfNoiseEvents = r0Events.Where(evt => !IsR0CollectionHealthEvent(evt) && IsCollectorSelfNoiseEvent(evt)).ToList();
-        var telemetryEvents = r0Events.Where(evt => !IsR0CollectionHealthEvent(evt) && !IsCollectorSelfNoiseEvent(evt)).ToList();
+        var networkStatusEvents = r0Events.Where(IsR0DriverNetworkStatusEvent).ToList();
+        var healthEvents = r0Events.Where(IsR0HealthRowEvent).ToList();
+        var selfNoiseEvents = r0Events.Where(evt => !IsR0HealthRowEvent(evt) && !IsR0DriverNetworkStatusEvent(evt) && IsCollectorSelfNoiseEvent(evt)).ToList();
+        var telemetryEvents = r0Events.Where(evt => !IsR0HealthRowEvent(evt) && !IsR0DriverNetworkStatusEvent(evt) && !IsCollectorSelfNoiseEvent(evt)).ToList();
         html.AppendLine("<section id=\"r0\" class=\"card\"><h2>R0 / driver events</h2>");
         if (r0Events.Count == 0)
         {
@@ -1808,6 +2144,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         html.AppendLine("<div class=\"grid\">");
         Metric(html, "Collector lifecycle", r0Events.Count(e => e.EventType.StartsWith("r0collector.", StringComparison.OrdinalIgnoreCase)).ToString(), "risk-info");
         Metric(html, "Collection health rows", healthEvents.Count.ToString(), healthEvents.Any(IsCollectionHealthAlertEvent) ? "risk-medium" : "risk-info");
+        Metric(html, "R0 network status rows", networkStatusEvents.Count.ToString(), networkStatusEvents.Count > 0 ? "risk-info" : "risk-low");
         Metric(html, "Driver telemetry rows", telemetryEvents.Count.ToString(), "risk-info");
         Metric(html, "Collector self-noise hidden", selfNoiseEvents.Count.ToString(), selfNoiseEvents.Count > 0 ? "risk-info" : "risk-low");
         Metric(html, "Kernel file rows", telemetryEvents.Count(IsFileEvent).ToString(), "risk-medium");
@@ -1817,7 +2154,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         html.AppendLine("</div>");
         html.AppendLine("<div class=\"section-note\"><strong>R0 noise policy.</strong> Collection health, device unavailable, and collector self-noise rows are evidence-quality lanes. They stay out of behavior counts, process trees, network cards, and file/registry/network behavior tables.</div>");
 
-        AppendR0CollectionHealthStatus(html, healthEvents, artifactLookup, artifacts);
+        AppendR0CollectionHealthStatus(html, healthEvents, networkStatusEvents, artifactLookup, artifacts);
         AppendR0SelfNoiseSummary(html, selfNoiseEvents);
 
         html.AppendLine("<h3>Driver telemetry evidence</h3>");
@@ -1873,6 +2210,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
     private static void AppendR0CollectionHealthStatus(
         StringBuilder html,
         IReadOnlyCollection<SandboxEvent> healthEvents,
+        IReadOnlyCollection<SandboxEvent> networkStatusEvents,
         IReadOnlyDictionary<string, List<ArtifactDescriptor>> artifactLookup,
         IReadOnlyCollection<ArtifactDescriptor> artifacts)
     {
@@ -1884,6 +2222,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         Metric(html, "Backpressure/drop", healthEvents.Count(IsBackpressureOrDropHealthEvent).ToString(), healthEvents.Any(IsBackpressureOrDropHealthEvent) ? "risk-medium" : "risk-info");
         Metric(html, "Driver health polls", healthEvents.Count(IsDriverHealthPollEvent).ToString(), "risk-info");
         html.AppendLine("</div>");
+        AppendR0DriverNetworkStatusStory(html, networkStatusEvents);
         AppendR0HealthAvailabilityOverview(html, healthEvents);
 
         if (healthEvents.Count == 0)
@@ -1901,6 +2240,70 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         html.AppendLine("<div class=\"section-note\"><strong>R0 health rows are folded by default.</strong> Open this evidence only when diagnosing driver readiness, queue loss, or unavailable device state.</div>");
         AppendEventRows(html, inlineHealthEvents, artifactLookup, artifacts);
         html.AppendLine("</details>");
+    }
+
+    /// <summary>
+    /// Appends a WFP/ALE network-status story for the newest R0Collector
+    /// diagnostics. Inputs are R0 collection-health events; processing extracts
+    /// networkStatusAvailable, layer masks, counters, and degrade reasons into
+    /// copyable cards that remain separate from sample network behavior.
+    /// </summary>
+    private static void AppendR0DriverNetworkStatusStory(StringBuilder html, IReadOnlyCollection<SandboxEvent> healthEvents)
+    {
+        var statusEvents = healthEvents
+            .Where(IsR0DriverNetworkStatusEvent)
+            .OrderBy(evt => evt.Timestamp)
+            .ToList();
+        if (statusEvents.Count == 0)
+        {
+            return;
+        }
+
+        var latest = statusEvents[^1];
+        var available = FirstEventDataValue(latest, "networkStatusAvailable") ?? "-";
+        var readiness = FirstEventDataValue(latest, "readinessState", "driverStateName", "status") ?? "-";
+        var degradeReason = FirstEventDataValue(latest, "lastDegradeReasonName", "diagnosticCode", "diagnosticStage") ?? "-";
+        var activeMask = FirstEventDataValue(latest, "activeLayerMaskHex", "activeLayerMask", "activeLayerMaskSummary") ?? "-";
+        var supportedMask = FirstEventDataValue(latest, "supportedLayerMaskHex", "supportedLayerMask", "supportedLayerMaskSummary") ?? "-";
+        var todoMask = FirstEventDataValue(latest, "todoMaskHex", "todoMask") ?? "-";
+        var counters = FormatR0NetworkStatusCounters(latest);
+        var copy = string.Join(
+            Environment.NewLine,
+            [
+                "r0collector.driverNetworkStatus",
+                $"networkStatusAvailable={available}",
+                $"readinessState={readiness}",
+                $"lastDegradeReasonName={degradeReason}",
+                $"supportedLayerMask={supportedMask}",
+                $"activeLayerMask={activeMask}",
+                $"todoMask={todoMask}",
+                counters,
+                EventDataToText(latest)
+            ]);
+
+        html.AppendLine("<h4>Driver network status / WFP-ALE</h4>");
+        html.AppendLine("<div class=\"section-note\"><strong>R0 network readiness.</strong> <code>r0collector.driverNetworkStatus</code> is an evidence-quality snapshot for WFP/ALE registration, masks, counters, and degrade reasons; it does not count as malicious network behavior.</div>");
+        html.AppendLine("<div class=\"overview-strip r0-network-status-overview\">");
+        AppendOverviewItem(
+            html,
+            "Network status availability",
+            available,
+            $"Readiness: {readiness}; degrade reason: {degradeReason}.",
+            TextEqualsAny(available, "true", "1", "yes") ? "risk-info" : "risk-medium");
+        AppendOverviewItem(
+            html,
+            "WFP/ALE masks",
+            activeMask,
+            $"Supported: {supportedMask}; TODO gap: {todoMask}; last registered: {FirstEventDataValue(latest, "lastRegisteredCalloutMaskHex", "lastRegisteredCalloutMask") ?? "-"}; filters: {FirstEventDataValue(latest, "lastAddedFilterMaskHex", "lastAddedFilterMask") ?? "-"}.",
+            TextEqualsAny(todoMask, "0", "0x0", "0x00000000") ? "risk-info" : "risk-medium");
+        AppendOverviewItem(
+            html,
+            "R0 network counters",
+            FirstEventDataValue(latest, "eventCount", "classifyCount") ?? "-",
+            counters,
+            HasR0NetworkFailureCounters(latest) ? "risk-medium" : "risk-info");
+        html.AppendLine("</div>");
+        html.AppendLine($"<details class=\"evidence-expansion-card\"><summary>Copy WFP/ALE network status evidence ({E(statusEvents.Count.ToString(CultureInfo.InvariantCulture))})</summary><pre class=\"copyable\" data-copy=\"{A(copy)}\">{E(copy)}</pre></details>");
     }
 
     /// <summary>
@@ -2142,6 +2545,11 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         AppendRawIndexCard(html, "Index by source", BuildRawIndexGroups(indexed, row => string.IsNullOrWhiteSpace(row.Event.Source) ? "(empty)" : row.Event.Source));
         AppendRawIndexCard(html, "Index by event family", BuildRawIndexGroups(indexed, row => EventFamilyLabel(row.Event)));
         html.AppendLine("</div>");
+        if (orderedEvents.Count > RawEventInlineLimit)
+        {
+            html.AppendLine($"<div class=\"section-note copyable\" data-copy=\"Rows {RawEventInlineLimit + 1}-{orderedEvents.Count}: report.json only\">Rows {RawEventInlineLimit + 1}-{orderedEvents.Count}: report.json only. These raw rows are intentionally outside the inline cap; use report.json or raw source artifacts for complete copyable row ranges.</div>");
+        }
+
         html.AppendLine("</details>");
     }
 
@@ -3928,6 +4336,19 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         return null;
     }
 
+    private static string FirstNonEmpty(params string?[] values)
+    {
+        foreach (var value in values)
+        {
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                return value;
+            }
+        }
+
+        return string.Empty;
+    }
+
     private static bool LooksLikeNetworkIndicatorKey(string key)
     {
         return key.Contains("address", StringComparison.OrdinalIgnoreCase) ||
@@ -4426,6 +4847,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
 
         if (evt.EventType.StartsWith("r0collector.driverHealth", StringComparison.OrdinalIgnoreCase) ||
             evt.EventType.StartsWith("r0collector.driverCapabilities", StringComparison.OrdinalIgnoreCase) ||
+            evt.EventType.StartsWith("r0collector.driverNetworkStatus", StringComparison.OrdinalIgnoreCase) ||
             evt.EventType.StartsWith("r0collector.driverStatus", StringComparison.OrdinalIgnoreCase) ||
             evt.EventType.StartsWith("r0collector.driverPoll", StringComparison.OrdinalIgnoreCase) ||
             evt.EventType.StartsWith("r0collector.driverReadEvents", StringComparison.OrdinalIgnoreCase) ||
@@ -4445,9 +4867,77 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
             "queueHighWatermark",
             "producerEnableMask",
             "supportedProducerMask",
+            "networkStatusAvailable",
+            "activeLayerMask",
+            "activeLayerMaskHex",
+            "supportedLayerMask",
+            "supportedLayerMaskHex",
+            "lastDegradeReasonName",
             "totalEventsDropped",
             "totalEventsBackpressured",
             "backpressureObserved");
+    }
+
+    /// <summary>
+    /// Determines whether an R0 diagnostic is a health row rather than a WFP/ALE
+    /// network-status snapshot. Inputs are normalized events; processing keeps
+    /// driverNetworkStatus in its own readiness lane so reports can say
+    /// "No R0 health rows" even when network-status diagnostics exist.
+    /// </summary>
+    private static bool IsR0HealthRowEvent(SandboxEvent evt)
+    {
+        return IsR0CollectionHealthEvent(evt) && !IsR0DriverNetworkStatusEvent(evt);
+    }
+
+    private static bool IsR0DriverNetworkStatusEvent(SandboxEvent evt)
+    {
+        return evt.EventType.StartsWith("r0collector.driverNetworkStatus", StringComparison.OrdinalIgnoreCase) ||
+            EventDataHasAnyKey(
+                evt,
+                "networkStatusAvailable",
+                "activeLayerMask",
+                "activeLayerMaskHex",
+                "supportedLayerMask",
+                "supportedLayerMaskHex",
+                "lastRegisteredCalloutMask",
+                "lastAddedFilterMask");
+    }
+
+    private static string FormatR0NetworkStatusCounters(SandboxEvent evt)
+    {
+        return string.Join(
+            "; ",
+            [
+                $"classifyCount={FirstEventDataValue(evt, "classifyCount") ?? "-"}",
+                $"eventCount={FirstEventDataValue(evt, "eventCount") ?? "-"}",
+                $"queueFailureCount={FirstEventDataValue(evt, "queueFailureCount") ?? "-"}",
+                $"classifyPayloadFailureCount={FirstEventDataValue(evt, "classifyPayloadFailureCount") ?? "-"}",
+                $"registerNtStatusHex={FirstEventDataValue(evt, "registerNtStatusHex") ?? "-"}",
+                $"engineNtStatusHex={FirstEventDataValue(evt, "engineNtStatusHex") ?? "-"}",
+                $"lastQueueFailureNtStatusHex={FirstEventDataValue(evt, "lastQueueFailureNtStatusHex") ?? "-"}"
+            ]);
+    }
+
+    private static string R0NetworkStatusStoryLine(SandboxEvent evt)
+    {
+        return string.Join(
+            " | ",
+            [
+                $"{evt.Timestamp:u}",
+                "r0collector.driverNetworkStatus",
+                $"available={FirstEventDataValue(evt, "networkStatusAvailable") ?? "-"}",
+                $"readiness={FirstEventDataValue(evt, "readinessState", "status") ?? "-"}",
+                $"activeMask={FirstEventDataValue(evt, "activeLayerMaskHex", "activeLayerMask") ?? "-"}",
+                $"supportedMask={FirstEventDataValue(evt, "supportedLayerMaskHex", "supportedLayerMask") ?? "-"}",
+                $"degrade={FirstEventDataValue(evt, "lastDegradeReasonName", "diagnosticCode") ?? "-"}",
+                FormatR0NetworkStatusCounters(evt)
+            ]);
+    }
+
+    private static bool HasR0NetworkFailureCounters(SandboxEvent evt)
+    {
+        return EventDataLongGreaterThanZero(evt, "queueFailureCount", "classifyPayloadFailureCount") ||
+            !TextEqualsAny(FirstEventDataValue(evt, "lastDegradeReasonName") ?? string.Empty, string.Empty, "-", "none", "ok", "success");
     }
 
     /// <summary>
@@ -5107,6 +5597,25 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         ("No static tags were emitted.", "未输出静态标签。"),
         ("No interesting strings recorded.", "未记录可疑字符串。"),
         ("No static warnings recorded.", "未记录静态警告。"),
+        ("Static PE resource story", "静态 PE 资源故事"),
+        ("Resource payload triage.", "资源载荷分诊。"),
+        ("Structured <code>static.pe.resource</code> evidence highlights resourceRole, embedded-PE markers, entropy, and size so payload candidates are visible before opening raw static events.", "结构化 <code>static.pe.resource</code> 证据会突出 resourceRole、内嵌 PE 标记、熵值和大小，让候选载荷在打开原始静态事件前可见。"),
+        ("Resource entries", "资源条目"),
+        ("High-entropy resources", "高熵资源"),
+        ("Resource events", "资源事件"),
+        ("Embedded PE:", "内嵌 PE："),
+        ("payload candidates:", "候选载荷："),
+        ("High entropy can indicate compressed/encrypted payload bytes; correlate with dropped files and runtime execution.", "高熵可能表示压缩/加密载荷字节；请与落地文件和运行时执行交叉验证。"),
+        ("Normalized static.pe.resource rows are preserved for behavior rules and raw evidence expansion.", "规范化 static.pe.resource 行会保留给行为规则和原始证据展开。"),
+        ("No structured PE resource entries or static.pe.resource events were recorded.", "未记录结构化 PE 资源条目或 static.pe.resource 事件。"),
+        ("static.pe.resource normalized evidence", "static.pe.resource 规范化证据"),
+        ("Resource payload triage", "资源载荷分诊"),
+        ("embedded PE", "内嵌 PE"),
+        ("payload candidate", "候选载荷"),
+        ("large-resource", "大型资源"),
+        ("metadata-resource", "元数据资源"),
+        ("very-high-entropy-resource", "极高熵资源"),
+        ("high-entropy-resource", "高熵资源"),
         ("Dynamic analysis", "动态分析"),
         ("VirusTotal / reputation", "VirusTotal / 信誉"),
         ("Hash-only enrichment.", "仅哈希增强。"),
@@ -5118,6 +5627,14 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         ("VirusTotal rule hits", "VirusTotal 规则命中"),
         ("External reputation rules are shown here so VT quality does not get mixed into local behavior evidence.", "外部信誉规则在此单独展示，避免 VT 质量状态混入本地行为证据。"),
         ("No VirusTotal enrichment events were recorded. VT is optional, hash-only, and does not upload samples.", "未记录 VirusTotal 增强事件。VT 为可选哈希查询，不上传样本。"),
+        ("VirusTotal official evidence", "VirusTotal 官方证据"),
+        ("Official file-object fields.", "官方文件对象字段。"),
+        ("Engine stats, reputation/community score, last analysis date, and permalink are displayed as external hash reputation only; VT never uploads the sample from this report path.", "引擎统计、信誉/社区分数、最近分析时间和永久链接仅作为外部哈希信誉展示；VT 不会从此报告路径上传样本。"),
+        ("VT verdict", "VT 判定"),
+        ("VT reputation/community", "VT 信誉/社区"),
+        ("VT permalink", "VT 永久链接"),
+        ("Copy-only external VirusTotal GUI/API link; use it for analyst pivoting outside the local report.", "仅复制的外部 VirusTotal GUI/API 链接；用于在本地报告外进行分析跳转。"),
+        ("Copy VirusTotal official evidence", "复制 VirusTotal 官方证据"),
         ("Behavior graph / IOC summary", "行为图谱 / IOC 摘要"),
         ("Evidence story board", "证据故事板"),
         ("Evidence story.", "证据故事。"),
@@ -5166,6 +5683,19 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         ("available", "可用"),
         ("Artifact links", "证据文件链接"),
         ("Artifact collection status", "证据采集状态"),
+        ("Artifact index evidence", "证据文件索引证据"),
+        ("Host artifact index.", "主机证据文件索引。"),
+        ("Download buttons use safe report-relative selectors only; duplicate grouping and rejection diagnostics explain why guest manifest references were accepted, deduplicated, or rejected.", "下载按钮只使用安全的报告相对选择器；重复分组和拒绝诊断说明 guest manifest 引用为何被接受、去重或拒绝。"),
+        ("Safe download selectors", "安全下载选择器"),
+        ("Duplicate artifact groups", "重复证据文件组"),
+        ("Rejected artifact references", "已拒绝证据文件引用"),
+        ("Artifacts with explicit selector evidence:", "带显式选择器证据的证据文件："),
+        ("Unsafe or guest-local paths remain copy-only.", "不安全或 guest 本地路径保持仅复制。"),
+        ("Duplicate members:", "重复成员："),
+        ("primary selectors are preserved in each artifact evidence block.", "主选择器会保留在每个证据文件证据块中。"),
+        ("No host-side manifest rejection diagnostics are attached to indexed artifacts.", "索引证据文件未附带主机侧 manifest 拒绝诊断。"),
+        ("Collections with rejection diagnostics:", "带拒绝诊断的采集集合："),
+        ("Artifact index selector/duplicate/rejection evidence", "证据文件索引选择器/重复/拒绝证据"),
         ("Collection evidence", "采集证据"),
         ("Copied files released or modified by the sample when collection was enabled.", "启用采集时，样本释放或修改并被复制的文件。"),
         ("Desktop screenshots captured around sample execution when enabled.", "启用时在样本执行前后捕获的桌面截图。"),
@@ -5208,6 +5738,19 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         ("R0 noise policy.", "R0 降噪策略。"),
         ("Collection health, device unavailable, and collector self-noise rows are evidence-quality lanes. They stay out of behavior counts, process trees, network cards, and file/registry/network behavior tables.", "采集健康、设备不可用和采集器自噪声行属于证据质量通道。它们不会进入行为计数、进程树、网络卡片以及文件/注册表/网络行为表。"),
         ("R0 availability", "R0 可用性"),
+        ("Driver network status / WFP-ALE", "驱动网络状态 / WFP-ALE"),
+        ("R0 network readiness.", "R0 网络就绪度。"),
+        ("<code>r0collector.driverNetworkStatus</code> is an evidence-quality snapshot for WFP/ALE registration, masks, counters, and degrade reasons; it does not count as malicious network behavior.", "<code>r0collector.driverNetworkStatus</code> 是 WFP/ALE 注册、掩码、计数器和降级原因的证据质量快照；不会计为恶意网络行为。"),
+        ("Network status availability", "网络状态可用性"),
+        ("WFP/ALE masks", "WFP/ALE 掩码"),
+        ("R0 network counters", "R0 网络计数器"),
+        ("Readiness:", "就绪度："),
+        ("degrade reason:", "降级原因："),
+        ("Supported:", "支持："),
+        ("TODO gap:", "待补缺口："),
+        ("last registered:", "最近注册："),
+        ("filters:", "过滤器："),
+        ("Copy WFP/ALE network status evidence", "复制 WFP/ALE 网络状态证据"),
         ("No R0 health rows", "无 R0 健康行"),
         ("Unavailable / degraded", "不可用 / 降级"),
         ("Attention needed", "需要关注"),
@@ -5361,6 +5904,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         ("Copy artifact evidence", "复制证据文件详情"),
         ("Copy artifact", "复制证据文件"),
         ("Copy artifacts", "复制证据文件"),
+        ("Download selector / duplicate / rejection diagnostics", "下载选择器 / 重复 / 拒绝诊断"),
         ("Copy event", "复制事件"),
         ("Copy process card", "复制进程卡"),
         ("Copy network card", "复制网络卡"),
@@ -6281,6 +6825,114 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         {
             return null;
         }
+    }
+
+    private static string RenderArtifactIndexEvidence(ArtifactDescriptor artifact)
+    {
+        var fields = new List<(string Label, string Value)>
+        {
+            ("selector", FirstNonEmpty(
+                MetadataValue(artifact.Metadata, "downloadSelector"),
+                artifact.RelativePath,
+                artifact.ImportPath,
+                "-")),
+            ("href", FirstNonEmpty(
+                ArtifactHref(artifact),
+                MetadataValue(artifact.Metadata, "downloadSafeLink", "safeLink"),
+                "-")),
+            ("importPath", FirstNonEmpty(artifact.ImportPath, MetadataValue(artifact.Metadata, "importPath"), "-"))
+        };
+
+        AddArtifactIndexField(fields, "duplicate", DuplicateArtifactLabel(artifact));
+        AddArtifactIndexField(fields, "rejection", ArtifactRejectionLabel(artifact));
+
+        var copy = ArtifactIndexEvidenceLine(artifact);
+        var html = new StringBuilder();
+        html.Append("<div class=\"relationship-tags artifact-index-fields\">");
+        foreach (var field in fields.Where(field => !string.IsNullOrWhiteSpace(field.Value)))
+        {
+            html.Append($"<span class=\"chip chip-info copyable\" data-copy=\"{A(field.Label + "=" + field.Value)}\">{E(field.Label)}={E(field.Value)}</span>");
+        }
+
+        html.Append("</div>");
+        html.Append($"<details class=\"flat-details\"><summary>Download selector / duplicate / rejection diagnostics</summary><pre class=\"copyable\" data-copy=\"{A(copy)}\">{E(copy)}</pre></details>");
+        return html.ToString();
+    }
+
+    private static void AddArtifactIndexField(List<(string Label, string Value)> fields, string label, string? value)
+    {
+        if (!string.IsNullOrWhiteSpace(value))
+        {
+            fields.Add((label, value));
+        }
+    }
+
+    private static bool HasDownloadSelectorEvidence(ArtifactDescriptor artifact)
+    {
+        return !string.IsNullOrWhiteSpace(artifact.RelativePath) ||
+            !string.IsNullOrWhiteSpace(artifact.SafeLink) ||
+            !string.IsNullOrWhiteSpace(artifact.ImportPath) ||
+            !string.IsNullOrWhiteSpace(MetadataValue(artifact.Metadata, "downloadSelector", "safeRelativeSelector", "downloadSafeLink", "safeLink"));
+    }
+
+    private static bool IsDuplicateArtifactDescriptor(ArtifactDescriptor artifact)
+    {
+        return TextEqualsAny(MetadataValue(artifact.Metadata, "isDuplicate") ?? string.Empty, "true", "1", "yes") ||
+            !string.IsNullOrWhiteSpace(MetadataValue(artifact.Metadata, "duplicateOfArtifactRelativePath")) ||
+            (int.TryParse(MetadataValue(artifact.Metadata, "duplicateOrdinal"), NumberStyles.Integer, CultureInfo.InvariantCulture, out var ordinal) && ordinal > 0);
+    }
+
+    private static bool HasArtifactRejectionDiagnostics(ArtifactDescriptor artifact)
+    {
+        return TextEqualsAny(MetadataValue(artifact.Metadata, "rejectionDiagnosticsAvailable") ?? string.Empty, "true", "1", "yes") ||
+            ArtifactRejectedCount(artifact) > 0 ||
+            !string.IsNullOrWhiteSpace(MetadataValue(artifact.Metadata, "artifactRejectionReasons", "lastRejectedArtifactSelector", "zhRejectionHint"));
+    }
+
+    private static int ArtifactRejectedCount(ArtifactDescriptor artifact)
+    {
+        return int.TryParse(MetadataValue(artifact.Metadata, "rejectedArtifactCount"), NumberStyles.Integer, CultureInfo.InvariantCulture, out var count)
+            ? Math.Max(0, count)
+            : 0;
+    }
+
+    private static string? DuplicateArtifactLabel(ArtifactDescriptor artifact)
+    {
+        var groupCount = MetadataValue(artifact.Metadata, "duplicateGroupCount");
+        var primary = MetadataValue(artifact.Metadata, "duplicatePrimarySelector", "duplicateOfArtifactRelativePath");
+        var isDuplicate = MetadataValue(artifact.Metadata, "isDuplicate");
+        if (string.IsNullOrWhiteSpace(groupCount) && string.IsNullOrWhiteSpace(primary) && string.IsNullOrWhiteSpace(isDuplicate))
+        {
+            return null;
+        }
+
+        return $"isDuplicate={FirstNonEmpty(isDuplicate, "false")}; groupCount={FirstNonEmpty(groupCount, "-")}; primary={FirstNonEmpty(primary, "-")}";
+    }
+
+    private static string? ArtifactRejectionLabel(ArtifactDescriptor artifact)
+    {
+        if (!HasArtifactRejectionDiagnostics(artifact))
+        {
+            return null;
+        }
+
+        return $"count={ArtifactRejectedCount(artifact)}; reasons={FirstNonEmpty(MetadataValue(artifact.Metadata, "artifactRejectionReasons"), "-")}; last={FirstNonEmpty(MetadataValue(artifact.Metadata, "lastRejectedArtifactSelector"), "-")}";
+    }
+
+    private static string ArtifactIndexEvidenceLine(ArtifactDescriptor artifact)
+    {
+        return string.Join(
+            " | ",
+            [
+                $"artifact={ArtifactDisplayName(artifact)}",
+                $"kind={artifact.Kind}",
+                $"downloadSelector={FirstNonEmpty(MetadataValue(artifact.Metadata, "downloadSelector"), artifact.RelativePath, "-")}",
+                $"safeLink={FirstNonEmpty(ArtifactHref(artifact), MetadataValue(artifact.Metadata, "downloadSafeLink", "safeLink"), "-")}",
+                $"safeRelativeSelector={FirstNonEmpty(MetadataValue(artifact.Metadata, "safeRelativeSelector"), artifact.RelativePath, "-")}",
+                $"importPath={FirstNonEmpty(artifact.ImportPath, MetadataValue(artifact.Metadata, "importPath"), "-")}",
+                $"duplicate={DuplicateArtifactLabel(artifact) ?? "false"}",
+                $"rejection={ArtifactRejectionLabel(artifact) ?? "none"}"
+            ]);
     }
 
     private static string RenderArtifactLocation(ArtifactDescriptor artifact)

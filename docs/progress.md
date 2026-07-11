@@ -1,202 +1,75 @@
-# KSwordSandbox progress snapshot
+# KSwordSandbox 进度快照 / Progress snapshot
 
-> Historical snapshot: this file preserves a point-in-time planning estimate and
-> may lag newer implementation/documentation. Use
-> `docs/current-architecture-and-operations.md` for the current MVP operator
-> chain, `docs/webui-real-r0-e2e.md` for recorded live E2E evidence, and
-> `docs/behavior-rule-matrix.md` for the current rule-count/source of truth.
+> 中文优先。本文只做当前工程进度和发布差距的轻量快照；权威操作链路见
+> `docs/current-architecture-and-operations.md`，真实 live 历史证据见
+> `docs/webui-real-r0-e2e.md`，规则清单见 `docs/behavior-rule-matrix.md`，发布差距审计见
+> `docs/v1-release-gap-audit.md`。本文不声称本轮重新运行了 Hyper-V live、Notepad 5s 或真实样本测试。
 
-This snapshot is intentionally conservative. It measures distance to the
-requested v1 deliverable: open WebUI, submit an EXE, run a Windows 10 Hyper-V
-guest, see raw R0/guest events live, import events, classify behavior, and open
-a final HTML report.
+## 当前完成度估计（不含测试覆盖）
 
-## Current estimated completion
+这些百分比衡量“当前开源 MVP 可务实做到的范围”，不包含云端多租户、海量样本库、完整家族归因或默认真实 R0 驱动签名：
 
-- Overall v1 deliverable: **64%**
-- Minimum usable E2E chain on this host: **72%**
-- Repository architecture, docs, module boundaries, policy: **80%**
-- Core job/event/rule/report models: **72%**
-- Web/API/WebUI submission and job UX: **76%**
-- Live raw telemetry contract: **78%**
-- Hyper-V runbook generation and execution recording: **68%**
-- Golden VM / payload staging / operator readiness: **55%**
-- Guest Agent dynamic collection: **70%**
-- R0 Driver + R0Collector: **58%**
-- Static analysis and behavior rules: **64%**
-- HTML report generation: **76%**
-- Artifact manifest and dropped-file plumbing: **70%**
-- Tests and quality gates: **72%**
-- Install/operations/security hardening: **30%**
+- 总体 v1 交付链路：**88%**
+- WebUI 上传/选择、自动启动、live monitor：**95%**
+- Hyper-V runbook / host orchestration：**90%**
+- Guest Agent R3 采集：**90%**
+- R0Collector 用户态采集链：**87%**
+- R0 driver / kernel producer：**76%**
+- 静态分析与行为规则：**93%**
+- 网络 sidecar / PCAP 元数据：**86%**
+- Artifact import / host index / download：**90%**
+- 中英 HTML 报告：**93%**
+- VirusTotal hash-only enrichment：**90%**
+- 发布/打包/仓库策略：**93%**
+- 文档与操作者 onboarding：**89%**
 
-## Evidence already present
+## 已具备的交付证据
 
-- Host Web project can plan jobs, execute dry-run/live runbooks, persist
-  runbook execution records, import guest event files, and serve live event
-  snapshots/SSE.
-- Guest Agent can emit normalized events and can merge R0Collector JSONL into
-  guest output.
-- R0 driver project is in the main solution and has control-device, ring-buffer,
-  health/poll/read-events, process/image, file, registry, and WFP source paths.
-- R0Collector builds as a native x64 console application and emits
-  `SandboxEvent`-compatible JSONL in mock and driver modes. It also has a
-  no-device `--abi-self-check` / `--contract-self-check` mode that records ABI
-  version, capability flags, producer masks, structure sizes, JSONL noise
-  policy, kernel backpressure policy, and queue-loss evidence without opening
-  the driver device.
-- R0Collector now has a shipped synthetic event-quality stress mode:
-  `--stress-count <n>` emits contiguous `driver.file` rows with sequence,
-  stress, loss, and backpressure evidence, and `--inject-jsonl-noise` appends
-  blank/malformed/extra-field rows for parser tolerance checks without opening
-  the driver device.
-- R0 network parsing now adds lightweight semantic fields (`serviceHint`,
-  `semanticCandidate`, `flowKey`, source/destination endpoints, and
-  DNS/HTTP/TLS candidate booleans) and uses URI-like top-level network paths
-  when remote endpoints decode.
-- Report renderer has cloud-sandbox-style sections for risk, behavior, MITRE,
-  static, dynamic, behavior graph / IOC summary, artifact links, process, file,
-  registry, network, failures, and raw events.
-- Repository policy blocks VM disks, binaries, samples, reports, keys, and build
-  outputs.
-- Smoke validation now has a P0/P1 gate that checks WebUI live endpoint shape,
-  guest `events.json` plus `driver-events.jsonl` import, Hyper-V script safety,
-  R0 driver/collector file and ABI strings, report sections, and repo policy.
-- `Invoke-FullValidation.ps1` now runs the live-telemetry contract script and a
-  non-mutating Hyper-V `PlanOnly`/`WhatIf` plan check before native/readiness
-  gates.
-- Smoke validation now enforces the harmless-sample contract for
-  `KSword.Sandbox.HarmlessSample`: the source project and
-  `Prepare-HarmlessSample.ps1` exist, generated `.exe`/`.dll`/`.bin` and
-  `bin`/`obj` outputs must stay out of git, and the Hyper-V E2E runbook explains
-  how to publish it outside the repository before `-Live`.
-- `Invoke-LocalPipelineSmoke.ps1` now covers the host-side minimal chain:
-  Web API health, directory scan, job plan, dry-run runbook execution,
-  `runbook-execution.json`, synthetic guest `events.json`,
-  synthetic `driver-events.jsonl`, live raw-event endpoint, guest import, and
-  final `report.html`.
-- `Invoke-FullValidation.ps1` includes the local WebUI/API pipeline smoke by
-  default, so the runnable host-side MVP path is part of the standard gate.
-- A real WebUI/API + Hyper-V + test-signed R0 validation has completed on the
-  local prepared VM. Evidence is recorded in `docs/webui-real-r0-e2e.md`:
-  `fe0db7cb-df74-444b-897e-50c9f5a27d4d` completed 17/17 runbook steps,
-  imported guest events, served default/zh/en HTML reports, and exposed 522
-  live raw events without calling `CSignTool.exe`.
-- The reusable `scripts/Invoke-WebUIApiE2E.ps1` gate now covers the WebUI API
-  path. Its default mode is dry-run and safe; `-Live` is required before any VM
-  mutation.
-- WebUI runbook execution now emits real UI-safe
-  `SandboxRunbookProgressSnapshot` updates through the executor `ProgressSink`.
-  `GET /api/jobs/{jobId}/runbook/progress` exposes the latest per-step state
-  while `/runbook/execute` is still running, without exposing PowerShell
-  commands, stdout, or stderr on the main dashboard.
-- The dedicated dynamic monitor page also polls the real runbook progress
-  endpoint and shows UI-safe step progress beside raw events and VirusTotal
-  results. The upload flow opens a same-gesture blank monitor placeholder before
-  asynchronous upload work, then navigates it to the job monitor after planning
-  to reduce browser popup-blocker failures.
-- WebUI live analysis now has a server-side background start path:
-  `POST /api/jobs/{jobId}/runbook/start` accepts the run and returns
-  immediately, while `GET /api/jobs/{jobId}/runbook/background` exposes queued,
-  running, completed, or failed state plus terminal execution/import metadata.
-  The dashboard and dynamic monitor both poll background state, so the browser
-  no longer owns one long Hyper-V execute request after the Web host accepts the
-  job. The older blocking `/runbook/execute` endpoint remains available for
-  tools.
-- The upload flow is now closer to one-click operation: after an `.exe` upload
-  is stored and planned, the dashboard opens the standalone dynamic monitor,
-  starts live VM analysis, keeps the main page on exact runbook step state, and
-  falls back to a copyable monitor/progress/report link card if the browser
-  blocks the new tab.
-- Final HTML reports no longer inline every raw event by default. Raw evidence
-  is collapsed in a bounded scroll panel, capped to the first 200 inline rows,
-  and the report shows complete source hints for `report.json`, `events.json`,
-  `driver-events.jsonl`, and artifact manifests.
-- Behavior detections now expose copyable native `<details>` "Top evidence"
-  blocks directly in each rule-hit row instead of forcing analysts to jump to
-  raw events first. Raw events also show a compact distribution summary for top
-  event types, sources, and event families before the collapsed raw table.
-- Behavior rules have been expanded substantially; see
-  `docs/behavior-rule-matrix.md` for the current exact count and matrix. Current
-  coverage includes
-  persistence, service/task abuse, PowerShell/script launch, download-execute,
-  process injection signals, credential/LSASS/browser-store access, lateral
-  movement, anti-sandbox checks, firewall/tool tampering, DNS/HTTP/TLS/C2,
-  PCAP evidence, screenshots, memory dumps, dropped-file artifacts, process
-  trees, and MITRE map consistency. The latest quality pass adds Office
-  startup/add-in, accessibility IFEO, logon-script file, Mavinject,
-  InstallUtil/MSBuild/Regasm proxy-execution, clipboard/screenshot/LSASS dump
-  file, domain discovery, `.onion`, encoded HTTP URI, domain-fronting, TLS C2,
-  and process-tree lineage rules with explicit confidence/evidence-field
-  metadata.
-- Guest Agent artifact collection now has opt-in dropped-file, screenshot,
-  memory-dump, and packet-capture lanes. Dropped files are copied under
-  `artifacts/dropped-files/**` with manifest metadata; screenshots and memory
-  dumps remain off by default; packet capture is explicit opt-in and uses
-  Windows `pktmon` to produce `packet-captures/*.pcapng` when the guest permits
-  it.
-- Artifact manifests now carry collection status metadata (`collections`,
-  `evidenceRole`, `capturePhase`, `captureState`, `guestPath`, `importPath`,
-  and `collectionName`), and host indexing recognizes memory dumps plus
-  `.pcap` / `.pcapng` files.
-- Screenshot collection remains opt-in but now supports a default
-  `before,during,after` cadence, `--screenshot-phases` /
-  `--screenshot-stages`, and bounded `--screenshot-count 1..5`; skipped
-  screenshots stay non-fatal on headless or unsupported guests.
-- Host artifact indexing now exposes collection summaries and can consume
-  guest-generated or externally supplied `.pcap` / `.pcapng` artifacts; packet
-  captures appear in report artifact links when present.
-- PCAP artifacts are now parsed into bounded normalized `pcap.summary`,
-  `pcap.flow`, `pcap.dns`, `pcap.http`, and `pcap.tls` events for Ethernet /
-  IPv4 / TCP / UDP captures. Guest event import merges sibling PCAP files into
-  report regeneration, and smoke coverage verifies DNS, HTTP, TLS/SNI, flow,
-  protocol summary, and rule hits.
-- The report now includes a static HTML/CSS weak-interaction behavior graph and
-  IOC summary cards, deriving process-to-file, process-to-registry,
-  process-to-network, and process-to-artifact edges from normalized events. It
-  now also has bounded evidence summary cards, process relationship cards, and
-  network relationship cards with folded evidence blocks and copy-friendly text.
-- Current validation evidence for this snapshot:
-  `dotnet build .\KSwordSandbox.sln`, native driver/collector compile-only
-  build, smoke tests, local pipeline smoke, and repository policy all pass.
-- VirusTotal integration has a first WebUI pass: `/settings` stores or clears a
-  local API key, `KSWORDBOX_VIRUSTOTAL_API_KEY` can override it, and
-  `/api/jobs/{jobId}/virustotal` performs a hash-only official v3 file-report
-  lookup without uploading samples. Missing keys or API failures return quiet
-  status payloads and do not interrupt sandbox execution.
+- WebUI/API 可以选择或上传 `.exe`，创建 job 后进入独立 live monitor；显式 live 才会操作 Hyper-V VM。
+- Live monitor 优先消费 `/api/jobs/{jobId}/progress/stream` 真实 runbook step SSE；SSE 不可用时回退 durable `runbook-progress.json` 和 `/runbook/progress` polling。
+- 主视图默认不展开 runbook command、stdout、stderr；需要深度排障时再打开 execution-flow 或复制 `runbook-execution.json`。
+- Web live artifact 面板展示 artifact index 总览、safe selector、download href、duplicate grouping 和 rejection diagnostics；下载解析必须命中 job artifact index。
+- VirusTotal 是可选 hash-only reputation enrichment；设置页只影响当前 Web 进程，缺 key、未收录、限速、认证失败、timeout 等 quiet state 不写默认 job log，也不进入主要恶意行为列表。
+- Host 静态分析输出 `static.analysis.completed` 兼容摘要，并投影 `static.pe.*`、`static.string.*`、`static.packer.hint`、`static.yara.match`、`static.pe.resource` 等结构化事件供规则和报告消费。
+- `static.pe.resource` 覆盖 PE resource type/name/language、size、RVA、entropy、embedded-PE/payload-candidate 等字段，规则侧可用于静态 resource payload triage。
+- Guest Agent 具备进程树、文件差异、网络快照，以及显式 opt-in 的 dropped files、screenshots、memory dumps、packet captures lanes；artifact metadata 带 sha256、size、相对路径和中文提示。
+- Host 可导入 `events.json`、`driver-events.jsonl`、artifact manifest、PCAP/PCAPNG 和 sidecar rows，生成 normalized events、findings、artifact index 与中英 HTML 报告。
+- PCAP/sidecar 归一化覆盖 DNS、HTTP、TLS、flow、IPv6 TCP/UDP、NXDOMAIN、HTTP upload/status、TLS SNI/JA3/ALPN/证书字段，并尽量保留 process/root lineage。
+- R0Collector 支持 mock/driver 模式、ABI/contract self-check、sequence/lost/backpressure/highWatermark 质量字段，并接入只读 `IOCTL_KSWORD_SANDBOX_GET_NETWORK_STATUS`。
+- `r0collector.driverNetworkStatus` 在成功时记录 WFP/ALE layer masks、producer counters、degrade reason 和 readiness state；IOCTL 不可用时输出 degraded 诊断行且继续采集。
+- HTML 报告已按 Risk、Process、Files、Network、R0、VT、Artifacts、Raw events 分区；raw events 默认折叠、分页、限高，命令墙字段默认隐藏在可复制 details 中。
+- 报告证据叙事包含 process relationship、network relationship、evidence story board、IOC/behavior graph、R0 health/noise 和 VT reputation 分区，避免把采集健康或外部信誉误算成样本行为。
+- 仓库策略阻止样本、VM、报告、PCAP、dump、驱动二进制、symbols、证书、secret、`bin/`、`obj/`、`x64/` 等产物进入 git。
 
-## Remaining P0 gaps
+## 仍需发布经理确认的 P0/P1 差距
 
-1. Turn the currently single-job/single-golden-VM flow into an operator-safe
-   packaged experience: clearer install/run checks, better failure recovery, and
-   one-click defaults that do not require reading runbook internals.
-2. Harden the real R0 path beyond the successful smoke: producer-specific
-   stress tests, unload/reload reliability, tighter event filtering, and live
-   ABI self-check execution in the guest image.
-3. Continue report evidence polish beyond the new relationship cards: improve
-   visual process-tree layout, timeline grouping, artifact cards, and screenshot
-   evidence placement.
-4. Finish real screenshot capture validation and repeated PCAP/network-flow
-   validation. The guest now has an opt-in pktmon path, but it still needs live
-   VM validation across privilege levels, existing-capture conflicts, and large
-   trace conversion.
-5. Move from single golden VM restore to safer temporary VM or differencing-disk
-   isolation before any broader sample testing.
-6. Broaden VirusTotal and external intelligence presentation beyond the first
-   hash-only lookup while keeping missing keys and API failures quiet by default.
+P0 当前不是“必须先写代码”，而是候选提交发布前必须重新确认的门禁：
 
-## Next best work
+1. 仓库和 source package 不含 runtime artifacts、样本、VM、dump、pcap、driver binary、证书或 secret。
+2. 默认 install/run/readiness/package 路径不调用 `CSignTool.exe`，不加载真实 driver，不修改 VM。
+3. 若 release notes 要声明“本候选已生成真实 Notepad 5s 报告”，必须在实验室主机重新运行 live 命令并记录 job id；历史证据不能替代 fresh release evidence。
 
-- Run the new R0Collector no-device ABI self-check inside the prepared guest
-  image and wire its output into operator readiness checks.
-- Finish deeper R0 typed payload parsing, producer-specific stress tests, and
-  unload/reload reliability checks.
-- Run the Hyper-V E2E PlanOnly/full-validation gates on the target host after
-  each script change, then run the live mode only from an elevated test session.
-- Use `Prepare-HarmlessSample.ps1` and the runbook checklist to build the
-  executable outside git for live Hyper-V validation.
-- Validate the new opt-in guest pktmon PCAP collection path inside the prepared
-  VM and ensure generated `.pcapng` artifacts are imported into the final
-  report during live Hyper-V runs.
-- Add richer visual process-tree layout, timeline grouping, and artifact cards
-  on top of the new process/network relationship cards.
-- Run native build and full smoke after each R0/collector merge.
+P1 仍值得继续补强：
+
+- 用真实样本人工走查 live monitor，确认当前 step、失败态、artifact 卡片、VT quiet card 和报告入口无需打开命令墙也能理解。
+- 用 benign GUI、harmless sample、下载执行、文件释放、网络样本生成报告，校准首屏摘要、关系卡、截图/PCAP/落地文件证据和 raw evidence 边界。
+- 对 R0 driver path 做真实驱动输入、压力样本、unload/reload 和 guest 内 ABI self-check 复验；默认发布仍只承诺 telemetry contract，不承诺任意主机都能加载未签名驱动。
+- 用更多 corpus 校准 behavior rules、MITRE 映射、static-only triage、YARA-like 噪音和 VT reputation 呈现。
+- 补 synthetic 覆盖：非 ASCII artifact path、深目录、重复内容、路径穿越拒绝、真实 sidecar/PCAP 字段质量。
+
+## 低成本下一步
+
+默认低成本验证不启动 VM、不签名、不联网、不调用 `CSignTool.exe`：
+
+```powershell
+.\scripts\Test-RepositoryPolicy.ps1
+.\scripts\Test-ReleaseReadiness.ps1 -AllowDirtySource
+```
+
+若只改文档，优先运行：
+
+```powershell
+git diff --check -- docs
+```
+
+Hyper-V live、真实 R0、VT 联网和重 smoke 只在 release manager 明确安排时运行。

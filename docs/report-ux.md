@@ -33,31 +33,28 @@ v1 报告必须在 live demo 中对操作者有用，而不只是技术上完整
 - MITRE mapping / MITRE 映射.
 - Engine/rule hits / 引擎与规则命中。
 - Static analysis / 静态分析：包含 PE sections、URLs、strings、warnings 和 tags。
+  静态 resource 证据应消费 `static.pe.resource`：展示 resource type/name/language、
+  size、RVA、entropy、embedded-PE/payload-candidate 等字段，并明确这是静态 triage，
+  不是已观察到的 guest 行为。
 - Dynamic summary / 动态分析.
 - VirusTotal / reputation / VirusTotal / 信誉：VT 是可选 hash-only 信誉 enrichment。
   缺失 API key、限速、未收录响应或 lookup transport status 属于 enrichment 质量/状态，
   不是沙箱观察到的恶意行为。
-- Behavior graph / IOC summary / 行为图谱与 IOC 摘要. This is a stable,
-  weak-interaction graph view that derives process-to-file, process-to-registry,
-  process-to-network, and process-to-artifact edges from normalized telemetry.
-  It must include an Evidence story board, Top behavior chain, Evidence graph
-  edges, and IOC summary panels so the final report feels like an
-  analyst-facing sandbox report rather than only raw tables. The Evidence story
-  board should keep dropped files, screenshots, memory dumps, PCAP/network,
-  process lineage, and R0 health/noise boundaries visible as copyable,
-  collapsible lanes before dense event tables.
-- Timeline. The timeline must use timeline grouping so bursty telemetry is
-  readable in chronological order: group by a stable time bucket, show event
-  counts and event-family summaries, keep a bounded timeline inline, and point
-  to raw events/report JSON for complete evidence.
-- Process details / 进程, including the Process tree, process relationship
-  tree, process relationship panels, and process event table. The tree should
-  prefer a stable process key when present and fall back to PID/PPID so parent,
-  child, and orphan relationships remain stable without JavaScript.
-  This stable process relationship tree must remain readable without opening
-  raw evidence first. A Process tree overview should show node/root/edge
-  counts, high-signal default-expanded nodes, and self-noise excluded from the
-  tree before the operator expands the lineage.
+- Behavior graph / IOC summary / 行为图谱与 IOC 摘要：使用稳定、弱交互的图谱视图，
+  从 normalized telemetry 推导 process-to-file、process-to-registry、process-to-network
+  和 process-to-artifact edges。必须包含 Evidence story board、Top behavior chain、
+  Evidence graph edges 和 IOC summary panels，使最终报告像分析员可读的沙箱报告，
+  而不是纯 raw table。Evidence story board 应在密集事件表之前，把 dropped files、
+  screenshots、memory dumps、PCAP/network、process lineage 和 R0 health/noise boundary
+  作为可复制、可折叠 lane 展示。
+- Timeline / 时间线：使用 timeline grouping 让突发遥测按时间顺序可读；按稳定时间桶分组，
+  展示 event count 和 event-family summary，inline 时间线保持有界，并指向 raw events/report JSON
+  作为完整证据。This is a bounded timeline by design; complete evidence remains
+  in raw events and report JSON。
+- Process details / 进程：包含 process tree、process relationship tree、process relationship panels
+  和 process event table。树应优先使用 stable process key / 稳定 process key，缺失时回退 PID/PPID，使 parent、
+  child 和 orphan relationship 无需 JavaScript 也稳定可读。Process tree overview 应展示
+  node/root/edge counts、默认展开的高信号节点，并在展开 lineage 前排除 self-noise；self-noise excluded。
 - File behavior / 文件, including dropped files.
   Dropped-file rows should be reinforced by the Evidence story board and
   Artifact collection status lanes so released files remain visible even when
@@ -76,22 +73,19 @@ v1 报告必须在 live demo 中对操作者有用，而不只是技术上完整
   pktmon collection metadata, packet counts, conversion status, and imported
   DNS/HTTP/TLS/flow rows should also appear in the Evidence story board and
   remain collapsible/copyable rather than being spread across raw rows only.
-- R0 / driver events.
-  R0 collection health status must be shown before driver telemetry evidence.
-  Device unavailable, driver health, queue backpressure, and dropped-event
-  counters describe telemetry quality and must not be counted as sample
-  behavior. Health alerts may be highlighted as collection-quality warnings.
-  The R0 availability summary should show available, unavailable/degraded,
-  attention-needed, or absent-health-row states as evidence quality rather than
-  malicious behavior.
-  Driver rows attributed to `KSword.Sandbox.R0Collector.exe`, the sandbox
-  agent, collector staging paths, or the KSword driver device are
-  collection-side self-noise. They must be excluded from behavior counts,
-  behavior graphs, and file/registry/network/process behavior sections, while
-  remaining auditable in the R0 self-noise summary and Raw normalized events.
-  R0 health/unavailable examples should be folded by default and capped to a
-  small representative set, with complete evidence left in raw events and
-  `report.json`.
+- R0 / driver events / R0 与驱动事件：
+  R0 collection health status 必须出现在 driver telemetry evidence 之前。Device unavailable、
+  driver health、queue backpressure 和 dropped-event counters 描述的是遥测质量，不能计入样本行为。
+  Health alerts 可以作为 collection-quality warnings 高亮。R0 availability summary 应显示
+  available、unavailable/degraded、attention-needed 或 absent-health-row 等采集质量状态，而不是恶意行为。
+  归因到 `KSword.Sandbox.R0Collector.exe`、sandbox agent、collector staging paths 或 KSword driver device
+  的 driver rows 属于 collection-side self-noise，必须从 behavior counts、behavior graphs 以及
+  file/registry/network/process behavior sections 中排除，同时保留在 R0 self-noise summary 和
+  Raw normalized events 中供审计。R0 health/unavailable examples 默认折叠并限制为少量代表样例，
+  完整证据留在 raw events 和 `report.json`。
+  `r0collector.driverNetworkStatus` 属于 R0/WFP/ALE readiness 诊断：展示
+  supported/active layer masks、producer counters、degrade reason、readinessState
+  和中文提示；不得把 IOCTL 不可用、degraded 或 queue/backpressure 诊断当作样本恶意行为。
 - Failure reasons / 失败原因.
 - Raw normalized events / 原始事件.
   This section should remain collapsed and capped, but before the collapsed
@@ -129,7 +123,7 @@ plain diagnostic dump. The visual contract is:
   `report.json`.
 - 具有可信 `safeLink` 或安全相对路径的 Artifact evidence 应渲染为显式
   Open/Download（`打开 / Open`、`下载 / Download`）按钮。任意 host/guest 绝对文件系统路径只能作为可复制
-  evidence text 展示 and must not be used as `href`。绝对路径不得用于 `href`。
+  evidence text 展示 and must not be used as `href`。绝对路径不得用于 `href`；absolute paths must not be used as `href`。
 - The Raw normalized events section should be slim by default: render a native
   collapsed `<details>` block, bound the expanded raw event panel height, and
   inline only the first 75 raw events. Expanded inline rows must be split into
@@ -222,10 +216,14 @@ Evidence rows 是操作者可见内容。Tables、timeline entries 和 raw evide
 
 ## Live UI 预期 / Live UI expectations
 
-WebUI live raw monitor 是独立 dynamic monitor page，由 main dashboard 链接；浏览器允许时，
-upload flow 会自动打开它。该页刻意只显示 raw events only；在 analysis 完成并导入 guest output 前，
-不运行 behavior classification。当页面由 upload 打开时，双语提示应告知操作者分析请求已由后台接管，
-可在 monitor 页查看进度/下载。Live table 应显示：
+WebUI live monitor 是独立 dynamic monitor page，由 main dashboard 链接；浏览器允许时，
+upload flow 会自动打开它；it is opened automatically by the upload flow，so the operator
+does not need to leave the dashboard tab running the analysis request。该页优先连接 `/api/jobs/{jobId}/progress/stream` 真实 runbook step SSE，
+不可用时回退 `/runbook/progress` polling 和 durable `runbook-progress.json`。在 analysis 完成并导入
+guest output 前，不运行 behavior classification；live UI shows raw events only before final classification。
+页面应同时展示 raw events、VT quiet/reputation card
+和 artifact index/download card；当页面由 upload 打开时，双语提示应告知操作者分析请求已由后台接管，
+可在 monitor 页查看进度、VT 状态和证据下载。Live table 应显示：
 
 - timestamp / 时间戳
 - `eventType`
@@ -233,6 +231,13 @@ upload flow 会自动打开它。该页刻意只显示 raw events only；在 ana
 - process id/name / 进程 ID/名称
 - path / 路径
 - data / 数据：command/output 字段隐藏在可复制 details 中
+
+Artifact 面板应展示 artifact index 总数、root path policy、safe selector policy、download selector/href、
+duplicate grouping 和 rejection diagnostics。只有来自 artifact index 的 job-relative selector 可以作为
+下载入口；host/guest 绝对路径只能作为可复制 evidence text。
+
+VT 面板应明确“hash-only，不上传样本”。缺 key、not-found、rate-limit、auth failure、timeout 或 transport
+failure 是 quiet state，只显示在 reputation/health 区，不写默认 job log，不进入 behavior finding。
 
 当 job 失败时，main dashboard 应保持 report links、artifact paths、progress stage status、
 failed step title/message、exit code 和 duration 可见。它不应内联长 runbook command text、

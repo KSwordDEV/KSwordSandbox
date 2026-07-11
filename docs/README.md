@@ -19,16 +19,20 @@ WebUI 展示实时进度和原始事件；可选 VirusTotal 只做 hash-only 查
 
 ## 发布就绪快照 / Release-readiness snapshot
 
-截至 `21a81ac` 后的文档刷新，release-review 的当前事实入口是
+截至 `b845c3d` 后的文档刷新，release-review 的当前事实入口是
 [`v1-release-gap-audit.md`](v1-release-gap-audit.md)：它维护组件完成百分比、
 剩余差距和低副作用验收命令。简要状态：
 
-- WebUI live 已有真实进度 SSE、durable progress fallback、上传后监控页、
-  artifact/download 卡片和 VT quiet state；命令/stdout/stderr 不在主视图展开。
-- 静态分析已拆出 `static.*` 结构化事件并进入规则消费；`rules/static-notes.yar`
+- WebUI live 优先使用 `/api/jobs/{jobId}/progress/stream` 真实 runbook step
+  SSE；不可用时回退 durable `runbook-progress.json`/polling。上传或选择 `.exe`
+  后进入监控页，命令/stdout/stderr 不在主视图展开。
+- Live monitor 已显示 VT quiet state、artifact index 总览、download selector/href、
+  duplicate 和 rejection diagnostics；下载必须通过 job artifact index 的安全相对 selector。
+- 静态分析已拆出 `static.*` 结构化事件并进入规则消费；`static.pe.resource`
+  投影 PE resource、payload candidate 和 entropy 等字段。`rules/static-notes.yar`
   由内置轻量 YARA-like matcher 处理，仍只作为 triage。
-- 网络/PCAP/sidecar、artifact index/download、R0 health/noise、VT reputation
-  和中英 HTML 报告已形成可审阅闭环。
+- 网络/PCAP/sidecar、artifact index/download、`r0collector.driverNetworkStatus`
+  R0 网络状态诊断、VT reputation 和中英 HTML 报告已形成可审阅闭环。
 - 默认 release/readiness/package 不签名、不加载驱动、不调用 `CSignTool.exe`、
   不 push，也不把 runtime 产物带入 git。
 

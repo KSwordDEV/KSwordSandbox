@@ -134,6 +134,14 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(rendererSource, "R0 noise policy", "Report renderer should explain R0 health/self-noise separation.");
         RequireContains(rendererSource, "R0 availability", "Report renderer should summarize R0 health availability.");
         RequireContains(rendererSource, "R0 health evidence examples", "Report renderer should fold R0 health evidence examples.");
+        RequireContains(rendererSource, "Driver network status / WFP-ALE", "Report renderer should surface R0 network status diagnostics.");
+        RequireContains(rendererSource, "r0collector.driverNetworkStatus", "Report renderer should narrate R0 network status evidence.");
+        RequireContains(rendererSource, "Static PE resource story", "Report renderer should expose structured PE resource evidence.");
+        RequireContains(rendererSource, "resourceRole", "Report renderer should render static resource roles.");
+        RequireContains(rendererSource, "Artifact index evidence", "Report renderer should explain artifact selector/duplicate/rejection diagnostics.");
+        RequireContains(rendererSource, "Download selector / duplicate / rejection diagnostics", "Report renderer should expose artifact index row evidence.");
+        RequireContains(rendererSource, "VirusTotal official evidence", "Report renderer should summarize VT official file-object fields.");
+        RequireContains(rendererSource, "VT reputation/community", "Report renderer should expose VT reputation/community score.");
         RequireContains(rendererSource, "id=\\\"cover\\\"", "Report renderer should expose a cover anchor.");
         RequireContains(rendererSource, "id=\\\"toc\\\"", "Report renderer should expose a table-of-contents anchor.");
         RequireContains(analysisModels, "HtmlReportZhPath", "Analysis job model should have a Chinese HTML report path for automatic report links.");
@@ -270,6 +278,8 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         var englishHtml = renderer.RenderEnglish(report, artifacts);
         var chineseHtml = renderer.RenderChinese(report, artifacts);
         var documents = renderer.RenderBilingualReports(report, artifacts);
+        var totalRawEvents = report.Events.Count;
+        var hiddenRawEvents = Math.Max(0, totalRawEvents - 75);
 
         RequireContains(defaultHtml, "<html lang=\"zh-CN\">", "Default rendered HTML should use the Simplified Chinese compatibility report.");
         RequireContains(defaultHtml, "href=\"report.zh.html\"", "Default rendered HTML should link to report.zh.html.");
@@ -281,10 +291,10 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(englishHtml, "position:sticky", "Rendered major section headers should be sticky.");
         RequireContains(englishHtml, "href=\"report.zh.html\"", "Rendered HTML should link to report.zh.html.");
         RequireContains(englishHtml, "href=\"report.en.html\"", "Rendered HTML should link to report.en.html.");
-        RequireContains(englishHtml, "<details class=\"raw-events-shell\"><summary>Show inline raw events (75/213; 138 hidden)</summary>", "Rendered raw events should be collapsed and capped.");
+        RequireContains(englishHtml, $"<details class=\"raw-events-shell\"><summary>Show inline raw events (75/{totalRawEvents}; {hiddenRawEvents} hidden)</summary>", "Rendered raw events should be collapsed and capped.");
         RequireContains(englishHtml, "Inline pages", "Rendered raw event overview should show page counts.");
-        RequireContains(englishHtml, "Raw event page 1: rows 1-25 of 213", "Rendered raw event panel should show the first native page.");
-        RequireContains(englishHtml, "Raw event page 3: rows 51-75 of 213", "Rendered raw event panel should show the final inline page.");
+        RequireContains(englishHtml, $"Raw event page 1: rows 1-25 of {totalRawEvents}", "Rendered raw event panel should show the first native page.");
+        RequireContains(englishHtml, $"Raw event page 3: rows 51-75 of {totalRawEvents}", "Rendered raw event panel should show the final inline page.");
         RequireContains(englishHtml, "raw-event-page", "Rendered raw event panel should use bounded page containers.");
         RequireContains(englishHtml, "Raw event page index", "Rendered raw event overview should include a static page index.");
         RequireContains(englishHtml, "Index by event type", "Rendered raw event index should include event type grouping.");
@@ -322,6 +332,17 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(englishHtml, "Memory dump evidence", "Rendered HTML should include memory dump story evidence.");
         RequireContains(englishHtml, "Network and PCAP evidence", "Rendered HTML should include network/PCAP story evidence.");
         RequireContains(englishHtml, "R0 health/noise boundary", "Rendered HTML should include R0 health/noise story evidence.");
+        RequireContains(englishHtml, "Driver network status / WFP-ALE", "Rendered HTML should include R0 WFP/ALE network status.");
+        RequireContains(englishHtml, "Network status availability", "Rendered HTML should include R0 network availability cards.");
+        RequireContains(englishHtml, "r0collector.driverNetworkStatus", "Rendered HTML should expose copyable R0 network status evidence.");
+        RequireContains(englishHtml, "Static PE resource story", "Rendered HTML should include structured static resource story.");
+        RequireContains(englishHtml, "embedded-pe", "Rendered HTML should include static resourceRole evidence.");
+        RequireContains(englishHtml, "Artifact index evidence", "Rendered HTML should include artifact selector/duplicate/rejection cards.");
+        RequireContains(englishHtml, "Download selector / duplicate / rejection diagnostics", "Rendered artifact rows should expose index diagnostics.");
+        RequireContains(englishHtml, "Rejected artifact references", "Rendered artifact index story should summarize rejection diagnostics.");
+        RequireContains(englishHtml, "VirusTotal official evidence", "Rendered HTML should include VT official evidence cards.");
+        RequireContains(englishHtml, "VT reputation/community", "Rendered HTML should include VT reputation/community fields.");
+        RequireContains(englishHtml, "https://www.virustotal.com/gui/file/", "Rendered HTML should include copyable VT permalink evidence.");
         RequireContains(englishHtml, "Artifact collection status", "Rendered HTML should include artifact collection status cards.");
         RequireContains(englishHtml, "Dropped files", "Rendered HTML should include dropped-file status card.");
         RequireContains(englishHtml, "Screenshots", "Rendered HTML should include screenshot status card.");
@@ -486,7 +507,20 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
             Sha256 = new string('d', 64),
             Metadata = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
             {
-                ["evidenceRole"] = "dropped-file"
+                ["evidenceRole"] = "dropped-file",
+                ["downloadSelector"] = "artifacts/contract-drop.bin",
+                ["safeRelativeSelector"] = "artifacts/contract-drop.bin",
+                ["duplicateGroupKey"] = "sha256:" + new string('d', 64),
+                ["duplicateGroupId"] = "duplicate-contract-drop",
+                ["duplicateGroupCount"] = "2",
+                ["duplicateOrdinal"] = "1",
+                ["isDuplicate"] = "true",
+                ["duplicatePrimarySelector"] = "artifacts/primary-contract-drop.bin",
+                ["duplicateOfArtifactRelativePath"] = "artifacts/primary-contract-drop.bin",
+                ["rejectionDiagnosticsAvailable"] = "true",
+                ["rejectedArtifactCount"] = "1",
+                ["lastRejectedArtifactSelector"] = "../unsafe.bin",
+                ["artifactRejectionReasons"] = "unsafeGuestArtifactPath"
             }
         }
     ];
@@ -580,6 +614,71 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
                 ["driverEventPath"] = "driver-events.jsonl"
             }
         };
+        var r0NetworkStatusEvent = new SandboxEvent
+        {
+            EventType = "r0collector.driverNetworkStatus",
+            Timestamp = timestamp.AddSeconds(4.5),
+            Source = "r0collector",
+            Data =
+            {
+                ["networkStatusAvailable"] = "true",
+                ["readinessState"] = "available",
+                ["supportedLayerMaskHex"] = "0x0000000F",
+                ["activeLayerMaskHex"] = "0x00000007",
+                ["lastRegisteredCalloutMaskHex"] = "0x00000007",
+                ["lastAddedFilterMaskHex"] = "0x00000007",
+                ["todoMaskHex"] = "0x00000008",
+                ["classifyCount"] = "12",
+                ["eventCount"] = "6",
+                ["queueFailureCount"] = "0",
+                ["classifyPayloadFailureCount"] = "0",
+                ["lastDegradeReasonName"] = "wfpAleConnectTodo"
+            }
+        };
+        var staticResourceEvent = new SandboxEvent
+        {
+            EventType = "static.pe.resource",
+            Timestamp = timestamp.AddSeconds(4.6),
+            Source = "host",
+            Path = @"D:\Samples\contract-sample.exe",
+            Data =
+            {
+                ["resourceType"] = "RCDATA",
+                ["resourceRole"] = "embedded-pe",
+                ["isEmbeddedPe"] = "True",
+                ["isPayloadCandidate"] = "True",
+                ["entropy"] = "7.850",
+                ["entropyLabel"] = "high",
+                ["size"] = "4096"
+            }
+        };
+        var vtEvent = new SandboxEvent
+        {
+            EventType = "enrichment.virustotal.lookup",
+            Timestamp = timestamp.AddSeconds(4.7),
+            Source = "virustotal",
+            Path = "https://www.virustotal.com/gui/file/" + new string('a', 64),
+            Data =
+            {
+                ["vtStatus"] = "found",
+                ["status"] = "found",
+                ["vtVerdict"] = "malicious",
+                ["verdict"] = "malicious",
+                ["vtMalicious"] = "3",
+                ["vtSuspicious"] = "1",
+                ["vtHarmless"] = "59",
+                ["vtUndetected"] = "8",
+                ["vtEngineCount"] = "71",
+                ["vtReputation"] = "-12",
+                ["vtCommunityScore"] = "-2",
+                ["communityScoreSource"] = "reputation",
+                ["vtCommunityHarmlessVotes"] = "1",
+                ["vtCommunityMaliciousVotes"] = "3",
+                ["vtCommunityVoteCount"] = "4",
+                ["lastAnalysisDateUtc"] = "2026-01-01T00:00:00.0000000Z",
+                ["permalink"] = "https://www.virustotal.com/gui/file/" + new string('a', 64)
+            }
+        };
         var failureEvent = new SandboxEvent
         {
             EventType = "analysis.timeout",
@@ -590,7 +689,7 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
                 ["reason"] = "contract timeout evidence"
             }
         };
-        var events = new List<SandboxEvent> { launcherEvent, processEvent, childProcessEvent, fileEvent, registryEvent, networkEvent, r0Event, failureEvent };
+        var events = new List<SandboxEvent> { launcherEvent, processEvent, childProcessEvent, fileEvent, registryEvent, networkEvent, r0Event, r0NetworkStatusEvent, staticResourceEvent, vtEvent, failureEvent };
         for (var index = 0; index < 205; index++)
         {
             events.Add(new SandboxEvent
@@ -641,6 +740,22 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
                         VirtualSize = 4096,
                         RawDataSize = 2048,
                         Entropy = 6.2
+                    }
+                ],
+                Resources =
+                [
+                    new PeResourceInfo
+                    {
+                        ResourceType = "RCDATA",
+                        DataRva = "0x00004000",
+                        DataFileOffset = "0x00002000",
+                        Size = 4096,
+                        Entropy = 7.85,
+                        EntropyLabel = "high",
+                        IsPayloadCandidate = true,
+                        IsEmbeddedPe = true,
+                        IsLarge = true,
+                        Tags = ["resource_high_entropy_data", "resource_embedded_pe"]
                     }
                 ],
                 Tags = ["contract-tag"],

@@ -237,6 +237,94 @@ function Get-ObjectPropertyValue {
     return $property.Value
 }
 
+function Get-ScriptParameterNames {
+    param([Parameter(Mandatory)][string]$RelativePath)
+
+    $path = Join-Path $RepositoryRoot $RelativePath
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+        return @()
+    }
+
+    $tokens = $null
+    $parseErrors = $null
+    $ast = [System.Management.Automation.Language.Parser]::ParseFile($path, [ref]$tokens, [ref]$parseErrors)
+    if (@($parseErrors).Count -gt 0 -or $null -eq $ast.ParamBlock) {
+        return @()
+    }
+
+    return @($ast.ParamBlock.Parameters | ForEach-Object { $_.Name.VariablePath.UserPath })
+}
+
+function Test-ScriptWrapperParameterSurface {
+    $contracts = @(
+        [pscustomobject]@{
+            root = 'run.ps1'
+            wrapper = 'scripts/run.ps1'
+            allowedExtra = @()
+        },
+        [pscustomobject]@{
+            root = 'install.ps1'
+            wrapper = 'scripts/install.ps1'
+            allowedExtra = @(
+                'DriverAction',
+                'DriverServiceName',
+                'DriverPath',
+                'DriverInfPath',
+                'DriverKind',
+                'MiniFilterAltitude',
+                'MiniFilterInstanceName',
+                'DriverPublishedName',
+                'SkipDriverTestSigningCheck',
+                'PreparePayload'
+            )
+        }
+    )
+
+    $issues = New-Object System.Collections.Generic.List[string]
+    foreach ($contract in $contracts) {
+        $rootParameters = @(Get-ScriptParameterNames -RelativePath $contract.root)
+        $wrapperParameters = @(Get-ScriptParameterNames -RelativePath $contract.wrapper)
+        if ($rootParameters.Count -eq 0) {
+            [void]$issues.Add("Unable to inspect root parameters: $($contract.root)")
+            continue
+        }
+
+        if ($wrapperParameters.Count -eq 0) {
+            [void]$issues.Add("Unable to inspect wrapper parameters: $($contract.wrapper)")
+            continue
+        }
+
+        foreach ($parameterName in $rootParameters) {
+            if ($wrapperParameters -notcontains $parameterName) {
+                [void]$issues.Add("Wrapper $($contract.wrapper) is missing root parameter -$parameterName from $($contract.root)")
+            }
+        }
+
+        foreach ($parameterName in $wrapperParameters) {
+            if (($rootParameters -notcontains $parameterName) -and ($contract.allowedExtra -notcontains $parameterName)) {
+                [void]$issues.Add("Wrapper $($contract.wrapper) has unexpected parameter -$parameterName that is not documented as wrapper-only.")
+            }
+        }
+    }
+
+    if ($issues.Count -eq 0) {
+        Add-ReleaseCheckResult `
+            -Id 'script-wrapper-parameter-surface' `
+            -Title 'Script wrapper parameter surface / scripts 包装器参数面' `
+            -Status Passed `
+            -Message 'scripts/run.ps1 and scripts/install.ps1 expose root wrapper parameters, with only documented script-folder extras.'
+        return
+    }
+
+    Add-ReleaseCheckResult `
+        -Id 'script-wrapper-parameter-surface' `
+        -Title 'Script wrapper parameter surface / scripts 包装器参数面' `
+        -Status Failed `
+        -Message "Script wrapper parameter contract found $($issues.Count) issue(s)." `
+        -Remediation @('Keep scripts/ wrappers in sync with root run.ps1/install.ps1 so portable package operators can use the same documented commands.') `
+        -Details @{ issues = @($issues.ToArray()) }
+}
+
 function Test-PackageManifests {
     $manifestPaths = @(
         'packaging/source-package.manifest.json',
@@ -484,8 +572,23 @@ function Test-DeploymentOperatorDiagnosticsContract {
         'scripts/package-portable.ps1' = @(
             'operatorDiagnostics',
             'runtimePublishEntries',
+            'runtimePublishSummary',
+            'runtimePublishRootMissingRecommendedActions',
+            'externalStateDiagnostics',
             'runtimePublishRootMustBeOutsideRepository',
             'no VM mutation, no driver signing, no CSignTool'
+        )
+        'scripts/install.ps1' = @(
+            'ShowTestSigningGuidance',
+            'PreparePayload',
+            'ConfigureVTKey',
+            'CheckEnvironment'
+        )
+        'scripts/run.ps1' = @(
+            'CheckEnvironment',
+            'RequirePayloadForWebUI',
+            'Live Hyper-V execution is',
+            'root runtime wrapper'
         )
     }
 
@@ -541,6 +644,65 @@ function Test-DeploymentOperatorDiagnosticsContract {
         -Status Failed `
         -Message "Deployment diagnostic contract found $($issues.Count) issue(s)." `
         -Remediation @('Keep install/run/readiness/package diagnostics explicit, bilingual, and non-mutating before release handoff.') `
+        -Details @{ issues = @($issues.ToArray()) }
+}
+
+function Test-DeploymentDocsOperatorHints {
+    $requiredMarkers = [ordered]@{
+        'docs/install.md' = @(
+            'ShowTestSigningGuidance',
+            'GuestPayloadStatus',
+            'VirusTotalStatus',
+            'RuntimeRootUnderRepository',
+            '不会启动、还原或停止 VM'
+        )
+        'docs/run.md' = @(
+            'CheckEnvironment',
+            'GuestPayloadFreshnessReasons',
+            'VirusTotalMissingKeyBehavior',
+            'RequirePayloadForWebUI',
+            '不会启动、还原或停止 Hyper-V VM'
+        )
+        'docs/release.md' = @(
+            'runtimePublishSummary',
+            'runtimePublishRootMissingRecommendedActions',
+            'externalStateDiagnostics',
+            'no VM mutation',
+            'CSignTool'
+        )
+    }
+
+    $issues = New-Object System.Collections.Generic.List[string]
+    foreach ($relative in $requiredMarkers.Keys) {
+        $path = Join-Path $RepositoryRoot $relative
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+            [void]$issues.Add("Missing deployment doc: $relative")
+            continue
+        }
+
+        $raw = Get-Content -LiteralPath $path -Raw
+        foreach ($marker in $requiredMarkers[$relative]) {
+            if ($raw.IndexOf($marker, [StringComparison]::OrdinalIgnoreCase) -lt 0) {
+                [void]$issues.Add("Missing operator hint marker '$marker' in $relative")
+            }
+        }
+    }
+
+    if ($issues.Count -eq 0) {
+        Add-ReleaseCheckResult `
+            -Id 'deployment-docs-operator-hints' `
+            -Title 'Deployment docs operator hints / 部署文档操作者提示' `
+            -Status Passed `
+            -Message 'Install/run/release docs describe non-mutating checks and repair hints for Hyper-V, guest payload, VT key, and RuntimePublishRoot gaps.'
+        return
+    }
+
+    Add-ReleaseCheckResult `
+        -Id 'deployment-docs-operator-hints' `
+        -Title 'Deployment docs operator hints / 部署文档操作者提示' `
+        -Status Failed `
+        -Message "Deployment docs operator hints found $($issues.Count) issue(s)." `
+        -Remediation @('Update docs/install.md, docs/run.md, and docs/release.md before release handoff so reviewers see concrete next-step commands for common deployment gaps.') `
         -Details @{ issues = @($issues.ToArray()) }
 }
 
@@ -623,9 +785,11 @@ if ($gitAvailable) {
 
 Test-PackageManifests
 Test-PowerShellScriptSyntax
+Test-ScriptWrapperParameterSurface
 Test-CSignToolNotInReleasePath
 Test-ReadinessNoVmMutationCommands
 Test-DeploymentOperatorDiagnosticsContract
+Test-DeploymentDocsOperatorHints
 Invoke-RepositoryPolicy
 Invoke-SourcePackageStage
 Invoke-LightBuild

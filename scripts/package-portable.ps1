@@ -61,7 +61,7 @@ if ([string]::IsNullOrWhiteSpace($ManifestPath)) {
 }
 
 if (-not (Test-Path -LiteralPath $ManifestPath -PathType Leaf)) {
-    throw "Package manifest was not found: $ManifestPath"
+    throw "错误：找不到 package manifest：$ManifestPath。下一步：请从仓库/便携包根目录运行，或显式传入 -ManifestPath；脚本不会构建、签名、push 或操作 VM。"
 }
 
 $ManifestPath = (Resolve-Path -LiteralPath $ManifestPath).Path
@@ -211,7 +211,7 @@ function Assert-OutputRootOutsideRepository {
     $repoFull = (Get-FullPathNoRequire -Path $RepoRoot).TrimEnd('\', '/') + [System.IO.Path]::DirectorySeparatorChar
     $outFull = Get-FullPathNoRequire -Path $OutRoot
     if ($outFull.StartsWith($repoFull, [StringComparison]::OrdinalIgnoreCase)) {
-        throw "OutputRoot must be outside the repository so packages are not accidentally committed: $OutRoot"
+        throw "错误：OutputRoot 位于仓库内，拒绝打包以避免误提交产物：$OutRoot。下一步：改用 D:\Temp\KSwordSandbox\packages 或其他仓库外目录；本脚本不会 push、发布或操作 VM。"
     }
 }
 
@@ -231,7 +231,7 @@ function Assert-RuntimePublishRootOutsideRepository {
     $repoFull = (Get-FullPathNoRequire -Path $RepoRoot).TrimEnd('\', '/') + [System.IO.Path]::DirectorySeparatorChar
     $publishFull = (Get-FullPathNoRequire -Path $PublishRoot).TrimEnd('\', '/') + [System.IO.Path]::DirectorySeparatorChar
     if ($publishFull.StartsWith($repoFull, [StringComparison]::OrdinalIgnoreCase)) {
-        throw "RuntimePublishRoot must be outside the repository. Publish host/guest/tool payloads to D:\Temp\KSwordSandbox\publish or another external folder: $PublishRoot"
+        throw "错误：RuntimePublishRoot 位于仓库内，拒绝从 bin/obj/x64 或源码树复制 runtime payload：$PublishRoot。下一步：先把 host-web、guest-tools、tools/job-tool、tools/postprocess 发布到 D:\Temp\KSwordSandbox\publish 或其他仓库外目录。"
     }
 }
 
@@ -602,11 +602,82 @@ function Get-RuntimePublishEntryDiagnostics {
     return @($entries.ToArray())
 }
 
+function Get-PackageRuntimePublishSummary {
+    param([object[]]$RuntimeEntries)
+
+    $present = @($RuntimeEntries | Where-Object { [bool]$_.exists })
+    $missing = @($RuntimeEntries | Where-Object { -not [bool]$_.exists })
+    $missingRequired = @($missing | Where-Object { [bool]$_.required })
+    $missingOptional = @($missing | Where-Object { -not [bool]$_.required })
+
+    return [ordered]@{
+        expectedCount = @($RuntimeEntries).Count
+        presentCount = $present.Count
+        missingCount = $missing.Count
+        missingRequiredCount = $missingRequired.Count
+        missingOptionalCount = $missingOptional.Count
+        missingRequiredSources = @($missingRequired | ForEach-Object { $_.source })
+        missingOptionalSources = @($missingOptional | ForEach-Object { $_.source })
+        completeRuntimePackageReady = if ($PackageKind -ne 'runtime') { $true } else { $missing.Count -eq 0 }
+        layoutDryRun = ($PackageKind -eq 'runtime' -and $missing.Count -gt 0)
+        failureMode = if ($PackageKind -ne 'runtime') {
+            'notApplicable'
+        }
+        elseif ([string]::IsNullOrWhiteSpace($RuntimePublishRoot)) {
+            'runtimePublishRootNotProvided'
+        }
+        elseif ($missingRequired.Count -gt 0) {
+            'missingRequiredRuntimePayload'
+        }
+        elseif ($missingOptional.Count -gt 0) {
+            'missingOptionalRuntimePayload'
+        }
+        else {
+            'ready'
+        }
+    }
+}
+
+function Get-PackageOperatorRecommendedActions {
+    param(
+        [object[]]$RuntimeEntries,
+        [object]$RuntimeSummary
+    )
+
+    $actions = New-Object System.Collections.Generic.List[string]
+
+    if ($PackageKind -eq 'runtime') {
+        if ([string]::IsNullOrWhiteSpace($RuntimePublishRoot)) {
+            [void]$actions.Add('下一步：如需完整 runtime 便携包，请先把 host-web、guest-tools、tools/job-tool、tools/postprocess 发布到仓库外目录，然后重跑 package-portable.ps1 -PackageKind runtime -RuntimePublishRoot <external-publish-root>。')
+            [void]$actions.Add('Next: for a layout-only dry run, keep -StageOnly and inspect package-manifest.generated.json; for handoff, provide an external RuntimePublishRoot.')
+        }
+        elseif ([int]$RuntimeSummary.missingCount -gt 0) {
+            [void]$actions.Add("下一步：补齐 RuntimePublishRoot 下缺失 payload：$(([string[]]@($RuntimeSummary.missingRequiredSources + $RuntimeSummary.missingOptionalSources)) -join ', ')。")
+            [void]$actions.Add('Next: rerun package-portable.ps1 after publishing the missing runtime folders; packaging itself does not build or copy into a VM.')
+        }
+        else {
+            [void]$actions.Add('RuntimePublishRoot payloads are present; inspect package-manifest.generated.json before handoff.')
+        }
+    }
+    else {
+        [void]$actions.Add('Source package mode is source-only; do not add runtime payloads, reports, samples, VM state, or build output.')
+    }
+
+    [void]$actions.Add('发布前只读检查：.\scripts\Test-ReleaseReadiness.ps1 -AllowDirtySource -StageSourcePackage；该命令不启动/还原 VM，不签名，不调用 CSignTool.exe。')
+    [void]$actions.Add('Hyper-V/guest payload/VT key 缺口请用 .\scripts\install.ps1 -Mode CheckEnvironment 或 .\scripts\run.ps1 -Mode CheckEnvironment 查看；这些状态检查不打印 secret，不执行 live。')
+    [void]$actions.Add('缺少 guest payload 时运行 .\scripts\Prepare-GuestPayload.ps1 -RepoRoot . -PayloadRoot <external-payload-root> -SelfContained；输出必须在仓库外。')
+    [void]$actions.Add('可选 VirusTotal key 用 .\scripts\install.ps1 -Mode ConfigureVTKey -PromptVTKey 配置；未配置或查询失败应静默跳过 hash-only enrichment。')
+
+    return @($actions.ToArray())
+}
+
 function Update-PackageOperatorDiagnostics {
     param([Parameter(Mandatory)][object]$Manifest)
 
     $runtimeEntries = @(Get-RuntimePublishEntryDiagnostics -Manifest $Manifest)
     $missingRuntimeEntries = @($runtimeEntries | Where-Object { -not [bool]$_.exists })
+    $runtimeSummary = Get-PackageRuntimePublishSummary -RuntimeEntries $runtimeEntries
+    $recommendedActions = Get-PackageOperatorRecommendedActions -RuntimeEntries $runtimeEntries -RuntimeSummary $runtimeSummary
     $script:operatorDiagnostics = [ordered]@{
         packageKind = $PackageKind
         runtimePublishRootProvided = -not [string]::IsNullOrWhiteSpace($RuntimePublishRoot)
@@ -614,8 +685,24 @@ function Update-PackageOperatorDiagnostics {
         runtimePublishRootRequiredForCompleteRuntime = ($PackageKind -eq 'runtime')
         runtimePublishRootMustBeOutsideRepository = $true
         runtimePublishEntries = @($runtimeEntries)
+        runtimePublishSummary = $runtimeSummary
         missingRuntimePublishEntries = @($missingRuntimeEntries | ForEach-Object { $_.source })
         runtimePublishReady = if ($PackageKind -ne 'runtime') { $true } else { $missingRuntimeEntries.Count -eq 0 }
+        runtimePublishRootMissingRecommendedActions = @($recommendedActions | Where-Object { $_ -match 'RuntimePublishRoot|runtime 便携包|payload' })
+        preflightCommands = [ordered]@{
+            releaseReadiness = '.\scripts\Test-ReleaseReadiness.ps1 -AllowDirtySource -StageSourcePackage'
+            installCheckEnvironment = '.\scripts\install.ps1 -Mode CheckEnvironment'
+            runCheckEnvironment = '.\scripts\run.ps1 -Mode CheckEnvironment'
+            prepareGuestPayload = '.\scripts\Prepare-GuestPayload.ps1 -RepoRoot . -PayloadRoot <external-payload-root> -SelfContained'
+            configureVirusTotalKey = '.\scripts\install.ps1 -Mode ConfigureVTKey -PromptVTKey'
+            runtimePackage = '.\scripts\package-portable.ps1 -PackageKind runtime -RuntimePublishRoot <external-publish-root> -OutputRoot <external-output-root> -Force'
+        }
+        externalStateDiagnostics = [ordered]@{
+            HyperV = 'not checked or mutated by packaging; run install/run CheckEnvironment for read-only prerequisite diagnostics'
+            GuestPayload = 'runtime payload is copied only from RuntimePublishRoot or prepared explicitly under an external PayloadRoot'
+            VirusTotal = 'optional hash-only key is never packaged; configure in process/user environment or installer local state'
+            RuntimeRoot = 'job outputs, reports, screenshots, PCAP, dumps, samples, and secrets must remain outside the repository and package source tree'
+        }
         nonMutating = [ordered]@{
             vmMutation = $false
             driverSigning = $false
@@ -623,6 +710,7 @@ function Update-PackageOperatorDiagnostics {
             gitPush = $false
             networkPublish = $false
         }
+        recommendedActions = @($recommendedActions)
         operatorGuidance = @(
             'RuntimePublishRoot must point to external published payloads such as host-web, guest-tools, tools/job-tool, and tools/postprocess.',
             'The package script stages and zips locally only; it does not build, sign, push, publish, start Hyper-V, or copy files into a VM.',
@@ -927,6 +1015,10 @@ Assert-OutputRootOutsideRepository -RepoRoot $RepositoryRoot -OutRoot $OutputRoo
 Assert-CleanSourcePackage
 
 if ($PackageKind -eq 'runtime' -and -not [string]::IsNullOrWhiteSpace($RuntimePublishRoot)) {
+    if (-not (Test-Path -LiteralPath $RuntimePublishRoot -PathType Container)) {
+        throw "错误：RuntimePublishRoot 不存在或不是目录：$RuntimePublishRoot。下一步：先把 host-web、guest-tools、tools/job-tool、tools/postprocess 发布/复制到仓库外目录，或不传 -RuntimePublishRoot 并使用 -StageOnly 做 layout dry-run；本脚本不会替你构建、签名或操作 VM。"
+    }
+
     $RuntimePublishRoot = (Resolve-Path -LiteralPath $RuntimePublishRoot).Path
     Assert-RuntimePublishRootOutsideRepository -RepoRoot $RepositoryRoot -PublishRoot $RuntimePublishRoot
 }
@@ -1010,6 +1102,11 @@ if ($PackageKind -eq 'runtime') {
     }
     if (-not [bool]$script:operatorDiagnostics.runtimePublishReady) {
         Write-Host '[package] 中文提示：runtime 包存在缺失的 published payload；本次可作为 layout/safety dry-run，完整交付前请补齐 RuntimePublishRoot。'
+    }
+    $summary = $script:operatorDiagnostics.runtimePublishSummary
+    Write-Host "[package] Runtime summary: present=$($summary.presentCount) missing=$($summary.missingCount) missingRequired=$($summary.missingRequiredCount) missingOptional=$($summary.missingOptionalCount) mode=$($summary.failureMode)"
+    foreach ($action in @($script:operatorDiagnostics.recommendedActions | Select-Object -First 4)) {
+        Write-Host "[package] Next: $action"
     }
 }
 Write-Host '[package] 中文提示：已排除本机 secret、install-state、DPAPI 备份、样本、报告、VM 磁盘/快照、仓库二进制和签名材料。'

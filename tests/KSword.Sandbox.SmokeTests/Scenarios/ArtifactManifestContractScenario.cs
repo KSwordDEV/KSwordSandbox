@@ -892,6 +892,13 @@ internal sealed class ArtifactManifestContractScenario : ISmokeTestScenario
 
         var builder = new HostArtifactIndexBuilder();
         var index = builder.Build(jobId, jobRoot);
+        SmokeAssert.True(index.RootPathPolicy == "server-owned-not-exposed-in-web-api", "Host artifact index should advertise the root path exposure policy.");
+        SmokeAssert.True(index.DownloadPolicy == "relative-index-selectors-only", "Host artifact index should advertise the guarded download-selector policy.");
+        SmokeAssert.True(index.ArtifactCount == index.Artifacts.Count, "Host artifact index should expose an artifact count summary.");
+        SmokeAssert.True(index.CollectionCount == index.Collections.Count, "Host artifact index should expose a collection count summary.");
+        SmokeAssert.True(index.DownloadableArtifactCount == index.Artifacts.Count(artifact => artifact.Metadata.TryGetValue("isDownloadable", out var downloadable) && downloadable == "true"), "Host artifact index should expose a downloadable artifact count summary.");
+        SmokeAssert.True(index.SensitiveArtifactCount >= 1, "Host artifact index should count sensitive downloadable evidence lanes.");
+        SmokeAssert.True(index.RejectedArtifactCount == 2, "Host artifact index should count rejected guest manifest artifact descriptors.");
         AssertIndexedArtifact(index, ArtifactKind.ReportJson, "report.json");
         AssertIndexedArtifact(index, ArtifactKind.ReportHtml, "report.html");
         AssertIndexedArtifact(index, ArtifactKind.RunbookJson, "runbook.json");
@@ -1235,6 +1242,14 @@ internal sealed class ArtifactManifestContractScenario : ISmokeTestScenario
         RequireGuid(root, "jobId", label);
         RequireString(root, "rootPath", label);
         RequireString(root, "producer", label);
+        RequireString(root, "rootPathPolicy", label);
+        RequireString(root, "downloadPolicy", label);
+        RequireInt(root, "collectionCount", label, value => value >= 0);
+        RequireInt(root, "artifactCount", label, value => value >= 0);
+        RequireInt(root, "downloadableArtifactCount", label, value => value >= 0);
+        RequireInt(root, "sensitiveArtifactCount", label, value => value >= 0);
+        RequireInt(root, "duplicateArtifactCount", label, value => value >= 0);
+        RequireInt(root, "rejectedArtifactCount", label, value => value >= 0);
         RequireString(root, "generatedAtUtc", label);
         RequireArray(root, "collections", label, collection => AssertCollectionJsonShape(collection, label));
         RequireArray(root, "artifacts", label, artifact => AssertArtifactDescriptorJsonShape(artifact, label, safeSelectorsRequired: true));

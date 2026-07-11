@@ -181,6 +181,16 @@ internal sealed class MemoryDumpProbe : IGuestProbe
         var attempted = 0;
         var captured = 0;
         var skipped = 0;
+        var rootTargetCount = targets.Count(static target => target.IsRoot);
+        var childTargetCount = targets.Count(static target => !target.IsRoot);
+        var rootAttempted = 0;
+        var childAttempted = 0;
+        var rootCaptured = 0;
+        var childCaptured = 0;
+        var rootSkipped = 0;
+        var childSkipped = 0;
+        var rootAlreadyCaptured = 0;
+        var childAlreadyCaptured = 0;
 
         foreach (var target in targets.OrderBy(target => target.Depth).ThenBy(target => target.ProcessId))
         {
@@ -188,18 +198,52 @@ internal sealed class MemoryDumpProbe : IGuestProbe
             if (capturedProcessIds.Contains(target.ProcessId))
             {
                 alreadyCaptured++;
+                if (target.IsRoot)
+                {
+                    rootAlreadyCaptured++;
+                }
+                else
+                {
+                    childAlreadyCaptured++;
+                }
+
                 continue;
             }
 
             attempted++;
+            if (target.IsRoot)
+            {
+                rootAttempted++;
+            }
+            else
+            {
+                childAttempted++;
+            }
+
             var evt = await CaptureTargetAsync(context, phaseLabel, target, rootProcessId.Value, cancellationToken).ConfigureAwait(false);
             if (string.Equals(evt.EventType, "memory_dump.captured", StringComparison.OrdinalIgnoreCase))
             {
                 captured++;
+                if (target.IsRoot)
+                {
+                    rootCaptured++;
+                }
+                else
+                {
+                    childCaptured++;
+                }
             }
             else
             {
                 skipped++;
+                if (target.IsRoot)
+                {
+                    rootSkipped++;
+                }
+                else
+                {
+                    childSkipped++;
+                }
             }
 
             events.Add(evt);
@@ -218,7 +262,24 @@ internal sealed class MemoryDumpProbe : IGuestProbe
                 duplicate: false));
         }
 
-        events.Add(CreateSweepEvent(phaseLabel, rootProcessId.Value, targets.Count, attempted, captured, skipped, alreadyCaptured));
+        events.Add(CreateSweepEvent(
+            phaseLabel,
+            rootProcessId.Value,
+            targets.Count,
+            attempted,
+            captured,
+            skipped,
+            alreadyCaptured,
+            rootTargetCount,
+            childTargetCount,
+            rootAttempted,
+            childAttempted,
+            rootCaptured,
+            childCaptured,
+            rootSkipped,
+            childSkipped,
+            rootAlreadyCaptured,
+            childAlreadyCaptured));
         return events;
     }
 
@@ -364,6 +425,9 @@ internal sealed class MemoryDumpProbe : IGuestProbe
         if (rootProcessId is not null)
         {
             evt.Data["rootProcessId"] = rootProcessId.Value.ToString(CultureInfo.InvariantCulture);
+            evt.Data.TryAdd("treeLineage", rootProcessId.Value.ToString(CultureInfo.InvariantCulture));
+            evt.Data.TryAdd("treeDepth", "0");
+            evt.Data.TryAdd("processRole", "sample-root-context");
         }
 
         if (target is not null)
@@ -371,6 +435,9 @@ internal sealed class MemoryDumpProbe : IGuestProbe
             evt.Data["processRole"] = target.IsRoot ? "root" : "child";
             evt.Data["treeDepth"] = target.Depth.ToString(CultureInfo.InvariantCulture);
             evt.Data["treeLineage"] = target.Lineage;
+            evt.Data["rootProcessDumpTarget"] = target.IsRoot.ToString(CultureInfo.InvariantCulture).ToLowerInvariant();
+            evt.Data["childProcessDumpTarget"] = (!target.IsRoot).ToString(CultureInfo.InvariantCulture).ToLowerInvariant();
+            evt.Data["memoryDumpCoverageRole"] = target.IsRoot ? "root" : "child";
             evt.Data["targetProcessName"] = target.ProcessName;
             AddOptionalData(evt, "processName", target.ProcessName);
             AddOptionalData(evt, "targetProcessPath", target.Path);
@@ -380,6 +447,12 @@ internal sealed class MemoryDumpProbe : IGuestProbe
             {
                 evt.Data["parentProcessId"] = target.ParentProcessId.Value.ToString(CultureInfo.InvariantCulture);
             }
+        }
+        else
+        {
+            evt.Data["rootProcessDumpTarget"] = rootProcessId is not null ? "true" : "false";
+            evt.Data["childProcessDumpTarget"] = "false";
+            evt.Data["memoryDumpCoverageRole"] = rootProcessId is null ? "unknown" : "root-context";
         }
 
         return evt;
@@ -395,7 +468,17 @@ internal sealed class MemoryDumpProbe : IGuestProbe
         int attemptedCount,
         int capturedCount,
         int skippedCount,
-        int alreadyCapturedCount)
+        int alreadyCapturedCount,
+        int rootTargetCount,
+        int childTargetCount,
+        int rootAttemptedCount,
+        int childAttemptedCount,
+        int rootCapturedCount,
+        int childCapturedCount,
+        int rootSkippedCount,
+        int childSkippedCount,
+        int rootAlreadyCapturedCount,
+        int childAlreadyCapturedCount)
     {
         return new SandboxEvent
         {
@@ -427,6 +510,19 @@ internal sealed class MemoryDumpProbe : IGuestProbe
                 ["capturedCount"] = capturedCount.ToString(CultureInfo.InvariantCulture),
                 ["skippedCount"] = skippedCount.ToString(CultureInfo.InvariantCulture),
                 ["alreadyCapturedCount"] = alreadyCapturedCount.ToString(CultureInfo.InvariantCulture),
+                ["rootTargetCount"] = rootTargetCount.ToString(CultureInfo.InvariantCulture),
+                ["childTargetCount"] = childTargetCount.ToString(CultureInfo.InvariantCulture),
+                ["rootAttemptedCount"] = rootAttemptedCount.ToString(CultureInfo.InvariantCulture),
+                ["childAttemptedCount"] = childAttemptedCount.ToString(CultureInfo.InvariantCulture),
+                ["rootCapturedCount"] = rootCapturedCount.ToString(CultureInfo.InvariantCulture),
+                ["childCapturedCount"] = childCapturedCount.ToString(CultureInfo.InvariantCulture),
+                ["rootSkippedCount"] = rootSkippedCount.ToString(CultureInfo.InvariantCulture),
+                ["childSkippedCount"] = childSkippedCount.ToString(CultureInfo.InvariantCulture),
+                ["rootAlreadyCapturedCount"] = rootAlreadyCapturedCount.ToString(CultureInfo.InvariantCulture),
+                ["childAlreadyCapturedCount"] = childAlreadyCapturedCount.ToString(CultureInfo.InvariantCulture),
+                ["rootProcessCoverageState"] = DetermineDumpCoverageState(rootTargetCount, rootAttemptedCount, rootCapturedCount, rootSkippedCount, rootAlreadyCapturedCount),
+                ["childProcessCoverageState"] = DetermineDumpCoverageState(childTargetCount, childAttemptedCount, childCapturedCount, childSkippedCount, childAlreadyCapturedCount),
+                ["memoryDumpCoverageState"] = DetermineDumpCoverageState(visibleTargetCount, attemptedCount, capturedCount, skippedCount, alreadyCapturedCount),
                 ["zhMessage"] = "内存转储 sweep 已完成并记录根/子进程覆盖情况。",
                 ["zhHint"] = "内存转储为显式 opt-in；启用后会尽力覆盖可见根进程树中的子进程。请结合 rootProcessId/treeLineage、capturedCount、skippedCount 和 alreadyCapturedCount 判断覆盖面。"
             }
@@ -519,6 +615,40 @@ internal sealed class MemoryDumpProbe : IGuestProbe
         }
 
         return "请结合 diagnosticStage、exceptionType/message 和 win32Error 判断是权限、进程状态、DbgHelp 还是输出路径问题。";
+    }
+
+    /// <summary>
+    /// Summarizes root/child minidump coverage for report cards without
+    /// requiring the host to recompute per-target attempt counters.
+    /// </summary>
+    private static string DetermineDumpCoverageState(
+        int targetCount,
+        int attemptedCount,
+        int capturedCount,
+        int skippedCount,
+        int alreadyCapturedCount)
+    {
+        if (targetCount == 0)
+        {
+            return "no-visible-targets";
+        }
+
+        if (capturedCount + alreadyCapturedCount >= targetCount && skippedCount == 0)
+        {
+            return "covered";
+        }
+
+        if (capturedCount > 0 || alreadyCapturedCount > 0)
+        {
+            return "partial";
+        }
+
+        if (attemptedCount > 0 && skippedCount == attemptedCount)
+        {
+            return "all-skipped";
+        }
+
+        return "unknown";
     }
 
     private static bool IsExitedBeforeDump(string? reason, string? diagnosticStage)

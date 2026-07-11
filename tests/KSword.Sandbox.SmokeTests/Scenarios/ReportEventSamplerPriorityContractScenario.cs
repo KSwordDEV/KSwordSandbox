@@ -54,6 +54,24 @@ internal sealed class ReportEventSamplerPriorityContractScenario : ISmokeTestSce
         });
         events.Add(new SandboxEvent
         {
+            EventType = "static.pe.resource",
+            Timestamp = timestamp.AddSeconds(1.1),
+            Source = "host",
+            Path = @"D:\Temp\sample.exe",
+            Data =
+            {
+                ["resourceType"] = "RCDATA",
+                ["resourceRole"] = "embedded-pe",
+                ["isEmbeddedPe"] = "True",
+                ["isPayloadCandidate"] = "True",
+                ["entropy"] = "7.900",
+                ["size"] = "8192",
+                ["tags"] = "resource_high_entropy_data,resource_embedded_pe",
+                ["zhHint"] = "资源内嵌 PE。"
+            }
+        });
+        events.Add(new SandboxEvent
+        {
             EventType = "http.request",
             Timestamp = timestamp.AddSeconds(1.5),
             Source = "host",
@@ -77,6 +95,45 @@ internal sealed class ReportEventSamplerPriorityContractScenario : ISmokeTestSce
                 ["userAgent"] = "KSwordSmoke",
                 ["contentType"] = "application/json",
                 ["payloadMagic"] = "MZ"
+            }
+        });
+        events.Add(new SandboxEvent
+        {
+            EventType = "artifact.host_imported",
+            Timestamp = timestamp.AddSeconds(1.7),
+            Source = "host",
+            Data =
+            {
+                ["artifactKind"] = "DroppedFile",
+                ["downloadSelector"] = "artifacts/drop.bin",
+                ["downloadSafeLink"] = "artifacts/drop.bin",
+                ["safeRelativeSelector"] = "artifacts/drop.bin",
+                ["importPath"] = "artifacts/drop.bin",
+                ["isDuplicate"] = "true",
+                ["duplicateGroupKey"] = "sha256:abc",
+                ["duplicateGroupCount"] = "2",
+                ["duplicatePrimarySelector"] = "artifacts/primary.bin",
+                ["artifactRejectionReasons"] = "unsafeGuestArtifactPath",
+                ["lastRejectedArtifactSelector"] = "../unsafe.bin"
+            }
+        });
+        events.Add(new SandboxEvent
+        {
+            EventType = "enrichment.virustotal.lookup",
+            Timestamp = timestamp.AddSeconds(1.8),
+            Source = "virustotal",
+            Data =
+            {
+                ["vtStatus"] = "found",
+                ["vtVerdict"] = "malicious",
+                ["vtMalicious"] = "4",
+                ["vtSuspicious"] = "1",
+                ["vtEngineCount"] = "72",
+                ["vtReputation"] = "-10",
+                ["vtCommunityScore"] = "-2",
+                ["communityScoreSource"] = "reputation",
+                ["lastAnalysisDateUtc"] = "2026-07-10T00:00:00.0000000Z",
+                ["permalink"] = "https://www.virustotal.com/gui/file/" + new string('b', 64)
             }
         });
         events.Add(new SandboxEvent
@@ -107,6 +164,28 @@ internal sealed class ReportEventSamplerPriorityContractScenario : ISmokeTestSce
                 ["sequenceMeaning"] = "last driver health sequence"
             }
         });
+        events.Add(new SandboxEvent
+        {
+            EventType = "r0collector.driverNetworkStatus",
+            Timestamp = timestamp.AddSeconds(4),
+            Source = "r0collector",
+            Data =
+            {
+                ["networkStatusAvailable"] = "true",
+                ["readinessState"] = "available",
+                ["supportedLayerMaskHex"] = "0x0000000F",
+                ["activeLayerMaskHex"] = "0x00000007",
+                ["lastRegisteredCalloutMaskHex"] = "0x00000007",
+                ["lastAddedFilterMaskHex"] = "0x00000007",
+                ["todoMaskHex"] = "0x00000008",
+                ["classifyCount"] = "12",
+                ["eventCount"] = "6",
+                ["queueFailureCount"] = "0",
+                ["classifyPayloadFailureCount"] = "0",
+                ["lastDegradeReasonName"] = "wfpAleConnectTodo",
+                ["zhHint"] = "WFP/ALE 网络状态。"
+            }
+        });
 
         var result = ReportEventSampler.SampleForReport(
             events,
@@ -126,6 +205,12 @@ internal sealed class ReportEventSamplerPriorityContractScenario : ISmokeTestSce
         RequireData(staticEvent, "apiCount", "7");
         RequireData(staticEvent, "zhMessage", "静态导入网络相关 API。");
 
+        var resourceEvent = RequireEvent(result.Events, "static.pe.resource");
+        RequireData(resourceEvent, "resourceRole", "embedded-pe");
+        RequireData(resourceEvent, "isEmbeddedPe", "True");
+        RequireData(resourceEvent, "entropy", "7.900");
+        RequireData(resourceEvent, "size", "8192");
+
         var networkEvent = RequireEvent(result.Events, "http.request");
         RequireData(networkEvent, "protocol", "tcp");
         RequireData(networkEvent, "collectionName", "network-sidecars");
@@ -139,6 +224,19 @@ internal sealed class ReportEventSamplerPriorityContractScenario : ISmokeTestSce
         RequireData(networkEvent, "host", "api.example.test");
         RequireData(networkEvent, "uri", "/checkin");
 
+        var artifactEvent = RequireEvent(result.Events, "artifact.host_imported");
+        RequireData(artifactEvent, "downloadSelector", "artifacts/drop.bin");
+        RequireData(artifactEvent, "downloadSafeLink", "artifacts/drop.bin");
+        RequireData(artifactEvent, "isDuplicate", "true");
+        RequireData(artifactEvent, "duplicateGroupCount", "2");
+        RequireData(artifactEvent, "lastRejectedArtifactSelector", "../unsafe.bin");
+
+        var vtEvent = RequireEvent(result.Events, "enrichment.virustotal.lookup");
+        RequireData(vtEvent, "vtVerdict", "malicious");
+        RequireData(vtEvent, "vtReputation", "-10");
+        RequireData(vtEvent, "vtCommunityScore", "-2");
+        RequireData(vtEvent, "permalink", "https://www.virustotal.com/gui/file/" + new string('b', 64));
+
         var probeEvent = RequireEvent(result.Events, "probe.summary");
         RequireData(probeEvent, "collectionHealth", "true");
         RequireData(probeEvent, "nonbehavior", "true");
@@ -149,6 +247,13 @@ internal sealed class ReportEventSamplerPriorityContractScenario : ISmokeTestSce
         RequireData(r0Event, "highWatermark", "96");
         RequireData(r0Event, "lastEnqueueFailureStatusHex", "0xC000009A");
         RequireData(r0Event, "sequence", "2048");
+
+        var r0NetworkStatusEvent = RequireEvent(result.Events, "r0collector.driverNetworkStatus");
+        RequireData(r0NetworkStatusEvent, "networkStatusAvailable", "true");
+        RequireData(r0NetworkStatusEvent, "activeLayerMaskHex", "0x00000007");
+        RequireData(r0NetworkStatusEvent, "todoMaskHex", "0x00000008");
+        RequireData(r0NetworkStatusEvent, "classifyCount", "12");
+        RequireData(r0NetworkStatusEvent, "lastDegradeReasonName", "wfpAleConnectTodo");
 
         return Task.FromResult(new SmokeTestResult
         {

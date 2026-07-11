@@ -1055,10 +1055,16 @@ static object? BuildSafeRunbookBackgroundJobSnapshot(AnalysisJob? job)
 static object? BuildRunbookProgressStreamCurrentStep(SandboxRunbookProgressSnapshot progress)
 {
     var steps = progress.Steps;
+    var totalSteps = Math.Max(progress.TotalSteps, steps.Count);
     var runningStep = steps.FirstOrDefault(step => string.Equals(step.State, SandboxRunbookProgressStates.Running, StringComparison.OrdinalIgnoreCase));
     var indexedStep = progress.CurrentStepIndex is >= 0 && progress.CurrentStepIndex < steps.Count
         ? steps[progress.CurrentStepIndex.Value]
         : null;
+    var source = runningStep is not null
+        ? "running-step"
+        : indexedStep is not null
+            ? "current-step-index"
+            : "first-pending-step";
     var currentStep = runningStep ?? indexedStep ?? steps.FirstOrDefault(step => string.Equals(step.State, SandboxRunbookProgressStates.Pending, StringComparison.OrdinalIgnoreCase));
     if (currentStep is null)
     {
@@ -1068,14 +1074,31 @@ static object? BuildRunbookProgressStreamCurrentStep(SandboxRunbookProgressSnaps
     return new
     {
         currentStep.StepIndex,
+        StepNumber = currentStep.StepIndex + 1,
+        TotalSteps = totalSteps,
+        Ordinal = $"{currentStep.StepIndex + 1}/{Math.Max(totalSteps, currentStep.StepIndex + 1)}",
         currentStep.StepId,
         currentStep.Title,
+        DisplayText = BuildRunbookCurrentStepDisplay(currentStep, totalSteps),
         currentStep.State,
+        StateMeaning = "UI-safe real runbook step status from the progress stream; command text/stdout/stderr are intentionally excluded.",
+        Source = source,
+        ProgressState = progress.State,
+        progress.CompletedSteps,
+        progress.ExecutedSteps,
         currentStep.StartedAtUtc,
         currentStep.Duration,
         currentStep.ExitCode,
         currentStep.Message
     };
+}
+
+static string BuildRunbookCurrentStepDisplay(SandboxRunbookStepProgressSnapshot step, int totalSteps)
+{
+    var ordinal = $"{step.StepIndex + 1}/{Math.Max(totalSteps, step.StepIndex + 1)}";
+    return string.IsNullOrWhiteSpace(step.Title)
+        ? $"{ordinal} {step.StepId}"
+        : $"{ordinal} {step.Title}";
 }
 
 static string ResolveRunbookProgressStreamEventName(

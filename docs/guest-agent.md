@@ -179,14 +179,17 @@ guest-output 目录下解析文件，而不是信任 VM 内绝对路径。
   `win32Error` when available.
 - `memory_dump.sweep` after the final `after-run` process-tree sweep. It records
   visible target count, attempted count, captured count, skipped count, and
-  already-captured count so the report can explain why a run has fewer dump
-  files than process-tree nodes.
+  already-captured count, plus root/child split counters and
+  `memoryDumpCoverageState` / `rootProcessCoverageState` /
+  `childProcessCoverageState` so the report can explain why a run has fewer
+  dump files than process-tree nodes.
 - `packet_capture.started`, `packet_capture.stopped`, and
   `packet_capture.captured` when `--packet-capture` / `--pcap` /
   `--network-capture` starts `pktmon`, stops it after the run, converts ETL to
   `packet-captures/*.pcapng`, and records size/path metadata for host PCAP
   import. Captured PCAPNG events also include `sha256`, `processRole`,
-  `rootProcessId`, `treeLineage`, and `zhMessage`/`zhHint` when available.
+  `rootProcessId`, `treeLineage`, `sourceTool`/`artifactSourceTool`, and
+  `zhMessage`/`zhHint` when available.
 - `packet_capture.skipped` and `packet_capture.failed` when packet capture was
   requested but Windows, rights, an existing capture session, `pktmon start`,
   `pktmon stop`, or `pktmon etl2pcap` prevents usable output. These events are
@@ -299,7 +302,9 @@ host artifact index 将这些文件分类为 `memory-dump`，不新增共享 art
 操作者或 host policy 必须按 job 显式 opt in。如果样本退出太快、session 不是 Windows，
 或 process access 被拒绝，Agent 会输出 `memory_dump.skipped` 并继续正常事件/artifact 写入。
 最终 `memory_dump.sweep` 只是 summary evidence；即使所有可见目标已捕获或没有仍可见的子进程，
-也会输出。
+也会输出。该 summary 会拆分 root/child attempted/captured/skipped/already-captured
+计数，并给出 coverage state，便于审阅者判断“未生成 dump”是已在 after-start
+捕获、目标退出、权限失败，还是没有可见子进程。
 
 ## 可选网络抓包 / Optional packet capture
 
@@ -312,6 +317,9 @@ elevated guest 权限。缺少 `pktmon`、access denied、已有 active capture 
 conversion 失败都会输出 `packet_capture.skipped` 或 `packet_capture.failed`，不会让分析失败。
 host PCAP importer 会消费成功的 `.pcapng` 文件，并在 guest output import 阶段把
 DNS/HTTP/TLS/flow 证据转换为规范化 `pcap.*` 事件。
+所有 packet-capture 生命周期事件都会保留 `sourceTool=pktmon.exe`、
+`artifactSourceTool=pktmon.exe` 和 `packetCaptureSource=guest-pktmon`；成功捕获时再补
+`sizeBytes`、`sha256` 和 PCAPNG block counters。
 
 ## 驱动 JSONL 兼容性 / Driver JSONL compatibility
 

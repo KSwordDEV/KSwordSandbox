@@ -1,6 +1,8 @@
 using System.Buffers.Binary;
 using System.Globalization;
 using System.Net;
+using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using KSword.Sandbox.Abstractions;
 
@@ -351,23 +353,14 @@ public sealed class PcapArtifactEventImporter
             var dns = TryParseDns(packet.Payload.AsSpan());
             if (dns is not null)
             {
+                var dnsData = DnsData(dns);
                 yield return new SandboxEvent
                 {
                     EventType = "pcap.dns",
                     Timestamp = packet.Timestamp,
                     Source = "host",
                     Path = path,
-                    Data = packet.BaseData(new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-                    {
-                        ["queryName"] = dns.QueryName,
-                        ["qname"] = dns.QueryName,
-                        ["domain"] = dns.QueryName,
-                        ["queryType"] = dns.QueryType,
-                        ["recordType"] = dns.QueryType,
-                        ["rcode"] = dns.RCode,
-                        ["isResponse"] = dns.IsResponse.ToString(CultureInfo.InvariantCulture).ToLowerInvariant(),
-                        ["classification"] = dns.RCode.Equals("NXDOMAIN", StringComparison.OrdinalIgnoreCase) ? "nxdomain" : string.Empty
-                    }, "dns", source)
+                    Data = packet.BaseData(dnsData, "dns", source)
                 };
                 yield return NetworkTelemetrySchema.CreateNetworkEvent(
                     "dns.query",
@@ -381,17 +374,7 @@ public sealed class PcapArtifactEventImporter
                     packet.DestinationIp,
                     packet.DestinationPort,
                     source,
-                    new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-                    {
-                        ["queryName"] = dns.QueryName,
-                        ["qname"] = dns.QueryName,
-                        ["domain"] = dns.QueryName,
-                        ["queryType"] = dns.QueryType,
-                        ["recordType"] = dns.QueryType,
-                        ["rcode"] = dns.RCode,
-                        ["isResponse"] = dns.IsResponse.ToString(CultureInfo.InvariantCulture).ToLowerInvariant(),
-                        ["classification"] = dns.RCode.Equals("NXDOMAIN", StringComparison.OrdinalIgnoreCase) ? "nxdomain" : string.Empty
-                    });
+                    dnsData);
             }
         }
 
@@ -400,23 +383,14 @@ public sealed class PcapArtifactEventImporter
             var http = TryParseHttp(packet.Payload.AsSpan());
             if (http is not null)
             {
+                var httpData = HttpData(http);
                 yield return new SandboxEvent
                 {
                     EventType = "pcap.http",
                     Timestamp = packet.Timestamp,
                     Source = "host",
                     Path = path,
-                    Data = packet.BaseData(new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-                    {
-                        ["method"] = http.Method,
-                        ["uri"] = http.Uri,
-                        ["requestUri"] = http.Uri,
-                        ["host"] = http.Host,
-                        ["url"] = string.IsNullOrWhiteSpace(http.Host) ? http.Uri : $"http://{http.Host}{http.Uri}",
-                        ["userAgent"] = http.UserAgent,
-                        ["contentType"] = http.ContentType,
-                        ["payloadMagic"] = http.PayloadMagic
-                    }, "http", source)
+                    Data = packet.BaseData(httpData, "http", source)
                 };
                 yield return NetworkTelemetrySchema.CreateNetworkEvent(
                     "http.request",
@@ -430,36 +404,20 @@ public sealed class PcapArtifactEventImporter
                     packet.DestinationIp,
                     packet.DestinationPort,
                     source,
-                    new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-                    {
-                        ["method"] = http.Method,
-                        ["uri"] = http.Uri,
-                        ["requestUri"] = http.Uri,
-                        ["host"] = http.Host,
-                        ["url"] = string.IsNullOrWhiteSpace(http.Host) ? http.Uri : $"http://{http.Host}{http.Uri}",
-                        ["userAgent"] = http.UserAgent,
-                        ["contentType"] = http.ContentType,
-                        ["payloadMagic"] = http.PayloadMagic
-                    });
+                    httpData);
             }
 
-            var tls = TryParseTlsClientHello(packet.Payload.AsSpan());
+            var tls = TryParseTls(packet.Payload.AsSpan());
             if (tls is not null)
             {
+                var tlsData = TlsData(tls);
                 yield return new SandboxEvent
                 {
                     EventType = "pcap.tls",
                     Timestamp = packet.Timestamp,
                     Source = "host",
                     Path = path,
-                    Data = packet.BaseData(new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-                    {
-                        ["sni"] = tls.Sni,
-                        ["serverName"] = tls.Sni,
-                        ["tlsVersion"] = tls.Version,
-                        ["handshakeType"] = tls.HandshakeType,
-                        ["ja3"] = string.Empty
-                    }, "tls", source)
+                    Data = packet.BaseData(tlsData, "tls", source)
                 };
                 yield return NetworkTelemetrySchema.CreateNetworkEvent(
                     "tls.connection",
@@ -473,16 +431,120 @@ public sealed class PcapArtifactEventImporter
                     packet.DestinationIp,
                     packet.DestinationPort,
                     source,
-                    new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-                    {
-                        ["sni"] = tls.Sni,
-                        ["serverName"] = tls.Sni,
-                        ["tlsVersion"] = tls.Version,
-                        ["handshakeType"] = tls.HandshakeType,
-                        ["ja3"] = string.Empty
-                    });
+                    tlsData);
             }
         }
+    }
+
+    private static Dictionary<string, string> DnsData(DnsInfo dns)
+    {
+        var isNxDomain = dns.RCode.Equals("NXDOMAIN", StringComparison.OrdinalIgnoreCase);
+        return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["queryName"] = dns.QueryName,
+            ["qname"] = dns.QueryName,
+            ["domain"] = dns.QueryName,
+            ["dnsQueryName"] = dns.QueryName,
+            ["queryType"] = dns.QueryType,
+            ["recordType"] = dns.QueryType,
+            ["dnsRecordType"] = dns.QueryType,
+            ["rcode"] = dns.RCode,
+            ["rcodeName"] = dns.RCode,
+            ["responseCode"] = dns.RCode,
+            ["dnsRcode"] = dns.RCode,
+            ["isResponse"] = dns.IsResponse.ToString(CultureInfo.InvariantCulture).ToLowerInvariant(),
+            ["classification"] = isNxDomain ? "nxdomain" : string.Empty,
+            ["dnsOutcome"] = isNxDomain ? "negative" : string.Empty,
+            ["isNxDomain"] = isNxDomain ? "true" : string.Empty
+        };
+    }
+
+    private static Dictionary<string, string> HttpData(HttpInfo http)
+    {
+        var data = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["httpMessageType"] = http.MessageType,
+            ["method"] = http.Method,
+            ["httpMethod"] = http.Method,
+            ["uri"] = http.Uri,
+            ["requestUri"] = http.Uri,
+            ["path"] = http.Uri,
+            ["host"] = http.Host,
+            ["hostname"] = http.Host,
+            ["httpHost"] = http.Host,
+            ["url"] = string.IsNullOrWhiteSpace(http.Host) || string.IsNullOrWhiteSpace(http.Uri)
+                ? string.Empty
+                : $"http://{http.Host}{http.Uri}",
+            ["userAgent"] = http.UserAgent,
+            ["contentType"] = http.ContentType,
+            ["statusCode"] = http.StatusCode,
+            ["responseStatusCode"] = http.StatusCode,
+            ["httpStatusCode"] = http.StatusCode,
+            ["statusFamily"] = StatusFamily(http.StatusCode),
+            ["requestBodyBytes"] = http.RequestBytes,
+            ["requestBytes"] = http.RequestBytes,
+            ["bytesToServer"] = http.RequestBytes,
+            ["responseBodyBytes"] = http.ResponseBytes,
+            ["responseBytes"] = http.ResponseBytes,
+            ["bytesToClient"] = http.ResponseBytes,
+            ["requestContentLength"] = string.Equals(http.MessageType, "request", StringComparison.OrdinalIgnoreCase) ? http.ContentLength : string.Empty,
+            ["responseContentLength"] = string.Equals(http.MessageType, "response", StringComparison.OrdinalIgnoreCase) ? http.ContentLength : string.Empty,
+            ["uploadBytes"] = http.RequestBytes,
+            ["downloadBytes"] = http.ResponseBytes,
+            ["payloadMagic"] = http.PayloadMagic
+        };
+
+        if (!string.IsNullOrWhiteSpace(http.RequestBytes) &&
+            (string.Equals(http.Method, "POST", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(http.Method, "PUT", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(http.Method, "PATCH", StringComparison.OrdinalIgnoreCase) ||
+                IsPositiveInteger(http.RequestBytes)))
+        {
+            data["uploadCandidate"] = "true";
+            data["transferDirection"] = "upload";
+        }
+        else if (!string.IsNullOrWhiteSpace(http.ResponseBytes))
+        {
+            data["transferDirection"] = "download";
+        }
+
+        return data;
+    }
+
+    private static Dictionary<string, string> TlsData(TlsInfo tls)
+    {
+        return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["sni"] = tls.Sni,
+            ["serverName"] = tls.Sni,
+            ["tlsServerName"] = tls.Sni,
+            ["tlsVersion"] = tls.Version,
+            ["handshakeType"] = tls.HandshakeType,
+            ["ja3"] = tls.Ja3,
+            ["ja3Hash"] = tls.Ja3,
+            ["tlsJa3"] = tls.Ja3,
+            ["ja3s"] = tls.Ja3s,
+            ["ja3sHash"] = tls.Ja3s,
+            ["tlsJa3s"] = tls.Ja3s,
+            ["alpn"] = tls.Alpn,
+            ["cipherSuite"] = tls.CipherSuite,
+            ["tlsExtensionTypes"] = tls.ExtensionTypes,
+            ["certSubject"] = tls.CertSubject,
+            ["certIssuer"] = tls.CertIssuer,
+            ["certSerial"] = tls.CertSerial,
+            ["certSha256"] = tls.CertSha256,
+            ["certificateSha256"] = tls.CertSha256,
+            ["certificateFingerprintSha256"] = tls.CertSha256,
+            ["certNotBefore"] = tls.CertNotBefore,
+            ["certNotAfter"] = tls.CertNotAfter,
+            ["certificateStatus"] = tls.CertificateStatus,
+            ["validationStatus"] = tls.CertificateStatus,
+            ["certSelfSigned"] = tls.CertSelfSigned,
+            ["tlsCertificateRisk"] = string.Equals(tls.CertificateStatus, "self-signed", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(tls.CertificateStatus, "parse_error", StringComparison.OrdinalIgnoreCase)
+                    ? "suspicious"
+                    : string.Empty
+        };
     }
 
     private static DecodedPacket? TryDecodePacket(PcapPacket packet)
@@ -714,91 +776,525 @@ public sealed class PcapArtifactEventImporter
 
         var firstLine = text[..firstLineEnd];
         var parts = firstLine.Split(' ', 3, StringSplitOptions.RemoveEmptyEntries);
-        if (parts.Length < 2 || !IsHttpMethod(parts[0]))
+        var headerEnd = text.IndexOf("\r\n\r\n", StringComparison.Ordinal);
+        var headerText = headerEnd >= 0
+            ? text[(firstLineEnd + 2)..headerEnd]
+            : text[(firstLineEnd + 2)..];
+        var headers = ParseHeaders(headerText);
+        var contentLength = headers.GetValueOrDefault("content-length", string.Empty);
+        var bodyBytes = headerEnd >= 0 && headerEnd + 4 <= length
+            ? (length - headerEnd - 4).ToString(CultureInfo.InvariantCulture)
+            : string.Empty;
+        var effectiveBodyBytes = FirstNonEmpty(contentLength, bodyBytes);
+        var payloadMagic = text.Contains("MZ", StringComparison.Ordinal) ? "MZ" : string.Empty;
+
+        if (parts.Length >= 2 && IsHttpMethod(parts[0]))
         {
-            return null;
+            return new HttpInfo(
+                "request",
+                parts[0],
+                parts[1],
+                headers.GetValueOrDefault("host", string.Empty),
+                headers.GetValueOrDefault("user-agent", string.Empty),
+                headers.GetValueOrDefault("content-type", string.Empty),
+                string.Empty,
+                effectiveBodyBytes,
+                string.Empty,
+                contentLength,
+                payloadMagic);
         }
 
-        var headers = ParseHeaders(text[(firstLineEnd + 2)..]);
-        var payloadMagic = text.Contains("MZ", StringComparison.Ordinal) ? "MZ" : string.Empty;
-        return new HttpInfo(
-            parts[0],
-            parts[1],
-            headers.GetValueOrDefault("host", string.Empty),
-            headers.GetValueOrDefault("user-agent", string.Empty),
-            headers.GetValueOrDefault("content-type", string.Empty),
-            payloadMagic);
+        if (parts.Length >= 2 &&
+            firstLine.StartsWith("HTTP/", StringComparison.OrdinalIgnoreCase) &&
+            int.TryParse(parts[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out var statusCode))
+        {
+            return new HttpInfo(
+                "response",
+                string.Empty,
+                string.Empty,
+                headers.GetValueOrDefault("host", string.Empty),
+                string.Empty,
+                headers.GetValueOrDefault("content-type", string.Empty),
+                statusCode.ToString(CultureInfo.InvariantCulture),
+                string.Empty,
+                effectiveBodyBytes,
+                contentLength,
+                payloadMagic);
+        }
+
+        return null;
     }
 
-    private static TlsInfo? TryParseTlsClientHello(ReadOnlySpan<byte> payload)
+    private static TlsInfo? TryParseTls(ReadOnlySpan<byte> payload)
     {
-        if (payload.Length < 9 || payload[0] != 0x16 || payload[5] != 0x01)
+        if (payload.Length < 9 || payload[0] != 0x16)
         {
             return null;
         }
 
         var recordVersion = $"0x{payload[1]:X2}{payload[2]:X2}";
-        var offset = 5 + 4;
-        if (payload.Length < offset + 34)
+        var recordLength = (int)BinaryPrimitives.ReadUInt16BigEndian(payload.Slice(3, 2));
+        if (recordLength <= 0 || 5 + recordLength > payload.Length)
         {
-            return new TlsInfo(string.Empty, recordVersion, "client_hello");
+            recordLength = payload.Length - 5;
         }
 
-        offset += 2; // client version
-        offset += 32; // random
-        if (offset >= payload.Length)
+        var handshake = payload.Slice(5, recordLength);
+        if (handshake.Length < 4)
         {
-            return new TlsInfo(string.Empty, recordVersion, "client_hello");
+            return new TlsInfo(string.Empty, recordVersion, "handshake", string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty);
         }
 
-        var sessionIdLength = payload[offset++];
+        var handshakeType = handshake[0];
+        var handshakeLength = ReadUInt24(handshake.Slice(1, 3));
+        var bodyLength = Math.Min(handshake.Length - 4, handshakeLength);
+        if (bodyLength < 0)
+        {
+            return null;
+        }
+
+        var body = handshake.Slice(4, bodyLength);
+        return handshakeType switch
+        {
+            1 => ParseTlsClientHello(body, recordVersion),
+            2 => ParseTlsServerHello(body, recordVersion),
+            11 => ParseTlsCertificate(body, recordVersion),
+            _ => new TlsInfo(string.Empty, recordVersion, $"handshake_{handshakeType.ToString(CultureInfo.InvariantCulture)}", string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty)
+        };
+    }
+
+    private static TlsInfo ParseTlsClientHello(ReadOnlySpan<byte> body, string recordVersion)
+    {
+        if (body.Length < 34)
+        {
+            return new TlsInfo(string.Empty, recordVersion, "client_hello", string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty);
+        }
+
+        var clientVersion = BinaryPrimitives.ReadUInt16BigEndian(body.Slice(0, 2));
+        var offset = 34; // version + random
+        if (offset >= body.Length)
+        {
+            return new TlsInfo(string.Empty, TlsVersionName(clientVersion, recordVersion), "client_hello", string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty);
+        }
+
+        var sessionIdLength = body[offset++];
+        if (offset + sessionIdLength + 2 > body.Length)
+        {
+            return new TlsInfo(string.Empty, TlsVersionName(clientVersion, recordVersion), "client_hello", string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty);
+        }
+
         offset += sessionIdLength;
-        if (offset + 2 > payload.Length)
-        {
-            return new TlsInfo(string.Empty, recordVersion, "client_hello");
-        }
-
-        var cipherLength = BinaryPrimitives.ReadUInt16BigEndian(payload.Slice(offset, 2));
-        offset += 2 + cipherLength;
-        if (offset >= payload.Length)
-        {
-            return new TlsInfo(string.Empty, recordVersion, "client_hello");
-        }
-
-        var compressionLength = payload[offset++];
-        offset += compressionLength;
-        if (offset + 2 > payload.Length)
-        {
-            return new TlsInfo(string.Empty, recordVersion, "client_hello");
-        }
-
-        var extensionsLength = BinaryPrimitives.ReadUInt16BigEndian(payload.Slice(offset, 2));
+        var cipherLength = BinaryPrimitives.ReadUInt16BigEndian(body.Slice(offset, 2));
         offset += 2;
-        var extensionsEnd = Math.Min(payload.Length, offset + extensionsLength);
+        if (cipherLength < 0 || offset + cipherLength > body.Length)
+        {
+            return new TlsInfo(string.Empty, TlsVersionName(clientVersion, recordVersion), "client_hello", string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty);
+        }
+
+        var cipherSuites = ReadUInt16List(body.Slice(offset, cipherLength), excludeGrease: true);
+        offset += cipherLength;
+        if (offset >= body.Length)
+        {
+            return new TlsInfo(string.Empty, TlsVersionName(clientVersion, recordVersion), "client_hello", Ja3Hash(clientVersion, cipherSuites, [], [], []), string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty);
+        }
+
+        var compressionLength = body[offset++];
+        if (offset + compressionLength > body.Length)
+        {
+            return new TlsInfo(string.Empty, TlsVersionName(clientVersion, recordVersion), "client_hello", Ja3Hash(clientVersion, cipherSuites, [], [], []), string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty);
+        }
+
+        offset += compressionLength;
+        if (offset + 2 > body.Length)
+        {
+            return new TlsInfo(string.Empty, TlsVersionName(clientVersion, recordVersion), "client_hello", Ja3Hash(clientVersion, cipherSuites, [], [], []), string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty);
+        }
+
+        var extensionsLength = BinaryPrimitives.ReadUInt16BigEndian(body.Slice(offset, 2));
+        offset += 2;
+        var extensionsEnd = Math.Min(body.Length, offset + extensionsLength);
+        var extensionTypes = new List<ushort>();
+        var ellipticCurves = new List<ushort>();
+        var ecPointFormats = new List<byte>();
+        var sni = string.Empty;
+        var alpn = string.Empty;
         while (offset + 4 <= extensionsEnd)
         {
-            var type = BinaryPrimitives.ReadUInt16BigEndian(payload.Slice(offset, 2));
-            var extensionLength = BinaryPrimitives.ReadUInt16BigEndian(payload.Slice(offset + 2, 2));
+            var type = BinaryPrimitives.ReadUInt16BigEndian(body.Slice(offset, 2));
+            var extensionLength = BinaryPrimitives.ReadUInt16BigEndian(body.Slice(offset + 2, 2));
             offset += 4;
             if (offset + extensionLength > extensionsEnd)
             {
                 break;
             }
 
-            if (type == 0 && extensionLength >= 5)
+            var extension = body.Slice(offset, extensionLength);
+            if (!IsGreaseValue(type))
             {
-                var ext = payload.Slice(offset, extensionLength);
-                var nameLength = BinaryPrimitives.ReadUInt16BigEndian(ext.Slice(3, 2));
-                if (5 + nameLength <= ext.Length)
-                {
-                    return new TlsInfo(Encoding.ASCII.GetString(ext.Slice(5, nameLength)), recordVersion, "client_hello");
-                }
+                extensionTypes.Add(type);
+            }
+
+            if (type == 0)
+            {
+                sni = ParseSniExtension(extension);
+            }
+            else if (type == 10)
+            {
+                ellipticCurves = ParseUInt16VectorExtension(extension);
+            }
+            else if (type == 11)
+            {
+                ecPointFormats = ParseByteVectorExtension(extension);
+            }
+            else if (type == 16)
+            {
+                alpn = ParseAlpnExtension(extension);
             }
 
             offset += extensionLength;
         }
 
-        return new TlsInfo(string.Empty, recordVersion, "client_hello");
+        return new TlsInfo(
+            sni,
+            TlsVersionName(clientVersion, recordVersion),
+            "client_hello",
+            Ja3Hash(clientVersion, cipherSuites, extensionTypes, ellipticCurves, ecPointFormats),
+            string.Empty,
+            alpn,
+            cipherSuites.Count > 0 ? UInt16Hex(cipherSuites[0]) : string.Empty,
+            string.Join("-", extensionTypes.Select(value => value.ToString(CultureInfo.InvariantCulture))),
+            string.Empty,
+            string.Empty,
+            string.Empty,
+            string.Empty,
+            string.Empty,
+            string.Empty,
+            string.Empty,
+            string.Empty);
+    }
+
+    private static TlsInfo ParseTlsServerHello(ReadOnlySpan<byte> body, string recordVersion)
+    {
+        if (body.Length < 38)
+        {
+            return new TlsInfo(string.Empty, recordVersion, "server_hello", string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty);
+        }
+
+        var serverVersion = BinaryPrimitives.ReadUInt16BigEndian(body.Slice(0, 2));
+        var offset = 34; // version + random
+        var sessionIdLength = body[offset++];
+        if (offset + sessionIdLength + 3 > body.Length)
+        {
+            return new TlsInfo(string.Empty, TlsVersionName(serverVersion, recordVersion), "server_hello", string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty);
+        }
+
+        offset += sessionIdLength;
+        var cipherSuite = BinaryPrimitives.ReadUInt16BigEndian(body.Slice(offset, 2));
+        offset += 3; // cipher + compression
+        var extensionTypes = new List<ushort>();
+        var alpn = string.Empty;
+        if (offset + 2 <= body.Length)
+        {
+            var extensionsLength = BinaryPrimitives.ReadUInt16BigEndian(body.Slice(offset, 2));
+            offset += 2;
+            var extensionsEnd = Math.Min(body.Length, offset + extensionsLength);
+            while (offset + 4 <= extensionsEnd)
+            {
+                var type = BinaryPrimitives.ReadUInt16BigEndian(body.Slice(offset, 2));
+                var extensionLength = BinaryPrimitives.ReadUInt16BigEndian(body.Slice(offset + 2, 2));
+                offset += 4;
+                if (offset + extensionLength > extensionsEnd)
+                {
+                    break;
+                }
+
+                var extension = body.Slice(offset, extensionLength);
+                if (!IsGreaseValue(type))
+                {
+                    extensionTypes.Add(type);
+                }
+
+                if (type == 16)
+                {
+                    alpn = ParseAlpnExtension(extension);
+                }
+
+                offset += extensionLength;
+            }
+        }
+
+        return new TlsInfo(
+            string.Empty,
+            TlsVersionName(serverVersion, recordVersion),
+            "server_hello",
+            string.Empty,
+            Ja3sHash(serverVersion, cipherSuite, extensionTypes),
+            alpn,
+            UInt16Hex(cipherSuite),
+            string.Join("-", extensionTypes.Select(value => value.ToString(CultureInfo.InvariantCulture))),
+            string.Empty,
+            string.Empty,
+            string.Empty,
+            string.Empty,
+            string.Empty,
+            string.Empty,
+            string.Empty,
+            string.Empty);
+    }
+
+    private static TlsInfo ParseTlsCertificate(ReadOnlySpan<byte> body, string recordVersion)
+    {
+        if (body.Length < 6)
+        {
+            return new TlsInfo(string.Empty, recordVersion, "certificate", string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, "parse_error");
+        }
+
+        var listOffset = 0;
+        var certificateListLength = ReadUInt24(body.Slice(0, 3));
+        if (certificateListLength == 0 && body.Length >= 7)
+        {
+            // TLS 1.3 Certificate starts with certificate_request_context before
+            // certificate_list. Treat this as best-effort metadata, not failure.
+            var contextLength = body[0];
+            if (1 + contextLength + 3 <= body.Length)
+            {
+                listOffset = 1 + contextLength;
+                certificateListLength = ReadUInt24(body.Slice(listOffset, 3));
+            }
+        }
+
+        listOffset += 3;
+        if (certificateListLength <= 0 || listOffset + 3 > body.Length)
+        {
+            return new TlsInfo(string.Empty, recordVersion, "certificate", string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, "parse_error");
+        }
+
+        var certLength = ReadUInt24(body.Slice(listOffset, 3));
+        listOffset += 3;
+        if (certLength <= 0 || listOffset + certLength > body.Length)
+        {
+            return new TlsInfo(string.Empty, recordVersion, "certificate", string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, "parse_error");
+        }
+
+        try
+        {
+            using var cert = X509CertificateLoader.LoadCertificate(body.Slice(listOffset, certLength).ToArray());
+            var sha256 = Convert.ToHexString(SHA256.HashData(cert.RawData)).ToLowerInvariant();
+            var status = string.Equals(cert.Subject, cert.Issuer, StringComparison.OrdinalIgnoreCase)
+                ? "self-signed"
+                : "observed";
+            return new TlsInfo(
+                string.Empty,
+                recordVersion,
+                "certificate",
+                string.Empty,
+                string.Empty,
+                string.Empty,
+                string.Empty,
+                string.Empty,
+                cert.Subject,
+                cert.Issuer,
+                cert.SerialNumber,
+                sha256,
+                cert.NotBefore.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture),
+                cert.NotAfter.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture),
+                string.Equals(cert.Subject, cert.Issuer, StringComparison.OrdinalIgnoreCase).ToString(CultureInfo.InvariantCulture).ToLowerInvariant(),
+                status);
+        }
+        catch (CryptographicException)
+        {
+            return new TlsInfo(string.Empty, recordVersion, "certificate", string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, "parse_error");
+        }
+    }
+
+    private static int ReadUInt24(ReadOnlySpan<byte> value)
+    {
+        return value.Length < 3
+            ? 0
+            : (value[0] << 16) | (value[1] << 8) | value[2];
+    }
+
+    private static List<ushort> ReadUInt16List(ReadOnlySpan<byte> value, bool excludeGrease)
+    {
+        var values = new List<ushort>();
+        for (var offset = 0; offset + 2 <= value.Length; offset += 2)
+        {
+            var parsed = BinaryPrimitives.ReadUInt16BigEndian(value.Slice(offset, 2));
+            if (!excludeGrease || !IsGreaseValue(parsed))
+            {
+                values.Add(parsed);
+            }
+        }
+
+        return values;
+    }
+
+    private static string ParseSniExtension(ReadOnlySpan<byte> extension)
+    {
+        if (extension.Length < 5)
+        {
+            return string.Empty;
+        }
+
+        var listLength = BinaryPrimitives.ReadUInt16BigEndian(extension.Slice(0, 2));
+        var offset = 2;
+        var end = Math.Min(extension.Length, offset + listLength);
+        while (offset + 3 <= end)
+        {
+            var nameType = extension[offset++];
+            var nameLength = BinaryPrimitives.ReadUInt16BigEndian(extension.Slice(offset, 2));
+            offset += 2;
+            if (offset + nameLength > end)
+            {
+                break;
+            }
+
+            if (nameType == 0)
+            {
+                return Encoding.ASCII.GetString(extension.Slice(offset, nameLength));
+            }
+
+            offset += nameLength;
+        }
+
+        return string.Empty;
+    }
+
+    private static string ParseAlpnExtension(ReadOnlySpan<byte> extension)
+    {
+        if (extension.Length < 3)
+        {
+            return string.Empty;
+        }
+
+        var listLength = BinaryPrimitives.ReadUInt16BigEndian(extension.Slice(0, 2));
+        var offset = 2;
+        var end = Math.Min(extension.Length, offset + listLength);
+        var values = new List<string>();
+        while (offset < end)
+        {
+            var length = extension[offset++];
+            if (length == 0 || offset + length > end)
+            {
+                break;
+            }
+
+            values.Add(Encoding.ASCII.GetString(extension.Slice(offset, length)));
+            offset += length;
+        }
+
+        return string.Join(",", values);
+    }
+
+    private static List<ushort> ParseUInt16VectorExtension(ReadOnlySpan<byte> extension)
+    {
+        if (extension.Length < 2)
+        {
+            return [];
+        }
+
+        var vectorLength = BinaryPrimitives.ReadUInt16BigEndian(extension.Slice(0, 2));
+        var length = Math.Min(extension.Length - 2, vectorLength);
+        return ReadUInt16List(extension.Slice(2, length), excludeGrease: true);
+    }
+
+    private static List<byte> ParseByteVectorExtension(ReadOnlySpan<byte> extension)
+    {
+        if (extension.Length < 1)
+        {
+            return [];
+        }
+
+        var vectorLength = extension[0];
+        var length = Math.Min(extension.Length - 1, vectorLength);
+        return extension.Slice(1, length).ToArray().ToList();
+    }
+
+    private static string Ja3Hash(
+        ushort version,
+        IReadOnlyCollection<ushort> cipherSuites,
+        IReadOnlyCollection<ushort> extensionTypes,
+        IReadOnlyCollection<ushort> ellipticCurves,
+        IReadOnlyCollection<byte> ecPointFormats)
+    {
+        var ja3String = string.Join(
+            ',',
+            version.ToString(CultureInfo.InvariantCulture),
+            JoinUInt16(cipherSuites),
+            JoinUInt16(extensionTypes),
+            JoinUInt16(ellipticCurves),
+            string.Join('-', ecPointFormats.Select(value => value.ToString(CultureInfo.InvariantCulture))));
+        return Md5Hex(ja3String);
+    }
+
+    private static string Ja3sHash(ushort version, ushort cipherSuite, IReadOnlyCollection<ushort> extensionTypes)
+    {
+        var ja3sString = string.Join(
+            ',',
+            version.ToString(CultureInfo.InvariantCulture),
+            cipherSuite.ToString(CultureInfo.InvariantCulture),
+            JoinUInt16(extensionTypes));
+        return Md5Hex(ja3sString);
+    }
+
+    private static string Md5Hex(string value)
+    {
+        return Convert.ToHexString(MD5.HashData(Encoding.ASCII.GetBytes(value))).ToLowerInvariant();
+    }
+
+    private static string JoinUInt16(IEnumerable<ushort> values)
+    {
+        return string.Join('-', values.Select(value => value.ToString(CultureInfo.InvariantCulture)));
+    }
+
+    private static bool IsGreaseValue(ushort value)
+    {
+        return (value & 0x0F0F) == 0x0A0A &&
+            ((value >> 8) & 0xFF) == (value & 0xFF);
+    }
+
+    private static string TlsVersionName(ushort version, string fallback)
+    {
+        return version switch
+        {
+            0x0301 => "TLS 1.0",
+            0x0302 => "TLS 1.1",
+            0x0303 => "TLS 1.2",
+            0x0304 => "TLS 1.3",
+            _ => string.IsNullOrWhiteSpace(fallback) ? UInt16Hex(version) : fallback
+        };
+    }
+
+    private static string UInt16Hex(ushort value)
+    {
+        return $"0x{value:X4}";
+    }
+
+    private static string FirstNonEmpty(params string?[] values)
+    {
+        foreach (var value in values)
+        {
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                return value;
+            }
+        }
+
+        return string.Empty;
+    }
+
+    private static string StatusFamily(string? statusCode)
+    {
+        return int.TryParse(statusCode, NumberStyles.Integer, CultureInfo.InvariantCulture, out var status) &&
+            status is >= 100 and <= 599
+                ? $"{status / 100}xx"
+                : string.Empty;
+    }
+
+    private static bool IsPositiveInteger(string? value)
+    {
+        return long.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed) &&
+            parsed > 0;
     }
 
     private static Dictionary<string, string> ParseHeaders(string headerText)
@@ -888,6 +1384,7 @@ public sealed class PcapArtifactEventImporter
     private static IEnumerable<SandboxEvent> ImportSidecarEvents(string pcapPath, NetworkArtifactSource pcapSource)
     {
         var sidecarImporter = new NetworkSidecarEventImporter();
+        var sidecarMetadata = PcapSidecarMetadata(pcapSource);
         foreach (var sidecarPath in EnumerateSidecarPaths(pcapPath))
         {
             var sidecarSource = NetworkArtifactSource.FromPath(
@@ -896,12 +1393,32 @@ public sealed class PcapArtifactEventImporter
                 artifactKind: "Log",
                 collectionName: "network-sidecars",
                 evidenceRole: "network-telemetry-sidecar",
-                importMode: "sidecar-artifact");
+                importMode: "sidecar-artifact",
+                metadata: sidecarMetadata);
             foreach (var evt in sidecarImporter.ImportEvents(sidecarPath, sidecarSource))
             {
                 yield return evt;
             }
         }
+    }
+
+    private static IReadOnlyDictionary<string, string> PcapSidecarMetadata(NetworkArtifactSource pcapSource)
+    {
+        var metadata = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (pcapSource.Metadata is not null)
+        {
+            foreach (var pair in pcapSource.Metadata)
+            {
+                metadata[pair.Key] = pair.Value;
+            }
+        }
+
+        metadata["pcapSourceArtifactPath"] = pcapSource.FullPath;
+        metadata["pcapSourceArtifactName"] = pcapSource.Name;
+        metadata["pcapSourceArtifactRelativePath"] = pcapSource.RelativePath;
+        metadata["pcapArtifactRelativePath"] = pcapSource.RelativePath;
+        metadata["sourcePcapArtifactRelativePath"] = pcapSource.RelativePath;
+        return metadata;
     }
 
     private static int CountSidecarArtifacts(string pcapPath)
@@ -968,9 +1485,36 @@ public sealed class PcapArtifactEventImporter
 
     private sealed record DnsInfo(string QueryName, string QueryType, string RCode, bool IsResponse);
 
-    private sealed record HttpInfo(string Method, string Uri, string Host, string UserAgent, string ContentType, string PayloadMagic);
+    private sealed record HttpInfo(
+        string MessageType,
+        string Method,
+        string Uri,
+        string Host,
+        string UserAgent,
+        string ContentType,
+        string StatusCode,
+        string RequestBytes,
+        string ResponseBytes,
+        string ContentLength,
+        string PayloadMagic);
 
-    private sealed record TlsInfo(string Sni, string Version, string HandshakeType);
+    private sealed record TlsInfo(
+        string Sni,
+        string Version,
+        string HandshakeType,
+        string Ja3,
+        string Ja3s,
+        string Alpn,
+        string CipherSuite,
+        string ExtensionTypes,
+        string CertSubject,
+        string CertIssuer,
+        string CertSerial,
+        string CertSha256,
+        string CertNotBefore,
+        string CertNotAfter,
+        string CertSelfSigned,
+        string CertificateStatus);
 
     private sealed record DecodedPacket(
         DateTimeOffset Timestamp,

@@ -194,6 +194,12 @@ internal sealed record VirusTotalLookupResult
 
     public bool PersistedToEnrichmentEvents { get; init; }
 
+    public string LiveLogPolicy => "display_only_no_job_log_by_default";
+
+    public string PersistencePolicy => CanPersistEnrichmentEvent
+        ? "display_only_by_default_explicit_persist_supported"
+        : "display_only_quiet_status_not_persisted";
+
     public bool IsQuietState => Status is
         VirusTotalLookupStatuses.MissingHash or
         VirusTotalLookupStatuses.InvalidHash or

@@ -71,6 +71,8 @@ param(
 
     [switch]$QueryGuestTestSigning,
 
+    [switch]$ShowTestSigningGuidance,
+
     [switch]$RestartGuestAfterTestSigning,
 
     [ValidateSet('Status', 'Install', 'Start', 'Stop', 'Restart', 'Uninstall')]
@@ -405,18 +407,20 @@ function Invoke-ScriptGuestTestSigningMenu {
     while ($true) {
         Write-Host ''
         Write-Host '来宾 test-signing 选项 / Guest test-signing options:'
-        Write-Host '  1) 查询当前 guest test-signing 状态 / Query current state'
-        Write-Host '  2) 启用 guest test-signing / Enable guest test-signing'
-        Write-Host '  3) 启用 guest test-signing，并在状态变化时重启 / Enable and reboot if changed'
-        Write-Host '  4) 禁用 guest test-signing / Disable guest test-signing'
-        Write-Host '  5) 返回 / Back'
-        $choice = Read-ScriptMenuChoice -Prompt '请选择 [1-5] / Choose [1-5]' -Allowed @('1', '2', '3', '4', '5')
+        Write-Host '  1) 显示只读 test-signing 指引 / Show read-only guidance'
+        Write-Host '  2) 查询当前 guest test-signing 状态 / Query current state'
+        Write-Host '  3) 启用 guest test-signing / Enable guest test-signing'
+        Write-Host '  4) 启用 guest test-signing，并在状态变化时重启 / Enable and reboot if changed'
+        Write-Host '  5) 禁用 guest test-signing / Disable guest test-signing'
+        Write-Host '  6) 返回 / Back'
+        $choice = Read-ScriptMenuChoice -Prompt '请选择 [1-6] / Choose [1-6]' -Allowed @('1', '2', '3', '4', '5', '6')
         switch ($choice) {
-            '1' { Invoke-RootInstaller -Parameters (New-RootInstallerParameterTable -RootMode 'Change' -Additional @{ QueryGuestTestSigning = $true }) }
-            '2' { Invoke-RootInstaller -Parameters (New-RootInstallerParameterTable -RootMode 'Change' -Additional @{ EnableGuestTestSigning = $true; Force = $true }) }
-            '3' { Invoke-RootInstaller -Parameters (New-RootInstallerParameterTable -RootMode 'Change' -Additional @{ EnableGuestTestSigning = $true; RestartGuestAfterTestSigning = $true; Force = $true }) }
-            '4' { Invoke-RootInstaller -Parameters (New-RootInstallerParameterTable -RootMode 'Change' -Additional @{ DisableGuestTestSigning = $true; Force = $true }) }
-            '5' { return }
+            '1' { Invoke-RootInstaller -Parameters (New-RootInstallerParameterTable -RootMode 'Change' -Additional @{ ShowTestSigningGuidance = $true }) }
+            '2' { Invoke-RootInstaller -Parameters (New-RootInstallerParameterTable -RootMode 'Change' -Additional @{ QueryGuestTestSigning = $true }) }
+            '3' { Invoke-RootInstaller -Parameters (New-RootInstallerParameterTable -RootMode 'Change' -Additional @{ EnableGuestTestSigning = $true; Force = $true }) }
+            '4' { Invoke-RootInstaller -Parameters (New-RootInstallerParameterTable -RootMode 'Change' -Additional @{ EnableGuestTestSigning = $true; RestartGuestAfterTestSigning = $true; Force = $true }) }
+            '5' { Invoke-RootInstaller -Parameters (New-RootInstallerParameterTable -RootMode 'Change' -Additional @{ DisableGuestTestSigning = $true; Force = $true }) }
+            '6' { return }
         }
     }
 }
@@ -428,7 +432,7 @@ function Invoke-ScriptChangeMenu {
         Write-Host '  1) 重置宿主机 guest password secret / Reset password secret'
         Write-Host '  2) 重置 VM 中实际来宾密码 / Reset actual VM guest password'
         Write-Host '  3) 配置 Hyper-V VM 名称、快照和路径 / Configure Hyper-V VM/checkpoint/paths'
-        Write-Host '  4) 管理 guest test-signing（查询/启用/禁用） / Manage guest test-signing'
+        Write-Host '  4) 管理 guest test-signing（指引/查询/启用/禁用） / Manage guest test-signing'
         Write-Host '  5) 准备 Guest Agent/R0Collector payload / Prepare guest payload'
         Write-Host '  6) 查看驱动 service/minifilter JSON 状态 / Driver JSON status'
         Write-Host '  7) 显示状态和就绪修复建议 / Show status/readiness guidance'
@@ -545,6 +549,7 @@ $hasChangeAction = [bool]$ResetPassword -or
     [bool]$EnableGuestTestSigning -or
     [bool]$DisableGuestTestSigning -or
     [bool]$QueryGuestTestSigning -or
+    [bool]$ShowTestSigningGuidance -or
     [bool]$GeneratePassword -or
     [bool]$PromptPassword
 

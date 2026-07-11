@@ -283,7 +283,11 @@ enable this option only for jobs where that evidence is required. Capture
 failures emit `memory_dump.skipped`; they do not block event, screenshot,
 packet-capture, or dropped-file artifact writing. The final
 `memory_dump.sweep` event records visible/attempted/captured/skipped counts so
-missing dump artifacts are explainable.
+missing dump artifacts are explainable. It also records root/child split
+counters (`rootTargetCount`, `childTargetCount`, `rootCapturedCount`,
+`childSkippedCount`, and related attempted/already-captured fields) plus
+`memoryDumpCoverageState`, `rootProcessCoverageState`, and
+`childProcessCoverageState` for report cards.
 
 The guest manifest and host artifact index classify `memory-dumps/**` files as
 `kind=MemoryDump`, `category=memory-dump`, `evidenceRole=memory-dump`, and
@@ -423,6 +427,10 @@ command failures retain `reason`, command exit/timeout details, and
 one `packet_capture.disabled` event with
 `captureEnabled=false`, `captureState=status=disabled`, and
 `reason=packetCaptureNotRequested`.
+Lifecycle rows also retain `sourceTool=pktmon.exe`,
+`artifactSourceTool=pktmon.exe`, `packetCaptureSourceTool=pktmon.exe`, and
+`packetCaptureSource=guest-pktmon`, so the host can attribute PCAP artifacts
+even when the final file is still pending, missing, or failed.
 
 中文优先提示：`packet_capture.protocol_summary` 是抓包诊断摘要，不是
 DNS/HTTP/TLS 行为证据。看到 `protocolSummaryAvailable=false`、

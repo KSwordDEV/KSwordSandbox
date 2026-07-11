@@ -1,5 +1,5 @@
 {
-  "version": "2026-07-12-v16-diagnostic-metadata-rules",
+  "version": "2026-07-12-v17-mvp-gap-rules",
   "rules": [
     {
       "id": "host-submission",
@@ -22998,6 +22998,999 @@
           "unset"
         ]
       }
+    },
+    {
+        "id": "lateral-dcom-mmc20-remote-execution-command",
+        "title": "DCOM MMC20 remote command execution",
+        "titleZh": "DCOM MMC20 远程命令执行",
+        "severity": "high",
+        "confidence": "high",
+        "summary": "A process command line used DCOM-style MMC20/ShellWindows automation with a remote target and command interpreter payload.",
+        "summaryZh": "进程命令行使用 DCOM MMC20/ShellWindows 自动化、远程目标和命令解释器载荷；用于补强无文件远程管理/横向移动证据。",
+        "mitreTechniqueId": "T1021.003",
+        "mitreTechniqueName": "Distributed Component Object Model",
+        "eventTypes": [
+            "process.start",
+            "process.new"
+        ],
+        "commandLineRegex": [
+            "(?=.*\\b(?:powershell(?:\\.exe)?|pwsh(?:\\.exe)?|wmic(?:\\.exe)?|cscript(?:\\.exe)?)\\b)(?=.*(?:MMC20\\.Application|ShellWindows|ShellBrowserWindow|ExecuteShellCommand|Invoke-DCOM|GetTypeFromProgID|/node:|\\\\\\\\[A-Za-z0-9_.-]+))(?=.*\\b(?:cmd(?:\\.exe)?|powershell(?:\\.exe)?|rundll32(?:\\.exe)?|regsvr32(?:\\.exe)?|mshta(?:\\.exe)?|wscript(?:\\.exe)?|cscript(?:\\.exe)?)\\b)"
+        ],
+        "evidenceFields": [
+            "eventType",
+            "processName",
+            "commandLine",
+            "parentProcessId"
+        ],
+        "tags": [
+            "lateral-movement",
+            "dcom",
+            "remote-admin",
+            "open-source-reference",
+            "mitre"
+        ],
+        "excludeCommandLineContains": [
+            "KSword.Sandbox.Agent",
+            "KSword.Sandbox.R0Collector",
+            "Test-ReleaseReadiness",
+            "SmokeTests"
+        ],
+        "excludeProcessNames": [
+            "KSword.Sandbox.Agent.exe",
+            "KSword.Sandbox.R0Collector.exe"
+        ],
+        "excludeDataContains": {
+            "eventType": [
+                "collection.health",
+                "enrichment.virustotal.lookup"
+            ],
+            "source": [
+                "virustotal",
+                "collection-health",
+                "r0collector"
+            ],
+            "producer": [
+                "virustotal",
+                "collection-health",
+                "r0collector"
+            ],
+            "component": [
+                "KSword.Sandbox.Agent",
+                "KSword.Sandbox.R0Collector",
+                "r0collector",
+                "virustotal"
+            ],
+            "status": [
+                "not_configured",
+                "disabled",
+                "skipped",
+                "collection health"
+            ],
+            "vtStatus": [
+                "not_configured",
+                "missing_hash"
+            ],
+            "healthStatus": [
+                "driver-health",
+                "collection-health",
+                "collection health"
+            ],
+            "message": [
+                "collection health",
+                "driver health",
+                "R0Collector",
+                "VirusTotal not configured",
+                "VT not configured"
+            ]
+        }
+    },
+    {
+        "id": "lateral-sc-remote-service-start-or-control",
+        "title": "Remote service control via sc.exe",
+        "titleZh": "通过 sc.exe 远程控制服务",
+        "severity": "medium",
+        "confidence": "high",
+        "summary": "A command line used sc.exe against a remote host to start, stop, delete, configure, or otherwise control a service.",
+        "summaryZh": "命令行使用 sc.exe 面向远程主机启动、停止、删除、配置或控制服务；属于远程服务管理和横向移动排查线索，需结合投放/认证证据判断。",
+        "mitreTechniqueId": "T1021",
+        "mitreTechniqueName": "Remote Services",
+        "eventTypes": [
+            "process.start",
+            "process.new"
+        ],
+        "commandLineRegex": [
+            "\\bsc(?:\\.exe)?\\s+\\\\\\\\[^\\\\\\s]+\\s+(?:start|stop|delete|pause|continue|failure|sdset|config)\\b[\\s\\S]{0,160}\\b(?:psexesvc|paexec|remcom|remote|service|svc|payload|winrm|remoteregistry|schedule|spooler)\\b"
+        ],
+        "evidenceFields": [
+            "eventType",
+            "processName",
+            "commandLine",
+            "parentProcessId"
+        ],
+        "tags": [
+            "lateral-movement",
+            "remote-service",
+            "service-control",
+            "remote-admin",
+            "mitre"
+        ],
+        "excludeCommandLineContains": [
+            "KSword.Sandbox.Agent",
+            "KSword.Sandbox.R0Collector",
+            "Test-ReleaseReadiness",
+            "SmokeTests"
+        ],
+        "excludeProcessNames": [
+            "KSword.Sandbox.Agent.exe",
+            "KSword.Sandbox.R0Collector.exe"
+        ],
+        "excludeDataContains": {
+            "eventType": [
+                "collection.health",
+                "enrichment.virustotal.lookup"
+            ],
+            "source": [
+                "virustotal",
+                "collection-health",
+                "r0collector"
+            ],
+            "producer": [
+                "virustotal",
+                "collection-health",
+                "r0collector"
+            ],
+            "component": [
+                "KSword.Sandbox.Agent",
+                "KSword.Sandbox.R0Collector",
+                "r0collector",
+                "virustotal"
+            ],
+            "status": [
+                "not_configured",
+                "disabled",
+                "skipped",
+                "collection health"
+            ],
+            "vtStatus": [
+                "not_configured",
+                "missing_hash"
+            ],
+            "healthStatus": [
+                "driver-health",
+                "collection-health",
+                "collection health"
+            ],
+            "message": [
+                "collection health",
+                "driver health",
+                "R0Collector",
+                "VirusTotal not configured",
+                "VT not configured"
+            ]
+        }
+    },
+    {
+        "id": "download-execute-wscript-cscript-remote-script-url",
+        "title": "WScript or CScript executes remote script URL",
+        "titleZh": "WScript/CScript 执行远程脚本 URL",
+        "severity": "high",
+        "confidence": "high",
+        "summary": "A Windows Script Host process executed or staged a script from an HTTP(S) URL or web cache path.",
+        "summaryZh": "Windows Script Host 进程从 HTTP(S) URL 或 Web 缓存路径执行/暂存脚本；常见于下载执行和脚本化载荷启动链。",
+        "mitreTechniqueId": "T1105",
+        "mitreTechniqueName": "Ingress Tool Transfer",
+        "eventTypes": [
+            "process.start",
+            "process.new"
+        ],
+        "commandLineRegex": [
+            "(?=.*\\b(?:wscript|cscript)(?:\\.exe)?\\b)(?=.*(?:https?://|\\\\INetCache\\\\|\\\\Temporary Internet Files\\\\))(?=.*\\.(?:js|jse|vbs|vbe|wsf|hta)(?:\\b|$|[\\s\\\"]))"
+        ],
+        "evidenceFields": [
+            "eventType",
+            "processName",
+            "commandLine",
+            "parentProcessId"
+        ],
+        "tags": [
+            "download-execute",
+            "script",
+            "wscript",
+            "cscript",
+            "mitre"
+        ],
+        "excludeCommandLineContains": [
+            "KSword.Sandbox.Agent",
+            "KSword.Sandbox.R0Collector",
+            "Test-ReleaseReadiness",
+            "SmokeTests"
+        ],
+        "excludeProcessNames": [
+            "KSword.Sandbox.Agent.exe",
+            "KSword.Sandbox.R0Collector.exe"
+        ],
+        "excludeDataContains": {
+            "eventType": [
+                "collection.health",
+                "enrichment.virustotal.lookup"
+            ],
+            "source": [
+                "virustotal",
+                "collection-health",
+                "r0collector"
+            ],
+            "producer": [
+                "virustotal",
+                "collection-health",
+                "r0collector"
+            ],
+            "component": [
+                "KSword.Sandbox.Agent",
+                "KSword.Sandbox.R0Collector",
+                "r0collector",
+                "virustotal"
+            ],
+            "status": [
+                "not_configured",
+                "disabled",
+                "skipped",
+                "collection health"
+            ],
+            "vtStatus": [
+                "not_configured",
+                "missing_hash"
+            ],
+            "healthStatus": [
+                "driver-health",
+                "collection-health",
+                "collection health"
+            ],
+            "message": [
+                "collection health",
+                "driver health",
+                "R0Collector",
+                "VirusTotal not configured",
+                "VT not configured"
+            ]
+        }
+    },
+    {
+        "id": "download-execute-artifact-hash-launch-correlation",
+        "title": "Downloaded artifact hash launched",
+        "titleZh": "下载产物哈希随后被执行",
+        "severity": "high",
+        "confidence": "high",
+        "summary": "A normalized download-execute correlation row tied an HTTP(S) source URL to a launched user-writable artifact with matching hash metadata.",
+        "summaryZh": "归一化下载执行关联行将 HTTP(S) 来源 URL、用户可写执行路径和匹配哈希元数据关联起来；比单独 URL 或文件写入更适合作为报告主证据。",
+        "mitreTechniqueId": "T1105",
+        "mitreTechniqueName": "Ingress Tool Transfer",
+        "eventTypes": [
+            "behavior.download_execute",
+            "download.execute",
+            "file.downloaded.executed"
+        ],
+        "allDataContains": {
+            "sourceUrl": [
+                "http://",
+                "https://"
+            ],
+            "hashMatch": [
+                "true",
+                "same",
+                "matched"
+            ]
+        },
+        "allDataKeys": [
+            "downloadSha256",
+            "executedSha256",
+            "executedPath"
+        ],
+        "dataRegex": {
+            "executedPath": [
+                "\\\\(?:Users\\\\[^\\\\]+\\\\(?:AppData|Downloads|Desktop|Documents)|Users\\\\Public|ProgramData|Windows\\\\Temp)\\\\.*\\.(?:exe|dll|ps1|vbs|js|jse|hta|bat|cmd|scr)(?:\\b|$)"
+            ]
+        },
+        "evidenceFields": [
+            "eventType",
+            "data.sourceUrl",
+            "data.downloadPath",
+            "data.executedPath",
+            "data.downloadSha256",
+            "data.executedSha256",
+            "data.hashMatch"
+        ],
+        "tags": [
+            "download-execute",
+            "artifact",
+            "hash-correlation",
+            "ingress-tool-transfer",
+            "mitre"
+        ],
+        "excludeDataContains": {
+            "eventType": [
+                "collection.health",
+                "enrichment.virustotal.lookup"
+            ],
+            "source": [
+                "virustotal",
+                "collection-health",
+                "r0collector"
+            ],
+            "producer": [
+                "virustotal",
+                "collection-health",
+                "r0collector"
+            ],
+            "component": [
+                "KSword.Sandbox.Agent",
+                "KSword.Sandbox.R0Collector",
+                "r0collector",
+                "virustotal"
+            ],
+            "status": [
+                "not_configured",
+                "disabled",
+                "skipped",
+                "collection health"
+            ],
+            "vtStatus": [
+                "not_configured",
+                "missing_hash"
+            ],
+            "healthStatus": [
+                "driver-health",
+                "collection-health",
+                "collection health"
+            ],
+            "message": [
+                "collection health",
+                "driver health",
+                "R0Collector",
+                "VirusTotal not configured",
+                "VT not configured"
+            ]
+        }
+    },
+    {
+        "id": "anti-sandbox-low-resource-exit-gate",
+        "title": "Low-resource sandbox gate before exit or delay",
+        "titleZh": "低资源沙箱门控后退出或延迟",
+        "severity": "medium",
+        "confidence": "high",
+        "summary": "Anti-analysis telemetry combined low CPU and memory thresholds with an explicit exit, delay, or gate action.",
+        "summaryZh": "反分析遥测同时包含低 CPU/内存阈值和明确的退出、延迟或门控动作；避免把普通系统信息采集直接提升为高危行为。",
+        "mitreTechniqueId": "T1497.001",
+        "mitreTechniqueName": "System Checks",
+        "eventTypes": [
+            "antiAnalysis.sandboxCheck",
+            "system.fingerprint",
+            "api.call"
+        ],
+        "allDataNumericRanges": {
+            "cpuCount": [
+                {
+                    "min": 1,
+                    "max": 2
+                }
+            ],
+            "memoryMB": [
+                {
+                    "min": 128,
+                    "max": 4096
+                }
+            ]
+        },
+        "dataContains": {
+            "action": [
+                "exit",
+                "terminate",
+                "sleep",
+                "delay",
+                "gate"
+            ],
+            "classification": [
+                "low-resource",
+                "sandbox-gate",
+                "anti-sandbox"
+            ],
+            "check": [
+                "low resource",
+                "cpu count",
+                "memory size"
+            ]
+        },
+        "evidenceFields": [
+            "eventType",
+            "processName",
+            "data.cpuCount",
+            "data.memoryMB",
+            "data.action",
+            "data.classification",
+            "data.check"
+        ],
+        "tags": [
+            "anti-analysis",
+            "anti-sandbox",
+            "low-resource",
+            "sandbox-gate",
+            "mitre"
+        ],
+        "excludeProcessNames": [
+            "KSword.Sandbox.Agent.exe",
+            "KSword.Sandbox.R0Collector.exe"
+        ],
+        "excludeDataContains": {
+            "eventType": [
+                "collection.health",
+                "enrichment.virustotal.lookup"
+            ],
+            "source": [
+                "virustotal",
+                "collection-health",
+                "r0collector"
+            ],
+            "producer": [
+                "virustotal",
+                "collection-health",
+                "r0collector"
+            ],
+            "component": [
+                "KSword.Sandbox.Agent",
+                "KSword.Sandbox.R0Collector",
+                "r0collector",
+                "virustotal"
+            ],
+            "status": [
+                "not_configured",
+                "disabled",
+                "skipped",
+                "collection health"
+            ],
+            "vtStatus": [
+                "not_configured",
+                "missing_hash"
+            ],
+            "healthStatus": [
+                "driver-health",
+                "collection-health",
+                "collection health"
+            ],
+            "message": [
+                "collection health",
+                "driver health",
+                "R0Collector",
+                "VirusTotal not configured",
+                "VT not configured"
+            ]
+        }
+    },
+    {
+        "id": "anti-sandbox-sleep-acceleration-ratio-mismatch",
+        "title": "Sleep acceleration ratio mismatch",
+        "titleZh": "Sleep 加速比例异常",
+        "severity": "medium",
+        "confidence": "high",
+        "summary": "Sleep/timing telemetry reported a long requested delay but a much shorter observed wait together with acceleration, fast-forward, or time-skew labels.",
+        "summaryZh": "Sleep/计时遥测报告较长请求延迟但实际等待很短，并带有加速、快进或时间偏移标签；用于识别按时间逃避沙箱的门控逻辑。",
+        "mitreTechniqueId": "T1497.003",
+        "mitreTechniqueName": "Time Based Evasion",
+        "eventTypes": [
+            "api.sleep",
+            "antiAnalysis.sleep",
+            "antiAnalysis.sandboxCheck"
+        ],
+        "allDataNumericRanges": {
+            "requestedMs": [
+                {
+                    "min": 300000
+                }
+            ],
+            "observedMs": [
+                {
+                    "min": 0,
+                    "max": 60000
+                }
+            ]
+        },
+        "dataContains": {
+            "classification": [
+                "accelerated",
+                "fast-forwarded",
+                "time-skew",
+                "sleep-skip"
+            ],
+            "result": [
+                "accelerated",
+                "fast-forwarded",
+                "skipped"
+            ],
+            "diagnostic": [
+                "sleep acceleration",
+                "time skew"
+            ]
+        },
+        "evidenceFields": [
+            "eventType",
+            "processName",
+            "data.requestedMs",
+            "data.observedMs",
+            "data.classification",
+            "data.result"
+        ],
+        "tags": [
+            "anti-analysis",
+            "anti-sandbox",
+            "time-evasion",
+            "sleep",
+            "mitre"
+        ],
+        "excludeProcessNames": [
+            "KSword.Sandbox.Agent.exe",
+            "KSword.Sandbox.R0Collector.exe"
+        ],
+        "excludeDataContains": {
+            "eventType": [
+                "collection.health",
+                "enrichment.virustotal.lookup"
+            ],
+            "source": [
+                "virustotal",
+                "collection-health",
+                "r0collector"
+            ],
+            "producer": [
+                "virustotal",
+                "collection-health",
+                "r0collector"
+            ],
+            "component": [
+                "KSword.Sandbox.Agent",
+                "KSword.Sandbox.R0Collector",
+                "r0collector",
+                "virustotal"
+            ],
+            "status": [
+                "not_configured",
+                "disabled",
+                "skipped",
+                "collection health"
+            ],
+            "vtStatus": [
+                "not_configured",
+                "missing_hash"
+            ],
+            "healthStatus": [
+                "driver-health",
+                "collection-health",
+                "collection health"
+            ],
+            "message": [
+                "collection health",
+                "driver health",
+                "R0Collector",
+                "VirusTotal not configured",
+                "VT not configured"
+            ]
+        }
+    },
+    {
+        "id": "injection-create-remote-thread-startaddress-rwx",
+        "title": "Remote thread starts in RWX memory",
+        "titleZh": "远程线程从 RWX 内存启动",
+        "severity": "high",
+        "confidence": "high",
+        "summary": "Thread telemetry reported CreateRemoteThread/NtCreateThreadEx with target process context, start address, and executable writable memory protection.",
+        "summaryZh": "线程遥测报告 CreateRemoteThread/NtCreateThreadEx，同时包含目标进程、启动地址和可执行可写内存保护；这是强注入证据。",
+        "mitreTechniqueId": "T1055.004",
+        "mitreTechniqueName": "Create Thread",
+        "eventTypes": [
+            "process.remote_thread",
+            "thread.remote",
+            "driver.thread",
+            "r0.thread",
+            "api.call"
+        ],
+        "allDataKeys": [
+            "targetProcessName",
+            "startAddress"
+        ],
+        "allDataContains": {
+            "operation": [
+                "CreateRemoteThread",
+                "NtCreateThreadEx",
+                "remote thread"
+            ],
+            "targetMemoryProtection": [
+                "PAGE_EXECUTE_READWRITE",
+                "EXECUTE_READWRITE",
+                "RWX"
+            ]
+        },
+        "evidenceFields": [
+            "eventType",
+            "processName",
+            "data.operation",
+            "data.targetProcessName",
+            "data.targetProcessId",
+            "data.startAddress",
+            "data.targetMemoryProtection"
+        ],
+        "tags": [
+            "injection",
+            "remote-thread",
+            "memory",
+            "rwx",
+            "mitre"
+        ],
+        "excludeProcessNames": [
+            "KSword.Sandbox.Agent.exe",
+            "KSword.Sandbox.R0Collector.exe"
+        ],
+        "excludeDataContains": {
+            "eventType": [
+                "collection.health",
+                "enrichment.virustotal.lookup"
+            ],
+            "source": [
+                "virustotal",
+                "collection-health",
+                "r0collector"
+            ],
+            "producer": [
+                "virustotal",
+                "collection-health",
+                "r0collector"
+            ],
+            "component": [
+                "KSword.Sandbox.Agent",
+                "KSword.Sandbox.R0Collector",
+                "r0collector",
+                "virustotal"
+            ],
+            "status": [
+                "not_configured",
+                "disabled",
+                "skipped",
+                "collection health"
+            ],
+            "vtStatus": [
+                "not_configured",
+                "missing_hash"
+            ],
+            "healthStatus": [
+                "driver-health",
+                "collection-health",
+                "collection health"
+            ],
+            "message": [
+                "collection health",
+                "driver health",
+                "R0Collector",
+                "VirusTotal not configured",
+                "VT not configured"
+            ]
+        }
+    },
+    {
+        "id": "injection-mapview-section-unbacked-execute",
+        "title": "Executable unbacked section mapped into process",
+        "titleZh": "可执行匿名 Section 映射到进程",
+        "severity": "high",
+        "confidence": "high",
+        "summary": "Memory/API telemetry reported NtMapViewOfSection or section-map behavior with executable protection and anonymous, pagefile, transacted, or otherwise unbacked mapping context.",
+        "summaryZh": "内存/API 遥测报告 NtMapViewOfSection/section map 行为，同时包含可执行权限和匿名、pagefile、事务或无文件映射上下文；用于识别 section-based 注入。",
+        "mitreTechniqueId": "T1055.002",
+        "mitreTechniqueName": "Portable Executable Injection",
+        "eventTypes": [
+            "process.memory",
+            "process.write_memory",
+            "driver.process",
+            "r0.process",
+            "api.call"
+        ],
+        "allDataContains": {
+            "operation": [
+                "NtMapViewOfSection",
+                "MapViewOfFile",
+                "section map",
+                "map section"
+            ],
+            "protection": [
+                "PAGE_EXECUTE",
+                "EXECUTE_READ",
+                "EXECUTE_READWRITE",
+                "RWX"
+            ],
+            "backingType": [
+                "unbacked",
+                "anonymous",
+                "pagefile",
+                "transacted"
+            ]
+        },
+        "evidenceFields": [
+            "eventType",
+            "processName",
+            "data.operation",
+            "data.targetProcessName",
+            "data.protection",
+            "data.backingType",
+            "data.sectionName"
+        ],
+        "tags": [
+            "injection",
+            "section-map",
+            "memory",
+            "unbacked",
+            "mitre"
+        ],
+        "excludeProcessNames": [
+            "KSword.Sandbox.Agent.exe",
+            "KSword.Sandbox.R0Collector.exe"
+        ],
+        "excludeDataContains": {
+            "eventType": [
+                "collection.health",
+                "enrichment.virustotal.lookup"
+            ],
+            "source": [
+                "virustotal",
+                "collection-health",
+                "r0collector"
+            ],
+            "producer": [
+                "virustotal",
+                "collection-health",
+                "r0collector"
+            ],
+            "component": [
+                "KSword.Sandbox.Agent",
+                "KSword.Sandbox.R0Collector",
+                "r0collector",
+                "virustotal"
+            ],
+            "status": [
+                "not_configured",
+                "disabled",
+                "skipped",
+                "collection health"
+            ],
+            "vtStatus": [
+                "not_configured",
+                "missing_hash"
+            ],
+            "healthStatus": [
+                "driver-health",
+                "collection-health",
+                "collection health"
+            ],
+            "message": [
+                "collection health",
+                "driver health",
+                "R0Collector",
+                "VirusTotal not configured",
+                "VT not configured"
+            ]
+        }
+    },
+    {
+        "id": "c2-ja3-sni-domain-fronting-correlation",
+        "title": "Domain-fronting TLS/HTTP correlation with risky JA3",
+        "titleZh": "Domain fronting 与高风险 JA3 关联",
+        "severity": "high",
+        "confidence": "high",
+        "summary": "Network metadata correlated Host/SNI mismatch or domain-fronting classification with SNI, Host, and suspicious JA3 reputation fields.",
+        "summaryZh": "网络元数据将 Host/SNI 不一致或 domain fronting 分类与 SNI、Host 和可疑 JA3 信誉字段关联；比单独 fronting 标签更适合作为 C2 证据。",
+        "mitreTechniqueId": "T1090",
+        "mitreTechniqueName": "Proxy",
+        "eventTypes": [
+            "network.tls",
+            "tls.connection",
+            "pcap.tls",
+            "network.http",
+            "http.request",
+            "pcap.http",
+            "network.flow"
+        ],
+        "allDataKeys": [
+            "host",
+            "sni",
+            "ja3"
+        ],
+        "allDataContains": {
+            "classification": [
+                "domain-fronting",
+                "host-sni-mismatch",
+                "sni-host-mismatch"
+            ],
+            "ja3Reputation": [
+                "suspicious",
+                "malicious",
+                "rare",
+                "c2"
+            ]
+        },
+        "evidenceFields": [
+            "eventType",
+            "data.host",
+            "data.sni",
+            "data.ja3",
+            "data.ja3Reputation",
+            "data.classification",
+            "destinationIp"
+        ],
+        "tags": [
+            "network",
+            "tls",
+            "http",
+            "c2",
+            "domain-fronting",
+            "ja3",
+            "mitre"
+        ],
+        "excludeDataContains": {
+            "eventType": [
+                "collection.health",
+                "enrichment.virustotal.lookup"
+            ],
+            "source": [
+                "virustotal",
+                "collection-health",
+                "r0collector"
+            ],
+            "producer": [
+                "virustotal",
+                "collection-health",
+                "r0collector"
+            ],
+            "component": [
+                "KSword.Sandbox.Agent",
+                "KSword.Sandbox.R0Collector",
+                "r0collector",
+                "virustotal"
+            ],
+            "status": [
+                "not_configured",
+                "disabled",
+                "skipped",
+                "collection health"
+            ],
+            "vtStatus": [
+                "not_configured",
+                "missing_hash"
+            ],
+            "healthStatus": [
+                "driver-health",
+                "collection-health",
+                "collection health"
+            ],
+            "message": [
+                "collection health",
+                "driver health",
+                "R0Collector",
+                "VirusTotal not configured",
+                "VT not configured"
+            ]
+        }
+    },
+    {
+        "id": "c2-beacon-sni-ja3-process-correlation",
+        "title": "Beacon timing tied to SNI, JA3, and user-writable process",
+        "titleZh": "Beacon 周期与 SNI、JA3、用户可写进程关联",
+        "severity": "high",
+        "confidence": "high",
+        "summary": "Flow or TLS metadata tied periodic C2/beacon timing, risky JA3 reputation, SNI, and a user-writable process path into one correlation row.",
+        "summaryZh": "流量或 TLS 元数据在同一关联行中包含周期性 C2/beacon 时间、风险 JA3 信誉、SNI 和用户可写进程路径；这是报告中可直接展开的强 C2 证据。",
+        "mitreTechniqueId": "T1071.001",
+        "mitreTechniqueName": "Web Protocols",
+        "eventTypes": [
+            "network.flow",
+            "pcap.flow",
+            "network.tls",
+            "tls.connection",
+            "pcap.tls"
+        ],
+        "allDataKeys": [
+            "sni",
+            "ja3",
+            "processPath"
+        ],
+        "allDataContains": {
+            "classification": [
+                "c2",
+                "beacon",
+                "periodic"
+            ],
+            "ja3Reputation": [
+                "suspicious",
+                "malicious",
+                "rare",
+                "c2"
+            ]
+        },
+        "allDataNumericRanges": {
+            "beaconIntervalSeconds": [
+                {
+                    "min": 10,
+                    "max": 3600
+                }
+            ],
+            "jitterPercent": [
+                {
+                    "min": 0,
+                    "max": 50
+                }
+            ]
+        },
+        "dataRegex": {
+            "processPath": [
+                "\\\\(?:Users\\\\[^\\\\]+\\\\(?:AppData|Downloads|Desktop|Documents)|Users\\\\Public|ProgramData|Windows\\\\Temp)\\\\.*\\.(?:exe|dll|ps1|vbs|js|jse|hta|bat|cmd|scr)(?:\\b|$)"
+            ]
+        },
+        "evidenceFields": [
+            "eventType",
+            "data.processPath",
+            "data.sni",
+            "data.ja3",
+            "data.ja3Reputation",
+            "data.beaconIntervalSeconds",
+            "data.jitterPercent",
+            "data.classification",
+            "destinationIp"
+        ],
+        "tags": [
+            "network",
+            "c2",
+            "beacon",
+            "tls",
+            "ja3",
+            "process-correlation",
+            "mitre"
+        ],
+        "excludeDataContains": {
+            "eventType": [
+                "collection.health",
+                "enrichment.virustotal.lookup"
+            ],
+            "source": [
+                "virustotal",
+                "collection-health",
+                "r0collector"
+            ],
+            "producer": [
+                "virustotal",
+                "collection-health",
+                "r0collector"
+            ],
+            "component": [
+                "KSword.Sandbox.Agent",
+                "KSword.Sandbox.R0Collector",
+                "r0collector",
+                "virustotal"
+            ],
+            "status": [
+                "not_configured",
+                "disabled",
+                "skipped",
+                "collection health"
+            ],
+            "vtStatus": [
+                "not_configured",
+                "missing_hash"
+            ],
+            "healthStatus": [
+                "driver-health",
+                "collection-health",
+                "collection health"
+            ],
+            "message": [
+                "collection health",
+                "driver health",
+                "R0Collector",
+                "VirusTotal not configured",
+                "VT not configured"
+            ]
+        }
     }
   ]
 }

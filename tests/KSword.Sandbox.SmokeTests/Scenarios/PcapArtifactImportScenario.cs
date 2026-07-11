@@ -80,10 +80,19 @@ internal sealed class PcapArtifactImportScenario : ISmokeTestScenario
         RequireData(dns, "flowKey", "udp|10.0.0.4:53000|8.8.8.8:53");
         RequireData(dns, "queryName", "beacon.example.test");
         RequireData(dns, "queryType", "A");
+        RequireData(dns, "dnsQueryName", "beacon.example.test");
+        RequireData(dns, "rcodeName", "NOERROR");
+        RequireData(dns, "pcapSourceArtifactRelativePath", "sample.pcap");
         RequireData(http, "method", "GET");
         RequireData(http, "host", "download.example.test");
         RequireData(http, "payloadMagic", "MZ");
+        RequireData(http, "httpMessageType", "request");
+        RequireData(http, "downloadSelector", "sample.pcap");
+        RequireData(http, "pcapSourceArtifactRelativePath", "sample.pcap");
         RequireData(tls, "sni", "secure.example.test");
+        RequireData(tls, "tlsVersion", "TLS 1.2");
+        RequireNonEmpty(tls, "ja3");
+        RequireData(tls, "pcapSourceArtifactRelativePath", "sample.pcap");
         AssertStandardNetworkEvent(dnsQuery, "dns", "pcap-native", "dns");
         RequireData(dnsQuery, "queryName", "beacon.example.test");
         RequireData(dnsQuery, "qname", "beacon.example.test");
@@ -95,10 +104,13 @@ internal sealed class PcapArtifactImportScenario : ISmokeTestScenario
         RequireData(httpRequest, "requestUri", "/payload.exe");
         RequireData(httpRequest, "url", "http://download.example.test/payload.exe");
         RequireData(httpRequest, "contentType", "application/x-msdownload");
+        RequireData(httpRequest, "httpMessageType", "request");
         AssertStandardNetworkEvent(tlsConnection, "tls", "pcap-native", "tls");
         RequireData(tlsConnection, "sni", "secure.example.test");
         RequireData(tlsConnection, "serverName", "secure.example.test");
         RequireData(tlsConnection, "handshakeType", "client_hello");
+        RequireData(tlsConnection, "tlsVersion", "TLS 1.2");
+        RequireNonEmpty(tlsConnection, "ja3");
         AssertStandardNetworkEvent(nativeFlow, "connection", "pcap-native", "dns");
         RequireData(nativeFlow, "packetCount", "1");
         RequireNonEmpty(nativeFlow, "payloadBytes");
@@ -117,6 +129,7 @@ internal sealed class PcapArtifactImportScenario : ISmokeTestScenario
         RequireData(sidecarLogFlow, "durationSeconds", "1.25");
         RequireData(sidecarLogFlow, "byteCount", "512");
         RequireData(sidecarLogFlow, "collectionHealth", "ok");
+        RequireData(sidecarLogFlow, "pcapSourceArtifactRelativePath", "sample.pcap");
         RequireNonEmpty(sidecarLogFlow, "zhMessage");
         RequireNonEmpty(sidecarLogFlow, "zhHint");
         var sidecarParseError = RequireEvent(events, "network.sidecar.parse_error");
@@ -425,6 +438,42 @@ internal sealed class PcapArtifactImportScenario : ISmokeTestScenario
         RequireData(flow, "bytesToServer", "2048");
         RequireData(flow, "bytesToClient", "1024");
         RequireData(flow, "communityId", "1:sidecar-community");
+
+        await AssertIpv6EndpointNormalizationAsync(root, cancellationToken);
+    }
+
+    private static async Task AssertIpv6EndpointNormalizationAsync(string parentRoot, CancellationToken cancellationToken)
+    {
+        var root = Path.Combine(parentRoot, "ipv6-sidecar", Guid.NewGuid().ToString("N"));
+        var sidecarRoot = Path.Combine(root, "network-sidecars");
+        Directory.CreateDirectory(sidecarRoot);
+        await File.WriteAllLinesAsync(
+            Path.Combine(sidecarRoot, "ipv6.jsonl"),
+            [
+                JsonSerializer.Serialize(new
+                {
+                    eventType = "network.connection",
+                    timestamp = "2026-07-11T00:00:04Z",
+                    sourceEndpoint = "[2001:db8::10]:5353",
+                    destinationEndpoint = "[2606:4700:4700::1111]:53",
+                    proto = "udp",
+                    uid = "ipv6-flow-1",
+                    rootProcessId = "5150",
+                    treeLineage = "5150:sidecar-sample.exe>6161:child.exe"
+                })
+            ],
+            cancellationToken);
+
+        var events = new NetworkArtifactEventImporter().ImportGuestArtifacts(root, includeCanonicalDriverJsonl: false);
+        var flow = RequireEvent(events, "network.flow", "uid", "ipv6-flow-1");
+        RequireData(flow, "ipFamily", "ipv6");
+        RequireData(flow, "sourceIp", "2001:db8::10");
+        RequireData(flow, "destinationIp", "2606:4700:4700::1111");
+        RequireData(flow, "sourceEndpoint", "[2001:db8::10]:5353");
+        RequireData(flow, "destinationEndpoint", "[2606:4700:4700::1111]:53");
+        RequireData(flow, "flowKey", "udp|[2001:db8::10]:5353|[2606:4700:4700::1111]:53");
+        RequireData(flow, "rootProcessId", "5150");
+        RequireData(flow, "treeLineage", "5150:sidecar-sample.exe>6161:child.exe");
     }
 
     private static async Task AssertGuestManifestNetworkImportAsync(string parentRoot, CancellationToken cancellationToken)

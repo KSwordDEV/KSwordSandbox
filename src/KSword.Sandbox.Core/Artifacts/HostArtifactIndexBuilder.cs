@@ -141,13 +141,20 @@ public sealed class HostArtifactIndexBuilder
         artifacts = MarkDuplicateArtifacts(artifacts)
             .OrderBy(artifact => artifact.RelativePath, StringComparer.OrdinalIgnoreCase)
             .ToList();
+        var collections = BuildCollections(artifacts, guestManifests, collectionEventMetadata, guestArtifactRejections, fullJobRoot);
 
         return new HostArtifactIndex
         {
             JobId = jobId,
             RootPath = fullJobRoot,
+            CollectionCount = collections.Count,
+            ArtifactCount = artifacts.Count,
+            DownloadableArtifactCount = artifacts.Count(IsDownloadableArtifact),
+            SensitiveArtifactCount = artifacts.Count(IsSensitiveArtifact),
+            DuplicateArtifactCount = artifacts.Count(IsDuplicateArtifact),
+            RejectedArtifactCount = guestArtifactRejections.Count,
             GeneratedAtUtc = DateTimeOffset.UtcNow,
-            Collections = BuildCollections(artifacts, guestManifests, collectionEventMetadata, guestArtifactRejections, fullJobRoot),
+            Collections = collections,
             Artifacts = artifacts
         };
     }
@@ -171,7 +178,15 @@ public sealed class HostArtifactIndexBuilder
             new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
             {
                 ["origin"] = "host",
-                ["schemaVersion"] = index.SchemaVersion.ToString()
+                ["schemaVersion"] = index.SchemaVersion.ToString(CultureInfo.InvariantCulture),
+                ["rootPathPolicy"] = index.RootPathPolicy,
+                ["downloadPolicy"] = index.DownloadPolicy,
+                ["artifactCount"] = index.ArtifactCount.ToString(CultureInfo.InvariantCulture),
+                ["collectionCount"] = index.CollectionCount.ToString(CultureInfo.InvariantCulture),
+                ["downloadableArtifactCount"] = index.DownloadableArtifactCount.ToString(CultureInfo.InvariantCulture),
+                ["sensitiveArtifactCount"] = index.SensitiveArtifactCount.ToString(CultureInfo.InvariantCulture),
+                ["duplicateArtifactCount"] = index.DuplicateArtifactCount.ToString(CultureInfo.InvariantCulture),
+                ["rejectedArtifactCount"] = index.RejectedArtifactCount.ToString(CultureInfo.InvariantCulture)
             });
     }
 
@@ -1501,6 +1516,19 @@ public sealed class HostArtifactIndexBuilder
     private static bool IsDuplicateArtifact(ArtifactDescriptor artifact)
     {
         return string.Equals(MetadataValue(artifact.Metadata, "isDuplicate"), "true", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsDownloadableArtifact(ArtifactDescriptor artifact)
+    {
+        return !string.IsNullOrWhiteSpace(artifact.RelativePath) &&
+            !string.IsNullOrWhiteSpace(artifact.SafeLink) &&
+            File.Exists(artifact.FullPath) &&
+            string.Equals(MetadataValue(artifact.Metadata, "isDownloadable"), "true", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsSensitiveArtifact(ArtifactDescriptor artifact)
+    {
+        return artifact.Kind is ArtifactKind.DroppedFile or ArtifactKind.Screenshot or ArtifactKind.MemoryDump or ArtifactKind.PacketCapture;
     }
 
     private static void AddArtifactIdentityMetadata(Dictionary<string, string> metadata, ArtifactDescriptor artifact)

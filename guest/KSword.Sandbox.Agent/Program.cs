@@ -2005,6 +2005,13 @@ internal static class AgentProgram
             evt.Data["sha256"] = copiedHash.Sha256;
             evt.Data["artifactSha256"] = copiedHash.Sha256;
             evt.Data["hashAlgorithm"] = "sha256";
+            evt.Data["artifactHashAlgorithm"] = "sha256";
+        }
+
+        if (!string.IsNullOrWhiteSpace(copiedHash.Status))
+        {
+            evt.Data["hashStatus"] = copiedHash.Status;
+            evt.Data["artifactHashStatus"] = copiedHash.Status;
         }
 
         return evt;
@@ -2415,6 +2422,21 @@ internal static class AgentProgram
         if (sourceEvent.Data.TryGetValue("lastWriteUtc", out var lastWriteUtc) && !string.IsNullOrWhiteSpace(lastWriteUtc))
         {
             evt.Data["sourceEventLastWriteUtc"] = lastWriteUtc;
+        }
+
+        if (sourceEvent.Data.TryGetValue("sha256", out var sha256) && !string.IsNullOrWhiteSpace(sha256))
+        {
+            evt.Data["sourceEventSha256"] = sha256;
+        }
+
+        if (sourceEvent.Data.TryGetValue("hashAlgorithm", out var hashAlgorithm) && !string.IsNullOrWhiteSpace(hashAlgorithm))
+        {
+            evt.Data["sourceEventHashAlgorithm"] = hashAlgorithm;
+        }
+
+        if (sourceEvent.Data.TryGetValue("hashStatus", out var hashStatus) && !string.IsNullOrWhiteSpace(hashStatus))
+        {
+            evt.Data["sourceEventHashStatus"] = hashStatus;
         }
     }
 

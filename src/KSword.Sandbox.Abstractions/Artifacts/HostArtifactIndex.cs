@@ -16,6 +16,22 @@ public sealed record HostArtifactIndex
 
     public string Producer { get; init; } = "KSword.Sandbox.Core";
 
+    public string RootPathPolicy { get; init; } = "server-owned-not-exposed-in-web-api";
+
+    public string DownloadPolicy { get; init; } = "relative-index-selectors-only";
+
+    public int CollectionCount { get; init; }
+
+    public int ArtifactCount { get; init; }
+
+    public int DownloadableArtifactCount { get; init; }
+
+    public int SensitiveArtifactCount { get; init; }
+
+    public int DuplicateArtifactCount { get; init; }
+
+    public int RejectedArtifactCount { get; init; }
+
     public DateTimeOffset GeneratedAtUtc { get; init; } = DateTimeOffset.UtcNow;
 
     public List<ArtifactCollectionDescriptor> Collections { get; init; } = [];

@@ -30,6 +30,7 @@ internal sealed class GuestAgentCollectionDepthScenario : ISmokeTestScenario
         AssertFileContains(Path.Combine(collectionRoot, "ProcessTreeProbe.cs"), "treeLineage", "Process tree events must preserve root/child lineage.");
         AssertFileContains(Path.Combine(collectionRoot, "ProcessTreeProbe.cs"), "processExited", "Process tree missing rows must preserve exited markers.");
         AssertFileContains(Path.Combine(collectionRoot, "ProcessTreeProbe.cs"), "rootExited", "Process tree summaries must preserve root-exited markers.");
+        AssertFileContains(Path.Combine(collectionRoot, "ProcessTreeProbe.cs"), "rootTreeMetadata", "New process rows should reuse root-tree metadata when lineage is available.");
         AssertFileContains(Path.Combine(collectionRoot, "ProcessTreeProbe.cs"), "zhMessage", "Process tree events must include Chinese report text.");
         AssertFileContains(Path.Combine(collectionRoot, "FileDiffProbe.cs"), "file.created", "File diff probe must emit file.created.");
         AssertFileContains(Path.Combine(collectionRoot, "FileDiffProbe.cs"), "file.modified", "File diff probe must emit file.modified.");
@@ -82,6 +83,9 @@ internal sealed class GuestAgentCollectionDepthScenario : ISmokeTestScenario
         AssertFileContains(Path.Combine(collectionRoot, "MemoryDumpProbe.cs"), "BuildVisibleDumpTargets", "Memory dump capture must build root/child process dump targets.");
         AssertFileContains(Path.Combine(collectionRoot, "MemoryDumpProbe.cs"), "processRole", "Memory dump events must identify root versus child process dumps.");
         AssertFileContains(Path.Combine(collectionRoot, "MemoryDumpProbe.cs"), "alreadyCapturedCount", "Memory dump sweep must report duplicate root/child dump suppression.");
+        AssertFileContains(Path.Combine(collectionRoot, "MemoryDumpProbe.cs"), "rootTargetCount", "Memory dump sweep must report root-process coverage.");
+        AssertFileContains(Path.Combine(collectionRoot, "MemoryDumpProbe.cs"), "childTargetCount", "Memory dump sweep must report child-process coverage.");
+        AssertFileContains(Path.Combine(collectionRoot, "MemoryDumpProbe.cs"), "memoryDumpCoverageState", "Memory dump sweep must expose a report-ready coverage state.");
         AssertFileContains(Path.Combine(collectionRoot, "MemoryDumpProbe.cs"), "artifactRelativePath", "Memory dump captured events must expose artifact-relative paths.");
         AssertFileContains(Path.Combine(collectionRoot, "MemoryDumpProbe.cs"), "sha256", "Memory dump captured events must expose event-level SHA-256 metadata.");
         AssertFileContains(Path.Combine(collectionRoot, "MemoryDumpProbe.cs"), "treeLineage", "Memory dump events must preserve child lineage metadata.");
@@ -99,6 +103,8 @@ internal sealed class GuestAgentCollectionDepthScenario : ISmokeTestScenario
         AssertFileContains(Path.Combine(collectionRoot, "PacketCaptureProbe.cs"), "packet-captures", "Packet capture probe must write to the packet-captures collection lane.");
         AssertFileContains(Path.Combine(collectionRoot, "PacketCaptureProbe.cs"), "artifactRelativePath", "Packet capture events must expose final PCAP artifact-relative paths.");
         AssertFileContains(Path.Combine(collectionRoot, "PacketCaptureProbe.cs"), "etlRelativePath", "Packet capture diagnostics must distinguish ETL diagnostic paths.");
+        AssertFileContains(Path.Combine(collectionRoot, "PacketCaptureProbe.cs"), "artifactSourceTool", "Packet capture events must identify the source tool for artifacts.");
+        AssertFileContains(Path.Combine(collectionRoot, "PacketCaptureProbe.cs"), "packetCaptureSourceTool", "Packet capture events must preserve packet-capture source tool metadata.");
         AssertFileContains(Path.Combine(collectionRoot, "PacketCaptureProbe.cs"), "sha256", "Packet capture captured events must expose event-level SHA-256 metadata.");
         AssertFileContains(Path.Combine(collectionRoot, "PacketCaptureProbe.cs"), "sizeBytes", "Packet capture captured events must expose event-level size metadata.");
         AssertFileContains(Path.Combine(collectionRoot, "PacketCaptureProbe.cs"), "artifactExists", "Packet capture diagnostics must preserve artifact existence/missing state.");
@@ -125,6 +131,7 @@ internal sealed class GuestAgentCollectionDepthScenario : ISmokeTestScenario
         SmokeAssert.True(guestWriterText.Contains("originalSha256", StringComparison.Ordinal), "Guest artifact writer must preserve original dropped-file SHA-256 metadata.");
         SmokeAssert.True(guestWriterText.Contains("copiedSha256", StringComparison.Ordinal), "Guest artifact writer must preserve copied dropped-file SHA-256 metadata.");
         SmokeAssert.True(guestWriterText.Contains("artifactHashStatus", StringComparison.Ordinal), "Guest artifact writer must preserve artifact hash/missing status metadata.");
+        SmokeAssert.True(guestWriterText.Contains("artifactSourceTool", StringComparison.Ordinal), "Guest artifact writer must preserve packet-capture artifact source-tool metadata.");
         SmokeAssert.True(guestWriterText.Contains("CountProbeFailureEvents", StringComparison.Ordinal), "Guest artifact writer must count probe failures in collection status.");
         SmokeAssert.True(guestWriterText.Contains("lastProcessId", StringComparison.Ordinal), "Guest artifact writer must preserve process identity in artifact/collection metadata.");
         SmokeAssert.True(guestWriterText.Contains("lastTreeLineage", StringComparison.Ordinal), "Guest artifact writer must preserve child lineage metadata in collection metadata.");
@@ -142,6 +149,7 @@ internal sealed class GuestAgentCollectionDepthScenario : ISmokeTestScenario
         SmokeAssert.True(programText.Contains("sourceMissing", StringComparison.Ordinal), "Dropped-file skipped events must preserve source missing state.");
         SmokeAssert.True(programText.Contains("AddDroppedFileHashData(evt, copiedHash, prefix: \"copied\")", StringComparison.Ordinal), "Dropped-file events must include copied artifact SHA-256 metadata.");
         SmokeAssert.True(programText.Contains("sourceHashStatus", StringComparison.Ordinal), "Dropped-file events must include source hash status metadata.");
+        SmokeAssert.True(programText.Contains("sourceEventSha256", StringComparison.Ordinal), "Dropped-file events must preserve source file-event hashes when available.");
 
         SmokeAssert.True(programText.Contains("new ProcessTreeProbe()", StringComparison.Ordinal), "Agent pipeline must include ProcessTreeProbe.");
         SmokeAssert.True(programText.Contains("new FileDiffProbe()", StringComparison.Ordinal), "Agent pipeline must include FileDiffProbe.");

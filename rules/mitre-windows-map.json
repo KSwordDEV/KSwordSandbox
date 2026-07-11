@@ -1,6 +1,6 @@
 {
   "matrix": "enterprise-windows",
-  "version": "2026-07-11-v15-open-source-reference-rules",
+  "version": "2026-07-12-v17-mvp-gap-rules",
   "techniques": [
     {
       "id": "T1003",
@@ -181,6 +181,14 @@
     {
       "id": "T1055.003",
       "name": "Thread Execution Hijacking",
+      "categories": [
+        "defense-evasion",
+        "privilege-escalation"
+      ]
+    },
+    {
+      "id": "T1055.004",
+      "name": "Create Thread",
       "categories": [
         "defense-evasion",
         "privilege-escalation"
