@@ -55,6 +55,16 @@ The root dashboard must keep these operator-facing areas visible and copyable:
   status;
 - artifact paths for `report.json`, `report.html`, `events.json`,
   `driver-events.jsonl`, and `runbook-execution.json`;
+- artifact index and download endpoints for operator-visible result files:
+  `GET /api/jobs/{jobId}/artifacts` returns the current host-side
+  `artifact-index` view, and
+  `GET /api/jobs/{jobId}/artifacts/download?path=<relative>` streams only files
+  present in that index. The download path is a normalized relative/safe-link
+  value, never an arbitrary absolute host path. The same guarded resolver backs
+  `GET /api/jobs/{jobId}/report/{relativeArtifactPath}` so links embedded in a
+  served HTML report can open `events.json`, `driver-events.jsonl`, dropped
+  files, screenshots, memory dumps, or PCAP artifacts without exposing local
+  filesystem paths to the browser;
 - automatic report links after a plan is created, including the served
   `/api/jobs/{jobId}/report/html` link and the local-file fallback when a path
   is recorded. The primary report button follows the current Chinese/English
@@ -109,6 +119,19 @@ The root dashboard must keep these operator-facing areas visible and copyable:
   `GET /api/jobs/{jobId}/runbook/background` so the monitor can show terminal
   completed/failed state and report links even if the main dashboard tab is
   closed after the server accepted the background task;
+- the dynamic monitor page should prioritize real product utility over smoke
+  coverage by showing an **Artifacts / downloads** panel. The panel lists
+  `report.html`, `report.zh.html`, `report.en.html`, `report.json`,
+  `events.json`, `driver-events.jsonl`, dropped files, screenshots, memory
+  dumps, and packet captures. If an existing safe Web endpoint is available
+  (currently the served report endpoint), the panel should render bilingual
+  open buttons. For evidence without a download endpoint, it should render the
+  copyable host path or derived expected path plus a bilingual
+  `等待回收` / `waiting for collection` state instead of hiding the lane. The
+  same monitor should make VirusTotal results visually prominent with clear
+  malicious/suspicious/clean/missing/not-configured states, and after a run
+  reaches a terminal background state it should keep explicit Chinese and
+  English report buttons visible;
 - a natural progress-page link to the dedicated execution-flow page for runbook
   step status, available both from the job actions and the progress summary.
   The root dashboard must not inline long runbook PowerShell commands,

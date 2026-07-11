@@ -178,5 +178,11 @@ Event tables also back-link to related artifacts. File events can link to
 dropped-file artifacts through exact paths or `relativePath` data, screenshot
 events link to screenshots, R0/driver events link to `driver-events.jsonl`, and
 guest import events link to `events.json`, driver JSONL, and the artifact
-manifest. These links are report-local `safeLink` anchors; original VM-local
-paths remain copyable evidence only.
+manifest. When a report is opened directly from the job folder, these remain
+report-local `safeLink` anchors. When the same report is served by WebUI through
+`/api/jobs/{jobId}/report/html`, relative links are handled by
+`/api/jobs/{jobId}/report/{relativeArtifactPath}` and resolved against the
+host-side artifact index, so the browser can download or preview evidence
+without being allowed to request arbitrary absolute host paths. The dedicated
+index endpoint `GET /api/jobs/{jobId}/artifacts` exposes the same descriptors
+with guarded download URLs for the dynamic monitor page.

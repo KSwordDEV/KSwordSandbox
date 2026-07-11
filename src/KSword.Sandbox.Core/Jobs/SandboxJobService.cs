@@ -74,6 +74,53 @@ public sealed class SandboxJobService
     }
 
     /// <summary>
+    /// Builds the current host-visible artifact index for one known job.
+    /// Inputs are a job ID; processing scans the deterministic job directory
+    /// for reports, telemetry, screenshots, memory dumps, packet captures, and
+    /// dropped files; the method returns descriptors without loading payloads.
+    /// </summary>
+    public HostArtifactIndex BuildArtifactIndex(Guid jobId)
+    {
+        EnsureJobExists(jobId);
+        return artifactIndexBuilder.Build(jobId, GetJobRoot(jobId));
+    }
+
+    /// <summary>
+    /// Resolves a browser-supplied artifact selector to an indexed local file.
+    /// Inputs are a job ID and relative/safe-link path from the artifact index;
+    /// processing rejects unknown, missing, or out-of-job paths; the method
+    /// returns a descriptor that is safe for the Web host to stream.
+    /// </summary>
+    public ArtifactDescriptor ResolveDownloadableArtifact(Guid jobId, string requestedPath)
+    {
+        var index = BuildArtifactIndex(jobId);
+        var normalized = NormalizeArtifactSelector(requestedPath);
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            throw new ArgumentException("Artifact path is required and must be relative to the job output.", nameof(requestedPath));
+        }
+
+        var descriptor = index.Artifacts.FirstOrDefault(artifact =>
+            ArtifactSelectorMatches(artifact.RelativePath, normalized) ||
+            ArtifactSelectorMatches(artifact.SafeLink, normalized) ||
+            ArtifactSelectorMatches(artifact.ImportPath, normalized));
+        if (descriptor is null)
+        {
+            throw new FileNotFoundException($"Artifact '{requestedPath}' is not present in job {jobId:D} artifact index.");
+        }
+
+        var jobRoot = GetJobRoot(jobId);
+        if (string.IsNullOrWhiteSpace(descriptor.FullPath) ||
+            !File.Exists(descriptor.FullPath) ||
+            !IsSameOrUnderDirectory(jobRoot, descriptor.FullPath))
+        {
+            throw new FileNotFoundException($"Artifact '{requestedPath}' is not available as a host-local file under the job output directory.");
+        }
+
+        return descriptor with { FullPath = Path.GetFullPath(descriptor.FullPath) };
+    }
+
+    /// <summary>
     /// Creates a planned job and writes JSON/HTML planning artifacts.
     /// Inputs are a SandboxSubmission, processing validates the sample, builds
     /// a Hyper-V runbook, classifies seed events, and writes reports; the
@@ -389,6 +436,37 @@ public sealed class SandboxJobService
     private string GetJobRoot(Guid jobId)
     {
         return Path.Combine(config.Paths.RuntimeRoot, "jobs", jobId.ToString("N"));
+    }
+
+    private void EnsureJobExists(Guid jobId)
+    {
+        if (!jobs.ContainsKey(jobId))
+        {
+            throw new KeyNotFoundException($"Job {jobId:D} was not found in the in-memory job list.");
+        }
+    }
+
+    private static bool ArtifactSelectorMatches(string candidate, string normalizedRequestedPath)
+    {
+        return string.Equals(NormalizeArtifactSelector(candidate), normalizedRequestedPath, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string NormalizeArtifactSelector(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        var decoded = Uri.UnescapeDataString(value.Trim()).Replace('\\', '/').TrimStart('/');
+        return ArtifactDescriptorFactory.NormalizeRelativePath(decoded);
+    }
+
+    private static bool IsSameOrUnderDirectory(string rootPath, string candidatePath)
+    {
+        var root = Path.GetFullPath(rootPath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        var candidate = Path.GetFullPath(candidatePath);
+        return candidate.StartsWith(root, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>

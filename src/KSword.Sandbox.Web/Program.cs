@@ -1,6 +1,8 @@
 using System.Text.Json;
+using KSword.Sandbox.Abstractions.Artifacts;
 using KSword.Sandbox.Abstractions;
 using KSword.Sandbox.Core.Configuration;
+using KSword.Sandbox.Core.Artifacts;
 using KSword.Sandbox.Core.Execution;
 using KSword.Sandbox.Core.Files;
 using KSword.Sandbox.Core.Jobs;
@@ -186,6 +188,52 @@ app.MapGet("/api/jobs/{jobId:guid}/report/html", async Task<IResult> (Guid jobId
             statusCode: 500);
     }
 });
+// GET /api/jobs/{jobId}/artifacts returns the current host-side artifact index.
+// It is the WebUI-facing source for downloadable evidence such as events.json,
+// driver-events.jsonl, dropped files, screenshots, memory dumps, and PCAPs.
+app.MapGet("/api/jobs/{jobId:guid}/artifacts", (Guid jobId, SandboxJobService service) =>
+{
+    try
+    {
+        var index = service.BuildArtifactIndex(jobId);
+        return Results.Ok(new
+        {
+            index.SchemaVersion,
+            index.JobId,
+            index.RootPath,
+            index.Producer,
+            index.GeneratedAtUtc,
+            index.Collections,
+            Artifacts = index.Artifacts.Select(artifact => ToWebArtifactDescriptor(jobId, artifact)).ToList()
+        });
+    }
+    catch (KeyNotFoundException ex)
+    {
+        return Results.NotFound(new { error = ex.Message });
+    }
+    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+    {
+        return Results.Problem(
+            title: "Unable to build artifact index.",
+            detail: $"Artifact index for job {jobId:D} could not be built: {ex.Message}",
+            statusCode: 500);
+    }
+});
+// GET /api/jobs/{jobId}/artifacts/download?path=<relative> streams one indexed
+// artifact. The path must match an artifact index relative path/safe link; the
+// endpoint never accepts arbitrary absolute filesystem paths from the browser.
+app.MapGet("/api/jobs/{jobId:guid}/artifacts/download", (Guid jobId, string path, SandboxJobService service) =>
+{
+    return StreamIndexedArtifact(jobId, path, service);
+});
+// GET /api/jobs/{jobId}/report/{artifactPath} supports relative links embedded
+// inside the served HTML report. For example, a report link to
+// guest/<job>/events.json resolves under this route instead of leaking a local
+// filesystem path to the browser.
+app.MapGet("/api/jobs/{jobId:guid}/report/{**artifactPath}", (Guid jobId, string artifactPath, SandboxJobService service) =>
+{
+    return StreamIndexedArtifact(jobId, artifactPath, service);
+});
 app.MapPost("/api/files/scan", (ExecutableScanRequest request, ExecutableTargetScanner scanner) =>
 {
     try
@@ -197,6 +245,7 @@ app.MapPost("/api/files/scan", (ExecutableScanRequest request, ExecutableTargetS
         return Results.BadRequest(new { error = $"File scan request is invalid or inaccessible: {ex.Message}" });
     }
 });
+
 app.MapPost("/api/files/upload", async (HttpRequest request, SandboxConfig currentConfig) =>
 {
     try
@@ -303,6 +352,75 @@ app.MapPost("/api/jobs/{jobId:guid}/guest-events/import", (Guid jobId, GuestEven
 });
 
 app.Run();
+
+/// <summary>
+/// Converts an artifact descriptor into a WebUI-safe DTO with a download URL.
+/// Inputs are a job ID and host-side descriptor; processing does not expose new
+/// filesystem powers beyond existing descriptor metadata; the returned object
+/// lets pages link to the server-side guarded artifact download endpoint.
+/// </summary>
+static object ToWebArtifactDescriptor(Guid jobId, ArtifactDescriptor artifact)
+{
+    var selector = FirstNonEmpty(artifact.RelativePath, artifact.SafeLink, artifact.ImportPath);
+    var href = string.IsNullOrWhiteSpace(selector)
+        ? string.Empty
+        : $"/api/jobs/{jobId:D}/artifacts/download?path={Uri.EscapeDataString(selector)}";
+    return new
+    {
+        artifact.Kind,
+        artifact.Category,
+        artifact.Name,
+        artifact.RelativePath,
+        artifact.SafeLink,
+        artifact.EvidenceRole,
+        artifact.CapturePhase,
+        artifact.CaptureState,
+        artifact.GuestPath,
+        artifact.ImportPath,
+        artifact.CollectionName,
+        artifact.MimeType,
+        artifact.SizeBytes,
+        artifact.Sha256,
+        artifact.Hashes,
+        artifact.CreatedAtUtc,
+        artifact.Metadata,
+        DownloadHref = href
+    };
+}
+
+static string FirstNonEmpty(params string?[] values)
+{
+    foreach (var value in values)
+    {
+        if (!string.IsNullOrWhiteSpace(value))
+        {
+            return value;
+        }
+    }
+
+    return string.Empty;
+}
+
+static IResult StreamIndexedArtifact(Guid jobId, string path, SandboxJobService service)
+{
+    try
+    {
+        var artifact = service.ResolveDownloadableArtifact(jobId, path);
+        var contentType = string.IsNullOrWhiteSpace(artifact.MimeType)
+            ? ArtifactDescriptorFactory.MimeTypeForPath(artifact.FullPath)
+            : artifact.MimeType;
+        var fileName = string.IsNullOrWhiteSpace(artifact.Name) ? Path.GetFileName(artifact.FullPath) : artifact.Name;
+        return Results.File(artifact.FullPath, contentType, fileName, enableRangeProcessing: true);
+    }
+    catch (KeyNotFoundException ex)
+    {
+        return Results.NotFound(new { error = ex.Message });
+    }
+    catch (Exception ex) when (ex is ArgumentException or FileNotFoundException or IOException or UnauthorizedAccessException)
+    {
+        return Results.NotFound(new { error = $"Artifact download failed for job {jobId:D}: {ex.Message}" });
+    }
+}
 
 /// <summary>
 /// Builds validated executor options for blocking and background runbook paths.

@@ -30,15 +30,51 @@ function kswFallbackCopyText(value) {
 
 function kswCopyDashboardValue(value) {
   if (!value) {
+    kswShowCopyToast('没有可复制的内容 / Nothing to copy');
     return;
   }
 
   if (navigator.clipboard && window.isSecureContext) {
-    navigator.clipboard.writeText(value).catch(function () { kswFallbackCopyText(value); });
+    navigator.clipboard.writeText(value).then(function () {
+      kswShowCopyToast('已复制 / Copied');
+    }).catch(function () {
+      kswFallbackCopyText(value);
+      kswShowCopyToast('已复制 / Copied');
+    });
     return;
   }
 
   kswFallbackCopyText(value);
+  kswShowCopyToast('已复制 / Copied');
+}
+
+function kswShowCopyToast(message) {
+  var toast = document.getElementById('copyToast');
+  if (!toast) {
+    toast = document.createElement('div');
+    toast.id = 'copyToast';
+    toast.setAttribute('role', 'status');
+    toast.setAttribute('aria-live', 'polite');
+    toast.style.position = 'fixed';
+    toast.style.left = '50%';
+    toast.style.bottom = '22px';
+    toast.style.transform = 'translateX(-50%)';
+    toast.style.background = '#0f172a';
+    toast.style.color = '#fff';
+    toast.style.borderRadius = '999px';
+    toast.style.padding = '10px 16px';
+    toast.style.zIndex = '9999';
+    toast.style.opacity = '0';
+    toast.style.transition = 'opacity .15s ease';
+    document.body.appendChild(toast);
+  }
+
+  toast.textContent = message;
+  toast.style.opacity = '.96';
+  window.clearTimeout(kswShowCopyToast._timer);
+  kswShowCopyToast._timer = window.setTimeout(function () {
+    toast.style.opacity = '0';
+  }, 1200);
 }
 
 document.addEventListener('click', function (event) {
