@@ -1,9 +1,7 @@
-# 文档地图与当前状态 / Documentation map and canonical status
+# 文档地图与权威状态 / Documentation map and canonical status
 
 本页是当前 MVP 文档的轻量索引，用于减少文档漂移：当两个文档覆盖同一主题时，
 优先更新下方 canonical（权威）文档，其他文档只保留短指针或历史说明。
-
-英文提示：本页同时作为 current MVP documentation 的 lightweight index。
 
 ## 当前 MVP 一段话 / Current MVP in one paragraph
 
@@ -58,8 +56,8 @@ runtime job 目录、生成的报告、guest payload 二进制、抓包、内存
 | R0 采集和驱动 ABI / R0 collection and driver ABI | [`r0-collector.md`](r0-collector.md), [`r0-jsonl-schema.md`](r0-jsonl-schema.md), [`r0-driver-core.md`](r0-driver-core.md), [`driver-install.md`](driver-install.md) | Collector JSONL 与 kernel/user ABI 是权威说明；driver install 是 VM-only 操作者 runbook。 |
 | R0 producer 说明 / R0 producer notes | [`r0-driver.md`](r0-driver.md), [`r0-file-monitor.md`](r0-file-monitor.md), [`r0-process-registry-image.md`](r0-process-registry-image.md), [`r0-network.md`](r0-network.md) | Producer 专项说明应链接回 `r0-driver-core.md`，避免重复 ABI 细节。 |
 | 行为规则与静态分析 / Behavior rules and static analysis | [`behavior-rule-matrix.md`](behavior-rule-matrix.md), [`rules-windows-sandbox.md`](rules-windows-sandbox.md), [`static-analysis.md`](static-analysis.md), [`../rules/static-analysis-notes.md`](../rules/static-analysis-notes.md) | `behavior-rule-matrix.md` 是完整清单；`rules-windows-sandbox.md` 是可读摘要；static 文档覆盖宿主侧证据。 |
-| VirusTotal | [`virustotal.md`](virustotal.md) | 可选 hash-only enrichment；不上传样本。 |
-| 打包/发布 / Packaging/release | [`release.md`](release.md), [`v1-release-gap-audit.md`](v1-release-gap-audit.md) | 源码/runtime 包边界、artifact 排除、发布 readiness 门禁和当前 v1 gap audit。 |
+| VirusTotal 信誉 / VirusTotal reputation | [`virustotal.md`](virustotal.md) | 可选 hash-only enrichment；不上传样本。 |
+| 打包与发布 / Packaging and release | [`release.md`](release.md), [`v1-release-gap-audit.md`](v1-release-gap-audit.md) | 源码/runtime 包边界、artifact 排除、发布 readiness 门禁和当前 v1 gap audit。 |
 
 ## 历史或背景说明 / Historical or background notes
 

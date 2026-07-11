@@ -97,7 +97,10 @@ public sealed class PcapArtifactEventImporter
                         ["exceptionType"] = ex.GetType().Name,
                         ["diagnosticCode"] = ValueOrEmpty(parseError.Data, "diagnosticCode"),
                         ["parserBoundary"] = ValueOrEmpty(parseError.Data, "parserBoundary"),
-                        ["parseFailureStage"] = ValueOrEmpty(parseError.Data, "parseFailureStage")
+                        ["parseFailureStage"] = ValueOrEmpty(parseError.Data, "parseFailureStage"),
+                        ["byteOffset"] = ValueOrEmpty(parseError.Data, "byteOffset"),
+                        ["expectedBytes"] = ValueOrEmpty(parseError.Data, "expectedBytes"),
+                        ["actualBytes"] = ValueOrEmpty(parseError.Data, "actualBytes")
                     }),
                 parseError
             ];
@@ -1457,10 +1460,13 @@ public sealed class PcapArtifactEventImporter
             ["status"] = "parse_error",
             ["exceptionType"] = ex.GetType().Name,
             ["message"] = ex.Message,
+            ["diagnosticMessage"] = ex.Message,
+            ["parseErrorMessage"] = ex.Message,
             ["parser"] = "native-pcap",
             ["diagnosticCode"] = boundary?.DiagnosticCode ?? "pcap_parse_error",
             ["parserBoundary"] = boundary?.ParserBoundary ?? "pcap.container",
             ["parseFailureStage"] = boundary?.ParseFailureStage ?? "native-pcap-read",
+            ["diagnosticStage"] = boundary?.ParseFailureStage ?? "native-pcap-read",
             ["zhHint"] = "PCAP 文件边界或长度校验失败；请保留源文件，优先检查抓包是否截断、复制未完成或格式不匹配。"
         };
         if (boundary is not null)
@@ -1617,7 +1623,13 @@ public sealed class PcapArtifactEventImporter
         return rcode switch
         {
             0 => "NOERROR",
+            1 => "FORMERR",
+            2 => "SERVFAIL",
             3 => "NXDOMAIN",
+            4 => "NOTIMP",
+            5 => "REFUSED",
+            9 => "NOTAUTH",
+            10 => "NOTZONE",
             _ => rcode.ToString()
         };
     }

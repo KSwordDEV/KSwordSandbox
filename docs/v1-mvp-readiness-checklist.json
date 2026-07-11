@@ -1,0 +1,117 @@
+{
+  "schema": "ksword.v1.mvp.readiness.checklist.v1",
+  "lastReviewedCommit": "0068358",
+  "reviewedAtLocal": "2026-07-12",
+  "purposeZh": "给审阅者和发布负责人提供机器可读的 v1 MVP 差距清单；它不是 fresh Hyper-V/live 验证记录。",
+  "freshLiveEvidenceRequired": true,
+  "freshLiveEvidenceGuardrailZh": "若 release notes 要声称本候选版本已生成真实 Notepad 5s 或真实 R0 报告，必须在实验室主机重新运行 live runbook 并记录 job id。",
+  "noisyOrUnsafeActionsExcludedByDefault": [
+    "git push",
+    "CSignTool.exe",
+    "Hyper-V live mutation",
+    "driver signing",
+    "sample binaries or VM artifacts in repository"
+  ],
+  "components": [
+    {
+      "id": "webui-live-progress",
+      "titleZh": "WebUI 真实进度流",
+      "targetZh": "上传/选择 EXE 后自动启动分析并进入 live monitor，显示真实 runbook step 和 durable fallback。",
+      "currentEvidence": [
+        "/api/jobs/{jobId}/progress/stream",
+        "/api/jobs/{jobId}/runbook/progress",
+        "runbook-progress.json",
+        "webui.experience.contract"
+      ],
+      "remainingRiskZh": "仍需 fresh Hyper-V live 复验代理/浏览器/SSE 中断情况下的现场体验。",
+      "releaseGate": "fresh-live-or-operator-waiver"
+    },
+    {
+      "id": "report-evidence-story",
+      "titleZh": "报告瘦身、证据展开和叙事",
+      "targetZh": "HTML 报告默认呈现稳定证据故事、进程树/网络/产物关系和可折叠 raw events，而不是命令墙。",
+      "currentEvidence": [
+        "report.evidence-story.contract",
+        "report.event-sampler-priority.contract",
+        "docs/report-ux.md"
+      ],
+      "remainingRiskZh": "真实样本长事件流下仍需人工审阅分页密度、打印模式和浏览器性能。",
+      "releaseGate": "report-review-on-fresh-job"
+    },
+    {
+      "id": "behavior-rules",
+      "titleZh": "行为规则与 MITRE 映射",
+      "targetZh": "覆盖持久化、注入、横向移动、反沙箱、下载执行、C2/网络和 artifact correlation，并显式排除采集噪声。",
+      "currentEvidence": [
+        "rules/behavior-rules.json",
+        "rules/mitre-windows-map.json",
+        "behavior.rules-high-signal-windows-v20",
+        "rules.schema-collection-health.guard"
+      ],
+      "remainingRiskZh": "需要继续用公开规则矩阵和真实样本 corpus 调整误报/漏报；不要把弱静态线索提升成高危行为。",
+      "releaseGate": "json-unique-and-targeted-rule-smoke"
+    },
+    {
+      "id": "r0-event-quality",
+      "titleZh": "R0/Collector 事件质量",
+      "targetZh": "稳定 ABI、stress/noise 自检、DNS/HTTP/TLS/PCAP 边界字段和中文 operator hint。",
+      "currentEvidence": [
+        "guest/KSword.Sandbox.R0Collector/src",
+        "docs/r0-collector.md",
+        "R0 no-device ABI/stress checks"
+      ],
+      "remainingRiskZh": "真实驱动加载、签名/test-signing、ring pressure 和真实 WFP 输入仍需实验室复验。",
+      "releaseGate": "no-device-self-check-plus-fresh-r0-if-claimed"
+    },
+    {
+      "id": "guest-artifacts",
+      "titleZh": "Dropped files、截图、内存转储、进程树",
+      "targetZh": "按用户勾选复制释放文件、截图、PCAP 和所有可见 root/child/descendant 内存 dump，并带 sha256/size/root lineage。",
+      "currentEvidence": [
+        "guest-agent.collection-depth",
+        "artifacts.manifest.contract",
+        "docs/artifacts.md",
+        "docs/guest-agent.md"
+      ],
+      "remainingRiskZh": "需要在真实 VM 下覆盖权限不足、进程过快退出、dump 失败、截图桌面锁定等边界。",
+      "releaseGate": "guest-artifact-contract-plus-fresh-job-artifacts"
+    },
+    {
+      "id": "network-telemetry",
+      "titleZh": "网络流量与 PCAP/sidecar 归一化",
+      "targetZh": "DNS/HTTP/TLS/PCAP 事件具备稳定 selector/hash/source linkage、IPv4/IPv6 endpoint 和 parser boundary 诊断。",
+      "currentEvidence": [
+        "pcap.artifact.import.contract",
+        "docs/network-telemetry.md"
+      ],
+      "remainingRiskZh": "真实 pktmon/PCAPNG 转换和复杂 TLS/HTTP 流量仍需样本复验。",
+      "releaseGate": "pcap-contract-plus-fresh-pcap-if-claimed"
+    },
+    {
+      "id": "virustotal",
+      "titleZh": "VirusTotal 官方 hash-only enrichment",
+      "targetZh": "设置页允许 API key；不配置或失败保持 quiet，不污染 job/行为日志；found 结果可在 live/report 展示。",
+      "currentEvidence": [
+        "/settings",
+        "/api/settings/virustotal",
+        "/api/jobs/{jobId}/virustotal",
+        "docs/virustotal.md"
+      ],
+      "remainingRiskZh": "需要真实 API key 下覆盖 401、429、timeout、not_found、found 官方字段差异。",
+      "releaseGate": "hash-only-no-upload-and-quiet-failure"
+    },
+    {
+      "id": "release-productization",
+      "titleZh": "部署、打包和发布产品化",
+      "targetZh": "源码/runtime 包排除样本/VM/产物，发布 readiness 非破坏性检查，文档中文优先且不误称 fresh live。",
+      "currentEvidence": [
+        "scripts/Test-RepositoryPolicy.ps1",
+        "scripts/Test-ReleaseReadiness.ps1",
+        "docs/release.md",
+        "docs/run.md"
+      ],
+      "remainingRiskZh": "最终 release candidate 仍需要 runtime publish root 完整性检查和实验室 fresh live 记录。",
+      "releaseGate": "repository-policy-and-release-readiness"
+    }
+  ]
+}

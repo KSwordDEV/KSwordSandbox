@@ -15,7 +15,7 @@ namespace KSword.Sandbox.Core.Execution;
 public sealed class PowerShellRunbookExecutor : IRunbookExecutor
 {
     private const string DryRunMessage = "Dry-run mode recorded the command without launching PowerShell.";
-    private const string ElevationFailureMessage = "Live Hyper-V runbook execution requires the host process to run from an elevated PowerShell session.";
+    private const string ElevationFailureMessage = "Live Hyper-V runbook execution requires the host process to run from an elevated PowerShell session. 修复建议：请使用“以管理员身份运行”的 PowerShell/服务进程重新启动后再执行 live 模式。";
     private static readonly TimeSpan StepHeartbeatInterval = TimeSpan.FromSeconds(15);
     private static readonly TimeSpan StreamReadTimeout = TimeSpan.FromSeconds(5);
 
@@ -203,6 +203,7 @@ public sealed class PowerShellRunbookExecutor : IRunbookExecutor
             var stepResult = await ExecutePowerShellStepAsync(
                 step,
                 index,
+                runbook.Steps.Count,
                 options,
                 heartbeatMessage => PublishProgress(
                     runbook,
@@ -328,6 +329,7 @@ public sealed class PowerShellRunbookExecutor : IRunbookExecutor
     private static async Task<SandboxRunbookStepExecutionResult> ExecutePowerShellStepAsync(
         SandboxRunbookStep step,
         int stepIndex,
+        int totalSteps,
         SandboxRunbookExecutionOptions options,
         Action<string>? heartbeat,
         CancellationToken cancellationToken)
@@ -347,6 +349,7 @@ public sealed class PowerShellRunbookExecutor : IRunbookExecutor
             if (!process.Start())
             {
                 stepTimer.Stop();
+                var facts = RunbookProgressFacts.DescribeStep(step, stepIndex, totalSteps);
                 return CreateStepResult(
                     step,
                     stepIndex,
@@ -357,7 +360,7 @@ public sealed class PowerShellRunbookExecutor : IRunbookExecutor
                     stderr: string.Empty,
                     startedAtUtc: startedAtUtc,
                     duration: stepTimer.Elapsed,
-                    message: "PowerShell process did not start.");
+                    message: $"PowerShell process did not start for step {facts.Ordinal}. 修复建议：确认 PowerShell 可执行文件路径有效、宿主权限满足要求。");
             }
 
             stdoutTask = process.StandardOutput.ReadToEndAsync();
@@ -368,6 +371,8 @@ public sealed class PowerShellRunbookExecutor : IRunbookExecutor
                 var exitedBeforeTimeout = await WaitForProcessExitWithHeartbeatAsync(
                     process,
                     step,
+                    stepIndex,
+                    totalSteps,
                     options.StepTimeout,
                     stepTimer,
                     heartbeat,
@@ -380,9 +385,10 @@ public sealed class PowerShellRunbookExecutor : IRunbookExecutor
                     var timedOutOutput = await CollectOutputAsync(stdoutTask, stderrTask).ConfigureAwait(false);
 
                     stepTimer.Stop();
+                    var facts = RunbookProgressFacts.DescribeStep(step, stepIndex, totalSteps);
                     var timedOutMessage = cancellationToken.IsCancellationRequested
-                        ? "PowerShell step was canceled before completion."
-                        : $"Step '{step.Title}' exceeded the per-step timeout of {FormatDuration(options.StepTimeout)}.";
+                        ? $"PowerShell step {facts.Ordinal} was canceled before completion. 修复建议：确认是否为操作者主动取消；如需重跑，请先检查 VM 清理状态。"
+                        : $"{RunbookProgressFacts.BuildStepPrefix(step, stepIndex, totalSteps)} exceeded the per-step timeout of {FormatDuration(options.StepTimeout)}. 修复建议：{facts.RemediationHintZh}";
 
                     return CreateStepResult(
                         step,
@@ -403,6 +409,8 @@ public sealed class PowerShellRunbookExecutor : IRunbookExecutor
                 await WaitForProcessExitWithoutTimeoutAsync(
                     process,
                     step,
+                    stepIndex,
+                    totalSteps,
                     stepTimer,
                     heartbeat,
                     cancellationToken).ConfigureAwait(false);
@@ -423,7 +431,7 @@ public sealed class PowerShellRunbookExecutor : IRunbookExecutor
                 stderr: output.StandardError,
                 startedAtUtc: startedAtUtc,
                 duration: stepTimer.Elapsed,
-                message: success ? null : BuildStepFailureMessage(exitCode, output.StandardError, output.StandardOutput));
+                message: success ? null : BuildStepFailureMessage(step, stepIndex, totalSteps, exitCode));
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -442,7 +450,7 @@ public sealed class PowerShellRunbookExecutor : IRunbookExecutor
                 stderr: canceledOutput.StandardError,
                 startedAtUtc: startedAtUtc,
                 duration: stepTimer.Elapsed,
-                message: "PowerShell step was canceled before completion.");
+                message: $"PowerShell step {RunbookProgressFacts.FormatOrdinal(stepIndex, totalSteps)} was canceled before completion. 修复建议：确认是否为操作者主动取消；如需重跑，请先检查 VM 清理状态。");
         }
         catch (Exception ex)
         {
@@ -461,7 +469,7 @@ public sealed class PowerShellRunbookExecutor : IRunbookExecutor
                 stderr: failedOutput.StandardError,
                 startedAtUtc: startedAtUtc,
                 duration: stepTimer.Elapsed,
-                message: $"PowerShell launch failed: {ex.Message}");
+                message: $"{RunbookProgressFacts.BuildStepPrefix(step, stepIndex, totalSteps)} failed before or during PowerShell launch: {ex.Message}. 修复建议：确认 PowerShell 可执行文件路径、工作目录和宿主权限。");
         }
     }
 
@@ -475,6 +483,8 @@ public sealed class PowerShellRunbookExecutor : IRunbookExecutor
     private static async Task<bool> WaitForProcessExitWithHeartbeatAsync(
         Process process,
         SandboxRunbookStep step,
+        int stepIndex,
+        int totalSteps,
         TimeSpan timeout,
         Stopwatch stepTimer,
         Action<string>? heartbeat,
@@ -501,7 +511,7 @@ public sealed class PowerShellRunbookExecutor : IRunbookExecutor
             await delayTask.ConfigureAwait(false);
             if (stepTimer.Elapsed < timeout)
             {
-                heartbeat?.Invoke(BuildStepHeartbeatMessage(step, stepTimer.Elapsed, timeout));
+                heartbeat?.Invoke(BuildStepHeartbeatMessage(step, stepIndex, totalSteps, stepTimer.Elapsed, timeout));
             }
         }
     }
@@ -515,6 +525,8 @@ public sealed class PowerShellRunbookExecutor : IRunbookExecutor
     private static async Task WaitForProcessExitWithoutTimeoutAsync(
         Process process,
         SandboxRunbookStep step,
+        int stepIndex,
+        int totalSteps,
         Stopwatch stepTimer,
         Action<string>? heartbeat,
         CancellationToken cancellationToken)
@@ -531,7 +543,7 @@ public sealed class PowerShellRunbookExecutor : IRunbookExecutor
             }
 
             await delayTask.ConfigureAwait(false);
-            heartbeat?.Invoke(BuildStepHeartbeatMessage(step, stepTimer.Elapsed, timeout: null));
+            heartbeat?.Invoke(BuildStepHeartbeatMessage(step, stepIndex, totalSteps, stepTimer.Elapsed, timeout: null));
         }
     }
 
@@ -550,7 +562,7 @@ public sealed class PowerShellRunbookExecutor : IRunbookExecutor
         var timeoutText = stepTimeout > TimeSpan.Zero
             ? $" Timeout: {FormatDuration(stepTimeout)}."
             : " No per-step timeout is configured.";
-        return $"Step {stepIndex + 1}/{totalSteps}: {DescribeStepForOperator(step)}{timeoutText}";
+        return $"{RunbookProgressFacts.BuildStepPrefix(step, stepIndex, totalSteps)}: {DescribeStepForOperator(step)}{timeoutText}";
     }
 
     /// <summary>
@@ -568,7 +580,7 @@ public sealed class PowerShellRunbookExecutor : IRunbookExecutor
         var failureText = primaryFailure is null
             ? "the earlier failure"
             : $"step {primaryFailure.StepIndex + 1} ({primaryFailure.Title})";
-        return $"Cleanup step {stepIndex + 1}/{totalSteps}: {DescribeStepForOperator(step)}. Preserving primary failure from {failureText}.";
+        return $"Cleanup {RunbookProgressFacts.BuildStepPrefix(step, stepIndex, totalSteps)}: {DescribeStepForOperator(step)}. Preserving primary failure from {failureText}.";
     }
 
     /// <summary>
@@ -579,13 +591,15 @@ public sealed class PowerShellRunbookExecutor : IRunbookExecutor
     /// </summary>
     private static string BuildStepHeartbeatMessage(
         SandboxRunbookStep step,
+        int stepIndex,
+        int totalSteps,
         TimeSpan elapsed,
         TimeSpan? timeout)
     {
         var timeoutText = timeout is { } value
             ? $", timeout {FormatDuration(value)}"
             : ", no per-step timeout";
-        return $"Still working on '{step.Title}' ({FormatDuration(elapsed)} elapsed{timeoutText}). {BuildLongStepHint(step)}";
+        return $"Still working on {RunbookProgressFacts.BuildStepPrefix(step, stepIndex, totalSteps)}: {step.Title} ({FormatDuration(elapsed)} elapsed{timeoutText}). {BuildLongStepHint(step)}";
     }
 
     /// <summary>
@@ -599,7 +613,7 @@ public sealed class PowerShellRunbookExecutor : IRunbookExecutor
         int totalSteps,
         TimeSpan duration)
     {
-        return $"Finished step {stepIndex + 1}/{totalSteps}: {step.Title} ({FormatDuration(duration)}).";
+        return $"Finished {RunbookProgressFacts.BuildStepPrefix(step, stepIndex, totalSteps)}: {step.Title} ({FormatDuration(duration)}).";
     }
 
     /// <summary>
@@ -635,14 +649,14 @@ public sealed class PowerShellRunbookExecutor : IRunbookExecutor
         return step.Id switch
         {
             "start-temp-vm" or "start-golden" or "start-vm" =>
-                "VM boot can take a few minutes after checkpoint restore.",
+                "VM boot can take a few minutes after checkpoint restore. 修复建议：若持续超时，请检查 VM 状态、检查点和 Hyper-V 服务。",
             "wait-powershell-direct" =>
-                "The VM may already be running while the guest service and credentials are still becoming ready.",
+                "The VM may already be running while the guest service and credentials are still becoming ready. 修复建议：检查来宾服务接口、账号密码和系统登录初始化。",
             "sync-live-output" =>
-                "Output copy failures are throttled; the final copy will report the first actionable error.",
+                "Output copy failures are throttled; the final copy will report the first actionable error. 修复建议：检查 agent 标记文件、会话稳定性和宿主输出目录权限。",
             "collect-output" =>
-                "If this fails, check the guest output directory, PowerShell Direct session, and required marker files.",
-            _ => "No command output is streamed here; full stdout/stderr remains in the execution record."
+                "If this fails, check the guest output directory, PowerShell Direct session, and required marker files. 修复建议：确认 events.json、agent.pid、agent.exit 均已生成。",
+            _ => "No command output is streamed here; full stdout/stderr remains in the execution record. 修复建议：如步骤卡住，请检查宿主权限、VM 状态和完整执行记录。"
         };
     }
 
@@ -682,12 +696,7 @@ public sealed class PowerShellRunbookExecutor : IRunbookExecutor
     /// </summary>
     private static bool IsCleanupStepId(string? stepId)
     {
-        return stepId is not null &&
-            (stepId.Equals("stop-vm", StringComparison.OrdinalIgnoreCase) ||
-             stepId.Equals("remove-temp-vm", StringComparison.OrdinalIgnoreCase) ||
-             stepId.Equals("stop-vm-after-run", StringComparison.OrdinalIgnoreCase) ||
-             stepId.Equals("restore-checkpoint-after-run", StringComparison.OrdinalIgnoreCase) ||
-             stepId.StartsWith("cleanup-", StringComparison.OrdinalIgnoreCase));
+        return RunbookProgressFacts.IsCleanupStepId(stepId);
     }
 
     /// <summary>
@@ -1006,56 +1015,22 @@ public sealed class PowerShellRunbookExecutor : IRunbookExecutor
     }
 
     /// <summary>
-    /// Builds a concise per-step failure message for WebUI/report display.
-    /// Inputs are exit status and captured streams; processing extracts a short
-    /// first actionable output line without including the PowerShell command
-    /// text; the returned message remains suitable for the main dashboard while
-    /// full stdout/stderr stay in the execution-flow record.
+    /// Builds a concise per-step failure message for reports and progress.
+    /// Inputs are step metadata and exit status; processing deliberately avoids
+    /// copying stdout/stderr or command text, while pointing operators to the
+    /// full execution record when they need raw evidence.
     /// </summary>
-    private static string BuildStepFailureMessage(int? exitCode, string standardError, string standardOutput)
+    private static string BuildStepFailureMessage(
+        SandboxRunbookStep step,
+        int stepIndex,
+        int totalSteps,
+        int? exitCode)
     {
-        var outputReason = ExtractFirstUsefulOutputLine(standardError);
-        if (string.IsNullOrWhiteSpace(outputReason))
-        {
-            outputReason = ExtractFirstUsefulOutputLine(standardOutput);
-        }
-
+        var facts = RunbookProgressFacts.DescribeStep(step, stepIndex, totalSteps);
         var exitText = exitCode is null
             ? "PowerShell failed before a process exit code was available"
             : $"PowerShell exited with code {exitCode.Value}";
-        return string.IsNullOrWhiteSpace(outputReason)
-            ? $"{exitText}."
-            : $"{exitText}: {outputReason}";
-    }
-
-    /// <summary>
-    /// Extracts one short output line for UI-safe failure summaries.
-    /// Input is stdout/stderr text; processing removes empty lines and truncates
-    /// long output; the returned value does not include command text generated
-    /// by the runbook itself unless PowerShell emitted it as an error.
-    /// </summary>
-    private static string ExtractFirstUsefulOutputLine(string text)
-    {
-        if (string.IsNullOrWhiteSpace(text))
-        {
-            return string.Empty;
-        }
-
-        var line = text
-            .Replace("\r\n", "\n", StringComparison.Ordinal)
-            .Replace('\r', '\n')
-            .Split('\n')
-            .Select(item => item.Trim())
-            .FirstOrDefault(item => !string.IsNullOrWhiteSpace(item));
-        if (string.IsNullOrWhiteSpace(line))
-        {
-            return string.Empty;
-        }
-
-        const int maxLength = 320;
-        return line.Length <= maxLength
-            ? line
-            : string.Concat(line.Substring(0, maxLength), "...");
+        return $"{exitText} at step {facts.Ordinal} [phase={facts.Phase}; category={facts.Category}]. 修复建议：{facts.RemediationHintZh} UI 进度不会包含 stdout/stderr；完整输出保留在 runbook-execution.json。";
     }
 
     /// <summary>
@@ -1085,7 +1060,7 @@ public sealed class PowerShellRunbookExecutor : IRunbookExecutor
             stepTitle = runbook.Steps[failedStepIndex.Value].Title;
         }
 
-        var reason = failedResult?.Message;
+        var reason = failedResult is null ? null : BuildSafeFailureReason(failedResult);
         var prefix = wasCanceled
             ? $"Live runbook execution was canceled at step {failedStepIndex.Value + 1}"
             : $"Live runbook execution stopped at step {failedStepIndex.Value + 1}";
@@ -1101,15 +1076,25 @@ public sealed class PowerShellRunbookExecutor : IRunbookExecutor
             .Where(result => result.StepIndex != failedStepIndex.Value &&
                 !result.Success &&
                 IsCleanupStepId(result.StepId))
-            .Select(result => string.IsNullOrWhiteSpace(result.Message)
-                ? result.Title
-                : $"{result.Title}: {result.Message}")
+            .Select(result => $"{result.Title}: {BuildSafeFailureReason(result)}")
             .Take(3)
             .ToList();
 
         return cleanupFailures.Count == 0
             ? primaryMessage
             : $"{primaryMessage} Cleanup also reported {cleanupFailures.Count} failure(s), recorded separately: {string.Join("; ", cleanupFailures)}";
+    }
+
+    private static string BuildSafeFailureReason(SandboxRunbookStepExecutionResult result)
+    {
+        if (RunbookProgressFacts.IsCanceledStepResult(result))
+        {
+            return "The step was canceled before completion.";
+        }
+
+        return result.ExitCode.HasValue
+            ? $"PowerShell exited with code {result.ExitCode.Value}; stdout/stderr are omitted from progress and retained in runbook-execution.json."
+            : "PowerShell did not return a normal exit code; stdout/stderr are omitted from progress and retained in runbook-execution.json.";
     }
 
     /// <summary>
@@ -1170,10 +1155,11 @@ public sealed class PowerShellRunbookExecutor : IRunbookExecutor
             .GroupBy(result => result.StepIndex)
             .ToDictionary(group => group.Key, group => group.Last());
         var steps = runbook.Steps
-            .Select((step, index) => CreateStepProgressSnapshot(step, index, resultByIndex, state, currentStepIndex))
+            .Select((step, index) => CreateStepProgressSnapshot(step, index, runbook.Steps.Count, resultByIndex, state, currentStepIndex))
             .ToList();
-        var currentStep = currentStepIndex is >= 0 && currentStepIndex.Value < runbook.Steps.Count
-            ? runbook.Steps[currentStepIndex.Value]
+        var resolvedCurrentStepIndex = RunbookProgressFacts.ResolveCurrentStepIndex(steps, currentStepIndex, state, success);
+        var currentStep = resolvedCurrentStepIndex is >= 0 && resolvedCurrentStepIndex.Value < runbook.Steps.Count
+            ? runbook.Steps[resolvedCurrentStepIndex.Value]
             : null;
 
         return new SandboxRunbookProgressSnapshot
@@ -1183,9 +1169,9 @@ public sealed class PowerShellRunbookExecutor : IRunbookExecutor
             Mode = options.Mode,
             State = state,
             TotalSteps = runbook.Steps.Count,
-            CompletedSteps = steps.Count(step => step.State is SandboxRunbookProgressStates.Completed or SandboxRunbookProgressStates.Skipped),
+            CompletedSteps = steps.Count(step => RunbookProgressFacts.CountsAsCompletedStep(step.State)),
             ExecutedSteps = results.Count(step => !step.Skipped && step.StepIndex >= 0),
-            CurrentStepIndex = currentStep is null ? null : currentStepIndex,
+            CurrentStepIndex = currentStep is null ? null : resolvedCurrentStepIndex,
             CurrentStepId = currentStep?.Id,
             CurrentStepTitle = currentStep?.Title,
             Success = success,
@@ -1206,19 +1192,14 @@ public sealed class PowerShellRunbookExecutor : IRunbookExecutor
     private static SandboxRunbookStepProgressSnapshot CreateStepProgressSnapshot(
         SandboxRunbookStep step,
         int stepIndex,
+        int totalSteps,
         IReadOnlyDictionary<int, SandboxRunbookStepExecutionResult> resultByIndex,
         string aggregateState,
         int? currentStepIndex)
     {
         if (resultByIndex.TryGetValue(stepIndex, out var result))
         {
-            var resultState = result.Skipped
-                ? SandboxRunbookProgressStates.Skipped
-                : result.Success
-                    ? SandboxRunbookProgressStates.Completed
-                    : IsCanceledStepResult(result)
-                        ? SandboxRunbookProgressStates.Canceled
-                        : SandboxRunbookProgressStates.Failed;
+            var resultState = RunbookProgressFacts.ResolveStepState(stepIndex, result, failedIndex: null);
             return new SandboxRunbookStepProgressSnapshot
             {
                 StepIndex = stepIndex,
@@ -1230,7 +1211,7 @@ public sealed class PowerShellRunbookExecutor : IRunbookExecutor
                 StartedAtUtc = result.StartedAtUtc,
                 Duration = result.Duration,
                 ExitCode = result.ExitCode,
-                Message = result.Message
+                Message = RunbookProgressFacts.BuildStepProgressMessage(step, stepIndex, totalSteps, resultState, result, isCurrent: currentStepIndex == stepIndex)
             };
         }
 
@@ -1244,20 +1225,11 @@ public sealed class PowerShellRunbookExecutor : IRunbookExecutor
             Title = step.Title,
             State = isCurrent ? SandboxRunbookProgressStates.Running : SandboxRunbookProgressStates.Pending,
             RequiresElevation = step.RequiresElevation,
-            MutatesVmState = step.MutatesVmState
+            MutatesVmState = step.MutatesVmState,
+            Message = isCurrent
+                ? RunbookProgressFacts.BuildStepProgressMessage(step, stepIndex, totalSteps, SandboxRunbookProgressStates.Running, result: null, isCurrent: true)
+                : null
         };
-    }
-
-    /// <summary>
-    /// Determines whether a failed step represents cancellation rather than an
-    /// ordinary PowerShell failure. Input is one step result; processing checks
-    /// the normalized executor messages; the returned value lets progress rows
-    /// display canceled instead of failed.
-    /// </summary>
-    private static bool IsCanceledStepResult(SandboxRunbookStepExecutionResult result)
-    {
-        return result.Message is not null &&
-            result.Message.Contains("canceled", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>

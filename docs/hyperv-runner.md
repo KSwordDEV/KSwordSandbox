@@ -93,9 +93,12 @@ D:\Temp\KSwordSandbox\jobs\<job-id>\runbook-progress.json
 ```
 
 `runbook-execution.json` 是完整执行记录，包含命令、stdout/stderr 和 phase details；`runbook-progress.json`
-是 UI-safe sidecar，只包含 step state、duration、exit code、message、failure reason/remediation hints，
-不包含 PowerShell command text 或 secret。脚本式 `Invoke-HyperVE2E.ps1` 也写同名 progress sidecar，
-因此 WebUI/recovery 工具可以用同一读取路径展示失败进度。
+是 UI-safe sidecar，只包含 step state、duration、exit code、current step、ordinal、phase/category message
+和 failure reason/remediation hints。Core 写入/恢复 progress sidecar 时会重建安全 message：不复制
+PowerShell command text、stdout、stderr 或 secret，只提示“完整输出在 runbook-execution.json”。
+如果 `runbook-progress.json` 缺失、损坏或比 `runbook-execution.json` 旧，Core 会从完整执行记录恢复
+current step，并在 message 中加入 snapshot freshness diagnostic / 快照新鲜度诊断。脚本式
+`Invoke-HyperVE2E.ps1` 也写同名 progress sidecar，因此 WebUI/recovery 工具可以用同一读取路径展示失败进度。
 
 Live runbook 成功后，host 会尝试从 collected guest folder 导入 guest output。synthetic events 或收集完成较晚
 时，也可手动导入：

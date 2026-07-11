@@ -287,6 +287,10 @@ internal sealed class GuestArtifactWriter
         AddIfNotEmpty(metadata, "capturePolicy", CapturePolicyForClassification(classification));
         AddIfNotEmpty(metadata, "importPath", relativePath);
         AddIfNotEmpty(metadata, "artifactRelativePath", relativePath);
+        AddIfNotEmpty(metadata, "artifactSelector", relativePath);
+        AddIfNotEmpty(metadata, "downloadSelector", relativePath);
+        AddIfNotEmpty(metadata, "artifactSelectorKind", "safe-output-relative-path");
+        AddIfNotEmpty(metadata, "artifactSelectorVersion", "artifact-selectors-v1");
         AddIfNotEmpty(metadata, "sourceArtifactRelativePath", relativePath);
         AddIfNotEmpty(metadata, "artifactFullPath", artifactFullPath);
         AddIfNotEmpty(metadata, "guestFullPath", FirstNonEmpty(droppedFileMetadata?.OriginalFullPath, ValueOrEmpty(metadata, "guestFullPath", "guestPath"), artifactFullPath));
@@ -439,6 +443,7 @@ internal sealed class GuestArtifactWriter
             ["artifactHashComputedCount"] = artifactHashComputedCount.ToString(System.Globalization.CultureInfo.InvariantCulture),
             ["artifactHashFailedCount"] = artifactHashFailedCount.ToString(System.Globalization.CultureInfo.InvariantCulture),
             ["artifactIntegrityState"] = CollectionArtifactIntegrityState(artifactCount, artifactHashComputedCount, artifactHashFailedCount, status),
+            ["artifactSelectorVersion"] = "artifact-selectors-v1",
             ["capturedCount"] = capturedCount.ToString(System.Globalization.CultureInfo.InvariantCulture),
             ["skippedCount"] = skippedEventCount.ToString(System.Globalization.CultureInfo.InvariantCulture),
             ["disabledCount"] = disabledCount.ToString(System.Globalization.CultureInfo.InvariantCulture),
@@ -607,18 +612,36 @@ internal sealed class GuestArtifactWriter
 
         var first = collectionArtifacts.OrderBy(artifact => artifact.RelativePath, StringComparer.OrdinalIgnoreCase).First();
         var last = collectionArtifacts.OrderBy(artifact => artifact.RelativePath, StringComparer.OrdinalIgnoreCase).Last();
-        AddIfMissing(metadata, "firstArtifactRelativePath", first.RelativePath);
-        AddIfMissing(metadata, "lastArtifactRelativePath", last.RelativePath);
-        AddIfMissing(metadata, "lastArtifactSafeLink", last.SafeLink);
-        AddIfMissing(metadata, "lastArtifactSha256", last.Sha256);
-        AddIfMissing(metadata, "lastArtifactSizeBytes", last.SizeBytes.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        metadata["artifactSelectorState"] = "available";
+        metadata["artifactSelectorMode"] = "relative-path-order-and-size";
+        AddCollectionArtifactSelector(metadata, "first", first, "first-relative-path");
+        AddCollectionArtifactSelector(metadata, "last", last, "last-relative-path");
 
         var largest = collectionArtifacts
             .OrderByDescending(artifact => artifact.SizeBytes)
             .ThenBy(artifact => artifact.RelativePath, StringComparer.OrdinalIgnoreCase)
             .First();
-        AddIfMissing(metadata, "largestArtifactRelativePath", largest.RelativePath);
-        AddIfMissing(metadata, "largestArtifactSizeBytes", largest.SizeBytes.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        AddCollectionArtifactSelector(metadata, "largest", largest, "largest-size-bytes");
+    }
+
+    private static void AddCollectionArtifactSelector(
+        Dictionary<string, string> metadata,
+        string prefix,
+        ArtifactDescriptor artifact,
+        string selectionReason)
+    {
+        var titlePrefix = char.ToUpperInvariant(prefix[0]) + prefix[1..];
+        AddIfMissing(metadata, $"{prefix}ArtifactSelector", artifact.RelativePath);
+        AddIfMissing(metadata, $"{prefix}ArtifactRelativePath", artifact.RelativePath);
+        AddIfMissing(metadata, $"{prefix}ArtifactSafeLink", artifact.SafeLink);
+        AddIfMissing(metadata, $"{prefix}ArtifactImportPath", artifact.ImportPath);
+        AddIfMissing(metadata, $"{prefix}ArtifactName", artifact.Name);
+        AddIfMissing(metadata, $"{prefix}ArtifactSha256", artifact.Sha256);
+        AddIfMissing(metadata, $"{prefix}ArtifactSizeBytes", artifact.SizeBytes.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        AddIfMissing(metadata, $"{prefix}ArtifactMimeType", artifact.MimeType);
+        AddIfMissing(metadata, $"{prefix}ArtifactCapturePhase", artifact.CapturePhase);
+        AddIfMissing(metadata, $"{prefix}ArtifactSelectionReason", selectionReason);
+        AddIfMissing(metadata, $"has{titlePrefix}ArtifactSelector", "true");
     }
 
     private static void AddCollectionReasonSummary(
@@ -1074,12 +1097,31 @@ internal sealed class GuestArtifactWriter
 
     private static bool HasDiagnosticData(SandboxEvent evt)
     {
+        if (IsNonDiagnosticSummaryEvent(evt))
+        {
+            return false;
+        }
+
         return evt.Data.ContainsKey("reason") ||
             evt.Data.ContainsKey("diagnosticStage") ||
             evt.Data.ContainsKey("exceptionType") ||
             evt.Data.ContainsKey("commandMessage") ||
             evt.Data.ContainsKey("protocolSummaryAvailable") ||
             IsProbeFailureEvent(evt);
+    }
+
+    private static bool IsNonDiagnosticSummaryEvent(SandboxEvent evt)
+    {
+        if (!evt.Data.TryGetValue("summaryEvent", out var summaryEvent) ||
+            !string.Equals(summaryEvent, "true", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return !evt.EventType.EndsWith(".skipped", StringComparison.OrdinalIgnoreCase) &&
+            !evt.EventType.EndsWith(".failed", StringComparison.OrdinalIgnoreCase) &&
+            !evt.EventType.EndsWith(".timeout", StringComparison.OrdinalIgnoreCase) &&
+            !evt.EventType.EndsWith(".parse_error", StringComparison.OrdinalIgnoreCase);
     }
 
     private static void CopyEventDataIfPresent(Dictionary<string, string> metadata, SandboxEvent evt, string sourceKey, string destinationKey)
@@ -1119,10 +1161,41 @@ internal sealed class GuestArtifactWriter
             "artifactIntegrityState",
             "artifactExists",
             "artifactRelativePathStatus",
+            "artifactSelector",
+            "downloadSelector",
+            "artifactSelectorKind",
+            "artifactSelectorVersion",
+            "artifactSelectorState",
+            "artifactSelectorMode",
+            "firstArtifactSelector",
+            "firstArtifactRelativePath",
+            "firstArtifactSafeLink",
+            "firstArtifactSha256",
+            "firstArtifactSizeBytes",
+            "firstArtifactSelectionReason",
+            "lastArtifactSelector",
+            "lastArtifactRelativePath",
+            "lastArtifactSafeLink",
+            "lastArtifactSha256",
+            "lastArtifactSizeBytes",
+            "lastArtifactSelectionReason",
+            "largestArtifactSelector",
+            "largestArtifactRelativePath",
+            "largestArtifactSafeLink",
+            "largestArtifactSha256",
+            "largestArtifactSizeBytes",
+            "largestArtifactSelectionReason",
             "sizeBytesStatus",
             "sha256Status",
             "reasonCode",
             "reasonCategory",
+            "reasonTaxonomy",
+            "reasonTaxonomyVersion",
+            "coverageTaxonomy",
+            "coverageTaxonomyVersion",
+            "behaviorCounted",
+            "nonbehavior",
+            "collectionHealth",
             "skippedReasons",
             "skippedReasonCounts",
             "sourceCopiedSha256Match",
@@ -1154,10 +1227,23 @@ internal sealed class GuestArtifactWriter
             "memoryDumpCoverageState",
             "rootDescendantCoverageState",
             "descendantTargetCount",
+            "directChildTargetCount",
+            "deeperDescendantTargetCount",
             "descendantAttemptedCount",
+            "directChildAttemptedCount",
+            "deeperDescendantAttemptedCount",
             "descendantCapturedCount",
+            "directChildCapturedCount",
+            "deeperDescendantCapturedCount",
             "descendantSkippedCount",
+            "directChildSkippedCount",
+            "deeperDescendantSkippedCount",
             "descendantAlreadyCapturedCount",
+            "directChildAlreadyCapturedCount",
+            "deeperDescendantAlreadyCapturedCount",
+            "directChildCoverageState",
+            "deeperDescendantCoverageState",
+            "descendantCoverageCompleteness",
             "copiedSha256",
             "copiedHashAlgorithm",
             "copiedHashStatus",

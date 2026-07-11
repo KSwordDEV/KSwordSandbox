@@ -238,11 +238,18 @@ public static class NetworkTelemetrySchema
                 string.Equals(pair.Key, "capturePhase", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(pair.Key, "sha256", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(pair.Key, "sourceArtifactSha256", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(pair.Key, "artifactSha256", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(pair.Key, "artifactHashSha256", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(pair.Key, "hash.sha256", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(pair.Key, "sizeBytes", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(pair.Key, "sourceArtifactSizeBytes", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(pair.Key, "artifactSizeBytes", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(pair.Key, "artifactRelativePath", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(pair.Key, "sourceArtifactRelativePath", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(pair.Key, "downloadSelector", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(pair.Key, "sourceArtifactSelector", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(pair.Key, "artifactSelector", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(pair.Key, "sourceDownloadSelector", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(pair.Key, "rootProcessId", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(pair.Key, "treeLineage", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(pair.Key, "processId", StringComparison.OrdinalIgnoreCase) ||
@@ -260,6 +267,7 @@ public static class NetworkTelemetrySchema
         }
 
         AddMetadataAliases(data, source.Metadata);
+        AddSourceArtifactAliases(data);
         AddPcapSourceArtifactIdentity(data, source);
 
         try
@@ -590,6 +598,14 @@ public static class NetworkTelemetrySchema
         }
     }
 
+    private static void AddAliases(Dictionary<string, string> data, string? value, params string[] keys)
+    {
+        foreach (var key in keys)
+        {
+            AddIfNotEmpty(data, key, value);
+        }
+    }
+
     public static int? ParsePort(string? value)
     {
         var normalized = string.IsNullOrWhiteSpace(value)
@@ -664,41 +680,99 @@ public static class NetworkTelemetrySchema
 
     private static void ApplyDnsNormalization(Dictionary<string, string> data)
     {
-        var queryName = NormalizeDnsName(FirstDataValue(data, "queryName", "qname", "dnsQueryName", "domain"));
+        var queryName = NormalizeDnsName(FirstDataValue(
+            data,
+            "queryName",
+            "qname",
+            "dnsQueryName",
+            "domain",
+            "query",
+            "dnsQuery",
+            "rrname",
+            "dns.rrname",
+            "dns.qry.name",
+            "dns.question.name",
+            "dns.questions.name",
+            "dns.query.name"));
         if (!string.IsNullOrWhiteSpace(queryName))
         {
-            data["queryName"] = queryName;
-            data["qname"] = queryName;
-            data["domain"] = queryName;
-            data["dnsQueryName"] = queryName;
-            data["queryNameNormalized"] = queryName;
-            data["domainNormalized"] = queryName;
+            AddAliases(
+                data,
+                queryName,
+                "queryName",
+                "qname",
+                "domain",
+                "dnsQueryName",
+                "query",
+                "dnsQuery",
+                "rrname",
+                "dns.rrname",
+                "dns.qry.name",
+                "dns.question.name",
+                "dns.questions.name",
+                "dns.query.name",
+                "queryNameNormalized",
+                "domainNormalized");
         }
 
-        var queryType = NormalizeDnsRecordType(FirstDataValue(data, "queryType", "recordType", "dnsRecordType", "qtype"));
+        var queryType = NormalizeDnsRecordType(FirstDataValue(
+            data,
+            "queryType",
+            "recordType",
+            "dnsRecordType",
+            "qtype",
+            "rrtype",
+            "dns.rrtype",
+            "dns.qry.type",
+            "dns.question.type",
+            "dns.questions.type",
+            "dns.query.type"));
         if (!string.IsNullOrWhiteSpace(queryType))
         {
-            data["queryType"] = queryType;
-            data["recordType"] = queryType;
-            data["dnsRecordType"] = queryType;
+            AddAliases(
+                data,
+                queryType,
+                "queryType",
+                "recordType",
+                "dnsRecordType",
+                "qtype",
+                "rrtype",
+                "dns.rrtype",
+                "dns.qry.type",
+                "dns.question.type",
+                "dns.questions.type",
+                "dns.query.type");
         }
 
-        var rcode = NormalizeDnsRCode(FirstDataValue(data, "rcode", "rcodeName", "responseCode", "dnsRcode"));
+        var rcode = NormalizeDnsRCode(FirstDataValue(
+            data,
+            "rcode",
+            "rcodeName",
+            "responseCode",
+            "dnsRcode",
+            "dnsResponseCode",
+            "dns.rcode",
+            "dns.flags.rcode",
+            "dns.response_code"));
         if (!string.IsNullOrWhiteSpace(rcode))
         {
-            data["rcode"] = rcode;
-            data["rcodeName"] = rcode;
-            data["responseCode"] = rcode;
-            data["dnsRcode"] = rcode;
+            AddAliases(
+                data,
+                rcode,
+                "rcode",
+                "rcodeName",
+                "responseCode",
+                "dnsRcode",
+                "dnsResponseCode",
+                "dns.rcode",
+                "dns.flags.rcode",
+                "dns.response_code");
         }
 
-        var answers = NormalizeDnsAnswerList(FirstDataValue(data, "answers", "answer", "resolvedIps", "dnsAnswers"));
+        var answers = NormalizeDnsAnswerList(FirstDataValue(data, "answers", "answer", "resolvedIp", "resolvedIps", "dnsAnswers", "dns.answer", "dns.answers", "dns.answers.data"));
         if (!string.IsNullOrWhiteSpace(answers))
         {
-            data["answer"] = answers;
-            data["answers"] = answers;
-            data["resolvedIps"] = answers;
-            data["dnsAnswers"] = answers;
+            AddAliases(data, answers, "answer", "answers", "resolvedIp", "resolvedIps", "dnsAnswers", "dns.answer", "dns.answers", "dns.answers.data");
             AddIfNotEmpty(data, "answerCount", CountDelimitedValues(answers));
         }
 
@@ -721,11 +795,10 @@ public static class NetworkTelemetrySchema
 
     private static void ApplyHttpNormalization(Dictionary<string, string> data)
     {
-        var method = NormalizeHttpMethod(FirstDataValue(data, "method", "httpMethod"));
+        var method = NormalizeHttpMethod(FirstDataValue(data, "method", "httpMethod", "requestMethod", "httpRequestMethod", "http.method", "http.request.method"));
         if (!string.IsNullOrWhiteSpace(method))
         {
-            data["method"] = method;
-            data["httpMethod"] = method;
+            AddAliases(data, method, "method", "httpMethod", "requestMethod", "httpRequestMethod", "http.method", "http.request.method");
         }
 
         var url = FirstDataValue(data, "url", "requestUrl", "httpUrl");
@@ -782,17 +855,97 @@ public static class NetworkTelemetrySchema
         {
             data["url"] = url.Trim();
         }
+
+        var statusCode = NormalizeHttpStatusCode(FirstDataValue(
+            data,
+            "statusCode",
+            "responseStatusCode",
+            "httpStatusCode",
+            "httpStatus",
+            "status",
+            "responseCode",
+            "http.response.status_code",
+            "http.response.code",
+            "http.status_code"));
+        if (!string.IsNullOrWhiteSpace(statusCode))
+        {
+            AddAliases(
+                data,
+                statusCode,
+                "statusCode",
+                "responseStatusCode",
+                "httpStatusCode",
+                "httpStatus",
+                "status",
+                "responseCode",
+                "http.response.status_code",
+                "http.response.code",
+                "http.status_code");
+            AddIfNotEmpty(data, "statusFamily", HttpStatusFamily(statusCode));
+        }
+
+        var requestBodyBytes = NormalizeByteCount(FirstDataValue(
+            data,
+            "requestBodyBytes",
+            "requestBytes",
+            "httpRequestBodyBytes",
+            "requestBodySizeBytes",
+            "requestBodySize",
+            "http.request.body.bytes",
+            "http.request.body.size",
+            "request.body.bytes",
+            "requestContentLength",
+            "uploadBytes",
+            "bytesToServer"));
+        var responseBodyBytes = NormalizeByteCount(FirstDataValue(
+            data,
+            "responseBodyBytes",
+            "responseBytes",
+            "httpResponseBodyBytes",
+            "responseBodySizeBytes",
+            "responseBodySize",
+            "http.response.body.bytes",
+            "http.response.body.size",
+            "response.body.bytes",
+            "responseContentLength",
+            "downloadBytes",
+            "bytesToClient"));
+        var requestContentLength = NormalizeByteCount(FirstDataValue(data, "requestContentLength", "http.request.headers.content_length", "request.headers.content-length"));
+        var responseContentLength = NormalizeByteCount(FirstDataValue(data, "responseContentLength", "http.response.headers.content_length", "response.headers.content-length"));
+        if (string.IsNullOrWhiteSpace(requestContentLength))
+        {
+            requestContentLength = requestBodyBytes;
+        }
+
+        if (string.IsNullOrWhiteSpace(responseContentLength))
+        {
+            responseContentLength = responseBodyBytes;
+        }
+
+        AddAliases(data, requestBodyBytes, "requestBodyBytes", "requestBytes", "httpRequestBodyBytes", "requestBodySizeBytes", "requestBodySize", "http.request.body.bytes", "http.request.body.size", "request.body.bytes", "bytesToServer");
+        AddAliases(data, responseBodyBytes, "responseBodyBytes", "responseBytes", "httpResponseBodyBytes", "responseBodySizeBytes", "responseBodySize", "http.response.body.bytes", "http.response.body.size", "response.body.bytes", "bytesToClient");
+        AddIfNotEmpty(data, "requestContentLength", requestContentLength);
+        AddIfNotEmpty(data, "responseContentLength", responseContentLength);
+        AddIfNotEmpty(data, "uploadBytes", FirstNonEmpty(requestBodyBytes, requestContentLength));
+        AddIfNotEmpty(data, "downloadBytes", FirstNonEmpty(responseBodyBytes, responseContentLength));
+
+        var messageType = FirstDataValue(data, "httpMessageType", "messageType", "http.message_type");
+        AddIfNotEmpty(data, "httpMessageType", messageType);
+        var bodyBytes = string.Equals(messageType, "response", StringComparison.OrdinalIgnoreCase)
+            ? FirstNonEmpty(responseBodyBytes, responseContentLength)
+            : string.Equals(messageType, "request", StringComparison.OrdinalIgnoreCase)
+                ? FirstNonEmpty(requestBodyBytes, requestContentLength)
+                : FirstNonEmpty(requestBodyBytes, responseBodyBytes, requestContentLength, responseContentLength);
+        AddAliases(data, bodyBytes, "bodyBytes", "bodySizeBytes", "httpBodyBytes", "http.body.bytes");
+        AddIfNotEmpty(data, "contentLength", FirstNonEmpty(FirstDataValue(data, "contentLength"), requestContentLength, responseContentLength));
     }
 
     private static void ApplyTlsNormalization(Dictionary<string, string> data)
     {
-        var sni = NormalizeDnsName(FirstDataValue(data, "sni", "serverName", "tlsServerName"));
+        var sni = NormalizeDnsName(FirstDataValue(data, "sni", "serverName", "tlsServerName", "tlsSni", "server_name", "tls.server_name", "tls.handshake.extensions_server_name", "ssl.handshake.extensions_server_name"));
         if (!string.IsNullOrWhiteSpace(sni))
         {
-            data["sni"] = sni;
-            data["serverName"] = sni;
-            data["tlsServerName"] = sni;
-            data["sniNormalized"] = sni;
+            AddAliases(data, sni, "sni", "serverName", "tlsServerName", "tlsSni", "server_name", "tls.server_name", "tls.handshake.extensions_server_name", "ssl.handshake.extensions_server_name", "sniNormalized");
         }
 
         var tlsVersion = NormalizeTlsVersion(FirstDataValue(data, "tlsVersion", "version"));
@@ -803,6 +956,32 @@ public static class NetworkTelemetrySchema
             data["handshakeType"] = handshakeType;
             data["tlsHandshakeType"] = handshakeType;
         }
+
+        var ja3 = NormalizeHashText(FirstDataValue(data, "ja3", "ja3Hash", "tlsJa3", "ja3.hash", "tls.ja3", "tls.ja3.hash", "tls.handshake.ja3_hash"));
+        AddAliases(data, ja3, "ja3", "ja3Hash", "tlsJa3", "ja3Fingerprint", "ja3.hash", "tls.ja3", "tls.ja3.hash", "tls.handshake.ja3_hash");
+        var ja3s = NormalizeHashText(FirstDataValue(data, "ja3s", "ja3sHash", "tlsJa3s", "ja3s.hash", "tls.ja3s", "tls.ja3s.hash", "tls.handshake.ja3s_hash"));
+        AddAliases(data, ja3s, "ja3s", "ja3sHash", "tlsJa3s", "ja3sFingerprint", "ja3s.hash", "tls.ja3s", "tls.ja3s.hash", "tls.handshake.ja3s_hash");
+
+        var certSubject = FirstDataValue(data, "certSubject", "certificateSubject", "x509Subject", "x509.subject", "tls.cert.subject", "tls.certificate.subject");
+        AddAliases(data, certSubject, "certSubject", "certificateSubject", "x509Subject", "x509.subject", "tls.cert.subject", "tls.certificate.subject");
+        var certIssuer = FirstDataValue(data, "certIssuer", "certificateIssuer", "x509Issuer", "x509.issuer", "tls.cert.issuer", "tls.certificate.issuer");
+        AddAliases(data, certIssuer, "certIssuer", "certificateIssuer", "x509Issuer", "x509.issuer", "tls.cert.issuer", "tls.certificate.issuer");
+        var certSerial = FirstDataValue(data, "certSerial", "certificateSerial", "x509Serial", "x509.serial_number", "tls.cert.serial", "tls.certificate.serial");
+        AddAliases(data, certSerial, "certSerial", "certificateSerial", "x509Serial", "x509.serial_number", "tls.cert.serial", "tls.certificate.serial");
+        var certSha256 = NormalizeHashText(FirstDataValue(data, "certSha256", "certificateSha256", "certificateFingerprintSha256", "x509.fingerprint.sha256", "cert.fingerprint.sha256", "tls.cert.fingerprint.sha256", "tls.certificate.fingerprint.sha256"));
+        AddAliases(data, certSha256, "certSha256", "certificateSha256", "certificateFingerprintSha256", "x509.fingerprint.sha256", "cert.fingerprint.sha256", "tls.cert.fingerprint.sha256", "tls.certificate.fingerprint.sha256");
+        var certSha1 = NormalizeHashText(FirstDataValue(data, "certSha1", "certificateSha1", "certificateFingerprintSha1", "x509.fingerprint.sha1", "cert.fingerprint.sha1", "tls.cert.fingerprint.sha1"));
+        AddAliases(data, certSha1, "certSha1", "certificateSha1", "certificateFingerprintSha1", "x509.fingerprint.sha1", "cert.fingerprint.sha1", "tls.cert.fingerprint.sha1");
+        var certNotBefore = FirstDataValue(data, "certNotBefore", "certificateNotBefore", "x509.not_before", "tls.cert.not_before");
+        AddAliases(data, certNotBefore, "certNotBefore", "certificateNotBefore", "x509.not_before", "tls.cert.not_before");
+        var certNotAfter = FirstDataValue(data, "certNotAfter", "certificateNotAfter", "x509.not_after", "tls.cert.not_after");
+        AddAliases(data, certNotAfter, "certNotAfter", "certificateNotAfter", "x509.not_after", "tls.cert.not_after");
+        var certificateStatus = FirstDataValue(data, "certificateStatus", "validationStatus", "tls.validation_status", "tls.cert.validation_status");
+        AddAliases(data, certificateStatus, "certificateStatus", "validationStatus", "tls.validation_status", "tls.cert.validation_status");
+        var certSelfSigned = NormalizeBoolean(FirstDataValue(data, "certSelfSigned", "certificateSelfSigned", "selfSigned", "tls.cert.self_signed"));
+        AddAliases(data, certSelfSigned, "certSelfSigned", "certificateSelfSigned", "selfSigned", "tls.cert.self_signed");
+        var certExpired = NormalizeBoolean(FirstDataValue(data, "certExpired", "certificateExpired", "tls.cert.expired"));
+        AddAliases(data, certExpired, "certExpired", "certificateExpired", "tls.cert.expired");
 
         if (IsSuspiciousCertificate(data))
         {
@@ -845,6 +1024,111 @@ public static class NetworkTelemetrySchema
 
         var count = value.Split(new[] { ',', ';', '|', ' ' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Length;
         return count > 0 ? count.ToString(CultureInfo.InvariantCulture) : null;
+    }
+
+    private static string NormalizeHttpStatusCode(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        var trimmed = value.Trim().Trim('"', '\'');
+        if (TryFormatHttpStatus(trimmed, out var status))
+        {
+            return status;
+        }
+
+        foreach (var token in trimmed.Split([' ', '\t'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (TryFormatHttpStatus(token, out status))
+            {
+                return status;
+            }
+        }
+
+        return trimmed;
+    }
+
+    private static bool TryFormatHttpStatus(string value, out string status)
+    {
+        if (int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed) &&
+            parsed is >= 100 and <= 599)
+        {
+            status = parsed.ToString(CultureInfo.InvariantCulture);
+            return true;
+        }
+
+        status = string.Empty;
+        return false;
+    }
+
+    private static string HttpStatusFamily(string? statusCode)
+    {
+        return int.TryParse(statusCode, NumberStyles.Integer, CultureInfo.InvariantCulture, out var status) &&
+            status is >= 100 and <= 599
+                ? $"{status / 100}xx"
+                : string.Empty;
+    }
+
+    private static string NormalizeByteCount(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        var trimmed = value.Trim().Trim('"', '\'');
+        return long.TryParse(trimmed, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed) &&
+            parsed >= 0
+                ? parsed.ToString(CultureInfo.InvariantCulture)
+                : trimmed;
+    }
+
+    private static string NormalizeBoolean(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        var trimmed = value.Trim().Trim('"', '\'');
+        if (string.Equals(trimmed, "1", StringComparison.Ordinal) ||
+            string.Equals(trimmed, "yes", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(trimmed, "y", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(trimmed, "true", StringComparison.OrdinalIgnoreCase))
+        {
+            return "true";
+        }
+
+        if (string.Equals(trimmed, "0", StringComparison.Ordinal) ||
+            string.Equals(trimmed, "no", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(trimmed, "n", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(trimmed, "false", StringComparison.OrdinalIgnoreCase))
+        {
+            return "false";
+        }
+
+        return trimmed;
+    }
+
+    private static string NormalizeHashText(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        var trimmed = value.Trim().Trim('"', '\'');
+        var compact = trimmed.Replace(":", string.Empty, StringComparison.Ordinal).Replace("-", string.Empty, StringComparison.Ordinal);
+        return compact.Length >= 32 && compact.All(IsHexCharacter)
+            ? compact.ToLowerInvariant()
+            : trimmed;
+    }
+
+    private static bool IsHexCharacter(char value)
+    {
+        return value is >= '0' and <= '9' or >= 'a' and <= 'f' or >= 'A' and <= 'F';
     }
 
     private static string DnsRecordTypeName(int code)
@@ -1011,10 +1295,42 @@ public static class NetworkTelemetrySchema
             source.FullPath.EndsWith(".pcapng", StringComparison.OrdinalIgnoreCase);
     }
 
+    private static void AddSourceArtifactAliases(Dictionary<string, string> data)
+    {
+        var selector = FirstDataValue(
+            data,
+            "sourceArtifactSelector",
+            "artifactSelector",
+            "downloadSelector",
+            "sourceDownloadSelector",
+            "sourceArtifactRelativePath",
+            "artifactRelativePath");
+        AddAliases(data, selector, "sourceArtifactSelector", "artifactSelector", "downloadSelector", "sourceDownloadSelector");
+
+        var relativePath = FirstDataValue(data, "sourceArtifactRelativePath", "artifactRelativePath", "sourceArtifactSelector", "downloadSelector");
+        AddAliases(data, relativePath, "sourceArtifactRelativePath", "artifactRelativePath");
+
+        var sha256 = NormalizeHashText(FirstDataValue(data, "sourceArtifactSha256", "sha256", "hash.sha256", "artifactSha256", "artifactHashSha256"));
+        AddAliases(data, sha256, "sourceArtifactSha256", "sha256", "hash.sha256", "artifactSha256", "artifactHashSha256");
+
+        var sizeBytes = NormalizeByteCount(FirstDataValue(data, "sourceArtifactSizeBytes", "sizeBytes", "artifactSizeBytes"));
+        AddAliases(data, sizeBytes, "sourceArtifactSizeBytes", "sizeBytes", "artifactSizeBytes");
+    }
+
     private static void AddPcapSourceArtifactIdentity(Dictionary<string, string> data, NetworkArtifactSource source)
     {
         var pcapPath = FirstDataValue(data, "pcapSourceArtifactPath", "sourcePcapArtifactPath");
-        var pcapRelativePath = FirstDataValue(data, "pcapSourceArtifactRelativePath", "sourcePcapArtifactRelativePath", "pcapArtifactRelativePath");
+        var pcapRelativePath = FirstDataValue(
+            data,
+            "pcapSourceArtifactRelativePath",
+            "sourcePcapArtifactRelativePath",
+            "pcapArtifactRelativePath",
+            "pcapSourceArtifactSelector",
+            "sourcePcapArtifactSelector",
+            "pcapDownloadSelector",
+            "sourcePcapDownloadSelector");
+        var pcapSha256 = NormalizeHashText(FirstDataValue(data, "pcapSourceArtifactSha256", "sourcePcapArtifactSha256", "pcapArtifactSha256", "pcapSha256"));
+        AddAliases(data, pcapSha256, "pcapSourceArtifactSha256", "sourcePcapArtifactSha256", "pcapArtifactSha256");
 
         if (string.IsNullOrWhiteSpace(pcapPath) &&
             !string.IsNullOrWhiteSpace(pcapRelativePath) &&

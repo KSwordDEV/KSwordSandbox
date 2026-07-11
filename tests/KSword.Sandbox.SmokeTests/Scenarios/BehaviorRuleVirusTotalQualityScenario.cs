@@ -153,6 +153,16 @@ internal sealed class BehaviorRuleVirusTotalQualityScenario : ISmokeTestScenario
         RequireContains(models, "SuspiciousCount", "VirusTotal result should flatten suspicious engine counts for reports.");
         RequireContains(models, "HttpStatusCode", "VirusTotal result should expose HTTP status for 404/rate-limit quality.");
         RequireContains(models, "RetryAfterUtc", "VirusTotal result should expose Retry-After timing for rate limits.");
+        RequireContains(models, "QuietErrorKind", "VirusTotal result should expose normalized quiet error taxonomy.");
+        RequireContains(models, "ResolveQuietErrorKind", "VirusTotal quiet taxonomy should normalize provider/local failures.");
+        RequireContains(models, "\"auth\"", "VirusTotal quiet taxonomy should distinguish authentication failures as auth.");
+        RequireContains(models, "\"rate_limit\"", "VirusTotal quiet taxonomy should distinguish provider rate limits.");
+        RequireContains(models, "ZhStatusText", "VirusTotal result should expose Chinese status text.");
+        RequireContains(models, "ZhStatusDetail", "VirusTotal result should expose a Chinese operator status explanation.");
+        RequireContains(models, "VirusTotalOfficialFileObject", "VirusTotal result should expose selected official file object metadata.");
+        RequireContains(models, "FileSizeBytes", "VirusTotal official file object fields should include file size.");
+        RequireContains(models, "FileTypeDescription", "VirusTotal official file object fields should include type description.");
+        RequireContains(models, "VirusTotalThreatClassification", "VirusTotal official file object fields should include threat classification metadata.");
         RequireContains(models, "RuleData", "VirusTotal result should expose rule-facing one-level string fields.");
         RequireContains(models, "ToRuleEvent", "VirusTotal result should be convertible to a rule-facing enrichment event.");
         RequireContains(models, "CanPersistEnrichmentEvent", "VirusTotal result should expose whether an event is report-safe to persist.");
@@ -167,6 +177,14 @@ internal sealed class BehaviorRuleVirusTotalQualityScenario : ISmokeTestScenario
         RequireContains(lookup, "malicious > 0", "VirusTotal verdict should treat malicious hits as malicious.");
         RequireContains(lookup, "suspicious > 0", "VirusTotal verdict should treat suspicious hits as suspicious when malicious is zero.");
         RequireContains(lookup, "ParseRetryAfterUtc", "VirusTotal lookup should parse Retry-After for rate limits.");
+        RequireContains(lookup, "\"not_configured\"", "VirusTotal lookup should tag missing-key skips with the stable quiet taxonomy.");
+        RequireContains(lookup, "\"auth\"", "VirusTotal lookup should tag authentication failures with the auth quiet taxonomy.");
+        RequireContains(lookup, "\"rate_limit\"", "VirusTotal lookup should tag rate limits with the rate_limit quiet taxonomy.");
+        RequireContains(lookup, "ReadOfficialFileObject", "VirusTotal lookup should parse selected official file object metadata.");
+        RequireContains(lookup, "\"popular_threat_classification\"", "VirusTotal lookup should parse official popular threat classification metadata.");
+        RequireContains(lookup, "\"first_submission_date\"", "VirusTotal lookup should parse official submission timestamps.");
+        RequireContains(lookup, "\"type_description\"", "VirusTotal lookup should parse official file type descriptions.");
+        RequireContains(lookup, "ReadStringArray", "VirusTotal lookup should preserve official names/tags arrays.");
 
         RequireContains(cache, "FoundTtl = TimeSpan.FromHours(24)", "VirusTotal cache should keep found reports for a bounded TTL.");
         RequireContains(cache, "NotFoundTtl = TimeSpan.FromHours(6)", "VirusTotal cache should keep not-found reports for a shorter bounded TTL.");
@@ -197,7 +215,7 @@ internal sealed class BehaviorRuleVirusTotalQualityScenario : ISmokeTestScenario
         RequireContains(liveEventsPage, "authentication_failed", "Live monitor should explicitly render VT authentication quiet state.");
         RequireContains(liveEventsPage, "timeout", "Live monitor should explicitly render VT timeout quiet state.");
         RequireContains(liveEventsPage, "quiet state", "Live monitor should label non-behavior VT outcomes as quiet states.");
-        RequireContains(liveEventsPage, "job logs", "Live monitor should state that quiet VT outcomes do not write job logs.");
+        RequireContains(liveEventsPage, "job/behavior logs", "Live monitor should state that quiet VT outcomes do not write job or behavior logs.");
         RequireContains(liveEventsPage, "/virustotal`, { cache: 'no-store' }", "Live monitor should use the display-only VT GET endpoint by default.");
         RequireNotContains(liveEventsPage, "persist=true", "Live monitor should not request implicit VirusTotal persistence.");
 
@@ -205,10 +223,16 @@ internal sealed class BehaviorRuleVirusTotalQualityScenario : ISmokeTestScenario
         RequireContains(program, "\"/api/jobs/{jobId:guid}/enrichments/virustotal\"", "Program.cs should expose a dedicated VirusTotal job enrichment endpoint.");
         RequireContains(program, "PersistedToEnrichmentEvents = true", "VirusTotal enrichment endpoint should report successful persistence.");
         RequireContains(program, "ShouldPersistVirusTotalResult", "VirusTotal endpoint should gate persistence to report-safe outcomes.");
+        RequireContains(program, "persist == true && ShouldPersistVirusTotalResult(result)", "Display-only VT GET should write job logs only when found results are explicitly persisted.");
+        RequireContains(program, "if (!ShouldPersistVirusTotalResult(result))", "Explicit VT enrichment should skip job-log/report writes for quiet statuses.");
 
         RequireContains(docs, "never", "VirusTotal docs should state that API keys are never written by the Web backend.");
         RequireContains(docs, "process-only", "VirusTotal docs should document process-only WebUI key updates.");
         RequireContains(docs, "timeout", "VirusTotal docs should document timeout as a quiet display state.");
+        RequireContains(docs, "quietErrorKind=not_configured", "VirusTotal docs should document the quiet error taxonomy.");
+        RequireContains(docs, "zhStatusText", "VirusTotal docs should document Chinese API status text.");
+        RequireContains(docs, "officialFileObject", "VirusTotal docs should document richer official file object fields.");
+        RequireContains(docs, "只有 `status=found`", "VirusTotal docs should say only found results are persistable.");
         RequireContains(docs, "POST /api/jobs/{jobId}/enrichments/virustotal", "VirusTotal docs should document the dedicated enrichment endpoint.");
         RequireContains(docs, "vt.lookup", "VirusTotal docs should document the compact vt.lookup event name.");
     }

@@ -63,7 +63,8 @@ internal sealed class VirusTotalLookupService
                 normalizedHash,
                 configured: false,
                 VirusTotalLookupStatuses.NotConfigured,
-                "VirusTotal API key is not configured.");
+                "VirusTotal API key is not configured.",
+                "not_configured");
         }
 
         var credentialScope = VirusTotalLookupCache.CreateCredentialScope(apiKey);
@@ -99,7 +100,8 @@ internal sealed class VirusTotalLookupService
                     Message = "Hash was not found by VirusTotal.",
                     Permalink = BuildFilePermalink(normalizedHash),
                     DetectionPermalink = BuildDetectionPermalink(normalizedHash),
-                    HttpStatusCode = (int)response.StatusCode
+                    HttpStatusCode = (int)response.StatusCode,
+                    ErrorKind = "not_found"
                 };
             }
 
@@ -110,7 +112,7 @@ internal sealed class VirusTotalLookupService
                     response.StatusCode,
                     VirusTotalLookupStatuses.RateLimited,
                     "VirusTotal lookup was rate-limited.",
-                    "rate_limited",
+                    "rate_limit",
                     ParseRetryAfterUtc(response));
             }
 
@@ -121,7 +123,7 @@ internal sealed class VirusTotalLookupService
                     response.StatusCode,
                     VirusTotalLookupStatuses.AuthenticationFailed,
                     "VirusTotal API key was rejected by the service.",
-                    "authentication_failed");
+                    "auth");
             }
 
             if (!response.IsSuccessStatusCode)
@@ -150,7 +152,7 @@ internal sealed class VirusTotalLookupService
                 configured: true,
                 timedOut ? VirusTotalLookupStatuses.Timeout : VirusTotalLookupStatuses.LookupFailed,
                 timedOut
-                    ? "VirusTotal lookup failed or timed out."
+                    ? "VirusTotal lookup timed out."
                     : "VirusTotal lookup failed.",
                 timedOut ? "timeout" : "transport_or_parse_error");
         }
@@ -179,9 +181,6 @@ internal sealed class VirusTotalLookupService
             }
         }
 
-        var name = ReadString(attributes, "meaningful_name") ??
-            ReadFirstString(attributes, "names") ??
-            ReadString(attributes, "suggested_threat_label");
         DateTimeOffset? lastAnalysis = null;
         if (attributes.ValueKind == JsonValueKind.Object &&
             attributes.TryGetProperty("last_analysis_date", out var dateElement) &&
@@ -190,6 +189,10 @@ internal sealed class VirusTotalLookupService
             lastAnalysis = DateTimeOffset.FromUnixTimeSeconds(unixSeconds);
         }
 
+        var officialFileObject = ReadOfficialFileObject(data, attributes, lastAnalysis);
+        var name = ReadString(attributes, "meaningful_name") ??
+            officialFileObject.Names.FirstOrDefault() ??
+            officialFileObject.ThreatClassification.SuggestedThreatLabel;
         var reputation = ReadNullableInt(attributes, "reputation");
         var communityVotes = ReadCommunityVotes(attributes);
         var malicious = ReadStat(stats, "malicious");
@@ -228,6 +231,7 @@ internal sealed class VirusTotalLookupService
             OfficialApiSelfLink = officialApiSelfLink,
             MeaningfulName = name,
             LastAnalysisDateUtc = lastAnalysis,
+            OfficialFileObject = officialFileObject,
             Reputation = reputation,
             CommunityVotes = communityVotes,
             MaliciousCount = malicious,
@@ -377,6 +381,25 @@ internal sealed class VirusTotalLookupService
         return null;
     }
 
+    private static IReadOnlyList<string> ReadStringArray(JsonElement element, string propertyName)
+    {
+        if (element.ValueKind != JsonValueKind.Object ||
+            !element.TryGetProperty(propertyName, out var value) ||
+            value.ValueKind != JsonValueKind.Array)
+        {
+            return Array.Empty<string>();
+        }
+
+        return value
+            .EnumerateArray()
+            .Where(static item => item.ValueKind == JsonValueKind.String)
+            .Select(static item => item.GetString())
+            .Where(static item => !string.IsNullOrWhiteSpace(item))
+            .Select(static item => item!.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
     private static int? ReadNullableInt(JsonElement element, string propertyName)
     {
         if (element.ValueKind != JsonValueKind.Object ||
@@ -399,6 +422,46 @@ internal sealed class VirusTotalLookupService
         return null;
     }
 
+    private static long? ReadNullableLong(JsonElement element, string propertyName)
+    {
+        if (element.ValueKind != JsonValueKind.Object ||
+            !element.TryGetProperty(propertyName, out var value))
+        {
+            return null;
+        }
+
+        if (value.ValueKind == JsonValueKind.Number && value.TryGetInt64(out var number))
+        {
+            return number;
+        }
+
+        if (value.ValueKind == JsonValueKind.String &&
+            long.TryParse(value.GetString(), out var stringNumber))
+        {
+            return stringNumber;
+        }
+
+        return null;
+    }
+
+    private static DateTimeOffset? ReadUnixDate(JsonElement element, string propertyName)
+    {
+        var seconds = ReadNullableLong(element, propertyName);
+        if (seconds is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            return DateTimeOffset.FromUnixTimeSeconds(seconds.Value);
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            return null;
+        }
+    }
+
     private static VirusTotalCommunityVotes ReadCommunityVotes(JsonElement attributes)
     {
         if (attributes.ValueKind != JsonValueKind.Object ||
@@ -413,5 +476,78 @@ internal sealed class VirusTotalLookupService
             Harmless = ReadNullableInt(votes, "harmless"),
             Malicious = ReadNullableInt(votes, "malicious")
         };
+    }
+
+    private static VirusTotalOfficialFileObject ReadOfficialFileObject(
+        JsonElement data,
+        JsonElement attributes,
+        DateTimeOffset? lastAnalysis)
+    {
+        return new VirusTotalOfficialFileObject
+        {
+            Id = ReadString(data, "id"),
+            Type = ReadString(data, "type"),
+            Md5 = ReadString(attributes, "md5"),
+            Sha1 = ReadString(attributes, "sha1"),
+            Sha256 = ReadString(attributes, "sha256"),
+            SizeBytes = ReadNullableLong(attributes, "size"),
+            FileTypeDescription = ReadString(attributes, "type_description"),
+            TypeTag = ReadString(attributes, "type_tag"),
+            Magic = ReadString(attributes, "magic"),
+            Names = ReadStringArray(attributes, "names"),
+            Tags = ReadStringArray(attributes, "tags"),
+            FirstSubmissionDateUtc = ReadUnixDate(attributes, "first_submission_date"),
+            LastSubmissionDateUtc = ReadUnixDate(attributes, "last_submission_date"),
+            LastAnalysisDateUtc = lastAnalysis,
+            LastModificationDateUtc = ReadUnixDate(attributes, "last_modification_date"),
+            FirstSeenInTheWildDateUtc = ReadUnixDate(attributes, "first_seen_itw_date"),
+            ThreatClassification = ReadThreatClassification(attributes)
+        };
+    }
+
+    private static VirusTotalThreatClassification ReadThreatClassification(JsonElement attributes)
+    {
+        if (attributes.ValueKind != JsonValueKind.Object ||
+            !attributes.TryGetProperty("popular_threat_classification", out var classification) ||
+            classification.ValueKind != JsonValueKind.Object)
+        {
+            return new VirusTotalThreatClassification();
+        }
+
+        return new VirusTotalThreatClassification
+        {
+            SuggestedThreatLabel = ReadString(classification, "suggested_threat_label"),
+            PopularThreatCategories = ReadThreatClassificationItems(classification, "popular_threat_category"),
+            PopularThreatNames = ReadThreatClassificationItems(classification, "popular_threat_name")
+        };
+    }
+
+    private static IReadOnlyList<VirusTotalThreatClassificationItem> ReadThreatClassificationItems(
+        JsonElement classification,
+        string propertyName)
+    {
+        if (classification.ValueKind != JsonValueKind.Object ||
+            !classification.TryGetProperty(propertyName, out var value) ||
+            value.ValueKind != JsonValueKind.Array)
+        {
+            return Array.Empty<VirusTotalThreatClassificationItem>();
+        }
+
+        return value
+            .EnumerateArray()
+            .Where(static item => item.ValueKind == JsonValueKind.Object)
+            .Select(static item =>
+            {
+                var label = ReadString(item, "value");
+                var count = ReadNullableInt(item, "count") ?? 0;
+                return string.IsNullOrWhiteSpace(label)
+                    ? null
+                    : new VirusTotalThreatClassificationItem(label.Trim(), Math.Max(0, count));
+            })
+            .Where(static item => item is not null)
+            .OrderByDescending(static item => item!.Count)
+            .ThenBy(static item => item!.Value, StringComparer.OrdinalIgnoreCase)
+            .Select(static item => item!)
+            .ToArray();
     }
 }

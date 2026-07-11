@@ -1,11 +1,14 @@
-# KSwordSandbox v1 发布差距审计（截至 071ec4c）
+# KSwordSandbox v1 发布差距审计（截至 0068358）
 
-更新时间：2026-07-12。本文是发布经理/审阅者 handoff，基于 `071ec4c Advance MVP artifact evidence readiness`
+更新时间：2026-07-12。本文是发布经理/审阅者 handoff，基于 `0068358 Advance v20 evidence and release readiness`
 之后的源码与文档状态整理；本次文档刷新没有重跑 Hyper-V live、重 smoke 或签名链。
 
 本页只回答发布前最重要的三件事：当前能交付什么、还差什么、审阅者用哪些低副作用命令验收。
 百分比不包含测试覆盖占比；100% 指当前 open-source MVP 可务实做到的范围，不包含云端多租户、海量样本库、
 完整恶意家族归因或默认真实 R0 驱动签名。
+本次不调整百分比：这次只加强 release/deployment guardrail、runtime dry-run 诊断和
+no-fresh-live 说明；没有新的 build 矩阵、真实样本报告、fresh live evidence `job id`
+或签名链结果可支撑上调。
 
 ## 总体判断
 
@@ -70,10 +73,13 @@
 已具备能力：
 
 - release/readiness 路径会扫描 `CSignTool.exe` 和 legacy interactive signing wrapper。
+- release/readiness 也会扫描 `AuthenticodeVariantGUI.exe`、`Out-GridView` 和常见
+  Windows Forms/OpenFileDialog/SaveFileDialog 指标，防止 GUI signing fallback 混入默认路径。
 - `install.ps1` / `run.ps1` / package/readiness 默认不签名、不加载真实 R0 driver。
 - 真实 R0 文档应坚持 ordinary `signtool.exe` 或 guest test-signing 的人工 lab 路径，不自动回退 GUI 签名链。
 
-通过证据：`Test-ReleaseReadiness.ps1` 的 `no-csigntool-release-path` 为 `Passed`。
+通过证据：`Test-ReleaseReadiness.ps1` 的 `no-csigntool-release-path` 和
+`no-gui-signing-fallback` 均为 `Passed`。
 
 ### 3. 最新 live 证据 / Fresh live evidence 由 release manager 在 lab 主机确认
 
@@ -91,6 +97,8 @@
 
 - 若 release notes 要声称“本候选版本已生成真实 Notepad 5s 报告”，必须在准备好的实验室主机重新运行上面的 live 命令并记录 job id。
 - 若真实 R0 未就绪，使用 disabled/mock R0 或记录 `-NoR0Collector`/等效配置，不把 R0 driver load 作为默认发布门槛。
+- 若未重新运行 live，release notes 必须写“本候选未刷新 fresh live evidence”；
+  `Test-ReleaseReadiness.ps1` / `package-portable.ps1` 的通过结果不能替代 live `job id`。
 
 通过证据：runtime root 下的最新 job 包含 `runbook-execution.json`、`guest\<job-id>\events.json`、`report.json`、
 `report.zh.html` 和 `report.en.html`，且 VM 已回到预期 checkpoint/state。

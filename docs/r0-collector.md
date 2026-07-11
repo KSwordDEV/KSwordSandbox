@@ -246,13 +246,28 @@ vocabulary: `protocolPayloadSource=none-r0-endpoint-metadata-only`,
 `pcapTlsDetailsAvailable=false`, and per-protocol boundary labels such as
 `dnsBoundary`, `httpBoundary`, and `tlsBoundary`. These fields are compatibility
 metadata only; they do not add packet parsing to R0.
+Correlation stability is explicit and additive: network rows also expose
+`networkCorrelationContractVersion=1`, `networkCorrelationRole=r0-endpoint-candidate`,
+`pcapCorrelationRole=join-candidate-not-l7-owner`,
+`pcapCorrelationJoinFields=flowKey|sourceEndpoint|destinationEndpoint|protocolName|sourcePort|destinationPort|processId`,
+`pcapCorrelationMissingFields`, `pcapCorrelationConfidence`,
+`networkCorrelationStableFields`, `l7ProtocolDetailsAvailable=false`,
+`l7ProtocolDetailsOwner=pcap-browser-sidecar-not-r0`,
+`r0ProtocolParserGuarantee=endpoint-port-pid-layer-only`, and
+`protocolBoundaryVerdict=l7-unavailable-r0-endpoint-only`. DNS/HTTP/TLS-specific
+owner fields (`dnsDetailsOwner`, `httpDetailsOwner`, `tlsDetailsOwner`) and
+record-type hints (`dnsCorrelationRecordType`, `httpCorrelationRecordType`,
+`tlsCorrelationRecordType`) identify which PCAP/browser/sidecar row family must
+own names, URLs, SNI, certificate, JA3/JA3S, response-code, or answer details.
 
 网络语义注意：`serviceHint` 和 DNS/HTTP/TLS candidate booleans 是 evidence labels，
 不是协议解析 verdict。R0Collector 不从 ALE payload 中解析 DNS name、HTTP Host/URI 或 TLS
 SNI；它只保留 endpoint/PID/layer/callout/filter 信息，让 Host import 可以把这些行与
 PCAP-derived rows 关联。中文 operator hint 字段 `zhPcapCorrelationHint` 和
 `zhNetworkBoundaryHint` 会明确提示：flowKey/端点是关联候选，DNS/HTTP/TLS 细节应来自
-PCAP、浏览器或 sidecar 行。
+PCAP、浏览器或 sidecar 行。协议专项中文提示 `zhDnsCorrelationHint`、
+`zhHttpCorrelationHint` 和 `zhTlsCorrelationHint` 分别提醒 operator：DNS 查询名/响应、
+HTTP Host/URI/Method/状态码、TLS SNI/证书/JA3/JA3S 都不是 R0 行的解析结果。
 
 当 file/process/image/registry payload 携带 bounded subject path 时，top-level
 `SandboxEvent.path` 会设置为该 subject path，让 WebUI live monitor 和 HTML report
@@ -446,7 +461,12 @@ KSword.Sandbox.R0Collector.exe `
   downloaded executable file creation. They are listed in
   `semanticSelfCheckScenarios` and do not change `StressJsonlExpectedDriverRows`.
   `semanticRowKind=no-device-companion` and `semanticRowCountedInStress=false`
-  make this separation machine-readable.
+  make this separation machine-readable. Additive fields
+  `semanticCompanionRow=true`, `semanticCompanionCount=6`,
+  `semanticCompanionContract=not-counted-in-StressJsonlExpectedDriverRows`,
+  `semanticStressCountImpact=none`, and `zhCompanionHint` reinforce that the
+  companion corpus enriches semantics without altering the 32 counted
+  `driver.file` stress rows.
 - `sequence` range `1200..1231` and `StressJsonlSequenceGapCount=0`.
 - a mock `r0collector.driverReadEvents` summary with
   `recordsProcessed`/`eventsEmitted`, `processed`/`eligible`/`emitted`,
@@ -523,6 +543,16 @@ Every collector-owned row keeps the event-quality fields stable under `data`:
   `pcapExpectedRecordTypes`, `pcap*DetailsAvailable`, `dnsBoundary`,
   `httpBoundary`, `tlsBoundary`, `zhPcapCorrelationHint`, and
   `zhNetworkBoundaryHint`.
+  Correlation rows additionally keep `networkCorrelationContractVersion`,
+  `networkCorrelationRole`, `pcapCorrelationRole`, `pcapCorrelationJoinFields`,
+  `pcapCorrelationMissingFields`, `pcapCorrelationConfidence`,
+  `networkCorrelationStableFields`, `l7ProtocolDetailsAvailable`,
+  `l7ProtocolDetailsOwner`, `r0ProtocolParserGuarantee`,
+  `protocolBoundaryVerdict`, `dnsCorrelationRecordType`,
+  `httpCorrelationRecordType`, `tlsCorrelationRecordType`,
+  `dnsDetailsOwner`, `httpDetailsOwner`, `tlsDetailsOwner`,
+  `zhDnsCorrelationHint`, `zhHttpCorrelationHint`, and
+  `zhTlsCorrelationHint`.
 - `sequence` is a concrete driver event sequence on driver rows and a
   `nextSequence` alias on snapshot/summary rows. Snapshot rows set
   `sequenceMeaning=nextSequence` so reports do not confuse a future sequence
@@ -554,7 +584,11 @@ Every collector-owned row keeps the event-quality fields stable under `data`:
   sample activity.
 - Diagnostic and noise rows also use richer taxonomy fields:
   `noiseScope`, `noiseKind`, `noiseSource`, `noiseDisposition`, and
-  `noiseFieldSet`. 中文：这些字段是采集/证据质量标签，帮助 operator 把
+  `noiseFieldSet`. New additive taxonomy evidence `noiseTaxonomyVersion`,
+  `noiseDecision`, `noiseDecisionSource`, `noiseClassificationConfidence`,
+  `noiseProbeKind`, `sampleBehaviorCandidateReason`, and
+  `zhNoiseClassificationHint` makes the classification reason stable even when
+  the row is a diagnostic or importer-tolerance probe. 中文：这些字段是采集/证据质量标签，帮助 operator 把
   readiness、ABI 自检和 JSONL 容错探针从样本行为中分离。
 
 malformed line 处理是刻意且有界的。除非在 mock/stress mode 中显式请求
@@ -616,11 +650,19 @@ KSword.Sandbox.R0Collector.exe `
   `pcapCorrelationPolicy`, `dnsBoundaryPolicy`, `httpBoundaryPolicy`, and
   `tlsBoundaryPolicy`: make no-device ABI/layout and protocol-boundary
   diagnostics stable enough for release gates and Chinese operator hints.
+- `networkCorrelationPolicy`, `networkCorrelationStableFields`,
+  `pcapCorrelationJoinFieldsPolicy`, and `l7ProtocolDetailsPolicy`: prove the
+  collector advertises the stable flowKey/endpoints/protocol/ports/processId
+  join contract while keeping L7 DNS/HTTP/TLS details owned by PCAP/browser/
+  sidecar rows.
 - `semanticSelfCheckScenarios`, `semanticSelfCheckRows`,
   `semanticSelfCheckSequenceStart`, `semanticSelfCheckSequenceEnd`,
   `semanticSelfCheckPolicy`, and `networkProtocolParserBoundary`: prove the
   no-device semantic companion corpus and R0/PCAP parser boundary are compiled
   into the collector binary.
+- `semanticStressCountPreservationPolicy`: states that semantic companion rows
+  keep `semanticRowCountedInStress=false` and do not contribute to
+  `StressJsonlExpectedDriverRows`.
 - `eventHeaderSize`, `healthReplySize`, `capabilitiesReplySize`,
   `statusReplySize`, `networkStatusReplySize`, `readEventsRequestSize`,
   `readEventsReplyHeaderSize`, network-status offset fields, and payload-size
@@ -678,6 +720,8 @@ live events。
 - Stable semantic/noise fields: `stableJsonlFields`,
   `typedPayloadSemanticFields`, `selfNoiseClassificationFields`,
   `stressBackpressureDiagnostics`, and `queueLossEvidence`.
+  `stableJsonlFields` and `selfNoiseClassificationFields` include the additive
+  network-correlation/noise-classification fields named above.
 
 中文：如果这些字段消失、改名或 offset/size 变化，readiness 应视为 ABI/schema
 drift，需要同步 public header、collector parser、docs 和 smoke tests。中文

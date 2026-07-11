@@ -46,6 +46,10 @@ internal sealed class BehaviorRuleStaticEventConsumptionScenario : ISmokeTestSce
         "static-resource-embedded-pe",
         "static-resource-high-entropy",
         "static-section-writable-executable",
+        "static-section-virtual-layout-anomaly",
+        "static-pe-signature-metadata-present",
+        "static-pe-parse-warning-observed",
+        "static-pe-zero-entrypoint",
         "static-embedded-url",
         "static-domain-indicator",
         "static-tor-domain-string",
@@ -161,7 +165,8 @@ internal sealed class BehaviorRuleStaticEventConsumptionScenario : ISmokeTestSce
                     ["characteristics"] = "IMAGE_SCN_MEM_EXECUTE|IMAGE_SCN_MEM_WRITE",
                     ["isExecutable"] = "True",
                     ["isWritable"] = "True",
-                    ["tags"] = "pe_section,high_entropy_section,very_high_entropy_section,writable_executable_section"
+                    ["sectionRole"] = "writable-executable",
+                    ["tags"] = "pe_section,high_entropy_section,very_high_entropy_section,writable_executable_section,virtual_only_section,oversized_virtual_section"
                 }
             },
             new SandboxEvent
@@ -407,11 +412,15 @@ internal sealed class BehaviorRuleStaticEventConsumptionScenario : ISmokeTestSce
                 {
                     ["fileFormat"] = "PE32+",
                     ["isPe"] = "True",
+                    ["machine"] = "0x8664",
+                    ["subsystem"] = "Windows GUI",
+                    ["entryPointRva"] = "0x00000000",
                     ["sectionCount"] = "5",
                     ["tagCount"] = "4",
                     ["interestingStringCount"] = "4",
-                    ["warningCount"] = "0",
-                    ["tags"] = "resources_present,resource_payload_candidate,resource_embedded_pe,resource_high_entropy_data"
+                    ["warningCount"] = "1",
+                    ["warnings"] = "Synthetic malformed-header warning for static rule smoke coverage.",
+                    ["tags"] = "resources_present,resource_payload_candidate,resource_embedded_pe,resource_high_entropy_data,digital_signature_present,authenticode_signature_present,signature_pkcs_signed_data"
                 }
             },
             new SandboxEvent
@@ -491,10 +500,17 @@ internal sealed class BehaviorRuleStaticEventConsumptionScenario : ISmokeTestSce
         var yaraConsumers = staticRules
             .Where(rule => rule.EventTypes.Contains("static.yara.match", StringComparer.OrdinalIgnoreCase))
             .ToList();
+        var genericYaraConsumers = yaraConsumers
+            .Where(rule => string.Equals(rule.Id, "static-yara-match-observed", StringComparison.OrdinalIgnoreCase))
+            .ToList();
         SmokeAssert.True(
-            yaraConsumers.Count == 1 &&
-            string.Equals(yaraConsumers[0].Id, "static-yara-match-observed", StringComparison.OrdinalIgnoreCase),
+            genericYaraConsumers.Count == 1,
             "static.yara.match should have exactly one generic consumer to avoid duplicate YARA findings.");
+        SmokeAssert.True(
+            yaraConsumers
+                .Where(rule => !string.Equals(rule.Id, "static-yara-match-observed", StringComparison.OrdinalIgnoreCase))
+                .All(rule => rule.Tags.Contains("structured-static", StringComparer.OrdinalIgnoreCase) && rule.DataContains.Count > 0),
+            "Additional static.yara.match consumers must be constrained structured-static capability rules.");
 
         var processInjectionRule = staticRules.Single(rule => string.Equals(rule.Id, "static-import-process-injection", StringComparison.OrdinalIgnoreCase));
         SmokeAssert.True(string.Equals(processInjectionRule.MitreTechniqueId, "T1055", StringComparison.OrdinalIgnoreCase), "Static process-injection imports should map to MITRE T1055.");

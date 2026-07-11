@@ -133,11 +133,19 @@ internal sealed class R0CollectorAbiSelfCheckContractScenario : ISmokeTestScenar
             "zhDriverEventSequencePolicy",
             "networkServiceHintPolicy",
             "networkFlowKeyPolicy",
+            "networkCorrelationPolicy",
+            "networkCorrelationStableFields",
+            "pcapCorrelationJoinFieldsPolicy",
             "selfNoiseClassificationFields",
             "typedPayloadSemanticFields",
             "stressBackpressureDiagnostics",
             "queueLossEvidence",
             "stableJsonlFields",
+            "semanticStressCountPreservationPolicy",
+            "noiseClassificationFieldSet",
+            "noiseTaxonomyVersion",
+            "noiseDecision",
+            "zhNoiseClassificationHint",
             "abiSelfCheckComplete"
         })
         {
@@ -339,13 +347,36 @@ internal sealed class R0CollectorAbiSelfCheckContractScenario : ISmokeTestScenar
             "flowKeyVersion=1",
             "ABI self-check should document flow-key version semantics.");
         RequireContains(
+            abiSelfCheck.Data["networkCorrelationPolicy"],
+            "join-candidate-not-l7-owner",
+            "ABI self-check should document R0/PCAP ownership boundary.");
+        RequireContains(
+            abiSelfCheck.Data["networkCorrelationStableFields"],
+            "pcapCorrelationJoinFields",
+            "ABI self-check should list stable network correlation fields.");
+        RequireContains(
+            abiSelfCheck.Data["pcapCorrelationJoinFieldsPolicy"],
+            "flowKey|sourceEndpoint|destinationEndpoint",
+            "ABI self-check should document stable PCAP join fields.");
+        RequireContains(
             abiSelfCheck.Data["selfNoiseClassificationFields"],
             "noiseClass",
             "ABI self-check should list self-noise classification fields.");
         RequireContains(
+            abiSelfCheck.Data["selfNoiseClassificationFields"],
+            "noiseDecision",
+            "ABI self-check should list noise decision fields.");
+        RequireData(abiSelfCheck, "noiseTaxonomyVersion", "1");
+        RequireData(abiSelfCheck, "noiseDecision", "collector-diagnostic");
+        RequireData(abiSelfCheck, "sampleBehaviorCandidateReason", "abi-self-check-is-collection-diagnostic");
+        RequireContains(
             abiSelfCheck.Data["stressBackpressureDiagnostics"],
             "observedSequenceSpan",
             "ABI self-check should list stress/backpressure diagnostic fields.");
+        RequireContains(
+            abiSelfCheck.Data["semanticStressCountPreservationPolicy"],
+            "semanticRowCountedInStress=false",
+            "ABI self-check should preserve semantic companion/stress row-count separation.");
         RequireContains(
             abiSelfCheck.Data["jsonlNoiseInjectionGuard"],
             "rejected",

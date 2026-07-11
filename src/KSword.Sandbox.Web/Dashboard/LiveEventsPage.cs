@@ -74,7 +74,29 @@ internal static class LiveEventsPage
             table { border-collapse:separate; border-spacing:0; width:100%; }
             td, th { border-bottom:1px solid #e5edf6; padding:9px; text-align:left; vertical-align:top; }
             th { background:#f7fbff; color:#475569; font-size:12px; position:sticky; top:0; text-transform:uppercase; z-index:1; }
-            td:nth-child(5),td:nth-child(6) { max-width:360px; word-break:break-word; }
+            td:nth-child(6),td:nth-child(7) { max-width:360px; word-break:break-word; }
+            .stream-status { background:#f8fafc; border:1px solid var(--line); border-left:3px solid #cbd5e1; color:#475569; margin:10px 0; padding:10px 12px; }
+            .stream-status.ok { background:#f0fdf4; border-color:#bbf7d0; border-left-color:#22c55e; color:#047857; }
+            .stream-status.fallback { background:#eff6ff; border-left-color:var(--blue); color:#075985; }
+            .stream-status.error { background:#fff7ed; border-color:#fdba74; border-left-color:#f97316; color:#9a3412; }
+            .event-toolbar { border:1px solid var(--line); border-left:3px solid var(--blue); display:grid; gap:10px; margin:12px 0; padding:12px; }
+            .quick-filter-line { align-items:flex-start; display:flex; flex-wrap:wrap; gap:8px 10px; }
+            .quick-filter-title { color:#475569; font-size:12px; font-weight:900; min-width:72px; padding-top:7px; }
+            .quick-filter-group { align-items:center; display:flex; flex-wrap:wrap; gap:6px; }
+            button.filter-chip { background:#f8fbff; border:1px solid var(--line); color:#075985; font-size:12px; padding:6px 9px; }
+            button.filter-chip.active { background:var(--blue); border-color:var(--blue); color:white; }
+            .event-page-controls { align-items:center; display:flex; flex-wrap:wrap; gap:8px; }
+            .event-page-controls label { align-items:center; display:inline-flex; gap:6px; font-weight:800; }
+            .event-page-controls select { border:1px solid var(--line); color:#0f172a; padding:7px 9px; }
+            .event-page-status { background:#f8fafc; border:1px solid var(--line); color:#475569; font-size:12px; font-weight:800; padding:7px 9px; }
+            .selected-event-summary { background:#f8fbff; border:1px dashed #bfdbfe; color:#075985; margin:10px 0; padding:10px 12px; word-break:break-word; }
+            .event-row { cursor:pointer; }
+            .event-row:hover { background:#f8fbff; }
+            .event-row.selected { background:#eff6ff; outline:2px solid rgba(67,160,255,.45); outline-offset:-2px; }
+            .event-severity { border-left:3px solid #cbd5e1; display:inline-block; padding-left:6px; }
+            .event-severity.error { border-left-color:#ef4444; color:#b91c1c; font-weight:900; }
+            .event-severity.warning { border-left-color:#f97316; color:#c2410c; font-weight:900; }
+            .event-severity.info { border-left-color:#22c55e; color:#047857; }
             .progressbar { background:#e2e8f0; border-radius:2px; height:12px; margin:12px 0; overflow:hidden; }
             .progressbar.compact { height:8px; margin:8px 0; }
             .progressbar-fill { background:linear-gradient(90deg,var(--blue),#78c0ff); border-radius:2px; height:100%; transition:width .2s ease; }
@@ -161,8 +183,8 @@ internal static class LiveEventsPage
             .report-ready { background:transparent; border-color:var(--line); }
 
             /* Square, flat operator theme: keep visual nesting shallow. */
-            section, article, .metric, .pill, button, a.button, a.buttonlink, input, code, pre, .pathbox, .callout, .report-notice, .report-entry, .workspace-tab, .tab-button, .tab-panel, details, .progress-box, .progress-bar, .progress-fill, .stage, .recent-job-card, .runbook-step, .empty, .table-wrap, .step-card, .artifact-group, .artifact-card, .cockpit-card, .vt-state-banner, .report-ready, .handoff-notice, .countdown, .toast, .num { border-radius: 0 !important; }
-            section, article, .metric, .pathbox, .callout, .report-notice, .report-entry, .tab-panel, .progress-box, .stage, .recent-job-card, .runbook-step, .step-card, .artifact-group, .artifact-card, .cockpit-card, .report-ready, .handoff-notice { box-shadow: none !important; }
+            section, article, .metric, .pill, button, a.button, a.buttonlink, input, code, pre, .pathbox, .callout, .report-notice, .report-entry, .workspace-tab, .tab-button, .tab-panel, details, .progress-box, .progress-bar, .progress-fill, .stage, .recent-job-card, .runbook-step, .empty, .table-wrap, .step-card, .artifact-group, .artifact-card, .cockpit-card, .vt-state-banner, .report-ready, .handoff-notice, .countdown, .toast, .num, .stream-status, .event-toolbar, .event-page-status, .selected-event-summary, select { border-radius: 0 !important; }
+            section, article, .metric, .pathbox, .callout, .report-notice, .report-entry, .tab-panel, .progress-box, .stage, .recent-job-card, .runbook-step, .step-card, .artifact-group, .artifact-card, .cockpit-card, .report-ready, .handoff-notice, .stream-status, .event-toolbar { box-shadow: none !important; }
             .pill, button, a.button, a.buttonlink { box-shadow: none !important; }
             @media(max-width:900px){ .grid{grid-template-columns:1fr;} header{padding:24px;} }
           </style>
@@ -242,11 +264,43 @@ internal static class LiveEventsPage
             </section>
             <section>
               <h2 data-zh="原始事件流" data-en="Raw event stream">原始事件流</h2>
-              <p class="muted" data-zh="右键任意表格单元可复制。若 SSE 不可用，会自动降级为轮询。" data-en="Right-click any table cell to copy. If SSE is unavailable, the page falls back to polling.">右键任意表格单元可复制。若 SSE 不可用，会自动降级为轮询。</p>
+              <p class="muted" data-zh="实时显示不是最终判定（verdict）；这里只保留未归类原始事件。可用严重度、类型、来源快速筛选，表格按页渲染，右键任意行/单元复制，选中行后可复制一条简短事件摘要。" data-en="Live display is not the final verdict; this page keeps unclassified raw events only. Use severity, type, and source quick filters, render bounded table pages, right-click any row/cell to copy, and select a row to copy a compact event summary.">实时显示不是最终判定（verdict）；这里只保留未归类原始事件。可用严重度、类型、来源快速筛选，表格按页渲染，右键任意行/单元复制，选中行后可复制一条简短事件摘要。</p>
+              <div id="streamFallbackStatus" class="stream-status" data-copy="原始事件流状态：等待连接 / raw event stream pending" data-zh="原始事件流状态：等待连接。" data-en="Raw event stream status: waiting to connect.">原始事件流状态：等待连接。</div>
+              <div class="event-toolbar" aria-label="原始事件筛选与分页">
+                <div class="quick-filter-line">
+                  <span class="quick-filter-title" data-zh="严重度" data-en="Severity">严重度</span>
+                  <div id="severityFilters" class="quick-filter-group"></div>
+                </div>
+                <div class="quick-filter-line">
+                  <span class="quick-filter-title" data-zh="类型" data-en="Type">类型</span>
+                  <div id="typeFilters" class="quick-filter-group"></div>
+                </div>
+                <div class="quick-filter-line">
+                  <span class="quick-filter-title" data-zh="来源" data-en="Source">来源</span>
+                  <div id="sourceFilters" class="quick-filter-group"></div>
+                </div>
+                <div class="event-page-controls">
+                  <button class="secondary" type="button" onclick="goEventPage('first')" data-zh="首页" data-en="First">首页</button>
+                  <button class="secondary" type="button" onclick="goEventPage('prev')" data-zh="上一页" data-en="Previous">上一页</button>
+                  <span id="eventPageStatus" class="event-page-status" data-copy="原始事件分页：等待数据 / raw-event pagination pending">原始事件分页：等待数据</span>
+                  <button class="secondary" type="button" onclick="goEventPage('next')" data-zh="下一页" data-en="Next">下一页</button>
+                  <button class="secondary" type="button" onclick="goEventPage('latest')" data-zh="最新页" data-en="Latest">最新页</button>
+                  <label><span data-zh="每页" data-en="Page size">每页</span>
+                    <select id="eventPageSize" onchange="setEventPageSize(this.value)">
+                      <option value="25">25</option>
+                      <option value="50" selected>50</option>
+                      <option value="100">100</option>
+                    </select>
+                  </label>
+                  <button class="secondary" type="button" onclick="clearEventFilters()" data-zh="清除筛选" data-en="Clear filters">清除筛选</button>
+                  <button type="button" onclick="copySelectedEventSummary()" data-zh="复制选中事件摘要" data-en="Copy selected event summary">复制选中事件摘要</button>
+                </div>
+              </div>
+              <div id="selectedEventSummary" class="selected-event-summary muted" data-copy="未选择原始事件 / no raw event selected" data-zh="尚未选择原始事件；点击表格行后可复制摘要。" data-en="No raw event is selected yet; click a table row to copy its summary.">尚未选择原始事件；点击表格行后可复制摘要。</div>
               <div class="table-wrap">
                 <table>
-                  <thead><tr><th data-zh="时间" data-en="time">时间</th><th data-zh="事件类型" data-en="eventType">事件类型</th><th data-zh="来源" data-en="source">来源</th><th data-zh="进程" data-en="pid/process">进程</th><th data-zh="路径" data-en="path">路径</th><th data-zh="数据（已隐藏命令输出字段）" data-en="data (command output fields hidden)">数据（已隐藏命令输出字段）</th></tr></thead>
-                  <tbody id="eventRows"><tr><td colspan="6" class="muted" data-zh="暂无事件。" data-en="No events yet.">暂无事件。</td></tr></tbody>
+                  <thead><tr><th data-zh="严重度" data-en="severity">严重度</th><th data-zh="时间" data-en="time">时间</th><th data-zh="事件类型" data-en="eventType">事件类型</th><th data-zh="来源" data-en="source">来源</th><th data-zh="进程" data-en="pid/process">进程</th><th data-zh="路径" data-en="path">路径</th><th data-zh="数据（已隐藏命令输出字段）" data-en="data (command output fields hidden)">数据（已隐藏命令输出字段）</th></tr></thead>
+                  <tbody id="eventRows"><tr><td colspan="7" class="muted" data-zh="暂无原始事件。" data-en="No raw events yet.">暂无原始事件。</td></tr></tbody>
                 </table>
               </div>
             </section>
@@ -310,12 +364,37 @@ internal static class LiveEventsPage
               ['生成报告', 'Generate report', '刷新 JSON/HTML 报告并开放入口', 'Refresh JSON/HTML reports and expose links']
             ];
             const seen = new Set();
+            const liveEventRecords = [];
+            const maxBufferedLiveEvents = 2000;
+            const eventTypeFilters = [
+              ['all', '全部', 'All'],
+              ['process', '进程', 'Process'],
+              ['file', '文件', 'File'],
+              ['registry', '注册表', 'Registry'],
+              ['network', '网络', 'Network'],
+              ['driver', 'R0/驱动', 'R0/driver'],
+              ['artifact', '证据', 'Artifact'],
+              ['diagnostic', '诊断/状态', 'Diagnostics']
+            ];
+            const severityFilters = [
+              ['all', '全部', 'All'],
+              ['error', '错误', 'Error'],
+              ['warning', '警告', 'Warning'],
+              ['info', '信息', 'Info']
+            ];
+            let activeSeverityFilter = 'all';
+            let activeTypeFilter = 'all';
+            let activeSourceFilter = 'all';
+            let eventPageIndex = 0;
+            let eventPageSize = 50;
+            let selectedEventKey = '';
+            let liveFetchInFlight = false;
 
             function t(zh, en) { return currentLanguage === 'en' ? en : zh; }
             function applyLanguage() {
               document.documentElement.lang = currentLanguage === 'en' ? 'en' : 'zh-CN';
               document.querySelectorAll('[data-zh][data-en]').forEach(el => {
-                if (el.id === 'status' || el.id === 'sources' || el.id === 'eventRows' || el.id === 'operatorCockpit' || el.id === 'artifactCards' || el.id === 'reportReadyActions' || el.id === 'vtResult' || el.id === 'uploadHandoffNotice') { return; }
+                if (el.id === 'status' || el.id === 'sources' || el.id === 'eventRows' || el.id === 'operatorCockpit' || el.id === 'artifactCards' || el.id === 'reportReadyActions' || el.id === 'vtResult' || el.id === 'uploadHandoffNotice' || el.id === 'streamFallbackStatus' || el.id === 'eventPageStatus' || el.id === 'selectedEventSummary' || el.id === 'severityFilters' || el.id === 'typeFilters' || el.id === 'sourceFilters') { return; }
                 el.textContent = t(el.getAttribute('data-zh'), el.getAttribute('data-en'));
               });
               document.getElementById('langToggle').textContent = currentLanguage === 'en' ? '切换到中文' : '切换到 English';
@@ -327,6 +406,7 @@ internal static class LiveEventsPage
               renderUploadHandoffNotice();
               renderArtifactPanel();
               renderOperatorCockpit();
+              renderEventTable();
             }
             document.getElementById('langToggle').addEventListener('click', () => {
               currentLanguage = currentLanguage === 'en' ? 'zh' : 'en';
@@ -454,16 +534,30 @@ internal static class LiveEventsPage
 
             function connectSse() {
               stopLive();
-              setStatus(t('正在连接 SSE 实时事件流...', 'Connecting SSE live event stream...'), false);
+              setStatus(t('正在连接 SSE 原始事件流...', 'Connecting SSE raw event stream...'), false);
+              setStreamFallbackStatus(
+                t('原始事件流：正在连接 SSE；若浏览器、代理或端点不支持，将自动降级为轮询 fallback。', 'Raw event stream: connecting SSE; if the browser, proxy, or endpoint does not support it, the page will fall back to polling.'),
+                'fallback');
               try {
                 eventSource = new EventSource(`/api/jobs/${encodeURIComponent(jobId)}/events/stream?offset=${eventOffset}&take=100&intervalMs=1500`);
-                eventSource.addEventListener('snapshot', ev => renderSnapshot(JSON.parse(ev.data), 'SSE'));
+                eventSource.addEventListener('open', () => setStreamFallbackStatus(
+                  t('原始事件流：SSE 已连接，等待 snapshot；如果长时间没有帧，可手动刷新或等待自动 fallback。', 'Raw event stream: SSE is connected and waiting for a snapshot; if frames do not arrive, refresh manually or wait for automatic fallback.'),
+                  'ok'));
+                eventSource.addEventListener('snapshot', ev => {
+                  try {
+                    renderSnapshot(JSON.parse(ev.data), 'SSE');
+                  } catch {
+                    setStreamFallbackStatus(
+                      t('原始事件流：SSE snapshot 解析失败；已保留连接并等待下一帧，表格不会追加不可解析数据。', 'Raw event stream: failed to parse an SSE snapshot; the connection stays open and the table will not append malformed data.'),
+                      'error');
+                  }
+                });
                 eventSource.onerror = () => {
                   stopLive();
-                  startPolling(t('SSE 不可用，已切换为轮询。', 'SSE unavailable; switched to polling.'));
+                  startPolling(t('SSE 原始事件流不可用，已切换为轮询 fallback；继续使用 nextOffset 游标补齐原始事件。', 'SSE raw event stream is unavailable; switched to polling fallback and will keep using the nextOffset cursor.'));
                 };
               } catch {
-                startPolling(t('浏览器不支持 SSE，已切换为轮询。', 'Browser SSE support unavailable; switched to polling.'));
+                startPolling(t('浏览器不支持 SSE，已切换为轮询 fallback；继续使用 nextOffset 游标补齐原始事件。', 'Browser SSE support is unavailable; switched to polling fallback and will keep using the nextOffset cursor.'));
               }
             }
 
@@ -2081,6 +2175,7 @@ internal static class LiveEventsPage
             function startPolling(message) {
               stopLive();
               setStatus(message, false);
+              setStreamFallbackStatus(message, 'fallback');
               refreshLiveEvents(false);
               pollTimer = setInterval(() => refreshLiveEvents(false), 2000);
             }
@@ -2091,18 +2186,23 @@ internal static class LiveEventsPage
             }
 
             async function refreshLiveEvents(reset) {
+              if (liveFetchInFlight) { return; }
               if (reset) {
-                eventOffset = 0;
-                sourceSignature = '';
-                seen.clear();
-                document.getElementById('eventRows').innerHTML = '';
+                resetLiveEventsBuffer();
+                setStreamFallbackStatus(
+                  t('原始事件流：正在从 offset=0 手动刷新；仍会隐藏命令、stdout、stderr 与 PowerShell 字段。', 'Raw event stream: manually refreshing from offset=0; command, stdout, stderr, and PowerShell fields remain hidden.'),
+                  'fallback');
               }
               try {
+                liveFetchInFlight = true;
                 const response = await fetch(`/api/jobs/${encodeURIComponent(jobId)}/events/live?offset=${eventOffset}&take=100`);
                 const payload = await requireOk(response, t('实时事件', 'live events'));
                 renderSnapshot(payload, 'poll');
               } catch (error) {
                 setStatus(error.message, true);
+                setStreamFallbackStatus(error.message, 'error');
+              } finally {
+                liveFetchInFlight = false;
               }
             }
 
@@ -2561,19 +2661,28 @@ internal static class LiveEventsPage
               const transportLabel = liveTransportLabel(transport);
               const nextSignature = (snapshot.sources || []).join('\\n');
               if (nextSignature !== sourceSignature) {
-                sourceSignature = nextSignature;
-                eventOffset = 0;
-                seen.clear();
-                document.getElementById('eventRows').innerHTML = '';
+                resetLiveEventsBuffer(nextSignature);
               }
 
-              eventOffset = snapshot.nextOffset || eventOffset;
+              const nextOffset = Number(snapshot.nextOffset);
+              eventOffset = Number.isFinite(nextOffset) && nextOffset >= 0 ? nextOffset : eventOffset;
               latestArtifactSources = snapshot.sources || [];
               updateArtifactSignalsFromEvents(snapshot.events || []);
               renderSources(snapshot.sources || []);
               renderArtifactPanel();
               appendRows(snapshot.events || []);
-              setStatus(t(`${transportLabel}：${snapshot.totalEvents || 0} 条原始事件；下次位置 ${eventOffset}；${new Date().toLocaleTimeString()}。`, `${transportLabel}: ${snapshot.totalEvents || 0} raw events; next offset ${eventOffset}; ${new Date().toLocaleTimeString()}.`), false);
+              const visible = filteredEventRecords().length;
+              const buffered = liveEventRecords.length;
+              const sourceStatus = summarizeSourceStatus(snapshot.events || []);
+              const hasMoreText = snapshot.hasMore
+                ? t('服务端仍有更多页，正在继续按游标读取。', 'More pages remain on the server; continuing by cursor.')
+                : t('当前页已读完。', 'Current page is complete.');
+              const statusText = t(`${transportLabel}：${snapshot.totalEvents || 0} 条原始事件；已缓冲 ${buffered} 条，当前筛选 ${visible} 条；下次位置 ${eventOffset}；${hasMoreText} ${new Date().toLocaleTimeString()}。`, `${transportLabel}: ${snapshot.totalEvents || 0} raw events; buffered ${buffered}, current filter ${visible}; next offset ${eventOffset}; ${hasMoreText} ${new Date().toLocaleTimeString()}.`);
+              setStatus(statusText, false);
+              setStreamFallbackStatus(formatLiveStreamDetail(transportLabel, snapshot, buffered, visible, sourceStatus), transport === 'SSE' ? 'ok' : 'fallback');
+              if (transport === 'poll' && snapshot.hasMore) {
+                setTimeout(() => refreshLiveEvents(false), 80);
+              }
             }
 
             function liveTransportLabel(transport) {
@@ -2586,34 +2695,315 @@ internal static class LiveEventsPage
             function renderSources(sources) {
               const target = document.getElementById('sources');
               if (!sources.length) {
-                target.textContent = t('尚未发现事件源。', 'No event sources found yet.');
+                target.textContent = t('尚未发现事件来源。', 'No event sources found yet.');
                 return;
               }
               target.innerHTML = `<strong>${t('事件来源', 'Sources')}</strong><ul>` + sources.map(s => `<li><code data-copy="${escapeAttr(s)}">${escapeHtml(s)}</code></li>`).join('') + '</ul>';
             }
 
             function appendRows(events) {
-              const body = document.getElementById('eventRows');
-              if (!events.length && seen.size === 0) {
-                body.innerHTML = `<tr><td colspan="6" class="muted">${t('暂无事件。', 'No events yet.')}</td></tr>`;
-                return;
-              }
-              if (seen.size === 0) { body.innerHTML = ''; }
+              const wasOnLatestPage = eventPageIndex >= maxEventPageIndex(filteredEventRecords().length);
+              let added = 0;
               for (const ev of events) {
-                const key = JSON.stringify([ev.timestamp, ev.eventType, ev.source, ev.processId, ev.path]);
+                const key = liveEventKey(ev);
                 if (seen.has(key)) { continue; }
                 seen.add(key);
-                const data = ev.data ? JSON.stringify(sanitizeEventData(ev.data)) : '';
-                const pid = [ev.processId || '', ev.processName || ''].filter(Boolean).join(' / ');
-                body.insertAdjacentHTML('beforeend', `<tr>
-                  <td>${cell(ev.timestamp)}</td>
-                  <td>${cell(ev.eventType)}</td>
-                  <td>${cell(ev.source)}</td>
-                  <td>${cell(pid)}</td>
-                  <td>${cell(ev.path)}</td>
-                  <td>${cell(data)}</td>
-                </tr>`);
+                liveEventRecords.push({
+                  key,
+                  event: ev,
+                  severity: eventSeverity(ev),
+                  family: eventFamily(ev),
+                  source: eventSourceValue(ev)
+                });
+                added++;
               }
+              trimLiveEventBuffer();
+              if (added > 0 && wasOnLatestPage) {
+                eventPageIndex = maxEventPageIndex(filteredEventRecords().length);
+              }
+              renderEventTable();
+            }
+
+            function resetLiveEventsBuffer(signature) {
+              eventOffset = 0;
+              sourceSignature = signature || '';
+              seen.clear();
+              liveEventRecords.length = 0;
+              eventPageIndex = 0;
+              selectedEventKey = '';
+              renderEventTable();
+            }
+
+            function trimLiveEventBuffer() {
+              if (liveEventRecords.length <= maxBufferedLiveEvents) { return; }
+              const removeCount = liveEventRecords.length - maxBufferedLiveEvents;
+              liveEventRecords.splice(0, removeCount);
+              seen.clear();
+              for (const record of liveEventRecords) { seen.add(record.key); }
+              if (selectedEventKey && !liveEventRecords.some(record => record.key === selectedEventKey)) {
+                selectedEventKey = '';
+              }
+            }
+
+            function liveEventKey(ev) {
+              return JSON.stringify([ev.timestamp, ev.eventType, ev.source, ev.processId, ev.processName, ev.path]);
+            }
+
+            function renderEventTable() {
+              renderEventFilterChips();
+              const body = document.getElementById('eventRows');
+              const filtered = filteredEventRecords();
+              const maxPage = maxEventPageIndex(filtered.length);
+              eventPageIndex = Math.min(Math.max(eventPageIndex, 0), maxPage);
+              if (liveEventRecords.length === 0) {
+                body.innerHTML = `<tr><td colspan="7" class="muted">${escapeHtml(t('暂无原始事件；保持页面打开，SSE 或轮询 fallback 会继续等待 events.json / driver-events.jsonl。', 'No raw events yet; keep this page open while SSE or polling fallback waits for events.json / driver-events.jsonl.'))}</td></tr>`;
+                updateEventPageStatus(0, 0, 0);
+                renderSelectedEventSummary(null);
+                return;
+              }
+              if (filtered.length === 0) {
+                body.innerHTML = `<tr><td colspan="7" class="muted">${escapeHtml(t('当前严重度/类型/来源筛选无匹配；清除筛选可查看已缓冲原始事件。', 'No buffered raw events match the current severity/type/source filters; clear filters to view them.'))}</td></tr>`;
+                updateEventPageStatus(0, 0, liveEventRecords.length);
+                renderSelectedEventSummary(selectedEventRecord());
+                return;
+              }
+              const start = eventPageIndex * eventPageSize;
+              const pageRows = filtered.slice(start, start + eventPageSize);
+              body.innerHTML = pageRows.map(record => renderEventRow(record)).join('');
+              updateEventPageStatus(start + 1, Math.min(start + pageRows.length, filtered.length), filtered.length);
+              renderSelectedEventSummary(selectedEventRecord());
+            }
+
+            function renderEventRow(record) {
+              const ev = record.event;
+              const pid = [ev.processId || '', ev.processName || ''].filter(Boolean).join(' / ');
+              const data = formatEventData(ev.data);
+              const summary = eventSummary(record);
+              const selectedClass = record.key === selectedEventKey ? ' selected' : '';
+              return `<tr class="event-row${selectedClass}" data-event-key="${escapeAttr(record.key)}" data-copy="${escapeAttr(summary)}">
+                <td><span class="event-severity ${escapeAttr(record.severity)}" data-copy="${escapeAttr(eventSeverityLabel(record.severity))}">${escapeHtml(eventSeverityLabel(record.severity))}</span></td>
+                <td>${cell(ev.timestamp)}</td>
+                <td>${cell(ev.eventType)}</td>
+                <td>${cell(ev.source)}</td>
+                <td>${cell(pid)}</td>
+                <td>${cell(ev.path)}</td>
+                <td>${cell(data)}</td>
+              </tr>`;
+            }
+
+            function renderEventFilterChips() {
+              renderStaticFilterGroup('severityFilters', 'severity', severityFilters, activeSeverityFilter, record => record.severity);
+              renderStaticFilterGroup('typeFilters', 'type', eventTypeFilters, activeTypeFilter, record => record.family);
+              renderSourceFilterGroup();
+            }
+
+            function renderStaticFilterGroup(elementId, kind, filters, activeValue, selector) {
+              const target = document.getElementById(elementId);
+              if (!target) { return; }
+              const counts = countBy(liveEventRecords, selector);
+              target.innerHTML = filters.map(([value, zh, en]) => {
+                const count = value === 'all' ? liveEventRecords.length : (counts.get(value) || 0);
+                const label = `${t(zh, en)} ${count}`;
+                const active = value === activeValue ? ' active' : '';
+                return `<button class="filter-chip${active}" type="button" data-event-filter-kind="${escapeAttr(kind)}" data-event-filter-value="${escapeAttr(value)}" data-copy="${escapeAttr(label)}">${escapeHtml(label)}</button>`;
+              }).join('');
+            }
+
+            function renderSourceFilterGroup() {
+              const target = document.getElementById('sourceFilters');
+              if (!target) { return; }
+              const counts = countBy(liveEventRecords, record => record.source || t('未知来源', 'unknown'));
+              const entries = Array.from(counts.entries())
+                .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+                .slice(0, 8);
+              if (activeSourceFilter !== 'all' && !counts.has(activeSourceFilter)) {
+                activeSourceFilter = 'all';
+              }
+              const allLabel = `${t('全部', 'All')} ${liveEventRecords.length}`;
+              const buttons = [`<button class="filter-chip${activeSourceFilter === 'all' ? ' active' : ''}" type="button" data-event-filter-kind="source" data-event-filter-value="all" data-copy="${escapeAttr(allLabel)}">${escapeHtml(allLabel)}</button>`];
+              for (const [source, count] of entries) {
+                const label = `${source || t('未知来源', 'unknown')} ${count}`;
+                const active = source === activeSourceFilter ? ' active' : '';
+                buttons.push(`<button class="filter-chip${active}" type="button" data-event-filter-kind="source" data-event-filter-value="${escapeAttr(source)}" data-copy="${escapeAttr(label)}">${escapeHtml(label)}</button>`);
+              }
+              target.innerHTML = buttons.join('');
+            }
+
+            function countBy(records, selector) {
+              const map = new Map();
+              for (const record of records) {
+                const key = selector(record) || '';
+                map.set(key, (map.get(key) || 0) + 1);
+              }
+              return map;
+            }
+
+            function filteredEventRecords() {
+              return liveEventRecords.filter(record =>
+                (activeSeverityFilter === 'all' || record.severity === activeSeverityFilter) &&
+                (activeTypeFilter === 'all' || record.family === activeTypeFilter) &&
+                (activeSourceFilter === 'all' || record.source === activeSourceFilter));
+            }
+
+            function maxEventPageIndex(count) {
+              return Math.max(0, Math.ceil(count / eventPageSize) - 1);
+            }
+
+            function updateEventPageStatus(first, last, filteredCount) {
+              const maxPage = maxEventPageIndex(filteredCount);
+              const text = filteredCount > 0
+                ? t(`原始事件分页：第 ${eventPageIndex + 1}/${maxPage + 1} 页，显示 ${first}-${last} / ${filteredCount}；已缓冲 ${liveEventRecords.length} / 上限 ${maxBufferedLiveEvents}。`, `Raw-event pagination: page ${eventPageIndex + 1}/${maxPage + 1}, showing ${first}-${last} / ${filteredCount}; buffered ${liveEventRecords.length} / cap ${maxBufferedLiveEvents}.`)
+                : t(`原始事件分页：当前筛选 0 条；已缓冲 ${liveEventRecords.length} / 上限 ${maxBufferedLiveEvents}。`, `Raw-event pagination: current filter has 0 rows; buffered ${liveEventRecords.length} / cap ${maxBufferedLiveEvents}.`);
+              const target = document.getElementById('eventPageStatus');
+              target.textContent = text;
+              target.setAttribute('data-copy', text);
+            }
+
+            function goEventPage(action) {
+              const maxPage = maxEventPageIndex(filteredEventRecords().length);
+              if (action === 'first') { eventPageIndex = 0; }
+              else if (action === 'prev') { eventPageIndex = Math.max(0, eventPageIndex - 1); }
+              else if (action === 'next') { eventPageIndex = Math.min(maxPage, eventPageIndex + 1); }
+              else if (action === 'latest') { eventPageIndex = maxPage; }
+              renderEventTable();
+            }
+
+            function setEventPageSize(value) {
+              const parsed = Number(value);
+              eventPageSize = [25, 50, 100].includes(parsed) ? parsed : 50;
+              eventPageIndex = Math.min(eventPageIndex, maxEventPageIndex(filteredEventRecords().length));
+              renderEventTable();
+            }
+
+            function setEventFilter(kind, value) {
+              if (kind === 'severity') { activeSeverityFilter = value || 'all'; }
+              if (kind === 'type') { activeTypeFilter = value || 'all'; }
+              if (kind === 'source') { activeSourceFilter = value || 'all'; }
+              eventPageIndex = 0;
+              renderEventTable();
+            }
+
+            function clearEventFilters() {
+              activeSeverityFilter = 'all';
+              activeTypeFilter = 'all';
+              activeSourceFilter = 'all';
+              eventPageIndex = maxEventPageIndex(liveEventRecords.length);
+              renderEventTable();
+            }
+
+            function selectEvent(key) {
+              selectedEventKey = key || '';
+              renderEventTable();
+            }
+
+            function selectedEventRecord() {
+              return selectedEventKey ? liveEventRecords.find(record => record.key === selectedEventKey) || null : null;
+            }
+
+            function renderSelectedEventSummary(record) {
+              const target = document.getElementById('selectedEventSummary');
+              const text = record
+                ? eventSummary(record)
+                : t('尚未选择原始事件；点击表格行后可复制摘要。', 'No raw event is selected yet; click a table row to copy its summary.');
+              target.textContent = text;
+              target.setAttribute('data-copy', text);
+            }
+
+            function copySelectedEventSummary() {
+              const record = selectedEventRecord();
+              if (!record) {
+                showToast(t('请先选择一条原始事件', 'Select one raw event first'));
+                return;
+              }
+              copyText(eventSummary(record));
+            }
+
+            function eventSummary(record) {
+              const ev = record.event;
+              const pid = [ev.processId ? `pid=${ev.processId}` : '', ev.processName ? `process=${ev.processName}` : ''].filter(Boolean).join('; ');
+              const path = ev.path ? `path=${ev.path}` : '';
+              const data = formatEventData(ev.data, 6, 120);
+              return [
+                t('原始事件摘要', 'Raw event summary'),
+                `severity=${eventSeverityLabel(record.severity)}`,
+                `type=${ev.eventType || '-'}`,
+                `source=${ev.source || '-'}`,
+                `time=${ev.timestamp || '-'}`,
+                pid,
+                path,
+                data ? `data=${data}` : ''
+              ].filter(Boolean).join(' | ');
+            }
+
+            function eventSeverity(ev) {
+              const data = ev?.data || {};
+              const explicit = String(firstDataValue(data, ['severity', 'healthSeverity', 'backpressureSeverity', 'level', 'risk']) || '').toLowerCase();
+              if (['critical', 'high', 'error', 'fatal'].includes(explicit)) { return 'error'; }
+              if (['medium', 'warning', 'warn', 'degraded'].includes(explicit)) { return 'warning'; }
+              const text = `${ev?.eventType || ''} ${ev?.source || ''}`.toLowerCase();
+              if (/(fail|failed|failure|error|exception|read_error|parse_error)/.test(text)) { return 'error'; }
+              if (/(timeout|missing|pending|empty|degraded|backpressure|skipped|unavailable)/.test(text)) { return 'warning'; }
+              return 'info';
+            }
+
+            function eventSeverityLabel(severity) {
+              if (severity === 'error') { return t('错误', 'Error'); }
+              if (severity === 'warning') { return t('警告', 'Warning'); }
+              return t('信息', 'Info');
+            }
+
+            function eventFamily(ev) {
+              const type = String(ev?.eventType || '').toLowerCase();
+              const source = String(ev?.source || '').toLowerCase();
+              if (type.startsWith('live.events.') || type.includes('status') || type.includes('health') || type.includes('parse_error') || type.includes('read_error')) { return 'diagnostic'; }
+              if (type.startsWith('driver.') || type.startsWith('r0collector.') || source.includes('driver') || source.includes('r0')) { return 'driver'; }
+              if (type.startsWith('process.') || type.startsWith('image.')) { return 'process'; }
+              if (type.startsWith('file.')) { return 'file'; }
+              if (type.startsWith('registry.')) { return 'registry'; }
+              if (type.startsWith('network.') || type.startsWith('dns.') || type.startsWith('http.') || type.startsWith('tls.') || type.startsWith('pcap.') || type.startsWith('packet_capture.') || type.startsWith('packet-capture.')) { return 'network'; }
+              if (type.startsWith('artifact.') || type.startsWith('screenshot.') || type.startsWith('memory_dump.') || type.startsWith('memory-dump.') || type.startsWith('guest.events.') || type.startsWith('collection.')) { return 'artifact'; }
+              return 'diagnostic';
+            }
+
+            function eventSourceValue(ev) {
+              return String(ev?.source || t('未知来源', 'unknown'));
+            }
+
+            function firstDataValue(data, keys) {
+              for (const key of keys) {
+                if (data && Object.prototype.hasOwnProperty.call(data, key) && data[key] !== undefined && data[key] !== null && data[key] !== '') {
+                  return data[key];
+                }
+              }
+              return '';
+            }
+
+            function formatLiveStreamDetail(transportLabel, snapshot, buffered, visible, sourceStatus) {
+              const sourceText = sourceStatus || ((snapshot.sources || []).length
+                ? t(`事件来源 ${(snapshot.sources || []).length} 个。`, `${(snapshot.sources || []).length} event source(s).`)
+                : t('尚未发现事件来源；页面会继续等待回收 events.json / driver-events.jsonl。', 'No event sources found yet; the page will keep waiting for events.json / driver-events.jsonl collection.'));
+              const modeText = String(transportLabel || '').includes('SSE')
+                ? t('当前传输：SSE 原始事件流。', 'Current transport: SSE raw event stream.')
+                : t('当前传输：轮询 fallback；SSE 不可用时这是预期兜底路径。', 'Current transport: polling fallback; this is expected when SSE is unavailable.');
+              const cursorText = t(`服务端 totalEvents=${snapshot.totalEvents || 0}，nextOffset=${eventOffset}，hasMore=${Boolean(snapshot.hasMore)}。`, `Server totalEvents=${snapshot.totalEvents || 0}, nextOffset=${eventOffset}, hasMore=${Boolean(snapshot.hasMore)}.`);
+              const viewText = t(`页面已缓冲 ${buffered}/${maxBufferedLiveEvents} 条，当前筛选显示 ${visible} 条；命令、stdout、stderr、PowerShell 字段默认隐藏。`, `Page buffered ${buffered}/${maxBufferedLiveEvents} rows and the current filter shows ${visible}; command, stdout, stderr, and PowerShell fields are hidden by default.`);
+              return [modeText, cursorText, viewText, sourceText].filter(Boolean).join(' ');
+            }
+
+            function summarizeSourceStatus(events) {
+              const statuses = [];
+              for (const ev of events || []) {
+                if (!String(ev?.eventType || '').startsWith('live.events.source_status')) { continue; }
+                const data = ev.data || {};
+                const name = firstDataValue(data, ['sourceFileName', 'fileName', 'path']) || ev.path || t('未知来源', 'unknown source');
+                const status = firstDataValue(data, ['status', 'readinessState']) || t('未知状态', 'unknown');
+                const eventCount = firstDataValue(data, ['eventCount', 'recordCount']) || '0';
+                const parseErrors = firstDataValue(data, ['parseErrorCount']) || '0';
+                const partialLines = firstDataValue(data, ['partialLineCount']) || '0';
+                statuses.push(`${name}: status=${status}, events=${eventCount}, parseErrors=${parseErrors}, partialLines=${partialLines}`);
+              }
+              if (!statuses.length) { return ''; }
+              return t(`事件来源诊断：${statuses.slice(0, 3).join('；')}${statuses.length > 3 ? '；…' : ''}。`, `Source diagnostics: ${statuses.slice(0, 3).join('; ')}${statuses.length > 3 ? '; ...' : ''}.`);
             }
 
             function sanitizeEventData(data) {
@@ -2623,6 +3013,26 @@ internal static class LiveEventsPage
                 sanitized[key] = value;
               }
               return sanitized;
+            }
+
+            function formatEventData(data, maxPairs = 12, maxValueLength = 180) {
+              if (!data || typeof data !== 'object') { return ''; }
+              const entries = Object.entries(sanitizeEventData(data));
+              const hiddenTechnical = Object.keys(data).filter(isHiddenTelemetryKey).length;
+              if (!entries.length && hiddenTechnical === 0) { return ''; }
+              const bounded = {};
+              for (const [key, value] of entries.slice(0, maxPairs)) {
+                bounded[key] = boundedText(value, maxValueLength);
+              }
+              const omitted = Math.max(0, entries.length - maxPairs);
+              if (omitted > 0) { bounded.__omittedDataPairs = String(omitted); }
+              if (hiddenTechnical > 0) { bounded.__hiddenTechnicalFields = String(hiddenTechnical); }
+              return JSON.stringify(bounded);
+            }
+
+            function boundedText(value, maxLength) {
+              const text = value == null ? '' : String(value);
+              return text.length > maxLength ? `${text.slice(0, maxLength)}…` : text;
             }
 
             function isHiddenTelemetryKey(key) {
@@ -2706,6 +3116,15 @@ internal static class LiveEventsPage
               status.textContent = message;
               status.setAttribute('data-copy', message || '');
             }
+
+            function setStreamFallbackStatus(message, tone) {
+              const target = document.getElementById('streamFallbackStatus');
+              if (!target) { return; }
+              const normalizedTone = ['ok', 'fallback', 'error'].includes(tone) ? tone : '';
+              target.className = `stream-status ${normalizedTone}`.trim();
+              target.textContent = message || t('原始事件流状态：等待连接。', 'Raw event stream status: waiting to connect.');
+              target.setAttribute('data-copy', target.textContent);
+            }
             function escapeHtml(value) { return String(value ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch])); }
             function escapeAttr(value) { return escapeHtml(value).replace(/`/g, '&#96;'); }
             function fallbackCopyText(value) {
@@ -2731,8 +3150,19 @@ internal static class LiveEventsPage
               fallbackCopyText(value);
               showToast(t('已复制', 'Copied'));
             }
+            document.addEventListener('click', event => {
+              const filter = event.target.closest ? event.target.closest('[data-event-filter-kind]') : null;
+              if (filter) {
+                setEventFilter(filter.getAttribute('data-event-filter-kind'), filter.getAttribute('data-event-filter-value'));
+                return;
+              }
+              const row = event.target.closest ? event.target.closest('tr[data-event-key]') : null;
+              if (row) {
+                selectEvent(row.getAttribute('data-event-key'));
+              }
+            });
             document.addEventListener('contextmenu', event => {
-              const target = event.target.closest ? event.target.closest('[data-copy], code, pre, input, p, li, h1, h2, h3, label, span, a, button, td, th, section, article, .metric, .artifact-card, .cockpit-card, .step-card') : null;
+              const target = event.target.closest ? event.target.closest('[data-copy], tr[data-event-key], code, pre, input, p, li, h1, h2, h3, label, span, a, button, td, th, section, article, .metric, .artifact-card, .cockpit-card, .step-card, .stream-status, .selected-event-summary') : null;
               if (!target) { return; }
               const value = target.getAttribute('data-copy') || target.value || target.innerText || target.textContent || '';
               if (!value.trim()) { return; }

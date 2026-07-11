@@ -17,6 +17,10 @@ namespace KSword.Sandbox.Agent.Collection;
 /// </summary>
 internal sealed class MemoryDumpProbe : IGuestProbe
 {
+    private const string ReasonTaxonomy = "guest-artifact.memory-dump.reason.v1";
+    private const string CoverageTaxonomy = "guest-artifact.memory-dump.coverage.v1";
+    private const string ArtifactSelectorVersion = "artifact-selectors-v1";
+
     private readonly IProcessMemoryDumpCapture dumpCapture;
     private readonly IProcessSnapshotProvider snapshotProvider;
     private readonly HashSet<int> capturedProcessIds = [];
@@ -205,6 +209,16 @@ internal sealed class MemoryDumpProbe : IGuestProbe
         var childSkipped = 0;
         var rootAlreadyCaptured = 0;
         var childAlreadyCaptured = 0;
+        var directChildTargetCount = targets.Count(static target => !target.IsRoot && target.Depth == 1);
+        var deeperDescendantTargetCount = targets.Count(static target => !target.IsRoot && target.Depth > 1);
+        var directChildAttempted = 0;
+        var deeperDescendantAttempted = 0;
+        var directChildCaptured = 0;
+        var deeperDescendantCaptured = 0;
+        var directChildSkipped = 0;
+        var deeperDescendantSkipped = 0;
+        var directChildAlreadyCaptured = 0;
+        var deeperDescendantAlreadyCaptured = 0;
 
         foreach (var target in targets.OrderBy(target => target.Depth).ThenBy(target => target.ProcessId))
         {
@@ -219,6 +233,14 @@ internal sealed class MemoryDumpProbe : IGuestProbe
                 else
                 {
                     childAlreadyCaptured++;
+                    if (target.Depth == 1)
+                    {
+                        directChildAlreadyCaptured++;
+                    }
+                    else
+                    {
+                        deeperDescendantAlreadyCaptured++;
+                    }
                 }
 
                 events.Add(CreateSkippedEvent(
@@ -241,6 +263,14 @@ internal sealed class MemoryDumpProbe : IGuestProbe
             else
             {
                 childAttempted++;
+                if (target.Depth == 1)
+                {
+                    directChildAttempted++;
+                }
+                else
+                {
+                    deeperDescendantAttempted++;
+                }
             }
 
             var evt = await CaptureTargetAsync(context, phaseLabel, target, rootProcessId.Value, cancellationToken).ConfigureAwait(false);
@@ -254,6 +284,14 @@ internal sealed class MemoryDumpProbe : IGuestProbe
                 else
                 {
                     childCaptured++;
+                    if (target.Depth == 1)
+                    {
+                        directChildCaptured++;
+                    }
+                    else
+                    {
+                        deeperDescendantCaptured++;
+                    }
                 }
             }
             else
@@ -266,6 +304,14 @@ internal sealed class MemoryDumpProbe : IGuestProbe
                 else
                 {
                     childSkipped++;
+                    if (target.Depth == 1)
+                    {
+                        directChildSkipped++;
+                    }
+                    else
+                    {
+                        deeperDescendantSkipped++;
+                    }
                 }
             }
 
@@ -303,6 +349,16 @@ internal sealed class MemoryDumpProbe : IGuestProbe
             childSkipped,
             rootAlreadyCaptured,
             childAlreadyCaptured,
+            directChildTargetCount,
+            deeperDescendantTargetCount,
+            directChildAttempted,
+            deeperDescendantAttempted,
+            directChildCaptured,
+            deeperDescendantCaptured,
+            directChildSkipped,
+            deeperDescendantSkipped,
+            directChildAlreadyCaptured,
+            deeperDescendantAlreadyCaptured,
             rootPidReuseSkipped));
         return events;
     }
@@ -352,6 +408,15 @@ internal sealed class MemoryDumpProbe : IGuestProbe
         evt.Data["status"] = "captured";
         evt.Data["childProcessDumpTarget"] = (target is not null && !target.IsRoot).ToString(CultureInfo.InvariantCulture).ToLowerInvariant();
         evt.Data["nonfatal"] = "false";
+        evt.Data["artifactEvent"] = "true";
+        evt.Data["behaviorCounted"] = "false";
+        evt.Data["nonbehavior"] = "true";
+        evt.Data["reason"] = "memoryDumpCaptured";
+        evt.Data["reasonCode"] = "memoryDumpCaptured";
+        evt.Data["reasonCategory"] = "captured";
+        evt.Data["reasonTaxonomy"] = ReasonTaxonomy;
+        evt.Data["reasonTaxonomyVersion"] = "v1";
+        evt.Data["artifactSelectorVersion"] = ArtifactSelectorVersion;
         evt.Data["artifactIntegrityState"] = "pending-hash";
         evt.Data["zhMessage"] = "内存转储已采集为可下载证据文件。";
         evt.Data["zhHint"] = "内存转储可能包含敏感内容；请使用 artifactRelativePath 下载，并用 sizeBytes/sha256 校验完整性。";
@@ -374,6 +439,10 @@ internal sealed class MemoryDumpProbe : IGuestProbe
             if (artifactPath.IsOutputRelative)
             {
                 AddOptionalData(evt, "artifactRelativePath", artifactPath.DisplayPath);
+                AddOptionalData(evt, "artifactSelector", artifactPath.DisplayPath);
+                AddOptionalData(evt, "downloadSelector", artifactPath.DisplayPath);
+                evt.Data["artifactSelectorKind"] = "safe-output-relative-path";
+                evt.Data["artifactSelectionReason"] = target is null ? "memory-dump-captured" : $"memory-dump-{evt.Data["targetProcessRole"]}";
             }
 
             evt.Data["artifactRelativePathStatus"] = artifactPath.Status;
@@ -403,6 +472,10 @@ internal sealed class MemoryDumpProbe : IGuestProbe
         evt.Data["captureState"] = "skipped";
         evt.Data["status"] = "skipped";
         evt.Data["nonfatal"] = "true";
+        evt.Data["artifactEvent"] = "false";
+        evt.Data["behaviorCounted"] = "false";
+        evt.Data["nonbehavior"] = "true";
+        evt.Data["collectionHealth"] = "true";
         evt.Data["artifactExists"] = "false";
         evt.Data["artifactIntegrityState"] = "skipped";
         evt.Data["artifactRelativePathStatus"] = duplicate ? "already-captured" : "not-created";
@@ -414,6 +487,8 @@ internal sealed class MemoryDumpProbe : IGuestProbe
         AddOptionalData(evt, "reason", result.Reason);
         evt.Data["reasonCode"] = MemoryDumpReasonCode(result, duplicate);
         evt.Data["reasonCategory"] = MemoryDumpReasonCategory(result, duplicate);
+        evt.Data["reasonTaxonomy"] = ReasonTaxonomy;
+        evt.Data["reasonTaxonomyVersion"] = "v1";
         evt.Data["zhReason"] = MemoryDumpReasonZhReason(result, duplicate);
         AddOptionalData(evt, "zhMessage", "内存转储采集被跳过；该事件说明证据缺口，不会中断整体分析。");
         AddOptionalData(evt, "zhHint", MemoryDumpReasonZhHint(result.Reason, result.DiagnosticStage, duplicate));
@@ -489,20 +564,23 @@ internal sealed class MemoryDumpProbe : IGuestProbe
 
         if (target is not null)
         {
-            evt.Data["processRole"] = target.IsRoot ? "root" : "child";
+            var targetRole = target.IsRoot ? "root" : target.Depth == 1 ? "direct-child" : "descendant";
+            evt.Data["processRole"] = targetRole;
             evt.Data["treeDepth"] = target.Depth.ToString(CultureInfo.InvariantCulture);
             evt.Data["treeLineage"] = target.Lineage;
             evt.Data["treeLineageStatus"] = string.IsNullOrWhiteSpace(target.Lineage) ? "unavailable" : "stable";
             evt.Data["rootProcessDumpTarget"] = target.IsRoot.ToString(CultureInfo.InvariantCulture).ToLowerInvariant();
             evt.Data["childProcessDumpTarget"] = (!target.IsRoot).ToString(CultureInfo.InvariantCulture).ToLowerInvariant();
             evt.Data["descendantProcessDumpTarget"] = (!target.IsRoot).ToString(CultureInfo.InvariantCulture).ToLowerInvariant();
-            evt.Data["memoryDumpCoverageRole"] = target.IsRoot ? "root" : "child";
+            evt.Data["directChildProcessDumpTarget"] = (!target.IsRoot && target.Depth == 1).ToString(CultureInfo.InvariantCulture).ToLowerInvariant();
+            evt.Data["deeperDescendantProcessDumpTarget"] = (!target.IsRoot && target.Depth > 1).ToString(CultureInfo.InvariantCulture).ToLowerInvariant();
+            evt.Data["memoryDumpCoverageRole"] = targetRole;
             evt.Data["targetProcessId"] = target.ProcessId.ToString(CultureInfo.InvariantCulture);
             evt.Data["targetProcessName"] = target.ProcessName;
             evt.Data["targetSelectionSource"] = target.SelectionSource;
             evt.Data["targetTreeDepth"] = target.Depth.ToString(CultureInfo.InvariantCulture);
             evt.Data["targetTreeLineage"] = target.Lineage;
-            evt.Data["targetProcessRole"] = target.IsRoot ? "root" : target.Depth == 1 ? "direct-child" : "descendant";
+            evt.Data["targetProcessRole"] = targetRole;
             evt.Data["rootAncestorProcessId"] = rootProcessId?.ToString(CultureInfo.InvariantCulture) ?? string.Empty;
             evt.Data["rootVisibleInSnapshot"] = target.RootVisibleInSnapshot.ToString(CultureInfo.InvariantCulture).ToLowerInvariant();
             evt.Data["isRootProcess"] = target.IsRoot.ToString(CultureInfo.InvariantCulture).ToLowerInvariant();
@@ -581,6 +659,16 @@ internal sealed class MemoryDumpProbe : IGuestProbe
         int childSkippedCount,
         int rootAlreadyCapturedCount,
         int childAlreadyCapturedCount,
+        int directChildTargetCount,
+        int deeperDescendantTargetCount,
+        int directChildAttemptedCount,
+        int deeperDescendantAttemptedCount,
+        int directChildCapturedCount,
+        int deeperDescendantCapturedCount,
+        int directChildSkippedCount,
+        int deeperDescendantSkippedCount,
+        int directChildAlreadyCapturedCount,
+        int deeperDescendantAlreadyCapturedCount,
         bool rootPidReuseSkipped)
     {
         return new SandboxEvent
@@ -601,6 +689,17 @@ internal sealed class MemoryDumpProbe : IGuestProbe
                 ["status"] = "summary",
                 ["summaryEvent"] = "true",
                 ["nonfatal"] = "false",
+                ["artifactEvent"] = "false",
+                ["behaviorCounted"] = "false",
+                ["nonbehavior"] = "true",
+                ["collectionHealth"] = "true",
+                ["reason"] = "memoryDumpSweepCompleted",
+                ["reasonCode"] = "memoryDumpSweepCompleted",
+                ["reasonCategory"] = "summary",
+                ["reasonTaxonomy"] = ReasonTaxonomy,
+                ["reasonTaxonomyVersion"] = "v1",
+                ["coverageTaxonomy"] = CoverageTaxonomy,
+                ["coverageTaxonomyVersion"] = "v1",
                 ["dumpType"] = MemoryDumpCaptureResult.MiniDumpTypeName,
                 ["evidenceRole"] = "memory-dump",
                 ["collectionName"] = "memory-dumps",
@@ -627,24 +726,37 @@ internal sealed class MemoryDumpProbe : IGuestProbe
                 ["rootTargetCount"] = rootTargetCount.ToString(CultureInfo.InvariantCulture),
                 ["childTargetCount"] = childTargetCount.ToString(CultureInfo.InvariantCulture),
                 ["descendantTargetCount"] = childTargetCount.ToString(CultureInfo.InvariantCulture),
+                ["directChildTargetCount"] = directChildTargetCount.ToString(CultureInfo.InvariantCulture),
+                ["deeperDescendantTargetCount"] = deeperDescendantTargetCount.ToString(CultureInfo.InvariantCulture),
                 ["rootAttemptedCount"] = rootAttemptedCount.ToString(CultureInfo.InvariantCulture),
                 ["childAttemptedCount"] = childAttemptedCount.ToString(CultureInfo.InvariantCulture),
                 ["descendantAttemptedCount"] = childAttemptedCount.ToString(CultureInfo.InvariantCulture),
+                ["directChildAttemptedCount"] = directChildAttemptedCount.ToString(CultureInfo.InvariantCulture),
+                ["deeperDescendantAttemptedCount"] = deeperDescendantAttemptedCount.ToString(CultureInfo.InvariantCulture),
                 ["rootCapturedCount"] = rootCapturedCount.ToString(CultureInfo.InvariantCulture),
                 ["childCapturedCount"] = childCapturedCount.ToString(CultureInfo.InvariantCulture),
                 ["descendantCapturedCount"] = childCapturedCount.ToString(CultureInfo.InvariantCulture),
+                ["directChildCapturedCount"] = directChildCapturedCount.ToString(CultureInfo.InvariantCulture),
+                ["deeperDescendantCapturedCount"] = deeperDescendantCapturedCount.ToString(CultureInfo.InvariantCulture),
                 ["rootSkippedCount"] = rootSkippedCount.ToString(CultureInfo.InvariantCulture),
                 ["childSkippedCount"] = childSkippedCount.ToString(CultureInfo.InvariantCulture),
                 ["descendantSkippedCount"] = childSkippedCount.ToString(CultureInfo.InvariantCulture),
+                ["directChildSkippedCount"] = directChildSkippedCount.ToString(CultureInfo.InvariantCulture),
+                ["deeperDescendantSkippedCount"] = deeperDescendantSkippedCount.ToString(CultureInfo.InvariantCulture),
                 ["rootAlreadyCapturedCount"] = rootAlreadyCapturedCount.ToString(CultureInfo.InvariantCulture),
                 ["childAlreadyCapturedCount"] = childAlreadyCapturedCount.ToString(CultureInfo.InvariantCulture),
                 ["descendantAlreadyCapturedCount"] = childAlreadyCapturedCount.ToString(CultureInfo.InvariantCulture),
+                ["directChildAlreadyCapturedCount"] = directChildAlreadyCapturedCount.ToString(CultureInfo.InvariantCulture),
+                ["deeperDescendantAlreadyCapturedCount"] = deeperDescendantAlreadyCapturedCount.ToString(CultureInfo.InvariantCulture),
                 ["rootPidReuseSkipped"] = rootPidReuseSkipped.ToString(CultureInfo.InvariantCulture).ToLowerInvariant(),
                 ["rootPidReuseSkippedCount"] = (rootPidReuseSkipped ? 1 : 0).ToString(CultureInfo.InvariantCulture),
                 ["rootProcessCoverageState"] = DetermineDumpCoverageState(rootTargetCount, rootAttemptedCount, rootCapturedCount, rootSkippedCount, rootAlreadyCapturedCount),
                 ["childProcessCoverageState"] = DetermineDumpCoverageState(childTargetCount, childAttemptedCount, childCapturedCount, childSkippedCount, childAlreadyCapturedCount),
+                ["directChildCoverageState"] = DetermineDumpCoverageState(directChildTargetCount, directChildAttemptedCount, directChildCapturedCount, directChildSkippedCount, directChildAlreadyCapturedCount),
+                ["deeperDescendantCoverageState"] = DetermineDumpCoverageState(deeperDescendantTargetCount, deeperDescendantAttemptedCount, deeperDescendantCapturedCount, deeperDescendantSkippedCount, deeperDescendantAlreadyCapturedCount),
                 ["memoryDumpCoverageState"] = DetermineDumpCoverageState(visibleTargetCount, attemptedCount, capturedCount, skippedCount, alreadyCapturedCount),
                 ["rootDescendantCoverageState"] = DetermineRootDescendantCoverageState(rootTargetCount, childTargetCount, rootCapturedCount, childCapturedCount, rootAlreadyCapturedCount, childAlreadyCapturedCount),
+                ["descendantCoverageCompleteness"] = DetermineDescendantCoverageCompleteness(childTargetCount, directChildTargetCount, deeperDescendantTargetCount, childCapturedCount, childAlreadyCapturedCount, directChildCapturedCount, directChildAlreadyCapturedCount, deeperDescendantCapturedCount, deeperDescendantAlreadyCapturedCount),
                 ["zhMessage"] = "内存转储 sweep 已完成并记录根/子进程覆盖情况。",
                 ["zhHint"] = "内存转储为显式 opt-in；启用后会尽力覆盖可见根进程树中的子进程。请结合 rootProcessId/treeLineage、capturedCount、skippedCount 和 alreadyCapturedCount 判断覆盖面。"
             }
@@ -674,11 +786,19 @@ internal sealed class MemoryDumpProbe : IGuestProbe
                 ["descendantProcessDumpEnabled"] = "false",
                 ["dumpTargetSelectionMode"] = "disabled-until-memory-dump-requested",
                 ["reason"] = "memoryDumpNotRequested",
+                ["reasonCode"] = "memoryDumpNotRequested",
+                ["reasonCategory"] = "disabled",
+                ["reasonTaxonomy"] = ReasonTaxonomy,
+                ["reasonTaxonomyVersion"] = "v1",
                 ["zhMessage"] = "内存转储采集未启用。",
                 ["zhHint"] = "未启用 --memory-dump/--memory-dumps，Guest Agent 不会生成进程 minidump。",
                 ["captureState"] = "disabled",
                 ["status"] = "disabled",
                 ["nonfatal"] = "true",
+                ["artifactEvent"] = "false",
+                ["behaviorCounted"] = "false",
+                ["nonbehavior"] = "true",
+                ["collectionHealth"] = "true",
                 ["dumpType"] = MemoryDumpCaptureResult.MiniDumpTypeName,
                 ["evidenceRole"] = "memory-dump",
                 ["collectionName"] = "memory-dumps",
@@ -692,8 +812,6 @@ internal sealed class MemoryDumpProbe : IGuestProbe
                 ["sizeBytesStatus"] = "disabled",
                 ["sha256Status"] = "disabled",
                 ["artifactHashStatus"] = "disabled",
-                ["reasonCode"] = "memoryDumpNotRequested",
-                ["reasonCategory"] = "disabled",
                 ["zhReason"] = "未请求内存转储。",
                 ["samplePath"] = context.SamplePath
             }
@@ -889,6 +1007,41 @@ internal sealed class MemoryDumpProbe : IGuestProbe
         }
 
         return "partial-root-and-descendants";
+    }
+
+    private static string DetermineDescendantCoverageCompleteness(
+        int descendantTargetCount,
+        int directChildTargetCount,
+        int deeperDescendantTargetCount,
+        int descendantCapturedCount,
+        int descendantAlreadyCapturedCount,
+        int directChildCapturedCount,
+        int directChildAlreadyCapturedCount,
+        int deeperDescendantCapturedCount,
+        int deeperDescendantAlreadyCapturedCount)
+    {
+        if (descendantTargetCount == 0)
+        {
+            return "no-visible-descendants";
+        }
+
+        var directChildrenCovered = directChildTargetCount == 0 ||
+            directChildCapturedCount + directChildAlreadyCapturedCount >= directChildTargetCount;
+        var deeperDescendantsCovered = deeperDescendantTargetCount == 0 ||
+            deeperDescendantCapturedCount + deeperDescendantAlreadyCapturedCount >= deeperDescendantTargetCount;
+        if (directChildrenCovered && deeperDescendantsCovered)
+        {
+            return deeperDescendantTargetCount == 0
+                ? "direct-children-covered-no-deeper-descendants"
+                : "all-descendant-depths-covered";
+        }
+
+        if (descendantCapturedCount + descendantAlreadyCapturedCount > 0)
+        {
+            return directChildrenCovered ? "direct-children-covered-deeper-descendants-partial" : "partial-descendant-depths";
+        }
+
+        return "descendants-not-covered";
     }
 
     private static bool IsExitedBeforeDump(string? reason, string? diagnosticStage)

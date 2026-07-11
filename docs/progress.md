@@ -8,6 +8,10 @@
 ## 当前完成度估计（不含测试覆盖）
 
 这些百分比衡量“当前开源 MVP 可务实做到的范围”，不包含云端多租户、海量样本库、完整家族归因或默认真实 R0 驱动签名：
+本次不调整百分比；本轮只收敛 release/deployment guardrail、runtime dry-run 诊断和
+no-fresh-live 说明，没有新的 build 矩阵、真实样本报告或 fresh live evidence `job id`
+可支撑上调。后续只有在记录新的 readiness/package 结果、source package dry-run、
+或实验室 live `job id` 与报告路径后，才更新这些数字。
 
 - 总体 v1 交付链路：**89%**
 - WebUI 上传/选择、自动启动、实时监控页（live monitor）：**95%**

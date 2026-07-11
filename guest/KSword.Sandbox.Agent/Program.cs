@@ -43,6 +43,10 @@ internal static class AgentProgram
 
     private const string DroppedFilesArtifactDirectoryName = "dropped-files";
 
+    private const string DroppedFileReasonTaxonomy = "guest-artifact.dropped-file.reason.v1";
+
+    private const string DroppedFileSelectorVersion = "artifact-selectors-v1";
+
     internal const int DefaultR0CollectorMaxEventsPerRead = 64;
 
     internal const int DefaultR0CollectorMaxReadBatches = 64;
@@ -1903,6 +1907,10 @@ internal static class AgentProgram
                     ["captureState"] = "captured",
                     ["status"] = "captured",
                     ["nonfatal"] = "false",
+                    ["artifactEvent"] = "false",
+                    ["behaviorCounted"] = "false",
+                    ["nonbehavior"] = "true",
+                    ["collectionHealth"] = "true",
                     ["zhMessage"] = "Guest artifact manifest 已写入，证据集合摘要可用。",
                     ["zhHint"] = "请使用 artifactRelativePath 下载 manifest；其中 collections metadata 汇总每个证据通道的 captured/skipped/failed/disabled 状态。"
                 }
@@ -1927,6 +1935,13 @@ internal static class AgentProgram
                     ["captureMemoryDump"] = options.CaptureMemoryDump.ToString(),
                     ["capturePacketCapture"] = options.CapturePacketCapture.ToString(),
                     ["reason"] = "writeFailed",
+                    ["reasonCode"] = "writeFailed",
+                    ["reasonCategory"] = "manifest-io",
+                    ["artifactEvent"] = "false",
+                    ["behaviorCounted"] = "false",
+                    ["nonbehavior"] = "true",
+                    ["collectionHealth"] = "true",
+                    ["nonfatal"] = "true",
                     ["zhMessage"] = "Guest artifact manifest 写入失败，但事件 JSON 仍会尽量写出。",
                     ["zhHint"] = "请检查 --out 目录权限、磁盘空间、路径长度，以及 artifacts/manifest.json 是否被其他进程占用。"
                 }
@@ -2044,11 +2059,24 @@ internal static class AgentProgram
                 ["artifactRelativePathStatus"] = "captured",
                 ["captureState"] = "captured",
                 ["status"] = "captured",
+                ["reason"] = "artifactCopied",
+                ["reasonCode"] = "artifactCopied",
+                ["reasonCategory"] = "captured",
+                ["reasonTaxonomy"] = DroppedFileReasonTaxonomy,
+                ["reasonTaxonomyVersion"] = "v1",
                 ["nonfatal"] = "false",
+                ["artifactEvent"] = "true",
+                ["behaviorCounted"] = "false",
+                ["nonbehavior"] = "true",
                 ["artifactExists"] = copiedInfo.Exists.ToString(CultureInfo.InvariantCulture).ToLowerInvariant(),
                 ["artifactIntegrityState"] = DroppedFileArtifactIntegrityState(copiedHash),
                 ["sizeBytesStatus"] = "computed",
                 ["sha256Status"] = copiedHash.Status,
+                ["artifactSelector"] = artifactRelativePath,
+                ["downloadSelector"] = artifactRelativePath,
+                ["artifactSelectorKind"] = "safe-output-relative-path",
+                ["artifactSelectorVersion"] = DroppedFileSelectorVersion,
+                ["artifactSelectionReason"] = "copied-dropped-file",
                 ["processRole"] = processContext.RootProcessId is null ? "sample-context" : "sample-root-context",
                 ["zhMessage"] = "掉落文件已复制为可下载证据文件。",
                 ["zhHint"] = "请使用 artifactRelativePath 下载复制后的文件；sourceSha256/copiedSha256 可用于比对源文件与证据文件。",
@@ -2119,6 +2147,8 @@ internal static class AgentProgram
                 ["skipReason"] = reason,
                 ["reasonCode"] = reason,
                 ["reasonCategory"] = DroppedFileReasonCategory(reason),
+                ["reasonTaxonomy"] = DroppedFileReasonTaxonomy,
+                ["reasonTaxonomyVersion"] = "v1",
                 ["zhReason"] = DroppedFileReasonZhReason(reason),
                 ["zhMessage"] = "掉落文件复制被跳过；该事件说明证据缺口，不会中断整体分析。",
                 ["zhHint"] = DroppedFileReasonZhHint(reason),
@@ -2135,6 +2165,10 @@ internal static class AgentProgram
                 ["captureState"] = "skipped",
                 ["status"] = "skipped",
                 ["nonfatal"] = "true",
+                ["artifactEvent"] = "false",
+                ["behaviorCounted"] = "false",
+                ["nonbehavior"] = "true",
+                ["collectionHealth"] = "true",
                 ["processRole"] = processContext?.RootProcessId is null ? "sample-context" : "sample-root-context",
                 ["expectedRelativePath"] = "artifacts/dropped-files/**",
                 ["artifactRelativePathStatus"] = "not-created",
@@ -2204,9 +2238,15 @@ internal static class AgentProgram
                 ["reason"] = reason,
                 ["reasonCode"] = reason,
                 ["reasonCategory"] = copiedCount > 0 ? "captured" : skippedCount > 0 ? "skipped" : "empty",
+                ["reasonTaxonomy"] = DroppedFileReasonTaxonomy,
+                ["reasonTaxonomyVersion"] = "v1",
                 ["zhReason"] = DroppedFileSummaryZhReason(reason),
                 ["summaryEvent"] = "true",
                 ["nonfatal"] = "true",
+                ["artifactEvent"] = "false",
+                ["behaviorCounted"] = "false",
+                ["nonbehavior"] = "true",
+                ["collectionHealth"] = "true",
                 ["processRole"] = processContext.RootProcessId is null ? "sample-context" : "sample-root-context",
                 ["expectedRelativePath"] = "artifacts/dropped-files/**",
                 ["artifactRelativePathStatus"] = copiedCount > 0 ? "some-captured" : "not-created",
@@ -2224,6 +2264,7 @@ internal static class AgentProgram
                 ["sourceHashComputedCount"] = CountOutcomeDataValue(outcomeEvents, "sourceHashStatus", "computed").ToString(CultureInfo.InvariantCulture),
                 ["sourceHashFailedCount"] = CountOutcomeDataValue(outcomeEvents, "sourceHashStatus", "failed").ToString(CultureInfo.InvariantCulture),
                 ["artifactCount"] = artifactCount.ToString(CultureInfo.InvariantCulture),
+                ["artifactSelectorVersion"] = DroppedFileSelectorVersion,
                 ["copyMethod"] = "shared-read-stream-copy",
                 ["zhMessage"] = copiedCount > 0
                     ? "掉落文件复制 sweep 已完成，并已产出可下载证据文件。"
@@ -2233,6 +2274,7 @@ internal static class AgentProgram
         };
         AddDroppedFileProcessContext(evt, processContext);
         AddDroppedFileSummaryReasonCounts(evt, outcomeEvents);
+        AddDroppedFileSummaryArtifactSelectors(evt, outcomeEvents);
         return evt;
     }
 
@@ -2259,6 +2301,8 @@ internal static class AgentProgram
                 ["reason"] = "collectDroppedFilesNotRequested",
                 ["reasonCode"] = "collectDroppedFilesNotRequested",
                 ["reasonCategory"] = "disabled",
+                ["reasonTaxonomy"] = DroppedFileReasonTaxonomy,
+                ["reasonTaxonomyVersion"] = "v1",
                 ["zhReason"] = "未请求掉落文件复制。",
                 ["zhMessage"] = "掉落文件复制采集未启用。",
                 ["zhHint"] = "未启用 --collect-dropped-files/--dropped-files，Guest Agent 只记录文件事件，不复制新建文件内容。",
@@ -2270,6 +2314,10 @@ internal static class AgentProgram
                 ["captureState"] = "disabled",
                 ["status"] = "disabled",
                 ["nonfatal"] = "true",
+                ["artifactEvent"] = "false",
+                ["behaviorCounted"] = "false",
+                ["nonbehavior"] = "true",
+                ["collectionHealth"] = "true",
                 ["processRole"] = processContext.RootProcessId is null ? "sample-context" : "sample-root-context",
                 ["expectedRelativePath"] = "artifacts/dropped-files/**",
                 ["artifactRelativePathStatus"] = "disabled",
@@ -2532,6 +2580,12 @@ internal static class AgentProgram
 
     private static void AddDroppedFileSummaryReasonCounts(SandboxEvent evt, IReadOnlyList<SandboxEvent> outcomeEvents)
     {
+        var outcomeReasonCounts = outcomeEvents
+            .Select(static item => item.Data.TryGetValue("reason", out var reason) ? reason : string.Empty)
+            .Where(static reason => !string.IsNullOrWhiteSpace(reason))
+            .GroupBy(static reason => reason, StringComparer.OrdinalIgnoreCase)
+            .OrderBy(static group => group.Key, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(static group => group.Key, static group => group.Count(), StringComparer.OrdinalIgnoreCase);
         var skippedReasonCounts = outcomeEvents
             .Where(static item => string.Equals(item.EventType, "artifact.dropped_file.skipped", StringComparison.OrdinalIgnoreCase))
             .Select(static item => item.Data.TryGetValue("reason", out var reason) ? reason : string.Empty)
@@ -2539,6 +2593,16 @@ internal static class AgentProgram
             .GroupBy(static reason => reason, StringComparer.OrdinalIgnoreCase)
             .OrderBy(static group => group.Key, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(static group => group.Key, static group => group.Count(), StringComparer.OrdinalIgnoreCase);
+
+        evt.Data["reasonCount"] = outcomeReasonCounts.Count.ToString(CultureInfo.InvariantCulture);
+        if (outcomeReasonCounts.Count > 0)
+        {
+            evt.Data["reasons"] = string.Join(",", outcomeReasonCounts.Keys);
+            evt.Data["reasonCounts"] = string.Join(
+                ";",
+                outcomeReasonCounts.Select(pair => $"{pair.Key}={pair.Value.ToString(CultureInfo.InvariantCulture)}"));
+            evt.Data["reasonCountsJson"] = JsonSerializer.Serialize(outcomeReasonCounts);
+        }
 
         if (skippedReasonCounts.Count == 0)
         {
@@ -2559,6 +2623,82 @@ internal static class AgentProgram
             AddDataIfNotEmpty(evt.Data, "lastSkippedReasonCategory", FirstEventData(lastSkipped, "reasonCategory"));
             AddDataIfNotEmpty(evt.Data, "lastSkippedZhHint", FirstEventData(lastSkipped, "zhHint"));
         }
+    }
+
+    private static void AddDroppedFileSummaryArtifactSelectors(SandboxEvent evt, IReadOnlyList<SandboxEvent> outcomeEvents)
+    {
+        var copiedArtifacts = outcomeEvents
+            .Where(static item => string.Equals(item.EventType, "artifact.dropped_file.copied", StringComparison.OrdinalIgnoreCase))
+            .Select(static item => new DroppedFileArtifactSummary(
+                FirstEventData(item, "artifactRelativePath", "relativePath", "importPath") ?? string.Empty,
+                ParseNullableLong(FirstEventData(item, "artifactSizeBytes", "copiedSizeBytes", "sizeBytes")) ?? 0,
+                FirstEventData(item, "artifactSha256", "copiedSha256", "sha256"),
+                FirstEventData(item, "guestFullPath", "sourcePath")))
+            .Where(static artifact => !string.IsNullOrWhiteSpace(artifact.RelativePath))
+            .ToList();
+
+        if (copiedArtifacts.Count == 0)
+        {
+            evt.Data["artifactSelectorState"] = "none-copied";
+            return;
+        }
+
+        evt.Data["artifactSelectorState"] = "available";
+        evt.Data["artifactSelectorMode"] = "copy-event-order-and-size";
+        AddDroppedFileArtifactSelector(evt.Data, "first", copiedArtifacts.First(), "first-copied-event");
+        AddDroppedFileArtifactSelector(evt.Data, "last", copiedArtifacts.Last(), "last-copied-event");
+        AddDroppedFileArtifactSelector(
+            evt.Data,
+            "largest",
+            copiedArtifacts
+                .OrderByDescending(static artifact => artifact.SizeBytes)
+                .ThenBy(static artifact => artifact.RelativePath, StringComparer.OrdinalIgnoreCase)
+                .First(),
+            "largest-size-bytes");
+    }
+
+    private static void AddDroppedFileArtifactSelector(
+        Dictionary<string, string> data,
+        string prefix,
+        DroppedFileArtifactSummary artifact,
+        string selectionReason)
+    {
+        var titlePrefix = char.ToUpperInvariant(prefix[0]) + prefix[1..];
+        data[DroppedFileArtifactSelectorKey(prefix)] = artifact.RelativePath;
+        data[$"{prefix}ArtifactRelativePath"] = artifact.RelativePath;
+        data[$"{prefix}ArtifactSafeLink"] = BuildArtifactSafeLink(artifact.RelativePath);
+        data[$"{prefix}ArtifactSizeBytes"] = artifact.SizeBytes.ToString(CultureInfo.InvariantCulture);
+        AddDataIfNotEmpty(data, $"{prefix}ArtifactSha256", artifact.Sha256);
+        AddDataIfNotEmpty(data, $"{prefix}ArtifactGuestFullPath", artifact.GuestFullPath);
+        data[$"{prefix}ArtifactSelectionReason"] = selectionReason;
+        data[$"has{titlePrefix}ArtifactSelector"] = "true";
+    }
+
+    private static string DroppedFileArtifactSelectorKey(string prefix)
+    {
+        return prefix switch
+        {
+            "first" => "firstArtifactSelector",
+            "last" => "lastArtifactSelector",
+            "largest" => "largestArtifactSelector",
+            _ => $"{prefix}ArtifactSelector"
+        };
+    }
+
+    private static long? ParseNullableLong(string? value)
+    {
+        return long.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed)
+            ? parsed
+            : null;
+    }
+
+    private static string BuildArtifactSafeLink(string relativePath)
+    {
+        return string.Join(
+            "/",
+            NormalizeArtifactRelativePath(relativePath)
+                .Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Select(Uri.EscapeDataString));
     }
 
     /// <summary>
@@ -3039,6 +3179,12 @@ internal static class AgentProgram
         string Status,
         string? ExceptionType,
         string? Message);
+
+    private sealed record DroppedFileArtifactSummary(
+        string RelativePath,
+        long SizeBytes,
+        string? Sha256,
+        string? GuestFullPath);
 
     private sealed record DroppedFileSourceEvidence(string SourcePath)
     {

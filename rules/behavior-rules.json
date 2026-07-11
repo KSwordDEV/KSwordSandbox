@@ -1371,10 +1371,12 @@
     },
     {
       "id": "static-section-writable-executable",
-      "title": "Writable executable or abnormal section",
+      "title": "Writable executable, very high entropy, or low-entropy section",
+      "titleZh": "可写可执行、高熵或低熵 PE 节",
       "severity": "medium",
       "confidence": "low",
-      "summary": "Static analysis found a writable executable section or an abnormal section layout.",
+      "summary": "Static analysis found a writable executable, very high entropy, or low-entropy section. This remains static triage until runtime unpacking, injection, or payload behavior is observed.",
+      "summaryZh": "静态分析发现可写可执行、高熵或低熵 PE 节；在观察到运行时解包、注入或载荷行为前仅作为静态分诊。",
       "mitreTechniqueId": "T1027",
       "mitreTechniqueName": "Obfuscated Files or Information",
       "eventTypes": [
@@ -1385,7 +1387,6 @@
         "tags": [
           "writable_executable_section",
           "very_high_entropy_section",
-          "oversized_virtual_section",
           "low_entropy_section"
         ]
       },
@@ -1407,6 +1408,155 @@
         "static",
         "pe",
         "sections"
+      ]
+    },
+    {
+      "id": "static-section-virtual-layout-anomaly",
+      "title": "Virtual-only or oversized PE section",
+      "titleZh": "仅虚拟映射或虚拟大小异常的 PE 节",
+      "severity": "low",
+      "confidence": "low",
+      "summary": "Static section metadata showed a virtual-only or oversized-virtual section. This is an obfuscation/unpacking triage clue, not observed runtime behavior.",
+      "summaryZh": "静态节元数据显示仅虚拟映射或虚拟大小异常的 PE 节；这是混淆/解包分诊线索，不代表已观察到运行时行为。",
+      "eventTypes": [
+        "static.pe.section"
+      ],
+      "dataContains": {
+        "tags": [
+          "virtual_only_section",
+          "oversized_virtual_section"
+        ]
+      },
+      "evidenceFields": [
+        "eventType",
+        "path",
+        "data.name",
+        "data.virtualAddress",
+        "data.virtualSize",
+        "data.rawDataSize",
+        "data.entropy",
+        "data.entropyLabel",
+        "data.sectionRole",
+        "data.tags"
+      ],
+      "tags": [
+        "static",
+        "pe",
+        "sections",
+        "layout",
+        "triage"
+      ]
+    },
+    {
+      "id": "static-pe-signature-metadata-present",
+      "title": "PE signature or certificate-table metadata present",
+      "titleZh": "存在 PE 签名或证书表元数据",
+      "severity": "info",
+      "confidence": "low",
+      "summary": "Static analysis observed PE security-directory, certificate-table, or Authenticode metadata. This is provenance context only and should not increase risk by itself.",
+      "summaryZh": "静态分析观察到 PE 安全目录、证书表或 Authenticode 元数据；该命中仅提供来源/签名上下文，不应单独提高风险。",
+      "eventTypes": [
+        "static.analysis.completed"
+      ],
+      "dataContains": {
+        "tags": [
+          "security_directory_present",
+          "digital_signature_present",
+          "authenticode_signature_present",
+          "signature_pkcs_signed_data"
+        ]
+      },
+      "evidenceFields": [
+        "eventType",
+        "path",
+        "data.fileFormat",
+        "data.isPe",
+        "data.machine",
+        "data.subsystem",
+        "data.entryPointRva",
+        "data.tags",
+        "data.warningCount"
+      ],
+      "tags": [
+        "static",
+        "pe",
+        "signature",
+        "provenance",
+        "triage"
+      ]
+    },
+    {
+      "id": "static-pe-parse-warning-observed",
+      "title": "Static PE parse warning observed",
+      "titleZh": "静态 PE 解析告警",
+      "severity": "info",
+      "confidence": "low",
+      "summary": "The static analyzer recorded PE parse warnings or malformed-header tags. This is parser/format context for analyst review, not proof of malicious behavior.",
+      "summaryZh": "静态分析器记录了 PE 解析告警或格式异常标签；这是供分析员复核的解析/格式上下文，不代表恶意行为已发生。",
+      "eventTypes": [
+        "static.analysis.completed"
+      ],
+      "dataNumericRanges": {
+        "warningCount": [
+          {
+            "min": 1
+          }
+        ]
+      },
+      "evidenceFields": [
+        "eventType",
+        "path",
+        "data.fileFormat",
+        "data.isPe",
+        "data.machine",
+        "data.sectionCount",
+        "data.entryPointRva",
+        "data.warningCount",
+        "data.warnings",
+        "data.tags"
+      ],
+      "tags": [
+        "static",
+        "pe",
+        "parser-warning",
+        "triage"
+      ]
+    },
+    {
+      "id": "static-pe-zero-entrypoint",
+      "title": "PE summary reported a zero entry point RVA",
+      "titleZh": "PE 摘要显示入口点 RVA 为零",
+      "severity": "info",
+      "confidence": "low",
+      "summary": "Static PE summary metadata reported entryPointRva=0. This can be benign for some artifacts, so it is retained as low-confidence structural context only.",
+      "summaryZh": "静态 PE 摘要元数据显示 entryPointRva=0；某些样本中可能是良性情况，因此仅保留为低置信结构上下文。",
+      "eventTypes": [
+        "static.analysis.completed"
+      ],
+      "allDataEquals": {
+        "isPe": [
+          "True"
+        ],
+        "entryPointRva": [
+          "0x00000000"
+        ]
+      },
+      "evidenceFields": [
+        "eventType",
+        "path",
+        "data.fileFormat",
+        "data.isPe",
+        "data.machine",
+        "data.subsystem",
+        "data.sectionCount",
+        "data.entryPointRva",
+        "data.tags"
+      ],
+      "tags": [
+        "static",
+        "pe",
+        "entrypoint",
+        "triage"
       ]
     },
     {

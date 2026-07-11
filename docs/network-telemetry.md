@@ -18,7 +18,7 @@ KSwordSandbox 的宿主侧网络导入把网络证据当作回收 artifact，而
   `key: value` tokens，以及类似下方的 loose flow text：
   `10.0.0.4:50200 -> 198.51.100.77:8080`。
 
-Host 只在 collected guest output root 下解析 manifest `relativePath` / `importPath`。Absolute VM-local paths
+Host 只在 collected guest output root 下解析 manifest `relativePath` / `importPath`。VM 内绝对路径（absolute VM-local paths）
 只保留为 evidence strings，不能作为 import targets 信任。
 
 ## Tshark 行为 / Tshark behavior
@@ -77,9 +77,9 @@ guest 端的 `packet_capture.protocol_summary` 是抓包文件诊断摘要，不
 Sidecar JSONL/log rows 会直接归一化到标准事件类型。损坏 JSON lines 变成
 `network.sidecar.parse_error` rows，而不是让整个 PCAP import 失败。
 
-## 共享字段 schema / Shared field schema
+## 共享字段 Schema / Shared field schema
 
-所有 imported network rows 都使用字符串值 `data` fields：
+所有导入后的 network rows 都使用字符串值 `data` fields：
 
 - `schema=network.telemetry.v1`
 - `eventFamily=network`
@@ -89,7 +89,7 @@ Sidecar JSONL/log rows 会直接归一化到标准事件类型。损坏 JSON lin
   - `collectionHealth`: `ok`, `partial`, `empty` 或 `degraded`
   - `zhMessage`: 面向操作者的简短中文摘要
   - `zhHint`: 简短中文 triage 提示
-- Endpoint aliases（端点别名）：
+- 端点别名（endpoint aliases）：
   - `protocol`, `transportProtocol`, `protocolName`
   - `ipFamily`: endpoint 存在时为 `ipv4` 或 `ipv6`
   - `sourceIp`, `sourcePort`, `srcIp`, `srcPort`, `localAddress`, `localPort`
@@ -106,8 +106,9 @@ Sidecar JSONL/log rows 会直接归一化到标准事件类型。损坏 JSON lin
   - `sourceArtifactRelativePath`
   - `artifactRelativePath`, `downloadSelector`
   - `sourceArtifactSelector`, `artifactSelector`, `sourceDownloadSelector`
-  - `sourceArtifactSizeBytes`
-  - `sourceArtifactSha256`
+  - `sourceArtifactSizeBytes`, `sizeBytes`, `artifactSizeBytes`
+  - `sourceArtifactSha256`, `sha256`, `hash.sha256`, `artifactSha256`,
+    `artifactHashSha256`
   - PCAP-native rows 暴露 `pcapSourceArtifactRelativePath`、
     `pcapSourceArtifactName`、`pcapSourceArtifactSelector`、`pcapDownloadSelector`、
     `pcapSourceArtifactSizeBytes` 和 `pcapSourceArtifactSha256`。相邻 sidecars
@@ -122,24 +123,38 @@ Sidecar JSONL/log rows 会直接归一化到标准事件类型。损坏 JSON lin
 
 协议字段：
 
-- DNS: `queryName`, `qname`, `domain`, `dnsQueryName`, `queryType`,
-  `recordType`, `dnsRecordType`, `rcode`, `rcodeName`, `responseCode`,
-  `dnsRcode`, `isResponse`, `answer`, `answers`, `resolvedIps`,
+- DNS: `queryName`, `qname`, `domain`, `dnsQueryName`, `query`, `dnsQuery`,
+  `rrname`, `dns.rrname`, `dns.qry.name`, `dns.question.name`,
+  `dns.questions.name`, `dns.query.name`, `queryType`, `recordType`,
+  `dnsRecordType`, `qtype`, `rrtype`, `dns.qry.type`, `dns.question.type`,
+  `rcode`, `rcodeName`, `responseCode`, `dnsRcode`, `dnsResponseCode`,
+  `dns.rcode`, `dns.flags.rcode`, `dns.response_code`, `isResponse`,
+  `answer`, `answers`, `resolvedIp`, `resolvedIps`, `dnsAnswers`,
   `answerCount`, `ttl`, `recordClass`, `dnsTransactionId`, `dnsOutcome`,
   `classification`, `isNxDomain`
-- HTTP: `httpMessageType`, `method`, `uri`, `requestUri`, `host`, `url`, `userAgent`,
-  `contentType`, `statusCode`, `responseStatusCode`, `httpStatusCode`,
-  `statusFamily`, `payloadMagic`, `referer`, `contentEncoding`,
-  `requestBodyBytes`, `requestBytes`, `responseBodyBytes`, `responseBytes`,
-  `requestContentLength`, `responseContentLength`, `uploadBytes`,
-  `downloadBytes`, `uploadCandidate`, `transferDirection`,
-  `authorizationHeaderPresent`, `cookiePresent`
-- TLS: `sni`, `serverName`, `tlsVersion`, `handshakeType`, `ja3`, `ja3s`,
-  `ja3Hash`, `ja3sHash`, `alpn`, `cipherSuite`, `certSubject`, `certIssuer`,
-  `certSerial`, `certSha256`, `certificateSha256`,
-  `certificateFingerprintSha256`, `certSha1`, `certNotBefore`,
-  `certNotAfter`, `certificateStatus`, `validationStatus`,
-  `certSelfSigned`, `certExpired`, `tlsCertificateRisk`. Native PCAP TLS
+- HTTP: `httpMessageType`, `method`, `httpMethod`, `requestMethod`,
+  `httpRequestMethod`, `http.request.method`, `uri`, `requestUri`, `host`,
+  `url`, `userAgent`, `contentType`, `statusCode`, `responseStatusCode`,
+  `httpStatusCode`, `httpStatus`, `responseCode`, `http.response.status_code`,
+  `http.response.code`, `statusFamily`, `payloadMagic`, `referer`,
+  `contentEncoding`, `requestBodyBytes`, `requestBytes`,
+  `httpRequestBodyBytes`, `requestBodySizeBytes`, `responseBodyBytes`,
+  `responseBytes`, `httpResponseBodyBytes`, `responseBodySizeBytes`,
+  `bodyBytes`, `bodySizeBytes`, `http.body.bytes`, `requestContentLength`,
+  `responseContentLength`, `contentLength`, `uploadBytes`, `downloadBytes`,
+  `uploadCandidate`, `transferDirection`, `authorizationHeaderPresent`,
+  `cookiePresent`
+- TLS: `sni`, `serverName`, `tlsServerName`, `tlsSni`, `server_name`,
+  `tls.server_name`, `tlsVersion`, `handshakeType`, `tlsHandshakeType`,
+  `ja3`, `ja3s`, `ja3Hash`, `ja3sHash`, `ja3Fingerprint`, `ja3sFingerprint`,
+  `ja3.hash`, `tls.ja3.hash`, `alpn`, `cipherSuite`, `certSubject`,
+  `certificateSubject`, `x509.subject`, `certIssuer`, `certificateIssuer`,
+  `x509.issuer`, `certSerial`, `certificateSerial`, `certSha256`,
+  `certificateSha256`, `certificateFingerprintSha256`,
+  `x509.fingerprint.sha256`, `certSha1`, `certNotBefore`, `certNotAfter`,
+  `certificateStatus`, `validationStatus`, `certSelfSigned`,
+  `certificateSelfSigned`, `certExpired`, `certificateExpired`,
+  `tlsCertificateRisk`. Native PCAP TLS
   parsing 可在不要求 `tshark` 的情况下，从 client-hello 推导 SNI/ALPN/cipher hint/JA3，
   在存在 server-hello 时推导 JA3S，并从 TLS Certificate handshakes 尽力提取 certificate
   subject/issuer/fingerprint metadata。
@@ -161,7 +176,7 @@ Sidecar JSONL/log rows 会直接归一化到标准事件类型。损坏 JSON lin
 `rootProcessId` / `treeLineage` 与 HTTP 上传、NXDOMAIN、TLS JA3/证书异常，
 可以把网络行为直接挂到样本进程树，而不是只把它当作孤立网络流量。
 
-Sidecar alias coverage（别名覆盖）有意兼容常见 Zeek/ECS/tshark/R0 字段族，例如 `id.orig_h`、`id.resp_h`、
+Sidecar 别名覆盖（alias coverage）有意兼容常见 Zeek/ECS/tshark/R0 字段族，例如 `id.orig_h`、`id.resp_h`、
 `orig_bytes`、`resp_bytes`、
 `dns.rrname`, `dns.answers`, `http.response.status_code`,
 `http.request.body.bytes`, `tls.ja3.hash`, `tls.cert.fingerprint.sha256`,
@@ -174,7 +189,8 @@ Sidecar 专属字段：
 - `sidecarFormat`: `jsonl` 或 `log`
 - `parser=sidecar-jsonl`
 - `originalEventType`: 输入 row 暴露时记录
-- Parse error rows 额外暴露 `diagnosticCode`、`parserBoundary`、`parseFailureStage`
+- Parse error rows 额外暴露 `diagnosticCode`、`parserBoundary`、`parseFailureStage`、
+  `diagnosticStage`、`diagnosticMessage`、`parseErrorMessage`、`linePreview`
   和中文 `zhHint`。JSONL 行级错误通常是
   `diagnosticCode=sidecar_json_parse_error`、`parserBoundary=sidecar.line`。
 

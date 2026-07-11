@@ -257,6 +257,7 @@ public sealed class HtmlReportRenderer
         html.AppendLine("<body class=\"modern-sandbox-report\">");
         AppendCover(html, report);
         AppendLanguageEntrypoints(html);
+        AppendNoScriptFallback(html);
         AppendTableOfContents(html);
         AppendQuickNavigation(html, report, artifactLinks);
         html.AppendLine("<main>");
@@ -313,13 +314,13 @@ section.card{counter-increment:report-section;max-height:75vh;max-height:var(--s
 table{border-collapse:collapse;border-spacing:0;width:100%;margin-top:14px}td,th{border-bottom:1px solid #e5edf6;padding:10px;text-align:left;vertical-align:top}th{background:#f8fbff;color:#475569;font-size:12px;position:sticky;text-transform:uppercase;top:0;z-index:1}
 code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.toc a{background:#fff;border:1px solid var(--line);border-radius:2px;color:#075985;display:inline-block;font-weight:700;margin:4px 8px 4px 0;padding:7px 12px;text-decoration:none}.toc a:hover{border-color:var(--primary);outline:2px solid rgba(67,160,255,.16)}
 .empty{background:#fff;border:1px dashed #b9d7f3;border-radius:2px;color:var(--muted);padding:14px}
-.copy-btn{background:#fff;border:1px solid rgba(67,160,255,.55);border-radius:2px;color:#075985;cursor:pointer;font-size:12px;font-weight:700;margin:2px 6px 2px 0;padding:4px 8px}.copyable{cursor:copy}.copy-hint{color:var(--muted);font-size:12px;margin-top:8px}
+.copy-btn{background:#fff;border:1px solid rgba(67,160,255,.55);border-radius:2px;color:#075985;cursor:pointer;font-size:12px;font-weight:700;margin:2px 6px 2px 0;padding:4px 8px}.copyable{cursor:copy}.copy-hint{color:var(--muted);font-size:12px;margin-top:8px}.no-js-fallback{border-color:#b9ddff}.no-js-fallback:before{background:#38bdf8}.fold-label{background:#f8fbff;border:1px solid #cfe6fb;color:#075985;display:inline-block;font-size:12px;font-weight:800;margin:2px 6px 2px 0;padding:3px 7px}
 .toolbar,.inline-actions{align-items:center;display:inline-flex;flex-wrap:wrap;gap:6px;justify-content:flex-start;margin:0 0 4px}.event-table-wrap{border:1px solid var(--line);border-radius:2px;margin-top:14px;max-height:var(--subsection-max);overflow:auto}.event-table-wrap table{margin-top:0}.event-table-wrap th{top:0}.bounded-list{max-height:var(--subsection-max);overflow:auto}
 .event-table td:first-child{white-space:nowrap}.event-table td:nth-child(2){min-width:140px}.event-table td:nth-child(4){min-width:140px}.event-table td:nth-child(5){min-width:260px}.event-table .evidence{min-width:280px}
 .timeline-groups{display:grid;gap:10px;margin-top:14px}.timeline-group{background:#fff;border:1px solid var(--line);border-radius:2px;overflow:hidden}.timeline-group>summary{align-items:flex-start;cursor:pointer;display:flex;gap:10px;justify-content:space-between;list-style:none;padding:12px 14px}.timeline-group>summary::-webkit-details-marker{display:none}.timeline-group>summary:before{color:var(--primary-deep);content:'▶';font-weight:900;margin-top:2px}.timeline-group[open]>summary:before{content:'▼'}.timeline-group small{color:var(--muted);display:block;line-height:1.4;margin-top:3px}.timeline{border-left:3px solid rgba(67,160,255,.45);margin:0 14px 14px 20px;padding:12px 0 0 18px}.timeline-item{background:#fff;border:1px solid var(--line);border-radius:2px;margin:0 0 10px;padding:10px 12px;position:relative}.timeline-item:before{background:var(--primary);border:2px solid var(--primary-soft);border-radius:2px;content:'';height:10px;left:-25px;position:absolute;top:13px;width:10px}.timeline-overflow{background:#f1f7ff;border:1px dashed #b9d7f3;border-radius:2px;color:var(--muted);margin:0 0 12px;padding:9px 11px}
 .graph-map{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));margin-top:12px}.graph-node{background:#fff;border:1px solid var(--line);border-left:4px solid var(--primary);border-radius:2px;padding:12px}.graph-node strong{display:block;margin-bottom:4px}.graph-node small{color:var(--muted);display:block;line-height:1.4}.behavior-chain{background:#fff;border:1px solid var(--line);border-radius:2px;counter-reset:chain;margin:12px 0;max-height:var(--subsection-max);overflow:auto;padding:8px 10px}.behavior-chain li{align-items:flex-start;background:#fff;border-bottom:1px solid #dbeafe;border-radius:0;counter-increment:chain;display:grid;gap:8px;grid-template-columns:auto 1fr;margin:0;padding:10px}.behavior-chain li:last-child{border-bottom:0}.behavior-chain li:before{align-items:center;background:var(--primary);border-radius:2px;color:white;content:counter(chain);display:inline-flex;font-weight:900;height:24px;justify-content:center;width:24px}.behavior-chain details{grid-column:2}.behavior-chain pre{max-height:var(--detail-max);overflow:auto;white-space:pre-wrap;word-break:break-word}.edge-table td:nth-child(1),.edge-table td:nth-child(3){min-width:170px}.ioc-grid{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));margin-top:14px}.ioc-card{background:#fff;border:1px solid var(--line);border-radius:2px;padding:12px}.ioc-card h3{font-size:15px;margin:0 0 8px}.ioc-card ul{margin:0;padding-left:18px}.ioc-card li{margin:5px 0;word-break:break-word}
-.evidence-summary-grid,.relation-grid,.overview-strip,.evidence-story-board,.narrative-spine{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));margin-top:14px}.evidence-summary-card,.relation-card,.overview-item,.evidence-story-lane,.narrative-step{background:#fff;border:1px solid var(--line);border-left:4px solid var(--primary);border-radius:2px;box-shadow:none;max-height:var(--subsection-max);min-width:0;overflow:auto;overflow-wrap:anywhere;padding:14px;position:relative}.narrative-spine{counter-reset:narrative-step}.narrative-step{contain:layout paint;display:grid;grid-template-columns:auto 1fr;gap:8px 10px;max-height:none;overflow:hidden}.narrative-step-index{align-items:center;background:var(--primary);color:#fff;display:inline-flex;font-weight:900;height:26px;justify-content:center;width:26px}.narrative-step h3{grid-column:2;margin:2px 0 0}.narrative-step .overview-value{grid-column:1/3}.narrative-step p{grid-column:1/3;color:var(--muted);font-size:13px;line-height:1.45;margin:0}.narrative-step .toolbar{grid-column:1/3}.evidence-summary-card:before,.relation-card:before,.overview-item:before,.evidence-story-lane:before,.narrative-step:before{display:none}.evidence-summary-card h3,.relation-card h3,.overview-item h3,.evidence-story-lane h3{font-size:15px;margin:0 0 8px;padding-left:0}.summary-value,.overview-value{color:#075985;display:block;font-size:26px;font-weight:900;letter-spacing:-.04em}.overview-value.risk-medium{color:#b45309}.overview-value.risk-high{color:#b91c1c}.overview-value.risk-low{color:#047857}.overview-value.risk-info{color:var(--primary-deep)}.overview-item p,.story-lead{color:var(--muted);font-size:13px;line-height:1.45;margin:6px 0 0}.compact-evidence-summary{background:#f8fbff;border:1px solid #cfe6fb;border-left:3px solid var(--primary);color:#334155;font-size:13px;line-height:1.45;margin:8px 0;padding:8px 10px;word-break:break-word}.compact-evidence-summary strong{color:#075985}.story-metrics{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0}.story-metrics span{background:#f8fbff;border:1px solid #cfe6fb;border-radius:2px;color:#075985;font-size:12px;font-weight:800;padding:6px 8px}.story-evidence-list{font-family:Consolas,monospace;font-size:12px;line-height:1.45;margin:8px 0 0;padding-left:18px}.story-evidence-list li{margin:3px 0;word-break:break-word}.relationship-meta{display:grid;gap:6px;grid-template-columns:repeat(2,minmax(0,1fr));margin:10px 0}.relationship-meta span{background:#f8fbff;border:1px solid #cfe6fb;border-radius:2px;color:#075985;font-size:12px;font-weight:700;padding:7px}.relationship-tags{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}.relationship-tags .chip{margin:0}.evidence-expansion-card{background:#f8fbff;border:1px solid #cfe6fb;border-left:3px solid var(--primary);margin-top:10px;padding:8px 10px}.evidence-expansion-card[open]{background:#fff}.relationship-details,.flat-details,.event-evidence-fields,.technical-field,.raw-technical-fields,.raw-technical-field{background:transparent;border:0;border-left:2px solid #cfe6fb;border-radius:0;margin-top:8px;padding:4px 0 4px 8px}.relationship-details summary,.flat-details summary,.event-evidence-fields summary,.technical-field summary,.raw-technical-fields summary,.raw-technical-field summary,.evidence-expansion-card summary{cursor:pointer;font-weight:800}.relationship-details pre,.flat-details pre,.event-evidence-fields pre,.technical-field pre,.raw-technical-field pre,.evidence-expansion-card pre{max-height:var(--detail-max);overflow:auto;white-space:pre-wrap;word-break:break-word}.relationship-title{display:flex;align-items:flex-start;gap:8px;justify-content:space-between}.relationship-title code{max-width:100%;overflow-wrap:anywhere}.anchor-offset{scroll-margin-top:18px}.mono-list{font-family:Consolas,monospace;font-size:12px;line-height:1.45;margin:6px 0 0 0;padding-left:18px}.mono-list li{margin:3px 0;word-break:break-word}
-.tree{font-family:Consolas,monospace;line-height:1.5;margin:12px 0}.tree ul{border-left:1px dashed #b9d7f3;list-style:none;margin:0 0 0 18px;padding-left:14px}.tree li{margin:5px 0}.process-tree{background:#fff;border:1px solid var(--line);border-radius:2px;max-height:var(--subsection-max);overflow:auto;padding:12px}.process-tree details.process-tree-node{margin:4px 0}.process-tree summary,.process-tree-leaf{align-items:center;cursor:pointer;display:flex;flex-wrap:wrap;gap:8px;list-style:none}.process-tree summary::-webkit-details-marker{display:none}.process-tree summary:before{color:var(--primary-deep);content:'▶';font-weight:900}.process-tree details[open]>summary:before{content:'▼'}.tree-badges{display:flex;flex-wrap:wrap;gap:5px}.tree-badge{background:#eef7ff;border:1px solid #cfe6fb;border-radius:2px;color:#075985;font-family:Segoe UI,Arial,sans-serif;font-size:11px;font-weight:800;padding:2px 7px}
+.evidence-summary-grid,.relation-grid,.overview-strip,.evidence-story-board,.narrative-spine{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));margin-top:14px}.evidence-summary-card,.relation-card,.overview-item,.evidence-story-lane,.narrative-step{background:#fff;border:1px solid var(--line);border-left:4px solid var(--primary);border-radius:2px;box-shadow:none;max-height:var(--subsection-max);min-width:0;overflow:auto;overflow-wrap:anywhere;padding:14px;position:relative}.narrative-spine{counter-reset:narrative-step}.narrative-spine-lead{align-items:flex-start;background:#f8fbff;border:1px solid #cfe6fb;border-left:4px solid var(--primary);display:flex;flex-wrap:wrap;gap:8px;margin:10px 0 0;padding:10px 12px}.narrative-spine-lead strong{color:#075985}.narrative-step{contain:layout paint;display:grid;grid-template-columns:auto 1fr;gap:8px 10px;max-height:none;overflow:hidden}.narrative-step-index{align-items:center;background:var(--primary);color:#fff;display:inline-flex;font-weight:900;height:26px;justify-content:center;width:26px}.narrative-step h3{grid-column:2;margin:2px 0 0}.narrative-step .overview-value{grid-column:1/3}.narrative-step p{grid-column:1/3;color:var(--muted);font-size:13px;line-height:1.45;margin:0}.narrative-step .toolbar{grid-column:1/3}.evidence-summary-card:before,.relation-card:before,.overview-item:before,.evidence-story-lane:before,.narrative-step:before{display:none}.evidence-summary-card h3,.relation-card h3,.overview-item h3,.evidence-story-lane h3{font-size:15px;margin:0 0 8px;padding-left:0}.summary-value,.overview-value{color:#075985;display:block;font-size:26px;font-weight:900;letter-spacing:-.04em}.overview-value.risk-medium{color:#b45309}.overview-value.risk-high{color:#b91c1c}.overview-value.risk-low{color:#047857}.overview-value.risk-info{color:var(--primary-deep)}.overview-item p,.story-lead{color:var(--muted);font-size:13px;line-height:1.45;margin:6px 0 0}.compact-evidence-summary{background:#f8fbff;border:1px solid #cfe6fb;border-left:3px solid var(--primary);color:#334155;font-size:13px;line-height:1.45;margin:8px 0;padding:8px 10px;word-break:break-word}.compact-evidence-summary strong{color:#075985}.story-metrics{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0}.story-metrics span{background:#f8fbff;border:1px solid #cfe6fb;border-radius:2px;color:#075985;font-size:12px;font-weight:800;padding:6px 8px}.story-evidence-list{font-family:Consolas,monospace;font-size:12px;line-height:1.45;margin:8px 0 0;padding-left:18px}.story-evidence-list li{margin:3px 0;word-break:break-word}.relationship-meta{display:grid;gap:6px;grid-template-columns:repeat(2,minmax(0,1fr));margin:10px 0}.relationship-meta span{background:#f8fbff;border:1px solid #cfe6fb;border-radius:2px;color:#075985;font-size:12px;font-weight:700;padding:7px}.relationship-tags{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}.relationship-tags .chip{margin:0}.evidence-expansion-card{background:#f8fbff;border:1px solid #cfe6fb;border-left:3px solid var(--primary);margin-top:10px;padding:8px 10px}.evidence-expansion-card[open]{background:#fff}.relationship-details,.flat-details,.event-evidence-fields,.technical-field,.raw-technical-fields,.raw-technical-field{background:transparent;border:0;border-left:2px solid #cfe6fb;border-radius:0;margin-top:8px;padding:4px 0 4px 8px}.relationship-details summary,.flat-details summary,.event-evidence-fields summary,.technical-field summary,.raw-technical-fields summary,.raw-technical-field summary,.evidence-expansion-card summary{cursor:pointer;font-weight:800}.relationship-details pre,.flat-details pre,.event-evidence-fields pre,.technical-field pre,.raw-technical-field pre,.evidence-expansion-card pre{max-height:var(--detail-max);overflow:auto;white-space:pre-wrap;word-break:break-word}.relationship-title{display:flex;align-items:flex-start;gap:8px;justify-content:space-between}.relationship-title code{max-width:100%;overflow-wrap:anywhere}.anchor-offset{scroll-margin-top:18px}.mono-list{font-family:Consolas,monospace;font-size:12px;line-height:1.45;margin:6px 0 0 0;padding-left:18px}.mono-list li{margin:3px 0;word-break:break-word}
+.tree{font-family:Consolas,monospace;line-height:1.5;margin:12px 0}.tree ul{border-left:1px dashed #b9d7f3;list-style:none;margin:0 0 0 18px;padding-left:14px}.tree li{margin:5px 0}.process-tree{background:#fff;border:1px solid var(--line);border-radius:2px;max-height:var(--subsection-max);overflow:auto;padding:12px}.process-tree details.process-tree-node{margin:4px 0}.process-tree summary,.process-tree-leaf{align-items:flex-start;cursor:pointer;display:flex;flex-wrap:wrap;gap:8px;list-style:none}.process-tree summary::-webkit-details-marker{display:none}.process-tree summary:before{color:var(--primary-deep);content:'▶';font-weight:900;margin-top:2px}.process-tree details[open]>summary:before{content:'▼'}.process-tree-line{display:flex;flex-wrap:wrap;gap:6px;min-width:0}.process-tree-label{font-weight:900}.process-tree-path{color:var(--muted);font-family:Segoe UI,Arial,sans-serif;font-size:12px;max-width:58ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.tree-badges{display:inline-flex;flex-wrap:wrap;gap:5px}.tree-badge{background:#eef7ff;border:1px solid #cfe6fb;border-radius:2px;color:#075985;font-family:Segoe UI,Arial,sans-serif;font-size:11px;font-weight:800;padding:2px 7px}
 .evidence{max-width:560px}.evidence summary{cursor:pointer;font-weight:700}.evidence pre{white-space:pre-wrap;word-break:break-word}
 .columns{display:grid;gap:14px;grid-template-columns:1fr 1fr}.compact-list{margin:8px 0 0 0;padding-left:18px}.compact-list li{margin:4px 0}
 .artifact-ref{font-weight:700}.artifact-location{display:grid;gap:6px}.artifact-actions{align-items:center;display:inline-flex;flex-wrap:wrap;gap:6px;margin-top:4px}.artifact-actions-inline{display:inline-flex;margin-left:6px;margin-top:0;vertical-align:middle}.artifact-btn{background:#fff;border:1px solid rgba(67,160,255,.72);border-radius:2px;box-shadow:none;color:#075985;display:inline-block;font-size:12px;font-weight:900;padding:4px 8px;text-decoration:none}.artifact-btn.download{background:#eef7ff;color:#075985}.artifact-btn:hover{outline:2px solid rgba(67,160,255,.14)}.artifact-no-link{background:#fff;border:1px dashed #cbd5e1;border-radius:2px;color:var(--muted);display:inline-block;font-size:12px;font-weight:800;padding:4px 8px}.artifact-copy-path{background:#fff;border:1px solid var(--line);border-radius:2px;padding:8px}.artifact-list{list-style:none;margin:8px 0 0 0;padding:0}.artifact-list li{border-top:1px solid #e2e8f0;margin-top:8px;padding-top:8px}.artifact-preview{max-height:var(--subsection-max);overflow:auto}.artifact-preview img{border:1px solid #cbd5e1;border-radius:2px;max-height:var(--artifact-preview-img-max);max-width:100%;object-fit:contain}
@@ -327,7 +328,8 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
 
 /* Square, flat operator theme: no pill/card nesting beyond one visual layer. */
 .modern-sandbox-report header:after{display:none}.modern-sandbox-report .card,.modern-sandbox-report section.card,.modern-sandbox-report .metric,.modern-sandbox-report .quick-link,.modern-sandbox-report .language-entry a,.modern-sandbox-report .badge,.modern-sandbox-report .chip,.modern-sandbox-report .section-note,.modern-sandbox-report code,.modern-sandbox-report .toc a,.modern-sandbox-report .empty,.modern-sandbox-report .copy-btn,.modern-sandbox-report .event-table-wrap,.modern-sandbox-report .timeline-group,.modern-sandbox-report .timeline-item,.modern-sandbox-report .timeline-overflow,.modern-sandbox-report .graph-node,.modern-sandbox-report .behavior-chain,.modern-sandbox-report .behavior-chain li,.modern-sandbox-report .behavior-chain details,.modern-sandbox-report .ioc-card,.modern-sandbox-report .evidence-summary-card,.modern-sandbox-report .evidence-story-lane,.modern-sandbox-report .narrative-step,.modern-sandbox-report .relation-card,.modern-sandbox-report .overview-item,.modern-sandbox-report .relationship-meta span,.modern-sandbox-report .relationship-details,.modern-sandbox-report .evidence-expansion-card,.modern-sandbox-report .process-tree,.modern-sandbox-report .tree-badge,.modern-sandbox-report .evidence details,.modern-sandbox-report .artifact-btn,.modern-sandbox-report .artifact-no-link,.modern-sandbox-report .artifact-copy-path,.modern-sandbox-report .artifact-preview img,.modern-sandbox-report .technical-field,.modern-sandbox-report .raw-technical-fields,.modern-sandbox-report .raw-technical-field,.modern-sandbox-report .raw-events-shell,.modern-sandbox-report .raw-event-page,.modern-sandbox-report .raw-source-hints{border-radius:0!important}.modern-sandbox-report .card:before,.modern-sandbox-report .evidence-summary-card:before,.modern-sandbox-report .evidence-story-lane:before,.modern-sandbox-report .narrative-step:before,.modern-sandbox-report .relation-card:before,.modern-sandbox-report .overview-item:before{border-radius:0!important}.modern-sandbox-report .badge,.modern-sandbox-report .chip,.modern-sandbox-report .copy-btn,.modern-sandbox-report .artifact-btn,.modern-sandbox-report .artifact-no-link{box-shadow:none!important}.modern-sandbox-report .event-evidence-fields,.modern-sandbox-report .flat-technical-fields,.modern-sandbox-report .related-artifacts-flat{background:transparent;border:0;border-radius:0;padding:0}.modern-sandbox-report .flat-technical-fields{border-top:1px solid var(--line);margin-top:8px;padding-top:8px}.modern-sandbox-report .related-artifacts-flat ul{border-top:1px solid var(--line);list-style:none;margin:6px 0 0 0;padding:0}.modern-sandbox-report .related-artifacts-flat li{border-top:1px solid #e2e8f0;margin-top:6px;padding-top:6px}.modern-sandbox-report .related-artifacts-flat li:first-child{border-top:0}.modern-sandbox-report .event-table-wrap,.modern-sandbox-report .raw-events-panel,.modern-sandbox-report .process-tree,.modern-sandbox-report .behavior-chain,.modern-sandbox-report .relation-card,.modern-sandbox-report .evidence-story-lane{overscroll-behavior:contain}.modern-sandbox-report .event-table td,.modern-sandbox-report .edge-table td{overflow-wrap:anywhere}.modern-sandbox-report .self-noise-note{background:#f8fafc;border-left:4px solid #94a3b8;color:#475569;margin:10px 0;padding:10px 12px}
-@media(max-width:900px){.grid,.columns{grid-template-columns:1fr 1fr}table{display:block;overflow-x:auto}}@media(max-width:640px){header{padding:28px 24px}.grid,.columns{grid-template-columns:1fr}main,nav{padding:0 14px}}
+@media print{html{scroll-behavior:auto}body{background:#fff;color:#000}header,main,nav{max-width:none;margin:0;padding:12px}.quick-nav,.toc,.language-entry{position:static}.copy-btn{display:none!important}section.card,.card,.event-table-wrap,.raw-events-panel,.process-tree,.behavior-chain,.relation-card,.evidence-story-lane,.evidence-summary-card,.raw-event-page{break-inside:avoid;max-height:none!important;overflow:visible!important}section.card>h2,th{position:static!important}.process-tree-path{white-space:normal}.raw-events-shell>summary:after,.raw-event-page>summary:after,.event-evidence-fields>summary:after,.technical-field>summary:after,.raw-technical-fields>summary:after{color:#64748b;content:' (folded in screen view; expand in browser for full evidence)';font-weight:400}}
+@media(max-width:900px){.grid,.columns{grid-template-columns:1fr 1fr}table{display:block;overflow-x:auto}}@media(max-width:640px){header{padding:28px 24px}.grid,.columns{grid-template-columns:1fr}main,nav{padding:0 14px}.process-tree-path{white-space:normal}}
 
 """);
         html.AppendLine("</style></head>");
@@ -369,6 +371,18 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         html.AppendLine("<a class=\"secondary\" href=\"report.html\">Default report</a>");
         html.AppendLine("<span class=\"hint\">Default report.html uses Simplified Chinese; report.en.html keeps English operator chrome. Evidence values stay original in both reports. The WebUI also serves these through /api/jobs/{jobId}/report/html?lang=zh and ?lang=en.</span>");
         html.AppendLine("</nav>");
+    }
+
+    /// <summary>
+    /// Adds a static no-JavaScript/print fallback note. Inputs are the report
+    /// shell builder; processing writes text-only guidance; return is none.
+    /// </summary>
+    private static void AppendNoScriptFallback(StringBuilder html)
+    {
+        html.AppendLine("<noscript><nav class=\"card no-js-fallback\">");
+        html.AppendLine("<strong>Print/no-JS fallback</strong>");
+        html.AppendLine("<span class=\"hint\">No JavaScript required for report navigation: native details, table scrolling, safe Open/Download artifact links, and the print stylesheet remain usable. Copy buttons require JavaScript; without it, select visible evidence text or use report.json/raw source hints.</span>");
+        html.AppendLine("</nav></noscript>");
     }
 
     /// <summary>
@@ -1246,8 +1260,10 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         IReadOnlyCollection<ArtifactDescriptor> artifacts)
     {
         var cards = BuildEvidenceNarrativeCards(report, processNodes, edges, fileIocs, registryIocs, networkIocs, artifactIocs, artifacts);
+        var spineCopy = BuildNarrativeSpineCopyText(cards);
         html.AppendLine("<h3 id=\"narrative-spine\" class=\"anchor-offset\">Narrative spine</h3>");
         html.AppendLine("<div class=\"section-note\"><strong>Compact evidence narrative.</strong> Read left to right: process tree root, behavior graph edges, network endpoint scope, and collected artifact proof. Each step stays bounded and copyable so the report explains the evidence before dense tables or raw rows.</div>");
+        html.AppendLine($"<div class=\"narrative-spine-lead copyable\" data-copy=\"{A(spineCopy)}\"><strong>Narrative spine summary</strong><span>Execution → storage → network → artifact proof, with copyable bounded evidence and no raw event wall.</span>{CopyButton("Copy narrative spine", spineCopy)}</div>");
         html.AppendLine("<div class=\"narrative-spine\">");
         foreach (var card in cards)
         {
@@ -1261,6 +1277,13 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         }
 
         html.AppendLine("</div>");
+    }
+
+    private static string BuildNarrativeSpineCopyText(IReadOnlyList<EvidenceNarrativeCard> cards)
+    {
+        return string.Join(
+            Environment.NewLine,
+            ["Narrative spine summary", .. cards.Select(card => $"{card.Step}. {card.Title}: value={card.Value}; detail={card.Detail}")]);
     }
 
     private static IReadOnlyList<EvidenceNarrativeCard> BuildEvidenceNarrativeCards(
@@ -1292,28 +1315,28 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
                 "1",
                 "Execution root",
                 processNodes.Count.ToString(CultureInfo.InvariantCulture),
-                $"Top process: {topProcess}; spawn edges: {spawnEdges}; highest finding: {highestFinding}.",
+                $"Root candidate: {topProcess}. Spawn edges: {spawnEdges}. Highest behavior finding: {highestFinding}.",
                 processNodes.Count > 0 ? "risk-info" : "risk-low",
                 string.Join(Environment.NewLine, ["Narrative step: Execution root", $"topProcess={topProcess}", $"processNodes={processNodes.Count}", $"spawnEdges={spawnEdges}", $"highestFinding={highestFinding}", .. processNodes.Take(6).Select(node => node.CopyText)])),
             new EvidenceNarrativeCard(
                 "2",
                 "Storage changes",
                 storageIocCount.ToString(CultureInfo.InvariantCulture),
-                $"File IOCs: {fileIocs.Count}; registry IOCs: {registryIocs.Count}; graph edges file/registry: {fileEdges}/{registryEdges}.",
+                $"Storage signal: {fileIocs.Count} file IOC(s), {registryIocs.Count} registry IOC(s), graph edges file/registry {fileEdges}/{registryEdges}.",
                 storageIocCount > 0 ? "risk-medium" : "risk-low",
                 string.Join(Environment.NewLine, ["Narrative step: Storage changes", $"fileIocs={fileIocs.Count}", $"registryIocs={registryIocs.Count}", $"fileEdges={fileEdges}", $"registryEdges={registryEdges}", .. fileIocs.Take(5), .. registryIocs.Take(5)])),
             new EvidenceNarrativeCard(
                 "3",
                 "Network scope",
                 networkIocs.Count.ToString(CultureInfo.InvariantCulture),
-                networkIocs.Count == 0 ? $"No endpoint IOC extracted; network graph edges: {networkEdges}." : $"Top endpoints: {string.Join(", ", networkIocs.Take(4))}; network graph edges: {networkEdges}.",
+                networkIocs.Count == 0 ? $"No endpoint IOC extracted; network graph edges: {networkEdges}." : $"Network scope: {string.Join(", ", networkIocs.Take(4))}; graph edges: {networkEdges}.",
                 networkIocs.Count + networkEdges > 0 ? "risk-medium" : "risk-low",
                 string.Join(Environment.NewLine, ["Narrative step: Network scope", $"networkIocs={networkIocs.Count}", $"networkEdges={networkEdges}", .. networkIocs.Take(8)])),
             new EvidenceNarrativeCard(
                 "4",
                 "Artifact proof",
                 artifactIocs.Count.ToString(CultureInfo.InvariantCulture),
-                $"Artifact edges: {artifactEdges}; indexed evidence types: {artifactCounts}.",
+                $"Artifact proof: {artifactEdges} graph edge(s); indexed evidence types: {artifactCounts}.",
                 artifactIocs.Count + artifactEdges > 0 ? "risk-info" : "risk-low",
                 string.Join(Environment.NewLine, ["Narrative step: Artifact proof", $"artifactIocs={artifactIocs.Count}", $"artifactEdges={artifactEdges}", $"artifactKinds={artifactCounts}", .. artifactIocs.Take(8)]))
         ];
@@ -1408,6 +1431,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
             html.AppendLine("</div>");
             html.AppendLine($"<span class=\"summary-value\">{E(card.Value)}</span>");
             html.AppendLine($"<p class=\"muted\">{E(card.Detail)}</p>");
+            html.AppendLine($"<div class=\"toolbar\">{CopyButton("Copy evidence summary", card.CopyText)}</div>");
             html.AppendLine($"<details class=\"evidence-expansion-card\"><summary>Expand evidence card details</summary><pre class=\"copyable\" data-copy=\"{A(card.CopyText)}\">{E(card.CopyText)}</pre></details>");
             html.AppendLine("</article>");
         }
@@ -2549,7 +2573,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         Metric(html, "Inline pages", RawEventPageCount(inlineEvents.Count).ToString(), "risk-info");
         Metric(html, "Hidden raw events", hiddenCount.ToString(), hiddenCount > 0 ? "risk-medium" : "risk-info");
         html.AppendLine("</div>");
-        html.AppendLine($"<div class=\"section-note\"><strong>Slim raw event sample.</strong> Raw events are collapsed by default. Raw events shown inline: {inlineEvents.Count}/{orderedEvents.Count}. Inline page size: {RawEventPageSize}. Raw evidence height limit: 58vh. Hidden raw events: {hiddenCount}. Inline raw pages use native details; command, stdout, stderr, PowerShell, script blocks, and oversized payloads stay folded in every row. Open report.json or raw source artifacts for complete evidence.</div>");
+        html.AppendLine($"<div class=\"section-note\"><strong>Slim raw event sample.</strong> Raw events are collapsed by default. Raw events shown inline: {inlineEvents.Count}/{orderedEvents.Count}. Inline page size: {RawEventPageSize}. Raw evidence height limit: 58vh. Hidden raw events: {hiddenCount}. Inline raw pages use native details; command, stdout, stderr, PowerShell, script blocks, and oversized payloads stay folded in every row. Open report.json or raw source artifacts for complete evidence. Native details work without JavaScript and print labels call out folded evidence.</div>");
         AppendRawEventReadingGuide(html, orderedEvents, inlineEvents.Count, hiddenCount);
         AppendRawSourceHints(html, report, artifacts);
         AppendRawEventDistribution(html, orderedEvents);
@@ -2561,7 +2585,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         }
         else
         {
-            html.AppendLine($"<details class=\"raw-events-shell\"><summary>Show inline raw events ({inlineEvents.Count}/{orderedEvents.Count}; {hiddenCount} hidden)</summary>");
+            html.AppendLine($"<details class=\"raw-events-shell\"><summary><span class=\"fold-label\">Closed by default</span> Show inline raw events ({inlineEvents.Count}/{orderedEvents.Count}; {hiddenCount} hidden; {RawEventPageCount(inlineEvents.Count)} native pages)</summary>");
             html.AppendLine("<div class=\"raw-events-panel\">");
             AppendRawEventPages(html, inlineEvents, orderedEvents.Count, artifactLookup, artifacts);
             html.AppendLine("</div>");
@@ -2656,8 +2680,10 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
                 .ToList();
             var first = index + 1;
             var last = index + pageEvents.Count;
+            var pageCount = RawEventPageCount(inlineEvents.Count);
             var open = pageNumber == 1 ? " open" : string.Empty;
             var copy = string.Join(Environment.NewLine, pageEvents.Select(EventOneLine));
+            var foldedTechnicalCount = pageEvents.Sum(RawEventFoldedTechnicalFieldCount);
             var pageFamilies = string.Join(
                 ", ",
                 pageEvents.Select(EventFamilyLabel).Distinct(StringComparer.OrdinalIgnoreCase).Take(3));
@@ -2667,7 +2693,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
                     .Select(evt => string.IsNullOrWhiteSpace(evt.EventType) ? "(empty)" : evt.EventType)
                     .Distinct(StringComparer.OrdinalIgnoreCase)
                     .Take(3));
-            html.AppendLine($"<details class=\"raw-event-page copyable\" data-copy=\"{A(copy)}\"{open}><summary>Raw event page {pageNumber}: rows {first}-{last} of {totalEventCount}; families {E(FirstNonEmpty(pageFamilies, "-"))}; top types {E(FirstNonEmpty(pageTypes, "-"))}</summary>");
+            html.AppendLine($"<details class=\"raw-event-page copyable\" data-copy=\"{A(copy)}\"{open}><summary>Raw event page {pageNumber}/{pageCount}: rows {first}-{last} of {totalEventCount}; folded technical fields {foldedTechnicalCount}; families {E(FirstNonEmpty(pageFamilies, "-"))}; top types {E(FirstNonEmpty(pageTypes, "-"))}</summary>");
             html.AppendLine($"<div class=\"toolbar\">{CopyButton("Copy raw page", copy)}</div>");
             html.AppendLine("<div class=\"copy-hint\">Page evidence sample. This page is a bounded native-details chunk; long command/output/script fields remain folded. Use the copy button or right-click to copy this inline page; open report.json/events.json for complete row payloads.</div>");
             AppendEventRows(html, pageEvents, artifactLookup, artifacts);
@@ -2683,6 +2709,17 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         return inlineEventCount == 0
             ? 0
             : (int)Math.Ceiling(inlineEventCount / (double)RawEventPageSize);
+    }
+
+    private static int RawEventFoldedTechnicalFieldCount(SandboxEvent evt)
+    {
+        var count = evt.Data.Count(pair => IsLongTechnicalEventField(pair.Key, pair.Value));
+        if (!string.IsNullOrWhiteSpace(evt.CommandLine))
+        {
+            count++;
+        }
+
+        return count;
     }
 
     /// <summary>
@@ -2820,6 +2857,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         html.AppendLine($"<h3>{E(title)}</h3>");
         html.AppendLine($"<span class=\"summary-value\">{E(groups.Sum(group => group.Count).ToString())}</span>");
         html.AppendLine("<p class=\"copy-hint\">Top groups stay visible; any remaining groups are folded into a copyable other-groups row so every raw event remains indexed.</p>");
+        html.AppendLine($"<div class=\"toolbar\">{CopyButton("Copy raw index summary", copy)}</div>");
         html.AppendLine("<ol class=\"compact-list raw-index-list\">");
         foreach (var group in groups)
         {
@@ -2880,6 +2918,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         html.AppendLine($"<article class=\"evidence-summary-card copyable\" data-copy=\"{A(copy)}\">");
         html.AppendLine($"<h3>{E(title)}</h3>");
         html.AppendLine($"<span class=\"summary-value\">{E(rows.Sum(row => row.Count).ToString())}</span>");
+        html.AppendLine($"<div class=\"toolbar\">{CopyButton("Copy distribution summary", copy)}</div>");
         html.AppendLine("<ol class=\"compact-list\">");
         foreach (var row in rows)
         {
@@ -3244,11 +3283,12 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
             .ThenBy(child => child.Timestamp)
             .ToList();
         var activity = ResolveProcessTreeActivity(evt, activityByProcess);
-        var badges = ProcessTreeBadges(evt, childEvents.Count, activity);
+        var badges = ProcessTreeBadges(evt, childEvents.Count, activity, depth);
+        var nodeContent = RenderProcessTreeNodeContent(evt, label, badges);
         if (childEvents.Count > 0)
         {
             var open = ShouldOpenProcessTreeNode(depth, activity) ? " open" : string.Empty;
-            html.AppendLine($"<li><details class=\"process-tree-node\"{open}><summary class=\"copyable\" data-copy=\"{A(EventToPlainText(evt))}\"><code>{E(label)}</code>{badges}</summary>");
+            html.AppendLine($"<li><details class=\"process-tree-node\"{open}><summary class=\"copyable\" data-copy=\"{A(EventToPlainText(evt))}\">{nodeContent}</summary>");
             if (!visited.Add(processKey))
             {
                 html.AppendLine("<ul><li><span class=\"muted\">Cycle suppressed for stable rendering.</span></li></ul>");
@@ -3267,7 +3307,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
             return;
         }
 
-        html.AppendLine($"<li><div class=\"process-tree-leaf copyable\" data-copy=\"{A(EventToPlainText(evt))}\"><code>{E(label)}</code>{badges}</div></li>");
+        html.AppendLine($"<li><div class=\"process-tree-leaf copyable\" data-copy=\"{A(EventToPlainText(evt))}\">{nodeContent}</div></li>");
     }
 
     /// <summary>
@@ -3339,10 +3379,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
 
     private static string ProcessTreeLabel(SandboxEvent evt)
     {
-        var image = !string.IsNullOrWhiteSpace(evt.Path)
-            ? evt.Path
-            : evt.CommandLine ?? string.Empty;
-        return $"{ProcessGraphLabel(evt)} ppid:{ResolveParentProcessId(evt)?.ToString() ?? "-"} {image}".Trim();
+        return $"{ProcessGraphLabel(evt)} ppid:{ResolveParentProcessId(evt)?.ToString() ?? "-"}".Trim();
     }
 
     private static bool IsProcessTreeCandidate(SandboxEvent evt)
@@ -3358,13 +3395,14 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         return int.TryParse(depth, out var parsedDepth) ? parsedDepth : int.MaxValue;
     }
 
-    private static string ProcessTreeBadges(SandboxEvent evt, int childCount, ProcessTreeActivity activity)
+    private static string ProcessTreeBadges(SandboxEvent evt, int childCount, ProcessTreeActivity activity, int depth)
     {
         var stableKey = FirstEventDataValue(evt, "processKey", "processGuid", "processUniqueId", "snapshotKey", "processSnapshotKey");
         var keyLabel = string.IsNullOrWhiteSpace(stableKey) ? $"pid:{evt.ProcessId?.ToString() ?? "-"}" : stableKey;
         var badges = new StringBuilder();
         badges.Append("<span class=\"tree-badges\">");
-        badges.Append($"<span class=\"tree-badge\">key {E(keyLabel)}</span>");
+        badges.Append($"<span class=\"tree-badge\" title=\"{A(keyLabel)}\">key {E(AbbreviateEvidenceValue(keyLabel, 48))}</span>");
+        badges.Append($"<span class=\"tree-badge\">depth {E(depth.ToString(CultureInfo.InvariantCulture))}</span>");
         badges.Append($"<span class=\"tree-badge\">children {E(childCount.ToString())}</span>");
         if (activity.EventCount > 0)
         {
@@ -3389,6 +3427,15 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         badges.Append($"<span class=\"tree-badge\">start {E(evt.Timestamp.ToString("HH:mm:ss"))}</span>");
         badges.Append("</span>");
         return badges.ToString();
+    }
+
+    private static string RenderProcessTreeNodeContent(SandboxEvent evt, string label, string badges)
+    {
+        var image = FirstNonEmpty(evt.Path, evt.CommandLine);
+        var imageHint = string.IsNullOrWhiteSpace(image)
+            ? string.Empty
+            : $"<span class=\"process-tree-path\" title=\"{A(image)}\">image {E(AbbreviateEvidenceValue(image, 96))}</span>";
+        return $"<span class=\"process-tree-line\"><code class=\"process-tree-label\">{E(label)}</code>{badges}{imageHint}</span>";
     }
 
     /// <summary>
@@ -6145,6 +6192,9 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         ("Default report", "默认报告"),
         ("Default report.html uses Simplified Chinese; report.en.html keeps English operator chrome. Evidence values stay original in both reports. The WebUI also serves these through /api/jobs/{jobId}/report/html?lang=zh and ?lang=en.", "默认 report.html 使用简体中文；report.en.html 保留英文操作界面。两份报告中的证据值保持原文。WebUI 也通过 /api/jobs/{jobId}/report/html?lang=zh 和 ?lang=en 提供这些报告。"),
         ("The WebUI also serves these through /api/jobs/{jobId}/report/html?lang=zh and ?lang=en.", "WebUI 也通过 /api/jobs/{jobId}/report/html?lang=zh 和 ?lang=en 提供这些报告。"),
+        ("Print/no-JS fallback", "打印 / 无 JS 兜底"),
+        ("No JavaScript required for report navigation: native details, table scrolling, safe Open/Download artifact links, and the print stylesheet remain usable. Copy buttons require JavaScript; without it, select visible evidence text or use report.json/raw source hints.", "报告导航不依赖 JavaScript：原生 details、表格滚动、安全打开/下载证据链接和打印样式仍可使用。复制按钮需要 JavaScript；无 JS 时请选中可见证据文本，或使用 report.json/原始来源提示。"),
+        (" (folded in screen view; expand in browser for full evidence)", "（屏幕视图中折叠；在浏览器中展开查看完整证据）"),
         ("Quick navigation", "快速导航"),
         ("Sticky subnav", "固定子导航"),
         ("Sticky subnav for Process / Files / Network / R0 / VT / Artifacts quick navigation; counts show currently embedded representative evidence. R0 health, collector self-noise, and VT status rows are counted in their own lanes rather than primary behavior.", "固定子导航用于快速跳转进程 / 文件 / 网络 / R0 / VT / 证据文件；计数表示当前内联的代表性证据。R0 健康、采集器自噪声和 VT 状态行会计入各自通道，而不是主要行为。"),
@@ -6224,13 +6274,27 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         ("Copy VirusTotal official evidence", "复制 VirusTotal 官方证据"),
         ("Behavior graph / IOC summary", "行为图谱 / IOC 摘要"),
         ("Narrative spine", "叙事主线"),
+        ("Narrative spine summary", "叙事主线摘要"),
         ("Compact evidence narrative.", "紧凑证据叙事。"),
         ("Read left to right: process tree root, behavior graph edges, network endpoint scope, and collected artifact proof. Each step stays bounded and copyable so the report explains the evidence before dense tables or raw rows.", "从左到右阅读：进程树根、行为图谱边、网络端点范围和已采集证据文件。每一步都保持有界且可复制，让报告先解释证据，再进入密集表格或原始行。"),
+        ("Execution → storage → network → artifact proof, with copyable bounded evidence and no raw event wall.", "执行 → 存储 → 网络 → 证据文件证明；证据有界且可复制，不形成原始事件墙。"),
         ("Execution root", "执行根节点"),
         ("Storage changes", "存储变更"),
         ("Network scope", "网络范围"),
         ("Artifact proof", "证据文件证明"),
+        ("Copy narrative spine", "复制叙事主线"),
         ("Copy narrative step", "复制叙事步骤"),
+        ("Root candidate:", "根候选："),
+        ("Spawn edges:", "启动边："),
+        ("Highest behavior finding:", "最高行为命中："),
+        ("Storage signal:", "存储信号："),
+        ("file IOC(s)", "文件 IOC"),
+        ("registry IOC(s)", "注册表 IOC"),
+        ("graph edges file/registry", "图谱文件/注册表边"),
+        ("Network scope:", "网络范围："),
+        ("graph edges:", "图谱边："),
+        ("Artifact proof:", "证据文件证明："),
+        ("graph edge(s)", "图谱边"),
         ("Top process:", "主要进程："),
         ("spawn edges:", "启动边："),
         ("highest finding:", "最高命中："),
@@ -6431,6 +6495,10 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         ("Raw events shown inline", "原始事件内联显示"),
         ("Raw evidence height limit:", "原始证据高度限制："),
         ("Open report.json or raw source artifacts for complete evidence.", "打开 report.json 或原始来源证据查看完整证据。"),
+        ("Native details work without JavaScript and print labels call out folded evidence.", "原生 details 不依赖 JavaScript；打印标签会标注已折叠证据。"),
+        ("Closed by default", "默认折叠"),
+        ("native pages", "原生分页"),
+        ("folded technical fields", "已折叠技术字段"),
         ("Show inline raw events", "显示内联原始事件"),
         ("Copy raw page", "复制原始事件页"),
         ("Page evidence sample.", "分页证据样例。"),
@@ -6545,6 +6613,9 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         ("Copy artifact", "复制证据文件"),
         ("Copy artifacts", "复制证据文件"),
         ("Download selector / duplicate / rejection diagnostics", "下载选择器 / 重复 / 拒绝诊断"),
+        ("Copy evidence summary", "复制证据摘要"),
+        ("Copy raw index summary", "复制原始索引摘要"),
+        ("Copy distribution summary", "复制分布摘要"),
         ("Copy event", "复制事件"),
         ("Copy process card", "复制进程卡"),
         ("Copy network card", "复制网络卡"),

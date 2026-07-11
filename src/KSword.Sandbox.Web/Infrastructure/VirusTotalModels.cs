@@ -101,6 +101,80 @@ internal sealed record VirusTotalCommunityVotes
 }
 
 /// <summary>
+/// One VirusTotal popular-threat classification item. Inputs are entries from
+/// the official file object's popular_threat_classification arrays; processing
+/// keeps provider value/count pairs without turning them into sandbox behavior.
+/// </summary>
+internal sealed record VirusTotalThreatClassificationItem(string Value, int Count);
+
+/// <summary>
+/// VirusTotal's official popular_threat_classification summary. Inputs are the
+/// nested official file object fields; processing preserves category/name votes
+/// and suggested labels as API metadata only.
+/// </summary>
+internal sealed record VirusTotalThreatClassification
+{
+    public string? SuggestedThreatLabel { get; init; }
+
+    public IReadOnlyList<VirusTotalThreatClassificationItem> PopularThreatCategories { get; init; } =
+        Array.Empty<VirusTotalThreatClassificationItem>();
+
+    public IReadOnlyList<VirusTotalThreatClassificationItem> PopularThreatNames { get; init; } =
+        Array.Empty<VirusTotalThreatClassificationItem>();
+
+    public string? TopThreatCategory => PopularThreatCategories.Count > 0
+        ? PopularThreatCategories[0].Value
+        : null;
+
+    public string? TopThreatName => PopularThreatNames.Count > 0
+        ? PopularThreatNames[0].Value
+        : null;
+}
+
+/// <summary>
+/// Selected official VirusTotal file object fields exposed by the lookup API.
+/// Inputs are data.id/data.type plus attributes from /api/v3/files/{hash};
+/// processing keeps identity, type, timing, names/tags, and threat-label
+/// metadata operator-safe while never storing API keys or sample bytes.
+/// </summary>
+internal sealed record VirusTotalOfficialFileObject
+{
+    public string? Id { get; init; }
+
+    public string? Type { get; init; }
+
+    public string? Md5 { get; init; }
+
+    public string? Sha1 { get; init; }
+
+    public string? Sha256 { get; init; }
+
+    public long? SizeBytes { get; init; }
+
+    public string? FileTypeDescription { get; init; }
+
+    public string? TypeTag { get; init; }
+
+    public string? Magic { get; init; }
+
+    public IReadOnlyList<string> Names { get; init; } = Array.Empty<string>();
+
+    public IReadOnlyList<string> Tags { get; init; } = Array.Empty<string>();
+
+    public DateTimeOffset? FirstSubmissionDateUtc { get; init; }
+
+    public DateTimeOffset? LastSubmissionDateUtc { get; init; }
+
+    public DateTimeOffset? LastAnalysisDateUtc { get; init; }
+
+    public DateTimeOffset? LastModificationDateUtc { get; init; }
+
+    public DateTimeOffset? FirstSeenInTheWildDateUtc { get; init; }
+
+    public VirusTotalThreatClassification ThreatClassification { get; init; } = new();
+}
+
+/// <summary>
 /// Operator-safe VirusTotal lookup result.
 /// Inputs are local sample hash plus optional VirusTotal API response;
 /// processing extracts summary fields only; the record returned to WebUI never
@@ -178,9 +252,61 @@ internal sealed record VirusTotalLookupResult
 
     public string? ErrorKind { get; init; }
 
+    public string? QuietErrorKind => IsQuietState
+        ? ResolveQuietErrorKind(Status, ErrorKind, HttpStatusCode)
+        : null;
+
+    public string? QuietErrorCategory => IsQuietState
+        ? ResolveQuietErrorCategory(QuietErrorKind)
+        : null;
+
+    public string ZhStatusText => BuildZhStatusText(Status, Verdict, MaliciousCount, SuspiciousCount);
+
+    public string ZhStatusDetail => BuildZhStatusDetail(Status, Verdict, MaliciousCount, SuspiciousCount, QuietErrorKind);
+
     public DateTimeOffset? RetryAfterUtc { get; init; }
 
     public Dictionary<string, int> LastAnalysisStats { get; init; } = new(StringComparer.OrdinalIgnoreCase);
+
+    public VirusTotalOfficialFileObject OfficialFileObject { get; init; } = new();
+
+    public string? OfficialFileObjectId => OfficialFileObject.Id;
+
+    public string? OfficialFileObjectType => OfficialFileObject.Type;
+
+    public string? Md5 => OfficialFileObject.Md5;
+
+    public string? Sha1 => OfficialFileObject.Sha1;
+
+    public string? OfficialSha256 => OfficialFileObject.Sha256;
+
+    public long? FileSizeBytes => OfficialFileObject.SizeBytes;
+
+    public string? FileTypeDescription => OfficialFileObject.FileTypeDescription;
+
+    public string? TypeTag => OfficialFileObject.TypeTag;
+
+    public string? Magic => OfficialFileObject.Magic;
+
+    public IReadOnlyList<string> Names => OfficialFileObject.Names;
+
+    public IReadOnlyList<string> Tags => OfficialFileObject.Tags;
+
+    public DateTimeOffset? FirstSubmissionDateUtc => OfficialFileObject.FirstSubmissionDateUtc;
+
+    public DateTimeOffset? LastSubmissionDateUtc => OfficialFileObject.LastSubmissionDateUtc;
+
+    public DateTimeOffset? LastModificationDateUtc => OfficialFileObject.LastModificationDateUtc;
+
+    public DateTimeOffset? FirstSeenInTheWildDateUtc => OfficialFileObject.FirstSeenInTheWildDateUtc;
+
+    public VirusTotalThreatClassification ThreatClassification => OfficialFileObject.ThreatClassification;
+
+    public string? SuggestedThreatLabel => ThreatClassification.SuggestedThreatLabel;
+
+    public string? TopThreatCategory => ThreatClassification.TopThreatCategory;
+
+    public string? TopThreatName => ThreatClassification.TopThreatName;
 
     public bool CacheHit { get; init; }
 
@@ -210,10 +336,10 @@ internal sealed record VirusTotalLookupResult
         VirusTotalLookupStatuses.Timeout or
         VirusTotalLookupStatuses.LookupFailed;
 
-    public string? QuietFailureReason => IsQuietState ? Status : null;
+    public string? QuietFailureReason => IsQuietState ? QuietErrorKind ?? Status : null;
 
     public string? QuietFailureExplanation => IsQuietState
-        ? BuildQuietFailureExplanation(Status, ErrorKind, HttpStatusCode, Message)
+        ? BuildQuietFailureExplanation(Status, QuietErrorKind, ErrorKind, HttpStatusCode, Message)
         : null;
 
     public bool CanPersistEnrichmentEvent => Configured &&
@@ -258,6 +384,8 @@ internal sealed record VirusTotalLookupResult
             ["eventName"] = VirusTotalLookupEventNames.CompactLookupName,
             ["vtVerdict"] = Verdict,
             ["verdict"] = Verdict,
+            ["zhStatusText"] = ZhStatusText,
+            ["zhStatusDetail"] = ZhStatusDetail,
             ["configured"] = Configured ? "true" : "false",
             ["queried"] = Queried ? "true" : "false",
             ["found"] = Found ? "true" : "false",
@@ -280,9 +408,12 @@ internal sealed record VirusTotalLookupResult
         AddIfPresent(data, "officialApiSelfLink", OfficialApiSelfLink);
         AddIfPresent(data, "meaningfulName", MeaningfulName);
         AddIfPresent(data, "errorKind", ErrorKind);
+        AddIfPresent(data, "quietErrorKind", QuietErrorKind);
+        AddIfPresent(data, "quietErrorCategory", QuietErrorCategory);
         AddIfPresent(data, "cacheAgeSeconds", FormatNullableSeconds(CacheAgeSeconds));
         AddIfPresent(data, "quietFailureReason", QuietFailureReason);
         AddIfPresent(data, "quietFailureExplanation", QuietFailureExplanation);
+        AddOfficialFileObjectData(data);
         if (Reputation is not null)
         {
             data["vtReputation"] = Reputation.Value.ToString(CultureInfo.InvariantCulture);
@@ -319,6 +450,38 @@ internal sealed record VirusTotalLookupResult
         }
 
         return data;
+    }
+
+    private void AddOfficialFileObjectData(IDictionary<string, string> data)
+    {
+        AddIfPresent(data, "vtOfficialFileObjectId", OfficialFileObject.Id);
+        AddIfPresent(data, "vtOfficialFileObjectType", OfficialFileObject.Type);
+        AddIfPresent(data, "vtMd5", OfficialFileObject.Md5);
+        AddIfPresent(data, "vtSha1", OfficialFileObject.Sha1);
+        AddIfPresent(data, "vtOfficialSha256", OfficialFileObject.Sha256);
+        AddIfPresent(data, "vtFileTypeDescription", OfficialFileObject.FileTypeDescription);
+        AddIfPresent(data, "vtTypeTag", OfficialFileObject.TypeTag);
+        AddIfPresent(data, "vtMagic", OfficialFileObject.Magic);
+        AddIfPresent(data, "vtNames", JoinValues(OfficialFileObject.Names));
+        AddIfPresent(data, "vtTags", JoinValues(OfficialFileObject.Tags));
+        AddIfPresent(data, "vtSuggestedThreatLabel", ThreatClassification.SuggestedThreatLabel);
+        AddIfPresent(data, "vtTopThreatCategory", ThreatClassification.TopThreatCategory);
+        AddIfPresent(data, "vtTopThreatName", ThreatClassification.TopThreatName);
+
+        if (OfficialFileObject.SizeBytes is not null)
+        {
+            data["vtFileSizeBytes"] = OfficialFileObject.SizeBytes.Value.ToString(CultureInfo.InvariantCulture);
+        }
+
+        AddIfPresent(data, "vtFirstSubmissionDateUtc", FormatDate(OfficialFileObject.FirstSubmissionDateUtc));
+        AddIfPresent(data, "vtLastSubmissionDateUtc", FormatDate(OfficialFileObject.LastSubmissionDateUtc));
+        AddIfPresent(data, "vtLastModificationDateUtc", FormatDate(OfficialFileObject.LastModificationDateUtc));
+        AddIfPresent(data, "vtFirstSeenInTheWildDateUtc", FormatDate(OfficialFileObject.FirstSeenInTheWildDateUtc));
+
+        var categoryVotes = FormatThreatItems(ThreatClassification.PopularThreatCategories);
+        var nameVotes = FormatThreatItems(ThreatClassification.PopularThreatNames);
+        AddIfPresent(data, "vtPopularThreatCategories", categoryVotes);
+        AddIfPresent(data, "vtPopularThreatNames", nameVotes);
     }
 
     public VirusTotalLookupResult WithCacheMetadata(
@@ -362,6 +525,31 @@ internal sealed record VirusTotalLookupResult
             : seconds.Value.ToString("0.###", CultureInfo.InvariantCulture);
     }
 
+    private static string? FormatDate(DateTimeOffset? value)
+    {
+        return value?.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture);
+    }
+
+    private static string? JoinValues(IReadOnlyList<string> values)
+    {
+        return values.Count == 0
+            ? null
+            : string.Join(", ", values
+                .Where(static value => !string.IsNullOrWhiteSpace(value))
+                .Select(static value => value.Trim())
+                .Take(20));
+    }
+
+    private static string? FormatThreatItems(IReadOnlyList<VirusTotalThreatClassificationItem> values)
+    {
+        return values.Count == 0
+            ? null
+            : string.Join(", ", values
+                .Where(static value => !string.IsNullOrWhiteSpace(value.Value))
+                .Select(static value => $"{value.Value.Trim()}:{Math.Max(0, value.Count).ToString(CultureInfo.InvariantCulture)}")
+                .Take(20));
+    }
+
     private static string StatusToVerdict(string? status)
     {
         return status switch
@@ -379,7 +567,7 @@ internal sealed record VirusTotalLookupResult
         };
     }
 
-    private static string BuildQuietFailureExplanation(string? status, string? errorKind, int? httpStatusCode, string? message)
+    private static string BuildQuietFailureExplanation(string? status, string? quietErrorKind, string? errorKind, int? httpStatusCode, string? message)
     {
         var baseMessage = string.IsNullOrWhiteSpace(message) ? null : message.Trim();
         var explanation = status switch
@@ -405,8 +593,124 @@ internal sealed record VirusTotalLookupResult
             explanation = $"{explanation} errorKind={errorKind.Trim()}.";
         }
 
+        if (!string.IsNullOrWhiteSpace(quietErrorKind) &&
+            !string.Equals(quietErrorKind, errorKind, StringComparison.OrdinalIgnoreCase))
+        {
+            explanation = $"{explanation} quietErrorKind={quietErrorKind.Trim()}.";
+        }
+
         return baseMessage is null
             ? explanation
             : $"{explanation} Provider message: {baseMessage}";
+    }
+
+    private static string ResolveQuietErrorKind(string? status, string? errorKind, int? httpStatusCode)
+    {
+        if (httpStatusCode is 401 or 403 ||
+            string.Equals(status, VirusTotalLookupStatuses.AuthenticationFailed, StringComparison.OrdinalIgnoreCase))
+        {
+            return "auth";
+        }
+
+        if (httpStatusCode is 429 ||
+            string.Equals(status, VirusTotalLookupStatuses.RateLimited, StringComparison.OrdinalIgnoreCase))
+        {
+            return "rate_limit";
+        }
+
+        if (httpStatusCode is 404 ||
+            string.Equals(status, VirusTotalLookupStatuses.NotFound, StringComparison.OrdinalIgnoreCase))
+        {
+            return "not_found";
+        }
+
+        if (string.Equals(status, VirusTotalLookupStatuses.NotConfigured, StringComparison.OrdinalIgnoreCase))
+        {
+            return "not_configured";
+        }
+
+        if (string.Equals(status, VirusTotalLookupStatuses.Timeout, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(errorKind, "timeout", StringComparison.OrdinalIgnoreCase))
+        {
+            return "timeout";
+        }
+
+        if (string.Equals(status, VirusTotalLookupStatuses.MissingHash, StringComparison.OrdinalIgnoreCase))
+        {
+            return "missing_hash";
+        }
+
+        if (string.Equals(status, VirusTotalLookupStatuses.InvalidHash, StringComparison.OrdinalIgnoreCase))
+        {
+            return "invalid_hash";
+        }
+
+        return string.IsNullOrWhiteSpace(errorKind)
+            ? VirusTotalLookupStatuses.LookupFailed
+            : errorKind.Trim();
+    }
+
+    private static string ResolveQuietErrorCategory(string? quietErrorKind)
+    {
+        return quietErrorKind switch
+        {
+            "not_configured" => "configuration",
+            "auth" => "authentication",
+            "rate_limit" => "provider_quota",
+            "timeout" => "network_timeout",
+            "not_found" => "provider_not_found",
+            "missing_hash" or "invalid_hash" => "local_input",
+            _ => "lookup_failure"
+        };
+    }
+
+    private static string BuildZhStatusText(string? status, string? verdict, int malicious, int suspicious)
+    {
+        return status switch
+        {
+            VirusTotalLookupStatuses.Found when string.Equals(verdict, VirusTotalLookupStatuses.Malicious, StringComparison.OrdinalIgnoreCase) => "官方已收录：恶意",
+            VirusTotalLookupStatuses.Found when string.Equals(verdict, VirusTotalLookupStatuses.Suspicious, StringComparison.OrdinalIgnoreCase) => "官方已收录：可疑",
+            VirusTotalLookupStatuses.Found => "官方已收录",
+            VirusTotalLookupStatuses.NotConfigured => "未配置 API Key",
+            VirusTotalLookupStatuses.NotFound => "官方未收录",
+            VirusTotalLookupStatuses.RateLimited => "官方限速",
+            VirusTotalLookupStatuses.AuthenticationFailed => "鉴权失败",
+            VirusTotalLookupStatuses.Timeout => "查询超时",
+            VirusTotalLookupStatuses.MissingHash => "缺少 SHA-256",
+            VirusTotalLookupStatuses.InvalidHash => "SHA-256 无效",
+            VirusTotalLookupStatuses.LookupFailed => "查询失败",
+            _ when malicious > 0 => "官方已收录：恶意",
+            _ when suspicious > 0 => "官方已收录：可疑",
+            _ => "状态未知"
+        };
+    }
+
+    private static string BuildZhStatusDetail(string? status, string? verdict, int malicious, int suspicious, string? quietErrorKind)
+    {
+        return status switch
+        {
+            VirusTotalLookupStatuses.Found when malicious > 0 =>
+                $"VirusTotal 官方文件报告已收录；{malicious.ToString(CultureInfo.InvariantCulture)} 个引擎判恶意，{suspicious.ToString(CultureInfo.InvariantCulture)} 个引擎判可疑。显式 persist 时可写入信誉增强。",
+            VirusTotalLookupStatuses.Found when suspicious > 0 =>
+                $"VirusTotal 官方文件报告已收录；0 个引擎判恶意，{suspicious.ToString(CultureInfo.InvariantCulture)} 个引擎判可疑。显式 persist 时可写入信誉增强。",
+            VirusTotalLookupStatuses.Found =>
+                $"VirusTotal 官方文件报告已收录；当前 verdict={verdict ?? VirusTotalLookupStatuses.Unknown}。显式 persist 时可写入信誉增强。",
+            VirusTotalLookupStatuses.NotConfigured =>
+                "未配置 VirusTotal API Key；未调用官方 API，仅在页面/API 中作为静默状态返回，不写任务/行为日志。",
+            VirusTotalLookupStatuses.NotFound =>
+                "VirusTotal 官方 API 已查询但未收录该 SHA-256；这是信誉状态，不代表样本行为，默认不写任务/行为日志。",
+            VirusTotalLookupStatuses.RateLimited =>
+                "VirusTotal 官方 API 返回限速；本次查询静默结束，可稍后重试，不写任务/行为日志。",
+            VirusTotalLookupStatuses.AuthenticationFailed =>
+                "VirusTotal 官方 API 拒绝当前 Key；请检查设置，沙箱分析继续，不写任务/行为日志。",
+            VirusTotalLookupStatuses.Timeout =>
+                "VirusTotal 查询超时；沙箱分析继续，该状态只通过 API/页面展示，不写任务/行为日志。",
+            VirusTotalLookupStatuses.MissingHash =>
+                "样本 SHA-256 不可用；未调用 VirusTotal 官方 API，不写任务/行为日志。",
+            VirusTotalLookupStatuses.InvalidHash =>
+                "样本 SHA-256 格式无效；未调用 VirusTotal 官方 API，不写任务/行为日志。",
+            _ =>
+                $"VirusTotal 查询处于静默失败状态（{quietErrorKind ?? VirusTotalLookupStatuses.LookupFailed}）；沙箱分析继续，不写任务/行为日志。"
+        };
     }
 }

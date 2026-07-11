@@ -1,5 +1,6 @@
 using System.Text.Json;
 using KSword.Sandbox.Abstractions;
+using KSword.Sandbox.Core.Execution;
 
 namespace KSword.Sandbox.Core.Jobs;
 
@@ -29,33 +30,47 @@ public sealed partial class SandboxJobService
         }
 
         var progressPath = GetRunbookProgressPath(jobId);
-        if (TryReadCompanionJsonFile(progressPath, out SandboxRunbookProgressSnapshot? persisted) &&
+        var hasPersistedProgress = TryReadCompanionJsonFile(progressPath, out SandboxRunbookProgressSnapshot? persisted) &&
             persisted is not null &&
-            persisted.JobId == jobId)
+            persisted.JobId == jobId;
+        if (hasPersistedProgress)
         {
-            snapshot = persisted;
-            return true;
+            persisted = RunbookProgressFacts.SanitizeSnapshot(job.Runbook, persisted!);
         }
 
-        if (job.Runbook is not null &&
-            TryReadRunbookExecutionResult(job.RunbookExecutionResultPath, out var execution) &&
+        var executionPath = ResolveRunbookExecutionPath(jobId, job);
+        var shouldInspectExecution = job.Runbook is not null &&
+            ShouldInspectExecutionProgress(progressPath, persisted, executionPath);
+        if (shouldInspectExecution &&
+            TryReadRunbookExecutionResult(executionPath, out var execution) &&
             execution is not null &&
-            execution.JobId == jobId)
+            execution.JobId == jobId &&
+            job.Runbook is not null)
         {
-            snapshot = BuildRunbookProgressSnapshot(job.Runbook, execution);
-            if (!File.Exists(progressPath))
+            var recovered = BuildRunbookProgressSnapshot(job.Runbook, execution);
+            if (persisted is null || !IsProgressSnapshotAtLeastAsFresh(persisted, recovered))
             {
+                var diagnostic = persisted is null
+                    ? "runbook-progress.json was missing/corrupt; recovered current step from runbook-execution.json."
+                    : "runbook-progress.json was older than runbook-execution.json; recovered fresher current step from execution result.";
+                snapshot = BuildRunbookProgressSnapshot(job.Runbook, execution, diagnostic, bumpUpdatedAt: true);
                 try
                 {
                     WriteJsonAtomically(progressPath, snapshot);
                 }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException)
                 {
-                    // Best-effort backfill; callers still receive the
-                    // recovered snapshot derived from runbook-execution.json.
+                    // Best-effort backfill; callers still receive the recovered
+                    // UI-safe snapshot derived from runbook-execution.json.
                 }
-            }
 
+                return true;
+            }
+        }
+
+        if (persisted is not null)
+        {
+            snapshot = persisted;
             return true;
         }
 
@@ -77,8 +92,10 @@ public sealed partial class SandboxJobService
             throw new ArgumentException("Runbook progress snapshot must include a job id.", nameof(snapshot));
         }
 
+        var job = GetJob(snapshot.JobId);
+        var safeSnapshot = RunbookProgressFacts.SanitizeSnapshot(job?.Runbook, snapshot);
         Directory.CreateDirectory(GetJobRoot(snapshot.JobId));
-        WriteJsonAtomically(GetRunbookProgressPath(snapshot.JobId), snapshot);
+        WriteJsonAtomically(GetRunbookProgressPath(snapshot.JobId), safeSnapshot);
     }
 
     /// <summary>
@@ -255,14 +272,14 @@ public sealed partial class SandboxJobService
         WriteJsonAtomically(Path.Combine(jobRoot, JobMetadataFileName), job);
     }
 
-    private void PersistRunbookProgress(AnalysisJob job, SandboxRunbookExecutionResult result)
+    private void PersistRunbookProgress(AnalysisJob job, SandboxRunbookExecutionResult result, string? freshnessDiagnostic = null, bool bumpUpdatedAt = false)
     {
         if (job.Runbook is null)
         {
             return;
         }
 
-        var snapshot = BuildRunbookProgressSnapshot(job.Runbook, result);
+        var snapshot = BuildRunbookProgressSnapshot(job.Runbook, result, freshnessDiagnostic, bumpUpdatedAt);
         WriteJsonAtomically(GetRunbookProgressPath(job.JobId), snapshot);
     }
 
@@ -280,7 +297,11 @@ public sealed partial class SandboxJobService
         WriteJsonAtomically(GetGuestImportStatePath(job.JobId), state);
     }
 
-    private static SandboxRunbookProgressSnapshot BuildRunbookProgressSnapshot(SandboxRunbook runbook, SandboxRunbookExecutionResult result)
+    private static SandboxRunbookProgressSnapshot BuildRunbookProgressSnapshot(
+        SandboxRunbook runbook,
+        SandboxRunbookExecutionResult result,
+        string? freshnessDiagnostic = null,
+        bool bumpUpdatedAt = false)
     {
         var startedAt = result.StartedAtUtc == default ? DateTimeOffset.UtcNow : result.StartedAtUtc;
         var updatedAt = startedAt + result.Duration;
@@ -289,12 +310,20 @@ public sealed partial class SandboxJobService
             updatedAt = startedAt;
         }
 
-        var resultByIndex = result.StepResults.ToDictionary(step => step.StepIndex);
+        if (bumpUpdatedAt && updatedAt < DateTimeOffset.UtcNow)
+        {
+            updatedAt = DateTimeOffset.UtcNow;
+        }
+
+        var resultByIndex = result.StepResults
+            .Where(step => step.StepIndex >= 0)
+            .GroupBy(step => step.StepIndex)
+            .ToDictionary(group => group.Key, group => group.Last());
         var failedIndex = result.FailedStepIndex;
         var steps = runbook.Steps.Select((step, index) =>
         {
             resultByIndex.TryGetValue(index, out var stepResult);
-            var state = ResolveStepProgressState(index, stepResult, failedIndex);
+            var state = RunbookProgressFacts.ResolveStepState(index, stepResult, failedIndex);
             return new SandboxRunbookStepProgressSnapshot
             {
                 StepIndex = index,
@@ -306,17 +335,18 @@ public sealed partial class SandboxJobService
                 StartedAtUtc = stepResult?.StartedAtUtc,
                 Duration = stepResult?.Duration,
                 ExitCode = stepResult?.ExitCode,
-                Message = stepResult?.Message
+                Message = RunbookProgressFacts.BuildStepProgressMessage(step, index, runbook.Steps.Count, state, stepResult, isCurrent: false)
             };
         }).ToList();
 
-        var completedSteps = steps.Count(step => string.Equals(step.State, SandboxRunbookProgressStates.Completed, StringComparison.OrdinalIgnoreCase));
-        var currentStep = steps.LastOrDefault(step =>
-            string.Equals(step.State, SandboxRunbookProgressStates.Failed, StringComparison.OrdinalIgnoreCase)) ??
-            steps.LastOrDefault(step => !string.Equals(step.State, SandboxRunbookProgressStates.Pending, StringComparison.OrdinalIgnoreCase));
+        var completedSteps = steps.Count(step => RunbookProgressFacts.CountsAsCompletedStep(step.State));
         var state = result.Success
             ? SandboxRunbookProgressStates.Completed
             : SandboxRunbookProgressStates.Failed;
+        var currentStepIndex = RunbookProgressFacts.ResolveCurrentStepIndex(steps, result.FailedStepIndex, state, result.Success);
+        var currentStep = currentStepIndex is >= 0
+            ? steps.FirstOrDefault(step => step.StepIndex == currentStepIndex.Value)
+            : null;
 
         return new SandboxRunbookProgressSnapshot
         {
@@ -331,7 +361,7 @@ public sealed partial class SandboxJobService
             CurrentStepId = currentStep?.StepId,
             CurrentStepTitle = currentStep?.Title,
             Success = result.Success,
-            Message = result.Message ?? (result.Success ? "Runbook execution completed." : "Runbook execution failed."),
+            Message = RunbookProgressFacts.BuildAggregateProgressMessage(runbook, result, freshnessDiagnostic),
             StartedAtUtc = startedAt,
             UpdatedAtUtc = updatedAt,
             Duration = result.Duration,
@@ -376,26 +406,6 @@ public sealed partial class SandboxJobService
         }
 
         return metadataStatus ?? AnalysisStatus.Planned;
-    }
-
-    private static string ResolveStepProgressState(
-        int stepIndex,
-        SandboxRunbookStepExecutionResult? stepResult,
-        int? failedIndex)
-    {
-        if (stepResult is not null)
-        {
-            return stepResult.Success
-                ? SandboxRunbookProgressStates.Completed
-                : SandboxRunbookProgressStates.Failed;
-        }
-
-        if (failedIndex.HasValue && stepIndex > failedIndex.Value)
-        {
-            return SandboxRunbookProgressStates.Skipped;
-        }
-
-        return SandboxRunbookProgressStates.Pending;
     }
 
     private static DateTimeOffset ResolveRecoveredCreatedAt(string jobRoot, AnalysisJob? metadataJob, AnalysisReport? report)
@@ -517,7 +527,11 @@ public sealed partial class SandboxJobService
         {
             try
             {
-                PersistRunbookProgress(job, execution);
+                PersistRunbookProgress(
+                    job,
+                    execution,
+                    "runbook-progress.json was missing during job recovery; backfilled current-step progress from runbook-execution.json.",
+                    bumpUpdatedAt: true);
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException)
             {
@@ -548,6 +562,66 @@ public sealed partial class SandboxJobService
             result.JobId == jobId
             ? result
             : null;
+    }
+
+    private string ResolveRunbookExecutionPath(Guid jobId, AnalysisJob job)
+    {
+        return string.IsNullOrWhiteSpace(job.RunbookExecutionResultPath)
+            ? Path.Combine(GetJobRoot(jobId), "runbook-execution.json")
+            : job.RunbookExecutionResultPath;
+    }
+
+    private static bool ShouldInspectExecutionProgress(
+        string progressPath,
+        SandboxRunbookProgressSnapshot? persisted,
+        string executionPath)
+    {
+        if (string.IsNullOrWhiteSpace(executionPath) || !File.Exists(executionPath))
+        {
+            return false;
+        }
+
+        if (persisted is null)
+        {
+            return true;
+        }
+
+        if (!persisted.Success.HasValue &&
+            !string.Equals(persisted.State, SandboxRunbookProgressStates.Completed, StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(persisted.State, SandboxRunbookProgressStates.Failed, StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(persisted.State, SandboxRunbookProgressStates.Canceled, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        var executionUpdated = SafeGetLastWriteTimeUtc(executionPath);
+        var progressUpdated = SafeGetLastWriteTimeUtc(progressPath);
+        return executionUpdated > progressUpdated.AddMilliseconds(1);
+    }
+
+    private static bool IsProgressSnapshotAtLeastAsFresh(
+        SandboxRunbookProgressSnapshot persisted,
+        SandboxRunbookProgressSnapshot recovered)
+    {
+        if (recovered.Success.HasValue && !persisted.Success.HasValue)
+        {
+            return false;
+        }
+
+        if (recovered.ExecutedSteps > persisted.ExecutedSteps ||
+            recovered.CompletedSteps > persisted.CompletedSteps)
+        {
+            return false;
+        }
+
+        if (recovered.CurrentStepIndex.HasValue &&
+            (!persisted.CurrentStepIndex.HasValue ||
+             recovered.CurrentStepIndex.Value > persisted.CurrentStepIndex.Value))
+        {
+            return false;
+        }
+
+        return persisted.UpdatedAtUtc >= recovered.UpdatedAtUtc;
     }
 
     private static bool TryReadRunbookExecutionResult(string? path, out SandboxRunbookExecutionResult? result)

@@ -24,6 +24,7 @@ internal sealed class ProcessTreeProbe : IGuestProbe
 {
     private const int MaxSystemDiffEventsPerKind = 256;
     private const int MaxProcessTreeSummaryItems = 16;
+    private const string ReasonTaxonomy = "guest-process-tree.reason.v1";
     private const string ServiceCreatedEventType = "service.created";
     private const string ServiceModifiedEventType = "service.modified";
     private const string ServiceDeletedEventType = "service.deleted";
@@ -347,6 +348,13 @@ internal sealed class ProcessTreeProbe : IGuestProbe
             evt.Data["captureState"] = "missing";
             evt.Data["status"] = "missing";
             evt.Data["reason"] = "processNotVisibleInCurrentSnapshot";
+            evt.Data["reasonCode"] = "processNotVisibleInCurrentSnapshot";
+            evt.Data["reasonCategory"] = "process-tree-visibility";
+            evt.Data["reasonTaxonomy"] = ReasonTaxonomy;
+            evt.Data["reasonTaxonomyVersion"] = "v1";
+            evt.Data["behaviorCounted"] = "false";
+            evt.Data["nonbehavior"] = "true";
+            evt.Data["collectionHealth"] = "true";
             evt.Data["missingAtPhase"] = ToPhaseLabel(phase);
             evt.Data["missingAtUtc"] = capturedAtUtc.ToString("O", CultureInfo.InvariantCulture);
             evt.Data["firstSeenPhase"] = ToPhaseLabel(observation.FirstSeenPhase);
@@ -1061,6 +1069,15 @@ internal sealed class ProcessTreeProbe : IGuestProbe
                 ["treeDepth"] = "0",
                 ["treeLineage"] = rootProcessId.ToString(CultureInfo.InvariantCulture),
                 ["reason"] = "Root process was not visible in the current process snapshot.",
+                ["reasonCode"] = "rootProcessNotVisible",
+                ["reasonCategory"] = "process-tree-visibility",
+                ["reasonTaxonomy"] = ReasonTaxonomy,
+                ["reasonTaxonomyVersion"] = "v1",
+                ["summaryEvent"] = "true",
+                ["artifactEvent"] = "false",
+                ["behaviorCounted"] = "false",
+                ["nonbehavior"] = "true",
+                ["collectionHealth"] = "true",
                 ["zhMessage"] = "样本根进程在当前进程快照中不可见，可能已经退出。",
                 ["zhHint"] = "该事件保留 rootProcessId/treeLineage 和已知启动信息；请结合 process.exit、process.timeout 或 missingAtUtc 判断退出时机。"
             }
@@ -1195,6 +1212,15 @@ internal sealed class ProcessTreeProbe : IGuestProbe
                 ["processTreeCompleteness"] = tree.RootVisible ? "complete-visible-root-tree" : "partial-root-missing-visible-descendants-only",
                 ["captureState"] = tree.RootVisible ? "complete" : "partial",
                 ["status"] = tree.RootVisible ? "complete" : "partial",
+                ["reason"] = tree.RootVisible ? "rootVisibleTreeCaptured" : "rootMissingTreePartiallyCaptured",
+                ["reasonCode"] = tree.RootVisible ? "rootVisibleTreeCaptured" : "rootMissingTreePartiallyCaptured",
+                ["reasonCategory"] = tree.RootVisible ? "process-tree-captured" : "process-tree-visibility",
+                ["reasonTaxonomy"] = ReasonTaxonomy,
+                ["reasonTaxonomyVersion"] = "v1",
+                ["artifactEvent"] = "false",
+                ["behaviorCounted"] = "false",
+                ["nonbehavior"] = "true",
+                ["collectionHealth"] = "true",
                 ["zhMessage"] = tree.RootVisible
                     ? "进程树快照已采集，根进程仍可见。"
                     : "进程树快照已采集，但根进程当前不可见，可能已经退出。",

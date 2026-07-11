@@ -214,7 +214,8 @@ internal sealed class ReportHealthReputationContractScenario : ISmokeTestScenari
         RequireContains(vtSection, "VirusTotal lookup rate-limited", "VT rate-limit should be rendered in the reputation section.");
 
         var rawSection = ExtractSection(englishHtml, "events");
-        RequireContains(rawSection, "<details class=\"raw-events-shell\"><summary>Show inline raw events (3/3; 0 hidden)</summary>", "Raw events should be collapsed even for small reports.");
+        RequireContains(rawSection, "<details class=\"raw-events-shell\"><summary><span class=\"fold-label\">Closed by default</span>", "Raw events should be collapsed even for small reports.");
+        RequireContains(rawSection, "Show inline raw events (3/3; 0 hidden; 1 native pages)", "Raw event summary should include bounded native pagination.");
         RequireContains(rawSection, "<div class=\"raw-events-panel\">", "Raw events should expand into the bounded panel.");
         RequireContains(rawSection, "Raw evidence height limit: 58vh", "Raw event guidance should disclose the bounded height.");
 

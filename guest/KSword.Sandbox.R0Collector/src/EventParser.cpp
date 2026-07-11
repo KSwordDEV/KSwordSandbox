@@ -1250,7 +1250,25 @@ void AddDriverNoiseClassificationFields(
         "noiseReasons",
         attribution.selfNoiseReason.empty() ? "none" : attribution.selfNoiseReason);
     data.AddUtf8("noiseFieldSet", kJsonlNoiseFieldSet);
+    data.AddUtf8("noiseTaxonomyVersion", "1");
+    data.AddUtf8(
+        "noiseDecision",
+        attribution.collectorNoise
+            ? "collector-self-noise"
+            : (attribution.selfNoise ? "producer-self-noise" : "not-noise"));
+    data.AddUtf8(
+        "noiseDecisionSource",
+        attribution.collectorNoise
+            ? "collector-path-or-pid"
+            : (attribution.selfNoise ? "driver-producer-flag" : "driver-attribution-default"));
+    data.AddUtf8("noiseClassificationConfidence", "high");
+    data.AddUtf8("noiseProbeKind", "none");
     data.AddBool("sampleBehaviorCandidate", sampleBehaviorCandidate);
+    data.AddUtf8(
+        "sampleBehaviorCandidateReason",
+        sampleBehaviorCandidate
+            ? "not-collector-or-producer-self-noise"
+            : "noise-classification-excludes-sample-behavior");
     data.AddBool("collectionDiagnostic", false);
     data.AddBool("collectionNoise", attribution.collectorNoise);
     data.AddUtf8(
@@ -1267,6 +1285,13 @@ void AddDriverNoiseClassificationFields(
             : (attribution.selfNoise
                 ? L"该行由 producer 标记为自噪声，不应直接计入样本行为。"
                 : L"该行未命中 Collector 自噪声规则，可作为样本或系统行为候选证据。"));
+    data.AddWide(
+        "zhNoiseClassificationHint",
+        attribution.collectorNoise
+            ? L"噪声分类为 Collector/KSword 基础设施；用于审计采集链路，不应计入样本行为。"
+            : (attribution.selfNoise
+                ? L"噪声分类为 producer 自噪声；请与 sampleBehaviorCandidate=false 一起处理。"
+                : L"噪声分类为 not-noise；该行可作为样本/系统行为候选，但仍需上下文确认。"));
     data.AddWide(
         "zhOperatorHint",
         attribution.collectorNoise
@@ -1569,9 +1594,20 @@ void AddNetworkProtocolBoundaryData(
     JsonDataObjectBuilder& data,
     const std::string& flowKey,
     const std::string& serviceHint) {
+    const bool dnsCandidate = serviceHint == "dns";
+    const bool httpCandidate = serviceHint == "http";
+    const bool tlsCandidate = serviceHint == "tls";
+
     data.AddBool("protocolPayloadParsed", false);
     data.AddUtf8("protocolParserSource", "r0-ale-endpoint-only");
     data.AddUtf8("protocolPayloadSource", "none-r0-endpoint-metadata-only");
+    data.AddUnsigned("networkCorrelationContractVersion", 1);
+    data.AddUtf8("networkCorrelationRole", "r0-endpoint-candidate");
+    data.AddUtf8("pcapCorrelationRole", "join-candidate-not-l7-owner");
+    data.AddUtf8("pcapCorrelationJoinFields", "flowKey|sourceEndpoint|destinationEndpoint|protocolName|sourcePort|destinationPort|processId");
+    data.AddUtf8("pcapCorrelationMissingFields", "dnsQueryName|httpHost|httpUri|httpMethod|tlsSni|tlsCertificate");
+    data.AddUtf8("pcapCorrelationConfidence", serviceHint == "unknown" ? "low" : "medium");
+    data.AddUtf8("networkCorrelationStableFields", kNetworkCorrelationStableFields);
     data.AddBool("pcapCorrelationRequired", true);
     data.AddUtf8("pcapCorrelationStatus", "required-unmatched-in-r0-row");
     data.AddUtf8("pcapFlowKeyCandidate", flowKey);
@@ -1588,12 +1624,18 @@ void AddNetworkProtocolBoundaryData(
     data.AddUtf8(
         "networkProtocolParserBoundary",
         "R0 WFP/ALE rows do not parse DNS names, HTTP Host/URI, or TLS SNI; correlate PCAP/browser/sidecar rows");
+    data.AddUtf8("r0ProtocolParserGuarantee", "endpoint-port-pid-layer-only");
+    data.AddUtf8("protocolBoundaryVerdict", "l7-unavailable-r0-endpoint-only");
+    data.AddBool("l7ProtocolDetailsAvailable", false);
+    data.AddUtf8("l7ProtocolDetailsOwner", "pcap-browser-sidecar-not-r0");
     data.AddUtf8("dnsQueryName", "");
     data.AddBool("dnsQueryNameAvailable", false);
     data.AddUtf8("dnsQueryNameSource", "pcap-required-not-r0");
+    data.AddUtf8("dnsCorrelationRecordType", dnsCandidate ? "pcap.dns-required" : "not-applicable");
+    data.AddUtf8("dnsDetailsOwner", "pcap.dns-or-sidecar");
     data.AddUtf8(
         "dnsBoundary",
-        serviceHint == "dns" ? "candidate-port-only-name-required-from-pcap" : "not-dns-candidate");
+        dnsCandidate ? "candidate-port-only-name-required-from-pcap" : "not-dns-candidate");
     data.AddUtf8("httpHost", "");
     data.AddUtf8("httpUri", "");
     data.AddUtf8("httpMethod", "");
@@ -1601,22 +1643,41 @@ void AddNetworkProtocolBoundaryData(
     data.AddBool("httpUriAvailable", false);
     data.AddBool("httpMethodAvailable", false);
     data.AddUtf8("httpMetadataSource", "pcap-or-browser-required-not-r0");
+    data.AddUtf8("httpCorrelationRecordType", httpCandidate ? "pcap.http-required" : "not-applicable");
+    data.AddUtf8("httpDetailsOwner", "pcap.http-browser-or-sidecar");
     data.AddUtf8(
         "httpBoundary",
-        serviceHint == "http" ? "candidate-port-only-host-uri-required-from-pcap" : "not-http-candidate");
+        httpCandidate ? "candidate-port-only-host-uri-required-from-pcap" : "not-http-candidate");
     data.AddUtf8("tlsSni", "");
     data.AddBool("tlsSniAvailable", false);
     data.AddBool("tlsCertificateAvailable", false);
     data.AddUtf8("tlsMetadataSource", "pcap-required-not-r0");
+    data.AddUtf8("tlsCorrelationRecordType", tlsCandidate ? "pcap.tls-required" : "not-applicable");
+    data.AddUtf8("tlsDetailsOwner", "pcap.tls-or-sidecar");
     data.AddUtf8(
         "tlsBoundary",
-        serviceHint == "tls" ? "candidate-port-only-sni-cert-required-from-pcap" : "not-tls-candidate");
+        tlsCandidate ? "candidate-port-only-sni-cert-required-from-pcap" : "not-tls-candidate");
     data.AddWide(
         "zhPcapCorrelationHint",
         L"该 R0 网络行只提供端点/端口/PID/layer 证据；DNS 名称、HTTP Host/URI、TLS SNI/证书需查看 PCAP、浏览器或 sidecar 行。");
     data.AddWide(
         "zhNetworkBoundaryHint",
         L"不要把 serviceHint 或 candidate 布尔值解读为协议载荷已解析；它们只是端口/协议候选标签。");
+    data.AddWide(
+        "zhDnsCorrelationHint",
+        dnsCandidate
+            ? L"DNS 候选只说明 53/UDP 端点；查询名、响应码和答案应由 pcap.dns 或 sidecar 行补齐。"
+            : L"该行不是 DNS 候选；如需域名证据请查看 pcap.dns 或 sidecar 行。");
+    data.AddWide(
+        "zhHttpCorrelationHint",
+        httpCandidate
+            ? L"HTTP 候选只说明 80/TCP 等端点；Host、URI、Method 和状态码应由 pcap.http、浏览器或代理 sidecar 行补齐。"
+            : L"该行不是 HTTP 候选；不要从 R0 端点字段推断 Host、URI 或 Method。");
+    data.AddWide(
+        "zhTlsCorrelationHint",
+        tlsCandidate
+            ? L"TLS 候选只说明 443/TCP 等端点；SNI、证书、JA3/JA3S 应由 pcap.tls 或 TLS sidecar 行补齐。"
+            : L"该行不是 TLS 候选；不要从 R0 端点字段推断 SNI 或证书。");
 }
 
 // Input: ASCII text already produced from numeric network metadata.

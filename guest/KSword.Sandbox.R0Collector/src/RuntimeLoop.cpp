@@ -41,7 +41,7 @@ std::string BuildConfigData(const Options& options) {
     }
     data.AddBool("mockMode", options.mockMode);
     data.AddBool("syntheticMode", options.mockMode);
-    if (options.mockMode) {
+    if (options.mockMode == true) {
         data.AddUtf8("semanticSelfCheckScenarios", kSyntheticSemanticSelfCheckScenarios);
         data.AddSigned("semanticContractVersion", kAbiSelfCheckDiagnosticsVersion);
         data.AddSigned("semanticSelfCheckRows", kSyntheticSemanticSelfCheckRows);
@@ -49,11 +49,15 @@ std::string BuildConfigData(const Options& options) {
         data.AddSigned(
             "semanticSelfCheckSequenceEnd",
             kSyntheticSemanticSequenceStart + kSyntheticSemanticSelfCheckRows - 1);
+        data.AddBool("semanticCompanionRowsExcludedFromStress", true);
+        data.AddUtf8("semanticStressCountPreservationPolicy", "semantic companion rows are not counted in StressJsonlExpectedDriverRows");
         data.AddWide(
             "zhSemanticSelfCheckHint",
             L"mock/stress 模式会附加 DNS/HTTP/TLS/横向移动/下载执行/进程血缘语义自检行；这些行不来自真实驱动。");
         data.AddUtf8("networkProtocolBoundaryFields", kNetworkProtocolBoundaryFields);
+        data.AddUtf8("networkCorrelationStableFields", kNetworkCorrelationStableFields);
         data.AddUtf8("jsonlNoiseFieldSet", kJsonlNoiseFieldSet);
+        data.AddUtf8("jsonlNoiseClassificationFields", kJsonlNoiseClassificationFields);
     }
     data.AddBool("injectJsonlNoise", options.injectJsonlNoise);
     data.AddUtf8("jsonlNoiseInjectionGuard", "noise injection is accepted only in mock/stress mode and rejected for abi/diagnose/health/live collection");
@@ -93,6 +97,14 @@ std::string BuildConfigData(const Options& options) {
     data.AddUtf8("noiseDisposition", "emitted-as-collector-lifecycle");
     data.AddUtf8("noiseReasons", "none");
     data.AddUtf8("noiseFieldSet", kJsonlNoiseFieldSet);
+    data.AddUtf8("noiseTaxonomyVersion", "1");
+    data.AddUtf8("noiseDecision", "collector-lifecycle");
+    data.AddUtf8("noiseDecisionSource", "collector-run-configuration");
+    data.AddUtf8("noiseClassificationConfidence", "high");
+    data.AddUtf8("noiseProbeKind", "none");
+    data.AddBool("sampleBehaviorCandidate", false);
+    data.AddUtf8("sampleBehaviorCandidateReason", "collector-lifecycle-not-sample-behavior");
+    data.AddWide("zhNoiseClassificationHint", L"噪声分类为 collector-lifecycle；该行描述采集器运行配置，不是样本行为。");
     data.AddBool("lost", false);
     data.AddUnsigned("lostCount", 0);
     data.AddBool("lossObserved", false);

@@ -5,7 +5,8 @@ Runs lightweight release-readiness gates for KSwordSandbox.
 .DESCRIPTION
 This script is intentionally source/release oriented. It does not start,
 restore, stop, or mutate Hyper-V VMs; it does not sign drivers; it does not
-call CSignTool.exe; and it does not run heavyweight smoke suites by default.
+call CSignTool.exe; it does not use GUI signing fallback; it does not create
+fresh live evidence; and it does not run heavyweight smoke suites by default.
 
 Inputs are the repository root plus opt-in switches for build, source-package
 staging, and complete runtime-payload handoff checks. Processing checks git
@@ -103,7 +104,7 @@ function Invoke-ReleaseCommand {
             -Id $Id `
             -Title $Title `
             -Status Passed `
-            -Message "Command completed successfully. Logs: $stdoutPath ; $stderrPath" `
+            -Message "命令成功 / Command completed successfully. Logs: $stdoutPath ; $stderrPath" `
             -Details @{ exitCode = $process.ExitCode; stdout = $stdoutPath; stderr = $stderrPath }
         return
     }
@@ -112,7 +113,7 @@ function Invoke-ReleaseCommand {
         -Id $Id `
         -Title $Title `
         -Status Failed `
-        -Message "Command failed with exit code $($process.ExitCode). Logs: $stdoutPath ; $stderrPath" `
+        -Message "命令失败，退出码 $($process.ExitCode) / Command failed. Logs: $stdoutPath ; $stderrPath" `
         -Remediation $Remediation `
         -Details @{ exitCode = $process.ExitCode; stdout = $stdoutPath; stderr = $stderrPath }
 }
@@ -774,9 +775,11 @@ function Test-DeploymentOperatorDiagnosticsContract {
             'operatorDiagnostics',
             'runtimePublishEntries',
             'runtimePublishSummary',
+            'runtimeDryRunGuardrail',
             'runtimeArchiveRequiresCompleteRuntimePayloads',
             'runtimePublishRootMissingRecommendedActions',
             'externalStateDiagnostics',
+            'freshLiveEvidenceGuardrail',
             'runtimePublishRootMustBeOutsideRepository',
             'no VM mutation, no driver signing, no GUI signing fallback',
             'no CSignTool'
@@ -868,9 +871,11 @@ function Test-DeploymentDocsOperatorHints {
         )
         'docs/release.md' = @(
             'runtimePublishSummary',
+            'runtimeDryRunGuardrail',
             'runtimeArchiveRequiresCompleteRuntimePayloads',
             'runtimePublishRootMissingRecommendedActions',
             'externalStateDiagnostics',
+            'freshLiveEvidenceGuardrail',
             'no VM mutation',
             'no GUI signing fallback',
             'CSignTool'
@@ -908,6 +913,69 @@ function Test-DeploymentDocsOperatorHints {
         -Status Failed `
         -Message "Deployment docs operator hints found $($issues.Count) issue(s)." `
         -Remediation @('Update docs/install.md, docs/run.md, and docs/release.md before release handoff so reviewers see concrete next-step commands for common deployment gaps.') `
+        -Details @{ issues = @($issues.ToArray()) }
+}
+
+function Test-NoFreshLiveEvidenceGuardrail {
+    $requiredMarkers = [ordered]@{
+        'docs/release.md' = @(
+            'fresh live evidence',
+            'job id',
+            '本候选未刷新 fresh live evidence'
+        )
+        'docs/run.md' = @(
+            'fresh live evidence',
+            '不会替 release notes 自动生成 fresh live evidence',
+            'job id'
+        )
+        'docs/v1-release-gap-audit.md' = @(
+            '本次不调整百分比',
+            'fresh live evidence',
+            'job id'
+        )
+        'docs/progress.md' = @(
+            '本次不调整百分比',
+            'fresh live evidence',
+            'job id'
+        )
+        'scripts/package-portable.ps1' = @(
+            'freshLiveEvidenceGuardrail',
+            'packagingCreatesFreshLiveEvidence = $false',
+            'releaseReadinessCreatesFreshLiveEvidence = $false'
+        )
+    }
+
+    $issues = New-Object System.Collections.Generic.List[string]
+    foreach ($relative in $requiredMarkers.Keys) {
+        $path = Join-Path $RepositoryRoot $relative
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+            [void]$issues.Add("Missing no-fresh-live guardrail file: $relative")
+            continue
+        }
+
+        $raw = Get-Content -LiteralPath $path -Raw
+        foreach ($marker in $requiredMarkers[$relative]) {
+            if ($raw.IndexOf($marker, [StringComparison]::OrdinalIgnoreCase) -lt 0) {
+                [void]$issues.Add("Missing no-fresh-live marker '$marker' in $relative")
+            }
+        }
+    }
+
+    if ($issues.Count -eq 0) {
+        Add-ReleaseCheckResult `
+            -Id 'no-fresh-live-evidence-guardrail' `
+            -Title 'No fresh live evidence claims / 不冒充 fresh live 证据' `
+            -Status Passed `
+            -Message '中文：readiness/package/docs 明确说明低成本发布检查不会启动 live，也不会生成 fresh live evidence；release notes 必须记录实验室 job id 后才能声明当前候选已刷新 live 证据。'
+        return
+    }
+
+    Add-ReleaseCheckResult `
+        -Id 'no-fresh-live-evidence-guardrail' `
+        -Title 'No fresh live evidence claims / 不冒充 fresh live 证据' `
+        -Status Failed `
+        -Message "No-fresh-live guardrail found $($issues.Count) issue(s)." `
+        -Remediation @('在 release/run/progress/gap 文档和 package metadata 中写清楚：readiness/package 不运行 Hyper-V live；没有当前候选 job id 时，release notes 必须声明未刷新 fresh live evidence。') `
         -Details @{ issues = @($issues.ToArray()) }
 }
 
@@ -997,6 +1065,7 @@ Test-NoGuiSigningFallback
 Test-ReadinessNoVmMutationCommands
 Test-DeploymentOperatorDiagnosticsContract
 Test-DeploymentDocsOperatorHints
+Test-NoFreshLiveEvidenceGuardrail
 Invoke-RepositoryPolicy
 Invoke-SourcePackageStage
 Invoke-LightBuild
@@ -1025,22 +1094,43 @@ $summary = [pscustomobject][ordered]@{
     noDriverSigning       = $true
     noGuiSigningFallback  = $true
     csignToolNotCalled    = $true
+    freshLiveEvidenceGenerated = $false
+    freshLiveEvidenceRequiresExplicitLabRun = $true
+    freshLiveEvidenceLabCommand = '.\run.ps1 -Mode Analyze -SamplePreset Notepad -DurationSeconds 5 -Live'
     results               = @($script:Results.ToArray())
 }
 
 $summaryPath = Join-Path $OutputRoot 'release-readiness.json'
 $summary | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $summaryPath -Encoding UTF8
 
-foreach ($result in $script:Results) {
-    $prefix = switch ($result.status) {
-        'Passed' { '[pass]' }
-        'Warning' { '[warn]' }
-        'Failed' { '[fail]' }
-        default { '[skip]' }
+function ConvertTo-ChineseFirstLabel {
+    param([string]$Text)
+
+    $parts = @($Text -split '\s+/\s+', 2)
+    if ($parts.Count -eq 2) {
+        return "$($parts[1]) / $($parts[0])"
     }
 
-    Write-Host "$prefix $($result.id): $($result.message)"
+    return $Text
 }
 
-Write-Host "Release readiness summary written: $summaryPath"
+Write-Host "发布就绪检查结果：通过=$($summary.passedCount)，警告=$($summary.warningCount)，失败=$($summary.failedCount)，跳过=$($summary.skippedCount)。"
+foreach ($result in $script:Results) {
+    $prefix = switch ($result.status) {
+        'Passed' { '通过 [pass]' }
+        'Warning' { '警告 [warn]' }
+        'Failed' { '失败 [fail]' }
+        default { '跳过 [skip]' }
+    }
+
+    $displayTitle = ConvertTo-ChineseFirstLabel -Text $result.title
+    Write-Host "$prefix $($result.id): $displayTitle"
+    Write-Host "  说明：$($result.message)"
+    if (@($result.remediation).Count -gt 0) {
+        Write-Host "  下一步：$(@($result.remediation) -join '；')"
+    }
+}
+
+Write-Host "发布就绪摘要已写入：$summaryPath"
+Write-Host '安全护栏：未启动/还原/停止 VM，未签名，未调用 CSignTool/GUI signing fallback，未生成 fresh live evidence。'
 exit $exitCode

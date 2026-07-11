@@ -3,7 +3,7 @@
 本文是贡献者和操作者的中文总览：连接当前模块边界、最小可用链路、驱动测试签名策略，以及
 Hyper-V 安装/运行流程。更细的操作步骤保留在链接的 runbook 中。
 
-本文是当前 MVP 状态和 operator chain 的 canonical 文档；文档库存、主次关系和历史/背景文档说明见
+本文是当前 MVP 状态和操作者链路（operator chain）的权威文档；文档库存、主次关系和历史/背景文档说明见
 `docs/README.md`。
 
 ## 当前 MVP 状态（current MVP status）
@@ -38,8 +38,8 @@ secrets 都不得提交。
 - 计划（plan）默认安全。普通 plan 或 dry-run 只记录意图，不还原、不启动、不停止、不修改 VM。
 - 样本默认留在本机。浏览器 upload 只把可执行文件存到本地 runtime root；可选 VirusTotal（VT）
   enrichment 是 hash-only，不上传样本字节。
-- Runtime artifacts 不进 git：samples、reports、job folders、payloads、VM disks、build outputs、
-  signed drivers、symbols、certificates、secrets 都必须留在仓库外。
+- 运行期产物（runtime artifacts）不进 git：samples、reports、job folders、payloads、VM disks、
+  build outputs、signed drivers、symbols、certificates、secrets 都必须留在仓库外。
 - `CSignTool.exe` 和旧 KSword signing wrapper 不属于默认工作流。真实驱动验证只在隔离 VM 中使用
   Windows test mode 和本地测试证书。
 - 文档/中文化任务只改文档，不构建、不签名、不提交构建产物、不 push。
@@ -54,7 +54,7 @@ secrets 都不得提交。
   Hyper-V runbook、通过 executor boundary 执行或记录 runbook、导入 guest/R0 事件、分类行为、
   索引 artifacts、渲染 reports。
 - `src/KSword.Sandbox.Web/`：ASP.NET WebUI/API。负责 dashboard、本地 executable upload/scan、job
-  planning、后台 runbook start、progress SSE/polling、live-event endpoints、artifact index/download
+  planning、后台 runbook 启动、progress SSE/polling、live-event endpoints、artifact index/download
   卡片、受保护 artifact download，以及可选 VirusTotal hash lookup settings。Settings 中的 VT key
   只写当前进程环境，不写磁盘。
 - `guest/KSword.Sandbox.Agent/`：VM 内采集器。按限定时间运行样本，输出 `events.json`，并可收集
@@ -69,8 +69,8 @@ secrets 都不得提交。
   规则变更应尽量保持 data-oriented。
 - `scripts/`、`install.ps1`、`run.ps1`：操作者入口、readiness checks、payload staging、Hyper-V E2E、
   native build helper、repository policy、本地 install/run 状态管理。
-- `tests/KSword.Sandbox.SmokeTests/`：repository shape、policy、runbook、report、rules、WebUI contracts、
-  R0/collector expectations 的 contract/smoke checks。
+- `tests/KSword.Sandbox.SmokeTests/`：repository shape、policy、runbook、report、rules、WebUI contracts
+  和 R0/collector expectations 的 contract/smoke checks。
 - `docs/`：operator 和 contributor runbook。文档更新应链接到实现 owner，避免在多个文档重复长命令。
 
 依赖方向保持：`Web -> Core -> Abstractions`；guest/driver 只产出事件，由 Core 消费；scripts 编排
@@ -99,7 +99,7 @@ flowchart TD
 关键边界：
 
 - Planning 和 dry-run 不修改 VM。
-- Live mode 需要 elevated host process、已准备的 golden VM/checkpoint、guest credentials，以及 staged
+- Live mode 需要提权的 host process、已准备的 golden VM/checkpoint、guest credentials，以及已暂存的
   guest payload files。
 - 可选真实 R0 需要本地 build 且 test-signed 的 `.sys`；mock R0 可在不加载 kernel driver 的情况下验证
   Guest Agent/R0Collector JSONL 通路。
@@ -167,11 +167,11 @@ Live API/WebUI E2E 会修改配置的 VM；必须先通过 readiness，并只在
 
 普通 build、smoke test、文档任务中不要签名、安装、启动或打开 driver；不要调用 `CSignTool.exe`。
 
-可选真实 driver validation 仅限 VM：
+可选真实驱动验证（driver validation）仅限 VM：
 
 1. 本地 build driver 和 R0Collector。
 2. 生成的 `.sys`、`.pdb`、`.exe` 和 certificates 保持在 git 外。
-3. 在 disposable VM 内启用 Windows test-signing 并重启。
+3. 在可丢弃 VM 内启用 Windows test-signing 并重启。
 4. 使用本地测试证书签名，或在隔离 lab path 使用 `scripts/Sign-SandboxDriverWithTestCertificate.ps1`。
 5. 通过本地 config 记录 host-side `.sys`：
 
@@ -251,7 +251,7 @@ Live API/WebUI E2E 会修改配置的 VM；必须先通过 readiness，并只在
 
 - 明确运行模式：PlanOnly 演示、Live Hyper-V lab、真实 R0 lab 分开配置和授权。
 - WebUI/API 默认建议只在本机或受控内网使用；团队化部署前补访问控制、审计、下载权限和防火墙策略。
-- Runtime root 要放在仓库外并规划容量、保留期、清理和导出策略。
+- Runtime root 要放在仓库外，并规划容量、保留期、清理和导出策略。
 - 样本、报告、payload、VM disk、driver build output、test certificates、DPAPI backups 和 keys 不入库。
 - Golden VM 更新要有 owner；更新 baseline 后重新创建 `Clean` checkpoint 并记录验证日期。
 - VirusTotal（VT）只是 reputation enrichment；缺 key、rate limit、not found 不应制造噪音行为告警。

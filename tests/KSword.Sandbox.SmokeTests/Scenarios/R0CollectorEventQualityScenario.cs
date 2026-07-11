@@ -250,6 +250,12 @@ internal sealed class R0CollectorEventQualityScenario : ISmokeTestScenario
         RequireContains(eventParser, "serviceHintDns", "Network parser must emit DNS service-hint booleans.");
         RequireContains(eventParser, "serviceHintHttp", "Network parser must emit HTTP service-hint booleans.");
         RequireContains(eventParser, "serviceHintTls", "Network parser must emit TLS service-hint booleans.");
+        RequireContains(eventParser, "networkCorrelationContractVersion", "Network parser must emit stable correlation contract version.");
+        RequireContains(eventParser, "pcapCorrelationJoinFields", "Network parser must name PCAP correlation join fields.");
+        RequireContains(eventParser, "l7ProtocolDetailsOwner", "Network parser must identify PCAP/browser/sidecar ownership for L7 details.");
+        RequireContains(eventParser, "zhDnsCorrelationHint", "Network parser must emit Chinese DNS correlation hints.");
+        RequireContains(eventParser, "zhHttpCorrelationHint", "Network parser must emit Chinese HTTP correlation hints.");
+        RequireContains(eventParser, "zhTlsCorrelationHint", "Network parser must emit Chinese TLS correlation hints.");
         RequireContains(eventParser, "observedSequenceSpan", "READ_EVENTS summaries must expose observed sequence span.");
         RequireContains(eventParser, "backpressureSeverity", "READ_EVENTS summaries must classify backpressure severity.");
 
@@ -298,6 +304,12 @@ internal sealed class R0CollectorEventQualityScenario : ISmokeTestScenario
         RequireContains(syntheticMode, "flowKey", "Synthetic network rows should preserve flow-key semantics.");
         RequireContains(syntheticMode, "flowKeyVersion", "Synthetic network rows should preserve flow-key version semantics.");
         RequireContains(syntheticMode, "serviceHintTls", "Synthetic network rows should preserve TLS service-hint semantics.");
+        RequireContains(syntheticMode, "semanticCompanionContract", "Synthetic semantic rows should declare that companion rows are not counted in stress.");
+        RequireContains(syntheticMode, "networkCorrelationStableFields", "Synthetic network rows should name stable correlation fields.");
+        RequireContains(syntheticMode, "pcapCorrelationJoinFields", "Synthetic network rows should name PCAP correlation join fields.");
+        RequireContains(syntheticMode, "protocolBoundaryVerdict", "Synthetic network rows should classify the L7 protocol boundary.");
+        RequireContains(syntheticMode, "noiseTaxonomyVersion", "Synthetic rows should emit stable noise taxonomy version.");
+        RequireContains(syntheticMode, "zhNoiseClassificationHint", "Synthetic rows should emit Chinese noise classification hints.");
         var abiSelfCheck = ReadRepositoryText(
             context,
             "guest",
@@ -313,6 +325,9 @@ internal sealed class R0CollectorEventQualityScenario : ISmokeTestScenario
         RequireContains(abiSelfCheck, "driverEventSequencePolicy", "ABI self-check must describe concrete event sequence fields.");
         RequireContains(abiSelfCheck, "networkServiceHintPolicy", "ABI self-check must describe DNS/HTTP/TLS service hints.");
         RequireContains(abiSelfCheck, "networkFlowKeyPolicy", "ABI self-check must describe flow-key endpoint semantics.");
+        RequireContains(abiSelfCheck, "networkCorrelationPolicy", "ABI self-check must describe R0/PCAP correlation ownership.");
+        RequireContains(abiSelfCheck, "networkCorrelationStableFields", "ABI self-check must list stable network correlation fields.");
+        RequireContains(abiSelfCheck, "semanticStressCountPreservationPolicy", "ABI self-check must preserve semantic companion/stress row-count separation.");
         RequireContains(abiSelfCheck, "selfNoiseClassificationFields", "ABI self-check must list self-noise classification fields.");
         RequireContains(abiSelfCheck, "typedPayloadSemanticFields", "ABI self-check must list typed payload semantic fields.");
         RequireContains(abiSelfCheck, "stableJsonlFields", "ABI self-check must list stable JSONL field names.");
@@ -1080,10 +1095,40 @@ internal sealed class R0CollectorEventQualityScenario : ISmokeTestScenario
         RequireData(mockNetwork!, "serviceHintTls", "true");
         RequireData(mockNetwork!, "webCandidate", "true");
         RequireData(mockNetwork!, "activityKind", "network.connect");
+        RequireData(mockNetwork!, "networkCorrelationContractVersion", "1");
+        RequireData(mockNetwork!, "networkCorrelationRole", "r0-endpoint-candidate");
+        RequireData(mockNetwork!, "pcapCorrelationRole", "join-candidate-not-l7-owner");
+        RequireData(mockNetwork!, "pcapCorrelationRequired", "true");
+        RequireData(mockNetwork!, "pcapCorrelationConfidence", "medium");
+        RequireData(mockNetwork!, "l7ProtocolDetailsAvailable", "false");
+        RequireData(mockNetwork!, "l7ProtocolDetailsOwner", "pcap-browser-sidecar-not-r0");
+        RequireData(mockNetwork!, "r0ProtocolParserGuarantee", "endpoint-port-pid-layer-only");
+        RequireData(mockNetwork!, "protocolBoundaryVerdict", "l7-unavailable-r0-endpoint-only");
+        RequireData(mockNetwork!, "tlsCorrelationRecordType", "pcap.tls-required");
+        RequireData(mockNetwork!, "tlsDetailsOwner", "pcap.tls-or-sidecar");
         RequireData(mockNetwork!, "noiseClass", "sample-or-system");
+        RequireData(mockNetwork!, "noiseTaxonomyVersion", "1");
+        RequireData(mockNetwork!, "noiseDecision", "not-noise");
         RequireData(mockNetwork!, "sampleBehaviorCandidate", "true");
         SmokeAssert.True(mockNetwork!.Data.ContainsKey("zhMessage"), "Executable mock network row should include Chinese message.");
         SmokeAssert.True(mockNetwork!.Data.ContainsKey("zhHint"), "Executable mock network row should include Chinese hint.");
+        SmokeAssert.True(mockNetwork!.Data.ContainsKey("zhDnsCorrelationHint"), "Executable mock network row should include Chinese DNS correlation hint.");
+        SmokeAssert.True(mockNetwork!.Data.ContainsKey("zhHttpCorrelationHint"), "Executable mock network row should include Chinese HTTP correlation hint.");
+        SmokeAssert.True(mockNetwork!.Data.ContainsKey("zhTlsCorrelationHint"), "Executable mock network row should include Chinese TLS correlation hint.");
+
+        var semanticCompanions = jsonLines.Events
+            .Where(evt => DataEquals(evt, "semanticRowKind", "no-device-companion") &&
+                DataEquals(evt, "semanticRowCountedInStress", "false"))
+            .ToList();
+        SmokeAssert.True(semanticCompanions.Count == 6, "Executable semantic companion corpus should remain six no-device rows.");
+        SmokeAssert.True(
+            semanticCompanions.All(evt =>
+                DataEquals(evt, "semanticCompanionRow", "true") &&
+                DataEquals(evt, "semanticCompanionCount", "6") &&
+                DataEquals(evt, "semanticCompanionContract", "not-counted-in-StressJsonlExpectedDriverRows") &&
+                DataEquals(evt, "semanticStressCountImpact", "none") &&
+                evt.Data.ContainsKey("zhCompanionHint")),
+            "Semantic companion rows should explicitly preserve stress row-count separation and Chinese hints.");
 
         var validNoise = jsonLines.Events.FirstOrDefault(evt =>
             string.Equals(evt.EventType, "driver.network", StringComparison.OrdinalIgnoreCase) &&
@@ -1097,8 +1142,18 @@ internal sealed class R0CollectorEventQualityScenario : ISmokeTestScenario
         RequireData(validNoise!, "serviceHint", "tls");
         RequireData(validNoise!, "serviceHintTls", "true");
         RequireData(validNoise!, "noiseClass", "jsonl-noise");
+        RequireData(validNoise!, "noiseTaxonomyVersion", "1");
+        RequireData(validNoise!, "noiseDecision", "jsonl-noise-probe");
+        RequireData(validNoise!, "noiseProbeKind", "valid-extra-field-row");
         RequireData(validNoise!, "sampleBehaviorCandidate", "false");
+        RequireData(validNoise!, "sampleBehaviorCandidateReason", "explicit-jsonl-noise-probe-not-sample-behavior");
         RequireData(validNoise!, "collectionDiagnostic", "true");
+        RequireData(validNoise!, "networkCorrelationRole", "r0-endpoint-candidate");
+        RequireData(validNoise!, "pcapCorrelationRole", "join-candidate-not-l7-owner");
+        RequireData(validNoise!, "tlsCorrelationRecordType", "pcap.tls-required");
+        RequireData(validNoise!, "protocolBoundaryVerdict", "l7-unavailable-r0-endpoint-only");
+        SmokeAssert.True(validNoise!.Data.ContainsKey("zhNoiseClassificationHint"), "Valid JSONL noise row should include Chinese noise classification hint.");
+        SmokeAssert.True(validNoise!.Data.ContainsKey("zhTlsCorrelationHint"), "Valid JSONL noise row should include Chinese TLS correlation hint.");
     }
 
     /// <summary>

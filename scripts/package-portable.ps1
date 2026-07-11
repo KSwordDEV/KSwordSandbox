@@ -675,26 +675,43 @@ function Get-PackageOperatorRecommendedActions {
     if ($PackageKind -eq 'runtime') {
         if ([string]::IsNullOrWhiteSpace($RuntimePublishRoot)) {
             [void]$actions.Add('下一步：如需完整 runtime 便携包，请先把 host-web、guest-tools、tools/job-tool、tools/postprocess 发布到仓库外目录，然后重跑 package-portable.ps1 -PackageKind runtime -RuntimePublishRoot <external-publish-root> -RequireCompleteRuntimePayloads。')
-            [void]$actions.Add('Next: for a layout-only dry run, keep -StageOnly and inspect package-manifest.generated.json; for handoff, provide an external RuntimePublishRoot and -RequireCompleteRuntimePayloads.')
+            [void]$actions.Add('下一步：仅做 layout/safety dry-run 时保留 -StageOnly 并检查 package-manifest.generated.json；正式 handoff 必须提供仓库外 RuntimePublishRoot 和 -RequireCompleteRuntimePayloads。')
         }
         elseif ([int]$RuntimeSummary.missingCount -gt 0) {
             [void]$actions.Add("下一步：补齐 RuntimePublishRoot 下缺失 payload：$(([string[]]@($RuntimeSummary.missingRequiredSources + $RuntimeSummary.missingOptionalSources)) -join ', ')。")
-            [void]$actions.Add('Next: rerun package-portable.ps1 after publishing the missing runtime folders; packaging itself does not build or copy into a VM.')
+            [void]$actions.Add('下一步：补齐缺失 runtime folders 后重跑 package-portable.ps1；打包脚本本身不会构建，也不会复制文件进 VM。')
         }
         else {
-            [void]$actions.Add('RuntimePublishRoot payloads are present; inspect package-manifest.generated.json before handoff.')
+            [void]$actions.Add('下一步：RuntimePublishRoot payload 已齐备；handoff 前检查 package-manifest.generated.json 的 fileInventory、operatorDiagnostics 和 safetyContract。')
         }
     }
     else {
-        [void]$actions.Add('Source package mode is source-only; do not add runtime payloads, reports, samples, VM state, or build output.')
+        [void]$actions.Add('下一步：source package 必须保持 source-only；不要加入 runtime payload、报告、样本、VM state 或 build output。')
     }
 
     [void]$actions.Add('发布前只读检查：.\scripts\Test-ReleaseReadiness.ps1 -AllowDirtySource -StageSourcePackage；该命令不启动/还原 VM，不签名，不调用 CSignTool.exe。')
     [void]$actions.Add('Hyper-V/guest payload/VT key 缺口请用 .\scripts\install.ps1 -Mode CheckEnvironment 或 .\scripts\run.ps1 -Mode CheckEnvironment 查看；这些状态检查不打印 secret，不执行 live。')
+    [void]$actions.Add('fresh live 证据护栏：package/readiness 不会生成新的 Notepad 5s job；release notes 若要声明当前候选已有 fresh live evidence，必须在实验室主机显式运行 live 并记录 commit、job id、runtime root 和报告路径。')
     [void]$actions.Add('缺少 guest payload 时运行 .\scripts\Prepare-GuestPayload.ps1 -RepoRoot . -PayloadRoot <external-payload-root> -SelfContained；输出必须在仓库外。')
     [void]$actions.Add('可选 VirusTotal key 用 .\scripts\install.ps1 -Mode ConfigureVTKey -PromptVTKey 配置；未配置或查询失败应静默跳过 hash-only enrichment。')
 
     return @($actions.ToArray())
+}
+
+function Write-PackageOperatorDiagnostic {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Chinese,
+
+        [string]$English = ''
+    )
+
+    if ([string]::IsNullOrWhiteSpace($English)) {
+        Write-Host "[package] $Chinese"
+        return
+    }
+
+    Write-Host "[package] $Chinese / $English"
 }
 
 function Update-PackageOperatorDiagnostics {
@@ -728,6 +745,17 @@ function Update-PackageOperatorDiagnostics {
         else {
             'blockedIncompleteRuntimeArchive'
         }
+        runtimeDryRunGuardrail = [ordered]@{
+            isLayoutDryRun = ($PackageKind -eq 'runtime' -and ($StageOnly.IsPresent -or -not [bool]$RequireCompleteRuntimePayloads -or $missingRuntimeEntries.Count -gt 0))
+            handoffAllowed = ($PackageKind -ne 'runtime' -or ((-not $StageOnly.IsPresent) -and [bool]$RequireCompleteRuntimePayloads -and $missingRuntimeEntries.Count -eq 0 -and -not [string]::IsNullOrWhiteSpace($RuntimePublishRoot)))
+            handoffRequires = @(
+                '仓库外 RuntimePublishRoot / external RuntimePublishRoot',
+                '-RequireCompleteRuntimePayloads',
+                'runtimePublishSummary.missingCount = 0',
+                'not -StageOnly'
+            )
+            chinese = '中文提示：runtime layout dry-run 只用于审阅目录和安全合约，不能作为可运行 handoff；完整 runtime zip 必须满足 handoffRequires。'
+        }
         runtimePublishRootMissingRecommendedActions = @($recommendedActions | Where-Object { $_ -match 'RuntimePublishRoot|runtime 便携包|payload' })
         preflightCommands = [ordered]@{
             releaseReadiness = '.\scripts\Test-ReleaseReadiness.ps1 -AllowDirtySource -StageSourcePackage'
@@ -752,14 +780,24 @@ function Update-PackageOperatorDiagnostics {
             gitPush = $false
             networkPublish = $false
         }
+        freshLiveEvidenceGuardrail = [ordered]@{
+            packagingCreatesFreshLiveEvidence = $false
+            releaseReadinessCreatesFreshLiveEvidence = $false
+            freshNotepad5sClaimRequiresLabRun = $true
+            liveCommand = '.\run.ps1 -Mode Analyze -SamplePreset Notepad -DurationSeconds 5 -Live'
+            requiredReleaseNoteFields = @('commit', 'jobId', 'runtimeRoot', 'generatedAtUtc/localTime', 'report.json/report.zh.html/report.en.html paths')
+            chinese = '中文提示：本脚本只做本机 staging/zip，不启动 Hyper-V live；没有记录 live job id 时，release notes 必须写“本候选未刷新 fresh live evidence”。'
+        }
         recommendedActions = @($recommendedActions)
         operatorGuidance = @(
+            '中文：先看 runtimePublishSummary、runtimeDryRunGuardrail、freshLiveEvidenceGuardrail；这些字段告诉审阅者本包是否可 handoff，以及是否不能声称 fresh live。',
+            '中文：完整 runtime handoff 必须提供仓库外 RuntimePublishRoot、传入 -RequireCompleteRuntimePayloads，并确保所有 runtime publish entries 存在。',
             'RuntimePublishRoot must point to external published payloads such as host-web, guest-tools, tools/job-tool, and tools/postprocess.',
             'Use -RequireCompleteRuntimePayloads for handoff builds; omit it only for explicit layout/safety dry-runs.',
             'The package script stages and zips locally only; it does not build, sign, push, publish, start Hyper-V, or copy files into a VM.',
             'Inspect package-manifest.generated.json before handoff; verify fileInventory sha256/sizeBytes and packageDiagnostics.'
         )
-        chineseGuidance = '中文提示：runtime 便携包如果没有 RuntimePublishRoot 也可做 layout dry-run；完整交付必须传入仓库外 RuntimePublishRoot 并使用 -RequireCompleteRuntimePayloads。'
+        chineseGuidance = '中文提示：runtime 便携包如果没有 RuntimePublishRoot 也可做 layout dry-run；完整交付必须传入仓库外 RuntimePublishRoot 并使用 -RequireCompleteRuntimePayloads。package/readiness 不会生成 fresh live evidence。'
     }
 }
 
@@ -1065,6 +1103,7 @@ function Write-GeneratedPackageManifest {
             DriverSigning = 'not performed'
             GuiSigningFallback = 'not called and forbidden from package contents'
             CSignTool = 'not called and forbidden from package contents'
+            FreshLiveEvidence = 'not generated by packaging; release notes must record an explicit lab job id before claiming current live validation'
         }
     }
 
@@ -1157,38 +1196,47 @@ if (-not $StageOnly.IsPresent) {
     Compress-Archive -Path $stageRoot -DestinationPath $archivePath -CompressionLevel Optimal
 }
 
-Write-Host "[package] Kind: $PackageKind"
-Write-Host "[package] Version: $Version"
-Write-Host "[package] Files: $($script:copiedFiles.Count)"
-Write-Host "[package] Stage: $stageRoot"
-Write-Host "[package] Metadata: $(Join-SafePath -Root $stageRoot -RelativePath 'package-manifest.generated.json')"
-Write-Host "[package] Payload bytes: $([Int64](($script:copiedFileRecords | Where-Object { $_.sourceType -ne 'generated' } | ForEach-Object { $_.sizeBytes } | Measure-Object -Sum).Sum))"
-Write-Host "[package] Optional/skipped entries: $($script:packageDiagnostics.Count)"
+Write-PackageOperatorDiagnostic -Chinese "包类型：$PackageKind" -English "Kind: $PackageKind"
+Write-PackageOperatorDiagnostic -Chinese "版本：$Version" -English "Version: $Version"
+Write-PackageOperatorDiagnostic -Chinese "文件数：$($script:copiedFiles.Count)" -English "Files: $($script:copiedFiles.Count)"
+Write-PackageOperatorDiagnostic -Chinese "暂存目录：$stageRoot" -English "Stage: $stageRoot"
+Write-PackageOperatorDiagnostic -Chinese "生成元数据：$(Join-SafePath -Root $stageRoot -RelativePath 'package-manifest.generated.json')" -English 'Metadata: package-manifest.generated.json'
+$payloadByteCount = [Int64](($script:copiedFileRecords | Where-Object { $_.sourceType -ne 'generated' } | ForEach-Object { $_.sizeBytes } | Measure-Object -Sum).Sum)
+Write-PackageOperatorDiagnostic -Chinese "payload 字节数：$payloadByteCount" -English "Payload bytes: $payloadByteCount"
+Write-PackageOperatorDiagnostic -Chinese "可选/跳过条目：$($script:packageDiagnostics.Count)" -English "Optional/skipped entries: $($script:packageDiagnostics.Count)"
 if ($PackageKind -eq 'runtime') {
     $runtimeRootDisplay = if ([string]::IsNullOrWhiteSpace($RuntimePublishRoot)) { '<not provided>' } else { $RuntimePublishRoot }
-    Write-Host "[package] RuntimePublishRoot: $runtimeRootDisplay"
-    Write-Host "[package] RequireCompleteRuntimePayloads: $([bool]$RequireCompleteRuntimePayloads)"
+    Write-PackageOperatorDiagnostic -Chinese "RuntimePublishRoot：$runtimeRootDisplay" -English "RuntimePublishRoot: $runtimeRootDisplay"
+    Write-PackageOperatorDiagnostic -Chinese "完整 runtime payload 要求：$([bool]$RequireCompleteRuntimePayloads)" -English "RequireCompleteRuntimePayloads: $([bool]$RequireCompleteRuntimePayloads)"
     foreach ($entry in @($script:operatorDiagnostics.runtimePublishEntries)) {
         $entryState = if ([bool]$entry.exists) { 'present' } elseif ([bool]$entry.required) { 'missing-required' } else { 'missing-optional' }
-        Write-Host "[package] Runtime entry: $entryState source=$($entry.source) target=$($entry.target)"
+        $entryChineseState = switch ($entryState) {
+            'present' { '存在' }
+            'missing-required' { '缺少-必需' }
+            default { '缺少-可选' }
+        }
+        Write-PackageOperatorDiagnostic -Chinese "runtime 条目：$entryChineseState source=$($entry.source) target=$($entry.target)" -English "Runtime entry: $entryState source=$($entry.source) target=$($entry.target)"
     }
     if (-not [bool]$script:operatorDiagnostics.runtimePublishReady) {
-        Write-Host '[package] 中文提示：runtime 包存在缺失的 published payload；本次仅可作为 layout/safety dry-run。完整交付请补齐 RuntimePublishRoot 并传入 -RequireCompleteRuntimePayloads。'
+        Write-PackageOperatorDiagnostic -Chinese '中文提示：runtime 包存在缺失的 published payload；本次仅可作为 layout/safety dry-run。完整交付请补齐 RuntimePublishRoot 并传入 -RequireCompleteRuntimePayloads。'
     }
     $summary = $script:operatorDiagnostics.runtimePublishSummary
-    Write-Host "[package] Runtime summary: present=$($summary.presentCount) missing=$($summary.missingCount) missingRequired=$($summary.missingRequiredCount) missingOptional=$($summary.missingOptionalCount) mode=$($summary.failureMode)"
+    Write-PackageOperatorDiagnostic -Chinese "runtime 摘要：存在=$($summary.presentCount) 缺失=$($summary.missingCount) 必需缺失=$($summary.missingRequiredCount) 可选缺失=$($summary.missingOptionalCount) 模式=$($summary.failureMode)" -English "Runtime summary: present=$($summary.presentCount) missing=$($summary.missingCount) missingRequired=$($summary.missingRequiredCount) missingOptional=$($summary.missingOptionalCount) mode=$($summary.failureMode)"
+    Write-PackageOperatorDiagnostic -Chinese "runtime handoff 允许：$($script:operatorDiagnostics.runtimeDryRunGuardrail.handoffAllowed)" -English "Runtime handoff allowed: $($script:operatorDiagnostics.runtimeDryRunGuardrail.handoffAllowed)"
     foreach ($action in @($script:operatorDiagnostics.recommendedActions | Select-Object -First 4)) {
-        Write-Host "[package] Next: $action"
+        $actionLine = if ($action -match '^(下一步：|Next:)') { $action } else { "下一步：$action" }
+        Write-PackageOperatorDiagnostic -Chinese $actionLine -English 'Next'
     }
 }
-Write-Host '[package] 中文提示：已排除本机 secret、install-state、DPAPI 备份、样本、报告、VM 磁盘/快照、仓库二进制、签名材料和 GUI signing fallback。'
-Write-Host '[package] Safety: no VM mutation, no driver signing, no GUI signing fallback, no CSignTool, no git push/publish.'
+Write-PackageOperatorDiagnostic -Chinese '中文提示：已排除本机 secret、install-state、DPAPI 备份、样本、报告、VM 磁盘/快照、仓库二进制、签名材料和 GUI signing fallback。'
+Write-PackageOperatorDiagnostic -Chinese 'fresh live 证据：未生成；若发布说明要声称当前候选已刷新真实 Notepad 5s，请先在实验室主机运行 live 并记录 job id。' -English 'Fresh live evidence: not generated by packaging.'
+Write-PackageOperatorDiagnostic -Chinese '安全合约：不修改 VM、不签名 driver、不使用 GUI signing fallback、不调用 CSignTool、不 git push/publish。' -English 'Safety: no VM mutation, no driver signing, no GUI signing fallback, no CSignTool, no git push/publish.'
 if ($StageOnly.IsPresent) {
-    Write-Host '[package] Archive: skipped (-StageOnly)'
+    Write-PackageOperatorDiagnostic -Chinese '压缩包：已跳过（-StageOnly，仅 layout/safety dry-run）' -English 'Archive: skipped (-StageOnly)'
 }
 else {
-    Write-Host "[package] Archive: $archivePath"
+    Write-PackageOperatorDiagnostic -Chinese "压缩包：$archivePath" -English "Archive: $archivePath"
     $archiveHash = Get-FileSha256Hex -Path $archivePath
-    Write-Host "[package] Archive SHA256: $archiveHash"
+    Write-PackageOperatorDiagnostic -Chinese "压缩包 SHA256：$archiveHash" -English "Archive SHA256: $archiveHash"
 }
-Write-Host '[package] Network publish/push: not performed'
+Write-PackageOperatorDiagnostic -Chinese '网络发布/git push：未执行' -English 'Network publish/push: not performed'

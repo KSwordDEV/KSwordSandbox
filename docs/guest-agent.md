@@ -163,20 +163,28 @@ guest-output 目录下解析文件，而不是信任 VM 内绝对路径。
   The event path points at the BMP file and `Data` includes `phase`,
   `screenshotStage`, `screenshotIndex`, `screenshotCount`, `widthPixels`, and
   `heightPixels`, `artifactRelativePath`, `sizeBytes`, `sha256`,
-  `processRole`, `rootProcessId`, `treeLineage`, and `zhMessage`/`zhHint`
-  when those values are available.
+  `artifactSelector` / `downloadSelector`, `processRole`, `rootProcessId`,
+  `treeLineage`, `behaviorCounted=false`, `nonbehavior=true`, and
+  `zhMessage`/`zhHint` when those values are available.
 - `screenshot.skipped` when screenshot capture was requested but the platform or
   guest session cannot expose a desktop surface. This is non-fatal and includes
   structured `reason`, stable `reasonCode` / `reasonCategory`, `diagnosticStage`,
-  `exceptionType`, `win32Error`, and `artifactIntegrityState=skipped` when
-  available, keeping smoke tests usable on headless hosts.
+  `exceptionType`, `win32Error`, `reasonTaxonomy`, and
+  `artifactIntegrityState=skipped` when available, keeping smoke tests usable on
+  headless hosts.
+- `screenshot.phase.summary` after each configured screenshot phase. This
+  summary is marked `summaryEvent=true`, `collectionHealth=true`, and
+  `nonbehavior=true`; it records captured/skipped counts, reason-count JSON, and
+  first/last/largest artifact selectors when screenshots were produced.
 - `memory_dump.captured` when `--memory-dump` successfully writes a
   `memory-dumps/*.dmp` minidump for the launched sample process or a visible
   descendant process. The event path points at the `.dmp` file and `Data`
   includes `phase`, `capturePhase`, `dumpType`, `sizeBytes`, `sha256`,
   `relativePath`, `artifactRelativePath`, `artifactRelativePathStatus`,
-  `capturePolicy`, `processRole`, `rootProcessId`, `treeDepth`, `treeLineage`,
-  descendant targeting fields, and `zhMessage`/`zhHint` when available.
+  `artifactSelector` / `downloadSelector`, `capturePolicy`, `processRole`,
+  `rootProcessId`, `treeDepth`, `treeLineage`, direct-child/deeper-descendant
+  targeting fields, `behaviorCounted=false`, `nonbehavior=true`, and
+  `zhMessage`/`zhHint` when available.
 - `memory_dump.skipped` when memory dump capture was requested but the platform,
   process state, or access rights prevent capture. This is non-fatal and
   includes structured `reason`, stable `reasonCode` / `reasonCategory`,
@@ -186,10 +194,13 @@ guest-output 目录下解析文件，而不是信任 VM 内绝对路径。
   skipped events with `artifactRelativePathStatus` and Chinese `zhHint`.
 - `memory_dump.sweep` after the final `after-run` process-tree sweep. It records
   visible target count, attempted count, captured count, skipped count, and
-  already-captured count, plus visible root/child and root/descendant split counters and
+  already-captured count, plus visible root/child, direct-child,
+  deeper-descendant, and root/descendant split counters and
   `memoryDumpCoverageState` / `rootProcessCoverageState` /
-  `childProcessCoverageState` so the report can explain why a run has fewer
-  dump files than process-tree nodes. Timeout runs can also emit a `cleanup`
+  `childProcessCoverageState` / `directChildCoverageState` /
+  `deeperDescendantCoverageState` / `descendantCoverageCompleteness` so the
+  report can explain why a run has fewer dump files than process-tree nodes.
+  It carries `coverageTaxonomy` and is marked `nonbehavior=true`. Timeout runs can also emit a `cleanup`
   pre-kill sweep before `Kill(entireProcessTree:true)` so live descendants are
   dumped before the agent terminates the process tree.
 - `packet_capture.started`, `packet_capture.stopped`, and
@@ -241,18 +252,23 @@ hash 和 host 可回收相对位置的持久证据链。
   guest-relative path, `artifactRelativePath`, copied/source sizes,
   source creation/last-write time, copy time, source/copied SHA-256 values
   when readable, hash status fields, `artifactIntegrityState`,
+  `artifactSelector` / `downloadSelector`, `reasonTaxonomy`,
   `sourceCopiedSha256Match`, `processRole`, `rootProcessId`, root
   `treeLineage`, `rootProcessIdStatus`, `treeLineageStatus`,
-  `zhMessage`/`zhHint`, and `evidenceRole=dropped-file`.
+  `behaviorCounted=false`, `nonbehavior=true`, `zhMessage`/`zhHint`, and
+  `evidenceRole=dropped-file`.
 - `artifact.dropped_file.skipped` when a candidate path disappeared, is outside
   the sample working directory, is under `--out`, or cannot be copied. Skipped
   rows preserve the same `phase`/`capturePhase`, process attribution,
-  machine-readable `reason` / `reasonCode` / `reasonCategory`, `zhReason`, and
+  machine-readable `reason` / `reasonCode` / `reasonCategory`,
+  `reasonTaxonomy`, `collectionHealth=true`, `nonbehavior=true`, `zhReason`, and
   `zhMessage`/`zhHint` shape for report explanations. The summary row also
-  includes skipped reason counts and copied/source hash outcome counters.
+  includes all reason counts, skipped reason counts, copied/source hash outcome
+  counters, and first/last/largest copied-artifact selectors.
 - `artifact.manifest.written` after `artifacts/manifest.json` is written. The
   event records the manifest-relative path, manifest artifact count, and copied
-  dropped-file count.
+  dropped-file count. Manifest success/failure rows are collection-health
+  metadata and carry `behaviorCounted=false` / `nonbehavior=true`.
 - `artifact.manifest.failed` if manifest writing fails; events and summary
   writing still continue best-effort.
 
@@ -282,7 +298,9 @@ events 添加 `r0collector.start_failed`，并继续正常 user-mode 采集。
 这些阶段映射到 `before-start`、`after-start` 和 `after-run` probe phase；也可以用
 `--screenshot-phases before,during,after` 缩小或重排。`--screenshot-count <1-5>`
 会在每个选中阶段捕获多张图片，并向 `screenshot.captured` / `screenshot.skipped`
-事件加入 `screenshotIndex` / `screenshotCount` metadata。
+事件加入 `screenshotIndex` / `screenshotCount` metadata。每个实际执行的截图阶段还会
+输出 `screenshot.phase.summary`，用 `reasonCountsJson`、`firstArtifactSelector`、
+`lastArtifactSelector` 和 `largestArtifactSelector` 汇总该阶段证据质量。
 
 实现直接使用 User32/GDI32 API，不依赖外部包或管理员权限。非交互 session 中截图可能不可用；
 此时 Agent 会输出带 reason 的 `screenshot.skipped`，而不是让分析失败。manifest 仍会根据事件
@@ -319,7 +337,8 @@ host artifact index 将这些文件分类为 `memory-dump`，不新增共享 art
 或 process access 被拒绝，Agent 会输出 `memory_dump.skipped` 并继续正常事件/artifact 写入。
 最终 `memory_dump.sweep` 只是 summary evidence；即使所有可见目标已捕获或没有仍可见的子进程，
 也会输出。该 summary 会拆分 root/descendant attempted/captured/skipped/already-captured
-计数，并给出 coverage state，便于审阅者判断“未生成 dump”是已在 after-start
+计数，并进一步拆分 `directChild*` 与 `deeperDescendant*` 计数，给出 coverage state，
+便于审阅者判断“未生成 dump”是已在 after-start
 捕获、目标退出、权限失败、PID 复用保护，还是没有可见子进程。每条 dump captured/skipped
 事件都会尽量保留 `rootProcessId`、`treeLineage`、`capturePolicy`、
 `artifactRelativePathStatus` 和 `zhHint`；如果 root PID 本身不可用，则用

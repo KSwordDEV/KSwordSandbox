@@ -1,5 +1,7 @@
 using System.Buffers.Binary;
 using System.Net;
+using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Text.Json;
 using KSword.Sandbox.Abstractions;
@@ -60,10 +62,14 @@ internal sealed class PcapArtifactImportScenario : ISmokeTestScenario
         var nativeFlow = RequireEvent(events, "network.flow", "importSource", "pcap-native");
         var dns = RequireEvent(events, "pcap.dns");
         var http = RequireEvent(events, "pcap.http");
+        var httpResponse = RequireEvent(events, "pcap.http", "statusCode", "200");
         var tls = RequireEvent(events, "pcap.tls");
+        var tlsCertificate = RequireEvent(events, "pcap.tls", "handshakeType", "certificate");
         var dnsQuery = RequireEvent(events, "dns.query", "importSource", "pcap-native");
         var httpRequest = RequireEvent(events, "http.request", "importSource", "pcap-native");
+        var httpResponseEvent = RequireEvent(events, "http.request", "statusCode", "200");
         var tlsConnection = RequireEvent(events, "tls.connection", "importSource", "pcap-native");
+        var tlsCertificateEvent = RequireEvent(events, "tls.connection", "handshakeType", "certificate");
 
         RequireData(importSummary, "schema", "network.telemetry.v1");
         RequireData(importSummary, "tsharkRequired", "false");
@@ -84,38 +90,75 @@ internal sealed class PcapArtifactImportScenario : ISmokeTestScenario
         RequireData(dns, "queryName", "beacon.example.test");
         RequireData(dns, "queryType", "A");
         RequireData(dns, "dnsQueryName", "beacon.example.test");
+        RequireData(dns, "query", "beacon.example.test");
+        RequireData(dns, "dns.qry.name", "beacon.example.test");
         RequireData(dns, "rcodeName", "NOERROR");
+        RequireData(dns, "dns.flags.rcode", "NOERROR");
         RequireData(dns, "pcapSourceArtifactRelativePath", "sample.pcap");
         RequireData(dns, "sourcePcapArtifactRelativePath", "sample.pcap");
         RequireNonEmpty(dns, "sourcePcapArtifactSha256");
         RequireData(http, "method", "GET");
+        RequireData(http, "requestMethod", "GET");
+        RequireData(http, "http.request.method", "GET");
         RequireData(http, "host", "download.example.test");
         RequireData(http, "payloadMagic", "MZ");
         RequireData(http, "httpMessageType", "request");
+        RequireData(http, "requestBodyBytes", "2");
+        RequireData(http, "bodySizeBytes", "2");
         RequireData(http, "downloadSelector", "sample.pcap");
         RequireData(http, "pcapSourceArtifactRelativePath", "sample.pcap");
+        RequireData(httpResponse, "httpMessageType", "response");
+        RequireData(httpResponse, "responseStatusCode", "200");
+        RequireData(httpResponse, "http.response.status_code", "200");
+        RequireData(httpResponse, "statusFamily", "2xx");
+        RequireData(httpResponse, "responseBodyBytes", "2");
+        RequireData(httpResponse, "bodySizeBytes", "2");
+        RequireData(httpResponse, "contentLength", "2");
         RequireData(tls, "sni", "secure.example.test");
+        RequireData(tls, "tlsSni", "secure.example.test");
+        RequireData(tls, "tls.server_name", "secure.example.test");
         RequireData(tls, "tlsVersion", "TLS 1.2");
         RequireNonEmpty(tls, "ja3");
+        RequireNonEmpty(tls, "ja3Hash");
+        RequireNonEmpty(tls, "ja3.hash");
         RequireData(tls, "pcapSourceArtifactRelativePath", "sample.pcap");
+        RequireData(tlsCertificate, "certificateStatus", "self-signed");
+        RequireData(tlsCertificate, "validationStatus", "self-signed");
+        RequireData(tlsCertificate, "certSelfSigned", "true");
+        RequireData(tlsCertificate, "tlsCertificateRisk", "suspicious");
+        RequireNonEmpty(tlsCertificate, "certSubject");
+        RequireNonEmpty(tlsCertificate, "certificateSubject");
+        RequireNonEmpty(tlsCertificate, "certSha256");
+        RequireNonEmpty(tlsCertificate, "certificateFingerprintSha256");
         AssertStandardNetworkEvent(dnsQuery, "dns", "pcap-native", "dns");
         RequireData(dnsQuery, "queryName", "beacon.example.test");
         RequireData(dnsQuery, "qname", "beacon.example.test");
         RequireData(dnsQuery, "domain", "beacon.example.test");
+        RequireData(dnsQuery, "query", "beacon.example.test");
         RequireData(dnsQuery, "recordType", "A");
+        RequireData(dnsQuery, "qtype", "A");
         RequireData(dnsQuery, "serviceHint", "dns");
         AssertStandardNetworkEvent(httpRequest, "http", "pcap-native", "http");
         RequireData(httpRequest, "method", "GET");
+        RequireData(httpRequest, "requestMethod", "GET");
         RequireData(httpRequest, "requestUri", "/payload.exe");
         RequireData(httpRequest, "url", "http://download.example.test/payload.exe");
         RequireData(httpRequest, "contentType", "application/x-msdownload");
         RequireData(httpRequest, "httpMessageType", "request");
+        RequireData(httpResponseEvent, "statusCode", "200");
+        RequireData(httpResponseEvent, "httpStatusCode", "200");
+        RequireData(httpResponseEvent, "http.response.status_code", "200");
+        RequireData(httpResponseEvent, "responseBodyBytes", "2");
         AssertStandardNetworkEvent(tlsConnection, "tls", "pcap-native", "tls");
         RequireData(tlsConnection, "sni", "secure.example.test");
         RequireData(tlsConnection, "serverName", "secure.example.test");
+        RequireData(tlsConnection, "tlsSni", "secure.example.test");
         RequireData(tlsConnection, "handshakeType", "client_hello");
         RequireData(tlsConnection, "tlsVersion", "TLS 1.2");
         RequireNonEmpty(tlsConnection, "ja3");
+        RequireNonEmpty(tlsConnection, "ja3Fingerprint");
+        RequireData(tlsCertificateEvent, "certificateStatus", "self-signed");
+        RequireNonEmpty(tlsCertificateEvent, "certificateSha256");
         AssertStandardNetworkEvent(nativeFlow, "connection", "pcap-native", "dns");
         RequireData(nativeFlow, "packetCount", "1");
         RequireNonEmpty(nativeFlow, "payloadBytes");
@@ -149,6 +192,10 @@ internal sealed class PcapArtifactImportScenario : ISmokeTestScenario
         RequireData(sidecarParseError, "sidecarFormat", "jsonl");
         RequireData(sidecarParseError, "diagnosticCode", "sidecar_json_parse_error");
         RequireData(sidecarParseError, "parserBoundary", "sidecar.line");
+        RequireData(sidecarParseError, "diagnosticStage", "json-line");
+        RequireData(sidecarParseError, "sourceArtifactSelector", "sample.conn.log");
+        RequireData(sidecarParseError, "downloadSelector", "sample.conn.log");
+        RequireNonEmpty(sidecarParseError, "linePreview");
         RequireNonEmpty(sidecarParseError, "pcapSourceArtifactSha256");
         RequireNonEmpty(sidecarParseError, "zhMessage");
         RequireNonEmpty(sidecarParseError, "zhHint");
@@ -422,6 +469,11 @@ internal sealed class PcapArtifactImportScenario : ISmokeTestScenario
         SmokeAssert.True(string.Equals(dns.ProcessName, "sidecar-sample.exe", StringComparison.Ordinal), "Sidecar-only DNS process.name should be promoted to SandboxEvent.ProcessName.");
         SmokeAssert.True(string.Equals(dns.CommandLine, "sidecar-sample.exe --dns", StringComparison.Ordinal), "Sidecar-only DNS process.command_line should be promoted to SandboxEvent.CommandLine.");
         RequireData(dns, "rcode", "NXDOMAIN");
+        RequireData(dns, "dns.flags.rcode", "NXDOMAIN");
+        RequireData(dns, "dns.response_code", "NXDOMAIN");
+        RequireData(dns, "query", "eve-sidecar.example.test");
+        RequireData(dns, "dns.qry.name", "eve-sidecar.example.test");
+        RequireData(dns, "qtype", "A");
         RequireData(dns, "classification", "nxdomain");
         RequireData(dns, "isNxDomain", "true");
         RequireData(dns, "rootProcessId", "5150");
@@ -429,16 +481,23 @@ internal sealed class PcapArtifactImportScenario : ISmokeTestScenario
 
         var http = RequireEvent(events, "http.request", "host", "api.sidecar-only.test");
         RequireData(http, "method", "POST");
+        RequireData(http, "requestMethod", "POST");
+        RequireData(http, "http.request.method", "POST");
         RequireData(http, "uri", "/stage");
         RequireData(http, "url", "http://api.sidecar-only.test/stage");
         RequireData(http, "destinationPort", "8080");
         RequireData(http, "userAgent", "SidecarOnlyUA");
         RequireData(http, "contentType", "application/json");
         RequireData(http, "statusCode", "202");
+        RequireData(http, "httpStatusCode", "202");
+        RequireData(http, "http.response.status_code", "202");
         RequireData(http, "statusFamily", "2xx");
         RequireData(http, "uploadCandidate", "true");
         RequireData(http, "uploadBytes", "1536");
+        RequireData(http, "requestBodySizeBytes", "1536");
+        RequireData(http, "bodySizeBytes", "1536");
         RequireData(http, "responseBodyBytes", "256");
+        RequireData(http, "httpResponseBodyBytes", "256");
         RequireData(http, "authorizationHeaderPresent", "true");
         RequireData(http, "cookiePresent", "true");
 
@@ -447,10 +506,15 @@ internal sealed class PcapArtifactImportScenario : ISmokeTestScenario
         RequireData(tls, "destinationPort", "443");
         RequireData(tls, "tlsVersion", "TLS 1.2");
         RequireData(tls, "ja3", "0123456789abcdef0123456789abcdef");
+        RequireData(tls, "ja3Hash", "0123456789abcdef0123456789abcdef");
+        RequireData(tls, "ja3Fingerprint", "0123456789abcdef0123456789abcdef");
+        RequireData(tls, "tlsSni", "tls.sidecar-only.test");
         RequireData(tls, "alpn", "h2");
         RequireData(tls, "certSubject", "CN=tls.sidecar-only.test");
+        RequireData(tls, "certificateSubject", "CN=tls.sidecar-only.test");
         RequireData(tls, "certIssuer", "CN=Untrusted Test CA");
         RequireData(tls, "certSha256", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+        RequireData(tls, "certificateFingerprintSha256", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
         RequireData(tls, "tlsCertificateRisk", "suspicious");
 
         var flow = RequireEvent(events, "network.flow", "uid", "sidecar-only-flow-1");
@@ -530,10 +594,18 @@ internal sealed class PcapArtifactImportScenario : ISmokeTestScenario
         var parseError = RequireEvent(events, "pcap.parse_error");
         RequireData(summary, "status", "parse_error");
         RequireData(summary, "diagnosticCode", "pcap_boundary_truncated");
+        RequireData(summary, "parserBoundary", "pcap.packet_payload");
+        RequireData(summary, "parseFailureStage", "read-packet-payload");
+        RequireNonEmpty(summary, "byteOffset");
+        RequireNonEmpty(summary, "expectedBytes");
+        RequireNonEmpty(summary, "actualBytes");
         RequireData(parseError, "collectionHealth", "degraded");
         RequireData(parseError, "diagnosticCode", "pcap_boundary_truncated");
         RequireData(parseError, "parserBoundary", "pcap.packet_payload");
         RequireData(parseError, "parseFailureStage", "read-packet-payload");
+        RequireData(parseError, "diagnosticStage", "read-packet-payload");
+        RequireData(parseError, "sourceArtifactSelector", "truncated-boundary.pcap");
+        RequireData(parseError, "downloadSelector", "truncated-boundary.pcap");
         RequireNonEmpty(parseError, "byteOffset");
         RequireNonEmpty(parseError, "expectedBytes");
         RequireNonEmpty(parseError, "actualBytes");
@@ -794,7 +866,9 @@ internal sealed class PcapArtifactImportScenario : ISmokeTestScenario
 
         WritePacket(stream, 1, BuildUdpFrame("10.0.0.4", "8.8.8.8", 53000, 53, BuildDnsQuery("beacon.example.test")));
         WritePacket(stream, 2, BuildTcpFrame("10.0.0.4", "198.51.100.20", 50000, 80, Encoding.ASCII.GetBytes("GET /payload.exe HTTP/1.1\r\nHost: download.example.test\r\nUser-Agent: KSwordSmoke\r\nContent-Type: application/x-msdownload\r\n\r\nMZ")));
-        WritePacket(stream, 3, BuildTcpFrame("10.0.0.4", "203.0.113.10", 50001, 443, BuildTlsClientHello("secure.example.test")));
+        WritePacket(stream, 3, BuildTcpFrame("198.51.100.20", "10.0.0.4", 80, 50000, Encoding.ASCII.GetBytes("HTTP/1.1 200 OK\r\nContent-Type: application/x-msdownload\r\nContent-Length: 2\r\n\r\nMZ")));
+        WritePacket(stream, 4, BuildTcpFrame("10.0.0.4", "203.0.113.10", 50001, 443, BuildTlsClientHello("secure.example.test")));
+        WritePacket(stream, 5, BuildTcpFrame("203.0.113.10", "10.0.0.4", 443, 50001, BuildTlsCertificate(BuildSelfSignedCertificateDer())));
         return stream.ToArray();
     }
 
@@ -924,6 +998,42 @@ internal sealed class PcapArtifactImportScenario : ISmokeTestScenario
         WriteUInt16Be(record, (ushort)handshakeBytes.Length);
         record.Write(handshakeBytes);
         return record.ToArray();
+    }
+
+    private static byte[] BuildTlsCertificate(byte[] certificateDer)
+    {
+        using var certificateList = new MemoryStream();
+        WriteUInt24Be(certificateList, certificateDer.Length + 3);
+        WriteUInt24Be(certificateList, certificateDer.Length);
+        certificateList.Write(certificateDer);
+        var body = certificateList.ToArray();
+
+        using var handshake = new MemoryStream();
+        handshake.WriteByte(11);
+        WriteUInt24Be(handshake, body.Length);
+        handshake.Write(body);
+        var handshakeBytes = handshake.ToArray();
+
+        using var record = new MemoryStream();
+        record.WriteByte(0x16);
+        WriteUInt16Be(record, 0x0303);
+        WriteUInt16Be(record, (ushort)handshakeBytes.Length);
+        record.Write(handshakeBytes);
+        return record.ToArray();
+    }
+
+    private static byte[] BuildSelfSignedCertificateDer()
+    {
+        using var rsa = RSA.Create(2048);
+        var request = new CertificateRequest(
+            "CN=secure.example.test",
+            rsa,
+            HashAlgorithmName.SHA256,
+            RSASignaturePadding.Pkcs1);
+        using var certificate = request.CreateSelfSigned(
+            DateTimeOffset.UtcNow.AddDays(-1),
+            DateTimeOffset.UtcNow.AddDays(7));
+        return certificate.RawData;
     }
 
     private static void WriteUInt16Le(Stream stream, ushort value)

@@ -117,13 +117,23 @@ std::string BuildAbiSelfCheckData(const Options& options) {
     data.AddUtf8("noiseDisposition", "emitted-as-collector-diagnostic");
     data.AddUtf8("noiseReasons", "none");
     data.AddUtf8("noiseFieldSet", kJsonlNoiseFieldSet);
+    data.AddUtf8("noiseClassificationFieldSet", kJsonlNoiseClassificationFields);
+    data.AddUtf8("noiseTaxonomyVersion", "1");
+    data.AddUtf8("noiseDecision", "collector-diagnostic");
+    data.AddUtf8("noiseDecisionSource", "abi-self-check-mode");
+    data.AddUtf8("noiseClassificationConfidence", "high");
+    data.AddUtf8("noiseProbeKind", "none");
     data.AddBool("sampleBehaviorCandidate", false);
+    data.AddUtf8("sampleBehaviorCandidateReason", "abi-self-check-is-collection-diagnostic");
     data.AddBool("collectionDiagnostic", true);
     data.AddBool("collectionNoise", false);
     data.AddUtf8("operatorInterpretation", "collection_diagnostic_not_sample_behavior");
     data.AddWide(
         "zhNoiseHint",
         L"ABI 自检行是采集诊断，不是样本行为；noise=false 表示它不是 JSONL 噪声注入行。");
+    data.AddWide(
+        "zhNoiseClassificationHint",
+        L"噪声分类为 collector-diagnostic；该行用于 ABI/字段合同验证，不应进入样本行为图。");
     data.AddBool("lost", false);
     data.AddUnsigned("lostCount", 0);
     data.AddBool("lossObserved", false);
@@ -265,13 +275,20 @@ std::string BuildAbiSelfCheckData(const Options& options) {
     data.AddUtf8("networkFlowKeyPolicy", "flowKeyVersion=1; flowKey uses protocol|sourceEndpoint|destinationEndpoint with direction-aware endpoints plus endpointPair/source/destination aliases");
     data.AddUtf8("networkProtocolParserBoundary", "R0 WFP/ALE rows are endpoint/port/layer evidence only; dnsQueryName/httpHost/httpUri/tlsSni require PCAP/browser/sidecar correlation and are marked unavailable in mock rows");
     data.AddUtf8("networkProtocolBoundaryFields", kNetworkProtocolBoundaryFields);
+    data.AddUtf8("networkCorrelationStableFields", kNetworkCorrelationStableFields);
+    data.AddUtf8("networkCorrelationPolicy", "R0 rows are join candidates only: networkCorrelationRole=r0-endpoint-candidate, pcapCorrelationRole=join-candidate-not-l7-owner, and pcapCorrelationJoinFields names flowKey/endpoints/protocol/ports/processId");
     data.AddUtf8("pcapCorrelationPolicy", "R0 driver.network rows emit pcapCorrelationRequired=true and flowKey candidates; PCAP import rows own DNS names, HTTP Host/URI/method, TLS SNI/certificate details");
+    data.AddUtf8("pcapCorrelationJoinFieldsPolicy", "stable join fields are flowKey|sourceEndpoint|destinationEndpoint|protocolName|sourcePort|destinationPort|processId; missing L7 fields remain unavailable on R0 rows");
     data.AddUtf8("pcapExpectedRecordTypes", "pcap.flow|pcap.dns|pcap.http|pcap.tls");
     data.AddUtf8("dnsBoundaryPolicy", "dnsCandidate/serviceHintDns is a port/protocol candidate only; dnsQueryNameAvailable=false until pcap.dns or sidecar evidence supplies the name");
     data.AddUtf8("httpBoundaryPolicy", "httpCandidate/serviceHintHttp is a port/protocol candidate only; httpHostAvailable/httpUriAvailable/httpMethodAvailable remain false on R0 rows");
     data.AddUtf8("tlsBoundaryPolicy", "tlsCandidate/serviceHintTls is a port/protocol candidate only; tlsSniAvailable/tlsCertificateAvailable remain false on R0 rows");
+    data.AddUtf8("l7ProtocolDetailsPolicy", "l7ProtocolDetailsAvailable=false and l7ProtocolDetailsOwner=pcap-browser-sidecar-not-r0 for R0 WFP/ALE rows");
     data.AddWide("zhNetworkProtocolParserBoundary", L"R0 WFP/ALE 行只证明端点、端口和层信息；DNS 查询名、HTTP Host/URI、TLS SNI 必须来自 PCAP/浏览器/sidecar 证据。");
     data.AddWide("zhPcapCorrelationPolicy", L"R0 网络行会给出 flowKey/端点候选；DNS/HTTP/TLS 细节归 PCAP import、浏览器或 sidecar 行所有。");
+    data.AddWide("zhDnsCorrelationPolicy", L"DNS 候选字段只说明 53/UDP 等端点；查询名、响应码和答案必须来自 pcap.dns 或 sidecar 行。");
+    data.AddWide("zhHttpCorrelationPolicy", L"HTTP 候选字段只说明 80/8080 等端点；Host、URI、Method 和状态码必须来自 pcap.http、浏览器或代理 sidecar 行。");
+    data.AddWide("zhTlsCorrelationPolicy", L"TLS 候选字段只说明 443/8443 等端点；SNI、证书、JA3/JA3S 必须来自 pcap.tls 或 TLS sidecar 行。");
     data.AddUtf8("semanticSelfCheckScenarios", kSyntheticSemanticSelfCheckScenarios);
     data.AddUnsigned("semanticSelfCheckRows", kSyntheticSemanticSelfCheckRows);
     data.AddUnsigned("semanticSelfCheckSequenceStart", kSyntheticSemanticSequenceStart);
@@ -281,14 +298,20 @@ std::string BuildAbiSelfCheckData(const Options& options) {
     data.AddUtf8(
         "semanticSelfCheckPolicy",
         "mock/stress runs emit dedicated no-device rows for process-lineage, DNS, HTTP, TLS, lateral movement, and download-execute without changing the counted StressJsonlExpectedDriverRows file corpus");
+    data.AddUtf8(
+        "semanticStressCountPreservationPolicy",
+        "semantic companion rows keep semanticRowCountedInStress=false and semanticStressCountImpact=none; only counted driver.file stress rows contribute to StressJsonlExpectedDriverRows");
     data.AddWide(
         "zhSemanticSelfCheckPolicy",
         L"mock/stress 会输出进程血缘、DNS、HTTP、TLS、横向移动和下载执行语义自检行；不会改变 StressJsonlExpectedDriverRows 计数的 driver.file 压测语料。");
-    data.AddUtf8("selfNoiseClassificationFields", "noiseClass|noiseScope|noiseKind|noiseSource|selfNoiseClass|collectorNoiseClass|noiseAction|noiseDisposition|noiseReasons|noiseFieldSet|sampleBehaviorCandidate|collectionNoise|operatorInterpretation|zhNoiseHint|zhOperatorHint");
+    data.AddWide(
+        "zhSemanticStressCountPreservationPolicy",
+        L"语义 companion 行不计入 StressJsonlExpectedDriverRows；只有带 stress=true 的 driver.file 压测行参与行数合同。");
+    data.AddUtf8("selfNoiseClassificationFields", "noiseClass|noiseScope|noiseKind|noiseSource|selfNoiseClass|collectorNoiseClass|noiseAction|noiseDisposition|noiseReasons|noiseFieldSet|noiseTaxonomyVersion|noiseDecision|noiseDecisionSource|noiseClassificationConfidence|noiseProbeKind|sampleBehaviorCandidate|sampleBehaviorCandidateReason|collectionNoise|operatorInterpretation|zhNoiseHint|zhNoiseClassificationHint|zhOperatorHint");
     data.AddUtf8("typedPayloadSemanticFields", "semanticFamily|behaviorLane|activityKind|evidenceReady|zhMessage|zhHint|zhSemanticHint|semanticScenario|artifactCandidateKind|dropLocationFamily|persistenceFamily|imageLoadFamily|networkEvidenceKind plus process/file/registry/network family-specific hints");
     data.AddUtf8("stressBackpressureDiagnostics", "observedSequenceSpan|expectedContiguousEvents|sequenceGapReason|lossDiagnostic|backpressureSeverity|backpressureDiagnostics|zhBackpressureHint");
     data.AddUtf8("queueLossEvidence", "lostCount|TotalEventsDropped|EventsDropped|TotalEventsSuppressed|TotalEventsBackpressured|ProducerDroppedMask|ProducerSuppressedMask|ProducerBackpressureMask|NextSequence|sequence|sequenceGapObserved|sequenceGapEstimate|queueHighWatermark|highWatermark");
-    data.AddUtf8("stableJsonlFields", "sequence|sequenceMeaning|sequenceScope|sequenceConcrete|lost|lostCount|loss|lossObserved|backpressure|backpressureObserved|backpressureReason|backpressureSeverity|highWatermark|lastEnqueueFailureStatus|noise|noiseScope|noiseKind|noiseSource|noiseClass|selfNoiseClass|collectorNoiseClass|noiseAction|noiseDisposition|noiseReasons|noiseFieldSet|collectorNoise|collectorSelfNoise|selfProcess|selfNoise|selfNoiseReason|selfNoiseAction|collectorSuppressed|sampleBehaviorCandidate|producer|producerCategory|eventOrigin|subjectKind|actorRole|subjectRole|processIdSource|semanticFamily|behaviorLane|activityKind|semanticContractVersion|semanticRowKind|semanticRowCountedInStress|semanticScenario|semanticSelfCheck|semanticSelfCheckScenarios|semanticSelfCheckRows|semanticEvidenceKind|zhSemanticHint|zhOperatorHint|artifactCandidateKind|dropLocationFamily|droppedFileCandidate|startupFolderCandidate|downloadedFileCandidate|executableFileCandidate|persistenceFamily|servicePersistenceCandidate|ifeoPersistenceCandidate|imageLoadFamily|injectionCandidate|processLineageScenario|lineageConfidence|parentProcessId|creatingProcessId|capturedCommandLine|networkEvidenceKind|externalAddressCandidate|lateralMovementCandidate|downloadExecuteCandidate|serviceHint|serviceHintDns|serviceHintHttp|serviceHintTls|dnsQueryNameAvailable|dnsQueryNameSource|httpHostAvailable|httpUriAvailable|httpMethodAvailable|tlsSniAvailable|tlsCertificateAvailable|protocolPayloadParsed|protocolParserSource|protocolPayloadSource|pcapCorrelationRequired|pcapCorrelationStatus|pcapFlowKeyCandidate|pcapCorrelationKey|networkProtocolBoundaryFields|flowKey|sourceEndpoint|destinationEndpoint|zhMessage|zhHint|zhPcapCorrelationHint|zhNetworkBoundaryHint|operationName|status|pathTruncated|schema|eventSchemaName|eventSchemaVersion|eligible|processed|emitted|suppressed|skipped|head|tail|sampling|sequenceGapReason|observedSequenceSpan|producerDroppedMask|producerSuppressedMask|producerBackpressureMask|effectiveProducerMask|lastFailureNtStatus|networkStatusAvailable|networkStatusCapability|supportedLayerMask|activeLayerMask|todoMask|classifyCount|eventCount|queueFailureCount|classifyPayloadFailureCount|lastDegradeReasonName");
+    data.AddUtf8("stableJsonlFields", "sequence|sequenceMeaning|sequenceScope|sequenceConcrete|lost|lostCount|loss|lossObserved|backpressure|backpressureObserved|backpressureReason|backpressureSeverity|highWatermark|lastEnqueueFailureStatus|noise|noiseScope|noiseKind|noiseSource|noiseClass|selfNoiseClass|collectorNoiseClass|noiseAction|noiseDisposition|noiseReasons|noiseFieldSet|noiseTaxonomyVersion|noiseDecision|noiseDecisionSource|noiseClassificationConfidence|noiseProbeKind|sampleBehaviorCandidate|sampleBehaviorCandidateReason|collectorNoise|collectorSelfNoise|selfProcess|selfNoise|selfNoiseReason|selfNoiseAction|collectorSuppressed|producer|producerCategory|eventOrigin|subjectKind|actorRole|subjectRole|processIdSource|semanticFamily|behaviorLane|activityKind|semanticContractVersion|semanticRowKind|semanticCompanionRow|semanticCompanionCount|semanticCompanionContract|semanticRowCountedInStress|semanticScenario|semanticSelfCheck|semanticSelfCheckScenarios|semanticSelfCheckRows|semanticEvidenceKind|zhSemanticHint|zhOperatorHint|zhCompanionHint|artifactCandidateKind|dropLocationFamily|droppedFileCandidate|startupFolderCandidate|downloadedFileCandidate|executableFileCandidate|persistenceFamily|servicePersistenceCandidate|ifeoPersistenceCandidate|imageLoadFamily|injectionCandidate|processLineageScenario|lineageConfidence|parentProcessId|creatingProcessId|capturedCommandLine|networkEvidenceKind|externalAddressCandidate|lateralMovementCandidate|downloadExecuteCandidate|serviceHint|serviceHintDns|serviceHintHttp|serviceHintTls|dnsQueryNameAvailable|dnsQueryNameSource|dnsCorrelationRecordType|dnsDetailsOwner|httpHostAvailable|httpUriAvailable|httpMethodAvailable|httpCorrelationRecordType|httpDetailsOwner|tlsSniAvailable|tlsCertificateAvailable|tlsCorrelationRecordType|tlsDetailsOwner|protocolPayloadParsed|protocolParserSource|protocolPayloadSource|networkCorrelationContractVersion|networkCorrelationRole|pcapCorrelationRole|pcapCorrelationJoinFields|pcapCorrelationMissingFields|pcapCorrelationConfidence|l7ProtocolDetailsAvailable|l7ProtocolDetailsOwner|r0ProtocolParserGuarantee|protocolBoundaryVerdict|pcapCorrelationRequired|pcapCorrelationStatus|pcapFlowKeyCandidate|pcapCorrelationKey|networkProtocolBoundaryFields|networkCorrelationStableFields|flowKey|sourceEndpoint|destinationEndpoint|zhMessage|zhHint|zhPcapCorrelationHint|zhNetworkBoundaryHint|zhDnsCorrelationHint|zhHttpCorrelationHint|zhTlsCorrelationHint|zhNoiseClassificationHint|operationName|status|pathTruncated|schema|eventSchemaName|eventSchemaVersion|eligible|processed|emitted|suppressed|skipped|head|tail|sampling|sequenceGapReason|observedSequenceSpan|producerDroppedMask|producerSuppressedMask|producerBackpressureMask|effectiveProducerMask|lastFailureNtStatus|networkStatusAvailable|networkStatusCapability|supportedLayerMask|activeLayerMask|todoMask|classifyCount|eventCount|queueFailureCount|classifyPayloadFailureCount|lastDegradeReasonName");
     data.AddUtf8("collectorSelfCheckContract", "--abi-self-check emits this row and exits before CreateFileW/DeviceIoControl");
     data.AddWide("zhCollectorSelfCheckContract", L"--abi-self-check \u4f1a\u53d1\u51fa\u8be5\u884c\uff0c\u5e76\u5728 CreateFileW/DeviceIoControl \u4e4b\u524d\u9000\u51fa\u3002");
 

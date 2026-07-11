@@ -147,6 +147,12 @@ files，并给出修复建议，例如运行 `.\scripts\Prepare-GuestPayload.ps1
 .\run.ps1 -Mode Analyze -SamplePath 'D:\Temp\sample.exe' -DurationSeconds 30 -Live
 ```
 
+中文护栏：`-Live` 是显式实验室动作，会修改已配置 VM。它不会由
+`Test-ReleaseReadiness.ps1`、`package-portable.ps1` 或普通 WebUI 启动自动触发，
+也不会替 release notes 自动生成 fresh live evidence。若发布说明要声明当前候选已刷新
+live，请先记录 commit、`job id`、运行时间、runtime root 和报告路径；否则写
+“本候选未刷新 fresh live evidence”。
+
 内置样本 live 形式：
 
 ```powershell

@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Runtime.InteropServices;
+using System.Text.Json;
 using KSword.Sandbox.Abstractions;
 
 namespace KSword.Sandbox.Agent.Collection;
@@ -13,6 +14,10 @@ namespace KSword.Sandbox.Agent.Collection;
 /// </summary>
 internal sealed class ScreenshotProbe : IGuestProbe
 {
+    private const string ReasonTaxonomy = "guest-artifact.screenshot.reason.v1";
+    private const string PhaseSummaryVersion = "screenshot-phase-summary-v1";
+    private const string ArtifactSelectorVersion = "artifact-selectors-v1";
+
     private readonly IScreenshotCapture screenshotCapture;
     private readonly ScreenshotProbeOptions options;
 
@@ -80,7 +85,7 @@ internal sealed class ScreenshotProbe : IGuestProbe
             return [];
         }
 
-        var events = new List<SandboxEvent>(requests.Count);
+        var events = new List<SandboxEvent>(requests.Count + 1);
         foreach (var request in requests)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -88,6 +93,7 @@ internal sealed class ScreenshotProbe : IGuestProbe
             events.Add(CreateScreenshotEvent(phase, context, request, result));
         }
 
+        events.Add(CreatePhaseSummaryEvent(phase, context, requests, events));
         return events;
     }
 
@@ -122,6 +128,9 @@ internal sealed class ScreenshotProbe : IGuestProbe
                 ["captureState"] = result.Captured ? "captured" : "skipped",
                 ["status"] = result.Captured ? "captured" : "skipped",
                 ["nonfatal"] = FormatBoolean(!result.Captured),
+                ["artifactEvent"] = "true",
+                ["behaviorCounted"] = "false",
+                ["nonbehavior"] = "true",
                 ["evidenceRole"] = "screenshot",
                 ["collectionName"] = "screenshots",
                 ["processRole"] = context.RootProcessId is null ? "sample-context" : "sample-root-context",
@@ -159,6 +168,9 @@ internal sealed class ScreenshotProbe : IGuestProbe
             evt.Data["reason"] = result.Reason;
             evt.Data["reasonCode"] = ScreenshotReasonCode(result);
             evt.Data["reasonCategory"] = ScreenshotReasonCategory(result);
+            evt.Data["reasonTaxonomy"] = ReasonTaxonomy;
+            evt.Data["reasonTaxonomyVersion"] = "v1";
+            evt.Data["collectionHealth"] = "true";
             evt.Data["zhReason"] = ScreenshotReasonZhReason(result);
             evt.Data["zhMessage"] = "截图采集被跳过；该事件说明证据缺口，不会中断整体分析。";
             evt.Data["zhHint"] = ScreenshotReasonZhHint(result.Reason, result.DiagnosticStage);
@@ -198,6 +210,10 @@ internal sealed class ScreenshotProbe : IGuestProbe
             evt.Data["screenshotRelativePath"] = relativePath;
             evt.Data["artifactFullPath"] = result.Path;
             AddIfNotEmpty(evt.Data, "artifactRelativePath", artifactRelativePath);
+            AddIfNotEmpty(evt.Data, "artifactSelector", artifactRelativePath);
+            AddIfNotEmpty(evt.Data, "downloadSelector", artifactRelativePath);
+            AddIfNotEmpty(evt.Data, "artifactSelectorKind", string.IsNullOrWhiteSpace(artifactRelativePath) ? null : "safe-output-relative-path");
+            AddIfNotEmpty(evt.Data, "artifactSelectorVersion", string.IsNullOrWhiteSpace(artifactRelativePath) ? null : ArtifactSelectorVersion);
             evt.Data["artifactRelativePathStatus"] = string.IsNullOrWhiteSpace(artifactRelativePath) ? "outside-output-root" : "captured";
             AddArtifactFileEvidence(evt, result.Path);
         }
@@ -211,6 +227,74 @@ internal sealed class ScreenshotProbe : IGuestProbe
             evt.Data["artifactHashStatus"] = result.Captured ? "missing" : "not-created";
         }
 
+        return evt;
+    }
+
+    /// <summary>
+    /// Creates a non-behavior summary for one configured screenshot phase.
+    /// Inputs are the phase, request plan, and per-attempt events; processing
+    /// aggregates captured/skipped counts, reason taxonomy counts, and
+    /// first/last/largest artifact selectors; the method returns a summary row.
+    /// </summary>
+    private static SandboxEvent CreatePhaseSummaryEvent(
+        ProbePhase phase,
+        GuestProbeContext context,
+        IReadOnlyList<ScreenshotCaptureRequest> requests,
+        IReadOnlyList<SandboxEvent> attemptEvents)
+    {
+        var capturedCount = attemptEvents.Count(static evt => string.Equals(evt.EventType, "screenshot.captured", StringComparison.OrdinalIgnoreCase));
+        var skippedCount = attemptEvents.Count(static evt => string.Equals(evt.EventType, "screenshot.skipped", StringComparison.OrdinalIgnoreCase));
+        var phaseLabel = ToPhaseLabel(phase);
+        var status = capturedCount > 0
+            ? skippedCount > 0 ? "partial" : "captured"
+            : skippedCount > 0 ? "skipped" : "enabled-empty";
+        var evt = new SandboxEvent
+        {
+            EventType = "screenshot.phase.summary",
+            Source = "guest",
+            ProcessName = SampleProcessName(context.SamplePath),
+            ProcessId = context.RootProcessId,
+            Data =
+            {
+                ["phase"] = phaseLabel,
+                ["capturePhase"] = phaseLabel,
+                ["probePhase"] = phaseLabel,
+                ["screenshotStage"] = string.Join(",", requests.Select(static request => request.StageLabel).Distinct(StringComparer.OrdinalIgnoreCase)),
+                ["screenshotPhaseSummaryVersion"] = PhaseSummaryVersion,
+                ["captureEnabled"] = "true",
+                ["implemented"] = "true",
+                ["capturePolicy"] = "explicit-opt-in-screenshot",
+                ["captureState"] = status,
+                ["status"] = status,
+                ["summaryEvent"] = "true",
+                ["artifactEvent"] = "false",
+                ["behaviorCounted"] = "false",
+                ["nonbehavior"] = "true",
+                ["collectionHealth"] = "true",
+                ["evidenceRole"] = "screenshot",
+                ["collectionName"] = "screenshots",
+                ["expectedRelativePath"] = "screenshots/*.bmp",
+                ["captureAttemptCount"] = attemptEvents.Count.ToString(CultureInfo.InvariantCulture),
+                ["configuredCaptureCount"] = requests.Count.ToString(CultureInfo.InvariantCulture),
+                ["capturedCount"] = capturedCount.ToString(CultureInfo.InvariantCulture),
+                ["skippedCount"] = skippedCount.ToString(CultureInfo.InvariantCulture),
+                ["artifactCount"] = capturedCount.ToString(CultureInfo.InvariantCulture),
+                ["artifactSelectorVersion"] = ArtifactSelectorVersion,
+                ["reasonTaxonomy"] = ReasonTaxonomy,
+                ["reasonTaxonomyVersion"] = "v1",
+                ["reason"] = ScreenshotPhaseSummaryReason(capturedCount, skippedCount),
+                ["reasonCategory"] = capturedCount > 0 ? "captured" : skippedCount > 0 ? "skipped" : "empty",
+                ["samplePath"] = context.SamplePath,
+                ["zhMessage"] = capturedCount > 0
+                    ? "截图阶段采集摘要已记录，并包含可下载截图选择器。"
+                    : "截图阶段采集摘要已记录，但没有产出可下载截图。",
+                ["zhHint"] = "这是截图采集阶段摘要，不代表样本行为；请使用 first/last/largestArtifactSelector 或 reasonCountsJson 审阅截图证据质量。"
+            }
+        };
+
+        AddRunContext(evt, context);
+        AddScreenshotReasonSummaries(evt, attemptEvents);
+        AddScreenshotArtifactSelectors(evt.Data, attemptEvents);
         return evt;
     }
 
@@ -233,11 +317,20 @@ internal sealed class ScreenshotProbe : IGuestProbe
                 ["implemented"] = "true",
                 ["capturePolicy"] = "explicit-opt-in-screenshot",
                 ["reason"] = "screenshotNotRequested",
+                ["reasonCode"] = "screenshotNotRequested",
+                ["reasonCategory"] = "disabled",
+                ["reasonTaxonomy"] = ReasonTaxonomy,
+                ["reasonTaxonomyVersion"] = "v1",
                 ["zhMessage"] = "截图采集未启用。",
+                ["zhReason"] = "未请求截图采集。",
                 ["zhHint"] = "未启用 --screenshot/--screenshots，Guest Agent 不会截取桌面内容。",
                 ["captureState"] = "disabled",
                 ["status"] = "disabled",
                 ["nonfatal"] = "true",
+                ["artifactEvent"] = "false",
+                ["behaviorCounted"] = "false",
+                ["nonbehavior"] = "true",
+                ["collectionHealth"] = "true",
                 ["evidenceRole"] = "screenshot",
                 ["collectionName"] = "screenshots",
                 ["processRole"] = context.RootProcessId is null ? "sample-context" : "sample-root-context",
@@ -262,6 +355,177 @@ internal sealed class ScreenshotProbe : IGuestProbe
 
         AddIfNotEmpty(evt.Data, "processName", evt.ProcessName);
         return evt;
+    }
+
+    private static string ScreenshotPhaseSummaryReason(int capturedCount, int skippedCount)
+    {
+        if (capturedCount > 0)
+        {
+            return skippedCount > 0 ? "someScreenshotsCaptured" : "allScreenshotsCaptured";
+        }
+
+        if (skippedCount > 0)
+        {
+            return "allScreenshotsSkipped";
+        }
+
+        return "noScreenshotAttempts";
+    }
+
+    private static void AddRunContext(SandboxEvent evt, GuestProbeContext context)
+    {
+        evt.Data["processRole"] = context.RootProcessId is null ? "sample-context" : "sample-root-context";
+        if (context.RootProcessId is not null)
+        {
+            var rootProcessId = context.RootProcessId.Value.ToString(CultureInfo.InvariantCulture);
+            evt.Data["rootProcessId"] = rootProcessId;
+            evt.Data.TryAdd("processId", rootProcessId);
+            evt.Data.TryAdd("treeDepth", "0");
+            evt.Data.TryAdd("treeLineage", rootProcessId);
+            evt.Data.TryAdd("rootProcessIdStatus", "available");
+            evt.Data.TryAdd("treeLineageStatus", "stable");
+        }
+        else
+        {
+            evt.Data.TryAdd("rootProcessIdStatus", "unavailable");
+            evt.Data.TryAdd("treeLineageStatus", "unavailable");
+        }
+
+        if (context.RootParentProcessId is not null)
+        {
+            evt.Data["rootParentProcessId"] = context.RootParentProcessId.Value.ToString(CultureInfo.InvariantCulture);
+            evt.Data.TryAdd("parentProcessId", context.RootParentProcessId.Value.ToString(CultureInfo.InvariantCulture));
+        }
+
+        AddIfNotEmpty(evt.Data, "processName", context.RootProcessName ?? evt.ProcessName);
+        AddIfNotEmpty(evt.Data, "rootProcessName", context.RootProcessName);
+        AddIfNotEmpty(evt.Data, "processImagePath", context.RootProcessPath ?? context.SamplePath);
+        AddIfNotEmpty(evt.Data, "rootImagePath", context.RootProcessPath ?? context.SamplePath);
+        AddIfNotEmpty(evt.Data, "commandLine", context.RootCommandLine);
+        AddIfNotEmpty(evt.Data, "rootCommandLine", context.RootCommandLine);
+        if (context.RootProcessStartTimeUtc is not null)
+        {
+            evt.Data["rootProcessStartTimeUtc"] = context.RootProcessStartTimeUtc.Value.ToString("O", CultureInfo.InvariantCulture);
+        }
+    }
+
+    private static void AddScreenshotReasonSummaries(SandboxEvent evt, IReadOnlyList<SandboxEvent> attemptEvents)
+    {
+        AddCounts(evt.Data, "reason", CountDataValues(attemptEvents, "reason"));
+        AddCounts(evt.Data, "reasonCategory", CountDataValues(attemptEvents, "reasonCategory"));
+    }
+
+    private static Dictionary<string, int> CountDataValues(IReadOnlyList<SandboxEvent> events, string key)
+    {
+        return events
+            .Select(evt => evt.Data.TryGetValue(key, out var value) ? value : string.Empty)
+            .Where(static value => !string.IsNullOrWhiteSpace(value))
+            .GroupBy(static value => value, StringComparer.OrdinalIgnoreCase)
+            .OrderBy(static group => group.Key, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(static group => group.Key, static group => group.Count(), StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static void AddCounts(Dictionary<string, string> data, string prefix, IReadOnlyDictionary<string, int> counts)
+    {
+        data[$"{prefix}Count"] = counts.Count.ToString(CultureInfo.InvariantCulture);
+        if (counts.Count == 0)
+        {
+            return;
+        }
+
+        data[$"{prefix}s"] = string.Join(",", counts.Keys);
+        data[$"{prefix}Counts"] = string.Join(
+            ";",
+            counts.Select(pair => $"{pair.Key}={pair.Value.ToString(CultureInfo.InvariantCulture)}"));
+        data[$"{prefix}CountsJson"] = JsonSerializer.Serialize(counts);
+    }
+
+    private static void AddScreenshotArtifactSelectors(Dictionary<string, string> data, IReadOnlyList<SandboxEvent> attemptEvents)
+    {
+        var artifacts = attemptEvents
+            .Where(static evt => string.Equals(evt.EventType, "screenshot.captured", StringComparison.OrdinalIgnoreCase))
+            .Select(static evt => new ScreenshotArtifactSummary(
+                FirstData(evt, "artifactRelativePath", "relativePath", "screenshotRelativePath"),
+                ParseLong(FirstData(evt, "artifactSizeBytes", "sizeBytes")),
+                FirstData(evt, "artifactSha256", "sha256")))
+            .Where(static artifact => !string.IsNullOrWhiteSpace(artifact.RelativePath))
+            .ToList();
+
+        if (artifacts.Count == 0)
+        {
+            data["artifactSelectorState"] = "none-captured";
+            return;
+        }
+
+        data["artifactSelectorState"] = "available";
+        data["artifactSelectorMode"] = "phase-event-order-and-size";
+        AddArtifactSelector(data, "first", artifacts.First(), "first-captured-event");
+        AddArtifactSelector(data, "last", artifacts.Last(), "last-captured-event");
+        AddArtifactSelector(
+            data,
+            "largest",
+            artifacts
+                .OrderByDescending(static artifact => artifact.SizeBytes)
+                .ThenBy(static artifact => artifact.RelativePath, StringComparer.OrdinalIgnoreCase)
+                .First(),
+            "largest-size-bytes");
+    }
+
+    private static void AddArtifactSelector(
+        Dictionary<string, string> data,
+        string prefix,
+        ScreenshotArtifactSummary artifact,
+        string selectionReason)
+    {
+        var titlePrefix = char.ToUpperInvariant(prefix[0]) + prefix[1..];
+        data[ArtifactSelectorKey(prefix)] = artifact.RelativePath;
+        data[$"{prefix}ArtifactRelativePath"] = artifact.RelativePath;
+        data[$"{prefix}ArtifactSafeLink"] = BuildSafeLink(artifact.RelativePath);
+        data[$"{prefix}ArtifactSizeBytes"] = artifact.SizeBytes.ToString(CultureInfo.InvariantCulture);
+        AddIfNotEmpty(data, $"{prefix}ArtifactSha256", artifact.Sha256);
+        data[$"{prefix}ArtifactSelectionReason"] = selectionReason;
+        data[$"has{titlePrefix}ArtifactSelector"] = "true";
+    }
+
+    private static string ArtifactSelectorKey(string prefix)
+    {
+        return prefix switch
+        {
+            "first" => "firstArtifactSelector",
+            "last" => "lastArtifactSelector",
+            "largest" => "largestArtifactSelector",
+            _ => $"{prefix}ArtifactSelector"
+        };
+    }
+
+    private static string FirstData(SandboxEvent evt, params string[] keys)
+    {
+        foreach (var key in keys)
+        {
+            if (evt.Data.TryGetValue(key, out var value) && !string.IsNullOrWhiteSpace(value))
+            {
+                return value;
+            }
+        }
+
+        return string.Empty;
+    }
+
+    private static long ParseLong(string value)
+    {
+        return long.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed)
+            ? parsed
+            : 0;
+    }
+
+    private static string BuildSafeLink(string relativePath)
+    {
+        return string.Join(
+            "/",
+            relativePath
+                .Replace('\\', '/')
+                .Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Select(Uri.EscapeDataString));
     }
 
     private static string ScreenshotReasonZhHint(string reason, string? diagnosticStage)
@@ -478,6 +742,8 @@ internal sealed class ScreenshotProbe : IGuestProbe
             _ => phase.ToString()
         };
     }
+
+    private sealed record ScreenshotArtifactSummary(string RelativePath, long SizeBytes, string Sha256);
 }
 
 /// <summary>
