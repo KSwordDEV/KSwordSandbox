@@ -374,13 +374,43 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
             html.AppendLine("<table><thead><tr><th>Severity</th><th>Behavior</th><th>Evidence</th></tr></thead><tbody>");
             foreach (var finding in findings)
             {
-                html.AppendLine($"<tr><td class=\"risk-{E(NormalizeSeverity(finding.Severity))}\">{E(finding.Severity)}</td><td><strong>{E(finding.Title)}</strong><br><span class=\"muted\">{E(finding.Summary)}</span></td><td>{finding.Evidence.Count}</td></tr>");
+                html.AppendLine($"<tr><td class=\"risk-{E(NormalizeSeverity(finding.Severity))}\">{E(finding.Severity)}</td><td><strong>{E(finding.Title)}</strong><br><span class=\"muted\">{E(finding.Summary)}</span></td><td>{RenderFindingEvidence(finding.Evidence)}</td></tr>");
             }
 
             html.AppendLine("</tbody></table>");
         }
 
         html.AppendLine("</section>");
+    }
+
+    /// <summary>
+    /// Renders top evidence directly under one behavior finding.
+    /// Inputs are the normalized events attached by the rule engine; processing
+    /// keeps the row compact but expandable; the method returns encoded HTML.
+    /// </summary>
+    private static string RenderFindingEvidence(IReadOnlyCollection<SandboxEvent> evidence)
+    {
+        if (evidence.Count == 0)
+        {
+            return "<span class=\"muted\">0 evidence events</span>";
+        }
+
+        const int inlineLimit = 5;
+        var topEvidence = evidence.Take(inlineLimit).ToList();
+        var hidden = Math.Max(0, evidence.Count - topEvidence.Count);
+        var summary = $"{evidence.Count} evidence events";
+        var compact = string.Join(Environment.NewLine, topEvidence.Select(EventOneLine));
+        var full = string.Join(Environment.NewLine + Environment.NewLine, topEvidence.Select(EventToPlainText));
+        if (hidden > 0)
+        {
+            compact += Environment.NewLine + $"... {hidden} more evidence events hidden in raw events/report.json";
+            full += Environment.NewLine + Environment.NewLine + $"... {hidden} more evidence events hidden in raw events/report.json";
+        }
+
+        return
+            $"<div class=\"toolbar\">{CopyButton("Copy behavior evidence", full)}</div>" +
+            $"<span class=\"chip chip-info copyable\" data-copy=\"{A(summary)}\">{E(summary)}</span>" +
+            $"<details><summary>Top evidence</summary><pre class=\"copyable\" data-copy=\"{A(full)}\">{E(compact)}</pre></details>";
     }
 
     /// <summary>
@@ -1092,6 +1122,7 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
         html.AppendLine("</div>");
         html.AppendLine($"<div class=\"section-note\"><strong>Raw events are collapsed by default.</strong> Raw events shown inline: {inlineEvents.Count}/{orderedEvents.Count}. Hidden raw events: {hiddenCount}. Open report.json or raw source artifacts for complete evidence.</div>");
         AppendRawSourceHints(html, report, artifacts);
+        AppendRawEventDistribution(html, orderedEvents);
 
         if (orderedEvents.Count == 0)
         {
@@ -1107,6 +1138,69 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
         }
 
         html.AppendLine("</section>");
+    }
+
+    /// <summary>
+    /// Appends a compact raw event distribution summary before the collapsed
+    /// raw table. Inputs are ordered report events; processing groups by event
+    /// type, source, and family; the method writes static cards only.
+    /// </summary>
+    private static void AppendRawEventDistribution(StringBuilder html, IReadOnlyCollection<SandboxEvent> events)
+    {
+        if (events.Count == 0)
+        {
+            return;
+        }
+
+        html.AppendLine("<h3>Raw event distribution</h3>");
+        html.AppendLine("<div class=\"evidence-summary-grid\">");
+        AppendDistributionCard(
+            html,
+            "Top event types",
+            events
+                .GroupBy(evt => string.IsNullOrWhiteSpace(evt.EventType) ? "(empty)" : evt.EventType)
+                .OrderByDescending(group => group.Count())
+                .ThenBy(group => group.Key, StringComparer.OrdinalIgnoreCase)
+                .Take(10)
+                .Select(group => (Label: group.Key, Count: group.Count()))
+                .ToList());
+        AppendDistributionCard(
+            html,
+            "Sources",
+            events
+                .GroupBy(evt => string.IsNullOrWhiteSpace(evt.Source) ? "(empty)" : evt.Source)
+                .OrderByDescending(group => group.Count())
+                .ThenBy(group => group.Key, StringComparer.OrdinalIgnoreCase)
+                .Take(10)
+                .Select(group => (Label: group.Key, Count: group.Count()))
+                .ToList());
+        AppendDistributionCard(
+            html,
+            "Event families",
+            events
+                .GroupBy(EventFamilyLabel)
+                .OrderByDescending(group => group.Count())
+                .ThenBy(group => group.Key, StringComparer.OrdinalIgnoreCase)
+                .Take(10)
+                .Select(group => (Label: group.Key, Count: group.Count()))
+                .ToList());
+        html.AppendLine("</div>");
+    }
+
+    private static void AppendDistributionCard(StringBuilder html, string title, IReadOnlyCollection<(string Label, int Count)> rows)
+    {
+        var copy = title + Environment.NewLine + string.Join(Environment.NewLine, rows.Select(row => $"{row.Label}: {row.Count}"));
+        html.AppendLine($"<article class=\"evidence-summary-card copyable\" data-copy=\"{A(copy)}\">");
+        html.AppendLine($"<h3>{E(title)}</h3>");
+        html.AppendLine($"<span class=\"summary-value\">{E(rows.Sum(row => row.Count).ToString())}</span>");
+        html.AppendLine("<ol class=\"compact-list\">");
+        foreach (var row in rows)
+        {
+            html.AppendLine($"<li><span class=\"chip chip-info copyable\" data-copy=\"{A(row.Label)}\">{E(row.Label)}</span> <strong>{E(row.Count.ToString())}</strong></li>");
+        }
+
+        html.AppendLine("</ol>");
+        html.AppendLine("</article>");
     }
 
     /// <summary>
@@ -2687,6 +2781,13 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
         ("Raw events shown inline", "原始事件内联显示"),
         ("Open report.json or raw source artifacts for complete evidence.", "打开 report.json 或原始来源证据查看完整证据。"),
         ("Show inline raw events", "显示内联原始事件"),
+        ("Raw event distribution", "原始事件分布"),
+        ("Top event types", "主要事件类型"),
+        ("Event families", "事件族"),
+        ("Sources", "来源"),
+        ("Top evidence", "关键证据"),
+        ("evidence events", "条证据事件"),
+        ("more evidence events hidden in raw events/report.json", "条更多证据事件隐藏在原始事件/report.json 中"),
         ("hidden)", "隐藏)"),
         ("same directory as report.html/report.en.html/report.zh.html; job folder", "与 report.html/report.en.html/report.zh.html 位于同一目录；作业目录"),
         ("No raw source artifacts were indexed; report.json remains the complete normalized source.", "未索引原始来源证据；report.json 仍是完整的规范化来源。"),

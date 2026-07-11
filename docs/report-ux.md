@@ -15,6 +15,9 @@ Required `report.html`, `report.zh.html`, and `report.en.html` sections:
 - Table of contents / 目录.
 - Risk summary / 风险摘要 cards.
 - Behavior detections / 行为命中.
+  Each finding should show the evidence count plus a native `<details>` "Top
+  evidence" block with copyable high-signal events so analysts can understand a
+  rule hit without opening the full raw table first.
 - MITRE mapping / MITRE 映射.
 - Engine/rule hits.
 - Static analysis / 静态分析 with PE sections, URLs, strings, warnings, and tags.
@@ -44,6 +47,9 @@ Required `report.html`, `report.zh.html`, and `report.en.html` sections:
 - R0 / driver events.
 - Failure reasons / 失败原因.
 - Raw normalized events / 原始事件.
+  This section should remain collapsed and capped, but before the collapsed
+  table it should show a small "Raw event distribution" summary for top event
+  types, sources, and event families.
 
 
 ## Report renderer visual contract

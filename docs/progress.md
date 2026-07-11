@@ -18,7 +18,7 @@ a final HTML report.
 - Guest Agent dynamic collection: **74%**
 - R0 Driver + R0Collector: **63%**
 - Static analysis and behavior rules: **66%**
-- HTML report generation: **79%**
+- HTML report generation: **81%**
 - Artifact manifest and dropped-file plumbing: **75%**
 - Tests and quality gates: **75%**
 - Install/operations/security hardening: **32%**
@@ -105,6 +105,10 @@ a final HTML report.
   is collapsed in a bounded scroll panel, capped to the first 200 inline rows,
   and the report shows complete source hints for `report.json`, `events.json`,
   `driver-events.jsonl`, and artifact manifests.
+- Behavior detections now expose copyable native `<details>` "Top evidence"
+  blocks directly in each rule-hit row instead of forcing analysts to jump to
+  raw events first. Raw events also show a compact distribution summary for top
+  event types, sources, and event families before the collapsed raw table.
 - Behavior rules have been expanded to 206 rules with added coverage for
   persistence, service/task abuse, PowerShell/script launch, download-execute,
   process injection signals, credential/LSASS/browser-store access, lateral
