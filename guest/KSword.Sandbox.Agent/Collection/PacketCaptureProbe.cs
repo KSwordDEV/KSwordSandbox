@@ -115,6 +115,7 @@ internal sealed class PacketCaptureProbe : IGuestProbe
                 ["capturePhase"] = "before-start",
                 ["captureEnabled"] = "true",
                 ["implemented"] = "true",
+                ["capturePolicy"] = "explicit-opt-in-network-packet-capture",
                 ["collector"] = "pktmon",
                 ["captureTool"] = PktmonExecutable,
                 ["captureToolMode"] = "windows-pktmon-etw",
@@ -137,6 +138,7 @@ internal sealed class PacketCaptureProbe : IGuestProbe
                 ["conversionSourceFormat"] = "etl",
                 ["conversionTargetFormat"] = "pcapng",
                 ["artifactRelativePath"] = RelativeToOutput(context.OutputDirectory, session.PcapngPath),
+                ["artifactRelativePathStatus"] = "expected-pending-conversion",
                 ["sourceArtifactRelativePath"] = RelativeToOutput(context.OutputDirectory, session.PcapngPath),
                 ["packetCaptureRelativePath"] = RelativeToOutput(context.OutputDirectory, session.PcapngPath),
                 ["expectedRelativePath"] = $"{CollectionName}/*.pcapng",
@@ -196,6 +198,7 @@ internal sealed class PacketCaptureProbe : IGuestProbe
                 ["capturePhase"] = "after-run",
                 ["captureEnabled"] = "true",
                 ["implemented"] = "true",
+                ["capturePolicy"] = "explicit-opt-in-network-packet-capture",
                 ["collector"] = "pktmon",
                 ["captureTool"] = PktmonExecutable,
                 ["captureToolMode"] = "windows-pktmon-etw",
@@ -219,6 +222,7 @@ internal sealed class PacketCaptureProbe : IGuestProbe
                 ["conversionSourceFormat"] = "etl",
                 ["conversionTargetFormat"] = "pcapng",
                 ["artifactRelativePath"] = RelativeToOutput(context.OutputDirectory, session.PcapngPath),
+                ["artifactRelativePathStatus"] = "expected-pending-conversion",
                 ["sourceArtifactRelativePath"] = RelativeToOutput(context.OutputDirectory, session.PcapngPath),
                 ["packetCaptureRelativePath"] = RelativeToOutput(context.OutputDirectory, session.PcapngPath),
                 ["expectedRelativePath"] = $"{CollectionName}/*.pcapng",
@@ -267,6 +271,7 @@ internal sealed class PacketCaptureProbe : IGuestProbe
                 ["capturePhase"] = "after-run",
                 ["captureEnabled"] = "true",
                 ["implemented"] = "true",
+                ["capturePolicy"] = "explicit-opt-in-network-packet-capture",
                 ["collector"] = "pktmon",
                 ["captureTool"] = PktmonExecutable,
                 ["captureToolMode"] = "windows-pktmon-etw",
@@ -294,6 +299,7 @@ internal sealed class PacketCaptureProbe : IGuestProbe
                 ["captureStartedUtc"] = session.StartedAtUtc.ToString("O", CultureInfo.InvariantCulture),
                 ["captureStoppedUtc"] = DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture),
                 ["artifactRelativePath"] = RelativeToOutput(context.OutputDirectory, session.PcapngPath),
+                ["artifactRelativePathStatus"] = "captured",
                 ["sourceArtifactRelativePath"] = RelativeToOutput(context.OutputDirectory, session.PcapngPath),
                 ["packetCaptureRelativePath"] = RelativeToOutput(context.OutputDirectory, session.PcapngPath),
                 ["expectedRelativePath"] = $"{CollectionName}/*.pcapng",
@@ -346,6 +352,7 @@ internal sealed class PacketCaptureProbe : IGuestProbe
                 ["capturePhase"] = phase,
                 ["captureEnabled"] = "true",
                 ["implemented"] = implemented.ToString(CultureInfo.InvariantCulture).ToLowerInvariant(),
+                ["capturePolicy"] = "explicit-opt-in-network-packet-capture",
                 ["reason"] = reason,
                 ["zhMessage"] = "网络抓包采集被跳过；该事件说明证据缺口，不会中断整体分析。",
                 ["zhHint"] = PacketCaptureReasonZhHint(reason),
@@ -361,7 +368,12 @@ internal sealed class PacketCaptureProbe : IGuestProbe
                 ["captureState"] = "skipped",
                 ["status"] = "skipped",
                 ["nonfatal"] = "true",
-                ["expectedRelativePath"] = $"{CollectionName}/*.pcapng"
+                ["expectedRelativePath"] = $"{CollectionName}/*.pcapng",
+                ["artifactExists"] = "false",
+                ["artifactIntegrityState"] = "skipped",
+                ["artifactRelativePathStatus"] = session is null ? "not-created" : "expected-not-created",
+                ["sizeBytesStatus"] = "not-created",
+                ["sha256Status"] = "not-created"
             }
         };
         AddCaptureSourceToolData(evt.Data);
@@ -398,6 +410,7 @@ internal sealed class PacketCaptureProbe : IGuestProbe
                 ["capturePhase"] = "before-start",
                 ["captureEnabled"] = "false",
                 ["implemented"] = "true",
+                ["capturePolicy"] = "explicit-opt-in-network-packet-capture",
                 ["reason"] = "packetCaptureNotRequested",
                 ["zhMessage"] = "网络抓包采集未启用。",
                 ["zhHint"] = "未启用 --packet-capture/--pcap/--network-capture，Guest Agent 不会启动 pktmon 抓包。",
@@ -408,6 +421,11 @@ internal sealed class PacketCaptureProbe : IGuestProbe
                 ["status"] = "disabled",
                 ["nonfatal"] = "true",
                 ["expectedRelativePath"] = $"{CollectionName}/*.pcapng",
+                ["artifactExists"] = "false",
+                ["artifactIntegrityState"] = "disabled",
+                ["artifactRelativePathStatus"] = "disabled",
+                ["sizeBytesStatus"] = "disabled",
+                ["sha256Status"] = "disabled",
                 ["samplePath"] = context.SamplePath
             }
         };
@@ -438,6 +456,7 @@ internal sealed class PacketCaptureProbe : IGuestProbe
                 ["capturePhase"] = "after-run",
                 ["captureEnabled"] = "true",
                 ["implemented"] = "true",
+                ["capturePolicy"] = "explicit-opt-in-network-packet-capture",
                 ["collector"] = "pktmon",
                 ["captureTool"] = PktmonExecutable,
                 ["captureToolMode"] = "windows-pktmon-etw",
@@ -457,6 +476,7 @@ internal sealed class PacketCaptureProbe : IGuestProbe
                 ["pcapngRelativePath"] = RelativeToOutput(context.OutputDirectory, session.PcapngPath),
                 ["diagnosticRelativePath"] = RelativeToOutput(context.OutputDirectory, session.EtlPath),
                 ["artifactRelativePath"] = RelativeToOutput(context.OutputDirectory, session.PcapngPath),
+                ["artifactRelativePathStatus"] = "captured",
                 ["sourceArtifactRelativePath"] = RelativeToOutput(context.OutputDirectory, session.PcapngPath),
                 ["packetCaptureRelativePath"] = RelativeToOutput(context.OutputDirectory, session.PcapngPath),
                 ["expectedRelativePath"] = $"{CollectionName}/*.pcapng",
@@ -522,6 +542,7 @@ internal sealed class PacketCaptureProbe : IGuestProbe
                 ["capturePhase"] = phase,
                 ["captureEnabled"] = "true",
                 ["implemented"] = "true",
+                ["capturePolicy"] = "explicit-opt-in-network-packet-capture",
                 ["reason"] = reason,
                 ["zhMessage"] = "pktmon 命令失败，网络抓包通道未完整产出。",
                 ["zhHint"] = PacketCaptureReasonZhHint(reason),
@@ -544,6 +565,7 @@ internal sealed class PacketCaptureProbe : IGuestProbe
                 ["pcapngRelativePath"] = RelativeToOutput(context.OutputDirectory, session.PcapngPath),
                 ["diagnosticRelativePath"] = RelativeToOutput(context.OutputDirectory, session.EtlPath),
                 ["artifactRelativePath"] = RelativeToOutput(context.OutputDirectory, session.PcapngPath),
+                ["artifactRelativePathStatus"] = "expected-not-created",
                 ["sourceArtifactRelativePath"] = RelativeToOutput(context.OutputDirectory, session.PcapngPath),
                 ["packetCaptureRelativePath"] = RelativeToOutput(context.OutputDirectory, session.PcapngPath),
                 ["expectedRelativePath"] = $"{CollectionName}/*.pcapng",
@@ -620,6 +642,7 @@ internal sealed class PacketCaptureProbe : IGuestProbe
     private static void AddExpectedArtifactEvidence(Dictionary<string, string> data, string status)
     {
         AddIfNotEmpty(data, "artifactIntegrityState", status);
+        AddIfNotEmpty(data, "artifactRelativePathStatus", status);
         AddIfNotEmpty(data, "hashStatus", status);
         AddIfNotEmpty(data, "artifactHashStatus", status);
         AddIfNotEmpty(data, "sizeBytesStatus", status);
@@ -728,6 +751,8 @@ internal sealed class PacketCaptureProbe : IGuestProbe
             data["packetCountStatus"] = summary.Status;
             data["packetCountConfidence"] = summary.Status == "computed" ? "pcapng-block-scan" : "diagnostic";
             data["pcapngDiagnosticsAvailable"] = "true";
+            data["pcapngValidationStatus"] = summary.Status;
+            data["pcapngTruncated"] = (summary.Status == "partial-or-invalid").ToString(CultureInfo.InvariantCulture).ToLowerInvariant();
             data["pcapngByteOrder"] = summary.ByteOrder;
             if (summary.PacketCount is not null)
             {
@@ -745,6 +770,11 @@ internal sealed class PacketCaptureProbe : IGuestProbe
                 data["pcapngSectionHeaderCount"] = summary.SectionHeaderBlockCount.Value.ToString(CultureInfo.InvariantCulture);
             }
 
+            if (summary.InterfaceDescriptionBlockCount is not null)
+            {
+                data["pcapngInterfaceDescriptionBlockCount"] = summary.InterfaceDescriptionBlockCount.Value.ToString(CultureInfo.InvariantCulture);
+            }
+
             if (summary.EnhancedPacketBlockCount is not null)
             {
                 data["pcapngEnhancedPacketBlockCount"] = summary.EnhancedPacketBlockCount.Value.ToString(CultureInfo.InvariantCulture);
@@ -754,6 +784,13 @@ internal sealed class PacketCaptureProbe : IGuestProbe
             {
                 data["pcapngSimplePacketBlockCount"] = summary.SimplePacketBlockCount.Value.ToString(CultureInfo.InvariantCulture);
             }
+
+            var trafficObserved = summary.PacketCount is > 0;
+            data["trafficObserved"] = trafficObserved.ToString(CultureInfo.InvariantCulture).ToLowerInvariant();
+            data["emptyCapture"] = (summary.PacketCount == 0).ToString(CultureInfo.InvariantCulture).ToLowerInvariant();
+            data["packetCaptureQuality"] = summary.Status == "computed"
+                ? trafficObserved ? "packets-observed" : "valid-empty-pcapng"
+                : summary.Status;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException or PathTooLongException)
         {
@@ -771,14 +808,14 @@ internal sealed class PacketCaptureProbe : IGuestProbe
         Span<byte> header = stackalloc byte[12];
         if (stream.Read(header) != header.Length)
         {
-            return new PcapngPacketSummary(null, null, null, null, null, "unknown", "too-small");
+            return new PcapngPacketSummary(null, null, null, null, null, null, "unknown", "too-small");
         }
 
         var littleEndian = true;
         var firstBlockType = BinaryPrimitives.ReadUInt32LittleEndian(header[..4]);
         if (firstBlockType != 0x0A0D0D0A)
         {
-            return new PcapngPacketSummary(null, null, null, null, null, "unknown", "not-pcapng");
+            return new PcapngPacketSummary(null, null, null, null, null, null, "unknown", "not-pcapng");
         }
 
         var byteOrderMagic = BinaryPrimitives.ReadUInt32LittleEndian(header[8..12]);
@@ -790,12 +827,13 @@ internal sealed class PacketCaptureProbe : IGuestProbe
         }
         else if (byteOrderMagic != 0x1A2B3C4D)
         {
-            return new PcapngPacketSummary(null, null, null, null, null, "unknown", "unknown-byte-order");
+            return new PcapngPacketSummary(null, null, null, null, null, null, "unknown", "unknown-byte-order");
         }
 
         stream.Position = 0;
         var blockCount = 0L;
         var sectionHeaderBlocks = 0L;
+        var interfaceDescriptionBlocks = 0L;
         var enhancedPacketBlocks = 0L;
         var simplePacketBlocks = 0L;
         Span<byte> blockHeader = stackalloc byte[8];
@@ -805,13 +843,17 @@ internal sealed class PacketCaptureProbe : IGuestProbe
             var blockLength = ReadUInt32(blockHeader[4..8], littleEndian);
             if (blockLength < 12 || blockLength > int.MaxValue || stream.Position - 8 + blockLength > stream.Length)
             {
-                return new PcapngPacketSummary(enhancedPacketBlocks + simplePacketBlocks, blockCount, sectionHeaderBlocks, enhancedPacketBlocks, simplePacketBlocks, byteOrder, "partial-or-invalid");
+                return new PcapngPacketSummary(enhancedPacketBlocks + simplePacketBlocks, blockCount, sectionHeaderBlocks, interfaceDescriptionBlocks, enhancedPacketBlocks, simplePacketBlocks, byteOrder, "partial-or-invalid");
             }
 
             blockCount++;
             if (blockType == 0x0A0D0D0A)
             {
                 sectionHeaderBlocks++;
+            }
+            else if (blockType == 0x00000001)
+            {
+                interfaceDescriptionBlocks++;
             }
             else if (blockType == 0x00000006)
             {
@@ -825,7 +867,7 @@ internal sealed class PacketCaptureProbe : IGuestProbe
             stream.Position += blockLength - 8;
         }
 
-        return new PcapngPacketSummary(enhancedPacketBlocks + simplePacketBlocks, blockCount, sectionHeaderBlocks, enhancedPacketBlocks, simplePacketBlocks, byteOrder, "computed");
+        return new PcapngPacketSummary(enhancedPacketBlocks + simplePacketBlocks, blockCount, sectionHeaderBlocks, interfaceDescriptionBlocks, enhancedPacketBlocks, simplePacketBlocks, byteOrder, "computed");
     }
 
     private static uint ReadUInt32(ReadOnlySpan<byte> value, bool littleEndian)
@@ -933,6 +975,7 @@ internal sealed class PacketCaptureProbe : IGuestProbe
         long? PacketCount,
         long? BlockCount,
         long? SectionHeaderBlockCount,
+        long? InterfaceDescriptionBlockCount,
         long? EnhancedPacketBlockCount,
         long? SimplePacketBlockCount,
         string ByteOrder,

@@ -3,6 +3,28 @@
 R0Collector writes newline-delimited JSON. Each line is one `SandboxEvent`-
 compatible object and is safe to merge with Guest Agent `events.json`.
 
+中文优先判读规则：
+
+- **JSONL 字段是 evidence labels，不是 verdicts。** `eventType`、`producerCategory`、
+  `subjectKind`、`operationName`、`serviceHint`、`dnsCandidate`、
+  `httpCandidate`、`tlsCandidate`、`lost`、`backpressure`、`noise` 等字段描述“采集到的事实
+  或归因标签”。它们不能单独等同于 malicious/benign、blocked/allowed、成功入侵或安全放行。
+- **ABI 字段只说明兼容性和解析形状。** `version`、`versionHex`、`abiVersionMajor`、
+  `abiVersionMinor`、`recordSize`、`payloadSize`、reply sizes、capability flags 和
+  producer masks 用于证明 collector/driver 如何解析同一 wire contract；除非该行来自 live
+  IOCTL，否则它们也不证明 driver 已加载。
+- **noise/self-noise 是采集噪声归因。** `noise=true`、`selfNoise=true`、
+  `collectorSelfNoise=true` 或 `collectorSuppressedEvents` 只说明行匹配了测试噪声、
+  KSword infrastructure path、collector PID/output path 等条件。默认抑制是降噪策略，不是
+  信任判定。
+- **backpressure/loss 是队列证据。** `backpressure`、`backpressureObserved`、
+  `backpressureReason`、`lost`、`lostCount`、`lossObserved`、sequence gaps 和 high watermark
+  表示 non-blocking ring 的压力或丢失；它们不表示 kernel 阻断或修改了样本行为。
+- **DNS/HTTP/TLS payload facts 来自 PCAP import。** R0 `driver.network` 的
+  `serviceHint` / candidate booleans 是 port/protocol 关联标签；DNS query、HTTP
+  method/host/URI、TLS SNI/certificate 和 packet details 应来自 `pcap.flow`、
+  `pcap.dns`、`pcap.http`、`pcap.tls` 等 payload-derived rows。
+
 ## Top-level object
 
 Required fields, emitted in stable order:
@@ -142,6 +164,10 @@ Common attribution fields are additive and string-valued:
   suppression before policy was applied; emitted mock/schema rows keep it
   `false`.
 
+这些 attribution/self-noise fields 只用于解释“谁产生了这条证据、它是否来自 KSword
+基础设施、是否被默认策略抑制”。Report 和 rules 可以把它们作为过滤或降权依据，但不能把任一
+单个标签解释为最终行为 verdict。
+
 Stable event-quality aliases are present across live, mock, stress, and schema
 smoke rows:
 
@@ -159,6 +185,10 @@ smoke rows:
 - `processed`, `eligible`, `emitted`, `suppressed`, `skipped`, `head`, `tail`,
   and `sampling`: compact `r0collector.driverReadEvents` aliases used by
   report sampling and large-stream smoke tests.
+
+中文：event-quality aliases 的目标是让 import/report 在 JSONL 很大、存在 injected
+noise、队列溢出或 collector-side sampling 时仍能追溯证据完整性。它们是质量/压力标签，
+不是样本是否恶意、连接是否被允许、文件是否成功落地的结论。
 
 Negotiation and queue rows must preserve these event-quality keys:
 
@@ -226,6 +256,13 @@ driver payload ABI provides them. File payloads also expose `pathNormalized` and
 `pathFallback` when the driver reports FltMgr-normalized or fallback path
 provenance. Driver rows prefer typed payload PIDs over callback-context header
 PIDs when the public payload carries a subject process ID.
+
+Network typed fields follow the same evidence-label rule. `serviceHint`,
+`semanticCandidate`, `dnsCandidate`, `httpCandidate`, and `tlsCandidate` are
+collector-derived correlation labels; protocol facts that require payload
+parsing remain in PCAP-derived rows. A `tlsCandidate=true` row on TCP/443, for
+example, does not by itself assert SNI, certificate details, successful TLS
+handshake, or maliciousness.
 
 ## Synthetic/self-test rows
 
@@ -336,4 +373,5 @@ Backpressure is represented as evidence, not as kernel blocking. When the ring
 overflows, the driver preserves loss through `TotalEventsDropped`,
 `EventsDropped`, `NextSequence`, and sequence gaps. Host report import must keep
 malformed JSONL as `driver.parse_error` evidence; live views may skip or defer
-partial rows while continuing to display valid collector rows.
+partial rows while continuing to display valid collector rows. 中文：这些 parse-error、
+loss、noise 和 backpressure rows 是“证据质量/采集状态”记录，不应被 rules 当成样本行为本身。

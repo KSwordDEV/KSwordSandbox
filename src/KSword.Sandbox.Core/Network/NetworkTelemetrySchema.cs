@@ -104,6 +104,7 @@ public static class NetworkTelemetrySchema
             }
         }
 
+        ApplyProtocolSpecificNormalization(data);
         ApplyHealthAndLocalization(data);
         return data;
     }
@@ -310,6 +311,210 @@ public static class NetworkTelemetrySchema
         };
     }
 
+    public static string NormalizeDnsName(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        var normalized = value.Trim().Trim('"', '\'').TrimEnd('.');
+        if (string.Equals(normalized, "<root>", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(normalized, "(empty)", StringComparison.OrdinalIgnoreCase))
+        {
+            return string.Empty;
+        }
+
+        return normalized.ToLowerInvariant();
+    }
+
+    public static string NormalizeDnsRecordType(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        var trimmed = value.Trim().Trim('"', '\'');
+        if (trimmed.StartsWith("0x", StringComparison.OrdinalIgnoreCase) &&
+            int.TryParse(trimmed[2..], NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var hexCode))
+        {
+            return DnsRecordTypeName(hexCode);
+        }
+
+        return int.TryParse(trimmed, NumberStyles.Integer, CultureInfo.InvariantCulture, out var code)
+            ? DnsRecordTypeName(code)
+            : trimmed.ToUpperInvariant();
+    }
+
+    public static string NormalizeDnsRCode(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        var trimmed = value.Trim().Trim('"', '\'');
+        if (trimmed.StartsWith("0x", StringComparison.OrdinalIgnoreCase) &&
+            int.TryParse(trimmed[2..], NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var hexCode))
+        {
+            return DnsRCodeName(hexCode);
+        }
+
+        return int.TryParse(trimmed, NumberStyles.Integer, CultureInfo.InvariantCulture, out var code)
+            ? DnsRCodeName(code)
+            : trimmed.Replace(' ', '_').Replace('-', '_').ToUpperInvariant();
+    }
+
+    public static string NormalizeDnsAnswerList(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        var answers = value
+            .Split(new[] { ',', ';', '|', ' ' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(answer => NormalizeDnsAnswer(answer))
+            .Where(answer => !string.IsNullOrWhiteSpace(answer))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(32)
+            .ToArray();
+        return answers.Length == 0 ? string.Empty : string.Join(",", answers);
+    }
+
+    public static string NormalizeHttpMethod(string? value)
+    {
+        return string.IsNullOrWhiteSpace(value)
+            ? string.Empty
+            : value.Trim().Trim('"', '\'').ToUpperInvariant();
+    }
+
+    public static string NormalizeHttpScheme(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        var normalized = value.Trim().Trim('"', '\'').ToLowerInvariant();
+        if (normalized is "http" or "https")
+        {
+            return normalized;
+        }
+
+        if (normalized.Contains("https", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Contains("tls", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Contains("ssl", StringComparison.OrdinalIgnoreCase))
+        {
+            return "https";
+        }
+
+        if (normalized.Contains("http", StringComparison.OrdinalIgnoreCase))
+        {
+            return "http";
+        }
+
+        return string.Empty;
+    }
+
+    public static string NormalizeHttpHost(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        var trimmed = value.Trim().Trim('"', '\'');
+        if (Uri.TryCreate($"http://{trimmed}", UriKind.Absolute, out var parsed) &&
+            !string.IsNullOrWhiteSpace(parsed.Host))
+        {
+            var host = parsed.Host.TrimEnd('.').ToLowerInvariant();
+            if (host.Contains(':', StringComparison.Ordinal) && !host.StartsWith("[", StringComparison.Ordinal))
+            {
+                host = $"[{host}]";
+            }
+
+            return parsed.IsDefaultPort ? host : $"{host}:{parsed.Port.ToString(CultureInfo.InvariantCulture)}";
+        }
+
+        return trimmed.TrimEnd('.').ToLowerInvariant();
+    }
+
+    public static string NormalizeHttpUri(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        var trimmed = value.Trim().Trim('"', '\'');
+        if (Uri.TryCreate(trimmed, UriKind.Absolute, out var absolute))
+        {
+            return string.IsNullOrWhiteSpace(absolute.PathAndQuery) ? "/" : absolute.PathAndQuery;
+        }
+
+        if (trimmed == "*" || trimmed.StartsWith("/", StringComparison.Ordinal) || trimmed.StartsWith("?", StringComparison.Ordinal))
+        {
+            return trimmed;
+        }
+
+        return "/" + trimmed.TrimStart('/');
+    }
+
+    public static string NormalizeTlsVersion(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        var trimmed = value.Trim().Trim('"', '\'');
+        var compact = trimmed.Replace(" ", string.Empty, StringComparison.Ordinal).Replace("_", string.Empty, StringComparison.Ordinal);
+        if (compact.StartsWith("0x", StringComparison.OrdinalIgnoreCase) &&
+            int.TryParse(compact[2..], NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var hexVersion))
+        {
+            return TlsVersionName(hexVersion, trimmed);
+        }
+
+        if (int.TryParse(compact, NumberStyles.Integer, CultureInfo.InvariantCulture, out var numericVersion))
+        {
+            return TlsVersionName(numericVersion, trimmed);
+        }
+
+        return compact.ToUpperInvariant() switch
+        {
+            "TLS1.0" or "TLSV1.0" => "TLS 1.0",
+            "TLS1.1" or "TLSV1.1" => "TLS 1.1",
+            "TLS1.2" or "TLSV1.2" => "TLS 1.2",
+            "TLS1.3" or "TLSV1.3" => "TLS 1.3",
+            "SSL3.0" or "SSLV3.0" => "SSL 3.0",
+            _ => trimmed
+        };
+    }
+
+    public static string NormalizeTlsHandshakeType(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        var trimmed = value.Trim().Trim('"', '\'');
+        if (trimmed.StartsWith("handshake_", StringComparison.OrdinalIgnoreCase) &&
+            int.TryParse(trimmed["handshake_".Length..], NumberStyles.Integer, CultureInfo.InvariantCulture, out var prefixed))
+        {
+            return TlsHandshakeName(prefixed);
+        }
+
+        if (int.TryParse(trimmed, NumberStyles.Integer, CultureInfo.InvariantCulture, out var code))
+        {
+            return TlsHandshakeName(code);
+        }
+
+        return trimmed.Replace(' ', '_').Replace('-', '_').ToLowerInvariant();
+    }
+
     public static string ServiceHint(string eventKind, string protocol, int? sourcePort, int? destinationPort)
     {
         if (string.Equals(eventKind, "dns", StringComparison.OrdinalIgnoreCase) ||
@@ -414,6 +619,326 @@ public static class NetworkTelemetrySchema
         {
             data[key] = port.Value.ToString(CultureInfo.InvariantCulture);
         }
+    }
+
+    private static void ApplyProtocolSpecificNormalization(Dictionary<string, string> data)
+    {
+        var eventKind = ValueOrEmpty(data, "eventKind");
+        if (string.Equals(eventKind, "dns", StringComparison.OrdinalIgnoreCase) ||
+            HasAnyDataValue(data, "queryName", "qname", "dnsQueryName", "domain", "rcode", "answers"))
+        {
+            ApplyDnsNormalization(data);
+        }
+
+        if (string.Equals(eventKind, "http", StringComparison.OrdinalIgnoreCase) ||
+            HasAnyDataValue(data, "method", "httpMethod", "url", "host", "requestUri", "statusCode"))
+        {
+            ApplyHttpNormalization(data);
+        }
+
+        if (string.Equals(eventKind, "tls", StringComparison.OrdinalIgnoreCase) ||
+            HasAnyDataValue(data, "sni", "serverName", "tlsVersion", "ja3", "certificateStatus", "certSubject"))
+        {
+            ApplyTlsNormalization(data);
+        }
+    }
+
+    private static void ApplyDnsNormalization(Dictionary<string, string> data)
+    {
+        var queryName = NormalizeDnsName(FirstDataValue(data, "queryName", "qname", "dnsQueryName", "domain"));
+        if (!string.IsNullOrWhiteSpace(queryName))
+        {
+            data["queryName"] = queryName;
+            data["qname"] = queryName;
+            data["domain"] = queryName;
+            data["dnsQueryName"] = queryName;
+            data["queryNameNormalized"] = queryName;
+            data["domainNormalized"] = queryName;
+        }
+
+        var queryType = NormalizeDnsRecordType(FirstDataValue(data, "queryType", "recordType", "dnsRecordType", "qtype"));
+        if (!string.IsNullOrWhiteSpace(queryType))
+        {
+            data["queryType"] = queryType;
+            data["recordType"] = queryType;
+            data["dnsRecordType"] = queryType;
+        }
+
+        var rcode = NormalizeDnsRCode(FirstDataValue(data, "rcode", "rcodeName", "responseCode", "dnsRcode"));
+        if (!string.IsNullOrWhiteSpace(rcode))
+        {
+            data["rcode"] = rcode;
+            data["rcodeName"] = rcode;
+            data["responseCode"] = rcode;
+            data["dnsRcode"] = rcode;
+        }
+
+        var answers = NormalizeDnsAnswerList(FirstDataValue(data, "answers", "answer", "resolvedIps", "dnsAnswers"));
+        if (!string.IsNullOrWhiteSpace(answers))
+        {
+            data["answer"] = answers;
+            data["answers"] = answers;
+            data["resolvedIps"] = answers;
+            data["dnsAnswers"] = answers;
+            AddIfNotEmpty(data, "answerCount", CountDelimitedValues(answers));
+        }
+
+        if (string.Equals(rcode, "NXDOMAIN", StringComparison.OrdinalIgnoreCase))
+        {
+            data["classification"] = "nxdomain";
+            data["dnsOutcome"] = "negative";
+            data["isNxDomain"] = "true";
+            AddIfNotEmpty(data, "zhHint", "DNS 返回 NXDOMAIN；若短时间大量出现，优先关联 DGA、探测域名或 C2 备用域。");
+        }
+        else if (rcode is "SERVFAIL" or "REFUSED")
+        {
+            AddIfNotEmpty(data, "dnsOutcome", "negative");
+        }
+        else if (!string.IsNullOrWhiteSpace(answers))
+        {
+            data["dnsOutcome"] = "answered";
+        }
+    }
+
+    private static void ApplyHttpNormalization(Dictionary<string, string> data)
+    {
+        var method = NormalizeHttpMethod(FirstDataValue(data, "method", "httpMethod"));
+        if (!string.IsNullOrWhiteSpace(method))
+        {
+            data["method"] = method;
+            data["httpMethod"] = method;
+        }
+
+        var url = FirstDataValue(data, "url", "requestUrl", "httpUrl");
+        var scheme = NormalizeHttpScheme(FirstDataValue(data, "scheme", "httpScheme"));
+        var host = NormalizeHttpHost(FirstDataValue(data, "host", "hostname", "httpHost"));
+        var uri = NormalizeHttpUri(FirstDataValue(data, "uri", "requestUri", "path"));
+
+        var hasAbsoluteUrl = Uri.TryCreate(url, UriKind.Absolute, out var parsedUrl);
+        if (hasAbsoluteUrl && parsedUrl is not null)
+        {
+            scheme = NormalizeHttpScheme(parsedUrl.Scheme);
+            if (string.IsNullOrWhiteSpace(host))
+            {
+                host = NormalizeHttpHost(parsedUrl.Authority);
+            }
+
+            if (string.IsNullOrWhiteSpace(uri))
+            {
+                uri = string.IsNullOrWhiteSpace(parsedUrl.PathAndQuery) ? "/" : parsedUrl.PathAndQuery;
+            }
+        }
+        else if (!string.IsNullOrWhiteSpace(url) && string.IsNullOrWhiteSpace(uri))
+        {
+            uri = NormalizeHttpUri(url);
+        }
+
+        if (string.IsNullOrWhiteSpace(scheme))
+        {
+            scheme = InferHttpSchemeFromPorts(data);
+        }
+
+        if (!string.IsNullOrWhiteSpace(host))
+        {
+            data["host"] = host;
+            data["hostname"] = host;
+            data["httpHost"] = host;
+            data["hostNormalized"] = host;
+        }
+
+        if (!string.IsNullOrWhiteSpace(uri))
+        {
+            data["uri"] = uri;
+            data["requestUri"] = uri;
+            data["path"] = uri;
+        }
+
+        AddIfNotEmpty(data, "scheme", scheme);
+        AddIfNotEmpty(data, "httpScheme", scheme);
+        if (!hasAbsoluteUrl && !string.IsNullOrWhiteSpace(host))
+        {
+            data["url"] = $"{(string.IsNullOrWhiteSpace(scheme) ? "http" : scheme)}://{FormatHttpAuthority(host)}{(string.IsNullOrWhiteSpace(uri) ? "/" : uri)}";
+        }
+        else if (hasAbsoluteUrl)
+        {
+            data["url"] = url.Trim();
+        }
+    }
+
+    private static void ApplyTlsNormalization(Dictionary<string, string> data)
+    {
+        var sni = NormalizeDnsName(FirstDataValue(data, "sni", "serverName", "tlsServerName"));
+        if (!string.IsNullOrWhiteSpace(sni))
+        {
+            data["sni"] = sni;
+            data["serverName"] = sni;
+            data["tlsServerName"] = sni;
+            data["sniNormalized"] = sni;
+        }
+
+        var tlsVersion = NormalizeTlsVersion(FirstDataValue(data, "tlsVersion", "version"));
+        AddIfNotEmpty(data, "tlsVersion", tlsVersion);
+        var handshakeType = NormalizeTlsHandshakeType(FirstDataValue(data, "handshakeType", "tlsHandshakeType"));
+        if (!string.IsNullOrWhiteSpace(handshakeType))
+        {
+            data["handshakeType"] = handshakeType;
+            data["tlsHandshakeType"] = handshakeType;
+        }
+
+        if (IsSuspiciousCertificate(data))
+        {
+            AddIfNotEmpty(data, "tlsCertificateRisk", "suspicious");
+            AddIfNotEmpty(data, "zhHint", "TLS 证书状态异常或自签名；请结合 SNI、JA3/JA3S、目标 IP 和 VT/情报结果复核。");
+        }
+    }
+
+    private static bool HasAnyDataValue(IReadOnlyDictionary<string, string> data, params string[] keys)
+    {
+        return keys.Any(key => !string.IsNullOrWhiteSpace(ValueOrEmpty(data, key)));
+    }
+
+    private static string NormalizeDnsAnswer(string value)
+    {
+        var trimmed = value.Trim().Trim('"', '\'').TrimEnd('.');
+        if (string.IsNullOrWhiteSpace(trimmed))
+        {
+            return string.Empty;
+        }
+
+        if (trimmed.StartsWith("name:", StringComparison.OrdinalIgnoreCase) ||
+            trimmed.StartsWith("addr:", StringComparison.OrdinalIgnoreCase))
+        {
+            trimmed = trimmed[(trimmed.IndexOf(':', StringComparison.Ordinal) + 1)..].Trim();
+        }
+
+        return trimmed.Contains(':', StringComparison.Ordinal) ||
+            trimmed.All(character => char.IsDigit(character) || character == '.')
+                ? trimmed.ToLowerInvariant()
+                : NormalizeDnsName(trimmed);
+    }
+
+    private static string? CountDelimitedValues(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        var count = value.Split(new[] { ',', ';', '|', ' ' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Length;
+        return count > 0 ? count.ToString(CultureInfo.InvariantCulture) : null;
+    }
+
+    private static string DnsRecordTypeName(int code)
+    {
+        return code switch
+        {
+            1 => "A",
+            2 => "NS",
+            5 => "CNAME",
+            6 => "SOA",
+            12 => "PTR",
+            15 => "MX",
+            16 => "TXT",
+            28 => "AAAA",
+            33 => "SRV",
+            65 => "HTTPS",
+            255 => "ANY",
+            _ => code.ToString(CultureInfo.InvariantCulture)
+        };
+    }
+
+    private static string DnsRCodeName(int code)
+    {
+        return code switch
+        {
+            0 => "NOERROR",
+            1 => "FORMERR",
+            2 => "SERVFAIL",
+            3 => "NXDOMAIN",
+            4 => "NOTIMP",
+            5 => "REFUSED",
+            9 => "NOTAUTH",
+            10 => "NOTZONE",
+            _ => code.ToString(CultureInfo.InvariantCulture)
+        };
+    }
+
+    private static string InferHttpSchemeFromPorts(IReadOnlyDictionary<string, string> data)
+    {
+        var destinationPort = ParsePort(FirstDataValue(data, "destinationPort", "dstPort", "destPort", "serverPort", "remotePort"));
+        var sourcePort = ParsePort(FirstDataValue(data, "sourcePort", "srcPort", "clientPort", "localPort"));
+        return destinationPort is 443 or 8443 || sourcePort is 443 or 8443
+            ? "https"
+            : "http";
+    }
+
+    private static string FormatHttpAuthority(string host)
+    {
+        if (string.IsNullOrWhiteSpace(host))
+        {
+            return string.Empty;
+        }
+
+        var trimmed = host.Trim();
+        if (trimmed.StartsWith("[", StringComparison.Ordinal) || !trimmed.Contains(':', StringComparison.Ordinal))
+        {
+            return trimmed;
+        }
+
+        if (trimmed.Count(character => character == ':') > 1)
+        {
+            return $"[{trimmed}]";
+        }
+
+        return trimmed;
+    }
+
+    private static bool IsSuspiciousCertificate(IReadOnlyDictionary<string, string> data)
+    {
+        var certificateStatus = FirstDataValue(data, "tlsCertificateRisk", "certificateStatus", "validationStatus");
+        if (certificateStatus.Contains("invalid", StringComparison.OrdinalIgnoreCase) ||
+            certificateStatus.Contains("self", StringComparison.OrdinalIgnoreCase) ||
+            certificateStatus.Contains("expired", StringComparison.OrdinalIgnoreCase) ||
+            certificateStatus.Contains("parse_error", StringComparison.OrdinalIgnoreCase) ||
+            certificateStatus.Contains("untrusted", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return string.Equals(FirstDataValue(data, "certSelfSigned", "selfSigned"), "true", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(FirstDataValue(data, "certExpired"), "true", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string TlsVersionName(int version, string fallback)
+    {
+        return version switch
+        {
+            0x0300 => "SSL 3.0",
+            0x0301 => "TLS 1.0",
+            0x0302 => "TLS 1.1",
+            0x0303 => "TLS 1.2",
+            0x0304 => "TLS 1.3",
+            _ => fallback
+        };
+    }
+
+    private static string TlsHandshakeName(int code)
+    {
+        return code switch
+        {
+            1 => "client_hello",
+            2 => "server_hello",
+            4 => "new_session_ticket",
+            8 => "encrypted_extensions",
+            11 => "certificate",
+            12 => "server_key_exchange",
+            13 => "certificate_request",
+            14 => "server_hello_done",
+            15 => "certificate_verify",
+            16 => "client_key_exchange",
+            20 => "finished",
+            _ => $"handshake_{code.ToString(CultureInfo.InvariantCulture)}"
+        };
     }
 
     private static string NormalizeAddress(string? address)
@@ -531,30 +1056,34 @@ public static class NetworkTelemetrySchema
                 extra.TryGetValue("queryName", out var queryName) &&
                 !string.IsNullOrWhiteSpace(queryName))
             {
-                return queryName;
+                return NormalizeDnsName(queryName);
             }
 
             if (string.Equals(eventKind, "http", StringComparison.OrdinalIgnoreCase))
             {
-                var host = ValueOrEmpty(extra, "host");
-                var uri = ValueOrEmpty(extra, "uri");
-                if (string.IsNullOrWhiteSpace(uri))
+                var url = ValueOrEmpty(extra, "url");
+                if (Uri.TryCreate(url, UriKind.Absolute, out _))
                 {
-                    uri = ValueOrEmpty(extra, "requestUri");
+                    return url.Trim();
                 }
+
+                var host = NormalizeHttpHost(FirstNonEmpty(ValueOrEmpty(extra, "host"), ValueOrEmpty(extra, "hostname"), ValueOrEmpty(extra, "httpHost")));
+                var uri = NormalizeHttpUri(FirstNonEmpty(ValueOrEmpty(extra, "uri"), ValueOrEmpty(extra, "requestUri"), ValueOrEmpty(extra, "path")));
+                var scheme = NormalizeHttpScheme(FirstNonEmpty(ValueOrEmpty(extra, "scheme"), ValueOrEmpty(extra, "httpScheme")));
+                if (string.IsNullOrWhiteSpace(scheme) && destinationPort is 443 or 8443)
+                {
+                    scheme = "https";
+                }
+
                 if (!string.IsNullOrWhiteSpace(host))
                 {
-                    return $"http://{host}{(string.IsNullOrWhiteSpace(uri) ? "/" : uri)}";
+                    return $"{(string.IsNullOrWhiteSpace(scheme) ? "http" : scheme)}://{FormatHttpAuthority(host)}{(string.IsNullOrWhiteSpace(uri) ? "/" : uri)}";
                 }
             }
 
             if (string.Equals(eventKind, "tls", StringComparison.OrdinalIgnoreCase))
             {
-                var sni = ValueOrEmpty(extra, "sni");
-                if (string.IsNullOrWhiteSpace(sni))
-                {
-                    sni = ValueOrEmpty(extra, "serverName");
-                }
+                var sni = NormalizeDnsName(FirstNonEmpty(ValueOrEmpty(extra, "sni"), ValueOrEmpty(extra, "serverName"), ValueOrEmpty(extra, "tlsServerName")));
                 if (!string.IsNullOrWhiteSpace(sni))
                 {
                     return $"tls://{sni}";
@@ -604,6 +1133,19 @@ public static class NetworkTelemetrySchema
             if (string.Equals(pair.Key, key, StringComparison.OrdinalIgnoreCase))
             {
                 return pair.Value;
+            }
+        }
+
+        return string.Empty;
+    }
+
+    private static string FirstNonEmpty(params string?[] values)
+    {
+        foreach (var value in values)
+        {
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                return value;
             }
         }
 

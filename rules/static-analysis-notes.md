@@ -105,6 +105,35 @@ triage events, not as observed guest behavior.
   severity by itself. These fields mean the static string/import surface has
   enough structure for analyst attention; runtime command, process, file, R0,
   or network evidence should provide the confirming behavior.
+- The release-prep rules `static-granular-download-exec-capability`,
+  `static-granular-injection-capability`, and
+  `static-granular-anti-debug-capability` consume structured `static.*` rows
+  directly (`downloadExecCandidate`, `hasProcessInjectionApi`,
+  `antiDebugCandidate`, `hasAntiDebugApi`, `primaryCapability`,
+  `behaviorFamily`, and `ruleKey`). Keep these static-only rules at low or
+  medium severity and low confidence; the corresponding high-confidence
+  behavior rules require process, file, R0, HTTP/TLS/PCAP, or command-line
+  evidence.
+
+## R0 semantic field handoff
+
+The R0Collector can emit parsed semantic fields that behavior rules should
+prefer over brittle raw-string matches when available:
+
+- Registry rows: `persistenceFamily`, `servicePersistenceCandidate`, and
+  `ifeoPersistenceCandidate`.
+- File rows: `dropLocationFamily` and `droppedFileCandidate`.
+- Image rows: `imageLoadFamily` and `injectionCandidate`.
+- Network rows: `networkEvidenceKind`, `lateralMovementCandidate`, and
+  `downloadExecuteCandidate`.
+
+These R0 fields are evidence shorthands, not final verdicts. R0-facing rules
+should still include `evidenceFields` and explicit self-noise/health guards
+such as `noise`, `selfNoise`, `collectorSelfNoise`, `collectorNoise`,
+`healthStatus`, `vtStatus`, and sandbox-agent/collector process exclusions.
+Do not globally exclude `source=r0collector` in rules whose purpose is to
+consume parsed R0 rows; instead, require the semantic fields and suppress known
+collector-health or self-noise markers.
 
 The built-in YARA-like matcher intentionally supports only the small subset
 used by `rules/static-notes.yar`: literal/regex strings, `ascii`, `wide`,

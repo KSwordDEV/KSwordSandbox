@@ -1,6 +1,6 @@
 {
   "matrix": "enterprise-windows",
-  "version": "2026-07-12-v17-mvp-gap-rules",
+  "version": "2026-07-12-v18-release-prep-guards",
   "techniques": [
     {
       "id": "T1003",
@@ -136,6 +136,13 @@
       "categories": [
         "execution",
         "lateral-movement"
+      ]
+    },
+    {
+      "id": "T1048.003",
+      "name": "Exfiltration Over Unencrypted Non-C2 Protocol",
+      "categories": [
+        "exfiltration"
       ]
     },
     {
@@ -550,6 +557,14 @@
       ]
     },
     {
+      "id": "T1546.003",
+      "name": "Windows Management Instrumentation Event Subscription",
+      "categories": [
+        "persistence",
+        "privilege-escalation"
+      ]
+    },
+    {
       "id": "T1546.008",
       "name": "Accessibility Features",
       "categories": [
@@ -560,6 +575,14 @@
     {
       "id": "T1546.009",
       "name": "AppCert DLLs",
+      "categories": [
+        "persistence",
+        "privilege-escalation"
+      ]
+    },
+    {
+      "id": "T1546.010",
+      "name": "AppInit DLLs",
       "categories": [
         "persistence",
         "privilege-escalation"
@@ -590,6 +613,14 @@
       ]
     },
     {
+      "id": "T1546.015",
+      "name": "Component Object Model Hijacking",
+      "categories": [
+        "persistence",
+        "privilege-escalation"
+      ]
+    },
+    {
       "id": "T1547.001",
       "name": "Registry Run Keys / Startup Folder",
       "categories": [
@@ -598,8 +629,32 @@
       ]
     },
     {
+      "id": "T1547.002",
+      "name": "Authentication Package",
+      "categories": [
+        "persistence",
+        "privilege-escalation"
+      ]
+    },
+    {
+      "id": "T1547.003",
+      "name": "Time Providers",
+      "categories": [
+        "persistence",
+        "privilege-escalation"
+      ]
+    },
+    {
       "id": "T1547.004",
       "name": "Winlogon Helper DLL",
+      "categories": [
+        "persistence",
+        "privilege-escalation"
+      ]
+    },
+    {
+      "id": "T1547.010",
+      "name": "Port Monitors",
       "categories": [
         "persistence",
         "privilege-escalation"
@@ -692,6 +747,13 @@
       ]
     },
     {
+      "id": "T1568.002",
+      "name": "Domain Generation Algorithms",
+      "categories": [
+        "command-and-control"
+      ]
+    },
+    {
       "id": "T1569.002",
       "name": "Service Execution",
       "categories": [
@@ -716,6 +778,13 @@
     {
       "id": "T1573",
       "name": "Encrypted Channel",
+      "categories": [
+        "command-and-control"
+      ]
+    },
+    {
+      "id": "T1573.002",
+      "name": "Asymmetric Cryptography",
       "categories": [
         "command-and-control"
       ]

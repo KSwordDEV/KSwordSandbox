@@ -9,9 +9,11 @@
     "noNetworkPublishByPackageScript": true,
     "noGitPushByPackageScript": true,
     "noDriverSigningByPackageScript": true,
+    "guiSigningFallback": "forbidden",
     "legacyCSignToolDefaultPath": "forbidden",
+    "completeRuntimePayloadsRequiredForHandoff": true,
     "runtimePayloadSource": "external RuntimePublishRoot only; repository bin/obj/x64 binaries are rejected",
-    "operatorDiagnostics": "install/run expose read-only Hyper-V prerequisite, VM profile, guest payload, VT key, runtime-root, and RuntimePublishRoot guidance; optional runtime publish entries are recorded in package-manifest.generated.json when skipped"
+    "operatorDiagnostics": "install/run expose read-only Hyper-V prerequisite, VM profile, guest payload, VT key, runtime-root, and RuntimePublishRoot guidance; optional runtime publish entries are recorded in package-manifest.generated.json when skipped for layout dry-runs, while handoff uses -RequireCompleteRuntimePayloads; package/readiness do not use GUI signing fallback or CSignTool"
   },
   "stagedMetadata": {
     "generatedManifest": "package-manifest.generated.json",
@@ -20,7 +22,7 @@
       "runtime publish root provenance when supplied",
       "staged file inventory with sizeBytes and sha256 for payload files",
       "skipped optional runtime publish entries and remediation context",
-      "safety contract for secrets, VM state, runtime evidence, signing, push/publish, and CSignTool"
+      "safety contract for secrets, VM state, runtime evidence, signing, GUI signing fallback, push/publish, and CSignTool"
     ],
     "selfHashNote": "The generated manifest lists itself in files but omits a recursive self-hash from fileInventory."
   },
@@ -417,7 +419,7 @@
     "**/*.webp"
   ],
   "requiredChecks": [
-    "Published runtime payloads must come from an external RuntimePublishRoot, not from repository bin/obj/x64 folders.",
+    "Published runtime payloads must come from an external RuntimePublishRoot, not from repository bin/obj/x64 folders; use -RequireCompleteRuntimePayloads for runtime handoff builds.",
     "Do not package submitted samples, VM disks/checkpoints, local reports, packet captures, memory dumps, signed driver binaries, or private signing material.",
     "Do not package local state such as sandbox.local.json, install-state.json, guest-password.dpapi, .env files, API keys, or user secret files.",
     "The package script stages and zips locally only; publishing/pushing remains a separate manual release-manager action."

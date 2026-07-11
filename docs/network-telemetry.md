@@ -8,19 +8,18 @@ KSwordSandbox 的宿主侧网络导入把网络证据当作回收 artifact，而
 
 支持的导入输入：
 
-- Guest `artifacts/manifest.json` descriptors for `PacketCapture` artifacts.
-- `.pcap` and `.pcapng` files under collected guest output, typically
-  `packet-captures/**`.
-- Packet-capture sidecar JSONL/log files beside captures, for example
+- Guest `artifacts/manifest.json` 中指向 `PacketCapture` artifacts 的 descriptors。
+- Collected guest output 下的 `.pcap` 和 `.pcapng` 文件，通常位于
+  `packet-captures/**`。
+- Capture 文件旁边的 packet-capture sidecar JSONL/log 文件，例如
   `*.dns.jsonl`, `*.http.jsonl`, `*.tls.jsonl`, `*.conn.jsonl`, `tshark*.jsonl`,
-  Zeek-like JSONL, or KSword/R0 network JSONL rows.
-- Weak sidecar log rows without strict JSON, including `key=value` or
-  `key: value` tokens and loose flow text such as
-  `10.0.0.4:50200 -> 198.51.100.77:8080`.
+  Zeek-like JSONL 或 KSword/R0 network JSONL rows。
+- 非严格 JSON 的弱结构 sidecar log rows，包括 `key=value` 或
+  `key: value` tokens，以及类似下方的 loose flow text：
+  `10.0.0.4:50200 -> 198.51.100.77:8080`。
 
-The host resolves manifest `relativePath` / `importPath` only under the
-collected guest output root. Absolute VM-local paths remain evidence strings and
-are not trusted as import targets.
+Host 只在 collected guest output root 下解析 manifest `relativePath` / `importPath`。Absolute VM-local paths
+只保留为 evidence strings，不能作为 import targets 信任。
 
 ## Tshark 行为 / Tshark behavior
 
@@ -37,7 +36,7 @@ are not trusted as import targets.
 损坏或暂不支持的 capture 会生成 `pcap.parse_error` 和一条 `status=parse_error` 的
 `network.import.summary`；这不会让整个 guest event import 失败。
 
-## Guest capture diagnostics vs imported evidence
+## Guest 抓包诊断与导入证据 / Guest capture diagnostics vs imported evidence
 
 guest 端的 `packet_capture.protocol_summary` 是抓包文件诊断摘要，不是 DNS/HTTP/TLS
 行为证据。若历史或降级字段显示
@@ -50,7 +49,7 @@ guest 端的 `packet_capture.protocol_summary` 是抓包文件诊断摘要，不
 `pcapngBlockCount`、`pcapngEnhancedPacketBlockCount`、
 `pcapngSimplePacketBlockCount` 和 `pcapngSectionHeaderCount` 判断证据是否具体。
 
-Concrete protocol evidence 来自宿主 native PCAP importer 或 sidecar importer。报告/规则应优先消费
+具体 protocol evidence 来自宿主 native PCAP importer 或 sidecar importer。报告/规则应优先消费
 导入后的 `dns.query`、`http.request`、`tls.connection`、`network.flow` 或 `pcap.*` rows；
 上述每一类行都应携带回指 capture 文件的 artifact traceability 字段。
 
@@ -81,35 +80,35 @@ Sidecar JSONL/log rows 会直接归一化到标准事件类型。损坏 JSON lin
 
 - `schema=network.telemetry.v1`
 - `eventFamily=network`
-- `eventKind`: `summary`, `connection`, `dns`, `http`, `tls`, or `parse_error`
-- `importSource`: `pcap-native`, `sidecar-jsonl`, or aggregate import metadata
-- Collection and operator fields:
-  - `collectionHealth`: `ok`, `partial`, `empty`, or `degraded`
-  - `zhMessage`: concise Chinese operator-facing summary
-  - `zhHint`: concise Chinese triage hint
-- Endpoint aliases:
+- `eventKind`: `summary`, `connection`, `dns`, `http`, `tls` 或 `parse_error`
+- `importSource`: `pcap-native`, `sidecar-jsonl` 或 aggregate import metadata
+- Collection 与操作者字段：
+  - `collectionHealth`: `ok`, `partial`, `empty` 或 `degraded`
+  - `zhMessage`: 面向操作者的简短中文摘要
+  - `zhHint`: 简短中文 triage 提示
+- Endpoint aliases（端点别名）：
   - `protocol`, `transportProtocol`, `protocolName`
-  - `ipFamily`: `ipv4` or `ipv6` when an endpoint is present
+  - `ipFamily`: endpoint 存在时为 `ipv4` 或 `ipv6`
   - `sourceIp`, `sourcePort`, `srcIp`, `srcPort`, `localAddress`, `localPort`
   - `destinationIp`, `destinationPort`, `dstIp`, `dstPort`,
     `remoteAddress`, `remotePort`
   - `sourceEndpoint`, `destinationEndpoint`, `localEndpoint`,
     `remoteEndpoint`
   - `flowKey`
-  - IPv6 endpoint normalization keeps bare addresses in `sourceIp` /
-    `destinationIp` and uses brackets only in endpoint strings, for example
-    `sourceEndpoint=[2001:db8::10]:5353`.
-- Artifact traceability:
+  - IPv6 endpoint normalization 会在 `sourceIp` / `destinationIp` 中保留裸地址，
+    只在 endpoint strings 中使用方括号，例如
+    `sourceEndpoint=[2001:db8::10]:5353`。
+- Artifact traceability（证据回溯字段）：
   - `sourceArtifactPath`
   - `sourceArtifactRelativePath`
   - `artifactRelativePath`, `downloadSelector`
   - `sourceArtifactSizeBytes`
   - `sourceArtifactSha256`
-  - PCAP-native rows expose `pcapSourceArtifactRelativePath`,
-    `pcapSourceArtifactName`, `pcapSourceArtifactSizeBytes`, and
-    `pcapSourceArtifactSha256`. Adjacent sidecars keep their own
-    `sourceArtifactRelativePath` while also preserving the parent capture in
-    `pcapSourceArtifactRelativePath` / `sourcePcapArtifactRelativePath`.
+  - PCAP-native rows 暴露 `pcapSourceArtifactRelativePath`、
+    `pcapSourceArtifactName`、`pcapSourceArtifactSizeBytes` 和
+    `pcapSourceArtifactSha256`。相邻 sidecars 保留自己的 `sourceArtifactRelativePath`，
+    同时用 `pcapSourceArtifactRelativePath` / `sourcePcapArtifactRelativePath`
+    保留 parent capture。
   - `collectionName`
   - `evidenceRole`
   - `importMode`
@@ -134,9 +133,9 @@ Sidecar JSONL/log rows 会直接归一化到标准事件类型。损坏 JSON lin
   `certificateFingerprintSha256`, `certSha1`, `certNotBefore`,
   `certNotAfter`, `certificateStatus`, `validationStatus`,
   `certSelfSigned`, `certExpired`, `tlsCertificateRisk`. Native PCAP TLS
-  parsing derives client-hello SNI/ALPN/cipher hint/JA3, server-hello JA3S
-  when present, and best-effort certificate subject/issuer/fingerprint
-  metadata from TLS Certificate handshakes without requiring `tshark`.
+  parsing 可在不要求 `tshark` 的情况下，从 client-hello 推导 SNI/ALPN/cipher hint/JA3，
+  在存在 server-hello 时推导 JA3S，并从 TLS Certificate handshakes 尽力提取 certificate
+  subject/issuer/fingerprint metadata。
 - Connection: `state`, `durationSeconds`, `packetCount`, `byteCount`,
   `packetsToServer`, `packetsToClient`, `bytesToServer`, `bytesToClient`,
   `uid`, `externalFlowKey`, `communityId`, `applicationProtocol`,
@@ -155,22 +154,21 @@ Sidecar JSONL/log rows 会直接归一化到标准事件类型。损坏 JSON lin
 `rootProcessId` / `treeLineage` 与 HTTP 上传、NXDOMAIN、TLS JA3/证书异常，
 可以把网络行为直接挂到样本进程树，而不是只把它当作孤立网络流量。
 
-Sidecar alias coverage 有意兼容常见 Zeek/ECS/tshark/R0 字段族，例如 `id.orig_h`、`id.resp_h`、
+Sidecar alias coverage（别名覆盖）有意兼容常见 Zeek/ECS/tshark/R0 字段族，例如 `id.orig_h`、`id.resp_h`、
 `orig_bytes`、`resp_bytes`、
 `dns.rrname`, `dns.answers`, `http.response.status_code`,
 `http.request.body.bytes`, `tls.ja3.hash`, `tls.cert.fingerprint.sha256`,
-`network.community_id`, and `process.entry_leader.*`. Sensitive HTTP headers
-are not copied verbatim; the importer records `authorizationHeaderPresent` and
-`cookiePresent` booleans instead.
+`network.community_id` 和 `process.entry_leader.*`。敏感 HTTP headers 不会原样复制；
+importer 只记录 `authorizationHeaderPresent` 和 `cookiePresent` booleans。
 
 Sidecar 专属字段：
 
 - `sidecarLineNumber`
-- `sidecarFormat`: `jsonl` or `log`
+- `sidecarFormat`: `jsonl` 或 `log`
 - `parser=sidecar-jsonl`
-- `originalEventType` when the input row exposed one
+- `originalEventType`: 输入 row 暴露时记录
 
-Log sidecar 是弱解析：importer 识别带引号或不带引号的 `key=value` / `key: value` token、
+Log sidecar（日志 sidecar）是弱解析：importer 识别带引号或不带引号的 `key=value` / `key: value` token、
 endpoint arrow、HTTP request line、DNS query token 和 TLS SNI token。无法识别的普通 log line
 会被忽略，以避免制造虚假网络证据。
 
@@ -203,14 +201,14 @@ IOCTL 不可用、旧 driver 协议不匹配或 device 打不开时，Collector 
 - `connectionEventCount`, `dnsEventCount`, `httpEventCount`, `tlsEventCount`
 - `parseErrorCount`
 - `protocols`
-- `manifestPresent` for guest-root aggregate imports
-- `tsharkRequired`, `tsharkAvailable`, `tsharkStatus` for PCAP imports
+- guest-root aggregate imports 的 `manifestPresent`
+- PCAP imports 的 `tsharkRequired`, `tsharkAvailable`, `tsharkStatus`
 
 该事件是网络导入健康状态的稳定 report/search anchor；行为规则仍应使用协议级 rows 作为证据。
 
 `collectionHealth` 从 imported rows 推导：
 
-- `ok`: row has enough endpoint/protocol context and no parse errors.
-- `partial`: a protocol row was imported but endpoint context is incomplete.
-- `empty`: an aggregate import found no network evidence rows.
-- `degraded`: malformed PCAP/sidecar rows or parse errors were observed.
+- `ok`: row 有足够 endpoint/protocol context，且没有 parse errors。
+- `partial`: 已导入 protocol row，但 endpoint context 不完整。
+- `empty`: aggregate import 没有找到 network evidence rows。
+- `degraded`: 观察到 malformed PCAP/sidecar rows 或 parse errors。

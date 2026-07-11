@@ -383,6 +383,8 @@ public static class ArtifactDescriptorFactory
 
     private static void ApplyKindMetadataDefaults(ArtifactKind kind, Dictionary<string, string> metadata, bool includeAvailability)
     {
+        AddDefault(metadata, "artifactKind", kind.ToString());
+        AddDefault(metadata, "sourceArtifactKind", kind.ToString());
         switch (kind)
         {
             case ArtifactKind.ArtifactIndex:

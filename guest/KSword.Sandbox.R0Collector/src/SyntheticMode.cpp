@@ -597,6 +597,10 @@ int RunSyntheticMode(const Options& options, EventWriter& writer) {
             "load",
             {
                 {"imagePath", "C:\\Windows\\System32\\kernel32.dll"},
+                {"imageOperationName", "load"},
+                {"imageLoadFamily", "windows-system-image"},
+                {"injectionCandidate", "false"},
+                {"userWritableImageCandidate", "false"},
                 {"imageBase", "0x0000000180000000"},
                 {"imageSize", "1048576"}
             })) {
@@ -613,6 +617,11 @@ int RunSyntheticMode(const Options& options, EventWriter& writer) {
             "create",
             {
                 {"filePath", "C:\\Users\\Public\\ksword-r0collector-mock.tmp"},
+                {"artifactCandidateKind", "dropped-file-or-file-change"},
+                {"dropLocationFamily", "shared-writable-directory"},
+                {"droppedFileCandidate", "true"},
+                {"startupFolderCandidate", "false"},
+                {"downloadExecuteCandidate", "false"},
                 {"desiredAccessHex", "0x0012019F"},
                 {"disposition", "create"}
             })) {
@@ -630,7 +639,13 @@ int RunSyntheticMode(const Options& options, EventWriter& writer) {
             {
                 {"keyPath", "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run"},
                 {"valueName", "KSwordMock"},
-                {"valueType", "REG_SZ"}
+                {"valueType", "REG_SZ"},
+                {"persistenceCandidate", "true"},
+                {"registryPersistenceSignal", "common-windows-persistence-key"},
+                {"persistenceFamily", "autorun-run-key"},
+                {"servicePersistenceCandidate", "false"},
+                {"ifeoPersistenceCandidate", "false"},
+                {"startupRegistryCandidate", "true"}
             })) {
         return kExitRuntimeFailure;
     }
@@ -671,10 +686,19 @@ int RunSyntheticMode(const Options& options, EventWriter& writer) {
                 {"serviceHintConfidence", "medium"},
                 {"serviceHintPolicy", "port-protocol heuristic: 53=dns, 80/8080/8000=http, 443/8443=tls"},
                 {"semanticCandidate", "tls"},
+                {"networkEvidenceKind", "tls-flow"},
+                {"externalAddressCandidate", "true"},
+                {"lateralMovementCandidate", "false"},
+                {"downloadExecuteCandidate", "true"},
                 {"dnsCandidate", "false"},
                 {"httpCandidate", "false"},
                 {"tlsCandidate", "true"},
                 {"webCandidate", "true"},
+                {"remoteServiceCandidate", "true"},
+                {"smbCandidate", "false"},
+                {"rpcCandidate", "false"},
+                {"rdpCandidate", "false"},
+                {"winrmCandidate", "false"},
                 {"serviceHintDns", "false"},
                 {"serviceHintHttp", "false"},
                 {"serviceHintTls", "true"},

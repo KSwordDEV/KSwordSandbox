@@ -9,9 +9,11 @@ copies allowed files into a staging tree outside the repository, writes generate
 package metadata, and creates a local zip unless -StageOnly is specified.
 
 The script is local-only: it does not push, publish, sign, or build. Runtime
-binaries must be supplied through an external RuntimePublishRoot; source packages
-are source-only and reject generated binaries, samples, VM state, private signing
-material, and local runtime artifacts.
+binaries must be supplied through an external RuntimePublishRoot; use
+-RequireCompleteRuntimePayloads for handoff packages and omit it only for
+explicit layout/safety dry-runs. Source packages are source-only and reject
+generated binaries, samples, VM state, private signing material, and local
+runtime artifacts. GUI signing fallback and CSignTool are forbidden.
 #>
 [CmdletBinding()]
 param(
@@ -23,6 +25,8 @@ param(
     [string]$ManifestPath,
 
     [string]$RuntimePublishRoot,
+
+    [switch]$RequireCompleteRuntimePayloads,
 
     [string]$OutputRoot = 'D:\Temp\KSwordSandbox\packages',
 
@@ -250,19 +254,18 @@ function Assert-PathAllowed {
 
     $normalized = ConvertTo-NormalizedRelativePath -Path $RelativePath
     $segments = @($normalized -split '/' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
-    $forbiddenSegments = @(
+    $caseInsensitiveForbiddenSegments = @(
         '.agents',
         '.cert',
         '.git',
         '.idea',
         '.vs',
         '.vscode',
-        'artifacts',
         'bin',
         'captures',
         'coverage',
+        'dist',
         'dumps',
-        'jobs',
         'logs',
         'memory-dumps',
         'obj',
@@ -270,7 +273,6 @@ function Assert-PathAllowed {
         'pcaps',
         'reports',
         'runtime',
-        'samples',
         'checkpoints',
         'screenshots',
         'snapshots',
@@ -280,20 +282,44 @@ function Assert-PathAllowed {
         'virtual-machines',
         'x64'
     )
+    $sourceNamespaceSegments = @('artifacts', 'jobs', 'samples')
+    $sourceNamespaceAllowList = @(
+        'src/ksword.sandbox.abstractions/artifacts/',
+        'src/ksword.sandbox.core/artifacts/',
+        'src/ksword.sandbox.core/jobs/',
+        'src/ksword.sandbox.core/samples/'
+    )
+    $normalizedLower = $normalized.ToLowerInvariant()
 
     foreach ($segment in $segments) {
-        # Use exact-case segment checks so source namespaces such as
-        # src/KSword.Sandbox.Abstractions/Artifacts are not mistaken for the
-        # lower-case runtime artifact-output folder "artifacts/".
-        if ($forbiddenSegments -ccontains $segment) {
+        $segmentLower = $segment.ToLowerInvariant()
+        if ($caseInsensitiveForbiddenSegments -contains $segmentLower) {
             throw "Forbidden package path segment '$segment' in '$normalized'."
+        }
+
+        if ($sourceNamespaceSegments -contains $segmentLower) {
+            $isAllowedSourceNamespace = $false
+            foreach ($allowedPrefix in $sourceNamespaceAllowList) {
+                if ($normalizedLower.StartsWith($allowedPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+                    $isAllowedSourceNamespace = $true
+                    break
+                }
+            }
+
+            if (-not $isAllowedSourceNamespace) {
+                throw "Forbidden package path segment '$segment' in '$normalized'."
+            }
         }
     }
 
     $fileName = [System.IO.Path]::GetFileName($normalized)
     $extension = [System.IO.Path]::GetExtension($normalized).ToLowerInvariant()
-    if ($fileName -ieq 'CSignTool.exe' -or $fileName -like 'Sign-SandboxDriverWithKsword*.ps1') {
-        throw "Forbidden legacy signing tool path in package: $normalized"
+    if ($fileName -ieq 'CSignTool.exe' -or
+        $fileName -ieq 'AuthenticodeVariantGUI.exe' -or
+        $fileName -ieq 'signtool.exe' -or
+        $fileName -ieq 'outer_display_info.dat' -or
+        $fileName -like 'Sign-SandboxDriverWithKsword*.ps1') {
+        throw "Forbidden signing tool or GUI signing fallback path in package: $normalized"
     }
 
     $blockedAlways = @(
@@ -648,8 +674,8 @@ function Get-PackageOperatorRecommendedActions {
 
     if ($PackageKind -eq 'runtime') {
         if ([string]::IsNullOrWhiteSpace($RuntimePublishRoot)) {
-            [void]$actions.Add('下一步：如需完整 runtime 便携包，请先把 host-web、guest-tools、tools/job-tool、tools/postprocess 发布到仓库外目录，然后重跑 package-portable.ps1 -PackageKind runtime -RuntimePublishRoot <external-publish-root>。')
-            [void]$actions.Add('Next: for a layout-only dry run, keep -StageOnly and inspect package-manifest.generated.json; for handoff, provide an external RuntimePublishRoot.')
+            [void]$actions.Add('下一步：如需完整 runtime 便携包，请先把 host-web、guest-tools、tools/job-tool、tools/postprocess 发布到仓库外目录，然后重跑 package-portable.ps1 -PackageKind runtime -RuntimePublishRoot <external-publish-root> -RequireCompleteRuntimePayloads。')
+            [void]$actions.Add('Next: for a layout-only dry run, keep -StageOnly and inspect package-manifest.generated.json; for handoff, provide an external RuntimePublishRoot and -RequireCompleteRuntimePayloads.')
         }
         elseif ([int]$RuntimeSummary.missingCount -gt 0) {
             [void]$actions.Add("下一步：补齐 RuntimePublishRoot 下缺失 payload：$(([string[]]@($RuntimeSummary.missingRequiredSources + $RuntimeSummary.missingOptionalSources)) -join ', ')。")
@@ -688,14 +714,16 @@ function Update-PackageOperatorDiagnostics {
         runtimePublishSummary = $runtimeSummary
         missingRuntimePublishEntries = @($missingRuntimeEntries | ForEach-Object { $_.source })
         runtimePublishReady = if ($PackageKind -ne 'runtime') { $true } else { $missingRuntimeEntries.Count -eq 0 }
+        completeRuntimePayloadsRequired = [bool]$RequireCompleteRuntimePayloads
         runtimePublishRootMissingRecommendedActions = @($recommendedActions | Where-Object { $_ -match 'RuntimePublishRoot|runtime 便携包|payload' })
         preflightCommands = [ordered]@{
             releaseReadiness = '.\scripts\Test-ReleaseReadiness.ps1 -AllowDirtySource -StageSourcePackage'
+            completeRuntimeReadiness = '.\scripts\Test-ReleaseReadiness.ps1 -AllowDirtySource -RuntimePublishRoot <external-publish-root> -RequireCompleteRuntimePackage'
             installCheckEnvironment = '.\scripts\install.ps1 -Mode CheckEnvironment'
             runCheckEnvironment = '.\scripts\run.ps1 -Mode CheckEnvironment'
             prepareGuestPayload = '.\scripts\Prepare-GuestPayload.ps1 -RepoRoot . -PayloadRoot <external-payload-root> -SelfContained'
             configureVirusTotalKey = '.\scripts\install.ps1 -Mode ConfigureVTKey -PromptVTKey'
-            runtimePackage = '.\scripts\package-portable.ps1 -PackageKind runtime -RuntimePublishRoot <external-publish-root> -OutputRoot <external-output-root> -Force'
+            runtimePackage = '.\scripts\package-portable.ps1 -PackageKind runtime -RuntimePublishRoot <external-publish-root> -RequireCompleteRuntimePayloads -OutputRoot <external-output-root> -Force'
         }
         externalStateDiagnostics = [ordered]@{
             HyperV = 'not checked or mutated by packaging; run install/run CheckEnvironment for read-only prerequisite diagnostics'
@@ -706,6 +734,7 @@ function Update-PackageOperatorDiagnostics {
         nonMutating = [ordered]@{
             vmMutation = $false
             driverSigning = $false
+            guiSigningFallback = $false
             csignTool = $false
             gitPush = $false
             networkPublish = $false
@@ -713,10 +742,11 @@ function Update-PackageOperatorDiagnostics {
         recommendedActions = @($recommendedActions)
         operatorGuidance = @(
             'RuntimePublishRoot must point to external published payloads such as host-web, guest-tools, tools/job-tool, and tools/postprocess.',
+            'Use -RequireCompleteRuntimePayloads for handoff builds; omit it only for explicit layout/safety dry-runs.',
             'The package script stages and zips locally only; it does not build, sign, push, publish, start Hyper-V, or copy files into a VM.',
             'Inspect package-manifest.generated.json before handoff; verify fileInventory sha256/sizeBytes and packageDiagnostics.'
         )
-        chineseGuidance = '中文提示：runtime 便携包如果没有 RuntimePublishRoot 也可做 layout dry-run，但完整交付前必须把 host-web/guest-tools/tools payload 发布到仓库外目录。'
+        chineseGuidance = '中文提示：runtime 便携包如果没有 RuntimePublishRoot 也可做 layout dry-run；完整交付必须传入仓库外 RuntimePublishRoot 并使用 -RequireCompleteRuntimePayloads。'
     }
 }
 
@@ -859,8 +889,8 @@ function Copy-RuntimeManifestEntry {
     $baseRoot = $RepositoryRoot
     if ($sourceType -eq 'runtimePublish') {
         if ([string]::IsNullOrWhiteSpace($RuntimePublishRoot)) {
-            if ($required) {
-                throw "RuntimePublishRoot is required for manifest entry '$source'."
+            if ($required -or $RequireCompleteRuntimePayloads.IsPresent) {
+                throw "错误：完整 runtime 便携包要求 RuntimePublishRoot，且必须包含 runtime payload：$source。下一步：把 host-web、guest-tools、tools/job-tool、tools/postprocess 发布到仓库外目录后，重跑 package-portable.ps1 -PackageKind runtime -RuntimePublishRoot <external-publish-root> -RequireCompleteRuntimePayloads。"
             }
 
             Write-Warning "Skipping optional runtime publish entry '$source' because RuntimePublishRoot was not provided."
@@ -879,8 +909,8 @@ function Copy-RuntimeManifestEntry {
 
     $sourcePath = Join-SafePath -Root $baseRoot -RelativePath $sourceRelative
     if (-not (Test-Path -LiteralPath $sourcePath)) {
-        if ($required) {
-            throw "Required package input was not found: $sourcePath"
+        if ($required -or ($sourceType -eq 'runtimePublish' -and $RequireCompleteRuntimePayloads.IsPresent)) {
+            throw "错误：完整 runtime 便携包缺少 payload：$sourcePath。下一步：先发布/复制 '$source' 到仓库外 RuntimePublishRoot；本脚本不会从仓库 bin/obj/x64 兜底复制，也不会构建、签名或操作 VM。"
         }
 
         Write-Warning "Skipping optional package input that was not found: $sourcePath"
@@ -983,9 +1013,10 @@ function Write-GeneratedPackageManifest {
             localSecrets = 'excluded'
             privateSigningMaterial = 'excluded'
             repositoryBinaries = if ($PackageKind -eq 'runtime') { 'allowed only from RuntimePublishRoot' } else { 'excluded' }
+            runtimeCompleteness = if ($PackageKind -ne 'runtime') { 'not applicable' } elseif ($RequireCompleteRuntimePayloads.IsPresent) { 'required' } else { 'layout dry-run allowed' }
         }
         safetyContract = [ordered]@{
-            Chinese = '中文提示：package-portable.ps1 已按 manifest 和硬性扩展/路径规则排除 secrets、本机状态、VM 磁盘/快照、样本、报告、截图、PCAP、dump、仓库二进制和 legacy signing tool；脚本不发布、不推送、不签名、不操作 VM。'
+            Chinese = '中文提示：package-portable.ps1 已按 manifest 和硬性扩展/路径规则排除 secrets、本机状态、VM 磁盘/快照、样本、报告、截图、PCAP、dump、仓库二进制、legacy signing tool 和 GUI signing fallback；脚本不发布、不推送、不签名、不操作 VM。'
             SensitiveMaterial = 'not packaged'
             VmState = 'not packaged'
             VmMutation = 'not performed'
@@ -994,6 +1025,7 @@ function Write-GeneratedPackageManifest {
             NetworkPublish = 'not performed'
             GitPush = 'not performed'
             DriverSigning = 'not performed'
+            GuiSigningFallback = 'not called and forbidden from package contents'
             CSignTool = 'not called and forbidden from package contents'
         }
     }
@@ -1096,12 +1128,13 @@ Write-Host "[package] Optional/skipped entries: $($script:packageDiagnostics.Cou
 if ($PackageKind -eq 'runtime') {
     $runtimeRootDisplay = if ([string]::IsNullOrWhiteSpace($RuntimePublishRoot)) { '<not provided>' } else { $RuntimePublishRoot }
     Write-Host "[package] RuntimePublishRoot: $runtimeRootDisplay"
+    Write-Host "[package] RequireCompleteRuntimePayloads: $([bool]$RequireCompleteRuntimePayloads)"
     foreach ($entry in @($script:operatorDiagnostics.runtimePublishEntries)) {
         $entryState = if ([bool]$entry.exists) { 'present' } elseif ([bool]$entry.required) { 'missing-required' } else { 'missing-optional' }
         Write-Host "[package] Runtime entry: $entryState source=$($entry.source) target=$($entry.target)"
     }
     if (-not [bool]$script:operatorDiagnostics.runtimePublishReady) {
-        Write-Host '[package] 中文提示：runtime 包存在缺失的 published payload；本次可作为 layout/safety dry-run，完整交付前请补齐 RuntimePublishRoot。'
+        Write-Host '[package] 中文提示：runtime 包存在缺失的 published payload；本次仅可作为 layout/safety dry-run。完整交付请补齐 RuntimePublishRoot 并传入 -RequireCompleteRuntimePayloads。'
     }
     $summary = $script:operatorDiagnostics.runtimePublishSummary
     Write-Host "[package] Runtime summary: present=$($summary.presentCount) missing=$($summary.missingCount) missingRequired=$($summary.missingRequiredCount) missingOptional=$($summary.missingOptionalCount) mode=$($summary.failureMode)"
@@ -1109,8 +1142,8 @@ if ($PackageKind -eq 'runtime') {
         Write-Host "[package] Next: $action"
     }
 }
-Write-Host '[package] 中文提示：已排除本机 secret、install-state、DPAPI 备份、样本、报告、VM 磁盘/快照、仓库二进制和签名材料。'
-Write-Host '[package] Safety: no VM mutation, no driver signing, no CSignTool, no git push/publish.'
+Write-Host '[package] 中文提示：已排除本机 secret、install-state、DPAPI 备份、样本、报告、VM 磁盘/快照、仓库二进制、签名材料和 GUI signing fallback。'
+Write-Host '[package] Safety: no VM mutation, no driver signing, no GUI signing fallback, no CSignTool, no git push/publish.'
 if ($StageOnly.IsPresent) {
     Write-Host '[package] Archive: skipped (-StageOnly)'
 }

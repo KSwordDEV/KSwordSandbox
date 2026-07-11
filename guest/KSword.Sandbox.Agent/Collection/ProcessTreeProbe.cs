@@ -571,6 +571,9 @@ internal sealed class ProcessTreeProbe : IGuestProbe
                 ["processId"] = process.ProcessId.ToString(CultureInfo.InvariantCulture),
                 ["processName"] = process.ProcessName,
                 ["snapshotState"] = snapshotState,
+                ["capturePolicy"] = "always-on-visible-process-tree",
+                ["processTreeSamplingMode"] = "phase-snapshot",
+                ["shortLivedProcessCoverage"] = "best-effort-phase-snapshot",
                 ["captureState"] = snapshotState,
                 ["status"] = snapshotState,
                 ["processMissing"] = string.Equals(snapshotState, "missing", StringComparison.OrdinalIgnoreCase).ToString(CultureInfo.InvariantCulture).ToLowerInvariant(),
@@ -714,6 +717,13 @@ internal sealed class ProcessTreeProbe : IGuestProbe
         evt.Data["isDescendantOfRoot"] = ToLowerInvariantString(isChild);
         evt.Data["processTreeNode"] = ToLowerInvariantString(isTreeNode);
         evt.Data["treeNodeState"] = snapshotState;
+        evt.Data["treeLineageStatus"] = string.IsNullOrWhiteSpace(lineage) ? "unavailable" : "stable";
+        evt.Data["rootProcessIdStatus"] = rootProcessId is null ? "unavailable-before-sample-start" : "available";
+        evt.Data["processTreeCoverageState"] = isMissing
+            ? "tracked-process-missing"
+            : isTreeNode
+                ? "visible-root-tree-node"
+                : "visible-process-snapshot";
         evt.Data["treeScope"] = rootProcessId is null
             ? "global-snapshot"
             : isTreeNode
@@ -1015,6 +1025,10 @@ internal sealed class ProcessTreeProbe : IGuestProbe
                 ["processExited"] = "true",
                 ["exitedBeforeSnapshot"] = "true",
                 ["snapshotState"] = "missing",
+                ["capturePolicy"] = "always-on-visible-process-tree",
+                ["processTreeSamplingMode"] = "phase-snapshot",
+                ["shortLivedProcessCoverage"] = "best-effort-phase-snapshot",
+                ["processTreeCoverageState"] = "partial-root-missing",
                 ["captureState"] = "missing",
                 ["status"] = "missing",
                 ["processRole"] = "root",
@@ -1071,6 +1085,9 @@ internal sealed class ProcessTreeProbe : IGuestProbe
         evt.Data["treeScope"] = "sample-root-tree";
         evt.Data["lineageStable"] = "true";
         evt.Data["lineageIncludesRoot"] = "true";
+        evt.Data["treeLineageStatus"] = "stable";
+        evt.Data["rootProcessIdStatus"] = "available";
+        evt.Data["processTreeCompleteness"] = "partial-root-missing-visible-descendants-only";
         evt.Data["childSummary"] = "none";
         evt.Data["childSummaryTruncated"] = "false";
         evt.Data["directChildProcessCount"] = "0";
@@ -1138,6 +1155,11 @@ internal sealed class ProcessTreeProbe : IGuestProbe
                 ["missingProcessCount"] = missingProcessCount.ToString(CultureInfo.InvariantCulture),
                 ["trackedProcessCount"] = monitoredProcessKeys.Count.ToString(CultureInfo.InvariantCulture),
                 ["summaryEvent"] = "true",
+                ["capturePolicy"] = "always-on-visible-process-tree",
+                ["processTreeSamplingMode"] = "phase-snapshot",
+                ["shortLivedProcessCoverage"] = "best-effort-phase-snapshot",
+                ["processTreeCoverageState"] = tree.RootVisible ? "visible-root-tree" : "partial-root-missing",
+                ["processTreeCompleteness"] = tree.RootVisible ? "complete-visible-root-tree" : "partial-root-missing-visible-descendants-only",
                 ["captureState"] = tree.RootVisible ? "complete" : "partial",
                 ["status"] = tree.RootVisible ? "complete" : "partial",
                 ["zhMessage"] = tree.RootVisible
@@ -1187,6 +1209,8 @@ internal sealed class ProcessTreeProbe : IGuestProbe
         evt.Data["treeScope"] = "sample-root-tree";
         evt.Data["lineageStable"] = "true";
         evt.Data["lineageIncludesRoot"] = "true";
+        evt.Data["treeLineageStatus"] = "stable";
+        evt.Data["rootProcessIdStatus"] = "available";
         evt.Data["zhProcessRole"] = "根进程";
         var copyText = CreateProcessTreeCopyText(
             evt,

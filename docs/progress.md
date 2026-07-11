@@ -10,7 +10,7 @@
 这些百分比衡量“当前开源 MVP 可务实做到的范围”，不包含云端多租户、海量样本库、完整家族归因或默认真实 R0 驱动签名：
 
 - 总体 v1 交付链路：**88%**
-- WebUI 上传/选择、自动启动、live monitor：**95%**
+- WebUI 上传/选择、自动启动、实时监控页（live monitor）：**95%**
 - Hyper-V runbook / host orchestration：**90%**
 - Guest Agent R3 采集：**90%**
 - R0Collector 用户态采集链：**87%**
@@ -25,7 +25,7 @@
 
 ## 已具备的交付证据
 
-- WebUI/API 可以选择或上传 `.exe`，创建 job 后进入独立 live monitor；显式 live 才会操作 Hyper-V VM。
+- WebUI/API 可以选择或上传 `.exe`，创建 job 后进入独立实时监控页（live monitor）；显式 live 才会操作 Hyper-V VM。
 - Live monitor 优先消费 `/api/jobs/{jobId}/progress/stream` 真实 runbook step SSE；SSE 不可用时回退 durable `runbook-progress.json` 和 `/runbook/progress` polling。
 - 主视图默认不展开 runbook command、stdout、stderr；需要深度排障时再打开 execution-flow 或复制 `runbook-execution.json`。
 - Web live artifact 面板展示 artifact index 总览、safe selector、download href、duplicate grouping 和 rejection diagnostics；下载解析必须命中 job artifact index。
@@ -45,16 +45,16 @@
 
 P0 当前不是“必须先写代码”，而是候选提交发布前必须重新确认的门禁：
 
-1. 仓库和 source package 不含 runtime artifacts、样本、VM、dump、pcap、driver binary、证书或 secret。
+1. 仓库和 source package 不含 runtime artifacts、样本、VM、dump、pcap、驱动二进制（driver binary）、证书或 secret。
 2. 默认 install/run/readiness/package 路径不调用 `CSignTool.exe`，不加载真实 driver，不修改 VM。
-3. 若 release notes 要声明“本候选已生成真实 Notepad 5s 报告”，必须在实验室主机重新运行 live 命令并记录 job id；历史证据不能替代 fresh release evidence。
+3. 若 release notes 要声明“本候选已生成真实 Notepad 5s 报告”，必须在实验室主机重新运行 live 命令并记录 job id；历史证据不能替代新的 release evidence。
 
 P1 仍值得继续补强：
 
-- 用真实样本人工走查 live monitor，确认当前 step、失败态、artifact 卡片、VT quiet card 和报告入口无需打开命令墙也能理解。
-- 用 benign GUI、harmless sample、下载执行、文件释放、网络样本生成报告，校准首屏摘要、关系卡、截图/PCAP/落地文件证据和 raw evidence 边界。
-- 对 R0 driver path 做真实驱动输入、压力样本、unload/reload 和 guest 内 ABI self-check 复验；默认发布仍只承诺 telemetry contract，不承诺任意主机都能加载未签名驱动。
-- 用更多 corpus 校准 behavior rules、MITRE 映射、static-only triage、YARA-like 噪音和 VT reputation 呈现。
+- 用真实样本人工走查实时监控页（live monitor），确认当前 step、失败态、artifact 卡片、VT quiet card 和报告入口无需打开命令墙也能理解。
+- 用 benign GUI、harmless sample、下载执行、文件释放、网络样本生成报告，校准首屏摘要、关系卡、截图/PCAP/落地文件证据和原始证据（raw evidence）边界。
+- 对 R0 driver path 做真实驱动输入、压力样本、unload/reload 和 guest 内 ABI self-check 复验；默认发布仍只承诺遥测契约（telemetry contract），不承诺任意主机都能加载未签名驱动。
+- 用更多样本集（corpus）校准 behavior rules、MITRE 映射、static-only triage、YARA-like 噪音和 VT reputation 呈现。
 - 补 synthetic 覆盖：非 ASCII artifact path、深目录、重复内容、路径穿越拒绝、真实 sidecar/PCAP 字段质量。
 
 ## 低成本下一步
@@ -72,4 +72,4 @@ P1 仍值得继续补强：
 git diff --check -- docs
 ```
 
-Hyper-V live、真实 R0、VT 联网和重 smoke 只在 release manager 明确安排时运行。
+Hyper-V live、真实 R0、VT 联网和重 smoke 只在 release manager（发布负责人）明确安排时运行。

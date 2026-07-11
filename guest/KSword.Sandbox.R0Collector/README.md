@@ -151,6 +151,21 @@ Driver-origin rows include additive attribution fields:
 - `actorRole`, `subjectRole`
 - `selfNoise`, `collectorNoise`, `collectorSelfNoise`, `selfProcess`,
   `selfNoiseReason`, `selfNoiseAction`, `collectorNoisePolicy`
+- typed payload semantics used by reports/rules:
+  - file rows: `artifactCandidateKind`, `dropLocationFamily`,
+    `droppedFileCandidate`, `startupFolderCandidate`
+  - registry rows: `persistenceFamily`, `servicePersistenceCandidate`,
+    `ifeoPersistenceCandidate`, `startupRegistryCandidate`
+  - image rows: `imageLoadFamily`, `injectionCandidate`,
+    `userWritableImageCandidate`
+  - network rows: `networkEvidenceKind`, `externalAddressCandidate`,
+    `lateralMovementCandidate`, `downloadExecuteCandidate`, `smbCandidate`,
+    `rpcCandidate`, `rdpCandidate`, `winrmCandidate`
+
+中文：这些字段只是“证据语义化”标签，方便报告展开、行为规则消费和人工复核；
+它们不是最终恶意 verdict。尤其是 `injectionCandidate`、`lateralMovementCandidate`
+和 `downloadExecuteCandidate` 需要与进程树、命令行、PCAP/HTTP/TLS、dropped files
+等证据组合判断。
 
 Queue, loss, sequence, and backpressure diagnostics are intentionally repeated
 with stable aliases across live rows:

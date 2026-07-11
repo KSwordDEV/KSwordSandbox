@@ -9,16 +9,17 @@
     "noNetworkPublishByPackageScript": true,
     "noGitPushByPackageScript": true,
     "noDriverSigningByPackageScript": true,
+    "guiSigningFallback": "forbidden",
     "legacyCSignToolDefaultPath": "forbidden",
     "runtimePayloadSource": "not applicable; source package is source-only",
-    "operatorDiagnostics": "install/run expose read-only Hyper-V prerequisite, VM profile, guest payload, VT key, runtime-root, and RuntimePublishRoot guidance; package-portable.ps1 writes generated metadata and prints stage/archive/safety diagnostics without VM or signing side effects"
+    "operatorDiagnostics": "install/run expose read-only Hyper-V prerequisite, VM profile, guest payload, VT key, runtime-root, and RuntimePublishRoot guidance; package-portable.ps1 writes generated metadata and prints stage/archive/safety diagnostics without VM, driver signing, GUI signing fallback, or CSignTool side effects"
   },
   "stagedMetadata": {
     "generatedManifest": "package-manifest.generated.json",
     "contains": [
       "package kind, version, source revision, branch, dirty-state preview",
       "staged file inventory with sizeBytes and sha256 for payload files",
-      "safety contract for secrets, VM state, runtime evidence, signing, push/publish, and CSignTool",
+    "safety contract for secrets, VM state, runtime evidence, signing, GUI signing fallback, push/publish, and CSignTool",
       "manifest required checks and optional packaging diagnostics"
     ],
     "selfHashNote": "The generated manifest lists itself in files but omits a recursive self-hash from fileInventory."

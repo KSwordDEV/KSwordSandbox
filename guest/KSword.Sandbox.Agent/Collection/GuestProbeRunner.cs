@@ -430,6 +430,7 @@ internal sealed class GuestProbeRunner
     {
         return probeId switch
         {
+            "file-diff" => new ProbeCollection("dropped-files", "dropped-file", "artifacts/dropped-files/**"),
             "screenshot" => new ProbeCollection("screenshots", "screenshot", "screenshots/*.bmp"),
             "memory-dump" => new ProbeCollection("memory-dumps", "memory-dump", "memory-dumps/*.dmp"),
             "packet-capture" => new ProbeCollection("packet-captures", "packet-capture", "packet-captures/*.pcapng"),
@@ -445,6 +446,7 @@ internal sealed class GuestProbeRunner
     {
         return probeId switch
         {
+            "file-diff" => context.CollectDroppedFiles,
             "screenshot" => context.CaptureScreenshots,
             "memory-dump" => context.CaptureMemoryDump,
             "packet-capture" => context.CapturePacketCapture,

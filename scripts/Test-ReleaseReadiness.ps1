@@ -7,12 +7,14 @@ This script is intentionally source/release oriented. It does not start,
 restore, stop, or mutate Hyper-V VMs; it does not sign drivers; it does not
 call CSignTool.exe; and it does not run heavyweight smoke suites by default.
 
-Inputs are the repository root plus opt-in switches for build and source-package
-staging. Processing checks git hygiene, repository policy, package manifest
-shape, PowerShell syntax for operational scripts, and accidental CSignTool
-references in normal release paths. Return behavior is exit code 0 when all
-required checks pass, otherwise exit code 1. Warnings are printed but do not
-fail unless -TreatWarningsAsErrors is supplied.
+Inputs are the repository root plus opt-in switches for build, source-package
+staging, and complete runtime-payload handoff checks. Processing checks git
+hygiene, repository policy, package manifest shape, runtime publish-root
+completeness when requested, PowerShell syntax for operational scripts, and
+accidental CSignTool/GUI-signing fallback references in normal release paths.
+Return behavior is exit code 0 when all required checks pass, otherwise exit
+code 1. Warnings are printed but do not fail unless -TreatWarningsAsErrors is
+supplied.
 #>
 [CmdletBinding()]
 param(
@@ -23,6 +25,10 @@ param(
     [switch]$AllowDirtySource,
 
     [switch]$StageSourcePackage,
+
+    [string]$RuntimePublishRoot,
+
+    [switch]$RequireCompleteRuntimePackage,
 
     [switch]$IncludeBuild,
 
@@ -350,7 +356,7 @@ function Test-PackageManifests {
             }
 
             $raw = Get-Content -LiteralPath $path -Raw
-            foreach ($requiredExclusion in @('*.vhdx', '*.sys', '*.pdb', '*.pcap', '*.pcapng', '*.dmp', '*.mdmp', '*.png', '*.jpg', '*.jsonl', '*.sqlite', 'screenshots/**', 'memory-dumps/**', 'packet-captures/**', 'sandbox.local.json', 'guest-password.dpapi')) {
+            foreach ($requiredExclusion in @('*.vhd', '*.vhdx', '*.vhdset', '*.vmcx', '*.sys', '*.pdb', '*.pcap', '*.pcapng', '*.dmp', '*.mdmp', '*.png', '*.jpg', '*.jsonl', '*.sqlite', '*.sqlite3', '*.db', '*.har', '*.trace', 'jobs/**', 'dumps/**', 'screenshots/**', 'memory-dumps/**', 'packet-captures/**', 'sandbox.local.json', 'guest-password.dpapi')) {
                 if ($raw.IndexOf($requiredExclusion, [StringComparison]::OrdinalIgnoreCase) -lt 0) {
                     [void]$issues.Add("Manifest does not mention required exclusion '$requiredExclusion': $relative")
                 }
@@ -358,6 +364,13 @@ function Test-PackageManifests {
 
             if ($null -eq $manifest.PSObject.Properties['releaseContract']) {
                 [void]$issues.Add("releaseContract is missing: $relative")
+            }
+            else {
+                $releaseContract = Get-ObjectPropertyValue -InputObject $manifest -Name 'releaseContract' -DefaultValue $null
+                $guiSigningFallback = [string](Get-ObjectPropertyValue -InputObject $releaseContract -Name 'guiSigningFallback' -DefaultValue '')
+                if ($guiSigningFallback -ine 'forbidden') {
+                    [void]$issues.Add("releaseContract.guiSigningFallback must be forbidden: $relative")
+                }
             }
 
             if ($null -eq $manifest.PSObject.Properties['stagedMetadata']) {
@@ -376,6 +389,14 @@ function Test-PackageManifests {
 
                 if ($raw.IndexOf('"sourceType": "runtimePublish"', [StringComparison]::OrdinalIgnoreCase) -lt 0) {
                     [void]$issues.Add("runtime manifest does not declare runtimePublish inputs: $relative")
+                }
+
+                $releaseContract = Get-ObjectPropertyValue -InputObject $manifest -Name 'releaseContract' -DefaultValue $null
+                if ($null -ne $releaseContract) {
+                    $requiresCompletePayloads = [bool](Get-ObjectPropertyValue -InputObject $releaseContract -Name 'completeRuntimePayloadsRequiredForHandoff' -DefaultValue $false)
+                    if (-not $requiresCompletePayloads) {
+                        [void]$issues.Add("runtime releaseContract must require complete runtime payloads for handoff: $relative")
+                    }
                 }
 
                 foreach ($entry in $includeEntries) {
@@ -407,6 +428,103 @@ function Test-PackageManifests {
         -Message "Package manifest checks found $($issues.Count) issue(s)." `
         -Remediation @('Update packaging manifests before release packaging.') `
         -Details @{ issues = @($issues.ToArray()) }
+}
+
+function Test-RuntimePublishCompleteness {
+    $manifestPath = Join-Path $RepositoryRoot 'packaging\runtime-package.manifest.json'
+    if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
+        Add-ReleaseCheckResult `
+            -Id 'runtime-publish-completeness' `
+            -Title 'Runtime publish completeness / runtime payload 完整性' `
+            -Status Failed `
+            -Message 'Runtime package manifest is missing.' `
+            -Remediation @('Restore packaging/runtime-package.manifest.json before release handoff.')
+        return
+    }
+
+    $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json -ErrorAction Stop
+    $runtimeEntries = @((Get-ObjectPropertyValue -InputObject $manifest -Name 'include' -DefaultValue @()) |
+        Where-Object { [string](Get-ObjectPropertyValue -InputObject $_ -Name 'sourceType' -DefaultValue 'repository') -eq 'runtimePublish' })
+
+    if ($runtimeEntries.Count -eq 0) {
+        Add-ReleaseCheckResult `
+            -Id 'runtime-publish-completeness' `
+            -Title 'Runtime publish completeness / runtime payload 完整性' `
+            -Status Failed `
+            -Message 'Runtime manifest does not declare runtimePublish entries.' `
+            -Remediation @('Declare host-web, guest-tools, tools/job-tool, and tools/postprocess runtimePublish entries.')
+        return
+    }
+
+    if ([string]::IsNullOrWhiteSpace($RuntimePublishRoot)) {
+        if ($RequireCompleteRuntimePackage) {
+            Add-ReleaseCheckResult `
+                -Id 'runtime-publish-completeness' `
+                -Title 'Runtime publish completeness / runtime payload 完整性' `
+                -Status Failed `
+                -Message '完整 runtime 便携包要求 -RuntimePublishRoot；当前未提供。' `
+                -Remediation @('先把 host-web、guest-tools、tools/job-tool、tools/postprocess 发布到仓库外目录，再重跑：.\scripts\Test-ReleaseReadiness.ps1 -RuntimePublishRoot <external-publish-root> -RequireCompleteRuntimePackage。') `
+                -Details @{ expectedSources = @($runtimeEntries | ForEach-Object { [string](Get-ObjectPropertyValue -InputObject $_ -Name 'source' -DefaultValue '') }) }
+            return
+        }
+
+        Add-ReleaseCheckResult `
+            -Id 'runtime-publish-completeness' `
+            -Title 'Runtime publish completeness / runtime payload 完整性' `
+            -Status Skipped `
+            -Message 'Skipped complete runtime payload gate. This is acceptable for source/layout readiness only; use -RuntimePublishRoot with -RequireCompleteRuntimePackage before runtime handoff.' `
+            -Details @{ expectedSources = @($runtimeEntries | ForEach-Object { [string](Get-ObjectPropertyValue -InputObject $_ -Name 'source' -DefaultValue '') }) }
+        return
+    }
+
+    $issues = New-Object System.Collections.Generic.List[string]
+    $rootFull = [System.IO.Path]::GetFullPath($RuntimePublishRoot)
+    $repoPrefix = ([System.IO.Path]::GetFullPath($RepositoryRoot)).TrimEnd('\', '/') + [System.IO.Path]::DirectorySeparatorChar
+    $rootPrefix = $rootFull.TrimEnd('\', '/') + [System.IO.Path]::DirectorySeparatorChar
+    if ($rootFull.StartsWith($repoPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+        [void]$issues.Add("RuntimePublishRoot must be outside the repository: $RuntimePublishRoot")
+    }
+
+    if (-not (Test-Path -LiteralPath $rootFull -PathType Container)) {
+        [void]$issues.Add("RuntimePublishRoot does not exist or is not a directory: $RuntimePublishRoot")
+    }
+    else {
+        foreach ($entry in $runtimeEntries) {
+            $source = [string](Get-ObjectPropertyValue -InputObject $entry -Name 'source' -DefaultValue '')
+            if ([string]::IsNullOrWhiteSpace($source)) {
+                [void]$issues.Add('Runtime publish entry is missing source.')
+                continue
+            }
+
+            $sourcePath = [System.IO.Path]::GetFullPath((Join-Path $rootFull $source))
+            if (($sourcePath -ne $rootFull) -and (-not $sourcePath.StartsWith($rootPrefix, [StringComparison]::OrdinalIgnoreCase))) {
+                [void]$issues.Add("Runtime publish entry escapes RuntimePublishRoot: $source")
+                continue
+            }
+
+            if (-not (Test-Path -LiteralPath $sourcePath -PathType Container)) {
+                [void]$issues.Add("Missing runtime publish payload directory: $source")
+            }
+        }
+    }
+
+    if ($issues.Count -eq 0) {
+        Add-ReleaseCheckResult `
+            -Id 'runtime-publish-completeness' `
+            -Title 'Runtime publish completeness / runtime payload 完整性' `
+            -Status Passed `
+            -Message 'RuntimePublishRoot is outside the repository and contains all expected runtime payload directories.'
+        return
+    }
+
+    $status = if ($RequireCompleteRuntimePackage) { 'Failed' } else { 'Warning' }
+    Add-ReleaseCheckResult `
+        -Id 'runtime-publish-completeness' `
+        -Title 'Runtime publish completeness / runtime payload 完整性' `
+        -Status $status `
+        -Message "Runtime publish completeness found $($issues.Count) issue(s)." `
+        -Remediation @('完整 runtime handoff 前必须补齐仓库外 RuntimePublishRoot；package/readiness 不会从仓库 bin/obj/x64 回退复制，也不会构建、签名或操作 VM。') `
+        -Details @{ issues = @($issues.ToArray()); runtimePublishRoot = $RuntimePublishRoot; requireCompleteRuntimePackage = [bool]$RequireCompleteRuntimePackage }
 }
 
 function Test-CSignToolNotInReleasePath {
@@ -464,6 +582,79 @@ function Test-CSignToolNotInReleasePath {
         -Message "Found $($legacyInvocations.Count) CSignTool invocation(s) in normal release scripts." `
         -Remediation @('Keep CSignTool usage out of normal install/run/package/readiness paths; use ordinary signtool/test-signing docs only when explicitly requested.') `
         -Details @{ matches = @($legacyInvocations.ToArray()) }
+}
+
+function Test-NoGuiSigningFallback {
+    $guiIndicators = New-Object System.Collections.Generic.List[object]
+    $files = @(Get-ChildItem -LiteralPath $RepositoryRoot -Recurse -File -Filter '*.ps1' |
+        Where-Object {
+            $_.FullName -notmatch '\\\.git\\' -and
+            $_.FullName -notmatch '\\bin\\|\\obj\\|\\x64\\' -and
+            $_.Name -notlike 'Sign-SandboxDriverWithKswordCSignTool.ps1'
+        })
+
+    foreach ($file in $files) {
+        $tokens = $null
+        $parseErrors = $null
+        $ast = [System.Management.Automation.Language.Parser]::ParseFile($file.FullName, [ref]$tokens, [ref]$parseErrors)
+        if (@($parseErrors).Count -gt 0) {
+            continue
+        }
+
+        $commandAsts = @($ast.FindAll({
+                    param($node)
+                    $node -is [System.Management.Automation.Language.CommandAst]
+                }, $true))
+
+        foreach ($commandAst in $commandAsts) {
+            $commandName = $commandAst.GetCommandName()
+            $leaf = if ([string]::IsNullOrWhiteSpace($commandName)) { '' } else { Split-Path -Leaf $commandName }
+            $text = $commandAst.Extent.Text
+            $isDirectGuiCommand = $leaf -in @('Out-GridView', 'AuthenticodeVariantGUI.exe')
+            $isGuiTypeOrAssembly = $text -match '(?i)(System\.Windows\.Forms|Microsoft\.Win32\.(OpenFileDialog|SaveFileDialog)|FolderBrowserDialog|OpenFileDialog|SaveFileDialog|PresentationFramework)'
+            $isGuiSignerProcess = $commandName -ieq 'Start-Process' -and $text -match '(?i)AuthenticodeVariantGUI\.exe'
+            if ($isDirectGuiCommand -or $isGuiTypeOrAssembly -or $isGuiSignerProcess) {
+                [void]$guiIndicators.Add([pscustomobject]@{
+                        Path       = $file.FullName
+                        LineNumber = $commandAst.Extent.StartLineNumber
+                        Line       = $text
+                    })
+            }
+        }
+
+        $typeAsts = @($ast.FindAll({
+                    param($node)
+                    $node -is [System.Management.Automation.Language.TypeExpressionAst]
+                }, $true))
+
+        foreach ($typeAst in $typeAsts) {
+            $typeName = [string]$typeAst.TypeName.FullName
+            if ($typeName -match '(?i)(System\.Windows\.Forms|Microsoft\.Win32\.(OpenFileDialog|SaveFileDialog)|FolderBrowserDialog|OpenFileDialog|SaveFileDialog)') {
+                [void]$guiIndicators.Add([pscustomobject]@{
+                        Path       = $file.FullName
+                        LineNumber = $typeAst.Extent.StartLineNumber
+                        Line       = $typeAst.Extent.Text
+                    })
+            }
+        }
+    }
+
+    if ($guiIndicators.Count -eq 0) {
+        Add-ReleaseCheckResult `
+            -Id 'no-gui-signing-fallback' `
+            -Title 'No GUI signing fallback / 无 GUI 签名回退' `
+            -Status Passed `
+            -Message 'Operational PowerShell scripts do not use GUI dialog APIs, Out-GridView, or AuthenticodeVariantGUI.exe as a signing fallback.'
+        return
+    }
+
+    Add-ReleaseCheckResult `
+        -Id 'no-gui-signing-fallback' `
+        -Title 'No GUI signing fallback / 无 GUI 签名回退' `
+        -Status Failed `
+        -Message "Found $($guiIndicators.Count) GUI fallback indicator(s) in operational PowerShell scripts." `
+        -Remediation @('Keep signing out of normal release paths. Lab-only signing must be explicit, non-interactive, and must fail or skip clearly instead of launching dialogs.') `
+        -Details @{ matches = @($guiIndicators.ToArray()) }
 }
 
 function Test-ReadinessNoVmMutationCommands {
@@ -576,7 +767,8 @@ function Test-DeploymentOperatorDiagnosticsContract {
             'runtimePublishRootMissingRecommendedActions',
             'externalStateDiagnostics',
             'runtimePublishRootMustBeOutsideRepository',
-            'no VM mutation, no driver signing, no CSignTool'
+            'no VM mutation, no driver signing, no GUI signing fallback',
+            'no CSignTool'
         )
         'scripts/install.ps1' = @(
             'ShowTestSigningGuidance',
@@ -668,6 +860,7 @@ function Test-DeploymentDocsOperatorHints {
             'runtimePublishRootMissingRecommendedActions',
             'externalStateDiagnostics',
             'no VM mutation',
+            'no GUI signing fallback',
             'CSignTool'
         )
     }
@@ -784,9 +977,11 @@ if ($gitAvailable) {
 }
 
 Test-PackageManifests
+Test-RuntimePublishCompleteness
 Test-PowerShellScriptSyntax
 Test-ScriptWrapperParameterSurface
 Test-CSignToolNotInReleasePath
+Test-NoGuiSigningFallback
 Test-ReadinessNoVmMutationCommands
 Test-DeploymentOperatorDiagnosticsContract
 Test-DeploymentDocsOperatorHints
@@ -811,9 +1006,12 @@ $summary = [pscustomobject][ordered]@{
     passedCount           = @($script:Results | Where-Object { $_.status -eq 'Passed' }).Count
     allowDirtySource      = [bool]$AllowDirtySource
     stageSourcePackage    = [bool]$StageSourcePackage
+    runtimePublishRoot    = if ([string]::IsNullOrWhiteSpace($RuntimePublishRoot)) { $null } else { $RuntimePublishRoot }
+    requireCompleteRuntimePackage = [bool]$RequireCompleteRuntimePackage
     includeBuild          = [bool]$IncludeBuild
     noVmMutation          = $true
     noDriverSigning       = $true
+    noGuiSigningFallback  = $true
     csignToolNotCalled    = $true
     results               = @($script:Results.ToArray())
 }

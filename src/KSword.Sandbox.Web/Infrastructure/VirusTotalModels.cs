@@ -218,17 +218,16 @@ internal sealed record VirusTotalLookupResult
 
     public bool CanPersistEnrichmentEvent => Configured &&
         Queried &&
-        (string.Equals(Status, VirusTotalLookupStatuses.Found, StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(Status, VirusTotalLookupStatuses.NotFound, StringComparison.OrdinalIgnoreCase));
+        string.Equals(Status, VirusTotalLookupStatuses.Found, StringComparison.OrdinalIgnoreCase);
 
     public IReadOnlyDictionary<string, string> RuleData => BuildRuleData();
 
     /// <summary>
     /// Converts the lookup result into a normalized enrichment event that the
     /// existing rule engine can classify without numeric predicates. Only real
-    /// found/not_found query outcomes are eligible; local configuration,
-    /// authentication, rate-limit, and timeout states intentionally stay out of
-    /// behavior rules.
+    /// found query outcomes are eligible; not_found, local configuration,
+    /// authentication, rate-limit, timeout, and transport states intentionally
+    /// stay out of behavior rules.
     /// </summary>
     public SandboxEvent ToRuleEvent(DateTimeOffset? timestamp = null)
     {
@@ -385,15 +384,15 @@ internal sealed record VirusTotalLookupResult
         var baseMessage = string.IsNullOrWhiteSpace(message) ? null : message.Trim();
         var explanation = status switch
         {
-            VirusTotalLookupStatuses.MissingHash => "Sample SHA-256 is unavailable; the official VirusTotal API was not called.",
-            VirusTotalLookupStatuses.InvalidHash => "Sample SHA-256 is malformed; the official VirusTotal API was not called.",
-            VirusTotalLookupStatuses.NotConfigured => "VirusTotal API key is not configured; lookup is skipped without writing job logs.",
-            VirusTotalLookupStatuses.NotFound => "VirusTotal returned 404 for this SHA-256; this is reputation status, not sample behavior.",
-            VirusTotalLookupStatuses.RateLimited => "VirusTotal returned a rate-limit response; lookup is quiet and can be retried later.",
-            VirusTotalLookupStatuses.AuthenticationFailed => "VirusTotal rejected the configured API key; check Settings before retrying.",
-            VirusTotalLookupStatuses.Timeout => "VirusTotal lookup timed out; sandbox execution continues and no job log is written.",
-            VirusTotalLookupStatuses.LookupFailed => "VirusTotal lookup failed during transport, HTTP, or response parsing; the failure stays display-only.",
-            _ => "VirusTotal lookup is in a quiet non-blocking state."
+            VirusTotalLookupStatuses.MissingHash => "样本 SHA-256 不可用，未调用 VirusTotal 官方 API；仅作为页面状态展示，不写任务/行为日志 / Sample SHA-256 is unavailable; official API was not called.",
+            VirusTotalLookupStatuses.InvalidHash => "样本 SHA-256 格式无效，未调用 VirusTotal 官方 API；仅作为页面状态展示，不写任务/行为日志 / Sample SHA-256 is malformed; official API was not called.",
+            VirusTotalLookupStatuses.NotConfigured => "VirusTotal API Key 未配置，已静默跳过查询；沙箱执行继续，不写任务/行为日志 / API key is not configured; lookup is skipped quietly.",
+            VirusTotalLookupStatuses.NotFound => "VirusTotal 未收录该 SHA-256；这是信誉查询状态，不代表样本行为，默认不写任务/行为日志 / VirusTotal has no report for this SHA-256; this is reputation status, not sample behavior.",
+            VirusTotalLookupStatuses.RateLimited => "VirusTotal 返回限速，已静默停止本次查询；可稍后重试，不写任务/行为日志 / VirusTotal returned a rate-limit response; retry later.",
+            VirusTotalLookupStatuses.AuthenticationFailed => "VirusTotal 拒绝当前 API Key；请在设置页检查，沙箱执行继续，不写任务/行为日志 / VirusTotal rejected the API key; check Settings before retrying.",
+            VirusTotalLookupStatuses.Timeout => "VirusTotal 查询超时；沙箱执行继续，该超时仅在页面展示，不写任务/行为日志 / VirusTotal lookup timed out; sandbox execution continues.",
+            VirusTotalLookupStatuses.LookupFailed => "VirusTotal 查询在网络、HTTP 或解析阶段失败；失败仅在页面展示，不写任务/行为日志 / VirusTotal lookup failed during transport, HTTP, or response parsing.",
+            _ => "VirusTotal 处于静默非阻断状态；仅页面展示，不写任务/行为日志 / VirusTotal lookup is in a quiet non-blocking state."
         };
 
         if (httpStatusCode is not null && !explanation.Contains(httpStatusCode.Value.ToString(CultureInfo.InvariantCulture), StringComparison.Ordinal))
@@ -408,6 +407,6 @@ internal sealed record VirusTotalLookupResult
 
         return baseMessage is null
             ? explanation
-            : $"{baseMessage} {explanation}";
+            : $"{explanation} Provider message: {baseMessage}";
     }
 }

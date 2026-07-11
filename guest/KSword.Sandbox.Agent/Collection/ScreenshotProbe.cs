@@ -118,6 +118,7 @@ internal sealed class ScreenshotProbe : IGuestProbe
                 ["screenshotStage"] = request.StageLabel,
                 ["captureEnabled"] = "true",
                 ["implemented"] = "true",
+                ["capturePolicy"] = "explicit-opt-in-screenshot",
                 ["captureState"] = result.Captured ? "captured" : "skipped",
                 ["status"] = result.Captured ? "captured" : "skipped",
                 ["nonfatal"] = FormatBoolean(!result.Captured),
@@ -128,6 +129,12 @@ internal sealed class ScreenshotProbe : IGuestProbe
                 ["screenshotCount"] = request.TotalCount.ToString(CultureInfo.InvariantCulture),
                 ["artifactLabel"] = request.ArtifactLabel,
                 ["expectedRelativePath"] = "screenshots/*.bmp",
+                ["imageFormat"] = "bmp",
+                ["bitsPerPixel"] = "32",
+                ["captureMethod"] = "windows-gdi-bitblt",
+                ["captureSurface"] = "virtual-screen",
+                ["userInteractive"] = Environment.UserInteractive.ToString(CultureInfo.InvariantCulture).ToLowerInvariant(),
+                ["sessionName"] = Environment.GetEnvironmentVariable("SESSIONNAME") ?? string.Empty,
                 ["samplePath"] = context.SamplePath
             }
         };
@@ -182,9 +189,22 @@ internal sealed class ScreenshotProbe : IGuestProbe
         if (!string.IsNullOrWhiteSpace(result.Path))
         {
             var relativePath = SafeRelativePath(context.OutputDirectory, result.Path);
+            var artifactRelativePath = SafeArtifactRelativePath(context.OutputDirectory, result.Path);
             evt.Data["relativePath"] = relativePath;
-            AddIfNotEmpty(evt.Data, "artifactRelativePath", SafeArtifactRelativePath(context.OutputDirectory, result.Path));
+            evt.Data["screenshotPath"] = result.Path;
+            evt.Data["screenshotRelativePath"] = relativePath;
+            evt.Data["artifactFullPath"] = result.Path;
+            AddIfNotEmpty(evt.Data, "artifactRelativePath", artifactRelativePath);
+            evt.Data["artifactRelativePathStatus"] = string.IsNullOrWhiteSpace(artifactRelativePath) ? "outside-output-root" : "captured";
             AddArtifactFileEvidence(evt, result.Path);
+        }
+        else
+        {
+            evt.Data["artifactExists"] = "false";
+            evt.Data["artifactIntegrityState"] = result.Captured ? "missing" : "skipped";
+            evt.Data["artifactRelativePathStatus"] = result.Captured ? "missing" : "not-created";
+            evt.Data["sizeBytesStatus"] = result.Captured ? "missing" : "not-created";
+            evt.Data["sha256Status"] = result.Captured ? "missing" : "not-created";
         }
 
         return evt;
@@ -207,6 +227,7 @@ internal sealed class ScreenshotProbe : IGuestProbe
                 ["capturePhase"] = "before-start",
                 ["captureEnabled"] = "false",
                 ["implemented"] = "true",
+                ["capturePolicy"] = "explicit-opt-in-screenshot",
                 ["reason"] = "screenshotNotRequested",
                 ["zhMessage"] = "截图采集未启用。",
                 ["zhHint"] = "未启用 --screenshot/--screenshots，Guest Agent 不会截取桌面内容。",
@@ -217,6 +238,9 @@ internal sealed class ScreenshotProbe : IGuestProbe
                 ["collectionName"] = "screenshots",
                 ["processRole"] = context.RootProcessId is null ? "sample-context" : "sample-root-context",
                 ["expectedRelativePath"] = "screenshots/*.bmp",
+                ["artifactRelativePathStatus"] = "disabled",
+                ["sizeBytesStatus"] = "disabled",
+                ["sha256Status"] = "disabled",
                 ["samplePath"] = context.SamplePath
             }
         };

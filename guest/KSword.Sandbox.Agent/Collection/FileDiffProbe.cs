@@ -113,13 +113,19 @@ internal sealed class FileDiffProbe : IGuestProbe
                 ["probePhase"] = "after-run",
                 ["captureEnabled"] = "true",
                 ["implemented"] = "true",
+                ["capturePolicy"] = "always-on-working-directory-file-diff",
+                ["droppedFileArtifactCopyPolicy"] = "explicit-opt-in-copy-after-run",
+                ["artifactRelativePathStatus"] = "not-created-by-file-diff",
                 ["evidenceRole"] = "dropped-file-candidate",
                 ["collectionName"] = "file-diff",
                 ["processRole"] = context.RootProcessId is null ? "sample-context" : "sample-root-context",
                 ["samplePath"] = context.SamplePath,
                 ["expectedRelativePath"] = "artifacts/dropped-files/**",
                 ["root"] = root,
-                ["relativePath"] = SafeRelativePath(root, path)
+                ["sourcePath"] = path,
+                ["guestFullPath"] = path,
+                ["relativePath"] = SafeRelativePath(root, path),
+                ["guestRelativePath"] = SafeRelativePath(root, path)
             }
         };
 
@@ -238,7 +244,7 @@ internal sealed class FileDiffProbe : IGuestProbe
     {
         try
         {
-            return Path.GetRelativePath(root, path);
+            return Path.GetRelativePath(root, path).Replace('\\', '/');
         }
         catch (ArgumentException)
         {

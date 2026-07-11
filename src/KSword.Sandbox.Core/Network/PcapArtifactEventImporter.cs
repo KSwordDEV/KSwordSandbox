@@ -348,7 +348,7 @@ public sealed class PcapArtifactEventImporter
 
     private static IEnumerable<SandboxEvent> BuildProtocolEvents(string path, DecodedPacket packet, NetworkArtifactSource source)
     {
-        if (packet.TransportProtocol == "UDP" && (packet.SourcePort == 53 || packet.DestinationPort == 53))
+        if ((packet.TransportProtocol is "UDP" or "TCP") && (packet.SourcePort == 53 || packet.DestinationPort == 53))
         {
             var dns = TryParseDns(packet.Payload.AsSpan());
             if (dns is not null)
@@ -453,8 +453,14 @@ public sealed class PcapArtifactEventImporter
             ["responseCode"] = dns.RCode,
             ["dnsRcode"] = dns.RCode,
             ["isResponse"] = dns.IsResponse.ToString(CultureInfo.InvariantCulture).ToLowerInvariant(),
+            ["answer"] = dns.Answers,
+            ["answers"] = dns.Answers,
+            ["resolvedIps"] = dns.Answers,
+            ["dnsAnswers"] = dns.Answers,
+            ["answerCount"] = dns.AnswerCount,
+            ["ttl"] = dns.Ttl,
             ["classification"] = isNxDomain ? "nxdomain" : string.Empty,
-            ["dnsOutcome"] = isNxDomain ? "negative" : string.Empty,
+            ["dnsOutcome"] = isNxDomain ? "negative" : string.IsNullOrWhiteSpace(dns.Answers) ? string.Empty : "answered",
             ["isNxDomain"] = isNxDomain ? "true" : string.Empty
         };
     }
@@ -718,6 +724,7 @@ public sealed class PcapArtifactEventImporter
 
     private static DnsInfo? TryParseDns(ReadOnlySpan<byte> payload)
     {
+        payload = StripDnsTcpLengthPrefix(payload);
         if (payload.Length < 12)
         {
             return null;
@@ -725,38 +732,179 @@ public sealed class PcapArtifactEventImporter
 
         var flags = BinaryPrimitives.ReadUInt16BigEndian(payload.Slice(2, 2));
         var questionCount = BinaryPrimitives.ReadUInt16BigEndian(payload.Slice(4, 2));
+        var answerCount = BinaryPrimitives.ReadUInt16BigEndian(payload.Slice(6, 2));
         if (questionCount == 0)
         {
             return null;
         }
 
         var offset = 12;
-        var labels = new List<string>();
-        for (var guard = 0; guard < 128 && offset < payload.Length; guard++)
-        {
-            var length = payload[offset++];
-            if (length == 0)
-            {
-                break;
-            }
-
-            if ((length & 0xC0) != 0 || length > 63 || offset + length > payload.Length)
-            {
-                return null;
-            }
-
-            labels.Add(Encoding.ASCII.GetString(payload.Slice(offset, length)));
-            offset += length;
-        }
-
-        if (labels.Count == 0 || offset + 4 > payload.Length)
+        if (!TryReadDnsName(payload, ref offset, out var queryName) ||
+            string.IsNullOrWhiteSpace(queryName) ||
+            offset + 4 > payload.Length)
         {
             return null;
         }
 
         var qtype = BinaryPrimitives.ReadUInt16BigEndian(payload.Slice(offset, 2));
+        offset += 4; // qtype + qclass
+        for (var questionIndex = 1; questionIndex < questionCount; questionIndex++)
+        {
+            if (!TryReadDnsName(payload, ref offset, out _) || offset + 4 > payload.Length)
+            {
+                break;
+            }
+
+            offset += 4;
+        }
+
+        var answers = new List<string>();
+        var ttl = string.Empty;
+        for (var answerIndex = 0; answerIndex < answerCount && answerIndex < 32; answerIndex++)
+        {
+            if (!TryReadDnsName(payload, ref offset, out _) || offset + 10 > payload.Length)
+            {
+                break;
+            }
+
+            var answerType = BinaryPrimitives.ReadUInt16BigEndian(payload.Slice(offset, 2));
+            offset += 2;
+            offset += 2; // class
+            var answerTtl = BinaryPrimitives.ReadUInt32BigEndian(payload.Slice(offset, 4));
+            offset += 4;
+            var dataLength = BinaryPrimitives.ReadUInt16BigEndian(payload.Slice(offset, 2));
+            offset += 2;
+            if (offset + dataLength > payload.Length)
+            {
+                break;
+            }
+
+            var dataOffset = offset;
+            var answer = ReadDnsAnswer(payload, answerType, dataOffset, dataLength);
+            if (!string.IsNullOrWhiteSpace(answer))
+            {
+                answers.Add(answer);
+                if (string.IsNullOrWhiteSpace(ttl))
+                {
+                    ttl = answerTtl.ToString(CultureInfo.InvariantCulture);
+                }
+            }
+
+            offset = dataOffset + dataLength;
+        }
+
         var rcode = flags & 0x000F;
-        return new DnsInfo(string.Join('.', labels), DnsTypeName(qtype), DnsRCodeName(rcode), (flags & 0x8000) != 0);
+        return new DnsInfo(
+            NetworkTelemetrySchema.NormalizeDnsName(queryName),
+            NetworkTelemetrySchema.NormalizeDnsRecordType(DnsTypeName(qtype)),
+            NetworkTelemetrySchema.NormalizeDnsRCode(DnsRCodeName(rcode)),
+            (flags & 0x8000) != 0,
+            NetworkTelemetrySchema.NormalizeDnsAnswerList(string.Join(",", answers)),
+            answerCount.ToString(CultureInfo.InvariantCulture),
+            ttl);
+    }
+
+    private static ReadOnlySpan<byte> StripDnsTcpLengthPrefix(ReadOnlySpan<byte> payload)
+    {
+        if (payload.Length < 14)
+        {
+            return payload;
+        }
+
+        var declaredLength = BinaryPrimitives.ReadUInt16BigEndian(payload.Slice(0, 2));
+        return declaredLength > 0 && declaredLength <= payload.Length - 2
+            ? payload.Slice(2, declaredLength)
+            : payload;
+    }
+
+    private static bool TryReadDnsName(ReadOnlySpan<byte> payload, ref int offset, out string name)
+    {
+        name = string.Empty;
+        var cursor = offset;
+        var jumped = false;
+        var labels = new List<string>();
+        var visitedPointers = new HashSet<int>();
+
+        for (var guard = 0; guard < 128 && cursor < payload.Length; guard++)
+        {
+            var length = payload[cursor++];
+            if (length == 0)
+            {
+                if (!jumped)
+                {
+                    offset = cursor;
+                }
+
+                name = string.Join('.', labels);
+                return true;
+            }
+
+            if ((length & 0xC0) == 0xC0)
+            {
+                if (cursor >= payload.Length)
+                {
+                    return false;
+                }
+
+                var pointer = ((length & 0x3F) << 8) | payload[cursor++];
+                if (pointer < 0 || pointer >= payload.Length || !visitedPointers.Add(pointer))
+                {
+                    return false;
+                }
+
+                if (!jumped)
+                {
+                    offset = cursor;
+                }
+
+                cursor = pointer;
+                jumped = true;
+                continue;
+            }
+
+            if ((length & 0xC0) != 0 || length > 63 || cursor + length > payload.Length)
+            {
+                return false;
+            }
+
+            labels.Add(Encoding.ASCII.GetString(payload.Slice(cursor, length)));
+            cursor += length;
+        }
+
+        return false;
+    }
+
+    private static string ReadDnsAnswer(ReadOnlySpan<byte> payload, ushort answerType, int dataOffset, ushort dataLength)
+    {
+        var data = payload.Slice(dataOffset, dataLength);
+        if (answerType == 1 && data.Length == 4)
+        {
+            return new IPAddress(data.ToArray()).ToString();
+        }
+
+        if (answerType == 28 && data.Length == 16)
+        {
+            return new IPAddress(data.ToArray()).ToString();
+        }
+
+        if (answerType is 2 or 5 or 12 && data.Length > 0)
+        {
+            var nameOffset = dataOffset;
+            return TryReadDnsName(payload, ref nameOffset, out var name)
+                ? NetworkTelemetrySchema.NormalizeDnsName(name)
+                : string.Empty;
+        }
+
+        if (answerType == 16 && data.Length > 1)
+        {
+            var textLength = data[0];
+            if (textLength > 0 && 1 + textLength <= data.Length)
+            {
+                return Encoding.ASCII.GetString(data.Slice(1, textLength));
+            }
+        }
+
+        return string.Empty;
     }
 
     private static HttpInfo? TryParseHttp(ReadOnlySpan<byte> payload)
@@ -1483,7 +1631,14 @@ public sealed class PcapArtifactEventImporter
 
     private sealed record PcapPacket(int Index, uint LinkType, DateTimeOffset Timestamp, byte[] Data);
 
-    private sealed record DnsInfo(string QueryName, string QueryType, string RCode, bool IsResponse);
+    private sealed record DnsInfo(
+        string QueryName,
+        string QueryType,
+        string RCode,
+        bool IsResponse,
+        string Answers,
+        string AnswerCount,
+        string Ttl);
 
     private sealed record HttpInfo(
         string MessageType,

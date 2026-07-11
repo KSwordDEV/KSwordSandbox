@@ -13,6 +13,23 @@ IOCTL 从内核驱动读取事件并写出 JSONL。所有 `eventType`、JSON key
 `diagnosticCode`、`reason`、`readinessState` 等机器字段保持英文稳定值；
 中文只作为附加 `zhMessage`、`zhHint`、`zhNote`、`zh*Policy` 字段出现。
 
+判读总则 / interpretation guardrails：
+
+- ABI/version/size/capability/mask 字段用于证明 collector 与 driver 对同一 public
+  wire contract 的理解是否一致；它们是兼容性 evidence，不是样本行为 verdict。
+- `noise`、`selfNoise`、`collectorSelfNoise`、`collectorSuppressedEvents` 和
+  `collectorSkippedEvents` 是采集噪声/采样标签。它们帮助 operator 区分 KSword
+  infrastructure 与样本证据，但不能被解释成“可信进程”或“恶意进程”的最终判定。
+- `lost`、`lossObserved`、`backpressure`、`backpressureObserved`、
+  `backpressureReason`、`highWatermark` 和 sequence gaps 是 non-blocking ring 的
+  queue-quality evidence。Driver 不因为这些字段等待、阻断或修改样本 I/O；collector/report
+  只据此说明采集完整性。
+- R0 `driver.network` 只提供 WFP/ALE endpoint metadata。`serviceHint`、
+  `semanticCandidate`、`dnsCandidate`、`httpCandidate`、`tlsCandidate` 只是
+  port/protocol correlation labels；DNS query、HTTP method/host/URI、TLS SNI 和 packet
+  details 必须来自 PCAP import rows（如 `pcap.flow`、`pcap.dns`、`pcap.http`、
+  `pcap.tls`），不能从 R0 candidate 字段反推。
+
 当前状态：
 
 - 使用 `CreateFileW` 打开 driver Win32 path `\\.\KSwordSandboxDriver`。
@@ -213,6 +230,11 @@ address bytes 也以 `localAddressHex` 和 `remoteAddressHex` 保留用于 diagn
 Synthetic `driver.network` rows 与 valid extra-field JSONL noise row 使用相同的
 `sourceEndpoint`、`destinationEndpoint`、`flowKey` 名称，使 no-device stress runs
 能在 WFP 加载前覆盖 report correlation contract。
+
+网络语义注意：`serviceHint` 和 DNS/HTTP/TLS candidate booleans 是 evidence labels，
+不是协议解析 verdict。R0Collector 不从 ALE payload 中解析 DNS name、HTTP Host/URI 或 TLS
+SNI；它只保留 endpoint/PID/layer/callout/filter 信息，让 Host import 可以把这些行与
+PCAP-derived rows 关联。
 
 当 file/process/image/registry payload 携带 bounded subject path 时，top-level
 `SandboxEvent.path` 会设置为该 subject path，让 WebUI live monitor 和 HTML report
@@ -417,6 +439,10 @@ parsing, and every parsed synthetic driver row has `eventOrigin`,
 `producerCategory`, `subjectKind`, `processIdSource`, and `selfNoise` fields.
 
 ### JSONL 质量与噪声契约 / JSONL quality and noise contract
+
+中文：本节列出的字段全部是“证据质量、归因或采集状态”标签。它们帮助 operator 判断
+JSONL 是否完整、哪些行被抑制、是否存在 queue pressure；它们不是 malicious/benign verdict，
+也不是 block/allow decision。
 
 Every collector-owned row keeps the event-quality fields stable under `data`:
 
@@ -733,7 +759,8 @@ backpressure 有意保持 non-blocking。kernel producers 不应等待 collector
 如果 fixed ring overflow，最旧的未读 records 可能被覆盖，collector 必须通过
 `TotalEventsDropped`、`EventsDropped`、`ProducerDroppedMask`、`NextSequence` 和
 `sequence` gaps 暴露 loss。如果 ring 只是有压力但尚未满，`TotalEventsBackpressured` 和
-`ProducerBackpressureMask` 标识 queue 超过阈值时观察到的 producer families。
+`ProducerBackpressureMask` 标识 queue 超过阈值时观察到的 producer families。这些字段只说明
+采集队列质量，不说明 kernel producer 阻断了文件、注册表、进程或网络操作。
 
 ## R0Collector 压力/就绪操作者门禁 / R0Collector stress/readiness operator gate
 

@@ -121,6 +121,10 @@ internal sealed class MemoryDumpProbe : IGuestProbe
             Depth: 0,
             Lineage: rememberedRootProcessId.Value.ToString(CultureInfo.InvariantCulture),
             IsRoot: true,
+            StartTimeUtc: context.RootProcessStartTimeUtc,
+            SessionId: null,
+            ThreadCount: null,
+            BasePriority: null,
             SnapshotKey: string.Empty);
         return [await CaptureTargetAsync(context, phaseLabel, target, rememberedRootProcessId.Value, cancellationToken).ConfigureAwait(false)];
     }
@@ -340,8 +344,20 @@ internal sealed class MemoryDumpProbe : IGuestProbe
         {
             var relativePath = SafeRelativePathForEvent(outputDirectory, result.Path);
             evt.Data["relativePath"] = relativePath;
+            evt.Data["memoryDumpPath"] = result.Path;
+            evt.Data["dumpPath"] = result.Path;
+            evt.Data["memoryDumpRelativePath"] = relativePath;
+            evt.Data["dumpRelativePath"] = relativePath;
+            evt.Data["artifactFullPath"] = result.Path;
             AddOptionalData(evt, "artifactRelativePath", relativePath);
+            evt.Data["artifactRelativePathStatus"] = string.IsNullOrWhiteSpace(relativePath) ? "outside-output-root" : "captured";
             AddArtifactFileEvidence(evt, result.Path);
+        }
+        else
+        {
+            evt.Data["artifactRelativePathStatus"] = "missing";
+            evt.Data["sizeBytesStatus"] = "missing";
+            evt.Data["sha256Status"] = "missing";
         }
 
         return evt;
@@ -361,6 +377,11 @@ internal sealed class MemoryDumpProbe : IGuestProbe
         evt.Data["captureState"] = "skipped";
         evt.Data["status"] = "skipped";
         evt.Data["nonfatal"] = "true";
+        evt.Data["artifactExists"] = "false";
+        evt.Data["artifactIntegrityState"] = "skipped";
+        evt.Data["artifactRelativePathStatus"] = "not-created";
+        evt.Data["sizeBytesStatus"] = "not-created";
+        evt.Data["sha256Status"] = "not-created";
         evt.Data["duplicate"] = duplicate.ToString(CultureInfo.InvariantCulture).ToLowerInvariant();
         evt.Data["childProcessDumpTarget"] = (target is not null && !target.IsRoot).ToString(CultureInfo.InvariantCulture).ToLowerInvariant();
         AddOptionalData(evt, "reason", result.Reason);
@@ -408,6 +429,7 @@ internal sealed class MemoryDumpProbe : IGuestProbe
                 ["capturePhase"] = phaseLabel,
                 ["captureEnabled"] = "true",
                 ["implemented"] = "true",
+                ["capturePolicy"] = "explicit-opt-in-sensitive-memory-dump",
                 ["childProcessDumpEnabled"] = "true",
                 ["childProcessDumpMode"] = "visible-root-tree",
                 ["dumpType"] = result.DumpType,
@@ -439,6 +461,31 @@ internal sealed class MemoryDumpProbe : IGuestProbe
             evt.Data["childProcessDumpTarget"] = (!target.IsRoot).ToString(CultureInfo.InvariantCulture).ToLowerInvariant();
             evt.Data["memoryDumpCoverageRole"] = target.IsRoot ? "root" : "child";
             evt.Data["targetProcessName"] = target.ProcessName;
+            if (target.StartTimeUtc is not null)
+            {
+                evt.Data["targetProcessStartTimeUtc"] = target.StartTimeUtc.Value.ToString("O", CultureInfo.InvariantCulture);
+            }
+
+            if (target.SessionId is not null)
+            {
+                evt.Data["targetSessionId"] = target.SessionId.Value.ToString(CultureInfo.InvariantCulture);
+            }
+
+            if (target.ThreadCount is not null)
+            {
+                evt.Data["targetThreadCount"] = target.ThreadCount.Value.ToString(CultureInfo.InvariantCulture);
+            }
+
+            if (target.BasePriority is not null)
+            {
+                evt.Data["targetBasePriority"] = target.BasePriority.Value.ToString(CultureInfo.InvariantCulture);
+            }
+
+            evt.Data["dumpTargetKey"] = string.IsNullOrWhiteSpace(target.SnapshotKey)
+                ? target.ProcessId.ToString(CultureInfo.InvariantCulture)
+                : target.SnapshotKey;
+            evt.Data["duplicateKeyMode"] = "pid";
+            evt.Data["pidReuseGuarded"] = string.IsNullOrWhiteSpace(target.SnapshotKey) ? "false" : "snapshot-key-recorded";
             AddOptionalData(evt, "processName", target.ProcessName);
             AddOptionalData(evt, "targetProcessPath", target.Path);
             AddOptionalData(evt, "processPath", target.Path);
@@ -491,6 +538,7 @@ internal sealed class MemoryDumpProbe : IGuestProbe
                 ["capturePhase"] = phaseLabel,
                 ["captureEnabled"] = "true",
                 ["implemented"] = "true",
+                ["capturePolicy"] = "explicit-opt-in-sensitive-memory-dump",
                 ["childProcessDumpEnabled"] = "true",
                 ["childProcessDumpMode"] = "visible-root-tree",
                 ["captureState"] = "summary",
@@ -546,6 +594,7 @@ internal sealed class MemoryDumpProbe : IGuestProbe
                 ["capturePhase"] = "before-start",
                 ["captureEnabled"] = "false",
                 ["implemented"] = "true",
+                ["capturePolicy"] = "explicit-opt-in-sensitive-memory-dump",
                 ["childProcessDumpEnabled"] = "false",
                 ["childProcessDumpMode"] = "disabled-until-memory-dump-requested",
                 ["reason"] = "memoryDumpNotRequested",
@@ -559,6 +608,9 @@ internal sealed class MemoryDumpProbe : IGuestProbe
                 ["collectionName"] = "memory-dumps",
                 ["processRole"] = context.RootProcessId is null ? "sample-context" : "sample-root-context",
                 ["expectedRelativePath"] = "memory-dumps/*.dmp",
+                ["artifactRelativePathStatus"] = "disabled",
+                ["sizeBytesStatus"] = "disabled",
+                ["sha256Status"] = "disabled",
                 ["samplePath"] = context.SamplePath
             }
         };
@@ -704,6 +756,10 @@ internal sealed class MemoryDumpProbe : IGuestProbe
                 depth,
                 lineage,
                 isRoot,
+                process.StartTimeUtc,
+                process.SessionId,
+                process.ThreadCount,
+                process.BasePriority,
                 process.Key));
 
             if (!childrenByParent.TryGetValue(process.ProcessId, out var children))
@@ -838,6 +894,10 @@ internal sealed class MemoryDumpProbe : IGuestProbe
         int Depth,
         string Lineage,
         bool IsRoot,
+        DateTime? StartTimeUtc,
+        int? SessionId,
+        int? ThreadCount,
+        int? BasePriority,
         string? SnapshotKey);
 }
 

@@ -64,6 +64,10 @@ internal static class LiveEventsPage
             .artifact-warning { background:#fff7ed; border-color:#fdba74; color:#9a3412; }
             .artifact-warning code { background:#ffedd5; }
             .report-ready { background:#eff6ff; border:1px solid rgba(67,160,255,.35); border-radius:2px; margin-top:12px; padding:12px; }
+            .handoff-notice { border:1px solid rgba(67,160,255,.35); border-left:3px solid var(--blue); margin-top:12px; padding:12px; }
+            .handoff-notice.accepted { background:#eff6ff; color:#075985; }
+            .handoff-notice.attention { background:#fff7ed; border-color:#fdba74; color:#9a3412; }
+            .handoff-notice[hidden] { display:none; }
             .muted { color:var(--muted); }
             code { background:#eef7ff; border-radius:2px; padding:2px 5px; word-break:break-all; }
             .table-wrap { max-height:75vh; overflow:auto; border:1px solid var(--line); border-radius:2px; }
@@ -156,8 +160,8 @@ internal static class LiveEventsPage
             .report-ready { background:transparent; border-color:var(--line); }
 
             /* Square, flat operator theme: keep visual nesting shallow. */
-            section, article, .metric, .pill, button, a.button, a.buttonlink, input, code, pre, .pathbox, .callout, .report-notice, .report-entry, .workspace-tab, .tab-button, .tab-panel, details, .progress-box, .progress-bar, .progress-fill, .stage, .recent-job-card, .runbook-step, .empty, .table-wrap, .step-card, .artifact-group, .artifact-card, .cockpit-card, .report-ready, .countdown, .toast, .num { border-radius: 0 !important; }
-            section, article, .metric, .pathbox, .callout, .report-notice, .report-entry, .tab-panel, .progress-box, .stage, .recent-job-card, .runbook-step, .step-card, .artifact-group, .artifact-card, .cockpit-card, .report-ready { box-shadow: none !important; }
+            section, article, .metric, .pill, button, a.button, a.buttonlink, input, code, pre, .pathbox, .callout, .report-notice, .report-entry, .workspace-tab, .tab-button, .tab-panel, details, .progress-box, .progress-bar, .progress-fill, .stage, .recent-job-card, .runbook-step, .empty, .table-wrap, .step-card, .artifact-group, .artifact-card, .cockpit-card, .report-ready, .handoff-notice, .countdown, .toast, .num { border-radius: 0 !important; }
+            section, article, .metric, .pathbox, .callout, .report-notice, .report-entry, .tab-panel, .progress-box, .stage, .recent-job-card, .runbook-step, .step-card, .artifact-group, .artifact-card, .cockpit-card, .report-ready, .handoff-notice { box-shadow: none !important; }
             .pill, button, a.button, a.buttonlink { box-shadow: none !important; }
             @media(max-width:900px){ .grid{grid-template-columns:1fr;} header{padding:24px;} }
           </style>
@@ -194,6 +198,7 @@ internal static class LiveEventsPage
               </div>
               <div id="status" class="status muted" data-zh="等待连接实时事件流。" data-en="Waiting to connect live event stream.">等待连接实时事件流。</div>
               <div id="sources" class="muted"></div>
+              <div id="uploadHandoffNotice" class="handoff-notice" hidden data-copy="上传接管状态未启用 / upload handoff not active"></div>
             </section>
             <section>
               <h2 data-zh="运营态势驾驶舱" data-en="Operator cockpit">运营态势驾驶舱</h2>
@@ -226,7 +231,7 @@ internal static class LiveEventsPage
             </section>
             <section>
               <h2 data-zh="VirusTotal 官方结果" data-en="VirusTotal official result">VirusTotal 官方结果</h2>
-              <p class="muted" data-zh="只查询 SHA-256 文件报告，不上传样本；未配置、未收录、限速、鉴权失败或超时都作为静默状态展示，不影响沙箱流程，也不会写任务日志；只有显式要求持久化时才写入信誉增强证据。" data-en="SHA-256 file-report lookup only; samples are not uploaded. Not configured, not found, rate-limited, auth-failed, and timeout outcomes are shown as quiet states; they do not affect sandbox execution or write job logs, and only explicit persist writes durable enrichment evidence.">只查询 SHA-256 文件报告，不上传样本；未配置、未收录、限速、鉴权失败或超时都作为静默状态展示，不影响沙箱流程，也不会写任务日志；只有显式要求持久化时才写入信誉增强证据。</p>
+              <p class="muted" data-zh="只查询 SHA-256 文件报告，不上传样本；未配置、未收录、限速、鉴权失败、超时或查询失败都作为静默页面状态展示，不影响沙箱流程，也不写任务/行为日志；只有已收录结果被显式要求时才允许写入信誉增强证据。" data-en="SHA-256 file-report lookup only; samples are not uploaded. Not configured, not found, rate-limited, auth-failed, timeout, or lookup-failed outcomes are quiet page statuses; they do not affect sandbox execution or write job/behavior logs. Only found results can be explicitly persisted as reputation enrichment.">只查询 SHA-256 文件报告，不上传样本；未配置、未收录、限速、鉴权失败、超时或查询失败都作为静默页面状态展示，不影响沙箱流程，也不写任务/行为日志；只有已收录结果被显式要求时才允许写入信誉增强证据。</p>
               <div id="vtResult" class="metric muted" data-copy="VirusTotal：等待查询 / pending">VirusTotal：等待查询。</div>
               <button class="secondary" type="button" onclick="refreshVirusTotal()" data-zh="刷新 VirusTotal" data-en="Refresh VirusTotal">刷新 VirusTotal</button>
             </section>
@@ -287,7 +292,11 @@ internal static class LiveEventsPage
             let reportAutoOpenDeadline = 0;
             let reportAutoOpenHref = '';
             let reportAutoOpenRemainingSeconds = 0;
-            const autoOpenReportFromMonitor = new URLSearchParams(window.location.search).get('fromUpload') === '1';
+            const monitorQuery = new URLSearchParams(window.location.search);
+            const enteredFromUpload = monitorQuery.get('fromUpload') === '1';
+            const uploadHandoffAccepted = monitorQuery.get('accepted') === '1';
+            const uploadHandoffState = monitorQuery.get('state') || '';
+            const autoOpenReportFromMonitor = enteredFromUpload;
             const monitorStages = [
               ['启动 VM', 'Start VM', '还原快照并等待来宾机可用', 'Restore checkpoint and wait for guest readiness'],
               ['部署 Payload', 'Deploy payload', '传入样本、Agent 与采集器', 'Copy sample, agent, and collectors'],
@@ -301,7 +310,7 @@ internal static class LiveEventsPage
             function applyLanguage() {
               document.documentElement.lang = currentLanguage === 'en' ? 'en' : 'zh-CN';
               document.querySelectorAll('[data-zh][data-en]').forEach(el => {
-                if (el.id === 'status' || el.id === 'sources' || el.id === 'eventRows' || el.id === 'operatorCockpit' || el.id === 'artifactCards' || el.id === 'reportReadyActions' || el.id === 'vtResult') { return; }
+                if (el.id === 'status' || el.id === 'sources' || el.id === 'eventRows' || el.id === 'operatorCockpit' || el.id === 'artifactCards' || el.id === 'reportReadyActions' || el.id === 'vtResult' || el.id === 'uploadHandoffNotice') { return; }
                 el.textContent = t(el.getAttribute('data-zh'), el.getAttribute('data-en'));
               });
               document.getElementById('langToggle').textContent = currentLanguage === 'en' ? '切换到中文' : '切换到 English';
@@ -310,6 +319,7 @@ internal static class LiveEventsPage
               if (lastVirusTotalResult) { renderVirusTotal(lastVirusTotalResult); }
               renderOperatorOptions(latestJobSnapshot || initialJob);
               if (reportAutoOpenScheduled) { updateReportAutoOpenNotice(); }
+              renderUploadHandoffNotice();
               renderArtifactPanel();
               renderOperatorCockpit();
             }
@@ -369,6 +379,35 @@ internal static class LiveEventsPage
                 .replace(/\bfailed\b/gi, t('失败', 'failed'))
                 .replace(/\bsucceeded\b/gi, t('成功', 'succeeded'))
                 .replace(/\bcompleted\b/gi, t('已完成', 'completed'));
+            }
+
+            function renderUploadHandoffNotice() {
+              const target = document.getElementById('uploadHandoffNotice');
+              if (!target) { return; }
+              if (!enteredFromUpload) {
+                target.hidden = true;
+                return;
+              }
+
+              const stateToken = normalizeStatusToken(uploadHandoffState || 'submitted');
+              const stateLabel = localizeServerStatus(stateToken) || stateToken;
+              const handoffIssue = !uploadHandoffAccepted && !['queued', 'running', 'completed', 'complete', 'succeeded', 'success'].includes(stateToken);
+              const headline = handoffIssue
+                ? t('上传已创建任务，但后台启动未确认', 'Upload created a job, but background start is not confirmed')
+                : t('上传流程已接管到实时监控', 'Upload flow has handed off to the live monitor');
+              const detail = handoffIssue
+                ? t('任务上下文已保留；请查看下方后台执行状态和真实进度流，必要时打开执行流程页排查 VM 预检或凭据问题。', 'Job context is preserved; review the background status and real progress stream below, and open the execution-flow page for VM preflight or credential issues if needed.')
+                : t('Web Host 已接管后台执行，本页会连接真实进度流、原始事件流、证据索引和 VirusTotal 静默状态；不需要重新上传。', 'The Web Host owns background execution; this page connects the real progress stream, raw-event stream, artifact index, and quiet VirusTotal status. Do not upload again.');
+              const progressHref = `/jobs/${encodeURIComponent(jobId)}/execution-flow`;
+              const copy = `${headline}; job=${jobId}; accepted=${uploadHandoffAccepted}; state=${stateToken}; ${detail}`;
+              target.hidden = false;
+              target.className = `handoff-notice ${handoffIssue ? 'attention' : 'accepted'}`;
+              target.setAttribute('data-copy', copy);
+              target.innerHTML = `
+                <strong>${escapeHtml(headline)}</strong>
+                <p>${escapeHtml(detail)}</p>
+                <p><span class="pill ${handoffIssue ? 'failed' : 'endpoint'}" data-copy="${escapeAttr(stateToken)}">${escapeHtml(t('接管状态', 'Handoff state'))}：${escapeHtml(stateLabel)}</span>
+                <a class="button secondary" target="_blank" rel="noopener" href="${escapeAttr(progressHref)}">${escapeHtml(t('打开执行流程排障', 'Open execution flow'))}</a></p>`;
             }
 
             function firstDefined(...values) {
@@ -923,13 +962,13 @@ internal static class LiveEventsPage
             function renderVirusTotalCockpitCard() {
               const result = lastVirusTotalResult;
               if (!result) {
-                const copy = t('VirusTotal 等待查询；默认不上传样本，不写任务日志噪音。', 'VirusTotal waiting; no sample upload and no job-log noise by default.');
+                const copy = t('VirusTotal 等待查询；默认不上传样本，不写任务/行为日志噪音。', 'VirusTotal waiting; no sample upload and no job/behavior-log noise by default.');
                 return {
                   copy,
                   html: `<article class="cockpit-card waiting" data-copy="${escapeAttr(copy)}">
                     <h3>VirusTotal</h3>
                     <p class="cockpit-main">${escapeHtml(t('等待 SHA-256 查询', 'waiting for SHA-256 lookup'))}</p>
-                    <div class="cockpit-meta"><span class="pill quiet">${escapeHtml(t('默认不写日志噪音', 'no log noise by default'))}</span></div>
+                    <div class="cockpit-meta"><span class="pill quiet">${escapeHtml(t('默认不写任务/行为日志', 'no job/behavior log by default'))}</span></div>
                   </article>`
                 };
               }
@@ -942,7 +981,7 @@ internal static class LiveEventsPage
               const communityVotes = vtValue(result, 'communityVotes') || {};
               const community = virusTotalCommunityCopy(result, communityVotes);
               const permalink = vtValue(result, 'detectionPermalink') || vtValue(result, 'permalink') || '';
-              const policy = vtValue(result, 'liveLogPolicy') || t('页面展示；默认不写任务日志', 'display-only; no job log by default');
+              const policy = virusTotalPolicyText(vtValue(result, 'liveLogPolicy'));
               const headline = status === 'found'
                 ? t(`命中 ${malicious + suspicious} / 官方已收录`, `${malicious + suspicious} detections / found`)
                 : virusTotalStatusLabel(status, result);
@@ -954,7 +993,7 @@ internal static class LiveEventsPage
                   <p class="cockpit-main">${escapeHtml(headline)}</p>
                   <div class="cockpit-meta">
                     <span class="pill ${tone}" data-copy="${escapeAttr(status)}">${escapeHtml(virusTotalStatusLabel(status, result))}</span>
-                    <span class="pill quiet" data-copy="${escapeAttr(policy)}">${escapeHtml(t('默认不写日志噪音', 'no log noise by default'))}</span>
+                    <span class="pill quiet" data-copy="${escapeAttr(policy)}">${escapeHtml(t('默认不写任务/行为日志', 'no job/behavior log by default'))}</span>
                     <span class="pill ${permalink ? 'endpoint' : 'waiting'}" data-copy="${escapeAttr(permalink || t('官方链接未提供', 'official permalink not provided'))}">${escapeHtml(permalink ? t('官方链接就绪', 'permalink ready') : t('无官方链接', 'no permalink'))}</span>
                   </div>
                   <p class="muted" data-copy="${escapeAttr(community)}">${escapeHtml(community)}</p>
@@ -1851,7 +1890,10 @@ internal static class LiveEventsPage
               const state = formatProgressState(rawState);
               const done = rawState === 'completed' || snapshot.success === true;
               const failed = rawState === 'failed' || rawState === 'canceled' || snapshot.success === false;
-              const percent = progressPercent(snapshot);
+              const streamPercent = Number(lastProgressStreamEnvelope?.progressPercent);
+              const percent = progressStreamMode === 'sse' && Number.isFinite(streamPercent)
+                ? Math.max(0, Math.min(100, Math.round(streamPercent)))
+                : progressPercent(snapshot);
               const stageIndex = estimateMonitorStageIndex(percent, done, failed);
               const streamInfo = normalizeRunbookStepInfo(streamCurrentStep || lastProgressStreamEnvelope?.currentStep, snapshot);
               const snapshotInfo = currentStepInfoFromSnapshot(snapshot);
@@ -1859,7 +1901,7 @@ internal static class LiveEventsPage
               const current = snapshot.currentStepTitle || currentInfo?.title || (done ? t('所有步骤已完成', 'all steps completed') : t('等待下一步', 'waiting for next step'));
               const currentState = currentInfo?.state ? formatProgressState(currentInfo.state) : state;
               const currentOrdinal = currentInfo?.ordinalText || t('步骤序号待定', 'step ordinal pending');
-              const currentSource = streamInfo ? t('progress stream currentStep', 'progress stream currentStep') : t('轮询/持久化快照', 'poll/durable snapshot');
+              const currentSource = streamInfo ? t('真实进度流 currentStep', 'real progress stream currentStep') : t('轮询/持久化快照', 'poll/durable snapshot');
               const elapsed = formatDuration(snapshot.duration) || '-';
               const failedStep = steps.find(step => ['failed', 'canceled'].includes(String(step.state || '').toLowerCase()));
               const failureReason = buildProgressFailureReason(snapshot, failedStep);
@@ -2044,9 +2086,26 @@ internal static class LiveEventsPage
               } catch (error) {
                 // Keep VirusTotal silent and non-blocking. Operators can open
                 // Settings if they need to inspect the API key.
-                const detail = error && error.message ? error.message : t('VirusTotal 查询不可用。', 'VirusTotal lookup unavailable.');
+                const detail = error && error.message ? error.message : '';
                 const notConfigured = /not[_ -]?configured|api key|未配置/i.test(detail);
-                renderVirusTotal({ status: notConfigured ? 'not_configured' : 'lookup_failed', configured: !notConfigured, queried: false, message: detail });
+                const status = notConfigured ? 'not_configured' : 'lookup_failed';
+                const quietMessage = notConfigured
+                  ? t('VirusTotal API Key 未配置；官方查询已静默跳过，沙箱分析继续。', 'VirusTotal API key is not configured; official lookup was skipped quietly and sandbox analysis continues.')
+                  : t('VirusTotal 查询暂不可用；已作为页面静默状态处理，不写任务/行为日志，沙箱分析继续。', 'VirusTotal lookup is temporarily unavailable; it is handled as a quiet page status without job/behavior logs, and sandbox analysis continues.');
+                renderVirusTotal({
+                  status,
+                  configured: !notConfigured,
+                  queried: false,
+                  found: false,
+                  message: quietMessage,
+                  errorKind: 'ui_endpoint_quiet_status',
+                  isQuietState: true,
+                  quietFailureReason: status,
+                  quietFailureExplanation: quietMessage,
+                  liveLogPolicy: 'display_only_no_job_log_by_default',
+                  persistencePolicy: 'display_only_quiet_status_not_persisted',
+                  diagnosticMessage: detail
+                });
               }
             }
 
@@ -2117,9 +2176,9 @@ internal static class LiveEventsPage
               const retryHtml = retry ? `<p class="muted" data-copy="${escapeAttr(retry)}">${escapeHtml(retry)}</p>` : '';
               const isQuiet = Boolean(result.isQuietState || result.IsQuietState || workflowState === 'quiet');
               const quietNote = isQuiet
-                ? `<p class="muted">${escapeHtml(t('静默状态卡：未配置、未收录、限速、鉴权失败、超时或查询失败不会写入报告噪声，也不会中断分析。', 'Quiet status card: not configured, not found, rate limits, auth failures, timeouts, or lookup failures do not write report noise and do not interrupt analysis.'))}</p>`
+                ? `<p class="muted">${escapeHtml(t('静默状态卡：未配置、未收录、限速、鉴权失败、超时或查询失败只在页面展示，不写任务/行为日志，也不会中断分析。', 'Quiet status card: not configured, not found, rate limits, auth failures, timeouts, or lookup failures are display-only, do not write job/behavior logs, and do not interrupt analysis.'))}</p>`
                 : '';
-              const logPolicy = vtValue(result, 'liveLogPolicy') || t('页面展示；默认不写任务日志噪音', 'display-only; no job-log noise by default');
+              const logPolicy = virusTotalPolicyText(vtValue(result, 'liveLogPolicy'));
               const statusCopy = `${vtStatus}${vtValue(result, 'errorKind') ? ` / ${vtValue(result, 'errorKind')}` : ''}; ${logPolicy}`;
               target.className = className;
               target.innerHTML = `
@@ -2142,7 +2201,7 @@ internal static class LiveEventsPage
                   <span class="pill ${queried ? 'endpoint' : 'quiet'}" data-copy="${escapeAttr(queriedLabel)}">${escapeHtml(queriedLabel)}</span>
                   <span class="pill ${outcomeStatus.tone}" data-copy="${escapeAttr(outcomeStatus.copy)}">${escapeHtml(outcomeStatus.label)}</span>
                   <span class="pill quiet" data-copy="${escapeAttr(quietLabel)}">${escapeHtml(quietLabel)}</span>
-                  <span class="pill quiet" data-copy="${escapeAttr(logPolicy)}">${escapeHtml(t('默认不写日志噪音', 'no log noise by default'))}</span>
+                  <span class="pill quiet" data-copy="${escapeAttr(logPolicy)}">${escapeHtml(t('默认不写任务/行为日志', 'no job/behavior log by default'))}</span>
                 </div>
                 ${quietNote}
                 <div class="vt-stats">
@@ -2185,7 +2244,8 @@ internal static class LiveEventsPage
               const communityText = virusTotalCommunityText(result, communityVotes);
               const cache = virusTotalCacheText(result) || t('本次请求未使用可展示缓存元数据', 'no displayable cache metadata for this request');
               const permalink = vtValue(result, 'detectionPermalink') || vtValue(result, 'permalink') || '';
-              const logPolicy = vtValue(result, 'liveLogPolicy') || t('页面展示；未配置、限速、未收录默认不写任务日志', 'display-only; not configured, rate-limited, and not-found states do not write job logs by default');
+              const logPolicy = virusTotalPolicyText(vtValue(result, 'liveLogPolicy'));
+              const persistencePolicy = virusTotalPolicyText(vtValue(result, 'persistencePolicy'));
               const fields = [
                 { label: t('最后分析时间', 'Last analysis date'), value: lastAnalysis },
                 { label: t('官方信誉分', 'Official reputation'), value: reputation === null || reputation === undefined ? t('未提供', 'not provided') : String(reputation) },
@@ -2194,7 +2254,8 @@ internal static class LiveEventsPage
                 { label: t('引擎总数', 'Engine total'), value: String(engineTotal) },
                 { label: t('缓存元数据', 'Cache metadata'), value: cache },
                 { label: t('官方链接', 'Official permalink'), value: permalink || t('未提供', 'not provided') },
-                { label: t('日志策略', 'Log policy'), value: logPolicy }
+                { label: t('日志策略', 'Log policy'), value: logPolicy },
+                { label: t('持久化策略', 'Persistence policy'), value: persistencePolicy }
               ];
               const rows = fields.map(field => `<div class="vt-field" data-copy="${escapeAttr(`${field.label}: ${field.value}`)}"><b>${escapeHtml(field.label)}</b><span>${escapeHtml(field.value)}</span></div>`).join('');
               const apiSelfLink = vtValue(result, 'officialApiSelfLink');
@@ -2208,11 +2269,29 @@ internal static class LiveEventsPage
               </details>`;
             }
 
+            function virusTotalPolicyText(value) {
+              const raw = String(value || '').trim();
+              const key = raw.toLowerCase();
+              if (!key || key === 'display_only_no_job_log_by_default' || key === 'display_only_no_job_or_behavior_log_by_default') {
+                return t('仅页面状态；默认不写任务/行为日志', 'display-only; no job/behavior log by default');
+              }
+
+              if (key === 'display_only_quiet_status_not_persisted') {
+                return t('静默状态仅页面展示；不会写入信誉增强、任务日志或行为日志', 'quiet status is display-only; no enrichment, job log, or behavior log is written');
+              }
+
+              if (key === 'display_only_by_default_explicit_persist_supported') {
+                return t('默认仅页面展示；只有已收录结果可被显式写入信誉增强', 'display-only by default; only found results can be explicitly persisted as reputation enrichment');
+              }
+
+              return localizeServerMessage(raw);
+            }
+
             function virusTotalQuietExplanationHtml(result, status) {
               const isQuiet = Boolean(result?.isQuietState || result?.IsQuietState || virusTotalWorkflowState(result) === 'quiet');
               if (!isQuiet) { return ''; }
               const reason = vtValue(result, 'quietFailureReason') || status || 'quiet';
-              const explanation = vtValue(result, 'quietFailureExplanation') || result?.message || t('该状态只在页面展示，不写任务日志，也不阻断沙箱执行。', 'This state is displayed only; it does not write job logs or block sandbox execution.');
+              const explanation = vtValue(result, 'quietFailureExplanation') || result?.message || t('该状态只在页面展示，不写任务/行为日志，也不阻断沙箱执行。', 'This state is displayed only; it does not write job/behavior logs or block sandbox execution.');
               const httpStatusCode = vtValue(result, 'httpStatusCode');
               const errorKindValue = vtValue(result, 'errorKind');
               const http = httpStatusCode ? `HTTP ${httpStatusCode}` : '';
@@ -2222,7 +2301,7 @@ internal static class LiveEventsPage
                 <summary data-copy="${escapeAttr(parts || reason)}">${escapeHtml(t('静默失败/跳过解释', 'quiet failure/skip explanation'))}</summary>
                 <p data-copy="${escapeAttr(explanation)}">${escapeHtml(explanation)}</p>
                 ${parts ? `<p class="muted" data-copy="${escapeAttr(parts)}">${escapeHtml(parts)}</p>` : ''}
-                <p class="muted">${escapeHtml(t('默认 GET 查询只在页面展示；只有显式要求持久化，并且结果是已收录或未收录时，才允许写入信誉增强事件。', 'Default GET lookup is display-only; only explicit persist with found/not_found can write an enrichment event.'))}</p>
+                <p class="muted">${escapeHtml(t('默认 GET 查询只在页面展示；未配置、未收录和失败类状态不会写入信誉增强或行为日志，只有已收录结果被显式要求时才允许持久化。', 'Default GET lookup is display-only; not-configured, not-found, and failure states do not write enrichment or behavior logs, and only found results can be explicitly persisted.'))}</p>
               </details>`;
             }
 
@@ -2289,7 +2368,6 @@ internal static class LiveEventsPage
             }
 
             function virusTotalQuietDisplay(status, result) {
-              const message = result?.message || '';
               const displays = {
                 not_configured: {
                   label: t('未配置 API Key，官方结果已静默跳过。', 'API key not configured; official result skipped quietly.'),
@@ -2312,7 +2390,7 @@ internal static class LiveEventsPage
                   status: t('鉴权失败', 'auth failed')
                 },
                 timeout: {
-                  label: t('VirusTotal 查询超时；已作为静默状态处理，不写任务日志。', 'VirusTotal lookup timed out; it is handled as a quiet state and does not write job logs.'),
+                  label: t('VirusTotal 查询超时；已作为静默状态处理，不写任务/行为日志。', 'VirusTotal lookup timed out; it is handled as a quiet state and does not write job/behavior logs.'),
                   score: t('超时', 'timeout'),
                   status: t('超时', 'timeout')
                 },
@@ -2328,15 +2406,15 @@ internal static class LiveEventsPage
                 }
               };
               const display = displays[status] || {
-                label: t('VirusTotal 查询失败，已静默处理；沙箱流程继续。', 'VirusTotal lookup failed quietly; sandbox execution continues.'),
-                score: t('失败', 'failed'),
-                status: t('查询失败', 'lookup failed')
+                label: t('VirusTotal 查询失败，已静默处理；沙箱流程继续，不写任务/行为日志。', 'VirusTotal lookup failed quietly; sandbox execution continues without job/behavior logs.'),
+                score: t('静默', 'quiet'),
+                status: t('静默失败', 'quiet failure')
               };
               return {
-                label: message || display.label,
+                label: display.label,
                 score: display.score,
                 status: display.status,
-                className: status === 'lookup_failed' ? 'metric vt-card vt-warning' : 'metric vt-card vt-quiet'
+                className: 'metric vt-card vt-quiet'
               };
             }
 
@@ -2412,7 +2490,7 @@ internal static class LiveEventsPage
               if (state === 'completed') { return vtBoolValue(result, 'found') ? t('解析官方引擎统计', 'parsing official engine stats') : t('确认官方未收录', 'confirmed not found in official report'); }
               if (state === 'quiet') {
                 const steps = {
-                  not_configured: t('等待配置 API Key；未写任务日志', 'waiting for API key configuration; no job log was written'),
+                  not_configured: t('等待配置 API Key；未写任务/行为日志', 'waiting for API key configuration; no job/behavior log was written'),
                   not_found: t('确认未收录；默认只在页面展示不落盘', 'confirmed not found; display-only by default'),
                   rate_limited: t('收到限速响应；等待后再查', 'received rate limit; wait before retrying'),
                   authentication_failed: t('API Key 鉴权失败；请到设置页检查', 'API key authentication failed; check Settings'),

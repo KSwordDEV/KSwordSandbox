@@ -3,7 +3,7 @@
 本页是当前 MVP 文档的轻量索引，用于减少文档漂移：当两个文档覆盖同一主题时，
 优先更新下方 canonical（权威）文档，其他文档只保留短指针或历史说明。
 
-English reference: this page is the lightweight index for the current MVP documentation.
+英文提示：本页同时作为 current MVP documentation 的 lightweight index。
 
 ## 当前 MVP 一段话 / Current MVP in one paragraph
 
@@ -47,7 +47,7 @@ runtime job 目录、生成的报告、guest payload 二进制、抓包、内存
 
 | 任务 / Task | 权威文档 / Canonical document(s) | 说明 / Notes |
 | --- | --- | --- |
-| 项目概览与边界 / Project overview and guardrails | [`../README.md`](../README.md), [`current-architecture-and-operations.md`](current-architecture-and-operations.md) | 根 README 是入口；current architecture/operations 是 MVP 状态和操作者地图的权威说明。 |
+| 项目概览与边界 / Project overview and guardrails | [`../README.md`](../README.md), [`current-architecture-and-operations.md`](current-architecture-and-operations.md) | 根 README 是入口；`current-architecture-and-operations.md` 是 MVP 状态和操作者地图的权威说明。 |
 | 安装、本地配置和密钥 / Install, local config, secrets | [`install.md`](install.md) | 集中说明 guest 密码、VT key 和 VM 配置。 |
 | 日常 WebUI / CLI 入口 / Daily WebUI / CLI entry point | [`run.md`](run.md) | 覆盖 WebUI 启动、Analyze 快捷入口、PlanOnly vs Live、报告重建和 artifact 检查。 |
 | Hyper-V live 操作者流程 / Hyper-V live operator flow | [`hyperv-e2e-runbook.md`](hyperv-e2e-runbook.md), [`hyperv-readiness.md`](hyperv-readiness.md) | 脚本化 PlanOnly/WhatIf/Live 流程和只读预检。 |
@@ -57,7 +57,7 @@ runtime job 目录、生成的报告、guest payload 二进制、抓包、内存
 | Guest 采集 / Guest collection | [`guest-agent.md`](guest-agent.md), [`guest-agent-framework.md`](guest-agent-framework.md) | 事件/artifact 覆盖和 probe 框架说明。 |
 | R0 采集和驱动 ABI / R0 collection and driver ABI | [`r0-collector.md`](r0-collector.md), [`r0-jsonl-schema.md`](r0-jsonl-schema.md), [`r0-driver-core.md`](r0-driver-core.md), [`driver-install.md`](driver-install.md) | Collector JSONL 与 kernel/user ABI 是权威说明；driver install 是 VM-only 操作者 runbook。 |
 | R0 producer 说明 / R0 producer notes | [`r0-driver.md`](r0-driver.md), [`r0-file-monitor.md`](r0-file-monitor.md), [`r0-process-registry-image.md`](r0-process-registry-image.md), [`r0-network.md`](r0-network.md) | Producer 专项说明应链接回 `r0-driver-core.md`，避免重复 ABI 细节。 |
-| 行为规则与静态分析 / Behavior rules and static analysis | [`behavior-rule-matrix.md`](behavior-rule-matrix.md), [`rules-windows-sandbox.md`](rules-windows-sandbox.md), [`static-analysis.md`](static-analysis.md), [`../rules/static-analysis-notes.md`](../rules/static-analysis-notes.md) | Matrix 是完整清单；rules-windows 是可读摘要；static 文档覆盖宿主侧证据。 |
+| 行为规则与静态分析 / Behavior rules and static analysis | [`behavior-rule-matrix.md`](behavior-rule-matrix.md), [`rules-windows-sandbox.md`](rules-windows-sandbox.md), [`static-analysis.md`](static-analysis.md), [`../rules/static-analysis-notes.md`](../rules/static-analysis-notes.md) | `behavior-rule-matrix.md` 是完整清单；`rules-windows-sandbox.md` 是可读摘要；static 文档覆盖宿主侧证据。 |
 | VirusTotal | [`virustotal.md`](virustotal.md) | 可选 hash-only enrichment；不上传样本。 |
 | 打包/发布 / Packaging/release | [`release.md`](release.md), [`v1-release-gap-audit.md`](v1-release-gap-audit.md) | 源码/runtime 包边界、artifact 排除、发布 readiness 门禁和当前 v1 gap audit。 |
 
@@ -68,11 +68,11 @@ runtime job 目录、生成的报告、guest payload 二进制、抓包、内存
 - [`progress.md`](progress.md): 历史进展快照和规划百分比。
 - [`extracted-results-summary.md`](extracted-results-summary.md): 研究和叙事摘要；当前状态已移至 `current-architecture-and-operations.md`。
 - [`hyperv-vm-current-state.md`](hyperv-vm-current-state.md): 带日期的只读 VM 观察；live 工作前请重新运行 readiness。
-- [`microstep-report-benchmark.md`](microstep-report-benchmark.md),
-  [`research-basis.md`](research-basis.md), and
+- [`microstep-report-benchmark.md`](microstep-report-benchmark.md)、
+  [`research-basis.md`](research-basis.md) 和
   [`open-source-sandbox-references.md`](open-source-sandbox-references.md):
   设计/参考材料。
-- [`r0-merge-review.md`](r0-merge-review.md) and
+- [`r0-merge-review.md`](r0-merge-review.md) 和
   [`r0-next-implementation-plan.md`](r0-next-implementation-plan.md): merge 或实现规划说明；执行前请与当前源码核对。
 
 ## 重叠内容策略 / Overlap policy

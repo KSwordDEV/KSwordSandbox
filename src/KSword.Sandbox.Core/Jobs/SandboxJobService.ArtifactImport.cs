@@ -150,10 +150,19 @@ public sealed partial class SandboxJobService
         {
             ["artifactKind"] = artifact.Kind.ToString(),
             ["sourceArtifactKind"] = artifact.Kind.ToString(),
+            ["artifactKindZh"] = ChineseKindName(artifact.Kind),
+            ["sourceArtifactKindZh"] = ChineseKindName(artifact.Kind),
             ["behaviorCounted"] = "false",
             ["sourceEventType"] = sourceEventType,
             ["downloadSelector"] = artifact.RelativePath,
             ["downloadSafeLink"] = artifact.SafeLink,
+            ["safeRelativeSelector"] = artifact.RelativePath,
+            ["downloadFileName"] = FirstNonEmpty(MetadataValue(artifact.Metadata, "downloadFileName"), artifact.Name),
+            ["downloadContentType"] = FirstNonEmpty(MetadataValue(artifact.Metadata, "downloadContentType"), artifact.MimeType),
+            ["downloadSecurityPolicy"] = FirstNonEmpty(MetadataValue(artifact.Metadata, "downloadSecurityPolicy"), "server-indexed-relative-selector"),
+            ["downloadRejectionPolicy"] = FirstNonEmpty(MetadataValue(artifact.Metadata, "downloadRejectionPolicy"), "reject-empty-absolute-traversal-unindexed-missing"),
+            ["downloadIndexPolicy"] = FirstNonEmpty(MetadataValue(artifact.Metadata, "downloadIndexPolicy"), "artifact-index-relative-selectors-only"),
+            ["isDownloadable"] = FirstNonEmpty(MetadataValue(artifact.Metadata, "isDownloadable"), "true"),
             ["nonbehavior"] = "true",
             ["behaviorScope"] = "artifact-import-metadata",
             ["notSampleBehavior"] = "true",
@@ -174,7 +183,8 @@ public sealed partial class SandboxJobService
             ["importMode"] = "host-artifact-index",
             ["indexRoot"] = jobRoot,
             ["zhMessage"] = $"Host 已索引可下载产物：{ChineseKindName(artifact.Kind)}。",
-            ["zhHint"] = "这是产物导入元数据，用于下载和溯源，不作为样本行为判定。"
+            ["zhHint"] = "这是产物导入元数据，用于下载和溯源，不作为样本行为判定。",
+            ["downloadHintZh"] = "仅允许使用 Host artifact-index.json 中的相对 downloadSelector 下载；拒绝绝对路径、路径穿越、未索引或已缺失文件。"
         };
 
         AddIfNotEmpty(data, "sha256", artifact.Sha256);
@@ -231,6 +241,9 @@ public sealed partial class SandboxJobService
         {
             ["collectionName"] = expectation.CollectionName,
             ["artifactKind"] = expectation.Kind.ToString(),
+            ["sourceArtifactKind"] = expectation.Kind.ToString(),
+            ["artifactKindZh"] = expectation.ChineseName,
+            ["sourceArtifactKindZh"] = expectation.ChineseName,
             ["behaviorCounted"] = "false",
             ["nonbehavior"] = "true",
             ["behaviorScope"] = "collection-health",

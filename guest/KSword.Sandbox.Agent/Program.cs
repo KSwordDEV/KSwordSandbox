@@ -544,7 +544,10 @@ internal static class AgentProgram
                         ["processId"] = processId?.ToString(CultureInfo.InvariantCulture) ?? string.Empty,
                         ["stdoutPath"] = collector.StandardOutputPath,
                         ["stderrPath"] = collector.StandardErrorPath,
-                        ["gracefulStopTimeoutSeconds"] = R0CollectorGracefulStopTimeout.TotalSeconds.ToString(CultureInfo.InvariantCulture)
+                        ["gracefulStopTimeoutSeconds"] = R0CollectorGracefulStopTimeout.TotalSeconds.ToString(CultureInfo.InvariantCulture),
+                        ["capturePolicy"] = "explicit-opt-in-r0collector-sidecar",
+                        ["zhMessage"] = "R0Collector 未在宽限期内退出，Guest Agent 将强制终止 sidecar 进程树。",
+                        ["zhHint"] = "该事件说明采集 sidecar 的关闭路径异常；请结合后续 r0collector.failed/exited、stdout/stderr 和 driver-events JSONL 判断证据完整性。"
                     }
                 };
                 AddR0ArtifactReferenceData(
@@ -811,7 +814,9 @@ internal static class AgentProgram
                 ["stderrPath"] = standardErrorPath,
                 ["processId"] = processId.ToString(CultureInfo.InvariantCulture),
                 ["supervisor"] = "guest-agent",
-                ["zhMessage"] = "R0Collector sidecar 已由 Guest Agent 启动，驱动 JSONL 和诊断日志会作为证据保留。"
+                ["capturePolicy"] = "explicit-opt-in-r0collector-sidecar",
+                ["zhMessage"] = "R0Collector sidecar 已由 Guest Agent 启动，驱动 JSONL 和诊断日志会作为证据保留。",
+                ["zhHint"] = "started 事件表示 sidecar 已启动；最终 JSONL/log 文件完整性请以 r0collector.exited/failed 和 manifest 中的 sizeBytes/sha256 为准。"
             }
         };
         AddR0ArtifactReferenceData(
@@ -854,7 +859,9 @@ internal static class AgentProgram
                 ["diagnosticDrainStatus"] = diagnosticDrainStatus,
                 ["jsonlDrainStatus"] = jsonLinesDrainStatus,
                 ["supervisor"] = "guest-agent",
-                ["zhMessage"] = "R0Collector sidecar 已正常退出，Guest Agent 已尝试冲刷 stdout/stderr 和 driver-events JSONL。"
+                ["capturePolicy"] = "explicit-opt-in-r0collector-sidecar",
+                ["zhMessage"] = "R0Collector sidecar 已正常退出，Guest Agent 已尝试冲刷 stdout/stderr 和 driver-events JSONL。",
+                ["zhHint"] = "请使用 artifactRelativePath 下载 driver-events JSONL；stdoutRelativePath/stderrRelativePath 可用于诊断 sidecar 输出。"
             }
         };
         AddR0ArtifactReferenceData(
@@ -1121,6 +1128,8 @@ internal static class AgentProgram
         var stdoutRelativePath = TryGetOutputRelativePath(outputDirectory, standardOutputPath);
         var stderrRelativePath = TryGetOutputRelativePath(outputDirectory, standardErrorPath);
 
+        evt.Data.TryAdd("capturePolicy", "explicit-opt-in-r0collector-sidecar");
+        evt.Data["artifactRelativePathStatus"] = string.IsNullOrWhiteSpace(driverEventsRelativePath) ? "not-available" : "expected-or-captured";
         AddDataIfNotEmpty(evt.Data, "driverEventsRelativePath", driverEventsRelativePath);
         AddDataIfNotEmpty(evt.Data, "jsonlRelativePath", driverEventsRelativePath);
         AddDataIfNotEmpty(evt.Data, "stdoutRelativePath", stdoutRelativePath);
@@ -1661,12 +1670,23 @@ internal static class AgentProgram
         var metadataByRelativePath = new Dictionary<string, DroppedFileArtifactMetadata>(StringComparer.OrdinalIgnoreCase);
         var usedArtifactRelativePaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var candidates = events
-            .Where(static evt => string.Equals(evt.EventType, "file.created", StringComparison.OrdinalIgnoreCase))
+            .Where(static evt =>
+                string.Equals(evt.EventType, "file.created", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(evt.EventType, "file.modified", StringComparison.OrdinalIgnoreCase))
             .ToList();
         var processContext = CreateDroppedFileProcessContext(options, events);
+        var candidateCreatedFileCount = candidates.Count(static evt => string.Equals(evt.EventType, "file.created", StringComparison.OrdinalIgnoreCase));
+        var candidateModifiedFileCount = candidates.Count(static evt => string.Equals(evt.EventType, "file.modified", StringComparison.OrdinalIgnoreCase));
 
         if (candidates.Count == 0)
         {
+            events.Add(CreateDroppedFileSummaryEvent(
+                processContext,
+                candidateCreatedFileCount,
+                candidateModifiedFileCount,
+                copiedCount: 0,
+                skippedCount: 0,
+                artifactCount: 0));
             return metadataByRelativePath;
         }
 
@@ -1674,6 +1694,7 @@ internal static class AgentProgram
         var outputDirectory = Path.GetFullPath(options.OutputDirectory);
         var artifactsRoot = Path.Combine(outputDirectory, GuestArtifactWriter.ArtifactsDirectoryName);
         var droppedFilesRoot = Path.Combine(artifactsRoot, DroppedFilesArtifactDirectoryName);
+        var copyOutcomeStartIndex = events.Count;
 
         foreach (var candidate in candidates)
         {
@@ -1762,7 +1783,7 @@ internal static class AgentProgram
 
                 var sourceInfo = new FileInfo(sourcePath);
                 Directory.CreateDirectory(Path.GetDirectoryName(destination.FullPath) ?? droppedFilesRoot);
-                File.Copy(sourcePath, destination.FullPath, overwrite: false);
+                CopyFileSharedRead(sourcePath, destination.FullPath);
                 var copiedInfo = new FileInfo(destination.FullPath);
                 var copiedHash = ComputeSha256BestEffort(destination.FullPath);
                 var copiedAtUtc = DateTimeOffset.UtcNow;
@@ -1803,6 +1824,14 @@ internal static class AgentProgram
             }
         }
 
+        var copyOutcomeEvents = events.Skip(copyOutcomeStartIndex).ToList();
+        events.Add(CreateDroppedFileSummaryEvent(
+            processContext,
+            candidateCreatedFileCount,
+            candidateModifiedFileCount,
+            copyOutcomeEvents.Count(static evt => string.Equals(evt.EventType, "artifact.dropped_file.copied", StringComparison.OrdinalIgnoreCase)),
+            copyOutcomeEvents.Count(static evt => string.Equals(evt.EventType, "artifact.dropped_file.skipped", StringComparison.OrdinalIgnoreCase)),
+            metadataByRelativePath.Count));
         return metadataByRelativePath;
     }
 
@@ -1848,6 +1877,7 @@ internal static class AgentProgram
                     ["copiedDroppedFileCount"] = droppedFileMetadataByRelativePath.Count.ToString(CultureInfo.InvariantCulture),
                     ["collectDroppedFiles"] = options.CollectDroppedFiles.ToString(),
                     ["captureScreenshots"] = options.CaptureScreenshots.ToString(),
+                    ["capturePolicy"] = "manifest-summary-of-guest-artifact-lanes",
                     ["screenshotPhases"] = options.ScreenshotOptions.FormatStages(),
                     ["screenshotCount"] = options.ScreenshotOptions.CaptureCount.ToString(CultureInfo.InvariantCulture),
                     ["captureMemoryDump"] = options.CaptureMemoryDump.ToString(),
@@ -1877,6 +1907,7 @@ internal static class AgentProgram
                 {
                     ["collectDroppedFiles"] = options.CollectDroppedFiles.ToString(),
                     ["captureScreenshots"] = options.CaptureScreenshots.ToString(),
+                    ["capturePolicy"] = "manifest-summary-of-guest-artifact-lanes",
                     ["screenshotPhases"] = options.ScreenshotOptions.FormatStages(),
                     ["screenshotCount"] = options.ScreenshotOptions.CaptureCount.ToString(CultureInfo.InvariantCulture),
                     ["captureMemoryDump"] = options.CaptureMemoryDump.ToString(),
@@ -1964,6 +1995,8 @@ internal static class AgentProgram
                 ["sourcePath"] = sourcePath,
                 ["guestFullPath"] = sourcePath,
                 ["guestRelativePath"] = originalRelativePath,
+                ["dropCandidateType"] = DroppedFileCandidateType(sourceEvent),
+                ["copyMethod"] = "shared-read-stream-copy",
                 ["artifactRelativePath"] = artifactRelativePath,
                 ["relativePath"] = artifactRelativePath,
                 ["importPath"] = artifactRelativePath,
@@ -1984,6 +2017,8 @@ internal static class AgentProgram
                 ["evidenceRole"] = "dropped-file",
                 ["captureEnabled"] = "true",
                 ["implemented"] = "true",
+                ["capturePolicy"] = "explicit-opt-in-copy-working-directory-new-files",
+                ["artifactRelativePathStatus"] = "captured",
                 ["captureState"] = "captured",
                 ["status"] = "captured",
                 ["nonfatal"] = "false",
@@ -2049,17 +2084,23 @@ internal static class AgentProgram
                 ["zhMessage"] = "掉落文件复制被跳过；该事件说明证据缺口，不会中断整体分析。",
                 ["zhHint"] = DroppedFileReasonZhHint(reason),
                 ["sourceEventType"] = sourceEvent.EventType,
+                ["dropCandidateType"] = DroppedFileCandidateType(sourceEvent),
+                ["copyMethod"] = "shared-read-stream-copy",
                 ["sourcePath"] = sourcePath ?? sourceEvent.Path ?? string.Empty,
                 ["guestFullPath"] = sourcePath ?? sourceEvent.Path ?? string.Empty,
                 ["collectionName"] = "dropped-files",
                 ["evidenceRole"] = "dropped-file",
                 ["captureEnabled"] = "true",
                 ["implemented"] = "true",
+                ["capturePolicy"] = "explicit-opt-in-copy-working-directory-new-files",
                 ["captureState"] = "skipped",
                 ["status"] = "skipped",
                 ["nonfatal"] = "true",
                 ["processRole"] = processContext?.RootProcessId is null ? "sample-context" : "sample-root-context",
                 ["expectedRelativePath"] = "artifacts/dropped-files/**",
+                ["artifactRelativePathStatus"] = "not-created",
+                ["sizeBytesStatus"] = "not-created",
+                ["sha256Status"] = "not-created",
                 ["collectDroppedFiles"] = "true"
             }
         };
@@ -2077,6 +2118,67 @@ internal static class AgentProgram
         }
 
         AddExceptionData(evt, exception);
+        return evt;
+    }
+
+    /// <summary>
+    /// Creates a dropped-file collection summary for copied/skipped outcomes.
+    /// </summary>
+    private static SandboxEvent CreateDroppedFileSummaryEvent(
+        DroppedFileProcessContext processContext,
+        int candidateCreatedFileCount,
+        int candidateModifiedFileCount,
+        int copiedCount,
+        int skippedCount,
+        int artifactCount)
+    {
+        var candidateFileCount = candidateCreatedFileCount + candidateModifiedFileCount;
+        var status = copiedCount > 0
+            ? "captured"
+            : skippedCount > 0
+                ? "skipped"
+                : "enabled-empty";
+        var evt = new SandboxEvent
+        {
+            EventType = "artifact.dropped_file.summary",
+            Source = "guest",
+            ProcessName = processContext.ProcessName,
+            ProcessId = processContext.RootProcessId,
+            ParentProcessId = processContext.ParentProcessId,
+            CommandLine = processContext.CommandLine,
+            Data =
+            {
+                ["phase"] = "after-run",
+                ["capturePhase"] = "after-run",
+                ["collectionName"] = "dropped-files",
+                ["evidenceRole"] = "dropped-file",
+                ["captureEnabled"] = "true",
+                ["implemented"] = "true",
+                ["capturePolicy"] = "explicit-opt-in-copy-working-directory-new-files",
+                ["captureState"] = status,
+                ["status"] = status,
+                ["summaryEvent"] = "true",
+                ["nonfatal"] = "true",
+                ["processRole"] = processContext.RootProcessId is null ? "sample-context" : "sample-root-context",
+                ["expectedRelativePath"] = "artifacts/dropped-files/**",
+                ["artifactRelativePathStatus"] = copiedCount > 0 ? "some-captured" : "not-created",
+                ["collectDroppedFiles"] = "true",
+                ["candidateFileCount"] = candidateFileCount.ToString(CultureInfo.InvariantCulture),
+                ["candidateCreatedFileCount"] = candidateCreatedFileCount.ToString(CultureInfo.InvariantCulture),
+                ["candidateModifiedFileCount"] = candidateModifiedFileCount.ToString(CultureInfo.InvariantCulture),
+                ["copyOutcomeEventCount"] = (copiedCount + skippedCount).ToString(CultureInfo.InvariantCulture),
+                ["copiedCount"] = copiedCount.ToString(CultureInfo.InvariantCulture),
+                ["copiedDroppedFileCount"] = copiedCount.ToString(CultureInfo.InvariantCulture),
+                ["skippedCount"] = skippedCount.ToString(CultureInfo.InvariantCulture),
+                ["artifactCount"] = artifactCount.ToString(CultureInfo.InvariantCulture),
+                ["copyMethod"] = "shared-read-stream-copy",
+                ["zhMessage"] = copiedCount > 0
+                    ? "掉落文件复制 sweep 已完成，并已产出可下载证据文件。"
+                    : "掉落文件复制 sweep 已完成，但没有产出可下载证据文件。",
+                ["zhHint"] = "请结合 candidateCreatedFileCount/candidateModifiedFileCount、copiedCount/skippedCount 以及 artifact.dropped_file.* 事件判断掉落文件覆盖情况。"
+            }
+        };
+        AddDroppedFileProcessContext(evt, processContext);
         return evt;
     }
 
@@ -2107,11 +2209,15 @@ internal static class AgentProgram
                 ["evidenceRole"] = "dropped-file",
                 ["captureEnabled"] = "false",
                 ["implemented"] = "true",
+                ["capturePolicy"] = "explicit-opt-in-copy-working-directory-new-files",
                 ["captureState"] = "disabled",
                 ["status"] = "disabled",
                 ["nonfatal"] = "true",
                 ["processRole"] = processContext.RootProcessId is null ? "sample-context" : "sample-root-context",
                 ["expectedRelativePath"] = "artifacts/dropped-files/**",
+                ["artifactRelativePathStatus"] = "disabled",
+                ["sizeBytesStatus"] = "disabled",
+                ["sha256Status"] = "disabled",
                 ["collectDroppedFiles"] = "false",
                 ["candidateCreatedFileCount"] = createdFileEventCount.ToString(CultureInfo.InvariantCulture),
                 ["outputDirectory"] = options.OutputDirectory
@@ -2246,6 +2352,27 @@ internal static class AgentProgram
             "destinationPathInvalid" => "无法在 artifacts/dropped-files 下生成安全目标路径。",
             "copyFailed" => "复制失败；请检查文件锁、权限、路径长度和磁盘空间。",
             _ => "该掉落文件复制尝试被跳过；请结合 reason、sourcePath 和 exceptionType/message 判断。"
+        };
+    }
+
+    /// <summary>
+    /// Copies a possibly locked dropped-file candidate using permissive source sharing.
+    /// </summary>
+    private static void CopyFileSharedRead(string sourcePath, string destinationPath)
+    {
+        using var source = new FileStream(sourcePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+        using var destination = new FileStream(destinationPath, FileMode.CreateNew, FileAccess.Write, FileShare.None);
+        source.CopyTo(destination);
+        destination.Flush(flushToDisk: true);
+    }
+
+    private static string DroppedFileCandidateType(SandboxEvent sourceEvent)
+    {
+        return sourceEvent.EventType switch
+        {
+            "file.created" => "created",
+            "file.modified" => "modified",
+            _ => sourceEvent.EventType
         };
     }
 

@@ -284,6 +284,7 @@ internal sealed class GuestArtifactWriter
         AddIfNotEmpty(metadata, "origin", "guest");
         AddIfNotEmpty(metadata, "evidenceRole", classification.EvidenceRole);
         AddIfNotEmpty(metadata, "collectionName", classification.CollectionName);
+        AddIfNotEmpty(metadata, "capturePolicy", CapturePolicyForClassification(classification));
         AddIfNotEmpty(metadata, "importPath", relativePath);
         AddIfNotEmpty(metadata, "artifactRelativePath", relativePath);
         AddIfNotEmpty(metadata, "sourceArtifactRelativePath", relativePath);
@@ -418,6 +419,7 @@ internal sealed class GuestArtifactWriter
             ["evidenceRole"] = evidenceRole,
             ["requested"] = enabled.ToString(System.Globalization.CultureInfo.InvariantCulture).ToLowerInvariant(),
             ["captureEnabled"] = enabled.ToString(System.Globalization.CultureInfo.InvariantCulture).ToLowerInvariant(),
+            ["capturePolicy"] = CapturePolicyForCollection(name),
             ["implemented"] = implemented.ToString(System.Globalization.CultureInfo.InvariantCulture).ToLowerInvariant(),
             ["artifactCount"] = artifactCount.ToString(System.Globalization.CultureInfo.InvariantCulture),
             ["fileCount"] = artifactCount.ToString(System.Globalization.CultureInfo.InvariantCulture),
@@ -1008,6 +1010,13 @@ internal sealed class GuestArtifactWriter
             "hashStatus",
             "artifactHashStatus",
             "artifactExists",
+            "artifactRelativePathStatus",
+            "sizeBytesStatus",
+            "sha256Status",
+            "capturePolicy",
+            "screenshotRelativePath",
+            "memoryDumpRelativePath",
+            "dumpRelativePath",
             "copiedSha256",
             "copiedHashAlgorithm",
             "copiedHashStatus",
@@ -1122,8 +1131,46 @@ internal sealed class GuestArtifactWriter
             "collectorSkippedOrUnavailable" => "采集器跳过或环境不可用。",
             "collectorFailed" => "采集器执行失败。",
             "noArtifactsProduced" => "已启用但没有产出文件。",
+            "sourcePathMissing" => "源事件没有可复制路径。",
+            "sourcePathInvalid" => "源路径无效。",
+            "sourceFileMissing" => "复制时源文件已不存在。",
+            "outsideWorkingDirectory" => "源文件位于样本工作目录之外，按策略跳过复制。",
+            "underOutputDirectory" => "源文件位于输出目录下，按策略跳过递归采集。",
+            "destinationPathInvalid" => "无法生成安全的证据目标路径。",
+            "copyFailed" => "掉落文件复制失败。",
+            "notWindows" => "该采集通道仅支持 Windows guest。",
+            "captureAlreadyActive" => "已有抓包会话处于活动状态。",
+            "captureWasNotStarted" => "抓包会话未成功启动。",
+            "pktmonStartFailed" => "pktmon start 失败。",
+            "pktmonStopFailed" => "pktmon stop 失败。",
+            "pktmonConvertFailed" => "pktmon ETL 转 PCAPNG 失败。",
+            "protocolParserNotImplemented" => "协议解析摘要尚未实现。",
+            "process-tree-empty" => "没有可见的根/子进程可供采集。",
+            "root-process" => "样本根进程 ID 不可用。",
+            "root-process-final" => "最终 sweep 阶段样本根进程 ID 不可用。",
+            "process-tree-snapshot" => "采集进程树快照失败。",
+            "duplicate" => "目标进程已在本次运行中采集过。",
             _ => string.Empty
         };
+    }
+
+    private static string CapturePolicyForCollection(string collectionName)
+    {
+        return collectionName switch
+        {
+            "dropped-files" => "explicit-opt-in-copy-working-directory-new-files",
+            "screenshots" => "explicit-opt-in-screenshot",
+            "memory-dumps" => "explicit-opt-in-sensitive-memory-dump",
+            "packet-captures" => "explicit-opt-in-network-packet-capture",
+            "driver-events" => "explicit-input-driver-jsonl",
+            "r0-logs" => "explicit-opt-in-r0collector-sidecar",
+            _ => "guest-artifact-discovery"
+        };
+    }
+
+    private static string CapturePolicyForClassification(ArtifactClassification classification)
+    {
+        return CapturePolicyForCollection(classification.CollectionName);
     }
 
     private static string ZhCollectionHint(string collectionName, string status, string reason)
@@ -1169,6 +1216,11 @@ internal sealed class GuestArtifactWriter
         CopyEventDataIfPresent(metadata, evt, "processRole", "lastProcessRole");
         CopyEventDataIfPresent(metadata, evt, "treeDepth", "lastTreeDepth");
         CopyEventDataIfPresent(metadata, evt, "treeLineage", "lastTreeLineage");
+        CopyEventDataIfPresent(metadata, evt, "treeLineageDisplay", "lastTreeLineageDisplay");
+        CopyEventDataIfPresent(metadata, evt, "treeLineageStatus", "lastTreeLineageStatus");
+        CopyEventDataIfPresent(metadata, evt, "rootProcessIdStatus", "lastRootProcessIdStatus");
+        CopyEventDataIfPresent(metadata, evt, "processTreeCoverageState", "lastProcessTreeCoverageState");
+        CopyEventDataIfPresent(metadata, evt, "processTreeCompleteness", "lastProcessTreeCompleteness");
         CopyEventDataIfPresent(metadata, evt, "childProcessCount", "lastChildProcessCount");
         CopyEventDataIfPresent(metadata, evt, "processMissing", "lastProcessMissing");
         CopyEventDataIfPresent(metadata, evt, "exitMissing", "lastExitMissing");

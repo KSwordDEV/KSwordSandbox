@@ -1084,7 +1084,95 @@ bool RegistryPersistenceCandidate(const std::wstring& keyPath) {
     return ContainsWideInsensitive(keyPath, L"\\software\\microsoft\\windows\\currentversion\\run") ||
         ContainsWideInsensitive(keyPath, L"\\software\\microsoft\\windows\\currentversion\\runonce") ||
         ContainsWideInsensitive(keyPath, L"\\software\\microsoft\\windows\\currentversion\\policies\\explorer\\run") ||
-        ContainsWideInsensitive(keyPath, L"\\software\\microsoft\\windows nt\\currentversion\\winlogon");
+        ContainsWideInsensitive(keyPath, L"\\software\\microsoft\\windows nt\\currentversion\\winlogon") ||
+        ContainsWideInsensitive(keyPath, L"\\software\\microsoft\\windows nt\\currentversion\\image file execution options") ||
+        ContainsWideInsensitive(keyPath, L"\\system\\currentcontrolset\\services") ||
+        ContainsWideInsensitive(keyPath, L"\\software\\microsoft\\windows\\currentversion\\explorer\\startupapproved");
+}
+
+// Input: Registry key path already decoded from a compact payload.
+// Processing: Names the persistence family without turning the row into a
+// verdict. Rules and reports can explain why the key deserves attention.
+// Return: Stable family label or "none".
+std::string RegistryPersistenceFamily(const std::wstring& keyPath) {
+    if (ContainsWideInsensitive(keyPath, L"\\software\\microsoft\\windows\\currentversion\\run") ||
+        ContainsWideInsensitive(keyPath, L"\\software\\microsoft\\windows\\currentversion\\runonce") ||
+        ContainsWideInsensitive(keyPath, L"\\software\\microsoft\\windows\\currentversion\\policies\\explorer\\run")) {
+        return "autorun-run-key";
+    }
+
+    if (ContainsWideInsensitive(keyPath, L"\\software\\microsoft\\windows nt\\currentversion\\winlogon")) {
+        return "winlogon-shell-userinit";
+    }
+
+    if (ContainsWideInsensitive(keyPath, L"\\software\\microsoft\\windows nt\\currentversion\\image file execution options")) {
+        return "ifeo-debugger";
+    }
+
+    if (ContainsWideInsensitive(keyPath, L"\\system\\currentcontrolset\\services")) {
+        return "service-configuration";
+    }
+
+    if (ContainsWideInsensitive(keyPath, L"\\software\\microsoft\\windows\\currentversion\\explorer\\startupapproved")) {
+        return "startup-approved";
+    }
+
+    return "none";
+}
+
+// Input: Decoded file path.
+// Processing: Tags common dropper locations for report cards/rules while
+// keeping the event evidence-level, not a maliciousness verdict.
+// Return: Stable family label.
+std::string FileDropLocationFamily(const std::wstring& filePath) {
+    if (filePath.empty()) {
+        return "unknown";
+    }
+
+    if (ContainsWideInsensitive(filePath, L"\\appdata\\local\\temp\\") ||
+        ContainsWideInsensitive(filePath, L"\\windows\\temp\\") ||
+        ContainsWideInsensitive(filePath, L"\\temp\\")) {
+        return "temp-directory";
+    }
+
+    if (ContainsWideInsensitive(filePath, L"\\appdata\\roaming\\microsoft\\windows\\start menu\\programs\\startup")) {
+        return "startup-folder";
+    }
+
+    if (ContainsWideInsensitive(filePath, L"\\users\\public\\") ||
+        ContainsWideInsensitive(filePath, L"\\programdata\\")) {
+        return "shared-writable-directory";
+    }
+
+    if (ContainsWideInsensitive(filePath, L"\\windows\\system32\\") ||
+        ContainsWideInsensitive(filePath, L"\\windows\\syswow64\\")) {
+        return "system-directory";
+    }
+
+    return "other";
+}
+
+// Input: Decoded image path.
+// Processing: Flags suspicious DLL/image loading contexts that are useful in a
+// report process tree and behavior rules without claiming injection by itself.
+// Return: Stable family label.
+std::string ImageLoadFamily(const std::wstring& imagePath, const bool systemModeImage) {
+    if (systemModeImage) {
+        return "kernel-or-driver-image";
+    }
+
+    if (ContainsWideInsensitive(imagePath, L"\\appdata\\") ||
+        ContainsWideInsensitive(imagePath, L"\\temp\\") ||
+        ContainsWideInsensitive(imagePath, L"\\programdata\\")) {
+        return "user-writable-image";
+    }
+
+    if (ContainsWideInsensitive(imagePath, L"\\windows\\system32\\") ||
+        ContainsWideInsensitive(imagePath, L"\\windows\\syswow64\\")) {
+        return "windows-system-image";
+    }
+
+    return imagePath.empty() ? "unknown" : "other";
 }
 
 // Input: A typed operation name.
@@ -1958,6 +2046,15 @@ bool AddFilePayloadData(
     const std::string fileIntent = deleteIntent
         ? "delete"
         : (renameIntent ? "rename" : (operationFailed ? "failed-access" : fileOperationName));
+    const std::string dropLocationFamily = FileDropLocationFamily(filePath);
+    const bool startupFolderCandidate = dropLocationFamily == "startup-folder";
+    const bool droppedFileCandidate =
+        fileIntent == "create" ||
+        fileIntent == "set-information" ||
+        fileIntent == "rename" ||
+        dropLocationFamily == "temp-directory" ||
+        dropLocationFamily == "startup-folder" ||
+        dropLocationFamily == "shared-writable-directory";
 
     data->AddUtf8("typedPayloadStatus", "parsed");
     data->AddUtf8("semanticFamily", "file");
@@ -1965,15 +2062,26 @@ bool AddFilePayloadData(
     data->AddUtf8("fileOperationName", fileOperationName);
     data->AddUtf8("activityKind", ActivityKind("file", fileOperationName));
     data->AddUtf8("fileIntent", fileIntent);
+    data->AddUtf8("artifactCandidateKind", droppedFileCandidate ? "dropped-file-or-file-change" : "file-activity");
+    data->AddUtf8("dropLocationFamily", dropLocationFamily);
+    data->AddBool("droppedFileCandidate", droppedFileCandidate);
+    data->AddBool("startupFolderCandidate", startupFolderCandidate);
+    data->AddBool("downloadExecuteCandidate", false);
     data->AddBool("evidenceReady", true);
-    data->AddWide("zhMessage", L"R0 捕获到文件系统行为。");
+    data->AddWide(
+        "zhMessage",
+        startupFolderCandidate
+            ? L"R0 捕获到启动目录文件行为。"
+            : (droppedFileCandidate ? L"R0 捕获到疑似释放文件/落地文件行为。" : L"R0 捕获到文件系统行为。"));
     data->AddWide(
         "zhHint",
-        deleteIntent
-            ? L"该文件事件带有删除意图，可结合 dropped files/artifact 目录判断样本释放或清理行为。"
-            : (renameIntent
-                ? L"该文件事件带有重命名意图，可关注释放文件是否被移动或伪装。"
-                : L"该文件事件来自内核 minifilter，适合与 Guest dropped files 和报告证据展开联动。"));
+        startupFolderCandidate
+            ? L"文件位于用户启动目录，是持久化重点证据；建议在报告中与进程树和 dropped files 一起展开。"
+            : (deleteIntent
+                ? L"该文件事件带有删除意图，可结合 dropped files/artifact 目录判断样本释放或清理行为。"
+                : (renameIntent
+                    ? L"该文件事件带有重命名意图，可关注释放文件是否被移动或伪装。"
+                    : L"该文件事件来自内核 minifilter，适合与 Guest dropped files、PCAP 和报告证据展开联动。")));
     data->AddUnsigned("fileVersion", filePayload->Version);
     data->AddUtf8("fileVersionHex", HexUnsignedLongLong(filePayload->Version, 8));
     data->AddUnsigned("filePayloadSize", filePayload->Size);
@@ -2183,8 +2291,32 @@ bool AddImagePayloadData(
         KswSandboxEventTypeImage,
         payload,
         payloadBytes);
+    const bool systemModeImage =
+        (imagePayload->Flags & KSWORD_SANDBOX_IMAGE_EVENT_FLAG_SYSTEM_MODE_IMAGE) != 0;
+    const bool mappedToAllPids =
+        (imagePayload->Flags & KSWORD_SANDBOX_IMAGE_EVENT_FLAG_MAPPED_TO_ALL_PIDS) != 0;
+    const std::string imageOperationName = ImageOperationName(imagePayload->Operation);
+    const std::string imageLoadFamily = ImageLoadFamily(imagePath, systemModeImage);
+    const bool injectionCandidate =
+        !systemModeImage &&
+        (imageLoadFamily == "user-writable-image" || mappedToAllPids);
 
     data->AddUtf8("typedPayloadStatus", "parsed");
+    data->AddUtf8("semanticFamily", "image");
+    data->AddUtf8("behaviorLane", "module-load");
+    data->AddUtf8("activityKind", ActivityKind("image", imageOperationName));
+    data->AddUtf8("imageLoadFamily", imageLoadFamily);
+    data->AddBool("injectionCandidate", injectionCandidate);
+    data->AddBool("userWritableImageCandidate", imageLoadFamily == "user-writable-image");
+    data->AddBool("evidenceReady", true);
+    data->AddWide(
+        "zhMessage",
+        injectionCandidate ? L"R0 捕获到可疑模块加载候选。" : L"R0 捕获到镜像/模块加载事件。");
+    data->AddWide(
+        "zhHint",
+        injectionCandidate
+            ? L"模块来自用户可写位置或映射范围异常，可与进程树、命令行和后续网络行为组合判断注入/侧载。"
+            : L"该镜像加载事件用于还原进程模块时间线，不单独构成恶意结论。");
     data->AddUnsigned("imageVersion", imagePayload->Version);
     data->AddUtf8("imageVersionHex", HexUnsignedLongLong(imagePayload->Version, 8));
     data->AddUnsigned("imagePayloadSize", imagePayload->Size);
@@ -2192,16 +2324,14 @@ bool AddImagePayloadData(
         "imagePayloadSizeMatchesPublicAbi",
         imagePayload->Size == static_cast<ULONG>(sizeof(KSWORD_SANDBOX_IMAGE_EVENT_PAYLOAD)));
     data->AddUnsigned("operation", imagePayload->Operation);
-    data->AddUtf8("imageOperationName", ImageOperationName(imagePayload->Operation));
+    data->AddUtf8("imageOperationName", imageOperationName);
     data->AddUnsigned("flags", imagePayload->Flags);
     data->AddUtf8("flagsHex", HexUnsignedLongLong(imagePayload->Flags, 8));
     data->AddUtf8("flagNames", ImageEventFlagNames(imagePayload->Flags));
     data->AddBool(
         "pathPresent",
         (imagePayload->Flags & KSWORD_SANDBOX_IMAGE_EVENT_FLAG_PATH_PRESENT) != 0);
-    data->AddBool(
-        "systemModeImage",
-        (imagePayload->Flags & KSWORD_SANDBOX_IMAGE_EVENT_FLAG_SYSTEM_MODE_IMAGE) != 0);
+    data->AddBool("systemModeImage", systemModeImage);
     data->AddBool(
         "processIdPresent",
         (imagePayload->Flags & KSWORD_SANDBOX_IMAGE_EVENT_FLAG_PROCESS_ID_PRESENT) != 0);
@@ -2211,9 +2341,7 @@ bool AddImagePayloadData(
     data->AddBool(
         "imagePathTruncated",
         (imagePayload->Flags & KSWORD_SANDBOX_IMAGE_EVENT_FLAG_PATH_TRUNCATED) != 0);
-    data->AddBool(
-        "mappedToAllPids",
-        (imagePayload->Flags & KSWORD_SANDBOX_IMAGE_EVENT_FLAG_MAPPED_TO_ALL_PIDS) != 0);
+    data->AddBool("mappedToAllPids", mappedToAllPids);
     data->AddBool(
         "extendedInfoPresent",
         (imagePayload->Flags & KSWORD_SANDBOX_IMAGE_EVENT_FLAG_EXTENDED_INFO_PRESENT) != 0);
@@ -2273,6 +2401,9 @@ bool AddRegistryPayloadData(
         KSWORD_SANDBOX_REGISTRY_VALUE_NAME_CHARS);
     const std::string registryOperationName = RegistryOperationName(registryPayload->Operation);
     const bool persistenceCandidate = RegistryPersistenceCandidate(keyPath);
+    const std::string persistenceFamily = RegistryPersistenceFamily(keyPath);
+    const bool servicePersistenceCandidate = persistenceFamily == "service-configuration";
+    const bool ifeoPersistenceCandidate = persistenceFamily == "ifeo-debugger";
 
     data->AddUtf8("typedPayloadStatus", "parsed");
     data->AddUtf8("semanticFamily", "registry");
@@ -2282,7 +2413,11 @@ bool AddRegistryPayloadData(
     data->AddBool("persistenceCandidate", persistenceCandidate);
     data->AddUtf8(
         "registryPersistenceSignal",
-        persistenceCandidate ? "common-windows-autorun-key" : "none");
+        persistenceCandidate ? "common-windows-persistence-key" : "none");
+    data->AddUtf8("persistenceFamily", persistenceFamily);
+    data->AddBool("servicePersistenceCandidate", servicePersistenceCandidate);
+    data->AddBool("ifeoPersistenceCandidate", ifeoPersistenceCandidate);
+    data->AddBool("startupRegistryCandidate", persistenceCandidate && !servicePersistenceCandidate && !ifeoPersistenceCandidate);
     data->AddBool("evidenceReady", true);
     data->AddWide(
         "zhMessage",
@@ -2290,7 +2425,7 @@ bool AddRegistryPayloadData(
     data->AddWide(
         "zhHint",
         persistenceCandidate
-            ? L"该注册表路径匹配常见自启动/持久化位置，应在报告中作为重点证据展开。"
+            ? L"该注册表路径匹配常见自启动/服务/IFEO 等持久化位置，应在报告中作为重点证据展开。"
             : L"该注册表事件来自内核回调，可结合行为规则和原始事件判断影响。");
     data->AddUnsigned("registryVersion", registryPayload->Version);
     data->AddUtf8("registryVersionHex", HexUnsignedLongLong(registryPayload->Version, 8));
@@ -2445,11 +2580,34 @@ bool AddNetworkPayloadData(
     const bool webCandidate = serviceHint == "http" || serviceHint == "tls" || serviceHint == "web";
     const std::string serviceHintSource = serviceHint == "unknown" ? "unclassified" : "port-protocol";
     const std::string serviceHintConfidence = serviceHint == "unknown" ? "none" : "medium";
+    const bool externalAddressCandidate =
+        remoteAddressPresent &&
+        !remoteAddress.empty() &&
+        remoteAddress.rfind("127.", 0) != 0 &&
+        remoteAddress != "::1" &&
+        remoteAddress != "0.0.0.0";
+    const bool lateralMovementCandidate =
+        externalAddressCandidate &&
+        networkPayload->Protocol == KSWORD_SANDBOX_NETWORK_PROTOCOL_TCP &&
+        (servicePort == 135 || servicePort == 139 || servicePort == 445 ||
+            servicePort == 3389 || servicePort == 5985 || servicePort == 5986);
+    const bool downloadExecuteCandidate = httpCandidate || tlsCandidate;
+    const std::string networkEvidenceKind = dnsCandidate
+        ? "dns-flow"
+        : (httpCandidate
+            ? "http-flow"
+            : (tlsCandidate
+                ? "tls-flow"
+                : (lateralMovementCandidate ? "lateral-movement-flow" : "network-flow")));
 
     data->AddUtf8("typedPayloadStatus", "parsed");
     data->AddUtf8("semanticFamily", "network");
     data->AddUtf8("behaviorLane", "network-flow");
     data->AddUtf8("activityKind", ActivityKind("network", NetworkOperationName(networkPayload->Operation)));
+    data->AddUtf8("networkEvidenceKind", networkEvidenceKind);
+    data->AddBool("externalAddressCandidate", externalAddressCandidate);
+    data->AddBool("lateralMovementCandidate", lateralMovementCandidate);
+    data->AddBool("downloadExecuteCandidate", downloadExecuteCandidate);
     data->AddBool("evidenceReady", true);
     data->AddWide(
         "zhMessage",
@@ -2457,12 +2615,16 @@ bool AddNetworkPayloadData(
             ? L"R0 捕获到疑似 DNS 网络流。"
             : (httpCandidate
                 ? L"R0 捕获到疑似 HTTP 网络流。"
-                : (tlsCandidate ? L"R0 捕获到疑似 TLS/HTTPS 网络流。" : L"R0 捕获到网络连接/授权事件。")));
+                : (tlsCandidate
+                    ? L"R0 捕获到疑似 TLS/HTTPS 网络流。"
+                    : (lateralMovementCandidate ? L"R0 捕获到疑似横向移动端口连接。" : L"R0 捕获到网络连接/授权事件。"))));
     data->AddWide(
         "zhHint",
-        remoteAddressPresent
-            ? L"该网络事件包含端点和 flowKey，可与 PCAP/DNS/HTTP/TLS sidecar 证据合并成网络关系图。"
-            : L"该网络事件缺少远端地址，仍保留 WFP 层/过滤器信息供排障和 ABI 核对。");
+        lateralMovementCandidate
+            ? L"远端端口命中 SMB/RPC/RDP/WinRM 等横向移动常见服务；请结合进程树、凭据/命令行和 PCAP 证据判断。"
+            : (remoteAddressPresent
+                ? L"该网络事件包含端点和 flowKey，可与 PCAP/DNS/HTTP/TLS sidecar 证据合并成网络关系图。"
+                : L"该网络事件缺少远端地址，仍保留 WFP 层/过滤器信息供排障和 ABI 核对。"));
     data->AddUnsigned("networkVersion", networkPayload->Version);
     data->AddUtf8("networkVersionHex", HexUnsignedLongLong(networkPayload->Version, 8));
     data->AddUnsigned("networkPayloadSize", networkPayload->Size);
@@ -2534,6 +2696,11 @@ bool AddNetworkPayloadData(
     data->AddBool("httpCandidate", httpCandidate);
     data->AddBool("tlsCandidate", tlsCandidate);
     data->AddBool("webCandidate", webCandidate);
+    data->AddBool("remoteServiceCandidate", externalAddressCandidate && serviceHint != "unknown");
+    data->AddBool("smbCandidate", servicePort == 445 || servicePort == 139);
+    data->AddBool("rpcCandidate", servicePort == 135);
+    data->AddBool("rdpCandidate", servicePort == 3389);
+    data->AddBool("winrmCandidate", servicePort == 5985 || servicePort == 5986);
     data->AddBool("serviceHintDns", dnsCandidate);
     data->AddBool("serviceHintHttp", httpCandidate);
     data->AddBool("serviceHintTls", tlsCandidate);

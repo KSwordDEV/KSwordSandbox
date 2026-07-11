@@ -1,5 +1,9 @@
 # R0 network/WFP event producer
 
+中文优先说明：本文描述 R0 network producer 的当前证据边界。当前实现是 WFP/ALE
+inspect-only endpoint telemetry；它给出“某进程/endpoint/端口/方向被 ALE classify
+观察到”的证据，不给出 DNS/HTTP/TLS payload verdict，也不等价于 PCAP。
+
 `driver/KSword.Sandbox.Driver/src/Producers/Network/NetworkMonitor.c` owns the modular R0 network producer.  It registers inspect-only Windows Filtering Platform (WFP) Application Layer Enforcement (ALE) callouts and filters for:
 
 - `ALE_AUTH_CONNECT_V4`
@@ -14,6 +18,25 @@ sensor.  The driver does not register packet/stream/datagram layers, does not
 parse DNS/HTTP/TLS payloads, does not maintain WFP flow contexts, and does not
 install protocol/address conditions.  Those items are explicit TODOs rather
 than hidden implementation claims.
+
+## 语义边界 / Semantic boundary
+
+- **R0 network row 是 endpoint evidence，不是 packet evidence。**
+  `driver.network` 行描述 ALE authorization/classify 处可见的 protocol、address、
+  port、direction、PID 和 WFP layer/callout/filter correlation。它不包含 packet bytes、
+  DNS query name、HTTP method/host/URI、TLS SNI/certificate 或完整流重组结果。
+- **DNS/HTTP/TLS 字段是 candidate labels，不是 verdict。** `serviceHint`、
+  `semanticCandidate`、`dnsCandidate`、`httpCandidate` 和 `tlsCandidate` 来自端口、
+  transport protocol 和 endpoint 方向等轻量启发式。它们只帮助 report/rules 做关联和展示，
+  不能证明应用实际完成了 DNS、HTTP 或 TLS 语义，也不能单独触发 malicious/benign 结论。
+- **PCAP rows 承载 payload-derived facts。** `pcap.flow`、`pcap.dns`、
+  `pcap.http` 和 `pcap.tls` 行来自 user/guest packet capture import，才是 DNS query、
+  HTTP request metadata、TLS SNI 和 packet-level details 的来源。R0 `flowKey` /
+  endpoint/PID/time fields 用于把 ALE metadata 与 PCAP evidence 关联；缺少 PCAP 不会否定
+  R0 endpoint evidence，R0 candidate 也不会凭空生成 PCAP fact。
+- **backpressure/loss 是采集队列状态。** network producer 遇到 queue pressure 时只通过
+  `queueFailureCount`、`LastQueueFailureNtStatus`、common loss/backpressure counters 和
+  producer masks 暴露采集丢失/压力；这些字段不表示 WFP 阻断、限速或修改了网络连接。
 
 ## Code layout and build guards
 
@@ -193,11 +216,12 @@ from the R0 ALE authorization payload.
 - `transportEndpointHandleHex`
 - `filterIdHex`
 
-`serviceHint` is a lightweight port/protocol semantic label (`dns`, `http`,
-`tls`, `web`, or `unknown`). It does not parse packet payloads; DNS query names,
-HTTP methods/hosts/URIs, and TLS SNI continue to come from imported PCAP events.
-The shared `flowKey` / endpoint fields are intended to let reports group R0
-WFP metadata with `pcap.flow`, `pcap.dns`, `pcap.http`, and `pcap.tls` rows.
+`serviceHint` 是轻量 port/protocol semantic label（`dns`、`http`、`tls`、
+`web` 或 `unknown`）。It does not parse packet payloads；DNS query names、
+HTTP methods/hosts/URIs 和 TLS SNI 继续来自 imported PCAP events。The shared
+`flowKey` / endpoint fields are intended to let reports group R0 WFP metadata
+with `pcap.flow`, `pcap.dns`, `pcap.http`, and `pcap.tls` rows。报告层应把这些字段当作
+evidence labels，而不是协议解析 verdict。
 
 ### Flow correlation field semantics
 
@@ -222,6 +246,12 @@ and they do not replace richer DNS, HTTP, or TLS evidence imported from PCAP.
 Synthetic collector rows and the valid JSONL noise row use the same field names
 so no-device stress runs can validate report grouping before the WFP producer is
 loaded.
+
+中文：`flowKey`、`sourceEndpoint`、`destinationEndpoint` 和 top-level `path`
+只帮助同一 flow 的多来源证据对齐。若 PCAP import 中没有对应 `pcap.dns` /
+`pcap.http` / `pcap.tls` 行，report 不应从 R0 `serviceHint` 反推出 query、Host header
+或 SNI；若 PCAP 有 payload-derived row，则应把它作为协议事实来源，并把 R0 row 作为
+kernel-side endpoint attribution。
 
 When the remote endpoint is decoded, top-level `SandboxEvent.path` is now a
 URI-like string such as `tcp://203.0.113.10:443` instead of only
@@ -253,6 +283,9 @@ Do not place `.sys`, `.pdb`, `.obj`, or other native build outputs under the rep
 - The TODO markers for flow contexts, packet/stream layers, and filter
   conditions are intentional.  Do not treat ALE inspect-only telemetry as full
   packet capture or complete WFP coverage.
+- `serviceHint` and DNS/HTTP/TLS candidate booleans remain evidence labels for
+  correlation.  They are not parser results, not block/allow decisions, and not
+  malicious/benign verdicts.
 - Runtime validation should be performed in a test-signed VM by loading the driver, generating outbound and inbound TCP/UDP activity, draining `READ_EVENTS`, and checking PID, address, port, layer, callout, and filter fields.
 - `GET_STATUS` exposes `ActiveProducerMask`, `FailedProducerMask`,
   `EffectiveProducerMask`, `LastNtStatus`, and `LastFailureNtStatus`.

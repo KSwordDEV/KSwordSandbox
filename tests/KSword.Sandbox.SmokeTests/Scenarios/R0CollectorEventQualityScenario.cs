@@ -234,6 +234,12 @@ internal sealed class R0CollectorEventQualityScenario : ISmokeTestScenario
         RequireContains(eventParser, "sampleBehaviorCandidate", "Driver rows must expose behavior-candidate classification.");
         RequireContains(eventParser, "semanticFamily", "Typed payload rows must include semantic family.");
         RequireContains(eventParser, "activityKind", "Typed payload rows must include family.operation activity kind.");
+        RequireContains(eventParser, "dropLocationFamily", "File payload rows must expose dropped-file location semantics.");
+        RequireContains(eventParser, "persistenceFamily", "Registry payload rows must expose persistence family semantics.");
+        RequireContains(eventParser, "imageLoadFamily", "Image payload rows must expose module-load family semantics.");
+        RequireContains(eventParser, "networkEvidenceKind", "Network payload rows must expose DNS/HTTP/TLS/lateral evidence kind.");
+        RequireContains(eventParser, "lateralMovementCandidate", "Network payload rows must expose lateral-movement candidate semantics.");
+        RequireContains(eventParser, "downloadExecuteCandidate", "Network/file payload rows must expose download-execute candidate semantics.");
         RequireContains(eventParser, "zhMessage", "Typed payload rows must include Chinese operator messages.");
         RequireContains(eventParser, "zhHint", "Typed payload rows must include Chinese operator hints.");
         RequireContains(eventParser, "sourceEndpoint", "Network parser must include source endpoint semantics.");
@@ -277,6 +283,11 @@ internal sealed class R0CollectorEventQualityScenario : ISmokeTestScenario
         RequireContains(syntheticMode, "sampleBehaviorCandidate", "Synthetic rows must include behavior-candidate metadata.");
         RequireContains(syntheticMode, "semanticFamily", "Synthetic rows must include semantic family metadata.");
         RequireContains(syntheticMode, "activityKind", "Synthetic rows must include activity-kind metadata.");
+        RequireContains(syntheticMode, "dropLocationFamily", "Synthetic file rows must include drop-location semantics.");
+        RequireContains(syntheticMode, "persistenceFamily", "Synthetic registry rows must include persistence-family semantics.");
+        RequireContains(syntheticMode, "imageLoadFamily", "Synthetic image rows must include image-load-family semantics.");
+        RequireContains(syntheticMode, "networkEvidenceKind", "Synthetic network rows must include evidence-kind semantics.");
+        RequireContains(syntheticMode, "downloadExecuteCandidate", "Synthetic rows must include download-execute candidate semantics.");
         RequireContains(syntheticMode, "zhMessage", "Synthetic rows must include Chinese operator messages.");
         RequireContains(syntheticMode, "zhHint", "Synthetic rows must include Chinese operator hints.");
         RequireContains(syntheticMode, "StressJsonlLossEvidence", "Synthetic rows must name the stress loss field set.");
@@ -303,6 +314,8 @@ internal sealed class R0CollectorEventQualityScenario : ISmokeTestScenario
         RequireContains(abiSelfCheck, "networkServiceHintPolicy", "ABI self-check must describe DNS/HTTP/TLS service hints.");
         RequireContains(abiSelfCheck, "networkFlowKeyPolicy", "ABI self-check must describe flow-key endpoint semantics.");
         RequireContains(abiSelfCheck, "selfNoiseClassificationFields", "ABI self-check must list self-noise classification fields.");
+        RequireContains(abiSelfCheck, "typedPayloadSemanticFields", "ABI self-check must list typed payload semantic fields.");
+        RequireContains(abiSelfCheck, "stableJsonlFields", "ABI self-check must list stable JSONL field names.");
         RequireContains(abiSelfCheck, "stressBackpressureDiagnostics", "ABI self-check must list stress/backpressure diagnostics.");
 
         foreach (var doc in new[] { collectorDoc, schemaDoc, coreDoc, driverReadme })

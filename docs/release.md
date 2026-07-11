@@ -30,7 +30,7 @@ Hyper-V live、重 smoke 或驱动签名。
 - 报告输出中英 HTML，区分本地行为、R0 health/noise、VT reputation 和
   artifacts，raw events 默认折叠/分页/限高。
 - R0 driver/collector 只作为可选 lab 路径发布；默认 package/readiness
-  不签名、不加载驱动、不调用 `CSignTool.exe`。
+  不签名、不加载驱动、不使用 GUI signing fallback、不调用 `CSignTool.exe`。
 
 审阅者优先看：
 
@@ -71,9 +71,9 @@ portable script copies. Keep exclusions broad enough to block:
 
 Both manifests also carry a `releaseContract` and `stagedMetadata` section.
 These are operator-facing guardrails, not build inputs: they document that
-packaging/readiness must not mutate Hyper-V, sign drivers, call `CSignTool.exe`,
-push, or publish, and they define the generated metadata fields reviewers should
-expect inside each staged package.
+packaging/readiness must not mutate Hyper-V, sign drivers, use GUI signing
+fallback, call `CSignTool.exe`, push, or publish, and they define the generated
+metadata fields reviewers should expect inside each staged package.
 
 ## Pre-release checklist
 
@@ -114,14 +114,28 @@ expect inside each staged package.
    .\scripts\package-portable.ps1 `
      -PackageKind runtime `
      -RuntimePublishRoot 'D:\Temp\KSwordSandbox\publish' `
+     -RequireCompleteRuntimePayloads `
      -OutputRoot 'D:\Temp\KSwordSandbox\packages'
    ```
+
+   如果只是审阅 layout/safety，可以省略 `-RequireCompleteRuntimePayloads` 并使用
+   `-StageOnly`；正式 runtime handoff 必须让 `host-web`、`guest-tools`、
+   `tools/job-tool`、`tools/postprocess` 都来自仓库外 `RuntimePublishRoot`。
 
 8. Inspect the generated `package-manifest.generated.json` inside the staged
    package and verify that no forbidden path or extension was copied. Reviewers
    should check `fileInventory[].sha256`, `fileInventory[].sizeBytes`,
    `packageDiagnostics`, `safetyContract`, `runtimePublishRoot`, `gitStatus`,
    and `manifestRequiredChecks`.
+   需要 runtime handoff gate 时运行：
+
+   ```powershell
+   .\scripts\Test-ReleaseReadiness.ps1 `
+     -AllowDirtySource `
+     -RuntimePublishRoot 'D:\Temp\KSwordSandbox\publish' `
+     -RequireCompleteRuntimePackage
+   ```
+
 9. Smoke-test the runtime package on a clean host or VM using only the portable
    package contents and local configuration.
 10. Record hashes and release notes. Push/publish only when a release manager
@@ -142,8 +156,10 @@ MVP package.
 - **Packaging locality:** package output root is outside the repository, for
   example `D:\Temp\KSwordSandbox\packages`; the packaging script only stages and
   zips locally.
-- **No legacy signing tool:** build, smoke, package, and onboarding commands do
-  not call `CSignTool.exe` or old KSword interactive signing wrappers.
+- **No legacy signing tool / no GUI signing fallback:** build, smoke, package,
+  and onboarding commands do not call `CSignTool.exe`, old KSword interactive
+  signing wrappers, or GUI signing fallback paths. Missing `signtool.exe` must
+  fail/skip clearly, not open a dialog.
 - **Known R0 signing limitation:** real R0 remains an optional lab path, not a
   default release promise. The driver can be compiled, but loading it requires a
   test-signed `.sys`, guest Windows test-signing, and an isolated Hyper-V VM.
@@ -264,8 +280,8 @@ Release-manager diagnostics are printed at the end of each package run:
 - skipped optional runtime publish entries, for example when `guest-tools` or
   `tools/postprocess` has not yet been published into `RuntimePublishRoot`;
 - archive path and SHA-256 when `-StageOnly` is not used;
-- explicit safety line: no VM mutation, no driver signing, no `CSignTool`, no
-  `git push`, and no network publish.
+- explicit safety line: no VM mutation, no driver signing, no GUI signing
+  fallback, no `CSignTool`, no `git push`, and no network publish.
 
 `package-manifest.generated.json` now includes `operatorDiagnostics` with
 runtime publish readiness, missing payload names, non-mutating guarantees, and
@@ -277,6 +293,8 @@ package safety guidance. Newer staging output should expose:
 - `runtimePublishRootMissingRecommendedActions`: concise next commands when
   `RuntimePublishRoot` is absent, under the repository, or missing expected
   folders.
+- `completeRuntimePayloadsRequired` / `runtimePublishSummary`: whether this is
+  an explicit complete-runtime handoff or only a layout dry-run.
 - `externalStateDiagnostics`: reminders that Hyper-V prerequisites, guest
   payload freshness, optional VT key state, and runtime job outputs are checked
   by read-only install/run status commands rather than by the package script.

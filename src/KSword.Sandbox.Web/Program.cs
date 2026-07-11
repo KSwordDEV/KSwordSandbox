@@ -113,9 +113,9 @@ app.MapGet("/api/jobs/{jobId:guid}/virustotal", async Task<IResult> (Guid jobId,
 });
 // POST /api/jobs/{jobId}/enrichments/virustotal is the explicit job enrichment
 // path. The live monitor GET stays display-only by default; this endpoint
-// performs the same hash-only lookup and persists only rule-safe VT lookup
-// evidence, leaving missing keys, auth failures, rate limits, and transport
-// failures as friendly non-persistent responses.
+// performs the same hash-only lookup and persists only rule-safe "found"
+// evidence. Missing/not-found results, missing keys, auth failures, rate
+// limits, and transport failures stay friendly non-persistent UI statuses.
 app.MapPost("/api/jobs/{jobId:guid}/enrichments/virustotal", async Task<IResult> (Guid jobId, SandboxJobService service, VirusTotalLookupService virusTotal, CancellationToken cancellationToken) =>
 {
     var job = service.GetJob(jobId);
@@ -317,6 +317,7 @@ app.MapPost("/api/files/upload/start", async Task<IResult> (HttpRequest request,
             Uploaded = candidate,
             Job = job,
             MonitorHref = $"/jobs/{job.JobId:D}/live-events",
+            UploadMonitorHref = $"/jobs/{job.JobId:D}/live-events?fromUpload=1&accepted={(runbookStart.Accepted ? "1" : "0")}&state={Uri.EscapeDataString(runbookStart.State ?? RunbookBackgroundExecutionStore.NotStarted)}",
             ExecutionFlowHref = $"/jobs/{job.JobId:D}/execution-flow",
             ReportHref = $"/api/jobs/{job.JobId:D}/report/html",
             BackgroundHref = $"/api/jobs/{job.JobId:D}/runbook/background",
@@ -760,9 +761,9 @@ static string SafeSelectorPreview(string? value)
 /// <summary>
 /// Decides whether a VirusTotal lookup result should become durable report
 /// evidence. Inputs are the operator-safe lookup result; processing persists
-/// only real query outcomes that are not local configuration or transport
-/// failures, preserving the requirement that missing API keys and failed calls
-/// stay quiet and do not write report/log noise.
+/// only real "found" query outcomes, preserving the requirement that
+/// missing/not-found VT status, missing API keys, and failed calls stay quiet
+/// and do not write report/behavior-log noise.
 /// </summary>
 static bool ShouldPersistVirusTotalResult(VirusTotalLookupResult result)
 {

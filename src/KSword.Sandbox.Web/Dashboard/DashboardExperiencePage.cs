@@ -191,7 +191,7 @@ internal static class DashboardExperiencePage
             <div class="header-row">
               <div>
                 <h1 data-zh="KSword 沙箱主机" data-en="KSword Sandbox Host">KSword 沙箱主机</h1>
-              <p data-zh="上传样本后会自动生成安全计划、启动动态分析并进入独立监控页；主页面只保留上传、配置、进度和报告入口，原始事件与下载列表集中在监控页。" data-en="After upload, the UI creates a safe plan, starts dynamic analysis, and enters the standalone monitor. The dashboard keeps only upload, configuration, progress, and report entry points; raw events and downloads stay on the monitor page.">上传样本后会自动生成安全计划、启动动态分析并进入独立监控页；主页面只保留上传、配置、进度和报告入口，原始事件与下载列表集中在监控页。</p>
+              <p data-zh="上传样本后会保存到本机、创建安全计划并尝试提交 VM 动态分析；随后进入独立监控页查看启动状态、真实进度和报告入口，原始事件与下载列表集中在监控页。" data-en="After upload, the UI stores the sample locally, creates a safe plan, and attempts to submit VM dynamic analysis. It then enters the standalone monitor for start status, real progress, and report links; raw events and downloads stay on the monitor page.">上传样本后会保存到本机、创建安全计划并尝试提交 VM 动态分析；随后进入独立监控页查看启动状态、真实进度和报告入口，原始事件与下载列表集中在监控页。</p>
                 <p><span class="pill" data-zh="提示：右键路径、表格值、证据字段和执行流程视图可复制。" data-en="Tip: right-click paths, table values, evidence fields, and execution-flow details to copy.">提示：右键路径、表格值、证据字段和执行流程视图可复制。</span></p>
               </div>
               <button class="secondary lang-toggle" type="button" onclick="toggleLanguage()" aria-label="语言切换 / Language switch" data-zh="语言：中文 ⇄ English" data-en="Language: English ⇄ 中文">语言：中文 ⇄ English</button>
@@ -211,34 +211,34 @@ internal static class DashboardExperiencePage
             </div>
             <div id="workspace-plan" class="workspace-panel active" role="tabpanel" aria-labelledby="workspace-tab-plan">
             <section class="operator-hero" id="operator-start">
-              <h2 data-zh="从这里开始：上传后自动进 VM" data-en="Start here: upload and enter VM automatically">从这里开始：上传后自动进 VM</h2>
-              <p class="hint" data-zh="首屏按云沙箱操作习惯组织：先选择样本，再看 VM / VirusTotal / 证据采集就绪状态，最后点击一个主按钮。上传成功后页面会立即跳转到动态监控页，不需要再找“启动”按钮。" data-en="The first screen follows a polished cloud-sandbox flow: choose a sample, review VM / VirusTotal / evidence readiness, then press one primary button. After upload succeeds, the page redirects to the dynamic monitor immediately; no extra Start button hunting.">首屏按云沙箱操作习惯组织：先选择样本，再看 VM / VirusTotal / 证据采集就绪状态，最后点击一个主按钮。上传成功后页面会立即跳转到动态监控页，不需要再找“启动”按钮。</p>
+              <h2 data-zh="从这里开始：上传后提交 VM 分析" data-en="Start here: upload and submit VM analysis">从这里开始：上传后提交 VM 分析</h2>
+              <p class="hint" data-zh="首屏按云沙箱操作习惯组织：先选择样本，再看 VM / VirusTotal / 证据采集就绪状态，最后点击一个主按钮。任务创建后会打开动态监控页确认后台接管状态和真实进度，不需要再找“启动”按钮。" data-en="The first screen follows a polished cloud-sandbox flow: choose a sample, review VM / VirusTotal / evidence readiness, then press one primary button. After the job is created, the dynamic monitor opens to confirm background handoff and real progress; no extra Start button hunting.">首屏按云沙箱操作习惯组织：先选择样本，再看 VM / VirusTotal / 证据采集就绪状态，最后点击一个主按钮。任务创建后会打开动态监控页确认后台接管状态和真实进度，不需要再找“启动”按钮。</p>
               <div id="operatorReadinessChips" class="readiness-strip" data-copy="等待配置加载 / waiting for readiness" data-copy-label="operator readiness summary"></div>
               <div class="operator-hero-grid">
                 <div class="operator-brief" data-copy="KSword WebUI one-click run: upload exe, plan, start VM, open live monitor">
                   <strong data-zh="本地安全边界" data-en="Local safety boundary">本地安全边界</strong>
-                  <span data-zh="样本只保存到本机 runtime root；VirusTotal 只查 SHA-256，不上传样本字节。若 VT 未配置或调用失败，主流程保持安静并继续。" data-en="Samples are saved only to the local runtime root; VirusTotal performs SHA-256 lookup only and never uploads sample bytes. If VT is missing or fails, the main flow stays quiet and continues.">样本只保存到本机 runtime root；VirusTotal 只查 SHA-256，不上传样本字节。若 VT 未配置或调用失败，主流程保持安静并继续。</span>
+                  <span data-zh="样本只保存到本机 runtime root；VirusTotal 只查 SHA-256，不上传样本字节。若 VT 未配置、未收录或调用失败，只作为页面静默状态，主流程继续。" data-en="Samples are saved only to the local runtime root; VirusTotal performs SHA-256 lookup only and never uploads sample bytes. If VT is missing, not found, or fails, it remains a quiet page status and the main flow continues.">样本只保存到本机 runtime root；VirusTotal 只查 SHA-256，不上传样本字节。若 VT 未配置、未收录或调用失败，只作为页面静默状态，主流程继续。</span>
                 </div>
                 <div class="operator-flow" aria-label="上传执行路径 / Upload execution path">
                   <div class="operator-step" data-copy="1. Choose local EXE"><b data-zh="1. 选择 EXE" data-en="1. Choose EXE">1. 选择 EXE</b><span data-zh="支持点击或拖拽到上传区域。" data-en="Click or drag into the upload zone.">支持点击或拖拽到上传区域。</span></div>
                   <div class="operator-step" data-copy="2. Review VM VT artifact readiness"><b data-zh="2. 看就绪态" data-en="2. Review readiness">2. 看就绪态</b><span data-zh="VM、检查点、R0、VT 和产物选项都可右键复制。" data-en="VM, checkpoint, R0, VT, and artifact options are right-click copyable.">VM、检查点、R0、VT 和产物选项都可右键复制。</span></div>
-                  <div class="operator-step" data-copy="3. Upload starts VM analysis and opens monitor"><b data-zh="3. 自动分析" data-en="3. Auto analyze">3. 自动分析</b><span data-zh="提交后直接进入动态监控页。" data-en="Submission opens the dynamic monitor directly.">提交后直接进入动态监控页。</span></div>
+                  <div class="operator-step" data-copy="3. Upload submits VM analysis and opens monitor"><b data-zh="3. 提交分析" data-en="3. Submit analysis">3. 提交分析</b><span data-zh="提交后打开动态监控页查看启动状态和真实进度。" data-en="Submission opens the dynamic monitor for start status and real progress.">提交后打开动态监控页查看启动状态和真实进度。</span></div>
                 </div>
               </div>
             </section>
             <section id="plan">
               <h2 data-zh="上传与配置" data-en="Upload and configuration">上传与配置</h2>
-              <p class="hint"><span data-zh="请选择一种提交方式：上传 EXE 会自动启动动态分析并跳转监控；选择已有路径或扫描目录会先生成可复核计划。" data-en="Choose one submission method: upload starts dynamic analysis and redirects to the monitor; existing path and folder scan create a reviewable plan first.">请选择一种提交方式：上传 EXE 会自动启动动态分析并跳转监控；选择已有路径或扫描目录会先生成可复核计划。</span></p>
+              <p class="hint"><span data-zh="请选择一种提交方式：上传 EXE 会创建任务、尝试启动动态分析并打开监控；选择已有路径或扫描目录会先生成可复核计划。" data-en="Choose one submission method: upload creates a job, attempts to start dynamic analysis, and opens the monitor; existing path and folder scan create a reviewable plan first.">请选择一种提交方式：上传 EXE 会创建任务、尝试启动动态分析并打开监控；选择已有路径或扫描目录会先生成可复核计划。</span></p>
               <input id="duration" type="hidden" value="120">
               <div class="tabs" role="tablist" aria-label="三种提交方式 / Three submission methods">
-                <button id="tab-upload" class="tab-button active" type="button" role="tab" aria-selected="true" aria-controls="panel-upload" onclick="selectPlanTab('upload')" data-zh="上传 .exe → 自动分析并打开监控" data-en="Upload .exe → auto analyze and open monitor">上传 .exe → 自动分析并打开监控</button>
+                <button id="tab-upload" class="tab-button active" type="button" role="tab" aria-selected="true" aria-controls="panel-upload" onclick="selectPlanTab('upload')" data-zh="上传 .exe → 提交分析并打开监控" data-en="Upload .exe → submit analysis and open monitor">上传 .exe → 提交分析并打开监控</button>
                 <button id="tab-path" class="tab-button" type="button" role="tab" aria-selected="false" aria-controls="panel-path" onclick="selectPlanTab('path')" data-zh="选择已有路径" data-en="Existing path">选择已有路径</button>
                 <button id="tab-scan" class="tab-button" type="button" role="tab" aria-selected="false" aria-controls="panel-scan" onclick="selectPlanTab('scan')" data-zh="扫描目录" data-en="Scan folder">扫描目录</button>
               </div>
               <div id="panel-upload" class="tab-panel active" role="tabpanel" aria-labelledby="tab-upload">
                   <div class="upload-card">
                     <h3 data-zh="一键动态分析" data-en="One-click dynamic analysis">一键动态分析</h3>
-                    <p class="hint" data-zh="保存文件、生成可检查计划、提交后台虚拟机分析，然后当前页面直接进入动态监控页；证据/下载（Artifacts）、原始事件和 VirusTotal 均在该独立页查看。" data-en="Stores the file, creates a reviewable plan, submits background VM analysis, then redirects this page directly into the dynamic monitor; artifacts/downloads, raw events, and VirusTotal live on that standalone page.">保存文件、生成可检查计划、提交后台虚拟机分析，然后当前页面直接进入动态监控页；证据/下载（Artifacts）、原始事件和 VirusTotal 均在该独立页查看。</p>
+                    <p class="hint" data-zh="保存文件、生成可检查计划、尝试提交后台虚拟机分析，然后当前页面进入动态监控页；证据/下载（Artifacts）、原始事件和 VirusTotal 均在该独立页查看。" data-en="Stores the file, creates a reviewable plan, attempts to submit background VM analysis, then redirects this page into the dynamic monitor; artifacts/downloads, raw events, and VirusTotal live on that standalone page.">保存文件、生成可检查计划、尝试提交后台虚拟机分析，然后当前页面进入动态监控页；证据/下载（Artifacts）、原始事件和 VirusTotal 均在该独立页查看。</p>
                     <div id="uploadDropZone" class="upload-dropzone" data-copy="上传区域：点击或拖拽 .exe / Upload zone: click or drag .exe" data-copy-label="upload drop zone">
                       <label for="sampleUpload" data-zh="可执行文件（.exe）" data-en="Executable file (.exe)">可执行文件（.exe）</label>
                       <input id="sampleUpload" type="file" accept=".exe,application/vnd.microsoft.portable-executable,application/octet-stream" data-copy-label="selected sample">
@@ -254,8 +254,8 @@ internal static class DashboardExperiencePage
                       <button type="button" onclick="applySamplePreset('evidence')" data-copy="证据优先：180s，强化落地文件、截图、PCAP / Evidence-first: 180s with dropped files, screenshots, PCAP" data-zh="证据优先" data-en="Evidence-first">证据优先</button>
                       <button type="button" onclick="applySamplePreset('memory')" data-copy="内存取证：180s，启用内存 dump（支持时含子进程） / Memory forensic: 180s, memory dumps including children when supported" data-zh="内存取证" data-en="Memory forensic">内存取证</button>
                     </div>
-                    <button class="primary-cta" onclick="uploadAndPlan()" data-zh="开始分析：上传 → 进 VM → 打开实时监控" data-en="Start analysis: upload → VM → live monitor">开始分析：上传 → 进 VM → 打开实时监控</button>
-                    <p class="microcopy" data-copy="Upload starts analysis automatically and redirects to live monitor" data-zh="点击后若后端预检失败，仍会尽量保留已创建任务、错误原因和监控/近期任务入口，避免丢上下文。" data-en="If backend preflight fails, the UI still tries to preserve the created job, failure reason, and monitor/recent-job entry points so context is not lost.">点击后若后端预检失败，仍会尽量保留已创建任务、错误原因和监控/近期任务入口，避免丢上下文。</p>
+                    <button class="primary-cta" onclick="uploadAndPlan()" data-zh="开始分析：上传 → 提交 VM → 打开监控" data-en="Start analysis: upload → submit VM → monitor">开始分析：上传 → 提交 VM → 打开监控</button>
+                    <p class="microcopy" data-copy="Upload creates a job, attempts VM analysis, and opens the live monitor" data-zh="点击后会显示浏览器真实上传进度；若 VM 启动预检失败，仍会保留已创建任务、错误原因和监控/近期任务入口，避免丢上下文。" data-en="After click, the browser shows real upload progress. If VM start preflight fails, the UI still preserves the created job, failure reason, and monitor/recent-job entry points so context is not lost.">点击后会显示浏览器真实上传进度；若 VM 启动预检失败，仍会保留已创建任务、错误原因和监控/近期任务入口，避免丢上下文。</p>
                   </div>
               </div>
               <div id="panel-path" class="tab-panel" role="tabpanel" aria-labelledby="tab-path" hidden>
@@ -816,7 +816,7 @@ internal static class DashboardExperiencePage
                 state: file ? 'good' : 'warn',
                 label: t('样本', 'Sample'),
                 value: file ? `${file.name} · ${formatBytes(file.size || 0)}` : t('等待选择 .exe', 'Waiting for .exe'),
-                hint: file ? t('将上传后自动进 VM', 'Will enter VM after upload') : t('点击或拖拽到上传区域', 'Click or drag into upload zone')
+                hint: file ? t('上传后创建任务并尝试提交 VM', 'Will create a job and attempt VM submission after upload') : t('点击或拖拽到上传区域', 'Click or drag into upload zone')
               });
               chips.push({
                 state: runtimeConfigLoadError ? 'warn' : (vmName ? 'good' : 'warn'),
@@ -839,7 +839,7 @@ internal static class DashboardExperiencePage
               chips.push({
                 state: virusTotalReadinessError ? 'warn' : (vtConfigured ? 'good' : 'neutral'),
                 label: 'VirusTotal',
-                value: virusTotalReadinessError ? t('状态读取失败', 'status load failed') : (vtConfigured ? t('已配置', 'configured') : t('未配置，安静跳过', 'not configured, quiet skip')),
+                value: virusTotalReadinessError ? t('状态读取失败', 'status load failed') : (vtConfigured ? t('已配置', 'configured') : t('未配置，静默跳过', 'not configured, quiet skip')),
                 hint: virusTotalReadinessError || `${t('来源', 'Source')}: ${vtSource}`
               });
               chips.push({
@@ -868,7 +868,7 @@ internal static class DashboardExperiencePage
 
               const file = input?.files?.[0] || null;
               if (!file) {
-                const emptyText = t('尚未选择样本。请选择一个本机 .exe；上传后会自动提交 VM 动态分析并跳转监控页。', 'No sample selected. Choose one local .exe; upload automatically submits VM dynamic analysis and opens the monitor.');
+                const emptyText = t('尚未选择样本。请选择一个本机 .exe；上传后会创建任务、尝试提交 VM 动态分析并打开监控页。', 'No sample selected. Choose one local .exe; upload creates a job, attempts VM dynamic analysis, and opens the monitor.');
                 target.className = 'selected-sample empty';
                 target.textContent = emptyText;
                 target.setAttribute('data-copy', emptyText);
@@ -1154,16 +1154,16 @@ internal static class DashboardExperiencePage
               setBusy(true);
               renderSelectedSample();
               renderOperatorReadinessChips();
-              setStatus(t('正在上传样本、生成计划并提交后台虚拟机分析；完成提交后会进入动态监控页...', 'Uploading sample, creating a plan, and submitting background VM analysis; the page will enter the dynamic monitor after submission...'), false);
+              setStatus(t('正在准备上传样本；浏览器会显示真实上传进度，上传完成后 Web Host 会创建任务并尝试提交后台 VM 分析。', 'Preparing to upload the sample; the browser will show real upload progress. After upload, the Web Host creates a job and attempts background VM analysis.'), false);
               try {
                 const form = new FormData();
                 form.append('sample', input.files[0]);
                 appendOneClickAnalysisOptions(form);
-                const uploadResponse = await fetch('/api/files/upload/start', {
-                  method: 'POST',
-                  body: form
-                });
-                const payload = await requireOk(uploadResponse, t('上传并启动分析', 'Upload and start analysis'));
+                const payload = await postFormWithUploadProgress(
+                  '/api/files/upload/start',
+                  form,
+                  t('上传并启动分析', 'Upload and start analysis'),
+                  progress => renderUploadTransferProgress(file, progress));
                 const uploaded = payload.uploaded || payload.Uploaded || {};
                 const job = payload.job || payload.Job || null;
 
@@ -1179,6 +1179,7 @@ internal static class DashboardExperiencePage
                 const jobId = job && (job.jobId || job.id || job.JobId);
                 if (jobId) {
                   const runbookStart = payload.runbookStart || payload.RunbookStart || {};
+                  const uploadMonitorHref = payload.uploadMonitorHref || payload.UploadMonitorHref || '';
                   startEstimatedProgress(true);
                   startRunbookProgressPolling(String(jobId));
                   startBackgroundExecutionPolling(String(jobId), true);
@@ -1191,15 +1192,26 @@ internal static class DashboardExperiencePage
                   const accepted = Boolean(runbookStart.accepted ?? runbookStart.Accepted);
                   const statusCode = Number(runbookStart.statusCode ?? runbookStart.StatusCode ?? 0);
                   const message = runbookStart.message || runbookStart.Message || '';
-                  if (!accepted && statusCode >= 400) {
+                  const startFailed = !accepted && statusCode >= 400;
+                  if (startFailed) {
                     renderStages(progressStageIndex, false, true);
-                    setStatus(
+                    renderUploadMonitorHandoff(
+                      String(jobId),
+                      runbookStart,
+                      uploadMonitorHref,
+                      true,
                       message || t('任务已创建，但后台虚拟机分析预检失败；请打开进度页查看原因。', 'Job was created, but background VM analysis preflight failed; open the progress page for details.'),
-                      true);
+                      4200);
                   } else {
-                    setStatus(t('上传完成，后台虚拟机分析已提交；正在进入动态监控页。', 'Upload completed and background VM analysis has been submitted; entering the dynamic monitor.'), false);
+                    renderUploadMonitorHandoff(
+                      String(jobId),
+                      runbookStart,
+                      uploadMonitorHref,
+                      false,
+                      t('上传完成，任务已创建并已提交后台接管；正在进入动态监控页查看真实进度。', 'Upload completed; the job was created and handed to the background runner. Entering the dynamic monitor for real progress.'),
+                      850);
                   }
-                  redirectToLiveMonitor(String(jobId), runbookStart);
+                  redirectToLiveMonitor(String(jobId), runbookStart, uploadMonitorHref, startFailed ? 4200 : 850);
                 } else {
                   setStatus(t('上传完成但未返回任务 ID；请查看近期任务列表。', 'Upload completed but no job id was returned; check the recent jobs list.'), true);
                 }
@@ -1210,17 +1222,129 @@ internal static class DashboardExperiencePage
               }
             }
 
-            function redirectToLiveMonitor(jobId, runbookStart) {
+            function postFormWithUploadProgress(url, form, action, onProgress) {
+              // Inputs: multipart form data and a progress callback. Processing
+              // uses XMLHttpRequest because fetch does not expose browser upload
+              // byte progress. Return: parsed JSON payload from the existing
+              // upload/start endpoint.
+              return new Promise((resolve, reject) => {
+                const xhr = new XMLHttpRequest();
+                xhr.open('POST', url);
+                xhr.responseType = 'text';
+                xhr.upload.onprogress = event => {
+                  if (onProgress) {
+                    onProgress({
+                      phase: 'uploading',
+                      lengthComputable: event.lengthComputable,
+                      loaded: event.loaded || 0,
+                      total: event.total || 0
+                    });
+                  }
+                };
+                xhr.upload.onload = () => {
+                  if (onProgress) {
+                    onProgress({ phase: 'processing' });
+                  }
+                };
+                xhr.onload = () => {
+                  const payload = parseXhrPayload(xhr.responseText);
+                  if (xhr.status >= 200 && xhr.status < 300) {
+                    resolve(payload);
+                    return;
+                  }
+
+                  reject(new Error(formatHttpError(action, xhr, payload)));
+                };
+                xhr.onerror = () => reject(new Error(t('上传请求无法连接 Web Host；请确认服务仍在运行，任务尚未创建。', 'Upload request could not reach the Web Host; confirm the service is still running. No job was created.')));
+                xhr.ontimeout = () => reject(new Error(t('上传请求超时；任务尚未创建，请稍后重试。', 'Upload request timed out; no job was created. Retry later.')));
+                xhr.send(form);
+              });
+            }
+
+            function parseXhrPayload(text) {
+              if (!text) {
+                return {};
+              }
+
+              try {
+                return JSON.parse(text);
+              } catch {
+                return { raw: text };
+              }
+            }
+
+            function renderUploadTransferProgress(file, progress) {
+              if (!progress || progress.phase === 'processing') {
+                setStatus(t('样本已上传到 Web Host；正在创建任务、生成计划并尝试提交后台 VM 分析。', 'Sample uploaded to the Web Host; creating the job, generating the plan, and attempting background VM analysis.'), false);
+                return;
+              }
+
+              const name = file?.name || t('样本', 'sample');
+              const loaded = Math.max(0, Number(progress.loaded) || 0);
+              const total = Math.max(0, Number(progress.total) || 0);
+              if (progress.lengthComputable && total > 0) {
+                const percent = Math.max(0, Math.min(100, Math.round((loaded / total) * 100)));
+                setStatus(t(
+                  `正在上传 ${name}：${percent}%（${formatBytes(loaded)} / ${formatBytes(total)}）。上传完成后会创建任务并尝试提交 VM 分析。`,
+                  `Uploading ${name}: ${percent}% (${formatBytes(loaded)} / ${formatBytes(total)}). After upload, the job is created and VM analysis is attempted.`), false);
+                return;
+              }
+
+              setStatus(t(
+                `正在上传 ${name}：已发送 ${formatBytes(loaded)}。上传完成后会创建任务并尝试提交 VM 分析。`,
+                `Uploading ${name}: sent ${formatBytes(loaded)}. After upload, the job is created and VM analysis is attempted.`), false);
+            }
+
+            function renderUploadMonitorHandoff(jobId, runbookStart, monitorHref, isError, message, delayMs) {
+              const target = document.getElementById('status');
+              if (!target) {
+                return;
+              }
+
+              const href = buildUploadMonitorHref(jobId, runbookStart, monitorHref);
+              const progressHref = `/jobs/${encodeURIComponent(jobId)}/execution-flow`;
+              const state = String((runbookStart && (runbookStart.state || runbookStart.State)) || 'submitted');
+              const delaySeconds = Math.max(1, Math.round((Number(delayMs) || 0) / 1000));
+              const headline = isError
+                ? t('任务已创建，但 VM 分析启动未通过', 'Job created, but VM analysis did not start')
+                : t('任务已创建，正在进入实时监控', 'Job created; entering live monitor');
+              const detail = localizeServerMessage(message || (isError
+                ? t('后台启动预检未通过；监控页会保留任务上下文，执行流程页可查看失败阶段。', 'Background preflight did not pass; the monitor keeps job context and the execution-flow page shows the failed stage.')
+                : t('后台执行已交给 Web Host；监控页会显示真实进度流、原始事件和证据入口。', 'Background execution has been handed to the Web Host; the monitor shows the real progress stream, raw events, and evidence links.')));
+              const countdown = t(`约 ${delaySeconds} 秒后自动打开监控页。`, `Opening the monitor automatically in about ${delaySeconds} seconds.`);
+              const copy = `${headline}; job=${jobId}; state=${state}; monitor=${href}; detail=${detail}`;
+              target.className = `status ${isError ? 'error' : 'ok'}`;
+              target.setAttribute('data-copy', copy);
+              target.setAttribute('data-copy-label', 'upload monitor handoff');
+              target.innerHTML = `
+                <strong>${escapeHtml(headline)}</strong>
+                <p>${escapeHtml(detail)}</p>
+                <p class="hint">${escapeHtml(countdown)} ${escapeHtml(t('如果浏览器未跳转，请使用下方按钮；不需要重新上传。', 'If the browser does not navigate, use the buttons below; do not upload again.'))}</p>
+                <p class="button-row">
+                  <a class="buttonlink" href="${escapeAttribute(href)}" data-copy="${escapeAttribute(href)}">${escapeHtml(t('打开实时监控页', 'Open live monitor'))}</a>
+                  <a class="buttonlink secondary" target="_blank" rel="noopener" href="${escapeAttribute(progressHref)}" data-copy="${escapeAttribute(progressHref)}">${escapeHtml(t('打开进度页（执行流程）', 'Open progress page (execution flow)'))}</a>
+                </p>`;
+            }
+
+            function buildUploadMonitorHref(jobId, runbookStart, monitorHref) {
+              if (monitorHref) {
+                return monitorHref;
+              }
+
+              const accepted = Boolean(runbookStart && (runbookStart.accepted ?? runbookStart.Accepted));
+              const state = encodeURIComponent(String((runbookStart && (runbookStart.state || runbookStart.State)) || 'submitted'));
+              return `${buildLiveMonitorHref(jobId)}?fromUpload=1&accepted=${accepted ? '1' : '0'}&state=${state}`;
+            }
+
+            function redirectToLiveMonitor(jobId, runbookStart, monitorHref, delayMs) {
               // Inputs: created job id plus the server-side background-start
               // result. Processing navigates the current page to the dedicated
               // dynamic monitor because /api/files/upload/start already handed
               // execution to the Web host background runner; return: none.
-              const accepted = Boolean(runbookStart && (runbookStart.accepted ?? runbookStart.Accepted));
-              const state = encodeURIComponent(String((runbookStart && (runbookStart.state || runbookStart.State)) || 'submitted'));
-              const monitorHref = `${buildLiveMonitorHref(jobId)}?fromUpload=1&accepted=${accepted ? '1' : '0'}&state=${state}`;
+              const href = buildUploadMonitorHref(jobId, runbookStart, monitorHref);
               setTimeout(() => {
-                window.location.href = monitorHref;
-              }, 450);
+                window.location.href = href;
+              }, Math.max(0, Number(delayMs) || 850));
             }
 
             function appendOneClickAnalysisOptions(form) {

@@ -1533,6 +1533,9 @@ public sealed class HostArtifactIndexBuilder
 
     private static void AddArtifactIdentityMetadata(Dictionary<string, string> metadata, ArtifactDescriptor artifact)
     {
+        AddIfMissing(metadata, "artifactKind", artifact.Kind.ToString());
+        AddIfMissing(metadata, "sourceArtifactKind", artifact.Kind.ToString());
+        AddIfMissing(metadata, "sourceArtifactKindZh", ArtifactKindNameZh(artifact.Kind));
         AddIfMissing(metadata, "artifactRelativePath", artifact.RelativePath);
         AddIfMissing(metadata, "sourceArtifactRelativePath", artifact.RelativePath);
         AddIfMissing(metadata, "importPath", artifact.ImportPath);
@@ -1564,6 +1567,9 @@ public sealed class HostArtifactIndexBuilder
         AddIfMissing(metadata, "safeRelativeSelector", artifact.RelativePath);
         AddIfMissing(metadata, "downloadSecurityPolicy", "server-indexed-relative-selector");
         AddIfMissing(metadata, "downloadRejectionPolicy", "reject-empty-absolute-traversal-unindexed-missing");
+        AddIfMissing(metadata, "downloadIndexPolicy", "artifact-index-relative-selectors-only");
+        AddIfMissing(metadata, "downloadHintZh", "仅允许使用 Host artifact-index.json 中的相对 downloadSelector 下载；拒绝绝对路径、路径穿越、未索引或已缺失文件。");
+        AddIfMissing(metadata, "zhHint", "这是 Host 产物索引元数据，用于安全下载和溯源，不作为样本行为判定。");
         AddIfMissing(metadata, "isDownloadable", "true");
         if (artifact.SizeBytes > 0)
         {
@@ -1578,6 +1584,30 @@ public sealed class HostArtifactIndexBuilder
 
         AddIfMissing(metadata, "previewLabel", PreviewLabel(artifact.Kind, fileName));
         AddIfMissing(metadata, "previewLabelZh", PreviewLabelZh(artifact.Kind, fileName));
+    }
+
+    private static string ArtifactKindNameZh(ArtifactKind kind)
+    {
+        return kind switch
+        {
+            ArtifactKind.DroppedFile => "掉落文件",
+            ArtifactKind.Screenshot => "截图",
+            ArtifactKind.MemoryDump => "内存转储",
+            ArtifactKind.PacketCapture => "抓包文件",
+            ArtifactKind.DriverEventsJsonLines => "R0 事件",
+            ArtifactKind.GuestEventsJson => "Guest 事件",
+            ArtifactKind.GuestSummaryJson => "Guest 摘要",
+            ArtifactKind.ArtifactManifest => "产物清单",
+            ArtifactKind.ArtifactIndex => "产物索引",
+            ArtifactKind.ReportJson => "JSON 报告",
+            ArtifactKind.ReportHtml => "HTML 报告",
+            ArtifactKind.RunbookJson => "Runbook",
+            ArtifactKind.RunbookExecutionJson => "Runbook 执行记录",
+            ArtifactKind.StaticAnalysisJson => "静态分析",
+            ArtifactKind.Log => "日志",
+            ArtifactKind.Bundle => "归档包",
+            _ => "产物"
+        };
     }
 
     private static string FormatByteCount(long bytes)

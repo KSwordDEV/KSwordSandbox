@@ -2,6 +2,11 @@
 
 Date: 2026-07-10
 
+中文优先维护说明：本文是历史实施计划，不是当前 ABI 的唯一事实来源。阅读时先以
+`docs/r0-driver-core.md`、`docs/r0-collector.md`、`docs/r0-jsonl-schema.md` 和各
+producer 专项文档为准；本文件保留早期落地顺序、风险和 patch split 供对照。所有字段名、
+ABI 结构名、event type 和 JSON key 继续保持英文稳定值。
+
 > Historical planning note: this file records an earlier R0 landing plan. Use
 > `docs/r0-driver-core.md` for the current ABI source of truth,
 > `docs/r0-collector.md` / `docs/r0-jsonl-schema.md` for collector status and
@@ -13,6 +18,17 @@ Scope: documentation-only review of the current working-tree snapshot. This
 plan intentionally does not modify `driver/`, `guest/`, `src/`, `tests/`, or
 `scripts/`, so it can run in parallel with the main driver ring-buffer and
 collector drain work.
+
+判读边界 / interpretation boundary：
+
+- ABI review rows and planned fields are compatibility evidence only. They do
+  not assert that a live driver was loaded unless a live readiness/drain row says
+  so.
+- `noise`、`selfNoise`、producer masks、loss/backpressure counters 和 sequence
+  gaps 是采集归因/质量标签，不是 malicious/benign verdict。
+- Network planning must preserve the current semantic split: R0 WFP/ALE rows
+  provide endpoint/PID/layer evidence, while DNS query、HTTP request metadata、
+  TLS SNI/certificate 和 packet bytes come from PCAP-derived rows.
 
 Reviewed files:
 
@@ -447,6 +463,10 @@ ABI additions:
 - For the first R0 event-stream version, stable fields should include protocol,
   address family, local/remote address bytes, local/remote port, direction,
   process id, and status/action.
+- Treat `serviceHint`, `dnsCandidate`, `httpCandidate`, and `tlsCandidate` as
+  evidence labels derived from endpoint metadata.  Do not define them as parser
+  verdicts; DNS/HTTP/TLS payload facts should remain PCAP-imported facts unless
+  a future ABI explicitly carries parsed payload semantics.
 - Do not copy KswordARK mutable block/hide/set-rules protocols into the sandbox
   first milestone.
 
@@ -496,6 +516,8 @@ records by `KSWORD_SANDBOX_EVENT_HEADER.Size`. The next collector patch should:
   `nextSequence`, and any sequence-gap evidence in `data`;
 - emit protocol errors without crashing when a driver returns malformed size,
   version, or payload fields;
+- preserve ABI/noise/loss/backpressure fields as evidence labels and keep
+  verdict generation in host rules/reports rather than in the collector parser;
 - keep `--mock` behavior unchanged for CI and pipeline smoke tests.
 
 ## Recommended next patch split

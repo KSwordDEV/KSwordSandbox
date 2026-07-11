@@ -1,5 +1,10 @@
 # R0 file monitor contract
 
+中文优先说明：本文描述 R0 file minifilter 当前输出的文件行为证据。Driver 只把紧凑的
+post-operation metadata 写入 `READ_EVENTS` ring；它不阻断、不修改用户 I/O，也不在内核中给出
+“恶意/良性”结论。`operationName`、`statusHex`、path provenance、drop-file labels 和
+self-noise labels 都是 evidence labels，最终 verdict 应由 host rules/report 在合并更多证据后生成。
+
 This note captures the current R0 minifilter file-telemetry contract for the
 KSword sandbox driver. It is intentionally narrower than a full DLP/auditing
 filter: the driver emits compact evidence into the existing `READ_EVENTS` ring
@@ -62,6 +67,10 @@ The producer marks path provenance with compatible flag bits:
 Older collectors that do not know the new bits still preserve them in `flagsHex`
 and unknown flag diagnostics.
 
+中文：path flags 只说明“路径是否存在、是否被截断、来源是 normalized name 还是
+`FILE_OBJECT.FileName` fallback”。它们不证明文件内容已复制、hash 已计算，也不证明 drop
+成功；需要结合 user-mode snapshot/hash evidence 才能形成 artifact-level 结论。
+
 ## Sandbox self-path filtering
 
 The filter suppresses known KSword infrastructure noise after path resolution and
@@ -83,6 +92,9 @@ sample-created files can still generate evidence. `out` is reserved for sandbox
 telemetry/artifact output; malware drops there may be intentionally hidden by
 this self-noise policy and should be revisited if samples are allowed to write
 sandbox output paths.
+
+中文：self-path filtering 是降噪策略，不是访问控制或信任判定。被抑制路径说明它匹配
+KSword infrastructure 片段；未被抑制的文件事件也只是可观察行为证据，不能单独等同于恶意。
 
 ## Drop-file evidence field design
 
@@ -114,3 +126,9 @@ normalization:
 Host rules should treat a successful create/write/rename event as behavioral
 signal and require artifact hash/size fields only when a concrete dropped-file
 artifact is available.
+
+中文：`dropEvidenceKind`、`dropConfidence` 和 `dropReason` 是 drop-file 证据标签，
+不是最终 verdict。`dropConfidence=high` 仍只表示“规则认为该事件更像落地文件证据”；
+它不替代 hash、size、artifact capture、process lineage、registry/network correlation 等后续证据。
+如果 `READ_EVENTS` ring 出现 loss/backpressure，host 应同时展示 common queue counters 和
+sequence gap 证据，避免把缺失事件误解释为样本没有文件行为。
