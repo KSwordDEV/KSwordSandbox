@@ -61,6 +61,27 @@ For a non-mutating plan check:
 .\run.ps1 -Mode Plan -SamplePath 'D:\Temp\sample.exe' -DurationSeconds 30
 ```
 
+Release shortcuts for built-in samples:
+
+```powershell
+# Analyze Notepad in PlanOnly mode; no VM mutation.
+.\run.ps1 -Mode Analyze -SamplePreset Notepad
+
+# Equivalent short alias.
+.\run.ps1 -Mode Analyze -SamplePath notepad
+
+# Publish the harmless sample outside git, then create a PlanOnly runbook.
+.\run.ps1 -Mode Analyze -SamplePreset HarmlessSample
+
+# Equivalent short alias.
+.\run.ps1 -Mode Analyze -SamplePath sample
+```
+
+中文提示：上面四条命令都是“一条命令 Analyze notepad/sample”的入口；未加
+`-Live` 时只生成计划，不启动、不还原、不停止 Hyper-V VM，也不会执行样本。
+`HarmlessSample` 会在 `D:\Temp\KSwordSandbox\samples\...` 或已配置的
+`RuntimeRoot` 下发布测试 EXE，输出位于仓库外。
+
 `-Mode Plan` is PlanOnly and non-mutating: it does not start, restore, stop, or
 copy into a VM, and it now skips guest payload preparation. The generated
 Hyper-V plan records missing/stale payload files plus repair suggestions such as
@@ -71,6 +92,17 @@ For a single live Hyper-V analysis from an elevated shell:
 ```powershell
 .\run.ps1 -Mode Analyze -SamplePath 'D:\Temp\sample.exe' -DurationSeconds 30 -Live
 ```
+
+Built-in sample live forms:
+
+```powershell
+.\run.ps1 -Mode Analyze -SamplePreset Notepad -Live
+.\run.ps1 -Mode Analyze -SamplePreset HarmlessSample -Live
+```
+
+Live mode can restore/start/stop the configured VM and requires the installed
+golden VM/checkpoint, guest password secret, prepared guest payload, and any
+real R0 `driver.hostDriverPath`/guest test-signing setup required by your lab.
 
 If `-Live` is omitted, `Analyze` falls back to PlanOnly and does not mutate the
 VM. This keeps accidental sample execution out of the default path while still
@@ -151,6 +183,9 @@ launched.
   config, local config file, Web/API config env var, and guest password sync.
 - `run.ps1` is for each launch: start WebUI, or run/plan one EXE with the
   installed config.
+- `run.ps1` never asks you to type a password on the command line. It mirrors
+  the configured secret from Process/User/Machine environment into the child
+  WebUI or Hyper-V process and reports only whether a value exists.
 
 Keep runtime outputs under `D:\Temp\KSwordSandbox`; do not commit generated
 reports, samples, payload binaries, VM disks, or local secrets.

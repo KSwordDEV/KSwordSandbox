@@ -120,6 +120,16 @@ bool ParseArguments(int argc, wchar_t* argv[], Options* options, std::wstring* e
             continue;
         }
 
+        if (arg == L"--suppress-self-noise") {
+            options->suppressSelfNoise = true;
+            continue;
+        }
+
+        if (arg == L"--emit-self-noise" || arg == L"--no-suppress-self-noise") {
+            options->suppressSelfNoise = false;
+            continue;
+        }
+
         if (arg == L"--abi-self-check" || arg == L"--contract-self-check") {
             options->abiSelfCheck = true;
             continue;
@@ -225,6 +235,8 @@ void PrintUsage(const wchar_t* programName) {
         << L"      --contract-self-check    Alias for --abi-self-check\n"
         << L"      --health                 Open the device, emit GET_HEALTH, and exit without draining\n"
         << L"      --heartbeat              Emit r0collector.heartbeat lifecycle rows\n"
+        << L"      --suppress-self-noise    Suppress known KSword/collector-owned driver rows (default)\n"
+        << L"      --emit-self-noise        Emit known self-noise rows but mark them in data.selfNoise\n"
         << L"      --mock                   Emit synthetic rows without opening a device\n"
         << L"      --synthetic              Alias for --mock\n"
         << L"      --self-test              Alias for --mock\n"

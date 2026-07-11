@@ -24,6 +24,11 @@ Current status:
   in a one-shot or timed polling loop.
 - Converts driver event records into `SandboxEvent` JSON Lines for the Guest
   Agent and Host import path.
+- Suppresses narrow collector/GuestAgent self-noise by default before JSONL
+  emission: collector PID, the exact collector output JSONL, and documented
+  KSword infrastructure paths. Suppressed records stay accountable through
+  `r0collector.driverReadEvents.data.collectorSuppressedEvents` and
+  `r0collector.stopped.data.collectorSuppressedEvents`.
 - Keeps synthetic self-test mode (`--mock`, `--synthetic`, or `--self-test`) for
   CI/local plumbing when the unsigned/test-signed driver is not installed.
 - Emits optional collector progress rows with `--heartbeat`.
@@ -213,6 +218,12 @@ Supported options:
   without polling or draining queued events.
 - `--heartbeat`: emit `r0collector.heartbeat` lifecycle rows after startup, at
   each completed poll/read-events iteration, and at synthetic completion.
+- `--suppress-self-noise`: default live-driver policy. Suppress driver rows for
+  the collector PID, the exact collector output JSONL, and known KSword
+  infrastructure paths before writing JSONL.
+- `--emit-self-noise` / `--no-suppress-self-noise`: diagnostic override that
+  emits those rows with `selfNoise=true`, `selfNoiseReason`, and
+  `selfNoiseAction=emit`.
 - `--mock`: emit synthetic process/file/registry-style rows and do not open the
   driver device.
 - `--synthetic`: alias for `--mock`.
@@ -261,6 +272,29 @@ Expected stress evidence:
 - one blank line, one malformed JSON row, and one valid extra-field row when
   `--inject-jsonl-noise` is supplied.
 
+Lightweight attribution/self-noise smoke without a driver:
+
+```powershell
+$out = Join-Path $env:TEMP 'ksword-r0-self-test-noise.jsonl'
+KSword.Sandbox.R0Collector.exe `
+  --self-test `
+  --heartbeat `
+  --emit-self-noise `
+  --inject-jsonl-noise `
+  --out $out
+
+$rows = Get-Content $out | Where-Object { $_.Trim() } | ForEach-Object {
+  try { $_ | ConvertFrom-Json -ErrorAction Stop } catch { $null }
+}
+$driverRows = $rows | Where-Object source -eq 'driver'
+$driverRows | Where-Object { $_.data.eventOrigin -and $_.data.subjectKind } |
+  Measure-Object
+```
+
+Expected: the process exits `0`, one intentionally malformed line fails JSON
+parsing, and every parsed synthetic driver row has `eventOrigin`,
+`producerCategory`, `subjectKind`, `processIdSource`, and `selfNoise` fields.
+
 ### JSONL quality and noise contract
 
 Every collector-owned row keeps the event-quality fields stable under `data`:
@@ -269,8 +303,16 @@ Every collector-owned row keeps the event-quality fields stable under `data`:
   downstream checks.
 - `producer` names the row family (`r0collector`, `file`, `process`, `image`,
   `registry`, or `network`).
-- `noise` is `false` for normal rows and `true` only for the valid synthetic
-  extra-field row emitted by `--inject-jsonl-noise`.
+- `noise` is `false` for normal rows. It is `true` for the valid synthetic
+  extra-field row emitted by `--inject-jsonl-noise` and for self-noise rows only
+  when the operator explicitly uses `--emit-self-noise`.
+- `selfNoise`, `selfNoiseReason`, `selfNoiseAction`, and
+  `collectorNoisePolicy` explain collector/KSword infrastructure attribution.
+  With the default suppression policy those noisy driver rows are not emitted;
+  counts remain in `collectorSuppressedEvents`.
+- `eventOrigin`, `producerCategory`, `subjectKind`, `processIdSource`,
+  `actorRole`, and `subjectRole` make driver-row ownership readable without
+  relying on report-generation heuristics.
 - `lost` is `true` only when the row itself reports drop/loss counters; delivered
   driver rows keep `lost=false` and use `sequence` plus status/read counters for
   gap analysis.
@@ -286,6 +328,14 @@ object containing the `sequence=broken` marker, and one valid `driver.network`
 row with an ignored extra top-level field plus `noise=true`. Live readers skip
 blank/malformed rows so valid telemetry remains visible; host import preserves
 malformed rows as `driver.parse_error` evidence rather than hiding them.
+
+Self-noise suppression is also bounded. It is intentionally not a broad process
+trust decision: the collector suppresses only the current collector PID, the
+exact JSONL file it is writing, and documented KSword infrastructure path
+fragments such as `\KSwordSandbox\agent\`, `\KSwordSandbox\r0collector\`,
+`\KSwordSandbox\driver\`, and `\KSwordSandbox\out\`. Drain-loop continuation is
+based on `recordsProcessed`, not emitted row count, so suppressing a full noisy
+batch cannot make the collector stop before the driver queue is empty.
 
 ## ABI self-check mode
 
@@ -320,7 +370,8 @@ Important `r0collector.abiSelfCheck` evidence fields:
   `producerMaskDefaultHex`, and producer/capability name fields: prove the
   collector knows the current process/image/file/registry/network producer
   families and optional IOCTL capability bits.
-- `schema`, `producer`, `noise`, `lost`, `backpressure`, and
+- `schema`, `producer`, `noise`, `selfNoise`, `selfNoiseReason`, `lost`,
+  `backpressure`, and
   `stableJsonlFields`: prove the collector binary knows the stable event-quality
   field names used by live, mock, stress, and noise rows.
 - `eventHeaderSize`, `healthReplySize`, `capabilitiesReplySize`,
@@ -463,7 +514,7 @@ Expected script rows for the live VM path:
 Every output line is a single `SandboxEvent`-compatible JSON object:
 
 ```json
-{"eventType":"driver.load","source":"driver","timestamp":"2026-07-10T00:00:00.000Z","processId":1234,"path":"\\\\.\\KSwordSandboxDriver","commandLine":"KSword.Sandbox.R0Collector.exe --out C:\\Sandbox\\driver-events.jsonl","data":{"sequence":"1","driverEventTypeName":"driverLoad","flagsHex":"0x00000003","driverLoadEventName":"driver.load"}}
+{"eventType":"driver.load","source":"driver","timestamp":"2026-07-10T00:00:00.000Z","processId":1234,"processName":"","path":"\\\\.\\KSwordSandboxDriver","commandLine":"","data":{"sequence":"1","driverEventTypeName":"driverLoad","producerCategory":"driver","eventOrigin":"kernel-driver-control-plane","subjectKind":"driver","processIdSource":"eventHeader","selfNoise":"false","flagsHex":"0x00000003","driverLoadEventName":"driver.load"}}
 ```
 
 Top-level field rules:
@@ -471,15 +522,20 @@ Top-level field rules:
 - `eventType`: collector lifecycle/error type or normalized driver event type.
 - `source`: `r0collector` for lifecycle rows, `driver` for drained R0 rows.
 - `timestamp`: collector UTC timestamp for the JSONL row.
-- `processId`: driver-supplied process ID when present; otherwise collector PID.
-- `path`: device path for lifecycle and network rows; file, process, image,
-  and registry rows use subject paths when payloads carry them.
-- `commandLine`: collector invocation until process payloads add richer command
-  lines.
+- `processId`: typed payload subject PID when present; otherwise the driver
+  event header PID. `data.processIdSource` names which source won.
+- `processName`: populated only when the payload provides a process image. It is
+  empty on driver rows that cannot safely name the owning process; lifecycle
+  rows still name the collector executable.
+- `path`: device path for lifecycle rows. File, process, image, and registry
+  rows use subject paths when payloads carry them; network rows use a URI-like
+  remote endpoint when decoded.
+- `commandLine`: lifecycle rows use the collector invocation. Live driver rows
+  keep this empty unless a typed process payload carries a command-line prefix.
 - `data`: string-valued metadata compatible with the current host model.
   Driver rows include `eventSchemaName`, `eventSchemaVersion`, and
   `payloadSchema` when the payload category is known; mock rows use the same
-  schema names so mock/live JSONL remain comparable.
+  schema names and attribution fields so mock/live JSONL remain comparable.
 
 The detailed JSONL contract is documented in
 [`docs/r0-jsonl-schema.md`](r0-jsonl-schema.md).
@@ -509,6 +565,11 @@ Required synthetic coverage:
 - Noise evidence: blank, truncated, malformed, and extra-field JSONL rows are
   expected in the corpus. Import keeps malformed rows as `driver.parse_error`;
   live display skips or defers bad partial rows without dropping valid rows.
+- Attribution/self-noise evidence: mock and ABI self-check rows preserve
+  `eventOrigin`, `producerCategory`, `subjectKind`, `processIdSource`,
+  `selfNoise`, `selfNoiseReason`, `collectorNoisePolicy`, and
+  `collectorSuppressedEvents` field names so no-device smoke can validate the
+  readable ownership contract.
 - Mock/stress inputs: use `--self-test`, `--synthetic`, `--mock`,
   `--stress-count`, `--inject-jsonl-noise`, `--abi-self-check`,
   `--max-events`, `--max-read-batches`, `--duration 0`, `--poll-ms`, and

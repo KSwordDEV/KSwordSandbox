@@ -383,7 +383,7 @@ internal static class SmokeTestProgram
             {
                 EventType = "file.created",
                 Source = "guest",
-                Path = "C:\\KSwordSandbox\\incoming\\drop.bin"
+                Path = "C:\\Users\\Public\\ksword-smoke-drop.bin"
             },
             new()
             {

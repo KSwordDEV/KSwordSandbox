@@ -44,6 +44,10 @@ Options:
 - `--health`: open the live device, emit `r0collector.driverHealth`, and exit
   without polling or draining queued events.
 - `--heartbeat`: emit `r0collector.heartbeat` progress rows.
+- `--suppress-self-noise`: suppress known collector/KSword infrastructure
+  driver rows before writing JSONL. This is the default.
+- `--emit-self-noise`: keep those rows for diagnosis and mark them with
+  `data.selfNoise=true` plus `data.selfNoiseReason`.
 - `--mock`: emit synthetic process/image/file/registry/network driver-category rows
   without opening a device.
 - `--synthetic`: alias for `--mock`.
@@ -77,6 +81,9 @@ Options:
     (`driver.process`, `image.load`, `driver.file`, `driver.registry`,
     `driver.network`, `driver.event.reserved`, or fallback `driver.event`)
   - unless `--health` was requested, `r0collector.driverReadEvents`
+    (`data.recordsProcessed`, `data.eventsEmitted`, and
+    `data.collectorSuppressedEvents` distinguish consumed driver records from
+    rows hidden by the collector self-noise policy)
   - unless `--health` was requested, final `r0collector.driverStatus`
   - optional `r0collector.heartbeat`
   - `r0collector.stopped`
@@ -91,6 +98,19 @@ Every line is a `SandboxEvent` object with stable top-level fields:
 
 The `data` object is string-valued because the shared host model currently uses
 `Dictionary<string,string>`.
+
+Driver-origin rows include additive attribution fields:
+
+- `eventOrigin`, `producerCategory`, `subjectKind`, `processIdSource`
+- `actorRole`, `subjectRole`
+- `selfNoise`, `selfNoiseReason`, `selfNoiseAction`, `collectorNoisePolicy`
+
+Normal live rows use `selfNoise=false`. With the default
+`--suppress-self-noise` policy, rows for the collector PID, the exact collector
+output JSONL, and known `\KSwordSandbox\agent\`, `\KSwordSandbox\r0collector\`,
+`\KSwordSandbox\driver\`, and `\KSwordSandbox\out\` paths are not emitted; the
+batch summary records the count in `collectorSuppressedEvents`. Use
+`--emit-self-noise` when debugging the suppression decision itself.
 
 ### `r0collector.driverHealth` producer masks
 

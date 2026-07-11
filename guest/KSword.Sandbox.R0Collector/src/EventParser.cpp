@@ -1856,10 +1856,13 @@ std::string BuildReadEventsBatchData(
     const KSWORD_SANDBOX_READ_EVENTS_REPLY& reply,
     const DWORD bytesReturned,
     const unsigned long requestedMaxEvents,
-    const unsigned long long eventsEmitted) {
+    const unsigned long long eventsEmitted,
+    const unsigned long long recordsProcessed,
+    const unsigned long long collectorSuppressedEvents,
+    const bool suppressSelfNoise) {
     JsonDataObjectBuilder data;
     const bool lost = reply.EventsDropped != 0;
-    const bool backpressure = lost || eventsEmitted >= requestedMaxEvents;
+    const bool backpressure = lost || recordsProcessed >= requestedMaxEvents;
     data.AddUtf8("ioctl", "IOCTL_KSWORD_SANDBOX_READ_EVENTS");
     data.AddUnsigned("ioctlCode", IOCTL_KSWORD_SANDBOX_READ_EVENTS);
     data.AddUnsigned("bytesReturned", bytesReturned);
@@ -1875,6 +1878,13 @@ std::string BuildReadEventsBatchData(
     data.AddUnsigned("size", reply.Size);
     data.AddUnsigned("eventsWritten", reply.EventsWritten);
     data.AddUnsigned("eventsEmitted", eventsEmitted);
+    data.AddUnsigned("recordsProcessed", recordsProcessed);
+    data.AddUnsigned("collectorSuppressedEvents", collectorSuppressedEvents);
+    data.AddUtf8(
+        "collectorNoisePolicy",
+        suppressSelfNoise
+            ? (collectorSuppressedEvents == 0 ? "suppress-self-noise" : "suppress-self-noise:applied")
+            : "emit-self-noise");
     data.AddUnsigned("flags", reply.Flags);
     data.AddUtf8("flagsHex", HexUnsignedLongLong(reply.Flags, 8));
     data.AddUnsigned("bytesWritten", reply.BytesWritten);
@@ -1892,7 +1902,8 @@ std::string BuildDriverEventData(
     const unsigned long long batchIndex,
     const unsigned long long recordOffset,
     const unsigned char* payload,
-    const size_t payloadBytes) {
+    const size_t payloadBytes,
+    const DriverEventAttribution& attribution) {
     const size_t payloadPreviewBytes = payloadBytes < kMaxPayloadHexBytes ? payloadBytes : kMaxPayloadHexBytes;
     const std::string driverEventTypeName = DriverEventTypeName(header.Type);
 
@@ -1907,7 +1918,18 @@ std::string BuildDriverEventData(
     data.AddUtf8("eventSchemaVersionHex", HexUnsignedLongLong(KSWORD_SANDBOX_EVENT_SCHEMA_VERSION, 8));
     data.AddUtf8("schema", KSWORD_SANDBOX_EVENT_SCHEMA_NAME);
     data.AddUtf8("producer", driverEventTypeName);
-    data.AddBool("noise", false);
+    data.AddUtf8("producerCategory", attribution.producerCategory);
+    data.AddUtf8("eventOrigin", attribution.eventOrigin);
+    data.AddUtf8("subjectKind", attribution.subjectKind);
+    data.AddUtf8("actorRole", attribution.actorRole);
+    data.AddUtf8("subjectRole", attribution.subjectRole);
+    data.AddUtf8("processIdSource", attribution.processIdSource);
+    data.AddUtf8("collectorNoisePolicy", attribution.collectorNoisePolicy);
+    data.AddBool("noise", attribution.selfNoise);
+    data.AddBool("selfNoise", attribution.selfNoise);
+    data.AddUtf8("selfNoiseReason", attribution.selfNoiseReason);
+    data.AddUtf8("selfNoiseAction", attribution.selfNoiseAction);
+    data.AddBool("collectorSuppressed", attribution.suppressed);
     data.AddBool("lost", false);
     data.AddBool("backpressure", false);
     data.AddUnsigned("recordSize", header.Size);

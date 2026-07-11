@@ -15,6 +15,8 @@ Single-sample CLI and environment-check modes are also available:
 
   .\run.ps1 -Mode Plan -SamplePath D:\Temp\sample.exe
   .\run.ps1 -Mode Analyze -SamplePath D:\Temp\sample.exe -Live
+  .\run.ps1 -Mode Analyze -SamplePreset Notepad
+  .\run.ps1 -Mode Analyze -SamplePreset HarmlessSample -Live
   .\run.ps1 -Mode CheckEnvironment
 
 Passing -WhatIf previews WebUI/analysis launch decisions without preparing
@@ -33,6 +35,9 @@ param(
     [string]$Mode = 'WebUI',
 
     [string]$SamplePath = '',
+
+    [ValidateSet('', 'Notepad', 'Sample', 'HarmlessSample')]
+    [string]$SamplePreset = '',
 
     [int]$DurationSeconds = 120,
 
@@ -117,6 +122,124 @@ function Resolve-FullPathIfPresent {
     }
 
     return [System.IO.Path]::GetFullPath($Path)
+}
+
+function Resolve-NotepadSamplePath {
+    $candidates = New-Object System.Collections.Generic.List[string]
+    foreach ($root in @($env:SystemRoot, $env:WINDIR)) {
+        if ([string]::IsNullOrWhiteSpace($root)) {
+            continue
+        }
+
+        [void]$candidates.Add((Join-Path $root 'System32\notepad.exe'))
+        [void]$candidates.Add((Join-Path $root 'Sysnative\notepad.exe'))
+        [void]$candidates.Add((Join-Path $root 'notepad.exe'))
+    }
+
+    $command = Get-Command notepad.exe -ErrorAction SilentlyContinue
+    if ($null -ne $command -and -not [string]::IsNullOrWhiteSpace([string]$command.Source)) {
+        [void]$candidates.Add([string]$command.Source)
+    }
+
+    foreach ($candidate in @($candidates.ToArray() | Select-Object -Unique)) {
+        if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+            return (Resolve-Path -LiteralPath $candidate).ProviderPath
+        }
+    }
+
+    throw 'Built-in Notepad sample was not found. Provide -SamplePath <sample.exe> instead.'
+}
+
+function Resolve-HarmlessSamplePath {
+    param([Parameter(Mandatory)][string]$EffectiveRuntimeRoot)
+
+    $sampleRoot = Join-Path $EffectiveRuntimeRoot 'samples\KSword.Sandbox.HarmlessSample'
+    $buildRoot = Join-Path $EffectiveRuntimeRoot 'build\KSword.Sandbox.HarmlessSample'
+    $intermediateRoot = Join-Path $EffectiveRuntimeRoot 'obj\KSword.Sandbox.HarmlessSample'
+    $sampleExe = Join-Path $sampleRoot 'KSword.Sandbox.HarmlessSample.exe'
+
+    if (-not $ForcePayloadPreparation -and (Test-Path -LiteralPath $sampleExe -PathType Leaf)) {
+        Write-RunInfo "Using built-in harmless sample: $sampleExe"
+        Write-RunInfo "中文提示：使用已准备好的 harmless sample；如需重新发布样本，请加 -ForcePayloadPreparation。"
+        return (Resolve-Path -LiteralPath $sampleExe).ProviderPath
+    }
+
+    $prepareScript = Join-Path $script:RepositoryRoot 'scripts\Prepare-HarmlessSample.ps1'
+    if (-not (Test-Path -LiteralPath $prepareScript -PathType Leaf)) {
+        throw "Harmless sample preparation script is missing: $prepareScript"
+    }
+
+    if ($WhatIfPreference) {
+        [void]$PSCmdlet.ShouldProcess($sampleExe, "Prepare built-in harmless sample through '$prepareScript'")
+        Write-RunInfo "WhatIf: built-in harmless sample would be published outside git to $sampleRoot."
+        Write-RunInfo "中文提示：预览模式不会生成样本；实际 Analyze harmless sample 时会发布到运行目录，不写入仓库。"
+        return [System.IO.Path]::GetFullPath($sampleExe)
+    }
+
+    if (-not $PSCmdlet.ShouldProcess($sampleExe, "Prepare built-in harmless sample through '$prepareScript'")) {
+        throw 'Built-in harmless sample preparation was declined. Provide -SamplePath <sample.exe> or rerun without declining confirmation.'
+    }
+
+    Write-RunInfo "Preparing built-in harmless sample outside git: $sampleRoot"
+    Write-RunInfo "中文提示：正在发布内置 harmless sample，输出位于运行目录，不会写入仓库或打印凭据。"
+    & powershell `
+        -NoProfile `
+        -ExecutionPolicy Bypass `
+        -File $prepareScript `
+        -RepositoryRoot $script:RepositoryRoot `
+        -OutputRoot $sampleRoot `
+        -BuildRoot $buildRoot `
+        -IntermediateRoot $intermediateRoot `
+        -Configuration $Configuration
+    if ($LASTEXITCODE -ne 0) {
+        throw "Harmless sample preparation failed with exit code $LASTEXITCODE."
+    }
+    if (-not (Test-Path -LiteralPath $sampleExe -PathType Leaf)) {
+        throw "Harmless sample executable was not produced: $sampleExe"
+    }
+
+    return (Resolve-Path -LiteralPath $sampleExe).ProviderPath
+}
+
+function Get-AnalysisSamplePreset {
+    if (-not [string]::IsNullOrWhiteSpace($SamplePreset)) {
+        return $SamplePreset
+    }
+
+    if ([string]::IsNullOrWhiteSpace($SamplePath)) {
+        return ''
+    }
+
+    switch -Regex ($SamplePath.Trim()) {
+        '^(notepad|notepad\.exe)$' { return 'Notepad' }
+        '^(sample|harmlesssample|harmless-sample)$' { return 'HarmlessSample' }
+        default { return '' }
+    }
+}
+
+function Resolve-AnalysisSamplePath {
+    param([Parameter(Mandatory)][string]$EffectiveRuntimeRoot)
+
+    $preset = Get-AnalysisSamplePreset
+    if (-not [string]::IsNullOrWhiteSpace($preset)) {
+        switch ($preset.ToLowerInvariant()) {
+            'notepad' {
+                $notepadPath = Resolve-NotepadSamplePath
+                Write-RunInfo "Using built-in Notepad sample: $notepadPath"
+                Write-RunInfo '中文提示：Analyze Notepad 使用系统 notepad.exe；不加 -Live 时只生成计划，不会启动/还原 VM。'
+                return $notepadPath
+            }
+            { $_ -in @('sample', 'harmlesssample') } {
+                return Resolve-HarmlessSamplePath -EffectiveRuntimeRoot $EffectiveRuntimeRoot
+            }
+        }
+    }
+
+    if ([string]::IsNullOrWhiteSpace($SamplePath)) {
+        throw 'Analyze/Plan mode requires -SamplePath or -SamplePreset Notepad|HarmlessSample.'
+    }
+
+    return Resolve-FullPathIfPresent -Path $SamplePath
 }
 
 function Get-EffectiveRuntimeRoot {
@@ -811,7 +934,12 @@ function Show-RunEnvironmentCheck {
         CheckEnvironmentCommand = '.\run.ps1 -Mode CheckEnvironment'
         PlanCommand = '.\run.ps1 -Mode Plan -SamplePath <sample.exe>'
         LiveCommand = '.\run.ps1 -Mode Analyze -SamplePath <sample.exe> -Live'
+        AnalyzeNotepadPlanCommand = '.\run.ps1 -Mode Analyze -SamplePreset Notepad'
+        AnalyzeNotepadLiveCommand = '.\run.ps1 -Mode Analyze -SamplePreset Notepad -Live'
+        AnalyzeHarmlessSamplePlanCommand = '.\run.ps1 -Mode Analyze -SamplePreset HarmlessSample'
+        AnalyzeHarmlessSampleLiveCommand = '.\run.ps1 -Mode Analyze -SamplePreset HarmlessSample -Live'
         ReadinessCommand = '.\scripts\Test-HyperVReadiness.ps1'
+        ChineseGuidance = '中文提示：默认 .\run.ps1 只启动 WebUI；Analyze/Plan 不加 -Live 时不会启动、还原或停止 VM；所有凭据只读取环境变量且不打印值。'
         WhatIfSupported = $true
         DefaultStartsVm = $false
         WebUiStartsVm = $false
@@ -909,6 +1037,7 @@ function Invoke-WebUi {
     Write-RunInfo "Starting WebUI: $effectiveUrl"
     Write-RunInfo "Config: $EffectiveConfigPath"
     Write-RunInfo "Hyper-V live prerequisites: configured VM/checkpoint, prepared self-contained guest payload, and guest password secret."
+    Write-RunInfo '中文提示：默认启动 WebUI 不会启动或还原 VM；实时 Hyper-V 执行必须在 WebUI/API 或 CLI 中显式选择 Live。'
     Write-RunInfo 'Press Ctrl+C to stop the WebUI.'
 
     if (-not $PSCmdlet.ShouldProcess($effectiveUrl, "Start WebUI with '$projectPath'")) {
@@ -943,13 +1072,14 @@ function Invoke-OneShotAnalysis {
         [AllowNull()]$State
     )
 
-    if ([string]::IsNullOrWhiteSpace($SamplePath)) {
-        throw 'Analyze/Plan mode requires -SamplePath.'
-    }
-
-    $resolvedSample = Resolve-FullPathIfPresent -Path $SamplePath
+    $resolvedSample = Resolve-AnalysisSamplePath -EffectiveRuntimeRoot $EffectiveRuntimeRoot
     if (-not (Test-Path -LiteralPath $resolvedSample -PathType Leaf)) {
-        throw "Sample executable was not found: $resolvedSample"
+        if ($WhatIfPreference) {
+            Write-RunInfo "WhatIf: sample executable is not present yet, but would be prepared/resolved before a real run: $resolvedSample"
+        }
+        else {
+            throw "Sample executable was not found: $resolvedSample"
+        }
     }
     if ([System.IO.Path]::GetExtension($resolvedSample) -ine '.exe') {
         throw "v1 one-shot analysis only accepts .exe samples: $resolvedSample"
@@ -996,11 +1126,13 @@ function Invoke-OneShotAnalysis {
     if ($runLive) {
         $arguments += '-Live'
         Write-RunInfo "Starting live Hyper-V analysis for: $resolvedSample"
+        Write-RunInfo '中文提示：这是 Live 模式，可能还原/启动/停止配置的 Hyper-V VM；凭据值不会打印。'
     }
     else {
         $arguments += '-PlanOnly'
         Write-RunInfo "Planning only, no VM mutation, for: $resolvedSample"
         Write-RunInfo 'Add -Live to run the sample in the configured Hyper-V VM.'
+        Write-RunInfo '中文提示：当前为计划模式，不会执行样本或改变 VM。'
     }
 
     $hyperVOutput = @(& powershell @arguments 2>&1)

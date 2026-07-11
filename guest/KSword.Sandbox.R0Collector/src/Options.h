@@ -21,6 +21,7 @@ struct Options {
     bool injectJsonlNoise = false;
     bool healthOnly = false;
     bool heartbeat = false;
+    bool suppressSelfNoise = true;
     bool showHelp = false;
 };
 

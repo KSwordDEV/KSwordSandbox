@@ -24,7 +24,10 @@ internal static class RunbookExecutionFlowPage
         var rows = RenderStepCards(job, execution);
         var summary = RenderSummary(job, execution);
         var liveEventsLink = $"<a class=\"button secondary\" href=\"/jobs/{Attr(jobId)}/live-events\" target=\"_blank\" rel=\"noopener\" data-zh=\"实时原始事件监控\" data-en=\"Live raw event monitor\">实时原始事件监控</a>";
-        var reportLink = string.IsNullOrWhiteSpace(job.HtmlReportPath)
+        var hasAnyReport = !string.IsNullOrWhiteSpace(job.HtmlReportPath)
+            || !string.IsNullOrWhiteSpace(job.HtmlReportZhPath)
+            || !string.IsNullOrWhiteSpace(job.HtmlReportEnPath);
+        var reportLink = !hasAnyReport
             ? "<span class=\"muted\" data-zh=\"暂无报告\" data-en=\"No report yet\">暂无报告</span>"
             : $"<a class=\"button\" href=\"/api/jobs/{Attr(jobId)}/report/html?lang=zh\" target=\"_blank\" rel=\"noopener\" data-zh=\"打开中文报告\" data-en=\"Open Chinese report\">打开中文报告</a><a class=\"button secondary\" href=\"/api/jobs/{Attr(jobId)}/report/html?lang=en\" target=\"_blank\" rel=\"noopener\" data-zh=\"打开英文报告\" data-en=\"Open English report\">打开英文报告</a>";
 
@@ -69,7 +72,7 @@ internal static class RunbookExecutionFlowPage
               <div>
                 <h1 data-zh="进度页（执行流程）" data-en="Progress page (execution flow)">进度页（执行流程）</h1>
                 <p data-zh="这里只展示人能理解的执行进度，不展示命令行细节、PowerShell 命令、stdout 或 stderr。" data-en="This page shows human-readable execution progress only; command-line details, PowerShell commands, stdout, and stderr stay hidden.">这里只展示人能理解的执行进度，不展示命令行细节、PowerShell 命令、stdout 或 stderr。</p>
-                <p data-zh="报告按钮会在报告生成后可用；实时原始事件请进入动态监控页，最终结论以报告页为准。" data-en="Report buttons are useful after report generation. Use the dynamic monitor for live raw events, and treat the report page as the final source of truth.">报告按钮会在报告生成后可用；实时原始事件请进入动态监控页，最终结论以报告页为准。</p>
+                <p data-zh="报告按钮会在报告生成后可用；实时原始事件请进入独立监控页，最终结论以报告页为准。" data-en="Report buttons are useful after report generation. Use the standalone monitor for live raw events, and treat the report page as the final source of truth.">报告按钮会在报告生成后可用；实时原始事件请进入独立监控页，最终结论以报告页为准。</p>
               </div>
               <button class="secondary" id="langToggle" type="button">EN</button>
             </div>

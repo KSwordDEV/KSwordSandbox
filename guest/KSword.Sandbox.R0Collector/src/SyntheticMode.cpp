@@ -52,6 +52,22 @@ ULONG MockDriverEventTypeValue(const std::string& driverEventTypeName) {
     return KswSandboxEventTypeReserved;
 }
 
+// Input: Mock driver event type name.
+// Processing: Uses the same subject-kind vocabulary as live driver rows.
+// Return: Stable subject kind label for attribution smoke tests.
+std::string MockSubjectKind(const std::string& driverEventTypeName) {
+    if (driverEventTypeName == "network") {
+        return "network-flow";
+    }
+    if (driverEventTypeName == "process" ||
+        driverEventTypeName == "image" ||
+        driverEventTypeName == "file" ||
+        driverEventTypeName == "registry") {
+        return driverEventTypeName;
+    }
+    return "unknown";
+}
+
 // Input: Mock category metadata, collector options, and the JSONL sink.
 // Processing: Emits one synthetic driver-originated row that uses the same
 // stable eventType values as drained R0 events while clearly marking the data as
@@ -85,6 +101,19 @@ bool EmitMockDriverCategoryEvent(
     data.AddUnsigned("driverEventType", MockDriverEventTypeValue(driverEventTypeName));
     data.AddUtf8("driverEventTypeName", driverEventTypeName);
     data.AddUtf8("producer", driverEventTypeName);
+    data.AddUtf8("producerCategory", driverEventTypeName);
+    data.AddUtf8("eventOrigin", "synthetic-r0collector");
+    data.AddUtf8("subjectKind", MockSubjectKind(driverEventTypeName));
+    data.AddUtf8("actorRole", "synthetic-sample-process");
+    data.AddUtf8("subjectRole", "synthetic-sample-or-system");
+    data.AddUtf8("processIdSource", "synthetic");
+    data.AddUtf8(
+        "collectorNoisePolicy",
+        options.suppressSelfNoise ? "suppress-self-noise" : "emit-self-noise");
+    data.AddBool("selfNoise", false);
+    data.AddUtf8("selfNoiseReason", "none");
+    data.AddUtf8("selfNoiseAction", "emit");
+    data.AddBool("collectorSuppressed", false);
     data.AddUtf8("operation", operation);
     data.AddUtf8("operationName", operation);
     data.AddUtf8("typedPayloadStatus", "mock");
@@ -126,7 +155,18 @@ bool EmitSyntheticJsonlNoiseRows(EventWriter& writer) {
     data.AddUtf8("eventSchemaVersionHex", HexUnsignedLongLong(KSWORD_SANDBOX_EVENT_SCHEMA_VERSION, 8));
     data.AddUtf8("schema", KSWORD_SANDBOX_EVENT_SCHEMA_NAME);
     data.AddUtf8("producer", "network");
+    data.AddUtf8("producerCategory", "network");
+    data.AddUtf8("eventOrigin", "synthetic-r0collector");
+    data.AddUtf8("subjectKind", "network-flow");
+    data.AddUtf8("actorRole", "synthetic-sample-process");
+    data.AddUtf8("subjectRole", "synthetic-jsonl-noise");
+    data.AddUtf8("processIdSource", "synthetic");
+    data.AddUtf8("collectorNoisePolicy", "synthetic-noise-injector");
     data.AddBool("noise", true);
+    data.AddBool("selfNoise", false);
+    data.AddUtf8("selfNoiseReason", "none");
+    data.AddUtf8("selfNoiseAction", "emit");
+    data.AddBool("collectorSuppressed", false);
     data.AddBool("lost", false);
     data.AddBool("backpressure", false);
     data.AddUtf8("protocolName", "tcp");
@@ -235,6 +275,10 @@ int RunSyntheticMode(const Options& options, EventWriter& writer) {
     mockData.AddBool("mock", true);
     mockData.AddWide("devicePath", options.devicePath);
     mockData.AddBool("healthOnly", options.healthOnly);
+    mockData.AddBool("suppressSelfNoise", options.suppressSelfNoise);
+    mockData.AddUtf8(
+        "collectorNoisePolicy",
+        options.suppressSelfNoise ? "suppress-self-noise" : "emit-self-noise");
     mockData.AddUtf8("ioctlProtocol", "not-issued");
     mockData.AddUtf8("note", "Synthetic marker; driver category mock rows follow.");
     mockEvent.dataJson = mockData.Build();

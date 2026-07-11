@@ -2,7 +2,10 @@
 
 #include "EventParser.h"
 
+#include <algorithm>
+#include <cwctype>
 #include <cstring>
+#include <string>
 #include <vector>
 
 namespace KSword::Sandbox::R0Collector {
@@ -462,12 +465,258 @@ bool EmitDriverPoll(const UniqueHandle& device, const Options& options, EventWri
     return EmitEvent(writer, event);
 }
 
+// Input: UTF-16 text from driver payloads or collector options.
+// Processing: Normalizes slashes and ASCII/Unicode casing for conservative
+// infrastructure path matching without touching the filesystem.
+// Return: Lowercase path-like text used only for comparisons.
+std::wstring NormalizedCompareText(std::wstring value) {
+    std::replace(value.begin(), value.end(), L'/', L'\\');
+    std::transform(
+        value.begin(),
+        value.end(),
+        value.begin(),
+        [](const wchar_t ch) {
+            return static_cast<wchar_t>(std::towlower(static_cast<wint_t>(ch)));
+        });
+    return value;
+}
+
+// Input: Two UTF-16 values.
+// Processing: Compares with the same normalization used for self-noise path
+// fragments so equivalent slash/case variants are treated consistently.
+// Return: true when the normalized values are identical and non-empty.
+bool EqualsNormalized(const std::wstring& left, const std::wstring& right) {
+    return !left.empty() && !right.empty() &&
+        NormalizedCompareText(left) == NormalizedCompareText(right);
+}
+
+// Input: A path-like value and a literal lowercase/uppercase fragment.
+// Processing: Performs a case-insensitive contains check after slash
+// normalization. The fragment is not treated as a glob or regular expression.
+// Return: true when the normalized value contains the normalized fragment.
+bool ContainsNormalized(const std::wstring& value, const wchar_t* fragment) {
+    if (value.empty() || fragment == nullptr || fragment[0] == L'\0') {
+        return false;
+    }
+
+    return NormalizedCompareText(value).find(NormalizedCompareText(fragment)) != std::wstring::npos;
+}
+
+// Input: Mutable reason string plus a short reason token.
+// Processing: Appends pipe-delimited reason tokens so suppressed event batches
+// remain diagnosable without emitting each noisy row.
+// Return: No return value.
+void AppendSelfNoiseReason(std::string* reasons, const char* reason) {
+    if (reasons == nullptr || reason == nullptr || reason[0] == '\0') {
+        return;
+    }
+
+    if (!reasons->empty()) {
+        *reasons += "|";
+    }
+    *reasons += reason;
+}
+
+// Input: Driver event type plus bounded payload bytes.
+// Processing: Detects whether the top-level SandboxEvent.processId was derived
+// from a typed payload subject PID or fell back to the callback/header PID.
+// Return: Stable data.processIdSource value.
+std::string DriverProcessIdSource(
+    const ULONG eventType,
+    const unsigned char* payload,
+    const size_t payloadBytes) {
+    if (payload == nullptr) {
+        return "eventHeader";
+    }
+
+    switch (eventType) {
+    case KswSandboxEventTypeProcess:
+        if (payloadBytes >= sizeof(KSWORD_SANDBOX_PROCESS_EVENT_PAYLOAD)) {
+            const auto* processPayload =
+                reinterpret_cast<const KSWORD_SANDBOX_PROCESS_EVENT_PAYLOAD*>(payload);
+            return processPayload->ProcessId != 0 ? "typedPayload.processId" : "eventHeader";
+        }
+        break;
+
+    case KswSandboxEventTypeImage:
+        if (payloadBytes >= sizeof(KSWORD_SANDBOX_IMAGE_EVENT_PAYLOAD)) {
+            const auto* imagePayload =
+                reinterpret_cast<const KSWORD_SANDBOX_IMAGE_EVENT_PAYLOAD*>(payload);
+            return imagePayload->ProcessId != 0 ? "typedPayload.processId" : "eventHeader";
+        }
+        break;
+
+    case KswSandboxEventTypeFile:
+        if (payloadBytes >= sizeof(KSWORD_SANDBOX_FILE_EVENT_PAYLOAD)) {
+            const auto* filePayload =
+                reinterpret_cast<const KSWORD_SANDBOX_FILE_EVENT_PAYLOAD*>(payload);
+            return filePayload->ProcessId != 0 ? "typedPayload.processId" : "eventHeader";
+        }
+        break;
+
+    case KswSandboxEventTypeRegistry:
+        if (payloadBytes >= sizeof(KSWORD_SANDBOX_REGISTRY_EVENT_PAYLOAD)) {
+            const auto* registryPayload =
+                reinterpret_cast<const KSWORD_SANDBOX_REGISTRY_EVENT_PAYLOAD*>(payload);
+            return registryPayload->ProcessId != 0 ? "typedPayload.processId" : "eventHeader";
+        }
+        break;
+
+    case KswSandboxEventTypeNetwork:
+        if (payloadBytes >= sizeof(KSWORD_SANDBOX_NETWORK_EVENT_PAYLOAD)) {
+            const auto* networkPayload =
+                reinterpret_cast<const KSWORD_SANDBOX_NETWORK_EVENT_PAYLOAD*>(payload);
+            const bool processIdPresent =
+                (networkPayload->Flags & KSWORD_SANDBOX_NETWORK_EVENT_FLAG_PROCESS_ID_PRESENT) != 0;
+            return (processIdPresent && networkPayload->ProcessId != 0)
+                ? "typedPayload.processId"
+                : "eventHeader";
+        }
+        break;
+
+    default:
+        break;
+    }
+
+    return "eventHeader";
+}
+
+// Input: Public driver event type.
+// Processing: Names the subject kind independently from eventType so reports and
+// raw JSONL can explain what object the row is about.
+// Return: Stable subject kind label.
+std::string DriverSubjectKind(const ULONG eventType) {
+    switch (eventType) {
+    case KswSandboxEventTypeDriverLoad:
+        return "driver";
+    case KswSandboxEventTypeProcess:
+        return "process";
+    case KswSandboxEventTypeImage:
+        return "image";
+    case KswSandboxEventTypeFile:
+        return "file";
+    case KswSandboxEventTypeRegistry:
+        return "registry";
+    case KswSandboxEventTypeNetwork:
+        return "network-flow";
+    case KswSandboxEventTypeReserved:
+        return "reserved";
+    case KswSandboxEventTypeNone:
+        return "none";
+    default:
+        return "unknown";
+    }
+}
+
+// Input: One decoded driver event plus collector options.
+// Processing: Classifies collector/guest-agent infrastructure rows by PID and
+// known KSword paths.  The policy is deliberately narrow: exact collector output
+// file, collector PID, and documented KSword infrastructure directories/files.
+// Return: Attribution metadata consumed by JSONL serialization and suppression.
+DriverEventAttribution BuildDriverEventAttribution(
+    const Options& options,
+    const KSWORD_SANDBOX_EVENT_HEADER& header,
+    const unsigned char* payload,
+    const size_t payloadBytes,
+    const SandboxEventFields& event,
+    const bool hasTypedSubjectPath) {
+    DriverEventAttribution attribution;
+    attribution.producerCategory =
+        header.Type == KswSandboxEventTypeDriverLoad ? "driver" : DriverEventTypeName(header.Type);
+    attribution.subjectKind = DriverSubjectKind(header.Type);
+    attribution.processIdSource = DriverProcessIdSource(header.Type, payload, payloadBytes);
+    attribution.collectorNoisePolicy = options.suppressSelfNoise
+        ? "suppress-self-noise"
+        : "emit-self-noise";
+    attribution.eventOrigin =
+        header.Type == KswSandboxEventTypeDriverLoad ? "kernel-driver-control-plane" : "kernel-driver";
+    attribution.actorRole =
+        attribution.processIdSource == "eventHeader" ? "callback-current-process" : "payload-subject-process";
+    attribution.subjectRole =
+        header.Type == KswSandboxEventTypeDriverLoad ? "driver-control-plane" : "sample-or-system";
+
+    std::string reasons;
+    if (event.processId == GetCurrentProcessId()) {
+        AppendSelfNoiseReason(&reasons, "collectorProcessId");
+    }
+
+    if (hasTypedSubjectPath) {
+        if (EqualsNormalized(event.path, options.outputPath)) {
+            AppendSelfNoiseReason(&reasons, "collectorOutputPath");
+        }
+
+        static constexpr const wchar_t* kInfrastructurePathFragments[] = {
+            L"\\kswordsandbox\\agent\\",
+            L"\\kswordsandbox\\r0collector\\",
+            L"\\kswordsandbox\\driver\\",
+            L"\\kswordsandbox\\out\\"
+        };
+        for (const wchar_t* fragment : kInfrastructurePathFragments) {
+            if (ContainsNormalized(event.path, fragment)) {
+                AppendSelfNoiseReason(&reasons, "kswordInfrastructurePath");
+                break;
+            }
+        }
+
+        const std::wstring fileName = BaseNameFromPath(event.path);
+        if (EqualsNormalized(fileName, L"driver-events.jsonl") ||
+            EqualsNormalized(fileName, L"r0collector.stdout.log") ||
+            EqualsNormalized(fileName, L"r0collector.stderr.log") ||
+            EqualsNormalized(fileName, L"events.json") ||
+            EqualsNormalized(fileName, L"agent-summary.json")) {
+            AppendSelfNoiseReason(&reasons, "kswordOutputArtifact");
+        }
+    }
+
+    if (header.Type == KswSandboxEventTypeProcess) {
+        if (ContainsNormalized(event.path, L"\\ksword.sandbox.r0collector.exe") ||
+            ContainsNormalized(event.commandLine, L"ksword.sandbox.r0collector.exe") ||
+            ContainsNormalized(event.path, L"\\ksword.sandbox.agent.exe") ||
+            ContainsNormalized(event.commandLine, L"ksword.sandbox.agent.exe")) {
+            AppendSelfNoiseReason(&reasons, "kswordToolProcess");
+        }
+    }
+
+    if (!reasons.empty()) {
+        attribution.selfNoise = true;
+        attribution.suppressed = options.suppressSelfNoise;
+        attribution.selfNoiseReason = reasons;
+        attribution.selfNoiseAction = options.suppressSelfNoise ? "suppress" : "emit";
+        attribution.actorRole = "collector-infrastructure";
+        attribution.subjectRole = "collector-infrastructure";
+    }
+
+    return attribution;
+}
+
+// Input: Output counter pointers from the caller.
+// Processing: Writes all available READ_EVENTS accounting counters defensively.
+// Return: No return value.
+void SetDriverEventRecordCounts(
+    unsigned long long* eventsEmitted,
+    unsigned long long* recordsProcessed,
+    unsigned long long* collectorSuppressedEvents,
+    const unsigned long long emitted,
+    const unsigned long long processed,
+    const unsigned long long suppressed) {
+    if (eventsEmitted != nullptr) {
+        *eventsEmitted = emitted;
+    }
+    if (recordsProcessed != nullptr) {
+        *recordsProcessed = processed;
+    }
+    if (collectorSuppressedEvents != nullptr) {
+        *collectorSuppressedEvents = suppressed;
+    }
+}
+
 // Input: READ_EVENTS output bytes and public reply header metadata.
 // Processing: Walks the byte stream after the fixed reply header, validates each
 // KSWORD_SANDBOX_EVENT_HEADER, and emits one driver-originated JSONL row per
-// event header.
-// Return: true when all advertised event records were emitted; false when the
-// stream is malformed or the sink fails. eventsEmitted receives the row count.
+// event header unless the row is classified as collector/guest self-noise.
+// Return: true when all advertised event records were processed; false when the
+// stream is malformed or the sink fails. Counter outputs distinguish emitted
+// rows, consumed records, and rows suppressed by the collector policy.
 bool EmitDriverEventRecords(
     EventWriter& writer,
     const Options& options,
@@ -475,15 +724,17 @@ bool EmitDriverEventRecords(
     const unsigned char* eventBytes,
     const size_t eventByteCount,
     const ULONG eventsWritten,
-    unsigned long long* eventsEmitted) {
+    unsigned long long* eventsEmitted,
+    unsigned long long* recordsProcessed,
+    unsigned long long* collectorSuppressedEvents) {
     size_t offset = 0;
     unsigned long long emitted = 0;
+    unsigned long long processed = 0;
+    unsigned long long suppressed = 0;
 
-    while (emitted < eventsWritten) {
+    while (processed < eventsWritten) {
         if (eventByteCount - offset < sizeof(KSWORD_SANDBOX_EVENT_HEADER)) {
-            if (eventsEmitted != nullptr) {
-                *eventsEmitted = emitted;
-            }
+            SetDriverEventRecordCounts(eventsEmitted, recordsProcessed, collectorSuppressedEvents, emitted, processed, suppressed);
             return EmitProtocolError(
                 writer,
                 options,
@@ -498,9 +749,7 @@ bool EmitDriverEventRecords(
         if (header.Version != KSWORD_SANDBOX_EVENT_HEADER_VERSION ||
             header.Size < sizeof(header) ||
             static_cast<size_t>(header.Size) > eventByteCount - offset) {
-            if (eventsEmitted != nullptr) {
-                *eventsEmitted = emitted;
-            }
+            SetDriverEventRecordCounts(eventsEmitted, recordsProcessed, collectorSuppressedEvents, emitted, processed, suppressed);
             return EmitProtocolError(
                 writer,
                 options,
@@ -511,9 +760,7 @@ bool EmitDriverEventRecords(
 
         const size_t payloadCapacity = static_cast<size_t>(header.Size) - sizeof(header);
         if (static_cast<size_t>(header.PayloadSize) > payloadCapacity) {
-            if (eventsEmitted != nullptr) {
-                *eventsEmitted = emitted;
-            }
+            SetDriverEventRecordCounts(eventsEmitted, recordsProcessed, collectorSuppressedEvents, emitted, processed, suppressed);
             return EmitProtocolError(
                 writer,
                 options,
@@ -526,6 +773,8 @@ bool EmitDriverEventRecords(
         SandboxEventFields event;
         event.eventType = DriverEventJsonType(header.Type);
         event.source = "driver";
+        event.processName.clear();
+        event.commandLine.clear();
         event.processId = ExtractTypedPayloadProcessId(
             header.Type,
             payload,
@@ -534,7 +783,8 @@ bool EmitDriverEventRecords(
         event.path = options.devicePath;
         const std::wstring subjectPath =
             ExtractTypedPayloadPath(header.Type, payload, header.PayloadSize);
-        if (!subjectPath.empty()) {
+        const bool hasTypedSubjectPath = !subjectPath.empty();
+        if (hasTypedSubjectPath) {
             event.path = subjectPath;
         }
         const std::wstring processName =
@@ -547,28 +797,42 @@ bool EmitDriverEventRecords(
         if (!commandLine.empty()) {
             event.commandLine = commandLine;
         }
+
+        const DriverEventAttribution attribution = BuildDriverEventAttribution(
+            options,
+            header,
+            payload,
+            header.PayloadSize,
+            event,
+            hasTypedSubjectPath);
+
+        if (attribution.suppressed) {
+            offset += header.Size;
+            ++processed;
+            ++suppressed;
+            continue;
+        }
+
         event.dataJson = BuildDriverEventData(
             header,
             batchIndex,
             static_cast<unsigned long long>(offset),
             payload,
-            header.PayloadSize);
+            header.PayloadSize,
+            attribution);
 
         if (!EmitEvent(writer, event)) {
-            if (eventsEmitted != nullptr) {
-                *eventsEmitted = emitted;
-            }
+            SetDriverEventRecordCounts(eventsEmitted, recordsProcessed, collectorSuppressedEvents, emitted, processed, suppressed);
             return false;
         }
 
         offset += header.Size;
         ++emitted;
+        ++processed;
     }
 
     if (offset != eventByteCount) {
-        if (eventsEmitted != nullptr) {
-            *eventsEmitted = emitted;
-        }
+        SetDriverEventRecordCounts(eventsEmitted, recordsProcessed, collectorSuppressedEvents, emitted, processed, suppressed);
         return EmitProtocolError(
             writer,
             options,
@@ -577,9 +841,7 @@ bool EmitDriverEventRecords(
             static_cast<DWORD>(eventByteCount));
     }
 
-    if (eventsEmitted != nullptr) {
-        *eventsEmitted = emitted;
-    }
+    SetDriverEventRecordCounts(eventsEmitted, recordsProcessed, collectorSuppressedEvents, emitted, processed, suppressed);
     return true;
 }
 
@@ -592,7 +854,9 @@ bool EmitDriverReadEvents(
     const Options& options,
     const unsigned long long batchIndex,
     EventWriter& writer,
-    unsigned long long* eventsEmitted) {
+    unsigned long long* eventsEmitted,
+    unsigned long long* recordsProcessed,
+    unsigned long long* collectorSuppressedEvents) {
     KSWORD_SANDBOX_READ_EVENTS_REQUEST request {};
     request.Version = KSWORD_SANDBOX_INTERFACE_VERSION;
     request.Size = sizeof(request);
@@ -662,6 +926,8 @@ bool EmitDriverReadEvents(
     }
 
     unsigned long long emitted = 0;
+    unsigned long long processed = 0;
+    unsigned long long suppressed = 0;
     const size_t eventByteCount = static_cast<size_t>(reply.BytesWritten);
     const unsigned char* eventBytes = buffer.data() + reply.Size;
     if (!EmitDriverEventRecords(
@@ -671,27 +937,30 @@ bool EmitDriverReadEvents(
             eventBytes,
             eventByteCount,
             reply.EventsWritten,
-            &emitted)) {
-        if (eventsEmitted != nullptr) {
-            *eventsEmitted = emitted;
-        }
+            &emitted,
+            &processed,
+            &suppressed)) {
+        SetDriverEventRecordCounts(eventsEmitted, recordsProcessed, collectorSuppressedEvents, emitted, processed, suppressed);
         return false;
     }
 
     SandboxEventFields event;
     event.eventType = "r0collector.driverReadEvents";
     event.path = options.devicePath;
-    event.dataJson = BuildReadEventsBatchData(reply, bytesReturned, options.readEventsMaxEvents, emitted);
+    event.dataJson = BuildReadEventsBatchData(
+        reply,
+        bytesReturned,
+        options.readEventsMaxEvents,
+        emitted,
+        processed,
+        suppressed,
+        options.suppressSelfNoise);
     if (!EmitEvent(writer, event)) {
-        if (eventsEmitted != nullptr) {
-            *eventsEmitted = emitted;
-        }
+        SetDriverEventRecordCounts(eventsEmitted, recordsProcessed, collectorSuppressedEvents, emitted, processed, suppressed);
         return false;
     }
 
-    if (eventsEmitted != nullptr) {
-        *eventsEmitted = emitted;
-    }
+    SetDriverEventRecordCounts(eventsEmitted, recordsProcessed, collectorSuppressedEvents, emitted, processed, suppressed);
     return true;
 }
 

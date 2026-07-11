@@ -61,6 +61,22 @@ After this one-time setup, the daily startup is just:
 .\run.ps1
 ```
 
+中文速查：
+
+- 首次安装：`.\install.ps1 -Mode Install -PromptPassword`
+- 配置黄金 VM/干净快照：`.\install.ps1 -Mode Change -UpdateHyperVConfig -VmName <VM> -CheckpointName <Snapshot>`
+- 配置测试签名驱动路径：`.\install.ps1 -Mode Change -UpdateHyperVConfig -DriverHostPath <test-signed .sys>`
+- 查询/启用来宾 test signing：
+  `.\install.ps1 -Mode Change -QueryGuestTestSigning` /
+  `.\install.ps1 -Mode Change -EnableGuestTestSigning -RestartGuestAfterTestSigning -Force`
+- 日常启动 WebUI：`.\run.ps1`
+- 一条命令做计划分析：`.\run.ps1 -Mode Analyze -SamplePreset Notepad`
+  或 `.\run.ps1 -Mode Analyze -SamplePreset HarmlessSample`
+
+`Analyze` 默认是 PlanOnly，不启动、不还原、不停止 VM；加 `-Live` 才会执行
+实时 Hyper-V 分析。所有密码和 API key 都只从本机环境/DPAPI/local state 读取，
+脚本和文档示例不要求把明文凭据写进命令行、配置文件、报告或 git。
+
 For a fresh local lab where you want the installer to generate a password:
 
 ```powershell
@@ -110,6 +126,22 @@ When `-DriverHostPath` is omitted, the installer preserves an existing local
 `driver.hostDriverPath` or auto-detects common built
 `KSword.Sandbox.Driver.sys` outputs. It does not sign drivers and must not call
 `CSignTool.exe`.
+
+Driver/test-signing notes for release packaging:
+
+- `-DriverHostPath` records where the host can find a locally built/test-signed
+  `.sys`; it does not copy signing keys or sign the file.
+- If you want a payload-only R0 plumbing test or no R0 at all, edit only the
+  generated local config outside git (`sandbox.local.json`) and set
+  `driver.useMockCollector=true` or `driver.enabled=false`; `install.ps1`
+  intentionally keeps the release CLI focused on the driver path and guest
+  test-signing switch.
+- `-EnableGuestTestSigning`, `-DisableGuestTestSigning`, and
+  `-QueryGuestTestSigning` delegate to the VM-side test-signing helper and are
+  explicit `Change` actions. Non-interactive enable/disable requires `-Force`.
+- Keep certificates, PFX files, driver binaries, and signing output outside the
+  repository. Use status/readiness output to verify path presence without
+  printing secrets.
 
 Safe environment summary without changing local state:
 

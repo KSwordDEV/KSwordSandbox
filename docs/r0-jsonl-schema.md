@@ -12,14 +12,17 @@ Required fields, emitted in stable order:
   event type.
 - `source`: string. `r0collector` for collector lifecycle rows, `driver` for
   drained or synthetic driver-category rows.
-- `processId`: number. Driver PID when the event header/payload supplies one;
-  otherwise the collector PID.
+- `processId`: number. Typed payload subject PID when present; otherwise the
+  driver event header PID. `data.processIdSource` records the source.
 - `processName`: string. Collector executable name for lifecycle rows; process
-  payload rows use the decoded process image basename when available.
+  payload rows use the decoded process image basename when available. Driver
+  rows that do not carry a process image keep this empty instead of falling
+  back to the collector executable.
 - `path`: string. Device path for lifecycle rows; typed file/process/image/
   registry rows use the decoded subject path when available.
 - `commandLine`: string. Collector command line for lifecycle rows; synthetic
-  rows use the mock process command line.
+  rows use the mock process command line. Live driver rows only populate this
+  when a typed process payload carries a bounded command-line prefix.
 - `data`: object. Values are emitted as strings for compatibility with the
   current host `Dictionary<string,string>` model.
 
@@ -89,6 +92,23 @@ Common `data` fields include `ioctl`, `batchIndex`, `recordOffset`, `version`,
 `payloadSize`, `payloadHexBytes`, `payloadTruncated`, `payloadHex`, and
 `typedPayloadParsed`.
 
+Common attribution fields are additive and string-valued:
+
+- `eventOrigin`: `kernel-driver`, `kernel-driver-control-plane`,
+  `collector-sidecar`, `guest-agent-import`, or `synthetic-r0collector`.
+- `producerCategory`: compact producer family such as `process`, `image`,
+  `file`, `registry`, `network`, `driver`, or `r0collector`.
+- `subjectKind`: object type shown to readers (`process`, `image`, `file`,
+  `registry`, `network-flow`, `driver`, `collector-diagnostic`, or `unknown`).
+- `processIdSource`: where the top-level PID came from, for example
+  `typedPayload.processId`, `eventHeader`, `top-level`, or `synthetic`.
+- `actorRole` / `subjectRole`: readable origin labels used to separate sample
+  or system activity from collector infrastructure diagnostics.
+- `selfNoise`, `selfNoiseReason`, `selfNoiseAction`, and
+  `collectorNoisePolicy`: collector-side classification for KSword
+  infrastructure rows. With the default policy, self-noise driver records are
+  suppressed and counted in the `r0collector.driverReadEvents` summary.
+
 Negotiation and queue rows must preserve these event-quality keys:
 
 - `r0collector.driverCapabilities.data`: `version`, `versionHex`, `size`,
@@ -110,8 +130,11 @@ Negotiation and queue rows must preserve these event-quality keys:
   `previousEnableMaskHex`, `effectiveEnableMaskHex`,
   `supportedProducerMaskHex`, and the matching `*MaskNames` fields.
 - `r0collector.driverReadEvents.data`: `requestedMaxEvents`,
-  `eventsWritten`, `eventsEmitted`, `bytesWritten`, `EventsDropped` as JSON key
-  `eventsDropped`, and `nextSequence`.
+  `eventsWritten`, `eventsEmitted`, `recordsProcessed`,
+  `collectorSuppressedEvents`, `bytesWritten`, `EventsDropped` as JSON key
+  `eventsDropped`, and `nextSequence`. Drain continuation uses
+  `recordsProcessed`, not `eventsEmitted`, so default self-noise suppression
+  cannot stop a batch early.
 
 Typed payload parsers add category-specific fields such as `operationName`,
 `filePath`, `imagePath`, `keyPath`, `valueName`, `protocolName`,
@@ -152,6 +175,12 @@ from real R0 telemetry.
   value through `IOCTL_KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK`, and records
   requested/effective masks in lifecycle and heartbeat rows. The reserved
   `KSWORD_SANDBOX_READ_EVENTS_REQUEST.Flags` field remains zero.
+- `--suppress-self-noise` is the default. It suppresses live driver rows for
+  the collector PID, the exact collector output JSONL, and documented KSword
+  infrastructure paths before writing JSONL. Suppressed counts remain visible in
+  `collectorSuppressedEvents`.
+- `--emit-self-noise` disables suppression and emits those rows with
+  `selfNoise=true`, `selfNoiseReason`, and `selfNoiseAction=emit`.
 - `--heartbeat` adds `r0collector.heartbeat` rows without changing driver drain
   semantics.
 - `--max-events` bounds one `READ_EVENTS` request and is the primary synthetic
@@ -180,7 +209,11 @@ corpus includes:
   `eventSchemaName`, `eventSchemaVersion`, `version`, `recordSize`,
   `payloadSize`, `payloadSchema`, `typedPayloadStatus`, and monotonic
   `sequence` values;
-- malformed, truncated, blank, or extra-field rows to verify robust parsing.
+- malformed, truncated, blank, or extra-field rows to verify robust parsing;
+- attribution and self-noise fields (`eventOrigin`, `producerCategory`,
+  `subjectKind`, `processIdSource`, `selfNoise`, `selfNoiseReason`,
+  `collectorSuppressedEvents`) so no-device smoke can validate readable event
+  ownership before a live driver is installed.
 
 Backpressure is represented as evidence, not as kernel blocking. When the ring
 overflows, the driver preserves loss through `TotalEventsDropped`,

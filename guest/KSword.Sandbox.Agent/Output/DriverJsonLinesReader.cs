@@ -27,8 +27,10 @@ internal sealed class DriverJsonLinesReader
         var events = new List<SandboxEvent>();
         try
         {
+            var lineNumber = 0;
             foreach (var line in ReadSharedLines(path))
             {
+                lineNumber++;
                 if (string.IsNullOrWhiteSpace(line))
                 {
                     continue;
@@ -43,12 +45,27 @@ internal sealed class DriverJsonLinesReader
                     var evt = JsonSerializer.Deserialize<SandboxEvent>(line, JsonOptions);
                     if (evt is not null)
                     {
-                        events.Add(evt with { Source = !hasSource || string.IsNullOrWhiteSpace(evt.Source) ? "driver" : evt.Source });
+                        events.Add(NormalizeParsedEvent(evt, hasSource, lineNumber, path));
                     }
                 }
-                catch (JsonException)
+                catch (JsonException ex)
                 {
-                    events.Add(new SandboxEvent { EventType = "driver.parse_error", Source = "guest", Path = path, Data = { ["line"] = line } });
+                    events.Add(new SandboxEvent
+                    {
+                        EventType = "driver.parse_error",
+                        Source = "guest",
+                        Path = path,
+                        Data =
+                        {
+                            ["line"] = line,
+                            ["lineNumber"] = lineNumber.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                            ["exceptionType"] = ex.GetType().FullName ?? ex.GetType().Name,
+                            ["message"] = ex.Message,
+                            ["eventOrigin"] = "guest-agent-import",
+                            ["collectionNoise"] = "true",
+                            ["attributionSummary"] = "guest-agent-import:malformed-driver-jsonl"
+                        }
+                    });
                 }
             }
         }
@@ -62,12 +79,158 @@ internal sealed class DriverJsonLinesReader
                 Data =
                 {
                     ["exceptionType"] = ex.GetType().FullName ?? ex.GetType().Name,
-                    ["message"] = ex.Message
+                    ["message"] = ex.Message,
+                    ["eventOrigin"] = "guest-agent-import",
+                    ["collectionNoise"] = "true",
+                    ["attributionSummary"] = "guest-agent-import:driver-jsonl-read-error"
                 }
             });
         }
 
         return events;
+    }
+
+    /// <summary>
+    /// Adds import-time attribution fields while preserving collector-provided
+    /// values. Inputs are one parsed JSONL row plus its source line metadata;
+    /// processing is additive and does not drop evidence rows.
+    /// </summary>
+    private static SandboxEvent NormalizeParsedEvent(SandboxEvent evt, bool hasSource, int lineNumber, string path)
+    {
+        var source = !hasSource || string.IsNullOrWhiteSpace(evt.Source) ? "driver" : evt.Source;
+        var data = evt.Data is null
+            ? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            : new Dictionary<string, string>(evt.Data, StringComparer.OrdinalIgnoreCase);
+
+        AddIfMissing(data, "jsonlLineNumber", lineNumber.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        AddIfMissing(data, "jsonlPath", path);
+
+        if (string.Equals(source, "driver", StringComparison.OrdinalIgnoreCase))
+        {
+            AddIfMissing(data, "eventOrigin", "kernel-driver");
+            AddIfMissing(data, "producerCategory", FirstNonEmpty(ValueOrNull(data, "producer"), ValueOrNull(data, "driverEventTypeName"), InferProducerCategory(evt.EventType)));
+            AddIfMissing(data, "subjectKind", InferSubjectKind(evt.EventType, data));
+            AddIfMissing(data, "actorRole", "payload-or-callback-process");
+            AddIfMissing(data, "subjectRole", IsTrue(ValueOrNull(data, "selfNoise")) ? "collector-infrastructure" : "sample-or-system");
+            AddIfMissing(data, "processIdSource", evt.ProcessId is null ? "not-present" : "top-level");
+            AddIfMissing(data, "noise", "false");
+            AddIfMissing(data, "selfNoise", IsTrue(ValueOrNull(data, "noise")) ? "true" : "false");
+            AddIfMissing(data, "selfNoiseReason", "none");
+            AddIfMissing(data, "selfNoiseAction", "emit");
+        }
+        else if (string.Equals(source, "r0collector", StringComparison.OrdinalIgnoreCase) ||
+                 evt.EventType.StartsWith("r0collector.", StringComparison.OrdinalIgnoreCase))
+        {
+            AddIfMissing(data, "eventOrigin", "collector-sidecar");
+            AddIfMissing(data, "producerCategory", "r0collector");
+            AddIfMissing(data, "subjectKind", "collector-diagnostic");
+            AddIfMissing(data, "actorRole", "collector-infrastructure");
+            AddIfMissing(data, "subjectRole", "collector-diagnostic");
+            AddIfMissing(data, "collectionNoise", "true");
+            AddIfMissing(data, "selfNoise", "false");
+        }
+
+        AddIfMissing(data, "attributionSummary", BuildAttributionSummary(evt, source, data));
+        return evt with { Source = source, Data = data };
+    }
+
+    private static void AddIfMissing(Dictionary<string, string> data, string key, string? value)
+    {
+        if (!data.ContainsKey(key) && !string.IsNullOrWhiteSpace(value))
+        {
+            data[key] = value;
+        }
+    }
+
+    private static string? ValueOrNull(IReadOnlyDictionary<string, string> data, string key)
+    {
+        return data.TryGetValue(key, out var value) && !string.IsNullOrWhiteSpace(value) ? value : null;
+    }
+
+    private static string FirstNonEmpty(params string?[] values)
+    {
+        foreach (var value in values)
+        {
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                return value;
+            }
+        }
+
+        return string.Empty;
+    }
+
+    private static bool IsTrue(string? value)
+    {
+        return string.Equals(value, "true", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string InferProducerCategory(string eventType)
+    {
+        if (string.Equals(eventType, "driver.load", StringComparison.OrdinalIgnoreCase))
+        {
+            return "driver";
+        }
+
+        if (eventType.StartsWith("driver.", StringComparison.OrdinalIgnoreCase))
+        {
+            var suffix = eventType["driver.".Length..];
+            var dot = suffix.IndexOf('.', StringComparison.Ordinal);
+            return dot < 0 ? suffix : suffix[..dot];
+        }
+
+        return string.Equals(eventType, "image.load", StringComparison.OrdinalIgnoreCase) ? "image" : "unknown";
+    }
+
+    private static string InferSubjectKind(string eventType, IReadOnlyDictionary<string, string> data)
+    {
+        if (data.TryGetValue("subjectKind", out var subjectKind) && !string.IsNullOrWhiteSpace(subjectKind))
+        {
+            return subjectKind;
+        }
+
+        if (string.Equals(eventType, "driver.process", StringComparison.OrdinalIgnoreCase))
+        {
+            return "process";
+        }
+
+        if (string.Equals(eventType, "image.load", StringComparison.OrdinalIgnoreCase))
+        {
+            return "image";
+        }
+
+        if (string.Equals(eventType, "driver.file", StringComparison.OrdinalIgnoreCase))
+        {
+            return "file";
+        }
+
+        if (string.Equals(eventType, "driver.registry", StringComparison.OrdinalIgnoreCase))
+        {
+            return "registry";
+        }
+
+        if (string.Equals(eventType, "driver.network", StringComparison.OrdinalIgnoreCase))
+        {
+            return "network-flow";
+        }
+
+        if (string.Equals(eventType, "driver.load", StringComparison.OrdinalIgnoreCase))
+        {
+            return "driver";
+        }
+
+        return "unknown";
+    }
+
+    private static string BuildAttributionSummary(SandboxEvent evt, string source, IReadOnlyDictionary<string, string> data)
+    {
+        var origin = FirstNonEmpty(ValueOrNull(data, "eventOrigin"), source);
+        var category = FirstNonEmpty(ValueOrNull(data, "producerCategory"), ValueOrNull(data, "producer"), InferProducerCategory(evt.EventType));
+        var subject = FirstNonEmpty(ValueOrNull(data, "subjectKind"), InferSubjectKind(evt.EventType, data));
+        var pid = evt.ProcessId?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? FirstNonEmpty(ValueOrNull(data, "processId"), ValueOrNull(data, "driverProcessId"), "-");
+        var subjectPath = FirstNonEmpty(evt.Path, ValueOrNull(data, "filePath"), ValueOrNull(data, "imagePath"), ValueOrNull(data, "keyPath"), ValueOrNull(data, "remoteEndpoint"), "-");
+        var selfNoise = IsTrue(ValueOrNull(data, "selfNoise")) ? " selfNoise=true" : string.Empty;
+        return $"{origin}:{category} subject={subject} pid={pid} path={subjectPath}{selfNoise}";
     }
 
     /// <summary>

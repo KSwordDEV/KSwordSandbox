@@ -76,6 +76,7 @@ std::string BuildAbiSelfCheckData(const Options& options) {
     data.AddBool("mockMode", options.mockMode);
     data.AddBool("healthOnly", options.healthOnly);
     data.AddBool("heartbeat", options.heartbeat);
+    data.AddBool("suppressSelfNoise", options.suppressSelfNoise);
     data.AddWide("devicePath", options.devicePath);
     data.AddWide("outputPath", options.outputPath);
     data.AddUtf8("schema", KSWORD_SANDBOX_EVENT_SCHEMA_NAME);
@@ -142,11 +143,16 @@ std::string BuildAbiSelfCheckData(const Options& options) {
 
     data.AddUtf8("readEventsRequestFlagsPolicy", "always-zero");
     data.AddUtf8("producerSelectionPolicy", "IOCTL_KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK only");
+    data.AddUtf8(
+        "collectorSelfNoisePolicy",
+        options.suppressSelfNoise
+            ? "default live READ_EVENTS import suppresses collector PID, collector output JSONL, and known KSword infrastructure paths; --emit-self-noise emits those rows with selfNoise=true"
+            : "--emit-self-noise active; collector and KSword infrastructure rows are emitted with selfNoise=true instead of being suppressed");
     data.AddUtf8("jsonlNoisePolicy", "blank lines ignored by live reader; malformed lines preserved by host import as driver.parse_error; valid rows with extra fields tolerated");
     data.AddUtf8("jsonlMalformedPolicy", "collector never emits malformed rows except when --inject-jsonl-noise is explicitly requested; live readers skip malformed rows and host import preserves them as driver.parse_error evidence");
     data.AddUtf8("kernelBackpressurePolicy", "nonblocking producers; fixed ring overwrites oldest unread record on overflow");
     data.AddUtf8("queueLossEvidence", "TotalEventsDropped|EventsDropped|TotalEventsSuppressed|NextSequence|sequence|queueHighWatermark");
-    data.AddUtf8("stableJsonlFields", "sequence|lost|backpressure|noise|producer|schema|eventSchemaName|eventSchemaVersion");
+    data.AddUtf8("stableJsonlFields", "sequence|lost|backpressure|noise|selfNoise|selfNoiseReason|producer|producerCategory|eventOrigin|subjectKind|processIdSource|schema|eventSchemaName|eventSchemaVersion");
     data.AddUtf8("collectorSelfCheckContract", "--abi-self-check emits this row and exits before CreateFileW/DeviceIoControl");
 
     return data.Build();
@@ -185,6 +191,10 @@ int RunAbiSelfCheckMode(const Options& options, EventWriter& writer) {
     data.AddBool("abiSelfCheck", true);
     data.AddBool("healthOnly", options.healthOnly);
     data.AddBool("heartbeat", options.heartbeat);
+    data.AddBool("suppressSelfNoise", options.suppressSelfNoise);
+    data.AddUtf8(
+        "collectorNoisePolicy",
+        options.suppressSelfNoise ? "suppress-self-noise" : "emit-self-noise");
     data.AddUtf8("schema", KSWORD_SANDBOX_EVENT_SCHEMA_NAME);
     data.AddUtf8("producer", "r0collector");
     data.AddBool("noise", false);

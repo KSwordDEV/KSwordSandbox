@@ -328,16 +328,21 @@ public sealed class SandboxJobService
         events.AddRange(guestEvents.Select(NormalizeEvent));
         AppendGuestImportEvent(events, guestEventsPath, guestEvents.Count);
 
-        var findings = ruleEngine.Classify(events);
+        var fullEvents = events.OrderBy(evt => evt.Timestamp).ToList();
+        var findings = ReportEventSampler.SanitizeFindings(ruleEngine.Classify(fullEvents));
+        var driverEventsPath = string.IsNullOrWhiteSpace(guestEventsPath)
+            ? null
+            : Path.Combine(Path.GetDirectoryName(guestEventsPath) ?? string.Empty, "driver-events.jsonl");
+        var sampling = ReportEventSampler.SampleForReport(fullEvents, jobRoot: jobRoot, eventsPath: guestEventsPath, driverEventsPath: driverEventsPath);
         var report = new AnalysisReport
         {
             JobId = job.JobId,
             Sample = sample,
             Status = status,
             StaticAnalysis = staticAnalysis,
-            Events = events,
+            Events = sampling.Events,
             Findings = findings,
-            Metrics = BuildMetrics(events, findings, staticAnalysis)
+            Metrics = BuildMetrics(sampling.Events, findings, staticAnalysis, fullEvents.Count, sampling.OmittedEventCount)
         };
 
         var jsonPath = Path.Combine(jobRoot, "report.json");
@@ -985,11 +990,20 @@ public sealed class SandboxJobService
     /// Inputs are event, finding, and static-analysis data, processing counts
     /// totals and severity groups, and the method returns a metric dictionary.
     /// </summary>
-    private static Dictionary<string, int> BuildMetrics(List<SandboxEvent> events, List<BehaviorFinding> findings, StaticAnalysisResult staticAnalysis)
+    private static Dictionary<string, int> BuildMetrics(
+        IReadOnlyCollection<SandboxEvent> events,
+        List<BehaviorFinding> findings,
+        StaticAnalysisResult staticAnalysis,
+        int? rawEventCount = null,
+        int omittedReportEvents = 0)
     {
+        var totalEvents = rawEventCount ?? events.Count;
         var metrics = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase)
         {
-            ["events.total"] = events.Count,
+            ["events.total"] = totalEvents,
+            ["events.raw"] = totalEvents,
+            ["events.report"] = events.Count,
+            ["events.omittedFromReport"] = omittedReportEvents,
             ["findings.total"] = findings.Count,
             ["static.tags"] = staticAnalysis.Tags.Count,
             ["static.urls"] = staticAnalysis.Urls.Count,

@@ -66,7 +66,8 @@ internal static class DashboardExperiencePage
             .report-notice { background:#ecfdf5; border:1px solid #86efac; border-radius:14px; color:#065f46; margin:12px 0; padding:14px; }
             .report-notice[hidden] { display:none; }
             .report-notice p { margin:6px 0; }
-            .report-entry { align-items:center; display:flex; flex-wrap:wrap; gap:8px; margin-top:12px; }
+            .report-entry { align-items:center; background:#f0fdf4; border:1px solid #86efac; border-radius:14px; display:flex; flex-wrap:wrap; gap:8px; margin-top:12px; padding:12px; }
+            .report-entry a.buttonlink { margin-top:0; }
             .report-entry .hint { margin:0; }
             .progress-links { margin:6px 0 10px; }
             .pill { background: #e7f3ff; border:1px solid rgba(67,160,255,.35); border-radius: 999px; color: #075985; display: inline-block; font-size: 12px; font-weight: 800; padding: 4px 9px; }
@@ -134,12 +135,21 @@ internal static class DashboardExperiencePage
           </header>
           <main>
             <section id="plan">
-              <h2 data-zh="规划分析" data-en="Plan analysis">规划分析</h2>
-              <p class="hint"><span data-zh="三种输入方式已拆成 Tab，默认选中“上传 EXE”。上传流程是一键动态分析：保存样本、生成计划、打开动态监控页并启动虚拟机；已有路径/扫描入口仍先停在计划复核。" data-en="The three input methods are tabs, with Upload EXE selected by default. Upload is a one-click dynamic flow: store the sample, create the plan, open the dynamic monitor, and start the VM. Existing-path and scan entries still stop at plan review first.">三种输入方式已拆成 Tab，默认选中“上传 EXE”。上传流程是一键动态分析：保存样本、生成计划、打开动态监控页并启动虚拟机；已有路径/扫描入口仍先停在计划复核。</span></p>
+              <h2 data-zh="提交分析" data-en="Submit analysis">提交分析</h2>
+              <p class="hint"><span data-zh="请选择一种方式：选择已有路径、上传 EXE、或扫描目录。上传流程会一键保存样本、生成计划、打开独立动态监控页并启动虚拟机；选择/扫描入口仍先停在计划复核。" data-en="Choose one input method: select an existing path, upload an EXE, or scan a folder. Upload is a one-click flow that stores the sample, creates the plan, opens the standalone dynamic monitor, and starts the VM; select/scan entries still stop at plan review first.">请选择一种方式：选择已有路径、上传 EXE、或扫描目录。上传流程会一键保存样本、生成计划、打开独立动态监控页并启动虚拟机；选择/扫描入口仍先停在计划复核。</span></p>
               <div class="tabs" role="tablist">
-                <button id="tab-upload" class="tab-button active" type="button" role="tab" aria-selected="true" aria-controls="panel-upload" onclick="selectPlanTab('upload')" data-zh="上传 EXE" data-en="Upload EXE">上传 EXE</button>
-                <button id="tab-path" class="tab-button" type="button" role="tab" aria-selected="false" aria-controls="panel-path" onclick="selectPlanTab('path')" data-zh="已有路径" data-en="Existing path">已有路径</button>
-                <button id="tab-scan" class="tab-button" type="button" role="tab" aria-selected="false" aria-controls="panel-scan" onclick="selectPlanTab('scan')" data-zh="扫描目录" data-en="Scan folder">扫描目录</button>
+                <button id="tab-path" class="tab-button" type="button" role="tab" aria-selected="false" aria-controls="panel-path" onclick="selectPlanTab('path')" data-zh="选择" data-en="Select">选择</button>
+                <button id="tab-upload" class="tab-button active" type="button" role="tab" aria-selected="true" aria-controls="panel-upload" onclick="selectPlanTab('upload')" data-zh="上传" data-en="Upload">上传</button>
+                <button id="tab-scan" class="tab-button" type="button" role="tab" aria-selected="false" aria-controls="panel-scan" onclick="selectPlanTab('scan')" data-zh="目录扫描" data-en="Folder scan">目录扫描</button>
+              </div>
+              <div id="panel-path" class="tab-panel" role="tabpanel" aria-labelledby="tab-path" hidden>
+                  <h3 data-zh="选择已有样本路径" data-en="Select existing sample path">选择已有样本路径</h3>
+                  <p class="hint" data-zh="适用于样本已经位于本机或挂载共享时。服务器会先校验路径，再生成可复核计划；需要动态分析时再点击当前任务里的启动按钮。" data-en="Use when the sample is already on this host or a mounted share. The server validates the path and creates a reviewable plan; start dynamic analysis from the current job card when ready.">适用于样本已经位于本机或挂载共享时。服务器会先校验路径，再生成可复核计划；需要动态分析时再点击当前任务里的启动按钮。</p>
+                  <label for="samplePath" data-zh="主机上的可执行文件路径" data-en="Executable path on host">主机上的可执行文件路径</label>
+                  <input id="samplePath" placeholder="D:\Temp\sample.exe">
+                  <label for="duration" data-zh="分析时长（秒）" data-en="Analysis duration, seconds">分析时长（秒）</label>
+                  <input id="duration" type="number" min="1" max="900" value="120">
+                  <button onclick="planPath()" data-zh="从路径生成计划" data-en="Create plan from path">从路径生成计划</button>
               </div>
               <div id="panel-upload" class="tab-panel active" role="tabpanel" aria-labelledby="tab-upload">
                   <h3 data-zh="上传 .exe 并自动动态分析" data-en="Upload .exe and run dynamic analysis">上传 .exe 并自动动态分析</h3>
@@ -149,15 +159,6 @@ internal static class DashboardExperiencePage
                   <label for="uploadDuration" data-zh="分析时长（秒）" data-en="Analysis duration, seconds">分析时长（秒）</label>
                   <input id="uploadDuration" type="number" min="1" max="900" value="120">
                   <button onclick="uploadAndPlan()" data-zh="上传 .exe → 自动分析并打开监控" data-en="Upload .exe → auto analyze and open monitor">上传 .exe → 自动分析并打开监控</button>
-              </div>
-              <div id="panel-path" class="tab-panel" role="tabpanel" aria-labelledby="tab-path" hidden>
-                  <h3 data-zh="规划已有主机路径" data-en="Plan existing host path">规划已有主机路径</h3>
-                  <p class="hint" data-zh="适用于样本已经位于本机或挂载共享时。服务器会先校验路径，再写入产物。" data-en="Use when the sample is already on this host or a mounted share. The server validates the path before writing artifacts.">适用于样本已经位于本机或挂载共享时。服务器会先校验路径，再写入产物。</p>
-                  <label for="samplePath" data-zh="主机上的可执行文件路径" data-en="Executable path on host">主机上的可执行文件路径</label>
-                  <input id="samplePath" placeholder="D:\Temp\sample.exe">
-                  <label for="duration" data-zh="分析时长（秒）" data-en="Analysis duration, seconds">分析时长（秒）</label>
-                  <input id="duration" type="number" min="1" max="900" value="120">
-                  <button onclick="planPath()" data-zh="从路径生成计划" data-en="Create plan from path">从路径生成计划</button>
               </div>
               <div id="panel-scan" class="tab-panel" role="tabpanel" aria-labelledby="tab-scan" hidden>
                   <h3 data-zh="扫描文件夹后规划" data-en="Scan folder, then plan">扫描文件夹后规划</h3>
@@ -191,7 +192,7 @@ internal static class DashboardExperiencePage
                   <div><label for="capturePacketCapture"><input id="capturePacketCapture" type="checkbox"> <span data-zh="采集网络抓包" data-en="Capture packet capture">采集网络抓包</span></label></div>
                 </div>
               </details>
-              <div id="status" class="status"></div>
+              <div id="status" class="status" role="status" aria-live="polite"></div>
             </section>
 
             <section>
@@ -214,7 +215,7 @@ internal static class DashboardExperiencePage
           <div id="copyToast" class="toast" role="status" aria-live="polite"></div>
           <script>
             let copyToastTimer = null;
-            let currentLanguage = localStorage.getItem('ksword-lang') === 'en' ? 'en' : 'zh';
+            let currentLanguage = 'zh';
             let progressTimer = null;
             let runbookProgressTimer = null;
             let backgroundExecutionTimer = null;
@@ -226,13 +227,13 @@ internal static class DashboardExperiencePage
             let latestRunbookProgressSnapshot = null;
             const liveStages = [
               ['任务已规划', 'Job planned', '已生成可复核计划', 'Reviewable plan is ready'],
-              ['检查 Hyper-V / 凭据', 'Check Hyper-V / credential', '验证主机与登录条件', 'Validate host and logon prerequisites'],
-              ['恢复检查点', 'Restore checkpoint', '通常是耗时阶段', 'Usually one of the slower stages'],
-              ['启动虚拟机', 'Start VM', '等待来宾通道可用', 'Wait for guest channel readiness'],
-              ['复制样本与工具', 'Stage sample and tools', '传入样本、Agent 与采集器', 'Copy sample, agent, and collectors'],
-              ['运行样本与采集器', 'Run sample and collectors', '采集运行期行为', 'Collect runtime behavior'],
-              ['回收事件', 'Collect events', '从来宾机同步证据', 'Sync evidence from the guest'],
-              ['导入并生成报告', 'Import and report', '写入 JSON/HTML 报告', 'Write JSON/HTML reports']
+              ['检查分析环境', 'Check analysis environment', '确认主机与登录条件', 'Confirm host and logon prerequisites'],
+              ['还原干净环境', 'Restore clean environment', '通常是耗时阶段', 'Usually one of the slower stages'],
+              ['启动分析环境', 'Start analysis environment', '等待来宾通道可用', 'Wait for guest channel readiness'],
+              ['准备样本与工具', 'Prepare sample and tools', '传入样本、Agent 与采集器', 'Copy sample, agent, and collectors'],
+              ['运行样本并采集行为', 'Run sample and collect behavior', '采集运行期行为', 'Collect runtime behavior'],
+              ['回收分析结果', 'Collect analysis results', '从来宾机同步证据', 'Sync evidence from the guest'],
+              ['生成报告', 'Generate report', '刷新 JSON/HTML 报告', 'Refresh JSON/HTML reports']
             ];
 
             function t(zh, en) {
@@ -283,20 +284,20 @@ internal static class DashboardExperiencePage
 
             function formatJobStatus(status) {
               const names = {
-                0: '排队中 / Queued',
-                1: '规划中 / Planning',
-                2: '已规划 / Planned',
-                3: '运行中 / Running',
-                4: '已完成 / Completed',
-                5: '失败 / Failed'
+                0: t('排队中', 'Queued'),
+                1: t('规划中', 'Planning'),
+                2: t('已规划', 'Planned'),
+                3: t('运行中', 'Running'),
+                4: t('已完成', 'Completed'),
+                5: t('失败', 'Failed')
               };
               const namedStatuses = {
-                queued: '排队中 / Queued',
-                planning: '规划中 / Planning',
-                planned: '已规划 / Planned',
-                running: '运行中 / Running',
-                completed: '已完成 / Completed',
-                failed: '失败 / Failed'
+                queued: t('排队中', 'Queued'),
+                planning: t('规划中', 'Planning'),
+                planned: t('已规划', 'Planned'),
+                running: t('运行中', 'Running'),
+                completed: t('已完成', 'Completed'),
+                failed: t('失败', 'Failed')
               };
               if (status === null || status === undefined || status === '') {
                 return '-';
@@ -304,7 +305,7 @@ internal static class DashboardExperiencePage
 
               if (typeof status === 'number' || /^\d+$/.test(String(status))) {
                 const numeric = Number(status);
-                return names[numeric] ? `${names[numeric]} (${numeric})` : `未知 / Unknown (${numeric})`;
+                return names[numeric] ? `${names[numeric]} (${numeric})` : `${t('未知', 'Unknown')} (${numeric})`;
               }
 
               const normalized = String(status).trim().toLowerCase();
@@ -316,7 +317,7 @@ internal static class DashboardExperiencePage
             }
 
             function selectPlanTab(name) {
-              for (const candidate of ['upload', 'path', 'scan']) {
+              for (const candidate of ['path', 'upload', 'scan']) {
                 const tab = document.getElementById(`tab-${candidate}`);
                 const panel = document.getElementById(`panel-${candidate}`);
                 tab.classList.toggle('active', candidate === name);
@@ -466,7 +467,7 @@ internal static class DashboardExperiencePage
                 const job = await planPath(uploaded.fullPath);
                 const jobId = job && (job.jobId || job.id);
                 if (jobId) {
-                  setStatus(t('上传完成，正在打开动态监控页并启动虚拟机分析。', 'Upload completed; opening the dynamic monitor and starting VM analysis.'), false);
+                  setStatus(t('上传完成，正在打开实时原始事件监控并启动虚拟机分析。', 'Upload completed; opening the Live raw event monitor and starting VM analysis.'), false);
                   openLiveMonitor(String(jobId), true, monitorWindow);
                   await executeRunbook(String(jobId), true);
                 } else if (monitorWindow && !monitorWindow.closed) {
@@ -701,7 +702,7 @@ internal static class DashboardExperiencePage
                   <p class="button-row">
                     <button onclick="executeRunbook('${escapeJs(jobId)}', true)" data-zh="启动虚拟机分析" data-en="Start VM analysis">启动虚拟机分析</button>
                     <a class="buttonlink secondary" target="_blank" rel="noopener" href="${escapeHtml(executionFlowHref)}" data-zh="打开进度页（执行流程）" data-en="Open progress page (execution flow)">打开进度页（执行流程）</a>
-                    <a class="buttonlink secondary" target="_blank" rel="noopener" href="${escapeHtml(liveEventsHref)}" onclick="openLiveMonitor('${escapeJs(jobId)}', false); return false;" data-zh="进入动态监控页" data-en="Enter dynamic monitor">进入动态监控页</a>
+                    <a class="buttonlink secondary" target="_blank" rel="noopener" href="${escapeHtml(liveEventsHref)}" onclick="openLiveMonitor('${escapeJs(jobId)}', false); return false;" data-zh="实时原始事件监控（独立页）" data-en="Live raw event monitor (standalone)">实时原始事件监控（独立页）</a>
                   </p>
                   <div class="report-entry" data-copy="${escapeAttribute([servedReportHref, servedZhReportHref, servedEnReportHref].filter(Boolean).join('\n'))}" data-copy-label="served report links">
                     <strong data-zh="报告页" data-en="Report page">报告页</strong>
@@ -712,9 +713,9 @@ internal static class DashboardExperiencePage
                   </div>
                   <div id="reportNotice" class="report-notice" hidden></div>
                   <div class="callout">
-                    <strong data-zh="独立页：动态监控" data-en="Standalone page: dynamic monitor">独立页：动态监控</strong>
+                    <strong data-zh="独立页：实时原始事件监控" data-en="Standalone page: Live raw event monitor">独立页：实时原始事件监控</strong>
                     <p class="hint" data-zh="上传流程会自动尝试打开该页；分析运行时可在新标签页查看原始事件。主页面保持简洁，最终结论以报告为准。" data-en="The upload flow automatically tries to open this page. Keep it in a separate tab to watch raw events while analysis runs. The dashboard stays simple and the final report remains the source of truth.">上传流程会自动尝试打开该页；分析运行时可在新标签页查看原始事件。主页面保持简洁，最终结论以报告为准。</p>
-                    <p class="button-row"><a class="buttonlink secondary" target="_blank" rel="noopener" href="${escapeHtml(liveEventsHref)}" onclick="openLiveMonitor('${escapeJs(jobId)}', false); return false;" data-zh="进入动态监控页（独立页）" data-en="Enter dynamic monitor (standalone)">进入动态监控页（独立页）</a></p>
+                    <p class="button-row"><a class="buttonlink secondary" target="_blank" rel="noopener" href="${escapeHtml(liveEventsHref)}" onclick="openLiveMonitor('${escapeJs(jobId)}', false); return false;" data-zh="打开实时原始事件监控" data-en="Open Live raw event monitor">打开实时原始事件监控</a></p>
                   </div>
                   <div id="liveMonitorNotice" class="report-notice" hidden></div>
                   <div id="analysisProgress" class="progress-box stage-progress">
@@ -724,12 +725,13 @@ internal static class DashboardExperiencePage
                     </div>
                     <p class="button-row progress-links">
                       <a class="buttonlink secondary" target="_blank" rel="noopener" href="${escapeHtml(executionFlowHref)}" data-zh="打开进度页（执行流程）" data-en="Open progress page (execution flow)">打开进度页（执行流程）</a>
-                      <a class="buttonlink secondary" target="_blank" rel="noopener" href="${escapeHtml(liveEventsHref)}" onclick="openLiveMonitor('${escapeJs(jobId)}', false); return false;" data-zh="进入动态监控页" data-en="Enter dynamic monitor">进入动态监控页</a>
+                      <a class="buttonlink secondary" target="_blank" rel="noopener" href="${escapeHtml(liveEventsHref)}" onclick="openLiveMonitor('${escapeJs(jobId)}', false); return false;" data-zh="实时原始事件监控（独立页）" data-en="Live raw event monitor (standalone)">实时原始事件监控（独立页）</a>
                     </p>
                     <div class="progress-bar"><div id="progressFill" class="progress-fill"></div></div>
                     <div id="progressFacts" class="progress-facts"></div>
                     <div id="stageList" class="stages"></div>
                     <div id="runbookProgressDetails" class="runbook-progress-details"></div>
+                    <p class="hint" data-zh="主页面只显示阶段摘要，不含命令行、stdout 或 stderr；需要排障时请打开执行流程页。" data-en="The dashboard shows stage summaries only, not command lines, stdout, or stderr; open the execution-flow page for troubleshooting.">主页面只显示阶段摘要，不含命令行、stdout 或 stderr；需要排障时请打开执行流程页。</p>
                     <p id="progressText" class="hint" data-zh="等待启动。虚拟机恢复/启动可能占用大部分时间。" data-en="Waiting to start. VM restore/start usually takes most of the time.">等待启动。虚拟机恢复/启动可能占用大部分时间。</p>
                   </div>
                   <details id="jobReportPaths" class="compact-details">
@@ -760,7 +762,7 @@ internal static class DashboardExperiencePage
                     <summary data-zh="最近消息" data-en="Recent messages">最近消息</summary>
                     ${messages ? `<ul>${messages}</ul>` : '<p class="hint" data-zh="暂无任务消息。" data-en="No job messages recorded.">暂无任务消息。</p>'}
                   </details>
-                  <div id="executionResult" class="hint" data-copy="planned steps: ${plannedStepCount}" data-copy-label="planned runbook step count">${t(`已规划 ${plannedStepCount} 个步骤。主界面只显示摘要；请打开“执行流程”查看详情。`, `${plannedStepCount} steps planned. The dashboard shows a summary only; open Execution flow for details.`)}</div>
+                  <div id="executionResult" class="hint" data-copy="plan ready; dashboard summary only" data-copy-label="plan summary">${t('计划已就绪。主界面只显示摘要；如需排障，请打开“进度页（执行流程）”。', 'The plan is ready. The dashboard shows a summary only; open the progress page (execution flow) for troubleshooting.')}</div>
                 </article>`;
               applyLanguage();
               if (latestRunbookProgressSnapshot) {
@@ -857,7 +859,7 @@ internal static class DashboardExperiencePage
                   <td data-copy="${escapeAttribute(statusLabel)}" data-copy-label="job status">${escapeHtml(statusLabel)}</td>
                   <td>${copyableCode(samplePath, 'job sample path', '-')}</td>
                   <td>${reportCell}</td>
-                  <td><button class="secondary" onclick="refreshJob('${escapeJs(jobId)}')" data-zh="打开任务" data-en="Open job">打开任务</button> <a class="buttonlink secondary" href="/jobs/${encodeURIComponent(jobId)}/execution-flow" target="_blank" rel="noopener" data-zh="进度页" data-en="Progress page">进度页</a> <a class="buttonlink secondary" href="/jobs/${encodeURIComponent(jobId)}/live-events" target="_blank" rel="noopener" data-zh="动态监控页" data-en="Dynamic monitor">动态监控页</a></td>
+                  <td><button class="secondary" onclick="refreshJob('${escapeJs(jobId)}')" data-zh="打开任务" data-en="Open job">打开任务</button> <a class="buttonlink secondary" href="/jobs/${encodeURIComponent(jobId)}/execution-flow" target="_blank" rel="noopener" data-zh="进度页" data-en="Progress page">进度页</a> <a class="buttonlink secondary" href="/jobs/${encodeURIComponent(jobId)}/live-events" target="_blank" rel="noopener" data-zh="实时原始事件监控" data-en="Live raw monitor">实时原始事件监控</a></td>
                 </tr>`;
               }).join('');
 
@@ -934,14 +936,14 @@ internal static class DashboardExperiencePage
               const current = currentLabel || t('等待启动', 'Waiting to start');
               const elapsed = elapsedLabel || '-';
               const failure = failureLabel || (isFailure
-                ? t('未记录失败原因；请打开执行流程查看 runbook-execution.json。', 'No failure reason was recorded; open Execution flow and inspect runbook-execution.json.')
-                : t('暂无失败原因', 'No failure reason'));
+                ? t('未记录失败原因；请打开进度页查看技术详情。', 'No failure reason was recorded; open the progress page for technical details.')
+                : t('暂无异常', 'No issues'));
               facts.innerHTML = `
-                <div class="metric"><strong>${t('当前步骤', 'Current step')}</strong><span data-copy="${escapeAttribute(current)}" data-copy-label="current runbook step">${escapeHtml(current)}</span></div>
-                <div class="metric"><strong>${t('已耗时', 'Elapsed')}</strong><span data-copy="${escapeAttribute(elapsed)}" data-copy-label="runbook elapsed">${escapeHtml(elapsed)}</span></div>
-                <div class="metric"><strong>${t('失败原因', 'Failure reason')}</strong><span class="${isFailure ? 'error' : 'hint'}" data-copy="${escapeAttribute(failure)}" data-copy-label="runbook failure reason">${escapeHtml(failure)}</span></div>`;
-              facts.setAttribute('data-copy', `current=${current}; elapsed=${elapsed}; failure=${failure}`);
-              facts.setAttribute('data-copy-label', 'runbook progress facts');
+                <div class="metric"><strong>${t('当前步骤', 'Current step')}</strong><span data-copy="${escapeAttribute(current)}" data-copy-label="current analysis step">${escapeHtml(current)}</span></div>
+                <div class="metric"><strong>${t('已耗时', 'Elapsed')}</strong><span data-copy="${escapeAttribute(elapsed)}" data-copy-label="analysis elapsed">${escapeHtml(elapsed)}</span></div>
+                <div class="metric"><strong>${t('失败原因', 'Failure reason')}</strong><span class="${isFailure ? 'error' : 'hint'}" data-copy="${escapeAttribute(failure)}" data-copy-label="analysis failure reason">${escapeHtml(failure)}</span></div>`;
+              facts.setAttribute('data-copy', `step=${current}; elapsed=${elapsed}; failure=${failure}`);
+              facts.setAttribute('data-copy-label', 'analysis progress summary');
             }
 
             function startEstimatedProgress(live) {
@@ -1008,7 +1010,7 @@ internal static class DashboardExperiencePage
               // stdout, or stderr in the main dashboard.
               try {
                 const response = await fetch(`/api/jobs/${encodeURIComponent(jobId)}/runbook/progress`, { cache: 'no-store' });
-                const snapshot = await requireOk(response, t('刷新真实执行进度', 'Refresh real execution progress'));
+                const snapshot = await requireOk(response, t('刷新执行进度', 'Refresh analysis progress'));
                 renderRunbookProgress(snapshot);
                 const state = normalizeProgressState(snapshot.state);
                 return state === 'completed' || state === 'failed' || state === 'canceled' || snapshot.success === true || snapshot.success === false;
@@ -1036,6 +1038,34 @@ internal static class DashboardExperiencePage
               }
             }
 
+            function estimateFriendlyStageIndex(totalSteps, currentStepIndex, completedSteps, done, failed) {
+              if (done) {
+                return liveStages.length - 1;
+              }
+
+              const total = Math.max(1, Number(totalSteps) || 1);
+              const numerator = Math.max(0, currentStepIndex >= 0 ? currentStepIndex : completedSteps);
+              const ratio = Math.max(0, Math.min(1, numerator / total));
+              const stageIndex = Math.round(ratio * (liveStages.length - 1));
+              return Math.max(0, Math.min(liveStages.length - 1, failed ? Math.max(stageIndex, 1) : stageIndex));
+            }
+
+            function renderFriendlyProgressStages(activeIndex, completed, failed) {
+              const boundedActive = Math.max(0, Math.min(liveStages.length - 1, Number(activeIndex) || 0));
+              return liveStages.map((stage, index) => {
+                const css = completed
+                  ? 'done'
+                  : failed && index === boundedActive
+                    ? 'failed'
+                    : index < boundedActive
+                      ? 'done'
+                      : index === boundedActive
+                        ? 'active'
+                        : '';
+                return `<div class="stage ${css}" data-copy="${escapeAttribute(`${t(stage[0], stage[1])} - ${t(stage[2], stage[3])}`)}" data-copy-label="analysis stage">${escapeHtml(t(stage[0], stage[1]))}<small>${escapeHtml(t(stage[2], stage[3]))}</small></div>`;
+              }).join('');
+            }
+
             function renderRunbookProgress(snapshot) {
               const list = document.getElementById('stageList');
               const fill = document.getElementById('progressFill');
@@ -1057,11 +1087,13 @@ internal static class DashboardExperiencePage
               const done = state === 'completed' || snapshot.success === true;
               const currentIndex = snapshot.currentStepIndex === null || snapshot.currentStepIndex === undefined ? -1 : Number(snapshot.currentStepIndex);
               const currentStep = currentIndex >= 0 && currentIndex < steps.length ? steps[currentIndex] : null;
-              const percent = total > 0 ? Math.round((completed / total) * 100) : (done ? 100 : 0);
+              const friendlyStageIndex = estimateFriendlyStageIndex(total, currentIndex, completed, done, failed);
+              const friendlyStage = liveStages[friendlyStageIndex] || liveStages[0];
+              const realPercent = total > 0 ? Math.round((Math.max(completed, currentIndex >= 0 ? currentIndex : 0) / total) * 100) : (done ? 100 : 0);
+              const stagePercent = Math.round((friendlyStageIndex / Math.max(1, liveStages.length - 1)) * 100);
+              const percent = done ? 100 : Math.min(99, Math.max(failed ? realPercent : 4, realPercent, stagePercent));
               const currentTitle = currentStep ? (currentStep.title || currentStep.stepId || '') : (snapshot.currentStepTitle || '');
-              const currentStepLabel = currentTitle
-                ? `${currentIndex >= 0 && total > 0 ? `${currentIndex + 1}/${total} — ` : ''}${currentTitle}`
-                : '';
+              const currentStepLabel = t(friendlyStage[0], friendlyStage[1]);
               const elapsed = formatDuration(snapshot.duration) || '-';
               const failedStep = steps.find(step => ['failed', 'canceled'].includes(normalizeProgressState(step.state)));
               const failureReason = getRunbookFailureReason(snapshot, failedStep, failed);
@@ -1069,43 +1101,39 @@ internal static class DashboardExperiencePage
               fill.classList.toggle('failed', failed);
               progressCompleted = done;
               progressFailed = failed;
-              progressStageIndex = total > 0 ? Math.max(0, Math.min(total - 1, currentIndex >= 0 ? currentIndex : completed)) : 0;
+              progressStageIndex = friendlyStageIndex;
 
               if (meta) {
                 const label = done
-                  ? t(`真实步骤完成 ${completed}/${total}`, `Real steps complete ${completed}/${total}`)
+                  ? t('分析完成', 'Analysis complete')
                   : failed
-                    ? t(`真实步骤失败 ${completed}/${total}`, `Real steps failed ${completed}/${total}`)
-                    : t(`真实步骤 ${Math.min(total, Math.max(1, currentIndex + 1 || completed + 1))}/${total}`, `Real step ${Math.min(total, Math.max(1, currentIndex + 1 || completed + 1))}/${total}`);
+                    ? t('分析已停止', 'Analysis stopped')
+                    : t(`分析进度约 ${percent}%`, `Analysis about ${percent}%`);
                 meta.textContent = label;
-                meta.setAttribute('data-copy', `${label}; elapsed=${elapsed}; executed=${executed}; state=${state}; failure=${failureReason || '-'}`);
+                meta.setAttribute('data-copy', `${label}; elapsed=${elapsed}; executed=${executed}; state=${state}; issue=${failureReason || '-'}`);
               }
 
               const currentPrefix = done
-                ? t('所有 runbook 步骤已完成', 'All runbook steps completed')
+                ? t('分析已完成，报告入口已就绪', 'Analysis completed; report entry is ready')
                 : failed
-                  ? t('runbook 执行已停止', 'Runbook execution stopped')
+                  ? t('分析未完成，请打开进度页查看原因', 'Analysis did not complete; open the progress page for details')
                   : currentTitle
-                    ? t('当前真实步骤', 'Current real step')
-                    : t('等待 executor 上报真实步骤', 'Waiting for executor step telemetry');
+                    ? t('正在处理', 'Processing')
+                    : t('等待进度更新', 'Waiting for progress updates');
               if (text) {
-                const message = snapshot.message ? ` · ${snapshot.message}` : '';
-                text.textContent = currentTitle
-                  ? `${currentPrefix}: ${currentStepLabel}${message}`
-                  : `${currentPrefix}${message}`;
+                text.textContent = done || failed
+                  ? currentPrefix
+                  : `${currentPrefix}：${currentStepLabel}`;
               }
               renderProgressFacts(currentStepLabel || currentPrefix, elapsed, failureReason, failed);
 
-              const focusSteps = buildProgressFocusSteps(steps, currentIndex, failed, done);
               list.className = 'stages';
-              list.innerHTML = focusSteps.length
-                ? focusSteps.map(step => renderProgressStageCard(step, total)).join('')
-                : `<div class="stage active">${escapeHtml(progressStateLabel(state))}<small>${escapeHtml(t('等待进度快照', 'Waiting for progress snapshot'))}</small></div>`;
+              list.innerHTML = renderFriendlyProgressStages(friendlyStageIndex, done, failed);
 
               if (details) {
-                const rows = steps.map(step => renderRunbookStepChip(step, currentIndex)).join('');
-                details.innerHTML = rows
-                  ? `<details><summary>${escapeHtml(t('展开真实 runbook 步骤状态（不含命令行）', 'Expand real runbook step status (no commands)'))}</summary><div class="runbook-step-grid">${rows}</div></details>`
+                const flowHref = snapshot.jobId ? `/jobs/${encodeURIComponent(snapshot.jobId)}/execution-flow` : '';
+                details.innerHTML = flowHref
+                  ? `<p class="hint">${escapeHtml(t('主页面只显示友好摘要；完整技术步骤请打开进度页。', 'The dashboard shows a friendly summary only; open the progress page for the full technical flow.'))} <a class="buttonlink secondary" target="_blank" rel="noopener" href="${escapeHtml(flowHref)}">${escapeHtml(t('打开进度页', 'Open progress page'))}</a></p>`
                   : '';
               }
             }
@@ -1159,31 +1187,13 @@ internal static class DashboardExperiencePage
             }
 
             function getRunbookFailureReason(snapshot, failedStep, failed) {
-              const pieces = [];
-              if (failedStep) {
-                const title = failedStep.title || failedStep.stepId || '';
-                if (title) {
-                  pieces.push(`${t('失败步骤', 'Failed step')}: ${title}`);
-                }
-
-                if (failedStep.message) {
-                  pieces.push(failedStep.message);
-                }
-
-                if (failedStep.exitCode !== null && failedStep.exitCode !== undefined) {
-                  pieces.push(`exit ${failedStep.exitCode}`);
-                }
+              if (!failed) {
+                return '';
               }
 
-              if (snapshot && snapshot.message && !pieces.includes(snapshot.message)) {
-                pieces.push(snapshot.message);
-              }
-
-              if (!pieces.length && failed) {
-                return t('未记录失败原因；请打开执行流程查看 runbook-execution.json。', 'No failure reason was recorded; open Execution flow and inspect runbook-execution.json.');
-              }
-
-              return pieces.join(' · ');
+              return failedStep || (snapshot && snapshot.message)
+                ? t('分析未完成；请打开进度页查看失败阶段和诊断详情。', 'Analysis did not complete; open the progress page for the failed stage and diagnostics.')
+                : t('未记录失败原因；请打开进度页查看技术详情。', 'No failure reason was recorded; open the progress page for technical details.');
             }
 
             function openReport(jobId) {
@@ -1222,7 +1232,7 @@ internal static class DashboardExperiencePage
                 opened = window.open('about:blank', '_blank');
                 if (opened) {
                   opened.document.title = 'KSword Sandbox monitor';
-                  opened.document.body.innerHTML = '<div style="font-family:Segoe UI,Arial,sans-serif;padding:24px;line-height:1.5"><h2>KSword Sandbox：动态监控页准备中 / Preparing dynamic monitor</h2><p>正在上传并创建任务。/ Uploading and creating the job.</p><p>如果此页一直空白或没有跳转，请回到主界面点击“进入动态监控页”。/ If this page stays blank or does not navigate, return to the dashboard and click Enter dynamic monitor.</p></div>';
+                  opened.document.body.innerHTML = '<div style="font-family:Segoe UI,Arial,sans-serif;padding:24px;line-height:1.5"><h2>KSword Sandbox：实时原始事件监控准备中 / Preparing Live raw event monitor</h2><p>正在上传并创建任务。/ Uploading and creating the job.</p><p>如果此页一直空白或没有跳转，请回到主界面点击“实时原始事件监控”。/ If this page stays blank or does not navigate, return to the dashboard and click Live raw event monitor.</p></div>';
                   opened.opener = null;
                 }
               } catch {
@@ -1270,17 +1280,17 @@ internal static class DashboardExperiencePage
               const href = buildLiveMonitorHref(jobId);
               const progressHref = `/jobs/${encodeURIComponent(jobId)}/execution-flow`;
               const zhMessage = opened
-                ? (autoOpenedFromUpload ? '已尝试在新标签页打开动态监控页；如果新标签仍是空白或被浏览器拦截，请使用下方链接。主界面会继续提交后台分析，当前任务无需重新上传。' : '已尝试打开动态监控页；如果没有出现新标签，请使用下方链接。主界面仍保留进度和报告入口。')
-                : '未获得新标签页句柄，浏览器可能阻止了自动打开；请点击下方“进入动态监控页”。当前任务卡片已保留入口，无需重新上传。';
+                ? (autoOpenedFromUpload ? '已尝试在新标签页打开实时原始事件监控；如果新标签仍是空白或被浏览器拦截，请使用下方链接。主界面会继续提交后台分析，当前任务无需重新上传。' : '已尝试打开实时原始事件监控；如果没有出现新标签，请使用下方链接。主界面仍保留进度和报告入口。')
+                : '未获得新标签页句柄，浏览器可能阻止了自动打开；请点击下方“实时原始事件监控”。当前任务卡片已保留入口，无需重新上传。';
               const enMessage = opened
-                ? (autoOpenedFromUpload ? 'The dashboard tried to open the dynamic monitor in a new tab. If the new tab stays blank or the browser blocks it, use the link below. This job does not need to be uploaded again.' : 'The dashboard tried to open the dynamic monitor. If no new tab appeared, use the link below; progress and report links remain here.')
-                : 'No new-tab handle was returned, so the browser may have blocked automatic opening. Click Enter dynamic monitor below; this job does not need to be uploaded again.';
+                ? (autoOpenedFromUpload ? 'The dashboard tried to open the Live raw event monitor in a new tab. If the new tab stays blank or the browser blocks it, use the link below. This job does not need to be uploaded again.' : 'The dashboard tried to open the Live raw event monitor. If no new tab appeared, use the link below; progress and report links remain here.')
+                : 'No new-tab handle was returned, so the browser may have blocked automatic opening. Click Live raw event monitor below; this job does not need to be uploaded again.';
               notice.hidden = false;
               notice.innerHTML = `
-                <strong data-zh="动态监控页已准备好" data-en="Dynamic monitor is ready">动态监控页已准备好</strong>
+                <strong data-zh="实时原始事件监控已准备好" data-en="Live raw event monitor is ready">实时原始事件监控已准备好</strong>
                 <p data-zh="${escapeAttribute(zhMessage)}" data-en="${escapeAttribute(enMessage)}">${escapeHtml(zhMessage)}</p>
                 <p class="button-row">
-                  <a class="buttonlink" target="_blank" rel="noopener" href="${escapeHtml(href)}" data-zh="进入动态监控页" data-en="Enter dynamic monitor">进入动态监控页</a>
+                  <a class="buttonlink" target="_blank" rel="noopener" href="${escapeHtml(href)}" data-zh="实时原始事件监控" data-en="Live raw event monitor">实时原始事件监控</a>
                   <a class="buttonlink secondary" target="_blank" rel="noopener" href="${escapeHtml(progressHref)}" data-zh="打开进度页（执行流程）" data-en="Open progress page (execution flow)">打开进度页（执行流程）</a>
                 </p>`;
               applyLanguage();
@@ -1356,7 +1366,7 @@ internal static class DashboardExperiencePage
                 const text = document.getElementById('progressText');
                 if (text) {
                   text.textContent = state === 'running'
-                    ? t('后台分析正在运行；可以停留在此页或查看动态监控页。', 'Background analysis is running; stay here or watch the dynamic monitor page.')
+                    ? t('后台分析正在运行；可以停留在此页或查看实时原始事件监控。', 'Background analysis is running; stay here or watch the Live raw event monitor.')
                     : t('后台分析已排队，等待执行器启动。', 'Background analysis is queued and waiting for the executor.');
                 }
                 return false;
@@ -1422,7 +1432,7 @@ internal static class DashboardExperiencePage
                 startBackgroundExecutionPolling(jobId, live);
                 const text = document.getElementById('progressText');
                 if (text) {
-                  text.textContent = t('后台任务已启动；真实 runbook step 会持续更新，完成后自动打开报告。', 'Background task started; real runbook steps will keep updating and the report opens when complete.');
+                  text.textContent = t('后台任务已启动；友好进度会持续更新，完成后自动打开报告。', 'Background task started; friendly progress will keep updating and the report opens when complete.');
                 }
                 setStatus(live ? t('虚拟机分析已在后台启动。', 'VM analysis started in the background.') : t('流程验证已在后台启动。', 'Flow verification started in the background.'), false);
                 renderBackgroundExecutionSnapshot(payload, live);
@@ -1435,7 +1445,7 @@ internal static class DashboardExperiencePage
                 }
                 const text = document.getElementById('progressText');
                 if (text) {
-                  text.textContent = t('执行未完成；请打开执行流程查看失败步骤和 runbook-execution.json。', 'Execution did not complete; open Execution flow for the failed step and runbook-execution.json.');
+                  text.textContent = t('执行未完成；请打开进度页查看失败阶段和诊断详情。', 'Execution did not complete; open the progress page for the failed stage and diagnostics.');
                 }
                 setStatus(error.message, true);
               } finally {
@@ -1474,20 +1484,15 @@ internal static class DashboardExperiencePage
               const jobId = result.jobId || (wrapper && wrapper.job && wrapper.job.jobId) || '';
               const flowHref = jobId ? `/jobs/${encodeURIComponent(jobId)}/execution-flow` : '#';
               const importMessage = wrapper && wrapper.guestImportMessage ? `<p class="${wrapper.guestImportSucceeded ? 'ok' : 'hint'}">${escapeHtml(wrapper.guestImportMessage)}</p>` : '';
-              const failedStep = Array.isArray(result.stepResults) ? result.stepResults.find(step => step && step.success === false) : null;
-              const failure = failedStep
-                ? `<p class="error"><strong>失败步骤 / Failed step:</strong> ${escapeHtml(failedStep.title || failedStep.stepId || '')}${failedStep.message ? ` — ${escapeHtml(failedStep.message)}` : ''}</p>`
-                : '';
               const successClass = result.success ? 'status-ok' : 'status-failed';
               document.getElementById('executionResult').innerHTML = `
                 <div class="pathbox" data-copy="mode=${escapeAttribute(result.mode)}; success=${result.success}; executed=${result.executedSteps}/${result.totalSteps}; duration=${escapeAttribute(formatDuration(result.duration))}" data-copy-label="runbook execution summary">
-                  <p><strong>模式 / Mode:</strong> ${escapeHtml(result.mode)} · <strong>结果 / Result:</strong> <span class="${successClass}">${result.success ? '成功 / success' : '失败 / failed'}</span></p>
-                  <p><strong>进度 / Progress:</strong> ${result.executedSteps}/${result.totalSteps} · <strong>耗时 / Duration:</strong> ${escapeHtml(formatDuration(result.duration))}</p>
-                  ${result.message ? `<p class="error">${escapeHtml(result.message)}</p>` : ''}
-                  ${failure}
+                  <p><strong>${t('分析结果', 'Analysis result')}:</strong> <span class="${successClass}">${result.success ? t('已完成', 'Completed') : t('未完成', 'Not completed')}</span></p>
+                  <p><strong>${t('耗时', 'Duration')}:</strong> ${escapeHtml(formatDuration(result.duration))}</p>
+                  ${result.success ? '' : `<p class="error">${escapeHtml(t('主页面不展开技术步骤；请打开进度页查看失败阶段。', 'The dashboard does not expand technical steps; open the progress page for the failed stage.'))}</p>`}
                   ${importMessage}
                   <p class="button-row">
-                    <a class="buttonlink secondary" target="_blank" rel="noopener" href="${escapeHtml(flowHref)}" data-zh="执行流程 / Execution flow" data-en="Execution flow / 执行流程">执行流程 / Execution flow</a>
+                    <a class="buttonlink secondary" target="_blank" rel="noopener" href="${escapeHtml(flowHref)}" data-zh="打开进度页（执行流程）" data-en="Open progress page (execution flow)">打开进度页（执行流程）</a>
                   </p>
                 </div>`;
               applyLanguage();

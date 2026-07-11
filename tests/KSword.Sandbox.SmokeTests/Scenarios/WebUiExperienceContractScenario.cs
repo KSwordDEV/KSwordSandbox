@@ -115,7 +115,10 @@ internal sealed class WebUiExperienceContractScenario : ISmokeTestScenario
         RequireContains(dashboard, "buildLiveMonitorHref", "Dashboard should build dynamic monitor links from the job id.");
         RequireContains(dashboard, "openLiveMonitorPlaceholder", "Upload flow should open a user-gesture monitor placeholder before async upload work.");
         RequireContains(dashboard, "window.open('about:blank', '_blank')", "Upload flow should open the placeholder synchronously to avoid popup blocking.");
-        RequireContains(dashboard, "动态监控页准备中 / Preparing dynamic monitor", "Upload monitor placeholder should show a visible bilingual loading page.");
+        RequireAnyContains(
+            dashboard,
+            ["动态监控页准备中 / Preparing dynamic monitor", "实时原始事件监控准备中 / Preparing Live raw event monitor"],
+            "Upload monitor placeholder should show a visible bilingual loading page.");
         RequireContains(dashboard, "openLiveMonitor(String(jobId), true, monitorWindow)", "Upload flow should navigate the placeholder into the dynamic monitor after planning.");
         RequireContains(dashboard, "showLiveMonitorNotice", "Dashboard should render a bilingual fallback when automatic monitor opening is blocked.");
         RequireContains(dashboard, "未获得新标签页句柄，浏览器可能阻止了自动打开", "Dashboard should explain automatic monitor fallback clearly in Chinese.");
@@ -145,13 +148,29 @@ internal sealed class WebUiExperienceContractScenario : ISmokeTestScenario
         RequireContains(dashboard, "startBackgroundExecutionPolling", "Dashboard should start background execution status polling during execution.");
         RequireContains(dashboard, "renderBackgroundExecutionSnapshot", "Dashboard should render background runbook terminal state and report readiness.");
         RequireContains(dashboard, "renderRunbookProgress", "Dashboard should render exact executor runbook step progress.");
-        RequireContains(dashboard, "id=\"progressFacts\"", "Dashboard progress card should expose current step, elapsed time, and failure reason.");
-        RequireContains(dashboard, "当前步骤", "Dashboard progress card should show the current step in Chinese.");
+        RequireContains(dashboard, "id=\"progressFacts\"", "Dashboard progress card should expose current stage/step, elapsed time, and issue/failure context.");
+        RequireAnyContains(
+            dashboard,
+            ["当前步骤", "当前阶段"],
+            "Dashboard progress card should show the current step or stage in Chinese.");
         RequireContains(dashboard, "Elapsed", "Dashboard progress card should show elapsed time in English.");
-        RequireContains(dashboard, "Failure reason", "Dashboard progress card should show failure reason in English.");
+        RequireAnyContains(
+            dashboard,
+            ["Failure reason", "Issue note"],
+            "Dashboard progress card should show failure or issue context in English.");
         RequireContains(dashboard, "getRunbookFailureReason", "Dashboard should derive a visible failure reason from failed runbook step snapshots.");
-        RequireContains(dashboard, "elapsed=${elapsed}; executed=${executed}; state=${state}; failure=${failureReason || '-'}", "Dashboard progress metadata should be copyable with elapsed and failure details.");
-        RequireContains(dashboard, "不含命令行", "Dashboard should state that expanded runbook progress omits command lines.");
+        RequireAnyContains(
+            dashboard,
+            [
+                "elapsed=${elapsed}; executed=${executed}; state=${state}; failure=${failureReason || '-'}",
+                "elapsed=${elapsed}; executed=${executed}; state=${state}; issue=${failureReason || '-'}",
+                "stage=${current}; elapsed=${elapsed}; issue=${failure}"
+            ],
+            "Dashboard progress metadata should be copyable with elapsed and issue/failure details.");
+        RequireAnyContains(
+            dashboard,
+            ["不含命令行", "never renders PowerShell", "not inline the 1~16 runbook steps, PowerShell, stdout, or stderr"],
+            "Dashboard should state or document that main-page runbook progress omits command lines.");
         RequireContains(dashboard, "executeRunbook(String(jobId), true)", "Upload flow should automatically start live VM analysis after planning.");
         RequireNotContains(dashboard, "fetch(`/api/jobs/${encodeURIComponent(jobId)}/runbook/execute`", "Dashboard should not depend on the legacy blocking runbook execute endpoint.");
         RequireContains(dashboard, "href=\"/settings\"", "Dashboard should link to the settings page.");

@@ -64,6 +64,8 @@ bool EmitDriverReadEvents(
     const Options& options,
     unsigned long long batchIndex,
     EventWriter& writer,
-    unsigned long long* eventsEmitted);
+    unsigned long long* eventsEmitted,
+    unsigned long long* recordsProcessed,
+    unsigned long long* collectorSuppressedEvents);
 
 } // namespace KSword::Sandbox::R0Collector

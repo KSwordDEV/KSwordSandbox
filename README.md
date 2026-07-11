@@ -94,6 +94,17 @@ template:
   -GuestWorkingDirectory 'C:\KSwordSandbox'
 ```
 
+Optional real-R0 lab wiring stays local:
+
+```powershell
+.\install.ps1 -Mode Change -UpdateHyperVConfig -DriverHostPath 'D:\Temp\KSwordSandbox\build\r0-driver\Release\KSword.Sandbox.Driver.sys'
+.\install.ps1 -Mode Change -QueryGuestTestSigning
+.\install.ps1 -Mode Change -EnableGuestTestSigning -RestartGuestAfterTestSigning -Force
+```
+
+`-DriverHostPath` records a local test-signed `.sys` path; it does not sign the
+driver. Test-signing commands affect only the configured guest VM.
+
 Check another computer's local readiness without changing state:
 
 ```powershell
@@ -134,6 +145,19 @@ elevated shell and automatically post-processes collected guest events into
 `report.json` / `report.html`. Use `-WhatIf` on `install.ps1` or `run.ps1` to
 preview local writes/startup without prompting for secrets, launching dotnet, or
 delegating Hyper-V live execution. See `docs/run.md`.
+
+Built-in one-command analysis shortcuts:
+
+```powershell
+.\run.ps1 -Mode Analyze -SamplePreset Notepad
+.\run.ps1 -Mode Analyze -SamplePreset HarmlessSample
+.\run.ps1 -Mode Analyze -SamplePreset Notepad -Live
+```
+
+中文提示：不加 `-Live` 时 `Analyze` 只生成计划，不启动、不还原、不停止 VM。
+`HarmlessSample` 会发布到 `D:\Temp\KSwordSandbox\samples\...` 或配置的
+`RuntimeRoot` 下，保持在仓库外。`run.ps1` 不在命令行提示明文密码，只镜像本机
+Process/User/Machine 环境中的 secret 给子进程。
 
 Build the native x64 collector and driver skeleton from the main solution:
 
@@ -219,9 +243,8 @@ The R0 driver is expected to be built as an unsigned local artifact by default.
 Only optional real-driver VM validation should test-sign the `.sys` outside this
 repository with Windows test mode and a local test certificate, then copy or
 stage it into the guest. The guest agent can ingest driver events from JSON Lines
-at the configured path. The v1 scaffold does not copy the full
-`D:\Projects\Ksword5.1` tree and does not commit driver binaries or signing
-material.
+at the configured path. The v1 scaffold does not copy an external KSword source
+tree and does not commit driver binaries or signing material.
 
 The initial R0 source path now contains a WDK control-device skeleton under
 `driver/KSword.Sandbox.Driver/` and a user-mode JSONL bridge skeleton under

@@ -315,8 +315,9 @@ internal sealed class GuestArtifactWriter
             CreateCollection(descriptors, events, "driver-events", ArtifactKind.DriverEventsJsonLines, "telemetry", "driver-events",
                 FirstRelativePath(descriptors, "driver-events") ?? "driver-events.jsonl",
                 options.DriverEventsRequested || descriptors.Any(artifact => string.Equals(artifact.CollectionName, "driver-events", StringComparison.OrdinalIgnoreCase)),
-                implemented: true, capturedEventPrefixes: ["driver.event", "driver.events", "r0collector.exited"],
-                skippedEventPrefixes: ["driver.events.missing", "r0collector.failed"], reasonWhenDisabled: "driverEventsNotRequested"),
+                implemented: true, capturedEventPrefixes: ["driver.load", "driver.process", "driver.file", "driver.registry", "driver.network", "driver.event", "driver.parse_error", "image.load", "r0collector.driver", "r0collector.exited"],
+                skippedEventPrefixes: ["driver.events.missing", "r0collector.failed"], reasonWhenDisabled: "driverEventsNotRequested",
+                failedEventPrefixes: ["driver.read_error"]),
             CreateCollection(descriptors, events, "r0-logs", ArtifactKind.Log, "log", "diagnostic-log",
                 FirstRelativePath(descriptors, "r0-logs") ?? "r0collector.stdout.log",
                 options.R0CollectorRequested || descriptors.Any(artifact => string.Equals(artifact.CollectionName, "r0-logs", StringComparison.OrdinalIgnoreCase)),
@@ -504,6 +505,18 @@ internal sealed class GuestArtifactWriter
             if (!string.IsNullOrWhiteSpace(normalized))
             {
                 yield return normalized;
+            }
+        }
+
+        foreach (var key in new[] { "driverEventsPath", "stdoutPath", "stderrPath", "jsonlPath" })
+        {
+            if (evt.Data.TryGetValue(key, out var eventPath) && !string.IsNullOrWhiteSpace(eventPath))
+            {
+                var relativePath = TryGetRelativePath(outputDirectory, eventPath);
+                if (!string.IsNullOrWhiteSpace(relativePath))
+                {
+                    yield return relativePath;
+                }
             }
         }
     }

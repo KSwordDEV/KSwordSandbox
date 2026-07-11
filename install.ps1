@@ -265,10 +265,10 @@ function Read-GuestPassword {
     }
 
     Write-Host ''
-    Write-Host 'Guest password option:'
-    Write-Host '  1) Generate a new random password and store it locally'
-    Write-Host '  2) Type the existing VM SandboxUser password'
-    $choice = Read-MenuChoice -Prompt 'Choose [1-2]' -Allowed @('1', '2')
+    Write-Host 'Guest password option / 来宾密码选项:'
+    Write-Host '  1) Generate a new random password and store it locally（生成随机密码并仅保存在本机）'
+    Write-Host '  2) Type the existing VM SandboxUser password（输入 VM 中现有 SandboxUser 密码）'
+    $choice = Read-MenuChoice -Prompt 'Choose [1-2] / 请选择 [1-2]' -Allowed @('1', '2')
     if ($choice -eq '1') {
         return [pscustomobject]@{
             Password = New-RandomPassword
@@ -741,14 +741,15 @@ function Read-OptionalText {
 }
 
 function Invoke-HyperVConfigPrompt {
-    $script:VmName = Read-OptionalText -Prompt 'Hyper-V golden VM name' -CurrentValue $VmName
-    $script:CheckpointName = Read-OptionalText -Prompt 'Clean checkpoint name' -CurrentValue $CheckpointName
-    $script:GuestUserName = Read-OptionalText -Prompt 'Guest username' -CurrentValue $GuestUserName
-    $script:GuestWorkingDirectory = Read-OptionalText -Prompt 'Guest working directory' -CurrentValue $GuestWorkingDirectory
-    $script:RuntimeRoot = Read-OptionalText -Prompt 'Host runtime root' -CurrentValue $RuntimeRoot
-    $script:GuestPayloadRoot = Read-OptionalText -Prompt 'Host guest payload root' -CurrentValue $GuestPayloadRoot
-    $script:DriverHostPath = Read-OptionalText -Prompt 'Host R0 driver .sys path (blank = auto-detect/none)' -CurrentValue (Resolve-DriverHostPath)
-    $script:LocalConfigPath = Read-OptionalText -Prompt 'Local sandbox config path' -CurrentValue (Get-LocalSandboxConfigPath)
+    Write-InstallInfo '中文提示：配置只写入本机状态和本机 sandbox.local.json；不会把 VM 名称、密码或本机路径写入 git。'
+    $script:VmName = Read-OptionalText -Prompt 'Hyper-V golden VM name / Hyper-V 黄金 VM 名称' -CurrentValue $VmName
+    $script:CheckpointName = Read-OptionalText -Prompt 'Clean checkpoint name / 干净快照名称' -CurrentValue $CheckpointName
+    $script:GuestUserName = Read-OptionalText -Prompt 'Guest username / 来宾用户名' -CurrentValue $GuestUserName
+    $script:GuestWorkingDirectory = Read-OptionalText -Prompt 'Guest working directory / 来宾工作目录' -CurrentValue $GuestWorkingDirectory
+    $script:RuntimeRoot = Read-OptionalText -Prompt 'Host runtime root / 宿主机运行目录' -CurrentValue $RuntimeRoot
+    $script:GuestPayloadRoot = Read-OptionalText -Prompt 'Host guest payload root / 宿主机 guest payload 目录' -CurrentValue $GuestPayloadRoot
+    $script:DriverHostPath = Read-OptionalText -Prompt 'Host R0 driver .sys path (blank = auto-detect/none) / 宿主机 R0 驱动 .sys 路径（留空=自动检测/不配置）' -CurrentValue (Resolve-DriverHostPath)
+    $script:LocalConfigPath = Read-OptionalText -Prompt 'Local sandbox config path / 本机 sandbox 配置路径' -CurrentValue (Get-LocalSandboxConfigPath)
     Set-HyperVConfigState
 }
 
@@ -772,17 +773,18 @@ function Invoke-GuestVmPasswordReset {
     if ($Mode -eq 'Interactive') {
         Write-Host ''
         Write-Host "This will restore checkpoint '$CheckpointName', mount the VM disk, boot '$VmName', reset '$GuestUserName', validate PowerShell Direct, and refresh the checkpoint."
-        $continue = Read-MenuChoice -Prompt 'Continue actual VM password reset? [y/n]' -Allowed @('y', 'Y', 'n', 'N')
+        Write-Host "中文提示：这会操作 Hyper-V VM 和快照；密码值不会显示，完成后宿主机 secret 与 VM 来宾密码保持一致。"
+        $continue = Read-MenuChoice -Prompt 'Continue actual VM password reset? [y/n] / 继续重置 VM 来宾密码？[y/n]' -Allowed @('y', 'Y', 'n', 'N')
         if ($continue -in @('n', 'N')) {
             Write-InstallInfo 'Actual VM password reset cancelled.'
             return
         }
 
         Write-Host ''
-        Write-Host 'Actual VM password option:'
-        Write-Host '  1) Generate a new random password inside the reset script'
-        Write-Host '  2) Prompt for a new VM password inside the reset script'
-        $passwordChoice = Read-MenuChoice -Prompt 'Choose [1-2]' -Allowed @('1', '2')
+        Write-Host 'Actual VM password option / VM 实际密码选项:'
+        Write-Host '  1) Generate a new random password inside the reset script（在重置脚本中生成随机密码）'
+        Write-Host '  2) Prompt for a new VM password inside the reset script（在重置脚本中提示输入新密码）'
+        $passwordChoice = Read-MenuChoice -Prompt 'Choose [1-2] / 请选择 [1-2]' -Allowed @('1', '2')
         $usePromptPassword = ($passwordChoice -eq '2')
     }
     elseif (-not $Force) {
@@ -977,7 +979,10 @@ function Show-KSwordSandboxInstallStatus {
         PayloadGuidance = ".\scripts\Prepare-GuestPayload.ps1 -RepoRoot . -PayloadRoot '$GuestPayloadRoot' -GuestWorkingDirectory '$GuestWorkingDirectory' -SelfContained"
         VmGuidance = ".\install.ps1 -Mode Change -UpdateHyperVConfig -VmName <existing VM> -CheckpointName <checkpoint>"
         CheckpointGuidance = ".\install.ps1 -Mode Change -UpdateHyperVConfig -VmName '$VmName' -CheckpointName <checkpoint>"
+        DriverHostPathGuidance = '.\install.ps1 -Mode Change -UpdateHyperVConfig -DriverHostPath <test-signed .sys>'
+        GuestTestSigningGuidance = '.\install.ps1 -Mode Change -QueryGuestTestSigning; .\install.ps1 -Mode Change -EnableGuestTestSigning -RestartGuestAfterTestSigning -Force'
         ReadinessGuidance = '.\scripts\Test-HyperVReadiness.ps1'
+        ChineseGuidance = '中文提示：Status/CheckEnvironment 不打印密码值，不启动/还原 VM；RecommendedActions 给出下一步修复命令。'
         RecommendedActions = @($recommendedActions.ToArray())
         SecretValuePrinted = $false
     }
@@ -1004,6 +1009,11 @@ function Show-KSwordSandboxEnvironmentCheck {
         CheckEnvironmentCommand = '.\install.ps1 -Mode CheckEnvironment'
         ReadinessCommand = '.\scripts\Test-HyperVReadiness.ps1'
         PlanOnlyCommand = '.\run.ps1 -Mode Plan -SamplePath <sample.exe>'
+        AnalyzeNotepadCommand = '.\run.ps1 -Mode Analyze -SamplePreset Notepad'
+        AnalyzeHarmlessSampleCommand = '.\run.ps1 -Mode Analyze -SamplePreset HarmlessSample'
+        ConfigureDriverHostPathCommand = '.\install.ps1 -Mode Change -UpdateHyperVConfig -DriverHostPath <test-signed .sys>'
+        GuestTestSigningQueryCommand = '.\install.ps1 -Mode Change -QueryGuestTestSigning'
+        GuestTestSigningEnableCommand = '.\install.ps1 -Mode Change -EnableGuestTestSigning -RestartGuestAfterTestSigning -Force'
         WebUiUrl = $WebUiUrl
         RunScriptExists = Test-Path -LiteralPath $runScript -PathType Leaf
         ReadinessScriptExists = Test-Path -LiteralPath $readinessScript -PathType Leaf
@@ -1019,6 +1029,7 @@ function Show-KSwordSandboxEnvironmentCheck {
         PlanOnlyStartsVm = $false
         LiveVmExecutionRequiresExplicitLive = $true
         SecretValuePrinted = $false
+        ChineseGuidance = '中文提示：先用本命令查看缺口；配置 VM/快照/guest 密码/driver path/test signing 后，再用 run.ps1 的 Analyze 命令。'
         InstallStatus = $installStatus
     }
 }
@@ -1127,11 +1138,12 @@ function Invoke-GuestTestSigningMode {
     if ($TestSigningMode -ne 'Query' -and $Mode -eq 'Interactive') {
         Write-Host ''
         Write-Host "This will run bcdedit /set testsigning $($TestSigningMode.ToLowerInvariant()) inside '$VmName'."
+        Write-Host '中文提示：test signing 是 VM 内部开关，仅用于隔离实验环境中的测试签名驱动；不会签名驱动文件。'
         if ($RestartAfterChange) {
-            Write-Host 'The guest may reboot if the state changes.'
+            Write-Host 'The guest may reboot if the state changes. / 如果状态变化，来宾系统可能会重启。'
         }
 
-        $continue = Read-MenuChoice -Prompt 'Continue guest test-signing change? [y/n]' -Allowed @('y', 'Y', 'n', 'N')
+        $continue = Read-MenuChoice -Prompt 'Continue guest test-signing change? [y/n] / 继续修改来宾 test signing？[y/n]' -Allowed @('y', 'Y', 'n', 'N')
         if ($continue -in @('n', 'N')) {
             Write-InstallInfo 'Guest test-signing change cancelled.'
             return
@@ -1171,13 +1183,13 @@ function Invoke-GuestTestSigningMode {
 function Invoke-GuestTestSigningMenu {
     while ($true) {
         Write-Host ''
-        Write-Host 'Guest test-signing options:'
-        Write-Host '  1) Query current guest test-signing state'
-        Write-Host '  2) Enable guest test-signing'
-        Write-Host '  3) Enable guest test-signing and reboot guest if changed'
-        Write-Host '  4) Disable guest test-signing'
-        Write-Host '  5) Back'
-        $choice = Read-MenuChoice -Prompt 'Choose [1-5]' -Allowed @('1', '2', '3', '4', '5')
+        Write-Host 'Guest test-signing options / 来宾 test signing 选项:'
+        Write-Host '  1) Query current guest test-signing state（查询当前状态）'
+        Write-Host '  2) Enable guest test-signing（启用）'
+        Write-Host '  3) Enable guest test-signing and reboot guest if changed（启用并在变化时重启来宾）'
+        Write-Host '  4) Disable guest test-signing（禁用）'
+        Write-Host '  5) Back（返回）'
+        $choice = Read-MenuChoice -Prompt 'Choose [1-5] / 请选择 [1-5]' -Allowed @('1', '2', '3', '4', '5')
         switch ($choice) {
             '1' { Invoke-GuestTestSigningMode -TestSigningMode Query }
             '2' { Invoke-GuestTestSigningMode -TestSigningMode Enable }
@@ -1191,11 +1203,11 @@ function Invoke-GuestTestSigningMenu {
 function Invoke-GuestPasswordMenu {
     while ($true) {
         Write-Host ''
-        Write-Host 'Guest password options:'
-        Write-Host '  1) Reset host-side password secret only'
-        Write-Host '  2) Reset actual VM guest password (elevated, explicit confirmation)'
-        Write-Host '  3) Back'
-        $choice = Read-MenuChoice -Prompt 'Choose [1-3]' -Allowed @('1', '2', '3')
+        Write-Host 'Guest password options / 来宾密码选项:'
+        Write-Host '  1) Reset host-side password secret only（仅重置宿主机保存的 secret）'
+        Write-Host '  2) Reset actual VM guest password (elevated, explicit confirmation)（重置 VM 内实际密码，需要管理员和确认）'
+        Write-Host '  3) Back（返回）'
+        $choice = Read-MenuChoice -Prompt 'Choose [1-3] / 请选择 [1-3]' -Allowed @('1', '2', '3')
         switch ($choice) {
             '1' { Reset-GuestPasswordSecret }
             '2' { Invoke-GuestVmPasswordReset }
@@ -1207,18 +1219,18 @@ function Invoke-GuestPasswordMenu {
 function Invoke-ChangeMenu {
     while ($true) {
         Write-Host ''
-        Write-Host 'Change options:'
-        Write-Host '  1) Reset password secret'
-        Write-Host '  2) Reset actual VM guest password'
-        Write-Host '  3) Change Hyper-V VM/checkpoint/guest paths'
-        Write-Host '  4) Change recorded guest username'
-        Write-Host '  5) Recreate runtime folders and local config'
-        Write-Host '  6) Show Hyper-V readiness/status'
-        Write-Host '  7) Manage guest test-signing'
-        Write-Host '  8) Configure optional VirusTotal API key'
-        Write-Host '  9) Check local environment'
-        Write-Host '  10) Back'
-        $choice = Read-MenuChoice -Prompt 'Choose [1-10]' -Allowed @('1', '2', '3', '4', '5', '6', '7', '8', '9', '10')
+        Write-Host 'Change options: / 更改选项:'
+        Write-Host '  1) Reset password secret（重置宿主机 guest 密码 secret）'
+        Write-Host '  2) Reset actual VM guest password（重置 VM 中实际来宾密码）'
+        Write-Host '  3) Change Hyper-V VM/checkpoint/guest paths（配置黄金 VM、干净快照、来宾路径）'
+        Write-Host '  4) Change recorded guest username（更改记录的来宾用户名）'
+        Write-Host '  5) Recreate runtime folders and local config（重建运行目录和本机配置）'
+        Write-Host '  6) Show Hyper-V readiness/status（查看 Hyper-V 就绪状态）'
+        Write-Host '  7) Manage guest test-signing（管理来宾 test signing）'
+        Write-Host '  8) Configure optional VirusTotal API key（配置可选 VT key）'
+        Write-Host '  9) Check local environment（检查本机环境）'
+        Write-Host '  10) Back（返回）'
+        $choice = Read-MenuChoice -Prompt 'Choose [1-10] / 请选择 [1-10]' -Allowed @('1', '2', '3', '4', '5', '6', '7', '8', '9', '10')
         switch ($choice) {
             '1' { Reset-GuestPasswordSecret }
             '2' { Invoke-GuestVmPasswordReset }
@@ -1240,25 +1252,25 @@ function Invoke-ChangeMenu {
 function Invoke-InteractiveInstaller {
     while ($true) {
         Write-Host ''
-        Write-Host 'KSwordSandbox local installer'
-        Write-Host '  1) Install / prepare local settings'
-        Write-Host '  2) Change settings'
-        Write-Host '  3) Uninstall local settings'
-        Write-Host '  4) Reset Guest password'
-        Write-Host '  5) Configure Hyper-V'
-        Write-Host '  6) Configure VT key'
-        Write-Host '  7) Check environment'
-        Write-Host '  8) Start WebUI'
-        Write-Host '  9) Status'
-        Write-Host '  10) Exit'
-        $choice = Read-MenuChoice -Prompt 'Choose [1-10]' -Allowed @('1', '2', '3', '4', '5', '6', '7', '8', '9', '10')
+        Write-Host 'KSwordSandbox local installer / 本地安装向导'
+        Write-Host '  1) Install / prepare local settings（安装/准备本机设置）'
+        Write-Host '  2) Change settings（更改设置）'
+        Write-Host '  3) Uninstall local settings（卸载本机设置）'
+        Write-Host '  4) Reset Guest password（重置来宾密码/secret）'
+        Write-Host '  5) Configure Hyper-V（配置 Hyper-V 黄金 VM/快照）'
+        Write-Host '  6) Configure VT key（配置可选 VT key）'
+        Write-Host '  7) Check environment（检查环境）'
+        Write-Host '  8) Start WebUI（启动 WebUI）'
+        Write-Host '  9) Status（状态）'
+        Write-Host '  10) Exit（退出）'
+        $choice = Read-MenuChoice -Prompt 'Choose [1-10] / 请选择 [1-10]' -Allowed @('1', '2', '3', '4', '5', '6', '7', '8', '9', '10')
         switch ($choice) {
             '1' {
                 Write-Host ''
-                Write-Host 'Install password handling:'
-                Write-Host '  1) Set/reset password now'
-                Write-Host '  2) Prepare folders only'
-                $installChoice = Read-MenuChoice -Prompt 'Choose [1-2]' -Allowed @('1', '2')
+                Write-Host 'Install password handling / 安装时密码处理:'
+                Write-Host '  1) Set/reset password now（现在设置/重置 guest password secret）'
+                Write-Host '  2) Prepare folders only（仅准备目录和本机配置）'
+                $installChoice = Read-MenuChoice -Prompt 'Choose [1-2] / 请选择 [1-2]' -Allowed @('1', '2')
                 Install-KSwordSandboxLocal -SetPassword:($installChoice -eq '1')
             }
             '2' { Invoke-ChangeMenu }
