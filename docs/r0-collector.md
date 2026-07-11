@@ -103,8 +103,9 @@ Initial IOCTLs:
   - Input: none.
   - Output: `KSWORD_SANDBOX_STATUS_REPLY`.
   - Purpose: Queue and status counters, lifecycle state, `ProducerEnableMask`,
-    `ActiveProducerMask`, `FailedProducerMask`, `TotalEventsSuppressed`, queue
-    capacity, high watermark, and last NTSTATUS.
+    `ActiveProducerMask`, `FailedProducerMask`, `TotalEventsSuppressed`,
+    `TotalEventsBackpressured`, producer dropped/suppressed/backpressure masks,
+    queue capacity, high watermark, and last NTSTATUS.
 - `IOCTL_KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK`
   - Input: `KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK_REQUEST`.
   - Output: `KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK_REPLY`.
@@ -124,10 +125,13 @@ size for later diagnostics.
 These rows preserve queue depth/capacity, high watermark, `ProducerEnableMask`,
 `SupportedProducerMask`, `ActiveProducerMask`, `FailedProducerMask`,
 `TotalEventsEnqueued`, `TotalEventsDropped`, `TotalEventsRead`,
-`TotalEventsSuppressed`, `NextSequence`, and `LastNtStatus`.  The JSON field
-names are `activeProducerMask`, `activeProducerMaskHex`,
+`TotalEventsSuppressed`, `TotalEventsBackpressured`, `ProducerDroppedMask`,
+`ProducerSuppressedMask`, `ProducerBackpressureMask`, `NextSequence`, and
+`LastNtStatus`.  The JSON field names are `activeProducerMask`,
+`activeProducerMaskHex`,
 `activeProducerMaskNames`, `failedProducerMask`, `failedProducerMaskHex`, and
-`failedProducerMaskNames`.
+`failedProducerMaskNames`; producer loss masks also emit decimal, hex, and
+name forms.
 
 The active/failed producer masks are published without an ABI minor bump by
 using the previously unused reserved/alignment space in
@@ -455,8 +459,9 @@ Important `r0collector.abiSelfCheck` evidence fields:
   record.
 - `queueLossEvidence`: names the diagnostic fields that must be preserved for
   lost-record analysis: `TotalEventsDropped`, `EventsDropped`,
-  `TotalEventsSuppressed`, `NextSequence`, per-event `sequence`, and
-  `QueueHighWatermark`.
+  `TotalEventsSuppressed`, `TotalEventsBackpressured`, `ProducerDroppedMask`,
+  `ProducerSuppressedMask`, `ProducerBackpressureMask`, `NextSequence`,
+  per-event `sequence`, and `QueueHighWatermark`.
 
 Treat `--abi-self-check` as a cheap preflight. It proves the collector and public
 headers agree about ABI/event-quality assumptions, but it does not prove that the
@@ -620,8 +625,12 @@ Required synthetic coverage:
 - Queue overflow/loss evidence: status and batch rows include
   `QueueHighWatermark`/`queueHighWatermark`, `TotalEventsDropped`/
   `totalEventsDropped`, `eventsDropped`, `TotalEventsSuppressed`,
-  `nextSequence`, and per-driver-row `sequence` so lost records can be
-  diagnosed from counters and gaps.
+  `TotalEventsBackpressured`/`totalEventsBackpressured`,
+  `ProducerDroppedMask`/`producerDroppedMask`,
+  `ProducerSuppressedMask`/`producerSuppressedMask`,
+  `ProducerBackpressureMask`/`producerBackpressureMask`, `nextSequence`, and
+  per-driver-row `sequence` so lost records can be diagnosed from counters and
+  gaps.
 - Noise evidence: blank, truncated, malformed, and extra-field JSONL rows are
   expected in the corpus. Import keeps malformed rows as `driver.parse_error`;
   live display skips or defers bad partial rows without dropping valid rows.
@@ -639,7 +648,10 @@ Required synthetic coverage:
 Backpressure is intentionally non-blocking. Kernel producers should not wait on
 collector throughput. If the fixed ring overflows, the oldest unread records can
 be overwritten and the collector must surface the loss through
-`TotalEventsDropped`, `EventsDropped`, `NextSequence`, and `sequence` gaps.
+`TotalEventsDropped`, `EventsDropped`, `ProducerDroppedMask`, `NextSequence`,
+and `sequence` gaps. If the ring is merely under pressure but not yet full,
+`TotalEventsBackpressured` and `ProducerBackpressureMask` identify the producer
+families observed while the queue was above the threshold.
 
 ## R0Collector stress/readiness operator gate
 
@@ -677,12 +689,14 @@ stay stable in docs, the readiness script, and smoke tests:
   non-zero gaps when queue-loss counters also prove overflow.
 - `StressJsonlLossEvidence`: the loss fields that must be preserved in JSONL:
   `TotalEventsDropped`, `totalEventsDropped`, `EventsDropped`,
-  `eventsDropped`, `NextSequence`, `nextSequence`, and per-driver-row
-  `sequence`.
+  `eventsDropped`, `ProducerDroppedMask`, `producerDroppedMask`,
+  `NextSequence`, `nextSequence`, and per-driver-row `sequence`.
 - `StressJsonlBackpressureEvidence`: the queue-pressure fields that prove
   non-blocking behavior: `QueueCapacity`, `queueCapacity`,
-  `QueueHighWatermark`, `queueHighWatermark`, `drainStoppedAtBatchLimit`,
-  `requestedMaxEvents`, `readEventsMaxEvents`, and `maxReadBatches`.
+  `QueueHighWatermark`, `queueHighWatermark`, `TotalEventsBackpressured`,
+  `totalEventsBackpressured`, `ProducerBackpressureMask`,
+  `producerBackpressureMask`, `drainStoppedAtBatchLimit`, `requestedMaxEvents`,
+  `readEventsMaxEvents`, and `maxReadBatches`.
 - `ReadinessNoDevicePolicy`: default readiness emits only static/no-device
   evidence and must set `OpensDevice=false`, `LoadsDriver=false`, and
   `CallsCSignTool=false` for the ABI self-check row.

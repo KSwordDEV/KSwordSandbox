@@ -232,6 +232,7 @@ KswPushEvent(
 
     if ((DeviceExtension->ProducerEnableMask & producerMask) == 0) {
         DeviceExtension->EventsSuppressed++;
+        DeviceExtension->ProducerSuppressedMask |= producerMask;
         KeReleaseSpinLock(&DeviceExtension->StateLock, oldIrql);
         return STATUS_CANCELLED;
     }
@@ -244,6 +245,7 @@ KswPushEvent(
             KswAdvanceEventRingIndex(DeviceExtension->EventReadIndex);
         DeviceExtension->EventCount--;
         DeviceExtension->EventsDropped++;
+        DeviceExtension->ProducerDroppedMask |= producerMask;
     }
 
     DeviceExtension->EventRing[DeviceExtension->EventWriteIndex] = eventRecord;
@@ -254,6 +256,11 @@ KswPushEvent(
     DeviceExtension->TotalEventsQueued++;
     if (DeviceExtension->EventCount > DeviceExtension->QueueHighWatermark) {
         DeviceExtension->QueueHighWatermark = DeviceExtension->EventCount;
+    }
+    if (DeviceExtension->EventCount >=
+        KSWORD_SANDBOX_EVENT_RING_BACKPRESSURE_THRESHOLD) {
+        DeviceExtension->EventsBackpressured++;
+        DeviceExtension->ProducerBackpressureMask |= producerMask;
     }
     if (NT_SUCCESS(DeviceExtension->LastStatus)) {
         DeviceExtension->LastStatus = STATUS_SUCCESS;
@@ -321,6 +328,7 @@ KswInitializeDeviceExtension(
     DeviceExtension->EventsDropped = 0;
     DeviceExtension->EventsRead = 0;
     DeviceExtension->EventsSuppressed = 0;
+    DeviceExtension->EventsBackpressured = 0;
     DeviceExtension->NextSequence = 1;
     DeviceExtension->LastStatus = STATUS_SUCCESS;
     DeviceExtension->LastFailureStatus = STATUS_SUCCESS;
@@ -328,6 +336,9 @@ KswInitializeDeviceExtension(
     DeviceExtension->SupportedProducerMask = KSWORD_SANDBOX_PRODUCER_MASK_CURRENT;
     DeviceExtension->ActiveProducerMask = KSWORD_SANDBOX_PRODUCER_FLAG_DRIVER;
     DeviceExtension->FailedProducerMask = 0;
+    DeviceExtension->ProducerDroppedMask = 0;
+    DeviceExtension->ProducerSuppressedMask = 0;
+    DeviceExtension->ProducerBackpressureMask = 0;
     DeviceExtension->QueueHighWatermark = 0;
 
     KeInitializeSpinLock(&DeviceExtension->StateLock);
@@ -358,6 +369,7 @@ KswSnapshotState(
     Snapshot->EventsDropped = DeviceExtension->EventsDropped;
     Snapshot->EventsRead = DeviceExtension->EventsRead;
     Snapshot->EventsSuppressed = DeviceExtension->EventsSuppressed;
+    Snapshot->EventsBackpressured = DeviceExtension->EventsBackpressured;
     Snapshot->NextSequence = KswGetNextReadableSequenceLocked(DeviceExtension);
     Snapshot->LastStatus = DeviceExtension->LastStatus;
     Snapshot->LastFailureStatus = DeviceExtension->LastFailureStatus;
@@ -365,6 +377,9 @@ KswSnapshotState(
     Snapshot->SupportedProducerMask = DeviceExtension->SupportedProducerMask;
     Snapshot->ActiveProducerMask = DeviceExtension->ActiveProducerMask;
     Snapshot->FailedProducerMask = DeviceExtension->FailedProducerMask;
+    Snapshot->ProducerDroppedMask = DeviceExtension->ProducerDroppedMask;
+    Snapshot->ProducerSuppressedMask = DeviceExtension->ProducerSuppressedMask;
+    Snapshot->ProducerBackpressureMask = DeviceExtension->ProducerBackpressureMask;
     Snapshot->QueueCapacity = KSWORD_SANDBOX_EVENT_RING_CAPACITY;
     Snapshot->EventCount = DeviceExtension->EventCount;
     Snapshot->QueueHighWatermark = DeviceExtension->QueueHighWatermark;

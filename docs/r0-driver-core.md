@@ -105,7 +105,10 @@ remove events that were already queued.
 - `Flags`: includes `KSWORD_SANDBOX_STATUS_FLAG_HAS_EVENTS`,
   `KSWORD_SANDBOX_STATUS_FLAG_PRODUCERS_PARTIAL`,
   `KSWORD_SANDBOX_STATUS_FLAG_PRODUCERS_ALL_DISABLED`, and
-  `KSWORD_SANDBOX_STATUS_FLAG_LAST_STATUS_FAILURE`.
+  `KSWORD_SANDBOX_STATUS_FLAG_LAST_STATUS_FAILURE`. Queue pressure and loss are
+  surfaced through `KSWORD_SANDBOX_STATUS_FLAG_QUEUE_BACKPRESSURE`,
+  `KSWORD_SANDBOX_STATUS_FLAG_EVENTS_DROPPED`, and
+  `KSWORD_SANDBOX_STATUS_FLAG_EVENTS_SUPPRESSED`.
 - `QueueCapacity`: fixed ring slot capacity.
 - `QueueDepth`: currently unread event count.
 - `QueueHighWatermark`: highest observed queue depth since load.
@@ -118,6 +121,11 @@ remove events that were already queued.
 - `TotalEventsDropped`: overwrite count when the ring was full.
 - `TotalEventsRead`: records returned through `READ_EVENTS`.
 - `TotalEventsSuppressed`: records skipped by disabled producer bits.
+- `TotalEventsBackpressured`: records accepted while the queue was at or above
+  the backpressure threshold.
+- `ProducerDroppedMask`, `ProducerSuppressedMask`, and
+  `ProducerBackpressureMask`: producer-family bitmasks that explain which
+  producers caused loss, operator suppression, or high queue pressure.
 - `NextSequence`: oldest unread event sequence, or the next sequence that will
   be assigned when the queue is empty.
 
@@ -127,12 +135,16 @@ collectors do not need larger health/poll output buffers.
 
 ## Synthetic event-quality and backpressure contract
 
-The event ring is bounded and non-blocking. Producers must not wait on user-mode
-collector throughput. When the ring is full, the oldest unread record may be
-overwritten, `TotalEventsDropped` increases, and collectors can also derive loss
-from `EventsDropped`, `NextSequence`, and per-event `sequence` gaps. This is the
-R0 backpressure contract: preserve evidence of loss instead of blocking kernel
-callbacks or hiding overflow.
+The event ring is bounded and non-blocking. The default capacity is 1024 records,
+with build-time guard rails of 64..4096 slots. Producers must not wait on
+user-mode collector throughput. When the queue reaches the backpressure
+threshold, `TotalEventsBackpressured` and `ProducerBackpressureMask` preserve
+pressure evidence. When the ring is full, the oldest unread record may be
+overwritten, `TotalEventsDropped` and `ProducerDroppedMask` increase, and
+collectors can also derive loss from `EventsDropped`, `NextSequence`, and
+per-event `sequence` gaps. This is the R0 backpressure contract: preserve
+evidence of pressure/loss instead of blocking kernel callbacks or hiding
+overflow.
 
 Synthetic tests and manual stress runs should model all of the following without
 loading a real driver:
@@ -144,7 +156,9 @@ loading a real driver:
   decimal and `0x` forms, plus active/failed masks from `GET_STATUS`.
 - Queue pressure evidence: `QueueCapacity`, `QueueDepth`,
   `QueueHighWatermark`, `TotalEventsDropped`, `TotalEventsSuppressed`,
-  `EventsDropped`, `NextSequence`, and monotonic per-record `sequence` values.
+  `TotalEventsBackpressured`, `ProducerDroppedMask`,
+  `ProducerSuppressedMask`, `ProducerBackpressureMask`, `EventsDropped`,
+  `NextSequence`, and monotonic per-record `sequence` values.
 - Noise evidence: malformed JSONL rows must not abort import. Host/guest readers
   should preserve malformed collector lines as `driver.parse_error` evidence for
   report import and should skip or defer partial rows for live display.

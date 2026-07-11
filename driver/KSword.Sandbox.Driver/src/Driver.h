@@ -16,14 +16,36 @@
 #define KSWORD_SANDBOX_DEVICE_EXTENSION_SIGNATURE 0x4B535744UL
 
 /*
- * Fixed ring capacity for the initial READ_EVENTS skeleton.
+ * READ_EVENTS ring sizing.
  *
- * Inputs : used by the per-device extension's static EventRing array.
+ * Inputs : KSWORD_SANDBOX_EVENT_RING_CAPACITY may be overridden at build time
+ *          for stress runs; the default is sized for bursty file/registry/image
+ *          telemetry without materially increasing non-paged pool pressure.
  * Logic  : keeping the array inside the IoCreateDevice extension places it in
- *          non-paged kernel memory and avoids dynamic allocation in dispatch.
- * Return : not applicable; future event producers can raise this cautiously.
+ *          non-paged kernel memory and avoids dynamic allocation in callbacks.
+ *          At the current 184-byte event record size, 1024 slots consume about
+ *          184 KiB of non-paged memory; the guard rails below prevent accidental
+ *          multi-megabyte lab builds.
+ * Return : not applicable.
  */
-#define KSWORD_SANDBOX_EVENT_RING_CAPACITY 64UL
+#if !defined(KSWORD_SANDBOX_EVENT_RING_CAPACITY)
+#define KSWORD_SANDBOX_EVENT_RING_CAPACITY 1024UL
+#endif
+
+#define KSWORD_SANDBOX_EVENT_RING_CAPACITY_MINIMUM 64UL
+#define KSWORD_SANDBOX_EVENT_RING_CAPACITY_MAXIMUM 4096UL
+#define KSWORD_SANDBOX_EVENT_RING_BACKPRESSURE_PERCENT 75UL
+#define KSWORD_SANDBOX_EVENT_RING_BACKPRESSURE_THRESHOLD \
+    ((KSWORD_SANDBOX_EVENT_RING_CAPACITY * \
+      KSWORD_SANDBOX_EVENT_RING_BACKPRESSURE_PERCENT) / 100UL)
+
+#if KSWORD_SANDBOX_EVENT_RING_CAPACITY < KSWORD_SANDBOX_EVENT_RING_CAPACITY_MINIMUM
+#error KSWORD_SANDBOX_EVENT_RING_CAPACITY is below the supported minimum.
+#endif
+
+#if KSWORD_SANDBOX_EVENT_RING_CAPACITY > KSWORD_SANDBOX_EVENT_RING_CAPACITY_MAXIMUM
+#error KSWORD_SANDBOX_EVENT_RING_CAPACITY is above the supported maximum.
+#endif
 
 /*
  * Local minifilter instance metadata.
@@ -72,6 +94,7 @@ typedef struct _KSWORD_SANDBOX_DEVICE_EXTENSION {
     ULONGLONG EventsDropped;
     ULONGLONG EventsRead;
     ULONGLONG EventsSuppressed;
+    ULONGLONG EventsBackpressured;
     ULONGLONG NextSequence;
     NTSTATUS LastStatus;
     NTSTATUS LastFailureStatus;
@@ -79,6 +102,10 @@ typedef struct _KSWORD_SANDBOX_DEVICE_EXTENSION {
     ULONG SupportedProducerMask;
     ULONG ActiveProducerMask;
     ULONG FailedProducerMask;
+    ULONG ProducerDroppedMask;
+    ULONG ProducerSuppressedMask;
+    ULONG ProducerBackpressureMask;
+    ULONG Reserved0;
     ULONG EventReadIndex;
     ULONG EventWriteIndex;
     ULONG EventCount;
@@ -101,6 +128,7 @@ typedef struct _KSWORD_SANDBOX_STATE_SNAPSHOT {
     ULONGLONG EventsDropped;
     ULONGLONG EventsRead;
     ULONGLONG EventsSuppressed;
+    ULONGLONG EventsBackpressured;
     ULONGLONG NextSequence;
     NTSTATUS LastStatus;
     NTSTATUS LastFailureStatus;
@@ -108,6 +136,9 @@ typedef struct _KSWORD_SANDBOX_STATE_SNAPSHOT {
     ULONG SupportedProducerMask;
     ULONG ActiveProducerMask;
     ULONG FailedProducerMask;
+    ULONG ProducerDroppedMask;
+    ULONG ProducerSuppressedMask;
+    ULONG ProducerBackpressureMask;
     ULONG QueueCapacity;
     ULONG EventCount;
     ULONG QueueHighWatermark;

@@ -115,6 +115,25 @@ KswBuildStatusFlags(
         flags |= KSWORD_SANDBOX_STATUS_FLAG_LAST_STATUS_FAILURE;
     }
 
+    if (Snapshot->EventCount >=
+            KSWORD_SANDBOX_EVENT_RING_BACKPRESSURE_THRESHOLD ||
+        Snapshot->QueueHighWatermark >=
+            KSWORD_SANDBOX_EVENT_RING_BACKPRESSURE_THRESHOLD ||
+        Snapshot->EventsBackpressured != 0 ||
+        Snapshot->ProducerBackpressureMask != 0) {
+        flags |= KSWORD_SANDBOX_STATUS_FLAG_QUEUE_BACKPRESSURE;
+    }
+
+    if (Snapshot->EventsDropped != 0 ||
+        Snapshot->ProducerDroppedMask != 0) {
+        flags |= KSWORD_SANDBOX_STATUS_FLAG_EVENTS_DROPPED;
+    }
+
+    if (Snapshot->EventsSuppressed != 0 ||
+        Snapshot->ProducerSuppressedMask != 0) {
+        flags |= KSWORD_SANDBOX_STATUS_FLAG_EVENTS_SUPPRESSED;
+    }
+
     return flags;
 }
 
@@ -305,6 +324,10 @@ KswHandleGetStatus(
     reply->TotalEventsRead = snapshot.EventsRead;
     reply->TotalEventsSuppressed = snapshot.EventsSuppressed;
     reply->NextSequence = snapshot.NextSequence;
+    reply->TotalEventsBackpressured = snapshot.EventsBackpressured;
+    reply->ProducerDroppedMask = snapshot.ProducerDroppedMask;
+    reply->ProducerSuppressedMask = snapshot.ProducerSuppressedMask;
+    reply->ProducerBackpressureMask = snapshot.ProducerBackpressureMask;
 
     return KswCompleteIrp(Irp, STATUS_SUCCESS, sizeof(*reply));
 }

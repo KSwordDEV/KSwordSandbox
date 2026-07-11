@@ -168,6 +168,9 @@ typedef enum _KSWORD_SANDBOX_DRIVER_STATE {
 #define KSWORD_SANDBOX_STATUS_FLAG_PRODUCERS_PARTIAL      0x00000002U
 #define KSWORD_SANDBOX_STATUS_FLAG_PRODUCERS_ALL_DISABLED 0x00000004U
 #define KSWORD_SANDBOX_STATUS_FLAG_LAST_STATUS_FAILURE    0x00000008U
+#define KSWORD_SANDBOX_STATUS_FLAG_QUEUE_BACKPRESSURE     0x00000010U
+#define KSWORD_SANDBOX_STATUS_FLAG_EVENTS_DROPPED         0x00000020U
+#define KSWORD_SANDBOX_STATUS_FLAG_EVENTS_SUPPRESSED      0x00000040U
 
 #define KSWORD_SANDBOX_CAPABILITY_FLAG_GET_HEALTH             0x0000000000000001ULL
 #define KSWORD_SANDBOX_CAPABILITY_FLAG_POLL                   0x0000000000000002ULL
@@ -552,9 +555,9 @@ typedef struct _KSWORD_SANDBOX_CAPABILITIES_REPLY {
  * Logic  : The driver returns a stable lifecycle snapshot, current producer
  *          enable mask, active/failed producer registration masks, ring
  *          capacity/depth, and monotonic total counters for enqueued, read,
- *          dropped, and suppressed events.  ActiveProducerMask and
- *          FailedProducerMask occupy previously unused reserved/alignment space
- *          so the ABI 1.0 reply size remains stable for older collectors.
+ *          dropped, suppressed, and queue-backpressure events.  Producer loss
+ *          masks occupy previously unused reserved/alignment space so the ABI
+ *          1.0 reply size remains stable for older collectors.
  * Return : sizeof(KSWORD_SANDBOX_STATUS_REPLY) bytes on success.
  */
 typedef struct _KSWORD_SANDBOX_STATUS_REPLY {
@@ -575,7 +578,12 @@ typedef struct _KSWORD_SANDBOX_STATUS_REPLY {
     ULONGLONG TotalEventsRead;
     ULONGLONG TotalEventsSuppressed;
     ULONGLONG NextSequence;
-    ULONGLONG Reserved[4];
+    ULONGLONG TotalEventsBackpressured;
+    ULONG ProducerDroppedMask;
+    ULONG ProducerSuppressedMask;
+    ULONG ProducerBackpressureMask;
+    ULONG Reserved0;
+    ULONGLONG Reserved[1];
 } KSWORD_SANDBOX_STATUS_REPLY, *PKSWORD_SANDBOX_STATUS_REPLY;
 
 /*

@@ -20,6 +20,8 @@ internal sealed class R0CollectorEventQualityScenario : ISmokeTestScenario
     private const string AbiVersion = "65536";
     private const string AbiVersionHex = "0x00010000";
     private const string CurrentProducerMaskHex = "0x0000003F";
+    private const int ExpectedEventRingCapacity = 1024;
+    private const int ExpectedBackpressureQueueDepth = 768;
     private const int ExpectedStressDriverRows = 32;
     private const int StressJsonlSequenceStart = 1200;
     private const int StressJsonlSequenceEnd = StressJsonlSequenceStart + ExpectedStressDriverRows - 1;
@@ -146,6 +148,10 @@ internal sealed class R0CollectorEventQualityScenario : ISmokeTestScenario
             "TotalEventsDropped",
             "TotalEventsRead",
             "TotalEventsSuppressed",
+            "TotalEventsBackpressured",
+            "ProducerDroppedMask",
+            "ProducerSuppressedMask",
+            "ProducerBackpressureMask",
             "NextSequence");
         RequireStructFields(
             header,
@@ -415,8 +421,8 @@ internal sealed class R0CollectorEventQualityScenario : ISmokeTestScenario
                     ["StressJsonlSequenceStart"] = StressJsonlSequenceStart.ToString(),
                     ["StressJsonlSequenceEnd"] = StressJsonlSequenceEnd.ToString(),
                     ["StressJsonlSequenceGapCount"] = StressJsonlSequenceGapCount.ToString(),
-                    ["StressJsonlLossEvidence"] = "TotalEventsDropped|totalEventsDropped|EventsDropped|eventsDropped|NextSequence|nextSequence|sequence",
-                    ["StressJsonlBackpressureEvidence"] = "QueueCapacity|queueCapacity|QueueHighWatermark|queueHighWatermark|drainStoppedAtBatchLimit|requestedMaxEvents|readEventsMaxEvents|maxReadBatches",
+                    ["StressJsonlLossEvidence"] = "TotalEventsDropped|totalEventsDropped|EventsDropped|eventsDropped|ProducerDroppedMask|producerDroppedMask|NextSequence|nextSequence|sequence",
+                    ["StressJsonlBackpressureEvidence"] = "QueueCapacity|queueCapacity|QueueHighWatermark|queueHighWatermark|TotalEventsBackpressured|totalEventsBackpressured|ProducerBackpressureMask|producerBackpressureMask|drainStoppedAtBatchLimit|requestedMaxEvents|readEventsMaxEvents|maxReadBatches",
                     ["ReadinessNoDevicePolicy"] = "no-device",
                     ["ReadinessNonFatalPolicy"] = "warning"
                 }
@@ -430,7 +436,7 @@ internal sealed class R0CollectorEventQualityScenario : ISmokeTestScenario
                 {
                     ["version"] = AbiVersion,
                     ["versionHex"] = AbiVersionHex,
-                    ["size"] = "96",
+                    ["size"] = "104",
                     ["abiVersionMajor"] = "1",
                     ["abiVersionMinor"] = "0",
                     ["capabilityFlagsHex"] = "0x00000000000003FF",
@@ -441,7 +447,7 @@ internal sealed class R0CollectorEventQualityScenario : ISmokeTestScenario
                     ["eventSchemaVersionHex"] = AbiVersionHex,
                     ["eventHeaderVersion"] = AbiVersion,
                     ["eventMaxPayloadSize"] = "128",
-                    ["eventRingCapacity"] = "64",
+                    ["eventRingCapacity"] = ExpectedEventRingCapacity.ToString(),
                     ["readEventsReplyHeaderSize"] = "40"
                 }
             },
@@ -460,7 +466,7 @@ internal sealed class R0CollectorEventQualityScenario : ISmokeTestScenario
                     ["effectiveEnableMaskNames"] = "driver|process|file|registry"
                 }
             },
-            BuildStatusRow("beforeDrain", queueDepth: 64, highWatermark: 64, dropped: 7, suppressed: 3, nextSequence: 1200),
+            BuildStatusRow("beforeDrain", queueDepth: ExpectedBackpressureQueueDepth, highWatermark: ExpectedEventRingCapacity, dropped: 7, suppressed: 3, nextSequence: 1200),
             new()
             {
                 EventType = "r0collector.driverReadEvents",
@@ -523,7 +529,7 @@ internal sealed class R0CollectorEventQualityScenario : ISmokeTestScenario
             });
         }
 
-        events.Add(BuildStatusRow("afterDrain", queueDepth: 8, highWatermark: 64, dropped: 9, suppressed: 5, nextSequence: 1232));
+        events.Add(BuildStatusRow("afterDrain", queueDepth: 8, highWatermark: ExpectedEventRingCapacity, dropped: 9, suppressed: 5, nextSequence: 1232));
         return events;
     }
 
@@ -550,8 +556,8 @@ internal sealed class R0CollectorEventQualityScenario : ISmokeTestScenario
                 ["phase"] = phase,
                 ["version"] = AbiVersion,
                 ["versionHex"] = AbiVersionHex,
-                ["size"] = "104",
-                ["queueCapacity"] = "64",
+                ["size"] = "120",
+                ["queueCapacity"] = ExpectedEventRingCapacity.ToString(),
                 ["queueDepth"] = queueDepth.ToString(),
                 ["queueHighWatermark"] = highWatermark.ToString(),
                 ["producerEnableMaskHex"] = "0x0000001B",
@@ -563,6 +569,10 @@ internal sealed class R0CollectorEventQualityScenario : ISmokeTestScenario
                 ["totalEventsRead"] = (nextSequence - queueDepth).ToString(),
                 ["totalEventsSuppressed"] = suppressed.ToString(),
                 ["nextSequence"] = nextSequence.ToString(),
+                ["totalEventsBackpressured"] = highWatermark >= ExpectedBackpressureQueueDepth ? "1" : "0",
+                ["producerDroppedMaskHex"] = "0x00000008",
+                ["producerSuppressedMaskHex"] = "0x00000010",
+                ["producerBackpressureMaskHex"] = "0x00000018",
                 ["backpressureObserved"] = "true"
             }
         };
@@ -601,6 +611,13 @@ internal sealed class R0CollectorEventQualityScenario : ISmokeTestScenario
 
         var before = statusRows.First(evt => DataEquals(evt, "phase", "beforeDrain"));
         var after = statusRows.First(evt => DataEquals(evt, "phase", "afterDrain"));
+        SmokeAssert.True(
+            new[] { before, after }.All(evt =>
+                evt.Data.ContainsKey("totalEventsBackpressured") &&
+                evt.Data.ContainsKey("producerDroppedMaskHex") &&
+                evt.Data.ContainsKey("producerSuppressedMaskHex") &&
+                evt.Data.ContainsKey("producerBackpressureMaskHex")),
+            "Synthetic before/after status rows should preserve new producer loss/backpressure masks.");
         SmokeAssert.True(
             ToInt(after, "totalEventsDropped") >= ToInt(before, "totalEventsDropped"),
             "Dropped/lost event counter should be monotonic across status rows.");

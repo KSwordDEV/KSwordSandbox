@@ -60,6 +60,13 @@ internal sealed class R0DriverCoreContractScenario : ISmokeTestScenario
         RequireContains(header, "KSWORD_SANDBOX_PRODUCER_FLAG_NETWORK", "Header must expose network producer bit.");
         RequireContains(header, "QueueCapacity", "Status reply must include queue capacity.");
         RequireContains(header, "TotalEventsSuppressed", "Status reply must include suppressed-event counter.");
+        RequireContains(header, "TotalEventsBackpressured", "Status reply must include backpressure-event counter.");
+        RequireContains(header, "ProducerDroppedMask", "Status reply must include producer dropped mask.");
+        RequireContains(header, "ProducerSuppressedMask", "Status reply must include producer suppressed mask.");
+        RequireContains(header, "ProducerBackpressureMask", "Status reply must include producer backpressure mask.");
+        RequireContains(header, "KSWORD_SANDBOX_STATUS_FLAG_QUEUE_BACKPRESSURE", "Status flags must expose queue backpressure.");
+        RequireContains(header, "KSWORD_SANDBOX_STATUS_FLAG_EVENTS_DROPPED", "Status flags must expose dropped events.");
+        RequireContains(header, "KSWORD_SANDBOX_STATUS_FLAG_EVENTS_SUPPRESSED", "Status flags must expose suppressed events.");
         RequireContains(header, "KSWORD_SANDBOX_HEALTH_FLAG_PRODUCER_MASKS_AVAILABLE", "Health flags must advertise producer-mask fields.");
         RequireContains(header, "ProducerEnableMask", "Health/status replies must include producer enable mask.");
         RequireContains(header, "ActiveProducerMask", "Health/status replies must include active producer mask.");
@@ -73,11 +80,17 @@ internal sealed class R0DriverCoreContractScenario : ISmokeTestScenario
         RequireContains(dispatch, "KSWORD_SANDBOX_HEALTH_FLAG_PRODUCER_MASKS_AVAILABLE", "GET_HEALTH flags must expose producer-mask availability.");
         RequireContains(dispatch, "reply->ProducerEnableMask = snapshot.ProducerEnableMask", "GET_HEALTH must return producer enable mask.");
         RequireContains(dispatch, "reply->FailedProducerMask = snapshot.FailedProducerMask", "GET_HEALTH must return failed producer mask.");
+        RequireContains(dispatch, "reply->TotalEventsBackpressured = snapshot.EventsBackpressured", "GET_STATUS must return backpressure counter.");
+        RequireContains(dispatch, "reply->ProducerDroppedMask = snapshot.ProducerDroppedMask", "GET_STATUS must return producer dropped mask.");
+        RequireContains(dispatch, "KSWORD_SANDBOX_STATUS_FLAG_QUEUE_BACKPRESSURE", "GET_STATUS flags must classify backpressure.");
 
         RequireContains(queue, "KswGetProducerMaskForEventType", "Queue must map event types to producer bits.");
         RequireContains(queue, "ProducerEnableMask", "Queue must gate events by producer enable mask.");
         RequireContains(queue, "EventsSuppressed", "Queue must count suppressed producer events.");
         RequireContains(queue, "QueueHighWatermark", "Queue must track queue high watermark.");
+        RequireContains(queue, "ProducerDroppedMask", "Queue must record producer families that dropped events.");
+        RequireContains(queue, "ProducerSuppressedMask", "Queue must record producer families suppressed by the enable mask.");
+        RequireContains(queue, "ProducerBackpressureMask", "Queue must record producer families seen under backpressure.");
 
         RequireContains(abiGuards, "sizeof(KSWORD_SANDBOX_HEALTH_REPLY) == 80U", "ABI guards must pin GET_HEALTH reply size.");
         RequireContains(abiGuards, "FIELD_OFFSET(KSWORD_SANDBOX_HEALTH_REPLY, ProducerEnableMask)", "ABI guards must pin health producer-mask offsets.");

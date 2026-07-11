@@ -151,8 +151,8 @@ std::string BuildAbiSelfCheckData(const Options& options) {
     data.AddUtf8("jsonlNoisePolicy", "blank lines ignored by live reader; malformed lines preserved by host import as driver.parse_error; valid rows with extra fields tolerated");
     data.AddUtf8("jsonlMalformedPolicy", "collector never emits malformed rows except when --inject-jsonl-noise is explicitly requested; live readers skip malformed rows and host import preserves them as driver.parse_error evidence");
     data.AddUtf8("kernelBackpressurePolicy", "nonblocking producers; fixed ring overwrites oldest unread record on overflow");
-    data.AddUtf8("queueLossEvidence", "TotalEventsDropped|EventsDropped|TotalEventsSuppressed|NextSequence|sequence|queueHighWatermark");
-    data.AddUtf8("stableJsonlFields", "sequence|lost|backpressure|noise|selfNoise|selfNoiseReason|producer|producerCategory|eventOrigin|subjectKind|processIdSource|schema|eventSchemaName|eventSchemaVersion");
+    data.AddUtf8("queueLossEvidence", "TotalEventsDropped|EventsDropped|TotalEventsSuppressed|TotalEventsBackpressured|ProducerDroppedMask|ProducerSuppressedMask|ProducerBackpressureMask|NextSequence|sequence|queueHighWatermark");
+    data.AddUtf8("stableJsonlFields", "sequence|lost|backpressure|noise|selfNoise|selfNoiseReason|producer|producerCategory|eventOrigin|subjectKind|processIdSource|schema|eventSchemaName|eventSchemaVersion|producerDroppedMask|producerSuppressedMask|producerBackpressureMask");
     data.AddUtf8("collectorSelfCheckContract", "--abi-self-check emits this row and exits before CreateFileW/DeviceIoControl");
 
     return data.Build();

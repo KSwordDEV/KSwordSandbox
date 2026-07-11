@@ -156,6 +156,10 @@ KswDrainEventHeaders(
     DeviceExtension->EventsQueued = DeviceExtension->EventCount;
     DeviceExtension->EventsRead += *EventsWritten;
     DeviceExtension->EventsDropped += corruptRecordsDropped;
+    if (corruptRecordsDropped != 0) {
+        DeviceExtension->ProducerDroppedMask |=
+            KSWORD_SANDBOX_PRODUCER_FLAG_DRIVER;
+    }
 
     *EventsDropped = DeviceExtension->EventsDropped;
     *NextSequence = KswGetNextReadableSequenceLocked(DeviceExtension);

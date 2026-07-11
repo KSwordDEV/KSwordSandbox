@@ -182,6 +182,18 @@ std::string StatusFlagNames(const ULONG flags) {
         appendName("LastStatusFailure");
         knownFlags |= KSWORD_SANDBOX_STATUS_FLAG_LAST_STATUS_FAILURE;
     }
+    if ((flags & KSWORD_SANDBOX_STATUS_FLAG_QUEUE_BACKPRESSURE) != 0) {
+        appendName("QueueBackpressure");
+        knownFlags |= KSWORD_SANDBOX_STATUS_FLAG_QUEUE_BACKPRESSURE;
+    }
+    if ((flags & KSWORD_SANDBOX_STATUS_FLAG_EVENTS_DROPPED) != 0) {
+        appendName("EventsDropped");
+        knownFlags |= KSWORD_SANDBOX_STATUS_FLAG_EVENTS_DROPPED;
+    }
+    if ((flags & KSWORD_SANDBOX_STATUS_FLAG_EVENTS_SUPPRESSED) != 0) {
+        appendName("EventsSuppressed");
+        knownFlags |= KSWORD_SANDBOX_STATUS_FLAG_EVENTS_SUPPRESSED;
+    }
 
     const ULONG unknownFlags = flags & ~knownFlags;
     if (unknownFlags != 0) {
@@ -1735,11 +1747,16 @@ std::string BuildCapabilitiesData(const KSWORD_SANDBOX_CAPABILITIES_REPLY& reply
 // Return: JSON object text for SandboxEvent.data.
 std::string BuildStatusData(const KSWORD_SANDBOX_STATUS_REPLY& reply, const DWORD bytesReturned) {
     JsonDataObjectBuilder data;
-    const bool lost = reply.TotalEventsDropped != 0;
+    const bool lost = reply.TotalEventsDropped != 0 || reply.ProducerDroppedMask != 0;
     const bool atCapacity =
         reply.QueueCapacity != 0 &&
         (reply.QueueDepth >= reply.QueueCapacity || reply.QueueHighWatermark >= reply.QueueCapacity);
-    const bool backpressure = lost || atCapacity;
+    const bool backpressure =
+        lost ||
+        atCapacity ||
+        reply.TotalEventsBackpressured != 0 ||
+        reply.ProducerBackpressureMask != 0 ||
+        (reply.Flags & KSWORD_SANDBOX_STATUS_FLAG_QUEUE_BACKPRESSURE) != 0;
     data.AddUtf8("ioctl", "IOCTL_KSWORD_SANDBOX_GET_STATUS");
     data.AddUnsigned("ioctlCode", IOCTL_KSWORD_SANDBOX_GET_STATUS);
     data.AddUnsigned("bytesReturned", bytesReturned);
@@ -1779,6 +1796,16 @@ std::string BuildStatusData(const KSWORD_SANDBOX_STATUS_REPLY& reply, const DWOR
     data.AddUnsigned("totalEventsRead", reply.TotalEventsRead);
     data.AddUnsigned("totalEventsSuppressed", reply.TotalEventsSuppressed);
     data.AddUnsigned("nextSequence", reply.NextSequence);
+    data.AddUnsigned("totalEventsBackpressured", reply.TotalEventsBackpressured);
+    data.AddUnsigned("producerDroppedMask", reply.ProducerDroppedMask);
+    data.AddUtf8("producerDroppedMaskHex", HexUnsignedLongLong(reply.ProducerDroppedMask, 8));
+    data.AddUtf8("producerDroppedMaskNames", ProducerMaskNames(reply.ProducerDroppedMask));
+    data.AddUnsigned("producerSuppressedMask", reply.ProducerSuppressedMask);
+    data.AddUtf8("producerSuppressedMaskHex", HexUnsignedLongLong(reply.ProducerSuppressedMask, 8));
+    data.AddUtf8("producerSuppressedMaskNames", ProducerMaskNames(reply.ProducerSuppressedMask));
+    data.AddUnsigned("producerBackpressureMask", reply.ProducerBackpressureMask);
+    data.AddUtf8("producerBackpressureMaskHex", HexUnsignedLongLong(reply.ProducerBackpressureMask, 8));
+    data.AddUtf8("producerBackpressureMaskNames", ProducerMaskNames(reply.ProducerBackpressureMask));
     return data.Build();
 }
 

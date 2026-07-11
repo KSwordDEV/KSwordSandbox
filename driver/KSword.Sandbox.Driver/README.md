@@ -102,20 +102,23 @@ the call also returns an empty batch rather than writing a partial record.
 
 ## Synthetic event-quality and backpressure contract
 
-The event ring is non-blocking. Producers should not wait for user-mode
-collector throughput; under backpressure the ring preserves diagnostics instead
-of blocking kernel callbacks. If the ring is full, the oldest unread record can
-be overwritten, `TotalEventsDropped` increases, and collectors can derive lost
-records from `EventsDropped`, `NextSequence`, and per-record `sequence` gaps.
-`QueueHighWatermark` shows whether the queue reached capacity, while
-`TotalEventsSuppressed` shows producer-mask load shedding.
+The event ring is non-blocking and defaults to 1024 records. Producers should
+not wait for user-mode collector throughput; under backpressure the ring
+preserves diagnostics instead of blocking kernel callbacks. If the ring is full,
+the oldest unread record can be overwritten, `TotalEventsDropped` and
+`ProducerDroppedMask` increase, and collectors can derive lost records from
+`EventsDropped`, `NextSequence`, and per-record `sequence` gaps.
+`QueueHighWatermark` shows whether the queue reached capacity,
+`TotalEventsBackpressured`/`ProducerBackpressureMask` show sustained queue
+pressure, and `TotalEventsSuppressed`/`ProducerSuppressedMask` show
+producer-mask load shedding.
 
 Synthetic event-quality checks exercise this contract without CSignTool, SCM
 mutation, or loading the driver. The generated JSONL corpus should include ABI
 version fields, producer masks, `QueueHighWatermark`, `TotalEventsDropped`,
-`eventsDropped`, mock/stress rows, malformed noise rows that import as
-`driver.parse_error`, and bounded stress knobs such as `--max-events` and
-`--max-read-batches`.
+`TotalEventsBackpressured`, producer loss/pressure masks, `eventsDropped`,
+mock/stress rows, malformed noise rows that import as `driver.parse_error`, and
+bounded stress knobs such as `--max-events` and `--max-read-batches`.
 
 ## Build requirements
 
