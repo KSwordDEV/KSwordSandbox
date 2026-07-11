@@ -50,7 +50,9 @@ The root dashboard must keep these operator-facing areas visible and copyable:
   `driver-events.jsonl`, and `runbook-execution.json`;
 - automatic report links after a plan is created, including the served
   `/api/jobs/{jobId}/report/html` link and the local-file fallback when a path
-  is recorded;
+  is recorded. The primary report button follows the current Chinese/English
+  dashboard language, while compact `zh` / `en` alternatives remain visible so
+  operators never need to paste a report path;
 - stage progress that shows ordered planning/execution/import/report steps with
   stable IDs and human-readable status;
 - real executor progress from
@@ -60,9 +62,12 @@ The root dashboard must keep these operator-facing areas visible and copyable:
   and intentionally omits PowerShell command text, `stdout`, and `stderr` from
   the main dashboard;
 - upload flow should be one-click for operators: after an `.exe` upload is
-  stored and a plan is created, the dashboard automatically starts live VM
-  analysis and switches the progress panel from estimated stages to real
-  runbook step status;
+  stored and a plan is created, the dashboard automatically opens the dedicated
+  dynamic monitor page in a new tab, starts live VM analysis, and switches the
+  progress panel from estimated stages to real runbook step status. If the
+  browser blocks the new tab, the current job card must show an explicit
+  bilingual `Enter dynamic monitor` fallback link while keeping the dashboard
+  alive for the long-running execute request;
 - VirusTotal official result integration is optional and hash-only. Operators
   can open `/settings` to save or clear a local API key; the key is read from
   `KSWORDBOX_VIRUSTOTAL_API_KEY` first or from the runtime settings file under
@@ -71,11 +76,14 @@ The root dashboard must keep these operator-facing areas visible and copyable:
   `files/{sha256}` endpoint with `x-apikey`, does not upload samples, and
   returns a quiet `not_configured` / `lookup_failed` state when missing or
   unavailable instead of interrupting analysis;
-- a link to a dedicated live raw monitor page that shows source files and
-  unclassified raw event rows before final report classification;
-- a link to the dedicated execution-flow page for runbook step status. The root
-  dashboard must not inline long runbook PowerShell commands, `stdout`, or
-  `stderr`.
+- a link to a dedicated live raw monitor page / dynamic monitor page that shows
+  source files and unclassified raw event rows before final report
+  classification. The page should explain that, when opened automatically from
+  upload, the dashboard tab must stay open to continue the analysis request;
+- a natural progress-page link to the dedicated execution-flow page for runbook
+  step status, available both from the job actions and the progress summary.
+  The root dashboard must not inline long runbook PowerShell commands,
+  command-line details, `stdout`, or `stderr`.
 
 All tables, path values, raw telemetry evidence, job messages, status text,
 inputs, and section text must support either an

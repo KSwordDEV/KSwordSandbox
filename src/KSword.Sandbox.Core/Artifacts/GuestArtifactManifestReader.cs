@@ -66,15 +66,20 @@ public sealed class GuestArtifactManifestReader
     {
         var fullGuestRoot = Path.GetFullPath(guestOutputRoot);
         var artifactsRoot = Path.GetDirectoryName(Path.GetFullPath(manifestPath)) ?? fullGuestRoot;
-        var artifacts = manifest.Artifacts
+        var artifacts = (manifest.Artifacts ?? [])
             .Select(artifact => NormalizeDescriptor(artifact, fullGuestRoot))
+            .ToList();
+        var collections = (manifest.Collections ?? [])
+            .Select(NormalizeCollection)
             .ToList();
 
         return manifest with
         {
             RuntimeRoot = fullGuestRoot,
             RootPath = artifactsRoot,
+            ImportRoot = fullGuestRoot,
             Producer = string.IsNullOrWhiteSpace(manifest.Producer) ? "KSword.Sandbox.Agent" : manifest.Producer,
+            Collections = collections,
             Artifacts = artifacts
         };
     }
@@ -97,11 +102,16 @@ public sealed class GuestArtifactManifestReader
             };
         }
 
-        var metadata = new Dictionary<string, string>(descriptor.Metadata, StringComparer.OrdinalIgnoreCase);
-        if (!string.IsNullOrWhiteSpace(descriptor.FullPath) &&
+        var metadata = CopyMetadata(descriptor.Metadata);
+        AddIfNotEmpty(metadata, "evidenceRole", descriptor.EvidenceRole);
+        AddIfNotEmpty(metadata, "capturePhase", descriptor.CapturePhase);
+        AddIfNotEmpty(metadata, "captureState", descriptor.CaptureState);
+        AddIfNotEmpty(metadata, "collectionName", descriptor.CollectionName);
+        AddIfNotEmpty(metadata, "importPath", string.IsNullOrWhiteSpace(descriptor.ImportPath) ? relativePath : descriptor.ImportPath);
+        if (!string.IsNullOrWhiteSpace(FirstNonEmpty(descriptor.GuestPath, descriptor.FullPath)) &&
             !metadata.ContainsKey("guestFullPath"))
         {
-            metadata["guestFullPath"] = descriptor.FullPath;
+            metadata["guestFullPath"] = FirstNonEmpty(descriptor.GuestPath, descriptor.FullPath);
         }
 
         var fullPath = Path.GetFullPath(Path.Combine(guestOutputRoot, relativePath));
@@ -117,7 +127,32 @@ public sealed class GuestArtifactManifestReader
             Sha256 = string.IsNullOrWhiteSpace(descriptor.Sha256) ? normalized.Sha256 : descriptor.Sha256,
             Hashes = MergeHashes(descriptor, normalized),
             CreatedAtUtc = descriptor.CreatedAtUtc == default ? normalized.CreatedAtUtc : descriptor.CreatedAtUtc,
+            EvidenceRole = FirstNonEmpty(descriptor.EvidenceRole, normalized.EvidenceRole, MetadataValue(metadata, "evidenceRole")),
+            CapturePhase = FirstNonEmpty(descriptor.CapturePhase, normalized.CapturePhase, MetadataValue(metadata, "capturePhase", "phase")),
+            CaptureState = FirstNonEmpty(descriptor.CaptureState, normalized.CaptureState, MetadataValue(metadata, "captureState")),
+            GuestPath = FirstNonEmpty(descriptor.GuestPath, MetadataValue(metadata, "guestFullPath", "guestPath"), descriptor.FullPath),
+            ImportPath = FirstNonEmpty(descriptor.ImportPath, normalized.ImportPath, relativePath),
+            CollectionName = FirstNonEmpty(descriptor.CollectionName, normalized.CollectionName, MetadataValue(metadata, "collectionName")),
             Metadata = metadata
+        };
+    }
+
+    private static ArtifactCollectionDescriptor NormalizeCollection(ArtifactCollectionDescriptor collection)
+    {
+        var relativePath = ArtifactDescriptorFactory.NormalizeRelativePath(collection.RelativePath);
+        return collection with
+        {
+            Category = string.IsNullOrWhiteSpace(collection.Category)
+                ? ArtifactDescriptorFactory.CategoryForKind(collection.Kind)
+                : collection.Category,
+            RelativePath = relativePath,
+            SafeLink = string.IsNullOrWhiteSpace(collection.SafeLink)
+                ? ArtifactDescriptorFactory.BuildSafeLink(relativePath)
+                : collection.SafeLink,
+            ImportPath = string.IsNullOrWhiteSpace(collection.ImportPath)
+                ? relativePath
+                : ArtifactDescriptorFactory.NormalizeRelativePath(collection.ImportPath),
+            Metadata = CopyMetadata(collection.Metadata)
         };
     }
 
@@ -138,5 +173,46 @@ public sealed class GuestArtifactManifestReader
         }
 
         return hashes;
+    }
+
+    private static Dictionary<string, string> CopyMetadata(IDictionary<string, string>? metadata)
+    {
+        return metadata is null
+            ? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            : new Dictionary<string, string>(metadata, StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static void AddIfNotEmpty(Dictionary<string, string> metadata, string key, string? value)
+    {
+        if (!string.IsNullOrWhiteSpace(value))
+        {
+            metadata[key] = value;
+        }
+    }
+
+    private static string FirstNonEmpty(params string?[] values)
+    {
+        foreach (var value in values)
+        {
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                return value;
+            }
+        }
+
+        return string.Empty;
+    }
+
+    private static string? MetadataValue(IDictionary<string, string> metadata, params string[] keys)
+    {
+        foreach (var key in keys)
+        {
+            if (metadata.TryGetValue(key, out var value) && !string.IsNullOrWhiteSpace(value))
+            {
+                return value;
+            }
+        }
+
+        return null;
     }
 }

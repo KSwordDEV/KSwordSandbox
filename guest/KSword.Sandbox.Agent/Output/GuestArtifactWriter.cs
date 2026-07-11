@@ -8,9 +8,9 @@ namespace KSword.Sandbox.Agent.Output;
 /// <summary>
 /// Describes the result of writing a guest-side artifact manifest.
 /// Inputs are produced by GuestArtifactWriter; processing is immutable storage;
-/// callers use the manifest path and descriptor count for events.
+/// callers use the manifest path and descriptor/collection counts for events.
 /// </summary>
-internal sealed record GuestArtifactManifestWriteResult(string ManifestPath, int ArtifactCount);
+internal sealed record GuestArtifactManifestWriteResult(string ManifestPath, int ArtifactCount, int CollectionCount);
 
 /// <summary>
 /// Preserves original dropped-file evidence metadata for copied artifacts.
@@ -20,15 +20,44 @@ internal sealed record GuestArtifactManifestWriteResult(string ManifestPath, int
 internal sealed record DroppedFileArtifactMetadata(string OriginalFullPath, string OriginalRelativePath, string SourceEventType);
 
 /// <summary>
-/// Writes guest events and summaries into the configured output directory.
-/// Inputs are output paths and event lists; processing serializes JSON files;
-/// methods return paths to written artifacts.
+/// Carries operator-selected guest artifact collection options into manifest
+/// serialization. Inputs are parsed CLI flags and sidecar settings; processing
+/// records collection-lane status without enabling sensitive capture by default.
+/// </summary>
+internal sealed record GuestArtifactCollectionOptions
+{
+    public bool CaptureScreenshots { get; init; }
+
+    public bool CollectDroppedFiles { get; init; }
+
+    public bool CaptureMemoryDump { get; init; }
+
+    public bool CapturePacketCapture { get; init; }
+
+    public bool DriverEventsRequested { get; init; }
+
+    public bool R0CollectorRequested { get; init; }
+}
+
+/// <summary>
+/// Writes guest events, summaries, and artifact manifests into the configured
+/// output directory. Inputs are output paths and event lists; processing
+/// serializes JSON files and builds safe artifact descriptors; methods return
+/// paths to written artifacts.
 /// </summary>
 internal sealed class GuestArtifactWriter
 {
     public const string ArtifactsDirectoryName = "artifacts";
 
     public const string ManifestFileName = "manifest.json";
+
+    private const string DroppedFilesDirectoryName = "dropped-files";
+
+    private const string ScreenshotsDirectoryName = "screenshots";
+
+    private const string MemoryDumpsDirectoryName = "memory-dumps";
+
+    private const string PacketCapturesDirectoryName = "packet-captures";
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -74,14 +103,17 @@ internal sealed class GuestArtifactWriter
     }
 
     /// <summary>
-    /// Writes artifacts/manifest.json for dropped files in the guest output.
-    /// Inputs are the output directory created by --out; processing scans the
-    /// artifacts subdirectory, records size/hash/path metadata for each file,
-    /// and serializes a manifest; the method returns the manifest path.
+    /// Writes artifacts/manifest.json for durable guest-side artifacts.
+    /// Inputs are the output directory created by --out; processing scans known
+    /// artifact folders and serializes a manifest; the method returns the path.
     /// </summary>
     public string WriteArtifactManifest(string outputDirectory)
     {
-        return WriteArtifactManifest(outputDirectory, metadataByRelativePath: null).ManifestPath;
+        return WriteArtifactManifest(
+            outputDirectory,
+            metadataByRelativePath: null,
+            events: Array.Empty<SandboxEvent>(),
+            collectionOptions: new GuestArtifactCollectionOptions()).ManifestPath;
     }
 
     /// <summary>
@@ -94,74 +126,122 @@ internal sealed class GuestArtifactWriter
         string outputDirectory,
         IReadOnlyDictionary<string, DroppedFileArtifactMetadata>? metadataByRelativePath)
     {
+        return WriteArtifactManifest(
+            outputDirectory,
+            metadataByRelativePath,
+            events: Array.Empty<SandboxEvent>(),
+            collectionOptions: new GuestArtifactCollectionOptions());
+    }
+
+    /// <summary>
+    /// Writes artifacts/manifest.json with descriptors and collection lanes.
+    /// Inputs are the output directory, optional dropped-file metadata, collected
+    /// events, and collection options; processing scans only safe paths below
+    /// the output root; the method returns write metadata.
+    /// </summary>
+    public GuestArtifactManifestWriteResult WriteArtifactManifest(
+        string outputDirectory,
+        IReadOnlyDictionary<string, DroppedFileArtifactMetadata>? metadataByRelativePath,
+        IReadOnlyList<SandboxEvent>? events,
+        GuestArtifactCollectionOptions? collectionOptions)
+    {
         Directory.CreateDirectory(outputDirectory);
-        var artifactsRoot = Path.Combine(outputDirectory, ArtifactsDirectoryName);
+        var fullOutputDirectory = Path.GetFullPath(outputDirectory);
+        var artifactsRoot = Path.Combine(fullOutputDirectory, ArtifactsDirectoryName);
         Directory.CreateDirectory(artifactsRoot);
         var manifestPath = Path.Combine(artifactsRoot, ManifestFileName);
-        var descriptors = EnumerateDroppedFileArtifacts(outputDirectory, artifactsRoot, manifestPath, metadataByRelativePath);
+        var safeEvents = events ?? Array.Empty<SandboxEvent>();
+        var descriptorEventMetadata = BuildEventMetadataByRelativePath(fullOutputDirectory, safeEvents);
+        var descriptors = EnumerateArtifactDescriptors(
+            fullOutputDirectory,
+            manifestPath,
+            metadataByRelativePath,
+            descriptorEventMetadata);
+        var collections = BuildCollections(
+            descriptors,
+            safeEvents,
+            collectionOptions ?? new GuestArtifactCollectionOptions());
         var manifest = new ArtifactManifest
         {
-            RuntimeRoot = Path.GetFullPath(outputDirectory),
-            RootPath = Path.GetFullPath(artifactsRoot),
+            RuntimeRoot = fullOutputDirectory,
+            RootPath = artifactsRoot,
+            ImportRoot = fullOutputDirectory,
             Producer = "KSword.Sandbox.Agent",
+            Collections = collections,
             Artifacts = descriptors
         };
 
         File.WriteAllText(manifestPath, JsonSerializer.Serialize(manifest, ManifestJsonOptions));
-        return new GuestArtifactManifestWriteResult(manifestPath, descriptors.Count);
+        return new GuestArtifactManifestWriteResult(manifestPath, descriptors.Count, collections.Count);
     }
 
-    /// <summary>
-    /// Enumerates dropped-file descriptors below the artifacts directory.
-    /// Inputs are output/artifact roots and the manifest path; processing skips
-    /// the manifest itself and hashes readable files; the method returns
-    /// descriptors suitable for the manifest JSON.
-    /// </summary>
-    private static List<ArtifactDescriptor> EnumerateDroppedFileArtifacts(
+    private static List<ArtifactDescriptor> EnumerateArtifactDescriptors(
         string outputDirectory,
-        string artifactsRoot,
         string manifestPath,
-        IReadOnlyDictionary<string, DroppedFileArtifactMetadata>? metadataByRelativePath)
+        IReadOnlyDictionary<string, DroppedFileArtifactMetadata>? droppedFileMetadataByRelativePath,
+        IReadOnlyDictionary<string, Dictionary<string, string>> eventMetadataByRelativePath)
     {
-        if (!Directory.Exists(artifactsRoot))
+        if (!Directory.Exists(outputDirectory))
         {
             return [];
         }
 
-        var fullOutputDirectory = Path.GetFullPath(outputDirectory);
+        var descriptors = new List<ArtifactDescriptor>();
         var fullManifestPath = Path.GetFullPath(manifestPath);
-        return Directory
-            .EnumerateFiles(artifactsRoot, "*", SearchOption.AllDirectories)
+        foreach (var path in EnumerateFilesSafe(outputDirectory)
             .Select(Path.GetFullPath)
             .Where(path => !string.Equals(path, fullManifestPath, StringComparison.OrdinalIgnoreCase))
-            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
-            .Select(path => CreateDroppedFileDescriptor(fullOutputDirectory, path, metadataByRelativePath))
-            .ToList();
+            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase))
+        {
+            var relativePath = NormalizeRelativePath(Path.GetRelativePath(outputDirectory, path));
+            if (string.IsNullOrWhiteSpace(relativePath) || !TryClassifyArtifact(relativePath, out var classification))
+            {
+                continue;
+            }
+
+            eventMetadataByRelativePath.TryGetValue(relativePath, out var eventMetadata);
+            DroppedFileArtifactMetadata? droppedFileMetadata = null;
+            droppedFileMetadataByRelativePath?.TryGetValue(relativePath, out droppedFileMetadata);
+            try
+            {
+                descriptors.Add(CreateArtifactDescriptor(outputDirectory, path, relativePath, classification, eventMetadata, droppedFileMetadata));
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException or PathTooLongException)
+            {
+                // A locked or disappearing optional artifact must not prevent
+                // events.json, summary, or other evidence from being written.
+            }
+        }
+
+        return descriptors;
     }
 
-    /// <summary>
-    /// Creates one dropped-file artifact descriptor from filesystem metadata.
-    /// Inputs are the guest output root and a file path; processing reads file
-    /// metadata and SHA-256, and the method returns the manifest descriptor.
-    /// </summary>
-    private static ArtifactDescriptor CreateDroppedFileDescriptor(
+    private static ArtifactDescriptor CreateArtifactDescriptor(
         string outputDirectory,
         string path,
-        IReadOnlyDictionary<string, DroppedFileArtifactMetadata>? metadataByRelativePath)
+        string relativePath,
+        ArtifactClassification classification,
+        IReadOnlyDictionary<string, string>? eventMetadata,
+        DroppedFileArtifactMetadata? droppedFileMetadata)
     {
+        _ = outputDirectory;
         var info = new FileInfo(path);
-        var relativePath = NormalizeRelativePath(Path.GetRelativePath(outputDirectory, info.FullName));
         var sha256 = ComputeSha256(info.FullName);
-        DroppedFileArtifactMetadata? sourceMetadata = null;
-        metadataByRelativePath?.TryGetValue(relativePath, out sourceMetadata);
+        var metadata = CreateBaseMetadata(classification, info.FullName, relativePath, eventMetadata, droppedFileMetadata);
         return new ArtifactDescriptor
         {
-            Kind = ArtifactKind.DroppedFile,
-            Category = "dropped-file",
+            Kind = classification.Kind,
+            Category = classification.Category,
             Name = info.Name,
             RelativePath = relativePath,
             FullPath = info.FullName,
             SafeLink = BuildSafeLink(relativePath),
+            EvidenceRole = classification.EvidenceRole,
+            CapturePhase = ValueOrEmpty(metadata, "capturePhase", "phase"),
+            CaptureState = ValueOrEmpty(metadata, "captureState"),
+            GuestPath = ValueOrEmpty(metadata, "guestFullPath", "guestPath"),
+            ImportPath = relativePath,
+            CollectionName = classification.CollectionName,
             MimeType = MimeTypeForPath(info.FullName),
             SizeBytes = info.Length,
             Sha256 = sha256,
@@ -170,42 +250,393 @@ internal sealed class GuestArtifactWriter
                 ["sha256"] = sha256
             },
             CreatedAtUtc = info.CreationTimeUtc,
-            Metadata = CreateDroppedFileMetadata(info.FullName, sourceMetadata)
+            Metadata = metadata
         };
     }
 
-    /// <summary>
-    /// Builds manifest metadata for a copied dropped-file artifact.
-    /// Inputs are the copied artifact path and optional original source
-    /// metadata; processing preserves the original guest path when known; the
-    /// method returns string metadata for ArtifactDescriptor.
-    /// </summary>
-    private static Dictionary<string, string> CreateDroppedFileMetadata(
+    private static Dictionary<string, string> CreateBaseMetadata(
+        ArtifactClassification classification,
         string artifactFullPath,
-        DroppedFileArtifactMetadata? sourceMetadata)
+        string relativePath,
+        IReadOnlyDictionary<string, string>? eventMetadata,
+        DroppedFileArtifactMetadata? droppedFileMetadata)
     {
-        var metadata = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        var metadata = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (eventMetadata is not null)
         {
-            ["origin"] = "guest",
-            ["evidenceRole"] = "dropped-file",
-            ["guestFullPath"] = sourceMetadata?.OriginalFullPath ?? artifactFullPath,
-            ["artifactFullPath"] = artifactFullPath
-        };
+            foreach (var pair in eventMetadata)
+            {
+                AddIfNotEmpty(metadata, pair.Key, pair.Value);
+            }
+        }
 
-        if (sourceMetadata is not null)
+        AddIfNotEmpty(metadata, "origin", "guest");
+        AddIfNotEmpty(metadata, "evidenceRole", classification.EvidenceRole);
+        AddIfNotEmpty(metadata, "collectionName", classification.CollectionName);
+        AddIfNotEmpty(metadata, "importPath", relativePath);
+        AddIfNotEmpty(metadata, "artifactFullPath", artifactFullPath);
+        AddIfNotEmpty(metadata, "guestFullPath", FirstNonEmpty(droppedFileMetadata?.OriginalFullPath, ValueOrEmpty(metadata, "guestFullPath", "guestPath"), artifactFullPath));
+        AddIfNotEmpty(metadata, "captureState", InferCaptureState(classification, metadata));
+
+        if (droppedFileMetadata is not null)
         {
-            metadata["guestRelativePath"] = sourceMetadata.OriginalRelativePath;
-            metadata["sourceEventType"] = sourceMetadata.SourceEventType;
+            metadata["guestRelativePath"] = droppedFileMetadata.OriginalRelativePath;
+            metadata["sourceEventType"] = droppedFileMetadata.SourceEventType;
+        }
+
+        if (metadata.TryGetValue("phase", out var phase))
+        {
+            AddIfNotEmpty(metadata, "capturePhase", phase);
         }
 
         return metadata;
     }
 
-    /// <summary>
-    /// Computes a SHA-256 digest for a guest artifact.
-    /// The input is a full file path, processing streams file bytes through the
-    /// hash algorithm, and the method returns lowercase hexadecimal text.
-    /// </summary>
+    private static List<ArtifactCollectionDescriptor> BuildCollections(
+        IReadOnlyList<ArtifactDescriptor> descriptors,
+        IReadOnlyList<SandboxEvent> events,
+        GuestArtifactCollectionOptions options)
+    {
+        return
+        [
+            CreateCollection(descriptors, events, "dropped-files", ArtifactKind.DroppedFile, "dropped-file", "dropped-file",
+                CombineRelative(ArtifactsDirectoryName, DroppedFilesDirectoryName), options.CollectDroppedFiles, implemented: true,
+                capturedEventPrefixes: ["artifact.dropped_file.copied"], skippedEventPrefixes: ["artifact.dropped_file.skipped"],
+                reasonWhenDisabled: "collectDroppedFilesNotRequested"),
+            CreateCollection(descriptors, events, "screenshots", ArtifactKind.Screenshot, "screenshot", "screenshot",
+                ScreenshotsDirectoryName, options.CaptureScreenshots, implemented: true,
+                capturedEventPrefixes: ["screenshot.captured"], skippedEventPrefixes: ["screenshot.skipped"],
+                reasonWhenDisabled: "screenshotNotRequested"),
+            CreateCollection(descriptors, events, "memory-dumps", ArtifactKind.MemoryDump, "memory-dump", "memory-dump",
+                MemoryDumpsDirectoryName, options.CaptureMemoryDump, implemented: true,
+                capturedEventPrefixes: ["memory_dump.captured"], skippedEventPrefixes: ["memory_dump.skipped"],
+                reasonWhenDisabled: "memoryDumpNotRequested"),
+            CreateCollection(descriptors, events, "driver-events", ArtifactKind.DriverEventsJsonLines, "telemetry", "driver-events",
+                FirstRelativePath(descriptors, "driver-events") ?? "driver-events.jsonl",
+                options.DriverEventsRequested || descriptors.Any(artifact => string.Equals(artifact.CollectionName, "driver-events", StringComparison.OrdinalIgnoreCase)),
+                implemented: true, capturedEventPrefixes: ["driver.event", "driver.events", "r0collector.exited"],
+                skippedEventPrefixes: ["driver.events.missing", "r0collector.failed"], reasonWhenDisabled: "driverEventsNotRequested"),
+            CreateCollection(descriptors, events, "r0-logs", ArtifactKind.Log, "log", "diagnostic-log",
+                FirstRelativePath(descriptors, "r0-logs") ?? "r0collector.stdout.log",
+                options.R0CollectorRequested || descriptors.Any(artifact => string.Equals(artifact.CollectionName, "r0-logs", StringComparison.OrdinalIgnoreCase)),
+                implemented: true, capturedEventPrefixes: ["r0collector.started", "r0collector.exited", "r0collector.failed"],
+                skippedEventPrefixes: [], reasonWhenDisabled: "r0CollectorNotRequested"),
+            CreateCollection(descriptors, events, "packet-captures", ArtifactKind.PacketCapture, "packet-capture", "packet-capture",
+                PacketCapturesDirectoryName, options.CapturePacketCapture, implemented: false,
+                capturedEventPrefixes: ["packet_capture.captured"], skippedEventPrefixes: ["packet_capture.skipped"],
+                reasonWhenDisabled: "packetCaptureReservedForFuture")
+        ];
+    }
+
+    private static ArtifactCollectionDescriptor CreateCollection(
+        IReadOnlyList<ArtifactDescriptor> descriptors,
+        IReadOnlyList<SandboxEvent> events,
+        string name,
+        ArtifactKind kind,
+        string category,
+        string evidenceRole,
+        string relativePath,
+        bool enabled,
+        bool implemented,
+        IReadOnlyList<string> capturedEventPrefixes,
+        IReadOnlyList<string> skippedEventPrefixes,
+        string reasonWhenDisabled)
+    {
+        var artifactCount = descriptors.Count(artifact => string.Equals(artifact.CollectionName, name, StringComparison.OrdinalIgnoreCase));
+        var capturedEventCount = CountEvents(events, capturedEventPrefixes);
+        var skippedEventCount = CountEvents(events, skippedEventPrefixes);
+        var failedEventCount = 0;
+        var status = DetermineCollectionStatus(enabled, implemented, artifactCount, capturedEventCount, skippedEventCount, failedEventCount);
+        var normalizedRelativePath = NormalizeRelativePath(relativePath);
+        var metadata = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["artifactCount"] = artifactCount.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["capturedEventCount"] = capturedEventCount.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["skippedEventCount"] = skippedEventCount.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["failedEventCount"] = failedEventCount.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["safeByDefault"] = (!enabled).ToString(System.Globalization.CultureInfo.InvariantCulture)
+        };
+
+        var reason = status switch
+        {
+            "disabled" => reasonWhenDisabled,
+            "not-implemented" => "collectorNotImplemented",
+            "skipped" => "collectorSkippedOrUnavailable",
+            "failed" => "collectorFailed",
+            "enabled-empty" => "noArtifactsProduced",
+            _ => string.Empty
+        };
+
+        return new ArtifactCollectionDescriptor
+        {
+            Name = name,
+            Kind = kind,
+            Category = category,
+            EvidenceRole = evidenceRole,
+            RelativePath = normalizedRelativePath,
+            SafeLink = BuildSafeLink(normalizedRelativePath),
+            ImportPath = normalizedRelativePath,
+            Enabled = enabled,
+            Implemented = implemented,
+            Status = status,
+            Reason = reason,
+            Metadata = metadata
+        };
+    }
+
+    private static string DetermineCollectionStatus(
+        bool enabled,
+        bool implemented,
+        int artifactCount,
+        int capturedEventCount,
+        int skippedEventCount,
+        int failedEventCount)
+    {
+        if (artifactCount > 0 || capturedEventCount > 0)
+        {
+            return "captured";
+        }
+
+        if (!enabled)
+        {
+            return "disabled";
+        }
+
+        if (!implemented)
+        {
+            return "not-implemented";
+        }
+
+        if (skippedEventCount > 0)
+        {
+            return "skipped";
+        }
+
+        if (failedEventCount > 0)
+        {
+            return "failed";
+        }
+
+        return "enabled-empty";
+    }
+
+    private static Dictionary<string, Dictionary<string, string>> BuildEventMetadataByRelativePath(string outputDirectory, IReadOnlyList<SandboxEvent> events)
+    {
+        var metadataByRelativePath = new Dictionary<string, Dictionary<string, string>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var evt in events)
+        {
+            foreach (var relativePath in CandidateRelativePaths(outputDirectory, evt).Distinct(StringComparer.OrdinalIgnoreCase))
+            {
+                if (!metadataByRelativePath.TryGetValue(relativePath, out var metadata))
+                {
+                    metadata = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                    metadataByRelativePath[relativePath] = metadata;
+                }
+
+                metadata["sourceEventType"] = evt.EventType;
+                metadata["sourceEventSource"] = evt.Source;
+                AddIfNotEmpty(metadata, "eventPath", evt.Path);
+                if (evt.ProcessId is not null)
+                {
+                    metadata["processId"] = evt.ProcessId.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                }
+
+                foreach (var pair in evt.Data)
+                {
+                    AddIfNotEmpty(metadata, pair.Key, pair.Value);
+                }
+
+                AddIfNotEmpty(metadata, "captureState", InferCaptureState(evt.EventType));
+            }
+        }
+
+        return metadataByRelativePath;
+    }
+
+    private static IEnumerable<string> CandidateRelativePaths(string outputDirectory, SandboxEvent evt)
+    {
+        if (!string.IsNullOrWhiteSpace(evt.Path))
+        {
+            var relativePath = TryGetRelativePath(outputDirectory, evt.Path);
+            if (!string.IsNullOrWhiteSpace(relativePath))
+            {
+                yield return relativePath;
+            }
+        }
+
+        if (evt.Data.TryGetValue("relativePath", out var relative) && !string.IsNullOrWhiteSpace(relative))
+        {
+            var normalized = NormalizeRelativePath(relative);
+            if (!string.IsNullOrWhiteSpace(normalized))
+            {
+                yield return normalized;
+            }
+        }
+
+        if (evt.Data.TryGetValue("artifactRelativePath", out var artifactRelativePath) && !string.IsNullOrWhiteSpace(artifactRelativePath))
+        {
+            var normalized = NormalizeRelativePath(artifactRelativePath);
+            if (!string.IsNullOrWhiteSpace(normalized))
+            {
+                yield return normalized;
+            }
+        }
+    }
+
+    private static bool TryClassifyArtifact(string relativePath, out ArtifactClassification classification)
+    {
+        var fileName = Path.GetFileName(relativePath);
+        var extension = Path.GetExtension(relativePath).ToLowerInvariant();
+        if (string.Equals(relativePath, "events.json", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(relativePath, "agent-summary.json", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(relativePath, CombineRelative(ArtifactsDirectoryName, ManifestFileName), StringComparison.OrdinalIgnoreCase))
+        {
+            classification = ArtifactClassification.Unknown;
+            return false;
+        }
+
+        if (relativePath.StartsWith($"{ArtifactsDirectoryName}/", StringComparison.OrdinalIgnoreCase))
+        {
+            classification = new ArtifactClassification(ArtifactKind.DroppedFile, "dropped-file", "dropped-file", "dropped-files");
+            return true;
+        }
+
+        if (relativePath.StartsWith($"{ScreenshotsDirectoryName}/", StringComparison.OrdinalIgnoreCase))
+        {
+            classification = new ArtifactClassification(ArtifactKind.Screenshot, "screenshot", "screenshot", "screenshots");
+            return true;
+        }
+
+        if (relativePath.StartsWith($"{MemoryDumpsDirectoryName}/", StringComparison.OrdinalIgnoreCase))
+        {
+            classification = new ArtifactClassification(ArtifactKind.MemoryDump, "memory-dump", "memory-dump", "memory-dumps");
+            return true;
+        }
+
+        if (relativePath.StartsWith($"{PacketCapturesDirectoryName}/", StringComparison.OrdinalIgnoreCase) ||
+            extension is ".pcap" or ".pcapng")
+        {
+            classification = new ArtifactClassification(ArtifactKind.PacketCapture, "packet-capture", "packet-capture", "packet-captures");
+            return true;
+        }
+
+        if (string.Equals(extension, ".jsonl", StringComparison.OrdinalIgnoreCase) &&
+            fileName.Contains("driver", StringComparison.OrdinalIgnoreCase))
+        {
+            classification = new ArtifactClassification(ArtifactKind.DriverEventsJsonLines, "telemetry", "driver-events", "driver-events");
+            return true;
+        }
+
+        if (string.Equals(extension, ".log", StringComparison.OrdinalIgnoreCase) ||
+            fileName.StartsWith("r0collector.", StringComparison.OrdinalIgnoreCase))
+        {
+            classification = new ArtifactClassification(ArtifactKind.Log, "log", "diagnostic-log", "r0-logs");
+            return true;
+        }
+
+        classification = ArtifactClassification.Unknown;
+        return false;
+    }
+
+    private static IEnumerable<string> EnumerateFilesSafe(string root)
+    {
+        var pending = new Stack<string>();
+        pending.Push(root);
+        while (pending.Count > 0)
+        {
+            var directory = pending.Pop();
+            IEnumerable<string> files;
+            try
+            {
+                files = Directory.EnumerateFiles(directory).ToList();
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException)
+            {
+                continue;
+            }
+
+            foreach (var file in files)
+            {
+                yield return file;
+            }
+
+            IEnumerable<string> directories;
+            try
+            {
+                directories = Directory.EnumerateDirectories(directory).ToList();
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException)
+            {
+                continue;
+            }
+
+            foreach (var child in directories)
+            {
+                pending.Push(child);
+            }
+        }
+    }
+
+    private static string? FirstRelativePath(IReadOnlyList<ArtifactDescriptor> descriptors, string collectionName)
+    {
+        return descriptors
+            .Where(artifact => string.Equals(artifact.CollectionName, collectionName, StringComparison.OrdinalIgnoreCase))
+            .OrderBy(artifact => artifact.RelativePath, StringComparer.OrdinalIgnoreCase)
+            .Select(artifact => artifact.RelativePath)
+            .FirstOrDefault(path => !string.IsNullOrWhiteSpace(path));
+    }
+
+    private static int CountEvents(IReadOnlyList<SandboxEvent> events, IReadOnlyList<string> eventPrefixes)
+    {
+        if (eventPrefixes.Count == 0)
+        {
+            return 0;
+        }
+
+        return events.Count(evt => eventPrefixes.Any(prefix => evt.EventType.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)));
+    }
+
+    private static string? InferCaptureState(ArtifactClassification classification, IReadOnlyDictionary<string, string> metadata)
+    {
+        if (metadata.TryGetValue("captureState", out var state) && !string.IsNullOrWhiteSpace(state))
+        {
+            return state;
+        }
+
+        if (metadata.TryGetValue("sourceEventType", out var eventType))
+        {
+            return InferCaptureState(eventType);
+        }
+
+        return classification.Kind == ArtifactKind.Log || classification.Kind == ArtifactKind.DriverEventsJsonLines
+            ? "available"
+            : "captured";
+    }
+
+    private static string? InferCaptureState(string eventType)
+    {
+        if (eventType.EndsWith(".captured", StringComparison.OrdinalIgnoreCase) ||
+            eventType.EndsWith(".copied", StringComparison.OrdinalIgnoreCase) ||
+            eventType.EndsWith(".written", StringComparison.OrdinalIgnoreCase) ||
+            eventType.EndsWith(".exited", StringComparison.OrdinalIgnoreCase))
+        {
+            return "captured";
+        }
+
+        if (eventType.EndsWith(".skipped", StringComparison.OrdinalIgnoreCase))
+        {
+            return "skipped";
+        }
+
+        if (eventType.EndsWith(".failed", StringComparison.OrdinalIgnoreCase) ||
+            eventType.EndsWith(".timeout", StringComparison.OrdinalIgnoreCase))
+        {
+            return "failed";
+        }
+
+        return null;
+    }
+
     private static string ComputeSha256(string path)
     {
         using var stream = File.OpenRead(path);
@@ -213,11 +644,43 @@ internal sealed class GuestArtifactWriter
         return Convert.ToHexString(hash).ToLowerInvariant();
     }
 
-    /// <summary>
-    /// Normalizes manifest-relative paths to safe slash-separated text.
-    /// The input may contain platform separators; processing rejects rooted or
-    /// parent-traversal segments; the method returns safe relative path text.
-    /// </summary>
+    private static string TryGetRelativePath(string root, string path)
+    {
+        try
+        {
+            var fullRoot = Path.GetFullPath(root);
+            var fullPath = Path.GetFullPath(path);
+            if (!IsSameOrUnderDirectory(fullPath, fullRoot))
+            {
+                return string.Empty;
+            }
+
+            return NormalizeRelativePath(Path.GetRelativePath(fullRoot, fullPath));
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return string.Empty;
+        }
+    }
+
+    private static bool IsSameOrUnderDirectory(string path, string directory)
+    {
+        var fullPath = Path.GetFullPath(path);
+        var fullDirectory = Path.GetFullPath(directory);
+        if (string.Equals(
+            Path.TrimEndingDirectorySeparator(fullPath),
+            Path.TrimEndingDirectorySeparator(fullDirectory),
+            StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        var directoryWithSeparator = Path.EndsInDirectorySeparator(fullDirectory)
+            ? fullDirectory
+            : fullDirectory + Path.DirectorySeparatorChar;
+        return fullPath.StartsWith(directoryWithSeparator, StringComparison.OrdinalIgnoreCase);
+    }
+
     private static string NormalizeRelativePath(string relativePath)
     {
         if (string.IsNullOrWhiteSpace(relativePath))
@@ -246,11 +709,6 @@ internal sealed class GuestArtifactWriter
         return string.Join("/", segments);
     }
 
-    /// <summary>
-    /// Builds a link target for local reports from a relative manifest path.
-    /// Inputs are slash-separated relative path text; processing URL-encodes
-    /// each segment; the method returns safe href text or empty text.
-    /// </summary>
     private static string BuildSafeLink(string relativePath)
     {
         var normalized = NormalizeRelativePath(relativePath);
@@ -262,11 +720,6 @@ internal sealed class GuestArtifactWriter
         return string.Join("/", normalized.Split('/').Select(Uri.EscapeDataString));
     }
 
-    /// <summary>
-    /// Maps common artifact file names to MIME types.
-    /// The input is a path; processing checks the extension; the method returns
-    /// a deterministic content type string.
-    /// </summary>
     private static string MimeTypeForPath(string path)
     {
         return Path.GetExtension(path).ToLowerInvariant() switch
@@ -280,9 +733,55 @@ internal sealed class GuestArtifactWriter
             ".jpg" or ".jpeg" => "image/jpeg",
             ".gif" => "image/gif",
             ".dmp" => "application/vnd.microsoft.minidump",
+            ".pcap" => "application/vnd.tcpdump.pcap",
+            ".pcapng" => "application/x-pcapng",
             ".zip" => "application/zip",
             ".exe" or ".dll" or ".sys" => "application/vnd.microsoft.portable-executable",
             _ => "application/octet-stream"
         };
+    }
+
+    private static string CombineRelative(params string[] segments)
+    {
+        return string.Join("/", segments.Where(segment => !string.IsNullOrWhiteSpace(segment)).Select(segment => segment.Trim('/', '\\')));
+    }
+
+    private static string ValueOrEmpty(IReadOnlyDictionary<string, string> metadata, params string[] keys)
+    {
+        foreach (var key in keys)
+        {
+            if (metadata.TryGetValue(key, out var value) && !string.IsNullOrWhiteSpace(value))
+            {
+                return value;
+            }
+        }
+
+        return string.Empty;
+    }
+
+    private static string FirstNonEmpty(params string?[] values)
+    {
+        foreach (var value in values)
+        {
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                return value;
+            }
+        }
+
+        return string.Empty;
+    }
+
+    private static void AddIfNotEmpty(Dictionary<string, string> metadata, string key, string? value)
+    {
+        if (!string.IsNullOrWhiteSpace(value))
+        {
+            metadata[key] = value;
+        }
+    }
+
+    private sealed record ArtifactClassification(ArtifactKind Kind, string Category, string EvidenceRole, string CollectionName)
+    {
+        public static ArtifactClassification Unknown { get; } = new(ArtifactKind.Unknown, string.Empty, string.Empty, string.Empty);
     }
 }

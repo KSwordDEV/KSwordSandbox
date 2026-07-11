@@ -15,7 +15,7 @@ return await AgentProgram.RunAsync(args);
 /// Guest-side collector that runs inside the disposable Windows VM.
 /// Inputs are command-line arguments for sample path, output path, duration,
 /// optional driver event path, optional R0Collector sidecar path, and optional
-/// screenshot, dropped-file extraction, and memory-dump flags; processing can
+/// screenshot, dropped-file extraction, memory-dump, and future PCAP flags; processing can
 /// start the sidecar, starts the sample, runs dynamic guest probes, merges
 /// driver JSONL, and writes JSON artifacts; RunAsync returns a process exit
 /// code.
@@ -190,6 +190,7 @@ internal static class AgentProgram
             new ProcessTreeProbe(),
             new FileDiffProbe(),
             new TcpConnectionDiffProbe(),
+            new PacketCaptureProbe(),
             new ScreenshotProbe(),
             new MemoryDumpProbe()
         ]);
@@ -210,7 +211,8 @@ internal static class AgentProgram
             OutputDirectory = options.OutputDirectory,
             RootProcessId = rootProcessId,
             CaptureScreenshots = options.CaptureScreenshots,
-            CaptureMemoryDump = options.CaptureMemoryDump
+            CaptureMemoryDump = options.CaptureMemoryDump,
+            CapturePacketCapture = options.CapturePacketCapture
         };
     }
 
@@ -1249,10 +1251,7 @@ internal static class AgentProgram
             ? CopyDroppedFileArtifacts(options, events)
             : new Dictionary<string, DroppedFileArtifactMetadata>(StringComparer.OrdinalIgnoreCase);
 
-        if (options.CollectDroppedFiles)
-        {
-            TryWriteDroppedFileManifest(options, events, artifactWriter, droppedFileMetadataByRelativePath);
-        }
+        TryWriteArtifactManifest(options, events, artifactWriter, droppedFileMetadataByRelativePath);
 
         artifactWriter.WriteEvents(options.OutputDirectory, events);
         artifactWriter.WriteSummary(options.OutputDirectory, options.SamplePath, events.Count);
@@ -1356,12 +1355,14 @@ internal static class AgentProgram
     }
 
     /// <summary>
-    /// Writes the dropped-file artifact manifest and records the outcome as a
-    /// guest event. Inputs are options, event list, writer, and copied artifact
-    /// metadata; processing writes artifacts/manifest.json best-effort; the
-    /// method returns no value.
+    /// Writes the guest artifact manifest and records the outcome as a guest
+    /// event. Inputs are options, event list, writer, and copied artifact
+    /// metadata; processing writes artifacts/manifest.json best-effort with
+    /// collection-lane status for screenshots, dropped files, memory dumps,
+    /// driver events, R0 logs, and future packet captures; the method returns
+    /// no value.
     /// </summary>
-    private static void TryWriteDroppedFileManifest(
+    private static void TryWriteArtifactManifest(
         AgentOptions options,
         List<SandboxEvent> events,
         GuestArtifactWriter artifactWriter,
@@ -1369,7 +1370,19 @@ internal static class AgentProgram
     {
         try
         {
-            var manifestResult = artifactWriter.WriteArtifactManifest(options.OutputDirectory, droppedFileMetadataByRelativePath);
+            var manifestResult = artifactWriter.WriteArtifactManifest(
+                options.OutputDirectory,
+                droppedFileMetadataByRelativePath,
+                events,
+                new GuestArtifactCollectionOptions
+                {
+                    CaptureScreenshots = options.CaptureScreenshots,
+                    CollectDroppedFiles = options.CollectDroppedFiles,
+                    CaptureMemoryDump = options.CaptureMemoryDump,
+                    CapturePacketCapture = options.CapturePacketCapture,
+                    DriverEventsRequested = !string.IsNullOrWhiteSpace(options.DriverEventsPath),
+                    R0CollectorRequested = !string.IsNullOrWhiteSpace(options.R0CollectorPath) || options.R0Mock
+                });
             events.Add(new SandboxEvent
             {
                 EventType = "artifact.manifest.written",
@@ -1378,9 +1391,14 @@ internal static class AgentProgram
                 Data =
                 {
                     ["artifactCount"] = manifestResult.ArtifactCount.ToString(CultureInfo.InvariantCulture),
+                    ["collectionCount"] = manifestResult.CollectionCount.ToString(CultureInfo.InvariantCulture),
                     ["copiedDroppedFileCount"] = droppedFileMetadataByRelativePath.Count.ToString(CultureInfo.InvariantCulture),
                     ["collectDroppedFiles"] = options.CollectDroppedFiles.ToString(),
+                    ["captureScreenshots"] = options.CaptureScreenshots.ToString(),
+                    ["captureMemoryDump"] = options.CaptureMemoryDump.ToString(),
+                    ["capturePacketCapture"] = options.CapturePacketCapture.ToString(),
                     ["relativePath"] = NormalizeArtifactRelativePath(Path.GetRelativePath(options.OutputDirectory, manifestResult.ManifestPath)),
+                    ["importPath"] = NormalizeArtifactRelativePath(Path.GetRelativePath(options.OutputDirectory, manifestResult.ManifestPath)),
                     ["artifactRoot"] = Path.Combine(options.OutputDirectory, GuestArtifactWriter.ArtifactsDirectoryName)
                 }
             });
@@ -1395,6 +1413,9 @@ internal static class AgentProgram
                 Data =
                 {
                     ["collectDroppedFiles"] = options.CollectDroppedFiles.ToString(),
+                    ["captureScreenshots"] = options.CaptureScreenshots.ToString(),
+                    ["captureMemoryDump"] = options.CaptureMemoryDump.ToString(),
+                    ["capturePacketCapture"] = options.CapturePacketCapture.ToString(),
                     ["reason"] = "writeFailed"
                 }
             };
@@ -1656,12 +1677,15 @@ internal sealed record AgentOptions
 
     public bool CaptureMemoryDump { get; init; }
 
+    public bool CapturePacketCapture { get; init; }
+
     /// <summary>
     /// Parses command-line switches for the guest agent.
     /// Inputs are string arguments, processing consumes --sample, --out,
     /// --duration, --driver-events, optional R0Collector sidecar switches, and
     /// boolean --r0-mock/--screenshot/--collect-dropped-files/--memory-dump
-    /// flags without breaking existing value switches; the method returns
+    /// plus future --packet-capture/--pcap placeholder flags without breaking
+    /// existing value switches; the method returns
     /// validated and normalized options.
     /// </summary>
     public static AgentOptions Parse(string[] args)
@@ -1682,7 +1706,10 @@ internal sealed record AgentOptions
                 string.Equals(optionName, "collect-dropped-files", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(optionName, "dropped-files", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(optionName, "memory-dump", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(optionName, "memory-dumps", StringComparison.OrdinalIgnoreCase))
+                string.Equals(optionName, "memory-dumps", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(optionName, "packet-capture", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(optionName, "pcap", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(optionName, "network-capture", StringComparison.OrdinalIgnoreCase))
             {
                 flags.Add(optionName);
                 continue;
@@ -1729,7 +1756,8 @@ internal sealed record AgentOptions
             R0Mock = flags.Contains("r0-mock"),
             CaptureScreenshots = flags.Contains("screenshot") || flags.Contains("screenshots"),
             CollectDroppedFiles = flags.Contains("collect-dropped-files") || flags.Contains("dropped-files"),
-            CaptureMemoryDump = flags.Contains("memory-dump") || flags.Contains("memory-dumps")
+            CaptureMemoryDump = flags.Contains("memory-dump") || flags.Contains("memory-dumps"),
+            CapturePacketCapture = flags.Contains("packet-capture") || flags.Contains("pcap") || flags.Contains("network-capture")
         };
     }
 }

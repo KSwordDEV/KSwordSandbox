@@ -64,12 +64,17 @@ internal sealed class ArtifactManifestContractScenario : ISmokeTestScenario
         SmokeAssert.True(guestWriter.Contains("manifest.json", StringComparison.Ordinal), "Guest writer should write manifest.json.");
         SmokeAssert.True(guestWriter.Contains("MimeType", StringComparison.Ordinal), "Guest writer should include MIME metadata.");
         SmokeAssert.True(guestWriter.Contains("SafeLink", StringComparison.Ordinal), "Guest writer should include safe links.");
+        SmokeAssert.True(guestWriter.Contains("Collections", StringComparison.Ordinal), "Guest writer should include artifact collection lanes.");
+        SmokeAssert.True(guestWriter.Contains("PacketCapture", StringComparison.Ordinal), "Guest writer should include future packet-capture manifest lanes.");
+        SmokeAssert.True(guestWriter.Contains("MemoryDump", StringComparison.Ordinal), "Guest writer should include memory-dump manifest descriptors.");
         SmokeAssert.True(guestDoc.Contains("artifacts/manifest.json", StringComparison.Ordinal), "Guest-agent doc should describe artifacts/manifest.json.");
         SmokeAssert.True(reportDoc.Contains("ArtifactManifest", StringComparison.Ordinal), "Report schema doc should describe ArtifactManifest.");
         SmokeAssert.True(reportDoc.Contains("DroppedFile", StringComparison.Ordinal), "Report schema doc should describe dropped-file artifact entries.");
         SmokeAssert.True(reportDoc.Contains("artifact-index.json", StringComparison.Ordinal), "Report schema doc should describe host artifact index.");
         SmokeAssert.True(artifactDoc.Contains("safeLink", StringComparison.Ordinal), "Artifact manifest doc should describe safe links.");
         SmokeAssert.True(artifactDoc.Contains("mimeType", StringComparison.Ordinal), "Artifact manifest doc should describe MIME type.");
+        SmokeAssert.True(artifactDoc.Contains("collections", StringComparison.OrdinalIgnoreCase), "Artifact manifest doc should describe collection lanes.");
+        SmokeAssert.True(artifactDoc.Contains("PacketCapture", StringComparison.Ordinal), "Artifact manifest doc should describe future packet-capture placeholders.");
         SmokeAssert.True(reportStage.Contains("HostArtifactIndexBuilder", StringComparison.Ordinal), "Report artifact stage should write host artifact index.");
     }
 
@@ -86,6 +91,20 @@ internal sealed class ArtifactManifestContractScenario : ISmokeTestScenario
         var manifest = new ArtifactManifest
         {
             Producer = "smoke",
+            Collections =
+            [
+                new ArtifactCollectionDescriptor
+                {
+                    Name = "dropped-files",
+                    Kind = ArtifactKind.DroppedFile,
+                    Category = "dropped-file",
+                    EvidenceRole = "dropped-file",
+                    RelativePath = "artifacts/dropped-files",
+                    Enabled = true,
+                    Implemented = true,
+                    Status = "captured"
+                }
+            ],
             Artifacts =
             [
                 new ArtifactDescriptor
@@ -93,8 +112,13 @@ internal sealed class ArtifactManifestContractScenario : ISmokeTestScenario
                     Kind = ArtifactKind.DroppedFile,
                     Name = "drop.bin",
                     Category = "dropped-file",
-                    RelativePath = "artifacts/drop.bin",
-                    SafeLink = "artifacts/drop.bin",
+                    RelativePath = "artifacts/dropped-files/drop.bin",
+                    SafeLink = "artifacts/dropped-files/drop.bin",
+                    EvidenceRole = "dropped-file",
+                    CaptureState = "captured",
+                    GuestPath = @"C:\work\drop.bin",
+                    ImportPath = "artifacts/dropped-files/drop.bin",
+                    CollectionName = "dropped-files",
                     MimeType = "application/octet-stream",
                     SizeBytes = 4,
                     Sha256 = "0000000000000000000000000000000000000000000000000000000000000000",
@@ -121,10 +145,15 @@ internal sealed class ArtifactManifestContractScenario : ISmokeTestScenario
 
         var roundTrip = await store.ReadManifestAsync(descriptor, cancellationToken);
         SmokeAssert.True(roundTrip.JobId == jobId, "Round-tripped manifest should carry job ID.");
+        SmokeAssert.True(roundTrip.ImportRoot == Path.Combine(runtimeRoot, "jobs", jobId.ToString("N")), "Round-tripped manifest should carry normalized import root.");
+        SmokeAssert.True(roundTrip.Collections.Count == 1, "Round-tripped manifest should preserve collection entries.");
+        SmokeAssert.True(roundTrip.Collections[0].SafeLink == "artifacts/dropped-files", "Round-tripped collection should expose a safe link.");
         SmokeAssert.True(roundTrip.Artifacts.Count == 1, "Round-tripped manifest should preserve artifact entries.");
         SmokeAssert.True(roundTrip.Artifacts[0].Kind == ArtifactKind.DroppedFile, "Round-tripped manifest should preserve dropped-file kind.");
         SmokeAssert.True(roundTrip.Artifacts[0].Hashes.ContainsKey("sha256"), "Round-tripped manifest entries should expose hash map.");
-        SmokeAssert.True(roundTrip.Artifacts[0].SafeLink == "artifacts/drop.bin", "Round-tripped manifest entries should preserve safe link.");
+        SmokeAssert.True(roundTrip.Artifacts[0].SafeLink == "artifacts/dropped-files/drop.bin", "Round-tripped manifest entries should preserve safe link.");
+        SmokeAssert.True(roundTrip.Artifacts[0].EvidenceRole == "dropped-file", "Round-tripped manifest entries should preserve evidence role.");
+        SmokeAssert.True(roundTrip.Artifacts[0].ImportPath == "artifacts/dropped-files/drop.bin", "Round-tripped manifest entries should preserve import path.");
     }
 
     /// <summary>
@@ -136,16 +165,52 @@ internal sealed class ArtifactManifestContractScenario : ISmokeTestScenario
     {
         var guestRoot = Path.Combine(context.RuntimeRoot, "artifact-manifest-guest", Guid.NewGuid().ToString("N"));
         var artifactsRoot = Path.Combine(guestRoot, "artifacts");
-        Directory.CreateDirectory(artifactsRoot);
-        var droppedFilePath = Path.Combine(artifactsRoot, "drop.bin");
+        var droppedFilesRoot = Path.Combine(artifactsRoot, "dropped-files");
+        var screenshotsRoot = Path.Combine(guestRoot, "screenshots");
+        var memoryDumpsRoot = Path.Combine(guestRoot, "memory-dumps");
+        Directory.CreateDirectory(droppedFilesRoot);
+        Directory.CreateDirectory(screenshotsRoot);
+        Directory.CreateDirectory(memoryDumpsRoot);
+        var droppedFilePath = Path.Combine(droppedFilesRoot, "drop.bin");
+        var screenshotPath = Path.Combine(screenshotsRoot, "after-run.bmp");
+        var memoryDumpPath = Path.Combine(memoryDumpsRoot, "after-start-pid123.dmp");
         await File.WriteAllTextAsync(droppedFilePath, "drop", cancellationToken);
+        await File.WriteAllBytesAsync(screenshotPath, [0x42, 0x4d, 0x00, 0x00], cancellationToken);
+        await File.WriteAllBytesAsync(memoryDumpPath, [0x4d, 0x44, 0x4d, 0x50], cancellationToken);
 
         var manifestPath = Path.Combine(artifactsRoot, "manifest.json");
         var manifest = new ArtifactManifest
         {
             RuntimeRoot = @"C:\KSwordSandbox\out",
             RootPath = @"C:\KSwordSandbox\out\artifacts",
+            ImportRoot = @"C:\KSwordSandbox\out",
             Producer = "KSword.Sandbox.Agent",
+            Collections =
+            [
+                new ArtifactCollectionDescriptor
+                {
+                    Name = "dropped-files",
+                    Kind = ArtifactKind.DroppedFile,
+                    Category = "dropped-file",
+                    EvidenceRole = "dropped-file",
+                    RelativePath = "artifacts/dropped-files",
+                    Enabled = true,
+                    Implemented = true,
+                    Status = "captured"
+                },
+                new ArtifactCollectionDescriptor
+                {
+                    Name = "packet-captures",
+                    Kind = ArtifactKind.PacketCapture,
+                    Category = "packet-capture",
+                    EvidenceRole = "packet-capture",
+                    RelativePath = "packet-captures",
+                    Enabled = false,
+                    Implemented = false,
+                    Status = "disabled",
+                    Reason = "packetCaptureReservedForFuture"
+                }
+            ],
             Artifacts =
             [
                 new ArtifactDescriptor
@@ -153,15 +218,59 @@ internal sealed class ArtifactManifestContractScenario : ISmokeTestScenario
                     Kind = ArtifactKind.DroppedFile,
                     Name = "drop.bin",
                     Category = "dropped-file",
-                    RelativePath = "artifacts/drop.bin",
-                    FullPath = @"C:\KSwordSandbox\out\artifacts\drop.bin",
-                    SafeLink = "artifacts/drop.bin",
+                    RelativePath = "artifacts/dropped-files/drop.bin",
+                    FullPath = @"C:\KSwordSandbox\out\artifacts\dropped-files\drop.bin",
+                    SafeLink = "artifacts/dropped-files/drop.bin",
+                    EvidenceRole = "dropped-file",
+                    CaptureState = "captured",
+                    GuestPath = @"C:\work\drop.bin",
+                    ImportPath = "artifacts/dropped-files/drop.bin",
+                    CollectionName = "dropped-files",
                     MimeType = "application/octet-stream",
                     SizeBytes = 4,
                     Metadata = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
                     {
-                        ["origin"] = "guest"
+                        ["origin"] = "guest",
+                        ["guestRelativePath"] = "drop.bin"
                     }
+                },
+                new ArtifactDescriptor
+                {
+                    Kind = ArtifactKind.Screenshot,
+                    Name = "after-run.bmp",
+                    Category = "screenshot",
+                    RelativePath = "screenshots/after-run.bmp",
+                    FullPath = @"C:\KSwordSandbox\out\screenshots\after-run.bmp",
+                    EvidenceRole = "screenshot",
+                    CapturePhase = "after-run",
+                    CaptureState = "captured",
+                    ImportPath = "screenshots/after-run.bmp",
+                    CollectionName = "screenshots",
+                    MimeType = "image/bmp",
+                    SizeBytes = 4
+                },
+                new ArtifactDescriptor
+                {
+                    Kind = ArtifactKind.MemoryDump,
+                    Name = "after-start-pid123.dmp",
+                    Category = "memory-dump",
+                    RelativePath = "memory-dumps/after-start-pid123.dmp",
+                    FullPath = @"C:\KSwordSandbox\out\memory-dumps\after-start-pid123.dmp",
+                    EvidenceRole = "memory-dump",
+                    CapturePhase = "after-start",
+                    CaptureState = "captured",
+                    ImportPath = "memory-dumps/after-start-pid123.dmp",
+                    CollectionName = "memory-dumps",
+                    MimeType = "application/vnd.microsoft.minidump",
+                    SizeBytes = 4
+                },
+                new ArtifactDescriptor
+                {
+                    Kind = ArtifactKind.DroppedFile,
+                    Name = "escape.bin",
+                    Category = "dropped-file",
+                    RelativePath = "../escape.bin",
+                    FullPath = @"C:\KSwordSandbox\out\escape.bin"
                 }
             ]
         };
@@ -172,13 +281,21 @@ internal sealed class ArtifactManifestContractScenario : ISmokeTestScenario
             ?? throw new InvalidOperationException("Guest manifest should load.");
 
         SmokeAssert.True(loaded.RootPath == artifactsRoot, "Loaded guest manifest should normalize root path to host artifacts directory.");
-        SmokeAssert.True(loaded.Artifacts.Count == 1, "Loaded guest manifest should preserve artifact count.");
+        SmokeAssert.True(loaded.ImportRoot == guestRoot, "Loaded guest manifest should normalize import root to host guest output.");
+        SmokeAssert.True(loaded.Collections.Count == 2, "Loaded guest manifest should preserve collection lanes.");
+        SmokeAssert.True(loaded.Collections.Any(collection => collection.Kind == ArtifactKind.PacketCapture && !collection.Implemented), "Loaded guest manifest should preserve future packet-capture placeholder.");
+        SmokeAssert.True(loaded.Artifacts.Count == 4, "Loaded guest manifest should preserve artifact count, including unsafe entries as non-linkable descriptors.");
         SmokeAssert.True(loaded.Artifacts[0].FullPath == droppedFilePath, "Loaded guest artifact should resolve full host path from relative path.");
         SmokeAssert.True(loaded.Artifacts[0].Metadata.ContainsKey("guestFullPath"), "Loaded guest artifact should preserve original guest full path.");
         SmokeAssert.True(loaded.Artifacts[0].Category == "dropped-file", "Loaded guest artifact should preserve category.");
         SmokeAssert.True(loaded.Artifacts[0].MimeType == "application/octet-stream", "Loaded guest artifact should preserve MIME type.");
-        SmokeAssert.True(loaded.Artifacts[0].SafeLink == "artifacts/drop.bin", "Loaded guest artifact should expose a safe link.");
+        SmokeAssert.True(loaded.Artifacts[0].SafeLink == "artifacts/dropped-files/drop.bin", "Loaded guest artifact should expose a safe link.");
+        SmokeAssert.True(loaded.Artifacts[0].EvidenceRole == "dropped-file", "Loaded guest artifact should preserve evidence role.");
+        SmokeAssert.True(loaded.Artifacts[0].ImportPath == "artifacts/dropped-files/drop.bin", "Loaded guest artifact should preserve import path.");
         SmokeAssert.True(!string.IsNullOrWhiteSpace(loaded.Artifacts[0].Sha256), "Loaded guest artifact should fill SHA-256 when file is present.");
+        SmokeAssert.True(loaded.Artifacts.Any(artifact => artifact.Kind == ArtifactKind.Screenshot && artifact.CapturePhase == "after-run"), "Loaded guest manifest should preserve screenshot capture phase.");
+        SmokeAssert.True(loaded.Artifacts.Any(artifact => artifact.Kind == ArtifactKind.MemoryDump && artifact.CollectionName == "memory-dumps"), "Loaded guest manifest should preserve memory-dump collection names.");
+        SmokeAssert.True(loaded.Artifacts.Any(artifact => artifact.Name == "escape.bin" && string.IsNullOrWhiteSpace(artifact.SafeLink)), "Unsafe guest artifact paths should not become safe links.");
     }
 
     /// <summary>
@@ -194,34 +311,54 @@ internal sealed class ArtifactManifestContractScenario : ISmokeTestScenario
         var guestRoot = Path.Combine(jobRoot, "guest", jobId.ToString("N"));
         var screenshotsRoot = Path.Combine(guestRoot, "screenshots");
         var memoryDumpsRoot = Path.Combine(guestRoot, "memory-dumps");
+        var packetCapturesRoot = Path.Combine(guestRoot, "packet-captures");
         var artifactsRoot = Path.Combine(guestRoot, "artifacts");
+        var droppedFilesRoot = Path.Combine(artifactsRoot, "dropped-files");
         Directory.CreateDirectory(screenshotsRoot);
         Directory.CreateDirectory(memoryDumpsRoot);
+        Directory.CreateDirectory(packetCapturesRoot);
         Directory.CreateDirectory(artifactsRoot);
+        Directory.CreateDirectory(droppedFilesRoot);
 
         await File.WriteAllTextAsync(Path.Combine(jobRoot, "report.json"), "{}", cancellationToken);
+        await File.WriteAllTextAsync(Path.Combine(jobRoot, "report.html"), "<html></html>", cancellationToken);
+        await File.WriteAllTextAsync(Path.Combine(jobRoot, "runbook.json"), "{}", cancellationToken);
+        await File.WriteAllTextAsync(Path.Combine(jobRoot, "runbook-execution.json"), "{}", cancellationToken);
         await File.WriteAllTextAsync(Path.Combine(guestRoot, "events.json"), "[]", cancellationToken);
+        await File.WriteAllTextAsync(Path.Combine(guestRoot, "agent-summary.json"), "{}", cancellationToken);
         await File.WriteAllTextAsync(Path.Combine(guestRoot, "driver-events.jsonl"), "{}", cancellationToken);
         await File.WriteAllBytesAsync(Path.Combine(screenshotsRoot, "after-run.bmp"), [0x42, 0x4d, 0x00, 0x00], cancellationToken);
         await File.WriteAllBytesAsync(Path.Combine(memoryDumpsRoot, "after-start-pid123.dmp"), [0x4d, 0x44, 0x4d, 0x50], cancellationToken);
-        await File.WriteAllTextAsync(Path.Combine(artifactsRoot, "drop.bin"), "drop", cancellationToken);
+        await File.WriteAllBytesAsync(Path.Combine(packetCapturesRoot, "future.pcapng"), [0x0a, 0x0d, 0x0d, 0x0a], cancellationToken);
+        await File.WriteAllTextAsync(Path.Combine(droppedFilesRoot, "drop.bin"), "drop", cancellationToken);
         await File.WriteAllTextAsync(Path.Combine(artifactsRoot, "manifest.json"), "{}", cancellationToken);
 
         var builder = new HostArtifactIndexBuilder();
         var index = builder.Build(jobId, jobRoot);
         AssertIndexedArtifact(index, ArtifactKind.ReportJson, "report.json");
+        AssertIndexedArtifact(index, ArtifactKind.ReportHtml, "report.html");
+        AssertIndexedArtifact(index, ArtifactKind.RunbookJson, "runbook.json");
+        AssertIndexedArtifact(index, ArtifactKind.RunbookExecutionJson, "runbook-execution.json");
         AssertIndexedArtifact(index, ArtifactKind.GuestEventsJson, $"guest/{jobId:N}/events.json");
+        AssertIndexedArtifact(index, ArtifactKind.GuestSummaryJson, $"guest/{jobId:N}/agent-summary.json");
         AssertIndexedArtifact(index, ArtifactKind.DriverEventsJsonLines, $"guest/{jobId:N}/driver-events.jsonl");
-        AssertIndexedArtifact(index, ArtifactKind.Screenshot, $"guest/{jobId:N}/screenshots/after-run.bmp");
-        var memoryDump = AssertIndexedArtifact(index, ArtifactKind.Bundle, $"guest/{jobId:N}/memory-dumps/after-start-pid123.dmp");
+        var screenshot = AssertIndexedArtifact(index, ArtifactKind.Screenshot, $"guest/{jobId:N}/screenshots/after-run.bmp");
+        SmokeAssert.True(screenshot.CapturePhase == "after-run", "Screenshot index entry should include capture phase.");
+        SmokeAssert.True(screenshot.CollectionName == "screenshots", "Screenshot index entry should include collection name.");
+        var memoryDump = AssertIndexedArtifact(index, ArtifactKind.MemoryDump, $"guest/{jobId:N}/memory-dumps/after-start-pid123.dmp");
         SmokeAssert.True(memoryDump.Category == "memory-dump", "Memory dump index entry should include memory-dump category.");
         SmokeAssert.True(memoryDump.MimeType == "application/vnd.microsoft.minidump", "Memory dump index entry should include minidump MIME type.");
         SmokeAssert.True(memoryDump.Metadata.TryGetValue("evidenceRole", out var dumpEvidenceRole) && dumpEvidenceRole == "memory-dump", "Memory dump index entry should include evidence role.");
-        var dropped = AssertIndexedArtifact(index, ArtifactKind.DroppedFile, $"guest/{jobId:N}/artifacts/drop.bin");
+        SmokeAssert.True(memoryDump.CollectionName == "memory-dumps", "Memory dump index entry should include collection name.");
+        var packetCapture = AssertIndexedArtifact(index, ArtifactKind.PacketCapture, $"guest/{jobId:N}/packet-captures/future.pcapng");
+        SmokeAssert.True(packetCapture.Category == "packet-capture", "Packet capture index entry should include packet-capture category.");
+        SmokeAssert.True(packetCapture.MimeType == "application/x-pcapng", "Packet capture index entry should include pcapng MIME type.");
+        SmokeAssert.True(packetCapture.CollectionName == "packet-captures", "Packet capture index entry should include collection name.");
+        var dropped = AssertIndexedArtifact(index, ArtifactKind.DroppedFile, $"guest/{jobId:N}/artifacts/dropped-files/drop.bin");
         SmokeAssert.True(dropped.SizeBytes == 4, "Dropped-file index entry should include size.");
         SmokeAssert.True(dropped.MimeType == "application/octet-stream", "Dropped-file index entry should include MIME type.");
         SmokeAssert.True(dropped.Category == "dropped-file", "Dropped-file index entry should include category.");
-        SmokeAssert.True(dropped.SafeLink == $"guest/{jobId:N}/artifacts/drop.bin", "Dropped-file index entry should include safe relative link.");
+        SmokeAssert.True(dropped.SafeLink == $"guest/{jobId:N}/artifacts/dropped-files/drop.bin", "Dropped-file index entry should include safe relative link.");
         SmokeAssert.True(dropped.Hashes.ContainsKey("sha256"), "Dropped-file index entry should include hashes map.");
 
         var indexDescriptor = builder.WriteIndex(jobId, jobRoot);
@@ -245,13 +382,15 @@ internal sealed class ArtifactManifestContractScenario : ISmokeTestScenario
         var guestRoot = Path.Combine(jobRoot, "guest", jobId.ToString("N"));
         var screenshotsRoot = Path.Combine(guestRoot, "screenshots");
         var artifactsRoot = Path.Combine(guestRoot, "artifacts");
+        var droppedFilesRoot = Path.Combine(artifactsRoot, "dropped-files");
         Directory.CreateDirectory(screenshotsRoot);
         Directory.CreateDirectory(artifactsRoot);
+        Directory.CreateDirectory(droppedFilesRoot);
 
         var eventsPath = Path.Combine(guestRoot, "events.json");
         var driverPath = Path.Combine(guestRoot, "driver-events.jsonl");
         var screenshotPath = Path.Combine(screenshotsRoot, "after-run.bmp");
-        var dropPath = Path.Combine(artifactsRoot, "drop.bin");
+        var dropPath = Path.Combine(droppedFilesRoot, "drop.bin");
         var manifestPath = Path.Combine(artifactsRoot, "manifest.json");
         await File.WriteAllTextAsync(eventsPath, "[]", cancellationToken);
         await File.WriteAllTextAsync(driverPath, "{}", cancellationToken);
@@ -271,9 +410,12 @@ internal sealed class ArtifactManifestContractScenario : ISmokeTestScenario
                         Kind = ArtifactKind.DroppedFile,
                         Name = "drop.bin",
                         Category = "dropped-file",
-                        RelativePath = "artifacts/drop.bin",
-                        FullPath = @"C:\KSwordSandbox\out\artifacts\drop.bin",
-                        SafeLink = "artifacts/drop.bin",
+                        RelativePath = "artifacts/dropped-files/drop.bin",
+                        FullPath = @"C:\KSwordSandbox\out\artifacts\dropped-files\drop.bin",
+                        SafeLink = "artifacts/dropped-files/drop.bin",
+                        EvidenceRole = "dropped-file",
+                        ImportPath = "artifacts/dropped-files/drop.bin",
+                        CollectionName = "dropped-files",
                         MimeType = "application/octet-stream",
                         SizeBytes = 4,
                         Metadata = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
@@ -371,7 +513,7 @@ internal sealed class ArtifactManifestContractScenario : ISmokeTestScenario
                     Path = dropPath,
                     Data =
                     {
-                        ["relativePath"] = "artifacts/drop.bin"
+                        ["relativePath"] = "artifacts/dropped-files/drop.bin"
                     }
                 }
             ]
@@ -384,12 +526,12 @@ internal sealed class ArtifactManifestContractScenario : ISmokeTestScenario
         SmokeAssert.True(html.Contains("events.json", StringComparison.Ordinal), "HTML report should expose events.json.");
         SmokeAssert.True(html.Contains("driver-events.jsonl", StringComparison.Ordinal), "HTML report should expose driver-events.jsonl.");
         SmokeAssert.True(html.Contains("screenshots/after-run.bmp", StringComparison.Ordinal), "HTML report should expose screenshot path.");
-        SmokeAssert.True(html.Contains("artifacts/drop.bin", StringComparison.Ordinal), "HTML report should expose dropped-file path.");
+        SmokeAssert.True(html.Contains("artifacts/dropped-files/drop.bin", StringComparison.Ordinal), "HTML report should expose dropped-file path.");
         SmokeAssert.True(html.Contains($"href=\"guest/{jobId:N}/events.json\"", StringComparison.Ordinal), "HTML report should use safe relative event links.");
         SmokeAssert.True(html.Contains($"href=\"guest/{jobId:N}/driver-events.jsonl\"", StringComparison.Ordinal), "HTML report should link driver JSONL.");
         SmokeAssert.True(html.Contains($"href=\"guest/{jobId:N}/screenshots/after-run.bmp\"", StringComparison.Ordinal), "HTML report should link screenshots.");
         SmokeAssert.True(html.Contains($"href=\"guest/{jobId:N}/artifacts/manifest.json\"", StringComparison.Ordinal), "HTML report should link artifact manifest.");
-        SmokeAssert.True(html.Contains($"href=\"guest/{jobId:N}/artifacts/drop.bin\"", StringComparison.Ordinal), "HTML report should link dropped files.");
+        SmokeAssert.True(html.Contains($"href=\"guest/{jobId:N}/artifacts/dropped-files/drop.bin\"", StringComparison.Ordinal), "HTML report should link dropped files.");
         SmokeAssert.True(html.Contains("Artifact evidence", StringComparison.Ordinal), "HTML report should render collapsible artifact evidence.");
         SmokeAssert.True(html.Contains("Related artifacts", StringComparison.Ordinal), "HTML report event evidence should expand related artifacts.");
         SmokeAssert.True(html.Contains("Screenshot preview", StringComparison.Ordinal), "HTML report should render screenshot evidence preview.");

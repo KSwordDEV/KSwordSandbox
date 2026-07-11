@@ -57,7 +57,10 @@ internal sealed class ScreenshotProbe : IGuestProbe
             Data =
             {
                 ["phase"] = phaseLabel,
-                ["captureEnabled"] = "true"
+                ["captureEnabled"] = "true",
+                ["captureState"] = result.Captured ? "captured" : "skipped",
+                ["evidenceRole"] = "screenshot",
+                ["collectionName"] = "screenshots"
             }
         };
 
@@ -91,7 +94,29 @@ internal sealed class ScreenshotProbe : IGuestProbe
             evt.Data["heightPixels"] = result.HeightPixels.Value.ToString(CultureInfo.InvariantCulture);
         }
 
+        if (!string.IsNullOrWhiteSpace(result.Path))
+        {
+            evt.Data["relativePath"] = SafeRelativePath(context.OutputDirectory, result.Path);
+        }
+
         return [evt];
+    }
+
+    /// <summary>
+    /// Computes a display relative path without trusting malformed paths.
+    /// Inputs are output root and artifact path; processing normalizes
+    /// separators and falls back to the original path on invalid input.
+    /// </summary>
+    private static string SafeRelativePath(string root, string path)
+    {
+        try
+        {
+            return Path.GetRelativePath(root, path).Replace('\\', '/');
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException)
+        {
+            return path;
+        }
     }
 
     /// <summary>

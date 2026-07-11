@@ -67,8 +67,10 @@ internal sealed class MemoryDumpProbe : IGuestProbe
             {
                 ["phase"] = phaseLabel,
                 ["captureEnabled"] = "true",
+                ["captureState"] = result.Captured ? "captured" : "skipped",
                 ["dumpType"] = result.DumpType,
-                ["evidenceRole"] = "memory-dump"
+                ["evidenceRole"] = "memory-dump",
+                ["collectionName"] = "memory-dumps"
             }
         };
 

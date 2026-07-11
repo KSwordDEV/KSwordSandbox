@@ -20,7 +20,7 @@ internal static class RunbookExecutionFlowPage
     internal static string Render(AnalysisJob job, SandboxRunbookExecutionResult? execution)
     {
         var jobId = job.JobId.ToString("D");
-        var title = "执行流程 / Execution flow";
+        var title = "进度页（执行流程） / Progress page (execution flow)";
         var rows = RenderStepCards(job, execution);
         var summary = RenderSummary(job, execution);
         var liveEventsLink = $"<a class=\"button secondary\" href=\"/jobs/{Attr(jobId)}/live-events\" target=\"_blank\" rel=\"noopener\" data-zh=\"实时原始事件监控\" data-en=\"Live raw event monitor\">实时原始事件监控</a>";
@@ -67,8 +67,9 @@ internal static class RunbookExecutionFlowPage
           <header>
             <div class="topbar">
               <div>
-                <h1 data-zh="执行流程" data-en="Execution flow">执行流程</h1>
-                <p data-zh="这里只展示人能理解的执行进度，不展示 PowerShell 命令、stdout 或 stderr。" data-en="This page shows human-readable execution progress only; PowerShell commands, stdout, and stderr stay hidden.">这里只展示人能理解的执行进度，不展示 PowerShell 命令、stdout 或 stderr。</p>
+                <h1 data-zh="进度页（执行流程）" data-en="Progress page (execution flow)">进度页（执行流程）</h1>
+                <p data-zh="这里只展示人能理解的执行进度，不展示命令行细节、PowerShell 命令、stdout 或 stderr。" data-en="This page shows human-readable execution progress only; command-line details, PowerShell commands, stdout, and stderr stay hidden.">这里只展示人能理解的执行进度，不展示命令行细节、PowerShell 命令、stdout 或 stderr。</p>
+                <p data-zh="报告按钮会在报告生成后可用；实时原始事件请进入动态监控页，最终结论以报告页为准。" data-en="Report buttons are useful after report generation. Use the dynamic monitor for live raw events, and treat the report page as the final source of truth.">报告按钮会在报告生成后可用；实时原始事件请进入动态监控页，最终结论以报告页为准。</p>
               </div>
               <button class="secondary" id="langToggle" type="button">EN</button>
             </div>

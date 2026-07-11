@@ -68,6 +68,7 @@ internal static class DashboardExperiencePage
             .report-notice p { margin:6px 0; }
             .report-entry { align-items:center; display:flex; flex-wrap:wrap; gap:8px; margin-top:12px; }
             .report-entry .hint { margin:0; }
+            .progress-links { margin:6px 0 10px; }
             .pill { background: #e7f3ff; border:1px solid rgba(67,160,255,.35); border-radius: 999px; color: #075985; display: inline-block; font-size: 12px; font-weight: 800; padding: 4px 9px; }
             .pill.ready { background:#dcfce7; border-color:#86efac; color:#166534; }
             .tabs { display:flex; flex-wrap:wrap; gap:8px; margin:16px 0 10px; }
@@ -117,7 +118,7 @@ internal static class DashboardExperiencePage
             <div class="header-row">
               <div>
                 <h1 data-zh="KSword 沙箱主机" data-en="KSword Sandbox Host">KSword 沙箱主机</h1>
-                <p data-zh="提交样本后先生成安全计划；主页面只保留关键状态、报告入口和独立监控入口，排障细节放在“执行流程”。" data-en="Submit a sample to create a safe plan first. The dashboard keeps only key status, report access, and the standalone monitor; troubleshooting details live in Execution flow.">提交样本后先生成安全计划；主页面只保留关键状态、报告入口和独立监控入口，排障细节放在“执行流程”。</p>
+                <p data-zh="上传样本后会自动生成安全计划、启动动态分析并打开独立监控页；主页面只保留关键状态、报告入口和进度入口，排障细节放在“执行流程”。" data-en="After upload, the UI creates a safe plan, starts dynamic analysis, and opens the standalone monitor automatically. The dashboard keeps only key status, report access, and progress entry points; troubleshooting details live in Execution flow.">上传样本后会自动生成安全计划、启动动态分析并打开独立监控页；主页面只保留关键状态、报告入口和进度入口，排障细节放在“执行流程”。</p>
                 <p><span class="pill" data-zh="提示：右键路径、表格值、证据字段和执行流程视图可复制。" data-en="Tip: right-click paths, table values, evidence fields, and execution-flow details to copy.">提示：右键路径、表格值、证据字段和执行流程视图可复制。</span></p>
               </div>
               <button class="secondary lang-toggle" type="button" onclick="toggleLanguage()" data-zh="English" data-en="中文">English</button>
@@ -132,20 +133,20 @@ internal static class DashboardExperiencePage
           <main>
             <section id="plan">
               <h2 data-zh="规划分析" data-en="Plan analysis">规划分析</h2>
-              <p class="hint"><span data-zh="三种输入方式已拆成 Tab，默认选中“上传 EXE”。生成计划不会执行样本；确认后再启动虚拟机分析。" data-en="The three input methods are tabs, with Upload EXE selected by default. Creating a plan does not execute the sample; start VM analysis only after review.">三种输入方式已拆成 Tab，默认选中“上传 EXE”。生成计划不会执行样本；确认后再启动虚拟机分析。</span></p>
+              <p class="hint"><span data-zh="三种输入方式已拆成 Tab，默认选中“上传 EXE”。上传流程是一键动态分析：保存样本、生成计划、打开动态监控页并启动虚拟机；已有路径/扫描入口仍先停在计划复核。" data-en="The three input methods are tabs, with Upload EXE selected by default. Upload is a one-click dynamic flow: store the sample, create the plan, open the dynamic monitor, and start the VM. Existing-path and scan entries still stop at plan review first.">三种输入方式已拆成 Tab，默认选中“上传 EXE”。上传流程是一键动态分析：保存样本、生成计划、打开动态监控页并启动虚拟机；已有路径/扫描入口仍先停在计划复核。</span></p>
               <div class="tabs" role="tablist">
                 <button id="tab-upload" class="tab-button active" type="button" role="tab" aria-selected="true" aria-controls="panel-upload" onclick="selectPlanTab('upload')" data-zh="上传 EXE" data-en="Upload EXE">上传 EXE</button>
                 <button id="tab-path" class="tab-button" type="button" role="tab" aria-selected="false" aria-controls="panel-path" onclick="selectPlanTab('path')" data-zh="已有路径" data-en="Existing path">已有路径</button>
                 <button id="tab-scan" class="tab-button" type="button" role="tab" aria-selected="false" aria-controls="panel-scan" onclick="selectPlanTab('scan')" data-zh="扫描目录" data-en="Scan folder">扫描目录</button>
               </div>
               <div id="panel-upload" class="tab-panel active" role="tabpanel" aria-labelledby="tab-upload">
-                  <h3 data-zh="上传 .exe 并生成计划" data-en="Upload .exe and create plan">上传 .exe 并生成计划</h3>
-                  <p class="hint" data-zh="保存文件并生成一个可检查的分析计划；此步骤不会执行样本。" data-en="Stores the file and creates a reviewable analysis plan; this step does not execute the sample.">保存文件并生成一个可检查的分析计划；此步骤不会执行样本。</p>
+                  <h3 data-zh="上传 .exe 并自动动态分析" data-en="Upload .exe and run dynamic analysis">上传 .exe 并自动动态分析</h3>
+                  <p class="hint" data-zh="保存文件、生成可检查计划，然后自动进入动态监控页并启动虚拟机分析；若浏览器阻止新标签页，当前任务卡片会保留“进入动态监控页”链接。" data-en="Stores the file, creates a reviewable plan, then automatically enters the dynamic monitor page and starts VM analysis. If the browser blocks the new tab, the current job card keeps an Enter dynamic monitor link.">保存文件、生成可检查计划，然后自动进入动态监控页并启动虚拟机分析；若浏览器阻止新标签页，当前任务卡片会保留“进入动态监控页”链接。</p>
                   <label for="sampleUpload" data-zh="可执行文件（.exe）" data-en="Executable file (.exe)">可执行文件（.exe）</label>
                   <input id="sampleUpload" type="file" accept=".exe,application/vnd.microsoft.portable-executable,application/octet-stream">
                   <label for="uploadDuration" data-zh="分析时长（秒）" data-en="Analysis duration, seconds">分析时长（秒）</label>
                   <input id="uploadDuration" type="number" min="1" max="900" value="120">
-                  <button onclick="uploadAndPlan()" data-zh="上传 .exe → 生成计划" data-en="Upload .exe → create plan">上传 .exe → 生成计划</button>
+                  <button onclick="uploadAndPlan()" data-zh="上传 .exe → 自动分析并打开监控" data-en="Upload .exe → auto analyze and open monitor">上传 .exe → 自动分析并打开监控</button>
               </div>
               <div id="panel-path" class="tab-panel" role="tabpanel" aria-labelledby="tab-path" hidden>
                   <h3 data-zh="规划已有主机路径" data-en="Plan existing host path">规划已有主机路径</h3>
@@ -214,7 +215,7 @@ internal static class DashboardExperiencePage
               ['任务已规划', 'Job planned', '已生成可复核计划', 'Reviewable plan is ready'],
               ['检查 Hyper-V / 凭据', 'Check Hyper-V / credential', '验证主机与登录条件', 'Validate host and logon prerequisites'],
               ['恢复检查点', 'Restore checkpoint', '通常是耗时阶段', 'Usually one of the slower stages'],
-              ['启动虚拟机', 'Start VM', '等待 PowerShell Direct 可用', 'Wait for PowerShell Direct readiness'],
+              ['启动虚拟机', 'Start VM', '等待来宾通道可用', 'Wait for guest channel readiness'],
               ['复制样本与工具', 'Stage sample and tools', '传入样本、Agent 与采集器', 'Copy sample, agent, and collectors'],
               ['运行样本与采集器', 'Run sample and collectors', '采集运行期行为', 'Collect runtime behavior'],
               ['回收事件', 'Collect events', '从来宾机同步证据', 'Sync evidence from the guest'],
@@ -438,7 +439,8 @@ internal static class DashboardExperiencePage
                 const job = await planPath(uploaded.fullPath);
                 const jobId = job && (job.jobId || job.id);
                 if (jobId) {
-                  setStatus(t('上传完成，已自动开始虚拟机分析。', 'Upload completed; VM analysis has started automatically.'), false);
+                  setStatus(t('上传完成，正在打开动态监控页并启动虚拟机分析。', 'Upload completed; opening the dynamic monitor and starting VM analysis.'), false);
+                  openLiveMonitor(String(jobId), true);
                   await executeRunbook(String(jobId), true);
                 }
               } catch (error) {
@@ -645,26 +647,32 @@ internal static class DashboardExperiencePage
                   </div>
                   <p class="button-row">
                     <button onclick="executeRunbook('${escapeJs(jobId)}', true)" data-zh="启动虚拟机分析" data-en="Start VM analysis">启动虚拟机分析</button>
-                    <a class="buttonlink secondary" target="_blank" rel="noopener" href="${escapeHtml(executionFlowHref)}" data-zh="执行流程" data-en="Execution flow">执行流程</a>
+                    <a class="buttonlink secondary" target="_blank" rel="noopener" href="${escapeHtml(executionFlowHref)}" data-zh="打开进度页（执行流程）" data-en="Open progress page (execution flow)">打开进度页（执行流程）</a>
+                    <a class="buttonlink secondary" target="_blank" rel="noopener" href="${escapeHtml(liveEventsHref)}" onclick="openLiveMonitor('${escapeJs(jobId)}', false); return false;" data-zh="进入动态监控页" data-en="Enter dynamic monitor">进入动态监控页</a>
                   </p>
                   <div class="report-entry" data-copy="${escapeAttribute([servedReportHref, servedZhReportHref, servedEnReportHref].filter(Boolean).join('\n'))}" data-copy-label="served report links">
-                    <strong data-zh="报告入口" data-en="Report entry">报告入口</strong>
+                    <strong data-zh="报告页" data-en="Report page">报告页</strong>
                     <a class="buttonlink" target="_blank" rel="noopener" href="${escapeHtml(currentReportHref)}" data-report-current="true" data-job-id="${escapeAttribute(jobId)}">${escapeHtml(reportState.link)}</a>
                     <a class="buttonlink secondary" target="_blank" rel="noopener" href="${escapeHtml(servedZhReportHref)}" data-zh="中文" data-en="ZH">中文</a>
                     <a class="buttonlink secondary" target="_blank" rel="noopener" href="${escapeHtml(servedEnReportHref)}" data-zh="英文" data-en="EN">英文</a>
-                    <span class="hint">${escapeHtml(reportState.hint)} <span data-zh="动态分析成功后会自动打开当前语言报告；若浏览器阻止跳转，请点这里。" data-en="After a successful dynamic analysis, the current-language report opens automatically; click here if the browser blocks navigation.">动态分析成功后会自动打开当前语言报告；若浏览器阻止跳转，请点这里。</span></span>
+                    <span class="hint">${escapeHtml(reportState.hint)} <span data-zh="主按钮始终跟随右上角语言；动态分析成功后会自动打开当前语言报告，中文/英文备用入口保留在旁边。" data-en="The primary button follows the language toggle. After successful dynamic analysis, the current-language report opens automatically, with Chinese and English fallbacks beside it.">主按钮始终跟随右上角语言；动态分析成功后会自动打开当前语言报告，中文/英文备用入口保留在旁边。</span></span>
                   </div>
                   <div id="reportNotice" class="report-notice" hidden></div>
                   <div class="callout">
-                    <strong data-zh="独立页：实时原始事件监控" data-en="Standalone page: live raw event monitor">独立页：实时原始事件监控</strong>
-                    <p class="hint" data-zh="分析运行时可在新标签页查看原始事件；主页面保持简洁，最终结论以报告为准。" data-en="Open raw events in a separate tab while analysis runs; the dashboard stays simple and the final report remains the source of truth.">分析运行时可在新标签页查看原始事件；主页面保持简洁，最终结论以报告为准。</p>
-                    <p class="button-row"><a class="buttonlink secondary" target="_blank" rel="noopener" href="${escapeHtml(liveEventsHref)}" data-zh="打开实时原始事件监控（独立页）" data-en="Open live raw event monitor (standalone)">打开实时原始事件监控（独立页）</a></p>
+                    <strong data-zh="独立页：动态监控" data-en="Standalone page: dynamic monitor">独立页：动态监控</strong>
+                    <p class="hint" data-zh="上传流程会自动尝试打开该页；分析运行时可在新标签页查看原始事件。主页面保持简洁，最终结论以报告为准。" data-en="The upload flow automatically tries to open this page. Keep it in a separate tab to watch raw events while analysis runs. The dashboard stays simple and the final report remains the source of truth.">上传流程会自动尝试打开该页；分析运行时可在新标签页查看原始事件。主页面保持简洁，最终结论以报告为准。</p>
+                    <p class="button-row"><a class="buttonlink secondary" target="_blank" rel="noopener" href="${escapeHtml(liveEventsHref)}" onclick="openLiveMonitor('${escapeJs(jobId)}', false); return false;" data-zh="进入动态监控页（独立页）" data-en="Enter dynamic monitor (standalone)">进入动态监控页（独立页）</a></p>
                   </div>
+                  <div id="liveMonitorNotice" class="report-notice" hidden></div>
                   <div id="analysisProgress" class="progress-box stage-progress">
                     <div class="progress-head">
-                      <strong data-zh="阶段进度" data-en="Stage progress">阶段进度</strong>
+                      <strong data-zh="进度页摘要" data-en="Progress summary">进度页摘要</strong>
                       <span id="progressMeta" class="progress-meta" data-copy-label="progress stage">1/8</span>
                     </div>
+                    <p class="button-row progress-links">
+                      <a class="buttonlink secondary" target="_blank" rel="noopener" href="${escapeHtml(executionFlowHref)}" data-zh="打开进度页（执行流程）" data-en="Open progress page (execution flow)">打开进度页（执行流程）</a>
+                      <a class="buttonlink secondary" target="_blank" rel="noopener" href="${escapeHtml(liveEventsHref)}" onclick="openLiveMonitor('${escapeJs(jobId)}', false); return false;" data-zh="进入动态监控页" data-en="Enter dynamic monitor">进入动态监控页</a>
+                    </p>
                     <div class="progress-bar"><div id="progressFill" class="progress-fill"></div></div>
                     <div id="stageList" class="stages"></div>
                     <div id="runbookProgressDetails" class="runbook-progress-details"></div>
@@ -795,7 +803,7 @@ internal static class DashboardExperiencePage
                   <td data-copy="${escapeAttribute(statusLabel)}" data-copy-label="job status">${escapeHtml(statusLabel)}</td>
                   <td>${copyableCode(samplePath, 'job sample path', '-')}</td>
                   <td>${reportCell}</td>
-                  <td><button class="secondary" onclick="refreshJob('${escapeJs(jobId)}')" data-zh="打开任务" data-en="Open job">打开任务</button> <a class="buttonlink secondary" href="/jobs/${encodeURIComponent(jobId)}/live-events" target="_blank" rel="noopener" data-zh="实时监控独立页" data-en="Standalone live monitor">实时监控独立页</a></td>
+                  <td><button class="secondary" onclick="refreshJob('${escapeJs(jobId)}')" data-zh="打开任务" data-en="Open job">打开任务</button> <a class="buttonlink secondary" href="/jobs/${encodeURIComponent(jobId)}/execution-flow" target="_blank" rel="noopener" data-zh="进度页" data-en="Progress page">进度页</a> <a class="buttonlink secondary" href="/jobs/${encodeURIComponent(jobId)}/live-events" target="_blank" rel="noopener" data-zh="动态监控页" data-en="Dynamic monitor">动态监控页</a></td>
                 </tr>`;
               }).join('');
 
@@ -1073,6 +1081,10 @@ internal static class DashboardExperiencePage
               return `/api/jobs/${encodeURIComponent(jobId)}/report/html?lang=${lang}`;
             }
 
+            function buildLiveMonitorHref(jobId) {
+              return `/jobs/${encodeURIComponent(jobId)}/live-events`;
+            }
+
             function refreshLocalizedReportLinks() {
               const lang = currentLanguage === 'en' ? 'en' : 'zh';
               document.querySelectorAll('a[data-report-current][data-job-id]').forEach(anchor => {
@@ -1083,6 +1095,57 @@ internal static class DashboardExperiencePage
 
                 anchor.href = buildReportHref(jobId, lang);
               });
+            }
+
+            function openLiveMonitor(jobId, autoOpenedFromUpload) {
+              // Inputs: current job id and whether this was triggered by the
+              // upload one-click flow. Processing opens the standalone dynamic
+              // monitor in a new tab and leaves the dashboard alive so the long
+              // runbook execute request can continue. Return: true when the
+              // browser provided a window handle, false when it likely blocked.
+              if (!jobId) {
+                return false;
+              }
+
+              const href = buildLiveMonitorHref(jobId);
+              let opened = null;
+              try {
+                opened = window.open(href, '_blank');
+                if (opened) {
+                  opened.opener = null;
+                }
+              } catch {
+                opened = null;
+              }
+
+              showLiveMonitorNotice(jobId, Boolean(opened), Boolean(autoOpenedFromUpload));
+              return Boolean(opened);
+            }
+
+            function showLiveMonitorNotice(jobId, opened, autoOpenedFromUpload) {
+              const notice = document.getElementById('liveMonitorNotice');
+              if (!notice || !jobId) {
+                return;
+              }
+
+              const href = buildLiveMonitorHref(jobId);
+              const progressHref = `/jobs/${encodeURIComponent(jobId)}/execution-flow`;
+              const zhMessage = opened
+                ? (autoOpenedFromUpload ? '已在新标签页打开动态监控页；请保留主界面继续执行分析，完成后会进入报告页。' : '已打开动态监控页；主界面仍保留进度和报告入口。')
+                : '浏览器可能阻止了自动打开；请点击“进入动态监控页”，并保留主界面继续执行分析。';
+              const enMessage = opened
+                ? (autoOpenedFromUpload ? 'The dynamic monitor opened in a new tab. Keep this dashboard running analysis; it will enter the report page when complete.' : 'The dynamic monitor opened. This dashboard still keeps progress and report links.')
+                : 'The browser may have blocked automatic opening. Click Enter dynamic monitor and keep this dashboard running analysis.';
+              notice.hidden = false;
+              notice.innerHTML = `
+                <strong data-zh="动态监控页已准备好" data-en="Dynamic monitor is ready">动态监控页已准备好</strong>
+                <p data-zh="${escapeAttribute(zhMessage)}" data-en="${escapeAttribute(enMessage)}">${escapeHtml(zhMessage)}</p>
+                <p class="button-row">
+                  <a class="buttonlink" target="_blank" rel="noopener" href="${escapeHtml(href)}" data-zh="进入动态监控页" data-en="Enter dynamic monitor">进入动态监控页</a>
+                  <a class="buttonlink secondary" target="_blank" rel="noopener" href="${escapeHtml(progressHref)}" data-zh="打开进度页（执行流程）" data-en="Open progress page (execution flow)">打开进度页（执行流程）</a>
+                </p>`;
+              applyLanguage();
+              notice.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
             }
 
             function showReportReadyNotice(jobId, autoOpen) {

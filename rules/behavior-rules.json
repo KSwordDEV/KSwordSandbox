@@ -1,5 +1,5 @@
 {
-  "version": "2026-07-11-v3-behavior-rule-expansion",
+  "version": "2026-07-11-v4-behavior-rule-coverage-expansion",
   "rules": [
     {
       "id": "host-submission",
@@ -3975,6 +3975,1597 @@
         "network",
         "http",
         "triage"
+      ]
+    },
+    {
+      "id": "screenshot-captured-artifact",
+      "title": "Screenshot artifact captured",
+      "severity": "info",
+      "summary": "The guest screenshot probe captured a desktop image artifact with dimensions or artifact path metadata for behavior review.",
+      "eventTypes": [
+        "screenshot.captured"
+      ],
+      "dataKeys": [
+        "widthPixels",
+        "heightPixels",
+        "relativePath",
+        "phase"
+      ],
+      "tags": [
+        "artifact",
+        "screenshot",
+        "collection"
+      ]
+    },
+    {
+      "id": "screenshot-capture-skipped",
+      "title": "Screenshot capture skipped",
+      "severity": "info",
+      "summary": "The guest screenshot probe was enabled but could not capture the desktop; reason and diagnostic fields are surfaced for collection quality review.",
+      "eventTypes": [
+        "screenshot.skipped"
+      ],
+      "dataKeys": [
+        "reason",
+        "diagnosticStage",
+        "exceptionType",
+        "win32Error"
+      ],
+      "tags": [
+        "artifact",
+        "screenshot",
+        "collection",
+        "diagnostic"
+      ]
+    },
+    {
+      "id": "memory-dump-captured-artifact",
+      "title": "Memory dump artifact captured",
+      "severity": "info",
+      "summary": "The opt-in guest memory dump probe captured a minidump artifact for the launched sample process.",
+      "eventTypes": [
+        "memory_dump.captured"
+      ],
+      "dataContains": {
+        "evidenceRole": [
+          "memory-dump"
+        ],
+        "dumpType": [
+          "MiniDump",
+          "Normal"
+        ]
+      },
+      "tags": [
+        "artifact",
+        "memory",
+        "collection"
+      ]
+    },
+    {
+      "id": "memory-dump-capture-skipped",
+      "title": "Memory dump capture skipped",
+      "severity": "info",
+      "summary": "The opt-in memory dump probe was enabled but could not produce a dump; diagnostics explain whether the root PID, platform, or API call failed.",
+      "eventTypes": [
+        "memory_dump.skipped"
+      ],
+      "dataKeys": [
+        "reason",
+        "diagnosticStage",
+        "exceptionType",
+        "processId",
+        "win32Error"
+      ],
+      "tags": [
+        "artifact",
+        "memory",
+        "collection",
+        "diagnostic"
+      ]
+    },
+    {
+      "id": "dropped-file-artifact-copied",
+      "title": "Dropped file artifact copied",
+      "severity": "info",
+      "summary": "The guest artifact collector copied a newly-created sample working-directory file into artifacts/dropped-files for post-run analysis.",
+      "eventTypes": [
+        "artifact.dropped_file.copied"
+      ],
+      "dataContains": {
+        "evidenceRole": [
+          "dropped-file"
+        ],
+        "collectDroppedFiles": [
+          "true"
+        ]
+      },
+      "tags": [
+        "artifact",
+        "dropped-file",
+        "collection"
+      ]
+    },
+    {
+      "id": "dropped-file-artifact-skipped",
+      "title": "Dropped file artifact copy skipped",
+      "severity": "info",
+      "summary": "A dropped-file artifact copy candidate was skipped because it was missing, outside scope, invalid, under the output tree, or failed to copy.",
+      "eventTypes": [
+        "artifact.dropped_file.skipped"
+      ],
+      "dataKeys": [
+        "reason",
+        "sourceEventType",
+        "sourcePath",
+        "collectDroppedFiles"
+      ],
+      "tags": [
+        "artifact",
+        "dropped-file",
+        "collection",
+        "diagnostic"
+      ]
+    },
+    {
+      "id": "dropped-executable-artifact-copied",
+      "title": "Executable dropped-file artifact copied",
+      "severity": "medium",
+      "summary": "The copied dropped-file artifact path or source path indicates an executable, script, library, driver, or archive payload staged during execution.",
+      "mitreTechniqueId": "T1105",
+      "mitreTechniqueName": "Ingress Tool Transfer",
+      "eventTypes": [
+        "artifact.dropped_file.copied"
+      ],
+      "containsPath": [
+        ".exe",
+        ".dll",
+        ".sys",
+        ".scr",
+        ".com",
+        ".ps1",
+        ".vbs",
+        ".js",
+        ".hta",
+        ".bat",
+        ".cmd",
+        ".zip",
+        ".rar",
+        ".7z"
+      ],
+      "tags": [
+        "artifact",
+        "dropped-file",
+        "payload",
+        "download-execute"
+      ]
+    },
+    {
+      "id": "artifact-manifest-written",
+      "title": "Guest artifact manifest written",
+      "severity": "info",
+      "summary": "The guest artifact writer produced a manifest that can correlate screenshots, dropped files, memory dumps, and other artifacts with normalized events.",
+      "eventTypes": [
+        "artifact.manifest.written"
+      ],
+      "dataKeys": [
+        "artifactCount",
+        "copiedDroppedFileCount",
+        "relativePath",
+        "artifactRoot"
+      ],
+      "tags": [
+        "artifact",
+        "manifest",
+        "collection"
+      ]
+    },
+    {
+      "id": "process-tree-observed",
+      "title": "Process tree node observed",
+      "severity": "low",
+      "summary": "The process-tree probe emitted a node with parent, root, depth, child-count, or lineage metadata, enabling full descendant review beyond single process-start rows.",
+      "eventTypes": [
+        "process.tree"
+      ],
+      "dataKeys": [
+        "rootProcessId",
+        "treeDepth",
+        "childProcessCount",
+        "treeLineage",
+        "parentProcessId"
+      ],
+      "tags": [
+        "process",
+        "process-tree",
+        "lineage"
+      ]
+    },
+    {
+      "id": "process-tree-root-unavailable",
+      "title": "Process tree root unavailable",
+      "severity": "info",
+      "summary": "The process-tree probe could not locate the expected root process in the snapshot, which may happen after rapid exit or collection timing races.",
+      "eventTypes": [
+        "process.tree_unavailable"
+      ],
+      "dataKeys": [
+        "rootProcessId",
+        "reason",
+        "phase"
+      ],
+      "tags": [
+        "process",
+        "process-tree",
+        "collection",
+        "diagnostic"
+      ]
+    },
+    {
+      "id": "process-start-failed",
+      "title": "Sample process start failed",
+      "severity": "medium",
+      "summary": "The guest executor failed to start the submitted sample or helper process; failure metadata is surfaced because launch failures can mask behavior.",
+      "eventTypes": [
+        "process.start_failed"
+      ],
+      "dataKeys": [
+        "exceptionType",
+        "message",
+        "exitCode",
+        "command"
+      ],
+      "tags": [
+        "process",
+        "execution",
+        "diagnostic"
+      ]
+    },
+    {
+      "id": "process-tree-large-fanout-placeholder",
+      "title": "Process tree fan-out metadata placeholder",
+      "severity": "low",
+      "summary": "A process-tree node carried child-count metadata, reserved for future thresholding of unusually broad process fan-out from a sample lineage.",
+      "eventTypes": [
+        "process.tree"
+      ],
+      "dataKeys": [
+        "childProcessCount"
+      ],
+      "tags": [
+        "process",
+        "process-tree",
+        "placeholder"
+      ]
+    },
+    {
+      "id": "lolbin-process-tree-node",
+      "title": "Living-off-the-land binary in process tree",
+      "severity": "medium",
+      "summary": "A process-tree node path referenced a common Windows LOLBin used for proxy execution, scripting, installation, or download staging.",
+      "mitreTechniqueId": "T1218",
+      "mitreTechniqueName": "System Binary Proxy Execution",
+      "eventTypes": [
+        "process.tree",
+        "process.new"
+      ],
+      "containsPath": [
+        "\\rundll32.exe",
+        "\\regsvr32.exe",
+        "\\mshta.exe",
+        "\\installutil.exe",
+        "\\regasm.exe",
+        "\\regsvcs.exe",
+        "\\msiexec.exe",
+        "\\cmstp.exe",
+        "\\certutil.exe",
+        "\\bitsadmin.exe"
+      ],
+      "tags": [
+        "process",
+        "process-tree",
+        "lolbin",
+        "defense-evasion"
+      ]
+    },
+    {
+      "id": "execution-from-user-writable-tree-path",
+      "title": "Process tree execution from user-writable path",
+      "severity": "medium",
+      "summary": "A process-tree or process observation referenced execution from Temp, AppData, Downloads, ProgramData, or Public staging paths.",
+      "mitreTechniqueId": "T1204.002",
+      "mitreTechniqueName": "Malicious File",
+      "eventTypes": [
+        "process.tree",
+        "process.new",
+        "process.start"
+      ],
+      "containsPath": [
+        "\\Temp\\",
+        "\\AppData\\",
+        "\\Downloads\\",
+        "\\Users\\Public\\",
+        "\\ProgramData\\"
+      ],
+      "tags": [
+        "process",
+        "process-tree",
+        "execution",
+        "staging-path"
+      ]
+    },
+    {
+      "id": "service-system-change-created",
+      "title": "Service inventory item created or modified",
+      "severity": "high",
+      "summary": "The system-change probe observed a Windows service created or modified after sample launch.",
+      "mitreTechniqueId": "T1543.003",
+      "mitreTechniqueName": "Windows Service",
+      "eventTypes": [
+        "service.created",
+        "service.modified"
+      ],
+      "dataKeys": [
+        "serviceName",
+        "displayName",
+        "rawSummary",
+        "serviceProcessId"
+      ],
+      "tags": [
+        "persistence",
+        "service",
+        "system-diff"
+      ]
+    },
+    {
+      "id": "service-system-change-suspicious-command",
+      "title": "Service diff with suspicious command metadata",
+      "severity": "high",
+      "summary": "A created or modified service diff referenced command shells, script interpreters, or user-writable staging paths in its raw metadata.",
+      "mitreTechniqueId": "T1543.003",
+      "mitreTechniqueName": "Windows Service",
+      "eventTypes": [
+        "service.created",
+        "service.modified"
+      ],
+      "dataContains": {
+        "rawSummary": [
+          "\\Temp\\",
+          "\\AppData\\",
+          "\\Users\\Public\\",
+          "powershell",
+          "cmd.exe",
+          "wscript",
+          "cscript",
+          "mshta",
+          ".ps1",
+          ".vbs"
+        ]
+      },
+      "tags": [
+        "persistence",
+        "service",
+        "system-diff",
+        "suspicious-command"
+      ]
+    },
+    {
+      "id": "scheduled-task-system-change-created",
+      "title": "Scheduled task inventory item created or modified",
+      "severity": "high",
+      "summary": "The system-change probe observed a scheduled task created or modified after sample launch.",
+      "mitreTechniqueId": "T1053.005",
+      "mitreTechniqueName": "Scheduled Task",
+      "eventTypes": [
+        "scheduled_task.created",
+        "scheduled_task.modified"
+      ],
+      "dataKeys": [
+        "taskName",
+        "taskToRun",
+        "rawSummary",
+        "author"
+      ],
+      "tags": [
+        "persistence",
+        "scheduled-task",
+        "system-diff"
+      ]
+    },
+    {
+      "id": "scheduled-task-suspicious-target",
+      "title": "Scheduled task diff with suspicious target",
+      "severity": "high",
+      "summary": "A created or modified scheduled task launches script interpreters, command shells, or payloads from user-writable staging paths.",
+      "mitreTechniqueId": "T1053.005",
+      "mitreTechniqueName": "Scheduled Task",
+      "eventTypes": [
+        "scheduled_task.created",
+        "scheduled_task.modified"
+      ],
+      "dataContains": {
+        "taskToRun": [
+          "powershell",
+          "cmd.exe",
+          "wscript",
+          "cscript",
+          "mshta",
+          "\\Temp\\",
+          "\\AppData\\",
+          "\\Users\\Public\\",
+          ".ps1",
+          ".vbs",
+          ".hta"
+        ],
+        "rawSummary": [
+          "powershell",
+          "cmd.exe",
+          "\\Temp\\",
+          "\\AppData\\",
+          ".ps1"
+        ]
+      },
+      "tags": [
+        "persistence",
+        "scheduled-task",
+        "system-diff",
+        "suspicious-command"
+      ]
+    },
+    {
+      "id": "startup-item-system-change-created",
+      "title": "Startup item inventory entry created or modified",
+      "severity": "high",
+      "summary": "The system-change probe observed a startup registry value or startup-folder item created or modified after sample launch.",
+      "mitreTechniqueId": "T1547.001",
+      "mitreTechniqueName": "Registry Run Keys / Startup Folder",
+      "eventTypes": [
+        "startup_item.created",
+        "startup_item.modified"
+      ],
+      "dataKeys": [
+        "location",
+        "name",
+        "value",
+        "kind"
+      ],
+      "tags": [
+        "persistence",
+        "startup-item",
+        "system-diff"
+      ]
+    },
+    {
+      "id": "startup-item-executable-value",
+      "title": "Startup item executable or script value",
+      "severity": "high",
+      "summary": "A created or modified startup item references an executable, script, library, or user-writable path as its autostart payload.",
+      "mitreTechniqueId": "T1547.001",
+      "mitreTechniqueName": "Registry Run Keys / Startup Folder",
+      "eventTypes": [
+        "startup_item.created",
+        "startup_item.modified"
+      ],
+      "dataContains": {
+        "value": [
+          ".exe",
+          ".dll",
+          ".ps1",
+          ".vbs",
+          ".js",
+          ".hta",
+          "\\Temp\\",
+          "\\AppData\\",
+          "\\Users\\Public\\"
+        ],
+        "location": [
+          "CurrentVersion\\Run",
+          "Startup"
+        ]
+      },
+      "tags": [
+        "persistence",
+        "startup-item",
+        "autostart-payload"
+      ]
+    },
+    {
+      "id": "persistence-system-item-deleted",
+      "title": "Persistence inventory item deleted",
+      "severity": "medium",
+      "summary": "The system-change probe observed a service, scheduled task, or startup item deleted during execution; this can represent cleanup, tampering, or installer rollback.",
+      "mitreTechniqueId": "T1070.004",
+      "mitreTechniqueName": "File Deletion",
+      "eventTypes": [
+        "service.deleted",
+        "scheduled_task.deleted",
+        "startup_item.deleted"
+      ],
+      "dataKeys": [
+        "serviceName",
+        "taskName",
+        "location",
+        "name",
+        "change"
+      ],
+      "tags": [
+        "persistence",
+        "cleanup",
+        "system-diff"
+      ]
+    },
+    {
+      "id": "system-diff-truncated",
+      "title": "System diff event volume truncated",
+      "severity": "info",
+      "summary": "The process-tree/system-change probe reached a per-kind diff cap and emitted a truncation marker so analysts know additional service, task, or startup changes existed.",
+      "eventTypes": [
+        "service.diff_truncated",
+        "scheduled_task.diff_truncated",
+        "startup_item.diff_truncated"
+      ],
+      "dataKeys": [
+        "totalCount",
+        "emittedCount",
+        "change",
+        "phase"
+      ],
+      "tags": [
+        "collection",
+        "system-diff",
+        "truncated"
+      ]
+    },
+    {
+      "id": "dns-cache-added",
+      "title": "DNS cache entry added",
+      "severity": "low",
+      "summary": "The network probe observed a new DNS cache entry after sample execution, preserving name, record type, TTL, or raw resolver evidence.",
+      "mitreTechniqueId": "T1071.004",
+      "mitreTechniqueName": "DNS",
+      "eventTypes": [
+        "dns.cache.added"
+      ],
+      "dataKeys": [
+        "name",
+        "recordType",
+        "data",
+        "timeToLive",
+        "rawSummary"
+      ],
+      "tags": [
+        "network",
+        "dns",
+        "dns-cache"
+      ]
+    },
+    {
+      "id": "dns-cache-txt-or-tunnel",
+      "title": "DNS cache entry with tunnel-capable record",
+      "severity": "medium",
+      "summary": "A new DNS cache entry referenced TXT, NULL, CNAME, tunnel, DGA, or DNS-log tokens commonly used in DNS C2 and tunneling triage.",
+      "mitreTechniqueId": "T1071.004",
+      "mitreTechniqueName": "DNS",
+      "eventTypes": [
+        "dns.cache.added"
+      ],
+      "dataContains": {
+        "recordType": [
+          "TXT",
+          "NULL",
+          "CNAME"
+        ],
+        "name": [
+          "dnscat",
+          "iodine",
+          "dnslog",
+          "tunnel"
+        ],
+        "rawSummary": [
+          "TXT",
+          "NULL",
+          "dnscat",
+          "iodine",
+          "tunnel",
+          "dga"
+        ]
+      },
+      "tags": [
+        "network",
+        "dns",
+        "c2",
+        "tunnel"
+      ]
+    },
+    {
+      "id": "dns-cache-dynamic-domain",
+      "title": "DNS cache dynamic or disposable domain",
+      "severity": "medium",
+      "summary": "A new DNS cache entry contained dynamic DNS, disposable, or commonly abused domain/TLD fragments.",
+      "mitreTechniqueId": "T1071.004",
+      "mitreTechniqueName": "DNS",
+      "eventTypes": [
+        "dns.cache.added"
+      ],
+      "dataContains": {
+        "name": [
+          ".duckdns.",
+          ".no-ip.",
+          ".hopto.",
+          ".ddns.",
+          ".dynu.",
+          ".top",
+          ".xyz",
+          ".club"
+        ],
+        "rawSummary": [
+          "duckdns",
+          "no-ip",
+          "hopto",
+          "ddns",
+          "dynu",
+          ".top",
+          ".xyz",
+          ".club"
+        ]
+      },
+      "tags": [
+        "network",
+        "dns",
+        "triage"
+      ]
+    },
+    {
+      "id": "netstat-connection-observed",
+      "title": "Netstat connection row observed",
+      "severity": "low",
+      "summary": "The network probe emitted a netstat row with local/remote endpoints, protocol, state, and optional owning PID for timeline correlation.",
+      "mitreTechniqueId": "T1049",
+      "mitreTechniqueName": "System Network Connections Discovery",
+      "eventTypes": [
+        "network.netstat"
+      ],
+      "dataKeys": [
+        "protocol",
+        "local",
+        "remote",
+        "state",
+        "owningProcessId"
+      ],
+      "tags": [
+        "network",
+        "netstat",
+        "discovery"
+      ]
+    },
+    {
+      "id": "netstat-added-connection",
+      "title": "Netstat connection added after launch",
+      "severity": "medium",
+      "summary": "A netstat row appeared only after sample execution, providing endpoint, state, protocol, and PID metadata beyond the TCP diff API.",
+      "mitreTechniqueId": "T1049",
+      "mitreTechniqueName": "System Network Connections Discovery",
+      "eventTypes": [
+        "network.netstat.added"
+      ],
+      "dataKeys": [
+        "protocol",
+        "remote",
+        "state",
+        "owningProcessId"
+      ],
+      "tags": [
+        "network",
+        "netstat",
+        "delta"
+      ]
+    },
+    {
+      "id": "network-listener-opened",
+      "title": "Network listener opened",
+      "severity": "medium",
+      "summary": "A TCP or UDP listener appeared after launch, which can indicate bind shells, local proxying, peer-to-peer behavior, or test harness services.",
+      "eventTypes": [
+        "network.tcp.listener.opened",
+        "network.udp.listener.opened"
+      ],
+      "dataKeys": [
+        "protocol",
+        "local",
+        "localAddress",
+        "localPort",
+        "state"
+      ],
+      "tags": [
+        "network",
+        "listener",
+        "delta"
+      ]
+    },
+    {
+      "id": "network-nonstandard-listener-port",
+      "title": "Network listener on non-standard suspicious port",
+      "severity": "high",
+      "summary": "A newly-opened TCP or UDP listener used a port often associated with reverse shells, proxying, Tor, testing backdoors, or non-standard command channels.",
+      "mitreTechniqueId": "T1571",
+      "mitreTechniqueName": "Non-Standard Port",
+      "eventTypes": [
+        "network.tcp.listener.opened",
+        "network.udp.listener.opened"
+      ],
+      "dataContains": {
+        "localPort": [
+          "4444",
+          "1337",
+          "31337",
+          "5555",
+          "6667",
+          "8081",
+          "9001",
+          "9050",
+          "9051"
+        ]
+      },
+      "tags": [
+        "network",
+        "listener",
+        "non-standard-port",
+        "c2"
+      ]
+    },
+    {
+      "id": "network-connection-closed",
+      "title": "TCP connection closed after launch",
+      "severity": "info",
+      "summary": "A TCP connection present in baseline was gone after execution; this is useful context for short-lived network behavior and cleanup windows.",
+      "eventTypes": [
+        "network.tcp.closed",
+        "network.netstat.removed"
+      ],
+      "dataKeys": [
+        "connection",
+        "remote",
+        "remoteAddress",
+        "remotePort",
+        "state"
+      ],
+      "tags": [
+        "network",
+        "tcp",
+        "delta",
+        "closed"
+      ]
+    },
+    {
+      "id": "http-executable-download",
+      "title": "HTTP executable or script download",
+      "severity": "high",
+      "summary": "HTTP or PCAP HTTP metadata referenced executable/script extensions, PE magic, archive payloads, or binary content types associated with staged tools.",
+      "mitreTechniqueId": "T1105",
+      "mitreTechniqueName": "Ingress Tool Transfer",
+      "eventTypes": [
+        "http.request",
+        "network.http",
+        "pcap.http"
+      ],
+      "dataContains": {
+        "url": [
+          ".exe",
+          ".dll",
+          ".ps1",
+          ".vbs",
+          ".hta",
+          ".js",
+          ".zip",
+          ".rar",
+          ".7z",
+          ".iso"
+        ],
+        "requestUri": [
+          ".exe",
+          ".dll",
+          ".ps1",
+          ".vbs",
+          ".hta",
+          ".zip"
+        ],
+        "contentType": [
+          "application/x-msdownload",
+          "application/octet-stream",
+          "application/zip",
+          "application/x-dosexec"
+        ],
+        "responseBodyMagic": [
+          "MZ",
+          "PK"
+        ],
+        "filename": [
+          ".exe",
+          ".dll",
+          ".ps1",
+          ".zip"
+        ]
+      },
+      "tags": [
+        "network",
+        "http",
+        "download",
+        "payload"
+      ]
+    },
+    {
+      "id": "http-post-or-checkin-beacon",
+      "title": "HTTP POST or check-in beacon pattern",
+      "severity": "medium",
+      "summary": "HTTP request metadata referenced POST/PUT methods or common beacon/check-in paths used by automated command channels.",
+      "mitreTechniqueId": "T1071.001",
+      "mitreTechniqueName": "Web Protocols",
+      "eventTypes": [
+        "http.request",
+        "network.http",
+        "pcap.http"
+      ],
+      "dataContains": {
+        "method": [
+          "POST",
+          "PUT"
+        ],
+        "url": [
+          "/gate",
+          "/panel",
+          "/checkin",
+          "/beacon",
+          "/api/",
+          "/tasks"
+        ],
+        "requestUri": [
+          "/gate",
+          "/panel",
+          "/checkin",
+          "/beacon",
+          "/api/",
+          "/tasks"
+        ],
+        "behavior": [
+          "beacon",
+          "checkin",
+          "c2"
+        ]
+      },
+      "tags": [
+        "network",
+        "http",
+        "c2",
+        "beacon"
+      ]
+    },
+    {
+      "id": "http-doh-request",
+      "title": "DNS-over-HTTPS request indicator",
+      "severity": "medium",
+      "summary": "HTTP metadata referenced DNS-over-HTTPS endpoints or application/dns-message content that can hide DNS lookups inside web traffic.",
+      "mitreTechniqueId": "T1071.004",
+      "mitreTechniqueName": "DNS",
+      "eventTypes": [
+        "http.request",
+        "network.http",
+        "pcap.http"
+      ],
+      "dataContains": {
+        "host": [
+          "cloudflare-dns.com",
+          "dns.google",
+          "dns.quad9.net",
+          "mozilla.cloudflare-dns.com"
+        ],
+        "url": [
+          "/dns-query",
+          "application/dns-message"
+        ],
+        "requestUri": [
+          "/dns-query"
+        ],
+        "contentType": [
+          "application/dns-message"
+        ]
+      },
+      "tags": [
+        "network",
+        "http",
+        "dns",
+        "doh"
+      ]
+    },
+    {
+      "id": "http-proxy-or-tunnel-method",
+      "title": "HTTP proxy or tunnel method observed",
+      "severity": "medium",
+      "summary": "HTTP telemetry referenced CONNECT, Upgrade, WebSocket, or proxy-like fields often used for tunneling through web infrastructure.",
+      "mitreTechniqueId": "T1090",
+      "mitreTechniqueName": "Proxy",
+      "eventTypes": [
+        "http.request",
+        "network.http",
+        "pcap.http"
+      ],
+      "dataContains": {
+        "method": [
+          "CONNECT"
+        ],
+        "headers": [
+          "Upgrade: websocket",
+          "Proxy-Authorization",
+          "Connection: Upgrade"
+        ],
+        "behavior": [
+          "proxy",
+          "tunnel",
+          "websocket"
+        ]
+      },
+      "tags": [
+        "network",
+        "http",
+        "proxy",
+        "tunnel"
+      ]
+    },
+    {
+      "id": "tls-invalid-certificate",
+      "title": "TLS invalid or self-signed certificate indicator",
+      "severity": "medium",
+      "summary": "TLS metadata referenced invalid, expired, untrusted, self-signed, or mismatched certificate validation evidence.",
+      "mitreTechniqueId": "T1573",
+      "mitreTechniqueName": "Encrypted Channel",
+      "eventTypes": [
+        "network.tls",
+        "tls.connection",
+        "pcap.tls"
+      ],
+      "dataContains": {
+        "certValidation": [
+          "invalid",
+          "expired",
+          "untrusted",
+          "self-signed",
+          "mismatch"
+        ],
+        "certificateIssuer": [
+          "self-signed",
+          "unknown"
+        ],
+        "certificateStatus": [
+          "invalid",
+          "expired",
+          "untrusted",
+          "self-signed"
+        ]
+      },
+      "tags": [
+        "network",
+        "tls",
+        "certificate",
+        "encrypted-channel"
+      ]
+    },
+    {
+      "id": "tls-encrypted-clienthello-or-esni",
+      "title": "TLS ECH or ESNI metadata observed",
+      "severity": "low",
+      "summary": "TLS metadata referenced encrypted SNI/ClientHello fields, reserved for future encrypted-channel triage when packet parsers expose ECH/ESNI details.",
+      "mitreTechniqueId": "T1573",
+      "mitreTechniqueName": "Encrypted Channel",
+      "eventTypes": [
+        "network.tls",
+        "tls.connection",
+        "pcap.tls"
+      ],
+      "dataContains": {
+        "extension": [
+          "encrypted_client_hello",
+          "ech",
+          "esni"
+        ],
+        "sni": [
+          "<encrypted>",
+          "encrypted",
+          "missing"
+        ],
+        "behavior": [
+          "ech",
+          "esni",
+          "encrypted clienthello"
+        ]
+      },
+      "tags": [
+        "network",
+        "tls",
+        "encrypted-channel",
+        "placeholder"
+      ]
+    },
+    {
+      "id": "pcap-executable-payload",
+      "title": "PCAP executable payload indicator",
+      "severity": "high",
+      "summary": "Packet-derived metadata referenced PE magic, executable filenames, archive payloads, or binary content types suggesting payload transfer.",
+      "mitreTechniqueId": "T1105",
+      "mitreTechniqueName": "Ingress Tool Transfer",
+      "eventTypes": [
+        "pcap.http",
+        "pcap.flow",
+        "network.flow",
+        "pcap.packet"
+      ],
+      "dataContains": {
+        "payloadMagic": [
+          "MZ",
+          "PK"
+        ],
+        "contentType": [
+          "application/x-msdownload",
+          "application/octet-stream",
+          "application/zip",
+          "application/x-dosexec"
+        ],
+        "filename": [
+          ".exe",
+          ".dll",
+          ".ps1",
+          ".zip",
+          ".rar",
+          ".7z"
+        ],
+        "url": [
+          ".exe",
+          ".dll",
+          ".ps1",
+          ".zip"
+        ]
+      },
+      "tags": [
+        "network",
+        "pcap",
+        "payload",
+        "download"
+      ]
+    },
+    {
+      "id": "pcap-dns-nxdomain-or-dga",
+      "title": "PCAP DNS NXDOMAIN or DGA indicator",
+      "severity": "medium",
+      "summary": "Packet-derived DNS telemetry referenced NXDOMAIN responses, DGA classification, or suspicious generated-domain labels.",
+      "mitreTechniqueId": "T1071.004",
+      "mitreTechniqueName": "DNS",
+      "eventTypes": [
+        "pcap.dns",
+        "dns.query",
+        "network.dns"
+      ],
+      "dataContains": {
+        "rcode": [
+          "NXDOMAIN",
+          "SERVFAIL"
+        ],
+        "classification": [
+          "dga",
+          "nxdomain",
+          "algorithmic"
+        ],
+        "queryName": [
+          "xn--",
+          "dga",
+          "entropy-high"
+        ],
+        "qname": [
+          "xn--",
+          "dga",
+          "entropy-high"
+        ]
+      },
+      "tags": [
+        "network",
+        "pcap",
+        "dns",
+        "dga"
+      ]
+    },
+    {
+      "id": "pcap-flow-upload-exfil-placeholder",
+      "title": "PCAP upload or exfiltration flow placeholder",
+      "severity": "medium",
+      "summary": "Flow or HTTP metadata referenced upload direction, POST/PUT bodies, or exfiltration labels; future parsers can attach thresholds for bytes sent.",
+      "mitreTechniqueId": "T1041",
+      "mitreTechniqueName": "Exfiltration Over C2 Channel",
+      "eventTypes": [
+        "pcap.flow",
+        "network.flow",
+        "pcap.http",
+        "http.request"
+      ],
+      "dataContains": {
+        "direction": [
+          "upload",
+          "egress",
+          "outbound"
+        ],
+        "method": [
+          "POST",
+          "PUT"
+        ],
+        "behavior": [
+          "exfil",
+          "upload",
+          "data theft"
+        ],
+        "classification": [
+          "exfil",
+          "upload"
+        ]
+      },
+      "tags": [
+        "network",
+        "pcap",
+        "exfiltration",
+        "placeholder"
+      ]
+    },
+    {
+      "id": "pcap-high-fanout-flow-placeholder",
+      "title": "PCAP high fan-out flow placeholder",
+      "severity": "low",
+      "summary": "Packet summary metadata carried flow-count or unique-destination fields for future high-fan-out scanning/beacon thresholding.",
+      "eventTypes": [
+        "pcap.summary",
+        "pcap.flow",
+        "network.flow"
+      ],
+      "dataKeys": [
+        "flowCount",
+        "uniqueDestinationCount",
+        "uniqueRemoteIpCount",
+        "packetCount",
+        "durationSeconds"
+      ],
+      "tags": [
+        "network",
+        "pcap",
+        "fanout",
+        "placeholder"
+      ]
+    },
+    {
+      "id": "rdp-network-port-observed",
+      "title": "RDP network port observed",
+      "severity": "medium",
+      "summary": "Network, driver, netstat, or PCAP telemetry referenced the Remote Desktop Protocol port 3389 or protocol labels.",
+      "mitreTechniqueId": "T1021.001",
+      "mitreTechniqueName": "Remote Desktop Protocol",
+      "eventTypes": [
+        "network.tcp",
+        "network.netstat",
+        "network.netstat.added",
+        "driver.network",
+        "pcap.tcp",
+        "network.flow"
+      ],
+      "dataContains": {
+        "remotePort": [
+          "3389"
+        ],
+        "destinationPort": [
+          "3389"
+        ],
+        "port": [
+          "3389"
+        ],
+        "remote": [
+          ":3389"
+        ],
+        "protocolName": [
+          "rdp",
+          "ms-wbt-server"
+        ]
+      },
+      "tags": [
+        "lateral-movement",
+        "rdp",
+        "network"
+      ]
+    },
+    {
+      "id": "ssh-network-port-observed",
+      "title": "SSH network port observed",
+      "severity": "medium",
+      "summary": "Network, driver, netstat, or PCAP telemetry referenced SSH port 22 or SSH protocol labels, useful for lateral movement and tunneling triage.",
+      "mitreTechniqueId": "T1021.004",
+      "mitreTechniqueName": "SSH",
+      "eventTypes": [
+        "network.tcp",
+        "network.netstat",
+        "network.netstat.added",
+        "driver.network",
+        "pcap.tcp",
+        "network.flow"
+      ],
+      "dataContains": {
+        "remotePort": [
+          "22"
+        ],
+        "destinationPort": [
+          "22"
+        ],
+        "port": [
+          "22"
+        ],
+        "remote": [
+          ":22"
+        ],
+        "protocolName": [
+          "ssh"
+        ]
+      },
+      "tags": [
+        "lateral-movement",
+        "ssh",
+        "network"
+      ]
+    },
+    {
+      "id": "ldap-kerberos-network-port-observed",
+      "title": "LDAP or Kerberos network port observed",
+      "severity": "medium",
+      "summary": "Network telemetry referenced LDAP, LDAPS, Kerberos, or Global Catalog ports that can support domain discovery, authentication, and lateral movement triage.",
+      "mitreTechniqueId": "T1018",
+      "mitreTechniqueName": "Remote System Discovery",
+      "eventTypes": [
+        "network.tcp",
+        "network.udp",
+        "network.netstat",
+        "network.netstat.added",
+        "driver.network",
+        "pcap.tcp",
+        "pcap.udp",
+        "network.flow"
+      ],
+      "dataContains": {
+        "remotePort": [
+          "389",
+          "636",
+          "88",
+          "464",
+          "3268",
+          "3269"
+        ],
+        "destinationPort": [
+          "389",
+          "636",
+          "88",
+          "464",
+          "3268",
+          "3269"
+        ],
+        "port": [
+          "389",
+          "636",
+          "88",
+          "464",
+          "3268",
+          "3269"
+        ],
+        "protocolName": [
+          "ldap",
+          "ldaps",
+          "kerberos",
+          "global catalog"
+        ]
+      },
+      "tags": [
+        "lateral-movement",
+        "discovery",
+        "domain",
+        "network"
+      ]
+    },
+    {
+      "id": "tor-or-proxy-port-observed",
+      "title": "Tor or proxy port observed",
+      "severity": "medium",
+      "summary": "Network telemetry referenced common local or remote proxy/Tor/SOCKS ports or protocol labels used to relay command channels.",
+      "mitreTechniqueId": "T1090",
+      "mitreTechniqueName": "Proxy",
+      "eventTypes": [
+        "network.tcp",
+        "network.netstat",
+        "network.netstat.added",
+        "driver.network",
+        "pcap.tcp",
+        "network.flow",
+        "network.tcp.listener.opened"
+      ],
+      "dataContains": {
+        "remotePort": [
+          "9050",
+          "9051",
+          "9150",
+          "1080",
+          "3128",
+          "8080"
+        ],
+        "localPort": [
+          "9050",
+          "9051",
+          "9150",
+          "1080",
+          "3128",
+          "8080"
+        ],
+        "destinationPort": [
+          "9050",
+          "9051",
+          "9150",
+          "1080",
+          "3128",
+          "8080"
+        ],
+        "protocolName": [
+          "socks",
+          "tor",
+          "proxy"
+        ]
+      },
+      "tags": [
+        "network",
+        "proxy",
+        "tor",
+        "c2"
+      ]
+    },
+    {
+      "id": "admin-share-file-path-observed",
+      "title": "Admin share file path observed",
+      "severity": "high",
+      "summary": "A file event referenced administrative shares such as ADMIN$, C$, IPC$, or UNC staging paths commonly used for lateral tool transfer.",
+      "mitreTechniqueId": "T1570",
+      "mitreTechniqueName": "Lateral Tool Transfer",
+      "eventTypes": [
+        "file.created",
+        "file.modified",
+        "file.open",
+        "driver.file",
+        "artifact.dropped_file.copied"
+      ],
+      "containsPath": [
+        "\\\\ADMIN$\\",
+        "\\\\C$\\",
+        "\\\\IPC$\\",
+        "\\ADMIN$\\",
+        "\\C$\\",
+        "\\IPC$\\"
+      ],
+      "tags": [
+        "lateral-movement",
+        "admin-share",
+        "file"
+      ]
+    },
+    {
+      "id": "remote-desktop-command-observed",
+      "title": "Remote Desktop command observed",
+      "severity": "medium",
+      "summary": "A command line referenced mstsc, cmdkey, or RDP connection file usage that can indicate interactive remote desktop activity.",
+      "mitreTechniqueId": "T1021.001",
+      "mitreTechniqueName": "Remote Desktop Protocol",
+      "eventTypes": [
+        "process.start"
+      ],
+      "containsCommandLine": [
+        "mstsc",
+        "mstsc.exe",
+        ".rdp",
+        "cmdkey /add:",
+        "cmdkey.exe /add:"
+      ],
+      "tags": [
+        "lateral-movement",
+        "rdp",
+        "command"
+      ]
+    },
+    {
+      "id": "network-share-discovery-command",
+      "title": "Network share discovery command",
+      "severity": "medium",
+      "summary": "A command line enumerated network shares, domains, sessions, or remote computers using built-in Windows discovery tools.",
+      "mitreTechniqueId": "T1135",
+      "mitreTechniqueName": "Network Share Discovery",
+      "eventTypes": [
+        "process.start"
+      ],
+      "containsCommandLine": [
+        "net view",
+        "net.exe view",
+        "net share",
+        "net.exe share",
+        "net use",
+        "nltest /dclist",
+        "nltest.exe /dclist",
+        "dsquery computer",
+        "Get-SmbShare",
+        "Get-SmbConnection"
+      ],
+      "tags": [
+        "discovery",
+        "network-share",
+        "lateral-movement"
+      ]
+    },
+    {
+      "id": "system-discovery-command",
+      "title": "System information discovery command",
+      "severity": "medium",
+      "summary": "A command line collected local OS, host, user, domain, or computer-system details that often precede staging or evasion decisions.",
+      "mitreTechniqueId": "T1082",
+      "mitreTechniqueName": "System Information Discovery",
+      "eventTypes": [
+        "process.start"
+      ],
+      "containsCommandLine": [
+        "systeminfo",
+        "hostname",
+        "whoami",
+        "whoami /all",
+        "wmic computersystem",
+        "wmic os get",
+        "Get-ComputerInfo",
+        "Get-CimInstance Win32_OperatingSystem",
+        "Get-WmiObject Win32_ComputerSystem"
+      ],
+      "tags": [
+        "discovery",
+        "system",
+        "command"
+      ]
+    },
+    {
+      "id": "process-discovery-command",
+      "title": "Process discovery command",
+      "severity": "medium",
+      "summary": "A command line enumerated running processes or services using tasklist, PowerShell, WMI, or service-control utilities.",
+      "mitreTechniqueId": "T1057",
+      "mitreTechniqueName": "Process Discovery",
+      "eventTypes": [
+        "process.start"
+      ],
+      "containsCommandLine": [
+        "tasklist",
+        "tasklist.exe",
+        "Get-Process",
+        "wmic process",
+        "Get-CimInstance Win32_Process",
+        "Get-WmiObject Win32_Process",
+        "sc query",
+        "sc.exe query"
+      ],
+      "tags": [
+        "discovery",
+        "process",
+        "command"
+      ]
+    },
+    {
+      "id": "network-discovery-command",
+      "title": "Network configuration discovery command",
+      "severity": "medium",
+      "summary": "A command line collected local network configuration, routes, ARP cache, firewall, or active connection details.",
+      "mitreTechniqueId": "T1016",
+      "mitreTechniqueName": "System Network Configuration Discovery",
+      "eventTypes": [
+        "process.start"
+      ],
+      "containsCommandLine": [
+        "ipconfig",
+        "ipconfig /all",
+        "netstat",
+        "netstat -ano",
+        "arp -a",
+        "route print",
+        "Get-NetIPConfiguration",
+        "Get-NetTCPConnection",
+        "Get-NetRoute",
+        "Get-DnsClientCache"
+      ],
+      "tags": [
+        "discovery",
+        "network",
+        "command"
+      ]
+    },
+    {
+      "id": "screenshot-api-observed",
+      "title": "Screen capture API observed",
+      "severity": "high",
+      "summary": "An API event referenced GDI/User32 screen-capture primitives such as BitBlt, GetDC, PrintWindow, or GetForegroundWindow.",
+      "mitreTechniqueId": "T1113",
+      "mitreTechniqueName": "Screen Capture",
+      "eventTypes": [
+        "api.call"
+      ],
+      "dataContains": {
+        "api": [
+          "BitBlt",
+          "GetDC",
+          "CreateCompatibleBitmap",
+          "PrintWindow",
+          "GetForegroundWindow",
+          "GetDesktopWindow"
+        ],
+        "operation": [
+          "screen capture",
+          "screenshot",
+          "desktop capture"
+        ]
+      },
+      "tags": [
+        "collection",
+        "screen-capture",
+        "api"
+      ]
+    },
+    {
+      "id": "file-masquerading-double-extension",
+      "title": "Double-extension masquerading file",
+      "severity": "medium",
+      "summary": "A file event referenced document/image/archive-looking names that end in executable or script extensions, a common user deception pattern.",
+      "mitreTechniqueId": "T1036",
+      "mitreTechniqueName": "Masquerading",
+      "eventTypes": [
+        "file.created",
+        "file.modified",
+        "driver.file",
+        "artifact.dropped_file.copied"
+      ],
+      "containsPath": [
+        ".pdf.exe",
+        ".doc.exe",
+        ".docx.exe",
+        ".xls.exe",
+        ".xlsx.exe",
+        ".jpg.exe",
+        ".png.exe",
+        ".txt.exe",
+        ".zip.exe",
+        ".pdf.scr",
+        ".doc.js",
+        ".txt.vbs"
+      ],
+      "tags": [
+        "defense-evasion",
+        "masquerading",
+        "filesystem"
+      ]
+    },
+    {
+      "id": "hidden-file-attribute-command",
+      "title": "Hidden or system file attribute command",
+      "severity": "medium",
+      "summary": "A command line used attrib to set hidden, system, or read-only file attributes, often used to conceal staged files or persistence artifacts.",
+      "mitreTechniqueId": "T1564.001",
+      "mitreTechniqueName": "Hidden Files and Directories",
+      "eventTypes": [
+        "process.start"
+      ],
+      "containsCommandLine": [
+        "attrib +h",
+        "attrib.exe +h",
+        "attrib +s",
+        "attrib.exe +s",
+        "attrib +r +h",
+        "attrib +h +s"
+      ],
+      "tags": [
+        "defense-evasion",
+        "hidden-files",
+        "command"
       ]
     }
   ]

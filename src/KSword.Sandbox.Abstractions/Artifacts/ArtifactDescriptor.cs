@@ -19,6 +19,18 @@ public sealed record ArtifactDescriptor
 
     public string SafeLink { get; init; } = string.Empty;
 
+    public string EvidenceRole { get; init; } = string.Empty;
+
+    public string CapturePhase { get; init; } = string.Empty;
+
+    public string CaptureState { get; init; } = string.Empty;
+
+    public string GuestPath { get; init; } = string.Empty;
+
+    public string ImportPath { get; init; } = string.Empty;
+
+    public string CollectionName { get; init; } = string.Empty;
+
     public string MimeType { get; init; } = string.Empty;
 
     public long SizeBytes { get; init; }

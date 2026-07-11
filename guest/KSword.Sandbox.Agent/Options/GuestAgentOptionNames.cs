@@ -21,4 +21,7 @@ internal static class GuestAgentOptionNames
     public const string DroppedFiles = "dropped-files";
     public const string MemoryDump = "memory-dump";
     public const string MemoryDumps = "memory-dumps";
+    public const string PacketCapture = "packet-capture";
+    public const string Pcap = "pcap";
+    public const string NetworkCapture = "network-capture";
 }

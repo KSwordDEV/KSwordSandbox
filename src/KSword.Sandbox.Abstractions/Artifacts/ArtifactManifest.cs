@@ -15,9 +15,13 @@ public sealed record ArtifactManifest
 
     public string RootPath { get; init; } = string.Empty;
 
+    public string ImportRoot { get; init; } = string.Empty;
+
     public string Producer { get; init; } = string.Empty;
 
     public DateTimeOffset GeneratedAtUtc { get; init; } = DateTimeOffset.UtcNow;
+
+    public List<ArtifactCollectionDescriptor> Collections { get; init; } = [];
 
     public List<ArtifactDescriptor> Artifacts { get; init; } = [];
 }

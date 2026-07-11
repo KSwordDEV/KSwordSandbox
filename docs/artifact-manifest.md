@@ -12,20 +12,49 @@ The file is an `ArtifactManifest`:
 - `jobId`: host job ID when known; guest manifests may leave it empty.
 - `runtimeRoot`: producer-local output root.
 - `rootPath`: producer-local artifact root.
+- `importRoot`: root that host importers use to resolve descriptor
+  `importPath` values. Guest manifests set it to the guest output root; host
+  readers normalize it to the collected guest-output directory.
 - `producer`: writer component, for example `KSword.Sandbox.Agent`.
 - `generatedAtUtc`: UTC generation timestamp.
+- `collections`: `ArtifactCollectionDescriptor[]` entries for collection lanes,
+  including disabled or future-placeholder lanes.
 - `artifacts`: `ArtifactDescriptor[]`.
+
+`ArtifactCollectionDescriptor` includes:
+
+- `name`: stable lane name, for example `dropped-files`, `screenshots`,
+  `memory-dumps`, `driver-events`, `r0-logs`, or `packet-captures`.
+- `kind`: primary artifact kind for the lane.
+- `category` and `evidenceRole`: stable grouping and evidence purpose.
+- `relativePath`, `safeLink`, and `importPath`: safe paths under the collected
+  guest output root.
+- `enabled`: whether the operator requested the lane for this run.
+- `implemented`: whether the collector can currently produce files. Future
+  PCAP lanes use `implemented=false`.
+- `status`: `disabled`, `enabled-empty`, `captured`, `skipped`, `failed`, or
+  `not-implemented`.
+- `reason`: compact diagnostic reason for disabled/skipped/future lanes.
+- `metadata`: string diagnostics such as artifact and event counts.
 
 Each `ArtifactDescriptor` includes:
 
-- `kind`: enum such as `DroppedFile`, `Screenshot`, `GuestEventsJson`,
-  `DriverEventsJsonLines`, or `ArtifactManifest`.
+- `kind`: enum such as `DroppedFile`, `Screenshot`, `MemoryDump`,
+  `PacketCapture`, `GuestEventsJson`, `DriverEventsJsonLines`, or
+  `ArtifactManifest`.
 - `category`: stable lower-case grouping such as `dropped-file`,
   `screenshot`, `telemetry`, or `artifact-manifest`.
 - `name`: file name only.
 - `relativePath`: slash-separated path under the collected output root.
 - `safeLink`: URL-encoded relative link derived only from safe relative path
   segments. Rooted paths and `..` traversal are not linkable.
+- `evidenceRole`: stable purpose such as `dropped-file`, `screenshot`,
+  `memory-dump`, `driver-events`, or `packet-capture`.
+- `capturePhase`: phase such as `after-start` or `after-run` when applicable.
+- `captureState`: `captured`, `skipped`, `available`, or `failed`.
+- `guestPath`: producer-local path kept as evidence only.
+- `importPath`: safe path that a host importer resolves under `importRoot`.
+- `collectionName`: collection lane that produced or owns the descriptor.
 - `fullPath`: producer-local path before host normalization, or host path after
   collection.
 - `mimeType`: deterministic content type such as `application/json`,
@@ -40,6 +69,13 @@ Each `ArtifactDescriptor` includes:
 Guest manifests intentionally use relative paths for durable links. The host
 preserves original VM-local absolute paths in metadata instead of trusting them
 as link targets.
+
+The current guest manifest writes descriptors for files already present below
+the guest output root, including `artifacts/dropped-files/**`, `screenshots/**`,
+`memory-dumps/**`, `driver-events.jsonl`, R0 diagnostic logs, and future
+`packet-captures/**` files if a later collector produces them. It does not
+start a PCAP collector today; `PacketCapture` is represented by a collection
+placeholder and optional future import path.
 
 ## Host artifact index
 
@@ -57,11 +93,15 @@ The host index scans known job artifacts under the job root and records safe
 relative links for:
 
 - `report.json` / `report.html`
-- `events.json`
+- localized reports such as `report.en.html` / `report.zh.html`
+- `runbook.json` / `runbook-execution.json`
+- `events.json` / `agent-summary.json`
 - `driver-events.jsonl`
 - `artifacts/manifest.json`
 - `screenshots/*`
-- dropped files under `artifacts/*`
+- `memory-dumps/*`
+- future `packet-captures/*.pcap` / `packet-captures/*.pcapng`
+- dropped files under `artifacts/dropped-files/*`
 
 The HTML report consumes this index when available. If no index has been
 provided, it still exposes artifact paths inferred from report events, but only
@@ -76,7 +116,12 @@ operators need to open from the local job folder:
 - `driver-events.jsonl`
 - `artifacts/manifest.json`
 - `screenshots/*`
-- dropped files under `artifacts/*`
+- dropped files under `artifacts/dropped-files/*`
+
+Memory dumps and future packet captures are indexed by `artifact-index.json`
+with `kind=MemoryDump` / `kind=PacketCapture`; the current HTML artifact-link
+section focuses on events, driver JSONL, manifests, screenshots, and dropped
+files.
 
 Each artifact row includes the safe relative link, kind/category, size, MIME,
 SHA-256, and a collapsible **Artifact evidence** block. Text evidence artifacts

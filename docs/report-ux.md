@@ -19,6 +19,11 @@ Required `report.html`, `report.zh.html`, and `report.en.html` sections:
 - Engine/rule hits.
 - Static analysis / 静态分析 with PE sections, URLs, strings, warnings, and tags.
 - Dynamic summary / 动态分析.
+- Behavior graph / IOC summary / 行为图谱与 IOC 摘要. This is a stable,
+  weak-interaction graph view that derives process-to-file, process-to-registry,
+  process-to-network, and process-to-artifact edges from normalized telemetry.
+  It must include Evidence graph edges and IOC summary cards so the final report
+  feels like an analyst-facing sandbox report rather than only raw tables.
 - Timeline.
 - Process details / 进程, including the Process tree and process event table.
 - File behavior / 文件, including dropped files.
@@ -49,6 +54,10 @@ plain diagnostic dump. The visual contract is:
 - Raw event expansion and layout stability must use native HTML/CSS rather than
   JavaScript. Copy affordances may enhance the static HTML but must not be
   required to reveal evidence.
+- The Behavior graph / IOC summary section should remain static HTML/CSS. It
+  should prefer stable weak interactions over fragile canvas/SVG rendering:
+  process graph nodes, Evidence graph edges, and IOC summary cards for network,
+  file/path, registry, and artifact indicators.
 - The report must support Chinese and English rendering entrypoints, or
   equivalent core renderer support for `report.zh.html` and `report.en.html`.
 - Each generated HTML report should expose an in-report bilingual entry bar
@@ -58,6 +67,10 @@ plain diagnostic dump. The visual contract is:
 - Jobs should keep report path fields suitable for automatic WebUI links, so a
   completed plan can expose the default report plus localized report clues
   without asking the operator to paste a filesystem path.
+- The WebUI report entry should be path-free for normal operators: one primary
+  current-language report button, compact Chinese/English alternatives, and an
+  automatic current-language report navigation after successful dynamic
+  analysis or manual event import refresh.
 - Validation should request the served bilingual endpoints
   `/api/jobs/{jobId}/report/html?lang=zh` and
   `/api/jobs/{jobId}/report/html?lang=en` and require `text/html` responses.
@@ -82,10 +95,13 @@ blocks should support fast copying:
 
 ## Live UI expectations
 
-The WebUI live raw monitor is a dedicated page linked from the main dashboard.
-It intentionally shows raw events only. It does not run behavior classification
-until the analysis is completed and guest output is imported. The live table
-should show:
+The WebUI live raw monitor is a dedicated dynamic monitor page linked from the
+main dashboard and opened automatically by the upload flow when the browser
+allows it. It intentionally shows raw events only. It does not run behavior
+classification until the analysis is completed and guest output is imported.
+When the page opens from upload, its bilingual hint should tell the operator to
+leave the dashboard tab running the analysis request. The live table should
+show:
 
 - timestamp
 - `eventType`
@@ -103,5 +119,6 @@ deep troubleshooting.
 
 The main dashboard should keep report navigation low-noise: one current-language
 primary report button, compact Chinese/English alternatives, a stable automatic
-open notice after successful generation/import, and the live raw monitor as a
-separate page rather than an inline stream.
+open notice after successful generation/import, a natural progress-page
+(`execution-flow`) link beside the progress summary, and the live raw monitor as
+a separate page rather than an inline stream.

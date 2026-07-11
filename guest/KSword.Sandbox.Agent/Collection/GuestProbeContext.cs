@@ -19,4 +19,6 @@ internal sealed record GuestProbeContext
     public bool CaptureScreenshots { get; init; }
 
     public bool CaptureMemoryDump { get; init; }
+
+    public bool CapturePacketCapture { get; init; }
 }

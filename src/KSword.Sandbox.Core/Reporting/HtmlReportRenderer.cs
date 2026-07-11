@@ -38,6 +38,10 @@ public sealed class HtmlReportRenderer
     private const int ArtifactPreviewCharacterLimit = 12_000;
     private const int RawEventInlineLimit = 200;
 
+    private sealed record BehaviorGraphEdge(string From, string Relation, string To, string Evidence);
+
+    private sealed record ProcessGraphNode(string Label, string Detail, string CopyText);
+
     private static readonly JsonSerializerOptions ArtifactJsonOptions = new(JsonSerializerDefaults.Web)
     {
         PropertyNameCaseInsensitive = true,
@@ -154,6 +158,7 @@ public sealed class HtmlReportRenderer
         AppendRuleHits(html, report);
         AppendStaticAnalysis(html, report);
         AppendDynamicAnalysis(html, report);
+        AppendBehaviorGraph(html, report, artifactLookup, artifactLinks);
         AppendArtifactLinks(html, artifactLinks);
         AppendTimeline(html, report, artifactLookup, artifactLinks);
         AppendProcessDetails(html, report, artifactLookup, artifactLinks);
@@ -202,6 +207,7 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
 .copy-btn{background:rgba(67,160,255,.12);border:1px solid rgba(67,160,255,.45);border-radius:999px;color:#075985;cursor:pointer;font-size:12px;font-weight:700;margin:2px 0;padding:5px 10px}.copyable{cursor:copy}.copy-hint{color:var(--muted);font-size:12px;margin-top:8px}
 .event-table td:first-child{white-space:nowrap}.event-table td:nth-child(2){min-width:140px}.event-table td:nth-child(4){min-width:140px}.event-table td:nth-child(5){min-width:260px}.event-table .evidence{min-width:280px}
 .timeline{border-left:3px solid rgba(67,160,255,.45);margin:14px 0 0 8px;padding-left:18px}.timeline-item{background:#f9fcff;border:1px solid var(--line);border-radius:12px;margin:0 0 12px;padding:10px 12px;position:relative}.timeline-item:before{background:var(--primary);border:3px solid var(--primary-soft);border-radius:999px;content:'';height:11px;left:-26px;position:absolute;top:13px;width:11px}
+.graph-map{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));margin-top:12px}.graph-node{background:#f8fbff;border:1px solid var(--line);border-left:4px solid var(--primary);border-radius:14px;padding:12px}.graph-node strong{display:block;margin-bottom:4px}.graph-node small{color:var(--muted);display:block;line-height:1.4}.edge-table td:nth-child(1),.edge-table td:nth-child(3){min-width:170px}.ioc-grid{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));margin-top:14px}.ioc-card{background:#ffffff;border:1px solid var(--line);border-radius:14px;padding:12px}.ioc-card h3{font-size:15px;margin:0 0 8px}.ioc-card ul{margin:0;padding-left:18px}.ioc-card li{margin:5px 0;word-break:break-word}
 .tree{font-family:Consolas,monospace;line-height:1.5;margin:12px 0}.tree ul{border-left:1px dashed #b9d7f3;list-style:none;margin:0 0 0 18px;padding-left:14px}.tree li{margin:5px 0}
 .evidence{max-width:560px}.evidence details{background:#f7fbff;border:1px solid var(--line);border-radius:12px;padding:8px}.evidence summary{cursor:pointer;font-weight:700}.evidence pre{white-space:pre-wrap;word-break:break-word}
 .toolbar{display:flex;gap:8px;justify-content:flex-end}.columns{display:grid;gap:14px;grid-template-columns:1fr 1fr}.compact-list{margin:8px 0 0 0;padding-left:18px}.compact-list li{margin:4px 0}
@@ -267,6 +273,7 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
             ("rules", "Engine and rule hits"),
             ("static", "Static analysis"),
             ("dynamic", "Dynamic analysis"),
+            ("graph", "Behavior graph / IOC summary"),
             ("artifacts", "Artifact links"),
             ("timeline", "Timeline"),
             ("process", "Process details"),
@@ -559,6 +566,97 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
         Metric(html, "R0 / driver events", report.Events.Count(IsR0Event).ToString(), "risk-info");
         Metric(html, "Failure markers", report.Events.Count(IsFailureEvent).ToString(), "risk-high");
         html.AppendLine("</div></section>");
+    }
+
+    /// <summary>
+    /// Appends a weak-interaction behavior graph and IOC summary.
+    /// Inputs are normalized events and artifacts; processing derives
+    /// process-to-file/registry/network/artifact edges without changing the
+    /// public report schema; the method returns no value.
+    /// </summary>
+    private static void AppendBehaviorGraph(
+        StringBuilder html,
+        AnalysisReport report,
+        IReadOnlyDictionary<string, List<ArtifactDescriptor>> artifactLookup,
+        IReadOnlyCollection<ArtifactDescriptor> artifacts)
+    {
+        var processNodes = BuildProcessGraphNodes(report).Take(16).ToList();
+        var edges = BuildBehaviorGraphEdges(report, artifactLookup, artifacts).Take(96).ToList();
+        var fileIocs = ExtractFileIocs(report).Take(40).ToList();
+        var registryIocs = ExtractRegistryIocs(report).Take(40).ToList();
+        var networkIocs = ExtractNetworkIocs(report).Take(40).ToList();
+        var artifactIocs = artifacts
+            .Select(ArtifactDisplayName)
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(40)
+            .ToList();
+
+        html.AppendLine("<section id=\"graph\" class=\"card\"><h2>Behavior graph / IOC summary</h2>");
+        if (report.Events.Count == 0)
+        {
+            Empty(html, "No behavior graph could be derived because no normalized events were collected.");
+            html.AppendLine("</section>");
+            return;
+        }
+
+        html.AppendLine("<div class=\"section-note\"><strong>Weak-interaction graph.</strong> This section summarizes process, file, registry, network, and artifact relationships from normalized telemetry so the report remains stable without client-side graph libraries.</div>");
+        html.AppendLine("<div class=\"grid\">");
+        Metric(html, "Graph processes", processNodes.Count.ToString(), "risk-info");
+        Metric(html, "Graph edges", edges.Count.ToString(), "risk-info");
+        Metric(html, "Network IOCs", networkIocs.Count.ToString(), "risk-medium");
+        Metric(html, "File IOCs", fileIocs.Count.ToString(), "risk-medium");
+        Metric(html, "Registry IOCs", registryIocs.Count.ToString(), "risk-medium");
+        Metric(html, "Artifact IOCs", artifactIocs.Count.ToString(), "risk-info");
+        html.AppendLine("</div>");
+
+        if (processNodes.Count > 0)
+        {
+            html.AppendLine("<h3>Process graph nodes</h3><div class=\"graph-map\">");
+            foreach (var node in processNodes)
+            {
+                html.AppendLine($"<div class=\"graph-node copyable\" data-copy=\"{A(node.CopyText)}\"><strong>{E(node.Label)}</strong><small>{E(node.Detail)}</small></div>");
+            }
+
+            html.AppendLine("</div>");
+        }
+
+        if (edges.Count == 0)
+        {
+            Empty(html, "No process-to-object graph edges were derived yet.");
+        }
+        else
+        {
+            html.AppendLine("<h3>Evidence graph edges</h3>");
+            html.AppendLine("<table class=\"edge-table\"><thead><tr><th>From</th><th>Relation</th><th>To</th><th>Evidence</th></tr></thead><tbody>");
+            foreach (var edge in edges)
+            {
+                var copy = string.Join(
+                    Environment.NewLine,
+                    [
+                        $"from={edge.From}",
+                        $"relation={edge.Relation}",
+                        $"to={edge.To}",
+                        edge.Evidence
+                    ]);
+                html.AppendLine("<tr>");
+                html.AppendLine($"<td class=\"copyable\" data-copy=\"{A(edge.From)}\"><code>{E(edge.From)}</code></td>");
+                html.AppendLine($"<td><span class=\"badge badge-info\">{E(edge.Relation)}</span></td>");
+                html.AppendLine($"<td class=\"copyable\" data-copy=\"{A(edge.To)}\"><code>{E(edge.To)}</code></td>");
+                html.AppendLine($"<td class=\"evidence\"><div class=\"toolbar\">{CopyButton("Copy graph edge", copy)}</div><details><summary>Evidence fields</summary><pre class=\"copyable\" data-copy=\"{A(copy)}\">{E(copy)}</pre></details></td>");
+                html.AppendLine("</tr>");
+            }
+
+            html.AppendLine("</tbody></table>");
+        }
+
+        html.AppendLine("<h3>IOC summary</h3><div class=\"ioc-grid\">");
+        AppendIocCard(html, "Network IOCs", networkIocs, "No DNS, HTTP, TLS, PCAP, or TCP/IP indicators were extracted from events.");
+        AppendIocCard(html, "File/path IOCs", fileIocs, "No file/path indicators were extracted from dynamic events.");
+        AppendIocCard(html, "Registry IOCs", registryIocs, "No registry indicators were extracted from dynamic events.");
+        AppendIocCard(html, "Artifact IOCs", artifactIocs, "No linked artifacts were indexed for this report.");
+        html.AppendLine("</div>");
+        html.AppendLine("</section>");
     }
 
     /// <summary>
@@ -1084,6 +1182,294 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
     }
 
     /// <summary>
+    /// Appends one IOC card with copy support.
+    /// Inputs are a title and bounded indicators; processing writes a compact
+    /// list or an empty state; the method returns no value.
+    /// </summary>
+    private static void AppendIocCard(StringBuilder html, string title, IReadOnlyCollection<string> values, string emptyMessage)
+    {
+        html.AppendLine("<div class=\"ioc-card\">");
+        var copy = values.Count == 0 ? string.Empty : string.Join(Environment.NewLine, values);
+        html.AppendLine($"<h3>{E(title)}</h3>");
+        if (values.Count > 0)
+        {
+            html.AppendLine($"<div class=\"toolbar\">{CopyButton("Copy IOCs", copy)}</div>");
+        }
+
+        if (values.Count == 0)
+        {
+            Empty(html, emptyMessage);
+        }
+        else
+        {
+            html.AppendLine("<ul>");
+            foreach (var value in values)
+            {
+                html.AppendLine($"<li><code class=\"copyable\" data-copy=\"{A(value)}\">{E(value)}</code></li>");
+            }
+
+            html.AppendLine("</ul>");
+        }
+
+        html.AppendLine("</div>");
+    }
+
+    /// <summary>
+    /// Builds compact process graph nodes from normalized events.
+    /// Inputs are a report; processing groups by PID/name/path and derives
+    /// child/event counts; the method returns copyable graph nodes.
+    /// </summary>
+    private static IReadOnlyList<ProcessGraphNode> BuildProcessGraphNodes(AnalysisReport report)
+    {
+        var eventsByProcess = report.Events
+            .Where(evt => evt.ProcessId.HasValue || !string.IsNullOrWhiteSpace(evt.ProcessName) || !string.IsNullOrWhiteSpace(evt.Path))
+            .GroupBy(ProcessIdentityKey, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var childCounts = report.Events
+            .Where(evt => evt.ProcessId.HasValue && evt.ParentProcessId.HasValue)
+            .GroupBy(evt => evt.ParentProcessId!.Value)
+            .ToDictionary(group => group.Key, group => group.Select(evt => evt.ProcessId!.Value).Distinct().Count());
+
+        return eventsByProcess
+            .Select(group =>
+            {
+                var first = group.OrderBy(evt => evt.Timestamp).First();
+                var label = ProcessGraphLabel(first);
+                var childCount = first.ProcessId.HasValue && childCounts.TryGetValue(first.ProcessId.Value, out var children)
+                    ? children
+                    : 0;
+                var detail = $"pid={first.ProcessId?.ToString() ?? "-"} ppid={first.ParentProcessId?.ToString() ?? "-"} events={group.Count()} children={childCount} firstSeen={first.Timestamp:u}";
+                return new ProcessGraphNode(
+                    label,
+                    detail,
+                    string.Join(Environment.NewLine, [$"process={label}", detail, $"path={first.Path ?? "-"}", $"commandLine={first.CommandLine ?? "-"}"]));
+            })
+            .OrderBy(node => node.Label, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    /// <summary>
+    /// Builds behavior graph edges from normalized events.
+    /// Inputs are report events and artifact lookup data; processing derives
+    /// relationships between processes and files/registry/network/artifacts;
+    /// the method returns bounded edge evidence.
+    /// </summary>
+    private static IReadOnlyList<BehaviorGraphEdge> BuildBehaviorGraphEdges(
+        AnalysisReport report,
+        IReadOnlyDictionary<string, List<ArtifactDescriptor>> artifactLookup,
+        IReadOnlyCollection<ArtifactDescriptor> artifacts)
+    {
+        var edges = new List<BehaviorGraphEdge>();
+        foreach (var evt in report.Events.OrderBy(evt => evt.Timestamp))
+        {
+            var from = EventProcessActor(evt);
+            if (string.Equals(evt.EventType, "process.start", StringComparison.OrdinalIgnoreCase) && evt.ProcessId.HasValue)
+            {
+                var parent = evt.ParentProcessId.HasValue ? $"pid:{evt.ParentProcessId.Value}" : from;
+                edges.Add(new BehaviorGraphEdge(parent, "spawn", ProcessGraphLabel(evt), EventToPlainText(evt)));
+            }
+
+            if (IsFileEvent(evt) && !string.IsNullOrWhiteSpace(evt.Path))
+            {
+                edges.Add(new BehaviorGraphEdge(from, "file", evt.Path!, EventToPlainText(evt)));
+            }
+
+            if (IsRegistryEvent(evt) && !string.IsNullOrWhiteSpace(evt.Path))
+            {
+                edges.Add(new BehaviorGraphEdge(from, "registry", evt.Path!, EventToPlainText(evt)));
+            }
+
+            var networkTarget = ExtractNetworkTarget(evt);
+            if (!string.IsNullOrWhiteSpace(networkTarget))
+            {
+                edges.Add(new BehaviorGraphEdge(from, "network", networkTarget, EventToPlainText(evt)));
+            }
+
+            foreach (var artifact in FindRelatedArtifacts(evt, artifactLookup, artifacts).Take(3))
+            {
+                edges.Add(new BehaviorGraphEdge(from, "artifact", ArtifactDisplayName(artifact), ArtifactToPlainText(artifact)));
+            }
+        }
+
+        return edges
+            .GroupBy(edge => $"{edge.From}|{edge.Relation}|{edge.To}", StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.First())
+            .ToList();
+    }
+
+    /// <summary>
+    /// Extracts dynamic file/path indicators from file events.
+    /// </summary>
+    private static IReadOnlyList<string> ExtractFileIocs(AnalysisReport report)
+    {
+        return report.Events
+            .Where(IsFileEvent)
+            .Select(evt => evt.Path)
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Cast<string>()
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(value => value, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    /// <summary>
+    /// Extracts dynamic registry indicators from registry events.
+    /// </summary>
+    private static IReadOnlyList<string> ExtractRegistryIocs(AnalysisReport report)
+    {
+        return report.Events
+            .Where(IsRegistryEvent)
+            .Select(evt => evt.Path)
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Cast<string>()
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(value => value, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    /// <summary>
+    /// Extracts network indicators from DNS/HTTP/TLS/PCAP/TCP events.
+    /// </summary>
+    private static IReadOnlyList<string> ExtractNetworkIocs(AnalysisReport report)
+    {
+        return report.Events
+            .Select(ExtractNetworkTarget)
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Cast<string>()
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(value => value, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    /// <summary>
+    /// Returns the best actor label for a graph edge.
+    /// </summary>
+    private static string EventProcessActor(SandboxEvent evt)
+    {
+        if (evt.ProcessId.HasValue)
+        {
+            return ProcessGraphLabel(evt);
+        }
+
+        if (!string.IsNullOrWhiteSpace(evt.ProcessName))
+        {
+            return evt.ProcessName!;
+        }
+
+        return evt.Source;
+    }
+
+    /// <summary>
+    /// Returns a stable process label.
+    /// </summary>
+    private static string ProcessGraphLabel(SandboxEvent evt)
+    {
+        var name = !string.IsNullOrWhiteSpace(evt.ProcessName)
+            ? evt.ProcessName
+            : !string.IsNullOrWhiteSpace(evt.Path)
+                ? Path.GetFileName(evt.Path)
+                : "process";
+        return evt.ProcessId.HasValue ? $"{name} pid:{evt.ProcessId.Value}" : name ?? "process";
+    }
+
+    /// <summary>
+    /// Returns a stable grouping key for process-related events.
+    /// </summary>
+    private static string ProcessIdentityKey(SandboxEvent evt)
+    {
+        if (evt.ProcessId.HasValue)
+        {
+            return $"pid:{evt.ProcessId.Value}";
+        }
+
+        if (!string.IsNullOrWhiteSpace(evt.ProcessName))
+        {
+            return $"name:{evt.ProcessName}";
+        }
+
+        return $"path:{evt.Path ?? evt.Source}";
+    }
+
+    /// <summary>
+    /// Extracts the best displayable network target from one event.
+    /// </summary>
+    private static string? ExtractNetworkTarget(SandboxEvent evt)
+    {
+        if (!IsNetworkEvent(evt) &&
+            !evt.EventType.Contains("dns", StringComparison.OrdinalIgnoreCase) &&
+            !evt.EventType.Contains("http", StringComparison.OrdinalIgnoreCase) &&
+            !evt.EventType.Contains("tls", StringComparison.OrdinalIgnoreCase) &&
+            !evt.EventType.Contains("pcap", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        if (!string.IsNullOrWhiteSpace(evt.Path) &&
+            (evt.Path.Contains("://", StringComparison.Ordinal) || evt.Path.Contains('.', StringComparison.Ordinal)))
+        {
+            return evt.Path;
+        }
+
+        var preferred = FirstEventDataValue(
+            evt,
+            "url",
+            "uri",
+            "host",
+            "hostname",
+            "domain",
+            "queryName",
+            "query",
+            "dnsName",
+            "sni",
+            "serverName",
+            "remoteEndpoint",
+            "remoteAddress",
+            "destinationAddress",
+            "ip");
+        if (string.IsNullOrWhiteSpace(preferred))
+        {
+            preferred = evt.Data
+                .Where(pair => LooksLikeNetworkIndicatorKey(pair.Key) && !string.IsNullOrWhiteSpace(pair.Value))
+                .Select(pair => pair.Value)
+                .FirstOrDefault();
+        }
+
+        if (string.IsNullOrWhiteSpace(preferred))
+        {
+            return null;
+        }
+
+        var port = FirstEventDataValue(evt, "remotePort", "destinationPort", "port");
+        return string.IsNullOrWhiteSpace(port) || preferred.Contains(':', StringComparison.Ordinal)
+            ? preferred
+            : $"{preferred}:{port}";
+    }
+
+    private static string? FirstEventDataValue(SandboxEvent evt, params string[] keys)
+    {
+        foreach (var key in keys)
+        {
+            if (evt.Data.TryGetValue(key, out var value) && !string.IsNullOrWhiteSpace(value))
+            {
+                return value;
+            }
+        }
+
+        return null;
+    }
+
+    private static bool LooksLikeNetworkIndicatorKey(string key)
+    {
+        return key.Contains("address", StringComparison.OrdinalIgnoreCase) ||
+            key.Contains("host", StringComparison.OrdinalIgnoreCase) ||
+            key.Contains("domain", StringComparison.OrdinalIgnoreCase) ||
+            key.Contains("query", StringComparison.OrdinalIgnoreCase) ||
+            key.Contains("url", StringComparison.OrdinalIgnoreCase) ||
+            key.Contains("sni", StringComparison.OrdinalIgnoreCase) ||
+            key.Contains("ja3", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
     /// Counts findings with a specific severity.
     /// Inputs are a report and severity, processing compares case-insensitive
     /// severity strings, and the method returns the count.
@@ -1208,6 +1594,8 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
         return evt.EventType.StartsWith("network.", StringComparison.OrdinalIgnoreCase) ||
             evt.EventType.StartsWith("http.", StringComparison.OrdinalIgnoreCase) ||
             evt.EventType.StartsWith("dns.", StringComparison.OrdinalIgnoreCase) ||
+            evt.EventType.StartsWith("tls.", StringComparison.OrdinalIgnoreCase) ||
+            evt.EventType.StartsWith("pcap.", StringComparison.OrdinalIgnoreCase) ||
             evt.EventType.StartsWith("driver.network", StringComparison.OrdinalIgnoreCase);
     }
 
@@ -1377,6 +1765,7 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
         ("Engine and rule hits", "引擎和规则命中"),
         ("Static analysis", "静态分析"),
         ("Dynamic analysis", "动态分析"),
+        ("Behavior graph / IOC summary", "行为图谱 / IOC 摘要"),
         ("Artifact links", "证据文件链接"),
         ("Timeline", "时间线"),
         ("Process details", "进程详情"),
@@ -1421,6 +1810,23 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
         ("Kernel registry rows", "内核注册表行"),
         ("Kernel network rows", "内核网络行"),
         ("R0 failures", "R0 失败"),
+        ("Graph processes", "图谱进程"),
+        ("Graph edges", "图谱边"),
+        ("Network IOCs", "网络 IOC"),
+        ("File IOCs", "文件 IOC"),
+        ("Registry IOCs", "注册表 IOC"),
+        ("Artifact IOCs", "证据文件 IOC"),
+        ("Weak-interaction graph.", "弱交互图谱。"),
+        ("This section summarizes process, file, registry, network, and artifact relationships from normalized telemetry so the report remains stable without client-side graph libraries.", "本节从规范化遥测汇总进程、文件、注册表、网络和证据文件关系，不依赖客户端图谱库也能稳定呈现。"),
+        ("Process graph nodes", "进程图谱节点"),
+        ("Evidence graph edges", "证据图谱边"),
+        ("IOC summary", "IOC 摘要"),
+        ("From", "来源"),
+        ("Relation", "关系"),
+        ("To", "目标"),
+        ("Copy graph edge", "复制图谱边"),
+        ("Copy IOCs", "复制 IOC"),
+        ("File/path IOCs", "文件/路径 IOC"),
         ("Behavior", "行为"),
         ("Evidence fields", "证据字段"),
         ("Artifact evidence", "证据文件详情"),
@@ -1487,6 +1893,12 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
         ("No filesystem path indicators were extracted.", "未提取文件系统路径指标。"),
         ("No events.json, driver-events.jsonl, screenshot, or dropped-file artifacts were indexed.", "未索引 events.json、driver-events.jsonl、截图或落地文件证据。"),
         ("No timeline events were collected.", "未采集到时间线事件。"),
+        ("No behavior graph could be derived because no normalized events were collected.", "未采集到规范化事件，因此无法生成行为图谱。"),
+        ("No process-to-object graph edges were derived yet.", "尚未生成进程到对象的图谱边。"),
+        ("No DNS, HTTP, TLS, PCAP, or TCP/IP indicators were extracted from events.", "未从事件中提取 DNS、HTTP、TLS、PCAP 或 TCP/IP 指标。"),
+        ("No file/path indicators were extracted from dynamic events.", "未从动态事件中提取文件/路径指标。"),
+        ("No registry indicators were extracted from dynamic events.", "未从动态事件中提取注册表指标。"),
+        ("No linked artifacts were indexed for this report.", "此报告未索引关联证据文件。"),
         ("No R0Collector or driver-originated events were imported.", "未导入 R0Collector 或驱动来源事件。"),
         ("No failure reason was recorded.", "未记录失败原因。"),
         ("Analysis status is Failed, but no timeout/error/failure event was recorded in normalized telemetry.", "分析状态为失败，但规范化遥测中未记录超时、错误或失败事件。"),

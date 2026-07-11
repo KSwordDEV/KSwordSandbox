@@ -1,6 +1,6 @@
 {
   "matrix": "enterprise-windows",
-  "version": "2026-07-11-behavior-coverage-expansion",
+  "version": "2026-07-11-behavior-coverage-expansion-v2",
   "techniques": [
     {
       "id": "T1003",
@@ -24,8 +24,37 @@
       ]
     },
     {
+      "id": "T1016",
+      "name": "System Network Configuration Discovery",
+      "categories": [
+        "discovery"
+      ]
+    },
+    {
+      "id": "T1018",
+      "name": "Remote System Discovery",
+      "categories": [
+        "discovery",
+        "lateral-movement"
+      ]
+    },
+    {
+      "id": "T1021.001",
+      "name": "Remote Desktop Protocol",
+      "categories": [
+        "lateral-movement"
+      ]
+    },
+    {
       "id": "T1021.002",
       "name": "SMB/Windows Admin Shares",
+      "categories": [
+        "lateral-movement"
+      ]
+    },
+    {
+      "id": "T1021.004",
+      "name": "SSH",
       "categories": [
         "lateral-movement"
       ]
@@ -59,11 +88,32 @@
       ]
     },
     {
+      "id": "T1036",
+      "name": "Masquerading",
+      "categories": [
+        "defense-evasion"
+      ]
+    },
+    {
+      "id": "T1041",
+      "name": "Exfiltration Over C2 Channel",
+      "categories": [
+        "exfiltration"
+      ]
+    },
+    {
       "id": "T1047",
       "name": "Windows Management Instrumentation",
       "categories": [
         "execution",
         "lateral-movement"
+      ]
+    },
+    {
+      "id": "T1049",
+      "name": "System Network Connections Discovery",
+      "categories": [
+        "discovery"
       ]
     },
     {
@@ -97,6 +147,13 @@
       "categories": [
         "defense-evasion",
         "privilege-escalation"
+      ]
+    },
+    {
+      "id": "T1057",
+      "name": "Process Discovery",
+      "categories": [
+        "discovery"
       ]
     },
     {
@@ -142,6 +199,20 @@
       ]
     },
     {
+      "id": "T1082",
+      "name": "System Information Discovery",
+      "categories": [
+        "discovery"
+      ]
+    },
+    {
+      "id": "T1090",
+      "name": "Proxy",
+      "categories": [
+        "command-and-control"
+      ]
+    },
+    {
       "id": "T1105",
       "name": "Ingress Tool Transfer",
       "categories": [
@@ -161,6 +232,20 @@
       "categories": [
         "defense-evasion",
         "persistence"
+      ]
+    },
+    {
+      "id": "T1113",
+      "name": "Screen Capture",
+      "categories": [
+        "collection"
+      ]
+    },
+    {
+      "id": "T1135",
+      "name": "Network Share Discovery",
+      "categories": [
+        "discovery"
       ]
     },
     {
@@ -295,6 +380,13 @@
       ]
     },
     {
+      "id": "T1564.001",
+      "name": "Hidden Files and Directories",
+      "categories": [
+        "defense-evasion"
+      ]
+    },
+    {
       "id": "T1569.002",
       "name": "Service Execution",
       "categories": [
@@ -307,6 +399,13 @@
       "name": "Lateral Tool Transfer",
       "categories": [
         "lateral-movement"
+      ]
+    },
+    {
+      "id": "T1571",
+      "name": "Non-Standard Port",
+      "categories": [
+        "command-and-control"
       ]
     },
     {

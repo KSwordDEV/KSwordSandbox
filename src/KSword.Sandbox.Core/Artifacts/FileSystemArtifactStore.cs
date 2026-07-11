@@ -59,6 +59,9 @@ public sealed class FileSystemArtifactStore : IArtifactStore
             RootPath = string.IsNullOrWhiteSpace(manifest.RootPath)
                 ? paths.BuildJobRoot(jobId)
                 : manifest.RootPath,
+            ImportRoot = string.IsNullOrWhiteSpace(manifest.ImportRoot)
+                ? paths.BuildJobRoot(jobId)
+                : manifest.ImportRoot,
             Producer = string.IsNullOrWhiteSpace(manifest.Producer)
                 ? "KSword.Sandbox.Core"
                 : manifest.Producer,
@@ -66,8 +69,11 @@ public sealed class FileSystemArtifactStore : IArtifactStore
         };
         normalizedManifest = normalizedManifest with
         {
-            Artifacts = normalizedManifest.Artifacts
+            Artifacts = (normalizedManifest.Artifacts ?? [])
                 .Select(ArtifactDescriptorFactory.NormalizeDescriptor)
+                .ToList(),
+            Collections = (normalizedManifest.Collections ?? [])
+                .Select(NormalizeCollection)
                 .ToList()
         };
 
@@ -99,5 +105,26 @@ public sealed class FileSystemArtifactStore : IArtifactStore
         var json = await ReadTextAsync(descriptor, cancellationToken);
         return JsonSerializer.Deserialize<ArtifactManifest>(json, ManifestJsonOptions)
             ?? throw new InvalidDataException($"Artifact manifest '{descriptor.FullPath}' could not be deserialized.");
+    }
+
+    private static ArtifactCollectionDescriptor NormalizeCollection(ArtifactCollectionDescriptor collection)
+    {
+        var relativePath = ArtifactDescriptorFactory.NormalizeRelativePath(collection.RelativePath);
+        return collection with
+        {
+            Category = string.IsNullOrWhiteSpace(collection.Category)
+                ? ArtifactDescriptorFactory.CategoryForKind(collection.Kind)
+                : collection.Category,
+            RelativePath = relativePath,
+            SafeLink = string.IsNullOrWhiteSpace(collection.SafeLink)
+                ? ArtifactDescriptorFactory.BuildSafeLink(relativePath)
+                : collection.SafeLink,
+            ImportPath = string.IsNullOrWhiteSpace(collection.ImportPath)
+                ? relativePath
+                : ArtifactDescriptorFactory.NormalizeRelativePath(collection.ImportPath),
+            Metadata = collection.Metadata is null
+                ? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                : new Dictionary<string, string>(collection.Metadata, StringComparer.OrdinalIgnoreCase)
+        };
     }
 }

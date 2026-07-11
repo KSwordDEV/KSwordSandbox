@@ -19,6 +19,8 @@ public enum ArtifactKind
     DriverEventsJsonLines,
     StaticAnalysisJson,
     Screenshot,
+    MemoryDump,
+    PacketCapture,
     Log,
     Bundle,
     ArtifactIndex

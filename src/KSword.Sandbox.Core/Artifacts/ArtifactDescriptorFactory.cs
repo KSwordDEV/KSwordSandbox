@@ -27,6 +27,7 @@ public static class ArtifactDescriptorFactory
         var info = new FileInfo(fullPath);
         var relativePath = SafeRelativePath(rootPath, info.FullName);
         var sha256 = ComputeSha256(info.FullName);
+        var copiedMetadata = CopyMetadata(metadata);
         var hashes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
             ["sha256"] = sha256
@@ -40,12 +41,18 @@ public static class ArtifactDescriptorFactory
             RelativePath = relativePath,
             FullPath = info.FullName,
             SafeLink = BuildSafeLink(relativePath),
+            EvidenceRole = FirstNonEmpty(MetadataValue(copiedMetadata, "evidenceRole")),
+            CapturePhase = FirstNonEmpty(MetadataValue(copiedMetadata, "capturePhase", "phase")),
+            CaptureState = FirstNonEmpty(MetadataValue(copiedMetadata, "captureState")),
+            GuestPath = FirstNonEmpty(MetadataValue(copiedMetadata, "guestFullPath", "guestPath", "sourcePath")),
+            ImportPath = FirstNonEmpty(MetadataValue(copiedMetadata, "importPath"), relativePath),
+            CollectionName = FirstNonEmpty(MetadataValue(copiedMetadata, "collectionName")),
             MimeType = MimeTypeForPath(info.FullName),
             SizeBytes = info.Length,
             Sha256 = sha256,
             Hashes = hashes,
             CreatedAtUtc = info.CreationTimeUtc,
-            Metadata = CopyMetadata(metadata)
+            Metadata = copiedMetadata
         };
     }
 
@@ -72,6 +79,7 @@ public static class ArtifactDescriptorFactory
             ? NormalizeRelativePath(path)
             : SafeRelativePath(rootPath, path);
         var safeLink = BuildSafeLink(relativePath);
+        var copiedMetadata = CopyMetadata(metadata);
 
         return new ArtifactDescriptor
         {
@@ -81,8 +89,14 @@ public static class ArtifactDescriptorFactory
             RelativePath = relativePath,
             FullPath = path,
             SafeLink = safeLink,
+            EvidenceRole = FirstNonEmpty(MetadataValue(copiedMetadata, "evidenceRole")),
+            CapturePhase = FirstNonEmpty(MetadataValue(copiedMetadata, "capturePhase", "phase")),
+            CaptureState = FirstNonEmpty(MetadataValue(copiedMetadata, "captureState")),
+            GuestPath = FirstNonEmpty(MetadataValue(copiedMetadata, "guestFullPath", "guestPath", "sourcePath")),
+            ImportPath = FirstNonEmpty(MetadataValue(copiedMetadata, "importPath"), relativePath),
+            CollectionName = FirstNonEmpty(MetadataValue(copiedMetadata, "collectionName")),
             MimeType = MimeTypeForPath(path),
-            Metadata = CopyMetadata(metadata)
+            Metadata = copiedMetadata
         };
     }
 
@@ -95,6 +109,7 @@ public static class ArtifactDescriptorFactory
     {
         var relativePath = NormalizeRelativePath(descriptor.RelativePath);
         var hashes = CopyMetadata(descriptor.Hashes);
+        var metadata = CopyMetadata(descriptor.Metadata);
         if (!string.IsNullOrWhiteSpace(descriptor.Sha256))
         {
             hashes["sha256"] = descriptor.Sha256;
@@ -109,11 +124,17 @@ public static class ArtifactDescriptorFactory
             SafeLink = string.IsNullOrWhiteSpace(descriptor.SafeLink)
                 ? BuildSafeLink(relativePath)
                 : descriptor.SafeLink,
+            EvidenceRole = FirstNonEmpty(descriptor.EvidenceRole, MetadataValue(metadata, "evidenceRole")),
+            CapturePhase = FirstNonEmpty(descriptor.CapturePhase, MetadataValue(metadata, "capturePhase", "phase")),
+            CaptureState = FirstNonEmpty(descriptor.CaptureState, MetadataValue(metadata, "captureState")),
+            GuestPath = FirstNonEmpty(descriptor.GuestPath, MetadataValue(metadata, "guestFullPath", "guestPath", "sourcePath")),
+            ImportPath = FirstNonEmpty(descriptor.ImportPath, MetadataValue(metadata, "importPath"), relativePath),
+            CollectionName = FirstNonEmpty(descriptor.CollectionName, MetadataValue(metadata, "collectionName")),
             MimeType = string.IsNullOrWhiteSpace(descriptor.MimeType)
                 ? MimeTypeForPath(!string.IsNullOrWhiteSpace(descriptor.FullPath) ? descriptor.FullPath : descriptor.Name)
                 : descriptor.MimeType,
             Hashes = hashes,
-            Metadata = CopyMetadata(descriptor.Metadata)
+            Metadata = metadata
         };
     }
 
@@ -215,6 +236,8 @@ public static class ArtifactDescriptorFactory
             ArtifactKind.DroppedFile => "dropped-file",
             ArtifactKind.StaticAnalysisJson => "static-analysis",
             ArtifactKind.Screenshot => "screenshot",
+            ArtifactKind.MemoryDump => "memory-dump",
+            ArtifactKind.PacketCapture => "packet-capture",
             ArtifactKind.Log => "log",
             ArtifactKind.Bundle => "bundle",
             _ => "artifact"
@@ -239,10 +262,43 @@ public static class ArtifactDescriptorFactory
             ".jpg" or ".jpeg" => "image/jpeg",
             ".gif" => "image/gif",
             ".dmp" => "application/vnd.microsoft.minidump",
+            ".pcap" => "application/vnd.tcpdump.pcap",
+            ".pcapng" => "application/x-pcapng",
             ".zip" => "application/zip",
             ".exe" or ".dll" or ".sys" => "application/vnd.microsoft.portable-executable",
             _ => "application/octet-stream"
         };
+    }
+
+    private static string FirstNonEmpty(params string?[] values)
+    {
+        foreach (var value in values)
+        {
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                return value;
+            }
+        }
+
+        return string.Empty;
+    }
+
+    private static string? MetadataValue(IDictionary<string, string>? metadata, params string[] keys)
+    {
+        if (metadata is null)
+        {
+            return null;
+        }
+
+        foreach (var key in keys)
+        {
+            if (metadata.TryGetValue(key, out var value) && !string.IsNullOrWhiteSpace(value))
+            {
+                return value;
+            }
+        }
+
+        return null;
     }
 
     private static Dictionary<string, string> CopyMetadata(IDictionary<string, string>? metadata)

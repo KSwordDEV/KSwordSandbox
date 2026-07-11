@@ -11,6 +11,19 @@ engine does not support yet.
 
 ## Added coverage
 
+- Probe/artifact evidence:
+  - Screenshot capture and skip diagnostics through `screenshot.captured` /
+    `screenshot.skipped`.
+  - Opt-in sample minidump capture and skip diagnostics through
+    `memory_dump.captured` / `memory_dump.skipped`.
+  - Dropped-file artifact copy/skip rows, copied executable/script/archive
+    payloads, and manifest write events.
+- Full process tree:
+  - `process.tree` root/depth/lineage/child-count rows and
+    `process.tree_unavailable` diagnostics.
+  - Process start failures, LOLBin nodes inside the tree, and execution from
+    user-writable staging paths such as Temp, AppData, Downloads, ProgramData,
+    and Public.
 - Registry persistence:
   - Run, RunOnce, RunOnceEx, policy Run, and StartupApproved autostart paths.
   - Service configuration hives, including typed `driver.registry` `keyPath`
@@ -18,6 +31,14 @@ engine does not support yet.
   - Service `ImagePath`, `ServiceDll`, failure-command, and account/value
     changes when paired with a service registry path.
   - Scheduled TaskCache registry paths, including typed driver payload fields.
+- System inventory diff persistence:
+  - `service.created` / `service.modified` and suspicious service raw command
+    metadata.
+  - `scheduled_task.created` / `scheduled_task.modified` and task targets that
+    launch scripts, shells, or user-writable payloads.
+  - `startup_item.created` / `startup_item.modified`, executable startup-item
+    values, deleted persistence items, and truncated service/task/startup diff
+    diagnostics.
 - Scheduled-task and service commands:
   - `schtasks.exe /create`, task changes, PowerShell ScheduledTasks cmdlets,
     legacy `at.exe`, `sc create/config/failure`, and service PowerShell cmdlets.
@@ -31,6 +52,21 @@ engine does not support yet.
   - Mshta and regsvr32 scriptlet proxy execution.
   - Certutil, bitsadmin, curl/wget, BITS, and PowerShell web-request staging.
   - Windows Script Host script execution.
+- DNS/HTTP/TLS/PCAP:
+  - DNS cache additions, TXT/NULL/CNAME/tunnel-style entries, and dynamic DNS
+    domain fragments from the current network probe.
+  - HTTP executable/script/archive downloads, POST/check-in beacon paths,
+    DNS-over-HTTPS requests, and CONNECT/WebSocket/proxy tunnel indicators.
+  - TLS invalid/self-signed certificate evidence plus ECH/ESNI metadata
+    placeholders.
+  - PCAP executable payload, NXDOMAIN/DGA DNS, upload/exfiltration, and
+    high-fan-out flow placeholders.
+- Network/lateral movement:
+  - Netstat observed/added/removed rows, listener-opened deltas, suspicious
+    non-standard listener ports, RDP/SSH/LDAP/Kerberos/domain ports, and
+    Tor/proxy ports.
+  - Admin-share file paths, Remote Desktop commands, network-share discovery,
+    system/process/network discovery commands.
 - Anti-analysis:
   - VM/tool artifact paths expanded for common VMware, VirtualBox, Hyper-V,
     QEMU, Xen, debugger, reverse-engineering, and traffic-analysis tools.
@@ -39,6 +75,11 @@ engine does not support yet.
   - Hardware, BIOS, ACPI, PCI, and hypervisor-identifying registry paths.
   - Command-line delay primitives such as `timeout`, ping-delay, `Start-Sleep`,
     and wait APIs.
+- Collection/defense-evasion extras:
+  - Screen-capture API calls (`BitBlt`, `GetDC`, `PrintWindow`, foreground or
+    desktop window APIs).
+  - Double-extension masquerading drops and `attrib` hidden/system file
+    attribute commands.
 
 ## Triage notes
 

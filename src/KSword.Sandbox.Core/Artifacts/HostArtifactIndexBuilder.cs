@@ -44,11 +44,22 @@ public sealed class HostArtifactIndexBuilder
                 var metadata = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
                 {
                     ["origin"] = "host",
-                    ["indexRoot"] = fullJobRoot
+                    ["indexRoot"] = fullJobRoot,
+                    ["importPath"] = ArtifactDescriptorFactory.SafeRelativePath(fullJobRoot, path)
                 };
                 if (!string.IsNullOrWhiteSpace(classification.EvidenceRole))
                 {
                     metadata["evidenceRole"] = classification.EvidenceRole;
+                }
+
+                if (!string.IsNullOrWhiteSpace(classification.CollectionName))
+                {
+                    metadata["collectionName"] = classification.CollectionName;
+                }
+
+                if (!string.IsNullOrWhiteSpace(classification.CapturePhase))
+                {
+                    metadata["capturePhase"] = classification.CapturePhase;
                 }
 
                 artifacts.Add(ArtifactDescriptorFactory.FromExistingFile(
@@ -154,35 +165,68 @@ public sealed class HostArtifactIndexBuilder
         if (string.Equals(Path.GetExtension(path), ".jsonl", StringComparison.OrdinalIgnoreCase) &&
             fileName.Contains("driver", StringComparison.OrdinalIgnoreCase))
         {
-            return new ArtifactClassification(ArtifactKind.DriverEventsJsonLines);
+            return new ArtifactClassification(ArtifactKind.DriverEventsJsonLines, EvidenceRole: "driver-events", CollectionName: "driver-events");
         }
 
         if (relativePath.Contains("/screenshots/", StringComparison.OrdinalIgnoreCase) ||
             relativePath.StartsWith("screenshots/", StringComparison.OrdinalIgnoreCase))
         {
-            return new ArtifactClassification(ArtifactKind.Screenshot, EvidenceRole: "screenshot");
+            return new ArtifactClassification(ArtifactKind.Screenshot, EvidenceRole: "screenshot", CollectionName: "screenshots", CapturePhase: InferCapturePhase(fileName));
         }
 
         if (relativePath.Contains("/memory-dumps/", StringComparison.OrdinalIgnoreCase) ||
             relativePath.StartsWith("memory-dumps/", StringComparison.OrdinalIgnoreCase))
         {
-            return new ArtifactClassification(ArtifactKind.Bundle, Category: "memory-dump", EvidenceRole: "memory-dump");
+            return new ArtifactClassification(ArtifactKind.MemoryDump, Category: "memory-dump", EvidenceRole: "memory-dump", CollectionName: "memory-dumps", CapturePhase: InferCapturePhase(fileName));
+        }
+
+        if (relativePath.Contains("/packet-captures/", StringComparison.OrdinalIgnoreCase) ||
+            relativePath.StartsWith("packet-captures/", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(Path.GetExtension(path), ".pcap", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(Path.GetExtension(path), ".pcapng", StringComparison.OrdinalIgnoreCase))
+        {
+            return new ArtifactClassification(ArtifactKind.PacketCapture, Category: "packet-capture", EvidenceRole: "packet-capture", CollectionName: "packet-captures", CapturePhase: InferCapturePhase(fileName));
         }
 
         if (relativePath.Contains("/artifacts/", StringComparison.OrdinalIgnoreCase) ||
             relativePath.StartsWith("artifacts/", StringComparison.OrdinalIgnoreCase))
         {
-            return new ArtifactClassification(ArtifactKind.DroppedFile, EvidenceRole: "dropped-file");
+            return new ArtifactClassification(ArtifactKind.DroppedFile, EvidenceRole: "dropped-file", CollectionName: "dropped-files");
         }
 
         if (string.Equals(Path.GetExtension(path), ".log", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(Path.GetExtension(path), ".txt", StringComparison.OrdinalIgnoreCase))
         {
-            return new ArtifactClassification(ArtifactKind.Log);
+            return new ArtifactClassification(ArtifactKind.Log, CollectionName: "logs");
         }
 
         return new ArtifactClassification(ArtifactKind.Unknown);
     }
 
-    private sealed record ArtifactClassification(ArtifactKind Kind, string? Category = null, string? EvidenceRole = null);
+    private static string? InferCapturePhase(string fileName)
+    {
+        if (fileName.StartsWith("after-start", StringComparison.OrdinalIgnoreCase))
+        {
+            return "after-start";
+        }
+
+        if (fileName.StartsWith("after-run", StringComparison.OrdinalIgnoreCase))
+        {
+            return "after-run";
+        }
+
+        if (fileName.StartsWith("before-start", StringComparison.OrdinalIgnoreCase))
+        {
+            return "before-start";
+        }
+
+        return null;
+    }
+
+    private sealed record ArtifactClassification(
+        ArtifactKind Kind,
+        string? Category = null,
+        string? EvidenceRole = null,
+        string? CollectionName = null,
+        string? CapturePhase = null);
 }

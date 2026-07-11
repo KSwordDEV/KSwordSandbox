@@ -37,6 +37,12 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
 
         RequireContains(rendererSource, "AppendTimeline", "Report renderer should include a timeline section.");
         RequireContains(rendererSource, "AppendProcessTree", "Report renderer should include a process tree.");
+        RequireContains(rendererSource, "AppendBehaviorGraph", "Report renderer should include a behavior graph and IOC summary section.");
+        RequireContains(rendererSource, "Behavior graph / IOC summary", "Report renderer should expose a graph/IOC section title.");
+        RequireContains(rendererSource, "Evidence graph edges", "Report renderer should expose graph edge evidence.");
+        RequireContains(rendererSource, "IOC summary", "Report renderer should expose IOC summary cards.");
+        RequireContains(rendererSource, "tls.", "Report renderer should classify TLS events as network behavior.");
+        RequireContains(rendererSource, "pcap.", "Report renderer should classify PCAP-derived events as network behavior.");
         RequireContains(rendererSource, "AppendRegistryBehavior", "Report renderer should include registry behavior.");
         RequireContains(rendererSource, "data-copy", "Report renderer should expose copyable evidence fields.");
         RequireContains(rendererSource, "contextmenu", "Report renderer should support right-click copy.");
@@ -73,6 +79,9 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(reportStage, "report.html", "Report stage should keep writing the default report.html artifact.");
 
         RequireContains(doc, "Timeline", "Report UX doc should list the timeline section.");
+        RequireContains(doc, "Behavior graph / IOC summary", "Report UX doc should list the behavior graph section.");
+        RequireContains(doc, "Evidence graph edges", "Report UX doc should require graph edge evidence.");
+        RequireContains(doc, "IOC summary", "Report UX doc should require IOC summary cards.");
         RequireContains(doc, "Process tree", "Report UX doc should list the process tree.");
         RequireContains(doc, "Registry behavior", "Report UX doc should list registry behavior.");
         RequireContains(doc, "Right-click", "Report UX doc should describe right-click copy.");
@@ -165,6 +174,10 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(englishHtml, "Raw source paths", "Rendered raw event section should show source path hints.");
         RequireContains(englishHtml, "report.json", "Rendered raw event section should link or hint report.json.");
         RequireContains(englishHtml, "No raw source artifacts were indexed; report.json remains the complete normalized source.", "Rendered raw source hints should explain missing raw artifacts.");
+        RequireContains(englishHtml, "<section id=\"graph\" class=\"card\"><h2>Behavior graph / IOC summary</h2>", "Rendered HTML should include the behavior graph section.");
+        RequireContains(englishHtml, "Evidence graph edges", "Rendered HTML should include graph edge evidence.");
+        RequireContains(englishHtml, "IOC summary", "Rendered HTML should include IOC summary cards.");
+        RequireContains(englishHtml, "Network IOCs", "Rendered HTML should include network IOC cards.");
 
         foreach (var expected in RequiredEnglishSectionFragments())
         {
@@ -205,6 +218,7 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         "<section id=\"mitre\" class=\"card\"><h2>Multi-dimensional / MITRE detections</h2>",
         "<section id=\"static\" class=\"card\"><h2>Static analysis</h2>",
         "<section id=\"dynamic\" class=\"card\"><h2>Dynamic analysis</h2>",
+        "<section id=\"graph\" class=\"card\"><h2>Behavior graph / IOC summary</h2>",
         "<section id=\"process\" class=\"card\"><h2>Process details</h2>",
         "<section id=\"files\" class=\"card\"><h2>Dropped files</h2>",
         "<section id=\"registry\" class=\"card\"><h2>Registry behavior</h2>",
@@ -228,6 +242,7 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         "多维 / MITRE 检测",
         "静态分析",
         "动态分析",
+        "行为图谱 / IOC 摘要",
         "进程详情",
         "落地文件",
         "注册表行为",

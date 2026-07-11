@@ -26,4 +26,6 @@ internal sealed record GuestAgentParsedOptions
     public bool CollectDroppedFiles { get; init; }
 
     public bool CaptureMemoryDump { get; init; }
+
+    public bool CapturePacketCapture { get; init; }
 }
