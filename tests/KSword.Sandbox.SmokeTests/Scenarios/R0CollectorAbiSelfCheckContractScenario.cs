@@ -70,6 +70,11 @@ internal sealed class R0CollectorAbiSelfCheckContractScenario : ISmokeTestScenar
             "producerMaskDefaultHex",
             "eventHeaderSize",
             "healthReplySize",
+            "healthReplyLegacyMinimumBytes",
+            "healthReplyProducerMaskBytes",
+            "healthProducerMasksAvailableFlag",
+            "healthProducerMasksAvailableFlagHex",
+            "healthProducerMasksCompatibilityPolicy",
             "capabilitiesReplySize",
             "statusReplySize",
             "readEventsRequestSize",
@@ -184,6 +189,11 @@ internal sealed class R0CollectorAbiSelfCheckContractScenario : ISmokeTestScenar
         RequireData(abiSelfCheck, "producerMaskCurrentHex", "0x0000003F");
         RequireData(abiSelfCheck, "producerMaskDefaultHex", "0x0000003F");
         RequireData(abiSelfCheck, "eventHeaderSize", "56");
+        RequireData(abiSelfCheck, "healthReplySize", "80");
+        RequireData(abiSelfCheck, "healthReplyLegacyMinimumBytes", "44");
+        RequireData(abiSelfCheck, "healthReplyProducerMaskBytes", "60");
+        RequireData(abiSelfCheck, "healthProducerMasksAvailableFlag", "16");
+        RequireData(abiSelfCheck, "healthProducerMasksAvailableFlagHex", "0x00000010");
         RequireData(abiSelfCheck, "capabilitiesReplySize", "104");
         RequireData(abiSelfCheck, "statusReplySize", "120");
         RequireData(abiSelfCheck, "readEventsReplyHeaderSize", "40");
@@ -199,6 +209,10 @@ internal sealed class R0CollectorAbiSelfCheckContractScenario : ISmokeTestScenar
             abiSelfCheck.Data["producerMaskCurrentNames"],
             "network",
             "ABI self-check should advertise the network producer.");
+        RequireContains(
+            abiSelfCheck.Data["healthProducerMasksCompatibilityPolicy"],
+            "legacy-sized replies",
+            "ABI self-check should describe GET_HEALTH legacy compatibility.");
         RequireContains(
             abiSelfCheck.Data["jsonlNoisePolicy"],
             "malformed lines preserved",

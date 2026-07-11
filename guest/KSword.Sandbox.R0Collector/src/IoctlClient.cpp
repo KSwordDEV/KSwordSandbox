@@ -189,14 +189,29 @@ bool EmitDriverHealth(const UniqueHandle& device, const Options& options, EventW
             L"Verify that the loaded driver matches the collector public ABI header.");
     }
 
-    if (bytesReturned < static_cast<DWORD>(sizeof(reply)) ||
+    const bool producerMasksAdvertised =
+        (reply.Flags & KSWORD_SANDBOX_HEALTH_FLAG_PRODUCER_MASKS_AVAILABLE) != 0;
+    const bool producerMaskBytesReturned =
+        bytesReturned >= static_cast<DWORD>(kHealthReplyProducerMaskBytes) &&
+        reply.Size >= kHealthReplyProducerMaskBytes;
+
+    if (bytesReturned < static_cast<DWORD>(kHealthReplyLegacyMinimumBytes) ||
         reply.Version != KSWORD_SANDBOX_INTERFACE_VERSION ||
-        reply.Size < sizeof(reply)) {
+        reply.Size < kHealthReplyLegacyMinimumBytes) {
         return EmitProtocolError(
             writer,
             options,
             "IOCTL_KSWORD_SANDBOX_GET_HEALTH",
-            L"GET_HEALTH returned an incompatible KSWORD_SANDBOX_HEALTH_REPLY.",
+            L"GET_HEALTH returned an incompatible KSWORD_SANDBOX_HEALTH_REPLY prefix.",
+            bytesReturned);
+    }
+
+    if (producerMasksAdvertised && !producerMaskBytesReturned) {
+        return EmitProtocolError(
+            writer,
+            options,
+            "IOCTL_KSWORD_SANDBOX_GET_HEALTH",
+            L"GET_HEALTH advertised producer masks without returning the producer-mask fields.",
             bytesReturned);
     }
 

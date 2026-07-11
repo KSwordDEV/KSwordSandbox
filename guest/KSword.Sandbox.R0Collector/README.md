@@ -92,6 +92,21 @@ Every line is a `SandboxEvent` object with stable top-level fields:
 The `data` object is string-valued because the shared host model currently uses
 `Dictionary<string,string>`.
 
+### `r0collector.driverHealth` producer masks
+
+`IOCTL_KSWORD_SANDBOX_GET_HEALTH` rows decode
+`KSWORD_SANDBOX_HEALTH_FLAG_PRODUCER_MASKS_AVAILABLE` as
+`ProducerMasksAvailable` in `flagNames`. When the flag is set and the returned
+reply size covers the producer-mask fields, `data.producerMasksAvailable` is
+`true` and the row includes `producerEnableMaskHex`,
+`supportedProducerMaskHex`, `activeProducerMaskHex`, and
+`failedProducerMaskHex` plus `*Names` variants.
+
+Older ABI drivers that do not advertise the flag remain accepted. In that path
+`producerMasksAvailable=false`, `producerMaskFieldsReturned` records whether the
+bytes were present, and the mask fields are emitted as zero-valued compatibility
+diagnostics rather than failing the health check.
+
 ## Exit codes
 
 - `0`: success.

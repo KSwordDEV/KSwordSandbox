@@ -68,6 +68,11 @@ internal sealed class ArtifactManifestContractScenario : ISmokeTestScenario
         SmokeAssert.True(guestWriter.Contains("PacketCapture", StringComparison.Ordinal), "Guest writer should include packet-capture manifest lanes.");
         SmokeAssert.True(guestWriter.Contains("packetCaptureNotRequested", StringComparison.Ordinal), "Guest writer should treat packet capture as an implemented opt-in collection.");
         SmokeAssert.True(guestWriter.Contains("MemoryDump", StringComparison.Ordinal), "Guest writer should include memory-dump manifest descriptors.");
+        SmokeAssert.True(guestWriter.Contains("artifactRelativePath", StringComparison.Ordinal), "Guest writer should preserve artifact-relative event metadata.");
+        SmokeAssert.True(guestWriter.Contains("lastReason", StringComparison.Ordinal), "Guest writer should preserve concrete collection failure reasons.");
+        SmokeAssert.True(guestWriter.Contains("lastDiagnosticStage", StringComparison.Ordinal), "Guest writer should preserve collection diagnostic stages.");
+        SmokeAssert.True(guestWriter.Contains("lastProcessId", StringComparison.Ordinal), "Guest writer should preserve artifact collection process identity.");
+        SmokeAssert.True(guestWriter.Contains("CountProbeFailureEvents", StringComparison.Ordinal), "Guest writer should count probe failures in collection status.");
         SmokeAssert.True(guestDoc.Contains("artifacts/manifest.json", StringComparison.Ordinal), "Guest-agent doc should describe artifacts/manifest.json.");
         SmokeAssert.True(reportDoc.Contains("ArtifactManifest", StringComparison.Ordinal), "Report schema doc should describe ArtifactManifest.");
         SmokeAssert.True(reportDoc.Contains("DroppedFile", StringComparison.Ordinal), "Report schema doc should describe dropped-file artifact entries.");
@@ -319,8 +324,18 @@ internal sealed class ArtifactManifestContractScenario : ISmokeTestScenario
         SmokeAssert.True(loaded.Artifacts[0].EvidenceRole == "dropped-file", "Loaded guest artifact should preserve evidence role.");
         SmokeAssert.True(loaded.Artifacts[0].ImportPath == "artifacts/dropped-files/drop.bin", "Loaded guest artifact should preserve import path.");
         SmokeAssert.True(!string.IsNullOrWhiteSpace(loaded.Artifacts[0].Sha256), "Loaded guest artifact should fill SHA-256 when file is present.");
-        SmokeAssert.True(loaded.Artifacts.Any(artifact => artifact.Kind == ArtifactKind.Screenshot && artifact.CapturePhase == "after-run"), "Loaded guest manifest should preserve screenshot capture phase.");
-        SmokeAssert.True(loaded.Artifacts.Any(artifact => artifact.Kind == ArtifactKind.MemoryDump && artifact.CollectionName == "memory-dumps"), "Loaded guest manifest should preserve memory-dump collection names.");
+        var loadedScreenshot = loaded.Artifacts.Single(artifact => artifact.Kind == ArtifactKind.Screenshot);
+        SmokeAssert.True(loadedScreenshot.CapturePhase == "after-run", "Loaded guest manifest should preserve screenshot capture phase.");
+        SmokeAssert.True(loadedScreenshot.CaptureState == "captured", "Loaded guest manifest should preserve screenshot capture state.");
+        SmokeAssert.True(loadedScreenshot.CollectionName == "screenshots", "Loaded guest manifest should preserve screenshot collection names.");
+        SmokeAssert.True(loadedScreenshot.ImportPath == "screenshots/after-run.bmp", "Loaded guest screenshot should preserve safe import path.");
+        SmokeAssert.True(loadedScreenshot.SafeLink == "screenshots/after-run.bmp", "Loaded guest screenshot should expose a safe link.");
+        var loadedMemoryDump = loaded.Artifacts.Single(artifact => artifact.Kind == ArtifactKind.MemoryDump);
+        SmokeAssert.True(loadedMemoryDump.CollectionName == "memory-dumps", "Loaded guest manifest should preserve memory-dump collection names.");
+        SmokeAssert.True(loadedMemoryDump.CapturePhase == "after-start", "Loaded guest memory dump should preserve capture phase.");
+        SmokeAssert.True(loadedMemoryDump.CaptureState == "captured", "Loaded guest memory dump should preserve capture state.");
+        SmokeAssert.True(loadedMemoryDump.ImportPath == "memory-dumps/after-start-pid123.dmp", "Loaded guest memory dump should preserve safe import path.");
+        SmokeAssert.True(loadedMemoryDump.SafeLink == "memory-dumps/after-start-pid123.dmp", "Loaded guest memory dump should expose a safe link.");
         var loadedPacketCapture = loaded.Artifacts.Single(artifact => artifact.Kind == ArtifactKind.PacketCapture);
         SmokeAssert.True(loadedPacketCapture.FullPath == packetCapturePath, "Loaded guest packet capture should resolve host path from import path.");
         SmokeAssert.True(loadedPacketCapture.Category == "packet-capture", "Loaded guest packet capture should fill packet-capture category.");
@@ -331,6 +346,8 @@ internal sealed class ArtifactManifestContractScenario : ISmokeTestScenario
         SmokeAssert.True(loadedPacketCapture.CollectionName == "packet-captures", "Loaded guest packet capture should fill collection name.");
         SmokeAssert.True(loadedPacketCapture.EvidenceRole == "packet-capture", "Loaded guest packet capture should fill evidence role.");
         SmokeAssert.True(loadedPacketCapture.CaptureState == "available", "Loaded guest packet capture should be available without starting host capture.");
+        SmokeAssert.True(loadedPacketCapture.ImportPath == "packet-captures/external.pcap", "Loaded guest packet capture should preserve safe import path.");
+        SmokeAssert.True(loadedPacketCapture.SafeLink == "packet-captures/external.pcap", "Loaded guest packet capture should expose a safe link.");
         SmokeAssert.True(loadedPacketCapture.Metadata.TryGetValue("captureSource", out var guestPcapSource) && guestPcapSource == "external", "Loaded guest packet capture should preserve external capture metadata.");
         SmokeAssert.True(loaded.Artifacts.Any(artifact => artifact.Name == "escape.bin" && string.IsNullOrWhiteSpace(artifact.SafeLink)), "Unsafe guest artifact paths should not become safe links.");
     }

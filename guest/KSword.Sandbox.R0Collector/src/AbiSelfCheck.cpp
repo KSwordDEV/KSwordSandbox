@@ -106,6 +106,13 @@ std::string BuildAbiSelfCheckData(const Options& options) {
 
     data.AddUnsigned("eventHeaderSize", sizeof(KSWORD_SANDBOX_EVENT_HEADER));
     data.AddUnsigned("healthReplySize", sizeof(KSWORD_SANDBOX_HEALTH_REPLY));
+    data.AddUnsigned("healthReplyLegacyMinimumBytes", kHealthReplyLegacyMinimumBytes);
+    data.AddUnsigned("healthReplyProducerMaskBytes", kHealthReplyProducerMaskBytes);
+    data.AddUnsigned("healthProducerMasksAvailableFlag", KSWORD_SANDBOX_HEALTH_FLAG_PRODUCER_MASKS_AVAILABLE);
+    data.AddUtf8("healthProducerMasksAvailableFlagHex", HexUnsignedLongLong(KSWORD_SANDBOX_HEALTH_FLAG_PRODUCER_MASKS_AVAILABLE, 8));
+    data.AddUtf8(
+        "healthProducerMasksCompatibilityPolicy",
+        "GET_HEALTH accepts legacy-sized replies; producer masks require KSWORD_SANDBOX_HEALTH_FLAG_PRODUCER_MASKS_AVAILABLE and returned field bytes");
     data.AddUnsigned("pollReplySize", sizeof(KSWORD_SANDBOX_POLL_REPLY));
     data.AddUnsigned("capabilitiesReplySize", sizeof(KSWORD_SANDBOX_CAPABILITIES_REPLY));
     data.AddUnsigned("statusReplySize", sizeof(KSWORD_SANDBOX_STATUS_REPLY));

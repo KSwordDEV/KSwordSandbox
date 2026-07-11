@@ -141,6 +141,10 @@ std::string HealthFlagNames(const ULONG flags) {
         appendName("EnableMaskAvailable");
         knownFlags |= KSWORD_SANDBOX_HEALTH_FLAG_ENABLE_MASK_AVAILABLE;
     }
+    if ((flags & KSWORD_SANDBOX_HEALTH_FLAG_PRODUCER_MASKS_AVAILABLE) != 0) {
+        appendName("ProducerMasksAvailable");
+        knownFlags |= KSWORD_SANDBOX_HEALTH_FLAG_PRODUCER_MASKS_AVAILABLE;
+    }
 
     const ULONG unknownFlags = flags & ~knownFlags;
     if (unknownFlags != 0) {
@@ -1626,6 +1630,12 @@ bool AddTypedPayloadData(
 std::string BuildHealthData(const KSWORD_SANDBOX_HEALTH_REPLY& reply, const DWORD bytesReturned) {
     JsonDataObjectBuilder data;
     const bool lost = reply.EventsDropped != 0;
+    const bool producerMaskFieldsReturned =
+        bytesReturned >= static_cast<DWORD>(kHealthReplyProducerMaskBytes) &&
+        reply.Size >= kHealthReplyProducerMaskBytes;
+    const bool producerMasksAdvertised =
+        (reply.Flags & KSWORD_SANDBOX_HEALTH_FLAG_PRODUCER_MASKS_AVAILABLE) != 0;
+    const bool producerMasksAvailable = producerMasksAdvertised && producerMaskFieldsReturned;
     data.AddUtf8("ioctl", "IOCTL_KSWORD_SANDBOX_GET_HEALTH");
     data.AddUnsigned("ioctlCode", IOCTL_KSWORD_SANDBOX_GET_HEALTH);
     data.AddUnsigned("bytesReturned", bytesReturned);
@@ -1646,6 +1656,24 @@ std::string BuildHealthData(const KSWORD_SANDBOX_HEALTH_REPLY& reply, const DWOR
     data.AddUnsigned("eventsQueued", reply.EventsQueued);
     data.AddUnsigned("eventsDropped", reply.EventsDropped);
     data.AddUnsigned("nextSequence", reply.NextSequence);
+    data.AddBool("producerMasksAdvertised", producerMasksAdvertised);
+    data.AddBool("producerMaskFieldsReturned", producerMaskFieldsReturned);
+    data.AddBool("producerMasksAvailable", producerMasksAvailable);
+    data.AddUtf8(
+        "producerMasksCompatibility",
+        producerMasksAvailable ? "available" : "legacy-or-not-advertised");
+    data.AddUnsigned("producerEnableMask", producerMasksAvailable ? reply.ProducerEnableMask : 0);
+    data.AddUtf8("producerEnableMaskHex", HexUnsignedLongLong(producerMasksAvailable ? reply.ProducerEnableMask : 0, 8));
+    data.AddUtf8("producerEnableMaskNames", ProducerMaskNames(producerMasksAvailable ? reply.ProducerEnableMask : 0));
+    data.AddUnsigned("supportedProducerMask", producerMasksAvailable ? reply.SupportedProducerMask : 0);
+    data.AddUtf8("supportedProducerMaskHex", HexUnsignedLongLong(producerMasksAvailable ? reply.SupportedProducerMask : 0, 8));
+    data.AddUtf8("supportedProducerMaskNames", ProducerMaskNames(producerMasksAvailable ? reply.SupportedProducerMask : 0));
+    data.AddUnsigned("activeProducerMask", producerMasksAvailable ? reply.ActiveProducerMask : 0);
+    data.AddUtf8("activeProducerMaskHex", HexUnsignedLongLong(producerMasksAvailable ? reply.ActiveProducerMask : 0, 8));
+    data.AddUtf8("activeProducerMaskNames", ProducerMaskNames(producerMasksAvailable ? reply.ActiveProducerMask : 0));
+    data.AddUnsigned("failedProducerMask", producerMasksAvailable ? reply.FailedProducerMask : 0);
+    data.AddUtf8("failedProducerMaskHex", HexUnsignedLongLong(producerMasksAvailable ? reply.FailedProducerMask : 0, 8));
+    data.AddUtf8("failedProducerMaskNames", ProducerMaskNames(producerMasksAvailable ? reply.FailedProducerMask : 0));
     data.AddSigned("lastNtStatus", reply.LastNtStatus);
     data.AddUtf8("lastNtStatusHex", HexUnsignedLongLong(static_cast<unsigned long>(reply.LastNtStatus), 8));
     return data.Build();

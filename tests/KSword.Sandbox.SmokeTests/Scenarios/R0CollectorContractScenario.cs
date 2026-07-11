@@ -19,6 +19,7 @@ internal sealed class R0CollectorContractScenario : ISmokeTestScenario
         var project = ReadText(Path.Combine(collectorRoot, "KSword.Sandbox.R0Collector.vcxproj"));
         var filters = ReadText(Path.Combine(collectorRoot, "KSword.Sandbox.R0Collector.vcxproj.filters"));
         var collectorDoc = ReadText(Path.Combine(context.RepositoryRoot, "docs", "r0-collector.md"));
+        var collectorReadme = ReadText(Path.Combine(collectorRoot, "README.md"));
         var schemaDoc = ReadText(Path.Combine(context.RepositoryRoot, "docs", "r0-jsonl-schema.md"));
 
         foreach (var module in new[]
@@ -54,6 +55,7 @@ internal sealed class R0CollectorContractScenario : ISmokeTestScenario
         var eventParser = ReadText(Path.Combine(sourceRoot, "EventParser.cpp"));
         var runtimeLoop = ReadText(Path.Combine(sourceRoot, "RuntimeLoop.cpp"));
         var abiSelfCheck = ReadText(Path.Combine(sourceRoot, "AbiSelfCheck.cpp"));
+        var healthData = ExtractFunctionBody(eventParser, "BuildHealthData");
         RequireContains(runtimeLoop, "RunAbiSelfCheckMode", "Runtime loop should support no-device ABI self-check mode.");
         RequireContains(abiSelfCheck, "r0collector.abiSelfCheck", "ABI self-check should emit a dedicated JSONL row.");
         RequireContains(abiSelfCheck, "collectorAbiVersion", "ABI self-check should preserve collector ABI version.");
@@ -74,8 +76,20 @@ internal sealed class R0CollectorContractScenario : ISmokeTestScenario
         RequireContains(ioctlClient, "r0collector.driverCapabilities", "R0Collector should emit capabilities JSONL rows.");
         RequireContains(ioctlClient, "r0collector.driverStatus", "R0Collector should emit status JSONL rows.");
         RequireContains(ioctlClient, "r0collector.driverProducerMask", "R0Collector should emit producer-mask JSONL rows.");
+        RequireContains(ioctlClient, "kHealthReplyLegacyMinimumBytes", "GET_HEALTH should tolerate the legacy health reply prefix.");
+        RequireContains(ioctlClient, "KSWORD_SANDBOX_HEALTH_FLAG_PRODUCER_MASKS_AVAILABLE", "GET_HEALTH should gate producer masks on the health flag.");
+        RequireContains(ioctlClient, "advertised producer masks without returning", "GET_HEALTH should reject flagged replies that omit producer mask bytes.");
         RequireContains(eventParser, "capabilityFlagsHex", "Capabilities row should preserve capability flags.");
         RequireContains(eventParser, "supportedProducerMaskHex", "Capabilities/status rows should preserve supported producer mask.");
+        RequireContains(eventParser, "KSWORD_SANDBOX_HEALTH_FLAG_PRODUCER_MASKS_AVAILABLE", "Health flag names should decode producer-mask availability.");
+        RequireContains(eventParser, "ProducerMasksAvailable", "Health flag names should print producer-mask availability.");
+        RequireContains(healthData, "producerMasksAvailable", "Health row should expose producer-mask availability.");
+        RequireContains(healthData, "producerMaskFieldsReturned", "Health row should expose producer-mask byte compatibility.");
+        RequireContains(healthData, "producerEnableMaskHex", "Health row should preserve producer enable mask when available.");
+        RequireContains(healthData, "supportedProducerMaskHex", "Health row should preserve supported producer mask when available.");
+        RequireContains(healthData, "activeProducerMaskHex", "Health row should preserve active producer mask when available.");
+        RequireContains(healthData, "failedProducerMaskHex", "Health row should preserve failed producer mask when available.");
+        RequireContains(healthData, "legacy-or-not-advertised", "Health row should mark old ABI compatibility when masks are unavailable.");
         RequireContains(eventParser, "queueCapacity", "Status row should preserve queue capacity.");
         RequireContains(eventParser, "queueDepth", "Status row should preserve queue depth.");
         RequireContains(eventParser, "producerEnableMaskHex", "Status row should preserve producer enable mask.");
@@ -107,12 +121,62 @@ internal sealed class R0CollectorContractScenario : ISmokeTestScenario
         RequireContains(collectorDoc, "r0collector.abiSelfCheck", "r0-collector.md should document ABI self-check output.");
         RequireContains(collectorDoc, "JSONL quality and noise contract", "r0-collector.md should document stable JSONL quality fields.");
 
+        foreach (var expected in new[]
+        {
+            "KSWORD_SANDBOX_HEALTH_FLAG_PRODUCER_MASKS_AVAILABLE",
+            "ProducerMasksAvailable",
+            "producerMasksAvailable",
+            "producerMaskFieldsReturned",
+            "producerEnableMaskHex",
+            "supportedProducerMaskHex",
+            "activeProducerMaskHex",
+            "failedProducerMaskHex",
+            "Older ABI drivers"
+        })
+        {
+            RequireContains(collectorReadme, expected, $"Collector README should document GET_HEALTH producer-mask compatibility field {expected}.");
+        }
+
         return Task.FromResult(new SmokeTestResult
         {
             ScenarioId = ScenarioId,
             Passed = true,
             Message = "R0Collector split, CLI aliases, and JSONL docs are in sync."
         });
+    }
+
+
+    /// <summary>
+    /// Extracts a function body for targeted static contract checks. Inputs are
+    /// source text and function name; processing finds the first brace-balanced
+    /// body after the name; return value is the body text.
+    /// </summary>
+    private static string ExtractFunctionBody(string content, string functionName)
+    {
+        var functionIndex = content.IndexOf(functionName, StringComparison.Ordinal);
+        SmokeAssert.True(functionIndex >= 0, $"Required function is missing: {functionName}");
+        var bodyStart = content.IndexOf('{', functionIndex);
+        SmokeAssert.True(bodyStart >= 0, $"Required function body is missing: {functionName}");
+
+        var depth = 0;
+        for (var index = bodyStart; index < content.Length; index++)
+        {
+            if (content[index] == '{')
+            {
+                depth++;
+            }
+            else if (content[index] == '}')
+            {
+                depth--;
+                if (depth == 0)
+                {
+                    return content[bodyStart..(index + 1)];
+                }
+            }
+        }
+
+        SmokeAssert.True(false, $"Required function body is unterminated: {functionName}");
+        return string.Empty;
     }
 
     /// <summary>

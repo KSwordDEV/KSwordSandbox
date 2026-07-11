@@ -103,6 +103,14 @@ internal sealed class R0CollectorEventQualityScenario : ISmokeTestScenario
         RequireContains(header, "KSWORD_SANDBOX_EVENT_HEADER_VERSION", "ABI header must publish event header version.");
         RequireContains(header, "KSWORD_SANDBOX_EVENT_SCHEMA_VERSION", "ABI header must publish event schema version.");
         RequireContains(header, "KSWORD_SANDBOX_CAPABILITY_FLAG_EVENT_SCHEMA_NAMES", "Capabilities must advertise schema-name support.");
+        RequireContains(header, "KSWORD_SANDBOX_HEALTH_FLAG_PRODUCER_MASKS_AVAILABLE", "GET_HEALTH ABI must publish the producer-mask availability flag.");
+        RequireStructFields(
+            header,
+            "KSWORD_SANDBOX_HEALTH_REPLY",
+            "ProducerEnableMask",
+            "SupportedProducerMask",
+            "ActiveProducerMask",
+            "FailedProducerMask");
         RequireStructFields(
             header,
             "KSWORD_SANDBOX_EVENT_HEADER",
@@ -182,14 +190,20 @@ internal sealed class R0CollectorEventQualityScenario : ISmokeTestScenario
         RequireContains(ioctlClient, "request->Flags = 0", "Producer-mask request reserved flags must remain zero.");
         RequireContains(ioctlClient, "request.Flags = 0", "READ_EVENTS request reserved flags must remain zero.");
         RequireContains(ioctlClient, "reply.BytesWritten > availableEventBytes", "Collector must protect against malformed READ_EVENTS byte counts.");
+        RequireContains(ioctlClient, "kHealthReplyLegacyMinimumBytes", "Collector must tolerate old GET_HEALTH replies that contain the stable legacy prefix.");
+        RequireContains(ioctlClient, "KSWORD_SANDBOX_HEALTH_FLAG_PRODUCER_MASKS_AVAILABLE", "Collector must gate GET_HEALTH producer masks on the advertised availability flag.");
+        RequireContains(ioctlClient, "advertised producer masks without returning", "Collector must reject flagged GET_HEALTH replies that omit producer mask bytes.");
 
         RequireContains(eventParser, "abiVersionMajor", "Capabilities JSONL must include ABI major version.");
         RequireContains(eventParser, "abiVersionMinor", "Capabilities JSONL must include ABI minor version.");
         RequireContains(eventParser, "eventHeaderVersion", "Capabilities JSONL must include event header version.");
         RequireContains(eventParser, "eventSchemaName", "Driver JSONL rows must include event schema name.");
         RequireContains(eventParser, "eventSchemaVersion", "Driver JSONL rows must include event schema version.");
-        RequireContains(eventParser, "producerEnableMaskHex", "Status JSONL must include producer enable mask.");
-        RequireContains(eventParser, "supportedProducerMaskHex", "Status/capabilities JSONL must include supported producer mask.");
+        RequireContains(eventParser, "ProducerMasksAvailable", "Health JSONL flag names must print producer-mask availability.");
+        RequireContains(eventParser, "producerMasksAvailable", "Health JSONL must expose whether GET_HEALTH producer masks are valid.");
+        RequireContains(eventParser, "producerMaskFieldsReturned", "Health JSONL must expose old/new GET_HEALTH byte compatibility.");
+        RequireContains(eventParser, "producerEnableMaskHex", "Status/health JSONL must include producer enable mask.");
+        RequireContains(eventParser, "supportedProducerMaskHex", "Status/capabilities/health JSONL must include supported producer mask.");
         RequireContains(eventParser, "activeProducerMaskHex", "Status JSONL must include active producer mask.");
         RequireContains(eventParser, "failedProducerMaskHex", "Status JSONL must include failed producer mask.");
         RequireContains(eventParser, "queueHighWatermark", "Status JSONL must include queue high watermark.");
