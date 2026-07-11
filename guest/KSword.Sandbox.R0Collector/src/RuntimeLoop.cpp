@@ -33,6 +33,11 @@ std::string BuildConfigData(const Options& options) {
     data.AddUnsigned("enableMask", options.enableMask);
     data.AddUtf8("enableMaskHex", HexUnsignedLongLong(options.enableMask, 8));
     data.AddUtf8("ioctlProtocol", "KSwordSandboxDriverIoctl.h");
+    data.AddUtf8("schema", KSWORD_SANDBOX_EVENT_SCHEMA_NAME);
+    data.AddUtf8("producer", "r0collector");
+    data.AddBool("noise", false);
+    data.AddBool("lost", false);
+    data.AddBool("backpressure", false);
     return data.Build();
 }
 
@@ -45,6 +50,11 @@ std::string BuildErrorData(const std::wstring& message, const DWORD errorCode, c
     data.AddWide("message", message);
     data.AddUnsigned("win32Error", errorCode);
     data.AddWide("hint", hint);
+    data.AddUtf8("schema", KSWORD_SANDBOX_EVENT_SCHEMA_NAME);
+    data.AddUtf8("producer", "r0collector");
+    data.AddBool("noise", false);
+    data.AddBool("lost", false);
+    data.AddBool("backpressure", false);
     return data.Build();
 }
 
@@ -81,6 +91,11 @@ bool EmitCollectorHeartbeat(
     data.AddBool("enableMaskSpecified", options.enableMaskSpecified);
     data.AddUnsigned("enableMask", options.enableMask);
     data.AddUtf8("enableMaskHex", HexUnsignedLongLong(options.enableMask, 8));
+    data.AddUtf8("schema", KSWORD_SANDBOX_EVENT_SCHEMA_NAME);
+    data.AddUtf8("producer", "r0collector");
+    data.AddBool("noise", false);
+    data.AddBool("lost", false);
+    data.AddBool("backpressure", false);
     event.dataJson = data.Build();
 
     return EmitEvent(writer, event);
@@ -112,6 +127,11 @@ int RunDriverHealthOnly(const UniqueHandle& device, const Options& options, Even
     data.AddBool("ioctlIssued", true);
     data.AddBool("healthOnly", true);
     data.AddBool("heartbeat", options.heartbeat);
+    data.AddUtf8("schema", KSWORD_SANDBOX_EVENT_SCHEMA_NAME);
+    data.AddUtf8("producer", "r0collector");
+    data.AddBool("noise", false);
+    data.AddBool("lost", false);
+    data.AddBool("backpressure", false);
 
     SandboxEventFields stoppedEvent;
     stoppedEvent.eventType = "r0collector.stopped";
@@ -212,6 +232,11 @@ int RunDriverIoctlLoop(const UniqueHandle& device, const Options& options, Event
     data.AddSigned("maxReadBatches", options.maxReadBatches);
     data.AddUnsigned("readEventsMaxEvents", options.readEventsMaxEvents);
     data.AddBool("heartbeat", options.heartbeat);
+    data.AddUtf8("schema", KSWORD_SANDBOX_EVENT_SCHEMA_NAME);
+    data.AddUtf8("producer", "r0collector");
+    data.AddBool("noise", false);
+    data.AddBool("lost", false);
+    data.AddBool("backpressure", drainStoppedAtBatchLimit);
 
     SandboxEventFields stoppedEvent;
     stoppedEvent.eventType = "r0collector.stopped";
@@ -295,6 +320,11 @@ int RunCollector(int argc, wchar_t* argv[]) {
         stoppedData.AddBool("heartbeat", options.heartbeat);
         stoppedData.AddSigned("stressCount", options.stressCount);
         stoppedData.AddBool("injectJsonlNoise", options.injectJsonlNoise);
+        stoppedData.AddUtf8("schema", KSWORD_SANDBOX_EVENT_SCHEMA_NAME);
+        stoppedData.AddUtf8("producer", "r0collector");
+        stoppedData.AddBool("noise", false);
+        stoppedData.AddBool("lost", false);
+        stoppedData.AddBool("backpressure", false);
         stoppedEvent.dataJson = stoppedData.Build();
         return EmitEvent(writer, stoppedEvent) ? kExitSuccess : kExitRuntimeFailure;
     }
@@ -325,6 +355,11 @@ int RunCollector(int argc, wchar_t* argv[]) {
     openedData.AddUnsigned("enableMask", options.enableMask);
     openedData.AddUtf8("enableMaskHex", HexUnsignedLongLong(options.enableMask, 8));
     openedData.AddUtf8("ioctlProtocol", "KSwordSandboxDriverIoctl.h");
+    openedData.AddUtf8("schema", KSWORD_SANDBOX_EVENT_SCHEMA_NAME);
+    openedData.AddUtf8("producer", "r0collector");
+    openedData.AddBool("noise", false);
+    openedData.AddBool("lost", false);
+    openedData.AddBool("backpressure", false);
     openedEvent.dataJson = openedData.Build();
     if (!EmitEvent(writer, openedEvent)) {
         return kExitRuntimeFailure;

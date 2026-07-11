@@ -19,6 +19,8 @@ public sealed class StaticAnalyzer
     private const int MaxImportDescriptors = 256;
     private const int MaxImportThunksPerDescriptor = 512;
     private const int MaxImportEvidence = 96;
+    private const int MaxImportSummaryModules = 24;
+    private const int MaxImportApiClusterEvidence = 12;
     private const int MaxExportNames = 64;
     private const int MaxTlsCallbacks = 32;
     private const int MaxCertificateEntries = 16;
@@ -1189,6 +1191,8 @@ public sealed class StaticAnalyzer
             ? Math.Min(MaxImportDescriptors, Math.Max(1, (int)(importDirectory.Size / 20)))
             : MaxImportDescriptors;
         var evidenceCount = 0;
+        var moduleSummaries = new List<ImportModuleSummary>();
+        var suspiciousApiClusters = new SortedDictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         for (var index = 0; index < descriptorLimit; index++)
         {
             var descriptorOffset = importOffset + index * 20;
@@ -1212,12 +1216,27 @@ public sealed class StaticAnalyzer
             var dllName = TryReadRvaAsciiString(reader, nameRva, sections, fileLength) ?? $"dll@0x{nameRva:X8}";
             AddImportModuleTags(dllName, tags);
             AddPeEvidence(interestingStrings, $"import:{dllName}", ref evidenceCount, MaxImportEvidence);
+            var moduleSummary = new ImportModuleSummary(dllName);
+            moduleSummaries.Add(moduleSummary);
             var thunkRva = originalFirstThunk != 0 ? originalFirstThunk : firstThunk;
             if (thunkRva != 0)
             {
-                ReadImportThunks(reader, dllName, thunkRva, sections, optionalMagic, fileLength, tags, interestingStrings, ref evidenceCount);
+                ReadImportThunks(
+                    reader,
+                    dllName,
+                    thunkRva,
+                    sections,
+                    optionalMagic,
+                    fileLength,
+                    tags,
+                    interestingStrings,
+                    moduleSummary,
+                    suspiciousApiClusters,
+                    ref evidenceCount);
             }
         }
+
+        AddImportSummaryEvidence(moduleSummaries, suspiciousApiClusters, tags, interestingStrings);
     }
 
     /// <summary>
@@ -1234,6 +1253,8 @@ public sealed class StaticAnalyzer
         long fileLength,
         SortedSet<string> tags,
         SortedSet<string> interestingStrings,
+        ImportModuleSummary moduleSummary,
+        SortedDictionary<string, int> suspiciousApiClusters,
         ref int evidenceCount)
     {
         if (!TryRvaToFileOffset(thunkRva, sections, fileLength, out var thunkOffset))
@@ -1262,6 +1283,7 @@ public sealed class StaticAnalyzer
 
             if ((rawEntry & ordinalMask) != 0)
             {
+                moduleSummary.OrdinalImportCount++;
                 AddPeEvidence(interestingStrings, $"import:{dllName}!#ordinal{rawEntry & 0xffff}", ref evidenceCount, MaxImportEvidence);
                 continue;
             }
@@ -1277,8 +1299,63 @@ public sealed class StaticAnalyzer
                 continue;
             }
 
+            moduleSummary.NamedApiCount++;
             AddPeEvidence(interestingStrings, $"import:{dllName}!{apiName}", ref evidenceCount, MaxImportEvidence);
             AddSuspiciousApiTags(apiName, tags);
+            foreach (var cluster in GetSuspiciousApiClusters(apiName))
+            {
+                suspiciousApiClusters.TryGetValue(cluster, out var hitCount);
+                suspiciousApiClusters[cluster] = hitCount + 1;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Emits import-table aggregate evidence after descriptor/thunk walking.
+    /// Inputs are bounded module summaries and suspicious API cluster counts;
+    /// processing adds compact report strings and coarse multi-cluster tags.
+    /// </summary>
+    private static void AddImportSummaryEvidence(
+        IReadOnlyList<ImportModuleSummary> moduleSummaries,
+        IReadOnlyDictionary<string, int> suspiciousApiClusters,
+        SortedSet<string> tags,
+        SortedSet<string> interestingStrings)
+    {
+        if (moduleSummaries.Count == 0)
+        {
+            return;
+        }
+
+        var namedApiCount = moduleSummaries.Sum(summary => summary.NamedApiCount);
+        var ordinalImportCount = moduleSummaries.Sum(summary => summary.OrdinalImportCount);
+        AddInterestingString(
+            interestingStrings,
+            $"import-summary:modules={moduleSummaries.Count},namedApis={namedApiCount},ordinals={ordinalImportCount}");
+
+        foreach (var summary in moduleSummaries.Take(MaxImportSummaryModules))
+        {
+            AddInterestingString(
+                interestingStrings,
+                $"import-module:{summary.DllName},namedApis={summary.NamedApiCount},ordinals={summary.OrdinalImportCount}");
+        }
+
+        if (suspiciousApiClusters.Count == 0)
+        {
+            return;
+        }
+
+        tags.Add("import_suspicious_api_cluster");
+        if (suspiciousApiClusters.Count > 1)
+        {
+            tags.Add("import_multi_suspicious_api_cluster");
+        }
+
+        foreach (var cluster in suspiciousApiClusters
+            .OrderByDescending(cluster => cluster.Value)
+            .ThenBy(cluster => cluster.Key, StringComparer.OrdinalIgnoreCase)
+            .Take(MaxImportApiClusterEvidence))
+        {
+            AddInterestingString(interestingStrings, $"import-api-cluster:{cluster.Key},hits={cluster.Value}");
         }
     }
 
@@ -1799,6 +1876,65 @@ public sealed class StaticAnalyzer
             tags.Add("import_anti_analysis_api");
             tags.Add("anti_analysis_string");
             tags.Add("debugger_evasion_string");
+        }
+    }
+
+    /// <summary>
+    /// Maps a suspicious API-like token to report-friendly behavior clusters.
+    /// Inputs are one imported or embedded API name; processing reuses the
+    /// same curated groups as tag classification; the method yields stable
+    /// cluster names for aggregate import-table evidence.
+    /// </summary>
+    private static IEnumerable<string> GetSuspiciousApiClusters(string apiName)
+    {
+        if (ContainsAny(apiName, ProcessInjectionApis))
+        {
+            yield return "process-injection";
+        }
+
+        if (ContainsAny(apiName, DynamicCodeApis))
+        {
+            yield return "dynamic-code";
+        }
+
+        if (ContainsAny(apiName, RegistryPersistenceApis))
+        {
+            yield return "registry-persistence";
+        }
+
+        if (ContainsAny(apiName, ServicePersistenceApis))
+        {
+            yield return "service-persistence";
+        }
+
+        if (ContainsAny(apiName, PersistenceApis))
+        {
+            yield return "persistence";
+        }
+
+        if (ContainsAny(apiName, NetworkApis))
+        {
+            yield return "network";
+        }
+
+        if (ContainsAny(apiName, FileDropApis))
+        {
+            yield return "file-drop";
+        }
+
+        if (ContainsScriptExecutionApi(apiName))
+        {
+            yield return "script-execution";
+        }
+
+        if (ContainsAny(apiName, ResourceApis))
+        {
+            yield return "resource";
+        }
+
+        if (ContainsAny(apiName, AntiAnalysisApis))
+        {
+            yield return "anti-analysis";
         }
     }
 
@@ -2435,6 +2571,25 @@ public sealed class StaticAnalyzer
     private readonly record struct PeDataDirectory(uint Rva, uint Size)
     {
         public bool IsPresent => Rva != 0;
+    }
+
+    /// <summary>
+    /// Internal aggregate for one IMAGE_IMPORT_DESCRIPTOR.
+    /// Inputs are a DLL name plus bounded thunk-walk counters; processing is
+    /// simple storage for report evidence, and the type is not exposed.
+    /// </summary>
+    private sealed class ImportModuleSummary
+    {
+        public ImportModuleSummary(string dllName)
+        {
+            DllName = dllName;
+        }
+
+        public string DllName { get; }
+
+        public int NamedApiCount { get; set; }
+
+        public int OrdinalImportCount { get; set; }
     }
 
     /// <summary>

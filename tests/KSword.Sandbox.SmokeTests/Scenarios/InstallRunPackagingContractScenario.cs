@@ -35,6 +35,8 @@ internal sealed class InstallRunPackagingContractScenario : ISmokeTestScenario
         RequireNotContains(installScript, "Sign-SandboxDriverWithKswordCSignTool", "install.ps1 must not call the legacy KSword signing wrapper.");
 
         RequireContains(runScript, "Ensure-GuestPayloadForWebUi", "run.ps1 should have a WebUI-specific payload wrapper.");
+        RequireContains(runScript, "StartWebUI", "run.ps1 should provide an explicit StartWebUI mode.");
+        RequireContains(runScript, "CheckEnvironment", "run.ps1 should provide a non-mutating environment-check mode.");
         RequireContains(runScript, "RequirePayloadForWebUI", "run.ps1 should allow strict WebUI payload enforcement.");
         RequireContains(runScript, "WebUI will still start", "WebUI mode should remain launchable when payload build prerequisites are missing.");
         RequireContains(runScript, "GuestPayloadManifestExists", "run.ps1 status should show payload readiness.");
@@ -42,11 +44,15 @@ internal sealed class InstallRunPackagingContractScenario : ISmokeTestScenario
         RequireContains(runScript, "Hyper-V live prerequisites", "run.ps1 should print live prerequisite guidance at WebUI startup.");
 
         RequireContains(installDoc, ".\\run.ps1", "Install docs should show the post-install WebUI command.");
+        RequireContains(installDoc, ".\\install.ps1 -Mode CheckEnvironment", "Install docs should show the environment-check command.");
+        RequireContains(installDoc, ".\\install.ps1 -Mode ConfigureVTKey -PromptVTKey", "Install docs should show VT key configuration.");
         RequireContains(installDoc, "self-contained Guest", "Install docs should explain self-contained guest payload preparation.");
         RequireContains(installDoc, "-RequirePayloadForWebUI", "Install docs should document strict payload mode.");
         RequireContains(installDoc, "must not call `CSignTool.exe`", "Install docs should document the no-CSignTool boundary.");
 
         RequireContains(readme, ".\\run.ps1", "README quick start should show the runtime wrapper.");
+        RequireContains(readme, ".\\install.ps1 -Mode CheckEnvironment", "README quick start should show the environment-check wrapper.");
+        RequireContains(readme, ".\\install.ps1 -Mode ConfigureVTKey -PromptVTKey", "README should document optional VT key setup.");
         RequireContains(readme, "self-contained guest payload", "README should explain payload preparation in the wrapper path.");
         RequireContains(readme, "RequirePayloadForWebUI", "README should document strict WebUI payload preparation.");
         RequireContains(readme, "do not call", "README should preserve the no-CSignTool install/run boundary.");

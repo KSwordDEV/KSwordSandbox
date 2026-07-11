@@ -46,6 +46,17 @@ tests/KSword.Sandbox.SmokeTests Console smoke tests
 
 ## Quick start
 
+Shortest path on a machine that already has the golden VM:
+
+```powershell
+.\install.ps1 -Mode Install -PromptPassword
+.\run.ps1
+```
+
+After that one-time setup, daily WebUI startup is just `.\run.ps1`. It starts
+the WebUI and does not start/restore a VM; live Hyper-V execution still requires
+an explicit `-Live` CLI flag or live selection in the WebUI/API.
+
 ```powershell
 .\install.ps1
 .\run.ps1
@@ -53,10 +64,12 @@ dotnet build .\KSwordSandbox.sln
 .\scripts\Invoke-SandboxSmokeTest.ps1
 ```
 
-`install.ps1` has an interactive menu for install, change, uninstall, and
-status. The Change menu includes host-only password reset, actual VM guest
-password reset, Hyper-V VM/checkpoint/guest path config, runtime folder refresh,
-and Hyper-V readiness/status. For unattended local lab setup:
+`install.ps1` has an interactive menu for install, change, uninstall, reset
+Guest password, configure Hyper-V, configure VT key, check environment, start
+WebUI, and status. The Change menu includes host-only password reset, actual VM
+guest password reset, Hyper-V VM/checkpoint/guest path config, runtime folder
+refresh, optional VirusTotal key setup, and Hyper-V readiness/status. For
+unattended local lab setup:
 
 ```powershell
 .\install.ps1 -Mode Install -GeneratePassword
@@ -81,6 +94,21 @@ template:
   -GuestWorkingDirectory 'C:\KSwordSandbox'
 ```
 
+Check another computer's local readiness without changing state:
+
+```powershell
+.\install.ps1 -Mode CheckEnvironment
+.\run.ps1 -Mode CheckEnvironment
+```
+
+Optional VirusTotal hash-only lookups use `KSWORDBOX_VIRUSTOTAL_API_KEY` from
+the current process/User/Machine environment. Configure it without printing the
+key:
+
+```powershell
+.\install.ps1 -Mode ConfigureVTKey -PromptVTKey
+```
+
 To synchronize an unknown VM `SandboxUser` password with the host secret from an
 elevated shell:
 
@@ -92,16 +120,20 @@ See `docs/install.md`.
 
 After installation, `run.ps1` is the normal per-use entry point. `.\run.ps1`
 starts the WebUI with the installed local config, sets `Sandbox__ConfigPath`,
-mirrors the guest password secret into the WebUI process when available, and
+mirrors the guest password secret into the WebUI process when available,
+mirrors the optional VirusTotal key into the WebUI process when configured, and
 checks/prepares the self-contained guest payload under the configured
-`guestPayloadRoot`. WebUI launch remains best-effort if local payload build tools
-are missing, so upload, planning, dry-run runbooks, and config review can still
-run; use `.\run.ps1 -RequirePayloadForWebUI` when payload preparation should be
+`guestPayloadRoot`. `.\run.ps1 -Mode StartWebUI` is the explicit WebUI startup
+alias. WebUI launch remains best-effort if local payload build tools are
+missing, so upload, planning, dry-run runbooks, and config review can still run;
+use `.\run.ps1 -RequirePayloadForWebUI` when payload preparation should be
 fatal. `.\run.ps1 -Mode Plan -SamplePath D:\Temp\sample.exe` creates a
 non-mutating Hyper-V plan; and `.\run.ps1 -Mode Analyze -SamplePath
 D:\Temp\sample.exe -Live` performs a single live Hyper-V analysis from an
 elevated shell and automatically post-processes collected guest events into
-`report.json` / `report.html`. See `docs/run.md`.
+`report.json` / `report.html`. Use `-WhatIf` on `install.ps1` or `run.ps1` to
+preview local writes/startup without prompting for secrets, launching dotnet, or
+delegating Hyper-V live execution. See `docs/run.md`.
 
 Build the native x64 collector and driver skeleton from the main solution:
 

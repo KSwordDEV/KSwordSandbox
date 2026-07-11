@@ -41,6 +41,7 @@ internal sealed class R0CollectorEventQualityScenario : ISmokeTestScenario
 
         AssertStaticAbiNoiseAndBackpressureContract(context);
         await AssertSyntheticJsonLinesQualityAsync(context, cancellationToken);
+        await AssertExecutableStressNoiseQualityAsync(context, cancellationToken);
 
         return new SmokeTestResult
         {
@@ -196,6 +197,9 @@ internal sealed class R0CollectorEventQualityScenario : ISmokeTestScenario
         RequireContains(eventParser, "totalEventsSuppressed", "Status JSONL must include producer-suppressed event counter.");
         RequireContains(eventParser, "eventsDropped", "Poll/read-events JSONL must include batch dropped counter.");
         RequireContains(eventParser, "sequence", "Driver rows must include sequence for loss-gap diagnostics.");
+        RequireContains(eventParser, "sourceEndpoint", "Network parser must include source endpoint semantics.");
+        RequireContains(eventParser, "destinationEndpoint", "Network parser must include destination endpoint semantics.");
+        RequireContains(eventParser, "flowKey", "Network parser must include flow-key semantics.");
 
         RequireContains(options, "--max-events", "Collector CLI must expose a READ_EVENTS max-events stress knob.");
         RequireContains(options, "--max-read-batches", "Collector CLI must expose a bounded drain batch knob.");
@@ -205,6 +209,15 @@ internal sealed class R0CollectorEventQualityScenario : ISmokeTestScenario
         RequireContains(syntheticMode, "typedPayloadStatus", "Synthetic rows must mark typed payload status.");
         RequireContains(syntheticMode, "mock", "Synthetic rows must mark mock mode.");
         RequireContains(syntheticMode, "eventSchemaVersion", "Synthetic rows must include event schema version.");
+        RequireContains(syntheticMode, "producer", "Synthetic rows must include stable producer metadata.");
+        RequireContains(syntheticMode, "schema", "Synthetic rows must include stable schema metadata.");
+        RequireContains(syntheticMode, "lost", "Synthetic rows must include stable loss/no-lost metadata.");
+        RequireContains(syntheticMode, "backpressure", "Synthetic rows must include stable backpressure metadata.");
+        RequireContains(syntheticMode, "noise", "Synthetic rows must include stable noise metadata.");
+        RequireContains(syntheticMode, "EmitSyntheticJsonlNoiseRows", "Synthetic JSONL noise should be injectable without requiring stress rows.");
+        RequireContains(syntheticMode, "sourceEndpoint", "Synthetic network rows should preserve source endpoint semantics.");
+        RequireContains(syntheticMode, "destinationEndpoint", "Synthetic network rows should preserve destination endpoint semantics.");
+        RequireContains(syntheticMode, "flowKey", "Synthetic network rows should preserve flow-key semantics.");
         var abiSelfCheck = ReadRepositoryText(
             context,
             "guest",
@@ -611,6 +624,87 @@ internal sealed class R0CollectorEventQualityScenario : ISmokeTestScenario
         RequireData(started, "StressJsonlSequenceGapCount", StressJsonlSequenceGapCount.ToString());
         SmokeAssert.True(started.Data.ContainsKey("StressJsonlLossEvidence"), "Started row should name stress loss evidence fields.");
         SmokeAssert.True(started.Data.ContainsKey("StressJsonlBackpressureEvidence"), "Started row should name stress backpressure evidence fields.");
+    }
+
+    /// <summary>
+    /// Runs the built collector stress/noise mode. Inputs are the smoke context
+    /// and cancellation token; processing writes native build/run artifacts only
+    /// under D:\Temp\KSwordSandbox\verify; return value is none.
+    /// </summary>
+    private static async Task AssertExecutableStressNoiseQualityAsync(
+        SmokeTestContext context,
+        CancellationToken cancellationToken)
+    {
+        var build = await R0CollectorExecutableSmokeHelper.BuildCollectorAsync(context, cancellationToken);
+        var outputPath = R0CollectorExecutableSmokeHelper.CreateRunOutputPath(build, "r0collector-stress-noise.jsonl");
+        var result = await R0CollectorExecutableSmokeHelper.RunCollectorAsync(
+            build.ExecutablePath,
+            [
+                "--stress-count",
+                ExpectedStressDriverRows.ToString(),
+                "--inject-jsonl-noise",
+                "--heartbeat",
+                "--max-events",
+                "16",
+                "--max-read-batches",
+                "4",
+                "--out",
+                outputPath
+            ],
+            context.RepositoryRoot,
+            cancellationToken);
+        if (R0CollectorExecutableSmokeHelper.IsExecutionBlockedByHostPolicy(result))
+        {
+            SmokeAssert.True(
+                result.CombinedOutput.Contains("Execution blocked by host policy", StringComparison.Ordinal),
+                "Blocked executable stress/noise smoke should report explicit host-policy evidence.");
+            return;
+        }
+
+        SmokeAssert.True(result.ExitCode == 0, $"collector stress/noise smoke should exit 0. Output: {result.CombinedOutput}");
+
+        var jsonLines = R0CollectorExecutableSmokeHelper.ReadJsonLines(outputPath);
+        SmokeAssert.True(jsonLines.BlankLineCount == 1, "Executable stress/noise JSONL should include one blank noise line.");
+        SmokeAssert.True(jsonLines.MalformedLines.Count == 1, "Executable stress/noise JSONL should include one malformed noise line.");
+        SmokeAssert.True(
+            jsonLines.MalformedLines.Single().Contains("broken", StringComparison.Ordinal),
+            "Malformed executable stress/noise row should retain the broken sequence marker.");
+
+        var stressRows = jsonLines.Events
+            .Where(evt => string.Equals(evt.EventType, "driver.file", StringComparison.OrdinalIgnoreCase) &&
+                DataEquals(evt, "stress", "true"))
+            .ToList();
+        SmokeAssert.True(stressRows.Count == ExpectedStressDriverRows, $"Executable collector should emit {ExpectedStressDriverRows} stress rows.");
+        SmokeAssert.True(
+            stressRows.All(evt =>
+                DataEquals(evt, "producer", "file") &&
+                DataEquals(evt, "schema", "ksword.sandbox.r0.event") &&
+                DataEquals(evt, "noise", "false") &&
+                DataEquals(evt, "lost", "false") &&
+                DataEquals(evt, "backpressure", "false") &&
+                evt.Data.ContainsKey("sequence") &&
+                evt.Data.ContainsKey("StressJsonlLossEvidence") &&
+                evt.Data.ContainsKey("StressJsonlBackpressureEvidence")),
+            "Executable stress rows should preserve stable producer/schema/noise/loss/backpressure fields.");
+        AssertMonotonicStressSequences(jsonLines.Events);
+
+        var mockNetwork = jsonLines.Events.FirstOrDefault(evt =>
+            string.Equals(evt.EventType, "driver.network", StringComparison.OrdinalIgnoreCase) &&
+            DataEquals(evt, "producer", "network") &&
+            DataEquals(evt, "noise", "false"));
+        SmokeAssert.True(mockNetwork is not null, "Executable mock corpus should include a non-noise driver.network row.");
+        RequireData(mockNetwork!, "sourceEndpoint", "192.0.2.10:51515");
+        RequireData(mockNetwork!, "destinationEndpoint", "203.0.113.10:443");
+        RequireData(mockNetwork!, "flowKey", "tcp|192.0.2.10:51515|203.0.113.10:443");
+
+        var validNoise = jsonLines.Events.FirstOrDefault(evt =>
+            string.Equals(evt.EventType, "driver.network", StringComparison.OrdinalIgnoreCase) &&
+            DataEquals(evt, "noise", "true") &&
+            DataEquals(evt, "sequence", "9999"));
+        SmokeAssert.True(validNoise is not null, "Executable JSONL noise corpus should keep the valid extra-field driver.network row.");
+        RequireData(validNoise!, "sourceEndpoint", "192.0.2.10:51515");
+        RequireData(validNoise!, "destinationEndpoint", "203.0.113.10:443");
+        RequireData(validNoise!, "flowKey", "tcp|192.0.2.10:51515|203.0.113.10:443");
     }
 
     /// <summary>

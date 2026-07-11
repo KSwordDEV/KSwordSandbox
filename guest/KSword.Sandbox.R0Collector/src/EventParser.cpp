@@ -1625,9 +1625,16 @@ bool AddTypedPayloadData(
 // Return: JSON object text for SandboxEvent.data.
 std::string BuildHealthData(const KSWORD_SANDBOX_HEALTH_REPLY& reply, const DWORD bytesReturned) {
     JsonDataObjectBuilder data;
+    const bool lost = reply.EventsDropped != 0;
     data.AddUtf8("ioctl", "IOCTL_KSWORD_SANDBOX_GET_HEALTH");
     data.AddUnsigned("ioctlCode", IOCTL_KSWORD_SANDBOX_GET_HEALTH);
     data.AddUnsigned("bytesReturned", bytesReturned);
+    data.AddUtf8("schema", KSWORD_SANDBOX_EVENT_SCHEMA_NAME);
+    data.AddUtf8("producer", "r0collector");
+    data.AddBool("noise", false);
+    data.AddBool("lost", lost);
+    data.AddBool("backpressure", lost);
+    data.AddBool("backpressureObserved", lost);
     data.AddUnsigned("version", reply.Version);
     data.AddUtf8("versionHex", HexUnsignedLongLong(reply.Version, 8));
     data.AddUnsigned("size", reply.Size);
@@ -1654,6 +1661,12 @@ std::string BuildCapabilitiesData(const KSWORD_SANDBOX_CAPABILITIES_REPLY& reply
     data.AddUtf8("ioctl", "IOCTL_KSWORD_SANDBOX_GET_CAPABILITIES");
     data.AddUnsigned("ioctlCode", IOCTL_KSWORD_SANDBOX_GET_CAPABILITIES);
     data.AddUnsigned("bytesReturned", bytesReturned);
+    data.AddUtf8("schema", KSWORD_SANDBOX_EVENT_SCHEMA_NAME);
+    data.AddUtf8("producer", "r0collector");
+    data.AddBool("noise", false);
+    data.AddBool("lost", false);
+    data.AddBool("backpressure", false);
+    data.AddBool("backpressureObserved", false);
     data.AddUnsigned("version", reply.Version);
     data.AddUtf8("versionHex", HexUnsignedLongLong(reply.Version, 8));
     data.AddUnsigned("size", reply.Size);
@@ -1694,9 +1707,20 @@ std::string BuildCapabilitiesData(const KSWORD_SANDBOX_CAPABILITIES_REPLY& reply
 // Return: JSON object text for SandboxEvent.data.
 std::string BuildStatusData(const KSWORD_SANDBOX_STATUS_REPLY& reply, const DWORD bytesReturned) {
     JsonDataObjectBuilder data;
+    const bool lost = reply.TotalEventsDropped != 0;
+    const bool atCapacity =
+        reply.QueueCapacity != 0 &&
+        (reply.QueueDepth >= reply.QueueCapacity || reply.QueueHighWatermark >= reply.QueueCapacity);
+    const bool backpressure = lost || atCapacity;
     data.AddUtf8("ioctl", "IOCTL_KSWORD_SANDBOX_GET_STATUS");
     data.AddUnsigned("ioctlCode", IOCTL_KSWORD_SANDBOX_GET_STATUS);
     data.AddUnsigned("bytesReturned", bytesReturned);
+    data.AddUtf8("schema", KSWORD_SANDBOX_EVENT_SCHEMA_NAME);
+    data.AddUtf8("producer", "r0collector");
+    data.AddBool("noise", false);
+    data.AddBool("lost", lost);
+    data.AddBool("backpressure", backpressure);
+    data.AddBool("backpressureObserved", backpressure);
     data.AddUnsigned("version", reply.Version);
     data.AddUtf8("versionHex", HexUnsignedLongLong(reply.Version, 8));
     data.AddUnsigned("size", reply.Size);
@@ -1742,6 +1766,12 @@ std::string BuildSetProducerEnableMaskData(
     data.AddUtf8("ioctl", "IOCTL_KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK");
     data.AddUnsigned("ioctlCode", IOCTL_KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK);
     data.AddUnsigned("bytesReturned", bytesReturned);
+    data.AddUtf8("schema", KSWORD_SANDBOX_EVENT_SCHEMA_NAME);
+    data.AddUtf8("producer", "r0collector");
+    data.AddBool("noise", false);
+    data.AddBool("lost", false);
+    data.AddBool("backpressure", false);
+    data.AddBool("backpressureObserved", false);
     data.AddUnsigned("requestedEnableMask", requestedEnableMask);
     data.AddUtf8("requestedEnableMaskHex", HexUnsignedLongLong(requestedEnableMask, 8));
     data.AddUtf8("requestedEnableMaskNames", ProducerMaskNames(requestedEnableMask));
@@ -1767,9 +1797,16 @@ std::string BuildSetProducerEnableMaskData(
 // Return: JSON object text for SandboxEvent.data.
 std::string BuildPollData(const KSWORD_SANDBOX_POLL_REPLY& reply, const DWORD bytesReturned) {
     JsonDataObjectBuilder data;
+    const bool lost = reply.EventsDropped != 0;
     data.AddUtf8("ioctl", "IOCTL_KSWORD_SANDBOX_POLL");
     data.AddUnsigned("ioctlCode", IOCTL_KSWORD_SANDBOX_POLL);
     data.AddUnsigned("bytesReturned", bytesReturned);
+    data.AddUtf8("schema", KSWORD_SANDBOX_EVENT_SCHEMA_NAME);
+    data.AddUtf8("producer", "r0collector");
+    data.AddBool("noise", false);
+    data.AddBool("lost", lost);
+    data.AddBool("backpressure", lost);
+    data.AddBool("backpressureObserved", lost);
     data.AddUnsigned("version", reply.Version);
     data.AddUtf8("versionHex", HexUnsignedLongLong(reply.Version, 8));
     data.AddUnsigned("size", reply.Size);
@@ -1793,10 +1830,18 @@ std::string BuildReadEventsBatchData(
     const unsigned long requestedMaxEvents,
     const unsigned long long eventsEmitted) {
     JsonDataObjectBuilder data;
+    const bool lost = reply.EventsDropped != 0;
+    const bool backpressure = lost || eventsEmitted >= requestedMaxEvents;
     data.AddUtf8("ioctl", "IOCTL_KSWORD_SANDBOX_READ_EVENTS");
     data.AddUnsigned("ioctlCode", IOCTL_KSWORD_SANDBOX_READ_EVENTS);
     data.AddUnsigned("bytesReturned", bytesReturned);
     data.AddUnsigned("requestedMaxEvents", requestedMaxEvents);
+    data.AddUtf8("schema", KSWORD_SANDBOX_EVENT_SCHEMA_NAME);
+    data.AddUtf8("producer", "r0collector");
+    data.AddBool("noise", false);
+    data.AddBool("lost", lost);
+    data.AddBool("backpressure", backpressure);
+    data.AddBool("backpressureObserved", backpressure);
     data.AddUnsigned("version", reply.Version);
     data.AddUtf8("versionHex", HexUnsignedLongLong(reply.Version, 8));
     data.AddUnsigned("size", reply.Size);
@@ -1821,6 +1866,7 @@ std::string BuildDriverEventData(
     const unsigned char* payload,
     const size_t payloadBytes) {
     const size_t payloadPreviewBytes = payloadBytes < kMaxPayloadHexBytes ? payloadBytes : kMaxPayloadHexBytes;
+    const std::string driverEventTypeName = DriverEventTypeName(header.Type);
 
     JsonDataObjectBuilder data;
     data.AddUtf8("ioctl", "IOCTL_KSWORD_SANDBOX_READ_EVENTS");
@@ -1831,9 +1877,14 @@ std::string BuildDriverEventData(
     data.AddUtf8("eventSchemaName", KSWORD_SANDBOX_EVENT_SCHEMA_NAME);
     data.AddUnsigned("eventSchemaVersion", KSWORD_SANDBOX_EVENT_SCHEMA_VERSION);
     data.AddUtf8("eventSchemaVersionHex", HexUnsignedLongLong(KSWORD_SANDBOX_EVENT_SCHEMA_VERSION, 8));
+    data.AddUtf8("schema", KSWORD_SANDBOX_EVENT_SCHEMA_NAME);
+    data.AddUtf8("producer", driverEventTypeName);
+    data.AddBool("noise", false);
+    data.AddBool("lost", false);
+    data.AddBool("backpressure", false);
     data.AddUnsigned("recordSize", header.Size);
     data.AddUnsigned("driverEventType", header.Type);
-    data.AddUtf8("driverEventTypeName", DriverEventTypeName(header.Type));
+    data.AddUtf8("driverEventTypeName", driverEventTypeName);
     data.AddUnsigned("flags", header.Flags);
     data.AddUtf8("flagsHex", HexUnsignedLongLong(header.Flags, 8));
     AddDriverEventFlagData(header, &data);

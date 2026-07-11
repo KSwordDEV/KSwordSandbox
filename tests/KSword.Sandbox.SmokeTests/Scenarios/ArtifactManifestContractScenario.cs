@@ -361,7 +361,93 @@ internal sealed class ArtifactManifestContractScenario : ISmokeTestScenario
         await File.WriteAllTextAsync(Path.Combine(jobRoot, "report.html"), "<html></html>", cancellationToken);
         await File.WriteAllTextAsync(Path.Combine(jobRoot, "runbook.json"), "{}", cancellationToken);
         await File.WriteAllTextAsync(Path.Combine(jobRoot, "runbook-execution.json"), "{}", cancellationToken);
-        await File.WriteAllTextAsync(Path.Combine(guestRoot, "events.json"), "[]", cancellationToken);
+        await File.WriteAllTextAsync(
+            Path.Combine(guestRoot, "events.json"),
+            JsonSerializer.Serialize(new[]
+            {
+                new SandboxEvent
+                {
+                    EventType = "artifact.dropped_file.copied",
+                    Source = "guest",
+                    Path = Path.Combine(droppedFilesRoot, "drop.bin"),
+                    Data =
+                    {
+                        ["collectionName"] = "dropped-files",
+                        ["evidenceRole"] = "dropped-file",
+                        ["relativePath"] = "artifacts/dropped-files/drop.bin",
+                        ["artifactRelativePath"] = "artifacts/dropped-files/drop.bin",
+                        ["guestFullPath"] = @"C:\work\drop.bin",
+                        ["guestRelativePath"] = "drop.bin",
+                        ["sizeBytes"] = "4"
+                    }
+                },
+                new SandboxEvent
+                {
+                    EventType = "screenshot.skipped",
+                    Source = "guest",
+                    Data =
+                    {
+                        ["collectionName"] = "screenshots",
+                        ["evidenceRole"] = "screenshot",
+                        ["reason"] = "desktopUnavailable",
+                        ["diagnosticStage"] = "screen-device"
+                    }
+                },
+                new SandboxEvent
+                {
+                    EventType = "memory_dump.captured",
+                    Source = "guest",
+                    Path = Path.Combine(memoryDumpsRoot, "after-start-pid123.dmp"),
+                    ProcessName = "sample.exe",
+                    ProcessId = 123,
+                    ParentProcessId = 100,
+                    Data =
+                    {
+                        ["collectionName"] = "memory-dumps",
+                        ["evidenceRole"] = "memory-dump",
+                        ["relativePath"] = "memory-dumps/after-start-pid123.dmp",
+                        ["processId"] = "123",
+                        ["rootProcessId"] = "123",
+                        ["processRole"] = "root",
+                        ["treeDepth"] = "0",
+                        ["treeLineage"] = "123",
+                        ["targetProcessName"] = "sample.exe",
+                        ["targetProcessPath"] = @"C:\work\sample.exe",
+                        ["snapshotKey"] = "123:sample.exe",
+                        ["dumpType"] = "MiniDumpNormal"
+                    }
+                },
+                new SandboxEvent
+                {
+                    EventType = "memory_dump.sweep",
+                    Source = "guest",
+                    ProcessId = 123,
+                    Data =
+                    {
+                        ["collectionName"] = "memory-dumps",
+                        ["evidenceRole"] = "memory-dump",
+                        ["rootProcessId"] = "123",
+                        ["visibleTargetCount"] = "2",
+                        ["attemptedCount"] = "1",
+                        ["capturedCount"] = "1",
+                        ["skippedCount"] = "0",
+                        ["alreadyCapturedCount"] = "1"
+                    }
+                },
+                new SandboxEvent
+                {
+                    EventType = "packet_capture.failed",
+                    Source = "guest",
+                    Data =
+                    {
+                        ["collectionName"] = "packet-captures",
+                        ["evidenceRole"] = "packet-capture",
+                        ["reason"] = "pktmonStartFailed",
+                        ["commandMessage"] = "pktmon unavailable"
+                    }
+                }
+            }, ManifestJsonOptions),
+            cancellationToken);
         await File.WriteAllTextAsync(Path.Combine(guestRoot, "agent-summary.json"), "{}", cancellationToken);
         await File.WriteAllTextAsync(Path.Combine(guestRoot, "driver-events.jsonl"), "{}", cancellationToken);
         await File.WriteAllBytesAsync(Path.Combine(screenshotsRoot, "after-run.bmp"), [0x42, 0x4d, 0x00, 0x00], cancellationToken);
@@ -369,7 +455,100 @@ internal sealed class ArtifactManifestContractScenario : ISmokeTestScenario
         await File.WriteAllBytesAsync(Path.Combine(packetCapturesRoot, "before-start.pcap"), [0xd4, 0xc3, 0xb2, 0xa1], cancellationToken);
         await File.WriteAllBytesAsync(Path.Combine(packetCapturesRoot, "future.pcapng"), [0x0a, 0x0d, 0x0d, 0x0a], cancellationToken);
         await File.WriteAllTextAsync(Path.Combine(droppedFilesRoot, "drop.bin"), "drop", cancellationToken);
-        await File.WriteAllTextAsync(Path.Combine(artifactsRoot, "manifest.json"), "{}", cancellationToken);
+        await File.WriteAllTextAsync(
+            Path.Combine(artifactsRoot, "manifest.json"),
+            JsonSerializer.Serialize(new ArtifactManifest
+            {
+                Producer = "KSword.Sandbox.Agent",
+                Collections =
+                [
+                    new ArtifactCollectionDescriptor
+                    {
+                        Name = "dropped-files",
+                        Kind = ArtifactKind.DroppedFile,
+                        Category = "dropped-file",
+                        EvidenceRole = "dropped-file",
+                        RelativePath = "artifacts/dropped-files",
+                        Enabled = true,
+                        Implemented = true,
+                        Status = "captured"
+                    },
+                    new ArtifactCollectionDescriptor
+                    {
+                        Name = "screenshots",
+                        Kind = ArtifactKind.Screenshot,
+                        Category = "screenshot",
+                        EvidenceRole = "screenshot",
+                        RelativePath = "screenshots",
+                        Enabled = true,
+                        Implemented = true,
+                        Status = "skipped",
+                        Reason = "desktopUnavailable"
+                    },
+                    new ArtifactCollectionDescriptor
+                    {
+                        Name = "memory-dumps",
+                        Kind = ArtifactKind.MemoryDump,
+                        Category = "memory-dump",
+                        EvidenceRole = "memory-dump",
+                        RelativePath = "memory-dumps",
+                        Enabled = true,
+                        Implemented = true,
+                        Status = "captured"
+                    },
+                    new ArtifactCollectionDescriptor
+                    {
+                        Name = "packet-captures",
+                        Kind = ArtifactKind.PacketCapture,
+                        Category = "packet-capture",
+                        EvidenceRole = "packet-capture",
+                        RelativePath = "packet-captures",
+                        Enabled = true,
+                        Implemented = true,
+                        Status = "failed",
+                        Reason = "pktmonStartFailed"
+                    }
+                ],
+                Artifacts =
+                [
+                    new ArtifactDescriptor
+                    {
+                        Kind = ArtifactKind.DroppedFile,
+                        Category = "dropped-file",
+                        Name = "drop.bin",
+                        RelativePath = "artifacts/dropped-files/drop.bin",
+                        GuestPath = @"C:\work\drop.bin",
+                        ImportPath = "artifacts/dropped-files/drop.bin",
+                        CollectionName = "dropped-files",
+                        EvidenceRole = "dropped-file",
+                        CaptureState = "captured",
+                        Metadata = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                        {
+                            ["guestRelativePath"] = "drop.bin"
+                        }
+                    },
+                    new ArtifactDescriptor
+                    {
+                        Kind = ArtifactKind.MemoryDump,
+                        Category = "memory-dump",
+                        Name = "after-start-pid123.dmp",
+                        RelativePath = "memory-dumps/after-start-pid123.dmp",
+                        GuestPath = @"C:\work\sample.exe",
+                        ImportPath = "memory-dumps/after-start-pid123.dmp",
+                        CollectionName = "memory-dumps",
+                        EvidenceRole = "memory-dump",
+                        CapturePhase = "after-start",
+                        CaptureState = "captured",
+                        Metadata = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                        {
+                            ["processId"] = "123",
+                            ["processRole"] = "root",
+                            ["treeLineage"] = "123"
+                        }
+                    }
+                ]
+            }, ManifestJsonOptions),
+            cancellationToken);
 
         var builder = new HostArtifactIndexBuilder();
         var index = builder.Build(jobId, jobRoot);
@@ -388,6 +567,9 @@ internal sealed class ArtifactManifestContractScenario : ISmokeTestScenario
         SmokeAssert.True(memoryDump.MimeType == "application/vnd.microsoft.minidump", "Memory dump index entry should include minidump MIME type.");
         SmokeAssert.True(memoryDump.Metadata.TryGetValue("evidenceRole", out var dumpEvidenceRole) && dumpEvidenceRole == "memory-dump", "Memory dump index entry should include evidence role.");
         SmokeAssert.True(memoryDump.CollectionName == "memory-dumps", "Memory dump index entry should include collection name.");
+        SmokeAssert.True(memoryDump.Metadata.TryGetValue("processId", out var dumpProcessId) && dumpProcessId == "123", "Memory dump index entry should preserve process identity metadata from guest events/manifests.");
+        SmokeAssert.True(memoryDump.Metadata.TryGetValue("processRole", out var dumpProcessRole) && dumpProcessRole == "root", "Memory dump index entry should preserve root/child process role metadata.");
+        SmokeAssert.True(memoryDump.Metadata.TryGetValue("treeLineage", out var dumpLineage) && dumpLineage == "123", "Memory dump index entry should preserve child-process sweep lineage metadata.");
         var packetCapture = AssertIndexedArtifact(index, ArtifactKind.PacketCapture, $"guest/{jobId:N}/packet-captures/before-start.pcap");
         SmokeAssert.True(packetCapture.Category == "packet-capture", "Packet capture index entry should include packet-capture category.");
         SmokeAssert.True(packetCapture.CapturePhase == "before-start", "Packet capture index entry should include capture phase when encoded in the file name.");
@@ -411,12 +593,21 @@ internal sealed class ArtifactManifestContractScenario : ISmokeTestScenario
         SmokeAssert.True(packetCaptureCollection.Metadata.TryGetValue("totalBytes", out var pcapBytes) && pcapBytes == "8", "Packet capture collection should record total bytes.");
         SmokeAssert.True(packetCaptureCollection.Metadata.TryGetValue("mimeTypes", out var pcapMimeTypes) && pcapMimeTypes.Contains("application/vnd.tcpdump.pcap", StringComparison.Ordinal) && pcapMimeTypes.Contains("application/x-pcapng", StringComparison.Ordinal), "Packet capture collection should record MIME types.");
         SmokeAssert.True(packetCaptureCollection.Metadata.TryGetValue("importMode", out var pcapImportMode) && pcapImportMode == "external-artifact", "Packet capture collection should mark external artifact import mode.");
+        SmokeAssert.True(packetCaptureCollection.Metadata.TryGetValue("guestManifestStatus", out var pcapGuestStatus) && pcapGuestStatus == "failed", "Packet capture collection should retain guest collection status even when files were later indexed.");
+        SmokeAssert.True(packetCaptureCollection.Metadata.TryGetValue("lastReason", out var pcapFailureReason) && pcapFailureReason == "pktmonStartFailed", "Packet capture collection should retain concrete failure reason from guest events.");
         var dropped = AssertIndexedArtifact(index, ArtifactKind.DroppedFile, $"guest/{jobId:N}/artifacts/dropped-files/drop.bin");
         SmokeAssert.True(dropped.SizeBytes == 4, "Dropped-file index entry should include size.");
         SmokeAssert.True(dropped.MimeType == "application/octet-stream", "Dropped-file index entry should include MIME type.");
         SmokeAssert.True(dropped.Category == "dropped-file", "Dropped-file index entry should include category.");
         SmokeAssert.True(dropped.SafeLink == $"guest/{jobId:N}/artifacts/dropped-files/drop.bin", "Dropped-file index entry should include safe relative link.");
         SmokeAssert.True(dropped.Hashes.ContainsKey("sha256"), "Dropped-file index entry should include hashes map.");
+        SmokeAssert.True(dropped.GuestPath == @"C:\work\drop.bin", "Dropped-file index entry should preserve original guest path.");
+        var memoryDumpCollection = index.Collections.Single(collection => collection.Name == "memory-dumps");
+        SmokeAssert.True(memoryDumpCollection.Metadata.TryGetValue("sweepVisibleTargetCount", out var visibleTargetCount) && visibleTargetCount == "2", "Memory dump collection should retain child-process sweep visible target count.");
+        SmokeAssert.True(memoryDumpCollection.Metadata.TryGetValue("sweepAlreadyCapturedCount", out var duplicateDumpCount) && duplicateDumpCount == "1", "Memory dump collection should retain duplicate root/child dump suppression count.");
+        var screenshotCollection = index.Collections.Single(collection => collection.Name == "screenshots");
+        SmokeAssert.True(screenshotCollection.Metadata.TryGetValue("skippedEventCount", out var screenshotSkippedCount) && screenshotSkippedCount == "1", "Screenshot collection should retain skipped capture event count.");
+        SmokeAssert.True(screenshotCollection.Metadata.TryGetValue("lastReason", out var screenshotReason) && screenshotReason == "desktopUnavailable", "Screenshot collection should retain concrete skipped reason.");
 
         var indexDescriptor = builder.WriteIndex(jobId, jobRoot);
         SmokeAssert.True(indexDescriptor.Kind == ArtifactKind.ArtifactIndex, "Index descriptor should use ArtifactIndex kind.");

@@ -70,6 +70,30 @@ HTTP methods/hosts/URIs, and TLS SNI continue to come from imported PCAP events.
 The shared `flowKey` / endpoint fields are intended to let reports group R0
 WFP metadata with `pcap.flow`, `pcap.dns`, `pcap.http`, and `pcap.tls` rows.
 
+### Flow correlation field semantics
+
+R0Collector emits endpoint fields deterministically from the decoded payload:
+
+- `localEndpoint` is `localAddress:localPort` and `remoteEndpoint` is
+  `remoteAddress:remotePort` when the corresponding address bytes decode.
+- For outbound ALE connect events, `sourceEndpoint=localEndpoint` and
+  `destinationEndpoint=remoteEndpoint`.
+- For inbound ALE recv-accept events, `sourceEndpoint=remoteEndpoint` and
+  `destinationEndpoint=localEndpoint`.
+- `flowKey` is `protocolName|sourceEndpoint|destinationEndpoint`; for the
+  controlled outbound TCP/443 smoke this is
+  `tcp|192.0.2.10:51515|203.0.113.10:443`.
+- IPv4 addresses use dotted decimal. IPv6 addresses are emitted in the
+  collector's deterministic eight-hextet form before the port is appended. If an
+  address is absent or cannot be decoded, the corresponding endpoint is empty
+  and low-level `localAddressHex` / `remoteAddressHex` remain available.
+
+These fields are correlation keys only. They do not imply packet payload parsing
+and they do not replace richer DNS, HTTP, or TLS evidence imported from PCAP.
+Synthetic collector rows and the valid JSONL noise row use the same field names
+so no-device stress runs can validate report grouping before the WFP producer is
+loaded.
+
 When the remote endpoint is decoded, top-level `SandboxEvent.path` is now a
 URI-like string such as `tcp://203.0.113.10:443` instead of only
 `\\.\KSwordSandboxDriver`, improving the live monitor and report path columns.

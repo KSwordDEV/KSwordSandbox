@@ -25,6 +25,8 @@ public sealed record BehaviorRule
 
     public string Severity { get; init; } = "info";
 
+    public string Confidence { get; init; } = "medium";
+
     public string Summary { get; init; } = string.Empty;
 
     public string? MitreTechniqueId { get; init; }
@@ -40,6 +42,8 @@ public sealed record BehaviorRule
     public List<string> DataKeys { get; init; } = [];
 
     public Dictionary<string, List<string>> DataContains { get; init; } = new(StringComparer.OrdinalIgnoreCase);
+
+    public List<string> EvidenceFields { get; init; } = [];
 
     public List<string> Tags { get; init; } = [];
 }

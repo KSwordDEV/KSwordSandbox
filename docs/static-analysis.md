@@ -21,6 +21,10 @@ The analyzer parses these PE structures best-effort with hard limits:
 - Copyable section evidence strings in the form
   `section:<name>,va=<rva>,vsize=<n>,raw=<n>,entropy=<n>` for report grouping.
 - Imports by module/API, including ordinal fallback evidence.
+- Import-table aggregate evidence in the form
+  `import-summary:modules=<n>,namedApis=<n>,ordinals=<n>`,
+  `import-module:<dll>,namedApis=<n>,ordinals=<n>`, and suspicious API
+  cluster rollups such as `import-api-cluster:process-injection,hits=<n>`.
 - Exports and registration/service-style entry points.
 - PE security directory / Authenticode certificate table presence and bounded
   WIN_CERTIFICATE entry metadata.
@@ -82,6 +86,11 @@ Import and fallback API-string tags are grouped to keep rules concise:
 - Anti-analysis: `import_anti_analysis_api`
 
 All grouped API hits also set `import_suspicious_api` for broad triage.
+When suspicious imported APIs are present, aggregate rollups add
+`import_suspicious_api_cluster`; two or more behavior clusters add
+`import_multi_suspicious_api_cluster`. These tags are intentionally broad and
+the copyable `import-api-cluster:*` evidence carries the cluster hit counts for
+report triage.
 
 ## Static notes / YARA boundary
 

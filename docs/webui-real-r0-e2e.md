@@ -136,9 +136,10 @@ cSignToolUsed:   false
 
 - The VM is still a single golden VM workflow; concurrent job scheduling and
   disposable temporary VM/differencing-disk isolation are not production-grade.
-- The WebUI progress bar is estimated from the long HTTP request. It does not
-  yet stream exact per-runbook-step state from the executor while the request is
-  in flight.
+- The WebUI now starts live analysis through the background runner and polls
+  real runbook progress snapshots. Operator validation should confirm the
+  progress card shows the current step, elapsed time, and any failed-step reason
+  while keeping command-line/stdout/stderr details out of the main dashboard.
 - R0 coverage is useful but not final: file/registry/process/image/network
   events exist, but ABI hardening, stress tests, filtering, and dropped-file
   extraction still need work.

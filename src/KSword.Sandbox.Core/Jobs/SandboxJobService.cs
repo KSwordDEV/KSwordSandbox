@@ -1,5 +1,6 @@
 using System.Text.Json;
 using KSword.Sandbox.Abstractions;
+using KSword.Sandbox.Abstractions.Artifacts;
 using KSword.Sandbox.Core.Artifacts;
 using KSword.Sandbox.Core.Network;
 using KSword.Sandbox.Core.Orchestration;
@@ -29,6 +30,7 @@ public sealed class SandboxJobService
     private readonly HyperVRunbookBuilder runbookBuilder;
     private readonly HtmlReportRenderer reportRenderer;
     private readonly StaticAnalyzer staticAnalyzer;
+    private readonly HostArtifactIndexBuilder artifactIndexBuilder = new();
     private readonly Dictionary<Guid, AnalysisJob> jobs = [];
 
     /// <summary>
@@ -364,11 +366,14 @@ public sealed class SandboxJobService
     /// </summary>
     private void WriteHtmlReports(string jobRoot, AnalysisReport report)
     {
-        File.WriteAllText(Path.Combine(jobRoot, "report.html"), reportRenderer.RenderEnglish(report));
-        foreach (var document in reportRenderer.RenderBilingualReports(report))
+        var artifactIndex = artifactIndexBuilder.Build(report.JobId, jobRoot);
+        File.WriteAllText(Path.Combine(jobRoot, "report.html"), reportRenderer.RenderEnglish(report, artifactIndex.Artifacts));
+        foreach (var document in reportRenderer.RenderBilingualReports(report, artifactIndex.Artifacts))
         {
             File.WriteAllText(Path.Combine(jobRoot, document.FileName), document.Html);
         }
+
+        artifactIndexBuilder.WriteIndex(report.JobId, jobRoot);
     }
 
     /// <summary>
@@ -519,7 +524,7 @@ public sealed class SandboxJobService
         {
             foreach (var pcapEvent in new PcapArtifactEventImporter().Import(pcapPath))
             {
-                var normalized = NormalizeEvent(pcapEvent);
+                var normalized = NormalizeImportedPcapEvent(pcapEvent, pcapPath, searchRoot);
                 if (eventKeys.Add(EventKey(normalized)))
                 {
                     events.Add(normalized);
@@ -528,6 +533,52 @@ public sealed class SandboxJobService
         }
 
         return events.Select(NormalizeEvent).ToList();
+    }
+
+    /// <summary>
+    /// Adds source artifact identity to host-generated PCAP events during guest
+    /// import. Inputs are one parsed PCAP event, the capture path, and import
+    /// root; processing records path, size, hash, format, and collection
+    /// context; the method returns a normalized event.
+    /// </summary>
+    private static SandboxEvent NormalizeImportedPcapEvent(SandboxEvent evt, string pcapPath, string importRoot)
+    {
+        var normalized = NormalizeEvent(evt);
+        var data = new Dictionary<string, string>(normalized.Data, StringComparer.OrdinalIgnoreCase)
+        {
+            ["sourceArtifactPath"] = pcapPath,
+            ["sourceArtifactKind"] = ArtifactKind.PacketCapture.ToString(),
+            ["sourceArtifactRelativePath"] = ArtifactDescriptorFactory.SafeRelativePath(importRoot, pcapPath),
+            ["sourceImportRoot"] = importRoot,
+            ["collectionName"] = "packet-captures",
+            ["evidenceRole"] = "packet-capture",
+            ["captureSource"] = "external",
+            ["hostCaptureStarted"] = "false",
+            ["importMode"] = "external-artifact",
+            ["pcapFormat"] = string.Equals(Path.GetExtension(pcapPath), ".pcapng", StringComparison.OrdinalIgnoreCase)
+                ? "pcapng"
+                : "pcap"
+        };
+
+        try
+        {
+            var info = new FileInfo(pcapPath);
+            data["sourceArtifactSizeBytes"] = info.Length.ToString();
+            data["sourceArtifactSha256"] = ComputeSha256(info.FullName);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException)
+        {
+            data["sourceArtifactHashSkipped"] = ex.GetType().Name;
+        }
+
+        return normalized with { Data = data };
+    }
+
+    private static string ComputeSha256(string fullPath)
+    {
+        using var stream = File.OpenRead(fullPath);
+        var hash = System.Security.Cryptography.SHA256.HashData(stream);
+        return Convert.ToHexString(hash).ToLowerInvariant();
     }
 
     /// <summary>

@@ -61,13 +61,16 @@ The root dashboard must keep these operator-facing areas visible and copyable:
   dashboard language, while compact `zh` / `en` alternatives remain visible so
   operators never need to paste a report path;
 - stage progress that shows ordered planning/execution/import/report steps with
-  stable IDs and human-readable status;
+  stable IDs and human-readable status. The progress card must also surface the
+  current step, elapsed time, and failure reason directly on the main dashboard
+  so an operator can understand whether the run is moving without expanding
+  advanced details;
 - real executor progress from
-  `GET /api/jobs/{jobId}/runbook/progress` while `/runbook/execute` is still
-  running. The endpoint is backed by `RunbookProgressStore`, receives
-  `SandboxRunbookProgressSnapshot` values through the executor `ProgressSink`,
-  and intentionally omits PowerShell command text, `stdout`, and `stderr` from
-  the main dashboard;
+  `GET /api/jobs/{jobId}/runbook/progress` after `/runbook/start` accepts a
+  background run or when tooling uses the legacy executor path. The endpoint is
+  backed by `RunbookProgressStore`, receives `SandboxRunbookProgressSnapshot`
+  values through the executor `ProgressSink`, and intentionally omits PowerShell
+  command text, `stdout`, and `stderr` from the main dashboard;
 - live VM analysis should be started through the server-side background path:
   `POST /api/jobs/{jobId}/runbook/start` returns immediately after accepting
   the job, and `GET /api/jobs/{jobId}/runbook/background` exposes queued,
@@ -82,10 +85,11 @@ The root dashboard must keep these operator-facing areas visible and copyable:
   first asynchronous upload/plan `await`, then navigates that existing window to
   `/jobs/{jobId}/live-events` once the job exists; this reduces popup-blocker
   failures compared with opening the monitor only after upload completes. If
-  the browser blocks the new tab, the current job card must show an explicit
-  bilingual `Enter dynamic monitor` fallback link while keeping the dashboard
-  usable while the Web host background runner owns the long-running Hyper-V
-  execution;
+  the browser blocks the new tab or leaves the placeholder blank, the current
+  job card must show an explicit bilingual `Enter dynamic monitor` fallback link
+  and explain that the already-created job does not need to be uploaded again,
+  while keeping the dashboard usable while the Web host background runner owns
+  the long-running Hyper-V execution;
 - VirusTotal official result integration is optional and hash-only. Operators
   can open `/settings` to save or clear a local API key; the key is read from
   `KSWORDBOX_VIRUSTOTAL_API_KEY` first or from the runtime settings file under
@@ -93,7 +97,8 @@ The root dashboard must keep these operator-facing areas visible and copyable:
   `GET /api/jobs/{jobId}/virustotal`, which queries the official v3
   `files/{sha256}` endpoint with `x-apikey`, does not upload samples, and
   returns a quiet `not_configured` / `lookup_failed` state when missing or
-  unavailable instead of interrupting analysis;
+  unavailable instead of interrupting analysis. A missing API key should remain
+  a quiet UI state with a settings link, not a repeated warning/noisy log path;
 - a link to a dedicated live raw monitor page / dynamic monitor page that shows
   source files and unclassified raw event rows before final report
   classification. The page should explain that, when opened automatically from

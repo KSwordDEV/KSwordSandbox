@@ -1,5 +1,5 @@
 {
-  "version": "2026-07-11-v5-microstep-gap-expansion",
+  "version": "2026-07-11-v6-mitre-quality-expansion",
   "rules": [
     {
       "id": "host-submission",
@@ -6616,6 +6616,897 @@
         "artifact",
         "pcap",
         "evidence"
+      ]
+    },
+    {
+      "id": "office-addin-persistence-registry",
+      "title": "Office add-in persistence registry path",
+      "severity": "high",
+      "confidence": "high",
+      "summary": "A registry event targeted Microsoft Office add-in, VSTO, or application option values that can load attacker-controlled code when Office starts.",
+      "mitreTechniqueId": "T1137",
+      "mitreTechniqueName": "Office Application Startup",
+      "eventTypes": [
+        "registry.set",
+        "registry.create",
+        "driver.registry"
+      ],
+      "containsPath": [
+        "\\Software\\Microsoft\\Office\\Word\\Addins",
+        "\\Software\\Microsoft\\Office\\Excel\\Addins",
+        "\\Software\\Microsoft\\Office\\PowerPoint\\Addins",
+        "\\Software\\Microsoft\\Office\\Outlook\\Addins",
+        "\\Software\\Microsoft\\Office\\Excel\\Options\\OPEN",
+        "\\Software\\Microsoft\\Office\\Word\\Options\\OPEN",
+        "\\Software\\Microsoft\\VSTO\\Security\\Inclusion"
+      ],
+      "dataContains": {
+        "valueName": [
+          "LoadBehavior",
+          "Manifest",
+          "OPEN",
+          "Path",
+          "FriendlyName"
+        ],
+        "value": [
+          ".dll",
+          ".vsto",
+          ".xll",
+          ".dotm",
+          ".xlam",
+          "file://",
+          "http://",
+          "https://"
+        ]
+      },
+      "evidenceFields": [
+        "eventType",
+        "path",
+        "data.valueName",
+        "data.value"
+      ],
+      "tags": [
+        "persistence",
+        "office",
+        "registry",
+        "add-in"
+      ]
+    },
+    {
+      "id": "office-startup-folder-persistence",
+      "title": "Office startup folder persistence file",
+      "severity": "high",
+      "confidence": "high",
+      "summary": "A file write targeted Office Startup, Word STARTUP, or Excel XLSTART locations that load templates/add-ins when Office applications start.",
+      "mitreTechniqueId": "T1137",
+      "mitreTechniqueName": "Office Application Startup",
+      "eventTypes": [
+        "file.created",
+        "file.modified",
+        "driver.file",
+        "artifact.dropped_file.copied"
+      ],
+      "containsPath": [
+        "\\Microsoft\\Word\\STARTUP",
+        "\\Microsoft\\Excel\\XLSTART",
+        "\\Office\\STARTUP",
+        "\\XLSTART",
+        "\\Word\\STARTUP"
+      ],
+      "evidenceFields": [
+        "eventType",
+        "path",
+        "processName",
+        "processId",
+        "data.sourcePath",
+        "data.artifactRelativePath"
+      ],
+      "tags": [
+        "persistence",
+        "office",
+        "filesystem",
+        "startup-folder"
+      ]
+    },
+    {
+      "id": "accessibility-features-ifeo-persistence",
+      "title": "Accessibility feature IFEO debugger persistence",
+      "severity": "high",
+      "confidence": "high",
+      "summary": "A registry event configured Image File Execution Options debugger values for Windows accessibility utilities commonly hijacked for persistence or privilege escalation.",
+      "mitreTechniqueId": "T1546.008",
+      "mitreTechniqueName": "Accessibility Features",
+      "eventTypes": [
+        "registry.set",
+        "registry.create",
+        "driver.registry"
+      ],
+      "containsPath": [
+        "Image File Execution Options\\sethc.exe",
+        "Image File Execution Options\\utilman.exe",
+        "Image File Execution Options\\osk.exe",
+        "Image File Execution Options\\magnify.exe",
+        "Image File Execution Options\\narrator.exe",
+        "Image File Execution Options\\displayswitch.exe",
+        "Image File Execution Options\\atbroker.exe"
+      ],
+      "dataContains": {
+        "valueName": [
+          "Debugger"
+        ],
+        "value": [
+          "cmd.exe",
+          "powershell",
+          ".exe",
+          ".dll",
+          "rundll32"
+        ]
+      },
+      "evidenceFields": [
+        "eventType",
+        "path",
+        "data.valueName",
+        "data.value"
+      ],
+      "tags": [
+        "persistence",
+        "privilege-escalation",
+        "registry",
+        "ifeo",
+        "accessibility"
+      ]
+    },
+    {
+      "id": "logon-script-file-persistence",
+      "title": "Logon script persistence file path",
+      "severity": "high",
+      "confidence": "medium",
+      "summary": "A file write targeted Group Policy or user logon/logoff script paths that can execute scripts during interactive logon or startup.",
+      "mitreTechniqueId": "T1037.001",
+      "mitreTechniqueName": "Logon Script (Windows)",
+      "eventTypes": [
+        "file.created",
+        "file.modified",
+        "driver.file",
+        "artifact.dropped_file.copied"
+      ],
+      "containsPath": [
+        "\\GroupPolicy\\User\\Scripts\\Logon",
+        "\\GroupPolicy\\User\\Scripts\\Logoff",
+        "\\GroupPolicy\\Machine\\Scripts\\Startup",
+        "\\GroupPolicy\\Machine\\Scripts\\Shutdown",
+        "\\SYSVOL",
+        "\\Scripts\\Logon",
+        "\\Scripts\\Startup"
+      ],
+      "evidenceFields": [
+        "eventType",
+        "path",
+        "processName",
+        "processId",
+        "data.sourcePath"
+      ],
+      "tags": [
+        "persistence",
+        "logon-script",
+        "filesystem",
+        "group-policy"
+      ]
+    },
+    {
+      "id": "mavinject-process-injection-command",
+      "title": "Mavinject process injection command",
+      "severity": "high",
+      "confidence": "high",
+      "summary": "A command line used mavinject.exe injection switches to load a DLL into another process.",
+      "mitreTechniqueId": "T1055",
+      "mitreTechniqueName": "Process Injection",
+      "eventTypes": [
+        "process.start"
+      ],
+      "containsCommandLine": [
+        "mavinject",
+        "mavinject.exe",
+        "/INJECTRUNNING",
+        "/HMODULE",
+        "/INJECTDLL"
+      ],
+      "evidenceFields": [
+        "eventType",
+        "processName",
+        "processId",
+        "parentProcessId",
+        "commandLine"
+      ],
+      "tags": [
+        "process",
+        "injection",
+        "lolbin",
+        "mavinject"
+      ]
+    },
+    {
+      "id": "installutil-proxy-execution-command",
+      "title": "InstallUtil proxy execution command",
+      "severity": "high",
+      "confidence": "medium",
+      "summary": "A command line invoked InstallUtil, which is commonly abused for .NET signed utility proxy execution in malware sandboxes.",
+      "mitreTechniqueId": "T1218.004",
+      "mitreTechniqueName": "InstallUtil",
+      "eventTypes": [
+        "process.start"
+      ],
+      "containsCommandLine": [
+        "installutil",
+        "installutil.exe",
+        "InstallUtil.exe"
+      ],
+      "evidenceFields": [
+        "eventType",
+        "processName",
+        "processId",
+        "parentProcessId",
+        "commandLine"
+      ],
+      "tags": [
+        "execution",
+        "defense-evasion",
+        "lolbin",
+        "installutil"
+      ]
+    },
+    {
+      "id": "msbuild-inline-task-proxy-execution",
+      "title": "MSBuild inline-task proxy execution",
+      "severity": "high",
+      "confidence": "medium",
+      "summary": "A command line referenced MSBuild inline tasks or CodeTaskFactory-style project execution used for trusted developer utility proxy execution.",
+      "mitreTechniqueId": "T1127.001",
+      "mitreTechniqueName": "MSBuild",
+      "eventTypes": [
+        "process.start"
+      ],
+      "containsCommandLine": [
+        "CodeTaskFactory",
+        "UsingTask",
+        "InlineTask",
+        "TaskFactory"
+      ],
+      "evidenceFields": [
+        "eventType",
+        "processName",
+        "processId",
+        "parentProcessId",
+        "commandLine"
+      ],
+      "tags": [
+        "execution",
+        "defense-evasion",
+        "lolbin",
+        "msbuild"
+      ]
+    },
+    {
+      "id": "regasm-regsvcs-proxy-execution-command",
+      "title": "Regasm or Regsvcs proxy execution command",
+      "severity": "high",
+      "confidence": "medium",
+      "summary": "A command line invoked Regasm or Regsvcs for signed utility proxy execution against a .NET assembly.",
+      "mitreTechniqueId": "T1218.009",
+      "mitreTechniqueName": "Regsvcs/Regasm",
+      "eventTypes": [
+        "process.start"
+      ],
+      "containsCommandLine": [
+        "regasm",
+        "regasm.exe",
+        "regsvcs",
+        "regsvcs.exe"
+      ],
+      "evidenceFields": [
+        "eventType",
+        "processName",
+        "processId",
+        "parentProcessId",
+        "commandLine"
+      ],
+      "tags": [
+        "execution",
+        "defense-evasion",
+        "lolbin",
+        "regasm",
+        "regsvcs"
+      ]
+    },
+    {
+      "id": "lsass-dump-file-created",
+      "title": "LSASS dump file created",
+      "severity": "critical",
+      "confidence": "high",
+      "summary": "A file creation or artifact copy used an LSASS-oriented dump filename, complementing process-access and command-line LSASS dumping evidence.",
+      "mitreTechniqueId": "T1003.001",
+      "mitreTechniqueName": "LSASS Memory",
+      "eventTypes": [
+        "file.created",
+        "file.modified",
+        "driver.file",
+        "artifact.dropped_file.copied"
+      ],
+      "containsPath": [
+        "lsass.dmp",
+        "lsass.dump",
+        "lsass.mdmp",
+        "lsass_",
+        "lsass-",
+        "\\lsass\\"
+      ],
+      "evidenceFields": [
+        "eventType",
+        "path",
+        "processName",
+        "processId",
+        "data.sourcePath",
+        "data.artifactRelativePath"
+      ],
+      "tags": [
+        "credential-access",
+        "lsass",
+        "memory-dump",
+        "filesystem"
+      ]
+    },
+    {
+      "id": "clipboard-collection-api-observed",
+      "title": "Clipboard collection API observed",
+      "severity": "medium",
+      "confidence": "medium",
+      "summary": "An API-call event referenced Windows clipboard access APIs that can collect copied credentials, tokens, wallet addresses, or operator input.",
+      "mitreTechniqueId": "T1115",
+      "mitreTechniqueName": "Clipboard Data",
+      "eventTypes": [
+        "api.call"
+      ],
+      "dataContains": {
+        "api": [
+          "OpenClipboard",
+          "GetClipboardData",
+          "IsClipboardFormatAvailable",
+          "EnumClipboardFormats",
+          "SetClipboardData"
+        ],
+        "operation": [
+          "clipboard",
+          "clipboard read",
+          "clipboard capture"
+        ]
+      },
+      "evidenceFields": [
+        "eventType",
+        "processName",
+        "processId",
+        "data.api",
+        "data.operation"
+      ],
+      "tags": [
+        "collection",
+        "clipboard",
+        "api"
+      ]
+    },
+    {
+      "id": "screenshot-file-created-by-sample",
+      "title": "Screenshot-like image file created by sample",
+      "severity": "medium",
+      "confidence": "medium",
+      "summary": "A file write used screenshot, screen, desktop, or capture-oriented filenames, which can corroborate screen-capture API evidence.",
+      "mitreTechniqueId": "T1113",
+      "mitreTechniqueName": "Screen Capture",
+      "eventTypes": [
+        "file.created",
+        "file.modified",
+        "driver.file",
+        "artifact.dropped_file.copied"
+      ],
+      "containsPath": [
+        "screenshot.png",
+        "screenshot.jpg",
+        "screen.png",
+        "screen.jpg",
+        "desktop.png",
+        "desktop.jpg",
+        "capture.png",
+        "capture.jpg",
+        "screen.bmp",
+        "desktop.bmp"
+      ],
+      "evidenceFields": [
+        "eventType",
+        "path",
+        "processName",
+        "processId",
+        "data.sourcePath",
+        "data.artifactRelativePath"
+      ],
+      "tags": [
+        "collection",
+        "screen-capture",
+        "filesystem"
+      ]
+    },
+    {
+      "id": "anti-analysis-uptime-check-command",
+      "title": "Uptime or boot-time anti-analysis check",
+      "severity": "medium",
+      "confidence": "medium",
+      "summary": "A command line queried system uptime, boot time, or elapsed run time, often used to identify freshly started sandbox guests.",
+      "mitreTechniqueId": "T1497.003",
+      "mitreTechniqueName": "Time Based Evasion",
+      "eventTypes": [
+        "process.start"
+      ],
+      "containsCommandLine": [
+        "lastbootuptime",
+        "LastBootUpTime",
+        "Get-Uptime",
+        "net statistics workstation",
+        "net stats workstation",
+        "net statistics server",
+        "systeminfo | find",
+        "wmic os get lastbootuptime",
+        "Get-CimInstance Win32_OperatingSystem"
+      ],
+      "evidenceFields": [
+        "eventType",
+        "processName",
+        "processId",
+        "parentProcessId",
+        "commandLine"
+      ],
+      "tags": [
+        "anti-analysis",
+        "sandbox-evasion",
+        "uptime",
+        "timing"
+      ]
+    },
+    {
+      "id": "anti-analysis-parent-process-check-api",
+      "title": "Parent-process anti-analysis check API",
+      "severity": "medium",
+      "confidence": "medium",
+      "summary": "An API-call or process-query event referenced parent-process or PEB inspection primitives used to detect non-interactive sandbox launchers.",
+      "mitreTechniqueId": "T1497.001",
+      "mitreTechniqueName": "System Checks",
+      "eventTypes": [
+        "api.call",
+        "process.query",
+        "antiAnalysis.sandboxCheck"
+      ],
+      "dataContains": {
+        "api": [
+          "NtQueryInformationProcess",
+          "ZwQueryInformationProcess",
+          "CreateToolhelp32Snapshot",
+          "Process32First",
+          "Process32Next"
+        ],
+        "operation": [
+          "parent process",
+          "ProcessBasicInformation",
+          "InheritedFromUniqueProcessId",
+          "PEB",
+          "process ancestry"
+        ],
+        "details": [
+          "parent process",
+          "ProcessBasicInformation",
+          "InheritedFromUniqueProcessId",
+          "explorer.exe parent"
+        ]
+      },
+      "evidenceFields": [
+        "eventType",
+        "processName",
+        "processId",
+        "data.api",
+        "data.operation",
+        "data.details"
+      ],
+      "tags": [
+        "anti-analysis",
+        "sandbox-evasion",
+        "process",
+        "parent-process"
+      ]
+    },
+    {
+      "id": "windows-credential-staging-command",
+      "title": "Windows credential staging command",
+      "severity": "high",
+      "confidence": "high",
+      "summary": "A command line staged credentials with cmdkey for remote Windows access, commonly adjacent to SMB, RDP, or WinRM lateral movement.",
+      "mitreTechniqueId": "T1021.002",
+      "mitreTechniqueName": "SMB/Windows Admin Shares",
+      "eventTypes": [
+        "process.start"
+      ],
+      "containsCommandLine": [
+        "cmdkey /add:",
+        "cmdkey.exe /add:",
+        "cmdkey /generic:",
+        "cmdkey.exe /generic:"
+      ],
+      "evidenceFields": [
+        "eventType",
+        "processName",
+        "processId",
+        "parentProcessId",
+        "commandLine"
+      ],
+      "tags": [
+        "lateral-movement",
+        "smb",
+        "rdp",
+        "credentials"
+      ]
+    },
+    {
+      "id": "domain-trust-discovery-command",
+      "title": "Domain trust discovery command",
+      "severity": "medium",
+      "confidence": "high",
+      "summary": "A command line queried domain trusts, domain controllers, or domain groups before potential lateral movement.",
+      "mitreTechniqueId": "T1482",
+      "mitreTechniqueName": "Domain Trust Discovery",
+      "eventTypes": [
+        "process.start"
+      ],
+      "containsCommandLine": [
+        "nltest /domain_trusts",
+        "nltest.exe /domain_trusts",
+        "nltest /dclist",
+        "nltest.exe /dclist",
+        "net view /domain",
+        "net.exe view /domain",
+        "net group \"Domain Admins\" /domain",
+        "dsquery computer",
+        "dsquery group",
+        "Get-ADTrust",
+        "Get-ADDomainController"
+      ],
+      "evidenceFields": [
+        "eventType",
+        "processName",
+        "processId",
+        "parentProcessId",
+        "commandLine"
+      ],
+      "tags": [
+        "discovery",
+        "domain",
+        "lateral-movement"
+      ]
+    },
+    {
+      "id": "tor-hidden-service-domain",
+      "title": "Tor hidden-service domain observed",
+      "severity": "high",
+      "confidence": "high",
+      "summary": "DNS, HTTP, or PCAP metadata referenced a .onion hidden-service domain, which can indicate anonymized C2 or proxy infrastructure.",
+      "mitreTechniqueId": "T1090",
+      "mitreTechniqueName": "Proxy",
+      "eventTypes": [
+        "dns.query",
+        "network.dns",
+        "pcap.dns",
+        "http.request",
+        "network.http",
+        "pcap.http"
+      ],
+      "dataContains": {
+        "queryName": [
+          ".onion"
+        ],
+        "qname": [
+          ".onion"
+        ],
+        "domain": [
+          ".onion"
+        ],
+        "host": [
+          ".onion"
+        ],
+        "uri": [
+          ".onion"
+        ],
+        "url": [
+          ".onion"
+        ]
+      },
+      "evidenceFields": [
+        "eventType",
+        "path",
+        "data.queryName",
+        "data.host",
+        "data.uri",
+        "data.url"
+      ],
+      "tags": [
+        "network",
+        "proxy",
+        "tor",
+        "c2"
+      ]
+    },
+    {
+      "id": "http-long-encoded-uri-c2",
+      "title": "HTTP long or encoded URI C2 indicator",
+      "severity": "medium",
+      "confidence": "medium",
+      "summary": "HTTP metadata was labeled as a long, encoded, base64, or high-entropy URI, which is useful C2 beacon and tasking triage evidence.",
+      "mitreTechniqueId": "T1071.001",
+      "mitreTechniqueName": "Web Protocols",
+      "eventTypes": [
+        "http.request",
+        "network.http",
+        "pcap.http"
+      ],
+      "dataContains": {
+        "classification": [
+          "long-uri",
+          "encoded-uri",
+          "base64-uri",
+          "high-entropy-uri",
+          "suspicious-uri"
+        ],
+        "behavior": [
+          "long-uri",
+          "encoded-uri",
+          "base64",
+          "beacon",
+          "tasking"
+        ],
+        "uriEncoding": [
+          "base64",
+          "hex",
+          "url-encoded"
+        ],
+        "uriEntropy": [
+          "high"
+        ],
+        "requestUri": [
+          "%2f",
+          "%3d",
+          "%2b"
+        ],
+        "uri": [
+          "%2f",
+          "%3d",
+          "%2b"
+        ]
+      },
+      "evidenceFields": [
+        "eventType",
+        "data.host",
+        "data.method",
+        "data.uri",
+        "data.requestUri",
+        "data.classification",
+        "data.behavior"
+      ],
+      "tags": [
+        "network",
+        "http",
+        "c2",
+        "beacon"
+      ]
+    },
+    {
+      "id": "http-domain-fronting-indicator",
+      "title": "HTTP/TLS domain-fronting indicator",
+      "severity": "high",
+      "confidence": "medium",
+      "summary": "HTTP, TLS, or PCAP metadata indicated host/SNI mismatch or explicit domain-fronting classification used to hide C2 destinations behind shared infrastructure.",
+      "mitreTechniqueId": "T1090",
+      "mitreTechniqueName": "Proxy",
+      "eventTypes": [
+        "http.request",
+        "network.http",
+        "pcap.http",
+        "network.tls",
+        "tls.connection",
+        "pcap.tls"
+      ],
+      "dataContains": {
+        "classification": [
+          "domain-fronting",
+          "fronted-domain",
+          "host-sni-mismatch",
+          "sni-host-mismatch"
+        ],
+        "behavior": [
+          "domain-fronting",
+          "fronted",
+          "host-sni-mismatch"
+        ],
+        "details": [
+          "domain front",
+          "Host/SNI mismatch",
+          "host-sni-mismatch"
+        ],
+        "fronting": [
+          "true",
+          "yes",
+          "suspected"
+        ]
+      },
+      "evidenceFields": [
+        "eventType",
+        "data.host",
+        "data.sni",
+        "data.serverName",
+        "data.classification",
+        "data.details"
+      ],
+      "tags": [
+        "network",
+        "http",
+        "tls",
+        "proxy",
+        "c2"
+      ]
+    },
+    {
+      "id": "tls-c2-indicator-fields",
+      "title": "TLS C2 indicator fields",
+      "severity": "high",
+      "confidence": "medium",
+      "summary": "TLS metadata was labeled as beacon, C2, suspicious JA3/JA3S, or suspicious SNI by a guest, PCAP, or enrichment sidecar.",
+      "mitreTechniqueId": "T1573",
+      "mitreTechniqueName": "Encrypted Channel",
+      "eventTypes": [
+        "network.tls",
+        "tls.connection",
+        "pcap.tls",
+        "driver.network"
+      ],
+      "dataContains": {
+        "classification": [
+          "c2",
+          "beacon",
+          "malware",
+          "suspicious-tls",
+          "malicious-ja3",
+          "rare-ja3"
+        ],
+        "behavior": [
+          "c2",
+          "beacon",
+          "checkin"
+        ],
+        "ja3Reputation": [
+          "malicious",
+          "suspicious",
+          "rare"
+        ],
+        "ja3sReputation": [
+          "malicious",
+          "suspicious",
+          "rare"
+        ],
+        "sniReputation": [
+          "malicious",
+          "suspicious",
+          "dga"
+        ]
+      },
+      "evidenceFields": [
+        "eventType",
+        "data.sni",
+        "data.ja3",
+        "data.ja3s",
+        "data.classification",
+        "data.behavior"
+      ],
+      "tags": [
+        "network",
+        "tls",
+        "encrypted-channel",
+        "c2"
+      ]
+    },
+    {
+      "id": "process-tree-office-spawned-script",
+      "title": "Office process spawned script or shell child",
+      "severity": "high",
+      "confidence": "high",
+      "summary": "Process-tree telemetry showed an Office application spawning a shell, scripting interpreter, or LOLBin child, a strong malicious-document execution pattern.",
+      "mitreTechniqueId": "T1204.002",
+      "mitreTechniqueName": "Malicious File",
+      "eventTypes": [
+        "process.tree"
+      ],
+      "dataContains": {
+        "treeLineage": [
+          "winword.exe -> powershell",
+          "winword.exe -> cmd.exe",
+          "winword.exe -> wscript",
+          "winword.exe -> cscript",
+          "winword.exe -> mshta",
+          "excel.exe -> powershell",
+          "excel.exe -> cmd.exe",
+          "excel.exe -> wscript",
+          "excel.exe -> cscript",
+          "excel.exe -> mshta",
+          "powerpnt.exe -> powershell",
+          "powerpnt.exe -> cmd.exe",
+          "outlook.exe -> powershell",
+          "outlook.exe -> cmd.exe"
+        ]
+      },
+      "evidenceFields": [
+        "eventType",
+        "processName",
+        "processId",
+        "parentProcessId",
+        "commandLine",
+        "data.treeLineage",
+        "data.parentProcessName"
+      ],
+      "tags": [
+        "process-tree",
+        "office",
+        "execution",
+        "script",
+        "malicious-document"
+      ]
+    },
+    {
+      "id": "process-tree-browser-spawned-script-or-lolbin",
+      "title": "Browser process spawned script, shell, or LOLBin child",
+      "severity": "high",
+      "confidence": "medium",
+      "summary": "Process-tree telemetry showed a browser spawning a shell, scripting interpreter, installer, or proxy-execution utility after download or exploit-driven execution.",
+      "mitreTechniqueId": "T1204.002",
+      "mitreTechniqueName": "Malicious File",
+      "eventTypes": [
+        "process.tree"
+      ],
+      "dataContains": {
+        "treeLineage": [
+          "chrome.exe -> powershell",
+          "chrome.exe -> cmd.exe",
+          "chrome.exe -> mshta",
+          "chrome.exe -> rundll32",
+          "chrome.exe -> regsvr32",
+          "chrome.exe -> msiexec",
+          "msedge.exe -> powershell",
+          "msedge.exe -> cmd.exe",
+          "msedge.exe -> mshta",
+          "msedge.exe -> rundll32",
+          "msedge.exe -> regsvr32",
+          "msedge.exe -> msiexec",
+          "firefox.exe -> powershell",
+          "firefox.exe -> cmd.exe",
+          "iexplore.exe -> powershell",
+          "iexplore.exe -> cmd.exe"
+        ]
+      },
+      "evidenceFields": [
+        "eventType",
+        "processName",
+        "processId",
+        "parentProcessId",
+        "commandLine",
+        "data.treeLineage",
+        "data.parentProcessName"
+      ],
+      "tags": [
+        "process-tree",
+        "browser",
+        "download-execute",
+        "script",
+        "lolbin"
       ]
     }
   ]

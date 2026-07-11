@@ -81,13 +81,18 @@ bool EmitMockDriverCategoryEvent(
     data.AddUtf8("eventSchemaName", KSWORD_SANDBOX_EVENT_SCHEMA_NAME);
     data.AddUnsigned("eventSchemaVersion", KSWORD_SANDBOX_EVENT_SCHEMA_VERSION);
     data.AddUtf8("eventSchemaVersionHex", HexUnsignedLongLong(KSWORD_SANDBOX_EVENT_SCHEMA_VERSION, 8));
+    data.AddUtf8("schema", KSWORD_SANDBOX_EVENT_SCHEMA_NAME);
     data.AddUnsigned("driverEventType", MockDriverEventTypeValue(driverEventTypeName));
     data.AddUtf8("driverEventTypeName", driverEventTypeName);
+    data.AddUtf8("producer", driverEventTypeName);
     data.AddUtf8("operation", operation);
     data.AddUtf8("operationName", operation);
     data.AddUtf8("typedPayloadStatus", "mock");
     data.AddBool("typedPayloadParsed", true);
     data.AddUtf8("payloadSchema", MockPayloadSchemaForDriverType(driverEventTypeName));
+    data.AddBool("lost", false);
+    data.AddBool("backpressure", false);
+    data.AddBool("noise", false);
     data.AddUtf8(
         "note",
         "Synthetic driver-category row for Guest Agent and host import plumbing.");
@@ -100,12 +105,57 @@ bool EmitMockDriverCategoryEvent(
     return EmitEvent(writer, event);
 }
 
+// Input: Event sink for synthetic mode.
+// Processing: Appends a deterministic blank line, malformed row, and valid
+// extra-field row so host readers prove JSONL noise tolerance without needing
+// stress rows or a live device.
+// Return: true when every noise line is accepted by the sink.
+bool EmitSyntheticJsonlNoiseRows(EventWriter& writer) {
+    if (!writer.WriteLine("   ")) {
+        return false;
+    }
+
+    if (!writer.WriteLine("{\"eventType\":\"driver.file\",\"source\":\"driver\",\"data\":{\"sequence\":\"broken\"")) {
+        return false;
+    }
+
+    JsonDataObjectBuilder data;
+    data.AddUtf8("sequence", "9999");
+    data.AddUtf8("eventSchemaName", KSWORD_SANDBOX_EVENT_SCHEMA_NAME);
+    data.AddUnsigned("eventSchemaVersion", KSWORD_SANDBOX_EVENT_SCHEMA_VERSION);
+    data.AddUtf8("eventSchemaVersionHex", HexUnsignedLongLong(KSWORD_SANDBOX_EVENT_SCHEMA_VERSION, 8));
+    data.AddUtf8("schema", KSWORD_SANDBOX_EVENT_SCHEMA_NAME);
+    data.AddUtf8("producer", "network");
+    data.AddBool("noise", true);
+    data.AddBool("lost", false);
+    data.AddBool("backpressure", false);
+    data.AddUtf8("protocolName", "tcp");
+    data.AddUtf8("transportProtocol", "tcp");
+    data.AddUtf8("directionName", "outbound");
+    data.AddUtf8("addressFamilyName", "ipv4");
+    data.AddUtf8("localAddress", "192.0.2.10");
+    data.AddUtf8("remoteAddress", "203.0.113.10");
+    data.AddUtf8("localPort", "51515");
+    data.AddUtf8("remotePort", "443");
+    data.AddUtf8("localEndpoint", "192.0.2.10:51515");
+    data.AddUtf8("remoteEndpoint", "203.0.113.10:443");
+    data.AddUtf8("sourceEndpoint", "192.0.2.10:51515");
+    data.AddUtf8("destinationEndpoint", "203.0.113.10:443");
+    data.AddUtf8("flowKey", "tcp|192.0.2.10:51515|203.0.113.10:443");
+
+    std::string line =
+        "{\"eventType\":\"driver.network\",\"source\":\"driver\",\"extraTopLevel\":\"ignored\",\"data\":";
+    line += data.Build();
+    line += "}";
+    return writer.WriteLine(line);
+}
+
 // Input: Collector options and the JSONL sink.
 // Processing: Emits a deterministic contiguous driver.file corpus that is large
 // enough for host/live readers to prove ordering, loss markers, and bounded
 // backpressure fields without opening the kernel device.
-// Return: true when all synthetic stress rows and optional noise rows were
-// written; false on output failure.
+// Return: true when all requested synthetic stress rows were written; false on
+// output failure.
 bool EmitSyntheticStressEvents(EventWriter& writer, const Options& options, const std::wstring& commandLine) {
     if (options.stressCount <= 0) {
         return true;
@@ -157,20 +207,6 @@ bool EmitSyntheticStressEvents(EventWriter& writer, const Options& options, cons
                     {"readEventsMaxEvents", std::to_string(options.readEventsMaxEvents)},
                     {"maxReadBatches", std::to_string(options.maxReadBatches)}
                 })) {
-            return false;
-        }
-    }
-
-    if (options.injectJsonlNoise) {
-        if (!writer.WriteLine("   ")) {
-            return false;
-        }
-
-        if (!writer.WriteLine("{\"eventType\":\"driver.file\",\"source\":\"driver\",\"data\":{\"sequence\":\"broken\"")) {
-            return false;
-        }
-
-        if (!writer.WriteLine("{\"eventType\":\"driver.network\",\"source\":\"driver\",\"extraTopLevel\":\"ignored\",\"data\":{\"sequence\":\"9999\",\"eventSchemaName\":\"ksword.sandbox.r0.event\"}}")) {
             return false;
         }
     }
@@ -287,12 +323,27 @@ int RunSyntheticMode(const Options& options, EventWriter& writer) {
                 {"localPort", "51515"},
                 {"remoteAddress", "203.0.113.10"},
                 {"remotePort", "443"},
+                {"localEndpoint", "192.0.2.10:51515"},
+                {"remoteEndpoint", "203.0.113.10:443"},
+                {"sourceEndpoint", "192.0.2.10:51515"},
+                {"destinationEndpoint", "203.0.113.10:443"},
+                {"flowKey", "tcp|192.0.2.10:51515|203.0.113.10:443"},
+                {"servicePort", "443"},
+                {"serviceHint", "tls"},
+                {"semanticCandidate", "tls"},
+                {"dnsCandidate", "false"},
+                {"httpCandidate", "false"},
+                {"tlsCandidate", "true"},
                 {"processId", currentProcessIdText}
             })) {
         return kExitRuntimeFailure;
     }
 
     if (!EmitSyntheticStressEvents(writer, options, mockCommandLine)) {
+        return kExitRuntimeFailure;
+    }
+
+    if (options.injectJsonlNoise && !EmitSyntheticJsonlNoiseRows(writer)) {
         return kExitRuntimeFailure;
     }
 

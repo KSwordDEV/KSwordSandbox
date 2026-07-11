@@ -54,7 +54,7 @@ internal static class SettingsPage
           <main>
             <section>
               <h2 data-zh="VirusTotal 官方结果" data-en="VirusTotal official results">VirusTotal 官方结果</h2>
-              <p class="muted" data-zh="当前只做 hash lookup，不上传样本。不配置或调用失败时，主流程继续运行且不写 noisy 日志。" data-en="Current integration performs hash lookup only and does not upload samples. If missing or failing, the main flow continues without noisy logs.">当前只做 hash lookup，不上传样本。不配置或调用失败时，主流程继续运行且不写 noisy 日志。</p>
+              <p class="muted" data-zh="当前只做 hash lookup，不上传样本。不配置或调用失败时，主流程继续运行且不会产生噪音日志。" data-en="Current integration performs hash lookup only and does not upload samples. If missing or failing, the main flow continues without noisy logs.">当前只做 hash lookup，不上传样本。不配置或调用失败时，主流程继续运行且不会产生噪音日志。</p>
               <div class="metric">
                 <strong data-zh="状态" data-en="Status">状态</strong>
                 <span id="vtConfigured" class="pill" data-copy="{{Attr(virusTotal.Configured ? "configured" : "not-configured")}}">{{Html(virusTotal.Configured ? "已配置 / Configured" : "未配置 / Not configured")}}</span>

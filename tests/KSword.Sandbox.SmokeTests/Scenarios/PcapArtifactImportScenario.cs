@@ -124,6 +124,12 @@ internal sealed class PcapArtifactImportScenario : ISmokeTestScenario
         SmokeAssert.True(report.Events.Any(evt => string.Equals(evt.EventType, "pcap.dns", StringComparison.OrdinalIgnoreCase)), "Imported report should include pcap.dns.");
         SmokeAssert.True(report.Events.Any(evt => string.Equals(evt.EventType, "pcap.http", StringComparison.OrdinalIgnoreCase)), "Imported report should include pcap.http.");
         SmokeAssert.True(report.Events.Any(evt => string.Equals(evt.EventType, "pcap.tls", StringComparison.OrdinalIgnoreCase)), "Imported report should include pcap.tls.");
+        var importedPcapSummary = report.Events.First(evt => string.Equals(evt.EventType, "pcap.summary", StringComparison.OrdinalIgnoreCase));
+        SmokeAssert.True(importedPcapSummary.Data.TryGetValue("collectionName", out var pcapCollection) && pcapCollection == "packet-captures", "Imported PCAP events should carry packet-captures collection context.");
+        SmokeAssert.True(importedPcapSummary.Data.TryGetValue("importMode", out var pcapImportMode) && pcapImportMode == "external-artifact", "Imported PCAP events should carry external artifact import mode.");
+        SmokeAssert.True(importedPcapSummary.Data.TryGetValue("sourceArtifactRelativePath", out var pcapRelativePath) && pcapRelativePath == "packet-captures/sample.pcap", "Imported PCAP events should carry source artifact relative path.");
+        SmokeAssert.True(importedPcapSummary.Data.TryGetValue("sourceArtifactSizeBytes", out var pcapSize) && long.Parse(pcapSize) > 0, "Imported PCAP events should carry source artifact size.");
+        SmokeAssert.True(importedPcapSummary.Data.TryGetValue("sourceArtifactSha256", out var pcapSha256) && pcapSha256.Length == 64, "Imported PCAP events should carry source artifact SHA-256.");
         SmokeAssert.True(report.Findings.Any(finding => finding.RuleId == "pcap-http-request-observed"), "PCAP HTTP rule should match imported pcap.http rows.");
         SmokeAssert.True(report.Findings.Any(finding => finding.RuleId == "pcap-dns-query-observed"), "PCAP DNS rule should match imported pcap.dns rows.");
         SmokeAssert.True(report.Findings.Any(finding => finding.RuleId == "pcap-tls-clienthello-observed"), "PCAP TLS rule should match imported pcap.tls rows.");

@@ -57,6 +57,29 @@ public sealed class GuestArtifactManifestReader
     }
 
     /// <summary>
+    /// Tries to load a guest artifact manifest synchronously for callers that
+    /// already operate on a filesystem scan.
+    /// Inputs are a guest output root; processing reads the canonical manifest
+    /// when it exists; the method returns null when no manifest was produced.
+    /// </summary>
+    public ArtifactManifest? TryRead(string guestOutputRoot)
+    {
+        var manifestPath = BuildManifestPath(guestOutputRoot);
+        if (!File.Exists(manifestPath))
+        {
+            return null;
+        }
+
+        var manifest = JsonSerializer.Deserialize<ArtifactManifest>(File.ReadAllText(manifestPath), JsonOptions);
+        if (manifest is null)
+        {
+            return null;
+        }
+
+        return NormalizeManifest(manifest, guestOutputRoot, manifestPath);
+    }
+
+    /// <summary>
     /// Normalizes a loaded guest manifest for host-side use.
     /// Inputs are the raw manifest, guest output root, and manifest path;
     /// processing fills missing roots and absolute descriptor paths from

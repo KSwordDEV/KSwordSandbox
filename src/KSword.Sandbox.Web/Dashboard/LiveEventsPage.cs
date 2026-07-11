@@ -254,14 +254,19 @@ internal static class LiveEventsPage
               const percent = progressPercent(snapshot);
               const state = formatProgressState(snapshot.state);
               const current = snapshot.currentStepTitle || t('等待下一步', 'waiting for next step');
+              const elapsed = formatDuration(snapshot.duration) || '-';
+              const failedStep = (snapshot.steps || []).find(step => ['failed', 'canceled'].includes(String(step.state || '').toLowerCase()));
+              const failureReason = buildProgressFailureReason(snapshot, failedStep);
               const message = snapshot.message ? `<p class="muted">${escapeHtml(snapshot.message)}</p>` : '';
+              const failure = failureReason ? `<p class="error">${t('失败原因：', 'Failure reason: ')}${escapeHtml(failureReason)}</p>` : '';
               const steps = (snapshot.steps || []).slice(0, 24).map(step => {
                 const stepState = String(step.state || 'pending').toLowerCase();
                 const line = `${Number(step.stepIndex ?? 0) + 1}. ${step.title || step.stepId || ''}`;
                 const detail = [
                   formatProgressState(stepState),
                   step.exitCode == null ? '' : `exit ${step.exitCode}`,
-                  step.duration ? formatDuration(step.duration) : ''
+                  step.duration ? formatDuration(step.duration) : '',
+                  step.message || ''
                 ].filter(Boolean).join(' · ');
                 return `<div class="step-card ${escapeAttr(stepState)}" data-copy="${escapeAttr(line + ' ' + detail)}">
                   <strong>${escapeHtml(line)}</strong>
@@ -273,9 +278,26 @@ internal static class LiveEventsPage
                 <strong>${escapeHtml(completed)} / ${escapeHtml(total)} ${t('步骤完成', 'steps completed')}</strong></div>
                 <div class="progressbar" aria-label="runbook progress"><div class="progressbar-fill" style="width:${percent}%"></div></div>
                 <p>${t('当前步骤', 'Current step')}：<strong>${escapeHtml(current)}</strong></p>
+                <p>${t('已耗时', 'Elapsed')}：<strong>${escapeHtml(elapsed)}</strong></p>
                 ${message}
+                ${failure}
                 <div class="step-list">${steps || `<p class="muted">${t('尚无步骤快照。', 'No step snapshot yet.')}</p>`}</div>`;
-              target.setAttribute('data-copy', `runbook ${state} ${completed}/${total} ${current}`);
+              target.setAttribute('data-copy', `runbook ${state} ${completed}/${total} ${current}; elapsed=${elapsed}; failure=${failureReason || '-'}`);
+            }
+
+            function buildProgressFailureReason(snapshot, failedStep) {
+              const pieces = [];
+              if (failedStep) {
+                const title = failedStep.title || failedStep.stepId || '';
+                if (title) { pieces.push(`${t('失败步骤', 'Failed step')}: ${title}`); }
+                if (failedStep.message) { pieces.push(failedStep.message); }
+                if (failedStep.exitCode != null) { pieces.push(`exit ${failedStep.exitCode}`); }
+              }
+              const state = String(snapshot?.state || '').toLowerCase();
+              if (snapshot?.message && (pieces.length > 0 || ['failed', 'canceled'].includes(state))) {
+                pieces.push(snapshot.message);
+              }
+              return pieces.join(' · ');
             }
 
             function progressPercent(snapshot) {
@@ -342,10 +364,12 @@ internal static class LiveEventsPage
                 const response = await fetch(`/api/jobs/${encodeURIComponent(jobId)}/virustotal`, { cache: 'no-store' });
                 const payload = await requireOk(response, 'VirusTotal');
                 renderVirusTotal(payload);
-              } catch {
+              } catch (error) {
                 // Keep VirusTotal silent and non-blocking. Operators can open
                 // Settings if they need to inspect the API key.
-                renderVirusTotal({ status: 'lookup_failed', configured: true, queried: false, message: t('VirusTotal 查询不可用。', 'VirusTotal lookup unavailable.') });
+                const detail = error && error.message ? error.message : t('VirusTotal 查询不可用。', 'VirusTotal lookup unavailable.');
+                const notConfigured = /not[_ -]?configured|api key|未配置/i.test(detail);
+                renderVirusTotal({ status: notConfigured ? 'not_configured' : 'lookup_failed', configured: !notConfigured, queried: false, message: detail });
               }
             }
 
@@ -361,7 +385,7 @@ internal static class LiveEventsPage
               if (!result.configured) {
                 label = t('未配置 API Key，已跳过官方结果。', 'API key not configured; official result skipped.');
               } else if (!result.queried) {
-                label = t('查询失败或被限速，沙箱流程继续。', 'Lookup failed or was rate-limited; sandbox flow continues.');
+                label = result.message || t('查询失败或被限速，沙箱流程继续。', 'Lookup failed or was rate-limited; sandbox flow continues.');
               } else if (!result.found) {
                 label = t('VirusTotal 未收录该 SHA-256。', 'VirusTotal has no report for this SHA-256.');
               } else {
@@ -369,9 +393,10 @@ internal static class LiveEventsPage
               }
 
               const link = result.permalink ? `<a href="${escapeAttr(result.permalink)}" target="_blank" rel="noopener">VirusTotal</a>` : '';
+              const settingsLink = !result.configured ? ` <a href="/settings">${t('打开设置', 'Open settings')}</a>` : '';
               const name = result.meaningfulName ? `<br><span>${escapeHtml(result.meaningfulName)}</span>` : '';
               const sha = result.sha256 ? `<br><code data-copy="${escapeAttr(result.sha256)}">${escapeHtml(result.sha256)}</code>` : '';
-              target.innerHTML = `<strong>${escapeHtml(label)}</strong> ${link}${name}${sha}`;
+              target.innerHTML = `<strong>${escapeHtml(label)}</strong> ${link}${settingsLink}${name}${sha}`;
               target.setAttribute('data-copy', `VirusTotal ${result.status || ''}: ${label} ${result.sha256 || ''}`);
             }
 

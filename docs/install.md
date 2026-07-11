@@ -22,6 +22,11 @@ The menu provides:
 - Install / prepare local settings
 - Change settings
 - Uninstall local settings
+- Reset Guest password
+- Configure Hyper-V
+- Configure VT key
+- Check environment
+- Start WebUI
 - Status
 
 The Change menu includes:
@@ -31,9 +36,30 @@ The Change menu includes:
 - change Hyper-V VM/checkpoint/guest paths;
 - change the recorded guest username;
 - recreate runtime folders and local config;
-- show Hyper-V readiness/status.
+- show Hyper-V readiness/status;
+- manage guest test-signing;
+- configure optional VirusTotal API key;
+- check local environment.
+
+Every mutating path supports `-WhatIf` because `install.ps1` uses
+PowerShell `ShouldProcess`. `-WhatIf` previews local environment/config writes,
+Guest password reset delegation, guest test-signing delegation, and WebUI
+startup without prompting for secrets, starting dotnet, or touching a VM.
 
 ## Fast local setup
+
+Shortest path for an existing golden VM:
+
+```powershell
+.\install.ps1 -Mode Install -PromptPassword
+.\run.ps1
+```
+
+After this one-time setup, the daily startup is just:
+
+```powershell
+.\run.ps1
+```
 
 For a fresh local lab where you want the installer to generate a password:
 
@@ -81,6 +107,21 @@ Non-interactive Hyper-V config update:
 Useful optional parameters are `-RuntimeRoot`, `-GuestPayloadRoot`,
 `-GuestUserName`, `-SecretName`, and `-LocalConfigPath`.
 
+Safe environment summary without changing local state:
+
+```powershell
+.\install.ps1 -Mode CheckEnvironment
+```
+
+Preview local Hyper-V config writes:
+
+```powershell
+.\install.ps1 -Mode Change -UpdateHyperVConfig -WhatIf `
+  -VmName 'KSwordSandbox-Win10-Golden' `
+  -CheckpointName 'Clean' `
+  -GuestWorkingDirectory 'C:\KSwordSandbox'
+```
+
 After install or config changes, run the read-only readiness preflight from an
 elevated PowerShell session:
 
@@ -105,6 +146,19 @@ The release-wrapper path is intentionally short:
 .\run.ps1
 ```
 
+Equivalent explicit startup wrappers:
+
+```powershell
+.\install.ps1 -Mode StartWebUI
+.\run.ps1 -Mode StartWebUI
+```
+
+Preview startup without launching dotnet:
+
+```powershell
+.\run.ps1 -Mode StartWebUI -WhatIf
+```
+
 Use `-GeneratePassword` only when you will also synchronize the actual VM
 `SandboxUser` password to that generated value. For the normal per-use launch,
 `.\run.ps1` loads `%ProgramData%\KSwordSandbox\install-state.json`, sets
@@ -125,6 +179,28 @@ warning and still starts for upload, planning, dry-run runbooks, and
 configuration review. Fix the payload before live Hyper-V execution, or run
 `.\run.ps1 -RequirePayloadForWebUI` when you want payload preparation failure to
 stop startup.
+
+## Optional VirusTotal key
+
+VirusTotal integration is optional and hash-only: the WebUI lookup checks an
+existing SHA-256 report and does not upload samples. Store the key outside git
+with the installer:
+
+```powershell
+.\install.ps1 -Mode ConfigureVTKey -PromptVTKey
+```
+
+This writes `KSWORDBOX_VIRUSTOTAL_API_KEY` to the current process and to the
+current Windows User environment unless `-CurrentProcessOnly` is supplied. The
+key value is never printed and is inherited by `.\run.ps1` / the WebUI process.
+To clear it:
+
+```powershell
+.\install.ps1 -Mode ConfigureVTKey -ClearVTKey
+```
+
+You can also configure or clear the key from the interactive menu:
+`Configure VT key`.
 
 ## Reset password secret
 

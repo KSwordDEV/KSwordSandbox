@@ -114,6 +114,23 @@ relative links for:
   guest capture probe or supplied by another tool
 - dropped files under `artifacts/dropped-files/*`
 
+During the scan, the host reads collected guest `artifacts/manifest.json`
+files and overlays matching descriptors by host-resolved full path. Host
+`relativePath`, `safeLink`, `fullPath`, `sizeBytes`, and `sha256` remain
+host-derived. Guest fields such as `guestPath`, `importPath`, `capturePhase`,
+`captureState`, `collectionName`, process identity, original VM-local paths,
+and extra `metadata` are retained. Collection lanes from the guest manifest are
+also retained, including `enabled`, `implemented`, `status`, `reason`, and
+metadata copies named `guestCollectionStatus` / `guestCollectionReason`.
+
+The host also summarizes nearby guest `events.json` rows into artifact and
+collection metadata. This keeps nonfatal evidence explainable even when no file
+was created: `screenshot.skipped` and `packet_capture.failed` contribute
+concrete `lastReason`, `lastDiagnosticStage`, or command fields, and
+`memory_dump.sweep` contributes `sweepVisibleTargetCount`,
+`sweepAttemptedCount`, `sweepCapturedCount`, `sweepSkippedCount`, and
+`sweepAlreadyCapturedCount`.
+
 The scan also classifies any discovered `.pcap` or `.pcapng` file as
 `PacketCapture` even when only the file is available and the manifest metadata
 is missing. Packet capture descriptors include deterministic MIME

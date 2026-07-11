@@ -6,6 +6,8 @@ Installs, changes, or uninstalls local KSwordSandbox operator settings.
 The installer is intentionally local-only. It prepares runtime folders and
 stores the guest credential secret outside git so Hyper-V live scripts can read
 KSWORDBOX_GUEST_PASSWORD without embedding passwords in config files.
+It can also record the optional VirusTotal API key in the current user's
+environment so the WebUI can perform hash-only lookups without committing a key.
 
 Default mode is interactive:
 
@@ -16,6 +18,9 @@ Automation examples:
   .\install.ps1 -Mode Install -GeneratePassword
   .\install.ps1 -Mode Change -ResetPassword -PromptPassword
   .\install.ps1 -Mode Change -UpdateHyperVConfig -VmName KSwordSandbox-Win10-Golden -CheckpointName Clean
+  .\install.ps1 -Mode ConfigureVTKey -PromptVTKey
+  .\install.ps1 -Mode CheckEnvironment
+  .\install.ps1 -Mode StartWebUI
   .\install.ps1 -Mode Change -ResetGuestVmPassword -GeneratePassword -Force
   .\install.ps1 -Mode Change -EnableGuestTestSigning -Force
   .\install.ps1 -Mode Uninstall
@@ -24,14 +29,16 @@ The script never prints the password value. By default it writes the configured
 secret to the current user's environment and mirrors it into the current process
 so commands launched from this PowerShell session can run immediately.
 #>
-[CmdletBinding()]
+[CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'Medium')]
 param(
-    [ValidateSet('Interactive', 'Install', 'Change', 'Uninstall', 'Status')]
+    [ValidateSet('Interactive', 'Install', 'Change', 'Uninstall', 'Status', 'CheckEnvironment', 'ConfigureVTKey', 'StartWebUI')]
     [string]$Mode = 'Interactive',
 
     [string]$GuestUserName = 'SandboxUser',
 
     [string]$SecretName = 'KSWORDBOX_GUEST_PASSWORD',
+
+    [string]$VirusTotalSecretName = 'KSWORDBOX_VIRUSTOTAL_API_KEY',
 
     [string]$RuntimeRoot = 'D:\Temp\KSwordSandbox',
 
@@ -45,6 +52,10 @@ param(
 
     [string]$LocalConfigPath = '',
 
+    [string]$VirusTotalSettingsPath = '',
+
+    [string]$WebUiUrl = 'http://127.0.0.1:18080',
+
     [switch]$GeneratePassword,
 
     [switch]$PromptPassword,
@@ -54,6 +65,18 @@ param(
     [switch]$ResetGuestVmPassword,
 
     [switch]$UpdateHyperVConfig,
+
+    [switch]$ConfigureVTKey,
+
+    [switch]$PromptVTKey,
+
+    [switch]$ClearVTKey,
+
+    [switch]$CheckEnvironment,
+
+    [switch]$StartWebUI,
+
+    [switch]$RunHyperVReadiness,
 
     [switch]$EnableGuestTestSigning,
 
@@ -76,6 +99,8 @@ param(
     [int]$BootTimeoutSeconds = 240,
 
     [int]$PowerShellDirectTimeoutSeconds = 240,
+
+    [switch]$OpenBrowser,
 
     [switch]$Force
 )
@@ -146,6 +171,7 @@ function Initialize-EffectiveParameters {
     $bindings = @{
         GuestUserName = 'guestUserName'
         SecretName = 'secretName'
+        VirusTotalSecretName = 'virusTotalSecretName'
         RuntimeRoot = 'runtimeRoot'
         GuestPayloadRoot = 'guestPayloadRoot'
         VmName = 'vmName'
@@ -259,6 +285,11 @@ function Save-DpapiSecretBackup {
         [Parameter(Mandatory)][string]$Path
     )
 
+    if (-not $PSCmdlet.ShouldProcess($Path, 'Write DPAPI-protected guest password backup')) {
+        Write-InstallInfo "WhatIf: DPAPI backup would be written for this Windows account: $Path"
+        return
+    }
+
     $parent = Split-Path -Parent $Path
     if (-not [string]::IsNullOrWhiteSpace($parent)) {
         New-Item -ItemType Directory -Path $parent -Force | Out-Null
@@ -305,13 +336,19 @@ function Write-LocalSandboxConfig {
         $config.driver.driverPathInGuest = Join-Path (Join-Path $GuestWorkingDirectory 'driver') $driverFileName
     }
 
-    $parent = Split-Path -Parent $targetPath
-    if (-not [string]::IsNullOrWhiteSpace($parent)) {
-        New-Item -ItemType Directory -Path $parent -Force | Out-Null
+    if ($PSCmdlet.ShouldProcess($targetPath, 'Write local sandbox config')) {
+        $parent = Split-Path -Parent $targetPath
+        if (-not [string]::IsNullOrWhiteSpace($parent)) {
+            New-Item -ItemType Directory -Path $parent -Force | Out-Null
+        }
+
+        $config | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $targetPath -Encoding UTF8
+        Write-InstallInfo "Local sandbox config written: $targetPath"
+    }
+    else {
+        Write-InstallInfo "WhatIf: local sandbox config would be written: $targetPath"
     }
 
-    $config | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $targetPath -Encoding UTF8
-    Write-InstallInfo "Local sandbox config written: $targetPath"
     return $targetPath
 }
 
@@ -323,6 +360,11 @@ function Set-WebConfigPathEnvironment {
         return
     }
 
+    if (-not $PSCmdlet.ShouldProcess($script:WebConfigPathEnvironmentName, "Set Web/API config path environment variable to '$ConfigPath'")) {
+        Write-InstallInfo "WhatIf: '$script:WebConfigPathEnvironmentName' would point at '$ConfigPath'."
+        return
+    }
+
     [Environment]::SetEnvironmentVariable($script:WebConfigPathEnvironmentName, $ConfigPath, 'Process')
     if (-not $CurrentProcessOnly) {
         [Environment]::SetEnvironmentVariable($script:WebConfigPathEnvironmentName, $ConfigPath, 'User')
@@ -331,6 +373,91 @@ function Set-WebConfigPathEnvironment {
     else {
         Write-InstallInfo "Set current process '$script:WebConfigPathEnvironmentName' to the local sandbox config."
     }
+}
+
+function Read-VirusTotalApiKey {
+    if ($ClearVTKey) {
+        return ''
+    }
+
+    if (-not $PromptVTKey -and $Mode -notin @('Interactive', 'ConfigureVTKey') -and -not $ConfigureVTKey) {
+        throw 'Non-interactive VirusTotal key configuration requires -PromptVTKey or -ClearVTKey.'
+    }
+
+    $secure = Read-Host "Enter optional VirusTotal API key for $VirusTotalSecretName" -AsSecureString
+    return ConvertFrom-SecureStringToPlainText -SecureString $secure
+}
+
+function Set-VirusTotalApiKeySecret {
+    param([AllowNull()][string]$ApiKey)
+
+    if ([string]::IsNullOrWhiteSpace($VirusTotalSecretName)) {
+        throw 'VirusTotal secret environment variable name must not be empty.'
+    }
+
+    if ($ClearVTKey) {
+        if (-not $PSCmdlet.ShouldProcess($VirusTotalSecretName, 'Clear optional VirusTotal API key from process/User environment')) {
+            Write-InstallInfo "WhatIf: optional VirusTotal API key '$VirusTotalSecretName' would be cleared from process/User environment."
+            return
+        }
+
+        [Environment]::SetEnvironmentVariable($VirusTotalSecretName, $null, 'Process')
+        [Environment]::SetEnvironmentVariable($VirusTotalSecretName, $null, 'User')
+        Write-InstallInfo "Optional VirusTotal API key '$VirusTotalSecretName' cleared from process/User environment."
+        return
+    }
+
+    if ([string]::IsNullOrWhiteSpace($ApiKey)) {
+        throw 'VirusTotal API key must not be empty. Use -ClearVTKey to remove the local setting.'
+    }
+
+    if (-not $PSCmdlet.ShouldProcess($VirusTotalSecretName, 'Store optional VirusTotal API key in local environment without printing it')) {
+        Write-InstallInfo "WhatIf: optional VirusTotal API key '$VirusTotalSecretName' would be stored locally. Value was not printed."
+        return
+    }
+
+    $trimmed = $ApiKey.Trim()
+    [Environment]::SetEnvironmentVariable($VirusTotalSecretName, $trimmed, 'Process')
+    if (-not $CurrentProcessOnly) {
+        [Environment]::SetEnvironmentVariable($VirusTotalSecretName, $trimmed, 'User')
+        Write-InstallInfo "Optional VirusTotal API key '$VirusTotalSecretName' stored in current User environment. Value was not printed."
+    }
+    else {
+        Write-InstallInfo "Optional VirusTotal API key '$VirusTotalSecretName' stored only in current process. Value was not printed."
+    }
+}
+
+function Invoke-VirusTotalKeyConfiguration {
+    if ($WhatIfPreference) {
+        [void]$PSCmdlet.ShouldProcess($VirusTotalSecretName, 'Configure optional VirusTotal API key')
+        Write-InstallInfo "WhatIf: optional VirusTotal API key '$VirusTotalSecretName' would be configured or cleared. Value was not printed."
+        return
+    }
+
+    $effectiveClear = [bool]$ClearVTKey
+    if ($Mode -eq 'Interactive' -and -not $PromptVTKey -and -not $ClearVTKey) {
+        Write-Host ''
+        Write-Host 'VirusTotal API key option:'
+        Write-Host '  1) Prompt and store optional key in the local environment'
+        Write-Host '  2) Clear local key from process/User environment'
+        Write-Host '  3) Back'
+        $choice = Read-MenuChoice -Prompt 'Choose [1-3]' -Allowed @('1', '2', '3')
+        if ($choice -eq '3') {
+            Write-InstallInfo 'VirusTotal key configuration cancelled.'
+            return
+        }
+
+        $effectiveClear = ($choice -eq '2')
+        $script:ClearVTKey = $effectiveClear
+    }
+
+    if ($effectiveClear) {
+        Set-VirusTotalApiKeySecret -ApiKey ''
+        return
+    }
+
+    $apiKey = Read-VirusTotalApiKey
+    Set-VirusTotalApiKeySecret -ApiKey $apiKey
 }
 
 function Save-InstallState {
@@ -350,7 +477,6 @@ function Save-InstallState {
         [string]$LocalConfig = ''
     )
 
-    New-Item -ItemType Directory -Path $script:InstallStateDirectory -Force | Out-Null
     if ([string]::IsNullOrWhiteSpace($LocalConfig)) {
         $LocalConfig = Get-LocalSandboxConfigPath
     }
@@ -361,6 +487,7 @@ function Save-InstallState {
         updatedAtUtc = [DateTimeOffset]::UtcNow.ToString('O')
         guestUserName = $GuestUser
         secretName = $Secret
+        virusTotalSecretName = $VirusTotalSecretName
         runtimeRoot = $Runtime
         guestPayloadRoot = $PayloadRoot
         passwordSource = $PasswordSource
@@ -375,6 +502,12 @@ function Save-InstallState {
         secretValuePrinted = $false
     }
 
+    if (-not $PSCmdlet.ShouldProcess($script:InstallStatePath, "Write install state for action '$Action'")) {
+        Write-InstallInfo "WhatIf: install state would be written: $script:InstallStatePath"
+        return
+    }
+
+    New-Item -ItemType Directory -Path $script:InstallStateDirectory -Force | Out-Null
     $state | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $script:InstallStatePath -Encoding UTF8
 }
 
@@ -391,6 +524,11 @@ function Set-GuestPasswordSecret {
 
     if ([string]::IsNullOrEmpty($Password)) {
         throw 'Guest password must not be empty.'
+    }
+
+    if (-not $PSCmdlet.ShouldProcess($Name, "Store guest password secret from source '$PasswordSource'")) {
+        Write-InstallInfo "WhatIf: guest password secret '$Name' would be stored locally. Value was not printed."
+        return
     }
 
     [Environment]::SetEnvironmentVariable($Name, $Password, 'Process')
@@ -431,12 +569,20 @@ function Set-GuestPasswordSecret {
 }
 
 function Initialize-KSwordSandboxRuntimeFolders {
-    New-Item -ItemType Directory -Path $RuntimeRoot -Force | Out-Null
-    New-Item -ItemType Directory -Path (Join-Path $RuntimeRoot 'jobs') -Force | Out-Null
-    New-Item -ItemType Directory -Path (Join-Path $RuntimeRoot 'plans') -Force | Out-Null
-    New-Item -ItemType Directory -Path (Join-Path $RuntimeRoot 'uploads') -Force | Out-Null
-    New-Item -ItemType Directory -Path (Join-Path $RuntimeRoot 'config') -Force | Out-Null
-    New-Item -ItemType Directory -Path $GuestPayloadRoot -Force | Out-Null
+    $directories = @(
+        $RuntimeRoot,
+        (Join-Path $RuntimeRoot 'jobs'),
+        (Join-Path $RuntimeRoot 'plans'),
+        (Join-Path $RuntimeRoot 'uploads'),
+        (Join-Path $RuntimeRoot 'config'),
+        $GuestPayloadRoot
+    )
+
+    foreach ($directory in $directories) {
+        if ($PSCmdlet.ShouldProcess($directory, 'Create or verify local runtime directory')) {
+            New-Item -ItemType Directory -Path $directory -Force | Out-Null
+        }
+    }
 }
 
 function Set-HyperVConfigState {
@@ -483,6 +629,12 @@ function Install-KSwordSandboxLocal {
     Set-WebConfigPathEnvironment -ConfigPath $configPath
 
     if ($SetPassword) {
+        if ($WhatIfPreference) {
+            [void]$PSCmdlet.ShouldProcess($SecretName, 'Store guest password secret')
+            Write-InstallInfo "WhatIf: guest password secret '$SecretName' would be set without printing the value."
+            return
+        }
+
         $credential = Read-GuestPassword -UseGenerated ([bool]$GeneratePassword) -UsePrompt ([bool]$PromptPassword) -ExistingSecretName $SecretName
         Set-GuestPasswordSecret -Name $SecretName -Password $credential.Password -PasswordSource $credential.Source
     }
@@ -502,6 +654,12 @@ function Install-KSwordSandboxLocal {
 }
 
 function Reset-GuestPasswordSecret {
+    if ($WhatIfPreference) {
+        [void]$PSCmdlet.ShouldProcess($SecretName, 'Reset host-side guest password secret')
+        Write-InstallInfo "WhatIf: host-side guest password secret '$SecretName' would be reset locally. Value was not printed."
+        return
+    }
+
     $credential = Read-GuestPassword -UseGenerated ([bool]$GeneratePassword) -UsePrompt ([bool]$PromptPassword) -ExistingSecretName $SecretName
     Set-GuestPasswordSecret -Name $SecretName -Password $credential.Password -PasswordSource "reset-$($credential.Source)"
     Write-InstallInfo 'Password secret reset locally. If you generated a new password, make sure the VM SandboxUser account is changed to the same value before live Hyper-V runs.'
@@ -537,6 +695,13 @@ function Invoke-GuestVmPasswordReset {
     if (-not (Test-Path -LiteralPath $resetScript -PathType Leaf)) {
         throw "Guest VM password reset script is missing: $resetScript"
     }
+
+    if ($WhatIfPreference) {
+        [void]$PSCmdlet.ShouldProcess($VmName, "Reset actual VM guest password for '$GuestUserName'")
+        Write-InstallInfo "WhatIf: actual VM guest password reset would be delegated to '$resetScript'. No checkpoint restore, disk mount, VM boot, or checkpoint refresh was executed."
+        return
+    }
+
     if (-not (Test-IsAdministrator)) {
         throw 'Resetting the actual VM guest password requires an elevated PowerShell session because it restores checkpoints and mounts the VM disk.'
     }
@@ -586,6 +751,11 @@ function Invoke-GuestVmPasswordReset {
         $arguments += '-SkipCheckpointRestore'
     }
 
+    if (-not $PSCmdlet.ShouldProcess($VmName, "Launch actual VM password reset for '$GuestUserName'")) {
+        Write-InstallInfo 'Actual VM password reset declined by ShouldProcess/Confirm.'
+        return
+    }
+
     Write-InstallInfo "Launching actual VM password reset for '$VmName'. Secret value will not be printed."
     & powershell @arguments
     if ($LASTEXITCODE -ne 0) {
@@ -630,6 +800,9 @@ function Show-KSwordSandboxInstallStatus {
     $processValue = [Environment]::GetEnvironmentVariable($SecretName, 'Process')
     $userValue = [Environment]::GetEnvironmentVariable($SecretName, 'User')
     $machineValue = [Environment]::GetEnvironmentVariable($SecretName, 'Machine')
+    $vtProcessValue = [Environment]::GetEnvironmentVariable($VirusTotalSecretName, 'Process')
+    $vtUserValue = [Environment]::GetEnvironmentVariable($VirusTotalSecretName, 'User')
+    $vtMachineValue = [Environment]::GetEnvironmentVariable($VirusTotalSecretName, 'Machine')
     $localConfig = Get-LocalSandboxConfigPath
     $hyperVModuleAvailable = $null -ne (Get-Command Get-VM -ErrorAction SilentlyContinue)
     $vmExists = $false
@@ -655,6 +828,10 @@ function Show-KSwordSandboxInstallStatus {
         ProcessSecretSet = -not [string]::IsNullOrWhiteSpace($processValue)
         UserSecretSet = -not [string]::IsNullOrWhiteSpace($userValue)
         MachineSecretSet = -not [string]::IsNullOrWhiteSpace($machineValue)
+        VirusTotalSecretName = $VirusTotalSecretName
+        VirusTotalProcessSecretSet = -not [string]::IsNullOrWhiteSpace($vtProcessValue)
+        VirusTotalUserSecretSet = -not [string]::IsNullOrWhiteSpace($vtUserValue)
+        VirusTotalMachineSecretSet = -not [string]::IsNullOrWhiteSpace($vtMachineValue)
         GuestUserName = $GuestUserName
         RuntimeRoot = [System.IO.Path]::GetFullPath($RuntimeRoot)
         RuntimeRootExists = Test-Path -LiteralPath $RuntimeRoot -PathType Container
@@ -681,6 +858,94 @@ function Show-KSwordSandboxInstallStatus {
     }
 }
 
+function Test-CommandAvailable {
+    param([Parameter(Mandatory)][string]$Name)
+    return $null -ne (Get-Command -Name $Name -ErrorAction SilentlyContinue)
+}
+
+function Show-KSwordSandboxEnvironmentCheck {
+    $runScript = Join-Path $PSScriptRoot 'run.ps1'
+    $readinessScript = Join-Path $PSScriptRoot 'scripts\Test-HyperVReadiness.ps1'
+    $webProject = Join-Path $PSScriptRoot 'src\KSword.Sandbox.Web\KSword.Sandbox.Web.csproj'
+    $installStatus = Show-KSwordSandboxInstallStatus
+
+    [pscustomobject][ordered]@{
+        StartupCommand = '.\run.ps1'
+        InstallCommand = '.\install.ps1'
+        ConfigureHyperVCommand = '.\install.ps1 -Mode Change -UpdateHyperVConfig -VmName <VM> -CheckpointName <Checkpoint>'
+        ConfigureGuestPasswordCommand = '.\install.ps1 -Mode Install -PromptPassword'
+        ResetGuestPasswordCommand = '.\install.ps1 -Mode Change -ResetGuestVmPassword -PromptPassword -Force'
+        ConfigureVTKeyCommand = '.\install.ps1 -Mode ConfigureVTKey -PromptVTKey'
+        CheckEnvironmentCommand = '.\install.ps1 -Mode CheckEnvironment'
+        WebUiUrl = $WebUiUrl
+        RunScriptExists = Test-Path -LiteralPath $runScript -PathType Leaf
+        ReadinessScriptExists = Test-Path -LiteralPath $readinessScript -PathType Leaf
+        WebProjectExists = Test-Path -LiteralPath $webProject -PathType Leaf
+        DotNetAvailable = Test-CommandAvailable -Name 'dotnet'
+        PowerShellAvailable = Test-CommandAvailable -Name 'powershell'
+        HyperVGetVmAvailable = Test-CommandAvailable -Name 'Get-VM'
+        HyperVGetVmSnapshotAvailable = Test-CommandAvailable -Name 'Get-VMSnapshot'
+        WhatIfSupported = $true
+        DefaultStartsVm = $false
+        StartWebUiStartsVm = $false
+        LiveVmExecutionRequiresExplicitLive = $true
+        SecretValuePrinted = $false
+        InstallStatus = $installStatus
+    }
+}
+
+function Invoke-KSwordSandboxEnvironmentCheck {
+    Show-KSwordSandboxEnvironmentCheck | Format-List
+
+    if ($RunHyperVReadiness) {
+        $readinessScript = Join-Path $PSScriptRoot 'scripts\Test-HyperVReadiness.ps1'
+        if (-not (Test-Path -LiteralPath $readinessScript -PathType Leaf)) {
+            throw "Hyper-V readiness script is missing: $readinessScript"
+        }
+
+        if (-not $PSCmdlet.ShouldProcess($readinessScript, 'Run read-only Hyper-V readiness preflight')) {
+            Write-InstallInfo "WhatIf: read-only Hyper-V readiness preflight would run: $readinessScript"
+            return
+        }
+
+        Write-InstallInfo 'Running read-only Hyper-V readiness preflight. It must not restore/start/stop a VM.'
+        & powershell -NoProfile -ExecutionPolicy Bypass -File $readinessScript
+        if ($LASTEXITCODE -ne 0) {
+            throw "Hyper-V readiness preflight failed with exit code $LASTEXITCODE."
+        }
+    }
+}
+
+function Invoke-KSwordSandboxWebUi {
+    $runScript = Join-Path $PSScriptRoot 'run.ps1'
+    if (-not (Test-Path -LiteralPath $runScript -PathType Leaf)) {
+        throw "run.ps1 was not found: $runScript"
+    }
+
+    if (-not $PSCmdlet.ShouldProcess($WebUiUrl, 'Start KSwordSandbox WebUI without starting or restoring a VM')) {
+        Write-InstallInfo "WhatIf: WebUI would be started via '$runScript -Mode WebUI -Url $WebUiUrl'. No VM would be started by this wrapper."
+        return
+    }
+
+    $arguments = @(
+        '-NoProfile',
+        '-ExecutionPolicy', 'Bypass',
+        '-File', $runScript,
+        '-Mode', 'WebUI',
+        '-Url', $WebUiUrl
+    )
+
+    if ($OpenBrowser) {
+        $arguments += '-OpenBrowser'
+    }
+
+    Write-InstallInfo "Starting WebUI through run.ps1 at $WebUiUrl. This wrapper does not start or restore a VM."
+    & powershell @arguments
+    if ($LASTEXITCODE -ne 0) {
+        throw "run.ps1 WebUI launch failed with exit code $LASTEXITCODE."
+    }
+}
+
 function Uninstall-KSwordSandboxLocal {
     if (-not $Force -and $Mode -eq 'Interactive') {
         Write-Host ''
@@ -690,6 +955,12 @@ function Uninstall-KSwordSandboxLocal {
             Write-InstallInfo 'Uninstall cancelled.'
             return
         }
+    }
+
+    if (-not $PSCmdlet.ShouldProcess($script:InstallStateDirectory, "Uninstall local KSwordSandbox settings and clear '$SecretName' from process/User environment")) {
+        Write-InstallInfo "WhatIf: local installer metadata and '$SecretName' process/User environment entries would be removed."
+        Write-InstallInfo 'Runtime output folders would be left intact.'
+        return
     }
 
     [Environment]::SetEnvironmentVariable($SecretName, $null, 'Process')
@@ -712,6 +983,12 @@ function Invoke-GuestTestSigningMode {
     $testSigningScript = Join-Path $PSScriptRoot 'scripts\Set-GuestTestSigning.ps1'
     if (-not (Test-Path -LiteralPath $testSigningScript -PathType Leaf)) {
         throw "Guest test-signing script is missing: $testSigningScript"
+    }
+
+    if ($WhatIfPreference) {
+        [void]$PSCmdlet.ShouldProcess($VmName, "Run guest test-signing '$TestSigningMode'")
+        Write-InstallInfo "WhatIf: guest test-signing '$TestSigningMode' would be delegated to '$testSigningScript'. No guest command or reboot was executed."
+        return
     }
 
     if ($TestSigningMode -ne 'Query' -and -not $Force -and $Mode -ne 'Interactive') {
@@ -750,6 +1027,11 @@ function Invoke-GuestTestSigningMode {
         $arguments += '-Force'
     }
 
+    if (-not $PSCmdlet.ShouldProcess($VmName, "Run guest test-signing '$TestSigningMode'")) {
+        Write-InstallInfo "Guest test-signing '$TestSigningMode' declined by ShouldProcess/Confirm."
+        return
+    }
+
     Write-InstallInfo "Running guest test-signing '$TestSigningMode' for VM '$VmName'."
     & powershell @arguments
     if ($LASTEXITCODE -ne 0) {
@@ -777,6 +1059,22 @@ function Invoke-GuestTestSigningMenu {
     }
 }
 
+function Invoke-GuestPasswordMenu {
+    while ($true) {
+        Write-Host ''
+        Write-Host 'Guest password options:'
+        Write-Host '  1) Reset host-side password secret only'
+        Write-Host '  2) Reset actual VM guest password (elevated, explicit confirmation)'
+        Write-Host '  3) Back'
+        $choice = Read-MenuChoice -Prompt 'Choose [1-3]' -Allowed @('1', '2', '3')
+        switch ($choice) {
+            '1' { Reset-GuestPasswordSecret }
+            '2' { Invoke-GuestVmPasswordReset }
+            '3' { return }
+        }
+    }
+}
+
 function Invoke-ChangeMenu {
     while ($true) {
         Write-Host ''
@@ -788,8 +1086,10 @@ function Invoke-ChangeMenu {
         Write-Host '  5) Recreate runtime folders and local config'
         Write-Host '  6) Show Hyper-V readiness/status'
         Write-Host '  7) Manage guest test-signing'
-        Write-Host '  8) Back'
-        $choice = Read-MenuChoice -Prompt 'Choose [1-8]' -Allowed @('1', '2', '3', '4', '5', '6', '7', '8')
+        Write-Host '  8) Configure optional VirusTotal API key'
+        Write-Host '  9) Check local environment'
+        Write-Host '  10) Back'
+        $choice = Read-MenuChoice -Prompt 'Choose [1-10]' -Allowed @('1', '2', '3', '4', '5', '6', '7', '8', '9', '10')
         switch ($choice) {
             '1' { Reset-GuestPasswordSecret }
             '2' { Invoke-GuestVmPasswordReset }
@@ -801,7 +1101,9 @@ function Invoke-ChangeMenu {
             '5' { Set-HyperVConfigState -Action 'runtime-folders-and-config-refreshed' }
             '6' { Show-KSwordSandboxInstallStatus | Format-List }
             '7' { Invoke-GuestTestSigningMenu }
-            '8' { return }
+            '8' { Invoke-VirusTotalKeyConfiguration }
+            '9' { Invoke-KSwordSandboxEnvironmentCheck }
+            '10' { return }
         }
     }
 }
@@ -813,9 +1115,14 @@ function Invoke-InteractiveInstaller {
         Write-Host '  1) Install / prepare local settings'
         Write-Host '  2) Change settings'
         Write-Host '  3) Uninstall local settings'
-        Write-Host '  4) Status'
-        Write-Host '  5) Exit'
-        $choice = Read-MenuChoice -Prompt 'Choose [1-5]' -Allowed @('1', '2', '3', '4', '5')
+        Write-Host '  4) Reset Guest password'
+        Write-Host '  5) Configure Hyper-V'
+        Write-Host '  6) Configure VT key'
+        Write-Host '  7) Check environment'
+        Write-Host '  8) Start WebUI'
+        Write-Host '  9) Status'
+        Write-Host '  10) Exit'
+        $choice = Read-MenuChoice -Prompt 'Choose [1-10]' -Allowed @('1', '2', '3', '4', '5', '6', '7', '8', '9', '10')
         switch ($choice) {
             '1' {
                 Write-Host ''
@@ -827,8 +1134,13 @@ function Invoke-InteractiveInstaller {
             }
             '2' { Invoke-ChangeMenu }
             '3' { Uninstall-KSwordSandboxLocal }
-            '4' { Show-KSwordSandboxInstallStatus | Format-List }
-            '5' { return }
+            '4' { Invoke-GuestPasswordMenu }
+            '5' { Invoke-HyperVConfigPrompt }
+            '6' { Invoke-VirusTotalKeyConfiguration }
+            '7' { Invoke-KSwordSandboxEnvironmentCheck }
+            '8' { Invoke-KSwordSandboxWebUi }
+            '9' { Show-KSwordSandboxInstallStatus | Format-List }
+            '10' { return }
         }
     }
 }
@@ -845,7 +1157,16 @@ switch ($Mode) {
         Install-KSwordSandboxLocal -SetPassword:$shouldSetPassword
     }
     'Change' {
-        if ($ResetGuestVmPassword) {
+        if ($StartWebUI) {
+            Invoke-KSwordSandboxWebUi
+        }
+        elseif ($CheckEnvironment) {
+            Invoke-KSwordSandboxEnvironmentCheck
+        }
+        elseif ($ConfigureVTKey -or $PromptVTKey -or $ClearVTKey) {
+            Invoke-VirusTotalKeyConfiguration
+        }
+        elseif ($ResetGuestVmPassword) {
             Invoke-GuestVmPasswordReset
         }
         elseif ($EnableGuestTestSigning) {
@@ -872,5 +1193,14 @@ switch ($Mode) {
     }
     'Status' {
         Show-KSwordSandboxInstallStatus | Format-List
+    }
+    'CheckEnvironment' {
+        Invoke-KSwordSandboxEnvironmentCheck
+    }
+    'ConfigureVTKey' {
+        Invoke-VirusTotalKeyConfiguration
+    }
+    'StartWebUI' {
+        Invoke-KSwordSandboxWebUi
     }
 }

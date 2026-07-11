@@ -42,6 +42,7 @@ internal sealed class WebUiRuntimeSmokeContractScenario : ISmokeTestScenario
 
         await ProbeLiveEndpointAsync(httpClient, baseUri, jobId, cancellationToken);
         await ProbeLiveRawMonitorPageAsync(httpClient, baseUri, jobId, cancellationToken);
+        await ProbeSettingsPageAsync(httpClient, baseUri, cancellationToken);
         await ProbeServedReportLinkAsync(httpClient, baseUri, jobId, cancellationToken);
         await ProbeServedReportLinkAsync(httpClient, baseUri, jobId, cancellationToken, "zh");
         await ProbeServedReportLinkAsync(httpClient, baseUri, jobId, cancellationToken, "en");
@@ -51,7 +52,7 @@ internal sealed class WebUiRuntimeSmokeContractScenario : ISmokeTestScenario
         {
             ScenarioId = ScenarioId,
             Passed = true,
-            Message = "Runtime WebUI smoke checked live events, live raw monitor page, localized report links, and manual guest import endpoint."
+            Message = "Runtime WebUI smoke checked live events, live raw monitor/settings pages, localized report links, and manual guest import endpoint."
         };
     }
 
@@ -66,6 +67,7 @@ internal sealed class WebUiRuntimeSmokeContractScenario : ISmokeTestScenario
         var program = ReadRepositoryText(context, "src", "KSword.Sandbox.Web", "Program.cs");
         var dashboard = ReadRepositoryText(context, "src", "KSword.Sandbox.Web", "Dashboard", "DashboardExperiencePage.cs");
         var liveEventsPage = ReadRepositoryText(context, "src", "KSword.Sandbox.Web", "Dashboard", "LiveEventsPage.cs");
+        var settingsPage = ReadRepositoryText(context, "src", "KSword.Sandbox.Web", "Dashboard", "SettingsPage.cs");
         var doc = ReadRepositoryText(context, "docs", "webui-framework.md");
         var script = ReadRepositoryText(context, "scripts", "Test-LiveTelemetryFramework.ps1");
 
@@ -100,6 +102,13 @@ internal sealed class WebUiRuntimeSmokeContractScenario : ISmokeTestScenario
         RequireContains(liveEventsPage, "/events/live", "Live raw monitor page should fall back to polling.");
         RequireContains(liveEventsPage, "data-zh", "Live raw monitor page should expose Chinese text markers.");
         RequireContains(liveEventsPage, "data-en", "Live raw monitor page should expose English text markers.");
+        RequireContains(liveEventsPage, "已耗时", "Live raw monitor page should expose elapsed runbook progress.");
+        RequireContains(liveEventsPage, "buildProgressFailureReason", "Live raw monitor page should expose runbook failure reasons.");
+        RequireContains(liveEventsPage, "Open settings", "Live raw monitor page should link to settings for missing VirusTotal keys.");
+
+        RequireContains(settingsPage, "VirusTotal API Key", "Settings page should expose the VirusTotal API key form.");
+        RequireContains(settingsPage, "does not upload samples", "Settings page should clearly state that samples are not uploaded.");
+        RequireContains(settingsPage, "不会产生噪音日志", "Settings page should state that missing VirusTotal keys do not create noisy logs.");
 
         RequireContains(doc, BaseUrlEnvironmentVariable, "WebUI framework doc should describe the runtime smoke base URL environment variable.");
         RequireContains(doc, JobIdEnvironmentVariable, "WebUI framework doc should describe the runtime smoke job ID environment variable.");
@@ -111,6 +120,7 @@ internal sealed class WebUiRuntimeSmokeContractScenario : ISmokeTestScenario
         RequireContains(doc, "/api/jobs/{jobId}/guest-events/import", "WebUI framework doc should describe the manual guest import smoke probe.");
         RequireContains(doc, "bilingual report endpoints", "WebUI framework doc should identify bilingual report endpoint validation.");
         RequireContains(doc, "static gate", "WebUI framework doc should describe the static gate fallback.");
+        RequireContains(doc, "current step, elapsed time, and failure reason", "WebUI framework doc should require visible runbook progress facts.");
 
         RequireContains(script, BaseUrlEnvironmentVariable, "Live telemetry framework script should accept the runtime smoke base URL environment variable.");
         RequireContains(script, JobIdEnvironmentVariable, "Live telemetry framework script should accept the runtime smoke job ID environment variable.");
@@ -192,6 +202,34 @@ internal sealed class WebUiRuntimeSmokeContractScenario : ISmokeTestScenario
         SmokeAssert.True(body.Contains("实时原始事件监控", StringComparison.Ordinal), "Live raw monitor page should include its Chinese title.");
         SmokeAssert.True(body.Contains("/events/live", StringComparison.Ordinal), "Live raw monitor page should reference the polling endpoint.");
         SmokeAssert.True(body.Contains("/events/stream", StringComparison.Ordinal), "Live raw monitor page should reference the SSE endpoint.");
+        SmokeAssert.True(body.Contains("虚拟机分析进度", StringComparison.Ordinal), "Live raw monitor page should include the Chinese runbook progress panel.");
+        SmokeAssert.True(body.Contains("Runbook progress", StringComparison.Ordinal), "Live raw monitor page should include the English runbook progress label.");
+        SmokeAssert.True(body.Contains("/runbook/progress", StringComparison.Ordinal), "Live raw monitor page should poll runbook progress.");
+        SmokeAssert.True(body.Contains("后台执行状态", StringComparison.Ordinal), "Live raw monitor page should include background execution status.");
+        SmokeAssert.True(body.Contains("/runbook/background", StringComparison.Ordinal), "Live raw monitor page should poll background execution status.");
+    }
+
+    /// <summary>
+    /// Probes the settings page without changing local settings. Inputs are an
+    /// HTTP client, base URI, and cancellation token; processing requests the
+    /// local settings HTML and validates VirusTotal copy; the method returns no
+    /// value on success.
+    /// </summary>
+    private static async Task ProbeSettingsPageAsync(HttpClient httpClient, Uri baseUri, CancellationToken cancellationToken)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, BuildUri(baseUri, "/settings"));
+        request.Headers.Accept.ParseAdd("text/html");
+
+        using var response = await httpClient.SendAsync(request, cancellationToken);
+        var body = await response.Content.ReadAsStringAsync(cancellationToken);
+        var mediaType = response.Content.Headers.ContentType?.MediaType ?? string.Empty;
+
+        SmokeAssert.True(response.IsSuccessStatusCode, $"Settings page returned HTTP {(int)response.StatusCode}: {Truncate(body)}");
+        SmokeAssert.True(string.Equals(mediaType, "text/html", StringComparison.OrdinalIgnoreCase), $"Settings page should return text/html, not '{mediaType}'.");
+        SmokeAssert.True(body.Contains("VirusTotal API Key", StringComparison.Ordinal), "Settings page should include the VirusTotal API key form.");
+        SmokeAssert.True(body.Contains("不会提交到仓库", StringComparison.Ordinal), "Settings page should explain local settings are not committed.");
+        SmokeAssert.True(body.Contains("/api/settings/virustotal", StringComparison.Ordinal), "Settings page should save through the VirusTotal settings endpoint.");
+        SmokeAssert.True(body.Contains("does not upload samples", StringComparison.Ordinal), "Settings page should state that samples are not uploaded.");
     }
 
     /// <summary>

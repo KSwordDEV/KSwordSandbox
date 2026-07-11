@@ -1,3 +1,4 @@
+using KSword.Sandbox.Abstractions;
 using KSword.Sandbox.SmokeTests.Assertions;
 using KSword.Sandbox.SmokeTests.Framework;
 
@@ -14,8 +15,10 @@ internal sealed class R0CollectorAbiSelfCheckContractScenario : ISmokeTestScenar
     public string ScenarioId => "r0.collector.abi-self-check.contract";
 
     /// <inheritdoc />
-    public Task<SmokeTestResult> RunAsync(SmokeTestContext context, CancellationToken cancellationToken = default)
+    public async Task<SmokeTestResult> RunAsync(SmokeTestContext context, CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+
         var collectorRoot = Path.Combine(context.RepositoryRoot, "guest", "KSword.Sandbox.R0Collector");
         var sourceRoot = Path.Combine(collectorRoot, "src");
         var project = ReadText(Path.Combine(collectorRoot, "KSword.Sandbox.R0Collector.vcxproj"));
@@ -57,6 +60,11 @@ internal sealed class R0CollectorAbiSelfCheckContractScenario : ISmokeTestScenar
             "eventHeaderVersion",
             "eventSchemaName",
             "eventSchemaVersion",
+            "schema",
+            "producer",
+            "noise",
+            "lost",
+            "backpressure",
             "capabilityFlagsCurrentHex",
             "producerMaskCurrentHex",
             "producerMaskDefaultHex",
@@ -74,8 +82,10 @@ internal sealed class R0CollectorAbiSelfCheckContractScenario : ISmokeTestScenar
             "readEventsRequestFlagsPolicy",
             "producerSelectionPolicy",
             "jsonlNoisePolicy",
+            "jsonlMalformedPolicy",
             "kernelBackpressurePolicy",
             "queueLossEvidence",
+            "stableJsonlFields",
             "abiSelfCheckComplete"
         })
         {
@@ -91,8 +101,10 @@ internal sealed class R0CollectorAbiSelfCheckContractScenario : ISmokeTestScenar
             "capabilityFlagsCurrentHex",
             "producerMaskCurrentHex",
             "jsonlNoisePolicy",
+            "jsonlMalformedPolicy",
             "kernelBackpressurePolicy",
             "queueLossEvidence",
+            "stableJsonlFields",
             "does not open",
             "DeviceIoControl"
         })
@@ -100,12 +112,117 @@ internal sealed class R0CollectorAbiSelfCheckContractScenario : ISmokeTestScenar
             RequireContains(collectorDoc, expected, $"r0-collector.md should document {expected} for ABI self-check mode.");
         }
 
-        return Task.FromResult(new SmokeTestResult
+        await AssertExecutableAbiSelfCheckGoldenAsync(context, cancellationToken);
+
+        return new SmokeTestResult
         {
             ScenarioId = ScenarioId,
             Passed = true,
-            Message = "R0Collector no-device ABI self-check contract is covered by source/docs smoke checks."
-        });
+            Message = "R0Collector no-device ABI self-check contract is covered by source/docs plus executable golden smoke or explicit host-policy block evidence."
+        };
+    }
+
+    /// <summary>
+    /// Builds and runs the collector no-device ABI self-check. Inputs are the
+    /// smoke context and cancellation token; processing writes build/output
+    /// artifacts only under D:\Temp\KSwordSandbox\verify; return value is none.
+    /// </summary>
+    private static async Task AssertExecutableAbiSelfCheckGoldenAsync(
+        SmokeTestContext context,
+        CancellationToken cancellationToken)
+    {
+        var build = await R0CollectorExecutableSmokeHelper.BuildCollectorAsync(context, cancellationToken);
+        var outputPath = R0CollectorExecutableSmokeHelper.CreateRunOutputPath(build, "r0collector-abi-self-check.jsonl");
+        var result = await R0CollectorExecutableSmokeHelper.RunCollectorAsync(
+            build.ExecutablePath,
+            [
+                "--abi-self-check",
+                "--heartbeat",
+                "--max-events",
+                "16",
+                "--max-read-batches",
+                "4",
+                "--enable-mask",
+                "0x3f",
+                "--out",
+                outputPath
+            ],
+            context.RepositoryRoot,
+            cancellationToken);
+        if (R0CollectorExecutableSmokeHelper.IsExecutionBlockedByHostPolicy(result))
+        {
+            SmokeAssert.True(
+                result.CombinedOutput.Contains("Execution blocked by host policy", StringComparison.Ordinal),
+                "Blocked executable ABI smoke should report explicit host-policy evidence.");
+            return;
+        }
+
+        SmokeAssert.True(result.ExitCode == 0, $"collector --abi-self-check should exit 0. Output: {result.CombinedOutput}");
+
+        var jsonLines = R0CollectorExecutableSmokeHelper.ReadJsonLines(outputPath);
+        SmokeAssert.True(jsonLines.BlankLineCount == 0, "ABI self-check output should not contain blank JSONL noise.");
+        SmokeAssert.True(jsonLines.MalformedLines.Count == 0, "ABI self-check output should not contain malformed JSONL rows.");
+
+        var started = RequireEvent(jsonLines.Events, "r0collector.started");
+        RequireData(started, "abiSelfCheck", "true");
+        RequireData(started, "readEventsMaxEvents", "16");
+        RequireData(started, "maxReadBatches", "4");
+        RequireData(started, "enableMaskHex", "0x0000003F");
+
+        var abiSelfCheck = RequireEvent(jsonLines.Events, "r0collector.abiSelfCheck");
+        RequireData(abiSelfCheck, "selfCheckPassed", "true");
+        RequireData(abiSelfCheck, "opensDriverDevice", "false");
+        RequireData(abiSelfCheck, "ioctlIssued", "false");
+        RequireData(abiSelfCheck, "collectorAbiVersion", "65536");
+        RequireData(abiSelfCheck, "collectorAbiVersionHex", "0x00010000");
+        RequireData(abiSelfCheck, "abiVersionMajor", "1");
+        RequireData(abiSelfCheck, "abiVersionMinor", "0");
+        RequireData(abiSelfCheck, "eventHeaderVersion", "65536");
+        RequireData(abiSelfCheck, "eventSchemaName", "ksword.sandbox.r0.event");
+        RequireData(abiSelfCheck, "eventSchemaVersion", "65536");
+        RequireData(abiSelfCheck, "capabilityFlagsCurrentHex", "0x00000000000003FF");
+        RequireData(abiSelfCheck, "producerMaskCurrentHex", "0x0000003F");
+        RequireData(abiSelfCheck, "producerMaskDefaultHex", "0x0000003F");
+        RequireData(abiSelfCheck, "eventHeaderSize", "56");
+        RequireData(abiSelfCheck, "capabilitiesReplySize", "104");
+        RequireData(abiSelfCheck, "statusReplySize", "120");
+        RequireData(abiSelfCheck, "readEventsReplyHeaderSize", "40");
+        RequireData(abiSelfCheck, "networkPayloadSize", "112");
+        RequireData(abiSelfCheck, "requestedMaxEvents", "16");
+        RequireData(abiSelfCheck, "maxReadBatches", "4");
+        RequireData(abiSelfCheck, "readEventsRequestFlagsPolicy", "always-zero");
+        RequireContains(
+            abiSelfCheck.Data["capabilityFlagNames"],
+            "EventSchemaNames",
+            "ABI self-check should advertise event-schema-name support.");
+        RequireContains(
+            abiSelfCheck.Data["producerMaskCurrentNames"],
+            "network",
+            "ABI self-check should advertise the network producer.");
+        RequireContains(
+            abiSelfCheck.Data["jsonlNoisePolicy"],
+            "malformed lines preserved",
+            "ABI self-check should describe malformed JSONL preservation.");
+        RequireContains(
+            abiSelfCheck.Data["kernelBackpressurePolicy"],
+            "nonblocking producers",
+            "ABI self-check should describe non-blocking backpressure.");
+        RequireContains(
+            abiSelfCheck.Data["queueLossEvidence"],
+            "sequence",
+            "ABI self-check should name sequence-based loss evidence.");
+
+        var stopped = RequireEvent(jsonLines.Events, "r0collector.stopped");
+        RequireData(stopped, "reason", "abiSelfCheckComplete");
+        RequireData(stopped, "opensDriverDevice", "false");
+        RequireData(stopped, "ioctlIssued", "false");
+
+        SmokeAssert.True(
+            jsonLines.Events.All(evt => !string.Equals(evt.EventType, "r0collector.deviceOpened", StringComparison.OrdinalIgnoreCase)),
+            "ABI self-check golden smoke must not open the driver device.");
+        SmokeAssert.True(
+            jsonLines.Events.All(evt => !string.Equals(evt.EventType, "r0collector.driverHealth", StringComparison.OrdinalIgnoreCase)),
+            "ABI self-check golden smoke must not issue driver health IOCTLs.");
     }
 
     /// <summary>
@@ -125,5 +242,28 @@ internal sealed class R0CollectorAbiSelfCheckContractScenario : ISmokeTestScenar
     private static void RequireContains(string content, string expected, string message)
     {
         SmokeAssert.True(content.Contains(expected, StringComparison.Ordinal), message);
+    }
+
+    /// <summary>
+    /// Returns the first event with an expected type. Inputs are event list and
+    /// type; processing searches case-insensitively; return value is the event.
+    /// </summary>
+    private static SandboxEvent RequireEvent(IEnumerable<SandboxEvent> events, string eventType)
+    {
+        var evt = events.FirstOrDefault(candidate => string.Equals(candidate.EventType, eventType, StringComparison.OrdinalIgnoreCase));
+        SmokeAssert.True(evt is not null, $"Executable ABI self-check JSONL should contain {eventType}.");
+        return evt!;
+    }
+
+    /// <summary>
+    /// Requires one data value. Inputs are an event, key, and value; processing
+    /// compares ordinally; return value is none.
+    /// </summary>
+    private static void RequireData(SandboxEvent evt, string key, string expected)
+    {
+        SmokeAssert.True(
+            evt.Data.TryGetValue(key, out var actual) &&
+            string.Equals(actual, expected, StringComparison.Ordinal),
+            $"{evt.EventType} should contain data.{key}={expected}.");
     }
 }

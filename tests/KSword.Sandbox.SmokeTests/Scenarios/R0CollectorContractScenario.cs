@@ -60,7 +60,9 @@ internal sealed class R0CollectorContractScenario : ISmokeTestScenario
         RequireContains(abiSelfCheck, "capabilityFlagsCurrentHex", "ABI self-check should preserve capability flags.");
         RequireContains(abiSelfCheck, "producerMaskCurrentHex", "ABI self-check should preserve producer mask.");
         RequireContains(abiSelfCheck, "jsonlNoisePolicy", "ABI self-check should describe JSONL noise policy.");
+        RequireContains(abiSelfCheck, "jsonlMalformedPolicy", "ABI self-check should describe malformed JSONL policy.");
         RequireContains(abiSelfCheck, "kernelBackpressurePolicy", "ABI self-check should describe kernel backpressure policy.");
+        RequireContains(abiSelfCheck, "stableJsonlFields", "ABI self-check should name stable JSONL event-quality fields.");
         RequireContains(ioctlClient, "EmitDriverCapabilities", "R0Collector should negotiate capabilities.");
         RequireContains(ioctlClient, "EmitDriverStatus", "R0Collector should emit status snapshots.");
         RequireContains(ioctlClient, "EmitDriverSetProducerEnableMask", "R0Collector should support producer-mask IOCTL negotiation.");
@@ -82,6 +84,11 @@ internal sealed class R0CollectorContractScenario : ISmokeTestScenario
         RequireContains(eventParser, "totalEventsSuppressed", "Status row should preserve suppressed event counter.");
         RequireContains(eventParser, "requestedEnableMaskHex", "Producer-mask row should preserve requested mask.");
         RequireContains(eventParser, "effectiveEnableMaskHex", "Producer-mask row should preserve effective mask.");
+        RequireContains(eventParser, "producer", "Event parser rows should preserve stable producer metadata.");
+        RequireContains(eventParser, "schema", "Event parser rows should preserve stable schema metadata.");
+        RequireContains(eventParser, "lost", "Event parser rows should preserve stable loss metadata.");
+        RequireContains(eventParser, "backpressure", "Event parser rows should preserve stable backpressure metadata.");
+        RequireContains(eventParser, "noise", "Event parser rows should preserve stable noise metadata.");
         RequireContains(runtimeLoop, "EmitDriverCapabilities", "Runtime loop should call capabilities before drain.");
         RequireContains(runtimeLoop, "EmitDriverSetProducerEnableMask", "Runtime loop should apply requested producer mask before drain.");
         RequireContains(runtimeLoop, "EmitDriverStatus", "Runtime loop should capture status before/after drain.");
@@ -98,6 +105,7 @@ internal sealed class R0CollectorContractScenario : ISmokeTestScenario
         RequireContains(collectorDoc, "drainStoppedAtBatchLimit", "r0-collector.md should describe the batch-limit exit field.");
         RequireContains(collectorDoc, "--abi-self-check", "r0-collector.md should describe the ABI self-check mode.");
         RequireContains(collectorDoc, "r0collector.abiSelfCheck", "r0-collector.md should document ABI self-check output.");
+        RequireContains(collectorDoc, "JSONL quality and noise contract", "r0-collector.md should document stable JSONL quality fields.");
 
         return Task.FromResult(new SmokeTestResult
         {

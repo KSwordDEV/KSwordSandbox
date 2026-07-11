@@ -28,6 +28,14 @@ internal sealed class StaticAnalysisPeEvidenceContractScenario : ISmokeTestScena
         AssertTags(
             result.Tags,
             "pe32_plus",
+            "imports_present",
+            "import_suspicious_api",
+            "import_process_injection_api",
+            "import_dynamic_code_api",
+            "import_network_api",
+            "import_network_library",
+            "import_suspicious_api_cluster",
+            "import_multi_suspicious_api_cluster",
             "overlay_present",
             "pe_overlay",
             "overlay_contains_certificate_table",
@@ -46,6 +54,18 @@ internal sealed class StaticAnalysisPeEvidenceContractScenario : ISmokeTestScena
         SmokeAssert.True(
             result.InterestingStrings.Any(value => value.StartsWith("signature:certificate-table", StringComparison.OrdinalIgnoreCase)),
             "StaticAnalyzer should emit certificate-table evidence.");
+        SmokeAssert.True(
+            result.InterestingStrings.Any(value => value.StartsWith("import-summary:modules=2,namedApis=4,ordinals=0", StringComparison.OrdinalIgnoreCase)),
+            "StaticAnalyzer should emit aggregate import-table summary evidence.");
+        SmokeAssert.True(
+            result.InterestingStrings.Any(value => value.StartsWith("import-module:KERNEL32.dll,namedApis=3,ordinals=0", StringComparison.OrdinalIgnoreCase)),
+            "StaticAnalyzer should emit per-module import count evidence.");
+        SmokeAssert.True(
+            result.InterestingStrings.Any(value => value.StartsWith("import-api-cluster:process-injection,hits=2", StringComparison.OrdinalIgnoreCase)),
+            "StaticAnalyzer should emit suspicious import API cluster evidence.");
+        SmokeAssert.True(
+            result.InterestingStrings.Any(value => value.StartsWith("import-api-cluster:network,hits=1", StringComparison.OrdinalIgnoreCase)),
+            "StaticAnalyzer should emit network import API cluster evidence.");
         SmokeAssert.True(
             result.Urls.Any(value => value.StartsWith("https://overlay.example.invalid/", StringComparison.OrdinalIgnoreCase)),
             "StaticAnalyzer should extract URL strings from overlay bytes.");
@@ -96,6 +116,8 @@ internal sealed class StaticAnalysisPeEvidenceContractScenario : ISmokeTestScena
         WriteUInt32(buffer, optionalHeaderOffset + 108, 16);
 
         var dataDirectoryOffset = optionalHeaderOffset + 112;
+        WriteUInt32(buffer, dataDirectoryOffset + 1 * 8, 0x1100);
+        WriteUInt32(buffer, dataDirectoryOffset + 1 * 8 + 4, 0x3c);
         WriteUInt32(buffer, dataDirectoryOffset + 4 * 8, 0x500);
         WriteUInt32(buffer, dataDirectoryOffset + 4 * 8 + 4, 0x100);
 
@@ -113,6 +135,8 @@ internal sealed class StaticAnalysisPeEvidenceContractScenario : ISmokeTestScena
             buffer[index] = 0x90;
         }
 
+        WriteSyntheticImportTable(buffer);
+
         var overlayText = "https://overlay.example.invalid/payload 9.9.9.9";
         var overlayBytes = System.Text.Encoding.ASCII.GetBytes(overlayText);
         overlayBytes.CopyTo(buffer.AsSpan(0x410, overlayBytes.Length));
@@ -124,6 +148,55 @@ internal sealed class StaticAnalysisPeEvidenceContractScenario : ISmokeTestScena
         FillDeterministicBytes(buffer, 0x600, buffer.Length, 0x2468ace0);
 
         File.WriteAllBytes(path, buffer);
+    }
+
+    /// <summary>
+    /// Writes a bounded import directory into the synthetic PE section.
+    /// </summary>
+    private static void WriteSyntheticImportTable(byte[] buffer)
+    {
+        buffer.AsSpan(0x300, 0x100).Clear();
+
+        WriteUInt32(buffer, 0x300, 0x1160);
+        WriteUInt32(buffer, 0x300 + 12, 0x1140);
+        WriteUInt32(buffer, 0x300 + 16, 0x1160);
+        WriteUInt32(buffer, 0x314, 0x1180);
+        WriteUInt32(buffer, 0x314 + 12, 0x114d);
+        WriteUInt32(buffer, 0x314 + 16, 0x1180);
+
+        WriteAsciiString(buffer, 0x340, "KERNEL32.dll");
+        WriteAsciiString(buffer, 0x34d, "WININET.dll");
+
+        WriteUInt64(buffer, 0x360, 0x11a0);
+        WriteUInt64(buffer, 0x368, 0x11b0);
+        WriteUInt64(buffer, 0x370, 0x11c8);
+        WriteUInt64(buffer, 0x378, 0);
+        WriteUInt64(buffer, 0x380, 0x11e0);
+        WriteUInt64(buffer, 0x388, 0);
+
+        WriteImportByName(buffer, 0x3a0, "VirtualAlloc");
+        WriteImportByName(buffer, 0x3b0, "WriteProcessMemory");
+        WriteImportByName(buffer, 0x3c8, "CreateRemoteThread");
+        WriteImportByName(buffer, 0x3e0, "InternetOpenA");
+    }
+
+    /// <summary>
+    /// Writes an IMAGE_IMPORT_BY_NAME entry with a zero hint.
+    /// </summary>
+    private static void WriteImportByName(byte[] buffer, int offset, string name)
+    {
+        WriteUInt16(buffer, offset, 0);
+        WriteAsciiString(buffer, offset + 2, name);
+    }
+
+    /// <summary>
+    /// Writes a null-terminated ASCII string into a byte buffer.
+    /// </summary>
+    private static void WriteAsciiString(byte[] buffer, int offset, string value)
+    {
+        var bytes = System.Text.Encoding.ASCII.GetBytes(value);
+        bytes.CopyTo(buffer.AsSpan(offset, bytes.Length));
+        buffer[offset + bytes.Length] = 0;
     }
 
     /// <summary>

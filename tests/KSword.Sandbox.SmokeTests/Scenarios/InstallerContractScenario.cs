@@ -24,13 +24,24 @@ internal sealed class InstallerContractScenario : ISmokeTestScenario
         var installer = File.ReadAllText(installerPath);
         var doc = File.ReadAllText(docPath);
 
-        RequireContains(installer, "ValidateSet('Interactive', 'Install', 'Change', 'Uninstall', 'Status')", "Installer should expose install/change/uninstall/status modes.");
+        RequireContains(installer, "ValidateSet(", "Installer should expose a ValidateSet for supported modes.");
+        foreach (var mode in new[] { "'Interactive'", "'Install'", "'Change'", "'Uninstall'", "'Status'", "'CheckEnvironment'", "'ConfigureVTKey'", "'StartWebUI'" })
+        {
+            RequireContains(installer, mode, $"Installer should expose mode {mode}.");
+        }
+        RequireContains(installer, "CmdletBinding(SupportsShouldProcess = $true", "Installer should support -WhatIf/-Confirm for mutating local operations.");
         RequireContains(installer, "KSwordSandbox local installer", "Installer should expose an interactive menu.");
         RequireContains(installer, "Install / prepare local settings", "Interactive installer should offer install.");
         RequireContains(installer, "Change settings", "Interactive installer should offer change.");
         RequireContains(installer, "Uninstall local settings", "Interactive installer should offer uninstall.");
+        RequireContains(installer, "Reset Guest password", "Interactive installer should offer direct Guest password reset options.");
+        RequireContains(installer, "Configure Hyper-V", "Interactive installer should offer direct Hyper-V configuration.");
+        RequireContains(installer, "Configure VT key", "Interactive installer should offer direct VirusTotal key configuration.");
+        RequireContains(installer, "Check environment", "Interactive installer should offer environment checks.");
+        RequireContains(installer, "Start WebUI", "Interactive installer should offer direct WebUI startup.");
         RequireContains(installer, "Status", "Interactive installer should offer status.");
         RequireContains(installer, "Invoke-ChangeMenu", "Installer should include a change menu.");
+        RequireContains(installer, "Invoke-GuestPasswordMenu", "Installer should include a safe Guest password menu.");
         RequireContains(installer, "Change options:", "Installer should label the change menu.");
         RequireContains(installer, "Reset password secret", "Installer change menu should include password reset.");
         RequireContains(installer, "Reset actual VM guest password", "Installer change menu should include actual VM password reset.");
@@ -38,12 +49,17 @@ internal sealed class InstallerContractScenario : ISmokeTestScenario
         RequireContains(installer, "Change recorded guest username", "Installer change menu should include more than password reset.");
         RequireContains(installer, "Recreate runtime folders and local config", "Installer change menu should include runtime folder and config refresh.");
         RequireContains(installer, "Show Hyper-V readiness/status", "Installer change menu should include Hyper-V status.");
+        RequireContains(installer, "Configure optional VirusTotal API key", "Installer change menu should include VT key configuration.");
+        RequireContains(installer, "Invoke-KSwordSandboxEnvironmentCheck", "Installer should include a read-only environment check path.");
+        RequireContains(installer, "Invoke-KSwordSandboxWebUi", "Installer should expose a WebUI startup wrapper.");
         RequireContains(installer, "Set-GuestPasswordSecret", "Installer should centralize secret writes.");
+        RequireContains(installer, "Set-VirusTotalApiKeySecret", "Installer should centralize VT key writes.");
         RequireContains(installer, "Set-HyperVConfigState", "Installer should centralize Hyper-V config writes.");
         RequireContains(installer, "Invoke-GuestVmPasswordReset", "Installer should expose actual VM password reset integration.");
         RequireContains(installer, "Reset-SandboxGuestPassword.ps1", "Installer should call the offline actual VM password reset script.");
         RequireContains(installer, "KSWORDBOX_GUEST_PASSWORD", "Installer should default to the expected Hyper-V guest password secret.");
         RequireContains(installer, "Sandbox__ConfigPath", "Installer should set the ASP.NET config path environment variable.");
+        RequireContains(installer, "KSWORDBOX_VIRUSTOTAL_API_KEY", "Installer should support the optional VirusTotal API key environment variable.");
         RequireContains(installer, "vmName = $Vm", "Install state should record the Hyper-V VM name.");
         RequireContains(installer, "checkpointName = $Checkpoint", "Install state should record the clean checkpoint name.");
         RequireContains(installer, "guestWorkingDirectory = $GuestWorking", "Install state should record the guest working directory.");
@@ -63,7 +79,15 @@ internal sealed class InstallerContractScenario : ISmokeTestScenario
         RequireContains(installer, "[switch]$ResetPassword", "Installer should support non-interactive password reset.");
         RequireContains(installer, "[switch]$ResetGuestVmPassword", "Installer should support non-interactive actual VM password reset.");
         RequireContains(installer, "[switch]$UpdateHyperVConfig", "Installer should support non-interactive Hyper-V config updates.");
+        RequireContains(installer, "[switch]$ConfigureVTKey", "Installer should support non-interactive VT key updates.");
+        RequireContains(installer, "[switch]$PromptVTKey", "Installer should support prompted VT key setup.");
+        RequireContains(installer, "[switch]$ClearVTKey", "Installer should support clearing VT key setup.");
+        RequireContains(installer, "[switch]$CheckEnvironment", "Installer should support non-interactive environment checks.");
+        RequireContains(installer, "[switch]$StartWebUI", "Installer should support direct WebUI startup.");
         RequireContains(installer, "$shouldSetPassword = [bool]$GeneratePassword -or [bool]$PromptPassword -or [bool]$ResetPassword", "Non-interactive install should support prompt/generate password setup.");
+        RequireContains(installer, "if ($StartWebUI)", "Non-interactive change should support direct WebUI startup.");
+        RequireContains(installer, "elseif ($CheckEnvironment)", "Non-interactive change should support environment checks.");
+        RequireContains(installer, "elseif ($ConfigureVTKey -or $PromptVTKey -or $ClearVTKey)", "Non-interactive change should support VT key configuration.");
         RequireContains(installer, "if ($ResetGuestVmPassword)", "Non-interactive change should prioritize actual VM password reset.");
         RequireContains(installer, "elseif ($UpdateHyperVConfig)", "Non-interactive change should support Hyper-V config updates.");
         RequireContains(installer, "if ($ResetPassword -or $GeneratePassword -or $PromptPassword)", "Non-interactive change should support reset password prompt/generate.");
@@ -80,6 +104,11 @@ internal sealed class InstallerContractScenario : ISmokeTestScenario
         RequireContains(doc, "DPAPI", "Install doc should describe DPAPI storage.");
         RequireContains(doc, "Sandbox__ConfigPath", "Install doc should describe Web/API local config wiring.");
         RequireContains(doc, ".\\install.ps1 -Mode Change -UpdateHyperVConfig", "Install doc should describe non-interactive Hyper-V config.");
+        RequireContains(doc, ".\\install.ps1 -Mode ConfigureVTKey -PromptVTKey", "Install doc should describe non-interactive VT key setup.");
+        RequireContains(doc, "KSWORDBOX_VIRUSTOTAL_API_KEY", "Install doc should document the VT key environment variable.");
+        RequireContains(doc, ".\\install.ps1 -Mode CheckEnvironment", "Install doc should describe non-interactive environment checks.");
+        RequireContains(doc, ".\\install.ps1 -Mode StartWebUI", "Install doc should describe direct WebUI startup.");
+        RequireContains(doc, "-WhatIf", "Install doc should document safe preview paths.");
         RequireContains(doc, ".\\install.ps1 -Mode Change -ResetGuestVmPassword -GeneratePassword -Force", "Install doc should describe non-interactive actual VM password reset.");
         RequireContains(doc, ".\\install.ps1 -Mode Install -GeneratePassword", "Install doc should describe non-interactive generated install.");
         RequireContains(doc, ".\\install.ps1 -Mode Install -PromptPassword", "Install doc should describe non-interactive prompted install.");

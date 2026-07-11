@@ -89,6 +89,8 @@ internal static class DashboardExperiencePage
             .progress-bar { background:#dbeafe; border-radius:999px; height:12px; overflow:hidden; }
             .progress-fill { background:linear-gradient(90deg,var(--blue),#7dd3fc); height:100%; width:0%; transition:width .25s ease; }
             .progress-fill.failed { background:linear-gradient(90deg,#f97316,#ef4444); }
+            .progress-facts { display:grid; gap:10px; grid-template-columns:repeat(3,minmax(0,1fr)); margin-top:10px; }
+            .progress-facts .metric { margin-top:0; }
             .stages { display:grid; gap:8px; grid-template-columns:repeat(4,minmax(0,1fr)); margin-top:12px; }
             .stage { background:white; border:1px solid #e5edf6; border-radius:12px; color:#64748b; padding:9px; }
             .stage small { color:#94a3b8; display:block; font-size:11px; margin-top:2px; }
@@ -110,7 +112,7 @@ internal static class DashboardExperiencePage
             .empty { border:1px dashed #b9d7f3; border-radius:12px; color:var(--muted); padding:14px; }
             .status-failed { color: #b91c1c; font-weight: 700; }
             .status-ok { color: #047857; font-weight: 700; }
-            @media (max-width: 980px) { .grid,.vm-grid,.job-summary,.stages { grid-template-columns: 1fr; } header { padding:24px; } }
+            @media (max-width: 980px) { .grid,.vm-grid,.job-summary,.stages,.progress-facts { grid-template-columns: 1fr; } header { padding:24px; } }
           </style>
         </head>
         <body>
@@ -725,6 +727,7 @@ internal static class DashboardExperiencePage
                       <a class="buttonlink secondary" target="_blank" rel="noopener" href="${escapeHtml(liveEventsHref)}" onclick="openLiveMonitor('${escapeJs(jobId)}', false); return false;" data-zh="进入动态监控页" data-en="Enter dynamic monitor">进入动态监控页</a>
                     </p>
                     <div class="progress-bar"><div id="progressFill" class="progress-fill"></div></div>
+                    <div id="progressFacts" class="progress-facts"></div>
                     <div id="stageList" class="stages"></div>
                     <div id="runbookProgressDetails" class="runbook-progress-details"></div>
                     <p id="progressText" class="hint" data-zh="等待启动。虚拟机恢复/启动可能占用大部分时间。" data-en="Waiting to start. VM restore/start usually takes most of the time.">等待启动。虚拟机恢复/启动可能占用大部分时间。</p>
@@ -914,6 +917,31 @@ internal static class DashboardExperiencePage
                 meta.textContent = label;
                 meta.setAttribute('data-copy', `${label}: ${t(liveStages[boundedActive][0], liveStages[boundedActive][1])}`);
               }
+              const stage = liveStages[boundedActive];
+              renderProgressFacts(
+                `${boundedActive + 1}/${liveStages.length} — ${t(stage[0], stage[1])}`,
+                '-',
+                progressFailed ? t('阶段已停止；请打开执行流程查看失败步骤。', 'Stage stopped; open Execution flow for the failed step.') : '',
+                progressFailed);
+            }
+
+            function renderProgressFacts(currentLabel, elapsedLabel, failureLabel, isFailure) {
+              const facts = document.getElementById('progressFacts');
+              if (!facts) {
+                return;
+              }
+
+              const current = currentLabel || t('等待启动', 'Waiting to start');
+              const elapsed = elapsedLabel || '-';
+              const failure = failureLabel || (isFailure
+                ? t('未记录失败原因；请打开执行流程查看 runbook-execution.json。', 'No failure reason was recorded; open Execution flow and inspect runbook-execution.json.')
+                : t('暂无失败原因', 'No failure reason'));
+              facts.innerHTML = `
+                <div class="metric"><strong>${t('当前步骤', 'Current step')}</strong><span data-copy="${escapeAttribute(current)}" data-copy-label="current runbook step">${escapeHtml(current)}</span></div>
+                <div class="metric"><strong>${t('已耗时', 'Elapsed')}</strong><span data-copy="${escapeAttribute(elapsed)}" data-copy-label="runbook elapsed">${escapeHtml(elapsed)}</span></div>
+                <div class="metric"><strong>${t('失败原因', 'Failure reason')}</strong><span class="${isFailure ? 'error' : 'hint'}" data-copy="${escapeAttribute(failure)}" data-copy-label="runbook failure reason">${escapeHtml(failure)}</span></div>`;
+              facts.setAttribute('data-copy', `current=${current}; elapsed=${elapsed}; failure=${failure}`);
+              facts.setAttribute('data-copy-label', 'runbook progress facts');
             }
 
             function startEstimatedProgress(live) {
@@ -948,8 +976,8 @@ internal static class DashboardExperiencePage
 
             function startRunbookProgressPolling(jobId) {
               // Inputs: current job id. Processing: polls the UI-safe progress
-              // endpoint while /runbook/execute is still pending, replacing the
-              // old estimated progress with real runbook step state. Return:
+              // endpoint after /runbook/start accepts background execution,
+              // replacing the old estimated progress with real runbook step state. Return:
               // no value; polling stops on terminal executor states.
               stopRunbookProgressPolling();
               if (!jobId) {
@@ -1030,6 +1058,13 @@ internal static class DashboardExperiencePage
               const currentIndex = snapshot.currentStepIndex === null || snapshot.currentStepIndex === undefined ? -1 : Number(snapshot.currentStepIndex);
               const currentStep = currentIndex >= 0 && currentIndex < steps.length ? steps[currentIndex] : null;
               const percent = total > 0 ? Math.round((completed / total) * 100) : (done ? 100 : 0);
+              const currentTitle = currentStep ? (currentStep.title || currentStep.stepId || '') : (snapshot.currentStepTitle || '');
+              const currentStepLabel = currentTitle
+                ? `${currentIndex >= 0 && total > 0 ? `${currentIndex + 1}/${total} — ` : ''}${currentTitle}`
+                : '';
+              const elapsed = formatDuration(snapshot.duration) || '-';
+              const failedStep = steps.find(step => ['failed', 'canceled'].includes(normalizeProgressState(step.state)));
+              const failureReason = getRunbookFailureReason(snapshot, failedStep, failed);
               fill.style.width = `${done ? 100 : Math.min(99, Math.max(failed ? percent : 4, percent))}%`;
               fill.classList.toggle('failed', failed);
               progressCompleted = done;
@@ -1043,10 +1078,9 @@ internal static class DashboardExperiencePage
                     ? t(`真实步骤失败 ${completed}/${total}`, `Real steps failed ${completed}/${total}`)
                     : t(`真实步骤 ${Math.min(total, Math.max(1, currentIndex + 1 || completed + 1))}/${total}`, `Real step ${Math.min(total, Math.max(1, currentIndex + 1 || completed + 1))}/${total}`);
                 meta.textContent = label;
-                meta.setAttribute('data-copy', `${label}; executed=${executed}; state=${state}`);
+                meta.setAttribute('data-copy', `${label}; elapsed=${elapsed}; executed=${executed}; state=${state}; failure=${failureReason || '-'}`);
               }
 
-              const currentTitle = currentStep ? (currentStep.title || currentStep.stepId || '') : (snapshot.currentStepTitle || '');
               const currentPrefix = done
                 ? t('所有 runbook 步骤已完成', 'All runbook steps completed')
                 : failed
@@ -1057,9 +1091,10 @@ internal static class DashboardExperiencePage
               if (text) {
                 const message = snapshot.message ? ` · ${snapshot.message}` : '';
                 text.textContent = currentTitle
-                  ? `${currentPrefix}: ${currentIndex + 1}/${total} — ${currentTitle}${message}`
+                  ? `${currentPrefix}: ${currentStepLabel}${message}`
                   : `${currentPrefix}${message}`;
               }
+              renderProgressFacts(currentStepLabel || currentPrefix, elapsed, failureReason, failed);
 
               const focusSteps = buildProgressFocusSteps(steps, currentIndex, failed, done);
               list.className = 'stages';
@@ -1111,7 +1146,7 @@ internal static class DashboardExperiencePage
                     ? 'active'
                     : '';
               const title = `${Number(step.stepIndex) + 1}/${total} ${step.title || step.stepId || ''}`;
-              const subtitle = `${progressStateLabel(state)}${step.message ? ` · ${step.message}` : ''}`;
+              const subtitle = `${progressStateLabel(state)}${step.duration ? ` · ${formatDuration(step.duration)}` : ''}${step.exitCode !== null && step.exitCode !== undefined ? ` · exit ${step.exitCode}` : ''}${step.message ? ` · ${step.message}` : ''}`;
               return `<div class="stage ${css}" data-copy="${escapeAttribute(`${title} - ${subtitle}`)}" data-copy-label="runbook progress step">${escapeHtml(title)}<small>${escapeHtml(subtitle)}</small></div>`;
             }
 
@@ -1121,6 +1156,34 @@ internal static class DashboardExperiencePage
               const title = `${Number(step.stepIndex) + 1}. ${step.title || step.stepId || ''}`;
               const detail = `${progressStateLabel(state)}${step.duration ? ` · ${formatDuration(step.duration)}` : ''}${step.exitCode !== null && step.exitCode !== undefined ? ` · exit ${step.exitCode}` : ''}${step.message ? ` · ${step.message}` : ''}`;
               return `<div class="runbook-step ${css}" data-copy="${escapeAttribute(`${title} - ${detail}`)}" data-copy-label="runbook step status"><b>${escapeHtml(title)}</b><small>${escapeHtml(detail)}</small></div>`;
+            }
+
+            function getRunbookFailureReason(snapshot, failedStep, failed) {
+              const pieces = [];
+              if (failedStep) {
+                const title = failedStep.title || failedStep.stepId || '';
+                if (title) {
+                  pieces.push(`${t('失败步骤', 'Failed step')}: ${title}`);
+                }
+
+                if (failedStep.message) {
+                  pieces.push(failedStep.message);
+                }
+
+                if (failedStep.exitCode !== null && failedStep.exitCode !== undefined) {
+                  pieces.push(`exit ${failedStep.exitCode}`);
+                }
+              }
+
+              if (snapshot && snapshot.message && !pieces.includes(snapshot.message)) {
+                pieces.push(snapshot.message);
+              }
+
+              if (!pieces.length && failed) {
+                return t('未记录失败原因；请打开执行流程查看 runbook-execution.json。', 'No failure reason was recorded; open Execution flow and inspect runbook-execution.json.');
+              }
+
+              return pieces.join(' · ');
             }
 
             function openReport(jobId) {
@@ -1159,7 +1222,7 @@ internal static class DashboardExperiencePage
                 opened = window.open('about:blank', '_blank');
                 if (opened) {
                   opened.document.title = 'KSword Sandbox monitor';
-                  opened.document.body.innerHTML = '<p style="font-family:Segoe UI,Arial,sans-serif;padding:24px">KSword Sandbox：正在上传并创建任务 / uploading and creating job...</p>';
+                  opened.document.body.innerHTML = '<div style="font-family:Segoe UI,Arial,sans-serif;padding:24px;line-height:1.5"><h2>KSword Sandbox：动态监控页准备中 / Preparing dynamic monitor</h2><p>正在上传并创建任务。/ Uploading and creating the job.</p><p>如果此页一直空白或没有跳转，请回到主界面点击“进入动态监控页”。/ If this page stays blank or does not navigate, return to the dashboard and click Enter dynamic monitor.</p></div>';
                   opened.opener = null;
                 }
               } catch {
@@ -1207,11 +1270,11 @@ internal static class DashboardExperiencePage
               const href = buildLiveMonitorHref(jobId);
               const progressHref = `/jobs/${encodeURIComponent(jobId)}/execution-flow`;
               const zhMessage = opened
-                ? (autoOpenedFromUpload ? '已在新标签页打开动态监控页；请保留主界面继续执行分析，完成后会进入报告页。' : '已打开动态监控页；主界面仍保留进度和报告入口。')
-                : '浏览器可能阻止了自动打开；请点击“进入动态监控页”，并保留主界面继续执行分析。';
+                ? (autoOpenedFromUpload ? '已尝试在新标签页打开动态监控页；如果新标签仍是空白或被浏览器拦截，请使用下方链接。主界面会继续提交后台分析，当前任务无需重新上传。' : '已尝试打开动态监控页；如果没有出现新标签，请使用下方链接。主界面仍保留进度和报告入口。')
+                : '未获得新标签页句柄，浏览器可能阻止了自动打开；请点击下方“进入动态监控页”。当前任务卡片已保留入口，无需重新上传。';
               const enMessage = opened
-                ? (autoOpenedFromUpload ? 'The dynamic monitor opened in a new tab. Keep this dashboard running analysis; it will enter the report page when complete.' : 'The dynamic monitor opened. This dashboard still keeps progress and report links.')
-                : 'The browser may have blocked automatic opening. Click Enter dynamic monitor and keep this dashboard running analysis.';
+                ? (autoOpenedFromUpload ? 'The dashboard tried to open the dynamic monitor in a new tab. If the new tab stays blank or the browser blocks it, use the link below. This job does not need to be uploaded again.' : 'The dashboard tried to open the dynamic monitor. If no new tab appeared, use the link below; progress and report links remain here.')
+                : 'No new-tab handle was returned, so the browser may have blocked automatic opening. Click Enter dynamic monitor below; this job does not need to be uploaded again.';
               notice.hidden = false;
               notice.innerHTML = `
                 <strong data-zh="动态监控页已准备好" data-en="Dynamic monitor is ready">动态监控页已准备好</strong>

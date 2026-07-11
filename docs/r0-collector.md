@@ -161,6 +161,10 @@ producer.  R0Collector now parses `protocolName`, `directionName`,
 `processIdPresent`, `flowHandleHex`, `transportEndpointHandleHex`,
 `layerIdHex`, `calloutIdHex`, and `filterIdHex`. Address bytes are also
 retained as `localAddressHex` and `remoteAddressHex` for diagnosis.
+Synthetic `driver.network` rows and the valid extra-field JSONL noise row use
+the same `sourceEndpoint`, `destinationEndpoint`, and `flowKey` names so
+no-device stress runs exercise the report correlation contract before WFP is
+loaded.
 
 When a file/process/image/registry payload carries a bounded subject path, the
 top-level `SandboxEvent.path` is set to that subject path so the WebUI live
@@ -257,6 +261,32 @@ Expected stress evidence:
 - one blank line, one malformed JSON row, and one valid extra-field row when
   `--inject-jsonl-noise` is supplied.
 
+### JSONL quality and noise contract
+
+Every collector-owned row keeps the event-quality fields stable under `data`:
+
+- `schema` mirrors `eventSchemaName` (`ksword.sandbox.r0.event`) for compact
+  downstream checks.
+- `producer` names the row family (`r0collector`, `file`, `process`, `image`,
+  `registry`, or `network`).
+- `noise` is `false` for normal rows and `true` only for the valid synthetic
+  extra-field row emitted by `--inject-jsonl-noise`.
+- `lost` is `true` only when the row itself reports drop/loss counters; delivered
+  driver rows keep `lost=false` and use `sequence` plus status/read counters for
+  gap analysis.
+- `backpressure` / `backpressureObserved` are set on status/read rows when the
+  queue reached capacity, a batch filled the requested cap, or drop counters are
+  non-zero. Synthetic stress rows keep `backpressure=false` but name the
+  `StressJsonlBackpressureEvidence` field set.
+
+Malformed-line handling is deliberate and bounded. The collector emits only
+valid JSONL unless `--inject-jsonl-noise` is explicitly requested in mock/stress
+mode. That option appends exactly one blank line, one truncated/malformed JSON
+object containing the `sequence=broken` marker, and one valid `driver.network`
+row with an ignored extra top-level field plus `noise=true`. Live readers skip
+blank/malformed rows so valid telemetry remains visible; host import preserves
+malformed rows as `driver.parse_error` evidence rather than hiding them.
+
 ## ABI self-check mode
 
 Use `--abi-self-check` before a signed/test-signed driver is available, before
@@ -290,6 +320,9 @@ Important `r0collector.abiSelfCheck` evidence fields:
   `producerMaskDefaultHex`, and producer/capability name fields: prove the
   collector knows the current process/image/file/registry/network producer
   families and optional IOCTL capability bits.
+- `schema`, `producer`, `noise`, `lost`, `backpressure`, and
+  `stableJsonlFields`: prove the collector binary knows the stable event-quality
+  field names used by live, mock, stress, and noise rows.
 - `eventHeaderSize`, `healthReplySize`, `capabilitiesReplySize`,
   `statusReplySize`, `readEventsRequestSize`, `readEventsReplyHeaderSize`, and
   payload-size fields: capture fixed structure layout assumptions used by the
@@ -303,6 +336,9 @@ Important `r0collector.abiSelfCheck` evidence fields:
 - `jsonlNoisePolicy`: documents that blank live rows are ignored, malformed
   imported rows must remain visible as `driver.parse_error`, and valid rows with
   extra fields are tolerated.
+- `jsonlMalformedPolicy`: documents that malformed output is produced only by
+  the explicit noise injector and must remain visible to import as parse-error
+  evidence.
 - `kernelBackpressurePolicy`: documents the non-blocking kernel ring behavior:
   producers do not wait for the collector; overflow overwrites the oldest unread
   record.

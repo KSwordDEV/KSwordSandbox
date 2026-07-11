@@ -90,6 +90,14 @@ continues. If a manifest or collected folder contains an externally supplied
 `.pcap` or `.pcapng`, the host can still import and report it as
 `kind=PacketCapture`.
 
+When the host builds `artifact-index.json`, it merges the guest
+`artifacts/manifest.json` and nearby `events.json` back into the filesystem
+scan. The index keeps host-safe paths, host-computed size, and host-computed
+SHA-256 as authoritative link fields, while preserving guest collection
+`status`/`reason`, concrete skipped or failed reasons, command diagnostics,
+original guest paths, process identity, and memory-dump root/child sweep
+metadata in descriptor or collection `metadata`.
+
 Each file descriptor also carries `evidenceRole`, `capturePhase`,
 `captureState`, `guestPath`, `importPath`, and `collectionName` alongside size,
 MIME type, and hashes. `guestPath` is evidence only; clickable links and import
@@ -124,3 +132,9 @@ For import/report purposes, existing packet captures are regular artifacts:
 - collection metadata records `captureSource=external`,
   `hostCaptureStarted=false`, `importMode=external-artifact`, artifact count,
   total bytes, and MIME types.
+
+`ImportGuestEvents` parses discovered `.pcap` / `.pcapng` files into bounded
+`pcap.*` events. Those imported events carry `collectionName=packet-captures`,
+`importMode=external-artifact`, `sourceArtifactRelativePath`,
+`sourceArtifactSizeBytes`, and `sourceArtifactSha256` so report findings remain
+traceable back to the capture artifact.

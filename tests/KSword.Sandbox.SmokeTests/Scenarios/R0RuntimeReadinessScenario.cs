@@ -97,6 +97,10 @@ internal sealed class R0RuntimeReadinessScenario : ISmokeTestScenario
         RequireContains(collectorDoc, "ReadinessNonFatalPolicy", "Collector doc should document the non-fatal readiness policy.");
         RequireContains(networkDoc, "Runtime validation gate", "Network doc should include runtime validation gate.");
         RequireContains(networkDoc, "Test-NetConnection", "Network doc should include a controlled traffic smoke.");
+        RequireContains(networkDoc, "Flow correlation field semantics", "Network doc should define flow correlation field semantics.");
+        RequireContains(networkDoc, "sourceEndpoint=localEndpoint", "Network doc should define outbound source endpoint mapping.");
+        RequireContains(networkDoc, "destinationEndpoint=remoteEndpoint", "Network doc should define outbound destination endpoint mapping.");
+        RequireContains(networkDoc, "flowKey", "Network doc should define the R0 network flow key.");
         RequireContains(driverReadme, "Runtime validation preflight", "Driver README should point operators at the preflight script.");
 
         return Task.FromResult(new SmokeTestResult

@@ -36,6 +36,7 @@ internal sealed class WebUiExperienceContractScenario : ISmokeTestScenario
         var stageDescriptor = ReadRepositoryText(context, "src", "KSword.Sandbox.Abstractions", "Pipeline", "AnalysisStageDescriptor.cs");
         var timelineEntry = ReadRepositoryText(context, "src", "KSword.Sandbox.Abstractions", "Pipeline", "AnalysisTimelineEntry.cs");
         var doc = ReadRepositoryText(context, "docs", "webui-framework.md");
+        var realR0Doc = ReadRepositoryText(context, "docs", "webui-real-r0-e2e.md");
         var reportUxDoc = ReadRepositoryText(context, "docs", "report-ux.md");
 
         RequireContains(program, "DashboardExperiencePage.Render()", "Program.cs should route the root WebUI through the Dashboard layer.");
@@ -114,8 +115,12 @@ internal sealed class WebUiExperienceContractScenario : ISmokeTestScenario
         RequireContains(dashboard, "buildLiveMonitorHref", "Dashboard should build dynamic monitor links from the job id.");
         RequireContains(dashboard, "openLiveMonitorPlaceholder", "Upload flow should open a user-gesture monitor placeholder before async upload work.");
         RequireContains(dashboard, "window.open('about:blank', '_blank')", "Upload flow should open the placeholder synchronously to avoid popup blocking.");
+        RequireContains(dashboard, "动态监控页准备中 / Preparing dynamic monitor", "Upload monitor placeholder should show a visible bilingual loading page.");
         RequireContains(dashboard, "openLiveMonitor(String(jobId), true, monitorWindow)", "Upload flow should navigate the placeholder into the dynamic monitor after planning.");
         RequireContains(dashboard, "showLiveMonitorNotice", "Dashboard should render a bilingual fallback when automatic monitor opening is blocked.");
+        RequireContains(dashboard, "未获得新标签页句柄，浏览器可能阻止了自动打开", "Dashboard should explain automatic monitor fallback clearly in Chinese.");
+        RequireContains(dashboard, "No new-tab handle was returned, so the browser may have blocked automatic opening", "Dashboard should explain automatic monitor fallback clearly in English.");
+        RequireContains(dashboard, "当前任务无需重新上传", "Dashboard monitor fallback should tell operators the job does not need another upload.");
         RequireContains(dashboard, "window.open(href, '_blank')", "Automatic dynamic monitor entry should keep the dashboard tab alive by opening a separate tab.");
         RequireAnyContains(
             dashboard,
@@ -140,8 +145,15 @@ internal sealed class WebUiExperienceContractScenario : ISmokeTestScenario
         RequireContains(dashboard, "startBackgroundExecutionPolling", "Dashboard should start background execution status polling during execution.");
         RequireContains(dashboard, "renderBackgroundExecutionSnapshot", "Dashboard should render background runbook terminal state and report readiness.");
         RequireContains(dashboard, "renderRunbookProgress", "Dashboard should render exact executor runbook step progress.");
+        RequireContains(dashboard, "id=\"progressFacts\"", "Dashboard progress card should expose current step, elapsed time, and failure reason.");
+        RequireContains(dashboard, "当前步骤", "Dashboard progress card should show the current step in Chinese.");
+        RequireContains(dashboard, "Elapsed", "Dashboard progress card should show elapsed time in English.");
+        RequireContains(dashboard, "Failure reason", "Dashboard progress card should show failure reason in English.");
+        RequireContains(dashboard, "getRunbookFailureReason", "Dashboard should derive a visible failure reason from failed runbook step snapshots.");
+        RequireContains(dashboard, "elapsed=${elapsed}; executed=${executed}; state=${state}; failure=${failureReason || '-'}", "Dashboard progress metadata should be copyable with elapsed and failure details.");
         RequireContains(dashboard, "不含命令行", "Dashboard should state that expanded runbook progress omits command lines.");
         RequireContains(dashboard, "executeRunbook(String(jobId), true)", "Upload flow should automatically start live VM analysis after planning.");
+        RequireNotContains(dashboard, "fetch(`/api/jobs/${encodeURIComponent(jobId)}/runbook/execute`", "Dashboard should not depend on the legacy blocking runbook execute endpoint.");
         RequireContains(dashboard, "href=\"/settings\"", "Dashboard should link to the settings page.");
         RequireContains(dashboard, "events.json", "Dashboard should display events.json path.");
         RequireContains(dashboard, "driver-events.jsonl", "Dashboard should display driver-events.jsonl path.");
@@ -185,13 +197,19 @@ internal sealed class WebUiExperienceContractScenario : ISmokeTestScenario
         RequireContains(liveEventsPage, "startRunbookProgressPolling", "Live monitor should start runbook progress polling automatically.");
         RequireContains(liveEventsPage, "startBackgroundStatusPolling", "Live monitor should start background status polling automatically.");
         RequireContains(liveEventsPage, "renderRunbookProgress", "Live monitor should render UI-safe runbook step snapshots.");
+        RequireContains(liveEventsPage, "step.message || ''", "Live monitor step cards should include failed-step messages without exposing command lines.");
+        RequireContains(liveEventsPage, "buildProgressFailureReason", "Live monitor should show a concise failure reason from runbook progress.");
+        RequireContains(liveEventsPage, "已耗时", "Live monitor progress card should show elapsed time in Chinese.");
         RequireContains(liveEventsPage, "不展示命令行", "Live monitor progress panel should hide command-line details.");
         RequireContains(liveEventsPage, "not command lines, stdout, or stderr", "Live monitor progress panel should hide stdout/stderr details.");
         RequireContains(liveEventsPage, "如果此页由上传流程自动打开", "Live monitor should explain the automatic upload-flow opening behavior.");
         RequireContains(liveEventsPage, "keep the dashboard tab running analysis", "Live monitor should have an English hint to keep the dashboard request alive.");
+        RequireContains(liveEventsPage, "Open settings", "Live monitor VirusTotal card should link to settings when the API key is missing.");
+        RequireContains(liveEventsPage, "result.message ||", "Live monitor VirusTotal card should preserve quiet lookup failure/not-configured messages.");
         RequireContains(settingsPage, "VirusTotal API Key", "Settings page should allow operators to set the VirusTotal API key.");
         RequireContains(settingsPage, "/api/settings/virustotal", "Settings page should save VirusTotal settings through the API endpoint.");
         RequireContains(settingsPage, "不会提交到仓库", "Settings page should explain that local settings are not committed.");
+        RequireContains(settingsPage, "不会产生噪音日志", "Settings page should state that missing VirusTotal keys do not create noisy logs.");
         RequireContains(virusTotalSettings, "KSWORDBOX_VIRUSTOTAL_API_KEY", "VirusTotal settings should support an environment variable override.");
         RequireContains(virusTotalSettings, "virustotal.key", "VirusTotal settings should persist under the runtime settings folder.");
         RequireContains(virusTotalLookup, "https://www.virustotal.com/api/v3/", "VirusTotal lookup should call the official v3 API base URL.");
@@ -238,8 +256,11 @@ internal sealed class WebUiExperienceContractScenario : ISmokeTestScenario
         RequireRegex(doc, @"current Chinese/English\s+dashboard language", "WebUI framework doc should describe current-language report links.");
         RequireContains(doc, "VM configuration fields", "WebUI framework doc should document VM configuration fields.");
         RequireContains(doc, "stage progress", "WebUI framework doc should document progress stages.");
+        RequireContains(doc, "current step, elapsed time, and failure reason", "WebUI framework doc should require progress cards to show current step, elapsed time, and failure reason.");
         RequireContains(doc, "right-click", "WebUI framework doc should describe right-click copy.");
         RequireContains(doc, "driver-events.jsonl", "WebUI framework doc should describe driver event paths.");
+        RequireNotContains(realR0Doc, "The WebUI progress bar is estimated from the long HTTP request", "Real R0 E2E doc should not describe WebUI progress as only estimated after real runbook progress landed.");
+        RequireNotContains(realR0Doc, "does not yet stream exact per-runbook-step state", "Real R0 E2E doc should not claim per-runbook progress is missing.");
 
         RequireContains(reportUxDoc, "automatic current-language report navigation", "Report UX doc should require automatic report page navigation.");
         RequireContains(reportUxDoc, "opened automatically by the upload flow", "Report UX doc should require upload-to-monitor navigation.");

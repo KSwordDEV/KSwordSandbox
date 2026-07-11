@@ -29,7 +29,12 @@ internal sealed class RunScriptContractScenario : ISmokeTestScenario
         var runDoc = File.ReadAllText(runDocPath);
         var readme = File.ReadAllText(readmePath);
 
-        RequireContains(runScript, "ValidateSet('WebUI', 'Analyze', 'Plan', 'Status')", "run.ps1 should expose WebUI, Analyze, Plan, and Status modes.");
+        RequireContains(runScript, "ValidateSet(", "run.ps1 should expose a ValidateSet for supported modes.");
+        foreach (var mode in new[] { "'WebUI'", "'StartWebUI'", "'Analyze'", "'Plan'", "'Status'", "'CheckEnvironment'" })
+        {
+            RequireContains(runScript, mode, $"run.ps1 should expose mode {mode}.");
+        }
+        RequireContains(runScript, "CmdletBinding(SupportsShouldProcess = $true", "run.ps1 should support -WhatIf/-Confirm for startup/delegation paths.");
         RequireContains(runScript, "install-state.json", "run.ps1 should load install.ps1 state.");
         RequireContains(runScript, "Sandbox__ConfigPath", "run.ps1 should set the Web/API config path.");
         RequireContains(runScript, "ASPNETCORE_URLS", "run.ps1 should control the WebUI listen URL without launchSettings.");
@@ -37,6 +42,9 @@ internal sealed class RunScriptContractScenario : ISmokeTestScenario
         RequireContains(runScript, "Resolve-WebListenUrl", "run.ps1 should resolve or fall back from blocked localhost ports.");
         RequireContains(runScript, "StrictUrl", "run.ps1 should allow strict URL binding for operators who need it.");
         RequireContains(runScript, "KSWORDBOX_GUEST_PASSWORD", "run.ps1 should default to the guest password secret name.");
+        RequireContains(runScript, "KSWORDBOX_VIRUSTOTAL_API_KEY", "run.ps1 should mirror the optional VirusTotal API key into process scope.");
+        RequireContains(runScript, "Import-UserOrMachineEnvironmentSecret", "run.ps1 should centralize user/machine secret import.");
+        RequireContains(runScript, "Show-RunEnvironmentCheck", "run.ps1 should expose a non-mutating environment check mode.");
         RequireContains(runScript, "SecretValuePrinted = $false", "run.ps1 status should assert secrets are not printed.");
         RequireContains(runScript, "dotnet", "run.ps1 should launch the Web project through dotnet.");
         RequireContains(runScript, "--no-launch-profile", "run.ps1 should avoid launchSettings port surprises.");
@@ -47,6 +55,9 @@ internal sealed class RunScriptContractScenario : ISmokeTestScenario
         RequireContains(runScript, "Prepare-GuestPayload.ps1", "run.ps1 should prepare missing guest payloads.");
         RequireContains(runScript, "-SelfContained", "run.ps1 should prepare self-contained guest payloads for the VM.");
         RequireContains(runScript, "-PlanOnly", "run.ps1 should support non-mutating plans.");
+        RequireContains(runScript, "WhatIf: WebUI would start", "run.ps1 should make WebUI startup previewable with -WhatIf.");
+        RequireContains(runScript, "WhatIf: guest payload preparation would be checked/prepared", "run.ps1 should make payload preparation previewable with -WhatIf.");
+        RequireContains(runScript, "No Hyper-V child script was launched", "run.ps1 should avoid Hyper-V delegation when -WhatIf declines ShouldProcess.");
         RequireContains(runScript, "Add -Live", "run.ps1 should tell operators how to opt into live VM execution.");
         RequireNotContains(runScript, "Write-Host $password", "run.ps1 must not print the guest password.");
         RequireNotContains(runScript, "Write-Output $password", "run.ps1 must not output the guest password.");
@@ -54,6 +65,9 @@ internal sealed class RunScriptContractScenario : ISmokeTestScenario
         RequireContains(runDoc, ".\\install.ps1", "run doc should show the one-time install step.");
         RequireContains(runDoc, ".\\run.ps1", "run doc should show the per-use runtime step.");
         RequireContains(runDoc, "-Mode WebUI", "run doc should document WebUI mode.");
+        RequireContains(runDoc, "-Mode StartWebUI", "run doc should document StartWebUI alias mode.");
+        RequireContains(runDoc, "-Mode CheckEnvironment", "run doc should document environment check mode.");
+        RequireContains(runDoc, "-WhatIf", "run doc should document safe preview mode.");
         RequireContains(runDoc, "-Mode Plan", "run doc should document non-mutating plan mode.");
         RequireContains(runDoc, "-Mode Analyze", "run doc should document one-shot analyze mode.");
         RequireContains(runDoc, "-Live", "run doc should document explicit live execution.");

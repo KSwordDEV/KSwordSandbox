@@ -50,6 +50,9 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(rendererSource, "Evidence graph edges", "Report renderer should expose graph edge evidence.");
         RequireContains(rendererSource, "AppendEvidenceSummaryCards", "Report renderer should expose evidence summary cards.");
         RequireContains(rendererSource, "Evidence summary cards", "Report renderer should expose evidence summary cards title.");
+        RequireContains(rendererSource, "AppendTopBehaviorChain", "Report renderer should expose a bounded top behavior chain.");
+        RequireContains(rendererSource, "Top behavior chain", "Report renderer should expose the top behavior chain title.");
+        RequireContains(rendererSource, "behavior-chain", "Report renderer should style the top behavior chain as a bounded panel.");
         RequireContains(rendererSource, "IOC summary", "Report renderer should expose IOC summary cards.");
         RequireContains(rendererSource, "AppendProcessRelationshipCards", "Report renderer should expose process relationship cards.");
         RequireContains(rendererSource, "Process relationship cards", "Report renderer should expose process relationship card title.");
@@ -102,6 +105,7 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(doc, "bounded timeline", "Report UX doc should require bounded timeline rendering.");
         RequireContains(doc, "Behavior graph / IOC summary", "Report UX doc should list the behavior graph section.");
         RequireContains(doc, "Evidence graph edges", "Report UX doc should require graph edge evidence.");
+        RequireContains(doc, "Top behavior chain", "Report UX doc should require a top behavior chain.");
         RequireContains(doc, "IOC summary", "Report UX doc should require IOC summary cards.");
         RequireContains(doc, "Process tree", "Report UX doc should list the process tree.");
         RequireContains(doc, "process relationship tree", "Report UX doc should require a stable process relationship tree.");
@@ -211,6 +215,9 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(englishHtml, "No raw source artifacts were indexed; report.json remains the complete normalized source.", "Rendered raw source hints should explain missing raw artifacts.");
         RequireContains(englishHtml, "<section id=\"graph\" class=\"card\"><h2>Behavior graph / IOC summary</h2>", "Rendered HTML should include the behavior graph section.");
         RequireContains(englishHtml, "Evidence graph edges", "Rendered HTML should include graph edge evidence.");
+        RequireContains(englishHtml, "Top behavior chain", "Rendered HTML should include the top behavior chain.");
+        RequireContains(englishHtml, "behavior-chain", "Rendered HTML should style the top behavior chain.");
+        RequireContains(englishHtml, "contract-sample.exe pid:4242 --network--&gt; 203.0.113.10:443", "Rendered behavior chain should include the sample network edge.");
         RequireContains(englishHtml, "id=\"evidence-summary-cards\"", "Rendered HTML should include evidence summary card anchor.");
         RequireContains(englishHtml, "Evidence summary cards", "Rendered HTML should include evidence summary cards.");
         RequireContains(englishHtml, "IOC summary", "Rendered HTML should include IOC summary cards.");
@@ -309,6 +316,7 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         "动态分析",
         "行为图谱 / IOC 摘要",
         "时间线",
+        "关键行为链",
         "证据摘要卡",
         "进程详情",
         "进程关系卡",

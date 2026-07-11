@@ -23,6 +23,19 @@ Equivalent explicit form:
 .\run.ps1 -Mode WebUI -Url 'http://127.0.0.1:18080' -OpenBrowser
 ```
 
+`StartWebUI` is an alias intended for menus and automation that prefer a verb:
+
+```powershell
+.\run.ps1 -Mode StartWebUI
+```
+
+Preview startup without building payloads, starting dotnet, opening a browser,
+or touching a VM:
+
+```powershell
+.\run.ps1 -Mode StartWebUI -WhatIf
+```
+
 `run.ps1` sets these process-scoped values before starting the Web project:
 
 - `Sandbox__ConfigPath` from `%ProgramData%\KSwordSandbox\install-state.json`,
@@ -30,8 +43,10 @@ Equivalent explicit form:
 - `ASPNETCORE_URLS` from `-Url`;
 - `KSWORDBOX_GUEST_PASSWORD` in process scope by mirroring the User/Machine
   environment value if one exists.
+- optional `KSWORDBOX_VIRUSTOTAL_API_KEY` in process scope by mirroring the
+  User/Machine environment value if one exists.
 
-The password value is never printed.
+The password value is never printed. Optional VT key values are never printed.
 
 If the requested localhost port is blocked by Windows/Hyper-V TCP port
 exclusions or another process, `run.ps1` automatically falls back to a nearby
@@ -80,8 +95,23 @@ without payload files.
 ```
 
 Status reports repository root, install state, local config, Web URL, runtime
-root, secret presence, VM/checkpoint presence, and whether the secret value was
-printed (`False`).
+root, secret presence, optional VirusTotal key presence, VM/checkpoint
+presence, and whether the secret value was printed (`False`).
+
+For a fuller non-mutating preflight summary:
+
+```powershell
+.\run.ps1 -Mode CheckEnvironment
+```
+
+`CheckEnvironment` prints the daily startup command, whether `dotnet`, the Web
+project, payload-preparation script, Hyper-V E2E script, local config, guest
+secret, optional VirusTotal key, VM, and checkpoint are visible from this host.
+
+`-WhatIf` is supported on `run.ps1`. In WebUI modes it skips payload
+preparation and dotnet startup. In `Plan` / `Analyze` modes it stops before
+delegating to `scripts\Invoke-HyperVE2E.ps1`, so no Hyper-V child script is
+launched.
 
 ## Relationship with install.ps1
 

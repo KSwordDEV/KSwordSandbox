@@ -25,8 +25,9 @@ Required `report.html`, `report.zh.html`, and `report.en.html` sections:
 - Behavior graph / IOC summary / 行为图谱与 IOC 摘要. This is a stable,
   weak-interaction graph view that derives process-to-file, process-to-registry,
   process-to-network, and process-to-artifact edges from normalized telemetry.
-  It must include Evidence graph edges and IOC summary cards so the final report
-  feels like an analyst-facing sandbox report rather than only raw tables.
+  It must include a Top behavior chain, Evidence graph edges, and IOC summary
+  cards so the final report feels like an analyst-facing sandbox report rather
+  than only raw tables.
 - Timeline. The timeline must use timeline grouping so bursty telemetry is
   readable in chronological order: group by a stable time bucket, show event
   counts and event-family summaries, keep a bounded timeline inline, and point
@@ -74,8 +75,8 @@ plain diagnostic dump. The visual contract is:
   required to reveal evidence.
 - The Behavior graph / IOC summary section should remain static HTML/CSS. It
   should prefer stable weak interactions over fragile canvas/SVG rendering:
-  process graph nodes, Evidence graph edges, and IOC summary cards for network,
-  file/path, registry, and artifact indicators.
+  process graph nodes, a bounded Top behavior chain, Evidence graph edges, and
+  IOC summary cards for network, file/path, registry, and artifact indicators.
 - Timeline and process relationship views should also prefer stable weak
   interactions: native HTML/CSS timeline group panels, a bounded process
   relationship tree, and copyable relationship cards rather than external graph

@@ -1,6 +1,6 @@
 {
   "matrix": "enterprise-windows",
-  "version": "2026-07-11-behavior-coverage-expansion-v3",
+  "version": "2026-07-11-behavior-coverage-expansion-v4",
   "techniques": [
     {
       "id": "T1003",
@@ -273,6 +273,21 @@
       ]
     },
     {
+      "id": "T1115",
+      "name": "Clipboard Data",
+      "categories": [
+        "collection"
+      ]
+    },
+    {
+      "id": "T1127.001",
+      "name": "MSBuild",
+      "categories": [
+        "defense-evasion",
+        "execution"
+      ]
+    },
+    {
       "id": "T1135",
       "name": "Network Share Discovery",
       "categories": [
@@ -316,6 +331,14 @@
       ]
     },
     {
+      "id": "T1218.004",
+      "name": "InstallUtil",
+      "categories": [
+        "defense-evasion",
+        "execution"
+      ]
+    },
+    {
       "id": "T1218.005",
       "name": "Mshta",
       "categories": [
@@ -330,6 +353,14 @@
       ]
     },
     {
+      "id": "T1218.009",
+      "name": "Regsvcs/Regasm",
+      "categories": [
+        "defense-evasion",
+        "execution"
+      ]
+    },
+    {
       "id": "T1218.010",
       "name": "Regsvr32",
       "categories": [
@@ -341,6 +372,13 @@
       "name": "Rundll32",
       "categories": [
         "defense-evasion"
+      ]
+    },
+    {
+      "id": "T1482",
+      "name": "Domain Trust Discovery",
+      "categories": [
+        "discovery"
       ]
     },
     {

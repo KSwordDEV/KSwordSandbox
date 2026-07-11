@@ -11,10 +11,14 @@ Default mode starts the local WebUI with the installed config:
 
   .\run.ps1
 
-Single-sample CLI modes are also available:
+Single-sample CLI and environment-check modes are also available:
 
   .\run.ps1 -Mode Plan -SamplePath D:\Temp\sample.exe
   .\run.ps1 -Mode Analyze -SamplePath D:\Temp\sample.exe -Live
+  .\run.ps1 -Mode CheckEnvironment
+
+Passing -WhatIf previews WebUI/analysis launch decisions without preparing
+payloads, starting dotnet, or delegating live Hyper-V execution.
 
 The script loads C:\ProgramData\KSwordSandbox\install-state.json when present,
 sets Sandbox__ConfigPath for the Web/API, mirrors the guest password from User
@@ -23,9 +27,9 @@ secret values. WebUI mode attempts self-contained guest payload preparation but
 keeps the UI launchable when local build tools are not installed; use
 -RequirePayloadForWebUI when payload preparation must be fatal.
 #>
-[CmdletBinding()]
+[CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'Medium')]
 param(
-    [ValidateSet('WebUI', 'Analyze', 'Plan', 'Status')]
+    [ValidateSet('WebUI', 'StartWebUI', 'Analyze', 'Plan', 'Status', 'CheckEnvironment')]
     [string]$Mode = 'WebUI',
 
     [string]$SamplePath = '',
@@ -161,6 +165,30 @@ function Get-SecretName {
     return Get-StateString -State $State -Name 'secretName' -DefaultValue 'KSWORDBOX_GUEST_PASSWORD'
 }
 
+function Get-VirusTotalSecretName {
+    param([AllowNull()]$State)
+    return Get-StateString -State $State -Name 'virusTotalSecretName' -DefaultValue 'KSWORDBOX_VIRUSTOTAL_API_KEY'
+}
+
+function Import-UserOrMachineEnvironmentSecret {
+    param([Parameter(Mandatory)][string]$Name)
+
+    $processSecret = [Environment]::GetEnvironmentVariable($Name, 'Process')
+    if (-not [string]::IsNullOrEmpty($processSecret)) {
+        return
+    }
+
+    $candidate = [Environment]::GetEnvironmentVariable($Name, 'User')
+    if ([string]::IsNullOrEmpty($candidate)) {
+        $candidate = [Environment]::GetEnvironmentVariable($Name, 'Machine')
+    }
+
+    if (-not [string]::IsNullOrEmpty($candidate)) {
+        [Environment]::SetEnvironmentVariable($Name, $candidate, 'Process')
+        Set-Item -Path "Env:\$Name" -Value $candidate
+    }
+}
+
 function Import-InstalledEnvironment {
     param(
         [AllowNull()]$State,
@@ -171,17 +199,8 @@ function Import-InstalledEnvironment {
     $env:Sandbox__ConfigPath = $EffectiveConfigPath
 
     $secretName = Get-SecretName -State $State
-    $processSecret = [Environment]::GetEnvironmentVariable($secretName, 'Process')
-    if ([string]::IsNullOrEmpty($processSecret)) {
-        $userSecret = [Environment]::GetEnvironmentVariable($secretName, 'User')
-        if ([string]::IsNullOrEmpty($userSecret)) {
-            $userSecret = [Environment]::GetEnvironmentVariable($secretName, 'Machine')
-        }
-        if (-not [string]::IsNullOrEmpty($userSecret)) {
-            [Environment]::SetEnvironmentVariable($secretName, $userSecret, 'Process')
-            Set-Item -Path "Env:\$secretName" -Value $userSecret
-        }
-    }
+    Import-UserOrMachineEnvironmentSecret -Name $secretName
+    Import-UserOrMachineEnvironmentSecret -Name (Get-VirusTotalSecretName -State $State)
 }
 
 function Read-SandboxConfig {
@@ -439,6 +458,12 @@ function Ensure-GuestPayload {
         return
     }
 
+    if ($WhatIfPreference) {
+        [void]$PSCmdlet.ShouldProcess($PayloadRoot, 'Prepare self-contained guest payload if missing or stale')
+        Write-RunInfo "WhatIf: guest payload preparation would be checked/prepared at $PayloadRoot."
+        return
+    }
+
     $agentName = 'KSword.Sandbox.Agent.exe'
     if ($null -ne $Config.guest -and $null -ne $Config.guest.PSObject.Properties['agentExecutableName'] -and -not [string]::IsNullOrWhiteSpace([string]$Config.guest.agentExecutableName)) {
         $agentName = [string]$Config.guest.agentExecutableName
@@ -529,6 +554,7 @@ function Show-RunStatus {
     )
 
     $secretName = Get-SecretName -State $State
+    $virusTotalSecretName = Get-VirusTotalSecretName -State $State
     $configExists = Test-Path -LiteralPath $EffectiveConfigPath -PathType Leaf
     $payloadRoot = [System.IO.Path]::GetFullPath((Get-StateString -State $State -Name 'guestPayloadRoot' -DefaultValue (Join-Path $EffectiveRuntimeRoot 'payload\guest-tools')))
     if ($configExists) {
@@ -582,7 +608,11 @@ function Show-RunStatus {
         SecretName = $secretName
         ProcessSecretSet = -not [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($secretName, 'Process'))
         UserSecretSet = -not [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($secretName, 'User'))
+        VirusTotalSecretName = $virusTotalSecretName
+        VirusTotalProcessSecretSet = -not [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($virusTotalSecretName, 'Process'))
+        VirusTotalUserSecretSet = -not [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($virusTotalSecretName, 'User'))
         GuestPasswordGuidance = ".\install.ps1 -Mode Install -PromptPassword, or .\install.ps1 -Mode Change -ResetGuestVmPassword -GeneratePassword -Force"
+        VirusTotalGuidance = ".\install.ps1 -Mode ConfigureVTKey -PromptVTKey, or set $virusTotalSecretName in User environment"
         VmName = $vmName
         CheckpointName = $checkpointName
         HyperVModuleAvailable = $hyperVModuleAvailable
@@ -591,6 +621,37 @@ function Show-RunStatus {
         CheckpointExists = $checkpointExists
         HyperVStatusError = $hyperVStatusError
         SecretValuePrinted = $false
+    }
+}
+
+function Show-RunEnvironmentCheck {
+    param(
+        [AllowNull()]$State,
+        [Parameter(Mandatory)][string]$EffectiveRuntimeRoot,
+        [Parameter(Mandatory)][string]$EffectiveConfigPath
+    )
+
+    $runStatus = Show-RunStatus -State $State -EffectiveRuntimeRoot $EffectiveRuntimeRoot -EffectiveConfigPath $EffectiveConfigPath
+    $webProject = Join-Path $script:RepositoryRoot 'src\KSword.Sandbox.Web\KSword.Sandbox.Web.csproj'
+    $hyperVScript = Join-Path $script:RepositoryRoot 'scripts\Invoke-HyperVE2E.ps1'
+    $payloadScript = Join-Path $script:RepositoryRoot 'scripts\Prepare-GuestPayload.ps1'
+
+    [pscustomobject][ordered]@{
+        DailyStartupCommand = '.\run.ps1'
+        StartWebUiCommand = '.\run.ps1 -Mode StartWebUI'
+        CheckEnvironmentCommand = '.\run.ps1 -Mode CheckEnvironment'
+        PlanCommand = '.\run.ps1 -Mode Plan -SamplePath <sample.exe>'
+        LiveCommand = '.\run.ps1 -Mode Analyze -SamplePath <sample.exe> -Live'
+        WhatIfSupported = $true
+        DefaultStartsVm = $false
+        WebUiStartsVm = $false
+        LiveRequiresExplicitSwitch = $true
+        DotNetAvailable = $null -ne (Get-Command dotnet -ErrorAction SilentlyContinue)
+        WebProjectExists = Test-Path -LiteralPath $webProject -PathType Leaf
+        HyperVE2EScriptExists = Test-Path -LiteralPath $hyperVScript -PathType Leaf
+        PayloadPreparationScriptExists = Test-Path -LiteralPath $payloadScript -PathType Leaf
+        SecretValuePrinted = $false
+        Status = $runStatus
     }
 }
 
@@ -679,6 +740,11 @@ function Invoke-WebUi {
     Write-RunInfo "Hyper-V live prerequisites: configured VM/checkpoint, prepared self-contained guest payload, and guest password secret."
     Write-RunInfo 'Press Ctrl+C to stop the WebUI.'
 
+    if (-not $PSCmdlet.ShouldProcess($effectiveUrl, "Start WebUI with '$projectPath'")) {
+        Write-RunInfo "WhatIf: WebUI would start at $effectiveUrl with config '$EffectiveConfigPath'. No dotnet process or browser was started."
+        return
+    }
+
     if ($OpenBrowser) {
         Start-Job -ScriptBlock {
             param([string]$TargetUrl)
@@ -725,6 +791,17 @@ function Invoke-OneShotAnalysis {
     }
 
     $runLive = [bool]$Live -and (-not [bool]$PlanOnly) -and ($Mode -ne 'Plan')
+    $analysisAction = if ($runLive) {
+        'Delegate live Hyper-V analysis. This can restore/start/stop the configured VM.'
+    }
+    else {
+        'Create a non-mutating Hyper-V analysis plan'
+    }
+    if (-not $PSCmdlet.ShouldProcess($resolvedSample, $analysisAction)) {
+        Write-RunInfo "WhatIf: $analysisAction for '$resolvedSample'. No Hyper-V child script was launched."
+        return
+    }
+
     $arguments = @(
         '-NoProfile',
         '-ExecutionPolicy', 'Bypass',
@@ -835,7 +912,7 @@ $effectiveRuntimeRoot = Get-EffectiveRuntimeRoot -State $state
 $effectiveConfigPath = Get-EffectiveConfigPath -State $state -EffectiveRuntimeRoot $effectiveRuntimeRoot
 Import-InstalledEnvironment -State $state -EffectiveConfigPath $effectiveConfigPath
 
-if ($Mode -eq 'WebUI' -and -not [string]::IsNullOrWhiteSpace($SamplePath)) {
+if ($Mode -in @('WebUI', 'StartWebUI') -and -not [string]::IsNullOrWhiteSpace($SamplePath)) {
     $Mode = 'Analyze'
 }
 
@@ -843,7 +920,16 @@ switch ($Mode) {
     'Status' {
         Show-RunStatus -State $state -EffectiveRuntimeRoot $effectiveRuntimeRoot -EffectiveConfigPath $effectiveConfigPath | Format-List
     }
+    'CheckEnvironment' {
+        Show-RunEnvironmentCheck -State $state -EffectiveRuntimeRoot $effectiveRuntimeRoot -EffectiveConfigPath $effectiveConfigPath | Format-List
+    }
     'WebUI' {
+        $config = Read-SandboxConfig -EffectiveConfigPath $effectiveConfigPath
+        $payloadRoot = Get-GuestPayloadRoot -State $state -Config $config -EffectiveRuntimeRoot $effectiveRuntimeRoot
+        Ensure-GuestPayloadForWebUi -PayloadRoot $payloadRoot -Config $config
+        Invoke-WebUi -EffectiveConfigPath $effectiveConfigPath
+    }
+    'StartWebUI' {
         $config = Read-SandboxConfig -EffectiveConfigPath $effectiveConfigPath
         $payloadRoot = Get-GuestPayloadRoot -State $state -Config $config -EffectiveRuntimeRoot $effectiveRuntimeRoot
         Ensure-GuestPayloadForWebUi -PayloadRoot $payloadRoot -Config $config
