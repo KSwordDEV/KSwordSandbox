@@ -36,10 +36,11 @@ The host also emits a normalized `static.analysis.completed` event. Its
 Guest collection writes `events.json` and `agent-summary.json` under the guest
 output directory before the host collects them. Driver/R0 telemetry may also be
 present as sibling `driver-events.jsonl`. Guest dropped-file evidence may be
-represented by `artifacts/manifest.json`, and screenshots may be present under
-`screenshots/`. Packet captures are not produced by the current KSword agent,
-but externally generated `.pcap` or `.pcapng` files may be present under
-`packet-captures/` or elsewhere in the collected job folder.
+represented by `artifacts/manifest.json`, screenshots may be present under
+`screenshots/`, and explicit `--packet-capture` / `--pcap` /
+`--network-capture` runs may produce `packet-captures/*.pcapng` through Windows
+`pktmon`. Externally generated `.pcap` or `.pcapng` files may also be present
+under `packet-captures/` or elsewhere in the collected job folder.
 
 When `events.json` is imported, sibling `*.jsonl` files under the same guest
 output root are merged into the regenerated `report.json` and `report.html`.
@@ -65,8 +66,8 @@ Dropped files and other copied evidence use
 - `producer`: component that wrote the manifest, such as
   `KSword.Sandbox.Agent`.
 - `generatedAtUtc`: manifest generation time.
-- `collections`: `ArtifactCollectionDescriptor[]` lanes, including disabled
-  placeholders and externally supplied packet-capture lanes.
+- `collections`: `ArtifactCollectionDescriptor[]` lanes, including disabled,
+  skipped/failed, and packet-capture lanes.
 - `artifacts`: `ArtifactDescriptor[]`.
 
 Each `ArtifactDescriptor` records:
@@ -94,16 +95,18 @@ Each `ArtifactDescriptor` records:
 Host-side code can load guest manifests with `GuestArtifactManifestReader`,
 which resolves `relativePath` under the collected guest-output directory and
 preserves original guest absolute paths in metadata. If a guest manifest points
-at an existing `.pcap` or `.pcapng`, the reader can consume it as external
+at an existing `.pcap` or `.pcapng`, the reader can consume it as
 `PacketCapture` evidence and fill MIME, size, SHA-256/hash map, safe import
-path, and packet-capture collection metadata without starting packet capture.
+path, and packet-capture collection metadata. Host import then parses bounded
+PCAP/PCAPNG content into normalized `pcap.summary`, `pcap.flow`, `pcap.dns`,
+`pcap.http`, and `pcap.tls` events when supported.
 
 The host writes `artifact-index.json` beside `report.json` and `report.html`.
 This `HostArtifactIndex` scans the job root for report files, `events.json`,
 `driver-events.jsonl`, `artifacts/manifest.json`, `screenshots/*`,
-`memory-dumps/*`, externally supplied `.pcap` / `.pcapng`, and dropped files
-under `artifacts/*`. Its `collections` list summarizes discovered lanes; for
-packet captures it records `name=packet-captures`, `kind=PacketCapture`,
+`memory-dumps/*`, `.pcap` / `.pcapng`, and dropped files under `artifacts/*`.
+Its `collections` list summarizes discovered lanes; for packet captures it
+records `name=packet-captures`, `kind=PacketCapture`,
 `status=captured`, `implemented=true` for import/report consumption,
 `captureSource=external`, `hostCaptureStarted=false`,
 `importMode=external-artifact`, artifact count, total bytes, and MIME types.

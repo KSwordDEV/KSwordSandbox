@@ -65,7 +65,8 @@ internal sealed class ArtifactManifestContractScenario : ISmokeTestScenario
         SmokeAssert.True(guestWriter.Contains("MimeType", StringComparison.Ordinal), "Guest writer should include MIME metadata.");
         SmokeAssert.True(guestWriter.Contains("SafeLink", StringComparison.Ordinal), "Guest writer should include safe links.");
         SmokeAssert.True(guestWriter.Contains("Collections", StringComparison.Ordinal), "Guest writer should include artifact collection lanes.");
-        SmokeAssert.True(guestWriter.Contains("PacketCapture", StringComparison.Ordinal), "Guest writer should include future packet-capture manifest lanes.");
+        SmokeAssert.True(guestWriter.Contains("PacketCapture", StringComparison.Ordinal), "Guest writer should include packet-capture manifest lanes.");
+        SmokeAssert.True(guestWriter.Contains("packetCaptureNotRequested", StringComparison.Ordinal), "Guest writer should treat packet capture as an implemented opt-in collection.");
         SmokeAssert.True(guestWriter.Contains("MemoryDump", StringComparison.Ordinal), "Guest writer should include memory-dump manifest descriptors.");
         SmokeAssert.True(guestDoc.Contains("artifacts/manifest.json", StringComparison.Ordinal), "Guest-agent doc should describe artifacts/manifest.json.");
         SmokeAssert.True(reportDoc.Contains("ArtifactManifest", StringComparison.Ordinal), "Report schema doc should describe ArtifactManifest.");
@@ -75,7 +76,7 @@ internal sealed class ArtifactManifestContractScenario : ISmokeTestScenario
         SmokeAssert.True(artifactDoc.Contains("safeLink", StringComparison.Ordinal), "Artifact manifest doc should describe safe links.");
         SmokeAssert.True(artifactDoc.Contains("mimeType", StringComparison.Ordinal), "Artifact manifest doc should describe MIME type.");
         SmokeAssert.True(artifactDoc.Contains("collections", StringComparison.OrdinalIgnoreCase), "Artifact manifest doc should describe collection lanes.");
-        SmokeAssert.True(artifactDoc.Contains("PacketCapture", StringComparison.Ordinal), "Artifact manifest doc should describe future packet-capture placeholders.");
+        SmokeAssert.True(artifactDoc.Contains("PacketCapture", StringComparison.Ordinal), "Artifact manifest doc should describe packet-capture artifacts.");
         SmokeAssert.True(artifactDoc.Contains("external-pcap-artifacts-indexed", StringComparison.OrdinalIgnoreCase), "Artifact manifest doc should describe external PCAP consumption.");
         SmokeAssert.True(reportStage.Contains("HostArtifactIndexBuilder", StringComparison.Ordinal), "Report artifact stage should write host artifact index.");
     }

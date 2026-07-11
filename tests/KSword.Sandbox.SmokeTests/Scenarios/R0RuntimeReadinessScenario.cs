@@ -31,6 +31,16 @@ internal sealed class R0RuntimeReadinessScenario : ISmokeTestScenario
         RequireContains(script, "DrainWithCollector", "R0Collector drain must be opt-in.");
         RequireContains(script, "IOCTL_KSWORD_SANDBOX_GET_HEALTH", "Script should name the health IOCTL it probes.");
         RequireContains(script, "R0 capability/status IOCTL static contract", "Script should statically check negotiated R0 IOCTL readiness.");
+        RequireContains(script, "Invoke-R0CollectorAbiSelfCheck", "Script should run the no-device R0Collector ABI self-check in readiness.");
+        RequireContains(script, "R0Collector ABI self-check", "Script should emit a dedicated ABI self-check readiness row.");
+        RequireContains(script, "--abi-self-check", "Script should invoke the collector no-device ABI self-check mode.");
+        RequireContains(script, "CollectorAbiSelfCheckOutputPath", "Script should expose an explicit ABI self-check output path.");
+        RequireContains(script, "'--out', $CollectorAbiSelfCheckOutputPath", "Script should write ABI self-check evidence to the explicit output path.");
+        RequireContains(script, "NoDevice        = $true", "ABI self-check readiness details should prove no-device behavior.");
+        RequireContains(script, "OpensDevice     = $false", "ABI self-check readiness details should prove it does not open the driver device.");
+        RequireContains(script, "CallsCSignTool  = $false", "ABI self-check readiness must not call the blocking signing helper.");
+        RequireContains(script, "ExecutionBlocked = $true", "Script should report endpoint execution blocking explicitly.");
+        RequireContains(script, "non-fatal readiness gap", "Blocked or incomplete ABI self-check execution should be non-fatal.");
         RequireContains(script, "IOCTL_KSWORD_SANDBOX_GET_CAPABILITIES", "Script should statically check capabilities IOCTL wiring.");
         RequireContains(script, "IOCTL_KSWORD_SANDBOX_GET_STATUS", "Script should statically check status IOCTL wiring.");
         RequireContains(script, "IOCTL_KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK", "Script should statically check producer-mask IOCTL wiring.");
@@ -64,6 +74,9 @@ internal sealed class R0RuntimeReadinessScenario : ISmokeTestScenario
         RequireContains(collectorDoc, "r0collector.driverStatus", "Collector doc should list status JSONL evidence.");
         RequireContains(collectorDoc, "r0collector.driverProducerMask", "Collector doc should list producer-mask JSONL evidence.");
         RequireContains(collectorDoc, "non-fatal diagnostics", "Collector doc should keep unavailable live-driver checks diagnostic.");
+        RequireContains(collectorDoc, "R0Collector ABI self-check", "Collector doc should describe the readiness ABI self-check row.");
+        RequireContains(collectorDoc, "non-fatal readiness gap", "Collector doc should say blocked ABI self-check execution is non-fatal.");
+        RequireContains(collectorDoc, "CollectorAbiSelfCheckOutputPath", "Collector doc should document the ABI self-check output path.");
         RequireContains(collectorDoc, "one-shot drain", "Collector doc should describe one-shot drain validation.");
         RequireContains(collectorDoc, "--duration 0", "Collector doc should show one-shot collector mode.");
         RequireContains(networkDoc, "Runtime validation gate", "Network doc should include runtime validation gate.");

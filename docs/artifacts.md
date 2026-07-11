@@ -16,11 +16,10 @@ The stable guest output root is the directory passed with `--out`.
   `--memory-dumps` is supplied.
 - `artifacts/dropped-files/**` is written only when `--collect-dropped-files`
   or `--dropped-files` is supplied.
-- `packet-captures/*.pcap` and `packet-captures/*.pcapng` are consumable when
-  an external tool has already generated them. The current agent only writes a
-  `PacketCapture` collection placeholder when `--packet-capture`, `--pcap`, or
-  `--network-capture` is explicitly supplied; it does not start a packet
-  sniffer.
+- `packet-captures/*.pcapng` is written only when `--packet-capture`, `--pcap`,
+  or `--network-capture` is explicitly supplied and Windows `pktmon` can start
+  capture inside the guest. Existing external `.pcap` / `.pcapng` files remain
+  consumable by the host importer.
 
 ## Dropped-files manifest
 
@@ -79,21 +78,34 @@ The guest manifest and host artifact index classify `memory-dumps/**` files as
 Each collection records `enabled`, `implemented`, `status`, `reason`,
 `relativePath`, `safeLink`, and `importPath`. Disabled lanes are explicit, so a
 host importer can distinguish "not requested" from "requested but unavailable."
-`packet-captures` remains `implemented=false` for KSword's own guest collector.
-If a manifest or collected folder contains an externally supplied `.pcap` or
-`.pcapng`, the host can still import and report it as `kind=PacketCapture`.
+`packet-captures` is an implemented opt-in lane for KSword's guest collector.
+When capture is requested but `pktmon` is unavailable, access is denied, or ETL
+conversion fails, the lane is marked `skipped` or `failed` and the run
+continues. If a manifest or collected folder contains an externally supplied
+`.pcap` or `.pcapng`, the host can still import and report it as
+`kind=PacketCapture`.
 
 Each file descriptor also carries `evidenceRole`, `capturePhase`,
 `captureState`, `guestPath`, `importPath`, and `collectionName` alongside size,
 MIME type, and hashes. `guestPath` is evidence only; clickable links and import
 paths are derived from safe paths under the collected guest output root.
 
-## External packet capture import
+## Optional packet capture and external import
 
-`--packet-capture`, `--pcap`, and `--network-capture` are safe placeholders.
-They emit `packet_capture.skipped` with `implemented=false` and reserve the
-`packet-captures/` import path in the manifest. No real network packet capture
-is performed by default or by the current placeholder.
+`--packet-capture`, `--pcap`, and `--network-capture` are explicit opt-in
+switches. They start Windows `pktmon` before the sample runs, stop it after the
+run, convert the ETL trace with `pktmon etl2pcap`, and write
+`packet-captures/*.pcapng` when conversion succeeds. Raw ETL diagnostics stay
+under `packet-capture-diagnostics/` and are not treated as packet-capture
+artifacts.
+
+Packet capture is still safe-by-default: no sniffer is started unless one of
+the opt-in switches is present. Missing `pktmon`, insufficient rights, active
+system capture conflicts, stop failures, or conversion failures emit
+`packet_capture.skipped` or `packet_capture.failed`; they do not prevent
+`events.json`, dropped files, screenshots, memory dumps, or the artifact
+manifest from being written. Successful runs emit `packet_capture.started`,
+`packet_capture.stopped`, and `packet_capture.captured`.
 
 For import/report purposes, existing packet captures are regular artifacts:
 

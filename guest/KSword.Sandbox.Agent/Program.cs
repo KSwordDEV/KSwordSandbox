@@ -15,7 +15,8 @@ return await AgentProgram.RunAsync(args);
 /// Guest-side collector that runs inside the disposable Windows VM.
 /// Inputs are command-line arguments for sample path, output path, duration,
 /// optional driver event path, optional R0Collector sidecar path, and optional
-/// screenshot stage/count, dropped-file extraction, memory-dump, and future PCAP flags; processing can
+/// screenshot stage/count, dropped-file extraction, memory-dump, and opt-in
+/// packet-capture flags; processing can
 /// start the sidecar, starts the sample, runs dynamic guest probes, merges
 /// driver JSONL, and writes JSON artifacts; RunAsync returns a process exit
 /// code.
@@ -1695,8 +1696,8 @@ internal sealed record AgentOptions
     /// Inputs are string arguments, processing consumes --sample, --out,
     /// --duration, --driver-events, optional R0Collector sidecar switches, and
     /// boolean --r0-mock/--screenshot/--collect-dropped-files/--memory-dump,
-    /// optional --screenshot-phases/--screenshot-count, plus future
-    /// --packet-capture/--pcap placeholder flags without breaking existing
+    /// optional --screenshot-phases/--screenshot-count, plus opt-in
+    /// --packet-capture/--pcap network capture flags without breaking existing
     /// value switches; the method returns
     /// validated and normalized options.
     /// </summary>

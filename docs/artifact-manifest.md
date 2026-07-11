@@ -18,7 +18,7 @@ The file is an `ArtifactManifest`:
 - `producer`: writer component, for example `KSword.Sandbox.Agent`.
 - `generatedAtUtc`: UTC generation timestamp.
 - `collections`: `ArtifactCollectionDescriptor[]` entries for collection lanes,
-  including disabled or future-placeholder lanes.
+  including disabled, skipped, failed, and optional lanes.
 - `artifacts`: `ArtifactDescriptor[]`.
 
 `ArtifactCollectionDescriptor` includes:
@@ -30,8 +30,8 @@ The file is an `ArtifactManifest`:
 - `relativePath`, `safeLink`, and `importPath`: safe paths under the collected
   guest output root.
 - `enabled`: whether the operator requested the lane for this run.
-- `implemented`: whether the collector can currently produce files. Future
-  PCAP lanes use `implemented=false`.
+- `implemented`: whether the collector can currently produce files. The current
+  guest packet-capture lane is implemented but remains explicit opt-in.
 - `status`: `disabled`, `enabled-empty`, `captured`, `skipped`, `failed`, or
   `not-implemented`.
 - `reason`: compact diagnostic reason for disabled/skipped/future lanes.
@@ -72,15 +72,19 @@ as link targets.
 
 The current guest manifest writes descriptors for files already present below
 the guest output root, including `artifacts/dropped-files/**`, `screenshots/**`,
-`memory-dumps/**`, `driver-events.jsonl`, R0 diagnostic logs, and future
-`packet-captures/**` files if a later collector produces them. It does not
-start a PCAP collector today; `PacketCapture` is represented by a collection
-placeholder and optional import path. If another tool has already placed a
-`.pcap` or `.pcapng` under the guest output root and the manifest references it,
-the host reader treats that file as externally supplied evidence and fills
+`memory-dumps/**`, `driver-events.jsonl`, R0 diagnostic logs, and
+`packet-captures/**` files. When `--packet-capture`, `--pcap`, or
+`--network-capture` is supplied, the guest can start Windows `pktmon`, convert
+ETL to PCAPNG, and produce `PacketCapture` descriptors with
 `kind=PacketCapture`, `category=packet-capture`, `mimeType`, `sizeBytes`,
 `sha256` / `hashes.sha256`, `evidenceRole=packet-capture`, and
-`collectionName=packet-captures` without starting packet capture itself.
+`collectionName=packet-captures`. Missing tools, access denied, active capture
+conflicts, stop failures, or conversion failures are represented by skipped or
+failed collection status rather than failing the run.
+
+If another tool has already placed a `.pcap` or `.pcapng` under the guest output
+root and the manifest references it, the host reader still treats that file as
+packet-capture evidence using the same safe descriptor fields.
 
 ## Host artifact index
 
@@ -106,22 +110,25 @@ relative links for:
 - `artifacts/manifest.json`
 - `screenshots/*`
 - `memory-dumps/*`
-- external `packet-captures/*.pcap` / `packet-captures/*.pcapng` files
+- `packet-captures/*.pcap` / `packet-captures/*.pcapng` files produced by the
+  guest capture probe or supplied by another tool
 - dropped files under `artifacts/dropped-files/*`
 
 The scan also classifies any discovered `.pcap` or `.pcapng` file as
-`PacketCapture` even when it was generated outside KSwordSandbox. Packet capture
-descriptors include deterministic MIME (`application/vnd.tcpdump.pcap` or
+`PacketCapture` even when only the file is available and the manifest metadata
+is missing. Packet capture descriptors include deterministic MIME
+(`application/vnd.tcpdump.pcap` or
 `application/x-pcapng`), byte size, SHA-256, safe relative import path, and
 metadata such as `captureSource=external`, `hostCaptureStarted=false`,
 `importMode=external-artifact`, and `collectionName=packet-captures`.
 
-`HostArtifactIndex.collections` summarizes discovered lanes. For an external
+`HostArtifactIndex.collections` summarizes discovered lanes. For a filesystem
 PCAP collection the host records `name=packet-captures`, `kind=PacketCapture`,
 `status=captured`, `implemented=true` for import/report consumption, and
 metadata such as artifact count, total bytes, MIME types, and
-`external-pcap-artifacts-indexed`. This means the host can consume externally
-generated packet captures, but it still does not run a packet sniffer.
+`external-pcap-artifacts-indexed`. The host-side indexer itself still does not
+run a packet sniffer; capture is performed by the explicit guest-side pktmon
+probe when requested.
 
 The HTML report consumes this index when available. If no index has been
 provided, it still exposes artifact paths inferred from report events, but only
@@ -138,8 +145,8 @@ operators need to open from the local job folder:
 - `screenshots/*`
 - dropped files under `artifacts/dropped-files/*`
 
-Memory dumps and externally supplied packet captures are indexed by
-`artifact-index.json` with `kind=MemoryDump` / `kind=PacketCapture`; the current
+Memory dumps and packet captures are indexed by `artifact-index.json` with
+`kind=MemoryDump` / `kind=PacketCapture`; the current
 HTML artifact-link section focuses on events, driver JSONL, manifests,
 screenshots, and dropped files.
 

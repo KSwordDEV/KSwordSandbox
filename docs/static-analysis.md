@@ -8,7 +8,8 @@ external tools and intentionally writes findings into the stable
 - `Tags`: rule-facing tokens consumed by `rules/behavior-rules.json`.
 - `Urls`: bounded URL strings extracted from ASCII/UTF-16 strings.
 - `InterestingStrings`: bounded human-readable evidence such as imports,
-  exports, section summaries, resources, paths, URLs, IPs, and command strings.
+  exports, section summaries, resources, overlay/signature hints, paths, URLs,
+  IPs, and command strings.
 - `Warnings`: parse-boundary and truncation notes.
 
 ## PE coverage
@@ -21,8 +22,12 @@ The analyzer parses these PE structures best-effort with hard limits:
   `section:<name>,va=<rva>,vsize=<n>,raw=<n>,entropy=<n>` for report grouping.
 - Imports by module/API, including ordinal fallback evidence.
 - Exports and registration/service-style entry points.
+- PE security directory / Authenticode certificate table presence and bounded
+  WIN_CERTIFICATE entry metadata.
 - TLS directory and callback-table pointers.
 - Resource directory types and resource data entries.
+- Overlay bytes after the last mapped section raw-data end, with certificate
+  table bytes separated from appended non-certificate data where possible.
 
 Resource tags include `resources_present`, `resource_type_rcdata`,
 `resource_manifest`, `resource_version_info`, `resource_icon`,
@@ -33,6 +38,17 @@ Section tags include `high_entropy_section`, `very_high_entropy_section`,
 `low_entropy_section`, `virtual_only_section`, `oversized_virtual_section`,
 `executable_section`, `writable_section`, and
 `writable_executable_section`.
+
+Overlay/signature tags include `overlay_present`, `pe_overlay`,
+`overlay_contains_certificate_table`, `overlay_certificate_table_only`,
+`overlay_non_certificate_data`, `overlay_large_data`,
+`overlay_high_entropy`, `security_directory_present`,
+`digital_signature_present`, `authenticode_signature_present`,
+`signature_pkcs_signed_data`, `invalid_security_directory`,
+`invalid_certificate_table`, and `certificate_table_unparsed`. Evidence is
+emitted as prefixed strings such as `overlay:start=...`,
+`overlay:non-certificate@...`, `signature:certificate-table@...`, and
+`signature:certificate[...]`.
 
 ## String and indicator coverage
 
@@ -94,3 +110,5 @@ validates that:
 2. Rule-referenced MITRE IDs exist in `rules/mitre-windows-map.json`.
 3. Synthetic static tags classify into expected findings.
 4. Synthetic files produce URL/IP/path/script/anti-analysis/resource tags.
+5. A synthetic PE contract sample emits overlay and certificate-table evidence
+   without requiring Authenticode validation libraries.

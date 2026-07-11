@@ -1,5 +1,5 @@
 {
-  "version": "2026-07-11-v4-behavior-rule-coverage-expansion",
+  "version": "2026-07-11-v5-microstep-gap-expansion",
   "rules": [
     {
       "id": "host-submission",
@@ -2644,7 +2644,9 @@
         "execution",
         "lateral-movement",
         "remote-service"
-      ]
+      ],
+      "mitreTechniqueId": "T1569.002",
+      "mitreTechniqueName": "Service Execution"
     },
     {
       "id": "winrm-powershell-remoting-lateral-command",
@@ -2669,7 +2671,9 @@
         "lateral-movement",
         "winrm",
         "powershell-remoting"
-      ]
+      ],
+      "mitreTechniqueId": "T1021.006",
+      "mitreTechniqueName": "Windows Remote Management"
     },
     {
       "id": "admin-share-or-remote-copy-command",
@@ -2694,7 +2698,9 @@
         "lateral-movement",
         "admin-share",
         "file-transfer"
-      ]
+      ],
+      "mitreTechniqueId": "T1570",
+      "mitreTechniqueName": "Lateral Tool Transfer"
     },
     {
       "id": "wmi-remote-execution-command",
@@ -2717,7 +2723,9 @@
         "execution",
         "lateral-movement",
         "wmi"
-      ]
+      ],
+      "mitreTechniqueId": "T1047",
+      "mitreTechniqueName": "Windows Management Instrumentation"
     },
     {
       "id": "anti-analysis-sandbox-artifact-command",
@@ -2831,7 +2839,9 @@
         "credentials",
         "lsass",
         "dump"
-      ]
+      ],
+      "mitreTechniqueId": "T1003.001",
+      "mitreTechniqueName": "LSASS Memory"
     },
     {
       "id": "lsass-process-access-observed",
@@ -2865,7 +2875,9 @@
         "credentials",
         "lsass",
         "process-access"
-      ]
+      ],
+      "mitreTechniqueId": "T1003.001",
+      "mitreTechniqueName": "LSASS Memory"
     },
     {
       "id": "credential-store-access-observed",
@@ -2899,7 +2911,9 @@
         "credentials",
         "credential-store",
         "filesystem"
-      ]
+      ],
+      "mitreTechniqueId": "T1555",
+      "mitreTechniqueName": "Credentials from Password Stores"
     },
     {
       "id": "credential-dumping-tool-command",
@@ -2926,7 +2940,9 @@
         "credentials",
         "credential-dumping",
         "tooling"
-      ]
+      ],
+      "mitreTechniqueId": "T1003",
+      "mitreTechniqueName": "OS Credential Dumping"
     },
     {
       "id": "network-c2-beacon-event",
@@ -5664,6 +5680,942 @@
         "defense-evasion",
         "hidden-files",
         "command"
+      ]
+    },
+    {
+      "id": "legacy-runservices-persistence",
+      "title": "Legacy RunServices persistence path",
+      "severity": "high",
+      "summary": "A registry event touched legacy RunServices or RunServicesOnce autostart paths still useful for malware triage on older Windows profiles.",
+      "mitreTechniqueId": "T1547.001",
+      "mitreTechniqueName": "Registry Run Keys / Startup Folder",
+      "eventTypes": [
+        "registry.set",
+        "registry.create",
+        "driver.registry"
+      ],
+      "containsPath": [
+        "\\CurrentVersion\\RunServices",
+        "\\CurrentVersion\\RunServicesOnce"
+      ],
+      "tags": [
+        "persistence",
+        "registry",
+        "run-key"
+      ]
+    },
+    {
+      "id": "appcert-dlls-persistence",
+      "title": "AppCert DLLs persistence path",
+      "severity": "high",
+      "summary": "A registry event touched Session Manager AppCertDlls, which can load DLLs into processes that call selected Win32 APIs.",
+      "mitreTechniqueId": "T1546.009",
+      "mitreTechniqueName": "AppCert DLLs",
+      "eventTypes": [
+        "registry.set",
+        "registry.create",
+        "driver.registry"
+      ],
+      "containsPath": [
+        "\\Session Manager\\AppCertDlls",
+        "\\Control\\Session Manager\\AppCertDlls"
+      ],
+      "tags": [
+        "persistence",
+        "appcert-dlls",
+        "registry"
+      ]
+    },
+    {
+      "id": "appcompat-shim-persistence",
+      "title": "Application shim persistence artifact",
+      "severity": "high",
+      "summary": "A registry or file event touched AppCompat shim database registration paths used to redirect application behavior or load attacker-controlled shims.",
+      "mitreTechniqueId": "T1546.011",
+      "mitreTechniqueName": "Application Shimming",
+      "eventTypes": [
+        "registry.set",
+        "registry.create",
+        "file.created",
+        "file.modified",
+        "driver.registry",
+        "driver.file"
+      ],
+      "containsPath": [
+        "\\AppCompatFlags\\Custom",
+        "\\AppCompatFlags\\InstalledSDB",
+        "\\AppPatch\\Custom\\",
+        ".sdb"
+      ],
+      "tags": [
+        "persistence",
+        "appcompat",
+        "shim"
+      ]
+    },
+    {
+      "id": "active-setup-persistence",
+      "title": "Active Setup persistence path",
+      "severity": "high",
+      "summary": "A registry event touched Active Setup Installed Components or StubPath values that can execute commands during user logon initialization.",
+      "mitreTechniqueId": "T1547.014",
+      "mitreTechniqueName": "Active Setup",
+      "eventTypes": [
+        "registry.set",
+        "registry.create",
+        "driver.registry"
+      ],
+      "containsPath": [
+        "\\Active Setup\\Installed Components",
+        "StubPath"
+      ],
+      "tags": [
+        "persistence",
+        "active-setup",
+        "registry"
+      ]
+    },
+    {
+      "id": "logon-script-persistence-registry",
+      "title": "Logon script persistence registry path",
+      "severity": "high",
+      "summary": "A registry event touched Windows logon/startup script policy paths that can execute attacker-controlled scripts during user or machine logon.",
+      "mitreTechniqueId": "T1037.001",
+      "mitreTechniqueName": "Logon Script (Windows)",
+      "eventTypes": [
+        "registry.set",
+        "registry.create",
+        "driver.registry"
+      ],
+      "containsPath": [
+        "\\Group Policy\\Scripts\\Startup",
+        "\\Group Policy\\Scripts\\Shutdown",
+        "\\Group Policy\\Scripts\\Logon",
+        "\\Group Policy\\Scripts\\Logoff",
+        "UserInitMprLogonScript"
+      ],
+      "tags": [
+        "persistence",
+        "logon-script",
+        "registry"
+      ]
+    },
+    {
+      "id": "bits-job-persistence-or-download-command",
+      "title": "BITS job persistence or download command",
+      "severity": "high",
+      "summary": "A command line configured BITS jobs, notification commands, or transfers that can persist or stage payloads without an interactive browser.",
+      "mitreTechniqueId": "T1197",
+      "mitreTechniqueName": "BITS Jobs",
+      "eventTypes": [
+        "process.start"
+      ],
+      "containsCommandLine": [
+        "bitsadmin /create",
+        "bitsadmin.exe /create",
+        "bitsadmin /addfile",
+        "bitsadmin /setnotifycmdline",
+        "bitsadmin /resume",
+        "Start-BitsTransfer",
+        "Set-BitsTransfer",
+        "Add-BitsFile"
+      ],
+      "tags": [
+        "persistence",
+        "download",
+        "bits",
+        "lolbin"
+      ]
+    },
+    {
+      "id": "screensaver-persistence-registry",
+      "title": "Screensaver persistence registry path",
+      "severity": "high",
+      "summary": "A registry event modified desktop screensaver configuration values that can launch a malicious SCR payload at idle or unlock time.",
+      "mitreTechniqueId": "T1546.002",
+      "mitreTechniqueName": "Screensaver",
+      "eventTypes": [
+        "registry.set",
+        "registry.create",
+        "driver.registry"
+      ],
+      "containsPath": [
+        "\\Control Panel\\Desktop\\SCRNSAVE.EXE",
+        "\\Control Panel\\Desktop\\ScreenSaveActive",
+        "\\Control Panel\\Desktop\\ScreenSaverIsSecure"
+      ],
+      "tags": [
+        "persistence",
+        "screensaver",
+        "registry"
+      ]
+    },
+    {
+      "id": "powershell-profile-persistence-file",
+      "title": "PowerShell profile persistence file",
+      "severity": "high",
+      "summary": "A file event wrote a PowerShell profile script that can run code every time a PowerShell host starts for the affected user or host.",
+      "mitreTechniqueId": "T1546.013",
+      "mitreTechniqueName": "PowerShell Profile",
+      "eventTypes": [
+        "file.created",
+        "file.modified",
+        "driver.file"
+      ],
+      "containsPath": [
+        "\\WindowsPowerShell\\profile.ps1",
+        "\\PowerShell\\profile.ps1",
+        "Microsoft.PowerShell_profile.ps1",
+        "Microsoft.VSCode_profile.ps1",
+        "profile.ps1"
+      ],
+      "tags": [
+        "persistence",
+        "powershell",
+        "file"
+      ]
+    },
+    {
+      "id": "process-injection-handle-access",
+      "title": "Process handle access for injection",
+      "severity": "high",
+      "summary": "A process access or API event requested VM-write, VM-operation, create-thread, or all-access rights commonly needed before process injection.",
+      "mitreTechniqueId": "T1055",
+      "mitreTechniqueName": "Process Injection",
+      "eventTypes": [
+        "process.open",
+        "process.access",
+        "driver.process",
+        "api.call"
+      ],
+      "dataContains": {
+        "desiredAccess": [
+          "PROCESS_VM_WRITE",
+          "PROCESS_VM_OPERATION",
+          "PROCESS_CREATE_THREAD",
+          "PROCESS_ALL_ACCESS"
+        ],
+        "accessMask": [
+          "PROCESS_VM_WRITE",
+          "PROCESS_VM_OPERATION",
+          "PROCESS_CREATE_THREAD",
+          "PROCESS_ALL_ACCESS"
+        ],
+        "api": [
+          "OpenProcess"
+        ],
+        "operation": [
+          "OpenProcess",
+          "VM_WRITE",
+          "CREATE_THREAD"
+        ]
+      },
+      "tags": [
+        "process",
+        "injection",
+        "handle-access"
+      ]
+    },
+    {
+      "id": "thread-context-hijack-injection",
+      "title": "Thread context hijacking injection primitive",
+      "severity": "high",
+      "summary": "An API or thread event referenced suspending a thread and changing its context, a common execution redirection primitive.",
+      "mitreTechniqueId": "T1055.003",
+      "mitreTechniqueName": "Thread Execution Hijacking",
+      "eventTypes": [
+        "api.call",
+        "process.memory",
+        "driver.process",
+        "thread.remote"
+      ],
+      "dataContains": {
+        "api": [
+          "SuspendThread",
+          "GetThreadContext",
+          "SetThreadContext",
+          "Wow64SetThreadContext",
+          "NtContinue"
+        ],
+        "operation": [
+          "SuspendThread",
+          "GetThreadContext",
+          "SetThreadContext",
+          "thread context hijack",
+          "NtContinue"
+        ],
+        "operationName": [
+          "SuspendThread",
+          "GetThreadContext",
+          "SetThreadContext",
+          "thread context hijack",
+          "NtContinue"
+        ]
+      },
+      "tags": [
+        "process",
+        "injection",
+        "thread-context"
+      ]
+    },
+    {
+      "id": "portable-executable-manual-map-injection",
+      "title": "Portable executable manual-map injection signal",
+      "severity": "high",
+      "summary": "An event referenced manual PE mapping, RunPE, section-image mapping, or process doppelganging style injection evidence.",
+      "mitreTechniqueId": "T1055.002",
+      "mitreTechniqueName": "Portable Executable Injection",
+      "eventTypes": [
+        "api.call",
+        "process.memory",
+        "driver.process",
+        "image.load"
+      ],
+      "dataContains": {
+        "api": [
+          "NtCreateSection",
+          "NtMapViewOfSection",
+          "ZwMapViewOfSection"
+        ],
+        "operation": [
+          "manual map",
+          "manualmap",
+          "RunPE",
+          "PE injection",
+          "process doppelganging",
+          "section image"
+        ],
+        "operationName": [
+          "manual map",
+          "manualmap",
+          "RunPE",
+          "PE injection",
+          "process doppelganging",
+          "section image"
+        ],
+        "technique": [
+          "manual map",
+          "RunPE",
+          "portable executable injection"
+        ]
+      },
+      "tags": [
+        "process",
+        "injection",
+        "pe"
+      ]
+    },
+    {
+      "id": "reflective-loader-or-module-stomping-signal",
+      "title": "Reflective loader or module stomping signal",
+      "severity": "high",
+      "summary": "An API, memory, or image-load event referenced reflective DLL loading, in-memory module loading, or module stomping evidence.",
+      "mitreTechniqueId": "T1620",
+      "mitreTechniqueName": "Reflective Code Loading",
+      "eventTypes": [
+        "api.call",
+        "process.memory",
+        "image.load",
+        "driver.image.load"
+      ],
+      "dataContains": {
+        "api": [
+          "ReflectiveLoader",
+          "MemoryModule"
+        ],
+        "operation": [
+          "reflective dll",
+          "ReflectiveLoader",
+          "module stomping",
+          "LoadLibrary from memory",
+          "sRDI"
+        ],
+        "operationName": [
+          "reflective dll",
+          "ReflectiveLoader",
+          "module stomping",
+          "LoadLibrary from memory",
+          "sRDI"
+        ],
+        "module": [
+          "ReflectiveLoader",
+          "MemoryModule"
+        ]
+      },
+      "tags": [
+        "process",
+        "injection",
+        "reflective-loading"
+      ]
+    },
+    {
+      "id": "dcom-remote-execution-command",
+      "title": "DCOM remote execution command",
+      "severity": "high",
+      "summary": "A command line referenced DCOM automation classes or helper labels commonly used to execute commands on a remote Windows host.",
+      "mitreTechniqueId": "T1021.003",
+      "mitreTechniqueName": "Distributed Component Object Model",
+      "eventTypes": [
+        "process.start"
+      ],
+      "containsCommandLine": [
+        "GetTypeFromProgID",
+        "MMC20.Application",
+        "ShellWindows",
+        "ShellBrowserWindow",
+        "ExecuteShellCommand",
+        "Invoke-DCOM",
+        "DCOM remote",
+        "New-Object -ComObject"
+      ],
+      "tags": [
+        "execution",
+        "lateral-movement",
+        "dcom"
+      ]
+    },
+    {
+      "id": "rpc-dcom-network-port-observed",
+      "title": "RPC or DCOM endpoint mapper port observed",
+      "severity": "medium",
+      "summary": "A network, driver, or PCAP flow event referenced RPC/DCOM endpoint mapper ports or protocol labels often used during remote Windows management.",
+      "mitreTechniqueId": "T1021.003",
+      "mitreTechniqueName": "Distributed Component Object Model",
+      "eventTypes": [
+        "network.tcp",
+        "driver.network",
+        "pcap.tcp",
+        "pcap.flow",
+        "network.flow"
+      ],
+      "dataContains": {
+        "remotePort": [
+          "135",
+          "593"
+        ],
+        "sourcePort": [
+          "135",
+          "593"
+        ],
+        "destinationPort": [
+          "135",
+          "593"
+        ],
+        "port": [
+          "135",
+          "593"
+        ],
+        "protocolName": [
+          "rpc",
+          "dcom",
+          "epmap"
+        ]
+      },
+      "tags": [
+        "lateral-movement",
+        "rpc",
+        "dcom",
+        "network"
+      ]
+    },
+    {
+      "id": "powershell-ssh-remoting-command",
+      "title": "PowerShell SSH remoting command",
+      "severity": "medium",
+      "summary": "A PowerShell command line used SSH transport remoting switches that can run commands on a remote system over SSH.",
+      "mitreTechniqueId": "T1021.004",
+      "mitreTechniqueName": "SSH",
+      "eventTypes": [
+        "process.start"
+      ],
+      "containsCommandLine": [
+        "Enter-PSSession -HostName",
+        "New-PSSession -HostName",
+        "Invoke-Command -HostName",
+        "-SSHTransport"
+      ],
+      "tags": [
+        "lateral-movement",
+        "ssh",
+        "powershell"
+      ]
+    },
+    {
+      "id": "remote-registry-command",
+      "title": "Remote registry command observed",
+      "severity": "high",
+      "summary": "A process command line used reg.exe against a remote registry path, which can support remote persistence, configuration change, or discovery.",
+      "mitreTechniqueId": "T1112",
+      "mitreTechniqueName": "Modify Registry",
+      "eventTypes": [
+        "process.start"
+      ],
+      "containsCommandLine": [
+        "reg add \\",
+        "reg.exe add \\",
+        "reg query \\",
+        "reg.exe query \\",
+        "reg copy \\",
+        "reg delete \\"
+      ],
+      "tags": [
+        "lateral-movement",
+        "registry",
+        "command"
+      ]
+    },
+    {
+      "id": "anti-analysis-locale-timezone-command",
+      "title": "Locale, language, or timezone anti-analysis command",
+      "severity": "medium",
+      "summary": "A command line queried locale, language, or timezone information often used to gate execution by region or identify sandbox defaults.",
+      "mitreTechniqueId": "T1497.001",
+      "mitreTechniqueName": "System Checks",
+      "eventTypes": [
+        "process.start"
+      ],
+      "containsCommandLine": [
+        "Get-Culture",
+        "Get-WinSystemLocale",
+        "Get-UICulture",
+        "Get-TimeZone",
+        "tzutil /g",
+        "tzutil.exe /g",
+        "wmic timezone",
+        "reg query HKCU\\Control Panel\\International"
+      ],
+      "tags": [
+        "anti-analysis",
+        "sandbox-evasion",
+        "locale"
+      ]
+    },
+    {
+      "id": "anti-analysis-input-idle-api-observed",
+      "title": "User input or idle-state anti-analysis API observed",
+      "severity": "medium",
+      "summary": "An API event referenced user input, cursor, foreground window, or idle-time checks used to detect unattended sandbox sessions.",
+      "mitreTechniqueId": "T1497.001",
+      "mitreTechniqueName": "System Checks",
+      "eventTypes": [
+        "api.call"
+      ],
+      "dataContains": {
+        "api": [
+          "GetLastInputInfo",
+          "GetCursorPos",
+          "GetAsyncKeyState",
+          "GetKeyState",
+          "GetForegroundWindow",
+          "GetWindowText"
+        ],
+        "operation": [
+          "user idle",
+          "input activity",
+          "mouse movement",
+          "keyboard state"
+        ]
+      },
+      "tags": [
+        "anti-analysis",
+        "sandbox-evasion",
+        "user-activity"
+      ]
+    },
+    {
+      "id": "anti-analysis-accelerated-sleep-placeholder",
+      "title": "Accelerated or skipped sleep telemetry placeholder",
+      "severity": "medium",
+      "summary": "Sleep or timeout telemetry carried requested/actual duration fields that can expose long-sleep evasion or sandbox time acceleration.",
+      "mitreTechniqueId": "T1497.003",
+      "mitreTechniqueName": "Time Based Evasion",
+      "eventTypes": [
+        "antiAnalysis.sleep",
+        "api.sleep",
+        "process.timeout",
+        "api.call"
+      ],
+      "dataKeys": [
+        "requestedSleepMs",
+        "actualSleepMs",
+        "sleepAccelerationRatio",
+        "sleepSkipped",
+        "fastForwardedSleep"
+      ],
+      "tags": [
+        "anti-analysis",
+        "delay",
+        "placeholder"
+      ]
+    },
+    {
+      "id": "certutil-download-or-decode-command",
+      "title": "Certutil download or decode command",
+      "severity": "high",
+      "summary": "A command line used certutil URL-cache, verifyctl, decode, or decodehex options to stage or transform payload data.",
+      "mitreTechniqueId": "T1140",
+      "mitreTechniqueName": "Deobfuscate/Decode Files or Information",
+      "eventTypes": [
+        "process.start"
+      ],
+      "containsCommandLine": [
+        "certutil -urlcache",
+        "certutil.exe -urlcache",
+        "certutil -verifyctl",
+        "certutil.exe -verifyctl",
+        "certutil -decode",
+        "certutil.exe -decode",
+        "certutil -decodehex",
+        "certutil.exe -decodehex",
+        "-split -f http"
+      ],
+      "tags": [
+        "execution",
+        "download",
+        "decode",
+        "lolbin"
+      ]
+    },
+    {
+      "id": "msiexec-remote-package-execution",
+      "title": "Msiexec remote package execution",
+      "severity": "high",
+      "summary": "A command line used msiexec to install or execute a remote HTTP/HTTPS/UNC package, a common proxy execution and download-execute pattern.",
+      "mitreTechniqueId": "T1218.007",
+      "mitreTechniqueName": "Msiexec",
+      "eventTypes": [
+        "process.start"
+      ],
+      "containsCommandLine": [
+        "msiexec /i http",
+        "msiexec.exe /i http",
+        "msiexec /package http",
+        "msiexec.exe /package http",
+        "msiexec /i \\",
+        "msiexec.exe /i \\",
+        "msiexec /quiet /i http",
+        "msiexec.exe /quiet /i http"
+      ],
+      "tags": [
+        "execution",
+        "download",
+        "lolbin",
+        "msiexec"
+      ]
+    },
+    {
+      "id": "rundll32-remote-url-or-script-execution",
+      "title": "Rundll32 remote URL or script execution",
+      "severity": "high",
+      "summary": "A command line used rundll32 with URL handlers, JavaScript, or remote DLL/script references associated with proxy execution.",
+      "mitreTechniqueId": "T1218.011",
+      "mitreTechniqueName": "Rundll32",
+      "eventTypes": [
+        "process.start"
+      ],
+      "containsCommandLine": [
+        "rundll32 url.dll,FileProtocolHandler http",
+        "rundll32.exe url.dll,FileProtocolHandler http",
+        "rundll32 javascript:",
+        "rundll32.exe javascript:",
+        "rundll32.exe http",
+        "rundll32 http",
+        "rundll32.exe \\",
+        "rundll32 \\"
+      ],
+      "tags": [
+        "execution",
+        "download",
+        "lolbin",
+        "rundll32"
+      ]
+    },
+    {
+      "id": "archive-extracted-execute-chain-placeholder",
+      "title": "Archive extracted then executed placeholder",
+      "severity": "high",
+      "summary": "A normalized correlation event indicates an archive or ISO was extracted/mounted and a child payload executed from the extracted path.",
+      "mitreTechniqueId": "T1204.002",
+      "mitreTechniqueName": "Malicious File",
+      "eventTypes": [
+        "behavior.archive_execute",
+        "archive.extracted.executed",
+        "file.archive.executed"
+      ],
+      "dataKeys": [
+        "archivePath",
+        "extractedPath",
+        "executedPath",
+        "archiveType"
+      ],
+      "tags": [
+        "download-execute",
+        "archive",
+        "correlation",
+        "placeholder"
+      ]
+    },
+    {
+      "id": "dns-long-label-or-base64-query",
+      "title": "DNS long-label or base64-like query",
+      "severity": "medium",
+      "summary": "DNS telemetry carried long-label, high-entropy, or base64-marker fields associated with tunneling, DGAs, or encoded C2 messages.",
+      "mitreTechniqueId": "T1071.004",
+      "mitreTechniqueName": "DNS",
+      "eventTypes": [
+        "dns.query",
+        "network.dns",
+        "pcap.dns"
+      ],
+      "dataKeys": [
+        "maxLabelLength",
+        "queryLength",
+        "queryEntropy",
+        "base64Label",
+        "encodedLabel"
+      ],
+      "tags": [
+        "network",
+        "dns",
+        "c2",
+        "tunnel"
+      ]
+    },
+    {
+      "id": "dns-exfil-volume-placeholder",
+      "title": "DNS exfiltration volume placeholder",
+      "severity": "medium",
+      "summary": "DNS or PCAP summary telemetry included query counts or byte totals for future high-volume tunnel and exfiltration correlation.",
+      "mitreTechniqueId": "T1041",
+      "mitreTechniqueName": "Exfiltration Over C2 Channel",
+      "eventTypes": [
+        "pcap.summary",
+        "pcap.dns",
+        "network.dns"
+      ],
+      "dataKeys": [
+        "dnsQueryCount",
+        "uniqueDnsQueryCount",
+        "totalQueryBytes",
+        "dnsPayloadBytes"
+      ],
+      "tags": [
+        "network",
+        "dns",
+        "exfiltration",
+        "placeholder"
+      ]
+    },
+    {
+      "id": "http-auth-cookie-or-token-exfil",
+      "title": "HTTP authorization, cookie, or token exfiltration field",
+      "severity": "high",
+      "summary": "HTTP metadata included authorization headers, cookies, bearer tokens, passwords, or session fields that can indicate credential or token exfiltration.",
+      "mitreTechniqueId": "T1041",
+      "mitreTechniqueName": "Exfiltration Over C2 Channel",
+      "eventTypes": [
+        "http.request",
+        "network.http",
+        "pcap.http"
+      ],
+      "dataContains": {
+        "headers": [
+          "Authorization:",
+          "Cookie:",
+          "Bearer ",
+          "Basic ",
+          "X-Api-Key"
+        ],
+        "body": [
+          "password=",
+          "passwd=",
+          "token=",
+          "sessionid=",
+          "cookie="
+        ],
+        "uri": [
+          "token=",
+          "sessionid=",
+          "password="
+        ],
+        "requestUri": [
+          "token=",
+          "sessionid=",
+          "password="
+        ],
+        "authorization": [
+          "Bearer ",
+          "Basic "
+        ],
+        "cookie": [
+          "session",
+          "auth",
+          "token"
+        ]
+      },
+      "tags": [
+        "network",
+        "http",
+        "exfiltration",
+        "credentials"
+      ]
+    },
+    {
+      "id": "tls-no-sni-or-rare-ja3-placeholder",
+      "title": "TLS missing SNI or rare JA3 placeholder",
+      "severity": "medium",
+      "summary": "TLS telemetry indicated missing/encrypted SNI or a rare JA3/JA3S classification for encrypted-channel C2 triage.",
+      "mitreTechniqueId": "T1573",
+      "mitreTechniqueName": "Encrypted Channel",
+      "eventTypes": [
+        "network.tls",
+        "tls.connection",
+        "pcap.tls"
+      ],
+      "dataContains": {
+        "sni": [
+          "<empty>",
+          "<missing>",
+          "missing",
+          "none",
+          "<encrypted>"
+        ],
+        "serverName": [
+          "<empty>",
+          "<missing>",
+          "missing",
+          "none",
+          "<encrypted>"
+        ],
+        "classification": [
+          "rare-ja3",
+          "malicious-ja3",
+          "no-sni",
+          "encrypted-sni"
+        ],
+        "ja3Reputation": [
+          "rare",
+          "malicious",
+          "suspicious"
+        ]
+      },
+      "tags": [
+        "network",
+        "tls",
+        "c2",
+        "placeholder"
+      ]
+    },
+    {
+      "id": "quic-http3-network-activity",
+      "title": "QUIC or HTTP/3 network activity",
+      "severity": "medium",
+      "summary": "UDP, flow, or TLS metadata referenced QUIC/HTTP3/ALPN h3 traffic that can carry encrypted command-and-control over web ports.",
+      "mitreTechniqueId": "T1071.001",
+      "mitreTechniqueName": "Web Protocols",
+      "eventTypes": [
+        "network.udp",
+        "pcap.udp",
+        "pcap.flow",
+        "network.flow",
+        "pcap.tls"
+      ],
+      "dataContains": {
+        "protocol": [
+          "quic",
+          "http/3",
+          "h3"
+        ],
+        "protocolName": [
+          "quic",
+          "http/3",
+          "h3"
+        ],
+        "alpn": [
+          "h3",
+          "h3-29",
+          "h3-32"
+        ],
+        "remotePort": [
+          "443",
+          "784",
+          "8853"
+        ],
+        "destinationPort": [
+          "443",
+          "784",
+          "8853"
+        ]
+      },
+      "tags": [
+        "network",
+        "quic",
+        "http3",
+        "c2"
+      ]
+    },
+    {
+      "id": "pcap-beacon-interval-placeholder",
+      "title": "PCAP beacon interval placeholder",
+      "severity": "medium",
+      "summary": "PCAP or flow telemetry included beacon interval, jitter, or periodicity fields for future C2 timing correlation.",
+      "mitreTechniqueId": "T1071.001",
+      "mitreTechniqueName": "Web Protocols",
+      "eventTypes": [
+        "pcap.flow",
+        "network.flow",
+        "pcap.summary"
+      ],
+      "dataKeys": [
+        "beaconIntervalSeconds",
+        "jitterPercent",
+        "periodicFlowCount",
+        "flowIntervalSeconds"
+      ],
+      "tags": [
+        "network",
+        "pcap",
+        "beacon",
+        "placeholder"
+      ]
+    },
+    {
+      "id": "packet-capture-artifact-indexed",
+      "title": "Packet capture artifact indexed",
+      "severity": "info",
+      "summary": "A manifest, host artifact, or PCAP import event recorded a packet-capture artifact path, hash, MIME type, or byte size for report linkage.",
+      "eventTypes": [
+        "artifact.packet_capture.indexed",
+        "pcap.artifact.indexed",
+        "artifact.manifest.written"
+      ],
+      "dataContains": {
+        "kind": [
+          "PacketCapture"
+        ],
+        "mimeType": [
+          "pcap",
+          "pcapng"
+        ],
+        "relativePath": [
+          ".pcap",
+          ".pcapng"
+        ],
+        "path": [
+          ".pcap",
+          ".pcapng"
+        ]
+      },
+      "dataKeys": [
+        "pcapPath",
+        "packetCapturePath",
+        "pcapSha256",
+        "pcapSizeBytes"
+      ],
+      "tags": [
+        "artifact",
+        "pcap",
+        "evidence"
       ]
     }
   ]

@@ -288,12 +288,30 @@ driver service is installed, signed, loaded, or returning live events.
 Use `scripts/Test-R0Readiness.ps1` before a real VM run. Its default mode is
 non-destructive and does not open `\\.\KSwordSandboxDriver`. It checks source
 files, `.sys` git hygiene, driver readability, Authenticode status,
-Administrator status, test-signing state, and read-only service state:
+Administrator status, test-signing state, read-only service state, and a
+no-device `R0Collector ABI self-check` when the collector executable exists:
 
 ```powershell
 .\scripts\Test-R0Readiness.ps1 `
   -DriverSysPath C:\KSwordSandbox\driver\KSword.Sandbox.Driver.sys `
   -R0CollectorPath C:\KSwordSandbox\tools\KSword.Sandbox.R0Collector.exe
+```
+
+The readiness script invokes the collector as
+`--abi-self-check --out <CollectorAbiSelfCheckOutputPath>` in default mode. It
+does not pass `--device`, does not open the driver object, does not issue
+`DeviceIoControl`, does not load the service, and does not call `CSignTool`.
+If Windows endpoint policy blocks the unsigned collector executable, the script
+reports that row as a `Warning` / non-fatal readiness gap instead of interrupting
+the rest of the readiness output.
+
+Use `-CollectorAbiSelfCheckOutputPath <path>` when the VM image bake or CI job
+needs the JSONL evidence in a stable location:
+
+```powershell
+.\scripts\Test-R0Readiness.ps1 `
+  -R0CollectorPath C:\KSwordSandbox\tools\KSword.Sandbox.R0Collector.exe `
+  -CollectorAbiSelfCheckOutputPath C:\KSwordSandbox\out\r0collector-abi-self-check.jsonl
 ```
 
 After the signed driver service is explicitly installed and started in the VM,

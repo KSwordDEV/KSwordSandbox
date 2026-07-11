@@ -21,6 +21,7 @@ public sealed class StaticAnalyzer
     private const int MaxImportEvidence = 96;
     private const int MaxExportNames = 64;
     private const int MaxTlsCallbacks = 32;
+    private const int MaxCertificateEntries = 16;
     private const int MaxResourceEntries = 160;
     private const int MaxResourceEvidence = 96;
     private const int MaxResourceDepth = 4;
@@ -369,6 +370,7 @@ public sealed class StaticAnalyzer
         var subsystemText = DescribeSubsystem(subsystem);
         AddPeTags(optionalMagic, subsystemText, sections, tags);
         AnalyzePeDataDirectories(reader, dataDirectories, sectionLayouts, optionalMagic, imageBase, fileLength, tags, interestingStrings, warnings);
+        AnalyzePeOverlayAndSignature(reader, dataDirectories, sectionLayouts, fileLength, tags, interestingStrings, warnings);
 
         return new StaticAnalysisResult
         {
@@ -978,6 +980,181 @@ public sealed class StaticAnalyzer
         {
             ReadTlsDirectory(reader, directories[9], sections, optionalMagic, imageBase, fileLength, tags, interestingStrings, warnings);
         }
+    }
+
+    /// <summary>
+    /// Extracts PE overlay and Authenticode certificate-table evidence.
+    /// Inputs are parsed data directories and section layouts; processing keeps
+    /// certificate-table parsing bounded and treats the PE security directory
+    /// as a raw file offset per the PE format; the method records tags and
+    /// human-readable evidence strings.
+    /// </summary>
+    private static void AnalyzePeOverlayAndSignature(
+        BinaryReader reader,
+        IReadOnlyList<PeDataDirectory> directories,
+        IReadOnlyList<PeSectionLayout> sections,
+        long fileLength,
+        SortedSet<string> tags,
+        SortedSet<string> interestingStrings,
+        List<string> warnings)
+    {
+        var securityDirectory = directories.Count > 4 ? directories[4] : new PeDataDirectory(0, 0);
+        var certificateTable = ReadCertificateTable(reader, securityDirectory, fileLength, tags, interestingStrings, warnings);
+        ReadOverlayEvidence(reader, sections, fileLength, certificateTable, tags, interestingStrings, warnings);
+    }
+
+    /// <summary>
+    /// Reads the IMAGE_DIRECTORY_ENTRY_SECURITY certificate table.
+    /// Inputs are the PE security directory, which stores a raw file offset
+    /// rather than an RVA; processing walks bounded WIN_CERTIFICATE entries;
+    /// the method returns the valid certificate interval when available.
+    /// </summary>
+    private static FileInterval? ReadCertificateTable(
+        BinaryReader reader,
+        PeDataDirectory securityDirectory,
+        long fileLength,
+        SortedSet<string> tags,
+        SortedSet<string> interestingStrings,
+        List<string> warnings)
+    {
+        if (!securityDirectory.IsPresent || securityDirectory.Size == 0)
+        {
+            return null;
+        }
+
+        tags.Add("security_directory_present");
+        var offset = (long)securityDirectory.Rva;
+        var size = (long)securityDirectory.Size;
+        AddInterestingString(interestingStrings, $"signature:certificate-table@0x{offset:X},size={size}");
+        if (offset < 0 || size < 8 || offset > fileLength - size)
+        {
+            tags.Add("invalid_security_directory");
+            warnings.Add($"PE security directory at 0x{offset:X} with size {size} is outside the file.");
+            return null;
+        }
+
+        tags.Add("digital_signature_present");
+        tags.Add("authenticode_signature_present");
+        var endOffset = offset + size;
+        var cursor = offset;
+        var entryCount = 0;
+        while (cursor <= endOffset - 8 && entryCount < MaxCertificateEntries)
+        {
+            if (!TryReadUInt32At(reader, cursor, fileLength, out var certificateLength) ||
+                !TryReadUInt16At(reader, cursor + sizeof(uint), fileLength, out var revision) ||
+                !TryReadUInt16At(reader, cursor + sizeof(uint) + sizeof(ushort), fileLength, out var certificateType))
+            {
+                break;
+            }
+
+            if (certificateLength < 8 || cursor + certificateLength > endOffset)
+            {
+                tags.Add("invalid_certificate_table");
+                warnings.Add($"WIN_CERTIFICATE entry at 0x{cursor:X} has invalid length {certificateLength}.");
+                break;
+            }
+
+            entryCount++;
+            var certificateTypeText = DescribeCertificateType(certificateType);
+            if (certificateType == 0x0002)
+            {
+                tags.Add("signature_pkcs_signed_data");
+            }
+
+            AddInterestingString(
+                interestingStrings,
+                $"signature:certificate[{entryCount}],type={certificateTypeText},revision=0x{revision:X4},size={certificateLength}");
+
+            var alignedLength = AlignToEight(certificateLength);
+            if (alignedLength <= 0)
+            {
+                break;
+            }
+
+            cursor += alignedLength;
+        }
+
+        if (cursor <= endOffset - 8 && entryCount >= MaxCertificateEntries)
+        {
+            warnings.Add($"Certificate-table scan truncated at {MaxCertificateEntries} entries.");
+        }
+
+        if (entryCount == 0)
+        {
+            tags.Add("certificate_table_unparsed");
+        }
+
+        return new FileInterval(offset, endOffset);
+    }
+
+    /// <summary>
+    /// Records bytes after the last section raw-data end as PE overlay.
+    /// Inputs are section layouts, file length, and optional certificate-table
+    /// interval; processing distinguishes certificate-only overlay from
+    /// non-certificate appended data and calculates bounded entropy evidence.
+    /// </summary>
+    private static void ReadOverlayEvidence(
+        BinaryReader reader,
+        IReadOnlyList<PeSectionLayout> sections,
+        long fileLength,
+        FileInterval? certificateTable,
+        SortedSet<string> tags,
+        SortedSet<string> interestingStrings,
+        List<string> warnings)
+    {
+        if (!TryGetRawImageEnd(sections, fileLength, out var rawImageEnd) || rawImageEnd >= fileLength)
+        {
+            return;
+        }
+
+        var overlay = new FileInterval(rawImageEnd, fileLength);
+        var overlaySize = overlay.Length;
+        tags.Add("overlay_present");
+        tags.Add("pe_overlay");
+        AddInterestingString(interestingStrings, $"overlay:start=0x{overlay.Start:X},size={overlaySize}");
+
+        FileInterval? certificateOverlay = null;
+        if (certificateTable is { } certificate && certificate.Overlaps(overlay))
+        {
+            certificateOverlay = certificate.Intersect(overlay);
+            tags.Add("overlay_contains_certificate_table");
+            AddInterestingString(
+                interestingStrings,
+                $"overlay:certificate-table@0x{certificateOverlay.Value.Start:X},size={certificateOverlay.Value.Length}");
+        }
+
+        var nonCertificateSegments = SubtractInterval(overlay, certificateOverlay).ToList();
+        var nonCertificateSize = nonCertificateSegments.Sum(segment => segment.Length);
+        if (nonCertificateSize == 0)
+        {
+            tags.Add("overlay_certificate_table_only");
+            return;
+        }
+
+        tags.Add("overlay_non_certificate_data");
+        AddInterestingString(interestingStrings, $"overlay:non-certificate-size={nonCertificateSize}");
+        if (nonCertificateSize >= 1024 * 1024)
+        {
+            tags.Add("overlay_large_data");
+        }
+
+        var largestSegment = nonCertificateSegments
+            .OrderByDescending(segment => segment.Length)
+            .First();
+        if (largestSegment.Length <= 0)
+        {
+            return;
+        }
+
+        var entropy = CalculateEntropy(reader, largestSegment.Start, (uint)Math.Min(largestSegment.Length, uint.MaxValue), fileLength, warnings);
+        if (entropy >= 7.2)
+        {
+            tags.Add("overlay_high_entropy");
+        }
+
+        AddInterestingString(
+            interestingStrings,
+            $"overlay:non-certificate@0x{largestSegment.Start:X},size={largestSegment.Length},entropy={Math.Round(entropy, 3):F3}");
     }
 
     /// <summary>
@@ -1700,6 +1877,79 @@ public sealed class StaticAnalyzer
     }
 
     /// <summary>
+    /// Calculates the end offset of mapped PE section raw data.
+    /// Inputs are section layouts and file length; processing ignores clearly
+    /// invalid raw ranges; the method returns false when no raw section exists.
+    /// </summary>
+    private static bool TryGetRawImageEnd(IReadOnlyList<PeSectionLayout> sections, long fileLength, out long rawImageEnd)
+    {
+        rawImageEnd = 0;
+        foreach (var section in sections)
+        {
+            if (section.RawSize == 0 || section.RawPointer >= fileLength)
+            {
+                continue;
+            }
+
+            var sectionEnd = Math.Min(fileLength, (long)section.RawPointer + section.RawSize);
+            if (sectionEnd > rawImageEnd)
+            {
+                rawImageEnd = sectionEnd;
+            }
+        }
+
+        return rawImageEnd > 0;
+    }
+
+    /// <summary>
+    /// Subtracts one optional interval from another.
+    /// Inputs are file intervals, processing returns the remaining left/right
+    /// segments, and the method yields only positive-length intervals.
+    /// </summary>
+    private static IEnumerable<FileInterval> SubtractInterval(FileInterval interval, FileInterval? excluded)
+    {
+        if (excluded is not { } value || !value.Overlaps(interval))
+        {
+            yield return interval;
+            yield break;
+        }
+
+        var overlap = value.Intersect(interval);
+        if (interval.Start < overlap.Start)
+        {
+            yield return new FileInterval(interval.Start, overlap.Start);
+        }
+
+        if (overlap.End < interval.End)
+        {
+            yield return new FileInterval(overlap.End, interval.End);
+        }
+    }
+
+    /// <summary>
+    /// Aligns a certificate-entry length to the PE eight-byte boundary.
+    /// </summary>
+    private static long AlignToEight(uint value)
+    {
+        return ((long)value + 7L) & ~7L;
+    }
+
+    /// <summary>
+    /// Describes WIN_CERTIFICATE type values for static evidence.
+    /// </summary>
+    private static string DescribeCertificateType(ushort certificateType)
+    {
+        return certificateType switch
+        {
+            0x0001 => "x509",
+            0x0002 => "pkcs-signed-data",
+            0x0003 => "reserved1",
+            0x0004 => "ts-stack-signed",
+            _ => $"0x{certificateType:X4}"
+        };
+    }
+
+    /// <summary>
     /// Converts an RVA to a raw file offset by using section layout metadata.
     /// Inputs are RVA, sections, and file length; processing checks section
     /// ranges and header RVAs, and the method returns whether mapping worked.
@@ -2193,4 +2443,18 @@ public sealed class StaticAnalyzer
     /// the value is not exposed in report models.
     /// </summary>
     private sealed record PeSectionLayout(string Name, uint VirtualAddress, uint VirtualSize, uint RawSize, uint RawPointer);
+
+    /// <summary>
+    /// Internal raw-file interval used for overlay/certificate-table parsing.
+    /// Inputs are start and exclusive end offsets; processing is simple storage
+    /// plus overlap helpers; the value is not exposed in report models.
+    /// </summary>
+    private readonly record struct FileInterval(long Start, long End)
+    {
+        public long Length => Math.Max(0, End - Start);
+
+        public bool Overlaps(FileInterval other) => Start < other.End && other.Start < End;
+
+        public FileInterval Intersect(FileInterval other) => new(Math.Max(Start, other.Start), Math.Min(End, other.End));
+    }
 }

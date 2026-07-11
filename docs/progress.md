@@ -7,7 +7,7 @@ a final HTML report.
 
 ## Current estimated completion
 
-- Overall v1 deliverable: **67%**
+- Overall v1 deliverable: **68%**
 - Minimum usable E2E chain on this host: **80%**
 - Repository architecture, docs, module boundaries, policy: **82%**
 - Core job/event/rule/report models: **74%**
@@ -15,12 +15,12 @@ a final HTML report.
 - Live raw telemetry contract: **80%**
 - Hyper-V runbook generation and execution recording: **69%**
 - Golden VM / payload staging / operator readiness: **58%**
-- Guest Agent dynamic collection: **72%**
+- Guest Agent dynamic collection: **74%**
 - R0 Driver + R0Collector: **60%**
 - Static analysis and behavior rules: **66%**
 - HTML report generation: **79%**
-- Artifact manifest and dropped-file plumbing: **72%**
-- Tests and quality gates: **74%**
+- Artifact manifest and dropped-file plumbing: **75%**
+- Tests and quality gates: **75%**
 - Install/operations/security hardening: **32%**
 
 ## Evidence already present
@@ -87,24 +87,25 @@ a final HTML report.
   persistence, service/task abuse, PowerShell/script launch, download-execute,
   process injection signals, credential/LSASS/browser-store access, lateral
   movement, anti-sandbox checks, firewall/tool tampering, DNS/HTTP/TLS/C2,
-  PCAP placeholders, screenshots, memory dumps, dropped-file artifacts, process
+  PCAP evidence, screenshots, memory dumps, dropped-file artifacts, process
   trees, and MITRE map consistency.
 - Guest Agent artifact collection now has opt-in dropped-file, screenshot,
-  memory-dump, and packet-capture placeholder lanes. Dropped files are copied
-  under `artifacts/dropped-files/**` with manifest metadata; screenshots and
-  memory dumps remain off by default; packet capture currently records a safe
-  `PacketCapture` collection placeholder and does not start a sniffer.
+  memory-dump, and packet-capture lanes. Dropped files are copied under
+  `artifacts/dropped-files/**` with manifest metadata; screenshots and memory
+  dumps remain off by default; packet capture is explicit opt-in and uses
+  Windows `pktmon` to produce `packet-captures/*.pcapng` when the guest permits
+  it.
 - Artifact manifests now carry collection status metadata (`collections`,
   `evidenceRole`, `capturePhase`, `captureState`, `guestPath`, `importPath`,
-  and `collectionName`), and host indexing recognizes memory dumps plus future
+  and `collectionName`), and host indexing recognizes memory dumps plus
   `.pcap` / `.pcapng` files.
 - Screenshot collection remains opt-in but now supports a default
   `before,during,after` cadence, `--screenshot-phases` /
   `--screenshot-stages`, and bounded `--screenshot-count 1..5`; skipped
   screenshots stay non-fatal on headless or unsupported guests.
 - Host artifact indexing now exposes collection summaries and can consume
-  externally generated `.pcap` / `.pcapng` artifacts without starting a sniffer;
-  packet captures appear in report artifact links when present.
+  guest-generated or externally supplied `.pcap` / `.pcapng` artifacts; packet
+  captures appear in report artifact links when present.
 - PCAP artifacts are now parsed into bounded normalized `pcap.summary`,
   `pcap.flow`, `pcap.dns`, `pcap.http`, and `pcap.tls` events for Ethernet /
   IPv4 / TCP / UDP captures. Guest event import merges sibling PCAP files into
@@ -135,9 +136,10 @@ a final HTML report.
 3. Continue report evidence polish beyond the new relationship cards: improve
    visual process-tree layout, timeline grouping, artifact cards, and screenshot
    evidence placement.
-4. Finish real screenshot capture validation and PCAP/network-flow capture. The
-   host importer can parse existing packet captures, but the guest still needs a
-   reliable opt-in sniffer path that produces those artifacts automatically.
+4. Finish real screenshot capture validation and repeated PCAP/network-flow
+   validation. The guest now has an opt-in pktmon path, but it still needs live
+   VM validation across privilege levels, existing-capture conflicts, and large
+   trace conversion.
 5. Move from single golden VM restore to safer temporary VM or differencing-disk
    isolation before any broader sample testing.
 6. Broaden VirusTotal and external intelligence presentation beyond the first
@@ -153,8 +155,9 @@ a final HTML report.
   each script change, then run the live mode only from an elevated test session.
 - Use `Prepare-HarmlessSample.ps1` and the runbook checklist to build the
   executable outside git for live Hyper-V validation.
-- Promote packet-capture placeholder into a real opt-in PCAP collection path in
-  the guest; the host-side `.pcap/.pcapng` importer is now present.
+- Validate the new opt-in guest pktmon PCAP collection path inside the prepared
+  VM and ensure generated `.pcapng` artifacts are imported into the final
+  report during live Hyper-V runs.
 - Add richer visual process-tree layout, timeline grouping, and artifact cards
   on top of the new process/network relationship cards.
 - Run native build and full smoke after each R0/collector merge.

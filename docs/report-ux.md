@@ -24,8 +24,16 @@ Required `report.html`, `report.zh.html`, and `report.en.html` sections:
   process-to-network, and process-to-artifact edges from normalized telemetry.
   It must include Evidence graph edges and IOC summary cards so the final report
   feels like an analyst-facing sandbox report rather than only raw tables.
-- Timeline.
-- Process details / 进程, including the Process tree and process event table.
+- Timeline. The timeline must use timeline grouping so bursty telemetry is
+  readable in chronological order: group by a stable time bucket, show event
+  counts and event-family summaries, keep a bounded timeline inline, and point
+  to raw events/report JSON for complete evidence.
+- Process details / 进程, including the Process tree, process relationship
+  tree, process relationship cards, and process event table. The tree should
+  prefer a stable process key when present and fall back to PID/PPID so parent,
+  child, and orphan relationships remain stable without JavaScript.
+  This stable process relationship tree must remain readable without opening
+  raw evidence first.
 - File behavior / 文件, including dropped files.
 - Artifact links / 证据文件链接 must include `events.json`,
   `driver-events.jsonl`, artifact manifests, screenshots, dropped files,
@@ -62,6 +70,10 @@ plain diagnostic dump. The visual contract is:
   should prefer stable weak interactions over fragile canvas/SVG rendering:
   process graph nodes, Evidence graph edges, and IOC summary cards for network,
   file/path, registry, and artifact indicators.
+- Timeline and process relationship views should also prefer stable weak
+  interactions: native HTML/CSS timeline group panels, a bounded process
+  relationship tree, and copyable relationship cards rather than external graph
+  JavaScript.
 - The report must support Chinese and English rendering entrypoints, or
   equivalent core renderer support for `report.zh.html` and `report.en.html`.
 - Each generated HTML report should expose an in-report bilingual entry bar

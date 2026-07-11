@@ -36,7 +36,16 @@ public sealed record HtmlReportDocument(string FileName, HtmlReportLanguage Lang
 public sealed class HtmlReportRenderer
 {
     private const int ArtifactPreviewCharacterLimit = 12_000;
+    private const int TimelineEventInlineLimit = 120;
+    private const int TimelineGroupEventInlineLimit = 12;
     private const int RawEventInlineLimit = 200;
+
+    private sealed record TimelineGroup(
+        string Window,
+        string Summary,
+        int TotalEventCount,
+        IReadOnlyList<SandboxEvent> Events,
+        string CopyText);
 
     private sealed record BehaviorGraphEdge(string From, string Relation, string To, string Evidence);
 
@@ -54,9 +63,11 @@ public sealed class HtmlReportRenderer
         int NetworkCount,
         string FirstSeen,
         string LastSeen,
+        string ParentLabel,
         string Path,
         string CommandLine,
         IReadOnlyList<string> ChildLabels,
+        IReadOnlyList<string> RelationshipLines,
         IReadOnlyList<string> EvidenceLines,
         string CopyText);
 
@@ -236,10 +247,10 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
 .empty{background:linear-gradient(180deg,#fff,#f7fbff);border:1px dashed #b9d7f3;border-radius:12px;color:var(--muted);padding:14px}
 .copy-btn{background:rgba(67,160,255,.12);border:1px solid rgba(67,160,255,.45);border-radius:999px;color:#075985;cursor:pointer;font-size:12px;font-weight:700;margin:2px 0;padding:5px 10px}.copyable{cursor:copy}.copy-hint{color:var(--muted);font-size:12px;margin-top:8px}
 .event-table td:first-child{white-space:nowrap}.event-table td:nth-child(2){min-width:140px}.event-table td:nth-child(4){min-width:140px}.event-table td:nth-child(5){min-width:260px}.event-table .evidence{min-width:280px}
-.timeline{border-left:3px solid rgba(67,160,255,.45);margin:14px 0 0 8px;padding-left:18px}.timeline-item{background:#f9fcff;border:1px solid var(--line);border-radius:12px;margin:0 0 12px;padding:10px 12px;position:relative}.timeline-item:before{background:var(--primary);border:3px solid var(--primary-soft);border-radius:999px;content:'';height:11px;left:-26px;position:absolute;top:13px;width:11px}
+.timeline-groups{display:grid;gap:12px;margin-top:14px}.timeline-group{background:#fbfdff;border:1px solid var(--line);border-radius:16px;overflow:hidden}.timeline-group>summary{align-items:flex-start;cursor:pointer;display:flex;gap:10px;justify-content:space-between;list-style:none;padding:12px 14px}.timeline-group>summary::-webkit-details-marker{display:none}.timeline-group>summary:before{color:var(--primary-deep);content:'▶';font-weight:900;margin-top:2px}.timeline-group[open]>summary:before{content:'▼'}.timeline-group small{color:var(--muted);display:block;line-height:1.4;margin-top:3px}.timeline{border-left:3px solid rgba(67,160,255,.45);margin:0 14px 14px 20px;padding:12px 0 0 18px}.timeline-item{background:#f9fcff;border:1px solid var(--line);border-radius:12px;margin:0 0 12px;padding:10px 12px;position:relative}.timeline-item:before{background:var(--primary);border:3px solid var(--primary-soft);border-radius:999px;content:'';height:11px;left:-26px;position:absolute;top:13px;width:11px}.timeline-overflow{background:#f1f7ff;border:1px dashed #b9d7f3;border-radius:12px;color:var(--muted);margin:0 0 12px;padding:9px 11px}
 .graph-map{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));margin-top:12px}.graph-node{background:#f8fbff;border:1px solid var(--line);border-left:4px solid var(--primary);border-radius:14px;padding:12px}.graph-node strong{display:block;margin-bottom:4px}.graph-node small{color:var(--muted);display:block;line-height:1.4}.edge-table td:nth-child(1),.edge-table td:nth-child(3){min-width:170px}.ioc-grid{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));margin-top:14px}.ioc-card{background:#ffffff;border:1px solid var(--line);border-radius:14px;padding:12px}.ioc-card h3{font-size:15px;margin:0 0 8px}.ioc-card ul{margin:0;padding-left:18px}.ioc-card li{margin:5px 0;word-break:break-word}
 .evidence-summary-grid,.relation-grid{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));margin-top:14px}.evidence-summary-card,.relation-card{background:linear-gradient(180deg,#ffffff,#f7fbff);border:1px solid var(--line);border-radius:18px;box-shadow:0 10px 28px rgba(15,23,42,.06);max-height:46vh;overflow:auto;padding:14px;position:relative}.evidence-summary-card:before,.relation-card:before{background:linear-gradient(180deg,var(--primary),#93c5fd);border-radius:18px 0 0 18px;content:'';height:100%;left:0;position:absolute;top:0;width:3px}.evidence-summary-card h3,.relation-card h3{font-size:15px;margin:0 0 8px;padding-left:4px}.summary-value{color:#075985;display:block;font-size:26px;font-weight:900;letter-spacing:-.04em}.relationship-meta{display:grid;gap:6px;grid-template-columns:repeat(2,minmax(0,1fr));margin:10px 0}.relationship-meta span{background:#eef7ff;border:1px solid #cfe6fb;border-radius:10px;color:#075985;font-size:12px;font-weight:700;padding:7px}.relationship-tags{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}.relationship-tags .chip{margin:0}.relationship-details{background:#fbfdff;border:1px solid var(--line);border-radius:12px;margin-top:10px;padding:8px}.relationship-details summary{cursor:pointer;font-weight:800}.relationship-details pre{max-height:30vh;overflow:auto;white-space:pre-wrap;word-break:break-word}.relationship-title{display:flex;align-items:flex-start;gap:8px;justify-content:space-between}.relationship-title code{max-width:100%;overflow-wrap:anywhere}.anchor-offset{scroll-margin-top:18px}.mono-list{font-family:Consolas,monospace;font-size:12px;line-height:1.45;margin:6px 0 0 0;padding-left:18px}.mono-list li{margin:3px 0;word-break:break-word}
-.tree{font-family:Consolas,monospace;line-height:1.5;margin:12px 0}.tree ul{border-left:1px dashed #b9d7f3;list-style:none;margin:0 0 0 18px;padding-left:14px}.tree li{margin:5px 0}
+.tree{font-family:Consolas,monospace;line-height:1.5;margin:12px 0}.tree ul{border-left:1px dashed #b9d7f3;list-style:none;margin:0 0 0 18px;padding-left:14px}.tree li{margin:5px 0}.process-tree{background:#fbfdff;border:1px solid var(--line);border-radius:16px;max-height:46vh;overflow:auto;padding:12px}.process-tree details.process-tree-node{margin:4px 0}.process-tree summary,.process-tree-leaf{align-items:center;cursor:pointer;display:flex;flex-wrap:wrap;gap:8px;list-style:none}.process-tree summary::-webkit-details-marker{display:none}.process-tree summary:before{color:var(--primary-deep);content:'▶';font-weight:900}.process-tree details[open]>summary:before{content:'▼'}.tree-badges{display:flex;flex-wrap:wrap;gap:5px}.tree-badge{background:#eef7ff;border:1px solid #cfe6fb;border-radius:999px;color:#075985;font-family:Segoe UI,Arial,sans-serif;font-size:11px;font-weight:800;padding:2px 7px}
 .evidence{max-width:560px}.evidence details{background:#f7fbff;border:1px solid var(--line);border-radius:12px;padding:8px}.evidence summary{cursor:pointer;font-weight:700}.evidence pre{white-space:pre-wrap;word-break:break-word}
 .toolbar{display:flex;gap:8px;justify-content:flex-end}.columns{display:grid;gap:14px;grid-template-columns:1fr 1fr}.compact-list{margin:8px 0 0 0;padding-left:18px}.compact-list li{margin:4px 0}
 .artifact-ref{font-weight:700}.artifact-list{list-style:none;margin:8px 0 0 0;padding:0}.artifact-list li{border-top:1px solid #e2e8f0;margin-top:8px;padding-top:8px}.artifact-preview img{border:1px solid #cbd5e1;border-radius:10px;max-height:260px;max-width:100%}
@@ -826,7 +837,7 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
         html.AppendLine("<section id=\"timeline\" class=\"card\"><h2>Timeline</h2>");
         var events = report.Events
             .OrderBy(e => e.Timestamp)
-            .Take(80)
+            .Take(TimelineEventInlineLimit)
             .ToList();
         if (events.Count == 0)
         {
@@ -835,16 +846,99 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
             return;
         }
 
-        html.AppendLine("<div class=\"timeline\">");
-        foreach (var evt in events)
+        var hiddenEvents = Math.Max(0, report.Events.Count - events.Count);
+        var groups = BuildTimelineGroups(events);
+        html.AppendLine("<div class=\"section-note\"><strong>Timeline grouping.</strong> Grouped by UTC minute with process/type summaries; large buckets show representative events first.</div>");
+        if (hiddenEvents > 0)
         {
-            var copy = EventToPlainText(evt);
-            var relatedArtifacts = FindRelatedArtifacts(evt, artifactLookup, artifacts);
-            html.AppendLine($"<div class=\"timeline-item copyable\" data-copy=\"{A(copy)}\"><strong>{E(evt.Timestamp.ToString("u"))}</strong> <span class=\"badge badge-info\">{E(evt.EventType)}</span><br><span class=\"muted\">{E(evt.ProcessName ?? evt.Source)} {RenderInlineEventLocation(evt, relatedArtifacts)}</span></div>");
+            html.AppendLine($"<div class=\"copy-hint\">Timeline is capped for readability; open Raw normalized events or report.json for complete evidence. {E(hiddenEvents.ToString())} additional timeline events are hidden.</div>");
+        }
+
+        html.AppendLine("<div class=\"timeline-groups\">");
+        for (var index = 0; index < groups.Count; index++)
+        {
+            var group = groups[index];
+            var open = index < 3 ? " open" : string.Empty;
+            html.AppendLine($"<details class=\"timeline-group\"{open}>");
+            html.AppendLine($"<summary class=\"timeline-group-summary copyable\" data-copy=\"{A(group.CopyText)}\"><span><strong>{E(group.Window)}</strong><small>{E(group.Summary)}</small></span><span class=\"badge badge-info\">{E(group.TotalEventCount.ToString())} events</span></summary>");
+            html.AppendLine("<div class=\"timeline\">");
+            foreach (var evt in group.Events.Take(TimelineGroupEventInlineLimit))
+            {
+                var copy = EventToPlainText(evt);
+                var relatedArtifacts = FindRelatedArtifacts(evt, artifactLookup, artifacts);
+                html.AppendLine($"<div class=\"timeline-item copyable\" data-copy=\"{A(copy)}\"><strong>{E(evt.Timestamp.ToString("u"))}</strong> <span class=\"badge badge-info\">{E(evt.EventType)}</span> <span class=\"chip chip-info\">{E(EventFamilyLabel(evt))}</span><br><span class=\"muted\">{E(evt.ProcessName ?? evt.Source)} {RenderInlineEventLocation(evt, relatedArtifacts)}</span></div>");
+            }
+
+            var groupHidden = group.TotalEventCount - Math.Min(group.TotalEventCount, TimelineGroupEventInlineLimit);
+            if (groupHidden > 0)
+            {
+                html.AppendLine($"<div class=\"timeline-overflow\">{E(groupHidden.ToString())} additional events in this group are hidden; open Raw normalized events or report.json for complete evidence.</div>");
+            }
+
+            html.AppendLine("</div></details>");
         }
 
         html.AppendLine("</div><div class=\"copy-hint\">Right-click timeline entries, table cells, or evidence blocks to copy their contents.</div></section>");
     }
+
+    /// <summary>
+    /// Groups timeline events by UTC minute for stable native-HTML expansion.
+    /// Inputs are already ordered/capped events; processing builds summary and
+    /// copy text per bucket; the method returns chronological timeline groups.
+    /// </summary>
+    private static IReadOnlyList<TimelineGroup> BuildTimelineGroups(IReadOnlyCollection<SandboxEvent> events)
+    {
+        return events
+            .GroupBy(evt => TimelineGroupWindow(evt.Timestamp), StringComparer.Ordinal)
+            .Select(group =>
+            {
+                var ordered = group.OrderBy(evt => evt.Timestamp).ToList();
+                var processes = ordered
+                    .Select(ProcessDisplayName)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .Take(6)
+                    .ToList();
+                var families = ordered
+                    .Select(EventFamilyLabel)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .OrderBy(value => value, StringComparer.OrdinalIgnoreCase)
+                    .Take(6)
+                    .ToList();
+                var eventTypes = ordered
+                    .Select(evt => evt.EventType)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .OrderBy(value => value, StringComparer.OrdinalIgnoreCase)
+                    .Take(8)
+                    .ToList();
+                var summary = $"Processes: {FormatLimitedList(processes)} | Event families: {FormatLimitedList(families)} | Event types: {FormatLimitedList(eventTypes)}";
+                var copyText = string.Join(
+                    Environment.NewLine,
+                    [
+                        $"Timeline group: {group.Key}",
+                        $"events={ordered.Count}",
+                        $"processes={string.Join(", ", processes)}",
+                        $"eventFamilies={string.Join(", ", families)}",
+                        $"eventTypes={string.Join(", ", eventTypes)}",
+                        "evidence:",
+                        .. ordered.Take(TimelineGroupEventInlineLimit).Select(EventOneLine)
+                    ]);
+                return new TimelineGroup(group.Key, summary, ordered.Count, ordered, copyText);
+            })
+            .OrderBy(group => group.Window, StringComparer.Ordinal)
+            .ToList();
+    }
+
+    /// <summary>
+    /// Formats one event timestamp as a minute-resolution UTC timeline bucket.
+    /// </summary>
+    private static string TimelineGroupWindow(DateTimeOffset timestamp) =>
+        timestamp.ToUniversalTime().ToString("yyyy-MM-dd HH:mm 'UTC'");
+
+    /// <summary>
+    /// Formats a bounded list for group summaries.
+    /// </summary>
+    private static string FormatLimitedList(IReadOnlyCollection<string> values) =>
+        values.Count == 0 ? "-" : string.Join(", ", values);
 
     /// <summary>
     /// Appends process-related event rows.
@@ -1221,7 +1315,7 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
     {
         var starts = report.Events
             .Where(e => string.Equals(e.EventType, "process.start", StringComparison.OrdinalIgnoreCase) && e.ProcessId.HasValue)
-            .GroupBy(e => e.ProcessId!.Value)
+            .GroupBy(ProcessIdentityKey, StringComparer.OrdinalIgnoreCase)
             .Select(g => g.OrderBy(e => e.Timestamp).First())
             .OrderBy(e => e.Timestamp)
             .ToList();
@@ -1231,19 +1325,25 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
             return;
         }
 
+        var known = starts
+            .SelectMany(ProcessLookupKeys)
+            .Where(key => !string.IsNullOrWhiteSpace(key))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
         var children = starts
-            .Where(e => e.ParentProcessId.HasValue)
-            .GroupBy(e => e.ParentProcessId!.Value)
-            .ToDictionary(g => g.Key, g => g.ToList());
-        var known = starts.Select(e => e.ProcessId!.Value).ToHashSet();
+            .Select(evt => new { Event = evt, ParentKey = ResolveParentProcessKey(evt, known) })
+            .Where(item => !string.IsNullOrWhiteSpace(item.ParentKey))
+            .GroupBy(item => item.ParentKey!, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.Select(item => item.Event).ToList(), StringComparer.OrdinalIgnoreCase);
         var roots = starts
-            .Where(e => !e.ParentProcessId.HasValue || !known.Contains(e.ParentProcessId.Value))
+            .Where(e => !ParentProcessLookupKeys(e).Any(known.Contains))
             .ToList();
 
-        html.AppendLine("<h3>Process tree</h3><div class=\"tree\"><ul>");
+        html.AppendLine("<h3>Process tree</h3>");
+        html.AppendLine("<div class=\"section-note\"><strong>Process relationship tree.</strong> Native expandable process tree grouped by stable process key when available, with PID/PPID fallback.</div>");
+        html.AppendLine("<div class=\"tree process-tree\"><ul>");
         foreach (var root in roots)
         {
-            AppendProcessTreeNode(html, root, children, new HashSet<int>());
+            AppendProcessTreeNode(html, root, children, new HashSet<string>(StringComparer.OrdinalIgnoreCase));
         }
 
         html.AppendLine("</ul></div>");
@@ -1254,23 +1354,65 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
     /// Inputs are a process event, child lookup, and visited set; processing
     /// prevents cycles; the method returns no value.
     /// </summary>
-    private static void AppendProcessTreeNode(StringBuilder html, SandboxEvent evt, IReadOnlyDictionary<int, List<SandboxEvent>> children, HashSet<int> visited)
+    private static void AppendProcessTreeNode(
+        StringBuilder html,
+        SandboxEvent evt,
+        IReadOnlyDictionary<string, List<SandboxEvent>> children,
+        HashSet<string> visited)
     {
-        var processId = evt.ProcessId ?? -1;
-        var label = $"{evt.ProcessName ?? "process"} pid={processId} ppid={evt.ParentProcessId?.ToString() ?? "-"} {evt.Path ?? evt.CommandLine ?? string.Empty}".Trim();
-        html.AppendLine($"<li class=\"copyable\" data-copy=\"{A(EventToPlainText(evt))}\"><code>{E(label)}</code>");
-        if (processId >= 0 && visited.Add(processId) && children.TryGetValue(processId, out var childEvents))
+        var processKey = ProcessIdentityKey(evt);
+        var label = ProcessTreeLabel(evt);
+        var childEvents = ProcessLookupKeys(evt)
+            .Where(children.ContainsKey)
+            .SelectMany(key => children[key])
+            .GroupBy(ProcessIdentityKey, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.OrderBy(child => child.Timestamp).First())
+            .OrderBy(child => child.Timestamp)
+            .ToList();
+        var badges = ProcessTreeBadges(evt, childEvents.Count);
+        if (childEvents.Count > 0)
         {
-            html.AppendLine("<ul>");
-            foreach (var child in childEvents.OrderBy(e => e.Timestamp))
+            html.AppendLine($"<li><details class=\"process-tree-node\" open><summary class=\"copyable\" data-copy=\"{A(EventToPlainText(evt))}\"><code>{E(label)}</code>{badges}</summary>");
+            if (!visited.Add(processKey))
             {
-                AppendProcessTreeNode(html, child, children, visited);
+                html.AppendLine("<ul><li><span class=\"muted\">Cycle suppressed for stable rendering.</span></li></ul>");
+                html.AppendLine("</details></li>");
+                return;
+            }
+
+            html.AppendLine("<ul>");
+            foreach (var child in childEvents)
+            {
+                AppendProcessTreeNode(html, child, children, new HashSet<string>(visited, StringComparer.OrdinalIgnoreCase));
             }
 
             html.AppendLine("</ul>");
+            html.AppendLine("</details></li>");
+            return;
         }
 
-        html.AppendLine("</li>");
+        html.AppendLine($"<li><div class=\"process-tree-leaf copyable\" data-copy=\"{A(EventToPlainText(evt))}\"><code>{E(label)}</code>{badges}</div></li>");
+    }
+
+    private static string ProcessTreeLabel(SandboxEvent evt)
+    {
+        var image = !string.IsNullOrWhiteSpace(evt.Path)
+            ? evt.Path
+            : evt.CommandLine ?? string.Empty;
+        return $"{ProcessGraphLabel(evt)} ppid:{evt.ParentProcessId?.ToString() ?? "-"} {image}".Trim();
+    }
+
+    private static string ProcessTreeBadges(SandboxEvent evt, int childCount)
+    {
+        var stableKey = FirstEventDataValue(evt, "processKey", "processGuid");
+        var keyLabel = string.IsNullOrWhiteSpace(stableKey) ? $"pid:{evt.ProcessId?.ToString() ?? "-"}" : stableKey;
+        var badges = new StringBuilder();
+        badges.Append("<span class=\"tree-badges\">");
+        badges.Append($"<span class=\"tree-badge\">key {E(keyLabel)}</span>");
+        badges.Append($"<span class=\"tree-badge\">children {E(childCount.ToString())}</span>");
+        badges.Append($"<span class=\"tree-badge\">start {E(evt.Timestamp.ToString("HH:mm:ss"))}</span>");
+        badges.Append("</span>");
+        return badges.ToString();
     }
 
     /// <summary>
@@ -1300,6 +1442,7 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
             html.AppendLine($"<span>Children: {E(card.ChildCount.ToString())}</span><span>Files: {E(card.FileCount.ToString())}</span>");
             html.AppendLine($"<span>Registry: {E(card.RegistryCount.ToString())}</span><span>Network: {E(card.NetworkCount.ToString())}</span>");
             html.AppendLine($"<span>First seen: {E(card.FirstSeen)}</span><span>Last seen: {E(card.LastSeen)}</span>");
+            html.AppendLine($"<span>Parent: {E(card.ParentLabel)}</span><span>Relationship lines: {E(card.RelationshipLines.Count.ToString())}</span>");
             html.AppendLine("</div>");
             if (!string.IsNullOrWhiteSpace(card.Path) || !string.IsNullOrWhiteSpace(card.CommandLine))
             {
@@ -1328,6 +1471,12 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
                 html.AppendLine("</ul></details>");
             }
 
+            if (card.RelationshipLines.Count > 0)
+            {
+                var relationships = string.Join(Environment.NewLine, card.RelationshipLines);
+                html.AppendLine($"<details class=\"relationship-details\"><summary>Stable relationship map</summary><pre class=\"copyable\" data-copy=\"{A(relationships)}\">{E(relationships)}</pre></details>");
+            }
+
             html.AppendLine("<div class=\"toolbar\">");
             html.AppendLine(CopyButton("Copy process card", card.CopyText));
             html.AppendLine("</div>");
@@ -1347,36 +1496,67 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
     {
         var starts = report.Events
             .Where(evt => string.Equals(evt.EventType, "process.start", StringComparison.OrdinalIgnoreCase) && evt.ProcessId.HasValue)
-            .GroupBy(evt => evt.ProcessId!.Value)
+            .GroupBy(ProcessIdentityKey, StringComparer.OrdinalIgnoreCase)
             .Select(group => group.OrderBy(evt => evt.Timestamp).First())
             .ToList();
+        var known = starts
+            .SelectMany(ProcessLookupKeys)
+            .Where(key => !string.IsNullOrWhiteSpace(key))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var processLabels = BuildProcessLabelLookup(report);
+        var canonicalKeys = BuildProcessCanonicalKeyLookup(report);
         var childrenByParent = starts
-            .Where(evt => evt.ParentProcessId.HasValue)
-            .GroupBy(evt => evt.ParentProcessId!.Value)
-            .ToDictionary(group => group.Key, group => group.OrderBy(evt => evt.Timestamp).Select(ProcessGraphLabel).Distinct(StringComparer.OrdinalIgnoreCase).ToList());
+            .Select(evt => new { Event = evt, ParentKey = ResolveParentProcessKey(evt, known) })
+            .Where(item => !string.IsNullOrWhiteSpace(item.ParentKey))
+            .GroupBy(item => item.ParentKey!, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(
+                group => group.Key,
+                group => group
+                    .OrderBy(item => item.Event.Timestamp)
+                    .Select(item => ResolveProcessLabel(item.Event, processLabels))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList(),
+                StringComparer.OrdinalIgnoreCase);
 
         return report.Events
             .Where(evt => evt.ProcessId.HasValue || !string.IsNullOrWhiteSpace(evt.ProcessName))
-            .GroupBy(ProcessIdentityKey, StringComparer.OrdinalIgnoreCase)
+            .GroupBy(evt => ResolveProcessGroupKey(evt, canonicalKeys), StringComparer.OrdinalIgnoreCase)
             .Select(group =>
             {
                 var events = group.OrderBy(evt => evt.Timestamp).ToList();
                 var first = events.First();
                 var last = events.Last();
-                IReadOnlyList<string> childLabels = first.ProcessId.HasValue && childrenByParent.TryGetValue(first.ProcessId.Value, out var children)
-                    ? children
-                    : [];
+                var childLabels = ProcessLookupKeys(first)
+                    .Where(childrenByParent.ContainsKey)
+                    .SelectMany(key => childrenByParent[key])
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .OrderBy(label => label, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
                 var fileCount = events.Count(IsFileEvent);
                 var registryCount = events.Count(IsRegistryEvent);
                 var networkCount = events.Count(IsNetworkEvent);
-                var label = ProcessGraphLabel(first);
+                var label = ResolveProcessLabel(first, processLabels);
+                var parentLabel = ResolveParentProcessLabel(first, processLabels);
                 var path = events.Select(evt => evt.Path).FirstOrDefault(value => !string.IsNullOrWhiteSpace(value)) ?? string.Empty;
                 var commandLine = events.Select(evt => evt.CommandLine).FirstOrDefault(value => !string.IsNullOrWhiteSpace(value)) ?? string.Empty;
                 var evidenceLines = events.Take(12).Select(EventOneLine).ToList();
+                var relationshipLines = new List<string>
+                {
+                    $"process={label}",
+                    $"processKey={ProcessIdentityKey(first)}",
+                    $"parentProcess={parentLabel}",
+                    $"parentProcessKey={string.Join(",", ParentProcessLookupKeys(first))}"
+                };
+                relationshipLines.AddRange(childLabels.Take(12).Select(child => $"child={child}"));
+                relationshipLines.Add($"files={fileCount}");
+                relationshipLines.Add($"registry={registryCount}");
+                relationshipLines.Add($"network={networkCount}");
                 var copyText = string.Join(
                     Environment.NewLine,
                     [
                         $"process={label}",
+                        $"processKey={ProcessIdentityKey(first)}",
+                        $"parentProcess={parentLabel}",
                         $"events={events.Count}",
                         $"children={childLabels.Count}",
                         $"files={fileCount}",
@@ -1401,9 +1581,11 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
                     networkCount,
                     first.Timestamp.ToString("u"),
                     last.Timestamp.ToString("u"),
+                    parentLabel,
                     path,
                     commandLine,
                     childLabels,
+                    relationshipLines,
                     evidenceLines,
                     copyText);
             })
@@ -1700,28 +1882,41 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
     /// </summary>
     private static IReadOnlyList<ProcessGraphNode> BuildProcessGraphNodes(AnalysisReport report)
     {
+        var canonicalKeys = BuildProcessCanonicalKeyLookup(report);
         var eventsByProcess = report.Events
             .Where(evt => evt.ProcessId.HasValue || !string.IsNullOrWhiteSpace(evt.ProcessName) || !string.IsNullOrWhiteSpace(evt.Path))
-            .GroupBy(ProcessIdentityKey, StringComparer.OrdinalIgnoreCase)
+            .GroupBy(evt => ResolveProcessGroupKey(evt, canonicalKeys), StringComparer.OrdinalIgnoreCase)
             .ToList();
+        var processLabels = BuildProcessLabelLookup(report);
+        var known = report.Events
+            .Where(evt => string.Equals(evt.EventType, "process.start", StringComparison.OrdinalIgnoreCase) && evt.ProcessId.HasValue)
+            .SelectMany(ProcessLookupKeys)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
         var childCounts = report.Events
             .Where(evt => evt.ProcessId.HasValue && evt.ParentProcessId.HasValue)
-            .GroupBy(evt => evt.ParentProcessId!.Value)
-            .ToDictionary(group => group.Key, group => group.Select(evt => evt.ProcessId!.Value).Distinct().Count());
+            .Select(evt => new { Event = evt, ParentKey = ResolveParentProcessKey(evt, known) ?? (evt.ParentProcessId.HasValue ? $"pid:{evt.ParentProcessId.Value}" : string.Empty) })
+            .Where(item => !string.IsNullOrWhiteSpace(item.ParentKey))
+            .GroupBy(item => item.ParentKey, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.Select(item => ResolveProcessGroupKey(item.Event, canonicalKeys)).Distinct(StringComparer.OrdinalIgnoreCase).Count(), StringComparer.OrdinalIgnoreCase);
 
         return eventsByProcess
             .Select(group =>
             {
                 var first = group.OrderBy(evt => evt.Timestamp).First();
-                var label = ProcessGraphLabel(first);
-                var childCount = first.ProcessId.HasValue && childCounts.TryGetValue(first.ProcessId.Value, out var children)
-                    ? children
-                    : 0;
+                var label = ResolveProcessLabel(first, processLabels);
+                var childCount = ProcessLookupKeys(first)
+                    .Where(childCounts.ContainsKey)
+                    .Sum(key => childCounts[key]);
+                if (childCount == 0 && first.ProcessId.HasValue && childCounts.TryGetValue($"pid:{first.ProcessId.Value}", out var pidChildren))
+                {
+                    childCount = pidChildren;
+                }
+
                 var detail = $"pid={first.ProcessId?.ToString() ?? "-"} ppid={first.ParentProcessId?.ToString() ?? "-"} events={group.Count()} children={childCount} firstSeen={first.Timestamp:u}";
                 return new ProcessGraphNode(
                     label,
                     detail,
-                    string.Join(Environment.NewLine, [$"process={label}", detail, $"path={first.Path ?? "-"}", $"commandLine={first.CommandLine ?? "-"}"]));
+                    string.Join(Environment.NewLine, [$"process={label}", $"processKey={ProcessIdentityKey(first)}", detail, $"path={first.Path ?? "-"}", $"commandLine={first.CommandLine ?? "-"}"]));
             })
             .OrderBy(node => node.Label, StringComparer.OrdinalIgnoreCase)
             .ToList();
@@ -1739,13 +1934,24 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
         IReadOnlyCollection<ArtifactDescriptor> artifacts)
     {
         var edges = new List<BehaviorGraphEdge>();
+        var processLabels = BuildProcessLabelLookup(report);
         foreach (var evt in report.Events.OrderBy(evt => evt.Timestamp))
         {
             var from = EventProcessActor(evt);
+            if (processLabels.Count > 0 && (evt.ProcessId.HasValue || !string.IsNullOrWhiteSpace(evt.ProcessName)))
+            {
+                from = ResolveProcessLabel(evt, processLabels);
+            }
+
             if (string.Equals(evt.EventType, "process.start", StringComparison.OrdinalIgnoreCase) && evt.ProcessId.HasValue)
             {
-                var parent = evt.ParentProcessId.HasValue ? $"pid:{evt.ParentProcessId.Value}" : from;
-                edges.Add(new BehaviorGraphEdge(parent, "spawn", ProcessGraphLabel(evt), EventToPlainText(evt)));
+                var parent = ResolveParentProcessLabel(evt, processLabels);
+                if (string.Equals(parent, "-", StringComparison.Ordinal))
+                {
+                    parent = from;
+                }
+
+                edges.Add(new BehaviorGraphEdge(parent, "spawn", ResolveProcessLabel(evt, processLabels), EventToPlainText(evt)));
             }
 
             if (IsFileEvent(evt) && !string.IsNullOrWhiteSpace(evt.Path))
@@ -1856,8 +2062,20 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
     /// </summary>
     private static string ProcessIdentityKey(SandboxEvent evt)
     {
+        var stableKey = FirstEventDataValue(evt, "processKey", "processGuid", "processUniqueId");
+        if (!string.IsNullOrWhiteSpace(stableKey))
+        {
+            return $"key:{stableKey}";
+        }
+
         if (evt.ProcessId.HasValue)
         {
+            var startTime = FirstEventDataValue(evt, "processCreateTime", "processStartTime", "createTime", "startTime");
+            if (!string.IsNullOrWhiteSpace(startTime))
+            {
+                return $"pid:{evt.ProcessId.Value}|start:{startTime}";
+            }
+
             return $"pid:{evt.ProcessId.Value}";
         }
 
@@ -1867,6 +2085,208 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
         }
 
         return $"path:{evt.Path ?? evt.Source}";
+    }
+
+    /// <summary>
+    /// Returns all process lookup keys that can identify one event actor.
+    /// </summary>
+    private static IReadOnlyList<string> ProcessLookupKeys(SandboxEvent evt)
+    {
+        var keys = new List<string>();
+        AddProcessLookupKey(keys, ProcessIdentityKey(evt));
+        var stableKey = FirstEventDataValue(evt, "processKey", "processGuid", "processUniqueId");
+        if (!string.IsNullOrWhiteSpace(stableKey))
+        {
+            AddProcessLookupKey(keys, $"key:{stableKey}");
+        }
+
+        if (evt.ProcessId.HasValue)
+        {
+            var startTime = FirstEventDataValue(evt, "processCreateTime", "processStartTime", "createTime", "startTime");
+            if (!string.IsNullOrWhiteSpace(startTime))
+            {
+                AddProcessLookupKey(keys, $"pid:{evt.ProcessId.Value}|start:{startTime}");
+            }
+
+            AddProcessLookupKey(keys, $"pid:{evt.ProcessId.Value}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(evt.ProcessName))
+        {
+            AddProcessLookupKey(keys, $"name:{evt.ProcessName}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(evt.Path))
+        {
+            AddProcessLookupKey(keys, $"path:{evt.Path}");
+        }
+
+        return keys;
+    }
+
+    /// <summary>
+    /// Returns parent process lookup keys for spawn-tree resolution.
+    /// </summary>
+    private static IReadOnlyList<string> ParentProcessLookupKeys(SandboxEvent evt)
+    {
+        var keys = new List<string>();
+        var stableKey = FirstEventDataValue(evt, "parentProcessKey", "parentProcessGuid", "parentProcessUniqueId");
+        if (!string.IsNullOrWhiteSpace(stableKey))
+        {
+            AddProcessLookupKey(keys, $"key:{stableKey}");
+        }
+
+        if (evt.ParentProcessId.HasValue)
+        {
+            var startTime = FirstEventDataValue(evt, "parentProcessCreateTime", "parentProcessStartTime");
+            if (!string.IsNullOrWhiteSpace(startTime))
+            {
+                AddProcessLookupKey(keys, $"pid:{evt.ParentProcessId.Value}|start:{startTime}");
+            }
+
+            AddProcessLookupKey(keys, $"pid:{evt.ParentProcessId.Value}");
+        }
+
+        var parentName = FirstEventDataValue(evt, "parentProcessName", "parentImageName");
+        if (!string.IsNullOrWhiteSpace(parentName))
+        {
+            AddProcessLookupKey(keys, $"name:{parentName}");
+        }
+
+        var parentImage = FirstEventDataValue(evt, "parentProcessImage", "parentImage", "parentPath");
+        if (!string.IsNullOrWhiteSpace(parentImage))
+        {
+            AddProcessLookupKey(keys, $"path:{parentImage}");
+        }
+
+        return keys;
+    }
+
+    private static void AddProcessLookupKey(List<string> keys, string? key)
+    {
+        if (!string.IsNullOrWhiteSpace(key) &&
+            !keys.Contains(key, StringComparer.OrdinalIgnoreCase))
+        {
+            keys.Add(key);
+        }
+    }
+
+    private static string? ResolveParentProcessKey(SandboxEvent evt, IReadOnlySet<string> knownKeys)
+    {
+        return ParentProcessLookupKeys(evt).FirstOrDefault(knownKeys.Contains);
+    }
+
+    private static IReadOnlyDictionary<string, string> BuildProcessLabelLookup(AnalysisReport report)
+    {
+        var lookup = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var start in report.Events
+            .Where(evt => string.Equals(evt.EventType, "process.start", StringComparison.OrdinalIgnoreCase) && evt.ProcessId.HasValue)
+            .GroupBy(ProcessIdentityKey, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.OrderBy(evt => evt.Timestamp).First()))
+        {
+            var label = ProcessGraphLabel(start);
+            foreach (var key in ProcessLookupKeys(start))
+            {
+                lookup.TryAdd(key, label);
+            }
+        }
+
+        return lookup;
+    }
+
+    private static IReadOnlyDictionary<string, string> BuildProcessCanonicalKeyLookup(AnalysisReport report)
+    {
+        var lookup = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var start in report.Events
+            .Where(evt => string.Equals(evt.EventType, "process.start", StringComparison.OrdinalIgnoreCase) && evt.ProcessId.HasValue)
+            .GroupBy(ProcessIdentityKey, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.OrderBy(evt => evt.Timestamp).First()))
+        {
+            var canonicalKey = ProcessIdentityKey(start);
+            foreach (var key in ProcessLookupKeys(start))
+            {
+                lookup.TryAdd(key, canonicalKey);
+            }
+        }
+
+        return lookup;
+    }
+
+    private static string ResolveProcessGroupKey(SandboxEvent evt, IReadOnlyDictionary<string, string> canonicalKeys)
+    {
+        foreach (var key in ProcessLookupKeys(evt))
+        {
+            if (canonicalKeys.TryGetValue(key, out var canonicalKey))
+            {
+                return canonicalKey;
+            }
+        }
+
+        return ProcessIdentityKey(evt);
+    }
+
+    private static string ResolveProcessLabel(SandboxEvent evt, IReadOnlyDictionary<string, string> processLabels)
+    {
+        foreach (var key in ProcessLookupKeys(evt))
+        {
+            if (processLabels.TryGetValue(key, out var label))
+            {
+                return label;
+            }
+        }
+
+        return ProcessGraphLabel(evt);
+    }
+
+    private static string ResolveParentProcessLabel(SandboxEvent evt, IReadOnlyDictionary<string, string> processLabels)
+    {
+        foreach (var key in ParentProcessLookupKeys(evt))
+        {
+            if (processLabels.TryGetValue(key, out var label))
+            {
+                return label;
+            }
+        }
+
+        return evt.ParentProcessId.HasValue ? $"pid:{evt.ParentProcessId.Value}" : "-";
+    }
+
+    /// <summary>
+    /// Returns an operator-readable event family for grouped timelines.
+    /// </summary>
+    private static string EventFamilyLabel(SandboxEvent evt)
+    {
+        if (evt.EventType.StartsWith("process.", StringComparison.OrdinalIgnoreCase))
+        {
+            return "process";
+        }
+
+        if (IsFileEvent(evt))
+        {
+            return "file";
+        }
+
+        if (IsRegistryEvent(evt))
+        {
+            return "registry";
+        }
+
+        if (IsNetworkEvent(evt))
+        {
+            return "network";
+        }
+
+        if (IsR0Event(evt))
+        {
+            return "r0";
+        }
+
+        if (IsFailureEvent(evt))
+        {
+            return "failure";
+        }
+
+        return "other";
     }
 
     /// <summary>
@@ -2297,6 +2717,14 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
         ("Artifact IOCs", "证据文件 IOC"),
         ("Weak-interaction graph.", "弱交互图谱。"),
         ("This section summarizes process, file, registry, network, and artifact relationships from normalized telemetry so the report remains stable without client-side graph libraries.", "本节从规范化遥测汇总进程、文件、注册表、网络和证据文件关系，不依赖客户端图谱库也能稳定呈现。"),
+        ("Timeline grouping.", "时间线分组。"),
+        ("Grouped by UTC minute with process/type summaries; large buckets show representative events first.", "按 UTC 分钟分组并显示进程/类型摘要；较大的分组优先展示代表性事件。"),
+        ("Timeline is capped for readability; open Raw normalized events or report.json for complete evidence.", "时间线为保证可读性已限制数量；打开原始事件或 report.json 查看完整证据。"),
+        ("additional timeline events are hidden.", "条额外时间线事件已隐藏。"),
+        ("Processes:", "进程："),
+        ("Event families:", "事件族："),
+        ("Event types:", "事件类型："),
+        ("additional events in this group are hidden; open Raw normalized events or report.json for complete evidence.", "条此分组内的额外事件已隐藏；打开原始事件或 report.json 查看完整证据。"),
         ("Evidence summary cards", "证据摘要卡"),
         ("Process evidence", "进程证据"),
         ("Network evidence", "网络证据"),
@@ -2332,6 +2760,12 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
         ("Copy network card", "复制网络卡"),
         ("Copied", "已复制"),
         ("Process tree", "进程树"),
+        ("Process relationship tree.", "进程关系树。"),
+        ("Native expandable process tree grouped by stable process key when available, with PID/PPID fallback.", "使用原生可展开进程树；有稳定进程键时按键分组，否则回退到 PID/PPID。"),
+        ("Cycle suppressed for stable rendering.", "已抑制循环以保持稳定渲染。"),
+        ("Stable relationship map", "稳定关系图"),
+        ("Relationship lines:", "关系行："),
+        ("Parent:", "父进程："),
         ("Process relationship cards", "进程关系卡"),
         ("Network relationship cards", "网络关系卡"),
         ("No process relationship cards could be derived from normalized telemetry.", "无法从规范化遥测生成进程关系卡。"),

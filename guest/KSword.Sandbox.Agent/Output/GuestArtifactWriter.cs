@@ -322,9 +322,9 @@ internal sealed class GuestArtifactWriter
                 implemented: true, capturedEventPrefixes: ["r0collector.started", "r0collector.exited", "r0collector.failed"],
                 skippedEventPrefixes: [], reasonWhenDisabled: "r0CollectorNotRequested"),
             CreateCollection(descriptors, events, "packet-captures", ArtifactKind.PacketCapture, "packet-capture", "packet-capture",
-                PacketCapturesDirectoryName, options.CapturePacketCapture, implemented: false,
+                PacketCapturesDirectoryName, options.CapturePacketCapture, implemented: true,
                 capturedEventPrefixes: ["packet_capture.captured"], skippedEventPrefixes: ["packet_capture.skipped"],
-                reasonWhenDisabled: "packetCaptureReservedForFuture")
+                reasonWhenDisabled: "packetCaptureNotRequested", failedEventPrefixes: ["packet_capture.failed"])
         ];
     }
 
@@ -340,12 +340,13 @@ internal sealed class GuestArtifactWriter
         bool implemented,
         IReadOnlyList<string> capturedEventPrefixes,
         IReadOnlyList<string> skippedEventPrefixes,
-        string reasonWhenDisabled)
+        string reasonWhenDisabled,
+        IReadOnlyList<string>? failedEventPrefixes = null)
     {
         var artifactCount = descriptors.Count(artifact => string.Equals(artifact.CollectionName, name, StringComparison.OrdinalIgnoreCase));
         var capturedEventCount = CountEvents(events, capturedEventPrefixes);
         var skippedEventCount = CountEvents(events, skippedEventPrefixes);
-        var failedEventCount = 0;
+        var failedEventCount = failedEventPrefixes is null ? 0 : CountEvents(events, failedEventPrefixes);
         var status = DetermineCollectionStatus(enabled, implemented, artifactCount, capturedEventCount, skippedEventCount, failedEventCount);
         var normalizedRelativePath = NormalizeRelativePath(relativePath);
         var metadata = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)

@@ -36,7 +36,15 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         var doc = File.ReadAllText(docPath);
 
         RequireContains(rendererSource, "AppendTimeline", "Report renderer should include a timeline section.");
+        RequireContains(rendererSource, "BuildTimelineGroups", "Report renderer should group timeline events for stable visual scanning.");
+        RequireContains(rendererSource, "timeline-group", "Report renderer should render grouped timeline buckets.");
+        RequireContains(rendererSource, "TimelineEventInlineLimit = 120", "Report renderer should cap timeline rendering separately from raw events.");
+        RequireContains(rendererSource, "EventFamilyLabel", "Report renderer should summarize timeline groups by event family.");
         RequireContains(rendererSource, "AppendProcessTree", "Report renderer should include a process tree.");
+        RequireContains(rendererSource, "process-tree", "Report renderer should render a bounded stable process tree.");
+        RequireContains(rendererSource, "Process relationship tree", "Report renderer should explain the process relationship tree.");
+        RequireContains(rendererSource, "ProcessLookupKeys", "Report renderer should resolve process relationships with stable lookup keys.");
+        RequireContains(rendererSource, "ParentProcessLookupKeys", "Report renderer should resolve parent process relationships with stable lookup keys.");
         RequireContains(rendererSource, "AppendBehaviorGraph", "Report renderer should include a behavior graph and IOC summary section.");
         RequireContains(rendererSource, "Behavior graph / IOC summary", "Report renderer should expose a graph/IOC section title.");
         RequireContains(rendererSource, "Evidence graph edges", "Report renderer should expose graph edge evidence.");
@@ -45,6 +53,8 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(rendererSource, "IOC summary", "Report renderer should expose IOC summary cards.");
         RequireContains(rendererSource, "AppendProcessRelationshipCards", "Report renderer should expose process relationship cards.");
         RequireContains(rendererSource, "Process relationship cards", "Report renderer should expose process relationship card title.");
+        RequireContains(rendererSource, "Stable relationship map", "Report renderer should expose a stable process relationship map.");
+        RequireContains(rendererSource, "parentProcess=", "Report renderer should include parent process evidence in process cards.");
         RequireContains(rendererSource, "AppendNetworkRelationshipCards", "Report renderer should expose network relationship cards.");
         RequireContains(rendererSource, "Network relationship cards", "Report renderer should expose network relationship card title.");
         RequireContains(rendererSource, "relationship-details", "Report renderer should use bounded expandable evidence cards.");
@@ -88,10 +98,14 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(reportStage, "report.html", "Report stage should keep writing the default report.html artifact.");
 
         RequireContains(doc, "Timeline", "Report UX doc should list the timeline section.");
+        RequireContains(doc, "timeline grouping", "Report UX doc should require timeline grouping.");
+        RequireContains(doc, "bounded timeline", "Report UX doc should require bounded timeline rendering.");
         RequireContains(doc, "Behavior graph / IOC summary", "Report UX doc should list the behavior graph section.");
         RequireContains(doc, "Evidence graph edges", "Report UX doc should require graph edge evidence.");
         RequireContains(doc, "IOC summary", "Report UX doc should require IOC summary cards.");
         RequireContains(doc, "Process tree", "Report UX doc should list the process tree.");
+        RequireContains(doc, "process relationship tree", "Report UX doc should require a stable process relationship tree.");
+        RequireContains(doc, "stable process key", "Report UX doc should require stable process key fallback behavior.");
         RequireContains(doc, "Registry behavior", "Report UX doc should list registry behavior.");
         RequireContains(doc, "Right-click", "Report UX doc should describe right-click copy.");
         RequireContains(doc, "raw events only", "Report UX doc should distinguish live raw events from final classification.");
@@ -158,6 +172,18 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
     }
 
     /// <summary>
+    /// Requires one fragment to appear before another. Inputs are rendered HTML
+    /// and two stable fragments; processing compares ordinal positions; return
+    /// value is none.
+    /// </summary>
+    private static void RequireBefore(string content, string first, string second, string message)
+    {
+        var firstIndex = content.IndexOf(first, StringComparison.Ordinal);
+        var secondIndex = content.IndexOf(second, StringComparison.Ordinal);
+        SmokeAssert.True(firstIndex >= 0 && secondIndex >= 0 && firstIndex < secondIndex, message);
+    }
+
+    /// <summary>
     /// Renders synthetic English and Chinese reports to verify the UX contract
     /// against emitted HTML rather than source strings only. Inputs are none;
     /// processing builds a deterministic report model and checks required
@@ -177,7 +203,7 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContainsNormalized(englishHtml, "overflow:auto", "Rendered major sections should scroll overflowing evidence.");
         RequireContains(englishHtml, "href=\"report.zh.html\"", "Rendered HTML should link to report.zh.html.");
         RequireContains(englishHtml, "href=\"report.en.html\"", "Rendered HTML should link to report.en.html.");
-        RequireContains(englishHtml, "<details class=\"raw-events-shell\"><summary>Show inline raw events (200/211; 11 hidden)</summary>", "Rendered raw events should be collapsed and capped.");
+        RequireContains(englishHtml, "<details class=\"raw-events-shell\"><summary>Show inline raw events (200/213; 13 hidden)</summary>", "Rendered raw events should be collapsed and capped.");
         RequireContains(englishHtml, "Total events", "Rendered raw event overview should show the total count label.");
         RequireContains(englishHtml, "Hidden raw events", "Rendered raw event overview should show the hidden count label.");
         RequireContains(englishHtml, "Raw source paths", "Rendered raw event section should show source path hints.");
@@ -196,6 +222,24 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(englishHtml, "Network relationship cards", "Rendered HTML should include network relationship cards.");
         RequireContains(englishHtml, "Copy network card", "Rendered HTML should include copyable network relationship cards.");
         RequireContains(englishHtml, "Endpoint-centric view.", "Rendered HTML should include cloud-sandbox-style network relationship guidance.");
+        RequireContains(englishHtml, "<section id=\"timeline\" class=\"card\"><h2>Timeline</h2>", "Rendered HTML should include the timeline section.");
+        RequireContains(englishHtml, "Timeline grouping.", "Rendered HTML should explain timeline grouping.");
+        RequireContains(englishHtml, "timeline-group", "Rendered HTML should include grouped timeline buckets.");
+        RequireContains(englishHtml, "Event families:", "Rendered timeline groups should summarize event families.");
+        RequireContains(englishHtml, "Process relationship tree.", "Rendered HTML should explain stable process tree rendering.");
+        RequireContains(englishHtml, "process-tree-node", "Rendered HTML should include expandable process tree nodes.");
+        RequireContains(englishHtml, "launcher.exe pid:4100 ppid:-", "Rendered process tree should include the launcher root.");
+        RequireContains(englishHtml, "contract-sample.exe pid:4242 ppid:4100", "Rendered process tree should include the sample child.");
+        RequireContains(englishHtml, "cmd.exe pid:4243 ppid:4242", "Rendered process tree should include the command child.");
+        RequireContains(englishHtml, "Children: 1", "Rendered process relationship card should aggregate child count.");
+        RequireContains(englishHtml, "Files: 1", "Rendered process relationship card should aggregate file count.");
+        RequireContains(englishHtml, "Registry: 1", "Rendered process relationship card should aggregate registry count.");
+        RequireContains(englishHtml, "Network: 1", "Rendered process relationship card should aggregate network count.");
+        RequireContains(englishHtml, "Stable relationship map", "Rendered process relationship card should include stable relationship map details.");
+        RequireContains(englishHtml, "parentProcess=launcher.exe pid:4100", "Rendered process card copy text should include parent process evidence.");
+        RequireContains(englishHtml, "child=cmd.exe pid:4243", "Rendered process card relationship map should include child process evidence.");
+        RequireBefore(englishHtml, "launcher.exe pid:4100 ppid:-", "contract-sample.exe pid:4242 ppid:4100", "Rendered process lineage should show parent before child.");
+        RequireBefore(englishHtml, "contract-sample.exe pid:4242 ppid:4100", "cmd.exe pid:4243 ppid:4242", "Rendered process lineage should show sample before spawned child.");
 
         foreach (var expected in RequiredEnglishSectionFragments())
         {
@@ -203,6 +247,8 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         }
 
         RequireContains(chineseHtml, "<html lang=\"zh-CN\">", "Chinese HTML should set the zh-CN language metadata.");
+        RequireContains(chineseHtml, "时间线分组", "Chinese HTML should localize timeline grouping guidance.");
+        RequireContains(chineseHtml, "进程关系树", "Chinese HTML should localize process relationship tree guidance.");
         foreach (var expected in RequiredChineseSectionLabels())
         {
             RequireContains(chineseHtml, expected, $"Rendered Chinese report should include {expected}.");
@@ -237,6 +283,7 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         "<section id=\"static\" class=\"card\"><h2>Static analysis</h2>",
         "<section id=\"dynamic\" class=\"card\"><h2>Dynamic analysis</h2>",
         "<section id=\"graph\" class=\"card\"><h2>Behavior graph / IOC summary</h2>",
+        "<section id=\"timeline\" class=\"card\"><h2>Timeline</h2>",
         "<section id=\"process\" class=\"card\"><h2>Process details</h2>",
         "<section id=\"files\" class=\"card\"><h2>Dropped files</h2>",
         "<section id=\"registry\" class=\"card\"><h2>Registry behavior</h2>",
@@ -261,6 +308,7 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         "静态分析",
         "动态分析",
         "行为图谱 / IOC 摘要",
+        "时间线",
         "证据摘要卡",
         "进程详情",
         "进程关系卡",
@@ -282,6 +330,16 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
     private static AnalysisReport BuildContractReport()
     {
         var timestamp = new DateTimeOffset(2026, 1, 2, 3, 4, 5, TimeSpan.Zero);
+        var launcherEvent = new SandboxEvent
+        {
+            EventType = "process.start",
+            Timestamp = timestamp.AddSeconds(-2),
+            Source = "guest",
+            ProcessName = "launcher.exe",
+            ProcessId = 4100,
+            Path = @"C:\Windows\explorer.exe",
+            CommandLine = @"C:\Windows\explorer.exe"
+        };
         var processEvent = new SandboxEvent
         {
             EventType = "process.start",
@@ -289,9 +347,20 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
             Source = "guest",
             ProcessName = "contract-sample.exe",
             ProcessId = 4242,
-            ParentProcessId = 1000,
+            ParentProcessId = 4100,
             Path = @"C:\Samples\contract-sample.exe",
             CommandLine = @"C:\Samples\contract-sample.exe --contract"
+        };
+        var childProcessEvent = new SandboxEvent
+        {
+            EventType = "process.start",
+            Timestamp = timestamp.AddMilliseconds(500),
+            Source = "guest",
+            ProcessName = "cmd.exe",
+            ProcessId = 4243,
+            ParentProcessId = 4242,
+            Path = @"C:\Windows\System32\cmd.exe",
+            CommandLine = @"cmd.exe /c whoami"
         };
         var fileEvent = new SandboxEvent
         {
@@ -329,8 +398,6 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
             EventType = "driver.file.create",
             Timestamp = timestamp.AddSeconds(4),
             Source = "driver",
-            ProcessName = "contract-sample.exe",
-            ProcessId = 4242,
             Path = @"C:\Users\Public\r0-drop.bin",
             Data =
             {
@@ -347,7 +414,7 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
                 ["reason"] = "contract timeout evidence"
             }
         };
-        var events = new List<SandboxEvent> { processEvent, fileEvent, registryEvent, networkEvent, r0Event, failureEvent };
+        var events = new List<SandboxEvent> { launcherEvent, processEvent, childProcessEvent, fileEvent, registryEvent, networkEvent, r0Event, failureEvent };
         for (var index = 0; index < 205; index++)
         {
             events.Add(new SandboxEvent

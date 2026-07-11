@@ -1,6 +1,6 @@
 {
   "matrix": "enterprise-windows",
-  "version": "2026-07-11-behavior-coverage-expansion-v2",
+  "version": "2026-07-11-behavior-coverage-expansion-v3",
   "techniques": [
     {
       "id": "T1003",
@@ -53,6 +53,13 @@
       ]
     },
     {
+      "id": "T1021.003",
+      "name": "Distributed Component Object Model",
+      "categories": [
+        "lateral-movement"
+      ]
+    },
+    {
       "id": "T1021.004",
       "name": "SSH",
       "categories": [
@@ -92,6 +99,14 @@
       "name": "Masquerading",
       "categories": [
         "defense-evasion"
+      ]
+    },
+    {
+      "id": "T1037.001",
+      "name": "Logon Script (Windows)",
+      "categories": [
+        "persistence",
+        "privilege-escalation"
       ]
     },
     {
@@ -136,6 +151,22 @@
     {
       "id": "T1055.001",
       "name": "Dynamic-link library injection",
+      "categories": [
+        "defense-evasion",
+        "privilege-escalation"
+      ]
+    },
+    {
+      "id": "T1055.002",
+      "name": "Portable Executable Injection",
+      "categories": [
+        "defense-evasion",
+        "privilege-escalation"
+      ]
+    },
+    {
+      "id": "T1055.003",
+      "name": "Thread Execution Hijacking",
       "categories": [
         "defense-evasion",
         "privilege-escalation"
@@ -249,10 +280,25 @@
       ]
     },
     {
+      "id": "T1137",
+      "name": "Office Application Startup",
+      "categories": [
+        "persistence"
+      ]
+    },
+    {
       "id": "T1140",
       "name": "Deobfuscate/Decode Files or Information",
       "categories": [
         "defense-evasion"
+      ]
+    },
+    {
+      "id": "T1197",
+      "name": "BITS Jobs",
+      "categories": [
+        "defense-evasion",
+        "persistence"
       ]
     },
     {
@@ -272,6 +318,13 @@
     {
       "id": "T1218.005",
       "name": "Mshta",
+      "categories": [
+        "defense-evasion"
+      ]
+    },
+    {
+      "id": "T1218.007",
+      "name": "Msiexec",
       "categories": [
         "defense-evasion"
       ]
@@ -328,8 +381,48 @@
       ]
     },
     {
+      "id": "T1546.002",
+      "name": "Screensaver",
+      "categories": [
+        "persistence",
+        "privilege-escalation"
+      ]
+    },
+    {
+      "id": "T1546.008",
+      "name": "Accessibility Features",
+      "categories": [
+        "persistence",
+        "privilege-escalation"
+      ]
+    },
+    {
+      "id": "T1546.009",
+      "name": "AppCert DLLs",
+      "categories": [
+        "persistence",
+        "privilege-escalation"
+      ]
+    },
+    {
+      "id": "T1546.011",
+      "name": "Application Shimming",
+      "categories": [
+        "persistence",
+        "privilege-escalation"
+      ]
+    },
+    {
       "id": "T1546.012",
       "name": "Image File Execution Options Injection",
+      "categories": [
+        "persistence",
+        "privilege-escalation"
+      ]
+    },
+    {
+      "id": "T1546.013",
+      "name": "PowerShell Profile",
       "categories": [
         "persistence",
         "privilege-escalation"
@@ -346,6 +439,14 @@
     {
       "id": "T1547.004",
       "name": "Winlogon Helper DLL",
+      "categories": [
+        "persistence",
+        "privilege-escalation"
+      ]
+    },
+    {
+      "id": "T1547.014",
+      "name": "Active Setup",
       "categories": [
         "persistence",
         "privilege-escalation"

@@ -5,13 +5,16 @@ Runs non-destructive R0 driver readiness checks before a real VM validation.
 .DESCRIPTION
 Default mode checks only local files, public R0 IOCTL contract text, read
 permissions, Authenticode signing metadata, Administrator status, test-signing
-boot configuration, and read-only SCM service state. It never loads, unloads,
-installs, deletes, or opens the driver device unless the caller supplies
-explicit parameters.
+boot configuration, read-only SCM service state, and the R0Collector no-device
+ABI self-check when the collector executable is present. It never loads,
+unloads, installs, deletes, or opens the driver device unless the caller
+supplies explicit parameters.
 
 Service mutation requires both the operation switch and -AllowServiceMutation.
 Device health and R0Collector drain checks are opt-in and assume the caller has
-already loaded the driver in an isolated test VM.
+already loaded the driver in an isolated test VM. The default ABI self-check
+uses only `--abi-self-check --out <jsonl>` and is reported as a non-fatal
+readiness gap if the local system blocks execution of the unsigned collector.
 #>
 [CmdletBinding()]
 param(
@@ -29,6 +32,7 @@ param(
     [switch]$CheckDeviceHealth,
     [switch]$CheckCollectorHealth,
     [switch]$DrainWithCollector,
+    [string]$CollectorAbiSelfCheckOutputPath = (Join-Path ([System.IO.Path]::GetTempPath()) ("KSwordSandbox-r0collector-abi-self-check-{0}.jsonl" -f ([Guid]::NewGuid().ToString('N')))),
     [string]$CollectorHealthOutputPath = (Join-Path ([System.IO.Path]::GetTempPath()) 'KSwordSandbox-r0collector-health-readiness.jsonl'),
     [string]$CollectorOutputPath = (Join-Path ([System.IO.Path]::GetTempPath()) 'KSwordSandbox-r0collector-readiness.jsonl')
 )
@@ -956,6 +960,103 @@ function Get-JsonLineEventSummary {
     return $summary
 }
 
+# Invoke-R0CollectorAbiSelfCheck runs the collector's no-device ABI/event
+# contract path. It does not pass --device, does not load the driver, does not
+# open \\.\KSwordSandboxDriver, and does not call DeviceIoControl. Any execution
+# block or non-zero exit is a Warning only because unsigned local binaries may
+# be intercepted by endpoint policy before VM readiness work can continue.
+function Invoke-R0CollectorAbiSelfCheck {
+    if (-not (Test-Path -LiteralPath $R0CollectorPath -PathType Leaf)) {
+        return New-R0ReadinessResult `
+            -Name 'R0Collector ABI self-check' `
+            -Status 'Warning' `
+            -Required $false `
+            -Message "R0Collector executable was not found; skipping no-device ABI self-check: $R0CollectorPath" `
+            -Details @{
+                R0CollectorPath = $R0CollectorPath
+                OutputPath      = $CollectorAbiSelfCheckOutputPath
+                AbiSelfCheck    = $true
+                NoDevice        = $true
+                OpensDevice     = $false
+                LoadsDriver     = $false
+                CallsCSignTool  = $false
+                NonFatal        = $true
+                OutputWritten   = $false
+            }
+    }
+
+    try {
+        $outputDirectory = Split-Path -Parent $CollectorAbiSelfCheckOutputPath
+        if (-not [string]::IsNullOrWhiteSpace($outputDirectory) -and -not (Test-Path -LiteralPath $outputDirectory -PathType Container)) {
+            New-Item -ItemType Directory -Force -Path $outputDirectory | Out-Null
+        }
+
+        if (Test-Path -LiteralPath $CollectorAbiSelfCheckOutputPath -PathType Leaf) {
+            Remove-Item -LiteralPath $CollectorAbiSelfCheckOutputPath -Force -ErrorAction SilentlyContinue
+        }
+
+        $collectorArgs = @(
+            '--abi-self-check',
+            '--out', $CollectorAbiSelfCheckOutputPath
+        )
+        $output = @(& $R0CollectorPath @collectorArgs 2>&1)
+        $exitCode = $LASTEXITCODE
+        $summary = Get-JsonLineEventSummary -Path $CollectorAbiSelfCheckOutputPath
+        $eventTypes = @($summary.EventTypes)
+        $hasAbiSelfCheck = $eventTypes -contains 'r0collector.abiSelfCheck'
+        $hasStopped = $eventTypes -contains 'r0collector.stopped'
+        $parseErrorCount = [int]$summary.ParseErrorCount
+        $passed = $exitCode -eq 0 -and [bool]$summary.OutputExists -and [int64]$summary.OutputLength -gt 0 -and $parseErrorCount -eq 0 -and $hasAbiSelfCheck
+
+        return New-R0ReadinessResult `
+            -Name 'R0Collector ABI self-check' `
+            -Status ($(if ($passed) { 'Passed' } else { 'Warning' })) `
+            -Required $false `
+            -Message ($(if ($passed) { "R0Collector --abi-self-check --out completed without opening the driver device." } else { "R0Collector --abi-self-check --out did not produce complete ABI evidence; treating as a non-fatal readiness gap." })) `
+            -Details @{
+                R0CollectorPath = $R0CollectorPath
+                OutputPath      = $CollectorAbiSelfCheckOutputPath
+                AbiSelfCheck    = $true
+                NoDevice        = $true
+                OpensDevice     = $false
+                LoadsDriver     = $false
+                CallsCSignTool  = $false
+                NonFatal        = -not $passed
+                ExitCode        = $exitCode
+                OutputWritten   = [bool]$summary.OutputExists
+                OutputLength    = [int64]$summary.OutputLength
+                LineCount       = [int]$summary.LineCount
+                EventTypes      = @($eventTypes)
+                HasAbiSelfCheck = $hasAbiSelfCheck
+                HasStopped      = $hasStopped
+                ParseErrorCount = $parseErrorCount
+                ParseErrors     = @($summary.ParseErrorSample)
+                ConsoleLineCount = @($output).Count
+                ConsoleOutputSuppressed = $true
+            }
+    }
+    catch {
+        return New-R0ReadinessResult `
+            -Name 'R0Collector ABI self-check' `
+            -Status 'Warning' `
+            -Required $false `
+            -Message "R0Collector ABI self-check could not execute; treating as a non-fatal readiness gap: $($_.Exception.Message)" `
+            -Details @{
+                R0CollectorPath = $R0CollectorPath
+                OutputPath      = $CollectorAbiSelfCheckOutputPath
+                AbiSelfCheck    = $true
+                NoDevice        = $true
+                OpensDevice     = $false
+                LoadsDriver     = $false
+                CallsCSignTool  = $false
+                NonFatal        = $true
+                ExecutionBlocked = $true
+                ErrorType       = $_.Exception.GetType().FullName
+                OutputWritten   = (Test-Path -LiteralPath $CollectorAbiSelfCheckOutputPath -PathType Leaf)
+            }
+    }
+}
+
 # Invoke-R0CollectorHealth runs the collector's health-only path using the
 # documented --health and --out options. It opens the already-loaded device,
 # writes JSONL to the explicit output path, and does not drain queued events.
@@ -1132,6 +1233,7 @@ $r0CollectorDoc = Join-Path $RepositoryRoot 'docs\r0-collector.md'
 [void]$results.Add((Test-DriverSysGitHygiene -Root $RepositoryRoot))
 [void]$results.Add((Test-ReadableFile -Name 'Driver binary readable' -Path $DriverSysPath -Required $true))
 [void]$results.Add((Test-ReadableFile -Name 'R0Collector executable readable' -Path $R0CollectorPath -Required $false))
+[void]$results.Add((Invoke-R0CollectorAbiSelfCheck))
 [void]$results.Add((Test-DriverSignature -Path $DriverSysPath))
 [void]$results.Add((Test-AdministratorPrivilege))
 [void]$results.Add((Test-TestSigningState -Required $testSigningRequired))
@@ -1191,10 +1293,11 @@ Write-Output ([pscustomobject][ordered]@{
         DevicePath             = $DevicePath
         RequireTestSigning     = $testSigningRequired
         ServiceMutationAllowed = [bool]$AllowServiceMutation
+        CollectorAbiSelfCheckOutputPath = $CollectorAbiSelfCheckOutputPath
         CollectorHealthOutputPath = $CollectorHealthOutputPath
         CollectorOutputPath     = $CollectorOutputPath
         DefaultModeSafe        = -not ($InstallService -or $StartService -or $StopService -or $DeleteService -or $CheckDeviceHealth -or $CheckCollectorHealth -or $DrainWithCollector)
-        Note                   = 'Default mode performs static negotiated-IOCTL contract checks but does not load/unload the driver, mutate SCM state, open the device, or write collector output.'
+        Note                   = 'Default mode performs static negotiated-IOCTL contract checks and a no-device R0Collector ABI self-check when available; it does not load/unload the driver, mutate SCM state, open the device, call DeviceIoControl, or call CSignTool.'
     })
 
 exit $exitCode
