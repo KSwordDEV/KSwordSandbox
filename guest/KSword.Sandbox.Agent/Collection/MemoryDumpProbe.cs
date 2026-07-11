@@ -418,6 +418,12 @@ internal sealed class MemoryDumpProbe : IGuestProbe
         evt.Data["childProcessDumpTarget"] = (target is not null && !target.IsRoot).ToString(CultureInfo.InvariantCulture).ToLowerInvariant();
         evt.Data["nonfatal"] = "false";
         evt.Data["artifactEvent"] = "true";
+        evt.Data["summaryRow"] = "false";
+        evt.Data["reportRowKind"] = "memory-dump-artifact";
+        evt.Data["eventSemanticClass"] = "artifact-memory-dump";
+        evt.Data["semanticEventCategory"] = "artifact-evidence";
+        evt.Data["semanticEventTags"] = "artifact,memory-dump,captured,nonbehavior";
+        evt.Data["artifactSemanticType"] = "memory-dump";
         evt.Data["behaviorCounted"] = "false";
         evt.Data["nonbehavior"] = "true";
         evt.Data["reason"] = "memoryDumpCaptured";
@@ -449,6 +455,8 @@ internal sealed class MemoryDumpProbe : IGuestProbe
             {
                 AddOptionalData(evt, "artifactRelativePath", artifactPath.DisplayPath);
                 AddOptionalData(evt, "artifactSelector", artifactPath.DisplayPath);
+                AddOptionalData(evt, "stableArtifactSelector", artifactPath.DisplayPath);
+                AddOptionalData(evt, "canonicalArtifactSelector", artifactPath.DisplayPath);
                 AddOptionalData(evt, "downloadSelector", artifactPath.DisplayPath);
                 AddOptionalData(evt, "artifactSafeLink", BuildSafeLink(artifactPath.DisplayPath));
                 evt.Data["artifactSelectorKind"] = "safe-output-relative-path";
@@ -483,6 +491,12 @@ internal sealed class MemoryDumpProbe : IGuestProbe
         evt.Data["status"] = "skipped";
         evt.Data["nonfatal"] = "true";
         evt.Data["artifactEvent"] = "false";
+        evt.Data["summaryRow"] = "false";
+        evt.Data["reportRowKind"] = duplicate ? "memory-dump-artifact-reference" : "memory-dump-diagnostic";
+        evt.Data["eventSemanticClass"] = duplicate ? "artifact-memory-dump-reference" : "artifact-memory-dump-diagnostic";
+        evt.Data["semanticEventCategory"] = "artifact-evidence";
+        evt.Data["semanticEventTags"] = duplicate ? "artifact,memory-dump,duplicate-reference,nonbehavior" : "artifact,memory-dump,skipped,nonbehavior";
+        evt.Data["artifactSemanticType"] = "memory-dump";
         evt.Data["behaviorCounted"] = "false";
         evt.Data["nonbehavior"] = "true";
         evt.Data["collectionHealth"] = "true";
@@ -705,6 +719,12 @@ internal sealed class MemoryDumpProbe : IGuestProbe
                 ["captureState"] = "summary",
                 ["status"] = "summary",
                 ["summaryEvent"] = "true",
+                ["summaryRow"] = "true",
+                ["reportRowKind"] = "memory-dump-sweep-summary",
+                ["eventSemanticClass"] = "artifact-memory-dump-summary",
+                ["semanticEventCategory"] = "artifact-evidence",
+                ["semanticEventTags"] = "artifact,memory-dump,sweep,summary,nonbehavior",
+                ["artifactSemanticType"] = "memory-dump",
                 ["nonfatal"] = "false",
                 ["artifactEvent"] = "false",
                 ["behaviorCounted"] = "false",
@@ -812,6 +832,12 @@ internal sealed class MemoryDumpProbe : IGuestProbe
                 ["captureState"] = "disabled",
                 ["status"] = "disabled",
                 ["nonfatal"] = "true",
+                ["summaryRow"] = "true",
+                ["reportRowKind"] = "memory-dump-disabled",
+                ["eventSemanticClass"] = "artifact-memory-dump-disabled",
+                ["semanticEventCategory"] = "artifact-evidence",
+                ["semanticEventTags"] = "artifact,memory-dump,disabled,nonbehavior",
+                ["artifactSemanticType"] = "memory-dump",
                 ["artifactEvent"] = "false",
                 ["behaviorCounted"] = "false",
                 ["nonbehavior"] = "true",

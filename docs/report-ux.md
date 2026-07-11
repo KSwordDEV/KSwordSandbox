@@ -146,8 +146,10 @@ progress-page 重新进入报告，避免自动打开失败时丢失上下文。
   但可见 evidence text、`report.json` 和 raw source hints 必须仍然可选中、可打印。
 - 行为图谱与 IOC 摘要（Behavior graph / IOC summary）章节保持静态 HTML/CSS，并优先使用稳定的弱交互，
   而不是脆弱的 canvas/SVG rendering：紧凑 Narrative spine、Evidence story board、process graph nodes、
-  有界 Top behavior chain、Evidence graph edges，以及 network、file/path、registry、artifact indicators 的
-  IOC summary panels。
+  Stable relationship lanes、有界 Top behavior chain、Evidence graph edges，以及 network、file/path、
+  registry、artifact indicators 的 IOC summary panels。Stable relationship lanes 应在密集 edge table 之前
+  汇总 process lineage、file path、registry path、network path 和 artifact proof 的关系计数与代表路径，
+  并提供 Copy stable relationship lanes，保证无 JS、无 canvas 时仍能复制关系图摘要。
 - Narrative spine 应在密集 graph tables 前提供四步、从左到右的紧凑证据叙事：execution root、
   storage changes、network scope 和 artifact proof。它必须有界、可复制、弱交互，并在
   `report.html` / `report.zh.html` 中保持中文优先。它应包含一条 Narrative spine summary 和显式
@@ -159,12 +161,18 @@ progress-page 重新进入报告，避免自动打开失败时丢失上下文。
 - Artifact status、process cards 和 network cards 中的紧凑 evidence summaries 应先于密集表格可见，
   在默认简体中文报告中中文优先，并可通过显式按钮和右键复制。摘要使用有界 key/value summaries
   和紧凑 artifact lines，不要把完整 raw events 或完整 descriptor payloads 内联倾倒出来。
+  Artifact lane health 必须对 dropped files、screenshots、memory dumps、packet captures 和 driver events
+  分别显示 captured / partial / failed / skipped / not observed 等状态、事件数与证据文件数。
 - Evidence summary cards、raw event distribution cards 和 raw event page index cards 也应提供显式
   Copy evidence summary / Copy distribution summary / Copy raw index summary 按钮，而不只依赖右键。
 - Timeline 与 process relationship 视图也应优先采用稳定弱交互：原生 HTML/CSS timeline group panels、
   有界 process relationship tree 和可复制 relationship panels，而不是外部 graph JavaScript。
   Process tree rows 应先显示紧凑 process label，再显示 depth/key/children/activity badges 和截断的
   image/path hint；完整 event evidence 保持可复制，避免树视图变成 raw path wall。
+  Process relation path 应在折叠 relationship map 之前可见，按 parent → process → children →
+  related artifacts 呈现，并附带 files/registry/network 计数。Network relation path 应在 endpoint card
+  中按 process → endpoint → DNS/HTTP/TLS/flow categories → PCAP/source artifacts 呈现，避免操作者
+  先打开 raw network rows 才能理解网络路径。
 - 报告必须支持中文和英文渲染入口，或在 core renderer 中等效支持 `report.zh.html` 与
   `report.en.html`。
 - 新增 report chrome 发布前必须有简体中文映射。Quick navigation、VT lookups/status、

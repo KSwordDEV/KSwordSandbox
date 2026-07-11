@@ -1128,6 +1128,7 @@ internal sealed class ArtifactManifestContractScenario : ISmokeTestScenario
         AssertThrows<ArgumentException>(() => service.ResolveDownloadableArtifact(job.JobId, "../escape.bin"), "Traversal download selectors should be rejected.");
         AssertThrows<ArgumentException>(() => service.ResolveDownloadableArtifact(job.JobId, Uri.EscapeDataString(@"C:\Windows\win.ini")), "URL-encoded absolute download selectors should be rejected.");
         AssertThrows<ArgumentException>(() => service.ResolveDownloadableArtifact(job.JobId, "%2e%2e%2fescape.bin"), "URL-encoded traversal download selectors should be rejected.");
+        AssertThrows<ArgumentException>(() => service.ResolveDownloadableArtifact(job.JobId, "guest%2f..%2fescape.bin"), "Partially URL-encoded traversal download selectors should be rejected.");
         AssertThrows<FileNotFoundException>(() => service.ResolveDownloadableArtifact(job.JobId, $"guest/{job.JobId:N}/artifacts/dropped-files/missing.bin"), "Unknown relative download selectors should be rejected.");
     }
 
@@ -1140,6 +1141,8 @@ internal sealed class ArtifactManifestContractScenario : ISmokeTestScenario
         SmokeAssert.True(collection.Metadata.TryGetValue("downloadResolutionState", out var state) && state == "missing", $"{collectionName} expected collection should expose missing download diagnostics.");
         SmokeAssert.True(collection.Metadata.TryGetValue("downloadRejectionCode", out var code) && code == "missing-artifact-file", $"{collectionName} expected collection should expose a missing-artifact rejection code.");
         SmokeAssert.True(collection.Metadata.TryGetValue("hasDownloadableArtifacts", out var hasDownloadable) && hasDownloadable == "false", $"{collectionName} expected collection should declare no downloadable artifacts.");
+        SmokeAssert.True(collection.Metadata.TryGetValue("selectorMetadataVersion", out var selectorVersion) && selectorVersion == "artifact-selector-v2", $"{collectionName} expected collection should expose stable selector metadata version.");
+        SmokeAssert.True(collection.Metadata.TryGetValue("downloadHintZh", out var hintZh) && hintZh.Contains("没有可下载文件", StringComparison.Ordinal), $"{collectionName} expected collection should include a clear Chinese unavailable download hint.");
     }
 
     /// <summary>
@@ -1259,7 +1262,19 @@ internal sealed class ArtifactManifestContractScenario : ISmokeTestScenario
         AssertSafeSelectorField(artifact, "relativePath", artifact.RelativePath);
         AssertSafeSelectorField(artifact, "safeLink", artifact.SafeLink);
         AssertSafeSelectorField(artifact, "importPath", artifact.ImportPath);
+        SmokeAssert.True(artifact.Metadata.TryGetValue("selectorMetadataVersion", out var selectorVersion) && selectorVersion == "artifact-selector-v2", $"{artifact.Kind} artifact should expose a stable selector metadata version.");
+        SmokeAssert.True(artifact.Metadata.TryGetValue("contentDispositionPolicy", out var dispositionPolicy) && dispositionPolicy == "attachment-filename-sanitized-from-indexed-artifact-name", $"{artifact.Kind} artifact should document safe Content-Disposition filename policy.");
+        SmokeAssert.True(artifact.Metadata.TryGetValue("safeContentDispositionFileName", out var dispositionName) && IsSafeDownloadName(dispositionName), $"{artifact.Kind} artifact should expose a safe Content-Disposition filename.");
+        SmokeAssert.True(artifact.Metadata.TryGetValue("reportRelativeHref", out var reportHref) && string.Equals(reportHref, artifact.SafeLink, StringComparison.Ordinal), $"{artifact.Kind} artifact should expose the report-relative href selector.");
         SmokeAssert.True(!string.IsNullOrWhiteSpace(artifact.FullPath), $"{artifact.Kind} artifact should retain a host-local full path for guarded streaming.");
+    }
+
+    private static bool IsSafeDownloadName(string value)
+    {
+        return !string.IsNullOrWhiteSpace(value) &&
+            string.Equals(value, Path.GetFileName(value.Replace('\\', '/')), StringComparison.Ordinal) &&
+            value.IndexOfAny(Path.GetInvalidFileNameChars()) < 0 &&
+            !value.Any(char.IsControl);
     }
 
     private static void AssertSafeSelectorField(ArtifactDescriptor artifact, string fieldName, string value)

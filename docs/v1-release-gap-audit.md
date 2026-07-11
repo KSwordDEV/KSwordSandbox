@@ -55,7 +55,9 @@ no-fresh-live 说明；没有新的 build 矩阵、真实样本报告、fresh li
 
 - `scripts/Test-RepositoryPolicy.ps1` 拒绝常见二进制、VM、report、sample、pcap、dump、secret 和大文件。
 - `scripts/Test-ReleaseReadiness.ps1` 组合仓库策略、PowerShell 语法、package manifest、release path `CSignTool.exe` 检查。
-- `package-manifest.generated.json` 暴露 `operatorDiagnostics`、`safetyContract`、`runtimePublishRoot`、`gitStatus` 和 required checks。
+- `package-manifest.generated.json` 暴露 `operatorDiagnostics`、`safetyContract`、`runtimePublishRoot`、`gitStatus` 和 required checks；
+  runtime handoff 审阅还应看 `runtimePublishSummary.incompleteCount`、expected leaf gaps
+  和 forbidden-file previews，确认仓库外 `RuntimePublishRoot` 不是 layout-only dry-run。
 
 发布前验收：
 
@@ -168,6 +170,10 @@ dotnet build .\tools\KSword.Sandbox.JobTool\KSword.Sandbox.JobTool.csproj -c Ver
 
 - 本项目是本地授权分析沙箱，不是云上传服务。
 - VirusTotal 是 hash-only；Intel VT-x/AMD-V 是 Hyper-V 硬件虚拟化，两者不是同一个配置。
+- VM profile、guest payload、guest test-signing、RuntimePublishRoot 完整性是不同故障域；
+  先用 `install/run CheckEnvironment` 看本机 profile/payload/VT key，再用
+  `Test-ReleaseReadiness -RuntimePublishRoot ... -RequireCompleteRuntimePackage`
+  验证 runtime package handoff。
 - 默认命令不会启动或修改 VM；Live 必须显式开启。
 - 默认不签名、不加载真实 R0 driver；真实 R0 是隔离实验室高级路径。
 - 不要提交或分享 runtime root、样本、报告、dump、pcap、VM、secret 或签名材料。

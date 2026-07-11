@@ -308,8 +308,8 @@ runtime publish readiness, missing payload names, non-mutating guarantees, and
 package safety guidance. Newer staging output should expose:
 
 - `runtimePublishSummary`: present/missing counts, missing required vs optional
-  runtime payloads, and whether this is a layout dry-run or complete runtime
-  handoff.
+  runtime payloads, `incompleteCount`, expected leaf-file gaps, forbidden-file
+  previews, and whether this is a layout dry-run or complete runtime handoff.
 - `safeExclusionCategories`: operator-readable categories that must stay out of
   source/runtime packages: secrets, install state, samples, reports/events,
   captures/PCAP/dumps/traces, VM disks/checkpoints, build outputs, symbols,
@@ -338,6 +338,38 @@ source tree.
 The generated metadata is intended to be committed only as part of a built
 release artifact, never back into the source repository. Keep staged packages
 under `D:\Temp\KSwordSandbox\packages` or another ignored external folder.
+
+### RuntimePublishRoot 排障 / RuntimePublishRoot troubleshooting
+
+`RuntimePublishRoot` 不是仓库目录，也不是 `bin/`、`obj/`、`x64/` 的兜底复制源。
+完整 runtime handoff 前，readiness/package diagnostics 应同时满足：
+
+- `host-web` contains `KSword.Sandbox.Web.exe` or `KSword.Sandbox.Web.dll`;
+- `guest-tools` contains `payload-manifest.json`, Guest Agent exe/dll, and
+  `r0collector/KSword.Sandbox.R0Collector.exe`;
+- `tools/job-tool` contains JobTool exe/dll;
+- `tools/postprocess` contains PostProcess exe/dll;
+- none of the runtime publish folders contains `.pdb`, `.sys`, PCAP/dump/trace,
+  VM disk/checkpoint/state, secret, certificate/private-key, `.jsonl`, SQLite,
+  zip/archive, `CSignTool.exe`, `signtool.exe`, or GUI signing fallback files.
+
+如果 `runtimePublishSummary.incompleteCount > 0`，不要把 zip 交付给操作者；
+重新发布对应 payload 到仓库外目录，再运行：
+
+```powershell
+.\scripts\Test-ReleaseReadiness.ps1 `
+  -AllowDirtySource `
+  -RuntimePublishRoot 'D:\Temp\KSwordSandbox\publish' `
+  -RequireCompleteRuntimePackage
+```
+
+如果缺口是 VM profile、guest payload freshness、guest test-signing、硬件虚拟化
+或可选 VirusTotal key，不要修改 package；先运行只读：
+
+```powershell
+.\scripts\install.ps1 -Mode CheckEnvironment
+.\scripts\run.ps1 -Mode CheckEnvironment
+```
 
 Runtime portable packages include both root-level `install.ps1`/`run.ps1` and
 the `scripts/` wrappers (`scripts/run.ps1`, `scripts/install.ps1`,

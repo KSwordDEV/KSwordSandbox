@@ -728,6 +728,17 @@ internal sealed class ProcessTreeProbe : IGuestProbe
                     ? "descendant"
                     : "process-snapshot";
 
+        evt.Data["eventSemanticClass"] = "process-tree-lineage";
+        evt.Data["semanticEventCategory"] = "process-lineage";
+        evt.Data["semanticEventTags"] = string.Join(",", new[]
+        {
+            "process-tree",
+            "lineage",
+            isRoot ? "root" : isChild ? "child" : "snapshot",
+            isMissing ? "missing" : "present"
+        });
+        evt.Data["reportRowKind"] = isTreeNode ? "process-tree-node" : "process-snapshot-row";
+        evt.Data["summaryRow"] = "false";
         evt.Data["isRootProcess"] = ToLowerInvariantString(isRoot);
         evt.Data["isChildProcess"] = ToLowerInvariantString(isChild);
         evt.Data["isDescendantOfRoot"] = ToLowerInvariantString(isChild);
@@ -736,10 +747,14 @@ internal sealed class ProcessTreeProbe : IGuestProbe
         evt.Data["processTreeRole"] = treeNodeRole;
         evt.Data["treeNodeRole"] = treeNodeRole;
         evt.Data["rootAncestorProcessId"] = rootProcessId?.ToString(CultureInfo.InvariantCulture) ?? string.Empty;
+        evt.Data["rootLineageProcessId"] = rootProcessId?.ToString(CultureInfo.InvariantCulture) ?? string.Empty;
+        evt.Data["rootProcessTreeLineage"] = rootProcessId?.ToString(CultureInfo.InvariantCulture) ?? string.Empty;
+        evt.Data["lineageRootProcessId"] = rootProcessId?.ToString(CultureInfo.InvariantCulture) ?? string.Empty;
         if (depth is not null)
         {
             evt.Data["rootRelativeDepth"] = depth.Value.ToString(CultureInfo.InvariantCulture);
             evt.Data["descendantDepth"] = depth.Value.ToString(CultureInfo.InvariantCulture);
+            evt.Data["treeLineageDepth"] = depth.Value.ToString(CultureInfo.InvariantCulture);
         }
 
         if (process.ParentProcessId is not null)
@@ -764,6 +779,9 @@ internal sealed class ProcessTreeProbe : IGuestProbe
                 ? "sample-root-tree"
                 : "sample-root-context";
         evt.Data["lineageStable"] = ToLowerInvariantString(!string.IsNullOrWhiteSpace(lineage));
+        AddIfNotEmpty(evt.Data, "stableTreeLineage", lineage);
+        AddIfNotEmpty(evt.Data, "rootChildTreeLineage", lineage);
+        AddIfNotEmpty(evt.Data, "lineageSelector", lineage);
         evt.Data["lineageIncludesRoot"] = ToLowerInvariantString(rootProcessId is not null &&
             !string.IsNullOrWhiteSpace(lineage) &&
             LineageContainsPid(lineage, rootProcessId.Value));
@@ -1074,6 +1092,11 @@ internal sealed class ProcessTreeProbe : IGuestProbe
                 ["reasonTaxonomy"] = ReasonTaxonomy,
                 ["reasonTaxonomyVersion"] = "v1",
                 ["summaryEvent"] = "true",
+                ["summaryRow"] = "true",
+                ["reportRowKind"] = "process-tree-root-unavailable",
+                ["eventSemanticClass"] = "process-tree-lineage-summary",
+                ["semanticEventCategory"] = "process-lineage",
+                ["semanticEventTags"] = "process-tree,lineage,root-missing,nonbehavior",
                 ["artifactEvent"] = "false",
                 ["behaviorCounted"] = "false",
                 ["nonbehavior"] = "true",
@@ -1128,11 +1151,18 @@ internal sealed class ProcessTreeProbe : IGuestProbe
         evt.Data["processTreeRole"] = "root";
         evt.Data["treeNodeRole"] = "root";
         evt.Data["rootAncestorProcessId"] = rootProcessId.ToString(CultureInfo.InvariantCulture);
+        evt.Data["rootLineageProcessId"] = rootProcessId.ToString(CultureInfo.InvariantCulture);
+        evt.Data["rootProcessTreeLineage"] = rootProcessId.ToString(CultureInfo.InvariantCulture);
+        evt.Data["lineageRootProcessId"] = rootProcessId.ToString(CultureInfo.InvariantCulture);
         evt.Data["rootRelativeDepth"] = "0";
         evt.Data["descendantDepth"] = "0";
+        evt.Data["treeLineageDepth"] = "0";
         evt.Data["treeNodeState"] = "missing";
         evt.Data["treeScope"] = "sample-root-tree";
         evt.Data["lineageStable"] = "true";
+        evt.Data["stableTreeLineage"] = rootProcessId.ToString(CultureInfo.InvariantCulture);
+        evt.Data["rootChildTreeLineage"] = rootProcessId.ToString(CultureInfo.InvariantCulture);
+        evt.Data["lineageSelector"] = rootProcessId.ToString(CultureInfo.InvariantCulture);
         evt.Data["lineageIncludesRoot"] = "true";
         evt.Data["treeLineageStatus"] = "stable";
         evt.Data["lineageStabilityReason"] = "root-relative-lineage-derived-from-launch-context";
@@ -1205,6 +1235,11 @@ internal sealed class ProcessTreeProbe : IGuestProbe
                 ["missingProcessCount"] = missingProcessCount.ToString(CultureInfo.InvariantCulture),
                 ["trackedProcessCount"] = monitoredProcessKeys.Count.ToString(CultureInfo.InvariantCulture),
                 ["summaryEvent"] = "true",
+                ["summaryRow"] = "true",
+                ["reportRowKind"] = "process-tree-summary",
+                ["eventSemanticClass"] = "process-tree-lineage-summary",
+                ["semanticEventCategory"] = "process-lineage",
+                ["semanticEventTags"] = "process-tree,lineage,summary,nonbehavior",
                 ["capturePolicy"] = "always-on-visible-process-tree",
                 ["processTreeSamplingMode"] = "phase-snapshot",
                 ["shortLivedProcessCoverage"] = "best-effort-phase-snapshot",

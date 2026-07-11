@@ -100,6 +100,11 @@ internal static class SettingsPage
                 <strong data-zh="落盘状态" data-en="Disk persistence">落盘状态</strong>
                 <code data-copy="WebUI does not persist VirusTotal API keys to disk">WebUI 不落盘 / no file persistence</code>
               </div>
+              <div class="metric">
+                <strong data-zh="策略摘要" data-en="Policy summary">策略摘要</strong>
+                <p class="muted" data-copy="{{Attr(virusTotal.ZhPolicySummary)}}">{{Html(virusTotal.ZhPolicySummary)}}</p>
+                <code data-copy="{{Attr(virusTotal.LookupMode)}}; {{Attr(virusTotal.PersistencePolicy)}}; {{Attr(virusTotal.QuietFailurePolicy)}}">{{Html(virusTotal.LookupMode)}} · {{Html(virusTotal.PersistencePolicy)}} · {{Html(virusTotal.QuietFailurePolicy)}}</code>
+              </div>
 
               <label for="apiKey" data-zh="VirusTotal API Key（仅当前进程）" data-en="VirusTotal API key (current process only)">VirusTotal API Key（仅当前进程）</label>
               <input id="apiKey" type="password" autocomplete="off" placeholder="x-apikey">

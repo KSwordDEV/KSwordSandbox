@@ -160,6 +160,10 @@ internal sealed class BehaviorRuleVirusTotalQualityScenario : ISmokeTestScenario
         RequireContains(models, "ZhStatusText", "VirusTotal result should expose Chinese status text.");
         RequireContains(models, "ZhStatusDetail", "VirusTotal result should expose a Chinese operator status explanation.");
         RequireContains(models, "VirusTotalOfficialFileObject", "VirusTotal result should expose selected official file object metadata.");
+        RequireContains(models, "LookupMode => \"hash_only_no_sample_upload\"", "VirusTotal settings state should expose the hash-only/no-upload policy.");
+        RequireContains(models, "PersistencePolicy => \"process_environment_only_no_disk\"", "VirusTotal settings state should expose process-only no-disk persistence policy.");
+        RequireContains(models, "QuietFailurePolicy", "VirusTotal settings state should expose quiet failure policy for the settings API.");
+        RequireContains(models, "ZhPolicySummary", "VirusTotal settings state should expose a Chinese policy summary for the settings page.");
         RequireContains(models, "FileSizeBytes", "VirusTotal official file object fields should include file size.");
         RequireContains(models, "FileTypeDescription", "VirusTotal official file object fields should include type description.");
         RequireContains(models, "VirusTotalThreatClassification", "VirusTotal official file object fields should include threat classification metadata.");
@@ -207,6 +211,9 @@ internal sealed class BehaviorRuleVirusTotalQualityScenario : ISmokeTestScenario
         RequireContains(settingsPage, "job 日志", "Settings page should state that VT key updates do not write job logs.");
         RequireContains(settingsPage, "不会提交到仓库", "Settings page should state that VT key updates are not committed to the repository.");
         RequireContains(settingsPage, "Set process environment", "Settings page action should avoid implying durable save.");
+        RequireContains(settingsPage, "virusTotal.ZhPolicySummary", "Settings page should render the settings API Chinese policy summary.");
+        RequireContains(settingsPage, "virusTotal.LookupMode", "Settings page should render hash-only lookup policy.");
+        RequireContains(settingsPage, "virusTotal.QuietFailurePolicy", "Settings page should render quiet failure policy.");
         RequireNotContains(settingsPage, "本机设置文件", "Settings page should not imply a local key settings file exists.");
         RequireNotContains(settingsPage, "保存 / 更新", "Settings page should not label process-only key updates as durable saves.");
 

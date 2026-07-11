@@ -1627,9 +1627,15 @@ public sealed class HostArtifactIndexBuilder
         AddIfMissing(metadata, "downloadSecurityPolicy", "server-indexed-relative-selector");
         AddIfMissing(metadata, "downloadRejectionPolicy", "reject-empty-absolute-traversal-unindexed-missing");
         AddIfMissing(metadata, "safeSelectorFields", "relativePath,safeLink,importPath,downloadSelector,downloadSafeLink");
+        AddIfMissing(metadata, "selectorMetadataVersion", "artifact-selector-v2");
+        AddIfMissing(metadata, "selectorAuthority", "host-artifact-index");
+        AddIfMissing(metadata, "selectorAvailability", downloadableArtifactCount > 0 ? "available" : "unavailable");
         AddIfMissing(metadata, "zhStatus", CollectionStatusZh(normalizedStatus));
         AddIfMissing(metadata, "zhReason", CollectionReasonZh(normalizedReason));
         AddIfMissing(metadata, "zhHint", CollectionHintZh(collectionName, normalizedStatus, normalizedReason, downloadableArtifactCount));
+        AddIfMissing(metadata, "downloadHintZh", downloadableArtifactCount > 0
+            ? "请使用 artifact-index.json 中的相对 selector 下载；不要传入本机绝对路径。"
+            : "当前集合没有可下载文件；这通常表示未请求、采集失败、文件缺失或来宾清单引用被拒绝，不代表样本行为。");
     }
 
     private static int ParseMetadataCount(IReadOnlyDictionary<string, string> metadata, params string[] keys)
@@ -2005,19 +2011,29 @@ public sealed class HostArtifactIndexBuilder
         var fileName = string.IsNullOrWhiteSpace(artifact.Name)
             ? Path.GetFileName(artifact.RelativePath)
             : artifact.Name;
+        var safeFileName = SafeDownloadFileName(fileName);
         AddIfMissing(metadata, "apiMetadataVersion", "artifact-descriptor-v1");
         AddIfMissing(metadata, "contentType", contentType);
         AddIfMissing(metadata, "downloadContentType", contentType);
         AddIfMissing(metadata, "downloadFileName", fileName);
-        AddIfMissing(metadata, "safeDownloadFileName", SafeDownloadFileName(fileName));
+        AddIfMissing(metadata, "safeDownloadFileName", safeFileName);
+        AddIfMissing(metadata, "contentDispositionFileName", safeFileName);
+        AddIfMissing(metadata, "safeContentDispositionFileName", safeFileName);
+        AddIfMissing(metadata, "contentDispositionPolicy", "attachment-filename-sanitized-from-indexed-artifact-name");
         AddIfMissing(metadata, "downloadSelector", artifact.RelativePath);
         AddIfMissing(metadata, "downloadSafeLink", artifact.SafeLink);
         AddIfMissing(metadata, "safeRelativeSelector", artifact.RelativePath);
+        AddIfMissing(metadata, "reportRelativeHref", artifact.SafeLink);
+        AddIfMissing(metadata, "reportRelativeDownloadName", safeFileName);
         AddIfMissing(metadata, "downloadAvailable", "true");
         AddIfMissing(metadata, "downloadResolutionState", "available");
         AddIfMissing(metadata, "downloadReadiness", "host-file-present");
         AddIfMissing(metadata, "downloadRejectionCode", "none");
         AddIfMissing(metadata, "downloadSelectorKind", "relativePath");
+        AddIfMissing(metadata, "selectorMetadataVersion", "artifact-selector-v2");
+        AddIfMissing(metadata, "selectorAuthority", "host-artifact-index");
+        AddIfMissing(metadata, "selectorArtifactKind", artifact.Kind.ToString());
+        AddIfMissing(metadata, "selectorCollectionName", artifact.CollectionName);
         AddIfMissing(metadata, "selectorSafety", "normalized-relative-indexed");
         AddIfMissing(metadata, "streamAuthority", "host-artifact-index");
         AddIfMissing(metadata, "selectorEncoding", "path-segment-url-encoded-safeLink");

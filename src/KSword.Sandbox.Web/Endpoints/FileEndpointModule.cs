@@ -7,6 +7,12 @@ namespace KSword.Sandbox.Web.Endpoints;
 /// </summary>
 internal sealed class FileEndpointModule : EndpointModuleBase
 {
+    public const string ArtifactDownloadSelectorPolicy = "relative-index-selectors-only";
+
+    public const string ArtifactDownloadRejectionPolicy = "reject-empty-absolute-traversal-unindexed-missing";
+
+    public const string ArtifactDownloadNamePolicy = "attachment-filename-sanitized-from-indexed-artifact-name";
+
     /// <summary>
     /// Inputs: none.
     /// Processing: initializes file module metadata with the API file prefix and files tag.

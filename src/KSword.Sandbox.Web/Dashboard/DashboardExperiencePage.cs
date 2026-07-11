@@ -1400,7 +1400,15 @@ internal static class DashboardExperiencePage
 
             function renderUploadTransferProgress(file, progress) {
               if (!progress || progress.phase === 'processing') {
-                setStatus(t('样本已上传到 Web Host；正在创建任务、生成计划并尝试提交后台 VM 分析。', 'Sample uploaded to the Web Host; creating the job, generating the plan, and attempting background VM analysis.'), false);
+                const message = t('样本已上传到 Web Host；正在创建任务、生成计划并尝试提交后台 VM 分析，随后当前页面进入动态监控页。', 'Sample uploaded to the Web Host; creating the job, generating the plan, and attempting background VM analysis, then this page enters the dynamic monitor.');
+                setStatus(message, false);
+                setUploadAutoStartNotice(
+                  t('上传已完成，等待后台接管', 'Upload complete; waiting for background handoff'),
+                  message,
+                  `phase=processing; endpoint=/api/files/upload/start; redirect=/jobs/{jobId}/live-events; no popup or extra dashboard tab required`,
+                  false,
+                  '',
+                  '');
                 return;
               }
 
@@ -1409,15 +1417,31 @@ internal static class DashboardExperiencePage
               const total = Math.max(0, Number(progress.total) || 0);
               if (progress.lengthComputable && total > 0) {
                 const percent = Math.max(0, Math.min(100, Math.round((loaded / total) * 100)));
-                setStatus(t(
+                const message = t(
                   `正在上传 ${name}：${percent}%（${formatBytes(loaded)} / ${formatBytes(total)}）。上传完成后会创建任务并尝试提交 VM 分析。`,
-                  `Uploading ${name}: ${percent}% (${formatBytes(loaded)} / ${formatBytes(total)}). After upload, the job is created and VM analysis is attempted.`), false);
+                  `Uploading ${name}: ${percent}% (${formatBytes(loaded)} / ${formatBytes(total)}). After upload, the job is created and VM analysis is attempted.`);
+                setStatus(message, false);
+                setUploadAutoStartNotice(
+                  t('正在上传：一键接管排队中', 'Uploading: one-click handoff queued'),
+                  message,
+                  `phase=uploading; sample=${name}; percent=${percent}; endpoint=/api/files/upload/start; redirect=/jobs/{jobId}/live-events`,
+                  false,
+                  '',
+                  '');
                 return;
               }
 
-              setStatus(t(
+              const message = t(
                 `正在上传 ${name}：已发送 ${formatBytes(loaded)}。上传完成后会创建任务并尝试提交 VM 分析。`,
-                `Uploading ${name}: sent ${formatBytes(loaded)}. After upload, the job is created and VM analysis is attempted.`), false);
+                `Uploading ${name}: sent ${formatBytes(loaded)}. After upload, the job is created and VM analysis is attempted.`);
+              setStatus(message, false);
+              setUploadAutoStartNotice(
+                t('正在上传：一键接管排队中', 'Uploading: one-click handoff queued'),
+                message,
+                `phase=uploading; sample=${name}; sent=${formatBytes(loaded)}; endpoint=/api/files/upload/start; redirect=/jobs/{jobId}/live-events`,
+                false,
+                '',
+                '');
             }
 
             function renderUploadMonitorHandoff(jobId, runbookStart, monitorHref, isError, message, delayMs) {

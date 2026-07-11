@@ -279,8 +279,16 @@ std::string BuildAbiSelfCheckData(const Options& options) {
     data.AddUtf8("driverEventSequencePolicy", "driver rows emit sequenceMeaning=eventSequence and sequenceConcrete=true; summaries emit sequenceMeaning=nextSequence");
     data.AddWide("zhDriverEventSequencePolicy", L"driver \u4e8b\u4ef6\u884c\u4f7f\u7528 sequenceMeaning=eventSequence \u548c sequenceConcrete=true\uff1b\u6458\u8981\u884c\u4f7f\u7528 sequenceMeaning=nextSequence\u3002");
     data.AddUtf8("networkServiceHintPolicy", "port-protocol heuristic: 53=dns, 80/8080/8000=http, 443/8443=tls; fields include serviceHintSource/serviceHintConfidence/serviceHintDns/serviceHintHttp/serviceHintTls");
-    data.AddUtf8("networkFlowKeyPolicy", "flowKeyVersion=1; flowKey uses protocol|sourceEndpoint|destinationEndpoint with direction-aware endpoints plus endpointPair/source/destination aliases");
-    data.AddUtf8("networkProtocolParserBoundary", "R0 WFP/ALE rows are endpoint/port/layer evidence only; dnsQueryName/httpHost/httpUri/tlsSni require PCAP/browser/sidecar correlation and are marked unavailable in mock rows");
+    data.AddUnsigned("networkCorrelationContractVersion", KSWORD_SANDBOX_NETWORK_CORRELATION_CONTRACT_VERSION);
+    data.AddUnsigned("networkFlowKeyVersion", KSWORD_SANDBOX_NETWORK_FLOW_KEY_VERSION);
+    data.AddUnsigned("networkProtocolBoundaryVersion", KSWORD_SANDBOX_NETWORK_PROTOCOL_BOUNDARY_VERSION);
+    data.AddUtf8("networkFlowKeyPolicy", "flowKeyVersion is the public constant KSWORD_SANDBOX_NETWORK_FLOW_KEY_VERSION; flowKey uses protocol|sourceEndpoint|destinationEndpoint with direction-aware endpoints plus endpointPair/source/destination aliases");
+    data.AddUtf8("networkWfpEventNamingPolicy", "driver.network rows emit wfpEventFamily/wfpEventName/wfpLayerSemanticName so reports can identify WFP ALE connect/recv-accept IPv4/IPv6 without WDK constants");
+    data.AddUtf8("networkWfpEventNameFields", kNetworkWfpEventNameFields);
+    data.AddUtf8("kernelNetworkProducerScope", "wfp-ale-endpoint-metadata-no-payload");
+    data.AddBool("rawPacketPayloadAvailable", false);
+    data.AddBool("kernelPayloadParserEnabled", false);
+    data.AddUtf8("networkProtocolParserBoundary", "R0 WFP/ALE rows are endpoint/port/layer evidence only; raw packets, dnsQueryName, httpHost/httpUri/httpMethod, tlsSni/certificates require PCAP/browser/sidecar correlation and are marked unavailable in mock rows");
     data.AddUtf8("networkProtocolBoundaryFields", kNetworkProtocolBoundaryFields);
     data.AddUtf8("networkCorrelationStableFields", kNetworkCorrelationStableFields);
     data.AddUtf8("networkCorrelationPolicy", "R0 rows are join candidates only: networkCorrelationRole=r0-endpoint-candidate, pcapCorrelationRole=join-candidate-not-l7-owner, and pcapCorrelationJoinFields names flowKey/endpoints/protocol/ports/processId");

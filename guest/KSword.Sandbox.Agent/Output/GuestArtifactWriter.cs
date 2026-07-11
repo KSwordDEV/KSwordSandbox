@@ -284,10 +284,20 @@ internal sealed class GuestArtifactWriter
         AddIfNotEmpty(metadata, "origin", "guest");
         AddIfNotEmpty(metadata, "evidenceRole", classification.EvidenceRole);
         AddIfNotEmpty(metadata, "collectionName", classification.CollectionName);
+        AddIfNotEmpty(metadata, "artifactSemanticType", ArtifactSemanticTypeForClassification(classification));
+        AddIfNotEmpty(metadata, "eventSemanticClass", $"artifact-{ArtifactSemanticTypeForClassification(classification)}");
+        AddIfNotEmpty(metadata, "semanticEventCategory", "artifact-evidence");
+        AddIfNotEmpty(metadata, "semanticEventTags", SemanticTagsForClassification(classification));
+        AddIfNotEmpty(metadata, "behaviorCounted", "false");
+        AddIfNotEmpty(metadata, "nonbehavior", "true");
+        AddIfNotEmpty(metadata, "summaryRow", "false");
+        AddIfNotEmpty(metadata, "reportRowKind", $"{ArtifactSemanticTypeForClassification(classification)}-artifact");
         AddIfNotEmpty(metadata, "capturePolicy", CapturePolicyForClassification(classification));
         AddIfNotEmpty(metadata, "importPath", relativePath);
         AddIfNotEmpty(metadata, "artifactRelativePath", relativePath);
         AddIfNotEmpty(metadata, "artifactSelector", relativePath);
+        AddIfNotEmpty(metadata, "stableArtifactSelector", relativePath);
+        AddIfNotEmpty(metadata, "canonicalArtifactSelector", relativePath);
         AddIfNotEmpty(metadata, "downloadSelector", relativePath);
         AddIfNotEmpty(metadata, "artifactSelectorKind", "safe-output-relative-path");
         AddIfNotEmpty(metadata, "artifactSelectorVersion", "artifact-selectors-v1");
@@ -430,6 +440,14 @@ internal sealed class GuestArtifactWriter
             ["collectionName"] = name,
             ["evidenceRole"] = evidenceRole,
             ["collectionSummaryVersion"] = "artifact-collection-summary-v2",
+            ["summaryRow"] = "true",
+            ["reportRowKind"] = "artifact-collection-summary",
+            ["eventSemanticClass"] = $"artifact-{ArtifactSemanticTypeForCollection(name)}-collection-summary",
+            ["semanticEventCategory"] = "artifact-evidence",
+            ["semanticEventTags"] = $"artifact,{ArtifactSemanticTypeForCollection(name)},collection,summary,nonbehavior",
+            ["artifactSemanticType"] = ArtifactSemanticTypeForCollection(name),
+            ["behaviorCounted"] = "false",
+            ["nonbehavior"] = "true",
             ["requested"] = enabled.ToString(System.Globalization.CultureInfo.InvariantCulture).ToLowerInvariant(),
             ["captureEnabled"] = enabled.ToString(System.Globalization.CultureInfo.InvariantCulture).ToLowerInvariant(),
             ["capturePolicy"] = CapturePolicyForCollection(name),
@@ -1162,11 +1180,19 @@ internal sealed class GuestArtifactWriter
             "artifactExists",
             "artifactRelativePathStatus",
             "artifactSelector",
+            "stableArtifactSelector",
+            "canonicalArtifactSelector",
             "downloadSelector",
             "artifactSelectorKind",
             "artifactSelectorVersion",
             "artifactSelectorState",
             "artifactSelectorMode",
+            "eventSemanticClass",
+            "semanticEventCategory",
+            "semanticEventTags",
+            "artifactSemanticType",
+            "reportRowKind",
+            "summaryRow",
             "firstArtifactSelector",
             "firstArtifactRelativePath",
             "firstArtifactSafeLink",
@@ -1379,6 +1405,32 @@ internal sealed class GuestArtifactWriter
             "duplicate" => "目标进程已在本次运行中采集过。",
             _ => string.Empty
         };
+    }
+
+
+    private static string ArtifactSemanticTypeForClassification(ArtifactClassification classification)
+    {
+        return ArtifactSemanticTypeForCollection(classification.CollectionName);
+    }
+
+    private static string ArtifactSemanticTypeForCollection(string collectionName)
+    {
+        return collectionName switch
+        {
+            "dropped-files" => "dropped-file",
+            "screenshots" => "screenshot",
+            "memory-dumps" => "memory-dump",
+            "packet-captures" => "packet-capture",
+            "driver-events" => "driver-events",
+            "r0-logs" => "diagnostic-log",
+            _ => "artifact"
+        };
+    }
+
+    private static string SemanticTagsForClassification(ArtifactClassification classification)
+    {
+        var semanticType = ArtifactSemanticTypeForClassification(classification);
+        return $"artifact,{semanticType},captured,nonbehavior";
     }
 
     private static string CapturePolicyForCollection(string collectionName)

@@ -8,7 +8,7 @@ WebUI 动态监控页以原始事件为核心：任务运行时先展示 Guest A
 2. Guest Agent 在任务专属输出目录写入 `events.json`，例如 `C:\KSwordSandbox\out\<job-id-n>`。
 3. R0Collector 在 `events.json` 旁边写入 `driver-events.jsonl`。
 4. Host 异步启动 Guest Agent，然后由 runbook 的 `sync-live-output` 步骤周期性把 guest 输出树复制到 `D:\Temp\KSwordSandbox\jobs\<job-id-n>\guest`。
-5. Core 实时遥测服务以 shared-read 容错方式读取 JSON/JSONL。
+5. Core 实时遥测服务以共享读取（shared-read）容错方式读取 JSON/JSONL。
 6. WebUI 优先消费 `/api/jobs/{jobId}/events/stream` 原始事件 SSE；不可用时轮询 `/api/jobs/{jobId}/events/live`，并追加未归类事件行。
 7. WebUI 同时优先消费 `/api/jobs/{jobId}/progress/stream` 真实 runbook 进度 SSE；不可用、无快照或代理缓冲时退回 `/runbook/progress` 与 `/runbook/background` 安全轮询。
 8. 任务结束后，Host 导入事件、执行行为规则，并重新生成 JSON/中文 HTML/英文 HTML 报告。
@@ -34,7 +34,7 @@ WebUI 动态监控页以原始事件为核心：任务运行时先展示 Guest A
 
 ## 文件源容错与状态行 / File-source tolerance and status rows
 
-实时读取使用 shared file access，因为 `events.json` 和 `driver-events.jsonl` 可能正在被复制或追加。文件源必须用可解释状态代替 endpoint 失败：
+实时读取使用共享文件访问（shared file access），因为 `events.json` 和 `driver-events.jsonl` 可能正在被复制或追加。文件源必须用可解释状态代替端点失败（endpoint failure）：
 
 - 缺失或暂时被锁定的文件：事件读取器返回空结果；live monitor 读取器可生成 `live.events.source_status`，其中 `status=missing` 或 `status=pending`。
 - 空文件：生成稳定的 `live.events.source_status`，其中 `status=empty`。
@@ -49,9 +49,9 @@ WebUI 动态监控页以原始事件为核心：任务运行时先展示 Guest A
 `/jobs/{jobId}/live-events` 页面保持独立、中文优先，并按低噪音原则展示：
 
 - 顶部任务概览、运营态势驾驶舱、采集选项、证据与下载、虚拟机分析进度、VirusTotal 官方结果、原始事件流。
-- 原始事件流优先使用 `/events/stream` SSE；不可用时显示明确 fallback 状态，并轮询 `/events/live`。
+- 原始事件流优先使用 `/events/stream` SSE；不可用时显示明确回退（fallback）状态，并轮询 `/events/live`。
 - 原始事件表格只渲染有界页面：浏览器保留有限缓冲，提供首页、上一页、下一页、最新页和每页行数控制。
-- 支持严重度、类型、来源三组 quick filters。严重度是页面诊断分组，不是最终风险等级。
+- 支持严重度、类型、来源三组快速筛选（quick filters）。严重度是页面诊断分组，不是最终风险等级。
 - 点击事件行可选中一条事件；`复制选中事件摘要` 输出一条短摘要，右键行、单元格、状态条仍可复制。
 - `data` 列默认隐藏 command/stdout/stderr/PowerShell 类字段，并截断过长值，避免 live 页变成巨大命令墙。
 
@@ -124,7 +124,7 @@ data: {"jobId":"00000000-0000-0000-0000-000000000000","retrievedAt":"2026-07-10T
 
 ### 真实进度流 / Real runbook progress stream
 
-`GET /api/jobs/{jobId}/progress/stream` 用于 WebUI 进度卡片。它推送 UI-safe payload：真实 runbook step、background 状态、terminal/final/failed 状态和 heartbeat。该 payload 不应包含命令行、`stdout`、`stderr` 或完整 PowerShell 输出。
+`GET /api/jobs/{jobId}/progress/stream` 用于 WebUI 进度卡片。它推送界面安全载荷（UI-safe payload）：真实 runbook step、后台（background）状态、终态/最终/失败（terminal/final/failed）状态和心跳（heartbeat）。该 payload 不应包含命令行、`stdout`、`stderr` 或完整 PowerShell 输出。
 
 可见文案必须中文优先：
 
@@ -141,10 +141,10 @@ data: {"jobId":"00000000-0000-0000-0000-000000000000","retrievedAt":"2026-07-10T
 
 当 SSE 不可用或不适合当前环境时，轮询仍是 WebUI 与 QA probe 的必备回退（fallback）。客户端应在以下情况回退到 `/api/jobs/{jobId}/events/live?offset=<lastOffset>&take=100` 或进度轮询 API：
 
-- SSE endpoint 返回 `404`、`405` 或 `501`。
+- SSE 端点（endpoint）返回 `404`、`405` 或 `501`。
 - 响应不是 `text/event-stream`。
 - 连接在收到 response headers 前失败。
 - 代理或本地测试 harness 缓冲 SSE，导致页面无法及时接收帧。
 - 进度流在短时间内没有返回 snapshot。
 
-fallback 是容忍丢包/重连的：服务端 cursor 是当前 raw event snapshot 上的整数 offset。客户端保留最近的 `nextOffset`，直到 `hasMore=false`；任务仍运行时继续低频轮询。任务完成后，一次最终轮询加 guest-event import/report refresh 即可补齐 UI 状态。
+回退（fallback）是容忍丢包/重连的：服务端 cursor 是当前 raw event snapshot 上的整数 offset。客户端保留最近的 `nextOffset`，直到 `hasMore=false`；任务仍运行时继续低频轮询。任务完成后，一次最终轮询加 guest-event import/report refresh 即可补齐 UI 状态。

@@ -41,6 +41,9 @@ internal sealed class ReportEvidenceStoryContractScenario : ISmokeTestScenario
         RequireContains(html, "Evidence health narrative", "Report should narrate evidence health before dense evidence.");
         RequireContains(html, "R0 / VT / Artifact health narrative", "Report should separate evidence health from sample behavior.");
         RequireContains(html, "Copy health narrative", "Evidence health narrative should be explicitly copyable.");
+        RequireContains(html, "Stable relationship lanes", "Behavior graph should expose stable relationship lanes before dense edges.");
+        RequireContains(html, "Process relation path", "Process cards should expose visible relationship paths.");
+        RequireContains(html, "Artifact lane health", "Artifact status cards should expose lane health summaries.");
         RequireContains(html, "process-tree-sparkline", "Process tree should expose weak-interaction activity sparklines.");
         RequireContains(html, "Network relation path", "Network cards should expose readable process-to-endpoint relation paths.");
         RequireContains(html, "raw-page-nav", "Raw event expansion should expose native page shortcuts.");

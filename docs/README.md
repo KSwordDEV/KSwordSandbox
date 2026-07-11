@@ -1,7 +1,7 @@
 # 文档地图与权威状态 / Documentation map and canonical status
 
 本页是当前 MVP 文档的轻量索引，用于减少文档漂移：当两个文档覆盖同一主题时，
-优先更新下方 canonical（权威）文档，其他文档只保留短指针或历史说明。
+优先更新下方权威（canonical）文档，其他文档只保留短指针或历史说明。
 
 ## 当前 MVP 一段话 / Current MVP in one paragraph
 
@@ -17,21 +17,21 @@ WebUI 展示实时进度和原始事件；可选 VirusTotal 只做 hash-only 查
 
 ## 发布就绪快照 / Release-readiness snapshot
 
-截至 `b845c3d` 后的文档刷新，release-review 的当前事实入口是
+截至 `b845c3d` 后的文档刷新，发布评审（release review）的当前事实入口是
 [`v1-release-gap-audit.md`](v1-release-gap-audit.md)：它维护组件完成百分比、
 剩余差距和低副作用验收命令。简要状态：
 
-- WebUI live 优先使用 `/api/jobs/{jobId}/progress/stream` 真实 runbook step
+- WebUI 实时页（live monitor）优先使用 `/api/jobs/{jobId}/progress/stream` 真实运行手册步骤（runbook step）
   SSE；不可用时回退 durable `runbook-progress.json`/polling。上传或选择 `.exe`
   后进入监控页，命令/stdout/stderr 不在主视图展开。
-- Live monitor 已显示 VT quiet state、artifact index 总览、download selector/href、
-  duplicate 和 rejection diagnostics；下载必须通过 job artifact index 的安全相对 selector。
+- 实时监控页已显示 VT 安静状态（quiet state）、证据索引总览、下载 selector/href、
+  重复项和拒绝诊断；下载必须通过任务证据索引（job artifact index）的安全相对 selector。
 - 静态分析已拆出 `static.*` 结构化事件并进入规则消费；`static.pe.resource`
   投影 PE resource、payload candidate 和 entropy 等字段。`rules/static-notes.yar`
   由内置轻量 YARA-like matcher 处理，仍只作为 triage。
 - 网络/PCAP/sidecar、artifact index/download、`r0collector.driverNetworkStatus`
   R0 网络状态诊断、VT reputation 和中英 HTML 报告已形成可审阅闭环。
-- 默认 release/readiness/package 不签名、不加载驱动、不调用 `CSignTool.exe`、
+- 默认发布、就绪检查和打包（release/readiness/package）不签名、不加载驱动、不调用 `CSignTool.exe`、
   不 push，也不把 runtime 产物带入 git。
 
 ## 仓库卫生提醒 / Repository hygiene reminder
@@ -57,7 +57,7 @@ runtime job 目录、生成的报告、guest payload 二进制、抓包、内存
 | R0 producer 说明 / R0 producer notes | [`r0-driver.md`](r0-driver.md), [`r0-file-monitor.md`](r0-file-monitor.md), [`r0-process-registry-image.md`](r0-process-registry-image.md), [`r0-network.md`](r0-network.md) | Producer 专项说明应链接回 `r0-driver-core.md`，避免重复 ABI 细节。 |
 | 行为规则与静态分析 / Behavior rules and static analysis | [`behavior-rule-matrix.md`](behavior-rule-matrix.md), [`rules-windows-sandbox.md`](rules-windows-sandbox.md), [`static-analysis.md`](static-analysis.md), [`../rules/static-analysis-notes.md`](../rules/static-analysis-notes.md) | `behavior-rule-matrix.md` 是完整清单；`rules-windows-sandbox.md` 是可读摘要；static 文档覆盖宿主侧证据。 |
 | VirusTotal 信誉 / VirusTotal reputation | [`virustotal.md`](virustotal.md) | 可选 hash-only enrichment；不上传样本。 |
-| 打包与发布 / Packaging and release | [`release.md`](release.md), [`v1-release-gap-audit.md`](v1-release-gap-audit.md) | 源码/runtime 包边界、artifact 排除、发布 readiness 门禁和当前 v1 gap audit。 |
+| 打包与发布 / Packaging and release | [`release.md`](release.md), [`v1-release-gap-audit.md`](v1-release-gap-audit.md) | 源码/runtime 包边界、artifact 排除、发布就绪（readiness）门禁和当前 v1 差距审计（gap audit）。 |
 
 ## 历史或背景说明 / Historical or background notes
 

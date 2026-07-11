@@ -468,9 +468,18 @@ function Test-RuntimePublishCompleteness {
     }
 
     $expectedSources = @($runtimeEntries | ForEach-Object { [string](Get-ObjectPropertyValue -InputObject $_ -Name 'source' -DefaultValue '') })
+    $expectedRuntimePayloadLeaves = @{
+        'host-web' = @('KSword.Sandbox.Web.exe|KSword.Sandbox.Web.dll')
+        'guest-tools' = @('payload-manifest.json', 'agent/KSword.Sandbox.Agent.exe|agent/KSword.Sandbox.Agent.dll', 'r0collector/KSword.Sandbox.R0Collector.exe')
+        'tools/job-tool' = @('KSword.Sandbox.JobTool.exe|KSword.Sandbox.JobTool.dll')
+        'tools/postprocess' = @('KSword.Sandbox.PostProcess.exe|KSword.Sandbox.PostProcess.dll')
+    }
+    $forbiddenRuntimePublishExtensions = @('.pdb', '.sys', '.pcap', '.pcapng', '.dmp', '.mdmp', '.vhd', '.vhdx', '.avhd', '.avhdx', '.pfx', '.pem', '.key', '.dpapi', '.jsonl', '.sqlite', '.db', '.zip')
+    $forbiddenRuntimePublishNames = @('sandbox.local.json', 'install-state.json', 'guest-password.dpapi', '.env', 'CSignTool.exe', 'AuthenticodeVariantGUI.exe', 'signtool.exe')
     $operatorHints = @(
         'Runtime payload completeness is a handoff gate only when -RuntimePublishRoot and -RequireCompleteRuntimePackage are supplied.',
         'Expected external payload folders: host-web, guest-tools, tools/job-tool, tools/postprocess.',
+        'Expected payload leaves include host-web KSword.Sandbox.Web exe/dll, guest payload manifest plus Agent/R0Collector, JobTool exe/dll, and PostProcess exe/dll; missing leaves are diagnostics for incomplete publish output.',
         'Read-only environment hints: run .\scripts\install.ps1 -Mode CheckEnvironment and .\scripts\run.ps1 -Mode CheckEnvironment for Hyper-V prerequisites, VM profile, guest payload freshness, and optional VT key status.',
         'This readiness script does not build payloads, copy from repository bin/obj/x64, start/restore/stop VMs, sign drivers, or generate fresh live evidence.'
     )
@@ -501,7 +510,8 @@ function Test-RuntimePublishCompleteness {
     $rootFull = [System.IO.Path]::GetFullPath($RuntimePublishRoot)
     $repoPrefix = ([System.IO.Path]::GetFullPath($RepositoryRoot)).TrimEnd('\', '/') + [System.IO.Path]::DirectorySeparatorChar
     $rootPrefix = $rootFull.TrimEnd('\', '/') + [System.IO.Path]::DirectorySeparatorChar
-    if ($rootFull.StartsWith($repoPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+    $repoFull = [System.IO.Path]::GetFullPath($RepositoryRoot).TrimEnd('\', '/')
+    if ($rootFull.TrimEnd('\', '/') -ieq $repoFull -or $rootFull.StartsWith($repoPrefix, [StringComparison]::OrdinalIgnoreCase)) {
         [void]$issues.Add("RuntimePublishRoot must be outside the repository: $RuntimePublishRoot")
     }
 
@@ -545,8 +555,42 @@ function Test-RuntimePublishCompleteness {
 
             $files = @(Get-ChildItem -LiteralPath $sourcePath -Recurse -File -Force)
             $totalBytes = [Int64](($files | ForEach-Object { $_.Length } | Measure-Object -Sum).Sum)
+            $relativeFiles = @($files | ForEach-Object {
+                    $fullName = [System.IO.Path]::GetFullPath($_.FullName)
+                    $fullName.Substring($sourcePath.TrimEnd('\', '/').Length + 1).Replace('\', '/')
+                })
+            $missingExpectedLeaves = New-Object System.Collections.Generic.List[string]
+            foreach ($expectedLeaf in @($expectedRuntimePayloadLeaves[$source])) {
+                $leafAlternatives = @($expectedLeaf -split '\|' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+                $hasExpectedLeaf = $false
+                foreach ($leafAlternative in $leafAlternatives) {
+                    if ($relativeFiles -contains $leafAlternative) {
+                        $hasExpectedLeaf = $true
+                        break
+                    }
+                }
+
+                if (-not $hasExpectedLeaf) {
+                    [void]$missingExpectedLeaves.Add($expectedLeaf)
+                }
+            }
+
+            $forbiddenFiles = @($files | Where-Object {
+                    $name = $_.Name
+                    $extension = $_.Extension.ToLowerInvariant()
+                    ($forbiddenRuntimePublishExtensions -contains $extension) -or ($forbiddenRuntimePublishNames -contains $name)
+                } | ForEach-Object {
+                    $_.FullName.Substring($sourcePath.TrimEnd('\', '/').Length + 1).Replace('\', '/')
+                } | Select-Object -First 20)
+
             if ($files.Count -eq 0) {
                 [void]$issues.Add("Runtime publish payload directory is empty: $source")
+            }
+            if ($missingExpectedLeaves.Count -gt 0) {
+                [void]$issues.Add("Runtime publish payload '$source' is missing expected leaf file(s): $($missingExpectedLeaves -join ', ')")
+            }
+            if ($forbiddenFiles.Count -gt 0) {
+                [void]$issues.Add("Runtime publish payload '$source' contains forbidden/sensitive file(s): $($forbiddenFiles -join ', ')")
             }
 
             [void]$entryDiagnostics.Add([pscustomobject][ordered]@{
@@ -555,7 +599,10 @@ function Test-RuntimePublishCompleteness {
                     exists = $true
                     fileCount = $files.Count
                     totalBytes = $totalBytes
-                    error = if ($files.Count -eq 0) { 'empty directory' } else { '' }
+                    expectedLeaves = @($expectedRuntimePayloadLeaves[$source])
+                    missingExpectedLeaves = @($missingExpectedLeaves.ToArray())
+                    forbiddenFilePreview = @($forbiddenFiles)
+                    error = if ($files.Count -eq 0) { 'empty directory' } elseif ($missingExpectedLeaves.Count -gt 0) { 'missing expected leaves' } elseif ($forbiddenFiles.Count -gt 0) { 'forbidden files present' } else { '' }
                 })
         }
     }
@@ -576,7 +623,7 @@ function Test-RuntimePublishCompleteness {
         -Title 'Runtime publish completeness / runtime payload 完整性' `
         -Status $status `
         -Message "Runtime publish completeness found $($issues.Count) issue(s)." `
-        -Remediation @('完整 runtime handoff 前必须补齐仓库外 RuntimePublishRoot；package/readiness 不会从仓库 bin/obj/x64 回退复制，也不会构建、签名或操作 VM。') `
+        -Remediation @('完整 runtime handoff 前必须补齐仓库外 RuntimePublishRoot，并确认每个 payload 含预期 exe/dll/manifest 且不含 .pdb/.sys/pcap/dump/VM/secret/signing 文件；package/readiness 不会从仓库 bin/obj/x64 回退复制，也不会构建、签名或操作 VM。') `
         -Details @{ issues = @($issues.ToArray()); runtimePublishRoot = $RuntimePublishRoot; expectedSources = $expectedSources; entries = @($entryDiagnostics.ToArray()); operatorHints = $operatorHints; requireCompleteRuntimePackage = [bool]$RequireCompleteRuntimePackage; handoffAllowed = $false }
 }
 

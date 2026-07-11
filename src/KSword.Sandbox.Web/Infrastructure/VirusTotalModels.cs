@@ -46,7 +46,20 @@ internal sealed record VirusTotalSettingsState(
     bool Configured,
     string? ApiKeyMask,
     string Source,
-    string? SettingsPath);
+    string? SettingsPath)
+{
+    public string Provider => "VirusTotal";
+
+    public string LookupMode => "hash_only_no_sample_upload";
+
+    public string PersistencePolicy => "process_environment_only_no_disk";
+
+    public string QuietFailurePolicy => "missing_key_not_found_rate_limit_auth_timeout_are_display_only_no_job_log";
+
+    public string ZhPolicySummary => Configured
+        ? "VirusTotal 已配置：仅查询 SHA-256，不上传样本；Key 仅在当前来源中读取，不写入报告或 job 日志。"
+        : "VirusTotal 未配置：沙箱主流程继续；动态监控页只显示静默状态，不写任务/行为日志。";
+}
 
 /// <summary>
 /// Request body for updating the local VirusTotal API key.

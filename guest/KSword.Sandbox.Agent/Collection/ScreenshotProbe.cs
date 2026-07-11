@@ -129,6 +129,12 @@ internal sealed class ScreenshotProbe : IGuestProbe
                 ["status"] = result.Captured ? "captured" : "skipped",
                 ["nonfatal"] = FormatBoolean(!result.Captured),
                 ["artifactEvent"] = "true",
+                ["summaryRow"] = "false",
+                ["reportRowKind"] = result.Captured ? "screenshot-artifact" : "screenshot-diagnostic",
+                ["eventSemanticClass"] = "artifact-screenshot",
+                ["semanticEventCategory"] = "artifact-evidence",
+                ["semanticEventTags"] = result.Captured ? "artifact,screenshot,captured,nonbehavior" : "artifact,screenshot,skipped,nonbehavior",
+                ["artifactSemanticType"] = "screenshot",
                 ["behaviorCounted"] = "false",
                 ["nonbehavior"] = "true",
                 ["evidenceRole"] = "screenshot",
@@ -211,7 +217,10 @@ internal sealed class ScreenshotProbe : IGuestProbe
             evt.Data["artifactFullPath"] = result.Path;
             AddIfNotEmpty(evt.Data, "artifactRelativePath", artifactRelativePath);
             AddIfNotEmpty(evt.Data, "artifactSelector", artifactRelativePath);
+            AddIfNotEmpty(evt.Data, "stableArtifactSelector", artifactRelativePath);
+            AddIfNotEmpty(evt.Data, "canonicalArtifactSelector", artifactRelativePath);
             AddIfNotEmpty(evt.Data, "downloadSelector", artifactRelativePath);
+            AddIfNotEmpty(evt.Data, "artifactSafeLink", string.IsNullOrWhiteSpace(artifactRelativePath) ? null : BuildSafeLink(artifactRelativePath));
             AddIfNotEmpty(evt.Data, "artifactSelectorKind", string.IsNullOrWhiteSpace(artifactRelativePath) ? null : "safe-output-relative-path");
             AddIfNotEmpty(evt.Data, "artifactSelectorVersion", string.IsNullOrWhiteSpace(artifactRelativePath) ? null : ArtifactSelectorVersion);
             evt.Data["artifactRelativePathStatus"] = string.IsNullOrWhiteSpace(artifactRelativePath) ? "outside-output-root" : "captured";
@@ -267,6 +276,12 @@ internal sealed class ScreenshotProbe : IGuestProbe
                 ["captureState"] = status,
                 ["status"] = status,
                 ["summaryEvent"] = "true",
+                ["summaryRow"] = "true",
+                ["reportRowKind"] = "screenshot-phase-summary",
+                ["eventSemanticClass"] = "artifact-screenshot-summary",
+                ["semanticEventCategory"] = "artifact-evidence",
+                ["semanticEventTags"] = "artifact,screenshot,summary,nonbehavior",
+                ["artifactSemanticType"] = "screenshot",
                 ["artifactEvent"] = "false",
                 ["behaviorCounted"] = "false",
                 ["nonbehavior"] = "true",
@@ -327,6 +342,12 @@ internal sealed class ScreenshotProbe : IGuestProbe
                 ["captureState"] = "disabled",
                 ["status"] = "disabled",
                 ["nonfatal"] = "true",
+                ["summaryRow"] = "true",
+                ["reportRowKind"] = "screenshot-disabled",
+                ["eventSemanticClass"] = "artifact-screenshot-disabled",
+                ["semanticEventCategory"] = "artifact-evidence",
+                ["semanticEventTags"] = "artifact,screenshot,disabled,nonbehavior",
+                ["artifactSemanticType"] = "screenshot",
                 ["artifactEvent"] = "false",
                 ["behaviorCounted"] = "false",
                 ["nonbehavior"] = "true",

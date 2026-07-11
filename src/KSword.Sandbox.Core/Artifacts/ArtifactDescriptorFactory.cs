@@ -196,6 +196,30 @@ public static class ArtifactDescriptorFactory
             return string.Empty;
         }
 
+        // Treat encoded absolute/traversal selectors as unsafe even when this
+        // API is called by manifest/index code rather than the browser download
+        // endpoint. This keeps report-relative links and index metadata aligned
+        // with the guarded download selector policy.
+        try
+        {
+            var decoded = Uri.UnescapeDataString(unified).Replace('\\', '/');
+            if (!string.Equals(decoded, unified, StringComparison.Ordinal))
+            {
+                if (Path.IsPathFullyQualified(decoded) ||
+                    decoded.StartsWith("/", StringComparison.Ordinal) ||
+                    decoded.Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                        .Any(segment => string.Equals(segment, "..", StringComparison.Ordinal) ||
+                            segment.Contains(':', StringComparison.Ordinal)))
+                {
+                    return string.Empty;
+                }
+            }
+        }
+        catch (UriFormatException)
+        {
+            return string.Empty;
+        }
+
         var segments = unified
             .Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Where(segment => !string.Equals(segment, ".", StringComparison.Ordinal))

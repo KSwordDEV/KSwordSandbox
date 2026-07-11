@@ -1,5 +1,5 @@
 {
-  "version": "2026-07-12-v21-defensive-behavior-expansion",
+  "version": "2026-07-12-v22-defensive-behavior-expansion",
   "rules": [
     {
       "id": "host-submission",
@@ -31201,6 +31201,746 @@
         "execution",
         "mitre"
       ]
+    },
+    {
+      "id": "lolbin-cmstp-remote-inf-proxy-execution",
+      "title": "CMSTP remote or user-writable INF proxy execution",
+      "titleZh": "CMSTP 远程或用户可写 INF 代理执行",
+      "severity": "high",
+      "confidence": "medium",
+      "summary": "Cmstp is launched with quiet/install style switches and a remote or user-writable INF path, indicating signed-binary proxy execution rather than normal connection-manager administration.",
+      "summaryZh": "cmstp 以静默或安装类参数加载远程或用户可写 INF，偏向签名二进制代理执行，而不是常规连接管理配置。",
+      "mitreTechniqueId": "T1218.003",
+      "mitreTechniqueName": "CMSTP",
+      "eventTypes": [
+        "process.start",
+        "process.new"
+      ],
+      "allContainsCommandLine": [
+        "cmstp",
+        ".inf"
+      ],
+      "commandLineRegex": [
+        "(?i)\\bcmstp(?:\\.exe)?\\b.*(?:/s|/au|/ni|/ns).*?(?:https?://[^\\s]+\\.inf|(?:C:)?\\\\Users\\\\[^\\\\]+\\\\.*\\.inf|(?:C:)?\\\\ProgramData\\\\.*\\.inf|(?:C:)?\\\\Windows\\\\Temp\\\\.*\\.inf)"
+      ],
+      "evidenceFields": [
+        "eventType",
+        "processName",
+        "commandLine",
+        "path"
+      ],
+      "tags": [
+        "lolbin",
+        "proxy-execution",
+        "download-execute",
+        "open-source-reference",
+        "mitre"
+      ],
+      "excludeProcessNames": [
+        "KSword.Sandbox.Agent.exe",
+        "KSword.Sandbox.R0Collector.exe"
+      ],
+      "excludeDataContains": {
+        "source": [
+          "virustotal",
+          "r0collector"
+        ],
+        "healthStatus": [
+          "collection-health"
+        ],
+        "vtStatus": [
+          "not_configured",
+          "not_found",
+          "rate_limited",
+          "unset"
+        ],
+        "collectorSelfNoise": [
+          "true"
+        ],
+        "noise": [
+          "true"
+        ],
+        "selfNoise": [
+          "true"
+        ]
+      }
+    },
+    {
+      "id": "lolbin-msbuild-inline-task-user-writable-project",
+      "title": "MSBuild inline task from user-writable project",
+      "titleZh": "MSBuild 从用户可写项目运行内联任务",
+      "severity": "medium",
+      "confidence": "medium",
+      "summary": "MSBuild executes a project in a user-writable location with inline-task indicators, a high-signal proxy execution shape when observed in sandboxed malware analysis.",
+      "summaryZh": "MSBuild 执行用户可写位置的项目并带有内联任务迹象；在沙箱样本分析中这是较高信号的代理执行形态。",
+      "mitreTechniqueId": "T1127.001",
+      "mitreTechniqueName": "MSBuild",
+      "eventTypes": [
+        "process.start",
+        "process.new"
+      ],
+      "allContainsCommandLine": [
+        "msbuild"
+      ],
+      "commandLineRegex": [
+        "(?i)\\bmsbuild(?:\\.exe)?\\b.*(?:C:)?\\\\(?:Users\\\\[^\\\\]+|ProgramData|Windows\\\\Temp)\\\\.*\\.(?:proj|csproj|vbproj|xml)\\b.*(?:UsingTask|CodeTaskFactory|inline|/t:)",
+        "(?i)\\bmsbuild(?:\\.exe)?\\b.*(?:UsingTask|CodeTaskFactory|inline).*?(?:C:)?\\\\(?:Users\\\\[^\\\\]+|ProgramData|Windows\\\\Temp)\\\\.*\\.(?:proj|csproj|vbproj|xml)\\b"
+      ],
+      "evidenceFields": [
+        "eventType",
+        "processName",
+        "commandLine",
+        "data.projectPath"
+      ],
+      "tags": [
+        "lolbin",
+        "proxy-execution",
+        "script-execution",
+        "open-source-reference",
+        "mitre"
+      ],
+      "excludeProcessNames": [
+        "KSword.Sandbox.Agent.exe",
+        "KSword.Sandbox.R0Collector.exe"
+      ],
+      "excludeDataContains": {
+        "source": [
+          "virustotal",
+          "r0collector"
+        ],
+        "healthStatus": [
+          "collection-health"
+        ],
+        "vtStatus": [
+          "not_configured",
+          "not_found",
+          "rate_limited",
+          "unset"
+        ],
+        "collectorSelfNoise": [
+          "true"
+        ],
+        "noise": [
+          "true"
+        ],
+        "selfNoise": [
+          "true"
+        ]
+      }
+    },
+    {
+      "id": "persistence-service-failurecommand-user-writable",
+      "title": "Service failure command points to user-writable payload",
+      "titleZh": "服务失败恢复命令指向用户可写载荷",
+      "severity": "high",
+      "confidence": "medium",
+      "summary": "A Windows service failure action command is configured to run an executable or script from a user-writable path, a persistence surface that is more specific than generic service edits.",
+      "summaryZh": "Windows 服务失败恢复动作被配置为从用户可写路径运行可执行文件或脚本，这是比普通服务修改更具体的持久化面。",
+      "mitreTechniqueId": "T1543.003",
+      "mitreTechniqueName": "Windows Service",
+      "eventTypes": [
+        "registry.set",
+        "registry.create",
+        "driver.registry",
+        "service.modified",
+        "service.created"
+      ],
+      "dataContainsAll": {
+        "path": [
+          "CurrentControlSet\\Services"
+        ]
+      },
+      "evidenceFields": [
+        "eventType",
+        "path",
+        "data.path",
+        "data.valueName",
+        "data.value",
+        "data.failureCommand"
+      ],
+      "tags": [
+        "persistence",
+        "service",
+        "registry",
+        "mitre"
+      ],
+      "excludeProcessNames": [
+        "KSword.Sandbox.Agent.exe",
+        "KSword.Sandbox.R0Collector.exe"
+      ],
+      "excludeDataContains": {
+        "source": [
+          "virustotal",
+          "r0collector"
+        ],
+        "healthStatus": [
+          "collection-health"
+        ],
+        "vtStatus": [
+          "not_configured",
+          "not_found",
+          "rate_limited",
+          "unset"
+        ],
+        "collectorSelfNoise": [
+          "true"
+        ],
+        "noise": [
+          "true"
+        ],
+        "selfNoise": [
+          "true"
+        ]
+      },
+      "allDataContains": {
+        "path": [
+          "CurrentControlSet\\Services"
+        ],
+        "valueName": [
+          "Failure"
+        ]
+      },
+      "allDataRegex": {
+        "value": [
+          "(?i)(?:C:)?\\\\(?:Users\\\\[^\\\\]+|ProgramData|Windows\\\\Temp)\\\\.*\\.(?:exe|dll|ps1|bat|cmd|vbs|js)\\b"
+        ]
+      }
+    },
+    {
+      "id": "persistence-scheduled-task-comhandler-user-writable",
+      "title": "Scheduled task COM handler resolves to user-writable DLL",
+      "titleZh": "计划任务 COM Handler 指向用户可写 DLL",
+      "severity": "high",
+      "confidence": "medium",
+      "summary": "Scheduled-task metadata or TaskCache registry evidence indicates a COM handler action whose DLL path is under a user-writable location.",
+      "summaryZh": "计划任务元数据或 TaskCache 注册表证据显示 COM Handler 动作的 DLL 路径位于用户可写位置。",
+      "mitreTechniqueId": "T1053.005",
+      "mitreTechniqueName": "Scheduled Task",
+      "eventTypes": [
+        "scheduled_task.created",
+        "scheduled_task.modified",
+        "registry.set",
+        "registry.create",
+        "driver.registry"
+      ],
+      "evidenceFields": [
+        "eventType",
+        "path",
+        "data.taskName",
+        "data.taskAction",
+        "data.handlerPath",
+        "data.comHandlerPath",
+        "data.value"
+      ],
+      "tags": [
+        "persistence",
+        "scheduled-task",
+        "com",
+        "mitre"
+      ],
+      "excludeProcessNames": [
+        "KSword.Sandbox.Agent.exe",
+        "KSword.Sandbox.R0Collector.exe"
+      ],
+      "excludeDataContains": {
+        "source": [
+          "virustotal",
+          "r0collector"
+        ],
+        "healthStatus": [
+          "collection-health"
+        ],
+        "vtStatus": [
+          "not_configured",
+          "not_found",
+          "rate_limited",
+          "unset"
+        ],
+        "collectorSelfNoise": [
+          "true"
+        ],
+        "noise": [
+          "true"
+        ],
+        "selfNoise": [
+          "true"
+        ]
+      },
+      "allDataContains": {
+        "taskAction": [
+          "ComHandler"
+        ]
+      },
+      "allDataRegex": {
+        "handlerPath": [
+          "(?i)(?:C:)?\\\\(?:Users\\\\[^\\\\]+|ProgramData|Windows\\\\Temp)\\\\.*\\.dll\\b"
+        ]
+      }
+    },
+    {
+      "id": "lateral-wmi-win32-process-create-remote-host",
+      "title": "WMI Win32_Process Create targets a remote host",
+      "titleZh": "WMI Win32_Process Create 指向远程主机",
+      "severity": "high",
+      "confidence": "medium",
+      "summary": "A command or normalized WMI event invokes Win32_Process Create against a named remote target, matching WMI remote execution semantics without relying on port-only evidence.",
+      "summaryZh": "命令或规范化 WMI 事件对命名远程目标调用 Win32_Process Create，符合 WMI 远程执行语义，且不依赖单纯端口证据。",
+      "mitreTechniqueId": "T1047",
+      "mitreTechniqueName": "Windows Management Instrumentation",
+      "eventTypes": [
+        "process.start",
+        "process.new",
+        "wmi.process_create",
+        "wmi.remote_execution"
+      ],
+      "dataRegex": {
+        "commandLine": [
+          "(?i)\\bwmic(?:\\.exe)?\\b.*(?:/node:|/user:).*process\\s+call\\s+create",
+          "(?i)\\bInvoke-WmiMethod\\b.*-Class\\s+Win32_Process.*-Name\\s+Create.*-ComputerName\\s+[^\\s]+"
+        ],
+        "targetHost": [
+          "(?i)^(?!localhost$|127\\.0\\.0\\.1$|\\.$).+"
+        ],
+        "wmiClass": [
+          "(?i)Win32_Process"
+        ]
+      },
+      "dataContains": {
+        "method": [
+          "Create"
+        ],
+        "operation": [
+          "Win32_Process",
+          "process call create"
+        ]
+      },
+      "evidenceFields": [
+        "eventType",
+        "processName",
+        "commandLine",
+        "data.targetHost",
+        "data.wmiClass",
+        "data.method",
+        "data.operation"
+      ],
+      "tags": [
+        "lateral-movement",
+        "wmi",
+        "remote-execution",
+        "mitre"
+      ],
+      "excludeProcessNames": [
+        "KSword.Sandbox.Agent.exe",
+        "KSword.Sandbox.R0Collector.exe"
+      ],
+      "excludeDataContains": {
+        "source": [
+          "virustotal",
+          "r0collector"
+        ],
+        "healthStatus": [
+          "collection-health"
+        ],
+        "vtStatus": [
+          "not_configured",
+          "not_found",
+          "rate_limited",
+          "unset"
+        ],
+        "collectorSelfNoise": [
+          "true"
+        ],
+        "noise": [
+          "true"
+        ],
+        "selfNoise": [
+          "true"
+        ]
+      }
+    },
+    {
+      "id": "lateral-winrm-invoke-command-remote-scriptblock",
+      "title": "WinRM PowerShell remote script block execution",
+      "titleZh": "WinRM PowerShell 远程脚本块执行",
+      "severity": "high",
+      "confidence": "medium",
+      "summary": "PowerShell remoting syntax launches an Invoke-Command, Enter-PSSession, or New-PSSession operation with a remote computer name or session and script block context.",
+      "summaryZh": "PowerShell 远程管理语法通过远程计算机名或会话执行 Invoke-Command、Enter-PSSession 或 New-PSSession，并带有脚本块上下文。",
+      "mitreTechniqueId": "T1021.006",
+      "mitreTechniqueName": "Windows Remote Management",
+      "eventTypes": [
+        "process.start",
+        "process.new",
+        "powershell.scriptblock",
+        "scriptblock.text"
+      ],
+      "dataRegex": {
+        "commandLine": [
+          "(?i)\\b(?:Invoke-Command|Enter-PSSession|New-PSSession)\\b.*(?:-ComputerName|-Session)\\s+[^\\s]+.*(?:-ScriptBlock|\\{)",
+          "(?i)\\bwinrs(?:\\.exe)?\\b\\s+-r:[^\\s]+\\s+.+"
+        ],
+        "scriptBlockText": [
+          "(?i)\\bInvoke-Command\\b.*(?:-ComputerName|-Session).*[-]ScriptBlock"
+        ]
+      },
+      "evidenceFields": [
+        "eventType",
+        "processName",
+        "commandLine",
+        "data.scriptBlockText",
+        "data.targetHost"
+      ],
+      "tags": [
+        "lateral-movement",
+        "winrm",
+        "powershell",
+        "mitre"
+      ],
+      "excludeProcessNames": [
+        "KSword.Sandbox.Agent.exe",
+        "KSword.Sandbox.R0Collector.exe"
+      ],
+      "excludeDataContains": {
+        "source": [
+          "virustotal",
+          "r0collector"
+        ],
+        "healthStatus": [
+          "collection-health"
+        ],
+        "vtStatus": [
+          "not_configured",
+          "not_found",
+          "rate_limited",
+          "unset"
+        ],
+        "collectorSelfNoise": [
+          "true"
+        ],
+        "noise": [
+          "true"
+        ],
+        "selfNoise": [
+          "true"
+        ]
+      }
+    },
+    {
+      "id": "staging-archive-extract-script-user-writable",
+      "title": "Archive extraction stages executable script in user-writable path",
+      "titleZh": "归档解压在用户可写路径落地可执行脚本",
+      "severity": "medium",
+      "confidence": "medium",
+      "summary": "An archive extraction command or normalized staging event writes script-like content to a user-writable directory, useful as staging evidence but lower severity without immediate execution correlation.",
+      "summaryZh": "归档解压命令或规范化暂存事件将脚本类内容写入用户可写目录；若缺少立即执行关联，则作为较低严重度的暂存证据。",
+      "mitreTechniqueId": "T1027",
+      "mitreTechniqueName": "Obfuscated Files or Information",
+      "eventTypes": [
+        "process.start",
+        "process.new",
+        "file.created",
+        "file.modified",
+        "artifact.dropped_file.copied"
+      ],
+      "dataRegex": {
+        "commandLine": [
+          "(?i)\\b(?:powershell(?:\\.exe)?\\s+.*Expand-Archive|tar(?:\\.exe)?\\s+-x|7z(?:\\.exe)?\\s+x|rar(?:\\.exe)?\\s+x)\\b.*(?:C:)?\\\\(?:Users\\\\[^\\\\]+|ProgramData|Windows\\\\Temp)\\\\.*\\.(?:zip|rar|7z|cab).*?(?:C:)?\\\\(?:Users\\\\[^\\\\]+|ProgramData|Windows\\\\Temp)\\\\"
+        ],
+        "droppedPath": [
+          "(?i)(?:C:)?\\\\(?:Users\\\\[^\\\\]+|ProgramData|Windows\\\\Temp)\\\\.*\\.(?:ps1|vbs|js|jse|hta|cmd|bat)\\b"
+        ],
+        "extractedPath": [
+          "(?i)(?:C:)?\\\\(?:Users\\\\[^\\\\]+|ProgramData|Windows\\\\Temp)\\\\.*\\.(?:ps1|vbs|js|jse|hta|cmd|bat)\\b"
+        ]
+      },
+      "dataContains": {
+        "archivePath": [
+          ".zip",
+          ".rar",
+          ".7z",
+          ".cab"
+        ],
+        "containerKind": [
+          "archive"
+        ]
+      },
+      "evidenceFields": [
+        "eventType",
+        "processName",
+        "commandLine",
+        "path",
+        "data.archivePath",
+        "data.extractedPath",
+        "data.droppedPath"
+      ],
+      "tags": [
+        "staging",
+        "archive",
+        "script",
+        "defense-evasion",
+        "mitre"
+      ],
+      "excludeProcessNames": [
+        "KSword.Sandbox.Agent.exe",
+        "KSword.Sandbox.R0Collector.exe"
+      ],
+      "excludeDataContains": {
+        "source": [
+          "virustotal",
+          "r0collector"
+        ],
+        "healthStatus": [
+          "collection-health"
+        ],
+        "vtStatus": [
+          "not_configured",
+          "not_found",
+          "rate_limited",
+          "unset"
+        ],
+        "collectorSelfNoise": [
+          "true"
+        ],
+        "noise": [
+          "true"
+        ],
+        "selfNoise": [
+          "true"
+        ]
+      }
+    },
+    {
+      "id": "staging-hidden-script-then-lolbin-launch-correlation",
+      "title": "Hidden staged script is launched by a LOLBin",
+      "titleZh": "隐藏暂存脚本随后由 LOLBin 启动",
+      "severity": "high",
+      "confidence": "medium",
+      "summary": "A normalized staging row correlates hidden/script attributes in a user-writable location with a LOLBin or script host launch in the same analysis window.",
+      "summaryZh": "规范化暂存行将用户可写位置中的隐藏脚本属性与同一分析窗口内 LOLBin 或脚本宿主启动关联起来。",
+      "mitreTechniqueId": "T1105",
+      "mitreTechniqueName": "Ingress Tool Transfer",
+      "eventTypes": [
+        "behavior.staging_correlation",
+        "download.execute",
+        "artifact.dropped_file.copied"
+      ],
+      "allDataKeys": [
+        "stagedPath",
+        "launcherProcessName",
+        "correlationId"
+      ],
+      "allDataContains": {
+        "attributes": [
+          "hidden"
+        ],
+        "stagedPath": [
+          "\\Users\\"
+        ]
+      },
+      "allDataRegex": {
+        "stagedPath": [
+          "(?i).*\\.(?:ps1|vbs|js|jse|hta|cmd|bat)\\b"
+        ],
+        "launcherProcessName": [
+          "(?i)^(?:powershell|wscript|cscript|mshta|rundll32|regsvr32)(?:\\.exe)?$"
+        ]
+      },
+      "evidenceFields": [
+        "eventType",
+        "data.stagedPath",
+        "data.launcherProcessName",
+        "data.attributes",
+        "data.correlationId"
+      ],
+      "tags": [
+        "staging",
+        "download-execute",
+        "lolbin",
+        "correlation",
+        "mitre"
+      ],
+      "excludeProcessNames": [
+        "KSword.Sandbox.Agent.exe",
+        "KSword.Sandbox.R0Collector.exe"
+      ],
+      "excludeDataContains": {
+        "source": [
+          "virustotal",
+          "r0collector"
+        ],
+        "healthStatus": [
+          "collection-health"
+        ],
+        "vtStatus": [
+          "not_configured",
+          "not_found",
+          "rate_limited",
+          "unset"
+        ],
+        "collectorSelfNoise": [
+          "true"
+        ],
+        "noise": [
+          "true"
+        ],
+        "selfNoise": [
+          "true"
+        ]
+      }
+    },
+    {
+      "id": "anti-analysis-debugger-check-exit-gate",
+      "title": "Debugger check gates exit or delayed execution",
+      "titleZh": "调试器检查触发退出或延迟执行",
+      "severity": "medium",
+      "confidence": "medium",
+      "summary": "An anti-analysis row combines debugger-detection API or PEB checks with an exit, sleep, or delayed-execution action.",
+      "summaryZh": "反分析事件将调试器检测 API 或 PEB 检查与退出、睡眠或延迟执行动作组合出现。",
+      "mitreTechniqueId": "T1497.001",
+      "mitreTechniqueName": "System Checks",
+      "eventTypes": [
+        "antiAnalysis.sandboxCheck",
+        "anti_sandbox.check",
+        "api.call",
+        "behavior.anti_analysis"
+      ],
+      "dataContains": {
+        "api": [
+          "IsDebuggerPresent",
+          "CheckRemoteDebuggerPresent",
+          "NtQueryInformationProcess"
+        ],
+        "check": [
+          "debugger",
+          "PEB BeingDebugged"
+        ],
+        "operation": [
+          "debugger"
+        ]
+      },
+      "dataRegex": {
+        "action": [
+          "(?i)\\b(exit|terminate|sleep|delay|stall)\\b"
+        ],
+        "result": [
+          "(?i)debugger\\s*(?:present|detected)"
+        ]
+      },
+      "evidenceFields": [
+        "eventType",
+        "processName",
+        "data.api",
+        "data.check",
+        "data.operation",
+        "data.action",
+        "data.result"
+      ],
+      "tags": [
+        "anti-sandbox",
+        "anti-analysis",
+        "debugger-check",
+        "mitre"
+      ],
+      "excludeProcessNames": [
+        "KSword.Sandbox.Agent.exe",
+        "KSword.Sandbox.R0Collector.exe"
+      ],
+      "excludeDataContains": {
+        "source": [
+          "virustotal",
+          "r0collector"
+        ],
+        "healthStatus": [
+          "collection-health"
+        ],
+        "vtStatus": [
+          "not_configured",
+          "not_found",
+          "rate_limited",
+          "unset"
+        ],
+        "collectorSelfNoise": [
+          "true"
+        ],
+        "noise": [
+          "true"
+        ],
+        "selfNoise": [
+          "true"
+        ]
+      }
+    },
+    {
+      "id": "download-execute-iwr-expand-start-chain",
+      "title": "PowerShell download, extract, and launch chain",
+      "titleZh": "PowerShell 下载、解压并启动链",
+      "severity": "high",
+      "confidence": "medium",
+      "summary": "A PowerShell command downloads content, expands or extracts it into a user-writable location, and launches a payload in one chained execution flow.",
+      "summaryZh": "PowerShell 命令在同一执行链中下载内容、解压到用户可写位置并启动载荷。",
+      "mitreTechniqueId": "T1105",
+      "mitreTechniqueName": "Ingress Tool Transfer",
+      "eventTypes": [
+        "process.start",
+        "process.new",
+        "download.execute",
+        "behavior.download_execute"
+      ],
+      "dataRegex": {
+        "commandLine": [
+          "(?i)\\bpowershell(?:\\.exe)?\\b.*(?:Invoke-WebRequest|iwr|wget|curl|Net\\.WebClient|DownloadFile).*?(?:Expand-Archive|tar\\s+-x|Shell\\.Application).*?(?:Start-Process|Invoke-Item|&\\s*['\"]?(?:C:)?\\\\(?:Users\\\\[^\\\\]+|ProgramData|Windows\\\\Temp)\\\\.*\\.(?:exe|ps1|bat|cmd))"
+        ]
+      },
+      "allDataRegex": {
+        "outputPath": [
+          "(?i)(?:C:)?\\\\(?:Users\\\\[^\\\\]+|ProgramData|Windows\\\\Temp)\\\\.*"
+        ],
+        "executedPath": [
+          "(?i)(?:C:)?\\\\(?:Users\\\\[^\\\\]+|ProgramData|Windows\\\\Temp)\\\\.*\\.(?:exe|ps1|bat|cmd)\\b"
+        ]
+      },
+      "evidenceFields": [
+        "eventType",
+        "processName",
+        "commandLine",
+        "data.url",
+        "data.outputPath",
+        "data.executedPath"
+      ],
+      "tags": [
+        "download-execute",
+        "powershell",
+        "archive",
+        "mitre"
+      ],
+      "excludeProcessNames": [
+        "KSword.Sandbox.Agent.exe",
+        "KSword.Sandbox.R0Collector.exe"
+      ],
+      "excludeDataContains": {
+        "source": [
+          "virustotal",
+          "r0collector"
+        ],
+        "healthStatus": [
+          "collection-health"
+        ],
+        "vtStatus": [
+          "not_configured",
+          "not_found",
+          "rate_limited",
+          "unset"
+        ],
+        "collectorSelfNoise": [
+          "true"
+        ],
+        "noise": [
+          "true"
+        ],
+        "selfNoise": [
+          "true"
+        ]
+      }
     }
   ]
 }

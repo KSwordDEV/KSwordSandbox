@@ -13,7 +13,7 @@ namespace KSword.Sandbox.SmokeTests.Scenarios;
 /// </summary>
 internal sealed class BehaviorRuleArtifactCorrelationScenario : ISmokeTestScenario
 {
-    private const string ExpectedVersion = "2026-07-12-v21-defensive-behavior-expansion";
+    private const string ExpectedVersion = "2026-07-12-v22-defensive-behavior-expansion";
 
     private static readonly string[] RequiredRuleIds =
     [

@@ -128,6 +128,9 @@ internal sealed class WebUiExperienceContractScenario : ISmokeTestScenario
         RequireContains(dashboard, "uploadAutoStartNotice", "Upload UI should expose a copyable auto-start/live-redirect affordance before and during handoff.");
         RequireContains(dashboard, "setUploadAutoStartNotice", "Upload handoff state should update the visible auto-start/live-redirect affordance.");
         RequireContains(dashboard, "复制一键路径", "Upload handoff affordance should have an explicit Chinese-first copy button.");
+        RequireContains(dashboard, "正在上传：一键接管排队中", "Upload handoff affordance should update while bytes are still uploading.");
+        RequireContains(dashboard, "Upload complete; waiting for background handoff", "Upload handoff affordance should update after upload before background start returns.");
+        RequireContains(dashboard, "no popup or extra dashboard tab required", "Upload handoff copy should make current-page monitor navigation explicit.");
         RequireAnyContains(
             dashboard,
             ["后台虚拟机分析已提交；正在进入动态监控页", "entering the dynamic monitor"],
@@ -262,6 +265,8 @@ internal sealed class WebUiExperienceContractScenario : ISmokeTestScenario
         RequireContains(liveEventsPage, "artifactLaneReadinessText", "Live monitor artifact cards should centralize lane-readiness display text.");
         RequireContains(liveEventsPage, "artifact lane readiness", "Live monitor should expose English artifact lane readiness copy text.");
         RequireContains(liveEventsPage, "复制 selector", "Live monitor artifact cards should expose explicit selector copy actions.");
+        RequireContains(liveEventsPage, "function cockpitCopyButton", "Live monitor cockpit should expose explicit copy buttons for important status cards.");
+        RequireContains(liveEventsPage, "复制卡片", "Live monitor cockpit should provide Chinese-first card summary copy affordances.");
         RequireContains(program, "DisplayText = BuildRunbookCurrentStepDisplay", "Progress SSE payload should include a safe current-step display label.");
         RequireContains(program, "StateMeaning", "Progress SSE payload should explain that command/stdout/stderr are excluded.");
         RequireContains(settingsPage, "VirusTotal API Key", "Settings page should allow operators to set the VirusTotal API key.");
@@ -326,6 +331,7 @@ internal sealed class WebUiExperienceContractScenario : ISmokeTestScenario
         RequireContains(doc, "dedicated live raw monitor page", "WebUI framework doc should require live raw telemetry on a separate page.");
         RequireRegex(doc, @"redirect the current browser page to\s+`/jobs/\{jobId\}/live-events`", "WebUI framework doc should require current-page dynamic monitor entry after upload.");
         RequireContains(doc, "no popup or extra dashboard tab is required", "WebUI framework doc should remove popup-based upload monitor behavior.");
+        RequireContains(doc, "复制卡片", "WebUI framework doc should require cockpit card-level copy summaries.");
         RequireContains(doc, "progress-page link", "WebUI framework doc should describe natural progress-page navigation.");
         RequireRegex(doc, @"current Chinese/English\s+dashboard language", "WebUI framework doc should describe current-language report links.");
         RequireContains(doc, "VM configuration fields", "WebUI framework doc should document VM configuration fields.");

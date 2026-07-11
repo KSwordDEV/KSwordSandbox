@@ -104,6 +104,13 @@ internal sealed class R0CollectorEventQualityScenario : ISmokeTestScenario
 
         RequireContains(header, "KSWORD_SANDBOX_EVENT_HEADER_VERSION", "ABI header must publish event header version.");
         RequireContains(header, "KSWORD_SANDBOX_EVENT_SCHEMA_VERSION", "ABI header must publish event schema version.");
+        RequireContains(header, "KSWORD_SANDBOX_NETWORK_CORRELATION_CONTRACT_VERSION", "ABI header must publish the network correlation contract version.");
+        RequireContains(header, "KSWORD_SANDBOX_NETWORK_FLOW_KEY_VERSION", "ABI header must publish the network flow-key version.");
+        RequireContains(header, "KSWORD_SANDBOX_NETWORK_PROTOCOL_BOUNDARY_VERSION", "ABI header must publish the network protocol boundary version.");
+        RequireContains(header, "KSWORD_SANDBOX_NETWORK_WFP_TODO_FLAG_DNS_PAYLOAD_PARSER", "Network status TODO mask must split DNS parser gaps.");
+        RequireContains(header, "KSWORD_SANDBOX_NETWORK_WFP_TODO_FLAG_HTTP_PAYLOAD_PARSER", "Network status TODO mask must split HTTP parser gaps.");
+        RequireContains(header, "KSWORD_SANDBOX_NETWORK_WFP_TODO_FLAG_TLS_PAYLOAD_PARSER", "Network status TODO mask must split TLS parser gaps.");
+        RequireContains(header, "KSWORD_SANDBOX_NETWORK_WFP_TODO_FLAG_PCAP_SIDECAR_JOIN", "Network status TODO mask must name PCAP sidecar join work.");
         RequireContains(header, "KSWORD_SANDBOX_CAPABILITY_FLAG_EVENT_SCHEMA_NAMES", "Capabilities must advertise schema-name support.");
         RequireContains(header, "KSWORD_SANDBOX_HEALTH_FLAG_PRODUCER_MASKS_AVAILABLE", "GET_HEALTH ABI must publish the producer-mask availability flag.");
         RequireStructFields(
@@ -252,6 +259,10 @@ internal sealed class R0CollectorEventQualityScenario : ISmokeTestScenario
         RequireContains(eventParser, "serviceHintDns", "Network parser must emit DNS service-hint booleans.");
         RequireContains(eventParser, "serviceHintHttp", "Network parser must emit HTTP service-hint booleans.");
         RequireContains(eventParser, "serviceHintTls", "Network parser must emit TLS service-hint booleans.");
+        RequireContains(eventParser, "wfpEventName", "Network parser must emit stable WFP event names.");
+        RequireContains(eventParser, "wfpLayerSemanticName", "Network parser must emit stable WFP layer semantic names.");
+        RequireContains(eventParser, "rawPacketPayloadAvailable", "Network parser must explicitly mark raw packet payloads unavailable in R0 rows.");
+        RequireContains(eventParser, "kernelPayloadParserEnabled", "Network parser must explicitly mark kernel payload parsing disabled.");
         RequireContains(eventParser, "networkCorrelationContractVersion", "Network parser must emit stable correlation contract version.");
         RequireContains(eventParser, "pcapCorrelationJoinFields", "Network parser must name PCAP correlation join fields.");
         RequireContains(eventParser, "l7ProtocolDetailsOwner", "Network parser must identify PCAP/browser/sidecar ownership for L7 details.");
@@ -285,6 +296,9 @@ internal sealed class R0CollectorEventQualityScenario : ISmokeTestScenario
         RequireContains(syntheticMode, "backpressure", "Synthetic rows must include stable backpressure metadata.");
         RequireContains(syntheticMode, "highWatermark", "Synthetic rows must include stable high-watermark metadata.");
         RequireContains(syntheticMode, "lastEnqueueFailureStatus", "Synthetic rows must include stable enqueue failure status metadata.");
+        RequireContains(syntheticMode, "wfpEventName", "Synthetic network rows must include WFP event naming fields.");
+        RequireContains(syntheticMode, "rawPacketPayloadAvailable", "Synthetic network rows must preserve raw packet payload boundary fields.");
+        RequireContains(syntheticMode, "kernelPayloadParserEnabled", "Synthetic network rows must preserve kernel parser boundary fields.");
         RequireContains(syntheticMode, "noise", "Synthetic rows must include stable noise metadata.");
         RequireContains(syntheticMode, "collectorSelfNoise", "Synthetic rows must include explicit collector self-noise metadata.");
         RequireContains(syntheticMode, "selfProcess", "Synthetic rows must include explicit self-process metadata.");
@@ -1111,6 +1125,13 @@ internal sealed class R0CollectorEventQualityScenario : ISmokeTestScenario
         RequireData(mockNetwork!, "serviceHint", "tls");
         RequireData(mockNetwork!, "serviceHintSource", "port-protocol");
         RequireData(mockNetwork!, "serviceHintTls", "true");
+        RequireData(mockNetwork!, "wfpEventFamily", "wfp.ale.auth");
+        RequireData(mockNetwork!, "wfpEventName", "wfp.ale.auth.connect.ipv4");
+        RequireData(mockNetwork!, "wfpLayerSemanticName", "ale-auth-connect-ipv4");
+        RequireData(mockNetwork!, "wfpInspectionAction", "continue-inspection-only");
+        RequireData(mockNetwork!, "kernelNetworkProducerScope", "wfp-ale-endpoint-metadata-no-payload");
+        RequireData(mockNetwork!, "rawPacketPayloadAvailable", "false");
+        RequireData(mockNetwork!, "kernelPayloadParserEnabled", "false");
         RequireData(mockNetwork!, "webCandidate", "true");
         RequireData(mockNetwork!, "activityKind", "network.connect");
         RequireData(mockNetwork!, "networkCorrelationContractVersion", "1");

@@ -482,6 +482,22 @@ std::string NetworkTodoMaskNames(const ULONG mask) {
         appendName("ProtocolPayloads");
         knownFlags |= KSWORD_SANDBOX_NETWORK_WFP_TODO_FLAG_PROTOCOL_PAYLOADS;
     }
+    if ((mask & KSWORD_SANDBOX_NETWORK_WFP_TODO_FLAG_DNS_PAYLOAD_PARSER) != 0) {
+        appendName("DnsPayloadParser");
+        knownFlags |= KSWORD_SANDBOX_NETWORK_WFP_TODO_FLAG_DNS_PAYLOAD_PARSER;
+    }
+    if ((mask & KSWORD_SANDBOX_NETWORK_WFP_TODO_FLAG_HTTP_PAYLOAD_PARSER) != 0) {
+        appendName("HttpPayloadParser");
+        knownFlags |= KSWORD_SANDBOX_NETWORK_WFP_TODO_FLAG_HTTP_PAYLOAD_PARSER;
+    }
+    if ((mask & KSWORD_SANDBOX_NETWORK_WFP_TODO_FLAG_TLS_PAYLOAD_PARSER) != 0) {
+        appendName("TlsPayloadParser");
+        knownFlags |= KSWORD_SANDBOX_NETWORK_WFP_TODO_FLAG_TLS_PAYLOAD_PARSER;
+    }
+    if ((mask & KSWORD_SANDBOX_NETWORK_WFP_TODO_FLAG_PCAP_SIDECAR_JOIN) != 0) {
+        appendName("PcapSidecarJoin");
+        knownFlags |= KSWORD_SANDBOX_NETWORK_WFP_TODO_FLAG_PCAP_SIDECAR_JOIN;
+    }
 
     const ULONG unknownFlags = mask & ~knownFlags;
     if (unknownFlags != 0) {
@@ -553,7 +569,7 @@ std::wstring NetworkStatusZhHint(const bool active, const bool degraded, const b
     }
 
     if (todoMask != 0) {
-        return L"TodoMask 表示当前仅覆盖 ALE inspect-only；packet/stream、flow context、filter condition 和协议 payload 解析仍由 sidecar/PCAP 路径补足。";
+        return L"TodoMask 表示当前仅覆盖 ALE inspect-only；packet/stream、flow context、filter condition、DNS/HTTP/TLS payload 解析和 PCAP sidecar join 仍由用户态/PCAP 路径补足。";
     }
 
     if (!active) {
@@ -1585,6 +1601,32 @@ std::string NetworkFlowKey(
     return protocolName + "|" + source + "|" + destination;
 }
 
+// Input: decoded direction/address-family names from one WFP/ALE payload.
+// Processing: Produces a stable event-family name that is independent of WDK
+// numeric layer ids and explicit about the ALE authorization source.
+// Return: a normalized WFP event name used in JSONL and smoke contracts.
+std::string NetworkWfpEventName(
+    const std::string& directionName,
+    const std::string& addressFamilyName) {
+    const std::string layer = directionName == "inbound" ? "recv-accept" :
+        (directionName == "outbound" ? "connect" : "unknown");
+    const std::string family = addressFamilyName == "ipv6" ? "ipv6" :
+        (addressFamilyName == "ipv4" ? "ipv4" : "unknown");
+    return "wfp.ale.auth." + layer + "." + family;
+}
+
+// Input: decoded direction/address-family names from one WFP/ALE payload.
+// Processing: Produces the public layer-semantic label that reports can show
+// without requiring WDK constants in user mode.
+// Return: stable layer semantic name.
+std::string NetworkWfpLayerSemanticName(
+    const std::string& directionName,
+    const std::string& addressFamilyName) {
+    const std::string layer = directionName == "inbound" ? "ale-auth-recv-accept" :
+        (directionName == "outbound" ? "ale-auth-connect" : "ale-auth-unknown");
+    return layer + "-" + addressFamilyName;
+}
+
 // Input: Network flow key and service-hint label already derived from endpoint
 // metadata.
 // Processing: Emits explicit L7/PCAP boundary fields so DNS/HTTP/TLS candidates
@@ -1598,10 +1640,13 @@ void AddNetworkProtocolBoundaryData(
     const bool httpCandidate = serviceHint == "http";
     const bool tlsCandidate = serviceHint == "tls";
 
+    data.AddUnsigned("protocolBoundaryVersion", KSWORD_SANDBOX_NETWORK_PROTOCOL_BOUNDARY_VERSION);
     data.AddBool("protocolPayloadParsed", false);
+    data.AddBool("rawPacketPayloadAvailable", false);
+    data.AddBool("kernelPayloadParserEnabled", false);
     data.AddUtf8("protocolParserSource", "r0-ale-endpoint-only");
     data.AddUtf8("protocolPayloadSource", "none-r0-endpoint-metadata-only");
-    data.AddUnsigned("networkCorrelationContractVersion", 1);
+    data.AddUnsigned("networkCorrelationContractVersion", KSWORD_SANDBOX_NETWORK_CORRELATION_CONTRACT_VERSION);
     data.AddUtf8("networkCorrelationRole", "r0-endpoint-candidate");
     data.AddUtf8("pcapCorrelationRole", "join-candidate-not-l7-owner");
     data.AddUtf8("pcapCorrelationJoinFields", "flowKey|sourceEndpoint|destinationEndpoint|protocolName|sourcePort|destinationPort|processId");
@@ -1619,11 +1664,11 @@ void AddNetworkProtocolBoundaryData(
     data.AddBool("pcapTlsDetailsAvailable", false);
     data.AddUtf8(
         "pcapBoundaryPolicy",
-        "R0 rows provide endpoint/port/PID/layer evidence; L7 names and URLs require PCAP/browser/sidecar rows");
+        "R0 rows provide endpoint/port/PID/layer evidence only; raw packets and L7 names/URLs require PCAP/browser/sidecar rows");
     data.AddUtf8("networkProtocolBoundaryFields", kNetworkProtocolBoundaryFields);
     data.AddUtf8(
         "networkProtocolParserBoundary",
-        "R0 WFP/ALE rows do not parse DNS names, HTTP Host/URI, or TLS SNI; correlate PCAP/browser/sidecar rows");
+        "R0 WFP/ALE rows do not parse raw payloads, DNS names, HTTP Host/URI/method, or TLS SNI/certificates; correlate PCAP/browser/sidecar rows");
     data.AddUtf8("r0ProtocolParserGuarantee", "endpoint-port-pid-layer-only");
     data.AddUtf8("protocolBoundaryVerdict", "l7-unavailable-r0-endpoint-only");
     data.AddBool("l7ProtocolDetailsAvailable", false);
@@ -2713,6 +2758,9 @@ bool AddNetworkPayloadData(
         networkPayload->Direction == KswSandboxNetworkDirectionInbound ? networkPayload->RemotePort : networkPayload->LocalPort;
     const USHORT destinationPort =
         networkPayload->Direction == KswSandboxNetworkDirectionInbound ? networkPayload->LocalPort : networkPayload->RemotePort;
+    const std::string addressFamilyName = NetworkAddressFamilyName(networkPayload->AddressFamily);
+    const std::string wfpEventName = NetworkWfpEventName(directionName, addressFamilyName);
+    const std::string wfpLayerSemanticName = NetworkWfpLayerSemanticName(directionName, addressFamilyName);
     const std::string flowKey = NetworkFlowKey(
         protocolName,
         localEndpoint,
@@ -2752,6 +2800,14 @@ bool AddNetworkPayloadData(
     data->AddUtf8("semanticFamily", "network");
     data->AddUtf8("behaviorLane", "network-flow");
     data->AddUtf8("activityKind", ActivityKind("network", NetworkOperationName(networkPayload->Operation)));
+    data->AddUtf8("wfpEventFamily", "wfp.ale.auth");
+    data->AddUtf8("wfpEventName", wfpEventName);
+    data->AddUtf8("wfpLayerSemanticName", wfpLayerSemanticName);
+    data->AddUtf8("wfpLayerDirection", directionName);
+    data->AddUtf8("wfpLayerAddressFamily", addressFamilyName);
+    data->AddUtf8("wfpInspectionAction", "continue-inspection-only");
+    data->AddUtf8("kernelNetworkProducerScope", "wfp-ale-endpoint-metadata-no-payload");
+    data->AddUtf8("networkWfpEventNameFields", kNetworkWfpEventNameFields);
     data->AddUtf8("networkEvidenceKind", networkEvidenceKind);
     data->AddBool("externalAddressCandidate", externalAddressCandidate);
     data->AddBool("lateralMovementCandidate", lateralMovementCandidate);
@@ -2791,7 +2847,7 @@ bool AddNetworkPayloadData(
     data->AddUnsigned("direction", networkPayload->Direction);
     data->AddUtf8("directionName", directionName);
     data->AddUnsigned("addressFamily", networkPayload->AddressFamily);
-    data->AddUtf8("addressFamilyName", NetworkAddressFamilyName(networkPayload->AddressFamily));
+    data->AddUtf8("addressFamilyName", addressFamilyName);
     data->AddUnsigned("flags", networkPayload->Flags);
     data->AddUtf8("flagsHex", HexUnsignedLongLong(networkPayload->Flags, 8));
     data->AddUtf8("flagNames", NetworkEventFlagNames(networkPayload->Flags));
@@ -2830,7 +2886,7 @@ bool AddNetworkPayloadData(
     data->AddUnsigned("destinationPort", destinationPort);
     data->AddUtf8("endpointPair", sourceEndpoint + " -> " + destinationEndpoint);
     data->AddUtf8("flowKey", flowKey);
-    data->AddUnsigned("flowKeyVersion", 1);
+    data->AddUnsigned("flowKeyVersion", KSWORD_SANDBOX_NETWORK_FLOW_KEY_VERSION);
     data->AddUtf8("flowKeyDirection", directionName);
     data->AddUtf8("flowKeySource", "directional-source-destination-endpoints");
     data->AddUtf8("flowKeyScope", "transport-5tuple-lite");
@@ -3358,6 +3414,13 @@ std::string BuildNetworkStatusData(const KSWORD_SANDBOX_NETWORK_STATUS_REPLY& re
     data.AddUtf8("networkStatusCapability", "ioctl-available");
     data.AddUtf8("networkStatusKind", "wfp-ale-runtime-diagnostics");
     data.AddUtf8("networkStatusInterpretation", "collector_readiness_not_sample_behavior");
+    data.AddUtf8("kernelNetworkProducerScope", "wfp-ale-endpoint-metadata-no-payload");
+    data.AddUtf8("networkWfpEventNameFields", kNetworkWfpEventNameFields);
+    data.AddBool("rawPacketPayloadAvailable", false);
+    data.AddBool("kernelPayloadParserEnabled", false);
+    data.AddUtf8(
+        "networkProtocolParserBoundary",
+        "GET_NETWORK_STATUS reports WFP/ALE readiness only; DNS/HTTP/TLS payload parsing is PCAP/browser/sidecar-owned");
     data.AddUnsigned("version", reply.Version);
     data.AddUtf8("versionHex", HexUnsignedLongLong(reply.Version, 8));
     data.AddUnsigned("collectorAbiVersion", KSWORD_SANDBOX_INTERFACE_VERSION);
@@ -3391,7 +3454,7 @@ std::string BuildNetworkStatusData(const KSWORD_SANDBOX_NETWORK_STATUS_REPLY& re
     data.AddUnsigned("todoMask", reply.TodoMask);
     data.AddUtf8("todoMaskHex", HexUnsignedLongLong(reply.TodoMask, 8));
     data.AddUtf8("todoMaskNames", NetworkTodoMaskNames(reply.TodoMask));
-    data.AddUtf8("todoMaskMeaning", "remaining-gap-mask-for-ale-inspect-only-coverage");
+    data.AddUtf8("todoMaskMeaning", "remaining-gap-mask-for-ale-inspect-only-coverage-and-user-mode-pcap-correlation");
     data.AddUnsigned("payloadVersion", reply.PayloadVersion);
     data.AddUtf8("payloadVersionHex", HexUnsignedLongLong(reply.PayloadVersion, 8));
     data.AddSigned("lastDegradeReason", reply.LastDegradeReason);

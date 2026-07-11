@@ -55,6 +55,8 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(rendererSource, "AppendBehaviorGraph", "Report renderer should include a behavior graph and IOC summary section.");
         RequireContains(rendererSource, "Behavior graph / IOC summary", "Report renderer should expose a graph/IOC section title.");
         RequireContains(rendererSource, "Evidence graph edges", "Report renderer should expose graph edge evidence.");
+        RequireContains(rendererSource, "Stable relationship lanes", "Report renderer should expose stable weak-interaction relationship lanes before dense edge tables.");
+        RequireContains(rendererSource, "Copy stable relationship lanes", "Report renderer should make relationship lane summaries explicitly copyable.");
         RequireContains(rendererSource, "AppendEvidenceSummaryCards", "Report renderer should expose evidence summary cards.");
         RequireContains(rendererSource, "Evidence summary cards", "Report renderer should expose evidence summary cards title.");
         RequireContains(rendererSource, "AppendEvidenceStoryBoard", "Report renderer should expose a narrative evidence story board.");
@@ -80,6 +82,7 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(rendererSource, "AppendProcessRelationshipCards", "Report renderer should expose process relationship cards.");
         RequireContains(rendererSource, "Process relationship cards", "Report renderer should expose process relationship card title.");
         RequireContains(rendererSource, "Stable relationship map", "Report renderer should expose a stable process relationship map.");
+        RequireContains(rendererSource, "Process relation path", "Report renderer should expose visible process relationship paths before folded evidence.");
         RequireContains(rendererSource, "parentProcess=", "Report renderer should include parent process evidence in process cards.");
         RequireContains(rendererSource, "AppendNetworkRelationshipCards", "Report renderer should expose network relationship cards.");
         RequireContains(rendererSource, "Network relationship cards", "Report renderer should expose network relationship card title.");
@@ -87,6 +90,7 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(rendererSource, "Network category view", "Report renderer should explain DNS/HTTP/TLS/flow network lanes.");
         RequireContains(rendererSource, "AppendNetworkRelationFlow", "Report renderer should expose static network relation paths.");
         RequireContains(rendererSource, "Network relation path", "Report renderer should make network relation paths visible.");
+        RequireContains(rendererSource, "DNS/HTTP/TLS/flow", "Report renderer should expose network path category counts in relation paths.");
         RequireContains(rendererSource, "relationship-details", "Report renderer should use bounded expandable evidence cards.");
         RequireContains(rendererSource, "Copy process card", "Report renderer should expose copyable process relationship cards.");
         RequireContains(rendererSource, "Copy network card", "Report renderer should expose copyable network relationship cards.");
@@ -161,6 +165,7 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(rendererSource, "Static PE resource story", "Report renderer should expose structured PE resource evidence.");
         RequireContains(rendererSource, "resourceRole", "Report renderer should render static resource roles.");
         RequireContains(rendererSource, "Artifact index evidence", "Report renderer should explain artifact selector/duplicate/rejection diagnostics.");
+        RequireContains(rendererSource, "Artifact lane health", "Report renderer should expose artifact lane health in compact summaries.");
         RequireContains(rendererSource, "Download selector / duplicate / rejection diagnostics", "Report renderer should expose artifact index row evidence.");
         RequireContains(rendererSource, "VirusTotal official evidence", "Report renderer should summarize VT official file-object fields.");
         RequireContains(rendererSource, "VT reputation/community", "Report renderer should expose VT reputation/community score.");
@@ -178,6 +183,7 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(doc, "Behavior graph / IOC summary", "Report UX doc should list the behavior graph section.");
         RequireContains(doc, "Evidence story board", "Report UX doc should require evidence storytelling lanes.");
         RequireContains(doc, "Evidence graph edges", "Report UX doc should require graph edge evidence.");
+        RequireContains(doc, "Stable relationship lanes", "Report UX doc should require stable relationship lane summaries.");
         RequireContains(doc, "Artifact collection status", "Report UX doc should require artifact collection status cards.");
         RequireContains(doc, "Top behavior chain", "Report UX doc should require a top behavior chain.");
         RequireContains(doc, "IOC summary", "Report UX doc should require IOC summary cards.");
@@ -204,6 +210,7 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(doc, "Copy evidence summary", "Report UX doc should require explicit copy buttons on evidence summaries.");
         RequireContains(doc, "Copy raw index summary", "Report UX doc should require explicit copy buttons on raw indexes.");
         RequireContains(doc, "Process tree rows", "Report UX doc should require readable process tree rows.");
+        RequireContains(doc, "Process relation path", "Report UX doc should require visible process relation paths.");
         RequireContains(doc, "#43A0FF", "Report UX doc should specify the report primary accent color.");
         RequireAnyContains(doc, ["modern sandbox report layout", "方角面板"], "Report UX doc should require the modern sandbox report layout.");
         RequireContains(doc, "75vh", "Report UX doc should specify bounded major report section height.");
@@ -217,6 +224,7 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireAnyContains(doc, ["default Simplified Chinese compatibility report", "默认简体中文兼容报告"], "Report UX doc should describe report.html default language.");
         RequireContains(doc, "R0 availability", "Report UX doc should require R0 availability summaries.");
         RequireContains(doc, "Network category view", "Report UX doc should require network category summaries.");
+        RequireContains(doc, "Network relation path", "Report UX doc should require visible network relation paths.");
         RequireContains(doc, "report.zh.html", "Report UX doc should mention report.zh.html.");
         RequireContains(doc, "report.en.html", "Report UX doc should mention report.en.html.");
         RequireContains(doc, "/api/jobs/{jobId}/report/html?lang=zh", "Report UX doc should describe the Chinese served report endpoint validation.");
@@ -352,6 +360,8 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireNotContains(englishHtml, "<br><span class=\"muted\">cmd.exe /c whoami</span>", "Rendered event tables should not inline command lines directly.");
         RequireContains(englishHtml, "<section id=\"graph\" class=\"card\"><h2>Behavior graph / IOC summary</h2>", "Rendered HTML should include the behavior graph section.");
         RequireContains(englishHtml, "Evidence graph edges", "Rendered HTML should include graph edge evidence.");
+        RequireContains(englishHtml, "Stable relationship lanes", "Rendered HTML should include stable relationship lane summaries.");
+        RequireContains(englishHtml, "Copy stable relationship lanes", "Rendered relationship lanes should be explicitly copyable.");
         RequireContains(englishHtml, "Top behavior chain", "Rendered HTML should include the top behavior chain.");
         RequireContains(englishHtml, "behavior-chain", "Rendered HTML should style the top behavior chain.");
         RequireContains(englishHtml, "contract-sample.exe pid:4242 --network--&gt; 203.0.113.10:443", "Rendered behavior chain should include the sample network edge.");
@@ -379,6 +389,7 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(englishHtml, "VT reputation/community", "Rendered HTML should include VT reputation/community fields.");
         RequireContains(englishHtml, "https://www.virustotal.com/gui/file/", "Rendered HTML should include copyable VT permalink evidence.");
         RequireContains(englishHtml, "Artifact collection status", "Rendered HTML should include artifact collection status cards.");
+        RequireContains(englishHtml, "Artifact lane health", "Rendered HTML should include artifact lane health compact summaries.");
         RequireContains(englishHtml, "Dropped files", "Rendered HTML should include dropped-file status card.");
         RequireContains(englishHtml, "Screenshots", "Rendered HTML should include screenshot status card.");
         RequireContains(englishHtml, "Memory dumps", "Rendered HTML should include memory-dump status card.");
@@ -414,6 +425,7 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(englishHtml, "Registry: 1", "Rendered process relationship card should aggregate registry count.");
         RequireContains(englishHtml, "Network: 1", "Rendered process relationship card should aggregate network count.");
         RequireContains(englishHtml, "Stable relationship map", "Rendered process relationship card should include stable relationship map details.");
+        RequireContains(englishHtml, "Process relation path", "Rendered process relationship card should include a visible process relation path.");
         RequireContains(englishHtml, "parentProcess=launcher.exe pid:4100", "Rendered process card copy text should include parent process evidence.");
         RequireContains(englishHtml, "child=cmd.exe pid:4243", "Rendered process card relationship map should include child process evidence.");
         RequireBefore(englishHtml, "launcher.exe pid:4100 ppid:-", "contract-sample.exe pid:4242 ppid:4100", "Rendered process lineage should show parent before child.");
@@ -438,6 +450,10 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(chineseHtml, "R0 可用性", "Chinese HTML should localize R0 availability.");
         RequireContains(chineseHtml, "端点分组", "Chinese HTML should localize network endpoint overview cards.");
         RequireContains(chineseHtml, "证据故事板", "Chinese HTML should localize evidence story board.");
+        RequireContains(chineseHtml, "稳定关系通道", "Chinese HTML should localize stable relationship lanes.");
+        RequireContains(chineseHtml, "进程关系路径", "Chinese HTML should localize process relation paths.");
+        RequireContains(chineseHtml, "网络关系路径", "Chinese HTML should localize network relation paths.");
+        RequireContains(chineseHtml, "证据文件通道健康", "Chinese HTML should localize artifact lane health.");
         RequireContains(chineseHtml, "叙事主线摘要", "Chinese HTML should localize narrative spine summary.");
         RequireContains(chineseHtml, "复制证据摘要", "Chinese HTML should localize evidence summary copy buttons.");
         RequireContains(chineseHtml, "默认折叠", "Chinese HTML should localize raw folded labels.");

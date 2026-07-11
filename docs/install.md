@@ -230,6 +230,9 @@ release packaging 的 driver/test-signing 注意事项：
 - 不确定 host/guest test-signing：使用
   `.\install.ps1 -Mode Change -ShowTestSigningGuidance`；该命令仅显示 guidance，
   不会改变 host 或 guest boot settings。
+- 不确定 “VT” 指什么：`VirusTotalStatus` / `ConfigureVTKey` 指可选 hash-only
+  VirusTotal API key；Hyper-V 的 Intel VT-x / AMD-V 是 BIOS/UEFI 硬件虚拟化。
+  VirusTotal key 缺失只会跳过 enrichment，Intel VT-x / AMD-V 缺失会阻止 Live VM。
 
 预览本机 Hyper-V config 写入：
 
@@ -439,6 +442,20 @@ PowerShell Direct 需要 guest Windows credential 来暂存样本、运行 Guest
 - VirusTotal：`VirusTotalStatus` 只显示可选 hash-only API key 是否存在、设置来源和缺失时的
   quiet-skip 行为；不会打印 key。VirusTotal key 与 BIOS/UEFI 里的 Intel VT-x / AMD-V
   硬件虚拟化不是同一件事。
+
+常见故障定位顺序 / Troubleshooting order：
+
+1. `HyperVPrerequisites` 缺 BIOS/UEFI virtualization、SLAT 或 Hyper-V module：
+   先修宿主机能力并重启，再看 VM 配置。
+2. `VmProfile` 仍是示例值或 VM/checkpoint 不存在：用 `-UpdateHyperVConfig`
+   记录真实 golden VM 和 clean checkpoint；不要编辑仓库模板。
+3. `GuestPayloadStatus` missing/stale：重新运行
+   `.\scripts\Prepare-GuestPayload.ps1 -RepoRoot . -PayloadRoot <payloadRoot> -SelfContained`，
+   确认输出在仓库外。
+4. 真实 R0 前 `HostTestSigningState` / guest test-signing 不清楚：先运行
+   `-ShowTestSigningGuidance` 或 `-QueryGuestTestSigning`，只在隔离 lab 中显式启用。
+5. `VirusTotalStatus` missing：这是可选项；需要 enrichment 时再运行
+   `.\install.ps1 -Mode ConfigureVTKey -PromptVTKey`，否则可继续 Plan/WebUI。
 
 VM profile 的来源是本机安装状态和 `sandbox.local.json`，不要修改仓库模板保存本机 VM 名称、
 checkpoint、guest path、driver path 或 secret。需要更新时继续使用：

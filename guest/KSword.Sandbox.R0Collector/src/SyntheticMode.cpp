@@ -95,10 +95,13 @@ void AddNetworkParserBoundaryFields(
     const bool httpCandidate = serviceHint == "http";
     const bool tlsCandidate = serviceHint == "tls";
 
+    extra.push_back({"protocolBoundaryVersion", std::to_string(KSWORD_SANDBOX_NETWORK_PROTOCOL_BOUNDARY_VERSION)});
     extra.push_back({"protocolPayloadParsed", "false"});
+    extra.push_back({"rawPacketPayloadAvailable", "false"});
+    extra.push_back({"kernelPayloadParserEnabled", "false"});
     extra.push_back({"protocolParserSource", "r0-ale-endpoint-only"});
     extra.push_back({"protocolPayloadSource", "none-r0-endpoint-metadata-only"});
-    extra.push_back({"networkCorrelationContractVersion", "1"});
+    extra.push_back({"networkCorrelationContractVersion", std::to_string(KSWORD_SANDBOX_NETWORK_CORRELATION_CONTRACT_VERSION)});
     extra.push_back({"networkCorrelationRole", "r0-endpoint-candidate"});
     extra.push_back({"pcapCorrelationRole", "join-candidate-not-l7-owner"});
     extra.push_back({"pcapCorrelationJoinFields", "flowKey|sourceEndpoint|destinationEndpoint|protocolName|sourcePort|destinationPort|processId"});
@@ -114,11 +117,11 @@ void AddNetworkParserBoundaryFields(
     extra.push_back({"pcapDnsDetailsAvailable", "false"});
     extra.push_back({"pcapHttpDetailsAvailable", "false"});
     extra.push_back({"pcapTlsDetailsAvailable", "false"});
-    extra.push_back({"pcapBoundaryPolicy", "R0 rows provide endpoint/port/PID/layer evidence; L7 names and URLs require PCAP/browser/sidecar rows"});
+    extra.push_back({"pcapBoundaryPolicy", "R0 rows provide endpoint/port/PID/layer evidence only; raw packets and L7 names/URLs require PCAP/browser/sidecar rows"});
     extra.push_back({"networkProtocolBoundaryFields", kNetworkProtocolBoundaryFields});
     extra.push_back({
         "networkProtocolParserBoundary",
-        "R0 WFP/ALE rows do not parse DNS names, HTTP Host/URI, or TLS SNI; correlate PCAP/browser/sidecar rows"});
+        "R0 WFP/ALE rows do not parse raw payloads, DNS names, HTTP Host/URI/method, or TLS SNI/certificates; correlate PCAP/browser/sidecar rows"});
     extra.push_back({"r0ProtocolParserGuarantee", "endpoint-port-pid-layer-only"});
     extra.push_back({"protocolBoundaryVerdict", "l7-unavailable-r0-endpoint-only"});
     extra.push_back({"l7ProtocolDetailsAvailable", "false"});
@@ -193,6 +196,14 @@ MockExtraData BuildNetworkSemanticExtra(
 
     extra.push_back({"payloadSize", std::to_string(sizeof(KSWORD_SANDBOX_NETWORK_EVENT_PAYLOAD))});
     extra.push_back({"networkOperationName", "aleAuthorize"});
+    extra.push_back({"wfpEventFamily", "wfp.ale.auth"});
+    extra.push_back({"wfpEventName", "wfp.ale.auth.connect.ipv4"});
+    extra.push_back({"wfpLayerSemanticName", "ale-auth-connect-ipv4"});
+    extra.push_back({"wfpLayerDirection", "outbound"});
+    extra.push_back({"wfpLayerAddressFamily", "ipv4"});
+    extra.push_back({"wfpInspectionAction", "continue-inspection-only"});
+    extra.push_back({"kernelNetworkProducerScope", "wfp-ale-endpoint-metadata-no-payload"});
+    extra.push_back({"networkWfpEventNameFields", kNetworkWfpEventNameFields});
     extra.push_back({"protocol", protocolName == "udp" ? "17" : "6"});
     extra.push_back({"protocolName", protocolName});
     extra.push_back({"transportProtocol", protocolName});
@@ -217,7 +228,7 @@ MockExtraData BuildNetworkSemanticExtra(
     extra.push_back({"destinationPort", remotePort});
     extra.push_back({"endpointPair", localEndpoint + " -> " + remoteEndpoint});
     extra.push_back({"flowKey", flowKey});
-    extra.push_back({"flowKeyVersion", "1"});
+    extra.push_back({"flowKeyVersion", std::to_string(KSWORD_SANDBOX_NETWORK_FLOW_KEY_VERSION)});
     extra.push_back({"flowKeyDirection", "outbound"});
     extra.push_back({"flowKeySource", "directional-source-destination-endpoints"});
     extra.push_back({"flowKeyScope", "transport-5tuple-lite"});

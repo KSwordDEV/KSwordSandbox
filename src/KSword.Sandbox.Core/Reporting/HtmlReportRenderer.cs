@@ -1192,6 +1192,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         AppendEvidenceSummaryCards(html, report, processNodes, edges, fileIocs, registryIocs, networkIocs, artifactIocs);
         AppendEvidenceStoryBoard(html, report, artifacts);
         AppendEvidenceHealthNarrative(html, report, artifacts);
+        AppendStableRelationshipLanes(html, edges);
         AppendTopBehaviorChain(html, edges);
 
         if (processNodes.Count > 0)
@@ -1353,6 +1354,72 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
             .Take(6)
             .ToList();
         return summary.Count == 0 ? "none" : string.Join(", ", summary);
+    }
+
+    /// <summary>
+    /// Appends a static relationship lane map before dense graph tables.
+    /// Inputs are derived graph edges; processing summarizes process-to-object
+    /// lane counts and representative paths with native copy/fold controls so
+    /// the graph remains stable without canvas or JavaScript libraries.
+    /// </summary>
+    private static void AppendStableRelationshipLanes(StringBuilder html, IReadOnlyCollection<BehaviorGraphEdge> edges)
+    {
+        var lanes = new[]
+        {
+            (Relation: "spawn", Title: "Process lineage lane", Detail: "Process-to-process execution relationships from stable process keys and PID/PPID fallback."),
+            (Relation: "file", Title: "File path lane", Detail: "Process-to-file writes, drops, reads, and path indicators."),
+            (Relation: "registry", Title: "Registry path lane", Detail: "Process-to-registry key/value relationships."),
+            (Relation: "network", Title: "Network path lane", Detail: "Process-to-endpoint DNS/HTTP/TLS/flow relationships."),
+            (Relation: "artifact", Title: "Artifact proof lane", Detail: "Process-to-artifact proof such as screenshots, dropped files, memory dumps, and PCAP."),
+        };
+        var edgeList = edges
+            .Where(edge => !BehaviorGraphEdgeLooksLikeCollectorSelfNoise(edge))
+            .ToList();
+        var copy = string.Join(
+            Environment.NewLine,
+            [
+                "Stable relationship lanes",
+                .. lanes.Select(lane => $"{lane.Title}: relation={lane.Relation}; edges={edgeList.Count(edge => string.Equals(edge.Relation, lane.Relation, StringComparison.OrdinalIgnoreCase))}"),
+                "representativePaths:",
+                .. edgeList
+                    .OrderBy(edge => BehaviorChainRelationRank(edge.Relation))
+                    .ThenBy(edge => edge.From, StringComparer.OrdinalIgnoreCase)
+                    .Take(24)
+                    .Select(edge => $"{edge.From} -> {edge.Relation} -> {edge.To}")
+            ]);
+
+        html.AppendLine("<h3>Stable relationship lanes</h3>");
+        html.AppendLine("<div class=\"section-note\"><strong>Stable relationship lanes.</strong> Weak-interaction lane map for process lineage, file paths, registry paths, network paths, and artifact proof. Counts and representative paths are visible before the dense edge table; complete edge evidence remains bounded below.</div>");
+        html.AppendLine("<div class=\"overview-strip relationship-lane-overview\">");
+        foreach (var lane in lanes)
+        {
+            var laneEdges = edgeList
+                .Where(edge => string.Equals(edge.Relation, lane.Relation, StringComparison.OrdinalIgnoreCase))
+                .Take(3)
+                .Select(edge => $"{edge.From} → {edge.To}")
+                .ToList();
+            var count = edgeList.Count(edge => string.Equals(edge.Relation, lane.Relation, StringComparison.OrdinalIgnoreCase));
+            var detail = laneEdges.Count == 0 ? lane.Detail : $"{lane.Detail} Examples: {string.Join("; ", laneEdges)}.";
+            AppendOverviewItem(html, lane.Title, count.ToString(CultureInfo.InvariantCulture), detail, count > 0 ? "risk-info" : "risk-low");
+        }
+
+        html.AppendLine("</div>");
+        html.AppendLine($"<details class=\"relationship-details\"><summary>Stable relationship lane copy map</summary><div class=\"toolbar\">{CopyButton("Copy stable relationship lanes", copy)}</div><pre class=\"copyable\" data-copy=\"{A(copy)}\">{E(copy)}</pre></details>");
+    }
+
+    private static bool BehaviorGraphEdgeLooksLikeCollectorSelfNoise(BehaviorGraphEdge edge)
+    {
+        return TextLooksLikeCollectorSelfNoise(edge.From) ||
+            TextLooksLikeCollectorSelfNoise(edge.To) ||
+            TextLooksLikeCollectorSelfNoise(edge.Evidence);
+    }
+
+    private static bool TextLooksLikeCollectorSelfNoise(string? value)
+    {
+        return !string.IsNullOrWhiteSpace(value) &&
+            (value.Contains("KSword.Sandbox.R0Collector", StringComparison.OrdinalIgnoreCase) ||
+                value.Contains("collector-self-noise", StringComparison.OrdinalIgnoreCase) ||
+                value.Contains("127.0.0.1:18080", StringComparison.OrdinalIgnoreCase));
     }
 
     /// <summary>
@@ -1603,8 +1670,8 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
             .Concat(r0HealthEvents
             .Take(6)
             .Concat(r0TelemetryEvents.Take(4))
-            .Concat(r0SelfNoiseEvents.Take(4))
             .Select(EventOneLine))
+            .Append($"R0 self-noise events hidden from behavior graph: {r0SelfNoiseEvents.Count}")
             .ToList();
 
         return
@@ -2016,7 +2083,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
             html.AppendLine($"<p class=\"muted\">{E(card.Detail)}</p>");
             AppendCompactEvidenceSummary(
                 html,
-                $"Artifact compact summary: collection={card.Name}; status={card.Status}; artifacts={card.ArtifactCount}; events={card.EventCount}; detail={card.Detail}",
+                $"Artifact lane health: collection={card.Name}; status={card.Status}; artifacts={card.ArtifactCount}; events={card.EventCount}; detail={card.Detail}",
                 "Copy compact summary");
             html.AppendLine($"<details class=\"evidence-expansion-card\"><summary>Expand collection evidence</summary><pre class=\"copyable\" data-copy=\"{A(card.CopyText)}\">{E(card.CopyText)}</pre></details>");
             html.AppendLine("</article>");
@@ -3279,7 +3346,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
             .ToList();
 
         html.AppendLine("<h3>Process tree</h3>");
-        html.AppendLine("<div class=\"section-note\"><strong>Process relationship tree.</strong> Native expandable process tree grouped by stable process key when available, with PID/PPID fallback.</div>");
+        html.AppendLine("<div class=\"section-note\"><strong>Process relationship tree.</strong> Native expandable process tree grouped by stable process key when available, with PID/PPID fallback; compact row labels, depth/key badges, activity sparklines, and path hints keep lineage readable.</div>");
         html.AppendLine("<div class=\"section-note\"><strong>Process tree default expansion.</strong> Key process nodes are open by default: roots, high-signal nodes, and the first relationship levels. Expand remaining nodes for full lineage.</div>");
         AppendProcessTreeOverview(html, starts.Count, children, roots.Count, activityByProcess, report.Events.Count(IsCollectorSelfNoiseEvent), report.Events.Count(IsCollectionHealthEvent));
         if (roots.Count == 0)
@@ -3577,6 +3644,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
             html.AppendLine($"<span>Parent: {E(card.ParentLabel)}</span><span>Relationship lines: {E(card.RelationshipLines.Count.ToString())}</span>");
             html.AppendLine($"<span>Artifacts: {E(card.RelatedArtifacts.Count.ToString())}</span><span>Evidence lines: {E(card.EvidenceLines.Count.ToString())}</span>");
             html.AppendLine("</div>");
+            AppendProcessRelationFlow(html, card);
             AppendCompactEvidenceSummary(html, card.CompactSummary, "Copy compact summary");
             AppendRelationshipArtifactLinks(html, card.RelatedArtifacts, "Linked artifacts for this process", "Copy linked process artifacts");
             if (!string.IsNullOrWhiteSpace(card.Path) || !string.IsNullOrWhiteSpace(card.CommandLine))
@@ -3975,6 +4043,24 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
     }
 
     /// <summary>
+    /// Appends a one-line parent-to-process relationship path for a process card.
+    /// Inputs are a summarized process card; processing emits a visible static
+    /// path so analysts can scan lineage and artifact proof without opening the
+    /// full relationship-map details block.
+    /// </summary>
+    private static void AppendProcessRelationFlow(StringBuilder html, ProcessRelationshipCard card)
+    {
+        var children = card.ChildLabels.Count == 0
+            ? "no child process"
+            : string.Join(" + ", card.ChildLabels.Take(3));
+        var artifact = card.RelatedArtifacts.Count == 0
+            ? "no linked artifact"
+            : string.Join(" + ", card.RelatedArtifacts.Take(2).Select(ArtifactDisplayName));
+        var flow = $"Process relation path: {card.ParentLabel} -> {card.Label} -> {children} -> {artifact}; files={card.FileCount}; registry={card.RegistryCount}; network={card.NetworkCount}";
+        html.AppendLine($"<div class=\"relation-flow copyable\" data-copy=\"{A(flow)}\"><strong>Process relation path</strong><br>{E(card.ParentLabel)} → <code>{E(card.Label)}</code> → {E(children)} → {E(artifact)}<br><span class=\"muted\">Files {E(card.FileCount.ToString(CultureInfo.InvariantCulture))} / Registry {E(card.RegistryCount.ToString(CultureInfo.InvariantCulture))} / Network {E(card.NetworkCount.ToString(CultureInfo.InvariantCulture))}</span></div>");
+    }
+
+    /// <summary>
     /// Appends a one-line process-to-endpoint relation path for a network card.
     /// Inputs are an already summarized endpoint card; processing emits a
     /// static copyable flow, avoiding graph libraries while making the network
@@ -3986,8 +4072,8 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         var artifact = card.RelatedArtifacts.Count == 0
             ? "no linked artifact"
             : string.Join(" + ", card.RelatedArtifacts.Take(2).Select(ArtifactDisplayName));
-        var flow = $"Network relation path: {actor} -> {card.Target} -> {string.Join("/", card.Categories)} -> {artifact}";
-        html.AppendLine($"<div class=\"relation-flow copyable\" data-copy=\"{A(flow)}\"><strong>Network relation path</strong><br>{E(actor)} → <code>{E(card.Target)}</code> → {E(string.Join(" / ", card.Categories))} → {E(artifact)}</div>");
+        var flow = $"Network relation path: {actor} -> {card.Target} -> {string.Join("/", card.Categories)} -> {artifact}; DNS/HTTP/TLS/flow={card.DnsCount}/{card.HttpCount}/{card.TlsCount}/{card.FlowCount}";
+        html.AppendLine($"<div class=\"relation-flow copyable\" data-copy=\"{A(flow)}\"><strong>Network relation path</strong><br>{E(actor)} → <code>{E(card.Target)}</code> → {E(string.Join(" / ", card.Categories))} → {E(artifact)}<br><span class=\"muted\">DNS/HTTP/TLS/flow {E(card.DnsCount.ToString(CultureInfo.InvariantCulture))}/{E(card.HttpCount.ToString(CultureInfo.InvariantCulture))}/{E(card.TlsCount.ToString(CultureInfo.InvariantCulture))}/{E(card.FlowCount.ToString(CultureInfo.InvariantCulture))}</span></div>");
     }
 
     /// <summary>
@@ -6431,6 +6517,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         ("R0 / VT / Artifact health narrative", "R0 / VT / 证据文件健康叙事"),
         ("Copy health narrative", "复制健康叙事"),
         ("Network relation path", "网络关系路径"),
+        ("DNS/HTTP/TLS/flow", "DNS/HTTP/TLS/流"),
         ("Evidence story.", "证据故事。"),
         ("Evidence story lanes.", "证据故事通道。"),
         ("These stable weak-interaction lanes keep the analyst narrative visible before dense tables: process lineage, released files, screenshots, memory dumps, PCAP/network, and R0 collection quality. Each lane shows a short explanation, metric chips, and a bounded native-details evidence sample; complete rows stay in Raw normalized events/report.json and Artifact links.", "这些稳定的弱交互通道会在密集表格前保留分析叙事：进程链路、释放文件、截图、内存转储、PCAP/网络以及 R0 采集质量。每个通道都会显示简短说明、指标标签和有界的原生 details 证据样例；完整行保留在原始事件/report.json 和证据文件链接中。"),
@@ -6477,14 +6564,36 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         ("R0 health rows:", "R0 健康行："),
         ("R0 telemetry rows:", "R0 遥测行："),
         ("Self-noise hidden:", "已隐藏自噪声："),
+        ("R0 self-noise events hidden from behavior graph:", "已从行为图谱隐藏的 R0 自噪声事件："),
+
         ("Health alerts:", "健康告警："),
         ("no health rows", "无健康行"),
         ("unavailable/degraded", "不可用/降级"),
         ("attention needed", "需要关注"),
         ("available", "可用"),
+        ("Stable relationship lanes", "稳定关系通道"),
+        ("Stable relationship lanes.", "稳定关系通道。"),
+        ("Weak-interaction lane map for process lineage, file paths, registry paths, network paths, and artifact proof. Counts and representative paths are visible before the dense edge table; complete edge evidence remains bounded below.", "用于进程链路、文件路径、注册表路径、网络路径和证据文件证明的弱交互通道图。计数和代表路径会先于密集边表可见；完整边证据仍在下方保持有界。"),
+        ("Process lineage lane", "进程链路通道"),
+        ("File path lane", "文件路径通道"),
+        ("Registry path lane", "注册表路径通道"),
+        ("Network path lane", "网络路径通道"),
+        ("Artifact proof lane", "证据文件证明通道"),
+        ("Process-to-process execution relationships from stable process keys and PID/PPID fallback.", "来自稳定进程键和 PID/PPID 回退的进程到进程执行关系。"),
+        ("Process-to-file writes, drops, reads, and path indicators.", "进程到文件写入、落地、读取和路径指标。"),
+        ("Process-to-registry key/value relationships.", "进程到注册表键/值关系。"),
+        ("Process-to-endpoint DNS/HTTP/TLS/flow relationships.", "进程到端点的 DNS/HTTP/TLS/流量关系。"),
+        ("Process-to-artifact proof such as screenshots, dropped files, memory dumps, and PCAP.", "进程到证据文件证明，例如截图、落地文件、内存转储和 PCAP。"),
+        ("Stable relationship lane copy map", "稳定关系通道复制图"),
+        ("Copy stable relationship lanes", "复制稳定关系通道"),
+        ("representativePaths:", "代表路径："),
+        ("Evidence lane health", "证据通道健康状态"),
+        ("Artifact lane health:", "证据文件通道健康："),
+        ("Process relation path", "进程关系路径"),
+        ("Process relation path:", "进程关系路径："),
         ("Artifact links", "证据文件链接"),
         ("Artifact evidence cards.", "证据文件证据卡。"),
-        ("Collection status, safe download selectors, duplicate grouping, and rejection diagnostics are summarized before the dense artifact table. Safe report-relative links can open or download; absolute host/guest paths remain copy-only evidence.", "采集状态、安全下载选择器、重复分组和拒绝诊断会先于密集证据文件表汇总。安全的报告相对链接可以打开或下载；主机/guest 绝对路径保持为仅复制证据。"),
+        ("Evidence lane health for dropped files, screenshots, memory dumps, packet captures, and driver events is summarized before the dense artifact table. Collection status, safe download selectors, duplicate grouping, and rejection diagnostics stay visible; safe report-relative links can open or download, while absolute host/guest paths remain copy-only evidence.", "落地文件、截图、内存转储、抓包和驱动事件的证据通道健康状态会先于密集证据文件表汇总。采集状态、安全下载选择器、重复分组和拒绝诊断保持可见；安全的报告相对链接可以打开或下载，主机/guest 绝对路径保持为仅复制证据。"),
         ("Artifact collection status", "证据采集状态"),
         ("Artifact index evidence", "证据文件索引证据"),
         ("Host artifact index.", "主机证据文件索引。"),
@@ -6757,7 +6866,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         ("Nodes with file, registry, or network activity open by default for readable triage.", "包含文件、注册表或网络活动的节点默认展开，便于可读分诊。"),
         ("Collector/health rows excluded from process tree evidence:", "已从进程树证据排除的采集器/健康行："),
         ("Process relationship tree.", "进程关系树。"),
-        ("Native expandable process tree grouped by stable process key when available, with PID/PPID fallback.", "使用原生可展开进程树；有稳定进程键时按键分组，否则回退到 PID/PPID。"),
+        ("Native expandable process tree grouped by stable process key when available, with PID/PPID fallback; compact row labels, depth/key badges, activity sparklines, and path hints keep lineage readable.", "使用原生可展开进程树；有稳定进程键时按键分组，否则回退到 PID/PPID；紧凑行标签、深度/键徽标、活动火花线和路径提示会保持链路可读。"),
         ("Process tree default expansion.", "进程树默认展开。"),
         ("Key process nodes are open by default: roots, high-signal nodes, and the first relationship levels. Expand remaining nodes for full lineage.", "关键进程节点默认展开：根节点、高信号节点和前几层关系。展开其余节点可查看完整谱系。"),
         ("Process relationship evidence.", "进程关系证据。"),

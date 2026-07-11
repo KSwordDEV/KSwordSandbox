@@ -588,6 +588,15 @@ function Add-PackageDiagnostic {
 function Get-RuntimePublishEntryDiagnostics {
     param([Parameter(Mandatory)][object]$Manifest)
 
+    $expectedRuntimePayloadLeaves = @{
+        'host-web' = @('KSword.Sandbox.Web.exe|KSword.Sandbox.Web.dll')
+        'guest-tools' = @('payload-manifest.json', 'agent/KSword.Sandbox.Agent.exe|agent/KSword.Sandbox.Agent.dll', 'r0collector/KSword.Sandbox.R0Collector.exe')
+        'tools/job-tool' = @('KSword.Sandbox.JobTool.exe|KSword.Sandbox.JobTool.dll')
+        'tools/postprocess' = @('KSword.Sandbox.PostProcess.exe|KSword.Sandbox.PostProcess.dll')
+    }
+    $forbiddenRuntimePublishExtensions = @('.pdb', '.sys', '.pcap', '.pcapng', '.dmp', '.mdmp', '.vhd', '.vhdx', '.avhd', '.avhdx', '.pfx', '.pem', '.key', '.dpapi', '.jsonl', '.sqlite', '.db', '.zip')
+    $forbiddenRuntimePublishNames = @('sandbox.local.json', 'install-state.json', 'guest-password.dpapi', '.env', 'CSignTool.exe', 'AuthenticodeVariantGUI.exe', 'signtool.exe')
+
     $entries = New-Object System.Collections.Generic.List[object]
     foreach ($entry in (Get-ObjectArrayProperty -InputObject $Manifest -Name 'include')) {
         $sourceType = [string](Get-ObjectPropertyValue -InputObject $entry -Name 'sourceType' -DefaultValue 'repository')
@@ -601,9 +610,38 @@ function Get-RuntimePublishEntryDiagnostics {
         $note = [string](Get-ObjectPropertyValue -InputObject $entry -Name 'note' -DefaultValue '')
         $sourcePath = $null
         $exists = $false
+        $fileCount = 0
+        $totalBytes = [Int64]0
+        $missingExpectedLeaves = @()
+        $forbiddenFilePreview = @()
         if (-not [string]::IsNullOrWhiteSpace($RuntimePublishRoot) -and -not [string]::IsNullOrWhiteSpace($source)) {
             $sourcePath = Join-SafePath -Root $RuntimePublishRoot -RelativePath $source
-            $exists = Test-Path -LiteralPath $sourcePath
+            $exists = Test-Path -LiteralPath $sourcePath -PathType Container
+            if ($exists) {
+                $files = @(Get-ChildItem -LiteralPath $sourcePath -Recurse -File -Force)
+                $fileCount = $files.Count
+                $totalBytes = [Int64](($files | ForEach-Object { $_.Length } | Measure-Object -Sum).Sum)
+                $relativeFiles = @($files | ForEach-Object {
+                        $fullName = [System.IO.Path]::GetFullPath($_.FullName)
+                        $fullName.Substring($sourcePath.TrimEnd('\', '/').Length + 1).Replace('\', '/')
+                    })
+                $missingExpectedLeaves = @($expectedRuntimePayloadLeaves[$source] | Where-Object {
+                        $leafAlternatives = @($_ -split '\|' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+                        $matched = $false
+                        foreach ($leafAlternative in $leafAlternatives) {
+                            if ($relativeFiles -contains $leafAlternative) {
+                                $matched = $true
+                                break
+                            }
+                        }
+                        -not $matched
+                    })
+                $forbiddenFilePreview = @($files | Where-Object {
+                        ($forbiddenRuntimePublishExtensions -contains $_.Extension.ToLowerInvariant()) -or ($forbiddenRuntimePublishNames -contains $_.Name)
+                    } | ForEach-Object {
+                        $_.FullName.Substring($sourcePath.TrimEnd('\', '/').Length + 1).Replace('\', '/')
+                    } | Select-Object -First 20)
+            }
         }
 
         [void]$entries.Add([pscustomobject][ordered]@{
@@ -612,15 +650,26 @@ function Get-RuntimePublishEntryDiagnostics {
                 required = $required
                 sourcePath = $sourcePath
                 exists = $exists
+                fileCount = $fileCount
+                totalBytes = $totalBytes
+                expectedLeaves = @($expectedRuntimePayloadLeaves[$source])
+                missingExpectedLeaves = @($missingExpectedLeaves)
+                forbiddenFilePreview = @($forbiddenFilePreview)
                 note = $note
-                remediation = if ($exists) {
+                remediation = if ($exists -and @($missingExpectedLeaves).Count -eq 0 -and @($forbiddenFilePreview).Count -eq 0) {
                     ''
                 }
                 elseif ([string]::IsNullOrWhiteSpace($RuntimePublishRoot)) {
                     "Provide -RuntimePublishRoot outside the repository when building a runtime package if this payload should be included: $source"
                 }
-                else {
+                elseif (-not $exists) {
                     "Publish or copy '$source' under RuntimePublishRoot before cutting a portable runtime package."
+                }
+                elseif (@($missingExpectedLeaves).Count -gt 0) {
+                    "Republish '$source'; expected leaf file(s) missing: $(@($missingExpectedLeaves) -join ', ')."
+                }
+                else {
+                    "Remove forbidden/sensitive file(s) from '$source' before packaging: $(@($forbiddenFilePreview) -join ', ')."
                 }
             })
     }
@@ -633,6 +682,7 @@ function Get-PackageRuntimePublishSummary {
 
     $present = @($RuntimeEntries | Where-Object { [bool]$_.exists })
     $missing = @($RuntimeEntries | Where-Object { -not [bool]$_.exists })
+    $incomplete = @($RuntimeEntries | Where-Object { [bool]$_.exists -and (@($_.missingExpectedLeaves).Count -gt 0 -or @($_.forbiddenFilePreview).Count -gt 0 -or [int]$_.fileCount -eq 0) })
     $missingRequired = @($missing | Where-Object { [bool]$_.required })
     $missingOptional = @($missing | Where-Object { -not [bool]$_.required })
 
@@ -642,10 +692,14 @@ function Get-PackageRuntimePublishSummary {
         missingCount = $missing.Count
         missingRequiredCount = $missingRequired.Count
         missingOptionalCount = $missingOptional.Count
+        incompleteCount = $incomplete.Count
         missingRequiredSources = @($missingRequired | ForEach-Object { $_.source })
         missingOptionalSources = @($missingOptional | ForEach-Object { $_.source })
-        completeRuntimePackageReady = if ($PackageKind -ne 'runtime') { $true } else { $missing.Count -eq 0 }
-        layoutDryRun = ($PackageKind -eq 'runtime' -and $missing.Count -gt 0)
+        incompleteSources = @($incomplete | ForEach-Object { $_.source })
+        missingExpectedLeaves = @($RuntimeEntries | Where-Object { @($_.missingExpectedLeaves).Count -gt 0 } | ForEach-Object { [ordered]@{ source = $_.source; missing = @($_.missingExpectedLeaves) } })
+        forbiddenFilePreviews = @($RuntimeEntries | Where-Object { @($_.forbiddenFilePreview).Count -gt 0 } | ForEach-Object { [ordered]@{ source = $_.source; forbidden = @($_.forbiddenFilePreview) } })
+        completeRuntimePackageReady = if ($PackageKind -ne 'runtime') { $true } else { $missing.Count -eq 0 -and $incomplete.Count -eq 0 }
+        layoutDryRun = ($PackageKind -eq 'runtime' -and ($missing.Count -gt 0 -or $incomplete.Count -gt 0))
         failureMode = if ($PackageKind -ne 'runtime') {
             'notApplicable'
         }
@@ -657,6 +711,9 @@ function Get-PackageRuntimePublishSummary {
         }
         elseif ($missingOptional.Count -gt 0) {
             'missingOptionalRuntimePayload'
+        }
+        elseif ($incomplete.Count -gt 0) {
+            'incompleteRuntimePayloadContents'
         }
         else {
             'ready'
@@ -680,6 +737,9 @@ function Get-PackageOperatorRecommendedActions {
         elseif ([int]$RuntimeSummary.missingCount -gt 0) {
             [void]$actions.Add("下一步：补齐 RuntimePublishRoot 下缺失 payload：$(([string[]]@($RuntimeSummary.missingRequiredSources + $RuntimeSummary.missingOptionalSources)) -join ', ')。")
             [void]$actions.Add('下一步：补齐缺失 runtime folders 后重跑 package-portable.ps1；打包脚本本身不会构建，也不会复制文件进 VM。')
+        }
+        elseif ([int]$RuntimeSummary.incompleteCount -gt 0) {
+            [void]$actions.Add("下一步：重新发布不完整 runtime payload：$(([string[]]@($RuntimeSummary.incompleteSources)) -join ', ')；确认预期 exe/dll/payload-manifest 存在，且没有 .pdb/.sys/pcap/dump/VM/secret/signing 文件。")
         }
         else {
             [void]$actions.Add('下一步：RuntimePublishRoot payload 已齐备；handoff 前检查 package-manifest.generated.json 的 fileInventory、operatorDiagnostics 和 safetyContract。')
@@ -730,7 +790,8 @@ function Update-PackageOperatorDiagnostics {
         runtimePublishEntries = @($runtimeEntries)
         runtimePublishSummary = $runtimeSummary
         missingRuntimePublishEntries = @($missingRuntimeEntries | ForEach-Object { $_.source })
-        runtimePublishReady = if ($PackageKind -ne 'runtime') { $true } else { $missingRuntimeEntries.Count -eq 0 }
+        incompleteRuntimePublishEntries = @($runtimeEntries | Where-Object { [bool]$_.exists -and (@($_.missingExpectedLeaves).Count -gt 0 -or @($_.forbiddenFilePreview).Count -gt 0 -or [int]$_.fileCount -eq 0) } | ForEach-Object { $_.source })
+        runtimePublishReady = if ($PackageKind -ne 'runtime') { $true } else { $missingRuntimeEntries.Count -eq 0 -and [int]$runtimeSummary.incompleteCount -eq 0 }
         completeRuntimePayloadsRequired = [bool]$RequireCompleteRuntimePayloads
         runtimeArchiveRequiresCompleteRuntimePayloads = ($PackageKind -eq 'runtime')
         runtimeArchiveMode = if ($PackageKind -ne 'runtime') {
@@ -746,12 +807,14 @@ function Update-PackageOperatorDiagnostics {
             'blockedIncompleteRuntimeArchive'
         }
         runtimeDryRunGuardrail = [ordered]@{
-            isLayoutDryRun = ($PackageKind -eq 'runtime' -and ($StageOnly.IsPresent -or -not [bool]$RequireCompleteRuntimePayloads -or $missingRuntimeEntries.Count -gt 0))
-            handoffAllowed = ($PackageKind -ne 'runtime' -or ((-not $StageOnly.IsPresent) -and [bool]$RequireCompleteRuntimePayloads -and $missingRuntimeEntries.Count -eq 0 -and -not [string]::IsNullOrWhiteSpace($RuntimePublishRoot)))
+            isLayoutDryRun = ($PackageKind -eq 'runtime' -and ($StageOnly.IsPresent -or -not [bool]$RequireCompleteRuntimePayloads -or $missingRuntimeEntries.Count -gt 0 -or [int]$runtimeSummary.incompleteCount -gt 0))
+            handoffAllowed = ($PackageKind -ne 'runtime' -or ((-not $StageOnly.IsPresent) -and [bool]$RequireCompleteRuntimePayloads -and $missingRuntimeEntries.Count -eq 0 -and [int]$runtimeSummary.incompleteCount -eq 0 -and -not [string]::IsNullOrWhiteSpace($RuntimePublishRoot)))
             handoffRequires = @(
                 '仓库外 RuntimePublishRoot / external RuntimePublishRoot',
                 '-RequireCompleteRuntimePayloads',
                 'runtimePublishSummary.missingCount = 0',
+                'runtimePublishSummary.incompleteCount = 0',
+                'payload folders contain expected exe/dll/manifest leaves and no forbidden VM/secret/signing/evidence files',
                 'not -StageOnly'
             )
             chinese = '中文提示：runtime layout dry-run 只用于审阅目录和安全合约，不能作为可运行 handoff；完整 runtime zip 必须满足 handoffRequires。'
@@ -769,7 +832,7 @@ function Update-PackageOperatorDiagnostics {
         externalStateDiagnostics = [ordered]@{
             HyperV = 'not checked or mutated by packaging; run install/run CheckEnvironment for read-only prerequisite diagnostics including Hyper-V module, elevation, hardware virtualization hints, VM/checkpoint presence, and Guest Service Interface'
             VmProfile = 'local VM name, checkpoint, guest working directory, driver host path, and runtime roots are operator-local profile values; they are diagnosed by install/run status and are not packaged as sandbox.local.json'
-            GuestPayload = 'runtime payload is copied only from RuntimePublishRoot or prepared explicitly under an external PayloadRoot; packaging records present/missing payload folders but does not build them'
+            GuestPayload = 'runtime payload is copied only from RuntimePublishRoot or prepared explicitly under an external PayloadRoot; packaging records present/missing/incomplete payload folders, expected exe/dll/manifest leaves, and forbidden file previews but does not build them'
             VirusTotal = 'optional hash-only VirusTotal API key is never packaged or printed; configure in process/user environment or installer local state; this is unrelated to Intel VT-x/AMD-V virtualization'
             RuntimeRoot = 'job outputs, reports, screenshots, PCAP, dumps, samples, and secrets must remain outside the repository and package source tree'
         }
@@ -832,6 +895,11 @@ function Assert-RuntimePackageArchiveRequiresCompletePayloads {
     if ($null -ne $summary -and [int]$summary.missingCount -gt 0) {
         $missing = @([string[]]@($summary.missingRequiredSources + $summary.missingOptionalSources)) -join ', '
         throw "错误：完整 runtime 便携包缺少 published payload：$missing。下一步：补齐 RuntimePublishRoot 后重跑；package-portable.ps1 不会从仓库 bin/obj/x64 兜底复制，也不会构建、签名或操作 VM。"
+    }
+
+    if ($null -ne $summary -and [int]$summary.incompleteCount -gt 0) {
+        $incomplete = @([string[]]@($summary.incompleteSources)) -join ', '
+        throw "错误：完整 runtime 便携包存在不完整或不安全的 payload：$incomplete。下一步：重新发布这些目录，确认预期 exe/dll/payload-manifest 存在且不含 .pdb/.sys/pcap/dump/VM/secret/signing 文件。"
     }
 }
 
@@ -1225,13 +1293,13 @@ if ($PackageKind -eq 'runtime') {
             'missing-required' { '缺少-必需' }
             default { '缺少-可选' }
         }
-        Write-PackageOperatorDiagnostic -Chinese "runtime 条目：$entryChineseState source=$($entry.source) target=$($entry.target)" -English "Runtime entry: $entryState source=$($entry.source) target=$($entry.target)"
+        Write-PackageOperatorDiagnostic -Chinese "runtime 条目：$entryChineseState source=$($entry.source) target=$($entry.target) files=$($entry.fileCount) bytes=$($entry.totalBytes) missingLeaves=$(@($entry.missingExpectedLeaves).Count) forbidden=$(@($entry.forbiddenFilePreview).Count)" -English "Runtime entry: $entryState source=$($entry.source) target=$($entry.target) files=$($entry.fileCount) bytes=$($entry.totalBytes) missingLeaves=$(@($entry.missingExpectedLeaves).Count) forbidden=$(@($entry.forbiddenFilePreview).Count)"
     }
     if (-not [bool]$script:operatorDiagnostics.runtimePublishReady) {
         Write-PackageOperatorDiagnostic -Chinese '中文提示：runtime 包存在缺失的 published payload；本次仅可作为 layout/safety dry-run。完整交付请补齐 RuntimePublishRoot 并传入 -RequireCompleteRuntimePayloads。'
     }
     $summary = $script:operatorDiagnostics.runtimePublishSummary
-    Write-PackageOperatorDiagnostic -Chinese "runtime 摘要：存在=$($summary.presentCount) 缺失=$($summary.missingCount) 必需缺失=$($summary.missingRequiredCount) 可选缺失=$($summary.missingOptionalCount) 模式=$($summary.failureMode)" -English "Runtime summary: present=$($summary.presentCount) missing=$($summary.missingCount) missingRequired=$($summary.missingRequiredCount) missingOptional=$($summary.missingOptionalCount) mode=$($summary.failureMode)"
+    Write-PackageOperatorDiagnostic -Chinese "runtime 摘要：存在=$($summary.presentCount) 缺失=$($summary.missingCount) 不完整=$($summary.incompleteCount) 必需缺失=$($summary.missingRequiredCount) 可选缺失=$($summary.missingOptionalCount) 模式=$($summary.failureMode)" -English "Runtime summary: present=$($summary.presentCount) missing=$($summary.missingCount) incomplete=$($summary.incompleteCount) missingRequired=$($summary.missingRequiredCount) missingOptional=$($summary.missingOptionalCount) mode=$($summary.failureMode)"
     Write-PackageOperatorDiagnostic -Chinese "runtime handoff 允许：$($script:operatorDiagnostics.runtimeDryRunGuardrail.handoffAllowed)" -English "Runtime handoff allowed: $($script:operatorDiagnostics.runtimeDryRunGuardrail.handoffAllowed)"
     foreach ($action in @($script:operatorDiagnostics.recommendedActions | Select-Object -First 4)) {
         $actionLine = if ($action -match '^(下一步：|Next:)') { $action } else { "下一步：$action" }

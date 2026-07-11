@@ -57,7 +57,7 @@ WebUI/UX 工作不得修改 `driver/`、`guest/` 或
   `/api/files/upload/start` 会保存样本、创建 job、提交后台 VM 分析，并将当前浏览器页
   导航到 `/jobs/{jobId}/live-events`；英文契约必须明确写作 redirect the current browser page to
   `/jobs/{jobId}/live-events`，并说明 no popup or extra dashboard tab is required；上传中、启动接受或预检失败时，该提示应更新为
-  可复制的 job/monitor/progress 摘要。
+  可复制的上传进度、job/monitor/progress 摘要。
 - 顶层工作区分为 `上传 / 配置`、`进度`、`报告` 三个 tab。上传/配置 tab
   是 default selected tab；上传/启动成功后按需切换到进度/报告区域；报告
   就绪通知必须在自动打开报告前显示。报告主链接必须跟随 current Chinese/English
@@ -164,6 +164,8 @@ WebUI/UX 工作不得修改 `driver/`、`guest/` 或
   Monitor 还应提供“刷新证据/下载卡片”手动入口，并为每张卡片提供右键复制和显式
   `复制卡片摘要` / `复制 selector` / `复制下载链接` affordances，方便值守人员不打开
   host 路径即可传递安全 selector 或 endpoint。
+  运营态势驾驶舱中的 runbook、VirusTotal、证据就绪和报告入口卡片也应提供卡片级
+  `复制卡片` 摘要按钮，同时保留右键复制整卡摘要，避免值守人员从大表或命令输出中摘取状态。
   每张证据卡还应显示 copyable artifact lane readiness，例如“安全端点可用”、
   “索引已记录，可复制 selector/状态”或“等待回收”，让操作者不用展开详情也能判断该 lane
   是否可交付。

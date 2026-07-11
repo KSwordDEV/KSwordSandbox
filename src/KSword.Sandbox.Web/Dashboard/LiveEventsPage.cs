@@ -1052,6 +1052,7 @@ internal static class LiveEventsPage
                     <span class="pill endpoint" data-copy="${escapeAttr(ordinal)}">${escapeHtml(ordinal)}</span>
                     <span class="pill quiet" data-copy="${escapeAttr(transport)}">${escapeHtml(transport)}</span>
                     <span class="pill" data-copy="${escapeAttr(String(percent))}">${escapeHtml(`${percent}%`)}</span>
+                    ${cockpitCopyButton(copy)}
                   </div>
                   <p class="muted">${escapeHtml(t('优先取 progress stream 的 currentStep；退化时才用轮询快照。', 'Prefers progress stream currentStep; falls back to polling snapshots only when needed.'))}</p>
                 </article>`
@@ -1095,6 +1096,7 @@ internal static class LiveEventsPage
                     <span class="pill ${tone}" data-copy="${escapeAttr(status)}">${escapeHtml(virusTotalStatusLabel(status, result))}</span>
                     <span class="pill quiet" data-copy="${escapeAttr(policy)}">${escapeHtml(t('默认不写日志噪音', 'no log noise by default'))}</span>
                     <span class="pill ${permalink ? 'endpoint' : 'waiting'}" data-copy="${escapeAttr(permalink || t('官方链接未提供', 'official permalink not provided'))}">${escapeHtml(permalink ? t('官方链接就绪', 'permalink ready') : t('无官方链接', 'no permalink'))}</span>
+                    ${cockpitCopyButton(copy)}
                   </div>
                   <p class="muted" data-copy="${escapeAttr(operatorState)}">${escapeHtml(operatorState)}</p>
                   <p class="muted" data-copy="${escapeAttr(community)}">${escapeHtml(community)}</p>
@@ -1116,6 +1118,7 @@ internal static class LiveEventsPage
                     <span class="pill ${summary.indexLoaded ? 'ready' : 'waiting'}">${escapeHtml(summary.indexLoaded ? t('索引已返回', 'index loaded') : t('等待索引', 'waiting index'))}</span>
                     <span class="pill endpoint" data-copy="${escapeAttr(String(summary.downloadableCount))}">${escapeHtml(t(`可下载 ${summary.downloadableCount}`, `${summary.downloadableCount} downloadable`))}</span>
                     <span class="pill ${summary.rejectionCount > 0 ? 'failed' : 'ready'}" data-copy="${escapeAttr(String(summary.rejectionCount))}">${escapeHtml(t(`拒绝 ${summary.rejectionCount}`, `${summary.rejectionCount} rejected`))}</span>
+                    ${cockpitCopyButton(copy)}
                   </div>
                   <p class="muted">${escapeHtml(t('摘要来自 artifact index 与采集信号；详细 selector 在下方卡片展开。', 'Summary comes from artifact index and collection signals; detailed selectors expand in cards below.'))}</p>
                 </article>`
@@ -1137,9 +1140,14 @@ internal static class LiveEventsPage
                   <div class="cockpit-meta">
                     <a class="button secondary" href="/api/jobs/${encodeURIComponent(jobId)}/report/html?lang=zh" target="_blank" rel="noopener">${escapeHtml(t('中文报告', 'Chinese report'))}</a>
                     <a class="button secondary" href="/api/jobs/${encodeURIComponent(jobId)}/report/html?lang=en" target="_blank" rel="noopener">${escapeHtml(t('英文报告', 'English report'))}</a>
+                    ${cockpitCopyButton(copy)}
                   </div>
                 </article>`
               };
+            }
+
+            function cockpitCopyButton(copy) {
+              return `<button class="secondary" type="button" data-copy="${escapeAttr(copy)}" onclick="copyText(this.getAttribute('data-copy'))">${escapeHtml(t('复制卡片', 'Copy card'))}</button>`;
             }
 
             function summarizeArtifactReadiness() {

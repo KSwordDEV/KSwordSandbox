@@ -471,11 +471,18 @@ typedef enum _KSWORD_SANDBOX_REGISTRY_OPERATION {
  *          optional WFP metadata into KSWORD_SANDBOX_NETWORK_EVENT_PAYLOAD.
  * Logic  : protocol values intentionally match IANA IP protocol numbers for
  *          common protocols.  Addresses are 16-byte slots: IPv4 uses bytes
- *          [0..3] and IPv6 uses all 16 bytes.
+ *          [0..3] and IPv6 uses all 16 bytes.  The v1 producer is an endpoint
+ *          metadata source only: it may label port/protocol candidates for
+ *          DNS/HTTP/TLS correlation, but raw payload parsing, DNS names, HTTP
+ *          Host/URI/method, TLS SNI/certificates, and packet records belong to
+ *          PCAP/browser/user-mode sidecars.
  * Return : not applicable.
  */
 #define KSWORD_SANDBOX_NETWORK_EVENT_VERSION 0x00010000U /* v1 network payload layout */
 #define KSWORD_SANDBOX_NETWORK_ADDRESS_BYTES 16U
+#define KSWORD_SANDBOX_NETWORK_CORRELATION_CONTRACT_VERSION 1U
+#define KSWORD_SANDBOX_NETWORK_FLOW_KEY_VERSION 1U
+#define KSWORD_SANDBOX_NETWORK_PROTOCOL_BOUNDARY_VERSION 1U
 
 #define KSWORD_SANDBOX_NETWORK_PROTOCOL_ANY 0U
 #define KSWORD_SANDBOX_NETWORK_PROTOCOL_ICMP 1U
@@ -530,8 +537,8 @@ typedef enum _KSWORD_SANDBOX_NETWORK_STATUS_DEGRADE_REASON {
  * Logic  : the current implementation level is ALE inspect-only.  The TODO
  *          bits are intentionally machine-readable so readiness gates can show
  *          exactly which WFP/network gaps remain without implying the v1 event
- *          payload already contains packet, stream, flow-context, or protocol
- *          parser evidence.
+ *          payload already contains packet, stream, flow-context, DNS, HTTP,
+ *          TLS, or raw-packet parser evidence.
  * Return : not applicable.
  */
 #define KSWORD_SANDBOX_NETWORK_STATUS_REPLY_VERSION KSWORD_SANDBOX_ABI_VERSION
@@ -560,11 +567,19 @@ typedef enum _KSWORD_SANDBOX_NETWORK_STATUS_DEGRADE_REASON {
 #define KSWORD_SANDBOX_NETWORK_WFP_TODO_FLAG_FLOW_CONTEXTS        0x00000002U
 #define KSWORD_SANDBOX_NETWORK_WFP_TODO_FLAG_FILTER_CONDITIONS    0x00000004U
 #define KSWORD_SANDBOX_NETWORK_WFP_TODO_FLAG_PROTOCOL_PAYLOADS    0x00000008U
+#define KSWORD_SANDBOX_NETWORK_WFP_TODO_FLAG_DNS_PAYLOAD_PARSER   0x00000010U
+#define KSWORD_SANDBOX_NETWORK_WFP_TODO_FLAG_HTTP_PAYLOAD_PARSER  0x00000020U
+#define KSWORD_SANDBOX_NETWORK_WFP_TODO_FLAG_TLS_PAYLOAD_PARSER   0x00000040U
+#define KSWORD_SANDBOX_NETWORK_WFP_TODO_FLAG_PCAP_SIDECAR_JOIN    0x00000080U
 #define KSWORD_SANDBOX_NETWORK_WFP_TODO_MASK_CURRENT \
     (KSWORD_SANDBOX_NETWORK_WFP_TODO_FLAG_PACKET_STREAM_LAYERS | \
      KSWORD_SANDBOX_NETWORK_WFP_TODO_FLAG_FLOW_CONTEXTS | \
      KSWORD_SANDBOX_NETWORK_WFP_TODO_FLAG_FILTER_CONDITIONS | \
-     KSWORD_SANDBOX_NETWORK_WFP_TODO_FLAG_PROTOCOL_PAYLOADS)
+     KSWORD_SANDBOX_NETWORK_WFP_TODO_FLAG_PROTOCOL_PAYLOADS | \
+     KSWORD_SANDBOX_NETWORK_WFP_TODO_FLAG_DNS_PAYLOAD_PARSER | \
+     KSWORD_SANDBOX_NETWORK_WFP_TODO_FLAG_HTTP_PAYLOAD_PARSER | \
+     KSWORD_SANDBOX_NETWORK_WFP_TODO_FLAG_TLS_PAYLOAD_PARSER | \
+     KSWORD_SANDBOX_NETWORK_WFP_TODO_FLAG_PCAP_SIDECAR_JOIN)
 
 /*
  * Network address family values.

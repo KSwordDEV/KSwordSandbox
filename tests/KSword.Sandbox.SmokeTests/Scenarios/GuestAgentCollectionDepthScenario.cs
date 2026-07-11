@@ -28,6 +28,10 @@ internal sealed class GuestAgentCollectionDepthScenario : ISmokeTestScenario
         AssertFileContains(Path.Combine(collectionRoot, "ProcessTreeProbe.cs"), "process.tree", "Process tree probe must emit process.tree.");
         AssertFileContains(Path.Combine(collectionRoot, "ProcessTreeProbe.cs"), "CreateToolhelp32Snapshot", "Process tree probe must use low-privilege Toolhelp snapshots.");
         AssertFileContains(Path.Combine(collectionRoot, "ProcessTreeProbe.cs"), "treeLineage", "Process tree events must preserve root/child lineage.");
+        AssertFileContains(Path.Combine(collectionRoot, "ProcessTreeProbe.cs"), "rootLineageProcessId", "Process tree events must expose root lineage aliases.");
+        AssertFileContains(Path.Combine(collectionRoot, "ProcessTreeProbe.cs"), "treeLineageDepth", "Process tree events must expose lineage depth aliases.");
+        AssertFileContains(Path.Combine(collectionRoot, "ProcessTreeProbe.cs"), "eventSemanticClass", "Process tree events must expose semantic classes for report selectors.");
+        AssertFileContains(Path.Combine(collectionRoot, "ProcessTreeProbe.cs"), "semanticEventTags", "Process tree events must expose semantic tags for report filtering.");
         AssertFileContains(Path.Combine(collectionRoot, "ProcessTreeProbe.cs"), "processTreeRole", "Process tree events must preserve stable root/direct-child/descendant roles.");
         AssertFileContains(Path.Combine(collectionRoot, "ProcessTreeProbe.cs"), "rootAncestorProcessId", "Process tree events must preserve stable root ancestor metadata.");
         AssertFileContains(Path.Combine(collectionRoot, "ProcessTreeProbe.cs"), "isDirectChildOfRoot", "Process tree events must distinguish direct children from deeper descendants.");
@@ -69,6 +73,10 @@ internal sealed class GuestAgentCollectionDepthScenario : ISmokeTestScenario
         AssertFileContains(Path.Combine(collectionRoot, "ScreenshotProbe.cs"), "win32Error", "Screenshot skipped events must include Win32 diagnostics when available.");
         AssertFileContains(Path.Combine(collectionRoot, "ScreenshotProbe.cs"), "capturePhase", "Screenshot events must include normalized capture phase metadata.");
         AssertFileContains(Path.Combine(collectionRoot, "ScreenshotProbe.cs"), "artifactRelativePath", "Screenshot events must expose artifact-relative paths.");
+        AssertFileContains(Path.Combine(collectionRoot, "ScreenshotProbe.cs"), "stableArtifactSelector", "Screenshot events must expose stable artifact selectors.");
+        AssertFileContains(Path.Combine(collectionRoot, "ScreenshotProbe.cs"), "canonicalArtifactSelector", "Screenshot events must expose canonical artifact selectors.");
+        AssertFileContains(Path.Combine(collectionRoot, "ScreenshotProbe.cs"), "artifactSemanticType", "Screenshot events must expose artifact semantic type tags.");
+        AssertFileContains(Path.Combine(collectionRoot, "ScreenshotProbe.cs"), "semanticEventTags", "Screenshot events must expose semantic event tags.");
         AssertFileContains(Path.Combine(collectionRoot, "ScreenshotProbe.cs"), "sha256", "Screenshot captured events must expose event-level SHA-256 metadata.");
         AssertFileContains(Path.Combine(collectionRoot, "ScreenshotProbe.cs"), "sizeBytes", "Screenshot captured events must expose event-level size metadata.");
         AssertFileContains(Path.Combine(collectionRoot, "ScreenshotProbe.cs"), "artifactIntegrityState", "Screenshot events must expose artifact integrity state.");
@@ -104,6 +112,10 @@ internal sealed class GuestAgentCollectionDepthScenario : ISmokeTestScenario
         AssertFileContains(Path.Combine(collectionRoot, "MemoryDumpProbe.cs"), "childTargetCount", "Memory dump sweep must report child-process coverage.");
         AssertFileContains(Path.Combine(collectionRoot, "MemoryDumpProbe.cs"), "memoryDumpCoverageState", "Memory dump sweep must expose a report-ready coverage state.");
         AssertFileContains(Path.Combine(collectionRoot, "MemoryDumpProbe.cs"), "artifactRelativePath", "Memory dump captured events must expose artifact-relative paths.");
+        AssertFileContains(Path.Combine(collectionRoot, "MemoryDumpProbe.cs"), "stableArtifactSelector", "Memory dump captured/reference events must expose stable artifact selectors.");
+        AssertFileContains(Path.Combine(collectionRoot, "MemoryDumpProbe.cs"), "canonicalArtifactSelector", "Memory dump captured/reference events must expose canonical artifact selectors.");
+        AssertFileContains(Path.Combine(collectionRoot, "MemoryDumpProbe.cs"), "artifactSemanticType", "Memory dump events must expose artifact semantic type tags.");
+        AssertFileContains(Path.Combine(collectionRoot, "MemoryDumpProbe.cs"), "semanticEventTags", "Memory dump events must expose semantic event tags.");
         AssertFileContains(Path.Combine(collectionRoot, "MemoryDumpProbe.cs"), "existingArtifactSelector", "Duplicate memory dump rows must reference the already-captured artifact selector.");
         AssertFileContains(Path.Combine(collectionRoot, "MemoryDumpProbe.cs"), "artifactReferenceEvent", "Duplicate memory dump rows must be explicit artifact-reference events.");
         AssertFileContains(Path.Combine(collectionRoot, "MemoryDumpProbe.cs"), "selectorArtifactCount", "Memory dump sweep summaries must count selector-ready dump artifacts.");
@@ -175,6 +187,11 @@ internal sealed class GuestAgentCollectionDepthScenario : ISmokeTestScenario
         SmokeAssert.True(guestWriterText.Contains("artifactIntegrityState", StringComparison.Ordinal), "Guest artifact writer must preserve artifact integrity metadata.");
         SmokeAssert.True(guestWriterText.Contains("reasonCountsJson", StringComparison.Ordinal), "Guest artifact writer must summarize collection skipped/failed reasons.");
         SmokeAssert.True(guestWriterText.Contains("artifactSelectorVersion", StringComparison.Ordinal), "Guest artifact writer must version artifact selector metadata.");
+        SmokeAssert.True(guestWriterText.Contains("stableArtifactSelector", StringComparison.Ordinal), "Guest artifact writer must preserve stable artifact selector metadata.");
+        SmokeAssert.True(guestWriterText.Contains("canonicalArtifactSelector", StringComparison.Ordinal), "Guest artifact writer must preserve canonical artifact selector metadata.");
+        SmokeAssert.True(guestWriterText.Contains("artifactSemanticType", StringComparison.Ordinal), "Guest artifact writer must preserve artifact semantic type metadata.");
+        SmokeAssert.True(guestWriterText.Contains("semanticEventTags", StringComparison.Ordinal), "Guest artifact writer must preserve semantic event tags.");
+        SmokeAssert.True(guestWriterText.Contains("summaryRow", StringComparison.Ordinal), "Guest artifact writer must mark collection summaries as report summary rows.");
         SmokeAssert.True(guestWriterText.Contains("firstArtifactSelector", StringComparison.Ordinal), "Guest artifact writer must expose first artifact selectors.");
         SmokeAssert.True(guestWriterText.Contains("lastArtifactSelector", StringComparison.Ordinal), "Guest artifact writer must expose last artifact selectors.");
         SmokeAssert.True(guestWriterText.Contains("largestArtifactSelector", StringComparison.Ordinal), "Guest artifact writer must expose largest artifact selectors.");
