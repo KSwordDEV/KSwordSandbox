@@ -20,6 +20,12 @@
     "maxDurationSeconds": 900,
     "maxSampleBytes": 209715200
   },
+  "artifactCollection": {
+    "collectDroppedFiles": false,
+    "captureScreenshots": false,
+    "captureMemoryDumps": false,
+    "capturePacketCapture": false
+  },
   "paths": {
     "runtimeRoot": "D:\\Temp\\KSwordSandbox",
     "rulesDirectory": "rules",

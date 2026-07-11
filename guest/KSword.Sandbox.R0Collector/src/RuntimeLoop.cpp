@@ -22,8 +22,10 @@ std::string BuildConfigData(const Options& options) {
     data.AddSigned("pollIntervalMs", options.pollIntervalMs);
     data.AddSigned("maxReadBatches", options.maxReadBatches);
     data.AddUnsigned("readEventsMaxEvents", options.readEventsMaxEvents);
+    data.AddSigned("stressCount", options.stressCount);
     data.AddBool("mockMode", options.mockMode);
     data.AddBool("syntheticMode", options.mockMode);
+    data.AddBool("injectJsonlNoise", options.injectJsonlNoise);
     data.AddBool("abiSelfCheck", options.abiSelfCheck);
     data.AddBool("healthOnly", options.healthOnly);
     data.AddBool("heartbeat", options.heartbeat);
@@ -291,6 +293,8 @@ int RunCollector(int argc, wchar_t* argv[]) {
         stoppedData.AddBool("ioctlIssued", false);
         stoppedData.AddBool("healthOnly", options.healthOnly);
         stoppedData.AddBool("heartbeat", options.heartbeat);
+        stoppedData.AddSigned("stressCount", options.stressCount);
+        stoppedData.AddBool("injectJsonlNoise", options.injectJsonlNoise);
         stoppedEvent.dataJson = stoppedData.Build();
         return EmitEvent(writer, stoppedEvent) ? kExitSuccess : kExitRuntimeFailure;
     }

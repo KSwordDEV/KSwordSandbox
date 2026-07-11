@@ -135,6 +135,26 @@ loading a real driver:
   `--heartbeat` to prove high-volume drain behavior without CSignTool, service
   mutation, or loading the driver.
 
+Operator readiness gates should expose the same evidence with stable field
+names so stress failures are diagnosable without loading a real driver:
+
+- `StressJsonlExpectedDriverRows`: expected driver-row count in the synthetic
+  stress corpus.
+- `StressJsonlSequenceStart`, `StressJsonlSequenceEnd`, and
+  `StressJsonlSequenceGapCount`: bounded sequence range and gap count for the
+  generated JSONL rows.
+- `StressJsonlLossEvidence`: `TotalEventsDropped`, `totalEventsDropped`,
+  `EventsDropped`, `eventsDropped`, `NextSequence`, `nextSequence`, and
+  per-record `sequence`.
+- `StressJsonlBackpressureEvidence`: `QueueCapacity`, `queueCapacity`,
+  `QueueHighWatermark`, `queueHighWatermark`, `drainStoppedAtBatchLimit`,
+  `requestedMaxEvents`, `readEventsMaxEvents`, and `maxReadBatches`.
+- `ReadinessNoDevicePolicy`: static/no-device checks must not call CSignTool,
+  mutate the service, load the driver, or open `\\.\KSwordSandboxDriver`.
+- `ReadinessNonFatalPolicy`: blocked unsigned collector execution, missing local
+  collector binaries, and incomplete no-device ABI self-check output are warning
+  diagnostics unless the operator explicitly requested live VM checks.
+
 ## IOCTL error contract
 
 Public handlers return standard NTSTATUS values:

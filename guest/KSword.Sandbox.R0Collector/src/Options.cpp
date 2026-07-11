@@ -110,6 +110,11 @@ bool ParseArguments(int argc, wchar_t* argv[], Options* options, std::wstring* e
             continue;
         }
 
+        if (arg == L"--inject-jsonl-noise") {
+            options->injectJsonlNoise = true;
+            continue;
+        }
+
         if (arg == L"--heartbeat") {
             options->heartbeat = true;
             continue;
@@ -157,6 +162,16 @@ bool ParseArguments(int argc, wchar_t* argv[], Options* options, std::wstring* e
             if (!ParseBoundedInt(value, 0, 1000000, arg, &options->maxReadBatches, error)) {
                 return false;
             }
+        } else if (arg == L"--stress-count") {
+            if (!readValue(arg, &value)) {
+                return false;
+            }
+            if (!ParseBoundedInt(value, 0, 100000, arg, &options->stressCount, error)) {
+                return false;
+            }
+            if (options->stressCount > 0) {
+                options->mockMode = true;
+            }
         } else if (arg == L"--max-events") {
             if (!readValue(arg, &value)) {
                 return false;
@@ -178,6 +193,13 @@ bool ParseArguments(int argc, wchar_t* argv[], Options* options, std::wstring* e
             }
             return false;
         }
+    }
+
+    if (options->injectJsonlNoise && !options->mockMode) {
+        if (error != nullptr) {
+            *error = L"--inject-jsonl-noise is only supported with --mock/--synthetic or --stress-count.";
+        }
+        return false;
     }
 
     return true;
@@ -206,6 +228,8 @@ void PrintUsage(const wchar_t* programName) {
         << L"      --mock                   Emit synthetic rows without opening a device\n"
         << L"      --synthetic              Alias for --mock\n"
         << L"      --self-test              Alias for --mock\n"
+        << L"      --stress-count <n>       Emit n synthetic contiguous driver.file stress rows; implies --mock\n"
+        << L"      --inject-jsonl-noise     In mock/stress mode also emit blank and malformed JSONL rows\n"
         << L"  -h, --help                   Show this help text\n";
 }
 

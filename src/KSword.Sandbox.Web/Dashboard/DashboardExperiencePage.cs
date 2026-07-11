@@ -179,6 +179,16 @@ internal static class DashboardExperiencePage
                   <div><label for="useMockCollector"><input id="useMockCollector" type="checkbox"> <span data-zh="使用模拟采集器" data-en="Use mock collector">使用模拟采集器</span></label></div>
                 </div>
               </details>
+              <details class="vm-config">
+                <summary data-zh="高级：敏感产物采集（显式 opt-in）" data-en="Advanced: sensitive artifact collection (explicit opt-in)">高级：敏感产物采集（显式 opt-in）</summary>
+                <p class="hint" data-zh="这些选项默认关闭；勾选后只影响当前任务，runbook 会把对应 flag 传给 Guest Agent。" data-en="These options are disabled by default. When checked, they only affect the current job and the runbook forwards matching flags to the Guest Agent.">这些选项默认关闭；勾选后只影响当前任务，runbook 会把对应 flag 传给 Guest Agent。</p>
+                <div class="vm-grid">
+                  <div><label for="collectDroppedFiles"><input id="collectDroppedFiles" type="checkbox"> <span data-zh="采集落地文件" data-en="Collect dropped files">采集落地文件</span></label></div>
+                  <div><label for="captureScreenshots"><input id="captureScreenshots" type="checkbox"> <span data-zh="采集截图" data-en="Capture screenshots">采集截图</span></label></div>
+                  <div><label for="captureMemoryDumps"><input id="captureMemoryDumps" type="checkbox"> <span data-zh="采集内存转储" data-en="Capture memory dumps">采集内存转储</span></label></div>
+                  <div><label for="capturePacketCapture"><input id="capturePacketCapture" type="checkbox"> <span data-zh="采集网络抓包" data-en="Capture packet capture">采集网络抓包</span></label></div>
+                </div>
+              </details>
               <div id="status" class="status"></div>
             </section>
 
@@ -324,6 +334,10 @@ internal static class DashboardExperiencePage
                 document.getElementById('guestWorkingDirectory').value = config.guest?.workingDirectory || '';
                 document.getElementById('guestPayloadRoot').value = config.paths?.guestPayloadRoot || '';
                 document.getElementById('useMockCollector').checked = Boolean(config.driver?.useMockCollector);
+                document.getElementById('collectDroppedFiles').checked = Boolean(config.artifactCollection?.collectDroppedFiles);
+                document.getElementById('captureScreenshots').checked = Boolean(config.artifactCollection?.captureScreenshots);
+                document.getElementById('captureMemoryDumps').checked = Boolean(config.artifactCollection?.captureMemoryDumps);
+                document.getElementById('capturePacketCapture').checked = Boolean(config.artifactCollection?.capturePacketCapture);
               } catch {
                 // Keep placeholders when config loading fails; planning still works with server defaults.
               }
@@ -342,6 +356,15 @@ internal static class DashboardExperiencePage
                 guestWorkingDirectory: clean('guestWorkingDirectory'),
                 guestPayloadRoot: clean('guestPayloadRoot'),
                 useMockCollector: document.getElementById('useMockCollector').checked
+              };
+            }
+
+            function getArtifactCollectionConfig() {
+              return {
+                collectDroppedFiles: document.getElementById('collectDroppedFiles').checked,
+                captureScreenshots: document.getElementById('captureScreenshots').checked,
+                captureMemoryDumps: document.getElementById('captureMemoryDumps').checked,
+                capturePacketCapture: document.getElementById('capturePacketCapture').checked
               };
             }
 
@@ -422,6 +445,7 @@ internal static class DashboardExperiencePage
                 return;
               }
 
+              const monitorWindow = openLiveMonitorPlaceholder();
               setBusy(true);
               setStatus(t('正在上传样本并保存...', 'Uploading sample into storage...'), false);
               try {
@@ -440,10 +464,15 @@ internal static class DashboardExperiencePage
                 const jobId = job && (job.jobId || job.id);
                 if (jobId) {
                   setStatus(t('上传完成，正在打开动态监控页并启动虚拟机分析。', 'Upload completed; opening the dynamic monitor and starting VM analysis.'), false);
-                  openLiveMonitor(String(jobId), true);
+                  openLiveMonitor(String(jobId), true, monitorWindow);
                   await executeRunbook(String(jobId), true);
+                } else if (monitorWindow && !monitorWindow.closed) {
+                  monitorWindow.close();
                 }
               } catch (error) {
+                if (monitorWindow && !monitorWindow.closed) {
+                  monitorWindow.close();
+                }
                 setStatus(error.message, true);
               } finally {
                 setBusy(false);
@@ -467,7 +496,8 @@ internal static class DashboardExperiencePage
                     samplePath,
                     durationSeconds: Number(document.getElementById('duration').value || 120),
                     dryRun: true,
-                    ...getVmConfig()
+                    ...getVmConfig(),
+                    ...getArtifactCollectionConfig()
                   })
                 });
                 const payload = await requireOk(response, t('生成分析计划', 'Create analysis plan'));
@@ -609,6 +639,24 @@ internal static class DashboardExperiencePage
               };
             }
 
+            function buildArtifactCollectionSummary(job) {
+              // Inputs: normalized job payload with submission opt-in fields.
+              // Processing: builds a concise operator-facing summary of the
+              // sensitive artifact lanes requested for this run. Return: a
+              // string suitable for display and right-click copy.
+              const submission = job.submission || {};
+              const lanes = [
+                [submission.collectDroppedFiles, t('落地文件', 'dropped files')],
+                [submission.captureScreenshots, t('截图', 'screenshots')],
+                [submission.captureMemoryDumps, t('内存转储', 'memory dumps')],
+                [submission.capturePacketCapture, t('网络抓包', 'packet capture')]
+              ];
+              const enabled = lanes.filter(([value]) => Boolean(value)).map(([, label]) => label);
+              return enabled.length > 0
+                ? enabled.join(', ')
+                : t('未启用敏感产物采集', 'no sensitive artifact collection enabled');
+            }
+
             function renderJob(job) {
               job = normalizeJobPayload(job);
               currentJobPayload = job;
@@ -636,6 +684,7 @@ internal static class DashboardExperiencePage
               const reportBadge = `<span class="${reportState.badgeClass}" data-copy="${escapeAttribute(reportState.badge)}" data-copy-label="report state">${escapeHtml(reportState.badge)}</span>`;
               const plannedStepCount = job.runbook?.steps?.length || 0;
               const messages = (job.messages || []).slice(-3).map(message => `<li data-copy="${escapeAttribute(message)}" data-copy-label="job message">${escapeHtml(message)} ${copyButton(message, 'job message')}</li>`).join('');
+              const artifactCollectionSummary = buildArtifactCollectionSummary(job);
               document.getElementById('jobResult').innerHTML = `
                 <article class="job-card">
                   <h3><span data-zh="任务已创建" data-en="Job created">任务已创建</span> ${copyableCode(jobId, 'job id')}</h3>
@@ -645,6 +694,7 @@ internal static class DashboardExperiencePage
                     <div class="metric"><strong data-zh="分析时长" data-en="Duration">分析时长</strong><span>${escapeHtml(String(job.submission?.durationSeconds || '-'))}s</span></div>
                     <div class="metric"><strong data-zh="报告" data-en="Report">报告</strong>${reportBadge}</div>
                   </div>
+                  <p class="hint"><strong data-zh="产物采集 opt-in" data-en="Artifact collection opt-in">产物采集 opt-in</strong> <span class="pill" data-copy="${escapeAttribute(artifactCollectionSummary)}" data-copy-label="artifact collection opt-in">${escapeHtml(artifactCollectionSummary)}</span></p>
                   <p class="button-row">
                     <button onclick="executeRunbook('${escapeJs(jobId)}', true)" data-zh="启动虚拟机分析" data-en="Start VM analysis">启动虚拟机分析</button>
                     <a class="buttonlink secondary" target="_blank" rel="noopener" href="${escapeHtml(executionFlowHref)}" data-zh="打开进度页（执行流程）" data-en="Open progress page (execution flow)">打开进度页（执行流程）</a>
@@ -1097,7 +1147,27 @@ internal static class DashboardExperiencePage
               });
             }
 
-            function openLiveMonitor(jobId, autoOpenedFromUpload) {
+            function openLiveMonitorPlaceholder() {
+              // Inputs: user-click initiated upload flow. Processing opens a
+              // blank monitor tab before the first await so browser popup
+              // policies treat it as a direct user gesture; return is the window
+              // handle, or null when blocked. The page is navigated after jobId
+              // exists.
+              let opened = null;
+              try {
+                opened = window.open('about:blank', '_blank');
+                if (opened) {
+                  opened.document.title = 'KSword Sandbox monitor';
+                  opened.document.body.innerHTML = '<p style="font-family:Segoe UI,Arial,sans-serif;padding:24px">KSword Sandbox：正在上传并创建任务 / uploading and creating job...</p>';
+                  opened.opener = null;
+                }
+              } catch {
+                opened = null;
+              }
+              return opened;
+            }
+
+            function openLiveMonitor(jobId, autoOpenedFromUpload, existingWindow) {
               // Inputs: current job id and whether this was triggered by the
               // upload one-click flow. Processing opens the standalone dynamic
               // monitor in a new tab and leaves the dashboard alive so the long
@@ -1108,11 +1178,16 @@ internal static class DashboardExperiencePage
               }
 
               const href = buildLiveMonitorHref(jobId);
-              let opened = null;
+              let opened = existingWindow && !existingWindow.closed ? existingWindow : null;
               try {
-                opened = window.open(href, '_blank');
                 if (opened) {
+                  opened.location.href = href;
                   opened.opener = null;
+                } else {
+                  opened = window.open(href, '_blank');
+                  if (opened) {
+                    opened.opener = null;
+                  }
                 }
               } catch {
                 opened = null;

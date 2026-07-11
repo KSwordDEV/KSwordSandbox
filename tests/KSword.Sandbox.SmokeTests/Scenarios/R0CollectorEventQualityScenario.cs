@@ -20,6 +20,10 @@ internal sealed class R0CollectorEventQualityScenario : ISmokeTestScenario
     private const string AbiVersion = "65536";
     private const string AbiVersionHex = "0x00010000";
     private const string CurrentProducerMaskHex = "0x0000003F";
+    private const int ExpectedStressDriverRows = 32;
+    private const int StressJsonlSequenceStart = 1200;
+    private const int StressJsonlSequenceEnd = StressJsonlSequenceStart + ExpectedStressDriverRows - 1;
+    private const int StressJsonlSequenceGapCount = 0;
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
@@ -93,6 +97,7 @@ internal sealed class R0CollectorEventQualityScenario : ISmokeTestScenario
         var schemaDoc = ReadRepositoryText(context, "docs", "r0-jsonl-schema.md");
         var coreDoc = ReadRepositoryText(context, "docs", "r0-driver-core.md");
         var driverReadme = ReadRepositoryText(context, "driver", "KSword.Sandbox.Driver", "README.md");
+        var readinessScript = ReadRepositoryText(context, "scripts", "Test-R0Readiness.ps1");
 
         RequireContains(header, "KSWORD_SANDBOX_EVENT_HEADER_VERSION", "ABI header must publish event header version.");
         RequireContains(header, "KSWORD_SANDBOX_EVENT_SCHEMA_VERSION", "ABI header must publish event schema version.");
@@ -222,6 +227,31 @@ internal sealed class R0CollectorEventQualityScenario : ISmokeTestScenario
             RequireContains(doc, "driver.parse_error", "Docs must describe JSONL parse-error preservation.");
             RequireContains(doc, "--max-read-batches", "Docs must describe bounded stress-drain input.");
         }
+
+        foreach (var doc in new[] { collectorDoc, coreDoc })
+        {
+            RequireContains(doc, "StressJsonlExpectedDriverRows", "Operator gate docs must name expected stress JSONL row-count evidence.");
+            RequireContains(doc, "StressJsonlSequenceStart", "Operator gate docs must name stress sequence-start evidence.");
+            RequireContains(doc, "StressJsonlSequenceEnd", "Operator gate docs must name stress sequence-end evidence.");
+            RequireContains(doc, "StressJsonlSequenceGapCount", "Operator gate docs must name stress sequence-gap evidence.");
+            RequireContains(doc, "StressJsonlLossEvidence", "Operator gate docs must name loss evidence field set.");
+            RequireContains(doc, "StressJsonlBackpressureEvidence", "Operator gate docs must name backpressure evidence field set.");
+            RequireContains(doc, "ReadinessNoDevicePolicy", "Operator gate docs must name the no-device readiness policy.");
+            RequireContains(doc, "ReadinessNonFatalPolicy", "Operator gate docs must name non-fatal readiness policy.");
+        }
+
+        RequireContains(readinessScript, "R0Collector event-quality static contract", "Readiness script should emit a static event-quality operator-gate row.");
+        RequireContains(readinessScript, "StressJsonlExpectedDriverRows", "Readiness script should surface expected stress row count evidence.");
+        RequireContains(readinessScript, "StressJsonlSequenceStart", "Readiness script should surface sequence-start evidence.");
+        RequireContains(readinessScript, "StressJsonlSequenceEnd", "Readiness script should surface sequence-end evidence.");
+        RequireContains(readinessScript, "StressJsonlSequenceGapCount", "Readiness script should surface sequence-gap evidence.");
+        RequireContains(readinessScript, "StressJsonlLossEvidence", "Readiness script should surface stress loss evidence field names.");
+        RequireContains(readinessScript, "StressJsonlBackpressureEvidence", "Readiness script should surface stress backpressure evidence field names.");
+        RequireContains(readinessScript, "ReadinessNoDevicePolicy", "Readiness script should surface no-device policy text.");
+        RequireContains(readinessScript, "ReadinessNonFatalPolicy", "Readiness script should surface non-fatal policy text.");
+        RequireContains(readinessScript, "CallsCSignTool             = $false", "Readiness event-quality static row must not call CSignTool.");
+        RequireContains(readinessScript, "OpensDevice                = $false", "Readiness event-quality static row must not open the driver device.");
+        RequireContains(readinessScript, "LoadsDriver                = $false", "Readiness event-quality static row must not load the driver.");
     }
 
     /// <summary>
@@ -297,6 +327,9 @@ internal sealed class R0CollectorEventQualityScenario : ISmokeTestScenario
         lines.Insert(3, "   ");
         lines.Insert(9, "{\"eventType\":\"driver.file\",\"source\":\"driver\",\"data\":{\"sequence\":\"broken\"");
         lines.Add("{\"eventType\":\"driver.network\",\"source\":\"driver\",\"extraTopLevel\":\"ignored\",\"data\":{\"sequence\":\"9999\",\"eventSchemaName\":\"ksword.sandbox.r0.event\"}}");
+        SmokeAssert.True(
+            lines.Count == validDriverEvents.Count + 3,
+            "Synthetic stress/noise JSONL should include the valid corpus, one blank line, one malformed line, and one extra-field row.");
         await File.WriteAllLinesAsync(driverEventsPath, lines, cancellationToken);
 
         var liveEvents = new FileLiveEventSource().Read(driverEventsPath).ToList();
@@ -350,7 +383,15 @@ internal sealed class R0CollectorEventQualityScenario : ISmokeTestScenario
                     ["enableMaskSpecified"] = "true",
                     ["enableMaskHex"] = CurrentProducerMaskHex,
                     ["readEventsMaxEvents"] = "16",
-                    ["maxReadBatches"] = "4"
+                    ["maxReadBatches"] = "4",
+                    ["StressJsonlExpectedDriverRows"] = ExpectedStressDriverRows.ToString(),
+                    ["StressJsonlSequenceStart"] = StressJsonlSequenceStart.ToString(),
+                    ["StressJsonlSequenceEnd"] = StressJsonlSequenceEnd.ToString(),
+                    ["StressJsonlSequenceGapCount"] = StressJsonlSequenceGapCount.ToString(),
+                    ["StressJsonlLossEvidence"] = "TotalEventsDropped|totalEventsDropped|EventsDropped|eventsDropped|NextSequence|nextSequence|sequence",
+                    ["StressJsonlBackpressureEvidence"] = "QueueCapacity|queueCapacity|QueueHighWatermark|queueHighWatermark|drainStoppedAtBatchLimit|requestedMaxEvents|readEventsMaxEvents|maxReadBatches",
+                    ["ReadinessNoDevicePolicy"] = "no-device",
+                    ["ReadinessNonFatalPolicy"] = "warning"
                 }
             },
             new()
@@ -427,7 +468,7 @@ internal sealed class R0CollectorEventQualityScenario : ISmokeTestScenario
             }
         };
 
-        for (var index = 0; index < 32; index++)
+        for (var index = 0; index < ExpectedStressDriverRows; index++)
         {
             events.Add(new SandboxEvent
             {
@@ -446,7 +487,7 @@ internal sealed class R0CollectorEventQualityScenario : ISmokeTestScenario
                     ["versionHex"] = AbiVersionHex,
                     ["recordSize"] = "96",
                     ["driverEventTypeName"] = "file",
-                    ["sequence"] = (1200 + index).ToString(),
+                    ["sequence"] = (StressJsonlSequenceStart + index).ToString(),
                     ["payloadSize"] = "56",
                     ["payloadSchema"] = "KSWORD_SANDBOX_FILE_EVENT_PAYLOAD",
                     ["typedPayloadStatus"] = "mock",
@@ -553,7 +594,7 @@ internal sealed class R0CollectorEventQualityScenario : ISmokeTestScenario
             .Where(evt => string.Equals(evt.EventType, "driver.file", StringComparison.OrdinalIgnoreCase) &&
                 DataEquals(evt, "stress", "true"))
             .ToList();
-        SmokeAssert.True(stressRows.Count == 32, $"Synthetic stress corpus should preserve 32 driver.file rows. Actual: {stressRows.Count}");
+        SmokeAssert.True(stressRows.Count == ExpectedStressDriverRows, $"Synthetic stress corpus should preserve {ExpectedStressDriverRows} driver.file rows. Actual: {stressRows.Count}");
         SmokeAssert.True(
             stressRows.All(evt =>
                 DataEquals(evt, "eventSchemaVersion", AbiVersion) &&
@@ -562,6 +603,14 @@ internal sealed class R0CollectorEventQualityScenario : ISmokeTestScenario
                 evt.Data.ContainsKey("sequence") &&
                 DataEquals(evt, "payloadSchema", "KSWORD_SANDBOX_FILE_EVENT_PAYLOAD")),
             "Every stress driver row should preserve ABI version, record size, sequence, and payload schema.");
+
+        var started = RequireEvent(events, "r0collector.started");
+        RequireData(started, "StressJsonlExpectedDriverRows", ExpectedStressDriverRows.ToString());
+        RequireData(started, "StressJsonlSequenceStart", StressJsonlSequenceStart.ToString());
+        RequireData(started, "StressJsonlSequenceEnd", StressJsonlSequenceEnd.ToString());
+        RequireData(started, "StressJsonlSequenceGapCount", StressJsonlSequenceGapCount.ToString());
+        SmokeAssert.True(started.Data.ContainsKey("StressJsonlLossEvidence"), "Started row should name stress loss evidence fields.");
+        SmokeAssert.True(started.Data.ContainsKey("StressJsonlBackpressureEvidence"), "Started row should name stress backpressure evidence fields.");
     }
 
     /// <summary>
@@ -576,13 +625,21 @@ internal sealed class R0CollectorEventQualityScenario : ISmokeTestScenario
             .Select(evt => ToInt(evt, "sequence"))
             .Order()
             .ToList();
-        SmokeAssert.True(sequences.Count == 32, "Expected 32 stress sequences.");
+        SmokeAssert.True(sequences.Count == ExpectedStressDriverRows, $"Expected {ExpectedStressDriverRows} stress sequences.");
+        SmokeAssert.True(sequences.First() == StressJsonlSequenceStart, "Stress driver event sequence start should match the gate contract.");
+        SmokeAssert.True(sequences.Last() == StressJsonlSequenceEnd, "Stress driver event sequence end should match the gate contract.");
+        var gapCount = 0;
         for (var index = 1; index < sequences.Count; index++)
         {
-            SmokeAssert.True(
-                sequences[index] == sequences[index - 1] + 1,
-                "Stress driver event sequence values should remain contiguous inside the parsed JSONL corpus.");
+            if (sequences[index] != sequences[index - 1] + 1)
+            {
+                gapCount++;
+            }
         }
+
+        SmokeAssert.True(
+            gapCount == StressJsonlSequenceGapCount,
+            "Stress driver event sequence values should remain contiguous inside the parsed JSONL corpus.");
     }
 
     /// <summary>

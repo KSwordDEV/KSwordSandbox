@@ -334,6 +334,7 @@ public sealed class HyperVRunbookBuilder
             "--duration",
             config.Analysis.DefaultDurationSeconds.ToString()
         };
+        arguments.AddRange(BuildArtifactCollectionAgentArguments(config));
         arguments.AddRange(BuildDriverAgentArguments(config, driverEventsPath));
 
         return string.Join("; ", new[]
@@ -343,6 +344,38 @@ public sealed class HyperVRunbookBuilder
             $"Set-Content -Path {Q(agentExitPath)} -Value $exitCode -Encoding ASCII",
             "exit $exitCode"
         });
+    }
+
+    /// <summary>
+    /// Builds optional Guest Agent arguments for sensitive artifact collection.
+    /// Inputs are typed sandbox config values that may come from WebUI
+    /// per-job overrides; processing forwards only explicitly enabled lanes;
+    /// the method returns PowerShell-safe flag tokens for the Guest Agent.
+    /// </summary>
+    private static List<string> BuildArtifactCollectionAgentArguments(SandboxConfig config)
+    {
+        var arguments = new List<string>();
+        if (config.ArtifactCollection.CollectDroppedFiles)
+        {
+            arguments.Add("--collect-dropped-files");
+        }
+
+        if (config.ArtifactCollection.CaptureScreenshots)
+        {
+            arguments.Add("--screenshot");
+        }
+
+        if (config.ArtifactCollection.CaptureMemoryDumps)
+        {
+            arguments.Add("--memory-dump");
+        }
+
+        if (config.ArtifactCollection.CapturePacketCapture)
+        {
+            arguments.Add("--packet-capture");
+        }
+
+        return arguments;
     }
 
     /// <summary>

@@ -14,6 +14,8 @@ public sealed record SandboxConfig
 
     public AnalysisConfig Analysis { get; init; } = new();
 
+    public ArtifactCollectionConfig ArtifactCollection { get; init; } = new();
+
     public SandboxPaths Paths { get; init; } = new();
 
     public DriverConfig Driver { get; init; } = new();
@@ -72,6 +74,23 @@ public sealed record AnalysisConfig
     public int MaxDurationSeconds { get; init; } = 900;
 
     public long MaxSampleBytes { get; init; } = 200L * 1024 * 1024;
+}
+
+/// <summary>
+/// Opt-in guest artifact collection settings.
+/// Inputs are config defaults or per-job WebUI overrides, processing forwards
+/// enabled lanes to the Guest Agent CLI, and the values are returned to
+/// runbook builders without collecting sensitive artifacts by default.
+/// </summary>
+public sealed record ArtifactCollectionConfig
+{
+    public bool CollectDroppedFiles { get; init; }
+
+    public bool CaptureScreenshots { get; init; }
+
+    public bool CaptureMemoryDumps { get; init; }
+
+    public bool CapturePacketCapture { get; init; }
 }
 
 /// <summary>

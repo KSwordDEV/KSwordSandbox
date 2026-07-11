@@ -41,6 +41,14 @@ internal static class LiveEventsPage
             td, th { border-bottom:1px solid #e5edf6; padding:9px; text-align:left; vertical-align:top; }
             th { background:#f7fbff; color:#475569; font-size:12px; position:sticky; top:0; text-transform:uppercase; z-index:1; }
             td:nth-child(5),td:nth-child(6),td:nth-child(7) { max-width:320px; word-break:break-word; }
+            .progressbar { background:#e2e8f0; border-radius:999px; height:12px; margin:12px 0; overflow:hidden; }
+            .progressbar-fill { background:linear-gradient(90deg,var(--blue),#78c0ff); border-radius:999px; height:100%; transition:width .2s ease; }
+            .step-list { display:grid; gap:8px; grid-template-columns:repeat(auto-fit,minmax(230px,1fr)); max-height:34vh; overflow:auto; padding:2px; }
+            .step-card { background:#f8fbff; border:1px solid var(--line); border-radius:12px; padding:10px; }
+            .step-card.running { border-color:var(--blue); box-shadow:0 0 0 2px rgba(67,160,255,.12); }
+            .step-card.failed { border-color:#fecaca; background:#fff7f7; }
+            .step-card.completed { border-color:#bbf7d0; background:#f7fff9; }
+            .step-card strong { display:block; margin-bottom:5px; }
             .pill { background:#e7f3ff; border:1px solid rgba(67,160,255,.45); border-radius:999px; color:#075985; display:inline-block; font-size:12px; font-weight:800; padding:4px 9px; }
             .status { min-height:24px; margin-top:10px; }
             .ok { color:#047857; }
@@ -86,6 +94,11 @@ internal static class LiveEventsPage
               <div id="sources" class="muted"></div>
             </section>
             <section>
+              <h2 data-zh="虚拟机分析进度" data-en="Runbook progress">虚拟机分析进度</h2>
+              <p class="muted" data-zh="这里同步主界面的真实 runbook step，只展示安全的步骤状态，不展示命令行、stdout 或 stderr。" data-en="This panel mirrors the real runbook steps from the dashboard and only shows UI-safe status, not command lines, stdout, or stderr.">这里同步主界面的真实 runbook step，只展示安全的步骤状态，不展示命令行、stdout 或 stderr。</p>
+              <div id="runbookProgress" class="metric muted" data-copy="runbook progress pending">等待主界面启动分析 / waiting for dashboard analysis</div>
+            </section>
+            <section>
               <h2 data-zh="VirusTotal 官方结果" data-en="VirusTotal official result">VirusTotal 官方结果</h2>
               <p class="muted" data-zh="只查询 SHA-256 文件报告，不上传样本；未配置或失败时不影响沙箱流程。" data-en="SHA-256 file-report lookup only; samples are not uploaded. Missing keys or failures do not affect sandbox execution.">只查询 SHA-256 文件报告，不上传样本；未配置或失败时不影响沙箱流程。</p>
               <div id="vtResult" class="metric muted" data-copy="VirusTotal: pending">VirusTotal：等待查询 / waiting</div>
@@ -110,6 +123,8 @@ internal static class LiveEventsPage
             let sourceSignature = '';
             let eventSource = null;
             let pollTimer = null;
+            let progressTimer = null;
+            let lastProgressSnapshot = null;
             const seen = new Set();
 
             function t(zh, en) { return currentLanguage === 'en' ? en : zh; }
@@ -120,6 +135,7 @@ internal static class LiveEventsPage
                 el.textContent = t(el.getAttribute('data-zh'), el.getAttribute('data-en'));
               });
               document.getElementById('langToggle').textContent = currentLanguage === 'en' ? '中文' : 'English';
+              if (lastProgressSnapshot) { renderRunbookProgress(lastProgressSnapshot); }
             }
             document.getElementById('langToggle').addEventListener('click', () => {
               currentLanguage = currentLanguage === 'en' ? 'zh' : 'en';
@@ -140,6 +156,87 @@ internal static class LiveEventsPage
               } catch {
                 startPolling(t('浏览器不支持 SSE，已切换为轮询。', 'Browser SSE support unavailable; switched to polling.'));
               }
+            }
+
+            function startRunbookProgressPolling() {
+              refreshRunbookProgress();
+              if (progressTimer) { clearInterval(progressTimer); }
+              progressTimer = setInterval(refreshRunbookProgress, 1500);
+            }
+
+            async function refreshRunbookProgress() {
+              try {
+                const response = await fetch(`/api/jobs/${encodeURIComponent(jobId)}/runbook/progress`, { cache: 'no-store' });
+                const payload = await requireOk(response, t('分析进度', 'runbook progress'));
+                renderRunbookProgress(payload);
+                if (payload && ['completed', 'failed', 'canceled'].includes(String(payload.state || '').toLowerCase()) && progressTimer) {
+                  clearInterval(progressTimer);
+                  progressTimer = null;
+                }
+              } catch {
+                // Keep progress non-blocking; the raw monitor and VirusTotal
+                // card must stay usable even before the dashboard starts live
+                // execution or after the Web host restarts.
+              }
+            }
+
+            function renderRunbookProgress(snapshot) {
+              lastProgressSnapshot = snapshot;
+              const target = document.getElementById('runbookProgress');
+              if (!target || !snapshot) { return; }
+              const total = Number(snapshot.totalSteps || 0);
+              const completed = Number(snapshot.completedSteps || 0);
+              const percent = progressPercent(snapshot);
+              const state = formatProgressState(snapshot.state);
+              const current = snapshot.currentStepTitle || t('等待下一步', 'waiting for next step');
+              const message = snapshot.message ? `<p class="muted">${escapeHtml(snapshot.message)}</p>` : '';
+              const steps = (snapshot.steps || []).slice(0, 24).map(step => {
+                const stepState = String(step.state || 'pending').toLowerCase();
+                const line = `${Number(step.stepIndex ?? 0) + 1}. ${step.title || step.stepId || ''}`;
+                const detail = [
+                  formatProgressState(stepState),
+                  step.exitCode == null ? '' : `exit ${step.exitCode}`,
+                  step.duration ? formatDuration(step.duration) : ''
+                ].filter(Boolean).join(' · ');
+                return `<div class="step-card ${escapeAttr(stepState)}" data-copy="${escapeAttr(line + ' ' + detail)}">
+                  <strong>${escapeHtml(line)}</strong>
+                  <span class="pill">${escapeHtml(detail || formatProgressState('pending'))}</span>
+                </div>`;
+              }).join('');
+              target.innerHTML = `
+                <div><span class="pill" data-copy="${escapeAttr(state)}">${escapeHtml(state)}</span>
+                <strong>${escapeHtml(completed)} / ${escapeHtml(total)} ${t('步骤完成', 'steps completed')}</strong></div>
+                <div class="progressbar" aria-label="runbook progress"><div class="progressbar-fill" style="width:${percent}%"></div></div>
+                <p>${t('当前步骤', 'Current step')}：<strong>${escapeHtml(current)}</strong></p>
+                ${message}
+                <div class="step-list">${steps || `<p class="muted">${t('尚无步骤快照。', 'No step snapshot yet.')}</p>`}</div>`;
+              target.setAttribute('data-copy', `runbook ${state} ${completed}/${total} ${current}`);
+            }
+
+            function progressPercent(snapshot) {
+              const total = Number(snapshot.totalSteps || 0);
+              if (total <= 0) { return 0; }
+              const completed = Number(snapshot.completedSteps || 0);
+              return Math.max(0, Math.min(100, Math.round((completed / total) * 100)));
+            }
+
+            function formatProgressState(state) {
+              const key = String(state || 'pending').toLowerCase();
+              const labels = {
+                pending: t('等待中', 'pending'),
+                running: t('运行中', 'running'),
+                completed: t('已完成', 'completed'),
+                failed: t('失败', 'failed'),
+                skipped: t('已跳过', 'skipped'),
+                canceled: t('已取消', 'canceled')
+              };
+              return labels[key] || key;
+            }
+
+            function formatDuration(value) {
+              if (typeof value === 'string') { return value; }
+              if (typeof value === 'number') { return `${value}ms`; }
+              return '';
             }
 
             function startPolling(message) {
@@ -322,6 +419,7 @@ internal static class LiveEventsPage
             }
             applyLanguage();
             refreshVirusTotal();
+            startRunbookProgressPolling();
             connectSse();
           </script>
         </body>

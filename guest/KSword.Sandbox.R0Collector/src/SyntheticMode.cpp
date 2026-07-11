@@ -100,6 +100,84 @@ bool EmitMockDriverCategoryEvent(
     return EmitEvent(writer, event);
 }
 
+// Input: Collector options and the JSONL sink.
+// Processing: Emits a deterministic contiguous driver.file corpus that is large
+// enough for host/live readers to prove ordering, loss markers, and bounded
+// backpressure fields without opening the kernel device.
+// Return: true when all synthetic stress rows and optional noise rows were
+// written; false on output failure.
+bool EmitSyntheticStressEvents(EventWriter& writer, const Options& options, const std::wstring& commandLine) {
+    if (options.stressCount <= 0) {
+        return true;
+    }
+
+    static constexpr int kStressSequenceStart = 1200;
+    const DWORD currentProcessId = GetCurrentProcessId();
+    const std::string currentProcessIdText = std::to_string(currentProcessId);
+    const std::string stressSequenceStartText = std::to_string(kStressSequenceStart);
+    const std::string stressSequenceEndText = std::to_string(kStressSequenceStart + options.stressCount - 1);
+
+    for (int index = 0; index < options.stressCount; ++index) {
+        const int sequence = kStressSequenceStart + index;
+        std::wstring path = LR"(C:\Users\Public\ksword-r0collector-stress-)";
+        path += std::to_wstring(index);
+        path += L".tmp";
+        const std::string pathUtf8 = Utf8FromWide(path);
+
+        if (!EmitMockDriverCategoryEvent(
+                writer,
+                options,
+                "driver.file",
+                path,
+                commandLine,
+                "file",
+                "create",
+                {
+                    {"stress", "true"},
+                    {"stressOrdinal", std::to_string(index)},
+                    {"stressCount", std::to_string(options.stressCount)},
+                    {"StressJsonlExpectedDriverRows", std::to_string(options.stressCount)},
+                    {"StressJsonlSequenceStart", stressSequenceStartText},
+                    {"StressJsonlSequenceEnd", stressSequenceEndText},
+                    {"StressJsonlSequenceGapCount", "0"},
+                    {"StressJsonlLossEvidence", "TotalEventsDropped|totalEventsDropped|EventsDropped|eventsDropped|NextSequence|nextSequence|sequence"},
+                    {"StressJsonlBackpressureEvidence", "QueueCapacity|queueCapacity|QueueHighWatermark|queueHighWatermark|drainStoppedAtBatchLimit|requestedMaxEvents|readEventsMaxEvents|maxReadBatches"},
+                    {"version", std::to_string(KSWORD_SANDBOX_EVENT_HEADER_VERSION)},
+                    {"versionHex", HexUnsignedLongLong(KSWORD_SANDBOX_EVENT_HEADER_VERSION, 8)},
+                    {"recordSize", std::to_string(sizeof(KSWORD_SANDBOX_EVENT_HEADER))},
+                    {"sequence", std::to_string(sequence)},
+                    {"payloadSize", std::to_string(sizeof(KSWORD_SANDBOX_FILE_EVENT_PAYLOAD))},
+                    {"filePath", pathUtf8},
+                    {"desiredAccessHex", "0x0012019F"},
+                    {"disposition", "create"},
+                    {"processId", currentProcessIdText},
+                    {"queueCapacity", "0"},
+                    {"queueHighWatermark", "0"},
+                    {"totalEventsDropped", "0"},
+                    {"readEventsMaxEvents", std::to_string(options.readEventsMaxEvents)},
+                    {"maxReadBatches", std::to_string(options.maxReadBatches)}
+                })) {
+            return false;
+        }
+    }
+
+    if (options.injectJsonlNoise) {
+        if (!writer.WriteLine("   ")) {
+            return false;
+        }
+
+        if (!writer.WriteLine("{\"eventType\":\"driver.file\",\"source\":\"driver\",\"data\":{\"sequence\":\"broken\"")) {
+            return false;
+        }
+
+        if (!writer.WriteLine("{\"eventType\":\"driver.network\",\"source\":\"driver\",\"extraTopLevel\":\"ignored\",\"data\":{\"sequence\":\"9999\",\"eventSchemaName\":\"ksword.sandbox.r0.event\"}}")) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
 // Input: User options and event writer.
 // Processing: Emits deterministic mock driver-like rows, then exits without
 // opening the device path. This keeps CI and Guest Agent wiring testable before
@@ -211,6 +289,10 @@ int RunSyntheticMode(const Options& options, EventWriter& writer) {
                 {"remotePort", "443"},
                 {"processId", currentProcessIdText}
             })) {
+        return kExitRuntimeFailure;
+    }
+
+    if (!EmitSyntheticStressEvents(writer, options, mockCommandLine)) {
         return kExitRuntimeFailure;
     }
 

@@ -740,6 +740,64 @@ std::string NetworkEventFlagNames(const ULONG flags) {
     return names.empty() ? "none" : names;
 }
 
+// Input: Network protocol plus the most meaningful peer port.
+// Processing: Applies light service hints without inspecting packet payloads.
+// Return: dns/http/tls/web/unknown label used by rules and reports.
+std::string NetworkServiceHint(const ULONG protocol, const USHORT remotePort) {
+    if (remotePort == 53 && (protocol == KSWORD_SANDBOX_NETWORK_PROTOCOL_UDP ||
+                             protocol == KSWORD_SANDBOX_NETWORK_PROTOCOL_TCP)) {
+        return "dns";
+    }
+
+    if ((remotePort == 80 || remotePort == 8080 || remotePort == 8000) &&
+        protocol == KSWORD_SANDBOX_NETWORK_PROTOCOL_TCP) {
+        return "http";
+    }
+
+    if ((remotePort == 443 || remotePort == 8443) &&
+        protocol == KSWORD_SANDBOX_NETWORK_PROTOCOL_TCP) {
+        return "tls";
+    }
+
+    if (remotePort == 80 || remotePort == 443 || remotePort == 8080 || remotePort == 8443) {
+        return "web";
+    }
+
+    return "unknown";
+}
+
+// Input: Address and port strings.
+// Processing: Joins decoded address/port into a stable endpoint token.
+// Return: endpoint text, or empty when no address was decoded.
+std::string NetworkEndpoint(const std::string& address, const USHORT port) {
+    if (address.empty()) {
+        return {};
+    }
+
+    return address + ":" + std::to_string(port);
+}
+
+// Input: transport, endpoints, and direction.
+// Processing: Produces a deterministic correlation key shared with PCAP/import
+// events so reports can group R0 and packet-capture evidence.
+// Return: flow key text.
+std::string NetworkFlowKey(
+    const std::string& protocolName,
+    const std::string& localEndpoint,
+    const std::string& remoteEndpoint,
+    const ULONG direction) {
+    const std::string source = direction == KswSandboxNetworkDirectionInbound ? remoteEndpoint : localEndpoint;
+    const std::string destination = direction == KswSandboxNetworkDirectionInbound ? localEndpoint : remoteEndpoint;
+    return protocolName + "|" + source + "|" + destination;
+}
+
+// Input: ASCII text already produced from numeric network metadata.
+// Processing: Widens byte-for-byte for top-level SandboxEvent.path construction.
+// Return: UTF-16 string safe for ASCII URI-like paths.
+std::wstring WideFromAscii(const std::string& value) {
+    return std::wstring(value.begin(), value.end());
+}
+
 // Input: Payload bytes and driver event type.
 // Processing: Decodes the best available subject path for top-level event.path.
 // Return: UTF-16 subject path or an empty string when the payload has no path.
@@ -788,6 +846,21 @@ std::wstring ExtractTypedPayloadPath(
                 registryPayload->KeyPath,
                 registryPayload->KeyPathLengthBytes,
                 KSWORD_SANDBOX_REGISTRY_KEY_PATH_CHARS);
+        }
+    }
+
+    if (eventType == KswSandboxEventTypeNetwork &&
+        payloadBytes >= sizeof(KSWORD_SANDBOX_NETWORK_EVENT_PAYLOAD)) {
+        const auto* networkPayload =
+            reinterpret_cast<const KSWORD_SANDBOX_NETWORK_EVENT_PAYLOAD*>(payload);
+        if ((networkPayload->Flags & KSWORD_SANDBOX_NETWORK_EVENT_FLAG_REMOTE_ADDRESS_PRESENT) != 0) {
+            const std::string remoteAddress =
+                NetworkAddressText(networkPayload->AddressFamily, networkPayload->RemoteAddress);
+            if (!remoteAddress.empty()) {
+                return WideFromAscii(
+                    NetworkProtocolName(networkPayload->Protocol) + "://" +
+                    remoteAddress + ":" + std::to_string(networkPayload->RemotePort));
+            }
         }
     }
 
@@ -1362,6 +1435,23 @@ bool AddNetworkPayloadData(
     const std::string remoteAddress = remoteAddressPresent
         ? NetworkAddressText(networkPayload->AddressFamily, networkPayload->RemoteAddress)
         : std::string();
+    const std::string protocolName = NetworkProtocolName(networkPayload->Protocol);
+    const std::string directionName = NetworkDirectionName(networkPayload->Direction);
+    const std::string localEndpoint = NetworkEndpoint(localAddress, networkPayload->LocalPort);
+    const std::string remoteEndpoint = NetworkEndpoint(remoteAddress, networkPayload->RemotePort);
+    const std::string sourceEndpoint =
+        networkPayload->Direction == KswSandboxNetworkDirectionInbound ? remoteEndpoint : localEndpoint;
+    const std::string destinationEndpoint =
+        networkPayload->Direction == KswSandboxNetworkDirectionInbound ? localEndpoint : remoteEndpoint;
+    const std::string flowKey = NetworkFlowKey(
+        protocolName,
+        localEndpoint,
+        remoteEndpoint,
+        networkPayload->Direction);
+    const USHORT servicePort = networkPayload->Direction == KswSandboxNetworkDirectionInbound
+        ? networkPayload->LocalPort
+        : networkPayload->RemotePort;
+    const std::string serviceHint = NetworkServiceHint(networkPayload->Protocol, servicePort);
 
     data->AddUtf8("typedPayloadStatus", "parsed");
     data->AddUnsigned("networkVersion", networkPayload->Version);
@@ -1371,9 +1461,10 @@ bool AddNetworkPayloadData(
         "networkPayloadSizeMatchesPublicAbi",
         networkPayload->Size == static_cast<ULONG>(sizeof(KSWORD_SANDBOX_NETWORK_EVENT_PAYLOAD)));
     data->AddUnsigned("protocol", networkPayload->Protocol);
-    data->AddUtf8("protocolName", NetworkProtocolName(networkPayload->Protocol));
+    data->AddUtf8("protocolName", protocolName);
+    data->AddUtf8("transportProtocol", protocolName);
     data->AddUnsigned("direction", networkPayload->Direction);
-    data->AddUtf8("directionName", NetworkDirectionName(networkPayload->Direction));
+    data->AddUtf8("directionName", directionName);
     data->AddUnsigned("addressFamily", networkPayload->AddressFamily);
     data->AddUtf8("addressFamilyName", NetworkAddressFamilyName(networkPayload->AddressFamily));
     data->AddUnsigned("flags", networkPayload->Flags);
@@ -1401,6 +1492,17 @@ bool AddNetworkPayloadData(
     }
     data->AddUnsigned("localPort", networkPayload->LocalPort);
     data->AddUnsigned("remotePort", networkPayload->RemotePort);
+    data->AddUtf8("localEndpoint", localEndpoint);
+    data->AddUtf8("remoteEndpoint", remoteEndpoint);
+    data->AddUtf8("sourceEndpoint", sourceEndpoint);
+    data->AddUtf8("destinationEndpoint", destinationEndpoint);
+    data->AddUtf8("flowKey", flowKey);
+    data->AddUnsigned("servicePort", servicePort);
+    data->AddUtf8("serviceHint", serviceHint);
+    data->AddUtf8("semanticCandidate", serviceHint);
+    data->AddBool("dnsCandidate", serviceHint == "dns");
+    data->AddBool("httpCandidate", serviceHint == "http");
+    data->AddBool("tlsCandidate", serviceHint == "tls");
     data->AddUnsigned("layerId", networkPayload->LayerId);
     data->AddUtf8("layerIdHex", HexUnsignedLongLong(networkPayload->LayerId, 4));
     data->AddUnsigned("calloutId", networkPayload->CalloutId);

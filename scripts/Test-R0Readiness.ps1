@@ -352,6 +352,169 @@ function Test-R0CapabilityIoctlStaticContract {
         }
 }
 
+# Test-R0CollectorEventQualityStaticContract verifies that the no-device
+# mock/stress/noise/backpressure operator gate is represented consistently in
+# docs and lightweight smoke contracts. It does not execute the collector, load
+# the driver, open the device, mutate SCM state, or call signing tools.
+function Test-R0CollectorEventQualityStaticContract {
+    param(
+        [string]$R0CollectorDocPath,
+        [string]$R0DriverCoreDocPath,
+        [string]$R0JsonlSchemaDocPath,
+        [string]$EventQualityScenarioPath,
+        [string]$RuntimeReadinessScenarioPath
+    )
+
+    $missing = New-Object System.Collections.Generic.List[string]
+    $checkedFiles = New-Object System.Collections.Generic.List[string]
+
+    $operatorGateFragments = @(
+        'R0Collector stress/readiness operator gate',
+        'StressJsonlExpectedDriverRows',
+        'StressJsonlSequenceStart',
+        'StressJsonlSequenceEnd',
+        'StressJsonlSequenceGapCount',
+        'StressJsonlLossEvidence',
+        'StressJsonlBackpressureEvidence',
+        'ReadinessNoDevicePolicy',
+        'ReadinessNonFatalPolicy',
+        'driver.parse_error',
+        'TotalEventsDropped',
+        'EventsDropped',
+        'NextSequence',
+        'sequence',
+        'QueueHighWatermark',
+        'drainStoppedAtBatchLimit',
+        '--mock',
+        '--synthetic',
+        '--self-test',
+        '--max-events',
+        '--max-read-batches',
+        '--duration 0',
+        '--poll-ms',
+        '--heartbeat'
+    )
+
+    Test-TextContractFragments `
+        -Label 'R0Collector stress/readiness operator gate doc' `
+        -Path $R0CollectorDocPath `
+        -Fragments $operatorGateFragments `
+        -MissingFragments $missing `
+        -CheckedFiles $checkedFiles
+
+    Test-TextContractFragments `
+        -Label 'R0 driver core stress/backpressure gate doc' `
+        -Path $R0DriverCoreDocPath `
+        -Fragments @(
+            'Synthetic event-quality and backpressure contract',
+            'StressJsonlExpectedDriverRows',
+            'StressJsonlSequenceStart',
+            'StressJsonlSequenceEnd',
+            'StressJsonlSequenceGapCount',
+            'StressJsonlLossEvidence',
+            'StressJsonlBackpressureEvidence',
+            'ReadinessNoDevicePolicy',
+            'ReadinessNonFatalPolicy',
+            'TotalEventsDropped',
+            'EventsDropped',
+            'NextSequence',
+            'sequence gaps',
+            'without CSignTool',
+            'loading the driver'
+        ) `
+        -MissingFragments $missing `
+        -CheckedFiles $checkedFiles
+
+    Test-TextContractFragments `
+        -Label 'R0 JSONL schema noise/loss doc' `
+        -Path $R0JsonlSchemaDocPath `
+        -Fragments @(
+            'driver.parse_error',
+            'eventSchemaName',
+            'eventSchemaVersion',
+            'sequence',
+            'TotalEventsDropped',
+            'QueueHighWatermark'
+        ) `
+        -MissingFragments $missing `
+        -CheckedFiles $checkedFiles
+
+    Test-TextContractFragments `
+        -Label 'R0Collector event-quality smoke scenario' `
+        -Path $EventQualityScenarioPath `
+        -Fragments @(
+            'r0.collector.event-quality.synthetic',
+            'StressJsonlExpectedDriverRows',
+            'StressJsonlSequenceStart',
+            'StressJsonlSequenceEnd',
+            'StressJsonlSequenceGapCount',
+            'StressJsonlLossEvidence',
+            'StressJsonlBackpressureEvidence',
+            'driver.parse_error',
+            'AssertMonotonicStressSequences',
+            'ExpectedStressDriverRows'
+        ) `
+        -MissingFragments $missing `
+        -CheckedFiles $checkedFiles
+
+    Test-TextContractFragments `
+        -Label 'R0 runtime readiness smoke scenario' `
+        -Path $RuntimeReadinessScenarioPath `
+        -Fragments @(
+            'r0.runtime-readiness.contract',
+            'R0Collector event-quality static contract',
+            'StressJsonlExpectedDriverRows',
+            'ReadinessNoDevicePolicy',
+            'ReadinessNonFatalPolicy',
+            'DefaultModeSafe',
+            'CallsCSignTool  = $false'
+        ) `
+        -MissingFragments $missing `
+        -CheckedFiles $checkedFiles
+
+    $passed = $missing.Count -eq 0
+    return New-R0ReadinessResult `
+        -Name 'R0Collector event-quality static contract' `
+        -Status ($(if ($passed) { 'Passed' } else { 'Failed' })) `
+        -Required $true `
+        -Message ($(if ($passed) { 'Static mock/stress/noise/readiness operator-gate references are present.' } else { 'One or more static mock/stress/noise/readiness operator-gate references are missing.' })) `
+        -Details @{
+            StaticOnly                 = $true
+            NoDevice                   = $true
+            OpensDevice                = $false
+            LoadsDriver                = $false
+            MutatesDriver              = $false
+            CallsCSignTool             = $false
+            CheckedFiles               = @($checkedFiles.ToArray())
+            MissingFragments           = @($missing.ToArray())
+            StressJsonlExpectedDriverRows = 32
+            StressJsonlSequenceStart   = 1200
+            StressJsonlSequenceEnd     = 1231
+            StressJsonlSequenceGapCount = 0
+            StressJsonlLossEvidence    = @(
+                'TotalEventsDropped',
+                'totalEventsDropped',
+                'EventsDropped',
+                'eventsDropped',
+                'NextSequence',
+                'nextSequence',
+                'sequence'
+            )
+            StressJsonlBackpressureEvidence = @(
+                'QueueCapacity',
+                'queueCapacity',
+                'QueueHighWatermark',
+                'queueHighWatermark',
+                'drainStoppedAtBatchLimit',
+                'requestedMaxEvents',
+                'readEventsMaxEvents',
+                'maxReadBatches'
+            )
+            ReadinessNoDevicePolicy    = 'Default readiness is static/no-device and must not load the driver, open the device, mutate SCM state, call DeviceIoControl, or call CSignTool.'
+            ReadinessNonFatalPolicy    = 'Missing or blocked local collector ABI self-check execution is a Warning unless the operator explicitly requested live VM checks.'
+        }
+}
+
 # Test-DriverSysGitHygiene verifies that kernel-driver binaries are not tracked,
 # staged, or otherwise visible to git as commit candidates. Ignored local .sys
 # files are not enumerated; the preferred path is to keep signed drivers outside
@@ -909,19 +1072,43 @@ function Invoke-DeviceHealthCheck {
     }
 }
 
+# Add-UniqueString appends one diagnostic field name to a list once.
+function Add-UniqueString {
+    param(
+        [System.Collections.Generic.List[string]]$List,
+        [string]$Value
+    )
+
+    if (-not [string]::IsNullOrWhiteSpace($Value) -and -not $List.Contains($Value)) {
+        [void]$List.Add($Value)
+    }
+}
+
 # Get-JsonLineEventSummary parses a collector JSONL output file enough to prove
-# that the expected lifecycle rows were written. It is read-only and keeps only
-# event type names plus a small parse-error sample for diagnostics.
+# that the expected lifecycle rows were written and that stress/readiness
+# evidence is visible. It is read-only and keeps event type names, line counts,
+# sequence/loss/backpressure field names, and a small parse-error sample.
 function Get-JsonLineEventSummary {
     param([string]$Path)
 
     $summary = [ordered]@{
-        OutputExists     = $false
-        OutputLength     = 0
-        LineCount        = 0
-        EventTypes       = @()
-        ParseErrorCount  = 0
-        ParseErrorSample = @()
+        OutputExists               = $false
+        OutputLength               = 0
+        PhysicalLineCount          = 0
+        BlankLineCount             = 0
+        LineCount                  = 0
+        EventTypes                 = @()
+        DriverRowCount             = 0
+        StressRowCount             = 0
+        MockRowCount               = 0
+        SequenceCount              = 0
+        SequenceFirst              = $null
+        SequenceLast               = $null
+        SequenceGapCount           = 0
+        LossEvidenceFields         = @()
+        BackpressureEvidenceFields = @()
+        ParseErrorCount            = 0
+        ParseErrorSample           = @()
     }
 
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
@@ -934,8 +1121,13 @@ function Get-JsonLineEventSummary {
 
     $eventTypes = New-Object System.Collections.Generic.List[string]
     $parseErrors = New-Object System.Collections.Generic.List[string]
+    $sequenceValues = New-Object System.Collections.Generic.List[Int64]
+    $lossEvidenceFields = New-Object System.Collections.Generic.List[string]
+    $backpressureEvidenceFields = New-Object System.Collections.Generic.List[string]
     foreach ($line in (Get-Content -LiteralPath $Path -ErrorAction Stop)) {
+        $summary.PhysicalLineCount = [int]$summary.PhysicalLineCount + 1
         if ([string]::IsNullOrWhiteSpace($line)) {
+            $summary.BlankLineCount = [int]$summary.BlankLineCount + 1
             continue
         }
 
@@ -943,10 +1135,49 @@ function Get-JsonLineEventSummary {
         try {
             $row = $line | ConvertFrom-Json -ErrorAction Stop
             if ($null -ne $row.eventType -and -not [string]::IsNullOrWhiteSpace([string]$row.eventType)) {
-                [void]$eventTypes.Add([string]$row.eventType)
+                $eventType = [string]$row.eventType
+                [void]$eventTypes.Add($eventType)
             }
             else {
                 [void]$parseErrors.Add("Line $($summary.LineCount): missing eventType")
+            }
+
+            if ($null -ne $row.source -and [string]$row.source -eq 'driver') {
+                $summary.DriverRowCount = [int]$summary.DriverRowCount + 1
+            }
+
+            if ($null -ne $row.data) {
+                $dataProperties = @($row.data.PSObject.Properties)
+                foreach ($property in $dataProperties) {
+                    switch -Regex ($property.Name) {
+                        '^(TotalEventsDropped|totalEventsDropped|EventsDropped|eventsDropped|TotalEventsSuppressed|totalEventsSuppressed|NextSequence|nextSequence|sequence)$' {
+                            Add-UniqueString -List $lossEvidenceFields -Value $property.Name
+                        }
+                        '^(QueueCapacity|queueCapacity|QueueHighWatermark|queueHighWatermark|drainStoppedAtBatchLimit|requestedMaxEvents|readEventsMaxEvents|maxReadBatches|backpressureObserved)$' {
+                            Add-UniqueString -List $backpressureEvidenceFields -Value $property.Name
+                        }
+                    }
+                }
+
+                $sequenceProperty = $row.data.PSObject.Properties['sequence']
+                if ($null -ne $sequenceProperty) {
+                    $sequenceValue = [Int64]0
+                    if ([Int64]::TryParse([string]$sequenceProperty.Value, [ref]$sequenceValue)) {
+                        [void]$sequenceValues.Add($sequenceValue)
+                    }
+                }
+
+                $stressProperty = $row.data.PSObject.Properties['stress']
+                if ($null -ne $stressProperty -and [string]$stressProperty.Value -eq 'true') {
+                    $summary.StressRowCount = [int]$summary.StressRowCount + 1
+                }
+
+                $mockProperty = $row.data.PSObject.Properties['mock']
+                $mockModeProperty = $row.data.PSObject.Properties['mockMode']
+                if (($null -ne $mockProperty -and [string]$mockProperty.Value -eq 'true') -or
+                    ($null -ne $mockModeProperty -and [string]$mockModeProperty.Value -eq 'true')) {
+                    $summary.MockRowCount = [int]$summary.MockRowCount + 1
+                }
             }
         }
         catch {
@@ -955,6 +1186,21 @@ function Get-JsonLineEventSummary {
     }
 
     $summary.EventTypes = @($eventTypes.ToArray())
+    $sortedSequences = @($sequenceValues.ToArray() | Sort-Object)
+    $summary.SequenceCount = $sortedSequences.Count
+    if ($sortedSequences.Count -gt 0) {
+        $summary.SequenceFirst = [Int64]$sortedSequences[0]
+        $summary.SequenceLast = [Int64]$sortedSequences[$sortedSequences.Count - 1]
+        $gapCount = 0
+        for ($index = 1; $index -lt $sortedSequences.Count; $index++) {
+            if ([Int64]$sortedSequences[$index] -ne ([Int64]$sortedSequences[$index - 1] + 1)) {
+                $gapCount++
+            }
+        }
+        $summary.SequenceGapCount = $gapCount
+    }
+    $summary.LossEvidenceFields = @($lossEvidenceFields.ToArray())
+    $summary.BackpressureEvidenceFields = @($backpressureEvidenceFields.ToArray())
     $summary.ParseErrorCount = $parseErrors.Count
     $summary.ParseErrorSample = @($parseErrors.ToArray() | Select-Object -First 5)
     return $summary
@@ -1025,10 +1271,21 @@ function Invoke-R0CollectorAbiSelfCheck {
                 ExitCode        = $exitCode
                 OutputWritten   = [bool]$summary.OutputExists
                 OutputLength    = [int64]$summary.OutputLength
+                PhysicalLineCount = [int]$summary.PhysicalLineCount
+                BlankLineCount  = [int]$summary.BlankLineCount
                 LineCount       = [int]$summary.LineCount
                 EventTypes      = @($eventTypes)
                 HasAbiSelfCheck = $hasAbiSelfCheck
                 HasStopped      = $hasStopped
+                DriverRowCount  = [int]$summary.DriverRowCount
+                StressRowCount  = [int]$summary.StressRowCount
+                MockRowCount    = [int]$summary.MockRowCount
+                SequenceCount   = [int]$summary.SequenceCount
+                StressJsonlSequenceStart = $summary.SequenceFirst
+                StressJsonlSequenceEnd = $summary.SequenceLast
+                StressJsonlSequenceGapCount = [int]$summary.SequenceGapCount
+                StressJsonlLossEvidence = @($summary.LossEvidenceFields)
+                StressJsonlBackpressureEvidence = @($summary.BackpressureEvidenceFields)
                 ParseErrorCount = $parseErrorCount
                 ParseErrors     = @($summary.ParseErrorSample)
                 ConsoleLineCount = @($output).Count
@@ -1104,10 +1361,19 @@ function Invoke-R0CollectorHealth {
                 ExitCode        = $exitCode
                 OutputWritten   = [bool]$summary.OutputExists
                 OutputLength    = [int64]$summary.OutputLength
+                PhysicalLineCount = [int]$summary.PhysicalLineCount
+                BlankLineCount  = [int]$summary.BlankLineCount
                 LineCount       = [int]$summary.LineCount
                 EventTypes      = @($eventTypes)
                 HasDeviceOpened = $hasDeviceOpened
                 HasDriverHealth = $hasDriverHealth
+                DriverRowCount  = [int]$summary.DriverRowCount
+                SequenceCount   = [int]$summary.SequenceCount
+                StressJsonlSequenceStart = $summary.SequenceFirst
+                StressJsonlSequenceEnd = $summary.SequenceLast
+                StressJsonlSequenceGapCount = [int]$summary.SequenceGapCount
+                StressJsonlLossEvidence = @($summary.LossEvidenceFields)
+                StressJsonlBackpressureEvidence = @($summary.BackpressureEvidenceFields)
                 ParseErrorCount = $parseErrorCount
                 ParseErrors     = @($summary.ParseErrorSample)
                 ConsoleOutput   = (($output | Out-String).Trim())
@@ -1176,6 +1442,8 @@ function Invoke-R0CollectorDrain {
                 OutputPath         = $CollectorOutputPath
                 OutputWritten      = [bool]$summary.OutputExists
                 OutputLength       = [int64]$summary.OutputLength
+                PhysicalLineCount  = [int]$summary.PhysicalLineCount
+                BlankLineCount     = [int]$summary.BlankLineCount
                 LineCount          = [int]$summary.LineCount
                 EventTypes         = @($eventTypes)
                 HasDriverHealth    = $hasDriverHealth
@@ -1184,6 +1452,15 @@ function Invoke-R0CollectorDrain {
                 DriverStatusCount  = $driverStatusCount
                 HasDriverPoll      = $hasDriverPoll
                 HasDriverReadEvents = $hasDriverReadEvents
+                DriverRowCount     = [int]$summary.DriverRowCount
+                StressRowCount     = [int]$summary.StressRowCount
+                MockRowCount       = [int]$summary.MockRowCount
+                SequenceCount      = [int]$summary.SequenceCount
+                StressJsonlSequenceStart = $summary.SequenceFirst
+                StressJsonlSequenceEnd = $summary.SequenceLast
+                StressJsonlSequenceGapCount = [int]$summary.SequenceGapCount
+                StressJsonlLossEvidence = @($summary.LossEvidenceFields)
+                StressJsonlBackpressureEvidence = @($summary.BackpressureEvidenceFields)
                 ParseErrorCount    = $parseErrorCount
                 ParseErrors        = @($summary.ParseErrorSample)
                 ExitCode           = $exitCode
@@ -1217,6 +1494,10 @@ $collectorEventParser = Join-Path $RepositoryRoot 'guest\KSword.Sandbox.R0Collec
 $collectorRuntimeLoop = Join-Path $RepositoryRoot 'guest\KSword.Sandbox.R0Collector\src\RuntimeLoop.cpp'
 $driverSigningDoc = Join-Path $RepositoryRoot 'docs\driver-signing.md'
 $r0CollectorDoc = Join-Path $RepositoryRoot 'docs\r0-collector.md'
+$r0DriverCoreDoc = Join-Path $RepositoryRoot 'docs\r0-driver-core.md'
+$r0JsonlSchemaDoc = Join-Path $RepositoryRoot 'docs\r0-jsonl-schema.md'
+$r0CollectorEventQualityScenario = Join-Path $RepositoryRoot 'tests\KSword.Sandbox.SmokeTests\Scenarios\R0CollectorEventQualityScenario.cs'
+$r0RuntimeReadinessScenario = Join-Path $RepositoryRoot 'tests\KSword.Sandbox.SmokeTests\Scenarios\R0RuntimeReadinessScenario.cs'
 
 [void]$results.Add((Test-RepositoryFile -Name 'Driver project file' -Path $driverProject))
 [void]$results.Add((Test-RepositoryFile -Name 'Driver public IOCTL header' -Path $driverHeader))
@@ -1230,6 +1511,12 @@ $r0CollectorDoc = Join-Path $RepositoryRoot 'docs\r0-collector.md'
             -CollectorRuntimeLoopPath $collectorRuntimeLoop `
             -DriverSigningDocPath $driverSigningDoc `
             -R0CollectorDocPath $r0CollectorDoc))
+[void]$results.Add((Test-R0CollectorEventQualityStaticContract `
+            -R0CollectorDocPath $r0CollectorDoc `
+            -R0DriverCoreDocPath $r0DriverCoreDoc `
+            -R0JsonlSchemaDocPath $r0JsonlSchemaDoc `
+            -EventQualityScenarioPath $r0CollectorEventQualityScenario `
+            -RuntimeReadinessScenarioPath $r0RuntimeReadinessScenario))
 [void]$results.Add((Test-DriverSysGitHygiene -Root $RepositoryRoot))
 [void]$results.Add((Test-ReadableFile -Name 'Driver binary readable' -Path $DriverSysPath -Required $true))
 [void]$results.Add((Test-ReadableFile -Name 'R0Collector executable readable' -Path $R0CollectorPath -Required $false))
@@ -1297,7 +1584,7 @@ Write-Output ([pscustomobject][ordered]@{
         CollectorHealthOutputPath = $CollectorHealthOutputPath
         CollectorOutputPath     = $CollectorOutputPath
         DefaultModeSafe        = -not ($InstallService -or $StartService -or $StopService -or $DeleteService -or $CheckDeviceHealth -or $CheckCollectorHealth -or $DrainWithCollector)
-        Note                   = 'Default mode performs static negotiated-IOCTL contract checks and a no-device R0Collector ABI self-check when available; it does not load/unload the driver, mutate SCM state, open the device, call DeviceIoControl, or call CSignTool.'
+        Note                   = 'Default mode performs static negotiated-IOCTL plus mock/stress/noise/readiness contract checks and a no-device R0Collector ABI self-check when available; it does not load/unload the driver, mutate SCM state, open the device, call DeviceIoControl, or call CSignTool.'
     })
 
 exit $exitCode

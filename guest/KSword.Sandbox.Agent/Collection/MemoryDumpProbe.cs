@@ -7,17 +7,23 @@ using KSword.Sandbox.Abstractions;
 namespace KSword.Sandbox.Agent.Collection;
 
 /// <summary>
-/// Optionally captures a best-effort minidump for the launched sample process.
-/// Inputs are the after-start probe phase, root process ID, and an explicit
-/// CLI opt-in flag; processing delegates to a platform capture implementation;
-/// CollectAsync returns memory_dump.captured or memory_dump.skipped events.
+/// Optionally captures best-effort minidumps for the launched sample process
+/// and its visible descendants.
+/// Inputs are after-start/after-run probe phases, root process ID, and an
+/// explicit CLI opt-in flag; processing delegates to a platform capture
+/// implementation and reuses the low-privilege process snapshot provider;
+/// CollectAsync returns memory_dump.captured, memory_dump.skipped, and
+/// memory_dump.sweep events.
 /// </summary>
 internal sealed class MemoryDumpProbe : IGuestProbe
 {
     private readonly IProcessMemoryDumpCapture dumpCapture;
+    private readonly IProcessSnapshotProvider snapshotProvider;
+    private readonly HashSet<int> capturedProcessIds = [];
+    private int? rememberedRootProcessId;
 
     public MemoryDumpProbe()
-        : this(new WindowsMiniDumpCapture())
+        : this(new WindowsMiniDumpCapture(), new ProcessSnapshotProvider())
     {
     }
 
@@ -27,67 +33,234 @@ internal sealed class MemoryDumpProbe : IGuestProbe
     /// phases, and the constructor returns no value.
     /// </summary>
     public MemoryDumpProbe(IProcessMemoryDumpCapture dumpCapture)
+        : this(dumpCapture, new ProcessSnapshotProvider())
+    {
+    }
+
+    /// <summary>
+    /// Creates a memory dump probe with injectable capture and process snapshot
+    /// providers. Inputs are services used by the probe; processing stores
+    /// them for future phases; the constructor returns no value.
+    /// </summary>
+    public MemoryDumpProbe(
+        IProcessMemoryDumpCapture dumpCapture,
+        IProcessSnapshotProvider snapshotProvider)
     {
         this.dumpCapture = dumpCapture;
+        this.snapshotProvider = snapshotProvider;
     }
 
     public string ProbeId => "memory-dump";
 
     /// <summary>
-    /// Captures one opt-in minidump while the sample process is running.
+    /// Captures opt-in minidumps while the sample process is running and after
+    /// the run has produced descendants.
     /// Inputs are phase, guest context, and cancellation token; processing skips
-    /// by default and only writes a dump for AfterStart when a root PID exists;
-    /// the method returns one diagnostic event for enabled attempts.
+    /// by default, captures the root process at AfterStart as a safety net, and
+    /// sweeps the visible root/child process tree at AfterRun; the method
+    /// returns diagnostic events for enabled attempts.
     /// </summary>
     public async Task<IReadOnlyList<SandboxEvent>> CollectAsync(
         ProbePhase phase,
         GuestProbeContext context,
         CancellationToken cancellationToken = default)
     {
-        if (!context.CaptureMemoryDump || phase is not ProbePhase.AfterStart)
+        if (!context.CaptureMemoryDump)
         {
             return [];
         }
 
         var phaseLabel = ToPhaseLabel(phase);
-        var result = context.RootProcessId is null
-            ? MemoryDumpCaptureResult.Skipped(
-                "Sample root process ID is not available for memory dump capture.",
-                processId: null,
-                diagnosticStage: "root-process")
-            : await dumpCapture.CaptureAsync(context.OutputDirectory, context.RootProcessId.Value, phaseLabel, cancellationToken);
-
-        var evt = new SandboxEvent
+        if (context.RootProcessId is not null)
         {
-            EventType = result.Captured ? "memory_dump.captured" : "memory_dump.skipped",
-            Source = "guest",
-            Path = result.Path,
-            ProcessId = result.ProcessId,
-            Data =
-            {
-                ["phase"] = phaseLabel,
-                ["captureEnabled"] = "true",
-                ["captureState"] = result.Captured ? "captured" : "skipped",
-                ["dumpType"] = result.DumpType,
-                ["evidenceRole"] = "memory-dump",
-                ["collectionName"] = "memory-dumps"
-            }
+            rememberedRootProcessId = context.RootProcessId.Value;
+        }
+
+        return phase switch
+        {
+            ProbePhase.AfterStart => await CaptureRootSafetyNetAsync(context, phaseLabel, cancellationToken).ConfigureAwait(false),
+            ProbePhase.AfterRun => await CaptureVisibleProcessTreeAsync(context, phaseLabel, cancellationToken).ConfigureAwait(false),
+            _ => []
         };
+    }
 
-        AddOptionalData(evt, "reason", result.Reason);
-        AddOptionalData(evt, "exceptionType", result.ExceptionType);
-        AddOptionalData(evt, "diagnosticStage", result.DiagnosticStage);
-
-        if (result.ProcessId is not null)
+    /// <summary>
+    /// Captures the root process once while it is most likely still alive.
+    /// Inputs are context, phase label, and cancellation token; processing
+    /// writes one root dump or a non-fatal skipped event; the method returns
+    /// memory dump events.
+    /// </summary>
+    private async Task<IReadOnlyList<SandboxEvent>> CaptureRootSafetyNetAsync(
+        GuestProbeContext context,
+        string phaseLabel,
+        CancellationToken cancellationToken)
+    {
+        if (rememberedRootProcessId is null)
         {
-            evt.Data["processId"] = result.ProcessId.Value.ToString(CultureInfo.InvariantCulture);
+            return
+            [
+                CreateSkippedEvent(
+                    MemoryDumpCaptureResult.Skipped(
+                        "Sample root process ID is not available for memory dump capture.",
+                        processId: null,
+                        diagnosticStage: "root-process"),
+                    phaseLabel,
+                    target: null,
+                    rootProcessId: null,
+                    duplicate: false)
+            ];
         }
 
-        if (result.Win32Error is not null)
+        var target = new MemoryDumpTarget(
+            rememberedRootProcessId.Value,
+            ParentProcessId: null,
+            ProcessName: "root",
+            Path: context.SamplePath,
+            Depth: 0,
+            Lineage: rememberedRootProcessId.Value.ToString(CultureInfo.InvariantCulture),
+            IsRoot: true,
+            SnapshotKey: string.Empty);
+        return [await CaptureTargetAsync(context, phaseLabel, target, rememberedRootProcessId.Value, cancellationToken).ConfigureAwait(false)];
+    }
+
+    /// <summary>
+    /// Captures root plus visible descendants at the final AfterRun sweep.
+    /// Inputs are context, phase label, and cancellation token; processing
+    /// snapshots processes, walks the root child tree, skips already captured
+    /// PIDs, and writes a summary event; the method returns sweep events.
+    /// </summary>
+    private async Task<IReadOnlyList<SandboxEvent>> CaptureVisibleProcessTreeAsync(
+        GuestProbeContext context,
+        string phaseLabel,
+        CancellationToken cancellationToken)
+    {
+        var rootProcessId = context.RootProcessId ?? rememberedRootProcessId;
+        if (rootProcessId is null)
         {
-            evt.Data["win32Error"] = result.Win32Error.Value.ToString(CultureInfo.InvariantCulture);
+            return
+            [
+                CreateSkippedEvent(
+                    MemoryDumpCaptureResult.Skipped(
+                        "Sample root process ID is not available for final memory dump sweep.",
+                        processId: null,
+                        diagnosticStage: "root-process-final"),
+                    phaseLabel,
+                    target: null,
+                    rootProcessId: null,
+                    duplicate: false)
+            ];
         }
 
+        Dictionary<int, ProcessTreeSnapshot> snapshot;
+        try
+        {
+            snapshot = snapshotProvider.Capture(cancellationToken);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or Win32Exception or NotSupportedException or UnauthorizedAccessException)
+        {
+            return
+            [
+                CreateSkippedEvent(
+                    MemoryDumpCaptureResult.Skipped(
+                        "Process tree snapshot failed before final memory dump sweep.",
+                        rootProcessId.Value,
+                        ex.GetType().FullName ?? ex.GetType().Name,
+                        diagnosticStage: "process-tree-snapshot"),
+                    phaseLabel,
+                    target: null,
+                    rootProcessId: rootProcessId.Value,
+                    duplicate: false)
+            ];
+        }
+
+        var targets = BuildVisibleDumpTargets(snapshot, rootProcessId.Value);
+        var events = new List<SandboxEvent>();
+        var alreadyCaptured = 0;
+        var attempted = 0;
+        var captured = 0;
+        var skipped = 0;
+
+        foreach (var target in targets.OrderBy(target => target.Depth).ThenBy(target => target.ProcessId))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (capturedProcessIds.Contains(target.ProcessId))
+            {
+                alreadyCaptured++;
+                continue;
+            }
+
+            attempted++;
+            var evt = await CaptureTargetAsync(context, phaseLabel, target, rootProcessId.Value, cancellationToken).ConfigureAwait(false);
+            if (string.Equals(evt.EventType, "memory_dump.captured", StringComparison.OrdinalIgnoreCase))
+            {
+                captured++;
+            }
+            else
+            {
+                skipped++;
+            }
+
+            events.Add(evt);
+        }
+
+        if (targets.Count == 0)
+        {
+            events.Add(CreateSkippedEvent(
+                MemoryDumpCaptureResult.Skipped(
+                    "No visible root or child processes were available for final memory dump sweep.",
+                    rootProcessId.Value,
+                    diagnosticStage: "process-tree-empty"),
+                phaseLabel,
+                target: null,
+                rootProcessId: rootProcessId.Value,
+                duplicate: false));
+        }
+
+        events.Add(CreateSweepEvent(phaseLabel, rootProcessId.Value, targets.Count, attempted, captured, skipped, alreadyCaptured));
+        return events;
+    }
+
+    /// <summary>
+    /// Captures one target process and converts the result into an event.
+    /// Inputs are context, phase, target metadata, root PID, and cancellation;
+    /// processing delegates to the dump capture service and stores tree
+    /// metadata; the method returns one SandboxEvent.
+    /// </summary>
+    private async Task<SandboxEvent> CaptureTargetAsync(
+        GuestProbeContext context,
+        string phaseLabel,
+        MemoryDumpTarget target,
+        int rootProcessId,
+        CancellationToken cancellationToken)
+    {
+        var duplicate = capturedProcessIds.Contains(target.ProcessId);
+        var result = duplicate
+            ? MemoryDumpCaptureResult.Skipped(
+                "Process memory dump was already captured earlier in this run.",
+                target.ProcessId,
+                diagnosticStage: "duplicate")
+            : await dumpCapture.CaptureAsync(context.OutputDirectory, target.ProcessId, phaseLabel, cancellationToken).ConfigureAwait(false);
+        if (result.Captured && result.ProcessId is not null)
+        {
+            capturedProcessIds.Add(result.ProcessId.Value);
+        }
+
+        return result.Captured
+            ? CreateCapturedEvent(result, phaseLabel, target, rootProcessId)
+            : CreateSkippedEvent(result, phaseLabel, target, rootProcessId, duplicate);
+    }
+
+    /// <summary>
+    /// Creates a memory_dump.captured event with process-tree metadata.
+    /// </summary>
+    private SandboxEvent CreateCapturedEvent(
+        MemoryDumpCaptureResult result,
+        string phaseLabel,
+        MemoryDumpTarget? target,
+        int? rootProcessId)
+    {
+        var evt = CreateBaseEvent("memory_dump.captured", result, phaseLabel, target, rootProcessId);
+        evt.Data["captureState"] = "captured";
         if (result.SizeBytes is not null)
         {
             evt.Data["sizeBytes"] = result.SizeBytes.Value.ToString(CultureInfo.InvariantCulture);
@@ -95,10 +268,187 @@ internal sealed class MemoryDumpProbe : IGuestProbe
 
         if (!string.IsNullOrWhiteSpace(result.Path))
         {
-            evt.Data["relativePath"] = SafeRelativePath(context.OutputDirectory, result.Path);
+            evt.Data["relativePath"] = SafeRelativePathForEvent(result.Path);
         }
 
-        return [evt];
+        return evt;
+    }
+
+    /// <summary>
+    /// Creates a memory_dump.skipped event with process-tree metadata.
+    /// </summary>
+    private SandboxEvent CreateSkippedEvent(
+        MemoryDumpCaptureResult result,
+        string phaseLabel,
+        MemoryDumpTarget? target,
+        int? rootProcessId,
+        bool duplicate)
+    {
+        var evt = CreateBaseEvent("memory_dump.skipped", result, phaseLabel, target, rootProcessId);
+        evt.Data["captureState"] = "skipped";
+        evt.Data["duplicate"] = duplicate.ToString(CultureInfo.InvariantCulture).ToLowerInvariant();
+        AddOptionalData(evt, "reason", result.Reason);
+        AddOptionalData(evt, "exceptionType", result.ExceptionType);
+        AddOptionalData(evt, "diagnosticStage", result.DiagnosticStage);
+
+        if (result.Win32Error is not null)
+        {
+            evt.Data["win32Error"] = result.Win32Error.Value.ToString(CultureInfo.InvariantCulture);
+        }
+
+        return evt;
+    }
+
+    /// <summary>
+    /// Creates base event fields shared by captured/skipped dump attempts.
+    /// </summary>
+    private static SandboxEvent CreateBaseEvent(
+        string eventType,
+        MemoryDumpCaptureResult result,
+        string phaseLabel,
+        MemoryDumpTarget? target,
+        int? rootProcessId)
+    {
+        var evt = new SandboxEvent
+        {
+            EventType = eventType,
+            Source = "guest",
+            Path = result.Path,
+            ProcessId = result.ProcessId,
+            ProcessName = target?.ProcessName,
+            ParentProcessId = target?.ParentProcessId,
+            CommandLine = target?.Path,
+            Data =
+            {
+                ["phase"] = phaseLabel,
+                ["captureEnabled"] = "true",
+                ["dumpType"] = result.DumpType,
+                ["evidenceRole"] = "memory-dump",
+                ["collectionName"] = "memory-dumps"
+            }
+        };
+
+        if (result.ProcessId is not null)
+        {
+            evt.Data["processId"] = result.ProcessId.Value.ToString(CultureInfo.InvariantCulture);
+        }
+
+        if (rootProcessId is not null)
+        {
+            evt.Data["rootProcessId"] = rootProcessId.Value.ToString(CultureInfo.InvariantCulture);
+        }
+
+        if (target is not null)
+        {
+            evt.Data["processRole"] = target.IsRoot ? "root" : "child";
+            evt.Data["treeDepth"] = target.Depth.ToString(CultureInfo.InvariantCulture);
+            evt.Data["treeLineage"] = target.Lineage;
+            evt.Data["targetProcessName"] = target.ProcessName;
+            AddOptionalData(evt, "targetProcessPath", target.Path);
+            AddOptionalData(evt, "snapshotKey", target.SnapshotKey);
+            if (target.ParentProcessId is not null)
+            {
+                evt.Data["parentProcessId"] = target.ParentProcessId.Value.ToString(CultureInfo.InvariantCulture);
+            }
+        }
+
+        return evt;
+    }
+
+    /// <summary>
+    /// Creates a memory_dump.sweep summary event for final tree capture.
+    /// </summary>
+    private static SandboxEvent CreateSweepEvent(
+        string phaseLabel,
+        int rootProcessId,
+        int visibleTargetCount,
+        int attemptedCount,
+        int capturedCount,
+        int skippedCount,
+        int alreadyCapturedCount)
+    {
+        return new SandboxEvent
+        {
+            EventType = "memory_dump.sweep",
+            Source = "guest",
+            ProcessId = rootProcessId,
+            Data =
+            {
+                ["phase"] = phaseLabel,
+                ["captureEnabled"] = "true",
+                ["captureState"] = "summary",
+                ["dumpType"] = MemoryDumpCaptureResult.MiniDumpTypeName,
+                ["evidenceRole"] = "memory-dump",
+                ["collectionName"] = "memory-dumps",
+                ["rootProcessId"] = rootProcessId.ToString(CultureInfo.InvariantCulture),
+                ["visibleTargetCount"] = visibleTargetCount.ToString(CultureInfo.InvariantCulture),
+                ["attemptedCount"] = attemptedCount.ToString(CultureInfo.InvariantCulture),
+                ["capturedCount"] = capturedCount.ToString(CultureInfo.InvariantCulture),
+                ["skippedCount"] = skippedCount.ToString(CultureInfo.InvariantCulture),
+                ["alreadyCapturedCount"] = alreadyCapturedCount.ToString(CultureInfo.InvariantCulture)
+            }
+        };
+    }
+
+    /// <summary>
+    /// Builds final dump targets from the visible root process tree.
+    /// Inputs are a process snapshot and root PID; processing walks children by
+    /// parent PID even when the root has already exited; the method returns
+    /// deterministic root/child targets.
+    /// </summary>
+    private static IReadOnlyList<MemoryDumpTarget> BuildVisibleDumpTargets(
+        IReadOnlyDictionary<int, ProcessTreeSnapshot> snapshot,
+        int rootProcessId)
+    {
+        var childrenByParent = snapshot.Values
+            .Where(process => process.ParentProcessId is not null)
+            .GroupBy(process => process.ParentProcessId!.Value)
+            .ToDictionary(group => group.Key, group => group.OrderBy(process => process.ProcessId).ToList());
+        var targets = new List<MemoryDumpTarget>();
+        var queue = new Queue<(ProcessTreeSnapshot Process, int Depth, string Lineage, bool IsRoot)>();
+        var visited = new HashSet<int>();
+        if (snapshot.TryGetValue(rootProcessId, out var root))
+        {
+            queue.Enqueue((root, 0, root.ProcessId.ToString(CultureInfo.InvariantCulture), true));
+        }
+        else if (childrenByParent.TryGetValue(rootProcessId, out var orphanedChildren))
+        {
+            foreach (var child in orphanedChildren)
+            {
+                queue.Enqueue((child, 1, $"{rootProcessId.ToString(CultureInfo.InvariantCulture)}>{child.ProcessId.ToString(CultureInfo.InvariantCulture)}", false));
+            }
+        }
+
+        while (queue.Count > 0)
+        {
+            var (process, depth, lineage, isRoot) = queue.Dequeue();
+            if (!visited.Add(process.ProcessId))
+            {
+                continue;
+            }
+
+            targets.Add(new MemoryDumpTarget(
+                process.ProcessId,
+                process.ParentProcessId,
+                process.ProcessName,
+                process.Path,
+                depth,
+                lineage,
+                isRoot,
+                process.Key));
+
+            if (!childrenByParent.TryGetValue(process.ProcessId, out var children))
+            {
+                continue;
+            }
+
+            foreach (var child in children)
+            {
+                queue.Enqueue((child, depth + 1, $"{lineage}>{child.ProcessId.ToString(CultureInfo.InvariantCulture)}", false));
+            }
+        }
+
+        return targets;
     }
 
     private static void AddOptionalData(SandboxEvent evt, string key, string? value)
@@ -131,17 +481,30 @@ internal sealed class MemoryDumpProbe : IGuestProbe
     /// Inputs are output root and artifact path; processing normalizes
     /// separators and falls back to the original path on malformed input.
     /// </summary>
-    private static string SafeRelativePath(string root, string path)
+    private static string SafeRelativePathForEvent(string path)
     {
         try
         {
-            return Path.GetRelativePath(root, path).Replace('\\', '/');
+            var directory = Path.GetDirectoryName(path);
+            return string.IsNullOrWhiteSpace(directory)
+                ? Path.GetFileName(path)
+                : Path.Combine(Path.GetFileName(directory), Path.GetFileName(path)).Replace('\\', '/');
         }
         catch (Exception ex) when (ex is ArgumentException or NotSupportedException)
         {
             return path;
         }
     }
+
+    private sealed record MemoryDumpTarget(
+        int ProcessId,
+        int? ParentProcessId,
+        string ProcessName,
+        string? Path,
+        int Depth,
+        string Lineage,
+        bool IsRoot,
+        string? SnapshotKey);
 }
 
 /// <summary>
@@ -377,5 +740,5 @@ internal sealed record MemoryDumpCaptureResult(
         return new MemoryDumpCaptureResult(false, null, processId, MiniDumpTypeName, null, reason, exceptionType, diagnosticStage, win32Error);
     }
 
-    private const string MiniDumpTypeName = "MiniDumpNormal";
+    public const string MiniDumpTypeName = "MiniDumpNormal";
 }

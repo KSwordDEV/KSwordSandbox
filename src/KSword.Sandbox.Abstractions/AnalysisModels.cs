@@ -41,6 +41,14 @@ public sealed record SandboxSubmission
     public string? GuestPayloadRoot { get; init; }
 
     public bool? UseMockCollector { get; init; }
+
+    public bool? CollectDroppedFiles { get; init; }
+
+    public bool? CaptureScreenshots { get; init; }
+
+    public bool? CaptureMemoryDumps { get; init; }
+
+    public bool? CapturePacketCapture { get; init; }
 }
 
 /// <summary>

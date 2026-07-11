@@ -44,6 +44,13 @@ The root dashboard must keep these operator-facing areas visible and copyable:
 - VM configuration fields that are sent with every dry-run planning request:
   `goldenVmName`, `goldenSnapshotName`, `guestUserName`,
   `guestWorkingDirectory`, `guestPayloadRoot`, and `useMockCollector`;
+- opt-in artifact collection fields that are sent with every dry-run planning
+  request and preserved on the job submission: `collectDroppedFiles`,
+  `captureScreenshots`, `captureMemoryDumps`, and `capturePacketCapture`. These
+  are disabled by default unless explicitly enabled in config or checked in the
+  WebUI, and the runbook forwards them to the Guest Agent as
+  `--collect-dropped-files`, `--screenshot`, `--memory-dump`, and
+  `--packet-capture`;
 - explicit job status, job ID, sample path, recent job list, and guest import
   status;
 - artifact paths for `report.json`, `report.html`, `events.json`,
@@ -64,8 +71,12 @@ The root dashboard must keep these operator-facing areas visible and copyable:
 - upload flow should be one-click for operators: after an `.exe` upload is
   stored and a plan is created, the dashboard automatically opens the dedicated
   dynamic monitor page in a new tab, starts live VM analysis, and switches the
-  progress panel from estimated stages to real runbook step status. If the
-  browser blocks the new tab, the current job card must show an explicit
+  progress panel from estimated stages to real runbook step status. The click
+  handler opens a same-gesture `about:blank` monitor placeholder before the
+  first asynchronous upload/plan `await`, then navigates that existing window to
+  `/jobs/{jobId}/live-events` once the job exists; this reduces popup-blocker
+  failures compared with opening the monitor only after upload completes. If
+  the browser blocks the new tab, the current job card must show an explicit
   bilingual `Enter dynamic monitor` fallback link while keeping the dashboard
   alive for the long-running execute request;
 - VirusTotal official result integration is optional and hash-only. Operators
@@ -79,7 +90,10 @@ The root dashboard must keep these operator-facing areas visible and copyable:
 - a link to a dedicated live raw monitor page / dynamic monitor page that shows
   source files and unclassified raw event rows before final report
   classification. The page should explain that, when opened automatically from
-  upload, the dashboard tab must stay open to continue the analysis request;
+  upload, the dashboard tab must stay open to continue the analysis request.
+  The monitor page also polls `GET /api/jobs/{jobId}/runbook/progress` and shows
+  UI-safe runbook step state, current step, and progress percentage without
+  command lines, `stdout`, or `stderr`;
 - a natural progress-page link to the dedicated execution-flow page for runbook
   step status, available both from the job actions and the progress summary.
   The root dashboard must not inline long runbook PowerShell commands,
@@ -136,6 +150,15 @@ must go through `DashboardHtml.Encode` or `DashboardHtml.Attribute`. When values
 need to be copied from text, badges, cards, or future tables, render them with a
 `data-copy` attribute so the standard context-copy script can handle right-click
 copy behavior consistently.
+
+Sensitive artifact collection controls must stay under an advanced/explicit
+opt-in section. The UI may pre-check them from
+`config.artifactCollection.collectDroppedFiles`,
+`config.artifactCollection.captureScreenshots`,
+`config.artifactCollection.captureMemoryDumps`, and
+`config.artifactCollection.capturePacketCapture`, but operators must be able to
+override them per job before planning. The job card should summarize which
+lanes were requested without implying that artifacts already exist.
 
 When JavaScript renders dynamic table rows, each path or evidence cell should
 either call the local copy-button helper or set `data-copy` to the raw value.

@@ -13,7 +13,9 @@ The stable guest output root is the directory passed with `--out`.
   `before,during,after`; `--screenshot-phases` and `--screenshot-count` can
   narrow stages or capture multiple images per stage.
 - `memory-dumps/*.dmp` is written only when `--memory-dump` or
-  `--memory-dumps` is supplied.
+  `--memory-dumps` is supplied. The current guest agent captures the sample
+  root process early and then performs a final visible root/child process sweep
+  so child processes can also produce dump artifacts.
 - `artifacts/dropped-files/**` is written only when `--collect-dropped-files`
   or `--dropped-files` is supplied.
 - `packet-captures/*.pcapng` is written only when `--packet-capture`, `--pcap`,
@@ -51,14 +53,17 @@ artifact index classify files under `screenshots/` as `kind=Screenshot`,
 ## Memory dump artifacts
 
 Memory dump capture is **off by default** and requires explicit opt-in with
-`--memory-dump` or `--memory-dumps`. The current implementation captures one
-`MiniDumpNormal` for the launched sample process during `after-start` and writes
-it under `memory-dumps/*.dmp`.
+`--memory-dump` or `--memory-dumps`. The current implementation captures a
+`MiniDumpNormal` for the launched sample process during `after-start`, then
+captures any still-visible child processes during an `after-run` process-tree
+sweep. Dump attempts write under `memory-dumps/*.dmp`.
 
 Dump files can contain credentials or document fragments. Host policy should
 enable this option only for jobs where that evidence is required. Capture
-failures emit `memory_dump.skipped`; they do not block event, screenshot, or
-dropped-file artifact writing.
+failures emit `memory_dump.skipped`; they do not block event, screenshot,
+packet-capture, or dropped-file artifact writing. The final
+`memory_dump.sweep` event records visible/attempted/captured/skipped counts so
+missing dump artifacts are explainable.
 
 The guest manifest and host artifact index classify `memory-dumps/**` files as
 `kind=MemoryDump`, `category=memory-dump`, `evidenceRole=memory-dump`, and

@@ -109,7 +109,9 @@ internal sealed class WebUiExperienceContractScenario : ISmokeTestScenario
         RequireContains(dashboard, "showReportReadyNotice", "Dashboard should show a stable report-ready notice after generation or import.");
         RequireContains(dashboard, "setTimeout(() => openReport(jobId)", "Dashboard should auto-open the current-language report after successful live analysis.");
         RequireContains(dashboard, "buildLiveMonitorHref", "Dashboard should build dynamic monitor links from the job id.");
-        RequireContains(dashboard, "openLiveMonitor(String(jobId), true)", "Upload flow should automatically enter the dynamic monitor page after planning.");
+        RequireContains(dashboard, "openLiveMonitorPlaceholder", "Upload flow should open a user-gesture monitor placeholder before async upload work.");
+        RequireContains(dashboard, "window.open('about:blank', '_blank')", "Upload flow should open the placeholder synchronously to avoid popup blocking.");
+        RequireContains(dashboard, "openLiveMonitor(String(jobId), true, monitorWindow)", "Upload flow should navigate the placeholder into the dynamic monitor after planning.");
         RequireContains(dashboard, "showLiveMonitorNotice", "Dashboard should render a bilingual fallback when automatic monitor opening is blocked.");
         RequireContains(dashboard, "window.open(href, '_blank')", "Automatic dynamic monitor entry should keep the dashboard tab alive by opening a separate tab.");
         RequireAnyContains(
@@ -168,6 +170,13 @@ internal sealed class WebUiExperienceContractScenario : ISmokeTestScenario
         RequireContains(liveEventsPage, "/virustotal", "Live monitor should fetch the per-job VirusTotal lookup endpoint.");
         RequireContains(liveEventsPage, "VirusTotal 官方结果", "Live monitor should display a VirusTotal result card.");
         RequireContains(liveEventsPage, "不上传样本", "Live monitor should state that VirusTotal integration does not upload samples.");
+        RequireContains(liveEventsPage, "/runbook/progress", "Live monitor should poll the real runbook progress endpoint.");
+        RequireContains(liveEventsPage, "虚拟机分析进度", "Live monitor should display a runbook progress panel.");
+        RequireContains(liveEventsPage, "Runbook progress", "Live monitor runbook progress panel should be bilingual.");
+        RequireContains(liveEventsPage, "startRunbookProgressPolling", "Live monitor should start runbook progress polling automatically.");
+        RequireContains(liveEventsPage, "renderRunbookProgress", "Live monitor should render UI-safe runbook step snapshots.");
+        RequireContains(liveEventsPage, "不展示命令行", "Live monitor progress panel should hide command-line details.");
+        RequireContains(liveEventsPage, "not command lines, stdout, or stderr", "Live monitor progress panel should hide stdout/stderr details.");
         RequireContains(liveEventsPage, "如果此页由上传流程自动打开", "Live monitor should explain the automatic upload-flow opening behavior.");
         RequireContains(liveEventsPage, "keep the dashboard tab running analysis", "Live monitor should have an English hint to keep the dashboard request alive.");
         RequireContains(settingsPage, "VirusTotal API Key", "Settings page should allow operators to set the VirusTotal API key.");

@@ -87,9 +87,10 @@ public sealed class SandboxJobService
 
         var sample = SampleHasher.Compute(normalizedSubmission.SamplePath, config.Analysis.MaxSampleBytes);
         var staticAnalysis = AnalyzeSample(sample);
-        var runbook = runbookBuilder.Build(BuildJobConfig(normalizedSubmission, duration), jobId, sample);
+        var jobConfig = BuildJobConfig(normalizedSubmission, duration);
+        var runbook = runbookBuilder.Build(jobConfig, jobId, sample);
 
-        var seedEvents = CreatePlanningEvents(sample, normalizedSubmission, runbook, staticAnalysis);
+        var seedEvents = CreatePlanningEvents(sample, normalizedSubmission, runbook, staticAnalysis, jobConfig.ArtifactCollection);
         var findings = ruleEngine.Classify(seedEvents);
         var report = new AnalysisReport
         {
@@ -319,7 +320,8 @@ public sealed class SandboxJobService
         Directory.CreateDirectory(jobRoot);
 
         var staticAnalysis = LoadExistingReport(job.JsonReportPath)?.StaticAnalysis ?? AnalyzeSample(sample);
-        var events = CreatePlanningEvents(sample, job.Submission, runbook, staticAnalysis);
+        var jobConfig = BuildJobConfig(job.Submission, job.Submission.DurationSeconds);
+        var events = CreatePlanningEvents(sample, job.Submission, runbook, staticAnalysis, jobConfig.ArtifactCollection);
         AppendRunbookExecutionEvent(events, job.RunbookExecutionResultPath);
         events.AddRange(guestEvents.Select(NormalizeEvent));
         AppendGuestImportEvent(events, guestEventsPath, guestEvents.Count);
@@ -841,6 +843,13 @@ public sealed class SandboxJobService
             {
                 UseMockCollector = submission.UseMockCollector ?? config.Driver.UseMockCollector
             },
+            ArtifactCollection = config.ArtifactCollection with
+            {
+                CollectDroppedFiles = submission.CollectDroppedFiles ?? config.ArtifactCollection.CollectDroppedFiles,
+                CaptureScreenshots = submission.CaptureScreenshots ?? config.ArtifactCollection.CaptureScreenshots,
+                CaptureMemoryDumps = submission.CaptureMemoryDumps ?? config.ArtifactCollection.CaptureMemoryDumps,
+                CapturePacketCapture = submission.CapturePacketCapture ?? config.ArtifactCollection.CapturePacketCapture
+            },
             Analysis = config.Analysis with { DefaultDurationSeconds = duration }
         };
     }
@@ -855,7 +864,7 @@ public sealed class SandboxJobService
     /// Inputs are sample metadata, submission, and runbook; processing creates
     /// normalized host events; the method returns the event list.
     /// </summary>
-    private static List<SandboxEvent> CreatePlanningEvents(SampleIdentity sample, SandboxSubmission submission, SandboxRunbook runbook, StaticAnalysisResult staticAnalysis)
+    private static List<SandboxEvent> CreatePlanningEvents(SampleIdentity sample, SandboxSubmission submission, SandboxRunbook runbook, StaticAnalysisResult staticAnalysis, ArtifactCollectionConfig artifactCollection)
     {
         return
         [
@@ -871,7 +880,15 @@ public sealed class SandboxJobService
                     ["sha1"] = sample.Sha1,
                     ["md5"] = sample.Md5,
                     ["crc32"] = sample.Crc32,
-                    ["sizeBytes"] = sample.SizeBytes.ToString()
+                    ["sizeBytes"] = sample.SizeBytes.ToString(),
+                    ["collectDroppedFiles"] = artifactCollection.CollectDroppedFiles.ToString(),
+                    ["captureScreenshots"] = artifactCollection.CaptureScreenshots.ToString(),
+                    ["captureMemoryDumps"] = artifactCollection.CaptureMemoryDumps.ToString(),
+                    ["capturePacketCapture"] = artifactCollection.CapturePacketCapture.ToString(),
+                    ["collectDroppedFilesOverride"] = FormatNullableBool(submission.CollectDroppedFiles),
+                    ["captureScreenshotsOverride"] = FormatNullableBool(submission.CaptureScreenshots),
+                    ["captureMemoryDumpsOverride"] = FormatNullableBool(submission.CaptureMemoryDumps),
+                    ["capturePacketCaptureOverride"] = FormatNullableBool(submission.CapturePacketCapture)
                 }
             },
             new SandboxEvent
@@ -900,6 +917,16 @@ public sealed class SandboxJobService
                 }
             }
         ];
+    }
+
+    /// <summary>
+    /// Formats optional per-job collection overrides for planning evidence.
+    /// Inputs are nullable boolean submission values; processing preserves
+    /// unset/null as "config-default"; the method returns display metadata.
+    /// </summary>
+    private static string FormatNullableBool(bool? value)
+    {
+        return value.HasValue ? value.Value.ToString() : "config-default";
     }
 
     /// <summary>

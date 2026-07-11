@@ -47,15 +47,32 @@ Presence flags distinguish absent values from zero-valued metadata:
 `guest/KSword.Sandbox.R0Collector` parses network payloads into string-valued JSON `data` fields, including:
 
 - `protocolName`
+- `transportProtocol`
 - `directionName`
 - `addressFamilyName`
 - `localAddress` / `remoteAddress` when decodable
 - `localAddressHex` / `remoteAddressHex`
 - `localPort` / `remotePort`
+- `localEndpoint` / `remoteEndpoint`
+- `sourceEndpoint` / `destinationEndpoint`
+- `flowKey`
+- `servicePort`
+- `serviceHint` and `semanticCandidate`
+- `dnsCandidate`, `httpCandidate`, and `tlsCandidate`
 - `processIdPresent`
 - `flowHandleHex`
 - `transportEndpointHandleHex`
 - `filterIdHex`
+
+`serviceHint` is a lightweight port/protocol semantic label (`dns`, `http`,
+`tls`, `web`, or `unknown`). It does not parse packet payloads; DNS query names,
+HTTP methods/hosts/URIs, and TLS SNI continue to come from imported PCAP events.
+The shared `flowKey` / endpoint fields are intended to let reports group R0
+WFP metadata with `pcap.flow`, `pcap.dns`, `pcap.http`, and `pcap.tls` rows.
+
+When the remote endpoint is decoded, top-level `SandboxEvent.path` is now a
+URI-like string such as `tcp://203.0.113.10:443` instead of only
+`\\.\KSwordSandboxDriver`, improving the live monitor and report path columns.
 
 The opaque `payloadHex` fallback remains present on every driver event for low-level diagnosis.
 
@@ -128,6 +145,9 @@ Expected network evidence in the JSONL `data` object:
 
 - `typedPayloadKind` is `network`.
 - `protocolName` is usually `tcp` for the `Test-NetConnection` smoke.
+- `serviceHint` is usually `tls` for port 443 traffic.
+- `flowKey`, `sourceEndpoint`, and `destinationEndpoint` are present when
+  addresses are decoded.
 - `directionName` is `outbound` for connect authorization events.
 - `addressFamilyName` is `ipv4` or `ipv6`.
 - `remoteAddress`, `remotePort`, `layerIdHex`, `calloutIdHex`, and

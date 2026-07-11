@@ -31,6 +31,7 @@ internal sealed class R0RuntimeReadinessScenario : ISmokeTestScenario
         RequireContains(script, "DrainWithCollector", "R0Collector drain must be opt-in.");
         RequireContains(script, "IOCTL_KSWORD_SANDBOX_GET_HEALTH", "Script should name the health IOCTL it probes.");
         RequireContains(script, "R0 capability/status IOCTL static contract", "Script should statically check negotiated R0 IOCTL readiness.");
+        RequireContains(script, "R0Collector event-quality static contract", "Script should statically check mock/stress/noise readiness.");
         RequireContains(script, "Invoke-R0CollectorAbiSelfCheck", "Script should run the no-device R0Collector ABI self-check in readiness.");
         RequireContains(script, "R0Collector ABI self-check", "Script should emit a dedicated ABI self-check readiness row.");
         RequireContains(script, "--abi-self-check", "Script should invoke the collector no-device ABI self-check mode.");
@@ -47,6 +48,14 @@ internal sealed class R0RuntimeReadinessScenario : ISmokeTestScenario
         RequireContains(script, "r0collector.driverCapabilities", "Script should validate collector capabilities rows in drain output.");
         RequireContains(script, "r0collector.driverStatus", "Script should validate collector status rows in drain output.");
         RequireContains(script, "r0collector.driverProducerMask", "Script should document producer-mask row coverage.");
+        RequireContains(script, "StressJsonlExpectedDriverRows", "Script should surface stress JSONL row-count evidence.");
+        RequireContains(script, "StressJsonlSequenceStart", "Script should surface stress sequence start evidence.");
+        RequireContains(script, "StressJsonlSequenceEnd", "Script should surface stress sequence end evidence.");
+        RequireContains(script, "StressJsonlSequenceGapCount", "Script should surface stress sequence gap evidence.");
+        RequireContains(script, "StressJsonlLossEvidence", "Script should surface stress loss evidence fields.");
+        RequireContains(script, "StressJsonlBackpressureEvidence", "Script should surface stress backpressure evidence fields.");
+        RequireContains(script, "ReadinessNoDevicePolicy", "Script should surface the default no-device readiness policy.");
+        RequireContains(script, "ReadinessNonFatalPolicy", "Script should surface the non-fatal readiness policy.");
         RequireContains(script, "DefaultModeSafe", "Script summary should identify default safe mode.");
 
         RequireContains(signingDoc, "bcdedit /set testsigning on", "Signing doc should describe test-signing enablement.");
@@ -79,6 +88,13 @@ internal sealed class R0RuntimeReadinessScenario : ISmokeTestScenario
         RequireContains(collectorDoc, "CollectorAbiSelfCheckOutputPath", "Collector doc should document the ABI self-check output path.");
         RequireContains(collectorDoc, "one-shot drain", "Collector doc should describe one-shot drain validation.");
         RequireContains(collectorDoc, "--duration 0", "Collector doc should show one-shot collector mode.");
+        RequireContains(collectorDoc, "R0Collector stress/readiness operator gate", "Collector doc should define the stress/readiness operator gate.");
+        RequireContains(collectorDoc, "StressJsonlExpectedDriverRows", "Collector doc should document stress row-count evidence.");
+        RequireContains(collectorDoc, "StressJsonlSequenceGapCount", "Collector doc should document stress sequence-gap evidence.");
+        RequireContains(collectorDoc, "StressJsonlLossEvidence", "Collector doc should document loss evidence fields.");
+        RequireContains(collectorDoc, "StressJsonlBackpressureEvidence", "Collector doc should document backpressure evidence fields.");
+        RequireContains(collectorDoc, "ReadinessNoDevicePolicy", "Collector doc should document the no-device readiness policy.");
+        RequireContains(collectorDoc, "ReadinessNonFatalPolicy", "Collector doc should document the non-fatal readiness policy.");
         RequireContains(networkDoc, "Runtime validation gate", "Network doc should include runtime validation gate.");
         RequireContains(networkDoc, "Test-NetConnection", "Network doc should include a controlled traffic smoke.");
         RequireContains(driverReadme, "Runtime validation preflight", "Driver README should point operators at the preflight script.");

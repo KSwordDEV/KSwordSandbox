@@ -155,16 +155,19 @@ value-type, value-size, and bounded key/value names.
 Network events use `KSWORD_SANDBOX_NETWORK_EVENT_PAYLOAD` from the WFP/ALE
 producer.  R0Collector now parses `protocolName`, `directionName`,
 `addressFamilyName`, `localAddress`, `remoteAddress`, `localPort`,
-`remotePort`, `processIdPresent`, `flowHandleHex`,
-`transportEndpointHandleHex`, `layerIdHex`, `calloutIdHex`, and `filterIdHex`.
-Address bytes are also retained as `localAddressHex` and `remoteAddressHex` for
-diagnosis.
+`remotePort`, `localEndpoint`, `remoteEndpoint`, `sourceEndpoint`,
+`destinationEndpoint`, `flowKey`, `transportProtocol`, `servicePort`,
+`serviceHint`, `semanticCandidate`, DNS/HTTP/TLS candidate booleans,
+`processIdPresent`, `flowHandleHex`, `transportEndpointHandleHex`,
+`layerIdHex`, `calloutIdHex`, and `filterIdHex`. Address bytes are also
+retained as `localAddressHex` and `remoteAddressHex` for diagnosis.
 
 When a file/process/image/registry payload carries a bounded subject path, the
 top-level `SandboxEvent.path` is set to that subject path so the WebUI live
 monitor and HTML report show the relevant object instead of only
-`\\.\KSwordSandboxDriver`.  Network events currently keep the device path as the
-top-level path and put endpoint details under `data`.
+`\\.\KSwordSandboxDriver`.  Network events use a URI-like top-level path such as
+`tcp://203.0.113.10:443` when the remote endpoint is decoded, while full
+endpoint and flow correlation details stay under `data`.
 
 ## CLI contract
 
@@ -210,6 +213,16 @@ Supported options:
   driver device.
 - `--synthetic`: alias for `--mock`.
 - `--self-test`: alias for `--mock`; intended for quick operator checks.
+- `--stress-count <n>`: emit `n` contiguous synthetic `driver.file` rows with
+  `stress=true`, `sequence`, `StressJsonlExpectedDriverRows`,
+  `StressJsonlSequenceStart`, `StressJsonlSequenceEnd`,
+  `StressJsonlSequenceGapCount`, loss evidence, and backpressure evidence. This
+  option implies `--mock`, never opens the driver, and is intended to move the
+  event-quality/stress corpus into the shipped collector binary instead of only
+  C# fixtures.
+- `--inject-jsonl-noise`: in mock/stress mode, append a blank line, malformed
+  JSON row, and valid row with an ignored extra top-level field. This proves the
+  Host live/import path can tolerate partial JSONL without hiding valid rows.
 
 Device-unavailable behavior is explicit: the collector writes
 `r0collector.deviceUnavailable` to the selected JSONL sink and exits with code
@@ -224,6 +237,25 @@ KSword.Sandbox.R0Collector.exe `
   --enable-mask 0x3 `
   --out -
 ```
+
+Quick event-quality stress without a driver:
+
+```powershell
+KSword.Sandbox.R0Collector.exe `
+  --stress-count 32 `
+  --inject-jsonl-noise `
+  --heartbeat `
+  --out C:\Sandbox\r0collector-stress.jsonl
+```
+
+Expected stress evidence:
+
+- 32 `driver.file` rows with `stress=true`.
+- `sequence` range `1200..1231` and `StressJsonlSequenceGapCount=0`.
+- loss/backpressure fields such as `totalEventsDropped`, `queueHighWatermark`,
+  `readEventsMaxEvents`, and `maxReadBatches`.
+- one blank line, one malformed JSON row, and one valid extra-field row when
+  `--inject-jsonl-noise` is supplied.
 
 ## ABI self-check mode
 
@@ -442,14 +474,71 @@ Required synthetic coverage:
   expected in the corpus. Import keeps malformed rows as `driver.parse_error`;
   live display skips or defers bad partial rows without dropping valid rows.
 - Mock/stress inputs: use `--self-test`, `--synthetic`, `--mock`,
-  `--abi-self-check`, `--max-events`, `--max-read-batches`, `--duration 0`,
-  `--poll-ms`, and `--heartbeat` to exercise bounded drains, no-device ABI
-  evidence, and heartbeat evidence.
+  `--stress-count`, `--inject-jsonl-noise`, `--abi-self-check`,
+  `--max-events`, `--max-read-batches`, `--duration 0`, `--poll-ms`, and
+  `--heartbeat` to exercise bounded drains, no-device ABI evidence, JSONL
+  tolerance, sequence continuity, and heartbeat evidence.
 
 Backpressure is intentionally non-blocking. Kernel producers should not wait on
 collector throughput. If the fixed ring overflows, the oldest unread records can
 be overwritten and the collector must surface the loss through
 `TotalEventsDropped`, `EventsDropped`, `NextSequence`, and `sequence` gaps.
+
+## R0Collector stress/readiness operator gate
+
+The R0 readiness gate is deliberately split into no-device checks and live-VM
+checks.  The default gate must remain safe for developer laptops and CI: it does
+not call `CSignTool`, does not load or unload the service, does not mutate SCM
+state, and does not open `\\.\KSwordSandboxDriver`.  Live device, collector
+health, and one-shot drain checks require explicit operator switches after the
+driver has already been installed and started in an isolated VM.
+
+Required no-device gate evidence:
+
+- `R0 capability/status IOCTL static contract`: source/docs-only row proving the
+  negotiated IOCTL names, collector JSONL rows, and non-fatal optional-IOCTL
+  strategy are still documented.
+- `R0Collector event-quality static contract`: source/docs-only row proving the
+  mock/stress/noise/backpressure contract is present before any driver load.
+- `R0Collector ABI self-check`: optional runtime row produced with
+  `--abi-self-check --out <CollectorAbiSelfCheckOutputPath>`.  Missing,
+  unsigned, or policy-blocked collector execution is a `Warning` and a
+  non-fatal readiness gap, not a hard stop for the rest of the static output.
+
+The operator gate treats the following synthetic stress fields as named
+contract evidence.  The exact values can change per scenario, but the names must
+stay stable in docs, the readiness script, and smoke tests:
+
+- `StressJsonlExpectedDriverRows`: expected number of generated driver stress
+  rows in the mock JSONL corpus.  The current smoke corpus expects 32
+  `driver.file` rows.
+- `StressJsonlSequenceStart` and `StressJsonlSequenceEnd`: first and last
+  driver `sequence` values used to prove the corpus has a bounded expected
+  sequence range.
+- `StressJsonlSequenceGapCount`: expected gap count inside the synthetic stress
+  corpus.  It should be `0` for the clean mock corpus; live VM drains can report
+  non-zero gaps when queue-loss counters also prove overflow.
+- `StressJsonlLossEvidence`: the loss fields that must be preserved in JSONL:
+  `TotalEventsDropped`, `totalEventsDropped`, `EventsDropped`,
+  `eventsDropped`, `NextSequence`, `nextSequence`, and per-driver-row
+  `sequence`.
+- `StressJsonlBackpressureEvidence`: the queue-pressure fields that prove
+  non-blocking behavior: `QueueCapacity`, `queueCapacity`,
+  `QueueHighWatermark`, `queueHighWatermark`, `drainStoppedAtBatchLimit`,
+  `requestedMaxEvents`, `readEventsMaxEvents`, and `maxReadBatches`.
+- `ReadinessNoDevicePolicy`: default readiness emits only static/no-device
+  evidence and must set `OpensDevice=false`, `LoadsDriver=false`, and
+  `CallsCSignTool=false` for the ABI self-check row.
+- `ReadinessNonFatalPolicy`: endpoint policy blocks, missing local collector
+  binaries, and incomplete ABI self-check JSONL are warnings unless the operator
+  requested a live device or live drain check.
+
+When a live VM drain is explicitly requested, the readiness output should record
+the JSONL output path, non-blank line count, event types, parse-error count,
+driver row count, sequence first/last/gap evidence, and any observed loss or
+backpressure fields.  A pass requires parseable JSONL plus the documented
+health/capabilities/status/poll/read-events rows; a stress-readiness report is
+not allowed to hide malformed rows, loss counters, or backpressure indicators.
 
 ## Guest Agent integration
 

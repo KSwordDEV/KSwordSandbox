@@ -91,10 +91,12 @@ throwing for expected launch/exit failures.
   in headless sessions. Skipped events include the failing capture stage and
   Win32 error code when available.
 - `MemoryDumpProbe` is opt-in through `--memory-dump` / `--memory-dumps`. The
-  default `WindowsMiniDumpCapture` writes one `MiniDumpNormal` file for the
-  launched sample root PID during `AfterStart`; it skips non-Windows, exited, or
-  inaccessible targets and emits `memory_dump.skipped` rather than failing the
-  run.
+  default `WindowsMiniDumpCapture` writes `MiniDumpNormal` files. It captures
+  the launched sample root PID during `AfterStart`, then reuses
+  `ProcessSnapshotProvider` during `AfterRun` to walk visible root/child
+  processes, skip already-captured PIDs, and emit `memory_dump.sweep` summary
+  evidence. Non-Windows, exited, or inaccessible targets emit
+  `memory_dump.skipped` rather than failing the run.
 - `PacketCaptureProbe` is opt-in through `--packet-capture` / `--pcap` /
   `--network-capture`. On Windows it uses bounded `pktmon.exe start`, `pktmon.exe
   stop`, and `pktmon.exe etl2pcap` commands to write
