@@ -38,10 +38,14 @@ public sealed class HtmlReportRenderer
     private const int ArtifactPreviewCharacterLimit = 12_000;
     private const int TimelineEventInlineLimit = 120;
     private const int TimelineGroupEventInlineLimit = 12;
-    private const int EventTableInlineLimit = 250;
+    private const int EventTableInlineLimit = 80;
     private const int StaticStringInlineLimit = 200;
-    private const int RawEventInlineLimit = 200;
+    private const int RawEventInlineLimit = 100;
     private const int RawEventPageSize = 50;
+    private const int EventCompactFieldInlineLimit = 28;
+    private const int EventCompactFieldValueLimit = 220;
+    private const int FindingEvidenceDataPairLimit = 16;
+    private const int FindingEvidenceValueLimit = 180;
 
     private sealed record TimelineGroup(
         string Window,
@@ -493,7 +497,9 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
         var hidden = Math.Max(0, evidence.Count - topEvidence.Count);
         var summary = $"{evidence.Count} evidence events";
         var compact = string.Join(Environment.NewLine, topEvidence.Select(EventOneLine));
-        var full = string.Join(Environment.NewLine + Environment.NewLine, topEvidence.Select(EventToPlainText));
+        var full = string.Join(
+            Environment.NewLine + Environment.NewLine,
+            topEvidence.Select(evt => EventToBoundedPlainText(evt, FindingEvidenceDataPairLimit, FindingEvidenceValueLimit)));
         if (hidden > 0)
         {
             compact += Environment.NewLine + $"... {hidden} more evidence events hidden in raw events/report.json";
@@ -503,7 +509,7 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
         return
             $"<div class=\"toolbar\">{CopyButton("Copy behavior evidence", full)}</div>" +
             $"<span class=\"chip chip-info copyable\" data-copy=\"{A(summary)}\">{E(summary)}</span>" +
-            $"<details><summary>Top evidence</summary><pre class=\"copyable\" data-copy=\"{A(full)}\">{E(compact)}</pre></details>";
+            $"<details><summary>Top evidence summary</summary><pre class=\"copyable\" data-copy=\"{A(full)}\">{E(compact)}</pre></details>";
     }
 
     /// <summary>
@@ -1733,7 +1739,7 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
         html.AppendLine("<table class=\"event-table\"><thead><tr><th>Time</th><th>Type</th><th>Source</th><th>Process</th><th>Path / Command</th><th>Data</th></tr></thead><tbody>");
         foreach (var evt in inlineEvents)
         {
-            var plain = EventToPlainText(evt);
+            var plain = EventToBoundedPlainText(evt, maxDataPairs: 40, maxValueLength: 300);
             var relatedArtifacts = FindRelatedArtifacts(evt, artifactLookup, artifacts);
             html.AppendLine("<tr>");
             html.AppendLine($"<td class=\"copyable\" data-copy=\"{A(evt.Timestamp.ToString("u"))}\">{E(evt.Timestamp.ToString("u"))}</td>");
@@ -3923,7 +3929,7 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
         }
 
         var html = new StringBuilder();
-        html.Append($"<details class=\"event-evidence-fields\" data-copy=\"{A(EventToPlainText(evt))}\"><summary>Evidence fields</summary>");
+        html.Append($"<details class=\"event-evidence-fields\" data-copy=\"{A(EventToBoundedPlainText(evt, maxDataPairs: 40, maxValueLength: 300))}\"><summary>Evidence fields</summary>");
         if (compactFields.Count == 0 && technicalFields.Count == 0)
         {
             html.Append("<pre>-</pre>");
@@ -3932,11 +3938,22 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
         {
             if (compactFields.Count > 0)
             {
+                var inlineCompactFields = compactFields
+                    .Take(EventCompactFieldInlineLimit)
+                    .ToList();
+                var hiddenCompactFields = Math.Max(0, compactFields.Count - inlineCompactFields.Count);
+
                 html.Append("<ul class=\"raw-field-list\">");
-                foreach (var pair in compactFields)
+                foreach (var pair in inlineCompactFields)
                 {
                     var copy = $"{pair.Key}={pair.Value}";
-                    html.Append($"<li><code class=\"copyable\" data-copy=\"{A(copy)}\">{E(pair.Key)}={E(pair.Value)}</code></li>");
+                    var displayValue = FormatBoundedEvidenceFieldValue(pair.Key, pair.Value, EventCompactFieldValueLimit);
+                    html.Append($"<li><code class=\"copyable\" data-copy=\"{A(copy)}\">{E(pair.Key)}={E(displayValue)}</code></li>");
+                }
+
+                if (hiddenCompactFields > 0)
+                {
+                    html.Append($"<li><span class=\"muted\">... {E(hiddenCompactFields.ToString())} additional fields hidden; open report.json/events.json for the full record.</span></li>");
                 }
 
                 html.Append("</ul>");
@@ -3947,8 +3964,9 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
                 html.Append($"<details class=\"raw-technical-fields\"><summary>Command/stdout/stderr/PowerShell fields hidden by default ({technicalFields.Count})</summary>");
                 foreach (var field in technicalFields)
                 {
-                    var copy = $"{field.Label}={field.Value}";
-                    html.Append($"<details class=\"raw-technical-field\"><summary>Hidden technical field: {E(field.Label)} ({E(field.Value.Length.ToString())} chars)</summary><pre class=\"copyable\" data-copy=\"{A(copy)}\">{E(copy)}</pre></details>");
+                    var boundedValue = FormatBoundedEvidenceFieldValue(field.Label, field.Value, 1_200);
+                    var copy = $"{field.Label}={boundedValue}";
+                    html.Append($"<details class=\"raw-technical-field\"><summary>Hidden technical field summary: {E(field.Label)} ({E(field.Value.Length.ToString())} chars)</summary><pre class=\"copyable\" data-copy=\"{A(copy)}\">{E(copy)}</pre></details>");
                 }
 
                 html.Append("</details>");
@@ -3977,8 +3995,25 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
             normalizedKey.Contains("powershell", StringComparison.OrdinalIgnoreCase) ||
             normalizedKey.Contains("scriptblock", StringComparison.OrdinalIgnoreCase) ||
             normalizedKey.Contains("encodedcommand", StringComparison.OrdinalIgnoreCase) ||
+            IsBulkyEvidenceFieldKey(key) ||
             (value.Length > 80 && value.Contains("powershell", StringComparison.OrdinalIgnoreCase)) ||
             value.Length > 500;
+    }
+
+    private static bool IsBulkyEvidenceFieldKey(string key)
+    {
+        var normalizedKey = key.Replace("_", string.Empty, StringComparison.Ordinal)
+            .Replace("-", string.Empty, StringComparison.Ordinal)
+            .Replace(".", string.Empty, StringComparison.Ordinal);
+        return string.Equals(key, "tags", StringComparison.OrdinalIgnoreCase) ||
+            normalizedKey.Contains("interestingstrings", StringComparison.OrdinalIgnoreCase) ||
+            normalizedKey.Contains("imports", StringComparison.OrdinalIgnoreCase) ||
+            normalizedKey.Contains("exports", StringComparison.OrdinalIgnoreCase) ||
+            normalizedKey.Contains("sections", StringComparison.OrdinalIgnoreCase) ||
+            normalizedKey.Contains("resources", StringComparison.OrdinalIgnoreCase) ||
+            normalizedKey.Contains("warnings", StringComparison.OrdinalIgnoreCase) ||
+            normalizedKey.Contains("urls", StringComparison.OrdinalIgnoreCase) ||
+            normalizedKey.Contains("strings", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>
@@ -4340,6 +4375,34 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
     }
 
     /// <summary>
+    /// Converts event data to a bounded evidence block for finding summaries.
+    /// Inputs are one event and size caps; processing keeps high-signal fields
+    /// while truncating bulky static/r0 dictionaries; the method returns
+    /// clipboard-friendly but report-size-safe text.
+    /// </summary>
+    private static string EventDataToBoundedText(SandboxEvent evt, int maxPairs, int maxValueLength)
+    {
+        if (evt.Data.Count == 0)
+        {
+            return "-";
+        }
+
+        var pairs = evt.Data
+            .OrderBy(pair => BulkyEvidenceFieldRank(pair.Key))
+            .ThenBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase)
+            .Take(maxPairs)
+            .Select(pair => $"{pair.Key}={FormatBoundedEvidenceFieldValue(pair.Key, pair.Value, maxValueLength)}")
+            .ToList();
+        var hidden = Math.Max(0, evt.Data.Count - pairs.Count);
+        if (hidden > 0)
+        {
+            pairs.Add($"__omittedDataPairs={hidden}");
+        }
+
+        return string.Join(Environment.NewLine, pairs);
+    }
+
+    /// <summary>
     /// Converts a normalized event to a one-block evidence string.
     /// Inputs are one event, processing concatenates common and data fields,
     /// and the method returns clipboard-friendly evidence text.
@@ -4357,6 +4420,59 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
         builder.AppendLine($"commandLine={evt.CommandLine ?? "-"}");
         builder.Append(EventDataToText(evt));
         return builder.ToString();
+    }
+
+    private static string EventToBoundedPlainText(SandboxEvent evt, int maxDataPairs, int maxValueLength)
+    {
+        var builder = new StringBuilder();
+        builder.AppendLine($"time={evt.Timestamp:u}");
+        builder.AppendLine($"type={evt.EventType}");
+        builder.AppendLine($"source={evt.Source}");
+        builder.AppendLine($"process={evt.ProcessName ?? "-"}");
+        builder.AppendLine($"pid={evt.ProcessId?.ToString() ?? "-"}");
+        builder.AppendLine($"ppid={evt.ParentProcessId?.ToString() ?? "-"}");
+        builder.AppendLine($"path={evt.Path ?? "-"}");
+        builder.AppendLine($"commandLine={AbbreviateEvidenceValue(evt.CommandLine ?? "-", maxValueLength)}");
+        builder.Append(EventDataToBoundedText(evt, maxDataPairs, maxValueLength));
+        return builder.ToString();
+    }
+
+    private static int BulkyEvidenceFieldRank(string key)
+    {
+        return IsBulkyEvidenceFieldKey(key) ? 1 : 0;
+    }
+
+    private static string FormatBoundedEvidenceFieldValue(string key, string value, int maxLength)
+    {
+        if (!IsBulkyEvidenceFieldKey(key))
+        {
+            return AbbreviateEvidenceValue(value, maxLength);
+        }
+
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return value;
+        }
+
+        var itemCount = value
+            .Split([',', ';', '\n', '\r'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Length;
+        var preview = value
+            .Split([',', ';', '\n', '\r'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Take(5)
+            .ToList();
+        var previewText = preview.Count == 0 ? string.Empty : " preview=" + string.Join(", ", preview);
+        return $"<{key} list: {itemCount} item(s), {value.Length} chars>{AbbreviateEvidenceValue(previewText, Math.Min(maxLength, 120))}";
+    }
+
+    private static string AbbreviateEvidenceValue(string value, int maxLength)
+    {
+        if (string.IsNullOrEmpty(value) || value.Length <= maxLength)
+        {
+            return value;
+        }
+
+        return value[..Math.Max(0, maxLength)] + $"…<truncated {value.Length - maxLength} chars>";
     }
 
     /// <summary>
