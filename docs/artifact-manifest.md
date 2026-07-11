@@ -75,7 +75,12 @@ the guest output root, including `artifacts/dropped-files/**`, `screenshots/**`,
 `memory-dumps/**`, `driver-events.jsonl`, R0 diagnostic logs, and future
 `packet-captures/**` files if a later collector produces them. It does not
 start a PCAP collector today; `PacketCapture` is represented by a collection
-placeholder and optional future import path.
+placeholder and optional import path. If another tool has already placed a
+`.pcap` or `.pcapng` under the guest output root and the manifest references it,
+the host reader treats that file as externally supplied evidence and fills
+`kind=PacketCapture`, `category=packet-capture`, `mimeType`, `sizeBytes`,
+`sha256` / `hashes.sha256`, `evidenceRole=packet-capture`, and
+`collectionName=packet-captures` without starting packet capture itself.
 
 ## Host artifact index
 
@@ -87,6 +92,7 @@ The host writes `artifact-index.json` in the job root. The file is a
 - `rootPath`
 - `producer`
 - `generatedAtUtc`
+- `collections`
 - `artifacts`
 
 The host index scans known job artifacts under the job root and records safe
@@ -100,8 +106,22 @@ relative links for:
 - `artifacts/manifest.json`
 - `screenshots/*`
 - `memory-dumps/*`
-- future `packet-captures/*.pcap` / `packet-captures/*.pcapng`
+- external `packet-captures/*.pcap` / `packet-captures/*.pcapng` files
 - dropped files under `artifacts/dropped-files/*`
+
+The scan also classifies any discovered `.pcap` or `.pcapng` file as
+`PacketCapture` even when it was generated outside KSwordSandbox. Packet capture
+descriptors include deterministic MIME (`application/vnd.tcpdump.pcap` or
+`application/x-pcapng`), byte size, SHA-256, safe relative import path, and
+metadata such as `captureSource=external`, `hostCaptureStarted=false`,
+`importMode=external-artifact`, and `collectionName=packet-captures`.
+
+`HostArtifactIndex.collections` summarizes discovered lanes. For an external
+PCAP collection the host records `name=packet-captures`, `kind=PacketCapture`,
+`status=captured`, `implemented=true` for import/report consumption, and
+metadata such as artifact count, total bytes, MIME types, and
+`external-pcap-artifacts-indexed`. This means the host can consume externally
+generated packet captures, but it still does not run a packet sniffer.
 
 The HTML report consumes this index when available. If no index has been
 provided, it still exposes artifact paths inferred from report events, but only
@@ -118,10 +138,10 @@ operators need to open from the local job folder:
 - `screenshots/*`
 - dropped files under `artifacts/dropped-files/*`
 
-Memory dumps and future packet captures are indexed by `artifact-index.json`
-with `kind=MemoryDump` / `kind=PacketCapture`; the current HTML artifact-link
-section focuses on events, driver JSONL, manifests, screenshots, and dropped
-files.
+Memory dumps and externally supplied packet captures are indexed by
+`artifact-index.json` with `kind=MemoryDump` / `kind=PacketCapture`; the current
+HTML artifact-link section focuses on events, driver JSONL, manifests,
+screenshots, and dropped files.
 
 Each artifact row includes the safe relative link, kind/category, size, MIME,
 SHA-256, and a collapsible **Artifact evidence** block. Text evidence artifacts

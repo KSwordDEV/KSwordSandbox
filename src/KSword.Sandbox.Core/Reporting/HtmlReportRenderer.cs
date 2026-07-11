@@ -1859,6 +1859,10 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
         ("Engine", "引擎"),
         ("Category", "类别"),
         ("Artifact", "证据文件"),
+        ("MemoryDump", "内存转储"),
+        ("PacketCapture", "网络抓包"),
+        ("memory-dump", "内存转储"),
+        ("packet-capture", "网络抓包"),
         ("Path / safe link", "路径 / 安全链接"),
         ("MIME", "MIME"),
         ("Time", "时间"),
@@ -2009,6 +2013,19 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
         if (string.Equals(evt.EventType, "screenshot.captured", StringComparison.OrdinalIgnoreCase))
         {
             AddRelatedByKind(related, artifacts, ArtifactKind.Screenshot);
+        }
+
+        if (evt.EventType.StartsWith("memory_dump.", StringComparison.OrdinalIgnoreCase) ||
+            evt.EventType.StartsWith("memory-dump.", StringComparison.OrdinalIgnoreCase))
+        {
+            AddRelatedByKind(related, artifacts, ArtifactKind.MemoryDump);
+        }
+
+        if (evt.EventType.StartsWith("pcap.", StringComparison.OrdinalIgnoreCase) ||
+            evt.EventType.StartsWith("packet_capture.", StringComparison.OrdinalIgnoreCase) ||
+            evt.EventType.StartsWith("packet-capture.", StringComparison.OrdinalIgnoreCase))
+        {
+            AddRelatedByKind(related, artifacts, ArtifactKind.PacketCapture);
         }
 
         if (evt.EventType.StartsWith("guest.events.", StringComparison.OrdinalIgnoreCase))
@@ -2178,6 +2195,21 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
                 !string.IsNullOrWhiteSpace(evt.Path))
             {
                 AddPathDescriptor(descriptors, evt.Path, TryResolveReportRoot(report.JobId, evt.Path), ArtifactKind.Screenshot, "screenshot");
+            }
+
+            if ((evt.EventType.StartsWith("memory_dump.", StringComparison.OrdinalIgnoreCase) ||
+                    evt.EventType.StartsWith("memory-dump.", StringComparison.OrdinalIgnoreCase)) &&
+                !string.IsNullOrWhiteSpace(evt.Path))
+            {
+                AddPathDescriptor(descriptors, evt.Path, TryResolveReportRoot(report.JobId, evt.Path), ArtifactKind.MemoryDump, "memory-dump");
+            }
+
+            if ((evt.EventType.StartsWith("pcap.", StringComparison.OrdinalIgnoreCase) ||
+                    evt.EventType.StartsWith("packet_capture.", StringComparison.OrdinalIgnoreCase) ||
+                    evt.EventType.StartsWith("packet-capture.", StringComparison.OrdinalIgnoreCase)) &&
+                !string.IsNullOrWhiteSpace(evt.Path))
+            {
+                AddPathDescriptor(descriptors, evt.Path, TryResolveReportRoot(report.JobId, evt.Path), ArtifactKind.PacketCapture, "packet-capture");
             }
 
             if (evt.EventType.StartsWith("file.", StringComparison.OrdinalIgnoreCase) &&
@@ -2516,6 +2548,8 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
             ArtifactKind.DriverEventsJsonLines or
             ArtifactKind.ArtifactManifest or
             ArtifactKind.Screenshot or
+            ArtifactKind.MemoryDump or
+            ArtifactKind.PacketCapture or
             ArtifactKind.DroppedFile;
     }
 
@@ -2527,7 +2561,9 @@ code{background:#f1f7ff;border-radius:6px;padding:2px 5px;word-break:break-all}.
             ArtifactKind.DriverEventsJsonLines => 1,
             ArtifactKind.ArtifactManifest => 2,
             ArtifactKind.Screenshot => 3,
-            ArtifactKind.DroppedFile => 4,
+            ArtifactKind.MemoryDump => 4,
+            ArtifactKind.PacketCapture => 5,
+            ArtifactKind.DroppedFile => 6,
             _ => 9
         };
     }

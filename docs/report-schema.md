@@ -37,7 +37,9 @@ Guest collection writes `events.json` and `agent-summary.json` under the guest
 output directory before the host collects them. Driver/R0 telemetry may also be
 present as sibling `driver-events.jsonl`. Guest dropped-file evidence may be
 represented by `artifacts/manifest.json`, and screenshots may be present under
-`screenshots/`.
+`screenshots/`. Packet captures are not produced by the current KSword agent,
+but externally generated `.pcap` or `.pcapng` files may be present under
+`packet-captures/` or elsewhere in the collected job folder.
 
 When `events.json` is imported, sibling `*.jsonl` files under the same guest
 output root are merged into the regenerated `report.json` and `report.html`.
@@ -58,18 +60,23 @@ Dropped files and other copied evidence use
 - `jobId`: host job ID when known; guest-side manifests may leave this empty.
 - `runtimeRoot`: root directory used by the producer.
 - `rootPath`: artifact root directory.
+- `importRoot`: root that host importers use to resolve descriptor import
+  paths.
 - `producer`: component that wrote the manifest, such as
   `KSword.Sandbox.Agent`.
 - `generatedAtUtc`: manifest generation time.
+- `collections`: `ArtifactCollectionDescriptor[]` lanes, including disabled
+  placeholders and externally supplied packet-capture lanes.
 - `artifacts`: `ArtifactDescriptor[]`.
 
 Each `ArtifactDescriptor` records:
 
 - `kind`: for dropped files, `DroppedFile`; manifest files use
   `ArtifactManifest`; event streams use `GuestEventsJson` or
-  `DriverEventsJsonLines`; screenshots use `Screenshot`.
+  `DriverEventsJsonLines`; screenshots use `Screenshot`; packet captures use
+  `PacketCapture`.
 - `category`: stable report grouping such as `dropped-file`, `telemetry`,
-  `screenshot`, or `artifact-manifest`.
+  `screenshot`, `packet-capture`, or `artifact-manifest`.
 - `name`: file name.
 - `relativePath`: path relative to the collected output root, for example
   `artifacts/drop.bin`.
@@ -77,20 +84,32 @@ Each `ArtifactDescriptor` records:
   paths and `..` traversal are not emitted as links.
 - `fullPath`: host-resolved path after collection, or producer-local path before
   host normalization.
+- `evidenceRole`, `capturePhase`, `captureState`, `guestPath`, `importPath`,
+  and `collectionName`.
 - `mimeType`, `sizeBytes`, `sha256`, `hashes`, `createdAtUtc`.
 - `metadata`: string fields such as `origin=guest`,
-  `evidenceRole=dropped-file`, and `guestFullPath`.
+  `evidenceRole=dropped-file`, `guestFullPath`, `captureSource=external`, and
+  `hostCaptureStarted=false`.
 
 Host-side code can load guest manifests with `GuestArtifactManifestReader`,
 which resolves `relativePath` under the collected guest-output directory and
-preserves original guest absolute paths in metadata.
+preserves original guest absolute paths in metadata. If a guest manifest points
+at an existing `.pcap` or `.pcapng`, the reader can consume it as external
+`PacketCapture` evidence and fill MIME, size, SHA-256/hash map, safe import
+path, and packet-capture collection metadata without starting packet capture.
 
 The host writes `artifact-index.json` beside `report.json` and `report.html`.
 This `HostArtifactIndex` scans the job root for report files, `events.json`,
-`driver-events.jsonl`, `artifacts/manifest.json`, `screenshots/*`, and dropped
-files under `artifacts/*`. The HTML report has an **Artifact links** section
-that exposes those indexed artifacts with safe relative links when available,
-and falls back to copyable paths from events when a link cannot be trusted.
+`driver-events.jsonl`, `artifacts/manifest.json`, `screenshots/*`,
+`memory-dumps/*`, externally supplied `.pcap` / `.pcapng`, and dropped files
+under `artifacts/*`. Its `collections` list summarizes discovered lanes; for
+packet captures it records `name=packet-captures`, `kind=PacketCapture`,
+`status=captured`, `implemented=true` for import/report consumption,
+`captureSource=external`, `hostCaptureStarted=false`,
+`importMode=external-artifact`, artifact count, total bytes, and MIME types.
+The HTML report has an **Artifact links** section that exposes indexed
+artifacts with safe relative links when available, and falls back to copyable
+paths from events when a link cannot be trusted.
 
 ## HTML sections
 

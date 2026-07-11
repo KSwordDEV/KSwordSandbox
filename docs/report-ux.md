@@ -27,6 +27,10 @@ Required `report.html`, `report.zh.html`, and `report.en.html` sections:
 - Timeline.
 - Process details / 进程, including the Process tree and process event table.
 - File behavior / 文件, including dropped files.
+- Artifact links / 证据文件链接 must include `events.json`,
+  `driver-events.jsonl`, artifact manifests, screenshots, dropped files,
+  opt-in memory dumps, and imported `.pcap` / `.pcapng` packet captures when
+  those files exist in the job directory.
 - Registry behavior / 注册表.
 - Network behavior / 网络.
 - R0 / driver events.

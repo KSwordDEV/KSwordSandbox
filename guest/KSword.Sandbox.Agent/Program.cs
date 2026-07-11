@@ -15,7 +15,7 @@ return await AgentProgram.RunAsync(args);
 /// Guest-side collector that runs inside the disposable Windows VM.
 /// Inputs are command-line arguments for sample path, output path, duration,
 /// optional driver event path, optional R0Collector sidecar path, and optional
-/// screenshot, dropped-file extraction, memory-dump, and future PCAP flags; processing can
+/// screenshot stage/count, dropped-file extraction, memory-dump, and future PCAP flags; processing can
 /// start the sidecar, starts the sample, runs dynamic guest probes, merges
 /// driver JSONL, and writes JSON artifacts; RunAsync returns a process exit
 /// code.
@@ -67,8 +67,9 @@ internal static class AgentProgram
     /// <summary>
     /// Runs the sample and collects normalized behavior events.
     /// Inputs are parsed options, processing snapshots process tree, file, TCP,
-    /// optional screenshot state, and optional after-start memory dump state
-    /// before and after execution, and the method returns collected events.
+    /// optional screenshot cadence, and optional after-start memory dump state
+    /// before, during, and after execution, and the method returns collected
+    /// events.
     /// </summary>
     private static async Task<List<SandboxEvent>> CollectAsync(AgentOptions options)
     {
@@ -82,13 +83,16 @@ internal static class AgentProgram
                 Path = options.SamplePath,
                 Data =
                 {
-                    ["durationSeconds"] = options.DurationSeconds.ToString(CultureInfo.InvariantCulture)
+                    ["durationSeconds"] = options.DurationSeconds.ToString(CultureInfo.InvariantCulture),
+                    ["captureScreenshots"] = options.CaptureScreenshots.ToString(),
+                    ["screenshotPhases"] = options.ScreenshotOptions.FormatStages(),
+                    ["screenshotCount"] = options.ScreenshotOptions.CaptureCount.ToString(CultureInfo.InvariantCulture)
                 }
             }
         };
 
         AddEnvironmentSnapshotEvent(events, options, workingDirectory);
-        var probeRunner = CreateProbeRunner();
+        var probeRunner = CreateProbeRunner(options);
         var probeContext = CreateGuestProbeContext(options, workingDirectory, rootProcessId: null);
         events.AddRange(await probeRunner.CollectAsync(ProbePhase.BeforeStart, probeContext));
         var r0Collector = StartR0Collector(options, events);
@@ -180,10 +184,11 @@ internal static class AgentProgram
     /// <summary>
     /// Creates the dynamic guest probe pipeline.
     /// Inputs are none; processing constructs the process tree, file diff, TCP
-    /// diff, optional screenshot, and opt-in memory dump probes in deterministic
-    /// order; the method returns a reusable GuestProbeRunner for one agent run.
+    /// diff, configurable optional screenshot, and opt-in memory dump probes in
+    /// deterministic order; the method returns a reusable GuestProbeRunner for
+    /// one agent run.
     /// </summary>
-    private static GuestProbeRunner CreateProbeRunner()
+    private static GuestProbeRunner CreateProbeRunner(AgentOptions options)
     {
         return new GuestProbeRunner(
         [
@@ -191,7 +196,7 @@ internal static class AgentProgram
             new FileDiffProbe(),
             new TcpConnectionDiffProbe(),
             new PacketCaptureProbe(),
-            new ScreenshotProbe(),
+            new ScreenshotProbe(options.ScreenshotOptions),
             new MemoryDumpProbe()
         ]);
     }
@@ -1395,6 +1400,8 @@ internal static class AgentProgram
                     ["copiedDroppedFileCount"] = droppedFileMetadataByRelativePath.Count.ToString(CultureInfo.InvariantCulture),
                     ["collectDroppedFiles"] = options.CollectDroppedFiles.ToString(),
                     ["captureScreenshots"] = options.CaptureScreenshots.ToString(),
+                    ["screenshotPhases"] = options.ScreenshotOptions.FormatStages(),
+                    ["screenshotCount"] = options.ScreenshotOptions.CaptureCount.ToString(CultureInfo.InvariantCulture),
                     ["captureMemoryDump"] = options.CaptureMemoryDump.ToString(),
                     ["capturePacketCapture"] = options.CapturePacketCapture.ToString(),
                     ["relativePath"] = NormalizeArtifactRelativePath(Path.GetRelativePath(options.OutputDirectory, manifestResult.ManifestPath)),
@@ -1414,6 +1421,8 @@ internal static class AgentProgram
                 {
                     ["collectDroppedFiles"] = options.CollectDroppedFiles.ToString(),
                     ["captureScreenshots"] = options.CaptureScreenshots.ToString(),
+                    ["screenshotPhases"] = options.ScreenshotOptions.FormatStages(),
+                    ["screenshotCount"] = options.ScreenshotOptions.CaptureCount.ToString(CultureInfo.InvariantCulture),
                     ["captureMemoryDump"] = options.CaptureMemoryDump.ToString(),
                     ["capturePacketCapture"] = options.CapturePacketCapture.ToString(),
                     ["reason"] = "writeFailed"
@@ -1673,6 +1682,8 @@ internal sealed record AgentOptions
 
     public bool CaptureScreenshots { get; init; }
 
+    public ScreenshotProbeOptions ScreenshotOptions { get; init; } = ScreenshotProbeOptions.Default;
+
     public bool CollectDroppedFiles { get; init; }
 
     public bool CaptureMemoryDump { get; init; }
@@ -1683,9 +1694,10 @@ internal sealed record AgentOptions
     /// Parses command-line switches for the guest agent.
     /// Inputs are string arguments, processing consumes --sample, --out,
     /// --duration, --driver-events, optional R0Collector sidecar switches, and
-    /// boolean --r0-mock/--screenshot/--collect-dropped-files/--memory-dump
-    /// plus future --packet-capture/--pcap placeholder flags without breaking
-    /// existing value switches; the method returns
+    /// boolean --r0-mock/--screenshot/--collect-dropped-files/--memory-dump,
+    /// optional --screenshot-phases/--screenshot-count, plus future
+    /// --packet-capture/--pcap placeholder flags without breaking existing
+    /// value switches; the method returns
     /// validated and normalized options.
     /// </summary>
     public static AgentOptions Parse(string[] args)
@@ -1745,6 +1757,11 @@ internal sealed record AgentOptions
             values.TryGetValue("r0-collector", out r0CollectorPath);
         }
 
+        var captureScreenshots = flags.Contains("screenshot") || flags.Contains("screenshots");
+        var screenshotOptions = ScreenshotProbeOptions.Parse(
+            FirstValue(values, "screenshot-phases", "screenshot-stages", "screenshots-phases", "screenshots-stages"),
+            FirstValue(values, "screenshot-count", "screenshots-count"));
+
         return new AgentOptions
         {
             SamplePath = Path.GetFullPath(samplePath),
@@ -1754,10 +1771,29 @@ internal sealed record AgentOptions
             R0CollectorPath = string.IsNullOrWhiteSpace(r0CollectorPath) ? null : Path.GetFullPath(r0CollectorPath),
             DriverDevicePath = string.IsNullOrWhiteSpace(driverDevicePath) ? DefaultDriverDevicePath : driverDevicePath,
             R0Mock = flags.Contains("r0-mock"),
-            CaptureScreenshots = flags.Contains("screenshot") || flags.Contains("screenshots"),
+            CaptureScreenshots = captureScreenshots,
+            ScreenshotOptions = screenshotOptions,
             CollectDroppedFiles = flags.Contains("collect-dropped-files") || flags.Contains("dropped-files"),
             CaptureMemoryDump = flags.Contains("memory-dump") || flags.Contains("memory-dumps"),
             CapturePacketCapture = flags.Contains("packet-capture") || flags.Contains("pcap") || flags.Contains("network-capture")
         };
+    }
+
+    /// <summary>
+    /// Finds the first populated option value across aliases.
+    /// Inputs are parsed value switches and candidate names; processing returns
+    /// the first non-empty value; the method returns null when none are set.
+    /// </summary>
+    private static string? FirstValue(IReadOnlyDictionary<string, string> values, params string[] names)
+    {
+        foreach (var name in names)
+        {
+            if (values.TryGetValue(name, out var value) && !string.IsNullOrWhiteSpace(value))
+            {
+                return value;
+            }
+        }
+
+        return null;
     }
 }

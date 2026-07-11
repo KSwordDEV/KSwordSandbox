@@ -23,8 +23,16 @@ arguments:
 Optional screenshot capture is disabled by default and can be enabled with:
 
 ```text
-[--screenshot]
+[--screenshot | --screenshots]
+[--screenshot-phases before,during,after]
+[--screenshot-count <1-5>]
 ```
+
+`--screenshot` remains the opt-in gate. `--screenshot-phases` accepts
+`before`, `during`, and `after` (aliases: `before-start`, `after-start`, and
+`after-run`). When omitted, the default cadence is `before,during,after`.
+`--screenshot-count` controls best-effort captures per selected stage and is
+clamped to 1-5.
 
 Optional memory dump capture is disabled by default and can be enabled only with
 an explicit opt-in:
@@ -45,9 +53,8 @@ It writes the primary JSON artifacts under `--out`:
 - `artifacts/dropped-files/**` - optional copies of newly-created files under
   the sample working directory when `--collect-dropped-files` or
   `--dropped-files` is supplied.
-- `artifacts/manifest.json` - optional dropped-file manifest written alongside
-  extracted dropped files when `--collect-dropped-files` or `--dropped-files` is
-  supplied.
+- `artifacts/manifest.json` - best-effort artifact manifest written as a safe
+  evidence index even when sensitive collection lanes are disabled.
 
 `artifacts/manifest.json` uses `ArtifactManifest` from
 `KSword.Sandbox.Abstractions.Artifacts`. Each entry records `kind:
@@ -117,7 +124,8 @@ The current guest collector emits these host-reportable event groups:
   become `startup_item.capture_failed` diagnostics instead of failing the run.
 - `screenshot.captured` when `--screenshot` successfully writes a desktop BMP.
   The event path points at the BMP file and `Data` includes `phase`,
-  `widthPixels`, and `heightPixels`.
+  `screenshotStage`, `screenshotIndex`, `screenshotCount`, `widthPixels`, and
+  `heightPixels`.
 - `screenshot.skipped` when screenshot capture was requested but the platform or
   guest session cannot expose a desktop surface. This is non-fatal and includes
   `diagnosticStage`, `exceptionType`, and `win32Error` when available, keeping
@@ -187,11 +195,19 @@ guest events and continues with normal user-mode collection.
 
 ## Optional screenshots
 
-`--screenshot` enables best-effort BMP capture during `after-start` and
-`after-run` probe phases. The implementation uses User32/GDI32 APIs directly so
-it does not need external packages or administrator rights. In non-interactive
-sessions, capture may be unavailable; the agent then emits `screenshot.skipped`
-with a reason instead of failing the analysis.
+`--screenshot` enables best-effort BMP capture with a fixed
+`before,during,after` cadence by default. The stages map to `before-start`,
+`after-start`, and `after-run` probe phases, and can be narrowed or reordered
+with `--screenshot-phases before,during,after`. `--screenshot-count <1-5>`
+captures multiple images per selected stage and adds `screenshotIndex` /
+`screenshotCount` metadata to each `screenshot.captured` or
+`screenshot.skipped` event.
+
+The implementation uses User32/GDI32 APIs directly so it does not need external
+packages or administrator rights. In non-interactive sessions, capture may be
+unavailable; the agent then emits `screenshot.skipped` with a reason instead of
+failing the analysis. The manifest still records the `screenshots` collection
+lane as enabled and skipped or empty according to the emitted events.
 
 Screenshots are intentionally opt-in because they can contain sensitive desktop
 state and can be noisy in automated VM runs. Future host policies should decide

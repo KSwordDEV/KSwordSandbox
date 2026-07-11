@@ -70,11 +70,13 @@ internal sealed class ArtifactManifestContractScenario : ISmokeTestScenario
         SmokeAssert.True(guestDoc.Contains("artifacts/manifest.json", StringComparison.Ordinal), "Guest-agent doc should describe artifacts/manifest.json.");
         SmokeAssert.True(reportDoc.Contains("ArtifactManifest", StringComparison.Ordinal), "Report schema doc should describe ArtifactManifest.");
         SmokeAssert.True(reportDoc.Contains("DroppedFile", StringComparison.Ordinal), "Report schema doc should describe dropped-file artifact entries.");
+        SmokeAssert.True(reportDoc.Contains("PacketCapture", StringComparison.Ordinal), "Report schema doc should describe packet-capture artifact entries.");
         SmokeAssert.True(reportDoc.Contains("artifact-index.json", StringComparison.Ordinal), "Report schema doc should describe host artifact index.");
         SmokeAssert.True(artifactDoc.Contains("safeLink", StringComparison.Ordinal), "Artifact manifest doc should describe safe links.");
         SmokeAssert.True(artifactDoc.Contains("mimeType", StringComparison.Ordinal), "Artifact manifest doc should describe MIME type.");
         SmokeAssert.True(artifactDoc.Contains("collections", StringComparison.OrdinalIgnoreCase), "Artifact manifest doc should describe collection lanes.");
         SmokeAssert.True(artifactDoc.Contains("PacketCapture", StringComparison.Ordinal), "Artifact manifest doc should describe future packet-capture placeholders.");
+        SmokeAssert.True(artifactDoc.Contains("external-pcap-artifacts-indexed", StringComparison.OrdinalIgnoreCase), "Artifact manifest doc should describe external PCAP consumption.");
         SmokeAssert.True(reportStage.Contains("HostArtifactIndexBuilder", StringComparison.Ordinal), "Report artifact stage should write host artifact index.");
     }
 
@@ -168,15 +170,19 @@ internal sealed class ArtifactManifestContractScenario : ISmokeTestScenario
         var droppedFilesRoot = Path.Combine(artifactsRoot, "dropped-files");
         var screenshotsRoot = Path.Combine(guestRoot, "screenshots");
         var memoryDumpsRoot = Path.Combine(guestRoot, "memory-dumps");
+        var packetCapturesRoot = Path.Combine(guestRoot, "packet-captures");
         Directory.CreateDirectory(droppedFilesRoot);
         Directory.CreateDirectory(screenshotsRoot);
         Directory.CreateDirectory(memoryDumpsRoot);
+        Directory.CreateDirectory(packetCapturesRoot);
         var droppedFilePath = Path.Combine(droppedFilesRoot, "drop.bin");
         var screenshotPath = Path.Combine(screenshotsRoot, "after-run.bmp");
         var memoryDumpPath = Path.Combine(memoryDumpsRoot, "after-start-pid123.dmp");
+        var packetCapturePath = Path.Combine(packetCapturesRoot, "external.pcap");
         await File.WriteAllTextAsync(droppedFilePath, "drop", cancellationToken);
         await File.WriteAllBytesAsync(screenshotPath, [0x42, 0x4d, 0x00, 0x00], cancellationToken);
         await File.WriteAllBytesAsync(memoryDumpPath, [0x4d, 0x44, 0x4d, 0x50], cancellationToken);
+        await File.WriteAllBytesAsync(packetCapturePath, [0xd4, 0xc3, 0xb2, 0xa1], cancellationToken);
 
         var manifestPath = Path.Combine(artifactsRoot, "manifest.json");
         var manifest = new ArtifactManifest
@@ -205,10 +211,15 @@ internal sealed class ArtifactManifestContractScenario : ISmokeTestScenario
                     Category = "packet-capture",
                     EvidenceRole = "packet-capture",
                     RelativePath = "packet-captures",
-                    Enabled = false,
+                    Enabled = true,
                     Implemented = false,
-                    Status = "disabled",
-                    Reason = "packetCaptureReservedForFuture"
+                    Status = "captured",
+                    Reason = "external-pcap-supplied",
+                    Metadata = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                    {
+                        ["captureSource"] = "external",
+                        ["hostCaptureStarted"] = "false"
+                    }
                 }
             ],
             Artifacts =
@@ -266,6 +277,20 @@ internal sealed class ArtifactManifestContractScenario : ISmokeTestScenario
                 },
                 new ArtifactDescriptor
                 {
+                    Kind = ArtifactKind.PacketCapture,
+                    Name = "external.pcap",
+                    RelativePath = "packet-captures/external.pcap",
+                    FullPath = @"C:\KSwordSandbox\out\packet-captures\external.pcap",
+                    ImportPath = "packet-captures/external.pcap",
+                    Metadata = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                    {
+                        ["origin"] = "guest",
+                        ["captureSource"] = "external",
+                        ["hostCaptureStarted"] = "false"
+                    }
+                },
+                new ArtifactDescriptor
+                {
                     Kind = ArtifactKind.DroppedFile,
                     Name = "escape.bin",
                     Category = "dropped-file",
@@ -283,8 +308,8 @@ internal sealed class ArtifactManifestContractScenario : ISmokeTestScenario
         SmokeAssert.True(loaded.RootPath == artifactsRoot, "Loaded guest manifest should normalize root path to host artifacts directory.");
         SmokeAssert.True(loaded.ImportRoot == guestRoot, "Loaded guest manifest should normalize import root to host guest output.");
         SmokeAssert.True(loaded.Collections.Count == 2, "Loaded guest manifest should preserve collection lanes.");
-        SmokeAssert.True(loaded.Collections.Any(collection => collection.Kind == ArtifactKind.PacketCapture && !collection.Implemented), "Loaded guest manifest should preserve future packet-capture placeholder.");
-        SmokeAssert.True(loaded.Artifacts.Count == 4, "Loaded guest manifest should preserve artifact count, including unsafe entries as non-linkable descriptors.");
+        SmokeAssert.True(loaded.Collections.Any(collection => collection.Kind == ArtifactKind.PacketCapture && !collection.Implemented && collection.Status == "captured"), "Loaded guest manifest should preserve external packet-capture collection metadata without implying host capture support.");
+        SmokeAssert.True(loaded.Artifacts.Count == 5, "Loaded guest manifest should preserve artifact count, including packet captures and unsafe entries as non-linkable descriptors.");
         SmokeAssert.True(loaded.Artifacts[0].FullPath == droppedFilePath, "Loaded guest artifact should resolve full host path from relative path.");
         SmokeAssert.True(loaded.Artifacts[0].Metadata.ContainsKey("guestFullPath"), "Loaded guest artifact should preserve original guest full path.");
         SmokeAssert.True(loaded.Artifacts[0].Category == "dropped-file", "Loaded guest artifact should preserve category.");
@@ -295,6 +320,17 @@ internal sealed class ArtifactManifestContractScenario : ISmokeTestScenario
         SmokeAssert.True(!string.IsNullOrWhiteSpace(loaded.Artifacts[0].Sha256), "Loaded guest artifact should fill SHA-256 when file is present.");
         SmokeAssert.True(loaded.Artifacts.Any(artifact => artifact.Kind == ArtifactKind.Screenshot && artifact.CapturePhase == "after-run"), "Loaded guest manifest should preserve screenshot capture phase.");
         SmokeAssert.True(loaded.Artifacts.Any(artifact => artifact.Kind == ArtifactKind.MemoryDump && artifact.CollectionName == "memory-dumps"), "Loaded guest manifest should preserve memory-dump collection names.");
+        var loadedPacketCapture = loaded.Artifacts.Single(artifact => artifact.Kind == ArtifactKind.PacketCapture);
+        SmokeAssert.True(loadedPacketCapture.FullPath == packetCapturePath, "Loaded guest packet capture should resolve host path from import path.");
+        SmokeAssert.True(loadedPacketCapture.Category == "packet-capture", "Loaded guest packet capture should fill packet-capture category.");
+        SmokeAssert.True(loadedPacketCapture.MimeType == "application/vnd.tcpdump.pcap", "Loaded guest packet capture should fill pcap MIME type.");
+        SmokeAssert.True(loadedPacketCapture.SizeBytes == 4, "Loaded guest packet capture should fill byte size.");
+        SmokeAssert.True(!string.IsNullOrWhiteSpace(loadedPacketCapture.Sha256), "Loaded guest packet capture should fill SHA-256 when file is present.");
+        SmokeAssert.True(loadedPacketCapture.Hashes.ContainsKey("sha256"), "Loaded guest packet capture should expose hashes map.");
+        SmokeAssert.True(loadedPacketCapture.CollectionName == "packet-captures", "Loaded guest packet capture should fill collection name.");
+        SmokeAssert.True(loadedPacketCapture.EvidenceRole == "packet-capture", "Loaded guest packet capture should fill evidence role.");
+        SmokeAssert.True(loadedPacketCapture.CaptureState == "available", "Loaded guest packet capture should be available without starting host capture.");
+        SmokeAssert.True(loadedPacketCapture.Metadata.TryGetValue("captureSource", out var guestPcapSource) && guestPcapSource == "external", "Loaded guest packet capture should preserve external capture metadata.");
         SmokeAssert.True(loaded.Artifacts.Any(artifact => artifact.Name == "escape.bin" && string.IsNullOrWhiteSpace(artifact.SafeLink)), "Unsafe guest artifact paths should not become safe links.");
     }
 
@@ -329,6 +365,7 @@ internal sealed class ArtifactManifestContractScenario : ISmokeTestScenario
         await File.WriteAllTextAsync(Path.Combine(guestRoot, "driver-events.jsonl"), "{}", cancellationToken);
         await File.WriteAllBytesAsync(Path.Combine(screenshotsRoot, "after-run.bmp"), [0x42, 0x4d, 0x00, 0x00], cancellationToken);
         await File.WriteAllBytesAsync(Path.Combine(memoryDumpsRoot, "after-start-pid123.dmp"), [0x4d, 0x44, 0x4d, 0x50], cancellationToken);
+        await File.WriteAllBytesAsync(Path.Combine(packetCapturesRoot, "before-start.pcap"), [0xd4, 0xc3, 0xb2, 0xa1], cancellationToken);
         await File.WriteAllBytesAsync(Path.Combine(packetCapturesRoot, "future.pcapng"), [0x0a, 0x0d, 0x0d, 0x0a], cancellationToken);
         await File.WriteAllTextAsync(Path.Combine(droppedFilesRoot, "drop.bin"), "drop", cancellationToken);
         await File.WriteAllTextAsync(Path.Combine(artifactsRoot, "manifest.json"), "{}", cancellationToken);
@@ -350,10 +387,29 @@ internal sealed class ArtifactManifestContractScenario : ISmokeTestScenario
         SmokeAssert.True(memoryDump.MimeType == "application/vnd.microsoft.minidump", "Memory dump index entry should include minidump MIME type.");
         SmokeAssert.True(memoryDump.Metadata.TryGetValue("evidenceRole", out var dumpEvidenceRole) && dumpEvidenceRole == "memory-dump", "Memory dump index entry should include evidence role.");
         SmokeAssert.True(memoryDump.CollectionName == "memory-dumps", "Memory dump index entry should include collection name.");
-        var packetCapture = AssertIndexedArtifact(index, ArtifactKind.PacketCapture, $"guest/{jobId:N}/packet-captures/future.pcapng");
+        var packetCapture = AssertIndexedArtifact(index, ArtifactKind.PacketCapture, $"guest/{jobId:N}/packet-captures/before-start.pcap");
         SmokeAssert.True(packetCapture.Category == "packet-capture", "Packet capture index entry should include packet-capture category.");
-        SmokeAssert.True(packetCapture.MimeType == "application/x-pcapng", "Packet capture index entry should include pcapng MIME type.");
+        SmokeAssert.True(packetCapture.CapturePhase == "before-start", "Packet capture index entry should include capture phase when encoded in the file name.");
+        SmokeAssert.True(packetCapture.CaptureState == "available", "Packet capture index entry should mark an existing external PCAP as available.");
+        SmokeAssert.True(packetCapture.MimeType == "application/vnd.tcpdump.pcap", "Packet capture index entry should include pcap MIME type.");
+        SmokeAssert.True(packetCapture.SizeBytes == 4, "Packet capture index entry should include byte size.");
+        SmokeAssert.True(packetCapture.Hashes.ContainsKey("sha256"), "Packet capture index entry should include hashes map.");
         SmokeAssert.True(packetCapture.CollectionName == "packet-captures", "Packet capture index entry should include collection name.");
+        SmokeAssert.True(packetCapture.Metadata.TryGetValue("captureSource", out var pcapSource) && pcapSource == "external", "Packet capture index entry should mark external capture source.");
+        SmokeAssert.True(packetCapture.Metadata.TryGetValue("hostCaptureStarted", out var hostCaptureStarted) && hostCaptureStarted == "false", "Packet capture index entry should not imply host packet capture was started.");
+        var packetCaptureNg = AssertIndexedArtifact(index, ArtifactKind.PacketCapture, $"guest/{jobId:N}/packet-captures/future.pcapng");
+        SmokeAssert.True(packetCaptureNg.MimeType == "application/x-pcapng", "Packet capture index entry should include pcapng MIME type.");
+        SmokeAssert.True(packetCaptureNg.Metadata.TryGetValue("pcapFormat", out var pcapNgFormat) && pcapNgFormat == "pcapng", "Packet capture index entry should record pcapng format metadata.");
+        var packetCaptureCollection = index.Collections.Single(collection => collection.Name == "packet-captures");
+        SmokeAssert.True(packetCaptureCollection.Kind == ArtifactKind.PacketCapture, "Packet capture collection should be present in host index.");
+        SmokeAssert.True(packetCaptureCollection.RelativePath == $"guest/{jobId:N}/packet-captures", "Packet capture collection should expose safe import path.");
+        SmokeAssert.True(packetCaptureCollection.SafeLink == $"guest/{jobId:N}/packet-captures", "Packet capture collection should expose safe link.");
+        SmokeAssert.True(packetCaptureCollection.Status == "captured", "Packet capture collection should indicate indexed files are present.");
+        SmokeAssert.True(packetCaptureCollection.Implemented, "Packet capture collection should indicate host can consume existing files.");
+        SmokeAssert.True(packetCaptureCollection.Metadata.TryGetValue("artifactCount", out var pcapCount) && pcapCount == "2", "Packet capture collection should record artifact count.");
+        SmokeAssert.True(packetCaptureCollection.Metadata.TryGetValue("totalBytes", out var pcapBytes) && pcapBytes == "8", "Packet capture collection should record total bytes.");
+        SmokeAssert.True(packetCaptureCollection.Metadata.TryGetValue("mimeTypes", out var pcapMimeTypes) && pcapMimeTypes.Contains("application/vnd.tcpdump.pcap", StringComparison.Ordinal) && pcapMimeTypes.Contains("application/x-pcapng", StringComparison.Ordinal), "Packet capture collection should record MIME types.");
+        SmokeAssert.True(packetCaptureCollection.Metadata.TryGetValue("importMode", out var pcapImportMode) && pcapImportMode == "external-artifact", "Packet capture collection should mark external artifact import mode.");
         var dropped = AssertIndexedArtifact(index, ArtifactKind.DroppedFile, $"guest/{jobId:N}/artifacts/dropped-files/drop.bin");
         SmokeAssert.True(dropped.SizeBytes == 4, "Dropped-file index entry should include size.");
         SmokeAssert.True(dropped.MimeType == "application/octet-stream", "Dropped-file index entry should include MIME type.");
@@ -366,6 +422,7 @@ internal sealed class ArtifactManifestContractScenario : ISmokeTestScenario
         SmokeAssert.True(File.Exists(indexDescriptor.FullPath), "artifact-index.json should be written.");
         var loaded = builder.TryReadIndex(jobRoot) ?? throw new InvalidOperationException("artifact-index.json should load.");
         SmokeAssert.True(loaded.Artifacts.Any(artifact => artifact.Kind == ArtifactKind.DriverEventsJsonLines), "Loaded index should include driver JSONL.");
+        SmokeAssert.True(loaded.Collections.Any(collection => collection.Name == "packet-captures" && collection.Metadata.ContainsKey("artifactCount")), "Loaded index should preserve packet-capture collection metadata.");
     }
 
     /// <summary>
@@ -381,20 +438,28 @@ internal sealed class ArtifactManifestContractScenario : ISmokeTestScenario
         var jobRoot = Path.Combine(runtimeRoot, "jobs", jobId.ToString("N"));
         var guestRoot = Path.Combine(jobRoot, "guest", jobId.ToString("N"));
         var screenshotsRoot = Path.Combine(guestRoot, "screenshots");
+        var memoryDumpsRoot = Path.Combine(guestRoot, "memory-dumps");
+        var packetCapturesRoot = Path.Combine(guestRoot, "packet-captures");
         var artifactsRoot = Path.Combine(guestRoot, "artifacts");
         var droppedFilesRoot = Path.Combine(artifactsRoot, "dropped-files");
         Directory.CreateDirectory(screenshotsRoot);
+        Directory.CreateDirectory(memoryDumpsRoot);
+        Directory.CreateDirectory(packetCapturesRoot);
         Directory.CreateDirectory(artifactsRoot);
         Directory.CreateDirectory(droppedFilesRoot);
 
         var eventsPath = Path.Combine(guestRoot, "events.json");
         var driverPath = Path.Combine(guestRoot, "driver-events.jsonl");
         var screenshotPath = Path.Combine(screenshotsRoot, "after-run.bmp");
+        var memoryDumpPath = Path.Combine(memoryDumpsRoot, "after-start-pid123.dmp");
+        var packetCapturePath = Path.Combine(packetCapturesRoot, "future.pcapng");
         var dropPath = Path.Combine(droppedFilesRoot, "drop.bin");
         var manifestPath = Path.Combine(artifactsRoot, "manifest.json");
         await File.WriteAllTextAsync(eventsPath, "[]", cancellationToken);
         await File.WriteAllTextAsync(driverPath, "{}", cancellationToken);
         await File.WriteAllBytesAsync(screenshotPath, [0x42, 0x4d, 0x00, 0x00], cancellationToken);
+        await File.WriteAllBytesAsync(memoryDumpPath, [0x4d, 0x44, 0x4d, 0x50], cancellationToken);
+        await File.WriteAllBytesAsync(packetCapturePath, [0x0a, 0x0d, 0x0d, 0x0a], cancellationToken);
         await File.WriteAllTextAsync(dropPath, "drop", cancellationToken);
         await File.WriteAllTextAsync(
             manifestPath,
@@ -427,7 +492,7 @@ internal sealed class ArtifactManifestContractScenario : ISmokeTestScenario
             }, ManifestJsonOptions),
             cancellationToken);
 
-        var report = CreateReport(jobId, eventsPath, screenshotPath, dropPath);
+        var report = CreateReport(jobId, eventsPath, screenshotPath, dropPath, memoryDumpPath, packetCapturePath);
         var index = new HostArtifactIndexBuilder().Build(jobId, jobRoot);
         var html = new HtmlReportRenderer().Render(report, index.Artifacts);
         AssertReportHtmlContainsArtifactLinks(html, jobId);
@@ -468,7 +533,7 @@ internal sealed class ArtifactManifestContractScenario : ISmokeTestScenario
         return artifact!;
     }
 
-    private static AnalysisReport CreateReport(Guid jobId, string eventsPath, string screenshotPath, string dropPath)
+    private static AnalysisReport CreateReport(Guid jobId, string eventsPath, string screenshotPath, string dropPath, string memoryDumpPath, string packetCapturePath)
     {
         return new AnalysisReport
         {
@@ -515,6 +580,28 @@ internal sealed class ArtifactManifestContractScenario : ISmokeTestScenario
                     {
                         ["relativePath"] = "artifacts/dropped-files/drop.bin"
                     }
+                },
+                new SandboxEvent
+                {
+                    EventType = "memory_dump.captured",
+                    Source = "guest",
+                    Path = memoryDumpPath,
+                    Data =
+                    {
+                        ["capturePhase"] = "after-start",
+                        ["collectionName"] = "memory-dumps"
+                    }
+                },
+                new SandboxEvent
+                {
+                    EventType = "pcap.summary",
+                    Source = "guest",
+                    Path = packetCapturePath,
+                    Data =
+                    {
+                        ["capturePhase"] = "future",
+                        ["collectionName"] = "packet-captures"
+                    }
                 }
             ]
         };
@@ -526,10 +613,14 @@ internal sealed class ArtifactManifestContractScenario : ISmokeTestScenario
         SmokeAssert.True(html.Contains("events.json", StringComparison.Ordinal), "HTML report should expose events.json.");
         SmokeAssert.True(html.Contains("driver-events.jsonl", StringComparison.Ordinal), "HTML report should expose driver-events.jsonl.");
         SmokeAssert.True(html.Contains("screenshots/after-run.bmp", StringComparison.Ordinal), "HTML report should expose screenshot path.");
+        SmokeAssert.True(html.Contains("memory-dumps/after-start-pid123.dmp", StringComparison.Ordinal), "HTML report should expose memory dump path.");
+        SmokeAssert.True(html.Contains("packet-captures/future.pcapng", StringComparison.Ordinal), "HTML report should expose packet capture path.");
         SmokeAssert.True(html.Contains("artifacts/dropped-files/drop.bin", StringComparison.Ordinal), "HTML report should expose dropped-file path.");
         SmokeAssert.True(html.Contains($"href=\"guest/{jobId:N}/events.json\"", StringComparison.Ordinal), "HTML report should use safe relative event links.");
         SmokeAssert.True(html.Contains($"href=\"guest/{jobId:N}/driver-events.jsonl\"", StringComparison.Ordinal), "HTML report should link driver JSONL.");
         SmokeAssert.True(html.Contains($"href=\"guest/{jobId:N}/screenshots/after-run.bmp\"", StringComparison.Ordinal), "HTML report should link screenshots.");
+        SmokeAssert.True(html.Contains($"href=\"guest/{jobId:N}/memory-dumps/after-start-pid123.dmp\"", StringComparison.Ordinal), "HTML report should link memory dumps.");
+        SmokeAssert.True(html.Contains($"href=\"guest/{jobId:N}/packet-captures/future.pcapng\"", StringComparison.Ordinal), "HTML report should link packet captures.");
         SmokeAssert.True(html.Contains($"href=\"guest/{jobId:N}/artifacts/manifest.json\"", StringComparison.Ordinal), "HTML report should link artifact manifest.");
         SmokeAssert.True(html.Contains($"href=\"guest/{jobId:N}/artifacts/dropped-files/drop.bin\"", StringComparison.Ordinal), "HTML report should link dropped files.");
         SmokeAssert.True(html.Contains("Artifact evidence", StringComparison.Ordinal), "HTML report should render collapsible artifact evidence.");

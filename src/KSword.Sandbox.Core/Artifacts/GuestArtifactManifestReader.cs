@@ -93,9 +93,10 @@ public sealed class GuestArtifactManifestReader
     private static ArtifactDescriptor NormalizeDescriptor(ArtifactDescriptor descriptor, string guestOutputRoot)
     {
         var relativePath = ArtifactDescriptorFactory.NormalizeRelativePath(descriptor.RelativePath);
+        var descriptorKind = ResolveDescriptorKind(descriptor, relativePath);
         if (string.IsNullOrWhiteSpace(relativePath))
         {
-            return ArtifactDescriptorFactory.NormalizeDescriptor(descriptor) with
+            return ArtifactDescriptorFactory.NormalizeDescriptor(descriptor with { Kind = descriptorKind }) with
             {
                 RelativePath = string.Empty,
                 SafeLink = string.Empty
@@ -108,6 +109,7 @@ public sealed class GuestArtifactManifestReader
         AddIfNotEmpty(metadata, "captureState", descriptor.CaptureState);
         AddIfNotEmpty(metadata, "collectionName", descriptor.CollectionName);
         AddIfNotEmpty(metadata, "importPath", string.IsNullOrWhiteSpace(descriptor.ImportPath) ? relativePath : descriptor.ImportPath);
+        AddPacketCaptureImportDefaults(descriptorKind, metadata);
         if (!string.IsNullOrWhiteSpace(FirstNonEmpty(descriptor.GuestPath, descriptor.FullPath)) &&
             !metadata.ContainsKey("guestFullPath"))
         {
@@ -115,9 +117,14 @@ public sealed class GuestArtifactManifestReader
         }
 
         var fullPath = Path.GetFullPath(Path.Combine(guestOutputRoot, relativePath));
+        if (descriptorKind == ArtifactKind.PacketCapture && File.Exists(fullPath))
+        {
+            AddIfMissing(metadata, "captureState", "available");
+        }
+
         var normalized = File.Exists(fullPath)
-            ? ArtifactDescriptorFactory.FromExistingFile(fullPath, guestOutputRoot, descriptor.Kind, metadata)
-            : ArtifactDescriptorFactory.FromKnownPath(fullPath, guestOutputRoot, descriptor.Kind, metadata);
+            ? ArtifactDescriptorFactory.FromExistingFile(fullPath, guestOutputRoot, descriptorKind, metadata)
+            : ArtifactDescriptorFactory.FromKnownPath(fullPath, guestOutputRoot, descriptorKind, metadata);
 
         return normalized with
         {
@@ -135,6 +142,23 @@ public sealed class GuestArtifactManifestReader
             CollectionName = FirstNonEmpty(descriptor.CollectionName, normalized.CollectionName, MetadataValue(metadata, "collectionName")),
             Metadata = metadata
         };
+    }
+
+    private static ArtifactKind ResolveDescriptorKind(ArtifactDescriptor descriptor, string relativePath)
+    {
+        if (descriptor.Kind != ArtifactKind.Unknown)
+        {
+            return descriptor.Kind;
+        }
+
+        if (ArtifactDescriptorFactory.IsPacketCapturePath(relativePath) ||
+            ArtifactDescriptorFactory.IsPacketCapturePath(descriptor.Name) ||
+            ArtifactDescriptorFactory.IsPacketCapturePath(descriptor.FullPath))
+        {
+            return ArtifactKind.PacketCapture;
+        }
+
+        return descriptor.Kind;
     }
 
     private static ArtifactCollectionDescriptor NormalizeCollection(ArtifactCollectionDescriptor collection)
@@ -185,6 +209,28 @@ public sealed class GuestArtifactManifestReader
     private static void AddIfNotEmpty(Dictionary<string, string> metadata, string key, string? value)
     {
         if (!string.IsNullOrWhiteSpace(value))
+        {
+            metadata[key] = value;
+        }
+    }
+
+    private static void AddPacketCaptureImportDefaults(ArtifactKind kind, Dictionary<string, string> metadata)
+    {
+        if (kind != ArtifactKind.PacketCapture)
+        {
+            return;
+        }
+
+        AddIfMissing(metadata, "evidenceRole", "packet-capture");
+        AddIfMissing(metadata, "collectionName", "packet-captures");
+        AddIfMissing(metadata, "captureSource", "external");
+        AddIfMissing(metadata, "hostCaptureStarted", "false");
+        AddIfMissing(metadata, "importMode", "external-artifact");
+    }
+
+    private static void AddIfMissing(Dictionary<string, string> metadata, string key, string value)
+    {
+        if (!metadata.ContainsKey(key) || string.IsNullOrWhiteSpace(metadata[key]))
         {
             metadata[key] = value;
         }

@@ -6,16 +6,18 @@ namespace KSword.Sandbox.Agent.Collection;
 
 /// <summary>
 /// Optionally captures guest desktop screenshots around sample execution.
-/// Inputs are probe phases and a capture-enabled flag from CLI options;
-/// processing delegates platform-specific capture to IScreenshotCapture;
-/// CollectAsync returns screenshot.captured or screenshot.skipped events.
+/// Inputs are probe phases, a capture-enabled flag, and screenshot stage/count
+/// options from CLI parsing; processing delegates platform-specific capture to
+/// IScreenshotCapture; CollectAsync returns screenshot.captured or
+/// screenshot.skipped events.
 /// </summary>
 internal sealed class ScreenshotProbe : IGuestProbe
 {
     private readonly IScreenshotCapture screenshotCapture;
+    private readonly ScreenshotProbeOptions options;
 
     public ScreenshotProbe()
-        : this(new WindowsDesktopScreenshotCapture())
+        : this(new WindowsDesktopScreenshotCapture(), ScreenshotProbeOptions.Default)
     {
     }
 
@@ -25,30 +27,80 @@ internal sealed class ScreenshotProbe : IGuestProbe
     /// future probe phases, and the constructor returns no value.
     /// </summary>
     public ScreenshotProbe(IScreenshotCapture screenshotCapture)
+        : this(screenshotCapture, ScreenshotProbeOptions.Default)
+    {
+    }
+
+    /// <summary>
+    /// Creates a screenshot probe with configurable stage and count settings.
+    /// The input is screenshot probe options; processing stores the capture
+    /// plan and default platform capture service; the constructor returns no
+    /// value.
+    /// </summary>
+    public ScreenshotProbe(ScreenshotProbeOptions options)
+        : this(new WindowsDesktopScreenshotCapture(), options)
+    {
+    }
+
+    /// <summary>
+    /// Creates a screenshot probe with injectable capture and capture plan.
+    /// The inputs are screenshot capture service and options; processing
+    /// stores both for future probe phases; the constructor returns no value.
+    /// </summary>
+    public ScreenshotProbe(IScreenshotCapture screenshotCapture, ScreenshotProbeOptions? options)
     {
         this.screenshotCapture = screenshotCapture;
+        this.options = options ?? ScreenshotProbeOptions.Default;
     }
 
     public string ProbeId => "screenshot";
 
     /// <summary>
-    /// Captures screenshots for enabled after-start and after-run phases.
+    /// Captures screenshots for enabled configured phases.
     /// Inputs are phase, guest context, and cancellation token; processing skips
-    /// capture when disabled or outside the selected phases; the method returns
-    /// screenshot events for enabled attempts.
+    /// capture when disabled or outside the selected stages, and can emit more
+    /// than one event per phase when the requested count is greater than one;
+    /// the method returns screenshot events for enabled attempts.
     /// </summary>
     public async Task<IReadOnlyList<SandboxEvent>> CollectAsync(
         ProbePhase phase,
         GuestProbeContext context,
         CancellationToken cancellationToken = default)
     {
-        if (!context.CaptureScreenshots || phase is not (ProbePhase.AfterStart or ProbePhase.AfterRun))
+        if (!context.CaptureScreenshots)
         {
             return [];
         }
 
-        var phaseLabel = ToPhaseLabel(phase);
-        var result = await screenshotCapture.CaptureAsync(context.OutputDirectory, phaseLabel, cancellationToken);
+        var requests = options.GetCaptureRequests(phase);
+        if (requests.Count == 0)
+        {
+            return [];
+        }
+
+        var events = new List<SandboxEvent>(requests.Count);
+        foreach (var request in requests)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var result = await screenshotCapture.CaptureAsync(context.OutputDirectory, request.ArtifactLabel, cancellationToken);
+            events.Add(CreateScreenshotEvent(phase, context, request, result));
+        }
+
+        return events;
+    }
+
+    /// <summary>
+    /// Converts one capture result into a normalized screenshot event.
+    /// Inputs are probe phase, run context, capture request, and result;
+    /// processing copies event and manifest metadata into Data; the method
+    /// returns a SandboxEvent.
+    /// </summary>
+    private static SandboxEvent CreateScreenshotEvent(
+        ProbePhase phase,
+        GuestProbeContext context,
+        ScreenshotCaptureRequest request,
+        ScreenshotCaptureResult result)
+    {
         var evt = new SandboxEvent
         {
             EventType = result.Captured ? "screenshot.captured" : "screenshot.skipped",
@@ -56,11 +108,16 @@ internal sealed class ScreenshotProbe : IGuestProbe
             Path = result.Path,
             Data =
             {
-                ["phase"] = phaseLabel,
+                ["phase"] = request.ProbePhaseLabel,
+                ["probePhase"] = ToPhaseLabel(phase),
+                ["screenshotStage"] = request.StageLabel,
                 ["captureEnabled"] = "true",
                 ["captureState"] = result.Captured ? "captured" : "skipped",
                 ["evidenceRole"] = "screenshot",
-                ["collectionName"] = "screenshots"
+                ["collectionName"] = "screenshots",
+                ["screenshotIndex"] = request.Sequence.ToString(CultureInfo.InvariantCulture),
+                ["screenshotCount"] = request.TotalCount.ToString(CultureInfo.InvariantCulture),
+                ["artifactLabel"] = request.ArtifactLabel
             }
         };
 
@@ -99,7 +156,7 @@ internal sealed class ScreenshotProbe : IGuestProbe
             evt.Data["relativePath"] = SafeRelativePath(context.OutputDirectory, result.Path);
         }
 
-        return [evt];
+        return evt;
     }
 
     /// <summary>
@@ -136,6 +193,211 @@ internal sealed class ScreenshotProbe : IGuestProbe
         };
     }
 }
+
+/// <summary>
+/// Operator-selected screenshot capture plan.
+/// Inputs are parsed screenshot stages and a per-stage capture count;
+/// processing maps probe phases to screenshot requests; methods return the
+/// best-effort capture attempts that should run for a phase.
+/// </summary>
+internal sealed record ScreenshotProbeOptions
+{
+    public const int DefaultCaptureCount = 1;
+    public const int MaximumCaptureCount = 5;
+
+    public static readonly ScreenshotProbeOptions Default = new()
+    {
+        Stages = [ScreenshotStage.Before, ScreenshotStage.During, ScreenshotStage.After],
+        CaptureCount = DefaultCaptureCount
+    };
+
+    public required IReadOnlyList<ScreenshotStage> Stages { get; init; }
+
+    public int CaptureCount { get; init; } = DefaultCaptureCount;
+
+    /// <summary>
+    /// Parses user-facing screenshot phase/count switches.
+    /// Inputs are optional comma-separated stages and count text; processing
+    /// accepts before/during/after aliases and clamps count to a safe maximum;
+    /// the method returns a normalized screenshot plan.
+    /// </summary>
+    public static ScreenshotProbeOptions Parse(string? rawStages, string? rawCount)
+    {
+        return new ScreenshotProbeOptions
+        {
+            Stages = ParseStages(rawStages),
+            CaptureCount = ParseCaptureCount(rawCount)
+        };
+    }
+
+    /// <summary>
+    /// Builds capture requests for a probe phase.
+    /// Inputs are the current probe phase; processing checks selected stages
+    /// and expands count into sequence-aware artifact labels; the method
+    /// returns zero or more requests for that phase.
+    /// </summary>
+    public IReadOnlyList<ScreenshotCaptureRequest> GetCaptureRequests(ProbePhase phase)
+    {
+        var stage = StageFromPhase(phase);
+        if (stage is null || !Stages.Contains(stage.Value))
+        {
+            return [];
+        }
+
+        var count = Math.Clamp(CaptureCount, 1, MaximumCaptureCount);
+        var stageLabel = ToStageLabel(stage.Value);
+        var phaseLabel = ToProbePhaseLabel(phase);
+        var requests = new List<ScreenshotCaptureRequest>(count);
+        for (var sequence = 1; sequence <= count; sequence++)
+        {
+            var artifactLabel = count == 1
+                ? phaseLabel
+                : $"{phaseLabel}-{sequence:00}-of-{count:00}";
+            requests.Add(new ScreenshotCaptureRequest(
+                stage.Value,
+                stageLabel,
+                phaseLabel,
+                artifactLabel,
+                sequence,
+                count));
+        }
+
+        return requests;
+    }
+
+    /// <summary>
+    /// Formats the selected stages as stable CLI text.
+    /// Inputs are none; processing joins normalized labels; the method returns
+    /// a comma-separated before/during/after list.
+    /// </summary>
+    public string FormatStages()
+    {
+        return string.Join(",", Stages.Select(ToStageLabel));
+    }
+
+    private static IReadOnlyList<ScreenshotStage> ParseStages(string? rawStages)
+    {
+        if (string.IsNullOrWhiteSpace(rawStages))
+        {
+            return Default.Stages;
+        }
+
+        var stages = new List<ScreenshotStage>();
+        foreach (var token in rawStages.Split([',', ';', '|', ' '], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (string.Equals(token, "all", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(token, "default", StringComparison.OrdinalIgnoreCase))
+            {
+                AddDistinct(stages, ScreenshotStage.Before);
+                AddDistinct(stages, ScreenshotStage.During);
+                AddDistinct(stages, ScreenshotStage.After);
+                continue;
+            }
+
+            AddDistinct(stages, ParseStage(token));
+        }
+
+        if (stages.Count == 0)
+        {
+            throw new ArgumentException("--screenshot-phases must include before, during, or after.");
+        }
+
+        return stages;
+    }
+
+    private static int ParseCaptureCount(string? rawCount)
+    {
+        if (string.IsNullOrWhiteSpace(rawCount))
+        {
+            return DefaultCaptureCount;
+        }
+
+        if (!int.TryParse(rawCount, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed))
+        {
+            throw new ArgumentException("--screenshot-count must be an integer.");
+        }
+
+        return Math.Clamp(parsed, 1, MaximumCaptureCount);
+    }
+
+    private static ScreenshotStage ParseStage(string token)
+    {
+        return token.Trim().ToLowerInvariant() switch
+        {
+            "before" or "pre" or "before-start" or "pre-start" => ScreenshotStage.Before,
+            "during" or "runtime" or "after-start" or "started" => ScreenshotStage.During,
+            "after" or "post" or "after-run" or "post-run" => ScreenshotStage.After,
+            _ => throw new ArgumentException($"Unsupported --screenshot-phases value '{token}'. Use before,during,after.")
+        };
+    }
+
+    private static void AddDistinct(List<ScreenshotStage> stages, ScreenshotStage stage)
+    {
+        if (!stages.Contains(stage))
+        {
+            stages.Add(stage);
+        }
+    }
+
+    private static ScreenshotStage? StageFromPhase(ProbePhase phase)
+    {
+        return phase switch
+        {
+            ProbePhase.BeforeStart => ScreenshotStage.Before,
+            ProbePhase.AfterStart => ScreenshotStage.During,
+            ProbePhase.AfterRun => ScreenshotStage.After,
+            _ => null
+        };
+    }
+
+    private static string ToStageLabel(ScreenshotStage stage)
+    {
+        return stage switch
+        {
+            ScreenshotStage.Before => "before",
+            ScreenshotStage.During => "during",
+            ScreenshotStage.After => "after",
+            _ => stage.ToString().ToLowerInvariant()
+        };
+    }
+
+    private static string ToProbePhaseLabel(ProbePhase phase)
+    {
+        return phase switch
+        {
+            ProbePhase.BeforeStart => "before-start",
+            ProbePhase.AfterStart => "after-start",
+            ProbePhase.AfterRun => "after-run",
+            ProbePhase.Cleanup => "cleanup",
+            _ => phase.ToString()
+        };
+    }
+}
+
+/// <summary>
+/// User-facing screenshot stages that map onto probe phases.
+/// Inputs are CLI configuration values; processing maps them to
+/// BeforeStart/AfterStart/AfterRun; values are stored in capture metadata.
+/// </summary>
+internal enum ScreenshotStage
+{
+    Before = 0,
+    During,
+    After
+}
+
+/// <summary>
+/// Describes one screenshot attempt in a configured capture plan.
+/// Inputs are stage, phase labels, artifact label, and sequence information;
+/// processing is immutable storage used by ScreenshotProbe event emission.
+/// </summary>
+internal sealed record ScreenshotCaptureRequest(
+    ScreenshotStage Stage,
+    string StageLabel,
+    string ProbePhaseLabel,
+    string ArtifactLabel,
+    int Sequence,
+    int TotalCount);
 
 /// <summary>
 /// Defines a platform screenshot capture implementation.

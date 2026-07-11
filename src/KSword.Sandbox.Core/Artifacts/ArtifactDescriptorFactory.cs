@@ -28,6 +28,7 @@ public static class ArtifactDescriptorFactory
         var relativePath = SafeRelativePath(rootPath, info.FullName);
         var sha256 = ComputeSha256(info.FullName);
         var copiedMetadata = CopyMetadata(metadata);
+        ApplyKindMetadataDefaults(kind, copiedMetadata, includeAvailability: true);
         var hashes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
             ["sha256"] = sha256
@@ -74,12 +75,13 @@ public static class ArtifactDescriptorFactory
             return FromExistingFile(path, rootPath, kind, metadata, category);
         }
 
+        var copiedMetadata = CopyMetadata(metadata);
+        ApplyKindMetadataDefaults(kind, copiedMetadata, includeAvailability: false);
         var name = SafeFileName(path);
         var relativePath = string.IsNullOrWhiteSpace(rootPath)
             ? NormalizeRelativePath(path)
             : SafeRelativePath(rootPath, path);
         var safeLink = BuildSafeLink(relativePath);
-        var copiedMetadata = CopyMetadata(metadata);
 
         return new ArtifactDescriptor
         {
@@ -110,6 +112,7 @@ public static class ArtifactDescriptorFactory
         var relativePath = NormalizeRelativePath(descriptor.RelativePath);
         var hashes = CopyMetadata(descriptor.Hashes);
         var metadata = CopyMetadata(descriptor.Metadata);
+        ApplyKindMetadataDefaults(descriptor.Kind, metadata, includeAvailability: false);
         if (!string.IsNullOrWhiteSpace(descriptor.Sha256))
         {
             hashes["sha256"] = descriptor.Sha256;
@@ -270,6 +273,18 @@ public static class ArtifactDescriptorFactory
         };
     }
 
+    /// <summary>
+    /// Returns true when a path names a supported packet-capture artifact.
+    /// Inputs are arbitrary paths or file names; processing checks only the
+    /// extension; the method returns true for .pcap and .pcapng files.
+    /// </summary>
+    public static bool IsPacketCapturePath(string path)
+    {
+        var extension = Path.GetExtension(path);
+        return string.Equals(extension, ".pcap", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(extension, ".pcapng", StringComparison.OrdinalIgnoreCase);
+    }
+
     private static string FirstNonEmpty(params string?[] values)
     {
         foreach (var value in values)
@@ -306,6 +321,29 @@ public static class ArtifactDescriptorFactory
         return metadata is null
             ? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
             : new Dictionary<string, string>(metadata, StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static void ApplyKindMetadataDefaults(ArtifactKind kind, Dictionary<string, string> metadata, bool includeAvailability)
+    {
+        if (kind != ArtifactKind.PacketCapture)
+        {
+            return;
+        }
+
+        AddDefault(metadata, "evidenceRole", "packet-capture");
+        AddDefault(metadata, "collectionName", "packet-captures");
+        if (includeAvailability)
+        {
+            AddDefault(metadata, "captureState", "available");
+        }
+    }
+
+    private static void AddDefault(Dictionary<string, string> metadata, string key, string value)
+    {
+        if (!metadata.ContainsKey(key) || string.IsNullOrWhiteSpace(metadata[key]))
+        {
+            metadata[key] = value;
+        }
     }
 
     private static string ComputeSha256(string fullPath)

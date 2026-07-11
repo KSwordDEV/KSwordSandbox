@@ -23,6 +23,10 @@ internal sealed record GuestAgentParsedOptions
 
     public bool CaptureScreenshots { get; init; }
 
+    public string ScreenshotPhases { get; init; } = "before,during,after";
+
+    public int ScreenshotCount { get; init; } = 1;
+
     public bool CollectDroppedFiles { get; init; }
 
     public bool CaptureMemoryDump { get; init; }

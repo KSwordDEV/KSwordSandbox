@@ -1,4 +1,5 @@
 using KSword.Sandbox.Abstractions.Artifacts;
+using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -7,8 +8,8 @@ namespace KSword.Sandbox.Core.Artifacts;
 /// <summary>
 /// Builds and persists host-side artifact indexes for job directories.
 /// Inputs are a job ID and job root; processing scans known report, telemetry,
-/// screenshot, memory-dump, manifest, and dropped-file paths; methods return
-/// index models or the descriptor for artifact-index.json.
+/// screenshot, memory-dump, packet-capture, manifest, and dropped-file paths;
+/// methods return index models or the descriptor for artifact-index.json.
 /// </summary>
 public sealed class HostArtifactIndexBuilder
 {
@@ -62,6 +63,16 @@ public sealed class HostArtifactIndexBuilder
                     metadata["capturePhase"] = classification.CapturePhase;
                 }
 
+                if (!string.IsNullOrWhiteSpace(classification.CaptureState))
+                {
+                    metadata["captureState"] = classification.CaptureState;
+                }
+
+                foreach (var pair in classification.Metadata ?? EmptyMetadata)
+                {
+                    metadata[pair.Key] = pair.Value;
+                }
+
                 artifacts.Add(ArtifactDescriptorFactory.FromExistingFile(
                     path,
                     fullJobRoot,
@@ -76,6 +87,7 @@ public sealed class HostArtifactIndexBuilder
             JobId = jobId,
             RootPath = fullJobRoot,
             GeneratedAtUtc = DateTimeOffset.UtcNow,
+            Collections = BuildCollections(artifacts),
             Artifacts = artifacts
         };
     }
@@ -182,10 +194,16 @@ public sealed class HostArtifactIndexBuilder
 
         if (relativePath.Contains("/packet-captures/", StringComparison.OrdinalIgnoreCase) ||
             relativePath.StartsWith("packet-captures/", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(Path.GetExtension(path), ".pcap", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(Path.GetExtension(path), ".pcapng", StringComparison.OrdinalIgnoreCase))
+            ArtifactDescriptorFactory.IsPacketCapturePath(path))
         {
-            return new ArtifactClassification(ArtifactKind.PacketCapture, Category: "packet-capture", EvidenceRole: "packet-capture", CollectionName: "packet-captures", CapturePhase: InferCapturePhase(fileName));
+            return new ArtifactClassification(
+                ArtifactKind.PacketCapture,
+                Category: "packet-capture",
+                EvidenceRole: "packet-capture",
+                CollectionName: "packet-captures",
+                CapturePhase: InferCapturePhase(fileName),
+                CaptureState: "available",
+                Metadata: BuildPacketCaptureMetadata(path));
         }
 
         if (relativePath.Contains("/artifacts/", StringComparison.OrdinalIgnoreCase) ||
@@ -223,10 +241,151 @@ public sealed class HostArtifactIndexBuilder
         return null;
     }
 
+    private static List<ArtifactCollectionDescriptor> BuildCollections(IEnumerable<ArtifactDescriptor> artifacts)
+    {
+        return artifacts
+            .Where(artifact => !string.IsNullOrWhiteSpace(artifact.CollectionName))
+            .GroupBy(artifact => artifact.CollectionName, StringComparer.OrdinalIgnoreCase)
+            .OrderBy(group => group.Key, StringComparer.OrdinalIgnoreCase)
+            .Select(group => BuildCollection(group.Key, group.OrderBy(artifact => artifact.RelativePath, StringComparer.OrdinalIgnoreCase).ToList()))
+            .ToList();
+    }
+
+    private static ArtifactCollectionDescriptor BuildCollection(string collectionName, IReadOnlyList<ArtifactDescriptor> artifacts)
+    {
+        var first = artifacts[0];
+        var relativePath = InferCollectionRelativePath(collectionName, artifacts);
+        var mimeTypes = artifacts
+            .Select(artifact => artifact.MimeType)
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(value => value, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var metadata = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["origin"] = "host",
+            ["discoveredBy"] = nameof(HostArtifactIndexBuilder),
+            ["artifactCount"] = artifacts.Count.ToString(CultureInfo.InvariantCulture),
+            ["totalBytes"] = artifacts.Sum(artifact => artifact.SizeBytes).ToString(CultureInfo.InvariantCulture)
+        };
+        if (mimeTypes.Count > 0)
+        {
+            metadata["mimeTypes"] = string.Join(",", mimeTypes);
+        }
+
+        if (string.Equals(collectionName, "packet-captures", StringComparison.OrdinalIgnoreCase))
+        {
+            metadata["captureSource"] = "external";
+            metadata["hostCaptureStarted"] = "false";
+            metadata["importMode"] = "external-artifact";
+            metadata["extensions"] = string.Join(
+                ",",
+                artifacts
+                    .Select(artifact => Path.GetExtension(artifact.Name).ToLowerInvariant())
+                    .Where(extension => !string.IsNullOrWhiteSpace(extension))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .OrderBy(extension => extension, StringComparer.OrdinalIgnoreCase));
+        }
+
+        return new ArtifactCollectionDescriptor
+        {
+            Name = collectionName,
+            Kind = artifacts.Select(artifact => artifact.Kind).Distinct().Count() == 1
+                ? first.Kind
+                : ArtifactKind.Unknown,
+            Category = first.Category,
+            EvidenceRole = first.EvidenceRole,
+            RelativePath = relativePath,
+            SafeLink = ArtifactDescriptorFactory.BuildSafeLink(relativePath),
+            ImportPath = relativePath,
+            Enabled = true,
+            Implemented = true,
+            Status = "captured",
+            Reason = string.Equals(collectionName, "packet-captures", StringComparison.OrdinalIgnoreCase)
+                ? "external-pcap-artifacts-indexed"
+                : string.Empty,
+            Metadata = metadata
+        };
+    }
+
+    private static string InferCollectionRelativePath(string collectionName, IReadOnlyList<ArtifactDescriptor> artifacts)
+    {
+        foreach (var artifact in artifacts)
+        {
+            var relativePath = ArtifactDescriptorFactory.NormalizeRelativePath(artifact.RelativePath);
+            var segments = relativePath.Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            for (var index = 0; index < segments.Length; index++)
+            {
+                if (string.Equals(segments[index], collectionName, StringComparison.OrdinalIgnoreCase))
+                {
+                    return string.Join("/", segments.Take(index + 1));
+                }
+            }
+        }
+
+        return CommonDirectory(artifacts
+            .Select(artifact => ArtifactDescriptorFactory.NormalizeRelativePath(artifact.RelativePath))
+            .Where(path => !string.IsNullOrWhiteSpace(path)));
+    }
+
+    private static string CommonDirectory(IEnumerable<string> relativePaths)
+    {
+        var directories = relativePaths
+            .Select(path => path.Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            .Where(segments => segments.Length > 1)
+            .Select(segments => segments.Take(segments.Length - 1).ToArray())
+            .ToList();
+        if (directories.Count == 0)
+        {
+            return string.Empty;
+        }
+
+        var prefix = directories[0].ToList();
+        foreach (var directory in directories.Skip(1))
+        {
+            var length = 0;
+            while (length < prefix.Count &&
+                length < directory.Length &&
+                string.Equals(prefix[length], directory[length], StringComparison.OrdinalIgnoreCase))
+            {
+                length++;
+            }
+
+            prefix = prefix.Take(length).ToList();
+            if (prefix.Count == 0)
+            {
+                break;
+            }
+        }
+
+        return string.Join("/", prefix);
+    }
+
+    private static IReadOnlyDictionary<string, string> BuildPacketCaptureMetadata(string path)
+    {
+        var extension = Path.GetExtension(path).ToLowerInvariant();
+        return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["captureSource"] = "external",
+            ["hostCaptureStarted"] = "false",
+            ["importMode"] = "external-artifact",
+            ["pcapFormat"] = string.Equals(extension, ".pcapng", StringComparison.OrdinalIgnoreCase)
+                ? "pcapng"
+                : string.Equals(extension, ".pcap", StringComparison.OrdinalIgnoreCase)
+                    ? "pcap"
+                    : "unknown"
+        };
+    }
+
+    private static readonly IReadOnlyDictionary<string, string> EmptyMetadata =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
     private sealed record ArtifactClassification(
         ArtifactKind Kind,
         string? Category = null,
         string? EvidenceRole = null,
         string? CollectionName = null,
-        string? CapturePhase = null);
+        string? CapturePhase = null,
+        string? CaptureState = null,
+        IReadOnlyDictionary<string, string>? Metadata = null);
 }

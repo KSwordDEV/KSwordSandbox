@@ -17,6 +17,12 @@ internal static class GuestAgentOptionNames
     public const string R0Mock = "r0-mock";
     public const string Screenshot = "screenshot";
     public const string Screenshots = "screenshots";
+    public const string ScreenshotPhases = "screenshot-phases";
+    public const string ScreenshotStages = "screenshot-stages";
+    public const string ScreenshotCount = "screenshot-count";
+    public const string ScreenshotsPhases = "screenshots-phases";
+    public const string ScreenshotsStages = "screenshots-stages";
+    public const string ScreenshotsCount = "screenshots-count";
     public const string CollectDroppedFiles = "collect-dropped-files";
     public const string DroppedFiles = "dropped-files";
     public const string MemoryDump = "memory-dump";

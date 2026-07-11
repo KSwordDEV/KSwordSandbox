@@ -3,8 +3,8 @@ namespace KSword.Sandbox.Abstractions.Artifacts;
 /// <summary>
 /// Host-side index of files visible under one job artifact directory.
 /// Inputs are descriptors discovered after report/guest collection; processing
-/// records normalized paths and safe links; the record is serialized as
-/// artifact-index.json for UI and report navigation.
+/// records normalized paths, safe links, and discovered collection lanes; the
+/// record is serialized as artifact-index.json for UI and report navigation.
 /// </summary>
 public sealed record HostArtifactIndex
 {
@@ -17,6 +17,8 @@ public sealed record HostArtifactIndex
     public string Producer { get; init; } = "KSword.Sandbox.Core";
 
     public DateTimeOffset GeneratedAtUtc { get; init; } = DateTimeOffset.UtcNow;
+
+    public List<ArtifactCollectionDescriptor> Collections { get; init; } = [];
 
     public List<ArtifactDescriptor> Artifacts { get; init; } = [];
 }

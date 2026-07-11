@@ -39,6 +39,10 @@ internal sealed class GuestAgentCollectionDepthScenario : ISmokeTestScenario
         AssertFileContains(Path.Combine(collectionRoot, "ProcessTreeProbe.cs"), "scheduled_task.created", "Process probe must emit scheduled task diff events.");
         AssertFileContains(Path.Combine(collectionRoot, "ProcessTreeProbe.cs"), "startup_item.created", "Process probe must emit startup item diff events.");
         AssertFileContains(Path.Combine(collectionRoot, "ScreenshotProbe.cs"), "IScreenshotCapture", "Screenshot interface must be present.");
+        AssertFileContains(Path.Combine(collectionRoot, "ScreenshotProbe.cs"), "ScreenshotProbeOptions", "Screenshot probe must expose configurable capture options.");
+        AssertFileContains(Path.Combine(collectionRoot, "ScreenshotProbe.cs"), "MaximumCaptureCount", "Screenshot count must be capped.");
+        AssertFileContains(Path.Combine(collectionRoot, "ScreenshotProbe.cs"), "screenshotStage", "Screenshot events must include configured stage metadata.");
+        AssertFileContains(Path.Combine(collectionRoot, "ScreenshotProbe.cs"), "screenshotIndex", "Screenshot events must include sequence metadata.");
         AssertFileContains(Path.Combine(collectionRoot, "ScreenshotProbe.cs"), "screenshot.skipped", "Screenshot capture must be non-fatal in unsupported sessions.");
         AssertFileContains(Path.Combine(collectionRoot, "ScreenshotProbe.cs"), "diagnosticStage", "Screenshot skipped events must include failure-stage diagnostics.");
         AssertFileContains(Path.Combine(collectionRoot, "MemoryDumpProbe.cs"), "IProcessMemoryDumpCapture", "Memory dump interface must be present.");
@@ -51,9 +55,14 @@ internal sealed class GuestAgentCollectionDepthScenario : ISmokeTestScenario
         SmokeAssert.True(programText.Contains("new ProcessTreeProbe()", StringComparison.Ordinal), "Agent pipeline must include ProcessTreeProbe.");
         SmokeAssert.True(programText.Contains("new FileDiffProbe()", StringComparison.Ordinal), "Agent pipeline must include FileDiffProbe.");
         SmokeAssert.True(programText.Contains("new TcpConnectionDiffProbe()", StringComparison.Ordinal), "Agent pipeline must include TcpConnectionDiffProbe.");
-        SmokeAssert.True(programText.Contains("new ScreenshotProbe()", StringComparison.Ordinal), "Agent pipeline must include ScreenshotProbe.");
+        SmokeAssert.True(programText.Contains("new ScreenshotProbe(options.ScreenshotOptions)", StringComparison.Ordinal), "Agent pipeline must include configured ScreenshotProbe.");
         SmokeAssert.True(programText.Contains("new MemoryDumpProbe()", StringComparison.Ordinal), "Agent pipeline must include MemoryDumpProbe.");
         SmokeAssert.True(programText.Contains("CaptureScreenshots", StringComparison.Ordinal), "Agent options must carry screenshot enablement.");
+        SmokeAssert.True(programText.Contains("ScreenshotProbeOptions.Parse", StringComparison.Ordinal), "Agent options must parse configurable screenshot phases and count.");
+        SmokeAssert.True(programText.Contains("screenshot-phases", StringComparison.Ordinal), "Agent CLI must accept configurable screenshot phases.");
+        SmokeAssert.True(programText.Contains("screenshot-count", StringComparison.Ordinal), "Agent CLI must accept configurable screenshot count.");
+        SmokeAssert.True(programText.Contains("artifact.manifest.written", StringComparison.Ordinal), "Agent must report manifest write success.");
+        SmokeAssert.True(programText.Contains("artifact.manifest.failed", StringComparison.Ordinal), "Agent must keep manifest write failures non-fatal.");
         SmokeAssert.True(programText.Contains("CaptureMemoryDump", StringComparison.Ordinal), "Agent options must carry explicit memory dump enablement.");
         SmokeAssert.True(programText.Contains("flags.Contains(\"memory-dump\")", StringComparison.Ordinal), "Memory dump capture must require an explicit flag.");
 
@@ -66,14 +75,19 @@ internal sealed class GuestAgentCollectionDepthScenario : ISmokeTestScenario
         SmokeAssert.True(guestAgentDoc.Contains("startup_item.created", StringComparison.Ordinal), "Guest agent doc must document startup item diffs.");
         SmokeAssert.True(guestAgentDoc.Contains("probe.timeout", StringComparison.Ordinal), "Guest agent doc must document probe timeouts.");
         SmokeAssert.True(guestAgentDoc.Contains("--screenshot", StringComparison.Ordinal), "Guest agent doc must document screenshot CLI.");
+        SmokeAssert.True(guestAgentDoc.Contains("--screenshot-phases", StringComparison.Ordinal), "Guest agent doc must document configurable screenshot phases.");
+        SmokeAssert.True(guestAgentDoc.Contains("--screenshot-count", StringComparison.Ordinal), "Guest agent doc must document configurable screenshot count.");
         SmokeAssert.True(guestAgentDoc.Contains("--memory-dump", StringComparison.Ordinal), "Guest agent doc must document memory dump CLI.");
         SmokeAssert.True(guestAgentDoc.Contains("off by default", StringComparison.OrdinalIgnoreCase), "Guest agent doc must document memory dumps as opt-in.");
         SmokeAssert.True(artifactsDoc.Contains("memory-dumps/*.dmp", StringComparison.Ordinal), "Artifacts doc must document memory dump output.");
         SmokeAssert.True(artifactsDoc.Contains("dropped-files", StringComparison.Ordinal), "Artifacts doc must document dropped-file artifacts.");
         SmokeAssert.True(artifactsDoc.Contains("screenshots/", StringComparison.Ordinal), "Artifacts doc must document screenshot artifacts.");
+        SmokeAssert.True(artifactsDoc.Contains("before,during,after", StringComparison.Ordinal), "Artifacts doc must document screenshot cadence metadata.");
+        SmokeAssert.True(artifactsDoc.Contains("manifest.json` is always written", StringComparison.Ordinal), "Artifacts doc must document best-effort manifest output.");
         SmokeAssert.True(frameworkDoc.Contains("IGuestProbe.CollectAsync", StringComparison.Ordinal), "Framework doc must document the probe extension point.");
         SmokeAssert.True(frameworkDoc.Contains("BoundedProcessRunner", StringComparison.Ordinal), "Framework doc must document bounded helper command execution.");
         SmokeAssert.True(frameworkDoc.Contains("IScreenshotCapture", StringComparison.Ordinal), "Framework doc must document screenshot capture interface.");
+        SmokeAssert.True(frameworkDoc.Contains("ScreenshotProbeOptions", StringComparison.Ordinal), "Framework doc must document configurable screenshot capture planning.");
 
         return Task.FromResult(new SmokeTestResult
         {

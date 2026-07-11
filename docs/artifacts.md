@@ -9,15 +9,18 @@ The stable guest output root is the directory passed with `--out`.
 - `artifacts/manifest.json` is always written as a safe evidence index. It can
   contain zero file artifacts when every sensitive collection lane is disabled.
 - `screenshots/*.bmp` is written only when `--screenshot` is supplied and the
-  guest desktop can be captured.
+  guest desktop can be captured. The default screenshot cadence is
+  `before,during,after`; `--screenshot-phases` and `--screenshot-count` can
+  narrow stages or capture multiple images per stage.
 - `memory-dumps/*.dmp` is written only when `--memory-dump` or
   `--memory-dumps` is supplied.
 - `artifacts/dropped-files/**` is written only when `--collect-dropped-files`
   or `--dropped-files` is supplied.
-- `packet-captures/*.pcapng` is reserved for future PCAP import. The current
-  agent only writes a `PacketCapture` collection placeholder when
-  `--packet-capture`, `--pcap`, or `--network-capture` is explicitly supplied;
-  it does not start a packet sniffer.
+- `packet-captures/*.pcap` and `packet-captures/*.pcapng` are consumable when
+  an external tool has already generated them. The current agent only writes a
+  `PacketCapture` collection placeholder when `--packet-capture`, `--pcap`, or
+  `--network-capture` is explicitly supplied; it does not start a packet
+  sniffer.
 
 ## Dropped-files manifest
 
@@ -36,11 +39,15 @@ paths as metadata only.
 ## Screenshot artifacts
 
 Screenshots are opt-in because they can contain desktop contents unrelated to
-the sample. They are best-effort BMP files captured during `after-start` and
-`after-run`. Unsupported or headless sessions emit `screenshot.skipped` instead
-of failing the run. The guest manifest and host artifact index classify files
-under `screenshots/` as `kind=Screenshot`, `category=screenshot`,
-`evidenceRole=screenshot`, and `collectionName=screenshots`.
+the sample. They are best-effort BMP files captured during the configured
+`before,during,after` stages, which map to `before-start`, `after-start`, and
+`after-run` probe phases. Unsupported or headless sessions emit
+`screenshot.skipped` instead of failing the run. Screenshot events carry
+`screenshotStage`, `screenshotIndex`, and `screenshotCount` metadata so the
+manifest can preserve the configured cadence. The guest manifest and host
+artifact index classify files under `screenshots/` as `kind=Screenshot`,
+`category=screenshot`, `evidenceRole=screenshot`, and
+`collectionName=screenshots`.
 
 ## Memory dump artifacts
 
@@ -72,17 +79,31 @@ The guest manifest and host artifact index classify `memory-dumps/**` files as
 Each collection records `enabled`, `implemented`, `status`, `reason`,
 `relativePath`, `safeLink`, and `importPath`. Disabled lanes are explicit, so a
 host importer can distinguish "not requested" from "requested but unavailable."
-`packet-captures` is currently `implemented=false` unless a future collector
-writes a `.pcap` or `.pcapng` file.
+`packet-captures` remains `implemented=false` for KSword's own guest collector.
+If a manifest or collected folder contains an externally supplied `.pcap` or
+`.pcapng`, the host can still import and report it as `kind=PacketCapture`.
 
 Each file descriptor also carries `evidenceRole`, `capturePhase`,
 `captureState`, `guestPath`, `importPath`, and `collectionName` alongside size,
 MIME type, and hashes. `guestPath` is evidence only; clickable links and import
 paths are derived from safe paths under the collected guest output root.
 
-## Future packet capture placeholder
+## External packet capture import
 
 `--packet-capture`, `--pcap`, and `--network-capture` are safe placeholders.
 They emit `packet_capture.skipped` with `implemented=false` and reserve the
 `packet-captures/` import path in the manifest. No real network packet capture
 is performed by default or by the current placeholder.
+
+For import/report purposes, existing packet captures are regular artifacts:
+
+- guest manifests can reference `packet-captures/*.pcap` or
+  `packet-captures/*.pcapng` with `kind=PacketCapture`;
+- host indexing also classifies any discovered `.pcap` or `.pcapng` file as
+  packet-capture evidence, even when it was generated outside KSwordSandbox;
+- descriptors expose MIME type (`application/vnd.tcpdump.pcap` or
+  `application/x-pcapng`), `sizeBytes`, `sha256`, `hashes.sha256`,
+  `collectionName=packet-captures`, and safe `importPath`;
+- collection metadata records `captureSource=external`,
+  `hostCaptureStarted=false`, `importMode=external-artifact`, artifact count,
+  total bytes, and MIME types.

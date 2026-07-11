@@ -15,18 +15,20 @@ through explicit probe boundaries:
 `GuestProbeRunner` and runs these phases:
 
 1. `BeforeStart` - baseline process list, file tree, TCP connections, DNS cache,
-   netstat rows, listeners, services, scheduled tasks, startup items, and
-   environment details.
-2. `AfterStart` - process deltas, process tree, and optional screenshot.
+   netstat rows, listeners, services, scheduled tasks, startup items,
+   environment details, and optional before-stage screenshot.
+2. `AfterStart` - process deltas, process tree, optional during-stage
+   screenshot, and opt-in memory dump.
 3. `AfterRun` - final process deltas, file diffs, TCP/DNS/netstat/listener
-   diffs, service/task/startup diffs, and optional screenshot.
+   diffs, service/task/startup diffs, and optional after-stage screenshot.
 
 The CLI remains backward compatible:
 
 ```text
 --sample <path> --out <directory> --duration <seconds>
 --driver-events <jsonl> --r0collector <path> --driver-device <path>
---r0-mock --screenshot --collect-dropped-files --memory-dump
+--r0-mock --screenshot --screenshot-phases before,during,after
+--screenshot-count <1-5> --collect-dropped-files --memory-dump
 ```
 
 The driver sidecar remains optional so VM smoke tests can proceed without a
@@ -77,11 +79,14 @@ throwing for expected launch/exit failures.
   DNS cache entries through `ipconfig /displaydns`, `netstat -ano` rows, and
   managed TCP/UDP listener snapshots with bounded command timeouts and
   truncation events for high-volume outputs.
-- `ScreenshotProbe` is opt-in through `--screenshot`. `IScreenshotCapture`
-  allows replacement capture implementations; the default
-  `WindowsDesktopScreenshotCapture` writes BMP files through User32/GDI32 and
-  emits `screenshot.skipped` instead of failing in headless sessions. Skipped
-  events include the failing capture stage and Win32 error code when available.
+- `ScreenshotProbe` is opt-in through `--screenshot`. `ScreenshotProbeOptions`
+  plans the default `before,during,after` cadence or the operator-selected
+  `--screenshot-phases` / `--screenshot-count` configuration without changing
+  the shared event model. `IScreenshotCapture` allows replacement capture
+  implementations; the default `WindowsDesktopScreenshotCapture` writes BMP
+  files through User32/GDI32 and emits `screenshot.skipped` instead of failing
+  in headless sessions. Skipped events include the failing capture stage and
+  Win32 error code when available.
 - `MemoryDumpProbe` is opt-in through `--memory-dump` / `--memory-dumps`. The
   default `WindowsMiniDumpCapture` writes one `MiniDumpNormal` file for the
   launched sample root PID during `AfterStart`; it skips non-Windows, exited, or
@@ -93,7 +98,7 @@ throwing for expected launch/exit failures.
 
 ## Current output artifact handling
 
-`GuestArtifactWriter` owns `events.json`, `agent-summary.json`, and optional
+`GuestArtifactWriter` owns `events.json`, `agent-summary.json`, and best-effort
 `artifacts/manifest.json` serialization. With `--collect-dropped-files`, the
 top-level agent copies `file.created` paths from the sample working directory to
 `artifacts/dropped-files`, skips paths under `--out`, then writes a dropped-file

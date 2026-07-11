@@ -7,19 +7,19 @@ a final HTML report.
 
 ## Current estimated completion
 
-- Overall v1 deliverable: **64%**
-- Minimum usable E2E chain on this host: **77%**
+- Overall v1 deliverable: **65%**
+- Minimum usable E2E chain on this host: **78%**
 - Repository architecture, docs, module boundaries, policy: **82%**
 - Core job/event/rule/report models: **72%**
 - Web/API/WebUI submission and job UX: **76%**
 - Live raw telemetry contract: **80%**
 - Hyper-V runbook generation and execution recording: **69%**
 - Golden VM / payload staging / operator readiness: **58%**
-- Guest Agent dynamic collection: **70%**
+- Guest Agent dynamic collection: **72%**
 - R0 Driver + R0Collector: **57%**
 - Static analysis and behavior rules: **64%**
-- HTML report generation: **74%**
-- Artifact manifest and dropped-file plumbing: **67%**
+- HTML report generation: **75%**
+- Artifact manifest and dropped-file plumbing: **70%**
 - Tests and quality gates: **71%**
 - Install/operations/security hardening: **32%**
 
@@ -94,6 +94,13 @@ a final HTML report.
   `evidenceRole`, `capturePhase`, `captureState`, `guestPath`, `importPath`,
   and `collectionName`), and host indexing recognizes memory dumps plus future
   `.pcap` / `.pcapng` files.
+- Screenshot collection remains opt-in but now supports a default
+  `before,during,after` cadence, `--screenshot-phases` /
+  `--screenshot-stages`, and bounded `--screenshot-count 1..5`; skipped
+  screenshots stay non-fatal on headless or unsupported guests.
+- Host artifact indexing now exposes collection summaries and can consume
+  externally generated `.pcap` / `.pcapng` artifacts without starting a sniffer;
+  packet captures appear in report artifact links when present.
 - The report now includes a static HTML/CSS weak-interaction behavior graph and
   IOC summary cards, deriving process-to-file, process-to-registry,
   process-to-network, and process-to-artifact edges from normalized events.
