@@ -273,7 +273,13 @@ public sealed class HostArtifactIndexBuilder
                     continue;
                 }
 
-                artifacts[fullPath] = artifact with { FullPath = fullPath };
+                if (artifacts.ContainsKey(fullPath))
+                {
+                    rejections.Add(CreateArtifactRejection(context, artifact with { FullPath = fullPath }, "duplicateGuestArtifactReference"));
+                    continue;
+                }
+
+                artifacts.Add(fullPath, artifact with { FullPath = fullPath });
             }
         }
 
@@ -417,6 +423,61 @@ public sealed class HostArtifactIndexBuilder
                 CopyEventDataIfPresent(metadata, evt, "zhHint", "lastZhHint");
                 CopyEventDataIfPresent(metadata, evt, "zhStatus", "lastZhStatus");
                 CopyEventDataIfPresent(metadata, evt, "zhReason", "lastZhReason");
+                CopyEventDataIfPresent(metadata, evt, "status", "lastStatus");
+                CopyEventDataIfPresent(metadata, evt, "captureState", "lastCaptureState");
+                CopyFirstEventDataIfPresent(metadata, evt, "lastArtifactRelativePath",
+                    "artifactRelativePath",
+                    "sourceArtifactRelativePath",
+                    "packetCaptureRelativePath",
+                    "pcapngRelativePath",
+                    "pcapRelativePath",
+                    "screenshotRelativePath",
+                    "memoryDumpRelativePath",
+                    "dumpRelativePath",
+                    "relativePath",
+                    "importPath");
+                CopyFirstEventDataIfPresent(metadata, evt, "lastPhase", "phase", "capturePhase", "screenshotStage");
+                CopyEventDataIfPresent(metadata, evt, "capturePhase", "lastCapturePhase");
+                CopyEventDataIfPresent(metadata, evt, "processId", "lastProcessId");
+                CopyEventDataIfPresent(metadata, evt, "parentProcessId", "lastParentProcessId");
+                CopyEventDataIfPresent(metadata, evt, "rootProcessId", "lastRootProcessId");
+                CopyEventDataIfPresent(metadata, evt, "processRole", "lastProcessRole");
+                CopyEventDataIfPresent(metadata, evt, "treeDepth", "lastTreeDepth");
+                CopyEventDataIfPresent(metadata, evt, "treeLineage", "lastTreeLineage");
+                CopyEventDataIfPresent(metadata, evt, "childProcessCount", "lastChildProcessCount");
+                CopyEventDataIfPresent(metadata, evt, "sourceHashStatus", "lastSourceHashStatus");
+                CopyEventDataIfPresent(metadata, evt, "sourceSha256", "lastSourceSha256");
+                CopyEventDataIfPresent(metadata, evt, "copiedSha256", "lastCopiedSha256");
+                CopyEventDataIfPresent(metadata, evt, "packetCountStatus", "lastDiagnosticPacketCountStatus");
+                CopyEventDataIfPresent(metadata, evt, "packetCount", "lastDiagnosticPacketCount");
+                CopyEventDataIfPresent(metadata, evt, "pcapngBlockCount", "lastDiagnosticPcapngBlockCount");
+                CopyEventDataIfPresent(metadata, evt, "pcapngEnhancedPacketBlockCount", "lastDiagnosticPcapngEnhancedPacketBlockCount");
+                CopyEventDataIfPresent(metadata, evt, "pcapngSimplePacketBlockCount", "lastDiagnosticPcapngSimplePacketBlockCount");
+                CopyEventDataIfPresent(metadata, evt, "pcapngSectionHeaderCount", "lastDiagnosticPcapngSectionHeaderCount");
+                CopyFirstEventDataIfPresent(metadata, evt, "lastDiagnosticPcapngRelativePath",
+                    "pcapngRelativePath",
+                    "packetCaptureRelativePath",
+                    "pcapRelativePath",
+                    "artifactRelativePath",
+                    "sourceArtifactRelativePath");
+                CopyFirstEventDataIfPresent(metadata, evt, "lastDiagnosticPcapngSizeBytes",
+                    "pcapngSizeBytes",
+                    "sourceArtifactSizeBytes",
+                    "sizeBytes");
+                CopyFirstEventDataIfPresent(metadata, evt, "lastDiagnosticPcapngSha256",
+                    "pcapngSha256",
+                    "sourceArtifactSha256",
+                    "sha256");
+
+                if (evt.ProcessId is not null)
+                {
+                    metadata["lastProcessId"] = evt.ProcessId.Value.ToString(CultureInfo.InvariantCulture);
+                }
+
+                if (evt.ParentProcessId is not null)
+                {
+                    metadata["lastParentProcessId"] = evt.ParentProcessId.Value.ToString(CultureInfo.InvariantCulture);
+                }
 
                 if (string.Equals(evt.EventType, "memory_dump.sweep", StringComparison.OrdinalIgnoreCase))
                 {
@@ -682,31 +743,26 @@ public sealed class HostArtifactIndexBuilder
         }
     }
 
-    private static string ResolveGuestArtifactFullPath(string guestRoot, ArtifactDescriptor artifact)
+    private static void CopyFirstEventDataIfPresent(
+        Dictionary<string, string> metadata,
+        SandboxEvent evt,
+        string destinationKey,
+        params string[] sourceKeys)
     {
-        if (!string.IsNullOrWhiteSpace(artifact.FullPath))
+        foreach (var sourceKey in sourceKeys)
         {
-            try
+            if (evt.Data.TryGetValue(sourceKey, out var value) && !string.IsNullOrWhiteSpace(value))
             {
-                var fullPath = Path.GetFullPath(artifact.FullPath);
-                if (IsSameOrUnderDirectory(fullPath, guestRoot))
-                {
-                    return fullPath;
-                }
-            }
-            catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
-            {
+                metadata[destinationKey] = value;
+                return;
             }
         }
+    }
 
-        foreach (var candidate in new[] { artifact.RelativePath, artifact.ImportPath })
+    private static string ResolveGuestArtifactFullPath(string guestRoot, ArtifactDescriptor artifact)
+    {
+        foreach (var relativePath in CandidateGuestArtifactSelectors(artifact).Distinct(StringComparer.OrdinalIgnoreCase))
         {
-            var relativePath = ArtifactDescriptorFactory.NormalizeRelativePath(candidate);
-            if (string.IsNullOrWhiteSpace(relativePath))
-            {
-                continue;
-            }
-
             try
             {
                 var fullPath = Path.GetFullPath(Path.Combine(guestRoot, relativePath));
@@ -720,7 +776,63 @@ public sealed class HostArtifactIndexBuilder
             }
         }
 
+        if (HasGuestArtifactSelector(artifact))
+        {
+            return string.Empty;
+        }
+
+        if (!string.IsNullOrWhiteSpace(artifact.FullPath))
+        {
+            try
+            {
+                var fullPath = Path.GetFullPath(artifact.FullPath);
+                var hostRelativePath = ArtifactDescriptorFactory.SafeRelativePath(guestRoot, fullPath);
+                if (!string.IsNullOrWhiteSpace(hostRelativePath) &&
+                    IsSameOrUnderDirectory(fullPath, guestRoot))
+                {
+                    return fullPath;
+                }
+            }
+            catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+            {
+            }
+        }
+
         return string.Empty;
+    }
+
+    private static IEnumerable<string> CandidateGuestArtifactSelectors(ArtifactDescriptor artifact)
+    {
+        foreach (var candidate in new[]
+        {
+            artifact.RelativePath,
+            artifact.ImportPath,
+            artifact.SafeLink,
+            MetadataValue(artifact.Metadata, "artifactRelativePath"),
+            MetadataValue(artifact.Metadata, "sourceArtifactRelativePath"),
+            MetadataValue(artifact.Metadata, "downloadSelector"),
+            MetadataValue(artifact.Metadata, "safeRelativeSelector"),
+            MetadataValue(artifact.Metadata, "downloadSafeLink")
+        })
+        {
+            var normalized = ArtifactDescriptorFactory.NormalizeSelector(candidate);
+            if (!string.IsNullOrWhiteSpace(normalized))
+            {
+                yield return normalized;
+            }
+        }
+    }
+
+    private static bool HasGuestArtifactSelector(ArtifactDescriptor artifact)
+    {
+        return !string.IsNullOrWhiteSpace(artifact.RelativePath) ||
+            !string.IsNullOrWhiteSpace(artifact.ImportPath) ||
+            !string.IsNullOrWhiteSpace(artifact.SafeLink) ||
+            HasMetadataValue(artifact.Metadata, "artifactRelativePath") ||
+            HasMetadataValue(artifact.Metadata, "sourceArtifactRelativePath") ||
+            HasMetadataValue(artifact.Metadata, "downloadSelector") ||
+            HasMetadataValue(artifact.Metadata, "safeRelativeSelector") ||
+            HasMetadataValue(artifact.Metadata, "downloadSafeLink");
     }
 
     private static ArtifactIndexRejection CreateArtifactRejection(
@@ -1121,6 +1233,13 @@ public sealed class HostArtifactIndexBuilder
         metadata["guestCollectionImplemented"] = collection.Implemented.ToString(CultureInfo.InvariantCulture).ToLowerInvariant();
         AddIfNotEmpty(metadata, "guestCollectionStatus", collection.Status);
         AddIfNotEmpty(metadata, "guestCollectionReason", collection.Reason);
+        AddCollectionPresentationMetadata(
+            metadata,
+            collection.Name,
+            collection.Kind,
+            collection.Status,
+            collection.Reason,
+            ParseMetadataCount(metadata, "downloadableArtifactCount", "artifactCount"));
 
         return collection with
         {
@@ -1147,7 +1266,7 @@ public sealed class HostArtifactIndexBuilder
         AddIfNotEmpty(metadata, "guestManifestStatus", guest.Status);
         AddIfNotEmpty(metadata, "guestManifestReason", guest.Reason);
 
-        return host with
+        var merged = host with
         {
             Kind = guest.Kind == ArtifactKind.Unknown ? host.Kind : guest.Kind,
             Category = FirstNonEmpty(guest.Category, host.Category),
@@ -1165,6 +1284,14 @@ public sealed class HostArtifactIndexBuilder
                 : FirstNonEmpty(guest.Reason, host.Reason),
             Metadata = metadata
         };
+        AddCollectionPresentationMetadata(
+            metadata,
+            merged.Name,
+            merged.Kind,
+            merged.Status,
+            merged.Reason,
+            ParseMetadataCount(metadata, "downloadableArtifactCount", "artifactCount"));
+        return merged with { Metadata = metadata };
     }
 
     private static ArtifactCollectionDescriptor BuildCollection(
@@ -1213,6 +1340,11 @@ public sealed class HostArtifactIndexBuilder
                     .OrderBy(extension => extension, StringComparer.OrdinalIgnoreCase));
         }
 
+        var reason = string.Equals(collectionName, "packet-captures", StringComparison.OrdinalIgnoreCase)
+            ? "external-pcap-artifacts-indexed"
+            : string.Empty;
+        AddCollectionPresentationMetadata(metadata, collectionName, first.Kind, "captured", reason, artifacts.Count);
+
         return new ArtifactCollectionDescriptor
         {
             Name = collectionName,
@@ -1227,9 +1359,7 @@ public sealed class HostArtifactIndexBuilder
             Enabled = true,
             Implemented = true,
             Status = "captured",
-            Reason = string.Equals(collectionName, "packet-captures", StringComparison.OrdinalIgnoreCase)
-                ? "external-pcap-artifacts-indexed"
-                : string.Empty,
+            Reason = reason,
             Metadata = metadata
         };
     }
@@ -1245,6 +1375,15 @@ public sealed class HostArtifactIndexBuilder
 
         var metadata = CopyMetadata(collection.Metadata);
         AddRejectionMetadata(metadata, rejections);
+        AddCollectionPresentationMetadata(
+            metadata,
+            collection.Name,
+            collection.Kind,
+            collection.Status,
+            string.IsNullOrWhiteSpace(collection.Reason)
+                ? FirstNonEmpty(rejections[^1].Reason, "guestManifestArtifactRejected")
+                : collection.Reason,
+            ParseMetadataCount(metadata, "downloadableArtifactCount", "artifactCount"));
         return collection with
         {
             Reason = string.IsNullOrWhiteSpace(collection.Reason)
@@ -1275,6 +1414,13 @@ public sealed class HostArtifactIndexBuilder
             ["downloadableArtifactCount"] = "0"
         };
         AddRejectionMetadata(metadata, rejections);
+        AddCollectionPresentationMetadata(
+            metadata,
+            collectionName,
+            kind,
+            "rejected",
+            FirstNonEmpty(rejections[^1].Reason, "guestManifestArtifactRejected"),
+            0);
 
         return new ArtifactCollectionDescriptor
         {
@@ -1318,6 +1464,160 @@ public sealed class HostArtifactIndexBuilder
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .OrderBy(reason => reason, StringComparer.OrdinalIgnoreCase));
         metadata["zhRejectionHint"] = "Host 已拒绝不安全、缺失或不可下载的 guest manifest 产物引用；只有 job 输出目录下的已索引相对路径可以下载。";
+    }
+
+    private static void AddCollectionPresentationMetadata(
+        Dictionary<string, string> metadata,
+        string collectionName,
+        ArtifactKind kind,
+        string status,
+        string reason,
+        int downloadableArtifactCount)
+    {
+        var resolvedKind = kind == ArtifactKind.Unknown ? KindForCollection(collectionName) : kind;
+        var normalizedStatus = FirstNonEmpty(status, "unknown");
+        var normalizedReason = FirstNonEmpty(reason, MetadataValue(metadata, "lastReason"), MetadataValue(metadata, "guestManifestReason"));
+        AddIfMissing(metadata, "apiMetadataVersion", "artifact-collection-v1");
+        AddIfMissing(metadata, "collectionDisplayName", CollectionDisplayName(collectionName, resolvedKind));
+        AddIfMissing(metadata, "collectionDisplayNameZh", CollectionDisplayNameZh(collectionName, resolvedKind));
+        AddIfMissing(metadata, "collectionNameZh", CollectionDisplayNameZh(collectionName, resolvedKind));
+        AddIfMissing(metadata, "artifactKindZh", ArtifactKindNameZh(resolvedKind));
+        AddIfMissing(metadata, "downloadableArtifactCount", downloadableArtifactCount.ToString(CultureInfo.InvariantCulture));
+        AddIfMissing(metadata, "hasDownloadableArtifacts", (downloadableArtifactCount > 0).ToString(CultureInfo.InvariantCulture).ToLowerInvariant());
+        AddIfMissing(metadata, "sensitiveCollection", IsSensitiveArtifactKind(resolvedKind).ToString(CultureInfo.InvariantCulture).ToLowerInvariant());
+        AddIfMissing(metadata, "downloadSelectorPolicy", "relative-index-selectors-only");
+        AddIfMissing(metadata, "downloadSecurityPolicy", "server-indexed-relative-selector");
+        AddIfMissing(metadata, "downloadRejectionPolicy", "reject-empty-absolute-traversal-unindexed-missing");
+        AddIfMissing(metadata, "safeSelectorFields", "relativePath,safeLink,importPath,downloadSelector,downloadSafeLink");
+        AddIfMissing(metadata, "zhStatus", CollectionStatusZh(normalizedStatus));
+        AddIfMissing(metadata, "zhReason", CollectionReasonZh(normalizedReason));
+        AddIfMissing(metadata, "zhHint", CollectionHintZh(collectionName, normalizedStatus, normalizedReason, downloadableArtifactCount));
+    }
+
+    private static int ParseMetadataCount(IReadOnlyDictionary<string, string> metadata, params string[] keys)
+    {
+        foreach (var key in keys)
+        {
+            if (metadata.TryGetValue(key, out var value) &&
+                int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var count))
+            {
+                return Math.Max(0, count);
+            }
+        }
+
+        return 0;
+    }
+
+    private static bool IsSensitiveArtifactKind(ArtifactKind kind)
+    {
+        return kind is ArtifactKind.DroppedFile or ArtifactKind.Screenshot or ArtifactKind.MemoryDump or ArtifactKind.PacketCapture;
+    }
+
+    private static string CollectionDisplayName(string collectionName, ArtifactKind kind)
+    {
+        return kind switch
+        {
+            ArtifactKind.DroppedFile => "Dropped files",
+            ArtifactKind.Screenshot => "Screenshots",
+            ArtifactKind.MemoryDump => "Memory dumps",
+            ArtifactKind.PacketCapture => "Packet captures",
+            ArtifactKind.DriverEventsJsonLines => "Driver events",
+            ArtifactKind.GuestEventsJson => "Guest events",
+            ArtifactKind.GuestSummaryJson => "Guest summary",
+            ArtifactKind.ArtifactManifest => "Artifact manifests",
+            ArtifactKind.ArtifactIndex => "Artifact index",
+            _ => string.IsNullOrWhiteSpace(collectionName) ? "Artifacts" : collectionName
+        };
+    }
+
+    private static string CollectionDisplayNameZh(string collectionName, ArtifactKind kind)
+    {
+        return kind switch
+        {
+            ArtifactKind.DroppedFile => "掉落文件",
+            ArtifactKind.Screenshot => "截图",
+            ArtifactKind.MemoryDump => "内存转储",
+            ArtifactKind.PacketCapture => "抓包文件",
+            ArtifactKind.DriverEventsJsonLines => "R0 事件",
+            ArtifactKind.GuestEventsJson => "Guest 事件",
+            ArtifactKind.GuestSummaryJson => "Guest 摘要",
+            ArtifactKind.ArtifactManifest => "产物清单",
+            ArtifactKind.ArtifactIndex => "产物索引",
+            _ => string.IsNullOrWhiteSpace(collectionName) ? "产物" : collectionName
+        };
+    }
+
+    private static string CollectionStatusZh(string status)
+    {
+        return status.ToLowerInvariant() switch
+        {
+            "captured" => "已采集",
+            "available" => "可用",
+            "skipped" => "已跳过",
+            "failed" => "采集失败",
+            "disabled" => "未启用",
+            "rejected" => "已拒绝",
+            "missing" => "缺失",
+            "summary" => "摘要",
+            _ => "未知状态"
+        };
+    }
+
+    private static string CollectionReasonZh(string reason)
+    {
+        if (string.IsNullOrWhiteSpace(reason))
+        {
+            return string.Empty;
+        }
+
+        return reason.Trim().ToLowerInvariant() switch
+        {
+            "nodownloadableartifacts" => "没有可下载产物",
+            "not-requested" => "未请求采集",
+            "notrequested" => "未请求采集",
+            "screenshotnotrequested" => "未请求截图",
+            "memorydumpnotrequested" => "未请求内存转储",
+            "packetcapturenotrequested" => "未请求抓包",
+            "droppedfilesnotrequested" => "未请求掉落文件收集",
+            "desktopunavailable" => "桌面会话不可用",
+            "targetprocessexited" => "目标进程已退出",
+            "pktmonstartfailed" => "pktmon 启动失败",
+            "unsafeguestartifactpath" => "guest manifest 产物路径不安全",
+            "missingguestartifactfile" => "guest manifest 指向的文件缺失",
+            "duplicateguestartifactreference" => "guest manifest 重复引用同一产物",
+            "guestmanifestartifactrejected" => "guest manifest 产物引用已被拒绝",
+            "external-pcap-artifacts-indexed" => "已索引外部抓包产物",
+            _ => reason
+        };
+    }
+
+    private static string CollectionHintZh(
+        string collectionName,
+        string status,
+        string reason,
+        int downloadableArtifactCount)
+    {
+        if (downloadableArtifactCount > 0)
+        {
+            return "Host 已为该 collection 建立安全相对下载选择器；请使用 artifact-index.json 中的 selector 下载，绝对路径仅用于诊断。";
+        }
+
+        if (string.Equals(status, "rejected", StringComparison.OrdinalIgnoreCase) ||
+            reason.Contains("unsafe", StringComparison.OrdinalIgnoreCase) ||
+            reason.Contains("missingGuestArtifactFile", StringComparison.OrdinalIgnoreCase) ||
+            reason.Contains("duplicateGuestArtifactReference", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Host 已保留 manifest 拒绝/重复诊断，但不会为不安全、缺失或重复的引用生成下载链接。";
+        }
+
+        return collectionName switch
+        {
+            "dropped-files" => "掉落文件默认关闭；请确认已启用收集、样本在工作目录内创建文件，且复制到 artifacts/dropped-files 成功。",
+            "screenshots" => "截图默认关闭；请确认已启用截图，来宾桌面会话、GDI 权限和输出路径可用。",
+            "memory-dumps" => "内存转储默认关闭；请确认已启用转储、目标进程仍可见，并且 MiniDumpWriteDump 权限可用。",
+            "packet-captures" => "抓包默认关闭；请确认已启用抓包、pktmon 可用并成功转换，或导入已有 .pcap/.pcapng。",
+            _ => "没有可下载产物时仅记录采集健康诊断，不会把缺口当作样本行为。"
+        };
     }
 
     private static string InferCollectionRelativePath(string collectionName, IReadOnlyList<ArtifactDescriptor> artifacts)
@@ -1458,6 +1758,12 @@ public sealed class HostArtifactIndexBuilder
                 group
                     .Select(item => item.artifact.RelativePath)
                     .Where(path => !string.IsNullOrWhiteSpace(path)));
+            var memberSelectorsJson = JsonSerializer.Serialize(
+                group
+                    .Select(item => item.artifact.RelativePath)
+                    .Where(path => !string.IsNullOrWhiteSpace(path))
+                    .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+                    .ToList());
             for (var ordinal = 0; ordinal < group.Count; ordinal++)
             {
                 var artifact = group[ordinal].artifact;
@@ -1474,8 +1780,10 @@ public sealed class HostArtifactIndexBuilder
                     metadata["duplicateRole"] = ordinal == 0 ? "primary" : "duplicate";
                     metadata["duplicatePrimarySelector"] = primary.RelativePath;
                     metadata["duplicatePrimarySafeLink"] = primary.SafeLink;
+                    metadata["duplicatePrimaryImportPath"] = primary.ImportPath;
                     metadata["duplicateOfArtifactRelativePath"] = primary.RelativePath;
                     metadata["duplicateGroupMemberSelectors"] = memberSelectors;
+                    metadata["duplicateGroupMemberSelectorsJson"] = memberSelectorsJson;
                     metadata["duplicateSetLabel"] = $"{group.Count.ToString(CultureInfo.InvariantCulture)} files share the same SHA-256 and size";
                     metadata["duplicateSetLabelZh"] = $"{group.Count.ToString(CultureInfo.InvariantCulture)} 个产物具有相同 SHA-256 和大小";
                 }
@@ -1559,12 +1867,16 @@ public sealed class HostArtifactIndexBuilder
         var fileName = string.IsNullOrWhiteSpace(artifact.Name)
             ? Path.GetFileName(artifact.RelativePath)
             : artifact.Name;
+        AddIfMissing(metadata, "apiMetadataVersion", "artifact-descriptor-v1");
         AddIfMissing(metadata, "contentType", contentType);
         AddIfMissing(metadata, "downloadContentType", contentType);
         AddIfMissing(metadata, "downloadFileName", fileName);
         AddIfMissing(metadata, "downloadSelector", artifact.RelativePath);
         AddIfMissing(metadata, "downloadSafeLink", artifact.SafeLink);
         AddIfMissing(metadata, "safeRelativeSelector", artifact.RelativePath);
+        AddIfMissing(metadata, "downloadAvailable", "true");
+        AddIfMissing(metadata, "selectorEncoding", "path-segment-url-encoded-safeLink");
+        AddIfMissing(metadata, "selectorFields", "relativePath,safeLink,importPath,downloadSelector,downloadSafeLink");
         AddIfMissing(metadata, "downloadSecurityPolicy", "server-indexed-relative-selector");
         AddIfMissing(metadata, "downloadRejectionPolicy", "reject-empty-absolute-traversal-unindexed-missing");
         AddIfMissing(metadata, "downloadIndexPolicy", "artifact-index-relative-selectors-only");
@@ -1730,6 +2042,13 @@ public sealed class HostArtifactIndexBuilder
         }
 
         return null;
+    }
+
+    private static bool HasMetadataValue(IDictionary<string, string>? metadata, string key)
+    {
+        return metadata is not null &&
+            metadata.TryGetValue(key, out var value) &&
+            !string.IsNullOrWhiteSpace(value);
     }
 
     private static Dictionary<string, string> CopyMetadata(IDictionary<string, string>? metadata)

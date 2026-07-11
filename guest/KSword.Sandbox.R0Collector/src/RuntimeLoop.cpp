@@ -41,6 +41,17 @@ std::string BuildConfigData(const Options& options) {
     }
     data.AddBool("mockMode", options.mockMode);
     data.AddBool("syntheticMode", options.mockMode);
+    if (options.mockMode) {
+        data.AddUtf8("semanticSelfCheckScenarios", kSyntheticSemanticSelfCheckScenarios);
+        data.AddSigned("semanticSelfCheckRows", kSyntheticSemanticSelfCheckRows);
+        data.AddSigned("semanticSelfCheckSequenceStart", kSyntheticSemanticSequenceStart);
+        data.AddSigned(
+            "semanticSelfCheckSequenceEnd",
+            kSyntheticSemanticSequenceStart + kSyntheticSemanticSelfCheckRows - 1);
+        data.AddWide(
+            "zhSemanticSelfCheckHint",
+            L"mock/stress 模式会附加 DNS/HTTP/TLS/横向移动/下载执行/进程血缘语义自检行；这些行不来自真实驱动。");
+    }
     data.AddBool("injectJsonlNoise", options.injectJsonlNoise);
     data.AddUtf8("jsonlNoiseInjectionGuard", "noise injection is accepted only in mock/stress mode and rejected for abi/diagnose/health/live collection");
     data.AddWide("zhJsonlNoiseInjectionGuard", L"JSONL 噪声注入仅在 mock/stress 模式允许，ABI/就绪/健康/实时采集会拒绝。");

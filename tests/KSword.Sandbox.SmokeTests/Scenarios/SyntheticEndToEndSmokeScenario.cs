@@ -184,6 +184,11 @@ internal sealed class SyntheticEndToEndSmokeScenario : ISmokeTestScenario
         SmokeAssert.True(planned.Runbook is not null, "Planned job should include a Hyper-V runbook.");
         SmokeAssert.True(planned.Runbook!.Steps.Count > 0, "Planned runbook should contain reviewable steps.");
         SmokeAssert.True(planned.Runbook.Steps.Any(step => step.Id == "run-agent"), "Planned runbook should include the guest agent step.");
+        SmokeAssert.True(planned.Runbook.Steps.Any(step => step.Id == "record-artifact-policy"), "Planned runbook should record the resolved artifact policy before guest execution.");
+        var artifactPolicy = planned.Runbook.Steps.Single(step => step.Id == "record-artifact-policy");
+        RequireContains(artifactPolicy.PowerShell, "artifact-collection-policy.json", "Runbook should write a durable artifact collection policy beside live output.");
+        RequireContains(artifactPolicy.PowerShell, "sample-process-tree-descendants-if-supported", "Artifact policy should document memory-dump descendant semantics.");
+        RequireContains(artifactPolicy.PowerShell, "safe relative selectors", "Artifact policy should document safe download selector expectations.");
         var runAgent = planned.Runbook.Steps.Single(step => step.Id == "run-agent");
         RequireContains(runAgent.PowerShell, "--collect-dropped-files", "Runbook should pass dropped-file collection into the guest agent.");
         RequireContains(runAgent.PowerShell, "--screenshot", "Runbook should pass screenshot collection into the guest agent.");
@@ -544,7 +549,12 @@ internal sealed class SyntheticEndToEndSmokeScenario : ISmokeTestScenario
         SmokeAssert.True(report.Events.Any(evt => evt.EventType == "memory_dump.captured"), "Imported report should contain memory dump artifact evidence.");
         var importEvent = report.Events.FirstOrDefault(evt => evt.EventType == "guest.events.imported");
         SmokeAssert.True(importEvent is not null, "Imported report should include guest.events.imported marker.");
-        SmokeAssert.True(importEvent!.Data.TryGetValue("eventCount", out var eventCountText) && int.TryParse(eventCountText, out var importedEventCount) && importedEventCount == 9, "Guest import marker should count events.json plus driver-events.jsonl rows.");
+        SmokeAssert.True(
+            importEvent!.Data.TryGetValue("eventCount", out var eventCountText) &&
+            int.TryParse(eventCountText, out var importedEventCount) &&
+            importedEventCount >= 9 &&
+            importedEventCount <= report.Events.Count,
+            "Guest import marker should count at least events.json plus driver-events.jsonl rows and stay bounded by the refreshed report event count.");
         SmokeAssert.True(report.Findings.Any(finding => finding.RuleId == "script-interpreter"), "Synthetic process event should trigger script-interpreter rule.");
         SmokeAssert.True(report.Findings.Any(finding => finding.RuleId == "registry-change"), "Synthetic registry event should trigger registry-change rule.");
         SmokeAssert.True(report.Findings.Any(finding => finding.RuleId == "r0collector-mock-driver-event"), "Synthetic R0 mock event should trigger R0 collector rule.");

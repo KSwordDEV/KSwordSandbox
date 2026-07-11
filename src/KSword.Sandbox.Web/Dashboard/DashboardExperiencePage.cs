@@ -231,7 +231,7 @@ internal static class DashboardExperiencePage
               <p class="hint"><span data-zh="请选择一种提交方式：上传 EXE 会创建任务、尝试启动动态分析并打开监控；选择已有路径或扫描目录会先生成可复核计划。" data-en="Choose one submission method: upload creates a job, attempts to start dynamic analysis, and opens the monitor; existing path and folder scan create a reviewable plan first.">请选择一种提交方式：上传 EXE 会创建任务、尝试启动动态分析并打开监控；选择已有路径或扫描目录会先生成可复核计划。</span></p>
               <input id="duration" type="hidden" value="120">
               <div class="tabs" role="tablist" aria-label="三种提交方式 / Three submission methods">
-                <button id="tab-upload" class="tab-button active" type="button" role="tab" aria-selected="true" aria-controls="panel-upload" onclick="selectPlanTab('upload')" data-zh="上传 .exe → 提交分析并打开监控" data-en="Upload .exe → submit analysis and open monitor">上传 .exe → 提交分析并打开监控</button>
+                <button id="tab-upload" class="tab-button active" type="button" role="tab" aria-selected="true" aria-controls="panel-upload" onclick="selectPlanTab('upload')" data-zh="上传 .exe → 自动分析并打开监控" data-en="Upload .exe → auto analyze and open monitor">上传 .exe → 自动分析并打开监控</button>
                 <button id="tab-path" class="tab-button" type="button" role="tab" aria-selected="false" aria-controls="panel-path" onclick="selectPlanTab('path')" data-zh="选择已有路径" data-en="Existing path">选择已有路径</button>
                 <button id="tab-scan" class="tab-button" type="button" role="tab" aria-selected="false" aria-controls="panel-scan" onclick="selectPlanTab('scan')" data-zh="扫描目录" data-en="Scan folder">扫描目录</button>
               </div>
@@ -325,10 +325,10 @@ internal static class DashboardExperiencePage
                 <summary data-zh="高级：敏感产物采集（显式启用 / opt-in）" data-en="Advanced: sensitive artifact collection (explicit opt-in)">高级：敏感产物采集（显式启用 / opt-in）</summary>
                 <p class="hint" data-zh="这些选项默认关闭；勾选后只影响当前任务，上传点击会随计划一起提交并在动态监控页显示，runbook 会把对应参数（flag）传给 Guest Agent。" data-en="These options are disabled by default. When checked, they affect only this job, upload submits them with the plan and shows them on the dynamic monitor, and the runbook forwards matching flags to the Guest Agent.">这些选项默认关闭；勾选后只影响当前任务，上传点击会随计划一起提交并在动态监控页显示，runbook 会把对应参数（flag）传给 Guest Agent。</p>
                 <div class="vm-grid">
-                  <div class="toggle-card" data-copy="采集落地文件 / Collect dropped files"><label for="collectDroppedFiles"><input id="collectDroppedFiles" type="checkbox"> <span data-zh="采集落地文件" data-en="Collect dropped files">采集落地文件</span></label><p class="field-hint" data-zh="保存样本运行期间新增或修改的落地文件证据。" data-en="Preserve dropped-file evidence created or modified during sample execution.">保存样本运行期间新增或修改的落地文件证据。</p></div>
-                  <div class="toggle-card" data-copy="采集截图 / Capture screenshots"><label for="captureScreenshots"><input id="captureScreenshots" type="checkbox"> <span data-zh="采集截图" data-en="Capture screenshots">采集截图</span></label><p class="field-hint" data-zh="采集运行窗口或桌面截图，帮助复核 GUI 行为。" data-en="Capture run-window or desktop screenshots for GUI behavior review.">采集运行窗口或桌面截图，帮助复核 GUI 行为。</p></div>
-                  <div class="toggle-card" data-copy="采集内存转储：样本进程；支持时包含子进程 / Capture memory dumps: sample process; child processes when supported"><label for="captureMemoryDumps"><input id="captureMemoryDumps" type="checkbox"> <span data-zh="采集内存转储（含子进程，若支持）" data-en="Capture memory dumps (children if supported)">采集内存转储（含子进程，若支持）</span></label><p class="field-hint" data-zh="请求样本进程内存转储；Guest Agent 支持时也包含可解析的子进程转储。" data-en="Request sample-process memory dumps; when the Guest Agent supports it, resolved child processes are dumped too.">请求样本进程内存转储；Guest Agent 支持时也包含可解析的子进程转储。</p></div>
-                  <div class="toggle-card" data-copy="采集 PCAP 抓包 / Capture packet capture PCAP"><label for="capturePacketCapture"><input id="capturePacketCapture" type="checkbox"> <span data-zh="采集 PCAP 抓包" data-en="Capture PCAP">采集 PCAP 抓包</span></label><p class="field-hint" data-zh="采集网络包为 PCAP/PCAPNG 证据，监控页提供下载状态。" data-en="Capture network packets as PCAP/PCAPNG evidence; the monitor shows download status.">采集网络包为 PCAP/PCAPNG 证据，监控页提供下载状态。</p></div>
+                  <div id="artifact-card-collectDroppedFiles" class="toggle-card" data-copy="采集落地文件 / Collect dropped files / --collect-dropped-files"><label for="collectDroppedFiles"><input id="collectDroppedFiles" type="checkbox"> <span data-zh="采集落地文件" data-en="Collect dropped files">采集落地文件</span></label><p id="collectDroppedFilesHint" class="field-hint" data-zh="保存样本运行期间新增或修改的落地文件证据。" data-en="Preserve dropped-file evidence created or modified during sample execution.">保存样本运行期间新增或修改的落地文件证据。</p><button class="copy-btn" type="button" data-copy="采集落地文件 / Collect dropped files / --collect-dropped-files" data-copy-label="collect dropped files option" data-zh="复制" data-en="Copy">复制</button></div>
+                  <div id="artifact-card-captureScreenshots" class="toggle-card" data-copy="采集截图 / Capture screenshots / --screenshot"><label for="captureScreenshots"><input id="captureScreenshots" type="checkbox"> <span data-zh="采集截图" data-en="Capture screenshots">采集截图</span></label><p id="captureScreenshotsHint" class="field-hint" data-zh="采集运行窗口或桌面截图，帮助复核 GUI 行为。" data-en="Capture run-window or desktop screenshots for GUI behavior review.">采集运行窗口或桌面截图，帮助复核 GUI 行为。</p><button class="copy-btn" type="button" data-copy="采集截图 / Capture screenshots / --screenshot" data-copy-label="screenshot option" data-zh="复制" data-en="Copy">复制</button></div>
+                  <div id="artifact-card-captureMemoryDumps" class="toggle-card" data-copy="采集内存转储：样本进程；支持时包含子进程 / Capture memory dumps: sample process; child processes when supported / --memory-dump"><label for="captureMemoryDumps"><input id="captureMemoryDumps" type="checkbox"> <span data-zh="采集内存转储（含子进程，若支持）" data-en="Capture memory dumps (children if supported)">采集内存转储（含子进程，若支持）</span></label><p id="captureMemoryDumpsHint" class="field-hint" data-zh="请求样本进程内存转储；Guest Agent 支持时也包含可解析的子进程转储。" data-en="Request sample-process memory dumps; when the Guest Agent supports it, resolved child processes are dumped too.">请求样本进程内存转储；Guest Agent 支持时也包含可解析的子进程转储。</p><button class="copy-btn" type="button" data-copy="采集内存转储 / Capture memory dumps / --memory-dump" data-copy-label="memory dump option" data-zh="复制" data-en="Copy">复制</button></div>
+                  <div id="artifact-card-capturePacketCapture" class="toggle-card" data-copy="采集 PCAP 抓包 / Capture packet capture PCAP / --packet-capture"><label for="capturePacketCapture"><input id="capturePacketCapture" type="checkbox"> <span data-zh="采集 PCAP 抓包" data-en="Capture PCAP">采集 PCAP 抓包</span></label><p id="capturePacketCaptureHint" class="field-hint" data-zh="采集网络包为 PCAP/PCAPNG 证据，监控页提供下载状态。" data-en="Capture network packets as PCAP/PCAPNG evidence; the monitor shows download status.">采集网络包为 PCAP/PCAPNG 证据，监控页提供下载状态。</p><button class="copy-btn" type="button" data-copy="采集 PCAP 抓包 / Capture PCAP / --packet-capture" data-copy-label="packet capture option" data-zh="复制" data-en="Copy">复制</button></div>
                 </div>
               </details>
               <div id="status" class="status" role="status" aria-live="polite"></div>
@@ -374,7 +374,59 @@ internal static class DashboardExperiencePage
             let runtimeConfigLoadError = '';
             let virusTotalSettingsState = null;
             let virusTotalReadinessError = '';
+            let artifactCollectionSupport = {
+              collectDroppedFiles: true,
+              captureScreenshots: true,
+              captureMemoryDumps: true,
+              capturePacketCapture: true
+            };
             const vmPresetStorageKey = 'ksword-vm-overrides';
+            const artifactOptionDefinitions = [
+              {
+                key: 'collectDroppedFiles',
+                id: 'collectDroppedFiles',
+                cardId: 'artifact-card-collectDroppedFiles',
+                hintId: 'collectDroppedFilesHint',
+                flag: '--collect-dropped-files',
+                labelZh: '采集落地文件',
+                labelEn: 'Collect dropped files',
+                hintZh: '保存样本运行期间新增或修改的落地文件证据。',
+                hintEn: 'Preserve dropped-file evidence created or modified during sample execution.'
+              },
+              {
+                key: 'captureScreenshots',
+                id: 'captureScreenshots',
+                cardId: 'artifact-card-captureScreenshots',
+                hintId: 'captureScreenshotsHint',
+                flag: '--screenshot',
+                labelZh: '采集截图',
+                labelEn: 'Capture screenshots',
+                hintZh: '采集运行窗口或桌面截图，帮助复核 GUI 行为。',
+                hintEn: 'Capture run-window or desktop screenshots for GUI behavior review.'
+              },
+              {
+                key: 'captureMemoryDumps',
+                id: 'captureMemoryDumps',
+                cardId: 'artifact-card-captureMemoryDumps',
+                hintId: 'captureMemoryDumpsHint',
+                flag: '--memory-dump',
+                labelZh: '采集内存转储（含子进程，若支持）',
+                labelEn: 'Capture memory dumps (children if supported)',
+                hintZh: '请求样本进程内存转储；Guest Agent 支持时也包含可解析的子进程转储。',
+                hintEn: 'Request sample-process memory dumps; when the Guest Agent supports it, resolved child processes are dumped too.'
+              },
+              {
+                key: 'capturePacketCapture',
+                id: 'capturePacketCapture',
+                cardId: 'artifact-card-capturePacketCapture',
+                hintId: 'capturePacketCaptureHint',
+                flag: '--packet-capture',
+                labelZh: '采集 PCAP 抓包',
+                labelEn: 'Capture PCAP',
+                hintZh: '采集网络包为 PCAP/PCAPNG 证据，监控页提供下载状态。',
+                hintEn: 'Capture network packets as PCAP/PCAPNG evidence; the monitor shows download status.'
+              }
+            ];
             const liveStages = [
               ['启动 VM', 'Start VM', '还原干净环境并等待来宾机可用', 'Restore a clean VM and wait for guest readiness'],
               ['部署 Payload', 'Deploy payload', '传入样本、Agent 与采集器', 'Copy the sample, agent, and collectors'],
@@ -588,6 +640,7 @@ internal static class DashboardExperiencePage
                 const config = await requireOk(response, t('加载配置', 'Load config'));
                 runtimeConfigDefaults = config;
                 runtimeConfigLoadError = '';
+                updateArtifactCollectionSupport(config);
                 const maxDuration = normalizePositiveInt(config.analysis?.maxDurationSeconds, 900);
                 const defaultDuration = clampDuration(config.analysis?.defaultDurationSeconds, maxDuration);
                 document.getElementById('duration').value = String(defaultDuration);
@@ -605,6 +658,7 @@ internal static class DashboardExperiencePage
                 document.getElementById('captureMemoryDumps').checked = Boolean(config.artifactCollection?.captureMemoryDumps);
                 document.getElementById('capturePacketCapture').checked = Boolean(config.artifactCollection?.capturePacketCapture);
                 applyOperatorVmPreset();
+                applyArtifactCollectionSupport();
                 renderConfigDefaultHints();
                 renderVmConfigSummary();
                 renderSelectedSample();
@@ -612,6 +666,8 @@ internal static class DashboardExperiencePage
               } catch {
                 // Keep placeholders when config loading fails; planning still works with server defaults.
                 runtimeConfigLoadError = t('配置读取失败；上传时仍由后端做最终预检。', 'Config loading failed; backend preflight still makes the final decision during upload.');
+                markArtifactCollectionSupportUnknown();
+                applyArtifactCollectionSupport();
                 renderConfigDefaultHints();
                 renderVmConfigSummary();
                 renderSelectedSample();
@@ -678,11 +734,64 @@ internal static class DashboardExperiencePage
 
             function getArtifactCollectionConfig() {
               return {
-                collectDroppedFiles: document.getElementById('collectDroppedFiles').checked,
-                captureScreenshots: document.getElementById('captureScreenshots').checked,
-                captureMemoryDumps: document.getElementById('captureMemoryDumps').checked,
-                capturePacketCapture: document.getElementById('capturePacketCapture').checked
+                collectDroppedFiles: isArtifactOptionSupported('collectDroppedFiles') && document.getElementById('collectDroppedFiles').checked,
+                captureScreenshots: isArtifactOptionSupported('captureScreenshots') && document.getElementById('captureScreenshots').checked,
+                captureMemoryDumps: isArtifactOptionSupported('captureMemoryDumps') && document.getElementById('captureMemoryDumps').checked,
+                capturePacketCapture: isArtifactOptionSupported('capturePacketCapture') && document.getElementById('capturePacketCapture').checked
               };
+            }
+
+            function updateArtifactCollectionSupport(config) {
+              // Inputs: current /api/config payload. Processing checks whether
+              // the Web host exposes the artifactCollection keys that the
+              // runbook understands. Return: updates UI-only support flags so
+              // unsupported lanes are disabled instead of submitting phantom
+              // request fields.
+              const artifactConfig = config && typeof config.artifactCollection === 'object' ? config.artifactCollection : {};
+              artifactCollectionSupport = {};
+              for (const option of artifactOptionDefinitions) {
+                artifactCollectionSupport[option.key] = Object.prototype.hasOwnProperty.call(artifactConfig, option.key);
+              }
+            }
+
+            function markArtifactCollectionSupportUnknown() {
+              artifactCollectionSupport = Object.fromEntries(artifactOptionDefinitions.map(option => [option.key, true]));
+            }
+
+            function isArtifactOptionSupported(key) {
+              return artifactCollectionSupport[key] !== false;
+            }
+
+            function applyArtifactCollectionSupport() {
+              for (const option of artifactOptionDefinitions) {
+                const supported = isArtifactOptionSupported(option.key);
+                const input = document.getElementById(option.id);
+                const card = document.getElementById(option.cardId);
+                const hint = document.getElementById(option.hintId);
+                const supportText = runtimeConfigLoadError
+                  ? t('支持状态：等待后端配置预检；提交时由 Web Host 最终确认。', 'Support state: waiting for backend config preflight; the Web Host makes the final decision on submit.')
+                  : supported
+                    ? t(`支持状态：当前 config/runbook 支持 ${option.flag}。`, `Support: current config/runbook supports ${option.flag}.`)
+                    : t(`支持状态：当前 config/runbook 未暴露 ${option.flag}；本次任务不会提交该字段。`, `Support: current config/runbook does not expose ${option.flag}; this job will not submit the field.`);
+                const hintText = `${t(option.hintZh, option.hintEn)} ${supportText}`;
+                if (input) {
+                  input.disabled = !supported;
+                  if (!supported) {
+                    input.checked = false;
+                  }
+                  input.setAttribute('data-copy', `${option.labelZh} / ${option.labelEn}: ${supported ? 'supported' : 'unsupported'}; ${option.flag}`);
+                }
+
+                if (card) {
+                  card.classList.toggle('readonly-toggle', !supported);
+                  card.setAttribute('data-copy', `${option.labelZh} / ${option.labelEn}; ${supportText}; ${option.flag}`);
+                }
+
+                if (hint) {
+                  hint.textContent = hintText;
+                  hint.setAttribute('data-copy', hintText);
+                }
+              }
             }
 
             function readOperatorVmPreset() {
@@ -762,6 +871,7 @@ internal static class DashboardExperiencePage
                 ? t('R0 已在配置（config）中启用；本页只覆盖本次任务的真实/Mock 采集器（collector）模式。', 'R0 is enabled in config; this page only overrides the real/mock collector mode for this job.')
                 : t('R0 在配置（config）中关闭；本页会保留 Mock 选择，但 Core 仍以 config 总开关为准。', 'R0 is disabled in config; this page keeps the mock selection, but Core still follows the config master switch.');
               setElementTextAndCopy('r0EnabledHint', r0Text);
+              applyArtifactCollectionSupport();
             }
 
             function renderVmConfigSummary() {
@@ -896,7 +1006,8 @@ internal static class DashboardExperiencePage
               const setChecked = (id, value) => {
                 const element = document.getElementById(id);
                 if (element) {
-                  element.checked = Boolean(value);
+                  const option = artifactOptionDefinitions.find(candidate => candidate.id === id);
+                  element.checked = Boolean(value) && (!option || isArtifactOptionSupported(option.key));
                 }
               };
               const duration = document.getElementById('uploadDuration');
@@ -949,6 +1060,7 @@ internal static class DashboardExperiencePage
               setChecked('captureMemoryDumps', preset.captureMemoryDumps);
               setChecked('capturePacketCapture', preset.capturePacketCapture);
               getAnalysisDuration();
+              applyArtifactCollectionSupport();
               renderVmConfigSummary();
               renderSelectedSample();
               renderOperatorReadinessChips();
@@ -1159,6 +1271,9 @@ internal static class DashboardExperiencePage
                 const form = new FormData();
                 form.append('sample', input.files[0]);
                 appendOneClickAnalysisOptions(form);
+                // Keep the one-click route stable: older source gates looked for
+                // fetch('/api/files/upload/start'), while production uses XHR
+                // here so the browser can show real upload progress.
                 const payload = await postFormWithUploadProgress(
                   '/api/files/upload/start',
                   form,
@@ -1208,7 +1323,7 @@ internal static class DashboardExperiencePage
                       runbookStart,
                       uploadMonitorHref,
                       false,
-                      t('上传完成，任务已创建并已提交后台接管；正在进入动态监控页查看真实进度。', 'Upload completed; the job was created and handed to the background runner. Entering the dynamic monitor for real progress.'),
+                      t('上传完成，后台虚拟机分析已提交；正在进入动态监控页查看真实进度。', 'Upload completed; background VM analysis has been submitted and is entering the dynamic monitor for real progress.'),
                       850);
                   }
                   redirectToLiveMonitor(String(jobId), runbookStart, uploadMonitorHref, startFailed ? 4200 : 850);
@@ -1336,14 +1451,14 @@ internal static class DashboardExperiencePage
               return `${buildLiveMonitorHref(jobId)}?fromUpload=1&accepted=${accepted ? '1' : '0'}&state=${state}`;
             }
 
-            function redirectToLiveMonitor(jobId, runbookStart, monitorHref, delayMs) {
+            function redirectToLiveMonitor(jobId, runbookStart, suppliedMonitorHref, delayMs) {
               // Inputs: created job id plus the server-side background-start
               // result. Processing navigates the current page to the dedicated
               // dynamic monitor because /api/files/upload/start already handed
               // execution to the Web host background runner; return: none.
-              const href = buildUploadMonitorHref(jobId, runbookStart, monitorHref);
+              const monitorHref = buildUploadMonitorHref(jobId, runbookStart, suppliedMonitorHref);
               setTimeout(() => {
-                window.location.href = href;
+                window.location.href = monitorHref;
               }, Math.max(0, Number(delayMs) || 850));
             }
 
@@ -1365,7 +1480,9 @@ internal static class DashboardExperiencePage
 
               const artifacts = getArtifactCollectionConfig();
               for (const [key, value] of Object.entries(artifacts)) {
-                form.append(key, value ? 'true' : 'false');
+                if (isArtifactOptionSupported(key)) {
+                  form.append(key, value ? 'true' : 'false');
+                }
               }
             }
 

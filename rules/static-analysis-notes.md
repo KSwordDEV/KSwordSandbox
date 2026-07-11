@@ -135,6 +135,31 @@ Do not globally exclude `source=r0collector` in rules whose purpose is to
 consume parsed R0 rows; instead, require the semantic fields and suppress known
 collector-health or self-noise markers.
 
+## Artifact-backed correlation handoff
+
+Host artifact import can project safe, one-level fields onto
+`artifact.host_imported` and imported `pcap.*` rows. Behavior rules should
+prefer these fields when they need to prove that a finding can be traced back to
+a concrete downloadable artifact:
+
+- Artifact identity: `sourceArtifactKind`, `artifactKind`, `collectionName`,
+  `evidenceRole`, `sourceEventType`, and `sourceEventPath`.
+- Safe selectors: `sourceArtifactRelativePath`, `artifactRelativePath`,
+  `downloadSelector`, `downloadSafeLink`, and `safeRelativeSelector`.
+- Host-computed integrity and size: `sourceArtifactSha256`, `sha256`,
+  `hash.sha256`, `sourceArtifactSizeBytes`, and `sizeBytes`.
+- Correlation context: `processId`, `parentProcessId`, `rootProcessId`,
+  `treeLineage`, `processName`, `commandLine`, and PCAP protocol/endpoint
+  fields such as `protocol`, `host`, `uri`, `queryName`, `sni`,
+  `destinationIp`, and `destinationPort`.
+
+Rules that consume host-imported artifacts should not treat the mere presence of
+`artifact.host_imported` as sample behavior. Require exact kind/collection/role,
+path and hash fields, source event context, and explicit collection-health, VT
+quiet-state, and R0 self-noise exclusions. Memory-dump and screenshot artifact
+correlations are evidence metadata unless separate sample behavior proves
+credential dumping or screen capture.
+
 The built-in YARA-like matcher intentionally supports only the small subset
 used by `rules/static-notes.yar`: literal/regex strings, `ascii`, `wide`,
 `nocase`, `uint16(offset) == value`, `$id`, `any/all/N of (...)`, `of them`,

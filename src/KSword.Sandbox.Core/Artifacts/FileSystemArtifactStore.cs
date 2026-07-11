@@ -109,7 +109,11 @@ public sealed class FileSystemArtifactStore : IArtifactStore
 
     private static ArtifactCollectionDescriptor NormalizeCollection(ArtifactCollectionDescriptor collection)
     {
-        var relativePath = ArtifactDescriptorFactory.NormalizeRelativePath(collection.RelativePath);
+        var importPath = ArtifactDescriptorFactory.NormalizeSelector(collection.ImportPath);
+        var relativePath = FirstNonEmpty(
+            ArtifactDescriptorFactory.NormalizeRelativePath(collection.RelativePath),
+            importPath,
+            ArtifactDescriptorFactory.NormalizeSelector(collection.SafeLink));
         var safeLink = ArtifactDescriptorFactory.BuildSafeLink(relativePath);
         if (string.IsNullOrWhiteSpace(safeLink))
         {
@@ -123,12 +127,23 @@ public sealed class FileSystemArtifactStore : IArtifactStore
                 : collection.Category,
             RelativePath = relativePath,
             SafeLink = safeLink,
-            ImportPath = string.IsNullOrWhiteSpace(collection.ImportPath)
-                ? relativePath
-                : ArtifactDescriptorFactory.NormalizeRelativePath(collection.ImportPath),
+            ImportPath = FirstNonEmpty(importPath, relativePath),
             Metadata = collection.Metadata is null
                 ? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
                 : new Dictionary<string, string>(collection.Metadata, StringComparer.OrdinalIgnoreCase)
         };
+    }
+
+    private static string FirstNonEmpty(params string?[] values)
+    {
+        foreach (var value in values)
+        {
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                return value;
+            }
+        }
+
+        return string.Empty;
     }
 }

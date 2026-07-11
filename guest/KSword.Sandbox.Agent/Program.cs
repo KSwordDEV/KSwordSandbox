@@ -98,7 +98,8 @@ internal static class AgentProgram
         };
 
         AddEnvironmentSnapshotEvent(events, options, workingDirectory);
-        var probeRunner = CreateProbeRunner(options);
+        var probePipeline = CreateProbePipeline(options);
+        var probeRunner = probePipeline.Runner;
         var probeContext = CreateGuestProbeContext(options, workingDirectory, rootProcessId: null);
         events.AddRange(await probeRunner.CollectAsync(ProbePhase.BeforeStart, probeContext));
         var r0Collector = StartR0Collector(options, events);
@@ -185,6 +186,12 @@ internal static class AgentProgram
                 if (executionProcessStartTimeUtc is not null)
                 {
                     events[^1].Data["startTimeUtc"] = executionProcessStartTimeUtc.Value.ToString("O", CultureInfo.InvariantCulture);
+                }
+
+                if (options.CaptureMemoryDump)
+                {
+                    executionStage = "timeout-memory-dump";
+                    events.AddRange(await probePipeline.MemoryDumpRunner.CollectAsync(ProbePhase.Cleanup, runningProbeContext));
                 }
 
                 executionStage = "kill-timeout";
@@ -292,21 +299,26 @@ internal static class AgentProgram
     /// <summary>
     /// Creates the dynamic guest probe pipeline.
     /// Inputs are none; processing constructs the process tree, file diff, TCP
-    /// diff, configurable optional screenshot, and opt-in memory dump probes in
-    /// deterministic order; the method returns a reusable GuestProbeRunner for
-    /// one agent run.
+    /// diff, configurable optional screenshot, packet capture, and opt-in
+    /// memory dump probes in deterministic order; the method returns shared
+    /// runners for one agent run.
     /// </summary>
-    private static GuestProbeRunner CreateProbeRunner(AgentOptions options)
+    private sealed record GuestProbePipeline(GuestProbeRunner Runner, GuestProbeRunner MemoryDumpRunner);
+
+    private static GuestProbePipeline CreateProbePipeline(AgentOptions options)
     {
-        return new GuestProbeRunner(
-        [
-            new ProcessTreeProbe(),
-            new FileDiffProbe(),
-            new TcpConnectionDiffProbe(),
-            new PacketCaptureProbe(),
-            new ScreenshotProbe(options.ScreenshotOptions),
-            new MemoryDumpProbe()
-        ]);
+        var memoryDumpProbe = new MemoryDumpProbe();
+        return new GuestProbePipeline(
+            new GuestProbeRunner(
+            [
+                new ProcessTreeProbe(),
+                new FileDiffProbe(),
+                new TcpConnectionDiffProbe(),
+                new PacketCaptureProbe(),
+                new ScreenshotProbe(options.ScreenshotOptions),
+                memoryDumpProbe
+            ]),
+            new GuestProbeRunner([memoryDumpProbe]));
     }
 
     /// <summary>
@@ -337,6 +349,7 @@ internal static class AgentProgram
             RootCommandLine = rootCommandLine,
             RootProcessStartTimeUtc = rootProcessStartTimeUtc,
             CaptureScreenshots = options.CaptureScreenshots,
+            CollectDroppedFiles = options.CollectDroppedFiles,
             CaptureMemoryDump = options.CaptureMemoryDump,
             CapturePacketCapture = options.CapturePacketCapture
         };

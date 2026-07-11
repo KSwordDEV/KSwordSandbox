@@ -1,5 +1,5 @@
 {
-  "version": "2026-07-12-v18-release-prep-guards",
+  "version": "2026-07-12-v19-artifact-correlation-guards",
   "rules": [
     {
       "id": "host-submission",
@@ -27526,6 +27526,827 @@
           "VirusTotal timeout"
         ]
       }
+    },
+    {
+      "id": "artifact-memory-dump-process-correlation",
+      "title": "Memory dump artifact tied to process identity",
+      "titleZh": "内存转储产物关联到进程身份",
+      "severity": "info",
+      "confidence": "medium",
+      "summary": "A host-indexed memory dump artifact preserves a captured memory-dump source event, process identity, size, hash, and safe relative artifact selector for analyst correlation. This is artifact evidence, not a credential-dumping verdict by itself.",
+      "summaryZh": "Host 索引的内存转储产物保留了已捕获的内存转储来源事件、进程身份、大小、哈希和安全相对产物选择器，便于分析关联；它本身不是凭据转储判定。",
+      "eventTypes": [
+        "artifact.host_imported"
+      ],
+      "allDataEquals": {
+        "sourceArtifactKind": [
+          "MemoryDump"
+        ],
+        "collectionName": [
+          "memory-dumps"
+        ],
+        "evidenceRole": [
+          "memory-dump"
+        ],
+        "sourceEventType": [
+          "memory_dump.captured"
+        ],
+        "isDownloadable": [
+          "true"
+        ]
+      },
+      "allDataKeys": [
+        "sourceArtifactRelativePath",
+        "sourceArtifactSha256",
+        "sourceArtifactSizeBytes",
+        "processId"
+      ],
+      "allDataRegex": {
+        "sourceArtifactSha256": [
+          "^[a-f0-9]{64}$"
+        ],
+        "sourceArtifactRelativePath": [
+          "(?:^|/)memory-dumps/.*\\.dmp$"
+        ]
+      },
+      "excludeProcessNames": [
+        "KSword.Sandbox.Agent.exe",
+        "KSword.Sandbox.R0Collector.exe"
+      ],
+      "excludeDataContains": {
+        "eventType": [
+          "collection.health",
+          "enrichment.virustotal.lookup",
+          "r0collector."
+        ],
+        "source": [
+          "r0collector",
+          "virustotal",
+          "collection-health"
+        ],
+        "producer": [
+          "r0collector",
+          "virustotal",
+          "collection-health"
+        ],
+        "component": [
+          "KSword.Sandbox.Agent",
+          "KSword.Sandbox.R0Collector",
+          "r0collector",
+          "virustotal"
+        ],
+        "status": [
+          "not_configured",
+          "disabled",
+          "skipped",
+          "failed",
+          "not_found",
+          "rate_limited",
+          "authentication_failed",
+          "timeout",
+          "lookup_failed",
+          "missing_hash",
+          "collection health",
+          "driver-health"
+        ],
+        "vtStatus": [
+          "not_configured",
+          "not_found",
+          "rate_limited",
+          "authentication_failed",
+          "timeout",
+          "lookup_failed",
+          "missing_hash"
+        ],
+        "healthStatus": [
+          "driver-health",
+          "collection-health",
+          "collection health"
+        ],
+        "noise": [
+          "true"
+        ],
+        "selfNoise": [
+          "true"
+        ],
+        "collectorSelfNoise": [
+          "true"
+        ],
+        "collectorNoise": [
+          "true"
+        ],
+        "selfNoiseClass": [
+          "collector",
+          "sandbox-agent",
+          "plumbing"
+        ],
+        "collectorNoiseClass": [
+          "collector",
+          "plumbing"
+        ],
+        "message": [
+          "collection health",
+          "driver health",
+          "R0Collector",
+          "VirusTotal not configured",
+          "VT not configured",
+          "VirusTotal rate limited",
+          "VirusTotal timeout"
+        ]
+      },
+      "evidenceFields": [
+        "eventType",
+        "data.sourceArtifactKind",
+        "data.collectionName",
+        "data.sourceEventType",
+        "data.processId",
+        "data.rootProcessId",
+        "data.treeLineage",
+        "data.sourceArtifactRelativePath",
+        "data.sourceArtifactSha256",
+        "data.sourceArtifactSizeBytes"
+      ],
+      "tags": [
+        "artifact",
+        "memory-dump",
+        "process",
+        "correlation",
+        "metadata"
+      ],
+      "allDataNumericRanges": {
+        "sourceArtifactSizeBytes": [
+          {
+            "min": 1
+          }
+        ]
+      }
+    },
+    {
+      "id": "artifact-dropped-file-source-correlation",
+      "title": "Dropped executable artifact tied to source event",
+      "titleZh": "释放的可执行产物关联到来源事件",
+      "severity": "medium",
+      "confidence": "medium",
+      "summary": "A host-indexed dropped-file artifact links an executable, script, library, driver, or archive payload under artifacts/dropped-files to the original file event, hash, and safe download selector.",
+      "summaryZh": "Host 索引的释放文件产物将 artifacts/dropped-files 下的可执行、脚本、库、驱动或归档载荷与原始文件事件、哈希和安全下载选择器关联。",
+      "mitreTechniqueId": "T1105",
+      "mitreTechniqueName": "Ingress Tool Transfer",
+      "eventTypes": [
+        "artifact.host_imported"
+      ],
+      "allDataEquals": {
+        "sourceArtifactKind": [
+          "DroppedFile"
+        ],
+        "collectionName": [
+          "dropped-files"
+        ],
+        "evidenceRole": [
+          "dropped-file"
+        ],
+        "isDownloadable": [
+          "true"
+        ]
+      },
+      "allDataContains": {
+        "sourceEventType": [
+          "artifact.dropped_file.copied",
+          "file.created",
+          "file.modified",
+          "driver.file"
+        ]
+      },
+      "allDataKeys": [
+        "sourceArtifactRelativePath",
+        "sourceArtifactSha256",
+        "sourceArtifactSizeBytes",
+        "sourceEventPath"
+      ],
+      "allDataRegex": {
+        "sourceArtifactSha256": [
+          "^[a-f0-9]{64}$"
+        ],
+        "sourceArtifactRelativePath": [
+          "(?:^|/)artifacts/dropped-files/.*\\.(?:exe|dll|sys|scr|com|ps1|vbs|js|jse|hta|bat|cmd|zip|rar|7z)$"
+        ]
+      },
+      "excludeProcessNames": [
+        "KSword.Sandbox.Agent.exe",
+        "KSword.Sandbox.R0Collector.exe"
+      ],
+      "excludeDataContains": {
+        "eventType": [
+          "collection.health",
+          "enrichment.virustotal.lookup",
+          "r0collector."
+        ],
+        "source": [
+          "r0collector",
+          "virustotal",
+          "collection-health"
+        ],
+        "producer": [
+          "r0collector",
+          "virustotal",
+          "collection-health"
+        ],
+        "component": [
+          "KSword.Sandbox.Agent",
+          "KSword.Sandbox.R0Collector",
+          "r0collector",
+          "virustotal"
+        ],
+        "status": [
+          "not_configured",
+          "disabled",
+          "skipped",
+          "failed",
+          "not_found",
+          "rate_limited",
+          "authentication_failed",
+          "timeout",
+          "lookup_failed",
+          "missing_hash",
+          "collection health",
+          "driver-health"
+        ],
+        "vtStatus": [
+          "not_configured",
+          "not_found",
+          "rate_limited",
+          "authentication_failed",
+          "timeout",
+          "lookup_failed",
+          "missing_hash"
+        ],
+        "healthStatus": [
+          "driver-health",
+          "collection-health",
+          "collection health"
+        ],
+        "noise": [
+          "true"
+        ],
+        "selfNoise": [
+          "true"
+        ],
+        "collectorSelfNoise": [
+          "true"
+        ],
+        "collectorNoise": [
+          "true"
+        ],
+        "selfNoiseClass": [
+          "collector",
+          "sandbox-agent",
+          "plumbing"
+        ],
+        "collectorNoiseClass": [
+          "collector",
+          "plumbing"
+        ],
+        "message": [
+          "collection health",
+          "driver health",
+          "R0Collector",
+          "VirusTotal not configured",
+          "VT not configured",
+          "VirusTotal rate limited",
+          "VirusTotal timeout"
+        ]
+      },
+      "evidenceFields": [
+        "eventType",
+        "data.sourceArtifactKind",
+        "data.collectionName",
+        "data.sourceEventType",
+        "data.sourceEventPath",
+        "data.processName",
+        "data.commandLine",
+        "data.sourceArtifactRelativePath",
+        "data.sourceArtifactSha256",
+        "data.sourceArtifactSizeBytes"
+      ],
+      "tags": [
+        "artifact",
+        "dropped-file",
+        "payload",
+        "correlation",
+        "download-execute",
+        "mitre"
+      ],
+      "allDataNumericRanges": {
+        "sourceArtifactSizeBytes": [
+          {
+            "min": 1
+          }
+        ]
+      }
+    },
+    {
+      "id": "artifact-screenshot-capture-correlation",
+      "title": "Screenshot artifact tied to capture event",
+      "titleZh": "截图产物关联到捕获事件",
+      "severity": "info",
+      "confidence": "medium",
+      "summary": "A host-indexed screenshot artifact preserves the captured screenshot source event, phase, size, hash, and safe relative artifact selector for report review. This records sandbox collection evidence rather than sample screen-capture behavior.",
+      "summaryZh": "Host 索引的截图产物保留截图来源事件、阶段、大小、哈希和安全相对产物选择器用于报告审阅；这记录的是沙箱采集证据，而不是样本截图行为。",
+      "eventTypes": [
+        "artifact.host_imported"
+      ],
+      "allDataEquals": {
+        "sourceArtifactKind": [
+          "Screenshot"
+        ],
+        "collectionName": [
+          "screenshots"
+        ],
+        "evidenceRole": [
+          "screenshot"
+        ],
+        "sourceEventType": [
+          "screenshot.captured"
+        ],
+        "isDownloadable": [
+          "true"
+        ]
+      },
+      "allDataKeys": [
+        "sourceArtifactRelativePath",
+        "sourceArtifactSha256",
+        "sourceArtifactSizeBytes"
+      ],
+      "allDataRegex": {
+        "sourceArtifactSha256": [
+          "^[a-f0-9]{64}$"
+        ],
+        "sourceArtifactRelativePath": [
+          "(?:^|/)screenshots/.*\\.(?:bmp|png|jpg|jpeg)$"
+        ]
+      },
+      "excludeProcessNames": [
+        "KSword.Sandbox.Agent.exe",
+        "KSword.Sandbox.R0Collector.exe"
+      ],
+      "excludeDataContains": {
+        "eventType": [
+          "collection.health",
+          "enrichment.virustotal.lookup",
+          "r0collector."
+        ],
+        "source": [
+          "r0collector",
+          "virustotal",
+          "collection-health"
+        ],
+        "producer": [
+          "r0collector",
+          "virustotal",
+          "collection-health"
+        ],
+        "component": [
+          "KSword.Sandbox.Agent",
+          "KSword.Sandbox.R0Collector",
+          "r0collector",
+          "virustotal"
+        ],
+        "status": [
+          "not_configured",
+          "disabled",
+          "skipped",
+          "failed",
+          "not_found",
+          "rate_limited",
+          "authentication_failed",
+          "timeout",
+          "lookup_failed",
+          "missing_hash",
+          "collection health",
+          "driver-health"
+        ],
+        "vtStatus": [
+          "not_configured",
+          "not_found",
+          "rate_limited",
+          "authentication_failed",
+          "timeout",
+          "lookup_failed",
+          "missing_hash"
+        ],
+        "healthStatus": [
+          "driver-health",
+          "collection-health",
+          "collection health"
+        ],
+        "noise": [
+          "true"
+        ],
+        "selfNoise": [
+          "true"
+        ],
+        "collectorSelfNoise": [
+          "true"
+        ],
+        "collectorNoise": [
+          "true"
+        ],
+        "selfNoiseClass": [
+          "collector",
+          "sandbox-agent",
+          "plumbing"
+        ],
+        "collectorNoiseClass": [
+          "collector",
+          "plumbing"
+        ],
+        "message": [
+          "collection health",
+          "driver health",
+          "R0Collector",
+          "VirusTotal not configured",
+          "VT not configured",
+          "VirusTotal rate limited",
+          "VirusTotal timeout"
+        ]
+      },
+      "evidenceFields": [
+        "eventType",
+        "data.sourceArtifactKind",
+        "data.collectionName",
+        "data.sourceEventType",
+        "data.phase",
+        "data.screenshotStage",
+        "data.widthPixels",
+        "data.heightPixels",
+        "data.sourceArtifactRelativePath",
+        "data.sourceArtifactSha256",
+        "data.sourceArtifactSizeBytes"
+      ],
+      "tags": [
+        "artifact",
+        "screenshot",
+        "correlation",
+        "collection",
+        "metadata"
+      ],
+      "allDataNumericRanges": {
+        "sourceArtifactSizeBytes": [
+          {
+            "min": 1
+          }
+        ]
+      }
+    },
+    {
+      "id": "artifact-pcap-protocol-correlation",
+      "title": "PCAP protocol row tied to capture artifact",
+      "titleZh": "PCAP 协议行关联到抓包产物",
+      "severity": "low",
+      "confidence": "medium",
+      "summary": "A packet-derived flow, DNS, HTTP, TLS, or summary row carries packet-capture artifact path, hash, collection, and protocol metadata so protocol evidence can be traced back to a concrete PCAP/PCAPNG file.",
+      "summaryZh": "包解析得到的流、DNS、HTTP、TLS 或摘要行携带抓包产物路径、哈希、collection 和协议元数据，使协议证据可追溯到具体 PCAP/PCAPNG 文件。",
+      "eventTypes": [
+        "pcap.summary",
+        "pcap.flow",
+        "pcap.tcp",
+        "pcap.udp",
+        "pcap.dns",
+        "pcap.http",
+        "pcap.tls"
+      ],
+      "allDataEquals": {
+        "collectionName": [
+          "packet-captures"
+        ]
+      },
+      "allDataKeys": [
+        "sourceArtifactRelativePath",
+        "sourceArtifactSha256",
+        "sourceArtifactSizeBytes"
+      ],
+      "dataKeys": [
+        "protocol",
+        "protocols",
+        "sourceIp",
+        "destinationIp",
+        "destinationPort",
+        "host",
+        "uri",
+        "queryName",
+        "sni",
+        "packetCount",
+        "flowCount"
+      ],
+      "allDataRegex": {
+        "sourceArtifactSha256": [
+          "^[a-f0-9]{64}$"
+        ],
+        "sourceArtifactRelativePath": [
+          "(?:^|/)packet-captures/.*\\.(?:pcap|pcapng)$"
+        ]
+      },
+      "excludeProcessNames": [
+        "KSword.Sandbox.Agent.exe",
+        "KSword.Sandbox.R0Collector.exe"
+      ],
+      "excludeDataContains": {
+        "eventType": [
+          "collection.health",
+          "enrichment.virustotal.lookup",
+          "r0collector."
+        ],
+        "source": [
+          "r0collector",
+          "virustotal",
+          "collection-health"
+        ],
+        "producer": [
+          "r0collector",
+          "virustotal",
+          "collection-health"
+        ],
+        "component": [
+          "KSword.Sandbox.Agent",
+          "KSword.Sandbox.R0Collector",
+          "r0collector",
+          "virustotal"
+        ],
+        "status": [
+          "not_configured",
+          "disabled",
+          "skipped",
+          "failed",
+          "not_found",
+          "rate_limited",
+          "authentication_failed",
+          "timeout",
+          "lookup_failed",
+          "missing_hash",
+          "collection health",
+          "driver-health"
+        ],
+        "vtStatus": [
+          "not_configured",
+          "not_found",
+          "rate_limited",
+          "authentication_failed",
+          "timeout",
+          "lookup_failed",
+          "missing_hash"
+        ],
+        "healthStatus": [
+          "driver-health",
+          "collection-health",
+          "collection health"
+        ],
+        "noise": [
+          "true"
+        ],
+        "selfNoise": [
+          "true"
+        ],
+        "collectorSelfNoise": [
+          "true"
+        ],
+        "collectorNoise": [
+          "true"
+        ],
+        "selfNoiseClass": [
+          "collector",
+          "sandbox-agent",
+          "plumbing"
+        ],
+        "collectorNoiseClass": [
+          "collector",
+          "plumbing"
+        ],
+        "message": [
+          "collection health",
+          "driver health",
+          "R0Collector",
+          "VirusTotal not configured",
+          "VT not configured",
+          "VirusTotal rate limited",
+          "VirusTotal timeout"
+        ]
+      },
+      "evidenceFields": [
+        "eventType",
+        "data.collectionName",
+        "data.protocol",
+        "data.sourceIp",
+        "data.destinationIp",
+        "data.destinationPort",
+        "data.host",
+        "data.uri",
+        "data.queryName",
+        "data.sni",
+        "data.sourceArtifactRelativePath",
+        "data.sourceArtifactSha256",
+        "data.sourceArtifactSizeBytes"
+      ],
+      "tags": [
+        "artifact",
+        "pcap",
+        "network",
+        "protocol",
+        "correlation",
+        "metadata"
+      ],
+      "allDataNumericRanges": {
+        "sourceArtifactSizeBytes": [
+          {
+            "min": 1
+          }
+        ]
+      }
+    },
+    {
+      "id": "process-tree-lineage-user-writable-descendant",
+      "title": "User-writable process-tree descendant with lineage",
+      "titleZh": "带谱系的用户可写路径进程树子进程",
+      "severity": "medium",
+      "confidence": "medium",
+      "summary": "A process-tree row shows a descendant process executing from a user-writable payload path with root, parent, depth, and lineage fields present, reducing ambiguity compared with a standalone process path.",
+      "summaryZh": "进程树行显示子孙进程从用户可写载荷路径执行，并包含 root、parent、depth 和 lineage 字段，相比单独进程路径更少歧义。",
+      "mitreTechniqueId": "T1204.002",
+      "mitreTechniqueName": "Malicious File",
+      "eventTypes": [
+        "process.tree"
+      ],
+      "allDataKeys": [
+        "rootProcessId",
+        "parentProcessId",
+        "treeLineage"
+      ],
+      "allDataNumericRanges": {
+        "treeDepth": [
+          {
+            "min": 1
+          }
+        ]
+      },
+      "pathRegex": [
+        "\\\\(?:Users\\\\[^\\\\]+\\\\(?:AppData|Downloads|Desktop|Documents)|Users\\\\Public|ProgramData|Windows\\\\Temp)\\\\.*\\.(?:exe|dll|scr|com|ps1|vbs|js|jse|hta|bat|cmd)$"
+      ],
+      "excludeProcessNames": [
+        "KSword.Sandbox.Agent.exe",
+        "KSword.Sandbox.R0Collector.exe"
+      ],
+      "excludeDataContains": {
+        "eventType": [
+          "collection.health",
+          "enrichment.virustotal.lookup",
+          "r0collector."
+        ],
+        "source": [
+          "r0collector",
+          "virustotal",
+          "collection-health"
+        ],
+        "producer": [
+          "r0collector",
+          "virustotal",
+          "collection-health"
+        ],
+        "component": [
+          "KSword.Sandbox.Agent",
+          "KSword.Sandbox.R0Collector",
+          "r0collector",
+          "virustotal"
+        ],
+        "status": [
+          "not_configured",
+          "disabled",
+          "skipped",
+          "failed",
+          "not_found",
+          "rate_limited",
+          "authentication_failed",
+          "timeout",
+          "lookup_failed",
+          "missing_hash",
+          "collection health",
+          "driver-health"
+        ],
+        "vtStatus": [
+          "not_configured",
+          "not_found",
+          "rate_limited",
+          "authentication_failed",
+          "timeout",
+          "lookup_failed",
+          "missing_hash"
+        ],
+        "healthStatus": [
+          "driver-health",
+          "collection-health",
+          "collection health"
+        ],
+        "noise": [
+          "true"
+        ],
+        "selfNoise": [
+          "true"
+        ],
+        "collectorSelfNoise": [
+          "true"
+        ],
+        "collectorNoise": [
+          "true"
+        ],
+        "selfNoiseClass": [
+          "collector",
+          "sandbox-agent",
+          "plumbing"
+        ],
+        "collectorNoiseClass": [
+          "collector",
+          "plumbing"
+        ],
+        "message": [
+          "collection health",
+          "driver health",
+          "R0Collector",
+          "VirusTotal not configured",
+          "VT not configured",
+          "VirusTotal rate limited",
+          "VirusTotal timeout"
+        ]
+      },
+      "evidenceFields": [
+        "eventType",
+        "processName",
+        "processId",
+        "parentProcessId",
+        "path",
+        "data.rootProcessId",
+        "data.parentProcessId",
+        "data.treeDepth",
+        "data.treeLineage",
+        "data.childProcessCount"
+      ],
+      "tags": [
+        "process",
+        "process-tree",
+        "lineage",
+        "user-writable",
+        "execution",
+        "mitre"
+      ]
+    },
+    {
+      "id": "virustotal-found-result-enrichment",
+      "title": "VirusTotal found result persisted",
+      "titleZh": "VirusTotal 已收录结果已持久化",
+      "severity": "info",
+      "confidence": "medium",
+      "summary": "VirusTotal enrichment returned a found result for a SHA-256 and exposed provider counts plus a permalink. This confirms external enrichment coverage only; verdict-specific rules carry malicious or suspicious scoring.",
+      "summaryZh": "VirusTotal 富化对 SHA-256 返回已收录结果，并暴露引擎计数和永久链接；这仅确认外部富化覆盖，恶意或可疑评分由判定专用规则承担。",
+      "eventTypes": [
+        "enrichment.virustotal.lookup",
+        "reputation.virustotal.file"
+      ],
+      "allDataEquals": {
+        "vtStatus": [
+          "found"
+        ]
+      },
+      "allDataKeys": [
+        "sha256",
+        "permalink"
+      ],
+      "dataKeys": [
+        "vtVerdict",
+        "verdict",
+        "vtMalicious",
+        "vtSuspicious",
+        "maliciousCount",
+        "suspiciousCount"
+      ],
+      "allDataRegex": {
+        "sha256": [
+          "^[a-f0-9]{64}$"
+        ]
+      },
+      "evidenceFields": [
+        "eventType",
+        "data.sha256",
+        "data.vtStatus",
+        "data.vtVerdict",
+        "data.vtMalicious",
+        "data.vtSuspicious",
+        "data.maliciousCount",
+        "data.suspiciousCount",
+        "data.permalink"
+      ],
+      "tags": [
+        "enrichment",
+        "virustotal",
+        "reputation",
+        "found",
+        "metadata"
+      ]
     }
   ]
 }

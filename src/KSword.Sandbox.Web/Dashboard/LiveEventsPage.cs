@@ -218,6 +218,10 @@ internal static class LiveEventsPage
             <section>
               <h2 data-zh="证据 / 下载" data-en="Artifacts / downloads">证据 / 下载</h2>
               <p class="muted" data-zh="证据文件来自真实证据索引（artifact index）；可下载的文件走安全下载端点（endpoint），并明确展示安全 selector、重复组和拒绝诊断；尚未回收的采集项显示等待状态。" data-en="Evidence files come from the real artifact index; downloadable files use the guarded download endpoint and expose safe selectors, duplicate groups, and rejection diagnostics; collection lanes not yet recovered show a waiting state.">证据文件来自真实证据索引（artifact index）；可下载的文件走安全下载端点（endpoint），并明确展示安全 selector、重复组和拒绝诊断；尚未回收的采集项显示等待状态。</p>
+              <p class="artifact-action">
+                <button class="secondary" type="button" onclick="refreshArtifactCardsNow()" data-copy="手动刷新证据索引 / Refresh artifact index" data-zh="刷新证据/下载卡片" data-en="Refresh artifact/download cards">刷新证据/下载卡片</button>
+                <span class="pill quiet" data-copy="live monitor always shows report, events, driver-events, dropped files, screenshots, memory dumps, and PCAP lanes">报告、events、驱动遥测、落地文件、截图、内存转储、PCAP 均保留卡片 lane</span>
+              </p>
               <div id="reportReadyActions" class="report-ready muted" data-copy="报告待生成 / reports pending">报告按钮会在运行结束后保持可用。</div>
               <div id="artifactCards" class="artifact-card-grid">
                 <article class="artifact-card waiting muted" data-copy="证据路径解析中 / artifacts pending" data-zh="正在解析证据（artifact）路径。" data-en="Resolving artifact paths.">正在解析证据（artifact）路径。</article>
@@ -968,7 +972,7 @@ internal static class LiveEventsPage
                   html: `<article class="cockpit-card waiting" data-copy="${escapeAttr(copy)}">
                     <h3>VirusTotal</h3>
                     <p class="cockpit-main">${escapeHtml(t('等待 SHA-256 查询', 'waiting for SHA-256 lookup'))}</p>
-                    <div class="cockpit-meta"><span class="pill quiet">${escapeHtml(t('默认不写任务/行为日志', 'no job/behavior log by default'))}</span></div>
+                    <div class="cockpit-meta"><span class="pill quiet">${escapeHtml(t('默认不写日志噪音', 'no log noise by default'))}</span></div>
                   </article>`
                 };
               }
@@ -993,7 +997,7 @@ internal static class LiveEventsPage
                   <p class="cockpit-main">${escapeHtml(headline)}</p>
                   <div class="cockpit-meta">
                     <span class="pill ${tone}" data-copy="${escapeAttr(status)}">${escapeHtml(virusTotalStatusLabel(status, result))}</span>
-                    <span class="pill quiet" data-copy="${escapeAttr(policy)}">${escapeHtml(t('默认不写任务/行为日志', 'no job/behavior log by default'))}</span>
+                    <span class="pill quiet" data-copy="${escapeAttr(policy)}">${escapeHtml(t('默认不写日志噪音', 'no log noise by default'))}</span>
                     <span class="pill ${permalink ? 'endpoint' : 'waiting'}" data-copy="${escapeAttr(permalink || t('官方链接未提供', 'official permalink not provided'))}">${escapeHtml(permalink ? t('官方链接就绪', 'permalink ready') : t('无官方链接', 'no permalink'))}</span>
                   </div>
                   <p class="muted" data-copy="${escapeAttr(community)}">${escapeHtml(community)}</p>
@@ -1091,6 +1095,16 @@ internal static class LiveEventsPage
                 }
                 return null;
               }
+            }
+
+            async function refreshArtifactCardsNow() {
+              setStatus(t('正在刷新证据/下载卡片...', 'Refreshing artifact/download cards...'), false);
+              await refreshArtifactIndex(true);
+              renderArtifactPanel();
+              const summary = summarizeArtifactReadiness();
+              setStatus(
+                t(`证据/下载卡片已刷新：${summary.readyCount}/${summary.totalCount} 类就绪，可下载 ${summary.downloadableCount} 项。`, `Artifact/download cards refreshed: ${summary.readyCount}/${summary.totalCount} lanes ready, ${summary.downloadableCount} downloadable.`),
+                false);
             }
 
             function renderArtifactPanel() {
@@ -1605,6 +1619,7 @@ internal static class LiveEventsPage
               const rejectionBlock = renderArtifactDownloadRejection(download, ready, safeSelector, hasIndexedArtifact);
               const chipRow = renderArtifactChipRow(download, selectors, duplicate);
               const copy = [previewLabel, fileName, path || statusText, safeSelector ? `selector=${safeSelector}` : '', statusText].filter(Boolean).join(' | ');
+              const summaryCopyAction = `<button class="secondary" type="button" data-copy="${escapeAttr(copy)}" onclick="copyText(this.getAttribute('data-copy'))">${escapeHtml(t('复制卡片摘要', 'Copy card summary'))}</button>`;
               return `<article class="artifact-card ${statusClass}" data-copy="${escapeAttr(copy)}">
                 <div class="artifact-card-title">
                   <strong data-copy="${escapeAttr(previewLabel)}">${escapeHtml(displayName)}</strong>
@@ -1616,7 +1631,7 @@ internal static class LiveEventsPage
                 ${selectorBlock}
                 ${duplicateBlock}
                 ${rejectionBlock}
-                <div class="artifact-action">${openAction}${copyAction}${selectorAction}${hrefCopyAction}</div>
+                <div class="artifact-action">${openAction}${summaryCopyAction}${copyAction}${selectorAction}${hrefCopyAction}</div>
               </article>`;
             }
 
@@ -2201,7 +2216,7 @@ internal static class LiveEventsPage
                   <span class="pill ${queried ? 'endpoint' : 'quiet'}" data-copy="${escapeAttr(queriedLabel)}">${escapeHtml(queriedLabel)}</span>
                   <span class="pill ${outcomeStatus.tone}" data-copy="${escapeAttr(outcomeStatus.copy)}">${escapeHtml(outcomeStatus.label)}</span>
                   <span class="pill quiet" data-copy="${escapeAttr(quietLabel)}">${escapeHtml(quietLabel)}</span>
-                  <span class="pill quiet" data-copy="${escapeAttr(logPolicy)}">${escapeHtml(t('默认不写任务/行为日志', 'no job/behavior log by default'))}</span>
+                  <span class="pill quiet" data-copy="${escapeAttr(logPolicy)}">${escapeHtml(t('默认不写日志噪音', 'no log noise by default'))}</span>
                 </div>
                 ${quietNote}
                 <div class="vt-stats">

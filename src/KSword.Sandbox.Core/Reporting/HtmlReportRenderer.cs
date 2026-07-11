@@ -54,6 +54,7 @@ public sealed class HtmlReportRenderer
     private const int FindingEvidenceDataPairLimit = 16;
     private const int FindingEvidenceValueLimit = 180;
     private const int RelationshipCardInlineLimit = 24;
+    private const int RelationshipArtifactInlineLimit = 6;
     private const int EvidenceStoryInlineLimit = 12;
 
     private sealed record TimelineGroup(
@@ -106,6 +107,8 @@ public sealed class HtmlReportRenderer
         IReadOnlyList<string> ChildLabels,
         IReadOnlyList<string> RelationshipLines,
         IReadOnlyList<string> EvidenceLines,
+        IReadOnlyList<ArtifactDescriptor> RelatedArtifacts,
+        string CompactSummary,
         string CopyText);
 
     private sealed record NetworkRelationshipCard(
@@ -123,6 +126,8 @@ public sealed class HtmlReportRenderer
         IReadOnlyList<string> Processes,
         IReadOnlyList<string> EventTypes,
         IReadOnlyList<string> EvidenceLines,
+        IReadOnlyList<ArtifactDescriptor> RelatedArtifacts,
+        string CompactSummary,
         string CopyText);
 
     private static readonly JsonSerializerOptions ArtifactJsonOptions = new(JsonSerializerDefaults.Web)
@@ -305,7 +310,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
 .event-table td:first-child{white-space:nowrap}.event-table td:nth-child(2){min-width:140px}.event-table td:nth-child(4){min-width:140px}.event-table td:nth-child(5){min-width:260px}.event-table .evidence{min-width:280px}
 .timeline-groups{display:grid;gap:10px;margin-top:14px}.timeline-group{background:#fff;border:1px solid var(--line);border-radius:2px;overflow:hidden}.timeline-group>summary{align-items:flex-start;cursor:pointer;display:flex;gap:10px;justify-content:space-between;list-style:none;padding:12px 14px}.timeline-group>summary::-webkit-details-marker{display:none}.timeline-group>summary:before{color:var(--primary-deep);content:'▶';font-weight:900;margin-top:2px}.timeline-group[open]>summary:before{content:'▼'}.timeline-group small{color:var(--muted);display:block;line-height:1.4;margin-top:3px}.timeline{border-left:3px solid rgba(67,160,255,.45);margin:0 14px 14px 20px;padding:12px 0 0 18px}.timeline-item{background:#fff;border:1px solid var(--line);border-radius:2px;margin:0 0 10px;padding:10px 12px;position:relative}.timeline-item:before{background:var(--primary);border:2px solid var(--primary-soft);border-radius:2px;content:'';height:10px;left:-25px;position:absolute;top:13px;width:10px}.timeline-overflow{background:#f1f7ff;border:1px dashed #b9d7f3;border-radius:2px;color:var(--muted);margin:0 0 12px;padding:9px 11px}
 .graph-map{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));margin-top:12px}.graph-node{background:#fff;border:1px solid var(--line);border-left:4px solid var(--primary);border-radius:2px;padding:12px}.graph-node strong{display:block;margin-bottom:4px}.graph-node small{color:var(--muted);display:block;line-height:1.4}.behavior-chain{background:#fff;border:1px solid var(--line);border-radius:2px;counter-reset:chain;margin:12px 0;max-height:var(--subsection-max);overflow:auto;padding:8px 10px}.behavior-chain li{align-items:flex-start;background:#fff;border-bottom:1px solid #dbeafe;border-radius:0;counter-increment:chain;display:grid;gap:8px;grid-template-columns:auto 1fr;margin:0;padding:10px}.behavior-chain li:last-child{border-bottom:0}.behavior-chain li:before{align-items:center;background:var(--primary);border-radius:2px;color:white;content:counter(chain);display:inline-flex;font-weight:900;height:24px;justify-content:center;width:24px}.behavior-chain details{grid-column:2}.behavior-chain pre{max-height:var(--detail-max);overflow:auto;white-space:pre-wrap;word-break:break-word}.edge-table td:nth-child(1),.edge-table td:nth-child(3){min-width:170px}.ioc-grid{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));margin-top:14px}.ioc-card{background:#fff;border:1px solid var(--line);border-radius:2px;padding:12px}.ioc-card h3{font-size:15px;margin:0 0 8px}.ioc-card ul{margin:0;padding-left:18px}.ioc-card li{margin:5px 0;word-break:break-word}
-.evidence-summary-grid,.relation-grid,.overview-strip,.evidence-story-board{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));margin-top:14px}.evidence-summary-card,.relation-card,.overview-item,.evidence-story-lane{background:#fff;border:1px solid var(--line);border-left:4px solid var(--primary);border-radius:2px;box-shadow:none;max-height:var(--subsection-max);overflow:auto;padding:14px;position:relative}.evidence-summary-card:before,.relation-card:before,.overview-item:before,.evidence-story-lane:before{display:none}.evidence-summary-card h3,.relation-card h3,.overview-item h3,.evidence-story-lane h3{font-size:15px;margin:0 0 8px;padding-left:0}.summary-value,.overview-value{color:#075985;display:block;font-size:26px;font-weight:900;letter-spacing:-.04em}.overview-value.risk-medium{color:#b45309}.overview-value.risk-high{color:#b91c1c}.overview-value.risk-low{color:#047857}.overview-value.risk-info{color:var(--primary-deep)}.overview-item p,.story-lead{color:var(--muted);font-size:13px;line-height:1.45;margin:6px 0 0}.story-metrics{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0}.story-metrics span{background:#f8fbff;border:1px solid #cfe6fb;border-radius:2px;color:#075985;font-size:12px;font-weight:800;padding:6px 8px}.story-evidence-list{font-family:Consolas,monospace;font-size:12px;line-height:1.45;margin:8px 0 0;padding-left:18px}.story-evidence-list li{margin:3px 0;word-break:break-word}.relationship-meta{display:grid;gap:6px;grid-template-columns:repeat(2,minmax(0,1fr));margin:10px 0}.relationship-meta span{background:#f8fbff;border:1px solid #cfe6fb;border-radius:2px;color:#075985;font-size:12px;font-weight:700;padding:7px}.relationship-tags{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}.relationship-tags .chip{margin:0}.evidence-expansion-card{background:#f8fbff;border:1px solid #cfe6fb;border-left:3px solid var(--primary);margin-top:10px;padding:8px 10px}.evidence-expansion-card[open]{background:#fff}.relationship-details,.flat-details,.event-evidence-fields,.technical-field,.raw-technical-fields,.raw-technical-field{background:transparent;border:0;border-left:2px solid #cfe6fb;border-radius:0;margin-top:8px;padding:4px 0 4px 8px}.relationship-details summary,.flat-details summary,.event-evidence-fields summary,.technical-field summary,.raw-technical-fields summary,.raw-technical-field summary,.evidence-expansion-card summary{cursor:pointer;font-weight:800}.relationship-details pre,.flat-details pre,.event-evidence-fields pre,.technical-field pre,.raw-technical-field pre,.evidence-expansion-card pre{max-height:var(--detail-max);overflow:auto;white-space:pre-wrap;word-break:break-word}.relationship-title{display:flex;align-items:flex-start;gap:8px;justify-content:space-between}.relationship-title code{max-width:100%;overflow-wrap:anywhere}.anchor-offset{scroll-margin-top:18px}.mono-list{font-family:Consolas,monospace;font-size:12px;line-height:1.45;margin:6px 0 0 0;padding-left:18px}.mono-list li{margin:3px 0;word-break:break-word}
+.evidence-summary-grid,.relation-grid,.overview-strip,.evidence-story-board{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));margin-top:14px}.evidence-summary-card,.relation-card,.overview-item,.evidence-story-lane{background:#fff;border:1px solid var(--line);border-left:4px solid var(--primary);border-radius:2px;box-shadow:none;max-height:var(--subsection-max);overflow:auto;padding:14px;position:relative}.evidence-summary-card:before,.relation-card:before,.overview-item:before,.evidence-story-lane:before{display:none}.evidence-summary-card h3,.relation-card h3,.overview-item h3,.evidence-story-lane h3{font-size:15px;margin:0 0 8px;padding-left:0}.summary-value,.overview-value{color:#075985;display:block;font-size:26px;font-weight:900;letter-spacing:-.04em}.overview-value.risk-medium{color:#b45309}.overview-value.risk-high{color:#b91c1c}.overview-value.risk-low{color:#047857}.overview-value.risk-info{color:var(--primary-deep)}.overview-item p,.story-lead{color:var(--muted);font-size:13px;line-height:1.45;margin:6px 0 0}.compact-evidence-summary{background:#f8fbff;border:1px solid #cfe6fb;border-left:3px solid var(--primary);color:#334155;font-size:13px;line-height:1.45;margin:8px 0;padding:8px 10px;word-break:break-word}.compact-evidence-summary strong{color:#075985}.story-metrics{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0}.story-metrics span{background:#f8fbff;border:1px solid #cfe6fb;border-radius:2px;color:#075985;font-size:12px;font-weight:800;padding:6px 8px}.story-evidence-list{font-family:Consolas,monospace;font-size:12px;line-height:1.45;margin:8px 0 0;padding-left:18px}.story-evidence-list li{margin:3px 0;word-break:break-word}.relationship-meta{display:grid;gap:6px;grid-template-columns:repeat(2,minmax(0,1fr));margin:10px 0}.relationship-meta span{background:#f8fbff;border:1px solid #cfe6fb;border-radius:2px;color:#075985;font-size:12px;font-weight:700;padding:7px}.relationship-tags{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}.relationship-tags .chip{margin:0}.evidence-expansion-card{background:#f8fbff;border:1px solid #cfe6fb;border-left:3px solid var(--primary);margin-top:10px;padding:8px 10px}.evidence-expansion-card[open]{background:#fff}.relationship-details,.flat-details,.event-evidence-fields,.technical-field,.raw-technical-fields,.raw-technical-field{background:transparent;border:0;border-left:2px solid #cfe6fb;border-radius:0;margin-top:8px;padding:4px 0 4px 8px}.relationship-details summary,.flat-details summary,.event-evidence-fields summary,.technical-field summary,.raw-technical-fields summary,.raw-technical-field summary,.evidence-expansion-card summary{cursor:pointer;font-weight:800}.relationship-details pre,.flat-details pre,.event-evidence-fields pre,.technical-field pre,.raw-technical-field pre,.evidence-expansion-card pre{max-height:var(--detail-max);overflow:auto;white-space:pre-wrap;word-break:break-word}.relationship-title{display:flex;align-items:flex-start;gap:8px;justify-content:space-between}.relationship-title code{max-width:100%;overflow-wrap:anywhere}.anchor-offset{scroll-margin-top:18px}.mono-list{font-family:Consolas,monospace;font-size:12px;line-height:1.45;margin:6px 0 0 0;padding-left:18px}.mono-list li{margin:3px 0;word-break:break-word}
 .tree{font-family:Consolas,monospace;line-height:1.5;margin:12px 0}.tree ul{border-left:1px dashed #b9d7f3;list-style:none;margin:0 0 0 18px;padding-left:14px}.tree li{margin:5px 0}.process-tree{background:#fff;border:1px solid var(--line);border-radius:2px;max-height:var(--subsection-max);overflow:auto;padding:12px}.process-tree details.process-tree-node{margin:4px 0}.process-tree summary,.process-tree-leaf{align-items:center;cursor:pointer;display:flex;flex-wrap:wrap;gap:8px;list-style:none}.process-tree summary::-webkit-details-marker{display:none}.process-tree summary:before{color:var(--primary-deep);content:'▶';font-weight:900}.process-tree details[open]>summary:before{content:'▼'}.tree-badges{display:flex;flex-wrap:wrap;gap:5px}.tree-badge{background:#eef7ff;border:1px solid #cfe6fb;border-radius:2px;color:#075985;font-family:Segoe UI,Arial,sans-serif;font-size:11px;font-weight:800;padding:2px 7px}
 .evidence{max-width:560px}.evidence summary{cursor:pointer;font-weight:700}.evidence pre{white-space:pre-wrap;word-break:break-word}
 .columns{display:grid;gap:14px;grid-template-columns:1fr 1fr}.compact-list{margin:8px 0 0 0;padding-left:18px}.compact-list li{margin:4px 0}
@@ -1811,6 +1816,10 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
             html.AppendLine($"<span>Artifacts: {E(card.ArtifactCount.ToString())}</span><span>Events: {E(card.EventCount.ToString())}</span>");
             html.AppendLine("</div>");
             html.AppendLine($"<p class=\"muted\">{E(card.Detail)}</p>");
+            AppendCompactEvidenceSummary(
+                html,
+                $"Artifact compact summary: collection={card.Name}; status={card.Status}; artifacts={card.ArtifactCount}; events={card.EventCount}; detail={card.Detail}",
+                "Copy compact summary");
             html.AppendLine($"<details class=\"evidence-expansion-card\"><summary>Expand collection evidence</summary><pre class=\"copyable\" data-copy=\"{A(card.CopyText)}\">{E(card.CopyText)}</pre></details>");
             html.AppendLine("</article>");
         }
@@ -2086,7 +2095,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
     {
         html.AppendLine("<section id=\"process\" class=\"card\"><h2>Process details</h2>");
         AppendProcessTree(html, report);
-        AppendProcessRelationshipCards(html, report);
+        AppendProcessRelationshipCards(html, report, artifactLookup, artifacts);
         AppendEventRows(html, report.Events.Where(IsSampleBehaviorProcessEvent).ToList(), artifactLookup, artifacts);
         html.AppendLine("</section>");
     }
@@ -2132,7 +2141,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
     {
         var networkEvents = report.Events.Where(IsSampleBehaviorNetworkEvent).ToList();
         html.AppendLine("<section id=\"network\" class=\"card\"><h2>Network behavior</h2>");
-        AppendNetworkRelationshipCards(html, networkEvents);
+        AppendNetworkRelationshipCards(html, networkEvents, artifactLookup, artifacts);
         AppendEventRows(html, networkEvents, artifactLookup, artifacts);
         html.AppendLine("</section>");
     }
@@ -3276,13 +3285,17 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
     /// process identity and summarizes child/file/registry/network evidence;
     /// return is none.
     /// </summary>
-    private static void AppendProcessRelationshipCards(StringBuilder html, AnalysisReport report)
+    private static void AppendProcessRelationshipCards(
+        StringBuilder html,
+        AnalysisReport report,
+        IReadOnlyDictionary<string, List<ArtifactDescriptor>> artifactLookup,
+        IReadOnlyCollection<ArtifactDescriptor> artifacts)
     {
-        var allCards = BuildProcessRelationshipCards(report);
+        var allCards = BuildProcessRelationshipCards(report, artifactLookup, artifacts);
         var cards = allCards.Take(RelationshipCardInlineLimit).ToList();
         var hiddenCardCount = Math.Max(0, allCards.Count - cards.Count);
         html.AppendLine("<h3 id=\"process-relationship-cards\" class=\"anchor-offset\">Process relationship cards</h3>");
-        html.AppendLine("<div class=\"section-note\"><strong>Process relationship evidence.</strong> Cards summarize child, file, registry, and network activity per stable process identity; long command lines stay folded and collector self-noise is excluded.</div>");
+        html.AppendLine("<div class=\"section-note\"><strong>Process relationship evidence.</strong> Cards summarize child, file, registry, network, and linked artifact evidence per stable process identity; long command lines stay folded and collector self-noise is excluded.</div>");
         if (cards.Count == 0)
         {
             Empty(html, "No process relationship cards could be derived from normalized telemetry.");
@@ -3301,7 +3314,10 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
             html.AppendLine($"<span>Registry: {E(card.RegistryCount.ToString())}</span><span>Network: {E(card.NetworkCount.ToString())}</span>");
             html.AppendLine($"<span>First seen: {E(card.FirstSeen)}</span><span>Last seen: {E(card.LastSeen)}</span>");
             html.AppendLine($"<span>Parent: {E(card.ParentLabel)}</span><span>Relationship lines: {E(card.RelationshipLines.Count.ToString())}</span>");
+            html.AppendLine($"<span>Artifacts: {E(card.RelatedArtifacts.Count.ToString())}</span><span>Evidence lines: {E(card.EvidenceLines.Count.ToString())}</span>");
             html.AppendLine("</div>");
+            AppendCompactEvidenceSummary(html, card.CompactSummary, "Copy compact summary");
+            AppendRelationshipArtifactLinks(html, card.RelatedArtifacts, "Linked artifacts for this process", "Copy linked process artifacts");
             if (!string.IsNullOrWhiteSpace(card.Path) || !string.IsNullOrWhiteSpace(card.CommandLine))
             {
                 html.AppendLine("<div class=\"section-note\">");
@@ -3352,10 +3368,14 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
 
     /// <summary>
     /// Builds process relationship cards from normalized events.
-    /// Inputs are an analysis report; processing groups by stable process key
-    /// and computes child/event category counters; returns copyable cards.
+    /// Inputs are an analysis report and artifact lookup data; processing
+    /// groups by stable process key and computes child/event/artifact counters;
+    /// returns copyable cards.
     /// </summary>
-    private static IReadOnlyList<ProcessRelationshipCard> BuildProcessRelationshipCards(AnalysisReport report)
+    private static IReadOnlyList<ProcessRelationshipCard> BuildProcessRelationshipCards(
+        AnalysisReport report,
+        IReadOnlyDictionary<string, List<ArtifactDescriptor>> artifactLookup,
+        IReadOnlyCollection<ArtifactDescriptor> artifacts)
     {
         var behaviorEvents = report.Events.Where(IsSampleBehaviorEvent).ToList();
         var starts = behaviorEvents
@@ -3404,6 +3424,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
                 var path = events.Select(evt => evt.Path).FirstOrDefault(value => !string.IsNullOrWhiteSpace(value)) ?? string.Empty;
                 var commandLine = events.Select(evt => evt.CommandLine).FirstOrDefault(value => !string.IsNullOrWhiteSpace(value)) ?? string.Empty;
                 var evidenceLines = events.Take(12).Select(EventOneLine).ToList();
+                var relatedArtifacts = FindProcessRelatedArtifacts(events, artifactLookup, artifacts);
                 var relationshipLines = new List<string>
                 {
                     $"process={label}",
@@ -3415,9 +3436,22 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
                 relationshipLines.Add($"files={fileCount}");
                 relationshipLines.Add($"registry={registryCount}");
                 relationshipLines.Add($"network={networkCount}");
+                relationshipLines.Add($"relatedArtifacts={relatedArtifacts.Count}");
+                relationshipLines.AddRange(relatedArtifacts.Take(RelationshipArtifactInlineLimit).Select(ArtifactCompactLine));
+                var compactSummary = BuildProcessCompactSummary(
+                    label,
+                    events.Count,
+                    childLabels.Count,
+                    fileCount,
+                    registryCount,
+                    networkCount,
+                    relatedArtifacts,
+                    first,
+                    last);
                 var copyText = string.Join(
                     Environment.NewLine,
                     [
+                        compactSummary,
                         $"process={label}",
                         $"processKey={ProcessIdentityKey(first)}",
                         $"parentProcess={parentLabel}",
@@ -3430,6 +3464,9 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
                         $"lastSeen={last.Timestamp:u}",
                         $"path={path}",
                         $"commandLine={commandLine}",
+                        $"relatedArtifacts={relatedArtifacts.Count}",
+                        "linkedArtifacts:",
+                        .. relatedArtifacts.Take(RelationshipArtifactInlineLimit).Select(ArtifactCompactLine),
                         "childProcesses:",
                         .. childLabels.Take(12),
                         "evidence:",
@@ -3451,6 +3488,8 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
                     childLabels,
                     relationshipLines,
                     evidenceLines,
+                    relatedArtifacts,
+                    compactSummary,
                     copyText);
             })
             .OrderByDescending(card => card.NetworkCount + card.FileCount + card.RegistryCount + card.ChildCount)
@@ -3463,9 +3502,13 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
     /// Inputs are network events; processing groups by endpoint/domain/SNI and
     /// emits protocol/process/evidence cards; return is none.
     /// </summary>
-    private static void AppendNetworkRelationshipCards(StringBuilder html, IReadOnlyCollection<SandboxEvent> networkEvents)
+    private static void AppendNetworkRelationshipCards(
+        StringBuilder html,
+        IReadOnlyCollection<SandboxEvent> networkEvents,
+        IReadOnlyDictionary<string, List<ArtifactDescriptor>> artifactLookup,
+        IReadOnlyCollection<ArtifactDescriptor> artifacts)
     {
-        var allCards = BuildNetworkRelationshipCards(networkEvents);
+        var allCards = BuildNetworkRelationshipCards(networkEvents, artifactLookup, artifacts);
         var cards = allCards.Take(RelationshipCardInlineLimit).ToList();
         var hiddenCardCount = Math.Max(0, allCards.Count - cards.Count);
         html.AppendLine("<h3 id=\"network-relationship-cards\" class=\"anchor-offset\">Network relationship cards</h3>");
@@ -3477,7 +3520,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
 
         AppendNetworkRelationshipOverview(html, allCards, cards.Count, networkEvents.Count);
         html.AppendLine("<div class=\"section-note\"><strong>Endpoint-centric view.</strong> Network events are grouped by domain, SNI, URL, IP, or endpoint so analysts can read the relationship map without opening raw events first.</div>");
-        html.AppendLine("<div class=\"section-note\"><strong>Network category view.</strong> Cards split DNS, HTTP, TLS, and flow counts so endpoint relationships stay readable without opening raw rows.</div>");
+        html.AppendLine("<div class=\"section-note\"><strong>Network category view.</strong> Cards split DNS, HTTP, TLS, flow, and linked PCAP/source artifacts so endpoint relationships stay readable without opening raw rows.</div>");
         html.AppendLine("<div class=\"relation-grid\">");
         foreach (var card in cards)
         {
@@ -3491,7 +3534,9 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
             html.AppendLine($"<span>Categories: {E(string.Join(" / ", card.Categories))}</span><span>DNS: {E(card.DnsCount.ToString())}</span>");
             html.AppendLine($"<span>HTTP: {E(card.HttpCount.ToString())}</span><span>TLS: {E(card.TlsCount.ToString())}</span>");
             html.AppendLine($"<span>Flow/other: {E(card.FlowCount.ToString())}</span><span>Event types: {E(card.EventTypes.Count.ToString())}</span>");
+            html.AppendLine($"<span>Artifacts: {E(card.RelatedArtifacts.Count.ToString())}</span><span>Evidence lines: {E(card.EvidenceLines.Count.ToString())}</span>");
             html.AppendLine("</div>");
+            AppendCompactEvidenceSummary(html, card.CompactSummary, "Copy compact summary");
             html.AppendLine("<div class=\"relationship-tags\">");
             foreach (var category in card.Categories.Take(6))
             {
@@ -3509,6 +3554,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
             }
 
             html.AppendLine("</div>");
+            AppendRelationshipArtifactLinks(html, card.RelatedArtifacts, "Linked network / PCAP artifacts", "Copy linked network artifacts");
             html.AppendLine("<div class=\"toolbar\">");
             html.AppendLine(CopyButton("Copy network card", card.CopyText));
             html.AppendLine("</div>");
@@ -3540,6 +3586,12 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         var httpCount = allCards.Sum(card => card.HttpCount);
         var tlsCount = allCards.Sum(card => card.TlsCount);
         var flowCount = allCards.Sum(card => card.FlowCount);
+        var linkedArtifacts = allCards
+            .SelectMany(card => card.RelatedArtifacts)
+            .GroupBy(ArtifactKey, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.First())
+            .ToList();
+        var pcapCount = linkedArtifacts.Count(artifact => artifact.Kind == ArtifactKind.PacketCapture);
         html.AppendLine("<div class=\"overview-strip network-relationship-overview\">");
         AppendOverviewItem(
             html,
@@ -3559,15 +3611,25 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
             flowCount.ToString(),
             "TCP/UDP/PCAP flow rows are grouped by endpoint and kept out of collector self-noise.",
             flowCount > 0 ? "risk-info" : "risk-low");
+        AppendOverviewItem(
+            html,
+            "Linked PCAP/artifacts",
+            linkedArtifacts.Count.ToString(CultureInfo.InvariantCulture),
+            $"Packet captures: {pcapCount}; related artifacts are surfaced on endpoint cards as compact copyable evidence.",
+            linkedArtifacts.Count > 0 ? "risk-info" : "risk-low");
         html.AppendLine("</div>");
     }
 
     /// <summary>
     /// Builds endpoint-centric network relationship cards.
-    /// Inputs are network events; processing groups by extracted target and
-    /// summarizes protocols/process actors; returns copyable cards.
+    /// Inputs are network events and artifact lookup data; processing groups by
+    /// extracted target and summarizes protocols/process actors plus PCAP/source
+    /// artifact links; returns copyable cards.
     /// </summary>
-    private static IReadOnlyList<NetworkRelationshipCard> BuildNetworkRelationshipCards(IReadOnlyCollection<SandboxEvent> networkEvents)
+    private static IReadOnlyList<NetworkRelationshipCard> BuildNetworkRelationshipCards(
+        IReadOnlyCollection<SandboxEvent> networkEvents,
+        IReadOnlyDictionary<string, List<ArtifactDescriptor>> artifactLookup,
+        IReadOnlyCollection<ArtifactDescriptor> artifacts)
     {
         return networkEvents
             .Select(evt => new
@@ -3590,9 +3652,22 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
                 var processes = events.Select(ProcessDisplayName).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(value => value, StringComparer.OrdinalIgnoreCase).ToList();
                 var eventTypes = events.Select(evt => evt.EventType).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(value => value, StringComparer.OrdinalIgnoreCase).ToList();
                 var evidenceLines = events.Take(12).Select(EventOneLine).ToList();
+                var relatedArtifacts = FindNetworkRelatedArtifacts(events, artifactLookup, artifacts);
+                var compactSummary = BuildNetworkCompactSummary(
+                    group.Key,
+                    events.Count,
+                    dnsCount,
+                    httpCount,
+                    tlsCount,
+                    flowCount,
+                    processes,
+                    relatedArtifacts,
+                    first,
+                    last);
                 var copyText = string.Join(
                     Environment.NewLine,
                     [
+                        compactSummary,
                         $"target={group.Key}",
                         $"events={events.Count}",
                         $"protocols={string.Join(",", protocols)}",
@@ -3603,6 +3678,9 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
                         $"flowOrOtherEvents={flowCount}",
                         $"firstSeen={first.Timestamp:u}",
                         $"lastSeen={last.Timestamp:u}",
+                        $"relatedArtifacts={relatedArtifacts.Count}",
+                        "linkedArtifacts:",
+                        .. relatedArtifacts.Take(RelationshipArtifactInlineLimit).Select(ArtifactCompactLine),
                         "processes:",
                         .. processes.Take(12),
                         "eventTypes:",
@@ -3625,11 +3703,278 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
                     processes,
                     eventTypes,
                     evidenceLines,
+                    relatedArtifacts,
+                    compactSummary,
                     copyText);
             })
             .OrderByDescending(card => card.EventCount)
             .ThenBy(card => card.Target, StringComparer.OrdinalIgnoreCase)
             .ToList();
+    }
+
+    /// <summary>
+    /// Finds artifacts related to a process-card event group.
+    /// Inputs are all events in one process card plus artifact indexes; processing
+    /// matches explicit event references and process metadata hints; returns
+    /// sorted descriptors for card-level evidence links.
+    /// </summary>
+    private static IReadOnlyList<ArtifactDescriptor> FindProcessRelatedArtifacts(
+        IReadOnlyCollection<SandboxEvent> events,
+        IReadOnlyDictionary<string, List<ArtifactDescriptor>> artifactLookup,
+        IReadOnlyCollection<ArtifactDescriptor> artifacts)
+    {
+        var related = FindRelatedArtifactsForEvents(events, artifactLookup, artifacts);
+        var processIds = events
+            .Where(evt => evt.ProcessId.HasValue)
+            .Select(evt => evt.ProcessId!.Value)
+            .ToHashSet();
+        var processNames = events
+            .Select(evt => evt.ProcessName)
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Cast<string>()
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var artifact in artifacts.Where(IsEvidenceArtifactKind))
+        {
+            if (ArtifactMatchesAnyProcess(artifact, processIds, processNames))
+            {
+                AddRelatedArtifact(related, artifact);
+            }
+        }
+
+        return SortRelatedArtifacts(related.Values);
+    }
+
+    /// <summary>
+    /// Finds artifacts related to an endpoint-card event group.
+    /// Inputs are all events in one network card plus artifact indexes;
+    /// processing matches sourceArtifact* references and PCAP collection hints;
+    /// returns sorted descriptors for compact card-level links.
+    /// </summary>
+    private static IReadOnlyList<ArtifactDescriptor> FindNetworkRelatedArtifacts(
+        IReadOnlyCollection<SandboxEvent> events,
+        IReadOnlyDictionary<string, List<ArtifactDescriptor>> artifactLookup,
+        IReadOnlyCollection<ArtifactDescriptor> artifacts)
+    {
+        var related = FindRelatedArtifactsForEvents(events, artifactLookup, artifacts);
+        if (NetworkEventsShouldLinkPacketCapture(events))
+        {
+            foreach (var artifact in artifacts.Where(artifact => artifact.Kind == ArtifactKind.PacketCapture))
+            {
+                AddRelatedArtifact(related, artifact);
+            }
+        }
+
+        return SortRelatedArtifacts(related.Values);
+    }
+
+    private static Dictionary<string, ArtifactDescriptor> FindRelatedArtifactsForEvents(
+        IEnumerable<SandboxEvent> events,
+        IReadOnlyDictionary<string, List<ArtifactDescriptor>> artifactLookup,
+        IReadOnlyCollection<ArtifactDescriptor> artifacts)
+    {
+        var related = new Dictionary<string, ArtifactDescriptor>(StringComparer.OrdinalIgnoreCase);
+        foreach (var evt in events)
+        {
+            foreach (var artifact in FindRelatedArtifacts(evt, artifactLookup, artifacts))
+            {
+                AddRelatedArtifact(related, artifact);
+            }
+        }
+
+        return related;
+    }
+
+    private static void AddRelatedArtifact(Dictionary<string, ArtifactDescriptor> related, ArtifactDescriptor artifact)
+    {
+        if (IsReportArtifactKind(artifact.Kind) && !IsCollectorSelfNoiseArtifact(artifact))
+        {
+            related[ArtifactKey(artifact)] = artifact;
+        }
+    }
+
+    private static IReadOnlyList<ArtifactDescriptor> SortRelatedArtifacts(IEnumerable<ArtifactDescriptor> artifacts)
+    {
+        return artifacts
+            .OrderBy(artifact => ArtifactKindRank(artifact.Kind))
+            .ThenBy(artifact => artifact.RelativePath, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(artifact => artifact.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static bool IsEvidenceArtifactKind(ArtifactDescriptor artifact)
+    {
+        return artifact.Kind is ArtifactKind.DroppedFile or
+            ArtifactKind.Screenshot or
+            ArtifactKind.MemoryDump or
+            ArtifactKind.PacketCapture;
+    }
+
+    private static bool ArtifactMatchesAnyProcess(
+        ArtifactDescriptor artifact,
+        IReadOnlySet<int> processIds,
+        IReadOnlySet<string> processNames)
+    {
+        if (processIds.Count > 0)
+        {
+            var processId = MetadataValue(
+                artifact.Metadata,
+                "processId",
+                "pid",
+                "sourceProcessId",
+                "targetProcessId",
+                "rootProcessId",
+                "dumpProcessId",
+                "screenshotProcessId",
+                "packetCaptureProcessId");
+            if (int.TryParse(processId, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsedProcessId) &&
+                processIds.Contains(parsedProcessId))
+            {
+                return true;
+            }
+        }
+
+        if (processNames.Count > 0)
+        {
+            var processName = MetadataValue(
+                artifact.Metadata,
+                "processName",
+                "imageName",
+                "sourceProcessName",
+                "targetProcessName",
+                "rootProcessName",
+                "dumpProcessName",
+                "screenshotProcessName");
+            if (!string.IsNullOrWhiteSpace(processName) &&
+                processNames.Contains(processName))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool NetworkEventsShouldLinkPacketCapture(IReadOnlyCollection<SandboxEvent> events)
+    {
+        return events.Any(evt =>
+            IsPacketCaptureEvidenceEvent(evt) ||
+            TextEqualsAny(FirstEventDataValue(evt, "sourceArtifactKind", "artifactKind", "kind") ?? string.Empty, nameof(ArtifactKind.PacketCapture), "packet-capture", "pcap", "pcapng") ||
+            string.Equals(FirstEventDataValue(evt, "collectionName"), "packet-captures", StringComparison.OrdinalIgnoreCase) ||
+            EventTextContainsAny(evt, "packetCaptureRelativePath", "pcapRelativePath", "pcapngRelativePath", ".pcap", ".pcapng"));
+    }
+
+    private static string BuildProcessCompactSummary(
+        string label,
+        int eventCount,
+        int childCount,
+        int fileCount,
+        int registryCount,
+        int networkCount,
+        IReadOnlyCollection<ArtifactDescriptor> relatedArtifacts,
+        SandboxEvent first,
+        SandboxEvent last)
+    {
+        return $"Process compact summary: process={label}; events={eventCount}; children={childCount}; files={fileCount}; registry={registryCount}; network={networkCount}; linkedArtifacts={relatedArtifacts.Count} ({ArtifactKindSummary(relatedArtifacts)}); window={first.Timestamp:u}..{last.Timestamp:u}";
+    }
+
+    private static string BuildNetworkCompactSummary(
+        string target,
+        int eventCount,
+        int dnsCount,
+        int httpCount,
+        int tlsCount,
+        int flowCount,
+        IReadOnlyCollection<string> processes,
+        IReadOnlyCollection<ArtifactDescriptor> relatedArtifacts,
+        SandboxEvent first,
+        SandboxEvent last)
+    {
+        var processSummary = processes.Count == 0 ? "-" : string.Join(", ", processes.Take(4));
+        return $"Network compact summary: target={target}; events={eventCount}; DNS/HTTP/TLS/flow={dnsCount}/{httpCount}/{tlsCount}/{flowCount}; processes={processSummary}; linkedArtifacts={relatedArtifacts.Count} ({ArtifactKindSummary(relatedArtifacts)}); window={first.Timestamp:u}..{last.Timestamp:u}";
+    }
+
+    private static string ArtifactKindSummary(IReadOnlyCollection<ArtifactDescriptor> artifacts)
+    {
+        var groups = artifacts
+            .GroupBy(artifact => artifact.Kind)
+            .OrderBy(group => ArtifactKindRank(group.Key))
+            .Select(group => $"{group.Key} {group.Count()}")
+            .Take(6)
+            .ToList();
+        return groups.Count == 0 ? "none" : string.Join(", ", groups);
+    }
+
+    private static string ArtifactCompactLine(ArtifactDescriptor artifact)
+    {
+        return string.Join(
+            " | ",
+            [
+                $"artifact={ArtifactDisplayName(artifact)}",
+                $"kind={artifact.Kind}",
+                $"category={artifact.Category}",
+                $"size={FormatArtifactSize(artifact.SizeBytes)}",
+                $"sha256={ArtifactSha256(artifact)}",
+                $"selector={FirstNonEmpty(MetadataValue(artifact.Metadata, "downloadSelector"), artifact.RelativePath, "-")}",
+                $"href={FirstNonEmpty(ArtifactHref(artifact), "-")}"
+            ]);
+    }
+
+    /// <summary>
+    /// Appends one compact, copyable analyst summary inside a relationship card.
+    /// Inputs are pre-built summary text and a copy label; processing writes a
+    /// short visible paragraph plus an explicit copy button; return is none.
+    /// </summary>
+    private static void AppendCompactEvidenceSummary(StringBuilder html, string compactSummary, string copyLabel)
+    {
+        if (string.IsNullOrWhiteSpace(compactSummary))
+        {
+            return;
+        }
+
+        html.AppendLine($"<div class=\"compact-evidence-summary copyable\" data-copy=\"{A(compactSummary)}\"><strong>Compact evidence summary</strong><br>{E(compactSummary)}<div class=\"toolbar\">{CopyButton(copyLabel, compactSummary)}</div></div>");
+    }
+
+    /// <summary>
+    /// Appends bounded related-artifact links for process/network cards.
+    /// Inputs are artifact descriptors already associated to a card; processing
+    /// emits compact one-line evidence and safe Open/Download actions; return is
+    /// none and large descriptor walls are deliberately avoided.
+    /// </summary>
+    private static void AppendRelationshipArtifactLinks(
+        StringBuilder html,
+        IReadOnlyCollection<ArtifactDescriptor> artifacts,
+        string title,
+        string copyLabel)
+    {
+        if (artifacts.Count == 0)
+        {
+            return;
+        }
+
+        var shown = artifacts.Take(RelationshipArtifactInlineLimit).ToList();
+        var hidden = Math.Max(0, artifacts.Count - shown.Count);
+        var copy = string.Join(Environment.NewLine, shown.Select(ArtifactCompactLine));
+        html.AppendLine($"<details class=\"relationship-details related-artifacts-flat\"><summary>{E(title)} ({E(shown.Count.ToString(CultureInfo.InvariantCulture))}/{E(artifacts.Count.ToString(CultureInfo.InvariantCulture))})</summary>");
+        html.AppendLine("<ul class=\"artifact-list\">");
+        foreach (var artifact in shown)
+        {
+            var compact = ArtifactCompactLine(artifact);
+            html.Append("<li>");
+            html.Append($"<code class=\"copyable\" data-copy=\"{A(compact)}\">{E(ArtifactDisplayName(artifact))}</code>");
+            html.Append(RenderArtifactActionButtons(artifact, inline: true));
+            html.Append($"<br><span class=\"muted\">{E(artifact.Kind.ToString())} / {E(artifact.Category)} / {E(FormatArtifactSize(artifact.SizeBytes))} / sha256 {E(ArtifactSha256(artifact))}</span>");
+            html.AppendLine("</li>");
+        }
+
+        html.AppendLine("</ul>");
+        if (hidden > 0)
+        {
+            html.AppendLine($"<div class=\"copy-hint\">{E(hidden.ToString(CultureInfo.InvariantCulture))} additional linked artifacts are hidden from this compact card; use Artifact links or report.json for complete evidence.</div>");
+        }
+
+        html.AppendLine($"<div class=\"toolbar\">{CopyButton(copyLabel, copy)}</div>");
+        html.AppendLine("</details>");
     }
 
     /// <summary>
@@ -6090,7 +6435,33 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         ("Process tree default expansion.", "进程树默认展开。"),
         ("Key process nodes are open by default: roots, high-signal nodes, and the first relationship levels. Expand remaining nodes for full lineage.", "关键进程节点默认展开：根节点、高信号节点和前几层关系。展开其余节点可查看完整谱系。"),
         ("Process relationship evidence.", "进程关系证据。"),
+        ("Cards summarize child, file, registry, network, and linked artifact evidence per stable process identity; long command lines stay folded and collector self-noise is excluded.", "卡片按稳定进程身份汇总子进程、文件、注册表、网络和关联证据文件；长命令行保持折叠，采集器自噪声已排除。"),
         ("Cards summarize child, file, registry, and network activity per stable process identity; long command lines stay folded and collector self-noise is excluded.", "卡片按稳定进程身份汇总子进程、文件、注册表和网络活动；长命令行保持折叠，采集器自噪声已排除。"),
+        ("Compact evidence summary", "简要证据摘要"),
+        ("Copy compact summary", "复制简要摘要"),
+        ("Process compact summary:", "进程简要摘要："),
+        ("Network compact summary:", "网络简要摘要："),
+        ("Artifact compact summary:", "证据文件简要摘要："),
+        ("collection=", "证据通道="),
+        ("processes=", "进程="),
+        ("process=", "进程="),
+        ("target=", "目标="),
+        ("status=", "状态="),
+        ("events=", "事件="),
+        ("children=", "子进程="),
+        ("files=", "文件="),
+        ("registry=", "注册表="),
+        ("network=", "网络="),
+        ("artifacts=", "证据文件="),
+        ("linkedArtifacts=", "关联证据文件="),
+        ("window=", "时间窗="),
+        ("detail=", "详情="),
+        ("Linked artifacts for this process", "此进程关联证据文件"),
+        ("Copy linked process artifacts", "复制进程关联证据文件"),
+        ("Linked network / PCAP artifacts", "关联网络 / PCAP 证据文件"),
+        ("Copy linked network artifacts", "复制网络关联证据文件"),
+        ("Summary lines:", "摘要行："),
+        ("Evidence lines:", "证据行："),
         ("Cycle suppressed for stable rendering.", "已抑制循环以保持稳定渲染。"),
         ("Stable relationship map", "稳定关系图"),
         ("Relationship lines:", "关系行："),
@@ -6105,6 +6476,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         ("Endpoint-centric view.", "端点中心视图。"),
         ("Network events are grouped by domain, SNI, URL, IP, or endpoint so analysts can read the relationship map without opening raw events first.", "网络事件按域名、SNI、URL、IP 或端点分组，分析人员无需先打开原始事件即可阅读关系图。"),
         ("Network category view.", "网络类别视图。"),
+        ("Cards split DNS, HTTP, TLS, flow, and linked PCAP/source artifacts so endpoint relationships stay readable without opening raw rows.", "卡片拆分 DNS、HTTP、TLS、流量和关联 PCAP/来源证据文件，使端点关系无需打开原始行也保持可读。"),
         ("Cards split DNS, HTTP, TLS, and flow counts so endpoint relationships stay readable without opening raw rows.", "卡片拆分 DNS、HTTP、TLS 和流量计数，使端点关系无需打开原始行也保持可读。"),
         ("Endpoint groups", "端点分组"),
         ("Rendered cards:", "已渲染卡片："),
@@ -6113,6 +6485,10 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         ("Protocol categories are counted before raw rows so relationship cards stay readable.", "协议类别先于原始行计数，使关系卡保持可读。"),
         ("Flow / other", "流量 / 其他"),
         ("TCP/UDP/PCAP flow rows are grouped by endpoint and kept out of collector self-noise.", "TCP/UDP/PCAP 流量行按端点分组，并排除采集器自噪声。"),
+        ("Linked PCAP/artifacts", "关联 PCAP/证据文件"),
+        ("Packet captures:", "抓包文件："),
+        ("related artifacts are surfaced on endpoint cards as compact copyable evidence.", "关联证据文件会以简洁可复制证据显示在端点卡上。"),
+        ("additional linked artifacts are hidden from this compact card; use Artifact links or report.json for complete evidence.", "个额外关联证据文件已从此简要卡隐藏；请使用证据文件链接或 report.json 查看完整证据。"),
         ("Artifacts:", "证据文件："),
         ("Categories:", "类别："),
         ("DNS:", "DNS："),

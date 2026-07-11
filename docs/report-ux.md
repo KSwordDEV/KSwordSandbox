@@ -55,6 +55,9 @@ v1 报告必须在 live demo 中对操作者有用，而不只是技术上完整
   和 process event table。树应优先使用 stable process key / 稳定 process key，缺失时回退 PID/PPID，使 parent、
   child 和 orphan relationship 无需 JavaScript 也稳定可读。Process tree overview 应展示
   node/root/edge counts、默认展开的高信号节点，并在展开 lineage 前排除 self-noise；self-noise excluded。
+  Process relationship cards 应在事件表之前提供中文优先的紧凑证据摘要，并把与该进程相关的
+  dropped files、screenshots、memory dumps 和 PCAP/source artifacts 作为有界、可复制、可打开/下载的
+  related artifact evidence 展示，而不是要求操作者去 raw event wall 中手工关联。
 - File behavior / 文件, including dropped files.
   Dropped-file rows should be reinforced by the Evidence story board and
   Artifact collection status lanes so released files remain visible even when
@@ -73,6 +76,10 @@ v1 报告必须在 live demo 中对操作者有用，而不只是技术上完整
   pktmon collection metadata, packet counts, conversion status, and imported
   DNS/HTTP/TLS/flow rows should also appear in the Evidence story board and
   remain collapsible/copyable rather than being spread across raw rows only.
+  Endpoint cards should also surface compact Chinese-first summaries and
+  linked PCAP/source artifacts for the endpoint when sourceArtifact* or packet
+  capture hints exist, with explicit copy buttons and safe Open/Download links
+  for report-relative artifacts.
 - R0 / driver events / R0 与驱动事件：
   R0 collection health status 必须出现在 driver telemetry evidence 之前。Device unavailable、
   driver health、queue backpressure 和 dropped-event counters 描述的是遥测质量，不能计入样本行为。
@@ -160,6 +167,11 @@ plain diagnostic dump. The visual contract is:
   3-8 metric chips, and a native collapsed evidence block. Required lanes are
   execution lineage, dropped-file evidence, screenshot evidence, memory dump
   evidence, network/PCAP evidence, and R0 health/noise boundary.
+- Compact evidence summaries in artifact status, process cards, and network
+  cards should be visible before dense tables, Chinese-first in the default
+  Simplified Chinese report, and copyable via both explicit buttons and
+  right-click. They should use bounded key/value summaries and compact artifact
+  lines rather than dumping full raw events or full descriptor payloads inline.
 - Timeline and process relationship views should also prefer stable weak
   interactions: native HTML/CSS timeline group panels, a bounded process
   relationship tree, and copyable relationship panels rather than external graph

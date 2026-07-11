@@ -620,13 +620,7 @@ public sealed partial class SandboxJobService
 
     private static string NormalizeArtifactSelector(string? value)
     {
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            return string.Empty;
-        }
-
-        var decoded = Uri.UnescapeDataString(value.Trim()).Replace('\\', '/').TrimStart('/');
-        return ArtifactDescriptorFactory.NormalizeRelativePath(decoded);
+        return ArtifactDescriptorFactory.NormalizeSelector(value);
     }
 
     private static bool IsSameOrUnderDirectory(string rootPath, string candidatePath)

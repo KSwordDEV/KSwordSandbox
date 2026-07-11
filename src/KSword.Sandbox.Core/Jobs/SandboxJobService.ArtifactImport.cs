@@ -201,10 +201,23 @@ public sealed partial class SandboxJobService
         AddIfNotEmpty(data, "processName", MetadataValue(artifact.Metadata, "processName"));
         AddIfNotEmpty(data, "commandLine", MetadataValue(artifact.Metadata, "commandLine"));
         AddIfNotEmpty(data, "duplicateGroupKey", MetadataValue(artifact.Metadata, "duplicateGroupKey"));
+        AddIfNotEmpty(data, "duplicateGroupId", MetadataValue(artifact.Metadata, "duplicateGroupId"));
         AddIfNotEmpty(data, "duplicateGroupCount", MetadataValue(artifact.Metadata, "duplicateGroupCount"));
         AddIfNotEmpty(data, "duplicateOrdinal", MetadataValue(artifact.Metadata, "duplicateOrdinal"));
+        AddIfNotEmpty(data, "duplicateRole", MetadataValue(artifact.Metadata, "duplicateRole"));
         AddIfNotEmpty(data, "isDuplicate", MetadataValue(artifact.Metadata, "isDuplicate"));
+        AddIfNotEmpty(data, "duplicatePrimarySelector", MetadataValue(artifact.Metadata, "duplicatePrimarySelector"));
+        AddIfNotEmpty(data, "duplicatePrimarySafeLink", MetadataValue(artifact.Metadata, "duplicatePrimarySafeLink"));
         AddIfNotEmpty(data, "duplicateOfArtifactRelativePath", MetadataValue(artifact.Metadata, "duplicateOfArtifactRelativePath"));
+        AddIfNotEmpty(data, "duplicateGroupMemberSelectors", MetadataValue(artifact.Metadata, "duplicateGroupMemberSelectors"));
+        AddIfNotEmpty(data, "duplicateGroupMemberSelectorsJson", MetadataValue(artifact.Metadata, "duplicateGroupMemberSelectorsJson"));
+        AddIfNotEmpty(data, "previewLabel", MetadataValue(artifact.Metadata, "previewLabel"));
+        AddIfNotEmpty(data, "previewLabelZh", MetadataValue(artifact.Metadata, "previewLabelZh"));
+        AddIfNotEmpty(data, "sizeDisplay", MetadataValue(artifact.Metadata, "sizeDisplay"));
+        AddIfNotEmpty(data, "sha256Short", MetadataValue(artifact.Metadata, "sha256Short"));
+        AddIfNotEmpty(data, "apiMetadataVersion", MetadataValue(artifact.Metadata, "apiMetadataVersion"));
+        AddIfNotEmpty(data, "selectorEncoding", MetadataValue(artifact.Metadata, "selectorEncoding"));
+        AddIfNotEmpty(data, "selectorFields", MetadataValue(artifact.Metadata, "selectorFields"));
 
         return new SandboxEvent
         {
@@ -242,16 +255,16 @@ public sealed partial class SandboxJobService
             ["collectionName"] = expectation.CollectionName,
             ["artifactKind"] = expectation.Kind.ToString(),
             ["sourceArtifactKind"] = expectation.Kind.ToString(),
+            ["artifactMissing"] = "true",
+            ["healthStatus"] = "collection-health",
+            ["sourceEventType"] = sourceEventType,
             ["artifactKindZh"] = expectation.ChineseName,
             ["sourceArtifactKindZh"] = expectation.ChineseName,
             ["behaviorCounted"] = "false",
             ["nonbehavior"] = "true",
             ["behaviorScope"] = "collection-health",
             ["notSampleBehavior"] = "true",
-            ["sourceEventType"] = sourceEventType,
             ["sourceEventPath"] = sourceEventPath,
-            ["artifactMissing"] = "true",
-            ["healthStatus"] = "collection-health",
             ["artifactCount"] = artifactCount.ToString(CultureInfo.InvariantCulture),
             ["expectedRelativePath"] = expectation.DefaultRelativePath,
             ["requested"] = requested.ToString(CultureInfo.InvariantCulture).ToLowerInvariant(),

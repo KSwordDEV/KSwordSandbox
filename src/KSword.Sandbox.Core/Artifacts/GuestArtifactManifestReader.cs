@@ -115,7 +115,12 @@ public sealed class GuestArtifactManifestReader
     /// </summary>
     private static ArtifactDescriptor NormalizeDescriptor(ArtifactDescriptor descriptor, string guestOutputRoot)
     {
-        var relativePath = ArtifactDescriptorFactory.NormalizeRelativePath(descriptor.RelativePath);
+        var descriptorImportPath = ArtifactDescriptorFactory.NormalizeSelector(descriptor.ImportPath);
+        var relativePath = FirstNonEmpty(
+            ArtifactDescriptorFactory.NormalizeRelativePath(descriptor.RelativePath),
+            descriptorImportPath,
+            ArtifactDescriptorFactory.NormalizeSelector(descriptor.SafeLink),
+            ArtifactDescriptorFactory.NormalizeSelector(MetadataValue(descriptor.Metadata, "artifactRelativePath", "sourceArtifactRelativePath", "downloadSelector", "safeRelativeSelector", "downloadSafeLink")));
         var descriptorKind = ResolveDescriptorKind(descriptor, relativePath);
         if (string.IsNullOrWhiteSpace(relativePath))
         {
@@ -131,7 +136,7 @@ public sealed class GuestArtifactManifestReader
         AddIfNotEmpty(metadata, "capturePhase", descriptor.CapturePhase);
         AddIfNotEmpty(metadata, "captureState", descriptor.CaptureState);
         AddIfNotEmpty(metadata, "collectionName", descriptor.CollectionName);
-        AddIfNotEmpty(metadata, "importPath", string.IsNullOrWhiteSpace(descriptor.ImportPath) ? relativePath : descriptor.ImportPath);
+        AddIfNotEmpty(metadata, "importPath", string.IsNullOrWhiteSpace(descriptorImportPath) ? relativePath : descriptorImportPath);
         AddPacketCaptureImportDefaults(descriptorKind, metadata);
         if (!string.IsNullOrWhiteSpace(FirstNonEmpty(descriptor.GuestPath, descriptor.FullPath)) &&
             !metadata.ContainsKey("guestFullPath"))
@@ -161,7 +166,7 @@ public sealed class GuestArtifactManifestReader
             CapturePhase = FirstNonEmpty(descriptor.CapturePhase, normalized.CapturePhase, MetadataValue(metadata, "capturePhase", "phase")),
             CaptureState = FirstNonEmpty(descriptor.CaptureState, normalized.CaptureState, MetadataValue(metadata, "captureState")),
             GuestPath = FirstNonEmpty(descriptor.GuestPath, MetadataValue(metadata, "guestFullPath", "guestPath"), descriptor.FullPath),
-            ImportPath = FirstNonEmpty(descriptor.ImportPath, normalized.ImportPath, relativePath),
+            ImportPath = FirstNonEmpty(descriptorImportPath, normalized.ImportPath, relativePath),
             CollectionName = FirstNonEmpty(descriptor.CollectionName, normalized.CollectionName, MetadataValue(metadata, "collectionName")),
             Metadata = metadata
         };
@@ -186,7 +191,11 @@ public sealed class GuestArtifactManifestReader
 
     private static ArtifactCollectionDescriptor NormalizeCollection(ArtifactCollectionDescriptor collection)
     {
-        var relativePath = ArtifactDescriptorFactory.NormalizeRelativePath(collection.RelativePath);
+        var importPath = ArtifactDescriptorFactory.NormalizeSelector(collection.ImportPath);
+        var relativePath = FirstNonEmpty(
+            ArtifactDescriptorFactory.NormalizeRelativePath(collection.RelativePath),
+            importPath,
+            ArtifactDescriptorFactory.NormalizeSelector(collection.SafeLink));
         var safeLink = ArtifactDescriptorFactory.BuildSafeLink(relativePath);
         if (string.IsNullOrWhiteSpace(safeLink))
         {
@@ -200,9 +209,7 @@ public sealed class GuestArtifactManifestReader
                 : collection.Category,
             RelativePath = relativePath,
             SafeLink = safeLink,
-            ImportPath = string.IsNullOrWhiteSpace(collection.ImportPath)
-                ? relativePath
-                : ArtifactDescriptorFactory.NormalizeRelativePath(collection.ImportPath),
+            ImportPath = FirstNonEmpty(importPath, relativePath),
             Metadata = CopyMetadata(collection.Metadata)
         };
     }

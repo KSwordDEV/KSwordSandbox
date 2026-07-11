@@ -138,7 +138,7 @@ public static class ArtifactDescriptorFactory
             CapturePhase = FirstNonEmpty(descriptor.CapturePhase, MetadataValue(metadata, "capturePhase", "phase")),
             CaptureState = FirstNonEmpty(descriptor.CaptureState, MetadataValue(metadata, "captureState")),
             GuestPath = FirstNonEmpty(descriptor.GuestPath, MetadataValue(metadata, "guestFullPath", "guestPath", "sourcePath")),
-            ImportPath = FirstNonEmpty(descriptor.ImportPath, MetadataValue(metadata, "importPath"), relativePath),
+            ImportPath = FirstNonEmpty(NormalizeSelector(descriptor.ImportPath), MetadataValue(metadata, "importPath"), relativePath),
             CollectionName = FirstNonEmpty(descriptor.CollectionName, MetadataValue(metadata, "collectionName")),
             MimeType = string.IsNullOrWhiteSpace(descriptor.MimeType)
                 ? MimeTypeForPath(!string.IsNullOrWhiteSpace(descriptor.FullPath) ? descriptor.FullPath : descriptor.Name)
@@ -212,6 +212,43 @@ public static class ArtifactDescriptorFactory
     }
 
     /// <summary>
+    /// Normalizes a browser/API/manifest artifact selector into a relative
+    /// path. Inputs may be plain or URL-encoded; processing rejects empty,
+    /// absolute, drive-qualified, malformed, or traversal selectors; the
+    /// method returns slash-separated selector text or empty text.
+    /// </summary>
+    public static string NormalizeSelector(string? selector)
+    {
+        if (string.IsNullOrWhiteSpace(selector))
+        {
+            return string.Empty;
+        }
+
+        var trimmed = selector.Trim();
+        if (trimmed.StartsWith("/", StringComparison.Ordinal) ||
+            trimmed.StartsWith("\\", StringComparison.Ordinal))
+        {
+            return string.Empty;
+        }
+
+        try
+        {
+            var decoded = Uri.UnescapeDataString(trimmed).Replace('\\', '/');
+            if (decoded.StartsWith("/", StringComparison.Ordinal) ||
+                decoded.StartsWith("\\", StringComparison.Ordinal))
+            {
+                return string.Empty;
+            }
+
+            return NormalizeRelativePath(decoded);
+        }
+        catch (UriFormatException)
+        {
+            return string.Empty;
+        }
+    }
+
+    /// <summary>
     /// Builds a link target that is safe to place in a local report href.
     /// Inputs are a normalized relative path; processing URL-encodes each path
     /// segment; the method returns slash-separated link text or empty text.
@@ -242,14 +279,7 @@ public static class ArtifactDescriptorFactory
             return string.Empty;
         }
 
-        try
-        {
-            return BuildSafeLink(Uri.UnescapeDataString(safeLink.Trim()));
-        }
-        catch (UriFormatException)
-        {
-            return string.Empty;
-        }
+        return BuildSafeLink(NormalizeSelector(safeLink));
     }
 
     /// <summary>
@@ -363,7 +393,12 @@ public static class ArtifactDescriptorFactory
     {
         AddDefault(metadata, "artifactRelativePath", relativePath);
         AddDefault(metadata, "sourceArtifactRelativePath", relativePath);
-        AddDefault(metadata, "importPath", relativePath);
+        var importPath = FirstNonEmpty(NormalizeSelector(MetadataValue(metadata, "importPath")), relativePath);
+        if (!string.IsNullOrWhiteSpace(importPath))
+        {
+            metadata["importPath"] = importPath;
+        }
+
         AddDefault(metadata, "sourceArtifactPath", fullPath);
         AddDefault(metadata, "fullPath", fullPath);
         if (sizeBytes is > 0)

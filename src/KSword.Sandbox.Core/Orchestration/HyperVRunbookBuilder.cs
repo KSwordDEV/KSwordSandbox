@@ -185,6 +185,7 @@ public sealed class HyperVRunbookBuilder
         steps.Add(Step("stage-guest-payload", "Stage Guest Agent and R0Collector into guest", BuildStageGuestPayloadCommand(config, targetVmName)));
         steps.Add(Step("copy-sample", "Copy submitted sample into guest", $"Copy-VMFile -VMName {Q(targetVmName)} -SourcePath {Q(sample.FullPath)} -DestinationPath {Q(guestSample)} -FileSource Host -CreateFullPath"));
         steps.Add(Step("make-host-output", "Create host output folder", $"New-Item -ItemType Directory -Force -Path {Q(hostOut)} | Out-Null", mutatesVmState: false));
+        steps.Add(Step("record-artifact-policy", "Record artifact collection policy", BuildRecordArtifactCollectionPolicyCommand(config, hostOut), requiresElevation: false, mutatesVmState: false));
         steps.Add(Step("prepare-guest-output", "Prepare job-specific guest output folder", BuildPrepareGuestOutputCommand(config, targetVmName, guestOut, driverEventsPath, agentPidPath, agentExitPath)));
         if (config.Driver.Enabled && !string.IsNullOrWhiteSpace(config.Driver.HostDriverPath))
         {
@@ -194,6 +195,38 @@ public sealed class HyperVRunbookBuilder
         steps.Add(Step("run-agent", "Start guest collector and sample asynchronously", BuildStartGuestAgentCommand(config, targetVmName, guestRoot, agentPath, guestSample, guestOut, driverEventsPath, agentPidPath, agentExitPath)));
         steps.Add(Step("sync-live-output", "Live-sync guest events while sample runs", BuildLiveOutputSyncCommand(config, targetVmName, guestOut, hostOut, agentPidPath, agentExitPath)));
         steps.Add(Step("collect-output", "Collect final guest JSON output", BuildCollectOutputCommand(config, targetVmName, guestOut, hostOut)));
+    }
+
+    /// <summary>
+    /// Builds a host-only step that writes the resolved per-job artifact policy
+    /// beside live guest output. Inputs are sandbox config and host output
+    /// root; processing records enabled lanes, memory-dump scope semantics, and
+    /// copy/download expectations before the guest starts; the method returns a
+    /// PowerShell command string.
+    /// </summary>
+    private static string BuildRecordArtifactCollectionPolicyCommand(SandboxConfig config, string hostOut)
+    {
+        return string.Join(" ", new[]
+        {
+            $"$hostOut = {Q(hostOut)};",
+            "New-Item -ItemType Directory -Force -Path $hostOut | Out-Null;",
+            "$policyPath = Join-Path $hostOut 'artifact-collection-policy.json';",
+            "$policy = [ordered]@{",
+            $"collectDroppedFiles = {PsBool(config.ArtifactCollection.CollectDroppedFiles)};",
+            $"captureScreenshots = {PsBool(config.ArtifactCollection.CaptureScreenshots)};",
+            $"captureMemoryDumps = {PsBool(config.ArtifactCollection.CaptureMemoryDumps)};",
+            $"capturePacketCapture = {PsBool(config.ArtifactCollection.CapturePacketCapture)};",
+            "memoryDumpScope = 'sample-process-tree-descendants-if-supported';",
+            "memoryDumpScopeZh = '启用内存转储时，Guest Agent 以样本进程树为边界，尽量包含已解析子进程/后代进程。';",
+            "droppedFilesScope = 'new-or-modified-files-in-guest-diff';",
+            "packetCaptureScope = 'guest-pcap-or-pcapng-artifact-if-supported';",
+            "downloadExpectation = 'host artifact index should expose safe relative selectors only';",
+            "policySource = 'resolved-sandbox-config-and-webui-overrides';",
+            "generatedAtUtc = (Get-Date).ToUniversalTime().ToString('o')",
+            "};",
+            "$policy | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $policyPath -Encoding UTF8;",
+            "Write-Host \"Artifact collection policy written: $policyPath\";"
+        });
     }
 
     /// <summary>
@@ -605,4 +638,9 @@ public sealed class HyperVRunbookBuilder
     {
         return $"'{text.Replace("'", "''")}'";
     }
+
+    /// <summary>
+    /// Converts a managed bool to a PowerShell literal.
+    /// </summary>
+    private static string PsBool(bool value) => value ? "$true" : "$false";
 }

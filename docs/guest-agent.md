@@ -169,20 +169,25 @@ guest-output 目录下解析文件，而不是信任 VM 内绝对路径。
   when available, keeping smoke tests usable on headless hosts.
 - `memory_dump.captured` when `--memory-dump` successfully writes a
   `memory-dumps/*.dmp` minidump for the launched sample process or a visible
-  child process. The event path points at the `.dmp` file and `Data` includes
-  `phase`, `capturePhase`, `dumpType`, `sizeBytes`, `sha256`, `relativePath`,
-  `artifactRelativePath`, `processRole`, `rootProcessId`, `treeDepth`,
-  `treeLineage`, and `zhMessage`/`zhHint` when available.
+  descendant process. The event path points at the `.dmp` file and `Data`
+  includes `phase`, `capturePhase`, `dumpType`, `sizeBytes`, `sha256`,
+  `relativePath`, `artifactRelativePath`, `artifactRelativePathStatus`,
+  `capturePolicy`, `processRole`, `rootProcessId`, `treeDepth`, `treeLineage`,
+  descendant targeting fields, and `zhMessage`/`zhHint` when available.
 - `memory_dump.skipped` when memory dump capture was requested but the platform,
   process state, or access rights prevent capture. This is non-fatal and
   includes structured `reason`, `diagnosticStage`, `exceptionType`, and
-  `win32Error` when available.
+  `win32Error` when available. Duplicate/already-captured targets, PID reuse
+  protection, missing root PID, and empty visible-tree cases are explicit
+  skipped events with `artifactRelativePathStatus` and Chinese `zhHint`.
 - `memory_dump.sweep` after the final `after-run` process-tree sweep. It records
   visible target count, attempted count, captured count, skipped count, and
-  already-captured count, plus root/child split counters and
+  already-captured count, plus root/descendant split counters and
   `memoryDumpCoverageState` / `rootProcessCoverageState` /
   `childProcessCoverageState` so the report can explain why a run has fewer
-  dump files than process-tree nodes.
+  dump files than process-tree nodes. Timeout runs can also emit a `cleanup`
+  pre-kill sweep before `Kill(entireProcessTree:true)` so live descendants are
+  dumped before the agent terminates the process tree.
 - `packet_capture.started`, `packet_capture.stopped`, and
   `packet_capture.captured` when `--packet-capture` / `--pcap` /
   `--network-capture` starts `pktmon`, stops it after the run, converts ETL to
@@ -294,17 +299,23 @@ VM-local path（`guestFullPath`）。它还携带 `guestRelativePath`、`sourceE
 
 `--memory-dump`（别名 `--memory-dumps`）为启动的样本进程及其可见子孙进程启用
 best-effort `MiniDumpNormal` 采集。probe 先在 `after-start` 捕获 root process 作为兜底；
-然后在 `after-run` 使用与 `ProcessTreeProbe` 相同的低权限 process snapshot 模型遍历可见
-root/child tree，并转储尚未捕获的子进程。dump 写到 `--out\memory-dumps\*.dmp`；
+然后使用与 `ProcessTreeProbe` 相同的低权限 process snapshot 模型遍历可见
+root/descendant tree，并转储尚未捕获的子进程。正常退出/早退时 sweep 发生在
+`after-run`；超时样本会先在 `cleanup` 阶段（调用 `Kill(entireProcessTree:true)` 之前）
+做一次 memory-dump-only sweep，尽量在子孙进程仍存活时写出 dump。dump 写到
+`--out\memory-dumps\*.dmp`；
 host artifact index 将这些文件分类为 `memory-dump`，不新增共享 artifact enum。
 
 内存转储有意默认关闭，因为 dump 文件可能包含凭据、token、文档片段或其他敏感内存。
 操作者或 host policy 必须按 job 显式 opt in。如果样本退出太快、session 不是 Windows，
 或 process access 被拒绝，Agent 会输出 `memory_dump.skipped` 并继续正常事件/artifact 写入。
 最终 `memory_dump.sweep` 只是 summary evidence；即使所有可见目标已捕获或没有仍可见的子进程，
-也会输出。该 summary 会拆分 root/child attempted/captured/skipped/already-captured
+也会输出。该 summary 会拆分 root/descendant attempted/captured/skipped/already-captured
 计数，并给出 coverage state，便于审阅者判断“未生成 dump”是已在 after-start
-捕获、目标退出、权限失败，还是没有可见子进程。
+捕获、目标退出、权限失败、PID 复用保护，还是没有可见子进程。每条 dump captured/skipped
+事件都会尽量保留 `rootProcessId`、`treeLineage`、`capturePolicy`、
+`artifactRelativePathStatus` 和 `zhHint`；如果 root PID 本身不可用，则用
+`rootProcessIdStatus` / `treeLineageStatus` 明确标记不可用。
 
 ## 可选网络抓包 / Optional packet capture
 

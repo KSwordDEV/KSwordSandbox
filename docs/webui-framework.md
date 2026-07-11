@@ -77,6 +77,10 @@ WebUI/UX 工作不得修改 `driver/`、`guest/` 或
   WebUI 勾选时才打开。runbook 转发给 Guest Agent 的参数为
   `--collect-dropped-files`、`--screenshot`、`--memory-dump` 和
   `--packet-capture`。
+  Upload UI 必须先读取当前 `/api/config` 的 `artifactCollection` shape；
+  当前配置/Runbook 未暴露的 lane 在页面中保持禁用和可复制说明，不向
+  upload/start 表单提交 phantom 字段。截图、内存转储和 PCAP 仍是高级显式
+  opt-in，内存转储文案需说明“样本进程，支持时包含子进程”。
 - 明确展示任务状态、任务 ID、样本路径、近期任务列表、进度页入口、实时监控入口和报告入口。
 - 可选高级手动 guest import input 只用于修复。根 dashboard 不再渲染
   artifact/download 路径表；报告与证据下载统一集中在 live monitor。
@@ -154,6 +158,9 @@ WebUI/UX 工作不得修改 `driver/`、`guest/` 或
   状态，而不是隐藏该 lane。同一 monitor 应突出展示 VirusTotal 结果，并清晰区分
   恶意/可疑/无害/缺失/未配置状态；后台运行进入 terminal state 后，
   仍保持显式中文和英文报告按钮可见；
+  Monitor 还应提供“刷新证据/下载卡片”手动入口，并为每张卡片提供右键复制和显式
+  `复制卡片摘要` / `复制 selector` / `复制下载链接` affordances，方便值守人员不打开
+  host 路径即可传递安全 selector 或 endpoint。
 - 为 runbook step status 提供自然的进度页链接，指向 dedicated execution-flow page，
   并同时出现在任务操作与进度摘要中。该入口在 UI 文案中称为 progress-page link，
   让操作者自然进入 execution-flow 诊断页，而不是在 dashboard 内展开命令墙。

@@ -68,14 +68,16 @@ Host 写出 `artifact-index.json` 作为可下载 artifact index。每个 downlo
 
 WebUI 下载 UX 还使用这些 host descriptor presentation/safety metadata：`previewLabel`、`previewLabelZh`、
 `contentType`、`downloadContentType`、`downloadFileName`、`downloadSelector`、`downloadSafeLink`、`sizeDisplay`、
-`sha256Short`、`isDownloadable`，以及
+`sha256Short`、`isDownloadable`、`downloadAvailable`、`apiMetadataVersion=artifact-descriptor-v1`、`selectorEncoding`
+和 `selectorFields`，以及
 `downloadSecurityPolicy=server-indexed-relative-selector` /
 `downloadRejectionPolicy=reject-empty-absolute-traversal-unindexed-missing` contract。这些字段都从 host-side index
 派生，适合放入 browser DTO；它们不是新的 filesystem authority。
 
 重复 artifact 按 host-computed SHA-256 加 byte size 分组。Index metadata 记录 `duplicateGroupKey`、
 `duplicateGroupId`、`duplicateGroupCount`、`duplicateOrdinal`、`duplicateRole`、`duplicatePrimarySelector`、
-`duplicatePrimarySafeLink`、`duplicateOfArtifactRelativePath` 和 `duplicateGroupMemberSelectors`。组内第一个稳定
+`duplicatePrimarySafeLink`、`duplicatePrimaryImportPath`、`duplicateOfArtifactRelativePath`、
+`duplicateGroupMemberSelectors` 和 machine-readable `duplicateGroupMemberSelectorsJson`。组内第一个稳定
 relative path 是 primary；后续 entry 仍可下载，但标记为 duplicate，方便 UI/report 折叠或标注重复的 dropped files、
 screenshots、dumps 或 captures。
 
@@ -83,6 +85,14 @@ screenshots、dumps 或 captures。
 相应 collection metadata 会记录 `rejectionDiagnosticsAvailable`、`rejectedArtifactCount`、
 `lastRejectedArtifactReason`、`lastRejectedArtifactName`、`lastRejectedArtifactSelector`、`lastRejectedArtifactKind`、
 `artifactRejectionReasons` 和 `zhRejectionHint`。这样既能保留操作者诊断，又能保持“只有 job output root 下已存在文件可被 stream”的不变式。
+当同一 guest manifest 重复引用同一个 host-resolved artifact 时，Host 保留第一次稳定 selector，后续引用记为
+`duplicateGuestArtifactReference` 诊断，不让后写 metadata 覆盖 primary selector。
+
+Collection descriptors 也带 API-ready metadata：`apiMetadataVersion=artifact-collection-v1`、`collectionDisplayName`、
+`collectionDisplayNameZh`、`downloadableArtifactCount`、`hasDownloadableArtifacts`、`sensitiveCollection`、
+`downloadSelectorPolicy`、`safeSelectorFields`、`zhStatus`、`zhReason` 和 `zhHint`。这些字段汇总
+dropped-files、screenshots、memory-dumps、packet-captures 的采集状态与下载策略，供 API/客户端展示；
+真正的 stream authority 仍然只是 Host index 中已存在文件的相对 selector。
 
 报告导入阶段，Host 还会为 downloadable dropped files、screenshots、memory dumps 和 packet captures 写出
 `artifact.host_imported` rows。这些 rows 记录 `sourceArtifactKind`、`sourceArtifactRelativePath`、

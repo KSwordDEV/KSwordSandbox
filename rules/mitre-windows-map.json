@@ -1,6 +1,6 @@
 {
   "matrix": "enterprise-windows",
-  "version": "2026-07-12-v18-release-prep-guards",
+  "version": "2026-07-12-v19-artifact-correlation-guards",
   "techniques": [
     {
       "id": "T1003",
