@@ -188,7 +188,7 @@ function Initialize-EffectiveParameters {
         $current = (Get-Variable -Name $entry.Key -Scope Script -ValueOnly)
         $value = Get-StateString -State $State -Name $entry.Value -DefaultValue $current
         if (-not [string]::IsNullOrWhiteSpace($value)) {
-            Set-Variable -Name $entry.Key -Value $value -Scope Script
+            Set-Variable -Name $entry.Key -Value $value -Scope Script -WhatIf:$false
         }
     }
 }

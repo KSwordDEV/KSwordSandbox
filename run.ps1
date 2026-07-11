@@ -734,7 +734,6 @@ function Invoke-WebUi {
 
     $effectiveUrl = Resolve-WebListenUrl -RequestedUrl $Url
     $script:Url = $effectiveUrl
-    $env:ASPNETCORE_URLS = $effectiveUrl
     Write-RunInfo "Starting WebUI: $effectiveUrl"
     Write-RunInfo "Config: $EffectiveConfigPath"
     Write-RunInfo "Hyper-V live prerequisites: configured VM/checkpoint, prepared self-contained guest payload, and guest password secret."
@@ -744,6 +743,8 @@ function Invoke-WebUi {
         Write-RunInfo "WhatIf: WebUI would start at $effectiveUrl with config '$EffectiveConfigPath'. No dotnet process or browser was started."
         return
     }
+
+    $env:ASPNETCORE_URLS = $effectiveUrl
 
     if ($OpenBrowser) {
         Start-Job -ScriptBlock {

@@ -109,12 +109,17 @@ a final HTML report.
   blocks directly in each rule-hit row instead of forcing analysts to jump to
   raw events first. Raw events also show a compact distribution summary for top
   event types, sources, and event families before the collapsed raw table.
-- Behavior rules have been expanded to 206 rules with added coverage for
+- Behavior rules have been expanded to 257 rules with added coverage for
   persistence, service/task abuse, PowerShell/script launch, download-execute,
   process injection signals, credential/LSASS/browser-store access, lateral
   movement, anti-sandbox checks, firewall/tool tampering, DNS/HTTP/TLS/C2,
   PCAP evidence, screenshots, memory dumps, dropped-file artifacts, process
-  trees, and MITRE map consistency.
+  trees, and MITRE map consistency. The latest quality pass adds Office
+  startup/add-in, accessibility IFEO, logon-script file, Mavinject,
+  InstallUtil/MSBuild/Regasm proxy-execution, clipboard/screenshot/LSASS dump
+  file, domain discovery, `.onion`, encoded HTTP URI, domain-fronting, TLS C2,
+  and process-tree lineage rules with explicit confidence/evidence-field
+  metadata.
 - Guest Agent artifact collection now has opt-in dropped-file, screenshot,
   memory-dump, and packet-capture lanes. Dropped files are copied under
   `artifacts/dropped-files/**` with manifest metadata; screenshots and memory

@@ -3,10 +3,12 @@
 This document describes the behavior rules in `rules/behavior-rules.json`.
 The matrix is intentionally conservative: rules classify normalized sandbox
 events for reporting, but they do not by themselves prove malicious intent.
-The 2026-07-11 v4 expansion keeps the same schema while broadening coverage to
-206 rules for download/execute chains, injection, credential access, full
-process trees, screenshot/memory/drop artifacts, lateral movement,
-anti-analysis, defense evasion, and DNS/HTTP/TLS/PCAP evidence.
+The 2026-07-11 v6 expansion broadens coverage to 257 rules for
+download/execute chains, injection, credential access, full process trees,
+screenshot/memory/drop artifacts, lateral movement, anti-analysis, defense
+evasion, and DNS/HTTP/TLS/PCAP evidence. The matching predicates remain simple;
+newer rules may also carry metadata-only `confidence` and `evidenceFields`
+values to make report triage and rule reviews more consistent.
 
 ## Rule schema boundary
 
@@ -19,6 +21,13 @@ The current rule engine supports these stable predicates:
 - `dataKeys`: requires at least one configured key in `SandboxEvent.Data`.
 - `dataContains`: case-insensitive substring match against configured data
   fields.
+
+Metadata-only fields do not affect matching:
+
+- `confidence`: expected triage confidence (`low`, `medium`, or `high`) for
+  the rule evidence shape.
+- `evidenceFields`: top-level or `data.*` fields analysts should inspect first
+  when reviewing the finding.
 
 There is no source-specific predicate yet. Rows that mention driver or R0
 events therefore rely on normalized event names and path/data evidence; report
@@ -93,6 +102,27 @@ future parser rows.
 | Static export traits | `static-export-registration-entrypoint`, `static-export-service-entrypoint` | `static.analysis.completed` | `low` to `medium` | `T1218.010`, `T1543.003` | Export names are triage-only evidence; registration exports can indicate regsvr32-compatible DLL entry points, and service exports can support service DLL triage. |
 | Static string indicators | `static-ip-address`, `static-windows-path-string`, `static-registry-path-string`, `static-persistence-string`, `static-script-command-string`, `static-encoded-command-string`, `static-lolbin-string`, `static-anti-sandbox-string` | `static.analysis.completed` | `low` to `medium` | `T1105`, `T1112`, `T1547.001`, `T1059`, `T1059.001`, `T1218`, `T1497` | Covers URL/IP/network indicators, Windows/registry paths, persistence paths, PowerShell encoded commands, living-off-the-land utility names, and VM/debugger/sandbox strings. |
 
+## 2026-07-11 v6 quality expansion
+
+The latest rules add 21 high-value detections that only use fields already
+represented by `SandboxEvent`, the guest probes, typed R0 JSONL rows, or the
+PCAP importer:
+
+- Persistence: Office add-in/startup paths, accessibility IFEO debugger
+  hijacks, and logon-script file paths.
+- Injection and proxy execution: Mavinject, InstallUtil, MSBuild inline tasks,
+  and Regasm/Regsvcs command evidence.
+- Collection and credentials: LSASS dump file creation, clipboard APIs, and
+  screenshot-like sample-created files.
+- Anti-analysis: uptime/boot-time checks and parent-process/PEB inspection
+  API evidence.
+- Lateral movement and discovery: `cmdkey` credential staging and domain trust
+  or domain-controller discovery commands.
+- DNS/HTTP/TLS/PCAP: `.onion` domains, long or encoded HTTP URI labels,
+  domain-fronting indicators, and TLS C2 classification fields.
+- Process trees: Office-to-script/LOLBin and browser-to-script/LOLBin lineage
+  patterns emitted by `process.tree` rows.
+
 ## MITRE mapping notes
 
 - `T1016`, `T1049`, `T1057`, `T1082`, and `T1135` cover command-line or
@@ -155,6 +185,13 @@ future parser rows.
 - `T1218.010` is used for static COM registration exports because those names
   are compatible with regsvr32-style execution, but the static rule does not
   prove that regsvr32 was actually used.
+- `T1115` covers clipboard API evidence when runtime telemetry explicitly
+  records clipboard access primitives.
+- `T1127.001`, `T1218.004`, and `T1218.009` cover MSBuild inline-task,
+  InstallUtil, and Regasm/Regsvcs proxy-execution command lines.
+- `T1137` covers Office add-in/startup registry and filesystem evidence.
+- `T1482` covers domain trust, domain-controller, and domain group discovery
+  commands used before lateral movement.
 - `T1497` covers static VM/sandbox/tool strings; `T1497.003` remains specific
   to time-based evasion and delay/sleep telemetry. Dynamic anti-analysis
   command rules also use `T1497` for VM/tool lookup, user-activity checks, and
