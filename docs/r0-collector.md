@@ -1,222 +1,200 @@
-# R0Collector IOCTL pipeline
+# R0Collector IOCTL 管线 / R0Collector IOCTL pipeline
 
-`guest/KSword.Sandbox.R0Collector` is the Windows user-mode sidecar that runs
-inside the guest VM and drains events from `KSword.Sandbox.Driver`.
+`guest/KSword.Sandbox.R0Collector` 是运行在 guest VM 内的 Windows user-mode
+sidecar，负责从 `KSword.Sandbox.Driver` drain 事件并写成 JSONL。
 
-Canonical scope: this page owns collector CLI/runtime/readiness integration.
-The kernel/user ABI source of truth is `docs/r0-driver-core.md`, JSONL field
-schema is `docs/r0-jsonl-schema.md`, and driver install/test-signing operator
-steps live in `docs/driver-install.md`.
+权威范围 / canonical scope：本文负责 collector CLI、runtime 和 readiness
+集成说明。kernel/user ABI 的权威来源是 `docs/r0-driver-core.md`，JSONL 字段 schema
+见 `docs/r0-jsonl-schema.md`，driver install/test-signing 操作者步骤见
+`docs/driver-install.md`。
 
 中文说明：`R0Collector` 是 guest VM 内的用户态 sidecar，负责通过 public
 IOCTL 从内核驱动读取事件并写出 JSONL。所有 `eventType`、JSON key、
 `diagnosticCode`、`reason`、`readinessState` 等机器字段保持英文稳定值；
 中文只作为附加 `zhMessage`、`zhHint`、`zhNote`、`zh*Policy` 字段出现。
 
-Current status:
+当前状态：
 
-- Opens the driver Win32 path `\\.\KSwordSandboxDriver` with `CreateFileW`.
-- Issues `IOCTL_KSWORD_SANDBOX_GET_HEALTH` once after opening the device.
-- Issues `IOCTL_KSWORD_SANDBOX_GET_CAPABILITIES` to record ABI version,
-  capability flags, `SupportedProducerMask`, `DefaultProducerMask`, and layout
-  limits before draining.
-- Optionally issues `IOCTL_KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK` when
-  `--enable-mask <mask>` is supplied, then emits the requested/effective mask.
-- Issues `IOCTL_KSWORD_SANDBOX_GET_STATUS` before and after draining to capture
-  queue depth, `ProducerEnableMask`, `ActiveProducerMask`,
-  `FailedProducerMask`, supported producer bits, and total counters.
-- Supports `--abi-self-check` / `--contract-self-check` for no-device ABI and
-  event-quality self-check output. This mode emits `r0collector.abiSelfCheck`,
-  records `collectorAbiVersion`, `capabilityFlagsCurrentHex`,
-  `producerMaskCurrentHex`, `jsonlNoisePolicy`, `kernelBackpressurePolicy`, and
-  `queueLossEvidence`, then exits before `CreateFileW` or `DeviceIoControl`.
-- Supports `--diagnose` / `--readiness` / `--readiness-check` for live, non-
-  mutating readiness output after the service is expected to be installed and
-  started in a VM. This mode emits `r0collector.readinessDiagnostic` and
-  `r0collector.readinessSummary` rows with `severity`, `readinessState`,
-  `diagnosticStage`, and `diagnosticCode` fields so service missing, device open
-  denied/not found, ABI mismatch, READ_EVENTS timeout, and no-event conditions
-  are not collapsed into a generic informational unavailable row.
+- 使用 `CreateFileW` 打开 driver Win32 path `\\.\KSwordSandboxDriver`。
+- 打开 device 后执行一次 `IOCTL_KSWORD_SANDBOX_GET_HEALTH`。
+- 在 drain 前执行 `IOCTL_KSWORD_SANDBOX_GET_CAPABILITIES`，记录 ABI version、
+  capability flags、`SupportedProducerMask`、`DefaultProducerMask` 和 layout limits。
+- 当传入 `--enable-mask <mask>` 时，可选执行
+  `IOCTL_KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK`，并输出 requested/effective mask。
+- drain 前后执行 `IOCTL_KSWORD_SANDBOX_GET_STATUS`，捕获 queue depth、
+  `ProducerEnableMask`、`ActiveProducerMask`、`FailedProducerMask`、supported producer bits
+  和 total counters。
+- 支持 `--abi-self-check` / `--contract-self-check`，用于 no-device ABI 和 event-quality
+  自检输出。该模式输出 `r0collector.abiSelfCheck`，记录 `collectorAbiVersion`、
+  `capabilityFlagsCurrentHex`、`producerMaskCurrentHex`、`jsonlNoisePolicy`、
+  `kernelBackpressurePolicy` 和 `queueLossEvidence`，随后在 `CreateFileW` /
+  `DeviceIoControl` 前退出。
+- 支持 `--diagnose` / `--readiness` / `--readiness-check`，用于在 VM 中预期服务已安装并启动后，
+  生成 live 但 non-mutating 的 readiness 输出。该模式输出
+  `r0collector.readinessDiagnostic` 和 `r0collector.readinessSummary` 行，包含
+  `severity`、`readinessState`、`diagnosticStage`、`diagnosticCode` 字段，避免把 service
+  missing、device open denied/not found、ABI mismatch、READ_EVENTS timeout、no-event
+  情况压扁成泛泛的 unavailable 信息。
   中文：这些就绪行是“采集健康诊断”，不是样本行为。新增中文字段仅帮助操
   作者理解下一步排查，不能替代稳定 code。
-- Issues `IOCTL_KSWORD_SANDBOX_POLL` and `IOCTL_KSWORD_SANDBOX_READ_EVENTS`
-  in a one-shot or timed polling loop.
-- Converts driver event records into `SandboxEvent` JSON Lines for the Guest
-  Agent and Host import path.
-- Suppresses narrow collector/GuestAgent self-noise by default before JSONL
-  emission: collector PID, the exact collector output JSONL, and documented
-  KSword infrastructure paths. Suppressed records stay accountable through
-  `r0collector.driverReadEvents.data.collectorSuppressedEvents` and
-  `r0collector.stopped.data.collectorSuppressedEvents`.
-- Keeps synthetic self-test mode (`--mock`, `--synthetic`, or `--self-test`) for
-  CI/local plumbing when the unsigned/test-signed driver is not installed.
-- Emits optional collector progress rows with `--heartbeat`.
+- 在 one-shot 或 timed polling loop 中执行 `IOCTL_KSWORD_SANDBOX_POLL` 和
+  `IOCTL_KSWORD_SANDBOX_READ_EVENTS`。
+- 把 driver event records 转换为 `SandboxEvent` JSON Lines，供 Guest Agent 和 Host import
+  path 消费。
+- JSONL emission 前默认抑制狭义 collector/GuestAgent self-noise：collector PID、准确的
+  collector output JSONL，以及文档化 KSword infrastructure path。被抑制记录仍通过
+  `r0collector.driverReadEvents.data.collectorSuppressedEvents` 和
+  `r0collector.stopped.data.collectorSuppressedEvents` 可审计。
+- 保留 synthetic self-test mode（`--mock`、`--synthetic`、`--self-test`），用于未安装
+  unsigned/test-signed driver 时的 CI/local plumbing。
+- 使用 `--heartbeat` 可输出可选 collector progress rows。
 
-## Source layout
+## 源码布局 / Source layout
 
-`guest/KSword.Sandbox.R0Collector/src` is split by runtime responsibility:
+`guest/KSword.Sandbox.R0Collector/src` 按 runtime responsibility 拆分：
 
 中文：源码按职责拆分；中文化只添加显示/诊断文本，不改变 IOCTL 协议、
 事件类型或字段名。
 
-- `main.cpp`: minimal `wmain` entry point.
-- `AbiSelfCheck.*`: no-device ABI/event-quality self-check row for CI and
-  operator preflight runs before the driver is installed.
-- `Options.*`: command-line parsing and usage text.
-- `JsonWriter.*`: UTF-8 conversion, JSON escaping, `SandboxEvent` JSONL writer,
-  and fallback stderr output.
-- `EventParser.*`: public driver ABI decoding and typed payload JSON mapping.
-- `IoctlClient.*`: device open, `DeviceIoControl` wrappers, health,
-  capabilities, status, producer-mask, poll, drain calls, and protocol error
-  rows.
-- `ReadinessDiagnostics.*`: live `--diagnose` orchestration, read-only SCM
-  service inspection, device-unavailable classification, ABI compatibility
-  probe, bounded overlapped `READ_EVENTS` timeout probe, and readiness summary
-  rows.
-- `SyntheticMode.*`: deterministic synthetic driver-category rows for local
-  plumbing tests.
-- `RuntimeLoop.*`: lifecycle orchestration, heartbeat rows, timed polling loop,
-  and exit-code mapping.
+- `main.cpp`：最小 `wmain` entry point。
+- `AbiSelfCheck.*`：no-device ABI/event-quality 自检行，用于 driver 安装前的 CI 和 operator preflight。
+- `Options.*`：命令行解析与 usage text。
+- `JsonWriter.*`：UTF-8 conversion、JSON escaping、`SandboxEvent` JSONL writer 和 fallback stderr 输出。
+- `EventParser.*`：public driver ABI decoding 与 typed payload JSON mapping。
+- `IoctlClient.*`：device open、`DeviceIoControl` wrapper、health/capabilities/status、
+  producer-mask、poll、drain call 和 protocol error rows。
+- `ReadinessDiagnostics.*`：live `--diagnose` orchestration、read-only SCM service inspection、
+  device-unavailable classification、ABI compatibility probe、有界 overlapped `READ_EVENTS`
+  timeout probe 和 readiness summary rows。
+- `SyntheticMode.*`：用于本地 plumbing tests 的 deterministic synthetic driver-category rows。
+- `RuntimeLoop.*`：lifecycle orchestration、heartbeat rows、timed polling loop 和 exit-code mapping。
 
-## Driver IOCTL contract
+## 驱动 IOCTL 契约 / Driver IOCTL contract
 
-The public ABI is owned by:
+public ABI 由以下头文件拥有：
 
 ```text
 driver/KSword.Sandbox.Driver/include/KSwordSandboxDriverIoctl.h
 ```
 
-Initial device names:
+初始 device name：
 
 - NT device: `\Device\KSwordSandboxDriver`
 - DOS link: `\DosDevices\KSwordSandboxDriver`
 - Win32 path: `\\.\KSwordSandboxDriver`
 
-Initial IOCTLs:
+初始 IOCTL：
 
 - `IOCTL_KSWORD_SANDBOX_GET_HEALTH`
-  - Input: none.
-  - Output: `KSWORD_SANDBOX_HEALTH_REPLY`.
-  - Purpose: driver/queue health and ABI sanity check.
+  - Input：none。
+  - Output：`KSWORD_SANDBOX_HEALTH_REPLY`。
+  - Purpose：driver/queue health 和 ABI sanity check。
 - `IOCTL_KSWORD_SANDBOX_POLL`
-  - Input: none.
-  - Output: `KSWORD_SANDBOX_POLL_REPLY`.
-  - Purpose: cheap queue snapshot before drain.
+  - Input：none。
+  - Output：`KSWORD_SANDBOX_POLL_REPLY`。
+  - Purpose：drain 前的低成本 queue snapshot。
 - `IOCTL_KSWORD_SANDBOX_READ_EVENTS`
-  - Input: optional `KSWORD_SANDBOX_READ_EVENTS_REQUEST`.
-  - Request `Flags` is reserved and must be zero. Producer selection is not
-    accepted on this IOCTL; use `IOCTL_KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK`.
-  - Output: `KSWORD_SANDBOX_READ_EVENTS_REPLY` followed by zero or more
-    `KSWORD_SANDBOX_EVENT_HEADER + payload` records.
-  - Purpose: consume queued R0 events.
+  - Input：可选 `KSWORD_SANDBOX_READ_EVENTS_REQUEST`。
+  - Request `Flags` 保留且必须为 zero。此 IOCTL 不接受 producer selection；
+    请使用 `IOCTL_KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK`。
+  - Output：`KSWORD_SANDBOX_READ_EVENTS_REPLY`，后接零条或多条
+    `KSWORD_SANDBOX_EVENT_HEADER + payload` records。
+  - Purpose：消费排队的 R0 events。
 - `IOCTL_KSWORD_SANDBOX_GET_CAPABILITIES`
-  - Input: none.
-  - Output: `KSWORD_SANDBOX_CAPABILITIES_REPLY`.
-  - Purpose: Capability negotiation before assuming optional IOCTLs, ABI
-    layout sizes, `SupportedProducerMask`, or `DefaultProducerMask`.
+  - Input：none。
+  - Output：`KSWORD_SANDBOX_CAPABILITIES_REPLY`。
+  - Purpose：在假设 optional IOCTL、ABI layout sizes、`SupportedProducerMask` 或
+    `DefaultProducerMask` 前进行 capability negotiation。
 - `IOCTL_KSWORD_SANDBOX_GET_STATUS`
-  - Input: none.
-  - Output: `KSWORD_SANDBOX_STATUS_REPLY`.
-  - Purpose: Queue and status counters, lifecycle state, `ProducerEnableMask`,
+  - Input：none。
+  - Output：`KSWORD_SANDBOX_STATUS_REPLY`。
+  - Purpose：queue/status counters、lifecycle state、`ProducerEnableMask`,
     `ActiveProducerMask`, `FailedProducerMask`, `EffectiveProducerMask`,
     `TotalEventsSuppressed`, `TotalEventsBackpressured`, producer
     dropped/suppressed/backpressure masks, queue capacity, high watermark,
     `LastNtStatus`, and `LastFailureNtStatus`.
 - `IOCTL_KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK`
-  - Input: `KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK_REQUEST`.
-  - Output: `KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK_REPLY`.
-  - Purpose: Apply an operator-selected producer mask and record requested,
-    previous, effective, and supported masks.
+  - Input：`KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK_REQUEST`。
+  - Output：`KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK_REPLY`。
+  - Purpose：应用操作者选择的 producer mask，并记录 requested、previous、effective
+    和 supported masks。
 
-### Capability/status/producer-mask negotiation
+### 能力、状态与 producer-mask 协商 / Capability/status/producer-mask negotiation
 
-`R0Collector` emits `r0collector.driverCapabilities` after
-`IOCTL_KSWORD_SANDBOX_GET_CAPABILITIES` succeeds. The row preserves ABI
-major/minor, capability flag names, producer-mask support/names, event schema
-name/version, event header version, ring capacity, reply sizes, and max payload
-size for later diagnostics.  `capabilityFlagNames` covers every current
-capability bit including `ProcessCreateExit`, `ImageLoad`, `FileMinifilter`,
-`RegistryCallback`, `NetworkWfpAle`, `EventCommonMetadata`,
-`ProducerMetadata`, and `SelfNoiseMetadata`; the row also emits boolean
-`*Capable` fields for those capabilities.
+`IOCTL_KSWORD_SANDBOX_GET_CAPABILITIES` 成功后，`R0Collector` 输出
+`r0collector.driverCapabilities`。该行保留 ABI major/minor、capability flag names、
+producer-mask support/names、event schema name/version、event header version、ring
+capacity、reply sizes 和 max payload size，供后续诊断使用。`capabilityFlagNames`
+覆盖当前每个 capability bit，包括 `ProcessCreateExit`、`ImageLoad`、`FileMinifilter`、
+`RegistryCallback`、`NetworkWfpAle`、`EventCommonMetadata`、`ProducerMetadata` 和
+`SelfNoiseMetadata`；同时为这些能力输出 boolean `*Capable` 字段。
 
-`R0Collector` emits `r0collector.driverStatus` for
-`IOCTL_KSWORD_SANDBOX_GET_STATUS` before draining and again after the final drain.
-These rows preserve queue depth/capacity, high watermark, `ProducerEnableMask`,
-`SupportedProducerMask`, `ActiveProducerMask`, `FailedProducerMask`,
-`EffectiveProducerMask`, `TotalEventsEnqueued`, `TotalEventsDropped`,
-`TotalEventsRead`, `TotalEventsSuppressed`, `TotalEventsBackpressured`,
-`ProducerDroppedMask`, `ProducerSuppressedMask`, `ProducerBackpressureMask`,
-`NextSequence`, `LastNtStatus`, and `LastFailureNtStatus`.  The JSON field names
-are `activeProducerMask`,
-`activeProducerMaskHex`,
-`activeProducerMaskNames`, `failedProducerMask`, `failedProducerMaskHex`, and
-`failedProducerMaskNames`; `effectiveProducerMask`, `effectiveProducerMaskHex`,
-`effectiveProducerMaskNames`, `lastFailureNtStatus`, and
-`lastFailureNtStatusHex` mirror the newly populated status fields. Producer
-loss masks also emit decimal, hex, and name forms.
+`R0Collector` 会在 drain 前和 final drain 后，为
+`IOCTL_KSWORD_SANDBOX_GET_STATUS` 输出 `r0collector.driverStatus`。这些行保留
+queue depth/capacity、high watermark、`ProducerEnableMask`、`SupportedProducerMask`、
+`ActiveProducerMask`、`FailedProducerMask`、`EffectiveProducerMask`、
+`TotalEventsEnqueued`、`TotalEventsDropped`、`TotalEventsRead`、
+`TotalEventsSuppressed`、`TotalEventsBackpressured`、`ProducerDroppedMask`、
+`ProducerSuppressedMask`、`ProducerBackpressureMask`、`NextSequence`、
+`LastNtStatus` 和 `LastFailureNtStatus`。JSON field names 包括
+`activeProducerMask`、`activeProducerMaskHex`、`activeProducerMaskNames`、
+`failedProducerMask`、`failedProducerMaskHex`、`failedProducerMaskNames`；
+`effectiveProducerMask`、`effectiveProducerMaskHex`、`effectiveProducerMaskNames`、
+`lastFailureNtStatus` 和 `lastFailureNtStatusHex` 镜像新增 status fields。Producer
+loss masks 也输出 decimal、hex 和 name forms。
 
-The active/failed producer masks are published without an ABI minor bump by
-using the previously unused reserved/alignment space in
-`KSWORD_SANDBOX_STATUS_REPLY`; the reply `Size` stays unchanged for ABI 1.0
-collectors.  Older drivers that zeroed that reserved space surface both masks as
-zero, while newer drivers fill them explicitly.
+active/failed producer masks 通过此前未使用的 reserved/alignment space 发布，不需要
+ABI minor bump；`KSWORD_SANDBOX_STATUS_REPLY` 的 reply `Size` 对 ABI 1.0 collectors
+保持不变。旧 driver 若把 reserved space 置零，会看到两个 mask 都是 zero；新 driver 会显式填充。
 
-When `--enable-mask <mask>` is supplied, `R0Collector` issues
-`IOCTL_KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK` and emits
-`r0collector.driverProducerMask`. The row records the requested mask plus the
-previous, effective, and supported masks and producer names returned by
-`KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK_REPLY`.
+传入 `--enable-mask <mask>` 时，`R0Collector` 执行
+`IOCTL_KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK` 并输出
+`r0collector.driverProducerMask`。该行记录 requested mask，以及
+`KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK_REPLY` 返回的 previous、effective、supported
+masks 和 producer names。
 
-When a live driver implements only the earlier health/poll/read-events subset,
-newer optional negotiation calls may fail with the Win32 mapping of
-`STATUS_INVALID_DEVICE_REQUEST` or `STATUS_NOT_SUPPORTED`.  The collector treats
-those specific optional failures as non-fatal, emits
-`r0collector.optionalIoctlUnavailable`, and continues with the compatible drain
-path.
+当 live driver 只实现早期 health/poll/read-events 子集时，新的 optional negotiation
+调用可能以 `STATUS_INVALID_DEVICE_REQUEST` 或 `STATUS_NOT_SUPPORTED` 的 Win32 映射失败。
+Collector 会把这类特定 optional failure 视为非致命，输出
+`r0collector.optionalIoctlUnavailable`，并继续使用兼容 drain path。
 
-`IOCTL_KSWORD_SANDBOX_DRAIN_EVENTS` may exist as a compatibility alias in local
-driver experiments, but R0Collector issues the public `READ_EVENTS` name.
+`IOCTL_KSWORD_SANDBOX_DRAIN_EVENTS` 可能作为本地 driver 实验中的兼容 alias 存在，
+但 R0Collector 使用公开的 `READ_EVENTS` 名称。
 
-## Current driver event path
+## 当前驱动事件路径 / Current driver event path
 
-The driver owns a fixed non-paged ring buffer. On load it currently queues one
-typed `driver.load` self-test event with
-`KSWORD_SANDBOX_EVENT_FLAG_SELF_TEST` and
-`KSWORD_SANDBOX_EVENT_FLAG_DRIVER_STARTED`. `READ_EVENTS` consumes complete
-records from the ring and reports drop/sequence counters.
+driver 拥有固定 non-paged ring buffer。加载时当前会排入一条 typed `driver.load`
+self-test 事件，带 `KSWORD_SANDBOX_EVENT_FLAG_SELF_TEST` 和
+`KSWORD_SANDBOX_EVENT_FLAG_DRIVER_STARTED`。`READ_EVENTS` 从 ring 消费完整 records，
+并报告 drop/sequence counters。
 
-Concrete behavior payloads are parsed by event type.  File events use
-`KSWORD_SANDBOX_FILE_EVENT_PAYLOAD` and expose fields such as `operationName`,
-`filePath`, `pathPresent`, `pathTruncated`, `statusHex`, `majorFunction`, and
-`minorFunction`.  Process payloads expose lineage cache/replay flags, parent and
-creator identifiers, bounded image paths, and command-line prefixes.  Image
-payloads expose process-id/property presence, base, size, image properties, and
-bounded paths.  Registry payloads expose key/value provenance, status,
-value-type, value-size, and bounded key/value names.
+concrete behavior payload 按 event type 解析。File events 使用
+`KSWORD_SANDBOX_FILE_EVENT_PAYLOAD`，暴露 `operationName`、`filePath`、
+`pathPresent`、`pathTruncated`、`statusHex`、`majorFunction`、`minorFunction` 等字段。
+Process payloads 暴露 lineage cache/replay flags、parent/creator identifiers、
+bounded image paths 和 command-line prefixes。Image payloads 暴露 process-id/property
+presence、base、size、image properties 和 bounded paths。Registry payloads 暴露
+key/value provenance、status、value-type、value-size 和 bounded key/value names。
 
-Network events use `KSWORD_SANDBOX_NETWORK_EVENT_PAYLOAD` from the WFP/ALE
-producer.  R0Collector now parses `protocolName`, `directionName`,
-`addressFamilyName`, `localAddress`, `remoteAddress`, `localPort`,
-`remotePort`, `localEndpoint`, `remoteEndpoint`, `sourceEndpoint`,
-`destinationEndpoint`, `flowKey`, `transportProtocol`, `servicePort`,
-`serviceHint`, `semanticCandidate`, DNS/HTTP/TLS candidate booleans,
-`processIdPresent`, `flowHandleHex`, `transportEndpointHandleHex`,
-`layerIdHex`, `calloutIdHex`, and `filterIdHex`. Address bytes are also
-retained as `localAddressHex` and `remoteAddressHex` for diagnosis.
-Synthetic `driver.network` rows and the valid extra-field JSONL noise row use
-the same `sourceEndpoint`, `destinationEndpoint`, and `flowKey` names so
-no-device stress runs exercise the report correlation contract before WFP is
-loaded.
+Network events 使用 WFP/ALE producer 的 `KSWORD_SANDBOX_NETWORK_EVENT_PAYLOAD`。
+R0Collector 现在解析 `protocolName`、`directionName`、`addressFamilyName`、
+`localAddress`、`remoteAddress`、`localPort`、`remotePort`、`localEndpoint`、
+`remoteEndpoint`、`sourceEndpoint`、`destinationEndpoint`、`flowKey`、
+`transportProtocol`、`servicePort`、`serviceHint`、`semanticCandidate`、
+DNS/HTTP/TLS candidate booleans、`processIdPresent`、`flowHandleHex`、
+`transportEndpointHandleHex`、`layerIdHex`、`calloutIdHex` 和 `filterIdHex`。
+address bytes 也以 `localAddressHex` 和 `remoteAddressHex` 保留用于 diagnosis。
+Synthetic `driver.network` rows 与 valid extra-field JSONL noise row 使用相同的
+`sourceEndpoint`、`destinationEndpoint`、`flowKey` 名称，使 no-device stress runs
+能在 WFP 加载前覆盖 report correlation contract。
 
-When a file/process/image/registry payload carries a bounded subject path, the
-top-level `SandboxEvent.path` is set to that subject path so the WebUI live
-monitor and HTML report show the relevant object instead of only
-`\\.\KSwordSandboxDriver`.  Network events use a URI-like top-level path such as
-`tcp://203.0.113.10:443` when the remote endpoint is decoded, while full
-endpoint and flow correlation details stay under `data`.
+当 file/process/image/registry payload 携带 bounded subject path 时，top-level
+`SandboxEvent.path` 会设置为该 subject path，让 WebUI live monitor 和 HTML report
+显示相关对象，而不是只显示 `\\.\KSwordSandboxDriver`。Network events 在 remote endpoint
+可解析时使用类似 URI 的 top-level path（如 `tcp://203.0.113.10:443`），完整 endpoint 和
+flow correlation details 保留在 `data` 中。
 
-## CLI contract
+## CLI 契约 / CLI contract
 
 ```powershell
 KSword.Sandbox.R0Collector.exe `
@@ -228,33 +206,29 @@ KSword.Sandbox.R0Collector.exe `
   --heartbeat
 ```
 
-Supported options:
+支持的选项（flag 名保持英文，中文说明用于操作者理解）：
 
 中文：CLI help 现在按英文 / 中文并列输出；flag 名、枚举值和路径参数不翻
 译，方便脚本和 smoke tests 继续匹配。
 
-- `--device`, `-d`: Win32 symbolic-link path for the driver device.
-- `--output`, `--out`, `-o`: JSON Lines output path, or `-` for stdout.
-- `--duration`, `-t`: Polling duration in seconds. `0` means one-shot open,
-  health, poll, and read-events.
-- `--poll-ms`, `--poll-interval`, `--poll-interval-ms`, `-p`: poll interval in
-  milliseconds.
-- `--diagnose`, `--readiness`, `--readiness-check`: run a live non-mutating
-  readiness diagnostic pass. The collector queries SCM state for `--service-name`,
-  opens the device, checks `GET_CAPABILITIES` ABI compatibility, emits
-  health/status rows, and runs a bounded `READ_EVENTS` probe without installing,
-  starting, stopping, or signing the driver.
-- `--service-name <name>`: kernel service name used by `--diagnose` service
-  diagnostics. Default is `KSwordSandboxDriver`.
-- `--read-timeout-ms <ms>` / `--diagnose-read-timeout-ms <ms>`: timeout for the
-  `--diagnose` overlapped `READ_EVENTS` probe. Default is `2000`.
-- `--max-events <count>`: cap each `READ_EVENTS` request to 1..1024 events.
-  Use small values in synthetic stress checks to prove batching and sequence
-  continuity.
-- `--max-read-batches <n>`: stop draining after `n` successful READ_EVENTS
-  batches; `0` means unlimited until the duration deadline or an empty batch.
-  This is the bounded batch limit and stress/backpressure input for safe local
-  tests.
+- `--device`, `-d`：driver device 的 Win32 symbolic-link path。
+- `--output`, `--out`, `-o`：JSON Lines 输出路径；`-` 表示 stdout。
+- `--duration`, `-t`：polling duration（秒）。`0` 表示 one-shot open、health、poll、
+  read-events。
+- `--poll-ms`, `--poll-interval`, `--poll-interval-ms`, `-p`：poll interval（毫秒）。
+- `--diagnose`, `--readiness`, `--readiness-check`：运行 live 但 non-mutating 的 readiness
+  diagnostic pass。Collector 会查询 `--service-name` 的 SCM state、打开 device、检查
+  `GET_CAPABILITIES` ABI compatibility、输出 health/status rows，并执行有界 `READ_EVENTS`
+  probe；不会 install/start/stop/sign driver。
+- `--service-name <name>`：`--diagnose` service diagnostics 使用的 kernel service name；
+  默认 `KSwordSandboxDriver`。
+- `--read-timeout-ms <ms>` / `--diagnose-read-timeout-ms <ms>`：`--diagnose` overlapped
+  `READ_EVENTS` probe timeout；默认 `2000`。
+- `--max-events <count>`：每个 `READ_EVENTS` request 限制在 1..1024 events。synthetic
+  stress check 中用小值证明 batching 和 sequence continuity。
+- `--max-read-batches <n>`：成功 drain `n` 个 READ_EVENTS batch 后停止；`0` 表示直到 duration
+  deadline 或 empty batch 前不限。这是安全本地测试的 bounded batch limit 和
+  stress/backpressure 输入。
 - `--driver-event-sample-stride <n>` / `--event-sample-stride <n>`: optional
   collector-side large-stream throttle for live driver rows. The default `1`
   emits every eligible driver row. Values greater than `1` emit the first
@@ -295,25 +269,22 @@ Supported options:
   JSON row, and valid row with an ignored extra top-level field. This proves the
   Host live/import path can tolerate partial JSONL without hiding valid rows.
 
-Device-unavailable behavior is explicit: the collector writes
-`r0collector.deviceUnavailable` to the selected JSONL sink and exits with code
-`66`. The row now includes `severity=error`, `readinessState=blocked`,
-`diagnosticStage=openDevice`, and a concrete `diagnosticCode` such as
-`open_device_not_found`, `open_device_denied`, `open_device_sharing_violation`,
-or `open_device_failed`. It also records `deviceAvailability=unavailable`,
-`collectionDiagnostic=true`, `sampleBehavior=false`, `ioctlIssued=false`,
-`driverLoadedByCollector=false`, `mutatesDriver=false`,
-`sideEffectPolicy=read-only-open-no-driver-load-no-scm-mutation-no-signing`,
-and `operatorInterpretation=collection_diagnostic_not_sample_behavior` so a
-missing or inaccessible device is clearly a collection/readiness issue rather
-than evidence of malicious sample behavior.
+device unavailable 行为是显式的：collector 会把 `r0collector.deviceUnavailable`
+写入选定 JSONL sink，并以 exit code `66` 退出。该行包含 `severity=error`、
+`readinessState=blocked`、`diagnosticStage=openDevice`，以及具体 `diagnosticCode`，
+例如 `open_device_not_found`、`open_device_denied`、`open_device_sharing_violation`
+或 `open_device_failed`。它还记录 `deviceAvailability=unavailable`、
+`collectionDiagnostic=true`、`sampleBehavior=false`、`ioctlIssued=false`、
+`driverLoadedByCollector=false`、`mutatesDriver=false`、
+`sideEffectPolicy=read-only-open-no-driver-load-no-scm-mutation-no-signing` 和
+`operatorInterpretation=collection_diagnostic_not_sample_behavior`，明确说明缺失或不可访问
+device 是采集/readiness 问题，不是样本恶意行为证据。
 
 中文：设备不可用时，`message`/`hint` 保留英文原文，同时新增
 `zhMessage`/`zhHint`。排查顺序通常是服务是否安装并运行、设备符号链接是
 否创建、Collector 是否提权、驱动和 Collector ABI 是否匹配。
 
-Live readiness diagnostic after a driver is expected to be installed and
-started:
+当 driver 预期已经在 VM 中安装并启动后，可运行 live readiness diagnostic：
 
 ```powershell
 KSword.Sandbox.R0Collector.exe `
@@ -324,7 +295,7 @@ KSword.Sandbox.R0Collector.exe `
   --out C:\Sandbox\r0collector-readiness.jsonl
 ```
 
-Expected diagnostic rows:
+预期诊断行 / Expected diagnostic rows：
 
 - `r0collector.readinessDiagnostic` with `diagnosticStage=service`. Codes include
   `missing_service`, `service_not_running`, `service_query_denied`, and
@@ -349,13 +320,12 @@ Expected diagnostic rows:
 继续采集。不要翻译 `missing_service`、`abi_mismatch`、`read_timeout` 等
 诊断 code。
 
-`driver_no_events` is a warning/degraded condition rather than a protocol
-failure: `READ_EVENTS` completed, but the queue was empty. It usually means the
-startup heartbeat was already drained or producers have not observed sample
-activity. `read_timeout`, `abi_mismatch`, `open_device_denied`, and
-`open_device_not_found` are hard blocked readiness states.
+`driver_no_events` 是 warning/degraded condition，不是 protocol failure：
+`READ_EVENTS` 已完成但 queue 为空。它通常表示 startup heartbeat 已被 drain，
+或 producer 尚未观察到样本活动。`read_timeout`、`abi_mismatch`、
+`open_device_denied` 和 `open_device_not_found` 是 hard blocked readiness states。
 
-Quick self-test without a driver:
+无 driver 快速自检 / Quick self-test without a driver：
 
 ```powershell
 KSword.Sandbox.R0Collector.exe `
@@ -365,7 +335,7 @@ KSword.Sandbox.R0Collector.exe `
   --out -
 ```
 
-Quick event-quality stress without a driver:
+无 driver 事件质量压力检查 / Quick event-quality stress without a driver：
 
 ```powershell
 KSword.Sandbox.R0Collector.exe `
@@ -375,7 +345,7 @@ KSword.Sandbox.R0Collector.exe `
   --out C:\Sandbox\r0collector-stress.jsonl
 ```
 
-Expected stress evidence:
+预期压力证据 / Expected stress evidence：
 
 - `r0collector.started` and `r0collector.mockDriverEvent` rows with
   `stressCount`, `stress=true`, and the `StressJsonl*` field set so automation
@@ -392,7 +362,7 @@ Expected stress evidence:
 - one blank line, one malformed JSON row, and one valid extra-field row when
   `--inject-jsonl-noise` is supplied.
 
-Lightweight attribution/self-noise smoke without a driver:
+无 driver 轻量 attribution/self-noise smoke：
 
 ```powershell
 $out = Join-Path $env:TEMP 'ksword-r0-self-test-noise.jsonl'
@@ -415,7 +385,7 @@ Expected: the process exits `0`, one intentionally malformed line fails JSON
 parsing, and every parsed synthetic driver row has `eventOrigin`,
 `producerCategory`, `subjectKind`, `processIdSource`, and `selfNoise` fields.
 
-### JSONL quality and noise contract
+### JSONL 质量与噪声契约 / JSONL quality and noise contract
 
 Every collector-owned row keeps the event-quality fields stable under `data`:
 
@@ -464,28 +434,25 @@ Every collector-owned row keeps the event-quality fields stable under `data`:
   on device/readiness/IOCTL diagnostic rows to separate collector health from
   sample activity.
 
-Malformed-line handling is deliberate and bounded. The collector emits only
-valid JSONL unless `--inject-jsonl-noise` is explicitly requested in mock/stress
-mode. That option appends exactly one blank line, one truncated/malformed JSON
-object containing the `sequence=broken` marker, and one valid `driver.network`
-row with an ignored extra top-level field plus `noise=true`. Live readers skip
-blank/malformed rows so valid telemetry remains visible; host import preserves
-malformed rows as `driver.parse_error` evidence rather than hiding them.
+malformed line 处理是刻意且有界的。除非在 mock/stress mode 中显式请求
+`--inject-jsonl-noise`，collector 只输出 valid JSONL。该选项会追加一条 blank line、
+一条带 `sequence=broken` marker 的 truncated/malformed JSON object，以及一条带 ignored
+extra top-level field 和 `noise=true` 的 valid `driver.network` row。live reader 会跳过
+blank/malformed rows，保证 valid telemetry 仍可见；host import 会把 malformed rows 保留为
+`driver.parse_error` 证据，而不是隐藏它们。
 
-Self-noise suppression is also bounded. It is intentionally not a broad process
-trust decision: the collector suppresses only the current collector PID, the
-exact JSONL file it is writing, and documented KSword infrastructure path
-fragments such as `\KSwordSandbox\agent\`, `\KSwordSandbox\r0collector\`,
-`\KSwordSandbox\driver\`, and `\KSwordSandbox\out\`. Drain-loop continuation is
-based on `recordsProcessed`, not emitted row count, so suppressing a full noisy
-batch cannot make the collector stop before the driver queue is empty.
-Optional stride sampling is applied only after this self-noise classification;
-it is disabled by default and never changes `recordsProcessed`.
+self-noise suppression 同样有界。它不是宽泛的 process trust decision：collector 只抑制
+当前 collector PID、自己正在写的准确 JSONL 文件，以及文档化 KSword infrastructure path
+片段，例如 `\KSwordSandbox\agent\`、`\KSwordSandbox\r0collector\`、
+`\KSwordSandbox\driver\`、`\KSwordSandbox\out\`。drain-loop continuation 基于
+`recordsProcessed` 而不是 emitted row count，因此即使一个 noisy batch 全部被抑制，
+collector 也不会在 driver queue 清空前停止。Optional stride sampling 只在该 self-noise
+classification 之后应用；默认关闭，并且不会改变 `recordsProcessed`。
 
-## ABI self-check mode
+## ABI 自检模式 / ABI self-check mode
 
-Use `--abi-self-check` before a signed/test-signed driver is available, before
-VM image bake, or in CI where loading a kernel driver is intentionally forbidden:
+在 signed/test-signed driver 可用前、VM image bake 前，或 CI 中故意禁止加载 kernel driver
+时，使用 `--abi-self-check`：
 
 ```powershell
 KSword.Sandbox.R0Collector.exe `
@@ -498,13 +465,12 @@ KSword.Sandbox.R0Collector.exe `
   --out C:\Sandbox\r0collector-abi-self-check.jsonl
 ```
 
-The mode emits normal `r0collector.started` / optional heartbeat rows, then a
-single `r0collector.abiSelfCheck` row followed by `r0collector.stopped` with
-`reason=abiSelfCheckComplete`. It does not open `\\.\KSwordSandboxDriver`, does
-not require Administrator, and does not issue `DeviceIoControl`; it is purely a
-collector/header contract check.
+该模式先输出正常 `r0collector.started` / 可选 heartbeat rows，然后输出单条
+`r0collector.abiSelfCheck`，最后输出带 `reason=abiSelfCheckComplete` 的
+`r0collector.stopped`。它不打开 `\\.\KSwordSandboxDriver`，不要求 Administrator，
+也不发出 `DeviceIoControl`；它纯粹是 collector/header contract check。
 
-Important `r0collector.abiSelfCheck` evidence fields:
+重要 `r0collector.abiSelfCheck` 证据字段：
 
 - `selfCheckPassed`, `opensDriverDevice`, `ioctlIssued`: prove this was a
   no-device source/ABI self-check instead of a live driver drain.
@@ -548,17 +514,17 @@ Important `r0collector.abiSelfCheck` evidence fields:
   `ProducerSuppressedMask`, `ProducerBackpressureMask`, `NextSequence`,
   per-event `sequence`, and `QueueHighWatermark`.
 
-Treat `--abi-self-check` as a cheap preflight. It proves the collector and public
-headers agree about ABI/event-quality assumptions, but it does not prove that the
-driver service is installed, signed, loaded, or returning live events.
+把 `--abi-self-check` 当作低成本 preflight：它证明 collector 和 public headers 在
+ABI/event-quality assumptions 上一致，但不证明 driver service 已安装、已签名、已加载或正在返回
+live events。
 
-## VM readiness and one-shot drain
+## VM 就绪检查与一次性 drain / VM readiness and one-shot drain
 
-Use `scripts/Test-R0Readiness.ps1` before a real VM run. Its default mode is
-non-destructive and does not open `\\.\KSwordSandboxDriver`. It checks source
-files, `.sys` git hygiene, driver readability, Authenticode status,
-Administrator status, test-signing state, read-only service state, and a
-no-device `R0Collector ABI self-check` when the collector executable exists:
+real VM run 前使用 `scripts/Test-R0Readiness.ps1`。默认模式是 non-destructive，
+不会打开 `\\.\KSwordSandboxDriver`。它检查 source files、`.sys` git hygiene、
+driver readability、Authenticode status、Administrator status、test-signing state、
+read-only service state，并在 collector executable 存在时执行 no-device
+`R0Collector ABI self-check`：
 
 ```powershell
 .\scripts\Test-R0Readiness.ps1 `
@@ -566,16 +532,14 @@ no-device `R0Collector ABI self-check` when the collector executable exists:
   -R0CollectorPath C:\KSwordSandbox\tools\KSword.Sandbox.R0Collector.exe
 ```
 
-The readiness script invokes the collector as
-`--abi-self-check --out <CollectorAbiSelfCheckOutputPath>` in default mode. It
-does not pass `--device`, does not open the driver object, does not issue
-`DeviceIoControl`, does not load the service, and does not call `CSignTool`.
-If Windows endpoint policy blocks the unsigned collector executable, the script
-reports that row as a `Warning` / non-fatal readiness gap instead of interrupting
-the rest of the readiness output.
+readiness 脚本在 default mode 中按以下方式调用 collector：
+`--abi-self-check --out <CollectorAbiSelfCheckOutputPath>`。它不会传入 `--device`，
+不会打开 driver object，不会发出 `DeviceIoControl`，不会加载 service，也不会调用
+`CSignTool`。如果 Windows endpoint policy 阻止未签名 collector executable，脚本会把该行报告为
+`Warning` / non-fatal readiness gap，而不是中断其余 readiness output。
 
-Use `-CollectorAbiSelfCheckOutputPath <path>` when the VM image bake or CI job
-needs the JSONL evidence in a stable location:
+当 VM image bake 或 CI job 需要把 JSONL evidence 放在稳定位置时，使用
+`-CollectorAbiSelfCheckOutputPath <path>`：
 
 ```powershell
 .\scripts\Test-R0Readiness.ps1 `
@@ -583,8 +547,8 @@ needs the JSONL evidence in a stable location:
   -CollectorAbiSelfCheckOutputPath C:\KSwordSandbox\out\r0collector-abi-self-check.jsonl
 ```
 
-After the signed driver service is explicitly installed and started in the VM,
-verify the public health IOCTL:
+在 VM 中显式安装并启动已签名 driver service 后，
+验证 public health IOCTL：
 
 ```powershell
 .\scripts\Test-R0Readiness.ps1 `
@@ -592,22 +556,19 @@ verify the public health IOCTL:
   -CheckDeviceHealth
 ```
 
-This check succeeds only if `CreateFileW("\\.\KSwordSandboxDriver", ...)` opens
-the device and `IOCTL_KSWORD_SANDBOX_GET_HEALTH` returns the public health
-reply.
+只有当 `CreateFileW("\\.\KSwordSandboxDriver", ...)` 成功打开 device，且
+`IOCTL_KSWORD_SANDBOX_GET_HEALTH` 返回 public health reply 时，该检查才会成功。
 
-The readiness script also performs a default static negotiated-IOCTL contract
-check before any driver load. That source/docs-only row covers
-`IOCTL_KSWORD_SANDBOX_GET_CAPABILITIES`,
-`IOCTL_KSWORD_SANDBOX_GET_STATUS`, and
-`IOCTL_KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK`; it is intended to catch ABI or
-runbook drift even when the signed/test-signed driver cannot be loaded. Treat
-live load failures outside an intentionally isolated VM as non-fatal diagnostics
-and rely on the static row plus VM logs to decide what changed.
+readiness 脚本还会在任何 driver load 前执行默认 static negotiated-IOCTL contract check。
+该 source/docs-only 行覆盖 `IOCTL_KSWORD_SANDBOX_GET_CAPABILITIES`、
+`IOCTL_KSWORD_SANDBOX_GET_STATUS` 和
+`IOCTL_KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK`；即使 signed/test-signed driver
+无法加载，也用于捕获 ABI 或 runbook drift。在刻意隔离的 VM 之外，把 live load failure
+视为 non-fatal diagnostics，并结合 static row 与 VM logs 判断变化点。
 
-Next verify the collector health-only CLI contract. This invokes
-`R0Collector --health --out <jsonl>` and fails unless the output JSONL parses
-and contains `r0collector.deviceOpened` plus `r0collector.driverHealth`:
+接着验证 collector health-only CLI contract；它会调用
+`R0Collector --health --out <jsonl>`；只有输出 JSONL 可解析，并包含
+`r0collector.deviceOpened` 和 `r0collector.driverHealth` 时才通过：
 
 ```powershell
 New-Item -ItemType Directory -Force C:\KSwordSandbox\out | Out-Null
@@ -619,7 +580,7 @@ New-Item -ItemType Directory -Force C:\KSwordSandbox\out | Out-Null
   -CollectorHealthOutputPath C:\KSwordSandbox\out\r0collector-health.jsonl
 ```
 
-Then run a collector one-shot drain through the script:
+然后通过脚本运行 collector one-shot drain：
 
 ```powershell
 .\scripts\Test-R0Readiness.ps1 `
@@ -629,14 +590,12 @@ Then run a collector one-shot drain through the script:
   -CollectorOutputPath C:\KSwordSandbox\out\driver-events.jsonl
 ```
 
-The drain path invokes R0Collector with `--duration 0`, so it opens the driver,
-emits health/capabilities/status/poll/read-events lifecycle rows, drains any
-queued driver records, and exits. A first load should normally expose the typed
-driver-start heartbeat row (`driver.load`) unless another reader has already
-consumed it. Older local builds may still surface the legacy
-`driver.event.reserved` heartbeat.
+drain path 使用 `--duration 0` 调用 R0Collector，因此它会打开 driver，输出
+health/capabilities/status/poll/read-events lifecycle rows，drain 所有 queued driver records
+并退出。首次 load 通常应暴露 typed driver-start heartbeat row（`driver.load`），除非已被其他
+reader 消费。较旧本地 build 仍可能显示 legacy `driver.event.reserved` heartbeat。
 
-Expected script rows for the live VM path:
+live VM 路径的预期脚本行 / Expected script rows for the live VM path：
 
 - `Driver .sys git hygiene`: no `.sys` file is tracked, staged, modified, or
   unignored as a commit candidate.
@@ -663,7 +622,7 @@ Expected script rows for the live VM path:
   loop exited because `--max-read-batches` was reached instead of waiting for
   the duration deadline.
 
-## JSON Lines format
+## JSON Lines 格式 / JSON Lines format
 
 Every output line is a single `SandboxEvent`-compatible JSON object:
 
@@ -675,7 +634,7 @@ Every output line is a single `SandboxEvent`-compatible JSON object:
 {"eventType":"driver.load","source":"driver","timestamp":"2026-07-10T00:00:00.000Z","processId":1234,"processName":"","path":"\\\\.\\KSwordSandboxDriver","commandLine":"","data":{"sequence":"1","driverEventTypeName":"driverLoad","producerCategory":"driver","eventOrigin":"kernel-driver-control-plane","subjectKind":"driver","processIdSource":"eventHeader","selfNoise":"false","flagsHex":"0x00000003","driverLoadEventName":"driver.load","zhDriverLoadEventDescription":"..."}}
 ```
 
-Top-level field rules:
+顶层字段规则 / Top-level field rules：
 
 - `eventType`: collector lifecycle/error type or normalized driver event type.
 - `source`: `r0collector` for lifecycle rows, `driver` for drained R0 rows.
@@ -695,17 +654,15 @@ Top-level field rules:
   `payloadSchema` when the payload category is known; mock rows use the same
   schema names and attribution fields so mock/live JSONL remain comparable.
 
-The detailed JSONL contract is documented in
-[`docs/r0-jsonl-schema.md`](r0-jsonl-schema.md).
+详细 JSONL contract 见 [`docs/r0-jsonl-schema.md`](r0-jsonl-schema.md)。
 
-## Synthetic event-quality and backpressure contract
+## 合成事件质量与背压契约 / Synthetic event-quality and backpressure contract
 
-R0Collector event quality is validated with synthetic JSONL before any real
-driver load. These tests do not call CSignTool, mutate the service, or open
-`\\.\KSwordSandboxDriver`; they generate collector-shaped rows and feed them
-through host/live JSONL readers.
+任何 real driver load 之前，R0Collector event quality 都先用 synthetic JSONL 验证。
+这些测试不调用 CSignTool、不修改 service、不打开 `\\.\KSwordSandboxDriver`；它们生成
+collector-shaped rows，并通过 host/live JSONL readers 消费。
 
-Required synthetic coverage:
+必需合成覆盖 / Required synthetic coverage：
 
 - ABI structure version evidence: capabilities and driver rows preserve
   `version`, `versionHex`, ABI major/minor, `eventHeaderVersion`,
@@ -741,24 +698,20 @@ Required synthetic coverage:
   no-device ABI evidence, JSONL tolerance, sequence continuity, optional
   collector sampling, and heartbeat evidence.
 
-Backpressure is intentionally non-blocking. Kernel producers should not wait on
-collector throughput. If the fixed ring overflows, the oldest unread records can
-be overwritten and the collector must surface the loss through
-`TotalEventsDropped`, `EventsDropped`, `ProducerDroppedMask`, `NextSequence`,
-and `sequence` gaps. If the ring is merely under pressure but not yet full,
-`TotalEventsBackpressured` and `ProducerBackpressureMask` identify the producer
-families observed while the queue was above the threshold.
+backpressure 有意保持 non-blocking。kernel producers 不应等待 collector throughput。
+如果 fixed ring overflow，最旧的未读 records 可能被覆盖，collector 必须通过
+`TotalEventsDropped`、`EventsDropped`、`ProducerDroppedMask`、`NextSequence` 和
+`sequence` gaps 暴露 loss。如果 ring 只是有压力但尚未满，`TotalEventsBackpressured` 和
+`ProducerBackpressureMask` 标识 queue 超过阈值时观察到的 producer families。
 
-## R0Collector stress/readiness operator gate
+## R0Collector 压力/就绪操作者门禁 / R0Collector stress/readiness operator gate
 
-The R0 readiness gate is deliberately split into no-device checks and live-VM
-checks.  The default gate must remain safe for developer laptops and CI: it does
-not call `CSignTool`, does not load or unload the service, does not mutate SCM
-state, and does not open `\\.\KSwordSandboxDriver`.  Live device, collector
-health, and one-shot drain checks require explicit operator switches after the
-driver has already been installed and started in an isolated VM.
+R0 readiness gate 有意拆分为 no-device checks 和 live-VM checks。默认 gate 必须对开发者
+laptop 和 CI 保持安全：不调用 `CSignTool`，不 load/unload service，不修改 SCM state，
+也不打开 `\\.\KSwordSandboxDriver`。live device、collector health 和 one-shot drain
+检查必须在 driver 已经安装并在隔离 VM 中启动后，由操作者显式开关触发。
 
-Required no-device gate evidence:
+必需 no-device 门禁证据 / Required no-device gate evidence：
 
 - `R0 capability/status IOCTL static contract`: source/docs-only row proving the
   negotiated IOCTL names, collector JSONL rows, and non-fatal optional-IOCTL
@@ -770,9 +723,8 @@ Required no-device gate evidence:
   unsigned, or policy-blocked collector execution is a `Warning` and a
   non-fatal readiness gap, not a hard stop for the rest of the static output.
 
-The operator gate treats the following synthetic stress fields as named
-contract evidence.  The exact values can change per scenario, but the names must
-stay stable in docs, the readiness script, and smoke tests:
+operator gate 把以下 synthetic stress fields 视为命名 contract evidence。具体值可随场景变化，
+但字段名必须在 docs、readiness script 和 smoke tests 中保持稳定：
 
 - `StressJsonlExpectedDriverRows`: expected number of generated driver stress
   rows in the mock JSONL corpus.  The current smoke corpus expects 32
@@ -802,32 +754,30 @@ stay stable in docs, the readiness script, and smoke tests:
   binaries, and incomplete ABI self-check JSONL are warnings unless the operator
   requested a live device or live drain check.
 
-When a live VM drain is explicitly requested, the readiness output should record
-the JSONL output path, non-blank line count, event types, parse-error count,
-driver row count, sequence first/last/gap evidence, and any observed loss or
-backpressure fields.  A pass requires parseable JSONL plus the documented
-health/capabilities/status/poll/read-events rows; a stress-readiness report is
-not allowed to hide malformed rows, loss counters, or backpressure indicators.
+显式请求 live VM drain 时，readiness output 应记录 JSONL output path、non-blank line count、
+event types、parse-error count、driver row count、sequence first/last/gap evidence，以及所有
+observed loss/backpressure fields。通过条件是 parseable JSONL 加上文档化的
+health/capabilities/status/poll/read-events rows；stress-readiness report 不允许隐藏
+malformed rows、loss counters 或 backpressure indicators。
 
-## Guest Agent integration
+## Guest Agent 集成 / Guest Agent integration
 
-The Guest Agent treats R0Collector as an optional sidecar:
+Guest Agent 把 R0Collector 当作可选 sidecar：
 
-1. When `--driver-events` is not supplied, no R0 sidecar is started.
-2. When `--driver-events <jsonl>` and `--r0collector <exe>` are supplied, the
-   agent starts R0Collector with:
+1. 未提供 `--driver-events` 时，不启动 R0 sidecar。
+2. 同时提供 `--driver-events <jsonl>` 和 `--r0collector <exe>` 时，Agent 使用以下参数启动
+   R0Collector：
    - `--device <driver-device>`
    - `--out <jsonl>` (or the equivalent `--output <jsonl>` alias)
    - `--duration <analysis seconds>`
-   - optional `--mock`
-3. After sample execution, the agent stops the sidecar and merges JSONL rows into
-   `events.json`.
-4. Host import then merges `events.json` plus sibling JSONL files, runs rules,
-   and regenerates `report.json` / `report.html`.
+   - 可选 `--mock`
+3. 样本执行后，Agent 停止 sidecar，并把 JSONL rows 合并进 `events.json`。
+4. Host import 随后合并 `events.json` 与 sibling JSONL files，运行 rules，并重新生成
+   `report.json` / `report.html`。
 
-## Repository hygiene
+## 仓库卫生 / Repository hygiene
 
-Do not commit generated native artifacts:
+不要提交生成的 native artifacts：
 
 - `.exe`
 - `.sys`
@@ -838,4 +788,4 @@ Do not commit generated native artifacts:
 - `obj/`
 - `x64/`
 
-Runtime output should stay under `D:\Temp\KSwordSandbox\...`.
+Runtime output 应保留在 `D:\Temp\KSwordSandbox\...` 下。

@@ -68,6 +68,48 @@ std::string MockSubjectKind(const std::string& driverEventTypeName) {
     return "unknown";
 }
 
+// Input: Mock driver category and operation.
+// Processing: Builds the same semantic family.operation field used by live typed
+// payload rows, but marks the row as synthetic elsewhere in data.
+// Return: Stable activity-kind token.
+std::string MockActivityKind(
+    const std::string& driverEventTypeName,
+    const std::string& operation) {
+    return driverEventTypeName + "." + (operation.empty() ? "unknown" : operation);
+}
+
+// Input: Mock driver category.
+// Processing: Provides a concise Chinese message for no-device smoke reports.
+// Return: UTF-16 Chinese operator-facing message.
+std::wstring MockZhMessage(const std::string& driverEventTypeName) {
+    if (driverEventTypeName == "process") {
+        return L"合成 R0 进程事件，用于验证 JSONL 字段和报告进程树。";
+    }
+    if (driverEventTypeName == "file") {
+        return L"合成 R0 文件事件，用于验证 dropped files/文件证据展示。";
+    }
+    if (driverEventTypeName == "registry") {
+        return L"合成 R0 注册表事件，用于验证持久化证据字段。";
+    }
+    if (driverEventTypeName == "network") {
+        return L"合成 R0 网络事件，用于验证 DNS/HTTP/TLS/flowKey 证据字段。";
+    }
+    if (driverEventTypeName == "image") {
+        return L"合成 R0 镜像加载事件，用于验证进程模块证据。";
+    }
+    return L"合成 R0 事件，用于验证 Collector JSONL 合同。";
+}
+
+// Input: Mock driver category.
+// Processing: Provides a Chinese hint that the row is not live kernel evidence.
+// Return: UTF-16 Chinese operator-facing hint.
+std::wstring MockZhHint(const std::string& driverEventTypeName) {
+    if (driverEventTypeName == "network") {
+        return L"该行为 mock/stress 输出，不来自真实驱动；字段形状应与 live 网络事件保持一致。";
+    }
+    return L"该行为 mock/stress 输出，不来自真实驱动；用于低成本验证字段、采样和报告合同。";
+}
+
 // Input: Mock category metadata, collector options, and the JSONL sink.
 // Processing: Emits one synthetic driver-originated row that uses the same
 // stable eventType values as drained R0 events while clearly marking the data as
@@ -82,6 +124,14 @@ bool EmitMockDriverCategoryEvent(
     const std::string& driverEventTypeName,
     const std::string& operation,
     const std::vector<std::pair<std::string, std::string>>& extraData) {
+    bool hasSequence = false;
+    for (const auto& item : extraData) {
+        if (item.first == "sequence") {
+            hasSequence = true;
+            break;
+        }
+    }
+
     SandboxEventFields event;
     event.eventType = eventType;
     event.source = "driver";
@@ -107,7 +157,21 @@ bool EmitMockDriverCategoryEvent(
     data.AddUtf8("actorRole", "synthetic-sample-process");
     data.AddUtf8("subjectRole", "synthetic-sample-or-system");
     data.AddUtf8("processIdSource", "synthetic");
+    data.AddUtf8("semanticFamily", driverEventTypeName);
+    data.AddUtf8("behaviorLane", MockSubjectKind(driverEventTypeName));
+    data.AddUtf8("activityKind", MockActivityKind(driverEventTypeName, operation));
     data.AddUtf8("operationName", operation);
+    if (hasSequence) {
+        data.AddUtf8("sequenceMeaning", "eventSequence");
+        data.AddUtf8("sequenceScope", "synthetic-driver-event");
+        data.AddBool("sequenceConcrete", true);
+        data.AddUtf8(
+            "sequencePolicy",
+            "Synthetic stress driver rows use concrete contiguous event sequences; summaries use nextSequence");
+        data.AddWide(
+            "zhSequencePolicy",
+            L"合成压测 driver 行使用连续具体事件 sequence；摘要行使用 nextSequence。");
+    }
     data.AddSigned("status", 0);
     data.AddUtf8("statusHex", "0x00000000");
     data.AddBool("statusPresent", true);
@@ -118,6 +182,16 @@ bool EmitMockDriverCategoryEvent(
     data.AddBool("collectorNoise", false);
     data.AddBool("collectorSelfNoise", false);
     data.AddBool("selfProcess", false);
+    data.AddUtf8("noiseClass", "sample-or-system");
+    data.AddUtf8("selfNoiseClass", "none");
+    data.AddUtf8("collectorNoiseClass", "none");
+    data.AddUtf8("noiseAction", "emit");
+    data.AddUtf8("noiseReasons", "none");
+    data.AddBool("sampleBehaviorCandidate", true);
+    data.AddBool("collectionDiagnostic", false);
+    data.AddBool("collectionNoise", false);
+    data.AddUtf8("operatorInterpretation", "candidate_sample_or_system_behavior");
+    data.AddWide("zhNoiseHint", L"该合成事件未标记为 Collector 自噪声，用于验证样本行为候选字段。");
     data.AddUtf8("collectorNoiseReason", "none");
     data.AddUtf8("collectorNoiseAction", "emit");
     data.AddBool("selfNoise", false);
@@ -140,6 +214,9 @@ bool EmitMockDriverCategoryEvent(
     data.AddUtf8(
         "note",
         "Synthetic driver-category row for Guest Agent and host import plumbing.");
+    data.AddBool("evidenceReady", true);
+    data.AddWide("zhMessage", MockZhMessage(driverEventTypeName));
+    data.AddWide("zhHint", MockZhHint(driverEventTypeName));
     data.AddWide(
         "zhNote",
         L"\u4f9b Guest Agent \u548c Host import \u7ba1\u7ebf\u6d4b\u8bd5\u4f7f\u7528\u7684\u5408\u6210 driver \u5206\u7c7b\u884c\u3002");
@@ -179,6 +256,9 @@ bool EmitSyntheticJsonlNoiseRows(EventWriter& writer) {
     data.AddUtf8("actorRole", "synthetic-sample-process");
     data.AddUtf8("subjectRole", "synthetic-jsonl-noise");
     data.AddUtf8("processIdSource", "synthetic");
+    data.AddUtf8("semanticFamily", "network");
+    data.AddUtf8("behaviorLane", "network-flow");
+    data.AddUtf8("activityKind", "network.aleAuthorize");
     data.AddUtf8("operationName", "aleAuthorize");
     data.AddSigned("status", 0);
     data.AddUtf8("statusHex", "0x00000000");
@@ -189,6 +269,16 @@ bool EmitSyntheticJsonlNoiseRows(EventWriter& writer) {
     data.AddBool("collectorNoise", false);
     data.AddBool("collectorSelfNoise", false);
     data.AddBool("selfProcess", false);
+    data.AddUtf8("noiseClass", "jsonl-noise");
+    data.AddUtf8("selfNoiseClass", "none");
+    data.AddUtf8("collectorNoiseClass", "none");
+    data.AddUtf8("noiseAction", "emit");
+    data.AddUtf8("noiseReasons", "synthetic-jsonl-noise-row");
+    data.AddBool("sampleBehaviorCandidate", false);
+    data.AddBool("collectionDiagnostic", true);
+    data.AddBool("collectionNoise", false);
+    data.AddUtf8("operatorInterpretation", "jsonl_noise_tolerance_probe_not_sample_behavior");
+    data.AddWide("zhNoiseHint", L"该行是显式 JSONL 噪声注入的合法额外字段行，用于验证导入器容错。");
     data.AddUtf8("collectorNoiseReason", "none");
     data.AddUtf8("collectorNoiseAction", "emit");
     data.AddBool("selfNoise", false);
@@ -210,6 +300,24 @@ bool EmitSyntheticJsonlNoiseRows(EventWriter& writer) {
     data.AddUtf8("sourceEndpoint", "192.0.2.10:51515");
     data.AddUtf8("destinationEndpoint", "203.0.113.10:443");
     data.AddUtf8("flowKey", "tcp|192.0.2.10:51515|203.0.113.10:443");
+    data.AddUnsigned("flowKeyVersion", 1);
+    data.AddUtf8("flowKeyDirection", "outbound");
+    data.AddUtf8("flowKeySource", "directional-source-destination-endpoints");
+    data.AddUtf8("flowKeyScope", "transport-5tuple-lite");
+    data.AddUtf8("endpointPair", "192.0.2.10:51515 -> 203.0.113.10:443");
+    data.AddUtf8("serviceHint", "tls");
+    data.AddUtf8("serviceHintSource", "port-protocol");
+    data.AddUtf8("serviceHintConfidence", "medium");
+    data.AddBool("dnsCandidate", false);
+    data.AddBool("httpCandidate", false);
+    data.AddBool("tlsCandidate", true);
+    data.AddBool("webCandidate", true);
+    data.AddBool("serviceHintDns", false);
+    data.AddBool("serviceHintHttp", false);
+    data.AddBool("serviceHintTls", true);
+    data.AddBool("evidenceReady", true);
+    data.AddWide("zhMessage", L"合成 JSONL 噪声网络行，保留 TLS flowKey 字段用于容错测试。");
+    data.AddWide("zhHint", L"该行不代表真实样本网络行为；用于验证合法额外字段不会破坏导入。");
 
     std::string line =
         "{\"eventType\":\"driver.network\",\"source\":\"driver\",\"extraTopLevel\":\"ignored\",\"data\":";
@@ -331,12 +439,16 @@ bool EmitSyntheticStressSummary(EventWriter& writer, const Options& options) {
     data.AddUnsigned("skipped", 0);
     data.AddUtf8("head", stressSequenceStartText);
     data.AddUtf8("tail", stressSequenceEndText);
+    data.AddUnsigned("observedSequenceSpan", options.stressCount);
+    data.AddUnsigned("expectedContiguousEvents", options.stressCount);
     data.AddBool("sequenceGapObserved", false);
     data.AddUnsigned("sequenceGapEstimate", 0);
+    data.AddUtf8("sequenceGapReason", "none");
     data.AddUtf8("sequenceRangeMeaning", "synthetic stress rows are contiguous concrete event sequences");
     data.AddWide("zhSequenceRangeMeaning", L"合成压测行使用连续的具体事件 sequence，用于验证丢失/缺口检测。");
     data.AddUtf8("sampling", options.driverEventSampleStride <= 1 ? "none" : "stride:not-applied-in-synthetic-stress");
     data.AddUtf8("loss", "none");
+    data.AddUtf8("lossDiagnostic", "none");
     data.AddUtf8("schema", KSWORD_SANDBOX_EVENT_SCHEMA_NAME);
     data.AddUtf8("producer", "r0collector");
     AddCollectorAttributionFields(data, "synthetic-stress-summary", "collector-diagnostic");
@@ -353,7 +465,12 @@ bool EmitSyntheticStressSummary(EventWriter& writer, const Options& options) {
     data.AddBool("lossObserved", false);
     data.AddBool("backpressure", false);
     data.AddBool("backpressureObserved", false);
+    data.AddUtf8("backpressureSeverity", "none");
     data.AddUtf8("backpressureReason", "none");
+    data.AddUtf8(
+        "backpressureDiagnostics",
+        "synthetic stress corpus is contiguous and no-device; live batches add queue/high-watermark/drop evidence");
+    data.AddWide("zhBackpressureHint", L"合成压测未观察到背压；真实驱动批次会补充队列水位、丢弃和读取上限证据。");
     data.AddUnsigned("eventsDropped", 0);
     data.AddUnsigned("lostCount", 0);
     data.AddUnsigned("totalEventsDropped", 0);
@@ -538,13 +655,29 @@ int RunSyntheticMode(const Options& options, EventWriter& writer) {
                 {"remoteEndpoint", "203.0.113.10:443"},
                 {"sourceEndpoint", "192.0.2.10:51515"},
                 {"destinationEndpoint", "203.0.113.10:443"},
+                {"sourceAddress", "192.0.2.10"},
+                {"destinationAddress", "203.0.113.10"},
+                {"sourcePort", "51515"},
+                {"destinationPort", "443"},
+                {"endpointPair", "192.0.2.10:51515 -> 203.0.113.10:443"},
                 {"flowKey", "tcp|192.0.2.10:51515|203.0.113.10:443"},
+                {"flowKeyVersion", "1"},
+                {"flowKeyDirection", "outbound"},
+                {"flowKeySource", "directional-source-destination-endpoints"},
+                {"flowKeyScope", "transport-5tuple-lite"},
                 {"servicePort", "443"},
                 {"serviceHint", "tls"},
+                {"serviceHintSource", "port-protocol"},
+                {"serviceHintConfidence", "medium"},
+                {"serviceHintPolicy", "port-protocol heuristic: 53=dns, 80/8080/8000=http, 443/8443=tls"},
                 {"semanticCandidate", "tls"},
                 {"dnsCandidate", "false"},
                 {"httpCandidate", "false"},
                 {"tlsCandidate", "true"},
+                {"webCandidate", "true"},
+                {"serviceHintDns", "false"},
+                {"serviceHintHttp", "false"},
+                {"serviceHintTls", "true"},
                 {"processId", currentProcessIdText}
             })) {
         return kExitRuntimeFailure;

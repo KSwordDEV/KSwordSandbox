@@ -40,9 +40,12 @@ v1 报告必须在 live demo 中对操作者有用，而不只是技术上完整
 - Behavior graph / IOC summary / 行为图谱与 IOC 摘要. This is a stable,
   weak-interaction graph view that derives process-to-file, process-to-registry,
   process-to-network, and process-to-artifact edges from normalized telemetry.
-  It must include a Top behavior chain, Evidence graph edges, and IOC summary
-  summary panels so the final report feels like an analyst-facing sandbox
-  report rather than only raw tables.
+  It must include an Evidence story board, Top behavior chain, Evidence graph
+  edges, and IOC summary panels so the final report feels like an
+  analyst-facing sandbox report rather than only raw tables. The Evidence story
+  board should keep dropped files, screenshots, memory dumps, PCAP/network,
+  process lineage, and R0 health/noise boundaries visible as copyable,
+  collapsible lanes before dense event tables.
 - Timeline. The timeline must use timeline grouping so bursty telemetry is
   readable in chronological order: group by a stable time bucket, show event
   counts and event-family summaries, keep a bounded timeline inline, and point
@@ -56,6 +59,9 @@ v1 报告必须在 live demo 中对操作者有用，而不只是技术上完整
   counts, high-signal default-expanded nodes, and self-noise excluded from the
   tree before the operator expands the lineage.
 - File behavior / 文件, including dropped files.
+  Dropped-file rows should be reinforced by the Evidence story board and
+  Artifact collection status lanes so released files remain visible even when
+  raw file activity is noisy.
 - Artifact links / 证据文件链接：当 job 目录存在对应文件时，必须包含 `events.json`、
   `driver-events.jsonl`、artifact manifests、screenshots、dropped files、显式 opt-in 的
   memory dumps，以及导入的 `.pcap` / `.pcapng` packet captures。本章节还必须包含
@@ -66,7 +72,10 @@ v1 报告必须在 live demo 中对操作者有用，而不只是技术上完整
 - Registry behavior / 注册表.
 - Network behavior / 网络. A Network category view should summarize endpoint
   groups plus DNS / HTTP / TLS / flow counts before raw network rows, so
-  operators can read relationships without opening the full raw table.
+  operators can read relationships without opening the full raw table. PCAP /
+  pktmon collection metadata, packet counts, conversion status, and imported
+  DNS/HTTP/TLS/flow rows should also appear in the Evidence story board and
+  remain collapsible/copyable rather than being spread across raw rows only.
 - R0 / driver events.
   R0 collection health status must be shown before driver telemetry evidence.
   Device unavailable, driver health, queue backpressure, and dropped-event
@@ -119,8 +128,8 @@ plain diagnostic dump. The visual contract is:
   (currently 200 entries) with a visible hidden-entry count and a pointer to
   `report.json`.
 - 具有可信 `safeLink` 或安全相对路径的 Artifact evidence 应渲染为显式
-  `打开 / Open`、`下载 / Download` 按钮。任意 host/guest 绝对文件系统路径只能作为可复制
-  evidence text 展示，不得作为 `href` 值。绝对路径不得用于 `href`。
+  Open/Download（`打开 / Open`、`下载 / Download`）按钮。任意 host/guest 绝对文件系统路径只能作为可复制
+  evidence text 展示 and must not be used as `href`。绝对路径不得用于 `href`。
 - The Raw normalized events section should be slim by default: render a native
   collapsed `<details>` block, bound the expanded raw event panel height, and
   inline only the first 75 raw events. Expanded inline rows must be split into
@@ -143,8 +152,14 @@ plain diagnostic dump. The visual contract is:
   required to reveal evidence.
 - The Behavior graph / IOC summary section should remain static HTML/CSS. It
   should prefer stable weak interactions over fragile canvas/SVG rendering:
-  process graph nodes, a bounded Top behavior chain, Evidence graph edges, and
-  IOC summary panels for network, file/path, registry, and artifact indicators.
+  an Evidence story board, process graph nodes, a bounded Top behavior chain,
+  Evidence graph edges, and IOC summary panels for network, file/path,
+  registry, and artifact indicators.
+- The Evidence story board should be summary-first and weakly interactive:
+  each lane must show a compact status badge, a short analyst narrative,
+  3-8 metric chips, and a native collapsed evidence block. Required lanes are
+  execution lineage, dropped-file evidence, screenshot evidence, memory dump
+  evidence, network/PCAP evidence, and R0 health/noise boundary.
 - Timeline and process relationship views should also prefer stable weak
   interactions: native HTML/CSS timeline group panels, a bounded process
   relationship tree, and copyable relationship panels rather than external graph
@@ -163,8 +178,7 @@ plain diagnostic dump. The visual contract is:
 - Each generated HTML report should expose an in-report bilingual entry bar
   linking the sibling `report.zh.html`, `report.en.html`, and compatibility
   `report.html` files, so local file viewing and served WebUI viewing behave
-  consistently. The entry bar should explain that `report.html` is the default
-  Simplified Chinese compatibility report, `report.en.html` keeps English
+  consistently. The entry bar should explain that `report.html` is the default Simplified Chinese compatibility report, `report.en.html` keeps English
   operator chrome, and evidence values stay original in both reports.
 - Jobs should keep report path fields suitable for automatic WebUI links, so a
   completed plan can expose the default report plus localized report clues
@@ -185,7 +199,7 @@ plain diagnostic dump. The visual contract is:
 Evidence rows 是操作者可见内容。Tables、timeline entries 和 raw evidence blocks
 应支持快速复制：
 
-- 右键可复制单元格或 timeline item，复制其 evidence text。
+- Right-click / 右键可复制单元格或 timeline item，复制其 evidence text。
 - 点击 raw evidence 上的 `复制 / Copy` 按钮，复制完整 event block。
 - Raw event fields should be sorted and rendered in a flat collapsible evidence
   block; command/output/script fields stay in nested copyable `<details>` so
@@ -203,7 +217,7 @@ Evidence rows 是操作者可见内容。Tables、timeline entries 和 raw evide
 ## Live UI 预期 / Live UI expectations
 
 WebUI live raw monitor 是独立 dynamic monitor page，由 main dashboard 链接；浏览器允许时，
-upload flow 会自动打开它。该页刻意只显示 raw events；在 analysis 完成并导入 guest output 前，
+upload flow 会自动打开它。该页刻意只显示 raw events only；在 analysis 完成并导入 guest output 前，
 不运行 behavior classification。当页面由 upload 打开时，双语提示应告知操作者分析请求已由后台接管，
 可在 monitor 页查看进度/下载。Live table 应显示：
 

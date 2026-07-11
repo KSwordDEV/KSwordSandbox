@@ -309,9 +309,17 @@ public static class NetworkTelemetrySchema
             return string.Empty;
         }
 
-        return port.HasValue
-            ? $"{address}:{port.Value.ToString(CultureInfo.InvariantCulture)}"
-            : address;
+        if (!port.HasValue)
+        {
+            return address;
+        }
+
+        var normalizedAddress = address.Contains(':', StringComparison.Ordinal) &&
+            !address.StartsWith("[", StringComparison.Ordinal) &&
+            !address.EndsWith("]", StringComparison.Ordinal)
+                ? $"[{address}]"
+                : address;
+        return $"{normalizedAddress}:{port.Value.ToString(CultureInfo.InvariantCulture)}";
     }
 
     public static void AddIfNotEmpty(Dictionary<string, string> data, string key, string? value)

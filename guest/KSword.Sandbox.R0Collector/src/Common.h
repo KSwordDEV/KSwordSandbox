@@ -37,6 +37,9 @@ inline constexpr const char* kStressJsonlBackpressureEvidence =
 inline constexpr size_t kAbiGuardEventHeaderSequenceOffset = offsetof(KSWORD_SANDBOX_EVENT_HEADER, Sequence);
 inline constexpr size_t kAbiGuardEventHeaderLostEventsOffset = offsetof(KSWORD_SANDBOX_EVENT_HEADER, LostEvents);
 inline constexpr size_t kAbiGuardEventHeaderBackpressureEventsOffset = offsetof(KSWORD_SANDBOX_EVENT_HEADER, BackpressureEvents);
+inline constexpr size_t kAbiGuardEventHeaderOperationOffset = offsetof(KSWORD_SANDBOX_EVENT_HEADER, Operation);
+inline constexpr size_t kAbiGuardEventHeaderStatusOffset = offsetof(KSWORD_SANDBOX_EVENT_HEADER, Status);
+inline constexpr size_t kAbiGuardEventHeaderProducerMetadataFlagsOffset = offsetof(KSWORD_SANDBOX_EVENT_HEADER, ProducerMetadataFlags);
 inline constexpr size_t kAbiGuardStatusQueueHighWatermarkOffset = offsetof(KSWORD_SANDBOX_STATUS_REPLY, QueueHighWatermark);
 inline constexpr size_t kAbiGuardStatusTotalEventsDroppedOffset = offsetof(KSWORD_SANDBOX_STATUS_REPLY, TotalEventsDropped);
 inline constexpr size_t kAbiGuardStatusTotalEventsBackpressuredOffset = offsetof(KSWORD_SANDBOX_STATUS_REPLY, TotalEventsBackpressured);
@@ -52,6 +55,12 @@ static_assert(kAbiGuardEventHeaderLostEventsOffset == 64U,
     "KSWORD_SANDBOX_EVENT_HEADER.LostEvents offset changed.");
 static_assert(kAbiGuardEventHeaderBackpressureEventsOffset == 72U,
     "KSWORD_SANDBOX_EVENT_HEADER.BackpressureEvents offset changed.");
+static_assert(kAbiGuardEventHeaderOperationOffset == 80U,
+    "KSWORD_SANDBOX_EVENT_HEADER.Operation offset changed.");
+static_assert(kAbiGuardEventHeaderStatusOffset == 84U,
+    "KSWORD_SANDBOX_EVENT_HEADER.Status offset changed.");
+static_assert(kAbiGuardEventHeaderProducerMetadataFlagsOffset == 92U,
+    "KSWORD_SANDBOX_EVENT_HEADER.ProducerMetadataFlags offset changed.");
 static_assert(kAbiGuardStatusQueueHighWatermarkOffset == 24U,
     "KSWORD_SANDBOX_STATUS_REPLY.QueueHighWatermark offset changed.");
 static_assert(kAbiGuardStatusTotalEventsDroppedOffset == 56U,

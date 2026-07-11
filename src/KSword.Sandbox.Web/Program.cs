@@ -157,32 +157,16 @@ app.MapPost("/api/jobs/{jobId:guid}/enrichments/virustotal", async Task<IResult>
 // intentionally excludes PowerShell commands, stdout, and stderr.
 app.MapGet("/api/jobs/{jobId:guid}/runbook/progress", (Guid jobId, SandboxJobService service, RunbookProgressStore progressStore) =>
 {
-    var hasMemorySnapshot = progressStore.TryGet(jobId, out var memorySnapshot);
-    var hasDurableSnapshot = service.TryGetRunbookProgress(jobId, out var durableSnapshot);
-    if (hasMemorySnapshot || hasDurableSnapshot)
-    {
-        var selectedSnapshot = SelectLatestRunbookProgressSnapshot(
-            hasMemorySnapshot ? memorySnapshot : null,
-            hasDurableSnapshot ? durableSnapshot : null);
-        progressStore.Update(selectedSnapshot);
-        return Results.Ok(selectedSnapshot);
-    }
-
-    var job = service.GetJob(jobId);
-    if (job is null)
-    {
-        return Results.NotFound(new { error = $"Job {jobId:D} was not found in the in-memory Web host job list." });
-    }
-
-    if (job.Runbook is null)
-    {
-        return Results.NotFound(new { error = $"任务 {jobId:D} 还没有分析进度快照；请先创建计划并启动分析 / The job does not have a runbook progress snapshot yet." });
-    }
-
-    var initialSnapshot = progressStore.Begin(job.Runbook, SandboxRunbookExecutionMode.DryRun);
-    UpdateRunbookProgress(service, progressStore, initialSnapshot);
-    return Results.Ok(initialSnapshot);
+    return TryReadOrCreateRunbookProgressSnapshot(jobId, service, progressStore, out var snapshot, out var errorResult)
+        ? Results.Ok(snapshot)
+        : errorResult ?? Results.NotFound(new { error = $"任务 {jobId:D} 还没有分析进度快照 / The job does not have a runbook progress snapshot yet." });
 });
+// GET /api/jobs/{jobId}/progress/stream is the preferred lightweight
+// Server-Sent Events transport for the live monitor. It emits UI-safe runbook
+// progress snapshots as executor updates arrive, includes compact background
+// execution state, and closes/reconnects on a bounded lifetime instead of
+// turning the monitor into an unbounded long-poll request.
+app.MapGet("/api/jobs/{jobId:guid}/progress/stream", WriteRunbookProgressStreamAsync);
 // GET /api/jobs/{jobId}/runbook/background returns the WebUI server-side
 // background execution state. It complements the per-step progress endpoint:
 // progress is live/streaming, while this endpoint carries the terminal
@@ -645,6 +629,367 @@ static void UpdateRunbookProgress(
         // Progress polling remains live from memory; durable progress is a
         // best-effort recovery aid and must not interrupt VM execution.
     }
+}
+
+/// <summary>
+/// Reads the best current runbook progress snapshot or creates the same
+/// pending snapshot used by the polling endpoint. Inputs are a job id, job
+/// service, and in-memory store; processing prefers the newest memory/durable
+/// state and keeps the store warm for SSE subscribers; return value indicates
+/// whether a UI-safe snapshot is available.
+/// </summary>
+static bool TryReadOrCreateRunbookProgressSnapshot(
+    Guid jobId,
+    SandboxJobService service,
+    RunbookProgressStore progressStore,
+    out SandboxRunbookProgressSnapshot? snapshot,
+    out IResult? errorResult)
+{
+    snapshot = null;
+    errorResult = null;
+
+    var hasMemorySnapshot = progressStore.TryGet(jobId, out var memorySnapshot);
+    var hasDurableSnapshot = service.TryGetRunbookProgress(jobId, out var durableSnapshot);
+    if (hasMemorySnapshot || hasDurableSnapshot)
+    {
+        snapshot = SelectLatestRunbookProgressSnapshot(
+            hasMemorySnapshot ? memorySnapshot : null,
+            hasDurableSnapshot ? durableSnapshot : null);
+        progressStore.Update(snapshot);
+        return true;
+    }
+
+    var job = service.GetJob(jobId);
+    if (job is null)
+    {
+        errorResult = Results.NotFound(new { error = $"Job {jobId:D} was not found in the in-memory Web host job list." });
+        return false;
+    }
+
+    if (job.Runbook is null)
+    {
+        errorResult = Results.NotFound(new { error = $"任务 {jobId:D} 还没有分析进度快照；请先创建计划并启动分析 / The job does not have a runbook progress snapshot yet." });
+        return false;
+    }
+
+    snapshot = progressStore.Begin(job.Runbook, SandboxRunbookExecutionMode.DryRun);
+    UpdateRunbookProgress(service, progressStore, snapshot);
+    return true;
+}
+
+/// <summary>
+/// Streams UI-safe runbook/background progress with Server-Sent Events.
+/// Inputs are route/query values, HTTP context, and WebUI stores; processing
+/// subscribes to the bounded progress channel and uses occasional heartbeats
+/// only to refresh background terminal/import state; the function writes no
+/// VirusTotal data and exits on client disconnect, terminal state, or max age.
+/// </summary>
+static async Task WriteRunbookProgressStreamAsync(
+    Guid jobId,
+    int? heartbeatMs,
+    int? maxSeconds,
+    HttpContext context,
+    SandboxJobService service,
+    RunbookProgressStore progressStore,
+    RunbookBackgroundExecutionStore backgroundStore)
+{
+    var cancellationToken = context.RequestAborted;
+    if (!TryReadOrCreateRunbookProgressSnapshot(jobId, service, progressStore, out var currentProgress, out var errorResult) ||
+        currentProgress is null)
+    {
+        await (errorResult ?? Results.NotFound(new { error = $"Job {jobId:D} was not found." })).ExecuteAsync(context);
+        return;
+    }
+
+    var heartbeatInterval = TimeSpan.FromMilliseconds(Math.Clamp(heartbeatMs ?? 1500, 500, 30000));
+    var maxStreamAge = TimeSpan.FromSeconds(Math.Clamp(maxSeconds ?? 1800, 30, 7200));
+    var streamDeadline = DateTimeOffset.UtcNow + maxStreamAge;
+
+    context.Response.StatusCode = StatusCodes.Status200OK;
+    context.Response.ContentType = "text/event-stream; charset=utf-8";
+    context.Response.Headers["Cache-Control"] = "no-cache";
+    context.Response.Headers["X-Accel-Buffering"] = "no";
+    await context.Response.WriteAsync("retry: 2500\n\n", cancellationToken);
+
+    await using var subscription = progressStore.Subscribe(jobId);
+    var background = backgroundStore.Get(jobId);
+    var eventName = ResolveRunbookProgressStreamEventName(currentProgress, background, heartbeat: false);
+    await WriteRunbookProgressStreamFrameAsync(
+        context.Response,
+        eventName,
+        BuildRunbookProgressStreamPayload(jobId, currentProgress, background, eventName),
+        cancellationToken);
+
+    if (IsRunbookProgressStreamTerminal(currentProgress, background))
+    {
+        return;
+    }
+
+    var wroteTerminal = false;
+    try
+    {
+        while (!cancellationToken.IsCancellationRequested && DateTimeOffset.UtcNow < streamDeadline)
+        {
+            using var waitCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            var readTask = subscription.Reader.WaitToReadAsync(waitCancellation.Token).AsTask();
+            var delayTask = Task.Delay(heartbeatInterval, cancellationToken);
+            var completedTask = await Task.WhenAny(readTask, delayTask).ConfigureAwait(false);
+            var heartbeat = completedTask != readTask;
+
+            if (heartbeat)
+            {
+                waitCancellation.Cancel();
+                try
+                {
+                    await readTask.ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+                {
+                    // Heartbeat won the race; the next loop creates a fresh
+                    // bounded wait so there are no abandoned channel waiters.
+                }
+            }
+
+            if (!heartbeat && !await readTask.ConfigureAwait(false))
+            {
+                break;
+            }
+
+            if (!heartbeat)
+            {
+                while (subscription.Reader.TryRead(out var progressUpdate))
+                {
+                    currentProgress = SelectLatestRunbookProgressSnapshot(currentProgress, progressUpdate);
+                }
+            }
+            else if (TryReadOrCreateRunbookProgressSnapshot(jobId, service, progressStore, out var refreshedProgress, out _) &&
+                refreshedProgress is not null)
+            {
+                currentProgress = SelectLatestRunbookProgressSnapshot(currentProgress, refreshedProgress);
+            }
+
+            background = backgroundStore.Get(jobId);
+            eventName = ResolveRunbookProgressStreamEventName(currentProgress, background, heartbeat);
+            await WriteRunbookProgressStreamFrameAsync(
+                context.Response,
+                eventName,
+                BuildRunbookProgressStreamPayload(jobId, currentProgress, background, eventName),
+                cancellationToken);
+
+            if (IsRunbookProgressStreamTerminal(currentProgress, background))
+            {
+                wroteTerminal = true;
+                break;
+            }
+        }
+
+        if (!wroteTerminal && !cancellationToken.IsCancellationRequested && DateTimeOffset.UtcNow >= streamDeadline)
+        {
+            background = backgroundStore.Get(jobId);
+            await WriteRunbookProgressStreamFrameAsync(
+                context.Response,
+                "timeout",
+                BuildRunbookProgressStreamPayload(jobId, currentProgress, background, "timeout"),
+                cancellationToken);
+        }
+    }
+    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+    {
+        // Browser navigation or EventSource.close() cancelled the request.
+    }
+}
+
+/// <summary>
+/// Builds the compact stream payload consumed by LiveEventsPage. The background
+/// snapshot is intentionally sanitized and excludes runbook execution command
+/// text, stdout, stderr, and PowerShell details.
+/// </summary>
+static object BuildRunbookProgressStreamPayload(
+    Guid jobId,
+    SandboxRunbookProgressSnapshot progress,
+    RunbookBackgroundExecutionSnapshot background,
+    string eventName)
+{
+    var state = ResolveRunbookProgressStreamState(progress, background);
+    return new
+    {
+        SchemaVersion = 1,
+        Transport = "sse",
+        Event = eventName,
+        JobId = jobId,
+        GeneratedAtUtc = DateTimeOffset.UtcNow,
+        State = state,
+        Terminal = IsRunbookProgressStreamTerminal(progress, background),
+        TerminalKind = state is "failed" or "canceled" ? "error" : state is "completed" ? "final" : null,
+        Message = ResolveRunbookProgressStreamMessage(progress, background),
+        ProgressPercent = ComputeRunbookProgressPercent(progress),
+        CurrentStep = BuildRunbookProgressStreamCurrentStep(progress),
+        Progress = progress,
+        Background = BuildSafeRunbookBackgroundSnapshot(background)
+    };
+}
+
+static object BuildSafeRunbookBackgroundSnapshot(RunbookBackgroundExecutionSnapshot snapshot)
+{
+    return new
+    {
+        snapshot.JobId,
+        snapshot.Live,
+        snapshot.ImportGuestEvents,
+        snapshot.Accepted,
+        snapshot.State,
+        snapshot.Success,
+        snapshot.Message,
+        snapshot.StartedAtUtc,
+        snapshot.UpdatedAtUtc,
+        snapshot.Duration,
+        snapshot.GuestImportSucceeded,
+        snapshot.GuestImportMessage,
+        Job = BuildSafeRunbookBackgroundJobSnapshot(snapshot.Job)
+    };
+}
+
+static object? BuildSafeRunbookBackgroundJobSnapshot(AnalysisJob? job)
+{
+    return job is null
+        ? null
+        : new
+        {
+            job.JobId,
+            Status = job.Status.ToString(),
+            job.JsonReportPath,
+            job.HtmlReportPath,
+            job.HtmlReportZhPath,
+            job.HtmlReportEnPath,
+            job.GuestEventsPath,
+            job.RunbookExecutionResultPath
+        };
+}
+
+static object? BuildRunbookProgressStreamCurrentStep(SandboxRunbookProgressSnapshot progress)
+{
+    var steps = progress.Steps;
+    var runningStep = steps.FirstOrDefault(step => string.Equals(step.State, SandboxRunbookProgressStates.Running, StringComparison.OrdinalIgnoreCase));
+    var indexedStep = progress.CurrentStepIndex is >= 0 && progress.CurrentStepIndex < steps.Count
+        ? steps[progress.CurrentStepIndex.Value]
+        : null;
+    var currentStep = runningStep ?? indexedStep ?? steps.FirstOrDefault(step => string.Equals(step.State, SandboxRunbookProgressStates.Pending, StringComparison.OrdinalIgnoreCase));
+    if (currentStep is null)
+    {
+        return null;
+    }
+
+    return new
+    {
+        currentStep.StepIndex,
+        currentStep.StepId,
+        currentStep.Title,
+        currentStep.State,
+        currentStep.StartedAtUtc,
+        currentStep.Duration,
+        currentStep.ExitCode,
+        currentStep.Message
+    };
+}
+
+static string ResolveRunbookProgressStreamEventName(
+    SandboxRunbookProgressSnapshot progress,
+    RunbookBackgroundExecutionSnapshot background,
+    bool heartbeat)
+{
+    var state = ResolveRunbookProgressStreamState(progress, background);
+    return state switch
+    {
+        "failed" or "canceled" => "failed",
+        "completed" => "final",
+        _ => heartbeat ? "heartbeat" : "snapshot"
+    };
+}
+
+static string ResolveRunbookProgressStreamState(
+    SandboxRunbookProgressSnapshot progress,
+    RunbookBackgroundExecutionSnapshot background)
+{
+    var backgroundState = (background.State ?? string.Empty).Trim().ToLowerInvariant();
+    var progressState = (progress.State ?? string.Empty).Trim().ToLowerInvariant();
+    if (backgroundState is RunbookBackgroundExecutionStore.Failed ||
+        progressState is SandboxRunbookProgressStates.Failed or SandboxRunbookProgressStates.Canceled ||
+        progress.Success == false)
+    {
+        return progressState == SandboxRunbookProgressStates.Canceled ? "canceled" : "failed";
+    }
+
+    if (backgroundState is RunbookBackgroundExecutionStore.Completed ||
+        progressState is SandboxRunbookProgressStates.Completed ||
+        progress.Success == true)
+    {
+        return "completed";
+    }
+
+    if (backgroundState is RunbookBackgroundExecutionStore.Running or RunbookBackgroundExecutionStore.Queued)
+    {
+        return backgroundState;
+    }
+
+    return string.IsNullOrWhiteSpace(progressState) ? backgroundState : progressState;
+}
+
+static string? ResolveRunbookProgressStreamMessage(
+    SandboxRunbookProgressSnapshot progress,
+    RunbookBackgroundExecutionSnapshot background)
+{
+    if (string.Equals(background.State, RunbookBackgroundExecutionStore.Failed, StringComparison.OrdinalIgnoreCase) &&
+        !string.IsNullOrWhiteSpace(background.Message))
+    {
+        return background.Message;
+    }
+
+    return !string.IsNullOrWhiteSpace(progress.Message)
+        ? progress.Message
+        : background.Message;
+}
+
+static bool IsRunbookProgressStreamTerminal(
+    SandboxRunbookProgressSnapshot progress,
+    RunbookBackgroundExecutionSnapshot background)
+{
+    var state = ResolveRunbookProgressStreamState(progress, background);
+    return state is "completed" or "failed" or "canceled";
+}
+
+static int ComputeRunbookProgressPercent(SandboxRunbookProgressSnapshot progress)
+{
+    var total = Math.Max(progress.TotalSteps, progress.Steps.Count);
+    if (total <= 0)
+    {
+        return 0;
+    }
+
+    var state = (progress.State ?? string.Empty).Trim().ToLowerInvariant();
+    if (state == SandboxRunbookProgressStates.Completed || progress.Success == true)
+    {
+        return 100;
+    }
+
+    var hasRunning = progress.Steps.Any(step => string.Equals(step.State, SandboxRunbookProgressStates.Running, StringComparison.OrdinalIgnoreCase));
+    var currentIndex = progress.CurrentStepIndex ?? -1;
+    var runningCredit = hasRunning ? 0.45d : currentIndex >= 0 && progress.CompletedSteps <= currentIndex ? 0.25d : 0d;
+    var numerator = Math.Max(progress.CompletedSteps, Math.Max(currentIndex, 0)) + runningCredit;
+    var percent = (int)Math.Round(Math.Min(total, numerator) / total * 100d, MidpointRounding.AwayFromZero);
+    var floor = state == SandboxRunbookProgressStates.Running || hasRunning ? 3 : 0;
+    return Math.Clamp(Math.Max(floor, percent), 0, 100);
+}
+
+static async Task WriteRunbookProgressStreamFrameAsync(
+    HttpResponse response,
+    string eventName,
+    object payload,
+    CancellationToken cancellationToken)
+{
+    var data = JsonSerializer.Serialize(payload, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+    await response.WriteAsync($"event: {eventName}\n", cancellationToken);
+    await response.WriteAsync($"data: {data}\n\n", cancellationToken);
+    await response.Body.FlushAsync(cancellationToken);
 }
 
 /// <summary>

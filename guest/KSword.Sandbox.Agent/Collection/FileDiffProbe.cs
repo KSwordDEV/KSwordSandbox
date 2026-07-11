@@ -64,11 +64,11 @@ internal sealed class FileDiffProbe : IGuestProbe
 
             if (!baseline.TryGetValue(path, out var previous))
             {
-                events.Add(CreateFileEvent("file.created", context.WorkingDirectory, path, snapshot, previous: null));
+                events.Add(CreateFileEvent("file.created", context, path, snapshot, previous: null));
             }
             else if (previous != snapshot)
             {
-                events.Add(CreateFileEvent("file.modified", context.WorkingDirectory, path, snapshot, previous));
+                events.Add(CreateFileEvent("file.modified", context, path, snapshot, previous));
             }
         }
 
@@ -78,7 +78,7 @@ internal sealed class FileDiffProbe : IGuestProbe
 
             if (!current.ContainsKey(path))
             {
-                events.Add(CreateFileEvent("file.deleted", context.WorkingDirectory, path, current: null, previous));
+                events.Add(CreateFileEvent("file.deleted", context, path, current: null, previous));
             }
         }
 
@@ -93,22 +93,47 @@ internal sealed class FileDiffProbe : IGuestProbe
     /// </summary>
     private static SandboxEvent CreateFileEvent(
         string eventType,
-        string root,
+        GuestProbeContext context,
         string path,
         FileStateSnapshot? current,
         FileStateSnapshot? previous)
     {
+        var root = context.WorkingDirectory;
         var evt = new SandboxEvent
         {
             EventType = eventType,
             Source = "guest",
             Path = path,
+            ProcessName = SampleProcessName(context.SamplePath),
+            ProcessId = context.RootProcessId,
             Data =
             {
+                ["phase"] = "after-run",
+                ["capturePhase"] = "after-run",
+                ["probePhase"] = "after-run",
+                ["captureEnabled"] = "true",
+                ["implemented"] = "true",
+                ["evidenceRole"] = "dropped-file-candidate",
+                ["collectionName"] = "file-diff",
+                ["processRole"] = context.RootProcessId is null ? "sample-context" : "sample-root-context",
+                ["samplePath"] = context.SamplePath,
+                ["expectedRelativePath"] = "artifacts/dropped-files/**",
                 ["root"] = root,
                 ["relativePath"] = SafeRelativePath(root, path)
             }
         };
+
+        if (context.RootProcessId is not null)
+        {
+            evt.Data["rootProcessId"] = context.RootProcessId.Value.ToString(CultureInfo.InvariantCulture);
+            evt.Data["processId"] = context.RootProcessId.Value.ToString(CultureInfo.InvariantCulture);
+            evt.Data["treeDepth"] = "0";
+            evt.Data["treeLineage"] = context.RootProcessId.Value.ToString(CultureInfo.InvariantCulture);
+        }
+
+        AddIfNotEmpty(evt.Data, "processName", evt.ProcessName);
+        AddIfNotEmpty(evt.Data, "rootProcessPath", context.RootProcessPath);
+        AddIfNotEmpty(evt.Data, "rootCommandLine", context.RootCommandLine);
 
         if (current is not null)
         {
@@ -179,6 +204,29 @@ internal sealed class FileDiffProbe : IGuestProbe
             "file.deleted" => "删除事件没有可下载文件；如复制被跳过，请查看 artifact.dropped_file.skipped 的 reason/zhHint。",
             _ => "请结合 relativePath、sizeBytes、sha256/hashStatus 和时间字段分析文件行为。"
         };
+    }
+
+    /// <summary>
+    /// Reads a display process name for sample-scoped file-diff events.
+    /// </summary>
+    private static string? SampleProcessName(string samplePath)
+    {
+        try
+        {
+            return string.IsNullOrWhiteSpace(samplePath) ? null : Path.GetFileName(samplePath);
+        }
+        catch (ArgumentException)
+        {
+            return null;
+        }
+    }
+
+    private static void AddIfNotEmpty(Dictionary<string, string> data, string key, string? value)
+    {
+        if (!string.IsNullOrWhiteSpace(value))
+        {
+            data[key] = value;
+        }
     }
 
     /// <summary>

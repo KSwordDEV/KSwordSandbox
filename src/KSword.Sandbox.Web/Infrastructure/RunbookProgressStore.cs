@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Threading.Channels;
 using KSword.Sandbox.Abstractions;
 
 namespace KSword.Sandbox.Web.Infrastructure;
@@ -12,6 +13,7 @@ namespace KSword.Sandbox.Web.Infrastructure;
 internal sealed class RunbookProgressStore
 {
     private readonly ConcurrentDictionary<Guid, SandboxRunbookProgressSnapshot> snapshots = new();
+    private readonly ConcurrentDictionary<Guid, ConcurrentDictionary<Guid, Channel<SandboxRunbookProgressSnapshot>>> subscribers = new();
 
     /// <summary>
     /// Creates a pending snapshot before the executor starts. Inputs are the
@@ -63,10 +65,29 @@ internal sealed class RunbookProgressStore
     public void Update(SandboxRunbookProgressSnapshot snapshot)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
+        var shouldPublish = false;
         snapshots.AddOrUpdate(
             snapshot.JobId,
-            snapshot,
-            (_, existing) => ShouldReplaceSnapshot(snapshot, existing) ? snapshot : existing);
+            _ =>
+            {
+                shouldPublish = true;
+                return snapshot;
+            },
+            (_, existing) =>
+            {
+                if (!ShouldReplaceSnapshot(snapshot, existing))
+                {
+                    return existing;
+                }
+
+                shouldPublish = true;
+                return snapshot;
+            });
+
+        if (shouldPublish)
+        {
+            Publish(snapshot);
+        }
     }
 
     /// <summary>
@@ -124,6 +145,76 @@ internal sealed class RunbookProgressStore
         return snapshots.TryGetValue(jobId, out snapshot!);
     }
 
+    /// <summary>
+    /// Subscribes a single SSE client to bounded progress updates for one job.
+    /// Inputs are the job id; processing creates a drop-oldest in-memory
+    /// channel and immediately seeds it with the latest snapshot when present;
+    /// callers dispose the subscription when the browser disconnects.
+    /// </summary>
+    public RunbookProgressSubscription Subscribe(Guid jobId)
+    {
+        var subscriberId = Guid.NewGuid();
+        var channel = Channel.CreateBounded<SandboxRunbookProgressSnapshot>(
+            new BoundedChannelOptions(16)
+            {
+                AllowSynchronousContinuations = false,
+                FullMode = BoundedChannelFullMode.DropOldest,
+                SingleReader = true,
+                SingleWriter = false
+            });
+
+        var jobSubscribers = subscribers.GetOrAdd(
+            jobId,
+            _ => new ConcurrentDictionary<Guid, Channel<SandboxRunbookProgressSnapshot>>());
+        jobSubscribers[subscriberId] = channel;
+
+        if (snapshots.TryGetValue(jobId, out var snapshot))
+        {
+            channel.Writer.TryWrite(snapshot);
+        }
+
+        return new RunbookProgressSubscription(
+            jobId,
+            subscriberId,
+            channel.Reader,
+            () => RemoveSubscriber(jobId, subscriberId));
+    }
+
+    private void Publish(SandboxRunbookProgressSnapshot snapshot)
+    {
+        if (!subscribers.TryGetValue(snapshot.JobId, out var jobSubscribers))
+        {
+            return;
+        }
+
+        foreach (var subscriber in jobSubscribers.ToArray())
+        {
+            if (!subscriber.Value.Writer.TryWrite(snapshot) &&
+                subscriber.Value.Reader.Completion.IsCompleted)
+            {
+                jobSubscribers.TryRemove(subscriber.Key, out _);
+            }
+        }
+    }
+
+    private void RemoveSubscriber(Guid jobId, Guid subscriberId)
+    {
+        if (!subscribers.TryGetValue(jobId, out var jobSubscribers))
+        {
+            return;
+        }
+
+        if (jobSubscribers.TryRemove(subscriberId, out var channel))
+        {
+            channel.Writer.TryComplete();
+        }
+
+        if (jobSubscribers.IsEmpty)
+        {
+            subscribers.TryRemove(jobId, out _);
+        }
+    }
+
     private static bool ShouldReplaceSnapshot(
         SandboxRunbookProgressSnapshot candidate,
         SandboxRunbookProgressSnapshot existing)
@@ -144,5 +235,42 @@ internal sealed class RunbookProgressStore
         }
 
         return candidate.Success.HasValue && !existing.Success.HasValue;
+    }
+}
+
+/// <summary>
+/// Disposable handle for one runbook-progress stream subscriber.
+/// </summary>
+internal sealed class RunbookProgressSubscription : IAsyncDisposable
+{
+    private readonly Action dispose;
+    private int disposed;
+
+    public RunbookProgressSubscription(
+        Guid jobId,
+        Guid subscriberId,
+        ChannelReader<SandboxRunbookProgressSnapshot> reader,
+        Action dispose)
+    {
+        JobId = jobId;
+        SubscriberId = subscriberId;
+        Reader = reader;
+        this.dispose = dispose;
+    }
+
+    public Guid JobId { get; }
+
+    public Guid SubscriberId { get; }
+
+    public ChannelReader<SandboxRunbookProgressSnapshot> Reader { get; }
+
+    public ValueTask DisposeAsync()
+    {
+        if (Interlocked.Exchange(ref disposed, 1) == 0)
+        {
+            dispose();
+        }
+
+        return ValueTask.CompletedTask;
     }
 }

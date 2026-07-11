@@ -16,9 +16,10 @@ collector rows, and normalized protocol/correlation rows rather than requiring
 stateful joins in the engine.
 
 The current rule set spans behavior, enrichment, static, and collection-health
-signals. The 2026-07-12 release-facing pass adds 38 behavior rules for
-persistence, process injection, lateral movement, anti-sandbox checks,
-download-execute chains, and DNS/HTTP/TLS/PCAP evidence. The rule ideas are
+signals. The 2026-07-12 release-facing pass adds the original 38 behavior rules
+plus a supplemental 19-rule open-source-inspired batch for persistence,
+process injection, lateral movement, download-execute chains,
+credential/exfil staging, and DNS/HTTP/TLS/PCAP evidence. The rule ideas are
 aligned with public inspiration families including SigmaHQ, Elastic detection
 rules, Splunk Security Content, and MITRE ATT&CK, but the project uses its own
 event predicates and does not copy upstream rule text. The previous
@@ -42,7 +43,7 @@ grouping intent, and the evidence fields analysts should inspect first.
 
 ## Added coverage
 
-### Release-facing mapping for the 38 newest rules
+### Release-facing mapping for the original 38-rule batch
 
 - Persistence: LSA authentication packages, AppInit/AppCert DLLs,
   BootExecute, Time Providers, WMI event subscriptions, COM InprocServer
@@ -62,6 +63,37 @@ grouping intent, and the evidence fields analysts should inspect first.
   executable payload magic, small periodic POST beacons, suspicious Host/SNI
   metadata, invalid or self-signed TLS, no-SNI/rare-JA3 combinations, and SMB
   admin-share session setup evidence.
+
+### Supplemental high-signal batch
+
+The follow-up batch adds 19 rules without copying upstream Sigma, Elastic,
+Splunk, or MITRE text/query content. Each rule is constrained to event types the
+repo already consumes (`process.*`, `registry.*`, `driver.*`, `api.call`,
+`pcap.*`, `network.*`, `dns.*`, `http.*`, and `tls.*`) and includes Chinese
+triage text.
+
+- Scheduled-task persistence: `schtasks /create` logon/start triggers and
+  RunLevel-highest tasks must point to a user-writable executable or script
+  path before they become high-severity findings.
+- Registry persistence: App Paths hijacks and Netsh helper DLL registration
+  require user-writable executable/DLL evidence and exclude query-only
+  registry operations.
+- Injection: direct-syscall / NTDLL-unhook labels, transacted-section /
+  process-doppelgänging primitives, and sensitive-process virtual-memory writes
+  consume API/R0/process telemetry rather than static strings.
+- Lateral movement: admin-share binary copy commands, remote `sc.exe` service
+  ImagePath creation, PowerShell `Copy-Item` to ADMIN$/C$, and PCAP svcctl
+  named-pipe metadata map to tool transfer or service execution.
+- Download-execute: PowerShell web-download plus Start-Process/Invoke-Item and
+  BITS notify-command payload rules require both transfer and execution/staging
+  context.
+- Credential/exfil staging: browser credential DB copy commands, LSASS
+  `MiniDumpWriteDump` API evidence, credential-themed archive staging, and
+  large authenticated HTTP uploads are separated from generic file/network
+  activity.
+- DNS/TLS: Base64-like high-entropy DNS labels and TLS new-domain / risky JA3
+  metadata strengthen packet-derived network triage while staying dependent on
+  normalized data fields.
 
 - Open-source reference behavior rules:
   - Odbcconf `REGSVR` proxy execution with a user-writable DLL path, mapped to

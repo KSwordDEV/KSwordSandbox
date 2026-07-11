@@ -1,6 +1,7 @@
 #include "EventParser.h"
 
 #include <algorithm>
+#include <cwctype>
 #include <cstring>
 #include <sstream>
 #include <string>
@@ -828,6 +829,119 @@ std::string DriverOperationName(const ULONG eventType, const ULONG operation) {
     }
 }
 
+// Input: UTF-16 text and a UTF-16 fragment.
+// Processing: Performs a case-insensitive containment check without filesystem
+// access so event semantics can be derived from bounded payload text safely.
+// Return: true when the fragment appears in the value.
+bool ContainsWideInsensitive(std::wstring value, std::wstring fragment) {
+    if (value.empty() || fragment.empty()) {
+        return false;
+    }
+
+    std::replace(value.begin(), value.end(), L'/', L'\\');
+    std::replace(fragment.begin(), fragment.end(), L'/', L'\\');
+    std::transform(
+        value.begin(),
+        value.end(),
+        value.begin(),
+        [](const wchar_t ch) {
+            return static_cast<wchar_t>(std::towlower(static_cast<wint_t>(ch)));
+        });
+    std::transform(
+        fragment.begin(),
+        fragment.end(),
+        fragment.begin(),
+        [](const wchar_t ch) {
+            return static_cast<wchar_t>(std::towlower(static_cast<wint_t>(ch)));
+        });
+
+    return value.find(fragment) != std::wstring::npos;
+}
+
+// Input: Registry key path decoded from the public payload.
+// Processing: Labels common Windows autorun locations as persistence candidates
+// for report/storytelling evidence without treating them as a final verdict.
+// Return: true when the key path resembles a common autostart location.
+bool RegistryPersistenceCandidate(const std::wstring& keyPath) {
+    return ContainsWideInsensitive(keyPath, L"\\software\\microsoft\\windows\\currentversion\\run") ||
+        ContainsWideInsensitive(keyPath, L"\\software\\microsoft\\windows\\currentversion\\runonce") ||
+        ContainsWideInsensitive(keyPath, L"\\software\\microsoft\\windows\\currentversion\\policies\\explorer\\run") ||
+        ContainsWideInsensitive(keyPath, L"\\software\\microsoft\\windows nt\\currentversion\\winlogon");
+}
+
+// Input: A typed operation name.
+// Processing: Normalizes the semantic family and operation into a compact
+// report/rule field.
+// Return: family.operation when operation is known, otherwise family.unknown.
+std::string ActivityKind(const std::string& family, const std::string& operationName) {
+    return family + "." + (operationName.empty() ? "unknown" : operationName);
+}
+
+// Input: Driver event sequence and JSON builder.
+// Processing: Emits stable concrete-event sequence semantics before verbose ABI
+// fields so report sampling keeps the meaning beside the sequence value.
+// Return: No return value; builder is mutated.
+void AddConcreteEventSequenceSemantics(
+    JsonDataObjectBuilder& data,
+    const unsigned long long sequence) {
+    data.AddUnsigned("sequence", sequence);
+    data.AddUtf8("sequenceMeaning", "eventSequence");
+    data.AddUtf8("sequenceScope", "driver-event");
+    data.AddBool("sequenceConcrete", true);
+    data.AddUtf8(
+        "sequencePolicy",
+        "Concrete driver rows use KSWORD_SANDBOX_EVENT_HEADER.Sequence; summary rows use NextSequence with sequenceMeaning=nextSequence");
+    data.AddWide(
+        "zhSequencePolicy",
+        L"具体 driver 事件行的 sequence 来自 KSWORD_SANDBOX_EVENT_HEADER.Sequence；"
+        L"摘要行使用 NextSequence，并以 sequenceMeaning=nextSequence 标记。");
+}
+
+// Input: Attribution returned by self-noise classification.
+// Processing: Emits stable noise-class fields used by reports to hide collector
+// plumbing from sample behavior while preserving an audit trail.
+// Return: No return value; builder is mutated.
+void AddDriverNoiseClassificationFields(
+    JsonDataObjectBuilder& data,
+    const DriverEventAttribution& attribution) {
+    const std::string selfNoiseClass = attribution.collectorNoise
+        ? "collector-self-noise"
+        : (attribution.selfNoise ? "producer-self-noise" : "none");
+    const std::string noiseClass = attribution.collectorNoise
+        ? "collector-infrastructure"
+        : (attribution.selfNoise ? "producer-self-noise" : "sample-or-system");
+    const bool sampleBehaviorCandidate = !attribution.collectorNoise && !attribution.selfNoise;
+
+    data.AddUtf8("noiseClass", noiseClass);
+    data.AddUtf8("selfNoiseClass", selfNoiseClass);
+    data.AddUtf8(
+        "collectorNoiseClass",
+        attribution.collectorNoise ? "collector-infrastructure" : "none");
+    data.AddUtf8(
+        "noiseAction",
+        attribution.suppressed ? "suppress" : "emit");
+    data.AddUtf8(
+        "noiseReasons",
+        attribution.selfNoiseReason.empty() ? "none" : attribution.selfNoiseReason);
+    data.AddBool("sampleBehaviorCandidate", sampleBehaviorCandidate);
+    data.AddBool("collectionDiagnostic", false);
+    data.AddBool("collectionNoise", attribution.collectorNoise);
+    data.AddUtf8(
+        "operatorInterpretation",
+        attribution.collectorNoise
+            ? "collector_self_noise_not_sample_behavior"
+            : (attribution.selfNoise ? "producer_self_noise_not_sample_behavior" : "candidate_sample_or_system_behavior"));
+    data.AddWide(
+        "zhNoiseHint",
+        attribution.collectorNoise
+            ? (attribution.suppressed
+                ? L"该行被判定为 Collector/KSword 基础设施自噪声，默认已从样本行为中抑制。"
+                : L"该行被判定为 Collector/KSword 基础设施自噪声；当前配置选择写出以便审计。")
+            : (attribution.selfNoise
+                ? L"该行由 producer 标记为自噪声，不应直接计入样本行为。"
+                : L"该行未命中 Collector 自噪声规则，可作为样本或系统行为候选证据。"));
+}
+
 // Input: Process payload flags.
 // Processing: Decodes public bits and preserves unknown bits for diagnostics.
 // Return: Pipe-delimited flag names, or "none".
@@ -1622,8 +1736,26 @@ bool AddFilePayloadData(
     const bool renameIntent =
         (filePayload->Flags & KSWORD_SANDBOX_FILE_EVENT_FLAG_RENAME_INTENT) != 0;
     const std::wstring filePath = ExtractFilePayloadPath(payload, payloadBytes);
+    const std::string fileOperationName = FileOperationName(filePayload->Operation);
+    const std::string fileIntent = deleteIntent
+        ? "delete"
+        : (renameIntent ? "rename" : (operationFailed ? "failed-access" : fileOperationName));
 
     data->AddUtf8("typedPayloadStatus", "parsed");
+    data->AddUtf8("semanticFamily", "file");
+    data->AddUtf8("behaviorLane", "filesystem");
+    data->AddUtf8("fileOperationName", fileOperationName);
+    data->AddUtf8("activityKind", ActivityKind("file", fileOperationName));
+    data->AddUtf8("fileIntent", fileIntent);
+    data->AddBool("evidenceReady", true);
+    data->AddWide("zhMessage", L"R0 捕获到文件系统行为。");
+    data->AddWide(
+        "zhHint",
+        deleteIntent
+            ? L"该文件事件带有删除意图，可结合 dropped files/artifact 目录判断样本释放或清理行为。"
+            : (renameIntent
+                ? L"该文件事件带有重命名意图，可关注释放文件是否被移动或伪装。"
+                : L"该文件事件来自内核 minifilter，适合与 Guest dropped files 和报告证据展开联动。"));
     data->AddUnsigned("fileVersion", filePayload->Version);
     data->AddUtf8("fileVersionHex", HexUnsignedLongLong(filePayload->Version, 8));
     data->AddUnsigned("filePayloadSize", filePayload->Size);
@@ -1705,8 +1837,32 @@ bool AddProcessPayloadData(
             processPayload->CommandLineLengthBytes,
             KSWORD_SANDBOX_PROCESS_COMMAND_LINE_CHARS)
         : std::wstring();
+    const std::string processOperationName = ProcessOperationName(processPayload->Operation);
+    const bool parentProcessIdPresent =
+        (processPayload->Flags & KSWORD_SANDBOX_PROCESS_EVENT_FLAG_PARENT_ID_PRESENT) != 0;
+    const bool creatingProcessIdPresent =
+        (processPayload->Flags & KSWORD_SANDBOX_PROCESS_EVENT_FLAG_CREATOR_ID_PRESENT) != 0;
 
     data->AddUtf8("typedPayloadStatus", "parsed");
+    data->AddUtf8("semanticFamily", "process");
+    data->AddUtf8("behaviorLane", "process-tree");
+    data->AddUtf8("processOperationName", processOperationName);
+    data->AddUtf8("activityKind", ActivityKind("process", processOperationName));
+    data->AddUtf8(
+        "processLifecycle",
+        processOperationName == "create" ? "start" : (processOperationName == "exit" ? "exit" : "unknown"));
+    data->AddUtf8(
+        "lineageConfidence",
+        parentProcessIdPresent || creatingProcessIdPresent ? "payload-lineage" : "header-only");
+    data->AddBool("evidenceReady", true);
+    data->AddWide(
+        "zhMessage",
+        processOperationName == "exit" ? L"R0 捕获到进程退出事件。" : L"R0 捕获到进程创建/生命周期事件。");
+    data->AddWide(
+        "zhHint",
+        parentProcessIdPresent || creatingProcessIdPresent
+            ? L"该进程事件包含父进程/创建者 PID，可用于恢复完整进程树。"
+            : L"该进程事件缺少显式父进程字段，可与 Guest 进程快照和命令行证据交叉验证。");
     data->AddUnsigned("processVersion", processPayload->Version);
     data->AddUtf8("processVersionHex", HexUnsignedLongLong(processPayload->Version, 8));
     data->AddUnsigned("processPayloadSize", processPayload->Size);
@@ -1729,12 +1885,8 @@ bool AddProcessPayloadData(
     data->AddBool(
         "legacyCallback",
         (processPayload->Flags & KSWORD_SANDBOX_PROCESS_EVENT_FLAG_LEGACY_CALLBACK) != 0);
-    data->AddBool(
-        "parentProcessIdPresent",
-        (processPayload->Flags & KSWORD_SANDBOX_PROCESS_EVENT_FLAG_PARENT_ID_PRESENT) != 0);
-    data->AddBool(
-        "creatingProcessIdPresent",
-        (processPayload->Flags & KSWORD_SANDBOX_PROCESS_EVENT_FLAG_CREATOR_ID_PRESENT) != 0);
+    data->AddBool("parentProcessIdPresent", parentProcessIdPresent);
+    data->AddBool("creatingProcessIdPresent", creatingProcessIdPresent);
     data->AddBool(
         "lineageCacheHit",
         (processPayload->Flags & KSWORD_SANDBOX_PROCESS_EVENT_FLAG_LINEAGE_CACHE_HIT) != 0);
@@ -1901,8 +2053,27 @@ bool AddRegistryPayloadData(
         registryPayload->ValueName,
         registryPayload->ValueNameLengthBytes,
         KSWORD_SANDBOX_REGISTRY_VALUE_NAME_CHARS);
+    const std::string registryOperationName = RegistryOperationName(registryPayload->Operation);
+    const bool persistenceCandidate = RegistryPersistenceCandidate(keyPath);
 
     data->AddUtf8("typedPayloadStatus", "parsed");
+    data->AddUtf8("semanticFamily", "registry");
+    data->AddUtf8("behaviorLane", "registry");
+    data->AddUtf8("registryOperationName", registryOperationName);
+    data->AddUtf8("activityKind", ActivityKind("registry", registryOperationName));
+    data->AddBool("persistenceCandidate", persistenceCandidate);
+    data->AddUtf8(
+        "registryPersistenceSignal",
+        persistenceCandidate ? "common-windows-autorun-key" : "none");
+    data->AddBool("evidenceReady", true);
+    data->AddWide(
+        "zhMessage",
+        persistenceCandidate ? L"R0 捕获到疑似持久化相关注册表行为。" : L"R0 捕获到注册表行为。");
+    data->AddWide(
+        "zhHint",
+        persistenceCandidate
+            ? L"该注册表路径匹配常见自启动/持久化位置，应在报告中作为重点证据展开。"
+            : L"该注册表事件来自内核回调，可结合行为规则和原始事件判断影响。");
     data->AddUnsigned("registryVersion", registryPayload->Version);
     data->AddUtf8("registryVersionHex", HexUnsignedLongLong(registryPayload->Version, 8));
     data->AddUnsigned("registryPayloadSize", registryPayload->Size);
@@ -2033,6 +2204,14 @@ bool AddNetworkPayloadData(
         networkPayload->Direction == KswSandboxNetworkDirectionInbound ? remoteEndpoint : localEndpoint;
     const std::string destinationEndpoint =
         networkPayload->Direction == KswSandboxNetworkDirectionInbound ? localEndpoint : remoteEndpoint;
+    const std::string sourceAddress =
+        networkPayload->Direction == KswSandboxNetworkDirectionInbound ? remoteAddress : localAddress;
+    const std::string destinationAddress =
+        networkPayload->Direction == KswSandboxNetworkDirectionInbound ? localAddress : remoteAddress;
+    const USHORT sourcePort =
+        networkPayload->Direction == KswSandboxNetworkDirectionInbound ? networkPayload->RemotePort : networkPayload->LocalPort;
+    const USHORT destinationPort =
+        networkPayload->Direction == KswSandboxNetworkDirectionInbound ? networkPayload->LocalPort : networkPayload->RemotePort;
     const std::string flowKey = NetworkFlowKey(
         protocolName,
         localEndpoint,
@@ -2042,8 +2221,30 @@ bool AddNetworkPayloadData(
         ? networkPayload->LocalPort
         : networkPayload->RemotePort;
     const std::string serviceHint = NetworkServiceHint(networkPayload->Protocol, servicePort);
+    const bool dnsCandidate = serviceHint == "dns";
+    const bool httpCandidate = serviceHint == "http";
+    const bool tlsCandidate = serviceHint == "tls";
+    const bool webCandidate = serviceHint == "http" || serviceHint == "tls" || serviceHint == "web";
+    const std::string serviceHintSource = serviceHint == "unknown" ? "unclassified" : "port-protocol";
+    const std::string serviceHintConfidence = serviceHint == "unknown" ? "none" : "medium";
 
     data->AddUtf8("typedPayloadStatus", "parsed");
+    data->AddUtf8("semanticFamily", "network");
+    data->AddUtf8("behaviorLane", "network-flow");
+    data->AddUtf8("activityKind", ActivityKind("network", NetworkOperationName(networkPayload->Operation)));
+    data->AddBool("evidenceReady", true);
+    data->AddWide(
+        "zhMessage",
+        dnsCandidate
+            ? L"R0 捕获到疑似 DNS 网络流。"
+            : (httpCandidate
+                ? L"R0 捕获到疑似 HTTP 网络流。"
+                : (tlsCandidate ? L"R0 捕获到疑似 TLS/HTTPS 网络流。" : L"R0 捕获到网络连接/授权事件。")));
+    data->AddWide(
+        "zhHint",
+        remoteAddressPresent
+            ? L"该网络事件包含端点和 flowKey，可与 PCAP/DNS/HTTP/TLS sidecar 证据合并成网络关系图。"
+            : L"该网络事件缺少远端地址，仍保留 WFP 层/过滤器信息供排障和 ABI 核对。");
     data->AddUnsigned("networkVersion", networkPayload->Version);
     data->AddUtf8("networkVersionHex", HexUnsignedLongLong(networkPayload->Version, 8));
     data->AddUnsigned("networkPayloadSize", networkPayload->Size);
@@ -2095,13 +2296,29 @@ bool AddNetworkPayloadData(
     data->AddUtf8("remoteEndpoint", remoteEndpoint);
     data->AddUtf8("sourceEndpoint", sourceEndpoint);
     data->AddUtf8("destinationEndpoint", destinationEndpoint);
+    data->AddUtf8("sourceAddress", sourceAddress);
+    data->AddUtf8("destinationAddress", destinationAddress);
+    data->AddUnsigned("sourcePort", sourcePort);
+    data->AddUnsigned("destinationPort", destinationPort);
+    data->AddUtf8("endpointPair", sourceEndpoint + " -> " + destinationEndpoint);
     data->AddUtf8("flowKey", flowKey);
+    data->AddUnsigned("flowKeyVersion", 1);
+    data->AddUtf8("flowKeyDirection", directionName);
+    data->AddUtf8("flowKeySource", "directional-source-destination-endpoints");
+    data->AddUtf8("flowKeyScope", "transport-5tuple-lite");
     data->AddUnsigned("servicePort", servicePort);
     data->AddUtf8("serviceHint", serviceHint);
+    data->AddUtf8("serviceHintSource", serviceHintSource);
+    data->AddUtf8("serviceHintConfidence", serviceHintConfidence);
+    data->AddUtf8("serviceHintPolicy", "port-protocol heuristic: 53=dns, 80/8080/8000=http, 443/8443=tls");
     data->AddUtf8("semanticCandidate", serviceHint);
-    data->AddBool("dnsCandidate", serviceHint == "dns");
-    data->AddBool("httpCandidate", serviceHint == "http");
-    data->AddBool("tlsCandidate", serviceHint == "tls");
+    data->AddBool("dnsCandidate", dnsCandidate);
+    data->AddBool("httpCandidate", httpCandidate);
+    data->AddBool("tlsCandidate", tlsCandidate);
+    data->AddBool("webCandidate", webCandidate);
+    data->AddBool("serviceHintDns", dnsCandidate);
+    data->AddBool("serviceHintHttp", httpCandidate);
+    data->AddBool("serviceHintTls", tlsCandidate);
     data->AddUnsigned("layerId", networkPayload->LayerId);
     data->AddUtf8("layerIdHex", HexUnsignedLongLong(networkPayload->LayerId, 4));
     data->AddUnsigned("calloutId", networkPayload->CalloutId);
@@ -2669,15 +2886,20 @@ std::string BuildReadEventsBatchData(
     const std::string emittedTail =
         counters.hasEmittedSequenceRange ? std::to_string(counters.emittedTailSequence) : "";
     unsigned long long sequenceGapEstimate = 0;
+    unsigned long long observedSequenceSpan = 0;
     if (counters.hasSequenceRange &&
         counters.recordsProcessed > 0 &&
         counters.tailSequence >= counters.headSequence) {
-        const unsigned long long observedSpan = counters.tailSequence - counters.headSequence + 1ULL;
-        if (observedSpan > counters.recordsProcessed) {
-            sequenceGapEstimate = observedSpan - counters.recordsProcessed;
+        observedSequenceSpan = counters.tailSequence - counters.headSequence + 1ULL;
+        if (observedSequenceSpan > counters.recordsProcessed) {
+            sequenceGapEstimate = observedSequenceSpan - counters.recordsProcessed;
         }
     }
     const bool sequenceGapObserved = sequenceGapEstimate != 0;
+    const std::string sequenceGapReason =
+        sequenceGapObserved ? "non-contiguous-consumed-driver-sequence" : "none";
+    const std::string backpressureSeverity =
+        lost ? "loss" : (sequenceGapObserved ? "sequence-gap" : (backpressure ? "bounded-drain" : "none"));
 
     data.AddUnsigned("requestedMaxEvents", requestedMaxEvents);
     data.AddUnsigned("recordsProcessed", counters.recordsProcessed);
@@ -2691,12 +2913,18 @@ std::string BuildReadEventsBatchData(
     data.AddUnsigned("skipped", counters.collectorSkippedEvents);
     data.AddUtf8("head", head);
     data.AddUtf8("tail", tail);
+    data.AddUnsigned("observedSequenceSpan", observedSequenceSpan);
+    data.AddUnsigned("expectedContiguousEvents", counters.recordsProcessed);
     data.AddBool("sequenceGapObserved", sequenceGapObserved);
     data.AddUnsigned("sequenceGapEstimate", sequenceGapEstimate);
+    data.AddUtf8("sequenceGapReason", sequenceGapReason);
     data.AddUtf8("sequenceRangeMeaning", "head/tail are consumed event sequences before collector self-noise suppression or sampling accounting");
     data.AddWide("zhSequenceRangeMeaning", L"head/tail 表示本批次已消费的事件 sequence 范围，用于区分真实丢失与 Collector 自身噪声/采样跳过。");
     data.AddUtf8("sampling", sampling);
     data.AddUtf8("loss", sequenceGapObserved && !lost ? "sequence-gap" : loss);
+    data.AddUtf8(
+        "lossDiagnostic",
+        lost ? "driver-drop-counter" : (sequenceGapObserved ? "sequence-gap-estimate" : "none"));
     data.AddUnsigned("eligibleEvents", counters.eligibleEvents);
     data.AddUtf8("schema", KSWORD_SANDBOX_EVENT_SCHEMA_NAME);
     data.AddUtf8("producer", "r0collector");
@@ -2734,9 +2962,18 @@ std::string BuildReadEventsBatchData(
     data.AddBool("lossObserved", lost || sequenceGapObserved);
     data.AddBool("backpressure", backpressure);
     data.AddBool("backpressureObserved", backpressure);
+    data.AddUtf8("backpressureSeverity", backpressureSeverity);
     data.AddUtf8(
         "backpressureReason",
         lost ? "events-dropped" : (cappedByMaxEvents ? "requested-max-events-reached" : (outputBufferFull ? "output-buffer-full" : (sequenceGapObserved ? "sequence-gap-without-drop-counter" : "none"))));
+    data.AddUtf8(
+        "backpressureDiagnostics",
+        "lost counter, sequence gap estimate, requested max-events cap, and output-buffer-full are reported independently");
+    data.AddWide(
+        "zhBackpressureHint",
+        backpressure
+            ? L"本批次出现丢失、读取上限或输出缓冲区压力；请查看 lostCount、sequenceGapEstimate、requestedMaxEvents 和 highWatermark。"
+            : L"本批次未观察到 R0 队列背压或丢失迹象。");
     data.AddBool("cappedByMaxEvents", cappedByMaxEvents);
     data.AddBool("outputBufferFull", outputBufferFull);
     data.AddUnsigned("flags", reply.Flags);
@@ -2781,6 +3018,8 @@ std::string BuildDriverEventData(
     data.AddUtf8("actorRole", attribution.actorRole);
     data.AddUtf8("subjectRole", attribution.subjectRole);
     data.AddUtf8("processIdSource", attribution.processIdSource);
+    AddConcreteEventSequenceSemantics(data, header.Sequence);
+    AddDriverNoiseClassificationFields(data, attribution);
     AddTypedReportCompatibilityData(header, payload, payloadBytes, &data);
     data.AddUtf8("collectorNoisePolicy", attribution.collectorNoisePolicy);
     data.AddBool("noise", attribution.selfNoise);
@@ -2818,7 +3057,6 @@ std::string BuildDriverEventData(
     data.AddUtf8("flagsHex", HexUnsignedLongLong(header.Flags, 8));
     AddDriverEventFlagData(header, &data);
     AddDriverEventCommonMetadata(header, &data);
-    data.AddUnsigned("sequence", header.Sequence);
     data.AddSigned("timestampQpc", header.TimestampQpc.QuadPart);
     data.AddUnsigned("driverProcessId", header.ProcessId);
     data.AddUnsigned("driverThreadId", header.ThreadId);

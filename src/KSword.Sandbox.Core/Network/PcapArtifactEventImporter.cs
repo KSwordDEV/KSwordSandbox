@@ -264,6 +264,7 @@ public sealed class PcapArtifactEventImporter
         var events = new List<SandboxEvent>();
         var flows = new Dictionary<string, FlowSummary>(StringComparer.OrdinalIgnoreCase);
         var protocols = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var ipFamilies = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var protocolEvents = 0;
         var parsedPackets = 0;
         var bytes = 0L;
@@ -278,6 +279,7 @@ public sealed class PcapArtifactEventImporter
 
             parsedPackets++;
             protocols.Add(decoded.TransportProtocol.ToLowerInvariant());
+            ipFamilies.Add(decoded.IpFamily);
             var key = decoded.FlowKey;
             if (!flows.TryGetValue(key, out var flow))
             {
@@ -320,6 +322,7 @@ public sealed class PcapArtifactEventImporter
             ["byteCount"] = bytes.ToString(CultureInfo.InvariantCulture),
             ["protocol"] = string.Join(",", protocols.OrderBy(protocol => protocol, StringComparer.OrdinalIgnoreCase)),
             ["protocols"] = string.Join(",", protocols.OrderBy(protocol => protocol, StringComparer.OrdinalIgnoreCase)),
+            ["ipFamilies"] = string.Join(",", ipFamilies.OrderBy(value => value, StringComparer.OrdinalIgnoreCase)),
             ["format"] = Path.GetExtension(path).Equals(".pcapng", StringComparison.OrdinalIgnoreCase) ? "pcapng" : "pcap"
         };
         NetworkTelemetrySchema.AddArtifactData(summaryData, source);
@@ -498,12 +501,21 @@ public sealed class PcapArtifactEventImporter
             offset = 18;
         }
 
-        if (etherType != 0x0800 || frame.Length < offset + 20)
+        if (etherType == 0x0800 && frame.Length >= offset + 20)
         {
-            return null;
+            return TryDecodeIpv4Packet(packet.Timestamp, frame[offset..]);
         }
 
-        var ip = frame[offset..];
+        if (etherType == 0x86DD && frame.Length >= offset + 40)
+        {
+            return TryDecodeIpv6Packet(packet.Timestamp, frame[offset..]);
+        }
+
+        return null;
+    }
+
+    private static DecodedPacket? TryDecodeIpv4Packet(DateTimeOffset timestamp, ReadOnlySpan<byte> ip)
+    {
         var version = ip[0] >> 4;
         var ihl = (ip[0] & 0x0F) * 4;
         if (version != 4 || ihl < 20 || ip.Length < ihl)
@@ -521,7 +533,90 @@ public sealed class PcapArtifactEventImporter
             return null;
         }
 
-        var transport = ip.Slice(ihl, availableLength - ihl);
+        return TryDecodeTransport(
+            timestamp,
+            sourceIp,
+            destinationIp,
+            protocol,
+            ip.Slice(ihl, availableLength - ihl));
+    }
+
+    private static DecodedPacket? TryDecodeIpv6Packet(DateTimeOffset timestamp, ReadOnlySpan<byte> ip)
+    {
+        var version = ip[0] >> 4;
+        if (version != 6 || ip.Length < 40)
+        {
+            return null;
+        }
+
+        var payloadLength = BinaryPrimitives.ReadUInt16BigEndian(ip.Slice(4, 2));
+        var availableLength = Math.Min(ip.Length, 40 + payloadLength);
+        if (availableLength < 40)
+        {
+            return null;
+        }
+
+        var protocol = ip[6];
+        var transportOffset = 40;
+        var payloadEnd = availableLength;
+        while (transportOffset < payloadEnd && IsIpv6ExtensionHeader(protocol))
+        {
+            if (protocol == 44)
+            {
+                if (transportOffset + 8 > payloadEnd)
+                {
+                    return null;
+                }
+
+                protocol = ip[transportOffset];
+                transportOffset += 8;
+                continue;
+            }
+
+            if (transportOffset + 2 > payloadEnd)
+            {
+                return null;
+            }
+
+            var extensionLength = protocol == 51
+                ? (ip[transportOffset + 1] + 2) * 4
+                : (ip[transportOffset + 1] + 1) * 8;
+            if (extensionLength <= 0 || transportOffset + extensionLength > payloadEnd)
+            {
+                return null;
+            }
+
+            protocol = ip[transportOffset];
+            transportOffset += extensionLength;
+        }
+
+        if (transportOffset >= payloadEnd)
+        {
+            return null;
+        }
+
+        var sourceIp = new IPAddress(ip.Slice(8, 16)).ToString();
+        var destinationIp = new IPAddress(ip.Slice(24, 16)).ToString();
+        return TryDecodeTransport(
+            timestamp,
+            sourceIp,
+            destinationIp,
+            protocol,
+            ip.Slice(transportOffset, payloadEnd - transportOffset));
+    }
+
+    private static bool IsIpv6ExtensionHeader(byte nextHeader)
+    {
+        return nextHeader is 0 or 43 or 44 or 51 or 60 or 135;
+    }
+
+    private static DecodedPacket? TryDecodeTransport(
+        DateTimeOffset timestamp,
+        string sourceIp,
+        string destinationIp,
+        byte protocol,
+        ReadOnlySpan<byte> transport)
+    {
         if (protocol == 6 && transport.Length >= 20)
         {
             var sourcePort = BinaryPrimitives.ReadUInt16BigEndian(transport.Slice(0, 2));
@@ -533,7 +628,7 @@ public sealed class PcapArtifactEventImporter
             }
 
             return new DecodedPacket(
-                packet.Timestamp,
+                timestamp,
                 sourceIp,
                 destinationIp,
                 sourcePort,
@@ -547,7 +642,7 @@ public sealed class PcapArtifactEventImporter
             var sourcePort = BinaryPrimitives.ReadUInt16BigEndian(transport.Slice(0, 2));
             var destinationPort = BinaryPrimitives.ReadUInt16BigEndian(transport.Slice(2, 2));
             return new DecodedPacket(
-                packet.Timestamp,
+                timestamp,
                 sourceIp,
                 destinationIp,
                 sourcePort,
@@ -886,7 +981,12 @@ public sealed class PcapArtifactEventImporter
         string TransportProtocol,
         byte[] Payload)
     {
-        public string FlowKey => $"{TransportProtocol}|{SourceIp}:{SourcePort}|{DestinationIp}:{DestinationPort}";
+        public string IpFamily => SourceIp.Contains(':', StringComparison.Ordinal) ||
+            DestinationIp.Contains(':', StringComparison.Ordinal)
+                ? "ipv6"
+                : "ipv4";
+
+        public string FlowKey => $"{TransportProtocol}|{NetworkTelemetrySchema.Endpoint(SourceIp, SourcePort)}|{NetworkTelemetrySchema.Endpoint(DestinationIp, DestinationPort)}";
 
         public Dictionary<string, string> BaseData(
             Dictionary<string, string>? extra = null,
@@ -895,6 +995,7 @@ public sealed class PcapArtifactEventImporter
         {
             var merged = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
             {
+                ["ipFamily"] = IpFamily,
                 ["payloadBytes"] = Payload.Length.ToString()
             };
             if (extra is not null)
@@ -928,9 +1029,12 @@ public sealed class PcapArtifactEventImporter
             DestinationIp = packet.DestinationIp;
             DestinationPort = packet.DestinationPort;
             FirstSeenUtc = packet.Timestamp;
+            IpFamily = packet.IpFamily;
         }
 
         public string Protocol { get; }
+
+        public string IpFamily { get; }
 
         public string SourceIp { get; }
 
@@ -977,6 +1081,7 @@ public sealed class PcapArtifactEventImporter
                 source,
                 new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
                 {
+                    ["ipFamily"] = IpFamily,
                     ["packetCount"] = PacketCount.ToString(CultureInfo.InvariantCulture),
                     ["byteCount"] = PayloadBytes.ToString(CultureInfo.InvariantCulture),
                     ["payloadBytes"] = PayloadBytes.ToString(CultureInfo.InvariantCulture),

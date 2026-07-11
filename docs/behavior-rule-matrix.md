@@ -3,10 +3,11 @@
 This document describes the behavior rules in `rules/behavior-rules.json`.
 The matrix is intentionally conservative: rules classify normalized sandbox
 events for reporting, but they do not by themselves prove malicious intent.
-The 2026-07-12 release-facing behavior expansion raises coverage to 439
-rules. It adds 38 runtime and packet-derived behavior rules across
-persistence, process injection, lateral movement, anti-sandbox checks,
-download-execute chains, and DNS/HTTP/TLS/PCAP triage. These rules are inspired
+The 2026-07-12 release-facing behavior expansion raises coverage to 458
+rules. It adds the original 38 runtime and packet-derived behavior rules plus
+19 supplemental high-signal rules across persistence, process injection,
+lateral movement, download-execute, credential/exfil staging, and
+DNS/HTTP/TLS/PCAP triage. These rules are inspired
 by public detection families such as SigmaHQ, Elastic detection rules, Splunk
 Security Content, and MITRE ATT&CK technique semantics, but the KSword rules are
 new sandbox predicates and do not copy upstream rule text. The previous
@@ -234,11 +235,11 @@ future parser rows.
 
 ## 2026-07-12 release-facing behavior expansion
 
-This pass documents 38 newly added behavior rules. The coverage is organized for
-release notes and analyst triage rather than as a copy of any upstream rule set:
-SigmaHQ, Elastic detection rules, Splunk Security Content, and MITRE ATT&CK are
-used as inspiration families for technique vocabulary, field hygiene, and
-false-positive thinking only.
+This pass documents the release-facing rule expansion. The coverage is
+organized for release notes and analyst triage rather than as a copy of any
+upstream rule set: SigmaHQ, Elastic detection rules, Splunk Security Content,
+and MITRE ATT&CK are used as inspiration families for technique vocabulary,
+field hygiene, and false-positive thinking only.
 
 | Release area | New rule IDs | Primary mapping |
 | --- | --- | --- |
@@ -248,6 +249,22 @@ false-positive thinking only.
 | Anti-sandbox | `anti-sandbox-cpuid-hypervisor-check`, `anti-sandbox-vm-registry-key-query`, `anti-sandbox-analysis-tool-process-query`, `anti-sandbox-long-sleep-or-time-skew` | Hypervisor/system checks, VM registry keys, analysis-tool enumeration, and timing evasion. |
 | Download-execute | `download-execute-certutil-urlcache-split`, `download-execute-bitsadmin-transfer`, `download-execute-powershell-webclient-to-user-writable`, `download-execute-mshta-or-regsvr32-remote-scriptlet`, `download-execute-rundll32-url-dll-entrypoint` | Tool transfer and LOLBin/proxy-execution download shapes. |
 | DNS/HTTP/TLS/PCAP | `pcap-dns-txt-long-label-exfil`, `pcap-dns-nxdomain-burst-dga`, `pcap-http-executable-download-magic`, `pcap-http-post-beacon-small-periodic`, `pcap-http-host-header-ip-or-suspicious-tld`, `pcap-tls-self-signed-or-invalid-cert`, `pcap-tls-sni-ip-literal-or-dga`, `pcap-tls-no-sni-rare-ja3`, `network-pcap-smb-session-setup-admin-share` | Packet-derived exfil, DGA, executable transfer, HTTP beaconing, suspicious host/SNI, TLS certificate/JA3, and SMB admin-share evidence. |
+
+## 2026-07-12 supplemental open-source-inspired batch
+
+The supplemental batch adds 19 rules and raises the rule count from 439 to
+458. It uses only KSwordSandbox event types and fields already present in the
+guest, R0/API, network, and PCAP rule model. It does not copy upstream rule
+text, SPL, KQL, EQL, Sigma YAML, or vendor test samples.
+
+| Release area | New rule IDs | Primary mapping |
+| --- | --- | --- |
+| Scheduled-task and registry persistence | `scheduled-task-onlogon-user-writable-command`, `scheduled-task-runlevel-highest-user-writable`, `persistence-app-paths-user-writable-hijack`, `persistence-netsh-helper-dll-registry` | `T1053.005` scheduled tasks and broad `T1546` event-triggered registry persistence when the payload path is user-writable or DLL-based. |
+| Injection and direct-syscall evidence | `injection-direct-syscall-or-ntdll-unhook`, `injection-process-doppelganging-transaction-primitive`, `injection-sensitive-process-virtual-memory-write` | `T1055`, `T1055.002`; API/R0/process rows must carry direct-syscall, NTDLL-unhook, transaction-section, or sensitive-target memory-write evidence. |
+| Lateral movement over file shares and services | `lateral-admin-share-binary-copy-command`, `lateral-remote-service-admin-share-binpath`, `lateral-powershell-copyitem-admin-share`, `pcap-smb-svcctl-named-pipe-executable-service` | `T1570`, `T1569.002`; requires admin-share copy, remote service ImagePath, or svcctl named-pipe metadata rather than port-only evidence. |
+| Download-execute | `download-execute-powershell-iwr-startprocess-chain`, `download-execute-bits-notifycmdline-payload` | `T1105`, `T1197`; requires web-transfer syntax, user-writable output or BITS notify command, and execution-oriented command context. |
+| Credential access and exfil staging | `credential-browser-database-copy-command`, `credential-lsass-minidump-api-call`, `credential-file-archive-staging-command`, `http-large-authenticated-upload` | `T1555.003`, `T1003.001`, `T1552.001`, `T1041`; focuses on browser DB copy commands, LSASS dump APIs, credential-themed archive staging, and authenticated large HTTP uploads. |
+| DNS/TLS network detections | `dns-base64-label-exfil-high-entropy`, `tls-risky-new-domain-or-c2-ja3` | `T1048.003`, `T1071.001`; requires long/high-entropy DNS labels or TLS reputation/JA3/new-domain metadata. |
 
 The release-facing mapping keeps static and reputation-only signals out of the
 primary runtime behavior bucket. High-risk findings still require concrete event

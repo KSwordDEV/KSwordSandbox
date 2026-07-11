@@ -20,6 +20,19 @@ Use `scripts/package-portable.ps1` to stage a local package tree and optionally
 create a `.zip` under an output directory outside the repository. The script is
 local-only and intentionally has no push/publish step.
 
+## 便携包成熟度约束 / Portable package contract
+
+- `RuntimePublishRoot` 必须在仓库外，例如 `D:\Temp\KSwordSandbox\publish`。
+  runtime 包只从该目录复制已发布的 Web/guest/tool payload；仓库内
+  `bin/`、`obj/`、`x64/` 二进制会被拒绝。
+- `package-manifest.generated.json` 会写入 staged package 根目录，包含版本、
+  git revision/branch、dirty-state preview、payload 文件列表、`sizeBytes`、
+  `sha256`、可选 runtime payload 跳过原因和安全合约。
+- readiness/package 脚本不启动、不还原、不停止 VM，不签名 driver，不调用
+  `CSignTool.exe`，也不执行 `git push` 或发布网络动作。
+- manifest 和脚本现在显式排除截图、PCAP/PCAPNG、JSONL 事件流、dump、
+  SQLite/DB、HAR/trace、VM 状态、样本、报告、secret 和签名材料。
+
 Before a review handoff or source package dry run, use the combined lightweight
 gate from the repository root:
 

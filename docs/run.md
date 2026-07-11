@@ -323,6 +323,12 @@ reports, samples, payload binaries, VM disks, or local secrets.
 
 - `install.ps1`/`run.ps1` 位于包根目录，`scripts\run.ps1` 只是等价 wrapper。
 - `app\host-web` 来自外部发布目录，不从仓库 `bin/`、`obj/`、`x64/` 复制。
+- `packaging\runtime-package.manifest.json` 和 `packaging\README.md` 会随 runtime
+  包一起进入包内，便于审阅 portable layout 与禁止项；真实发布 payload 的
+  来源仍只允许是仓库外 `RuntimePublishRoot`。
+- 包根的 `package-manifest.generated.json` 是本次 staging 的审计索引，包含
+  文件 hash/size、git revision、runtime publish root、跳过的可选 payload
+  和安全合约。排障时先看这个文件，再看 `Status`/`CheckEnvironment`。
 - 本机 `sandbox.local.json`、guest password、VT key、样本、报告和 VM 输出继续保存在 runtime root
   或 Windows 环境/DPAPI 中，不进入 zip。
 - 默认 WebUI 不执行 Live；Live Hyper-V 仍必须在 WebUI/API 或 CLI 中显式选择。

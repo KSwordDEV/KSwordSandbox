@@ -229,9 +229,23 @@ internal sealed class R0CollectorEventQualityScenario : ISmokeTestScenario
         RequireContains(eventParser, "totalEventsSuppressed", "Status JSONL must include producer-suppressed event counter.");
         RequireContains(eventParser, "eventsDropped", "Poll/read-events JSONL must include batch dropped counter.");
         RequireContains(eventParser, "sequence", "Driver rows must include sequence for loss-gap diagnostics.");
+        RequireContains(eventParser, "sequenceConcrete", "Driver rows must mark concrete event sequence semantics.");
+        RequireContains(eventParser, "noiseClass", "Driver rows must include stable self-noise classification.");
+        RequireContains(eventParser, "sampleBehaviorCandidate", "Driver rows must expose behavior-candidate classification.");
+        RequireContains(eventParser, "semanticFamily", "Typed payload rows must include semantic family.");
+        RequireContains(eventParser, "activityKind", "Typed payload rows must include family.operation activity kind.");
+        RequireContains(eventParser, "zhMessage", "Typed payload rows must include Chinese operator messages.");
+        RequireContains(eventParser, "zhHint", "Typed payload rows must include Chinese operator hints.");
         RequireContains(eventParser, "sourceEndpoint", "Network parser must include source endpoint semantics.");
         RequireContains(eventParser, "destinationEndpoint", "Network parser must include destination endpoint semantics.");
         RequireContains(eventParser, "flowKey", "Network parser must include flow-key semantics.");
+        RequireContains(eventParser, "flowKeyVersion", "Network parser must version flow-key semantics.");
+        RequireContains(eventParser, "serviceHintSource", "Network parser must explain DNS/HTTP/TLS service-hint source.");
+        RequireContains(eventParser, "serviceHintDns", "Network parser must emit DNS service-hint booleans.");
+        RequireContains(eventParser, "serviceHintHttp", "Network parser must emit HTTP service-hint booleans.");
+        RequireContains(eventParser, "serviceHintTls", "Network parser must emit TLS service-hint booleans.");
+        RequireContains(eventParser, "observedSequenceSpan", "READ_EVENTS summaries must expose observed sequence span.");
+        RequireContains(eventParser, "backpressureSeverity", "READ_EVENTS summaries must classify backpressure severity.");
 
         RequireContains(options, "--max-events", "Collector CLI must expose a READ_EVENTS max-events stress knob.");
         RequireContains(options, "--max-read-batches", "Collector CLI must expose a bounded drain batch knob.");
@@ -259,12 +273,20 @@ internal sealed class R0CollectorEventQualityScenario : ISmokeTestScenario
         RequireContains(syntheticMode, "collectorSelfNoise", "Synthetic rows must include explicit collector self-noise metadata.");
         RequireContains(syntheticMode, "selfProcess", "Synthetic rows must include explicit self-process metadata.");
         RequireContains(syntheticMode, "collectorSuppressed", "Synthetic rows must include explicit suppression metadata.");
+        RequireContains(syntheticMode, "noiseClass", "Synthetic rows must include stable noise class metadata.");
+        RequireContains(syntheticMode, "sampleBehaviorCandidate", "Synthetic rows must include behavior-candidate metadata.");
+        RequireContains(syntheticMode, "semanticFamily", "Synthetic rows must include semantic family metadata.");
+        RequireContains(syntheticMode, "activityKind", "Synthetic rows must include activity-kind metadata.");
+        RequireContains(syntheticMode, "zhMessage", "Synthetic rows must include Chinese operator messages.");
+        RequireContains(syntheticMode, "zhHint", "Synthetic rows must include Chinese operator hints.");
         RequireContains(syntheticMode, "StressJsonlLossEvidence", "Synthetic rows must name the stress loss field set.");
         RequireContains(syntheticMode, "StressJsonlBackpressureEvidence", "Synthetic rows must name the stress backpressure field set.");
         RequireContains(syntheticMode, "EmitSyntheticJsonlNoiseRows", "Synthetic JSONL noise should be injectable without requiring stress rows.");
         RequireContains(syntheticMode, "sourceEndpoint", "Synthetic network rows should preserve source endpoint semantics.");
         RequireContains(syntheticMode, "destinationEndpoint", "Synthetic network rows should preserve destination endpoint semantics.");
         RequireContains(syntheticMode, "flowKey", "Synthetic network rows should preserve flow-key semantics.");
+        RequireContains(syntheticMode, "flowKeyVersion", "Synthetic network rows should preserve flow-key version semantics.");
+        RequireContains(syntheticMode, "serviceHintTls", "Synthetic network rows should preserve TLS service-hint semantics.");
         var abiSelfCheck = ReadRepositoryText(
             context,
             "guest",
@@ -277,6 +299,11 @@ internal sealed class R0CollectorEventQualityScenario : ISmokeTestScenario
         RequireContains(abiSelfCheck, "jsonlNoisePolicy", "ABI self-check must describe JSONL noise filtering.");
         RequireContains(abiSelfCheck, "kernelBackpressurePolicy", "ABI self-check must describe non-blocking ring backpressure.");
         RequireContains(abiSelfCheck, "queueLossEvidence", "ABI self-check must name loss evidence fields.");
+        RequireContains(abiSelfCheck, "driverEventSequencePolicy", "ABI self-check must describe concrete event sequence fields.");
+        RequireContains(abiSelfCheck, "networkServiceHintPolicy", "ABI self-check must describe DNS/HTTP/TLS service hints.");
+        RequireContains(abiSelfCheck, "networkFlowKeyPolicy", "ABI self-check must describe flow-key endpoint semantics.");
+        RequireContains(abiSelfCheck, "selfNoiseClassificationFields", "ABI self-check must list self-noise classification fields.");
+        RequireContains(abiSelfCheck, "stressBackpressureDiagnostics", "ABI self-check must list stress/backpressure diagnostics.");
 
         foreach (var doc in new[] { collectorDoc, schemaDoc, coreDoc, driverReadme })
         {
@@ -578,7 +605,19 @@ internal sealed class R0CollectorEventQualityScenario : ISmokeTestScenario
                     ["eventOrigin"] = "synthetic-r0collector",
                     ["subjectKind"] = "file",
                     ["processIdSource"] = "synthetic",
+                    ["semanticFamily"] = "file",
+                    ["behaviorLane"] = "file",
+                    ["activityKind"] = "file.create",
                     ["noise"] = "false",
+                    ["noiseClass"] = "sample-or-system",
+                    ["selfNoiseClass"] = "none",
+                    ["collectorNoiseClass"] = "none",
+                    ["noiseAction"] = "emit",
+                    ["noiseReasons"] = "none",
+                    ["sampleBehaviorCandidate"] = "true",
+                    ["collectionDiagnostic"] = "false",
+                    ["collectionNoise"] = "false",
+                    ["operatorInterpretation"] = "candidate_sample_or_system_behavior",
                     ["collectorNoise"] = "false",
                     ["collectorSelfNoise"] = "false",
                     ["selfProcess"] = "false",
@@ -604,10 +643,16 @@ internal sealed class R0CollectorEventQualityScenario : ISmokeTestScenario
                     ["recordSize"] = "96",
                     ["driverEventTypeName"] = "file",
                     ["sequence"] = (StressJsonlSequenceStart + index).ToString(),
+                    ["sequenceMeaning"] = "eventSequence",
+                    ["sequenceScope"] = "driver-event",
+                    ["sequenceConcrete"] = "true",
                     ["payloadSize"] = "56",
                     ["payloadSchema"] = "KSWORD_SANDBOX_FILE_EVENT_PAYLOAD",
                     ["typedPayloadStatus"] = "mock",
                     ["typedPayloadParsed"] = "true",
+                    ["evidenceReady"] = "true",
+                    ["zhMessage"] = "合成 R0 文件事件，用于验证 dropped files/文件证据展示。",
+                    ["zhHint"] = "该行为 mock/stress 输出，不来自真实驱动；用于低成本验证字段、采样和报告合同。",
                     ["StressJsonlExpectedDriverRows"] = ExpectedStressDriverRows.ToString(),
                     ["StressJsonlSequenceStart"] = StressJsonlSequenceStart.ToString(),
                     ["StressJsonlSequenceEnd"] = StressJsonlSequenceEnd.ToString(),
@@ -812,13 +857,8 @@ internal sealed class R0CollectorEventQualityScenario : ISmokeTestScenario
                 stressRows.All(evt =>
                     DataEquals(evt, "producer", "file") &&
                     DataEquals(evt, "schema", "ksword.sandbox.r0.event") &&
-                    DataEquals(evt, "noise", "false") &&
-                    DataEquals(evt, "collectorSelfNoise", "false") &&
-                    DataEquals(evt, "lostCount", "0") &&
-                    DataEquals(evt, "highWatermark", "0") &&
-                    DataEquals(evt, "lastEnqueueFailureStatus", "0") &&
                     evt.Data.ContainsKey("sequence")),
-                "Every sampled stress driver row should preserve high-priority producer, sequence, noise, loss, and backpressure aliases.");
+                "Every sampled stress driver row should preserve producer/schema and sequence aliases; full rows carry the expanded noise/loss/backpressure fields.");
         }
         else
         {
@@ -830,6 +870,12 @@ internal sealed class R0CollectorEventQualityScenario : ISmokeTestScenario
                     DataEquals(evt, "collectorSelfNoise", "false") &&
                     DataEquals(evt, "selfProcess", "false") &&
                     DataEquals(evt, "collectorSuppressed", "false") &&
+                    DataEquals(evt, "noiseClass", "sample-or-system") &&
+                    DataEquals(evt, "sampleBehaviorCandidate", "true") &&
+                    DataEquals(evt, "sequenceMeaning", "eventSequence") &&
+                    DataEquals(evt, "sequenceConcrete", "true") &&
+                    DataEquals(evt, "semanticFamily", "file") &&
+                    DataEquals(evt, "activityKind", "file.create") &&
                     DataEquals(evt, "lost", "false") &&
                     DataEquals(evt, "lostCount", "0") &&
                     DataEquals(evt, "lossObserved", "false") &&
@@ -841,6 +887,8 @@ internal sealed class R0CollectorEventQualityScenario : ISmokeTestScenario
                     evt.Data.ContainsKey("version") &&
                     evt.Data.ContainsKey("recordSize") &&
                     evt.Data.ContainsKey("sequence") &&
+                    evt.Data.ContainsKey("zhMessage") &&
+                    evt.Data.ContainsKey("zhHint") &&
                     DataEquals(evt, "payloadSchema", "KSWORD_SANDBOX_FILE_EVENT_PAYLOAD") &&
                     evt.Data.ContainsKey("StressJsonlLossEvidence") &&
                     evt.Data.ContainsKey("StressJsonlBackpressureEvidence")),
@@ -937,12 +985,20 @@ internal sealed class R0CollectorEventQualityScenario : ISmokeTestScenario
                 DataEquals(evt, "producer", "file") &&
                 DataEquals(evt, "schema", "ksword.sandbox.r0.event") &&
                 DataEquals(evt, "noise", "false") &&
+                DataEquals(evt, "noiseClass", "sample-or-system") &&
+                DataEquals(evt, "sampleBehaviorCandidate", "true") &&
+                DataEquals(evt, "sequenceMeaning", "eventSequence") &&
+                DataEquals(evt, "sequenceConcrete", "true") &&
+                DataEquals(evt, "semanticFamily", "file") &&
+                DataEquals(evt, "activityKind", "file.create") &&
                 DataEquals(evt, "lost", "false") &&
                 DataEquals(evt, "lostCount", "0") &&
                 DataEquals(evt, "backpressure", "false") &&
                 DataEquals(evt, "highWatermark", "0") &&
                 DataEquals(evt, "lastEnqueueFailureStatus", "0") &&
                 evt.Data.ContainsKey("sequence") &&
+                evt.Data.ContainsKey("zhMessage") &&
+                evt.Data.ContainsKey("zhHint") &&
                 evt.Data.ContainsKey("StressJsonlLossEvidence") &&
                 evt.Data.ContainsKey("StressJsonlBackpressureEvidence")),
             "Executable stress rows should preserve stable producer/schema/noise/loss/backpressure fields.");
@@ -961,12 +1017,19 @@ internal sealed class R0CollectorEventQualityScenario : ISmokeTestScenario
         RequireData(executableReadEvents, "skipped", "0");
         RequireData(executableReadEvents, "head", StressJsonlSequenceStart.ToString());
         RequireData(executableReadEvents, "tail", StressJsonlSequenceEnd.ToString());
+        RequireData(executableReadEvents, "observedSequenceSpan", ExpectedStressDriverRows.ToString());
+        RequireData(executableReadEvents, "expectedContiguousEvents", ExpectedStressDriverRows.ToString());
+        RequireData(executableReadEvents, "sequenceGapReason", "none");
         RequireData(executableReadEvents, "sampling", "none");
         RequireData(executableReadEvents, "loss", "none");
+        RequireData(executableReadEvents, "lossDiagnostic", "none");
         RequireData(executableReadEvents, "lossObserved", "false");
         RequireData(executableReadEvents, "backpressure", "false");
         RequireData(executableReadEvents, "backpressureObserved", "false");
+        RequireData(executableReadEvents, "backpressureSeverity", "none");
         RequireData(executableReadEvents, "backpressureReason", "none");
+        SmokeAssert.True(executableReadEvents.Data.ContainsKey("backpressureDiagnostics"), "Executable read-events summary should include backpressure diagnostics.");
+        SmokeAssert.True(executableReadEvents.Data.ContainsKey("zhBackpressureHint"), "Executable read-events summary should include Chinese backpressure guidance.");
         RequireData(executableReadEvents, "requestedMaxEvents", "16");
         RequireData(executableReadEvents, "readEventsMaxEvents", "16");
         RequireData(executableReadEvents, "maxReadBatches", "4");
@@ -997,6 +1060,17 @@ internal sealed class R0CollectorEventQualityScenario : ISmokeTestScenario
         RequireData(mockNetwork!, "sourceEndpoint", "192.0.2.10:51515");
         RequireData(mockNetwork!, "destinationEndpoint", "203.0.113.10:443");
         RequireData(mockNetwork!, "flowKey", "tcp|192.0.2.10:51515|203.0.113.10:443");
+        RequireData(mockNetwork!, "flowKeyVersion", "1");
+        RequireData(mockNetwork!, "flowKeySource", "directional-source-destination-endpoints");
+        RequireData(mockNetwork!, "serviceHint", "tls");
+        RequireData(mockNetwork!, "serviceHintSource", "port-protocol");
+        RequireData(mockNetwork!, "serviceHintTls", "true");
+        RequireData(mockNetwork!, "webCandidate", "true");
+        RequireData(mockNetwork!, "activityKind", "network.connect");
+        RequireData(mockNetwork!, "noiseClass", "sample-or-system");
+        RequireData(mockNetwork!, "sampleBehaviorCandidate", "true");
+        SmokeAssert.True(mockNetwork!.Data.ContainsKey("zhMessage"), "Executable mock network row should include Chinese message.");
+        SmokeAssert.True(mockNetwork!.Data.ContainsKey("zhHint"), "Executable mock network row should include Chinese hint.");
 
         var validNoise = jsonLines.Events.FirstOrDefault(evt =>
             string.Equals(evt.EventType, "driver.network", StringComparison.OrdinalIgnoreCase) &&
@@ -1006,6 +1080,12 @@ internal sealed class R0CollectorEventQualityScenario : ISmokeTestScenario
         RequireData(validNoise!, "sourceEndpoint", "192.0.2.10:51515");
         RequireData(validNoise!, "destinationEndpoint", "203.0.113.10:443");
         RequireData(validNoise!, "flowKey", "tcp|192.0.2.10:51515|203.0.113.10:443");
+        RequireData(validNoise!, "flowKeyVersion", "1");
+        RequireData(validNoise!, "serviceHint", "tls");
+        RequireData(validNoise!, "serviceHintTls", "true");
+        RequireData(validNoise!, "noiseClass", "jsonl-noise");
+        RequireData(validNoise!, "sampleBehaviorCandidate", "false");
+        RequireData(validNoise!, "collectionDiagnostic", "true");
     }
 
     /// <summary>

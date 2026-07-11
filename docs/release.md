@@ -40,6 +40,12 @@ portable script copies. Keep exclusions broad enough to block:
 - signed driver binaries and private signing/certificate material;
 - local config, environment files, DPAPI backups, and install state.
 
+Both manifests also carry a `releaseContract` and `stagedMetadata` section.
+These are operator-facing guardrails, not build inputs: they document that
+packaging/readiness must not mutate Hyper-V, sign drivers, call `CSignTool.exe`,
+push, or publish, and they define the generated metadata fields reviewers should
+expect inside each staged package.
+
 ## Pre-release checklist
 
 1. Coordinate with other workers before cutting a package. Do not revert their
@@ -83,7 +89,10 @@ portable script copies. Keep exclusions broad enough to block:
    ```
 
 8. Inspect the generated `package-manifest.generated.json` inside the staged
-   package and verify that no forbidden path or extension was copied.
+   package and verify that no forbidden path or extension was copied. Reviewers
+   should check `fileInventory[].sha256`, `fileInventory[].sizeBytes`,
+   `packageDiagnostics`, `safetyContract`, `runtimePublishRoot`, `gitStatus`,
+   and `manifestRequiredChecks`.
 9. Smoke-test the runtime package on a clean host or VM using only the portable
    package contents and local configuration.
 10. Record hashes and release notes. Push/publish only when a release manager
@@ -206,6 +215,20 @@ The script validates output placement, path traversal, manifest exclusions, and
 high-risk extensions before copying. Runtime package binaries are allowed only
 when they come from the external runtime publish root; source packages remain
 source-only.
+
+Release-manager diagnostics are printed at the end of each package run:
+
+- package kind/version, staging path, generated metadata path, copied file count
+  and payload byte count;
+- skipped optional runtime publish entries, for example when `guest-tools` or
+  `tools/postprocess` has not yet been published into `RuntimePublishRoot`;
+- archive path and SHA-256 when `-StageOnly` is not used;
+- explicit safety line: no VM mutation, no driver signing, no `CSignTool`, no
+  `git push`, and no network publish.
+
+The generated metadata is intended to be committed only as part of a built
+release artifact, never back into the source repository. Keep staged packages
+under `D:\Temp\KSwordSandbox\packages` or another ignored external folder.
 
 Runtime portable packages include both root-level `install.ps1`/`run.ps1` and
 the `scripts/` wrappers (`scripts/run.ps1`, `scripts/install.ps1`,

@@ -184,7 +184,7 @@ internal static class LiveEventsPage
             </section>
             <section>
               <h2 data-zh="虚拟机分析进度" data-en="Runbook progress">虚拟机分析进度</h2>
-              <p class="muted" data-zh="这里同步 durable runbook-progress.json 中的真实 runbook step，只展示安全的步骤状态，不展示命令行；终端 stdout/stderr 仅在完成后的排障展开项中折叠显示。" data-en="This panel mirrors real runbook steps from durable runbook-progress.json and only shows UI-safe status, not command lines, stdout, or stderr; terminal stdout/stderr stay collapsed in troubleshooting details after completion.">这里同步 durable runbook-progress.json 中的真实 runbook step，只展示安全的步骤状态，不展示命令行；终端 stdout/stderr 仅在完成后的排障展开项中折叠显示。</p>
+              <p class="muted" data-zh="这里优先连接 /api/jobs/{jobId}/progress/stream 真实进度流，同步 durable runbook-progress.json 中的真实 runbook step；只展示安全的步骤状态，不展示命令行，SSE 不可用时自动退回轮询。" data-en="This panel prefers the real /api/jobs/{jobId}/progress/stream feed and mirrors real runbook steps from durable runbook-progress.json; it shows UI-safe status only, not command lines, and falls back to polling when SSE is unavailable.">这里优先连接 /api/jobs/{jobId}/progress/stream 真实进度流，同步 durable runbook-progress.json 中的真实 runbook step；只展示安全的步骤状态，不展示命令行，SSE 不可用时自动退回轮询。</p>
               <div id="runbookProgress" class="metric muted" data-copy="等待执行进度 / runbook progress pending" data-zh="等待主界面启动分析。" data-en="Waiting for dashboard analysis.">等待主界面启动分析。</div>
               <div id="backgroundStatus" class="metric muted" data-copy="后台执行等待启动 / background execution pending" data-zh="后台执行状态：等待启动。" data-en="Background execution: waiting.">后台执行状态：等待启动。</div>
             </section>
@@ -228,10 +228,14 @@ internal static class LiveEventsPage
             let eventOffset = 0;
             let sourceSignature = '';
             let eventSource = null;
+            let progressEventSource = null;
             let pollTimer = null;
             let progressTimer = null;
             let backgroundTimer = null;
             let jobTimer = null;
+            let progressStreamFallbackTimer = null;
+            let progressStreamTerminal = false;
+            let progressStreamConnected = false;
             let lastProgressSnapshot = null;
             let lastBackgroundSnapshot = null;
             let lastVirusTotalResult = null;
@@ -339,10 +343,98 @@ internal static class LiveEventsPage
               }
             }
 
+            function startRunbookProgressStream() {
+              stopRunbookProgressPolling();
+              stopBackgroundStatusPolling();
+              stopRunbookProgressStream();
+              progressStreamTerminal = false;
+              progressStreamConnected = false;
+
+              if (!window.EventSource) {
+                startRunbookProgressPollingFallback(t('浏览器不支持进度流，已切换为安全轮询。', 'Browser progress stream support unavailable; switched to safe polling.'));
+                return;
+              }
+
+              try {
+                progressEventSource = new EventSource(`/api/jobs/${encodeURIComponent(jobId)}/progress/stream?heartbeatMs=1500&maxSeconds=1800`);
+                progressStreamFallbackTimer = setTimeout(() => {
+                  if (!progressStreamConnected && !progressStreamTerminal) {
+                    stopRunbookProgressStream();
+                    startRunbookProgressPollingFallback(t('进度流暂未返回快照，已切换为安全轮询。', 'Progress stream did not return a snapshot yet; switched to safe polling.'));
+                  }
+                }, 6000);
+
+                progressEventSource.onopen = () => {
+                  progressStreamConnected = true;
+                  clearProgressStreamFallbackTimer();
+                  stopRunbookProgressPolling();
+                  stopBackgroundStatusPolling();
+                };
+
+                ['snapshot', 'heartbeat', 'final', 'failed', 'timeout'].forEach(eventName => {
+                  progressEventSource.addEventListener(eventName, ev => {
+                    renderProgressStreamPayload(JSON.parse(ev.data), eventName);
+                  });
+                });
+
+                progressEventSource.onerror = () => {
+                  if (progressStreamTerminal) { return; }
+                  stopRunbookProgressStream();
+                  startRunbookProgressPollingFallback(t('进度 SSE 不可用，已切换为轮询。', 'Progress SSE unavailable; switched to polling.'));
+                };
+              } catch {
+                startRunbookProgressPollingFallback(t('进度流初始化失败，已切换为安全轮询。', 'Progress stream initialization failed; switched to safe polling.'));
+              }
+            }
+
+            function renderProgressStreamPayload(payload, eventName) {
+              if (!payload) { return; }
+              progressStreamConnected = true;
+              clearProgressStreamFallbackTimer();
+              if (payload.progress) {
+                renderRunbookProgress(payload.progress);
+              }
+              if (payload.background) {
+                if (payload.background.job) {
+                  latestJobSnapshot = normalizeJobSnapshot(payload.background.job);
+                }
+                renderBackgroundStatus(payload.background);
+              }
+
+              const terminal = Boolean(payload.terminal) || ['final', 'failed'].includes(eventName);
+              if (terminal) {
+                progressStreamTerminal = true;
+                stopRunbookProgressStream();
+                stopRunbookProgressPolling();
+                stopBackgroundStatusPolling();
+                refreshArtifactIndex(false).then(renderArtifactPanel).catch(() => renderArtifactPanel());
+                refreshJobSnapshot();
+                return;
+              }
+
+              if (eventName === 'timeout') {
+                stopRunbookProgressStream();
+                setTimeout(startRunbookProgressStream, 1200);
+              }
+            }
+
+            function startRunbookProgressPollingFallback(message) {
+              const target = document.getElementById('backgroundStatus');
+              if (target && message) {
+                target.setAttribute('data-copy', message);
+              }
+              startRunbookProgressPolling();
+              startBackgroundStatusPolling();
+            }
+
             function startRunbookProgressPolling() {
               refreshRunbookProgress();
               if (progressTimer) { clearInterval(progressTimer); }
               progressTimer = setInterval(refreshRunbookProgress, 1500);
+            }
+
+            function stopRunbookProgressPolling() {
+              if (progressTimer) { clearInterval(progressTimer); progressTimer = null; }
             }
 
             async function refreshRunbookProgress() {
@@ -365,6 +457,25 @@ internal static class LiveEventsPage
               refreshBackgroundStatus();
               if (backgroundTimer) { clearInterval(backgroundTimer); }
               backgroundTimer = setInterval(refreshBackgroundStatus, 2000);
+            }
+
+            function stopBackgroundStatusPolling() {
+              if (backgroundTimer) { clearInterval(backgroundTimer); backgroundTimer = null; }
+            }
+
+            function stopRunbookProgressStream() {
+              clearProgressStreamFallbackTimer();
+              if (progressEventSource) {
+                progressEventSource.close();
+                progressEventSource = null;
+              }
+            }
+
+            function clearProgressStreamFallbackTimer() {
+              if (progressStreamFallbackTimer) {
+                clearTimeout(progressStreamFallbackTimer);
+                progressStreamFallbackTimer = null;
+              }
             }
 
             function startJobSnapshotPolling() {
@@ -1724,8 +1835,7 @@ internal static class LiveEventsPage
             renderArtifactPanel();
             refreshVirusTotal();
             startJobSnapshotPolling();
-            startRunbookProgressPolling();
-            startBackgroundStatusPolling();
+            startRunbookProgressStream();
             connectSse();
           </script>
         </body>

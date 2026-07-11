@@ -215,6 +215,26 @@ function Assert-OutputRootOutsideRepository {
     }
 }
 
+# Assert-RuntimePublishRootOutsideRepository prevents runtime payloads from
+# being sourced from repository bin/obj/x64 by accident. Inputs are the repo
+# root and a resolved runtime publish root. Return behavior: throws on unsafe
+# placement, otherwise returns nothing.
+function Assert-RuntimePublishRootOutsideRepository {
+    param(
+        [Parameter(Mandatory)]
+        [string]$RepoRoot,
+
+        [Parameter(Mandatory)]
+        [string]$PublishRoot
+    )
+
+    $repoFull = (Get-FullPathNoRequire -Path $RepoRoot).TrimEnd('\', '/') + [System.IO.Path]::DirectorySeparatorChar
+    $publishFull = (Get-FullPathNoRequire -Path $PublishRoot).TrimEnd('\', '/') + [System.IO.Path]::DirectorySeparatorChar
+    if ($publishFull.StartsWith($repoFull, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "RuntimePublishRoot must be outside the repository. Publish host/guest/tool payloads to D:\Temp\KSwordSandbox\publish or another external folder: $PublishRoot"
+    }
+}
+
 # Assert-PathAllowed applies package-level hard exclusions in addition to manifest globs.
 function Assert-PathAllowed {
     param(
@@ -241,12 +261,18 @@ function Assert-PathAllowed {
         'bin',
         'captures',
         'coverage',
+        'dumps',
+        'jobs',
         'logs',
+        'memory-dumps',
         'obj',
+        'packet-captures',
+        'pcaps',
         'reports',
         'runtime',
         'samples',
         'checkpoints',
+        'screenshots',
         'snapshots',
         'TestResults',
         'vm-state',
@@ -266,29 +292,48 @@ function Assert-PathAllowed {
 
     $fileName = [System.IO.Path]::GetFileName($normalized)
     $extension = [System.IO.Path]::GetExtension($normalized).ToLowerInvariant()
+    if ($fileName -ieq 'CSignTool.exe' -or $fileName -like 'Sign-SandboxDriverWithKsword*.ps1') {
+        throw "Forbidden legacy signing tool path in package: $normalized"
+    }
+
     $blockedAlways = @(
         '.7z',
         '.avhd',
         '.avhdx',
+        '.bin',
         '.bmp',
+        '.cap',
         '.cer',
         '.crt',
         '.csr',
+        '.crash',
+        '.db',
         '.der',
         '.dmp',
         '.doc',
         '.docx',
         '.dpapi',
+        '.dump',
         '.esd',
         '.etl',
         '.evtx',
+        '.gif',
         '.gz',
+        '.har',
+        '.heapsnapshot',
+        '.hprof',
         '.iso',
+        '.jpeg',
+        '.jpg',
+        '.jsonl',
         '.key',
         '.kdbx',
         '.lib',
         '.log',
+        '.mdmp',
+        '.mem',
         '.mrt',
+        '.nettrace',
         '.nvram',
         '.obj',
         '.ova',
@@ -300,10 +345,15 @@ function Assert-PathAllowed {
         '.pdf',
         '.pem',
         '.pfx',
+        '.png',
         '.rar',
+        '.raw',
         '.snk',
+        '.sqlite',
+        '.sqlite3',
         '.sys',
         '.tar',
+        '.trace',
         '.vmcx',
         '.vmgs',
         '.vmrs',
@@ -313,6 +363,8 @@ function Assert-PathAllowed {
         '.vhdset',
         '.vhdx',
         '.wim',
+        '.wer',
+        '.webp',
         '.xls',
         '.xlsx',
         '.zip'
@@ -396,6 +448,78 @@ function Get-GitRevision {
     return 'unknown'
 }
 
+# Get-GitBranch returns the current branch name when git is available.
+function Get-GitBranch {
+    $gitCommand = Get-Command git -ErrorAction SilentlyContinue
+    if ($null -eq $gitCommand) {
+        return 'unknown'
+    }
+
+    try {
+        $branch = @(git -C $RepositoryRoot rev-parse --abbrev-ref HEAD)
+        if ($LASTEXITCODE -eq 0 -and $branch.Count -gt 0 -and -not [string]::IsNullOrWhiteSpace($branch[0])) {
+            return [string]$branch[0]
+        }
+    }
+    catch {
+        return 'unknown'
+    }
+
+    return 'unknown'
+}
+
+# Get-GitStatusSnapshot returns compact dirty-state metadata for generated
+# package provenance. It never changes repository state.
+function Get-GitStatusSnapshot {
+    $gitCommand = Get-Command git -ErrorAction SilentlyContinue
+    if ($null -eq $gitCommand) {
+        return [ordered]@{
+            available   = $false
+            isDirty     = $null
+            changeCount = $null
+            preview     = @()
+        }
+    }
+
+    try {
+        $status = @(git -C $RepositoryRoot status --porcelain)
+        return [ordered]@{
+            available   = $true
+            isDirty     = ($status.Count -gt 0)
+            changeCount = $status.Count
+            preview     = @($status | Select-Object -First 25)
+        }
+    }
+    catch {
+        return [ordered]@{
+            available   = $true
+            isDirty     = $null
+            changeCount = $null
+            preview     = @("git status failed: $($_.Exception.Message)")
+        }
+    }
+}
+
+# Get-FileSha256Hex computes a lowercase SHA-256 without depending on the
+# Get-FileHash cmdlet, so package staging works in restricted/older host shells.
+function Get-FileSha256Hex {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Path
+    )
+
+    $stream = [System.IO.File]::OpenRead($Path)
+    $sha256 = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $hashBytes = $sha256.ComputeHash($stream)
+        return -join ($hashBytes | ForEach-Object { $_.ToString('x2') })
+    }
+    finally {
+        $stream.Dispose()
+        $sha256.Dispose()
+    }
+}
+
 # Get-DefaultPackageVersion returns a git-derived version or timestamp fallback.
 function Get-DefaultPackageVersion {
     $gitCommand = Get-Command git -ErrorAction SilentlyContinue
@@ -412,6 +536,27 @@ function Get-DefaultPackageVersion {
     }
 
     return 'dev-' + (Get-Date -Format 'yyyyMMdd-HHmmss')
+}
+
+# Add-PackageDiagnostic records operator-facing packaging warnings/notes in
+# generated metadata and console output.
+function Add-PackageDiagnostic {
+    param(
+        [Parameter(Mandatory)]
+        [ValidateSet('Info', 'Warning')]
+        [string]$Severity,
+
+        [Parameter(Mandatory)]
+        [string]$Message,
+
+        [hashtable]$Details = @{}
+    )
+
+    [void]$script:packageDiagnostics.Add([pscustomobject][ordered]@{
+            severity = $Severity
+            message  = $Message
+            details  = $Details
+        })
 }
 
 # Assert-CleanSourcePackage enforces clean source releases unless explicitly bypassed.
@@ -443,7 +588,11 @@ function Copy-PackageFile {
         [string]$SourcePath,
 
         [Parameter(Mandatory)]
-        [string]$TargetRelativePath
+        [string]$TargetRelativePath,
+
+        [string]$SourceType = 'repository',
+
+        [string]$SourceRelativePath = ''
     )
 
     $targetRelative = ConvertTo-NormalizedRelativePath -Path $TargetRelativePath
@@ -455,6 +604,14 @@ function Copy-PackageFile {
 
     Copy-Item -LiteralPath $SourcePath -Destination $targetPath -Force
     [void]$script:copiedFiles.Add($targetRelative)
+    $targetItem = Get-Item -LiteralPath $targetPath
+    [void]$script:copiedFileRecords.Add([pscustomobject][ordered]@{
+            path               = $targetRelative
+            sourceType         = $SourceType
+            sourceRelativePath = if ([string]::IsNullOrWhiteSpace($SourceRelativePath)) { $null } else { ConvertTo-NormalizedRelativePath -Path $SourceRelativePath }
+            sizeBytes          = [Int64]$targetItem.Length
+            sha256             = Get-FileSha256Hex -Path $targetPath
+        })
 }
 
 # Copy-SourcePackage copies git-indexed source files using manifest include/exclude rules.
@@ -497,7 +654,7 @@ function Copy-SourcePackage {
             continue
         }
 
-        Copy-PackageFile -SourcePath $sourcePath -TargetRelativePath $relative
+        Copy-PackageFile -SourcePath $sourcePath -TargetRelativePath $relative -SourceType 'repository' -SourceRelativePath $relative
     }
 }
 
@@ -536,6 +693,8 @@ function Copy-RuntimeManifestEntry {
         throw 'Runtime manifest entry is missing source.'
     }
 
+    $sourceRelative = ConvertTo-NormalizedRelativePath -Path $source
+    $targetRelative = Get-EntryTargetRelativePath -Entry $Entry -Source $sourceRelative
     $baseRoot = $RepositoryRoot
     if ($sourceType -eq 'runtimePublish') {
         if ([string]::IsNullOrWhiteSpace($RuntimePublishRoot)) {
@@ -544,6 +703,10 @@ function Copy-RuntimeManifestEntry {
             }
 
             Write-Warning "Skipping optional runtime publish entry '$source' because RuntimePublishRoot was not provided."
+            Add-PackageDiagnostic `
+                -Severity Warning `
+                -Message "Optional runtime publish entry skipped because RuntimePublishRoot was not provided: $source" `
+                -Details @{ sourceType = $sourceType; source = $source; target = $targetRelative }
             return
         }
 
@@ -553,8 +716,6 @@ function Copy-RuntimeManifestEntry {
         throw "Unsupported runtime manifest sourceType '$sourceType' for '$source'."
     }
 
-    $sourceRelative = ConvertTo-NormalizedRelativePath -Path $source
-    $targetRelative = Get-EntryTargetRelativePath -Entry $Entry -Source $sourceRelative
     $sourcePath = Join-SafePath -Root $baseRoot -RelativePath $sourceRelative
     if (-not (Test-Path -LiteralPath $sourcePath)) {
         if ($required) {
@@ -562,6 +723,10 @@ function Copy-RuntimeManifestEntry {
         }
 
         Write-Warning "Skipping optional package input that was not found: $sourcePath"
+        Add-PackageDiagnostic `
+            -Severity Warning `
+            -Message "Optional package input skipped because it was not found: $source" `
+            -Details @{ sourceType = $sourceType; source = $source; target = $targetRelative; sourcePath = $sourcePath }
         return
     }
 
@@ -571,7 +736,7 @@ function Copy-RuntimeManifestEntry {
         }
 
         Assert-PathAllowed -Kind $PackageKind -RelativePath $targetRelative -SourceType $sourceType
-        Copy-PackageFile -SourcePath $sourcePath -TargetRelativePath $targetRelative
+        Copy-PackageFile -SourcePath $sourcePath -TargetRelativePath $targetRelative -SourceType $sourceType -SourceRelativePath $sourceRelative
         return
     }
 
@@ -583,7 +748,8 @@ function Copy-RuntimeManifestEntry {
         }
 
         Assert-PathAllowed -Kind $PackageKind -RelativePath $targetFileRelative -SourceType $sourceType
-        Copy-PackageFile -SourcePath $file.FullName -TargetRelativePath $targetFileRelative
+        $sourceFileRelative = ConvertTo-NormalizedRelativePath -Path (Join-Path $sourceRelative $relativeUnderSource)
+        Copy-PackageFile -SourcePath $file.FullName -TargetRelativePath $targetFileRelative -SourceType $sourceType -SourceRelativePath $sourceFileRelative
     }
 }
 
@@ -610,16 +776,42 @@ function Write-GeneratedPackageManifest {
         [string]$PackageDirectoryName
     )
 
+    $manifestDisplayPath = try {
+        Get-RelativePathFromRoot -Root $RepositoryRoot -Path $ManifestPath
+    }
+    catch {
+        $ManifestPath
+    }
+
     $metadata = [ordered]@{
         manifestVersion = 1
         packageName = [string](Get-ObjectPropertyValue -InputObject $Manifest -Name 'packageName' -DefaultValue "KSwordSandbox-$PackageKind")
         packageKind = $PackageKind
         version = $Version
         sourceRevision = Get-GitRevision
+        sourceBranch = Get-GitBranch
+        gitStatus = Get-GitStatusSnapshot
         generatedAtUtc = [DateTime]::UtcNow.ToString('o')
+        repositoryRoot = $RepositoryRoot
+        manifestPath = $manifestDisplayPath
+        runtimePublishRoot = if ([string]::IsNullOrWhiteSpace($RuntimePublishRoot)) { $null } else { $RuntimePublishRoot }
         packageDirectory = $PackageDirectoryName
-        fileCount = $script:copiedFiles.Count
-        files = @($script:copiedFiles | Sort-Object)
+        stageRoot = $stageRoot
+        archivePlanned = -not $StageOnly.IsPresent
+        archivePath = if ($StageOnly.IsPresent) { $null } else { $archivePath }
+        fileCount = $script:copiedFiles.Count + 1
+        payloadFileCount = $script:copiedFiles.Count
+        payloadTotalBytes = [Int64](($script:copiedFileRecords | ForEach-Object { $_.sizeBytes } | Measure-Object -Sum).Sum)
+        files = @(($script:copiedFiles + @('package-manifest.generated.json')) | Sort-Object)
+        fileInventory = @($script:copiedFileRecords | Sort-Object path)
+        generatedMetadata = [ordered]@{
+            path = 'package-manifest.generated.json'
+            includesSelfInFilesList = $true
+            includesSelfInFileInventory = $false
+            reason = 'Avoid recursive self-hash; all payload files include sizeBytes and sha256.'
+        }
+        manifestRequiredChecks = @(Get-ObjectArrayProperty -InputObject $Manifest -Name 'requiredChecks')
+        packageDiagnostics = @($script:packageDiagnostics.ToArray())
         exclusionSummary = [ordered]@{
             samples = 'excluded'
             virtualMachines = 'excluded'
@@ -631,22 +823,39 @@ function Write-GeneratedPackageManifest {
             repositoryBinaries = if ($PackageKind -eq 'runtime') { 'allowed only from RuntimePublishRoot' } else { 'excluded' }
         }
         safetyContract = [ordered]@{
-            Chinese = '中文提示：package-portable.ps1 已按 manifest 和硬性扩展/路径规则排除 secrets、本机状态、VM 磁盘/快照、样本、报告和仓库二进制；脚本不发布、不推送。'
+            Chinese = '中文提示：package-portable.ps1 已按 manifest 和硬性扩展/路径规则排除 secrets、本机状态、VM 磁盘/快照、样本、报告、截图、PCAP、dump、仓库二进制和 legacy signing tool；脚本不发布、不推送、不签名、不操作 VM。'
             SensitiveMaterial = 'not packaged'
             VmState = 'not packaged'
+            VmMutation = 'not performed'
             RepositoryBuildOutput = 'not packaged'
             RuntimeBinariesSource = if ($PackageKind -eq 'runtime') { 'external RuntimePublishRoot only' } else { 'not packaged' }
             NetworkPublish = 'not performed'
+            GitPush = 'not performed'
+            DriverSigning = 'not performed'
+            CSignTool = 'not called and forbidden from package contents'
         }
     }
 
     $metadataPath = Join-SafePath -Root $stageRoot -RelativePath 'package-manifest.generated.json'
     $metadata | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $metadataPath -Encoding UTF8
     [void]$script:copiedFiles.Add('package-manifest.generated.json')
+    $metadataItem = Get-Item -LiteralPath $metadataPath
+    [void]$script:copiedFileRecords.Add([pscustomobject][ordered]@{
+            path               = 'package-manifest.generated.json'
+            sourceType         = 'generated'
+            sourceRelativePath = $null
+            sizeBytes          = [Int64]$metadataItem.Length
+            sha256             = Get-FileSha256Hex -Path $metadataPath
+        })
 }
 
 Assert-OutputRootOutsideRepository -RepoRoot $RepositoryRoot -OutRoot $OutputRoot
 Assert-CleanSourcePackage
+
+if ($PackageKind -eq 'runtime' -and -not [string]::IsNullOrWhiteSpace($RuntimePublishRoot)) {
+    $RuntimePublishRoot = (Resolve-Path -LiteralPath $RuntimePublishRoot).Path
+    Assert-RuntimePublishRootOutsideRepository -RepoRoot $RepositoryRoot -PublishRoot $RuntimePublishRoot
+}
 
 if ([string]::IsNullOrWhiteSpace($Version)) {
     $Version = Get-DefaultPackageVersion
@@ -667,6 +876,8 @@ $OutputRoot = Get-FullPathNoRequire -Path $OutputRoot
 $stagingRoot = Join-SafePath -Root $OutputRoot -RelativePath 'staging'
 $stageRoot = Join-SafePath -Root $stagingRoot -RelativePath $packageDirectoryName
 $script:copiedFiles = [System.Collections.Generic.List[string]]::new()
+$script:copiedFileRecords = [System.Collections.Generic.List[object]]::new()
+$script:packageDiagnostics = [System.Collections.Generic.List[object]]::new()
 
 if (Test-Path -LiteralPath $stageRoot) {
     if (-not $Force.IsPresent) {
@@ -691,9 +902,9 @@ else {
     Copy-RuntimePackage -Manifest $manifest
 }
 
+$archivePath = Join-SafePath -Root $OutputRoot -RelativePath "$packageDirectoryName.zip"
 Write-GeneratedPackageManifest -Manifest $manifest -PackageDirectoryName $packageDirectoryName
 
-$archivePath = Join-SafePath -Root $OutputRoot -RelativePath "$packageDirectoryName.zip"
 if (-not $StageOnly.IsPresent) {
     if ((Test-Path -LiteralPath $archivePath -PathType Leaf) -and -not $Force.IsPresent) {
         throw "Archive already exists. Use -Force to replace it: $archivePath"
@@ -710,11 +921,17 @@ Write-Host "[package] Kind: $PackageKind"
 Write-Host "[package] Version: $Version"
 Write-Host "[package] Files: $($script:copiedFiles.Count)"
 Write-Host "[package] Stage: $stageRoot"
+Write-Host "[package] Metadata: $(Join-SafePath -Root $stageRoot -RelativePath 'package-manifest.generated.json')"
+Write-Host "[package] Payload bytes: $([Int64](($script:copiedFileRecords | Where-Object { $_.sourceType -ne 'generated' } | ForEach-Object { $_.sizeBytes } | Measure-Object -Sum).Sum))"
+Write-Host "[package] Optional/skipped entries: $($script:packageDiagnostics.Count)"
 Write-Host '[package] 中文提示：已排除本机 secret、install-state、DPAPI 备份、样本、报告、VM 磁盘/快照、仓库二进制和签名材料。'
+Write-Host '[package] Safety: no VM mutation, no driver signing, no CSignTool, no git push/publish.'
 if ($StageOnly.IsPresent) {
     Write-Host '[package] Archive: skipped (-StageOnly)'
 }
 else {
     Write-Host "[package] Archive: $archivePath"
+    $archiveHash = Get-FileSha256Hex -Path $archivePath
+    Write-Host "[package] Archive SHA256: $archiveHash"
 }
 Write-Host '[package] Network publish/push: not performed'

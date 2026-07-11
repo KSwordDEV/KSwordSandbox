@@ -22,7 +22,7 @@
    - `rules/behavior-rules.json` 采用 signature-like 规则，覆盖持久化、注入、下载执行、横向移动、反沙箱、凭据访问、防御规避、C2/网络行为。
    - `RuleEngine` 已支持更多 all-of 谓词，避免 CAPE/Cuckoo 类规则常见的单字符串误报。
    - v15 将公开 Sigma/LOLBAS 风格的 Windows 代理执行与 API 监控思路落到三个高约束规则：`odbcconf-regsvr-user-writable-dll-proxy-execution`、`mmc-user-writable-msc-proxy-execution`、`named-pipe-impersonation-api-observed`。这些规则要求 event type 加命令行/API/路径上下文，并显式排除 KSword/R0Collector/VT 采集噪声。
-   - 2026-07-12 的 38 条新增规则把 SigmaHQ、Elastic detection rules、Splunk Security Content 与 MITRE ATT&CK 作为“灵感家族”：参考其持久化、注入、横向移动、反沙箱、下载执行和网络 triage 维度，但规则 ID、谓词、字段组合、中文摘要和 false-positive guard 均按 KSwordSandbox 事件模型重新编写。
+   - 2026-07-12 的 release-facing 规则扩展把 SigmaHQ、Elastic detection rules、Splunk Security Content 与 MITRE ATT&CK 作为“灵感家族”：参考其持久化、注入、横向移动、反沙箱、下载执行、凭据/外传和网络 triage 维度，但规则 ID、谓词、字段组合、中文摘要和 false-positive guard 均按 KSwordSandbox 事件模型重新编写。
 
 2. 报告结构
    - 报告分为风险摘要、行为命中、MITRE 映射、静态分析、动态分析、进程树、文件、注册表、网络、R0、证据文件、raw events。
@@ -37,7 +37,7 @@
 
 ## 2026-07-12 release-facing 行为扩展说明
 
-本轮只更新行为规则文档/矩阵说明，不修改 `rules/behavior-rules.json`。当前规则集通过 38 条新增行为规则覆盖以下 release-facing 能力：
+当前规则集通过 38 条 release-facing 行为规则和 19 条补充高信号规则覆盖以下能力：
 
 - 持久化：LSA authentication package、AppInit/AppCert DLL、BootExecute、Time Provider、WMI event subscription、COM InprocServer hijack、print monitor、Active Setup。
 - 注入：R0/driver/API monitor 风格的跨进程内存写、远程线程、QueueUserAPC、section map execute、suspended-process hollowing、LSASS handle access。
@@ -45,6 +45,7 @@
 - 反沙箱：CPUID/hypervisor、VM registry key、analysis-tool process query、long sleep / time skew。
 - 下载执行：Certutil URL cache、BITS transfer、PowerShell WebClient 到用户可写路径、Mshta/Regsvr32 remote scriptlet、Rundll32 URL/DLL entrypoint。
 - DNS/HTTP/TLS/PCAP：DNS TXT long-label exfil、NXDOMAIN/DGA burst、HTTP executable payload magic、small periodic POST beacon、Host/SNI suspicious metadata、self-signed/invalid TLS、no-SNI rare JA3、SMB admin-share session setup。
+- 补充高信号规则：scheduled-task logon/start 和 RunLevel-highest 持久化、App Paths/Netsh helper registry 持久化、direct syscall / NTDLL unhook / process doppelgänging / sensitive-process memory write、admin-share copy / remote service / svcctl named-pipe lateral movement、PowerShell/BITS download-execute、browser credential DB copy、LSASS MiniDumpWriteDump、credential archive staging、large authenticated HTTP upload、Base64-like DNS exfil 和 risky TLS JA3/new-domain 元数据。
 
 开源参考边界：SigmaHQ、Elastic detection rules、Splunk Security Content 和 MITRE ATT&CK 只作为检测家族、字段约束、误报控制和技术映射参考；不复制规则正文、查询语句、SPL/EQL/KQL、描述文本或测试样例。落地到本项目时必须转换为 `SandboxEvent` event type、path/command/data predicates、`evidenceFields`、severity/confidence 和 KSword/R0Collector/VT 噪声排除。
 

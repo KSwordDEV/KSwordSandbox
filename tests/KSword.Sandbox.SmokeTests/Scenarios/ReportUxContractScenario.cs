@@ -55,6 +55,13 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(rendererSource, "Evidence graph edges", "Report renderer should expose graph edge evidence.");
         RequireContains(rendererSource, "AppendEvidenceSummaryCards", "Report renderer should expose evidence summary cards.");
         RequireContains(rendererSource, "Evidence summary cards", "Report renderer should expose evidence summary cards title.");
+        RequireContains(rendererSource, "AppendEvidenceStoryBoard", "Report renderer should expose a narrative evidence story board.");
+        RequireContains(rendererSource, "Evidence story board", "Report renderer should expose the evidence story board title.");
+        RequireContains(rendererSource, "Dropped-file evidence", "Report renderer should keep dropped-file story evidence visible.");
+        RequireContains(rendererSource, "Screenshot evidence", "Report renderer should keep screenshot story evidence visible.");
+        RequireContains(rendererSource, "Memory dump evidence", "Report renderer should keep memory dump story evidence visible.");
+        RequireContains(rendererSource, "Network and PCAP evidence", "Report renderer should keep PCAP/network story evidence visible.");
+        RequireContains(rendererSource, "R0 health/noise boundary", "Report renderer should keep R0 health/noise context visible.");
         RequireContains(rendererSource, "AppendArtifactCollectionStatusCards", "Report renderer should expose artifact collection status cards.");
         RequireContains(rendererSource, "Artifact collection status", "Report renderer should expose artifact collection status title.");
         RequireContains(rendererSource, "Dropped files", "Report renderer should summarize dropped-file collection status.");
@@ -133,6 +140,7 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(doc, "timeline grouping", "Report UX doc should require timeline grouping.");
         RequireContains(doc, "bounded timeline", "Report UX doc should require bounded timeline rendering.");
         RequireContains(doc, "Behavior graph / IOC summary", "Report UX doc should list the behavior graph section.");
+        RequireContains(doc, "Evidence story board", "Report UX doc should require evidence storytelling lanes.");
         RequireContains(doc, "Evidence graph edges", "Report UX doc should require graph edge evidence.");
         RequireContains(doc, "Artifact collection status", "Report UX doc should require artifact collection status cards.");
         RequireContains(doc, "Top behavior chain", "Report UX doc should require a top behavior chain.");
@@ -294,6 +302,13 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(englishHtml, "contract-sample.exe pid:4242 --network--&gt; 203.0.113.10:443", "Rendered behavior chain should include the sample network edge.");
         RequireContains(englishHtml, "id=\"evidence-summary-cards\"", "Rendered HTML should include evidence summary card anchor.");
         RequireContains(englishHtml, "Evidence summary cards", "Rendered HTML should include evidence summary cards.");
+        RequireContains(englishHtml, "id=\"evidence-story-board\"", "Rendered HTML should include evidence story board anchor.");
+        RequireContains(englishHtml, "Evidence story board", "Rendered HTML should include evidence story board.");
+        RequireContains(englishHtml, "Dropped-file evidence", "Rendered HTML should include dropped-file story evidence.");
+        RequireContains(englishHtml, "Screenshot evidence", "Rendered HTML should include screenshot story evidence.");
+        RequireContains(englishHtml, "Memory dump evidence", "Rendered HTML should include memory dump story evidence.");
+        RequireContains(englishHtml, "Network and PCAP evidence", "Rendered HTML should include network/PCAP story evidence.");
+        RequireContains(englishHtml, "R0 health/noise boundary", "Rendered HTML should include R0 health/noise story evidence.");
         RequireContains(englishHtml, "Artifact collection status", "Rendered HTML should include artifact collection status cards.");
         RequireContains(englishHtml, "Dropped files", "Rendered HTML should include dropped-file status card.");
         RequireContains(englishHtml, "Screenshots", "Rendered HTML should include screenshot status card.");
@@ -349,6 +364,11 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         RequireContains(chineseHtml, "进程树节点", "Chinese HTML should localize process-tree overview cards.");
         RequireContains(chineseHtml, "R0 可用性", "Chinese HTML should localize R0 availability.");
         RequireContains(chineseHtml, "端点分组", "Chinese HTML should localize network endpoint overview cards.");
+        RequireContains(chineseHtml, "证据故事板", "Chinese HTML should localize evidence story board.");
+        RequireContains(chineseHtml, "落地文件证据", "Chinese HTML should localize dropped-file story evidence.");
+        RequireContains(chineseHtml, "截图证据", "Chinese HTML should localize screenshot story evidence.");
+        RequireContains(chineseHtml, "内存转储证据", "Chinese HTML should localize memory dump story evidence.");
+        RequireContains(chineseHtml, "网络与 PCAP 证据", "Chinese HTML should localize network/PCAP story evidence.");
         RequireContains(chineseHtml, "原始证据高度限制", "Chinese HTML should localize raw evidence height guidance.");
         RequireContains(chineseHtml, "默认 report.html 使用简体中文", "Chinese HTML should localize the bilingual default-report hint.");
         RequireContains(chineseHtml, "打开", "Chinese HTML should localize artifact open buttons.");
@@ -414,6 +434,7 @@ internal sealed class ReportUxContractScenario : ISmokeTestScenario
         "静态分析",
         "动态分析",
         "行为图谱 / IOC 摘要",
+        "证据故事板",
         "时间线",
         "关键行为链",
         "证据摘要卡",

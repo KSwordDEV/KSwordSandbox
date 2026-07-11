@@ -248,7 +248,7 @@ internal sealed class MemoryDumpProbe : IGuestProbe
         }
 
         return result.Captured
-            ? CreateCapturedEvent(result, phaseLabel, target, rootProcessId)
+            ? CreateCapturedEvent(result, phaseLabel, target, rootProcessId, context.OutputDirectory)
             : CreateSkippedEvent(result, phaseLabel, target, rootProcessId, duplicate);
     }
 
@@ -259,7 +259,8 @@ internal sealed class MemoryDumpProbe : IGuestProbe
         MemoryDumpCaptureResult result,
         string phaseLabel,
         MemoryDumpTarget? target,
-        int? rootProcessId)
+        int? rootProcessId,
+        string outputDirectory)
     {
         var evt = CreateBaseEvent("memory_dump.captured", result, phaseLabel, target, rootProcessId);
         evt.Data["captureState"] = "captured";
@@ -276,7 +277,7 @@ internal sealed class MemoryDumpProbe : IGuestProbe
 
         if (!string.IsNullOrWhiteSpace(result.Path))
         {
-            var relativePath = SafeRelativePathForEvent(result.Path);
+            var relativePath = SafeRelativePathForEvent(outputDirectory, result.Path);
             evt.Data["relativePath"] = relativePath;
             AddOptionalData(evt, "artifactRelativePath", relativePath);
             AddArtifactFileEvidence(evt, result.Path);
@@ -634,16 +635,26 @@ internal sealed class MemoryDumpProbe : IGuestProbe
     /// Inputs are output root and artifact path; processing normalizes
     /// separators and falls back to the original path on malformed input.
     /// </summary>
-    private static string SafeRelativePathForEvent(string path)
+    private static string SafeRelativePathForEvent(string outputDirectory, string path)
     {
         try
         {
-            var directory = Path.GetDirectoryName(path);
+            var outputRoot = Path.GetFullPath(outputDirectory);
+            var fullPath = Path.GetFullPath(path);
+            var outputRootWithSeparator = Path.EndsInDirectorySeparator(outputRoot)
+                ? outputRoot
+                : outputRoot + Path.DirectorySeparatorChar;
+            if (fullPath.StartsWith(outputRootWithSeparator, StringComparison.OrdinalIgnoreCase))
+            {
+                return Path.GetRelativePath(outputRoot, fullPath).Replace('\\', '/');
+            }
+
+            var directory = Path.GetDirectoryName(fullPath);
             return string.IsNullOrWhiteSpace(directory)
-                ? Path.GetFileName(path)
-                : Path.Combine(Path.GetFileName(directory), Path.GetFileName(path)).Replace('\\', '/');
+                ? Path.GetFileName(fullPath)
+                : Path.Combine(Path.GetFileName(directory), Path.GetFileName(fullPath)).Replace('\\', '/');
         }
-        catch (Exception ex) when (ex is ArgumentException or NotSupportedException)
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
         {
             return path;
         }
@@ -661,6 +672,7 @@ internal sealed class MemoryDumpProbe : IGuestProbe
             var info = new FileInfo(path);
             if (!info.Exists)
             {
+                evt.Data["hashStatus"] = "missing";
                 evt.Data["artifactHashStatus"] = "missing";
                 evt.Data["artifactExists"] = "false";
                 return;
@@ -675,10 +687,13 @@ internal sealed class MemoryDumpProbe : IGuestProbe
             evt.Data["sha256"] = sha256;
             evt.Data["artifactSha256"] = sha256;
             evt.Data["hashAlgorithm"] = "sha256";
+            evt.Data["hashStatus"] = "computed";
+            evt.Data["artifactHashAlgorithm"] = "sha256";
             evt.Data["artifactHashStatus"] = "computed";
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException or PathTooLongException)
         {
+            evt.Data["hashStatus"] = "failed";
             evt.Data["artifactHashStatus"] = "failed";
             evt.Data["artifactHashExceptionType"] = ex.GetType().FullName ?? ex.GetType().Name;
             evt.Data["artifactHashMessage"] = ex.Message;

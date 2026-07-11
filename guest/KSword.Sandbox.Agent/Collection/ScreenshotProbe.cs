@@ -260,6 +260,7 @@ internal sealed class ScreenshotProbe : IGuestProbe
             var info = new FileInfo(path);
             if (!info.Exists)
             {
+                evt.Data["hashStatus"] = "missing";
                 evt.Data["artifactHashStatus"] = "missing";
                 evt.Data["artifactExists"] = "false";
                 return;
@@ -274,10 +275,13 @@ internal sealed class ScreenshotProbe : IGuestProbe
             evt.Data["sha256"] = sha256;
             evt.Data["artifactSha256"] = sha256;
             evt.Data["hashAlgorithm"] = "sha256";
+            evt.Data["hashStatus"] = "computed";
+            evt.Data["artifactHashAlgorithm"] = "sha256";
             evt.Data["artifactHashStatus"] = "computed";
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException or PathTooLongException)
         {
+            evt.Data["hashStatus"] = "failed";
             evt.Data["artifactHashStatus"] = "failed";
             evt.Data["artifactHashExceptionType"] = ex.GetType().FullName ?? ex.GetType().Name;
             evt.Data["artifactHashMessage"] = ex.Message;

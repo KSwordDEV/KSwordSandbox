@@ -85,6 +85,9 @@ internal sealed class R0CollectorAbiSelfCheckContractScenario : ISmokeTestScenar
             "eventHeaderSequenceOffset",
             "eventHeaderLostEventsOffset",
             "eventHeaderBackpressureEventsOffset",
+            "eventHeaderOperationOffset",
+            "eventHeaderStatusOffset",
+            "eventHeaderProducerMetadataFlagsOffset",
             "statusQueueHighWatermarkOffset",
             "statusTotalEventsDroppedOffset",
             "statusTotalEventsBackpressuredOffset",
@@ -115,6 +118,15 @@ internal sealed class R0CollectorAbiSelfCheckContractScenario : ISmokeTestScenar
             "kernelBackpressurePolicy",
             "sequenceSemantics",
             "zhSequenceSemantics",
+            "driverEventSequenceMeaning",
+            "driverEventSequenceScope",
+            "driverEventSequencePolicy",
+            "zhDriverEventSequencePolicy",
+            "networkServiceHintPolicy",
+            "networkFlowKeyPolicy",
+            "selfNoiseClassificationFields",
+            "typedPayloadSemanticFields",
+            "stressBackpressureDiagnostics",
             "queueLossEvidence",
             "stableJsonlFields",
             "abiSelfCheckComplete"
@@ -230,6 +242,9 @@ internal sealed class R0CollectorAbiSelfCheckContractScenario : ISmokeTestScenar
         RequireData(abiSelfCheck, "eventHeaderSequenceOffset", "16");
         RequireData(abiSelfCheck, "eventHeaderLostEventsOffset", "64");
         RequireData(abiSelfCheck, "eventHeaderBackpressureEventsOffset", "72");
+        RequireData(abiSelfCheck, "eventHeaderOperationOffset", "80");
+        RequireData(abiSelfCheck, "eventHeaderStatusOffset", "84");
+        RequireData(abiSelfCheck, "eventHeaderProducerMetadataFlagsOffset", "92");
         RequireData(abiSelfCheck, "statusQueueHighWatermarkOffset", "24");
         RequireData(abiSelfCheck, "statusTotalEventsDroppedOffset", "56");
         RequireData(abiSelfCheck, "statusTotalEventsBackpressuredOffset", "88");
@@ -284,6 +299,32 @@ internal sealed class R0CollectorAbiSelfCheckContractScenario : ISmokeTestScenar
             abiSelfCheck.Data["sequenceSemantics"],
             "sequenceMeaning=nextSequence",
             "ABI self-check should explain sequence summary semantics.");
+        RequireData(abiSelfCheck, "driverEventSequenceMeaning", "eventSequence");
+        RequireData(abiSelfCheck, "driverEventSequenceScope", "driver-event");
+        RequireContains(
+            abiSelfCheck.Data["driverEventSequencePolicy"],
+            "sequenceConcrete=true",
+            "ABI self-check should explain concrete driver event sequence semantics.");
+        RequireContains(
+            abiSelfCheck.Data["networkServiceHintPolicy"],
+            "53=dns",
+            "ABI self-check should document DNS service-hint mapping.");
+        RequireContains(
+            abiSelfCheck.Data["networkServiceHintPolicy"],
+            "443/8443=tls",
+            "ABI self-check should document TLS service-hint mapping.");
+        RequireContains(
+            abiSelfCheck.Data["networkFlowKeyPolicy"],
+            "flowKeyVersion=1",
+            "ABI self-check should document flow-key version semantics.");
+        RequireContains(
+            abiSelfCheck.Data["selfNoiseClassificationFields"],
+            "noiseClass",
+            "ABI self-check should list self-noise classification fields.");
+        RequireContains(
+            abiSelfCheck.Data["stressBackpressureDiagnostics"],
+            "observedSequenceSpan",
+            "ABI self-check should list stress/backpressure diagnostic fields.");
         RequireContains(
             abiSelfCheck.Data["jsonlNoiseInjectionGuard"],
             "rejected",

@@ -218,6 +218,25 @@ function Test-PowerShellScriptSyntax {
         -Details @{ errors = @($errors.ToArray()) }
 }
 
+function Get-ObjectPropertyValue {
+    param(
+        [Parameter(Mandatory)]
+        [object]$InputObject,
+
+        [Parameter(Mandatory)]
+        [string]$Name,
+
+        [object]$DefaultValue = $null
+    )
+
+    $property = $InputObject.PSObject.Properties[$Name]
+    if ($null -eq $property) {
+        return $DefaultValue
+    }
+
+    return $property.Value
+}
+
 function Test-PackageManifests {
     $manifestPaths = @(
         'packaging/source-package.manifest.json',
@@ -243,9 +262,39 @@ function Test-PackageManifests {
             }
 
             $raw = Get-Content -LiteralPath $path -Raw
-            foreach ($requiredExclusion in @('*.vhdx', '*.sys', '*.pdb', '*.pcap', '*.dmp', 'sandbox.local.json', 'guest-password.dpapi')) {
+            foreach ($requiredExclusion in @('*.vhdx', '*.sys', '*.pdb', '*.pcap', '*.pcapng', '*.dmp', '*.mdmp', '*.png', '*.jpg', '*.jsonl', '*.sqlite', 'screenshots/**', 'memory-dumps/**', 'packet-captures/**', 'sandbox.local.json', 'guest-password.dpapi')) {
                 if ($raw.IndexOf($requiredExclusion, [StringComparison]::OrdinalIgnoreCase) -lt 0) {
                     [void]$issues.Add("Manifest does not mention required exclusion '$requiredExclusion': $relative")
+                }
+            }
+
+            if ($null -eq $manifest.PSObject.Properties['releaseContract']) {
+                [void]$issues.Add("releaseContract is missing: $relative")
+            }
+
+            if ($null -eq $manifest.PSObject.Properties['stagedMetadata']) {
+                [void]$issues.Add("stagedMetadata contract is missing: $relative")
+            }
+
+            if ([string]$manifest.packageKind -eq 'source' -and @(Get-ObjectPropertyValue -InputObject $manifest -Name 'includePatterns' -DefaultValue @()).Count -eq 0) {
+                [void]$issues.Add("source includePatterns are empty: $relative")
+            }
+
+            if ([string]$manifest.packageKind -eq 'runtime') {
+                $includeEntries = @(Get-ObjectPropertyValue -InputObject $manifest -Name 'include' -DefaultValue @())
+                if ($includeEntries.Count -eq 0) {
+                    [void]$issues.Add("runtime include entries are empty: $relative")
+                }
+
+                if ($raw.IndexOf('"sourceType": "runtimePublish"', [StringComparison]::OrdinalIgnoreCase) -lt 0) {
+                    [void]$issues.Add("runtime manifest does not declare runtimePublish inputs: $relative")
+                }
+
+                foreach ($entry in $includeEntries) {
+                    $entrySource = [string](Get-ObjectPropertyValue -InputObject $entry -Name 'source' -DefaultValue '')
+                    if ($entrySource -like 'scripts/Sign-SandboxDriverWithKsword*') {
+                        [void]$issues.Add("runtime manifest must not include legacy KSword signing wrapper: $entrySource")
+                    }
                 }
             }
         }
@@ -273,16 +322,45 @@ function Test-PackageManifests {
 }
 
 function Test-CSignToolNotInReleasePath {
-    $matches = @(Get-ChildItem -LiteralPath $RepositoryRoot -Recurse -File -Filter '*.ps1' |
+    $legacyInvocations = New-Object System.Collections.Generic.List[object]
+    $files = @(Get-ChildItem -LiteralPath $RepositoryRoot -Recurse -File -Filter '*.ps1' |
         Where-Object {
             $_.FullName -notmatch '\\\.git\\' -and
             $_.FullName -notmatch '\\bin\\|\\obj\\|\\x64\\' -and
-            $_.Name -ne 'Test-ReleaseReadiness.ps1' -and
             $_.Name -notlike 'Sign-SandboxDriverWithKswordCSignTool.ps1'
-        } |
-        Select-String -Pattern 'CSignTool\.exe|Sign-SandboxDriverWithKswordCSignTool' -SimpleMatch -ErrorAction SilentlyContinue)
+        })
 
-    if ($matches.Count -eq 0) {
+    foreach ($file in $files) {
+        $tokens = $null
+        $parseErrors = $null
+        $ast = [System.Management.Automation.Language.Parser]::ParseFile($file.FullName, [ref]$tokens, [ref]$parseErrors)
+        if (@($parseErrors).Count -gt 0) {
+            continue
+        }
+
+        $commandAsts = @($ast.FindAll({
+                    param($node)
+                    $node -is [System.Management.Automation.Language.CommandAst]
+                }, $true))
+
+        foreach ($commandAst in $commandAsts) {
+            $commandName = $commandAst.GetCommandName()
+            $leaf = if ([string]::IsNullOrWhiteSpace($commandName)) { '' } else { Split-Path -Leaf $commandName }
+            $text = $commandAst.Extent.Text
+            $isDirectLegacyInvocation = $leaf -ieq 'CSignTool.exe' -or $leaf -ieq 'Sign-SandboxDriverWithKswordCSignTool.ps1'
+            $isStartProcessLegacyInvocation = $commandName -ieq 'Start-Process' -and $text -match '(?i)-FilePath\s+["'']?[^"`''\r\n]*(CSignTool\.exe|Sign-SandboxDriverWithKswordCSignTool)'
+            $isPowerShellLegacyInvocation = $commandName -match '^(powershell|powershell\.exe|pwsh|pwsh\.exe)$' -and $text -match '(?i)-File\s+["'']?[^"`''\r\n]*Sign-SandboxDriverWithKswordCSignTool'
+            if ($isDirectLegacyInvocation -or $isStartProcessLegacyInvocation -or $isPowerShellLegacyInvocation) {
+                [void]$legacyInvocations.Add([pscustomobject]@{
+                        Path       = $file.FullName
+                        LineNumber = $commandAst.Extent.StartLineNumber
+                        Line       = $text
+                    })
+            }
+        }
+    }
+
+    if ($legacyInvocations.Count -eq 0) {
         Add-ReleaseCheckResult `
             -Id 'no-csigntool-release-path' `
             -Title 'No CSignTool in release path / 发布链路不调用 CSignTool' `
@@ -295,9 +373,96 @@ function Test-CSignToolNotInReleasePath {
         -Id 'no-csigntool-release-path' `
         -Title 'No CSignTool in release path / 发布链路不调用 CSignTool' `
         -Status Failed `
-        -Message "Found $($matches.Count) CSignTool reference(s) in normal release scripts." `
+        -Message "Found $($legacyInvocations.Count) CSignTool invocation(s) in normal release scripts." `
         -Remediation @('Keep CSignTool usage out of normal install/run/package/readiness paths; use ordinary signtool/test-signing docs only when explicitly requested.') `
-        -Details @{ matches = @($matches | Select-Object Path, LineNumber, Line) }
+        -Details @{ matches = @($legacyInvocations.ToArray()) }
+}
+
+function Test-ReadinessNoVmMutationCommands {
+    $forbiddenCommands = @(
+        'Start-VM',
+        'Stop-VM',
+        'Restart-VM',
+        'Restore-VMSnapshot',
+        'Checkpoint-VM',
+        'Remove-VMSnapshot',
+        'Set-VM',
+        'Set-VMMemory',
+        'Set-VMProcessor',
+        'Enable-VMIntegrationService',
+        'Disable-VMIntegrationService',
+        'Copy-VMFile',
+        'Set-GuestTestSigning.ps1',
+        'Start-SandboxHyperVJob.ps1'
+    )
+
+    $checkedScripts = @(
+        'scripts\Test-ReleaseReadiness.ps1',
+        'scripts\package-portable.ps1'
+    )
+
+    $issues = New-Object System.Collections.Generic.List[object]
+    foreach ($relative in $checkedScripts) {
+        $path = Join-Path $RepositoryRoot $relative
+        $tokens = $null
+        $parseErrors = $null
+        $ast = [System.Management.Automation.Language.Parser]::ParseFile($path, [ref]$tokens, [ref]$parseErrors)
+        if (@($parseErrors).Count -gt 0) {
+            [void]$issues.Add([pscustomobject]@{ path = $relative; command = 'parse-error'; line = 0; text = 'Unable to parse script for safety command audit.' })
+            continue
+        }
+
+        $commandAsts = @($ast.FindAll({
+                    param($node)
+                    $node -is [System.Management.Automation.Language.CommandAst]
+                }, $true))
+
+        foreach ($commandAst in $commandAsts) {
+            $commandName = $commandAst.GetCommandName()
+            if ([string]::IsNullOrWhiteSpace($commandName)) {
+                continue
+            }
+
+            $leaf = Split-Path -Leaf $commandName
+            if ($forbiddenCommands -contains $leaf) {
+                [void]$issues.Add([pscustomobject]@{
+                        path    = $relative
+                        command = $leaf
+                        line    = $commandAst.Extent.StartLineNumber
+                        text    = $commandAst.Extent.Text
+                    })
+            }
+
+            if ($leaf -ieq 'git') {
+                $commandText = $commandAst.Extent.Text
+                if ($commandText -match '(?i)\bpush\b') {
+                    [void]$issues.Add([pscustomobject]@{
+                            path    = $relative
+                            command = 'git push'
+                            line    = $commandAst.Extent.StartLineNumber
+                            text    = $commandText
+                        })
+                }
+            }
+        }
+    }
+
+    if ($issues.Count -eq 0) {
+        Add-ReleaseCheckResult `
+            -Id 'readiness-non-mutating' `
+            -Title 'Readiness/package scripts are non-mutating / readiness 和打包不操作 VM' `
+            -Status Passed `
+            -Message 'Release readiness and portable packaging scripts do not invoke VM mutation, driver signing, git push, or Hyper-V live scripts.'
+        return
+    }
+
+    Add-ReleaseCheckResult `
+        -Id 'readiness-non-mutating' `
+        -Title 'Readiness/package scripts are non-mutating / readiness 和打包不操作 VM' `
+        -Status Failed `
+        -Message "Found $($issues.Count) forbidden command invocation(s) in release readiness/package scripts." `
+        -Remediation @('Keep readiness/package scripts limited to parsing, repository policy, source staging, and optional light builds; move VM/live/signing actions to explicit operator runbooks.') `
+        -Details @{ issues = @($issues.ToArray()) }
 }
 
 function Invoke-RepositoryPolicy {
@@ -380,6 +545,7 @@ if ($gitAvailable) {
 Test-PackageManifests
 Test-PowerShellScriptSyntax
 Test-CSignToolNotInReleasePath
+Test-ReadinessNoVmMutationCommands
 Invoke-RepositoryPolicy
 Invoke-SourcePackageStage
 Invoke-LightBuild

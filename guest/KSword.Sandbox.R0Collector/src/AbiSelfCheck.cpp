@@ -134,6 +134,9 @@ std::string BuildAbiSelfCheckData(const Options& options) {
     data.AddUnsigned("eventHeaderSequenceOffset", kAbiGuardEventHeaderSequenceOffset);
     data.AddUnsigned("eventHeaderLostEventsOffset", kAbiGuardEventHeaderLostEventsOffset);
     data.AddUnsigned("eventHeaderBackpressureEventsOffset", kAbiGuardEventHeaderBackpressureEventsOffset);
+    data.AddUnsigned("eventHeaderOperationOffset", kAbiGuardEventHeaderOperationOffset);
+    data.AddUnsigned("eventHeaderStatusOffset", kAbiGuardEventHeaderStatusOffset);
+    data.AddUnsigned("eventHeaderProducerMetadataFlagsOffset", kAbiGuardEventHeaderProducerMetadataFlagsOffset);
     data.AddUnsigned("statusQueueHighWatermarkOffset", kAbiGuardStatusQueueHighWatermarkOffset);
     data.AddUnsigned("statusTotalEventsDroppedOffset", kAbiGuardStatusTotalEventsDroppedOffset);
     data.AddUnsigned("statusTotalEventsBackpressuredOffset", kAbiGuardStatusTotalEventsBackpressuredOffset);
@@ -208,8 +211,17 @@ std::string BuildAbiSelfCheckData(const Options& options) {
     data.AddWide("zhKernelBackpressurePolicy", L"\u5185\u6838 producer \u975e\u963b\u585e\uff1b\u56fa\u5b9a\u73af\u5f62\u7f13\u51b2\u533a\u6ea2\u51fa\u65f6\u8986\u76d6\u6700\u65e7\u672a\u8bfb\u8bb0\u5f55\uff1bbackpressure=true \u662f\u8bc1\u636e/\u8bca\u65ad\uff0c\u4e0d\u8868\u793a producer \u88ab\u963b\u585e\u3002");
     data.AddUtf8("sequenceSemantics", "event rows use concrete event Sequence; health/poll/status/readEvents summary rows use NextSequence with sequenceMeaning=nextSequence; head/tail are consumed batch sequence bounds");
     data.AddWide("zhSequenceSemantics", L"\u4e8b\u4ef6\u884c\u7684 sequence \u662f\u5177\u4f53\u4e8b\u4ef6 Sequence\uff1bhealth/poll/status/readEvents \u6458\u8981\u884c\u7684 sequence \u662f NextSequence\uff0c\u5e76\u4ee5 sequenceMeaning=nextSequence \u6807\u8bb0\uff1bhead/tail \u662f\u6279\u6b21\u5df2\u6d88\u8d39\u8bb0\u5f55\u7684 sequence \u8fb9\u754c\u3002");
+    data.AddUtf8("driverEventSequenceMeaning", "eventSequence");
+    data.AddUtf8("driverEventSequenceScope", "driver-event");
+    data.AddUtf8("driverEventSequencePolicy", "driver rows emit sequenceMeaning=eventSequence and sequenceConcrete=true; summaries emit sequenceMeaning=nextSequence");
+    data.AddWide("zhDriverEventSequencePolicy", L"driver \u4e8b\u4ef6\u884c\u4f7f\u7528 sequenceMeaning=eventSequence \u548c sequenceConcrete=true\uff1b\u6458\u8981\u884c\u4f7f\u7528 sequenceMeaning=nextSequence\u3002");
+    data.AddUtf8("networkServiceHintPolicy", "port-protocol heuristic: 53=dns, 80/8080/8000=http, 443/8443=tls; fields include serviceHintSource/serviceHintConfidence/serviceHintDns/serviceHintHttp/serviceHintTls");
+    data.AddUtf8("networkFlowKeyPolicy", "flowKeyVersion=1; flowKey uses protocol|sourceEndpoint|destinationEndpoint with direction-aware endpoints plus endpointPair/source/destination aliases");
+    data.AddUtf8("selfNoiseClassificationFields", "noiseClass|selfNoiseClass|collectorNoiseClass|noiseAction|noiseReasons|sampleBehaviorCandidate|collectionNoise|operatorInterpretation|zhNoiseHint");
+    data.AddUtf8("typedPayloadSemanticFields", "semanticFamily|behaviorLane|activityKind|evidenceReady|zhMessage|zhHint plus process/file/registry/network family-specific hints");
+    data.AddUtf8("stressBackpressureDiagnostics", "observedSequenceSpan|expectedContiguousEvents|sequenceGapReason|lossDiagnostic|backpressureSeverity|backpressureDiagnostics|zhBackpressureHint");
     data.AddUtf8("queueLossEvidence", "lostCount|TotalEventsDropped|EventsDropped|TotalEventsSuppressed|TotalEventsBackpressured|ProducerDroppedMask|ProducerSuppressedMask|ProducerBackpressureMask|NextSequence|sequence|sequenceGapObserved|sequenceGapEstimate|queueHighWatermark|highWatermark");
-    data.AddUtf8("stableJsonlFields", "sequence|sequenceMeaning|lost|lostCount|loss|lossObserved|backpressure|backpressureObserved|backpressureReason|highWatermark|lastEnqueueFailureStatus|noise|collectorNoise|collectorSelfNoise|selfProcess|selfNoise|selfNoiseReason|selfNoiseAction|collectorSuppressed|producer|producerCategory|eventOrigin|subjectKind|actorRole|subjectRole|processIdSource|operationName|status|pathTruncated|schema|eventSchemaName|eventSchemaVersion|eligible|processed|emitted|suppressed|skipped|head|tail|sampling|producerDroppedMask|producerSuppressedMask|producerBackpressureMask|effectiveProducerMask|lastFailureNtStatus");
+    data.AddUtf8("stableJsonlFields", "sequence|sequenceMeaning|sequenceScope|sequenceConcrete|lost|lostCount|loss|lossObserved|backpressure|backpressureObserved|backpressureReason|backpressureSeverity|highWatermark|lastEnqueueFailureStatus|noise|noiseClass|selfNoiseClass|collectorNoiseClass|collectorNoise|collectorSelfNoise|selfProcess|selfNoise|selfNoiseReason|selfNoiseAction|collectorSuppressed|sampleBehaviorCandidate|producer|producerCategory|eventOrigin|subjectKind|actorRole|subjectRole|processIdSource|semanticFamily|behaviorLane|activityKind|serviceHint|flowKey|sourceEndpoint|destinationEndpoint|zhMessage|zhHint|operationName|status|pathTruncated|schema|eventSchemaName|eventSchemaVersion|eligible|processed|emitted|suppressed|skipped|head|tail|sampling|sequenceGapReason|observedSequenceSpan|producerDroppedMask|producerSuppressedMask|producerBackpressureMask|effectiveProducerMask|lastFailureNtStatus");
     data.AddUtf8("collectorSelfCheckContract", "--abi-self-check emits this row and exits before CreateFileW/DeviceIoControl");
     data.AddWide("zhCollectorSelfCheckContract", L"--abi-self-check \u4f1a\u53d1\u51fa\u8be5\u884c\uff0c\u5e76\u5728 CreateFileW/DeviceIoControl \u4e4b\u524d\u9000\u51fa\u3002");
 

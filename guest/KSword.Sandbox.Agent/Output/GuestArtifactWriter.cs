@@ -238,6 +238,7 @@ internal sealed class GuestArtifactWriter
         var info = new FileInfo(path);
         var sha256 = ComputeSha256(info.FullName);
         var metadata = CreateBaseMetadata(classification, info.FullName, relativePath, eventMetadata, droppedFileMetadata);
+        AddDescriptorFileIntegrityMetadata(classification, metadata, info, sha256);
         return new ArtifactDescriptor
         {
             Kind = classification.Kind,
@@ -285,6 +286,7 @@ internal sealed class GuestArtifactWriter
         AddIfNotEmpty(metadata, "collectionName", classification.CollectionName);
         AddIfNotEmpty(metadata, "importPath", relativePath);
         AddIfNotEmpty(metadata, "artifactRelativePath", relativePath);
+        AddIfNotEmpty(metadata, "sourceArtifactRelativePath", relativePath);
         AddIfNotEmpty(metadata, "artifactFullPath", artifactFullPath);
         AddIfNotEmpty(metadata, "guestFullPath", FirstNonEmpty(droppedFileMetadata?.OriginalFullPath, ValueOrEmpty(metadata, "guestFullPath", "guestPath"), artifactFullPath));
         AddIfNotEmpty(metadata, "captureState", InferCaptureState(classification, metadata));
@@ -443,6 +445,12 @@ internal sealed class GuestArtifactWriter
             AddIfMissing(metadata, "protocolSummaryState", "capture-metadata-only");
             AddIfMissing(metadata, "protocolSummaryStatus", "skipped");
             AddIfMissing(metadata, "protocolSummaryReason", "protocolParserNotImplemented");
+            AddIfMissing(metadata, "protocolDiagnosticsAvailable", "true");
+            AddIfMissing(metadata, "protocolDiagnostics", "pcapng-block-counters");
+            AddIfMissing(metadata, "protocolFamiliesExpected", "dns,http,tls");
+            AddIfMissing(metadata, "dnsSummaryState", "not-parsed");
+            AddIfMissing(metadata, "httpSummaryState", "not-parsed");
+            AddIfMissing(metadata, "tlsSummaryState", "not-parsed");
             AddIfMissing(metadata, "zhHint", "未集成协议解析时，请优先查看 artifactCount/fileCount/totalBytes、lastArtifactRelativePath、lastDiagnosticEtlRelativePath、lastDiagnosticPacketCountStatus 与 sha256 等文件完整性字段。");
         }
 
@@ -609,6 +617,7 @@ internal sealed class GuestArtifactWriter
             "dumpRelativePath",
             "pcapRelativePath",
             "pcapngRelativePath",
+            "packetCaptureRelativePath",
             "etlRelativePath",
             "diagnosticRelativePath"
         })
@@ -994,7 +1003,9 @@ internal sealed class GuestArtifactWriter
             "sha256",
             "hashAlgorithm",
             "artifactSha256",
+            "artifactHashAlgorithm",
             "artifactSizeBytes",
+            "hashStatus",
             "artifactHashStatus",
             "artifactExists",
             "copiedSha256",
@@ -1009,12 +1020,26 @@ internal sealed class GuestArtifactWriter
             "packetCaptureRelativePath",
             "diagnosticRelativePath",
             "pcapFormat",
+            "pcapExists",
+            "pcapSizeBytes",
+            "pcapLastWriteUtc",
+            "pcapSha256",
+            "pcapHashAlgorithm",
+            "pcapHashStatus",
+            "pcapHashExceptionType",
+            "pcapHashMessage",
             "protocolSummaryAvailable",
             "protocolSummaryState",
             "protocolSummaryStatus",
             "protocolSummaryReason",
             "protocolSummaryFormat",
             "protocolsObserved",
+            "protocolDiagnosticsAvailable",
+            "protocolDiagnostics",
+            "protocolFamiliesExpected",
+            "dnsSummaryState",
+            "httpSummaryState",
+            "tlsSummaryState",
             "captureTool",
             "captureToolMode",
             "captureToolCommand",
@@ -1033,8 +1058,20 @@ internal sealed class GuestArtifactWriter
             "pcapngPacketBlockCount",
             "pcapngEnhancedPacketBlockCount",
             "pcapngSimplePacketBlockCount",
+            "pcapngSectionHeaderCount",
+            "pcapngByteOrder",
+            "pcapngDiagnosticsAvailable",
+            "packetCountConfidence",
             "conversionOutputSummaryAvailable",
             "pktmonReportedPacketCount",
+            "pcapngExists",
+            "pcapngSizeBytes",
+            "pcapngLastWriteUtc",
+            "pcapngSha256",
+            "pcapngHashAlgorithm",
+            "pcapngHashStatus",
+            "pcapngHashExceptionType",
+            "pcapngHashMessage",
             "etlExists",
             "etlSizeBytes",
             "etlLastWriteUtc",
@@ -1152,6 +1189,63 @@ internal sealed class GuestArtifactWriter
             : "captured";
     }
 
+    private static void AddDescriptorFileIntegrityMetadata(
+        ArtifactClassification classification,
+        Dictionary<string, string> metadata,
+        FileInfo info,
+        string sha256)
+    {
+        AddIfMissing(metadata, "artifactExists", "true");
+        AddIfMissing(metadata, "sizeBytes", info.Length.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        AddIfMissing(metadata, "artifactSizeBytes", info.Length.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        AddIfMissing(metadata, "artifactLastWriteUtc", info.LastWriteTimeUtc.ToString("O", System.Globalization.CultureInfo.InvariantCulture));
+        AddIfMissing(metadata, "mtimeUtc", info.LastWriteTimeUtc.ToString("O", System.Globalization.CultureInfo.InvariantCulture));
+        AddIfMissing(metadata, "sha256", sha256);
+        AddIfMissing(metadata, "artifactSha256", sha256);
+        AddIfMissing(metadata, "hashAlgorithm", "sha256");
+        AddIfMissing(metadata, "hashStatus", "computed");
+        AddIfMissing(metadata, "artifactHashAlgorithm", "sha256");
+        AddIfMissing(metadata, "artifactHashStatus", "computed");
+
+        if (metadata.TryGetValue("rootProcessId", out var rootProcessId) && !string.IsNullOrWhiteSpace(rootProcessId))
+        {
+            AddIfMissing(metadata, "treeLineage", rootProcessId);
+            AddIfMissing(metadata, "processRole", "sample-root-context");
+        }
+
+        if (classification.Kind == ArtifactKind.PacketCapture)
+        {
+            AddPacketCaptureFileIntegrityAliases(metadata, info, sha256);
+        }
+    }
+
+    private static void AddPacketCaptureFileIntegrityAliases(
+        Dictionary<string, string> metadata,
+        FileInfo info,
+        string sha256)
+    {
+        var extension = Path.GetExtension(info.FullName);
+        var prefix = string.Equals(extension, ".pcapng", StringComparison.OrdinalIgnoreCase)
+            ? "pcapng"
+            : string.Equals(extension, ".pcap", StringComparison.OrdinalIgnoreCase)
+                ? "pcap"
+                : "packetCapture";
+
+        AddIfMissing(metadata, $"{prefix}Exists", "true");
+        AddIfMissing(metadata, $"{prefix}SizeBytes", info.Length.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        AddIfMissing(metadata, $"{prefix}LastWriteUtc", info.LastWriteTimeUtc.ToString("O", System.Globalization.CultureInfo.InvariantCulture));
+        AddIfMissing(metadata, $"{prefix}Sha256", sha256);
+        AddIfMissing(metadata, $"{prefix}HashAlgorithm", "sha256");
+        AddIfMissing(metadata, $"{prefix}HashStatus", "computed");
+        AddIfMissing(metadata, "protocolDiagnosticsAvailable", "true");
+        AddIfMissing(metadata, "protocolDiagnostics", "pcapng-block-counters");
+        AddIfMissing(metadata, "protocolFamiliesExpected", "dns,http,tls");
+        AddIfMissing(metadata, "dnsSummaryState", "not-parsed");
+        AddIfMissing(metadata, "httpSummaryState", "not-parsed");
+        AddIfMissing(metadata, "tlsSummaryState", "not-parsed");
+        AddIfMissing(metadata, "protocolsObserved", "not-parsed");
+    }
+
     private static void AddPacketCaptureMetadataDefaults(
         ArtifactClassification classification,
         Dictionary<string, string> metadata,
@@ -1191,6 +1285,13 @@ internal sealed class GuestArtifactWriter
         AddIfMissing(metadata, "protocolSummaryState", "capture-metadata-only");
         AddIfMissing(metadata, "protocolSummaryStatus", "skipped");
         AddIfMissing(metadata, "protocolSummaryReason", "protocolParserNotImplemented");
+        AddIfMissing(metadata, "protocolDiagnosticsAvailable", "true");
+        AddIfMissing(metadata, "protocolDiagnostics", "pcapng-block-counters");
+        AddIfMissing(metadata, "protocolFamiliesExpected", "dns,http,tls");
+        AddIfMissing(metadata, "dnsSummaryState", "not-parsed");
+        AddIfMissing(metadata, "httpSummaryState", "not-parsed");
+        AddIfMissing(metadata, "tlsSummaryState", "not-parsed");
+        AddIfMissing(metadata, "protocolsObserved", "not-parsed");
         AddIfMissing(metadata, "zhHint", "未集成协议解析时，此条目仍提供 PCAP/PCAPNG 路径、大小、sha256、采集/转换状态和可下载证据。请下载 artifactRelativePath 进行外部协议分析。");
     }
 

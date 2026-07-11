@@ -302,12 +302,14 @@ internal sealed class PacketCaptureProbe : IGuestProbe
             }
         };
         AddArtifactFileEvidence(captured, session.PcapngPath);
+        AddNamedFileEvidence(captured.Data, "pcapng", session.PcapngPath);
         AddNamedFileEvidence(captured.Data, "etl", session.EtlPath);
         AddPcapngPacketSummary(captured.Data, session.PcapngPath);
+        AddProtocolDiagnosticDefaults(captured.Data);
         AddPktmonConversionOutputSummary(captured.Data, convertResult);
         AddRootProcessData(captured, context);
         events.Add(captured);
-        events.Add(CreateProtocolSummaryPlaceholderEvent(context, session, pcapInfo));
+        events.Add(CreateProtocolSummaryMetadataEvent(context, session, pcapInfo));
         return events;
     }
 
@@ -409,9 +411,9 @@ internal sealed class PacketCaptureProbe : IGuestProbe
     }
 
     /// <summary>
-    /// Emits a protocol-summary placeholder tied to the captured PCAPNG.
+    /// Emits protocol diagnostics tied to the captured PCAPNG.
     /// </summary>
-    private static SandboxEvent CreateProtocolSummaryPlaceholderEvent(
+    private static SandboxEvent CreateProtocolSummaryMetadataEvent(
         GuestProbeContext context,
         PacketCaptureSession session,
         FileInfo pcapInfo)
@@ -438,8 +440,8 @@ internal sealed class PacketCaptureProbe : IGuestProbe
                 ["status"] = "captured",
                 ["nonfatal"] = "true",
                 ["reason"] = "protocolParserNotImplemented",
-                ["zhMessage"] = "PCAPNG 已采集，但协议摘要解析器尚未实现；该 placeholder 不会改变 packet-captures 的 captured 状态。",
-                ["zhHint"] = "请直接下载/分析 packet-captures/*.pcapng；后续实现协议解析后会填充摘要字段。",
+                ["zhMessage"] = "PCAPNG 已采集；当前事件提供协议解析前的抓包诊断摘要。",
+                ["zhHint"] = "请先查看 pcapng*、packetCount*、etl* 字段判断抓包是否有效；需要 DNS/HTTP/TLS 明细时下载 artifactRelativePath 进行协议分析。",
                 ["pcapFormat"] = "pcapng",
                 ["etlPath"] = session.EtlPath,
                 ["pcapngPath"] = session.PcapngPath,
@@ -454,12 +456,18 @@ internal sealed class PacketCaptureProbe : IGuestProbe
                 ["sizeBytes"] = pcapInfo.Length.ToString(CultureInfo.InvariantCulture),
                 ["pcapLastWriteUtc"] = pcapInfo.LastWriteTimeUtc.ToString("O", CultureInfo.InvariantCulture),
                 ["protocolSummaryAvailable"] = "false",
-                ["protocolSummaryState"] = "placeholder",
+                ["protocolSummaryState"] = "capture-metadata-only",
                 ["protocolSummaryStatus"] = "skipped",
                 ["protocolSummaryReason"] = "protocolParserNotImplemented",
                 ["protocolSummaryFormat"] = "capture-metadata",
-                ["protocolSummary"] = "{}",
-                ["protocolsObserved"] = "unknown",
+                ["protocolSummary"] = "{\"state\":\"capture-metadata-only\"}",
+                ["protocolsObserved"] = "not-parsed",
+                ["protocolDiagnosticsAvailable"] = "true",
+                ["protocolDiagnostics"] = "pcapng-block-counters",
+                ["protocolFamiliesExpected"] = "dns,http,tls",
+                ["dnsSummaryState"] = "not-parsed",
+                ["httpSummaryState"] = "not-parsed",
+                ["tlsSummaryState"] = "not-parsed",
                 ["packetCaptureFileCount"] = "1",
                 ["fileCount"] = "1",
                 ["conversionStatus"] = "succeeded",
@@ -470,8 +478,10 @@ internal sealed class PacketCaptureProbe : IGuestProbe
         };
 
         AddArtifactFileEvidence(evt, session.PcapngPath);
+        AddNamedFileEvidence(evt.Data, "pcapng", session.PcapngPath);
         AddNamedFileEvidence(evt.Data, "etl", session.EtlPath);
         AddPcapngPacketSummary(evt.Data, session.PcapngPath);
+        AddProtocolDiagnosticDefaults(evt.Data);
         AddRootProcessData(evt, context);
         return evt;
     }
@@ -543,6 +553,8 @@ internal sealed class PacketCaptureProbe : IGuestProbe
         AddNamedFileEvidence(evt.Data, "etl", session.EtlPath);
         AddRootProcessData(evt, context);
         AddArtifactFileEvidence(evt, session.PcapngPath);
+        AddNamedFileEvidence(evt.Data, "pcapng", session.PcapngPath);
+        AddProtocolDiagnosticDefaults(evt.Data);
         return evt;
     }
 
@@ -607,6 +619,7 @@ internal sealed class PacketCaptureProbe : IGuestProbe
             var info = new FileInfo(path);
             if (!info.Exists)
             {
+                evt.Data["hashStatus"] = "missing";
                 evt.Data["artifactHashStatus"] = "missing";
                 evt.Data["artifactExists"] = "false";
                 return;
@@ -621,10 +634,13 @@ internal sealed class PacketCaptureProbe : IGuestProbe
             evt.Data["sha256"] = sha256;
             evt.Data["artifactSha256"] = sha256;
             evt.Data["hashAlgorithm"] = "sha256";
+            evt.Data["hashStatus"] = "computed";
+            evt.Data["artifactHashAlgorithm"] = "sha256";
             evt.Data["artifactHashStatus"] = "computed";
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException or PathTooLongException)
         {
+            evt.Data["hashStatus"] = "failed";
             evt.Data["artifactHashStatus"] = "failed";
             evt.Data["artifactHashExceptionType"] = ex.GetType().FullName ?? ex.GetType().Name;
             evt.Data["artifactHashMessage"] = ex.Message;
@@ -673,6 +689,9 @@ internal sealed class PacketCaptureProbe : IGuestProbe
         {
             var summary = CountPcapngPacketBlocks(path);
             data["packetCountStatus"] = summary.Status;
+            data["packetCountConfidence"] = summary.Status == "computed" ? "pcapng-block-scan" : "diagnostic";
+            data["pcapngDiagnosticsAvailable"] = "true";
+            data["pcapngByteOrder"] = summary.ByteOrder;
             if (summary.PacketCount is not null)
             {
                 data["packetCount"] = summary.PacketCount.Value.ToString(CultureInfo.InvariantCulture);
@@ -682,6 +701,11 @@ internal sealed class PacketCaptureProbe : IGuestProbe
             if (summary.BlockCount is not null)
             {
                 data["pcapngBlockCount"] = summary.BlockCount.Value.ToString(CultureInfo.InvariantCulture);
+            }
+
+            if (summary.SectionHeaderBlockCount is not null)
+            {
+                data["pcapngSectionHeaderCount"] = summary.SectionHeaderBlockCount.Value.ToString(CultureInfo.InvariantCulture);
             }
 
             if (summary.EnhancedPacketBlockCount is not null)
@@ -697,6 +721,8 @@ internal sealed class PacketCaptureProbe : IGuestProbe
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException or PathTooLongException)
         {
             data["packetCountStatus"] = "failed";
+            data["packetCountConfidence"] = "failed";
+            data["pcapngDiagnosticsAvailable"] = "false";
             data["packetCountExceptionType"] = ex.GetType().FullName ?? ex.GetType().Name;
             data["packetCountMessage"] = ex.Message;
         }
@@ -708,28 +734,31 @@ internal sealed class PacketCaptureProbe : IGuestProbe
         Span<byte> header = stackalloc byte[12];
         if (stream.Read(header) != header.Length)
         {
-            return new PcapngPacketSummary(null, null, null, null, "too-small");
+            return new PcapngPacketSummary(null, null, null, null, null, "unknown", "too-small");
         }
 
         var littleEndian = true;
         var firstBlockType = BinaryPrimitives.ReadUInt32LittleEndian(header[..4]);
         if (firstBlockType != 0x0A0D0D0A)
         {
-            return new PcapngPacketSummary(null, null, null, null, "not-pcapng");
+            return new PcapngPacketSummary(null, null, null, null, null, "unknown", "not-pcapng");
         }
 
         var byteOrderMagic = BinaryPrimitives.ReadUInt32LittleEndian(header[8..12]);
+        var byteOrder = "little-endian";
         if (byteOrderMagic == 0x4D3C2B1A)
         {
             littleEndian = false;
+            byteOrder = "big-endian";
         }
         else if (byteOrderMagic != 0x1A2B3C4D)
         {
-            return new PcapngPacketSummary(null, null, null, null, "unknown-byte-order");
+            return new PcapngPacketSummary(null, null, null, null, null, "unknown", "unknown-byte-order");
         }
 
         stream.Position = 0;
         var blockCount = 0L;
+        var sectionHeaderBlocks = 0L;
         var enhancedPacketBlocks = 0L;
         var simplePacketBlocks = 0L;
         Span<byte> blockHeader = stackalloc byte[8];
@@ -739,11 +768,15 @@ internal sealed class PacketCaptureProbe : IGuestProbe
             var blockLength = ReadUInt32(blockHeader[4..8], littleEndian);
             if (blockLength < 12 || blockLength > int.MaxValue || stream.Position - 8 + blockLength > stream.Length)
             {
-                return new PcapngPacketSummary(enhancedPacketBlocks + simplePacketBlocks, blockCount, enhancedPacketBlocks, simplePacketBlocks, "partial-or-invalid");
+                return new PcapngPacketSummary(enhancedPacketBlocks + simplePacketBlocks, blockCount, sectionHeaderBlocks, enhancedPacketBlocks, simplePacketBlocks, byteOrder, "partial-or-invalid");
             }
 
             blockCount++;
-            if (blockType == 0x00000006)
+            if (blockType == 0x0A0D0D0A)
+            {
+                sectionHeaderBlocks++;
+            }
+            else if (blockType == 0x00000006)
             {
                 enhancedPacketBlocks++;
             }
@@ -755,7 +788,7 @@ internal sealed class PacketCaptureProbe : IGuestProbe
             stream.Position += blockLength - 8;
         }
 
-        return new PcapngPacketSummary(enhancedPacketBlocks + simplePacketBlocks, blockCount, enhancedPacketBlocks, simplePacketBlocks, "computed");
+        return new PcapngPacketSummary(enhancedPacketBlocks + simplePacketBlocks, blockCount, sectionHeaderBlocks, enhancedPacketBlocks, simplePacketBlocks, byteOrder, "computed");
     }
 
     private static uint ReadUInt32(ReadOnlySpan<byte> value, bool littleEndian)
@@ -784,6 +817,20 @@ internal sealed class PacketCaptureProbe : IGuestProbe
             data["pktmonReportedPacketCount"] = convertedPackets.Value.ToString(CultureInfo.InvariantCulture);
             AddIfNotEmpty(data, "packetCount", data.TryGetValue("packetCount", out var existing) && !string.IsNullOrWhiteSpace(existing) ? existing : convertedPackets.Value.ToString(CultureInfo.InvariantCulture));
         }
+    }
+
+    private static void AddProtocolDiagnosticDefaults(Dictionary<string, string> data)
+    {
+        AddIfNotEmpty(data, "protocolDiagnosticsAvailable", data.TryGetValue("protocolDiagnosticsAvailable", out var existing) ? existing : "true");
+        AddIfNotEmpty(data, "protocolDiagnostics", data.TryGetValue("protocolDiagnostics", out var diagnostics) ? diagnostics : "pcapng-block-counters");
+        AddIfNotEmpty(data, "protocolFamiliesExpected", data.TryGetValue("protocolFamiliesExpected", out var families) ? families : "dns,http,tls");
+        AddIfNotEmpty(data, "dnsSummaryState", data.TryGetValue("dnsSummaryState", out var dns) ? dns : "not-parsed");
+        AddIfNotEmpty(data, "httpSummaryState", data.TryGetValue("httpSummaryState", out var http) ? http : "not-parsed");
+        AddIfNotEmpty(data, "tlsSummaryState", data.TryGetValue("tlsSummaryState", out var tls) ? tls : "not-parsed");
+        AddIfNotEmpty(data, "protocolSummaryAvailable", data.TryGetValue("protocolSummaryAvailable", out var available) ? available : "false");
+        AddIfNotEmpty(data, "protocolSummaryState", data.TryGetValue("protocolSummaryState", out var state) ? state : "capture-metadata-only");
+        AddIfNotEmpty(data, "protocolSummaryStatus", data.TryGetValue("protocolSummaryStatus", out var status) ? status : "skipped");
+        AddIfNotEmpty(data, "protocolSummaryReason", data.TryGetValue("protocolSummaryReason", out var reason) ? reason : "protocolParserNotImplemented");
     }
 
     private static long? FindFirstNumberAfterLabel(string text, string label)
@@ -848,8 +895,10 @@ internal sealed class PacketCaptureProbe : IGuestProbe
     private sealed record PcapngPacketSummary(
         long? PacketCount,
         long? BlockCount,
+        long? SectionHeaderBlockCount,
         long? EnhancedPacketBlockCount,
         long? SimplePacketBlockCount,
+        string ByteOrder,
         string Status);
 
     private sealed record PacketCaptureSession(
