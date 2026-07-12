@@ -353,3 +353,11 @@ reports, samples, payload binaries, VM disks, or local secrets.
 - 本机 `sandbox.local.json`、guest password、VT key、样本、报告和 VM 输出继续保存在 runtime root
   或 Windows 环境/DPAPI 中，不进入 zip。
 - 默认 WebUI 不执行 Live；Live Hyper-V 仍必须在 WebUI/API 或 CLI 中显式选择。
+
+### 发布 smoke 场景边界 / Release smoke boundaries
+
+release smoke 默认只接受低副作用场景：PowerShell parse、repository policy、source package `-StageOnly`
+dry-run、以及带仓库外 `RuntimePublishRoot` 的完整性检查。`release-readiness.json.componentProgress`
+会把这些场景标记为 `documented-low-cost-only`。任何 `-Live` Notepad 5s、真实 R0、Hyper-V VM mutation
+或 heavy E2E 都必须由 release manager 在 lab host 显式运行，并记录 `job id`、commit、runtime root、
+生成时间和报告路径；否则 release notes 写“本候选未刷新 fresh live evidence”。

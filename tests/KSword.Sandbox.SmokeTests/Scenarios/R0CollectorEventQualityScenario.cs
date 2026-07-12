@@ -271,6 +271,12 @@ internal sealed class R0CollectorEventQualityScenario : ISmokeTestScenario
         RequireContains(eventParser, "zhTlsCorrelationHint", "Network parser must emit Chinese TLS correlation hints.");
         RequireContains(eventParser, "observedSequenceSpan", "READ_EVENTS summaries must expose observed sequence span.");
         RequireContains(eventParser, "backpressureSeverity", "READ_EVENTS summaries must classify backpressure severity.");
+        RequireContains(eventParser, "batchSummaryVersion", "READ_EVENTS summaries must version compact batch evidence.");
+        RequireContains(eventParser, "sequenceCountScope", "READ_EVENTS summaries must define sequence counter scope.");
+        RequireContains(eventParser, "noiseObservedCount", "READ_EVENTS summaries must expose explicit noise counters.");
+        RequireContains(eventParser, "lossObservedCount", "READ_EVENTS summaries must expose explicit loss counters.");
+        RequireContains(eventParser, "abiCompatibility", "Capabilities rows must expose ABI compatibility diagnostics.");
+        RequireContains(eventParser, "abiMismatchReasons", "Capabilities rows must expose concrete ABI mismatch reasons.");
 
         RequireContains(options, "--max-events", "Collector CLI must expose a READ_EVENTS max-events stress knob.");
         RequireContains(options, "--max-read-batches", "Collector CLI must expose a bounded drain batch knob.");
@@ -1063,6 +1069,14 @@ internal sealed class R0CollectorEventQualityScenario : ISmokeTestScenario
         AssertMonotonicStressSequences(jsonLines.Events);
 
         var executableReadEvents = RequireEvent(jsonLines.Events, "r0collector.driverReadEvents");
+        RequireData(executableReadEvents, "batchSummaryVersion", "2");
+        RequireData(executableReadEvents, "batchKind", "synthetic-stress-read-events");
+        RequireData(executableReadEvents, "batchCounterScope", "synthetic-no-device-stress-corpus");
+        RequireData(executableReadEvents, "sequenceScope", "counted-stress-driver-file-rows");
+        RequireData(executableReadEvents, "sequenceCountScope", "StressJsonlExpectedDriverRows-only");
+        RequireData(executableReadEvents, "noiseObservedCount", "0");
+        RequireData(executableReadEvents, "lossObservedCount", "0");
+        RequireData(executableReadEvents, "backpressureObservedCount", "0");
         RequireData(executableReadEvents, "recordsProcessed", ExpectedStressDriverRows.ToString());
         RequireData(executableReadEvents, "collectorAbiVersion", AbiVersion);
         RequireData(executableReadEvents, "selfNoiseFilterMatched", "false");

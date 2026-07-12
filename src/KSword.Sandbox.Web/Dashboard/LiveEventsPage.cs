@@ -258,6 +258,7 @@ internal static class LiveEventsPage
                 <span class="pill quiet" data-copy="live monitor always shows report, events, driver-events, dropped files, screenshots, memory dumps, and PCAP lanes">报告、events、驱动遥测、落地文件、截图、内存转储、PCAP 均保留卡片 lane</span>
               </p>
               <div id="reportReadyActions" class="report-ready muted" data-copy="报告待生成 / reports pending">报告按钮会在运行结束后保持可用。</div>
+              <div id="artifactReadinessPanel" class="report-ready muted" data-copy="证据就绪面板加载中 / artifact readiness panel loading">证据就绪面板加载中。</div>
               <div id="artifactCards" class="artifact-card-grid">
                 <article class="artifact-card waiting muted" data-copy="证据路径解析中 / artifacts pending" data-zh="正在解析证据（artifact）路径。" data-en="Resolving artifact paths.">正在解析证据（artifact）路径。</article>
               </div>
@@ -812,7 +813,8 @@ internal static class LiveEventsPage
               const importMessage = snapshot.guestImportMessage
                 ? `<p class="${snapshot.guestImportSucceeded ? 'ok' : 'muted'}" data-copy="${escapeAttr(snapshot.guestImportMessage)}">${escapeHtml(localizeServerMessage(snapshot.guestImportMessage))}</p>`
                 : '';
-              const outputNotice = `<p class="muted">${escapeHtml(t('实时页不展示命令行、标准输出 stdout 或标准错误 stderr；这里只显示可读进度。需要排障时请打开执行流程或复制 runbook-execution.json 路径。', 'The Live page does not show command lines, stdout, or stderr; it only shows readable progress. For troubleshooting, open Execution flow or copy the runbook-execution.json path.'))}</p>`;
+              const outputNotice = `<p class="muted">${escapeHtml(t('实时页默认不展开命令行、标准输出 stdout 或标准错误 stderr；这里只显示可读进度。终态排障输出仅放在折叠面板内。', 'The Live page keeps command lines, stdout, and stderr collapsed by default; readable progress stays visible. Terminal troubleshooting output is available only inside a collapsed panel.'))}</p>`;
+              const outputDetails = renderExecutionOutputDetails(snapshot);
               target.innerHTML = `
                 <div class="card-status"><span class="pill ${backgroundStateTone(state)}">${escapeHtml(stateLabel)}</span>
                   <strong>${escapeHtml(snapshot.live ? t('虚拟机分析', 'VM analysis') : t('流程验证', 'flow verification'))}</strong>
@@ -823,7 +825,8 @@ internal static class LiveEventsPage
                 ${message ? `<p>${escapeHtml(message)}</p>` : ''}
                 ${importMessage}
                 ${reportButtons}
-                ${outputNotice}`;
+                ${outputNotice}
+                ${outputDetails}`;
               target.setAttribute('data-copy', `后台分析 ${stateLabel}; 进度=${progress.percentText}; 当前=${currentStep}; 耗时=${elapsed}; 消息=${message}`);
               renderOperatorCockpit();
               if (autoOpenReportFromMonitor && state === 'completed' && !reportAutoOpenScheduled) {
@@ -1230,7 +1233,8 @@ internal static class LiveEventsPage
               const summary = summarizeArtifactReadiness();
               const tone = summary.readyCount > 0 ? 'ready' : (summary.indexLoaded ? 'waiting' : 'quiet');
               const headline = t(`${summary.readyCount}/${summary.totalCount} 类证据就绪`, `${summary.readyCount}/${summary.totalCount} evidence lanes ready`);
-              const copy = `${headline}; indexed=${summary.indexLoaded}; downloadable=${summary.downloadableCount}; rejections=${summary.rejectionCount}`;
+              const laneSummary = `${t('已就绪', 'ready')}: ${(summary.readyLanes || []).slice(0, 6).join('、') || t('暂无', 'none')}; ${t('等待', 'waiting')}: ${(summary.waitingLanes || []).slice(0, 6).join('、') || t('暂无', 'none')}`;
+              const copy = `${headline}; indexed=${summary.indexLoaded}; downloadable=${summary.downloadableCount}; rejections=${summary.rejectionCount}; ${laneSummary}`;
               return {
                 copy,
                 html: `<article class="cockpit-card ${tone}" data-copy="${escapeAttr(copy)}">
@@ -1242,7 +1246,7 @@ internal static class LiveEventsPage
                     <span class="pill ${summary.rejectionCount > 0 ? 'failed' : 'ready'}" data-copy="${escapeAttr(String(summary.rejectionCount))}">${escapeHtml(t(`拒绝 ${summary.rejectionCount}`, `${summary.rejectionCount} rejected`))}</span>
                     ${cockpitCopyButton(copy)}
                   </div>
-                  <p class="muted">${escapeHtml(t('摘要来自 artifact index 与采集信号；详细 selector 在下方卡片展开。', 'Summary comes from artifact index and collection signals; detailed selectors expand in cards below.'))}</p>
+                  <p class="muted" data-copy="${escapeAttr(laneSummary)}">${escapeHtml(t('摘要来自 artifact index 与采集信号；详细 selector 在下方卡片展开。', 'Summary comes from artifact index and collection signals; detailed selectors expand in cards below.'))}</p>
                 </article>`
               };
             }
@@ -1290,8 +1294,35 @@ internal static class LiveEventsPage
                 readyCount,
                 totalCount,
                 downloadableCount,
-                rejectionCount
+                rejectionCount,
+                readyLanes: rows.filter(row => row && row.ready).map(row => row.displayName || row.fileName).filter(Boolean),
+                waitingLanes: rows.filter(row => row && !row.ready).map(row => row.displayName || row.fileName).filter(Boolean)
               };
+            }
+
+            function renderArtifactReadinessPanel() {
+              const target = document.getElementById('artifactReadinessPanel');
+              if (!target) { return; }
+
+              const summary = summarizeArtifactReadiness();
+              const readyText = summary.readyLanes.length > 0 ? summary.readyLanes.slice(0, 8).join('、') : t('暂无', 'none');
+              const waitingText = summary.waitingLanes.length > 0 ? summary.waitingLanes.slice(0, 8).join('、') : t('暂无', 'none');
+              const copy = `证据就绪=${summary.readyCount}/${summary.totalCount}; 可下载=${summary.downloadableCount}; 拒绝诊断=${summary.rejectionCount}; 已就绪=${readyText}; 等待=${waitingText}`;
+              target.className = `report-ready ${summary.readyCount > 0 ? 'ok' : 'muted'}`;
+              target.setAttribute('data-copy', copy);
+              target.innerHTML = `
+                <div class="artifact-group-title">
+                  <strong>${escapeHtml(t('证据就绪面板', 'Artifact readiness panel'))}</strong>
+                  ${cockpitCopyButton(copy)}
+                </div>
+                <div class="artifact-chip-row">
+                  <span class="pill ${summary.indexLoaded ? 'ready' : 'waiting'}" data-copy="${escapeAttr(summary.indexLoaded ? t('证据索引已返回', 'artifact index loaded') : t('等待证据索引', 'waiting for artifact index'))}">${escapeHtml(summary.indexLoaded ? t('索引已返回', 'index loaded') : t('等待索引', 'waiting index'))}</span>
+                  <span class="pill ${summary.readyCount > 0 ? 'ready' : 'waiting'}" data-copy="${escapeAttr(`${summary.readyCount}/${summary.totalCount}`)}">${escapeHtml(t(`${summary.readyCount}/${summary.totalCount} 类就绪`, `${summary.readyCount}/${summary.totalCount} lanes ready`))}</span>
+                  <span class="pill endpoint" data-copy="${escapeAttr(String(summary.downloadableCount))}">${escapeHtml(t(`可下载 ${summary.downloadableCount}`, `${summary.downloadableCount} downloadable`))}</span>
+                  <span class="pill ${summary.rejectionCount > 0 ? 'failed' : 'ready'}" data-copy="${escapeAttr(String(summary.rejectionCount))}">${escapeHtml(t(`拒绝诊断 ${summary.rejectionCount}`, `${summary.rejectionCount} rejections`))}</span>
+                </div>
+                <p class="muted" data-copy="${escapeAttr(readyText)}"><strong>${escapeHtml(t('已就绪：', 'Ready: '))}</strong>${escapeHtml(readyText)}</p>
+                <p class="muted" data-copy="${escapeAttr(waitingText)}"><strong>${escapeHtml(t('等待：', 'Waiting: '))}</strong>${escapeHtml(waitingText)}</p>`;
             }
 
             function progressStreamLabel() {
@@ -1342,6 +1373,7 @@ internal static class LiveEventsPage
               const rows = buildIndexedArtifactRows(paths);
               latestArtifactRows = rows;
               body.innerHTML = renderArtifactIndexSummary() + renderArtifactGroups(rows);
+              renderArtifactReadinessPanel();
               renderReportReadyActions(paths);
               renderOperatorCockpit();
             }
@@ -1497,6 +1529,8 @@ internal static class LiveEventsPage
               rows.push({
                 groupKey,
                 groupLabel: artifactGroupLabel(groupKey),
+                displayName,
+                fileName,
                 ready: Boolean(ready),
                 html: artifactRow(displayName, fileName, path, href, ready, detail, artifact)
               });

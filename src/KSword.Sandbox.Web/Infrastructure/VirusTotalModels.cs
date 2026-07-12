@@ -142,6 +142,44 @@ internal sealed record VirusTotalThreatClassification
     public string? TopThreatName => PopularThreatNames.Count > 0
         ? PopularThreatNames[0].Value
         : null;
+
+    public string? PopularThreatCategorySummary => FormatThreatItems(PopularThreatCategories, 6);
+
+    public string? PopularThreatNameSummary => FormatThreatItems(PopularThreatNames, 6);
+
+    public string? ThreatClassificationSummary
+    {
+        get
+        {
+            var parts = new List<string>();
+            if (!string.IsNullOrWhiteSpace(SuggestedThreatLabel))
+            {
+                parts.Add($"label={SuggestedThreatLabel.Trim()}");
+            }
+
+            if (!string.IsNullOrWhiteSpace(PopularThreatCategorySummary))
+            {
+                parts.Add($"categories={PopularThreatCategorySummary}");
+            }
+
+            if (!string.IsNullOrWhiteSpace(PopularThreatNameSummary))
+            {
+                parts.Add($"names={PopularThreatNameSummary}");
+            }
+
+            return parts.Count == 0 ? null : string.Join("; ", parts);
+        }
+    }
+
+    private static string? FormatThreatItems(IReadOnlyList<VirusTotalThreatClassificationItem> values, int limit)
+    {
+        return values.Count == 0
+            ? null
+            : string.Join(", ", values
+                .Where(static value => !string.IsNullOrWhiteSpace(value.Value))
+                .Select(static value => $"{value.Value.Trim()}:{Math.Max(0, value.Count).ToString(CultureInfo.InvariantCulture)}")
+                .Take(Math.Max(1, limit)));
+    }
 }
 
 /// <summary>
@@ -185,6 +223,113 @@ internal sealed record VirusTotalOfficialFileObject
     public DateTimeOffset? FirstSeenInTheWildDateUtc { get; init; }
 
     public VirusTotalThreatClassification ThreatClassification { get; init; } = new();
+
+    public string? NamesSummary => JoinValues(Names, 8);
+
+    public string? TagsSummary => JoinValues(Tags, 12);
+
+    public string? TypeSummary
+    {
+        get
+        {
+            var parts = new List<string>();
+            if (!string.IsNullOrWhiteSpace(FileTypeDescription))
+            {
+                parts.Add(FileTypeDescription.Trim());
+            }
+
+            if (!string.IsNullOrWhiteSpace(TypeTag) &&
+                !parts.Contains(TypeTag.Trim(), StringComparer.OrdinalIgnoreCase))
+            {
+                parts.Add(TypeTag.Trim());
+            }
+
+            if (!string.IsNullOrWhiteSpace(Magic))
+            {
+                parts.Add(Magic.Trim());
+            }
+
+            return parts.Count == 0 ? null : string.Join(" / ", parts.Take(3));
+        }
+    }
+
+    public string? OfficialSummary
+    {
+        get
+        {
+            var parts = new List<string>();
+            if (!string.IsNullOrWhiteSpace(TypeSummary))
+            {
+                parts.Add($"type={TypeSummary}");
+            }
+
+            if (SizeBytes is not null)
+            {
+                parts.Add($"sizeBytes={SizeBytes.Value.ToString(CultureInfo.InvariantCulture)}");
+            }
+
+            if (!string.IsNullOrWhiteSpace(NamesSummary))
+            {
+                parts.Add($"names={NamesSummary}");
+            }
+
+            if (!string.IsNullOrWhiteSpace(TagsSummary))
+            {
+                parts.Add($"tags={TagsSummary}");
+            }
+
+            if (!string.IsNullOrWhiteSpace(ThreatClassification.ThreatClassificationSummary))
+            {
+                parts.Add($"threat={ThreatClassification.ThreatClassificationSummary}");
+            }
+
+            return parts.Count == 0 ? null : string.Join("; ", parts);
+        }
+    }
+
+    public string? ZhOfficialSummary
+    {
+        get
+        {
+            var parts = new List<string>();
+            if (!string.IsNullOrWhiteSpace(TypeSummary))
+            {
+                parts.Add($"类型={TypeSummary}");
+            }
+
+            if (SizeBytes is not null)
+            {
+                parts.Add($"大小={SizeBytes.Value.ToString(CultureInfo.InvariantCulture)} bytes");
+            }
+
+            if (!string.IsNullOrWhiteSpace(NamesSummary))
+            {
+                parts.Add($"名称={NamesSummary}");
+            }
+
+            if (!string.IsNullOrWhiteSpace(TagsSummary))
+            {
+                parts.Add($"标签={TagsSummary}");
+            }
+
+            if (!string.IsNullOrWhiteSpace(ThreatClassification.ThreatClassificationSummary))
+            {
+                parts.Add($"威胁分类={ThreatClassification.ThreatClassificationSummary}");
+            }
+
+            return parts.Count == 0 ? null : string.Join("；", parts);
+        }
+    }
+
+    private static string? JoinValues(IReadOnlyList<string> values, int limit)
+    {
+        return values.Count == 0
+            ? null
+            : string.Join(", ", values
+                .Where(static value => !string.IsNullOrWhiteSpace(value))
+                .Select(static value => value.Trim())
+                .Take(Math.Max(1, limit)));
+    }
 }
 
 /// <summary>
@@ -321,6 +466,20 @@ internal sealed record VirusTotalLookupResult
 
     public string? TopThreatName => ThreatClassification.TopThreatName;
 
+    public string? PopularThreatCategorySummary => ThreatClassification.PopularThreatCategorySummary;
+
+    public string? PopularThreatNameSummary => ThreatClassification.PopularThreatNameSummary;
+
+    public string? ThreatClassificationSummary => ThreatClassification.ThreatClassificationSummary;
+
+    public string? OfficialFileObjectSummary => OfficialFileObject.OfficialSummary;
+
+    public string? ZhOfficialFileObjectSummary => OfficialFileObject.ZhOfficialSummary;
+
+    public int LastAnalysisResultCount => LastAnalysisStats.Values.Where(static value => value > 0).Sum();
+
+    public string LastAnalysisCategorySummary => BuildLastAnalysisCategorySummary();
+
     public bool CacheHit { get; init; }
 
     public DateTimeOffset? CachedAtUtc { get; init; }
@@ -412,6 +571,10 @@ internal sealed record VirusTotalLookupResult
             ["vtDetectionCount"] = DetectionCount.ToString(CultureInfo.InvariantCulture),
             ["vtEngineCount"] = EngineCount.ToString(CultureInfo.InvariantCulture),
             ["engineCount"] = EngineCount.ToString(CultureInfo.InvariantCulture),
+            ["vtLastAnalysisResultCount"] = LastAnalysisResultCount.ToString(CultureInfo.InvariantCulture),
+            ["lastAnalysisResultCount"] = LastAnalysisResultCount.ToString(CultureInfo.InvariantCulture),
+            ["vtLastAnalysisCategorySummary"] = LastAnalysisCategorySummary,
+            ["lastAnalysisCategorySummary"] = LastAnalysisCategorySummary,
             ["cacheHit"] = CacheHit ? "true" : "false"
         };
 
@@ -477,9 +640,17 @@ internal sealed record VirusTotalLookupResult
         AddIfPresent(data, "vtMagic", OfficialFileObject.Magic);
         AddIfPresent(data, "vtNames", JoinValues(OfficialFileObject.Names));
         AddIfPresent(data, "vtTags", JoinValues(OfficialFileObject.Tags));
+        AddIfPresent(data, "vtNamesSummary", OfficialFileObject.NamesSummary);
+        AddIfPresent(data, "vtTagsSummary", OfficialFileObject.TagsSummary);
+        AddIfPresent(data, "vtTypeSummary", OfficialFileObject.TypeSummary);
+        AddIfPresent(data, "vtOfficialFileObjectSummary", OfficialFileObject.OfficialSummary);
+        AddIfPresent(data, "vtZhOfficialFileObjectSummary", OfficialFileObject.ZhOfficialSummary);
         AddIfPresent(data, "vtSuggestedThreatLabel", ThreatClassification.SuggestedThreatLabel);
         AddIfPresent(data, "vtTopThreatCategory", ThreatClassification.TopThreatCategory);
         AddIfPresent(data, "vtTopThreatName", ThreatClassification.TopThreatName);
+        AddIfPresent(data, "vtPopularThreatCategorySummary", ThreatClassification.PopularThreatCategorySummary);
+        AddIfPresent(data, "vtPopularThreatNameSummary", ThreatClassification.PopularThreatNameSummary);
+        AddIfPresent(data, "vtThreatClassificationSummary", ThreatClassification.ThreatClassificationSummary);
 
         if (OfficialFileObject.SizeBytes is not null)
         {
@@ -495,6 +666,19 @@ internal sealed record VirusTotalLookupResult
         var nameVotes = FormatThreatItems(ThreatClassification.PopularThreatNames);
         AddIfPresent(data, "vtPopularThreatCategories", categoryVotes);
         AddIfPresent(data, "vtPopularThreatNames", nameVotes);
+    }
+
+    private string BuildLastAnalysisCategorySummary()
+    {
+        var ordered = LastAnalysisStats
+            .Where(static item => item.Value > 0)
+            .OrderByDescending(static item => item.Value)
+            .ThenBy(static item => item.Key, StringComparer.OrdinalIgnoreCase)
+            .Take(12)
+            .Select(static item => $"{item.Key}:{item.Value.ToString(CultureInfo.InvariantCulture)}")
+            .ToArray();
+
+        return ordered.Length == 0 ? "none" : string.Join(", ", ordered);
     }
 
     public VirusTotalLookupResult WithCacheMetadata(

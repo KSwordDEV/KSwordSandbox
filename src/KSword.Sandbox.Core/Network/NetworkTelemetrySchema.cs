@@ -827,6 +827,22 @@ public static class NetworkTelemetrySchema
             AddDnsAnswerScopeFields(data, answers);
         }
 
+        var answerTypeSummary = NormalizeDnsAnswerTypeSummary(FirstDataValue(data, "answerTypeSummary", "dnsAnswerTypeSummary", "dns.answer.type_summary", "dns.answers.type", "dns.rrtype"));
+        AddAliases(data, answerTypeSummary, "answerTypeSummary", "dnsAnswerTypeSummary", "dns.answer.type_summary");
+        if (!string.IsNullOrWhiteSpace(answerTypeSummary))
+        {
+            data["dnsAnswerHasCname"] = BoolString(answerTypeSummary.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Contains("CNAME", StringComparer.OrdinalIgnoreCase));
+        }
+
+        var cnameChain = NormalizeDnsCnameChain(FirstDataValue(data, "cnameChain", "dnsCnameChain", "dns.cname.chain", "dns.cname", "cnameTarget"));
+        AddAliases(data, cnameChain, "cnameChain", "dnsCnameChain", "dns.cname.chain");
+        if (!string.IsNullOrWhiteSpace(cnameChain))
+        {
+            AddIfNotEmpty(data, "cnameTarget", LastDelimitedValue(cnameChain));
+            data["hasCname"] = "true";
+            data["dnsAnswerHasCname"] = "true";
+        }
+
         if (string.Equals(rcode, "NXDOMAIN", StringComparison.OrdinalIgnoreCase))
         {
             data["classification"] = "nxdomain";
@@ -937,6 +953,13 @@ public static class NetworkTelemetrySchema
 
         var userAgent = FirstDataValue(data, "userAgent", "user_agent", "httpUserAgent", "http.user_agent", "http.user_agent.original", "http.request.headers.user-agent", "request.headers.user-agent", "user-agent");
         AddAliases(data, userAgent, "userAgent", "user_agent", "httpUserAgent", "http.user_agent", "http.user_agent.original", "http.request.headers.user-agent", "request.headers.user-agent", "user-agent");
+        AddIfNotEmpty(data, "httpUserAgentFamily", ClassifyHttpUserAgent(userAgent));
+
+        var referer = FirstDataValue(data, "referer", "referrer", "http.referer", "http.request.referrer", "request.headers.referer", "request.headers.referrer");
+        AddAliases(data, referer, "referer", "referrer", "http.referer", "http.request.referrer", "request.headers.referer", "request.headers.referrer");
+
+        var contentDisposition = FirstDataValue(data, "contentDisposition", "httpContentDisposition", "http.content_disposition", "http.response.headers.content-disposition", "response.headers.content-disposition");
+        AddAliases(data, contentDisposition, "contentDisposition", "httpContentDisposition", "http.content_disposition", "http.response.headers.content-disposition", "response.headers.content-disposition");
 
         var requestBodyBytes = NormalizeByteCount(FirstDataValue(
             data,
@@ -992,7 +1015,187 @@ public static class NetworkTelemetrySchema
                 : FirstNonEmpty(requestBodyBytes, responseBodyBytes, requestContentLength, responseContentLength);
         AddAliases(data, bodyBytes, "bodyBytes", "bodySizeBytes", "httpBodyBytes", "http.body.bytes");
         AddIfNotEmpty(data, "contentLength", FirstNonEmpty(FirstDataValue(data, "contentLength"), requestContentLength, responseContentLength));
+        var downloadFilename = FirstNonEmpty(
+            SanitizeFileNameHint(FirstDataValue(data, "downloadFilename", "downloadFileName", "filename", "file.name")),
+            FilenameFromContentDisposition(contentDisposition),
+            FilenameFromUri(uri));
+        AddAliases(data, downloadFilename, "downloadFilename", "downloadFileName", "filename", "file.name", "httpDownloadFilename");
+        if (!string.IsNullOrWhiteSpace(downloadFilename))
+        {
+            data["downloadFilenameSource"] = !string.IsNullOrWhiteSpace(FilenameFromContentDisposition(contentDisposition)) ? "content-disposition" : "uri";
+        }
+
         ApplyHttpTransferHints(data, method, statusCode, uri, requestBodyBytes, responseBodyBytes, requestContentLength, responseContentLength);
+    }
+
+    private static string NormalizeDnsAnswerTypeSummary(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        var types = value.Split(new[] { ',', ';', '|', ' ' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(NormalizeDnsRecordType)
+            .Where(type => !string.IsNullOrWhiteSpace(type))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(type => type, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        return types.Length == 0 ? string.Empty : string.Join(',', types);
+    }
+
+    private static string NormalizeDnsCnameChain(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        var names = value.Split(new[] { "->", ",", ";", "|", " " }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(NormalizeDnsName)
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(16)
+            .ToArray();
+        return names.Length == 0 ? string.Empty : string.Join("->", names);
+    }
+
+    private static string LastDelimitedValue(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        var parts = value.Split(new[] { "->", ",", ";", "|" }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        return parts.Length == 0 ? string.Empty : parts[^1];
+    }
+
+    private static string ClassifyHttpUserAgent(string? userAgent)
+    {
+        if (string.IsNullOrWhiteSpace(userAgent))
+        {
+            return "missing";
+        }
+
+        var value = userAgent.Trim();
+        if (value.Contains("curl", StringComparison.OrdinalIgnoreCase) ||
+            value.Contains("wget", StringComparison.OrdinalIgnoreCase) ||
+            value.Contains("python", StringComparison.OrdinalIgnoreCase) ||
+            value.Contains("powershell", StringComparison.OrdinalIgnoreCase))
+        {
+            return "automation";
+        }
+
+        return value.Contains("mozilla", StringComparison.OrdinalIgnoreCase) ? "browser-like" : "custom";
+    }
+
+    private static string FilenameFromContentDisposition(string? contentDisposition)
+    {
+        if (string.IsNullOrWhiteSpace(contentDisposition))
+        {
+            return string.Empty;
+        }
+
+        foreach (var part in contentDisposition.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var separator = part.IndexOf('=');
+            if (separator <= 0)
+            {
+                continue;
+            }
+
+            var key = part[..separator].Trim();
+            if (!string.Equals(key, "filename", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(key, "filename*", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var value = part[(separator + 1)..].Trim().Trim('"').Trim((char)39);
+            var encodedSeparator = value.IndexOf("''", StringComparison.Ordinal);
+            if (encodedSeparator >= 0 && encodedSeparator + 2 < value.Length)
+            {
+                value = Uri.UnescapeDataString(value[(encodedSeparator + 2)..]);
+            }
+
+            return SanitizeFileNameHint(value);
+        }
+
+        return string.Empty;
+    }
+
+    private static string FilenameFromUri(string? uri)
+    {
+        if (string.IsNullOrWhiteSpace(uri))
+        {
+            return string.Empty;
+        }
+
+        var path = uri.Split('?', '#')[0].Replace("\\", "/", StringComparison.Ordinal);
+        var slash = path.LastIndexOf('/');
+        var fileName = slash >= 0 ? path[(slash + 1)..] : path;
+        return fileName.Contains('.', StringComparison.Ordinal) ? SanitizeFileNameHint(fileName) : string.Empty;
+    }
+
+    private static string SanitizeFileNameHint(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        var fileName = Path.GetFileName(value.Trim().Replace("\\", "/", StringComparison.Ordinal));
+        return string.IsNullOrWhiteSpace(fileName) || fileName is "." or ".." ? string.Empty : fileName;
+    }
+
+    private static string InferCertificateValidityStatus(string notBeforeText, string notAfterText)
+    {
+        if (!DateTimeOffset.TryParse(notBeforeText, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var notBefore) ||
+            !DateTimeOffset.TryParse(notAfterText, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var notAfter))
+        {
+            return string.Empty;
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        if (now < notBefore.ToUniversalTime())
+        {
+            return "not-yet-valid";
+        }
+
+        return now > notAfter.ToUniversalTime() ? "expired" : "valid";
+    }
+
+    private static string CertificateIssuerSummary(string subject, string issuer, string selfSigned)
+    {
+        if (string.Equals(selfSigned, "true", StringComparison.OrdinalIgnoreCase) ||
+            (!string.IsNullOrWhiteSpace(subject) && string.Equals(subject, issuer, StringComparison.OrdinalIgnoreCase)))
+        {
+            return "self-signed";
+        }
+
+        return string.IsNullOrWhiteSpace(issuer) ? string.Empty : "issuer-observed";
+    }
+
+    private static string CertificateRiskReason(IReadOnlyDictionary<string, string> data, string validityStatus)
+    {
+        if (string.Equals(FirstDataValue(data, "certSelfSigned", "certificateSelfSigned", "selfSigned"), "true", StringComparison.OrdinalIgnoreCase))
+        {
+            return "self-signed";
+        }
+
+        if (validityStatus is "expired" or "not-yet-valid")
+        {
+            return validityStatus;
+        }
+
+        var status = FirstDataValue(data, "certificateStatus", "validationStatus", "tls.validation_status", "tls.cert.validation_status");
+        if (status.Contains("invalid", StringComparison.OrdinalIgnoreCase) || status.Contains("untrusted", StringComparison.OrdinalIgnoreCase))
+        {
+            return "invalid-or-untrusted";
+        }
+
+        return status.Contains("parse_error", StringComparison.OrdinalIgnoreCase) ? "parse-error" : string.Empty;
     }
 
     private static void AddDnsAnswerScopeFields(Dictionary<string, string> data, string answers)
@@ -1183,10 +1386,20 @@ public static class NetworkTelemetrySchema
         AddAliases(data, certSelfSigned, "certSelfSigned", "certificateSelfSigned", "selfSigned", "tls.cert.self_signed");
         var certExpired = NormalizeBoolean(FirstDataValue(data, "certExpired", "certificateExpired", "tls.cert.expired"));
         AddAliases(data, certExpired, "certExpired", "certificateExpired", "tls.cert.expired");
+        var validityStatus = FirstNonEmpty(
+            FirstDataValue(data, "certificateValidityStatus", "tlsCertificateValidityStatus"),
+            InferCertificateValidityStatus(certNotBefore, certNotAfter));
+        AddAliases(data, validityStatus, "certificateValidityStatus", "tlsCertificateValidityStatus");
+        AddIfNotEmpty(data, "certificateIssuerSummary", CertificateIssuerSummary(certSubject, certIssuer, certSelfSigned));
+        AddIfNotEmpty(data, "tlsCertificateIssuerSummary", ValueOrEmpty(data, "certificateIssuerSummary"));
+        AddIfNotEmpty(data, "tlsCertificateRiskReason", CertificateRiskReason(data, validityStatus));
+        AddIfNotEmpty(data, "certificateRiskReason", ValueOrEmpty(data, "tlsCertificateRiskReason"));
+        AddIfNotEmpty(data, "tlsCertificateRiskClassification", string.IsNullOrWhiteSpace(ValueOrEmpty(data, "tlsCertificateRiskReason")) ? string.Empty : "certificate-anomaly");
 
         if (IsSuspiciousCertificate(data))
         {
             AddIfNotEmpty(data, "tlsCertificateRisk", "suspicious");
+            AddIfNotEmpty(data, "protocolHealth", "warning");
             AddIfNotEmpty(data, "zhHint", "TLS 证书状态异常或自签名；请结合 SNI、JA3/JA3S、目标 IP 和 VT/情报结果复核。");
         }
     }

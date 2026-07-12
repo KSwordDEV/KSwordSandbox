@@ -1,11 +1,10 @@
-# KSwordSandbox project framework
+# KSwordSandbox 项目框架 / project framework
 
-This repository is being expanded as a multi-project Windows sandbox rather
-than a single flat prototype. The intent is to keep each domain large enough to
-accept parallel work without making later R0, Hyper-V, WebUI, and reporting
-changes fight over the same files.
+本仓库正在从单一扁平 prototype 扩展为多项目 Windows sandbox。目标是让各领域有足够清晰的边界，支持并行工作，同时减少后续 R0、Hyper-V、WebUI 和 reporting 改动争抢同一批文件。
 
-## Module ownership
+English summary: the repository is a multi-project Windows sandbox with boundaries for parallel R0, Hyper-V, WebUI, and reporting work.
+
+## 模块归属 / Module ownership
 
 - `src/KSword.Sandbox.Abstractions`: stable contracts shared by host, guest,
   tests, and report tooling.
@@ -24,7 +23,7 @@ changes fight over the same files.
 - `tests/KSword.Sandbox.SmokeTests`: scenario-based verification for build,
   synthetic events, report content, and repository policy.
 
-## Near-term expansion rules
+## 近期扩展规则 / Near-term expansion rules
 
 1. Prefer new focused files over adding more responsibilities to existing
    large files.
@@ -35,7 +34,7 @@ changes fight over the same files.
 5. Keep the Hyper-V live path usable even when R0 driver signing or WDK setup
    is temporarily blocked.
 
-## Suggested next split
+## 建议拆分方向 / Suggested next split
 
 - Web worker: endpoint groups, dashboard renderer, request/response contracts.
 - Guest worker: modular probes and sidecar collector lifecycle.

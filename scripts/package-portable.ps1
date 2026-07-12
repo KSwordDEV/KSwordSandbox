@@ -758,6 +758,60 @@ function Get-PackageOperatorRecommendedActions {
     return @($actions.ToArray())
 }
 
+
+function Get-ReleaseComponentProgressSnapshot {
+    $now = [DateTimeOffset]::UtcNow.ToString('O')
+    return [ordered]@{
+        schema = 'ksword.release.component-progress.v1'
+        generatedAtUtc = $now
+        purpose = 'Machine-readable reviewer snapshot for deployment/productization handoff; it is not fresh Hyper-V/live evidence.'
+        noFreshLiveEvidenceGenerated = $true
+        releaseNotesFallbackZh = '本候选未刷新 fresh live evidence'
+        components = @(
+            [ordered]@{
+                id = 'runtime-publish-root'
+                titleZh = 'RuntimePublishRoot 完整性'
+                state = if ($PackageKind -eq 'runtime' -and [bool]$script:operatorDiagnostics.runtimeDryRunGuardrail.handoffAllowed) { 'ready-for-handoff' } elseif ($PackageKind -eq 'runtime') { 'blocked-needs-external-publish-root' } else { 'not-applicable-to-source-package' }
+                evidence = @('operatorDiagnostics.runtimePublishEntries', 'operatorDiagnostics.runtimePublishSummary', 'sourceRuntimeSafetyMetadata.runtimePackage')
+                handoffGate = 'external RuntimePublishRoot plus -RequireCompleteRuntimePayloads; no repository bin/obj/x64 fallback'
+                remediationZh = '先发布 host-web、guest-tools、tools/job-tool、tools/postprocess 到仓库外 RuntimePublishRoot，再重跑 readiness/package 完整 runtime 检查。'
+            },
+            [ordered]@{
+                id = 'package-safety-contract'
+                titleZh = '包安全边界'
+                state = 'guarded'
+                evidence = @('safetyContract', 'safeExclusionCategories', 'fileInventory.sha256')
+                handoffGate = 'no samples, reports, VM state, secrets, signing material, driver binaries, generated artifacts, or CSignTool'
+                remediationZh = '若 package-manifest.generated.json 中出现 rejectIfPresent 项，丢弃该包并修正 manifest/exclude/source root。'
+            },
+            [ordered]@{
+                id = 'reviewer-checklist'
+                titleZh = '审阅者 checklist JSON'
+                state = 'generated'
+                evidence = @('reviewerChecklist', 'componentProgress', 'operatorGuidance')
+                handoffGate = 'reviewer confirms source/runtime gates and release-note no-fresh-live wording'
+                remediationZh = '审阅时优先检查 reviewerChecklist.mustPassBeforeRuntimeHandoff 与 rejectIfPresent。'
+            },
+            [ordered]@{
+                id = 'fresh-live-guardrail'
+                titleZh = '不冒充 fresh live 证据'
+                state = 'guarded-not-generated'
+                evidence = @('freshLiveEvidenceGuardrail', 'releaseNotesFallbackZh')
+                handoffGate = 'fresh live claim requires explicit lab job id, commit, runtime root, timestamp, and report paths'
+                remediationZh = '没有实验室 job id 时，release notes 必须写“本候选未刷新 fresh live evidence”。'
+            },
+            [ordered]@{
+                id = 'operator-remediation-zh'
+                titleZh = '中文操作者修复提示'
+                state = 'documented'
+                evidence = @('recommendedActions', 'externalStateDiagnostics', 'docs/install.md', 'docs/run.md', 'docs/release.md')
+                handoffGate = 'common deployment gaps have Chinese next-step commands before live execution'
+                remediationZh = '先运行 install/run CheckEnvironment，再按 RecommendedActions 修复 Hyper-V、VM profile、payload、VT key 或 runtime root。'
+            }
+        )
+    }
+}
+
 function Write-PackageOperatorDiagnostic {
     param(
         [Parameter(Mandatory)]
@@ -898,6 +952,7 @@ function Update-PackageOperatorDiagnostics {
         )
         chineseGuidance = '中文提示：runtime 便携包如果没有 RuntimePublishRoot 也可做 layout dry-run；完整交付必须传入仓库外 RuntimePublishRoot 并使用 -RequireCompleteRuntimePayloads。package/readiness 不会生成 fresh live evidence。'
     }
+    $script:operatorDiagnostics.componentProgress = Get-ReleaseComponentProgressSnapshot
 }
 
 # Assert-RuntimePackageArchiveRequiresCompletePayloads prevents accidental
@@ -1184,6 +1239,7 @@ function Write-GeneratedPackageManifest {
         packageDiagnostics = @($script:packageDiagnostics.ToArray())
         operatorDiagnostics = $script:operatorDiagnostics
         reviewerChecklist = $script:operatorDiagnostics.reviewerChecklist
+        componentProgress = $script:operatorDiagnostics.componentProgress
         sourceRuntimeSafetyMetadata = [ordered]@{
             chinese = '中文提示：source 包只交付源码/规则/文档/测试/脚本；runtime 包只从仓库外 RuntimePublishRoot 复制已发布 payload。两类包都不得包含本机 secret、VM 状态、样本、报告、dump/pcap/trace、签名材料或仓库 build output。'
             sourcePackage = [ordered]@{

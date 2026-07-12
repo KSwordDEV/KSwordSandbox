@@ -440,6 +440,10 @@ public sealed class NetworkSidecarEventImporter
             "_source.layers.dns.dns.aaaa",
             "_source.layers.dns.dns.cname");
         AddAliases(extra, answer, "answer", "answers", "dnsAnswer", "dnsAnswers", "resolvedIp", "resolvedIps", "resolvedAddress", "resolvedAddresses", "answerIp", "answerAddress", "dns.answer", "dns.answers", "dns.answers.data", "dns.answers.name", "dns.resp.name", "dns.a", "dns.aaaa", "dns.cname");
+        NetworkTelemetrySchema.AddIfNotEmpty(extra, "answerTypeSummary", FirstValue(fields, "answerTypeSummary", "dnsAnswerTypeSummary", "dns.answers.type", "dns.rrtype", "_source.layers.dns.dns.resp.type"));
+        NetworkTelemetrySchema.AddIfNotEmpty(extra, "dnsAnswerTypeSummary", FirstValue(fields, "answerTypeSummary", "dnsAnswerTypeSummary", "dns.answers.type", "dns.rrtype", "_source.layers.dns.dns.resp.type"));
+        NetworkTelemetrySchema.AddIfNotEmpty(extra, "cnameChain", FirstValue(fields, "cnameChain", "dnsCnameChain", "dns.cname.chain", "dns.cname", "_source.layers.dns.dns.cname"));
+        NetworkTelemetrySchema.AddIfNotEmpty(extra, "dnsCnameChain", FirstValue(fields, "cnameChain", "dnsCnameChain", "dns.cname.chain", "dns.cname", "_source.layers.dns.dns.cname"));
         NetworkTelemetrySchema.AddIfNotEmpty(extra, "answerCount", FirstNonEmpty(FirstValue(fields, "answerCount", "answersCount", "dns.answers.count", "dns.count.answers"), CountDelimitedValues(answer)));
         NetworkTelemetrySchema.AddIfNotEmpty(extra, "ttl", FirstValue(fields, "ttl", "dns.ttl", "dns.resp.ttl", "dns.answers.ttl"));
         NetworkTelemetrySchema.AddIfNotEmpty(extra, "recordClass", FirstValue(fields, "recordClass", "queryClass", "dns.qry.class", "dns.question.class"));
@@ -500,7 +504,11 @@ public sealed class NetworkSidecarEventImporter
         AddAliases(extra, statusCode, "statusCode", "responseStatusCode", "httpStatusCode", "httpStatus", "status", "responseCode", "http.response.status_code", "http.response.code", "http.status_code", "http.status", "status_code", "response.status_code", "sc-status");
         NetworkTelemetrySchema.AddIfNotEmpty(extra, "statusFamily", StatusFamily(statusCode));
         NetworkTelemetrySchema.AddIfNotEmpty(extra, "payloadMagic", FirstValue(fields, "payloadMagic", "file.magic"));
-        NetworkTelemetrySchema.AddIfNotEmpty(extra, "referer", FirstValue(fields, "referer", "referrer", "http.referer", "http.request.referrer", "request.headers.referer"));
+        var referer = FirstValue(fields, "referer", "referrer", "http.referer", "http.request.referrer", "request.headers.referer", "request.headers.referrer");
+        AddAliases(extra, referer, "referer", "referrer", "http.referer", "http.request.referrer", "request.headers.referer", "request.headers.referrer");
+        var contentDisposition = FirstValue(fields, "contentDisposition", "httpContentDisposition", "http.content_disposition", "http.response.headers.content-disposition", "response.headers.content-disposition");
+        AddAliases(extra, contentDisposition, "contentDisposition", "httpContentDisposition", "http.content_disposition", "http.response.headers.content-disposition", "response.headers.content-disposition");
+        AddAliases(extra, FirstValue(fields, "downloadFilename", "downloadFileName", "filename", "file.name", "http.file_data.filename"), "downloadFilename", "downloadFileName", "filename", "file.name", "httpDownloadFilename");
         NetworkTelemetrySchema.AddIfNotEmpty(extra, "contentEncoding", FirstValue(fields, "contentEncoding", "http.content_encoding", "http.response.content_encoding"));
 
         var requestBytes = FirstValue(fields, "requestBodyBytes", "requestBytes", "http.request.body.bytes", "http.request.body.size", "http.request.bytes", "request.bytes", "requestContentLength", "http.request.headers.content_length", "bytes_toserver", "orig_bytes");
@@ -560,11 +568,15 @@ public sealed class NetworkSidecarEventImporter
         NetworkTelemetrySchema.AddIfNotEmpty(extra, "validationStatus", validationStatus);
         NetworkTelemetrySchema.AddIfNotEmpty(extra, "certSelfSigned", NormalizeBoolean(FirstValue(fields, "certSelfSigned", "selfSigned", "certificate.self_signed", "tls.cert.self_signed")));
         NetworkTelemetrySchema.AddIfNotEmpty(extra, "certExpired", NormalizeBoolean(FirstValue(fields, "certExpired", "certificate.expired", "tls.cert.expired")));
+        NetworkTelemetrySchema.AddIfNotEmpty(extra, "certificateValidityStatus", FirstValue(fields, "certificateValidityStatus", "tlsCertificateValidityStatus", "x509.validity.status"));
+        NetworkTelemetrySchema.AddIfNotEmpty(extra, "tlsCertificateRiskReason", FirstValue(fields, "tlsCertificateRiskReason", "certificateRiskReason", "tls.cert.risk_reason"));
+        NetworkTelemetrySchema.AddIfNotEmpty(extra, "tlsCertificateRiskClassification", FirstValue(fields, "tlsCertificateRiskClassification", "certificateRiskClassification", "tls.cert.risk_classification"));
         if (Contains(validationStatus, "invalid") ||
             Contains(validationStatus, "self") ||
             string.Equals(FirstValue(fields, "certSelfSigned", "selfSigned", "certificate.self_signed", "tls.cert.self_signed"), "true", StringComparison.OrdinalIgnoreCase))
         {
             extra["tlsCertificateRisk"] = "suspicious";
+            extra["protocolHealth"] = "warning";
             extra["zhHint"] = "TLS 证书状态异常或自签名；请结合 SNI、JA3/JA3S、目标 IP 和 VT/情报结果复核。";
         }
     }

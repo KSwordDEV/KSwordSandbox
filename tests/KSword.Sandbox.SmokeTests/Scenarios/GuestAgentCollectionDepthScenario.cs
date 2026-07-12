@@ -37,6 +37,9 @@ internal sealed class GuestAgentCollectionDepthScenario : ISmokeTestScenario
         AssertFileContains(Path.Combine(collectionRoot, "ProcessTreeProbe.cs"), "isDirectChildOfRoot", "Process tree events must distinguish direct children from deeper descendants.");
         AssertFileContains(Path.Combine(collectionRoot, "ProcessTreeProbe.cs"), "processExited", "Process tree missing rows must preserve exited markers.");
         AssertFileContains(Path.Combine(collectionRoot, "ProcessTreeProbe.cs"), "rootExited", "Process tree summaries must preserve root-exited markers.");
+        AssertFileContains(Path.Combine(collectionRoot, "ProcessTreeProbe.cs"), "missingTreeLineageStatus", "Process tree missing rows must explain lineage recovery state.");
+        AssertFileContains(Path.Combine(collectionRoot, "ProcessTreeProbe.cs"), "visibleDeeperDescendantProcessCount", "Process tree summaries must count deeper visible descendants separately.");
+        AssertFileContains(Path.Combine(collectionRoot, "ProcessTreeProbe.cs"), "rootOrphanedTreeRecovered", "Process tree summaries must mark recovered orphaned root-child trees.");
         AssertFileContains(Path.Combine(collectionRoot, "ProcessTreeProbe.cs"), "rootTreeMetadata", "New process rows should reuse root-tree metadata when lineage is available.");
         AssertFileContains(Path.Combine(collectionRoot, "ProcessTreeProbe.cs"), "zhMessage", "Process tree events must include Chinese report text.");
         AssertFileContains(Path.Combine(collectionRoot, "ProcessTreeProbe.cs"), "reasonTaxonomy", "Process tree missing/summary rows must expose stable reason taxonomy.");
@@ -134,6 +137,9 @@ internal sealed class GuestAgentCollectionDepthScenario : ISmokeTestScenario
         AssertFileContains(Path.Combine(collectionRoot, "MemoryDumpProbe.cs"), "descendantCoverageCompleteness", "Memory dump sweep must expose report-ready descendant coverage completeness.");
         AssertFileContains(Path.Combine(collectionRoot, "MemoryDumpProbe.cs"), "directChildProcessDumpTarget", "Memory dump events must flag direct-child dump targets.");
         AssertFileContains(Path.Combine(collectionRoot, "MemoryDumpProbe.cs"), "deeperDescendantProcessDumpTarget", "Memory dump events must flag deeper descendant dump targets.");
+        AssertFileContains(Path.Combine(collectionRoot, "MemoryDumpProbe.cs"), "artifactAttemptEvent", "Memory dump captured/skipped attempts must be explicit artifact attempt events.");
+        AssertFileContains(Path.Combine(collectionRoot, "MemoryDumpProbe.cs"), "childProcessArtifactEvent", "Memory dump child captured/skipped attempts must be reportable child artifact events.");
+        AssertFileContains(Path.Combine(collectionRoot, "MemoryDumpProbe.cs"), "childProcessDumpOutcome", "Memory dump child attempts must preserve captured/skipped/already-captured outcomes.");
         AssertFileContains(Path.Combine(collectionRoot, "MemoryDumpProbe.cs"), "coverageTaxonomy", "Memory dump sweep must version coverage taxonomy.");
         AssertFileContains(Path.Combine(collectionRoot, "MemoryDumpProbe.cs"), "reasonTaxonomy", "Memory dump events must expose a stable reason taxonomy.");
         AssertFileContains(Path.Combine(collectionRoot, "MemoryDumpProbe.cs"), "reasonCode", "Memory dump skipped events must expose stable reason codes.");

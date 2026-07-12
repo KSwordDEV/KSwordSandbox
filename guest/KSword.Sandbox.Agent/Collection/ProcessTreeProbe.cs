@@ -362,6 +362,9 @@ internal sealed class ProcessTreeProbe : IGuestProbe
             evt.Data["lastSeenPhase"] = ToPhaseLabel(observation.LastSeenPhase);
             evt.Data["lastSeenUtc"] = observation.LastSeenAtUtc.ToString("O", CultureInfo.InvariantCulture);
             evt.Data["visibleInAnySnapshot"] = observation.VisibleInAnySnapshot.ToString(CultureInfo.InvariantCulture).ToLowerInvariant();
+            evt.Data["missingProcessRole"] = evt.Data.GetValueOrDefault("processTreeRole", evt.Data.GetValueOrDefault("processRole", "tracked-process"));
+            evt.Data["missingTreeLineageStatus"] = string.IsNullOrWhiteSpace(missingLineage) ? "unavailable" : "stable-from-observation";
+            evt.Data["missingLineageSource"] = string.IsNullOrWhiteSpace(missingLineage) ? "unavailable" : "observed-parent-chain";
             events.Add(evt);
         }
 
@@ -491,6 +494,8 @@ internal sealed class ProcessTreeProbe : IGuestProbe
 
         var visited = new HashSet<int>();
         var maxDepth = 0;
+        var visibleDirectChildProcessCount = 0;
+        var visibleDeeperDescendantProcessCount = 0;
         while (queue.Count != 0)
         {
             var (process, depth, lineage) = queue.Dequeue();
@@ -500,6 +505,15 @@ internal sealed class ProcessTreeProbe : IGuestProbe
             }
 
             maxDepth = Math.Max(maxDepth, depth);
+            if (depth == 1)
+            {
+                visibleDirectChildProcessCount++;
+            }
+            else if (depth > 1)
+            {
+                visibleDeeperDescendantProcessCount++;
+            }
+
             processKeys.Add(process.Key);
             var childCount = childrenByParent.TryGetValue(process.ProcessId, out var children) ? children.Count : 0;
             events.Add(CreateProcessSnapshotEvent(
@@ -535,6 +549,8 @@ internal sealed class ProcessTreeProbe : IGuestProbe
             RootProcessId: rootProcessId,
             VisibleProcessCount: visited.Count,
             DirectChildProcessCount: directChildCount,
+            VisibleDirectChildProcessCount: visibleDirectChildProcessCount,
+            VisibleDeeperDescendantProcessCount: visibleDeeperDescendantProcessCount,
             MaxDepth: maxDepth,
             OrphanedChildProcessCount: rootVisible ? 0 : directChildCount);
     }
@@ -652,16 +668,21 @@ internal sealed class ProcessTreeProbe : IGuestProbe
 
         if (rootProcessId is not null)
         {
-            evt.Data["rootProcessId"] = rootProcessId.Value.ToString(CultureInfo.InvariantCulture);
-            evt.Data["processRole"] = process.ProcessId == rootProcessId.Value
+            var processRole = process.ProcessId == rootProcessId.Value
                 ? "root"
-                : depth is not null
-                    ? "child"
-                    : "process-snapshot";
+                : depth == 1
+                    ? "direct-child"
+                    : depth > 1
+                        ? "descendant"
+                        : "process-snapshot";
+            evt.Data["rootProcessId"] = rootProcessId.Value.ToString(CultureInfo.InvariantCulture);
+            evt.Data["processRole"] = processRole;
+            evt.Data["processRoleCategory"] = processRole is "direct-child" or "descendant" ? "child" : processRole;
         }
         else
         {
             evt.Data["processRole"] = "process-snapshot";
+            evt.Data["processRoleCategory"] = "process-snapshot";
         }
 
         if (depth is not null)
@@ -1230,8 +1251,14 @@ internal sealed class ProcessTreeProbe : IGuestProbe
                 ["snapshotProcessCount"] = snapshot.Count.ToString(CultureInfo.InvariantCulture),
                 ["directChildProcessCount"] = tree.DirectChildProcessCount.ToString(CultureInfo.InvariantCulture),
                 ["childProcessCount"] = tree.DirectChildProcessCount.ToString(CultureInfo.InvariantCulture),
+                ["visibleDirectChildProcessCount"] = tree.VisibleDirectChildProcessCount.ToString(CultureInfo.InvariantCulture),
+                ["visibleDeeperDescendantProcessCount"] = tree.VisibleDeeperDescendantProcessCount.ToString(CultureInfo.InvariantCulture),
+                ["visibleDescendantProcessCount"] = (tree.VisibleDirectChildProcessCount + tree.VisibleDeeperDescendantProcessCount).ToString(CultureInfo.InvariantCulture),
+                ["deeperDescendantProcessCount"] = tree.VisibleDeeperDescendantProcessCount.ToString(CultureInfo.InvariantCulture),
                 ["maxTreeDepth"] = tree.MaxDepth.ToString(CultureInfo.InvariantCulture),
                 ["orphanedChildProcessCount"] = tree.OrphanedChildProcessCount.ToString(CultureInfo.InvariantCulture),
+                ["orphanedDescendantProcessCount"] = (!tree.RootVisible ? tree.VisibleProcessCount : 0).ToString(CultureInfo.InvariantCulture),
+                ["rootOrphanedTreeRecovered"] = (!tree.RootVisible && tree.VisibleProcessCount > 0).ToString(CultureInfo.InvariantCulture).ToLowerInvariant(),
                 ["missingProcessCount"] = missingProcessCount.ToString(CultureInfo.InvariantCulture),
                 ["trackedProcessCount"] = monitoredProcessKeys.Count.ToString(CultureInfo.InvariantCulture),
                 ["summaryEvent"] = "true",
@@ -3142,6 +3169,8 @@ internal sealed record ProcessTreeEventResult(
     int RootProcessId,
     int VisibleProcessCount,
     int DirectChildProcessCount,
+    int VisibleDirectChildProcessCount,
+    int VisibleDeeperDescendantProcessCount,
     int MaxDepth,
     int OrphanedChildProcessCount);
 

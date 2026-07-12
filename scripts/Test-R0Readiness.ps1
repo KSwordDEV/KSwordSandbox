@@ -376,6 +376,12 @@ function Test-R0CollectorEventQualityStaticContract {
         'StressJsonlSequenceGapCount',
         'StressJsonlLossEvidence',
         'StressJsonlBackpressureEvidence',
+        'batchSummaryVersion',
+        'sequenceScope',
+        'noiseObservedCount',
+        'lossObservedCount',
+        'abiCompatibility',
+        'abiMismatchReasons',
         'ReadinessNoDevicePolicy',
         'ReadinessNonFatalPolicy',
         'driver.parse_error',
@@ -433,6 +439,12 @@ function Test-R0CollectorEventQualityStaticContract {
             'eventSchemaName',
             'eventSchemaVersion',
             'sequence',
+            'batchSummaryVersion',
+            'sequenceScope',
+            'noiseObservedCount',
+            'lossObservedCount',
+            'abiCompatibility',
+            'abiMismatchReasons',
             'TotalEventsDropped',
             'QueueHighWatermark'
         ) `
@@ -450,6 +462,11 @@ function Test-R0CollectorEventQualityStaticContract {
             'StressJsonlSequenceGapCount',
             'StressJsonlLossEvidence',
             'StressJsonlBackpressureEvidence',
+            'batchSummaryVersion',
+            'sequenceScope',
+            'noiseObservedCount',
+            'lossObservedCount',
+            'abiCompatibility',
             'driver.parse_error',
             'AssertMonotonicStressSequences',
             'ExpectedStressDriverRows'
@@ -1114,6 +1131,14 @@ function Get-JsonLineEventSummary {
         BackpressureEvidenceFields = @()
         NoiseRowCount              = 0
         ValidNoiseRowCount         = 0
+        LossObservedRowCount       = 0
+        BackpressureObservedRowCount = 0
+        NextSequenceAliasRowCount  = 0
+        EventSequenceRowCount      = 0
+        SequenceConcreteRowCount   = 0
+        BatchSummaryCount          = 0
+        BatchSummaryVersions       = @()
+        SequenceScopes             = @()
         MalformedLineCount         = 0
         ParseErrorCount            = 0
         ParseErrorSample           = @()
@@ -1133,6 +1158,8 @@ function Get-JsonLineEventSummary {
     $countedStressSequenceValues = New-Object System.Collections.Generic.List[Int64]
     $lossEvidenceFields = New-Object System.Collections.Generic.List[string]
     $backpressureEvidenceFields = New-Object System.Collections.Generic.List[string]
+    $batchSummaryVersions = New-Object System.Collections.Generic.List[string]
+    $sequenceScopes = New-Object System.Collections.Generic.List[string]
     foreach ($line in (Get-Content -LiteralPath $Path -ErrorAction Stop)) {
         $summary.PhysicalLineCount = [int]$summary.PhysicalLineCount + 1
         if ([string]::IsNullOrWhiteSpace($line)) {
@@ -1203,6 +1230,42 @@ function Get-JsonLineEventSummary {
                     $summary.ValidNoiseRowCount = [int]$summary.ValidNoiseRowCount + 1
                 }
 
+                $lossObservedProperty = $row.data.PSObject.Properties['lossObserved']
+                if ($null -ne $lossObservedProperty -and [string]$lossObservedProperty.Value -eq 'true') {
+                    $summary.LossObservedRowCount = [int]$summary.LossObservedRowCount + 1
+                }
+
+                $backpressureObservedProperty = $row.data.PSObject.Properties['backpressureObserved']
+                if ($null -ne $backpressureObservedProperty -and [string]$backpressureObservedProperty.Value -eq 'true') {
+                    $summary.BackpressureObservedRowCount = [int]$summary.BackpressureObservedRowCount + 1
+                }
+
+                $sequenceMeaningProperty = $row.data.PSObject.Properties['sequenceMeaning']
+                if ($null -ne $sequenceMeaningProperty) {
+                    if ([string]$sequenceMeaningProperty.Value -eq 'nextSequence') {
+                        $summary.NextSequenceAliasRowCount = [int]$summary.NextSequenceAliasRowCount + 1
+                    }
+                    elseif ([string]$sequenceMeaningProperty.Value -eq 'eventSequence') {
+                        $summary.EventSequenceRowCount = [int]$summary.EventSequenceRowCount + 1
+                    }
+                }
+
+                $sequenceConcreteProperty = $row.data.PSObject.Properties['sequenceConcrete']
+                if ($null -ne $sequenceConcreteProperty -and [string]$sequenceConcreteProperty.Value -eq 'true') {
+                    $summary.SequenceConcreteRowCount = [int]$summary.SequenceConcreteRowCount + 1
+                }
+
+                $batchSummaryVersionProperty = $row.data.PSObject.Properties['batchSummaryVersion']
+                if ($null -ne $batchSummaryVersionProperty) {
+                    $summary.BatchSummaryCount = [int]$summary.BatchSummaryCount + 1
+                    Add-UniqueString -List $batchSummaryVersions -Value ([string]$batchSummaryVersionProperty.Value)
+                }
+
+                $sequenceScopeProperty = $row.data.PSObject.Properties['sequenceScope']
+                if ($null -ne $sequenceScopeProperty) {
+                    Add-UniqueString -List $sequenceScopes -Value ([string]$sequenceScopeProperty.Value)
+                }
+
                 $mockProperty = $row.data.PSObject.Properties['mock']
                 $mockModeProperty = $row.data.PSObject.Properties['mockMode']
                 if (($null -ne $mockProperty -and [string]$mockProperty.Value -eq 'true') -or
@@ -1254,6 +1317,8 @@ function Get-JsonLineEventSummary {
     }
     $summary.LossEvidenceFields = @($lossEvidenceFields.ToArray())
     $summary.BackpressureEvidenceFields = @($backpressureEvidenceFields.ToArray())
+    $summary.BatchSummaryVersions = @($batchSummaryVersions.ToArray())
+    $summary.SequenceScopes = @($sequenceScopes.ToArray())
     $summary.ParseErrorCount = $parseErrors.Count
     $summary.MalformedLineCount = $parseErrors.Count
     $summary.NoiseRowCount = [int]$summary.NoiseRowCount + [int]$summary.MalformedLineCount + [int]$summary.BlankLineCount
@@ -1348,6 +1413,14 @@ function Invoke-R0CollectorAbiSelfCheck {
                 StressJsonlBackpressureEvidence = @($summary.BackpressureEvidenceFields)
                 NoiseRowCount  = [int]$summary.NoiseRowCount
                 ValidNoiseRowCount = [int]$summary.ValidNoiseRowCount
+                LossObservedRowCount = [int]$summary.LossObservedRowCount
+                BackpressureObservedRowCount = [int]$summary.BackpressureObservedRowCount
+                NextSequenceAliasRowCount = [int]$summary.NextSequenceAliasRowCount
+                EventSequenceRowCount = [int]$summary.EventSequenceRowCount
+                SequenceConcreteRowCount = [int]$summary.SequenceConcreteRowCount
+                BatchSummaryCount = [int]$summary.BatchSummaryCount
+                BatchSummaryVersions = @($summary.BatchSummaryVersions)
+                SequenceScopes = @($summary.SequenceScopes)
                 MalformedLineCount = [int]$summary.MalformedLineCount
                 ParseErrorCount = $parseErrorCount
                 ParseErrors     = @($summary.ParseErrorSample)
@@ -1444,6 +1517,14 @@ function Invoke-R0CollectorHealth {
                 StressJsonlBackpressureEvidence = @($summary.BackpressureEvidenceFields)
                 NoiseRowCount   = [int]$summary.NoiseRowCount
                 ValidNoiseRowCount = [int]$summary.ValidNoiseRowCount
+                LossObservedRowCount = [int]$summary.LossObservedRowCount
+                BackpressureObservedRowCount = [int]$summary.BackpressureObservedRowCount
+                NextSequenceAliasRowCount = [int]$summary.NextSequenceAliasRowCount
+                EventSequenceRowCount = [int]$summary.EventSequenceRowCount
+                SequenceConcreteRowCount = [int]$summary.SequenceConcreteRowCount
+                BatchSummaryCount = [int]$summary.BatchSummaryCount
+                BatchSummaryVersions = @($summary.BatchSummaryVersions)
+                SequenceScopes = @($summary.SequenceScopes)
                 MalformedLineCount = [int]$summary.MalformedLineCount
                 ParseErrorCount = $parseErrorCount
                 ParseErrors     = @($summary.ParseErrorSample)
@@ -1539,6 +1620,14 @@ function Invoke-R0CollectorDrain {
                 StressJsonlBackpressureEvidence = @($summary.BackpressureEvidenceFields)
                 NoiseRowCount      = [int]$summary.NoiseRowCount
                 ValidNoiseRowCount = [int]$summary.ValidNoiseRowCount
+                LossObservedRowCount = [int]$summary.LossObservedRowCount
+                BackpressureObservedRowCount = [int]$summary.BackpressureObservedRowCount
+                NextSequenceAliasRowCount = [int]$summary.NextSequenceAliasRowCount
+                EventSequenceRowCount = [int]$summary.EventSequenceRowCount
+                SequenceConcreteRowCount = [int]$summary.SequenceConcreteRowCount
+                BatchSummaryCount = [int]$summary.BatchSummaryCount
+                BatchSummaryVersions = @($summary.BatchSummaryVersions)
+                SequenceScopes = @($summary.SequenceScopes)
                 MalformedLineCount = [int]$summary.MalformedLineCount
                 ParseErrorCount    = $parseErrorCount
                 ParseErrors        = @($summary.ParseErrorSample)

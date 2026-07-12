@@ -1,12 +1,14 @@
-# Local pipeline smoke
+# 本地管线 Smoke / Local pipeline smoke
 
-`scripts/Invoke-LocalPipelineSmoke.ps1` is a fast host-only smoke for checking
-the Web/Core pipeline without a real Hyper-V VM.
+`scripts/Invoke-LocalPipelineSmoke.ps1` 是快速 host-only smoke，用于在没有真实 Hyper-V VM 的情况下检查 Web/Core 管线。
 
-## Purpose
+English summary: this script checks the Web/Core pipeline without a real Hyper-V VM.
 
-Use this smoke when you want to verify that the local API and Core job/report
-services still form a closed loop:
+## 用途 / Purpose
+
+当需要验证本地 API 与 Core job/report services 仍能形成闭环时，使用此 smoke：
+
+English summary: use this smoke to verify that the local API and Core job/report services still form a closed loop:
 
 1. create a harmless `.exe`-named file under
    `D:\Temp\KSwordSandbox\pipeline-smoke`;
@@ -25,30 +27,30 @@ services still form a closed loop:
 The smoke only executes the runbook in dry-run mode. It does not require
 Hyper-V, does not start a VM, and does not require a golden VM.
 
-## Run
+## 运行 / Run
 
-From the repository root:
+从仓库根目录运行 / From the repository root:
 
 ```powershell
 pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\Invoke-LocalPipelineSmoke.ps1
 ```
 
-Useful options:
+常用选项 / Useful options:
 
 ```powershell
-# Use Release build output.
+# 使用 Release build output / Use Release build output.
 pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\Invoke-LocalPipelineSmoke.ps1 -Configuration Release
 
-# Skip build inside dotnet run after a prior successful build.
+# 已有成功 build 后跳过 dotnet run 内部构建 / Skip build inside dotnet run after a prior successful build.
 pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\Invoke-LocalPipelineSmoke.ps1 -NoBuild
 
-# Use a different runtime artifact root.
+# 使用不同 runtime artifact root / Use a different runtime artifact root.
 pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\Invoke-LocalPipelineSmoke.ps1 -RuntimeRoot D:\Temp\KSwordSandbox\pipeline-smoke-dev
 ```
 
-## Outputs
+## 输出 / Outputs
 
-On success the script prints:
+成功时脚本会打印 / On success the script prints:
 
 - run root;
 - benign sample path;
@@ -63,8 +65,8 @@ All runtime artifacts are written below the configured runtime root, not into
 the repository. Do not commit generated run folders, samples, configs, reports,
 or logs.
 
-## Failure handling
+## 失败处理 / Failure handling
 
-The script exits with code `1` on failure and prints the run root plus the Web
-stderr tail when available. Inspect the printed `report.html`, `report.json`,
-and log paths before deleting the run folder.
+失败时脚本以 exit code `1` 退出，并在可用时打印 run root 和 Web stderr tail。删除 run folder 前，先检查打印出的 `report.html`、`report.json` 和 log paths。
+
+English summary: on failure, inspect the printed report and log paths before deleting the run folder.

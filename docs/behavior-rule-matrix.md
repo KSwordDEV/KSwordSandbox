@@ -3,9 +3,12 @@
 This document describes the behavior rules in `rules/behavior-rules.json`.
 The matrix is intentionally conservative: rules classify normalized sandbox
 events for reporting, but they do not by themselves prove malicious intent.
-As of the local v23 high-signal behavior batch (baseline `77298d6 / v22`),
-`rules/behavior-rules.json` contains 560 rules
-with no duplicate IDs in the cheap JSON audit. The v23 batch adds 10 constrained
+As of the local v25 R0/file/network semantic-field batch,
+`rules/behavior-rules.json` contains 568 rules
+with no duplicate IDs in the cheap JSON audit. The v25 batch adds 8 constrained
+rules over structured DNS answer scope, HTTP transfer hints, TLS certificate
+CN/validity fields, host artifact evidence matrices and memory/screenshot/PCAP
+selectors, and R0 backpressure/loss quality fields. The v23 batch adds 10 constrained
 Windows sandbox rules across time-provider, Netsh helper, and screensaver
 persistence; process doppelgänging/ghosting-style injection; DCOM and
 PsExec-style SMB lateral movement; human-interaction and VM artifact
@@ -317,6 +320,24 @@ text, SPL, KQL, EQL, Sigma YAML, or vendor test samples.
 The release-facing mapping keeps static and reputation-only signals out of the
 primary runtime behavior bucket. High-risk findings still require concrete event
 type plus path, command-line, API, registry, packet, or normalized data context.
+
+## 2026-07-12 v25 R0/file/network semantic-field batch
+
+This pass adds 8 focused rules and raises the rule count from 560 to 568. It is
+bounded to fields already emitted by the project and treats collection-only
+artifact/R0 rows as evidence-quality metadata rather than sample behavior.
+
+| Area | Rule IDs | Intent |
+| --- | --- | --- |
+| DNS answer scope | `dns-answer-private-or-loopback-scope`, `dns-answer-fastflux-public-scope-low-ttl` | Consumes `answerScope`, answer counts, TTL, ASN/country hints, and query names to flag private/loopback resolution and public fast-flux-style rotation. |
+| HTTP transfer hints | `http-transfer-executable-download-hints`, `http-transfer-authenticated-upload-hints` | Uses `transferHint`, content disposition/type, transfer encoding, upload direction, auth/cookie presence, and body-size fields for download-execute or upload/exfil triage. |
+| TLS certificate semantics | `tls-cert-common-name-ip-or-dynamic-host`, `tls-cert-invalid-validity-window` | Consumes `certificateCommonName`, issuer/subject, SNI, and validity-window status fields for encrypted-channel metadata review. |
+| Artifact selector health | `artifact-evidence-matrix-selectors-ready` | Requires `artifact.import_summary` to carry `artifactEvidenceMatrix`, `primaryArtifactSelectors`, and positive screenshot/memory/PCAP counts. It is metadata-only. |
+| R0 quality metadata | `r0-backpressure-or-loss-observed` | Surfaces queue depth/capacity/high-watermark, dropped/lost counters, and backpressure/loss flags as collection-quality evidence only. |
+
+The cheap contract scenario is `behavior.rules-v25-semantic-fields`; it loads
+repository JSON and matches synthetic DNS/HTTP/TLS/artifact/R0 rows without
+Hyper-V, signing, live packet capture, or heavy E2E execution.
 
 ## 2026-07-12 v19 artifact correlation guards
 

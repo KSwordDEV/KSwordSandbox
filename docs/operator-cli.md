@@ -1,7 +1,8 @@
-# KSword Sandbox operator CLI
+# KSword Sandbox 操作者 CLI / operator CLI
 
-This page documents the no-WebUI command loop for debugging the minimum job
-path. Commands are designed to be JSON-friendly and safe by default.
+本页记录不经过 WebUI 的命令循环，用于调试最小 job 链路。命令默认安全，并保持 JSON-friendly，方便脚本和操作者排障。
+
+English summary: this page documents the no-WebUI command loop for the minimum job path.
 
 Canonical command coverage remains in `docs/run.md` and `docs/verification.md`;
 this page only covers the JobTool/no-WebUI loop.
@@ -10,21 +11,21 @@ JobTool reads and writes runtime job files. Keep job folders, reports,
 `artifact-index.json`, imported events, samples, payload binaries, VM files,
 captures, dumps, and secrets under the runtime root and out of git.
 
-## Entry points
+## 入口 / Entry points
 
-Use the .NET tool directly:
+直接使用 .NET tool / Use the .NET tool directly:
 
 ```powershell
 dotnet run --project .\tools\KSword.Sandbox.JobTool\KSword.Sandbox.JobTool.csproj -- <command> --json
 ```
 
-Or use the PowerShell wrapper:
+或使用 PowerShell wrapper / Or use the PowerShell wrapper:
 
 ```powershell
 .\scripts\Invoke-OperatorCli.ps1 <command> -Json
 ```
 
-Supported commands:
+支持的命令 / Supported commands:
 
 - `plan`
 - `import`
@@ -35,10 +36,10 @@ Supported commands:
 - `recover`
 - `readiness`
 
-Legacy aliases are still accepted by JobTool: `list-jobs`, `show-job`,
+JobTool 仍接受 legacy aliases： `list-jobs`, `show-job`,
 `rebuild-report`, `import-live`, and `inspect-artifacts`.
 
-## Safety contract
+## 安全契约 / Safety contract
 
 - `list`, `status`, `artifacts` without `--write-index`, `recover` without
   write switches, and `readiness` are read-only host-side operations.
@@ -54,7 +55,7 @@ Legacy aliases are still accepted by JobTool: `list-jobs`, `show-job`,
 All JSON output includes `secretValuePrinted=false`; password/API key/token-like
 fields are redacted before printing.
 
-## Common flow
+## 常用流程 / Common flow
 
 ```powershell
 # 1. Check host-side operator readiness.
@@ -80,17 +81,17 @@ fields are redacted before printing.
 .\scripts\Invoke-OperatorCli.ps1 recover -JobId <guid> -RebuildReport -WriteIndex -WriteState -Json
 ```
 
-## JobTool command reference
+## JobTool 命令参考 / command reference
 
 ### `plan`
 
-Creates a dry-run `AnalysisJob` and report artifacts.
+创建 dry-run `AnalysisJob` 和 report artifacts / Creates a dry-run `AnalysisJob` and report artifacts.
 
 ```powershell
 dotnet run --project .\tools\KSword.Sandbox.JobTool\KSword.Sandbox.JobTool.csproj -- plan --sample <exe> --json
 ```
 
-Important JSON fields: `kind=KSwordSandbox.PlanResult`, `jobId`, `jobRoot`,
+重要 JSON 字段 / Important JSON fields: `kind=KSwordSandbox.PlanResult`, `jobId`, `jobRoot`,
 `jsonReportPath`, `htmlReportPath`, `runbookStepCount`, `vmAction=none`.
 
 ### `list`
@@ -178,7 +179,7 @@ For the existing deeper Hyper-V readiness script, use:
 .\scripts\Invoke-OperatorCli.ps1 readiness -HyperVReadiness -Json
 ```
 
-## Exit codes
+## 退出码 / Exit codes
 
 - `0`: command succeeded, or readiness has no failed required checks.
 - `1`: invalid command, help-needed usage, or readiness/recover found a

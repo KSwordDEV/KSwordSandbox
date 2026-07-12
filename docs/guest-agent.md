@@ -91,7 +91,11 @@ guest-output 目录下解析文件，而不是信任 VM 内绝对路径。
   `treeLineage`, `processTreeRole` / `treeNodeRole`, `rootAncestorProcessId`,
   `rootRelativeDepth`, `isDirectChildOfRoot`, `sessionId`, `threadCount`, and
   Toolhelp image metadata when available. These fields are stable even when a
-  descendant is seen after the root has exited.
+  descendant is seen after the root has exited. Missing rows add
+  `missingTreeLineageStatus` / `missingLineageSource`, while summaries split
+  `visibleDirectChildProcessCount` from `visibleDeeperDescendantProcessCount`
+  and mark `rootOrphanedTreeRecovered` when only child/deeper descendant rows
+  remain visible.
 - `process.tree_unavailable` when the root PID has already exited or is not
   visible in the current low-privilege snapshot.
 - `environment.detail` for additional runtime and guest context, including
@@ -341,7 +345,8 @@ host artifact index 将这些文件分类为 `memory-dump`，不新增共享 art
 便于审阅者判断“未生成 dump”是已在 after-start
 捕获、目标退出、权限失败、PID 复用保护，还是没有可见子进程。每条 dump captured/skipped
 事件都会尽量保留 `rootProcessId`、`treeLineage`、`capturePolicy`、
-`artifactRelativePathStatus` 和 `zhHint`；如果 root PID 本身不可用，则用
+`artifactRelativePathStatus`、`artifactAttemptEvent`、`childProcessArtifactEvent`、
+`childProcessDumpOutcome` 和 `zhHint`；如果 root PID 本身不可用，则用
 `rootProcessIdStatus` / `treeLineageStatus` 明确标记不可用。
 
 ## 可选网络抓包 / Optional packet capture

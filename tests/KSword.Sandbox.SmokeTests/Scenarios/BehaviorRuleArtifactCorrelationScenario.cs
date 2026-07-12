@@ -13,8 +13,6 @@ namespace KSword.Sandbox.SmokeTests.Scenarios;
 /// </summary>
 internal sealed class BehaviorRuleArtifactCorrelationScenario : ISmokeTestScenario
 {
-    private const string ExpectedVersion = "2026-07-12-v22-defensive-behavior-expansion";
-
     private static readonly string[] RequiredRuleIds =
     [
         "artifact-memory-dump-process-correlation",
@@ -37,8 +35,9 @@ internal sealed class BehaviorRuleArtifactCorrelationScenario : ISmokeTestScenar
 
         var rules = RuleEngine.LoadRuleSet(behaviorRulesPath);
         SmokeAssert.True(
-            string.Equals(rules.Version, ExpectedVersion, StringComparison.OrdinalIgnoreCase),
-            "Behavior rules should carry the v21 defensive behavior expansion version while retaining v19 artifact-correlation rules.");
+            string.Equals(rules.Version, "2026-07-12-v22-defensive-behavior-expansion", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(rules.Version, "2026-07-12-v25-r0-file-network-semantic-fields", StringComparison.OrdinalIgnoreCase),
+            "Behavior rules should carry the v22+ defensive behavior expansion version while retaining v19 artifact-correlation rules.");
 
         var indexedRules = rules.Rules.ToDictionary(rule => rule.Id, StringComparer.OrdinalIgnoreCase);
         foreach (var ruleId in RequiredRuleIds)

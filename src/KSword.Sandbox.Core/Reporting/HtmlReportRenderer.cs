@@ -99,6 +99,15 @@ public sealed class HtmlReportRenderer
         string Detail,
         string CopyText);
 
+    private sealed record ArtifactEvidenceMatrixRow(
+        string CollectionName,
+        ArtifactKind Kind,
+        int Count,
+        string State,
+        long Bytes,
+        string Source,
+        string Selectors);
+
     private sealed record ProcessRelationshipCard(
         string Label,
         string RiskCss,
@@ -1627,6 +1636,11 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         IReadOnlyCollection<ArtifactDescriptor> artifacts)
     {
         var sampleEvents = report.Events.Where(IsSampleBehaviorEvent).OrderBy(evt => evt.Timestamp).ToList();
+        var artifactMatrixRows = BuildArtifactEvidenceMatrixRows(report.Events, artifacts);
+        var droppedMatrix = FindArtifactEvidenceMatrixRow(artifactMatrixRows, "dropped-files");
+        var screenshotMatrix = FindArtifactEvidenceMatrixRow(artifactMatrixRows, "screenshots");
+        var memoryMatrix = FindArtifactEvidenceMatrixRow(artifactMatrixRows, "memory-dumps");
+        var packetMatrix = FindArtifactEvidenceMatrixRow(artifactMatrixRows, "packet-captures");
         var processEvents = sampleEvents.Where(IsProcessTreeCandidate).ToList();
         var processNodes = BuildProcessGraphNodes(report).Take(8).ToList();
         var processChildHints = processEvents.Count(HasParentProcessEvidence);
@@ -1636,24 +1650,42 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
             processEvidence.AddRange(processNodes.Take(8).Select(node => node.CopyText));
         }
 
+        var matrixOverviewLine = ArtifactEvidenceMatrixOverviewLine(artifactMatrixRows);
+        if (!string.IsNullOrWhiteSpace(matrixOverviewLine))
+        {
+            processEvidence.Add(matrixOverviewLine);
+        }
+
         var droppedArtifacts = StoryArtifactsByKind(artifacts, ArtifactKind.DroppedFile);
         var droppedEvents = sampleEvents.Where(IsDroppedFileEvidenceEvent).ToList();
         var fileEvents = sampleEvents.Where(IsFileEvent).ToList();
-        var droppedEvidence = BuildStoryEvidenceLines(droppedArtifacts, droppedEvents.Count > 0 ? droppedEvents : fileEvents);
+        var droppedEvidence = AddArtifactMatrixEvidence(
+            BuildStoryEvidenceLines(droppedArtifacts, droppedEvents.Count > 0 ? droppedEvents : fileEvents),
+            "Dropped-file artifactEvidenceMatrix",
+            droppedMatrix);
 
         var screenshotArtifacts = StoryArtifactsByKind(artifacts, ArtifactKind.Screenshot);
         var screenshotEvents = report.Events.Where(IsScreenshotEvidenceEvent).OrderBy(evt => evt.Timestamp).ToList();
-        var screenshotEvidence = BuildStoryEvidenceLines(screenshotArtifacts, screenshotEvents);
+        var screenshotEvidence = AddArtifactMatrixEvidence(
+            BuildStoryEvidenceLines(screenshotArtifacts, screenshotEvents),
+            "Screenshot artifactEvidenceMatrix",
+            screenshotMatrix);
 
         var memoryArtifacts = StoryArtifactsByKind(artifacts, ArtifactKind.MemoryDump);
         var memoryEvents = report.Events.Where(IsMemoryDumpEvidenceEvent).OrderBy(evt => evt.Timestamp).ToList();
         var childDumpEvents = memoryEvents.Count(evt => TextEqualsAny(FirstEventDataValue(evt, "childProcessDumpEnabled", "includeChildProcesses", "childDumpEnabled") ?? string.Empty, "true", "enabled", "yes"));
-        var memoryEvidence = BuildStoryEvidenceLines(memoryArtifacts, memoryEvents);
+        var memoryEvidence = AddArtifactMatrixEvidence(
+            BuildStoryEvidenceLines(memoryArtifacts, memoryEvents),
+            "Memory dump artifactEvidenceMatrix",
+            memoryMatrix);
 
         var packetArtifacts = StoryArtifactsByKind(artifacts, ArtifactKind.PacketCapture);
         var packetEvents = report.Events.Where(IsPacketCaptureEvidenceEvent).OrderBy(evt => evt.Timestamp).ToList();
         var networkEvents = sampleEvents.Where(IsNetworkEvent).ToList();
-        var networkEvidence = BuildStoryEvidenceLines(packetArtifacts, packetEvents.Concat(networkEvents).OrderBy(evt => evt.Timestamp).ToList());
+        var networkEvidence = AddArtifactMatrixEvidence(
+            BuildStoryEvidenceLines(packetArtifacts, packetEvents.Concat(networkEvents).OrderBy(evt => evt.Timestamp).ToList()),
+            "PCAP artifactEvidenceMatrix",
+            packetMatrix);
         var dnsCount = networkEvents.Count(evt => string.Equals(NetworkCategoryLabel(evt), "DNS", StringComparison.OrdinalIgnoreCase));
         var httpCount = networkEvents.Count(evt => string.Equals(NetworkCategoryLabel(evt), "HTTP", StringComparison.OrdinalIgnoreCase));
         var tlsCount = networkEvents.Count(evt => string.Equals(NetworkCategoryLabel(evt), "TLS", StringComparison.OrdinalIgnoreCase));
@@ -1686,6 +1718,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
                     $"Process candidates: {processEvents.Count}",
                     $"Child/parent hints: {processChildHints}",
                     $"Graph nodes: {processNodes.Count}",
+                    $"Artifact matrix lanes ready: {artifactMatrixRows.Count(row => string.Equals(row.State, "ready", StringComparison.OrdinalIgnoreCase))}/{artifactMatrixRows.Count}",
                     $"Collector/health excluded: {report.Events.Count(evt => IsCollectorSelfNoiseEvent(evt) || IsCollectionHealthEvent(evt))}"
                 ],
                 processEvidence),
@@ -1698,7 +1731,8 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
                     $"Dropped artifacts: {droppedArtifacts.Count}",
                     $"Dropped-file events: {droppedEvents.Count}",
                     $"File rows: {fileEvents.Count}",
-                    $"Unique file targets: {fileEvents.Select(ExtractReadableEventTarget).Where(value => !string.IsNullOrWhiteSpace(value)).Distinct(StringComparer.OrdinalIgnoreCase).Count()}"
+                    $"Unique file targets: {fileEvents.Select(ExtractReadableEventTarget).Where(value => !string.IsNullOrWhiteSpace(value)).Distinct(StringComparer.OrdinalIgnoreCase).Count()}",
+                    ArtifactEvidenceMatrixMetric(droppedMatrix)
                 ],
                 droppedEvidence),
             CreateEvidenceStoryCard(
@@ -1710,7 +1744,8 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
                     $"Screenshot artifacts: {screenshotArtifacts.Count}",
                     $"Screenshot events: {screenshotEvents.Count}",
                     $"Captured bytes: {screenshotArtifacts.Sum(artifact => Math.Max(0, artifact.SizeBytes))}",
-                    $"Latest capture: {LatestEventTime(screenshotEvents)}"
+                    $"Latest capture: {LatestEventTime(screenshotEvents)}",
+                    ArtifactEvidenceMatrixMetric(screenshotMatrix)
                 ],
                 screenshotEvidence),
             CreateEvidenceStoryCard(
@@ -1722,7 +1757,8 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
                     $"Memory dump artifacts: {memoryArtifacts.Count}",
                     $"Memory dump events: {memoryEvents.Count}",
                     $"Child dump enabled rows: {childDumpEvents}",
-                    $"Captured bytes: {memoryArtifacts.Sum(artifact => Math.Max(0, artifact.SizeBytes))}"
+                    $"Captured bytes: {memoryArtifacts.Sum(artifact => Math.Max(0, artifact.SizeBytes))}",
+                    ArtifactEvidenceMatrixMetric(memoryMatrix)
                 ],
                 memoryEvidence),
             CreateEvidenceStoryCard(
@@ -1734,7 +1770,8 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
                     $"Network rows: {networkEvents.Count}",
                     $"Packet artifacts: {packetArtifacts.Count}",
                     $"Packet capture events: {packetEvents.Count}",
-                    $"DNS/HTTP/TLS/flow: {dnsCount}/{httpCount}/{tlsCount}/{flowCount}"
+                    $"DNS/HTTP/TLS/flow: {dnsCount}/{httpCount}/{tlsCount}/{flowCount}",
+                    ArtifactEvidenceMatrixMetric(packetMatrix)
                 ],
                 networkEvidence),
             CreateEvidenceStoryCard(
@@ -1840,6 +1877,209 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
             .Where(value => !string.IsNullOrWhiteSpace(value))
             .Take(EvidenceStoryInlineLimit)
             .ToList();
+    }
+
+    private static IReadOnlyList<string> AddArtifactMatrixEvidence(
+        IReadOnlyList<string> evidenceLines,
+        string label,
+        ArtifactEvidenceMatrixRow? matrixRow)
+    {
+        var lines = new List<string>();
+        if (matrixRow is not null)
+        {
+            lines.Add(ArtifactEvidenceMatrixEvidenceLine(label, matrixRow));
+        }
+
+        lines.AddRange(evidenceLines);
+        return lines
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Take(EvidenceStoryInlineLimit)
+            .ToList();
+    }
+
+    private static ArtifactEvidenceMatrixRow? FindArtifactEvidenceMatrixRow(
+        IReadOnlyCollection<ArtifactEvidenceMatrixRow> rows,
+        string collectionName)
+    {
+        return rows.FirstOrDefault(row => string.Equals(row.CollectionName, collectionName, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static string ArtifactEvidenceMatrixMetric(ArtifactEvidenceMatrixRow? row)
+    {
+        return row is null
+            ? "artifactEvidenceMatrix: not reported"
+            : $"artifactEvidenceMatrix: {row.CollectionName}={row.Count}:{row.State}:{row.Bytes} bytes";
+    }
+
+    private static string ArtifactEvidenceMatrixEvidenceLine(string label, ArtifactEvidenceMatrixRow row)
+    {
+        var selectors = string.IsNullOrWhiteSpace(row.Selectors) ? "-" : row.Selectors;
+        return $"{label}: collection={row.CollectionName} | kind={row.Kind} | count={row.Count} | state={row.State} | bytes={row.Bytes} | selectors={selectors} | source={row.Source}";
+    }
+
+    private static string ArtifactEvidenceMatrixOverviewLine(IReadOnlyCollection<ArtifactEvidenceMatrixRow> rows)
+    {
+        if (rows.Count == 0)
+        {
+            return string.Empty;
+        }
+
+        return "artifactEvidenceMatrix overview: " + string.Join("; ", rows.Select(row => $"{row.CollectionName}={row.Count}:{row.State}:{row.Bytes}"));
+    }
+
+    private static IReadOnlyList<ArtifactEvidenceMatrixRow> BuildArtifactEvidenceMatrixRows(
+        IReadOnlyCollection<SandboxEvent> events,
+        IReadOnlyCollection<ArtifactDescriptor> artifacts)
+    {
+        var rows = new Dictionary<string, ArtifactEvidenceMatrixRow>(StringComparer.OrdinalIgnoreCase);
+        foreach (var evt in events.OrderBy(evt => evt.Timestamp))
+        {
+            var matrix = FirstEventDataValue(evt, "artifactEvidenceMatrix");
+            foreach (var row in ParseArtifactEvidenceMatrix(matrix, evt.EventType))
+            {
+                rows[row.CollectionName] = row;
+            }
+
+            MergeEventMatrixCount(rows, evt, "dropped-files", ArtifactKind.DroppedFile, "droppedFileArtifactCount", "droppedFileBytes");
+            MergeEventMatrixCount(rows, evt, "screenshots", ArtifactKind.Screenshot, "screenshotArtifactCount", "screenshotBytes");
+            MergeEventMatrixCount(rows, evt, "memory-dumps", ArtifactKind.MemoryDump, "memoryDumpArtifactCount", "memoryDumpBytes");
+            MergeEventMatrixCount(rows, evt, "packet-captures", ArtifactKind.PacketCapture, "packetCaptureArtifactCount", "packetCaptureBytes");
+        }
+
+        MergeArtifactMatrixFallback(rows, artifacts, "dropped-files", ArtifactKind.DroppedFile);
+        MergeArtifactMatrixFallback(rows, artifacts, "screenshots", ArtifactKind.Screenshot);
+        MergeArtifactMatrixFallback(rows, artifacts, "memory-dumps", ArtifactKind.MemoryDump);
+        MergeArtifactMatrixFallback(rows, artifacts, "packet-captures", ArtifactKind.PacketCapture);
+
+        return rows.Values
+            .OrderBy(row => ArtifactEvidenceMatrixRank(row.CollectionName))
+            .ThenBy(row => row.CollectionName, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static IEnumerable<ArtifactEvidenceMatrixRow> ParseArtifactEvidenceMatrix(string? matrix, string source)
+    {
+        if (string.IsNullOrWhiteSpace(matrix))
+        {
+            yield break;
+        }
+
+        foreach (var token in matrix.Split([';', ',', '|'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var parts = token.Split('=', 2, StringSplitOptions.TrimEntries);
+            if (parts.Length != 2 || string.IsNullOrWhiteSpace(parts[0]))
+            {
+                continue;
+            }
+
+            var valueParts = parts[1].Split(':', StringSplitOptions.TrimEntries);
+            var count = valueParts.Length > 0 && int.TryParse(valueParts[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsedCount)
+                ? parsedCount
+                : 0;
+            var state = valueParts.Length > 1 && !string.IsNullOrWhiteSpace(valueParts[1]) ? valueParts[1] : InferMatrixState(count);
+            var bytes = valueParts.Length > 2 && long.TryParse(valueParts[2], NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsedBytes)
+                ? parsedBytes
+                : 0;
+            var collectionName = NormalizeArtifactEvidenceCollectionName(parts[0]);
+            yield return new ArtifactEvidenceMatrixRow(collectionName, ArtifactKindForMatrixCollection(collectionName), count, state, bytes, source, string.Empty);
+        }
+    }
+
+    private static void MergeEventMatrixCount(
+        IDictionary<string, ArtifactEvidenceMatrixRow> rows,
+        SandboxEvent evt,
+        string collectionName,
+        ArtifactKind kind,
+        string countKey,
+        string bytesKey)
+    {
+        var countValue = FirstEventDataValue(evt, countKey);
+        if (!int.TryParse(countValue, NumberStyles.Integer, CultureInfo.InvariantCulture, out var count))
+        {
+            return;
+        }
+
+        var bytes = long.TryParse(FirstEventDataValue(evt, bytesKey), NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsedBytes)
+            ? parsedBytes
+            : 0;
+        var state = count > 0 ? "ready" : "missing";
+        rows[collectionName] = new ArtifactEvidenceMatrixRow(collectionName, kind, count, state, bytes, evt.EventType, FirstEventDataValue(evt, "primaryArtifactSelectors") ?? string.Empty);
+    }
+
+    private static void MergeArtifactMatrixFallback(
+        IDictionary<string, ArtifactEvidenceMatrixRow> rows,
+        IReadOnlyCollection<ArtifactDescriptor> artifacts,
+        string collectionName,
+        ArtifactKind kind)
+    {
+        if (rows.ContainsKey(collectionName))
+        {
+            return;
+        }
+
+        var laneArtifacts = artifacts
+            .Where(artifact => artifact.Kind == kind && !IsCollectorSelfNoiseArtifact(artifact))
+            .ToList();
+        if (laneArtifacts.Count == 0)
+        {
+            return;
+        }
+
+        var selectors = string.Join(",", laneArtifacts
+            .Select(artifact => FirstNonEmpty(MetadataValue(artifact.Metadata, "downloadSelector", "safeRelativeSelector"), artifact.SafeLink, artifact.RelativePath))
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(4));
+        rows[collectionName] = new ArtifactEvidenceMatrixRow(
+            collectionName,
+            kind,
+            laneArtifacts.Count,
+            "ready",
+            laneArtifacts.Sum(artifact => Math.Max(0, artifact.SizeBytes)),
+            "artifact-index-fallback",
+            selectors);
+    }
+
+    private static string NormalizeArtifactEvidenceCollectionName(string value)
+    {
+        var normalized = value.Trim().ToLowerInvariant().Replace('_', '-');
+        return normalized switch
+        {
+            "dropped-file" or "dropped-files" or "droppedfiles" => "dropped-files",
+            "screenshot" or "screenshots" => "screenshots",
+            "memory-dump" or "memory-dumps" or "memorydumps" => "memory-dumps",
+            "packet-capture" or "packet-captures" or "pcap" or "pcapng" => "packet-captures",
+            _ => normalized
+        };
+    }
+
+    private static ArtifactKind ArtifactKindForMatrixCollection(string collectionName)
+    {
+        return collectionName switch
+        {
+            "dropped-files" => ArtifactKind.DroppedFile,
+            "screenshots" => ArtifactKind.Screenshot,
+            "memory-dumps" => ArtifactKind.MemoryDump,
+            "packet-captures" => ArtifactKind.PacketCapture,
+            _ => ArtifactKind.Unknown
+        };
+    }
+
+    private static int ArtifactEvidenceMatrixRank(string collectionName)
+    {
+        return collectionName switch
+        {
+            "dropped-files" => 0,
+            "screenshots" => 1,
+            "memory-dumps" => 2,
+            "packet-captures" => 3,
+            _ => 100
+        };
+    }
+
+    private static string InferMatrixState(int count)
+    {
+        return count > 0 ? "ready" : "missing";
     }
 
     private static List<ArtifactDescriptor> StoryArtifactsByKind(
@@ -2107,7 +2347,8 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         AnalysisReport report,
         IReadOnlyCollection<ArtifactDescriptor> artifacts)
     {
-        var cards = BuildArtifactCollectionStatusCards(report, artifacts);
+        var matrixRows = BuildArtifactEvidenceMatrixRows(report.Events, artifacts);
+        var cards = BuildArtifactCollectionStatusCards(report, artifacts, matrixRows);
         html.AppendLine("<h3>Artifact collection status</h3>");
         html.AppendLine("<div class=\"evidence-summary-grid artifact-status-grid\">");
         foreach (var card in cards)
@@ -2133,7 +2374,8 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
 
     private static IReadOnlyList<ArtifactCollectionStatusCard> BuildArtifactCollectionStatusCards(
         AnalysisReport report,
-        IReadOnlyCollection<ArtifactDescriptor> artifacts)
+        IReadOnlyCollection<ArtifactDescriptor> artifacts,
+        IReadOnlyCollection<ArtifactEvidenceMatrixRow> matrixRows)
     {
         return
         [
@@ -2144,7 +2386,8 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
                 artifacts,
                 report.Events,
                 evt => evt.EventType.StartsWith("artifact.dropped_file.", StringComparison.OrdinalIgnoreCase),
-                "Copied files released or modified by the sample when collection was enabled."),
+                "Copied files released or modified by the sample when collection was enabled.",
+                FindArtifactEvidenceMatrixRow(matrixRows, "dropped-files")),
             BuildArtifactCollectionStatusCard(
                 "Screenshots",
                 "screenshots",
@@ -2152,7 +2395,8 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
                 artifacts,
                 report.Events,
                 evt => evt.EventType.StartsWith("screenshot.", StringComparison.OrdinalIgnoreCase),
-                "Desktop screenshots captured around sample execution when enabled."),
+                "Desktop screenshots captured around sample execution when enabled.",
+                FindArtifactEvidenceMatrixRow(matrixRows, "screenshots")),
             BuildArtifactCollectionStatusCard(
                 "Memory dumps",
                 "memory-dumps",
@@ -2160,7 +2404,8 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
                 artifacts,
                 report.Events,
                 evt => evt.EventType.StartsWith("memory_dump.", StringComparison.OrdinalIgnoreCase),
-                "Opt-in process and child-process memory dump artifacts."),
+                "Opt-in process and child-process memory dump artifacts.",
+                FindArtifactEvidenceMatrixRow(matrixRows, "memory-dumps")),
             BuildArtifactCollectionStatusCard(
                 "Packet captures",
                 "packet-captures",
@@ -2168,7 +2413,8 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
                 artifacts,
                 report.Events,
                 evt => evt.EventType.StartsWith("packet_capture.", StringComparison.OrdinalIgnoreCase) || evt.EventType.StartsWith("pcap.", StringComparison.OrdinalIgnoreCase),
-                "Opt-in pktmon/PCAP artifacts and imported DNS/HTTP/TLS/flow rows."),
+                "Opt-in pktmon/PCAP artifacts and imported DNS/HTTP/TLS/flow rows.",
+                FindArtifactEvidenceMatrixRow(matrixRows, "packet-captures")),
             BuildArtifactCollectionStatusCard(
                 "Driver events",
                 "driver-events",
@@ -2176,7 +2422,8 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
                 artifacts,
                 report.Events,
                 IsR0Event,
-                "R0Collector JSONL and driver-originated telemetry.")
+                "R0Collector JSONL and driver-originated telemetry.",
+                null)
         ];
     }
 
@@ -2187,7 +2434,8 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         IReadOnlyCollection<ArtifactDescriptor> artifacts,
         IReadOnlyCollection<SandboxEvent> events,
         Func<SandboxEvent, bool> eventPredicate,
-        string defaultDetail)
+        string defaultDetail,
+        ArtifactEvidenceMatrixRow? matrixRow)
     {
         var collectionArtifacts = artifacts
             .Where(artifact => artifact.Kind == kind ||
@@ -2226,6 +2474,11 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
             detail += $" Phases: {string.Join(", ", phases)}.";
         }
 
+        if (matrixRow is not null)
+        {
+            detail += $" artifactEvidenceMatrix: {matrixRow.CollectionName}={matrixRow.Count}:{matrixRow.State}:{matrixRow.Bytes}.";
+        }
+
         var copy = string.Join(
             Environment.NewLine,
             [
@@ -2236,6 +2489,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
                 $"eventCount={collectionEvents.Count}",
                 $"latestReason={reason ?? "-"}",
                 $"phases={string.Join(",", phases)}",
+                matrixRow is null ? "artifactEvidenceMatrix=-" : ArtifactEvidenceMatrixEvidenceLine("artifactEvidenceMatrix", matrixRow),
                 .. collectionArtifacts.Take(8).Select(ArtifactToPlainText),
                 .. collectionEvents.Take(8).Select(EventOneLine)
             ]);
@@ -4772,6 +5026,11 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
     {
         var edges = new List<BehaviorGraphEdge>();
         var processLabels = BuildProcessLabelLookup(report);
+        foreach (var matrixRow in BuildArtifactEvidenceMatrixRows(report.Events, artifacts))
+        {
+            edges.Add(new BehaviorGraphEdge("artifactEvidenceMatrix", "artifact", matrixRow.CollectionName, ArtifactEvidenceMatrixEvidenceLine("artifactEvidenceMatrix lane", matrixRow)));
+        }
+
         foreach (var evt in report.Events.OrderBy(evt => evt.Timestamp))
         {
             if (!IsSampleBehaviorEvent(evt))

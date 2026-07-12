@@ -1038,6 +1038,22 @@ bool EmitSyntheticStressSummary(EventWriter& writer, const Options& options) {
 
     JsonDataObjectBuilder data;
     AddSyntheticAbiVersionFields(data);
+    data.AddUnsigned("batchSummaryVersion", 2);
+    data.AddUtf8("batchKind", "synthetic-stress-read-events");
+    data.AddUtf8("batchCounterScope", "synthetic-no-device-stress-corpus");
+    data.AddUtf8("sequenceScope", "counted-stress-driver-file-rows");
+    data.AddUtf8("sequenceCountScope", "StressJsonlExpectedDriverRows-only");
+    data.AddUtf8("sequenceHeadScope", "first-counted-stress-driver-file-sequence");
+    data.AddUtf8("sequenceTailScope", "last-counted-stress-driver-file-sequence");
+    data.AddBool("sequenceRangeAvailable", true);
+    data.AddBool("emittedSequenceRangeAvailable", true);
+    data.AddUnsigned("noiseObservedCount", 0);
+    data.AddUnsigned("collectorNoiseEvents", 0);
+    data.AddUnsigned("driverNoiseEvents", 0);
+    data.AddUnsigned("selfNoiseSuppressedEvents", 0);
+    data.AddUnsigned("sampledOutEvents", 0);
+    data.AddUnsigned("lossObservedCount", 0);
+    data.AddUnsigned("backpressureObservedCount", 0);
     data.AddUnsigned("version", KSWORD_SANDBOX_INTERFACE_VERSION);
     data.AddUtf8("versionHex", HexUnsignedLongLong(KSWORD_SANDBOX_INTERFACE_VERSION, 8));
     data.AddBool("mock", true);
@@ -1075,6 +1091,10 @@ bool EmitSyntheticStressSummary(EventWriter& writer, const Options& options) {
     data.AddUnsigned("skipped", 0);
     data.AddUtf8("head", stressSequenceStartText);
     data.AddUtf8("tail", stressSequenceEndText);
+    data.AddUtf8("headSequence", stressSequenceStartText);
+    data.AddUtf8("tailSequence", stressSequenceEndText);
+    data.AddUtf8("emittedHeadSequence", stressSequenceStartText);
+    data.AddUtf8("emittedTailSequence", stressSequenceEndText);
     data.AddUnsigned("observedSequenceSpan", options.stressCount);
     data.AddUnsigned("expectedContiguousEvents", options.stressCount);
     data.AddBool("sequenceGapObserved", false);

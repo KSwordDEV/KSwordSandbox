@@ -143,6 +143,33 @@ std::string BuildAbiSelfCheckData(const Options& options) {
 
     data.AddUnsigned("collectorAbiVersion", KSWORD_SANDBOX_INTERFACE_VERSION);
     data.AddUtf8("collectorAbiVersionHex", HexUnsignedLongLong(KSWORD_SANDBOX_INTERFACE_VERSION, 8));
+    data.AddUtf8("abiCompatibilityDiagnosticLevel", "compile-time-no-device-contract");
+    data.AddBool("abiCompatible", true);
+    data.AddUtf8("abiCompatibility", "compile-time-compatible");
+    data.AddUtf8("abiMismatchReasons", "none");
+    data.AddUnsigned("expectedInterfaceVersion", KSWORD_SANDBOX_INTERFACE_VERSION);
+    data.AddUtf8("expectedInterfaceVersionHex", HexUnsignedLongLong(KSWORD_SANDBOX_INTERFACE_VERSION, 8));
+    data.AddUnsigned("driverInterfaceVersion", KSWORD_SANDBOX_INTERFACE_VERSION);
+    data.AddUtf8("driverInterfaceVersionHex", HexUnsignedLongLong(KSWORD_SANDBOX_INTERFACE_VERSION, 8));
+    data.AddBool("interfaceVersionCompatible", true);
+    data.AddUnsigned("expectedAbiVersionMajor", KSWORD_SANDBOX_ABI_VERSION_MAJOR);
+    data.AddUnsigned("expectedAbiVersionMinor", KSWORD_SANDBOX_ABI_VERSION_MINOR);
+    data.AddUnsigned("driverAbiVersionMajor", KSWORD_SANDBOX_ABI_VERSION_MAJOR);
+    data.AddUnsigned("driverAbiVersionMinor", KSWORD_SANDBOX_ABI_VERSION_MINOR);
+    data.AddBool("abiMajorMatch", true);
+    data.AddBool("abiMinorForwardCompatible", true);
+    data.AddUnsigned("expectedEventHeaderVersion", KSWORD_SANDBOX_EVENT_HEADER_VERSION);
+    data.AddUnsigned("driverEventHeaderVersion", KSWORD_SANDBOX_EVENT_HEADER_VERSION);
+    data.AddBool("eventHeaderVersionCompatible", true);
+    data.AddUnsigned("expectedEventMaxPayloadSize", KSWORD_SANDBOX_EVENT_MAX_PAYLOAD_SIZE);
+    data.AddUnsigned("driverEventMaxPayloadSize", KSWORD_SANDBOX_EVENT_MAX_PAYLOAD_SIZE);
+    data.AddBool("eventMaxPayloadSizeCompatible", true);
+    data.AddUtf8(
+        "abiCompatibilityPolicy",
+        "no-device self-check emits expected/driver aliases with compile-time values; live --diagnose and driverCapabilities rows compare returned driver bytes");
+    data.AddWide(
+        "zhAbiCompatibilityHint",
+        L"无设备 ABI 自检使用编译期 expected/driver 别名证明 Collector 合同；live diagnose/capabilities 会比较真实驱动返回值。");
     data.AddUnsigned("abiVersionMajor", KSWORD_SANDBOX_ABI_VERSION_MAJOR);
     data.AddUnsigned("abiVersionMinor", KSWORD_SANDBOX_ABI_VERSION_MINOR);
     data.AddUnsigned("eventHeaderVersion", KSWORD_SANDBOX_EVENT_HEADER_VERSION);
@@ -274,6 +301,10 @@ std::string BuildAbiSelfCheckData(const Options& options) {
     data.AddWide("zhKernelBackpressurePolicy", L"\u5185\u6838 producer \u975e\u963b\u585e\uff1b\u56fa\u5b9a\u73af\u5f62\u7f13\u51b2\u533a\u6ea2\u51fa\u65f6\u8986\u76d6\u6700\u65e7\u672a\u8bfb\u8bb0\u5f55\uff1bbackpressure=true \u662f\u8bc1\u636e/\u8bca\u65ad\uff0c\u4e0d\u8868\u793a producer \u88ab\u963b\u585e\u3002");
     data.AddUtf8("sequenceSemantics", "event rows use concrete event Sequence; health/poll/status/readEvents summary rows use NextSequence with sequenceMeaning=nextSequence; head/tail are consumed batch sequence bounds");
     data.AddWide("zhSequenceSemantics", L"\u4e8b\u4ef6\u884c\u7684 sequence \u662f\u5177\u4f53\u4e8b\u4ef6 Sequence\uff1bhealth/poll/status/readEvents \u6458\u8981\u884c\u7684 sequence \u662f NextSequence\uff0c\u5e76\u4ee5 sequenceMeaning=nextSequence \u6807\u8bb0\uff1bhead/tail \u662f\u6279\u6b21\u5df2\u6d88\u8d39\u8bb0\u5f55\u7684 sequence \u8fb9\u754c\u3002");
+    data.AddUtf8("batchSummaryFieldSet", "batchSummaryVersion|batchKind|batchCounterScope|sequenceScope|sequenceCountScope|noiseObservedCount|lossObservedCount|backpressureObservedCount");
+    data.AddUtf8("sequenceScopePolicy", "driver rows use sequenceScope=driver-event; live READ_EVENTS summaries use consumed-driver-event-records; synthetic stress summaries use counted-stress-driver-file-rows");
+    data.AddUtf8("noiseLossCounterPolicy", "summary rows carry explicit noiseObservedCount/lossObservedCount/backpressureObservedCount so no-device and live evidence can be compared without scanning every driver row");
+    data.AddWide("zhSequenceScopePolicy", L"driver 行、live 批次摘要和 synthetic stress 摘要使用不同 sequenceScope，避免把 nextSequence 摘要值当成具体事件序列。");
     data.AddUtf8("driverEventSequenceMeaning", "eventSequence");
     data.AddUtf8("driverEventSequenceScope", "driver-event");
     data.AddUtf8("driverEventSequencePolicy", "driver rows emit sequenceMeaning=eventSequence and sequenceConcrete=true; summaries emit sequenceMeaning=nextSequence");

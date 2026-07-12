@@ -70,7 +70,10 @@ Example:
   live IOCTL emitted before `r0collector.stopped`.
 - `r0collector.driverCapabilities`: successful
   `IOCTL_KSWORD_SANDBOX_GET_CAPABILITIES` reply. It records ABI major/minor,
-  capability flags, supported/default producer masks, and event layout limits.
+  capability flags, supported/default producer masks, event layout limits, and
+  explicit ABI compatibility diagnostics (`abiCompatibility`,
+  `abiCompatible`, `abiMismatchReasons`, plus `expected*`/`driver*` version and
+  reply-size aliases).
 - `r0collector.driverProducerMask`: emitted when `--enable-mask` is supplied
   and `IOCTL_KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK` succeeds. It records
   requested, previous, effective, and supported masks.
@@ -188,6 +191,12 @@ smoke rows:
 - `processed`, `eligible`, `emitted`, `suppressed`, `skipped`, `head`, `tail`,
   and `sampling`: compact `r0collector.driverReadEvents` aliases used by
   report sampling and large-stream smoke tests.
+- `batchSummaryVersion`, `batchKind`, `batchCounterScope`, `sequenceScope`,
+  and `sequenceCountScope`: clarify whether a batch row describes live consumed
+  driver records or the no-device counted stress corpus. Summary rows also emit
+  `noiseObservedCount`, `lossObservedCount`, and
+  `backpressureObservedCount` so readiness evidence can be compared without
+  scanning every driver row.
 
 中文：event-quality aliases 的目标是让 import/report 在 JSONL 很大、存在 injected
 noise、队列溢出或 collector-side sampling 时仍能追溯证据完整性。它们是质量/压力标签，
@@ -238,7 +247,10 @@ Negotiation and queue rows must preserve these event-quality keys:
   `previousEnableMaskHex`, `effectiveEnableMaskHex`,
   `supportedProducerMaskHex`, and the matching `*MaskNames` fields.
 - `r0collector.driverReadEvents.data`: the first fields are intentionally kept
-  report-sampling friendly: `requestedMaxEvents`, `recordsProcessed`,
+  report-sampling friendly: `batchSummaryVersion`, `batchKind`,
+  `batchCounterScope`, `sequenceScope`, `sequenceCountScope`,
+  `noiseObservedCount`, `lossObservedCount`, `backpressureObservedCount`,
+  `requestedMaxEvents`, `recordsProcessed`,
   `eventsEmitted`, `collectorSuppressedEvents`, `collectorSkippedEvents`,
   `eligibleEvents`, and concise aliases `processed`, `eligible`, `emitted`,
   `suppressed`, `skipped`, `head`, `tail`, and `sampling`. The row also keeps

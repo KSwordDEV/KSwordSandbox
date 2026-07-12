@@ -567,11 +567,11 @@ static string BuildPreviewLabel(ArtifactKind kind, string fileName, bool english
     var label = english
         ? kind switch
         {
-            ArtifactKind.DroppedFile => "Dropped file",
-            ArtifactKind.Screenshot => "Screenshot",
-            ArtifactKind.MemoryDump => "Memory dump",
-            ArtifactKind.PacketCapture => "Packet capture",
-            _ => "Artifact"
+            ArtifactKind.DroppedFile => "掉落文件 / Dropped file",
+            ArtifactKind.Screenshot => "截图 / Screenshot",
+            ArtifactKind.MemoryDump => "内存转储 / Memory dump",
+            ArtifactKind.PacketCapture => "抓包文件 / Packet capture",
+            _ => "证据文件 / Artifact"
         }
         : kind switch
         {

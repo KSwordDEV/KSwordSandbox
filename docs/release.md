@@ -396,3 +396,21 @@ the `scripts/` wrappers (`scripts/run.ps1`, `scripts/install.ps1`,
 startup plus read-only Status/CheckEnvironment checks from either layout. The
 published WebUI is expected at `app/host-web`; root `run.ps1` automatically uses
 that directory when the source project is not present.
+
+### 机器可读 handoff 字段 / Machine-readable handoff fields
+
+`package-manifest.generated.json` 和 `release-readiness.json` 都应包含 `componentProgress`。
+这是 deployment/productization 的机器可读进度快照，不是 fresh live evidence。
+审阅者按以下 JSON 字段做最终 handoff：
+
+- `componentProgress.components[].id`: `runtime-publish-root`, `package-safety-contract`,
+  `release-smoke-scenarios`, `fresh-live-guardrail`, `operator-remediation-zh`。
+- `reviewerChecklist`: source/runtime handoff 必过项、release notes 必写项和 `rejectIfPresent`。
+- `sourceRuntimeSafetyMetadata.runtimePackage.repositoryBinaryFallbackAllowed = false`：
+  `RuntimePublishRoot` 只能是仓库外 publish 输出，不能回退到 `bin/obj/x64`。
+- `freshLiveEvidenceGuardrail` 和 `componentProgress.noFreshLiveEvidenceGenerated = true`：
+  没有实验室 `job id` 时，release notes 必须写“本候选未刷新 fresh live evidence”。
+
+RuntimePublishRoot publish checklist：仓库外目录下必须同时有 `host-web`、`guest-tools`、
+`tools/job-tool`、`tools/postprocess`；每个目录非空，包含预期 exe/dll/payload-manifest，
+且不含 `.pdb`、`.sys`、PCAP、dump、VM 文件、secret、证书私钥、`CSignTool.exe` 或 GUI signing fallback。

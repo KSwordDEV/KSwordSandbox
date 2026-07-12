@@ -172,10 +172,13 @@ Manifest 从不信任 VM-local absolute paths 来生成链接。Host 只在 coll
   `parentProcessId`、`treeDepth`、`treeLineage` 和 `childProcessCount` metadata。若 root 已退出，Guest 保留
   `process.tree_unavailable`，并可继续写出 parent PID 指向 root process 的 visible orphan child rows。
 - 每次 root sweep 写出 `process.tree.summary`，包含 `rootProcessId`、`rootVisible`、`visibleProcessCount`、
-  `directChildProcessCount`、`maxTreeDepth`、`orphanedChildProcessCount`、`missingProcessCount`、root image/command-line
+  `directChildProcessCount`、`visibleDirectChildProcessCount`、`visibleDeeperDescendantProcessCount`、
+  `visibleDescendantProcessCount`、`maxTreeDepth`、`orphanedChildProcessCount`、`rootOrphanedTreeRecovered`、
+  `missingProcessCount`、root image/command-line
   metadata，以及用于报告进程树渲染（report process-tree rendering）的 `summaryEvent=true`。Process-tree missing/summary rows
   会携带 `reasonCode` / `reasonCategory` / `reasonTaxonomy` 以及
-  `behaviorCounted=false` / `nonbehavior=true`，因此已退出进程诊断不会抬高行为计数。
+  `behaviorCounted=false` / `nonbehavior=true`，因此已退出进程诊断不会抬高行为计数。Missing rows 还会用
+  `missingTreeLineageStatus` 和 `missingLineageSource` 标明 lineage 是从 observed parent chain 恢复还是不可用。
 - 持久化差异（Persistence diffs）写出 `service.*`、`scheduled_task.*`、`startup_item.*` 和 `registry.run.*` rows。Service rows
   在可读时包含 `imagePath`、`startType`、`serviceType`、`objectName`、`serviceDll` 等 registry configuration metadata。
 - DNS/proxy 上下文写出 `dns.cache.*`、`network.hosts.*` 和 `network.proxy.*` rows。Hosts snapshots 保留 source path、
@@ -248,7 +251,9 @@ root/descendant targeting 还带 `targetProcessRole`、`targetTreeDepth`、`targ
 `rootAncestorProcessId`、`directChildProcessDumpTarget`、`deeperDescendantProcessDumpTarget`
 和 `isDirectChildOfRoot`。Skipped attempts 保留 `reason`、稳定
 `reasonCode` / `reasonCategory` / `reasonTaxonomy`、`diagnosticStage`、可选 `exceptionType` 和可选 `win32Error`；captured/skipped/disabled
-rows 均包含 `zhMessage` / `zhHint`。Probe timeouts 或 exceptions 映射为 `memory-dumps` collection 的 nonfatal failed status，
+rows 均包含 `zhMessage` / `zhHint`。Captured/skipped child targets also carry
+`artifactAttemptEvent`、`childProcessArtifactEvent` 和 `childProcessDumpOutcome` so skipped child/deeper-descendant dump gaps can be
+reported alongside captured dump artifacts. Probe timeouts 或 exceptions 映射为 `memory-dumps` collection 的 nonfatal failed status，
 而不是变成 `enabled-empty`。未请求 memory dumps 时，Guest 写出一个同形状的 `memory_dump.disabled` event。
 `memory_dump.sweep` event 是 summary（`summaryEvent=true`），带 `coverageTaxonomy`，
 并标记 `behaviorCounted=false` / `nonbehavior=true`，不计入 captured/skipped/failed collection status。

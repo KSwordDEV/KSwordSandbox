@@ -1,5 +1,5 @@
 {
-  "version": "2026-07-12-v23-high-signal-behavior-expansion",
+  "version": "2026-07-12-v25-r0-file-network-semantic-fields",
   "rules": [
     {
       "id": "host-submission",
@@ -32613,6 +32613,641 @@
           "true"
         ]
       }
+    },
+    {
+      "id": "dns-answer-private-or-loopback-scope",
+      "title": "DNS answer resolves to private or loopback scope",
+      "titleZh": "DNS 应答解析到私有或回环范围",
+      "severity": "medium",
+      "confidence": "medium",
+      "summary": "DNS telemetry reports an answer scope such as RFC1918, loopback, link-local, or multicast for a queried name, which can indicate internal pivoting, rebinding, or sandbox-aware resolution when paired with process and PCAP evidence.",
+      "summaryZh": "DNS 遥测报告查询名的应答范围为 RFC1918、回环、链路本地或组播；与进程和 PCAP 证据结合时，可提示内网跳转、重绑定或沙箱感知解析。",
+      "mitreTechniqueId": "T1071.004",
+      "mitreTechniqueName": "Application Layer Protocol: DNS",
+      "eventTypes": [
+        "pcap.dns",
+        "dns.query",
+        "network.dns"
+      ],
+      "allDataKeys": [
+        "queryName",
+        "answerScope"
+      ],
+      "dataContains": {
+        "answerScope": [
+          "private",
+          "rfc1918",
+          "loopback",
+          "link-local",
+          "multicast",
+          "unique-local"
+        ]
+      },
+      "evidenceFields": [
+        "eventType",
+        "data.queryName",
+        "data.answerScope",
+        "data.answerAddresses",
+        "data.answerCount",
+        "data.sourceArtifactRelativePath"
+      ],
+      "tags": [
+        "network",
+        "dns",
+        "semantic-field",
+        "mitre"
+      ],
+      "excludeProcessNames": [
+        "KSword.Sandbox.Agent.exe",
+        "KSword.Sandbox.R0Collector.exe"
+      ],
+      "excludeDataContains": {
+        "source": [
+          "collection-health",
+          "virustotal"
+        ],
+        "healthStatus": [
+          "collection-health",
+          "driver-health"
+        ],
+        "vtStatus": [
+          "not_configured",
+          "not_found",
+          "rate_limited",
+          "unset"
+        ],
+        "collectorSelfNoise": [
+          "true"
+        ],
+        "noise": [
+          "true"
+        ],
+        "selfNoise": [
+          "true"
+        ]
+      }
+    },
+    {
+      "id": "dns-answer-fastflux-public-scope-low-ttl",
+      "title": "DNS answer scope suggests fast-flux style rotation",
+      "titleZh": "DNS 应答范围提示 fast-flux 式轮转",
+      "severity": "medium",
+      "confidence": "medium",
+      "summary": "DNS or PCAP rows show many public or multi-ASN answers with a low TTL for one queried name, a bounded semantic-field signal for rotating command infrastructure.",
+      "summaryZh": "DNS 或 PCAP 行显示单个查询名存在多个 public/multi-ASN 应答且 TTL 较低，这是轮转型命令基础设施的有界语义字段信号。",
+      "mitreTechniqueId": "T1568.002",
+      "mitreTechniqueName": "Dynamic Resolution: Domain Generation Algorithms",
+      "eventTypes": [
+        "pcap.dns",
+        "dns.query",
+        "network.dns"
+      ],
+      "allDataKeys": [
+        "queryName",
+        "answerScope"
+      ],
+      "dataContains": {
+        "answerScope": [
+          "public",
+          "multi-asn",
+          "multi-country",
+          "fastflux"
+        ]
+      },
+      "evidenceFields": [
+        "eventType",
+        "data.queryName",
+        "data.answerScope",
+        "data.answerCount",
+        "data.minimumTtlSeconds",
+        "data.answerCountries",
+        "data.answerAsns"
+      ],
+      "tags": [
+        "network",
+        "dns",
+        "dynamic-resolution",
+        "semantic-field",
+        "mitre"
+      ],
+      "excludeProcessNames": [
+        "KSword.Sandbox.Agent.exe",
+        "KSword.Sandbox.R0Collector.exe"
+      ],
+      "excludeDataContains": {
+        "source": [
+          "collection-health",
+          "virustotal"
+        ],
+        "healthStatus": [
+          "collection-health",
+          "driver-health"
+        ],
+        "vtStatus": [
+          "not_configured",
+          "not_found",
+          "rate_limited",
+          "unset"
+        ],
+        "collectorSelfNoise": [
+          "true"
+        ],
+        "noise": [
+          "true"
+        ],
+        "selfNoise": [
+          "true"
+        ]
+      },
+      "allDataNumericRanges": {
+        "answerCount": [
+          {
+            "min": 4
+          }
+        ],
+        "minimumTtlSeconds": [
+          {
+            "max": 120
+          }
+        ]
+      }
+    },
+    {
+      "id": "http-transfer-executable-download-hints",
+      "title": "HTTP transfer hints for executable download",
+      "titleZh": "HTTP 传输提示可执行载荷下载",
+      "severity": "high",
+      "confidence": "medium",
+      "summary": "HTTP telemetry carries transfer metadata indicating an executable, script, archive, or DLL payload, using structured content type, disposition, extension, or magic hints rather than raw packet text.",
+      "summaryZh": "HTTP 遥测携带内容类型、Content-Disposition、扩展名或 magic 等结构化传输元数据，指向 EXE、脚本、归档或 DLL 载荷，而非依赖原始包文本。",
+      "mitreTechniqueId": "T1105",
+      "mitreTechniqueName": "Ingress Tool Transfer",
+      "eventTypes": [
+        "pcap.http",
+        "http.response",
+        "http.request",
+        "network.http"
+      ],
+      "dataContains": {
+        "transferHint": [
+          "executable",
+          "pe",
+          "script",
+          "archive",
+          "dll",
+          "download"
+        ],
+        "contentDisposition": [
+          "attachment",
+          "filename="
+        ]
+      },
+      "dataRegex": {
+        "uri": [
+          "(?i)\\.(?:exe|dll|scr|com|ps1|vbs|js|jse|hta|zip|rar|7z)(?:$|[?#])"
+        ],
+        "responseContentType": [
+          "(?i)(application/octet-stream|application/x-msdownload|application/zip|application/x-7z-compressed)"
+        ]
+      },
+      "evidenceFields": [
+        "eventType",
+        "data.method",
+        "data.host",
+        "data.uri",
+        "data.statusCode",
+        "data.responseContentType",
+        "data.contentDisposition",
+        "data.transferEncoding",
+        "data.transferHint",
+        "data.bodyMagic"
+      ],
+      "tags": [
+        "network",
+        "http",
+        "download-execute",
+        "semantic-field",
+        "mitre"
+      ],
+      "excludeProcessNames": [
+        "KSword.Sandbox.Agent.exe",
+        "KSword.Sandbox.R0Collector.exe"
+      ],
+      "excludeDataContains": {
+        "source": [
+          "collection-health",
+          "virustotal"
+        ],
+        "healthStatus": [
+          "collection-health",
+          "driver-health"
+        ],
+        "vtStatus": [
+          "not_configured",
+          "not_found",
+          "rate_limited",
+          "unset"
+        ],
+        "collectorSelfNoise": [
+          "true"
+        ],
+        "noise": [
+          "true"
+        ],
+        "selfNoise": [
+          "true"
+        ]
+      }
+    },
+    {
+      "id": "http-transfer-authenticated-upload-hints",
+      "title": "HTTP transfer hints for authenticated upload or exfiltration",
+      "titleZh": "HTTP 传输提示认证上传或外传",
+      "severity": "high",
+      "confidence": "medium",
+      "summary": "HTTP metadata combines upload direction, transfer encoding or compression hints, and authentication/cookie material, indicating possible exfiltration or check-in upload activity.",
+      "summaryZh": "HTTP 元数据同时包含上传方向、传输编码或压缩提示，以及认证/Cookie 材料，提示可能的外传或 check-in 上传活动。",
+      "mitreTechniqueId": "T1048.003",
+      "mitreTechniqueName": "Exfiltration Over Alternative Protocol: Exfiltration Over Unencrypted Non-C2 Protocol",
+      "eventTypes": [
+        "pcap.http",
+        "http.request",
+        "network.http"
+      ],
+      "allDataContains": {
+        "direction": [
+          "upload",
+          "egress",
+          "outbound"
+        ]
+      },
+      "dataContains": {
+        "transferEncoding": [
+          "chunked",
+          "gzip",
+          "deflate",
+          "br"
+        ],
+        "requestContentType": [
+          "multipart",
+          "octet-stream",
+          "zip",
+          "json"
+        ],
+        "authorizationPresent": [
+          "true"
+        ],
+        "cookiePresent": [
+          "true"
+        ]
+      },
+      "dataNumericRanges": {
+        "requestBodyBytes": [
+          {
+            "min": 1048576
+          }
+        ]
+      },
+      "evidenceFields": [
+        "eventType",
+        "data.method",
+        "data.host",
+        "data.uri",
+        "data.direction",
+        "data.requestBodyBytes",
+        "data.transferEncoding",
+        "data.requestContentType",
+        "data.authorizationPresent",
+        "data.cookiePresent"
+      ],
+      "tags": [
+        "network",
+        "http",
+        "exfiltration",
+        "semantic-field",
+        "mitre"
+      ],
+      "excludeProcessNames": [
+        "KSword.Sandbox.Agent.exe",
+        "KSword.Sandbox.R0Collector.exe"
+      ],
+      "excludeDataContains": {
+        "source": [
+          "collection-health",
+          "virustotal"
+        ],
+        "healthStatus": [
+          "collection-health",
+          "driver-health"
+        ],
+        "vtStatus": [
+          "not_configured",
+          "not_found",
+          "rate_limited",
+          "unset"
+        ],
+        "collectorSelfNoise": [
+          "true"
+        ],
+        "noise": [
+          "true"
+        ],
+        "selfNoise": [
+          "true"
+        ]
+      }
+    },
+    {
+      "id": "tls-cert-common-name-ip-or-dynamic-host",
+      "title": "TLS certificate common name is IP literal or dynamic host",
+      "titleZh": "TLS 证书 CN 为 IP 字面量或动态主机名",
+      "severity": "medium",
+      "confidence": "medium",
+      "summary": "TLS metadata exposes a certificate common name that is an IP literal, dynamic-DNS style host, or onion host, using structured certificate CN fields instead of raw handshake text.",
+      "summaryZh": "TLS 元数据通过结构化证书 CN 字段暴露 IP 字面量、动态 DNS 风格主机或 onion 主机，而不是依赖原始握手文本。",
+      "mitreTechniqueId": "T1573",
+      "mitreTechniqueName": "Encrypted Channel",
+      "eventTypes": [
+        "pcap.tls",
+        "network.tls",
+        "tls.connection"
+      ],
+      "allDataKeys": [
+        "certificateCommonName"
+      ],
+      "dataRegex": {
+        "certificateCommonName": [
+          "(?i)^(?:\\d{1,3}\\.){3}\\d{1,3}$|(?:duckdns|no-ip|dynu|ddns|hopto|onion)\\."
+        ]
+      },
+      "evidenceFields": [
+        "eventType",
+        "data.sni",
+        "data.certificateCommonName",
+        "data.certificateSubject",
+        "data.certificateIssuer",
+        "data.ja3",
+        "data.destinationIp",
+        "data.destinationPort"
+      ],
+      "tags": [
+        "network",
+        "tls",
+        "certificate",
+        "semantic-field",
+        "mitre"
+      ],
+      "excludeProcessNames": [
+        "KSword.Sandbox.Agent.exe",
+        "KSword.Sandbox.R0Collector.exe"
+      ],
+      "excludeDataContains": {
+        "source": [
+          "collection-health",
+          "virustotal"
+        ],
+        "healthStatus": [
+          "collection-health",
+          "driver-health"
+        ],
+        "vtStatus": [
+          "not_configured",
+          "not_found",
+          "rate_limited",
+          "unset"
+        ],
+        "collectorSelfNoise": [
+          "true"
+        ],
+        "noise": [
+          "true"
+        ],
+        "selfNoise": [
+          "true"
+        ]
+      }
+    },
+    {
+      "id": "tls-cert-invalid-validity-window",
+      "title": "TLS certificate validity window failed",
+      "titleZh": "TLS 证书有效期窗口异常",
+      "severity": "medium",
+      "confidence": "medium",
+      "summary": "TLS certificate metadata reports an expired, not-yet-valid, or otherwise invalid validity window, a structured asymmetric-certificate quality signal for encrypted channels.",
+      "summaryZh": "TLS 证书元数据报告过期、尚未生效或其他无效的有效期窗口，这是加密通道的结构化非对称证书质量信号。",
+      "mitreTechniqueId": "T1573.002",
+      "mitreTechniqueName": "Encrypted Channel: Asymmetric Cryptography",
+      "eventTypes": [
+        "pcap.tls",
+        "network.tls",
+        "tls.connection"
+      ],
+      "dataContains": {
+        "certificateValidity": [
+          "expired",
+          "not_yet_valid",
+          "invalid",
+          "outside_window"
+        ],
+        "certificateValidityStatus": [
+          "expired",
+          "not_yet_valid",
+          "invalid",
+          "outside_window"
+        ]
+      },
+      "evidenceFields": [
+        "eventType",
+        "data.sni",
+        "data.certificateCommonName",
+        "data.certificateNotBefore",
+        "data.certificateNotAfter",
+        "data.certificateValidity",
+        "data.certificateValidityStatus",
+        "data.destinationIp"
+      ],
+      "tags": [
+        "network",
+        "tls",
+        "certificate",
+        "semantic-field",
+        "mitre"
+      ],
+      "excludeProcessNames": [
+        "KSword.Sandbox.Agent.exe",
+        "KSword.Sandbox.R0Collector.exe"
+      ],
+      "excludeDataContains": {
+        "source": [
+          "collection-health",
+          "virustotal"
+        ],
+        "healthStatus": [
+          "collection-health",
+          "driver-health"
+        ],
+        "vtStatus": [
+          "not_configured",
+          "not_found",
+          "rate_limited",
+          "unset"
+        ],
+        "collectorSelfNoise": [
+          "true"
+        ],
+        "noise": [
+          "true"
+        ],
+        "selfNoise": [
+          "true"
+        ]
+      }
+    },
+    {
+      "id": "artifact-evidence-matrix-selectors-ready",
+      "title": "Artifact evidence matrix includes downloadable selectors",
+      "titleZh": "证据矩阵包含可下载选择器",
+      "severity": "info",
+      "confidence": "medium",
+      "summary": "The host artifact-import summary reports ready screenshots, memory dumps, and packet captures together with safe primary relative selectors, preserving evidence availability without treating collection status as malicious behavior.",
+      "summaryZh": "Host artifact-import 摘要同时报告截图、内存转储和抓包已就绪，并带有安全主相对选择器；它保留证据可用性，但不把采集状态当作恶意行为。",
+      "eventTypes": [
+        "artifact.import_summary"
+      ],
+      "allDataEquals": {
+        "behaviorCounted": [
+          "false"
+        ],
+        "nonbehavior": [
+          "true"
+        ],
+        "hostImport": [
+          "true"
+        ]
+      },
+      "evidenceFields": [
+        "eventType",
+        "data.artifactEvidenceMatrix",
+        "data.primaryArtifactSelectors",
+        "data.screenshotArtifactCount",
+        "data.memoryDumpArtifactCount",
+        "data.packetCaptureArtifactCount",
+        "data.downloadSecurityPolicy"
+      ],
+      "tags": [
+        "artifact",
+        "collection",
+        "metadata",
+        "selectors",
+        "semantic-field"
+      ],
+      "dataContainsAll": {
+        "artifactEvidenceMatrix": [
+          "screenshots=",
+          "memory-dumps=",
+          "packet-captures="
+        ],
+        "primaryArtifactSelectors": [
+          "screenshots:",
+          "memory-dumps:",
+          "packet-captures:"
+        ]
+      },
+      "allDataNumericRanges": {
+        "screenshotArtifactCount": [
+          {
+            "min": 1
+          }
+        ],
+        "memoryDumpArtifactCount": [
+          {
+            "min": 1
+          }
+        ],
+        "packetCaptureArtifactCount": [
+          {
+            "min": 1
+          }
+        ]
+      }
+    },
+    {
+      "id": "r0-backpressure-or-loss-observed",
+      "title": "R0 collector backpressure or event loss observed",
+      "titleZh": "观察到 R0 采集背压或事件丢失",
+      "severity": "info",
+      "confidence": "medium",
+      "summary": "R0 collector health or batch rows report queue backpressure, dropped counters, sequence loss, or high-watermark evidence. This is evidence-quality context and not a malicious sample behavior finding by itself.",
+      "summaryZh": "R0 采集健康或批次行报告队列背压、丢弃计数、序列丢失或高水位证据；这是证据质量上下文，本身不是样本恶意行为判定。",
+      "eventTypes": [
+        "r0collector.driverHealth",
+        "r0collector.driverPoll",
+        "r0collector.driverReadEvents",
+        "r0collector.batch",
+        "driver.events.batch"
+      ],
+      "dataContains": {
+        "backpressureObserved": [
+          "true"
+        ],
+        "backpressure": [
+          "true"
+        ],
+        "lossObserved": [
+          "true"
+        ],
+        "lost": [
+          "true"
+        ],
+        "loss": [
+          "gap",
+          "dropped",
+          "observed"
+        ]
+      },
+      "dataNumericRanges": {
+        "totalEventsDropped": [
+          {
+            "min": 1
+          }
+        ],
+        "eventsDropped": [
+          {
+            "min": 1
+          }
+        ],
+        "lostCount": [
+          {
+            "min": 1
+          }
+        ],
+        "queueHighWatermark": [
+          {
+            "min": 1
+          }
+        ]
+      },
+      "evidenceFields": [
+        "eventType",
+        "source",
+        "data.queueDepth",
+        "data.queueCapacity",
+        "data.queueHighWatermark",
+        "data.totalEventsDropped",
+        "data.eventsDropped",
+        "data.lostCount",
+        "data.lossObserved",
+        "data.backpressureObserved",
+        "data.backpressureReason"
+      ],
+      "tags": [
+        "r0collector",
+        "driver-health",
+        "backpressure",
+        "loss",
+        "collection",
+        "metadata"
+      ]
     }
   ]
 }

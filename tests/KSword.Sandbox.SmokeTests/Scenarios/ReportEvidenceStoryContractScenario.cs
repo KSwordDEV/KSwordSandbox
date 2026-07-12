@@ -48,6 +48,12 @@ internal sealed class ReportEvidenceStoryContractScenario : ISmokeTestScenario
         RequireContains(html, "Network relation path", "Network cards should expose readable process-to-endpoint relation paths.");
         RequireContains(html, "raw-page-nav", "Raw event expansion should expose native page shortcuts.");
         RequireContains(html, "Story evidence expansion summary", "Evidence expansions should show a visible summary before dense rows.");
+        RequireContains(html, "artifactEvidenceMatrix overview", "Process story lane should surface artifactEvidenceMatrix overview evidence.");
+        RequireContains(html, "Dropped-file artifactEvidenceMatrix", "Dropped-file story lane should surface artifactEvidenceMatrix state.");
+        RequireContains(html, "Screenshot artifactEvidenceMatrix", "Screenshot story lane should surface artifactEvidenceMatrix state.");
+        RequireContains(html, "Memory dump artifactEvidenceMatrix", "Memory dump story lane should surface artifactEvidenceMatrix state.");
+        RequireContains(html, "PCAP artifactEvidenceMatrix", "PCAP story lane should surface artifactEvidenceMatrix state.");
+        RequireContains(html, "artifactEvidenceMatrix lane", "Behavior graph artifact lane should include matrix-backed evidence.");
         RequireContains(html, "Network evidence expansion summary", "Network relationship expansions should summarize shown/hidden evidence.");
         RequireContains(html, "Raw event slimming story", "Raw event section should explain visible/folded/report-only evidence before row expansion.");
         RequireContains(html, "Artifact / network / R0 anchors", "Raw event slimming cards should preserve artifact/network/R0 evidence anchors.");
@@ -151,7 +157,76 @@ internal sealed class ReportEvidenceStoryContractScenario : ISmokeTestScenario
             }
         };
 
-        var events = new List<SandboxEvent> { processStart, r0NetworkStatus, staticResource, vt, networkFlow };
+        var artifactImportSummary = new SandboxEvent
+        {
+            EventType = "host.artifact.index",
+            Timestamp = timestamp.AddSeconds(5),
+            Source = "host",
+            Data =
+            {
+                ["behaviorCounted"] = "false",
+                ["nonbehavior"] = "true",
+                ["notSampleBehavior"] = "true",
+                ["artifactEvidenceMatrix"] = "dropped-files=1:ready:512;screenshots=1:ready:2048;memory-dumps=1:ready:4096;packet-captures=1:ready:8192",
+                ["artifactEvidenceCollectionsReady"] = "dropped-files,screenshots,memory-dumps,packet-captures",
+                ["primaryArtifactSelectors"] = "artifacts/drop.bin,screenshots/desktop.png,dumps/story.dmp,captures/story.pcapng",
+                ["droppedFileArtifactCount"] = "1",
+                ["screenshotArtifactCount"] = "1",
+                ["memoryDumpArtifactCount"] = "1",
+                ["packetCaptureArtifactCount"] = "1",
+                ["droppedFileBytes"] = "512",
+                ["screenshotBytes"] = "2048",
+                ["memoryDumpBytes"] = "4096",
+                ["packetCaptureBytes"] = "8192"
+            }
+        };
+
+        var screenshot = new SandboxEvent
+        {
+            EventType = "screenshot.captured",
+            Timestamp = timestamp.AddSeconds(6),
+            Source = "guest",
+            ProcessName = "story.exe",
+            ProcessId = 5000,
+            Data =
+            {
+                ["screenshotRelativePath"] = "screenshots/desktop.png",
+                ["collectionName"] = "screenshots",
+                ["captureStatus"] = "captured"
+            }
+        };
+
+        var memoryDump = new SandboxEvent
+        {
+            EventType = "memory_dump.captured",
+            Timestamp = timestamp.AddSeconds(7),
+            Source = "guest",
+            ProcessName = "story.exe",
+            ProcessId = 5000,
+            Data =
+            {
+                ["memoryDumpRelativePath"] = "dumps/story.dmp",
+                ["collectionName"] = "memory-dumps",
+                ["childProcessDumpEnabled"] = "true"
+            }
+        };
+
+        var packetCapture = new SandboxEvent
+        {
+            EventType = "pcap.imported",
+            Timestamp = timestamp.AddSeconds(8),
+            Source = "host",
+            ProcessName = "story.exe",
+            ProcessId = 5000,
+            Data =
+            {
+                ["pcapngRelativePath"] = "captures/story.pcapng",
+                ["collectionName"] = "packet-captures",
+                ["pcapngPacketCount"] = "42"
+            }
+        };
+
+        var events = new List<SandboxEvent> { processStart, r0NetworkStatus, staticResource, vt, networkFlow, artifactImportSummary, screenshot, memoryDump, packetCapture };
         for (var index = 0; index < 30; index++)
         {
             events.Add(new SandboxEvent
@@ -243,6 +318,48 @@ internal sealed class ReportEvidenceStoryContractScenario : ISmokeTestScenario
                 ["rejectedArtifactCount"] = "1",
                 ["lastRejectedArtifactSelector"] = "../unsafe.bin",
                 ["artifactRejectionReasons"] = "unsafeGuestArtifactPath"
+            }
+        },
+        new ArtifactDescriptor
+        {
+            Kind = ArtifactKind.Screenshot,
+            Category = "screenshot",
+            Name = "desktop.png",
+            RelativePath = "screenshots/desktop.png",
+            SafeLink = "screenshots/desktop.png",
+            SizeBytes = 2048,
+            Sha256 = new string('e', 64),
+            Metadata = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["downloadSelector"] = "screenshots/desktop.png"
+            }
+        },
+        new ArtifactDescriptor
+        {
+            Kind = ArtifactKind.MemoryDump,
+            Category = "memory-dump",
+            Name = "story.dmp",
+            RelativePath = "dumps/story.dmp",
+            SafeLink = "dumps/story.dmp",
+            SizeBytes = 4096,
+            Sha256 = new string('f', 64),
+            Metadata = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["downloadSelector"] = "dumps/story.dmp"
+            }
+        },
+        new ArtifactDescriptor
+        {
+            Kind = ArtifactKind.PacketCapture,
+            Category = "packet-capture",
+            Name = "story.pcapng",
+            RelativePath = "captures/story.pcapng",
+            SafeLink = "captures/story.pcapng",
+            SizeBytes = 8192,
+            Sha256 = new string('1', 64),
+            Metadata = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["downloadSelector"] = "captures/story.pcapng"
             }
         }
     ];

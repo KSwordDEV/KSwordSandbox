@@ -3121,6 +3121,53 @@ std::string BuildHealthData(const KSWORD_SANDBOX_HEALTH_REPLY& reply, const DWOR
 // Return: JSON object text for SandboxEvent.data.
 std::string BuildCapabilitiesData(const KSWORD_SANDBOX_CAPABILITIES_REPLY& reply, const DWORD bytesReturned) {
     JsonDataObjectBuilder data;
+    const bool replySizeCompatible = bytesReturned >= sizeof(KSWORD_SANDBOX_CAPABILITIES_REPLY);
+    const bool versionCompatible = reply.Version == KSWORD_SANDBOX_INTERFACE_VERSION;
+    const bool abiMajorMatch = reply.AbiVersionMajor == KSWORD_SANDBOX_ABI_VERSION_MAJOR;
+    const bool abiMinorForwardCompatible = reply.AbiVersionMinor >= KSWORD_SANDBOX_ABI_VERSION_MINOR;
+    const bool eventHeaderCompatible = reply.EventHeaderVersion == KSWORD_SANDBOX_EVENT_HEADER_VERSION;
+    const bool eventPayloadLimitCompatible = reply.EventMaxPayloadSize <= KSWORD_SANDBOX_EVENT_MAX_PAYLOAD_SIZE;
+    const bool readEventsReplyHeaderCompatible =
+        reply.ReadEventsReplyHeaderSize >= KSWORD_SANDBOX_READ_EVENTS_REPLY_HEADER_SIZE;
+    const bool capabilitiesReplySizeCompatible =
+        reply.CapabilitiesReplySize >= sizeof(KSWORD_SANDBOX_CAPABILITIES_REPLY);
+    const bool statusReplySizeCompatible =
+        reply.StatusReplySize >= sizeof(KSWORD_SANDBOX_STATUS_REPLY);
+    const bool producerMaskReplySizeCompatible =
+        reply.SetProducerEnableMaskReplySize >= sizeof(KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK_REPLY);
+    const bool abiCompatible =
+        replySizeCompatible &&
+        versionCompatible &&
+        abiMajorMatch &&
+        abiMinorForwardCompatible &&
+        eventHeaderCompatible &&
+        eventPayloadLimitCompatible &&
+        readEventsReplyHeaderCompatible &&
+        capabilitiesReplySizeCompatible &&
+        statusReplySizeCompatible &&
+        producerMaskReplySizeCompatible;
+
+    std::string abiMismatchReasons;
+    const auto appendMismatch = [&abiMismatchReasons](const bool ok, const std::string& reason) {
+        if (ok) {
+            return;
+        }
+        if (!abiMismatchReasons.empty()) {
+            abiMismatchReasons += "|";
+        }
+        abiMismatchReasons += reason;
+    };
+    appendMismatch(replySizeCompatible, "bytesReturnedTooSmall");
+    appendMismatch(versionCompatible, "interfaceVersion");
+    appendMismatch(abiMajorMatch, "abiMajor");
+    appendMismatch(abiMinorForwardCompatible, "abiMinorTooOld");
+    appendMismatch(eventHeaderCompatible, "eventHeaderVersion");
+    appendMismatch(eventPayloadLimitCompatible, "eventMaxPayloadSize");
+    appendMismatch(readEventsReplyHeaderCompatible, "readEventsReplyHeaderSize");
+    appendMismatch(capabilitiesReplySizeCompatible, "capabilitiesReplySize");
+    appendMismatch(statusReplySizeCompatible, "statusReplySize");
+    appendMismatch(producerMaskReplySizeCompatible, "producerMaskReplySize");
+
     data.AddUtf8("ioctl", "IOCTL_KSWORD_SANDBOX_GET_CAPABILITIES");
     data.AddUnsigned("ioctlCode", IOCTL_KSWORD_SANDBOX_GET_CAPABILITIES);
     data.AddUnsigned("bytesReturned", bytesReturned);
@@ -3148,6 +3195,44 @@ std::string BuildCapabilitiesData(const KSWORD_SANDBOX_CAPABILITIES_REPLY& reply
     data.AddUnsigned("version", reply.Version);
     data.AddUtf8("versionHex", HexUnsignedLongLong(reply.Version, 8));
     data.AddUnsigned("size", reply.Size);
+    data.AddUtf8("abiCompatibilityDiagnosticLevel", "capabilities-wire-contract");
+    data.AddBool("abiCompatible", abiCompatible);
+    data.AddUtf8("abiCompatibility", abiCompatible ? "compatible" : "incompatible");
+    data.AddUtf8("abiMismatchReasons", abiMismatchReasons.empty() ? "none" : abiMismatchReasons);
+    data.AddUnsigned("expectedInterfaceVersion", KSWORD_SANDBOX_INTERFACE_VERSION);
+    data.AddUtf8("expectedInterfaceVersionHex", HexUnsignedLongLong(KSWORD_SANDBOX_INTERFACE_VERSION, 8));
+    data.AddUnsigned("driverInterfaceVersion", reply.Version);
+    data.AddUtf8("driverInterfaceVersionHex", HexUnsignedLongLong(reply.Version, 8));
+    data.AddBool("interfaceVersionCompatible", versionCompatible);
+    data.AddUnsigned("expectedAbiVersionMajor", KSWORD_SANDBOX_ABI_VERSION_MAJOR);
+    data.AddUnsigned("expectedAbiVersionMinor", KSWORD_SANDBOX_ABI_VERSION_MINOR);
+    data.AddUnsigned("driverAbiVersionMajor", reply.AbiVersionMajor);
+    data.AddUnsigned("driverAbiVersionMinor", reply.AbiVersionMinor);
+    data.AddBool("abiMajorMatch", abiMajorMatch);
+    data.AddBool("abiMinorForwardCompatible", abiMinorForwardCompatible);
+    data.AddUnsigned("expectedEventHeaderVersion", KSWORD_SANDBOX_EVENT_HEADER_VERSION);
+    data.AddUnsigned("driverEventHeaderVersion", reply.EventHeaderVersion);
+    data.AddBool("eventHeaderVersionCompatible", eventHeaderCompatible);
+    data.AddUnsigned("expectedEventMaxPayloadSize", KSWORD_SANDBOX_EVENT_MAX_PAYLOAD_SIZE);
+    data.AddUnsigned("driverEventMaxPayloadSize", reply.EventMaxPayloadSize);
+    data.AddBool("eventMaxPayloadSizeCompatible", eventPayloadLimitCompatible);
+    data.AddUnsigned("expectedReadEventsReplyHeaderSize", KSWORD_SANDBOX_READ_EVENTS_REPLY_HEADER_SIZE);
+    data.AddUnsigned("driverReadEventsReplyHeaderSize", reply.ReadEventsReplyHeaderSize);
+    data.AddBool("readEventsReplyHeaderSizeCompatible", readEventsReplyHeaderCompatible);
+    data.AddUnsigned("expectedCapabilitiesReplySize", sizeof(KSWORD_SANDBOX_CAPABILITIES_REPLY));
+    data.AddUnsigned("driverCapabilitiesReplySize", reply.CapabilitiesReplySize);
+    data.AddBool("capabilitiesReplySizeCompatible", capabilitiesReplySizeCompatible);
+    data.AddUnsigned("expectedStatusReplySize", sizeof(KSWORD_SANDBOX_STATUS_REPLY));
+    data.AddUnsigned("driverStatusReplySize", reply.StatusReplySize);
+    data.AddBool("statusReplySizeCompatible", statusReplySizeCompatible);
+    data.AddUnsigned("expectedSetProducerEnableMaskReplySize", sizeof(KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK_REPLY));
+    data.AddUnsigned("driverSetProducerEnableMaskReplySize", reply.SetProducerEnableMaskReplySize);
+    data.AddBool("setProducerEnableMaskReplySizeCompatible", producerMaskReplySizeCompatible);
+    data.AddWide(
+        "zhAbiCompatibilityHint",
+        abiCompatible
+            ? L"Capabilities ABI 与 Collector 期望兼容。"
+            : L"Capabilities ABI 与 Collector 期望不兼容；请查看 abiMismatchReasons 和 expected*/driver* 字段。");
     data.AddUnsigned("abiVersionMajor", reply.AbiVersionMajor);
     data.AddUnsigned("abiVersionMinor", reply.AbiVersionMinor);
     data.AddUnsigned("capabilityFlags", reply.CapabilityFlags);
@@ -3638,7 +3723,26 @@ std::string BuildReadEventsBatchData(
     const bool backpressure = lost || cappedByMaxEvents || outputBufferFull || sequenceGapObserved;
     const std::string backpressureSeverity =
         lost ? "loss" : (sequenceGapObserved ? "sequence-gap" : (backpressure ? "bounded-drain" : "none"));
+    const unsigned long long driverNoiseEvents = counters.collectorSuppressedEvents;
+    const unsigned long long collectorNoiseEvents =
+        counters.collectorSuppressedEvents + counters.collectorSkippedEvents;
 
+    data.AddUnsigned("batchSummaryVersion", 2);
+    data.AddUtf8("batchKind", "live-read-events");
+    data.AddUtf8("batchCounterScope", "single-read-events-ioctl");
+    data.AddUtf8("sequenceScope", "consumed-driver-event-records");
+    data.AddUtf8("sequenceCountScope", "recordsProcessed-before-self-noise-suppression-and-sampling");
+    data.AddUtf8("sequenceHeadScope", counters.hasSequenceRange ? "first-consumed-driver-event-sequence" : "none");
+    data.AddUtf8("sequenceTailScope", counters.hasSequenceRange ? "last-consumed-driver-event-sequence" : "none");
+    data.AddBool("sequenceRangeAvailable", counters.hasSequenceRange);
+    data.AddBool("emittedSequenceRangeAvailable", counters.hasEmittedSequenceRange);
+    data.AddUnsigned("noiseObservedCount", collectorNoiseEvents);
+    data.AddUnsigned("collectorNoiseEvents", collectorNoiseEvents);
+    data.AddUnsigned("driverNoiseEvents", driverNoiseEvents);
+    data.AddUnsigned("selfNoiseSuppressedEvents", counters.collectorSuppressedEvents);
+    data.AddUnsigned("sampledOutEvents", counters.collectorSkippedEvents);
+    data.AddUnsigned("lossObservedCount", (lost || sequenceGapObserved) ? 1 : 0);
+    data.AddUnsigned("backpressureObservedCount", backpressure ? 1 : 0);
     data.AddUnsigned("requestedMaxEvents", requestedMaxEvents);
     data.AddUnsigned("recordsProcessed", counters.recordsProcessed);
     data.AddUnsigned("eventsEmitted", counters.eventsEmitted);

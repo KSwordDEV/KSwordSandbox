@@ -1,15 +1,14 @@
-# Architecture
+# 架构 / Architecture
 
-KSwordSandbox is a local Windows malware-analysis sandbox scaffold. The current
-v1 path is built around a prepared Hyper-V Windows 10 guest, host-side planning
-and reporting, guest-side collection, optional R0 telemetry, and local-only
-artifacts.
+KSwordSandbox 是本地 Windows 恶意行为分析沙箱骨架。当前 v1 链路围绕已准备的 Hyper-V Windows 10 guest、host 侧规划与报告、guest 侧采集、可选 R0 遥测，以及仅保存在本机的证据文件构建。
 
-For the concise operator map that also covers install/run, module ownership,
-driver test signing, and Hyper-V live execution, see
-`docs/current-architecture-and-operations.md`.
+English summary: KSwordSandbox is a local Windows malware-analysis sandbox scaffold with host planning/reporting, guest collection, optional R0 telemetry, and local-only artifacts.
 
-## Design goals
+需要同时覆盖 install/run、module ownership、driver test signing 和 Hyper-V live execution 的简明操作者地图，请参见 `docs/current-architecture-and-operations.md`。
+
+English summary: see `docs/current-architecture-and-operations.md` for the concise operator map covering install/run, ownership, test signing, and Hyper-V live execution.
+
+## 设计目标 / Design goals
 
 - Keep normal planning safe and reviewable: dry-run/PlanOnly must not mutate VM
   state or execute a sample.
@@ -23,7 +22,7 @@ driver test signing, and Hyper-V live execution, see
 - Keep optional external enrichment hash-only by default; VirusTotal lookups do
   not upload samples.
 
-## High-level flow
+## 高层流程 / High-level flow
 
 ```mermaid
 flowchart TD
@@ -45,9 +44,9 @@ flowchart TD
     N --> O["Local report.json / report.html / artifact index"]
 ```
 
-## Runtime boundaries
+## 运行边界 / Runtime boundaries
 
-Host:
+Host（主机）:
 
 - owns WebUI/API, job planning, runbook generation, runbook execution records,
   local upload storage, artifact import, rule classification, and reports;
@@ -55,7 +54,7 @@ Host:
 - writes runtime data under `paths.runtimeRoot`, normally
   `D:\Temp\KSwordSandbox`.
 
-Guest:
+Guest（来宾 VM）:
 
 - runs the submitted sample inside the prepared VM;
 - writes `events.json`, marker files, and optional artifacts under the
@@ -63,7 +62,7 @@ Guest:
 - can run R0Collector as a sidecar, either in mock mode or against a real driver
   device.
 
-Driver/R0:
+Driver/R0（内核遥测）:
 
 - is optional for the default safe chain;
 - is source-only in the repository;
@@ -71,19 +70,19 @@ Driver/R0:
   loading in an isolated VM;
 - must not use `CSignTool.exe` or commit signed binaries/certificates.
 
-External services:
+External services（外部服务）:
 
 - are optional;
 - currently limited to VirusTotal hash reputation lookup;
 - do not receive sample bytes by default.
 
-Git:
+Git（仓库边界）:
 
 - stores source, docs, rules, configuration templates, and smoke contracts;
 - must not store runtime outputs, build artifacts, large files, VM disks,
   samples, credentials, certificates, or signed driver files.
 
-## Module boundaries
+## 模块边界 / Module boundaries
 
 - `KSword.Sandbox.Abstractions`: shared immutable models and contracts.
 - `KSword.Sandbox.Core`: configuration loading, hashing, static analysis,
@@ -105,7 +104,7 @@ Preferred dependency direction is `Web -> Core -> Abstractions`. Guest and
 driver components emit files/events that Core imports; they should not depend
 on WebUI implementation details.
 
-## Execution modes
+## 执行模式 / Execution modes
 
 Plan/DryRun:
 
@@ -125,7 +124,7 @@ Live:
 - writes `runbook-execution.json`, guest outputs, imported events, reports, and
   artifact indexes under the runtime root.
 
-## Event schema
+## 事件 Schema / Event schema
 
 Every telemetry row uses the shared `SandboxEvent` shape:
 

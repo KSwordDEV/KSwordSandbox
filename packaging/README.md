@@ -1,10 +1,12 @@
-# KSwordSandbox packaging manifests
+# KSwordSandbox 打包清单 / packaging manifests
 
 中文优先提示：便携打包只做本机 staging/zip，不发布、不推送；manifest 和
 `scripts/package-portable.ps1` 的硬性规则会排除本机 secret、`install-state.json`、
 DPAPI 备份、`.env`、样本、报告、VM 磁盘/快照、仓库二进制、符号和签名材料。
 
-This directory contains the first productization-facing package manifests:
+本目录包含首批面向产品化的 package manifests：
+
+English summary: this directory contains the first productization-facing package manifests.
 
 - `source-package.manifest.json` defines the source-release include roots and
   the hard exclusions for samples, VM state, generated build output, archives,
@@ -44,8 +46,9 @@ local-only and intentionally has no push/publish step.
 - manifest 和脚本现在显式排除截图、PCAP/PCAPNG、JSONL 事件流、dump、
   SQLite/DB、HAR/trace、VM 状态、样本、报告、secret 和签名材料。
 
-Before a review handoff or source package dry run, use the combined lightweight
-gate from the repository root:
+在 review handoff 或 source package dry run 前，从仓库根目录运行组合轻量门禁：
+
+English summary: before review handoff or source-package dry run, use the combined lightweight gate from the repository root:
 
 ```powershell
 .\scripts\Test-ReleaseReadiness.ps1 -AllowDirtySource -StageSourcePackage
@@ -60,9 +63,6 @@ gate from the repository root:
   -RequireCompleteRuntimePackage
 ```
 
-The readiness wrapper calls repository policy, parses operational PowerShell
-scripts, validates package manifests, and scans normal release paths for legacy
-`CSignTool.exe` references and GUI signing fallback indicators. It also checks
-that install/run/package scripts keep Hyper-V prerequisite、VM profile、guest
-payload、VT key、runtime root 和 package safety diagnostics visible to
-operators. It does not start Hyper-V, sign drivers, or publish artifacts.
+Readiness wrapper 会调用 repository policy、解析操作者 PowerShell scripts、校验 package manifests，并扫描常规 release path 中遗留的 `CSignTool.exe` 引用和 GUI signing fallback 指示。它还会确认 install/run/package scripts 保持 Hyper-V prerequisite、VM profile、guest payload、VT key、runtime root 和 package safety diagnostics 对操作者可见。它不会启动 Hyper-V、签名 driver 或发布 artifacts。
+
+English summary: the readiness wrapper validates policy, scripts, manifests, and safety diagnostics without starting Hyper-V, signing drivers, or publishing artifacts.

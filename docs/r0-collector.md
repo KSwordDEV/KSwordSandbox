@@ -169,7 +169,10 @@ driver/KSword.Sandbox.Driver/include/KSwordSandboxDriverIoctl.h
 `IOCTL_KSWORD_SANDBOX_GET_CAPABILITIES` 成功后，`R0Collector` 输出
 `r0collector.driverCapabilities`。该行保留 ABI major/minor、capability flag names、
 producer-mask support/names、event schema name/version、event header version、ring
-capacity、reply sizes 和 max payload size，供后续诊断使用。`capabilityFlagNames`
+capacity、reply sizes 和 max payload size，供后续诊断使用。该行还输出
+`abiCompatibility`、`abiCompatible`、`abiMismatchReasons` 以及
+`expected*`/`driver*` version、payload limit 和 reply-size aliases，使 operator 可以
+直接定位 ABI major/minor、event header、payload limit 或 size drift。`capabilityFlagNames`
 覆盖当前每个 capability bit，包括 `ProcessCreateExit`、`ImageLoad`、`FileMinifilter`、
 `RegistryCallback`、`NetworkWfpAle`、`GetNetworkStatus`、`EventCommonMetadata`、
 `ProducerMetadata` 和 `SelfNoiseMetadata`；同时为这些能力输出 boolean
@@ -188,6 +191,16 @@ queue depth/capacity、high watermark、`ProducerEnableMask`、`SupportedProduce
 `effectiveProducerMask`、`effectiveProducerMaskHex`、`effectiveProducerMaskNames`、
 `lastFailureNtStatus` 和 `lastFailureNtStatusHex` 镜像新增 status fields。Producer
 loss masks 也输出 decimal、hex 和 name forms。
+
+`r0collector.driverReadEvents` batch summaries now start with compact evidence
+fields intended for large/noisy streams: `batchSummaryVersion`, `batchKind`,
+`batchCounterScope`, `sequenceScope`, `sequenceCountScope`,
+`noiseObservedCount`, `lossObservedCount`, and `backpressureObservedCount`.
+Live rows use `sequenceScope=consumed-driver-event-records`; synthetic stress
+rows use `sequenceScope=counted-stress-driver-file-rows`.  This prevents
+`nextSequence` snapshot aliases from being confused with concrete event
+sequences and lets no-device readiness checks compare noise/loss/backpressure
+counters without scanning every driver row.
 
 active/failed producer masks 通过此前未使用的 reserved/alignment space 发布，不需要
 ABI minor bump；`KSWORD_SANDBOX_STATUS_REPLY` 的 reply `Size` 对 ABI 1.0 collectors

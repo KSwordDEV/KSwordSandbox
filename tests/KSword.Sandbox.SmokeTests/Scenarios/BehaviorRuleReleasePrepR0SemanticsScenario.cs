@@ -75,8 +75,9 @@ internal sealed class BehaviorRuleReleasePrepR0SemanticsScenario : ISmokeTestSce
 
         var rules = RuleEngine.LoadRuleSet(behaviorRulesPath);
         SmokeAssert.True(
-            string.Equals(rules.Version, "2026-07-12-v22-defensive-behavior-expansion", StringComparison.OrdinalIgnoreCase),
-            "Behavior rules should carry the v21 defensive behavior expansion version while retaining release-prep rules.");
+            string.Equals(rules.Version, "2026-07-12-v22-defensive-behavior-expansion", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(rules.Version, "2026-07-12-v25-r0-file-network-semantic-fields", StringComparison.OrdinalIgnoreCase),
+            "Behavior rules should carry the v22+ defensive behavior expansion version while retaining release-prep rules.");
 
         var indexedRules = rules.Rules.ToDictionary(rule => rule.Id, StringComparer.OrdinalIgnoreCase);
         foreach (var ruleId in RequiredRuleIds)

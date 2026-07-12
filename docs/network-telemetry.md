@@ -131,12 +131,16 @@ Sidecar JSONL/log 行会直接归一化到标准事件类型。损坏 JSON lines
   `dns.rcode`, `dns.flags.rcode`, `dns.response_code`, `isResponse`,
   `answer`, `answers`, `resolvedIp`, `resolvedIps`, `dnsAnswers`,
   `answerCount`, `ttl`, `recordClass`, `dnsTransactionId`, `dnsOutcome`,
-  `classification`, `isNxDomain`
+  `classification`, `isNxDomain`, `answerTypeSummary`,
+  `dnsAnswerTypeSummary`, `cnameChain`, `dnsCnameChain`, `cnameTarget`,
+  `hasCname`, `dnsAnswerHasCname`
 - HTTP: `httpMessageType`, `method`, `httpMethod`, `requestMethod`,
   `httpRequestMethod`, `http.request.method`, `uri`, `requestUri`, `host`,
   `url`, `userAgent`, `contentType`, `statusCode`, `responseStatusCode`,
   `httpStatusCode`, `httpStatus`, `responseCode`, `http.response.status_code`,
-  `http.response.code`, `statusFamily`, `payloadMagic`, `referer`,
+  `http.response.code`, `statusFamily`, `payloadMagic`, `referer`, `referrer`,
+  `httpUserAgentFamily`, `contentDisposition`, `httpContentDisposition`,
+  `downloadFilename`, `downloadFileName`, `downloadFilenameSource`,
   `contentEncoding`, `requestBodyBytes`, `requestBytes`,
   `httpRequestBodyBytes`, `requestBodySizeBytes`, `responseBodyBytes`,
   `responseBytes`, `httpResponseBodyBytes`, `responseBodySizeBytes`,
@@ -154,10 +158,15 @@ Sidecar JSONL/log 行会直接归一化到标准事件类型。损坏 JSON lines
   `x509.fingerprint.sha256`, `certSha1`, `certNotBefore`, `certNotAfter`,
   `certificateStatus`, `validationStatus`, `certSelfSigned`,
   `certificateSelfSigned`, `certExpired`, `certificateExpired`,
-  `tlsCertificateRisk`. Native PCAP TLS
+  `certificateValidityStatus`, `tlsCertificateValidityStatus`,
+  `certificateIssuerSummary`, `tlsCertificateIssuerSummary`,
+  `tlsCertificateRisk`, `tlsCertificateRiskReason`,
+  `tlsCertificateRiskClassification`. Native PCAP TLS
   parsing 可在不要求 `tshark` 的情况下，从 client-hello 推导 SNI/ALPN/cipher hint/JA3，
   在存在 server-hello 时推导 JA3S，并从 TLS Certificate handshakes 尽力提取 certificate
-  subject/issuer/fingerprint metadata。
+  subject/issuer/fingerprint metadata。自签名、过期、尚未生效、invalid/untrusted 或
+  certificate parse error 会将协议行的 `protocolHealth` 标记为 `warning`，同时保留
+  `collectionHealth=ok`，表示“协议证据可解析，但证书风险需要复核”。
 - Connection: `state`, `durationSeconds`, `packetCount`, `byteCount`,
   `packetsToServer`, `packetsToClient`, `bytesToServer`, `bytesToClient`,
   `uid`, `externalFlowKey`, `communityId`, `applicationProtocol`,

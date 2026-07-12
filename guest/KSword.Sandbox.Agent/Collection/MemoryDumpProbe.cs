@@ -416,6 +416,10 @@ internal sealed class MemoryDumpProbe : IGuestProbe
         evt.Data["captureState"] = "captured";
         evt.Data["status"] = "captured";
         evt.Data["childProcessDumpTarget"] = (target is not null && !target.IsRoot).ToString(CultureInfo.InvariantCulture).ToLowerInvariant();
+        evt.Data["artifactAttemptEvent"] = "true";
+        evt.Data["targetDumpOutcome"] = "captured";
+        evt.Data["childProcessDumpOutcome"] = target is null || target.IsRoot ? "not-child-target" : "captured";
+        evt.Data["childProcessArtifactEvent"] = (target is not null && !target.IsRoot).ToString(CultureInfo.InvariantCulture).ToLowerInvariant();
         evt.Data["nonfatal"] = "false";
         evt.Data["artifactEvent"] = "true";
         evt.Data["summaryRow"] = "false";
@@ -503,11 +507,16 @@ internal sealed class MemoryDumpProbe : IGuestProbe
         evt.Data["artifactExists"] = "false";
         evt.Data["artifactIntegrityState"] = "skipped";
         evt.Data["artifactRelativePathStatus"] = duplicate ? "already-captured" : "not-created";
+        evt.Data["artifactAttemptEvent"] = "true";
+        evt.Data["artifactDiagnosticEvent"] = "true";
         evt.Data["sizeBytesStatus"] = "not-created";
         evt.Data["sha256Status"] = "not-created";
         evt.Data["duplicate"] = duplicate.ToString(CultureInfo.InvariantCulture).ToLowerInvariant();
         evt.Data["alreadyCaptured"] = duplicate.ToString(CultureInfo.InvariantCulture).ToLowerInvariant();
         evt.Data["childProcessDumpTarget"] = (target is not null && !target.IsRoot).ToString(CultureInfo.InvariantCulture).ToLowerInvariant();
+        evt.Data["targetDumpOutcome"] = duplicate ? "already-captured" : "skipped";
+        evt.Data["childProcessDumpOutcome"] = target is null || target.IsRoot ? "not-child-target" : duplicate ? "already-captured" : "skipped";
+        evt.Data["childProcessArtifactEvent"] = (target is not null && !target.IsRoot).ToString(CultureInfo.InvariantCulture).ToLowerInvariant();
         if (duplicate)
         {
             evt.Data["artifactReferenceEvent"] = "true";
@@ -1390,7 +1399,13 @@ internal sealed class MemoryDumpProbe : IGuestProbe
 
             foreach (var child in children)
             {
-                queue.Enqueue((child, depth + 1, $"{lineage}>{child.ProcessId.ToString(CultureInfo.InvariantCulture)}", false, isRoot ? "visible-descendant" : selectionSource));
+                var childDepth = depth + 1;
+                var childSelectionSource = childDepth == 1
+                    ? "visible-direct-child"
+                    : selectionSource.Contains("orphaned", StringComparison.OrdinalIgnoreCase)
+                        ? "visible-orphaned-deeper-descendant"
+                        : "visible-deeper-descendant";
+                queue.Enqueue((child, childDepth, $"{lineage}>{child.ProcessId.ToString(CultureInfo.InvariantCulture)}", false, childSelectionSource));
             }
         }
 

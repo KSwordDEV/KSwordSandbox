@@ -913,6 +913,7 @@ function Test-DeploymentOperatorDiagnosticsContract {
             'externalStateDiagnostics',
             'freshLiveEvidenceGuardrail',
             'reviewerChecklist',
+            'componentProgress',
             'sourceRuntimeSafetyMetadata',
             'runtimePublishRootMustBeOutsideRepository',
             'no VM mutation, no driver signing, no GUI signing fallback',
@@ -1011,6 +1012,7 @@ function Test-DeploymentDocsOperatorHints {
             'externalStateDiagnostics',
             'freshLiveEvidenceGuardrail',
             'reviewerChecklist',
+            'componentProgress',
             'sourceRuntimeSafetyMetadata',
             'no VM mutation',
             'no GUI signing fallback',
@@ -1214,6 +1216,63 @@ function Get-GitReleaseMetadata {
     return [pscustomobject]$metadata
 }
 
+
+function Get-ReleaseComponentProgressSnapshot {
+    param([int]$ExitCode = 0)
+
+    $runtimeRootProvided = -not [string]::IsNullOrWhiteSpace($RuntimePublishRoot)
+    $completeRuntimeRequested = [bool]$RequireCompleteRuntimePackage
+    return [ordered]@{
+        schema = 'ksword.release.component-progress.v1'
+        generatedAtUtc = [DateTimeOffset]::UtcNow.ToString('O')
+        purpose = 'Machine-readable component progress for release reviewers; readiness is non-mutating and does not create fresh live evidence.'
+        noFreshLiveEvidenceGenerated = $true
+        releaseNotesFallbackZh = '本候选未刷新 fresh live evidence'
+        components = @(
+            [ordered]@{
+                id = 'runtime-publish-root'
+                titleZh = 'RuntimePublishRoot publish checklist'
+                state = if ($runtimeRootProvided -and $completeRuntimeRequested -and $ExitCode -eq 0) { 'ready-for-runtime-handoff' } elseif ($runtimeRootProvided) { 'diagnosed-needs-complete-runtime-gate' } else { 'blocked-missing-external-runtime-publish-root' }
+                handoffGate = 'Run readiness with -RuntimePublishRoot <external-publish-root> -RequireCompleteRuntimePackage, then package runtime with -RequireCompleteRuntimePayloads.'
+                reviewerChecklist = @('outside repository', 'host-web present', 'guest-tools present', 'tools/job-tool present', 'tools/postprocess present', 'no forbidden generated/secret/VM/signing files')
+                remediationZh = '把 host-web、guest-tools、tools/job-tool、tools/postprocess 发布到仓库外 RuntimePublishRoot；不要从仓库 bin/obj/x64 兜底复制。'
+            },
+            [ordered]@{
+                id = 'package-safety-contract'
+                titleZh = '包安全边界'
+                state = 'guarded'
+                handoffGate = 'No samples, reports, VM state, generated artifacts, secrets, signing material, CSignTool, or GUI signing fallback in source/runtime packages.'
+                reviewerChecklist = @('manifest high-risk exclusions present', 'sourceRuntimeSafetyMetadata excludes runtime evidence and signing material', 'rejectIfPresent absent from staged package')
+                remediationZh = '如果发现样本、报告、PCAP/dump/trace、VM 文件、secret、证书私钥、driver binary 或 CSignTool，丢弃包并修正 manifest/exclude。'
+            },
+            [ordered]@{
+                id = 'release-smoke-scenarios'
+                titleZh = '发布 smoke 场景'
+                state = 'documented-low-cost-only'
+                handoffGate = 'PowerShell parse, repository policy, source package StageOnly dry-run; no Hyper-V/live/heavy E2E.'
+                reviewerChecklist = @('release-readiness.json failedCount=0', 'source package dry-run metadata reviewed', 'complete runtime gate rerun before runtime handoff')
+                remediationZh = '低成本 smoke 失败先看 release-readiness.md 的 Next；live smoke 只能由 release manager 在 lab host 显式运行。'
+            },
+            [ordered]@{
+                id = 'fresh-live-guardrail'
+                titleZh = 'No-fresh-live guardrail'
+                state = 'guarded-not-generated'
+                handoffGate = 'Fresh live claim requires lab job id, commit, runtime root, timestamp, and report paths.'
+                reviewerChecklist = @('no job id means release notes says 本候选未刷新 fresh live evidence', 'readiness/package outputs are not fresh live evidence')
+                remediationZh = '没有当前候选实验室 job id，不得在 release notes 声称 fresh Notepad 5s 或真实 R0 证据。'
+            },
+            [ordered]@{
+                id = 'operator-remediation-zh'
+                titleZh = '中文操作者修复提示'
+                state = 'documented'
+                handoffGate = 'install/run CheckEnvironment exposes Chinese next-step commands for deployment gaps.'
+                reviewerChecklist = @('Hyper-V prerequisites', 'VM profile/checkpoint', 'guest payload freshness', 'VT key optional state', 'runtime root outside repository')
+                remediationZh = '先运行 .\\scripts\\install.ps1 -Mode CheckEnvironment 和 .\\scripts\\run.ps1 -Mode CheckEnvironment，再按 RecommendedActions 修复。'
+            }
+        )
+    }
+}
+
 function ConvertTo-ReleaseReadinessMarkdown {
     param(
         [Parameter(Mandatory)]
@@ -1389,6 +1448,7 @@ $summary = [pscustomobject][ordered]@{
             '样本、报告、PCAP/dump/trace、VM 磁盘/快照、secret、证书私钥或 driver binary'
         )
     }
+    componentProgress     = Get-ReleaseComponentProgressSnapshot -ExitCode $exitCode
     sourceRuntimeSafetyMetadata = [ordered]@{
         sourcePackage = [ordered]@{
             dryRunEnabledByDefault = -not [bool]$SkipSourcePackageDryRun

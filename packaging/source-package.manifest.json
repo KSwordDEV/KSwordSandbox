@@ -12,7 +12,10 @@
     "guiSigningFallback": "forbidden",
     "legacyCSignToolDefaultPath": "forbidden",
     "runtimePayloadSource": "not applicable; source package is source-only",
-    "operatorDiagnostics": "install/run expose read-only Hyper-V prerequisite, VM profile, guest payload, VT key, runtime-root, and RuntimePublishRoot guidance; package-portable.ps1 writes generated metadata including reviewerChecklist and sourceRuntimeSafetyMetadata, and prints stage/archive/safety diagnostics without VM, driver signing, GUI signing fallback, or CSignTool side effects"
+    "operatorDiagnostics": "install/run expose read-only Hyper-V prerequisite, VM profile, guest payload, VT key, runtime-root, and RuntimePublishRoot guidance; package-portable.ps1 writes generated metadata including reviewerChecklist and sourceRuntimeSafetyMetadata, and prints stage/archive/safety diagnostics without VM, driver signing, GUI signing fallback, or CSignTool side effects",
+    "machineReadableComponentProgress": "package-manifest.generated.json:componentProgress and release-readiness.json:componentProgress",
+    "reviewerChecklistJson": "package-manifest.generated.json:reviewerChecklist and release-readiness.json:reviewerChecklist",
+    "noFreshLiveGuardrail": "package/readiness do not generate fresh live evidence; release notes must say 本候选未刷新 fresh live evidence unless a lab job id is recorded"
   },
   "stagedMetadata": {
     "generatedManifest": "package-manifest.generated.json",
@@ -22,7 +25,9 @@
       "generated reviewerChecklist for source/runtime handoff, release-note fields, and hard reject conditions",
       "sourceRuntimeSafetyMetadata declaring source-only/source exclusions, external RuntimePublishRoot-only runtime payloads, and non-mutating safety state",
       "safety contract for secrets, VM state, runtime evidence, signing, GUI signing fallback, push/publish, and CSignTool",
-      "manifest required checks and optional packaging diagnostics"
+      "manifest required checks and optional packaging diagnostics",
+      "machine-readable componentProgress snapshot for deployment/productization review",
+      "reviewerChecklist JSON and no-fresh-live guardrail fields"
     ],
     "selfHashNote": "The generated manifest lists itself in files but omits a recursive self-hash from fileInventory."
   },
@@ -271,5 +276,32 @@
     "Run scripts/Test-RepositoryPolicy.ps1 before cutting a source package.",
     "Cut source packages from a clean git worktree unless AllowDirtySource is explicitly documented.",
     "Do not include runtime-root folders, submitted samples, VM disks/checkpoints, local state/secrets, build intermediates, signed driver binaries, or private signing material."
-  ]
+  ],
+  "componentProgressTemplate": {
+    "schema": "ksword.release.component-progress.v1",
+    "purpose": "Machine-readable deployment/productization progress for release reviewers; not fresh live evidence.",
+    "components": [
+      {
+        "id": "runtime-publish-root",
+        "handoffGate": "external RuntimePublishRoot; host-web, guest-tools, tools/job-tool, tools/postprocess; no repository bin/obj/x64 fallback",
+        "appliesTo": "runtime handoff only"
+      },
+      {
+        "id": "package-safety-contract",
+        "handoffGate": "exclude samples, reports, VM state, generated artifacts, secrets, signing material, CSignTool"
+      },
+      {
+        "id": "release-smoke-scenarios",
+        "handoffGate": "PowerShell parse, repository policy, source StageOnly dry-run; no Hyper-V/live/heavy E2E"
+      },
+      {
+        "id": "fresh-live-guardrail",
+        "handoffGate": "fresh live claims require explicit lab job id, commit, runtime root, timestamp, and report paths"
+      },
+      {
+        "id": "operator-remediation-zh",
+        "handoffGate": "Chinese next-step remediation is present in readiness/package/install/run output"
+      }
+    ]
+  }
 }

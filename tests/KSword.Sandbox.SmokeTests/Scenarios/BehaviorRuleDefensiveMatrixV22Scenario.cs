@@ -57,8 +57,9 @@ internal sealed class BehaviorRuleDefensiveMatrixV22Scenario : ISmokeTestScenari
         var rules = RuleEngine.LoadRuleSet(behaviorRulesPath);
         SmokeAssert.True(
             string.Equals(rules.Version, "2026-07-12-v22-defensive-behavior-expansion", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(rules.Version, "2026-07-12-v23-high-signal-behavior-expansion", StringComparison.OrdinalIgnoreCase),
-            "Behavior rules should carry the v22 defensive behavior expansion version or a newer v23 behavior expansion version.");
+            string.Equals(rules.Version, "2026-07-12-v23-high-signal-behavior-expansion", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(rules.Version, "2026-07-12-v25-r0-file-network-semantic-fields", StringComparison.OrdinalIgnoreCase),
+            "Behavior rules should carry the v22 defensive behavior expansion version or a newer behavior expansion version.");
 
         var mitreTechniqueIds = ReadMitreTechniqueIds(mitreMapPath);
         foreach (var techniqueId in RequiredTechniqueIds)

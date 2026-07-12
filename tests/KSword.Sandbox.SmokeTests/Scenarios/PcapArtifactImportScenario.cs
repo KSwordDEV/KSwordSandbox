@@ -102,6 +102,11 @@ internal sealed class PcapArtifactImportScenario : ISmokeTestScenario
         RequireData(dns, "dns.qry.name", "beacon.example.test");
         RequireData(dns, "rcodeName", "NOERROR");
         RequireData(dns, "dns.flags.rcode", "NOERROR");
+        RequireData(dns, "answerTypeSummary", "A,CNAME");
+        RequireData(dns, "dnsAnswerTypeSummary", "A,CNAME");
+        RequireData(dns, "cnameChain", "cdn.example.test");
+        RequireData(dns, "cnameTarget", "cdn.example.test");
+        RequireData(dns, "hasCname", "true");
         RequireData(dns, "pcapSourceArtifactRelativePath", "sample.pcap");
         RequireData(dns, "sourcePcapArtifactRelativePath", "sample.pcap");
         RequireData(dns, "sourceAddressScope", "private");
@@ -117,6 +122,11 @@ internal sealed class PcapArtifactImportScenario : ISmokeTestScenario
         RequireData(http, "url.host", "download.example.test");
         RequireData(http, "http.request.uri", "/payload.exe");
         RequireData(http, "http.user_agent", "KSwordSmoke");
+        RequireData(http, "httpUserAgentFamily", "custom");
+        RequireData(http, "referer", "http://referrer.example.test/start");
+        RequireData(http, "http.referer", "http://referrer.example.test/start");
+        RequireData(http, "downloadFilename", "payload.exe");
+        RequireData(http, "downloadFilenameSource", "uri");
         RequireData(http, "payloadMagic", "MZ");
         RequireData(http, "httpMessageType", "request");
         RequireData(http, "requestBodyBytes", "2");
@@ -139,6 +149,9 @@ internal sealed class PcapArtifactImportScenario : ISmokeTestScenario
         RequireData(httpResponse, "responseBodyBytes", "2");
         RequireData(httpResponse, "bodySizeBytes", "2");
         RequireData(httpResponse, "contentLength", "2");
+        RequireData(httpResponse, "contentDisposition", "attachment; filename=\"payload.exe\"");
+        RequireData(httpResponse, "downloadFilename", "payload.exe");
+        RequireData(httpResponse, "downloadFilenameSource", "content-disposition");
         RequireData(httpResponse, "downloadCandidate", "true");
         RequireData(httpResponse, "downloadReason", "body-bytes");
         RequireData(httpResponse, "transferDirection", "download");
@@ -158,6 +171,11 @@ internal sealed class PcapArtifactImportScenario : ISmokeTestScenario
         RequireData(tlsCertificate, "validationStatus", "self-signed");
         RequireData(tlsCertificate, "certSelfSigned", "true");
         RequireData(tlsCertificate, "tlsCertificateRisk", "suspicious");
+        RequireData(tlsCertificate, "tlsCertificateRiskReason", "self-signed");
+        RequireData(tlsCertificate, "tlsCertificateRiskClassification", "certificate-anomaly");
+        RequireData(tlsCertificate, "certificateValidityStatus", "valid");
+        RequireData(tlsCertificate, "certificateIssuerSummary", "self-signed");
+        RequireData(tlsCertificate, "protocolHealth", "warning");
         RequireNonEmpty(tlsCertificate, "certSubject");
         RequireNonEmpty(tlsCertificate, "certificateSubject");
         RequireNonEmpty(tlsCertificate, "certSha256");
@@ -174,12 +192,16 @@ internal sealed class PcapArtifactImportScenario : ISmokeTestScenario
         RequireData(dnsQuery, "query", "beacon.example.test");
         RequireData(dnsQuery, "recordType", "A");
         RequireData(dnsQuery, "qtype", "A");
+        RequireData(dnsQuery, "answerTypeSummary", "A,CNAME");
+        RequireData(dnsQuery, "cnameChain", "cdn.example.test");
         RequireData(dnsQuery, "serviceHint", "dns");
         AssertStandardNetworkEvent(httpRequest, "http", "pcap-native", "http");
         RequireData(httpRequest, "method", "GET");
         RequireData(httpRequest, "requestMethod", "GET");
         RequireData(httpRequest, "requestUri", "/payload.exe");
         RequireData(httpRequest, "url", "http://download.example.test/payload.exe");
+        RequireData(httpRequest, "referer", "http://referrer.example.test/start");
+        RequireData(httpRequest, "downloadFilename", "payload.exe");
         RequireData(httpRequest, "contentType", "application/x-msdownload");
         RequireData(httpRequest, "httpMessageType", "request");
         RequireData(httpRequest, "downloadCandidate", "true");
@@ -188,6 +210,8 @@ internal sealed class PcapArtifactImportScenario : ISmokeTestScenario
         RequireData(httpResponseEvent, "httpStatusCode", "200");
         RequireData(httpResponseEvent, "http.response.status_code", "200");
         RequireData(httpResponseEvent, "responseBodyBytes", "2");
+        RequireData(httpResponseEvent, "contentDisposition", "attachment; filename=\"payload.exe\"");
+        RequireData(httpResponseEvent, "downloadFilenameSource", "content-disposition");
         RequireData(httpResponseEvent, "downloadCandidate", "true");
         RequireData(httpResponseEvent, "transferDirection", "download");
         AssertStandardNetworkEvent(tlsConnection, "tls", "pcap-native", "tls");
@@ -201,6 +225,9 @@ internal sealed class PcapArtifactImportScenario : ISmokeTestScenario
         RequireData(tlsCertificateEvent, "certificateStatus", "self-signed");
         RequireNonEmpty(tlsCertificateEvent, "certificateSha256");
         RequireData(tlsCertificateEvent, "certificateSubjectCn", "secure.example.test");
+        RequireData(tlsCertificateEvent, "tlsCertificateRiskReason", "self-signed");
+        RequireData(tlsCertificateEvent, "certificateIssuerSummary", "self-signed");
+        RequireData(tlsCertificateEvent, "protocolHealth", "warning");
         RequireNonEmpty(tlsCertificateEvent, "tlsCertificateValidityDays");
         AssertStandardNetworkEvent(nativeFlow, "connection", "pcap-native", "dns");
         RequireData(nativeFlow, "packetCount", "1");
@@ -966,9 +993,9 @@ internal sealed class PcapArtifactImportScenario : ISmokeTestScenario
         WriteUInt32Le(stream, 65535);
         WriteUInt32Le(stream, 1); // Ethernet
 
-        WritePacket(stream, 1, BuildUdpFrame("10.0.0.4", "8.8.8.8", 53000, 53, BuildDnsQuery("beacon.example.test")));
-        WritePacket(stream, 2, BuildTcpFrame("10.0.0.4", "198.51.100.20", 50000, 80, Encoding.ASCII.GetBytes("GET /payload.exe HTTP/1.1\r\nHost: download.example.test\r\nUser-Agent: KSwordSmoke\r\nContent-Type: application/x-msdownload\r\n\r\nMZ")));
-        WritePacket(stream, 3, BuildTcpFrame("198.51.100.20", "10.0.0.4", 80, 50000, Encoding.ASCII.GetBytes("HTTP/1.1 200 OK\r\nContent-Type: application/x-msdownload\r\nContent-Length: 2\r\n\r\nMZ")));
+        WritePacket(stream, 1, BuildUdpFrame("10.0.0.4", "8.8.8.8", 53000, 53, BuildDnsResponseWithCname("beacon.example.test", "cdn.example.test", "198.51.100.45")));
+        WritePacket(stream, 2, BuildTcpFrame("10.0.0.4", "198.51.100.20", 50000, 80, Encoding.ASCII.GetBytes("GET /payload.exe HTTP/1.1\r\nHost: download.example.test\r\nUser-Agent: KSwordSmoke\r\nReferer: http://referrer.example.test/start\r\nContent-Type: application/x-msdownload\r\n\r\nMZ")));
+        WritePacket(stream, 3, BuildTcpFrame("198.51.100.20", "10.0.0.4", 80, 50000, Encoding.ASCII.GetBytes("HTTP/1.1 200 OK\r\nContent-Type: application/x-msdownload\r\nContent-Length: 2\r\nContent-Disposition: attachment; filename=\"payload.exe\"\r\n\r\nMZ")));
         WritePacket(stream, 4, BuildTcpFrame("10.0.0.4", "203.0.113.10", 50001, 443, BuildTlsClientHello("secure.example.test")));
         WritePacket(stream, 5, BuildTcpFrame("203.0.113.10", "10.0.0.4", 443, 50001, BuildTlsCertificate(BuildSelfSignedCertificateDer())));
         return stream.ToArray();
@@ -1042,15 +1069,42 @@ internal sealed class PcapArtifactImportScenario : ISmokeTestScenario
         return packet;
     }
 
-    private static byte[] BuildDnsQuery(string name)
+    private static byte[] BuildDnsResponseWithCname(string queryName, string cnameTarget, string answerIp)
     {
         using var stream = new MemoryStream();
         WriteUInt16Be(stream, 0x1234);
-        WriteUInt16Be(stream, 0x0100);
+        WriteUInt16Be(stream, 0x8180);
         WriteUInt16Be(stream, 1);
+        WriteUInt16Be(stream, 2);
         WriteUInt16Be(stream, 0);
         WriteUInt16Be(stream, 0);
-        WriteUInt16Be(stream, 0);
+        WriteDnsName(stream, queryName);
+        WriteUInt16Be(stream, 1);
+        WriteUInt16Be(stream, 1);
+        WriteUInt16Be(stream, 0xC00C);
+        WriteUInt16Be(stream, 5);
+        WriteUInt16Be(stream, 1);
+        WriteUInt32Be(stream, 60);
+        using (var cname = new MemoryStream())
+        {
+            WriteDnsName(cname, cnameTarget);
+            var cnameBytes = cname.ToArray();
+            WriteUInt16Be(stream, cnameBytes.Length);
+            stream.Write(cnameBytes);
+        }
+
+        WriteDnsName(stream, cnameTarget);
+        WriteUInt16Be(stream, 1);
+        WriteUInt16Be(stream, 1);
+        WriteUInt32Be(stream, 60);
+        var address = IPAddress.Parse(answerIp).GetAddressBytes();
+        WriteUInt16Be(stream, address.Length);
+        stream.Write(address);
+        return stream.ToArray();
+    }
+
+    private static void WriteDnsName(Stream stream, string name)
+    {
         foreach (var label in name.Split('.'))
         {
             var bytes = Encoding.ASCII.GetBytes(label);
@@ -1059,9 +1113,6 @@ internal sealed class PcapArtifactImportScenario : ISmokeTestScenario
         }
 
         stream.WriteByte(0);
-        WriteUInt16Be(stream, 1);
-        WriteUInt16Be(stream, 1);
-        return stream.ToArray();
     }
 
     private static byte[] BuildTlsClientHello(string sni)
@@ -1156,6 +1207,13 @@ internal sealed class PcapArtifactImportScenario : ISmokeTestScenario
     {
         Span<byte> buffer = stackalloc byte[2];
         BinaryPrimitives.WriteUInt16BigEndian(buffer, (ushort)value);
+        stream.Write(buffer);
+    }
+
+    private static void WriteUInt32Be(Stream stream, uint value)
+    {
+        Span<byte> buffer = stackalloc byte[4];
+        BinaryPrimitives.WriteUInt32BigEndian(buffer, value);
         stream.Write(buffer);
     }
 
