@@ -28,6 +28,12 @@ $script:R0CollectorCommandLine = ''
 $script:R0CollectorArguments = @()
 $script:R0CollectorMode = 'Disabled'
 $script:VmMutationStarted = $false
+$script:VmConsoleOpenAttempted = $false
+$script:VmConsoleOpenSucceeded = $false
+$script:VmConsoleOpenMessage = ''
+$script:VmConsoleProcessId = $null
+$script:VmConsoleOpenStrategy = ''
+$script:VmConsoleRdpTarget = ''
 $script:Cmdlet = $PSCmdlet
 $script:GuestServiceInterfaceComponentId = '6C09BB55-D683-4DA0-8931-C9BF705F6480'
 
@@ -384,6 +390,295 @@ function Wait-VMRunning {
     } while ((Get-Date) -lt $deadline)
 
     throw "错误：VM '$VmName' 未在 $TimeoutSeconds 秒内进入 Running 状态；最后状态：$lastState。下一步：在 Hyper-V 管理器检查 VM 启动错误后重试。"
+}
+
+function Get-OptionalPlanBoolean {
+    param(
+        [AllowNull()]$Object,
+        [Parameter(Mandatory)][string]$Name,
+        [bool]$DefaultValue
+    )
+
+    if ($null -eq $Object) {
+        return $DefaultValue
+    }
+
+    $property = $Object.PSObject.Properties[$Name]
+    if ($null -eq $property -or $null -eq $property.Value) {
+        return $DefaultValue
+    }
+
+    try {
+        return [System.Convert]::ToBoolean($property.Value)
+    }
+    catch {
+        return $DefaultValue
+    }
+}
+
+function Get-OptionalPlanString {
+    param(
+        [AllowNull()]$Object,
+        [Parameter(Mandatory)][string]$Name,
+        [AllowNull()][string]$DefaultValue
+    )
+
+    if ($null -eq $Object) {
+        return $DefaultValue
+    }
+
+    $property = $Object.PSObject.Properties[$Name]
+    if ($null -eq $property -or [string]::IsNullOrWhiteSpace([string]$property.Value)) {
+        return $DefaultValue
+    }
+
+    return [string]$property.Value
+}
+
+function Quote-NativeProcessArgument {
+    param([AllowNull()][string]$Value)
+
+    if ($null -eq $Value) {
+        $Value = ''
+    }
+
+    if ($Value -notmatch '[\s"]') {
+        return $Value
+    }
+
+    return '"' + ($Value -replace '"', '\"') + '"'
+}
+
+function Resolve-NativeCommandPath {
+    param(
+        [Parameter(Mandatory)][string]$Name,
+        [string[]]$AdditionalCandidates = @()
+    )
+
+    $command = Get-Command -Name $Name -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($null -ne $command -and -not [string]::IsNullOrWhiteSpace([string]$command.Source)) {
+        return [string]$command.Source
+    }
+
+    foreach ($candidate in $AdditionalCandidates) {
+        if (-not [string]::IsNullOrWhiteSpace($candidate) -and (Test-Path -LiteralPath $candidate -PathType Leaf)) {
+            return (Resolve-Path -LiteralPath $candidate).ProviderPath
+        }
+    }
+
+    return ''
+}
+
+function Test-DesktopLauncherStillPresent {
+    param(
+        [AllowNull()][System.Diagnostics.Process]$Process,
+        [Parameter(Mandatory)][string]$LauncherName
+    )
+
+    $processName = [System.IO.Path]::GetFileNameWithoutExtension($LauncherName)
+    if ($null -ne $Process -and -not [string]::IsNullOrWhiteSpace($Process.ProcessName)) {
+        $processName = $Process.ProcessName
+    }
+
+    Start-Sleep -Milliseconds 1200
+
+    if ($null -ne $Process) {
+        try {
+            $Process.Refresh()
+            if (-not $Process.HasExited) {
+                return [pscustomobject]@{ Success = $true; Message = "$LauncherName is still running after launch check." }
+            }
+        }
+        catch {
+            return [pscustomobject]@{ Success = $false; Message = "$LauncherName launch verification failed: $($_.Exception.Message)" }
+        }
+    }
+
+    $windowProcess = Get-Process -Name $processName -ErrorAction SilentlyContinue |
+        Where-Object { $_.MainWindowHandle -ne [IntPtr]::Zero } |
+        Select-Object -First 1
+    if ($null -ne $windowProcess) {
+        return [pscustomobject]@{ Success = $true; Message = "$LauncherName desktop window is present in process '$($windowProcess.ProcessName)' (PID $($windowProcess.Id))." }
+    }
+
+    if ($null -eq $Process) {
+        return [pscustomobject]@{ Success = $false; Message = "$LauncherName did not return a process handle and no desktop window was observed." }
+    }
+
+    if ($Process.HasExited) {
+        return [pscustomobject]@{ Success = $false; Message = "$LauncherName exited immediately with code $($Process.ExitCode); no durable interactive desktop window was observed." }
+    }
+
+    return [pscustomobject]@{ Success = $false; Message = "$LauncherName launch verification did not observe a running process or desktop window." }
+}
+
+function Get-VmRdpTarget {
+    param([Parameter(Mandatory)][object]$Plan)
+
+    $configured = Get-OptionalPlanString -Object $Plan.vm -Name 'rdpTarget' -DefaultValue ''
+    if (-not [string]::IsNullOrWhiteSpace($configured)) {
+        return $configured
+    }
+
+    try {
+        $adapterCommand = Get-Command -Name 'Get-VMNetworkAdapter' -ErrorAction SilentlyContinue
+        if ($null -eq $adapterCommand) {
+            return ''
+        }
+
+        $addresses = @(Get-VMNetworkAdapter -VMName ([string]$Plan.vm.name) -ErrorAction Stop |
+            ForEach-Object { $_.IPAddresses } |
+            Where-Object {
+                $text = [string]$_
+                $text -match '^(\d{1,3}\.){3}\d{1,3}$' -and
+                (-not $text.StartsWith('169.254.')) -and
+                $text -ne '0.0.0.0'
+            } |
+            Select-Object -Unique)
+        if ($addresses.Count -gt 0) {
+            return [string]$addresses[0]
+        }
+    }
+    catch {
+        return ''
+    }
+
+    return ''
+}
+
+function Start-HyperVVmConnectDesktop {
+    param(
+        [Parameter(Mandatory)][string]$ServerName,
+        [Parameter(Mandatory)][string]$VmName
+    )
+
+    $systemRoot = if ([string]::IsNullOrWhiteSpace($env:SystemRoot)) { 'C:\Windows' } else { $env:SystemRoot }
+    $vmConnectPath = Resolve-NativeCommandPath -Name 'vmconnect.exe' -AdditionalCandidates @(
+        (Join-Path $systemRoot 'System32\vmconnect.exe'),
+        (Join-Path $systemRoot 'Sysnative\vmconnect.exe')
+    )
+    if ([string]::IsNullOrWhiteSpace($vmConnectPath)) {
+        return [pscustomobject]@{ Success = $false; ProcessId = $null; Message = 'vmconnect.exe was not found.' }
+    }
+
+    try {
+        $argumentList = @(
+            (Quote-NativeProcessArgument -Value $ServerName),
+            (Quote-NativeProcessArgument -Value $VmName)
+        )
+        $process = Start-Process -FilePath $vmConnectPath -ArgumentList $argumentList -PassThru -WindowStyle Normal -ErrorAction Stop
+        $verification = Test-DesktopLauncherStillPresent -Process $process -LauncherName 'vmconnect.exe'
+        if (-not [bool]$verification.Success) {
+            return [pscustomobject]@{ Success = $false; ProcessId = $process.Id; Message = "vmconnect.exe launch did not produce a durable desktop window for VM '$VmName' on '$ServerName' (PID $($process.Id)): $($verification.Message)" }
+        }
+
+        return [pscustomobject]@{ Success = $true; ProcessId = $process.Id; Message = "vmconnect.exe started and remained open for VM '$VmName' on '$ServerName' (PID $($process.Id))." }
+    }
+    catch {
+        return [pscustomobject]@{ Success = $false; ProcessId = $null; Message = "vmconnect.exe launch failed: $($_.Exception.Message)" }
+    }
+}
+
+function Start-RdpDesktop {
+    param([Parameter(Mandatory)][string]$Target)
+
+    $systemRoot = if ([string]::IsNullOrWhiteSpace($env:SystemRoot)) { 'C:\Windows' } else { $env:SystemRoot }
+    $mstscPath = Resolve-NativeCommandPath -Name 'mstsc.exe' -AdditionalCandidates @(
+        (Join-Path $systemRoot 'System32\mstsc.exe'),
+        (Join-Path $systemRoot 'Sysnative\mstsc.exe')
+    )
+    if ([string]::IsNullOrWhiteSpace($mstscPath)) {
+        return [pscustomobject]@{ Success = $false; ProcessId = $null; Message = 'mstsc.exe was not found.' }
+    }
+
+    try {
+        $argumentList = @('/v:' + (Quote-NativeProcessArgument -Value $Target))
+        $process = Start-Process -FilePath $mstscPath -ArgumentList $argumentList -PassThru -WindowStyle Normal -ErrorAction Stop
+        $verification = Test-DesktopLauncherStillPresent -Process $process -LauncherName 'mstsc.exe'
+        if (-not [bool]$verification.Success) {
+            return [pscustomobject]@{ Success = $false; ProcessId = $process.Id; Message = "mstsc.exe launch did not produce a durable desktop window for RDP target '$Target' (PID $($process.Id)): $($verification.Message)" }
+        }
+
+        return [pscustomobject]@{ Success = $true; ProcessId = $process.Id; Message = "mstsc.exe started and remained open for RDP target '$Target' (PID $($process.Id))." }
+    }
+    catch {
+        return [pscustomobject]@{ Success = $false; ProcessId = $null; Message = "mstsc.exe launch failed for '$Target': $($_.Exception.Message)" }
+    }
+}
+
+function Open-HyperVVmConsole {
+    param([Parameter(Mandatory)][object]$Plan)
+
+    $enabled = Get-OptionalPlanBoolean -Object $Plan.vm -Name 'openVmConsoleOnLiveStart' -DefaultValue (Get-OptionalPlanBoolean -Object $Plan.vm -Name 'openConsoleOnLiveStart' -DefaultValue $true)
+    $disabledByNoOpenVmConsole = Get-OptionalPlanBoolean -Object $Plan.vm -Name 'consoleDisabledByNoOpenVmConsole' -DefaultValue $false
+    $required = $enabled -and (-not $disabledByNoOpenVmConsole)
+    if (-not $enabled) {
+        if (-not $disabledByNoOpenVmConsole) {
+            throw 'Live analysis would run headless because the plan disabled VM desktop opening, but headless live execution is allowed only when the operator supplies -NoOpenVmConsole explicitly.'
+        }
+
+        $script:VmConsoleOpenMessage = 'VM console auto-open disabled by -NoOpenVmConsole.'
+        Write-HyperVJobStep 'Hyper-V VM console auto-open disabled by -NoOpenVmConsole; continuing headless by explicit operator request. / 仅因显式 -NoOpenVmConsole 才允许不打开 VM 桌面。'
+        return
+    }
+
+    $script:VmConsoleOpenAttempted = $true
+    $serverName = Get-OptionalPlanString -Object $Plan.vm -Name 'consoleServerName' -DefaultValue 'localhost'
+    $vmName = [string]$Plan.vm.name
+    $messages = New-Object System.Collections.Generic.List[string]
+
+    $vmConnectResult = Start-HyperVVmConnectDesktop -ServerName $serverName -VmName $vmName
+    [void]$messages.Add([string]$vmConnectResult.Message)
+    if ([bool]$vmConnectResult.Success) {
+        $script:VmConsoleOpenSucceeded = $true
+        $script:VmConsoleOpenStrategy = 'HyperV.VMConnect'
+        $script:VmConsoleProcessId = $vmConnectResult.ProcessId
+        $script:VmConsoleOpenMessage = [string]$vmConnectResult.Message
+        Write-HyperVJobStep "已打开 Hyper-V VM 桌面/控制台：$vmName；可手动交互观察样本。 / Opened Hyper-V VM console via vmconnect.exe."
+        return
+    }
+
+    $rdpEnabled = Get-OptionalPlanBoolean -Object $Plan.vm -Name 'rdpFallbackEnabled' -DefaultValue $true
+    if ($rdpEnabled) {
+        $rdpTarget = Get-VmRdpTarget -Plan $Plan
+        $script:VmConsoleRdpTarget = $rdpTarget
+        if (-not [string]::IsNullOrWhiteSpace($rdpTarget)) {
+            $rdpResult = Start-RdpDesktop -Target $rdpTarget
+            [void]$messages.Add([string]$rdpResult.Message)
+            if ([bool]$rdpResult.Success) {
+                $script:VmConsoleOpenSucceeded = $true
+                $script:VmConsoleOpenStrategy = 'RDP.Mstsc'
+                $script:VmConsoleProcessId = $rdpResult.ProcessId
+                $script:VmConsoleOpenMessage = [string]$rdpResult.Message
+                Write-HyperVJobStep "已通过 mstsc/RDP 打开 VM 桌面：$rdpTarget；可手动交互观察样本。 / Opened VM desktop via mstsc.exe."
+                return
+            }
+        }
+        else {
+            [void]$messages.Add('RDP fallback skipped: no hyperV.rdpTarget configured and no VM IPv4 address was discoverable from Get-VMNetworkAdapter.')
+        }
+    }
+    else {
+        [void]$messages.Add('RDP fallback disabled by plan.')
+    }
+
+    $script:VmConsoleOpenSucceeded = $false
+    $script:VmConsoleOpenMessage = ($messages.ToArray() -join ' | ')
+    $manualHints = @(
+        "vmconnect.exe $serverName '$vmName'",
+        "mstsc.exe /v:<hyperV.rdpTarget 或 VM IP/反代地址>"
+    )
+    $message = if ($required) {
+        "错误：Live 分析被配置为必须打开可交互 VM 桌面，但 VMConnect/RDP 都未成功启动；尚未启动样本。下一步：安装 Hyper-V 管理工具/确认 vmconnect.exe 可用，或在 config hyperV.rdpTarget 配置 RDP/反代地址，或确认来宾 RDP 已启用。尝试详情：$script:VmConsoleOpenMessage。手动命令：$($manualHints -join ' ; ')"
+    }
+    else {
+        "自动打开 VM 桌面失败；只有显式 -NoOpenVmConsole/consoleDisabledByNoOpenVmConsole 才允许 headless 继续。下一步：如需交互观察，可手动安装 Hyper-V 管理工具/运行 vmconnect.exe，或配置 hyperV.rdpTarget 后重试。尝试详情：$script:VmConsoleOpenMessage。手动命令：$($manualHints -join ' ; ')"
+    }
+    if ($required) {
+        throw $message
+    }
+
+    Write-Warning ("中文提示：" + $message)
 }
 
 function Get-PowerShellDirectDiagnosticHint {
@@ -828,6 +1123,18 @@ function Save-StartResult {
         diagnostics = [ordered]@{
             vmName = $Plan.vm.name
             cleanCheckpointName = $Plan.vm.cleanCheckpointName
+            openVmConsoleOnLiveStart = Get-OptionalPlanBoolean -Object $Plan.vm -Name 'openVmConsoleOnLiveStart' -DefaultValue (Get-OptionalPlanBoolean -Object $Plan.vm -Name 'openConsoleOnLiveStart' -DefaultValue $true)
+            openVmConnectOnLiveStart = Get-OptionalPlanBoolean -Object $Plan.vm -Name 'openVmConnectOnLiveStart' -DefaultValue (Get-OptionalPlanBoolean -Object $Plan.vm -Name 'openConsoleOnLiveStart' -DefaultValue $true)
+            openConsoleOnLiveStart = Get-OptionalPlanBoolean -Object $Plan.vm -Name 'openConsoleOnLiveStart' -DefaultValue $true
+            consoleDisabledByNoOpenVmConsole = Get-OptionalPlanBoolean -Object $Plan.vm -Name 'consoleDisabledByNoOpenVmConsole' -DefaultValue $false
+            consoleFailureBlocksHeadless = (Get-OptionalPlanBoolean -Object $Plan.vm -Name 'openVmConsoleOnLiveStart' -DefaultValue (Get-OptionalPlanBoolean -Object $Plan.vm -Name 'openConsoleOnLiveStart' -DefaultValue $true)) -and (-not (Get-OptionalPlanBoolean -Object $Plan.vm -Name 'consoleDisabledByNoOpenVmConsole' -DefaultValue $false))
+            consoleServerName = Get-OptionalPlanString -Object $Plan.vm -Name 'consoleServerName' -DefaultValue 'localhost'
+            consoleOpenAttempted = $script:VmConsoleOpenAttempted
+            consoleOpenSucceeded = $script:VmConsoleOpenSucceeded
+            consoleOpenMessage = $script:VmConsoleOpenMessage
+            consoleProcessId = $script:VmConsoleProcessId
+            consoleOpenStrategy = $script:VmConsoleOpenStrategy
+            consoleRdpTarget = $script:VmConsoleRdpTarget
             guestUserName = $Plan.guest.userName
             guestPasswordSecretName = $Plan.guest.passwordSecretName
             secretValuePrinted = $false
@@ -1037,6 +1344,10 @@ try {
             Start-VM -Name $plan.vm.name
             Wait-VMRunning -VmName $plan.vm.name -TimeoutSeconds ([int]$plan.timeouts.startupSeconds)
         }
+    }
+
+    Invoke-RecordedStep -Id 'open-vm-console' -Title 'Open Hyper-V VM console/desktop for operator interaction' -ScriptBlock {
+        Open-HyperVVmConsole -Plan $plan
     }
 
     Invoke-RecordedStep -Id 'wait-powershell-direct' -Title 'Wait for PowerShell Direct readiness' -ScriptBlock {

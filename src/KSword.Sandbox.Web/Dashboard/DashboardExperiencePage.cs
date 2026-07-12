@@ -247,7 +247,7 @@ internal static class DashboardExperiencePage
                     <div id="selectedSampleSummary" class="selected-sample empty" data-copy="尚未选择样本 / no sample selected" data-copy-label="selected sample summary"></div>
                     <label for="uploadDuration" data-zh="分析时长（秒）" data-en="Analysis duration, seconds">分析时长（秒）</label>
                     <input id="uploadDuration" type="number" min="1" max="900" value="120" data-copy-label="analysis duration">
-                    <p id="durationHint" class="field-hint" data-copy="" data-copy-label="analysis duration hint" data-zh="后端会按配置限制分析时长；本次任务值会随上传一起提交。" data-en="The backend clamps analysis duration by config; this per-job value is submitted with upload.">后端会按配置限制分析时长；本次任务值会随上传一起提交。</p>
+                    <p id="durationHint" class="field-hint" data-copy="" data-copy-label="analysis duration hint" data-zh="后端会按配置限制分析时长；本次任务值会随上传一起提交；勾选“不限制运行时间”时会改用无限制语义。" data-en="The backend clamps bounded analysis duration by config; this per-job value is submitted with upload. When No runtime limit is checked, the request uses unlimited semantics.">后端会按配置限制分析时长；本次任务值会随上传一起提交；勾选“不限制运行时间”时会改用无限制语义。</p>
                     <div class="preset-row" aria-label="样本运行预设 / Sample run presets">
                       <button type="button" onclick="applySamplePreset('quick')" data-copy="快速观察：30s，关闭敏感产物采集 / Quick observe: 30s, sensitive artifact collection off" data-zh="快速观察 30s" data-en="Quick 30s">快速观察 30s</button>
                       <button type="button" onclick="applySamplePreset('standard')" data-copy="标准动态：120s，落地文件+截图+PCAP / Standard dynamic: 120s, dropped files + screenshots + PCAP" data-zh="标准动态 120s" data-en="Standard 120s">标准动态 120s</button>
@@ -287,6 +287,10 @@ internal static class DashboardExperiencePage
               <details class="vm-config" open>
                 <summary data-zh="本次任务：虚拟机运行配置" data-en="This job: VM run configuration">本次任务：虚拟机运行配置</summary>
                 <p class="hint" data-zh="默认从 config 与本机 WebUI 预设读取；这里的值只覆盖当前任务，不写入配置文件，也不展示长命令行。" data-en="Defaults are loaded from config and the local WebUI preset. Values here only override the current job, do not write config files, and do not show long command lines.">默认从 config 与本机 WebUI 预设读取；这里的值只覆盖当前任务，不写入配置文件，也不展示长命令行。</p>
+                <div class="toggle-card runtime-limit-card" data-copy="不限制运行时间 / No runtime limit：未启用 / disabled" data-copy-label="runtime limit policy">
+                  <label for="uploadDurationUnlimited"><input id="uploadDurationUnlimited" type="checkbox"> <span data-zh="不限制运行时间（仅传入无限制语义）" data-en="No runtime limit (send unlimited intent only)">不限制运行时间（仅传入无限制语义）</span></label>
+                  <p id="durationUnlimitedHint" class="field-hint" data-copy="未启用：使用上方秒数，并按后端 config 限制 / Disabled: use bounded seconds clamped by backend config" data-copy-label="runtime limit hint" data-zh="未勾选时使用上方秒数；勾选后上传/路径规划会提交 durationUnlimited=true、durationSeconds=0，启动 runbook 时 stepTimeoutSeconds=0（不设置 Web 端单步超时）。这不是“停止 VM/杀样本”按钮；需要后端取消接口时再接入。" data-en="When unchecked, the seconds field is used. When checked, upload/path planning submits durationUnlimited=true and durationSeconds=0, and runbook start uses stepTimeoutSeconds=0 (no Web-side per-step timeout). This is not a Stop VM/Kill sample button; backend cancellation can be wired only when a safe cancel API exists.">未勾选时使用上方秒数；勾选后上传/路径规划会提交 durationUnlimited=true、durationSeconds=0，启动 runbook 时 stepTimeoutSeconds=0（不设置 Web 端单步超时）。这不是“停止 VM/杀样本”按钮；需要后端取消接口时再接入。</p>
+                </div>
                 <div class="vm-grid">
                   <div class="config-card">
                     <h4 data-zh="VM 与检查点" data-en="VM and checkpoint">VM 与检查点</h4>
@@ -650,6 +654,7 @@ internal static class DashboardExperiencePage
                 const defaultDuration = clampDuration(config.analysis?.defaultDurationSeconds, maxDuration);
                 document.getElementById('duration').value = String(defaultDuration);
                 document.getElementById('uploadDuration').value = String(defaultDuration);
+                document.getElementById('uploadDurationUnlimited').checked = false;
                 document.getElementById('uploadDuration').max = String(maxDuration);
                 document.getElementById('goldenVmName').value = config.hyperV?.goldenVmName || '';
                 document.getElementById('goldenSnapshotName').value = config.hyperV?.goldenSnapshotName || '';
@@ -698,6 +703,16 @@ internal static class DashboardExperiencePage
               return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
             }
 
+            function isDurationUnlimited() {
+              return document.getElementById('uploadDurationUnlimited')?.checked === true;
+            }
+
+            function formatAnalysisDuration() {
+              return isDurationUnlimited()
+                ? t('不限制运行时间', 'no runtime limit')
+                : `${getAnalysisDuration()}s`;
+            }
+
             function clampDuration(value, maxDuration) {
               const max = normalizePositiveInt(maxDuration, 900);
               const parsed = normalizePositiveInt(value, normalizePositiveInt(runtimeConfigDefaults?.analysis?.defaultDurationSeconds, 120));
@@ -707,6 +722,22 @@ internal static class DashboardExperiencePage
             function getAnalysisDuration() {
               const input = document.getElementById('uploadDuration');
               const hidden = document.getElementById('duration');
+              if (isDurationUnlimited()) {
+                if (input) {
+                  input.disabled = true;
+                }
+
+                if (hidden) {
+                  hidden.value = '0';
+                }
+
+                return 0;
+              }
+
+              if (input) {
+                input.disabled = false;
+              }
+
               const max = normalizePositiveInt(input?.max || runtimeConfigDefaults?.analysis?.maxDurationSeconds, 900);
               const fallback = normalizePositiveInt(runtimeConfigDefaults?.analysis?.defaultDurationSeconds || hidden?.value, 120);
               const duration = clampDuration(input?.value || hidden?.value || fallback, max);
@@ -827,6 +858,7 @@ internal static class DashboardExperiencePage
 
               setValue('uploadDuration', preset.durationSeconds);
               setValue('duration', preset.durationSeconds);
+              setChecked('uploadDurationUnlimited', preset.durationUnlimited);
               setValue('goldenVmName', preset.goldenVmName);
               setValue('goldenSnapshotName', preset.goldenSnapshotName);
               setValue('guestUserName', preset.guestUserName);
@@ -843,6 +875,7 @@ internal static class DashboardExperiencePage
             function captureVmPreset() {
               return {
                 durationSeconds: getAnalysisDuration(),
+                durationUnlimited: isDurationUnlimited(),
                 ...getVmConfig(),
                 ...getArtifactCollectionConfig()
               };
@@ -866,8 +899,16 @@ internal static class DashboardExperiencePage
               const secretName = runtimeConfigDefaults?.guest?.passwordSecretName || 'KSWORDBOX_GUEST_PASSWORD';
               const maxDuration = normalizePositiveInt(runtimeConfigDefaults?.analysis?.maxDurationSeconds, 900);
               setElementTextAndCopy('durationHint', t(
-                `后端会限制在 1-${maxDuration} 秒；本次任务值会随上传一起提交，也可保存为本机 WebUI 预设。`,
-                `The backend clamps this to 1-${maxDuration} seconds; the per-job value is submitted with upload and can be saved as a local WebUI preset.`));
+                `后端会把有界时长限制在 1-${maxDuration} 秒；勾选“不限制运行时间”时会提交 durationUnlimited=true、durationSeconds=0，并可保存为本机 WebUI 预设。`,
+                `The backend clamps bounded duration to 1-${maxDuration} seconds; when No runtime limit is checked, the UI submits durationUnlimited=true and durationSeconds=0, and this can be saved as a local WebUI preset.`));
+              const unlimitedHint = isDurationUnlimited()
+                ? t('已启用：本次上传/路径规划传入无限制运行语义；监控页的“停止监视/轮询”只停止浏览器刷新，不停止 VM 或样本。', 'Enabled: this upload/path plan sends no-runtime-limit semantics; the monitor Stop watching/polling button only stops browser refresh and does not stop the VM or sample.')
+                : t('未启用：使用上方秒数，并由后端按 config 限制。', 'Disabled: use the seconds field above, clamped by backend config.');
+              setElementTextAndCopy('durationUnlimitedHint', unlimitedHint);
+              const runtimeCard = document.querySelector('.runtime-limit-card');
+              if (runtimeCard) {
+                runtimeCard.setAttribute('data-copy', `${t('运行时间策略', 'Runtime policy')}: ${unlimitedHint}`);
+              }
               setElementTextAndCopy('guestCredentialHint', t(
                 `Guest 密码只从本机密钥环境变量 ${secretName} 读取；WebUI 不输入也不保存密码。`,
                 `Guest password is read only from the local secret environment variable ${secretName}; the WebUI does not ask for or store it.`));
@@ -889,7 +930,7 @@ internal static class DashboardExperiencePage
                 const value = (document.getElementById(id)?.value || '').trim();
                 return value || fallback || t('使用默认', 'default');
               };
-              const duration = getAnalysisDuration();
+              const durationLabel = formatAnalysisDuration();
               const r0Enabled = document.getElementById('r0Enabled')?.checked;
               const mock = document.getElementById('useMockCollector')?.checked;
               const r0Mode = r0Enabled
@@ -899,7 +940,7 @@ internal static class DashboardExperiencePage
               const parts = [
                 `${t('VM', 'VM')}: ${valueOrDefault('goldenVmName', runtimeConfigDefaults?.hyperV?.goldenVmName)}`,
                 `${t('检查点', 'Checkpoint')}: ${valueOrDefault('goldenSnapshotName', runtimeConfigDefaults?.hyperV?.goldenSnapshotName)}`,
-                `${t('时长', 'Duration')}: ${duration}s`,
+                `${t('运行时间', 'Runtime')}: ${durationLabel}`,
                 `${t('Guest', 'Guest')}: ${valueOrDefault('guestUserName', runtimeConfigDefaults?.guest?.userName)}`,
                 r0Mode,
                 `${t('产物', 'Artifacts')}: ${artifacts}`
@@ -932,6 +973,14 @@ internal static class DashboardExperiencePage
                 label: t('样本', 'Sample'),
                 value: file ? `${file.name} · ${formatBytes(file.size || 0)}` : t('等待选择 .exe', 'Waiting for .exe'),
                 hint: file ? t('上传后创建任务并尝试提交 VM', 'Will create a job and attempt VM submission after upload') : t('点击或拖拽到上传区域', 'Click or drag into upload zone')
+              });
+              chips.push({
+                state: isDurationUnlimited() ? 'warn' : 'neutral',
+                label: t('运行时间', 'Runtime'),
+                value: formatAnalysisDuration(),
+                hint: isDurationUnlimited()
+                  ? t('传入 durationUnlimited=true；停止监视不会停止 VM/样本', 'Sends durationUnlimited=true; stopping the monitor does not stop the VM/sample')
+                  : t('使用有界秒数，由后端按 config 限制', 'Uses bounded seconds clamped by backend config')
               });
               chips.push({
                 state: runtimeConfigLoadError ? 'warn' : (vmName ? 'good' : 'warn'),
@@ -991,13 +1040,13 @@ internal static class DashboardExperiencePage
                 return;
               }
 
-              const duration = getAnalysisDuration();
+              const durationLabel = formatAnalysisDuration();
               const artifacts = buildArtifactCollectionSummary({ submission: getArtifactCollectionConfig() });
               const isExe = /\.exe$/i.test(file.name || '');
               const parts = [
                 `${t('文件', 'File')}: ${file.name}`,
                 `${t('大小', 'Size')}: ${formatBytes(file.size || 0)}`,
-                `${t('时长', 'Duration')}: ${duration}s`,
+                `${t('运行时间', 'Runtime')}: ${durationLabel}`,
                 `${t('证据采集', 'Evidence')}: ${artifacts}`,
                 isExe ? t('扩展名检查：通过', 'Extension check: pass') : t('扩展名检查：不是 .exe，后端会拒绝', 'Extension check: not .exe, backend will reject')
               ];
@@ -1060,6 +1109,11 @@ internal static class DashboardExperiencePage
                 hiddenDuration.value = String(preset.seconds);
               }
 
+              const unlimited = document.getElementById('uploadDurationUnlimited');
+              if (unlimited) {
+                unlimited.checked = false;
+              }
+
               setChecked('collectDroppedFiles', preset.collectDroppedFiles);
               setChecked('captureScreenshots', preset.captureScreenshots);
               setChecked('captureMemoryDumps', preset.captureMemoryDumps);
@@ -1076,6 +1130,7 @@ internal static class DashboardExperiencePage
               const ids = [
                 'sampleUpload',
                 'uploadDuration',
+                'uploadDurationUnlimited',
                 'goldenVmName',
                 'goldenSnapshotName',
                 'guestUserName',
@@ -1094,10 +1149,12 @@ internal static class DashboardExperiencePage
                 }
 
                 element.addEventListener('input', () => {
+                  renderConfigDefaultHints();
                   renderSelectedSample();
                   renderOperatorReadinessChips();
                 });
                 element.addEventListener('change', () => {
+                  renderConfigDefaultHints();
                   renderSelectedSample();
                   renderOperatorReadinessChips();
                 });
@@ -1154,6 +1211,7 @@ internal static class DashboardExperiencePage
             function setupConfigSummaryListeners() {
               const ids = [
                 'uploadDuration',
+                'uploadDurationUnlimited',
                 'goldenVmName',
                 'goldenSnapshotName',
                 'guestUserName',
@@ -1529,9 +1587,11 @@ internal static class DashboardExperiencePage
               // planning into multipart fields, plus the live-run defaults.
               // Return: mutates the FormData in place for /api/files/upload/start.
               form.append('durationSeconds', String(getAnalysisDuration()));
+              form.append('durationUnlimited', isDurationUnlimited() ? 'true' : 'false');
+              form.append('runtimeLimitMode', isDurationUnlimited() ? 'unlimited' : 'bounded');
               form.append('live', 'true');
               form.append('importGuestEvents', 'true');
-              form.append('stepTimeoutSeconds', '1800');
+              form.append('stepTimeoutSeconds', isDurationUnlimited() ? '0' : '1800');
               const vm = getVmConfig();
               for (const [key, value] of Object.entries(vm)) {
                 if (value !== undefined && value !== null) {
@@ -1563,6 +1623,7 @@ internal static class DashboardExperiencePage
                   body: JSON.stringify({
                     samplePath,
                     durationSeconds: getAnalysisDuration(),
+                    durationUnlimited: isDurationUnlimited(),
                     dryRun: true,
                     ...getVmConfig(),
                     ...getArtifactCollectionConfig()
@@ -1652,7 +1713,8 @@ internal static class DashboardExperiencePage
                 submission: {
                   ...submission,
                   samplePath: submission.samplePath || raw.samplePath || sample.fullPath || sample.path || '',
-                  durationSeconds: submission.durationSeconds ?? raw.durationSeconds ?? raw.analysisDurationSeconds ?? ''
+                  durationSeconds: submission.durationSeconds ?? submission.DurationSeconds ?? raw.durationSeconds ?? raw.analysisDurationSeconds ?? '',
+                  durationUnlimited: Boolean(submission.durationUnlimited ?? submission.DurationUnlimited ?? raw.durationUnlimited ?? raw.DurationUnlimited ?? false)
                 },
                 jsonReportPath: raw.jsonReportPath || artifactPaths.reportJsonPath || artifactPaths.jsonReportPath || report.jsonReportPath || report.reportJsonPath || '',
                 htmlReportPath: raw.htmlReportPath || artifactPaths.reportHtmlPath || artifactPaths.htmlReportPath || report.htmlReportPath || report.reportHtmlPath || '',
@@ -1733,6 +1795,17 @@ internal static class DashboardExperiencePage
                 : t('未启用敏感产物采集（动态监控页仍会显示基础报告/events 状态）', 'no sensitive artifact collection enabled; the dynamic monitor still shows basic report/events status');
             }
 
+            function formatSubmissionRuntime(submission) {
+              if (submission?.durationUnlimited) {
+                return t('不限制运行时间', 'no runtime limit');
+              }
+
+              const seconds = submission?.durationSeconds;
+              return seconds === undefined || seconds === null || seconds === ''
+                ? '-'
+                : `${seconds}s`;
+            }
+
             function buildVmRunSummary(job) {
               // Inputs: normalized job payload plus loaded config defaults.
               // Processing: summarizes only operator-safe VM choices, avoiding
@@ -1745,6 +1818,7 @@ internal static class DashboardExperiencePage
               const parts = [
                 `${t('VM', 'VM')}: ${submission.goldenVmName || runtimeConfigDefaults?.hyperV?.goldenVmName || t('config 默认', 'config default')}`,
                 `${t('检查点', 'Checkpoint')}: ${submission.goldenSnapshotName || runtimeConfigDefaults?.hyperV?.goldenSnapshotName || t('config 默认', 'config default')}`,
+                `${t('运行时间', 'Runtime')}: ${formatSubmissionRuntime(submission)}`,
                 `${t('Guest', 'Guest')}: ${submission.guestUserName || runtimeConfigDefaults?.guest?.userName || t('config 默认', 'config default')}`,
                 r0Mode
               ];
@@ -1796,13 +1870,13 @@ internal static class DashboardExperiencePage
                   <div class="job-summary">
                     <div class="metric"><strong data-zh="状态" data-en="Status">状态</strong><span class="pill" data-copy="${escapeAttribute(statusLabel)}" data-copy-label="job status">${escapeHtml(statusLabel)}</span></div>
                     <div class="metric"><strong data-zh="样本" data-en="Sample">样本</strong>${copyableCode(job.sample?.fullPath || job.submission?.samplePath || '', 'sample path')}</div>
-                    <div class="metric"><strong data-zh="分析时长" data-en="Duration">分析时长</strong><span>${escapeHtml(String(job.submission?.durationSeconds || '-'))}s</span></div>
+                    <div class="metric"><strong data-zh="运行时间" data-en="Runtime">运行时间</strong><span data-copy="${escapeAttribute(formatSubmissionRuntime(job.submission))}">${escapeHtml(formatSubmissionRuntime(job.submission))}</span></div>
                     <div class="metric"><strong data-zh="报告" data-en="Report">报告</strong>${reportBadge}</div>
                   </div>
                   <p class="hint"><strong>${escapeHtml(t('VM 配置', 'VM configuration'))}</strong> <span class="pill" data-copy="${escapeAttribute(vmRunSummary)}" data-copy-label="VM configuration summary">${escapeHtml(vmRunSummary)}</span></p>
                   <p class="hint"><strong data-zh="产物采集显式启用（opt-in）" data-en="Artifact collection opt-in">产物采集显式启用（opt-in）</strong> <span class="pill" data-copy="${escapeAttribute(artifactCollectionSummary)}" data-copy-label="artifact collection opt-in">${escapeHtml(artifactCollectionSummary)}</span></p>
                   <p class="button-row">
-                    <button onclick="executeRunbook('${escapeJs(jobId)}', true)" data-zh="启动虚拟机分析" data-en="Start VM analysis">启动虚拟机分析</button>
+                    <button onclick="executeRunbook('${escapeJs(jobId)}', true, ${job.submission?.durationUnlimited ? 'true' : 'false'})" data-zh="启动虚拟机分析" data-en="Start VM analysis">启动虚拟机分析</button>
                     <a class="buttonlink secondary" target="_blank" rel="noopener" href="${escapeHtml(executionFlowHref)}" data-zh="打开进度页（执行流程）" data-en="Open progress page (execution flow)">打开进度页（执行流程）</a>
                     <a class="buttonlink secondary" target="_blank" rel="noopener" href="${escapeHtml(liveEventsHref)}" onclick="openLiveMonitor('${escapeJs(jobId)}', false); return false;" data-zh="实时原始事件监控（独立页）" data-en="Live raw event monitor (standalone)">实时原始事件监控（独立页）</a>
                   </p>
@@ -1842,7 +1916,7 @@ internal static class DashboardExperiencePage
                       <label for="guestImportPath" data-zh="手动事件文件（可选）" data-en="Manual event file (optional)">手动事件文件（可选）</label>
                       <input id="guestImportPath" placeholder="${escapeAttribute(artifactPaths.eventsJsonPath || 'D:\\runtime\\jobs\\<job>\\guest\\events.json')}" value="${escapeAttribute(guestEventsPath || artifactPaths.eventsJsonPath || '')}" data-copy-label="manual guest import path">
                       <p class="button-row">
-                        <button class="secondary" onclick="executeRunbook('${escapeJs(jobId)}', false)" data-zh="仅验证流程（不启动虚拟机）" data-en="Verify flow only (no VM start)">仅验证流程（不启动虚拟机）</button>
+                        <button class="secondary" onclick="executeRunbook('${escapeJs(jobId)}', false, ${job.submission?.durationUnlimited ? 'true' : 'false'})" data-zh="仅验证流程（不启动虚拟机）" data-en="Verify flow only (no VM start)">仅验证流程（不启动虚拟机）</button>
                         <button class="secondary" onclick="importGuestEvents('${escapeJs(jobId)}')" data-zh="手动导入事件并刷新报告" data-en="Import events manually and refresh report">手动导入事件并刷新报告</button>
                       </p>
                     </div>
@@ -2551,7 +2625,7 @@ internal static class DashboardExperiencePage
               return true;
             }
 
-            async function executeRunbook(jobId, live) {
+            async function executeRunbook(jobId, live, durationUnlimited) {
               setBusy(true);
               latestRunbookProgressSnapshot = null;
               startEstimatedProgress(live);
@@ -2564,7 +2638,8 @@ internal static class DashboardExperiencePage
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({
                     live,
-                    stepTimeoutSeconds: 1800,
+                    stepTimeoutSeconds: durationUnlimited ? 0 : 1800,
+                    durationUnlimited: Boolean(durationUnlimited),
                     importGuestEvents: true
                   })
                 });

@@ -967,6 +967,99 @@ function Show-InstallEntrypointDiagnostics {
     $diagnostics | Format-List
 }
 
+function Write-InstallDiagnosticObject {
+    param([Parameter(Mandatory)][object]$InputObject)
+
+    if ($Json) {
+        $InputObject | ConvertTo-Json -Depth $JsonDepth
+        return
+    }
+
+    if ($PassThru) {
+        Write-Output $InputObject
+        return
+    }
+
+    $InputObject | Format-List
+}
+
+function New-InstallReadinessVerdict {
+    param(
+        [bool]$LocalConfigExists,
+        [bool]$RuntimeRootExists,
+        [bool]$RuntimeRootUnderRepository,
+        [bool]$GuestPayloadReadyForLiveCopy,
+        [bool]$GuestSecretSet,
+        [bool]$HyperVModuleAvailable,
+        [bool]$VmExists,
+        [bool]$CheckpointExists,
+        [bool]$DriverHostPathConfigured,
+        [bool]$DriverHostPathExists,
+        [AllowNull()][string]$DriverSignatureStatus,
+        [string[]]$RecommendedActions = @()
+    )
+
+    $blocking = New-Object System.Collections.Generic.List[string]
+    $warnings = New-Object System.Collections.Generic.List[string]
+
+    if (-not $LocalConfigExists) { [void]$blocking.Add('MissingLocalConfig') }
+    if (-not $RuntimeRootExists) { [void]$warnings.Add('RuntimeRootMissing') }
+    if ($RuntimeRootUnderRepository) { [void]$blocking.Add('RuntimeRootUnderRepository') }
+    if (-not $GuestPayloadReadyForLiveCopy) { [void]$blocking.Add('GuestPayloadNotReadyForLiveCopy') }
+    if (-not $GuestSecretSet) { [void]$blocking.Add('MissingGuestPasswordSecret') }
+    if (-not $HyperVModuleAvailable) { [void]$blocking.Add('MissingHyperVPowerShellModule') }
+    if ($HyperVModuleAvailable -and -not $VmExists) { [void]$blocking.Add('MissingConfiguredVm') }
+    if ($HyperVModuleAvailable -and $VmExists -and -not $CheckpointExists) { [void]$blocking.Add('MissingConfiguredCheckpoint') }
+    if (-not $DriverHostPathConfigured) {
+        [void]$warnings.Add('DriverHostPathNotConfigured')
+    }
+    elseif (-not $DriverHostPathExists) {
+        [void]$blocking.Add('DriverHostPathMissing')
+    }
+    elseif ($DriverSignatureStatus -eq 'NotSigned') {
+        [void]$warnings.Add('DriverNotSigned')
+    }
+
+    $webUiReady = $LocalConfigExists -and (-not $RuntimeRootUnderRepository)
+    $installStateReady = $LocalConfigExists -and $RuntimeRootExists -and $GuestSecretSet
+    $liveReady = $installStateReady -and
+        $GuestPayloadReadyForLiveCopy -and
+        $HyperVModuleAvailable -and
+        $VmExists -and
+        $CheckpointExists -and
+        ((-not $DriverHostPathConfigured) -or ($DriverHostPathExists -and $DriverSignatureStatus -ne 'NotSigned'))
+    $overallStatus = if ($liveReady) {
+        'ReadyForLive'
+    }
+    elseif ($webUiReady -or $installStateReady) {
+        'ReadyForNonLive'
+    }
+    else {
+        'Blocked'
+    }
+
+    [pscustomobject][ordered]@{
+        Schema = 'ksword.install.readiness-verdict.v1'
+        GeneratedAtUtc = [DateTimeOffset]::UtcNow.ToString('O')
+        MachineReadable = $true
+        OverallStatus = $overallStatus
+        InstallStateReady = $installStateReady
+        WebUiReady = $webUiReady
+        LiveReady = $liveReady
+        StatusMutatesVm = $false
+        CheckEnvironmentMutatesVm = $false
+        InstallEntrypointChoices = @('UseConfiguredEnvironment', 'RestoreCleanCheckpoint', 'CreateOrPreparePath')
+        UseConfiguredEnvironmentMutatesVm = $false
+        RestoreCheckpointRequiresAllowVmMutation = $true
+        CreateOrPreparePathCreatesVm = $false
+        CreateOrPreparePathCreatesCheckpoint = $false
+        BlockingReasons = @($blocking.ToArray() | Select-Object -Unique)
+        WarningReasons = @($warnings.ToArray() | Select-Object -Unique)
+        RecommendedActionCount = @($RecommendedActions).Count
+        RecommendedActions = @($RecommendedActions)
+    }
+}
+
 function Invoke-InstallerGuestPayloadPreparation {
     $prepareScript = Join-Path $PSScriptRoot 'scripts\Prepare-GuestPayload.ps1'
     if (-not (Test-Path -LiteralPath $prepareScript -PathType Leaf)) {
@@ -1043,7 +1136,7 @@ function Invoke-RestoreCleanCheckpointEntrypoint {
 
     if (-not $AllowVmMutation) {
         if (-not $Json) {
-            Write-InstallInfo '默认安全计划：还原 checkpoint/snapshot 入口未加 -AllowVmMutation 时只显示计划和诊断；不会查询、启动、停止或还原 VM。 / Safe default: restore entrypoint is plan-only unless VM mutation is explicitly allowed.'
+            Write-InstallInfo '默认安全计划：还原 checkpoint/snapshot 入口未加 -AllowVmMutation 时只显示计划和诊断；可能做只读状态查询，但不会启动、停止、还原或修改 VM。 / Safe default: restore entrypoint is plan-only unless VM mutation is explicitly allowed.'
         }
         Show-InstallEntrypointDiagnostics -SelectedEntrypoint 'RestoreCleanCheckpoint'
         return
@@ -1116,6 +1209,10 @@ function Assert-InstallEntrypointContract {
         'ShowTestSigningGuidance',
         'OpenBrowser'
     )
+
+    if ($BoundParameters.ContainsKey('Mode') -and [string]$BoundParameters['Mode'] -ne 'Interactive') {
+        throw "错误：-InstallEntrypoint $SelectedEntrypoint 不能和 -Mode $($BoundParameters['Mode']) 混用，否则安装语义不封闭。下一步：三选一运行 install entrypoint；或去掉 -InstallEntrypoint，单独使用 -Mode Status/-Mode Change。"
+    }
 
     foreach ($switchName in $modeActionSwitches) {
         if (Test-BoundSwitchTruthy -BoundParameters $BoundParameters -Name $switchName) {
@@ -1878,11 +1975,56 @@ function Show-KSwordSandboxInstallStatus {
         [void]$recommendedActions.Add("下一步：运行 .\install.ps1 -Mode Change -UpdateHyperVConfig -VmName '$VmName' -CheckpointName <checkpoint> 记录快照，或先创建 checkpoint '$CheckpointName'。")
     }
 
+    $runtimeRootExists = Test-Path -LiteralPath $RuntimeRoot -PathType Container
+    $localConfigExists = Test-Path -LiteralPath $localConfig -PathType Leaf
+    $guestSecretSet = (-not [string]::IsNullOrWhiteSpace($processValue)) -or
+        (-not [string]::IsNullOrWhiteSpace($userValue)) -or
+        (-not [string]::IsNullOrWhiteSpace($machineValue))
+    $recommendedActionArray = @($recommendedActions.ToArray() | Select-Object -Unique)
+    $readinessVerdict = New-InstallReadinessVerdict `
+        -LocalConfigExists $localConfigExists `
+        -RuntimeRootExists $runtimeRootExists `
+        -RuntimeRootUnderRepository ([bool]$runtimeStatus.RuntimeRootUnderRepository) `
+        -GuestPayloadReadyForLiveCopy ([bool]$payloadStatus.ReadyForLiveCopy) `
+        -GuestSecretSet $guestSecretSet `
+        -HyperVModuleAvailable $hyperVModuleAvailable `
+        -VmExists $vmExists `
+        -CheckpointExists $checkpointExists `
+        -DriverHostPathConfigured (-not [string]::IsNullOrWhiteSpace($driverHost)) `
+        -DriverHostPathExists $driverHostExists `
+        -DriverSignatureStatus $driverSignatureStatus `
+        -RecommendedActions $recommendedActionArray
+
     [pscustomobject][ordered]@{
+        Kind = 'KSwordSandbox.InstallStatus'
+        ContractVersion = 2
+        MachineReadable = $true
+        ReadinessVerdictSchema = 'ksword.install.readiness-verdict.v1'
+        ReadinessVerdict = $readinessVerdict
+        ReadinessOverallStatus = $readinessVerdict.OverallStatus
+        InstallStateReady = $readinessVerdict.InstallStateReady
+        WebUiReady = $readinessVerdict.WebUiReady
+        LiveReady = $readinessVerdict.LiveReady
+        StatusMutatesVm = $false
+        CheckEnvironmentMutatesVm = $false
+        VmMutationPolicy = [pscustomobject][ordered]@{
+            Schema = 'ksword.install.vm-mutation-policy.v1'
+            StatusMutatesVm = $false
+            CheckEnvironmentMutatesVm = $false
+            UseConfiguredEnvironmentMutatesVm = $false
+            RestoreCleanCheckpointMayMutateVm = $true
+            RestoreCheckpointRequiresAllowVmMutation = $true
+            RestoreCheckpointRequiresExplicitConfirmOrForce = $true
+            CreateOrPreparePathCreatesVm = $false
+            CreateOrPreparePathCreatesCheckpoint = $false
+            CreateOrPreparePathMutatesVm = $false
+            MachineReadable = $true
+        }
         SecretName = $SecretName
         ProcessSecretSet = -not [string]::IsNullOrWhiteSpace($processValue)
         UserSecretSet = -not [string]::IsNullOrWhiteSpace($userValue)
         MachineSecretSet = -not [string]::IsNullOrWhiteSpace($machineValue)
+        GuestSecretSet = $guestSecretSet
         VirusTotalSecretName = $VirusTotalSecretName
         VirusTotalProcessSecretSet = -not [string]::IsNullOrWhiteSpace($vtProcessValue)
         VirusTotalUserSecretSet = -not [string]::IsNullOrWhiteSpace($vtUserValue)
@@ -1892,7 +2034,7 @@ function Show-KSwordSandboxInstallStatus {
         VirusTotalMissingKeyBehavior = $virusTotalStatus.MissingKeyBehavior
         GuestUserName = $GuestUserName
         RuntimeRoot = [System.IO.Path]::GetFullPath($RuntimeRoot)
-        RuntimeRootExists = Test-Path -LiteralPath $RuntimeRoot -PathType Container
+        RuntimeRootExists = $runtimeRootExists
         RuntimeRootStatus = $runtimeStatus
         RuntimeRootUnderRepository = [bool]$runtimeStatus.RuntimeRootUnderRepository
         GuestPayloadRoot = [System.IO.Path]::GetFullPath($GuestPayloadRoot)
@@ -1936,7 +2078,7 @@ function Show-KSwordSandboxInstallStatus {
         HostTestSigningState = $hostTestSigningStatus.State
         HostTestSigningMessage = $hostTestSigningStatus.Message
         LocalConfigPath = $localConfig
-        LocalConfigExists = Test-Path -LiteralPath $localConfig -PathType Leaf
+        LocalConfigExists = $localConfigExists
         WebConfigPathProcess = [Environment]::GetEnvironmentVariable($script:WebConfigPathEnvironmentName, 'Process')
         WebConfigPathUser = [Environment]::GetEnvironmentVariable($script:WebConfigPathEnvironmentName, 'User')
         InstallStatePath = $script:InstallStatePath
@@ -1966,7 +2108,7 @@ function Show-KSwordSandboxInstallStatus {
         TestSigningGuidance = 'Guest test-signing is managed from the Change menu; host test-signing is guidance-only here and is needed only when the host itself loads a test-signed driver.'
         ReadinessGuidance = '.\scripts\Test-HyperVReadiness.ps1'
         ChineseGuidance = '中文提示：Status/CheckEnvironment 不打印密码值，不启动/还原 VM；安装入口可显式选择 UseConfiguredEnvironment、RestoreCleanCheckpoint 或 CreateOrPreparePath；RecommendedActions 给出下一步修复命令。'
-        RecommendedActions = @($recommendedActions.ToArray() | Select-Object -Unique)
+        RecommendedActions = $recommendedActionArray
         SecretValuePrinted = $false
     }
 }
@@ -1983,6 +2125,16 @@ function Show-KSwordSandboxEnvironmentCheck {
     $installStatus = Show-KSwordSandboxInstallStatus
 
     [pscustomobject][ordered]@{
+        Kind = 'KSwordSandbox.InstallEnvironmentCheck'
+        ContractVersion = 2
+        MachineReadable = $true
+        ReadinessVerdictSchema = $installStatus.ReadinessVerdictSchema
+        ReadinessVerdict = $installStatus.ReadinessVerdict
+        ReadinessOverallStatus = $installStatus.ReadinessOverallStatus
+        InstallStateReady = $installStatus.InstallStateReady
+        WebUiReady = $installStatus.WebUiReady
+        LiveReady = $installStatus.LiveReady
+        VmMutationPolicy = $installStatus.VmMutationPolicy
         StartupCommand = '.\run.ps1'
         InstallCommand = '.\install.ps1'
         UseConfiguredEnvironmentCommand = '.\install.ps1 -InstallEntrypoint UseConfiguredEnvironment -PlanOnly'
@@ -2014,9 +2166,13 @@ function Show-KSwordSandboxEnvironmentCheck {
         HyperVGetVmSnapshotAvailable = Test-CommandAvailable -Name 'Get-VMSnapshot'
         WhatIfSupported = $true
         DefaultStartsVm = $false
+        DefaultMutatesVm = $false
         StartWebUiStartsVm = $false
+        StartWebUiMutatesVm = $false
         CheckEnvironmentStartsVm = $false
+        CheckEnvironmentMutatesVm = $false
         PlanOnlyStartsVm = $false
+        PlanOnlyMutatesVm = $false
         InstallEntrypointChoices = @('UseConfiguredEnvironment', 'RestoreCleanCheckpoint', 'CreateOrPreparePath')
         OperatorModeMatrix = @(Get-InstallOperatorModeMatrix)
         InstallEntrypointVmMutationRequiresAllowVmMutation = $true
@@ -2030,7 +2186,7 @@ function Show-KSwordSandboxEnvironmentCheck {
 }
 
 function Invoke-KSwordSandboxEnvironmentCheck {
-    Show-KSwordSandboxEnvironmentCheck | Format-List
+    Write-InstallDiagnosticObject -InputObject (Show-KSwordSandboxEnvironmentCheck)
 
     if ($RunHyperVReadiness) {
         $readinessScript = Join-Path $PSScriptRoot 'scripts\Test-HyperVReadiness.ps1'
@@ -2371,6 +2527,7 @@ if ($PlanOnly -and $Mode -eq 'Interactive') {
 
 $hasRootChangeAction = [bool]$StartWebUI -or
     [bool]$CheckEnvironment -or
+    [bool]$RunHyperVReadiness -or
     [bool]$ConfigureVTKey -or
     [bool]$PromptVTKey -or
     [bool]$ClearVTKey -or
@@ -2401,7 +2558,7 @@ switch ($Mode) {
         if ($StartWebUI) {
             Invoke-KSwordSandboxWebUi
         }
-        elseif ($CheckEnvironment) {
+        elseif ($CheckEnvironment -or $RunHyperVReadiness) {
             Invoke-KSwordSandboxEnvironmentCheck
         }
         elseif ($ConfigureVTKey -or $PromptVTKey -or $ClearVTKey) {
@@ -2436,7 +2593,7 @@ switch ($Mode) {
         Uninstall-KSwordSandboxLocal
     }
     'Status' {
-        Show-KSwordSandboxInstallStatus | Format-List
+        Write-InstallDiagnosticObject -InputObject (Show-KSwordSandboxInstallStatus)
     }
     'CheckEnvironment' {
         Invoke-KSwordSandboxEnvironmentCheck

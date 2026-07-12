@@ -155,7 +155,9 @@ while operators can still inspect WFP/ALE setup progress and known gaps.
 V1 typed payload checklist:
 
 - file: `KSWORD_SANDBOX_FILE_EVENT_PAYLOAD`,
-  `KSWORD_SANDBOX_FILE_EVENT_VERSION`, size 128 bytes.
+  `KSWORD_SANDBOX_FILE_EVENT_VERSION`, size 128 bytes. Operation value
+  `KswSandboxFileOperationSetSecurity` records `IRP_MJ_SET_SECURITY` as
+  metadata-only path/status evidence; ACL bytes are not copied into v1.
 - process lifecycle: `KSWORD_SANDBOX_PROCESS_EVENT_PAYLOAD`,
   `KSWORD_SANDBOX_PROCESS_EVENT_VERSION`, size 128 bytes.
 - process/thread handle access draft:
@@ -163,10 +165,15 @@ V1 typed payload checklist:
   `KSWORD_SANDBOX_PROCESS_HANDLE_ACCESS_EVENT_VERSION`, size 128 bytes. This
   payload is emitted only by the guarded ObRegisterCallbacks producer and uses
   process event operations `HandleCreateDraft` / `HandleDuplicateDraft`.
+  Pre-operation rows carry `OriginalDesiredAccess` and `DesiredAccess`; successful
+  post-operation rows carry `GrantedAccess` and final `Status`.
 - image: `KSWORD_SANDBOX_IMAGE_EVENT_PAYLOAD`,
   `KSWORD_SANDBOX_IMAGE_EVENT_VERSION`, size 128 bytes.
 - registry: `KSWORD_SANDBOX_REGISTRY_EVENT_PAYLOAD`,
-  `KSWORD_SANDBOX_REGISTRY_EVENT_VERSION`, size 128 bytes.
+  `KSWORD_SANDBOX_REGISTRY_EVENT_VERSION`, size 128 bytes. Operation value
+  `KswSandboxRegistryOperationSetKeySecurity` records
+  `RegNtPostSetKeySecurity` as metadata-only key/status/security-information
+  evidence; security descriptor bytes are not copied into v1.
 - network: `KSWORD_SANDBOX_NETWORK_EVENT_PAYLOAD`,
   `KSWORD_SANDBOX_NETWORK_EVENT_VERSION`, size 112 bytes.
 
@@ -218,8 +225,10 @@ The guarded process/thread handle-access producer emits
 `KswSandboxEventTypeProcess` records, but it has its own producer bit:
 `KSWORD_SANDBOX_PRODUCER_FLAG_PROCESS_HANDLE_ACCESS`. This keeps operator
 enable masks and `ActiveProducerMask` / `FailedProducerMask` precise when
-process create/exit callbacks succeed but `ObRegisterCallbacks` fails. The
-distinct payload contract is still the draft payload version plus
+process create/exit callbacks succeed but `ObRegisterCallbacks` fails. It
+registers non-mutating pre/post callbacks for `PsProcessType` and `PsThreadType`
+handle create/duplicate operations; it never changes requested access, blocks a
+handle, or allocates callback context. The distinct payload contract is still the draft payload version plus
 `KSWORD_SANDBOX_CAPABILITY_FLAG_PROCESS_HANDLE_ACCESS_DRAFT` in the live
 capability reply.
 

@@ -188,6 +188,10 @@ static_assert(KSWORD_SANDBOX_REGISTRY_EVENT_VERSION == 0x00010000U,
     "Registry payload v1 version constant changed without ABI doc update.");
 static_assert(KSWORD_SANDBOX_NETWORK_EVENT_VERSION == 0x00010000U,
     "Network payload v1 version constant changed without ABI doc update.");
+static_assert(KswSandboxFileOperationSetSecurity == 9U,
+    "File SetSecurity operation value changed without collector parser update.");
+static_assert(KswSandboxRegistryOperationSetKeySecurity == 7U,
+    "Registry SetKeySecurity operation value changed without collector parser update.");
 static_assert(kAbiGuardDriverLoadPayloadVersionOffset == 0U && kAbiGuardDriverLoadPayloadSizeOffset == 4U,
     "Driver-load payload Version/Size prefix changed.");
 static_assert(kAbiGuardFilePayloadVersionOffset == 0U && kAbiGuardFilePayloadSizeOffset == 4U,

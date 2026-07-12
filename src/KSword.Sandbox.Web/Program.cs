@@ -168,10 +168,10 @@ app.MapGet("/api/jobs/{jobId:guid}/runbook/progress", (Guid jobId, SandboxJobSer
 // execution state, and closes/reconnects on a bounded lifetime instead of
 // turning the monitor into an unbounded long-poll request.
 app.MapGet("/api/jobs/{jobId:guid}/progress/stream", WriteRunbookProgressStreamAsync);
-// GET /api/jobs/{jobId}/runbook/background returns the WebUI server-side
-// background execution state. It complements the per-step progress endpoint:
-// progress is live/streaming, while this endpoint carries the terminal
-// execution result, imported job, and report-ready metadata after completion.
+// GET /api/jobs/{jobId}/runbook/background returns a UI-safe WebUI
+// background execution state. It intentionally strips raw PowerShell command
+// text, stdout, stderr, and the full AnalysisJob object; report-ready metadata
+// is exposed through a compact job snapshot only.
 app.MapGet("/api/jobs/{jobId:guid}/runbook/background", (Guid jobId, SandboxJobService service, RunbookBackgroundExecutionStore backgroundStore) =>
 {
     if (service.GetJob(jobId) is null)
@@ -179,7 +179,7 @@ app.MapGet("/api/jobs/{jobId:guid}/runbook/background", (Guid jobId, SandboxJobS
         return Results.NotFound(new { error = $"未找到任务 {jobId:D}；请刷新任务列表或重新上传样本 / Job was not found in the Web host job list." });
     }
 
-    return Results.Ok(backgroundStore.Get(jobId));
+    return Results.Ok(BuildSafeRunbookBackgroundSnapshot(backgroundStore.Get(jobId)));
 });
 // GET /api/jobs/{jobId}/events/live returns unclassified raw events for the
 // WebUI monitor. Inputs are a job id plus optional offset/take query values;
@@ -384,9 +384,10 @@ app.MapPost("/api/jobs/{jobId:guid}/runbook/start", (Guid jobId, RunbookExecuteR
         return Results.BadRequest(new { error = start.Message });
     }
 
+    var safeSnapshot = BuildSafeRunbookBackgroundSnapshot(start.Snapshot ?? backgroundStore.Get(jobId));
     return start.Accepted
-        ? Results.Accepted($"/api/jobs/{jobId:D}/runbook/background", start.Snapshot)
-        : Results.Ok(start.Snapshot);
+        ? Results.Accepted($"/api/jobs/{jobId:D}/runbook/background", safeSnapshot)
+        : Results.Ok(safeSnapshot);
 });
 app.MapPost("/api/jobs/{jobId:guid}/guest-events/import", (Guid jobId, GuestEventImportRequest request, SandboxJobService service) =>
 {
@@ -1515,7 +1516,9 @@ static IResult? TryPrepareRunbookExecution(
     options = new SandboxRunbookExecutionOptions
     {
         Mode = mode,
-        StepTimeout = TimeSpan.FromSeconds(Math.Clamp(request.StepTimeoutSeconds, 1, 7200)),
+        StepTimeout = request.StepTimeoutSeconds <= 0 || request.DurationUnlimited
+            ? TimeSpan.Zero
+            : TimeSpan.FromSeconds(Math.Clamp(request.StepTimeoutSeconds, 1, 7200)),
         RequireElevatedPowerShell = true,
         WorkingDirectory = Directory.GetCurrentDirectory(),
         EnvironmentVariables = environmentVariables,
@@ -1930,11 +1933,15 @@ static string? ResolveLocalizedReportPath(AnalysisJob job, string? lang)
 /// </summary>
 static SandboxSubmission BuildSubmissionFromUploadForm(ExecutableCandidate candidate, IFormCollection form, SandboxConfig config)
 {
+    var durationUnlimited = ReadFormBool(form, "durationUnlimited", false) ||
+        ReadFormBool(form, "unlimitedDuration", false) ||
+        string.Equals(ReadFormString(form, "runtimeLimitMode"), "unlimited", StringComparison.OrdinalIgnoreCase);
     return new SandboxSubmission
     {
         SamplePath = candidate.FullPath,
         DisplayName = candidate.FileName,
-        DurationSeconds = ReadFormInt(form, "durationSeconds", config.Analysis.DefaultDurationSeconds, 1, config.Analysis.MaxDurationSeconds),
+        DurationSeconds = durationUnlimited ? 0 : ReadFormInt(form, "durationSeconds", config.Analysis.DefaultDurationSeconds, 1, config.Analysis.MaxDurationSeconds),
+        DurationUnlimited = durationUnlimited,
         DryRun = true,
         GoldenVmName = ReadFormString(form, "goldenVmName"),
         GoldenSnapshotName = ReadFormString(form, "goldenSnapshotName"),
@@ -1957,10 +1964,14 @@ static SandboxSubmission BuildSubmissionFromUploadForm(ExecutableCandidate candi
 /// </summary>
 static RunbookExecuteRequest BuildRunbookExecuteRequestFromUploadForm(IFormCollection form)
 {
+    var durationUnlimited = ReadFormBool(form, "durationUnlimited", false) ||
+        ReadFormBool(form, "unlimitedDuration", false) ||
+        string.Equals(ReadFormString(form, "runtimeLimitMode"), "unlimited", StringComparison.OrdinalIgnoreCase);
     return new RunbookExecuteRequest
     {
         Live = ReadFormBool(form, "live", true),
-        StepTimeoutSeconds = ReadFormInt(form, "stepTimeoutSeconds", 1800, 1, 7200),
+        StepTimeoutSeconds = durationUnlimited ? 0 : ReadFormInt(form, "stepTimeoutSeconds", 1800, 1, 7200),
+        DurationUnlimited = durationUnlimited,
         ImportGuestEvents = ReadFormBool(form, "importGuestEvents", true)
     };
 }
@@ -2090,6 +2101,8 @@ internal sealed record RunbookExecuteRequest
     public bool Live { get; init; }
 
     public int StepTimeoutSeconds { get; init; } = 1800;
+
+    public bool DurationUnlimited { get; init; }
 
     public bool ImportGuestEvents { get; init; } = true;
 }

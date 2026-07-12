@@ -58,7 +58,13 @@ param(
     [string]$GuestPayloadRoot = '',
 
     # Disables R0Collector arguments for this E2E plan without editing config.
-    [switch]$NoR0Collector
+    [switch]$NoR0Collector,
+
+    # Disables interactive desktop launch when live analysis starts.
+    # Live mode opens the VM desktop by default so samples that need manual UI
+    # interaction can be observed/interacted with. The start phase first tries
+    # Hyper-V VMConnect, then mstsc/RDP fallback when available.
+    [switch]$NoOpenVmConsole
 )
 
 Set-StrictMode -Version 3.0
@@ -2550,6 +2556,10 @@ function New-HyperVE2ESteps {
         [Parameter(Mandatory)][string]$SecretName,
         [Parameter(Mandatory)][string]$GuestAgentCommandLine,
         [string]$R0CollectorCommandLine = '',
+        [bool]$OpenVmConsoleOnLiveStart,
+        [string]$VmConsoleServerName = 'localhost',
+        [bool]$RdpFallbackEnabled,
+        [string]$RdpTarget = '',
         [bool]$RestoreAfterRun
     )
 
@@ -2560,6 +2570,15 @@ function New-HyperVE2ESteps {
     [void]$steps.Add((New-HyperVE2EStep -Id 'restore-checkpoint' -Phase 'start' -Title 'Restore clean checkpoint' -PowerShell ("Restore-VMSnapshot -VMName {0} -Name {1} -Confirm:`$false" -f (Quote-PowerShellString $Vm), (Quote-PowerShellString $Snapshot)) -MutatesVmState $true))
     [void]$steps.Add((New-HyperVE2EStep -Id 'enable-guest-service' -Phase 'start' -Title 'Enable Guest Service Interface' -PowerShell (Get-EnableGuestServicePowerShell -Vm $Vm) -MutatesVmState $true))
     [void]$steps.Add((New-HyperVE2EStep -Id 'start-vm' -Phase 'start' -Title 'Start restored golden VM' -PowerShell ("Start-VM -Name {0}" -f (Quote-PowerShellString $Vm)) -MutatesVmState $true))
+    if ($OpenVmConsoleOnLiveStart) {
+        $rdpHint = if ($RdpFallbackEnabled) {
+            if ([string]::IsNullOrWhiteSpace($RdpTarget)) { 'fallback: discover VM IP and run mstsc.exe /v:<ip>' } else { "fallback: mstsc.exe /v:$RdpTarget" }
+        }
+        else {
+            'fallback: disabled'
+        }
+        [void]$steps.Add((New-HyperVE2EStep -Id 'open-vm-console' -Phase 'start' -Title 'Open interactive VM desktop for operator interaction' -PowerShell (("vmconnect.exe {0} {1}; {2}" -f (Quote-PowerShellString $VmConsoleServerName), (Quote-PowerShellString $Vm), $rdpHint)) -MutatesVmState $false))
+    }
     [void]$steps.Add((New-HyperVE2EStep -Id 'wait-powershell-direct' -Phase 'start' -Title 'Wait for PowerShell Direct in the guest' -PowerShell ("Invoke-Command -VMName {0} -Credential `$guestCredential -ScriptBlock {{ `$env:COMPUTERNAME }}" -f (Quote-PowerShellString $Vm)) -MutatesVmState $false))
     [void]$steps.Add((New-HyperVE2EStep -Id 'stage-guest-payload' -Phase 'start' -Title 'Copy Guest Agent and R0Collector payload into guest' -PowerShell ("Copy-Item -ToSession <PSSession> -Path {0}\agent\* -Destination <guestAgentDirectory> -Recurse -Force" -f $PayloadRoot) -MutatesVmState $true))
     [void]$steps.Add((New-HyperVE2EStep -Id 'copy-sample' -Phase 'start' -Title 'Copy submitted sample into guest' -PowerShell ("Copy-VMFile -VMName {0} -SourcePath {1} -DestinationPath {2} -FileSource Host -CreateFullPath -Force" -f (Quote-PowerShellString $Vm), (Quote-PowerShellString $SampleHostPath), (Quote-PowerShellString $SampleGuestPath)) -MutatesVmState $true))
@@ -2626,6 +2645,15 @@ try {
     $effectiveGuestSecretName = Get-StringOrDefault -Value $GuestPasswordSecretName -DefaultValue (Get-ObjectPropertyValue -Object $guest -Name 'passwordSecretName' -DefaultValue 'KSWORDBOX_GUEST_PASSWORD')
     $effectiveGuestRoot = Get-StringOrDefault -Value $GuestWorkingDirectory -DefaultValue (Get-ObjectPropertyValue -Object $guest -Name 'workingDirectory' -DefaultValue 'C:\KSwordSandbox')
     $agentExecutableName = Get-ObjectPropertyValue -Object $guest -Name 'agentExecutableName' -DefaultValue 'KSword.Sandbox.Agent.exe'
+    $openVmConsoleFromConfig = Get-BooleanOrDefault -Value (Get-ObjectPropertyValue -Object $hyperV -Name 'openVmConsoleOnLiveStart' -DefaultValue $true) -DefaultValue $true
+    if ((-not $openVmConsoleFromConfig) -and (-not [bool]$NoOpenVmConsole)) {
+        Write-Warning 'hyperV.openVmConsoleOnLiveStart=false is ignored for Live safety: interactive VM desktop opening is required unless -NoOpenVmConsole is supplied explicitly.'
+    }
+    $openVmConsoleOnLiveStart = (-not [bool]$NoOpenVmConsole)
+    $vmConsoleServerName = Get-StringOrDefault -Value (Get-ObjectPropertyValue -Object $hyperV -Name 'vmConsoleServerName' -DefaultValue 'localhost') -DefaultValue 'localhost'
+    $rdpFallbackEnabled = Get-BooleanOrDefault -Value (Get-ObjectPropertyValue -Object $hyperV -Name 'rdpFallbackEnabled' -DefaultValue $true) -DefaultValue $true
+    $rdpTargetValue = Get-ObjectPropertyValue -Object $hyperV -Name 'rdpTarget' -DefaultValue $null
+    $rdpTarget = if ([string]::IsNullOrWhiteSpace([string]$rdpTargetValue)) { '' } else { [string]$rdpTargetValue }
     $defaultDuration = Get-IntOrDefault -Value (Get-ObjectPropertyValue -Object $analysis -Name 'defaultDurationSeconds' -DefaultValue 120) -DefaultValue 120
     $effectiveDurationSeconds = if ($DurationSeconds -gt 0) { $DurationSeconds } else { $defaultDuration }
     $effectiveExecutionTimeoutSeconds = if ($ExecutionTimeoutSeconds -gt 0) { $ExecutionTimeoutSeconds } else { [Math]::Max($effectiveDurationSeconds + 120, 180) }
@@ -2722,6 +2750,21 @@ try {
     [void]$checks.Add((New-HyperVFeatureCheck))
     [void]$checks.Add((New-CommandAvailabilityCheck -Name 'PowerShell Direct commands' -Commands @('New-PSSession', 'Invoke-Command', 'Copy-Item') -RequiredForLive $true))
     [void]$checks.Add((New-CommandAvailabilityCheck -Name 'Hyper-V commands' -Commands @('Get-VM', 'Get-VMSnapshot', 'Get-VMIntegrationService', 'Enable-VMIntegrationService', 'Start-VM', 'Stop-VM', 'Restore-VMSnapshot', 'Copy-VMFile') -RequiredForLive $true))
+    if ($openVmConsoleOnLiveStart) {
+        [void]$checks.Add((New-CommandAvailabilityCheck -Name 'Hyper-V VM console command' -Commands @('vmconnect.exe') -RequiredForLive $false))
+    }
+    else {
+        [void]$checks.Add((New-PlanCheck `
+                    -Name 'Hyper-V VM console command' `
+                    -Status 'Passed' `
+                    -RequiredForLive $false `
+                    -Message 'VM console auto-open is disabled only because -NoOpenVmConsole was supplied; headless live analysis is otherwise blocked before sample execution.' `
+                    -Details @{ openVmConsoleOnLiveStart = $false; openVmConnectOnLiveStart = $false; disabledByNoOpenVmConsole = [bool]$NoOpenVmConsole } `
+                    -Category 'operator-ui'))
+    }
+    if ($openVmConsoleOnLiveStart -and $rdpFallbackEnabled) {
+        [void]$checks.Add((New-CommandAvailabilityCheck -Name 'Remote Desktop fallback command' -Commands @('mstsc.exe') -RequiredForLive $false))
+    }
     [void]$checks.Add((New-GuestSecretCheck -SecretName $effectiveGuestSecretName))
     [void]$checks.Add((New-HostSharedPathCheck -RuntimeRoot $runtimeRoot -GuestPayloadRoot $resolvedPayloadRoot -RepositoryRoot $resolvedRepoRoot))
     [void]$checks.Add((New-HostTestSigningCheck -DriverEnabled $driverEnabled -UseMockCollector $useMockCollector))
@@ -2750,6 +2793,7 @@ try {
     $startScript = Join-Path $resolvedRepoRoot 'scripts\Start-SandboxHyperVJob.ps1'
     $collectScript = Join-Path $resolvedRepoRoot 'scripts\Collect-GuestOutputs.ps1'
     $importReportScript = Join-Path $resolvedRepoRoot 'scripts\Import-HyperVJobReport.ps1'
+    $vmConsoleCommand = if ($openVmConsoleOnLiveStart) { "vmconnect.exe $vmConsoleServerName `"$effectiveVmName`"" } else { '' }
     $plan = [ordered]@{
         contractVersion = 1
         kind = 'KSwordSandbox.HyperVE2EPlan'
@@ -2776,6 +2820,19 @@ try {
         vm = [ordered]@{
             name = $effectiveVmName
             cleanCheckpointName = $effectiveCheckpointName
+            openVmConsoleOnLiveStart = $openVmConsoleOnLiveStart
+            openVmConnectOnLiveStart = $openVmConsoleOnLiveStart
+            openConsoleOnLiveStart = $openVmConsoleOnLiveStart
+            requireConsoleOnLiveStart = $openVmConsoleOnLiveStart
+            consoleDisabledByNoOpenVmConsole = [bool]$NoOpenVmConsole
+            consoleServerName = $vmConsoleServerName
+            consoleCommand = $vmConsoleCommand
+            consoleDisableSwitch = '-NoOpenVmConsole'
+            consoleBestEffort = $false
+            consoleFailureBlocksHeadless = $openVmConsoleOnLiveStart
+            desktopStrategies = @('HyperV.VMConnect', 'RDP.Mstsc')
+            rdpFallbackEnabled = $rdpFallbackEnabled
+            rdpTarget = $rdpTarget
         }
         guest = [ordered]@{
             userName = $effectiveGuestUserName
@@ -2849,6 +2906,13 @@ try {
             whatIfPreventsMutation = $true
             liveRequiresAdministrator = $true
             liveRequiresExplicitSwitch = $true
+            openVmConsoleOnLiveStartDefault = $true
+            openVmConnectOnLiveStart = $openVmConsoleOnLiveStart
+            vmConsoleRequiredUnlessNoOpenVmConsole = $true
+            vmConsoleOpenIsBestEffort = $false
+            openVmConnectFailureBlocksHeadless = $openVmConsoleOnLiveStart
+            headlessLiveRequiresNoOpenVmConsole = $true
+            noVmConsoleWhenPlanOnlyOrWhatIf = (-not $willRunLive)
             secretValuePrinted = $false
             noVmMutationWhenPlanOnly = (-not $willRunLive)
         }
@@ -2859,6 +2923,7 @@ try {
             planOnlyCommand = '.\run.ps1 -Mode Plan -SamplePath <sample.exe>'
             whatIfCommand = '.\run.ps1 -Mode Analyze -SamplePath <sample.exe> -Live -WhatIf'
             payloadPreparationCommand = $payloadPrepareCommand
+            disableVmConsoleCommand = '.\run.ps1 -Mode Analyze -SamplePath <sample.exe> -Live -NoOpenVmConsole'
             noVmMutationForPlanOnlyOrWhatIf = $true
             repairSuggestions = @($preflightSummary['repairSuggestions'])
         }
@@ -2884,6 +2949,10 @@ try {
             -SecretName $effectiveGuestSecretName `
             -GuestAgentCommandLine $guestAgentCommandLine `
             -R0CollectorCommandLine $r0CollectorCommandLine `
+            -OpenVmConsoleOnLiveStart $openVmConsoleOnLiveStart `
+            -VmConsoleServerName $vmConsoleServerName `
+            -RdpFallbackEnabled $rdpFallbackEnabled `
+            -RdpTarget $rdpTarget `
             -RestoreAfterRun $RestoreCheckpointAfterRun
     }
 

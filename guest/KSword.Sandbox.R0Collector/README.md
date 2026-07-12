@@ -118,7 +118,8 @@ Options:
   - unless `--health` was requested, `r0collector.driverStatus` before draining
   - unless `--health` was requested, `r0collector.driverPoll`
   - unless `--health` was requested, stable driver rows from `IOCTL_KSWORD_SANDBOX_READ_EVENTS`
-    (`driver.process`, `image.load`, `driver.file`, `driver.registry`,
+    (`driver.process`, `process.access` for explicit draft handle-access rows,
+    `image.load`, `driver.file`, `driver.registry`,
     `driver.network`, `driver.event.reserved`, or fallback `driver.event`)
   - unless `--health` was requested, `r0collector.driverReadEvents`
     (`data.recordsProcessed`, `data.eventsEmitted`, and
@@ -182,12 +183,21 @@ Driver/control-plane rows also include additive R0 coverage readiness fields:
 Audited defensive categories are `driver.load`, `process.lifecycle`,
 `image.load`, `file.activity`, `registry.activity`, `network.metadata`, and
 `queue.loss.backpressure`. Known gaps are reported explicitly instead of being
-inferred from adjacent rows: process handle access, token privilege adjustment,
-thread lifecycle/remote-thread creation, token object handles,
-service-control/driver-load semantics, network raw-packet/DNS/HTTP/TLS
-payloads, full paths/command lines, registry value data bytes, user-mode stack,
-and file content/hash evidence require draft R0 payloads, ETW/audit,
-PCAP/sidecar, or guest artifact correlation.
+inferred from adjacent rows: process handle access unless draft rows/capabilities
+are present, token privilege adjustment, thread lifecycle/remote-thread
+creation, token object handles, service-control/driver-load semantics, network
+raw-packet/DNS/HTTP/TLS payloads, full paths/command lines, registry value data
+bytes, file/registry security descriptor bytes, user-mode stack, and file
+content/hash evidence require draft R0 payloads, ETW/audit, PCAP/sidecar, or
+guest artifact correlation.
+
+Explicit handle-access draft rows are normalized to `process.access`.
+Pre-operation rows decode `originalDesiredAccess`/`desiredAccess`; successful
+post-operation rows decode `grantedAccess`. `objectTypeName` and
+`accessMaskDecodeScope` distinguish process rights from thread rights. File
+`setSecurity` and registry `setKeySecurity` rows are R0 direct metadata rows
+only: they preserve operation/path/status and, for registry, the
+`securityInformation` mask, but both set `*SecurityDescriptorBytesCaptured=false`.
 
 中文：`r0Coverage*` 字段只说明当前 JSONL 行能证明哪些防御 telemetry 覆盖面，以及哪些
 缺口需要 fallback；它们不是恶意/良性 verdict，也不表示 driver 阻断了行为。

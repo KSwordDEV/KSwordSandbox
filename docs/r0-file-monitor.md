@@ -24,6 +24,7 @@ callbacks for these major operations:
   - `KswSandboxFileOperationDelete` for `FileDispositionInformation` and
     `FileDispositionInformationEx`
   - `KswSandboxFileOperationSetInformation` for other metadata updates
+- `IRP_MJ_SET_SECURITY` -> `KswSandboxFileOperationSetSecurity`
 - `IRP_MJ_CLEANUP` -> `KswSandboxFileOperationCleanup`
 - `IRP_MJ_CLOSE` -> `KswSandboxFileOperationClose`
 
@@ -33,6 +34,9 @@ Every emitted file payload is queued from the post-operation callback and sets
 operation `NTSTATUS` observed by the minifilter.  Failed operations also set
 `KSWORD_SANDBOX_FILE_EVENT_FLAG_OPERATION_FAILED`, which lets rules distinguish
 failed probes from successful writes/deletes without reinterpreting NTSTATUS.
+`IRP_MJ_SET_SECURITY` rows are metadata-only: they prove the file security-set
+request reached the minifilter and carry path/status evidence, but the v1 driver
+does not copy ACL/security descriptor bytes or decode individual ACEs.
 
 ## Path normalization and truncation
 
@@ -61,6 +65,8 @@ The producer marks path provenance with compatible flag bits:
   from a disposition-style `SET_INFORMATION`.
 - `KSWORD_SANDBOX_FILE_EVENT_FLAG_RENAME_INTENT`: the operation was normalized
   from a rename/link-style `SET_INFORMATION`.
+- `KSWORD_SANDBOX_FILE_EVENT_FLAG_SECURITY_INTENT`: the operation was
+  `IRP_MJ_SET_SECURITY`; `fileSecurityDescriptorBytesCaptured=false` in JSONL.
 - `KSWORD_SANDBOX_FILE_EVENT_FLAG_OPERATION_FAILED`: the post-operation status
   was a failure.
 
@@ -105,11 +111,13 @@ snapshot/hash evidence rather than expanding the kernel payload.
 Recommended string-valued `SandboxEvent.Data` keys for future collector/host
 normalization:
 
-- `operationName`: `create`, `write`, `read`, `rename`, `delete`, `setInformation`,
-  `cleanup`, or `close`.
+- `operationName`: `create`, `write`, `read`, `rename`, `delete`,
+  `setInformation`, `setSecurity`, `cleanup`, or `close`.
 - `filePath`: top-level subject path copied from the driver payload.
 - `pathPresent`, `pathTruncated`, `pathNormalized`, `pathFallback`.
 - `statusHex`, `postOperation`, `majorFunction`, `minorFunction`.
+- `fileSecurityIntent`, `fileSetSecurityR0Direct`, `fileSecurityCoverage`, and
+  `fileSecurityDescriptorBytesCaptured=false` for `setSecurity` rows.
 - `dropEvidenceKind`: `create`, `write`, `renameTarget`, `deleteDisposition`, or
   `snapshotOnly`.
 - `dropConfidence`: `low`, `medium`, or `high`.

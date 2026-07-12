@@ -628,7 +628,9 @@ public sealed class NetworkSidecarEventImporter
                 "dns.query.name",
                 "dns.answers",
                 "dns.answers.data",
+                "qtype_name",
                 "rcode",
+                "rcode_name",
                 "responseCode",
                 "dnsRcode",
                 "dns.rcode",
@@ -680,14 +682,17 @@ public sealed class NetworkSidecarEventImporter
         int? sourcePort,
         int? destinationPort)
     {
+        var hasEndpointPair = !string.IsNullOrWhiteSpace(sourceIp) &&
+            !string.IsNullOrWhiteSpace(destinationIp) &&
+            (sourcePort.HasValue || destinationPort.HasValue);
+        var hasFlowIdentity = HasAny(fields, "flowKey", "flow.key", "uid", "connection", "connection.id", "community_id", "network.community_id");
         return Contains(eventType, "connection") ||
             Contains(eventType, "flow") ||
-            Contains(eventType, "network") ||
             Contains(eventType, "conn") ||
-            HasAny(fields, "flowKey", "uid", "connection") ||
-            (!string.IsNullOrWhiteSpace(sourceIp) &&
-                !string.IsNullOrWhiteSpace(destinationIp) &&
-                (sourcePort.HasValue || destinationPort.HasValue));
+            hasFlowIdentity ||
+            hasEndpointPair ||
+            (Contains(eventType, "network") &&
+                HasAny(fields, "sourceIp", "destinationIp", "src", "dst", "sourceEndpoint", "destinationEndpoint", "id.orig_h", "id.resp_h"));
     }
 
     private static void AddDnsFields(IReadOnlyDictionary<string, string> fields, Dictionary<string, string> extra)
@@ -712,6 +717,8 @@ public sealed class NetworkSidecarEventImporter
             "queryType",
             "recordType",
             "qtype",
+            "qtype_name",
+            "query_type",
             "typeName",
             "rrtype",
             "dns.rrtype",
@@ -725,7 +732,7 @@ public sealed class NetworkSidecarEventImporter
         AddAliases(extra, queryName, "queryName", "qname", "domain", "dnsQueryName", "query", "dnsQuery", "rrname", "dns.rrname", "dns.qry.name", "dns.question.name", "dns.questions.name", "dns.query.name");
         AddAliases(extra, queryType, "queryType", "recordType", "dnsRecordType", "qtype", "rrtype", "dns.rrtype", "dns.qry.type", "dns.question.type", "dns.questions.type", "dns.query.type");
 
-        var rcode = NetworkTelemetrySchema.NormalizeDnsRCode(FirstValue(fields, "rcode", "rcodeName", "responseCode", "dnsRcode", "dnsResponseCode", "dns.rcode", "dns.flags.rcode", "dns.response_code", "_source.layers.dns.dns.flags.rcode"));
+        var rcode = NetworkTelemetrySchema.NormalizeDnsRCode(FirstValue(fields, "rcode", "rcodeName", "rcode_name", "responseCode", "dnsRcode", "dnsResponseCode", "dns.rcode", "dns.flags.rcode", "dns.response_code", "_source.layers.dns.dns.flags.rcode"));
         AddAliases(extra, rcode, "rcode", "rcodeName", "responseCode", "dnsRcode", "dnsResponseCode", "dns.rcode", "dns.flags.rcode", "dns.response_code");
         NetworkTelemetrySchema.AddIfNotEmpty(extra, "isResponse", NormalizeBoolean(FirstValue(fields, "isResponse", "dns.flags.response", "dns.response", "_source.layers.dns.dns.flags.response")));
 
@@ -753,7 +760,7 @@ public sealed class NetworkSidecarEventImporter
         NetworkTelemetrySchema.AddIfNotEmpty(extra, "cnameChain", FirstValue(fields, "cnameChain", "dnsCnameChain", "dns.cname.chain", "dns.cname", "_source.layers.dns.dns.cname"));
         NetworkTelemetrySchema.AddIfNotEmpty(extra, "dnsCnameChain", FirstValue(fields, "cnameChain", "dnsCnameChain", "dns.cname.chain", "dns.cname", "_source.layers.dns.dns.cname"));
         NetworkTelemetrySchema.AddIfNotEmpty(extra, "answerCount", FirstNonEmpty(FirstValue(fields, "answerCount", "answersCount", "dns.answers.count", "dns.count.answers"), CountDelimitedValues(answer)));
-        NetworkTelemetrySchema.AddIfNotEmpty(extra, "ttl", FirstValue(fields, "ttl", "dns.ttl", "dns.resp.ttl", "dns.answers.ttl"));
+        NetworkTelemetrySchema.AddIfNotEmpty(extra, "ttl", FirstValue(fields, "ttl", "TTLs", "dns.ttl", "dns.resp.ttl", "dns.answers.ttl"));
         NetworkTelemetrySchema.AddIfNotEmpty(extra, "recordClass", FirstValue(fields, "recordClass", "queryClass", "dns.qry.class", "dns.question.class"));
         NetworkTelemetrySchema.AddIfNotEmpty(extra, "dnsTransactionId", FirstValue(fields, "dnsTransactionId", "transactionId", "dns.id"));
 
@@ -819,10 +826,11 @@ public sealed class NetworkSidecarEventImporter
         AddAliases(extra, FirstValue(fields, "downloadFilename", "downloadFileName", "filename", "file.name", "http.file_data.filename"), "downloadFilename", "downloadFileName", "filename", "file.name", "httpDownloadFilename");
         NetworkTelemetrySchema.AddIfNotEmpty(extra, "contentEncoding", FirstValue(fields, "contentEncoding", "http.content_encoding", "http.response.content_encoding"));
 
-        var requestBytes = FirstValue(fields, "requestBodyBytes", "requestBytes", "http.request.body.bytes", "http.request.body.size", "http.request.bytes", "request.bytes", "requestContentLength", "http.request.headers.content_length", "bytes_toserver", "orig_bytes");
-        var responseBytes = FirstValue(fields, "responseBodyBytes", "responseBytes", "http.response.body.bytes", "http.response.body.size", "http.response.bytes", "response.bytes", "responseContentLength", "http.response.headers.content_length", "bytes_toclient", "resp_bytes");
-        var requestContentLength = FirstNonEmpty(FirstValue(fields, "requestContentLength", "http.request.headers.content_length", "request.headers.content-length"), requestBytes);
-        var responseContentLength = FirstNonEmpty(FirstValue(fields, "responseContentLength", "http.response.headers.content_length", "response.headers.content-length"), responseBytes);
+        NetworkTelemetrySchema.AddIfNotEmpty(extra, "statusMessage", FirstValue(fields, "statusMessage", "status_msg", "http.response.status_phrase"));
+        var requestBytes = FirstValue(fields, "requestBodyBytes", "requestBytes", "request_body_len", "http.request.body.bytes", "http.request.body.size", "http.request.bytes", "request.bytes", "requestContentLength", "http.request.headers.content_length", "bytes_toserver", "orig_bytes");
+        var responseBytes = FirstValue(fields, "responseBodyBytes", "responseBytes", "response_body_len", "http.response.body.bytes", "http.response.body.size", "http.response.bytes", "response.bytes", "responseContentLength", "http.response.headers.content_length", "bytes_toclient", "resp_bytes");
+        var requestContentLength = FirstNonEmpty(FirstValue(fields, "requestContentLength", "request_body_len", "http.request.headers.content_length", "request.headers.content-length"), requestBytes);
+        var responseContentLength = FirstNonEmpty(FirstValue(fields, "responseContentLength", "response_body_len", "http.response.headers.content_length", "response.headers.content-length"), responseBytes);
         AddAliases(extra, requestBytes, "requestBodyBytes", "requestBytes", "httpRequestBodyBytes", "requestBodySizeBytes", "requestBodySize", "http.request.body.bytes", "http.request.body.size", "request.body.bytes", "bytesToServer");
         AddAliases(extra, responseBytes, "responseBodyBytes", "responseBytes", "httpResponseBodyBytes", "responseBodySizeBytes", "responseBodySize", "http.response.body.bytes", "http.response.body.size", "response.body.bytes", "bytesToClient");
         NetworkTelemetrySchema.AddIfNotEmpty(extra, "requestContentLength", requestContentLength);
@@ -871,7 +879,7 @@ public sealed class NetworkSidecarEventImporter
         NetworkTelemetrySchema.AddIfNotEmpty(extra, "certSha1", FirstValue(fields, "certSha1", "certificateSha1", "x509.fingerprint.sha1", "cert.sha1", "cert.fingerprint.sha1", "tls.cert.fingerprint.sha1"));
         NetworkTelemetrySchema.AddIfNotEmpty(extra, "certNotBefore", FirstValue(fields, "certNotBefore", "certificateNotBefore", "x509.not_before", "tls.cert.not_before"));
         NetworkTelemetrySchema.AddIfNotEmpty(extra, "certNotAfter", FirstValue(fields, "certNotAfter", "certificateNotAfter", "x509.not_after", "tls.cert.not_after"));
-        var validationStatus = FirstValue(fields, "validationStatus", "certificateStatus", "tls.validation_status", "ssl.validation_status", "cert.validation_status", "tls.cert.validation_status");
+        var validationStatus = FirstValue(fields, "validationStatus", "validation_status", "certificateStatus", "tls.validation_status", "ssl.validation_status", "cert.validation_status", "tls.cert.validation_status");
         NetworkTelemetrySchema.AddIfNotEmpty(extra, "certificateStatus", validationStatus);
         NetworkTelemetrySchema.AddIfNotEmpty(extra, "validationStatus", validationStatus);
         NetworkTelemetrySchema.AddIfNotEmpty(extra, "certSelfSigned", NormalizeBoolean(FirstValue(fields, "certSelfSigned", "selfSigned", "certificate.self_signed", "tls.cert.self_signed")));
@@ -905,7 +913,12 @@ public sealed class NetworkSidecarEventImporter
         NetworkTelemetrySchema.AddIfNotEmpty(extra, "bytesToClient", bytesToClient);
         NetworkTelemetrySchema.AddIfNotEmpty(extra, "uid", FirstValue(fields, "uid", "flow_id", "flowId", "conn.uid", "community_id", "network.community_id"));
         NetworkTelemetrySchema.AddIfNotEmpty(extra, "externalFlowKey", FirstValue(fields, "flowKey", "flow.key", "connectionId", "connection.id", "network.community_id", "community_id"));
-        NetworkTelemetrySchema.AddIfNotEmpty(extra, "applicationProtocol", FirstValue(fields, "applicationProtocol", "appProtocol", "service", "network.application", "network.protocol"));
+        var applicationProtocol = FirstValue(fields, "applicationProtocol", "appProtocol", "service", "network.application", "network.protocol");
+        NetworkTelemetrySchema.AddIfNotEmpty(extra, "applicationProtocol", applicationProtocol);
+        if (!string.IsNullOrWhiteSpace(applicationProtocol))
+        {
+            extra["applicationProtocolSource"] = "sidecar-field";
+        }
         NetworkTelemetrySchema.AddIfNotEmpty(extra, "flowReason", FirstValue(fields, "flowReason", "reason", "history", "conn.history"));
     }
 
@@ -1137,6 +1150,12 @@ public sealed class NetworkSidecarEventImporter
     private static string InferProtocol(string? value, int? sourcePort, int? destinationPort)
     {
         var protocolText = value ?? string.Empty;
+        var normalizedProtocol = NetworkTelemetrySchema.NormalizeProtocol(value);
+        if (normalizedProtocol is "tcp" or "udp" or "icmp" or "icmpv6")
+        {
+            return normalizedProtocol;
+        }
+
         if (protocolText.Contains("tcp", StringComparison.OrdinalIgnoreCase))
         {
             return "tcp";
@@ -1157,7 +1176,7 @@ public sealed class NetworkSidecarEventImporter
             return "tcp";
         }
 
-        return NetworkTelemetrySchema.NormalizeProtocol(value);
+        return normalizedProtocol;
     }
 
     private static void FlattenJson(

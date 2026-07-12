@@ -16,6 +16,8 @@ public sealed record ReportEventSamplingOptions
 
     public int MaxHighValueEventsPerType { get; init; } = 80;
 
+    public int MaxDiagnosticEvents { get; init; } = 12;
+
     public int MaxEvidenceEventsPerFinding { get; init; } = 8;
 
     public int MaxEventDataPairs { get; init; } = 24;
@@ -52,6 +54,27 @@ public sealed record ReportEventSamplingResult
 public static class ReportEventSampler
 {
     public static readonly ReportEventSamplingOptions DefaultOptions = new();
+
+    private enum ReportSamplingBucket
+    {
+        StrongSampleBehavior,
+        FindingEvidence,
+        ProbableSampleEvidence,
+        GeneralBehaviorEvidence,
+        Diagnostics,
+        Excluded
+    }
+
+    private sealed record ReportSamplingCandidate(SandboxEvent Event, int Index, ReportSamplingBucket Bucket);
+
+    private static readonly ReportSamplingBucket[] ReportSamplingBucketPriority =
+    [
+        ReportSamplingBucket.StrongSampleBehavior,
+        ReportSamplingBucket.FindingEvidence,
+        ReportSamplingBucket.ProbableSampleEvidence,
+        ReportSamplingBucket.GeneralBehaviorEvidence,
+        ReportSamplingBucket.Diagnostics
+    ];
 
     private static readonly string[] PriorityDataKeys =
     [
@@ -579,11 +602,13 @@ public static class ReportEventSampler
         ReportEventSamplingOptions? options = null,
         string? jobRoot = null,
         string? eventsPath = null,
-        string? driverEventsPath = null)
+        string? driverEventsPath = null,
+        IEnumerable<BehaviorFinding>? findings = null)
     {
         var resolvedOptions = options ?? DefaultOptions;
         var orderedEvents = rawEvents.OrderBy(evt => evt.Timestamp).ToList();
-        var selected = SelectEvents(orderedEvents, resolvedOptions)
+        var findingEvidenceKeys = BuildFindingEvidenceKeys(findings);
+        var selected = SelectEvents(orderedEvents, resolvedOptions, findingEvidenceKeys)
             .Select(evt => SanitizeEvent(evt, resolvedOptions))
             .ToList();
 
@@ -637,54 +662,326 @@ public static class ReportEventSampler
         };
     }
 
-    private static IEnumerable<SandboxEvent> SelectEvents(IReadOnlyList<SandboxEvent> orderedEvents, ReportEventSamplingOptions options)
+    private static IEnumerable<SandboxEvent> SelectEvents(
+        IReadOnlyList<SandboxEvent> orderedEvents,
+        ReportEventSamplingOptions options,
+        IReadOnlySet<string> findingEvidenceKeys)
     {
         var inlineCandidates = orderedEvents
-            .Where(static evt => !IsLowValueOperationalInlineEvent(evt))
+            .Select((evt, index) => new ReportSamplingCandidate(evt, index, ClassifyReportSamplingBucket(evt, findingEvidenceKeys)))
+            .Where(static candidate => candidate.Bucket != ReportSamplingBucket.Excluded)
             .ToList();
 
-        if (inlineCandidates.Count <= options.MaxInlineEvents)
+        if (inlineCandidates.Count == 0)
         {
-            return inlineCandidates;
+            return [];
         }
 
-        var selected = new bool[inlineCandidates.Count];
-        var perType = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-        var selectedCount = 0;
-
-        for (var index = 0; index < inlineCandidates.Count && selectedCount < options.MaxInlineEvents; index++)
+        var diagnosticQuota = Math.Max(0, Math.Min(options.MaxDiagnosticEvents, options.MaxInlineEvents));
+        var diagnosticCount = inlineCandidates.Count(static candidate => candidate.Bucket == ReportSamplingBucket.Diagnostics);
+        if (inlineCandidates.Count <= options.MaxInlineEvents && diagnosticCount <= diagnosticQuota)
         {
-            var evt = inlineCandidates[index];
-            var eventType = NormalizeEventType(evt.EventType);
-            var typeLimit = IsHighValueReportEvent(evt)
-                ? options.MaxHighValueEventsPerType
-                : options.MaxEventsPerType;
+            return inlineCandidates.Select(static candidate => candidate.Event);
+        }
 
-            perType.TryGetValue(eventType, out var currentForType);
-            if (currentForType >= typeLimit)
+        var selectedIndexes = new HashSet<int>();
+        var perType = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var bucket in ReportSamplingBucketPriority)
+        {
+            var bucketQuota = bucket == ReportSamplingBucket.Diagnostics
+                ? diagnosticQuota
+                : options.MaxInlineEvents;
+            var selectedForBucket = 0;
+
+            foreach (var candidate in inlineCandidates.Where(candidate => candidate.Bucket == bucket))
             {
-                continue;
-            }
+                if (selectedIndexes.Count >= options.MaxInlineEvents || selectedForBucket >= bucketQuota)
+                {
+                    break;
+                }
 
-            selected[index] = true;
-            selectedCount++;
-            perType[eventType] = currentForType + 1;
+                var eventType = NormalizeEventType(candidate.Event.EventType);
+                var typeLimit = TypeLimitForBucket(candidate.Event, bucket, options);
+
+                perType.TryGetValue(eventType, out var currentForType);
+                if (currentForType >= typeLimit)
+                {
+                    continue;
+                }
+
+                selectedIndexes.Add(candidate.Index);
+                selectedForBucket++;
+                perType[eventType] = currentForType + 1;
+            }
         }
 
         // If the first pass did not reach the requested max because most events
         // were one noisy type, keep the report intentionally smaller. Raw JSONL
         // remains the authority; avoiding a fill pass prevents driver.file or
         // registry noise from overwhelming user-facing reports.
-        var result = new List<SandboxEvent>(selectedCount);
-        for (var index = 0; index < inlineCandidates.Count; index++)
+        return inlineCandidates
+            .Where(candidate => selectedIndexes.Contains(candidate.Index))
+            .OrderBy(static candidate => candidate.Index)
+            .Select(static candidate => candidate.Event)
+            .ToList();
+    }
+
+    private static HashSet<string> BuildFindingEvidenceKeys(IEnumerable<BehaviorFinding>? findings)
+    {
+        var keys = new HashSet<string>(StringComparer.Ordinal);
+        if (findings is null)
         {
-            if (selected[index])
+            return keys;
+        }
+
+        foreach (var finding in findings)
+        {
+            foreach (var evidence in finding.Evidence)
             {
-                result.Add(inlineCandidates[index]);
+                keys.Add(BuildEventEvidenceKey(evidence));
             }
         }
 
-        return result;
+        return keys;
+    }
+
+    private static ReportSamplingBucket ClassifyReportSamplingBucket(
+        SandboxEvent evt,
+        IReadOnlySet<string> findingEvidenceKeys)
+    {
+        if (IsReportSamplingMarkerEvent(evt))
+        {
+            return ReportSamplingBucket.Excluded;
+        }
+
+        if (IsDiagnosticReportEvent(evt))
+        {
+            return ReportSamplingBucket.Diagnostics;
+        }
+
+        if (IsStrongSampleBehaviorEvent(evt))
+        {
+            return ReportSamplingBucket.StrongSampleBehavior;
+        }
+
+        if (findingEvidenceKeys.Contains(BuildEventEvidenceKey(evt)))
+        {
+            return ReportSamplingBucket.FindingEvidence;
+        }
+
+        if (IsProbableSampleEvidenceEvent(evt))
+        {
+            return ReportSamplingBucket.ProbableSampleEvidence;
+        }
+
+        return IsHighValueReportEvent(evt)
+            ? ReportSamplingBucket.GeneralBehaviorEvidence
+            : ReportSamplingBucket.Diagnostics;
+    }
+
+    private static int TypeLimitForBucket(
+        SandboxEvent evt,
+        ReportSamplingBucket bucket,
+        ReportEventSamplingOptions options)
+    {
+        if (bucket == ReportSamplingBucket.Diagnostics)
+        {
+            return Math.Max(1, Math.Min(2, options.MaxEventsPerType));
+        }
+
+        return IsHighValueReportEvent(evt)
+            ? options.MaxHighValueEventsPerType
+            : options.MaxEventsPerType;
+    }
+
+    private static bool IsStrongSampleBehaviorEvent(SandboxEvent evt)
+    {
+        return EventDataBoolTrue(evt, "behaviorCounted", "countsAsBehavior", "countedAsBehavior") &&
+            (EventDataBoolTrue(evt, "strongSampleCorrelation") ||
+             EventDataEqualsAny(evt, "sampleCorrelation", "confirmed") ||
+             EventDataEqualsAny(evt, "sampleCorrelationStatus", "correlated", "confirmed") ||
+             EventDataEqualsAny(evt, "sampleCorrelationStrength", "strong"));
+    }
+
+    private static bool IsProbableSampleEvidenceEvent(SandboxEvent evt)
+    {
+        if (!EventDataBoolTrue(evt, "behaviorCounted", "countsAsBehavior", "countedAsBehavior") &&
+            !EventDataBoolTrue(evt, "sampleBehaviorCandidate", "sample_behavior_candidate"))
+        {
+            return false;
+        }
+
+        return EventDataBoolTrue(evt, "sampleBehaviorCandidate", "sample_behavior_candidate") ||
+            EventDataEqualsAny(evt, "sampleCorrelation", "probable", "candidate") ||
+            EventDataEqualsAny(evt, "sampleCorrelationStatus", "probable", "candidate") ||
+            EventDataEqualsAny(evt, "sampleCorrelationStrength", "medium", "probable") ||
+            EventDataEqualsAny(evt, "evidenceDisposition", "behavior-candidate");
+    }
+
+    private static bool IsDiagnosticReportEvent(SandboxEvent evt)
+    {
+        var eventType = NormalizeEventType(evt.EventType);
+        if (IsLowValueOperationalInlineEvent(evt) ||
+            IsDisabledArtifactCollectionEvent(evt) ||
+            eventType.StartsWith("r0collector.", StringComparison.OrdinalIgnoreCase) ||
+            eventType.StartsWith("collection-health.", StringComparison.OrdinalIgnoreCase) ||
+            eventType.StartsWith("etw_security.", StringComparison.OrdinalIgnoreCase) ||
+            eventType.StartsWith("report.", StringComparison.OrdinalIgnoreCase) ||
+            eventType.StartsWith("guest.events.", StringComparison.OrdinalIgnoreCase) ||
+            eventType.StartsWith("artifact.import", StringComparison.OrdinalIgnoreCase) ||
+            eventType.StartsWith("artifact.manifest.", StringComparison.OrdinalIgnoreCase) ||
+            TextEqualsAny(eventType, "artifact.host_imported", "network.health", "pcap.parse_error", "driver.parse_error", "driver.read_error"))
+        {
+            return true;
+        }
+
+        if (eventType.StartsWith("security_eventlog.", StringComparison.OrdinalIgnoreCase) &&
+            (IsReadinessOrStatusEvent(evt) ||
+             eventType.Contains(".audit_policy.", StringComparison.OrdinalIgnoreCase) ||
+             eventType.Contains(".collection.", StringComparison.OrdinalIgnoreCase) ||
+             eventType.Contains(".fallback_surface.", StringComparison.OrdinalIgnoreCase) ||
+             eventType.EndsWith(".skipped", StringComparison.OrdinalIgnoreCase) ||
+             eventType.EndsWith(".query_failed", StringComparison.OrdinalIgnoreCase) ||
+             eventType.EndsWith(".parse_failed", StringComparison.OrdinalIgnoreCase) ||
+             eventType.EndsWith(".query.summary", StringComparison.OrdinalIgnoreCase)))
+        {
+            return true;
+        }
+
+        if (EventDataBoolFalse(evt, "behaviorCounted", "behavior_counted", "countsAsBehavior", "countedAsBehavior") ||
+            EventDataBoolFalse(evt, "sampleBehaviorCandidate", "sample_behavior_candidate", "sampleBehavior", "sample_behavior") ||
+            EventDataBoolTrue(
+                evt,
+                "nonbehavior",
+                "nonBehavior",
+                "non_behavior",
+                "notSampleBehavior",
+                "not_sample_behavior",
+                "metadataOnly",
+                "metadata_only",
+                "collectionHealth",
+                "collectionStatus",
+                "collectionDiagnostic",
+                "collectionNoise",
+                "collectorSelfNoise",
+                "collectorNoise",
+                "selfNoise",
+                "selfProcess",
+                "readinessOnly",
+                "statusOnly",
+                "healthEvent",
+                "diagnosticEvent",
+                "qualityEvent",
+                "telemetryHealth",
+                "telemetryDegraded",
+                "telemetry_degraded",
+                "backpressure",
+                "backpressureObserved",
+                "lossObserved",
+                "vtQuietState",
+                "operationalEvent",
+                "hostGenerated",
+                "hostControlPlane"))
+        {
+            return true;
+        }
+
+        return IsReadinessOrStatusEvent(evt);
+    }
+
+    private static bool IsReadinessOrStatusEvent(SandboxEvent evt)
+    {
+        return EventDataEqualsAny(
+                evt,
+                "eventKind",
+                "nonbehavior",
+                "metadata",
+                "diagnostic",
+                "health",
+                "status",
+                "summary",
+                "readiness",
+                "collection-status",
+                "evidence-quality",
+                "quiet-state",
+                "enrichment-status") ||
+            EventDataEqualsAny(
+                evt,
+                "behaviorScope",
+                "collection-health",
+                "network-collection-health",
+                "network-import-summary",
+                "raw-pcap-compatibility",
+                "diagnostic",
+                "status",
+                "collection-status",
+                "evidence-quality",
+                "host-operational",
+                "host-control-plane",
+                "collector-diagnostic",
+                "collector-lifecycle",
+                "driver-health",
+                "driver-readiness",
+                "readiness-only",
+                "setup",
+                "import",
+                "health",
+                "readiness") ||
+            EventDataEqualsAny(evt, "semanticLane", "nonbehavior", "non-behavior", "diagnostic", "collection-health") ||
+            EventDataEqualsAny(evt, "sampleBehaviorBoundary", "nonbehavior-separated", "not-sample-behavior", "nonbehavior-evidence-quality") ||
+            EventDataEqualsAny(evt, "collectorNoiseScope", "nonbehavior-evidence-quality", "collector-diagnostic", "collector-self-noise");
+    }
+
+    private static bool IsDisabledArtifactCollectionEvent(SandboxEvent evt)
+    {
+        var eventType = NormalizeEventType(evt.EventType);
+        return TextEqualsAny(
+                eventType,
+                "packet_capture.disabled",
+                "packet-capture.disabled",
+                "screenshot.disabled",
+                "memory_dump.disabled",
+                "memory-dump.disabled",
+                "dropped_file.disabled",
+                "dropped-file.disabled") ||
+            eventType.EndsWith(".disabled", StringComparison.OrdinalIgnoreCase) &&
+            TextContainsAny(eventType, "packet_capture", "packet-capture", "screenshot", "memory_dump", "memory-dump", "dropped_file", "dropped-file");
+    }
+
+    private static bool IsReportSamplingMarkerEvent(SandboxEvent evt)
+    {
+        return string.Equals(NormalizeEventType(evt.EventType), "report.events.sampled", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string BuildEventEvidenceKey(SandboxEvent evt)
+    {
+        return string.Join(
+            '\u001f',
+            evt.Timestamp.UtcTicks.ToString(),
+            NormalizeEventType(evt.EventType),
+            evt.Source ?? string.Empty,
+            evt.ProcessName ?? string.Empty,
+            evt.ProcessId?.ToString() ?? string.Empty,
+            evt.ParentProcessId?.ToString() ?? string.Empty,
+            evt.Path ?? string.Empty,
+            evt.CommandLine ?? string.Empty,
+            FirstDataValue(
+                evt,
+                "uid",
+                "eventId",
+                "eventRecordId",
+                "sequence",
+                "flowKey",
+                "processKey",
+                "processGuid",
+                "snapshotKey",
+                "imagePath",
+                "filePath",
+                "keyPath",
+                "queryName",
+                "host",
+                "uri") ?? string.Empty);
     }
 
     private static bool IsLowValueOperationalInlineEvent(SandboxEvent evt)
@@ -700,6 +997,9 @@ public static class ReportEventSampler
                 "startup_item.snapshot",
                 "registry.run.snapshot",
                 "dns.cache.snapshot",
+                "process.snapshot",
+                "process.observed",
+                "probe.summary",
                 "network.hosts.snapshot",
                 "network.proxy.snapshot",
                 "network.netstat.snapshot",
@@ -746,7 +1046,8 @@ public static class ReportEventSampler
             ["omittedEventCount"] = result.OmittedEventCount.ToString(),
             ["maxInlineEvents"] = options.MaxInlineEvents.ToString(),
             ["maxEventsPerType"] = options.MaxEventsPerType.ToString(),
-            ["maxHighValueEventsPerType"] = options.MaxHighValueEventsPerType.ToString()
+            ["maxHighValueEventsPerType"] = options.MaxHighValueEventsPerType.ToString(),
+            ["maxDiagnosticEvents"] = options.MaxDiagnosticEvents.ToString()
         };
 
         if (!string.IsNullOrWhiteSpace(eventsPath))
@@ -949,6 +1250,37 @@ public static class ReportEventSampler
         return false;
     }
 
+    private static bool EventDataBoolFalse(SandboxEvent evt, params string[] keys)
+    {
+        foreach (var key in keys)
+        {
+            if (evt.Data.TryGetValue(key, out var value) && IsFalsy(value))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool EventDataEqualsAny(SandboxEvent evt, string key, params string[] values)
+    {
+        return evt.Data.TryGetValue(key, out var value) && TextEqualsAny(value, values);
+    }
+
+    private static string? FirstDataValue(SandboxEvent evt, params string[] keys)
+    {
+        foreach (var key in keys)
+        {
+            if (evt.Data.TryGetValue(key, out var value) && !string.IsNullOrWhiteSpace(value))
+            {
+                return value;
+            }
+        }
+
+        return null;
+    }
+
     private static bool IsTruthy(string value)
     {
         return string.Equals(value, "true", StringComparison.OrdinalIgnoreCase) ||
@@ -956,9 +1288,21 @@ public static class ReportEventSampler
             string.Equals(value, "yes", StringComparison.OrdinalIgnoreCase);
     }
 
+    private static bool IsFalsy(string value)
+    {
+        return string.Equals(value, "false", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(value, "0", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(value, "no", StringComparison.OrdinalIgnoreCase);
+    }
+
     private static bool TextEqualsAny(string value, params string[] candidates)
     {
         return candidates.Any(candidate => string.Equals(value, candidate, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool TextContainsAny(string value, params string[] fragments)
+    {
+        return fragments.Any(fragment => value.Contains(fragment, StringComparison.OrdinalIgnoreCase));
     }
 
     private static string? Truncate(string? value, int maxCharacters)

@@ -107,6 +107,7 @@ public sealed class HyperVRunbookBuilder
         steps.Add(Step("create-temp-vm", "Create temporary analysis VM", $"New-VM -Name {Q(targetVmName)} -Generation 2 -MemoryStartupBytes {config.HyperV.MemoryStartupBytes} -VHDPath {Q(diffDisk)}{switchPart} | Out-Null"));
         steps.Add(Step("enable-guest-service", "Enable Guest Service Interface", BuildEnableGuestServiceCommand(targetVmName)));
         steps.Add(Step("start-temp-vm", "Start temporary analysis VM and wait for Running", BuildStartVmAndWaitCommand(targetVmName)));
+        AddOpenInteractiveDesktopStep(steps, config, targetVmName);
         steps.Add(Step("wait-powershell-direct", "Wait for PowerShell Direct in guest", BuildWaitPowerShellDirectCommand(config, targetVmName), mutatesVmState: false));
     }
 
@@ -121,7 +122,28 @@ public sealed class HyperVRunbookBuilder
         steps.Add(Step("restore-golden", "Restore clean checkpoint", $"Restore-VMSnapshot -VMName {Q(config.HyperV.GoldenVmName)} -Name {Q(config.HyperV.GoldenSnapshotName)} -Confirm:$false"));
         steps.Add(Step("enable-guest-service", "Enable Guest Service Interface", BuildEnableGuestServiceCommand(config.HyperV.GoldenVmName)));
         steps.Add(Step("start-golden", "Start restored golden VM and wait for Running", BuildStartVmAndWaitCommand(config.HyperV.GoldenVmName)));
+        AddOpenInteractiveDesktopStep(steps, config, config.HyperV.GoldenVmName);
         steps.Add(Step("wait-powershell-direct", "Wait for PowerShell Direct in guest", BuildWaitPowerShellDirectCommand(config, config.HyperV.GoldenVmName), mutatesVmState: false));
+    }
+
+    /// <summary>
+    /// Adds the operator-interaction desktop step. Inputs are Hyper-V/RDP
+    /// settings and target VM name; processing opens VMConnect first and falls
+    /// back to mstsc/RDP when configured or discoverable; the method appends a
+    /// required step before any sample copy/execution happens.
+    /// </summary>
+    private static void AddOpenInteractiveDesktopStep(List<SandboxRunbookStep> steps, SandboxConfig config, string targetVmName)
+    {
+        // Live Web/Core runbooks do not have the CLI-only -NoOpenVmConsole
+        // escape hatch, so they always require an operator-visible VM desktop
+        // before payload/sample staging. The config field remains for backward
+        // compatibility and status display, but it must not silently make live
+        // execution headless.
+        steps.Add(Step(
+            "open-vm-desktop",
+            "Open interactive Hyper-V VM desktop for operator interaction",
+            BuildOpenInteractiveDesktopCommand(config, targetVmName),
+            mutatesVmState: false));
     }
 
     /// <summary>
@@ -150,6 +172,60 @@ public sealed class HyperVRunbookBuilder
             "} while ((Get-Date) -lt $deadline);",
             $"if (-not $ready) {{ throw \"VM '$vmName' did not reach Running state within {startupTimeoutSeconds} seconds. Last state: $lastState\" }};",
             "Write-Host \"VM '$vmName' is running.\""
+        });
+    }
+
+    /// <summary>
+    /// Builds a host-side desktop launch command. Inputs are VMConnect/RDP
+    /// config and target VM name; processing starts vmconnect.exe or mstsc.exe
+    /// and fails the runbook if neither desktop path opens, preventing the
+    /// sample from running without an operator-visible VM desktop.
+    /// </summary>
+    private static string BuildOpenInteractiveDesktopCommand(SandboxConfig config, string targetVmName)
+    {
+        var rdpTarget = config.HyperV.RdpTarget ?? string.Empty;
+        return string.Join(" ", new[]
+        {
+            $"$vmName = {Q(targetVmName)};",
+            $"$serverName = {Q(config.HyperV.VmConsoleServerName)};",
+            $"$rdpFallbackEnabled = {PsBool(config.HyperV.RdpFallbackEnabled)};",
+            $"$configuredRdpTarget = {Q(rdpTarget)};",
+            "$messages = New-Object System.Collections.Generic.List[string];",
+            "function Resolve-NativeCommand([string]$Name, [string[]]$Candidates) {",
+            "$cmd = Get-Command -Name $Name -ErrorAction SilentlyContinue | Select-Object -First 1;",
+            "if ($null -ne $cmd -and -not [string]::IsNullOrWhiteSpace([string]$cmd.Source)) { return [string]$cmd.Source };",
+            "foreach ($candidate in $Candidates) { if (-not [string]::IsNullOrWhiteSpace($candidate) -and (Test-Path -LiteralPath $candidate -PathType Leaf)) { return (Resolve-Path -LiteralPath $candidate).ProviderPath } };",
+            "return '';",
+            "};",
+            "function Test-DesktopLauncherStillPresent($Process, [string]$LauncherName) {",
+            "$processName = [System.IO.Path]::GetFileNameWithoutExtension($LauncherName);",
+            "if ($null -ne $Process -and -not [string]::IsNullOrWhiteSpace($Process.ProcessName)) { $processName = $Process.ProcessName };",
+            "Start-Sleep -Milliseconds 1200;",
+            "if ($null -ne $Process) { try { $Process.Refresh(); if (-not $Process.HasExited) { return [pscustomobject]@{ Success = $true; Message = \"$LauncherName is still running after launch check.\" } } } catch { return [pscustomobject]@{ Success = $false; Message = \"$LauncherName launch verification failed: $($_.Exception.Message)\" } } };",
+            "$windowProcess = Get-Process -Name $processName -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne [IntPtr]::Zero } | Select-Object -First 1;",
+            "if ($null -ne $windowProcess) { return [pscustomobject]@{ Success = $true; Message = \"$LauncherName desktop window is present in process '$($windowProcess.ProcessName)' (PID $($windowProcess.Id)).\" } };",
+            "if ($null -eq $Process) { return [pscustomobject]@{ Success = $false; Message = \"$LauncherName did not return a process handle and no desktop window was observed.\" } };",
+            "if ($Process.HasExited) { return [pscustomobject]@{ Success = $false; Message = \"$LauncherName exited immediately with code $($Process.ExitCode); no durable interactive desktop window was observed.\" } };",
+            "return [pscustomobject]@{ Success = $false; Message = \"$LauncherName launch verification did not observe a running process or desktop window.\" };",
+            "};",
+            "$systemRoot = if ([string]::IsNullOrWhiteSpace($env:SystemRoot)) { 'C:\\Windows' } else { $env:SystemRoot };",
+            "$vmconnect = Resolve-NativeCommand 'vmconnect.exe' @((Join-Path $systemRoot 'System32\\vmconnect.exe'), (Join-Path $systemRoot 'Sysnative\\vmconnect.exe'));",
+            "if (-not [string]::IsNullOrWhiteSpace($vmconnect)) {",
+            "try { $p = Start-Process -FilePath $vmconnect -ArgumentList @($serverName, $vmName) -WindowStyle Normal -PassThru -ErrorAction Stop; $check = Test-DesktopLauncherStillPresent $p 'vmconnect.exe'; if ($check.Success) { Write-Host \"Opened Hyper-V VMConnect desktop for VM '$vmName' (PID $($p.Id)). / 已打开 Hyper-V VM 桌面。\"; exit 0 } else { [void]$messages.Add(\"vmconnect.exe launch verification failed: $($check.Message)\") } }",
+            "catch { [void]$messages.Add(\"vmconnect.exe failed: $($_.Exception.Message)\") }",
+            "} else { [void]$messages.Add('vmconnect.exe was not found.') };",
+            "if ($rdpFallbackEnabled) {",
+            "$rdpTarget = $configuredRdpTarget;",
+            "if ([string]::IsNullOrWhiteSpace($rdpTarget)) { try {",
+            "$rdpTarget = @(Get-VMNetworkAdapter -VMName $vmName -ErrorAction Stop | ForEach-Object { $_.IPAddresses } | Where-Object { $t = [string]$_; $t -match '^(\\d{1,3}\\.){3}\\d{1,3}$' -and -not $t.StartsWith('169.254.') -and $t -ne '0.0.0.0' } | Select-Object -Unique -First 1)[0]",
+            "} catch { [void]$messages.Add(\"RDP target discovery failed: $($_.Exception.Message)\") } };",
+            "if (-not [string]::IsNullOrWhiteSpace($rdpTarget)) {",
+            "$mstsc = Resolve-NativeCommand 'mstsc.exe' @((Join-Path $systemRoot 'System32\\mstsc.exe'), (Join-Path $systemRoot 'Sysnative\\mstsc.exe'));",
+            "if (-not [string]::IsNullOrWhiteSpace($mstsc)) { try { $p = Start-Process -FilePath $mstsc -ArgumentList @('/v:' + $rdpTarget) -WindowStyle Normal -PassThru -ErrorAction Stop; $check = Test-DesktopLauncherStillPresent $p 'mstsc.exe'; if ($check.Success) { Write-Host \"Opened RDP desktop for '$rdpTarget' (PID $($p.Id)). / 已通过 RDP 打开 VM 桌面。\"; exit 0 } else { [void]$messages.Add(\"mstsc.exe launch verification failed: $($check.Message)\") } } catch { [void]$messages.Add(\"mstsc.exe failed: $($_.Exception.Message)\") } } else { [void]$messages.Add('mstsc.exe was not found.') }",
+            "} else { [void]$messages.Add('RDP fallback skipped: no hyperV.rdpTarget and no VM IPv4 was discoverable.') }",
+            "} else { [void]$messages.Add('RDP fallback disabled.') };",
+            "$detail = $messages -join ' | ';",
+            "throw \"Live analysis requires an interactive VM desktop before the sample starts, but VMConnect/RDP did not open. 修复建议：安装 Hyper-V 管理工具、确认 vmconnect.exe 可用，或设置 hyperV.rdpTarget 为 RDP/反代地址。 Details: $detail\""
         });
     }
 
@@ -527,7 +603,10 @@ public sealed class HyperVRunbookBuilder
     /// </summary>
     private static string BuildLiveOutputSyncCommand(SandboxConfig config, string targetVmName, string guestOut, string hostOut, string agentPidPath, string agentExitPath)
     {
-        var maxSyncSeconds = Math.Max(config.Analysis.DefaultDurationSeconds + 60, 90);
+        var hasSyncDeadline = !config.Analysis.DurationUnlimited && config.Analysis.DefaultDurationSeconds > 0;
+        var maxSyncSeconds = hasSyncDeadline
+            ? Math.Max(config.Analysis.DefaultDurationSeconds + 60, 90)
+            : 0;
         var command = string.Join(" ", new[]
         {
             $"$session = New-PSSession -VMName {Q(targetVmName)} -Credential $guestCredential -ErrorAction Stop;",
@@ -536,7 +615,9 @@ public sealed class HyperVRunbookBuilder
             $"$hostOut = {Q(hostOut)};",
             $"$pidPath = {Q(agentPidPath)};",
             $"$exitPath = {Q(agentExitPath)};",
-            $"$deadline = (Get-Date).AddSeconds({maxSyncSeconds});",
+            $"$hasSyncDeadline = ${hasSyncDeadline.ToString().ToLowerInvariant()};",
+            $"$maxSyncSeconds = {maxSyncSeconds};",
+            "$deadline = if ($hasSyncDeadline) { (Get-Date).AddSeconds($maxSyncSeconds) } else { [datetime]::MaxValue };",
             "$nextHeartbeat = (Get-Date).AddSeconds(15);",
             "$copyWarningCount = 0;",
             "$firstCopyWarning = '';",
@@ -553,7 +634,7 @@ public sealed class HyperVRunbookBuilder
             "if ($running) { Start-Sleep -Seconds 2 }",
             "} while ($running -and (Get-Date) -lt $deadline);",
             "try { Copy-Item -FromSession $session -Path $guestOut -Destination $hostOut -Recurse -Force -ErrorAction Stop } catch { $copyContext = if ([string]::IsNullOrWhiteSpace($firstCopyWarning)) { '' } else { \" First periodic copy warning: $firstCopyWarning\" }; throw \"Final live output copy failed from '$guestOut' to '$hostOut': $($_.Exception.Message).$copyContext\" };",
-            $"if ($running) {{ throw \"Guest Agent process $guestAgentPid did not exit before the live-sync deadline ({maxSyncSeconds} seconds). Suppressed copy warning count: $copyWarningCount\" }}",
+            "if ($running -and $hasSyncDeadline) { throw \"Guest Agent process $guestAgentPid did not exit before the live-sync deadline ($maxSyncSeconds seconds). Suppressed copy warning count: $copyWarningCount\" }",
             "$exitText = Invoke-Command -Session $session -ScriptBlock { param($path) if (Test-Path -LiteralPath $path -PathType Leaf) { (Get-Content -LiteralPath $path -Raw).Trim() } else { throw \"Guest Agent exit marker was not found: $path\" } } -ArgumentList $exitPath -ErrorAction Stop;",
             "$exitCode = 0;",
             "if (-not [int]::TryParse([string]$exitText, [ref]$exitCode)) { throw \"Guest Agent exit marker was not an integer: '$exitText' ($exitPath)\" };",

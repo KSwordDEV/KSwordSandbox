@@ -96,6 +96,17 @@ throwing for expected launch/exit failures.
   truncation events for high-volume outputs. DNS keys exclude TTL to reduce
   resolver-cache countdown noise; `dns.cache.diff` and `network.netstat.diff`
   provide stable count/hash summaries before bounded row-level events.
+- `WindowsBehaviorEventLogProbe` is an always-on, bounded Event Log supplement
+  for R0 blind spots that are better observed through existing Windows logs
+  than through a live ETW session. It records a watermark before launch, then
+  queries recent System / Service Control Manager, TaskScheduler Operational,
+  and PowerShell Operational events after start/run with short `wevtutil`
+  timeouts. Health rows remain `collectionHealth=true` and
+  `behaviorCounted=false`; actual `eventlog.service.*`,
+  `eventlog.scheduled_task.*`, and `eventlog.powershell.*` rows become behavior
+  candidates only after strong root-PID or sample-path/text correlation and
+  include `severity`, `behaviorBoundary`, `noiseBoundary`, `zhMessage`, and
+  `zhHint`.
 - `ScreenshotProbe` is opt-in through `--screenshot`. `ScreenshotProbeOptions`
   plans the default `before,during,after` cadence or the operator-selected
   `--screenshot-phases` / `--screenshot-count` configuration without changing

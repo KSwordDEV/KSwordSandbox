@@ -1655,6 +1655,7 @@ function Test-DeploymentOperatorDiagnosticsContract {
             'Get-InstallHyperVPrerequisiteStatus',
             'Get-InstallGuestPayloadStatus',
             'Get-InstallVirusTotalStatus',
+            'ReadinessVerdict',
             'RuntimeRootUnderRepository',
             'StartsOrMutatesVm = $false'
         )
@@ -1662,8 +1663,26 @@ function Test-DeploymentOperatorDiagnosticsContract {
             'Get-RunHyperVPrerequisiteStatus',
             'GuestPayloadFreshnessReasons',
             'VirusTotalMissingKeyBehavior',
+            'ReadinessVerdict',
+            'ModeCoercionMetadata',
+            'OpenVmConnectOnLiveStart',
+            'AnalyzeLiveMayMutateVm',
             'RuntimeRootUnderRepository',
             'StartsOrMutatesVm = $false'
+        )
+        'scripts/Invoke-HyperVE2E.ps1' = @(
+            'openVmConsoleOnLiveStart',
+            'openVmConnectOnLiveStart',
+            'NoOpenVmConsole',
+            'vmConsoleOpenIsBestEffort = $false',
+            'vmConsoleRequiredUnlessNoOpenVmConsole = $true'
+        )
+        'scripts/Start-SandboxHyperVJob.ps1' = @(
+            'Open-HyperVVmConsole',
+            'openVmConnectOnLiveStart',
+            'consoleFailureBlocksHeadless',
+            'consoleDisabledByNoOpenVmConsole',
+            'VM console auto-open disabled by -NoOpenVmConsole'
         )
         'scripts/package-portable.ps1' = @(
             'Assert-RuntimePackageArchiveRequiresCompletePayloads',
@@ -1697,6 +1716,8 @@ function Test-DeploymentOperatorDiagnosticsContract {
         'scripts/run.ps1' = @(
             'CheckEnvironment',
             'RequirePayloadForWebUI',
+            'NoOpenVmConsole',
+            'Json',
             'Live Hyper-V execution is',
             'root runtime wrapper'
         )
@@ -1763,6 +1784,7 @@ function Test-DeploymentDocsOperatorHints {
             'ShowTestSigningGuidance',
             'GuestPayloadStatus',
             'VirusTotalStatus',
+            'ReadinessVerdict',
             'RuntimeRootUnderRepository',
             '不会启动、还原或停止 VM'
         )
@@ -1771,6 +1793,9 @@ function Test-DeploymentDocsOperatorHints {
             'GuestPayloadFreshnessReasons',
             'VirusTotalMissingKeyBehavior',
             'RequirePayloadForWebUI',
+            'ReadinessVerdict',
+            'ModeCoercionMetadata',
+            'OpenVmConnectOnLiveStart',
             '不会启动、还原或停止 Hyper-V VM'
         )
         'docs/release.md' = @(
@@ -1789,6 +1814,9 @@ function Test-DeploymentDocsOperatorHints {
             'gapAudit',
             'self-noise-guard-readiness',
             'sourceRuntimeSafetyMetadata',
+            'ReadinessVerdict',
+            'ModeCoercionMetadata',
+            'OpenVmConnectOnLiveStart',
             'no VM mutation',
             'no GUI signing fallback',
             'CSignTool'
@@ -1918,8 +1946,10 @@ function Test-SelfNoiseGuardReadiness {
                 $evidence.rulesVersion.IndexOf('guard', [StringComparison]::OrdinalIgnoreCase) -lt 0 -and
                 $evidence.rulesVersion.IndexOf('v27', [StringComparison]::OrdinalIgnoreCase) -lt 0 -and
                 $evidence.rulesVersion.IndexOf('v28', [StringComparison]::OrdinalIgnoreCase) -lt 0 -and
-                $evidence.rulesVersion.IndexOf('v29', [StringComparison]::OrdinalIgnoreCase) -lt 0) {
-                [void]$issues.Add("rules/behavior-rules.json version does not advertise self-noise guard hardening or v27/v28/v29 expansion: $($evidence.rulesVersion)")
+                $evidence.rulesVersion.IndexOf('v29', [StringComparison]::OrdinalIgnoreCase) -lt 0 -and
+                $evidence.rulesVersion.IndexOf('v30', [StringComparison]::OrdinalIgnoreCase) -lt 0 -and
+                $evidence.rulesVersion.IndexOf('v31', [StringComparison]::OrdinalIgnoreCase) -lt 0) {
+                [void]$issues.Add("rules/behavior-rules.json version does not advertise self-noise guard hardening or v27/v28/v29/v30/v31 expansion: $($evidence.rulesVersion)")
             }
 
             $guardedRuleCount = 0
@@ -1982,7 +2012,7 @@ function Test-SelfNoiseGuardReadiness {
         -Title 'Self-noise guard readiness / 自噪声护栏就绪' `
         -Status Failed `
         -Message "Self-noise guard readiness found $($issues.Count) issue(s)." `
-        -Remediation @('中文修复：确认 rules/behavior-rules.json 仍是 v26/v27/v28/v29 self-noise hardening 规则，并在 docs/release.md/docs/run.md 写明采集器自噪声、collection-health、VT quiet state、R0/ETW health/capability 行和 behaviorCounted=false 不可计入样本行为；本检查只做静态审计，不运行 smoke/live。') `
+        -Remediation @('中文修复：确认 rules/behavior-rules.json 仍是 v26/v27/v28/v29/v30/v31 self-noise hardening 规则，并在 docs/release.md/docs/run.md 写明采集器自噪声、collection-health、VT quiet state、R0/ETW health/capability 行和 behaviorCounted=false 不可计入样本行为；本检查只做静态审计，不运行 smoke/live。') `
         -Details @{ issues = @($issues.ToArray()); evidence = $evidence }
 }
 

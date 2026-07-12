@@ -44,6 +44,8 @@ param(
 
     [switch]$NoR0Collector,
 
+    [switch]$NoOpenVmConsole,
+
     [switch]$PlanOnly,
 
     [switch]$NoBuild,
@@ -56,7 +58,14 @@ param(
 
     [switch]$StrictUrl,
 
-    [switch]$RequirePayloadForWebUI
+    [switch]$RequirePayloadForWebUI,
+
+    [switch]$PassThru,
+
+    [switch]$Json,
+
+    [ValidateRange(4, 32)]
+    [int]$JsonDepth = 12
 )
 
 Set-StrictMode -Version 3.0

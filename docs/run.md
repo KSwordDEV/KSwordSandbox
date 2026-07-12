@@ -201,6 +201,20 @@ files，并给出修复建议，例如运行 `.\scripts\Prepare-GuestPayload.ps1
 live，请先记录 commit、`job id`、运行时间、runtime root 和报告路径；否则写
 “本候选未刷新 fresh live evidence”。
 
+Live 开始时默认必须打开已配置 Hyper-V VM 的真实桌面/控制台，且该步骤位于
+样本复制和执行之前：
+计划和结果中会记录 `OpenVmConsoleOnLiveStart` / `OpenVmConnectOnLiveStart`、
+`consoleOpenAttempted`、`consoleOpenSucceeded`、`consoleOpenMessage`、
+`consoleFailureBlocksHeadless`。默认策略不是 best-effort：先尝试
+`vmconnect.exe` 打开 Hyper-V 本体控制台；失败时可用 `mstsc.exe /v:<target>`
+打开 `hyperV.rdpTarget`（可以是 RDP 反代地址/端口）或自动发现的 VM IPv4。
+如果 VMConnect/RDP 都没有成功启动可交互桌面，Live 会在样本执行前失败。只有
+无人值守环境显式传入 `-NoOpenVmConsole` 才允许 headless：
+
+```powershell
+.\run.ps1 -Mode Analyze -SamplePath 'D:\Temp\sample.exe' -DurationSeconds 30 -Live -NoOpenVmConsole
+```
+
 内置样本 live 形式：
 
 ```powershell
@@ -295,12 +309,20 @@ VM/Guest/ETW/artifact/report 主链路，但不能证明 real R0 覆盖。
 
 ```powershell
 .\run.ps1 -Mode Status
+.\run.ps1 -Mode Status -Json
+.\run.ps1 -Mode CheckEnvironment -Json
 ```
 
 `Status` 会报告 repository root、install state、local config、Web URL、runtime root、
 secret 是否存在、可选 VirusTotal key 是否存在、VM/checkpoint 是否存在、host
 Guest Agent/R0Collector payload 是否存在、R0 driver host-path readiness，以及是否打印
 secret 值（应为 `False`）。它还会输出 `RecommendedActions`，用可读文本给出常见缺口修复：
+机器可读字段包括 `ReadinessVerdict`、`ReadinessOverallStatus`、`WebUiReady`、
+`PlanOnlyReady`、`LiveReady`、`BlockingReasons`、`WarningReasons`、
+`VmMutationPolicy` 和 `ModeCoercionMetadata`。`VmMutationPolicy` 明确记录：
+默认 WebUI 不修改 VM；`Analyze`/`Plan` 不加 `-Live` 不修改 VM；只有
+`Analyze -Live` 才可能 `RestoreCheckpoint`、`StartVm`、复制 payload/sample、
+运行 Guest Agent、`StopVm` 和可选再次恢复 checkpoint。
 
 - 缺少 VM：用以下命令记录真实 VM：
   `.\install.ps1 -Mode Change -UpdateHyperVConfig -VmName <existing VM> -CheckpointName <checkpoint>`;

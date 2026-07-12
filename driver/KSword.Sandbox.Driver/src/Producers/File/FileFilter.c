@@ -48,12 +48,13 @@ KswFilePayloadVersion(
  * Minifilter operation table for the file telemetry producer.
  *
  * Inputs : consumed by FltRegisterFilter during DriverEntry.
- * Logic  : CREATE, READ, WRITE, SET_INFORMATION, CLEANUP, and CLOSE are
- *          registered.  CLOSE is pre-only because there is no useful final
- *          status at that point; other operations use post callbacks when
+ * Logic  : CREATE, READ, WRITE, SET_INFORMATION, SET_SECURITY, CLEANUP, and
+ *          CLOSE are registered.  CLOSE is pre-only because there is no useful
+ *          final status at that point; other operations use post callbacks when
  *          available so collectors see result status.  The callback maps
  *          SET_INFORMATION to Rename/Delete for those information classes and
- *          otherwise preserves SetInformation.
+ *          otherwise preserves SetInformation.  SET_SECURITY is metadata-only:
+ *          the v1 payload records operation/status/path without copying ACLs.
  * Return : not applicable; FltMgr reads this static registration table.
  */
 static const FLT_OPERATION_REGISTRATION g_KswFileFilterOperations[] = {
@@ -61,6 +62,7 @@ static const FLT_OPERATION_REGISTRATION g_KswFileFilterOperations[] = {
     { IRP_MJ_READ, 0, KswFileFilterPreOperation, KswFileFilterPostOperation },
     { IRP_MJ_WRITE, 0, KswFileFilterPreOperation, KswFileFilterPostOperation },
     { IRP_MJ_SET_INFORMATION, 0, KswFileFilterPreOperation, KswFileFilterPostOperation },
+    { IRP_MJ_SET_SECURITY, 0, KswFileFilterPreOperation, KswFileFilterPostOperation },
     { IRP_MJ_CLEANUP, 0, KswFileFilterPreOperation, KswFileFilterPostOperation },
     { IRP_MJ_CLOSE, 0, KswFileFilterPreOperation, NULL },
     { IRP_MJ_OPERATION_END }
@@ -478,9 +480,9 @@ KswIsSandboxSelfPath(
  * Maps a minifilter callback to the public file operation ABI.
  *
  * Inputs : Data is the FltMgr callback data for one file-system operation.
- * Logic  : common create/read/write/lifetime operations map directly; selected
- *          SET_INFORMATION classes are normalized to Rename/Delete and all
- *          remaining metadata updates are preserved as SetInformation.
+ * Logic  : common create/read/write/security/lifetime operations map directly;
+ *          selected SET_INFORMATION classes are normalized to Rename/Delete and
+ *          all remaining metadata updates are preserved as SetInformation.
  * Return : KSWORD_SANDBOX_FILE_OPERATION value or None for ignored callbacks.
  */
 static
@@ -515,6 +517,9 @@ KswMapFileOperation(
             return KswSandboxFileOperationRename;
         }
         return KswSandboxFileOperationSetInformation;
+
+    case IRP_MJ_SET_SECURITY:
+        return KswSandboxFileOperationSetSecurity;
 
     case IRP_MJ_CLEANUP:
         return KswSandboxFileOperationCleanup;
@@ -830,6 +835,8 @@ KswPushFileEvent(
         payload.Flags |= KSWORD_SANDBOX_FILE_EVENT_FLAG_DELETE_INTENT;
     } else if (Operation == KswSandboxFileOperationRename) {
         payload.Flags |= KSWORD_SANDBOX_FILE_EVENT_FLAG_RENAME_INTENT;
+    } else if (Operation == KswSandboxFileOperationSetSecurity) {
+        payload.Flags |= KSWORD_SANDBOX_FILE_EVENT_FLAG_SECURITY_INTENT;
     }
 
     (VOID)KswCopyBestFilePathToPayload(

@@ -38,7 +38,9 @@ inline constexpr const char* kR0TelemetryCoverageFallbackOwners =
     "network.rawPacketPayload=PCAP/sidecar;"
     "network.dnsHttpTlsPayload=PCAP/DNS-HTTP-TLS-sidecar;"
     "file.contentBytesAndHash=Guest/artifact-hashing;"
+    "file.securityDescriptorBytes=ETW/security-audit-or-Guest/artifact;"
     "registry.valueDataBytes=Guest/registry-snapshot-or-ETW;"
+    "registry.securityDescriptorBytes=ETW/security-audit-or-Guest/registry-snapshot;"
     "userModeCallStack=ETW-or-Guest-instrumentation";
 
 // Input: DriverState value returned by GET_HEALTH or POLL.
@@ -857,6 +859,8 @@ std::string FileOperationName(const ULONG operation) {
         return "read";
     case KswSandboxFileOperationRename:
         return "rename";
+    case KswSandboxFileOperationSetSecurity:
+        return "setSecurity";
     default:
         return "unrecognized";
     }
@@ -920,6 +924,11 @@ std::string FileEventFlagNames(const ULONG flags) {
     if ((flags & KSWORD_SANDBOX_FILE_EVENT_FLAG_RENAME_INTENT) != 0) {
         appendName("RenameIntent");
         knownFlags |= KSWORD_SANDBOX_FILE_EVENT_FLAG_RENAME_INTENT;
+    }
+
+    if ((flags & KSWORD_SANDBOX_FILE_EVENT_FLAG_SECURITY_INTENT) != 0) {
+        appendName("SecurityIntent");
+        knownFlags |= KSWORD_SANDBOX_FILE_EVENT_FLAG_SECURITY_INTENT;
     }
 
     const ULONG unknownFlags = flags & ~knownFlags;
@@ -1333,6 +1342,8 @@ std::string RegistryOperationName(const ULONG operation) {
         return "deleteKey";
     case KswSandboxRegistryOperationRenameKey:
         return "renameKey";
+    case KswSandboxRegistryOperationSetKeySecurity:
+        return "setKeySecurity";
     default:
         return "unrecognized";
     }
@@ -1655,7 +1666,9 @@ std::string R0CoverageKnownGaps(
     AppendPipeToken(gaps, "bounded.pathPrefixes");
     AppendPipeToken(gaps, "bounded.processCommandLinePrefix");
     AppendPipeToken(gaps, "registry.valueDataBytes");
+    AppendPipeToken(gaps, "registry.securityDescriptorBytes");
     AppendPipeToken(gaps, "file.contentBytesAndHash");
+    AppendPipeToken(gaps, "file.securityDescriptorBytes");
     AppendPipeToken(gaps, "userModeCallStack");
 
     return gaps.empty() ? "none" : gaps;
@@ -1743,9 +1756,9 @@ std::string R0DriverEventKnownGaps(
     case KswSandboxEventTypeImage:
         return "driver.serviceLoadSemantics|bounded.imagePath|image.hashSignatureMetadata|image.contentBytes";
     case KswSandboxEventTypeFile:
-        return "bounded.filePath|file.contentBytesAndHash|userModeStack";
+        return "bounded.filePath|file.contentBytesAndHash|file.securityDescriptorBytes|userModeStack";
     case KswSandboxEventTypeRegistry:
-        return "service.control|driver.serviceLoadSemantics|bounded.registryKeyValue|registry.valueDataBytes|userModeStack";
+        return "service.control|driver.serviceLoadSemantics|bounded.registryKeyValue|registry.valueDataBytes|registry.securityDescriptorBytes|userModeStack";
     case KswSandboxEventTypeNetwork:
         return "network.rawPacketPayload|network.dnsHttpTlsPayload|pcap.sidecarCorrelationRequired";
     case KswSandboxEventTypeReserved:
@@ -2330,6 +2343,14 @@ std::string RegistryEventFlagNames(const ULONG flags) {
     if ((flags & KSWORD_SANDBOX_REGISTRY_EVENT_FLAG_VALUE_DATA_EMPTY) != 0) {
         appendName("ValueDataEmpty");
         knownFlags |= KSWORD_SANDBOX_REGISTRY_EVENT_FLAG_VALUE_DATA_EMPTY;
+    }
+    if ((flags & KSWORD_SANDBOX_REGISTRY_EVENT_FLAG_SECURITY_INFORMATION_PRESENT) != 0) {
+        appendName("SecurityInformationPresent");
+        knownFlags |= KSWORD_SANDBOX_REGISTRY_EVENT_FLAG_SECURITY_INFORMATION_PRESENT;
+    }
+    if ((flags & KSWORD_SANDBOX_REGISTRY_EVENT_FLAG_SECURITY_DESCRIPTOR_PRESENT) != 0) {
+        appendName("SecurityDescriptorPresent");
+        knownFlags |= KSWORD_SANDBOX_REGISTRY_EVENT_FLAG_SECURITY_DESCRIPTOR_PRESENT;
     }
     const ULONG unknownFlags = flags & ~knownFlags;
     if (unknownFlags != 0) {
@@ -3093,11 +3114,13 @@ bool AddFilePayloadData(
         (filePayload->Flags & KSWORD_SANDBOX_FILE_EVENT_FLAG_DELETE_INTENT) != 0;
     const bool renameIntent =
         (filePayload->Flags & KSWORD_SANDBOX_FILE_EVENT_FLAG_RENAME_INTENT) != 0;
+    const bool securityIntent =
+        (filePayload->Flags & KSWORD_SANDBOX_FILE_EVENT_FLAG_SECURITY_INTENT) != 0;
     const std::wstring filePath = ExtractFilePayloadPath(payload, payloadBytes);
     const std::string fileOperationName = FileOperationName(filePayload->Operation);
     const std::string fileIntent = deleteIntent
         ? "delete"
-        : (renameIntent ? "rename" : (operationFailed ? "failed-access" : fileOperationName));
+        : (renameIntent ? "rename" : (securityIntent ? "set-security" : (operationFailed ? "failed-access" : fileOperationName)));
     const std::string dropLocationFamily = FileDropLocationFamily(filePath);
     const bool startupFolderCandidate = dropLocationFamily == "startup-folder";
     const bool droppedFileCandidate =
@@ -3118,13 +3141,19 @@ bool AddFilePayloadData(
     data->AddUtf8("dropLocationFamily", dropLocationFamily);
     data->AddBool("droppedFileCandidate", droppedFileCandidate);
     data->AddBool("startupFolderCandidate", startupFolderCandidate);
+    data->AddBool("fileSecurityIntent", securityIntent);
+    data->AddBool("fileSetSecurityR0Direct", securityIntent);
+    data->AddBool("fileSecurityDescriptorBytesCaptured", false);
+    data->AddUtf8(
+        "fileSecurityCoverage",
+        securityIntent ? "r0-metadata-only-irp-mj-set-security" : "not-a-file-security-event");
     data->AddBool("downloadExecuteCandidate", false);
     data->AddBool("evidenceReady", true);
     data->AddWide(
         "zhMessage",
         startupFolderCandidate
             ? L"R0 捕获到启动目录文件行为。"
-            : (droppedFileCandidate ? L"R0 捕获到疑似释放文件/落地文件行为。" : L"R0 捕获到文件系统行为。"));
+             : (droppedFileCandidate ? L"R0 捕获到疑似释放文件/落地文件行为。" : L"R0 捕获到文件系统行为。"));
     data->AddWide(
         "zhHint",
         startupFolderCandidate
@@ -3133,7 +3162,9 @@ bool AddFilePayloadData(
                 ? L"该文件事件带有删除意图，可结合 dropped files/artifact 目录判断样本释放或清理行为。"
                 : (renameIntent
                     ? L"该文件事件带有重命名意图，可关注释放文件是否被移动或伪装。"
-                    : L"该文件事件来自内核 minifilter，适合与 Guest dropped files、PCAP 和报告证据展开联动。")));
+                    : (securityIntent
+                        ? L"该文件事件来自 IRP_MJ_SET_SECURITY；R0 仅证明文件安全设置请求的路径/状态元数据，不复制 ACL 字节。"
+                        : L"该文件事件来自内核 minifilter，适合与 Guest dropped files、PCAP 和报告证据展开联动。"))));
     data->AddUnsigned("fileVersion", filePayload->Version);
     data->AddUtf8("fileVersionHex", HexUnsignedLongLong(filePayload->Version, 8));
     data->AddUnsigned("filePayloadSize", filePayload->Size);
@@ -3153,6 +3184,7 @@ bool AddFilePayloadData(
     data->AddBool("operationFailed", operationFailed);
     data->AddBool("deleteIntent", deleteIntent);
     data->AddBool("renameIntent", renameIntent);
+    data->AddBool("securityIntent", securityIntent);
     data->AddUtf8(
         "statusHex",
         HexUnsignedLongLong(static_cast<unsigned long>(filePayload->Status), 8));
@@ -3183,23 +3215,31 @@ bool AddFilePayloadData(
 void AddProcessAccessMaskFields(
     JsonDataObjectBuilder& data,
     const std::string& prefix,
+    const ULONG objectType,
     const ULONG accessMask,
     const bool present) {
     data.AddBool(prefix + "Present", present);
     data.AddUnsigned(prefix, present ? accessMask : 0);
     data.AddUtf8(prefix + "Hex", HexUnsignedLongLong(present ? accessMask : 0, 8));
-    data.AddUtf8(prefix + "Names", present ? ProcessAccessMaskNames(accessMask) : "not-present");
-    data.AddBool(prefix + "VmRead", present && (accessMask & 0x00000010U) != 0);
-    data.AddBool(prefix + "VmWrite", present && (accessMask & 0x00000020U) != 0);
-    data.AddBool(prefix + "CreateThread", present && (accessMask & 0x00000002U) != 0);
-    data.AddBool(prefix + "DupHandle", present && (accessMask & 0x00000040U) != 0);
+    data.AddUtf8(prefix + "Names", present ? ProcessHandleAccessMaskNames(objectType, accessMask) : "not-present");
+    data.AddUtf8(prefix + "DecodeScope", ProcessHandleAccessDecodeScope(objectType));
+    data.AddUtf8(
+        prefix + "SensitiveReasons",
+        present ? SensitiveProcessHandleAccessReasons(objectType, accessMask) : "not-present");
+
+    const bool processObject = objectType != KswSandboxProcessAccessObjectTypeThread;
+    const bool threadObject = objectType == KswSandboxProcessAccessObjectTypeThread;
+    data.AddBool(prefix + "VmRead", present && processObject && (accessMask & 0x00000010U) != 0);
+    data.AddBool(prefix + "VmWrite", present && processObject && (accessMask & 0x00000020U) != 0);
+    data.AddBool(prefix + "CreateThread", present && processObject && (accessMask & 0x00000002U) != 0);
+    data.AddBool(prefix + "DupHandle", present && processObject && (accessMask & 0x00000040U) != 0);
     data.AddBool(prefix + "Terminate", present && (accessMask & 0x00000001U) != 0);
-    data.AddBool(
-        prefix + "Sensitive",
-        present &&
-            (accessMask & (0x00000001U | 0x00000002U | 0x00000008U | 0x00000010U |
-                           0x00000020U | 0x00000040U | 0x00000800U |
-                           0x00040000U | 0x00080000U | 0x01000000U)) != 0);
+    data.AddBool(prefix + "ThreadSuspendResume", present && threadObject && (accessMask & 0x00000002U) != 0);
+    data.AddBool(prefix + "ThreadGetContext", present && threadObject && (accessMask & 0x00000008U) != 0);
+    data.AddBool(prefix + "ThreadSetContext", present && threadObject && (accessMask & 0x00000010U) != 0);
+    data.AddBool(prefix + "ThreadSetToken", present && threadObject && (accessMask & 0x00000080U) != 0);
+    data.AddBool(prefix + "ThreadImpersonate", present && threadObject && (accessMask & 0x00000100U) != 0);
+    data.AddBool(prefix + "Sensitive", present && SensitiveProcessHandleAccessMask(objectType, accessMask));
 }
 
 // Input: Payload bytes for the draft KswSandboxEventTypeProcess handle-access
@@ -3254,6 +3294,9 @@ bool AddProcessHandleAccessPayloadData(
         (processAccessPayload->Flags & KSWORD_SANDBOX_PROCESS_ACCESS_EVENT_FLAG_ACCESS_REDUCED) != 0;
     const bool operationFailed =
         (processAccessPayload->Flags & KSWORD_SANDBOX_PROCESS_ACCESS_EVENT_FLAG_OPERATION_FAILED) != 0;
+    const bool targetThreadIdPresent =
+        (processAccessPayload->Flags & KSWORD_SANDBOX_PROCESS_ACCESS_EVENT_FLAG_TARGET_TID_PRESENT) != 0;
+    const ULONG objectType = processAccessPayload->ObjectType;
 
     data->AddUtf8("typedPayloadStatus", "parsed-draft");
     data->AddUtf8("semanticFamily", "process.access");
@@ -3279,12 +3322,17 @@ bool AddProcessHandleAccessPayloadData(
     data->AddUnsigned("flags", processAccessPayload->Flags);
     data->AddUtf8("flagsHex", HexUnsignedLongLong(processAccessPayload->Flags, 8));
     data->AddUtf8("flagNames", ProcessAccessEventFlagNames(processAccessPayload->Flags));
+    data->AddUnsigned("objectType", objectType);
+    data->AddUtf8("objectTypeName", ProcessAccessObjectTypeName(objectType));
+    data->AddUtf8("accessMaskDecodeScope", ProcessHandleAccessDecodeScope(objectType));
     data->AddBool("targetProcessIdPresent", targetProcessIdPresent);
+    data->AddBool("targetThreadIdPresent", targetThreadIdPresent);
     data->AddBool("sourceProcessIdPresent", sourceProcessIdPresent);
     data->AddBool("duplicateTargetProcessIdPresent", duplicateTargetProcessIdPresent);
     data->AddUnsigned("actorProcessId", processAccessPayload->ActorProcessId);
     data->AddUnsigned("processId", processAccessPayload->ActorProcessId);
     data->AddUnsigned("targetProcessId", targetProcessIdPresent ? processAccessPayload->TargetProcessId : 0);
+    data->AddUnsigned("targetThreadId", targetThreadIdPresent ? processAccessPayload->TargetThreadId : 0);
     data->AddUnsigned("sourceProcessId", sourceProcessIdPresent ? processAccessPayload->SourceProcessId : 0);
     data->AddUnsigned(
         "duplicateTargetProcessId",
@@ -3292,24 +3340,27 @@ bool AddProcessHandleAccessPayloadData(
     AddProcessAccessMaskFields(
         *data,
         "originalDesiredAccess",
+        objectType,
         processAccessPayload->OriginalDesiredAccess,
         originalDesiredAccessPresent);
     AddProcessAccessMaskFields(
         *data,
         "desiredAccess",
+        objectType,
         processAccessPayload->DesiredAccess,
         desiredAccessPresent);
     AddProcessAccessMaskFields(
         *data,
         "grantedAccess",
+        objectType,
         processAccessPayload->GrantedAccess,
         grantedAccessPresent);
     const std::string originalDesiredAccessNames =
-        originalDesiredAccessPresent ? ProcessAccessMaskNames(processAccessPayload->OriginalDesiredAccess) : "";
+        originalDesiredAccessPresent ? ProcessHandleAccessMaskNames(objectType, processAccessPayload->OriginalDesiredAccess) : "";
     const std::string desiredAccessNames =
-        desiredAccessPresent ? ProcessAccessMaskNames(processAccessPayload->DesiredAccess) : "";
+        desiredAccessPresent ? ProcessHandleAccessMaskNames(objectType, processAccessPayload->DesiredAccess) : "";
     const std::string grantedAccessNames =
-        grantedAccessPresent ? ProcessAccessMaskNames(processAccessPayload->GrantedAccess) : "";
+        grantedAccessPresent ? ProcessHandleAccessMaskNames(objectType, processAccessPayload->GrantedAccess) : "";
     const std::string requestedAccessNames =
         !desiredAccessNames.empty() ? desiredAccessNames : originalDesiredAccessNames;
     std::string combinedAccessNames;
@@ -3340,15 +3391,18 @@ bool AddProcessHandleAccessPayloadData(
     data->AddBool(
         "sensitiveProcessAccessRequested",
         (originalDesiredAccessPresent &&
-            (processAccessPayload->OriginalDesiredAccess &
-                (0x00000001U | 0x00000002U | 0x00000008U | 0x00000010U |
-                 0x00000020U | 0x00000040U | 0x00000800U)) != 0) ||
+            SensitiveProcessHandleAccessMask(objectType, processAccessPayload->OriginalDesiredAccess)) ||
             (desiredAccessPresent &&
-                (processAccessPayload->DesiredAccess &
-                    (0x00000001U | 0x00000002U | 0x00000008U | 0x00000010U |
-                     0x00000020U | 0x00000040U | 0x00000800U)) != 0));
+                SensitiveProcessHandleAccessMask(objectType, processAccessPayload->DesiredAccess)));
+    data->AddBool(
+        "sensitiveGrantedAccess",
+        grantedAccessPresent &&
+            SensitiveProcessHandleAccessMask(objectType, processAccessPayload->GrantedAccess));
     data->AddBool("preOperation", preOperation);
     data->AddBool("postOperation", postOperation);
+    data->AddUtf8(
+        "processAccessPhase",
+        postOperation ? "post-operation-granted-access" : (preOperation ? "pre-operation-requested-access" : "unknown"));
     data->AddBool(
         "kernelHandle",
         (processAccessPayload->Flags & KSWORD_SANDBOX_PROCESS_ACCESS_EVENT_FLAG_KERNEL_HANDLE) != 0);
@@ -3669,6 +3723,12 @@ bool AddRegistryPayloadData(
         registryPayload->ValueNameLengthBytes,
         KSWORD_SANDBOX_REGISTRY_VALUE_NAME_CHARS);
     const std::string registryOperationName = RegistryOperationName(registryPayload->Operation);
+    const bool setKeySecurityOperation =
+        registryPayload->Operation == KswSandboxRegistryOperationSetKeySecurity;
+    const bool securityInformationPresent =
+        (registryPayload->Flags & KSWORD_SANDBOX_REGISTRY_EVENT_FLAG_SECURITY_INFORMATION_PRESENT) != 0;
+    const bool securityDescriptorPresent =
+        (registryPayload->Flags & KSWORD_SANDBOX_REGISTRY_EVENT_FLAG_SECURITY_DESCRIPTOR_PRESENT) != 0;
     const bool persistenceCandidate = RegistryPersistenceCandidate(keyPath);
     const std::string persistenceFamily = RegistryPersistenceFamily(keyPath);
     const bool servicePersistenceCandidate = persistenceFamily == "service-configuration";
@@ -3687,15 +3747,25 @@ bool AddRegistryPayloadData(
     data->AddBool("servicePersistenceCandidate", servicePersistenceCandidate);
     data->AddBool("ifeoPersistenceCandidate", ifeoPersistenceCandidate);
     data->AddBool("startupRegistryCandidate", persistenceCandidate && !servicePersistenceCandidate && !ifeoPersistenceCandidate);
+    data->AddBool("registrySetKeySecurityR0Direct", setKeySecurityOperation);
+    data->AddBool("registrySecurityInformationPresent", securityInformationPresent);
+    data->AddBool("registrySecurityDescriptorPresent", securityDescriptorPresent);
+    data->AddBool("registrySecurityDescriptorBytesCaptured", false);
+    data->AddUtf8(
+        "registrySecurityCoverage",
+        setKeySecurityOperation ? "r0-metadata-only-regntpostsetkeysecurity" : "not-a-registry-security-event");
     data->AddBool("evidenceReady", true);
     data->AddWide(
         "zhMessage",
-        persistenceCandidate ? L"R0 捕获到疑似持久化相关注册表行为。" : L"R0 捕获到注册表行为。");
+        setKeySecurityOperation ? L"R0 捕获到注册表键安全设置行为。" :
+            (persistenceCandidate ? L"R0 捕获到疑似持久化相关注册表行为。" : L"R0 捕获到注册表行为。"));
     data->AddWide(
         "zhHint",
-        persistenceCandidate
+        setKeySecurityOperation
+            ? L"该注册表事件来自 RegNtPostSetKeySecurity；R0 仅记录 key/status/security information 元数据，不复制安全描述符字节。"
+            : (persistenceCandidate
             ? L"该注册表路径匹配常见自启动/服务/IFEO 等持久化位置，应在报告中作为重点证据展开。"
-            : L"该注册表事件来自内核回调，可结合行为规则和原始事件判断影响。");
+            : L"该注册表事件来自内核回调，可结合行为规则和原始事件判断影响。"));
     data->AddUnsigned("registryVersion", registryPayload->Version);
     data->AddUtf8("registryVersionHex", HexUnsignedLongLong(registryPayload->Version, 8));
     data->AddUnsigned("registryPayloadSize", registryPayload->Size);
@@ -3745,12 +3815,17 @@ bool AddRegistryPayloadData(
     data->AddBool(
         "valueDataEmpty",
         (registryPayload->Flags & KSWORD_SANDBOX_REGISTRY_EVENT_FLAG_VALUE_DATA_EMPTY) != 0);
+    data->AddBool("setKeySecurityOperation", setKeySecurityOperation);
     data->AddUtf8(
         "statusHex",
         HexUnsignedLongLong(static_cast<unsigned long>(registryPayload->Status), 8));
     data->AddUnsigned("processId", registryPayload->ProcessId);
     data->AddUnsigned("valueDataType", registryPayload->ValueDataType);
     data->AddUtf8("valueDataTypeHex", HexUnsignedLongLong(registryPayload->ValueDataType, 8));
+    data->AddUnsigned("securityInformation", securityInformationPresent ? registryPayload->ValueDataType : 0);
+    data->AddUtf8(
+        "securityInformationHex",
+        HexUnsignedLongLong(securityInformationPresent ? registryPayload->ValueDataType : 0, 8));
     data->AddUnsigned("valueDataSizeBytes", registryPayload->ValueDataSizeBytes);
     data->AddUnsigned("keyPathLengthBytes", registryPayload->KeyPathLengthBytes);
     data->AddUnsigned(

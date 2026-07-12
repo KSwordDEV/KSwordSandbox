@@ -176,11 +176,15 @@ Category interpretation:
 - `image.load`: image/module load metadata with bounded path prefix.
   Kernel/driver-image loads are image metadata only; service-control/SCM
   semantics for arbitrary driver loads remain Guest/ETW evidence.
-- `file.activity`: minifilter file operation metadata with bounded path prefix;
-  content bytes and hashes are guest/artifact evidence.
-- `registry.activity`: callback key/value metadata; v1 does not carry value
-  data bytes. Service key writes are configuration metadata, not proof that SCM
-  created, started, or loaded a service/driver.
+- `file.activity`: minifilter file operation metadata with bounded path prefix.
+  `IRP_MJ_SET_SECURITY` is represented as metadata-only `setSecurity`
+  (`fileSecurityDescriptorBytesCaptured=false`); content bytes, hashes, and ACL
+  bytes are guest/artifact or ETW evidence.
+- `registry.activity`: callback key/value metadata. `RegNtPostSetKeySecurity`
+  is represented as metadata-only `setKeySecurity` with the optional
+  `securityInformation` mask; v1 does not carry value data bytes or security
+  descriptor bytes. Service key writes are configuration metadata, not proof
+  that SCM created, started, or loaded a service/driver.
 - `network.metadata`: WFP/ALE endpoint metadata only; raw packets and
   DNS/HTTP/TLS payload details require PCAP/sidecar/ETW correlation.
 - `queue.loss.backpressure`: GET_STATUS, READ_EVENTS, per-record counters,
@@ -196,7 +200,8 @@ advertised, `token.privilegeAdjustment`, `token.objectHandles`,
 `service.control`, `driver.serviceLoadSemantics`,
 `network.rawPacketPayload`, `network.dnsHttpTlsPayload`,
 `file.contentBytesAndHash`, `registry.valueDataBytes`, and
-`userModeCallStack`.  Their owners are documented in
+`file.securityDescriptorBytes`, `registry.securityDescriptorBytes`, and
+`userModeCallStack`. Their owners are documented in
 `r0CoverageFallbackOwners` / `r0FallbackOwners`: ETW/security/object/thread
 providers, Guest service/artifact/registry collection, and PCAP/protocol
 sidecars as appropriate.
@@ -222,10 +227,41 @@ the draft bit. When such a row is observed, the collector normalizes it as
 `eventType=process.access` and emits `data.payloadSchemaName=r0.process_handle_access`,
 `semanticFamily=process.access`, `behaviorLane=process-handle-access`,
 `actorProcessId`, `targetProcessId`, optional `sourceProcessId` and
-`duplicateTargetProcessId`, `originalDesiredAccess*`, `desiredAccess*`,
-`grantedAccess*`, `*Names`, `*Hex`, and boolean decodes such as `*VmWrite`,
-`*CreateThread`, `*DupHandle`, and `*Sensitive`. 中文：这些字段只来自显式句柄访问
-payload；普通 `driver.process` create/exit 行不能推断进程句柄权限。
+`duplicateTargetProcessId`, optional `targetThreadId`, `objectTypeName`,
+`accessMaskDecodeScope`, `originalDesiredAccess*`, `desiredAccess*`,
+`grantedAccess*`, `*Names`, `*Hex`, `*SensitiveReasons`, `preOperation`,
+`postOperation`, and `processAccessPhase`. Process-object rows decode
+`*VmWrite`, `*CreateThread`, `*DupHandle`; thread-object rows decode
+`*ThreadSetContext`, `*ThreadSetToken`, `*ThreadImpersonate`, etc. Post rows
+carry `grantedAccess*` only when the object-manager operation succeeded.
+中文：这些字段只来自显式句柄访问 payload；普通 `driver.process` create/exit 行不能推断进程/线程句柄权限。
+
+### ETW fallback row contract for object/permission lanes
+
+R0 rows must not be used to infer unimplemented object/permission actions. When
+Guest/ETW/Security fills these lanes, normalized fallback rows should use this
+contract:
+
+- `fallbackContractVersion=1`
+- `fallbackLane=process.handleAccess|thread.handleAccess|token.objectHandles|token.privilegeAdjustment|file.securityDescriptorBytes|registry.securityDescriptorBytes`
+- `fallbackOwner=ETW/security-audit|ETW/object-access|ETW/kernel-thread|Guest/API-trace|Guest/registry-snapshot`
+- `r0DirectObservation=false` unless a matching R0 draft row/capability is
+  present and active.
+- `r0InferenceAllowed=false`
+- `etwFallbackRequired=true`
+- `etwProviderStatus=enabled|disabled|unavailable|partial`
+- `collectionStatus=observed|not-observed|provider-disabled|audit-policy-missing|dropped-events`
+- action fields, when observed: `actorProcessId`, `actorProcessName`,
+  `actorImagePath`, `targetObjectType=process|thread|token|file|registryKey`,
+  `targetProcessId`, `targetThreadId`, `operationName=open|duplicate|setSecurity|adjustPrivilege`,
+  `requestedAccessHex`, `requestedAccessNames`, `grantedAccessHex`,
+  `grantedAccessNames`, `grantedAccessKnown`, `sensitiveAccessNames`,
+  `privilegeName`, `privilegeAction`, `statusHex`, and `operationResult`.
+
+Readiness/provider rows such as `provider-disabled`, `audit-policy-missing`, or
+`unavailable` must set `behaviorCounted=false` and `nonbehavior=true`. Actual
+ETW object/permission action rows may be behavior-counted, but they remain
+evidence labels rather than malicious/benign verdicts.
 
 Common attribution fields are additive and string-valued:
 
@@ -406,8 +442,14 @@ Typed payload parsers add category-specific fields such as `operationName`,
 `directionName`, `localAddress`, `remoteAddress`, and port metadata when the
 driver payload ABI provides them. File payloads also expose `pathNormalized` and
 `pathFallback` when the driver reports FltMgr-normalized or fallback path
-provenance. Driver rows prefer typed payload PIDs over callback-context header
-PIDs when the public payload carries a subject process ID.
+provenance. File `setSecurity` rows add `fileSecurityIntent`,
+`fileSetSecurityR0Direct`, `fileSecurityCoverage`, and
+`fileSecurityDescriptorBytesCaptured=false`. Registry `setKeySecurity` rows add
+`registrySetKeySecurityR0Direct`, `registrySecurityCoverage`,
+`registrySecurityInformationPresent`, `securityInformationHex`, and
+`registrySecurityDescriptorBytesCaptured=false`. Driver rows prefer typed
+payload PIDs over callback-context header PIDs when the public payload carries a
+subject process ID.
 
 Network typed fields follow the same evidence-label rule. `serviceHint`,
 `semanticCandidate`, `dnsCandidate`, `httpCandidate`, and `tlsCandidate` are

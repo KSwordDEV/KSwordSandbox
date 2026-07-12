@@ -16,6 +16,7 @@ Single-sample CLI and environment-check modes are also available:
   .\run.ps1 -Mode Plan -SamplePath D:\Temp\sample.exe
   .\run.ps1 -Mode Analyze -SamplePath D:\Temp\sample.exe -Live
   .\run.ps1 -Mode Analyze -SamplePreset Notepad -Live -NoR0Collector
+  .\run.ps1 -Mode Analyze -SamplePath D:\Temp\sample.exe -Live -NoOpenVmConsole
   .\run.ps1 -Mode Analyze -SamplePreset Notepad
   .\run.ps1 -Mode Analyze -SamplePreset HarmlessSample -Live
   .\run.ps1 -Mode CheckEnvironment
@@ -62,6 +63,12 @@ param(
     # but the real driver is unsigned or test-signing is not configured.
     [switch]$NoR0Collector,
 
+    # By default live Hyper-V analysis opens an interactive VM desktop after
+    # the restored VM reaches Running. The live start phase first tries
+    # Hyper-V VMConnect, then mstsc/RDP when an RDP target is configured or
+    # discoverable. Use this switch only for headless automation.
+    [switch]$NoOpenVmConsole,
+
     [switch]$PlanOnly,
 
     [switch]$NoBuild,
@@ -74,7 +81,14 @@ param(
 
     [switch]$StrictUrl,
 
-    [switch]$RequirePayloadForWebUI
+    [switch]$RequirePayloadForWebUI,
+
+    [switch]$PassThru,
+
+    [switch]$Json,
+
+    [ValidateRange(4, 32)]
+    [int]$JsonDepth = 12
 )
 
 Set-StrictMode -Version 3.0
@@ -84,6 +98,12 @@ $script:RepositoryRoot = if ([string]::IsNullOrWhiteSpace($PSScriptRoot)) { (Get
 $script:InstallStatePath = Join-Path $env:ProgramData 'KSwordSandbox\install-state.json'
 $script:WebConfigPathEnvironmentName = 'Sandbox__ConfigPath'
 $script:ConfigPathWasExplicit = $PSBoundParameters.ContainsKey('ConfigPath')
+$script:RequestedRunMode = $Mode
+$script:EffectiveRunMode = $Mode
+$script:RunModeCoerced = $false
+$script:RunModeCoercionReason = ''
+$script:RunModeCoercionTriggerParameter = ''
+$script:RunModeCoercionOriginalMode = $Mode
 
 function Write-RunInfo {
     param([Parameter(Mandatory)][string]$Message)
@@ -342,6 +362,7 @@ function Get-RunOperatorModeMatrix {
             SafeDiagnostics = @('.\install.ps1 -Mode Status', '.\install.ps1 -Mode CheckEnvironment', '.\run.ps1 -Mode Status', '.\run.ps1 -Mode CheckEnvironment')
             PrimaryRunCommand = '.\run.ps1'
             StartsVmByDefault = $false
+            MutatesVmByDefault = $false
             RequiresLiveSwitchForVmMutation = $true
             NextStepsZh = @('下一步：确认 RecommendedActions 后运行 .\run.ps1；需要真实执行样本时才显式加 -Live。')
         },
@@ -353,6 +374,7 @@ function Get-RunOperatorModeMatrix {
             SafeDiagnostics = @('.\install.ps1 -InstallEntrypoint RestoreCleanCheckpoint -PlanOnly', '.\install.ps1 -InstallEntrypoint RestoreCleanCheckpoint -AllowVmMutation -WhatIf', '.\scripts\Test-HyperVReadiness.ps1')
             PrimaryRunCommand = '.\run.ps1 -Mode Analyze -SamplePath <sample.exe> -Live'
             StartsVmByDefault = $false
+            MutatesVmByDefault = $false
             RequiresLiveSwitchForVmMutation = $true
             NextStepsZh = @('下一步：恢复 baseline 请回到 install.ps1 的 RestoreCleanCheckpoint 入口；run.ps1 默认不会回退 VM。')
         },
@@ -364,10 +386,158 @@ function Get-RunOperatorModeMatrix {
             SafeDiagnostics = @('.\install.ps1 -InstallEntrypoint CreateOrPreparePath -PlanOnly', '.\install.ps1 -InstallEntrypoint CreateOrPreparePath -WhatIf', '.\run.ps1 -Mode CheckEnvironment')
             PrimaryRunCommand = '.\run.ps1 -Mode Analyze -SamplePreset Notepad'
             StartsVmByDefault = $false
+            MutatesVmByDefault = $false
             RequiresLiveSwitchForVmMutation = $true
             NextStepsZh = @('下一步：先完成 install.ps1 CreateOrPreparePath、本机 VM/checkpoint profile 和 payload；再用 run.ps1 做 WebUI/PlanOnly。')
         }
     )
+}
+
+function Get-RunModeResolution {
+    [pscustomobject][ordered]@{
+        Schema = 'ksword.run.mode-coercion.v1'
+        RequestedMode = $script:RequestedRunMode
+        EffectiveMode = $script:EffectiveRunMode
+        ModeCoerced = [bool]$script:RunModeCoerced
+        ModeCoercionReason = $script:RunModeCoercionReason
+        ModeCoercionTriggerParameter = $script:RunModeCoercionTriggerParameter
+        ModeCoercionOriginalMode = $script:RunModeCoercionOriginalMode
+        MachineReadable = $true
+    }
+}
+
+function Get-RunVmMutationPolicy {
+    [pscustomobject][ordered]@{
+        Schema = 'ksword.run.vm-mutation-policy.v1'
+        DefaultMutatesVm = $false
+        StatusMutatesVm = $false
+        CheckEnvironmentMutatesVm = $false
+        WebUiLaunchMutatesVm = $false
+        WebUiDefaultMutatesVm = $false
+        PlanMutatesVm = $false
+        AnalyzePlanMutatesVm = $false
+        AnalyzeWithoutLiveMutatesVm = $false
+        AnalyzeLiveMayMutateVm = $true
+        AnalyzeLiveMutationOperations = @('RestoreCheckpoint', 'StartVm', 'CopyPayloadAndSampleIntoGuest', 'RunGuestAgent', 'StopVm', 'OptionalRestoreCheckpointAfterRun')
+        RequiresExplicitLiveForVmMutation = $true
+        LiveRequiresAdministrator = $true
+        OpenVmConsoleOnLiveStartDefault = $true
+        OpenVmConnectOnLiveStartDefault = $true
+        OpenVmConsoleRequestedForThisInvocation = (-not [bool]$NoOpenVmConsole)
+        OpenVmConnectOnLiveStart = (-not [bool]$NoOpenVmConsole)
+        OpenVmConsoleIsBestEffort = $false
+        OpenVmConsoleFailureBlocksHeadless = (-not [bool]$NoOpenVmConsole)
+        VmConsoleRequiredUnlessNoOpenVmConsole = $true
+        DisableVmConsoleCommand = '.\run.ps1 -Mode Analyze -SamplePath <sample.exe> -Live -NoOpenVmConsole'
+        MachineReadable = $true
+    }
+}
+
+function New-RunReadinessVerdict {
+    param(
+        [bool]$ConfigExists,
+        [bool]$RuntimeRootExists,
+        [bool]$RuntimeRootUnderRepository,
+        [bool]$WebUiLaunchTargetReady,
+        [bool]$GuestPayloadRootExists,
+        [bool]$GuestAgentPayloadExists,
+        [bool]$R0CollectorPayloadExists,
+        [bool]$GuestPayloadManifestExists,
+        [bool]$GuestPayloadFresh,
+        [bool]$GuestSecretSet,
+        [bool]$HyperVModuleAvailable,
+        [bool]$VmExists,
+        [bool]$CheckpointExists,
+        [AllowNull()][object]$DriverStatus,
+        [string[]]$RecommendedActions = @()
+    )
+
+    $blocking = New-Object System.Collections.Generic.List[string]
+    $warnings = New-Object System.Collections.Generic.List[string]
+
+    if (-not $ConfigExists) { [void]$blocking.Add('MissingLocalConfig') }
+    if (-not $RuntimeRootExists) { [void]$warnings.Add('RuntimeRootMissing') }
+    if ($RuntimeRootUnderRepository) { [void]$blocking.Add('RuntimeRootUnderRepository') }
+    if (-not $WebUiLaunchTargetReady) { [void]$blocking.Add('MissingWebUiLaunchTarget') }
+    if (-not $GuestSecretSet) { [void]$blocking.Add('MissingGuestPasswordSecret') }
+    if (-not $HyperVModuleAvailable) { [void]$blocking.Add('MissingHyperVPowerShellModule') }
+    if ($HyperVModuleAvailable -and -not $VmExists) { [void]$blocking.Add('MissingConfiguredVm') }
+    if ($HyperVModuleAvailable -and $VmExists -and -not $CheckpointExists) { [void]$blocking.Add('MissingConfiguredCheckpoint') }
+
+    $payloadFilesPresent = $GuestPayloadRootExists -and $GuestAgentPayloadExists -and $R0CollectorPayloadExists -and $GuestPayloadManifestExists
+    if (-not $payloadFilesPresent) {
+        [void]$blocking.Add('MissingGuestPayload')
+    }
+    elseif (-not $GuestPayloadFresh) {
+        [void]$warnings.Add('GuestPayloadStaleOrUnverified')
+    }
+
+    $driverStatusName = if ($null -eq $DriverStatus) { '' } else { [string]$DriverStatus.Status }
+    $driverLiveReady = $driverStatusName -in @('Ready', 'Mock', 'Disabled')
+    if (-not $driverLiveReady) {
+        [void]$blocking.Add("R0DriverConfiguration:$driverStatusName")
+    }
+
+    $webUiReady = $ConfigExists -and $WebUiLaunchTargetReady -and (-not $RuntimeRootUnderRepository)
+    $planOnlyReady = $ConfigExists -and (-not $RuntimeRootUnderRepository)
+    $liveReady = $planOnlyReady -and
+        $payloadFilesPresent -and
+        $GuestPayloadFresh -and
+        $GuestSecretSet -and
+        $HyperVModuleAvailable -and
+        $VmExists -and
+        $CheckpointExists -and
+        $driverLiveReady
+    $overallStatus = if ($liveReady) {
+        'ReadyForLive'
+    }
+    elseif ($webUiReady -or $planOnlyReady) {
+        'ReadyForNonLive'
+    }
+    else {
+        'Blocked'
+    }
+
+    [pscustomobject][ordered]@{
+        Schema = 'ksword.run.readiness-verdict.v1'
+        GeneratedAtUtc = [DateTimeOffset]::UtcNow.ToString('O')
+        MachineReadable = $true
+        OverallStatus = $overallStatus
+        WebUiReady = $webUiReady
+        PlanOnlyReady = $planOnlyReady
+        LiveReady = $liveReady
+        DefaultPathMutatesVm = $false
+        WebUiMutatesVm = $false
+        StatusMutatesVm = $false
+        CheckEnvironmentMutatesVm = $false
+        AnalyzeWithoutLiveMutatesVm = $false
+        AnalyzeLiveMayMutateVm = $true
+        RequiresExplicitLiveForVmMutation = $true
+        OpenVmConsoleOnLiveStartDefault = $true
+        OpenVmConnectOnLiveStart = (-not [bool]$NoOpenVmConsole)
+        OpenVmConsoleFailureBlocksHeadless = (-not [bool]$NoOpenVmConsole)
+        VmConsoleRequiredUnlessNoOpenVmConsole = $true
+        BlockingReasons = @($blocking.ToArray() | Select-Object -Unique)
+        WarningReasons = @($warnings.ToArray() | Select-Object -Unique)
+        RecommendedActionCount = @($RecommendedActions).Count
+        RecommendedActions = @($RecommendedActions)
+    }
+}
+
+function Write-RunDiagnosticObject {
+    param([Parameter(Mandatory)][object]$InputObject)
+
+    if ($Json) {
+        $InputObject | ConvertTo-Json -Depth $JsonDepth
+        return
+    }
+
+    if ($PassThru) {
+        Write-Output $InputObject
+        return
+    }
+
+    $InputObject | Format-List
 }
 
 function Get-SecretName {
@@ -1273,7 +1443,57 @@ function Show-RunStatus {
         [void]$recommendedActions.Add("下一步：运行 .\install.ps1 -Mode Change -UpdateHyperVConfig -VmName '$vmName' -CheckpointName <checkpoint> 记录快照，或先创建 checkpoint '$checkpointName'。")
     }
 
+    $runtimeRootExists = Test-Path -LiteralPath $EffectiveRuntimeRoot -PathType Container
+    $guestPayloadRootExists = Test-Path -LiteralPath $payloadRoot -PathType Container
+    $guestAgentPayloadExists = Test-Path -LiteralPath $agentPayload -PathType Leaf
+    $r0CollectorPayloadExists = Test-Path -LiteralPath $collectorPayload -PathType Leaf
+    $guestPayloadManifestExists = Test-Path -LiteralPath $payloadManifest -PathType Leaf
+    $guestPayloadFresh = if ($null -eq $payloadFreshness) { $false } else { [bool]$payloadFreshness.Fresh }
+    $guestSecretSet = (-not [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($secretName, 'Process'))) -or
+        (-not [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($secretName, 'User'))) -or
+        (-not [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($secretName, 'Machine')))
+    $recommendedActionArray = @($recommendedActions.ToArray() | Select-Object -Unique)
+    $modeResolution = Get-RunModeResolution
+    $vmMutationPolicy = Get-RunVmMutationPolicy
+    $readinessVerdict = New-RunReadinessVerdict `
+        -ConfigExists $configExists `
+        -RuntimeRootExists $runtimeRootExists `
+        -RuntimeRootUnderRepository $runtimeRootUnderRepository `
+        -WebUiLaunchTargetReady ($webLaunchTarget.Kind -ne 'Missing') `
+        -GuestPayloadRootExists $guestPayloadRootExists `
+        -GuestAgentPayloadExists $guestAgentPayloadExists `
+        -R0CollectorPayloadExists $r0CollectorPayloadExists `
+        -GuestPayloadManifestExists $guestPayloadManifestExists `
+        -GuestPayloadFresh $guestPayloadFresh `
+        -GuestSecretSet $guestSecretSet `
+        -HyperVModuleAvailable $hyperVModuleAvailable `
+        -VmExists $vmExists `
+        -CheckpointExists $checkpointExists `
+        -DriverStatus $driverStatus `
+        -RecommendedActions $recommendedActionArray
+
     [pscustomobject][ordered]@{
+        Kind = 'KSwordSandbox.RunStatus'
+        ContractVersion = 2
+        MachineReadable = $true
+        ReadinessVerdictSchema = 'ksword.run.readiness-verdict.v1'
+        ReadinessVerdict = $readinessVerdict
+        ReadinessOverallStatus = $readinessVerdict.OverallStatus
+        WebUiReady = $readinessVerdict.WebUiReady
+        PlanOnlyReady = $readinessVerdict.PlanOnlyReady
+        LiveReady = $readinessVerdict.LiveReady
+        VmMutationPolicySchema = 'ksword.run.vm-mutation-policy.v1'
+        VmMutationPolicy = $vmMutationPolicy
+        ModeCoercionMetadataSchema = 'ksword.run.mode-coercion.v1'
+        ModeCoercionMetadata = $modeResolution
+        RequestedMode = $modeResolution.RequestedMode
+        EffectiveMode = $modeResolution.EffectiveMode
+        ModeCoerced = $modeResolution.ModeCoerced
+        ModeCoercionReason = $modeResolution.ModeCoercionReason
+        OpenVmConsoleOnLiveStartDefault = $true
+        OpenVmConnectOnLiveStart = (-not [bool]$NoOpenVmConsole)
+        OpenVmConsoleFailureBlocksHeadless = (-not [bool]$NoOpenVmConsole)
+        VmConsoleRequiredUnlessNoOpenVmConsole = $true
         RepositoryRoot = $script:RepositoryRoot
         InstallStatePath = $script:InstallStatePath
         InstallStateExists = Test-Path -LiteralPath $script:InstallStatePath -PathType Leaf
@@ -1296,18 +1516,18 @@ function Show-RunStatus {
         PublishedWebExeExists = $webLaunchTarget.PublishedExeExists
         PublishedWebDllExists = $webLaunchTarget.PublishedDllExists
         RuntimeRoot = $EffectiveRuntimeRoot
-        RuntimeRootExists = Test-Path -LiteralPath $EffectiveRuntimeRoot -PathType Container
+        RuntimeRootExists = $runtimeRootExists
         RuntimeRootUnderRepository = $runtimeRootUnderRepository
         RuntimeRootGuidance = '运行目录建议放在仓库外，例如 D:\Temp\KSwordSandbox；jobs/uploads/reports/PCAP/dump 不应进入 git。'
         GuestPayloadRoot = $payloadRoot
-        GuestPayloadRootExists = Test-Path -LiteralPath $payloadRoot -PathType Container
+        GuestPayloadRootExists = $guestPayloadRootExists
         GuestPayloadManifest = $payloadManifest
-        GuestPayloadManifestExists = Test-Path -LiteralPath $payloadManifest -PathType Leaf
+        GuestPayloadManifestExists = $guestPayloadManifestExists
         GuestAgentPayload = $agentPayload
-        GuestAgentPayloadExists = Test-Path -LiteralPath $agentPayload -PathType Leaf
+        GuestAgentPayloadExists = $guestAgentPayloadExists
         R0CollectorPayload = $collectorPayload
-        R0CollectorPayloadExists = Test-Path -LiteralPath $collectorPayload -PathType Leaf
-        GuestPayloadFresh = if ($null -eq $payloadFreshness) { $false } else { [bool]$payloadFreshness.Fresh }
+        R0CollectorPayloadExists = $r0CollectorPayloadExists
+        GuestPayloadFresh = $guestPayloadFresh
         GuestPayloadFreshnessReasons = if ($null -eq $payloadFreshness) { @('payload freshness 未检查：缺少 Agent/R0Collector/payload-manifest.json 中至少一个文件。') } else { @($payloadFreshness.Reasons) }
         R0DriverConfigurationStatus = $driverStatus.Status
         R0DriverConfigurationWarning = $driverStatus.Warning
@@ -1319,6 +1539,8 @@ function Show-RunStatus {
         SecretName = $secretName
         ProcessSecretSet = -not [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($secretName, 'Process'))
         UserSecretSet = -not [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($secretName, 'User'))
+        MachineSecretSet = -not [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($secretName, 'Machine'))
+        GuestSecretSet = $guestSecretSet
         VirusTotalSecretName = $virusTotalSecretName
         VirusTotalProcessSecretSet = -not [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($virusTotalSecretName, 'Process'))
         VirusTotalUserSecretSet = -not [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($virusTotalSecretName, 'User'))
@@ -1349,7 +1571,7 @@ function Show-RunStatus {
         VmGuidance = ".\install.ps1 -Mode Change -UpdateHyperVConfig -VmName <existing VM> -CheckpointName <checkpoint>"
         CheckpointGuidance = ".\install.ps1 -Mode Change -UpdateHyperVConfig -VmName '$vmName' -CheckpointName <checkpoint>"
         ReadinessGuidance = '.\scripts\Test-HyperVReadiness.ps1'
-        RecommendedActions = @($recommendedActions.ToArray() | Select-Object -Unique)
+        RecommendedActions = $recommendedActionArray
         SecretValuePrinted = $false
     }
 }
@@ -1368,6 +1590,22 @@ function Show-RunEnvironmentCheck {
     $webLaunchTarget = Get-WebUiLaunchTarget -ThrowIfMissing $false
 
     [pscustomobject][ordered]@{
+        Kind = 'KSwordSandbox.RunEnvironmentCheck'
+        ContractVersion = 2
+        MachineReadable = $true
+        ReadinessVerdictSchema = $runStatus.ReadinessVerdictSchema
+        ReadinessVerdict = $runStatus.ReadinessVerdict
+        ReadinessOverallStatus = $runStatus.ReadinessOverallStatus
+        WebUiReady = $runStatus.WebUiReady
+        PlanOnlyReady = $runStatus.PlanOnlyReady
+        LiveReady = $runStatus.LiveReady
+        VmMutationPolicySchema = $runStatus.VmMutationPolicySchema
+        VmMutationPolicy = $runStatus.VmMutationPolicy
+        ModeCoercionMetadataSchema = $runStatus.ModeCoercionMetadataSchema
+        ModeCoercionMetadata = $runStatus.ModeCoercionMetadata
+        RequestedMode = $runStatus.RequestedMode
+        EffectiveMode = $runStatus.EffectiveMode
+        ModeCoerced = $runStatus.ModeCoerced
         DailyStartupCommand = '.\run.ps1'
         StartWebUiCommand = '.\run.ps1 -Mode StartWebUI'
         CheckEnvironmentCommand = '.\run.ps1 -Mode CheckEnvironment'
@@ -1378,18 +1616,30 @@ function Show-RunEnvironmentCheck {
         CreateOrPreparePathCommand = '.\install.ps1 -InstallEntrypoint CreateOrPreparePath -PromptPassword'
         PlanCommand = '.\run.ps1 -Mode Plan -SamplePath <sample.exe>'
         LiveCommand = '.\run.ps1 -Mode Analyze -SamplePath <sample.exe> -Live'
+        LiveNoVmConsoleCommand = '.\run.ps1 -Mode Analyze -SamplePath <sample.exe> -Live -NoOpenVmConsole'
         AnalyzeNotepadPlanCommand = '.\run.ps1 -Mode Analyze -SamplePreset Notepad'
         AnalyzeNotepadLiveCommand = '.\run.ps1 -Mode Analyze -SamplePreset Notepad -Live'
         AnalyzeHarmlessSamplePlanCommand = '.\run.ps1 -Mode Analyze -SamplePreset HarmlessSample'
         AnalyzeHarmlessSampleLiveCommand = '.\run.ps1 -Mode Analyze -SamplePreset HarmlessSample -Live'
         ReadinessCommand = '.\scripts\Test-HyperVReadiness.ps1'
-        ChineseGuidance = '中文提示：默认 .\run.ps1 只启动 WebUI；Analyze/Plan 不加 -Live 时不会启动、还原或停止 VM；所有凭据只读取环境变量且不打印值。'
+        ChineseGuidance = '中文提示：默认 .\run.ps1 只启动 WebUI，不修改 VM；Analyze/Plan 不加 -Live 时不会启动、还原或停止 VM；Analyze -Live 才可能修改已配置 VM。所有凭据只读取环境变量且不打印值。'
         WhatIfSupported = $true
         DefaultStartsVm = $false
+        DefaultMutatesVm = $false
         WebUiStartsVm = $false
+        WebUiMutatesVm = $false
         LiveRequiresExplicitSwitch = $true
+        AnalyzeLiveMayMutateVm = $true
+        AnalyzeLiveMutationOperations = @('RestoreCheckpoint', 'StartVm', 'CopyPayloadAndSampleIntoGuest', 'RunGuestAgent', 'StopVm', 'OptionalRestoreCheckpointAfterRun')
         CheckEnvironmentStartsVm = $false
+        CheckEnvironmentMutatesVm = $false
         PlanOnlyStartsVm = $false
+        PlanOnlyMutatesVm = $false
+        OpenVmConsoleOnLiveStartDefault = $true
+        OpenVmConnectOnLiveStart = (-not [bool]$NoOpenVmConsole)
+        OpenVmConsoleIsBestEffort = $false
+        OpenVmConsoleFailureBlocksHeadless = (-not [bool]$NoOpenVmConsole)
+        VmConsoleRequiredUnlessNoOpenVmConsole = $true
         DotNetAvailable = $null -ne (Get-Command dotnet -ErrorAction SilentlyContinue)
         WebProjectExists = Test-Path -LiteralPath $webProject -PathType Leaf
         WebUiLaunchKind = $webLaunchTarget.Kind
@@ -1621,6 +1871,9 @@ function Invoke-OneShotAnalysis {
     if ($NoR0Collector) {
         $arguments += '-NoR0Collector'
     }
+    if ($NoOpenVmConsole) {
+        $arguments += '-NoOpenVmConsole'
+    }
 
     $hyperVOutput = @(& powershell @arguments 2>&1)
     $hyperVExitCode = $LASTEXITCODE
@@ -1712,15 +1965,27 @@ $effectiveConfigPath = Get-EffectiveConfigPath -State $state -EffectiveRuntimeRo
 Import-InstalledEnvironment -State $state -EffectiveConfigPath $effectiveConfigPath
 
 if ($Mode -in @('WebUI', 'StartWebUI') -and -not [string]::IsNullOrWhiteSpace($SamplePath)) {
+    $script:RunModeCoerced = $true
+    $script:RunModeCoercionReason = 'SamplePath supplied with WebUI/StartWebUI; routing to Analyze so the sample is handled by the one-shot analysis path.'
+    $script:RunModeCoercionTriggerParameter = 'SamplePath'
+    $script:RunModeCoercionOriginalMode = $Mode
+    if (-not $Json) {
+        Write-RunInfo "ModeCoercion：检测到 -SamplePath，已从 $Mode 切换到 Analyze；默认仍不修改 VM，除非显式加 -Live。 / Mode coerced to Analyze."
+    }
     $Mode = 'Analyze'
+}
+$script:EffectiveRunMode = $Mode
+
+if (($Json -or $PassThru) -and $Mode -notin @('Status', 'CheckEnvironment')) {
+    throw '错误：-Json/-PassThru 只支持 run.ps1 的 Status/CheckEnvironment 诊断输出，避免启动 WebUI、执行样本或委托 Live 时混入非 JSON 输出。下一步：改用 .\run.ps1 -Mode CheckEnvironment -Json。'
 }
 
 switch ($Mode) {
     'Status' {
-        Show-RunStatus -State $state -EffectiveRuntimeRoot $effectiveRuntimeRoot -EffectiveConfigPath $effectiveConfigPath | Format-List
+        Write-RunDiagnosticObject -InputObject (Show-RunStatus -State $state -EffectiveRuntimeRoot $effectiveRuntimeRoot -EffectiveConfigPath $effectiveConfigPath)
     }
     'CheckEnvironment' {
-        Show-RunEnvironmentCheck -State $state -EffectiveRuntimeRoot $effectiveRuntimeRoot -EffectiveConfigPath $effectiveConfigPath | Format-List
+        Write-RunDiagnosticObject -InputObject (Show-RunEnvironmentCheck -State $state -EffectiveRuntimeRoot $effectiveRuntimeRoot -EffectiveConfigPath $effectiveConfigPath)
     }
     'WebUI' {
         Assert-RunLocalConfigReadyForInteractiveStartup -EffectiveConfigPath $effectiveConfigPath -ModeName 'WebUI'

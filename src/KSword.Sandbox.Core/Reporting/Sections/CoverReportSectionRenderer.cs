@@ -12,12 +12,12 @@ public sealed class CoverReportSectionRenderer : IReportSectionRenderer
 {
     public string SectionId => "cover";
 
-    public string Title => "Cover";
+    public string Title => "封面 / Cover";
 
     /// <inheritdoc />
     public string Render(AnalysisReport report)
     {
-        return $"<section id=\"cover\"><h1>KSword Sandbox Report</h1><p>{E(report.Sample.FileName)}</p><p>{E(report.Sample.Sha256)}</p><p>{E(report.Status.ToString())}</p></section>";
+        return $"<section id=\"cover\"><h1>KSword 沙箱分析报告 / KSword Sandbox Report</h1><p>{E(report.Sample.FileName)}</p><p>{E(report.Sample.Sha256)}</p><p>{E(report.Status.ToString())}</p></section>";
     }
 
     /// <summary>

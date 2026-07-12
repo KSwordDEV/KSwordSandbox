@@ -52,9 +52,10 @@ internal static class PostProcessProgram
                 .ToList();
             allEvents = SampleCorrelationClassifier.Apply(allEvents, sample.FullPath);
             var rulesPath = Path.Combine(repoRoot, config.Paths.RulesDirectory, "behavior-rules.json");
-            var findings = ReportEventSampler.SanitizeFindings(new RuleEngine(RuleEngine.LoadRuleSet(rulesPath)).Classify(allEvents));
+            var rawFindings = new RuleEngine(RuleEngine.LoadRuleSet(rulesPath)).Classify(allEvents);
+            var findings = ReportEventSampler.SanitizeFindings(rawFindings);
             var driverEventsPath = Path.Combine(Path.GetDirectoryName(eventsPath) ?? string.Empty, "driver-events.jsonl");
-            var sampling = ReportEventSampler.SampleForReport(allEvents, jobRoot: jobRoot, eventsPath: eventsPath, driverEventsPath: driverEventsPath);
+            var sampling = ReportEventSampler.SampleForReport(allEvents, jobRoot: jobRoot, eventsPath: eventsPath, driverEventsPath: driverEventsPath, findings: rawFindings);
             var reportEvents = sampling.Events;
             var omittedReportEvents = sampling.OmittedEventCount;
 

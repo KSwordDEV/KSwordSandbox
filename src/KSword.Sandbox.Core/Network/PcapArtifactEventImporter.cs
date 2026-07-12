@@ -21,6 +21,13 @@ public sealed class PcapArtifactEventImporter
     private const int MaxPayloadBytes = 8192;
     private const int MaxFlowEvents = 256;
     private const int MaxProtocolEvents = 256;
+    private const uint LinkTypeNullLoopback = 0;
+    private const uint LinkTypeEthernet = 1;
+    private const uint LinkTypeRawIp = 101;
+    private const uint LinkTypeLinuxSll = 113;
+    private const uint LinkTypeIpv4 = 228;
+    private const uint LinkTypeIpv6 = 229;
+    private const uint LinkTypeLinuxSll2 = 276;
 
     /// <summary>
     /// Parses one packet-capture artifact into normalized events.
@@ -798,7 +805,22 @@ public sealed class PcapArtifactEventImporter
 
     private static DecodedPacket? TryDecodePacket(PcapPacket packet)
     {
-        if (packet.LinkType != 1 || packet.Data.Length < 14)
+        return packet.LinkType switch
+        {
+            LinkTypeEthernet => TryDecodeEthernetPacket(packet),
+            LinkTypeRawIp => TryDecodeRawIpPacket(packet.Index, packet.Timestamp, packet.Data),
+            LinkTypeIpv4 => TryDecodeIpv4Packet(packet.Index, packet.Timestamp, packet.Data),
+            LinkTypeIpv6 => TryDecodeIpv6Packet(packet.Index, packet.Timestamp, packet.Data),
+            LinkTypeNullLoopback => TryDecodeNullLoopbackPacket(packet),
+            LinkTypeLinuxSll => TryDecodeLinuxSllPacket(packet, sll2: false),
+            LinkTypeLinuxSll2 => TryDecodeLinuxSllPacket(packet, sll2: true),
+            _ => null
+        };
+    }
+
+    private static DecodedPacket? TryDecodeEthernetPacket(PcapPacket packet)
+    {
+        if (packet.Data.Length < 14)
         {
             return null;
         }
@@ -823,6 +845,50 @@ public sealed class PcapArtifactEventImporter
         }
 
         return null;
+    }
+
+    private static DecodedPacket? TryDecodeRawIpPacket(int packetIndex, DateTimeOffset timestamp, ReadOnlySpan<byte> payload)
+    {
+        if (payload.Length == 0)
+        {
+            return null;
+        }
+
+        return (payload[0] >> 4) switch
+        {
+            4 => TryDecodeIpv4Packet(packetIndex, timestamp, payload),
+            6 => TryDecodeIpv6Packet(packetIndex, timestamp, payload),
+            _ => null
+        };
+    }
+
+    private static DecodedPacket? TryDecodeNullLoopbackPacket(PcapPacket packet)
+    {
+        if (packet.Data.Length <= 4)
+        {
+            return null;
+        }
+
+        return TryDecodeRawIpPacket(packet.Index, packet.Timestamp, packet.Data.AsSpan(4));
+    }
+
+    private static DecodedPacket? TryDecodeLinuxSllPacket(PcapPacket packet, bool sll2)
+    {
+        var headerLength = sll2 ? 20 : 16;
+        if (packet.Data.Length <= headerLength)
+        {
+            return null;
+        }
+
+        var frame = packet.Data.AsSpan();
+        var protocol = BinaryPrimitives.ReadUInt16BigEndian(sll2 ? frame.Slice(0, 2) : frame.Slice(14, 2));
+        var payload = frame[headerLength..];
+        return protocol switch
+        {
+            0x0800 => TryDecodeIpv4Packet(packet.Index, packet.Timestamp, payload),
+            0x86DD => TryDecodeIpv6Packet(packet.Index, packet.Timestamp, payload),
+            _ => TryDecodeRawIpPacket(packet.Index, packet.Timestamp, payload)
+        };
     }
 
     private static DecodedPacket? TryDecodeIpv4Packet(int packetIndex, DateTimeOffset timestamp, ReadOnlySpan<byte> ip)

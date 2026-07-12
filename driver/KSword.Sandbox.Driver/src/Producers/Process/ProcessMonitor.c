@@ -90,6 +90,12 @@ KswProcessHandlePreOperationCallback(
     _In_ PVOID RegistrationContext,
     _Inout_ POB_PRE_OPERATION_INFORMATION OperationInformation
     );
+
+static VOID
+KswProcessHandlePostOperationCallback(
+    _In_ PVOID RegistrationContext,
+    _In_ POB_POST_OPERATION_INFORMATION OperationInformation
+    );
 #endif
 
 /*
@@ -534,7 +540,7 @@ KswQueueProcessEvent(
 /*
  * Queues one guarded process/thread handle-access event.
  * Inputs : Payload is a fixed draft handle-access record produced by
- *          ObRegisterCallbacks pre-operation notification.
+ *          ObRegisterCallbacks pre/post-operation notification.
  * Logic  : shares the process producer enable bit and READ_EVENTS ring; no
  *          allocation, blocking, or access-mask mutation occurs in the callback
  *          hot path.
@@ -573,7 +579,7 @@ KswQueueProcessHandleAccessEvent(
 }
 /*
  * Adds target identity fields for a process or thread object.
- * Inputs : OperationInformation is supplied by ObRegisterCallbacks; Payload is
+ * Inputs : Object/ObjectType are supplied by ObRegisterCallbacks; Payload is
  *          the fixed draft record being built on the callback stack.
  * Logic  : supports PsProcessType and PsThreadType only.  Thread handle events
  *          include both the owning process id and target thread id so consumers
@@ -583,22 +589,22 @@ KswQueueProcessHandleAccessEvent(
 static
 BOOLEAN
 KswPopulateHandleAccessObjectIdentity(
-    _In_ POB_PRE_OPERATION_INFORMATION OperationInformation,
+    _In_opt_ PVOID Object,
+    _In_opt_ POBJECT_TYPE ObjectType,
     _Inout_ PKSWORD_SANDBOX_PROCESS_HANDLE_ACCESS_EVENT_PAYLOAD_V1_DRAFT Payload
     )
 {
-    if (OperationInformation == NULL ||
-        Payload == NULL ||
-        OperationInformation->Object == NULL ||
-        OperationInformation->ObjectType == NULL) {
+    if (Payload == NULL ||
+        Object == NULL ||
+        ObjectType == NULL) {
         return FALSE;
     }
 
-    if (OperationInformation->ObjectType == *PsProcessType) {
+    if (ObjectType == *PsProcessType) {
         Payload->ObjectType = KswSandboxProcessAccessObjectTypeProcess;
         Payload->TargetProcessId =
             (ULONGLONG)(ULONG_PTR)PsGetProcessId(
-                (PEPROCESS)OperationInformation->Object);
+                (PEPROCESS)Object);
         Payload->Flags |=
             KSWORD_SANDBOX_PROCESS_ACCESS_EVENT_FLAG_PROCESS_OBJECT;
         if (Payload->TargetProcessId != 0) {
@@ -608,14 +614,14 @@ KswPopulateHandleAccessObjectIdentity(
         return TRUE;
     }
 
-    if (OperationInformation->ObjectType == *PsThreadType) {
+    if (ObjectType == *PsThreadType) {
         Payload->ObjectType = KswSandboxProcessAccessObjectTypeThread;
         Payload->TargetProcessId =
             (ULONGLONG)(ULONG_PTR)PsGetThreadProcessId(
-                (PETHREAD)OperationInformation->Object);
+                (PETHREAD)Object);
         Payload->TargetThreadId =
             (ULONGLONG)(ULONG_PTR)PsGetThreadId(
-                (PETHREAD)OperationInformation->Object);
+                (PETHREAD)Object);
         Payload->Flags |=
             KSWORD_SANDBOX_PROCESS_ACCESS_EVENT_FLAG_THREAD_OBJECT;
         if (Payload->TargetProcessId != 0) {
@@ -633,7 +639,8 @@ KswPopulateHandleAccessObjectIdentity(
 }
 
 /*
- * Emits non-mutating handle create/duplicate telemetry from Ob callbacks.
+ * Emits non-mutating pre-operation handle create/duplicate telemetry from Ob
+ * callbacks.
  * Inputs : OperationInformation describes the process/thread object handle
  *          operation before the kernel grants access.
  * Logic  : captures actor pid, target pid/tid, source/target duplicate pids,
@@ -684,7 +691,8 @@ KswProcessHandlePreOperationCallback(
     }
 
     if (!KswPopulateHandleAccessObjectIdentity(
-            OperationInformation,
+            OperationInformation->Object,
+            OperationInformation->ObjectType,
             &payload)) {
         return OB_PREOP_SUCCESS;
     }
@@ -746,12 +754,104 @@ KswProcessHandlePreOperationCallback(
 }
 
 /*
+ * Emits non-mutating post-operation granted-access telemetry from Ob callbacks.
+ * Inputs : OperationInformation describes the process/thread object handle
+ *          operation after object-manager processing has completed.
+ * Logic  : captures actor pid, target pid/tid, final NTSTATUS, and granted
+ *          access without allocating callback context or mutating the request.
+ *          Duplicate source/target process handles are available only in the
+ *          pre-operation payload; consumers correlate pre/post rows by sequence
+ *          proximity and actor/target/callbackOperation when needed.
+ * Return : no value; post-operation callbacks cannot change handle processing.
+ */
+static
+VOID
+KswProcessHandlePostOperationCallback(
+    _In_ PVOID RegistrationContext,
+    _In_ POB_POST_OPERATION_INFORMATION OperationInformation
+    )
+{
+    KSWORD_SANDBOX_PROCESS_HANDLE_ACCESS_EVENT_PAYLOAD_V1_DRAFT payload;
+    POB_POST_CREATE_HANDLE_INFORMATION createInfo;
+    POB_POST_DUPLICATE_HANDLE_INFORMATION duplicateInfo;
+
+    UNREFERENCED_PARAMETER(RegistrationContext);
+
+    if (OperationInformation == NULL ||
+        OperationInformation->Parameters == NULL ||
+        InterlockedCompareExchange(
+            &g_KswProcessMonitorRuntime.ObjectCallbackRegistered,
+            0,
+            0) == 0) {
+        return;
+    }
+
+    RtlZeroMemory(&payload, sizeof(payload));
+    payload.Version = KswProcessHandleAccessPayloadVersion();
+    payload.Size = sizeof(payload);
+    payload.ActorProcessId = (ULONGLONG)(ULONG_PTR)PsGetCurrentProcessId();
+    payload.CallbackOperation = (ULONG)OperationInformation->Operation;
+    payload.PreviousMode = (ULONG)ExGetPreviousMode();
+    payload.Status = OperationInformation->ReturnStatus;
+    payload.Flags =
+        KSWORD_SANDBOX_PROCESS_ACCESS_EVENT_FLAG_POST_OPERATION;
+
+    if (OperationInformation->KernelHandle != 0) {
+        payload.Flags |=
+            KSWORD_SANDBOX_PROCESS_ACCESS_EVENT_FLAG_KERNEL_HANDLE;
+    }
+    if (payload.PreviousMode == UserMode) {
+        payload.Flags |=
+            KSWORD_SANDBOX_PROCESS_ACCESS_EVENT_FLAG_USER_MODE_REQUEST;
+    }
+    if (!NT_SUCCESS(payload.Status)) {
+        payload.Flags |=
+            KSWORD_SANDBOX_PROCESS_ACCESS_EVENT_FLAG_OPERATION_FAILED;
+    }
+
+    if (!KswPopulateHandleAccessObjectIdentity(
+            OperationInformation->Object,
+            OperationInformation->ObjectType,
+            &payload)) {
+        return;
+    }
+
+    switch (OperationInformation->Operation) {
+    case OB_OPERATION_HANDLE_CREATE:
+        createInfo = &OperationInformation->Parameters->CreateHandleInformation;
+        payload.Operation = KswSandboxProcessOperationHandleCreateDraft;
+        payload.GrantedAccess = createInfo->GrantedAccess;
+        if (NT_SUCCESS(payload.Status)) {
+            payload.Flags |=
+                KSWORD_SANDBOX_PROCESS_ACCESS_EVENT_FLAG_GRANTED_ACCESS_PRESENT;
+        }
+        break;
+
+    case OB_OPERATION_HANDLE_DUPLICATE:
+        duplicateInfo =
+            &OperationInformation->Parameters->DuplicateHandleInformation;
+        payload.Operation = KswSandboxProcessOperationHandleDuplicateDraft;
+        payload.GrantedAccess = duplicateInfo->GrantedAccess;
+        if (NT_SUCCESS(payload.Status)) {
+            payload.Flags |=
+                KSWORD_SANDBOX_PROCESS_ACCESS_EVENT_FLAG_GRANTED_ACCESS_PRESENT;
+        }
+        break;
+
+    default:
+        return;
+    }
+
+    KswQueueProcessHandleAccessEvent(&payload);
+}
+
+/*
  * Registers process/thread object-manager handle telemetry callbacks.
  * Inputs : DeviceExtension owns the shared event ring.
- * Logic  : registers one non-mutating pre-operation callback for PsProcessType
- *          and PsThreadType handle create/duplicate operations.  Registration
- *          failure is non-fatal to process create/exit telemetry and is exposed
- *          through LastNtStatus.
+ * Logic  : registers non-mutating pre/post-operation callbacks for
+ *          PsProcessType and PsThreadType handle create/duplicate operations.
+ *          Registration failure is non-fatal to process create/exit telemetry
+ *          and is exposed through LastNtStatus.
  * Return : STATUS_SUCCESS when Ob callbacks registered; otherwise the object
  *          manager registration failure.
  */
@@ -789,14 +889,16 @@ KswInitializeProcessHandleAccessCallbacks(
         OB_OPERATION_HANDLE_CREATE | OB_OPERATION_HANDLE_DUPLICATE;
     operationRegistrations[0].PreOperation =
         KswProcessHandlePreOperationCallback;
-    operationRegistrations[0].PostOperation = NULL;
+    operationRegistrations[0].PostOperation =
+        KswProcessHandlePostOperationCallback;
 
     operationRegistrations[1].ObjectType = PsThreadType;
     operationRegistrations[1].Operations =
         OB_OPERATION_HANDLE_CREATE | OB_OPERATION_HANDLE_DUPLICATE;
     operationRegistrations[1].PreOperation =
         KswProcessHandlePreOperationCallback;
-    operationRegistrations[1].PostOperation = NULL;
+    operationRegistrations[1].PostOperation =
+        KswProcessHandlePostOperationCallback;
 
     callbackRegistration.Version = ObGetFilterVersion();
     callbackRegistration.OperationRegistrationCount =

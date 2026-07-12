@@ -540,6 +540,48 @@ KswCapturePostRenameKey(
 }
 
 /*
+ * Captures a completed set-key-security registry operation.
+ * Inputs : PostInfo is the post-operation record for RegNtPostSetKeySecurity.
+ * Logic  : resolves the key object path, records final status, and preserves
+ *          the SECURITY_INFORMATION mask when present.  The v1 payload remains
+ *          metadata-only and never copies the security descriptor bytes.
+ * Return : no return value.
+ */
+static
+VOID
+KswCapturePostSetKeySecurity(
+    _In_opt_ PREG_POST_OPERATION_INFORMATION PostInfo
+    )
+{
+    PREG_SET_KEY_SECURITY_INFORMATION preInfo;
+    KSWORD_SANDBOX_REGISTRY_EVENT_PAYLOAD payload;
+    PVOID keyObject;
+
+    if (PostInfo == NULL || PostInfo->PreInformation == NULL) {
+        return;
+    }
+
+    preInfo = (PREG_SET_KEY_SECURITY_INFORMATION)PostInfo->PreInformation;
+    keyObject = preInfo->Object != NULL ? preInfo->Object : PostInfo->Object;
+
+    KswInitializeRegistryPayload(
+        &payload,
+        KswSandboxRegistryOperationSetKeySecurity,
+        PostInfo->Status);
+    KswCopyRegistryKeyObjectPath(keyObject, &payload);
+    if (preInfo->SecurityInformation != NULL) {
+        payload.ValueDataType = (ULONG)(*preInfo->SecurityInformation);
+        payload.Flags |=
+            KSWORD_SANDBOX_REGISTRY_EVENT_FLAG_SECURITY_INFORMATION_PRESENT;
+    }
+    if (preInfo->SecurityDescriptor != NULL) {
+        payload.Flags |=
+            KSWORD_SANDBOX_REGISTRY_EVENT_FLAG_SECURITY_DESCRIPTOR_PRESENT;
+    }
+    KswQueueRegistryEvent(&payload);
+}
+
+/*
  * Configuration Manager registry callback.
  * Inputs : CallbackContext is unused because module-local state owns the device
  *          extension; Argument1 is REG_NOTIFY_CLASS and Argument2 is the typed
@@ -605,6 +647,11 @@ KswRegistryCallback(
 
     case RegNtPostRenameKey:
         KswCapturePostRenameKey((PREG_POST_OPERATION_INFORMATION)Argument2);
+        break;
+
+    case RegNtPostSetKeySecurity:
+        KswCapturePostSetKeySecurity(
+            (PREG_POST_OPERATION_INFORMATION)Argument2);
         break;
 
     default:

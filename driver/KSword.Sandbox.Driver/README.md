@@ -83,12 +83,15 @@ records. Each public payload starts with `Version` and `Size`, is bounded by
 JSONL with `eventSchemaName`, `eventSchemaVersion`, `payloadSchema`, and
 per-record `sequence` evidence.
 
-The driver also registers a minimal minifilter for `CREATE`, `WRITE`, and
-delete-style `SET_INFORMATION` operations. File callbacks emit
+The driver also registers a minimal minifilter for `CREATE`, `READ`, `WRITE`,
+`SET_INFORMATION`, metadata-only `SET_SECURITY`, `CLEANUP`, and `CLOSE`
+operations. File callbacks emit
 `KswSandboxEventTypeFile` records into the same `READ_EVENTS` stream. Each file
 payload is bounded to `KSWORD_SANDBOX_EVENT_MAX_PAYLOAD_SIZE` and carries the
 operation, requestor PID, final NTSTATUS, IRP major/minor function, path flags,
-and a truncated UTF-16 path prefix copied from `FILE_OBJECT.FileName`.
+and a truncated UTF-16 path prefix copied from FltMgr name resolution or
+`FILE_OBJECT.FileName` fallback. `SET_SECURITY` rows prove only path/status
+metadata; ACL/security descriptor bytes remain ETW/guest evidence.
 
 The network producer registers inspect-only WFP/ALE connect and recv-accept
 callouts for IPv4 and IPv6. It does not block, absorb, redirect, or modify
@@ -104,19 +107,23 @@ capability/mask is advertised and active:
 
 - `processCreateExit`: process create/exit callbacks.
 - `processHandleAccessDraft`: process/thread handle create/duplicate
-  pre-operation callbacks when the process producer is compiled,
+  pre/post-operation callbacks when the process producer is compiled,
   `KSWORD_SANDBOX_ENABLE_PROCESS_HANDLE_ACCESS=1`, and `ObRegisterCallbacks`
   registration succeeds.
 - `imageLoad`: image-load callbacks.
-- `fileActivity`: minifilter create/write/delete-style operations.
-- `registryActivity`: registry callback operations.
+- `fileActivity`: minifilter create/read/write/set-information/set-security
+  metadata.
+- `registryActivity`: registry callback operations, including metadata-only
+  `RegNtPostSetKeySecurity`.
 - `networkActivity`: WFP/ALE endpoint metadata only.
 
 The guarded handle-access producer is non-mutating: it never reduces
 `DesiredAccess`, blocks a handle, allocates in the callback path, or waits for
 the collector. It emits `KswSandboxEventTypeProcess` records with
 `KSWORD_SANDBOX_PROCESS_HANDLE_ACCESS_EVENT_VERSION` and the draft
-`KSWORD_SANDBOX_PROCESS_HANDLE_ACCESS_EVENT_PAYLOAD_V1_DRAFT` layout.
+`KSWORD_SANDBOX_PROCESS_HANDLE_ACCESS_EVENT_PAYLOAD_V1_DRAFT` layout. Pre rows
+carry requested access; successful post rows carry `GrantedAccess` and final
+`Status`.
 Handle-access records use their own producer bit,
 `KSWORD_SANDBOX_PRODUCER_FLAG_PROCESS_HANDLE_ACCESS`, while process lifecycle
 records keep `KSWORD_SANDBOX_PRODUCER_FLAG_PROCESS`. The live

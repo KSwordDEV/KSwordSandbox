@@ -105,7 +105,7 @@ public sealed partial class SandboxJobService
             throw new KeyNotFoundException($"Job {jobId:D} was not found in the in-memory job list.");
         }
 
-        var jobConfig = BuildJobConfig(job.Submission, job.Submission.DurationSeconds);
+        var jobConfig = BuildJobConfig(job.Submission, ResolveDuration(job.Submission));
         return artifactIndexBuilder.Build(jobId, GetJobRoot(jobId), jobConfig.ArtifactCollection);
     }
 
@@ -152,7 +152,7 @@ public sealed partial class SandboxJobService
     /// </summary>
     public AnalysisJob Plan(SandboxSubmission submission)
     {
-        var duration = ClampDuration(submission.DurationSeconds);
+        var duration = ResolveDuration(submission);
         var normalizedSubmission = NormalizeSubmission(submission, duration);
         var jobId = Guid.NewGuid();
         var jobRoot = GetJobRoot(jobId);
@@ -407,7 +407,7 @@ public sealed partial class SandboxJobService
             throw new ArgumentException("Guest events path is required.", nameof(eventsPath));
         }
 
-        var duration = ClampDuration(submission.DurationSeconds);
+        var duration = ResolveDuration(submission);
         var normalizedSubmission = NormalizeSubmission(submission, duration);
         var jobRoot = GetJobRoot(jobId);
         Directory.CreateDirectory(jobRoot);
@@ -635,7 +635,7 @@ public sealed partial class SandboxJobService
         Directory.CreateDirectory(jobRoot);
 
         var staticAnalysis = LoadExistingReport(job.JsonReportPath)?.StaticAnalysis ?? AnalyzeSample(sample);
-        var jobConfig = BuildJobConfig(job.Submission, job.Submission.DurationSeconds);
+        var jobConfig = BuildJobConfig(job.Submission, ResolveDuration(job.Submission));
         var events = CreatePlanningEvents(sample, job.Submission, runbook, staticAnalysis, jobConfig.ArtifactCollection);
         AppendRunbookExecutionEvent(events, job.RunbookExecutionResultPath);
         events.AddRange(LoadEnrichmentEvents(job.JobId));
@@ -645,11 +645,12 @@ public sealed partial class SandboxJobService
         events.AddRange(BuildHostArtifactImportEvents(jobConfig.ArtifactCollection, jobRoot, guestEventsPath, artifactIndex, events));
 
         var fullEvents = SampleCorrelationClassifier.Apply(events.OrderBy(evt => evt.Timestamp), sample.FullPath);
-        var findings = ReportEventSampler.SanitizeFindings(ruleEngine.Classify(fullEvents));
+        var rawFindings = ruleEngine.Classify(fullEvents);
+        var findings = ReportEventSampler.SanitizeFindings(rawFindings);
         var driverEventsPath = string.IsNullOrWhiteSpace(guestEventsPath)
             ? null
             : Path.Combine(Path.GetDirectoryName(guestEventsPath) ?? string.Empty, "driver-events.jsonl");
-        var sampling = ReportEventSampler.SampleForReport(fullEvents, jobRoot: jobRoot, eventsPath: guestEventsPath, driverEventsPath: driverEventsPath);
+        var sampling = ReportEventSampler.SampleForReport(fullEvents, jobRoot: jobRoot, eventsPath: guestEventsPath, driverEventsPath: driverEventsPath, findings: rawFindings);
         var report = new AnalysisReport
         {
             JobId = job.JobId,
@@ -785,24 +786,40 @@ public sealed partial class SandboxJobService
     }
 
     /// <summary>
-    /// Resolves the guest event artifact for a job.
-    /// Inputs are job ID and optional explicit path, processing accepts a file
-    /// or searches jobRoot\guest recursively, and the method returns the file
-    /// path or throws when no artifact exists.
+    /// Resolves the guest event artifact for a WebUI job.
+    /// Inputs are job ID and optional explicit path; processing only accepts
+    /// explicit files under this job's runtime root, or searches jobRoot\guest
+    /// recursively. This prevents the Web API from importing arbitrary host
+    /// files while preserving the separate ImportExternalRun tool path for
+    /// operator-controlled offline imports.
     /// </summary>
     private string ResolveGuestEventsPath(Guid jobId, string? eventsPath)
     {
+        var jobRoot = Path.GetFullPath(GetJobRoot(jobId));
         if (!string.IsNullOrWhiteSpace(eventsPath))
         {
-            if (!File.Exists(eventsPath))
+            var resolved = Path.GetFullPath(eventsPath);
+            if (!IsPathUnderRoot(resolved, jobRoot))
             {
-                throw new FileNotFoundException("Guest events file was not found.", eventsPath);
+                throw new InvalidDataException(
+                    $"Explicit guest events import path must stay under this job root. JobRoot={jobRoot}; EventsPath={resolved}");
             }
 
-            return Path.GetFullPath(eventsPath);
+            if (!IsGuestEventImportFileName(resolved))
+            {
+                throw new InvalidDataException(
+                    "Explicit guest events import path must be an events.json or .jsonl file under the job root.");
+            }
+
+            if (!File.Exists(resolved))
+            {
+                throw new FileNotFoundException("Guest events file was not found.", resolved);
+            }
+
+            return resolved;
         }
 
-        var guestRoot = Path.Combine(GetJobRoot(jobId), "guest");
+        var guestRoot = Path.Combine(jobRoot, "guest");
         if (!Directory.Exists(guestRoot))
         {
             throw new DirectoryNotFoundException($"Guest output folder was not found: {guestRoot}");
@@ -825,6 +842,21 @@ public sealed partial class SandboxJobService
         }
 
         throw new FileNotFoundException($"No events.json or .jsonl artifact was found under {guestRoot}.");
+    }
+
+    private static bool IsGuestEventImportFileName(string path)
+    {
+        var fileName = Path.GetFileName(path);
+        return string.Equals(fileName, "events.json", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(Path.GetExtension(path), ".jsonl", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsPathUnderRoot(string candidatePath, string rootPath)
+    {
+        var candidate = Path.GetFullPath(candidatePath);
+        var root = Path.GetFullPath(rootPath);
+        var normalizedRoot = root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        return candidate.StartsWith(normalizedRoot, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>
@@ -1349,7 +1381,18 @@ public sealed partial class SandboxJobService
     }
 
     /// <summary>
-    /// Clamps requested duration to configured safe bounds.
+    /// Resolves requested duration while preserving explicit unlimited intent.
+    /// Inputs are the raw submission; processing returns 0 only when the
+    /// operator selected no runtime limit, otherwise it applies configured safe
+    /// bounds; the method returns the effective persisted seconds value.
+    /// </summary>
+    private int ResolveDuration(SandboxSubmission submission)
+    {
+        return submission.DurationUnlimited ? 0 : ClampDuration(submission.DurationSeconds);
+    }
+
+    /// <summary>
+    /// Clamps requested bounded duration to configured safe bounds.
     /// The input is user-supplied seconds, processing applies defaults and max
     /// limits, and the method returns the effective duration in seconds.
     /// </summary>
@@ -1361,15 +1404,16 @@ public sealed partial class SandboxJobService
 
     /// <summary>
     /// Normalizes optional WebUI job settings while preserving per-job VM
-    /// overrides. Inputs are the raw submission and clamped duration; processing
-    /// trims string values and forces dry-run planning mode; the method returns
-    /// the persisted request snapshot.
+    /// overrides. Inputs are the raw submission and effective duration; processing
+    /// trims string values, keeps explicit no-limit semantics, and forces dry-run
+    /// planning mode; the method returns the persisted request snapshot.
     /// </summary>
     private static SandboxSubmission NormalizeSubmission(SandboxSubmission submission, int duration)
     {
         return submission with
         {
-            DurationSeconds = duration,
+            DurationSeconds = submission.DurationUnlimited ? 0 : duration,
+            DurationUnlimited = submission.DurationUnlimited,
             DryRun = true,
             GoldenVmName = CleanOptional(submission.GoldenVmName),
             GoldenSnapshotName = CleanOptional(submission.GoldenSnapshotName),
@@ -1414,7 +1458,7 @@ public sealed partial class SandboxJobService
                 CaptureMemoryDumps = submission.CaptureMemoryDumps ?? config.ArtifactCollection.CaptureMemoryDumps,
                 CapturePacketCapture = submission.CapturePacketCapture ?? config.ArtifactCollection.CapturePacketCapture
             },
-            Analysis = config.Analysis with { DefaultDurationSeconds = duration }
+            Analysis = config.Analysis with { DefaultDurationSeconds = duration, DurationUnlimited = submission.DurationUnlimited }
         };
     }
 
@@ -1449,6 +1493,9 @@ public sealed partial class SandboxJobService
                     ["md5"] = sample.Md5,
                     ["crc32"] = sample.Crc32,
                     ["sizeBytes"] = sample.SizeBytes.ToString(),
+                    ["durationSeconds"] = submission.DurationSeconds.ToString(),
+                    ["durationUnlimited"] = submission.DurationUnlimited.ToString(),
+                    ["runtimeLimitPolicy"] = submission.DurationUnlimited ? "unlimited-requested" : "bounded-seconds",
                     ["collectDroppedFiles"] = artifactCollection.CollectDroppedFiles.ToString(),
                     ["captureScreenshots"] = artifactCollection.CaptureScreenshots.ToString(),
                     ["captureMemoryDumps"] = artifactCollection.CaptureMemoryDumps.ToString(),

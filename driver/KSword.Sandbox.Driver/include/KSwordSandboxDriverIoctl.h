@@ -388,7 +388,8 @@ typedef enum _KSWORD_SANDBOX_FILE_OPERATION {
     KswSandboxFileOperationCleanup = 5,
     KswSandboxFileOperationClose = 6,
     KswSandboxFileOperationRead = 7,
-    KswSandboxFileOperationRename = 8
+    KswSandboxFileOperationRename = 8,
+    KswSandboxFileOperationSetSecurity = 9
 } KSWORD_SANDBOX_FILE_OPERATION;
 
 /*
@@ -411,6 +412,7 @@ typedef enum _KSWORD_SANDBOX_FILE_OPERATION {
 #define KSWORD_SANDBOX_FILE_EVENT_FLAG_OPERATION_FAILED 0x00000040U
 #define KSWORD_SANDBOX_FILE_EVENT_FLAG_DELETE_INTENT    0x00000080U
 #define KSWORD_SANDBOX_FILE_EVENT_FLAG_RENAME_INTENT    0x00000100U
+#define KSWORD_SANDBOX_FILE_EVENT_FLAG_SECURITY_INTENT  0x00000200U
 
 /*
  * Bounded UTF-16 path capacity for file payloads.
@@ -500,7 +502,8 @@ typedef enum _KSWORD_SANDBOX_REGISTRY_OPERATION {
     KswSandboxRegistryOperationSetValue = 3,
     KswSandboxRegistryOperationDeleteValue = 4,
     KswSandboxRegistryOperationDeleteKey = 5,
-    KswSandboxRegistryOperationRenameKey = 6
+    KswSandboxRegistryOperationRenameKey = 6,
+    KswSandboxRegistryOperationSetKeySecurity = 7
 } KSWORD_SANDBOX_REGISTRY_OPERATION;
 
 #define KSWORD_SANDBOX_REGISTRY_EVENT_FLAG_KEY_PRESENT       0x00000001U
@@ -515,6 +518,8 @@ typedef enum _KSWORD_SANDBOX_REGISTRY_OPERATION {
 #define KSWORD_SANDBOX_REGISTRY_EVENT_FLAG_VALUE_SIZE_PRESENT 0x00000200U
 #define KSWORD_SANDBOX_REGISTRY_EVENT_FLAG_OPERATION_FAILED  0x00000400U
 #define KSWORD_SANDBOX_REGISTRY_EVENT_FLAG_VALUE_DATA_EMPTY  0x00000800U
+#define KSWORD_SANDBOX_REGISTRY_EVENT_FLAG_SECURITY_INFORMATION_PRESENT 0x00001000U
+#define KSWORD_SANDBOX_REGISTRY_EVENT_FLAG_SECURITY_DESCRIPTOR_PRESENT  0x00002000U
 
 /*
  * Network event payload version, protocol values, and compact address fields.

@@ -220,6 +220,7 @@ internal static class LiveEventsPage
               <a class="button secondary" href="/settings" data-zh="设置 / VirusTotal" data-en="Settings / VirusTotal">设置 / VirusTotal</a>
               <button type="button" onclick="connectSse()" data-zh="连接实时流" data-en="Connect stream">连接实时流</button>
               <button class="secondary" type="button" onclick="refreshLiveEvents(true)" data-zh="手动刷新" data-en="Manual refresh">手动刷新</button>
+              <button class="secondary" type="button" onclick="stopMonitoringOnly()" data-copy="停止监视/停止轮询：只停止当前浏览器页的 SSE、轮询、自动刷新和报告自动跳转；不停止 VM、不终止样本 / Stop watching/polling: browser page only; does not stop VM or sample" data-zh="停止监视/停止轮询（不停止 VM/样本）" data-en="Stop watching/polling (not VM/sample)">停止监视/停止轮询（不停止 VM/样本）</button>
             </div>
           </header>
           <main>
@@ -366,9 +367,11 @@ internal static class LiveEventsPage
             let latestReportReadiness = null;
             let reportAutoOpenScheduled = false;
             let reportAutoOpenTimer = null;
+            let reportAutoOpenNavigationTimer = null;
             let reportAutoOpenDeadline = 0;
             let reportAutoOpenHref = '';
             let reportAutoOpenRemainingSeconds = 0;
+            let monitoringStopped = false;
             let virusTotalPersistInFlight = false;
             const monitorQuery = new URLSearchParams(window.location.search);
             const enteredFromUpload = monitorQuery.get('fromUpload') === '1';
@@ -608,6 +611,7 @@ internal static class LiveEventsPage
             }
 
             function connectSse() {
+              monitoringStopped = false;
               stopLive();
               setStatus(t('正在连接 SSE 原始事件流...', 'Connecting SSE raw event stream...'), false);
               setStreamFallbackStatus(
@@ -637,6 +641,7 @@ internal static class LiveEventsPage
             }
 
             function startRunbookProgressStream() {
+              if (monitoringStopped) { return; }
               stopRunbookProgressPolling();
               stopBackgroundStatusPolling();
               stopRunbookProgressStream();
@@ -769,6 +774,7 @@ internal static class LiveEventsPage
             }
 
             function startRunbookProgressPolling() {
+              if (monitoringStopped) { return; }
               refreshRunbookProgress();
               if (progressTimer) { clearInterval(progressTimer); }
               progressTimer = setInterval(refreshRunbookProgress, 1500);
@@ -797,6 +803,7 @@ internal static class LiveEventsPage
             }
 
             function startBackgroundStatusPolling() {
+              if (monitoringStopped) { return; }
               refreshBackgroundStatus();
               if (backgroundTimer) { clearInterval(backgroundTimer); }
               backgroundTimer = setInterval(refreshBackgroundStatus, 2000);
@@ -822,9 +829,14 @@ internal static class LiveEventsPage
             }
 
             function startJobSnapshotPolling() {
+              if (monitoringStopped) { return; }
               refreshJobSnapshot();
               if (jobTimer) { clearInterval(jobTimer); }
               jobTimer = setInterval(refreshJobSnapshot, 5000);
+            }
+
+            function stopJobSnapshotPolling() {
+              if (jobTimer) { clearInterval(jobTimer); jobTimer = null; }
             }
 
             async function refreshJobSnapshot() {
@@ -896,7 +908,7 @@ internal static class LiveEventsPage
                 ${outputDetails}`;
               target.setAttribute('data-copy', `后台分析 ${stateLabel}; 进度=${progress.percentText}; 当前=${currentStep}; 耗时=${elapsed}; 消息=${message}`);
               renderOperatorCockpit();
-              if (autoOpenReportFromMonitor && state === 'completed' && reportReadiness.hasJobHtmlReport && !reportAutoOpenScheduled) {
+              if (!monitoringStopped && autoOpenReportFromMonitor && state === 'completed' && reportReadiness.hasJobHtmlReport && !reportAutoOpenScheduled) {
                 scheduleReportAutoOpen();
               }
             }
@@ -975,7 +987,11 @@ internal static class LiveEventsPage
               updateReportAutoOpenNotice();
               if (reportAutoOpenTimer) { clearInterval(reportAutoOpenTimer); }
               reportAutoOpenTimer = setInterval(updateReportAutoOpenNotice, 250);
-              setTimeout(() => {
+              if (reportAutoOpenNavigationTimer) {
+                clearTimeout(reportAutoOpenNavigationTimer);
+              }
+              reportAutoOpenNavigationTimer = setTimeout(() => {
+                if (monitoringStopped) { return; }
                 if (reportAutoOpenTimer) {
                   clearInterval(reportAutoOpenTimer);
                   reportAutoOpenTimer = null;
@@ -984,15 +1000,24 @@ internal static class LiveEventsPage
               }, 5000);
             }
 
+            function stopReportAutoOpenCountdown() {
+              reportAutoOpenScheduled = false;
+              if (reportAutoOpenTimer) {
+                clearInterval(reportAutoOpenTimer);
+                reportAutoOpenTimer = null;
+              }
+
+              if (reportAutoOpenNavigationTimer) {
+                clearTimeout(reportAutoOpenNavigationTimer);
+                reportAutoOpenNavigationTimer = null;
+              }
+            }
+
             function updateReportAutoOpenNotice() {
               const readiness = currentReportReadiness();
               renderHeaderReportActions(readiness);
               if (!readiness.hasJobHtmlReport) {
-                reportAutoOpenScheduled = false;
-                if (reportAutoOpenTimer) {
-                  clearInterval(reportAutoOpenTimer);
-                  reportAutoOpenTimer = null;
-                }
+                stopReportAutoOpenCountdown();
 
                 renderReportReadyActions(buildArtifactPaths(normalizeJobSnapshot(latestJobSnapshot || initialJob), latestArtifactSources));
                 setStatus(readiness.hasIndexedHtmlReport
@@ -2828,6 +2853,7 @@ internal static class LiveEventsPage
             }
 
             function startPolling(message) {
+              if (monitoringStopped) { return; }
               stopLive();
               setStatus(message, false);
               setStreamFallbackStatus(message, 'fallback');
@@ -2838,6 +2864,34 @@ internal static class LiveEventsPage
             function stopLive() {
               if (eventSource) { eventSource.close(); eventSource = null; }
               if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+            }
+
+            function stopMonitoringOnly() {
+              // Inputs: operator click on the live monitor page. Processing:
+              // closes browser-owned streams/timers only. Return: no backend
+              // cancel is sent, so VM execution and sample processes are not
+              // stopped or killed by this UI affordance.
+              monitoringStopped = true;
+              stopLive();
+              stopRunbookProgressStream();
+              stopRunbookProgressPolling();
+              stopBackgroundStatusPolling();
+              stopJobSnapshotPolling();
+              clearProgressStreamFallbackTimer();
+              stopReportAutoOpenCountdown();
+              liveFetchInFlight = false;
+              const message = t(
+                '已停止本页监视/轮询：SSE、轮询、自动刷新和报告自动跳转已关闭。没有调用后端取消接口；VM 和样本不会因此停止。',
+                'Stopped this page watching/polling: SSE, polling, auto-refresh, and report auto-navigation are closed. No backend cancel API was called; the VM and sample are not stopped.');
+              setStatus(message, false);
+              setStreamFallbackStatus(message, 'fallback');
+              const background = document.getElementById('backgroundStatus');
+              if (background) {
+                background.className = 'metric muted';
+                background.innerHTML = `<strong>${escapeHtml(t('监视已停止', 'Watching stopped'))}</strong><p>${escapeHtml(message)}</p>`;
+                background.setAttribute('data-copy', message);
+              }
+              renderOperatorCockpit();
             }
 
             async function refreshLiveEvents(reset) {

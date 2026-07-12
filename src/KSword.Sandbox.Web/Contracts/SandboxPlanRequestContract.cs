@@ -13,6 +13,8 @@ namespace KSword.Sandbox.Web.Contracts;
 /// <param name="CaptureScreenshots">Explicit opt-in for screenshot artifact collection.</param>
 /// <param name="CaptureMemoryDumps">Explicit opt-in for memory-dump artifact collection.</param>
 /// <param name="CapturePacketCapture">Explicit opt-in for guest packet-capture artifact collection.</param>
+/// <param name="DurationSeconds">Optional bounded runtime in seconds; 0 is the Web/API unlimited sentinel when DurationUnlimited is true.</param>
+/// <param name="DurationUnlimited">Explicit no-runtime-limit intent from upload/path planning UI.</param>
 public sealed record SandboxPlanRequestContract(
     string ExecutablePath,
     string? Arguments,
@@ -21,4 +23,6 @@ public sealed record SandboxPlanRequestContract(
     bool? CollectDroppedFiles = null,
     bool? CaptureScreenshots = null,
     bool? CaptureMemoryDumps = null,
-    bool? CapturePacketCapture = null);
+    bool? CapturePacketCapture = null,
+    int? DurationSeconds = null,
+    bool? DurationUnlimited = null);

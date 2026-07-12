@@ -148,6 +148,43 @@ guest-output 目录下解析文件，而不是信任 VM 内绝对路径。
   `targetProcess*`, `sourceProcess*`, `duplicated*HandleId`, `object*`,
   `accesses`, `requestedAccess`, `desiredAccess`, `api`, and `operation`
   aliases when available. All rows include `zhMessage` and `zhHint`.
+- `eventlog.behavior.collection.started`,
+  `eventlog.behavior.query.summary`, `eventlog.behavior.skipped`, and
+  `eventlog.behavior.parse_failed` for a bounded Windows Event Log supplement
+  that targets non-Security operational channels without starting live ETW.
+  The probe reads only recent records with short `wevtutil qe` timeouts and
+  marks collection-health rows with `behaviorCounted=false`,
+  `nonbehavior=true`, `sampleBehaviorCandidate=false`, `severity=info`, and
+  Chinese `zhMessage` / `zhHint`. The actual targeted behavior rows are:
+  `eventlog.service.installed`, `eventlog.service.start_type_changed`,
+  `eventlog.service.control_sent`,
+  `eventlog.scheduled_task.registered`,
+  `eventlog.scheduled_task.updated`,
+  `eventlog.scheduled_task.deleted`,
+  `eventlog.scheduled_task.disabled`,
+  `eventlog.scheduled_task.action_started`,
+  `eventlog.scheduled_task.action_completed`,
+  `eventlog.powershell.module_command`, and
+  `eventlog.powershell.script_block`. These rows cover System / Service
+  Control Manager IDs `7035`, `7040`, `7045`,
+  TaskScheduler Operational IDs `106`, `140`, `141`, `142`, `200`, `201`,
+  and PowerShell Operational IDs `4103`, `4104`. Each event includes stable
+  fields such as `channelKey`, `windowsEventLogChannel`, `providerName`,
+  `windowsEventId`, `eventRecordId`, `surfaceKey`, `fallbackSurfaceKey`,
+  `semanticEventTags`, `fallbackOwner=WindowsBehaviorEventLogProbe`,
+  `r0CoverageGap`, `behaviorBoundary`, `noiseBoundary`, `noiseClass`,
+  `severity`, `severityMeaning`, `sampleCorrelation*`, `behaviorCounted`, and
+  raw `eventData.*` aliases. Service rows add service aliases such as
+  `serviceName`, `serviceImagePath`, `serviceStartType`, and
+  `serviceAccount`; task rows add `taskName`, `taskActionName`,
+  `taskUserName`, and `taskInstanceId`; PowerShell rows add
+  `powerShellCommandName`, `powerShellScriptBlockId`,
+  `powerShellScriptBlockText`, `powerShellHostApplication`, and
+  `powerShellContextInfo` when present. Only rows strongly correlated to the
+  sample by root PID or sample path/command text set `behaviorCounted=true`.
+  Uncorrelated service/task/PowerShell operational rows remain
+  `behaviorCounted=false` because these logs can contain benign OS,
+  maintenance, or administrator activity inside the same time window.
 - `etw_security.readiness.summary`,
   `etw_security.provider_manifest.readiness`, and
   `etw_security.surface.readiness` for targeted ETW/Security coverage

@@ -1143,7 +1143,13 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         Metric(html, "Collection health", report.Events.Count(IsCollectionHealthEvent).ToString(), "risk-info");
         Metric(html, "VT lookups", report.Events.Count(IsVirusTotalEvent).ToString(), "risk-info");
         Metric(html, "Failure markers", report.Events.Count(IsOperationalFailureEvent).ToString(), "risk-high");
-        html.AppendLine("</div></section>");
+        html.AppendLine("</div>");
+        if (report.Events.Count == 0)
+        {
+            Empty(html, "No dynamic events were collected. Zero counters mean telemetry was not collected or imported for this section; they are not proof that the sample had no behavior.");
+        }
+
+        html.AppendLine("</section>");
     }
 
     /// <summary>
@@ -2282,6 +2288,11 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
             MergeEventMatrixCount(rows, evt, "packet-captures", ArtifactKind.PacketCapture, "packetCaptureArtifactCount", "packetCaptureBytes");
         }
 
+        foreach (var evt in events.OrderBy(evt => evt.Timestamp))
+        {
+            MergeDisabledArtifactCollectionState(rows, evt);
+        }
+
         MergeArtifactMatrixFallback(rows, artifacts, "dropped-files", ArtifactKind.DroppedFile);
         MergeArtifactMatrixFallback(rows, artifacts, "screenshots", ArtifactKind.Screenshot);
         MergeArtifactMatrixFallback(rows, artifacts, "memory-dumps", ArtifactKind.MemoryDump);
@@ -2340,6 +2351,33 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
             : 0;
         var state = count > 0 ? "ready" : "missing";
         rows[collectionName] = new ArtifactEvidenceMatrixRow(collectionName, kind, count, state, bytes, evt.EventType, FirstEventDataValue(evt, "primaryArtifactSelectors") ?? string.Empty);
+    }
+
+    private static void MergeDisabledArtifactCollectionState(
+        IDictionary<string, ArtifactEvidenceMatrixRow> rows,
+        SandboxEvent evt)
+    {
+        if (!TryGetDisabledArtifactCollection(evt, out var collectionName, out var kind))
+        {
+            return;
+        }
+
+        if (rows.TryGetValue(collectionName, out var existing) &&
+            existing.Count > 0 &&
+            string.Equals(existing.State, "ready", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        var selectors = rows.TryGetValue(collectionName, out existing) ? existing.Selectors : string.Empty;
+        rows[collectionName] = new ArtifactEvidenceMatrixRow(
+            collectionName,
+            kind,
+            existing?.Count ?? 0,
+            "disabled",
+            existing?.Bytes ?? 0,
+            evt.EventType,
+            selectors);
     }
 
     private static void MergeArtifactMatrixFallback(
@@ -2540,6 +2578,11 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
 
     private static bool IsDroppedFileEvidenceEvent(SandboxEvent evt)
     {
+        if (IsDisabledArtifactCollectionEvent(evt))
+        {
+            return false;
+        }
+
         var role = FirstEventDataValue(evt, "evidenceRole", "artifactKind", "kind", "collectionName") ?? string.Empty;
         return evt.EventType.StartsWith("artifact.dropped_file.", StringComparison.OrdinalIgnoreCase) ||
             evt.EventType.StartsWith("dropped_file.", StringComparison.OrdinalIgnoreCase) ||
@@ -2551,6 +2594,11 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
 
     private static bool IsScreenshotEvidenceEvent(SandboxEvent evt)
     {
+        if (IsDisabledArtifactCollectionEvent(evt))
+        {
+            return false;
+        }
+
         return evt.EventType.StartsWith("screenshot.", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(FirstEventDataValue(evt, "collectionName"), "screenshots", StringComparison.OrdinalIgnoreCase) ||
             EventTextContainsAny(evt, "screenshotRelativePath", "screenshotPath", "screenshots");
@@ -2558,6 +2606,11 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
 
     private static bool IsMemoryDumpEvidenceEvent(SandboxEvent evt)
     {
+        if (IsDisabledArtifactCollectionEvent(evt))
+        {
+            return false;
+        }
+
         return evt.EventType.StartsWith("memory_dump.", StringComparison.OrdinalIgnoreCase) ||
             evt.EventType.StartsWith("memory-dump.", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(FirstEventDataValue(evt, "collectionName"), "memory-dumps", StringComparison.OrdinalIgnoreCase) ||
@@ -2566,11 +2619,72 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
 
     private static bool IsPacketCaptureEvidenceEvent(SandboxEvent evt)
     {
+        if (IsDisabledArtifactCollectionEvent(evt))
+        {
+            return false;
+        }
+
         return evt.EventType.StartsWith("packet_capture.", StringComparison.OrdinalIgnoreCase) ||
             evt.EventType.StartsWith("packet-capture.", StringComparison.OrdinalIgnoreCase) ||
             evt.EventType.StartsWith("pcap.", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(FirstEventDataValue(evt, "collectionName"), "packet-captures", StringComparison.OrdinalIgnoreCase) ||
             EventTextContainsAny(evt, "packetCaptureRelativePath", "pcapRelativePath", "pcapngRelativePath", "pktmon", ".pcap", ".pcapng", ".etl");
+    }
+
+    private static bool IsDisabledArtifactCollectionEvent(SandboxEvent evt)
+    {
+        return TryGetDisabledArtifactCollection(evt, out _, out _);
+    }
+
+    private static bool TryGetDisabledArtifactCollection(SandboxEvent evt, out string collectionName, out ArtifactKind kind)
+    {
+        var eventType = evt.EventType ?? string.Empty;
+        var state = FirstEventDataValue(evt, "captureState", "status", "collectionState", "state") ?? string.Empty;
+        var disabled = eventType.EndsWith(".disabled", StringComparison.OrdinalIgnoreCase) ||
+            TextEqualsAny(state, "disabled", "not-enabled", "not_enabled", "off");
+
+        if (!disabled)
+        {
+            collectionName = string.Empty;
+            kind = ArtifactKind.Unknown;
+            return false;
+        }
+
+        var collection = FirstEventDataValue(evt, "collectionName", "artifactKind", "kind", "evidenceRole") ?? eventType;
+        if (TextContainsAny(eventType, "packet_capture", "packet-capture", "pcap") ||
+            TextContainsAny(collection, "packet-capture", "packet_capture", "packet-captures", "pcap"))
+        {
+            collectionName = "packet-captures";
+            kind = ArtifactKind.PacketCapture;
+            return true;
+        }
+
+        if (TextContainsAny(eventType, "screenshot") || TextContainsAny(collection, "screenshot", "screenshots"))
+        {
+            collectionName = "screenshots";
+            kind = ArtifactKind.Screenshot;
+            return true;
+        }
+
+        if (TextContainsAny(eventType, "memory_dump", "memory-dump") ||
+            TextContainsAny(collection, "memory-dump", "memory_dump", "memory-dumps"))
+        {
+            collectionName = "memory-dumps";
+            kind = ArtifactKind.MemoryDump;
+            return true;
+        }
+
+        if (TextContainsAny(eventType, "dropped_file", "dropped-file") ||
+            TextContainsAny(collection, "dropped-file", "dropped_file", "dropped-files"))
+        {
+            collectionName = "dropped-files";
+            kind = ArtifactKind.DroppedFile;
+            return true;
+        }
+
+        collectionName = string.Empty;
+        kind = ArtifactKind.Unknown;
+        return false;
     }
 
     /// <summary>
@@ -2859,6 +2973,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         {
             "captured" => "low",
             "failed" => "high",
+            "disabled" => "info",
             "skipped" => "medium",
             "partial" => "medium",
             "observed" => "info",
@@ -2911,6 +3026,12 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         IReadOnlyCollection<ArtifactDescriptor> artifacts,
         IReadOnlyCollection<SandboxEvent> events)
     {
+        if (artifacts.Count == 0 &&
+            events.Any(IsDisabledArtifactCollectionEvent))
+        {
+            return "disabled";
+        }
+
         if (artifacts.Any(artifact =>
                 string.Equals(artifact.CaptureState, "failed", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(MetadataValue(artifact.Metadata, "captureState"), "failed", StringComparison.OrdinalIgnoreCase)) ||
@@ -3475,7 +3596,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         html.AppendLine("<section id=\"failure\" class=\"card\"><h2>Failure reasons</h2>");
         if (report.Status != AnalysisStatus.Failed && failures.Count == 0)
         {
-            Empty(html, "No failure reason was recorded.");
+            Empty(html, "No operational failure markers were collected for this job.");
         }
         else if (failures.Count == 0)
         {
@@ -4749,6 +4870,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
 
         AppendNetworkRelationshipOverview(html, allCards, cards.Count, networkEvents.Count);
         html.AppendLine("<div class=\"section-note\"><strong>Endpoint-centric view.</strong> Network events are grouped by domain, SNI, URL, IP, or endpoint so analysts can read the relationship map without opening raw events first.</div>");
+        html.AppendLine("<div class=\"section-note\"><strong>Observed-only / 仅真实采集.</strong> Relationship cards require an observed DNS/HTTP/TLS/flow target; rows without a target remain in raw evidence and do not create placeholder endpoint cards.</div>");
         html.AppendLine("<div class=\"section-note\"><strong>Network category view / 网络分类视图.</strong> Cards split DNS, HTTP, TLS, flow, and linked PCAP/source artifacts so endpoint relationships stay readable without opening raw rows. Hint / 提示: PCAP/source artifact badges only appear when current indexed data links them to the endpoint.</div>");
         html.AppendLine("<div class=\"relation-grid\">");
         foreach (var card in cards)
@@ -4868,8 +4990,9 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
             .Select(evt => new
             {
                 Event = evt,
-                Target = ExtractNetworkTarget(evt) ?? $"unresolved:{evt.EventType}"
+                Target = ExtractNetworkTarget(evt) ?? string.Empty
             })
+            .Where(item => !string.IsNullOrWhiteSpace(item.Target))
             .GroupBy(item => item.Target, StringComparer.OrdinalIgnoreCase)
             .Select(group =>
             {
@@ -5024,7 +5147,8 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         IReadOnlyCollection<ArtifactDescriptor> artifacts)
     {
         var related = FindRelatedArtifactsForEvents(events, artifactLookup, artifacts);
-        if (NetworkEventsShouldLinkPacketCapture(events))
+        var hasExplicitPacketCaptureLink = related.Values.Any(artifact => artifact.Kind == ArtifactKind.PacketCapture);
+        if (!hasExplicitPacketCaptureLink && NetworkEventsShouldLinkPacketCapture(events))
         {
             foreach (var artifact in artifacts.Where(artifact => artifact.Kind == ArtifactKind.PacketCapture))
             {
@@ -5338,6 +5462,13 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
     /// </summary>
     private static string NetworkProtocolLabel(SandboxEvent evt)
     {
+        var applicationProtocol = FirstEventDataValue(evt, "applicationProtocol", "serviceHint", "serviceName");
+        if (IsTrustedApplicationProtocol(evt, applicationProtocol) &&
+            !string.Equals(applicationProtocol, "unknown", StringComparison.OrdinalIgnoreCase))
+        {
+            return applicationProtocol!.ToUpperInvariant();
+        }
+
         if (evt.Data.TryGetValue("protocol", out var protocol) && !string.IsNullOrWhiteSpace(protocol))
         {
             return protocol.ToUpperInvariant();
@@ -5407,22 +5538,28 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
     /// </summary>
     private static string NetworkCategoryLabel(SandboxEvent evt)
     {
-        var protocol = FirstEventDataValue(evt, "protocol", "applicationProtocol", "appProtocol", "networkProtocol", "ipProtocol");
-        if (ContainsProtocolOrType(protocol, "dns") ||
+        var applicationProtocol = FirstEventDataValue(evt, "applicationProtocol", "appProtocol", "serviceHint", "serviceName");
+        var protocol = FirstEventDataValue(evt, "protocol", "transportProtocol", "networkProtocol", "ipProtocol");
+        var trustedApplicationProtocol = IsTrustedApplicationProtocol(evt, applicationProtocol) ? applicationProtocol : string.Empty;
+        if (ContainsProtocolOrType(trustedApplicationProtocol, "dns") ||
+            ContainsProtocolOrType(protocol, "dns") ||
             evt.EventType.Contains("dns", StringComparison.OrdinalIgnoreCase) ||
             HasEventDataKeyContaining(evt, "dns", "queryName", "queryType", "answers"))
         {
             return "DNS";
         }
 
-        if (ContainsProtocolOrType(protocol, "http") ||
+        if (ContainsProtocolOrType(trustedApplicationProtocol, "http") ||
+            ContainsProtocolOrType(protocol, "http") ||
             evt.EventType.Contains("http", StringComparison.OrdinalIgnoreCase) ||
             HasEventDataKeyContaining(evt, "http", "url", "uri", "userAgent", "statusCode", "method"))
         {
             return "HTTP";
         }
 
-        if (ContainsProtocolOrType(protocol, "tls") ||
+        if (ContainsProtocolOrType(trustedApplicationProtocol, "tls") ||
+            ContainsProtocolOrType(trustedApplicationProtocol, "ssl") ||
+            ContainsProtocolOrType(protocol, "tls") ||
             ContainsProtocolOrType(protocol, "ssl") ||
             evt.EventType.Contains("tls", StringComparison.OrdinalIgnoreCase) ||
             evt.EventType.Contains("ssl", StringComparison.OrdinalIgnoreCase) ||
@@ -5432,6 +5569,28 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         }
 
         return "Flow";
+    }
+
+    private static bool IsTrustedApplicationProtocol(SandboxEvent evt, string? applicationProtocol)
+    {
+        if (string.IsNullOrWhiteSpace(applicationProtocol))
+        {
+            return false;
+        }
+
+        var eventKind = FirstEventDataValue(evt, "eventKind");
+        if (!string.Equals(eventKind, "connection", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        var source = FirstEventDataValue(evt, "applicationProtocolSource", "appProtocolSource", "serviceSource");
+        if (!string.IsNullOrWhiteSpace(source))
+        {
+            return true;
+        }
+
+        return !string.Equals(FirstEventDataValue(evt, "serviceHintSource"), "port-or-protocol", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool ContainsProtocolOrType(string? value, string token) =>
@@ -5996,26 +6155,32 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
             return null;
         }
 
-        if (!string.IsNullOrWhiteSpace(evt.Path) &&
-            (evt.Path.Contains("://", StringComparison.Ordinal) || evt.Path.Contains('.', StringComparison.Ordinal)))
+        var canonicalTarget = FirstEventDataValue(
+            evt,
+            "networkTarget",
+            "relationshipCardTarget",
+            "networkRelationshipTarget",
+            "relationshipTarget");
+        if (!string.IsNullOrWhiteSpace(canonicalTarget))
         {
-            return evt.Path;
+            return canonicalTarget;
         }
 
         var preferred = FirstEventDataValue(
             evt,
-            "url",
-            "uri",
-            "host",
-            "hostname",
-            "domain",
             "queryName",
             "query",
+            "domain",
             "dnsName",
             "sni",
             "serverName",
+            "host",
+            "hostname",
+            "url",
+            "uri",
             "remoteEndpoint",
             "remoteAddress",
+            "destinationEndpoint",
             "destinationAddress",
             "ip");
         if (string.IsNullOrWhiteSpace(preferred))
@@ -6026,13 +6191,22 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
                 .FirstOrDefault();
         }
 
+        if (string.IsNullOrWhiteSpace(preferred) &&
+            !string.IsNullOrWhiteSpace(evt.Path) &&
+            (evt.Path.Contains("://", StringComparison.Ordinal) || evt.Path.Contains('.', StringComparison.Ordinal)))
+        {
+            preferred = evt.Path;
+        }
+
         if (string.IsNullOrWhiteSpace(preferred))
         {
             return null;
         }
 
-        var port = FirstEventDataValue(evt, "remotePort", "destinationPort", "port");
-        return string.IsNullOrWhiteSpace(port) || preferred.Contains(':', StringComparison.Ordinal)
+        var port = FirstEventDataValue(evt, "networkTargetPort", "remotePort", "destinationPort", "port");
+        return string.IsNullOrWhiteSpace(port) ||
+            preferred.Contains(':', StringComparison.Ordinal) ||
+            preferred.Contains("://", StringComparison.Ordinal)
             ? preferred
             : $"{preferred}:{port}";
     }
@@ -6496,7 +6670,13 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
             "metadata",
             "diagnostic",
             "health",
+            "status",
+            "readiness",
             "evidence-health",
+            "evidence-quality",
+            "collection-health",
+            "collection-status",
+            "enrichment-status",
             "report-only",
             "report_only",
             "artifact-index",
@@ -6505,14 +6685,58 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
 
     private static bool IsNonBehaviorEvent(SandboxEvent evt)
     {
-        if (EventDataBoolTrue(evt, "nonbehavior", "nonBehavior", "non_behavior", "notBehavior", "not_behavior"))
+        if (EventDataBoolTrue(
+                evt,
+                "nonbehavior",
+                "nonBehavior",
+                "non_behavior",
+                "notBehavior",
+                "not_behavior",
+                "metadataOnly",
+                "metadata_only",
+                "readinessOnly",
+                "readiness_only",
+                "statusOnly",
+                "status_only",
+                "healthEvent",
+                "health_event",
+                "diagnosticEvent",
+                "diagnostic_event",
+                "qualityEvent",
+                "quality_event",
+                "telemetryHealth",
+                "telemetry_health",
+                "telemetryDegraded",
+                "telemetry_degraded",
+                "backpressure",
+                "backpressureObserved",
+                "backpressure_observed",
+                "lossObserved",
+                "loss_observed",
+                "enrichmentStatus",
+                "enrichment_status",
+                "vtQuietState",
+                "vt_quiet_state"))
         {
             return true;
         }
 
         var eventKind = FirstEventDataValue(evt, "eventKind", "eventRole", "evidenceRole", "classification");
         return !string.IsNullOrWhiteSpace(eventKind) &&
-            TextEqualsAny(eventKind, "nonbehavior", "non-behavior", "metadata", "diagnostic", "health", "status");
+            TextEqualsAny(
+                eventKind,
+                "nonbehavior",
+                "non-behavior",
+                "metadata",
+                "diagnostic",
+                "health",
+                "status",
+                "summary",
+                "readiness",
+                "collection-status",
+                "evidence-quality",
+                "quiet-state",
+                "enrichment-status");
     }
 
     /// <summary>
@@ -6624,6 +6848,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         return evt.Source.Contains("driver", StringComparison.OrdinalIgnoreCase) ||
             evt.Source.Contains("r0", StringComparison.OrdinalIgnoreCase) ||
             evt.EventType.StartsWith("driver.", StringComparison.OrdinalIgnoreCase) ||
+            evt.EventType.StartsWith("r0.", StringComparison.OrdinalIgnoreCase) ||
             evt.EventType.StartsWith("r0collector.", StringComparison.OrdinalIgnoreCase);
     }
 
@@ -7229,7 +7454,11 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         if (finding.Evidence.Count > 0 &&
             finding.Evidence.All(evt =>
                 IsCollectionHealthEvent(evt) ||
+                IsR0CollectionHealthEvent(evt) ||
                 IsCollectorSelfNoiseEvent(evt) ||
+                IsNonBehaviorEvent(evt) ||
+                IsNotSampleBehaviorMarkerEvent(evt) ||
+                IsVirusTotalQuietStateEvent(evt) ||
                 IsWeakOrEnvironmentalSampleCorrelationEvent(evt) ||
                 IsBehaviorCountedFalseEvent(evt) ||
                 IsSampleBehaviorCandidateFalseEvent(evt)))
@@ -7248,10 +7477,53 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
             return true;
         }
 
+        if (FindingTextSuggestsDiagnostic(finding))
+        {
+            return true;
+        }
+
         return finding.RuleId.StartsWith("host-", StringComparison.OrdinalIgnoreCase) ||
             finding.RuleId.StartsWith("runbook-", StringComparison.OrdinalIgnoreCase) ||
             finding.RuleId.StartsWith("r0collector-", StringComparison.OrdinalIgnoreCase) ||
             finding.RuleId.Contains("unavailable", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool FindingTextSuggestsDiagnostic(BehaviorFinding finding)
+    {
+        return TextContainsAny(
+                finding.RuleId,
+                "health",
+                "status",
+                "readiness",
+                "diagnostic",
+                "self-noise",
+                "self_noise",
+                "collector-noise",
+                "collector_noise",
+                "quiet-state",
+                "quiet_state",
+                "collection-health",
+                "collection-status")
+            || TextContainsAny(
+                finding.Title,
+                "health",
+                "status",
+                "readiness",
+                "diagnostic",
+                "self-noise",
+                "collector noise",
+                "quiet state",
+                "collection health",
+                "collection status")
+            || TextContainsAny(
+                finding.Summary,
+                "not sample behavior",
+                "not malicious sample behavior",
+                "collection health",
+                "evidence quality",
+                "readiness",
+                "self-noise",
+                "quiet state");
     }
 
     /// <summary>
@@ -7780,6 +8052,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         ("very-high-entropy-resource", "极高熵资源"),
         ("high-entropy-resource", "高熵资源"),
         ("Dynamic analysis", "动态分析"),
+        ("No dynamic events were collected. Zero counters mean telemetry was not collected or imported for this section; they are not proof that the sample had no behavior.", "未采集到动态事件。本节的 0 计数表示遥测未采集或未导入，不代表样本没有行为。"),
         ("VirusTotal / reputation", "VirusTotal / 信誉"),
         ("Hash-only enrichment.", "仅哈希增强。"),
         ("VirusTotal (VT) results are optional reputation evidence and are separated from sandbox behavior. Missing keys, rate limits, or not-found responses are enrichment status, not malicious sample behavior.", "VirusTotal (VT) 结果是可选信誉证据，已与沙箱行为分离。缺少密钥、限速或未找到响应属于增强状态，不是恶意样本行为。"),
@@ -7931,9 +8204,14 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         ("Artifact collection status", "证据采集状态"),
         ("Artifact evidence matrix narrative", "证据文件矩阵叙事"),
         ("Artifact evidence matrix narrative.", "证据文件矩阵叙事。"),
+        ("Matrix lanes summarize dropped files, screenshots, memory dumps, and packet captures before the artifact table. Counts come from normalized <code>artifactEvidenceMatrix</code> rows when present and fall back to the artifact index, so missing lanes stay explicit without expanding raw rows.", "矩阵通道会在证据文件表之前汇总落地文件、截图、内存转储和抓包。计数优先来自规范化 <code>artifactEvidenceMatrix</code> 行；缺失时回退到证据文件索引，因此缺失通道会保持显式可见，而不是展开原始行假填充。"),
         ("Matrix lanes", "矩阵通道"),
         ("Artifact references", "证据文件引用"),
         ("Selector coverage", "选择器覆盖"),
+        ("Ready lanes:", "就绪通道："),
+        ("bounded lane cards summarize collection state before dense artifacts.", "有界通道卡会在密集证据文件表前汇总采集状态。"),
+        ("Total bytes represented by matrix lanes:", "矩阵通道代表的总字节数："),
+        ("Rows with selectors can be copied directly; safe Open/Download actions remain in the artifact table.", "带选择器的行可直接复制；安全打开/下载操作仍保留在证据文件表中。"),
         ("Copy artifact matrix narrative", "复制证据文件矩阵叙事"),
         ("Artifact evidence matrix narrative rows", "证据文件矩阵叙事行"),
         ("Artifact matrix expansion summary", "证据文件矩阵展开摘要"),
@@ -7960,6 +8238,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         ("Phases:", "阶段："),
         (">captured<", ">已采集<"),
         (">failed<", ">失败<"),
+        (">disabled<", ">已禁用<"),
         (">skipped<", ">已跳过<"),
         (">partial<", ">部分采集<"),
         (">observed<", ">已观察<"),
@@ -8027,6 +8306,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         ("No non-health R0 driver telemetry rows were imported. Collection health rows above describe evidence quality rather than sample behavior.", "未导入非健康类 R0 驱动遥测行。上方采集健康行描述证据质量，而不是样本行为。"),
         ("No R0 collection health rows were imported.", "未导入 R0 采集健康行。"),
         ("Failure reasons", "失败原因"),
+        ("No operational failure markers were collected for this job.", "本作业未采集到运行失败标记。"),
         ("Raw normalized events", "原始事件"),
         ("Slim raw event sample.", "精简原始事件样本。"),
         ("Inline raw pages use native details; command, stdout, stderr, PowerShell, script blocks, and oversized payloads stay folded in every row.", "内联原始事件页使用原生 details；command、stdout、stderr、PowerShell、script block 和超大载荷会在每行中保持折叠。"),

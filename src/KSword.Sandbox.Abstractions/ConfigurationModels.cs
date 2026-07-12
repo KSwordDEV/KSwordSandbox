@@ -40,6 +40,17 @@ public sealed record HyperVConfig
 
     public string? BaseVhdxPath { get; init; }
 
+    // Backward-compatible status/config surface. Live Web/Core runbooks still
+    // require an interactive VM desktop; only the CLI -NoOpenVmConsole switch
+    // may explicitly permit headless execution.
+    public bool OpenVmConsoleOnLiveStart { get; init; } = true;
+
+    public string VmConsoleServerName { get; init; } = "localhost";
+
+    public bool RdpFallbackEnabled { get; init; } = true;
+
+    public string? RdpTarget { get; init; }
+
     public long MemoryStartupBytes { get; init; } = 4L * 1024 * 1024 * 1024;
 }
 
@@ -72,6 +83,8 @@ public sealed record AnalysisConfig
     public int DefaultDurationSeconds { get; init; } = 120;
 
     public int MaxDurationSeconds { get; init; } = 900;
+
+    public bool DurationUnlimited { get; init; }
 
     public long MaxSampleBytes { get; init; } = 200L * 1024 * 1024;
 }

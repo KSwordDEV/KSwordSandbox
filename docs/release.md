@@ -27,7 +27,7 @@ v28 已收敛 telemetry/product-readiness polish、defensive behavior matrix、a
   `runbook-progress.json`，主视图不展示命令/stdout/stderr。
 - Host 静态分析已输出 granular `static.*` 事件，行为规则消费
   `static.pe.*`、`static.string.*`、`static.packer.hint` 和
-  `static.yara.match`；规则库当前 588 条（`2026-07-12-v28-behavior-rule-expansion`）且静态命中仍是 triage，不等同 guest 行为。
+  `static.yara.match`；规则库当前 584 条（`2026-07-12-v31-noise-sampling-boundary`）且静态命中仍是 triage，不等同 guest 行为。
 - Artifact index/download 走 job 内安全 selector，Web DTO 暴露
   duplicate/rejection/download 诊断；包策略继续拒绝 runtime 产物入库。
 - VirusTotal 是 process-memory only 配置入口和 hash-only 查询；quiet
@@ -154,10 +154,10 @@ generated metadata 字段：`gitMetadata`、`executionBoundaries`、`requiredEvi
    asks for lab smoke/live:
 
    ```powershell
-   .\install.ps1 -Mode Status
-   .\install.ps1 -Mode CheckEnvironment
-   .\run.ps1 -Mode Status
-   .\run.ps1 -Mode CheckEnvironment
+   .\install.ps1 -Mode Status -Json
+   .\install.ps1 -Mode CheckEnvironment -Json
+   .\run.ps1 -Mode Status -Json
+   .\run.ps1 -Mode CheckEnvironment -Json
    .\run.ps1 -Mode Analyze -SamplePreset Notepad
    .\run.ps1 -Mode StartWebUI -WhatIf
    ```
@@ -166,6 +166,11 @@ generated metadata 字段：`gitMetadata`、`executionBoundaries`、`requiredEvi
    sign drivers, invoke `CSignTool.exe`, upload samples, push, publish, or
    create fresh live evidence. Runtime smoke on a clean host/VM is a separate
    release-manager lab action, not the default packaging gate.
+   The JSON status commands expose `ReadinessVerdict`,
+   `ReadinessOverallStatus`, `BlockingReasons`, `WarningReasons`,
+   `VmMutationPolicy`, and run-side `ModeCoercionMetadata` so automation can
+   decide whether the candidate is `ReadyForLive`, `ReadyForNonLive`, or
+   `Blocked` without scraping formatted text.
 10. Record hashes and release notes. Push/publish only when a release manager
     explicitly requests it; the package script does not push.
 
@@ -374,6 +379,16 @@ VT-x / AMD-V or Hyper-V module is a Live host prerequisite failure.
    .\run.ps1 -Mode Analyze -SamplePreset Notepad -DurationSeconds 5 -Live
    ```
 
+   Live start requires opening the configured VM desktop/console before any
+   sample copy/execution. The runbook plan/start result records
+   `OpenVmConsoleOnLiveStart` / `OpenVmConnectOnLiveStart`,
+   `consoleOpenAttempted`, `consoleOpenSucceeded`, `consoleOpenMessage`, and
+   `consoleFailureBlocksHeadless`. VMConnect is tried first; `mstsc.exe` may
+   open `hyperV.rdpTarget` (including an RDP reverse-proxy endpoint) or a
+   discovered VM IPv4. If neither desktop path opens, the run fails before the
+   sample starts; use `-NoOpenVmConsole` only for explicit unattended headless
+   runs.
+
 6. 记录 release note 证据字段：commit、`job id`、运行时间（UTC 或本地时区）、
    runtime root、VM/checkpoint、是否启用真实 R0，以及报告路径。确认 `run.ps1`
    打印的输出 job 目录包含：
@@ -557,6 +572,18 @@ that directory when the source project is not present.
   `-AllowVmMutation` 且经过 `ShouldProcess` / `-Confirm` 或 `-Force`、`CreateOrPreparePath`
   只做本机目录/config/secret/payload 准备。`Test-ReleaseReadiness.ps1` 只用 AST/JSON
   静态检查该 contract，不运行安装入口或 VM mutation。
+- `ReadinessVerdict`（install/run `Status` 和 `CheckEnvironment`）：机器可读
+  `ReadinessOverallStatus`、`WebUiReady`、`PlanOnlyReady`、`LiveReady`、
+  `BlockingReasons`、`WarningReasons` 和 `RecommendedActions`；不得用
+  formatted text scraping 代替这些字段。
+- `VmMutationPolicy` / `ModeCoercionMetadata`（run status）：必须说明默认 WebUI
+  不修改 VM、`Analyze`/`Plan` 不加 `-Live` 不修改 VM、`Analyze -Live` 才可能
+  restore/start/stop/copy/run guest；当 `WebUI`/`StartWebUI` 因 `-SamplePath`
+  被转为 `Analyze` 时，`ModeCoercionMetadata.ModeCoerced=true`。
+- `OpenVmConsoleOnLiveStart` / `OpenVmConnectOnLiveStart`（Hyper-V plan/start result）：
+  Live 默认必须打开 VM 桌面；`consoleFailureBlocksHeadless=true`，VMConnect/RDP
+  失败会在样本执行前阻塞。只有显式 `-NoOpenVmConsole` 才允许 headless；RDP
+  fallback 可指向 `hyperV.rdpTarget` 中配置的反代地址。
 - `componentProgress.components[].id`: `runtime-publish-root`, `package-safety-contract`,
   `release-smoke-scenarios`, `fresh-live-guardrail`, `self-noise-guard-readiness`,
   `operator-remediation-zh`。

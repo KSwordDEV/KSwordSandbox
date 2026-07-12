@@ -432,6 +432,7 @@ internal sealed class GuestProbeRunner
         {
             "file-diff" => new ProbeCollection("dropped-files", "dropped-file", "artifacts/dropped-files/**"),
             "security-event-log" => new ProbeCollection("security-event-log", "privilege-security-audit-event", "events.json/security.*"),
+            "windows-behavior-event-log" => new ProbeCollection("windows-behavior-event-log", "targeted-windows-eventlog-behavior", "events.json/eventlog.*"),
             "screenshot" => new ProbeCollection("screenshots", "screenshot", "screenshots/*.bmp"),
             "memory-dump" => new ProbeCollection("memory-dumps", "memory-dump", "memory-dumps/*.dmp"),
             "packet-capture" => new ProbeCollection("packet-captures", "packet-capture", "packet-captures/*.pcapng"),

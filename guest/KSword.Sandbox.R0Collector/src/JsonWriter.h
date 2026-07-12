@@ -224,7 +224,9 @@ inline void AddR0EtwCapabilityContractFields(
     appendGap(gapCategories, "network.httpPayload");
     appendGap(gapCategories, "network.tlsPayload");
     appendGap(gapCategories, "file.contentBytesAndHash");
+    appendGap(gapCategories, "file.securityDescriptorBytes");
     appendGap(gapCategories, "registry.valueDataBytes");
+    appendGap(gapCategories, "registry.securityDescriptorBytes");
     appendGap(gapCategories, "userModeCallStack");
 
     data.AddUnsigned("r0EtwCapabilityContractVersion", 1);
@@ -249,7 +251,9 @@ inline void AddR0EtwCapabilityContractFields(
         "network.httpPayload=PCAP/HTTP-sidecar-or-browser;"
         "network.tlsPayload=PCAP/TLS-sidecar;"
         "file.contentBytesAndHash=Guest/artifact-hashing;"
+        "file.securityDescriptorBytes=ETW/security-audit-or-Guest/artifact;"
         "registry.valueDataBytes=Guest/registry-snapshot-or-ETW;"
+        "registry.securityDescriptorBytes=ETW/security-audit-or-Guest/registry-snapshot;"
         "userModeCallStack=ETW-or-Guest-instrumentation");
     data.AddUtf8(
         "r0ReadinessGapInterpretation",

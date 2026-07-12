@@ -6,6 +6,10 @@
     "switchName": null,
     "useDifferencingDisk": false,
     "baseVhdxPath": null,
+    "openVmConsoleOnLiveStart": true,
+    "vmConsoleServerName": "localhost",
+    "rdpFallbackEnabled": true,
+    "rdpTarget": null,
     "memoryStartupBytes": 4294967296
   },
   "guest": {

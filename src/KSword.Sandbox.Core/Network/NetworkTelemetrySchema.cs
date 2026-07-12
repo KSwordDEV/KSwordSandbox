@@ -113,6 +113,7 @@ public static class NetworkTelemetrySchema
         }
 
         ApplyProtocolSpecificNormalization(data);
+        ApplyNetworkRelationshipNormalization(data);
         ApplyProvenanceAndBehaviorMetadata(data);
         ApplyHealthAndLocalization(data);
         return data;
@@ -441,12 +442,21 @@ public static class NetworkTelemetrySchema
         }
 
         var value = protocol.Trim().ToLowerInvariant();
+        if (value.StartsWith("0x", StringComparison.OrdinalIgnoreCase) &&
+            int.TryParse(value[2..], NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var hexProtocol))
+        {
+            value = hexProtocol.ToString(CultureInfo.InvariantCulture);
+        }
+
         return value switch
         {
             "6" => "tcp",
             "17" => "udp",
+            "1" => "icmp",
+            "58" => "icmpv6",
             "tcp6" => "tcp",
             "udp6" => "udp",
+            "ip6" => "ipv6",
             _ => value
         };
     }
@@ -906,6 +916,141 @@ public static class NetworkTelemetrySchema
         }
     }
 
+    private static void ApplyNetworkRelationshipNormalization(Dictionary<string, string> data)
+    {
+        var eventKind = ValueOrEmpty(data, "eventKind");
+        if (string.IsNullOrWhiteSpace(eventKind) ||
+            string.Equals(eventKind, "summary", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(eventKind, "parse_error", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(eventKind, "health", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        var destinationIp = FirstDataValue(data, "destinationIp", "dstIp", "destIp", "destinationAddress", "remoteAddress", "serverIp");
+        var destinationPort = ParsePort(FirstDataValue(data, "destinationPort", "dstPort", "destPort", "serverPort", "remotePort"));
+        var destinationEndpoint = FirstNonEmpty(
+            FirstDataValue(data, "destinationEndpoint", "dstEndpoint", "destEndpoint", "serverEndpoint", "remoteEndpoint"),
+            Endpoint(destinationIp, destinationPort));
+        var sourceEndpoint = FirstDataValue(data, "sourceEndpoint", "srcEndpoint", "clientEndpoint", "localEndpoint");
+        var protocol = NormalizeProtocol(FirstDataValue(data, "transportProtocol", "protocol", "protocolName"));
+        var serviceHint = FirstNonEmpty(FirstDataValue(data, "applicationProtocol", "serviceHint", "serviceName"), eventKind);
+
+        var dnsName = NormalizeDnsName(FirstDataValue(data, "queryName", "qname", "domain", "dnsQueryName", "dns.query.name"));
+        var httpHost = NormalizeRelationshipHost(FirstDataValue(data, "host", "hostname", "httpHost", "authority", "url.host", "url.domain", "http.host"));
+        var httpHostPort = ExtractAuthorityPort(FirstDataValue(data, "host", "hostname", "httpHost", "authority", "url.host", "url.domain", "http.host"));
+        if (string.IsNullOrWhiteSpace(httpHost))
+        {
+            var url = FirstDataValue(data, "url", "requestUrl", "httpUrl", "url.full", "url.original", "http.url", "http.request.full_uri");
+            if (Uri.TryCreate(url, UriKind.Absolute, out var parsedUrl))
+            {
+                httpHost = NormalizeRelationshipHost(parsedUrl.Host);
+                httpHostPort = parsedUrl.IsDefaultPort ? null : parsedUrl.Port;
+            }
+        }
+
+        var tlsSni = NormalizeDnsName(FirstDataValue(data, "sni", "serverName", "tlsServerName", "tlsSni", "server_name", "tls.sni", "tls.server_name", "ssl.server_name"));
+        var target = string.Empty;
+        var targetKind = string.Empty;
+        var targetSource = string.Empty;
+        int? targetPort = null;
+
+        if (string.Equals(eventKind, "dns", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(dnsName))
+        {
+            target = dnsName;
+            targetKind = "dns-name";
+            targetSource = "dns.queryName";
+        }
+        else if (string.Equals(eventKind, "http", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(httpHost))
+        {
+            target = httpHost;
+            targetKind = IsIpAddressText(httpHost) ? "ip" : "host";
+            targetSource = "http.host";
+            targetPort = httpHostPort ?? destinationPort;
+        }
+        else if (string.Equals(eventKind, "tls", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(tlsSni))
+        {
+            target = tlsSni;
+            targetKind = IsIpAddressText(tlsSni) ? "ip" : "sni";
+            targetSource = "tls.sni";
+            targetPort = destinationPort;
+        }
+        else if (!string.IsNullOrWhiteSpace(destinationEndpoint))
+        {
+            target = destinationEndpoint;
+            targetKind = "endpoint";
+            targetSource = "destinationEndpoint";
+            targetPort = destinationPort;
+        }
+        else if (!string.IsNullOrWhiteSpace(destinationIp))
+        {
+            target = NormalizeAddress(destinationIp);
+            targetKind = IsIpAddressText(target) ? "ip" : "address";
+            targetSource = "destinationIp";
+            targetPort = destinationPort;
+        }
+
+        if (string.IsNullOrWhiteSpace(target))
+        {
+            return;
+        }
+
+        AddAliases(
+            data,
+            target,
+            "networkTarget",
+            "relationshipTarget",
+            "networkRelationshipTarget",
+            "relationshipCardTarget");
+        AddIfNotEmpty(data, "networkTargetKind", targetKind);
+        AddIfNotEmpty(data, "networkTargetSource", targetSource);
+        AddIfNotEmpty(data, "networkTargetPort", targetPort?.ToString(CultureInfo.InvariantCulture));
+        AddIfNotEmpty(data, "networkTargetEndpoint", targetKind == "endpoint" ? target : Endpoint(target, targetPort));
+        AddIfNotEmpty(data, "networkSourceEndpoint", sourceEndpoint);
+        AddIfNotEmpty(data, "networkDestinationEndpoint", destinationEndpoint);
+
+        var domainJoinKey = FirstNonEmpty(dnsName, httpHost, tlsSni);
+        AddIfNotEmpty(data, "domainJoinKey", domainJoinKey);
+        AddIfNotEmpty(data, "dnsHttpTlsJoinKey", domainJoinKey);
+        AddIfNotEmpty(data, "endpointJoinKey", destinationEndpoint);
+        AddIfNotEmpty(data, "networkFlowJoinKey", !string.IsNullOrWhiteSpace(protocol) && !string.IsNullOrWhiteSpace(sourceEndpoint) && !string.IsNullOrWhiteSpace(destinationEndpoint)
+            ? $"{protocol}|{sourceEndpoint}|{destinationEndpoint}"
+            : string.Empty);
+
+        var serviceForCorrelation = string.Equals(eventKind, "connection", StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(FirstDataValue(data, "serviceHintSource"), "port-or-protocol", StringComparison.OrdinalIgnoreCase)
+                ? eventKind
+                : serviceHint;
+        var correlationKey = string.Join(
+            "|",
+            "network",
+            string.IsNullOrWhiteSpace(serviceForCorrelation) ? eventKind : serviceForCorrelation,
+            targetKind,
+            target,
+            targetPort?.ToString(CultureInfo.InvariantCulture) ?? string.Empty);
+        AddIfNotEmpty(data, "networkCorrelationKey", correlationKey);
+        AddIfNotEmpty(data, "relationshipCardKey", correlationKey);
+        switch (eventKind.ToLowerInvariant())
+        {
+            case "dns":
+                AddIfNotEmpty(data, "dnsCorrelationKey", correlationKey);
+                break;
+            case "http":
+                AddIfNotEmpty(data, "httpCorrelationKey", correlationKey);
+                break;
+            case "tls":
+                AddIfNotEmpty(data, "tlsCorrelationKey", correlationKey);
+                break;
+            case "connection":
+                AddIfNotEmpty(data, "flowCorrelationKey", correlationKey);
+                break;
+        }
+
+        AddIfNotEmpty(data, "relationshipCardPolicy", "observed-fields-only-no-synthetic-network-events");
+        AddIfNotEmpty(data, "lowNoisePolicy", "canonical-behavior-events; raw-pcap-compatibility-and-health-rows-nonbehavior");
+        AddIfNotEmpty(data, "networkRelationshipZhHint", "关系键仅由已采集到的 DNS/HTTP/TLS/端点字段派生；未采集到协议行时不会补造网络事件。");
+    }
+
     private static void ApplyDnsNormalization(Dictionary<string, string> data)
     {
         var queryName = NormalizeDnsName(FirstDataValue(
@@ -949,6 +1094,8 @@ public static class NetworkTelemetrySchema
             "recordType",
             "dnsRecordType",
             "qtype",
+            "qtype_name",
+            "query_type",
             "rrtype",
             "dns.rrtype",
             "dns.qry.type",
@@ -964,6 +1111,8 @@ public static class NetworkTelemetrySchema
                 "recordType",
                 "dnsRecordType",
                 "qtype",
+                "qtype_name",
+                "query_type",
                 "rrtype",
                 "dns.rrtype",
                 "dns.qry.type",
@@ -976,6 +1125,7 @@ public static class NetworkTelemetrySchema
             data,
             "rcode",
             "rcodeName",
+            "rcode_name",
             "responseCode",
             "dnsRcode",
             "dnsResponseCode",
@@ -989,6 +1139,7 @@ public static class NetworkTelemetrySchema
                 rcode,
                 "rcode",
                 "rcodeName",
+                "rcode_name",
                 "responseCode",
                 "dnsRcode",
                 "dnsResponseCode",
@@ -1144,6 +1295,7 @@ public static class NetworkTelemetrySchema
             "httpStatusCode",
             "httpStatus",
             "status",
+            "status_code",
             "responseCode",
             "http.response.status_code",
             "http.response.code",
@@ -1158,16 +1310,19 @@ public static class NetworkTelemetrySchema
                 "httpStatusCode",
                 "httpStatus",
                 "status",
+                "status_code",
                 "responseCode",
                 "http.response.status_code",
                 "http.response.code",
                 "http.status_code",
                 "http.status",
-                "status_code",
                 "response.status_code",
                 "sc-status");
             AddIfNotEmpty(data, "statusFamily", HttpStatusFamily(statusCode));
         }
+
+        var statusMessage = FirstDataValue(data, "statusMessage", "status_msg", "httpStatusMessage", "http.response.status_phrase");
+        AddAliases(data, statusMessage, "statusMessage", "status_msg", "httpStatusMessage", "http.response.status_phrase");
 
         var userAgent = FirstDataValue(data, "userAgent", "user_agent", "httpUserAgent", "http.user_agent", "http.user_agent.original", "http.request.headers.user-agent", "request.headers.user-agent", "user-agent");
         AddAliases(data, userAgent, "userAgent", "user_agent", "httpUserAgent", "http.user_agent", "http.user_agent.original", "http.request.headers.user-agent", "request.headers.user-agent", "user-agent");
@@ -1183,6 +1338,7 @@ public static class NetworkTelemetrySchema
             data,
             "requestBodyBytes",
             "requestBytes",
+            "request_body_len",
             "httpRequestBodyBytes",
             "requestBodySizeBytes",
             "requestBodySize",
@@ -1196,6 +1352,7 @@ public static class NetworkTelemetrySchema
             data,
             "responseBodyBytes",
             "responseBytes",
+            "response_body_len",
             "httpResponseBodyBytes",
             "responseBodySizeBytes",
             "responseBodySize",
@@ -1205,8 +1362,8 @@ public static class NetworkTelemetrySchema
             "responseContentLength",
             "downloadBytes",
             "bytesToClient"));
-        var requestContentLength = NormalizeByteCount(FirstDataValue(data, "requestContentLength", "http.request.headers.content_length", "request.headers.content-length"));
-        var responseContentLength = NormalizeByteCount(FirstDataValue(data, "responseContentLength", "http.response.headers.content_length", "response.headers.content-length"));
+        var requestContentLength = NormalizeByteCount(FirstDataValue(data, "requestContentLength", "request_body_len", "http.request.headers.content_length", "request.headers.content-length"));
+        var responseContentLength = NormalizeByteCount(FirstDataValue(data, "responseContentLength", "response_body_len", "http.response.headers.content_length", "response.headers.content-length"));
         if (string.IsNullOrWhiteSpace(requestContentLength))
         {
             requestContentLength = requestBodyBytes;
@@ -1217,8 +1374,8 @@ public static class NetworkTelemetrySchema
             responseContentLength = responseBodyBytes;
         }
 
-        AddAliases(data, requestBodyBytes, "requestBodyBytes", "requestBytes", "httpRequestBodyBytes", "requestBodySizeBytes", "requestBodySize", "http.request.body.bytes", "http.request.body.size", "request.body.bytes", "bytesToServer");
-        AddAliases(data, responseBodyBytes, "responseBodyBytes", "responseBytes", "httpResponseBodyBytes", "responseBodySizeBytes", "responseBodySize", "http.response.body.bytes", "http.response.body.size", "response.body.bytes", "bytesToClient");
+        AddAliases(data, requestBodyBytes, "requestBodyBytes", "requestBytes", "request_body_len", "httpRequestBodyBytes", "requestBodySizeBytes", "requestBodySize", "http.request.body.bytes", "http.request.body.size", "request.body.bytes", "bytesToServer");
+        AddAliases(data, responseBodyBytes, "responseBodyBytes", "responseBytes", "response_body_len", "httpResponseBodyBytes", "responseBodySizeBytes", "responseBodySize", "http.response.body.bytes", "http.response.body.size", "response.body.bytes", "bytesToClient");
         AddIfNotEmpty(data, "requestContentLength", requestContentLength);
         AddIfNotEmpty(data, "responseContentLength", responseContentLength);
         AddIfNotEmpty(data, "uploadBytes", FirstNonEmpty(requestBodyBytes, requestContentLength));
@@ -1598,8 +1755,8 @@ public static class NetworkTelemetrySchema
         var certNotAfter = FirstDataValue(data, "certNotAfter", "certificateNotAfter", "x509.not_after", "tls.cert.not_after");
         AddAliases(data, certNotAfter, "certNotAfter", "certificateNotAfter", "x509.not_after", "tls.cert.not_after");
         AddTlsCertificateValidityFields(data, certSubject, certIssuer, certNotBefore, certNotAfter);
-        var certificateStatus = FirstDataValue(data, "certificateStatus", "validationStatus", "tls.validation_status", "tls.cert.validation_status");
-        AddAliases(data, certificateStatus, "certificateStatus", "validationStatus", "tls.validation_status", "tls.cert.validation_status");
+        var certificateStatus = FirstDataValue(data, "certificateStatus", "validationStatus", "validation_status", "tls.validation_status", "tls.cert.validation_status");
+        AddAliases(data, certificateStatus, "certificateStatus", "validationStatus", "validation_status", "tls.validation_status", "tls.cert.validation_status");
         var certSelfSigned = NormalizeBoolean(FirstDataValue(data, "certSelfSigned", "certificateSelfSigned", "selfSigned", "tls.cert.self_signed"));
         AddAliases(data, certSelfSigned, "certSelfSigned", "certificateSelfSigned", "selfSigned", "tls.cert.self_signed");
         var certExpired = NormalizeBoolean(FirstDataValue(data, "certExpired", "certificateExpired", "tls.cert.expired"));
@@ -1856,6 +2013,63 @@ public static class NetworkTelemetrySchema
         }
 
         return trimmed;
+    }
+
+    private static string NormalizeRelationshipHost(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        var normalized = NormalizeHttpHost(value);
+        if (TrySplitBracketedEndpoint(normalized, out var bracketedAddress, out _))
+        {
+            return NormalizeDnsName(bracketedAddress);
+        }
+
+        if (TrySplitSingleColonEndpoint(normalized, out var address, out _))
+        {
+            return NormalizeDnsName(address);
+        }
+
+        if (normalized.StartsWith("[", StringComparison.Ordinal) &&
+            normalized.EndsWith("]", StringComparison.Ordinal) &&
+            normalized.Length > 2)
+        {
+            normalized = normalized[1..^1];
+        }
+
+        return NormalizeDnsName(normalized);
+    }
+
+    private static int? ExtractAuthorityPort(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        var normalized = NormalizeHttpHost(value);
+        if (TrySplitBracketedEndpoint(normalized, out _, out var bracketedPort))
+        {
+            return bracketedPort;
+        }
+
+        return TrySplitSingleColonEndpoint(normalized, out _, out var port)
+            ? port
+            : null;
+    }
+
+    private static bool IsIpAddressText(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        var trimmed = value.Trim().Trim('[', ']');
+        return IPAddress.TryParse(trimmed, out _);
     }
 
     private static bool IsSuspiciousCertificate(IReadOnlyDictionary<string, string> data)
@@ -2873,7 +3087,7 @@ public static class NetworkTelemetrySchema
 
         if (string.Equals(eventKind, "summary", StringComparison.OrdinalIgnoreCase))
         {
-            return "可筛选 dns.query、http.request、tls.connection、network.flow 查看标准化网络证据。";
+            return "可筛选 dns.query、http.request、tls.connection、network.flow 查看标准化网络证据；关系卡只使用实际导入的协议/端点字段，未采集到不会补造事件。";
         }
 
         if (string.Equals(eventKind, "health", StringComparison.OrdinalIgnoreCase))

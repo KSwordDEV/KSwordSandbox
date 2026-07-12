@@ -228,6 +228,8 @@ guest test-signing 委托和 WebUI 启动；不会提示 secret、启动 dotnet 
 ```powershell
 .\install.ps1 -InstallEntrypoint CreateOrPreparePath -PlanOnly -Json
 .\install.ps1 -InstallEntrypoint RestoreCleanCheckpoint -AllowVmMutation -WhatIf -Json
+.\install.ps1 -Mode Status -Json
+.\install.ps1 -Mode CheckEnvironment -Json
 .\scripts\Test-HyperVReadiness.ps1 -Json
 ```
 
@@ -235,6 +237,11 @@ guest test-signing 委托和 WebUI 启动；不会提示 secret、启动 dotnet 
 `OperatorModeMatrix`、`ReadOnlyAssertions`、`CreateOrPreparePlanActions`、restore
 gate 字段和中文 next actions；`Test-HyperVReadiness -Json` 输出单一 envelope：
 `{ Checks, Summary }`。
+`Status` / `CheckEnvironment` 也会输出机器可读 `ReadinessVerdict`：
+`ReadinessOverallStatus`（`ReadyForLive` / `ReadyForNonLive` / `Blocked`）、
+`InstallStateReady`、`WebUiReady`、`LiveReady`、`BlockingReasons`、`WarningReasons`
+和 `RecommendedActions`。这些诊断不会启动、还原或停止 VM；当 Hyper-V module
+可用时，它们可能执行只读 VM/checkpoint/profile 查询。
 
 ## 快速本地安装 / Fast local setup
 

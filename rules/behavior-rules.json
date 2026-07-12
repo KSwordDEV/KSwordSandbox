@@ -1,5 +1,5 @@
 {
-  "version": "2026-07-12-v29-security-privilege",
+  "version": "2026-07-12-v31-noise-sampling-boundary",
   "rules": [
     {
       "id": "host-submission",
@@ -222,13 +222,17 @@
       "titleZh": "观察到镜像加载元数据",
       "severity": "info",
       "confidence": "low",
-      "summary": "An R0 image-load callback row included image or module path metadata for report correlation with process and driver activity.",
-      "summaryZh": "R0/驱动遥测显示“观察到镜像加载元数据”；该规则依赖结构化驱动字段，并应排除采集健康和自噪声事件。",
+      "summary": "R0 image-load metadata is reported only when the row is sample-correlated and not a truncated/system-mode image path; ordinary system DLL load metadata stays diagnostic.",
+      "summaryZh": "仅当 R0 镜像加载行已关联样本且不是截断/系统镜像路径时才报告；普通系统 DLL 加载元数据保留为诊断，不作为行为发现。",
       "eventTypes": [
         "image.load",
         "image.loaded",
         "driver.imageLoad",
-        "driver.image.load"
+        "driver.image.load",
+        "etw.image.load",
+        "etw.kernel_process.image_load",
+        "r0.image",
+        "r0.image.load"
       ],
       "dataKeys": [
         "imagePath",
@@ -252,7 +256,37 @@
         "driver",
         "image-load",
         "metadata"
-      ]
+      ],
+      "allDataEquals": {
+        "behaviorCounted": [
+          "true"
+        ]
+      },
+      "excludeDataEquals": {
+        "pathTruncated": [
+          "true"
+        ],
+        "imagePathTruncated": [
+          "true"
+        ],
+        "systemModeImage": [
+          "true"
+        ]
+      },
+      "excludeDataContains": {
+        "imagePath": [
+          "\\Windows\\System32\\",
+          "\\Windows\\SysWOW64\\",
+          "\\Windows\\WinSxS\\",
+          "\\Program Files\\Windows Defender\\"
+        ],
+        "path": [
+          "\\Windows\\System32\\",
+          "\\Windows\\SysWOW64\\",
+          "\\Windows\\WinSxS\\",
+          "\\Program Files\\Windows Defender\\"
+        ]
+      }
     },
     {
       "id": "network-connection",
@@ -272,11 +306,11 @@
     },
     {
       "id": "process-timeout-long-sleep",
-      "title": "Sample still running at timeout",
-      "titleZh": "样本在超时时仍在运行",
+      "title": "Sleep-evasion timeout signal",
+      "titleZh": "Sleep 逃避超时信号",
       "severity": "info",
-      "summary": "The sample process was still running when the configured analysis window ended. This is common for GUI applications such as Notepad and is reported as execution-state metadata, not malicious behavior by itself.",
-      "summaryZh": "配置的分析窗口结束时样本进程仍在运行。这对记事本等 GUI 应用较常见，报告为执行状态元数据，本身不是恶意行为。",
+      "summary": "A timeout row is reported only when explicit sleep-evasion telemetry marks the timeout as a behavior candidate; a process merely still running after a short analysis window is metadata.",
+      "summaryZh": "仅当超时行带有明确 sleep 逃避遥测并标记为行为候选时才报告；短分析窗口结束时进程仍运行仅是元数据。",
       "eventTypes": [
         "process.timeout"
       ],
@@ -285,7 +319,12 @@
         "timeout",
         "collection-metadata"
       ],
-      "confidence": "low"
+      "confidence": "low",
+      "allDataEquals": {
+        "sleepEvasionCandidate": [
+          "true"
+        ]
+      }
     },
     {
       "id": "static-pe-known-packer",
@@ -482,8 +521,8 @@
       "titleZh": "观察到嵌入 URL 字符串",
       "severity": "info",
       "confidence": "low",
-      "summary": "Static analysis extracted URL-like strings from the sample. Manifest, schema, and vendor/fwlink URLs are triage metadata, not observed transfer behavior.",
-      "summaryZh": "静态分析发现“观察到嵌入 URL 字符串”相关证据；这是分诊元数据，请结合 PE 结构、导入/字符串和运行时行为复核。",
+      "summary": "Static URL strings are reported only when the structured indicator contains a meaningful host; malformed tiny URL-like fragments and reference metadata stay triage context.",
+      "summaryZh": "仅当结构化字符串指标包含有意义主机名时才报告静态 URL；畸形短 URL 片段和引用元数据保留为分诊上下文。",
       "eventTypes": [
         "static.analysis.completed",
         "static.string.indicator"
@@ -513,6 +552,21 @@
       "excludeDataEquals": {
         "classification": [
           "reference"
+        ],
+        "value": [
+          "https://L/H",
+          "http://L/H"
+        ]
+      },
+      "allDataRegex": {
+        "value": [
+          "^https?://(?=.{12,240}$)(?:(?:[A-Z0-9-]+\\.)+[A-Z]{2,63}|(?:\\d{1,3}\\.){3}\\d{1,3})(?::\\d{1,5})?(?:[/?#][^\\s\"'<>]*)?$"
+        ]
+      },
+      "excludeDataContains": {
+        "value": [
+          "https://L/H",
+          "http://L/H"
         ]
       }
     },
@@ -521,8 +575,8 @@
       "title": "PE import table present",
       "titleZh": "存在 PE 导入表",
       "severity": "info",
-      "summary": "Static analysis parsed at least one PE import descriptor; imported module/API evidence may appear in interesting strings.",
-      "summaryZh": "静态分析发现“存在 PE 导入表”相关证据；这是分诊元数据，请结合 PE 结构、导入/字符串和运行时行为复核。",
+      "summary": "Static analysis parsed at least one PE import descriptor; imported module/API evidence may appear in interesting strings. Pure PE metadata is suppressed from findings unless a future producer explicitly sets promoteStaticMetadataFinding=true.",
+      "summaryZh": "静态分析发现“存在 PE 导入表”相关证据；这是分诊元数据，请结合 PE 结构、导入/字符串和运行时行为复核。 纯 PE 元数据默认不生成 finding；除非后续生产者显式设置 promoteStaticMetadataFinding=true。",
       "eventTypes": [
         "static.analysis.completed",
         "static.pe.import.module"
@@ -550,9 +604,15 @@
         "static",
         "pe",
         "imports",
-        "triage"
+        "triage",
+        "metadata-suppressed"
       ],
-      "confidence": "low"
+      "confidence": "low",
+      "allDataEquals": {
+        "promoteStaticMetadataFinding": [
+          "true"
+        ]
+      }
     },
     {
       "id": "static-import-suspicious-api",
@@ -1174,7 +1234,7 @@
       "title": "PE resource directory present",
       "titleZh": "存在 PE 资源目录",
       "severity": "info",
-      "summary": "Static analysis parsed a PE resource directory; resource type and payload hints may appear in static evidence.",
+      "summary": "Static analysis parsed a PE resource directory; resource type and payload hints may appear in static evidence. Pure PE metadata is suppressed from findings unless a future producer explicitly sets promoteStaticMetadataFinding=true.",
       "eventTypes": [
         "static.analysis.completed",
         "static.pe.resource"
@@ -1201,10 +1261,16 @@
         "static",
         "pe",
         "resources",
-        "triage"
+        "triage",
+        "metadata-suppressed"
       ],
       "confidence": "low",
-      "summaryZh": "静态分析解析到 PE 资源目录；资源类型、大小、熵值和载荷线索会在 granular resource 事件中展开。"
+      "summaryZh": "静态分析解析到 PE 资源目录；资源类型、大小、熵值和载荷线索会在 granular resource 事件中展开。 纯 PE 元数据默认不生成 finding；除非后续生产者显式设置 promoteStaticMetadataFinding=true。",
+      "allDataEquals": {
+        "promoteStaticMetadataFinding": [
+          "true"
+        ]
+      }
     },
     {
       "id": "static-resource-payload-candidate",
@@ -1412,8 +1478,8 @@
       "titleZh": "存在 PE 签名或证书表元数据",
       "severity": "info",
       "confidence": "low",
-      "summary": "Static analysis observed PE security-directory, certificate-table, or Authenticode metadata. This is provenance context only and should not increase risk by itself.",
-      "summaryZh": "静态分析观察到 PE 安全目录、证书表或 Authenticode 元数据；该命中仅提供来源/签名上下文，不应单独提高风险。",
+      "summary": "Static analysis observed PE security-directory, certificate-table, or Authenticode metadata. This is provenance context only and should not increase risk by itself. Pure PE metadata is suppressed from findings unless a future producer explicitly sets promoteStaticMetadataFinding=true.",
+      "summaryZh": "静态分析观察到 PE 安全目录、证书表或 Authenticode 元数据；该命中仅提供来源/签名上下文，不应单独提高风险。 纯 PE 元数据默认不生成 finding；除非后续生产者显式设置 promoteStaticMetadataFinding=true。",
       "eventTypes": [
         "static.analysis.completed"
       ],
@@ -1441,8 +1507,14 @@
         "pe",
         "signature",
         "provenance",
-        "triage"
-      ]
+        "triage",
+        "metadata-suppressed"
+      ],
+      "allDataEquals": {
+        "promoteStaticMetadataFinding": [
+          "true"
+        ]
+      }
     },
     {
       "id": "static-pe-parse-warning-observed",
@@ -1976,7 +2048,15 @@
           "wmic path Win32_",
           "wmic /namespace:\\\\root\\wmi PATH MSAcpi",
           "wmic baseboard",
-          "wmic memorychip"
+          "wmic memorychip",
+          "certutil.cpp",
+          "\\certutil.cpp",
+          "/certutil.cpp"
+        ],
+        "path": [
+          "certutil.cpp",
+          "\\certutil.cpp",
+          "/certutil.cpp"
         ]
       }
     },
@@ -2057,7 +2137,15 @@
           "wmic path Win32_",
           "wmic /namespace:\\\\root\\wmi PATH MSAcpi",
           "wmic baseboard",
-          "wmic memorychip"
+          "wmic memorychip",
+          "certutil.cpp",
+          "\\certutil.cpp",
+          "/certutil.cpp"
+        ],
+        "path": [
+          "certutil.cpp",
+          "\\certutil.cpp",
+          "/certutil.cpp"
         ]
       }
     },
@@ -2602,7 +2690,8 @@
       "summary": "A kernel process callback row was imported from driver telemetry and should be inspected with the raw event payload.",
       "summaryZh": "R0 驱动进程回调提供进程创建/退出等内核侧上下文；只有与样本 PID、父子链或路径关联时才归因为样本行为，未知关联保持分诊，不正常化未知样本。",
       "eventTypes": [
-        "driver.process"
+        "driver.process",
+        "r0.process"
       ],
       "tags": [
         "driver",
@@ -2625,7 +2714,8 @@
         "driver.file.write",
         "driver.file.setinfo",
         "driver.file.rename",
-        "driver.file.delete"
+        "driver.file.delete",
+        "r0.file"
       ],
       "dataContains": {
         "operationName": [
@@ -2667,12 +2757,13 @@
       "title": "R0 driver registry mutation signal",
       "titleZh": "R0 驱动注册表变更信号",
       "severity": "medium",
-      "summary": "Driver telemetry reported registry create, set, delete, or rename operations from kernel callback evidence.",
-      "summaryZh": "R0 驱动报告注册表创建、设置、删除或重命名信号；需结合进程/路径/值数据与样本执行链归因，排除采集健康和自噪声，未知关联不得视为良性。",
+      "summary": "Driver registry mutation rows are promoted only when sample correlation marked behaviorCounted=true; empty-process CTL/certificate maintenance rows stay telemetry diagnostics.",
+      "summaryZh": "仅当样本关联已标记 behaviorCounted=true 时才提升 R0 注册表变更行；空进程 CTL/证书维护行保留为遥测诊断。",
       "mitreTechniqueId": "T1112",
       "mitreTechniqueName": "Modify Registry",
       "eventTypes": [
-        "driver.registry"
+        "driver.registry",
+        "r0.registry"
       ],
       "dataContains": {
         "operationName": [
@@ -2694,7 +2785,42 @@
         "driver",
         "r0",
         "registry"
-      ]
+      ],
+      "allDataEquals": {
+        "behaviorCounted": [
+          "true"
+        ]
+      },
+      "excludeDataContains": {
+        "keyPath": [
+          "\\CTLs\\",
+          "AuthRoot\\CTLs",
+          "Cryptography\\OID",
+          "CertificateTrustList",
+          "CTLs"
+        ],
+        "path": [
+          "\\CTLs\\",
+          "AuthRoot\\CTLs",
+          "Cryptography\\OID",
+          "CertificateTrustList",
+          "CTLs"
+        ],
+        "valueName": [
+          "\\CTLs\\",
+          "AuthRoot\\CTLs",
+          "Cryptography\\OID",
+          "CertificateTrustList",
+          "CTLs"
+        ],
+        "message": [
+          "\\CTLs\\",
+          "AuthRoot\\CTLs",
+          "Cryptography\\OID",
+          "CertificateTrustList",
+          "CTLs"
+        ]
+      }
     },
     {
       "id": "r0-driver-network-signal",
@@ -2706,7 +2832,8 @@
       "mitreTechniqueId": "T1105",
       "mitreTechniqueName": "Ingress Tool Transfer",
       "eventTypes": [
-        "driver.network"
+        "driver.network",
+        "r0.network"
       ],
       "tags": [
         "driver",
@@ -3090,7 +3217,8 @@
       "mitreTechniqueId": "T1547.001",
       "mitreTechniqueName": "Registry Run Keys / Startup Folder",
       "eventTypes": [
-        "driver.registry"
+        "driver.registry",
+        "r0.registry"
       ],
       "dataContains": {
         "keyPath": [
@@ -3142,7 +3270,8 @@
       "mitreTechniqueId": "T1543.003",
       "mitreTechniqueName": "Windows Service",
       "eventTypes": [
-        "driver.registry"
+        "driver.registry",
+        "r0.registry"
       ],
       "dataContains": {
         "keyPath": [
@@ -3278,7 +3407,8 @@
       "mitreTechniqueId": "T1053.005",
       "mitreTechniqueName": "Scheduled Task",
       "eventTypes": [
-        "driver.registry"
+        "driver.registry",
+        "r0.registry"
       ],
       "dataContains": {
         "keyPath": [
@@ -3558,7 +3688,8 @@
       "mitreTechniqueId": "T1105",
       "mitreTechniqueName": "Ingress Tool Transfer",
       "eventTypes": [
-        "driver.network"
+        "driver.network",
+        "r0.network"
       ],
       "dataContains": {
         "directionName": [
@@ -3588,7 +3719,8 @@
       "mitreTechniqueId": "T1071.004",
       "mitreTechniqueName": "DNS",
       "eventTypes": [
-        "driver.network"
+        "driver.network",
+        "r0.network"
       ],
       "dataContains": {
         "protocolName": [
@@ -3618,7 +3750,8 @@
       "mitreTechniqueId": "T1071.001",
       "mitreTechniqueName": "Web Protocols",
       "eventTypes": [
-        "driver.network"
+        "driver.network",
+        "r0.network"
       ],
       "dataContains": {
         "protocolName": [
@@ -4588,7 +4721,11 @@
         "process.open",
         "process.access",
         "api.call",
-        "driver.process"
+        "driver.process",
+        "security.process.handle_duplicated",
+        "etw.process.access",
+        "etw.process.open",
+        "etw.process.handle"
       ],
       "dataContains": {
         "targetProcessName": [
@@ -5033,7 +5170,11 @@
         "process.access",
         "process.open",
         "driver.process",
-        "api.call"
+        "api.call",
+        "security.process.handle_duplicated",
+        "etw.process.access",
+        "etw.process.open",
+        "etw.process.handle"
       ],
       "dataContains": {
         "targetImage": [
@@ -6297,8 +6438,8 @@
       "titleZh": "观察到进程树子进程计数元数据",
       "severity": "info",
       "confidence": "low",
-      "summary": "A process-tree node carried child-count metadata for triage of unusually broad sample lineage fan-out.",
-      "summaryZh": "进程树节点携带 child-count 元数据，用于分诊异常宽的样本谱系扇出。",
+      "summary": "Process-tree child-count metadata is reported only for fan-out of two or more child processes; 0/1 child counts stay metadata.",
+      "summaryZh": "仅当进程树扇出达到 2 个或更多子进程时才报告 child-count 元数据；0/1 子进程计数保留为元数据。",
       "eventTypes": [
         "process.tree"
       ],
@@ -6321,7 +6462,14 @@
         "fanout",
         "metadata",
         "collection"
-      ]
+      ],
+      "allDataNumericRanges": {
+        "childProcessCount": [
+          {
+            "min": 2
+          }
+        ]
+      }
     },
     {
       "id": "lolbin-process-tree-node",
@@ -8133,7 +8281,11 @@
         "process.open",
         "process.access",
         "driver.process",
-        "api.call"
+        "api.call",
+        "security.process.handle_duplicated",
+        "etw.process.access",
+        "etw.process.open",
+        "etw.process.handle"
       ],
       "dataContains": {
         "desiredAccess": [
@@ -10896,7 +11048,11 @@
         "etw.privilege.*",
         "process.access",
         "driver.process",
-        "api.call"
+        "api.call",
+        "security.process.handle_duplicated",
+        "etw.process.access",
+        "etw.process.open",
+        "etw.process.handle"
       ],
       "dataContains": {
         "desiredAccess": [
@@ -12950,7 +13106,10 @@
       "eventTypes": [
         "process.remote_thread",
         "thread.remote",
-        "driver.thread"
+        "driver.thread",
+        "etw.thread.remote",
+        "etw.thread.start",
+        "etw.threat_intelligence.remote_thread"
       ],
       "dataKeys": [
         "targetProcessName",
@@ -13048,7 +13207,11 @@
         "process.open",
         "process.access",
         "driver.process",
-        "api.call"
+        "api.call",
+        "security.process.handle_duplicated",
+        "etw.process.access",
+        "etw.process.open",
+        "etw.process.handle"
       ],
       "dataContains": {
         "desiredAccess": [
@@ -20982,7 +21145,10 @@
         "driver.thread",
         "process.remote_thread",
         "thread.remote",
-        "api.call"
+        "api.call",
+        "etw.thread.remote",
+        "etw.thread.start",
+        "etw.threat_intelligence.remote_thread"
       ],
       "dataContains": {
         "operation": [
@@ -21193,7 +21359,11 @@
         "process.access",
         "driver.process",
         "r0.process",
-        "api.call"
+        "api.call",
+        "security.process.handle_duplicated",
+        "etw.process.access",
+        "etw.process.open",
+        "etw.process.handle"
       ],
       "dataContains": {
         "targetProcessName": [
@@ -24478,7 +24648,10 @@
         "thread.remote",
         "driver.thread",
         "r0.thread",
-        "api.call"
+        "api.call",
+        "etw.thread.remote",
+        "etw.thread.start",
+        "etw.threat_intelligence.remote_thread"
       ],
       "allDataKeys": [
         "targetProcessName",
@@ -26588,7 +26761,53 @@
           "VirusTotal not configured",
           "VT not configured",
           "VirusTotal rate limited",
-          "VirusTotal timeout"
+          "VirusTotal timeout",
+          "crl.microsoft.com",
+          "www.microsoft.com/pki",
+          "microsoft.com/pki",
+          "/pki/crl/",
+          "/pki/certs/",
+          ".crl",
+          "MicRooCerAut",
+          "Microsoft Root",
+          "Microsoft Code Verification",
+          "Microsoft Time-Stamp"
+        ],
+        "value": [
+          "crl.microsoft.com",
+          "www.microsoft.com/pki",
+          "microsoft.com/pki",
+          "/pki/crl/",
+          "/pki/certs/",
+          ".crl",
+          "MicRooCerAut",
+          "Microsoft Root",
+          "Microsoft Code Verification",
+          "Microsoft Time-Stamp"
+        ],
+        "url": [
+          "crl.microsoft.com",
+          "www.microsoft.com/pki",
+          "microsoft.com/pki",
+          "/pki/crl/",
+          "/pki/certs/",
+          ".crl",
+          "MicRooCerAut",
+          "Microsoft Root",
+          "Microsoft Code Verification",
+          "Microsoft Time-Stamp"
+        ],
+        "matchedStrings": [
+          "crl.microsoft.com",
+          "www.microsoft.com/pki",
+          "microsoft.com/pki",
+          "/pki/crl/",
+          "/pki/certs/",
+          ".crl",
+          "MicRooCerAut",
+          "Microsoft Root",
+          "Microsoft Code Verification",
+          "Microsoft Time-Stamp"
         ]
       }
     },
@@ -26809,6 +27028,14 @@
           "VT not configured",
           "VirusTotal rate limited",
           "VirusTotal timeout"
+        ],
+        "matchedStrings": [
+          "\"Xen\""
+        ]
+      },
+      "excludeDataEquals": {
+        "value": [
+          "Xen"
         ]
       }
     },
@@ -27273,7 +27500,8 @@
       "eventTypes": [
         "driver.registry",
         "registry.set",
-        "registry.create"
+        "registry.create",
+        "r0.registry"
       ],
       "allDataContains": {
         "persistenceFamily": [
@@ -27387,7 +27615,8 @@
       "eventTypes": [
         "driver.registry",
         "registry.set",
-        "registry.create"
+        "registry.create",
+        "r0.registry"
       ],
       "allDataContains": {
         "persistenceFamily": [
@@ -27501,7 +27730,8 @@
       "eventTypes": [
         "driver.registry",
         "registry.set",
-        "registry.create"
+        "registry.create",
+        "r0.registry"
       ],
       "allDataContains": {
         "persistenceFamily": [
@@ -27615,7 +27845,8 @@
       "eventTypes": [
         "driver.file",
         "file.created",
-        "file.modified"
+        "file.modified",
+        "r0.file"
       ],
       "allDataContains": {
         "dropLocationFamily": [
@@ -27722,18 +27953,27 @@
       "titleZh": "R0 语义用户可写释放文件候选",
       "severity": "medium",
       "confidence": "medium",
-      "summary": "Parsed R0 file telemetry reported droppedFileCandidate=true in Temp, ProgramData, Public, or another writable drop-location family.",
-      "summaryZh": "解析后的 R0 文件遥测在 Temp、ProgramData、Public 或其他可写位置报告释放文件候选；需结合样本进程、文件类型、后续执行或下载来源，未关联样本时仅作分诊。",
+      "summary": "Parsed R0 file telemetry reports dropped-file candidates only for create/write/rename/delete/security mutation rows with full paths in user-writable locations.",
+      "summaryZh": "仅当解析后的 R0 文件遥测为 create/write/rename/delete/security 等修改操作，且完整路径位于用户可写位置时，才报告释放文件候选。",
       "mitreTechniqueId": "T1105",
       "mitreTechniqueName": "Ingress Tool Transfer",
       "eventTypes": [
         "driver.file",
         "file.created",
-        "file.modified"
+        "file.modified",
+        "r0.file"
       ],
       "allDataContains": {
         "droppedFileCandidate": [
           "true"
+        ],
+        "operationName": [
+          "create",
+          "write",
+          "setInformation",
+          "rename",
+          "delete",
+          "setSecurity"
         ]
       },
       "dataContains": {
@@ -27830,6 +28070,20 @@
           "VT not configured",
           "VirusTotal rate limited",
           "VirusTotal timeout"
+        ],
+        "operationName": [
+          "read",
+          "close",
+          "cleanup",
+          "open"
+        ]
+      },
+      "excludeDataEquals": {
+        "pathTruncated": [
+          "true"
+        ],
+        "filePathTruncated": [
+          "true"
         ]
       }
     },
@@ -27847,7 +28101,9 @@
         "image.load",
         "image.loaded",
         "driver.imageLoad",
-        "driver.image.load"
+        "driver.image.load",
+        "r0.image",
+        "r0.image.load"
       ],
       "allDataContains": {
         "imageLoadFamily": [
@@ -27963,7 +28219,8 @@
       "eventTypes": [
         "driver.network",
         "network.tcp",
-        "network.flow"
+        "network.flow",
+        "r0.network"
       ],
       "allDataContains": {
         "networkEvidenceKind": [
@@ -28078,7 +28335,8 @@
       "eventTypes": [
         "driver.network",
         "network.tcp",
-        "network.flow"
+        "network.flow",
+        "r0.network"
       ],
       "allDataContains": {
         "downloadExecuteCandidate": [
@@ -28198,7 +28456,8 @@
         "driver.network",
         "network.udp",
         "network.tcp",
-        "network.flow"
+        "network.flow",
+        "r0.network"
       ],
       "allDataContains": {
         "networkEvidenceKind": [
@@ -28309,7 +28568,8 @@
       "eventTypes": [
         "driver.file",
         "file.created",
-        "file.modified"
+        "file.modified",
+        "r0.file"
       ],
       "allDataContains": {
         "droppedFileCandidate": [
@@ -29750,7 +30010,10 @@
         "process.memory",
         "thread.remote",
         "driver.thread",
-        "process.remote_thread"
+        "process.remote_thread",
+        "etw.thread.remote",
+        "etw.thread.start",
+        "etw.threat_intelligence.remote_thread"
       ],
       "dataContainsAll": {
         "operation": [
@@ -36806,6 +37069,176 @@
           "false"
         ]
       }
+    },
+    {
+      "id": "static-analysis-summary-tags-observed",
+      "title": "Static analysis summary emitted tags",
+      "titleZh": "静态分析摘要输出标签",
+      "severity": "info",
+      "confidence": "low",
+      "summary": "The host static analyzer emitted one or more summary tags. This is static triage context only and should be correlated with granular static rows or runtime evidence.",
+      "summaryZh": "主机静态分析器输出了一个或多个摘要标签。该命中仅是静态分诊上下文，应结合结构化静态行或运行时证据复核。",
+      "eventTypes": [
+        "static.analysis.completed"
+      ],
+      "dataEquals": {
+        "ruleKey": [
+          "static.summary"
+        ]
+      },
+      "dataNumericRanges": {
+        "tagCount": [
+          {
+            "min": 1
+          }
+        ]
+      },
+      "evidenceFields": [
+        "eventType",
+        "path",
+        "data.ruleKey",
+        "data.tagCount",
+        "data.tags",
+        "data.warningCount",
+        "data.zhEvidenceBoundary"
+      ],
+      "tags": [
+        "static",
+        "summary",
+        "triage",
+        "metadata"
+      ]
+    },
+    {
+      "id": "static-yara-builtin-engine-observed",
+      "title": "Built-in static YARA-like engine matched",
+      "titleZh": "内置静态 YARA-like 引擎命中",
+      "severity": "low",
+      "confidence": "medium",
+      "summary": "A static.yara.match row came from the built-in lightweight YARA-like engine. Treat it as static signature triage until corroborated by runtime behavior.",
+      "summaryZh": "static.yara.match 行来自内置轻量 YARA-like 引擎。除非有运行时行为佐证，否则应作为静态签名分诊处理。",
+      "eventTypes": [
+        "static.yara.match"
+      ],
+      "dataEquals": {
+        "engine": [
+          "builtin"
+        ]
+      },
+      "dataContains": {
+        "tags": [
+          "static.yara.engine.builtin"
+        ]
+      },
+      "evidenceFields": [
+        "eventType",
+        "path",
+        "data.ruleName",
+        "data.engine",
+        "data.tags",
+        "data.matchedStringIds",
+        "data.scope",
+        "data.mitre"
+      ],
+      "tags": [
+        "static",
+        "yara",
+        "signature",
+        "triage",
+        "metadata"
+      ]
+    },
+    {
+      "id": "security-explicit-credential-use-sample-correlated",
+      "title": "Sample-correlated explicit credential use",
+      "titleZh": "样本相关的显式凭据使用",
+      "severity": "medium",
+      "confidence": "medium",
+      "summary": "A Windows Security 4648 explicit-credential logon row was strongly correlated to the sample process. Review target account, server, and process context before treating it as credential abuse.",
+      "summaryZh": "Windows Security 4648 显式凭据登录行与样本进程强关联。请复核目标账号、目标服务器和进程上下文，再判断是否属于凭据滥用。",
+      "mitreTechniqueId": "T1078",
+      "mitreTechniqueName": "Valid Accounts",
+      "eventTypes": [
+        "security.credential.explicit_logon"
+      ],
+      "allDataEquals": {
+        "strongSampleCorrelation": [
+          "true"
+        ],
+        "explicitCredentialsUsed": [
+          "true"
+        ]
+      },
+      "evidenceFields": [
+        "eventType",
+        "processName",
+        "processId",
+        "commandLine",
+        "data.credentialTargetAccount",
+        "data.credentialTargetServerName",
+        "data.credentialProcessName",
+        "data.sampleCorrelationReason"
+      ],
+      "tags": [
+        "security",
+        "credential-access",
+        "explicit-credentials",
+        "mitre"
+      ]
+    },
+    {
+      "id": "etw-remote-thread-telemetry-sample-correlated",
+      "title": "Sample-correlated ETW remote thread telemetry",
+      "titleZh": "样本相关的 ETW 远程线程遥测",
+      "severity": "high",
+      "confidence": "medium",
+      "summary": "ETW-style thread telemetry reported a remote-thread or threat-intelligence thread event with explicit sample correlation. Readiness-only ETW rows remain excluded by nonbehavior guards.",
+      "summaryZh": "ETW 风格线程遥测报告远程线程或 Threat-Intelligence 线程事件，并带有明确样本关联。仅就绪度的 ETW 行仍会被非行为边界排除。",
+      "mitreTechniqueId": "T1055",
+      "mitreTechniqueName": "Process Injection",
+      "eventTypes": [
+        "etw.thread.remote",
+        "etw.threat_intelligence.remote_thread"
+      ],
+      "allDataEquals": {
+        "strongSampleCorrelation": [
+          "true"
+        ]
+      },
+      "dataContains": {
+        "operation": [
+          "CreateRemoteThread",
+          "NtCreateThreadEx",
+          "remote thread"
+        ],
+        "api": [
+          "CreateRemoteThread",
+          "NtCreateThreadEx",
+          "RtlCreateUserThread"
+        ],
+        "threadTelemetryKind": [
+          "remote",
+          "threat-intelligence"
+        ]
+      },
+      "evidenceFields": [
+        "eventType",
+        "source",
+        "processName",
+        "processId",
+        "data.targetProcessName",
+        "data.targetProcessId",
+        "data.operation",
+        "data.api",
+        "data.threadTelemetryKind"
+      ],
+      "tags": [
+        "etw",
+        "process",
+        "thread",
+        "injection",
+        "mitre"
+      ]
     }
   ]
 }

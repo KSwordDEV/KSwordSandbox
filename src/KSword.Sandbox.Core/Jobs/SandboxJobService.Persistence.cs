@@ -232,7 +232,7 @@ public sealed partial class SandboxJobService
             DurationSeconds = config.Analysis.DefaultDurationSeconds,
             DryRun = true
         };
-        var duration = ClampDuration(submission.DurationSeconds);
+        var duration = ResolveDuration(submission);
         var normalizedSubmission = NormalizeSubmission(submission, duration);
         var runbook = metadataJob?.Runbook ?? TryBuildRecoveredRunbook(jobId, sample, normalizedSubmission);
         var status = ResolveRecoveredStatus(metadataJob?.Status, report?.Status, execution, importState);

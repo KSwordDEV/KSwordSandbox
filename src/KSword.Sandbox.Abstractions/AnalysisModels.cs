@@ -28,7 +28,19 @@ public sealed record SandboxSubmission
 
     public string? DisplayName { get; init; }
 
+    /// <summary>
+    /// Requested bounded analysis window in seconds. A value of 0 is allowed
+    /// only when <see cref="DurationUnlimited"/> is true and represents the
+    /// Web/API "no runtime limit" intent.
+    /// </summary>
     public int DurationSeconds { get; init; } = 120;
+
+    /// <summary>
+    /// True when the operator explicitly requested no Web/API runtime cap for
+    /// this sample. The host still may require an external cancellation path or
+    /// infrastructure-level guard; this flag preserves the request semantics.
+    /// </summary>
+    public bool DurationUnlimited { get; init; }
 
     public bool DryRun { get; init; } = true;
 
