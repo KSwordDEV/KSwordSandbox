@@ -17,8 +17,13 @@ param(
     # Repository root that contains KSwordSandbox.sln, guest/, and scripts/.
     [string]$RepoRoot = '',
 
-    # Visual Studio MSBuild used for both SDK-style .NET publish and native VC++ build.
-    [string]$MSBuildPath = 'D:\Software\VS\MSBuild\Current\Bin\MSBuild.exe',
+    # Visual Studio MSBuild used for the native VC++ build. When omitted, the
+    # script resolves the installed Visual Studio Build Tools instance.
+    [string]$MSBuildPath = '',
+
+    # .NET CLI used for SDK-style Guest Agent publish. When omitted, the user
+    # installed SDK is preferred before the machine-wide dotnet host.
+    [string]$DotnetPath = '',
 
     # Final host-side payload directory copied into or from the Hyper-V guest.
     [string]$PayloadRoot = 'D:\Temp\KSwordSandbox\payload\guest-tools',
@@ -426,6 +431,55 @@ function Invoke-NormalizedMSBuild {
     return $process.ExitCode
 }
 
+# Invoke-NormalizedDotnet runs the SDK-style .NET CLI with a stable environment.
+# Inputs are the dotnet executable and CLI arguments; processing captures the
+# child output and returns its exit code. This keeps SDK resolution in the
+# .NET SDK process instead of forcing Visual Studio's .NET Framework MSBuild to
+# load a user-local SDK workload resolver.
+function Invoke-NormalizedDotnet {
+    param(
+        [Parameter(Mandatory)]
+        [string]$FileName,
+
+        [Parameter(Mandatory)]
+        [string[]]$Arguments
+    )
+
+    $processInfo = [System.Diagnostics.ProcessStartInfo]::new()
+    $processInfo.FileName = $FileName
+    $processInfo.Arguments = ($Arguments | ForEach-Object { ConvertTo-ProcessArgument $_ }) -join ' '
+    $processInfo.UseShellExecute = $false
+    $processInfo.RedirectStandardOutput = $true
+    $processInfo.RedirectStandardError = $true
+
+    $pathValue = [Environment]::GetEnvironmentVariable('PATH')
+    foreach ($key in @($processInfo.EnvironmentVariables.Keys)) {
+        if ($key -ieq 'PATH') {
+            $processInfo.EnvironmentVariables.Remove($key)
+        }
+    }
+
+    if (-not [string]::IsNullOrEmpty($pathValue)) {
+        $processInfo.EnvironmentVariables['Path'] = $pathValue
+    }
+
+    Write-PrepStep "dotnet $($processInfo.Arguments)"
+    $process = [System.Diagnostics.Process]::Start($processInfo)
+    $stdout = $process.StandardOutput.ReadToEnd()
+    $stderr = $process.StandardError.ReadToEnd()
+    $process.WaitForExit()
+
+    if (-not [string]::IsNullOrWhiteSpace($stdout)) {
+        Write-Host $stdout
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($stderr)) {
+        Write-Error $stderr
+    }
+
+    return $process.ExitCode
+}
+
 # Copy-DirectoryContents copies one staged publish directory into the payload.
 # Inputs: source directory, destination directory, and IncludeSymbols flag.
 # Processing: copies files recursively, creates parent folders, and skips .pdb
@@ -564,6 +618,36 @@ try {
         return (Get-Location).Path
     }
 
+    function Resolve-ToolPath {
+        param(
+            [string]$RequestedPath,
+            [Parameter(Mandatory)][string]$ToolName,
+            [Parameter(Mandatory)][string[]]$Candidates
+        )
+
+        if (-not [string]::IsNullOrWhiteSpace($RequestedPath)) {
+            $explicitPath = [System.IO.Path]::GetFullPath($RequestedPath)
+            if (Test-Path -LiteralPath $explicitPath -PathType Leaf) {
+                return $explicitPath
+            }
+
+            throw "$ToolName was not found: $explicitPath"
+        }
+
+        foreach ($candidate in $Candidates) {
+            if (-not [string]::IsNullOrWhiteSpace($candidate) -and (Test-Path -LiteralPath $candidate -PathType Leaf)) {
+                return (Get-Item -LiteralPath $candidate).FullName
+            }
+        }
+
+        $command = Get-Command $ToolName -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($null -ne $command -and (Test-Path -LiteralPath $command.Source -PathType Leaf)) {
+            return (Get-Item -LiteralPath $command.Source).FullName
+        }
+
+        throw "Could not resolve $ToolName. Checked: $($Candidates -join '; ')"
+    }
+
     if ([string]::IsNullOrWhiteSpace($RepoRoot)) {
         $RepoRoot = Resolve-DefaultRepoRoot
     }
@@ -575,9 +659,25 @@ try {
     $agentProject = Join-Path $resolvedRepo 'guest\KSword.Sandbox.Agent\KSword.Sandbox.Agent.csproj'
     $collectorProject = Join-Path $resolvedRepo 'guest\KSword.Sandbox.R0Collector\KSword.Sandbox.R0Collector.vcxproj'
 
-    if (-not (Test-Path -LiteralPath $MSBuildPath -PathType Leaf)) {
-        throw "错误：找不到 MSBuild：$MSBuildPath。下一步：安装 Visual Studio Build Tools/WDK，或传入正确 -MSBuildPath。"
-    }
+    $resolvedMSBuildPath = Resolve-ToolPath `
+        -RequestedPath $MSBuildPath `
+        -ToolName 'MSBuild.exe' `
+        -Candidates @(
+            'C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\MSBuild\Current\Bin\MSBuild.exe',
+            'C:\Program Files\Microsoft Visual Studio\2022\BuildTools\MSBuild\Current\Bin\MSBuild.exe',
+            'D:\Software\VS\MSBuild\Current\Bin\MSBuild.exe'
+        )
+
+    $resolvedDotnetPath = Resolve-ToolPath `
+        -RequestedPath $DotnetPath `
+        -ToolName 'dotnet.exe' `
+        -Candidates @(
+            (Join-Path $env:USERPROFILE '.dotnet\dotnet.exe'),
+            'C:\Program Files\dotnet\dotnet.exe'
+        )
+
+    Write-PrepStep "Using dotnet CLI: $resolvedDotnetPath"
+    Write-PrepStep "Using native MSBuild: $resolvedMSBuildPath"
 
     if (-not (Test-Path -LiteralPath $agentProject -PathType Leaf)) {
         throw "错误：找不到 Guest Agent 项目：$agentProject。下一步：确认仓库完整并从仓库根目录运行。"
@@ -600,25 +700,24 @@ try {
     New-Item -ItemType Directory -Path $agentPublishRoot, $agentArtifacts, $collectorOutDir, $collectorIntDir, $agentPayloadDir, $collectorPayloadDir -Force | Out-Null
 
     Write-PrepStep "Publishing Guest Agent into $agentPublishRoot"
-    $agentExit = Invoke-NormalizedMSBuild -FileName $MSBuildPath -Arguments @(
+    $agentExit = Invoke-NormalizedDotnet -FileName $resolvedDotnetPath -Arguments @(
+        'publish',
         $agentProject,
-        '/restore',
-        '/t:Publish',
-        "/p:Configuration=$Configuration",
-        "/p:RuntimeIdentifier=$RuntimeIdentifier",
-        "/p:SelfContained=$([bool]$script:EffectiveSelfContained)",
-        '/p:UseAppHost=true',
-        "/p:PublishDir=$(Add-TrailingDirectorySeparator -Path $agentPublishRoot)",
-        "/p:ArtifactsPath=$agentArtifacts",
-        '/m:1',
-        '/v:minimal'
+        '--configuration', $Configuration,
+        '--runtime', $RuntimeIdentifier,
+        '--self-contained', ([string]([bool]$script:EffectiveSelfContained)).ToLowerInvariant(),
+        '-p:UseAppHost=true',
+        "-p:PublishDir=$(Add-TrailingDirectorySeparator -Path $agentPublishRoot)",
+        "-p:ArtifactsPath=$agentArtifacts",
+        '--nologo',
+        '--verbosity', 'minimal'
     )
     if ($agentExit -ne 0) {
         throw "错误：Guest Agent publish 失败，退出码 $agentExit。下一步：查看上方 dotnet publish 输出，安装/修复 .NET SDK 后重试。"
     }
 
     Write-PrepStep "Building R0Collector into $collectorOutDir"
-    $collectorExit = Invoke-NormalizedMSBuild -FileName $MSBuildPath -Arguments @(
+    $collectorExit = Invoke-NormalizedMSBuild -FileName $resolvedMSBuildPath -Arguments @(
         $collectorProject,
         '/t:Build',
         "/p:Configuration=$Configuration",

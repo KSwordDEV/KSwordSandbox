@@ -25,10 +25,10 @@ progress-page 重新进入报告，避免自动打开失败时丢失上下文。
 `report.html` 是默认简体中文兼容报告；显式英文入口仍是 `report.en.html`。
 
 - 封面 / Cover：包含 job id、生成时间、verdict、样本身份和 hashes。
-- 目录 / Table of contents。
-- 快速导航 / Quick navigation：面向高频章节的 sticky subnav：
-  Risk、Process、Files、Network、R0、VT、Artifacts 和 Raw events。计数应代表当前嵌入证据，
-  不得暗示 R0 health、collector self-noise 或 VT lookup status 是恶意行为。
+- 目录 / Table of contents 与快速导航 / Quick navigation 在桌面端合并放入左侧文档导航栏。
+  目录覆盖全部章节；快速导航保留 Risk、Process、Files、Network、R0、VT、Artifacts 和 Raw events
+  等高频入口及代表性证据计数，不得暗示 R0 health、collector self-noise 或 VT lookup status 是恶意行为。
+  当前章节应通过 `IntersectionObserver` 高亮并设置 `aria-current="location"`；无 JavaScript 时锚点仍必须可用。
 - 风险摘要 / Risk summary：方形摘要面板。
 - 行为命中 / Behavior detections。
   每个 finding 应显示 evidence count，并提供原生 `<details>` “Top evidence / 关键证据”块，
@@ -117,6 +117,15 @@ progress-page 重新进入报告，避免自动打开失败时丢失上下文。
   behavior、MITRE、static、dynamic、timeline、process、file、registry、network、R0、failure
   和 raw event evidence 在演示时仍可导航。
 - 每个有界主面板应保留 sticky section header，操作者滚动密集证据时不会丢失当前章节。
+  主面板必须使用 layout/paint containment 和独立 stacking context，把 sticky 子元素严格裁剪在
+  当前章节内，避免窄视口或合成滚动时把上一章标题、图谱节点或表头绘制到下一章。
+- 表头 sticky 只能用于 `.event-table-wrap`、raw events panel/page 等自身有界的内部滚动容器；
+  普通图谱表、摘要表和无独立滚动容器的表格必须使用非 sticky 表头，避免跨章节残留。
+- 桌面报告应使用成熟文档系统式双列壳层：左侧导航栏宽度稳定在约 `248-280px`，整栏 sticky、
+  高度受当前 viewport 限制并可独立滚动；右侧正文使用 `minmax(0,1fr)`，长表格不得撑开阅读列。
+- 在 `<=1000px` 的窄视口，左侧导航栏必须回到正文上方并取消 sticky；平板双列展示目录和快捷入口，
+  手机改为单列，并在 JavaScript 可用时通过带 `aria-expanded` 的“章节 / Sections”按钮默认收起；
+  无 JavaScript 时导航保持完整可见，避免导航遮挡或挤压文件、注册表、网络等章节。
   Section chrome 采用 Microstep 风格的亮蓝节奏：`#43A0FF` accents、紧凑方形 step markers
   和 summary-first spacing。
 - 重型事件表不仅要受整页面板限制，也要在章节内部有界。Renderer 内联代表性窗口
@@ -186,6 +195,9 @@ progress-page 重新进入报告，避免自动打开失败时丢失上下文。
   empty states、status words 和 evidence-expander summaries。Raw evidence 必须保持原样：
   `eventType`、API names、schema keys/values、hashes、paths、command lines、stdout、stderr
   以及 JSON/JSONL previews 不翻译。
+- 中文本地化不得对 `<style>` 内容执行通用字符串替换；只能翻译明确列出的 CSS `content` 文案。
+  CSS 标识符和值（尤其 `overflow:auto/hidden/visible`）必须逐字保留，避免状态词 `low:`
+  误命中 `overflow:` 并使章节裁剪失效。
 - 每个生成的 HTML report 都应提供报告内双语入口栏，链接同目录的 `report.zh.html`、
   `report.en.html` 和兼容 `report.html`，使本地文件查看与 WebUI served viewing 行为一致。
   入口栏应说明：`report.html` 是默认简体中文兼容报告，`report.en.html` 保留英文 operator chrome，

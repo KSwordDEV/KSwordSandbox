@@ -182,7 +182,7 @@ public sealed class HtmlReportRenderer
     };
 
     private static readonly Regex ChineseRawEvidenceFragmentRegex = new(
-        "<(?:code|pre)\\b[^>]*>.*?</(?:code|pre)>|\\sdata-copy=\"[^\"]*\"",
+        "<style\\b[^>]*>.*?</style>|<(?:code|pre)\\b[^>]*>.*?</(?:code|pre)>|\\sdata-copy=\"[^\"]*\"",
         RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.CultureInvariant,
         TimeSpan.FromSeconds(2));
 
@@ -295,9 +295,14 @@ public sealed class HtmlReportRenderer
         AppendCover(html, report);
         AppendLanguageEntrypoints(html);
         AppendNoScriptFallback(html);
-        AppendTableOfContents(html);
+        html.AppendLine("<div class=\"report-layout\">");
+        html.AppendLine("<aside class=\"report-sidebar\" aria-label=\"Report navigation\">");
+        html.AppendLine("<div class=\"sidebar-heading\"><div><strong>KSword Sandbox Report</strong><span>Report navigation</span></div><button type=\"button\" class=\"sidebar-toggle\" aria-controls=\"sidebar-navigation\" aria-expanded=\"false\"><span aria-hidden=\"true\">&#9776;</span><span>Sections</span></button></div>");
+        html.AppendLine("<div id=\"sidebar-navigation\" class=\"sidebar-navigation\">");
         AppendQuickNavigation(html, report, artifactLinks);
-        html.AppendLine("<main>");
+        AppendTableOfContents(html);
+        html.AppendLine("</div></aside>");
+        html.AppendLine("<main class=\"report-content\">");
         AppendRiskSummary(html, report);
         AppendBehaviorDetections(html, report);
         AppendAggregatedBehaviorFacts(html, report, artifactLinks);
@@ -318,7 +323,7 @@ public sealed class HtmlReportRenderer
         AppendR0Events(html, report, artifactLookup, artifactLinks);
         AppendFailureReasons(html, report, artifactLookup, artifactLinks);
         AppendRawEvents(html, report, artifactLookup, artifactLinks);
-        html.AppendLine("</main>");
+        html.AppendLine("</main></div>");
         AppendReportScripts(html);
         html.AppendLine("</body></html>");
         return html.ToString();
@@ -341,21 +346,21 @@ body.modern-sandbox-report:before{background:var(--primary);content:'';display:b
 header{background:linear-gradient(135deg,#08111f,#123d66 62%,#0d5fa8);border-bottom:4px solid var(--primary);color:white;padding:34px 48px;position:relative;overflow:hidden}
 header:after{display:none}header h1{font-size:34px;letter-spacing:-.03em;margin:0 0 8px}header .muted{color:#dbeafe}
 header table{background:rgba(8,17,31,.32);border:1px solid rgba(255,255,255,.22);border-collapse:collapse;border-radius:2px;overflow:hidden}header td,header th{border-bottom:1px solid rgba(255,255,255,.18);color:white}header th{background:rgba(255,255,255,.08);position:static}
-main,nav{max-width:1280px;margin:24px auto;padding:0 24px}main{counter-reset:report-section}.card{background:#fff;border:1px solid var(--line);border-radius:2px;box-shadow:none;margin:18px 0;padding:22px;position:relative}
-section.card{counter-increment:report-section;max-height:75vh;max-height:var(--section-max);overflow:auto;scrollbar-color:var(--primary) #eaf4ff;scrollbar-width:thin}.card:before{background:var(--primary);border-radius:0;content:'';height:100%;left:0;opacity:.9;position:absolute;top:0;width:3px}
+.card.language-entry,.card.no-js-fallback{max-width:1560px;margin:18px auto}.report-layout{align-items:start;display:grid;gap:28px;grid-template-columns:minmax(248px,280px) minmax(0,1fr);margin:24px auto;max-width:1600px;padding:0 24px}.report-sidebar{background:#fff;border:1px solid var(--line);border-left:3px solid var(--primary);max-height:calc(100vh - 32px);overflow:auto;position:sticky;scrollbar-color:var(--primary) #eaf4ff;scrollbar-width:thin;top:16px}.sidebar-heading{align-items:center;border-bottom:1px solid var(--line);display:flex;gap:12px;justify-content:space-between;padding:18px 16px}.sidebar-heading strong{display:block;font-size:15px}.sidebar-heading div>span{color:var(--muted);display:block;font-size:12px;font-weight:700;margin-top:4px}.sidebar-toggle{align-items:center;background:#fff;border:1px solid #bfdbfe;border-radius:2px;color:#075985;cursor:pointer;display:none;font-size:12px;font-weight:800;gap:6px;min-height:34px;padding:6px 9px}.sidebar-toggle:hover{background:#eef7ff;border-color:var(--primary)}.sidebar-toggle span[aria-hidden=true]{font-size:16px;line-height:1}.sidebar-navigation{display:block}.sidebar-section{padding:14px 12px}.sidebar-section+.sidebar-section{border-top:1px solid var(--line)}.sidebar-section h2{color:#334155;font-size:12px;margin:0 6px 8px;text-transform:uppercase}.report-content{counter-reset:report-section;min-width:0}.card{background:#fff;border:1px solid var(--line);border-radius:2px;box-shadow:none;margin:18px 0;padding:22px;position:relative}
+section.card{contain:layout paint;counter-increment:report-section;isolation:isolate;max-height:75vh;max-height:var(--section-max);overflow:auto;overscroll-behavior:contain;scrollbar-color:var(--primary) #eaf4ff;scrollbar-width:thin}.card:before{background:var(--primary);border-radius:0;content:'';height:100%;left:0;opacity:.9;position:absolute;top:0;width:3px}
 .language-entry{align-items:center;display:flex;flex-wrap:wrap;gap:10px}.language-entry strong{color:#075985}.language-entry .hint{color:var(--muted);font-size:13px}.language-entry a{background:var(--primary);border-radius:2px;color:white;font-weight:800;padding:8px 12px;text-decoration:none}.language-entry a.secondary{background:#334155}.language-entry a:hover{outline:2px solid rgba(67,160,255,.18)}
-.quick-nav{border-color:#b9ddff;position:sticky;top:8px;z-index:20}.quick-nav:before{background:var(--primary)}.quick-nav h2{font-size:16px;margin-bottom:8px}.quick-nav .hint{color:var(--muted);font-size:12px;margin:0 0 10px}.quick-links{display:flex;flex-wrap:wrap;gap:8px}.quick-link{align-items:center;background:#fff;border:1px solid #cfe6fb;border-radius:2px;color:#075985;display:inline-flex;gap:8px;min-height:40px;padding:7px 10px;text-decoration:none}.quick-link strong{font-size:13px}.quick-link small{background:#dff0ff;border-radius:2px;color:#075985;font-weight:900;min-width:24px;padding:3px 7px;text-align:center}.quick-link:hover{border-color:var(--primary);outline:2px solid rgba(67,160,255,.16)}
+.quick-links,.toc-links{display:grid;gap:2px}.quick-link,.toc-link{align-items:center;border-left:3px solid transparent;color:#334155;display:grid;gap:8px;grid-template-columns:minmax(0,1fr) auto;min-height:34px;padding:7px 8px;text-decoration:none}.quick-link strong{font-size:12px;overflow-wrap:anywhere}.quick-link small{background:#eef7ff;color:#075985;font-size:11px;font-weight:900;min-width:24px;padding:3px 6px;text-align:center}.toc-link{display:block;font-size:12px;font-weight:650;line-height:1.35}.quick-link:hover,.toc-link:hover{background:#f8fbff;border-left-color:#93c5fd;color:#075985}.quick-link.is-active,.toc-link.is-active{background:#eaf4ff;border-left-color:var(--primary);color:#075985}.quick-link[aria-current=location],.toc-link[aria-current=location]{font-weight:900}
 .card h2{align-items:center;display:flex;gap:10px;margin:0 0 14px}.card h2:before{background:var(--primary);border-radius:0;content:'';display:inline-block;height:12px;width:12px}section.card>h2{backdrop-filter:none;background:#fff;border-bottom:1px solid #dbeafe;margin:-22px -22px 16px;padding:16px 22px;position:sticky;top:-22px;z-index:3}section.card>h2:after{background:var(--primary);border-radius:2px;color:white;content:'Step ' counter(report-section);font-size:11px;font-weight:900;margin-left:auto;padding:5px 9px;text-transform:uppercase}
 .grid{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(170px,1fr))}.metric{background:#fff;border:1px solid var(--line);border-left:3px solid var(--primary);border-radius:2px;padding:14px}.metric b{display:block;font-size:26px;margin-top:4px}
 .muted{color:var(--muted)}.risk-critical{color:#7f1d1d}.risk-high{color:#b91c1c}.risk-medium{color:#b45309}.risk-low{color:#047857}.risk-info{color:var(--primary-deep)}
 .badge,.chip,.evidence-count{border:1px solid transparent;border-radius:2px;display:inline-block;font-weight:700;padding:5px 9px}.chip{font-size:12px;margin:2px 4px 2px 0;padding:3px 7px}.evidence-count{background:#f8fbff;border-color:#cfe6fb;color:#075985;font-size:12px;margin:2px 6px 2px 0}
 .badge-critical,.chip-critical{background:#fecaca;color:#7f1d1d}.badge-high,.chip-high{background:#fee2e2;color:#991b1b}.badge-medium,.chip-medium{background:#fef3c7;color:#92400e}.badge-low,.chip-low{background:#dcfce7;color:#166534}.badge-info,.chip-info{background:var(--primary-soft);color:#075985}
 .section-note{background:#f7fbff;border:1px solid #dbeafe;border-left:4px solid var(--primary);border-radius:2px;color:#475569;margin:10px 0;padding:10px 12px}
-table{border-collapse:collapse;border-spacing:0;width:100%;margin-top:14px}td,th{border-bottom:1px solid #e5edf6;padding:10px;text-align:left;vertical-align:top}th{background:#f8fbff;color:#475569;font-size:12px;position:sticky;text-transform:uppercase;top:0;z-index:1}
-code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.toc a{background:#fff;border:1px solid var(--line);border-radius:2px;color:#075985;display:inline-block;font-weight:700;margin:4px 8px 4px 0;padding:7px 12px;text-decoration:none}.toc a:hover{border-color:var(--primary);outline:2px solid rgba(67,160,255,.16)}
+table{border-collapse:collapse;border-spacing:0;width:100%;margin-top:14px}td,th{border-bottom:1px solid #e5edf6;padding:10px;text-align:left;vertical-align:top}th{background:#f8fbff;color:#475569;font-size:12px;position:static;text-transform:uppercase}
+code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}
 .empty{background:#fff;border:1px dashed #b9d7f3;border-radius:2px;color:var(--muted);padding:14px}
 .copy-btn{background:#fff;border:1px solid rgba(67,160,255,.55);border-radius:2px;color:#075985;cursor:pointer;font-size:12px;font-weight:700;margin:2px 6px 2px 0;padding:4px 8px}.copyable{cursor:copy}.copy-hint{color:var(--muted);font-size:12px;margin-top:8px}.no-js-fallback{border-color:#b9ddff}.no-js-fallback:before{background:#38bdf8}.fold-label{background:#f8fbff;border:1px solid #cfe6fb;color:#075985;display:inline-block;font-size:12px;font-weight:800;margin:2px 6px 2px 0;padding:3px 7px}
-.toolbar,.inline-actions{align-items:center;display:inline-flex;flex-wrap:wrap;gap:6px;justify-content:flex-start;margin:0 0 4px}.event-table-wrap{border:1px solid var(--line);border-radius:2px;margin-top:14px;max-height:var(--subsection-max);overflow:auto}.event-table-wrap table{margin-top:0}.event-table-wrap th{top:0}.bounded-list{max-height:var(--subsection-max);overflow:auto}
+.toolbar,.inline-actions{align-items:center;display:inline-flex;flex-wrap:wrap;gap:6px;justify-content:flex-start;margin:0 0 4px}.event-table-wrap{border:1px solid var(--line);border-radius:2px;margin-top:14px;max-height:var(--subsection-max);overflow:auto}.event-table-wrap table{margin-top:0}.event-table-wrap th,.raw-events-panel th,.raw-event-page th{position:sticky;top:0;z-index:1}.bounded-list{max-height:var(--subsection-max);overflow:auto}
 .event-table td:first-child{white-space:nowrap}.event-table td:nth-child(2){min-width:140px}.event-table td:nth-child(4){min-width:140px}.event-table td:nth-child(5){min-width:260px}.event-table .evidence{min-width:280px}
 .timeline-groups{display:grid;gap:10px;margin-top:14px}.timeline-group{background:#fff;border:1px solid var(--line);border-radius:2px;overflow:hidden}.timeline-group>summary{align-items:flex-start;cursor:pointer;display:flex;gap:10px;justify-content:space-between;list-style:none;padding:12px 14px}.timeline-group>summary::-webkit-details-marker{display:none}.timeline-group>summary:before{color:var(--primary-deep);content:'▶';font-weight:900;margin-top:2px}.timeline-group[open]>summary:before{content:'▼'}.timeline-group small{color:var(--muted);display:block;line-height:1.4;margin-top:3px}.timeline{border-left:3px solid rgba(67,160,255,.45);margin:0 14px 14px 20px;padding:12px 0 0 18px}.timeline-item{background:#fff;border:1px solid var(--line);border-radius:2px;margin:0 0 10px;padding:10px 12px;position:relative}.timeline-item:before{background:var(--primary);border:2px solid var(--primary-soft);border-radius:2px;content:'';height:10px;left:-25px;position:absolute;top:13px;width:10px}.timeline-overflow{background:#f1f7ff;border:1px dashed #b9d7f3;border-radius:2px;color:var(--muted);margin:0 0 12px;padding:9px 11px}
 .graph-map{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));margin-top:12px}.graph-node{background:#fff;border:1px solid var(--line);border-left:4px solid var(--primary);border-radius:2px;padding:12px}.graph-node strong{display:block;margin-bottom:4px}.graph-node small{color:var(--muted);display:block;line-height:1.4}.behavior-chain{background:#fff;border:1px solid var(--line);border-radius:2px;counter-reset:chain;margin:12px 0;max-height:var(--subsection-max);overflow:auto;padding:8px 10px}.behavior-chain li{align-items:flex-start;background:#fff;border-bottom:1px solid #dbeafe;border-radius:0;counter-increment:chain;display:grid;gap:8px;grid-template-columns:auto 1fr;margin:0;padding:10px}.behavior-chain li:last-child{border-bottom:0}.behavior-chain li:before{align-items:center;background:var(--primary);border-radius:2px;color:white;content:counter(chain);display:inline-flex;font-weight:900;height:24px;justify-content:center;width:24px}.behavior-chain details{grid-column:2}.behavior-chain pre{max-height:var(--detail-max);overflow:auto;white-space:pre-wrap;word-break:break-word}.edge-table td:nth-child(1),.edge-table td:nth-child(3){min-width:170px}.ioc-grid{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));margin-top:14px}.ioc-card{background:#fff;border:1px solid var(--line);border-radius:2px;padding:12px}.ioc-card h3{font-size:15px;margin:0 0 8px}.ioc-card ul{margin:0;padding-left:18px}.ioc-card li{margin:5px 0;word-break:break-word}
@@ -368,8 +373,8 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
 
 /* Square, flat operator theme: no pill/card nesting beyond one visual layer. */
 .modern-sandbox-report header:after{display:none}.modern-sandbox-report .card,.modern-sandbox-report section.card,.modern-sandbox-report .metric,.modern-sandbox-report .quick-link,.modern-sandbox-report .language-entry a,.modern-sandbox-report .badge,.modern-sandbox-report .chip,.modern-sandbox-report .section-note,.modern-sandbox-report code,.modern-sandbox-report .toc a,.modern-sandbox-report .empty,.modern-sandbox-report .copy-btn,.modern-sandbox-report .event-table-wrap,.modern-sandbox-report .timeline-group,.modern-sandbox-report .timeline-item,.modern-sandbox-report .timeline-overflow,.modern-sandbox-report .graph-node,.modern-sandbox-report .behavior-chain,.modern-sandbox-report .behavior-chain li,.modern-sandbox-report .behavior-chain details,.modern-sandbox-report .ioc-card,.modern-sandbox-report .evidence-summary-card,.modern-sandbox-report .evidence-story-lane,.modern-sandbox-report .narrative-step,.modern-sandbox-report .relation-card,.modern-sandbox-report .overview-item,.modern-sandbox-report .relationship-meta span,.modern-sandbox-report .relationship-details,.modern-sandbox-report .evidence-expansion-card,.modern-sandbox-report .process-tree,.modern-sandbox-report .tree-badge,.modern-sandbox-report .evidence details,.modern-sandbox-report .artifact-btn,.modern-sandbox-report .artifact-no-link,.modern-sandbox-report .artifact-copy-path,.modern-sandbox-report .artifact-preview img,.modern-sandbox-report .technical-field,.modern-sandbox-report .raw-technical-fields,.modern-sandbox-report .raw-technical-field,.modern-sandbox-report .raw-events-shell,.modern-sandbox-report .raw-event-page,.modern-sandbox-report .raw-source-hints{border-radius:0!important}.modern-sandbox-report .card:before,.modern-sandbox-report .evidence-summary-card:before,.modern-sandbox-report .evidence-story-lane:before,.modern-sandbox-report .narrative-step:before,.modern-sandbox-report .relation-card:before,.modern-sandbox-report .overview-item:before{border-radius:0!important}.modern-sandbox-report .badge,.modern-sandbox-report .chip,.modern-sandbox-report .copy-btn,.modern-sandbox-report .artifact-btn,.modern-sandbox-report .artifact-no-link{box-shadow:none!important}.modern-sandbox-report .event-evidence-fields,.modern-sandbox-report .flat-technical-fields,.modern-sandbox-report .related-artifacts-flat{background:transparent;border:0;border-radius:0;padding:0}.modern-sandbox-report .flat-technical-fields{border-top:1px solid var(--line);margin-top:8px;padding-top:8px}.modern-sandbox-report .related-artifacts-flat ul{border-top:1px solid var(--line);list-style:none;margin:6px 0 0 0;padding:0}.modern-sandbox-report .related-artifacts-flat li{border-top:1px solid #e2e8f0;margin-top:6px;padding-top:6px}.modern-sandbox-report .related-artifacts-flat li:first-child{border-top:0}.modern-sandbox-report .event-table-wrap,.modern-sandbox-report .raw-events-panel,.modern-sandbox-report .process-tree,.modern-sandbox-report .behavior-chain,.modern-sandbox-report .relation-card,.modern-sandbox-report .evidence-story-lane{overscroll-behavior:contain}.modern-sandbox-report .event-table td,.modern-sandbox-report .edge-table td{overflow-wrap:anywhere}.modern-sandbox-report .self-noise-note{background:#f8fafc;border-left:4px solid #94a3b8;color:#475569;margin:10px 0;padding:10px 12px}
-@media print{html{scroll-behavior:auto}body{background:#fff;color:#000}header,main,nav{max-width:none;margin:0;padding:12px}.quick-nav,.toc,.language-entry{position:static}.copy-btn{display:none!important}section.card,.card,.event-table-wrap,.raw-events-panel,.process-tree,.behavior-chain,.relation-card,.evidence-story-lane,.evidence-summary-card,.raw-event-page{break-inside:avoid;max-height:none!important;overflow:visible!important}section.card>h2,th{position:static!important}.process-tree-path{white-space:normal}.raw-events-shell>summary:after,.raw-event-page>summary:after,.event-evidence-fields>summary:after,.technical-field>summary:after,.raw-technical-fields>summary:after{color:#64748b;content:' (folded in screen view; expand in browser for full evidence)';font-weight:400}}
-@media(max-width:900px){.grid,.columns{grid-template-columns:1fr 1fr}table{display:block;overflow-x:auto}}@media(max-width:640px){header{padding:28px 24px}.grid,.columns{grid-template-columns:1fr}main,nav{padding:0 14px}.process-tree-path{white-space:normal}}
+@media print{html{scroll-behavior:auto}body{background:#fff;color:#000}header,.language-entry,.no-js-fallback{max-width:none;margin:0;padding:12px}.report-layout{display:block;margin:0;max-width:none;padding:0 12px}.report-sidebar{max-height:none;overflow:visible;position:static}.report-content{min-width:0}.copy-btn{display:none!important}section.card,.card,.event-table-wrap,.raw-events-panel,.process-tree,.behavior-chain,.relation-card,.evidence-story-lane,.evidence-summary-card,.raw-event-page{break-inside:avoid;max-height:none!important;overflow:visible!important}section.card>h2,th{position:static!important}.process-tree-path{white-space:normal}.raw-events-shell>summary:after,.raw-event-page>summary:after,.event-evidence-fields>summary:after,.technical-field>summary:after,.raw-technical-fields>summary:after{color:#64748b;content:' (folded in screen view; expand in browser for full evidence)';font-weight:400}}
+@media(max-width:1000px){.report-layout{display:block}.report-sidebar{display:grid;grid-template-columns:1fr 1fr;max-height:none;position:static}.sidebar-heading{grid-column:1/-1}.sidebar-navigation{display:contents}.sidebar-section+.sidebar-section{border-left:1px solid var(--line);border-top:0}.grid,.columns{grid-template-columns:1fr 1fr}table{display:block;overflow-x:auto}}@media(max-width:640px){header{padding:28px 24px}.language-entry,.no-js-fallback{margin:14px}.report-layout{padding:0 14px}.report-sidebar{display:block}.sidebar-navigation{display:block}.report-js .sidebar-toggle{display:inline-flex}.report-js .report-sidebar:not(.is-open) .sidebar-navigation{display:none}.sidebar-section+.sidebar-section{border-left:0;border-top:1px solid var(--line)}.grid,.columns{grid-template-columns:1fr}.process-tree-path{white-space:normal}}
 
 """);
         html.AppendLine("</style></head>");
@@ -432,7 +437,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
     /// </summary>
     private static void AppendTableOfContents(StringBuilder html)
     {
-        html.AppendLine("<nav id=\"toc\" class=\"card toc\"><h2>Table of contents</h2>");
+        html.AppendLine("<nav id=\"toc\" class=\"sidebar-section toc\" aria-labelledby=\"toc-title\"><h2 id=\"toc-title\">Table of contents</h2><div class=\"toc-links\">");
         foreach (var (href, title) in new[]
         {
             ("cover", "Cover"),
@@ -458,23 +463,22 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
             ("events", "Raw normalized events")
         })
         {
-            html.AppendLine($"<a href=\"#{href}\">{E(title)}</a>");
+            html.AppendLine($"<a class=\"toc-link\" href=\"#{href}\">{E(title)}</a>");
         }
 
-        html.AppendLine("</nav>");
+        html.AppendLine("</div></nav>");
     }
 
     /// <summary>
-    /// Appends a sticky subnav for high-traffic operator sections.
+    /// Appends compact high-traffic shortcuts inside the report sidebar.
     /// Inputs are report counts and indexed artifacts; processing writes quick
     /// Process / Files / Network / R0 / VT / Artifacts quick navigation links;
     /// the method returns no value.
     /// </summary>
     private static void AppendQuickNavigation(StringBuilder html, AnalysisReport report, IReadOnlyCollection<ArtifactDescriptor> artifacts)
     {
-        html.AppendLine("<nav id=\"quick-nav\" class=\"card quick-nav\" aria-label=\"Sticky subnav\">");
-        html.AppendLine("<h2>Quick navigation</h2>");
-        html.AppendLine("<p class=\"hint\">Sticky subnav for Process / Files / Network / R0 / VT / Artifacts quick navigation; counts show currently embedded representative evidence. R0 health, collector self-noise, and VT status rows are counted in their own lanes rather than primary behavior.</p>");
+        html.AppendLine("<nav id=\"quick-nav\" class=\"sidebar-section quick-nav\" aria-labelledby=\"quick-nav-title\">");
+        html.AppendLine("<h2 id=\"quick-nav-title\">Quick navigation</h2>");
         html.AppendLine("<div class=\"quick-links\">");
         QuickLink(html, "risk", "Risk summary", PrimaryBehaviorFindings(report).Count().ToString());
         QuickLink(html, "facts", "Behavior facts", BuildBehaviorFactCards(report, artifacts).Count(card => card.EvidenceLines.Count > 0).ToString());
@@ -8271,6 +8275,11 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
 
         html = ChineseVisibleEventCountRegex.Replace(html, " 个事件");
         html = RestoreChineseRawEvidenceFragments(html, protectedFragments);
+        foreach (var (english, chinese) in ChineseCssTranslations)
+        {
+            html = html.Replace(english, chinese, StringComparison.Ordinal);
+        }
+
         return html;
     }
 
@@ -8312,6 +8321,12 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         return html;
     }
 
+    private static readonly IReadOnlyList<(string English, string Chinese)> ChineseCssTranslations =
+    [
+        ("content:'Step ' counter(report-section)", "content:'步骤 ' counter(report-section)"),
+        (" (folded in screen view; expand in browser for full evidence)", "（屏幕视图中折叠；在浏览器中展开查看完整证据）")
+    ];
+
     private static readonly IReadOnlyList<(string English, string Chinese)> ChineseHtmlTranslations =
     [
         ("<html lang=\"en\">", "<html lang=\"zh-CN\">"),
@@ -8352,6 +8367,8 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         ("No JavaScript required for report navigation: native details, table scrolling, safe Open/Download artifact links, and the print stylesheet remain usable. Copy buttons require JavaScript; without it, select visible evidence text or use report.json/raw source hints.", "报告导航不依赖 JavaScript：原生 details、表格滚动、安全打开/下载证据链接和打印样式仍可使用。复制按钮需要 JavaScript；无 JS 时请选中可见证据文本，或使用 report.json/原始来源提示。"),
         (" (folded in screen view; expand in browser for full evidence)", "（屏幕视图中折叠；在浏览器中展开查看完整证据）"),
         ("Quick navigation", "快速导航"),
+        ("Report navigation", "报告导航"),
+        (">Sections<", ">章节<"),
         ("Sticky subnav", "固定子导航"),
         ("Sticky subnav for Process / Files / Network / R0 / VT / Artifacts quick navigation; counts show currently embedded representative evidence. R0 health, collector self-noise, and VT status rows are counted in their own lanes rather than primary behavior.", "固定子导航用于快速跳转进程 / 文件 / 网络 / R0 / VT / 证据文件；计数表示当前内联的代表性证据。R0 健康、采集器自噪声和 VT 状态行会计入各自通道，而不是主要行为。"),
         ("Sticky subnav for Process / Files / Network / R0 / VT / Artifacts quick navigation; counts show currently embedded representative evidence.", "固定子导航用于快速跳转进程 / 文件 / 网络 / R0 / VT / 证据文件；计数表示当前内联的代表性证据。"),
@@ -11171,6 +11188,54 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
     target.textContent = 'Copied';
     window.setTimeout(function () { target.textContent = original; }, 900);
   });
+
+  document.documentElement.classList.add('report-js');
+  var reportSidebar = document.querySelector('.report-sidebar');
+  var sidebarToggle = document.querySelector('.sidebar-toggle');
+  function setSidebarExpanded(expanded) {
+    if (!reportSidebar || !sidebarToggle) { return; }
+    reportSidebar.classList.toggle('is-open', expanded);
+    sidebarToggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+  }
+
+  if (sidebarToggle) {
+    sidebarToggle.addEventListener('click', function () {
+      setSidebarExpanded(sidebarToggle.getAttribute('aria-expanded') !== 'true');
+    });
+  }
+
+  var sidebarLinks = Array.prototype.slice.call(document.querySelectorAll('.report-sidebar a[href^="#"]'));
+  function setActiveSidebarSection(sectionId) {
+    sidebarLinks.forEach(function (link) {
+      var active = link.getAttribute('href') === '#' + sectionId;
+      link.classList.toggle('is-active', active);
+      if (active) { link.setAttribute('aria-current', 'location'); }
+      else { link.removeAttribute('aria-current'); }
+    });
+  }
+
+  sidebarLinks.forEach(function (link) {
+    link.addEventListener('click', function () {
+      setActiveSidebarSection((link.getAttribute('href') || '').slice(1));
+      if (window.matchMedia('(max-width: 640px)').matches) { setSidebarExpanded(false); }
+    });
+  });
+
+  var observedSections = document.querySelectorAll('header#cover, main section[id]');
+  if ('IntersectionObserver' in window) {
+    var sectionObserver = new IntersectionObserver(function (entries) {
+      var visible = entries
+        .filter(function (entry) { return entry.isIntersecting; })
+        .sort(function (left, right) { return Math.abs(left.boundingClientRect.top) - Math.abs(right.boundingClientRect.top); });
+      if (visible.length > 0) { setActiveSidebarSection(visible[0].target.id); }
+    }, { rootMargin: '-8% 0px -76% 0px', threshold: [0, 0.01] });
+    observedSections.forEach(function (section) { sectionObserver.observe(section); });
+  }
+
+  window.addEventListener('hashchange', function () {
+    if (window.location.hash.length > 1) { setActiveSidebarSection(window.location.hash.slice(1)); }
+  });
+  setActiveSidebarSection(window.location.hash.length > 1 ? window.location.hash.slice(1) : 'cover');
 })();
 </script>
 """);

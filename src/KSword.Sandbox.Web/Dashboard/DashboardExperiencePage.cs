@@ -74,6 +74,7 @@ internal static class DashboardExperiencePage
             .progress-links { margin:6px 0 10px; }
             .pill { background: #e7f3ff; border:1px solid rgba(67,160,255,.35); border-radius:2px; color: #075985; display: inline-block; font-size: 12px; font-weight: 800; padding: 4px 9px; }
             .pill.ready { background:#dcfce7; border-color:#86efac; color:#166534; }
+            .pill.warn { background:#fff7ed; border-color:#fdba74; color:#9a3412; }
             .operator-hero { background:linear-gradient(135deg,#f8fbff,#eef7ff); border-left:4px solid var(--blue); }
             .operator-hero h2 { margin-top:0; }
             .operator-hero-grid { display:grid; gap:12px; grid-template-columns:1.15fr .85fr; margin-top:14px; }
@@ -115,6 +116,13 @@ internal static class DashboardExperiencePage
             .config-card { background:#f8fbff; border:1px solid var(--line); border-radius:2px; padding:12px; }
             .config-card h4 { margin:0 0 8px; }
             .field-hint { color:var(--muted); font-size:12px; line-height:1.45; margin:5px 0 0; }
+            .local-detection-bar { align-items:center; background:#eef7ff; border:1px solid #93c5fd; display:flex; gap:12px; justify-content:space-between; margin:12px 0; padding:12px; }
+            .local-detection-bar.warn { background:#fff7ed; border-color:#fdba74; }
+            .local-detection-bar.error { background:#fef2f2; border-color:#fecaca; }
+            .local-detection-bar strong { display:block; margin-bottom:4px; }
+            .local-detection-bar p { margin:0; }
+            .local-detection-bar button { flex:0 0 auto; margin:0; min-height:40px; }
+            .source-label { color:#075985; font-weight:800; }
             .toggle-stack { display:grid; gap:8px; margin-top:8px; }
             .toggle-card { background:white; border:1px solid #e5edf6; border-radius:2px; padding:9px; }
             .toggle-card label { align-items:flex-start; display:flex; gap:8px; margin:0; }
@@ -122,8 +130,8 @@ internal static class DashboardExperiencePage
             .readonly-toggle { opacity:.82; }
             .config-summary { display:flex; flex-wrap:wrap; gap:6px; margin-top:12px; }
             .config-summary .pill { max-width:100%; overflow-wrap:anywhere; }
-            .preset-actions { align-items:center; display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
-            .preset-actions button { margin-top:0; }
+            .preset-actions { align-items:stretch; display:grid; gap:8px; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); margin-top:12px; }
+            .preset-actions button, .preset-actions a.buttonlink { align-items:center; display:flex; justify-content:center; line-height:1.25; margin:0; min-height:42px; padding:10px 14px; text-align:center; width:100%; }
             details.vm-config { background:#f8fbff; border:1px dashed #b9d7f3; border-radius:2px; margin-top:16px; padding:12px 14px; }
             details.vm-config summary { cursor:pointer; font-weight:800; }
             .job-card { border-left:5px solid var(--blue); }
@@ -183,7 +191,7 @@ internal static class DashboardExperiencePage
             section, article, .metric, .pill, button, a.button, a.buttonlink, input, code, pre, .pathbox, .callout, .report-notice, .report-entry, .countdown, .workspace-tab, .tab-button, .tab-panel, details, .config-card, .toggle-card, .progress-box, .progress-bar, .progress-fill, .stage, .recent-job-card, .runbook-step, .empty, .table-wrap, .step-card, .report-ready, .toast, .num { border-radius: 0 !important; }
             section, article, .metric, .pathbox, .callout, .report-notice, .report-entry, .tab-panel, .config-card, .toggle-card, .progress-box, .stage, .recent-job-card, .runbook-step, .step-card, .report-ready { box-shadow: none !important; }
             .pill, button, a.button, a.buttonlink { box-shadow: none !important; }
-            @media (max-width: 980px) { .grid,.vm-grid,.job-summary,.stages,.progress-facts,.operator-hero-grid,.operator-flow { grid-template-columns: 1fr; } header { padding:24px; } .primary-cta { min-width:0; width:100%; } }
+            @media (max-width: 980px) { .grid,.vm-grid,.job-summary,.stages,.progress-facts,.operator-hero-grid,.operator-flow { grid-template-columns: 1fr; } header { padding:24px; } .primary-cta { min-width:0; width:100%; } .local-detection-bar { align-items:stretch; flex-direction:column; } .local-detection-bar button { width:100%; } }
           </style>
         </head>
         <body>
@@ -286,7 +294,14 @@ internal static class DashboardExperiencePage
               </div>
               <details class="vm-config" open>
                 <summary data-zh="本次任务：虚拟机运行配置" data-en="This job: VM run configuration">本次任务：虚拟机运行配置</summary>
-                <p class="hint" data-zh="默认从 config 与本机 WebUI 预设读取；这里的值只覆盖当前任务，不写入配置文件，也不展示长命令行。" data-en="Defaults are loaded from config and the local WebUI preset. Values here only override the current job, do not write config files, and do not show long command lines.">默认从 config 与本机 WebUI 预设读取；这里的值只覆盖当前任务，不写入配置文件，也不展示长命令行。</p>
+                <p class="hint" data-zh="页面先只读检测本机 VM、检查点和 Payload；检测不到时保持为空并明确提示，不会用 config 或浏览器预设冒充真实状态。Guest 帐号与工作目录无法从离线宿主机可靠推断，因此会单独标记为当前任务配置。" data-en="The page first performs a read-only local detection of the VM, checkpoint, and payload. Missing values stay empty and are never replaced by config or browser presets pretending to be detected state. Guest account and working folder cannot be inferred reliably from an offline host, so they are labeled separately as active job config.">页面先只读检测本机 VM、检查点和 Payload；检测不到时保持为空并明确提示，不会用 config 或浏览器预设冒充真实状态。Guest 帐号与工作目录无法从离线宿主机可靠推断，因此会单独标记为当前任务配置。</p>
+                <div id="localDetectionBar" class="local-detection-bar" data-copy="" data-copy-label="local host detection status">
+                  <div>
+                    <strong data-zh="本机自动检测" data-en="Local auto-detection">本机自动检测</strong>
+                    <p id="localDetectionStatus" class="field-hint" data-copy="" data-copy-label="local detection detail" data-zh="正在检测本机 Hyper-V 与 Payload…" data-en="Detecting local Hyper-V and payload…">正在检测本机 Hyper-V 与 Payload…</p>
+                  </div>
+                  <button class="secondary" type="button" onclick="refreshLocalHostReadiness(true)" data-zh="重新检测本机" data-en="Detect again">重新检测本机</button>
+                </div>
                 <div class="toggle-card runtime-limit-card" data-copy="不限制运行时间 / No runtime limit：未启用 / disabled" data-copy-label="runtime limit policy">
                   <label for="uploadDurationUnlimited"><input id="uploadDurationUnlimited" type="checkbox"> <span data-zh="不限制运行时间（仅传入无限制语义）" data-en="No runtime limit (send unlimited intent only)">不限制运行时间（仅传入无限制语义）</span></label>
                   <p id="durationUnlimitedHint" class="field-hint" data-copy="未启用：使用上方秒数，并按后端 config 限制 / Disabled: use bounded seconds clamped by backend config" data-copy-label="runtime limit hint" data-zh="未勾选时使用上方秒数；勾选后上传/路径规划会提交 durationUnlimited=true、durationSeconds=0，启动 runbook 时 stepTimeoutSeconds=0（不设置 Web 端单步超时）。这不是“停止 VM/杀样本”按钮；需要后端取消接口时再接入。" data-en="When unchecked, the seconds field is used. When checked, upload/path planning submits durationUnlimited=true and durationSeconds=0, and runbook start uses stepTimeoutSeconds=0 (no Web-side per-step timeout). This is not a Stop VM/Kill sample button; backend cancellation can be wired only when a safe cancel API exists.">未勾选时使用上方秒数；勾选后上传/路径规划会提交 durationUnlimited=true、durationSeconds=0，启动 runbook 时 stepTimeoutSeconds=0（不设置 Web 端单步超时）。这不是“停止 VM/杀样本”按钮；需要后端取消接口时再接入。</p>
@@ -295,19 +310,26 @@ internal static class DashboardExperiencePage
                   <div class="config-card">
                     <h4 data-zh="VM 与检查点" data-en="VM and checkpoint">VM 与检查点</h4>
                     <label for="goldenVmName" data-zh="VM 名称" data-en="VM name">VM 名称</label>
-                    <input id="goldenVmName" placeholder="KSwordSandbox-Win10-Golden" data-copy-label="VM name">
+                    <input id="goldenVmName" list="detectedVmOptions" placeholder="正在检测本机 / detecting local host" data-copy-label="VM name">
+                    <datalist id="detectedVmOptions"></datalist>
+                    <p id="vmDetectionHint" class="field-hint" data-copy="" data-copy-label="VM detection source">等待本机检测。</p>
                     <label for="goldenSnapshotName" data-zh="检查点" data-en="Checkpoint">检查点</label>
-                    <input id="goldenSnapshotName" placeholder="Clean" data-copy-label="checkpoint">
+                    <input id="goldenSnapshotName" list="detectedCheckpointOptions" placeholder="正在检测本机 / detecting local host" data-copy-label="checkpoint">
+                    <datalist id="detectedCheckpointOptions"></datalist>
+                    <p id="checkpointDetectionHint" class="field-hint" data-copy="" data-copy-label="checkpoint detection source">等待本机检测。</p>
                   </div>
                   <div class="config-card">
-                    <h4 data-zh="Guest 用户提示" data-en="Guest user hint">Guest 用户提示</h4>
+                    <h4 data-zh="Guest 任务配置" data-en="Guest job config">Guest 任务配置</h4>
                     <label for="guestUserName" data-zh="Guest 用户" data-en="Guest user">Guest 用户</label>
-                    <input id="guestUserName" placeholder="SandboxUser" data-copy-label="guest user">
+                    <input id="guestUserName" placeholder="来自当前任务配置 / active config" data-copy-label="guest user">
+                    <p id="guestUserSourceHint" class="field-hint" data-copy="" data-copy-label="guest user source">来源：当前任务配置。</p>
                     <p id="guestCredentialHint" class="field-hint" data-copy="" data-copy-label="guest credential hint" data-zh="Guest 密码只从本机密钥环境变量读取；WebUI 不输入也不保存密码。" data-en="Guest password is read only from the local secret environment variable; the WebUI does not ask for or store it.">Guest 密码只从本机密钥环境变量读取；WebUI 不输入也不保存密码。</p>
                     <label for="guestWorkingDirectory" data-zh="Guest 工作目录" data-en="Guest working folder">Guest 工作目录</label>
-                    <input id="guestWorkingDirectory" placeholder="C:\KSwordSandbox" data-copy-label="guest working folder">
+                    <input id="guestWorkingDirectory" placeholder="来自当前任务配置 / active config" data-copy-label="guest working folder">
+                    <p id="guestWorkingDirectorySourceHint" class="field-hint" data-copy="" data-copy-label="guest working directory source">来源：当前任务配置。</p>
                     <label for="guestPayloadRoot" data-zh="Guest 工具目录（主机）" data-en="Guest tool folder (host)">Guest 工具目录（主机）</label>
-                    <input id="guestPayloadRoot" placeholder="D:\Temp\KSwordSandbox\payload\guest-tools" data-copy-label="guest payload root">
+                    <input id="guestPayloadRoot" placeholder="正在检测本机 / detecting local host" data-copy-label="guest payload root">
+                    <p id="guestPayloadDetectionHint" class="field-hint" data-copy="" data-copy-label="guest payload detection source">等待本机检测。</p>
                   </div>
                   <div class="config-card">
                     <h4 data-zh="R0 采集器（collector）" data-en="R0 collector">R0 采集器（collector）</h4>
@@ -325,9 +347,10 @@ internal static class DashboardExperiencePage
                 </div>
                 <div id="vmConfigSummary" class="config-summary" data-copy="" data-copy-label="VM configuration summary"></div>
                 <div class="preset-actions">
-                  <button class="secondary" type="button" onclick="saveVmPreset()" data-zh="保存为本机 WebUI 预设" data-en="Save as local WebUI preset">保存为本机 WebUI 预设</button>
-                  <button class="secondary" type="button" onclick="clearVmPreset()" data-zh="清除本机预设" data-en="Clear local preset">清除本机预设</button>
-                  <a class="buttonlink secondary" href="/settings" data-zh="设置页也可管理预设" data-en="Manage preset in Settings">设置页也可管理预设</a>
+                  <button id="loadVmPresetButton" class="secondary" type="button" onclick="loadVmPresetExplicitly()" data-zh="载入已保存覆盖值" data-en="Load saved overrides">载入已保存覆盖值</button>
+                  <button class="secondary" type="button" onclick="saveVmPreset()" data-zh="保存当前覆盖值" data-en="Save current overrides">保存当前覆盖值</button>
+                  <button class="secondary" type="button" onclick="clearVmPreset()" data-zh="清除已保存覆盖值" data-en="Clear saved overrides">清除已保存覆盖值</button>
+                  <a class="buttonlink secondary" href="/settings" data-zh="在设置页管理默认值" data-en="Manage defaults in Settings">在设置页管理默认值</a>
                 </div>
               </details>
               <details class="vm-config" open>
@@ -381,6 +404,9 @@ internal static class DashboardExperiencePage
             let latestRunbookProgressSnapshot = null;
             let runtimeConfigDefaults = null;
             let runtimeConfigLoadError = '';
+            let localHostReadiness = null;
+            let localHostReadinessError = '';
+            let localHostReadinessLoading = false;
             let virusTotalSettingsState = null;
             let virusTotalReadinessError = '';
             let artifactCollectionSupport = {
@@ -470,6 +496,7 @@ internal static class DashboardExperiencePage
               });
               refreshLocalizedReportLinks();
               renderConfigDefaultHints();
+              renderLocalHostReadiness();
               renderVmConfigSummary();
               if (latestRunbookProgressSnapshot) {
                 renderRunbookProgress(latestRunbookProgressSnapshot);
@@ -656,32 +683,95 @@ internal static class DashboardExperiencePage
                 document.getElementById('uploadDuration').value = String(defaultDuration);
                 document.getElementById('uploadDurationUnlimited').checked = false;
                 document.getElementById('uploadDuration').max = String(maxDuration);
-                document.getElementById('goldenVmName').value = config.hyperV?.goldenVmName || '';
-                document.getElementById('goldenSnapshotName').value = config.hyperV?.goldenSnapshotName || '';
+                document.getElementById('goldenVmName').value = '';
+                document.getElementById('goldenSnapshotName').value = '';
                 document.getElementById('guestUserName').value = config.guest?.userName || '';
                 document.getElementById('guestWorkingDirectory').value = config.guest?.workingDirectory || '';
-                document.getElementById('guestPayloadRoot').value = config.paths?.guestPayloadRoot || '';
+                document.getElementById('guestPayloadRoot').value = '';
                 document.getElementById('r0Enabled').checked = Boolean(config.driver?.enabled);
                 document.getElementById('useMockCollector').checked = Boolean(config.driver?.useMockCollector);
                 document.getElementById('collectDroppedFiles').checked = Boolean(config.artifactCollection?.collectDroppedFiles);
                 document.getElementById('captureScreenshots').checked = Boolean(config.artifactCollection?.captureScreenshots);
                 document.getElementById('captureMemoryDumps').checked = Boolean(config.artifactCollection?.captureMemoryDumps);
                 document.getElementById('capturePacketCapture').checked = Boolean(config.artifactCollection?.capturePacketCapture);
-                applyOperatorVmPreset();
                 applyArtifactCollectionSupport();
-                renderConfigDefaultHints();
-                renderVmConfigSummary();
-                renderSelectedSample();
-                renderOperatorReadinessChips();
               } catch {
-                // Keep placeholders when config loading fails; planning still works with server defaults.
                 runtimeConfigLoadError = t('配置读取失败；上传时仍由后端做最终预检。', 'Config loading failed; backend preflight still makes the final decision during upload.');
                 markArtifactCollectionSupportUnknown();
                 applyArtifactCollectionSupport();
+              }
+
+              await refreshLocalHostReadiness(false, false);
+              updateVmPresetButtonState();
+              renderConfigDefaultHints();
+              renderLocalHostReadiness();
+              renderVmConfigSummary();
+              renderSelectedSample();
+              renderOperatorReadinessChips();
+            }
+
+            async function refreshLocalHostReadiness(forceRefresh = false, announce = true) {
+              localHostReadinessLoading = true;
+              localHostReadinessError = '';
+              renderLocalHostReadiness();
+              try {
+                const suffix = forceRefresh ? '?refresh=true' : '';
+                const response = await fetch(`/api/host/readiness${suffix}`);
+                localHostReadiness = await requireOk(response, t('检测本机状态', 'Detect local host state'));
+                applyLocalHostReadinessDefaults();
+                if (announce) {
+                  setStatus(t('本机状态已重新检测；检测不到的项目保持为空，不使用预设值替代。', 'Local host state was detected again; missing values stay empty and are not replaced by presets.'), false);
+                }
+              } catch (error) {
+                localHostReadinessError = error && error.message
+                  ? error.message
+                  : t('本机状态检测失败。', 'Local host detection failed.');
+                if (!localHostReadiness) {
+                  document.getElementById('goldenVmName').value = '';
+                  document.getElementById('goldenSnapshotName').value = '';
+                  document.getElementById('guestPayloadRoot').value = '';
+                }
+                if (announce) {
+                  setStatus(`${t('本机状态检测失败', 'Local host detection failed')}: ${localHostReadinessError}`, true);
+                }
+              } finally {
+                localHostReadinessLoading = false;
                 renderConfigDefaultHints();
+                renderLocalHostReadiness();
                 renderVmConfigSummary();
                 renderSelectedSample();
                 renderOperatorReadinessChips();
+              }
+            }
+
+            function applyLocalHostReadinessDefaults() {
+              const hyperV = localHostReadiness?.hyperV;
+              const guest = localHostReadiness?.guest;
+              const paths = localHostReadiness?.paths;
+              document.getElementById('goldenVmName').value = hyperV?.vmExists ? (hyperV.vmName || '') : '';
+              document.getElementById('goldenSnapshotName').value = hyperV?.checkpointExists ? (hyperV.checkpointName || '') : '';
+              document.getElementById('guestUserName').value = guest?.userName || runtimeConfigDefaults?.guest?.userName || '';
+              document.getElementById('guestWorkingDirectory').value = guest?.workingDirectory || runtimeConfigDefaults?.guest?.workingDirectory || '';
+              document.getElementById('guestPayloadRoot').value = paths?.guestPayloadRoot?.exists ? (paths.guestPayloadRoot.path || '') : '';
+              renderDetectedVmOptions();
+            }
+
+            function renderDetectedVmOptions() {
+              const candidates = Array.isArray(localHostReadiness?.hyperV?.vmCandidates)
+                ? localHostReadiness.hyperV.vmCandidates
+                : [];
+              const vmList = document.getElementById('detectedVmOptions');
+              const checkpointList = document.getElementById('detectedCheckpointOptions');
+              if (vmList) {
+                vmList.innerHTML = candidates
+                  .map(candidate => `<option value="${escapeAttribute(candidate.name || '')}">${escapeHtml(candidate.state || '')}</option>`)
+                  .join('');
+              }
+              if (checkpointList) {
+                const checkpoints = [...new Set(candidates.flatMap(candidate => Array.isArray(candidate.checkpoints) ? candidate.checkpoints : []))];
+                checkpointList.innerHTML = checkpoints
+                  .map(name => `<option value="${escapeAttribute(name)}"></option>`)
+                  .join('');
               }
             }
 
@@ -842,7 +932,7 @@ internal static class DashboardExperiencePage
             function applyOperatorVmPreset() {
               const preset = readOperatorVmPreset();
               if (!preset) {
-                return;
+                return false;
               }
 
               const setValue = (id, value) => {
@@ -870,6 +960,28 @@ internal static class DashboardExperiencePage
               setChecked('captureMemoryDumps', preset.captureMemoryDumps);
               setChecked('capturePacketCapture', preset.capturePacketCapture);
               getAnalysisDuration();
+              return true;
+            }
+
+            function loadVmPresetExplicitly() {
+              if (!applyOperatorVmPreset()) {
+                setStatus(t('没有已保存的覆盖值；页面继续使用本机检测结果。', 'No saved overrides were found; the page continues using local detection.'), true);
+                return;
+              }
+
+              renderConfigDefaultHints();
+              renderLocalHostReadiness();
+              renderVmConfigSummary();
+              renderSelectedSample();
+              renderOperatorReadinessChips();
+              setStatus(t('已显式载入浏览器保存的覆盖值；摘要会标记为“任务覆盖”。', 'Saved browser overrides were loaded explicitly; the summary marks them as job overrides.'), false);
+            }
+
+            function updateVmPresetButtonState() {
+              const button = document.getElementById('loadVmPresetButton');
+              if (button) {
+                button.disabled = !readOperatorVmPreset();
+              }
             }
 
             function captureVmPreset() {
@@ -884,19 +996,22 @@ internal static class DashboardExperiencePage
             function saveVmPreset() {
               const preset = captureVmPreset();
               localStorage.setItem(vmPresetStorageKey, JSON.stringify(preset));
+              updateVmPresetButtonState();
               renderConfigDefaultHints();
               renderVmConfigSummary();
-              setStatus(t('本机 WebUI 预设已保存；后续任务会默认使用这些覆盖值。', 'Local WebUI preset saved; future jobs will default to these override values.'), false);
+              setStatus(t('当前覆盖值已保存；下次需要点击“载入已保存覆盖值”，不会自动盖过本机检测结果。', 'Current overrides were saved; next time use Load saved overrides, because they will not replace local detection automatically.'), false);
             }
 
             async function clearVmPreset() {
               localStorage.removeItem(vmPresetStorageKey);
               await loadConfigDefaults();
-              setStatus(t('本机 WebUI 预设已清除；已恢复 config 默认值。', 'Local WebUI preset cleared; config defaults restored.'), false);
+              updateVmPresetButtonState();
+              setStatus(t('已保存覆盖值已清除；页面已恢复本机自动检测结果。', 'Saved overrides were cleared; the page now shows local auto-detection again.'), false);
             }
 
             function renderConfigDefaultHints() {
-              const secretName = runtimeConfigDefaults?.guest?.passwordSecretName || 'KSWORDBOX_GUEST_PASSWORD';
+              const secretName = localHostReadiness?.guest?.passwordSecretName || runtimeConfigDefaults?.guest?.passwordSecretName || 'KSWORDBOX_GUEST_PASSWORD';
+              const secretDetected = Boolean(localHostReadiness?.guest?.passwordSecretAvailable);
               const maxDuration = normalizePositiveInt(runtimeConfigDefaults?.analysis?.maxDurationSeconds, 900);
               setElementTextAndCopy('durationHint', t(
                 `后端会把有界时长限制在 1-${maxDuration} 秒；勾选“不限制运行时间”时会提交 durationUnlimited=true、durationSeconds=0，并可保存为本机 WebUI 预设。`,
@@ -910,8 +1025,8 @@ internal static class DashboardExperiencePage
                 runtimeCard.setAttribute('data-copy', `${t('运行时间策略', 'Runtime policy')}: ${unlimitedHint}`);
               }
               setElementTextAndCopy('guestCredentialHint', t(
-                `Guest 密码只从本机密钥环境变量 ${secretName} 读取；WebUI 不输入也不保存密码。`,
-                `Guest password is read only from the local secret environment variable ${secretName}; the WebUI does not ask for or store it.`));
+                `Guest 密码只从本机密钥环境变量 ${secretName} 读取；本机检测：${secretDetected ? '已找到' : '未找到'}（不读取或显示密码值）。`,
+                `Guest password is read only from local secret environment variable ${secretName}; local detection: ${secretDetected ? 'found' : 'not found'} (the value is never read into the page or displayed).`));
               const r0Enabled = Boolean(runtimeConfigDefaults?.driver?.enabled);
               const r0Text = r0Enabled
                 ? t('R0 已在配置（config）中启用；本页只覆盖本次任务的真实/Mock 采集器（collector）模式。', 'R0 is enabled in config; this page only overrides the real/mock collector mode for this job.')
@@ -920,16 +1035,114 @@ internal static class DashboardExperiencePage
               applyArtifactCollectionSupport();
             }
 
+            function detectedFieldBaseline(id) {
+              const hyperV = localHostReadiness?.hyperV;
+              const guest = localHostReadiness?.guest;
+              const payload = localHostReadiness?.paths?.guestPayloadRoot;
+              const baselines = {
+                goldenVmName: { value: hyperV?.vmExists ? (hyperV.vmName || '') : '', source: 'detected' },
+                goldenSnapshotName: { value: hyperV?.checkpointExists ? (hyperV.checkpointName || '') : '', source: 'detected' },
+                guestUserName: { value: guest?.userName || runtimeConfigDefaults?.guest?.userName || '', source: 'config' },
+                guestWorkingDirectory: { value: guest?.workingDirectory || runtimeConfigDefaults?.guest?.workingDirectory || '', source: 'config' },
+                guestPayloadRoot: { value: payload?.exists ? (payload.path || '') : '', source: 'detected' }
+              };
+              return baselines[id] || { value: '', source: 'missing' };
+            }
+
+            function classifyConfigField(id) {
+              const value = (document.getElementById(id)?.value || '').trim();
+              const baseline = detectedFieldBaseline(id);
+              if (!value) {
+                return { value: '', source: 'missing', label: t('未检测到', 'NOT_FOUND'), state: 'warn' };
+              }
+
+              if (baseline.value && value.localeCompare(baseline.value, undefined, { sensitivity: 'accent' }) === 0) {
+                return baseline.source === 'config'
+                  ? { value, source: 'config', label: t('任务配置', 'job config'), state: 'neutral' }
+                  : { value, source: 'detected', label: t('本机检测', 'local detection'), state: 'ready' };
+              }
+
+              return { value, source: 'override', label: t('任务覆盖', 'job override'), state: 'neutral' };
+            }
+
+            function renderLocalHostReadiness() {
+              const bar = document.getElementById('localDetectionBar');
+              const hyperV = localHostReadiness?.hyperV;
+              const paths = localHostReadiness?.paths;
+              let message = '';
+              let level = '';
+              if (localHostReadinessLoading) {
+                message = t('正在只读检测 Hyper-V、VM、检查点、运行目录与 Payload…', 'Running read-only detection for Hyper-V, VM, checkpoint, runtime folders, and payload…');
+              } else if (localHostReadinessError) {
+                level = 'error';
+                message = `${t('本机检测失败；未使用 config 或浏览器预设替代真实状态', 'Local detection failed; config and browser presets were not used as detected state')}: ${localHostReadinessError}`;
+              } else if (hyperV?.accessDenied) {
+                level = 'warn';
+                message = t(
+                  `Hyper-V 命令存在，但当前 Web Host 无权查询 VM；VM/检查点保持为空。Payload：${paths?.guestPayloadRoot?.exists && paths?.agentExecutable?.exists ? '已检测到' : '缺失'}。请以管理员身份重启 WebUI 后重新检测。`,
+                  `Hyper-V cmdlets exist, but this Web Host cannot query VMs; VM/checkpoint stay empty. Payload: ${paths?.guestPayloadRoot?.exists && paths?.agentExecutable?.exists ? 'detected' : 'missing'}. Restart the WebUI elevated and detect again.`);
+              } else if (!hyperV?.managementAvailable) {
+                level = 'error';
+                message = t('未检测到 Hyper-V PowerShell 管理命令；VM/检查点保持为空，不使用预设值。', 'Hyper-V PowerShell management cmdlets were not detected; VM/checkpoint stay empty and presets are not substituted.');
+              } else if (hyperV?.querySucceeded && hyperV?.vmExists && hyperV?.checkpointExists) {
+                message = t(
+                  `已检测到 VM “${hyperV.vmName}”与检查点“${hyperV.checkpointName}”；Payload ${paths?.guestPayloadRoot?.exists && paths?.agentExecutable?.exists ? '已就绪' : '缺失'}。`,
+                  `Detected VM “${hyperV.vmName}” and checkpoint “${hyperV.checkpointName}”; payload is ${paths?.guestPayloadRoot?.exists && paths?.agentExecutable?.exists ? 'ready' : 'missing'}.`);
+                level = paths?.guestPayloadRoot?.exists && paths?.agentExecutable?.exists ? '' : 'warn';
+              } else if (hyperV?.querySucceeded) {
+                level = 'warn';
+                const count = Array.isArray(hyperV.vmCandidates) ? hyperV.vmCandidates.length : 0;
+                message = count > 1
+                  ? t(`检测到 ${count} 个 VM 候选，无法安全自动选择；请手动选择。未使用 config 预设值。`, `Detected ${count} VM candidates and could not select one safely; choose manually. Config presets were not substituted.`)
+                  : t('未检测到可用的 VM 或检查点；字段保持为空，未使用 config 预设值。', 'No usable VM/checkpoint was detected; fields stay empty and config presets were not substituted.');
+              } else {
+                level = 'warn';
+                message = t('等待本机检测结果；可检测字段不会从预设值填充。', 'Waiting for local detection; detectable fields will not be populated from presets.');
+              }
+
+              if (bar) {
+                bar.classList.toggle('warn', level === 'warn');
+                bar.classList.toggle('error', level === 'error');
+                bar.setAttribute('data-copy', message);
+              }
+              setElementTextAndCopy('localDetectionStatus', message);
+
+              const vmField = classifyConfigField('goldenVmName');
+              const checkpointField = classifyConfigField('goldenSnapshotName');
+              const payloadField = classifyConfigField('guestPayloadRoot');
+              const vmDetail = hyperV?.accessDenied
+                ? t('来源：未检测到（当前 Web Host 查询 Hyper-V 被拒绝；请以管理员身份重启）。', 'Source: not detected (this Web Host was denied access to Hyper-V; restart elevated).')
+                : vmField.source === 'detected'
+                  ? t(`来源：本机检测；状态 ${hyperV?.vmState || '-'}。`, `Source: local detection; state ${hyperV?.vmState || '-'}.`)
+                  : vmField.source === 'override'
+                    ? t('来源：本次任务手动覆盖。', 'Source: manual override for this job.')
+                    : t('未检测到 VM；可从候选列表选择或手动输入。', 'No VM detected; choose a candidate or enter one manually.');
+              const checkpointDetail = checkpointField.source === 'detected'
+                ? t('来源：选中 VM 的本机检查点清单。', 'Source: local checkpoint inventory for the selected VM.')
+                : checkpointField.source === 'override'
+                  ? t('来源：本次任务手动覆盖。', 'Source: manual override for this job.')
+                  : t('未检测到可安全自动选择的检查点。', 'No checkpoint could be selected safely.');
+              const payloadDetail = payloadField.source === 'detected'
+                ? t(`来源：本机路径存在性检测；manifest ${paths?.payloadManifest?.exists ? '存在' : '缺失'}，Agent ${paths?.agentExecutable?.exists ? '存在' : '缺失'}，R0Collector ${paths?.collectorExecutable?.exists ? '存在' : '缺失'}。`, `Source: local path existence check; manifest ${paths?.payloadManifest?.exists ? 'exists' : 'missing'}, Agent ${paths?.agentExecutable?.exists ? 'exists' : 'missing'}, R0Collector ${paths?.collectorExecutable?.exists ? 'exists' : 'missing'}.`)
+                : payloadField.source === 'override'
+                  ? t('来源：本次任务手动覆盖；尚未由本机检测确认存在。', 'Source: manual job override; existence has not been confirmed by local detection.')
+                  : t(`未检测到 Guest Payload 目录${paths?.guestPayloadRoot?.path ? `；配置候选路径不存在：${paths.guestPayloadRoot.path}` : ''}。`, `Guest payload folder was not detected${paths?.guestPayloadRoot?.path ? `; configured candidate does not exist: ${paths.guestPayloadRoot.path}` : ''}.`);
+              setElementTextAndCopy('vmDetectionHint', vmDetail);
+              setElementTextAndCopy('checkpointDetectionHint', checkpointDetail);
+              setElementTextAndCopy('guestUserSourceHint', t('来源：当前任务配置；宿主机无法在不连接 Guest 的情况下可靠推断帐号。', 'Source: active job config; the host cannot reliably infer the account without connecting to the guest.'));
+              setElementTextAndCopy('guestWorkingDirectorySourceHint', t('来源：当前任务配置；这是 Guest 内路径，不是宿主机路径。', 'Source: active job config; this is a guest path, not a host path.'));
+              setElementTextAndCopy('guestPayloadDetectionHint', payloadDetail);
+              document.getElementById('goldenVmName').placeholder = t('未检测到，可手动输入', 'Not detected; enter manually');
+              document.getElementById('goldenSnapshotName').placeholder = t('未检测到，可手动输入', 'Not detected; enter manually');
+              document.getElementById('guestPayloadRoot').placeholder = t('未检测到，可手动输入', 'Not detected; enter manually');
+            }
+
             function renderVmConfigSummary() {
               const target = document.getElementById('vmConfigSummary');
               if (!target) {
                 return;
               }
 
-              const valueOrDefault = (id, fallback) => {
-                const value = (document.getElementById(id)?.value || '').trim();
-                return value || fallback || t('使用默认', 'default');
-              };
               const durationLabel = formatAnalysisDuration();
               const r0Enabled = document.getElementById('r0Enabled')?.checked;
               const mock = document.getElementById('useMockCollector')?.checked;
@@ -937,16 +1150,21 @@ internal static class DashboardExperiencePage
                 ? (mock ? t('R0：Mock 采集器（collector）', 'R0: mock collector') : t('R0：真实采集器（collector）', 'R0: real collector'))
                 : t('R0：config 已关闭', 'R0: disabled by config');
               const artifacts = buildArtifactCollectionSummary({ submission: getArtifactCollectionConfig() });
+              const vm = classifyConfigField('goldenVmName');
+              const checkpoint = classifyConfigField('goldenSnapshotName');
+              const guest = classifyConfigField('guestUserName');
+              const payload = classifyConfigField('guestPayloadRoot');
               const parts = [
-                `${t('VM', 'VM')}: ${valueOrDefault('goldenVmName', runtimeConfigDefaults?.hyperV?.goldenVmName)}`,
-                `${t('检查点', 'Checkpoint')}: ${valueOrDefault('goldenSnapshotName', runtimeConfigDefaults?.hyperV?.goldenSnapshotName)}`,
-                `${t('运行时间', 'Runtime')}: ${durationLabel}`,
-                `${t('Guest', 'Guest')}: ${valueOrDefault('guestUserName', runtimeConfigDefaults?.guest?.userName)}`,
-                r0Mode,
-                `${t('产物', 'Artifacts')}: ${artifacts}`
+                { text: `${t('VM', 'VM')} [${vm.label}]: ${vm.value || t('未检测到', 'NOT_FOUND')}`, state: vm.state },
+                { text: `${t('检查点', 'Checkpoint')} [${checkpoint.label}]: ${checkpoint.value || t('未检测到', 'NOT_FOUND')}`, state: checkpoint.state },
+                { text: `${t('Payload', 'Payload')} [${payload.label}]: ${payload.value || t('未检测到', 'NOT_FOUND')}`, state: payload.state },
+                { text: `${t('运行时间', 'Runtime')}: ${durationLabel}`, state: isDurationUnlimited() ? 'warn' : 'neutral' },
+                { text: `${t('Guest', 'Guest')} [${guest.label}]: ${guest.value || t('未配置', 'not configured')}`, state: guest.state },
+                { text: r0Mode, state: 'neutral' },
+                { text: `${t('产物', 'Artifacts')}: ${artifacts}`, state: 'neutral' }
               ];
-              target.setAttribute('data-copy', parts.join(' | '));
-              target.innerHTML = parts.map(part => `<span class="pill" data-copy="${escapeAttribute(part)}" data-copy-label="VM configuration summary item">${escapeHtml(part)}</span>`).join('');
+              target.setAttribute('data-copy', parts.map(part => part.text).join(' | '));
+              target.innerHTML = parts.map(part => `<span class="pill ${part.state === 'ready' ? 'ready' : part.state === 'warn' ? 'warn' : ''}" data-copy="${escapeAttribute(part.text)}" data-copy-label="VM configuration summary item">${escapeHtml(part.text)}</span>`).join('');
             }
 
             function renderOperatorReadinessChips() {
@@ -956,9 +1174,10 @@ internal static class DashboardExperiencePage
               }
 
               const file = document.getElementById('sampleUpload')?.files?.[0] || null;
-              const vmName = (document.getElementById('goldenVmName')?.value || runtimeConfigDefaults?.hyperV?.goldenVmName || '').trim();
-              const checkpoint = (document.getElementById('goldenSnapshotName')?.value || runtimeConfigDefaults?.hyperV?.goldenSnapshotName || '').trim();
-              const secretName = runtimeConfigDefaults?.guest?.passwordSecretName || 'KSWORDBOX_GUEST_PASSWORD';
+              const vmField = classifyConfigField('goldenVmName');
+              const checkpointField = classifyConfigField('goldenSnapshotName');
+              const secretName = localHostReadiness?.guest?.passwordSecretName || runtimeConfigDefaults?.guest?.passwordSecretName || 'KSWORDBOX_GUEST_PASSWORD';
+              const secretAvailable = Boolean(localHostReadiness?.guest?.passwordSecretAvailable);
               const r0Enabled = document.getElementById('r0Enabled')?.checked;
               const mock = document.getElementById('useMockCollector')?.checked;
               const artifactConfig = getArtifactCollectionConfig();
@@ -983,16 +1202,20 @@ internal static class DashboardExperiencePage
                   : t('使用有界秒数，由后端按 config 限制', 'Uses bounded seconds clamped by backend config')
               });
               chips.push({
-                state: runtimeConfigLoadError ? 'warn' : (vmName ? 'good' : 'warn'),
+                state: vmField.value && checkpointField.value ? (vmField.source === 'detected' ? 'good' : 'warn') : 'error',
                 label: t('VM', 'VM'),
-                value: runtimeConfigLoadError || (vmName ? vmName : t('未从配置读取 VM 名称', 'VM name not loaded from config')),
-                hint: checkpoint ? `${t('检查点', 'Checkpoint')}: ${checkpoint}` : t('上传时后端会做最终预检', 'Backend preflight checks this during upload')
+                value: vmField.value || t('未检测到 / NOT_FOUND', 'NOT_FOUND'),
+                hint: checkpointField.value
+                  ? `${t('检查点', 'Checkpoint')} [${checkpointField.label}]: ${checkpointField.value}`
+                  : (localHostReadiness?.hyperV?.accessDenied
+                    ? t('当前 Web Host 查询 Hyper-V 被拒绝；未使用预设值', 'Hyper-V query was denied for this Web Host; presets were not substituted')
+                    : t('未检测到检查点；请重新检测或手动覆盖', 'Checkpoint not detected; detect again or override manually'))
               });
               chips.push({
-                state: 'neutral',
+                state: secretAvailable ? 'good' : 'warn',
                 label: t('Guest 密钥', 'Guest secret'),
-                value: secretName,
-                hint: t('WebUI 不输入密码；后端预检存在性', 'WebUI does not accept passwords; backend checks presence')
+                value: secretAvailable ? t('已检测到', 'detected') : t('未检测到', 'not detected'),
+                hint: `${secretName} · ${t('仅检测存在性，不显示值', 'presence only; value is never displayed')}`
               });
               chips.push({
                 state: r0Enabled ? (mock ? 'warn' : 'good') : 'neutral',
@@ -1150,11 +1373,13 @@ internal static class DashboardExperiencePage
 
                 element.addEventListener('input', () => {
                   renderConfigDefaultHints();
+                  renderLocalHostReadiness();
                   renderSelectedSample();
                   renderOperatorReadinessChips();
                 });
                 element.addEventListener('change', () => {
                   renderConfigDefaultHints();
+                  renderLocalHostReadiness();
                   renderSelectedSample();
                   renderOperatorReadinessChips();
                 });
