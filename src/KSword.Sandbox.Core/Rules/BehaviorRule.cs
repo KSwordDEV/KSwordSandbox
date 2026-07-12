@@ -98,6 +98,8 @@ public sealed record BehaviorRule
 
     public Dictionary<string, List<string>> ExcludeDataContains { get; init; } = new(StringComparer.OrdinalIgnoreCase);
 
+    public bool IncludeNonBehaviorEvidence { get; init; }
+
     public List<string> EvidenceFields { get; init; } = [];
 
     public List<string> Tags { get; init; } = [];

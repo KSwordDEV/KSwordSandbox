@@ -1436,10 +1436,12 @@ internal static partial class ProgramMain
         Console.WriteLine("    KSword.Sandbox.JobTool recover --job-id <guid>|--job-root <path> [--write-state] [--write-index] [--rebuild-report] [--sample <exe>] [--events <events.json|jsonl>] [--json]");
         Console.WriteLine("  就绪检查 / Readiness:");
         Console.WriteLine("    KSword.Sandbox.JobTool readiness [--config <sandbox.json>] [--repo-root <path>] [--runtime-root <path>] [--job-id <guid>|--job-root <path>] [--sample <exe>] [--json]");
+        Console.WriteLine("  离线审计 / Self-noise audit:");
+        Console.WriteLine("    KSword.Sandbox.JobTool audit --job-id <guid>|--job-root <path> [--config <sandbox.json>] [--repo-root <path>] [--runtime-root <path>] [--json]");
         Console.WriteLine();
-        Console.WriteLine("别名 / Aliases: list-jobs=list, show-job=status, rebuild-report=report, import-live=import, inspect-artifacts=artifacts.");
+        Console.WriteLine("别名 / Aliases: list-jobs=list, show-job=status, rebuild-report=report, import-live=import, inspect-artifacts=artifacts, self-noise-audit/review=audit.");
         Console.WriteLine("说明 / Notes:");
-        Console.WriteLine("  plan/report/import/artifacts/recover/readiness 只复用本地文件；不会启动、还原、停止或修改 VM。/ these commands reuse local files only and do not start, restore, stop, or mutate VMs.");
+        Console.WriteLine("  plan/report/import/artifacts/recover/readiness/audit 只复用本地文件；不会启动、还原、停止或修改 VM。/ these commands reuse local files only and do not start, restore, stop, or mutate VMs.");
         Console.WriteLine("  report/import 会在任务运行目录下写入 report.json/report.html/report.zh.html/report.en.html 和 artifact-index.json。/ report/import write report and artifact-index files under the job runtime folder.");
         Console.WriteLine("  artifacts 仅在 --write-index 时写 artifact-index.json；recover 仅在 --write-state/--write-index/--rebuild-report 时写文件。/ artifacts/recover writes are explicit opt-in.");
         Console.WriteLine("  输出前会隐藏 password/API-key/token 等敏感字段。/ output redacts password/API-key/token-like fields before printing.");

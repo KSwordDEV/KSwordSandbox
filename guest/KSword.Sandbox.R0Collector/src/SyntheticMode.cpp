@@ -267,6 +267,31 @@ MockExtraData BuildNetworkSemanticExtra(
     return extra;
 }
 
+
+// Input: Mock driver event type name.
+// Processing: Maps synthetic category rows to the fixed v1 public payload
+// version constants stamped by live producers.
+// Return: ABI payload version for the category, or the interface version for
+// forward-compatible mock fallback rows.
+ULONG MockPayloadVersionForDriverType(const std::string& driverEventTypeName) {
+    if (driverEventTypeName == "process") {
+        return KSWORD_SANDBOX_PROCESS_EVENT_VERSION;
+    }
+    if (driverEventTypeName == "image") {
+        return KSWORD_SANDBOX_IMAGE_EVENT_VERSION;
+    }
+    if (driverEventTypeName == "file") {
+        return KSWORD_SANDBOX_FILE_EVENT_VERSION;
+    }
+    if (driverEventTypeName == "registry") {
+        return KSWORD_SANDBOX_REGISTRY_EVENT_VERSION;
+    }
+    if (driverEventTypeName == "network") {
+        return KSWORD_SANDBOX_NETWORK_EVENT_VERSION;
+    }
+    return KSWORD_SANDBOX_INTERFACE_VERSION;
+}
+
 // Input: Mock driver event type name.
 // Processing: Maps synthetic category rows to the same public event type values
 // and payload schema names that live READ_EVENTS parser rows emit.
@@ -459,6 +484,7 @@ bool EmitMockDriverCategoryEvent(
     data.AddUtf8("noiseDisposition", "emitted-as-sample-or-system-candidate");
     data.AddUtf8("noiseReasons", "none");
     data.AddUtf8("noiseFieldSet", kJsonlNoiseFieldSet);
+    data.AddUtf8("StressJsonlNoiseEvidence", kStressJsonlNoiseEvidence);
     data.AddUtf8("noiseTaxonomyVersion", "1");
     data.AddUtf8("noiseDecision", "not-noise");
     data.AddUtf8("noiseDecisionSource", "synthetic-driver-category-default");
@@ -477,10 +503,19 @@ bool EmitMockDriverCategoryEvent(
     data.AddUtf8("selfNoiseReason", "none");
     data.AddUtf8("selfNoiseAction", "emit");
     data.AddBool("collectorSuppressed", false);
+    const ULONG mockPayloadVersion = MockPayloadVersionForDriverType(driverEventTypeName);
     data.AddUtf8("operation", operation);
     data.AddUtf8("typedPayloadStatus", "mock");
     data.AddBool("typedPayloadParsed", true);
     data.AddUtf8("payloadSchema", MockPayloadSchemaForDriverType(driverEventTypeName));
+    data.AddUnsigned("payloadVersion", mockPayloadVersion);
+    data.AddUtf8("payloadVersionHex", HexUnsignedLongLong(mockPayloadVersion, 8));
+    data.AddUnsigned("payloadSchemaVersion", mockPayloadVersion);
+    data.AddUnsigned("expectedPayloadVersion", mockPayloadVersion);
+    data.AddUtf8("expectedPayloadVersionHex", HexUnsignedLongLong(mockPayloadVersion, 8));
+    data.AddUtf8("payloadVersionStatus", "mock-v1-compatible");
+    data.AddUtf8("payloadVersionPolicy", "synthetic rows mirror fixed v1 producer payload versions; live rows must match Version and Size before typed parsing");
+    data.AddUtf8("producerPayloadVersionFieldSet", kTypedPayloadVersionFieldSet);
     data.AddBool("lost", false);
     data.AddUnsigned("lostCount", 0);
     data.AddBool("lossObserved", false);
@@ -800,6 +835,7 @@ bool EmitSyntheticJsonlNoiseRows(EventWriter& writer) {
     data.AddUtf8("noiseDisposition", "emitted-for-importer-tolerance-probe");
     data.AddUtf8("noiseReasons", "synthetic-jsonl-noise-row");
     data.AddUtf8("noiseFieldSet", kJsonlNoiseFieldSet);
+    data.AddUtf8("StressJsonlNoiseEvidence", kStressJsonlNoiseEvidence);
     data.AddUtf8("noiseTaxonomyVersion", "1");
     data.AddUtf8("noiseDecision", "jsonl-noise-probe");
     data.AddUtf8("noiseDecisionSource", "explicit---inject-jsonl-noise");
@@ -1056,6 +1092,7 @@ bool EmitSyntheticStressSummary(EventWriter& writer, const Options& options) {
     data.AddBool("sequenceRangeAvailable", true);
     data.AddBool("emittedSequenceRangeAvailable", true);
     data.AddUnsigned("noiseObservedCount", 0);
+    data.AddUtf8("StressJsonlNoiseEvidence", kStressJsonlNoiseEvidence);
     data.AddUnsigned("collectorNoiseEvents", 0);
     data.AddUnsigned("driverNoiseEvents", 0);
     data.AddUnsigned("selfNoiseSuppressedEvents", 0);
@@ -1182,6 +1219,7 @@ bool EmitSyntheticStressSummary(EventWriter& writer, const Options& options) {
     data.AddUtf8("StressJsonlSequenceGapCount", "0");
     data.AddUtf8("StressJsonlLossEvidence", kStressJsonlLossEvidence);
     data.AddUtf8("StressJsonlBackpressureEvidence", kStressJsonlBackpressureEvidence);
+    data.AddUtf8("StressJsonlNoiseEvidence", kStressJsonlNoiseEvidence);
     event.dataJson = data.Build();
 
     return EmitEvent(writer, event);
@@ -1265,6 +1303,7 @@ int RunSyntheticMode(const Options& options, EventWriter& writer) {
         mockData.AddUnsigned("sequenceGapEstimate", 0);
         mockData.AddUtf8("StressJsonlLossEvidence", kStressJsonlLossEvidence);
         mockData.AddUtf8("StressJsonlBackpressureEvidence", kStressJsonlBackpressureEvidence);
+        mockData.AddUtf8("StressJsonlNoiseEvidence", kStressJsonlNoiseEvidence);
     }
     mockData.AddUtf8("ioctlProtocol", "not-issued");
     mockData.AddUtf8("note", "Synthetic marker; driver category mock rows follow.");

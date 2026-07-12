@@ -14,6 +14,7 @@
     "runtimePayloadSource": "not applicable; source package is source-only",
     "operatorDiagnostics": "install/run expose read-only Hyper-V prerequisite, VM profile, guest payload, VT key, runtime-root, and RuntimePublishRoot guidance; package-portable.ps1 writes generated metadata including reviewerChecklist and sourceRuntimeSafetyMetadata, and prints stage/archive/safety diagnostics without VM, driver signing, GUI signing fallback, or CSignTool side effects",
     "machineReadableComponentProgress": "package-manifest.generated.json:componentProgress and release-readiness.json:componentProgress",
+    "machineReadableGapAudit": "package-manifest.generated.json:gapAudit and release-readiness.json:gapAudit cover no fresh live evidence, RuntimePublishRoot completeness, self-noise guard readiness, and component progress",
     "reviewerChecklistJson": "package-manifest.generated.json:reviewerChecklist and release-readiness.json:reviewerChecklist",
     "noFreshLiveGuardrail": "package/readiness do not generate fresh live evidence; release notes must say 本候选未刷新 fresh live evidence unless a lab job id is recorded"
   },
@@ -27,6 +28,7 @@
       "safety contract for secrets, VM state, runtime evidence, signing, GUI signing fallback, push/publish, and CSignTool",
       "manifest required checks and optional packaging diagnostics",
       "machine-readable componentProgress snapshot for deployment/productization review",
+      "machine-readable gapAudit snapshot for no fresh live evidence, RuntimePublishRoot completeness, self-noise guard readiness, and component progress",
       "reviewerChecklist JSON and no-fresh-live guardrail fields"
     ],
     "selfHashNote": "The generated manifest lists itself in files but omits a recursive self-hash from fileInventory."
@@ -297,6 +299,10 @@
       {
         "id": "fresh-live-guardrail",
         "handoffGate": "fresh live claims require explicit lab job id, commit, runtime root, timestamp, and report paths"
+      },
+      {
+        "id": "self-noise-guard-readiness",
+        "handoffGate": "static rules/docs audit confirms self-noise, collection-health, VT quiet state, and behaviorCounted=false boundaries without smoke/live"
       },
       {
         "id": "operator-remediation-zh",

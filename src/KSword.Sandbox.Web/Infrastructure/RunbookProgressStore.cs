@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Threading.Channels;
 using KSword.Sandbox.Abstractions;
+using KSword.Sandbox.Web.Contracts;
 
 namespace KSword.Sandbox.Web.Infrastructure;
 
@@ -143,6 +144,31 @@ internal sealed class RunbookProgressStore
     public bool TryGet(Guid jobId, out SandboxRunbookProgressSnapshot snapshot)
     {
         return snapshots.TryGetValue(jobId, out snapshot!);
+    }
+
+    /// <summary>
+    /// Attempts to read the latest snapshot with API-safe durability/freshness
+    /// metadata. Inputs are a job id and optional durable source path;
+    /// processing derives age, stale flag, latest step summary, counts, and
+    /// Chinese operator hints without exposing commands/stdout/stderr; return
+    /// value tells callers whether progress is known in this Web host process.
+    /// </summary>
+    public bool TryGetContract(
+        Guid jobId,
+        string? durableSourcePath,
+        out RunbookProgressContract contract)
+    {
+        contract = null!;
+        if (!TryGet(jobId, out var snapshot))
+        {
+            return false;
+        }
+
+        contract = RunbookProgressContract.FromSnapshot(
+            snapshot,
+            durableSourcePath,
+            DateTimeOffset.UtcNow);
+        return true;
     }
 
     /// <summary>

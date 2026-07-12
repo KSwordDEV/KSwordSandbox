@@ -365,8 +365,8 @@ driver-category rows.
 - `--stress-count <n>` implies `--mock` and emits a deterministic synthetic
   stress corpus with `StressJsonlExpectedDriverRows`,
   `StressJsonlSequenceStart`, `StressJsonlSequenceEnd`,
-  `StressJsonlSequenceGapCount`, `StressJsonlLossEvidence`, and
-  `StressJsonlBackpressureEvidence`.
+  `StressJsonlSequenceGapCount`, `StressJsonlLossEvidence`,
+  `StressJsonlBackpressureEvidence`, and `StressJsonlNoiseEvidence`.
 - `--inject-jsonl-noise` is valid only in mock/stress mode. It appends exactly
   one blank line, one malformed `sequence=broken` row, and one valid
   extra-field `driver.network` row with `noise=true`.
@@ -392,13 +392,19 @@ corpus includes:
   `backpressureObserved`;
 - mock or stress driver rows with `mock:"true"`, `stress:"true"`,
   `eventSchemaName`, `eventSchemaVersion`, `version`, `recordSize`,
-  `payloadSize`, `payloadSchema`, `typedPayloadStatus`, and monotonic
-  `sequence` values;
+  `payloadSize`, `payloadSchema`, `payloadVersion`, `payloadVersionHex`,
+  `payloadSchemaVersion`, `typedPayloadStatus`, and monotonic `sequence`
+  values;
 - malformed, truncated, blank, or extra-field rows to verify robust parsing;
 - attribution and self-noise fields (`eventOrigin`, `producerCategory`,
   `subjectKind`, `processIdSource`, `selfNoise`, `collectorSelfNoise`,
   `selfProcess`, `selfNoiseReason`, `collectorSuppressedEvents`) so no-device
   smoke can validate readable event ownership before a live driver is installed.
+
+`payloadVersion`/`payloadVersionHex` are producer payload ABI evidence, not a
+behavior verdict. For known v1 schemas they must equal `0x00010000`; if a live
+row has a version/size mismatch, collectors keep header and bounded hex evidence
+instead of pretending the typed payload parsed.
 
 Backpressure is represented as evidence, not as kernel blocking. When the ring
 overflows, the driver preserves loss through `TotalEventsDropped`,

@@ -338,6 +338,10 @@ VM-local path（`guestFullPath`）。它还携带 `guestRelativePath`、`sourceE
 原始 source size/timestamps、`sourceEventTimestampUtc`、`copiedAtUtc`、
 `sourceSha256`、`originalSha256` 和 `copiedSha256`，让报告区分“guest 中观察到的文件”
 和“复制回来的 artifact”。该选项不收集 memory dump；内存转储仍是单独的显式 opt-in。
+`file.created`/`file.modified` 候选 rows、`artifact.dropped_file.copied` 和
+`artifact.dropped_file.skipped` 共享 artifact 列族：`rootProcessId`、`treeLineage`、
+`processRole`、`artifactRelativePath`、`sizeBytes`、`sha256` 以及对应 status 字段；没有产出文件时
+这些值为空并由 `artifactRelativePathStatus`、`sizeBytesStatus`、`sha256Status` 解释原因。
 
 ## 可选内存转储 / Optional memory dumps
 
@@ -360,7 +364,8 @@ host artifact index 将这些文件分类为 `memory-dump`，不新增共享 art
 捕获、目标退出、权限失败、PID 复用保护，还是没有可见子进程。每条 dump captured/skipped
 事件都会尽量保留 `rootProcessId`、`treeLineage`、`capturePolicy`、
 `artifactRelativePathStatus`、`artifactAttemptEvent`、`childProcessArtifactEvent`、
-`childProcessDumpOutcome` 和 `zhHint`；如果 root PID 本身不可用，则用
+`childProcessDumpOutcome`、`directChildProcessDumpEnabled`、`deeperDescendantProcessDumpEnabled`、
+`descendantDumpOptInScope` 和 `zhHint`；如果 root PID 本身不可用，则用
 `rootProcessIdStatus` / `treeLineageStatus` 明确标记不可用。
 
 ## 可选网络抓包 / Optional packet capture
@@ -376,7 +381,9 @@ host PCAP importer 会消费成功的 `.pcapng` 文件，并在 guest output imp
 DNS/HTTP/TLS/flow 证据转换为规范化 `pcap.*` 事件。
 所有 packet-capture 生命周期事件都会保留 `sourceTool=pktmon.exe`、
 `artifactSourceTool=pktmon.exe` 和 `packetCaptureSource=guest-pktmon`；成功捕获时再补
-`sizeBytes`、`sha256` 和 PCAPNG block counters。
+`sizeBytes`、`sha256` 和 PCAPNG block counters。started/stopped/skipped/failed/captured rows 都会带
+`artifactRelativePath`、`artifactRelativePathStatus`、`sizeBytesStatus` 与 `sha256Status`，使 pending、skipped
+和 captured rows 可以统一渲染。
 
 ## 驱动 JSONL 兼容性 / Driver JSONL compatibility
 

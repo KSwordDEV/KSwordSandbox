@@ -158,6 +158,17 @@ model into operator-facing sections:
 - a bilingual entry bar linking sibling `report.zh.html`, `report.en.html`,
   and compatibility `report.html` files.
 
+The behavior graph and process/network relationship cards are intentionally
+weak-interaction/static. They separate collection metadata from sample behavior
+with a compact graph self-noise boundary card: `behaviorCounted=false`,
+`nonbehavior`, collector self-noise, VT quiet states, and R0 health/readiness
+rows remain in dedicated sections and raw normalized events, but are not
+promoted into process tree or evidence-graph behavior. When the current
+artifact index or normalized events already link evidence to a process,
+endpoint, or edge, compact bilingual artifact badges are rendered on those
+cards/edges; full descriptors, hashes, selectors, and safe Open/Download
+actions remain in Artifact links and raw evidence.
+
 Tables, chips, code fields, timeline entries, and evidence blocks expose
 `data-copy` attributes. The local report script supports right-click copy and
 explicit **Copy event** buttons without external dependencies.

@@ -182,6 +182,14 @@ public static class NetworkTelemetrySchema
             ["tlsEventCount"] = CountEvents(materialized, "tls").ToString(CultureInfo.InvariantCulture),
             ["flowEventCount"] = materialized.Count(evt => IsEventType(evt, "network.flow") || IsEventType(evt, "pcap.flow")).ToString(CultureInfo.InvariantCulture),
             ["parseErrorCount"] = CountEvents(materialized, "parse_error").ToString(CultureInfo.InvariantCulture),
+            ["nonbehaviorEventCount"] = CountByDataValue(materialized, "nonbehavior", "true").ToString(CultureInfo.InvariantCulture),
+            ["behaviorCountedEventCount"] = CountByDataValue(materialized, "behaviorCounted", "true").ToString(CultureInfo.InvariantCulture),
+            ["collectorSelfNoiseEventCount"] = CountByDataValue(materialized, "collectorSelfNoise", "true").ToString(CultureInfo.InvariantCulture),
+            ["protocolHealthSummary"] = BuildDataValueSummary(materialized, "protocolHealth"),
+            ["collectionHealthSummary"] = BuildDataValueSummary(materialized, "collectionHealth"),
+            ["protocolHealthWarningCount"] = CountByDataValue(materialized, "protocolHealth", "warning").ToString(CultureInfo.InvariantCulture),
+            ["protocolHealthDegradedCount"] = CountByDataValue(materialized, "protocolHealth", "degraded").ToString(CultureInfo.InvariantCulture),
+            ["protocolHealthOkCount"] = CountByDataValue(materialized, "protocolHealth", "ok").ToString(CultureInfo.InvariantCulture),
             ["protocols"] = string.Join(",", protocols.OrderBy(value => value, StringComparer.OrdinalIgnoreCase)),
             ["protocol"] = string.Join(",", protocols.OrderBy(value => value, StringComparer.OrdinalIgnoreCase))
         };
@@ -227,10 +235,16 @@ public static class NetworkTelemetrySchema
         AddIfNotEmpty(data, "collectionName", source.CollectionName);
         AddIfNotEmpty(data, "evidenceRole", source.EvidenceRole);
         AddIfNotEmpty(data, "importMode", source.ImportMode);
+        AddIfNotEmpty(data, "importArtifactRole", source.EvidenceRole);
+        AddIfNotEmpty(data, "importArtifactKind", source.ArtifactKind);
+        AddIfNotEmpty(data, "importArtifactName", source.Name);
+        AddIfNotEmpty(data, "importArtifactRelativePath", source.RelativePath);
+        AddIfNotEmpty(data, "importArtifactSelector", source.RelativePath);
         AddIfNotEmpty(data, "importProvenance", "host-imported-network-artifact");
         AddIfNotEmpty(data, "provenance", "host-imported-guest-artifact");
         if (IsPacketCaptureSource(source))
         {
+            AddIfNotEmpty(data, "packetCaptureImportProvenance", "pcap-artifact");
             AddIfNotEmpty(data, "pcapSourceArtifactPath", source.FullPath);
             AddIfNotEmpty(data, "pcapSourceArtifactName", source.Name);
             AddIfNotEmpty(data, "pcapSourceArtifactRelativePath", source.RelativePath);
@@ -509,6 +523,19 @@ public static class NetworkTelemetrySchema
         var isNonBehavior = string.Equals(eventKind, "summary", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(eventKind, "parse_error", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(eventKind, "health", StringComparison.OrdinalIgnoreCase);
+        var isCollectorSelfNoise = !string.IsNullOrWhiteSpace(collectorProcessName) ||
+            string.Equals(sourceComponent, "ksword-r0collector", StringComparison.OrdinalIgnoreCase);
+        data["collectorSelfNoise"] = BoolString(isCollectorSelfNoise);
+        AddIfNotEmpty(data, "collectorNoiseScope", isCollectorSelfNoise
+            ? "collector-self-noise"
+            : isNonBehavior
+                ? "nonbehavior-evidence-quality"
+                : "sample-or-external-network");
+        AddIfNotEmpty(data, "sampleBehaviorBoundary", isCollectorSelfNoise
+            ? "collector-separated"
+            : isNonBehavior
+                ? "nonbehavior-separated"
+                : "sample-countable");
 
         if (!data.ContainsKey("behaviorCounted"))
         {
@@ -2391,6 +2418,25 @@ public static class NetworkTelemetrySchema
             (evt.Data.TryGetValue("eventKind", out var kind) &&
                 string.Equals(kind, eventKind, StringComparison.OrdinalIgnoreCase)) ||
             evt.EventType.Contains(eventKind, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static int CountByDataValue(IReadOnlyCollection<SandboxEvent> events, string key, string expected)
+    {
+        return events.Count(evt =>
+            evt.Data.TryGetValue(key, out var value) &&
+            string.Equals(value, expected, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static string BuildDataValueSummary(IReadOnlyCollection<SandboxEvent> events, string key)
+    {
+        return string.Join(
+            ",",
+            events
+                .Select(evt => evt.Data.TryGetValue(key, out var value) ? value : string.Empty)
+                .Where(value => !string.IsNullOrWhiteSpace(value))
+                .GroupBy(value => value, StringComparer.OrdinalIgnoreCase)
+                .OrderBy(group => group.Key, StringComparer.OrdinalIgnoreCase)
+                .Select(group => $"{group.Key}:{group.Count().ToString(CultureInfo.InvariantCulture)}"));
     }
 
     private static bool IsEventType(SandboxEvent evt, string eventType)

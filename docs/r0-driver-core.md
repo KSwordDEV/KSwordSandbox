@@ -108,9 +108,13 @@ and drops stale device-extension pointers before the control device is deleted.
 
 Current typed payload versions are fixed at `0x00010000` for process, image,
 registry, file, and network v1 layouts. Those values are producer-stamped on
-emitted records. Future field growth must use a new negotiated version or an
-explicit draft/successor structure; it must not silently change the existing v1
-layout.
+emitted records. The driver and collector both compile-time guard that every
+typed payload starts with `Version` at offset 0 and `Size` at offset 4;
+`--abi-self-check` emits the matching `*PayloadVersion`, `*PayloadVersionHex`,
+`*PayloadVersionOffset`, and `*PayloadSizeOffset` fields so no-device readiness
+can detect drift before a live driver is opened. Future field growth must use a
+new negotiated version or an explicit draft/successor structure; it must not
+silently change the existing v1 layout.
 
 The network producer also exposes a separate
 `KSWORD_SANDBOX_NETWORK_STATUS_REPLY` through
@@ -273,7 +277,9 @@ loading a real driver:
 
 - ABI evidence: `Version`, `Size`, `KSWORD_SANDBOX_EVENT_HEADER_VERSION`,
   `KSWORD_SANDBOX_EVENT_SCHEMA_VERSION`, `eventSchemaName`,
-  `eventSchemaVersion`, `recordSize`, `payloadSize`, and payload schema names.
+  `eventSchemaVersion`, `recordSize`, `payloadSize`, `payloadSchema`,
+  `payloadVersion`, `payloadVersionHex`, `payloadSchemaVersion`, and the
+  `producerPayloadVersionFieldSet` name list.
 - Producer-mask evidence: requested/effective/supported masks, including the
   decimal and `0x` forms, plus active/failed masks from `GET_STATUS`.
 - Queue pressure evidence: `QueueCapacity`, `QueueDepth`,
@@ -283,7 +289,10 @@ loading a real driver:
   `NextSequence`, and monotonic per-record `sequence` values.
 - Noise evidence: malformed JSONL rows must not abort import. Host/guest readers
   should preserve malformed collector lines as `driver.parse_error` evidence for
-  report import and should skip or defer partial rows for live display.
+  report import and should skip or defer partial rows for live display. Stress
+  and mock rows name `StressJsonlNoiseEvidence` so importers know which
+  `noise*`, `collectorNoise*`, `selfNoise*`, behavior-counting, and
+  `sampleBehaviorCandidate` fields must survive noisy corpora.
 - Stress inputs: use mock JSONL plus bounded collector knobs such as
   `--max-events`, `--max-read-batches`, `--duration 0`, `--poll-ms`, and
   `--heartbeat` to prove high-volume drain behavior without CSignTool, service
@@ -303,6 +312,9 @@ names so stress failures are diagnosable without loading a real driver:
 - `StressJsonlBackpressureEvidence`: `QueueCapacity`, `queueCapacity`,
   `QueueHighWatermark`, `queueHighWatermark`, `drainStoppedAtBatchLimit`,
   `requestedMaxEvents`, `readEventsMaxEvents`, and `maxReadBatches`.
+- `StressJsonlNoiseEvidence`: the noise/self-noise metadata field set that must
+  remain present on stress summaries, mock markers, and explicit valid
+  extra-field noise rows.
 - `ReadinessNoDevicePolicy`: static/no-device checks must not call CSignTool,
   mutate the service, load the driver, or open `\\.\KSwordSandboxDriver`.
 - `ReadinessNonFatalPolicy`: blocked unsigned collector execution, missing local

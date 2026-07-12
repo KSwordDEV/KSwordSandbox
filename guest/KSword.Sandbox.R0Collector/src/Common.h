@@ -30,13 +30,17 @@ inline constexpr int kSyntheticSemanticSelfCheckRows = 6;
 inline constexpr DWORD kSyntheticSampleProcessId = 4242U;
 inline constexpr const char* kSyntheticSemanticSelfCheckScenarios =
     "process-lineage|dns|http|tls|lateral-movement|download-execute";
-inline constexpr unsigned long kAbiSelfCheckDiagnosticsVersion = 3U;
+inline constexpr unsigned long kAbiSelfCheckDiagnosticsVersion = 4U;
 inline constexpr const char* kStableAbiVersionFields =
-    "collectorAbiVersion|collectorAbiVersionHex|abiVersionMajor|abiVersionMinor|eventHeaderVersion|eventHeaderVersionHex|eventSchemaName|eventSchemaVersion|eventSchemaVersionHex|version|versionHex";
+    "collectorAbiVersion|collectorAbiVersionHex|abiVersionMajor|abiVersionMinor|eventHeaderVersion|eventHeaderVersionHex|eventSchemaName|eventSchemaVersion|eventSchemaVersionHex|version|versionHex|payloadVersion|payloadVersionHex|payloadSchemaVersion";
 inline constexpr const char* kStressJsonlLossEvidence =
     "lost|lostCount|lossObserved|TotalEventsDropped|totalEventsDropped|EventsDropped|eventsDropped|ProducerDroppedMask|producerDroppedMask|NextSequence|nextSequence|sequence|sequenceGapObserved|sequenceGapEstimate|head|tail|loss";
 inline constexpr const char* kStressJsonlBackpressureEvidence =
     "backpressure|backpressureObserved|highWatermark|QueueCapacity|queueCapacity|QueueHighWatermark|queueHighWatermark|TotalEventsBackpressured|totalEventsBackpressured|ProducerBackpressureMask|producerBackpressureMask|lastEnqueueFailureStatus|drainStoppedAtBatchLimit|requestedMaxEvents|readEventsMaxEvents|maxReadBatches|sampling";
+inline constexpr const char* kStressJsonlNoiseEvidence =
+    "noise|collectorNoise|collectorSelfNoise|selfNoise|selfProcess|collectorSuppressed|noiseClass|noiseScope|noiseKind|noiseSource|noiseAction|noiseDisposition|noiseReasons|noiseDecision|noiseDecisionSource|noiseProbeKind|behaviorCounted|nonbehavior|sampleBehaviorCandidate";
+inline constexpr const char* kTypedPayloadVersionFieldSet =
+    "payloadVersion|payloadVersionHex|payloadSchemaVersion|payloadSchema|expectedPayloadVersion|expectedPayloadVersionHex|payloadVersionPolicy|payloadVersionStatus|producerPayloadVersionFieldSet";
 inline constexpr const char* kNetworkProtocolBoundaryFields =
     "protocolBoundaryVersion|protocolPayloadParsed|rawPacketPayloadAvailable|kernelPayloadParserEnabled|protocolParserSource|protocolPayloadSource|networkProtocolParserBoundary|networkProtocolBoundaryFields|pcapCorrelationRequired|pcapCorrelationStatus|pcapFlowKeyCandidate|pcapCorrelationKey|pcapCorrelationKeySource|pcapExpectedRecordTypes|pcapBoundaryPolicy|pcapDnsDetailsAvailable|pcapHttpDetailsAvailable|pcapTlsDetailsAvailable|dnsQueryNameAvailable|dnsQueryNameSource|dnsBoundary|httpHostAvailable|httpUriAvailable|httpMethodAvailable|httpMetadataSource|httpBoundary|tlsSniAvailable|tlsCertificateAvailable|tlsMetadataSource|tlsBoundary|networkCorrelationContractVersion|networkCorrelationRole|pcapCorrelationRole|pcapCorrelationJoinFields|pcapCorrelationMissingFields|pcapCorrelationConfidence|dnsCorrelationRecordType|httpCorrelationRecordType|tlsCorrelationRecordType|dnsDetailsOwner|httpDetailsOwner|tlsDetailsOwner|l7ProtocolDetailsAvailable|l7ProtocolDetailsOwner|r0ProtocolParserGuarantee|protocolBoundaryVerdict|zhPcapCorrelationHint|zhNetworkBoundaryHint|zhDnsCorrelationHint|zhHttpCorrelationHint|zhTlsCorrelationHint";
 inline constexpr const char* kNetworkCorrelationStableFields =
@@ -71,6 +75,19 @@ inline constexpr size_t kAbiGuardNetworkStatusClassifyCountOffset = offsetof(KSW
 inline constexpr size_t kAbiGuardNetworkStatusEventCountOffset = offsetof(KSWORD_SANDBOX_NETWORK_STATUS_REPLY, EventCount);
 inline constexpr size_t kAbiGuardNetworkStatusQueueFailureCountOffset = offsetof(KSWORD_SANDBOX_NETWORK_STATUS_REPLY, QueueFailureCount);
 inline constexpr size_t kAbiGuardNetworkStatusLastQueueFailureOffset = offsetof(KSWORD_SANDBOX_NETWORK_STATUS_REPLY, LastQueueFailureNtStatus);
+
+inline constexpr size_t kAbiGuardDriverLoadPayloadVersionOffset = offsetof(KSWORD_SANDBOX_DRIVER_LOAD_PAYLOAD, Version);
+inline constexpr size_t kAbiGuardDriverLoadPayloadSizeOffset = offsetof(KSWORD_SANDBOX_DRIVER_LOAD_PAYLOAD, Size);
+inline constexpr size_t kAbiGuardFilePayloadVersionOffset = offsetof(KSWORD_SANDBOX_FILE_EVENT_PAYLOAD, Version);
+inline constexpr size_t kAbiGuardFilePayloadSizeOffset = offsetof(KSWORD_SANDBOX_FILE_EVENT_PAYLOAD, Size);
+inline constexpr size_t kAbiGuardProcessPayloadVersionOffset = offsetof(KSWORD_SANDBOX_PROCESS_EVENT_PAYLOAD, Version);
+inline constexpr size_t kAbiGuardProcessPayloadSizeOffset = offsetof(KSWORD_SANDBOX_PROCESS_EVENT_PAYLOAD, Size);
+inline constexpr size_t kAbiGuardImagePayloadVersionOffset = offsetof(KSWORD_SANDBOX_IMAGE_EVENT_PAYLOAD, Version);
+inline constexpr size_t kAbiGuardImagePayloadSizeOffset = offsetof(KSWORD_SANDBOX_IMAGE_EVENT_PAYLOAD, Size);
+inline constexpr size_t kAbiGuardRegistryPayloadVersionOffset = offsetof(KSWORD_SANDBOX_REGISTRY_EVENT_PAYLOAD, Version);
+inline constexpr size_t kAbiGuardRegistryPayloadSizeOffset = offsetof(KSWORD_SANDBOX_REGISTRY_EVENT_PAYLOAD, Size);
+inline constexpr size_t kAbiGuardNetworkPayloadVersionOffset = offsetof(KSWORD_SANDBOX_NETWORK_EVENT_PAYLOAD, Version);
+inline constexpr size_t kAbiGuardNetworkPayloadSizeOffset = offsetof(KSWORD_SANDBOX_NETWORK_EVENT_PAYLOAD, Size);
 
 static_assert(sizeof(KSWORD_SANDBOX_EVENT_HEADER) == 104U,
     "KSWORD_SANDBOX_EVENT_HEADER size changed; update R0Collector ABI diagnostics and tests.");
@@ -114,6 +131,42 @@ static_assert(kAbiGuardNetworkStatusQueueFailureCountOffset == 72U,
     "KSWORD_SANDBOX_NETWORK_STATUS_REPLY.QueueFailureCount offset changed.");
 static_assert(kAbiGuardNetworkStatusLastQueueFailureOffset == 92U,
     "KSWORD_SANDBOX_NETWORK_STATUS_REPLY.LastQueueFailureNtStatus offset changed.");
+
+
+static_assert(KSWORD_SANDBOX_PROCESS_EVENT_VERSION == 0x00010000U,
+    "Process payload v1 version constant changed without ABI doc update.");
+static_assert(KSWORD_SANDBOX_IMAGE_EVENT_VERSION == 0x00010000U,
+    "Image payload v1 version constant changed without ABI doc update.");
+static_assert(KSWORD_SANDBOX_FILE_EVENT_VERSION == 0x00010000U,
+    "File payload v1 version constant changed without ABI doc update.");
+static_assert(KSWORD_SANDBOX_REGISTRY_EVENT_VERSION == 0x00010000U,
+    "Registry payload v1 version constant changed without ABI doc update.");
+static_assert(KSWORD_SANDBOX_NETWORK_EVENT_VERSION == 0x00010000U,
+    "Network payload v1 version constant changed without ABI doc update.");
+static_assert(kAbiGuardDriverLoadPayloadVersionOffset == 0U && kAbiGuardDriverLoadPayloadSizeOffset == 4U,
+    "Driver-load payload Version/Size prefix changed.");
+static_assert(kAbiGuardFilePayloadVersionOffset == 0U && kAbiGuardFilePayloadSizeOffset == 4U,
+    "File payload Version/Size prefix changed.");
+static_assert(kAbiGuardProcessPayloadVersionOffset == 0U && kAbiGuardProcessPayloadSizeOffset == 4U,
+    "Process payload Version/Size prefix changed.");
+static_assert(kAbiGuardImagePayloadVersionOffset == 0U && kAbiGuardImagePayloadSizeOffset == 4U,
+    "Image payload Version/Size prefix changed.");
+static_assert(kAbiGuardRegistryPayloadVersionOffset == 0U && kAbiGuardRegistryPayloadSizeOffset == 4U,
+    "Registry payload Version/Size prefix changed.");
+static_assert(kAbiGuardNetworkPayloadVersionOffset == 0U && kAbiGuardNetworkPayloadSizeOffset == 4U,
+    "Network payload Version/Size prefix changed.");
+static_assert(sizeof(KSWORD_SANDBOX_DRIVER_LOAD_PAYLOAD) == 48U,
+    "Driver-load payload size changed.");
+static_assert(sizeof(KSWORD_SANDBOX_FILE_EVENT_PAYLOAD) == 128U,
+    "File payload size changed.");
+static_assert(sizeof(KSWORD_SANDBOX_PROCESS_EVENT_PAYLOAD) == 128U,
+    "Process payload size changed.");
+static_assert(sizeof(KSWORD_SANDBOX_IMAGE_EVENT_PAYLOAD) == 128U,
+    "Image payload size changed.");
+static_assert(sizeof(KSWORD_SANDBOX_REGISTRY_EVENT_PAYLOAD) == 128U,
+    "Registry payload size changed.");
+static_assert(sizeof(KSWORD_SANDBOX_NETWORK_EVENT_PAYLOAD) == 112U,
+    "Network payload size changed.");
 
 // GET_HEALTH producer masks were added in ABI-reserved space.  Keep accepting
 // legacy replies that only contain the stable prefix through LastNtStatus, and

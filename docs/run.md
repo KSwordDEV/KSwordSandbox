@@ -348,7 +348,7 @@ reports, samples, payload binaries, VM disks, or local secrets.
 - 包根的 `package-manifest.generated.json` 是本次 staging 的审计索引，包含
   文件 hash/size、git revision、runtime publish root、跳过的可选 payload
   和安全合约。排障时先看这个文件里的 generated `reviewerChecklist`、
-  `sourceRuntimeSafetyMetadata`、`runtimePublishSummary.incompleteCount`、
+  `sourceRuntimeSafetyMetadata`、`gapAudit`、`runtimePublishSummary.incompleteCount`、
   expected leaf gaps、forbidden-file previews，再看 `Status`/`CheckEnvironment`。
 - 本机 `sandbox.local.json`、guest password、VT key、样本、报告和 VM 输出继续保存在 runtime root
   或 Windows 环境/DPAPI 中，不进入 zip。
@@ -358,6 +358,13 @@ reports, samples, payload binaries, VM disks, or local secrets.
 
 release smoke 默认只接受低副作用场景：PowerShell parse、repository policy、source package `-StageOnly`
 dry-run、以及带仓库外 `RuntimePublishRoot` 的完整性检查。`release-readiness.json.componentProgress`
-会把这些场景标记为 `documented-low-cost-only`。任何 `-Live` Notepad 5s、真实 R0、Hyper-V VM mutation
+会把这些场景标记为 `documented-low-cost-only`，`release-readiness.json.gapAudit`
+会机器可读地列出 no fresh live evidence、RuntimePublishRoot completeness、self-noise guard readiness
+和 component progress。任何 `-Live` Notepad 5s、真实 R0、Hyper-V VM mutation
 或 heavy E2E 都必须由 release manager 在 lab host 显式运行，并记录 `job id`、commit、runtime root、
 生成时间和报告路径；否则 release notes 写“本候选未刷新 fresh live evidence”。
+
+自噪声护栏只做静态/readiness 审计：采集器自噪声、collection-health、VT quiet state、
+`behaviorCounted=false`、R0 health/noise 行必须留在证据质量通道，不得被写成样本行为。
+如果 `gapAudit.selfNoiseGuardReadiness` 失败，先修复规则 guard 和报告/文档降噪说明；不要在
+run/package/readiness 阶段临时补跑 smoke、Hyper-V live 或 CSignTool。

@@ -472,7 +472,12 @@ internal sealed class MemoryDumpProbe : IGuestProbe
         }
         else
         {
+            evt.Data["artifactRelativePath"] = string.Empty;
+            evt.Data["artifactExists"] = "false";
+            evt.Data["artifactIntegrityState"] = "missing";
             evt.Data["artifactRelativePathStatus"] = "missing";
+            evt.Data["sizeBytes"] = string.Empty;
+            evt.Data["sha256"] = string.Empty;
             evt.Data["sizeBytesStatus"] = "missing";
             evt.Data["sha256Status"] = "missing";
         }
@@ -506,9 +511,12 @@ internal sealed class MemoryDumpProbe : IGuestProbe
         evt.Data["collectionHealth"] = "true";
         evt.Data["artifactExists"] = "false";
         evt.Data["artifactIntegrityState"] = "skipped";
+        evt.Data.TryAdd("artifactRelativePath", string.Empty);
         evt.Data["artifactRelativePathStatus"] = duplicate ? "already-captured" : "not-created";
         evt.Data["artifactAttemptEvent"] = "true";
         evt.Data["artifactDiagnosticEvent"] = "true";
+        evt.Data.TryAdd("sizeBytes", string.Empty);
+        evt.Data.TryAdd("sha256", string.Empty);
         evt.Data["sizeBytesStatus"] = "not-created";
         evt.Data["sha256Status"] = "not-created";
         evt.Data["duplicate"] = duplicate.ToString(CultureInfo.InvariantCulture).ToLowerInvariant();
@@ -582,10 +590,17 @@ internal sealed class MemoryDumpProbe : IGuestProbe
                 ["capturePolicy"] = "explicit-opt-in-sensitive-memory-dump",
                 ["childProcessDumpEnabled"] = "true",
                 ["childProcessDumpMode"] = "visible-root-tree",
+                ["directChildProcessDumpEnabled"] = "true",
+                ["deeperDescendantProcessDumpEnabled"] = "true",
+                ["descendantDumpOptInScope"] = "root-plus-direct-children-and-deeper-descendants",
+                ["descendantDumpOptInMetadataVersion"] = "memory-dump-descendant-opt-in-v1",
                 ["dumpType"] = result.DumpType,
                 ["evidenceRole"] = "memory-dump",
                 ["collectionName"] = "memory-dumps",
                 ["expectedRelativePath"] = "memory-dumps/*.dmp",
+                ["artifactRelativePath"] = string.Empty,
+                ["sizeBytes"] = string.Empty,
+                ["sha256"] = string.Empty,
                 ["dumpTargetSelectionMode"] = "root-plus-visible-descendants",
                 ["descendantProcessDumpEnabled"] = "true",
                 ["rootProcessIdStatus"] = rootProcessId is null ? "unavailable" : "available",
@@ -620,6 +635,9 @@ internal sealed class MemoryDumpProbe : IGuestProbe
             evt.Data["directChildProcessDumpTarget"] = (!target.IsRoot && target.Depth == 1).ToString(CultureInfo.InvariantCulture).ToLowerInvariant();
             evt.Data["deeperDescendantProcessDumpTarget"] = (!target.IsRoot && target.Depth > 1).ToString(CultureInfo.InvariantCulture).ToLowerInvariant();
             evt.Data["memoryDumpCoverageRole"] = targetRole;
+            evt.Data["descendantDumpOptInApplied"] = (!target.IsRoot).ToString(CultureInfo.InvariantCulture).ToLowerInvariant();
+            evt.Data["directChildDumpOptInApplied"] = (!target.IsRoot && target.Depth == 1).ToString(CultureInfo.InvariantCulture).ToLowerInvariant();
+            evt.Data["deeperDescendantDumpOptInApplied"] = (!target.IsRoot && target.Depth > 1).ToString(CultureInfo.InvariantCulture).ToLowerInvariant();
             evt.Data["childProcessScope"] = target.IsRoot ? "root-only" : target.Depth == 1 ? "direct-child" : "deeper-descendant";
             evt.Data["childProcessScopeSummary"] = target.IsRoot
                 ? "target=root"
@@ -679,6 +697,9 @@ internal sealed class MemoryDumpProbe : IGuestProbe
             evt.Data["rootProcessDumpTarget"] = rootProcessId is not null ? "true" : "false";
             evt.Data["childProcessDumpTarget"] = "false";
             evt.Data["descendantProcessDumpTarget"] = "false";
+            evt.Data["descendantDumpOptInApplied"] = "false";
+            evt.Data["directChildDumpOptInApplied"] = "false";
+            evt.Data["deeperDescendantDumpOptInApplied"] = "false";
             evt.Data["memoryDumpCoverageRole"] = rootProcessId is null ? "unknown" : "root-context";
             evt.Data["rootVisibleInSnapshot"] = "unknown";
             evt.Data["lineageIncludesRoot"] = rootProcessId is not null ? "true" : "false";
@@ -739,6 +760,10 @@ internal sealed class MemoryDumpProbe : IGuestProbe
                 ["capturePolicy"] = "explicit-opt-in-sensitive-memory-dump",
                 ["childProcessDumpEnabled"] = "true",
                 ["childProcessDumpMode"] = "visible-root-tree",
+                ["directChildProcessDumpEnabled"] = "true",
+                ["deeperDescendantProcessDumpEnabled"] = "true",
+                ["descendantDumpOptInScope"] = "root-plus-direct-children-and-deeper-descendants",
+                ["descendantDumpOptInMetadataVersion"] = "memory-dump-descendant-opt-in-v1",
                 ["captureState"] = "summary",
                 ["status"] = "summary",
                 ["summaryEvent"] = "true",
@@ -764,9 +789,12 @@ internal sealed class MemoryDumpProbe : IGuestProbe
                 ["evidenceRole"] = "memory-dump",
                 ["collectionName"] = "memory-dumps",
                 ["expectedRelativePath"] = "memory-dumps/*.dmp",
+                ["artifactRelativePath"] = string.Empty,
                 ["artifactRelativePathStatus"] = "not-applicable-summary",
                 ["artifactExists"] = "false",
                 ["artifactIntegrityState"] = "not-applicable-summary",
+                ["sizeBytes"] = string.Empty,
+                ["sha256"] = string.Empty,
                 ["sizeBytesStatus"] = "not-applicable-summary",
                 ["sha256Status"] = "not-applicable-summary",
                 ["dumpTargetSelectionMode"] = "root-plus-visible-descendants",
@@ -849,6 +877,10 @@ internal sealed class MemoryDumpProbe : IGuestProbe
                 ["capturePolicy"] = "explicit-opt-in-sensitive-memory-dump",
                 ["childProcessDumpEnabled"] = "false",
                 ["childProcessDumpMode"] = "disabled-until-memory-dump-requested",
+                ["directChildProcessDumpEnabled"] = "false",
+                ["deeperDescendantProcessDumpEnabled"] = "false",
+                ["descendantDumpOptInScope"] = "disabled-until-memory-dump-requested",
+                ["descendantDumpOptInMetadataVersion"] = "memory-dump-descendant-opt-in-v1",
                 ["descendantProcessDumpEnabled"] = "false",
                 ["dumpTargetSelectionMode"] = "disabled-until-memory-dump-requested",
                 ["reason"] = "memoryDumpNotRequested",
@@ -876,11 +908,14 @@ internal sealed class MemoryDumpProbe : IGuestProbe
                 ["collectionName"] = "memory-dumps",
                 ["processRole"] = context.RootProcessId is null ? "sample-context" : "sample-root-context",
                 ["expectedRelativePath"] = "memory-dumps/*.dmp",
+                ["artifactRelativePath"] = string.Empty,
                 ["artifactRelativePathStatus"] = "disabled",
                 ["artifactExists"] = "false",
                 ["artifactIntegrityState"] = "disabled",
                 ["rootProcessIdStatus"] = context.RootProcessId is null ? "unavailable-before-sample-start" : "available",
                 ["treeLineageStatus"] = context.RootProcessId is null ? "unavailable-before-sample-start" : "stable",
+                ["sizeBytes"] = string.Empty,
+                ["sha256"] = string.Empty,
                 ["sizeBytesStatus"] = "disabled",
                 ["sha256Status"] = "disabled",
                 ["artifactHashStatus"] = "disabled",
@@ -1578,6 +1613,8 @@ internal sealed class MemoryDumpProbe : IGuestProbe
                 evt.Data["artifactHashStatus"] = "missing";
                 evt.Data["artifactExists"] = "false";
                 evt.Data["artifactIntegrityState"] = "missing";
+                evt.Data["sizeBytes"] = string.Empty;
+                evt.Data["sha256"] = string.Empty;
                 evt.Data["sizeBytesStatus"] = "missing";
                 evt.Data["sha256Status"] = "missing";
                 return;
@@ -1601,6 +1638,7 @@ internal sealed class MemoryDumpProbe : IGuestProbe
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException or PathTooLongException)
         {
+            evt.Data.TryAdd("sha256", string.Empty);
             evt.Data["hashStatus"] = "failed";
             evt.Data["artifactHashStatus"] = "failed";
             evt.Data["artifactIntegrityState"] = "hash-failed";

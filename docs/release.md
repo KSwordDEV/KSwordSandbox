@@ -399,18 +399,30 @@ that directory when the source project is not present.
 
 ### 机器可读 handoff 字段 / Machine-readable handoff fields
 
-`package-manifest.generated.json` 和 `release-readiness.json` 都应包含 `componentProgress`。
-这是 deployment/productization 的机器可读进度快照，不是 fresh live evidence。
+`package-manifest.generated.json` 和 `release-readiness.json` 都应包含 `componentProgress`
+和 `gapAudit`。这是 deployment/productization 的机器可读进度/缺口快照，不是 fresh live evidence。
 审阅者按以下 JSON 字段做最终 handoff：
 
 - `componentProgress.components[].id`: `runtime-publish-root`, `package-safety-contract`,
-  `release-smoke-scenarios`, `fresh-live-guardrail`, `operator-remediation-zh`。
+  `release-smoke-scenarios`, `fresh-live-guardrail`, `self-noise-guard-readiness`,
+  `operator-remediation-zh`。
+- `gapAudit.schema = ksword.release.gap-audit.v27`: 机器可读 gap audit，固定覆盖
+  `noFreshLiveEvidence`、`runtimePublishRootCompleteness`、`selfNoiseGuardReadiness`
+  和 `componentProgressStatus`。它只证明本地静态/readiness 门禁，不代表 live evidence。
 - `reviewerChecklist`: source/runtime handoff 必过项、release notes 必写项和 `rejectIfPresent`。
 - `sourceRuntimeSafetyMetadata.runtimePackage.repositoryBinaryFallbackAllowed = false`：
   `RuntimePublishRoot` 只能是仓库外 publish 输出，不能回退到 `bin/obj/x64`。
 - `freshLiveEvidenceGuardrail` 和 `componentProgress.noFreshLiveEvidenceGenerated = true`：
   没有实验室 `job id` 时，release notes 必须写“本候选未刷新 fresh live evidence”。
+- `selfNoiseGuardReadiness.staticAuditOnly = true`：自噪声护栏只做静态证据审计；
+  采集器自噪声、collection-health、VT quiet state、`behaviorCounted=false` 行不得进入样本行为结论。
 
 RuntimePublishRoot publish checklist：仓库外目录下必须同时有 `host-web`、`guest-tools`、
 `tools/job-tool`、`tools/postprocess`；每个目录非空，包含预期 exe/dll/payload-manifest，
 且不含 `.pdb`、`.sys`、PCAP、dump、VM 文件、secret、证书私钥、`CSignTool.exe` 或 GUI signing fallback。
+
+中文修复优先级：先看 `gapAudit.runtimePublishRootCompleteness.remediationZh`
+补齐仓库外 publish root；再看 `gapAudit.selfNoiseGuardReadiness.remediationZh`
+确认规则和文档没有把采集/自噪声当作样本行为；最后看
+`gapAudit.noFreshLiveEvidence.remediationZh`，没有 lab `job id` 就不要修改 release notes 的
+“本候选未刷新 fresh live evidence”。

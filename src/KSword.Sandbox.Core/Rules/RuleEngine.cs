@@ -67,7 +67,7 @@ public sealed class RuleEngine
             var matchedCount = 0;
             foreach (var evt in eventList)
             {
-                if (!Matches(rule, evt))
+                if (!IsEligibleForRule(rule, evt) || !Matches(rule, evt))
                 {
                     continue;
                 }
@@ -238,6 +238,144 @@ public sealed class RuleEngine
         }
 
         return true;
+    }
+
+    /// <summary>
+    /// Applies a centralized self-noise and nonbehavior guard before the
+    /// declarative rule predicates run. Inputs are one rule and event;
+    /// processing honors explicit metadata such as behaviorCounted=false,
+    /// nonbehavior=true, collector noise fields, quiet VT rows, and collector
+    /// process identity; the method returns true when the rule is allowed to
+    /// inspect the event.
+    /// </summary>
+    private static bool IsEligibleForRule(BehaviorRule rule, SandboxEvent evt)
+    {
+        if (RuleIncludesNonBehaviorEvidence(rule))
+        {
+            return true;
+        }
+
+        return !IsNonBehaviorOrSelfNoiseEvent(evt);
+    }
+
+    /// <summary>
+    /// Determines whether a rule intentionally consumes operational metadata.
+    /// Inputs are one behavior rule; processing checks the explicit
+    /// IncludeNonBehaviorEvidence switch plus stable diagnostic/reputation
+    /// tags; the method returns true for rules such as VT reputation and R0
+    /// health findings that should remain visible outside the behavior lane.
+    /// </summary>
+    private static bool RuleIncludesNonBehaviorEvidence(BehaviorRule rule)
+    {
+        if (rule.IncludeNonBehaviorEvidence)
+        {
+            return true;
+        }
+
+        return rule.Tags.Any(tag =>
+            string.Equals(tag, "diagnostic", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(tag, "metadata", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(tag, "collection", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(tag, "collection-health", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(tag, "r0collector", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(tag, "driver-health", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(tag, "virustotal", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(tag, "reputation", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(tag, "enrichment", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool IsNonBehaviorOrSelfNoiseEvent(SandboxEvent evt)
+    {
+        if (EventDataBoolFalse(evt, "behaviorCounted", "behavior_counted", "countsAsBehavior", "countedAsBehavior") ||
+            EventDataBoolFalse(evt, "sampleBehaviorCandidate", "sample_behavior_candidate") ||
+            EventDataBoolTrue(
+                evt,
+                "nonbehavior",
+                "nonBehavior",
+                "non_behavior",
+                "notBehavior",
+                "not_behavior",
+                "notSampleBehavior",
+                "collectionHealth",
+                "collectorSelfNoise",
+                "collector_self_noise",
+                "collectorNoise",
+                "collectionNoise",
+                "selfNoise",
+                "self_noise",
+                "noise",
+                "hostImportSelfNoise"))
+        {
+            return true;
+        }
+
+        if (MatchesEventType(
+                [
+                    "r0collector.*",
+                    "enrichment.virustotal.*",
+                    "reputation.virustotal.*",
+                    "collection-health.*",
+                    "artifact.import.*",
+                    "guest.events.imported",
+                    "report.generated",
+                    "driver.parse_error",
+                    "hyperv.runbook.*"
+                ],
+                evt.EventType))
+        {
+            return true;
+        }
+
+        if (Contains(["collection-health", "virustotal", "r0collector"], evt.Source))
+        {
+            return true;
+        }
+
+        if (MatchesProcessName(evt, ["KSword.Sandbox.Agent.exe", "KSword.Sandbox.R0Collector.exe"]))
+        {
+            return true;
+        }
+
+        if (TryGetRuleFieldValue(evt, "eventKind", out var eventKind) ||
+            TryGetRuleFieldValue(evt, "eventRole", out eventKind) ||
+            TryGetRuleFieldValue(evt, "evidenceRole", out eventKind) ||
+            TryGetRuleFieldValue(evt, "classification", out eventKind))
+        {
+            return TextEqualsAny(eventKind, "nonbehavior", "non-behavior", "metadata", "diagnostic", "health", "status", "summary");
+        }
+
+        return false;
+    }
+
+    private static bool EventDataBoolTrue(SandboxEvent evt, params string[] names)
+    {
+        return names.Any(name => TryGetRuleFieldValue(evt, name, out var value) && IsTruthy(value));
+    }
+
+    private static bool EventDataBoolFalse(SandboxEvent evt, params string[] names)
+    {
+        return names.Any(name => TryGetRuleFieldValue(evt, name, out var value) && IsFalsy(value));
+    }
+
+    private static bool IsTruthy(string value)
+    {
+        return string.Equals(value, "true", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(value, "1", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(value, "yes", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(value, "y", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsFalsy(string value)
+    {
+        return string.Equals(value, "false", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(value, "0", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(value, "no", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(value, "n", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool TextEqualsAny(string text, params string[] candidates)
+    {
+        return candidates.Any(candidate => string.Equals(text, candidate, StringComparison.OrdinalIgnoreCase));
     }
 
     /// <summary>

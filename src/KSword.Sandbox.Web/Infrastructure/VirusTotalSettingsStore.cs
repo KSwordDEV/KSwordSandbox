@@ -5,8 +5,9 @@ namespace KSword.Sandbox.Web.Infrastructure;
 /// <summary>
 /// Resolves the optional VirusTotal API key without persisting it to disk.
 /// Inputs are the configured runtime root and settings page updates;
-/// processing reads environment variables and lets the settings endpoint update
-/// only the current process environment; returned settings always mask the key.
+/// processing reads Process/User/Machine environment variables and lets the
+/// settings endpoint update only the current Web Host process environment;
+/// returned settings always mask the key.
 /// </summary>
 internal sealed class VirusTotalSettingsStore
 {
@@ -42,7 +43,8 @@ internal sealed class VirusTotalSettingsStore
 
     /// <summary>
     /// Updates process-local settings. Inputs are a possibly-empty key and
-    /// clear flag; processing writes only the current process environment; the
+    /// clear flag; processing writes only EnvironmentVariableTarget.Process for
+    /// the current Web Host and never changes User/Machine scopes or files; the
     /// returned state is masked.
     /// </summary>
     public VirusTotalSettingsState Save(string? apiKey, bool clear)
@@ -85,11 +87,11 @@ internal sealed class VirusTotalSettingsStore
         return scope switch
         {
             EnvironmentVariableTarget.Process =>
-                $"当前 Web Host 进程环境变量 {EnvironmentVariableName} / current process environment",
+                $"当前 Web Host 进程环境变量 {EnvironmentVariableName} / current Web Host process environment",
             EnvironmentVariableTarget.User =>
-                $"当前 Windows 用户环境变量 {EnvironmentVariableName} / current user environment",
+                $"当前 Windows 用户环境变量 {EnvironmentVariableName}（只读取，WebUI 不修改） / current user environment (read-only for WebUI)",
             EnvironmentVariableTarget.Machine =>
-                $"本机系统环境变量 {EnvironmentVariableName} / local machine environment",
+                $"本机系统环境变量 {EnvironmentVariableName}（只读取，WebUI 不修改） / local machine environment (read-only for WebUI)",
             _ => $"环境变量 {EnvironmentVariableName} / environment"
         };
     }

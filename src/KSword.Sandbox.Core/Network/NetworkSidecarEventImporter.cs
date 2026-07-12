@@ -53,6 +53,9 @@ public sealed class NetworkSidecarEventImporter
                     ["sidecarArtifactCount"] = "1",
                     ["pcapArtifactCount"] = "0",
                     ["parser"] = "jsonl-sidecar",
+                    ["parserInputKind"] = "network-sidecar",
+                    ["parserBounded"] = "true",
+                    ["parserMaxLines"] = MaxLines.ToString(System.Globalization.CultureInfo.InvariantCulture),
                     ["tsharkRequired"] = "false"
                 }),
             .. events
@@ -217,7 +220,14 @@ public sealed class NetworkSidecarEventImporter
             ["sidecarLineNumber"] = lineNumber.ToString(System.Globalization.CultureInfo.InvariantCulture),
             ["sidecarFormat"] = sidecarFormat,
             ["importSource"] = "sidecar-jsonl",
-            ["parser"] = "sidecar-jsonl"
+            ["parser"] = "sidecar-jsonl",
+            ["parserInputKind"] = "network-sidecar",
+            ["parserBounded"] = "true",
+            ["parserMaxLines"] = MaxLines.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["sidecarImportProvenance"] = "sidecar-artifact",
+            ["sidecarSourceArtifactRelativePath"] = source.RelativePath,
+            ["sidecarSourceArtifactName"] = source.Name,
+            ["sidecarSourceArtifactSelector"] = source.RelativePath
         };
         NetworkTelemetrySchema.AddIfNotEmpty(extra, "originalEventType", originalEventType);
         AddSidecarProcessFields(fields, extra);
@@ -329,6 +339,13 @@ public sealed class NetworkSidecarEventImporter
             ["eventKind"] = "health",
             ["importSource"] = "sidecar-jsonl",
             ["parser"] = "sidecar-jsonl",
+            ["parserInputKind"] = "network-sidecar",
+            ["parserBounded"] = "true",
+            ["parserMaxLines"] = MaxLines.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["sidecarImportProvenance"] = "sidecar-artifact",
+            ["sidecarSourceArtifactRelativePath"] = source.RelativePath,
+            ["sidecarSourceArtifactName"] = source.Name,
+            ["sidecarSourceArtifactSelector"] = source.RelativePath,
             ["behaviorCounted"] = "false",
             ["nonbehavior"] = "true",
             ["behaviorScope"] = "network-collection-health",
@@ -736,6 +753,19 @@ public sealed class NetworkSidecarEventImporter
         NetworkTelemetrySchema.AddIfNotEmpty(extra, "rootCommandLine", FirstValue(fields, "rootCommandLine", "process.root.command_line", "process.entry_leader.command_line"));
         NetworkTelemetrySchema.AddIfNotEmpty(extra, "collectorProcessName", FirstValue(fields, "collectorProcessName", "collector.processName", "collector.process.name"));
         NetworkTelemetrySchema.AddIfNotEmpty(extra, "sourceComponent", FirstValue(fields, "sourceComponent", "source.component", "telemetrySource", "telemetry.source"));
+        var collectorProcess = FirstNonEmpty(
+            FirstValue(fields, "collectorProcessName", "collector.processName", "collector.process.name"),
+            processName?.Contains("R0Collector", StringComparison.OrdinalIgnoreCase) == true ? processName : null,
+            imageName?.Contains("R0Collector", StringComparison.OrdinalIgnoreCase) == true ? imageName : null,
+            commandLine?.Contains("R0Collector", StringComparison.OrdinalIgnoreCase) == true ? "KSword.Sandbox.R0Collector.exe" : null);
+        NetworkTelemetrySchema.AddIfNotEmpty(extra, "collectorProcessName", collectorProcess);
+        if (!string.IsNullOrWhiteSpace(collectorProcess))
+        {
+            extra["sourceComponent"] = "ksword-r0collector";
+            extra["collectorSelfNoise"] = "true";
+            extra["collectorNoiseScope"] = "collector-self-noise";
+            extra["sampleBehaviorBoundary"] = "collector-separated";
+        }
     }
 
     private static SandboxEvent ApplySidecarProcessContext(SandboxEvent evt, IReadOnlyDictionary<string, string> fields)
@@ -1200,6 +1230,13 @@ public sealed class NetworkSidecarEventImporter
             ["diagnosticMessage"] = message,
             ["parseErrorMessage"] = message,
             ["parser"] = "sidecar-jsonl",
+            ["parserInputKind"] = "network-sidecar",
+            ["parserBounded"] = "true",
+            ["parserMaxLines"] = MaxLines.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["sidecarImportProvenance"] = "sidecar-artifact",
+            ["sidecarSourceArtifactRelativePath"] = source.RelativePath,
+            ["sidecarSourceArtifactName"] = source.Name,
+            ["sidecarSourceArtifactSelector"] = source.RelativePath,
             ["diagnosticCode"] = diagnosticCode,
             ["parserBoundary"] = parserBoundary,
             ["parseFailureStage"] = sidecarFormat == "jsonl" ? "json-line" : "sidecar-stream",

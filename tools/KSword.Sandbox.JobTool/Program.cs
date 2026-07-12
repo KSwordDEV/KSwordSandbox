@@ -32,6 +32,7 @@ internal static partial class ProgramMain
                 "artifacts" or "artifacts-inspect" or "inspect-artifacts" => InspectArtifacts(options),
                 "recover" => RecoverJob(options),
                 "readiness" => CheckReadiness(options),
+                "audit" or "self-noise-audit" or "review" => AuditJob(options),
                 _ => UnknownCommand(command)
             };
         }

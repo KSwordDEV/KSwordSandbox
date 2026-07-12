@@ -68,6 +68,13 @@ public sealed class PcapArtifactEventImporter
                         ["parser"] = "native-pcap",
                         ["pcapParser"] = "native-pcap",
                         ["pcapParserMode"] = "bounded-native",
+                        ["parserInputKind"] = "packet-capture",
+                        ["parserBounded"] = "true",
+                        ["parserMaxPackets"] = MaxPackets.ToString(CultureInfo.InvariantCulture),
+                        ["parserMaxPayloadBytes"] = MaxPayloadBytes.ToString(CultureInfo.InvariantCulture),
+                        ["parserMaxProtocolEvents"] = MaxProtocolEvents.ToString(CultureInfo.InvariantCulture),
+                        ["parserMaxFlowEvents"] = MaxFlowEvents.ToString(CultureInfo.InvariantCulture),
+                        ["parserPacketLimitHit"] = (packets.Count >= MaxPackets).ToString(CultureInfo.InvariantCulture).ToLowerInvariant(),
                         ["pcapSourceDiagnostic"] = "native parser used; tshark not required",
                         ["tsharkRequired"] = "false",
                         ["tsharkAvailable"] = IsTsharkAvailable().ToString(CultureInfo.InvariantCulture).ToLowerInvariant(),
@@ -98,6 +105,12 @@ public sealed class PcapArtifactEventImporter
                         ["parser"] = "native-pcap",
                         ["pcapParser"] = "native-pcap",
                         ["pcapParserMode"] = "bounded-native",
+                        ["parserInputKind"] = "packet-capture",
+                        ["parserBounded"] = "true",
+                        ["parserMaxPackets"] = MaxPackets.ToString(CultureInfo.InvariantCulture),
+                        ["parserMaxPayloadBytes"] = MaxPayloadBytes.ToString(CultureInfo.InvariantCulture),
+                        ["parserMaxProtocolEvents"] = MaxProtocolEvents.ToString(CultureInfo.InvariantCulture),
+                        ["parserMaxFlowEvents"] = MaxFlowEvents.ToString(CultureInfo.InvariantCulture),
                         ["pcapSourceDiagnostic"] = "pcap parse_error emitted with boundary diagnostics",
                         ["tsharkRequired"] = "false",
                         ["tsharkAvailable"] = IsTsharkAvailable().ToString(CultureInfo.InvariantCulture).ToLowerInvariant(),
@@ -291,6 +304,7 @@ public sealed class PcapArtifactEventImporter
         var flows = new Dictionary<string, FlowSummary>(StringComparer.OrdinalIgnoreCase);
         var protocols = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var ipFamilies = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var protocolHealthCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         var protocolEvents = 0;
         var parsedPackets = 0;
         var bytes = 0L;
@@ -327,6 +341,14 @@ public sealed class PcapArtifactEventImporter
                 }
 
                 events.Add(protocolEvent);
+                if (protocolEvent.Data.TryGetValue("protocolHealth", out var protocolHealth) &&
+                    !string.IsNullOrWhiteSpace(protocolHealth))
+                {
+                    protocolHealthCounts[protocolHealth] = protocolHealthCounts.TryGetValue(protocolHealth, out var count)
+                        ? count + 1
+                        : 1;
+                }
+
                 protocolEvents++;
                 if (protocolEvents >= MaxProtocolEvents)
                 {
@@ -344,6 +366,14 @@ public sealed class PcapArtifactEventImporter
             ["parser"] = "native-pcap",
             ["pcapParser"] = "native-pcap",
             ["pcapParserMode"] = "bounded-native",
+            ["parserInputKind"] = "packet-capture",
+            ["parserBounded"] = "true",
+            ["parserMaxPackets"] = MaxPackets.ToString(CultureInfo.InvariantCulture),
+            ["parserMaxPayloadBytes"] = MaxPayloadBytes.ToString(CultureInfo.InvariantCulture),
+            ["parserMaxProtocolEvents"] = MaxProtocolEvents.ToString(CultureInfo.InvariantCulture),
+            ["parserMaxFlowEvents"] = MaxFlowEvents.ToString(CultureInfo.InvariantCulture),
+            ["parserPacketLimitHit"] = (packets.Count >= MaxPackets).ToString(CultureInfo.InvariantCulture).ToLowerInvariant(),
+            ["parserProtocolEventLimitHit"] = (protocolEvents >= MaxProtocolEvents).ToString(CultureInfo.InvariantCulture).ToLowerInvariant(),
             ["pcapSourceDiagnostic"] = "native parser used; tshark not required",
             ["packetCount"] = packets.Count.ToString(CultureInfo.InvariantCulture),
             ["parsedPacketCount"] = parsedPackets.ToString(CultureInfo.InvariantCulture),
@@ -351,6 +381,9 @@ public sealed class PcapArtifactEventImporter
             ["byteCount"] = bytes.ToString(CultureInfo.InvariantCulture),
             ["protocol"] = string.Join(",", protocols.OrderBy(protocol => protocol, StringComparer.OrdinalIgnoreCase)),
             ["protocols"] = string.Join(",", protocols.OrderBy(protocol => protocol, StringComparer.OrdinalIgnoreCase)),
+            ["protocolHealthSummary"] = string.Join(",", protocolHealthCounts.OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase).Select(pair => $"{pair.Key}:{pair.Value.ToString(CultureInfo.InvariantCulture)}")),
+            ["protocolHealthWarningCount"] = protocolHealthCounts.TryGetValue("warning", out var warningCount) ? warningCount.ToString(CultureInfo.InvariantCulture) : "0",
+            ["protocolHealthOkCount"] = protocolHealthCounts.TryGetValue("ok", out var okCount) ? okCount.ToString(CultureInfo.InvariantCulture) : "0",
             ["ipFamilies"] = string.Join(",", ipFamilies.OrderBy(value => value, StringComparer.OrdinalIgnoreCase)),
             ["format"] = Path.GetExtension(path).Equals(".pcapng", StringComparison.OrdinalIgnoreCase) ? "pcapng" : "pcap"
         };
@@ -1758,6 +1791,12 @@ public sealed class PcapArtifactEventImporter
             ["parser"] = "native-pcap",
             ["pcapParser"] = "native-pcap",
             ["pcapParserMode"] = "bounded-native",
+            ["parserInputKind"] = "packet-capture",
+            ["parserBounded"] = "true",
+            ["parserMaxPackets"] = MaxPackets.ToString(CultureInfo.InvariantCulture),
+            ["parserMaxPayloadBytes"] = MaxPayloadBytes.ToString(CultureInfo.InvariantCulture),
+            ["parserMaxProtocolEvents"] = MaxProtocolEvents.ToString(CultureInfo.InvariantCulture),
+            ["parserMaxFlowEvents"] = MaxFlowEvents.ToString(CultureInfo.InvariantCulture),
             ["pcapSourceDiagnostic"] = "pcap parse_error emitted with boundary diagnostics",
             ["diagnosticCode"] = boundary?.DiagnosticCode ?? "pcap_parse_error",
             ["parserBoundary"] = boundary?.ParserBoundary ?? "pcap.container",
@@ -2139,7 +2178,12 @@ public sealed class PcapArtifactEventImporter
             var merged = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
             {
                 ["ipFamily"] = IpFamily,
-                ["payloadBytes"] = Payload.Length.ToString()
+                ["payloadBytes"] = Payload.Length.ToString(CultureInfo.InvariantCulture),
+                ["parserInputKind"] = "packet-capture",
+                ["parserBounded"] = "true",
+                ["parserMaxPayloadBytes"] = MaxPayloadBytes.ToString(CultureInfo.InvariantCulture),
+                ["packetCaptureImportProvenance"] = "pcap-artifact",
+                ["packetFactSource"] = "native-pcap-packet"
             };
             if (extra is not null)
             {

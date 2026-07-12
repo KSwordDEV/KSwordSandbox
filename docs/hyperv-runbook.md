@@ -125,3 +125,23 @@ elevated host process 启动，并满足 golden VM、checkpoint、guest credenti
 
 如果 `Test-HyperVReadiness.ps1` 因 VM 为 `Off` 报告 `PowerShell Direct` 为 `Warning`，这表示 preflight
 保持了只读；可以在 operator-controlled session 中手动启动 VM 后再复验，或在 live 前接受该只读限制。
+
+## 进度耐久化与新鲜度字段
+
+真实 runbook 进度仍以 UI-safe 快照为准：实时内存流会同步写入 job 目录中的
+`runbook-progress.json`，终端执行记录写入 `runbook-execution.json`。API/契约层的进度元数据不包含
+PowerShell command、stdout 或 stderr，只暴露便于值守人员判断“当前显示是否可信”的字段：
+
+- `durableSourcePath`：持久化来源路径，优先指向 `runbook-progress.json` 或终端
+  `runbook-execution.json`。
+- `snapshotAge`：本次 API 生成时间与快照 `updatedAtUtc` 的差值。
+- `staleThreshold`：默认 `00:00:15`；非终止状态超过该阈值时可认为进度可能陈旧。
+- `isStale`：仅 queued/running/pending 等非终止状态会置为 true；completed/failed/canceled 不因年龄变陈旧。
+- `latestStepSummary`：最新/当前步骤的安全摘要，包含 `stepIndex`、`ordinal`、`title`、`state`、
+  `phase/category`、`exitCode`、`message` 和中文修复提示。
+- `completedStepCount`、`failedStepCount`、`runningStepCount`：供监控页或外部轮询快速判断进度。
+- `operatorHintsZh`：中文值守提示，说明持久化路径、快照年龄、最新步骤以及下一步处理建议。
+
+如果进度看起来停住，先刷新 `/api/jobs/{jobId}/runbook/progress` 或
+`/api/jobs/{jobId}/runbook/background`。若 `isStale=true` 且后台仍在 running，保留 job 目录并检查
+Web Host 日志；不要重复启动同一 job，避免覆盖证据和执行上下文。

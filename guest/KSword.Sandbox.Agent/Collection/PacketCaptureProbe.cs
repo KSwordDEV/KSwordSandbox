@@ -390,9 +390,12 @@ internal sealed class PacketCaptureProbe : IGuestProbe
                 ["status"] = "skipped",
                 ["nonfatal"] = "true",
                 ["expectedRelativePath"] = $"{CollectionName}/*.pcapng",
+                ["artifactRelativePath"] = artifactRelativePath,
                 ["artifactExists"] = "false",
                 ["artifactIntegrityState"] = "skipped",
                 ["artifactRelativePathStatus"] = session is null ? "not-created" : "expected-not-created",
+                ["sizeBytes"] = string.Empty,
+                ["sha256"] = string.Empty,
                 ["sizeBytesStatus"] = "not-created",
                 ["sha256Status"] = "not-created"
             }
@@ -452,7 +455,10 @@ internal sealed class PacketCaptureProbe : IGuestProbe
                 ["expectedRelativePath"] = $"{CollectionName}/*.pcapng",
                 ["artifactExists"] = "false",
                 ["artifactIntegrityState"] = "disabled",
+                ["artifactRelativePath"] = string.Empty,
                 ["artifactRelativePathStatus"] = "disabled",
+                ["sizeBytes"] = string.Empty,
+                ["sha256"] = string.Empty,
                 ["sizeBytesStatus"] = "disabled",
                 ["sha256Status"] = "disabled",
                 ["samplePath"] = context.SamplePath
@@ -719,6 +725,8 @@ internal sealed class PacketCaptureProbe : IGuestProbe
     {
         AddIfNotEmpty(data, "artifactIntegrityState", status);
         AddIfNotEmpty(data, "artifactRelativePathStatus", status);
+        data.TryAdd("sizeBytes", string.Empty);
+        data.TryAdd("sha256", string.Empty);
         AddIfNotEmpty(data, "hashStatus", status);
         AddIfNotEmpty(data, "artifactHashStatus", status);
         AddIfNotEmpty(data, "sizeBytesStatus", status);
@@ -786,6 +794,8 @@ internal sealed class PacketCaptureProbe : IGuestProbe
                 evt.Data["artifactHashStatus"] = "missing";
                 evt.Data["artifactExists"] = "false";
                 evt.Data["artifactIntegrityState"] = "missing";
+                evt.Data["sizeBytes"] = string.Empty;
+                evt.Data["sha256"] = string.Empty;
                 evt.Data["sizeBytesStatus"] = "missing";
                 evt.Data["sha256Status"] = "missing";
                 return;
@@ -809,6 +819,7 @@ internal sealed class PacketCaptureProbe : IGuestProbe
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException or PathTooLongException)
         {
+            evt.Data.TryAdd("sha256", string.Empty);
             evt.Data["hashStatus"] = "failed";
             evt.Data["artifactHashStatus"] = "failed";
             evt.Data["artifactIntegrityState"] = "hash-failed";

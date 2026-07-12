@@ -115,7 +115,10 @@ internal sealed class FileDiffProbe : IGuestProbe
                 ["implemented"] = "true",
                 ["capturePolicy"] = "always-on-working-directory-file-diff",
                 ["droppedFileArtifactCopyPolicy"] = "explicit-opt-in-copy-after-run",
+                ["artifactRelativePath"] = string.Empty,
                 ["artifactRelativePathStatus"] = "not-created-by-file-diff",
+                ["artifactExists"] = "false",
+                ["artifactIntegrityState"] = "not-created-by-file-diff",
                 ["evidenceRole"] = "dropped-file-candidate",
                 ["collectionName"] = "file-diff",
                 ["processRole"] = context.RootProcessId is null ? "sample-context" : "sample-root-context",
@@ -144,8 +147,17 @@ internal sealed class FileDiffProbe : IGuestProbe
         if (current is not null)
         {
             evt.Data["sizeBytes"] = current.SizeBytes.ToString(CultureInfo.InvariantCulture);
+            evt.Data["sizeBytesStatus"] = "computed";
             evt.Data["lastWriteUtc"] = current.LastWriteUtc.ToString("O", CultureInfo.InvariantCulture);
             AddFileHashEvidence(evt, path);
+        }
+        else
+        {
+            evt.Data["sizeBytes"] = string.Empty;
+            evt.Data["sizeBytesStatus"] = "not-created";
+            evt.Data["sha256"] = string.Empty;
+            evt.Data["sha256Status"] = "not-created";
+            evt.Data["hashStatus"] = "not-created";
         }
 
         if (previous is not null)
@@ -174,6 +186,8 @@ internal sealed class FileDiffProbe : IGuestProbe
             if (!File.Exists(path))
             {
                 evt.Data["hashStatus"] = "missing";
+                evt.Data["sha256"] = string.Empty;
+                evt.Data["sha256Status"] = "missing";
                 return;
             }
 
@@ -181,10 +195,13 @@ internal sealed class FileDiffProbe : IGuestProbe
             evt.Data["sha256"] = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(stream)).ToLowerInvariant();
             evt.Data["hashAlgorithm"] = "sha256";
             evt.Data["hashStatus"] = "computed";
+            evt.Data["sha256Status"] = "computed";
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException or PathTooLongException)
         {
+            evt.Data.TryAdd("sha256", string.Empty);
             evt.Data["hashStatus"] = "failed";
+            evt.Data["sha256Status"] = "failed";
             evt.Data["hashExceptionType"] = ex.GetType().FullName ?? ex.GetType().Name;
             evt.Data["hashMessage"] = ex.Message;
         }

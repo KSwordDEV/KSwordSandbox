@@ -914,6 +914,8 @@ function Test-DeploymentOperatorDiagnosticsContract {
             'freshLiveEvidenceGuardrail',
             'reviewerChecklist',
             'componentProgress',
+            'gapAudit',
+            'self-noise-guard-readiness',
             'sourceRuntimeSafetyMetadata',
             'runtimePublishRootMustBeOutsideRepository',
             'no VM mutation, no driver signing, no GUI signing fallback',
@@ -1013,6 +1015,8 @@ function Test-DeploymentDocsOperatorHints {
             'freshLiveEvidenceGuardrail',
             'reviewerChecklist',
             'componentProgress',
+            'gapAudit',
+            'self-noise-guard-readiness',
             'sourceRuntimeSafetyMetadata',
             'no VM mutation',
             'no GUI signing fallback',
@@ -1115,6 +1119,97 @@ function Test-NoFreshLiveEvidenceGuardrail {
         -Message "No-fresh-live guardrail found $($issues.Count) issue(s)." `
         -Remediation @('在 release/run/progress/gap 文档和 package metadata 中写清楚：readiness/package 不运行 Hyper-V live；没有当前候选 job id 时，release notes 必须声明未刷新 fresh live evidence。') `
         -Details @{ issues = @($issues.ToArray()) }
+}
+
+function Test-SelfNoiseGuardReadiness {
+    $issues = New-Object System.Collections.Generic.List[string]
+    $docEvidence = New-Object System.Collections.Generic.List[object]
+    $evidence = [ordered]@{
+        rulesPath = 'rules/behavior-rules.json'
+        rulesVersion = $null
+        totalRules = 0
+        guardedRuleCount = 0
+        requiredMarkers = @('self-noise', 'noise', 'behaviorCounted', 'collection-health')
+        docs = $docEvidence
+    }
+
+    $rulesPath = Join-Path $RepositoryRoot 'rules\behavior-rules.json'
+    if (-not (Test-Path -LiteralPath $rulesPath -PathType Leaf)) {
+        [void]$issues.Add('Missing rules/behavior-rules.json for static self-noise guard audit.')
+    }
+    else {
+        try {
+            $rules = Get-Content -LiteralPath $rulesPath -Raw | ConvertFrom-Json -ErrorAction Stop
+            $evidence.rulesVersion = [string](Get-ObjectPropertyValue -InputObject $rules -Name 'version' -DefaultValue '')
+            $ruleItems = @(Get-ObjectPropertyValue -InputObject $rules -Name 'rules' -DefaultValue @())
+            $evidence.totalRules = $ruleItems.Count
+            if ($evidence.rulesVersion.IndexOf('self-noise', [StringComparison]::OrdinalIgnoreCase) -lt 0 -and
+                $evidence.rulesVersion.IndexOf('v27', [StringComparison]::OrdinalIgnoreCase) -lt 0) {
+                [void]$issues.Add("rules/behavior-rules.json version does not advertise self-noise guard hardening or v27 expansion: $($evidence.rulesVersion)")
+            }
+
+            $guardedRuleCount = 0
+            foreach ($rule in $ruleItems) {
+                $guardText = @(
+                    (Get-ObjectPropertyValue -InputObject $rule -Name 'excludeDataContains' -DefaultValue $null),
+                    (Get-ObjectPropertyValue -InputObject $rule -Name 'excludeDataEquals' -DefaultValue $null),
+                    (Get-ObjectPropertyValue -InputObject $rule -Name 'excludeProcessNames' -DefaultValue $null),
+                    (Get-ObjectPropertyValue -InputObject $rule -Name 'tags' -DefaultValue $null),
+                    (Get-ObjectPropertyValue -InputObject $rule -Name 'summary' -DefaultValue ''),
+                    (Get-ObjectPropertyValue -InputObject $rule -Name 'summaryZh' -DefaultValue '')
+                ) | ConvertTo-Json -Depth 8 -Compress
+                if ($guardText -match '(?i)selfNoise|self-noise|collectorSelfNoise|collector-self-noise|behaviorCounted|collection-health|virustotal|r0collector|noise') {
+                    $guardedRuleCount++
+                }
+            }
+            $evidence.guardedRuleCount = $guardedRuleCount
+            if ($guardedRuleCount -le 0) {
+                [void]$issues.Add('rules/behavior-rules.json has no statically detectable self-noise/collection-health guard markers.')
+            }
+        }
+        catch {
+            [void]$issues.Add("Unable to parse rules/behavior-rules.json for self-noise guard audit: $($_.Exception.Message)")
+        }
+    }
+
+    foreach ($relative in @('docs/release.md', 'docs/run.md')) {
+        $path = Join-Path $RepositoryRoot $relative
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+            [void]$issues.Add("Missing self-noise readiness doc: $relative")
+            continue
+        }
+
+        $raw = Get-Content -LiteralPath $path -Raw
+        $hasSelfNoise = $raw.IndexOf('self-noise', [StringComparison]::OrdinalIgnoreCase) -ge 0 -or
+            $raw.IndexOf('自噪声', [StringComparison]::OrdinalIgnoreCase) -ge 0
+        $hasNoLiveBoundary = $raw.IndexOf('fresh live evidence', [StringComparison]::OrdinalIgnoreCase) -ge 0
+        [void]$docEvidence.Add([ordered]@{
+                path = $relative
+                hasSelfNoiseMarker = $hasSelfNoise
+                hasFreshLiveBoundary = $hasNoLiveBoundary
+            })
+        if (-not $hasSelfNoise) {
+            [void]$issues.Add("Missing self-noise operator marker in $relative")
+        }
+    }
+
+    if ($issues.Count -eq 0) {
+        Add-ReleaseCheckResult `
+            -Id 'self-noise-guard-readiness' `
+            -Title 'Self-noise guard readiness / 自噪声护栏就绪' `
+            -Status Passed `
+            -Message 'Static rules/docs audit found self-noise, collection-health, behaviorCounted, and no-fresh-live boundaries without running smoke tests or live Hyper-V.' `
+            -Details @{ evidence = $evidence }
+        return
+    }
+
+    Add-ReleaseCheckResult `
+        -Id 'self-noise-guard-readiness' `
+        -Title 'Self-noise guard readiness / 自噪声护栏就绪' `
+        -Status Failed `
+        -Message "Self-noise guard readiness found $($issues.Count) issue(s)." `
+        -Remediation @('中文修复：确认 rules/behavior-rules.json 仍是 v26/v27 self-noise hardening 规则，并在 docs/release.md/docs/run.md 写明采集器自噪声、collection-health、VT quiet state 和 behaviorCounted=false 不可计入样本行为；本检查只做静态审计，不运行 smoke/live。') `
+        -Details @{ issues = @($issues.ToArray()); evidence = $evidence }
 }
 
 function Invoke-RepositoryPolicy {
@@ -1262,6 +1357,14 @@ function Get-ReleaseComponentProgressSnapshot {
                 remediationZh = '没有当前候选实验室 job id，不得在 release notes 声称 fresh Notepad 5s 或真实 R0 证据。'
             },
             [ordered]@{
+                id = 'self-noise-guard-readiness'
+                titleZh = '自噪声护栏就绪'
+                state = 'static-audit-only'
+                handoffGate = 'Rules/docs must show self-noise, collection-health, VT quiet state, and behaviorCounted=false boundaries; no smoke/live execution in readiness.'
+                reviewerChecklist = @('rules version advertises self-noise hardening', 'docs explain self-noise stays out of behavior conclusions', 'readiness result self-noise-guard-readiness is Passed')
+                remediationZh = '先修复 rules/behavior-rules.json 的 self-noise/collection-health/behaviorCounted guard，再补 docs/release.md/docs/run.md；本 readiness 步骤不运行 smoke/live。'
+            },
+            [ordered]@{
                 id = 'operator-remediation-zh'
                 titleZh = '中文操作者修复提示'
                 state = 'documented'
@@ -1270,6 +1373,65 @@ function Get-ReleaseComponentProgressSnapshot {
                 remediationZh = '先运行 .\\scripts\\install.ps1 -Mode CheckEnvironment 和 .\\scripts\\run.ps1 -Mode CheckEnvironment，再按 RecommendedActions 修复。'
             }
         )
+    }
+}
+
+function Get-ReleaseGapAuditSnapshot {
+    param([int]$ExitCode = 0)
+
+    $resultById = @{}
+    foreach ($result in @($script:Results.ToArray())) {
+        $resultById[[string]$result.id] = $result
+    }
+
+    $runtimeResult = $resultById['runtime-publish-completeness']
+    $freshLiveResult = $resultById['no-fresh-live-evidence-guardrail']
+    $selfNoiseResult = $resultById['self-noise-guard-readiness']
+    $componentProgress = Get-ReleaseComponentProgressSnapshot -ExitCode $ExitCode
+    $runtimeRootProvided = -not [string]::IsNullOrWhiteSpace($RuntimePublishRoot)
+    $runtimeHandoffVerified = ($runtimeRootProvided -and [bool]$RequireCompleteRuntimePackage -and $null -ne $runtimeResult -and $runtimeResult.status -eq 'Passed' -and $ExitCode -eq 0)
+
+    return [ordered]@{
+        schema = 'ksword.release.gap-audit.v27'
+        generatedAtUtc = [DateTimeOffset]::UtcNow.ToString('O')
+        purpose = 'Machine-readable release/productization gap audit; produced by non-mutating readiness only.'
+        nonMutating = [ordered]@{
+            hyperVLive = $false
+            smokeTests = $false
+            driverSigning = $false
+            csignTool = $false
+            gitPush = $false
+        }
+        noFreshLiveEvidence = [ordered]@{
+            generated = $false
+            status = if ($null -eq $freshLiveResult) { 'not-run' } else { [string]$freshLiveResult.status }
+            releaseNotesFallbackZh = '本候选未刷新 fresh live evidence'
+            requiredForClaim = @('commit', 'job id', 'RuntimePublishRoot/runtime root', 'generated time', 'report.json', 'report.zh.html', 'report.en.html')
+            remediationZh = '没有实验室 live job id 时，发布说明必须写“本候选未刷新 fresh live evidence”；不要把 readiness/package JSON 当作 fresh live 证据。'
+        }
+        runtimePublishRootCompleteness = [ordered]@{
+            runtimePublishRoot = if ($runtimeRootProvided) { $RuntimePublishRoot } else { $null }
+            requireCompleteRuntimePackage = [bool]$RequireCompleteRuntimePackage
+            handoffVerified = $runtimeHandoffVerified
+            status = if ($null -eq $runtimeResult) { 'not-run' } else { [string]$runtimeResult.status }
+            issues = if ($null -ne $runtimeResult -and $null -ne $runtimeResult.details -and $runtimeResult.details.ContainsKey('issues')) { @($runtimeResult.details.issues) } else { @() }
+            expectedSources = if ($null -ne $runtimeResult -and $null -ne $runtimeResult.details -and $runtimeResult.details.ContainsKey('expectedSources')) { @($runtimeResult.details.expectedSources) } else { @('host-web', 'guest-tools', 'tools/job-tool', 'tools/postprocess') }
+            remediationZh = '完整 runtime handoff 前，先把 host-web、guest-tools、tools/job-tool、tools/postprocess 发布到仓库外 RuntimePublishRoot，再用 -RuntimePublishRoot <external-publish-root> -RequireCompleteRuntimePackage 重跑 readiness；不要从仓库 bin/obj/x64 兜底。'
+        }
+        selfNoiseGuardReadiness = [ordered]@{
+            status = if ($null -eq $selfNoiseResult) { 'not-run' } else { [string]$selfNoiseResult.status }
+            smokeExecuted = $false
+            staticAuditOnly = $true
+            evidence = if ($null -ne $selfNoiseResult -and $null -ne $selfNoiseResult.details -and $selfNoiseResult.details.ContainsKey('evidence')) { $selfNoiseResult.details.evidence } else { $null }
+            remediationZh = '若静态审计失败，先恢复 rules/behavior-rules.json 的 self-noise/collection-health/behaviorCounted guard，再补 docs/run.md 和 docs/release.md；不要在本 release-readiness 步骤中运行 smoke/live。'
+        }
+        componentProgress = $componentProgress
+        componentProgressStatus = [ordered]@{
+            present = $true
+            schema = $componentProgress.schema
+            componentIds = @($componentProgress.components | ForEach-Object { $_.id })
+            remediationZh = '若 componentProgress 缺组件，请同步更新 package-portable.ps1、Test-ReleaseReadiness.ps1 和 packaging/*.json 的 componentProgressTemplate。'
+        }
     }
 }
 
@@ -1377,6 +1539,7 @@ Test-ReadinessNoVmMutationCommands
 Test-DeploymentOperatorDiagnosticsContract
 Test-DeploymentDocsOperatorHints
 Test-NoFreshLiveEvidenceGuardrail
+Test-SelfNoiseGuardReadiness
 Invoke-RepositoryPolicy
 Invoke-SourcePackageStage
 Invoke-LightBuild
@@ -1449,6 +1612,7 @@ $summary = [pscustomobject][ordered]@{
         )
     }
     componentProgress     = Get-ReleaseComponentProgressSnapshot -ExitCode $exitCode
+    gapAudit              = Get-ReleaseGapAuditSnapshot -ExitCode $exitCode
     sourceRuntimeSafetyMetadata = [ordered]@{
         sourcePackage = [ordered]@{
             dryRunEnabledByDefault = -not [bool]$SkipSourcePackageDryRun

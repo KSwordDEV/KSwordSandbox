@@ -64,7 +64,7 @@ public sealed class HtmlReportRenderer
         IReadOnlyList<SandboxEvent> Events,
         string CopyText);
 
-    private sealed record BehaviorGraphEdge(string From, string Relation, string To, string Evidence);
+    private sealed record BehaviorGraphEdge(string From, string Relation, string To, string Evidence, IReadOnlyList<ArtifactDescriptor> RelatedArtifacts);
 
     private sealed record ProcessGraphNode(string Label, string Detail, string CopyText);
 
@@ -328,7 +328,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
 .event-table td:first-child{white-space:nowrap}.event-table td:nth-child(2){min-width:140px}.event-table td:nth-child(4){min-width:140px}.event-table td:nth-child(5){min-width:260px}.event-table .evidence{min-width:280px}
 .timeline-groups{display:grid;gap:10px;margin-top:14px}.timeline-group{background:#fff;border:1px solid var(--line);border-radius:2px;overflow:hidden}.timeline-group>summary{align-items:flex-start;cursor:pointer;display:flex;gap:10px;justify-content:space-between;list-style:none;padding:12px 14px}.timeline-group>summary::-webkit-details-marker{display:none}.timeline-group>summary:before{color:var(--primary-deep);content:'▶';font-weight:900;margin-top:2px}.timeline-group[open]>summary:before{content:'▼'}.timeline-group small{color:var(--muted);display:block;line-height:1.4;margin-top:3px}.timeline{border-left:3px solid rgba(67,160,255,.45);margin:0 14px 14px 20px;padding:12px 0 0 18px}.timeline-item{background:#fff;border:1px solid var(--line);border-radius:2px;margin:0 0 10px;padding:10px 12px;position:relative}.timeline-item:before{background:var(--primary);border:2px solid var(--primary-soft);border-radius:2px;content:'';height:10px;left:-25px;position:absolute;top:13px;width:10px}.timeline-overflow{background:#f1f7ff;border:1px dashed #b9d7f3;border-radius:2px;color:var(--muted);margin:0 0 12px;padding:9px 11px}
 .graph-map{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));margin-top:12px}.graph-node{background:#fff;border:1px solid var(--line);border-left:4px solid var(--primary);border-radius:2px;padding:12px}.graph-node strong{display:block;margin-bottom:4px}.graph-node small{color:var(--muted);display:block;line-height:1.4}.behavior-chain{background:#fff;border:1px solid var(--line);border-radius:2px;counter-reset:chain;margin:12px 0;max-height:var(--subsection-max);overflow:auto;padding:8px 10px}.behavior-chain li{align-items:flex-start;background:#fff;border-bottom:1px solid #dbeafe;border-radius:0;counter-increment:chain;display:grid;gap:8px;grid-template-columns:auto 1fr;margin:0;padding:10px}.behavior-chain li:last-child{border-bottom:0}.behavior-chain li:before{align-items:center;background:var(--primary);border-radius:2px;color:white;content:counter(chain);display:inline-flex;font-weight:900;height:24px;justify-content:center;width:24px}.behavior-chain details{grid-column:2}.behavior-chain pre{max-height:var(--detail-max);overflow:auto;white-space:pre-wrap;word-break:break-word}.edge-table td:nth-child(1),.edge-table td:nth-child(3){min-width:170px}.ioc-grid{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));margin-top:14px}.ioc-card{background:#fff;border:1px solid var(--line);border-radius:2px;padding:12px}.ioc-card h3{font-size:15px;margin:0 0 8px}.ioc-card ul{margin:0;padding-left:18px}.ioc-card li{margin:5px 0;word-break:break-word}
-.evidence-summary-grid,.relation-grid,.overview-strip,.evidence-story-board,.narrative-spine{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));margin-top:14px}.evidence-summary-card,.relation-card,.overview-item,.evidence-story-lane,.narrative-step{background:#fff;border:1px solid var(--line);border-left:4px solid var(--primary);border-radius:2px;box-shadow:none;max-height:var(--subsection-max);min-width:0;overflow:auto;overflow-wrap:anywhere;padding:14px;position:relative}.narrative-spine{counter-reset:narrative-step}.narrative-spine-lead{align-items:flex-start;background:#f8fbff;border:1px solid #cfe6fb;border-left:4px solid var(--primary);display:flex;flex-wrap:wrap;gap:8px;margin:10px 0 0;padding:10px 12px}.narrative-spine-lead strong{color:#075985}.narrative-step{contain:layout paint;display:grid;grid-template-columns:auto 1fr;gap:8px 10px;max-height:none;overflow:hidden}.narrative-step-index{align-items:center;background:var(--primary);color:#fff;display:inline-flex;font-weight:900;height:26px;justify-content:center;width:26px}.narrative-step h3{grid-column:2;margin:2px 0 0}.narrative-step .overview-value{grid-column:1/3}.narrative-step p{grid-column:1/3;color:var(--muted);font-size:13px;line-height:1.45;margin:0}.narrative-step .toolbar{grid-column:1/3}.evidence-summary-card:before,.relation-card:before,.overview-item:before,.evidence-story-lane:before,.narrative-step:before{display:none}.evidence-summary-card h3,.relation-card h3,.overview-item h3,.evidence-story-lane h3{font-size:15px;margin:0 0 8px;padding-left:0}.summary-value,.overview-value{color:#075985;display:block;font-size:26px;font-weight:900;letter-spacing:-.04em}.overview-value.risk-medium{color:#b45309}.overview-value.risk-high{color:#b91c1c}.overview-value.risk-low{color:#047857}.overview-value.risk-info{color:var(--primary-deep)}.overview-item p,.story-lead{color:var(--muted);font-size:13px;line-height:1.45;margin:6px 0 0}.compact-evidence-summary{background:#f8fbff;border:1px solid #cfe6fb;border-left:3px solid var(--primary);color:#334155;font-size:13px;line-height:1.45;margin:8px 0;padding:8px 10px;word-break:break-word}.compact-evidence-summary strong{color:#075985}.story-metrics{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0}.story-metrics span{background:#f8fbff;border:1px solid #cfe6fb;border-radius:2px;color:#075985;font-size:12px;font-weight:800;padding:6px 8px}.story-evidence-list{font-family:Consolas,monospace;font-size:12px;line-height:1.45;margin:8px 0 0;padding-left:18px}.story-evidence-list li{margin:3px 0;word-break:break-word}.relationship-meta{display:grid;gap:6px;grid-template-columns:repeat(2,minmax(0,1fr));margin:10px 0}.relationship-meta span{background:#f8fbff;border:1px solid #cfe6fb;border-radius:2px;color:#075985;font-size:12px;font-weight:700;padding:7px}.relationship-tags{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}.relationship-tags .chip{margin:0}.evidence-expansion-card{background:#f8fbff;border:1px solid #cfe6fb;border-left:3px solid var(--primary);margin-top:10px;padding:8px 10px}.evidence-expansion-card[open]{background:#fff}.relationship-details,.flat-details,.event-evidence-fields,.technical-field,.raw-technical-fields,.raw-technical-field{background:transparent;border:0;border-left:2px solid #cfe6fb;border-radius:0;margin-top:8px;padding:4px 0 4px 8px}.relationship-details summary,.flat-details summary,.event-evidence-fields summary,.technical-field summary,.raw-technical-fields summary,.raw-technical-field summary,.evidence-expansion-card summary{cursor:pointer;font-weight:800}.relationship-details pre,.flat-details pre,.event-evidence-fields pre,.technical-field pre,.raw-technical-field pre,.evidence-expansion-card pre{max-height:var(--detail-max);overflow:auto;white-space:pre-wrap;word-break:break-word}.relationship-title{display:flex;align-items:flex-start;gap:8px;justify-content:space-between}.relationship-title code{max-width:100%;overflow-wrap:anywhere}.anchor-offset{scroll-margin-top:18px}.mono-list{font-family:Consolas,monospace;font-size:12px;line-height:1.45;margin:6px 0 0 0;padding-left:18px}.mono-list li{margin:3px 0;word-break:break-word}
+.evidence-summary-grid,.relation-grid,.overview-strip,.evidence-story-board,.narrative-spine{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));margin-top:14px}.evidence-summary-card,.relation-card,.overview-item,.evidence-story-lane,.narrative-step{background:#fff;border:1px solid var(--line);border-left:4px solid var(--primary);border-radius:2px;box-shadow:none;max-height:var(--subsection-max);min-width:0;overflow:auto;overflow-wrap:anywhere;padding:14px;position:relative}.narrative-spine{counter-reset:narrative-step}.narrative-spine-lead{align-items:flex-start;background:#f8fbff;border:1px solid #cfe6fb;border-left:4px solid var(--primary);display:flex;flex-wrap:wrap;gap:8px;margin:10px 0 0;padding:10px 12px}.narrative-spine-lead strong{color:#075985}.narrative-step{contain:layout paint;display:grid;grid-template-columns:auto 1fr;gap:8px 10px;max-height:none;overflow:hidden}.narrative-step-index{align-items:center;background:var(--primary);color:#fff;display:inline-flex;font-weight:900;height:26px;justify-content:center;width:26px}.narrative-step h3{grid-column:2;margin:2px 0 0}.narrative-step .overview-value{grid-column:1/3}.narrative-step p{grid-column:1/3;color:var(--muted);font-size:13px;line-height:1.45;margin:0}.narrative-step .toolbar{grid-column:1/3}.evidence-summary-card:before,.relation-card:before,.overview-item:before,.evidence-story-lane:before,.narrative-step:before{display:none}.evidence-summary-card h3,.relation-card h3,.overview-item h3,.evidence-story-lane h3{font-size:15px;margin:0 0 8px;padding-left:0}.summary-value,.overview-value{color:#075985;display:block;font-size:26px;font-weight:900;letter-spacing:-.04em}.overview-value.risk-medium{color:#b45309}.overview-value.risk-high{color:#b91c1c}.overview-value.risk-low{color:#047857}.overview-value.risk-info{color:var(--primary-deep)}.overview-item p,.story-lead{color:var(--muted);font-size:13px;line-height:1.45;margin:6px 0 0}.compact-evidence-summary{background:#f8fbff;border:1px solid #cfe6fb;border-left:3px solid var(--primary);color:#334155;font-size:13px;line-height:1.45;margin:8px 0;padding:8px 10px;word-break:break-word}.compact-evidence-summary strong{color:#075985}.story-metrics{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0}.story-metrics span{background:#f8fbff;border:1px solid #cfe6fb;border-radius:2px;color:#075985;font-size:12px;font-weight:800;padding:6px 8px}.story-evidence-list{font-family:Consolas,monospace;font-size:12px;line-height:1.45;margin:8px 0 0;padding-left:18px}.story-evidence-list li{margin:3px 0;word-break:break-word}.relationship-meta{display:grid;gap:6px;grid-template-columns:repeat(2,minmax(0,1fr));margin:10px 0}.relationship-meta span{background:#f8fbff;border:1px solid #cfe6fb;border-radius:2px;color:#075985;font-size:12px;font-weight:700;padding:7px}.relationship-tags,.artifact-badge-row{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}.relationship-tags .chip,.artifact-badge-row .chip{margin:0}.artifact-badge-row{background:#f8fbff;border:1px solid #cfe6fb;border-left:3px solid #60a5fa;padding:7px 8px}.artifact-badge-row strong{color:#075985;font-size:12px;margin-right:2px}.evidence-expansion-card{background:#f8fbff;border:1px solid #cfe6fb;border-left:3px solid var(--primary);margin-top:10px;padding:8px 10px}.evidence-expansion-card[open]{background:#fff}.relationship-details,.flat-details,.event-evidence-fields,.technical-field,.raw-technical-fields,.raw-technical-field{background:transparent;border:0;border-left:2px solid #cfe6fb;border-radius:0;margin-top:8px;padding:4px 0 4px 8px}.relationship-details summary,.flat-details summary,.event-evidence-fields summary,.technical-field summary,.raw-technical-fields summary,.raw-technical-field summary,.evidence-expansion-card summary{cursor:pointer;font-weight:800}.relationship-details pre,.flat-details pre,.event-evidence-fields pre,.technical-field pre,.raw-technical-field pre,.evidence-expansion-card pre{max-height:var(--detail-max);overflow:auto;white-space:pre-wrap;word-break:break-word}.relationship-title{display:flex;align-items:flex-start;gap:8px;justify-content:space-between}.relationship-title code{max-width:100%;overflow-wrap:anywhere}.anchor-offset{scroll-margin-top:18px}.mono-list{font-family:Consolas,monospace;font-size:12px;line-height:1.45;margin:6px 0 0 0;padding-left:18px}.mono-list li{margin:3px 0;word-break:break-word}
 .tree{font-family:Consolas,monospace;line-height:1.5;margin:12px 0}.tree ul{border-left:1px dashed #b9d7f3;list-style:none;margin:0 0 0 18px;padding-left:14px}.tree li{margin:5px 0}.process-tree{background:#fff;border:1px solid var(--line);border-radius:2px;max-height:var(--subsection-max);overflow:auto;padding:12px}.process-tree details.process-tree-node{margin:4px 0}.process-tree summary,.process-tree-leaf{align-items:flex-start;cursor:pointer;display:flex;flex-wrap:wrap;gap:8px;list-style:none}.process-tree summary::-webkit-details-marker{display:none}.process-tree summary:before{color:var(--primary-deep);content:'▶';font-weight:900;margin-top:2px}.process-tree details[open]>summary:before{content:'▼'}.process-tree-line{display:flex;flex-wrap:wrap;gap:6px;min-width:0}.process-tree-label{font-weight:900}.process-tree-path{color:var(--muted);font-family:Segoe UI,Arial,sans-serif;font-size:12px;max-width:58ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.tree-badges{display:inline-flex;flex-wrap:wrap;gap:5px}.tree-badge{background:#eef7ff;border:1px solid #cfe6fb;border-radius:2px;color:#075985;font-family:Segoe UI,Arial,sans-serif;font-size:11px;font-weight:800;padding:2px 7px}.process-tree-sparkline{align-items:center;display:inline-grid;gap:2px;grid-template-columns:repeat(4,20px);height:14px;margin-top:3px}.process-tree-sparkline span{background:#dbeafe;border:1px solid #bfdbfe;display:block;height:12px}.process-tree-sparkline .hot{background:#43A0FF;border-color:#0969c9}.process-tree-sparkline-label{color:#64748b;font-family:Segoe UI,Arial,sans-serif;font-size:11px;margin-left:2px}
 .evidence{max-width:560px}.evidence summary{cursor:pointer;font-weight:700}.evidence pre{white-space:pre-wrap;word-break:break-word}
 .columns{display:grid;gap:14px;grid-template-columns:1fr 1fr}.compact-list{margin:8px 0 0 0;padding-left:18px}.compact-list li{margin:4px 0}
@@ -1232,7 +1232,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
             return;
         }
 
-        html.AppendLine("<div class=\"section-note\"><strong>Weak-interaction graph.</strong> This section summarizes process, file, registry, network, and artifact relationships from normalized telemetry so the report remains stable without client-side graph libraries.</div>");
+        html.AppendLine("<div class=\"section-note\"><strong>Weak-interaction graph / 弱交互图谱.</strong> This section summarizes process, file, registry, network, and artifact relationships from normalized telemetry so the report remains stable without client-side graph libraries. Hint / 提示: artifact badges show indexed evidence already present in report.json/artifact-index; self-noise stays in raw evidence, not sample behavior.</div>");
         html.AppendLine("<div class=\"grid\">");
         Metric(html, "Graph processes", processNodes.Count.ToString(), "risk-info");
         Metric(html, "Graph edges", edges.Count.ToString(), "risk-info");
@@ -1241,6 +1241,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         Metric(html, "Registry IOCs", registryIocs.Count.ToString(), "risk-medium");
         Metric(html, "Artifact IOCs", artifactIocs.Count.ToString(), "risk-info");
         html.AppendLine("</div>");
+        AppendGraphNoiseBoundaryCard(html, report);
 
         AppendEvidenceNarrativeSpine(html, report, processNodes, edges, fileIocs, registryIocs, networkIocs, artifactIocs, artifacts);
         AppendEvidenceSummaryCards(html, report, processNodes, edges, fileIocs, registryIocs, networkIocs, artifactIocs);
@@ -1296,6 +1297,45 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         AppendIocCard(html, "Artifact IOCs", artifactIocs, "No linked artifacts were indexed for this report.");
         html.AppendLine("</div>");
         html.AppendLine("</section>");
+    }
+
+    /// <summary>
+    /// Appends a copyable graph-boundary card that explains sample behavior
+    /// versus collection/self-noise without changing raw event pagination.
+    /// </summary>
+    private static void AppendGraphNoiseBoundaryCard(StringBuilder html, AnalysisReport report)
+    {
+        var sampleBehavior = report.Events.Count(IsSampleBehaviorEvent);
+        var behaviorCountedFalse = report.Events.Count(IsBehaviorCountedFalseEvent);
+        var nonBehavior = report.Events.Count(IsNonBehaviorEvent);
+        var collectorSelfNoise = report.Events.Count(IsCollectorSelfNoiseEvent);
+        var healthRows = report.Events.Count(IsCollectionHealthEvent);
+        var vtQuiet = report.Events.Count(IsVirusTotalQuietStateEvent);
+        var excluded = report.Events.Count(IsExcludedFromBehaviorStoryEvent);
+        var examples = report.Events
+            .Where(IsExcludedFromBehaviorStoryEvent)
+            .Take(4)
+            .Select(EventOneLine)
+            .ToList();
+        var copy = string.Join(
+            Environment.NewLine,
+            [
+                "graphSelfNoiseBoundary=sample-behavior-vs-collection-metadata",
+                $"sampleBehaviorRows={sampleBehavior}",
+                $"excludedRows={excluded}",
+                $"behaviorCountedFalse={behaviorCountedFalse}",
+                $"nonBehavior={nonBehavior}",
+                $"collectorSelfNoise={collectorSelfNoise}",
+                $"collectionHealthRows={healthRows}",
+                $"vtQuietRows={vtQuiet}",
+                "completeSource=Raw normalized events/report.json; pagination/folding unchanged",
+                .. examples
+            ]);
+
+        html.AppendLine($"<div class=\"compact-evidence-summary copyable\" data-copy=\"{A(copy)}\"><strong>Graph self-noise boundary / 图谱自噪声边界</strong><br>");
+        html.AppendLine($"Sample behavior rows / 样本行为行: <b>{E(sampleBehavior.ToString(CultureInfo.InvariantCulture))}</b>; excluded collection/reputation rows / 已分离采集与信誉行: <b>{E(excluded.ToString(CultureInfo.InvariantCulture))}</b>.");
+        html.AppendLine("<br><span class=\"muted\">Hint / 提示: these rows remain copyable in R0/VT/Raw sections and report.json; graph cards do not promote them into sample behavior.</span>");
+        html.AppendLine($"<div class=\"story-metrics\"><span>behaviorCounted=false {E(behaviorCountedFalse.ToString(CultureInfo.InvariantCulture))}</span><span>nonbehavior {E(nonBehavior.ToString(CultureInfo.InvariantCulture))}</span><span>collector {E(collectorSelfNoise.ToString(CultureInfo.InvariantCulture))}</span><span>health {E(healthRows.ToString(CultureInfo.InvariantCulture))}</span><span>VT quiet {E(vtQuiet.ToString(CultureInfo.InvariantCulture))}</span></div>{CopyButton("Copy graph boundary", copy)}</div>");
     }
 
     /// <summary>
@@ -4033,7 +4073,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         var cards = allCards.Take(RelationshipCardInlineLimit).ToList();
         var hiddenCardCount = Math.Max(0, allCards.Count - cards.Count);
         html.AppendLine("<h3 id=\"process-relationship-cards\" class=\"anchor-offset\">Process relationship cards</h3>");
-        html.AppendLine("<div class=\"section-note\"><strong>Process relationship evidence.</strong> Cards summarize child, file, registry, network, and linked artifact evidence per stable process identity; long command lines stay folded and collector self-noise is excluded.</div>");
+        html.AppendLine("<div class=\"section-note\"><strong>Process relationship evidence / 进程关系证据.</strong> Cards summarize child, file, registry, network, and linked artifact evidence per stable process identity; long command lines stay folded and collector self-noise is excluded. Hint / 提示: artifact badges are compact proof anchors, while full descriptors remain in Artifact links and raw events.</div>");
         if (cards.Count == 0)
         {
             Empty(html, "No process relationship cards could be derived from normalized telemetry.");
@@ -4055,6 +4095,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
             html.AppendLine($"<span>Artifacts: {E(card.RelatedArtifacts.Count.ToString())}</span><span>Evidence lines: {E(card.EvidenceLines.Count.ToString())}</span>");
             html.AppendLine("</div>");
             AppendProcessRelationFlow(html, card);
+            html.AppendLine(RenderInlineArtifactBadges(card.RelatedArtifacts, "Process artifacts / 进程证据"));
             AppendCompactEvidenceSummary(html, card.CompactSummary, "Copy compact summary");
             AppendRelationshipArtifactLinks(html, card.RelatedArtifacts, "Linked artifacts for this process", "Copy linked process artifacts");
             if (!string.IsNullOrWhiteSpace(card.Path) || !string.IsNullOrWhiteSpace(card.CommandLine))
@@ -4261,7 +4302,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
 
         AppendNetworkRelationshipOverview(html, allCards, cards.Count, networkEvents.Count);
         html.AppendLine("<div class=\"section-note\"><strong>Endpoint-centric view.</strong> Network events are grouped by domain, SNI, URL, IP, or endpoint so analysts can read the relationship map without opening raw events first.</div>");
-        html.AppendLine("<div class=\"section-note\"><strong>Network category view.</strong> Cards split DNS, HTTP, TLS, flow, and linked PCAP/source artifacts so endpoint relationships stay readable without opening raw rows.</div>");
+        html.AppendLine("<div class=\"section-note\"><strong>Network category view / 网络分类视图.</strong> Cards split DNS, HTTP, TLS, flow, and linked PCAP/source artifacts so endpoint relationships stay readable without opening raw rows. Hint / 提示: PCAP/source artifact badges only appear when current indexed data links them to the endpoint.</div>");
         html.AppendLine("<div class=\"relation-grid\">");
         foreach (var card in cards)
         {
@@ -4279,6 +4320,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
             html.AppendLine("</div>");
             AppendCompactEvidenceSummary(html, card.CompactSummary, "Copy compact summary");
             AppendNetworkRelationFlow(html, card);
+            html.AppendLine(RenderInlineArtifactBadges(card.RelatedArtifacts, "Network artifacts / 网络证据"));
             html.AppendLine("<div class=\"relationship-tags\">");
             foreach (var category in card.Categories.Take(6))
             {
@@ -4699,6 +4741,38 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
     }
 
     /// <summary>
+    /// Renders compact artifact badges for cards and graph edges when related
+    /// descriptors already exist in current report/index data.
+    /// </summary>
+    private static string RenderInlineArtifactBadges(IReadOnlyCollection<ArtifactDescriptor> artifacts, string label)
+    {
+        if (artifacts.Count == 0)
+        {
+            return string.Empty;
+        }
+
+        var shown = artifacts.Take(RelationshipArtifactInlineLimit).ToList();
+        var hidden = Math.Max(0, artifacts.Count - shown.Count);
+        var copy = string.Join(Environment.NewLine, artifacts.Select(ArtifactCompactLine));
+        var html = new StringBuilder();
+        html.Append($"<div class=\"artifact-badge-row copyable\" data-copy=\"{A(copy)}\"><strong>{E(label)}</strong>");
+        foreach (var artifact in shown)
+        {
+            var compact = ArtifactCompactLine(artifact);
+            var badge = $"{artifact.Kind}:{ArtifactDisplayName(artifact)}";
+            html.Append($"<span class=\"chip chip-info copyable\" data-copy=\"{A(compact)}\" title=\"{A(compact)}\">{E(AbbreviateEvidenceValue(badge, 64))}</span>");
+        }
+
+        if (hidden > 0)
+        {
+            html.Append($"<span class=\"chip chip-medium\">+{E(hidden.ToString(CultureInfo.InvariantCulture))}</span>");
+        }
+
+        html.Append("</div>");
+        return html.ToString();
+    }
+
+    /// <summary>
     /// Appends one compact, copyable analyst summary inside a relationship card.
     /// Inputs are pre-built summary text and a copy label; processing writes a
     /// short visible paragraph plus an explicit copy button; return is none.
@@ -5073,7 +5147,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         var processLabels = BuildProcessLabelLookup(report);
         foreach (var matrixRow in BuildArtifactEvidenceMatrixRows(report.Events, artifacts))
         {
-            edges.Add(new BehaviorGraphEdge("artifactEvidenceMatrix", "artifact", matrixRow.CollectionName, ArtifactEvidenceMatrixEvidenceLine("artifactEvidenceMatrix lane", matrixRow)));
+            edges.Add(new BehaviorGraphEdge("artifactEvidenceMatrix", "artifact", matrixRow.CollectionName, ArtifactEvidenceMatrixEvidenceLine("artifactEvidenceMatrix lane", matrixRow), []));
         }
 
         foreach (var evt in report.Events.OrderBy(evt => evt.Timestamp))
@@ -5084,6 +5158,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
             }
 
             var from = EventProcessActor(evt);
+            var relatedArtifacts = FindRelatedArtifacts(evt, artifactLookup, artifacts).Take(3).ToList();
             if (processLabels.Count > 0 && (evt.ProcessId.HasValue || !string.IsNullOrWhiteSpace(evt.ProcessName)))
             {
                 from = ResolveProcessLabel(evt, processLabels);
@@ -5097,28 +5172,28 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
                     parent = from;
                 }
 
-                edges.Add(new BehaviorGraphEdge(parent, "spawn", ResolveProcessLabel(evt, processLabels), EventToPlainText(evt)));
+                edges.Add(new BehaviorGraphEdge(parent, "spawn", ResolveProcessLabel(evt, processLabels), EventToPlainText(evt), relatedArtifacts));
             }
 
             if (IsFileEvent(evt) && !string.IsNullOrWhiteSpace(evt.Path))
             {
-                edges.Add(new BehaviorGraphEdge(from, "file", evt.Path!, EventToPlainText(evt)));
+                edges.Add(new BehaviorGraphEdge(from, "file", evt.Path!, EventToPlainText(evt), relatedArtifacts));
             }
 
             if (IsRegistryEvent(evt) && !string.IsNullOrWhiteSpace(evt.Path))
             {
-                edges.Add(new BehaviorGraphEdge(from, "registry", evt.Path!, EventToPlainText(evt)));
+                edges.Add(new BehaviorGraphEdge(from, "registry", evt.Path!, EventToPlainText(evt), relatedArtifacts));
             }
 
             var networkTarget = ExtractNetworkTarget(evt);
             if (!string.IsNullOrWhiteSpace(networkTarget))
             {
-                edges.Add(new BehaviorGraphEdge(from, "network", networkTarget, EventToPlainText(evt)));
+                edges.Add(new BehaviorGraphEdge(from, "network", networkTarget, EventToPlainText(evt), relatedArtifacts));
             }
 
-            foreach (var artifact in FindRelatedArtifacts(evt, artifactLookup, artifacts).Take(3))
+            foreach (var artifact in relatedArtifacts)
             {
-                edges.Add(new BehaviorGraphEdge(from, "artifact", ArtifactDisplayName(artifact), ArtifactToPlainText(artifact)));
+                edges.Add(new BehaviorGraphEdge(from, "artifact", ArtifactDisplayName(artifact), ArtifactToPlainText(artifact), [artifact]));
             }
         }
 
@@ -5731,8 +5806,8 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
     /// </summary>
     private static bool IsSampleBehaviorEvent(SandboxEvent evt)
     {
-        return !IsCollectionHealthEvent(evt) &&
-            !IsCollectorSelfNoiseEvent(evt) &&
+        return !IsExcludedFromBehaviorStoryEvent(evt) &&
+            !IsCollectionHealthEvent(evt) &&
             !IsVirusTotalEvent(evt);
     }
 
@@ -5749,6 +5824,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
     {
         return IsBehaviorCountedFalseEvent(evt) ||
             IsNonBehaviorEvent(evt) ||
+            IsSampleBehaviorCandidateFalseEvent(evt) ||
             IsCollectorSelfNoiseEvent(evt) ||
             IsVirusTotalQuietStateEvent(evt) ||
             IsR0CollectionHealthEvent(evt);
@@ -5757,6 +5833,11 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
     private static bool IsBehaviorCountedFalseEvent(SandboxEvent evt)
     {
         return EventDataBoolFalse(evt, "behaviorCounted", "behavior_counted", "countsAsBehavior", "countedAsBehavior");
+    }
+
+    private static bool IsSampleBehaviorCandidateFalseEvent(SandboxEvent evt)
+    {
+        return EventDataBoolFalse(evt, "sampleBehaviorCandidate", "sample_behavior_candidate");
     }
 
     private static bool IsNonBehaviorEvent(SandboxEvent evt)

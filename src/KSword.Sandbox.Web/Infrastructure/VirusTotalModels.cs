@@ -54,11 +54,31 @@ internal sealed record VirusTotalSettingsState(
 
     public string PersistencePolicy => "process_environment_only_no_disk";
 
+    public string ApiKeyPersistenceScope => "process_only_current_web_host_environment";
+
+    public string NoSampleUploadGuarantee => "official_files_hash_lookup_only_no_sample_upload";
+
     public string QuietFailurePolicy => "missing_key_not_found_rate_limit_auth_timeout_are_display_only_no_job_log";
 
+    public IReadOnlyList<string> QuietStateTaxonomy =>
+    [
+        VirusTotalLookupStatuses.NotConfigured,
+        VirusTotalLookupStatuses.NotFound,
+        VirusTotalLookupStatuses.RateLimited,
+        VirusTotalLookupStatuses.AuthenticationFailed,
+        VirusTotalLookupStatuses.Timeout,
+        VirusTotalLookupStatuses.LookupFailed,
+        VirusTotalLookupStatuses.MissingHash,
+        VirusTotalLookupStatuses.InvalidHash
+    ];
+
+    public string ZhProcessOnlySummary => Configured
+        ? $"API Key 当前来源：{Source}；设置页写入/清除只影响当前 Web Host 进程环境变量，WebUI 不落盘。"
+        : "API Key 未配置；可在本页临时写入当前 Web Host 进程环境变量，WebUI 不落盘。";
+
     public string ZhPolicySummary => Configured
-        ? "VirusTotal 已配置：仅查询 SHA-256，不上传样本；Key 仅在当前来源中读取，不写入报告或 job 日志。"
-        : "VirusTotal 未配置：沙箱主流程继续；动态监控页只显示静默状态，不写任务/行为日志。";
+        ? "VirusTotal 已配置：仅对 SHA-256 调用官方 files/{hash} 查询，不上传样本；Key 只在进程/User/Machine 环境变量中读取，不写入报告或 job 日志。"
+        : "VirusTotal 未配置：沙箱主流程继续；动态监控页/API 只显示静默状态，不写任务/行为日志。";
 }
 
 /// <summary>
@@ -252,6 +272,27 @@ internal sealed record VirusTotalOfficialFileObject
             return parts.Count == 0 ? null : string.Join(" / ", parts.Take(3));
         }
     }
+
+    public IReadOnlyList<string> OfficialSummaryFields =>
+    [
+        "id",
+        "type",
+        "md5",
+        "sha1",
+        "sha256",
+        "sizeBytes",
+        "fileTypeDescription",
+        "typeTag",
+        "magic",
+        "names",
+        "tags",
+        "firstSubmissionDateUtc",
+        "lastSubmissionDateUtc",
+        "lastAnalysisDateUtc",
+        "lastModificationDateUtc",
+        "firstSeenInTheWildDateUtc",
+        "threatClassification"
+    ];
 
     public string? OfficialSummary
     {
@@ -492,6 +533,10 @@ internal sealed record VirusTotalLookupResult
 
     public bool PersistedToEnrichmentEvents { get; init; }
 
+    public string LookupMode => "hash_only_no_sample_upload";
+
+    public string NoSampleUploadGuarantee => "official_v3_files_hash_lookup_only_never_uploads_sample_bytes";
+
     public string LiveLogPolicy => "display_only_no_job_log_by_default";
 
     public string PersistencePolicy => CanPersistEnrichmentEvent
@@ -507,6 +552,24 @@ internal sealed record VirusTotalLookupResult
         VirusTotalLookupStatuses.AuthenticationFailed or
         VirusTotalLookupStatuses.Timeout or
         VirusTotalLookupStatuses.LookupFailed;
+
+    public IReadOnlyList<string> QuietStateTaxonomy =>
+    [
+        VirusTotalLookupStatuses.NotConfigured,
+        VirusTotalLookupStatuses.NotFound,
+        VirusTotalLookupStatuses.RateLimited,
+        VirusTotalLookupStatuses.AuthenticationFailed,
+        VirusTotalLookupStatuses.Timeout,
+        VirusTotalLookupStatuses.LookupFailed,
+        VirusTotalLookupStatuses.MissingHash,
+        VirusTotalLookupStatuses.InvalidHash
+    ];
+
+    public IReadOnlyList<string> OfficialSummaryFields => OfficialFileObject.OfficialSummaryFields;
+
+    public string? OfficialSummary => OfficialFileObject.OfficialSummary;
+
+    public string? ZhOfficialSummary => OfficialFileObject.ZhOfficialSummary;
 
     public string? QuietFailureReason => IsQuietState ? QuietErrorKind ?? Status : null;
 
@@ -575,7 +638,9 @@ internal sealed record VirusTotalLookupResult
             ["lastAnalysisResultCount"] = LastAnalysisResultCount.ToString(CultureInfo.InvariantCulture),
             ["vtLastAnalysisCategorySummary"] = LastAnalysisCategorySummary,
             ["lastAnalysisCategorySummary"] = LastAnalysisCategorySummary,
-            ["cacheHit"] = CacheHit ? "true" : "false"
+            ["cacheHit"] = CacheHit ? "true" : "false",
+            ["lookupMode"] = LookupMode,
+            ["noSampleUploadGuarantee"] = NoSampleUploadGuarantee
         };
 
         AddIfPresent(data, "message", Message);
@@ -644,7 +709,10 @@ internal sealed record VirusTotalLookupResult
         AddIfPresent(data, "vtTagsSummary", OfficialFileObject.TagsSummary);
         AddIfPresent(data, "vtTypeSummary", OfficialFileObject.TypeSummary);
         AddIfPresent(data, "vtOfficialFileObjectSummary", OfficialFileObject.OfficialSummary);
+        AddIfPresent(data, "officialSummary", OfficialFileObject.OfficialSummary);
         AddIfPresent(data, "vtZhOfficialFileObjectSummary", OfficialFileObject.ZhOfficialSummary);
+        AddIfPresent(data, "zhOfficialSummary", OfficialFileObject.ZhOfficialSummary);
+        AddIfPresent(data, "vtOfficialSummaryFields", string.Join(",", OfficialFileObject.OfficialSummaryFields));
         AddIfPresent(data, "vtSuggestedThreatLabel", ThreatClassification.SuggestedThreatLabel);
         AddIfPresent(data, "vtTopThreatCategory", ThreatClassification.TopThreatCategory);
         AddIfPresent(data, "vtTopThreatName", ThreatClassification.TopThreatName);

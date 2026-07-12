@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using KSword.Sandbox.Abstractions;
+using KSword.Sandbox.Web.Contracts;
 
 namespace KSword.Sandbox.Web.Infrastructure;
 
@@ -148,6 +149,8 @@ internal sealed class RunbookBackgroundExecutionStore
 /// </summary>
 internal sealed record RunbookBackgroundExecutionSnapshot
 {
+    private static readonly TimeSpan BackgroundStaleThreshold = TimeSpan.FromSeconds(15);
+
     public required Guid JobId { get; init; }
 
     public bool Live { get; init; }
@@ -177,6 +180,143 @@ internal sealed record RunbookBackgroundExecutionSnapshot
     public bool GuestImportSucceeded { get; init; }
 
     public string? GuestImportMessage { get; init; }
+
+    public string? DurableSourcePath => DurableProgressSourcePath ?? DurableExecutionSourcePath;
+
+    public string? DurableProgressSourcePath => ResolveSiblingPath(Job?.RunbookExecutionResultPath, "runbook-progress.json");
+
+    public string? DurableExecutionSourcePath => Job?.RunbookExecutionResultPath;
+
+    public DateTimeOffset SnapshotGeneratedAtUtc => DateTimeOffset.UtcNow;
+
+    public TimeSpan SnapshotAge
+    {
+        get
+        {
+            var now = DateTimeOffset.UtcNow;
+            return now >= UpdatedAtUtc ? now - UpdatedAtUtc : TimeSpan.Zero;
+        }
+    }
+
+    public TimeSpan StaleThreshold => BackgroundStaleThreshold;
+
+    public bool IsStale => IsBackgroundActive(State) && SnapshotAge > StaleThreshold;
+
+    public int CompletedStepCount => Execution?.StepResults.Count(step => step.Success || step.Skipped) ?? 0;
+
+    public int FailedStepCount => Execution?.StepResults.Count(step => !step.Success && !step.Skipped) ?? 0;
+
+    public int RunningStepCount => IsBackgroundActive(State) && Execution is null ? 1 : 0;
+
+    public RunbookStepProgressSummaryContract? LatestStepSummary => BuildLatestStepSummary(Execution);
+
+    public IReadOnlyList<string> OperatorHintsZh => BuildOperatorHintsZh();
+
+    private static bool IsBackgroundActive(string? state)
+    {
+        return string.Equals(state, RunbookBackgroundExecutionStore.Queued, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(state, RunbookBackgroundExecutionStore.Running, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static RunbookStepProgressSummaryContract? BuildLatestStepSummary(SandboxRunbookExecutionResult? execution)
+    {
+        if (execution is null || execution.StepResults.Count == 0)
+        {
+            return null;
+        }
+
+        var latest = execution.StepResults
+            .OrderBy(step => step.StepIndex)
+            .ThenBy(step => step.StartedAtUtc)
+            .Last();
+        var state = latest.Success
+            ? latest.Skipped ? SandboxRunbookProgressStates.Skipped : SandboxRunbookProgressStates.Completed
+            : SandboxRunbookProgressStates.Failed;
+        var progressStep = new SandboxRunbookStepProgressSnapshot
+        {
+            StepIndex = latest.StepIndex,
+            StepId = latest.StepId,
+            Title = latest.Title,
+            State = state,
+            RequiresElevation = latest.RequiresElevation,
+            MutatesVmState = latest.MutatesVmState,
+            StartedAtUtc = latest.StartedAtUtc,
+            Duration = latest.Duration,
+            ExitCode = latest.ExitCode,
+            Message = latest.Message,
+            RemediationHintZh = latest.Success
+                ? "该步骤已完成；继续观察后续步骤或报告入口。"
+                : "该步骤失败；打开执行流程页查看 stdout/stderr，并保留 job 目录用于排障。"
+        };
+
+        return RunbookStepProgressSummaryContract.FromStep(progressStep, execution.TotalSteps);
+    }
+
+    private IReadOnlyList<string> BuildOperatorHintsZh()
+    {
+        var hints = new List<string>();
+        if (string.IsNullOrWhiteSpace(DurableSourcePath))
+        {
+            hints.Add("后台状态暂未包含持久化执行记录路径；等待 runbook-execution.json 写入或检查 job 元数据。");
+        }
+        else
+        {
+            hints.Add($"持久化执行记录：{DurableSourcePath}");
+        }
+
+        hints.Add($"后台快照年龄：{FormatAge(SnapshotAge)}；超过 {FormatAge(StaleThreshold)} 且仍在排队/运行时视为可能陈旧。");
+
+        if (LatestStepSummary is not null)
+        {
+            hints.Add($"最新步骤：{LatestStepSummary.Ordinal} {LatestStepSummary.Title}（{LatestStepSummary.State}）。");
+        }
+
+        if (IsStale)
+        {
+            hints.Add("后台状态可能陈旧：刷新 /runbook/background；若仍无变化，查看进度页和 Web Host 日志。");
+        }
+        else if (string.Equals(State, RunbookBackgroundExecutionStore.Completed, StringComparison.OrdinalIgnoreCase))
+        {
+            hints.Add("后台执行已完成：打开中文或英文报告，并确认 guest events 是否已导入。");
+        }
+        else if (string.Equals(State, RunbookBackgroundExecutionStore.Failed, StringComparison.OrdinalIgnoreCase))
+        {
+            hints.Add("后台执行失败：不要重复提交；先打开进度页/执行流程页定位失败步骤。");
+        }
+        else if (IsBackgroundActive(State))
+        {
+            hints.Add("后台执行仍在进行：保持监控页打开，避免重复启动同一 job。");
+        }
+
+        return hints;
+    }
+
+    private static string FormatAge(TimeSpan value)
+    {
+        return value.TotalMinutes >= 1
+            ? $"{value.TotalMinutes:0.#} 分钟"
+            : $"{value.TotalSeconds:0.#} 秒";
+    }
+
+    private static string? ResolveSiblingPath(string? path, string fileName)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return null;
+        }
+
+        try
+        {
+            var directory = Path.GetDirectoryName(path);
+            return string.IsNullOrWhiteSpace(directory)
+                ? null
+                : Path.Combine(directory, fileName);
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return null;
+        }
+    }
 }
 
 /// <summary>

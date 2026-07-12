@@ -92,6 +92,7 @@ std::string BuildConfigData(const Options& options) {
     data.AddUtf8("schema", KSWORD_SANDBOX_EVENT_SCHEMA_NAME);
     data.AddUtf8("producer", "r0collector");
     AddCollectorAttributionFields(data, "collector-lifecycle", "collector-lifecycle");
+    AddCollectorNonBehaviorFields(data, "collector-lifecycle", "emit-collector-lifecycle-not-sample-behavior");
     data.AddBool("collectorNoise", false);
     data.AddBool("collectorSelfNoise", false);
     data.AddBool("selfProcess", false);
@@ -170,6 +171,7 @@ std::string BuildErrorData(const std::wstring& message, const DWORD errorCode, c
     data.AddUtf8("schema", KSWORD_SANDBOX_EVENT_SCHEMA_NAME);
     data.AddUtf8("producer", "r0collector");
     AddCollectorAttributionFields(data, "collector-error", "collector-diagnostic");
+    AddCollectorNonBehaviorFields(data, "collector-error", "emit-collector-error-not-sample-behavior");
     data.AddBool("collectorNoise", true);
     data.AddBool("collectorSelfNoise", false);
     data.AddBool("selfProcess", false);
@@ -241,6 +243,7 @@ bool EmitCollectorHeartbeat(
     data.AddUtf8("schema", KSWORD_SANDBOX_EVENT_SCHEMA_NAME);
     data.AddUtf8("producer", "r0collector");
     AddCollectorAttributionFields(data, "collector-heartbeat", "collector-lifecycle");
+    AddCollectorNonBehaviorFields(data, "collector-heartbeat", "emit-collector-heartbeat-not-sample-behavior");
     data.AddBool("collectorNoise", false);
     data.AddBool("collectorSelfNoise", false);
     data.AddBool("selfProcess", false);
@@ -302,6 +305,7 @@ int RunDriverHealthOnly(const UniqueHandle& device, const Options& options, Even
     data.AddUtf8("schema", KSWORD_SANDBOX_EVENT_SCHEMA_NAME);
     data.AddUtf8("producer", "r0collector");
     AddCollectorAttributionFields(data, "collector-stopped", "collector-lifecycle");
+    AddCollectorNonBehaviorFields(data, "collector-stopped", "emit-collector-stopped-not-sample-behavior");
     data.AddBool("collectorNoise", false);
     data.AddBool("collectorSelfNoise", false);
     data.AddBool("selfProcess", false);
@@ -463,6 +467,7 @@ int RunDriverIoctlLoop(const UniqueHandle& device, const Options& options, Event
     data.AddUtf8("schema", KSWORD_SANDBOX_EVENT_SCHEMA_NAME);
     data.AddUtf8("producer", "r0collector");
     AddCollectorAttributionFields(data, "collector-stopped", "collector-lifecycle");
+    AddCollectorNonBehaviorFields(data, "collector-stopped", "emit-collector-stopped-not-sample-behavior");
     data.AddBool("collectorNoise", false);
     data.AddBool("collectorSelfNoise", false);
     data.AddBool("selfProcess", false);
@@ -582,6 +587,7 @@ int RunCollector(int argc, wchar_t* argv[]) {
         stoppedData.AddUtf8("schema", KSWORD_SANDBOX_EVENT_SCHEMA_NAME);
         stoppedData.AddUtf8("producer", "r0collector");
         AddCollectorAttributionFields(stoppedData, "collector-stopped", "collector-lifecycle");
+        AddCollectorNonBehaviorFields(stoppedData, "collector-stopped", "emit-collector-stopped-not-sample-behavior");
         stoppedData.AddBool("collectorNoise", false);
         stoppedData.AddBool("collectorSelfNoise", false);
         stoppedData.AddBool("selfProcess", false);
@@ -632,6 +638,7 @@ int RunCollector(int argc, wchar_t* argv[]) {
     openedData.AddUtf8("schema", KSWORD_SANDBOX_EVENT_SCHEMA_NAME);
     openedData.AddUtf8("producer", "r0collector");
     AddCollectorAttributionFields(openedData, "collector-device-open", "collector-diagnostic");
+    AddCollectorNonBehaviorFields(openedData, "collector-device-open", "emit-collector-device-open-not-sample-behavior");
     openedData.AddBool("collectorNoise", false);
     openedData.AddBool("collectorSelfNoise", false);
     openedData.AddBool("selfProcess", false);

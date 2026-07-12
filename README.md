@@ -251,9 +251,10 @@ WebUI/API E2E：
   -StepTimeoutSeconds 900
 ```
 
-已记录的本地 real-R0 WebUI/API 验证证据见 `docs/webui-real-r0-e2e.md`；该记录完成了
+已记录的本地 real-R0 WebUI/API **历史验证证据**见 `docs/webui-real-r0-e2e.md`；该记录完成了
 17/17 个 Hyper-V runbook step，导入 guest/R0 事件，生成默认/中文/英文 HTML 报告，并且没有
-调用 `CSignTool.exe`。
+调用 `CSignTool.exe`。它不是当前候选版本的 fresh live evidence；如果发布前未重新跑实验室
+live job，release notes 必须明确写“本候选未刷新 fresh live evidence”。
 
 更多命令见 `docs/verification.md`。
 

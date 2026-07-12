@@ -65,24 +65,24 @@ internal static class SettingsPage
             <div class="row" style="justify-content:space-between;align-items:flex-start">
               <div>
                 <h1 data-zh="设置" data-en="Settings">设置</h1>
-                <p data-zh="本页只修改当前 Web Host 进程环境；不会写入配置文件、runtime settings、报告或 job 日志，也不会提交到仓库。" data-en="This page only changes the current Web Host process environment; it does not write config files, runtime settings, reports, or job logs, and nothing is committed to the repository.">本页只修改当前 Web Host 进程环境；不会写入配置文件、runtime settings、报告或 job 日志，也不会提交到仓库。</p>
+                <p data-zh="本页的 VirusTotal API Key 操作仅修改当前 Web Host 进程环境变量；不会写入配置文件、runtime settings、报告或 job 日志，也不会提交到仓库。" data-en="VirusTotal API key actions on this page only change the current Web Host process environment variable; they do not write config files, runtime settings, reports, or job logs, and nothing is committed to the repository.">本页的 VirusTotal API Key 操作仅修改当前 Web Host 进程环境变量；不会写入配置文件、runtime settings、报告或 job 日志，也不会提交到仓库。</p>
               </div>
               <button class="secondary" type="button" onclick="toggleLanguage()" data-zh="切换到 English" data-en="切换到中文">切换到 English</button>
             </div>
             <p class="row"><a class="button secondary" href="/" data-zh="返回主界面" data-en="Back to dashboard">返回主界面</a></p>
           </header>
           <main>
-            <section id="vtSettingsSection" data-copy="VirusTotal status={{Attr(virusTotal.Configured ? "configured" : "not-configured")}}; source={{Attr(virusTotal.Source)}}; persistence=process-only-no-file; no sample upload">
-              <h2 data-zh="VirusTotal 官方结果" data-en="VirusTotal official results">VirusTotal 官方结果</h2>
-              <p class="muted" data-zh="当前只做哈希查询（hash lookup），不上传样本。不配置、未收录、限速、鉴权失败或超时时，主流程继续运行且不会产生噪音日志；状态只在动态监控页/API 中静默展示，不写任务日志或行为日志。" data-en="Current integration performs hash lookup only and does not upload samples. Missing keys, not-found, rate limits, auth failures, or timeouts keep the main flow running without noisy logs; status is shown quietly on the live monitor/API without job or behavior logs.">当前只做哈希查询（hash lookup），不上传样本。不配置、未收录、限速、鉴权失败或超时时，主流程继续运行且不会产生噪音日志；状态只在动态监控页/API 中静默展示，不写任务日志或行为日志。</p>
-              <button class="copy-btn" type="button" data-copy="VirusTotal status={{Attr(virusTotal.Configured ? "configured" : "not-configured")}}; source={{Attr(virusTotal.Source)}}; persistence=process-only-no-file; hash-only; does not upload samples" data-copy-label="VirusTotal settings summary" data-zh="复制本卡摘要" data-en="Copy card summary">复制本卡摘要</button>
+            <section id="vtSettingsSection" data-copy="VirusTotal status={{Attr(virusTotal.Configured ? "configured" : "not-configured")}}; source={{Attr(virusTotal.Source)}}; api-key=process-only-current-web-host; persistence=process-only-no-file; official files/{hash} lookup only; no sample upload">
+              <h2 data-zh="VirusTotal 官方 hash-only 结果" data-en="VirusTotal official hash-only results">VirusTotal 官方 hash-only 结果</h2>
+              <p class="muted" data-zh="当前只对样本 SHA-256 调用 VirusTotal 官方 files/{hash} 报告查询；不上传样本字节、不提交扫描 URL、不写样本内容。不配置、未收录、限速、鉴权失败、超时或查询失败时，主流程继续运行且不会产生噪音日志；状态只在动态监控页/API 中静默展示，不写任务日志或行为日志。" data-en="The integration only calls VirusTotal official files/{hash} report lookup for the sample SHA-256; it does not upload sample bytes, submit scan URLs, or write sample contents. Missing keys, not-found, rate limits, auth failures, timeouts, or lookup failures keep the main flow running without noisy logs; status is shown quietly on the live monitor/API without job or behavior logs.">当前只对样本 SHA-256 调用 VirusTotal 官方 files/{hash} 报告查询；不上传样本字节、不提交扫描 URL、不写样本内容。不配置、未收录、限速、鉴权失败、超时或查询失败时，主流程继续运行且不会产生噪音日志；状态只在动态监控页/API 中静默展示，不写任务日志或行为日志。</p>
+              <button class="copy-btn" type="button" data-copy="VirusTotal status={{Attr(virusTotal.Configured ? "configured" : "not-configured")}}; source={{Attr(virusTotal.Source)}}; api-key=process-only-current-web-host; persistence=process-only-no-file; official files/{hash} hash lookup only; does not upload sample bytes" data-copy-label="VirusTotal settings summary" data-zh="复制本卡摘要" data-en="Copy card summary">复制本卡摘要</button>
               <div class="metric">
                 <strong data-zh="安全提示" data-en="Security note">安全提示</strong>
-                <p class="muted" data-copy="VirusTotal API key WebUI updates are process-only and never persisted to disk." data-zh="在本页输入的 API Key 只写入当前进程环境变量 KSWORDBOX_VIRUSTOTAL_API_KEY；WebUI 不落盘。需要重启后仍生效时，请在启动 Web Host 之前设置 User/Machine 环境变量。" data-en="Keys entered here are written only to the current process environment variable KSWORDBOX_VIRUSTOTAL_API_KEY; the WebUI never persists them to disk. For restart-stable use, set a User/Machine environment variable before starting the Web Host.">在本页输入的 API Key 只写入当前进程环境变量 KSWORDBOX_VIRUSTOTAL_API_KEY；WebUI 不落盘。需要重启后仍生效时，请在启动 Web Host 之前设置 User/Machine 环境变量。</p>
+                <p class="muted" data-copy="VirusTotal API key WebUI updates are process-only for the current Web Host and never persisted to disk." data-zh="在本页输入的 API Key 只写入当前 Web Host 进程环境变量 KSWORDBOX_VIRUSTOTAL_API_KEY；WebUI 不落盘，也不会修改 User/Machine 环境变量。需要重启后仍生效时，请在启动 Web Host 之前设置 User/Machine 环境变量。" data-en="Keys entered here are written only to the current Web Host process environment variable KSWORDBOX_VIRUSTOTAL_API_KEY (current process environment variable); the WebUI never persists them to disk and never modifies User/Machine environment variables. For restart-stable use, set a User/Machine environment variable before starting the Web Host.">在本页输入的 API Key 只写入当前 Web Host 进程环境变量 KSWORDBOX_VIRUSTOTAL_API_KEY；WebUI 不落盘，也不会修改 User/Machine 环境变量。需要重启后仍生效时，请在启动 Web Host 之前设置 User/Machine 环境变量。</p>
               </div>
               <div class="metric">
                 <strong data-zh="动态监控页展示策略" data-en="Live monitor display policy">动态监控页展示策略</strong>
-                <p class="muted" data-copy="VT quiet statuses are display-only on /jobs/{jobId}/live-events and do not write job/behavior logs." data-zh="上传 EXE 后会进入 /jobs/{jobId}/live-events；VirusTotal 未配置、未收录或调用失败时，该页只显示“静默状态”，不阻断分析、不写任务/行为日志。" data-en="After EXE upload, the UI enters /jobs/{jobId}/live-events; if VirusTotal is missing, not found, or fails, that page shows a quiet status only, without blocking analysis or writing job/behavior logs.">上传 EXE 后会进入 /jobs/{jobId}/live-events；VirusTotal 未配置、未收录或调用失败时，该页只显示“静默状态”，不阻断分析、不写任务/行为日志。</p>
+                <p class="muted" data-copy="VT quiet taxonomy: not_configured, not_found, rate_limited, authentication_failed, timeout, lookup_failed, missing_hash, invalid_hash; display-only on /jobs/{jobId}/live-events and no job/behavior logs." data-zh="上传 EXE 后会进入 /jobs/{jobId}/live-events；VirusTotal 的静默状态包括未配置、未收录、限速、鉴权失败、超时、查询失败、缺少/无效 SHA-256。该页只展示状态，不阻断分析、不写任务/行为日志。" data-en="After EXE upload, the UI enters /jobs/{jobId}/live-events; VirusTotal quiet states include not configured, not found, rate limited, authentication failed, timeout, lookup failed, and missing/invalid SHA-256. The page displays status only, without blocking analysis or writing job/behavior logs.">上传 EXE 后会进入 /jobs/{jobId}/live-events；VirusTotal 的静默状态包括未配置、未收录、限速、鉴权失败、超时、查询失败、缺少/无效 SHA-256。该页只展示状态，不阻断分析、不写任务/行为日志。</p>
               </div>
               <div class="metric">
                 <strong data-zh="状态" data-en="Status">状态</strong>
@@ -97,19 +97,25 @@ internal static class SettingsPage
                 <code data-copy="{{Attr(virusTotal.ApiKeyMask ?? string.Empty)}}">{{Html(virusTotal.ApiKeyMask ?? "-")}}</code>
               </div>
               <div class="metric">
-                <strong data-zh="落盘状态" data-en="Disk persistence">落盘状态</strong>
-                <code data-copy="WebUI does not persist VirusTotal API keys to disk">WebUI 不落盘 / no file persistence</code>
+                <strong data-zh="API Key 持久化" data-en="API key persistence">API Key 持久化</strong>
+                <code data-copy="WebUI process-only current Web Host environment; does not persist VirusTotal API keys to disk">仅当前进程 / WebUI 不落盘</code>
               </div>
               <div class="metric">
                 <strong data-zh="策略摘要" data-en="Policy summary">策略摘要</strong>
                 <p class="muted" data-copy="{{Attr(virusTotal.ZhPolicySummary)}}">{{Html(virusTotal.ZhPolicySummary)}}</p>
-                <code data-copy="{{Attr(virusTotal.LookupMode)}}; {{Attr(virusTotal.PersistencePolicy)}}; {{Attr(virusTotal.QuietFailurePolicy)}}">{{Html(virusTotal.LookupMode)}} · {{Html(virusTotal.PersistencePolicy)}} · {{Html(virusTotal.QuietFailurePolicy)}}</code>
+                <p class="muted" data-copy="{{Attr(virusTotal.ZhProcessOnlySummary)}}">{{Html(virusTotal.ZhProcessOnlySummary)}}</p>
+                <code data-copy="{{Attr(virusTotal.LookupMode)}}; {{Attr(virusTotal.NoSampleUploadGuarantee)}}; {{Attr(virusTotal.ApiKeyPersistenceScope)}}; {{Attr(virusTotal.PersistencePolicy)}}; {{Attr(virusTotal.QuietFailurePolicy)}}">{{Html(virusTotal.LookupMode)}} · {{Html(virusTotal.NoSampleUploadGuarantee)}} · {{Html(virusTotal.ApiKeyPersistenceScope)}} · {{Html(virusTotal.QuietFailurePolicy)}}</code>
               </div>
 
-              <label for="apiKey" data-zh="VirusTotal API Key（仅当前进程）" data-en="VirusTotal API key (current process only)">VirusTotal API Key（仅当前进程）</label>
-              <input id="apiKey" type="password" autocomplete="off" placeholder="x-apikey">
+              <div class="metric">
+                <strong data-zh="官方摘要字段" data-en="Official summary fields">官方摘要字段</strong>
+                <p class="muted" data-copy="VT official summary fields: engineCounts, lastAnalysisStats, lastAnalysisDateUtc, reputation/communityScore, officialFileObject, officialSummary, zhOfficialSummary, permalink/detectionPermalink/officialApiSelfLink." data-zh="结果 API 会返回官方引擎统计、最后分析时间、信誉/社区分数、officialFileObject、officialSummary/zhOfficialSummary 和 VirusTotal 链接；这些都是 hash 报告元数据，不是样本行为。" data-en="The result API returns official engine counts, last analysis time, reputation/community score, officialFileObject, officialSummary/zhOfficialSummary, and VirusTotal links; these are hash-report metadata, not sample behavior.">结果 API 会返回官方引擎统计、最后分析时间、信誉/社区分数、officialFileObject、officialSummary/zhOfficialSummary 和 VirusTotal 链接；这些都是 hash 报告元数据，不是样本行为。</p>
+              </div>
+
+              <label for="apiKey" data-zh="VirusTotal API Key（仅写入当前进程）" data-en="VirusTotal API key (write to current process only)">VirusTotal API Key（仅写入当前进程）</label>
+              <input id="apiKey" type="password" autocomplete="off" placeholder="x-apikey" data-copy-label="VirusTotal API key input">
               <div class="row">
-                <button type="button" onclick="saveKey(false)" data-zh="写入当前进程环境" data-en="Set process environment">写入当前进程环境</button>
+                <button type="button" onclick="saveKey(false)" data-zh="写入当前 Web Host 进程" data-en="Set process environment (current Web Host)">写入当前 Web Host 进程</button>
                 <button class="secondary" type="button" onclick="saveKey(true)" data-zh="清除当前进程 Key" data-en="Clear process key">清除当前进程 Key</button>
               </div>
               <p id="status" class="muted" data-copy=""></p>
@@ -190,7 +196,7 @@ internal static class SettingsPage
             async function saveKey(clear){
               const apiKey = document.getElementById('apiKey').value;
               if(!clear && !apiKey.trim()){
-                setStatus(t('请输入 API Key；如果要移除当前进程 Key，请点击“清除当前进程 Key”。', 'Enter an API key; to remove the current process key, click Clear process key.'), true);
+                setStatus(t('请输入 API Key；该操作只写入当前 Web Host 进程。若要移除当前进程 Key，请点击“清除当前进程 Key”。', 'Enter an API key; this writes only to the current Web Host process. To remove the current process key, click Clear process key.'), true);
                 return;
               }
               try {
@@ -205,9 +211,9 @@ internal static class SettingsPage
                 const source = payload.source || 'not-configured';
                 const message = clear
                   ? (payload.configured
-                    ? t(`当前进程 Key 已清除；仍从 ${source} 读取。`, `Current process key cleared; VirusTotal is still configured from ${source}.`)
+                    ? t(`当前进程 Key 已清除；仍从 ${source} 读取。WebUI 不会修改 User/Machine 环境变量。`, `Current process key cleared; VirusTotal is still configured from ${source}. The WebUI does not modify User/Machine environment variables.`)
                     : t('当前进程 Key 已清除；VirusTotal 未配置。', 'Current process key cleared; VirusTotal is not configured.'))
-                  : t(`API Key 已写入当前 Web Host 进程环境（${source}）；不会落盘，重启后需要重新输入或预先设置环境变量。`, `API key was written to the current Web Host process environment (${source}); it is not persisted to disk and must be re-entered after restart unless an environment variable is set before launch.`);
+                  : t(`API Key 已写入当前 Web Host 进程环境（${source}）；不会落盘，不会修改 User/Machine 环境变量，重启后需要重新输入或预先设置环境变量。`, `API key was written to the current Web Host process environment (${source}); it is not persisted to disk, does not modify User/Machine environment variables, and must be re-entered after restart unless an environment variable is set before launch.`);
                 setStatus(message, false);
                 setTimeout(() => location.reload(), 800);
               } catch(error) {
@@ -280,7 +286,7 @@ internal static class SettingsPage
                 return t('检查启动 Web Host 的本机权限后重试。', 'Check the local permissions of the Web Host process, then retry.');
               }
               if(/VirusTotal/i.test(actionText)){
-                return t('确认 API Key 未粘贴为空；若要移除当前进程 Key，请点击“清除当前进程 Key”。', 'Confirm the API key was not pasted as empty; to remove the process key, click Clear process key.');
+                return t('确认 API Key 未粘贴为空；本页只写入当前 Web Host 进程。若要移除当前进程 Key，请点击“清除当前进程 Key”。', 'Confirm the API key was not pasted as empty; this page writes only to the current Web Host process. To remove the process key, click Clear process key.');
               }
               if(/配置|config/i.test(actionText)){
                 return t('确认 Web Host 仍在运行并刷新页面；上传页仍会使用已保存的本地预设。', 'Confirm the Web Host is still running and refresh the page; the upload page can still use saved local presets.');

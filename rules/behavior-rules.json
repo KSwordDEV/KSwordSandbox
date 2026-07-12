@@ -1,5 +1,5 @@
 {
-  "version": "2026-07-12-v26-self-noise-guard-hardening",
+  "version": "2026-07-12-v27-behavior-rule-expansion",
   "rules": [
     {
       "id": "host-submission",
@@ -34314,6 +34314,901 @@
         "collection",
         "metadata"
       ]
+    },
+    {
+      "id": "persistence-ifeo-verifierdll-user-writable",
+      "title": "IFEO VerifierDll points to user-writable DLL",
+      "titleZh": "IFEO VerifierDll 指向用户可写 DLL",
+      "severity": "high",
+      "confidence": "high",
+      "summary": "An Image File Execution Options verifier DLL registry value was written to a user-writable DLL path, a constrained IFEO persistence and abuse surface.",
+      "summaryZh": "Image File Execution Options 的 VerifierDll 注册表值被写入为用户可写 DLL 路径，是受约束的 IFEO 持久化/滥用信号。",
+      "mitreTechniqueId": "T1546",
+      "mitreTechniqueName": "Event Triggered Execution",
+      "eventTypes": [
+        "registry.set",
+        "registry.create",
+        "driver.registry"
+      ],
+      "allDataRegex": {
+        "path": [
+          "(?i)\\\\Image File Execution Options\\\\[^\\\\]+\\\\VerifierDll$|\\\\Image File Execution Options\\\\[^\\\\]+$"
+        ],
+        "valueName": [
+          "(?i)^VerifierDll$"
+        ],
+        "value": [
+          "(?i)(?:Users|ProgramData|AppData|Temp|Downloads|Public)\\\\[^\\r\\n]+\\.dll$"
+        ]
+      },
+      "evidenceFields": [
+        "path",
+        "data.valueName",
+        "data.value"
+      ],
+      "tags": [
+        "mitre",
+        "open-source-reference",
+        "sigma-style",
+        "elastic-style",
+        "splunk-style",
+        "persistence",
+        "registry",
+        "ifeo"
+      ],
+      "excludeProcessNames": [
+        "KSword.Sandbox.Agent.exe",
+        "KSword.Sandbox.R0Collector.exe"
+      ],
+      "excludeDataContains": {
+        "source": [
+          "collection-health",
+          "virustotal",
+          "r0collector"
+        ],
+        "healthStatus": [
+          "collection-health",
+          "driver-health"
+        ],
+        "vtStatus": [
+          "not_configured",
+          "not_found",
+          "rate_limited",
+          "unset"
+        ],
+        "collectorSelfNoise": [
+          "true"
+        ],
+        "noise": [
+          "true"
+        ],
+        "selfNoise": [
+          "true"
+        ],
+        "collectorNoise": [
+          "true"
+        ]
+      },
+      "excludeDataEquals": {
+        "behaviorCounted": [
+          "false"
+        ],
+        "nonbehavior": [
+          "true"
+        ]
+      }
+    },
+    {
+      "id": "persistence-bits-notifycmdline-user-writable",
+      "title": "BITS job NotifyCmdLine user-writable payload",
+      "titleZh": "BITS NotifyCmdLine 指向用户可写载荷",
+      "severity": "high",
+      "confidence": "high",
+      "summary": "A BITS job or qmgr registry row configured NotifyCmdLine/notify command execution from a user-writable executable or script path.",
+      "summaryZh": "BITS 作业或 qmgr 注册表行将 NotifyCmdLine/通知命令配置为用户可写可执行或脚本路径。",
+      "mitreTechniqueId": "T1197",
+      "mitreTechniqueName": "BITS Jobs",
+      "eventTypes": [
+        "bits.job.created",
+        "bits.job.modified",
+        "registry.set",
+        "registry.create",
+        "driver.registry"
+      ],
+      "dataContains": {
+        "jobType": [
+          "bits"
+        ],
+        "path": [
+          "\\BITS",
+          "\\qmgr"
+        ],
+        "valueName": [
+          "NotifyCmdLine",
+          "notifyCommand"
+        ]
+      },
+      "dataRegex": {
+        "value": [
+          "(?i)(?:Users|ProgramData|AppData|Temp|Downloads|Public)\\\\[^\\r\\n]+\\.(?:exe|dll|ps1|vbs|js|cmd|bat)$"
+        ],
+        "notifyCommand": [
+          "(?i)(?:Users|ProgramData|AppData|Temp|Downloads|Public)\\\\[^\\r\\n]+\\.(?:exe|dll|ps1|vbs|js|cmd|bat)"
+        ]
+      },
+      "evidenceFields": [
+        "data.jobId",
+        "data.jobType",
+        "path",
+        "data.valueName",
+        "data.value",
+        "data.notifyCommand"
+      ],
+      "tags": [
+        "mitre",
+        "open-source-reference",
+        "sigma-style",
+        "elastic-style",
+        "splunk-style",
+        "persistence",
+        "bits",
+        "download-execute"
+      ],
+      "excludeProcessNames": [
+        "KSword.Sandbox.Agent.exe",
+        "KSword.Sandbox.R0Collector.exe"
+      ],
+      "excludeDataContains": {
+        "source": [
+          "collection-health",
+          "virustotal",
+          "r0collector"
+        ],
+        "healthStatus": [
+          "collection-health",
+          "driver-health"
+        ],
+        "vtStatus": [
+          "not_configured",
+          "not_found",
+          "rate_limited",
+          "unset"
+        ],
+        "collectorSelfNoise": [
+          "true"
+        ],
+        "noise": [
+          "true"
+        ],
+        "selfNoise": [
+          "true"
+        ],
+        "collectorNoise": [
+          "true"
+        ]
+      },
+      "excludeDataEquals": {
+        "behaviorCounted": [
+          "false"
+        ],
+        "nonbehavior": [
+          "true"
+        ]
+      }
+    },
+    {
+      "id": "injection-createremotethread-loadlibrary-user-dll",
+      "title": "CreateRemoteThread LoadLibrary user-writable DLL injection",
+      "titleZh": "CreateRemoteThread LoadLibrary 用户可写 DLL 注入",
+      "severity": "high",
+      "confidence": "high",
+      "summary": "API-sequence or injection telemetry links remote process allocation/write/thread creation to LoadLibrary of a user-writable DLL.",
+      "summaryZh": "API 序列或注入遥测将远程进程分配/写入/建线程与加载用户可写 DLL 关联。",
+      "mitreTechniqueId": "T1055.001",
+      "mitreTechniqueName": "Process Injection: Dynamic-link library injection",
+      "eventTypes": [
+        "api.sequence",
+        "api.call",
+        "process.injection",
+        "behavior.injection"
+      ],
+      "dataContainsAll": {
+        "operation": [
+          "VirtualAllocEx",
+          "WriteProcessMemory",
+          "CreateRemoteThread",
+          "LoadLibrary"
+        ]
+      },
+      "dataRegex": {
+        "targetProcessName": [
+          "(?i)^[a-z0-9_.-]+\\.exe$"
+        ],
+        "dllPath": [
+          "(?i)(?:Users|ProgramData|AppData|Temp|Downloads|Public)\\\\[^\\r\\n]+\\.dll$"
+        ]
+      },
+      "evidenceFields": [
+        "processName",
+        "data.operation",
+        "data.targetProcessName",
+        "data.dllPath"
+      ],
+      "tags": [
+        "mitre",
+        "open-source-reference",
+        "sigma-style",
+        "elastic-style",
+        "splunk-style",
+        "injection",
+        "dll-injection"
+      ],
+      "excludeProcessNames": [
+        "KSword.Sandbox.Agent.exe",
+        "KSword.Sandbox.R0Collector.exe"
+      ],
+      "excludeDataContains": {
+        "source": [
+          "collection-health",
+          "virustotal",
+          "r0collector"
+        ],
+        "healthStatus": [
+          "collection-health",
+          "driver-health"
+        ],
+        "vtStatus": [
+          "not_configured",
+          "not_found",
+          "rate_limited",
+          "unset"
+        ],
+        "collectorSelfNoise": [
+          "true"
+        ],
+        "noise": [
+          "true"
+        ],
+        "selfNoise": [
+          "true"
+        ],
+        "collectorNoise": [
+          "true"
+        ]
+      },
+      "excludeDataEquals": {
+        "behaviorCounted": [
+          "false"
+        ],
+        "nonbehavior": [
+          "true"
+        ]
+      }
+    },
+    {
+      "id": "injection-queueuserapc-loadlibrary-suspended-process",
+      "title": "QueueUserAPC LoadLibrary into suspended process",
+      "titleZh": "QueueUserAPC 将 LoadLibrary 注入挂起进程",
+      "severity": "high",
+      "confidence": "high",
+      "summary": "Injection telemetry reported a suspended target process with QueueUserAPC/NtQueueApcThread and LoadLibrary-style DLL loading context.",
+      "summaryZh": "注入遥测报告挂起目标进程，并包含 QueueUserAPC/NtQueueApcThread 与 LoadLibrary DLL 加载上下文。",
+      "mitreTechniqueId": "T1055.004",
+      "mitreTechniqueName": "Process Injection: CreateRemoteThread",
+      "eventTypes": [
+        "api.sequence",
+        "api.call",
+        "thread.remote",
+        "behavior.injection"
+      ],
+      "dataContainsAll": {
+        "operation": [
+          "CreateProcess",
+          "suspended",
+          "QueueUserAPC",
+          "LoadLibrary"
+        ]
+      },
+      "dataRegex": {
+        "targetProcessName": [
+          "(?i)^[a-z0-9_.-]+\\.exe$"
+        ],
+        "payloadPath": [
+          "(?i)(?:Users|ProgramData|AppData|Temp|Downloads|Public)\\\\[^\\r\\n]+\\.dll$"
+        ]
+      },
+      "evidenceFields": [
+        "processName",
+        "data.operation",
+        "data.targetProcessName",
+        "data.payloadPath"
+      ],
+      "tags": [
+        "mitre",
+        "open-source-reference",
+        "sigma-style",
+        "elastic-style",
+        "splunk-style",
+        "injection",
+        "apc"
+      ],
+      "excludeProcessNames": [
+        "KSword.Sandbox.Agent.exe",
+        "KSword.Sandbox.R0Collector.exe"
+      ],
+      "excludeDataContains": {
+        "source": [
+          "collection-health",
+          "virustotal",
+          "r0collector"
+        ],
+        "healthStatus": [
+          "collection-health",
+          "driver-health"
+        ],
+        "vtStatus": [
+          "not_configured",
+          "not_found",
+          "rate_limited",
+          "unset"
+        ],
+        "collectorSelfNoise": [
+          "true"
+        ],
+        "noise": [
+          "true"
+        ],
+        "selfNoise": [
+          "true"
+        ],
+        "collectorNoise": [
+          "true"
+        ]
+      },
+      "excludeDataEquals": {
+        "behaviorCounted": [
+          "false"
+        ],
+        "nonbehavior": [
+          "true"
+        ]
+      }
+    },
+    {
+      "id": "lateral-svcctl-remote-service-user-writable-binary",
+      "title": "Remote service control creates user-writable service binary",
+      "titleZh": "远程服务控制创建用户可写服务二进制",
+      "severity": "high",
+      "confidence": "high",
+      "summary": "Service-control or process telemetry ties a remote host to service creation/start with a user-writable service binary path.",
+      "summaryZh": "服务控制或进程遥测将远程主机与创建/启动服务及用户可写服务二进制路径关联。",
+      "mitreTechniqueId": "T1569.002",
+      "mitreTechniqueName": "System Services: Service Execution",
+      "eventTypes": [
+        "service.created",
+        "service.modified",
+        "process.start",
+        "process.new",
+        "smb.pipe.open",
+        "pcap.smb"
+      ],
+      "allDataRegex": {
+        "remoteHost": [
+          "(?i)^[A-Za-z0-9_.-]{2,}$"
+        ],
+        "serviceBinary": [
+          "(?i)(?:Users|ProgramData|AppData|Temp|Downloads|Public|ADMIN\\$|C\\$)\\\\[^\\r\\n]+\\.(?:exe|dll|bat|cmd|ps1)$"
+        ]
+      },
+      "dataContains": {
+        "pipeName": [
+          "svcctl",
+          "ntsvcs"
+        ],
+        "operation": [
+          "CreateService",
+          "StartService",
+          "service create"
+        ]
+      },
+      "commandLineRegex": [
+        "(?i)\\b(sc|psexec|paexec)(?:\\.exe)?\\b.*\\\\\\\\[A-Za-z0-9_.-]+.*\\b(create|start|binPath=)\\b"
+      ],
+      "evidenceFields": [
+        "processName",
+        "commandLine",
+        "data.remoteHost",
+        "data.serviceName",
+        "data.serviceBinary",
+        "data.pipeName",
+        "data.operation"
+      ],
+      "tags": [
+        "mitre",
+        "open-source-reference",
+        "sigma-style",
+        "elastic-style",
+        "splunk-style",
+        "lateral-movement",
+        "service-control",
+        "smb"
+      ],
+      "excludeProcessNames": [
+        "KSword.Sandbox.Agent.exe",
+        "KSword.Sandbox.R0Collector.exe"
+      ],
+      "excludeDataContains": {
+        "source": [
+          "collection-health",
+          "virustotal",
+          "r0collector"
+        ],
+        "healthStatus": [
+          "collection-health",
+          "driver-health"
+        ],
+        "vtStatus": [
+          "not_configured",
+          "not_found",
+          "rate_limited",
+          "unset"
+        ],
+        "collectorSelfNoise": [
+          "true"
+        ],
+        "noise": [
+          "true"
+        ],
+        "selfNoise": [
+          "true"
+        ],
+        "collectorNoise": [
+          "true"
+        ]
+      },
+      "excludeDataEquals": {
+        "behaviorCounted": [
+          "false"
+        ],
+        "nonbehavior": [
+          "true"
+        ]
+      }
+    },
+    {
+      "id": "lateral-winrm-encoded-command-remote-target",
+      "title": "WinRM remote target runs encoded PowerShell command",
+      "titleZh": "WinRM 远程目标运行编码 PowerShell 命令",
+      "severity": "high",
+      "confidence": "high",
+      "summary": "PowerShell or WinRM command telemetry includes a remote target plus encoded/scriptblock execution context.",
+      "summaryZh": "PowerShell 或 WinRM 命令遥测同时包含远程目标和编码/脚本块执行上下文。",
+      "mitreTechniqueId": "T1021.006",
+      "mitreTechniqueName": "Remote Services: Windows Remote Management",
+      "eventTypes": [
+        "process.start",
+        "process.new",
+        "powershell.scriptblock",
+        "winrm.command"
+      ],
+      "commandLineRegex": [
+        "(?i)(Invoke-Command|Enter-PSSession|New-PSSession|winrs|powershell(?:\\.exe)?).*(-ComputerName|/r:|https?://[A-Za-z0-9_.-]+:598[56]).*(-enc|-encodedcommand|ScriptBlock|Invoke-Expression)"
+      ],
+      "dataRegex": {
+        "remoteHost": [
+          "(?i)^[A-Za-z0-9_.-]{2,}$"
+        ],
+        "scriptBlockText": [
+          "(?i)(FromBase64String|-enc|-encodedcommand|IEX|Invoke-Expression)"
+        ]
+      },
+      "evidenceFields": [
+        "processName",
+        "commandLine",
+        "data.remoteHost",
+        "data.scriptBlockText"
+      ],
+      "tags": [
+        "mitre",
+        "open-source-reference",
+        "sigma-style",
+        "elastic-style",
+        "splunk-style",
+        "lateral-movement",
+        "winrm",
+        "powershell"
+      ],
+      "excludeProcessNames": [
+        "KSword.Sandbox.Agent.exe",
+        "KSword.Sandbox.R0Collector.exe"
+      ],
+      "excludeDataContains": {
+        "source": [
+          "collection-health",
+          "virustotal",
+          "r0collector"
+        ],
+        "healthStatus": [
+          "collection-health",
+          "driver-health"
+        ],
+        "vtStatus": [
+          "not_configured",
+          "not_found",
+          "rate_limited",
+          "unset"
+        ],
+        "collectorSelfNoise": [
+          "true"
+        ],
+        "noise": [
+          "true"
+        ],
+        "selfNoise": [
+          "true"
+        ],
+        "collectorNoise": [
+          "true"
+        ]
+      },
+      "excludeDataEquals": {
+        "behaviorCounted": [
+          "false"
+        ],
+        "nonbehavior": [
+          "true"
+        ]
+      }
+    },
+    {
+      "id": "anti-sandbox-tool-enumeration-gated-exit",
+      "title": "Sandbox tool enumeration gates execution or exit",
+      "titleZh": "沙箱工具枚举控制执行或退出",
+      "severity": "medium",
+      "confidence": "medium",
+      "summary": "Anti-analysis telemetry shows enumeration of VM/sandbox tools, services, drivers, or processes tied to an exit/sleep/abort gate.",
+      "summaryZh": "反分析遥测显示枚举 VM/沙箱工具、服务、驱动或进程，并与退出/休眠/中止门控关联。",
+      "mitreTechniqueId": "T1497.001",
+      "mitreTechniqueName": "Virtualization/Sandbox Evasion: System Checks",
+      "eventTypes": [
+        "antiAnalysis.sandboxCheck",
+        "anti_sandbox.check",
+        "api.call",
+        "process.start",
+        "process.new",
+        "behavior.anti_analysis"
+      ],
+      "allDataRegex": {
+        "check": [
+          "(?i)(vmtools|vbox|qemu|xen|hyperv|sandbox|wireshark|procmon|process|service|driver|device)"
+        ],
+        "action": [
+          "(?i)(exit|abort|sleep|delay|gate|suppress|terminate)"
+        ]
+      },
+      "evidenceFields": [
+        "processName",
+        "commandLine",
+        "data.check",
+        "data.action",
+        "data.matchedName"
+      ],
+      "tags": [
+        "mitre",
+        "open-source-reference",
+        "sigma-style",
+        "elastic-style",
+        "splunk-style",
+        "anti-sandbox",
+        "anti-analysis",
+        "tool-enumeration"
+      ],
+      "excludeProcessNames": [
+        "KSword.Sandbox.Agent.exe",
+        "KSword.Sandbox.R0Collector.exe"
+      ],
+      "excludeDataContains": {
+        "source": [
+          "collection-health",
+          "virustotal",
+          "r0collector"
+        ],
+        "healthStatus": [
+          "collection-health",
+          "driver-health"
+        ],
+        "vtStatus": [
+          "not_configured",
+          "not_found",
+          "rate_limited",
+          "unset"
+        ],
+        "collectorSelfNoise": [
+          "true"
+        ],
+        "noise": [
+          "true"
+        ],
+        "selfNoise": [
+          "true"
+        ],
+        "collectorNoise": [
+          "true"
+        ]
+      },
+      "excludeDataEquals": {
+        "behaviorCounted": [
+          "false"
+        ],
+        "nonbehavior": [
+          "true"
+        ]
+      }
+    },
+    {
+      "id": "anti-sandbox-sleep-skew-gated-execution",
+      "title": "Sleep skew or time acceleration gates execution",
+      "titleZh": "睡眠偏移或时间加速检测控制执行",
+      "severity": "medium",
+      "confidence": "medium",
+      "summary": "Timing telemetry reported a sleep/time-skew check with a threshold and an execution gate or abort action.",
+      "summaryZh": "计时遥测报告睡眠/时间偏移检查、阈值以及执行门控或中止动作。",
+      "mitreTechniqueId": "T1497.003",
+      "mitreTechniqueName": "Virtualization/Sandbox Evasion: Time Based Evasion",
+      "eventTypes": [
+        "antiAnalysis.sandboxCheck",
+        "anti_sandbox.check",
+        "api.sleep",
+        "behavior.anti_analysis"
+      ],
+      "allDataRegex": {
+        "check": [
+          "(?i)(sleep|time|tick|rdtsc|GetTickCount|QueryPerformanceCounter|time skew|acceleration)"
+        ],
+        "action": [
+          "(?i)(exit|abort|gate|suppress|delay|continue-only-if)"
+        ]
+      },
+      "allDataNumericRanges": {
+        "requestedSleepMs": [
+          {
+            "min": 30000
+          }
+        ],
+        "observedSkewMs": [
+          {
+            "min": 1000
+          }
+        ]
+      },
+      "evidenceFields": [
+        "data.check",
+        "data.action",
+        "data.requestedSleepMs",
+        "data.observedSkewMs"
+      ],
+      "tags": [
+        "mitre",
+        "open-source-reference",
+        "sigma-style",
+        "elastic-style",
+        "splunk-style",
+        "anti-sandbox",
+        "anti-analysis",
+        "time-evasion"
+      ],
+      "excludeProcessNames": [
+        "KSword.Sandbox.Agent.exe",
+        "KSword.Sandbox.R0Collector.exe"
+      ],
+      "excludeDataContains": {
+        "source": [
+          "collection-health",
+          "virustotal",
+          "r0collector"
+        ],
+        "healthStatus": [
+          "collection-health",
+          "driver-health"
+        ],
+        "vtStatus": [
+          "not_configured",
+          "not_found",
+          "rate_limited",
+          "unset"
+        ],
+        "collectorSelfNoise": [
+          "true"
+        ],
+        "noise": [
+          "true"
+        ],
+        "selfNoise": [
+          "true"
+        ],
+        "collectorNoise": [
+          "true"
+        ]
+      },
+      "excludeDataEquals": {
+        "behaviorCounted": [
+          "false"
+        ],
+        "nonbehavior": [
+          "true"
+        ]
+      }
+    },
+    {
+      "id": "download-execute-certutil-urlcache-user-launch",
+      "title": "Certutil URL cache download followed by user-writable launch",
+      "titleZh": "Certutil URL 缓存下载后启动用户可写载荷",
+      "severity": "high",
+      "confidence": "high",
+      "summary": "Process or normalized download-execute telemetry links certutil URL cache retrieval from HTTP(S) to execution of a user-writable payload.",
+      "summaryZh": "进程或规范化下载执行遥测将 certutil URL 缓存 HTTP(S) 拉取与用户可写载荷执行关联。",
+      "mitreTechniqueId": "T1105",
+      "mitreTechniqueName": "Ingress Tool Transfer",
+      "eventTypes": [
+        "process.start",
+        "process.new",
+        "download.execute",
+        "behavior.download_execute"
+      ],
+      "commandLineRegex": [
+        "(?i)\\bcertutil(?:\\.exe)?\\b.*\\b-urlcache\\b.*\\b-f\\b.*https?://[^\\s]+.*(?:Users|ProgramData|AppData|Temp|Downloads|Public)\\\\[^\\r\\n]+\\.(?:exe|dll|ps1|bat|cmd)"
+      ],
+      "allDataRegex": {
+        "sourceUrl": [
+          "(?i)^https?://"
+        ],
+        "executedPath": [
+          "(?i)(?:Users|ProgramData|AppData|Temp|Downloads|Public)\\\\[^\\r\\n]+\\.(?:exe|dll|ps1|bat|cmd)$"
+        ]
+      },
+      "evidenceFields": [
+        "processName",
+        "commandLine",
+        "data.sourceUrl",
+        "data.executedPath"
+      ],
+      "tags": [
+        "mitre",
+        "open-source-reference",
+        "sigma-style",
+        "elastic-style",
+        "splunk-style",
+        "download-execute",
+        "lolbas-inspired",
+        "certutil"
+      ],
+      "excludeProcessNames": [
+        "KSword.Sandbox.Agent.exe",
+        "KSword.Sandbox.R0Collector.exe"
+      ],
+      "excludeDataContains": {
+        "source": [
+          "collection-health",
+          "virustotal",
+          "r0collector"
+        ],
+        "healthStatus": [
+          "collection-health",
+          "driver-health"
+        ],
+        "vtStatus": [
+          "not_configured",
+          "not_found",
+          "rate_limited",
+          "unset"
+        ],
+        "collectorSelfNoise": [
+          "true"
+        ],
+        "noise": [
+          "true"
+        ],
+        "selfNoise": [
+          "true"
+        ],
+        "collectorNoise": [
+          "true"
+        ]
+      },
+      "excludeDataEquals": {
+        "behaviorCounted": [
+          "false"
+        ],
+        "nonbehavior": [
+          "true"
+        ]
+      }
+    },
+    {
+      "id": "download-execute-mshta-remote-scriptlet-user-payload",
+      "title": "Mshta remote scriptlet launches user-writable payload",
+      "titleZh": "Mshta 远程脚本组件启动用户可写载荷",
+      "severity": "high",
+      "confidence": "high",
+      "summary": "Mshta or normalized download-execute telemetry references a remote HTA/scriptlet and a subsequent user-writable executable or script payload.",
+      "summaryZh": "Mshta 或规范化下载执行遥测引用远程 HTA/脚本组件，并随后启动用户可写可执行或脚本载荷。",
+      "mitreTechniqueId": "T1218.005",
+      "mitreTechniqueName": "System Binary Proxy Execution: Mshta",
+      "eventTypes": [
+        "process.start",
+        "process.new",
+        "download.execute",
+        "behavior.download_execute"
+      ],
+      "commandLineRegex": [
+        "(?i)\\bmshta(?:\\.exe)?\\b.*(https?://|script:|vbscript:|javascript:|\\.sct|\\.hta)"
+      ],
+      "allDataRegex": {
+        "sourceUrl": [
+          "(?i)^(https?://|script:|vbscript:|javascript:)"
+        ],
+        "executedPath": [
+          "(?i)(?:Users|ProgramData|AppData|Temp|Downloads|Public)\\\\[^\\r\\n]+\\.(?:exe|dll|ps1|vbs|js|hta)$"
+        ]
+      },
+      "evidenceFields": [
+        "processName",
+        "commandLine",
+        "data.sourceUrl",
+        "data.executedPath"
+      ],
+      "tags": [
+        "mitre",
+        "open-source-reference",
+        "sigma-style",
+        "elastic-style",
+        "splunk-style",
+        "download-execute",
+        "lolbas-inspired",
+        "proxy-execution",
+        "mshta"
+      ],
+      "excludeProcessNames": [
+        "KSword.Sandbox.Agent.exe",
+        "KSword.Sandbox.R0Collector.exe"
+      ],
+      "excludeDataContains": {
+        "source": [
+          "collection-health",
+          "virustotal",
+          "r0collector"
+        ],
+        "healthStatus": [
+          "collection-health",
+          "driver-health"
+        ],
+        "vtStatus": [
+          "not_configured",
+          "not_found",
+          "rate_limited",
+          "unset"
+        ],
+        "collectorSelfNoise": [
+          "true"
+        ],
+        "noise": [
+          "true"
+        ],
+        "selfNoise": [
+          "true"
+        ],
+        "collectorNoise": [
+          "true"
+        ]
+      },
+      "excludeDataEquals": {
+        "behaviorCounted": [
+          "false"
+        ],
+        "nonbehavior": [
+          "true"
+        ]
+      }
     }
   ]
 }

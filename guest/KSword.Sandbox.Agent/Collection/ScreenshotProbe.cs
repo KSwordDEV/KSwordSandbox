@@ -224,6 +224,9 @@ internal sealed class ScreenshotProbe : IGuestProbe
         }
         else
         {
+            evt.Data["artifactRelativePath"] = string.Empty;
+            evt.Data["sizeBytes"] = string.Empty;
+            evt.Data["sha256"] = string.Empty;
             evt.Data["artifactExists"] = "false";
             evt.Data["artifactIntegrityState"] = result.Captured ? "missing" : "skipped";
             evt.Data["artifactRelativePathStatus"] = result.Captured ? "missing" : "not-created";
@@ -358,9 +361,12 @@ internal sealed class ScreenshotProbe : IGuestProbe
                 ["collectionName"] = "screenshots",
                 ["processRole"] = context.RootProcessId is null ? "sample-context" : "sample-root-context",
                 ["expectedRelativePath"] = "screenshots/*.bmp",
+                ["artifactRelativePath"] = string.Empty,
                 ["artifactRelativePathStatus"] = "disabled",
                 ["artifactExists"] = "false",
                 ["artifactIntegrityState"] = "disabled",
+                ["sizeBytes"] = string.Empty,
+                ["sha256"] = string.Empty,
                 ["sizeBytesStatus"] = "disabled",
                 ["sha256Status"] = "disabled",
                 ["artifactHashStatus"] = "disabled",
@@ -637,6 +643,8 @@ internal sealed class ScreenshotProbe : IGuestProbe
                 evt.Data["artifactHashStatus"] = "missing";
                 evt.Data["artifactExists"] = "false";
                 evt.Data["artifactIntegrityState"] = "missing";
+                evt.Data["sizeBytes"] = string.Empty;
+                evt.Data["sha256"] = string.Empty;
                 evt.Data["sizeBytesStatus"] = "missing";
                 evt.Data["sha256Status"] = "missing";
                 return;
@@ -660,6 +668,7 @@ internal sealed class ScreenshotProbe : IGuestProbe
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException or PathTooLongException)
         {
+            evt.Data.TryAdd("sha256", string.Empty);
             evt.Data["hashStatus"] = "failed";
             evt.Data["artifactHashStatus"] = "failed";
             evt.Data["artifactIntegrityState"] = "hash-failed";

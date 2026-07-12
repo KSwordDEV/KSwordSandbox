@@ -144,6 +144,9 @@ not the behavior being intentionally consumed. Treat open-source references
 such as SigmaHQ, Elastic detection-rules, Splunk Security Content, and LOLBAS as
 behavior-family inspiration only; keep KSword predicates expressed over local
 event fields and add source-reference tags only through existing rule `tags`.
+The v27 behavior-rule batch follows this constraint by using tags such as
+`open-source-reference`, `sigma-style`, `elastic-style`, `splunk-style`, and
+`lolbas-inspired`; no dedicated source-reference schema field exists.
 
 ## Artifact-backed correlation handoff
 

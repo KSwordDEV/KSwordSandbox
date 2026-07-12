@@ -801,6 +801,14 @@ function Get-ReleaseComponentProgressSnapshot {
                 remediationZh = '没有实验室 job id 时，release notes 必须写“本候选未刷新 fresh live evidence”。'
             },
             [ordered]@{
+                id = 'self-noise-guard-readiness'
+                titleZh = '自噪声护栏就绪'
+                state = 'static-audit-documented'
+                evidence = @('rules/behavior-rules.json version contains self-noise hardening', 'docs/release.md self-noise boundary', 'docs/run.md self-noise boundary')
+                handoffGate = 'self-noise, collection-health, VT quiet state, and behaviorCounted=false rows stay out of sample behavior; package/readiness do not run smoke/live'
+                remediationZh = '如果审阅发现自噪声行进入行为结论，先修复规则 guard 和报告降噪，再运行允许的静态/readiness 检查；不要用 package 阶段补跑 live。'
+            },
+            [ordered]@{
                 id = 'operator-remediation-zh'
                 titleZh = '中文操作者修复提示'
                 state = 'documented'
@@ -809,6 +817,54 @@ function Get-ReleaseComponentProgressSnapshot {
                 remediationZh = '先运行 install/run CheckEnvironment，再按 RecommendedActions 修复 Hyper-V、VM profile、payload、VT key 或 runtime root。'
             }
         )
+    }
+}
+
+function Get-PackageGapAuditSnapshot {
+    $runtimeSummary = $script:operatorDiagnostics.runtimePublishSummary
+    $runtimeRootProvided = -not [string]::IsNullOrWhiteSpace($RuntimePublishRoot)
+    $runtimeHandoffAllowed = if ($PackageKind -eq 'runtime') { [bool]$script:operatorDiagnostics.runtimeDryRunGuardrail.handoffAllowed } else { $true }
+    return [ordered]@{
+        schema = 'ksword.release.gap-audit.v27'
+        generatedAtUtc = [DateTimeOffset]::UtcNow.ToString('O')
+        packageKind = $PackageKind
+        purpose = 'Machine-readable release/productization gap audit from portable packaging; no live evidence is generated.'
+        nonMutating = [ordered]@{
+            hyperVLive = $false
+            smokeTests = $false
+            driverSigning = $false
+            csignTool = $false
+            gitPush = $false
+            networkPublish = $false
+        }
+        noFreshLiveEvidence = [ordered]@{
+            generated = $false
+            releaseNotesFallbackZh = '本候选未刷新 fresh live evidence'
+            requiredForClaim = @('commit', 'job id', 'RuntimePublishRoot/runtime root', 'generated time', 'report.json', 'report.zh.html', 'report.en.html')
+            remediationZh = '打包只生成 staging/zip/metadata；没有实验室 live job id 时，release notes 必须写“本候选未刷新 fresh live evidence”。'
+        }
+        runtimePublishRootCompleteness = [ordered]@{
+            appliesTo = if ($PackageKind -eq 'runtime') { 'runtime handoff' } else { 'not applicable to source package' }
+            runtimePublishRoot = if ($runtimeRootProvided) { $RuntimePublishRoot } else { $null }
+            requireCompleteRuntimePayloads = [bool]$RequireCompleteRuntimePayloads
+            handoffAllowed = $runtimeHandoffAllowed
+            missingCount = if ($null -eq $runtimeSummary) { $null } else { [int]$runtimeSummary.missingCount }
+            incompleteCount = if ($null -eq $runtimeSummary) { $null } else { [int]$runtimeSummary.incompleteCount }
+            expectedSources = @('host-web', 'guest-tools', 'tools/job-tool', 'tools/postprocess')
+            remediationZh = '完整 runtime handoff 必须传入仓库外 RuntimePublishRoot 和 -RequireCompleteRuntimePayloads，并确认 missingCount/incompleteCount 均为 0；不要从仓库 bin/obj/x64 兜底复制。'
+        }
+        selfNoiseGuardReadiness = [ordered]@{
+            staticAuditOnly = $true
+            smokeExecuted = $false
+            state = 'documented-not-executed-by-packaging'
+            evidence = @('componentProgress:self-noise-guard-readiness', 'docs/release.md', 'docs/run.md', 'rules/behavior-rules.json')
+            remediationZh = '若需要证明自噪声护栏，使用允许的静态/readiness 审计；package-portable.ps1 不运行 smoke、Hyper-V live 或报告生成。'
+        }
+        componentProgressStatus = [ordered]@{
+            present = $true
+            componentIds = @((Get-ReleaseComponentProgressSnapshot).components | ForEach-Object { $_.id })
+            remediationZh = '若缺 componentProgress/gapAudit，请停止 handoff，修正 package/readiness metadata 后重新生成包。'
+        }
     }
 }
 
@@ -953,6 +1009,7 @@ function Update-PackageOperatorDiagnostics {
         chineseGuidance = '中文提示：runtime 便携包如果没有 RuntimePublishRoot 也可做 layout dry-run；完整交付必须传入仓库外 RuntimePublishRoot 并使用 -RequireCompleteRuntimePayloads。package/readiness 不会生成 fresh live evidence。'
     }
     $script:operatorDiagnostics.componentProgress = Get-ReleaseComponentProgressSnapshot
+    $script:operatorDiagnostics.gapAudit = Get-PackageGapAuditSnapshot
 }
 
 # Assert-RuntimePackageArchiveRequiresCompletePayloads prevents accidental
@@ -1240,6 +1297,7 @@ function Write-GeneratedPackageManifest {
         operatorDiagnostics = $script:operatorDiagnostics
         reviewerChecklist = $script:operatorDiagnostics.reviewerChecklist
         componentProgress = $script:operatorDiagnostics.componentProgress
+        gapAudit = $script:operatorDiagnostics.gapAudit
         sourceRuntimeSafetyMetadata = [ordered]@{
             chinese = '中文提示：source 包只交付源码/规则/文档/测试/脚本；runtime 包只从仓库外 RuntimePublishRoot 复制已发布 payload。两类包都不得包含本机 secret、VM 状态、样本、报告、dump/pcap/trace、签名材料或仓库 build output。'
             sourcePackage = [ordered]@{

@@ -8,8 +8,9 @@ namespace KSword.Sandbox.Web.Infrastructure;
 /// Performs optional VirusTotal v3 hash lookups for already-submitted samples.
 /// Inputs are local SHA-256 hashes and an optional local API key; processing
 /// calls the official file-report endpoint only when configured; failures are
-/// returned as quiet status values instead of being logged. This service does
-/// not upload samples; it only asks VirusTotal for an existing file report.
+/// returned as quiet status values instead of being logged. This service uses
+/// only GET /api/v3/files/{hash}; it never sends sample bytes, filenames as
+/// uploads, multipart content, or URLs for scanning.
 /// </summary>
 internal sealed class VirusTotalLookupService
 {
@@ -31,8 +32,9 @@ internal sealed class VirusTotalLookupService
 
     /// <summary>
     /// Looks up one SHA-256 hash. Inputs are the sample hash and cancellation;
-    /// processing skips if no key is configured, otherwise calls
-    /// /api/v3/files/{hash}; return value is an operator-safe summary.
+    /// processing skips if no key is configured, otherwise calls only the
+    /// official /api/v3/files/{hash} report endpoint; return value is an
+    /// operator-safe summary with no sample-upload side effects.
     /// </summary>
     public async Task<VirusTotalLookupResult> LookupFileHashAsync(string sha256, CancellationToken cancellationToken = default)
     {
@@ -42,7 +44,7 @@ internal sealed class VirusTotalLookupService
                 string.Empty,
                 configured: settingsStore.GetState().Configured,
                 VirusTotalLookupStatuses.MissingHash,
-                "Sample SHA-256 is not available.");
+                "Sample SHA-256 is not available; VirusTotal was not called and no sample was uploaded.");
         }
 
         var normalizedHash = sha256.Trim().ToLowerInvariant();
@@ -52,7 +54,7 @@ internal sealed class VirusTotalLookupService
                 normalizedHash,
                 configured: settingsStore.GetState().Configured,
                 VirusTotalLookupStatuses.InvalidHash,
-                "VirusTotal lookup requires a SHA-256 hash.",
+                "VirusTotal hash-only lookup requires a SHA-256 hash; VirusTotal was not called and no sample was uploaded.",
                 "invalid_hash");
         }
 
@@ -63,7 +65,7 @@ internal sealed class VirusTotalLookupService
                 normalizedHash,
                 configured: false,
                 VirusTotalLookupStatuses.NotConfigured,
-                "VirusTotal API key is not configured.",
+                "VirusTotal API key is not configured; lookup was skipped and no sample was uploaded.",
                 "not_configured");
         }
 
@@ -97,7 +99,7 @@ internal sealed class VirusTotalLookupService
                     Found = false,
                     Status = VirusTotalLookupStatuses.NotFound,
                     Verdict = VirusTotalLookupStatuses.NotFound,
-                    Message = "Hash was not found by VirusTotal.",
+                    Message = "Hash was not found by VirusTotal; no sample was uploaded.",
                     Permalink = BuildFilePermalink(normalizedHash),
                     DetectionPermalink = BuildDetectionPermalink(normalizedHash),
                     HttpStatusCode = (int)response.StatusCode,
@@ -111,7 +113,7 @@ internal sealed class VirusTotalLookupService
                     normalizedHash,
                     response.StatusCode,
                     VirusTotalLookupStatuses.RateLimited,
-                    "VirusTotal lookup was rate-limited.",
+                    "VirusTotal hash-only lookup was rate-limited; no sample was uploaded.",
                     "rate_limit",
                     ParseRetryAfterUtc(response));
             }
@@ -122,7 +124,7 @@ internal sealed class VirusTotalLookupService
                     normalizedHash,
                     response.StatusCode,
                     VirusTotalLookupStatuses.AuthenticationFailed,
-                    "VirusTotal API key was rejected by the service.",
+                    "VirusTotal API key was rejected by the service; no sample was uploaded.",
                     "auth");
             }
 
@@ -132,7 +134,7 @@ internal sealed class VirusTotalLookupService
                     normalizedHash,
                     response.StatusCode,
                     VirusTotalLookupStatuses.LookupFailed,
-                    "VirusTotal lookup failed.",
+                    "VirusTotal hash-only lookup failed; no sample was uploaded.",
                     "http_error");
             }
 
@@ -152,8 +154,8 @@ internal sealed class VirusTotalLookupService
                 configured: true,
                 timedOut ? VirusTotalLookupStatuses.Timeout : VirusTotalLookupStatuses.LookupFailed,
                 timedOut
-                    ? "VirusTotal lookup timed out."
-                    : "VirusTotal lookup failed.",
+                    ? "VirusTotal hash-only lookup timed out; no sample was uploaded."
+                    : "VirusTotal hash-only lookup failed; no sample was uploaded.",
                 timedOut ? "timeout" : "transport_or_parse_error");
         }
     }
