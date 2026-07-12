@@ -32,8 +32,8 @@ internal sealed class SecurityEventLogProbe : IGuestProbe
 
     private static readonly int[] TargetEventIds =
     [
-        4656, // A handle to an object was requested; filtered to Process objects in XPath.
-        4663, // An attempt was made to access an object; filtered to Process objects in XPath.
+        4656, // A handle to an object was requested; filtered to Process objects after parsing.
+        4663, // An attempt was made to access an object; filtered to Process objects after parsing.
         4672, // Special privileges assigned to new logon.
         4673, // A privileged service was called.
         4674, // An operation was attempted on a privileged object.
@@ -180,6 +180,7 @@ internal sealed class SecurityEventLogProbe : IGuestProbe
         }
 
         var rawEvents = ParseSecurityEvents(result.StandardOutput, phase, context, events)
+            .Where(IsTargetSecurityEvent)
             .Where(rawEvent => ShouldEmit(rawEvent))
             .OrderBy(rawEvent => rawEvent.TimestampUtc)
             .ThenBy(rawEvent => rawEvent.RecordId ?? long.MaxValue)
@@ -211,27 +212,49 @@ internal sealed class SecurityEventLogProbe : IGuestProbe
     }
 
     /// <summary>
-    /// Runs wevtutil against the Security channel with a bounded XPath query.
+    /// Runs wevtutil against the Security channel with bounded XPath queries.
     /// Inputs are the lower time bound and cancellation token; processing avoids
-    /// shell execution and caps records; the command result is returned.
+    /// EventData predicates because wevtutil supports only a subset of XPath,
+    /// caps records, and returns a combined command result.
     /// </summary>
-    private static Task<BoundedCommandResult> QuerySecurityLogAsync(
+    private static async Task<BoundedCommandResult> QuerySecurityLogAsync(
         DateTimeOffset sinceUtc,
         CancellationToken cancellationToken)
     {
         var wevtutilPath = ResolveWevtutilPath();
-        var query = BuildSecurityXPathQuery(sinceUtc);
-        var arguments = new[]
-        {
-            "qe",
-            ChannelName,
-            $"/q:{query}",
-            "/f:RenderedXml",
-            "/rd:true",
-            $"/c:{MaxEventsPerRead.ToString(CultureInfo.InvariantCulture)}"
-        };
+        var queries = BuildSecurityXPathQueries(sinceUtc);
+        var outputs = new List<string>(queries.Count);
+        var displayedArguments = new List<string>(queries.Count);
 
-        return BoundedProcessRunner.RunAsync(wevtutilPath, arguments, CommandTimeout, cancellationToken);
+        foreach (var query in queries)
+        {
+            var arguments = BuildWevtutilQueryArguments(query);
+            var result = await BoundedProcessRunner
+                .RunAsync(wevtutilPath, arguments, CommandTimeout, cancellationToken)
+                .ConfigureAwait(false);
+            displayedArguments.Add(result.Arguments);
+
+            if (!result.Succeeded)
+            {
+                return result;
+            }
+
+            if (!string.IsNullOrWhiteSpace(result.StandardOutput))
+            {
+                outputs.Add(result.StandardOutput);
+            }
+        }
+
+        return new BoundedCommandResult(
+            wevtutilPath,
+            string.Join(" ; ", displayedArguments),
+            ExitCode: 0,
+            string.Join(Environment.NewLine, outputs),
+            StandardError: string.Empty,
+            TimedOut: false,
+            ExceptionType: null,
+            Message: null,
+            Timeout: CommandTimeout);
     }
 
     /// <summary>
@@ -291,23 +314,40 @@ internal sealed class SecurityEventLogProbe : IGuestProbe
     }
 
     /// <summary>
-    /// Builds a Security channel XPath query for targeted privilege/security
+    /// Builds Security channel XPath queries for targeted privilege/security
     /// event IDs. The input is a UTC lower bound; processing formats Event Log
-    /// time and event ID predicates; the XPath string is returned.
+    /// time and EventID-only System predicates so the XPath remains accepted by
+    /// wevtutil; process-object filtering is performed after XML parsing.
     /// </summary>
-    private static string BuildSecurityXPathQuery(DateTimeOffset sinceUtc)
+    private static IReadOnlyList<string> BuildSecurityXPathQueries(DateTimeOffset sinceUtc)
     {
-        var processAccessIds = new HashSet<int>(ProcessAccessEventIds);
-        var eventIdPredicate = string.Join(
-            " or ",
-            TargetEventIds
-                .Where(id => !processAccessIds.Contains(id))
-                .Select(static id => $"EventID={id.ToString(CultureInfo.InvariantCulture)}"));
-        var processAccessEventIdPredicate = string.Join(
-            " or ",
-            ProcessAccessEventIds.Select(static id => $"EventID={id.ToString(CultureInfo.InvariantCulture)}"));
         var systemTime = sinceUtc.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", CultureInfo.InvariantCulture);
-        return $"*[System[({eventIdPredicate}) and TimeCreated[@SystemTime >= '{systemTime}']] or (System[({processAccessEventIdPredicate}) and TimeCreated[@SystemTime >= '{systemTime}']] and EventData[Data[@Name='ObjectType']='Process'])]";
+        return TargetEventIds
+            .Chunk(8)
+            .Select(chunk =>
+            {
+                var eventIdPredicate = string.Join(
+                    " or ",
+                    chunk.Select(static id => $"EventID={id.ToString(CultureInfo.InvariantCulture)}"));
+                return $"*[System[({eventIdPredicate}) and TimeCreated[@SystemTime >= '{systemTime}']]]";
+            })
+            .ToList();
+    }
+
+    /// <summary>
+    /// Builds wevtutil qe arguments for a single XPath query.
+    /// </summary>
+    private static string[] BuildWevtutilQueryArguments(string query)
+    {
+        return
+        [
+            "qe",
+            ChannelName,
+            $"/q:{query}",
+            "/f:RenderedXml",
+            "/rd:true",
+            $"/c:{MaxEventsPerRead.ToString(CultureInfo.InvariantCulture)}"
+        ];
     }
 
     /// <summary>
@@ -469,6 +509,29 @@ internal sealed class SecurityEventLogProbe : IGuestProbe
             ? $"record:{rawEvent.RecordId.Value.ToString(CultureInfo.InvariantCulture)}"
             : $"synthetic:{rawEvent.EventId}:{rawEvent.TimestampUtc:O}:{Field(rawEvent.EventData, "ProcessId")}:{Field(rawEvent.EventData, "NewProcessId")}:{Field(rawEvent.EventData, "ProcessName")}:{Field(rawEvent.EventData, "NewProcessName")}:{Field(rawEvent.EventData, "ObjectName")}:{Field(rawEvent.EventData, "HandleId")}:{Field(rawEvent.EventData, "AccessMask")}:{Field(rawEvent.EventData, "PrivilegeList")}:{Field(rawEvent.EventData, "EnabledPrivilegeList")}:{Field(rawEvent.EventData, "DisabledPrivilegeList")}";
         return seenEventKeys.Add(key);
+    }
+
+    /// <summary>
+    /// Applies filters that are intentionally not encoded in the wevtutil XPath.
+    /// Inputs are parsed Security events; processing keeps all target IDs except
+    /// 4656/4663, which are only emitted for Process object audit rows.
+    /// </summary>
+    private static bool IsTargetSecurityEvent(RawSecurityEvent rawEvent)
+    {
+        if (!TargetEventIds.Contains(rawEvent.EventId))
+        {
+            return false;
+        }
+
+        if (!ProcessAccessEventIds.Contains(rawEvent.EventId))
+        {
+            return true;
+        }
+
+        var objectType = FirstNonEmpty(
+            Field(rawEvent.EventData, "ObjectType"),
+            ExtractRenderedFieldValue(rawEvent.RenderedMessage, "Object Type"));
+        return IsProcessObjectType(objectType);
     }
 
     /// <summary>

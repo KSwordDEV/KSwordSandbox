@@ -1,6 +1,7 @@
 using System.Text.Json;
 using KSword.Sandbox.Abstractions;
 using KSword.Sandbox.Core.Configuration;
+using KSword.Sandbox.Core.Correlation;
 using KSword.Sandbox.Core.Reporting;
 using KSword.Sandbox.Core.Rules;
 using KSword.Sandbox.Core.Samples;
@@ -49,6 +50,7 @@ internal static class PostProcessProgram
                 .Concat(guestEvents)
                 .OrderBy(evt => evt.Timestamp)
                 .ToList();
+            allEvents = SampleCorrelationClassifier.Apply(allEvents, sample.FullPath);
             var rulesPath = Path.Combine(repoRoot, config.Paths.RulesDirectory, "behavior-rules.json");
             var findings = ReportEventSampler.SanitizeFindings(new RuleEngine(RuleEngine.LoadRuleSet(rulesPath)).Classify(allEvents));
             var driverEventsPath = Path.Combine(Path.GetDirectoryName(eventsPath) ?? string.Empty, "driver-events.jsonl");

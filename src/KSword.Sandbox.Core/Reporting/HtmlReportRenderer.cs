@@ -6314,6 +6314,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
             IsNonBehaviorEvent(evt) ||
             IsNotSampleBehaviorMarkerEvent(evt) ||
             IsSampleBehaviorCandidateFalseEvent(evt) ||
+            IsWeakOrEnvironmentalSampleCorrelationEvent(evt) ||
             IsCollectorSelfNoiseEvent(evt) ||
             IsVirusTotalQuietStateEvent(evt) ||
             IsR0CollectionHealthEvent(evt);
@@ -6327,6 +6328,29 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
     private static bool IsSampleBehaviorCandidateFalseEvent(SandboxEvent evt)
     {
         return EventDataBoolFalse(evt, "sampleBehaviorCandidate", "sample_behavior_candidate");
+    }
+
+    private static bool IsWeakOrEnvironmentalSampleCorrelationEvent(SandboxEvent evt)
+    {
+        if (EventDataBoolTrue(evt, "strongSampleCorrelation"))
+        {
+            return false;
+        }
+
+        var label = FirstEventDataValue(evt, "sampleCorrelation", "sample_correlation");
+        if (TextEqualsAny(label ?? string.Empty, "environment", "unknown", "uncorrelated", "nonbehavior", "not-sample", "not_sample"))
+        {
+            return true;
+        }
+
+        var status = FirstEventDataValue(evt, "sampleCorrelationStatus", "sample_correlation_status");
+        if (TextEqualsAny(status ?? string.Empty, "environment", "unknown", "uncorrelated", "session-related", "session-only", "not-correlated", "not_correlated"))
+        {
+            return true;
+        }
+
+        var strength = FirstEventDataValue(evt, "sampleCorrelationStrength", "sample_correlation_strength");
+        return TextEqualsAny(strength ?? string.Empty, "none", "weak", "session-only", "unattributed");
     }
 
     private static bool IsNotSampleBehaviorMarkerEvent(SandboxEvent evt)
@@ -7091,7 +7115,12 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
     private static bool IsDiagnosticFinding(BehaviorFinding finding)
     {
         if (finding.Evidence.Count > 0 &&
-            finding.Evidence.All(evt => IsCollectionHealthEvent(evt) || IsCollectorSelfNoiseEvent(evt)))
+            finding.Evidence.All(evt =>
+                IsCollectionHealthEvent(evt) ||
+                IsCollectorSelfNoiseEvent(evt) ||
+                IsWeakOrEnvironmentalSampleCorrelationEvent(evt) ||
+                IsBehaviorCountedFalseEvent(evt) ||
+                IsSampleBehaviorCandidateFalseEvent(evt)))
         {
             return true;
         }

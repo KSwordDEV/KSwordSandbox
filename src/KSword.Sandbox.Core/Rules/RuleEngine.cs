@@ -348,6 +348,11 @@ public sealed class RuleEngine
             return true;
         }
 
+        if (HasWeakOrEnvironmentalSampleCorrelation(evt))
+        {
+            return true;
+        }
+
         if (MatchesEventType(
                 [
                     "r0collector.*",
@@ -429,6 +434,53 @@ public sealed class RuleEngine
 
         if (TryGetRuleFieldValue(evt, "collectorNoiseScope", out var collectorNoiseScope) &&
             TextEqualsAny(collectorNoiseScope, "nonbehavior-evidence-quality", "collector-diagnostic", "collector-self-noise"))
+        {
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool HasWeakOrEnvironmentalSampleCorrelation(SandboxEvent evt)
+    {
+        if (EventDataBoolTrue(evt, "strongSampleCorrelation") ||
+            (TryGetRuleFieldValue(evt, "sampleCorrelationStatus", out var strongStatus) &&
+                TextEqualsAny(strongStatus, "correlated", "confirmed")) ||
+            (TryGetRuleFieldValue(evt, "sampleCorrelation", out var strongLabel) &&
+                TextEqualsAny(strongLabel, "confirmed", "probable")))
+        {
+            return false;
+        }
+
+        if (TryGetRuleFieldValue(evt, "sampleCorrelation", out var sampleCorrelation) &&
+            TextEqualsAny(
+                sampleCorrelation,
+                "environment",
+                "unknown",
+                "uncorrelated",
+                "nonbehavior",
+                "not-sample",
+                "not_sample"))
+        {
+            return true;
+        }
+
+        if (TryGetRuleFieldValue(evt, "sampleCorrelationStatus", out var status) &&
+            TextEqualsAny(
+                status,
+                "environment",
+                "unknown",
+                "uncorrelated",
+                "session-related",
+                "session-only",
+                "not-correlated",
+                "not_correlated"))
+        {
+            return true;
+        }
+
+        if (TryGetRuleFieldValue(evt, "sampleCorrelationStrength", out var strength) &&
+            TextEqualsAny(strength, "none", "weak", "session-only", "unattributed"))
         {
             return true;
         }

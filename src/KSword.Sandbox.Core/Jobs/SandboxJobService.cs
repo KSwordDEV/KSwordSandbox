@@ -2,6 +2,7 @@ using System.Text.Json;
 using KSword.Sandbox.Abstractions;
 using KSword.Sandbox.Abstractions.Artifacts;
 using KSword.Sandbox.Core.Artifacts;
+using KSword.Sandbox.Core.Correlation;
 using KSword.Sandbox.Core.Network;
 using KSword.Sandbox.Core.Orchestration;
 using KSword.Sandbox.Core.Reporting;
@@ -643,7 +644,7 @@ public sealed partial class SandboxJobService
         var artifactIndex = artifactIndexBuilder.Build(job.JobId, jobRoot);
         events.AddRange(BuildHostArtifactImportEvents(jobConfig.ArtifactCollection, jobRoot, guestEventsPath, artifactIndex, events));
 
-        var fullEvents = events.OrderBy(evt => evt.Timestamp).ToList();
+        var fullEvents = SampleCorrelationClassifier.Apply(events.OrderBy(evt => evt.Timestamp), sample.FullPath);
         var findings = ReportEventSampler.SanitizeFindings(ruleEngine.Classify(fullEvents));
         var driverEventsPath = string.IsNullOrWhiteSpace(guestEventsPath)
             ? null
