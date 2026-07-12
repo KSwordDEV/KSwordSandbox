@@ -573,39 +573,63 @@ function Test-SmokeLiveEventsEndpoint {
 function Test-SmokeReportHtml {
     <#
     .SYNOPSIS
-    Validates key report sections and findings in report.html.
+    Validates key report sections and findings in a localized HTML report.
 
     .DESCRIPTION
     The input is the generated HTML report path. Processing reads the file and
     checks for stable section headings plus rule titles produced by the
-    synthetic guest events. The function returns no value on success.
+    synthetic guest events. English and Simplified Chinese reports intentionally
+    localize section labels and finding titles, so callers must pass the
+    expected language instead of assuming report.html contains English chrome.
+    The function returns no value on success.
     #>
     param(
         [Parameter(Mandatory)]
-        [string]$HtmlReportPath
+        [string]$HtmlReportPath,
+
+        [ValidateSet('English', 'Chinese')]
+        [string]$Language = 'English'
     )
 
     Assert-SmokeCondition -Condition (Test-Path -LiteralPath $HtmlReportPath -PathType Leaf) -Message "HTML report was not found: $HtmlReportPath"
     $html = Get-Content -LiteralPath $HtmlReportPath -Raw
-    $requiredSnippets = @(
-        'Risk summary',
-        'Static analysis',
-        'CRC32',
-        'PE sections',
-        'Process details',
-        'Dropped files',
-        'Network behavior',
-        'Command and scripting interpreter',
-        'Dropped or modified file',
-        'Outbound TCP activity observed',
-        'Registry modification observed',
-        'R0 collector mock driver event',
-        'r0collector.mockDriverEvent',
-        'Raw normalized events'
-    )
+    $requiredSnippets = if ($Language -eq 'Chinese') {
+        @(
+            '风险摘要',
+            '静态分析',
+            'CRC32',
+            'PE 节区',
+            '进程详情',
+            '落地文件证据',
+            '网络行为',
+            '命令和脚本解释器',
+            '观察到出站 TCP 活动',
+            '观察到注册表修改',
+            'r0collector.mockDriverEvent',
+            '原始事件'
+        )
+    }
+    else {
+        @(
+            'Risk summary',
+            'Static analysis',
+            'CRC32',
+            'PE sections',
+            'Process details',
+            'Dropped files',
+            'File and dropped-artifact activity',
+            'Network behavior',
+            'Command and scripting interpreter',
+            'Outbound TCP activity observed',
+            'Registry modification observed',
+            'R0/security gap-filling telemetry',
+            'r0collector.mockDriverEvent',
+            'Raw normalized events'
+        )
+    }
 
     foreach ($snippet in $requiredSnippets) {
-        Assert-SmokeCondition -Condition ($html.Contains($snippet)) -Message "HTML report is missing expected text: $snippet"
+        Assert-SmokeCondition -Condition ($html.Contains($snippet)) -Message "$Language HTML report is missing expected text: $snippet"
     }
 }
 
@@ -738,8 +762,15 @@ try {
     }
     Assert-SmokeCondition -Condition (@('4', 'Completed') -contains [string]$importedJob.status) -Message "Expected completed job status after import; actual status was $($importedJob.status)."
 
-    Test-SmokeReportHtml -HtmlReportPath ([string]$importedJob.htmlReportPath)
-    Write-SmokeStep "Report validation passed: $($importedJob.htmlReportPath)"
+    $defaultHtmlReportPath = [string]$importedJob.htmlReportPath
+    $zhHtmlReportPath = [string]$importedJob.htmlReportZhPath
+    $enHtmlReportPath = [string]$importedJob.htmlReportEnPath
+    Assert-SmokeCondition -Condition (-not [string]::IsNullOrWhiteSpace($zhHtmlReportPath)) -Message 'Imported job is missing htmlReportZhPath.'
+    Assert-SmokeCondition -Condition (-not [string]::IsNullOrWhiteSpace($enHtmlReportPath)) -Message 'Imported job is missing htmlReportEnPath.'
+    Test-SmokeReportHtml -HtmlReportPath $defaultHtmlReportPath -Language Chinese
+    Test-SmokeReportHtml -HtmlReportPath $zhHtmlReportPath -Language Chinese
+    Test-SmokeReportHtml -HtmlReportPath $enHtmlReportPath -Language English
+    Write-SmokeStep "Report validation passed: default=$defaultHtmlReportPath; zh=$zhHtmlReportPath; en=$enHtmlReportPath"
 
     Write-Host ''
     Write-Host 'PASS: local pipeline smoke completed.'
@@ -750,6 +781,8 @@ try {
     Write-Host "  Guest events:   $($guestArtifacts.EventsPath)"
     Write-Host "  JSON report:    $($importedJob.jsonReportPath)"
     Write-Host "  HTML report:    $($importedJob.htmlReportPath)"
+    Write-Host "  HTML zh report: $($importedJob.htmlReportZhPath)"
+    Write-Host "  HTML en report: $($importedJob.htmlReportEnPath)"
     Write-Host "  Web stdout log: $($script:SmokeContext.StdoutLog)"
     Write-Host "  Web stderr log: $($script:SmokeContext.StderrLog)"
     exit 0
