@@ -27,6 +27,10 @@ std::string BuildConfigData(const Options& options) {
     data.AddUnsigned("eventSchemaVersion", KSWORD_SANDBOX_EVENT_SCHEMA_VERSION);
     data.AddUtf8("eventSchemaVersionHex", HexUnsignedLongLong(KSWORD_SANDBOX_EVENT_SCHEMA_VERSION, 8));
     data.AddUtf8("stableAbiVersionFields", kStableAbiVersionFields);
+    AddCurrentR0EtwCapabilityContractFields(
+        data,
+        "collector-startup",
+        "compile-time-current-capability-flags-and-producer-mask");
     data.AddWide("devicePath", options.devicePath);
     data.AddWide("serviceName", options.serviceName);
     data.AddWide("outputPath", options.outputPath);

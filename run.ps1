@@ -15,6 +15,7 @@ Single-sample CLI and environment-check modes are also available:
 
   .\run.ps1 -Mode Plan -SamplePath D:\Temp\sample.exe
   .\run.ps1 -Mode Analyze -SamplePath D:\Temp\sample.exe -Live
+  .\run.ps1 -Mode Analyze -SamplePreset Notepad -Live -NoR0Collector
   .\run.ps1 -Mode Analyze -SamplePreset Notepad
   .\run.ps1 -Mode Analyze -SamplePreset HarmlessSample -Live
   .\run.ps1 -Mode CheckEnvironment
@@ -55,6 +56,11 @@ param(
     [int]$ExecutionTimeoutSeconds = 240,
 
     [switch]$Live,
+
+    # Disable Guest R0Collector sidecar for this one-shot Analyze/Plan run
+    # without editing sandbox.local.json. Useful when the VM is otherwise ready
+    # but the real driver is unsigned or test-signing is not configured.
+    [switch]$NoR0Collector,
 
     [switch]$PlanOnly,
 
@@ -1512,7 +1518,13 @@ function Invoke-OneShotAnalysis {
 
     $runLive = [bool]$Live -and (-not [bool]$PlanOnly) -and ($Mode -ne 'Plan')
     $payloadRoot = Get-GuestPayloadRoot -State $State -Config $Config -EffectiveRuntimeRoot $EffectiveRuntimeRoot
-    Write-R0DriverConfigurationWarning -Config $Config
+    if ($NoR0Collector) {
+        Write-RunInfo 'R0Collector: 本次 Analyze/Plan 已通过 -NoR0Collector 禁用 R0 sidecar；不会修改配置文件。'
+        Write-RunInfo '中文提示：这适合 unsigned driver/test-signing 未就绪时验证真实 VM/Guest/ETW/artifact/report 主链路；该运行不能证明真实 R0 覆盖。'
+    }
+    else {
+        Write-R0DriverConfigurationWarning -Config $Config
+    }
     if ($runLive) {
         Ensure-GuestPayload -PayloadRoot $payloadRoot -Config $Config
     }
@@ -1553,6 +1565,9 @@ function Invoke-OneShotAnalysis {
         Write-RunInfo "仅生成计划，不修改 VM：$resolvedSample / Planning only, no VM mutation."
         Write-RunInfo '下一步：如需在配置的 Hyper-V VM 中真实执行样本，请追加 -Live。 / Add -Live for live execution.'
         Write-RunInfo '中文提示：当前为计划模式，不会执行样本或改变 VM。'
+    }
+    if ($NoR0Collector) {
+        $arguments += '-NoR0Collector'
     }
 
     $hyperVOutput = @(& powershell @arguments 2>&1)

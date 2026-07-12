@@ -1,5 +1,5 @@
 {
-  "version": "2026-07-12-v28-behavior-rule-expansion",
+  "version": "2026-07-12-v29-security-privilege",
   "rules": [
     {
       "id": "host-submission",
@@ -4440,9 +4440,14 @@
     {
       "id": "lsass-process-access-observed",
       "title": "LSASS process access observed",
+      "titleZh": "观察到 LSASS 进程访问",
       "severity": "critical",
       "summary": "Process, API, or driver telemetry reported LSASS as the target process or image for access that should be reviewed for credential dumping.",
+      "summaryZh": "进程、API 或驱动遥测报告 LSASS 作为进程访问目标或镜像；需排查是否为凭据转储前置行为。",
       "eventTypes": [
+        "security.process.access_requested",
+        "security.process.accessed",
+        "security.privilege.object_operation",
         "process.open",
         "process.access",
         "api.call",
@@ -4462,6 +4467,10 @@
           "\\lsass.exe"
         ],
         "path": [
+          "\\lsass.exe"
+        ],
+        "eventData.ObjectName": [
+          "lsass.exe",
           "\\lsass.exe"
         ]
       },
@@ -4858,11 +4867,16 @@
     {
       "id": "credential-lsass-process-access",
       "title": "LSASS process access observed",
+      "titleZh": "观察到 LSASS 进程访问",
       "severity": "high",
       "summary": "A process, driver, or API event referenced opening or reading lsass.exe, a common precursor to credential dumping.",
+      "summaryZh": "进程、驱动或 API 事件引用打开或读取 lsass.exe，这是凭据转储的常见前置行为。",
       "mitreTechniqueId": "T1003.001",
       "mitreTechniqueName": "LSASS Memory",
       "eventTypes": [
+        "security.process.access_requested",
+        "security.process.accessed",
+        "security.privilege.object_operation",
         "process.access",
         "process.open",
         "driver.process",
@@ -4887,6 +4901,19 @@
           "PROCESS_ALL_ACCESS",
           "0x0010",
           "0x0410",
+          "0x1410"
+        ],
+        "eventData.ObjectName": [
+          "lsass.exe",
+          "\\lsass.exe"
+        ],
+        "eventData.AccessMask": [
+          "PROCESS_VM_READ",
+          "PROCESS_ALL_ACCESS",
+          "0x0010",
+          "0x10",
+          "0x0410",
+          "0x410",
           "0x1410"
         ]
       },
@@ -7784,11 +7811,18 @@
     {
       "id": "process-injection-handle-access",
       "title": "Process handle access for injection",
+      "titleZh": "用于注入排查的进程句柄访问",
       "severity": "high",
       "summary": "A process access or API event requested VM-write, VM-operation, create-thread, or all-access rights commonly needed before process injection.",
+      "summaryZh": "进程访问或 API 事件请求了注入前常见的 VM 写入、VM 操作、创建线程或全访问权限；需结合目标进程和后续行为确认。",
       "mitreTechniqueId": "T1055",
       "mitreTechniqueName": "Process Injection",
       "eventTypes": [
+        "security.process.access_requested",
+        "security.process.accessed",
+        "security.privilege.object_operation",
+        "etw.security",
+        "etw.security.*",
         "process.open",
         "process.access",
         "driver.process",
@@ -7807,6 +7841,38 @@
           "PROCESS_CREATE_THREAD",
           "PROCESS_ALL_ACCESS"
         ],
+        "requestedAccess": [
+          "PROCESS_VM_WRITE",
+          "PROCESS_VM_OPERATION",
+          "PROCESS_CREATE_THREAD",
+          "PROCESS_ALL_ACCESS"
+        ],
+        "grantedAccess": [
+          "PROCESS_VM_WRITE",
+          "PROCESS_VM_OPERATION",
+          "PROCESS_CREATE_THREAD",
+          "PROCESS_ALL_ACCESS"
+        ],
+        "accesses": [
+          "PROCESS_VM_WRITE",
+          "PROCESS_VM_OPERATION",
+          "PROCESS_CREATE_THREAD",
+          "PROCESS_ALL_ACCESS"
+        ],
+        "eventData.AccessMask": [
+          "PROCESS_VM_WRITE",
+          "PROCESS_VM_OPERATION",
+          "PROCESS_CREATE_THREAD",
+          "PROCESS_ALL_ACCESS",
+          "0x0002",
+          "0x2",
+          "0x0008",
+          "0x8",
+          "0x0020",
+          "0x20",
+          "0x1fffff",
+          "0x1f0fff"
+        ],
         "api": [
           "OpenProcess"
         ],
@@ -7816,6 +7882,20 @@
           "CREATE_THREAD"
         ]
       },
+      "evidenceFields": [
+        "eventType",
+        "processName",
+        "processId",
+        "data.targetProcessName",
+        "data.targetProcessId",
+        "data.desiredAccess",
+        "data.requestedAccess",
+        "data.accessMask",
+        "data.grantedAccess",
+        "data.eventData.AccessMask",
+        "data.api",
+        "data.operation"
+      ],
       "tags": [
         "process",
         "injection",
@@ -10358,6 +10438,55 @@
       ]
     },
     {
+      "id": "security-privilege-telemetry-observed",
+      "title": "Security or privilege telemetry observed",
+      "titleZh": "观察到安全或权限遥测",
+      "severity": "info",
+      "confidence": "low",
+      "summary": "Windows Security/ETW privilege or process-access telemetry was imported as supporting context. This rule does not by itself indicate malicious behavior; review target object/process, requested rights, privilege name, and correlated higher-signal rules.",
+      "summaryZh": "已导入 Windows Security/ETW 权限或进程访问遥测作为辅助上下文。该规则本身不表示恶意行为；请结合目标对象/进程、请求权限、权限名称以及更高信号规则排查。",
+      "eventTypes": [
+        "security.*",
+        "etw.security",
+        "etw.security.*",
+        "etw.privilege",
+        "etw.privilege.*",
+        "process.access",
+        "privilege.enabled"
+      ],
+      "evidenceFields": [
+        "eventType",
+        "processName",
+        "processId",
+        "path",
+        "data.provider",
+        "data.providerName",
+        "data.eventId",
+        "data.securityEventName",
+        "data.eventName",
+        "data.targetProcessName",
+        "data.targetProcessId",
+        "data.targetObject",
+        "data.objectName",
+        "data.desiredAccess",
+        "data.requestedAccess",
+        "data.accessMask",
+        "data.grantedAccess",
+        "data.privilege",
+        "data.privilegeName",
+        "data.privilegeList",
+        "data.enabledPrivilegeList",
+        "data.eventData.PrivilegeList"
+      ],
+      "tags": [
+        "security",
+        "privilege",
+        "process",
+        "telemetry",
+        "telemetry-context"
+      ]
+    },
+    {
       "id": "process-access-debug-privilege",
       "title": "Process access with debug or all-access rights",
       "titleZh": "使用调试或全访问权限访问进程",
@@ -10368,6 +10497,14 @@
       "mitreTechniqueId": "T1055",
       "mitreTechniqueName": "Process Injection",
       "eventTypes": [
+        "security.process.access_requested",
+        "security.process.accessed",
+        "security.privilege.*",
+        "security.token.*",
+        "etw.security",
+        "etw.security.*",
+        "etw.privilege",
+        "etw.privilege.*",
         "process.access",
         "driver.process",
         "api.call"
@@ -10386,8 +10523,55 @@
           "PROCESS_CREATE_THREAD",
           "0x1f0fff"
         ],
+        "requestedAccess": [
+          "PROCESS_ALL_ACCESS",
+          "PROCESS_VM_WRITE",
+          "PROCESS_VM_OPERATION",
+          "PROCESS_CREATE_THREAD",
+          "0x1f0fff"
+        ],
+        "grantedAccess": [
+          "PROCESS_ALL_ACCESS",
+          "PROCESS_VM_WRITE",
+          "PROCESS_VM_OPERATION",
+          "PROCESS_CREATE_THREAD",
+          "0x1f0fff"
+        ],
+        "accesses": [
+          "PROCESS_ALL_ACCESS",
+          "PROCESS_VM_WRITE",
+          "PROCESS_VM_OPERATION",
+          "PROCESS_CREATE_THREAD",
+          "0x1f0fff"
+        ],
         "privilege": [
           "SeDebugPrivilege"
+        ],
+        "privilegeList": [
+          "SeDebugPrivilege"
+        ],
+        "enabledPrivilegeList": [
+          "SeDebugPrivilege"
+        ],
+        "eventData.PrivilegeList": [
+          "SeDebugPrivilege"
+        ],
+        "eventData.EnabledPrivilegeList": [
+          "SeDebugPrivilege"
+        ],
+        "eventData.AccessMask": [
+          "PROCESS_ALL_ACCESS",
+          "PROCESS_VM_WRITE",
+          "PROCESS_VM_OPERATION",
+          "PROCESS_CREATE_THREAD",
+          "0x1f0fff",
+          "0x1fffff",
+          "0x0020",
+          "0x20",
+          "0x0008",
+          "0x8",
+          "0x0002",
+          "0x2"
         ],
         "operation": [
           "OpenProcess",
@@ -10401,8 +10585,14 @@
         "processId",
         "data.targetProcessName",
         "data.desiredAccess",
+        "data.requestedAccess",
         "data.accessMask",
+        "data.grantedAccess",
         "data.privilege",
+        "data.privilegeList",
+        "data.enabledPrivilegeList",
+        "data.eventData.PrivilegeList",
+        "data.eventData.AccessMask",
         "data.operation"
       ],
       "tags": [
@@ -10720,12 +10910,66 @@
       "mitreTechniqueId": "T1134.001",
       "mitreTechniqueName": "Token Impersonation/Theft",
       "eventTypes": [
+        "security.privilege.*",
+        "security.token.*",
+        "etw.privilege",
+        "etw.privilege.*",
+        "etw.security",
+        "etw.security.*",
         "api.call",
         "process.token",
         "privilege.enabled"
       ],
       "dataContains": {
         "privilege": [
+          "SeDebugPrivilege",
+          "SeBackupPrivilege",
+          "SeRestorePrivilege",
+          "SeTakeOwnershipPrivilege",
+          "SeImpersonatePrivilege",
+          "SeAssignPrimaryTokenPrivilege"
+        ],
+        "privilegeName": [
+          "SeDebugPrivilege",
+          "SeBackupPrivilege",
+          "SeRestorePrivilege",
+          "SeTakeOwnershipPrivilege",
+          "SeImpersonatePrivilege",
+          "SeAssignPrimaryTokenPrivilege"
+        ],
+        "privilegeDisplayName": [
+          "SeDebugPrivilege",
+          "SeBackupPrivilege",
+          "SeRestorePrivilege",
+          "SeTakeOwnershipPrivilege",
+          "SeImpersonatePrivilege",
+          "SeAssignPrimaryTokenPrivilege"
+        ],
+        "privilegeList": [
+          "SeDebugPrivilege",
+          "SeBackupPrivilege",
+          "SeRestorePrivilege",
+          "SeTakeOwnershipPrivilege",
+          "SeImpersonatePrivilege",
+          "SeAssignPrimaryTokenPrivilege"
+        ],
+        "enabledPrivilegeList": [
+          "SeDebugPrivilege",
+          "SeBackupPrivilege",
+          "SeRestorePrivilege",
+          "SeTakeOwnershipPrivilege",
+          "SeImpersonatePrivilege",
+          "SeAssignPrimaryTokenPrivilege"
+        ],
+        "eventData.PrivilegeList": [
+          "SeDebugPrivilege",
+          "SeBackupPrivilege",
+          "SeRestorePrivilege",
+          "SeTakeOwnershipPrivilege",
+          "SeImpersonatePrivilege",
+          "SeAssignPrimaryTokenPrivilege"
+        ],
+        "eventData.EnabledPrivilegeList": [
           "SeDebugPrivilege",
           "SeBackupPrivilege",
           "SeRestorePrivilege",
@@ -10749,7 +10993,12 @@
         "processId",
         "data.api",
         "data.operation",
-        "data.privilege"
+        "data.privilege",
+        "data.privilegeName",
+        "data.privilegeDisplayName",
+        "data.privilegeList",
+        "data.enabledPrivilegeList",
+        "data.eventData.PrivilegeList"
       ],
       "tags": [
         "privilege-escalation",
@@ -12404,6 +12653,9 @@
       "mitreTechniqueId": "T1055",
       "mitreTechniqueName": "Process Injection",
       "eventTypes": [
+        "security.privilege.object_operation",
+        "etw.security",
+        "etw.security.*",
         "process.open",
         "process.access",
         "driver.process",
@@ -12422,6 +12674,24 @@
           "PROCESS_VM_OPERATION",
           "PROCESS_CREATE_THREAD"
         ],
+        "requestedAccess": [
+          "PROCESS_ALL_ACCESS",
+          "PROCESS_VM_WRITE",
+          "PROCESS_VM_OPERATION",
+          "PROCESS_CREATE_THREAD"
+        ],
+        "grantedAccess": [
+          "PROCESS_ALL_ACCESS",
+          "PROCESS_VM_WRITE",
+          "PROCESS_VM_OPERATION",
+          "PROCESS_CREATE_THREAD"
+        ],
+        "accesses": [
+          "PROCESS_ALL_ACCESS",
+          "PROCESS_VM_WRITE",
+          "PROCESS_VM_OPERATION",
+          "PROCESS_CREATE_THREAD"
+        ],
         "targetProcessName": [
           "lsass.exe",
           "winlogon.exe",
@@ -12433,6 +12703,26 @@
           "winlogon.exe",
           "services.exe",
           "svchost.exe"
+        ],
+        "eventData.ObjectName": [
+          "lsass.exe",
+          "winlogon.exe",
+          "services.exe",
+          "svchost.exe"
+        ],
+        "eventData.AccessMask": [
+          "PROCESS_ALL_ACCESS",
+          "PROCESS_VM_WRITE",
+          "PROCESS_VM_OPERATION",
+          "PROCESS_CREATE_THREAD",
+          "0x1fffff",
+          "0x1f0fff",
+          "0x0020",
+          "0x20",
+          "0x0008",
+          "0x8",
+          "0x0002",
+          "0x2"
         ]
       },
       "excludeProcessNames": [
@@ -12443,7 +12733,11 @@
         "eventType",
         "processName",
         "data.desiredAccess",
+        "data.requestedAccess",
         "data.accessMask",
+        "data.grantedAccess",
+        "data.eventData.ObjectName",
+        "data.eventData.AccessMask",
         "data.targetProcessName",
         "data.targetProcess"
       ],
@@ -20503,6 +20797,9 @@
       "mitreTechniqueId": "T1003.001",
       "mitreTechniqueName": "LSASS Memory",
       "eventTypes": [
+        "security.privilege.object_operation",
+        "etw.security",
+        "etw.security.*",
         "process.open",
         "process.access",
         "driver.process",
@@ -20520,6 +20817,46 @@
           "PROCESS_CREATE_THREAD",
           "0x1fffff",
           "0x1f0fff"
+        ],
+        "requestedAccess": [
+          "PROCESS_ALL_ACCESS",
+          "PROCESS_VM_WRITE",
+          "PROCESS_VM_READ",
+          "PROCESS_CREATE_THREAD",
+          "0x1fffff",
+          "0x1f0fff"
+        ],
+        "accessMask": [
+          "PROCESS_ALL_ACCESS",
+          "PROCESS_VM_WRITE",
+          "PROCESS_VM_READ",
+          "PROCESS_CREATE_THREAD",
+          "0x1fffff",
+          "0x1f0fff"
+        ],
+        "grantedAccess": [
+          "PROCESS_ALL_ACCESS",
+          "PROCESS_VM_WRITE",
+          "PROCESS_VM_READ",
+          "PROCESS_CREATE_THREAD",
+          "0x1fffff",
+          "0x1f0fff"
+        ],
+        "eventData.ObjectName": [
+          "lsass.exe",
+          "\\lsass.exe"
+        ],
+        "eventData.AccessMask": [
+          "PROCESS_ALL_ACCESS",
+          "PROCESS_VM_WRITE",
+          "PROCESS_VM_READ",
+          "PROCESS_CREATE_THREAD",
+          "0x1fffff",
+          "0x1f0fff",
+          "0x0010",
+          "0x10",
+          "0x0020",
+          "0x20"
         ]
       },
       "excludeProcessNames": [
@@ -20531,7 +20868,11 @@
         "processName",
         "targetProcessName",
         "data.desiredAccess",
+        "data.requestedAccess",
         "data.grantedAccess",
+        "data.accessMask",
+        "data.eventData.ObjectName",
+        "data.eventData.AccessMask",
         "data.api"
       ],
       "tags": [
@@ -22629,6 +22970,9 @@
       "mitreTechniqueId": "T1003.001",
       "mitreTechniqueName": "LSASS Memory",
       "eventTypes": [
+        "security.process.created",
+        "etw.security",
+        "etw.security.*",
         "api.call",
         "process.memory",
         "process.open",
@@ -22644,6 +22988,12 @@
         ],
         "operationName": [
           "MiniDumpWriteDump|lsass dump|process dump|memory dump"
+        ],
+        "commandLine": [
+          "MiniDumpWriteDump|comsvcs\\.dll|PssCaptureSnapshot|lsass\\.(?:dmp|dump)|\\blsass\\b"
+        ],
+        "eventData.CommandLine": [
+          "MiniDumpWriteDump|comsvcs\\.dll|PssCaptureSnapshot|lsass\\.(?:dmp|dump)|\\blsass\\b"
         ]
       },
       "dataContains": {
@@ -22668,7 +23018,8 @@
         "data.targetProcessName",
         "data.targetImage",
         "path",
-        "commandLine"
+        "commandLine",
+        "data.eventData.CommandLine"
       ],
       "tags": [
         "credential-access",

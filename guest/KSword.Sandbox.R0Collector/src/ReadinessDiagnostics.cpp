@@ -427,6 +427,10 @@ bool EmitReadinessDiagnostic(
     data.AddSigned("diagnoseReadTimeoutMs", options.diagnoseReadTimeoutMs);
     data.AddUtf8("schema", KSWORD_SANDBOX_EVENT_SCHEMA_NAME);
     data.AddUtf8("producer", "r0collector");
+    AddCurrentR0EtwCapabilityContractFields(
+        data,
+        "readiness-diagnostic",
+        "compile-time-current-capability-flags-and-producer-mask");
     AddReadinessNoiseFields(data, "emitted-as-readiness-diagnostic");
     data.AddBool("lost", false);
     data.AddUnsigned("lostCount", 0);
@@ -1039,6 +1043,10 @@ bool EmitReadinessSummary(
     data.AddSigned("diagnoseReadTimeoutMs", options.diagnoseReadTimeoutMs);
     data.AddUtf8("schema", KSWORD_SANDBOX_EVENT_SCHEMA_NAME);
     data.AddUtf8("producer", "r0collector");
+    AddCurrentR0EtwCapabilityContractFields(
+        data,
+        "readiness-summary",
+        "compile-time-current-capability-flags-and-producer-mask");
     AddReadinessNoiseFields(data, "emitted-as-readiness-summary");
     data.AddBool("lost", false);
     data.AddUnsigned("lostCount", 0);
@@ -1105,6 +1113,10 @@ bool EmitDeviceUnavailableDiagnostic(
     data.AddWide("zhHint", DeviceOpenZhHint(openError, options.serviceName));
     data.AddUtf8("schema", KSWORD_SANDBOX_EVENT_SCHEMA_NAME);
     data.AddUtf8("producer", "r0collector");
+    AddCurrentR0EtwCapabilityContractFields(
+        data,
+        "device-unavailable-diagnostic",
+        "compile-time-current-capability-flags-and-producer-mask");
     AddReadinessNoiseFields(data, "emitted-as-device-unavailable-diagnostic");
     data.AddBool("lost", false);
     data.AddUnsigned("lostCount", 0);

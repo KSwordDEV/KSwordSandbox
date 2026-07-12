@@ -1321,9 +1321,11 @@ function Test-SelfNoiseGuardReadiness {
             $ruleItems = @(Get-ObjectPropertyValue -InputObject $rules -Name 'rules' -DefaultValue @())
             $evidence.totalRules = $ruleItems.Count
             if ($evidence.rulesVersion.IndexOf('self-noise', [StringComparison]::OrdinalIgnoreCase) -lt 0 -and
+                $evidence.rulesVersion.IndexOf('guard', [StringComparison]::OrdinalIgnoreCase) -lt 0 -and
                 $evidence.rulesVersion.IndexOf('v27', [StringComparison]::OrdinalIgnoreCase) -lt 0 -and
-                $evidence.rulesVersion.IndexOf('v28', [StringComparison]::OrdinalIgnoreCase) -lt 0) {
-                [void]$issues.Add("rules/behavior-rules.json version does not advertise self-noise guard hardening or v27/v28 expansion: $($evidence.rulesVersion)")
+                $evidence.rulesVersion.IndexOf('v28', [StringComparison]::OrdinalIgnoreCase) -lt 0 -and
+                $evidence.rulesVersion.IndexOf('v29', [StringComparison]::OrdinalIgnoreCase) -lt 0) {
+                [void]$issues.Add("rules/behavior-rules.json version does not advertise self-noise guard hardening or v27/v28/v29 expansion: $($evidence.rulesVersion)")
             }
 
             $guardedRuleCount = 0
@@ -1386,7 +1388,7 @@ function Test-SelfNoiseGuardReadiness {
         -Title 'Self-noise guard readiness / 自噪声护栏就绪' `
         -Status Failed `
         -Message "Self-noise guard readiness found $($issues.Count) issue(s)." `
-        -Remediation @('中文修复：确认 rules/behavior-rules.json 仍是 v26/v27/v28 self-noise hardening 规则，并在 docs/release.md/docs/run.md 写明采集器自噪声、collection-health、VT quiet state 和 behaviorCounted=false 不可计入样本行为；本检查只做静态审计，不运行 smoke/live。') `
+        -Remediation @('中文修复：确认 rules/behavior-rules.json 仍是 v26/v27/v28/v29 self-noise hardening 规则，并在 docs/release.md/docs/run.md 写明采集器自噪声、collection-health、VT quiet state、R0/ETW health/capability 行和 behaviorCounted=false 不可计入样本行为；本检查只做静态审计，不运行 smoke/live。') `
         -Details @{ issues = @($issues.ToArray()); evidence = $evidence }
 }
 
@@ -1516,9 +1518,14 @@ function Get-ReleaseExecutionBoundaries {
         networkPublishExecuted = $false
         payloadBuildExecuted = [bool]$IncludeBuild
         sourcePackageStageOnlyDryRun = -not [bool]$SkipSourcePackageDryRun
+        installerModesExecuted = @()
+        installCheckEnvironmentExecuted = $false
+        installStatusExecuted = $false
+        installChangeExecuted = $false
+        resetGuestVmPasswordExecuted = $false
         allowedActions = @('git metadata read', 'repository policy', 'PowerShell parse', 'package manifest parse', 'source package StageOnly dry-run', 'optional compile build when -IncludeBuild is explicitly supplied')
-        forbiddenActions = @('smoke test execution', 'Hyper-V live execution', 'VM start/restore/stop/mutation', 'driver signing', 'GUI signing fallback', 'CSignTool.exe invocation', 'git push', 'network publish', 'fresh live evidence generation')
-        chinese = '中文：Test-ReleaseReadiness.ps1 不跑 smoke、不跑 Hyper-V live、不签名、不调用 CSignTool.exe、不 push/publish、不生成 fresh live evidence。'
+        forbiddenActions = @('installer mode execution', 'install CheckEnvironment execution', 'smoke test execution', 'Hyper-V live execution', 'VM start/restore/stop/mutation', 'driver signing', 'GUI signing fallback', 'CSignTool.exe invocation', 'git push', 'network publish', 'fresh live evidence generation')
+        chinese = '中文：Test-ReleaseReadiness.ps1 不运行安装模式、不跑 smoke、不跑 Hyper-V live、不签名、不调用 CSignTool.exe、不 push/publish、不生成 fresh live evidence。'
     }
 }
 
@@ -1528,9 +1535,232 @@ function Get-ReleaseRequiredEvidenceFields {
         provenance = @('gitMetadata.branch', 'gitMetadata.commit', 'gitMetadata.shortCommit', 'gitMetadata.dirtyStatus', 'gitMetadata.statusCount', 'generatedAtUtc', 'repositoryRoot')
         sourceHandoff = @('release-readiness.json.failedCount=0', 'gitMetadata.branch', 'gitMetadata.commit', 'gitMetadata.dirtyStatus', 'sourceRuntimeSafetyMetadata', 'executionBoundaries', 'results[].id/status')
         runtimeHandoff = @('RuntimePublishRoot', 'RequireCompleteRuntimePackage=true', 'gapAudit.runtimePublishRootCompleteness.handoffVerified=true', 'summary.missingCount=0', 'summary.incompleteCount=0', 'summary.forbiddenFileCount=0', 'entries[].sourcePath')
+        installModeHandoff = @('installModeContract.schema', 'installModeContract.modes[].id', 'installModeContract.readinessPackageNonMutation', 'installContractGaps', 'installContractGapNextActionsZh', 'results[install-mode-contract].status')
         freshLiveClaim = @('gitMetadata.commit', 'gitMetadata.branch', 'gitMetadata.dirtyStatus', 'job id', 'runtime root', 'generatedAtUtc/local time', 'report.json path', 'report.zh.html path', 'report.en.html path')
         fallbackWhenMissingFreshLiveJobZh = '没有实验室 live job id 时，release notes 必须写“本候选未刷新 fresh live evidence”。'
     }
+}
+
+function Get-InstallModeRequiredIds {
+    return @(
+        'existing-environment',
+        'restore-checkpoint-snapshot',
+        'fresh-create-flow',
+        'first-computer-prerequisites',
+        'compatibility-boundaries',
+        'readiness-package-non-mutation'
+    )
+}
+
+function Get-InstallContractGapNextActionsZh {
+    param([string[]]$Gaps = @())
+
+    if (@($Gaps).Count -eq 0) {
+        return @()
+    }
+
+    $actions = New-Object System.Collections.Generic.List[string]
+    [void]$actions.Add("检测到 install contract 缺口：$(@($Gaps) -join '；')。")
+    [void]$actions.Add('下一步：只在 scripts\Test-ReleaseReadiness.ps1、scripts\package-portable.ps1 和 packaging/*.manifest.json 中补齐机器可读 contract；不要改 install scripts 或 docs。')
+    [void]$actions.Add("下一步：在 packaging/*.manifest.json 的 releaseContract.installModeContract.modeIds 中补齐：$((Get-InstallModeRequiredIds) -join ', ')。")
+    [void]$actions.Add('下一步：重新运行允许的 parse/JSON/readiness 检查，确认 installModeContract、installContractGaps、installContractGapNextActionsZh 和 executionBoundaries 同时存在。')
+    return @($actions.ToArray())
+}
+
+function Get-InstallModeContractSnapshot {
+    param([string]$GeneratedBy = 'scripts/Test-ReleaseReadiness.ps1')
+
+    $requiredModeIds = @(Get-InstallModeRequiredIds)
+    $gaps = New-Object System.Collections.Generic.List[string]
+    $manifestContractsPresent = New-Object System.Collections.Generic.List[string]
+    $manifestModeIds = New-Object System.Collections.Generic.List[string]
+
+    foreach ($relative in @('packaging/source-package.manifest.json', 'packaging/runtime-package.manifest.json')) {
+        $path = Join-Path $RepositoryRoot $relative
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+            [void]$gaps.Add("Missing package manifest: $relative")
+            continue
+        }
+
+        try {
+            $manifest = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json -ErrorAction Stop
+            $releaseContract = Get-ObjectPropertyValue -InputObject $manifest -Name 'releaseContract' -DefaultValue $null
+            if ($null -eq $releaseContract) {
+                [void]$gaps.Add("releaseContract missing in $relative")
+                continue
+            }
+
+            $installModeContract = Get-ObjectPropertyValue -InputObject $releaseContract -Name 'installModeContract' -DefaultValue $null
+            if ($null -eq $installModeContract) {
+                [void]$gaps.Add("releaseContract.installModeContract missing in $relative")
+            }
+            else {
+                [void]$manifestContractsPresent.Add($relative)
+                foreach ($modeId in @((Get-ObjectPropertyValue -InputObject $installModeContract -Name 'modeIds' -DefaultValue @()) | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })) {
+                    [void]$manifestModeIds.Add([string]$modeId)
+                }
+            }
+
+            foreach ($flagName in @('noVmMutationByPackageScript', 'noSmokeByPackageOrReadiness', 'noHyperVLiveByPackageOrReadiness', 'noDriverSigningByPackageScript', 'noCSignToolInvocationByPackageOrReadiness')) {
+                if (-not [bool](Get-ObjectPropertyValue -InputObject $releaseContract -Name $flagName -DefaultValue $false)) {
+                    [void]$gaps.Add("releaseContract.$flagName must be true in $relative")
+                }
+            }
+
+            $stagedMetadata = Get-ObjectPropertyValue -InputObject $manifest -Name 'stagedMetadata' -DefaultValue $null
+            $machineOutputContract = if ($null -eq $stagedMetadata) { $null } else { Get-ObjectPropertyValue -InputObject $stagedMetadata -Name 'machineOutputContract' -DefaultValue $null }
+            if ($null -eq $machineOutputContract -or -not [bool](Get-ObjectPropertyValue -InputObject $machineOutputContract -Name 'installModeContractRequired' -DefaultValue $false)) {
+                [void]$gaps.Add("stagedMetadata.machineOutputContract.installModeContractRequired must be true in $relative")
+            }
+        }
+        catch {
+            [void]$gaps.Add("Invalid install contract JSON in ${relative}: $($_.Exception.Message)")
+        }
+    }
+
+    $uniqueManifestModeIds = @($manifestModeIds.ToArray() | Select-Object -Unique)
+    foreach ($modeId in $requiredModeIds) {
+        if ($uniqueManifestModeIds -notcontains $modeId) {
+            [void]$gaps.Add("packaging manifests missing install mode id '$modeId'")
+        }
+    }
+
+    $packageScriptPath = Join-Path $RepositoryRoot 'scripts\package-portable.ps1'
+    if (Test-Path -LiteralPath $packageScriptPath -PathType Leaf) {
+        $packageRaw = Get-Content -LiteralPath $packageScriptPath -Raw
+        foreach ($marker in @('installModeContract', 'installContractGaps', 'installContractGapNextActionsZh', 'existing-environment', 'restore-checkpoint-snapshot', 'fresh-create-flow', 'first-computer-prerequisites', 'compatibility-boundaries', 'readiness-package-non-mutation')) {
+            if ($packageRaw.IndexOf($marker, [StringComparison]::OrdinalIgnoreCase) -lt 0) {
+                [void]$gaps.Add("Missing install contract marker '$marker' in scripts/package-portable.ps1")
+            }
+        }
+    }
+    else {
+        [void]$gaps.Add('Missing scripts/package-portable.ps1 for install contract generation.')
+    }
+
+    foreach ($contractFile in @(
+            [pscustomobject]@{ Relative = 'install.ps1'; Markers = @('Get-InstallHyperVPrerequisiteStatus', 'Get-InstallVmProfileStatus', 'ConfigureHyperVCommand', 'ResetGuestPasswordCommand', 'CheckEnvironmentStartsVm = $false') },
+            [pscustomobject]@{ Relative = 'scripts/install.ps1'; Markers = @('CheckEnvironment', 'PreparePayload', '仅配置本机 Hyper-V 元数据；不会启动或还原 VM', 'ResetGuestVmPassword') }
+        )) {
+        $path = Join-Path $RepositoryRoot $contractFile.Relative
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+            [void]$gaps.Add("Missing installer compatibility contract file: $($contractFile.Relative)")
+            continue
+        }
+
+        $raw = Get-Content -LiteralPath $path -Raw
+        foreach ($marker in @($contractFile.Markers)) {
+            if ($raw.IndexOf($marker, [StringComparison]::OrdinalIgnoreCase) -lt 0) {
+                [void]$gaps.Add("Missing installer mode marker '$marker' in $($contractFile.Relative)")
+            }
+        }
+    }
+
+    $gapArray = @($gaps.ToArray() | Select-Object -Unique)
+    $gapDetected = $gapArray.Count -gt 0
+
+    return [pscustomobject][ordered]@{
+        schema = 'ksword.release.install-mode-contract.v1'
+        generatedBy = $GeneratedBy
+        generatedAtUtc = [DateTimeOffset]::UtcNow.ToString('O')
+        purpose = 'Machine-readable installer UX/compatibility contract for release reviewers; generated by readiness without executing install modes.'
+        manifestContractsPresent = @($manifestContractsPresent.ToArray())
+        requiredModeIds = @($requiredModeIds)
+        manifestModeIds = @($uniqueManifestModeIds)
+        gapDetected = $gapDetected
+        gaps = @($gapArray)
+        gapNextActionsZh = @(Get-InstallContractGapNextActionsZh -Gaps $gapArray)
+        modes = @(
+            [ordered]@{
+                id = 'existing-environment'
+                titleZh = '已有环境接入'
+                primaryCommands = @('.\scripts\install.ps1 -Mode CheckEnvironment', '.\scripts\install.ps1 -Mode Change -UpdateHyperVConfig -VmName <existing VM> -CheckpointName <checkpoint>', '.\scripts\run.ps1 -Mode CheckEnvironment')
+                evidenceFields = @('InstallStatus.VmExists', 'InstallStatus.CheckpointExists', 'InstallStatus.VmProfile', 'InstallStatus.GuestPayloadStatus', 'InstallStatus.RecommendedActions')
+                readinessExecutesCommand = $false
+                startsOrMutatesVm = $false
+                nextActionsZh = @('下一步：已有 VM 时先用 CheckEnvironment 读取缺口，再用 -UpdateHyperVConfig 记录本机 VM/checkpoint profile。')
+            },
+            [ordered]@{
+                id = 'restore-checkpoint-snapshot'
+                titleZh = '还原 checkpoint/snapshot 边界'
+                primaryCommands = @('.\scripts\install.ps1 -Mode CheckEnvironment', '.\scripts\install.ps1 -Mode Change -ResetGuestVmPassword -PromptPassword -Force', '.\scripts\run.ps1 -Mode Analyze -SamplePreset Notepad -DurationSeconds 5 -Live')
+                evidenceFields = @('InstallStatus.CheckpointExists', 'InstallStatus.CheckpointGuidance', 'VmProfile.ExpectedCheckpointName')
+                readinessExecutesCommand = $false
+                packageExecutesCommand = $false
+                mayRestoreCheckpointOnlyWhenExplicit = $true
+                nextActionsZh = @('下一步：缺 checkpoint 时先创建或选择 clean checkpoint；只有显式 lab/live 操作才可还原快照。')
+            },
+            [ordered]@{
+                id = 'fresh-create-flow'
+                titleZh = '首次/新机器本机配置流程'
+                primaryCommands = @('.\scripts\install.ps1 -Mode Install -PromptPassword', '.\scripts\install.ps1 -Mode Change -UpdateHyperVConfig -VmName <existing VM> -CheckpointName <checkpoint>', '.\scripts\Prepare-GuestPayload.ps1 -RepoRoot . -PayloadRoot <external-payload-root> -SelfContained')
+                evidenceFields = @('InstallStatus.RuntimeRootExists', 'InstallStatus.LocalConfigExists', 'InstallStatus.SecretValuePrinted=false', 'InstallStatus.GuestPayloadReadyForLiveCopy')
+                createsLocalRuntimeFolders = $true
+                createsVm = $false
+                createsCheckpoint = $false
+                nextActionsZh = @('下一步：新机器先运行 Install -PromptPassword 创建本机目录/配置/secret；payload 和 RuntimeRoot 放仓库外。')
+            },
+            [ordered]@{
+                id = 'first-computer-prerequisites'
+                titleZh = '首台电脑前置条件'
+                evidenceFields = @('HyperVPrerequisites.OsIsWindows', 'HyperVPrerequisites.PowerShellModuleAvailable', 'HyperVPrerequisites.VirtualizationFirmwareEnabled', 'HyperVPrerequisites.SecondLevelAddressTranslationSupported', 'InstallStatus.IsAdministrator', 'InstallStatus.RuntimeRootUnderRepository', 'InstallStatus.VirusTotalStatus')
+                evaluatedBy = @('.\scripts\install.ps1 -Mode CheckEnvironment', '.\scripts\run.ps1 -Mode CheckEnvironment')
+                evaluatedByReadinessPackage = $false
+                nextActionsZh = @('下一步：首机先跑 CheckEnvironment；按 RecommendedActions 修复 Hyper-V、BIOS 虚拟化、VM/checkpoint、payload、secret 和 runtime root。')
+            },
+            [ordered]@{
+                id = 'compatibility-boundaries'
+                titleZh = '兼容性边界'
+                boundaries = @('Non-Windows hosts are source/package/readiness only; Hyper-V live requires Windows_NT.', 'Status/CheckEnvironment are read-only and do not print secrets.', 'StartWebUI does not start a VM; live VM execution requires explicit run.ps1 -Live.', 'Runtime packages require external RuntimePublishRoot.', 'VirusTotal is optional hash-only enrichment, not virtualization.')
+                evidenceFields = @('executionBoundaries', 'operatorReadinessHints', 'freshLiveEvidenceGuardrail', 'requiredEvidenceFields.installModeHandoff')
+                nextActionsZh = @('下一步：目标机器不满足 Hyper-V live 条件时，不要声称 fresh live；release notes 使用 no-fresh-live fallback。')
+            },
+            [ordered]@{
+                id = 'readiness-package-non-mutation'
+                titleZh = 'readiness/package 明确不变更'
+                evidenceFields = @('executionBoundaries.smokeTestsExecuted=false', 'executionBoundaries.hyperVLiveExecuted=false', 'executionBoundaries.vmMutationExecuted=false', 'executionBoundaries.driverSigningExecuted=false', 'executionBoundaries.csignToolInvoked=false')
+                installerModesExecutedByReadinessPackage = @()
+                nonMutating = $true
+                nextActionsZh = @('下一步：审阅 executionBoundaries；readiness/package 不能启动/还原/停止 VM、签名、push/publish 或生成 fresh live evidence。')
+            }
+        )
+        readinessPackageNonMutation = [ordered]@{
+            installerModesExecuted = @()
+            checkEnvironmentExecuted = $false
+            statusExecuted = $false
+            installExecuted = $false
+            changeExecuted = $false
+            resetGuestVmPasswordExecuted = $false
+            vmStartRestoreStopExecuted = $false
+            vmMutationExecuted = $false
+            driverSigningExecuted = $false
+            csignToolInvoked = $false
+            gitPushOrNetworkPublishExecuted = $false
+            chinese = '中文：readiness/package 只做静态/本地低副作用检查，不运行安装模式、不启动/还原/停止 VM、不签名、不 push/publish。'
+        }
+        machineReadableEvidenceFields = @('installModeContract.modes[].id', 'installModeContract.readinessPackageNonMutation', 'installContractGaps', 'installContractGapNextActionsZh', 'executionBoundaries', 'requiredEvidenceFields.installModeHandoff')
+    }
+}
+
+function Test-InstallModeMachineReadableContract {
+    $contract = Get-InstallModeContractSnapshot
+    if (-not [bool]$contract.gapDetected) {
+        Add-ReleaseCheckResult `
+            -Id 'install-mode-contract' `
+            -Title 'Install mode contract / 安装模式契约' `
+            -Status Passed `
+            -Message 'Machine-readable install mode contract covers existing environment, checkpoint/snapshot restore boundary, fresh/create flow, first-computer prerequisites, compatibility boundaries, and readiness/package non-mutation.' `
+            -Details @{ installModeContract = $contract }
+        return
+    }
+
+    Add-ReleaseCheckResult `
+        -Id 'install-mode-contract' `
+        -Title 'Install mode contract / 安装模式契约' `
+        -Status Failed `
+        -Message "Install mode machine-readable contract found $(@($contract.gaps).Count) gap(s)." `
+        -Remediation @($contract.gapNextActionsZh) `
+        -Details @{ installModeContract = $contract; issues = @($contract.gaps); nextActionsZh = @($contract.gapNextActionsZh) }
 }
 
 function Get-RuntimeHandoffNextActionsZh {
@@ -1581,6 +1811,8 @@ function Get-ReleaseComponentProgressSnapshot {
 
     $runtimeRootProvided = -not [string]::IsNullOrWhiteSpace($RuntimePublishRoot)
     $completeRuntimeRequested = [bool]$RequireCompleteRuntimePackage
+    $installContractResult = @($script:Results | Where-Object { $_.id -eq 'install-mode-contract' } | Select-Object -First 1)
+    $installContractStatus = if ($installContractResult.Count -eq 0) { 'not-run' } else { [string]$installContractResult[0].status }
     return [ordered]@{
         schema = 'ksword.release.component-progress.v1'
         generatedAtUtc = [DateTimeOffset]::UtcNow.ToString('O')
@@ -1639,6 +1871,14 @@ function Get-ReleaseComponentProgressSnapshot {
                 handoffGate = 'install/run CheckEnvironment exposes Chinese next-step commands for deployment gaps.'
                 reviewerChecklist = @('Hyper-V prerequisites', 'VM profile/checkpoint', 'guest payload freshness', 'VT key optional state', 'runtime root outside repository')
                 remediationZh = '先运行 .\\scripts\\install.ps1 -Mode CheckEnvironment 和 .\\scripts\\run.ps1 -Mode CheckEnvironment，再按 RecommendedActions 修复。'
+            },
+            [ordered]@{
+                id = 'install-mode-contract'
+                titleZh = '安装模式机器可读契约'
+                state = if ($installContractStatus -eq 'Passed') { 'documented' } elseif ($installContractStatus -eq 'not-run') { 'not-run' } else { 'blocked-contract-gap' }
+                handoffGate = 'Machine-readable contract covers existing environment, restore checkpoint/snapshot boundary, fresh/create flow, first-computer prerequisites, compatibility boundaries, and readiness/package non-mutation.'
+                reviewerChecklist = @('installModeContract.schema', 'required mode ids present', 'installContractGaps empty', 'installContractGapNextActionsZh present when gaps exist', 'executionBoundaries show no installer/live/VM mutation')
+                remediationZh = '若 install-mode-contract 失败，按 release-readiness.json 的 installContractGapNextActionsZh 补齐 package/readiness/manifest metadata；不要改 install scripts/docs 或运行 live。'
             }
         )
     }
@@ -1659,6 +1899,8 @@ function Get-ReleaseGapAuditSnapshot {
     $noCSignToolResult = $resultById['no-csigntool-release-path']
     $noGuiSigningResult = $resultById['no-gui-signing-fallback']
     $manifestResult = $resultById['package-manifests']
+    $installContractResult = $resultById['install-mode-contract']
+    $installModeContract = Get-InstallModeContractSnapshot
     $componentProgress = Get-ReleaseComponentProgressSnapshot -ExitCode $ExitCode
     $runtimeRootProvided = -not [string]::IsNullOrWhiteSpace($RuntimePublishRoot)
     $runtimeHandoffVerified = ($runtimeRootProvided -and [bool]$RequireCompleteRuntimePackage -and $null -ne $runtimeResult -and $runtimeResult.status -eq 'Passed' -and $ExitCode -eq 0)
@@ -1682,6 +1924,11 @@ function Get-ReleaseGapAuditSnapshot {
             smokeTests = $false
             vmStartRestoreStop = $false
             vmMutation = $false
+            installerModes = $false
+            installCheckEnvironment = $false
+            installStatus = $false
+            installChange = $false
+            resetGuestVmPassword = $false
             driverSigning = $false
             csignTool = $false
             csignToolInvoked = $false
@@ -1735,6 +1982,17 @@ function Get-ReleaseGapAuditSnapshot {
             componentIds = @($componentProgress.components | ForEach-Object { $_.id })
             remediationZh = '若 componentProgress 缺组件，请同步更新 package-portable.ps1、Test-ReleaseReadiness.ps1 和 packaging/*.json 的 componentProgressTemplate。'
         }
+        installModeContract = [ordered]@{
+            schema = $installModeContract.schema
+            status = if ($null -eq $installContractResult) { 'not-run' } else { [string]$installContractResult.status }
+            gapDetected = [bool]$installModeContract.gapDetected
+            gaps = @($installModeContract.gaps)
+            nextActionsZh = @($installModeContract.gapNextActionsZh)
+            requiredModeIds = @($installModeContract.requiredModeIds)
+            modeIds = @($installModeContract.modes | ForEach-Object { $_.id })
+            readinessPackageNonMutation = $installModeContract.readinessPackageNonMutation
+            remediationZh = 'install mode contract 必须覆盖已有环境、checkpoint/snapshot 边界、首次/新机器流程、首机前置条件、兼容性边界，以及 package/readiness 明确不变更。'
+        }
     }
 }
 
@@ -1772,6 +2030,14 @@ function ConvertTo-ReleaseReadinessMarkdown {
     [void]$lines.Add("- Fresh live evidence generated: ``$($Summary.freshLiveEvidenceGenerated)``")
     [void]$lines.Add("- Release-note fallback without a lab job id: ``$($Summary.releaseNotesFreshLiveFallback)``")
     [void]$lines.Add('')
+    [void]$lines.Add('## Install mode contract')
+    [void]$lines.Add('')
+    [void]$lines.Add("- Gap detected: ``$($Summary.installContractGapDetected)``")
+    foreach ($item in @($Summary.installContractGapNextActionsZh | Select-Object -First 6)) {
+        [void]$lines.Add("- Install contract next: $item")
+    }
+    [void]$lines.Add('- The machine-readable `installModeContract` covers existing environment, checkpoint/snapshot restore boundary, fresh/create flow, first-computer prerequisites, compatibility boundaries, and readiness/package non-mutation.')
+    [void]$lines.Add('')
     [void]$lines.Add('## Runtime handoff status')
     [void]$lines.Add('')
     if ([string]::IsNullOrWhiteSpace([string]$Summary.runtimePublishRoot)) {
@@ -1795,6 +2061,9 @@ function ConvertTo-ReleaseReadinessMarkdown {
     }
     foreach ($item in @($Summary.requiredEvidenceFields.runtimeHandoff)) {
         [void]$lines.Add("- Runtime handoff: ``$item``")
+    }
+    foreach ($item in @($Summary.requiredEvidenceFields.installModeHandoff)) {
+        [void]$lines.Add("- Install mode handoff: ``$item``")
     }
     foreach ($item in @($Summary.requiredEvidenceFields.freshLiveClaim)) {
         [void]$lines.Add("- Fresh live claim: ``$item``")
@@ -1859,6 +2128,7 @@ Test-CSignToolNotInReleasePath
 Test-NoGuiSigningFallback
 Test-ReadinessNoVmMutationCommands
 Test-DeploymentOperatorDiagnosticsContract
+Test-InstallModeMachineReadableContract
 Test-DeploymentDocsOperatorHints
 Test-NoFreshLiveEvidenceGuardrail
 Test-SelfNoiseGuardReadiness
@@ -1877,6 +2147,7 @@ $runtimeHandoffMissingNextActionsZh = if ($runtimeResultForSummary.Count -gt 0 -
 else {
     @(Get-RuntimeHandoffNextActionsZh)
 }
+$installModeContractSummary = Get-InstallModeContractSnapshot
 
 $summary = [pscustomobject][ordered]@{
     contractVersion       = 1
@@ -1919,6 +2190,10 @@ $summary = [pscustomobject][ordered]@{
     includeBuild          = [bool]$IncludeBuild
     executionBoundaries   = Get-ReleaseExecutionBoundaries
     requiredEvidenceFields = Get-ReleaseRequiredEvidenceFields
+    installModeContract   = $installModeContractSummary
+    installContractGapDetected = [bool]$installModeContractSummary.gapDetected
+    installContractGaps   = @($installModeContractSummary.gaps)
+    installContractGapNextActionsZh = @($installModeContractSummary.gapNextActionsZh)
     runtimeHandoffMissingNextActionsZh = @($runtimeHandoffMissingNextActionsZh)
     noSmokeTests          = $true
     noHyperVLive          = $true
@@ -1935,6 +2210,7 @@ $summary = [pscustomobject][ordered]@{
     operatorReadinessHints = @(
         'Runtime handoff requires a complete external RuntimePublishRoot; source/package dry-runs do not prove runtime payload completeness.',
         'Use install/run CheckEnvironment for read-only VT key, Hyper-V prerequisite, VM profile, guest payload freshness, runtime-root-under-repository, and driver-path hints.',
+        'installModeContract machine-readably separates existing environment, restore checkpoint/snapshot, fresh/create setup, first-computer prerequisites, compatibility boundaries, and package/readiness non-mutation.',
         'No readiness/package command creates a job id; release notes need an explicit lab live run before claiming fresh live evidence.'
     )
     reviewerChecklist     = [ordered]@{
@@ -1942,6 +2218,7 @@ $summary = [pscustomobject][ordered]@{
         mustPassBeforeSourceHandoff = @(
             'release-readiness.json failedCount = 0',
             'source package StageOnly dry-run 已生成 package-manifest.generated.json',
+            'installModeContract.gapDetected = false，installContractGaps 为空；若不为空按 installContractGapNextActionsZh 修复',
             'generated metadata 的 sourceRuntimeSafetyMetadata/source package safety 未显示 runtime payload、VM state、secret、签名材料或 build output',
             'dirty source 只能作为内部 draft，并在 release notes 说明 AllowDirtySource'
         )
@@ -1982,6 +2259,11 @@ $summary = [pscustomobject][ordered]@{
             smokeTests = $false
             hyperVLive = $false
             vmMutation = $false
+            installerModes = $false
+            checkEnvironment = $false
+            installModeInstall = $false
+            installModeChange = $false
+            resetGuestVmPassword = $false
             driverSigning = $false
             guiSigningFallback = $false
             csignTool = $false

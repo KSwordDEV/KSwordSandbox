@@ -35,6 +35,8 @@ internal static class GuestSelfNoiseMetadata
 
         ApplySelfNoiseBehaviorFlags(evt.Data);
         AddIfMissing(evt.Data, "sampleBehaviorCandidateReason", "guest-agent-collection-or-diagnostic-self-noise");
+        AddIfMissing(evt.Data, "nonbehaviorReason", "guest-agent-collection-or-diagnostic-self-noise");
+        AddIfMissing(evt.Data, "behaviorCountingPolicy", "guest-agent-setup-import-health-events-are-not-sample-behavior");
 
         if (IsDiagnosticOrCollectionHealth(evt))
         {
@@ -69,21 +71,29 @@ internal static class GuestSelfNoiseMetadata
 
         if (EndsWithAny(
             eventType,
+            ".snapshot",
+            ".summary",
             ".capture_failed",
             ".capture_skipped",
             ".capture_truncated",
             ".read_failed",
+            ".read_error",
             ".parse_failed",
-            ".write_failed"))
+            ".parse_error",
+            ".write_failed",
+            ".write_error"))
         {
             return true;
         }
 
         return DataEquals(evt, "collectionHealth", "true") ||
+            DataEquals(evt, "collectionDiagnostic", "true") ||
             DataEquals(evt, "artifactDiagnosticEvent", "true") ||
             DataEquals(evt, "summaryEvent", "true") ||
             DataEquals(evt, "behaviorCounted", "false") ||
-            DataEquals(evt, "nonbehavior", "true");
+            DataEquals(evt, "nonbehavior", "true") ||
+            DataEquals(evt, "notSampleBehavior", "true") ||
+            DataEquals(evt, "sampleBehaviorCandidate", "false");
     }
 
     private static bool IsDiagnosticOrCollectionHealth(SandboxEvent evt)
@@ -96,6 +106,11 @@ internal static class GuestSelfNoiseMetadata
             eventType.Contains("failed", StringComparison.OrdinalIgnoreCase) ||
             eventType.Contains("timeout", StringComparison.OrdinalIgnoreCase) ||
             eventType.Contains("summary", StringComparison.OrdinalIgnoreCase) ||
+            eventType.Contains("diagnostic", StringComparison.OrdinalIgnoreCase) ||
+            eventType.EndsWith(".snapshot", StringComparison.OrdinalIgnoreCase) ||
+            eventType.EndsWith(".read_error", StringComparison.OrdinalIgnoreCase) ||
+            eventType.EndsWith(".parse_error", StringComparison.OrdinalIgnoreCase) ||
+            eventType.EndsWith(".write_error", StringComparison.OrdinalIgnoreCase) ||
             eventType.StartsWith("probe.", StringComparison.OrdinalIgnoreCase) ||
             eventType.StartsWith("r0collector.", StringComparison.OrdinalIgnoreCase);
     }
@@ -123,6 +138,19 @@ internal static class GuestSelfNoiseMetadata
             {
                 return "网络抓包采集事件由 Guest Agent 产生，用于说明 PCAP/PCAPNG 证据的采集状态。";
             }
+
+            if (eventType.StartsWith("driver.", StringComparison.OrdinalIgnoreCase) &&
+                (eventType.EndsWith("_error", StringComparison.OrdinalIgnoreCase) ||
+                 eventType.EndsWith(".parse_error", StringComparison.OrdinalIgnoreCase) ||
+                 eventType.EndsWith(".read_error", StringComparison.OrdinalIgnoreCase)))
+            {
+                return "driver-events JSONL 导入诊断由 Guest Agent 产生，用于说明 R0 证据读取或解析状态。";
+            }
+
+            if (eventType.EndsWith(".snapshot", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Guest Agent 采集到基线/状态快照，用于解释观察范围和证据质量。";
+            }
         }
 
         return "Guest Agent 自身或采集通道诊断事件已记录。";
@@ -141,6 +169,11 @@ internal static class GuestSelfNoiseMetadata
              eventType.StartsWith("packet_capture.", StringComparison.OrdinalIgnoreCase)))
         {
             return "该事件不代表样本行为；请结合 captureState/status、reason、artifactRelativePath、sizeBytes 和 sha256 判断证据是否可用。";
+        }
+
+        if (eventType is not null && eventType.EndsWith(".snapshot", StringComparison.OrdinalIgnoreCase))
+        {
+            return "该快照用于对比前后状态或说明采集覆盖范围；具体新增/修改/删除行才应作为样本行为候选。";
         }
 
         return "该事件用于解释 Guest Agent 自身、采集健康或证据链状态，不应计入样本行为统计。";

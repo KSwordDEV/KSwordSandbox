@@ -23,13 +23,13 @@
  *          telemetry without materially increasing non-paged pool pressure.
  * Logic  : keeping the array inside the IoCreateDevice extension places it in
  *          non-paged kernel memory and avoids dynamic allocation in callbacks.
- *          At the current 232-byte event record size, 1024 slots consume about
- *          232 KiB of non-paged memory; the guard rails below prevent accidental
+ *          At the current 232-byte event record size, 4096 slots consume about
+ *          928 KiB of non-paged memory; the guard rails below prevent accidental
  *          multi-megabyte lab builds.
  * Return : not applicable.
  */
 #if !defined(KSWORD_SANDBOX_EVENT_RING_CAPACITY)
-#define KSWORD_SANDBOX_EVENT_RING_CAPACITY 1024UL
+#define KSWORD_SANDBOX_EVENT_RING_CAPACITY 4096UL
 #endif
 
 #define KSWORD_SANDBOX_EVENT_RING_CAPACITY_MINIMUM 64UL
@@ -76,6 +76,10 @@
 #define KSWORD_SANDBOX_ENABLE_PROCESS_CREATE 1
 #endif
 
+#if !defined(KSWORD_SANDBOX_ENABLE_PROCESS_HANDLE_ACCESS)
+#define KSWORD_SANDBOX_ENABLE_PROCESS_HANDLE_ACCESS 1
+#endif
+
 #if !defined(KSWORD_SANDBOX_ENABLE_IMAGE_LOAD)
 #define KSWORD_SANDBOX_ENABLE_IMAGE_LOAD 1
 #endif
@@ -96,6 +100,9 @@
     (KSWORD_SANDBOX_PRODUCER_FLAG_DRIVER | \
      (KSWORD_SANDBOX_ENABLE_PROCESS_CREATE ? \
         KSWORD_SANDBOX_PRODUCER_FLAG_PROCESS : 0U) | \
+     (KSWORD_SANDBOX_ENABLE_PROCESS_CREATE && \
+      KSWORD_SANDBOX_ENABLE_PROCESS_HANDLE_ACCESS ? \
+        KSWORD_SANDBOX_PRODUCER_FLAG_PROCESS_HANDLE_ACCESS : 0U) | \
      (KSWORD_SANDBOX_ENABLE_IMAGE_LOAD ? \
         KSWORD_SANDBOX_PRODUCER_FLAG_IMAGE : 0U) | \
      (KSWORD_SANDBOX_ENABLE_FILE_MINIFILTER ? \

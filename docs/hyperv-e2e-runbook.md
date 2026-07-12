@@ -3,6 +3,31 @@
 本文覆盖已准备 KSword Sandbox Hyper-V golden VM 的脚本式 E2E 路径。默认安全：顶层命令只写 JSON
 计划并退出；只有在 elevated host PowerShell 中显式传入 `-Live` 才会触碰 VM。
 
+## 先确认操作者路径 / Confirm the operator path first
+
+`Invoke-HyperVE2E.ps1` 假设你已经完成以下三条路径之一；它不是首台机器创建 VM 的向导：
+
+- 使用已配置环境：本机 install state、`sandbox.local.json`、guest secret、VM/checkpoint
+  profile、runtime root 和 staged payload 已存在。
+- 恢复已有 checkpoint/snapshot：VM 和 clean snapshot 已存在；恢复 snapshot 是显式
+  lab mutation，只能在操作者确认后执行。
+- 创建/准备新环境：先完成 Hyper-V host 兼容性、BIOS/UEFI Intel VT-x / AMD-V、
+  Hyper-V PowerShell module、管理员 PowerShell、Windows guest、`SandboxUser`、
+  Guest Service Interface、PowerShell Direct 和 clean checkpoint。
+
+低成本确认命令：
+
+```powershell
+.\install.ps1 -Mode Status
+.\install.ps1 -Mode CheckEnvironment
+.\run.ps1 -Mode Status
+.\run.ps1 -Mode CheckEnvironment
+.\run.ps1 -Mode Analyze -SamplePreset Notepad
+```
+
+这些命令不启动、不还原、不停止 VM，不签名 driver，不调用 `CSignTool.exe`。
+VirusTotal key 可选；Intel VT-x / AMD-V 才是 Hyper-V live 前置条件。
+
 ## 安全契约（safety contract）
 
 `scripts/Invoke-HyperVE2E.ps1` 是 operator 的主要脚本入口；the default mode is `PlanOnly`：
@@ -73,32 +98,17 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\Invoke-HyperVE2E.ps1 `
 
 ## 历史 go/no-go 快照
 
-以下状态来自 2026-07-10 的本地非变更 Hyper-V/readiness 观察。当前日期已晚于该快照；在 2026-07-11
-或之后执行 live 前，必须重新从 elevated PowerShell 运行 `Test-HyperVReadiness.ps1`。
+旧的本地 go/no-go 快照只可作为历史记录，不可作为当前 release 或当前机器 readiness。
+在任何 `-Live` 前都必须从当前 elevated PowerShell 重新运行只读检查：
 
-- [x] Host shell 当时为 elevated。
-- [x] VM 存在：`KSwordSandbox-Win10-Golden`。
-- [x] VM 当时读取为 `Off`。
-- [x] Clean checkpoint 存在：`Clean`。
-- [x] Guest Service Interface 已启用；中文显示名可能是 `来宾服务接口`，脚本也接受组件 ID
-  `6C09BB55-D683-4DA0-8931-C9BF705F6480`。
-- [x] Runtime root 存在：`D:\Temp\KSwordSandbox`。
-- [x] Host payload root 存在：`D:\Temp\KSwordSandbox\payload\guest-tools`。
-- [x] Host payload files 存在：`payload-manifest.json`、`agent\KSword.Sandbox.Agent.exe`、
-  `r0collector\KSword.Sandbox.R0Collector.exe`。
-- [ ] 需要在同一个 elevated process 设置 `KSWORDBOX_GUEST_PASSWORD`。
-- [ ] 设置密码后确认 PowerShell Direct；VM 为 `Off` 时 readiness 不会为你启动 VM。
-
-历史 summary：
-
-```text
-Passed: 7
-Warnings: 2
-Failed: 1
-Required failure: KSWORDBOX_GUEST_PASSWORD is missing from the current process.
-Warnings: PowerShell Direct and guest payload probes were skipped because the password secret is missing.
-Read-only guarantee: no probe files were written and no VM mutation commands were executed.
+```powershell
+.\install.ps1 -Mode CheckEnvironment
+.\run.ps1 -Mode CheckEnvironment
+.\scripts\Test-HyperVReadiness.ps1
 ```
+
+如果这些检查缺少 guest password、VM/checkpoint、Guest Service Interface、PowerShell Direct
+或 payload，先按 `RecommendedActions` 修复；不要用历史 snapshot 代替当前证据。
 
 ## Harmless behavior sample contract
 

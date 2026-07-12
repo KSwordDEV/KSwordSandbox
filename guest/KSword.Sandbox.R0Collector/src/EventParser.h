@@ -40,7 +40,9 @@ struct DriverReadEventsBatchCounters {
 };
 
 std::string DriverEventJsonType(ULONG eventType);
+std::string DriverEventJsonType(ULONG eventType, const unsigned char* payload, size_t payloadBytes);
 std::string DriverEventTypeName(ULONG eventType);
+bool IsProcessHandleAccessPayload(ULONG eventType, const unsigned char* payload, size_t payloadBytes);
 std::wstring ExtractTypedPayloadPath(ULONG eventType, const unsigned char* payload, size_t payloadBytes);
 std::wstring ExtractTypedPayloadCommandLine(ULONG eventType, const unsigned char* payload, size_t payloadBytes);
 std::wstring ExtractTypedPayloadProcessName(ULONG eventType, const unsigned char* payload, size_t payloadBytes);

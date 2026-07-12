@@ -16,7 +16,7 @@
     "legacyCSignToolDefaultPath": "forbidden",
     "completeRuntimePayloadsRequiredForHandoff": true,
     "runtimePayloadSource": "external RuntimePublishRoot only; repository bin/obj/x64 binaries are rejected",
-    "operatorDiagnostics": "install/run expose read-only Hyper-V prerequisite, VM profile, guest payload, VT key, runtime-root, and RuntimePublishRoot guidance; optional runtime publish entries are recorded in package-manifest.generated.json when skipped for layout dry-runs, while handoff uses -RequireCompleteRuntimePayloads; generated reviewerChecklist and sourceRuntimeSafetyMetadata identify source/runtime safety boundaries; package/readiness do not use GUI signing fallback or CSignTool",
+    "operatorDiagnostics": "install/run expose read-only Hyper-V prerequisite, VM profile, guest payload, VT key, runtime-root, and RuntimePublishRoot guidance; optional runtime publish entries are recorded in package-manifest.generated.json when skipped for layout dry-runs, while handoff uses -RequireCompleteRuntimePayloads; generated reviewerChecklist and sourceRuntimeSafetyMetadata identify source/runtime safety boundaries; package/readiness do not use GUI signing fallback or CSignTool. Machine-readable installModeContract documents existing environment, checkpoint/snapshot restore boundaries, fresh/create local setup, first-computer prerequisites, compatibility boundaries, and explicit package/readiness non-mutation with Chinese gap next actions.",
     "machineReadableComponentProgress": "package-manifest.generated.json:componentProgress and release-readiness.json:componentProgress",
     "machineReadableGapAudit": "package-manifest.generated.json:gapAudit and release-readiness.json:gapAudit use ksword.release.gap-audit.v28 and cover no fresh live evidence, RuntimePublishRoot completeness, self-noise guard readiness, no VM mutation/no signing guardrails, and component progress",
     "runtimeCompletenessDiagnostics": "package-manifest.generated.json:operatorDiagnostics.runtimeCompletenessDiagnostics and release-readiness.json:gapAudit.runtimePublishRootCompleteness expose root placement, expected runtimePublish entries, missing/empty/incomplete counts, expected leaf gaps, forbidden-file previews, and handoffAllowed",
@@ -25,7 +25,145 @@
     "noFreshLiveGuardrail": "package/readiness do not generate fresh live evidence; release notes must say 本候选未刷新 fresh live evidence unless a lab job id is recorded",
     "machineReadableExecutionBoundaries": "package-manifest.generated.json:executionBoundaries and release-readiness.json:executionBoundaries explicitly list no smoke, no Hyper-V live, no signing, no CSignTool, no push/publish",
     "machineReadableRequiredEvidenceFields": "package-manifest.generated.json:requiredEvidenceFields and release-readiness.json:requiredEvidenceFields list branch, commit, dirty status, runtime handoff fields, and fresh-live claim fields",
-    "gitProvenanceFields": "package-manifest.generated.json:gitMetadata and release-readiness.json:gitMetadata include branch, full commit, short commit, dirtyStatus, statusCount, and statusPreview"
+    "gitProvenanceFields": "package-manifest.generated.json:gitMetadata and release-readiness.json:gitMetadata include branch, full commit, short commit, dirtyStatus, statusCount, and statusPreview",
+    "installModeContract": {
+      "schema": "ksword.release.install-mode-contract.v1",
+      "required": true,
+      "modeIds": [
+        "existing-environment",
+        "restore-checkpoint-snapshot",
+        "fresh-create-flow",
+        "first-computer-prerequisites",
+        "compatibility-boundaries",
+        "readiness-package-non-mutation"
+      ],
+      "generatedMetadataFields": [
+        "installModeContract",
+        "installContractGapDetected",
+        "installContractGaps",
+        "installContractGapNextActionsZh",
+        "executionBoundaries.installerModesExecuted",
+        "requiredEvidenceFields.installModeHandoff"
+      ],
+      "modes": [
+        {
+          "id": "existing-environment",
+          "titleZh": "已有环境接入",
+          "operatorCommands": [
+            ".\\scripts\\install.ps1 -Mode CheckEnvironment",
+            ".\\scripts\\install.ps1 -Mode Change -UpdateHyperVConfig -VmName <existing VM> -CheckpointName <checkpoint>",
+            ".\\scripts\\run.ps1 -Mode CheckEnvironment"
+          ],
+          "machineEvidence": [
+            "VmExists",
+            "CheckpointExists",
+            "VmProfile",
+            "GuestPayloadStatus",
+            "RecommendedActions"
+          ],
+          "packageReadinessMutation": "none"
+        },
+        {
+          "id": "restore-checkpoint-snapshot",
+          "titleZh": "还原 checkpoint/snapshot 边界",
+          "operatorCommands": [
+            ".\\scripts\\install.ps1 -Mode CheckEnvironment",
+            ".\\scripts\\install.ps1 -Mode Change -ResetGuestVmPassword -PromptPassword -Force",
+            ".\\scripts\\run.ps1 -Mode Analyze -SamplePreset Notepad -DurationSeconds 5 -Live"
+          ],
+          "machineEvidence": [
+            "CheckpointExists",
+            "CheckpointGuidance",
+            "VmProfile.ExpectedCheckpointName"
+          ],
+          "packageReadinessMutation": "forbidden; restore/refresh is explicit lab/live only"
+        },
+        {
+          "id": "fresh-create-flow",
+          "titleZh": "首次/新机器本机配置流程",
+          "operatorCommands": [
+            ".\\scripts\\install.ps1 -Mode Install -PromptPassword",
+            ".\\scripts\\install.ps1 -Mode Change -UpdateHyperVConfig -VmName <existing VM> -CheckpointName <checkpoint>",
+            ".\\scripts\\Prepare-GuestPayload.ps1 -RepoRoot . -PayloadRoot <external-payload-root> -SelfContained"
+          ],
+          "machineEvidence": [
+            "RuntimeRootExists",
+            "LocalConfigExists",
+            "SecretValuePrinted=false",
+            "GuestPayloadReadyForLiveCopy"
+          ],
+          "packageReadinessMutation": "none; package/readiness do not create VM/checkpoint/payload"
+        },
+        {
+          "id": "first-computer-prerequisites",
+          "titleZh": "首台电脑前置条件",
+          "operatorCommands": [
+            ".\\scripts\\install.ps1 -Mode CheckEnvironment",
+            ".\\scripts\\run.ps1 -Mode CheckEnvironment"
+          ],
+          "machineEvidence": [
+            "HyperVPrerequisites",
+            "VirtualizationFirmwareEnabled",
+            "SecondLevelAddressTranslationSupported",
+            "RuntimeRootUnderRepository",
+            "VirusTotalStatus"
+          ],
+          "packageReadinessMutation": "none; package/readiness do not probe or mutate live host prerequisites"
+        },
+        {
+          "id": "compatibility-boundaries",
+          "titleZh": "兼容性边界",
+          "machineEvidence": [
+            "executionBoundaries",
+            "externalStateDiagnostics",
+            "freshLiveEvidenceGuardrail"
+          ],
+          "boundaries": [
+            "source/package/readiness are low-side-effect and do not require live Hyper-V",
+            "Hyper-V live requires Windows_NT, Hyper-V features/module, hardware virtualization, existing VM, and clean checkpoint",
+            "Runtime payloads must come from an external RuntimePublishRoot",
+            "VirusTotal is optional hash-only enrichment and is unrelated to Intel VT-x/AMD-V"
+          ],
+          "packageReadinessMutation": "none"
+        },
+        {
+          "id": "readiness-package-non-mutation",
+          "titleZh": "readiness/package 明确不变更",
+          "machineEvidence": [
+            "executionBoundaries",
+            "nonMutating",
+            "safetyContract"
+          ],
+          "packageReadinessMutation": "no installer modes, no CheckEnvironment execution, no VM start/restore/stop, no signing, no push/publish, no fresh live evidence"
+        }
+      ],
+      "gapHandling": {
+        "gapDetectedField": "installContractGapDetected",
+        "gapsField": "installContractGaps",
+        "nextActionsZhField": "installContractGapNextActionsZh",
+        "nextActionsZhWhenMissing": [
+          "下一步：补齐 releaseContract.installModeContract.modeIds 中缺失的安装模式。",
+          "下一步：重新生成 package-manifest.generated.json/release-readiness.json，确认 installContractGaps 为空。",
+          "下一步：不要通过 readiness/package 运行 install、Hyper-V live、VM mutation、签名或 push/publish。"
+        ]
+      },
+      "readinessPackageNonMutation": {
+        "installerModesExecuted": [],
+        "checkEnvironmentExecuted": false,
+        "installExecuted": false,
+        "changeExecuted": false,
+        "resetGuestVmPasswordExecuted": false,
+        "vmStartRestoreStopExecuted": false,
+        "vmMutationExecuted": false,
+        "driverSigningExecuted": false,
+        "csignToolInvoked": false,
+        "gitPushOrNetworkPublishExecuted": false,
+        "chinese": "中文：readiness/package 只生成 metadata/staging，不运行安装模式、不启动/还原/停止 VM、不签名、不 push/publish。"
+      }
+    },
+    "machineReadableInstallModeContract": "package-manifest.generated.json:installModeContract and release-readiness.json:installModeContract cover existing-environment, restore-checkpoint-snapshot, fresh-create-flow, first-computer-prerequisites, compatibility-boundaries, and readiness-package-non-mutation.",
+    "installContractGapMetadata": "installContractGapDetected, installContractGaps, and installContractGapNextActionsZh provide Chinese next actions when manifest/package/readiness install contract gaps are detected.",
+    "readinessPackageNonMutationExplicit": "package/readiness execute no installer modes, no CheckEnvironment, no VM start/restore/stop, no driver signing, no CSignTool, no git push, and no network publish."
   },
   "stagedMetadata": {
     "generatedManifest": "package-manifest.generated.json",
@@ -44,7 +182,9 @@
       "gitMetadata with branch, full commit, short commit, dirty status, status count, and preview",
       "requiredEvidenceFields for source handoff, runtime handoff, and fresh live claims",
       "runtimeHandoffMissingNextActionsZh with Chinese next actions when complete RuntimePublishRoot handoff is missing",
-      "reviewerChecklist JSON and no-fresh-live guardrail fields"
+      "reviewerChecklist JSON and no-fresh-live guardrail fields",
+      "installModeContract for existing environment, restore checkpoint/snapshot boundary, fresh/create flow, first-computer prerequisites, compatibility boundaries, and readiness/package non-mutation",
+      "installContractGapDetected, installContractGaps, and installContractGapNextActionsZh with Chinese next actions when install contract metadata is incomplete"
     ],
     "selfHashNote": "The generated manifest lists itself in files but omits a recursive self-hash from fileInventory.",
     "machineOutputContract": {
@@ -59,7 +199,20 @@
         "CSignTool.exe",
         "GUI signing fallback",
         "git push",
-        "network publish"
+        "network publish",
+        "installer mode execution",
+        "install CheckEnvironment execution",
+        "VM checkpoint restore/refresh"
+      ],
+      "installModeContractRequired": true,
+      "installContractGapNextActionsZhRequired": true,
+      "requiredInstallModeIds": [
+        "existing-environment",
+        "restore-checkpoint-snapshot",
+        "fresh-create-flow",
+        "first-computer-prerequisites",
+        "compatibility-boundaries",
+        "readiness-package-non-mutation"
       ]
     }
   },
@@ -465,7 +618,8 @@
     "Do not package local state such as sandbox.local.json, install-state.json, guest-password.dpapi, .env files, API keys, or user secret files.",
     "The package script stages and zips locally only; publishing/pushing remains a separate manual release-manager action.",
     "package-manifest.generated.json and release-readiness.json must expose executionBoundaries: no smoke, no Hyper-V live, no signing, no CSignTool, no push/publish.",
-    "Machine-readable handoff evidence must include branch, commit, dirty status, requiredEvidenceFields, and Chinese next actions when complete RuntimePublishRoot handoff is missing."
+    "Machine-readable handoff evidence must include branch, commit, dirty status, requiredEvidenceFields, and Chinese next actions when complete RuntimePublishRoot handoff is missing.",
+    "Generated package/readiness metadata must include installModeContract, installContractGaps, and installContractGapNextActionsZh covering existing environment, restore checkpoint/snapshot, fresh/create flow, first-computer prerequisites, compatibility boundaries, and package/readiness non-mutation."
   ],
   "componentProgressTemplate": {
     "schema": "ksword.release.component-progress.v1",
@@ -500,6 +654,10 @@
       {
         "id": "operator-remediation-zh",
         "handoffGate": "Chinese next-step remediation is present in readiness/package/install/run output"
+      },
+      {
+        "id": "install-mode-contract",
+        "handoffGate": "installModeContract mode ids present; installContractGaps empty; Chinese installContractGapNextActionsZh present when gaps are detected; package/readiness non-mutation explicit"
       }
     ]
   }

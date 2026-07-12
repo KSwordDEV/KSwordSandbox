@@ -215,6 +215,16 @@ typedef enum _KSWORD_SANDBOX_DRIVER_STATE {
 #define KSWORD_SANDBOX_CAPABILITY_FLAG_PRODUCER_METADATA      0x0000000000010000ULL
 #define KSWORD_SANDBOX_CAPABILITY_FLAG_SELF_NOISE_METADATA    0x0000000000020000ULL
 #define KSWORD_SANDBOX_CAPABILITY_FLAG_GET_NETWORK_STATUS     0x0000000000040000ULL
+/*
+ * Draft-only capability reservations.  These bits are intentionally omitted
+ * from the shared KSWORD_SANDBOX_CAPABILITY_FLAGS_CURRENT baseline; a kernel
+ * build advertises them through GET_CAPABILITIES only when the corresponding
+ * guarded producer emits versioned payloads.  They let collectors name the
+ * future surface without overclaiming that v1 process lifecycle events include
+ * privilege or handle access telemetry.
+ */
+#define KSWORD_SANDBOX_CAPABILITY_FLAG_PROCESS_HANDLE_ACCESS_DRAFT 0x0000000000080000ULL
+#define KSWORD_SANDBOX_CAPABILITY_FLAG_TOKEN_PRIVILEGE_DRAFT       0x0000000000100000ULL
 
 #define KSWORD_SANDBOX_CAPABILITY_FLAGS_CURRENT \
     (KSWORD_SANDBOX_CAPABILITY_FLAG_GET_HEALTH | \
@@ -254,6 +264,7 @@ typedef enum _KSWORD_SANDBOX_DRIVER_STATE {
 #define KSWORD_SANDBOX_PRODUCER_FLAG_FILE      0x00000008U
 #define KSWORD_SANDBOX_PRODUCER_FLAG_REGISTRY  0x00000010U
 #define KSWORD_SANDBOX_PRODUCER_FLAG_NETWORK   0x00000020U
+#define KSWORD_SANDBOX_PRODUCER_FLAG_PROCESS_HANDLE_ACCESS 0x00000040U
 
 #define KSWORD_SANDBOX_PRODUCER_MASK_CURRENT \
     (KSWORD_SANDBOX_PRODUCER_FLAG_DRIVER | \
@@ -261,10 +272,12 @@ typedef enum _KSWORD_SANDBOX_DRIVER_STATE {
      KSWORD_SANDBOX_PRODUCER_FLAG_IMAGE | \
      KSWORD_SANDBOX_PRODUCER_FLAG_FILE | \
      KSWORD_SANDBOX_PRODUCER_FLAG_REGISTRY | \
-     KSWORD_SANDBOX_PRODUCER_FLAG_NETWORK)
+     KSWORD_SANDBOX_PRODUCER_FLAG_NETWORK | \
+     KSWORD_SANDBOX_PRODUCER_FLAG_PROCESS_HANDLE_ACCESS)
 
 #define KSWORD_SANDBOX_PRODUCER_MASK_DEFAULT \
-    KSWORD_SANDBOX_PRODUCER_MASK_CURRENT
+    (KSWORD_SANDBOX_PRODUCER_MASK_CURRENT & \
+     ~KSWORD_SANDBOX_PRODUCER_FLAG_PROCESS_HANDLE_ACCESS)
 
 /*
  * Event type values.
@@ -388,7 +401,9 @@ typedef enum _KSWORD_SANDBOX_FILE_OPERATION {
 typedef enum _KSWORD_SANDBOX_PROCESS_OPERATION {
     KswSandboxProcessOperationNone = 0,
     KswSandboxProcessOperationCreate = 1,
-    KswSandboxProcessOperationExit = 2
+    KswSandboxProcessOperationExit = 2,
+    KswSandboxProcessOperationHandleCreateDraft = 3,
+    KswSandboxProcessOperationHandleDuplicateDraft = 4
 } KSWORD_SANDBOX_PROCESS_OPERATION;
 
 #define KSWORD_SANDBOX_PROCESS_EVENT_FLAG_IMAGE_PATH_PRESENT      0x00000001U
@@ -957,6 +972,67 @@ typedef struct _KSWORD_SANDBOX_PROCESS_EVENT_PAYLOAD {
     WCHAR ImagePath[KSWORD_SANDBOX_PROCESS_IMAGE_PATH_CHARS];
     WCHAR CommandLine[KSWORD_SANDBOX_PROCESS_COMMAND_LINE_CHARS];
 } KSWORD_SANDBOX_PROCESS_EVENT_PAYLOAD, *PKSWORD_SANDBOX_PROCESS_EVENT_PAYLOAD;
+
+/*
+ * Draft process/thread-handle access payload.
+ *
+ * Inputs : emitted only when a guarded ObRegisterCallbacks producer is compiled
+ *          and successfully registers.  The fixed-size layout carries
+ *          PsProcessType and PsThreadType handle create/duplicate telemetry
+ *          after the driver advertises
+ *          KSWORD_SANDBOX_CAPABILITY_FLAG_PROCESS_HANDLE_ACCESS_DRAFT.
+ * Logic  : the first Version/Size/Operation/Flags prefix matches existing typed
+ *          payload conventions, while explicit access-mask fields avoid
+ *          overloading process lifecycle ImagePath/CommandLine slots.
+ *          OriginalDesiredAccess and DesiredAccess come from pre-operation
+ *          callback data; GrantedAccess is meaningful only for a successful
+ *          post-operation observation.
+ * Return : not applicable.
+ */
+#define KSWORD_SANDBOX_PROCESS_HANDLE_ACCESS_EVENT_VERSION 0x00010001U /* draft */
+
+#define KSWORD_SANDBOX_PROCESS_ACCESS_EVENT_FLAG_TARGET_PID_PRESENT 0x00000001U
+#define KSWORD_SANDBOX_PROCESS_ACCESS_EVENT_FLAG_SOURCE_PID_PRESENT 0x00000002U
+#define KSWORD_SANDBOX_PROCESS_ACCESS_EVENT_FLAG_DUPLICATE_TARGET_PID_PRESENT 0x00000004U
+#define KSWORD_SANDBOX_PROCESS_ACCESS_EVENT_FLAG_ORIGINAL_DESIRED_ACCESS_PRESENT 0x00000008U
+#define KSWORD_SANDBOX_PROCESS_ACCESS_EVENT_FLAG_DESIRED_ACCESS_PRESENT 0x00000010U
+#define KSWORD_SANDBOX_PROCESS_ACCESS_EVENT_FLAG_GRANTED_ACCESS_PRESENT 0x00000020U
+#define KSWORD_SANDBOX_PROCESS_ACCESS_EVENT_FLAG_PRE_OPERATION 0x00000040U
+#define KSWORD_SANDBOX_PROCESS_ACCESS_EVENT_FLAG_POST_OPERATION 0x00000080U
+#define KSWORD_SANDBOX_PROCESS_ACCESS_EVENT_FLAG_KERNEL_HANDLE 0x00000100U
+#define KSWORD_SANDBOX_PROCESS_ACCESS_EVENT_FLAG_USER_MODE_REQUEST 0x00000200U
+#define KSWORD_SANDBOX_PROCESS_ACCESS_EVENT_FLAG_ACCESS_REDUCED 0x00000400U
+#define KSWORD_SANDBOX_PROCESS_ACCESS_EVENT_FLAG_OPERATION_FAILED 0x00000800U
+#define KSWORD_SANDBOX_PROCESS_ACCESS_EVENT_FLAG_PROCESS_OBJECT 0x00001000U
+#define KSWORD_SANDBOX_PROCESS_ACCESS_EVENT_FLAG_THREAD_OBJECT 0x00002000U
+#define KSWORD_SANDBOX_PROCESS_ACCESS_EVENT_FLAG_TARGET_TID_PRESENT 0x00004000U
+
+typedef enum _KSWORD_SANDBOX_PROCESS_ACCESS_OBJECT_TYPE {
+    KswSandboxProcessAccessObjectTypeNone = 0,
+    KswSandboxProcessAccessObjectTypeProcess = 1,
+    KswSandboxProcessAccessObjectTypeThread = 2
+} KSWORD_SANDBOX_PROCESS_ACCESS_OBJECT_TYPE;
+
+typedef struct _KSWORD_SANDBOX_PROCESS_HANDLE_ACCESS_EVENT_PAYLOAD_V1_DRAFT {
+    ULONG Version;
+    ULONG Size;
+    ULONG Operation;
+    ULONG Flags;
+    ULONGLONG ActorProcessId;
+    ULONGLONG TargetProcessId;
+    ULONGLONG SourceProcessId;
+    ULONGLONG DuplicateTargetProcessId;
+    ULONG OriginalDesiredAccess;
+    ULONG DesiredAccess;
+    ULONG GrantedAccess;
+    ULONG CallbackOperation;
+    LONG Status;
+    ULONG PreviousMode;
+    ULONG ObjectType;
+    ULONGLONG TargetThreadId;
+    ULONGLONG Reserved[5];
+} KSWORD_SANDBOX_PROCESS_HANDLE_ACCESS_EVENT_PAYLOAD_V1_DRAFT,
+    *PKSWORD_SANDBOX_PROCESS_HANDLE_ACCESS_EVENT_PAYLOAD_V1_DRAFT;
 
 /*
  * Bounded payload for KswSandboxEventTypeImage.

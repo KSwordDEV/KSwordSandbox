@@ -47,9 +47,11 @@ internal static class AgentProgram
 
     private const string DroppedFileSelectorVersion = "artifact-selectors-v1";
 
-    internal const int DefaultR0CollectorMaxEventsPerRead = 64;
+    internal const int DefaultR0CollectorMaxEventsPerRead = 1024;
 
-    internal const int DefaultR0CollectorMaxReadBatches = 64;
+    internal const int DefaultR0CollectorMaxReadBatches = 0;
+
+    internal const int DefaultR0CollectorDriverEventSampleStride = 16;
 
     /// <summary>
     /// Main async entry point for the guest collector.
@@ -316,6 +318,7 @@ internal static class AgentProgram
             new GuestProbeRunner(
             [
                 new ProcessTreeProbe(),
+                new SecurityEventLogProbe(),
                 new FileDiffProbe(),
                 new TcpConnectionDiffProbe(),
                 new PacketCaptureProbe(),
@@ -450,6 +453,8 @@ internal static class AgentProgram
             startInfo.ArgumentList.Add(options.R0CollectorMaxEventsPerRead.ToString(CultureInfo.InvariantCulture));
             startInfo.ArgumentList.Add("--max-read-batches");
             startInfo.ArgumentList.Add(options.R0CollectorMaxReadBatches.ToString(CultureInfo.InvariantCulture));
+            startInfo.ArgumentList.Add("--driver-event-sample-stride");
+            startInfo.ArgumentList.Add(options.R0CollectorDriverEventSampleStride.ToString(CultureInfo.InvariantCulture));
             if (options.R0Mock)
             {
                 startInfo.ArgumentList.Add("--mock");
@@ -826,6 +831,8 @@ internal static class AgentProgram
                 ["durationSeconds"] = options.DurationSeconds.ToString(CultureInfo.InvariantCulture),
                 ["r0MaxEventsPerRead"] = options.R0CollectorMaxEventsPerRead.ToString(CultureInfo.InvariantCulture),
                 ["r0MaxReadBatches"] = options.R0CollectorMaxReadBatches.ToString(CultureInfo.InvariantCulture),
+                ["r0DriverEventSampleStride"] = options.R0CollectorDriverEventSampleStride.ToString(CultureInfo.InvariantCulture),
+                ["r0BackpressureMitigation"] = "unlimited-read-batches-with-stride-sampling",
                 ["r0Mock"] = options.R0Mock.ToString(),
                 ["stdoutPath"] = standardOutputPath,
                 ["stderrPath"] = standardErrorPath,
@@ -1273,7 +1280,9 @@ internal static class AgentProgram
             "--max-events",
             options.R0CollectorMaxEventsPerRead.ToString(CultureInfo.InvariantCulture),
             "--max-read-batches",
-            options.R0CollectorMaxReadBatches.ToString(CultureInfo.InvariantCulture)
+            options.R0CollectorMaxReadBatches.ToString(CultureInfo.InvariantCulture),
+            "--driver-event-sample-stride",
+            options.R0CollectorDriverEventSampleStride.ToString(CultureInfo.InvariantCulture)
         };
 
         if (options.R0Mock)
@@ -3284,6 +3293,8 @@ internal sealed record AgentOptions
 
     public int R0CollectorMaxReadBatches { get; init; } = AgentProgram.DefaultR0CollectorMaxReadBatches;
 
+    public int R0CollectorDriverEventSampleStride { get; init; } = AgentProgram.DefaultR0CollectorDriverEventSampleStride;
+
     public bool CaptureScreenshots { get; init; }
 
     public ScreenshotProbeOptions ScreenshotOptions { get; init; } = ScreenshotProbeOptions.Default;
@@ -3364,6 +3375,7 @@ internal sealed record AgentOptions
         var captureScreenshots = flags.Contains("screenshot") || flags.Contains("screenshots");
         var r0MaxEventsPerRead = ParseBoundedOption(values, 1, 1024, AgentProgram.DefaultR0CollectorMaxEventsPerRead, "r0-max-events", "r0-read-events-max-events", "driver-max-events");
         var r0MaxReadBatches = ParseBoundedOption(values, 0, 1_000_000, AgentProgram.DefaultR0CollectorMaxReadBatches, "r0-max-read-batches", "driver-max-read-batches");
+        var r0DriverEventSampleStride = ParseBoundedOption(values, 1, 1_000_000, AgentProgram.DefaultR0CollectorDriverEventSampleStride, "r0-driver-event-sample-stride", "driver-event-sample-stride", "r0-event-sample-stride");
         var screenshotOptions = ScreenshotProbeOptions.Parse(
             FirstValue(values, "screenshot-phases", "screenshot-stages", "screenshots-phases", "screenshots-stages"),
             FirstValue(values, "screenshot-count", "screenshots-count"));
@@ -3379,6 +3391,7 @@ internal sealed record AgentOptions
             R0Mock = flags.Contains("r0-mock"),
             R0CollectorMaxEventsPerRead = r0MaxEventsPerRead,
             R0CollectorMaxReadBatches = r0MaxReadBatches,
+            R0CollectorDriverEventSampleStride = r0DriverEventSampleStride,
             CaptureScreenshots = captureScreenshots,
             ScreenshotOptions = screenshotOptions,
             CollectDroppedFiles = flags.Contains("collect-dropped-files") || flags.Contains("dropped-files"),

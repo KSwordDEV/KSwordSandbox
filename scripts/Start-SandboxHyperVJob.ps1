@@ -147,6 +147,20 @@ function Assert-DirectoryForLive {
     }
 }
 
+function Get-HyperVVmNameCandidates {
+    param([int]$Limit = 20)
+
+    try {
+        return @(Get-VM -ErrorAction Stop |
+            Sort-Object -Property Name |
+            Select-Object -First $Limit |
+            ForEach-Object { [string]$_.Name })
+    }
+    catch {
+        return @()
+    }
+}
+
 function Assert-VmCheckpointForLive {
     param([Parameter(Mandatory)][object]$Plan)
 
@@ -154,7 +168,9 @@ function Assert-VmCheckpointForLive {
         $vm = Get-VM -Name $Plan.vm.name -ErrorAction Stop
     }
     catch {
-        throw "错误：VM 诊断失败，无法查询 golden VM '$($Plan.vm.name)'；尚未执行 VM mutation。下一步：确认 VM 名称与 Hyper-V 权限，或运行 .\install.ps1 -Mode Change -UpdateHyperVConfig。英文详情：$($_.Exception.Message)"
+        $availableVms = @(Get-HyperVVmNameCandidates -Limit 20)
+        $availableText = if ($availableVms.Count -gt 0) { $availableVms -join ', ' } else { '<none or unavailable>' }
+        throw "错误：VM 诊断失败，无法查询 golden VM '$($Plan.vm.name)'；尚未执行 VM mutation。已看到 VMs：$availableText。下一步：确认 VM 名称与 Hyper-V 权限，运行 .\scripts\Test-HyperVReadiness.ps1 -ListAvailableVmProfiles 列出只读候选，或运行 .\install.ps1 -Mode Change -UpdateHyperVConfig。英文详情：$($_.Exception.Message)"
     }
 
     try {

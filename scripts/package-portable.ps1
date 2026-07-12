@@ -581,7 +581,15 @@ function Get-FileSha256Hex {
         [string]$Path
     )
 
-    $stream = [System.IO.File]::OpenRead($Path)
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        throw "Cannot hash non-file path: $Path"
+    }
+
+    $stream = [System.IO.File]::Open(
+        $Path,
+        [System.IO.FileMode]::Open,
+        [System.IO.FileAccess]::Read,
+        [System.IO.FileShare]::ReadWrite -bor [System.IO.FileShare]::Delete)
     $sha256 = [System.Security.Cryptography.SHA256]::Create()
     try {
         $hashBytes = $sha256.ComputeHash($stream)
@@ -900,8 +908,225 @@ function Get-PackageRequiredEvidenceFields {
         provenance = @('gitMetadata.branch', 'gitMetadata.commit', 'gitMetadata.shortCommit', 'gitMetadata.dirtyStatus', 'gitMetadata.statusCount', 'generatedAtUtc', 'packageKind', 'version')
         sourceHandoff = @('gitMetadata.branch', 'gitMetadata.commit', 'gitMetadata.dirtyStatus', 'fileInventory[].path', 'fileInventory[].sizeBytes', 'fileInventory[].sha256', 'safetyContract', 'sourceRuntimeSafetyMetadata', 'executionBoundaries')
         runtimeHandoff = @('runtimePublishRoot', 'operatorDiagnostics.runtimeDryRunGuardrail.handoffAllowed', 'operatorDiagnostics.runtimePublishSummary.missingCount=0', 'operatorDiagnostics.runtimePublishSummary.incompleteCount=0', 'operatorDiagnostics.runtimePublishSummary.forbiddenFileCount=0', 'operatorDiagnostics.runtimeCompletenessDiagnostics.entries', 'archivePath', 'archiveSha256')
+        installModeHandoff = @('installModeContract.schema', 'installModeContract.modes[].id', 'installModeContract.readinessPackageNonMutation', 'installContractGaps', 'installContractGapNextActionsZh')
         freshLiveClaim = @('gitMetadata.commit', 'gitMetadata.branch', 'gitMetadata.dirtyStatus', 'job id', 'runtime root', 'generatedAtUtc/local time', 'report.json path', 'report.zh.html path', 'report.en.html path')
         fallbackWhenMissingFreshLiveJobZh = '没有实验室 live job id 时，release notes 必须写“本候选未刷新 fresh live evidence”。'
+    }
+}
+
+function Get-InstallModeRequiredIds {
+    return @(
+        'existing-environment',
+        'restore-checkpoint-snapshot',
+        'fresh-create-flow',
+        'first-computer-prerequisites',
+        'compatibility-boundaries',
+        'readiness-package-non-mutation'
+    )
+}
+
+function Get-InstallContractGapNextActionsZh {
+    param([string[]]$Gaps = @())
+
+    if (@($Gaps).Count -eq 0) {
+        return @()
+    }
+
+    $actions = New-Object System.Collections.Generic.List[string]
+    [void]$actions.Add("检测到 install contract 缺口：$(@($Gaps) -join '；')。")
+    [void]$actions.Add('下一步：只修改 package/readiness/packaging manifest 的机器可读 contract；不要在 release/package 阶段运行 install、smoke、Hyper-V live、签名或 VM mutation。')
+    [void]$actions.Add("下一步：在 packaging/*.manifest.json 的 releaseContract.installModeContract.modeIds 中补齐：$((Get-InstallModeRequiredIds) -join ', ')。")
+    [void]$actions.Add('下一步：重新生成 package-manifest.generated.json，并确认 installModeContract、installContractGaps、installContractGapNextActionsZh 和 executionBoundaries 同时存在。')
+    return @($actions.ToArray())
+}
+
+function Get-InstallModeContractSnapshot {
+    param(
+        [object]$Manifest = $null,
+        [string]$GeneratedBy = 'scripts/package-portable.ps1'
+    )
+
+    $requiredModeIds = @(Get-InstallModeRequiredIds)
+    $manifestContractPresent = $false
+    $manifestModeIds = @()
+    $gaps = New-Object System.Collections.Generic.List[string]
+
+    if ($null -eq $Manifest) {
+        [void]$gaps.Add('No package manifest was supplied for install mode contract verification.')
+    }
+    else {
+        $releaseContract = Get-ObjectPropertyValue -InputObject $Manifest -Name 'releaseContract' -DefaultValue $null
+        if ($null -eq $releaseContract) {
+            [void]$gaps.Add('releaseContract is missing from package manifest.')
+        }
+        else {
+            $installModeContract = Get-ObjectPropertyValue -InputObject $releaseContract -Name 'installModeContract' -DefaultValue $null
+            if ($null -eq $installModeContract) {
+                [void]$gaps.Add('releaseContract.installModeContract is missing from package manifest.')
+            }
+            else {
+                $manifestContractPresent = $true
+                $manifestModeIds = @((Get-ObjectPropertyValue -InputObject $installModeContract -Name 'modeIds' -DefaultValue @()) |
+                    Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } |
+                    ForEach-Object { [string]$_ })
+                foreach ($modeId in $requiredModeIds) {
+                    if ($manifestModeIds -notcontains $modeId) {
+                        [void]$gaps.Add("releaseContract.installModeContract.modeIds missing '$modeId'.")
+                    }
+                }
+            }
+
+            foreach ($flagName in @('noVmMutationByPackageScript', 'noSmokeByPackageOrReadiness', 'noHyperVLiveByPackageOrReadiness', 'noDriverSigningByPackageScript', 'noCSignToolInvocationByPackageOrReadiness')) {
+                if (-not [bool](Get-ObjectPropertyValue -InputObject $releaseContract -Name $flagName -DefaultValue $false)) {
+                    [void]$gaps.Add("releaseContract.$flagName must be true.")
+                }
+            }
+        }
+    }
+
+    $gapArray = @($gaps.ToArray())
+    $gapDetected = $gapArray.Count -gt 0
+
+    return [pscustomobject][ordered]@{
+        schema = 'ksword.release.install-mode-contract.v1'
+        generatedBy = $GeneratedBy
+        generatedAtUtc = [DateTimeOffset]::UtcNow.ToString('O')
+        purpose = 'Machine-readable installer UX/compatibility contract for release reviewers; generated by package/readiness without executing installer modes.'
+        manifestContractPresent = $manifestContractPresent
+        requiredModeIds = @($requiredModeIds)
+        manifestModeIds = @($manifestModeIds)
+        gapDetected = $gapDetected
+        gaps = @($gapArray)
+        gapNextActionsZh = @(Get-InstallContractGapNextActionsZh -Gaps $gapArray)
+        modes = @(
+            [ordered]@{
+                id = 'existing-environment'
+                titleZh = '已有环境接入'
+                operatorScenario = 'Use an already-created/imported Hyper-V golden VM and clean checkpoint; installer records local profile values and CheckEnvironment reads them.'
+                primaryCommands = @(
+                    '.\scripts\install.ps1 -Mode CheckEnvironment',
+                    '.\scripts\install.ps1 -Mode Change -UpdateHyperVConfig -VmName <existing VM> -CheckpointName <checkpoint>',
+                    '.\scripts\run.ps1 -Mode CheckEnvironment'
+                )
+                evidenceFields = @('InstallStatus.VmExists', 'InstallStatus.CheckpointExists', 'InstallStatus.VmProfile', 'InstallStatus.GuestPayloadStatus', 'InstallStatus.RecommendedActions')
+                checkEnvironmentStartsOrMutatesVm = $false
+                createsVm = $false
+                restoresCheckpoint = $false
+                writesLocalState = 'Change -UpdateHyperVConfig writes local config/install-state only; it does not write git-tracked files.'
+                nextActionsZh = @(
+                    '下一步：先运行 .\scripts\install.ps1 -Mode CheckEnvironment 读取 VM/checkpoint/payload/secret 缺口。',
+                    '下一步：已有 VM 时运行 .\scripts\install.ps1 -Mode Change -UpdateHyperVConfig -VmName <existing VM> -CheckpointName <checkpoint> 记录本机 profile。'
+                )
+            },
+            [ordered]@{
+                id = 'restore-checkpoint-snapshot'
+                titleZh = '还原 checkpoint/snapshot 边界'
+                operatorScenario = 'Checkpoint restore/refresh is a live VM operation and is never performed by package/readiness; it is reserved for explicit lab actions such as guest password reset or run.ps1 -Live.'
+                primaryCommands = @(
+                    '.\scripts\install.ps1 -Mode CheckEnvironment',
+                    '.\scripts\install.ps1 -Mode Change -ResetGuestVmPassword -PromptPassword -Force',
+                    '.\scripts\run.ps1 -Mode Analyze -SamplePreset Notepad -DurationSeconds 5 -Live'
+                )
+                evidenceFields = @('InstallStatus.CheckpointExists', 'InstallStatus.CheckpointGuidance', 'VmProfile.ExpectedCheckpointName', 'ResetGuestPasswordCommand')
+                readinessPackageCanExecute = $false
+                mayRestoreCheckpointOnlyWhenExplicit = $true
+                requiresAdministrator = $true
+                skipFlags = @('-SkipCheckpointRestore', '-SkipCheckpointRefresh')
+                nextActionsZh = @(
+                    '下一步：缺少 checkpoint 时先创建或选择 clean checkpoint，再用 -UpdateHyperVConfig 记录名称。',
+                    '下一步：只有确认要操作隔离 VM 时才运行 ResetGuestVmPassword 或 run.ps1 -Live；package/readiness 不会替你还原快照。'
+                )
+            },
+            [ordered]@{
+                id = 'fresh-create-flow'
+                titleZh = '首次/新机器本机配置流程'
+                operatorScenario = 'Fresh local setup creates runtime folders, local sandbox config, and optional secrets; it does not create a VM, checkpoint, runtime publish payload, or fresh live evidence.'
+                primaryCommands = @(
+                    '.\scripts\install.ps1 -Mode Install -PromptPassword',
+                    '.\scripts\install.ps1 -Mode Change -UpdateHyperVConfig -VmName <existing VM> -CheckpointName <checkpoint>',
+                    '.\scripts\Prepare-GuestPayload.ps1 -RepoRoot . -PayloadRoot <external-payload-root> -SelfContained'
+                )
+                evidenceFields = @('InstallStatus.RuntimeRootExists', 'InstallStatus.LocalConfigExists', 'InstallStatus.SecretValuePrinted=false', 'InstallStatus.GuestPayloadReadyForLiveCopy')
+                createsLocalRuntimeFolders = $true
+                createsVm = $false
+                createsCheckpoint = $false
+                buildsPayload = $false
+                nextActionsZh = @(
+                    '下一步：新机器先运行 .\scripts\install.ps1 -Mode Install -PromptPassword 创建本机目录、配置和 guest secret。',
+                    '下一步：payload 输出必须放仓库外；准备完成后再用 CheckEnvironment 确认 freshness。'
+                )
+            },
+            [ordered]@{
+                id = 'first-computer-prerequisites'
+                titleZh = '首台电脑前置条件'
+                operatorScenario = 'Read-only environment checks identify host prerequisites before any live VM execution.'
+                evidenceFields = @('HyperVPrerequisites.OsIsWindows', 'HyperVPrerequisites.PowerShellModuleAvailable', 'HyperVPrerequisites.VirtualizationFirmwareEnabled', 'HyperVPrerequisites.SecondLevelAddressTranslationSupported', 'InstallStatus.IsAdministrator', 'InstallStatus.RuntimeRootUnderRepository', 'InstallStatus.VirusTotalStatus')
+                requiredForLive = @('Windows host', 'Hyper-V feature and PowerShell module', 'hardware virtualization enabled', 'SLAT/EPT/NPT support', 'existing/imported golden VM', 'clean checkpoint', 'guest password secret', 'external runtime/payload roots')
+                optional = @('VirusTotal API key for hash-only enrichment', 'test-signed R0 driver path for isolated advanced lab runs')
+                nextActionsZh = @(
+                    '下一步：在首台电脑上先跑 CheckEnvironment；按 RecommendedActions 启用 Hyper-V、BIOS 虚拟化、SLAT 支持、VM/checkpoint、payload、secret。',
+                    '下一步：RuntimeRoot/RuntimePublishRoot/PayloadRoot 均应放仓库外，避免把本机状态或证据打进包。'
+                )
+            },
+            [ordered]@{
+                id = 'compatibility-boundaries'
+                titleZh = '兼容性边界'
+                operatorScenario = 'Source/readiness/package paths are low-side-effect and can run without live Hyper-V; live analysis requires an explicitly prepared Windows Hyper-V lab host.'
+                boundaries = @(
+                    'Non-Windows hosts are source/package/readiness/report-viewing only; Hyper-V live requires Windows_NT.',
+                    'CheckEnvironment/Status are read-only and do not print secret values.',
+                    'StartWebUI starts the UI wrapper only; live VM execution requires explicit run.ps1 -Live.',
+                    'Runtime packages copy binaries only from external RuntimePublishRoot.',
+                    'VirusTotal is optional hash-only enrichment and is unrelated to Intel VT-x/AMD-V virtualization.',
+                    'Real R0/test-signing is an isolated advanced lab path, not a default install/package requirement.'
+                )
+                evidenceFields = @('executionBoundaries', 'externalStateDiagnostics', 'freshLiveEvidenceGuardrail', 'requiredEvidenceFields.installModeHandoff')
+                nextActionsZh = @(
+                    '下一步：若目标机器不满足 Hyper-V live 条件，只交付 source/runtime 包并保留 release notes 的 no-fresh-live fallback。',
+                    '下一步：需要真实 live/R0 时由 release manager 在隔离 lab host 显式运行并记录 job id。'
+                )
+            },
+            [ordered]@{
+                id = 'readiness-package-non-mutation'
+                titleZh = 'readiness/package 明确不变更'
+                operatorScenario = 'This generated metadata is evidence that package/readiness did not execute install modes, mutate VM state, sign drivers, push, publish, or create fresh live evidence.'
+                evidenceFields = @('executionBoundaries.smokeTestsExecuted=false', 'executionBoundaries.hyperVLiveExecuted=false', 'executionBoundaries.vmMutationExecuted=false', 'executionBoundaries.driverSigningExecuted=false', 'executionBoundaries.csignToolInvoked=false', 'executionBoundaries.gitPushExecuted=false')
+                installerModesExecutedByReadinessPackage = @()
+                nonMutating = $true
+                nextActionsZh = @(
+                    '下一步：审阅 release-readiness.json/package-manifest.generated.json 的 executionBoundaries；这些字段必须显示未运行 smoke/live/签名/push。',
+                    '下一步：不要把 package/readiness 输出当作 fresh live evidence；缺 live job id 时 release notes 写“本候选未刷新 fresh live evidence”。'
+                )
+            }
+        )
+        firstComputerPrerequisites = [ordered]@{
+            evaluatedBy = @('.\scripts\install.ps1 -Mode CheckEnvironment', '.\scripts\run.ps1 -Mode CheckEnvironment')
+            evaluatedByPackageReadiness = $false
+            packageReadinessReason = 'Package/readiness are non-mutating release gates and do not probe live host/VM state.'
+            nextActionsZh = @('下一步：把 CheckEnvironment 输出中的 RecommendedActions 当作首机安装修复清单；修复后再进入 live。')
+        }
+        compatibilityBoundaries = [ordered]@{
+            sourcePackage = 'source-only; excludes runtime payloads, VM state, samples, reports, secrets, signing material, and build output'
+            runtimePackage = 'requires external RuntimePublishRoot for complete handoff; repository bin/obj/x64 fallback is rejected'
+            hyperVLive = 'explicit lab action only; package/readiness never start, restore, or stop VMs'
+            driverAndSigning = 'driver signing, guest test-signing changes, GUI signing fallback, and CSignTool are not package/readiness actions'
+            virusTotal = 'optional hash-only enrichment key; never packaged or printed'
+        }
+        readinessPackageNonMutation = [ordered]@{
+            installerModesExecuted = @()
+            checkEnvironmentExecuted = $false
+            statusExecuted = $false
+            installExecuted = $false
+            changeExecuted = $false
+            resetGuestVmPasswordExecuted = $false
+            vmStartRestoreStopExecuted = $false
+            vmMutationExecuted = $false
+            driverSigningExecuted = $false
+            csignToolInvoked = $false
+            gitPushOrNetworkPublishExecuted = $false
+            chinese = '中文：package/readiness 只生成 metadata 和本地 staging，不运行安装模式、不启动/还原/停止 VM、不签名、不 push/publish。'
+        }
+        machineReadableEvidenceFields = @('installModeContract.modes[].id', 'installModeContract.readinessPackageNonMutation', 'installContractGaps', 'installContractGapNextActionsZh', 'executionBoundaries', 'requiredEvidenceFields.installModeHandoff')
     }
 }
 
@@ -956,6 +1181,14 @@ function Get-RuntimeHandoffMissingNextActionsZh {
 
 function Get-ReleaseComponentProgressSnapshot {
     $now = [DateTimeOffset]::UtcNow.ToString('O')
+    $installContractGapDetected = $false
+    $operatorDiagnosticsVariable = Get-Variable -Name operatorDiagnostics -Scope Script -ErrorAction SilentlyContinue
+    if ($null -ne $operatorDiagnosticsVariable -and
+        $null -ne $operatorDiagnosticsVariable.Value -and
+        $operatorDiagnosticsVariable.Value.Contains('installContractGapDetected')) {
+        $installContractGapDetected = [bool]$operatorDiagnosticsVariable.Value['installContractGapDetected']
+    }
+
     return [ordered]@{
         schema = 'ksword.release.component-progress.v1'
         generatedAtUtc = $now
@@ -1012,6 +1245,14 @@ function Get-ReleaseComponentProgressSnapshot {
                 evidence = @('recommendedActions', 'externalStateDiagnostics', 'docs/install.md', 'docs/run.md', 'docs/release.md')
                 handoffGate = 'common deployment gaps have Chinese next-step commands before live execution'
                 remediationZh = '先运行 install/run CheckEnvironment，再按 RecommendedActions 修复 Hyper-V、VM profile、payload、VT key 或 runtime root。'
+            },
+            [ordered]@{
+                id = 'install-mode-contract'
+                titleZh = '安装模式机器可读契约'
+                state = if ($installContractGapDetected) { 'blocked-contract-gap' } else { 'documented' }
+                evidence = @('installModeContract', 'installContractGaps', 'installContractGapNextActionsZh', 'executionBoundaries')
+                handoffGate = 'existing environment, restore/checkpoint boundary, fresh/create flow, first-computer prerequisites, compatibility boundaries, and readiness/package non-mutation are machine-readable.'
+                remediationZh = '若 installContractGaps 非空，按 installContractGapNextActionsZh 补齐 packaging/readiness/package metadata；不要通过 package 阶段运行 install、live 或 VM mutation。'
             }
         )
     }
@@ -1022,6 +1263,7 @@ function Get-PackageGapAuditSnapshot {
     $rootDiagnostics = $script:operatorDiagnostics.runtimePublishRootDiagnostics
     $runtimeRootProvided = -not [string]::IsNullOrWhiteSpace($RuntimePublishRoot)
     $runtimeHandoffAllowed = if ($PackageKind -eq 'runtime') { [bool]$script:operatorDiagnostics.runtimeDryRunGuardrail.handoffAllowed } else { $true }
+    $installModeContract = $script:operatorDiagnostics.installModeContract
     return [ordered]@{
         schema = 'ksword.release.gap-audit.v28'
         contractVersion = 28
@@ -1083,6 +1325,17 @@ function Get-PackageGapAuditSnapshot {
             componentIds = @((Get-ReleaseComponentProgressSnapshot).components | ForEach-Object { $_.id })
             remediationZh = '若缺 componentProgress/gapAudit，请停止 handoff，修正 package/readiness metadata 后重新生成包。'
         }
+        installModeContract = [ordered]@{
+            schema = $installModeContract.schema
+            status = if ([bool]$installModeContract.gapDetected) { 'blocked-contract-gap' } else { 'documented' }
+            gapDetected = [bool]$installModeContract.gapDetected
+            gaps = @($installModeContract.gaps)
+            nextActionsZh = @($installModeContract.gapNextActionsZh)
+            requiredModeIds = @($installModeContract.requiredModeIds)
+            modeIds = @($installModeContract.modes | ForEach-Object { $_.id })
+            readinessPackageNonMutation = $installModeContract.readinessPackageNonMutation
+            remediationZh = 'install mode contract 必须覆盖已有环境、checkpoint/snapshot 边界、首次/新机器流程、首机前置条件、兼容性边界，以及 package/readiness 明确不变更。'
+        }
     }
 }
 
@@ -1113,12 +1366,17 @@ function Update-PackageOperatorDiagnostics {
     $runtimeHandoffMissingNextActionsZh = Get-RuntimeHandoffMissingNextActionsZh -RuntimeEntries $runtimeEntries -RuntimeSummary $runtimeSummary -RootDiagnostics $runtimeRootDiagnostics
     $executionBoundaries = Get-PackageExecutionBoundaries
     $requiredEvidenceFields = Get-PackageRequiredEvidenceFields
+    $installModeContract = Get-InstallModeContractSnapshot -Manifest $Manifest
     $gitMetadata = Get-PackageGitMetadataSnapshot
     $script:operatorDiagnostics = [ordered]@{
         packageKind = $PackageKind
         gitMetadata = $gitMetadata
         executionBoundaries = $executionBoundaries
         requiredEvidenceFields = $requiredEvidenceFields
+        installModeContract = $installModeContract
+        installContractGapDetected = [bool]$installModeContract.gapDetected
+        installContractGaps = @($installModeContract.gaps)
+        installContractGapNextActionsZh = @($installModeContract.gapNextActionsZh)
         validationScope = [ordered]@{
             noSmokeTests = $true
             noHyperVLive = $true
@@ -1128,7 +1386,10 @@ function Update-PackageOperatorDiagnostics {
             noGitPush = $true
             noNetworkPublish = $true
             noRepositoryBinaryFallback = $true
-            chinese = '机器可读边界：不跑 smoke、不跑 live、不签名、不调用 CSignTool.exe。'
+            installModeContractGenerated = $true
+            installerModesExecuted = @()
+            installerModeMutation = $false
+            chinese = '机器可读边界：不跑 smoke、不跑 live、不签名、不调用 CSignTool.exe，不运行安装模式或 VM mutation。'
         }
         runtimePublishRootProvided = -not [string]::IsNullOrWhiteSpace($RuntimePublishRoot)
         runtimePublishRoot = if ([string]::IsNullOrWhiteSpace($RuntimePublishRoot)) { $null } else { $RuntimePublishRoot }
@@ -1185,6 +1446,9 @@ function Update-PackageOperatorDiagnostics {
             completeRuntimeReadiness = '.\scripts\Test-ReleaseReadiness.ps1 -AllowDirtySource -RuntimePublishRoot <external-publish-root> -RequireCompleteRuntimePackage'
             installCheckEnvironment = '.\scripts\install.ps1 -Mode CheckEnvironment'
             runCheckEnvironment = '.\scripts\run.ps1 -Mode CheckEnvironment'
+            recordExistingEnvironment = '.\scripts\install.ps1 -Mode Change -UpdateHyperVConfig -VmName <existing VM> -CheckpointName <checkpoint>'
+            freshLocalInstall = '.\scripts\install.ps1 -Mode Install -PromptPassword'
+            resetGuestPasswordExplicitVmMutation = '.\scripts\install.ps1 -Mode Change -ResetGuestVmPassword -PromptPassword -Force'
             prepareGuestPayload = '.\scripts\Prepare-GuestPayload.ps1 -RepoRoot . -PayloadRoot <external-payload-root> -SelfContained'
             configureVirusTotalKey = '.\scripts\install.ps1 -Mode ConfigureVTKey -PromptVTKey'
             runtimePackage = '.\scripts\package-portable.ps1 -PackageKind runtime -RuntimePublishRoot <external-publish-root> -RequireCompleteRuntimePayloads -OutputRoot <external-output-root> -Force'
@@ -1195,6 +1459,7 @@ function Update-PackageOperatorDiagnostics {
             GuestPayload = 'runtime payload is copied only from RuntimePublishRoot or prepared explicitly under an external PayloadRoot; packaging records present/missing/incomplete payload folders, expected exe/dll/manifest leaves, and forbidden file previews but does not build them'
             VirusTotal = 'optional hash-only VirusTotal API key is never packaged or printed; configure in process/user environment or installer local state; this is unrelated to Intel VT-x/AMD-V virtualization'
             RuntimeRoot = 'job outputs, reports, screenshots, PCAP, dumps, samples, and secrets must remain outside the repository and package source tree'
+            InstallModes = 'existing environment, restore checkpoint/snapshot, fresh/create local setup, first-computer prerequisites, and compatibility boundaries are described by installModeContract; packaging does not execute any installer mode'
         }
         safeExclusionCategories = @(
             'local secrets and environment files',
@@ -1209,6 +1474,11 @@ function Update-PackageOperatorDiagnostics {
             smokeTests = $false
             hyperVLive = $false
             vmMutation = $false
+            installerModes = $false
+            checkEnvironment = $false
+            installModeInstall = $false
+            installModeChange = $false
+            resetGuestVmPassword = $false
             driverSigning = $false
             guiSigningFallback = $false
             csignTool = $false
@@ -1233,6 +1503,7 @@ function Update-PackageOperatorDiagnostics {
                 'gitStatus.dirty = false，或 release notes 明确说明 AllowDirtySource/internal draft',
                 'sourceRuntimeSafetyMetadata.sourcePackage.sourceOnly = true',
                 'safetyContract 确认 secrets、VM state、samples、reports、build output、signing material 未打包',
+                'installModeContract.gapDetected = false，且 installContractGaps 为空',
                 'reviewer 运行 .\scripts\Test-ReleaseReadiness.ps1 -AllowDirtySource 并检查 failedCount=0'
             )
             mustPassBeforeRuntimeHandoff = @(
@@ -1256,6 +1527,7 @@ function Update-PackageOperatorDiagnostics {
         recommendedActions = @($recommendedActions)
         operatorGuidance = @(
             '中文：先看 reviewerChecklist、sourceRuntimeSafetyMetadata、runtimePublishSummary、runtimeDryRunGuardrail、safeExclusionCategories、externalStateDiagnostics、freshLiveEvidenceGuardrail；这些字段告诉审阅者本包是否可 handoff，以及是否不能声称 fresh live。',
+            '中文：installModeContract 机器可读说明已有环境接入、checkpoint/snapshot 还原边界、首次/新机器流程、首机前置条件、兼容性边界，以及 package/readiness 不运行安装模式。',
             '中文：完整 runtime handoff 必须提供仓库外 RuntimePublishRoot、传入 -RequireCompleteRuntimePayloads，并确保所有 runtime publish entries 存在。',
             'RuntimePublishRoot must point to external published payloads such as host-web, guest-tools, tools/job-tool, and tools/postprocess.',
             'Use -RequireCompleteRuntimePayloads for handoff builds; omit it only for explicit layout/safety dry-runs.',
@@ -1340,15 +1612,36 @@ function Copy-PackageFile {
         [void](New-Item -ItemType Directory -Path $targetDirectory -Force)
     }
 
+    if (Test-Path -LiteralPath $targetPath -PathType Container) {
+        Remove-Item -LiteralPath $targetPath -Recurse -Force
+    }
+
     Copy-Item -LiteralPath $SourcePath -Destination $targetPath -Force
+    if (-not (Test-Path -LiteralPath $targetPath -PathType Leaf)) {
+        throw "Package copy did not produce a file leaf: $targetRelative"
+    }
+
     [void]$script:copiedFiles.Add($targetRelative)
     $targetItem = Get-Item -LiteralPath $targetPath
+    $hashSource = 'staged'
+    $hashWarning = $null
+    try {
+        $sha256 = Get-FileSha256Hex -Path $targetPath
+    }
+    catch {
+        $hashSource = 'source-after-copy-target-unreadable'
+        $hashWarning = $_.Exception.Message
+        $sha256 = Get-FileSha256Hex -Path $SourcePath
+    }
+
     [void]$script:copiedFileRecords.Add([pscustomobject][ordered]@{
             path               = $targetRelative
             sourceType         = $SourceType
             sourceRelativePath = if ([string]::IsNullOrWhiteSpace($SourceRelativePath)) { $null } else { ConvertTo-NormalizedRelativePath -Path $SourceRelativePath }
             sizeBytes          = [Int64]$targetItem.Length
-            sha256             = Get-FileSha256Hex -Path $targetPath
+            sha256             = $sha256
+            hashSource         = $hashSource
+            hashWarning        = $hashWarning
         })
 }
 
@@ -1556,12 +1849,23 @@ function Write-GeneratedPackageManifest {
         operatorDiagnostics = $script:operatorDiagnostics
         executionBoundaries = $script:operatorDiagnostics.executionBoundaries
         requiredEvidenceFields = $script:operatorDiagnostics.requiredEvidenceFields
+        installModeContract = $script:operatorDiagnostics.installModeContract
+        installContractGapDetected = [bool]$script:operatorDiagnostics.installContractGapDetected
+        installContractGaps = @($script:operatorDiagnostics.installContractGaps)
+        installContractGapNextActionsZh = @($script:operatorDiagnostics.installContractGapNextActionsZh)
         runtimeHandoffMissingNextActionsZh = @($script:operatorDiagnostics.runtimeHandoffMissingNextActionsZh)
         reviewerChecklist = $script:operatorDiagnostics.reviewerChecklist
         componentProgress = $script:operatorDiagnostics.componentProgress
         gapAudit = $script:operatorDiagnostics.gapAudit
         sourceRuntimeSafetyMetadata = [ordered]@{
             chinese = '中文提示：source 包只交付源码/规则/文档/测试/脚本；runtime 包只从仓库外 RuntimePublishRoot 复制已发布 payload。两类包都不得包含本机 secret、VM 状态、样本、报告、dump/pcap/trace、签名材料或仓库 build output。'
+            installModeContract = [ordered]@{
+                gapDetected = [bool]$script:operatorDiagnostics.installContractGapDetected
+                gaps = @($script:operatorDiagnostics.installContractGaps)
+                nextActionsZh = @($script:operatorDiagnostics.installContractGapNextActionsZh)
+                modeIds = @($script:operatorDiagnostics.installModeContract.modes | ForEach-Object { $_.id })
+                packageReadinessExecutesInstallerModes = $false
+            }
             sourcePackage = [ordered]@{
                 sourceOnly = ($PackageKind -eq 'source')
                 includesRuntimePayloads = $false
@@ -1597,6 +1901,7 @@ function Write-GeneratedPackageManifest {
             SensitiveMaterial = 'not packaged'
             VmState = 'not packaged'
             VmMutation = 'not performed'
+            InstallerModeExecution = 'not performed by packaging/readiness; installModeContract documents operator-only modes'
             SmokeTests = 'not executed'
             HyperVLive = 'not executed'
             RepositoryBuildOutput = 'not packaged'
@@ -1736,6 +2041,7 @@ if ($PackageKind -eq 'runtime') {
 }
 Write-PackageOperatorDiagnostic -Chinese '中文提示：已排除本机 secret、install-state、DPAPI 备份、样本、报告、VM 磁盘/快照、仓库二进制、签名材料和 GUI signing fallback。'
 Write-PackageOperatorDiagnostic -Chinese 'fresh live 证据：未生成；若发布说明要声称当前候选已刷新真实 Notepad 5s，请先在实验室主机运行 live 并记录 job id。' -English 'Fresh live evidence: not generated by packaging.'
+Write-PackageOperatorDiagnostic -Chinese '安装模式契约：已在 package-manifest.generated.json 写入 installModeContract；package/readiness 不运行 Install/Change/CheckEnvironment/ResetGuestVmPassword。'
 Write-PackageOperatorDiagnostic -Chinese '安全合约：不跑 smoke、不跑 Hyper-V live、不修改 VM、不签名 driver、不使用 GUI signing fallback、不调用 CSignTool、不 git push/publish。' -English 'Safety: no smoke tests, no Hyper-V live, no VM mutation, no driver signing, no GUI signing fallback, no CSignTool, no git push/publish.'
 if ($StageOnly.IsPresent) {
     Write-PackageOperatorDiagnostic -Chinese '压缩包：已跳过（-StageOnly，仅 layout/safety dry-run）' -English 'Archive: skipped (-StageOnly)'

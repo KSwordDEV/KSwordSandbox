@@ -40,6 +40,68 @@ KswGetProducerMaskForEventType(
 }
 
 /*
+ * Detects the explicit draft process-handle access payload shape.
+ *
+ * Inputs : EventType and bounded payload bytes supplied to KswPushEvent.
+ * Logic  : checks the public draft Version/Size/Operation prefix so ordinary
+ *          process create/exit rows remain gated by the process producer bit.
+ * Return : TRUE only for process/thread handle-access draft records.
+ */
+static
+BOOLEAN
+KswIsProcessHandleAccessPayload(
+    _In_ ULONG EventType,
+    _In_reads_bytes_opt_(PayloadSize) const VOID* Payload,
+    _In_ ULONG PayloadSize
+    )
+{
+    const KSWORD_SANDBOX_PROCESS_HANDLE_ACCESS_EVENT_PAYLOAD_V1_DRAFT*
+        accessPayload;
+
+    if (EventType != KswSandboxEventTypeProcess ||
+        Payload == NULL ||
+        PayloadSize <
+            (ULONG)sizeof(KSWORD_SANDBOX_PROCESS_HANDLE_ACCESS_EVENT_PAYLOAD_V1_DRAFT)) {
+        return FALSE;
+    }
+
+    accessPayload =
+        (const KSWORD_SANDBOX_PROCESS_HANDLE_ACCESS_EVENT_PAYLOAD_V1_DRAFT*)Payload;
+    return accessPayload->Version ==
+            KSWORD_SANDBOX_PROCESS_HANDLE_ACCESS_EVENT_VERSION &&
+        accessPayload->Size ==
+            (ULONG)sizeof(KSWORD_SANDBOX_PROCESS_HANDLE_ACCESS_EVENT_PAYLOAD_V1_DRAFT) &&
+        (accessPayload->Operation ==
+                KswSandboxProcessOperationHandleCreateDraft ||
+            accessPayload->Operation ==
+                KswSandboxProcessOperationHandleDuplicateDraft);
+}
+
+/*
+ * Maps an event plus optional payload to its producer enable/status bit.
+ *
+ * Inputs : EventType and payload bytes supplied by a producer.
+ * Logic  : process lifecycle and process-handle-access records share the public
+ *          event type but use separate producer bits so registration failures
+ *          and operator enable masks remain machine-readable.
+ * Return : one KSWORD_SANDBOX_PRODUCER_FLAG_* bit.
+ */
+static
+ULONG
+KswGetProducerMaskForEvent(
+    _In_ ULONG EventType,
+    _In_reads_bytes_opt_(PayloadSize) const VOID* Payload,
+    _In_ ULONG PayloadSize
+    )
+{
+    if (KswIsProcessHandleAccessPayload(EventType, Payload, PayloadSize)) {
+        return KSWORD_SANDBOX_PRODUCER_FLAG_PROCESS_HANDLE_ACCESS;
+    }
+
+    return KswGetProducerMaskForEventType(EventType);
+}
+
+/*
  * Mirrors typed payload metadata into the common event header.
  *
  * Inputs : Header is the record header being prepared; EventType identifies the
@@ -65,7 +127,7 @@ KswPopulateCommonEventMetadata(
         return;
     }
 
-    producerMask = KswGetProducerMaskForEventType(EventType);
+    producerMask = KswGetProducerMaskForEvent(EventType, Payload, PayloadSize);
     Header->ProducerId = producerMask;
     if (producerMask != 0) {
         Header->Flags |=
@@ -94,6 +156,34 @@ KswPopulateCommonEventMetadata(
 
             processPayload =
                 (const KSWORD_SANDBOX_PROCESS_EVENT_PAYLOAD*)Payload;
+            if (KswIsProcessHandleAccessPayload(
+                    EventType,
+                    Payload,
+                    PayloadSize)) {
+                const KSWORD_SANDBOX_PROCESS_HANDLE_ACCESS_EVENT_PAYLOAD_V1_DRAFT*
+                    accessPayload;
+
+                accessPayload =
+                    (const KSWORD_SANDBOX_PROCESS_HANDLE_ACCESS_EVENT_PAYLOAD_V1_DRAFT*)Payload;
+                Header->ProcessId = accessPayload->TargetProcessId;
+                Header->Operation = accessPayload->Operation;
+                Header->Status = accessPayload->Status;
+                Header->Flags |=
+                    KSWORD_SANDBOX_EVENT_FLAG_OPERATION_PRESENT;
+                if ((accessPayload->Flags &
+                        KSWORD_SANDBOX_PROCESS_ACCESS_EVENT_FLAG_TARGET_PID_PRESENT) != 0 ||
+                    accessPayload->TargetProcessId != 0) {
+                    Header->Flags |=
+                        KSWORD_SANDBOX_EVENT_FLAG_TARGET_PID_PRESENT;
+                }
+                if ((accessPayload->Flags &
+                        (KSWORD_SANDBOX_PROCESS_ACCESS_EVENT_FLAG_POST_OPERATION |
+                         KSWORD_SANDBOX_PROCESS_ACCESS_EVENT_FLAG_OPERATION_FAILED)) != 0) {
+                    Header->Flags |= KSWORD_SANDBOX_EVENT_FLAG_STATUS_PRESENT;
+                }
+                break;
+            }
+
             Header->ProcessId = processPayload->ProcessId;
             Header->ParentProcessId = processPayload->ParentProcessId;
             Header->Operation = processPayload->Operation;
@@ -430,7 +520,7 @@ KswPushEvent(
         return STATUS_INVALID_PARAMETER;
     }
 
-    producerMask = KswGetProducerMaskForEventType(EventType);
+    producerMask = KswGetProducerMaskForEvent(EventType, Payload, PayloadSize);
 
     RtlZeroMemory(&eventRecord, sizeof(eventRecord));
     eventRecord.Header.Version = KSWORD_SANDBOX_EVENT_HEADER_VERSION;
@@ -574,7 +664,8 @@ KswInitializeDeviceExtension(
     DeviceExtension->LastStatus = STATUS_SUCCESS;
     DeviceExtension->LastFailureStatus = STATUS_SUCCESS;
     DeviceExtension->SupportedProducerMask = KSWORD_SANDBOX_COMPILED_PRODUCER_MASK;
-    DeviceExtension->ProducerEnableMask = DeviceExtension->SupportedProducerMask;
+    DeviceExtension->ProducerEnableMask =
+        DeviceExtension->SupportedProducerMask & KSWORD_SANDBOX_PRODUCER_MASK_DEFAULT;
     DeviceExtension->ActiveProducerMask = KSWORD_SANDBOX_PRODUCER_FLAG_DRIVER;
     DeviceExtension->FailedProducerMask = 0;
     DeviceExtension->ProducerDroppedMask = 0;

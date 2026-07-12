@@ -10,7 +10,7 @@ starting, restoring, stopping, or deleting any VM. The script emits structured
 PowerShell objects for each check plus a summary object. It returns exit code 0
 when no check failed, or exit code 1 when at least one check failed.
 #>
-[CmdletBinding()]
+[CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'Low')]
 param(
     # Input: golden VM name from config/sandbox.example.json.
     # Processing: read-only lookup through Get-VM when Hyper-V is queryable.
@@ -88,7 +88,18 @@ param(
 
     # Input: skip the read-only scan that prevents the current guest password
     # value from being committed in tracked/untracked repository text files.
-    [switch]$SkipRepositorySecretScan
+    [switch]$SkipRepositorySecretScan,
+
+    # Input: include a read-only inventory of available Hyper-V VM/checkpoint
+    # profile candidates. Processing uses Get-VM/Get-VMSnapshot only and never
+    # starts, restores, or changes a VM. Return behavior adds one optional
+    # readiness row operators can use to choose -VmName/-CheckpointName.
+    [switch]$ListAvailableVmProfiles,
+
+    # Input: maximum VM/checkpoint candidates to include in the optional
+    # profile inventory and failure diagnostics.
+    [ValidateRange(1, 100)]
+    [int]$VmProfileListLimit = 20
 )
 
 Set-StrictMode -Version 3.0
@@ -497,6 +508,16 @@ function Import-GuestPasswordFromPrompt {
         }
     }
 
+    if (-not $PSCmdlet.ShouldProcess($SecretName, 'Set process-only guest password secret for readiness probe')) {
+        return [pscustomobject][ordered]@{
+            PromptAttempted      = $false
+            PromptSucceeded      = $false
+            ProcessSecretUpdated = $false
+            SecretValuePrinted   = $false
+            WhatIfSkipped        = $true
+        }
+    }
+
     $secure = Read-Host "Enter guest password for $SecretName (stored in this PowerShell process only)" -AsSecureString
     $plainText = ConvertFrom-SecureStringToPlainText -SecureString $secure
     try {
@@ -618,9 +639,19 @@ function Test-ReadinessInputResolution {
 
     $status = 'Passed'
     $message = "Readiness inputs resolved from $($Metadata.ConfigSource)."
-    if (-not [bool]$Metadata.ConfigLoaded) {
+    $remediation = @()
+    if ([string]$Metadata.ConfigSource -eq 'repository-example') {
+        $status = 'Warning'
+        $message = 'Readiness is using repository example config; fresh computers should create local config outside git before live execution.'
+        $remediation = @(
+            'Run .\install.ps1 -InstallEntrypoint CreateOrPreparePath -PromptPassword, then use -UpdateHyperVConfig to record the real VM/checkpoint; do not edit config\sandbox.example.json.',
+            '下一步：运行 .\install.ps1 -InstallEntrypoint CreateOrPreparePath -PromptPassword，然后用 -UpdateHyperVConfig 记录真实 VM/checkpoint；不要编辑 config\sandbox.example.json。'
+        )
+    }
+    elseif (-not [bool]$Metadata.ConfigLoaded) {
         $status = 'Warning'
         $message = "Sandbox config was not loaded from '$($Metadata.ConfigPath)'; explicit/default parameters are in use."
+        $remediation = @('Create local config with .\install.ps1 -InstallEntrypoint CreateOrPreparePath before live execution.')
     }
 
     return New-ReadinessResult `
@@ -628,6 +659,7 @@ function Test-ReadinessInputResolution {
         -Status $status `
         -Required $false `
         -Message $message `
+        -Remediation $remediation `
         -Details @{
             RepositoryRoot         = $Metadata.RepositoryRoot
             ConfigPath             = $Metadata.ConfigPath
@@ -826,6 +858,148 @@ function Test-HyperVFeatureState {
         -Remediation @('Open an elevated Windows PowerShell session and rerun .\scripts\Test-HyperVReadiness.ps1 so Hyper-V feature and VMMS service state can be queried.')
 }
 
+# Test-HyperVHostCompatibility checks fresh-computer host compatibility that is
+# not fully covered by Hyper-V feature/module lookup. Inputs are none; processing
+# uses read-only CIM queries for Windows edition, hypervisor presence, firmware
+# virtualization, SLAT/EPT/NPT, and VM monitor extensions. Return behavior is a
+# readiness row with Chinese-first next actions for new hosts.
+function Test-HyperVHostCompatibility {
+    try {
+        $hostIsWindows = [System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform(
+            [System.Runtime.InteropServices.OSPlatform]::Windows)
+    }
+    catch {
+        $hostIsWindows = $false
+    }
+
+    $details = @{
+        IsWindows = $hostIsWindows
+        OperatingSystemCaption = ''
+        OperatingSystemSKU = $null
+        ProductType = $null
+        WindowsEditionLikelySupportsClientHyperV = $null
+        HypervisorPresent = $null
+        VirtualizationFirmwareEnabled = $null
+        SecondLevelAddressTranslationSupported = $null
+        VmMonitorModeExtensions = $null
+        InspectionErrors = @()
+        ReadOnly = $true
+        MutatedVm = $false
+    }
+    $actions = [System.Collections.Generic.List[string]]::new()
+    $errors = [System.Collections.Generic.List[string]]::new()
+
+    if (-not $hostIsWindows) {
+        return New-ReadinessResult `
+            -Name 'Fresh computer host compatibility' `
+            -Category 'host' `
+            -Status 'Failed' `
+            -Required $true `
+            -Message 'Live Hyper-V execution requires a Windows host.' `
+            -Details $details `
+            -Remediation @('下一步：Hyper-V live 模式需要 Windows Pro/Enterprise/Education 或 Windows Server；非 Windows host 只能运行 PlanOnly/WhatIf/WebUI/打包检查。')
+    }
+
+    if ($null -eq (Get-Command -Name Get-CimInstance -ErrorAction SilentlyContinue)) {
+        $details['InspectionErrors'] = @('Get-CimInstance is unavailable.')
+        return New-ReadinessResult `
+            -Name 'Fresh computer host compatibility' `
+            -Category 'host' `
+            -Status 'Warning' `
+            -Required $true `
+            -Message 'Unable to inspect Windows edition and CPU virtualization settings because Get-CimInstance is unavailable.' `
+            -Details $details `
+            -Remediation @('下一步：在完整 Windows PowerShell/PowerShell 环境中重新运行 readiness，以便读取 Windows edition、BIOS 虚拟化和 SLAT。')
+    }
+
+    try {
+        $os = Get-CimInstance -ClassName Win32_OperatingSystem -ErrorAction Stop
+        $details['OperatingSystemCaption'] = [string]$os.Caption
+        $details['OperatingSystemSKU'] = $os.OperatingSystemSKU
+        $details['ProductType'] = $os.ProductType
+        $isServer = [int]$os.ProductType -ne 1
+        $looksHomeEdition = [string]$os.Caption -match '(?i)\bHome\b|CoreSingleLanguage|CoreCountrySpecific'
+        $details['WindowsEditionLikelySupportsClientHyperV'] = ($isServer -or (-not $looksHomeEdition))
+        if (-not [bool]$details['WindowsEditionLikelySupportsClientHyperV']) {
+            [void]$actions.Add('下一步：Windows Home/Core 不能作为默认 Hyper-V live host；请使用 Windows Pro/Enterprise/Education 或 Windows Server，或只运行 PlanOnly/WhatIf。')
+        }
+    }
+    catch {
+        [void]$errors.Add("Unable to read Win32_OperatingSystem: $($_.Exception.Message)")
+    }
+
+    try {
+        $computerSystem = Get-CimInstance -ClassName Win32_ComputerSystem -ErrorAction Stop
+        $hypervisorProperty = $computerSystem.PSObject.Properties['HypervisorPresent']
+        if ($null -ne $hypervisorProperty) {
+            $details['HypervisorPresent'] = [bool]$hypervisorProperty.Value
+        }
+    }
+    catch {
+        [void]$errors.Add("Unable to read Win32_ComputerSystem.HypervisorPresent: $($_.Exception.Message)")
+    }
+
+    try {
+        $processor = Get-CimInstance -ClassName Win32_Processor -ErrorAction Stop | Select-Object -First 1
+        if ($null -ne $processor) {
+            $firmwareProperty = $processor.PSObject.Properties['VirtualizationFirmwareEnabled']
+            if ($null -ne $firmwareProperty) {
+                $details['VirtualizationFirmwareEnabled'] = [bool]$firmwareProperty.Value
+                if (-not [bool]$details['VirtualizationFirmwareEnabled']) {
+                    [void]$actions.Add('下一步：在 BIOS/UEFI 启用 Intel VT-x/AMD-V（虚拟化技术），冷重启后重新运行 readiness。')
+                }
+            }
+
+            $slatProperty = $processor.PSObject.Properties['SecondLevelAddressTranslationExtensions']
+            if ($null -ne $slatProperty) {
+                $details['SecondLevelAddressTranslationSupported'] = [bool]$slatProperty.Value
+                if (-not [bool]$details['SecondLevelAddressTranslationSupported']) {
+                    [void]$actions.Add('下一步：Hyper-V 需要 SLAT/EPT/NPT；请换用支持二级地址转换的宿主机 CPU。')
+                }
+            }
+
+            $vmMonitorProperty = $processor.PSObject.Properties['VMMonitorModeExtensions']
+            if ($null -ne $vmMonitorProperty) {
+                $details['VmMonitorModeExtensions'] = [bool]$vmMonitorProperty.Value
+            }
+        }
+    }
+    catch {
+        [void]$errors.Add("Unable to read Win32_Processor virtualization state: $($_.Exception.Message)")
+    }
+
+    $details['InspectionErrors'] = @($errors.ToArray())
+    if ($actions.Count -gt 0) {
+        return New-ReadinessResult `
+            -Name 'Fresh computer host compatibility' `
+            -Category 'host' `
+            -Status 'Failed' `
+            -Required $true `
+            -Message 'Fresh-computer Hyper-V host compatibility has blocking gaps.' `
+            -Details $details `
+            -Remediation @($actions.ToArray())
+    }
+
+    if ($errors.Count -gt 0) {
+        return New-ReadinessResult `
+            -Name 'Fresh computer host compatibility' `
+            -Category 'host' `
+            -Status 'Warning' `
+            -Required $true `
+            -Message 'Fresh-computer Hyper-V host compatibility could not be fully proven from this session.' `
+            -Details $details `
+            -Remediation @('下一步：用管理员 PowerShell 重新运行 readiness；若仍无法读取，请手动确认 Windows edition、BIOS 虚拟化和 SLAT/EPT/NPT。')
+    }
+
+    return New-ReadinessResult `
+        -Name 'Fresh computer host compatibility' `
+        -Category 'host' `
+        -Status 'Passed' `
+        -Required $true `
+        -Message 'Windows edition and CPU virtualization compatibility look suitable for Hyper-V live execution.' `
+        -Details $details
+}
+
 # Test-HyperVModule checks for the management module and required commands.
 # Inputs are none; processing uses Get-Module/Get-Command only and never calls
 # mutation-capable cmdlets. Return behavior is a readiness object; failure means
@@ -989,7 +1163,7 @@ function Test-GuestPasswordSecret {
             SecretValuePrinted = $false
         } `
         -Remediation @(
-            ".\install.ps1 -Mode Install -PromptPassword",
+            ".\install.ps1 -InstallEntrypoint CreateOrPreparePath -PromptPassword",
             ".\install.ps1 -Mode Change -ResetPassword -PromptPassword",
             ".\scripts\Test-HyperVReadiness.ps1 -PromptForMissingGuestPassword for a process-only one-shot readiness probe"
         )
@@ -1479,7 +1653,180 @@ function Test-HostPayloadFiles {
             CheckedDirectories = @($checkedDirectories.ToArray())
             CheckedFiles       = @($checkedFiles.ToArray())
             MutatedFiles       = $false
+    }
+}
+
+# Get-HyperVVmProfileCandidates enumerates VM/checkpoint profile choices without
+# changing Hyper-V state. Inputs are an item limit and a flag that controls
+# whether checkpoint names are included. Processing uses only Get-VM and
+# Get-VMSnapshot. Return behavior is one object with query metadata and a bounded
+# Profiles array suitable for Details output.
+function Get-HyperVVmProfileCandidates {
+    param(
+        [ValidateRange(1, 100)]
+        [int]$Limit = 20,
+        [switch]$IncludeCheckpoints
+    )
+
+    $profiles = New-Object System.Collections.Generic.List[object]
+    try {
+        $allVms = @(Get-VM -ErrorAction Stop | Sort-Object -Property Name)
+        foreach ($vm in @($allVms | Select-Object -First $Limit)) {
+            $checkpointQuerySucceeded = $false
+            $checkpointQueryError = ''
+            $checkpoints = New-Object System.Collections.Generic.List[object]
+
+            if ($IncludeCheckpoints) {
+                try {
+                    $snapshotObjects = @(Get-VMSnapshot -VMName $vm.Name -ErrorAction Stop |
+                        Sort-Object -Property CreationTime -Descending)
+                    $checkpointQuerySucceeded = $true
+                    foreach ($snapshot in @($snapshotObjects | Select-Object -First $Limit)) {
+                        [void]$checkpoints.Add([pscustomobject][ordered]@{
+                                CheckpointName = [string]$snapshot.Name
+                                CheckpointId   = [string]$snapshot.Id
+                                CreationTime   = $snapshot.CreationTime
+                            })
+                    }
+                }
+                catch {
+                    $checkpointQueryError = $_.Exception.Message
+                }
+            }
+
+            [void]$profiles.Add([pscustomobject][ordered]@{
+                    VmName                   = [string]$vm.Name
+                    VmId                     = [string]$vm.Id
+                    State                    = [string]$vm.State
+                    Generation               = $vm.Generation
+                    CheckpointQueryAttempted = [bool]$IncludeCheckpoints
+                    CheckpointQuerySucceeded = $checkpointQuerySucceeded
+                    CheckpointQueryError     = $checkpointQueryError
+                    Checkpoints              = @($checkpoints.ToArray())
+                })
         }
+
+        return [pscustomobject][ordered]@{
+            QuerySucceeded     = $true
+            QueryError         = ''
+            ReturnedVmCount    = $profiles.Count
+            TotalVmCount       = $allVms.Count
+            Limit              = $Limit
+            IncludeCheckpoints = [bool]$IncludeCheckpoints
+            Profiles           = @($profiles.ToArray())
+        }
+    }
+    catch {
+        return [pscustomobject][ordered]@{
+            QuerySucceeded     = $false
+            QueryError         = $_.Exception.Message
+            ReturnedVmCount    = 0
+            TotalVmCount       = 0
+            Limit              = $Limit
+            IncludeCheckpoints = [bool]$IncludeCheckpoints
+            Profiles           = @()
+        }
+    }
+}
+
+# Test-HyperVProfileInventory emits an optional read-only helper row for
+# selecting an existing VM/checkpoint profile. Inputs are precomputed host
+# readiness plus configured target names. Processing intentionally skips the
+# inventory unless -ListAvailableVmProfiles was requested.
+function Test-HyperVProfileInventory {
+    param(
+        [string]$TargetVmName,
+        [string]$TargetCheckpointName,
+        [bool]$Requested,
+        [bool]$HyperVAvailable,
+        [bool]$IsAdministrator,
+        [ValidateRange(1, 100)]
+        [int]$Limit = 20
+    )
+
+    if (-not $Requested) {
+        return $null
+    }
+
+    if (-not $HyperVAvailable) {
+        return New-ReadinessResult `
+            -Name 'Available VM profile inventory' `
+            -Category 'hyperv-profile' `
+            -Status 'Warning' `
+            -Required $false `
+            -Message 'Skipped VM profile inventory because Hyper-V feature/module readiness failed.' `
+            -Details @{
+                Requested = $true
+                Skipped   = $true
+                Reason    = 'Hyper-V module or feature unavailable'
+                ReadOnly  = $true
+            } `
+            -Remediation @('Enable Hyper-V and the Hyper-V PowerShell tools, then rerun .\scripts\Test-HyperVReadiness.ps1 -ListAvailableVmProfiles from an elevated shell.')
+    }
+
+    if (-not $IsAdministrator) {
+        return New-ReadinessResult `
+            -Name 'Available VM profile inventory' `
+            -Category 'hyperv-profile' `
+            -Status 'Warning' `
+            -Required $false `
+            -Message 'Skipped VM profile inventory because the current process is not Administrator.' `
+            -Details @{
+                Requested = $true
+                Skipped   = $true
+                Reason    = 'Administrator required for reliable Hyper-V enumeration'
+                ReadOnly  = $true
+            } `
+            -Remediation @('Open PowerShell as Administrator and rerun .\scripts\Test-HyperVReadiness.ps1 -ListAvailableVmProfiles; the inventory is read-only.')
+    }
+
+    $inventory = Get-HyperVVmProfileCandidates -Limit $Limit -IncludeCheckpoints
+    if (-not [bool]$inventory.QuerySucceeded) {
+        return New-ReadinessResult `
+            -Name 'Available VM profile inventory' `
+            -Category 'hyperv-profile' `
+            -Status 'Warning' `
+            -Required $false `
+            -Message "Unable to enumerate available Hyper-V VM profiles: $($inventory.QueryError)" `
+            -Details @{
+                Requested            = $true
+                TargetVmName         = $TargetVmName
+                TargetCheckpointName = $TargetCheckpointName
+                QuerySucceeded       = $false
+                QueryError           = $inventory.QueryError
+                Limit                = $Limit
+                ReadOnly             = $true
+            } `
+            -Remediation @('Verify Hyper-V service health and permissions, then rerun the read-only profile inventory.')
+    }
+
+    $status = if ([int]$inventory.TotalVmCount -gt 0) { 'Passed' } else { 'Warning' }
+    $message = if ([int]$inventory.TotalVmCount -gt 0) {
+        "Listed $($inventory.ReturnedVmCount) of $($inventory.TotalVmCount) Hyper-V VM profile candidate(s) with checkpoint names."
+    }
+    else {
+        'No Hyper-V VMs were found to use as a KSword Sandbox profile.'
+    }
+
+    return New-ReadinessResult `
+        -Name 'Available VM profile inventory' `
+        -Category 'hyperv-profile' `
+        -Status $status `
+        -Required $false `
+        -Message $message `
+        -Details @{
+            Requested            = $true
+            TargetVmName         = $TargetVmName
+            TargetCheckpointName = $TargetCheckpointName
+            QuerySucceeded       = $true
+            ReturnedVmCount      = [int]$inventory.ReturnedVmCount
+            TotalVmCount         = [int]$inventory.TotalVmCount
+            Limit                = $Limit
+            ReadOnly             = $true
+            Profiles             = @($inventory.Profiles)
+            ConfigureCommand     = '.\install.ps1 -Mode Change -UpdateHyperVConfig -VmName <existing VM> -CheckpointName <checkpoint>'
+        } `
+        -Remediation $(if ([int]$inventory.TotalVmCount -eq 0) { @('Create or import a golden VM and create a clean checkpoint before recording the profile.') } else { @("Choose an exact VmName and checkpoint from this inventory, then run .\install.ps1 -Mode Change -UpdateHyperVConfig -VmName <existing VM> -CheckpointName <checkpoint>.") })
 }
 
 # Test-HyperVVm checks that the requested golden VM can be read.
@@ -1491,7 +1838,9 @@ function Test-HyperVVm {
     param(
         [string]$Name,
         [bool]$HyperVAvailable,
-        [bool]$IsAdministrator
+        [bool]$IsAdministrator,
+        [ValidateRange(1, 100)]
+        [int]$CandidateLimit = 20
     )
 
     if ([string]::IsNullOrWhiteSpace($Name)) {
@@ -1539,16 +1888,22 @@ function Test-HyperVVm {
             Where-Object { $_.Name -eq $Name })
 
         if ($vmMatches.Count -eq 0) {
+            $inventory = Get-HyperVVmProfileCandidates -Limit $CandidateLimit
             return New-ReadinessResult `
                 -Name 'Target VM' `
                 -Status 'Failed' `
                 -Required $true `
                 -Message "No exact VM named '$Name' was found." `
                 -Details @{
-                    VmName = $Name
+                    VmName                  = $Name
+                    CandidateQuerySucceeded = [bool]$inventory.QuerySucceeded
+                    CandidateQueryError     = $inventory.QueryError
+                    CandidateLimit          = $CandidateLimit
+                    AvailableVmProfiles     = @($inventory.Profiles)
                 } `
                 -Remediation @(
                     "Create or import a golden VM named '$Name', or record the existing VM with .\install.ps1 -Mode Change -UpdateHyperVConfig -VmName <existing VM> -CheckpointName <checkpoint>.",
+                    'To list read-only VM/checkpoint candidates, run .\scripts\Test-HyperVReadiness.ps1 -ListAvailableVmProfiles from an elevated shell.',
                     'After updating config, rerun .\scripts\Test-HyperVReadiness.ps1; it does not start or restore the VM.'
                 )
         }
@@ -1567,17 +1922,25 @@ function Test-HyperVVm {
             }
     }
     catch {
+        $inventory = Get-HyperVVmProfileCandidates -Limit $CandidateLimit
         return New-ReadinessResult `
             -Name 'Target VM' `
             -Status 'Failed' `
             -Required $true `
             -Message "Unable to read target VM '$Name': $($_.Exception.Message)" `
             -Details @{
-                VmName       = $Name
-                ErrorType    = $_.Exception.GetType().FullName
-                ErrorMessage = $_.Exception.Message
+                VmName                  = $Name
+                ErrorType               = $_.Exception.GetType().FullName
+                ErrorMessage            = $_.Exception.Message
+                CandidateQuerySucceeded = [bool]$inventory.QuerySucceeded
+                CandidateQueryError     = $inventory.QueryError
+                CandidateLimit          = $CandidateLimit
+                AvailableVmProfiles     = @($inventory.Profiles)
             } `
-            -Remediation @("Verify Hyper-V service health and the configured VM name '$Name', then rerun the read-only readiness preflight from an elevated shell.")
+            -Remediation @(
+                "Verify Hyper-V service health and the configured VM name '$Name', then rerun the read-only readiness preflight from an elevated shell.",
+                'To list read-only VM/checkpoint candidates, run .\scripts\Test-HyperVReadiness.ps1 -ListAvailableVmProfiles from an elevated shell.'
+            )
     }
 }
 
@@ -1589,7 +1952,9 @@ function Test-HyperVCheckpoint {
     param(
         [string]$Name,
         [string]$Vm,
-        [bool]$CanQueryVmState
+        [bool]$CanQueryVmState,
+        [ValidateRange(1, 100)]
+        [int]$CandidateLimit = 20
     )
 
     if ([string]::IsNullOrWhiteSpace($Name)) {
@@ -1624,17 +1989,30 @@ function Test-HyperVCheckpoint {
             Where-Object { $_.Name -eq $Name })
 
         if ($snapshots.Count -eq 0) {
+            $availableSnapshots = @(Get-VMSnapshot -VMName $Vm -ErrorAction SilentlyContinue |
+                Sort-Object -Property CreationTime -Descending |
+                Select-Object -First $CandidateLimit |
+                ForEach-Object {
+                    [pscustomobject][ordered]@{
+                        CheckpointName = [string]$_.Name
+                        CheckpointId   = [string]$_.Id
+                        CreationTime   = $_.CreationTime
+                    }
+                })
             return New-ReadinessResult `
                 -Name 'Clean checkpoint' `
                 -Status 'Failed' `
                 -Required $true `
                 -Message "No exact checkpoint named '$Name' was found on VM '$Vm'." `
                 -Details @{
-                    VmName         = $Vm
-                    CheckpointName = $Name
+                    VmName               = $Vm
+                    CheckpointName       = $Name
+                    CandidateLimit       = $CandidateLimit
+                    AvailableCheckpoints = @($availableSnapshots)
                 } `
                 -Remediation @(
                     "Create a clean checkpoint named '$Name' on VM '$Vm', or record the existing checkpoint with .\install.ps1 -Mode Change -UpdateHyperVConfig -VmName '$Vm' -CheckpointName <checkpoint>.",
+                    "To list read-only checkpoint candidates for existing VMs, run .\scripts\Test-HyperVReadiness.ps1 -ListAvailableVmProfiles -VmName '$Vm'.",
                     'Rerun .\scripts\Test-HyperVReadiness.ps1 after updating the checkpoint; no VM mutation is performed by the check.'
                 )
         }
@@ -1653,18 +2031,43 @@ function Test-HyperVCheckpoint {
             }
     }
     catch {
+        $outerError = $_
+        $availableSnapshots = @()
+        $candidateQueryError = ''
+        try {
+            $availableSnapshots = @(Get-VMSnapshot -VMName $Vm -ErrorAction Stop |
+                Sort-Object -Property CreationTime -Descending |
+                Select-Object -First $CandidateLimit |
+                ForEach-Object {
+                    [pscustomobject][ordered]@{
+                        CheckpointName = [string]$_.Name
+                        CheckpointId   = [string]$_.Id
+                        CreationTime   = $_.CreationTime
+                    }
+                })
+        }
+        catch {
+            $candidateQueryError = $_.Exception.Message
+        }
+
         return New-ReadinessResult `
             -Name 'Clean checkpoint' `
             -Status 'Failed' `
             -Required $true `
-            -Message "Unable to read checkpoint '$Name' on VM '$Vm': $($_.Exception.Message)" `
+            -Message "Unable to read checkpoint '$Name' on VM '$Vm': $($outerError.Exception.Message)" `
             -Details @{
-                VmName         = $Vm
-                CheckpointName = $Name
-                ErrorType      = $_.Exception.GetType().FullName
-                ErrorMessage   = $_.Exception.Message
+                VmName                  = $Vm
+                CheckpointName          = $Name
+                ErrorType               = $outerError.Exception.GetType().FullName
+                ErrorMessage            = $outerError.Exception.Message
+                CandidateQueryError     = $candidateQueryError
+                CandidateLimit          = $CandidateLimit
+                AvailableCheckpoints    = @($availableSnapshots)
             } `
-            -Remediation @("Verify VM '$Vm' and checkpoint '$Name' in Hyper-V Manager, then rerun the read-only readiness preflight from an elevated shell.")
+            -Remediation @(
+                "Verify VM '$Vm' and checkpoint '$Name' in Hyper-V Manager, then rerun the read-only readiness preflight from an elevated shell.",
+                "To list read-only checkpoint candidates for existing VMs, run .\scripts\Test-HyperVReadiness.ps1 -ListAvailableVmProfiles -VmName '$Vm'."
+            )
     }
 }
 
@@ -1832,7 +2235,7 @@ function Test-PowerShellDirectReadOnly {
                 Reason        = 'Guest password secret missing from Process, User, or Machine scope'
             } `
             -Remediation @(
-                ".\install.ps1 -Mode Install -PromptPassword",
+                ".\install.ps1 -InstallEntrypoint CreateOrPreparePath -PromptPassword",
                 ".\scripts\Test-HyperVReadiness.ps1 -PromptForMissingGuestPassword for a process-only probe without persisting the password"
             )
     }
@@ -2428,6 +2831,81 @@ function Test-HostTestSigningStatus {
         -Remediation $(if ($realDriverMode -and (-not $testSigningEnabled)) { @('For real R0 collection, enable Windows test-signing inside the isolated guest VM, reboot it, and recreate/restore the Clean checkpoint; use mock R0 when signing is not in scope.') } else { @() })
 }
 
+
+# Get-ReadinessChineseNextActions distills common fresh-computer and portable
+# package blockers into Chinese-first operator actions. Inputs are existing
+# readiness rows and resolved metadata. Processing is read-only and only formats
+# guidance. Return behavior is a de-duplicated string array for the summary.
+function Get-ReadinessChineseNextActions {
+    param(
+        [Parameter(Mandatory)][object[]]$Results,
+        [Parameter(Mandatory)][object]$Metadata
+    )
+
+    $actions = [System.Collections.Generic.List[string]]::new()
+
+    if ([string]$Metadata.ConfigSource -eq 'repository-example' -or -not [bool]$Metadata.InstallStateLoaded) {
+        [void]$actions.Add('下一步：这看起来像首台机器/新便携包环境；先运行 .\install.ps1 -InstallEntrypoint CreateOrPreparePath -PlanOnly 查看将创建的仓库外目录和本机 config。')
+        [void]$actions.Add('下一步：不要修改 config\sandbox.example.json；用 .\install.ps1 -Mode Change -UpdateHyperVConfig -VmName <existing VM> -CheckpointName <checkpoint> 记录本机 VM profile。')
+    }
+
+    foreach ($result in $Results) {
+        $status = [string]$result.Status
+        if ($status -notin @('Failed', 'Warning')) {
+            continue
+        }
+
+        switch ([string]$result.Name) {
+            'Readiness input resolution' {
+                [void]$actions.Add('下一步：如果本机 config 未加载，运行 .\install.ps1 -InstallEntrypoint CreateOrPreparePath 创建 sandbox.local.json，并确认 Sandbox__ConfigPath 指向仓库外路径。')
+            }
+            'Fresh computer host compatibility' {
+                [void]$actions.Add('下一步：首台机器先确认 Windows edition 支持 Hyper-V，BIOS/UEFI 已启用 Intel VT-x/AMD-V，CPU 支持 SLAT/EPT/NPT；否则只能做 PlanOnly/WhatIf/WebUI/打包检查。')
+            }
+            'Hyper-V feature enabled' {
+                [void]$actions.Add('下一步：确认宿主机是 Windows Pro/Enterprise/Education/Server，启用 Hyper-V Windows 功能和管理工具，按提示重启后重跑 readiness。')
+            }
+            'Hyper-V PowerShell module' {
+                [void]$actions.Add('下一步：安装/启用 Hyper-V PowerShell module；普通 Windows Home 或未启用 Hyper-V 的机器只能做 Plan/WebUI/打包检查，不能跑 Live VM。')
+            }
+            'Administrator privilege' {
+                [void]$actions.Add('下一步：需要查询 VM/checkpoint 或执行 Live 时，用管理员 PowerShell 重跑；只做 Plan/WhatIf/状态检查可以继续用普通 shell。')
+            }
+            'Runtime root writable' {
+                [void]$actions.Add("下一步：创建并授权 runtime root '$RuntimeRoot'，推荐放在 D:\Temp\KSwordSandbox 或其他仓库外目录。")
+            }
+            'Host shared path configuration' {
+                [void]$actions.Add('下一步：确保 runtimeRoot 和 guestPayloadRoot 是绝对路径且在 git 仓库外；样本、报告、payload、VM 输出不能进入源码树。')
+            }
+            'Guest password secret' {
+                [void]$actions.Add("下一步：运行 .\install.ps1 -InstallEntrypoint CreateOrPreparePath -PromptPassword 保存 '$GuestPasswordSecretName'；临时检查可用 .\scripts\Test-HyperVReadiness.ps1 -PromptForMissingGuestPassword。")
+            }
+            'Target VM' {
+                [void]$actions.Add("下一步：创建/导入 golden VM，或运行 .\install.ps1 -Mode Change -UpdateHyperVConfig -VmName <existing VM> -CheckpointName <checkpoint> 记录真实 VM；可加 -ListAvailableVmProfiles 只读列出候选。")
+            }
+            'Clean checkpoint' {
+                [void]$actions.Add("下一步：在现有 VM 上创建 clean checkpoint，或用 .\install.ps1 -Mode Change -UpdateHyperVConfig -VmName '$VmName' -CheckpointName <checkpoint> 记录正确名称。")
+            }
+            'Guest Service Interface' {
+                [void]$actions.Add("下一步：在 Hyper-V Manager 或管理员 PowerShell 中为 VM '$VmName' 启用 Guest Service Interface（来宾服务接口），然后重跑只读 readiness。")
+            }
+            'Host payload files' {
+                [void]$actions.Add("下一步：运行 .\scripts\Prepare-GuestPayload.ps1 -RepoRoot . -PayloadRoot '$GuestPayloadRoot' -GuestWorkingDirectory '$GuestWorkingDirectory' -SelfContained 准备 Guest Agent/R0Collector payload。")
+            }
+            'R0 driver host path configuration' {
+                [void]$actions.Add('下一步：真实 R0 需要仓库外 test-signed .sys 路径；只验证链路可在 sandbox.local.json 设置 driver.useMockCollector=true 或 driver.enabled=false。')
+            }
+            'Test signing status' {
+                [void]$actions.Add('下一步：test-signing 只用于隔离实验 VM/宿主机的测试签名驱动路径；本 readiness 不签名 driver，也不会调用 CSignTool.exe。')
+            }
+        }
+    }
+
+    [void]$actions.Add('下一步：三种安装入口保持互斥：UseConfiguredEnvironment 只诊断；RestoreCleanCheckpoint 只还原已有 clean checkpoint 且需要 -AllowVmMutation + -Confirm/-Force；CreateOrPreparePath 只准备本机路径/config/payload。')
+
+    return @($actions.ToArray() | Select-Object -Unique)
+}
+
 $script:ReadinessInputMetadata = Resolve-ReadinessInputConfiguration
 $promptMetadata = Import-GuestPasswordFromPrompt `
     -SecretName $GuestPasswordSecretName `
@@ -2454,6 +2932,9 @@ $administratorResult = Test-AdministratorPrivilege
 
 $hyperVFeatureResult = Test-HyperVFeatureState
 [void]$results.Add($hyperVFeatureResult)
+
+$hostCompatibilityResult = Test-HyperVHostCompatibility
+[void]$results.Add($hostCompatibilityResult)
 
 $hyperVModuleResult = Test-HyperVModule
 [void]$results.Add($hyperVModuleResult)
@@ -2486,10 +2967,22 @@ $hostPayloadResult = Test-HostPayloadFiles `
 $isAdministrator = $administratorResult.Status -eq 'Passed'
 $isHyperVAvailable = ($hyperVModuleResult.Status -eq 'Passed') -and ($hyperVFeatureResult.Status -ne 'Failed')
 
+$profileInventoryResult = Test-HyperVProfileInventory `
+    -TargetVmName $VmName `
+    -TargetCheckpointName $CheckpointName `
+    -Requested ([bool]$ListAvailableVmProfiles) `
+    -HyperVAvailable $isHyperVAvailable `
+    -IsAdministrator $isAdministrator `
+    -Limit $VmProfileListLimit
+if ($null -ne $profileInventoryResult) {
+    [void]$results.Add($profileInventoryResult)
+}
+
 $vmResult = Test-HyperVVm `
     -Name $VmName `
     -HyperVAvailable $isHyperVAvailable `
-    -IsAdministrator $isAdministrator
+    -IsAdministrator $isAdministrator `
+    -CandidateLimit $VmProfileListLimit
 [void]$results.Add($vmResult)
 
 $canQueryVmState = $isAdministrator `
@@ -2499,7 +2992,8 @@ $canQueryVmState = $isAdministrator `
 $checkpointResult = Test-HyperVCheckpoint `
     -Name $CheckpointName `
     -Vm $VmName `
-    -CanQueryVmState $canQueryVmState
+    -CanQueryVmState $canQueryVmState `
+    -CandidateLimit $VmProfileListLimit
 [void]$results.Add($checkpointResult)
 
 $guestServiceResult = Test-GuestServiceInterface `
@@ -2552,6 +3046,7 @@ $failedRequiredCount = @($results | Where-Object { $_.Status -eq 'Failed' -and [
 $failedCheckIds = @($results | Where-Object { $_.Status -eq 'Failed' } | ForEach-Object { [string]$_.CheckId })
 $warningCheckIds = @($results | Where-Object { $_.Status -eq 'Warning' } | ForEach-Object { [string]$_.CheckId })
 $recommendedActions = @(Get-ReadinessRecommendedActions -Results @($results.ToArray()))
+$chineseNextActions = @(Get-ReadinessChineseNextActions -Results @($results.ToArray()) -Metadata $script:ReadinessInputMetadata)
 $exitCode = if ($failedCount -gt 0) { 1 } else { 0 }
 $overallStatus = if ($failedCount -gt 0) {
     'Failed'
@@ -2594,6 +3089,16 @@ Write-Output ([pscustomobject][ordered]@{
         DriverEnabled  = $script:ReadinessInputMetadata.DriverEnabled
         DriverUseMockCollector = $script:ReadinessInputMetadata.DriverUseMockCollector
         DriverHostPath = $script:ReadinessInputMetadata.DriverHostPath
+        VmProfileInventoryIncluded = [bool]$ListAvailableVmProfiles
+        VmProfileListLimit = $VmProfileListLimit
+        InstallEntrypointChoices = @('UseConfiguredEnvironment', 'RestoreCleanCheckpoint', 'CreateOrPreparePath')
+        UseConfiguredEnvironmentCommand = '.\install.ps1 -InstallEntrypoint UseConfiguredEnvironment -PlanOnly'
+        RestoreCheckpointPlanCommand = '.\install.ps1 -InstallEntrypoint RestoreCleanCheckpoint -PlanOnly'
+        RestoreCheckpointWhatIfCommand = '.\install.ps1 -InstallEntrypoint RestoreCleanCheckpoint -AllowVmMutation -WhatIf'
+        RestoreCheckpointCommand = '.\install.ps1 -InstallEntrypoint RestoreCleanCheckpoint -AllowVmMutation -Confirm'
+        CreateOrPreparePathCommand = '.\install.ps1 -InstallEntrypoint CreateOrPreparePath'
+        FreshComputerCompatibilityGuidance = '中文提示：首台机器先确认 Windows/Hyper-V/BIOS 虚拟化/SLAT/管理员 shell，再创建或导入 Windows golden VM、启用 Guest Service Interface、配置 guest secret、准备 payload，并创建 clean checkpoint。'
+        ChineseNextActions = $chineseNextActions
         ReadOnly       = $true
         ReadOnlyAssertions = [pscustomobject][ordered]@{
             NoProbeFilesWritten = $true
@@ -2605,6 +3110,8 @@ Write-Output ([pscustomobject][ordered]@{
         }
         RecommendedActions = $recommendedActions
         RemediationHints = $recommendedActions
+        RecommendedActionsZh = $chineseNextActions
+        RemediationHintsZh = $chineseNextActions
         Checks = @($results | ForEach-Object {
                 [pscustomobject][ordered]@{
                     CheckId = [string]$_.CheckId

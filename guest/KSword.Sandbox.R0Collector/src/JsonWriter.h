@@ -72,6 +72,174 @@ private:
     std::string json_ = "{";
 };
 
+// Input: Mutable JSON data builder and optional process-handle capability state.
+// Processing: Emits explicit negative/availability fields for telemetry that
+// process lifecycle rows do not provide, preventing reports from treating
+// create/exit evidence as AdjustTokenPrivileges, SeDebugPrivilege, or process
+// handle requested/granted-access evidence.
+// Return: No return value; builder is mutated.
+inline void AddR0PrivilegeProcessAccessCoverageFields(
+    JsonDataObjectBuilder& data,
+    const bool processHandleAccessTelemetryAvailable = false,
+    const bool tokenPrivilegeTelemetryAvailable = false) {
+    data.AddBool("r0PrivilegeTelemetryAvailable", tokenPrivilegeTelemetryAvailable);
+    data.AddBool("r0AdjustTokenPrivilegesTelemetryAvailable", tokenPrivilegeTelemetryAvailable);
+    data.AddBool("r0SeDebugPrivilegeTelemetryAvailable", tokenPrivilegeTelemetryAvailable);
+    data.AddUtf8(
+        "r0PrivilegeTelemetrySource",
+        tokenPrivilegeTelemetryAvailable
+            ? kR0PrivilegeTelemetrySourceDraft
+            : kR0PrivilegeTelemetrySourceUnavailable);
+    data.AddUtf8(
+        "r0PrivilegeTelemetryStatus",
+        tokenPrivilegeTelemetryAvailable ? "draft-capability-advertised" : "not-implemented");
+    data.AddBool("tokenPrivilegeAdjustmentR0Direct", tokenPrivilegeTelemetryAvailable);
+    data.AddBool("tokenPrivilegeAdjustmentEtwFallbackRequired", !tokenPrivilegeTelemetryAvailable);
+    data.AddUtf8(
+        "tokenPrivilegeAdjustmentObservation",
+        tokenPrivilegeTelemetryAvailable ? "r0-direct-draft" : "etw-fallback-required");
+    data.AddUtf8(
+        "tokenPrivilegeAdjustmentObservationSource",
+        tokenPrivilegeTelemetryAvailable ? kR0PrivilegeTelemetrySourceDraft : "etw-security-audit-or-kernel-provider");
+    data.AddUtf8(
+        "tokenPrivilegeAdjustmentEtwFallbackReason",
+        tokenPrivilegeTelemetryAvailable ? "none" : "not-implemented-no-token-privilege-producer");
+    data.AddBool("r0ProcessHandleAccessTelemetryAvailable", processHandleAccessTelemetryAvailable);
+    data.AddBool("r0ProcessHandleRightsTelemetryAvailable", processHandleAccessTelemetryAvailable);
+    data.AddBool("r0ProcessHandleRequestedAccessAvailable", processHandleAccessTelemetryAvailable);
+    data.AddBool("r0ProcessHandleGrantedAccessAvailable", processHandleAccessTelemetryAvailable);
+    data.AddUtf8(
+        "r0ProcessHandleAccessTelemetrySource",
+        processHandleAccessTelemetryAvailable
+            ? kR0ProcessHandleAccessTelemetrySourceDraft
+            : kR0ProcessHandleAccessTelemetrySourceUnavailable);
+    data.AddUtf8(
+        "r0ProcessHandleAccessTelemetryStatus",
+        processHandleAccessTelemetryAvailable ? "draft-capability-advertised" : "not-implemented");
+    data.AddBool("handleAccessR0Direct", processHandleAccessTelemetryAvailable);
+    data.AddBool("handleAccessEtwFallbackRequired", !processHandleAccessTelemetryAvailable);
+    data.AddUtf8(
+        "handleAccessObservation",
+        processHandleAccessTelemetryAvailable ? "r0-direct-draft" : "etw-fallback-required");
+    data.AddUtf8(
+        "handleAccessObservationSource",
+        processHandleAccessTelemetryAvailable
+            ? kR0ProcessHandleAccessTelemetrySourceDraft
+            : "etw-object-access-or-kernel-provider");
+    data.AddUtf8(
+        "handleAccessEtwFallbackReason",
+        processHandleAccessTelemetryAvailable ? "none" : "not-implemented-no-obcallback-handle-access-producer");
+    data.AddUtf8("r0ProcessPrivilegeCoveragePolicy", kR0ProcessPrivilegeCoveragePolicy);
+    data.AddUtf8("r0PrivilegeTelemetryFieldSet", kR0PrivilegeTelemetryFieldSet);
+}
+
+// Input: R0 direct-observation booleans for the producer families and draft
+// handle/token telemetry surfaces.
+// Processing: Emits a stable machine-readable contract that separates what the
+// current R0 path observes directly from lanes that must be filled by ETW (or
+// another explicitly documented side channel) instead of inferred from nearby
+// process lifecycle evidence.
+// Return: No return value; builder is mutated.
+inline void AddR0EtwCapabilityContractFields(
+    JsonDataObjectBuilder& data,
+    const std::string& contractSource,
+    const std::string& evidenceSource,
+    const bool processCreateExitR0Direct,
+    const bool imageLoadR0Direct,
+    const bool fileActivityR0Direct,
+    const bool registryActivityR0Direct,
+    const bool networkActivityR0Direct,
+    const bool processHandleAccessTelemetryAvailable = false,
+    const bool tokenPrivilegeTelemetryAvailable = false) {
+    std::string directScope;
+    std::string fallbackScope;
+    const auto appendScope = [](std::string& scope, const char* name) {
+        if (!scope.empty()) {
+            scope += "|";
+        }
+        scope += name;
+    };
+    const auto classifyScope = [&](const bool r0Direct, const char* name) {
+        if (r0Direct) {
+            appendScope(directScope, name);
+        } else {
+            appendScope(fallbackScope, name);
+        }
+    };
+
+    classifyScope(processCreateExitR0Direct, "processCreateExit");
+    classifyScope(imageLoadR0Direct, "imageLoad");
+    classifyScope(fileActivityR0Direct, "fileActivity");
+    classifyScope(registryActivityR0Direct, "registryActivity");
+    classifyScope(networkActivityR0Direct, "networkActivity");
+    classifyScope(processHandleAccessTelemetryAvailable, "handleAccess");
+    classifyScope(tokenPrivilegeTelemetryAvailable, "tokenPrivilegeAdjustment");
+
+    data.AddUnsigned("r0EtwCapabilityContractVersion", 1);
+    data.AddUtf8("r0EtwCapabilityContractSource", contractSource);
+    data.AddUtf8("r0EtwCapabilityContractEvidence", evidenceSource);
+    data.AddUtf8("r0EtwCapabilityContractFieldSet", kR0EtwCapabilityContractFieldSet);
+    data.AddUtf8("r0DirectObservationScope", directScope.empty() ? "none" : directScope);
+    data.AddUtf8("etwFallbackRequiredScope", fallbackScope.empty() ? "none" : fallbackScope);
+    data.AddBool("etwFallbackRequiredForR0Gaps", !fallbackScope.empty());
+    data.AddUtf8(
+        "r0EtwFallbackPolicy",
+        "R0 emits advertised direct producer lanes; ETW fallback owns missing, disabled, or unimplemented lanes including handle access and token privilege adjustment unless draft R0 capability bits are advertised");
+
+    const auto addDirectLane = [&data](const char* prefix, const bool r0Direct, const char* r0Source) {
+        data.AddBool(std::string(prefix) + "R0Direct", r0Direct);
+        data.AddUtf8(
+            std::string(prefix) + "Observation",
+            r0Direct ? "r0-direct" : "etw-fallback-required");
+        data.AddUtf8(
+            std::string(prefix) + "ObservationSource",
+            r0Direct ? r0Source : "etw-fallback-required");
+        data.AddBool(std::string(prefix) + "EtwFallbackRequired", !r0Direct);
+        data.AddUtf8(
+            std::string(prefix) + "EtwFallbackReason",
+            r0Direct ? "none" : "r0-direct-capability-not-advertised-or-not-active");
+    };
+
+    addDirectLane("processCreateExit", processCreateExitR0Direct, "ps-process-create-notify");
+    addDirectLane("imageLoad", imageLoadR0Direct, "ps-image-load-notify");
+    addDirectLane("fileActivity", fileActivityR0Direct, "fltmgr-minifilter");
+    addDirectLane("registryActivity", registryActivityR0Direct, "cm-registry-callback");
+    addDirectLane("networkActivity", networkActivityR0Direct, "wfp-ale-inspect-only");
+    data.AddUtf8(
+        "networkActivityR0Scope",
+        networkActivityR0Direct ? "endpoint-metadata-only" : "none");
+    data.AddBool("networkProtocolPayloadR0Direct", false);
+    data.AddBool("networkProtocolPayloadFallbackRequired", true);
+    data.AddUtf8("networkProtocolPayloadFallbackOwner", "pcap-sidecar-or-etw");
+
+    AddR0PrivilegeProcessAccessCoverageFields(
+        data,
+        processHandleAccessTelemetryAvailable,
+        tokenPrivilegeTelemetryAvailable);
+}
+
+inline void AddCurrentR0EtwCapabilityContractFields(
+    JsonDataObjectBuilder& data,
+    const std::string& contractSource,
+    const std::string& evidenceSource) {
+    AddR0EtwCapabilityContractFields(
+        data,
+        contractSource,
+        evidenceSource,
+        (KSWORD_SANDBOX_CAPABILITY_FLAGS_CURRENT & KSWORD_SANDBOX_CAPABILITY_FLAG_PROCESS_CREATE_EXIT) != 0 &&
+            (KSWORD_SANDBOX_PRODUCER_MASK_CURRENT & KSWORD_SANDBOX_PRODUCER_FLAG_PROCESS) != 0,
+        (KSWORD_SANDBOX_CAPABILITY_FLAGS_CURRENT & KSWORD_SANDBOX_CAPABILITY_FLAG_IMAGE_LOAD) != 0 &&
+            (KSWORD_SANDBOX_PRODUCER_MASK_CURRENT & KSWORD_SANDBOX_PRODUCER_FLAG_IMAGE) != 0,
+        (KSWORD_SANDBOX_CAPABILITY_FLAGS_CURRENT & KSWORD_SANDBOX_CAPABILITY_FLAG_FILE_MINIFILTER) != 0 &&
+            (KSWORD_SANDBOX_PRODUCER_MASK_CURRENT & KSWORD_SANDBOX_PRODUCER_FLAG_FILE) != 0,
+        (KSWORD_SANDBOX_CAPABILITY_FLAGS_CURRENT & KSWORD_SANDBOX_CAPABILITY_FLAG_REGISTRY_CALLBACK) != 0 &&
+            (KSWORD_SANDBOX_PRODUCER_MASK_CURRENT & KSWORD_SANDBOX_PRODUCER_FLAG_REGISTRY) != 0,
+        (KSWORD_SANDBOX_CAPABILITY_FLAGS_CURRENT & KSWORD_SANDBOX_CAPABILITY_FLAG_NETWORK_WFP_ALE) != 0 &&
+            (KSWORD_SANDBOX_PRODUCER_MASK_CURRENT & KSWORD_SANDBOX_PRODUCER_FLAG_NETWORK) != 0,
+        (KSWORD_SANDBOX_CAPABILITY_FLAGS_CURRENT & KSWORD_SANDBOX_CAPABILITY_FLAG_PROCESS_HANDLE_ACCESS_DRAFT) != 0,
+        (KSWORD_SANDBOX_CAPABILITY_FLAGS_CURRENT & KSWORD_SANDBOX_CAPABILITY_FLAG_TOKEN_PRIVILEGE_DRAFT) != 0);
+}
+
 void AddCollectorAttributionFields(
     JsonDataObjectBuilder& data,
     const std::string& subjectKind,

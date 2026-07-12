@@ -244,9 +244,10 @@ public sealed class RuleEngine
     /// Applies a centralized self-noise and nonbehavior guard before the
     /// declarative rule predicates run. Inputs are one rule and event;
     /// processing honors explicit metadata such as behaviorCounted=false,
-    /// nonbehavior=true, collector noise fields, quiet VT rows, and collector
-    /// process identity; the method returns true when the rule is allowed to
-    /// inspect the event.
+    /// nonbehavior=true, sampleBehaviorCandidate=false, setup/import/health
+    /// scopes, collector noise fields, quiet VT rows, and collector process
+    /// identity; the method returns true when the rule is allowed to inspect
+    /// the event.
     /// </summary>
     private static bool IsEligibleForRule(BehaviorRule rule, SandboxEvent evt)
     {
@@ -304,7 +305,7 @@ public sealed class RuleEngine
     private static bool IsNonBehaviorOrSelfNoiseEvent(SandboxEvent evt)
     {
         if (EventDataBoolFalse(evt, "behaviorCounted", "behavior_counted", "countsAsBehavior", "countedAsBehavior") ||
-            EventDataBoolFalse(evt, "sampleBehaviorCandidate", "sample_behavior_candidate") ||
+            EventDataBoolFalse(evt, "sampleBehaviorCandidate", "sample_behavior_candidate", "sampleBehavior", "sample_behavior", "isSampleBehavior", "is_sample_behavior") ||
             EventDataBoolTrue(
                 evt,
                 "nonbehavior",
@@ -321,14 +322,28 @@ public sealed class RuleEngine
                 "metadataOnly",
                 "metadata_only",
                 "collectionHealth",
+                "collectionDiagnostic",
+                "collection_diagnostic",
                 "collectorSelfNoise",
                 "collector_self_noise",
                 "collectorNoise",
                 "collectionNoise",
                 "selfNoise",
                 "self_noise",
+                "r0SelfNoise",
+                "r0_self_noise",
+                "selfProcess",
+                "self_process",
                 "noise",
-                "hostImportSelfNoise"))
+                "hostImportSelfNoise",
+                "operationalEvent",
+                "hostGenerated",
+                "host_generated",
+                "hostControlPlane",
+                "host_control_plane",
+                "artifactDiagnosticEvent",
+                "summaryEvent",
+                "collectorSuppressed"))
         {
             return true;
         }
@@ -339,10 +354,16 @@ public sealed class RuleEngine
                     "enrichment.virustotal.*",
                     "reputation.virustotal.*",
                     "collection-health.*",
-                    "artifact.import.*",
-                    "guest.events.imported",
+                    "collection.health",
+                    "artifact.import*",
+                    "artifact.host_imported",
+                    "artifact.manifest.*",
+                    "guest.events.*",
+                    "live.events.*",
                     "report.generated",
+                    "report.events.*",
                     "driver.parse_error",
+                    "driver.read_error",
                     "hyperv.runbook.*"
                 ],
                 evt.EventType))
@@ -369,7 +390,45 @@ public sealed class RuleEngine
         }
 
         if (TryGetRuleFieldValue(evt, "behaviorScope", out var behaviorScope) &&
-            TextEqualsAny(behaviorScope, "artifact-index", "artifact-import-summary", "artifact-import-rejection", "artifact-import-metadata", "collection-health", "diagnostic", "host-operational", "host-control-plane"))
+            TextEqualsAny(
+                behaviorScope,
+                "artifact-index",
+                "artifact-import-summary",
+                "artifact-import-rejection",
+                "artifact-import-metadata",
+                "collection-health",
+                "network-collection-health",
+                "network-import-summary",
+                "raw-pcap-compatibility",
+                "diagnostic",
+                "host-operational",
+                "host-control-plane",
+                "collector-diagnostic",
+                "collector-lifecycle",
+                "driver-health",
+                "driver-readiness",
+                "setup",
+                "import",
+                "health",
+                "readiness"))
+        {
+            return true;
+        }
+
+        if (TryGetRuleFieldValue(evt, "semanticLane", out var semanticLane) &&
+            TextEqualsAny(semanticLane, "nonbehavior", "non-behavior", "diagnostic", "collection-health"))
+        {
+            return true;
+        }
+
+        if (TryGetRuleFieldValue(evt, "sampleBehaviorBoundary", out var boundary) &&
+            TextEqualsAny(boundary, "nonbehavior-separated", "not-sample-behavior", "nonbehavior-evidence-quality"))
+        {
+            return true;
+        }
+
+        if (TryGetRuleFieldValue(evt, "collectorNoiseScope", out var collectorNoiseScope) &&
+            TextEqualsAny(collectorNoiseScope, "nonbehavior-evidence-quality", "collector-diagnostic", "collector-self-noise"))
         {
             return true;
         }

@@ -44,6 +44,7 @@ void AddSyntheticAbiVersionFields(JsonDataObjectBuilder& data) {
     data.AddUnsigned("eventSchemaVersion", KSWORD_SANDBOX_EVENT_SCHEMA_VERSION);
     data.AddUtf8("eventSchemaVersionHex", HexUnsignedLongLong(KSWORD_SANDBOX_EVENT_SCHEMA_VERSION, 8));
     data.AddUtf8("stableAbiVersionFields", kStableAbiVersionFields);
+    AddR0PrivilegeProcessAccessCoverageFields(data);
 }
 
 void AddSyntheticSelfNoiseFilterFields(JsonDataObjectBuilder& data) {

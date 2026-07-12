@@ -49,6 +49,73 @@ function Test-IsAdministrator {
     return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 }
 
+function Test-ResetShouldProcess {
+    param(
+        [Parameter(Mandatory)][string]$Target,
+        [Parameter(Mandatory)][string]$Action
+    )
+
+    $previousConfirmPreference = $ConfirmPreference
+    try {
+        if ($Force -and (-not [bool]$WhatIfPreference)) {
+            $ConfirmPreference = 'None'
+        }
+
+        return $PSCmdlet.ShouldProcess($Target, $Action)
+    }
+    finally {
+        $ConfirmPreference = $previousConfirmPreference
+    }
+}
+
+function New-ResetSkippedResult {
+    param([string]$Reason)
+
+    return [pscustomobject][ordered]@{
+        VmName = $VmName
+        CheckpointName = $CheckpointName
+        GuestUserName = $GuestUserName
+        SecretName = $SecretName
+        SecretStored = $false
+        SecretValuePrinted = $false
+        CheckpointRefreshed = $false
+        MutationExecuted = $false
+        WhatIf = [bool]$WhatIfPreference
+        Reason = $Reason
+    }
+}
+
+function Get-ResetVmNameCandidates {
+    param([int]$Limit = 20)
+
+    try {
+        return @(Get-VM -ErrorAction Stop |
+            Sort-Object -Property Name |
+            Select-Object -First $Limit |
+            ForEach-Object { [string]$_.Name })
+    }
+    catch {
+        return @()
+    }
+}
+
+function Get-ResetCheckpointCandidates {
+    param(
+        [Parameter(Mandatory)][string]$TargetVmName,
+        [int]$Limit = 20
+    )
+
+    try {
+        return @(Get-VMSnapshot -VMName $TargetVmName -ErrorAction Stop |
+            Sort-Object -Property CreationTime -Descending |
+            Select-Object -First $Limit |
+            ForEach-Object { [string]$_.Name })
+    }
+    catch {
+        return @()
+    }
+}
+
 function New-RandomPassword {
     param([int]$Length = 28)
 
@@ -392,6 +459,13 @@ function Update-CleanCheckpoint {
 }
 
 try {
+    $operationDescription = "还原 checkpoint '$CheckpointName'、挂载 VM 磁盘、重置来宾用户 '$GuestUserName'、启动 VM 验证凭据、保存 host secret，并按参数刷新 checkpoint / Reset guest password workflow"
+    if (-not (Test-ResetShouldProcess -Target $VmName -Action $operationDescription)) {
+        Write-ResetInfo '已取消或处于 -WhatIf 预览；未执行 VM、VHD、registry、checkpoint 或 secret mutation。 / No mutation executed.'
+        Write-Output (New-ResetSkippedResult -Reason 'ShouldProcess declined or WhatIf')
+        exit 0
+    }
+
     if (-not (Test-IsAdministrator)) {
         throw '错误：重置 Hyper-V 来宾密码需要宿主机管理员 PowerShell。下一步：以管理员身份打开 PowerShell 后重试。'
     }
@@ -401,17 +475,40 @@ try {
         throw '错误：新来宾密码不能为空。下一步：重新运行并输入有效密码，或去掉 -PromptPassword 让脚本生成随机密码。'
     }
 
-    $vm = Get-VM -Name $VmName -ErrorAction Stop
+    try {
+        $vm = Get-VM -Name $VmName -ErrorAction Stop
+    }
+    catch {
+        $availableVms = @(Get-ResetVmNameCandidates -Limit 20)
+        $availableText = if ($availableVms.Count -gt 0) { $availableVms -join ', ' } else { '<none or unavailable>' }
+        throw "错误：无法查询 VM '$VmName'；尚未执行密码重置 mutation。已看到 VMs：$availableText。下一步：运行 .\scripts\Test-HyperVReadiness.ps1 -ListAvailableVmProfiles 只读列出 VM/checkpoint 候选，或用 -VmName <existing VM> 指定。英文详情：$($_.Exception.Message)"
+    }
+
     if ($vm.State -ne 'Off') {
-        if (-not $Force -and -not $PSCmdlet.ShouldProcess($VmName, '密码重置前关闭 VM / Turn off VM before password reset')) { return }
+        if (-not (Test-ResetShouldProcess -Target $VmName -Action '密码重置前关闭 VM / Turn off VM before password reset')) {
+            Write-Output (New-ResetSkippedResult -Reason 'Stop VM declined')
+            exit 0
+        }
         Stop-VM -Name $VmName -TurnOff -Force -ErrorAction Stop
     }
 
     if (-not $SkipCheckpointRestore) {
-        $snapshot = Get-VMSnapshot -VMName $VmName -Name $CheckpointName -ErrorAction Stop
-        if ($Force -or $PSCmdlet.ShouldProcess($VmName, "注入密码重置前还原 checkpoint '$CheckpointName' / Restore checkpoint before password reset")) {
+        try {
+            $snapshot = Get-VMSnapshot -VMName $VmName -Name $CheckpointName -ErrorAction Stop
+        }
+        catch {
+            $availableCheckpoints = @(Get-ResetCheckpointCandidates -TargetVmName $VmName -Limit 20)
+            $availableText = if ($availableCheckpoints.Count -gt 0) { $availableCheckpoints -join ', ' } else { '<none or unavailable>' }
+            throw "错误：VM '$VmName' 上找不到 checkpoint '$CheckpointName'；尚未注入密码重置服务或启动重置流程。已看到 checkpoints：$availableText。下一步：运行 .\scripts\Test-HyperVReadiness.ps1 -ListAvailableVmProfiles -VmName '$VmName' 只读列出候选，或用 -CheckpointName <checkpoint> 指定。英文详情：$($_.Exception.Message)"
+        }
+
+        if (Test-ResetShouldProcess -Target $VmName -Action "注入密码重置前还原 checkpoint '$CheckpointName' / Restore checkpoint before password reset") {
             Restore-VMSnapshot -VMName $VmName -Name $CheckpointName -Confirm:$false -ErrorAction Stop
             Write-ResetInfo "已还原 checkpoint '$CheckpointName'。 / Restored checkpoint."
+        }
+        else {
+            Write-Output (New-ResetSkippedResult -Reason 'Restore checkpoint declined')
+            exit 0
         }
     }
 
@@ -422,15 +519,21 @@ try {
 
     $vhdPath = $drive.Path
     Write-ResetInfo "正在向 VHD 注入一次性密码重置服务：$vhdPath / Injecting one-shot reset service."
-    try {
-        $mountedVolume = Mount-GuestWindowsVolume -VhdPath $vhdPath
-        Inject-PasswordResetService -WindowsRoot $mountedVolume.Root -SystemHive $mountedVolume.SystemHive -Password $credentialInput.Password
+    if (Test-ResetShouldProcess -Target $vhdPath -Action "挂载 VHD 并注入一次性密码重置服务 / Mount VHD and inject one-shot reset service") {
+        try {
+            $mountedVolume = Mount-GuestWindowsVolume -VhdPath $vhdPath
+            Inject-PasswordResetService -WindowsRoot $mountedVolume.Root -SystemHive $mountedVolume.SystemHive -Password $credentialInput.Password
+        }
+        finally {
+            Dismount-GuestWindowsVolume -VhdPath $vhdPath
+        }
     }
-    finally {
-        Dismount-GuestWindowsVolume -VhdPath $vhdPath
+    else {
+        Write-Output (New-ResetSkippedResult -Reason 'Offline VHD injection declined')
+        exit 0
     }
 
-    if ($Force -or $PSCmdlet.ShouldProcess($VmName, '启动 VM 运行一次性密码重置服务 / Boot VM to run reset service')) {
+    if (Test-ResetShouldProcess -Target $VmName -Action '启动 VM 运行一次性密码重置服务 / Boot VM to run reset service') {
         Start-VM -Name $VmName -ErrorAction Stop
         Wait-VMRunning -TimeoutSeconds $BootTimeoutSeconds
         Write-ResetInfo 'VM 已运行；正在等待 PowerShell Direct 使用重置后的凭据连通。 / Waiting for PowerShell Direct.'
@@ -451,10 +554,14 @@ try {
         Write-ResetInfo '凭据验证后已停止 VM。 / VM stopped after credential validation.'
 
         if (-not $SkipCheckpointRefresh) {
-            if ($Force -or $PSCmdlet.ShouldProcess($VmName, "用重置后的密码刷新 checkpoint '$CheckpointName' / Refresh checkpoint with reset password")) {
+            if (Test-ResetShouldProcess -Target $VmName -Action "用重置后的密码刷新 checkpoint '$CheckpointName' / Refresh checkpoint with reset password") {
                 Update-CleanCheckpoint
             }
         }
+    }
+    else {
+        Write-Output (New-ResetSkippedResult -Reason 'Boot VM declined')
+        exit 0
     }
 
     Write-ResetInfo '来宾密码重置完成；secret 值未打印。 / Guest password reset completed.'

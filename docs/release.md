@@ -149,10 +149,100 @@ generated metadata 字段：`gitMetadata`、`executionBoundaries`、`requiredEvi
      -RequireCompleteRuntimePackage
    ```
 
-9. Smoke-test the runtime package on a clean host or VM using only the portable
-   package contents and local configuration.
+9. For install UX / portable runtime review, run only low-cost verification
+   from the source root or staged package root unless a release manager explicitly
+   asks for lab smoke/live:
+
+   ```powershell
+   .\install.ps1 -Mode Status
+   .\install.ps1 -Mode CheckEnvironment
+   .\run.ps1 -Mode Status
+   .\run.ps1 -Mode CheckEnvironment
+   .\run.ps1 -Mode Analyze -SamplePreset Notepad
+   .\run.ps1 -Mode StartWebUI -WhatIf
+   ```
+
+   These commands must not start, restore, stop, or mutate VMs; they must not
+   sign drivers, invoke `CSignTool.exe`, upload samples, push, publish, or
+   create fresh live evidence. Runtime smoke on a clean host/VM is a separate
+   release-manager lab action, not the default packaging gate.
 10. Record hashes and release notes. Push/publish only when a release manager
     explicitly requests it; the package script does not push.
+
+## 操作者安装路径 / Operator install paths
+
+Release notes and handoff tickets should describe which operator path was used.
+Do not collapse these into one ambiguous “install” step:
+
+1. **Use an already configured environment / 使用已配置环境。** Local install
+   state, `sandbox.local.json`, guest password secret, VM profile, runtime root,
+   and staged guest payload already exist outside git. Verify with:
+
+   ```powershell
+   .\install.ps1 -Mode Status
+   .\install.ps1 -Mode CheckEnvironment
+   .\run.ps1 -Mode Status
+   .\run.ps1 -Mode CheckEnvironment
+   .\run.ps1 -Mode Analyze -SamplePreset Notepad
+   ```
+
+   `Analyze` without `-Live` is PlanOnly and must not touch Hyper-V.
+
+2. **Restore an existing checkpoint/snapshot / 恢复已有 checkpoint/snapshot。**
+   The VM and clean snapshot already exist; the operator records the exact VM
+   and snapshot names, refreshes payload, then explicitly restores baseline only
+   in an isolated lab session:
+
+   ```powershell
+   .\install.ps1 -Mode Change -UpdateHyperVConfig `
+     -VmName '<existing VM>' `
+     -CheckpointName '<clean checkpoint>' `
+     -GuestWorkingDirectory 'C:\KSwordSandbox'
+   .\install.ps1 -InstallEntrypoint CreateOrPreparePath -PromptPassword
+   .\scripts\Prepare-GuestPayload.ps1 -RepoRoot . -SelfContained
+   .\scripts\Test-HyperVReadiness.ps1
+   ```
+
+   Actual restore is VM mutation and is never part of package/readiness:
+
+   ```powershell
+   .\install.ps1 -InstallEntrypoint RestoreCleanCheckpoint -AllowVmMutation -WhatIf
+   .\install.ps1 -InstallEntrypoint RestoreCleanCheckpoint -AllowVmMutation -Confirm
+   ```
+
+3. **Create/prep a new VM/environment / 创建或准备新环境。** First-computer
+   setup must confirm Windows host compatibility, Hyper-V feature/module,
+   administrator PowerShell for live, BIOS/UEFI Intel VT-x / AMD-V plus SLAT,
+   Windows guest, `SandboxUser` or equivalent account, Guest Service Interface,
+   PowerShell Direct, and a clean checkpoint/snapshot. Then configure local
+   state outside git:
+
+   ```powershell
+   .\install.ps1 -InstallEntrypoint CreateOrPreparePath -PromptPassword
+   .\install.ps1 -Mode Change -UpdateHyperVConfig `
+     -VmName 'KSwordSandbox-Win10-Golden' `
+     -CheckpointName 'Clean' `
+     -GuestWorkingDirectory 'C:\KSwordSandbox'
+   .\scripts\Prepare-GuestPayload.ps1 `
+     -RepoRoot . `
+     -PayloadRoot 'D:\Temp\KSwordSandbox\payload\guest-tools' `
+     -GuestWorkingDirectory 'C:\KSwordSandbox' `
+     -SelfContained
+   .\install.ps1 -Mode CheckEnvironment
+   .\run.ps1 -Mode CheckEnvironment
+   ```
+
+Across all three paths: `CSignTool.exe` and GUI/interactive signing fallback are
+forbidden; `.sys`, `.pdb`, certificates, private keys, samples, reports, VM
+disks/checkpoints, `sandbox.local.json`, `install-state.json`, and DPAPI backups
+stay outside git and source packages. VirusTotal key configuration is optional:
+
+```powershell
+.\install.ps1 -Mode ConfigureVTKey -PromptVTKey
+```
+
+Missing VirusTotal key should quiet-skip hash-only enrichment. Missing Intel
+VT-x / AMD-V or Hyper-V module is a Live host prerequisite failure.
 
 ## 开源 MVP readiness 检查清单 / Open-source MVP readiness checklist
 
@@ -172,6 +262,10 @@ generated metadata 字段：`gitMetadata`、`executionBoundaries`、`requiredEvi
   and onboarding commands do not call `CSignTool.exe`, old KSword interactive
   signing wrappers, or GUI signing fallback paths. Missing `signtool.exe` must
   fail/skip clearly, not open a dialog.
+- **Operator paths documented:** release handoff states whether the operator is
+  using an already configured environment, restoring an existing clean
+  checkpoint/snapshot, or creating/prepping a new VM/environment. The low-cost
+  verification commands above are the default install UX check.
 - **Known R0 signing limitation:** real R0 remains an optional lab path, not a
   default release promise. The driver can be compiled, but loading it requires a
   test-signed `.sys`, guest Windows test-signing, and an isolated Hyper-V VM.
@@ -220,7 +314,7 @@ generated metadata 字段：`gitMetadata`、`executionBoundaries`、`requiredEvi
 2. If readiness reports missing local state, configure it outside git:
 
    ```powershell
-   .\install.ps1 -Mode Install -PromptPassword
+   .\install.ps1 -InstallEntrypoint CreateOrPreparePath -PromptPassword
    .\install.ps1 -Mode Change -UpdateHyperVConfig `
      -VmName 'KSwordSandbox-Win10-Golden' `
      -CheckpointName 'Clean' `

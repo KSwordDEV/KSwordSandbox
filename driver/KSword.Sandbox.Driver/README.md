@@ -95,6 +95,45 @@ callouts for IPv4 and IPv6. It does not block, absorb, redirect, or modify
 traffic; it queues compact `KswSandboxEventTypeNetwork` records into the same
 ring for R0Collector to drain.
 
+## R0/ETW capability contract
+
+`GET_CAPABILITIES`, current `GET_HEALTH` producer masks, and `GET_STATUS`
+runtime masks let R0Collector emit machine-readable `r0EtwCapability*` fields.
+The current R0 driver observes these lanes directly when their producer
+capability/mask is advertised and active:
+
+- `processCreateExit`: process create/exit callbacks.
+- `processHandleAccessDraft`: process/thread handle create/duplicate
+  pre-operation callbacks when the process producer is compiled,
+  `KSWORD_SANDBOX_ENABLE_PROCESS_HANDLE_ACCESS=1`, and `ObRegisterCallbacks`
+  registration succeeds.
+- `imageLoad`: image-load callbacks.
+- `fileActivity`: minifilter create/write/delete-style operations.
+- `registryActivity`: registry callback operations.
+- `networkActivity`: WFP/ALE endpoint metadata only.
+
+The guarded handle-access producer is non-mutating: it never reduces
+`DesiredAccess`, blocks a handle, allocates in the callback path, or waits for
+the collector. It emits `KswSandboxEventTypeProcess` records with
+`KSWORD_SANDBOX_PROCESS_HANDLE_ACCESS_EVENT_VERSION` and the draft
+`KSWORD_SANDBOX_PROCESS_HANDLE_ACCESS_EVENT_PAYLOAD_V1_DRAFT` layout.
+Handle-access records use their own producer bit,
+`KSWORD_SANDBOX_PRODUCER_FLAG_PROCESS_HANDLE_ACCESS`, while process lifecycle
+records keep `KSWORD_SANDBOX_PRODUCER_FLAG_PROCESS`. The live
+`GET_CAPABILITIES` reply advertises
+`KSWORD_SANDBOX_CAPABILITY_FLAG_PROCESS_HANDLE_ACCESS_DRAFT` only when the
+guarded producer is compiled in. If object-callback registration fails due to
+altitude collision, signing/integrity policy, or OS support, process
+create/exit telemetry can remain active while `FailedProducerMask` names
+`processHandleAccess`; `LastNtStatus` keeps the exact NTSTATUS.
+
+The current v1 event stream still does **not** directly emit token privilege
+adjustment telemetry. That lane remains represented as
+`tokenPrivilegeAdjustmentEtwFallbackRequired=true` unless a future signed driver
+advertises a matching privilege payload capability. Consumers must not infer
+AdjustTokenPrivileges / SeDebugPrivilege evidence from process create/exit or
+handle-access rows.
+
 When the ring is empty, `READ_EVENTS` still succeeds if the fixed reply header
 fits and returns `EventsWritten == 0` and `BytesWritten == 0`. If the output
 buffer has no room for a complete pending record, the event remains queued and

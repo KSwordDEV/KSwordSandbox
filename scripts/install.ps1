@@ -12,7 +12,9 @@ delegation, payload preparation, and WebUI startup behavior stay identical to
 the primary release wrapper.
 
 The wrapper does not print secret values, does not sign drivers, and does not
-start a VM by itself.
+start a VM by itself. Install-entrypoint selection can explicitly choose
+already configured environment diagnostics, existing clean checkpoint restore
+planning, or create/prepare-new-path behavior.
 #>
 [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'Medium')]
 param(
@@ -42,6 +44,9 @@ param(
     [string]$VirusTotalSettingsPath = '',
 
     [string]$WebUiUrl = 'http://127.0.0.1:18080',
+
+    [ValidateSet('UseConfiguredEnvironment', 'RestoreCleanCheckpoint', 'CreateOrPreparePath')]
+    [string]$InstallEntrypoint = 'UseConfiguredEnvironment',
 
     [switch]$GeneratePassword,
 
@@ -113,6 +118,12 @@ param(
 
     [switch]$PreparePayload,
 
+    [switch]$PlanOnly,
+
+    [switch]$AllowVmMutation,
+
+    [switch]$PrepareGuestPayload,
+
     [switch]$Force
 )
 
@@ -154,6 +165,11 @@ $script:DriverWrapperParameterNames = @(
 function Write-ScriptInstallInfo {
     param([Parameter(Mandatory)][string]$Message)
     Write-Host "[scripts/install] $Message"
+}
+
+if ($PlanOnly -and -not $WhatIfPreference) {
+    $WhatIfPreference = $true
+    Write-ScriptInstallInfo 'PlanOnly 已启用：本次只输出计划/诊断，不写入本机状态、不启动或还原 VM。 / PlanOnly enabled: diagnostics only.'
 }
 
 function Read-ScriptMenuChoice {
@@ -199,7 +215,7 @@ function Read-ScriptInstallState {
         return Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json
     }
     catch {
-        Write-ScriptInstallInfo "中文提示：无法读取安装状态 '$statePath'，将忽略并继续。下一步：如配置异常，请重新运行 .\scripts\install.ps1 -Mode Install -PromptPassword。英文详情：$($_.Exception.Message)"
+        Write-ScriptInstallInfo "中文提示：无法读取安装状态 '$statePath'，将忽略并继续。下一步：如配置异常，请重新运行 .\scripts\install.ps1 -InstallEntrypoint CreateOrPreparePath -PromptPassword。英文详情：$($_.Exception.Message)"
         return $null
     }
 }
@@ -403,6 +419,15 @@ function Invoke-ScriptHyperVConfigPrompt {
     })
 }
 
+function Confirm-ScriptGuestTestSigningMutation {
+    param([Parameter(Mandatory)][string]$ActionDescription)
+
+    Write-Host ''
+    Write-Host "中文提示：$ActionDescription 会修改 VM 内 Windows test-signing boot setting；仅用于隔离实验 VM，且不会签名 driver。 / This mutates guest boot settings only."
+    $continue = Read-ScriptMenuChoice -Prompt '是否继续？[y/n] / Continue? [y/n]' -Allowed @('y', 'Y', 'n', 'N')
+    return $continue -in @('y', 'Y')
+}
+
 function Invoke-ScriptGuestTestSigningMenu {
     while ($true) {
         Write-Host ''
@@ -417,9 +442,21 @@ function Invoke-ScriptGuestTestSigningMenu {
         switch ($choice) {
             '1' { Invoke-RootInstaller -Parameters (New-RootInstallerParameterTable -RootMode 'Change' -Additional @{ ShowTestSigningGuidance = $true }) }
             '2' { Invoke-RootInstaller -Parameters (New-RootInstallerParameterTable -RootMode 'Change' -Additional @{ QueryGuestTestSigning = $true }) }
-            '3' { Invoke-RootInstaller -Parameters (New-RootInstallerParameterTable -RootMode 'Change' -Additional @{ EnableGuestTestSigning = $true; Force = $true }) }
-            '4' { Invoke-RootInstaller -Parameters (New-RootInstallerParameterTable -RootMode 'Change' -Additional @{ EnableGuestTestSigning = $true; RestartGuestAfterTestSigning = $true; Force = $true }) }
-            '5' { Invoke-RootInstaller -Parameters (New-RootInstallerParameterTable -RootMode 'Change' -Additional @{ DisableGuestTestSigning = $true; Force = $true }) }
+            '3' {
+                if (Confirm-ScriptGuestTestSigningMutation -ActionDescription '启用 guest test-signing') {
+                    Invoke-RootInstaller -Parameters (New-RootInstallerParameterTable -RootMode 'Change' -Additional @{ EnableGuestTestSigning = $true; Force = $true })
+                }
+            }
+            '4' {
+                if (Confirm-ScriptGuestTestSigningMutation -ActionDescription '启用 guest test-signing 并在状态变化时重启') {
+                    Invoke-RootInstaller -Parameters (New-RootInstallerParameterTable -RootMode 'Change' -Additional @{ EnableGuestTestSigning = $true; RestartGuestAfterTestSigning = $true; Force = $true })
+                }
+            }
+            '5' {
+                if (Confirm-ScriptGuestTestSigningMutation -ActionDescription '禁用 guest test-signing') {
+                    Invoke-RootInstaller -Parameters (New-RootInstallerParameterTable -RootMode 'Change' -Additional @{ DisableGuestTestSigning = $true; Force = $true })
+                }
+            }
             '6' { return }
         }
     }
@@ -474,10 +511,29 @@ function Invoke-ScriptChangeMenu {
     }
 }
 
+function Invoke-ScriptInstallEntrypointMenu {
+    Write-Host ''
+    Write-Host '安装入口选择 / Install entrypoint selection:'
+    Write-Host '  1) 使用已配置环境（只诊断，不修改 VM） / Use already configured environment'
+    Write-Host '  2) 还原已有干净 checkpoint/snapshot（默认只给计划；真实还原需 -AllowVmMutation） / Restore existing clean checkpoint'
+    Write-Host '  3) 创建/准备新的本机路径（目录/config，可选 payload；不创建 VM） / Create or prepare new local path'
+    $choice = Read-ScriptMenuChoice -Prompt '请选择 [1-3] / Choose [1-3]' -Allowed @('1', '2', '3')
+    $selectedEntrypoint = switch ($choice) {
+        '1' { 'UseConfiguredEnvironment' }
+        '2' { 'RestoreCleanCheckpoint' }
+        '3' { 'CreateOrPreparePath' }
+    }
+
+    Invoke-RootInstaller -Parameters (New-RootInstallerParameterTable -Additional @{
+        InstallEntrypoint = $selectedEntrypoint
+    })
+}
+
 function Invoke-ScriptInstallerMenu {
     while ($true) {
         Write-Host ''
         Write-Host 'KSwordSandbox scripts 目录安装向导 / script-folder installer'
+        Write-Host '  0) 安装入口选择 / Install entrypoint selector'
         Write-Host '  1) 安装/准备本机设置 / Install or prepare local settings'
         Write-Host '  2) 更改设置 / Change settings'
         Write-Host '  3) 卸载本机设置 / Uninstall local settings'
@@ -485,8 +541,9 @@ function Invoke-ScriptInstallerMenu {
         Write-Host '  5) 启动 WebUI / Start WebUI'
         Write-Host '  6) 状态 / Status'
         Write-Host '  7) 退出 / Exit'
-        $choice = Read-ScriptMenuChoice -Prompt '请选择 [1-7] / Choose [1-7]' -Allowed @('1', '2', '3', '4', '5', '6', '7')
+        $choice = Read-ScriptMenuChoice -Prompt '请选择 [0-7] / Choose [0-7]' -Allowed @('0', '1', '2', '3', '4', '5', '6', '7')
         switch ($choice) {
+            '0' { Invoke-ScriptInstallEntrypointMenu }
             '1' {
                 Write-Host ''
                 Write-Host '安装密码处理 / Install password handling:'
@@ -518,7 +575,18 @@ $scriptInstallState = Read-ScriptInstallState
 Initialize-ScriptEffectiveParameters -State $scriptInstallState -BoundParameters $PSBoundParameters
 
 if ($PreparePayload) {
-    Invoke-ScriptPayloadPreparation
+    Write-ScriptInstallInfo '中文提示：-PreparePayload 属于 CreateOrPreparePath 安装入口；将委托根安装器按创建/准备路径模式执行。 / PreparePayload routes through CreateOrPreparePath.'
+    Invoke-RootInstaller -Parameters (New-RootInstallerParameterTable -Additional @{
+        InstallEntrypoint = 'CreateOrPreparePath'
+        PrepareGuestPayload = $true
+    })
+    return
+}
+
+if ($PSBoundParameters.ContainsKey('InstallEntrypoint') -or
+    $PrepareGuestPayload -or
+    ($PlanOnly -and $Mode -eq 'Interactive')) {
+    Invoke-RootInstaller -Parameters (New-RootInstallerParameterTable -RootMode 'Interactive')
     return
 }
 
@@ -551,7 +619,9 @@ $hasChangeAction = [bool]$ResetPassword -or
     [bool]$QueryGuestTestSigning -or
     [bool]$ShowTestSigningGuidance -or
     [bool]$GeneratePassword -or
-    [bool]$PromptPassword
+    [bool]$PromptPassword -or
+    [bool]$PlanOnly -or
+    [bool]$PrepareGuestPayload
 
 if ($Mode -eq 'Change' -and -not $hasChangeAction) {
     Invoke-ScriptChangeMenu

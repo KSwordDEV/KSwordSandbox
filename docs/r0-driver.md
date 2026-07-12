@@ -91,6 +91,13 @@ Each emitted `KSWORD_SANDBOX_EVENT_HEADER` also snapshots `LostEvents` and `Back
 
 `GET_CAPABILITIES` advertises only compiled producer capability bits plus common metadata capability bits. Runtime registration failures remain visible through `GET_HEALTH`/`GET_STATUS` masks and NTSTATUS fields.
 
+R0/ETW coverage is explicit in collector JSONL. `processCreateExit`,
+`imageLoad`, `fileActivity`, `registryActivity`, and WFP/ALE
+`networkActivity` are R0-direct only when the corresponding capability and
+producer mask are advertised/active. `handleAccess` and
+`tokenPrivilegeAdjustment` are current R0 gaps; they remain ETW/audit fallback
+lanes unless future draft capability bits are advertised with versioned payloads.
+
 ## Verification
 
 Build without signing or CSignTool:

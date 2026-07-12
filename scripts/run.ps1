@@ -40,6 +40,8 @@ param(
 
     [switch]$Live,
 
+    [switch]$NoR0Collector,
+
     [switch]$PlanOnly,
 
     [switch]$NoBuild,

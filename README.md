@@ -62,37 +62,85 @@ tests/KSword.Sandbox.SmokeTests 控制台 smoke/contract tests
 
 ## 快速开始（quick start）
 
-### 部署模式选择
+### 先选择操作者路径 / Choose the operator path first
 
-- **本地演示 / PlanOnly：** 适合先验证 WebUI、API、规则和报告链路；不启动 VM。
-- **Live Hyper-V 实验室：** 需要管理员 PowerShell、已准备的 golden VM、clean checkpoint、
-  guest 凭据、Guest Service Interface、PowerShell Direct 和 staged guest payload。
-- **真实 R0 驱动实验：** 不属于默认路径。先完成 compile-only，再在隔离 VM 内 test-sign
-  并加载；不要把 `.sys`、`.pdb`、证书或签名材料放入仓库。
+- **路径 A：使用已经配置好的环境。** 适合已经有 `%ProgramData%\KSwordSandbox\install-state.json`、
+  仓库外 `sandbox.local.json`、guest password secret、VM profile 和 staged guest payload
+  的机器；先跑只读 `Status` / `CheckEnvironment`，再日常启动 WebUI。
+- **路径 B：恢复已有 checkpoint/snapshot。** 适合 VM 已存在但需要回到 clean baseline 的实验室；
+  先记录 VM/checkpoint 名称和 guest password，准备 payload，再由操作者显式恢复 snapshot。
+  恢复 VM 是 lab mutation，不是 packaging/readiness 的默认动作。
+- **路径 C：创建或准备新 VM/环境。** 适合第一台电脑或新实验室；先确认 Windows Hyper-V
+  兼容性、BIOS/UEFI Intel VT-x / AMD-V、Hyper-V PowerShell module、管理员 PowerShell、
+  Windows guest、`SandboxUser`、Guest Service Interface、PowerShell Direct 和 clean checkpoint。
 
-### 已有 golden VM 的最短路径
+三条路径都不要求 `CSignTool.exe`。VirusTotal（VT）API key 是可选 hash-only enrichment；
+缺失时应 quiet-skip。这里的 VT key 不等于 Hyper-V 需要的 Intel VT-x / AMD-V 硬件虚拟化。
+
+### 路径 A：已有配置环境的最短路径
+
+低成本验证（不启动、不还原、不停止 VM；不签名；不生成 fresh live evidence）：
+
+```powershell
+.\install.ps1 -Mode Status
+.\install.ps1 -Mode CheckEnvironment
+.\run.ps1 -Mode Status
+.\run.ps1 -Mode CheckEnvironment
+.\run.ps1 -Mode Analyze -SamplePreset Notepad
+```
+
+日常启动 WebUI：
+
+```powershell
+.\run.ps1
+```
+
+### 路径 B：已有 VM/checkpoint 的恢复路径
+
+```powershell
+.\install.ps1 -Mode Change -UpdateHyperVConfig `
+  -VmName '<existing VM>' `
+  -CheckpointName '<clean checkpoint>' `
+  -GuestWorkingDirectory 'C:\KSwordSandbox'
+.\install.ps1 -Mode Install -PromptPassword
+.\scripts\Prepare-GuestPayload.ps1 -RepoRoot . -SelfContained
+.\scripts\Test-HyperVReadiness.ps1
+```
+
+只有当操作者明确要恢复 baseline 时才运行 mutating restore：
+
+```powershell
+Restore-VMSnapshot -VMName '<existing VM>' -Name '<clean checkpoint>' -Confirm:$false
+```
+
+### 路径 C：新 VM/新环境准备路径
+
+先在 Hyper-V 中准备 Windows guest、guest 账号、Guest Service Interface 和 clean checkpoint，
+再写本机配置：
 
 ```powershell
 .\install.ps1 -Mode Install -PromptPassword
-.\run.ps1
+.\install.ps1 -Mode Change -UpdateHyperVConfig `
+  -VmName 'KSwordSandbox-Win10-Golden' `
+  -CheckpointName 'Clean' `
+  -GuestWorkingDirectory 'C:\KSwordSandbox'
+.\scripts\Prepare-GuestPayload.ps1 `
+  -RepoRoot . `
+  -PayloadRoot 'D:\Temp\KSwordSandbox\payload\guest-tools' `
+  -GuestWorkingDirectory 'C:\KSwordSandbox' `
+  -SelfContained
+.\install.ps1 -Mode CheckEnvironment
+.\run.ps1 -Mode CheckEnvironment
 ```
 
-安装完成后，日常启动 WebUI 只需要：
-
-```powershell
-.\run.ps1
-```
-
-`run.ps1` 默认只启动 WebUI，不会启动或还原 VM。Live Hyper-V 执行仍然必须显式使用
-CLI `-Live` 或 WebUI/API 中的 live 选项。
+`run.ps1` 默认只启动 WebUI 或生成 PlanOnly runbook，不会启动或还原 VM。Live Hyper-V
+执行必须显式使用 CLI `-Live` 或 WebUI/API 中的 live 选项。
 
 ### 安装菜单、凭据和本地配置
 
 ```powershell
 .\install.ps1
 .\run.ps1
-dotnet build .\KSwordSandbox.sln
-.\scripts\Invoke-SandboxSmokeTest.ps1
 ```
 
 `install.ps1` 提供交互菜单：安装、修改、卸载、重置 Guest 密码、配置 Hyper-V、配置
@@ -213,26 +261,29 @@ D:\Temp\KSwordSandbox\jobs\<job-id>\
 
 ## 验证命令（verification）
 
-常用安全验证链路：
+安装/发布准备的低成本验证链路：
 
 ```powershell
-# 文档/仓库策略：不启动 VM，不签名驱动。
+# 仓库策略：不启动 VM，不签名驱动。
 .\scripts\Test-RepositoryPolicy.ps1
 
-# 快速离线质量门：不启动 VM，不加载驱动。
-.\scripts\Test-QualityGates.ps1
+# 安装/运行只读状态：不启动、不还原、不停止 VM。
+.\install.ps1 -Mode Status
+.\install.ps1 -Mode CheckEnvironment
+.\run.ps1 -Mode Status
+.\run.ps1 -Mode CheckEnvironment
 
-# .NET 构建与全量 smoke。
-dotnet build .\KSwordSandbox.sln
-dotnet run --project .\tests\KSword.Sandbox.SmokeTests\KSword.Sandbox.SmokeTests.csproj --no-build
+# PlanOnly 分析：不执行样本，不修改 VM。
+.\run.ps1 -Mode Analyze -SamplePreset Notepad
 
-# Native compile-only：只验证能编译，不签名、不安装、不启动驱动。
-.\scripts\Invoke-NativeBuild.ps1 -Project .\KSwordSandbox.sln -Configuration Debug -Platform x64
+# WebUI 启动预览：不启动 dotnet，不触碰 VM。
+.\run.ps1 -Mode StartWebUI -WhatIf
 ```
 
-`Invoke-NativeBuild.ps1` 会规范化子 MSBuild 环境，避免父 shell 同时存在 `PATH` 与 `Path` 时
-Visual C++ task 失败。当前 driver validation 应止步于 compile success。不要使用
-`CSignTool.exe`；不要提交 `bin/`、`obj/`、`x64/`、`.sys`、`.pdb`、`.obj` 或 native build 输出。
+构建、native compile、smoke 和 WebUI/API E2E 是更深的开发或实验室验证，不是安装/发布准备
+默认步骤；需要时按 `docs/verification.md` 显式执行。当前 driver validation 应止步于
+compile success。不要使用 `CSignTool.exe`；不要提交 `bin/`、`obj/`、`x64/`、`.sys`、
+`.pdb`、`.obj` 或 native build 输出。
 
 WebUI/API E2E：
 

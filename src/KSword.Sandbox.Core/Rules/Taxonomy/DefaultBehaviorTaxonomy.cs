@@ -41,6 +41,14 @@ public static class DefaultBehaviorTaxonomy
                 Category = "Command and Control",
                 MitreTechniqueId = "T1071",
                 EventTypes = ["network.tcp", "network.connect"]
+            },
+            new BehaviorTaxonomyNode
+            {
+                Id = "security-privilege-telemetry",
+                Title = "Security and privilege telemetry",
+                Category = "Privilege and security",
+                MitreTechniqueId = "T1134",
+                EventTypes = ["etw.security", "etw.privilege", "process.access", "privilege.enabled"]
             }
         ]);
     }

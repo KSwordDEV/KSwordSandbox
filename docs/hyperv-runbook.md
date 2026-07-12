@@ -34,6 +34,23 @@ preflight 命令见 `docs/hyperv-readiness.md`；脚本化 PlanOnly / WhatIf / L
 PowerShell Direct 报告已用时间、尝试次数（attempt count）和最后连接错误；live-output
 sync 抑制重复周期性 copy error，只保留首个 warning，最终 copy 失败时给出一个简洁原因。
 
+## 环境路径与兼容性 / Environment path and compatibility
+
+本页的 Live runbook 只适用于已经完成安装路径选择的操作者：
+
+- 已配置环境：直接用 `Status` / `CheckEnvironment` 确认 VM profile、secret、
+  payload 和 runtime root。
+- 恢复已有 checkpoint/snapshot：先记录 VM/checkpoint 名称并准备 payload；实际
+  `Restore-VMSnapshot` 是显式 lab mutation，不是低成本 readiness。
+- 创建/准备新环境：先完成支持 Hyper-V 的 Windows host、Hyper-V PowerShell module、
+  管理员 PowerShell、BIOS/UEFI Intel VT-x / AMD-V 和 SLAT、Windows guest、
+  Guest Service Interface、PowerShell Direct、guest account/password secret 和 clean
+  checkpoint/snapshot。
+
+VirusTotal key 是可选 hash-only enrichment，缺失不阻止 Plan/WebUI；Intel VT-x /
+AMD-V 是 Hyper-V live 前置条件。runbook 准备路径不签名 driver，不调用
+`CSignTool.exe`，也不使用旧 GUI/interactive signing fallback。
+
 ## 执行前提（execution prerequisites）
 
 - Elevated host PowerShell。

@@ -3,6 +3,10 @@
 
 C_ASSERT(sizeof(KSWORD_SANDBOX_PROCESS_EVENT_PAYLOAD) <=
     KSWORD_SANDBOX_EVENT_MAX_PAYLOAD_SIZE);
+C_ASSERT(sizeof(KSWORD_SANDBOX_PROCESS_HANDLE_ACCESS_EVENT_PAYLOAD_V1_DRAFT) <=
+    KSWORD_SANDBOX_EVENT_MAX_PAYLOAD_SIZE);
+
+#define KSWORD_SANDBOX_PROCESS_HANDLE_ACCESS_ALTITUDE L"385201.7338"
 
 /*
  * Process notify registration mode.
@@ -50,10 +54,13 @@ typedef struct _KSWORD_SANDBOX_PROCESS_MONITOR_RUNTIME {
     PKSWORD_SANDBOX_DEVICE_EXTENSION DeviceExtension;
     volatile LONG Active;
     volatile LONG CallbackRegistered;
+    volatile LONG ObjectCallbackRegistered;
     volatile LONG Initialized;
     volatile LONG Uninitializing;
+    PVOID ObjectCallbackRegistrationHandle;
     ULONG NotifyMode;
     ULONG PayloadVersion;
+    ULONG HandleAccessPayloadVersion;
     KSPIN_LOCK LineageLock;
     ULONG LineageNextIndex;
     KSWORD_SANDBOX_PROCESS_LINEAGE_ENTRY
@@ -76,6 +83,14 @@ KswProcessCreateNotifyLegacy(
     _In_ HANDLE ProcessId,
     _In_ BOOLEAN Create
     );
+
+#if KSWORD_SANDBOX_ENABLE_PROCESS_HANDLE_ACCESS
+static OB_PREOP_CALLBACK_STATUS
+KswProcessHandlePreOperationCallback(
+    _In_ PVOID RegistrationContext,
+    _Inout_ POB_PRE_OPERATION_INFORMATION OperationInformation
+    );
+#endif
 
 /*
  * Clears the fixed process lineage cache.
@@ -130,6 +145,29 @@ KswProcessPayloadVersion(
     version = g_KswProcessMonitorRuntime.PayloadVersion;
     return version == 0 ? KSWORD_SANDBOX_PROCESS_EVENT_VERSION : version;
 }
+
+#if KSWORD_SANDBOX_ENABLE_PROCESS_HANDLE_ACCESS
+/*
+ * Returns the draft process/thread handle-access payload version.
+ * Inputs : none; reads module-local runtime state.
+ * Logic  : callbacks may race with teardown, so fall back to the public draft
+ *          version rather than emitting zero if runtime cleanup has started.
+ * Return : KSWORD_SANDBOX_PROCESS_HANDLE_ACCESS_EVENT_VERSION.
+ */
+static
+ULONG
+KswProcessHandleAccessPayloadVersion(
+    VOID
+    )
+{
+    ULONG version;
+
+    version = g_KswProcessMonitorRuntime.HandleAccessPayloadVersion;
+    return version == 0 ?
+        KSWORD_SANDBOX_PROCESS_HANDLE_ACCESS_EVENT_VERSION :
+        version;
+}
+#endif
 
 /*
  * Remembers process lineage from a create callback for the later exit callback.
@@ -492,6 +530,325 @@ KswQueueProcessEvent(
     }
 }
 
+#if KSWORD_SANDBOX_ENABLE_PROCESS_HANDLE_ACCESS
+/*
+ * Queues one guarded process/thread handle-access event.
+ * Inputs : Payload is a fixed draft handle-access record produced by
+ *          ObRegisterCallbacks pre-operation notification.
+ * Logic  : shares the process producer enable bit and READ_EVENTS ring; no
+ *          allocation, blocking, or access-mask mutation occurs in the callback
+ *          hot path.
+ * Return : no return value; enqueue failures are reported through shared
+ *          status/loss counters where possible.
+ */
+static
+VOID
+KswQueueProcessHandleAccessEvent(
+    _In_ const KSWORD_SANDBOX_PROCESS_HANDLE_ACCESS_EVENT_PAYLOAD_V1_DRAFT* Payload
+    )
+{
+    PKSWORD_SANDBOX_DEVICE_EXTENSION deviceExtension;
+    NTSTATUS status;
+
+    if (Payload == NULL ||
+        InterlockedCompareExchange(&g_KswProcessMonitorRuntime.Active, 0, 0) == 0) {
+        return;
+    }
+
+    deviceExtension = g_KswProcessMonitorRuntime.DeviceExtension;
+    if (deviceExtension == NULL ||
+        deviceExtension->Signature != KSWORD_SANDBOX_DEVICE_EXTENSION_SIGNATURE) {
+        return;
+    }
+
+    status = KswPushEvent(
+        deviceExtension,
+        KswSandboxEventTypeProcess,
+        0,
+        Payload,
+        (ULONG)sizeof(*Payload));
+    if (!NT_SUCCESS(status) && status != STATUS_CANCELLED) {
+        KswSetLastStatus(deviceExtension, status);
+    }
+}
+/*
+ * Adds target identity fields for a process or thread object.
+ * Inputs : OperationInformation is supplied by ObRegisterCallbacks; Payload is
+ *          the fixed draft record being built on the callback stack.
+ * Logic  : supports PsProcessType and PsThreadType only.  Thread handle events
+ *          include both the owning process id and target thread id so consumers
+ *          do not need to infer a TID from process-only fields.
+ * Return : TRUE when the object type is supported and identity was captured.
+ */
+static
+BOOLEAN
+KswPopulateHandleAccessObjectIdentity(
+    _In_ POB_PRE_OPERATION_INFORMATION OperationInformation,
+    _Inout_ PKSWORD_SANDBOX_PROCESS_HANDLE_ACCESS_EVENT_PAYLOAD_V1_DRAFT Payload
+    )
+{
+    if (OperationInformation == NULL ||
+        Payload == NULL ||
+        OperationInformation->Object == NULL ||
+        OperationInformation->ObjectType == NULL) {
+        return FALSE;
+    }
+
+    if (OperationInformation->ObjectType == *PsProcessType) {
+        Payload->ObjectType = KswSandboxProcessAccessObjectTypeProcess;
+        Payload->TargetProcessId =
+            (ULONGLONG)(ULONG_PTR)PsGetProcessId(
+                (PEPROCESS)OperationInformation->Object);
+        Payload->Flags |=
+            KSWORD_SANDBOX_PROCESS_ACCESS_EVENT_FLAG_PROCESS_OBJECT;
+        if (Payload->TargetProcessId != 0) {
+            Payload->Flags |=
+                KSWORD_SANDBOX_PROCESS_ACCESS_EVENT_FLAG_TARGET_PID_PRESENT;
+        }
+        return TRUE;
+    }
+
+    if (OperationInformation->ObjectType == *PsThreadType) {
+        Payload->ObjectType = KswSandboxProcessAccessObjectTypeThread;
+        Payload->TargetProcessId =
+            (ULONGLONG)(ULONG_PTR)PsGetThreadProcessId(
+                (PETHREAD)OperationInformation->Object);
+        Payload->TargetThreadId =
+            (ULONGLONG)(ULONG_PTR)PsGetThreadId(
+                (PETHREAD)OperationInformation->Object);
+        Payload->Flags |=
+            KSWORD_SANDBOX_PROCESS_ACCESS_EVENT_FLAG_THREAD_OBJECT;
+        if (Payload->TargetProcessId != 0) {
+            Payload->Flags |=
+                KSWORD_SANDBOX_PROCESS_ACCESS_EVENT_FLAG_TARGET_PID_PRESENT;
+        }
+        if (Payload->TargetThreadId != 0) {
+            Payload->Flags |=
+                KSWORD_SANDBOX_PROCESS_ACCESS_EVENT_FLAG_TARGET_TID_PRESENT;
+        }
+        return TRUE;
+    }
+
+    return FALSE;
+}
+
+/*
+ * Emits non-mutating handle create/duplicate telemetry from Ob callbacks.
+ * Inputs : OperationInformation describes the process/thread object handle
+ *          operation before the kernel grants access.
+ * Logic  : captures actor pid, target pid/tid, source/target duplicate pids,
+ *          requested access masks, callback operation, previous mode, and
+ *          kernel-handle state.  It never changes DesiredAccess and always
+ *          returns OB_PREOP_SUCCESS.
+ * Return : OB_PREOP_SUCCESS so object-manager processing continues normally.
+ */
+static
+OB_PREOP_CALLBACK_STATUS
+KswProcessHandlePreOperationCallback(
+    _In_ PVOID RegistrationContext,
+    _Inout_ POB_PRE_OPERATION_INFORMATION OperationInformation
+    )
+{
+    KSWORD_SANDBOX_PROCESS_HANDLE_ACCESS_EVENT_PAYLOAD_V1_DRAFT payload;
+    POB_PRE_CREATE_HANDLE_INFORMATION createInfo;
+    POB_PRE_DUPLICATE_HANDLE_INFORMATION duplicateInfo;
+
+    UNREFERENCED_PARAMETER(RegistrationContext);
+
+    if (OperationInformation == NULL ||
+        OperationInformation->Parameters == NULL ||
+        InterlockedCompareExchange(
+            &g_KswProcessMonitorRuntime.ObjectCallbackRegistered,
+            0,
+            0) == 0) {
+        return OB_PREOP_SUCCESS;
+    }
+
+    RtlZeroMemory(&payload, sizeof(payload));
+    payload.Version = KswProcessHandleAccessPayloadVersion();
+    payload.Size = sizeof(payload);
+    payload.ActorProcessId = (ULONGLONG)(ULONG_PTR)PsGetCurrentProcessId();
+    payload.CallbackOperation = (ULONG)OperationInformation->Operation;
+    payload.PreviousMode = (ULONG)ExGetPreviousMode();
+    payload.Status = STATUS_SUCCESS;
+    payload.Flags =
+        KSWORD_SANDBOX_PROCESS_ACCESS_EVENT_FLAG_PRE_OPERATION;
+
+    if (OperationInformation->KernelHandle != 0) {
+        payload.Flags |=
+            KSWORD_SANDBOX_PROCESS_ACCESS_EVENT_FLAG_KERNEL_HANDLE;
+    }
+    if (payload.PreviousMode == UserMode) {
+        payload.Flags |=
+            KSWORD_SANDBOX_PROCESS_ACCESS_EVENT_FLAG_USER_MODE_REQUEST;
+    }
+
+    if (!KswPopulateHandleAccessObjectIdentity(
+            OperationInformation,
+            &payload)) {
+        return OB_PREOP_SUCCESS;
+    }
+
+    switch (OperationInformation->Operation) {
+    case OB_OPERATION_HANDLE_CREATE:
+        createInfo = &OperationInformation->Parameters->CreateHandleInformation;
+        payload.Operation = KswSandboxProcessOperationHandleCreateDraft;
+        payload.OriginalDesiredAccess = createInfo->OriginalDesiredAccess;
+        payload.DesiredAccess = createInfo->DesiredAccess;
+        payload.Flags |=
+            KSWORD_SANDBOX_PROCESS_ACCESS_EVENT_FLAG_ORIGINAL_DESIRED_ACCESS_PRESENT |
+            KSWORD_SANDBOX_PROCESS_ACCESS_EVENT_FLAG_DESIRED_ACCESS_PRESENT;
+        if (payload.DesiredAccess != payload.OriginalDesiredAccess) {
+            payload.Flags |=
+                KSWORD_SANDBOX_PROCESS_ACCESS_EVENT_FLAG_ACCESS_REDUCED;
+        }
+        break;
+
+    case OB_OPERATION_HANDLE_DUPLICATE:
+        duplicateInfo =
+            &OperationInformation->Parameters->DuplicateHandleInformation;
+        payload.Operation = KswSandboxProcessOperationHandleDuplicateDraft;
+        payload.OriginalDesiredAccess = duplicateInfo->OriginalDesiredAccess;
+        payload.DesiredAccess = duplicateInfo->DesiredAccess;
+        if (duplicateInfo->SourceProcess != NULL) {
+            payload.SourceProcessId =
+                (ULONGLONG)(ULONG_PTR)PsGetProcessId(
+                    duplicateInfo->SourceProcess);
+            if (payload.SourceProcessId != 0) {
+                payload.Flags |=
+                    KSWORD_SANDBOX_PROCESS_ACCESS_EVENT_FLAG_SOURCE_PID_PRESENT;
+            }
+        }
+        if (duplicateInfo->TargetProcess != NULL) {
+            payload.DuplicateTargetProcessId =
+                (ULONGLONG)(ULONG_PTR)PsGetProcessId(
+                    duplicateInfo->TargetProcess);
+            if (payload.DuplicateTargetProcessId != 0) {
+                payload.Flags |=
+                    KSWORD_SANDBOX_PROCESS_ACCESS_EVENT_FLAG_DUPLICATE_TARGET_PID_PRESENT;
+            }
+        }
+        payload.Flags |=
+            KSWORD_SANDBOX_PROCESS_ACCESS_EVENT_FLAG_ORIGINAL_DESIRED_ACCESS_PRESENT |
+            KSWORD_SANDBOX_PROCESS_ACCESS_EVENT_FLAG_DESIRED_ACCESS_PRESENT;
+        if (payload.DesiredAccess != payload.OriginalDesiredAccess) {
+            payload.Flags |=
+                KSWORD_SANDBOX_PROCESS_ACCESS_EVENT_FLAG_ACCESS_REDUCED;
+        }
+        break;
+
+    default:
+        return OB_PREOP_SUCCESS;
+    }
+
+    KswQueueProcessHandleAccessEvent(&payload);
+    return OB_PREOP_SUCCESS;
+}
+
+/*
+ * Registers process/thread object-manager handle telemetry callbacks.
+ * Inputs : DeviceExtension owns the shared event ring.
+ * Logic  : registers one non-mutating pre-operation callback for PsProcessType
+ *          and PsThreadType handle create/duplicate operations.  Registration
+ *          failure is non-fatal to process create/exit telemetry and is exposed
+ *          through LastNtStatus.
+ * Return : STATUS_SUCCESS when Ob callbacks registered; otherwise the object
+ *          manager registration failure.
+ */
+static
+NTSTATUS
+KswInitializeProcessHandleAccessCallbacks(
+    _In_ PKSWORD_SANDBOX_DEVICE_EXTENSION DeviceExtension
+    )
+{
+    NTSTATUS status;
+    UNICODE_STRING altitude;
+    OB_CALLBACK_REGISTRATION callbackRegistration;
+    OB_OPERATION_REGISTRATION operationRegistrations[2];
+
+    if (DeviceExtension == NULL ||
+        DeviceExtension->Signature != KSWORD_SANDBOX_DEVICE_EXTENSION_SIGNATURE) {
+        return STATUS_INVALID_PARAMETER;
+    }
+
+    if (InterlockedCompareExchange(
+            &g_KswProcessMonitorRuntime.ObjectCallbackRegistered,
+            0,
+            0) != 0) {
+        return STATUS_DEVICE_BUSY;
+    }
+
+    RtlZeroMemory(&callbackRegistration, sizeof(callbackRegistration));
+    RtlZeroMemory(operationRegistrations, sizeof(operationRegistrations));
+    RtlInitUnicodeString(
+        &altitude,
+        KSWORD_SANDBOX_PROCESS_HANDLE_ACCESS_ALTITUDE);
+
+    operationRegistrations[0].ObjectType = PsProcessType;
+    operationRegistrations[0].Operations =
+        OB_OPERATION_HANDLE_CREATE | OB_OPERATION_HANDLE_DUPLICATE;
+    operationRegistrations[0].PreOperation =
+        KswProcessHandlePreOperationCallback;
+    operationRegistrations[0].PostOperation = NULL;
+
+    operationRegistrations[1].ObjectType = PsThreadType;
+    operationRegistrations[1].Operations =
+        OB_OPERATION_HANDLE_CREATE | OB_OPERATION_HANDLE_DUPLICATE;
+    operationRegistrations[1].PreOperation =
+        KswProcessHandlePreOperationCallback;
+    operationRegistrations[1].PostOperation = NULL;
+
+    callbackRegistration.Version = ObGetFilterVersion();
+    callbackRegistration.OperationRegistrationCount =
+        (USHORT)RTL_NUMBER_OF(operationRegistrations);
+    callbackRegistration.Altitude = altitude;
+    callbackRegistration.RegistrationContext = DeviceExtension;
+    callbackRegistration.OperationRegistration = operationRegistrations;
+
+    status = ObRegisterCallbacks(
+        &callbackRegistration,
+        &g_KswProcessMonitorRuntime.ObjectCallbackRegistrationHandle);
+    if (NT_SUCCESS(status)) {
+        InterlockedExchange(
+            &g_KswProcessMonitorRuntime.ObjectCallbackRegistered,
+            1);
+    }
+    KswRecordProducerStatus(
+        DeviceExtension,
+        KSWORD_SANDBOX_PRODUCER_FLAG_PROCESS_HANDLE_ACCESS,
+        status);
+
+    return status;
+}
+
+/*
+ * Unregisters object-manager handle telemetry callbacks.
+ * Inputs : none; callback registration handle is module-local.
+ * Logic  : clears the registered gate before calling ObUnRegisterCallbacks so
+ *          any concurrent callback returns without queuing new events.
+ * Return : no return value.
+ */
+static
+VOID
+KswUninitializeProcessHandleAccessCallbacks(
+    VOID
+    )
+{
+    PVOID callbackRegistrationHandle;
+
+    callbackRegistrationHandle =
+        g_KswProcessMonitorRuntime.ObjectCallbackRegistrationHandle;
+    if (InterlockedExchange(
+            &g_KswProcessMonitorRuntime.ObjectCallbackRegistered,
+            0) != 0 &&
+        callbackRegistrationHandle != NULL) {
+        ObUnRegisterCallbacks(callbackRegistrationHandle);
+    }
+
+    g_KswProcessMonitorRuntime.ObjectCallbackRegistrationHandle = NULL;
+}
+#endif
+
 /*
  * Emits a process create or exit event from the Ex callback.
  * Inputs : Process and ProcessId identify the target process; CreateInfo is
@@ -631,6 +988,9 @@ KswInitializeProcessMonitor(
     )
 {
     NTSTATUS processStatus;
+#if KSWORD_SANDBOX_ENABLE_PROCESS_HANDLE_ACCESS
+    NTSTATUS handleAccessStatus;
+#endif
 
     if (DeviceExtension == NULL ||
         DeviceExtension->Signature != KSWORD_SANDBOX_DEVICE_EXTENSION_SIGNATURE) {
@@ -651,8 +1011,11 @@ KswInitializeProcessMonitor(
     g_KswProcessMonitorRuntime.NotifyMode = KswProcessNotifyModeNone;
     g_KswProcessMonitorRuntime.PayloadVersion =
         KSWORD_SANDBOX_PROCESS_EVENT_VERSION;
+    g_KswProcessMonitorRuntime.HandleAccessPayloadVersion =
+        KSWORD_SANDBOX_PROCESS_HANDLE_ACCESS_EVENT_VERSION;
     InterlockedExchange(&g_KswProcessMonitorRuntime.Active, 0);
     InterlockedExchange(&g_KswProcessMonitorRuntime.CallbackRegistered, 0);
+    InterlockedExchange(&g_KswProcessMonitorRuntime.ObjectCallbackRegistered, 0);
     InterlockedExchange(&g_KswProcessMonitorRuntime.Uninitializing, 0);
     KeInitializeSpinLock(&g_KswProcessMonitorRuntime.LineageLock);
     InterlockedExchange(&g_KswProcessMonitorRuntime.Initialized, 1);
@@ -683,6 +1046,16 @@ KswInitializeProcessMonitor(
         InterlockedExchange(&g_KswProcessMonitorRuntime.Active, 1);
     }
 
+#if KSWORD_SANDBOX_ENABLE_PROCESS_HANDLE_ACCESS
+    if (NT_SUCCESS(processStatus)) {
+        handleAccessStatus =
+            KswInitializeProcessHandleAccessCallbacks(DeviceExtension);
+        if (!NT_SUCCESS(handleAccessStatus)) {
+            KswSetLastStatus(DeviceExtension, handleAccessStatus);
+        }
+    }
+#endif
+
     return processStatus;
 }
 
@@ -708,6 +1081,9 @@ KswUninitializeProcessMonitor(
     }
 
     InterlockedExchange(&g_KswProcessMonitorRuntime.Active, 0);
+#if KSWORD_SANDBOX_ENABLE_PROCESS_HANDLE_ACCESS
+    KswUninitializeProcessHandleAccessCallbacks();
+#endif
     processRegistered = InterlockedExchange(
         &g_KswProcessMonitorRuntime.CallbackRegistered,
         0);
@@ -724,6 +1100,7 @@ KswUninitializeProcessMonitor(
     g_KswProcessMonitorRuntime.NotifyMode = KswProcessNotifyModeNone;
     KswClearProcessLineage();
     g_KswProcessMonitorRuntime.PayloadVersion = 0;
+    g_KswProcessMonitorRuntime.HandleAccessPayloadVersion = 0;
     g_KswProcessMonitorRuntime.DeviceExtension = NULL;
     InterlockedExchange(&g_KswProcessMonitorRuntime.Initialized, 0);
 }

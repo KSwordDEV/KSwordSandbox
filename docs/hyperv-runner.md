@@ -9,6 +9,26 @@ One-command Hyper-V E2E script: 脚本式入口仍是 `scripts/Invoke-HyperVE2E.
 注意区分：Web/API runner 使用 `DryRun` 字段；脚本式 `Invoke-HyperVE2E.ps1` 使用 `PlanOnly`。二者都不
 修改 VM，但入口和持久化字段不同。
 
+## Install/readiness boundary
+
+The Web/API runner assumes the operator has already chosen one of the documented
+install paths: use an already configured environment, restore an existing clean
+checkpoint/snapshot in an isolated lab, or create/prep a new VM/environment.
+First-computer live compatibility still requires a Hyper-V-capable Windows host,
+Hyper-V PowerShell module, elevated host process, BIOS/UEFI Intel VT-x / AMD-V
+plus SLAT, Windows guest, Guest Service Interface, PowerShell Direct, guest
+password secret, clean checkpoint, and staged guest payload.
+
+Before enabling `live=true`, use low-cost checks:
+
+```powershell
+.\install.ps1 -Mode CheckEnvironment
+.\run.ps1 -Mode CheckEnvironment
+```
+
+These checks do not start/restore/stop VMs, sign drivers, call `CSignTool.exe`,
+or configure optional VirusTotal hash-only enrichment.
+
 ## 执行模式（execution modes）
 
 ### DryRun

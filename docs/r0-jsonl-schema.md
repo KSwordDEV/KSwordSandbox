@@ -67,13 +67,16 @@ Example:
   selected `enableMask` and ABI protocol name.
 - `r0collector.driverHealth`: successful
   `IOCTL_KSWORD_SANDBOX_GET_HEALTH` reply. With `--health`, this is the only
-  live IOCTL emitted before `r0collector.stopped`.
+  live IOCTL emitted before `r0collector.stopped`. Current health rows include
+  the R0/ETW capability contract when producer masks are present; legacy health
+  replies mark the contract evidence as `live-get-health-legacy-no-producer-masks`.
 - `r0collector.driverCapabilities`: successful
   `IOCTL_KSWORD_SANDBOX_GET_CAPABILITIES` reply. It records ABI major/minor,
   capability flags, supported/default producer masks, event layout limits, and
   explicit ABI compatibility diagnostics (`abiCompatibility`,
   `abiCompatible`, `abiMismatchReasons`, plus `expected*`/`driver*` version and
-  reply-size aliases).
+  reply-size aliases). It is the canonical live row for deciding direct R0
+  observation versus ETW fallback lanes.
 - `r0collector.driverProducerMask`: emitted when `--enable-mask` is supplied
   and `IOCTL_KSWORD_SANDBOX_SET_PRODUCER_ENABLE_MASK` succeeds. It records
   requested, previous, effective, and supported masks.
@@ -130,6 +133,9 @@ these normalized `eventType` values:
 
 - `driver.load`
 - `driver.process`
+- `process.access` for an explicit draft
+  `KSWORD_SANDBOX_PROCESS_HANDLE_ACCESS_EVENT_PAYLOAD_V1_DRAFT` row
+  (`data.payloadSchemaName=r0.process_handle_access`)
 - `image.load`
 - `driver.file`
 - `driver.registry`
@@ -149,6 +155,20 @@ Common `data` fields include `ioctl`, `batchIndex`, `recordOffset`, `version`,
 `stress=false`, `stressOrdinal=-1`, `stressCount=0`, and
 `stressCorpusRole=live-driver-event`; synthetic stress rows override those
 stress fields with counted corpus values.
+
+Process-handle access readiness is additive and evidence-gated. The current
+public ABI reserves `KSWORD_SANDBOX_PROCESS_HANDLE_ACCESS_EVENT_PAYLOAD_V1_DRAFT`
+and `KSWORD_SANDBOX_CAPABILITY_FLAG_PROCESS_HANDLE_ACCESS_DRAFT`, but current v1
+drivers must not be treated as providing handle access unless a live driver row
+uses the draft `Version`/`Size`/handle operation prefix or capabilities advertise
+the draft bit. When such a row is observed, the collector normalizes it as
+`eventType=process.access` and emits `data.payloadSchemaName=r0.process_handle_access`,
+`semanticFamily=process.access`, `behaviorLane=process-handle-access`,
+`actorProcessId`, `targetProcessId`, optional `sourceProcessId` and
+`duplicateTargetProcessId`, `originalDesiredAccess*`, `desiredAccess*`,
+`grantedAccess*`, `*Names`, `*Hex`, and boolean decodes such as `*VmWrite`,
+`*CreateThread`, `*DupHandle`, and `*Sensitive`. 中文：这些字段只来自显式句柄访问
+payload；普通 `driver.process` create/exit 行不能推断进程句柄权限。
 
 Common attribution fields are additive and string-valued:
 
@@ -184,6 +204,10 @@ Common attribution fields are additive and string-valued:
   `collectorSuppressed=true` is present only on rows that were classified for
   suppression before policy was applied; emitted mock/schema rows keep it
   `false`.
+  `process.access` rows use the same collector self-noise policy: exact
+  collector PID, KSword infrastructure paths, explicit producer self-noise flags,
+  and `--suppress-self-noise` decide suppression. Target-process PID or access
+  mask values alone are never treated as noise.
 
 这些 attribution/self-noise fields 只用于解释“谁产生了这条证据、它是否来自 KSword
 基础设施、是否被默认策略抑制”。Report 和 rules 可以把它们作为过滤或降权依据，但不能把任一
@@ -243,7 +267,15 @@ Negotiation and queue rows must preserve these event-quality keys:
   `eventMaxPayloadSize`, `eventRingCapacity`, `readEventsReplyHeaderSize`,
   `capabilitiesReplySize`, `statusReplySize`,
   `setProducerEnableMaskRequestSize`, and
-  `setProducerEnableMaskReplySize`, plus non-behavior hints
+  `setProducerEnableMaskReplySize`, plus R0/ETW coverage fields
+  `r0EtwCapabilityContractVersion`, `r0EtwCapabilityContractSource`,
+  `r0EtwCapabilityContractEvidence`, `r0DirectObservationScope`,
+  `etwFallbackRequiredScope`, `etwFallbackRequiredForR0Gaps`,
+  `processCreateExitR0Direct`, `imageLoadR0Direct`, `fileActivityR0Direct`,
+  `registryActivityR0Direct`, `networkActivityR0Direct`,
+  `handleAccessR0Direct`, `handleAccessEtwFallbackRequired`,
+  `tokenPrivilegeAdjustmentR0Direct`, and
+  `tokenPrivilegeAdjustmentEtwFallbackRequired`, plus non-behavior hints
   `behaviorCounted=false`, `nonbehavior=true`, `noisePolicy`,
   `producerHint`, `producerProcessHint`, `selfProcessHint`, and zh hints so
   hosts do not count ABI/capability negotiation as sample behavior.
@@ -257,7 +289,13 @@ Negotiation and queue rows must preserve these event-quality keys:
   `totalEventsRead`, `totalEventsEnqueued`, `lostCount`, `lost`,
   `lossObserved`, `backpressure`, `backpressureObserved`,
   `backpressureReason`, `nextSequence`, `sequence`, and
-  `sequenceMeaning=nextSequence`.
+  `sequenceMeaning=nextSequence`. Status rows also carry the same R0/ETW
+  coverage contract, derived from active/effective producer masks, so disabled
+  or failed runtime producers move their lane into `etwFallbackRequiredScope`.
+  Current producer names include `driver`, `process`, `processHandleAccess`,
+  `image`, `file`, `registry`, and `network`; the separate
+  `processHandleAccess` bit prevents process create/exit success from hiding an
+  `ObRegisterCallbacks` registration failure.
 - `r0collector.driverNetworkStatus.data`: `diagnosticStage=networkStatus`,
   `diagnosticCode`, `severity`, `readinessState`, `networkStatusAvailable`,
   `getNetworkStatusCapable`, `networkWfpAleCapable`, `networkWfpAleActive`,

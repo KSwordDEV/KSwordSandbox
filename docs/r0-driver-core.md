@@ -94,6 +94,22 @@ service/minifilter state.
 - `KSWORD_SANDBOX_CAPABILITY_FLAG_SELF_NOISE_METADATA`
 - `KSWORD_SANDBOX_CAPABILITY_FLAG_GET_NETWORK_STATUS`
 
+Draft-only flag `KSWORD_SANDBOX_CAPABILITY_FLAG_PROCESS_HANDLE_ACCESS_DRAFT`
+is not included in the shared `KSWORD_SANDBOX_CAPABILITY_FLAGS_CURRENT`
+baseline, but the live kernel `GET_CAPABILITIES` reply advertises it when
+the process producer is compiled, `KSWORD_SANDBOX_ENABLE_PROCESS_HANDLE_ACCESS=1`,
+and the guarded driver build contains the ObRegisterCallbacks producer that emits
+`KSWORD_SANDBOX_PROCESS_HANDLE_ACCESS_EVENT_PAYLOAD_V1_DRAFT`. Runtime
+registration success/failure is reported through the separate
+`KSWORD_SANDBOX_PRODUCER_FLAG_PROCESS_HANDLE_ACCESS` active/failed producer bit
+and `LastNtStatus`; the normal process producer bit can still remain active for
+process create/exit callbacks.
+
+Draft-only flag `KSWORD_SANDBOX_CAPABILITY_FLAG_TOKEN_PRIVILEGE_DRAFT` remains
+reserved and is not advertised by the current driver. Until a signed driver
+build advertises that bit with matching payloads, token privilege adjustment is
+an ETW/audit fallback lane in the collector contract.
+
 ## Producer runtime state 与 payload 版本
 
 Each v1 event producer owns an explicit runtime state structure in the driver
@@ -140,8 +156,13 @@ V1 typed payload checklist:
 
 - file: `KSWORD_SANDBOX_FILE_EVENT_PAYLOAD`,
   `KSWORD_SANDBOX_FILE_EVENT_VERSION`, size 128 bytes.
-- process: `KSWORD_SANDBOX_PROCESS_EVENT_PAYLOAD`,
+- process lifecycle: `KSWORD_SANDBOX_PROCESS_EVENT_PAYLOAD`,
   `KSWORD_SANDBOX_PROCESS_EVENT_VERSION`, size 128 bytes.
+- process/thread handle access draft:
+  `KSWORD_SANDBOX_PROCESS_HANDLE_ACCESS_EVENT_PAYLOAD_V1_DRAFT`,
+  `KSWORD_SANDBOX_PROCESS_HANDLE_ACCESS_EVENT_VERSION`, size 128 bytes. This
+  payload is emitted only by the guarded ObRegisterCallbacks producer and uses
+  process event operations `HandleCreateDraft` / `HandleDuplicateDraft`.
 - image: `KSWORD_SANDBOX_IMAGE_EVENT_PAYLOAD`,
   `KSWORD_SANDBOX_IMAGE_EVENT_VERSION`, size 128 bytes.
 - registry: `KSWORD_SANDBOX_REGISTRY_EVENT_PAYLOAD`,
@@ -185,12 +206,30 @@ collectors that still ignore the reserved area remain compatible.
 - `KSWORD_SANDBOX_PRODUCER_FLAG_FILE`
 - `KSWORD_SANDBOX_PRODUCER_FLAG_REGISTRY`
 - `KSWORD_SANDBOX_PRODUCER_FLAG_NETWORK`
+- `KSWORD_SANDBOX_PRODUCER_FLAG_PROCESS_HANDLE_ACCESS`
 
 `SupportedProducerMask` is now derived from the compiled producer set.  The
 normal build includes all producer bits.  A lab build can define
 `KSWORD_SANDBOX_ENABLE_NETWORK_WFP_ALE=0`; in that case the network bit and the
 `NETWORK_WFP_ALE` capability are intentionally omitted rather than advertised as
 a fake/stub success.
+
+The guarded process/thread handle-access producer emits
+`KswSandboxEventTypeProcess` records, but it has its own producer bit:
+`KSWORD_SANDBOX_PRODUCER_FLAG_PROCESS_HANDLE_ACCESS`. This keeps operator
+enable masks and `ActiveProducerMask` / `FailedProducerMask` precise when
+process create/exit callbacks succeed but `ObRegisterCallbacks` fails. The
+distinct payload contract is still the draft payload version plus
+`KSWORD_SANDBOX_CAPABILITY_FLAG_PROCESS_HANDLE_ACCESS_DRAFT` in the live
+capability reply.
+
+`KSWORD_SANDBOX_PRODUCER_MASK_DEFAULT` intentionally excludes the draft
+`processHandleAccess` bit even when the build supports it. This keeps the MVP
+live default from overloading the fixed R0 ring with global handle-open noise.
+Operators can still opt in with `SET_PRODUCER_ENABLE_MASK` / R0Collector
+`--enable-mask 0x7f`; reports should treat default-disabled handle telemetry as
+an explicit R0/ETW coverage boundary, not as proof that no handle access
+occurred.
 
 The request `EnableMask` must be a subset of `SupportedProducerMask`. The driver
 rejects unsupported bits with `STATUS_INVALID_PARAMETER`. Disabling a producer

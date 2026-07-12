@@ -848,6 +848,12 @@ std::string DriverProcessIdSource(
 
     switch (eventType) {
     case KswSandboxEventTypeProcess:
+        if (IsProcessHandleAccessPayload(eventType, payload, payloadBytes) &&
+            payloadBytes >= sizeof(KSWORD_SANDBOX_PROCESS_HANDLE_ACCESS_EVENT_PAYLOAD_V1_DRAFT)) {
+            const auto* processAccessPayload =
+                reinterpret_cast<const KSWORD_SANDBOX_PROCESS_HANDLE_ACCESS_EVENT_PAYLOAD_V1_DRAFT*>(payload);
+            return processAccessPayload->ActorProcessId != 0 ? "typedPayload.actorProcessId" : "eventHeader";
+        }
         if (payloadBytes >= sizeof(KSWORD_SANDBOX_PROCESS_EVENT_PAYLOAD)) {
             const auto* processPayload =
                 reinterpret_cast<const KSWORD_SANDBOX_PROCESS_EVENT_PAYLOAD*>(payload);
@@ -906,7 +912,15 @@ std::string DriverProcessIdSource(
 // Processing: Names the subject kind independently from eventType so reports and
 // raw JSONL can explain what object the row is about.
 // Return: Stable subject kind label.
-std::string DriverSubjectKind(const ULONG eventType) {
+std::string DriverSubjectKind(
+    const ULONG eventType,
+    const unsigned char* payload,
+    const size_t payloadBytes) {
+    if (IsProcessHandleAccessPayload(eventType, payload, payloadBytes) &&
+        payloadBytes >= sizeof(KSWORD_SANDBOX_PROCESS_HANDLE_ACCESS_EVENT_PAYLOAD_V1_DRAFT)) {
+        return "process-handle";
+    }
+
     switch (eventType) {
     case KswSandboxEventTypeDriverLoad:
         return "driver";
@@ -942,17 +956,20 @@ DriverEventAttribution BuildDriverEventAttribution(
     const SandboxEventFields& event,
     const bool hasTypedSubjectPath) {
     DriverEventAttribution attribution;
-    attribution.producerCategory =
-        header.Type == KswSandboxEventTypeDriverLoad ? "driver" : DriverEventTypeName(header.Type);
-    attribution.subjectKind = DriverSubjectKind(header.Type);
+    attribution.producerCategory = IsProcessHandleAccessPayload(header.Type, payload, payloadBytes) &&
+            payloadBytes >= sizeof(KSWORD_SANDBOX_PROCESS_HANDLE_ACCESS_EVENT_PAYLOAD_V1_DRAFT)
+        ? "process.access"
+        : (header.Type == KswSandboxEventTypeDriverLoad ? "driver" : DriverEventTypeName(header.Type));
+    attribution.subjectKind = DriverSubjectKind(header.Type, payload, payloadBytes);
     attribution.processIdSource = DriverProcessIdSource(header.Type, payload, payloadBytes);
     attribution.collectorNoisePolicy = options.suppressSelfNoise
         ? "suppress-self-noise"
         : "emit-self-noise";
     attribution.eventOrigin =
         header.Type == KswSandboxEventTypeDriverLoad ? "kernel-driver-control-plane" : "kernel-driver";
-    attribution.actorRole =
-        attribution.processIdSource == "eventHeader" ? "callback-current-process" : "payload-subject-process";
+    attribution.actorRole = attribution.processIdSource == "typedPayload.actorProcessId"
+        ? "payload-actor-process"
+        : (attribution.processIdSource == "eventHeader" ? "callback-current-process" : "payload-subject-process");
     attribution.subjectRole =
         header.Type == KswSandboxEventTypeDriverLoad ? "driver-control-plane" : "sample-or-system";
 
@@ -1191,7 +1208,7 @@ bool EmitDriverEventRecords(
 
         const unsigned char* payload = eventBytes + offset + sizeof(header);
         SandboxEventFields event;
-        event.eventType = DriverEventJsonType(header.Type);
+        event.eventType = DriverEventJsonType(header.Type, payload, header.PayloadSize);
         event.source = "driver";
         event.processName.clear();
         event.commandLine.clear();

@@ -51,6 +51,20 @@ inline constexpr const char* kJsonlNoiseFieldSet =
     "noise|noiseScope|noiseKind|noiseSource|noiseClass|selfNoiseClass|collectorNoiseClass|noiseAction|noiseDisposition|noiseReasons|noiseTaxonomyVersion|noiseDecision|noiseDecisionSource|noiseClassificationConfidence|noiseProbeKind|sampleBehaviorCandidate|sampleBehaviorCandidateReason|collectionDiagnostic|collectionNoise|operatorInterpretation|zhNoiseHint|zhNoiseClassificationHint|zhOperatorHint";
 inline constexpr const char* kJsonlNoiseClassificationFields =
     "noiseTaxonomyVersion|noiseDecision|noiseDecisionSource|noiseClassificationConfidence|noiseProbeKind|sampleBehaviorCandidateReason|zhNoiseClassificationHint";
+inline constexpr const char* kR0PrivilegeTelemetrySourceUnavailable =
+    "not-implemented-no-token-privilege-producer";
+inline constexpr const char* kR0PrivilegeTelemetrySourceDraft =
+    "driver-token-privilege-draft";
+inline constexpr const char* kR0ProcessHandleAccessTelemetrySourceUnavailable =
+    "not-implemented-no-obcallback-handle-access-producer";
+inline constexpr const char* kR0ProcessHandleAccessTelemetrySourceDraft =
+    "driver-obcallback-process-handle-access-draft";
+inline constexpr const char* kR0ProcessPrivilegeCoveragePolicy =
+    "R0 process lifecycle telemetry is separate from token privilege changes and process-handle requested/granted access telemetry; consumers must rely on explicit R0/ETW fallback fields instead of inferring coverage from process create/exit producer support";
+inline constexpr const char* kR0PrivilegeTelemetryFieldSet =
+    "r0PrivilegeTelemetryAvailable|r0AdjustTokenPrivilegesTelemetryAvailable|r0SeDebugPrivilegeTelemetryAvailable|r0PrivilegeTelemetrySource|r0PrivilegeTelemetryStatus|tokenPrivilegeAdjustmentR0Direct|tokenPrivilegeAdjustmentEtwFallbackRequired|tokenPrivilegeAdjustmentObservation|tokenPrivilegeAdjustmentObservationSource|tokenPrivilegeAdjustmentEtwFallbackReason|r0ProcessHandleAccessTelemetryAvailable|r0ProcessHandleRightsTelemetryAvailable|r0ProcessHandleRequestedAccessAvailable|r0ProcessHandleGrantedAccessAvailable|r0ProcessHandleAccessTelemetrySource|r0ProcessHandleAccessTelemetryStatus|handleAccessR0Direct|handleAccessEtwFallbackRequired|handleAccessObservation|handleAccessObservationSource|handleAccessEtwFallbackReason|r0ProcessPrivilegeCoveragePolicy";
+inline constexpr const char* kR0EtwCapabilityContractFieldSet =
+    "r0EtwCapabilityContractVersion|r0EtwCapabilityContractSource|r0EtwCapabilityContractEvidence|r0EtwCapabilityContractFieldSet|r0DirectObservationScope|etwFallbackRequiredScope|etwFallbackRequiredForR0Gaps|processCreateExitR0Direct|processCreateExitObservation|processCreateExitObservationSource|processCreateExitEtwFallbackRequired|imageLoadR0Direct|imageLoadObservation|imageLoadObservationSource|imageLoadEtwFallbackRequired|fileActivityR0Direct|fileActivityObservation|fileActivityObservationSource|fileActivityEtwFallbackRequired|registryActivityR0Direct|registryActivityObservation|registryActivityObservationSource|registryActivityEtwFallbackRequired|networkActivityR0Direct|networkActivityObservation|networkActivityObservationSource|networkActivityEtwFallbackRequired|handleAccessR0Direct|handleAccessEtwFallbackRequired|tokenPrivilegeAdjustmentR0Direct|tokenPrivilegeAdjustmentEtwFallbackRequired";
 
 // Collector-side ABI guard constants. These mirror the public driver ABI offsets
 // that release/readiness diagnostics depend on. Keep them in the collector so
@@ -192,6 +206,8 @@ static_assert(sizeof(KSWORD_SANDBOX_FILE_EVENT_PAYLOAD) == 128U,
     "File payload size changed.");
 static_assert(sizeof(KSWORD_SANDBOX_PROCESS_EVENT_PAYLOAD) == 128U,
     "Process payload size changed.");
+static_assert(sizeof(KSWORD_SANDBOX_PROCESS_HANDLE_ACCESS_EVENT_PAYLOAD_V1_DRAFT) == 128U,
+    "Draft process-handle access payload size changed.");
 static_assert(sizeof(KSWORD_SANDBOX_IMAGE_EVENT_PAYLOAD) == 128U,
     "Image payload size changed.");
 static_assert(sizeof(KSWORD_SANDBOX_REGISTRY_EVENT_PAYLOAD) == 128U,

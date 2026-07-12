@@ -7,6 +7,18 @@ English summary: this page documents the no-WebUI command loop for the minimum j
 Canonical command coverage remains in `docs/run.md` and `docs/verification.md`;
 this page only covers the JobTool/no-WebUI loop.
 
+This CLI does not install Hyper-V, create VMs, restore checkpoints, configure
+VirusTotal, sign drivers, or call `CSignTool.exe`. Before using it for a real
+operator flow, choose one install path from `docs/install.md`: already configured
+environment, restore an existing clean checkpoint/snapshot, or create/prep a new
+VM/environment. Low-cost readiness remains:
+
+```powershell
+.\install.ps1 -Mode CheckEnvironment
+.\run.ps1 -Mode CheckEnvironment
+.\scripts\Invoke-OperatorCli.ps1 readiness -Json
+```
+
 JobTool reads and writes runtime job files. Keep job folders, reports,
 `artifact-index.json`, imported events, samples, payload binaries, VM files,
 captures, dumps, and secrets under the runtime root and out of git.

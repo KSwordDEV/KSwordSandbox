@@ -575,6 +575,74 @@ function New-CommandAvailabilityCheck {
         )
 }
 
+function Get-HyperVVmProfileCandidates {
+    param(
+        [ValidateRange(1, 100)]
+        [int]$Limit = 20,
+        [switch]$IncludeCheckpoints
+    )
+
+    $profiles = New-Object System.Collections.Generic.List[object]
+    try {
+        $allVms = @(Get-VM -ErrorAction Stop | Sort-Object -Property Name)
+        foreach ($vm in @($allVms | Select-Object -First $Limit)) {
+            $checkpoints = New-Object System.Collections.Generic.List[object]
+            $checkpointQuerySucceeded = $false
+            $checkpointQueryError = ''
+
+            if ($IncludeCheckpoints) {
+                try {
+                    $snapshotObjects = @(Get-VMSnapshot -VMName $vm.Name -ErrorAction Stop |
+                        Sort-Object -Property CreationTime -Descending)
+                    $checkpointQuerySucceeded = $true
+                    foreach ($snapshot in @($snapshotObjects | Select-Object -First $Limit)) {
+                        [void]$checkpoints.Add([ordered]@{
+                                checkpointName = [string]$snapshot.Name
+                                checkpointId   = [string]$snapshot.Id
+                                creationTime   = $snapshot.CreationTime
+                            })
+                    }
+                }
+                catch {
+                    $checkpointQueryError = $_.Exception.Message
+                }
+            }
+
+            [void]$profiles.Add([ordered]@{
+                    vmName                   = [string]$vm.Name
+                    vmId                     = [string]$vm.Id
+                    state                    = [string]$vm.State
+                    generation               = $vm.Generation
+                    checkpointQueryAttempted = [bool]$IncludeCheckpoints
+                    checkpointQuerySucceeded = $checkpointQuerySucceeded
+                    checkpointQueryError     = $checkpointQueryError
+                    checkpoints              = @($checkpoints.ToArray())
+                })
+        }
+
+        return [pscustomobject][ordered]@{
+            querySucceeded     = $true
+            queryError         = ''
+            returnedVmCount    = $profiles.Count
+            totalVmCount       = $allVms.Count
+            limit              = $Limit
+            includeCheckpoints = [bool]$IncludeCheckpoints
+            profiles           = @($profiles.ToArray())
+        }
+    }
+    catch {
+        return [pscustomobject][ordered]@{
+            querySucceeded     = $false
+            queryError         = $_.Exception.Message
+            returnedVmCount    = 0
+            totalVmCount       = 0
+            limit              = $Limit
+            includeCheckpoints = [bool]$IncludeCheckpoints
+            profiles           = @()
+        }
+    }
+}
+
 function New-GuestSecretCheck {
     param([Parameter(Mandatory)][string]$SecretName)
 
@@ -759,14 +827,16 @@ function New-HyperVVmCheck {
             -Details @{ vmName = $VmName; exists = $true; state = $vm.State.ToString(); id = [string]$vm.Id; readOnly = $true }
     }
     catch {
+        $inventory = Get-HyperVVmProfileCandidates -Limit 20
         return New-PlanCheck `
             -Name 'Golden VM exists' `
             -Status 'Failed' `
             -RequiredForLive $true `
             -Message "VM 诊断：找不到或无法查询 golden VM '$VmName'。下一步：确认 VM 名称、Hyper-V 权限和宿主机环境。英文详情：$($_.Exception.Message)" `
-            -Details @{ vmName = $VmName; exists = $false; readOnly = $true; error = $_.Exception.Message } `
+            -Details @{ vmName = $VmName; exists = $false; readOnly = $true; error = $_.Exception.Message; candidateQuerySucceeded = [bool]$inventory.querySucceeded; candidateQueryError = $inventory.queryError; candidateLimit = 20; availableVmProfiles = @($inventory.profiles) } `
             -Remediation @(
                 "Create or import a golden Hyper-V VM named '$VmName', or record the actual VM name with .\install.ps1 -Mode Change -UpdateHyperVConfig -VmName <existing VM> -CheckpointName <checkpoint>.",
+                "List read-only local VM/checkpoint candidates with .\scripts\Test-HyperVReadiness.ps1 -ListAvailableVmProfiles from an elevated shell.",
                 "Run .\scripts\Test-HyperVReadiness.ps1 after updating the VM name; it is read-only and will not start or restore the VM."
             )
     }
@@ -798,22 +868,35 @@ function New-HyperVCheckpointCheck {
             -Details @{ vmName = $VmName; checkpointName = $CheckpointName; exists = $true; creationTime = $snapshot.CreationTime; readOnly = $true }
     }
     catch {
+        $outerError = $_
         $availableSnapshots = @()
+        $candidateQueryError = ''
         try {
-            $availableSnapshots = @(Get-VMSnapshot -VMName $VmName -ErrorAction Stop | ForEach-Object { [string]$_.Name } | Select-Object -First 20)
+            $availableSnapshots = @(Get-VMSnapshot -VMName $VmName -ErrorAction Stop |
+                Sort-Object -Property CreationTime -Descending |
+                Select-Object -First 20 |
+                ForEach-Object {
+                    [ordered]@{
+                        checkpointName = [string]$_.Name
+                        checkpointId   = [string]$_.Id
+                        creationTime   = $_.CreationTime
+                    }
+                })
         }
         catch {
             $availableSnapshots = @()
+            $candidateQueryError = $_.Exception.Message
         }
 
         return New-PlanCheck `
             -Name 'Clean checkpoint exists' `
             -Status 'Failed' `
             -RequiredForLive $true `
-            -Message "Checkpoint 诊断：找不到或无法查询 clean checkpoint '$CheckpointName'（VM '$VmName'）。下一步：创建干净快照或更新 -CheckpointName。英文详情：$($_.Exception.Message)" `
-            -Details @{ vmName = $VmName; checkpointName = $CheckpointName; exists = $false; readOnly = $true; availableCheckpoints = @($availableSnapshots); error = $_.Exception.Message } `
+            -Message "Checkpoint 诊断：找不到或无法查询 clean checkpoint '$CheckpointName'（VM '$VmName'）。下一步：创建干净快照或更新 -CheckpointName。英文详情：$($outerError.Exception.Message)" `
+            -Details @{ vmName = $VmName; checkpointName = $CheckpointName; exists = $false; readOnly = $true; availableCheckpoints = @($availableSnapshots); candidateLimit = 20; candidateQueryError = $candidateQueryError; error = $outerError.Exception.Message } `
             -Remediation @(
                 "Create a clean checkpoint named '$CheckpointName' on VM '$VmName', or record the correct checkpoint with .\install.ps1 -Mode Change -UpdateHyperVConfig -VmName '$VmName' -CheckpointName <checkpoint>.",
+                "List read-only local VM/checkpoint candidates with .\scripts\Test-HyperVReadiness.ps1 -ListAvailableVmProfiles -VmName '$VmName' from an elevated shell.",
                 "Rerun .\scripts\Test-HyperVReadiness.ps1 to confirm the checkpoint exists; the check is read-only."
             )
     }
@@ -2772,6 +2855,7 @@ try {
         operatorGuidance = [ordered]@{
             checkEnvironmentCommand = '.\run.ps1 -Mode CheckEnvironment'
             readinessCommand = '.\scripts\Test-HyperVReadiness.ps1'
+            vmProfileInventoryCommand = '.\scripts\Test-HyperVReadiness.ps1 -ListAvailableVmProfiles'
             planOnlyCommand = '.\run.ps1 -Mode Plan -SamplePath <sample.exe>'
             whatIfCommand = '.\run.ps1 -Mode Analyze -SamplePath <sample.exe> -Live -WhatIf'
             payloadPreparationCommand = $payloadPrepareCommand

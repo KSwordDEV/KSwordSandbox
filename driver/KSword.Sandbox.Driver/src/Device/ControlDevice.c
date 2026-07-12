@@ -189,6 +189,10 @@ KswBuildCapabilityFlags(
     flags |= KSWORD_SANDBOX_CAPABILITY_FLAG_PROCESS_CREATE_EXIT;
 #endif
 
+#if KSWORD_SANDBOX_ENABLE_PROCESS_CREATE && KSWORD_SANDBOX_ENABLE_PROCESS_HANDLE_ACCESS
+    flags |= KSWORD_SANDBOX_CAPABILITY_FLAG_PROCESS_HANDLE_ACCESS_DRAFT;
+#endif
+
 #if KSWORD_SANDBOX_ENABLE_IMAGE_LOAD
     flags |= KSWORD_SANDBOX_CAPABILITY_FLAG_IMAGE_LOAD;
 #endif
@@ -231,7 +235,8 @@ KswFillCapabilitiesReply(
     Reply->AbiVersionMinor = KSWORD_SANDBOX_ABI_VERSION_MINOR;
     Reply->CapabilityFlags = KswBuildCapabilityFlags();
     Reply->SupportedProducerMask = Snapshot->SupportedProducerMask;
-    Reply->DefaultProducerMask = KSWORD_SANDBOX_COMPILED_PRODUCER_MASK;
+    Reply->DefaultProducerMask =
+        KSWORD_SANDBOX_COMPILED_PRODUCER_MASK & KSWORD_SANDBOX_PRODUCER_MASK_DEFAULT;
     Reply->EventHeaderVersion = KSWORD_SANDBOX_EVENT_HEADER_VERSION;
     Reply->EventMaxPayloadSize = KSWORD_SANDBOX_EVENT_MAX_PAYLOAD_SIZE;
     Reply->EventRingCapacity = KSWORD_SANDBOX_EVENT_RING_CAPACITY;

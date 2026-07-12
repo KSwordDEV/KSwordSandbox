@@ -39,6 +39,8 @@ std::string CurrentCapabilityFlagNames(const unsigned long long flags) {
     appendName(KSWORD_SANDBOX_CAPABILITY_FLAG_PRODUCER_METADATA, "ProducerMetadata");
     appendName(KSWORD_SANDBOX_CAPABILITY_FLAG_SELF_NOISE_METADATA, "SelfNoiseMetadata");
     appendName(KSWORD_SANDBOX_CAPABILITY_FLAG_GET_NETWORK_STATUS, "GetNetworkStatus");
+    appendName(KSWORD_SANDBOX_CAPABILITY_FLAG_PROCESS_HANDLE_ACCESS_DRAFT, "ProcessHandleAccessDraft");
+    appendName(KSWORD_SANDBOX_CAPABILITY_FLAG_TOKEN_PRIVILEGE_DRAFT, "TokenPrivilegeDraft");
 
     return names.empty() ? "none" : names;
 }
@@ -62,6 +64,7 @@ std::string CurrentProducerMaskNames(const unsigned long mask) {
 
     appendName(KSWORD_SANDBOX_PRODUCER_FLAG_DRIVER, "driver");
     appendName(KSWORD_SANDBOX_PRODUCER_FLAG_PROCESS, "process");
+    appendName(KSWORD_SANDBOX_PRODUCER_FLAG_PROCESS_HANDLE_ACCESS, "processHandleAccess");
     appendName(KSWORD_SANDBOX_PRODUCER_FLAG_IMAGE, "image");
     appendName(KSWORD_SANDBOX_PRODUCER_FLAG_FILE, "file");
     appendName(KSWORD_SANDBOX_PRODUCER_FLAG_REGISTRY, "registry");
@@ -189,6 +192,34 @@ std::string BuildAbiSelfCheckData(const Options& options) {
     data.AddUnsigned("producerMaskDefault", KSWORD_SANDBOX_PRODUCER_MASK_DEFAULT);
     data.AddUtf8("producerMaskDefaultHex", HexUnsignedLongLong(KSWORD_SANDBOX_PRODUCER_MASK_DEFAULT, 8));
     data.AddUtf8("producerMaskDefaultNames", CurrentProducerMaskNames(KSWORD_SANDBOX_PRODUCER_MASK_DEFAULT));
+    AddCurrentR0EtwCapabilityContractFields(
+        data,
+        "abi-self-check",
+        "compile-time-current-capability-flags-and-producer-mask");
+    data.AddUnsigned(
+        "processHandleAccessDraftCapabilityFlag",
+        KSWORD_SANDBOX_CAPABILITY_FLAG_PROCESS_HANDLE_ACCESS_DRAFT);
+    data.AddUtf8(
+        "processHandleAccessDraftCapabilityFlagHex",
+        HexUnsignedLongLong(KSWORD_SANDBOX_CAPABILITY_FLAG_PROCESS_HANDLE_ACCESS_DRAFT, 16));
+    data.AddUnsigned(
+        "tokenPrivilegeDraftCapabilityFlag",
+        KSWORD_SANDBOX_CAPABILITY_FLAG_TOKEN_PRIVILEGE_DRAFT);
+    data.AddUtf8(
+        "tokenPrivilegeDraftCapabilityFlagHex",
+        HexUnsignedLongLong(KSWORD_SANDBOX_CAPABILITY_FLAG_TOKEN_PRIVILEGE_DRAFT, 16));
+    data.AddUnsigned(
+        "processHandleAccessDraftPayloadVersion",
+        KSWORD_SANDBOX_PROCESS_HANDLE_ACCESS_EVENT_VERSION);
+    data.AddUtf8(
+        "processHandleAccessDraftPayloadVersionHex",
+        HexUnsignedLongLong(KSWORD_SANDBOX_PROCESS_HANDLE_ACCESS_EVENT_VERSION, 8));
+    data.AddUnsigned(
+        "processHandleAccessDraftPayloadSize",
+        sizeof(KSWORD_SANDBOX_PROCESS_HANDLE_ACCESS_EVENT_PAYLOAD_V1_DRAFT));
+    data.AddUtf8(
+        "processHandleAccessDraftPayloadPolicy",
+        "reserved schema only; current signed driver does not register ObRegisterCallbacks or emit process handle access rows");
 
     data.AddBool("abiGuardPassed", true);
     data.AddUtf8("abiGuardPolicy", "compile-time static_asserts plus emitted size/offset evidence for release readiness");
@@ -397,7 +428,7 @@ std::string BuildAbiSelfCheckData(const Options& options) {
     data.AddUtf8("typedPayloadSemanticFields", "semanticFamily|behaviorLane|activityKind|evidenceReady|zhMessage|zhHint|zhSemanticHint|semanticScenario|artifactCandidateKind|dropLocationFamily|persistenceFamily|imageLoadFamily|networkEvidenceKind plus process/file/registry/network family-specific hints");
     data.AddUtf8("stressBackpressureDiagnostics", "observedSequenceSpan|expectedContiguousEvents|sequenceGapReason|lossDiagnostic|backpressureSeverity|backpressureDiagnostics|zhBackpressureHint");
     data.AddUtf8("queueLossEvidence", "lostCount|TotalEventsDropped|EventsDropped|TotalEventsSuppressed|TotalEventsBackpressured|ProducerDroppedMask|ProducerSuppressedMask|ProducerBackpressureMask|NextSequence|sequence|sequenceGapObserved|sequenceGapEstimate|queueHighWatermark|highWatermark");
-    data.AddUtf8("stableJsonlFields", "sequence|sequenceMeaning|sequenceScope|sequenceConcrete|lost|lostCount|loss|lossObserved|backpressure|backpressureObserved|backpressureReason|backpressureSeverity|highWatermark|lastEnqueueFailureStatus|noise|noiseScope|noiseKind|noiseSource|noiseClass|selfNoiseClass|collectorNoiseClass|noiseAction|noiseDisposition|noiseReasons|noiseFieldSet|noiseTaxonomyVersion|noiseDecision|noiseDecisionSource|noiseClassificationConfidence|noiseProbeKind|sampleBehaviorCandidate|sampleBehaviorCandidateReason|collectorNoise|collectorSelfNoise|selfProcess|selfNoise|selfNoiseReason|selfNoiseAction|collectorSuppressed|producer|producerCategory|eventOrigin|subjectKind|actorRole|subjectRole|processIdSource|semanticFamily|behaviorLane|activityKind|semanticContractVersion|semanticRowKind|semanticCompanionRow|semanticCompanionCount|semanticCompanionContract|semanticRowCountedInStress|semanticScenario|semanticSelfCheck|semanticSelfCheckScenarios|semanticSelfCheckRows|semanticEvidenceKind|zhSemanticHint|zhOperatorHint|zhCompanionHint|artifactCandidateKind|dropLocationFamily|droppedFileCandidate|startupFolderCandidate|downloadedFileCandidate|executableFileCandidate|persistenceFamily|servicePersistenceCandidate|ifeoPersistenceCandidate|imageLoadFamily|injectionCandidate|processLineageScenario|lineageConfidence|parentProcessId|creatingProcessId|capturedCommandLine|networkEvidenceKind|externalAddressCandidate|lateralMovementCandidate|downloadExecuteCandidate|serviceHint|serviceHintDns|serviceHintHttp|serviceHintTls|dnsQueryNameAvailable|dnsQueryNameSource|dnsCorrelationRecordType|dnsDetailsOwner|httpHostAvailable|httpUriAvailable|httpMethodAvailable|httpCorrelationRecordType|httpDetailsOwner|tlsSniAvailable|tlsCertificateAvailable|tlsCorrelationRecordType|tlsDetailsOwner|protocolPayloadParsed|protocolParserSource|protocolPayloadSource|networkCorrelationContractVersion|networkCorrelationRole|pcapCorrelationRole|pcapCorrelationJoinFields|pcapCorrelationMissingFields|pcapCorrelationConfidence|l7ProtocolDetailsAvailable|l7ProtocolDetailsOwner|r0ProtocolParserGuarantee|protocolBoundaryVerdict|pcapCorrelationRequired|pcapCorrelationStatus|pcapFlowKeyCandidate|pcapCorrelationKey|networkProtocolBoundaryFields|networkCorrelationStableFields|flowKey|sourceEndpoint|destinationEndpoint|zhMessage|zhHint|zhPcapCorrelationHint|zhNetworkBoundaryHint|zhDnsCorrelationHint|zhHttpCorrelationHint|zhTlsCorrelationHint|zhNoiseClassificationHint|operationName|status|pathTruncated|schema|eventSchemaName|eventSchemaVersion|eligible|processed|emitted|suppressed|skipped|head|tail|sampling|sequenceGapReason|observedSequenceSpan|producerDroppedMask|producerSuppressedMask|producerBackpressureMask|effectiveProducerMask|lastFailureNtStatus|networkStatusAvailable|networkStatusCapability|supportedLayerMask|activeLayerMask|todoMask|classifyCount|eventCount|queueFailureCount|classifyPayloadFailureCount|lastDegradeReasonName|payloadVersion|payloadVersionHex|payloadSchemaVersion|payloadVersionStatus|expectedPayloadVersion|expectedPayloadVersionHex|producerPayloadVersionFieldSet|stress|stressOrdinal|stressCount|stressCorpusRole|driverEventStressFieldSet|StressJsonlNoiseEvidence");
+    data.AddUtf8("stableJsonlFields", "sequence|sequenceMeaning|sequenceScope|sequenceConcrete|lost|lostCount|loss|lossObserved|backpressure|backpressureObserved|backpressureReason|backpressureSeverity|highWatermark|lastEnqueueFailureStatus|noise|noiseScope|noiseKind|noiseSource|noiseClass|selfNoiseClass|collectorNoiseClass|noiseAction|noiseDisposition|noiseReasons|noiseFieldSet|noiseTaxonomyVersion|noiseDecision|noiseDecisionSource|noiseClassificationConfidence|noiseProbeKind|sampleBehaviorCandidate|sampleBehaviorCandidateReason|collectorNoise|collectorSelfNoise|selfProcess|selfNoise|selfNoiseReason|selfNoiseAction|collectorSuppressed|producer|producerCategory|eventOrigin|subjectKind|actorRole|subjectRole|processIdSource|semanticFamily|behaviorLane|activityKind|semanticContractVersion|semanticRowKind|semanticCompanionRow|semanticCompanionCount|semanticCompanionContract|semanticRowCountedInStress|semanticScenario|semanticSelfCheck|semanticSelfCheckScenarios|semanticSelfCheckRows|semanticEvidenceKind|zhSemanticHint|zhOperatorHint|zhCompanionHint|artifactCandidateKind|dropLocationFamily|droppedFileCandidate|startupFolderCandidate|downloadedFileCandidate|executableFileCandidate|persistenceFamily|servicePersistenceCandidate|ifeoPersistenceCandidate|imageLoadFamily|injectionCandidate|processLineageScenario|lineageConfidence|r0PrivilegeTelemetryAvailable|r0AdjustTokenPrivilegesTelemetryAvailable|r0SeDebugPrivilegeTelemetryAvailable|r0PrivilegeTelemetrySource|r0PrivilegeTelemetryStatus|tokenPrivilegeAdjustmentR0Direct|tokenPrivilegeAdjustmentEtwFallbackRequired|tokenPrivilegeAdjustmentObservation|tokenPrivilegeAdjustmentObservationSource|tokenPrivilegeAdjustmentEtwFallbackReason|r0ProcessHandleAccessTelemetryAvailable|r0ProcessHandleRightsTelemetryAvailable|r0ProcessHandleRequestedAccessAvailable|r0ProcessHandleGrantedAccessAvailable|r0ProcessHandleAccessTelemetrySource|r0ProcessHandleAccessTelemetryStatus|handleAccessR0Direct|handleAccessEtwFallbackRequired|handleAccessObservation|handleAccessObservationSource|handleAccessEtwFallbackReason|r0ProcessPrivilegeCoveragePolicy|r0PrivilegeTelemetryFieldSet|r0EtwCapabilityContractVersion|r0EtwCapabilityContractSource|r0EtwCapabilityContractEvidence|r0EtwCapabilityContractFieldSet|r0DirectObservationScope|etwFallbackRequiredScope|etwFallbackRequiredForR0Gaps|r0EtwFallbackPolicy|processCreateExitR0Direct|processCreateExitObservation|processCreateExitObservationSource|processCreateExitEtwFallbackRequired|imageLoadR0Direct|fileActivityR0Direct|registryActivityR0Direct|networkActivityR0Direct|parentProcessId|creatingProcessId|capturedCommandLine|networkEvidenceKind|externalAddressCandidate|lateralMovementCandidate|downloadExecuteCandidate|serviceHint|serviceHintDns|serviceHintHttp|serviceHintTls|dnsQueryNameAvailable|dnsQueryNameSource|dnsCorrelationRecordType|dnsDetailsOwner|httpHostAvailable|httpUriAvailable|httpMethodAvailable|httpCorrelationRecordType|httpDetailsOwner|tlsSniAvailable|tlsCertificateAvailable|tlsCorrelationRecordType|tlsDetailsOwner|protocolPayloadParsed|protocolParserSource|protocolPayloadSource|networkCorrelationContractVersion|networkCorrelationRole|pcapCorrelationRole|pcapCorrelationJoinFields|pcapCorrelationMissingFields|pcapCorrelationConfidence|l7ProtocolDetailsAvailable|l7ProtocolDetailsOwner|r0ProtocolParserGuarantee|protocolBoundaryVerdict|pcapCorrelationRequired|pcapCorrelationStatus|pcapFlowKeyCandidate|pcapCorrelationKey|networkProtocolBoundaryFields|networkCorrelationStableFields|flowKey|sourceEndpoint|destinationEndpoint|zhMessage|zhHint|zhPcapCorrelationHint|zhNetworkBoundaryHint|zhDnsCorrelationHint|zhHttpCorrelationHint|zhTlsCorrelationHint|zhNoiseClassificationHint|operationName|status|pathTruncated|schema|eventSchemaName|eventSchemaVersion|eligible|processed|emitted|suppressed|skipped|head|tail|sampling|sequenceGapReason|observedSequenceSpan|producerDroppedMask|producerSuppressedMask|producerBackpressureMask|effectiveProducerMask|lastFailureNtStatus|networkStatusAvailable|networkStatusCapability|supportedLayerMask|activeLayerMask|todoMask|classifyCount|eventCount|queueFailureCount|classifyPayloadFailureCount|lastDegradeReasonName|payloadVersion|payloadVersionHex|payloadSchemaVersion|payloadVersionStatus|expectedPayloadVersion|expectedPayloadVersionHex|producerPayloadVersionFieldSet|stress|stressOrdinal|stressCount|stressCorpusRole|driverEventStressFieldSet|StressJsonlNoiseEvidence");
     data.AddUtf8("collectorSelfCheckContract", "--abi-self-check emits this row and exits before CreateFileW/DeviceIoControl");
     data.AddWide("zhCollectorSelfCheckContract", L"--abi-self-check \u4f1a\u53d1\u51fa\u8be5\u884c\uff0c\u5e76\u5728 CreateFileW/DeviceIoControl \u4e4b\u524d\u9000\u51fa\u3002");
 

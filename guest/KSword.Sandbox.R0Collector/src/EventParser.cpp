@@ -79,6 +79,22 @@ std::string DriverEventJsonType(const ULONG eventType) {
     }
 }
 
+// Input: Public driver event type plus optional payload bytes.
+// Processing: Promotes draft process-handle access payloads to a stable
+// normalized row type while leaving ordinary process create/exit rows unchanged.
+// Return: SandboxEvent.eventType value for one driver-originated event.
+std::string DriverEventJsonType(
+    const ULONG eventType,
+    const unsigned char* payload,
+    const size_t payloadBytes) {
+    if (IsProcessHandleAccessPayload(eventType, payload, payloadBytes) &&
+        payloadBytes >= sizeof(KSWORD_SANDBOX_PROCESS_HANDLE_ACCESS_EVENT_PAYLOAD_V1_DRAFT)) {
+        return "process.access";
+    }
+
+    return DriverEventJsonType(eventType);
+}
+
 // Input: Flag bits from KSWORD_SANDBOX_EVENT_HEADER.Flags.
 // Processing: Decodes currently public flag bits and preserves unknown bits as a
 // hexadecimal suffix so newer drivers remain diagnosable by older collectors.
@@ -341,6 +357,14 @@ std::string CapabilityFlagNames(const ULONGLONG flags) {
         appendName("GetNetworkStatus");
         knownFlags |= KSWORD_SANDBOX_CAPABILITY_FLAG_GET_NETWORK_STATUS;
     }
+    if ((flags & KSWORD_SANDBOX_CAPABILITY_FLAG_PROCESS_HANDLE_ACCESS_DRAFT) != 0) {
+        appendName("ProcessHandleAccessDraft");
+        knownFlags |= KSWORD_SANDBOX_CAPABILITY_FLAG_PROCESS_HANDLE_ACCESS_DRAFT;
+    }
+    if ((flags & KSWORD_SANDBOX_CAPABILITY_FLAG_TOKEN_PRIVILEGE_DRAFT) != 0) {
+        appendName("TokenPrivilegeDraft");
+        knownFlags |= KSWORD_SANDBOX_CAPABILITY_FLAG_TOKEN_PRIVILEGE_DRAFT;
+    }
 
     const ULONGLONG unknownFlags = flags & ~knownFlags;
     if (unknownFlags != 0) {
@@ -599,6 +623,10 @@ std::string ProducerMaskNames(const ULONG mask) {
     if ((mask & KSWORD_SANDBOX_PRODUCER_FLAG_PROCESS) != 0) {
         appendName("process");
         knownFlags |= KSWORD_SANDBOX_PRODUCER_FLAG_PROCESS;
+    }
+    if ((mask & KSWORD_SANDBOX_PRODUCER_FLAG_PROCESS_HANDLE_ACCESS) != 0) {
+        appendName("processHandleAccess");
+        knownFlags |= KSWORD_SANDBOX_PRODUCER_FLAG_PROCESS_HANDLE_ACCESS;
     }
     if ((mask & KSWORD_SANDBOX_PRODUCER_FLAG_IMAGE) != 0) {
         appendName("image");
@@ -931,9 +959,140 @@ std::string ProcessOperationName(const ULONG operation) {
         return "create";
     case KswSandboxProcessOperationExit:
         return "exit";
+    case KswSandboxProcessOperationHandleCreateDraft:
+        return "handleCreateDraft";
+    case KswSandboxProcessOperationHandleDuplicateDraft:
+        return "handleDuplicateDraft";
     default:
         return "unrecognized";
     }
+}
+
+// Input: Process event payload prefix.
+// Processing: Detects the reserved draft ObRegisterCallbacks layout without
+// requiring the current driver to advertise or emit it.  The check is strict on
+// event type, draft version, draft size, and handle operation code so lifecycle
+// create/exit payloads cannot be misread as handle-access rows.
+// Return: true only for the draft process-handle access payload shape.
+bool IsProcessHandleAccessPayload(
+    const ULONG eventType,
+    const unsigned char* payload,
+    const size_t payloadBytes) {
+    if (eventType != KswSandboxEventTypeProcess ||
+        payload == nullptr ||
+        payloadBytes < (3U * sizeof(ULONG))) {
+        return false;
+    }
+
+    ULONG payloadVersion = 0;
+    ULONG payloadSize = 0;
+    ULONG operation = 0;
+    std::memcpy(&payloadVersion, payload, sizeof(payloadVersion));
+    std::memcpy(&payloadSize, payload + sizeof(ULONG), sizeof(payloadSize));
+    std::memcpy(&operation, payload + (2U * sizeof(ULONG)), sizeof(operation));
+
+    const bool handleOperation =
+        operation == KswSandboxProcessOperationHandleCreateDraft ||
+        operation == KswSandboxProcessOperationHandleDuplicateDraft;
+    return payloadVersion == KSWORD_SANDBOX_PROCESS_HANDLE_ACCESS_EVENT_VERSION &&
+        payloadSize == static_cast<ULONG>(sizeof(KSWORD_SANDBOX_PROCESS_HANDLE_ACCESS_EVENT_PAYLOAD_V1_DRAFT)) &&
+        handleOperation;
+}
+
+// Input: Process-handle access payload Flags.
+// Processing: Names the draft Ob callback metadata bits while preserving unknown
+// bits for a future driver/parser pair.
+// Return: Pipe-delimited flag names, or "none".
+std::string ProcessAccessEventFlagNames(const ULONG flags) {
+    std::string names;
+    ULONG knownFlags = 0;
+    const auto appendName = [&names](const std::string& name) {
+        if (!names.empty()) {
+            names += "|";
+        }
+        names += name;
+    };
+
+    const auto appendFlag = [&](const ULONG bit, const char* name) {
+        if ((flags & bit) != 0) {
+            appendName(name);
+            knownFlags |= bit;
+        }
+    };
+
+    appendFlag(KSWORD_SANDBOX_PROCESS_ACCESS_EVENT_FLAG_TARGET_PID_PRESENT, "TargetPidPresent");
+    appendFlag(KSWORD_SANDBOX_PROCESS_ACCESS_EVENT_FLAG_SOURCE_PID_PRESENT, "SourcePidPresent");
+    appendFlag(KSWORD_SANDBOX_PROCESS_ACCESS_EVENT_FLAG_DUPLICATE_TARGET_PID_PRESENT, "DuplicateTargetPidPresent");
+    appendFlag(KSWORD_SANDBOX_PROCESS_ACCESS_EVENT_FLAG_ORIGINAL_DESIRED_ACCESS_PRESENT, "OriginalDesiredAccessPresent");
+    appendFlag(KSWORD_SANDBOX_PROCESS_ACCESS_EVENT_FLAG_DESIRED_ACCESS_PRESENT, "DesiredAccessPresent");
+    appendFlag(KSWORD_SANDBOX_PROCESS_ACCESS_EVENT_FLAG_GRANTED_ACCESS_PRESENT, "GrantedAccessPresent");
+    appendFlag(KSWORD_SANDBOX_PROCESS_ACCESS_EVENT_FLAG_PRE_OPERATION, "PreOperation");
+    appendFlag(KSWORD_SANDBOX_PROCESS_ACCESS_EVENT_FLAG_POST_OPERATION, "PostOperation");
+    appendFlag(KSWORD_SANDBOX_PROCESS_ACCESS_EVENT_FLAG_KERNEL_HANDLE, "KernelHandle");
+    appendFlag(KSWORD_SANDBOX_PROCESS_ACCESS_EVENT_FLAG_USER_MODE_REQUEST, "UserModeRequest");
+    appendFlag(KSWORD_SANDBOX_PROCESS_ACCESS_EVENT_FLAG_ACCESS_REDUCED, "AccessReduced");
+    appendFlag(KSWORD_SANDBOX_PROCESS_ACCESS_EVENT_FLAG_OPERATION_FAILED, "OperationFailed");
+
+    const ULONG unknownFlags = flags & ~knownFlags;
+    if (unknownFlags != 0) {
+        appendName("Unknown(" + HexUnsignedLongLong(unknownFlags, 8) + ")");
+    }
+
+    return names.empty() ? "none" : names;
+}
+
+// Input: Windows process access mask.
+// Processing: Decodes stable process-specific and standard rights used by
+// ObRegisterCallbacks access checks, preserving unknown bits.
+// Return: Pipe-delimited access names, or "none".
+std::string ProcessAccessMaskNames(const ULONG accessMask) {
+    std::string names;
+    ULONG knownMask = 0;
+    const auto appendName = [&names](const std::string& name) {
+        if (!names.empty()) {
+            names += "|";
+        }
+        names += name;
+    };
+    const auto appendRight = [&](const ULONG bit, const char* name) {
+        if ((accessMask & bit) != 0) {
+            appendName(name);
+            knownMask |= bit;
+        }
+    };
+
+    appendRight(0x00000001U, "PROCESS_TERMINATE");
+    appendRight(0x00000002U, "PROCESS_CREATE_THREAD");
+    appendRight(0x00000004U, "PROCESS_SET_SESSIONID");
+    appendRight(0x00000008U, "PROCESS_VM_OPERATION");
+    appendRight(0x00000010U, "PROCESS_VM_READ");
+    appendRight(0x00000020U, "PROCESS_VM_WRITE");
+    appendRight(0x00000040U, "PROCESS_DUP_HANDLE");
+    appendRight(0x00000080U, "PROCESS_CREATE_PROCESS");
+    appendRight(0x00000100U, "PROCESS_SET_QUOTA");
+    appendRight(0x00000200U, "PROCESS_SET_INFORMATION");
+    appendRight(0x00000400U, "PROCESS_QUERY_INFORMATION");
+    appendRight(0x00000800U, "PROCESS_SUSPEND_RESUME");
+    appendRight(0x00001000U, "PROCESS_QUERY_LIMITED_INFORMATION");
+    appendRight(0x00002000U, "PROCESS_SET_LIMITED_INFORMATION");
+    appendRight(0x00010000U, "DELETE");
+    appendRight(0x00020000U, "READ_CONTROL");
+    appendRight(0x00040000U, "WRITE_DAC");
+    appendRight(0x00080000U, "WRITE_OWNER");
+    appendRight(0x00100000U, "SYNCHRONIZE");
+    appendRight(0x01000000U, "ACCESS_SYSTEM_SECURITY");
+    appendRight(0x02000000U, "MAXIMUM_ALLOWED");
+    appendRight(0x10000000U, "GENERIC_ALL");
+    appendRight(0x20000000U, "GENERIC_EXECUTE");
+    appendRight(0x40000000U, "GENERIC_WRITE");
+    appendRight(0x80000000U, "GENERIC_READ");
+
+    const ULONG unknownMask = accessMask & ~knownMask;
+    if (unknownMask != 0) {
+        appendName("Unknown(" + HexUnsignedLongLong(unknownMask, 8) + ")");
+    }
+
+    return names.empty() ? "none" : names;
 }
 
 // Input: Registry operation value from KSWORD_SANDBOX_REGISTRY_EVENT_PAYLOAD.
@@ -1282,9 +1441,6 @@ void AddDriverPayloadVersionEvidence(
         return;
     }
 
-    const ULONG expectedPayloadVersion = ExpectedDriverPayloadVersion(header.Type);
-    const ULONG expectedPayloadSize = ExpectedDriverPayloadSize(header.Type);
-    const bool schemaKnown = expectedPayloadVersion != 0 && expectedPayloadSize != 0;
     const bool hasVersionPrefix = payload != nullptr && payloadBytes >= sizeof(ULONG);
     const bool hasSizePrefix = payload != nullptr && payloadBytes >= (2U * sizeof(ULONG));
     ULONG payloadVersion = 0;
@@ -1297,6 +1453,18 @@ void AddDriverPayloadVersionEvidence(
         std::memcpy(&payloadSizePrefix, payload + sizeof(ULONG), sizeof(payloadSizePrefix));
     }
 
+    ULONG expectedPayloadVersion = ExpectedDriverPayloadVersion(header.Type);
+    ULONG expectedPayloadSize = ExpectedDriverPayloadSize(header.Type);
+    std::string payloadSchemaExpected = DriverPayloadSchemaName(header.Type);
+    bool draftPayloadSchema = false;
+    if (header.Type == KswSandboxEventTypeProcess &&
+        payloadVersion == KSWORD_SANDBOX_PROCESS_HANDLE_ACCESS_EVENT_VERSION) {
+        expectedPayloadVersion = KSWORD_SANDBOX_PROCESS_HANDLE_ACCESS_EVENT_VERSION;
+        expectedPayloadSize = static_cast<ULONG>(sizeof(KSWORD_SANDBOX_PROCESS_HANDLE_ACCESS_EVENT_PAYLOAD_V1_DRAFT));
+        payloadSchemaExpected = "KSWORD_SANDBOX_PROCESS_HANDLE_ACCESS_EVENT_PAYLOAD_V1_DRAFT";
+        draftPayloadSchema = true;
+    }
+    const bool schemaKnown = expectedPayloadVersion != 0 && expectedPayloadSize != 0;
     const bool payloadVersionCompatible =
         schemaKnown && hasVersionPrefix && payloadVersion == expectedPayloadVersion;
     const bool payloadSizePrefixCompatible =
@@ -1312,7 +1480,7 @@ void AddDriverPayloadVersionEvidence(
     } else if (!payloadSizePrefixCompatible) {
         payloadVersionStatus = "payload-size-mismatch";
     } else {
-        payloadVersionStatus = "v1-compatible";
+        payloadVersionStatus = draftPayloadSchema ? "draft-compatible" : "v1-compatible";
     }
 
     data->AddUnsigned("payloadVersion", payloadVersion);
@@ -1327,7 +1495,7 @@ void AddDriverPayloadVersionEvidence(
     data->AddBool("payloadVersionCompatible", payloadVersionCompatible);
     data->AddBool("payloadSizePrefixCompatible", payloadSizePrefixCompatible);
     data->AddUtf8("payloadVersionStatus", payloadVersionStatus);
-    data->AddUtf8("payloadSchemaExpected", DriverPayloadSchemaName(header.Type));
+    data->AddUtf8("payloadSchemaExpected", payloadSchemaExpected);
     data->AddUtf8(
         "payloadVersionPolicy",
         "driver rows always emit payloadVersion/payloadVersionHex/payloadSchemaVersion; typed parsers require fixed v1 Version and Size prefixes");
@@ -1906,10 +2074,13 @@ std::wstring ExtractTypedPayloadPath(
     }
 
     if (eventType == KswSandboxEventTypeProcess &&
+        !IsProcessHandleAccessPayload(eventType, payload, payloadBytes) &&
         payloadBytes >= sizeof(KSWORD_SANDBOX_PROCESS_EVENT_PAYLOAD)) {
         const auto* processPayload =
             reinterpret_cast<const KSWORD_SANDBOX_PROCESS_EVENT_PAYLOAD*>(payload);
-        if ((processPayload->Flags & KSWORD_SANDBOX_PROCESS_EVENT_FLAG_IMAGE_PATH_PRESENT) != 0) {
+        if (processPayload->Version == KSWORD_SANDBOX_PROCESS_EVENT_VERSION &&
+            processPayload->Size == static_cast<ULONG>(sizeof(KSWORD_SANDBOX_PROCESS_EVENT_PAYLOAD)) &&
+            (processPayload->Flags & KSWORD_SANDBOX_PROCESS_EVENT_FLAG_IMAGE_PATH_PRESENT) != 0) {
             return BoundedWideStringFromUtf16Bytes(
                 processPayload->ImagePath,
                 processPayload->ImagePathLengthBytes,
@@ -1969,12 +2140,17 @@ std::wstring ExtractTypedPayloadCommandLine(
     const size_t payloadBytes) {
     if (eventType != KswSandboxEventTypeProcess ||
         payload == nullptr ||
+        IsProcessHandleAccessPayload(eventType, payload, payloadBytes) ||
         payloadBytes < sizeof(KSWORD_SANDBOX_PROCESS_EVENT_PAYLOAD)) {
         return {};
     }
 
     const auto* processPayload =
         reinterpret_cast<const KSWORD_SANDBOX_PROCESS_EVENT_PAYLOAD*>(payload);
+    if (processPayload->Version != KSWORD_SANDBOX_PROCESS_EVENT_VERSION ||
+        processPayload->Size != static_cast<ULONG>(sizeof(KSWORD_SANDBOX_PROCESS_EVENT_PAYLOAD))) {
+        return {};
+    }
     if ((processPayload->Flags & KSWORD_SANDBOX_PROCESS_EVENT_FLAG_COMMAND_PRESENT) == 0) {
         return {};
     }
@@ -2019,10 +2195,22 @@ unsigned long long ExtractTypedPayloadProcessId(
 
     switch (eventType) {
     case KswSandboxEventTypeProcess:
+        if (IsProcessHandleAccessPayload(eventType, payload, payloadBytes) &&
+            payloadBytes >= sizeof(KSWORD_SANDBOX_PROCESS_HANDLE_ACCESS_EVENT_PAYLOAD_V1_DRAFT)) {
+            const auto* processAccessPayload =
+                reinterpret_cast<const KSWORD_SANDBOX_PROCESS_HANDLE_ACCESS_EVENT_PAYLOAD_V1_DRAFT*>(payload);
+            return processAccessPayload->ActorProcessId != 0
+                ? processAccessPayload->ActorProcessId
+                : fallbackProcessId;
+        }
         if (payloadBytes >= sizeof(KSWORD_SANDBOX_PROCESS_EVENT_PAYLOAD)) {
             const auto* processPayload =
                 reinterpret_cast<const KSWORD_SANDBOX_PROCESS_EVENT_PAYLOAD*>(payload);
-            return processPayload->ProcessId != 0 ? processPayload->ProcessId : fallbackProcessId;
+            return processPayload->Version == KSWORD_SANDBOX_PROCESS_EVENT_VERSION &&
+                processPayload->Size == static_cast<ULONG>(sizeof(KSWORD_SANDBOX_PROCESS_EVENT_PAYLOAD)) &&
+                processPayload->ProcessId != 0
+                    ? processPayload->ProcessId
+                    : fallbackProcessId;
         }
         break;
 
@@ -2195,7 +2383,14 @@ void AddTypedReportCompatibilityData(
         break;
 
     case KswSandboxEventTypeProcess:
-        if (payload != nullptr && payloadBytes >= sizeof(KSWORD_SANDBOX_PROCESS_EVENT_PAYLOAD)) {
+        if (IsProcessHandleAccessPayload(header.Type, payload, payloadBytes) &&
+            payloadBytes >= sizeof(KSWORD_SANDBOX_PROCESS_HANDLE_ACCESS_EVENT_PAYLOAD_V1_DRAFT)) {
+            const auto* processAccessPayload =
+                reinterpret_cast<const KSWORD_SANDBOX_PROCESS_HANDLE_ACCESS_EVENT_PAYLOAD_V1_DRAFT*>(payload);
+            data->AddUtf8("operationName", ProcessOperationName(processAccessPayload->Operation));
+            data->AddSigned("status", processAccessPayload->Status);
+            data->AddBool("pathTruncated", false);
+        } else if (payload != nullptr && payloadBytes >= sizeof(KSWORD_SANDBOX_PROCESS_EVENT_PAYLOAD)) {
             const auto* processPayload =
                 reinterpret_cast<const KSWORD_SANDBOX_PROCESS_EVENT_PAYLOAD*>(payload);
             data->AddUtf8("operationName", ProcessOperationName(processPayload->Operation));
@@ -2475,8 +2670,220 @@ bool AddFilePayloadData(
     return true;
 }
 
+// Input: Process access mask plus a stable field prefix.
+// Processing: Emits decoded and hex access-mask forms plus a compact high-risk
+// right hint for handle-access telemetry.
+// Return: No return value; builder is mutated.
+void AddProcessAccessMaskFields(
+    JsonDataObjectBuilder& data,
+    const std::string& prefix,
+    const ULONG accessMask,
+    const bool present) {
+    data.AddBool(prefix + "Present", present);
+    data.AddUnsigned(prefix, present ? accessMask : 0);
+    data.AddUtf8(prefix + "Hex", HexUnsignedLongLong(present ? accessMask : 0, 8));
+    data.AddUtf8(prefix + "Names", present ? ProcessAccessMaskNames(accessMask) : "not-present");
+    data.AddBool(prefix + "VmRead", present && (accessMask & 0x00000010U) != 0);
+    data.AddBool(prefix + "VmWrite", present && (accessMask & 0x00000020U) != 0);
+    data.AddBool(prefix + "CreateThread", present && (accessMask & 0x00000002U) != 0);
+    data.AddBool(prefix + "DupHandle", present && (accessMask & 0x00000040U) != 0);
+    data.AddBool(prefix + "Terminate", present && (accessMask & 0x00000001U) != 0);
+    data.AddBool(
+        prefix + "Sensitive",
+        present &&
+            (accessMask & (0x00000001U | 0x00000002U | 0x00000008U | 0x00000010U |
+                           0x00000020U | 0x00000040U | 0x00000800U |
+                           0x00040000U | 0x00080000U | 0x01000000U)) != 0);
+}
+
+// Input: Payload bytes for the draft KswSandboxEventTypeProcess handle-access
+// schema and JSON builder.
+// Processing: Parses future ObRegisterCallbacks process-handle access telemetry
+// into normalized process.access / r0.process_handle_access fields.  This parser
+// is gated by the draft Version/Size/Operation prefix and does not imply current
+// driver availability.
+// Return: true when the draft payload was parsed; false otherwise.
+bool AddProcessHandleAccessPayloadData(
+    const unsigned char* payload,
+    const size_t payloadBytes,
+    JsonDataObjectBuilder* data) {
+    if (data == nullptr) {
+        return false;
+    }
+
+    data->AddUtf8("typedPayloadKind", "process-handle-access");
+    data->AddUtf8("payloadSchema", "KSWORD_SANDBOX_PROCESS_HANDLE_ACCESS_EVENT_PAYLOAD_V1_DRAFT");
+    data->AddUtf8("payloadSchemaName", "r0.process_handle_access");
+    data->AddUtf8("normalizedEventType", "process.access");
+    data->AddUnsigned(
+        "typedPayloadMinimumSize",
+        static_cast<unsigned long long>(sizeof(KSWORD_SANDBOX_PROCESS_HANDLE_ACCESS_EVENT_PAYLOAD_V1_DRAFT)));
+    data->AddUnsigned("typedPayloadObservedBytes", static_cast<unsigned long long>(payloadBytes));
+    if (!IsProcessHandleAccessPayload(KswSandboxEventTypeProcess, payload, payloadBytes) ||
+        payloadBytes < sizeof(KSWORD_SANDBOX_PROCESS_HANDLE_ACCESS_EVENT_PAYLOAD_V1_DRAFT)) {
+        data->AddUtf8("typedPayloadStatus", "payload-too-small-or-not-draft-process-handle-access");
+        return false;
+    }
+
+    const auto* processAccessPayload =
+        reinterpret_cast<const KSWORD_SANDBOX_PROCESS_HANDLE_ACCESS_EVENT_PAYLOAD_V1_DRAFT*>(payload);
+    const std::string operationName = ProcessOperationName(processAccessPayload->Operation);
+    const bool targetProcessIdPresent =
+        (processAccessPayload->Flags & KSWORD_SANDBOX_PROCESS_ACCESS_EVENT_FLAG_TARGET_PID_PRESENT) != 0;
+    const bool sourceProcessIdPresent =
+        (processAccessPayload->Flags & KSWORD_SANDBOX_PROCESS_ACCESS_EVENT_FLAG_SOURCE_PID_PRESENT) != 0;
+    const bool duplicateTargetProcessIdPresent =
+        (processAccessPayload->Flags & KSWORD_SANDBOX_PROCESS_ACCESS_EVENT_FLAG_DUPLICATE_TARGET_PID_PRESENT) != 0;
+    const bool originalDesiredAccessPresent =
+        (processAccessPayload->Flags & KSWORD_SANDBOX_PROCESS_ACCESS_EVENT_FLAG_ORIGINAL_DESIRED_ACCESS_PRESENT) != 0;
+    const bool desiredAccessPresent =
+        (processAccessPayload->Flags & KSWORD_SANDBOX_PROCESS_ACCESS_EVENT_FLAG_DESIRED_ACCESS_PRESENT) != 0;
+    const bool grantedAccessPresent =
+        (processAccessPayload->Flags & KSWORD_SANDBOX_PROCESS_ACCESS_EVENT_FLAG_GRANTED_ACCESS_PRESENT) != 0;
+    const bool preOperation =
+        (processAccessPayload->Flags & KSWORD_SANDBOX_PROCESS_ACCESS_EVENT_FLAG_PRE_OPERATION) != 0;
+    const bool postOperation =
+        (processAccessPayload->Flags & KSWORD_SANDBOX_PROCESS_ACCESS_EVENT_FLAG_POST_OPERATION) != 0;
+    const bool accessReduced =
+        (processAccessPayload->Flags & KSWORD_SANDBOX_PROCESS_ACCESS_EVENT_FLAG_ACCESS_REDUCED) != 0;
+    const bool operationFailed =
+        (processAccessPayload->Flags & KSWORD_SANDBOX_PROCESS_ACCESS_EVENT_FLAG_OPERATION_FAILED) != 0;
+
+    data->AddUtf8("typedPayloadStatus", "parsed-draft");
+    data->AddUtf8("semanticFamily", "process.access");
+    data->AddUtf8("behaviorLane", "process-handle-access");
+    data->AddUtf8("activityKind", ActivityKind("process.access", operationName));
+    data->AddUtf8("r0ProcessHandleAccessEvent", "r0.process_handle_access");
+    data->AddBool("evidenceReady", true);
+    data->AddBool("processHandleAccessDraftPayloadParsed", true);
+    data->AddUtf8(
+        "processHandleAccessAvailability",
+        "draft-payload-parsed-from-driver-row");
+    data->AddUtf8(
+        "processHandleAccessAbiEvidence",
+        "Version/Size/Operation matched KSWORD_SANDBOX_PROCESS_HANDLE_ACCESS_EVENT_PAYLOAD_V1_DRAFT");
+    data->AddUnsigned("processAccessVersion", processAccessPayload->Version);
+    data->AddUtf8("processAccessVersionHex", HexUnsignedLongLong(processAccessPayload->Version, 8));
+    data->AddUnsigned("processAccessPayloadSize", processAccessPayload->Size);
+    data->AddBool(
+        "processAccessPayloadSizeMatchesDraftAbi",
+        processAccessPayload->Size == static_cast<ULONG>(sizeof(KSWORD_SANDBOX_PROCESS_HANDLE_ACCESS_EVENT_PAYLOAD_V1_DRAFT)));
+    data->AddUnsigned("operation", processAccessPayload->Operation);
+    data->AddUtf8("processAccessOperationName", operationName);
+    data->AddUnsigned("flags", processAccessPayload->Flags);
+    data->AddUtf8("flagsHex", HexUnsignedLongLong(processAccessPayload->Flags, 8));
+    data->AddUtf8("flagNames", ProcessAccessEventFlagNames(processAccessPayload->Flags));
+    data->AddBool("targetProcessIdPresent", targetProcessIdPresent);
+    data->AddBool("sourceProcessIdPresent", sourceProcessIdPresent);
+    data->AddBool("duplicateTargetProcessIdPresent", duplicateTargetProcessIdPresent);
+    data->AddUnsigned("actorProcessId", processAccessPayload->ActorProcessId);
+    data->AddUnsigned("processId", processAccessPayload->ActorProcessId);
+    data->AddUnsigned("targetProcessId", targetProcessIdPresent ? processAccessPayload->TargetProcessId : 0);
+    data->AddUnsigned("sourceProcessId", sourceProcessIdPresent ? processAccessPayload->SourceProcessId : 0);
+    data->AddUnsigned(
+        "duplicateTargetProcessId",
+        duplicateTargetProcessIdPresent ? processAccessPayload->DuplicateTargetProcessId : 0);
+    AddProcessAccessMaskFields(
+        *data,
+        "originalDesiredAccess",
+        processAccessPayload->OriginalDesiredAccess,
+        originalDesiredAccessPresent);
+    AddProcessAccessMaskFields(
+        *data,
+        "desiredAccess",
+        processAccessPayload->DesiredAccess,
+        desiredAccessPresent);
+    AddProcessAccessMaskFields(
+        *data,
+        "grantedAccess",
+        processAccessPayload->GrantedAccess,
+        grantedAccessPresent);
+    const std::string originalDesiredAccessNames =
+        originalDesiredAccessPresent ? ProcessAccessMaskNames(processAccessPayload->OriginalDesiredAccess) : "";
+    const std::string desiredAccessNames =
+        desiredAccessPresent ? ProcessAccessMaskNames(processAccessPayload->DesiredAccess) : "";
+    const std::string grantedAccessNames =
+        grantedAccessPresent ? ProcessAccessMaskNames(processAccessPayload->GrantedAccess) : "";
+    const std::string requestedAccessNames =
+        !desiredAccessNames.empty() ? desiredAccessNames : originalDesiredAccessNames;
+    std::string combinedAccessNames;
+    const auto appendAccessNames = [&combinedAccessNames](const std::string& names) {
+        if (names.empty() || names == "none" || names == "not-present") {
+            return;
+        }
+
+        if (!combinedAccessNames.empty()) {
+            combinedAccessNames += "|";
+        }
+        combinedAccessNames += names;
+    };
+    appendAccessNames(originalDesiredAccessNames);
+    appendAccessNames(desiredAccessNames);
+    appendAccessNames(grantedAccessNames);
+    data->AddUtf8("requestedAccess", requestedAccessNames.empty() ? "not-present" : requestedAccessNames);
+    data->AddUtf8("accesses", combinedAccessNames.empty() ? "not-present" : combinedAccessNames);
+    data->AddUtf8(
+        "accessMask",
+        !requestedAccessNames.empty()
+            ? requestedAccessNames
+            : (desiredAccessPresent
+                ? HexUnsignedLongLong(processAccessPayload->DesiredAccess, 8)
+                : (originalDesiredAccessPresent
+                    ? HexUnsignedLongLong(processAccessPayload->OriginalDesiredAccess, 8)
+                    : "not-present")));
+    data->AddBool(
+        "sensitiveProcessAccessRequested",
+        (originalDesiredAccessPresent &&
+            (processAccessPayload->OriginalDesiredAccess &
+                (0x00000001U | 0x00000002U | 0x00000008U | 0x00000010U |
+                 0x00000020U | 0x00000040U | 0x00000800U)) != 0) ||
+            (desiredAccessPresent &&
+                (processAccessPayload->DesiredAccess &
+                    (0x00000001U | 0x00000002U | 0x00000008U | 0x00000010U |
+                     0x00000020U | 0x00000040U | 0x00000800U)) != 0));
+    data->AddBool("preOperation", preOperation);
+    data->AddBool("postOperation", postOperation);
+    data->AddBool(
+        "kernelHandle",
+        (processAccessPayload->Flags & KSWORD_SANDBOX_PROCESS_ACCESS_EVENT_FLAG_KERNEL_HANDLE) != 0);
+    data->AddBool(
+        "userModeRequest",
+        (processAccessPayload->Flags & KSWORD_SANDBOX_PROCESS_ACCESS_EVENT_FLAG_USER_MODE_REQUEST) != 0);
+    data->AddBool("accessReduced", accessReduced);
+    data->AddBool("operationFailed", operationFailed);
+    data->AddUnsigned("callbackOperation", processAccessPayload->CallbackOperation);
+    data->AddSigned("processAccessStatus", processAccessPayload->Status);
+    data->AddUtf8(
+        "statusHex",
+        HexUnsignedLongLong(static_cast<unsigned long>(processAccessPayload->Status), 8));
+    data->AddUnsigned("previousMode", processAccessPayload->PreviousMode);
+    data->AddBool("pathPresent", false);
+    data->AddUtf8(
+        "processHandleAccessNoisePolicy",
+        "uses common collector self-noise fields; do not infer sample verdict from handle access alone");
+    data->AddUtf8(
+        "processHandleAccessDecodePolicy",
+        "requested/granted access masks are decoded from explicit draft fields; lifecycle process rows never imply handle rights");
+    AddR0PrivilegeProcessAccessCoverageFields(*data, true, false);
+    data->AddWide(
+        "zhMessage",
+        L"R0 捕获到进程句柄访问草案事件。");
+    data->AddWide(
+        "zhHint",
+        L"该行来自显式 process-handle access 草案 payload；请结合 actor/target PID 和 access mask 判断，不要从普通进程创建/退出事件推断句柄权限。");
+    data->AddWide(
+        "zhAccessMaskHint",
+        L"originalDesiredAccess/desiredAccess/grantedAccess 已按 Windows 进程权限位解码；VM_WRITE、CREATE_THREAD、DUP_HANDLE、TERMINATE 等通常需要重点查看。");
+    data->AddWide(
+        "zhNoisePolicy",
+        L"噪声策略仍使用通用 collector/self-noise 字段；命中 KSword 基础设施或 collector PID 时可抑制，否则仅作为行为候选证据。");
+    return true;
+}
+
 // Input: Payload bytes for KswSandboxEventTypeProcess and JSON builder.
-// Processing: Parses process create/exit payload fields into string-valued data.
+// Processing: Parses process create/exit payload fields into string-valued data,
+// or dispatches to the reserved draft process-handle access parser when a future
+// driver emits that explicit payload version.
 // Return: true when the public process payload was parsed; false otherwise.
 bool AddProcessPayloadData(
     const unsigned char* payload,
@@ -2484,6 +2891,10 @@ bool AddProcessPayloadData(
     JsonDataObjectBuilder* data) {
     if (data == nullptr) {
         return false;
+    }
+
+    if (IsProcessHandleAccessPayload(KswSandboxEventTypeProcess, payload, payloadBytes)) {
+        return AddProcessHandleAccessPayloadData(payload, payloadBytes, data);
     }
 
     data->AddUtf8("typedPayloadKind", "process");
@@ -2531,6 +2942,7 @@ bool AddProcessPayloadData(
     data->AddUtf8(
         "lineageConfidence",
         parentProcessIdPresent || creatingProcessIdPresent ? "payload-lineage" : "header-only");
+    AddR0PrivilegeProcessAccessCoverageFields(*data);
     data->AddBool("evidenceReady", true);
     data->AddWide(
         "zhMessage",
@@ -3255,6 +3667,20 @@ std::string BuildHealthData(const KSWORD_SANDBOX_HEALTH_REPLY& reply, const DWOR
     data.AddUnsigned("supportedProducerMask", producerMasksAvailable ? reply.SupportedProducerMask : 0);
     data.AddUtf8("supportedProducerMaskHex", HexUnsignedLongLong(producerMasksAvailable ? reply.SupportedProducerMask : 0, 8));
     data.AddUtf8("supportedProducerMaskNames", ProducerMaskNames(producerMasksAvailable ? reply.SupportedProducerMask : 0));
+    const ULONG healthActiveEnabledProducerMask = producerMasksAvailable
+        ? (reply.ActiveProducerMask & reply.ProducerEnableMask)
+        : 0;
+    AddR0EtwCapabilityContractFields(
+        data,
+        "driver-health",
+        producerMasksAvailable ? "live-get-health-producer-masks" : "live-get-health-legacy-no-producer-masks",
+        producerMasksAvailable && (reply.SupportedProducerMask & KSWORD_SANDBOX_PRODUCER_FLAG_PROCESS) != 0,
+        producerMasksAvailable && (reply.SupportedProducerMask & KSWORD_SANDBOX_PRODUCER_FLAG_IMAGE) != 0,
+        producerMasksAvailable && (reply.SupportedProducerMask & KSWORD_SANDBOX_PRODUCER_FLAG_FILE) != 0,
+        producerMasksAvailable && (reply.SupportedProducerMask & KSWORD_SANDBOX_PRODUCER_FLAG_REGISTRY) != 0,
+        producerMasksAvailable && (reply.SupportedProducerMask & KSWORD_SANDBOX_PRODUCER_FLAG_NETWORK) != 0,
+        (healthActiveEnabledProducerMask & KSWORD_SANDBOX_PRODUCER_FLAG_PROCESS_HANDLE_ACCESS) != 0,
+        false);
     data.AddUnsigned("activeProducerMask", producerMasksAvailable ? reply.ActiveProducerMask : 0);
     data.AddUtf8("activeProducerMaskHex", HexUnsignedLongLong(producerMasksAvailable ? reply.ActiveProducerMask : 0, 8));
     data.AddUtf8("activeProducerMaskNames", ProducerMaskNames(producerMasksAvailable ? reply.ActiveProducerMask : 0));
@@ -3305,6 +3731,13 @@ std::string BuildCapabilitiesData(const KSWORD_SANDBOX_CAPABILITIES_REPLY& reply
         capabilitiesReplySizeCompatible &&
         statusReplySizeCompatible &&
         producerMaskReplySizeCompatible;
+    const bool processHandleAccessCapabilityAdvertised =
+        (reply.CapabilityFlags & KSWORD_SANDBOX_CAPABILITY_FLAG_PROCESS_HANDLE_ACCESS_DRAFT) != 0;
+    const bool processHandleAccessTelemetryAvailable =
+        processHandleAccessCapabilityAdvertised &&
+        (reply.SupportedProducerMask & KSWORD_SANDBOX_PRODUCER_FLAG_PROCESS_HANDLE_ACCESS) != 0;
+    const bool tokenPrivilegeTelemetryAvailable =
+        (reply.CapabilityFlags & KSWORD_SANDBOX_CAPABILITY_FLAG_TOKEN_PRIVILEGE_DRAFT) != 0;
 
     std::string abiMismatchReasons;
     const auto appendMismatch = [&abiMismatchReasons](const bool ok, const std::string& reason) {
@@ -3439,6 +3872,28 @@ std::string BuildCapabilitiesData(const KSWORD_SANDBOX_CAPABILITIES_REPLY& reply
     data.AddBool(
         "selfNoiseMetadataCapable",
         (reply.CapabilityFlags & KSWORD_SANDBOX_CAPABILITY_FLAG_SELF_NOISE_METADATA) != 0);
+    data.AddBool("processHandleAccessDraftCapable", processHandleAccessCapabilityAdvertised);
+    data.AddBool(
+        "processHandleAccessProducerSupported",
+        (reply.SupportedProducerMask & KSWORD_SANDBOX_PRODUCER_FLAG_PROCESS_HANDLE_ACCESS) != 0);
+    data.AddBool("processHandleAccessTelemetrySupported", processHandleAccessTelemetryAvailable);
+    data.AddBool("tokenPrivilegeDraftCapable", tokenPrivilegeTelemetryAvailable);
+    AddR0EtwCapabilityContractFields(
+        data,
+        "driver-capabilities",
+        "live-get-capabilities-flags-and-supported-producer-mask",
+        (reply.CapabilityFlags & KSWORD_SANDBOX_CAPABILITY_FLAG_PROCESS_CREATE_EXIT) != 0 &&
+            (reply.SupportedProducerMask & KSWORD_SANDBOX_PRODUCER_FLAG_PROCESS) != 0,
+        (reply.CapabilityFlags & KSWORD_SANDBOX_CAPABILITY_FLAG_IMAGE_LOAD) != 0 &&
+            (reply.SupportedProducerMask & KSWORD_SANDBOX_PRODUCER_FLAG_IMAGE) != 0,
+        (reply.CapabilityFlags & KSWORD_SANDBOX_CAPABILITY_FLAG_FILE_MINIFILTER) != 0 &&
+            (reply.SupportedProducerMask & KSWORD_SANDBOX_PRODUCER_FLAG_FILE) != 0,
+        (reply.CapabilityFlags & KSWORD_SANDBOX_CAPABILITY_FLAG_REGISTRY_CALLBACK) != 0 &&
+            (reply.SupportedProducerMask & KSWORD_SANDBOX_PRODUCER_FLAG_REGISTRY) != 0,
+        (reply.CapabilityFlags & KSWORD_SANDBOX_CAPABILITY_FLAG_NETWORK_WFP_ALE) != 0 &&
+            (reply.SupportedProducerMask & KSWORD_SANDBOX_PRODUCER_FLAG_NETWORK) != 0,
+        processHandleAccessTelemetryAvailable,
+        tokenPrivilegeTelemetryAvailable);
     data.AddUnsigned("supportedProducerMask", reply.SupportedProducerMask);
     data.AddUtf8("supportedProducerMaskHex", HexUnsignedLongLong(reply.SupportedProducerMask, 8));
     data.AddUtf8("supportedProducerMaskNames", ProducerMaskNames(reply.SupportedProducerMask));
@@ -3458,6 +3913,9 @@ std::string BuildCapabilitiesData(const KSWORD_SANDBOX_CAPABILITIES_REPLY& reply
     data.AddUnsigned("setProducerEnableMaskReplySize", reply.SetProducerEnableMaskReplySize);
     data.AddBool("driverProducerSupported", (reply.SupportedProducerMask & KSWORD_SANDBOX_PRODUCER_FLAG_DRIVER) != 0);
     data.AddBool("processProducerSupported", (reply.SupportedProducerMask & KSWORD_SANDBOX_PRODUCER_FLAG_PROCESS) != 0);
+    data.AddBool(
+        "processHandleAccessProducerSupported",
+        (reply.SupportedProducerMask & KSWORD_SANDBOX_PRODUCER_FLAG_PROCESS_HANDLE_ACCESS) != 0);
     data.AddBool("imageProducerSupported", (reply.SupportedProducerMask & KSWORD_SANDBOX_PRODUCER_FLAG_IMAGE) != 0);
     data.AddBool("fileProducerSupported", (reply.SupportedProducerMask & KSWORD_SANDBOX_PRODUCER_FLAG_FILE) != 0);
     data.AddBool("registryProducerSupported", (reply.SupportedProducerMask & KSWORD_SANDBOX_PRODUCER_FLAG_REGISTRY) != 0);
@@ -3554,6 +4012,18 @@ std::string BuildStatusData(const KSWORD_SANDBOX_STATUS_REPLY& reply, const DWOR
         reply.ProducerEnableMask,
         reply.ActiveProducerMask,
         reply.FailedProducerMask);
+    const ULONG activeEnabledProducerMask = reply.ActiveProducerMask & reply.EffectiveProducerMask;
+    AddR0EtwCapabilityContractFields(
+        data,
+        "driver-status",
+        "live-get-status-active-effective-producer-mask",
+        (activeEnabledProducerMask & KSWORD_SANDBOX_PRODUCER_FLAG_PROCESS) != 0,
+        (activeEnabledProducerMask & KSWORD_SANDBOX_PRODUCER_FLAG_IMAGE) != 0,
+        (activeEnabledProducerMask & KSWORD_SANDBOX_PRODUCER_FLAG_FILE) != 0,
+        (activeEnabledProducerMask & KSWORD_SANDBOX_PRODUCER_FLAG_REGISTRY) != 0,
+        (activeEnabledProducerMask & KSWORD_SANDBOX_PRODUCER_FLAG_NETWORK) != 0,
+        (activeEnabledProducerMask & KSWORD_SANDBOX_PRODUCER_FLAG_PROCESS_HANDLE_ACCESS) != 0,
+        false);
     data.AddUnsigned("totalEventsEnqueued", reply.TotalEventsEnqueued);
     data.AddUnsigned("totalEventsDropped", reply.TotalEventsDropped);
     data.AddUnsigned("lostCount", reply.TotalEventsDropped);
@@ -3792,6 +4262,7 @@ std::string BuildSetProducerEnableMaskData(
         reply.EffectiveEnableMask,
         reply.EffectiveEnableMask,
         0);
+    AddR0PrivilegeProcessAccessCoverageFields(data);
     return data.Build();
 }
 
