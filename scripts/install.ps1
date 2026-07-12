@@ -125,6 +125,13 @@ param(
 
     [switch]$PrepareGuestPayload,
 
+    [switch]$PassThru,
+
+    [switch]$Json,
+
+    [ValidateRange(4, 32)]
+    [int]$JsonDepth = 12,
+
     [switch]$Force
 )
 
@@ -170,7 +177,9 @@ function Write-ScriptInstallInfo {
 
 if ($PlanOnly -and -not $WhatIfPreference) {
     $WhatIfPreference = $true
-    Write-ScriptInstallInfo 'PlanOnly 已启用：本次只输出计划/诊断，不写入本机状态、不启动或还原 VM。 / PlanOnly enabled: diagnostics only.'
+    if (-not $Json) {
+        Write-ScriptInstallInfo 'PlanOnly 已启用：本次只输出计划/诊断，不写入本机状态、不启动或还原 VM。 / PlanOnly enabled: diagnostics only.'
+    }
 }
 
 function Read-ScriptMenuChoice {
@@ -216,7 +225,9 @@ function Read-ScriptInstallState {
         return Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json
     }
     catch {
-        Write-ScriptInstallInfo "中文提示：无法读取安装状态 '$statePath'，将忽略并继续。下一步：如配置异常，请重新运行 .\scripts\install.ps1 -InstallEntrypoint CreateOrPreparePath -PromptPassword。英文详情：$($_.Exception.Message)"
+        if (-not $Json) {
+            Write-ScriptInstallInfo "中文提示：无法读取安装状态 '$statePath'，将忽略并继续。下一步：如配置异常，请重新运行 .\scripts\install.ps1 -InstallEntrypoint CreateOrPreparePath -PromptPassword。英文详情：$($_.Exception.Message)"
+        }
         return $null
     }
 }
@@ -576,7 +587,9 @@ $scriptInstallState = Read-ScriptInstallState
 Initialize-ScriptEffectiveParameters -State $scriptInstallState -BoundParameters $PSBoundParameters
 
 if ($PreparePayload) {
-    Write-ScriptInstallInfo '中文提示：-PreparePayload 属于 CreateOrPreparePath 安装入口；将委托根安装器按创建/准备路径模式执行。 / PreparePayload routes through CreateOrPreparePath.'
+    if (-not $Json) {
+        Write-ScriptInstallInfo '中文提示：-PreparePayload 属于 CreateOrPreparePath 安装入口；将委托根安装器按创建/准备路径模式执行。 / PreparePayload routes through CreateOrPreparePath.'
+    }
     Invoke-RootInstaller -Parameters (New-RootInstallerParameterTable -Additional @{
         InstallEntrypoint = 'CreateOrPreparePath'
         PrepareGuestPayload = $true

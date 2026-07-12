@@ -23,6 +23,20 @@ ETW/Security readiness rows（例如 `etw_security.readiness.summary`、
 Guest Agent 只做有界 provider manifest / Security log readiness 查询，不启动 live
 ETW 长 trace；这些行必须保持 `behaviorCounted=false`、`nonbehavior=true`、
 `sampleBehaviorCandidate=false`，并通过中文提示说明“就绪度/降级不代表样本行为”。
+这些 readiness 行同时提供稳定的机器可读 fallback matrix 字段：
+`fallbackMatrixVersion`、`fallbackMatrixOwner`、`surfaceKeys` /
+`fallbackSurfaceKeys`、`eventIdMap` / `fallbackEventIdMaps` / `securityEventIds`、`fallbackOwner`、
+`r0CoverageGap` 和 `behaviorBoundary`。覆盖面包括 process handle
+access/duplicate、token privilege、thread/remote-thread、module load 和
+process lifecycle；其中 thread/module 仅记录 provider readiness，不表示 live ETW
+subscription。
+
+实际 `security.*` rows 不是 readiness；它们来自有界 Security Event Log 查询。
+这些行保留同样的 fallback routing（`securityFallbackSurfaceKey`、
+`fallbackOwner`、`r0CoverageGap`、`behaviorBoundary`）并补齐 4690、4696、4703、
+4673、4674 等事件的 process/token/privilege aliases，方便规则与报告消费。
+但只有强样本 PID/路径关联的行才允许 `behaviorCounted=true`；未关联或仅会话相关的
+Security rows 必须作为上下文/非行为处理。
 
 ## 可见文案与术语约定 / Visible wording
 

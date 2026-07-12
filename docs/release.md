@@ -179,6 +179,7 @@ Do not collapse these into one ambiguous “install” step:
    and staged guest payload already exist outside git. Verify with:
 
    ```powershell
+   .\install.ps1 -InstallEntrypoint UseConfiguredEnvironment -PlanOnly
    .\install.ps1 -Mode Status
    .\install.ps1 -Mode CheckEnvironment
    .\run.ps1 -Mode Status
@@ -186,7 +187,11 @@ Do not collapse these into one ambiguous “install” step:
    .\run.ps1 -Mode Analyze -SamplePreset Notepad
    ```
 
-   `Analyze` without `-Live` is PlanOnly and must not touch Hyper-V.
+   `UseConfiguredEnvironment` is read-only: it reports existing install state,
+   local config, secret presence, VM/checkpoint profile, and payload status; it
+   must not write local state or mutate Hyper-V. It may perform read-only
+   Hyper-V queries (`Get-VM`, checkpoint/profile checks) when the module is
+   available. `Analyze` without `-Live` is PlanOnly and must not mutate Hyper-V.
 
 2. **Restore an existing checkpoint/snapshot / 恢复已有 checkpoint/snapshot。**
    The VM and clean snapshot already exist; the operator records the exact VM
@@ -203,21 +208,34 @@ Do not collapse these into one ambiguous “install” step:
    .\scripts\Test-HyperVReadiness.ps1
    ```
 
-   Actual restore is VM mutation and is never part of package/readiness:
+   Actual restore is VM mutation and is never part of package/readiness. Preview
+   first; `-WhatIf` with `-AllowVmMutation` must not call `Restore-VMSnapshot`,
+   start, stop, or otherwise mutate the VM. Remove `-WhatIf` and use `-Confirm`
+   or `-Force` only in an isolated lab session:
 
    ```powershell
    .\install.ps1 -InstallEntrypoint RestoreCleanCheckpoint -AllowVmMutation -WhatIf
    .\install.ps1 -InstallEntrypoint RestoreCleanCheckpoint -AllowVmMutation -Confirm
+   .\install.ps1 -InstallEntrypoint RestoreCleanCheckpoint -AllowVmMutation -Force
    ```
+
+   `-Force` is only the unattended confirmation path; it must still require
+   `-AllowVmMutation` and still pass through `ShouldProcess`.
 
 3. **Create/prep a new VM/environment / 创建或准备新环境。** First-computer
    setup must confirm Windows host compatibility, Hyper-V feature/module,
    administrator PowerShell for live, BIOS/UEFI Intel VT-x / AMD-V plus SLAT,
    Windows guest, `SandboxUser` or equivalent account, Guest Service Interface,
    PowerShell Direct, and a clean checkpoint/snapshot. Then configure local
-   state outside git:
+   state outside git. First-computer setup may be previewed with
+   `CreateOrPreparePath -PlanOnly` and `CreateOrPreparePath -WhatIf`; these must
+   only report planned repository-external directory/config/secret/payload writes
+   and must not create/import a VM, create a checkpoint, start/stop/restore
+   Hyper-V, sign drivers, or touch samples.
 
    ```powershell
+   .\install.ps1 -InstallEntrypoint CreateOrPreparePath -PlanOnly
+   .\install.ps1 -InstallEntrypoint CreateOrPreparePath -WhatIf
    .\install.ps1 -InstallEntrypoint CreateOrPreparePath -PromptPassword
    .\install.ps1 -Mode Change -UpdateHyperVConfig `
      -VmName 'KSwordSandbox-Win10-Golden' `
@@ -231,6 +249,11 @@ Do not collapse these into one ambiguous “install” step:
    .\install.ps1 -Mode CheckEnvironment
    .\run.ps1 -Mode CheckEnvironment
    ```
+
+   Any optional payload preparation under `CreateOrPreparePath` must target the
+   configured repository-external `GuestPayloadRoot`/runtime root only; it must
+   not copy payloads into git, package runtime outputs from `bin/obj/x64`, or
+   mutate the VM guest.
 
 Across all three paths: `CSignTool.exe` and GUI/interactive signing fallback are
 forbidden; `.sys`, `.pdb`, certificates, private keys, samples, reports, VM

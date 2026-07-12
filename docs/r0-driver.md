@@ -72,11 +72,16 @@ R0Collector reports the current public driver ABI with this readiness taxonomy:
 
 Known gaps are explicit by design: process lifecycle events do not cover
 process/thread handle requested/granted access unless the draft handle-access
-payload is advertised and emitted; token privilege adjustment is not in v1 R0;
-network DNS/HTTP/TLS/raw packet details are PCAP/sidecar or ETW evidence; file,
-image, process, and registry names are bounded prefixes; file content/hash and
-registry value-data bytes are not in the v1 driver payloads.  Reports should
-surface these as `r0CoverageKnownGaps`, not infer them from adjacent metadata.
+payload is advertised and emitted; they also do not cover thread lifecycle or
+remote-thread creation events. Token privilege adjustment and token object
+handles are not in v1 R0. Service-control and arbitrary driver-load semantics
+belong to Guest/SCM/ETW evidence; `driver.load` is the KSword driver startup
+heartbeat, and `image.load` is image metadata, not proof of SCM service state.
+Network DNS/HTTP/TLS/raw packet details are PCAP/sidecar or ETW evidence. File,
+image, process, and registry names are bounded prefixes; file content/hash,
+registry value-data bytes, and user-mode call stacks are not in the v1 driver
+payloads. Reports should surface these as `r0CoverageKnownGaps` with
+`r0CoverageFallbackOwners`, not infer them from adjacent metadata.
 
 ## Event queue stress and backpressure status
 
@@ -119,6 +124,10 @@ R0/ETW coverage is explicit in collector JSONL. `processCreateExit`,
 producer mask are advertised/active. `handleAccess` and
 `tokenPrivilegeAdjustment` are current R0 gaps; they remain ETW/audit fallback
 lanes unless future draft capability bits are advertised with versioned payloads.
+Thread lifecycle/remote thread creation, service-control/driver-load semantics,
+DNS/HTTP/TLS payloads, file content/hash, registry value data, and user-mode
+stacks are also explicit fallback lanes; readiness fields document them as
+coverage gaps, never as malicious/benign verdicts.
 
 ## Verification
 

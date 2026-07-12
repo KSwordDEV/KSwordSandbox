@@ -198,8 +198,8 @@
       "title": "New process observed after launch",
       "titleZh": "启动后观察到新进程",
       "severity": "low",
-      "summary": "The guest agent observed a non-baseline process after sample execution started. Sandbox plumbing helpers are excluded so the finding stays focused on sample-visible process activity.",
-      "summaryZh": "来宾 Agent 在样本执行开始后观察到非基线进程。沙箱管道辅助进程已排除，使命中聚焦于样本可见的进程活动。",
+      "summary": "The guest agent observed a non-baseline process after sample execution started. Sandbox plumbing helpers and normal interactive GUI root-process baselines are excluded so the finding stays focused on sample-visible process activity.",
+      "summaryZh": "来宾 Agent 在样本执行开始后观察到非基线进程。沙箱管道辅助进程以及普通交互式 GUI 根进程基线已排除，使命中聚焦于样本可见的进程活动。",
       "eventTypes": [
         "process.new"
       ],
@@ -224,7 +224,15 @@
         "KSword.Sandbox.R0Collector.exe",
         "--r0collector",
         "--driver-events"
-      ]
+      ],
+      "excludeDataEquals": {
+        "normalBehaviorBoundary": [
+          "normal-interactive-gui-baseline"
+        ],
+        "sampleCorrelationBoundary": [
+          "normal-interactive-gui-baseline"
+        ]
+      }
     },
     {
       "id": "registry-change",
@@ -1091,10 +1099,10 @@
     {
       "id": "scheduled-task-persistence",
       "title": "Scheduled task persistence command",
-      "titleZh": "Scheduled task 持久化 命令",
+      "titleZh": "计划任务持久化命令",
       "severity": "high",
       "summary": "A process command line referenced scheduled-task creation or registration primitives.",
-      "summaryZh": "持久化相关遥测显示“Scheduled task 持久化 命令”；请结合注册表、文件路径、命令行和用户可写位置证据复核。",
+      "summaryZh": "命令行或持久化遥测显示创建、修改或启用计划任务；请结合任务目标、触发器、用户可写路径和父进程复核。",
       "mitreTechniqueId": "T1053.005",
       "mitreTechniqueName": "Scheduled Task",
       "eventTypes": [
@@ -1145,10 +1153,10 @@
     {
       "id": "temp-executable-drop",
       "title": "Temp/AppData or executable file drop",
-      "titleZh": "Temp/AppData或executable 文件 drop",
+      "titleZh": "临时目录或用户目录投放可执行文件",
       "severity": "medium",
       "summary": "A file write targeted Temp/AppData or used an executable, library, driver, or script extension; the current rule schema treats path fragments as OR conditions.",
-      "summaryZh": "行为规则命中“Temp/AppData或executable 文件 drop”；请结合 evidenceFields、进程树和样本上下文复核。",
+      "summaryZh": "文件遥测显示在 Temp、AppData 等用户可写位置投放可执行或脚本文件；请结合进程树、文件来源和后续执行证据复核。",
       "mitreTechniqueId": "T1105",
       "mitreTechniqueName": "Ingress Tool Transfer",
       "eventTypes": [
@@ -1191,10 +1199,10 @@
     {
       "id": "script-file-executed",
       "title": "Script file execution command",
-      "titleZh": "Script 文件 execution 命令",
+      "titleZh": "脚本文件执行命令",
       "severity": "medium",
       "summary": "A process command line referenced a script-like file extension.",
-      "summaryZh": "行为规则命中“Script 文件 execution 命令”；请结合 evidenceFields、进程树和样本上下文复核。",
+      "summaryZh": "进程遥测显示脚本文件被解释器执行；请结合脚本路径、父进程和样本上下文复核。",
       "mitreTechniqueId": "T1059",
       "mitreTechniqueName": "Command and Scripting Interpreter",
       "eventTypes": [
@@ -1219,10 +1227,10 @@
     {
       "id": "http-network-activity",
       "title": "HTTP or HTTPS activity observed",
-      "titleZh": "HTTP或HTTPS 活动已观察",
+      "titleZh": "HTTP/HTTPS 网络活动",
       "severity": "medium",
       "summary": "A normalized HTTP request event was observed during execution.",
-      "summaryZh": "网络、驱动、Netstat 或 PCAP 遥测显示“HTTP或HTTPS 活动已观察”；请结合进程、端点、协议字段和样本上下文复核。",
+      "summaryZh": "网络、驱动、Netstat 或 PCAP 遥测显示 HTTP/HTTPS 连接；请结合进程、端点、协议字段和样本上下文复核。",
       "mitreTechniqueId": "T1071.001",
       "mitreTechniqueName": "Web Protocols",
       "eventTypes": [
@@ -1237,10 +1245,10 @@
     {
       "id": "dns-query-observed",
       "title": "DNS query observed",
-      "titleZh": "DNS 查询已观察",
+      "titleZh": "DNS 查询活动",
       "severity": "medium",
       "summary": "A normalized DNS query event was observed during execution.",
-      "summaryZh": "网络、驱动、Netstat 或 PCAP 遥测显示“DNS 查询已观察”；请结合进程、端点、协议字段和样本上下文复核。",
+      "summaryZh": "网络、驱动、Netstat 或 PCAP 遥测显示 DNS 查询；请结合进程、查询域名和样本上下文复核。",
       "mitreTechniqueId": "T1071.004",
       "mitreTechniqueName": "DNS",
       "eventTypes": [
@@ -1282,10 +1290,10 @@
     {
       "id": "anti-analysis-debugger-check",
       "title": "Debugger or sandbox check observed",
-      "titleZh": "调试器或沙箱 check已观察",
+      "titleZh": "调试器或沙箱检查",
       "severity": "medium",
       "summary": "A normalized anti-analysis event reported a debugger, sandbox, or timing check.",
-      "summaryZh": "反分析相关遥测显示“调试器或沙箱 check已观察”；这通常用于识别沙箱、调试器或交互环境，并应结合退出、延迟或门控行为复核。",
+      "summaryZh": "反分析遥测显示调试器、沙箱或分析环境检查；请结合退出、延迟、抑制执行等门控行为复核。",
       "mitreTechniqueId": "T1622",
       "mitreTechniqueName": "Debugger Evasion",
       "eventTypes": [
@@ -1650,10 +1658,10 @@
     {
       "id": "static-import-dynamic-code",
       "title": "Dynamic code loading or memory protection APIs",
-      "titleZh": "Dynamic code loading或memory protection API",
+      "titleZh": "动态代码加载或内存保护 API",
       "severity": "low",
       "summary": "Static analysis found imports or API-like strings used for dynamic code loading, memory mapping, or memory protection changes.",
-      "summaryZh": "静态分析发现“Dynamic code loading或memory protection API”相关证据；这是分诊元数据，请结合 PE 结构、导入/字符串和运行时行为复核。",
+      "summaryZh": "静态分析发现动态代码加载或内存保护相关 API；这是静态分诊线索，不代表运行时已执行解包、注入或内存篡改。",
       "mitreTechniqueId": "T1620",
       "mitreTechniqueName": "Reflective Code Loading",
       "eventTypes": [
@@ -1694,10 +1702,10 @@
     {
       "id": "static-import-script-execution",
       "title": "Script or process execution API imports",
-      "titleZh": "Script或进程 execution API 导入",
+      "titleZh": "脚本或进程执行相关 API 导入",
       "severity": "low",
       "summary": "Static analysis found imports commonly used to launch command interpreters, scripts, or child processes.",
-      "summaryZh": "静态分析发现“Script或进程 execution API 导入”相关证据；这是分诊元数据，请结合 PE 结构、导入/字符串和运行时行为复核。",
+      "summaryZh": "静态导入表包含脚本启动或进程执行相关 API；需结合命令行、子进程和运行时证据确认是否实际执行。",
       "mitreTechniqueId": "T1059",
       "mitreTechniqueName": "Command and Scripting Interpreter",
       "eventTypes": [
@@ -1739,10 +1747,10 @@
     {
       "id": "static-import-file-drop",
       "title": "File creation or dropper API imports",
-      "titleZh": "文件 创建或dropper API 导入",
+      "titleZh": "文件创建或投放器相关 API 导入",
       "severity": "low",
       "summary": "Static analysis found imports commonly used to create, copy, move, delete, or write files.",
-      "summaryZh": "静态分析发现“文件 创建或dropper API 导入”相关证据；这是分诊元数据，请结合 PE 结构、导入/字符串和运行时行为复核。",
+      "summaryZh": "静态导入表包含创建、写入、复制或删除文件相关 API；这是能力线索，不等同于已观察到落地文件。",
       "mitreTechniqueId": "T1106",
       "mitreTechniqueName": "Native API",
       "eventTypes": [
@@ -1949,11 +1957,11 @@
     {
       "id": "static-windows-path-string",
       "title": "Embedded Windows path string",
-      "titleZh": "Embedded Windows 路径 字符串",
+      "titleZh": "内嵌 Windows 路径字符串",
       "severity": "low",
       "confidence": "low",
       "summary": "Static analysis extracted Windows filesystem path strings that may help triage dropped files or staging locations.",
-      "summaryZh": "静态分析发现“Embedded Windows 路径 字符串”相关证据；这是分诊元数据，请结合 PE 结构、导入/字符串和运行时行为复核。",
+      "summaryZh": "静态字符串中出现 Windows 路径或目录片段；用于分诊上下文，需结合运行期文件/注册表事件判断是否实际访问。",
       "eventTypes": [
         "static.analysis.completed",
         "static.string.path"
@@ -1987,11 +1995,11 @@
     {
       "id": "static-registry-path-string",
       "title": "Embedded registry path string",
-      "titleZh": "Embedded 注册表 路径 字符串",
+      "titleZh": "内嵌注册表路径字符串",
       "severity": "medium",
       "confidence": "low",
       "summary": "Static analysis extracted registry path strings, including service or Run-key paths when present.",
-      "summaryZh": "静态分析发现“Embedded 注册表 路径 字符串”相关证据；这是分诊元数据，请结合 PE 结构、导入/字符串和运行时行为复核。",
+      "summaryZh": "静态分析发现注册表路径相关字符串；这是分诊元数据，请结合 PE 结构、导入/字符串和运行时行为复核。",
       "mitreTechniqueId": "T1112",
       "mitreTechniqueName": "Modify Registry",
       "eventTypes": [
@@ -2023,11 +2031,11 @@
     {
       "id": "static-persistence-string",
       "title": "Embedded persistence path or command string",
-      "titleZh": "Embedded 持久化 路径或命令 字符串",
+      "titleZh": "内嵌持久化路径或命令字符串",
       "severity": "medium",
       "confidence": "low",
       "summary": "Static analysis extracted Run-key, Startup-folder, service, or similar persistence-oriented strings.",
-      "summaryZh": "静态分析发现“Embedded 持久化 路径或命令 字符串”相关证据；这是分诊元数据，请结合 PE 结构、导入/字符串和运行时行为复核。",
+      "summaryZh": "静态分析发现持久化路径或命令相关字符串；这是分诊元数据，请结合 PE 结构、导入/字符串和运行时行为复核。",
       "mitreTechniqueId": "T1547.001",
       "mitreTechniqueName": "Registry Run Keys / Startup Folder",
       "eventTypes": [
@@ -2072,7 +2080,6 @@
       "mitreTechniqueId": "T1059",
       "mitreTechniqueName": "Command and Scripting Interpreter",
       "eventTypes": [
-        "static.analysis.completed",
         "static.string.path",
         "static.string.command"
       ],
@@ -2098,16 +2105,26 @@
         "static",
         "strings",
         "script"
-      ]
+      ],
+      "excludeDataContains": {
+        "value": [
+          "wmic cpu get",
+          "wmic os get",
+          "wmic path Win32_",
+          "wmic /namespace:\\\\root\\wmi PATH MSAcpi",
+          "wmic baseboard",
+          "wmic memorychip"
+        ]
+      }
     },
     {
       "id": "static-encoded-command-string",
       "title": "Encoded PowerShell or script command string",
-      "titleZh": "Encoded PowerShell或script 命令 字符串",
+      "titleZh": "内嵌编码命令或脚本命令字符串",
       "severity": "medium",
       "confidence": "low",
       "summary": "Static analysis extracted encoded-command or base64 execution markers in command strings.",
-      "summaryZh": "静态分析发现“Encoded PowerShell或script 命令 字符串”相关证据；这是分诊元数据，请结合 PE 结构、导入/字符串和运行时行为复核。",
+      "summaryZh": "静态分析发现编码 PowerShell 或脚本命令相关字符串；这是分诊元数据，请结合 PE 结构、导入/字符串和运行时行为复核。",
       "mitreTechniqueId": "T1059.001",
       "mitreTechniqueName": "PowerShell",
       "eventTypes": [
@@ -2147,7 +2164,6 @@
       "mitreTechniqueId": "T1218",
       "mitreTechniqueName": "System Binary Proxy Execution",
       "eventTypes": [
-        "static.analysis.completed",
         "static.string.command"
       ],
       "dataContains": {
@@ -2170,15 +2186,66 @@
         "static",
         "strings",
         "lolbin"
+      ],
+      "excludeDataContains": {
+        "value": [
+          "wmic cpu get",
+          "wmic os get",
+          "wmic path Win32_",
+          "wmic /namespace:\\\\root\\wmi PATH MSAcpi",
+          "wmic baseboard",
+          "wmic memorychip"
+        ]
+      }
+    },
+    {
+      "id": "static-wmic-system-discovery-string",
+      "title": "WMIC system discovery or anti-analysis string",
+      "titleZh": "WMIC 系统发现或反分析字符串",
+      "severity": "medium",
+      "confidence": "low",
+      "summary": "Static analysis extracted WMIC hardware, OS, ACPI, board, memory, or device inventory command strings. This is static triage for system discovery or sandbox fingerprinting and requires runtime corroboration.",
+      "summaryZh": "静态字符串中出现 WMIC 硬件、系统、ACPI、主板、内存或设备盘点命令；这是系统发现/沙箱指纹识别的静态分诊线索，需要运行时证据确认。",
+      "mitreTechniqueId": "T1082",
+      "mitreTechniqueName": "System Information Discovery",
+      "eventTypes": [
+        "static.string.command"
+      ],
+      "dataContains": {
+        "value": [
+          "wmic cpu get",
+          "wmic os get",
+          "wmic path Win32_",
+          "wmic /namespace:\\\\root\\wmi PATH MSAcpi",
+          "wmic baseboard",
+          "wmic memorychip"
+        ]
+      },
+      "evidenceFields": [
+        "eventType",
+        "path",
+        "data.value",
+        "data.category",
+        "data.tool",
+        "data.tags",
+        "data.staticEvidenceBoundary",
+        "data.runtimeCorrelationRequired"
+      ],
+      "tags": [
+        "static",
+        "strings",
+        "discovery",
+        "anti-analysis",
+        "wmic"
       ]
     },
     {
       "id": "static-anti-sandbox-string",
       "title": "Anti-sandbox or debugger string",
-      "titleZh": "Anti-沙箱或调试器 字符串",
+      "titleZh": "反沙箱或调试器字符串",
       "severity": "low",
       "summary": "Static analysis extracted debugger, sandbox, VM, or analysis-tool strings.",
-      "summaryZh": "静态分析发现“Anti-沙箱或调试器 字符串”相关证据；这是分诊元数据，请结合 PE 结构、导入/字符串和运行时行为复核。",
+      "summaryZh": "静态字符串中出现反沙箱、调试器或环境探测线索；这是能力/意图线索，需结合运行时探测行为确认。",
       "mitreTechniqueId": "T1497",
       "mitreTechniqueName": "Virtualization/Sandbox Evasion",
       "eventTypes": [
@@ -2518,11 +2585,11 @@
     {
       "id": "static-download-command-string",
       "title": "Embedded download command string",
-      "titleZh": "Embedded 下载命令 字符串",
+      "titleZh": "内嵌下载命令字符串",
       "severity": "medium",
       "confidence": "low",
       "summary": "Static analysis extracted command strings for PowerShell, BITS, certutil, curl, wget, or msiexec download staging. This is string triage unless matching runtime process activity is observed.",
-      "summaryZh": "静态分析发现“Embedded 下载命令 字符串”相关证据；这是分诊元数据，请结合 PE 结构、导入/字符串和运行时行为复核。",
+      "summaryZh": "静态分析发现下载命令相关字符串；这是分诊元数据，请结合 PE 结构、导入/字符串和运行时行为复核。",
       "mitreTechniqueId": "T1105",
       "mitreTechniqueName": "Ingress Tool Transfer",
       "eventTypes": [
@@ -2556,11 +2623,11 @@
     {
       "id": "static-exfil-command-string",
       "title": "Embedded upload or exfil command string",
-      "titleZh": "Embedded upload或exfil 命令 字符串",
+      "titleZh": "内嵌上传或外传命令字符串",
       "severity": "medium",
       "confidence": "low",
       "summary": "Static analysis extracted upload-oriented command strings such as curl form upload, FTP script mode, or WinHTTP/WinINet write markers. Treat this as triage until runtime network evidence confirms data transfer.",
-      "summaryZh": "静态分析发现“Embedded upload或exfil 命令 字符串”相关证据；这是分诊元数据，请结合 PE 结构、导入/字符串和运行时行为复核。",
+      "summaryZh": "静态分析发现上传或外传命令相关字符串；这是分诊元数据，请结合 PE 结构、导入/字符串和运行时行为复核。",
       "mitreTechniqueId": "T1041",
       "mitreTechniqueName": "Exfiltration Over C2 Channel",
       "eventTypes": [
@@ -2594,11 +2661,11 @@
     {
       "id": "static-credential-access-string",
       "title": "Embedded credential-access string",
-      "titleZh": "Embedded credential-access 字符串",
+      "titleZh": "内嵌凭据访问字符串",
       "severity": "medium",
       "confidence": "low",
       "summary": "Static analysis extracted strings associated with LSASS, SAM/SECURITY/NTDS material, DPAPI, Vault, or credential dumping tools. This is static triage unless corroborated by runtime access.",
-      "summaryZh": "静态分析发现“Embedded credential-access 字符串”相关证据；这是分诊元数据，请结合 PE 结构、导入/字符串和运行时行为复核。",
+      "summaryZh": "静态分析发现凭据访问相关字符串；这是分诊元数据，请结合 PE 结构、导入/字符串和运行时行为复核。",
       "mitreTechniqueId": "T1003",
       "mitreTechniqueName": "OS Credential Dumping",
       "eventTypes": [
@@ -2631,11 +2698,11 @@
     {
       "id": "static-defense-evasion-string",
       "title": "Embedded defense-evasion string",
-      "titleZh": "Embedded defense-evasion 字符串",
+      "titleZh": "内嵌防御规避字符串",
       "severity": "medium",
       "confidence": "low",
       "summary": "Static analysis extracted strings associated with Defender, AMSI, ETW, event-log, firewall, or security-tool tampering. This is static triage unless matching runtime behavior is observed.",
-      "summaryZh": "静态分析发现“Embedded defense-evasion 字符串”相关证据；这是分诊元数据，请结合 PE 结构、导入/字符串和运行时行为复核。",
+      "summaryZh": "静态分析发现防御规避相关字符串；这是分诊元数据，请结合 PE 结构、导入/字符串和运行时行为复核。",
       "mitreTechniqueId": "T1562.001",
       "mitreTechniqueName": "Disable or Modify Tools",
       "eventTypes": [
@@ -2667,11 +2734,11 @@
     {
       "id": "r0collector-lifecycle",
       "title": "R0 collector lifecycle event",
-      "titleZh": "R0 collector lifecycle event",
+      "titleZh": "R0 采集器生命周期事件",
       "severity": "info",
       "confidence": "low",
       "summary": "R0Collector emitted startup, heartbeat, device-open, or stopped lifecycle telemetry for driver-side collection visibility.",
-      "summaryZh": "网络、驱动、Netstat 或 PCAP 遥测显示“R0 collector lifecycle event”；请结合进程、端点、协议字段和样本上下文复核。",
+      "summaryZh": "R0 采集器启动、轮询或退出等生命周期事件；这是采集健康上下文，不代表样本行为。",
       "eventTypes": [
         "r0collector.started",
         "r0collector.deviceOpened",
@@ -2730,10 +2797,10 @@
     {
       "id": "r0-driver-file-write-signal",
       "title": "R0 driver file write or rename signal",
-      "titleZh": "R0 driver 文件 写入或rename signal",
+      "titleZh": "R0 驱动文件写入或重命名信号",
       "severity": "medium",
       "summary": "Driver telemetry reported file write/set-information/rename/delete style operations outside known sandbox output paths and registry hive backing files. Treat this as R0 filesystem telemetry; confirm process attribution before escalating.",
-      "summaryZh": "R0/驱动遥测显示“R0 driver 文件 写入或rename signal”；该规则依赖结构化驱动字段，并应排除采集健康和自噪声事件。",
+      "summaryZh": "R0/驱动遥测显示文件写入或重命名信号；该规则依赖结构化驱动字段，并应排除采集健康和自噪声事件。",
       "mitreTechniqueId": "T1105",
       "mitreTechniqueName": "Ingress Tool Transfer",
       "eventTypes": [
@@ -2865,10 +2932,10 @@
     {
       "id": "tasks-folder-file-write",
       "title": "Scheduled Tasks folder file write",
-      "titleZh": "Scheduled Tasks folder 文件 写入",
+      "titleZh": "计划任务目录文件写入",
       "severity": "high",
       "summary": "A file write targeted the Windows Scheduled Tasks folder, which can indicate task-based persistence outside command-line creation telemetry.",
-      "summaryZh": "R0/驱动遥测显示“Scheduled Tasks folder 文件 写入”；该规则依赖结构化驱动字段，并应排除采集健康和自噪声事件。",
+      "summaryZh": "R0/驱动遥测显示计划任务目录下的文件写入；该规则依赖结构化驱动字段，并应排除采集健康和自噪声事件。",
       "mitreTechniqueId": "T1053.005",
       "mitreTechniqueName": "Scheduled Task",
       "eventTypes": [
@@ -3036,10 +3103,10 @@
     {
       "id": "udp-network-activity",
       "title": "UDP network activity observed",
-      "titleZh": "UDP 网络活动已观察",
+      "titleZh": "UDP 网络活动",
       "severity": "medium",
       "summary": "A normalized UDP network event was collected during sample execution.",
-      "summaryZh": "网络、驱动、Netstat 或 PCAP 遥测显示“UDP 网络活动已观察”；请结合进程、端点、协议字段和样本上下文复核。",
+      "summaryZh": "网络、驱动、Netstat 或 PCAP 遥测显示 UDP 连接；请结合进程、端点、协议字段和样本上下文复核。",
       "mitreTechniqueId": "T1105",
       "mitreTechniqueName": "Ingress Tool Transfer",
       "eventTypes": [
@@ -3055,10 +3122,10 @@
     {
       "id": "tls-or-https-network-activity",
       "title": "TLS or HTTPS network activity observed",
-      "titleZh": "TLS或HTTPS 网络活动已观察",
+      "titleZh": "TLS/HTTPS 网络活动",
       "severity": "medium",
       "summary": "A normalized network event or driver payload referenced TLS/HTTPS or remote port 443.",
-      "summaryZh": "网络、驱动、Netstat 或 PCAP 遥测显示“TLS或HTTPS 网络活动已观察”；请结合进程、端点、协议字段和样本上下文复核。",
+      "summaryZh": "网络、驱动、Netstat 或 PCAP 遥测显示 TLS 或 HTTPS 连接；请结合进程、端点、证书/SNI 和样本上下文复核。",
       "mitreTechniqueId": "T1071.001",
       "mitreTechniqueName": "Web Protocols",
       "eventTypes": [
@@ -3115,10 +3182,10 @@
     {
       "id": "anti-analysis-vm-artifact-query",
       "title": "VM, sandbox, debugger, or analysis-tool artifact query",
-      "titleZh": "VM, 沙箱, 调试器,或analysis-tool artifact 查询",
+      "titleZh": "虚拟机、沙箱或分析工具痕迹查询",
       "severity": "medium",
       "summary": "A path-bearing registry, file, or process query referenced VM, sandbox, debugger, or analysis-tool artifacts.",
-      "summaryZh": "R0/驱动遥测显示“VM, 沙箱, 调试器,或analysis-tool artifact 查询”；该规则依赖结构化驱动字段，并应排除采集健康和自噪声事件。",
+      "summaryZh": "R0/驱动遥测显示对虚拟机、沙箱、调试器或分析工具痕迹的查询；该规则依赖结构化驱动字段，并应排除采集健康和自噪声事件。",
       "mitreTechniqueId": "T1497",
       "mitreTechniqueName": "Virtualization/Sandbox Evasion",
       "eventTypes": [
@@ -3166,10 +3233,10 @@
     {
       "id": "anti-analysis-delay-api-observed",
       "title": "Sleep or delay API observed",
-      "titleZh": "休眠或delay API已观察",
+      "titleZh": "休眠或延迟 API 调用",
       "severity": "medium",
       "summary": "Telemetry reported sleep, delay, or wait API usage that can be used to evade short sandbox windows.",
-      "summaryZh": "反分析相关遥测显示“休眠或delay API已观察”；这通常用于识别沙箱、调试器或交互环境，并应结合退出、延迟或门控行为复核。",
+      "summaryZh": "反分析遥测显示休眠或延迟 API 调用；请结合退出、延迟、抑制执行等门控行为复核。",
       "mitreTechniqueId": "T1497.003",
       "mitreTechniqueName": "Time Based Evasion",
       "eventTypes": [
@@ -3200,10 +3267,10 @@
     {
       "id": "driver-registry-run-key-typed-persistence",
       "title": "Typed driver registry Run-key persistence",
-      "titleZh": "Typed driver 注册表 Run-key 持久化",
+      "titleZh": "驱动解析的 Run 键持久化",
       "severity": "high",
       "summary": "A driver.registry typed payload reported a key path under Run, RunOnce, RunOnceEx, or policy Run autostart locations.",
-      "summaryZh": "R0/驱动遥测显示“Typed driver 注册表 Run-key 持久化”；该规则依赖结构化驱动字段，并应排除采集健康和自噪声事件。",
+      "summaryZh": "驱动解析后的注册表遥测显示 Run、RunOnce、RunOnceEx 或策略 Run 自启动位置活动；该规则依赖结构化驱动字段，并应排除采集健康和自噪声事件。",
       "mitreTechniqueId": "T1547.001",
       "mitreTechniqueName": "Registry Run Keys / Startup Folder",
       "eventTypes": [
@@ -3349,10 +3416,10 @@
     {
       "id": "scheduled-task-registry-cache-persistence",
       "title": "Scheduled TaskCache registry persistence",
-      "titleZh": "Scheduled TaskCache 注册表 持久化",
+      "titleZh": "计划任务 TaskCache 注册表持久化",
       "severity": "high",
       "summary": "A registry event targeted Task Scheduler cache keys used to register or hide scheduled-task persistence.",
-      "summaryZh": "R0/驱动遥测显示“Scheduled TaskCache 注册表 持久化”；该规则依赖结构化驱动字段，并应排除采集健康和自噪声事件。",
+      "summaryZh": "R0/驱动遥测显示计划任务 TaskCache 注册表持久化活动；该规则依赖结构化驱动字段，并应排除采集健康和自噪声事件。",
       "mitreTechniqueId": "T1053.005",
       "mitreTechniqueName": "Scheduled Task",
       "eventTypes": [
@@ -3388,10 +3455,10 @@
     {
       "id": "driver-registry-taskcache-typed-persistence",
       "title": "Typed driver registry Scheduled TaskCache persistence",
-      "titleZh": "Typed driver 注册表 Scheduled TaskCache 持久化",
+      "titleZh": "驱动解析的计划任务 TaskCache 持久化",
       "severity": "high",
       "summary": "A driver.registry typed payload reported Task Scheduler cache key activity.",
-      "summaryZh": "R0/驱动遥测显示“Typed driver 注册表 Scheduled TaskCache 持久化”；该规则依赖结构化驱动字段，并应排除采集健康和自噪声事件。",
+      "summaryZh": "驱动解析后的注册表遥测显示任务计划程序 TaskCache 键活动；该规则依赖结构化驱动字段，并应排除采集健康和自噪声事件。",
       "mitreTechniqueId": "T1053.005",
       "mitreTechniqueName": "Scheduled Task",
       "eventTypes": [
@@ -3434,10 +3501,10 @@
     {
       "id": "powershell-encoded-command-execution",
       "title": "PowerShell encoded command execution",
-      "titleZh": "PowerShell 编码命令 execution",
+      "titleZh": "PowerShell 编码命令执行",
       "severity": "high",
       "summary": "A process command line used PowerShell encoded-command switches or short aliases frequently used to conceal script payloads.",
-      "summaryZh": "持久化相关遥测显示“PowerShell 编码命令 execution”；请结合注册表、文件路径、命令行和用户可写位置证据复核。",
+      "summaryZh": "进程或脚本遥测显示 PowerShell 使用编码命令执行；请结合命令解码结果、父进程和用户可写位置证据复核。",
       "mitreTechniqueId": "T1059.001",
       "mitreTechniqueName": "PowerShell",
       "eventTypes": [
@@ -3641,10 +3708,10 @@
     {
       "id": "wscript-cscript-script-execution",
       "title": "Windows Script Host execution",
-      "titleZh": "Windows Script Host execution",
+      "titleZh": "Windows Script Host 脚本执行",
       "severity": "medium",
       "summary": "A process command line invoked Windows Script Host or launched script extensions handled by WSH.",
-      "summaryZh": "行为规则命中“Windows Script Host execution”；请结合 evidenceFields、进程树和样本上下文复核。",
+      "summaryZh": "进程遥测显示 WScript/CScript 执行脚本；请结合脚本路径、父进程和样本上下文复核。",
       "mitreTechniqueId": "T1059",
       "mitreTechniqueName": "Command and Scripting Interpreter",
       "eventTypes": [
@@ -3728,10 +3795,10 @@
     {
       "id": "driver-network-web-protocol-or-port",
       "title": "Typed driver web protocol or web-port traffic",
-      "titleZh": "Typed driver web protocol或web-端口 traffic",
+      "titleZh": "驱动解析的 Web 协议或 Web 端口流量",
       "severity": "medium",
       "summary": "A driver.network typed payload referenced HTTP/HTTPS protocol labels or common web ports beyond normalized user-mode network rows.",
-      "summaryZh": "网络、驱动、Netstat 或 PCAP 遥测显示“Typed driver web protocol或web-端口 traffic”；请结合进程、端点、协议字段和样本上下文复核。",
+      "summaryZh": "网络、驱动、Netstat 或 PCAP 遥测显示 Web 协议或 Web 端口流量；请结合进程、端点、协议字段和样本上下文复核。",
       "mitreTechniqueId": "T1071.001",
       "mitreTechniqueName": "Web Protocols",
       "eventTypes": [
@@ -3794,10 +3861,10 @@
     {
       "id": "anti-analysis-process-enumeration-command",
       "title": "Process or driver enumeration for anti-analysis",
-      "titleZh": "进程或driver enumeration for 反分析",
+      "titleZh": "用于反分析的进程或驱动枚举",
       "severity": "medium",
       "summary": "A command line enumerated running processes, loaded modules, or drivers, which samples often use to look for analysis tools.",
-      "summaryZh": "反分析相关遥测显示“进程或driver enumeration for 反分析”；这通常用于识别沙箱、调试器或交互环境，并应结合退出、延迟或门控行为复核。",
+      "summaryZh": "反分析遥测显示进程、驱动或分析工具枚举；请结合退出、延迟、抑制执行等门控行为复核。",
       "mitreTechniqueId": "T1497",
       "mitreTechniqueName": "Virtualization/Sandbox Evasion",
       "eventTypes": [
@@ -3853,10 +3920,10 @@
     {
       "id": "anti-analysis-timing-command",
       "title": "Command-line sleep or delay for anti-analysis",
-      "titleZh": "命令-line 休眠或delay for 反分析",
+      "titleZh": "用于反分析的命令行休眠或延迟",
       "severity": "medium",
       "summary": "A command line invoked sleep, timeout, ping-delay, or wait primitives that can stall short sandbox windows.",
-      "summaryZh": "反分析相关遥测显示“命令-line 休眠或delay for 反分析”；这通常用于识别沙箱、调试器或交互环境，并应结合退出、延迟或门控行为复核。",
+      "summaryZh": "反分析遥测显示命令行触发休眠、延迟或时间探测；请结合退出、延迟、抑制执行等门控行为复核。",
       "mitreTechniqueId": "T1497.003",
       "mitreTechniqueName": "Time Based Evasion",
       "eventTypes": [
@@ -3880,10 +3947,10 @@
     {
       "id": "downloaded-file-zone-identifier",
       "title": "Downloaded file mark-of-the-web metadata",
-      "titleZh": "下载ed 文件 mark-of-the-web 元数据",
+      "titleZh": "下载文件的 Mark-of-the-Web 元数据",
       "severity": "medium",
       "summary": "A file write referenced Zone.Identifier or mark-of-the-web metadata that can indicate content downloaded from an untrusted zone.",
-      "summaryZh": "R0/驱动遥测显示“下载ed 文件 mark-of-the-web 元数据”；该规则依赖结构化驱动字段，并应排除采集健康和自噪声事件。",
+      "summaryZh": "R0/驱动遥测显示下载文件带有 Zone.Identifier 或 Mark-of-the-Web 元数据；该规则依赖结构化驱动字段，并应排除采集健康和自噪声事件。",
       "mitreTechniqueId": "T1105",
       "mitreTechniqueName": "Ingress Tool Transfer",
       "eventTypes": [
@@ -3944,10 +4011,10 @@
     {
       "id": "execution-from-downloads-or-staging-path",
       "title": "Execution from download or staging path",
-      "titleZh": "Execution来自下载或staging 路径",
+      "titleZh": "从下载目录或暂存路径执行",
       "severity": "high",
       "summary": "A process launched from a user download, temporary, public, or ProgramData staging path commonly used after payload transfer.",
-      "summaryZh": "下载、暂存或代理执行相关遥测显示“Execution来自下载或staging 路径”；请结合来源 URL/UNC、落地路径和后续执行链复核。",
+      "summaryZh": "下载、暂存或代理执行遥测显示载荷从下载目录或暂存路径执行；请结合来源 URL/UNC、落地路径和后续执行链复核。",
       "mitreTechniqueId": "T1105",
       "mitreTechniqueName": "Ingress Tool Transfer",
       "eventTypes": [
@@ -3972,10 +4039,10 @@
     {
       "id": "download-archive-or-script-stage",
       "title": "Downloaded archive or script staged on disk",
-      "titleZh": "下载ed archive或script staged on disk",
+      "titleZh": "下载的归档或脚本落盘暂存",
       "severity": "medium",
       "summary": "A newly written file used an archive, disk image, script, or shortcut extension often seen in download-and-execute chains.",
-      "summaryZh": "R0/驱动遥测显示“下载ed archive或script staged on disk”；该规则依赖结构化驱动字段，并应排除采集健康和自噪声事件。",
+      "summaryZh": "R0/驱动遥测显示下载的归档、脚本或相关载荷已落盘暂存；该规则依赖结构化驱动字段，并应排除采集健康和自噪声事件。",
       "mitreTechniqueId": "T1105",
       "mitreTechniqueName": "Ingress Tool Transfer",
       "eventTypes": [
@@ -4006,11 +4073,11 @@
     {
       "id": "download-execute-chain-observed",
       "title": "Downloaded artifact execution chain observed",
-      "titleZh": "下载ed artifact execution chain已观察",
+      "titleZh": "已观察到下载后执行链",
       "severity": "high",
       "confidence": "high",
       "summary": "A normalized higher-level event reported that a downloaded or staged artifact was executed during the same analysis window. The rule requires an executed path plus at least one download/source path field.",
-      "summaryZh": "下载、暂存或代理执行相关遥测显示“下载ed artifact execution chain已观察”；请结合来源 URL/UNC、落地路径和后续执行链复核。",
+      "summaryZh": "规范化遥测显示下载或暂存的文件在同一分析窗口内被执行；请结合来源 URL/UNC、落地路径和后续执行链复核。",
       "mitreTechniqueId": "T1105",
       "mitreTechniqueName": "Ingress Tool Transfer",
       "eventTypes": [
@@ -4047,10 +4114,10 @@
     {
       "id": "process-injection-memory-primitive",
       "title": "Cross-process memory injection primitive",
-      "titleZh": "跨进程 memory 注入原语",
+      "titleZh": "跨进程内存注入原语",
       "severity": "high",
       "summary": "An event referenced cross-process allocation or memory-write APIs frequently used for process injection.",
-      "summaryZh": "R0/驱动遥测显示“跨进程 memory 注入原语”；该规则依赖结构化驱动字段，并应排除采集健康和自噪声事件。",
+      "summaryZh": "R0/驱动遥测显示跨进程内存写入、分配或权限修改等注入原语；该规则依赖结构化驱动字段，并应排除采集健康和自噪声事件。",
       "mitreTechniqueId": "T1055",
       "mitreTechniqueName": "Process Injection",
       "eventTypes": [
@@ -4134,10 +4201,10 @@
     {
       "id": "process-hollowing-signal",
       "title": "Process hollowing or suspended-process replacement signal",
-      "titleZh": "进程空洞化或suspended-进程 replacement signal",
+      "titleZh": "进程空洞化或挂起进程替换信号",
       "severity": "high",
       "summary": "An event referenced suspended process creation, image unmapping, context manipulation, or resume patterns associated with process hollowing.",
-      "summaryZh": "R0/驱动遥测显示“进程空洞化或suspended-进程 replacement signal”；该规则依赖结构化驱动字段，并应排除采集健康和自噪声事件。",
+      "summaryZh": "R0/驱动遥测显示进程空洞化或挂起进程替换信号；该规则依赖结构化驱动字段，并应排除采集健康和自噪声事件。",
       "mitreTechniqueId": "T1055.012",
       "mitreTechniqueName": "Process Hollowing",
       "eventTypes": [
@@ -4179,10 +4246,10 @@
     {
       "id": "rwx-memory-protection-change",
       "title": "Executable writable memory protection change",
-      "titleZh": "Executable writable memory protection change",
+      "titleZh": "内存保护改为可写且可执行",
       "severity": "medium",
       "summary": "A memory event referenced RWX or executable memory protection changes that can precede injected code execution.",
-      "summaryZh": "行为规则命中“Executable writable memory protection change”；请结合 evidenceFields、进程树和样本上下文复核。",
+      "summaryZh": "行为遥测显示内存页被设置为可写且可执行或等价保护；请结合进程树、调用序列和样本上下文复核。",
       "mitreTechniqueId": "T1055",
       "mitreTechniqueName": "Process Injection",
       "eventTypes": [
@@ -4570,10 +4637,10 @@
     {
       "id": "anti-analysis-sandbox-artifact-command",
       "title": "Command-line sandbox or analysis artifact lookup",
-      "titleZh": "命令-line 沙箱或analysis artifact lookup",
+      "titleZh": "命令行查询沙箱或分析工具痕迹",
       "severity": "medium",
       "summary": "A process command line referenced VM, sandbox, debugger, or analysis-tool process names commonly queried before changing behavior.",
-      "summaryZh": "反分析相关遥测显示“命令-line 沙箱或analysis artifact lookup”；这通常用于识别沙箱、调试器或交互环境，并应结合退出、延迟或门控行为复核。",
+      "summaryZh": "反分析遥测显示命令行查询沙箱、虚拟机或分析工具痕迹；请结合退出、延迟、抑制执行等门控行为复核。",
       "mitreTechniqueId": "T1497",
       "mitreTechniqueName": "Virtualization/Sandbox Evasion",
       "eventTypes": [
@@ -4605,10 +4672,10 @@
     {
       "id": "anti-analysis-user-activity-check",
       "title": "User activity or interaction check",
-      "titleZh": "User 活动或interaction check",
+      "titleZh": "用户活动或交互状态检查",
       "severity": "medium",
       "summary": "A process command line referenced recent-document, user-assist, session, mouse, keyboard, or idle-time checks commonly used to detect automated sandboxes.",
-      "summaryZh": "反分析相关遥测显示“User 活动或interaction check”；这通常用于识别沙箱、调试器或交互环境，并应结合退出、延迟或门控行为复核。",
+      "summaryZh": "反分析遥测显示用户活动、输入或交互状态检查；请结合退出、延迟、抑制执行等门控行为复核。",
       "mitreTechniqueId": "T1497",
       "mitreTechniqueName": "Virtualization/Sandbox Evasion",
       "eventTypes": [
@@ -4739,10 +4806,10 @@
     {
       "id": "credential-store-access-observed",
       "title": "Credential store access observed",
-      "titleZh": "凭据存储访问已观察",
+      "titleZh": "凭据存储访问",
       "severity": "high",
       "summary": "File, registry, or driver telemetry touched Windows hives, domain database, browser stores, vaults, or password manager paths containing credential material.",
-      "summaryZh": "网络、驱动、Netstat 或 PCAP 遥测显示“凭据存储访问已观察”；请结合进程、端点、协议字段和样本上下文复核。",
+      "summaryZh": "遥测显示访问凭据存储、密钥材料或相关文件/注册表位置；请结合进程、路径和后续网络/横向移动证据复核。",
       "eventTypes": [
         "file.open",
         "file.created",
@@ -4822,10 +4889,10 @@
     {
       "id": "network-c2-beacon-event",
       "title": "Explicit C2 beacon event",
-      "titleZh": "Explicit C2 beacon event",
+      "titleZh": "明确的 C2 心跳事件",
       "severity": "high",
       "summary": "A normalized collector emitted an explicit command-and-control or beacon event.",
-      "summaryZh": "网络、驱动、Netstat 或 PCAP 遥测显示“Explicit C2 beacon event”；请结合进程、端点、协议字段和样本上下文复核。",
+      "summaryZh": "规范化采集器报告明确的命令控制或心跳通信事件；请结合进程、端点、协议字段和样本上下文复核。",
       "mitreTechniqueId": "T1071.001",
       "mitreTechniqueName": "Web Protocols",
       "eventTypes": [
@@ -4842,10 +4909,10 @@
     {
       "id": "network-c2-indicator-fields",
       "title": "C2 indicator fields in network telemetry",
-      "titleZh": "C2 指标 字段中network telemetry",
+      "titleZh": "网络遥测中的 C2 指标字段",
       "severity": "high",
       "summary": "HTTP, TLS, or driver network telemetry contained explicit beacon, callback, check-in, tasking, URI, or protocol classification fields often used to label C2 activity. Script/library user agents are handled by constrained companion rules.",
-      "summaryZh": "网络、驱动、Netstat 或 PCAP 遥测显示“C2 指标 字段中network telemetry”；请结合进程、端点、协议字段和样本上下文复核。",
+      "summaryZh": "网络、驱动、Netstat 或 PCAP 遥测包含 C2 相关指标字段；请结合进程、端点、协议字段和样本上下文复核。",
       "mitreTechniqueId": "T1071.001",
       "mitreTechniqueName": "Web Protocols",
       "eventTypes": [
@@ -5227,10 +5294,10 @@
     {
       "id": "credential-sam-system-hive-access",
       "title": "SAM/SYSTEM hive credential material access",
-      "titleZh": "SAM/SYSTEM 配置单元 credential material access",
+      "titleZh": "SAM/SYSTEM 配置单元凭据材料访问",
       "severity": "high",
       "summary": "A file or registry event referenced Windows SAM, SECURITY, or SYSTEM hive material used for offline credential extraction.",
-      "summaryZh": "R0/驱动遥测显示“SAM/SYSTEM 配置单元 credential material access”；该规则依赖结构化驱动字段，并应排除采集健康和自噪声事件。",
+      "summaryZh": "文件或注册表事件触及可用于离线凭据提取的 SAM、SECURITY 或 SYSTEM 配置单元材料。",
       "mitreTechniqueId": "T1003.002",
       "mitreTechniqueName": "Security Account Manager",
       "eventTypes": [
@@ -5332,10 +5399,10 @@
     {
       "id": "credential-vault-dpapi-access",
       "title": "Windows credential vault or DPAPI material access",
-      "titleZh": "Windows 凭据保管库或 DPAPI material access",
+      "titleZh": "Windows 凭据保管库或 DPAPI 材料访问",
       "severity": "high",
       "summary": "A file or registry event referenced Windows Vault, DPAPI Protect directories, credential files, or policy secrets.",
-      "summaryZh": "R0/驱动遥测显示“Windows 凭据保管库或 DPAPI material access”；该规则依赖结构化驱动字段，并应排除采集健康和自噪声事件。",
+      "summaryZh": "文件或注册表事件触及 Windows Vault、DPAPI Protect 目录、凭据文件或策略机密材料。",
       "mitreTechniqueId": "T1555",
       "mitreTechniqueName": "Credentials from Password Stores",
       "eventTypes": [
@@ -5403,10 +5470,10 @@
     {
       "id": "smb-network-port-observed",
       "title": "SMB network port observed",
-      "titleZh": "SMB 网络端口已观察",
+      "titleZh": "SMB 网络端口活动",
       "severity": "medium",
       "summary": "A network or driver event referenced SMB port 445 or legacy NetBIOS file-sharing ports.",
-      "summaryZh": "网络、驱动、Netstat 或 PCAP 遥测显示“SMB 网络端口已观察”；请结合进程、端点、协议字段和样本上下文复核。",
+      "summaryZh": "网络、驱动、Netstat 或 PCAP 遥测显示 SMB 端口活动；请结合进程、端点、协议字段和样本上下文复核。",
       "mitreTechniqueId": "T1021.002",
       "mitreTechniqueName": "SMB/Windows Admin Shares",
       "eventTypes": [
@@ -5449,10 +5516,10 @@
     {
       "id": "winrm-network-port-observed",
       "title": "WinRM network port observed",
-      "titleZh": "WinRM 网络端口已观察",
+      "titleZh": "WinRM 网络端口活动",
       "severity": "medium",
       "summary": "A network, driver, or PCAP event referenced WinRM ports 5985 or 5986.",
-      "summaryZh": "网络、驱动、Netstat 或 PCAP 遥测显示“WinRM 网络端口已观察”；请结合进程、端点、协议字段和样本上下文复核。",
+      "summaryZh": "网络、驱动、Netstat 或 PCAP 遥测显示 WinRM 端口活动；请结合进程、端点、协议字段和样本上下文复核。",
       "mitreTechniqueId": "T1021.006",
       "mitreTechniqueName": "Windows Remote Management",
       "eventTypes": [
@@ -5493,10 +5560,10 @@
     {
       "id": "anti-analysis-cpuid-api-observed",
       "title": "CPU or hypervisor check API observed",
-      "titleZh": "CPU或hypervisor check API已观察",
+      "titleZh": "CPU 或虚拟化检查 API 调用",
       "severity": "medium",
       "summary": "An API or anti-analysis event referenced CPU, hypervisor, or native system information checks used for sandbox fingerprinting.",
-      "summaryZh": "反分析相关遥测显示“CPU或hypervisor check API已观察”；这通常用于识别沙箱、调试器或交互环境，并应结合退出、延迟或门控行为复核。",
+      "summaryZh": "反分析遥测显示 CPU、CPUID 或 Hypervisor 检查 API 调用；请结合退出、延迟、抑制执行等门控行为复核。",
       "mitreTechniqueId": "T1497.001",
       "mitreTechniqueName": "System Checks",
       "eventTypes": [
@@ -5534,10 +5601,10 @@
     {
       "id": "anti-analysis-mac-disk-fingerprint-command",
       "title": "MAC, disk, or device fingerprint command",
-      "titleZh": "MAC, disk,或device fingerprint 命令",
+      "titleZh": "MAC、磁盘或设备指纹命令",
       "severity": "medium",
       "summary": "A command line queried NIC, MAC address, disk, volume, or device inventory commonly used to identify virtualized environments.",
-      "summaryZh": "反分析相关遥测显示“MAC, disk,或device fingerprint 命令”；这通常用于识别沙箱、调试器或交互环境，并应结合退出、延迟或门控行为复核。",
+      "summaryZh": "反分析遥测显示 MAC、磁盘或设备指纹采集命令；请结合退出、延迟、抑制执行等门控行为复核。",
       "mitreTechniqueId": "T1497.001",
       "mitreTechniqueName": "System Checks",
       "eventTypes": [
@@ -5565,11 +5632,11 @@
     {
       "id": "anti-analysis-sleep-duration-metadata",
       "title": "Sleep duration telemetry observed",
-      "titleZh": "休眠 duration telemetry已观察",
+      "titleZh": "休眠时长遥测",
       "severity": "medium",
       "confidence": "low",
       "summary": "A sleep, timeout, or anti-analysis event carried duration fields used to triage time-based evasion evidence.",
-      "summaryZh": "反分析相关遥测显示“休眠 duration telemetry已观察”；这通常用于识别沙箱、调试器或交互环境，并应结合退出、延迟或门控行为复核。",
+      "summaryZh": "反分析遥测显示休眠时长或延迟元数据；请结合退出、延迟、抑制执行等门控行为复核。",
       "mitreTechniqueId": "T1497.003",
       "mitreTechniqueName": "Time Based Evasion",
       "eventTypes": [
@@ -5689,10 +5756,10 @@
     {
       "id": "defender-disable-command",
       "title": "Microsoft Defender disable or exclusion command",
-      "titleZh": "Microsoft Defender disable或exclusion 命令",
+      "titleZh": "Microsoft Defender 禁用或排除命令",
       "severity": "high",
       "summary": "A command line attempted to disable Defender features, add exclusions, stop services, or remove definitions.",
-      "summaryZh": "安全控制或日志规避相关遥测显示“Microsoft Defender disable或exclusion 命令”；请结合命令行参数、注册表值和执行主体确认影响。",
+      "summaryZh": "安全控制或日志规避遥测显示尝试禁用 Defender、添加排除项、停止服务或移除定义；请结合命令行参数、注册表值和执行主体确认影响。",
       "mitreTechniqueId": "T1562.001",
       "mitreTechniqueName": "Disable or Modify Tools",
       "eventTypes": [
@@ -5721,10 +5788,10 @@
     {
       "id": "defender-policy-registry-disable",
       "title": "Defender policy registry disable setting",
-      "titleZh": "Defender 策略 注册表 disable setting",
+      "titleZh": "Defender 策略注册表禁用设置",
       "severity": "high",
       "summary": "A registry event modified Windows Defender policy values associated with disabled protections or exclusions.",
-      "summaryZh": "R0/驱动遥测显示“Defender 策略 注册表 disable setting”；该规则依赖结构化驱动字段，并应排除采集健康和自噪声事件。",
+      "summaryZh": "R0/驱动遥测显示 Defender 策略注册表禁用设置；该规则依赖结构化驱动字段，并应排除采集健康和自噪声事件。",
       "mitreTechniqueId": "T1562.001",
       "mitreTechniqueName": "Disable or Modify Tools",
       "eventTypes": [
@@ -5777,10 +5844,10 @@
     {
       "id": "security-tool-stop-or-kill-command",
       "title": "Security tool stop or kill command",
-      "titleZh": "安全工具 stop或kill 命令",
+      "titleZh": "安全工具停止或终止命令",
       "severity": "high",
       "summary": "A command line referenced stopping or killing common Windows security, logging, or EDR-related services and processes.",
-      "summaryZh": "安全控制或日志规避相关遥测显示“安全工具 stop或kill 命令”；请结合命令行参数、注册表值和执行主体确认影响。",
+      "summaryZh": "安全控制或日志规避遥测显示停止或终止安全工具的命令；请结合命令行参数、注册表值和执行主体确认影响。",
       "mitreTechniqueId": "T1562.001",
       "mitreTechniqueName": "Disable or Modify Tools",
       "eventTypes": [
@@ -5811,10 +5878,10 @@
     {
       "id": "firewall-defense-disable-command",
       "title": "Windows firewall or network defense disable command",
-      "titleZh": "Windows 防火墙或network defense disable 命令",
+      "titleZh": "Windows 防火墙或网络防护禁用命令",
       "severity": "high",
       "summary": "A command line disabled firewall profiles, disabled rules, or broadly opened network access.",
-      "summaryZh": "安全控制或日志规避相关遥测显示“Windows 防火墙或network defense disable 命令”；请结合命令行参数、注册表值和执行主体确认影响。",
+      "summaryZh": "安全控制或日志规避遥测显示禁用防火墙配置、规则或网络防护；请结合命令行参数、注册表值和执行主体确认影响。",
       "mitreTechniqueId": "T1562.004",
       "mitreTechniqueName": "Disable or Modify System Firewall",
       "eventTypes": [
@@ -5936,10 +6003,10 @@
     {
       "id": "pcap-http-request-observed",
       "title": "PCAP HTTP request observed",
-      "titleZh": "PCAP HTTP 请求已观察",
+      "titleZh": "PCAP HTTP 请求记录",
       "severity": "medium",
       "summary": "A normalized HTTP or PCAP HTTP event included endpoint, host, URI, method, content-type, user-agent, or payload metadata.",
-      "summaryZh": "网络、驱动、Netstat 或 PCAP 遥测显示“PCAP HTTP 请求已观察”；请结合进程、端点、协议字段和样本上下文复核。",
+      "summaryZh": "PCAP 遥测显示 HTTP 请求；请结合进程、端点、URI 和样本上下文复核。",
       "mitreTechniqueId": "T1071.001",
       "mitreTechniqueName": "Web Protocols",
       "eventTypes": [
@@ -5971,10 +6038,10 @@
     {
       "id": "pcap-dns-query-observed",
       "title": "PCAP DNS query observed",
-      "titleZh": "PCAP DNS 查询已观察",
+      "titleZh": "PCAP DNS 查询记录",
       "severity": "medium",
       "summary": "A normalized DNS or PCAP DNS event included endpoint, query, or response-code metadata.",
-      "summaryZh": "网络、驱动、Netstat 或 PCAP 遥测显示“PCAP DNS 查询已观察”；请结合进程、端点、协议字段和样本上下文复核。",
+      "summaryZh": "PCAP 遥测显示 DNS 查询；请结合进程、查询域名和样本上下文复核。",
       "mitreTechniqueId": "T1071.004",
       "mitreTechniqueName": "DNS",
       "eventTypes": [
@@ -6004,10 +6071,10 @@
     {
       "id": "pcap-tls-clienthello-observed",
       "title": "PCAP TLS ClientHello observed",
-      "titleZh": "PCAP TLS ClientHello已观察",
+      "titleZh": "PCAP TLS ClientHello 记录",
       "severity": "medium",
       "summary": "A normalized TLS or PCAP TLS event included endpoint, SNI, JA3, ALPN, or TLS version metadata.",
-      "summaryZh": "网络、驱动、Netstat 或 PCAP 遥测显示“PCAP TLS ClientHello已观察”；请结合进程、端点、协议字段和样本上下文复核。",
+      "summaryZh": "PCAP 遥测显示 TLS ClientHello；请结合进程、端点、SNI/JA3 和样本上下文复核。",
       "mitreTechniqueId": "T1573",
       "mitreTechniqueName": "Encrypted Channel",
       "eventTypes": [
@@ -6038,10 +6105,10 @@
     {
       "id": "dns-dynamic-domain-pattern",
       "title": "DNS query to dynamic or disposable domain pattern",
-      "titleZh": "DNS 查询到dynamic或disposable domain pattern",
+      "titleZh": "DNS 查询动态或一次性域名模式",
       "severity": "medium",
       "summary": "A DNS event referenced dynamic DNS, disposable, or commonly abused top-level domain fragments for triage.",
-      "summaryZh": "网络、驱动、Netstat 或 PCAP 遥测显示“DNS 查询到dynamic或disposable domain pattern”；请结合进程、端点、协议字段和样本上下文复核。",
+      "summaryZh": "网络、驱动、Netstat 或 PCAP 遥测显示 DNS 查询命中动态域名或一次性域名模式；请结合进程、端点、协议字段和样本上下文复核。",
       "mitreTechniqueId": "T1071.004",
       "mitreTechniqueName": "DNS",
       "eventTypes": [
@@ -6360,8 +6427,8 @@
       "title": "Process tree node observed",
       "titleZh": "观察到进程树节点",
       "severity": "low",
-      "summary": "The process-tree probe emitted a node with parent, root, depth, child-count, or lineage metadata, enabling full descendant review beyond single process-start rows.",
-      "summaryZh": "进程树探针输出带有父进程、根、深度、子进程数或谱系元数据的节点，可超越单个 process-start 行审阅完整后代。",
+      "summary": "The process-tree probe emitted a non-baseline node with parent, root, depth, child-count, or lineage metadata, enabling full descendant review beyond single process-start rows.",
+      "summaryZh": "进程树探针输出带有父进程、根、深度、子进程数或谱系元数据的非基线节点，可超越单个 process-start 行审阅完整后代。",
       "eventTypes": [
         "process.tree"
       ],
@@ -6372,6 +6439,14 @@
         "treeLineage",
         "parentProcessId"
       ],
+      "excludeDataEquals": {
+        "normalBehaviorBoundary": [
+          "normal-interactive-gui-baseline"
+        ],
+        "sampleCorrelationBoundary": [
+          "normal-interactive-gui-baseline"
+        ]
+      },
       "tags": [
         "process",
         "process-tree",
@@ -6381,10 +6456,10 @@
     {
       "id": "process-tree-root-unavailable",
       "title": "Process tree root unavailable",
-      "titleZh": "进程 tree root unavailable",
+      "titleZh": "进程树根节点不可用",
       "severity": "info",
       "summary": "The process-tree probe could not locate the expected root process in the snapshot, which may happen after rapid exit or collection timing races.",
-      "summaryZh": "进程树遥测显示“进程 tree root unavailable”；请结合父子进程、命令行、下载/暂存路径和样本上下文复核。",
+      "summaryZh": "进程树探针未能在快照中定位根进程；常见于样本快速退出或采集时序竞争，属于诊断信息。",
       "eventTypes": [
         "process.tree_unavailable"
       ],
@@ -6403,10 +6478,10 @@
     {
       "id": "process-start-failed",
       "title": "Sample process start failed",
-      "titleZh": "Sample 进程 start failed",
+      "titleZh": "样本进程启动失败",
       "severity": "medium",
       "summary": "The guest executor failed to start the submitted sample or helper process; failure metadata is surfaced because launch failures can mask behavior.",
-      "summaryZh": "行为规则命中“Sample 进程 start failed”；请结合 evidenceFields、进程树和样本上下文复核。",
+      "summaryZh": "行为遥测显示样本进程启动失败；请结合错误码、路径、父进程和样本上下文复核。",
       "eventTypes": [
         "process.start_failed"
       ],
@@ -6489,10 +6564,10 @@
     {
       "id": "execution-from-user-writable-tree-path",
       "title": "Process tree execution from user-writable path",
-      "titleZh": "进程 tree execution来自user-writable 路径",
+      "titleZh": "进程树中从用户可写路径执行",
       "severity": "medium",
       "summary": "A process-tree or process observation referenced execution from Temp, AppData, Downloads, ProgramData, or Public staging paths.",
-      "summaryZh": "进程树遥测显示“进程 tree execution来自user-writable 路径”；请结合父子进程、命令行、下载/暂存路径和样本上下文复核。",
+      "summaryZh": "进程树遥测显示可执行或脚本从用户可写路径启动；请结合父子进程、命令行、下载/暂存路径和样本上下文复核。",
       "mitreTechniqueId": "T1204.002",
       "mitreTechniqueName": "Malicious File",
       "eventTypes": [
@@ -6576,10 +6651,10 @@
     {
       "id": "scheduled-task-system-change-created",
       "title": "Scheduled task inventory item created or modified",
-      "titleZh": "Scheduled task inventory item 已创建或已修改",
+      "titleZh": "计划任务被创建或修改",
       "severity": "high",
       "summary": "The system-change probe observed a scheduled task created or modified after sample launch.",
-      "summaryZh": "持久化相关遥测显示“Scheduled task inventory item 已创建或已修改”；请结合注册表、文件路径、命令行和用户可写位置证据复核。",
+      "summaryZh": "系统变更遥测显示样本启动后计划任务被创建或修改；请结合任务目标、触发器、注册表和用户可写位置证据复核。",
       "mitreTechniqueId": "T1053.005",
       "mitreTechniqueName": "Scheduled Task",
       "eventTypes": [
@@ -6601,10 +6676,10 @@
     {
       "id": "scheduled-task-suspicious-target",
       "title": "Scheduled task diff with suspicious target",
-      "titleZh": "Scheduled task diff带有suspicious target",
+      "titleZh": "计划任务指向可疑目标",
       "severity": "high",
       "summary": "A created or modified scheduled task launches script interpreters, command shells, or payloads from user-writable staging paths.",
-      "summaryZh": "持久化相关遥测显示“Scheduled task diff带有suspicious target”；请结合注册表、文件路径、命令行和用户可写位置证据复核。",
+      "summaryZh": "计划任务差异遥测显示新建或修改的任务启动脚本解释器、命令行外壳或用户可写路径载荷。",
       "mitreTechniqueId": "T1053.005",
       "mitreTechniqueName": "Scheduled Task",
       "eventTypes": [
@@ -6643,10 +6718,10 @@
     {
       "id": "startup-item-system-change-created",
       "title": "Startup item inventory entry created or modified",
-      "titleZh": "启动项 inventory entry 已创建或已修改",
+      "titleZh": "启动项被创建或修改",
       "severity": "high",
       "summary": "The system-change probe observed a startup registry value or startup-folder item created or modified after sample launch.",
-      "summaryZh": "持久化相关遥测显示“启动项 inventory entry 已创建或已修改”；请结合注册表、文件路径、命令行和用户可写位置证据复核。",
+      "summaryZh": "系统变更遥测显示启动项被创建或修改；请结合注册表、文件路径、命令行和用户可写位置证据复核。",
       "mitreTechniqueId": "T1547.001",
       "mitreTechniqueName": "Registry Run Keys / Startup Folder",
       "eventTypes": [
@@ -6668,10 +6743,10 @@
     {
       "id": "startup-item-executable-value",
       "title": "Startup item executable or script value",
-      "titleZh": "启动项 executable或script value",
+      "titleZh": "启动项指向可执行或脚本值",
       "severity": "high",
       "summary": "A created or modified startup item references an executable, script, library, or user-writable path as its autostart payload.",
-      "summaryZh": "持久化相关遥测显示“启动项 executable或script value”；请结合注册表、文件路径、命令行和用户可写位置证据复核。",
+      "summaryZh": "持久化遥测显示启动项值指向可执行文件或脚本；请结合注册表、文件路径、命令行和用户可写位置证据复核。",
       "mitreTechniqueId": "T1547.001",
       "mitreTechniqueName": "Registry Run Keys / Startup Folder",
       "eventTypes": [
@@ -6704,10 +6779,10 @@
     {
       "id": "persistence-system-item-deleted",
       "title": "Persistence inventory item deleted",
-      "titleZh": "持久化 inventory item deleted",
+      "titleZh": "持久化清单项被删除",
       "severity": "medium",
       "summary": "The system-change probe observed a service, scheduled task, or startup item deleted during execution; this can represent cleanup, tampering, or installer rollback.",
-      "summaryZh": "持久化相关遥测显示“持久化 inventory item deleted”；请结合注册表、文件路径、命令行和用户可写位置证据复核。",
+      "summaryZh": "持久化遥测显示启动项、任务或相关清单项被删除；请结合注册表、文件路径、命令行和用户可写位置证据复核。",
       "mitreTechniqueId": "T1070.004",
       "mitreTechniqueName": "File Deletion",
       "eventTypes": [
@@ -6780,10 +6855,10 @@
     {
       "id": "dns-cache-txt-or-tunnel",
       "title": "DNS cache entry with tunnel-capable record",
-      "titleZh": "DNS 缓存 entry带有tunnel-capable record",
+      "titleZh": "DNS 缓存包含可用于隧道的记录",
       "severity": "medium",
       "summary": "A new DNS cache entry referenced TXT, NULL, CNAME, tunnel, DGA, or DNS-log tokens commonly used in DNS C2 and tunneling triage.",
-      "summaryZh": "网络、驱动、Netstat 或 PCAP 遥测显示“DNS 缓存 entry带有tunnel-capable record”；请结合进程、端点、协议字段和样本上下文复核。",
+      "summaryZh": "DNS 缓存或网络遥测显示 TXT/NULL 等可用于隧道的记录；请结合进程、端点、协议字段和样本上下文复核。",
       "mitreTechniqueId": "T1071.004",
       "mitreTechniqueName": "DNS",
       "eventTypes": [
@@ -6820,10 +6895,10 @@
     {
       "id": "dns-cache-dynamic-domain",
       "title": "DNS cache dynamic or disposable domain",
-      "titleZh": "DNS 缓存 dynamic或disposable domain",
+      "titleZh": "DNS 缓存包含动态或一次性域名",
       "severity": "medium",
       "summary": "A new DNS cache entry contained dynamic DNS, disposable, or commonly abused domain/TLD fragments.",
-      "summaryZh": "网络、驱动、Netstat 或 PCAP 遥测显示“DNS 缓存 dynamic或disposable domain”；请结合进程、端点、协议字段和样本上下文复核。",
+      "summaryZh": "DNS 缓存或网络遥测显示动态域名或一次性域名；请结合进程、端点、协议字段和样本上下文复核。",
       "mitreTechniqueId": "T1071.004",
       "mitreTechniqueName": "DNS",
       "eventTypes": [
@@ -6860,11 +6935,11 @@
     {
       "id": "netstat-connection-observed",
       "title": "Netstat collection metadata row observed",
-      "titleZh": "Netstat 采集 元数据 row已观察",
+      "titleZh": "观察到 Netstat 采集元数据行",
       "severity": "info",
       "confidence": "low",
       "summary": "The network probe emitted a netstat row with local/remote endpoints, protocol, state, and optional owning PID. Generic observed rows are collection metadata; use netstat-added-connection for post-launch deltas.",
-      "summaryZh": "行为规则命中“Netstat 采集 元数据 row已观察”；请结合 evidenceFields、进程树和样本上下文复核。",
+      "summaryZh": "Netstat 采集输出了连接/监听元数据行；只有与样本 PID、命令行或端点关联时才升级为样本网络行为。",
       "eventTypes": [
         "network.netstat"
       ],
@@ -6994,10 +7069,10 @@
     {
       "id": "http-executable-download",
       "title": "HTTP executable or script download",
-      "titleZh": "HTTP executable或script 下载",
+      "titleZh": "HTTP 可执行文件或脚本下载",
       "severity": "high",
       "summary": "HTTP or PCAP HTTP metadata referenced executable/script extensions, PE magic, archive payloads, or binary content types associated with staged tools.",
-      "summaryZh": "网络、驱动、Netstat 或 PCAP 遥测显示“HTTP executable或script 下载”；请结合进程、端点、协议字段和样本上下文复核。",
+      "summaryZh": "HTTP 或 PCAP 元数据引用可执行/脚本扩展名、PE 魔数、归档载荷或二进制内容类型，符合工具暂存下载特征。",
       "mitreTechniqueId": "T1105",
       "mitreTechniqueName": "Ingress Tool Transfer",
       "eventTypes": [
@@ -7065,10 +7140,10 @@
     {
       "id": "http-post-or-checkin-beacon",
       "title": "HTTP POST or check-in beacon pattern",
-      "titleZh": "HTTP POST或check-in beacon pattern",
+      "titleZh": "HTTP POST 或签到心跳模式",
       "severity": "medium",
       "summary": "HTTP request metadata referenced common beacon/check-in paths or explicit beacon/C2 labels. Generic POST/PUT methods alone are intentionally excluded to avoid treating normal web traffic as C2.",
-      "summaryZh": "网络、驱动、Netstat 或 PCAP 遥测显示“HTTP POST或check-in beacon pattern”；请结合进程、端点、协议字段和样本上下文复核。",
+      "summaryZh": "网络、驱动、Netstat 或 PCAP 遥测显示 HTTP POST、签到或心跳模式；请结合进程、端点、协议字段和样本上下文复核。",
       "mitreTechniqueId": "T1071.001",
       "mitreTechniqueName": "Web Protocols",
       "eventTypes": [
@@ -7169,10 +7244,10 @@
     {
       "id": "http-proxy-or-tunnel-method",
       "title": "HTTP proxy or tunnel method observed",
-      "titleZh": "HTTP proxy或tunnel method已观察",
+      "titleZh": "HTTP 代理或隧道方法",
       "severity": "medium",
       "summary": "HTTP telemetry referenced CONNECT, Upgrade, WebSocket, or proxy-like fields often used for tunneling through web infrastructure.",
-      "summaryZh": "网络、驱动、Netstat 或 PCAP 遥测显示“HTTP proxy或tunnel method已观察”；请结合进程、端点、协议字段和样本上下文复核。",
+      "summaryZh": "网络、驱动、Netstat 或 PCAP 遥测显示 HTTP 代理或隧道方法；请结合进程、端点、协议字段和样本上下文复核。",
       "mitreTechniqueId": "T1090",
       "mitreTechniqueName": "Proxy",
       "eventTypes": [
@@ -7205,10 +7280,10 @@
     {
       "id": "tls-invalid-certificate",
       "title": "TLS invalid or self-signed certificate indicator",
-      "titleZh": "TLS invalid或self-signed certificate 指标",
+      "titleZh": "TLS 无效或自签名证书指标",
       "severity": "medium",
       "summary": "TLS metadata referenced invalid, expired, untrusted, self-signed, or mismatched certificate validation evidence.",
-      "summaryZh": "网络、驱动、Netstat 或 PCAP 遥测显示“TLS invalid或self-signed certificate 指标”；请结合进程、端点、协议字段和样本上下文复核。",
+      "summaryZh": "网络、驱动、Netstat 或 PCAP 遥测显示 TLS 无效证书或自签名证书指标；请结合进程、端点、协议字段和样本上下文复核。",
       "mitreTechniqueId": "T1573",
       "mitreTechniqueName": "Encrypted Channel",
       "eventTypes": [
@@ -7472,10 +7547,10 @@
     {
       "id": "rdp-network-port-observed",
       "title": "RDP network port observed",
-      "titleZh": "RDP 网络端口已观察",
+      "titleZh": "RDP 网络端口活动",
       "severity": "medium",
       "summary": "Network, driver, netstat, or PCAP telemetry referenced the Remote Desktop Protocol port 3389 or protocol labels.",
-      "summaryZh": "网络、驱动、Netstat 或 PCAP 遥测显示“RDP 网络端口已观察”；请结合进程、端点、协议字段和样本上下文复核。",
+      "summaryZh": "网络、驱动、Netstat 或 PCAP 遥测显示 RDP 端口活动；请结合进程、端点、协议字段和样本上下文复核。",
       "mitreTechniqueId": "T1021.001",
       "mitreTechniqueName": "Remote Desktop Protocol",
       "eventTypes": [
@@ -7517,10 +7592,10 @@
     {
       "id": "ssh-network-port-observed",
       "title": "SSH network port observed",
-      "titleZh": "SSH 网络端口已观察",
+      "titleZh": "SSH 网络端口活动",
       "severity": "medium",
       "summary": "Network, driver, netstat, or PCAP telemetry referenced SSH port 22 or SSH protocol labels, useful for lateral movement and tunneling triage.",
-      "summaryZh": "网络、驱动、Netstat 或 PCAP 遥测显示“SSH 网络端口已观察”；请结合进程、端点、协议字段和样本上下文复核。",
+      "summaryZh": "网络、驱动、Netstat 或 PCAP 遥测显示 SSH 端口活动；请结合进程、端点、协议字段和样本上下文复核。",
       "mitreTechniqueId": "T1021.004",
       "mitreTechniqueName": "SSH",
       "eventTypes": [
@@ -7561,10 +7636,10 @@
     {
       "id": "ldap-kerberos-network-port-observed",
       "title": "LDAP or Kerberos network port observed",
-      "titleZh": "LDAP或Kerberos 网络端口已观察",
+      "titleZh": "LDAP/Kerberos 网络端口活动",
       "severity": "medium",
       "summary": "Network telemetry referenced LDAP, LDAPS, Kerberos, or Global Catalog ports that can support domain discovery, authentication, and lateral movement triage.",
-      "summaryZh": "网络、驱动、Netstat 或 PCAP 遥测显示“LDAP或Kerberos 网络端口已观察”；请结合进程、端点、协议字段和样本上下文复核。",
+      "summaryZh": "网络、驱动、Netstat 或 PCAP 遥测显示 LDAP 或 Kerberos 端口活动；请结合进程、端点、协议字段和样本上下文复核。",
       "mitreTechniqueId": "T1018",
       "mitreTechniqueName": "Remote System Discovery",
       "eventTypes": [
@@ -7628,10 +7703,10 @@
     {
       "id": "tor-or-proxy-port-observed",
       "title": "Tor or proxy port observed",
-      "titleZh": "Tor或proxy 端口已观察",
+      "titleZh": "Tor 或代理端口活动",
       "severity": "medium",
       "summary": "Network telemetry referenced common local or remote proxy/Tor/SOCKS ports or protocol labels used to relay command channels.",
-      "summaryZh": "网络、驱动、Netstat 或 PCAP 遥测显示“Tor或proxy 端口已观察”；请结合进程、端点、协议字段和样本上下文复核。",
+      "summaryZh": "网络、驱动、Netstat 或 PCAP 遥测显示 Tor 或代理端口活动；请结合进程、端点、协议字段和样本上下文复核。",
       "mitreTechniqueId": "T1090",
       "mitreTechniqueName": "Proxy",
       "eventTypes": [
@@ -7693,10 +7768,10 @@
     {
       "id": "admin-share-file-path-observed",
       "title": "Admin share file path observed",
-      "titleZh": "管理共享 文件 路径已观察",
+      "titleZh": "管理共享文件路径活动",
       "severity": "high",
       "summary": "A file event referenced administrative shares such as ADMIN$, C$, IPC$, or UNC staging paths commonly used for lateral tool transfer.",
-      "summaryZh": "R0/驱动遥测显示“管理共享 文件 路径已观察”；该规则依赖结构化驱动字段，并应排除采集健康和自噪声事件。",
+      "summaryZh": "R0/驱动遥测显示 ADMIN$、C$ 或 IPC$ 等管理共享文件路径活动；该规则依赖结构化驱动字段，并应排除采集健康和自噪声事件。",
       "mitreTechniqueId": "T1570",
       "mitreTechniqueName": "Lateral Tool Transfer",
       "eventTypes": [
@@ -7723,10 +7798,10 @@
     {
       "id": "remote-desktop-command-observed",
       "title": "Remote Desktop command observed",
-      "titleZh": "远程桌面 命令已观察",
+      "titleZh": "远程桌面命令",
       "severity": "medium",
       "summary": "A command line referenced mstsc, cmdkey, or RDP connection file usage that can indicate interactive remote desktop activity.",
-      "summaryZh": "持久化相关遥测显示“远程桌面 命令已观察”；请结合注册表、文件路径、命令行和用户可写位置证据复核。",
+      "summaryZh": "持久化或远程管理遥测显示远程桌面相关命令；请结合注册表、命令行和执行主体复核。",
       "mitreTechniqueId": "T1021.001",
       "mitreTechniqueName": "Remote Desktop Protocol",
       "eventTypes": [
@@ -7865,10 +7940,10 @@
     {
       "id": "screenshot-api-observed",
       "title": "Screen capture API observed",
-      "titleZh": "屏幕捕获 API已观察",
+      "titleZh": "屏幕捕获 API 调用",
       "severity": "high",
       "summary": "An API event referenced GDI/User32 screen-capture primitives such as BitBlt, GetDC, PrintWindow, or GetForegroundWindow.",
-      "summaryZh": "行为规则命中“屏幕捕获 API已观察”；请结合 evidenceFields、进程树和样本上下文复核。",
+      "summaryZh": "行为遥测显示屏幕捕获 API 调用；请结合进程树、调用序列和样本上下文复核。",
       "mitreTechniqueId": "T1113",
       "mitreTechniqueName": "Screen Capture",
       "eventTypes": [
@@ -7933,10 +8008,10 @@
     {
       "id": "hidden-file-attribute-command",
       "title": "Hidden or system file attribute command",
-      "titleZh": "隐藏或system 文件 attribute 命令",
+      "titleZh": "隐藏或系统文件属性命令",
       "severity": "medium",
       "summary": "A command line used attrib to set hidden, system, or read-only file attributes, often used to conceal staged files or persistence artifacts.",
-      "summaryZh": "持久化相关遥测显示“隐藏或system 文件 attribute 命令”；请结合注册表、文件路径、命令行和用户可写位置证据复核。",
+      "summaryZh": "持久化遥测显示设置隐藏或系统文件属性的命令；请结合文件路径、命令行和执行主体复核。",
       "mitreTechniqueId": "T1564.001",
       "mitreTechniqueName": "Hidden Files and Directories",
       "eventTypes": [
@@ -8509,10 +8584,10 @@
     {
       "id": "rpc-dcom-network-port-observed",
       "title": "RPC or DCOM endpoint mapper port observed",
-      "titleZh": "RPC或DCOM endpoint mapper 端口已观察",
+      "titleZh": "RPC/DCOM endpoint mapper 端口活动",
       "severity": "medium",
       "summary": "A network, driver, or PCAP flow event referenced RPC/DCOM endpoint mapper ports or protocol labels often used during remote Windows management.",
-      "summaryZh": "网络、驱动、Netstat 或 PCAP 遥测显示“RPC或DCOM endpoint mapper 端口已观察”；请结合进程、端点、协议字段和样本上下文复核。",
+      "summaryZh": "网络、驱动、Netstat 或 PCAP 遥测显示 RPC/DCOM endpoint mapper 端口活动；请结合进程、端点、协议字段和样本上下文复核。",
       "mitreTechniqueId": "T1021.003",
       "mitreTechniqueName": "Distributed Component Object Model",
       "eventTypes": [
@@ -8579,10 +8654,10 @@
     {
       "id": "remote-registry-command",
       "title": "Remote registry command observed",
-      "titleZh": "远程注册表 命令已观察",
+      "titleZh": "远程注册表命令",
       "severity": "high",
       "summary": "A process command line used reg.exe against a remote registry path, which can support remote persistence, configuration change, or discovery.",
-      "summaryZh": "持久化相关遥测显示“远程注册表 命令已观察”；请结合注册表、文件路径、命令行和用户可写位置证据复核。",
+      "summaryZh": "持久化或远程管理遥测显示远程注册表相关命令；请结合目标主机、注册表路径、命令行和执行主体复核。",
       "mitreTechniqueId": "T1112",
       "mitreTechniqueName": "Modify Registry",
       "eventTypes": [
@@ -8605,10 +8680,10 @@
     {
       "id": "anti-analysis-locale-timezone-command",
       "title": "Locale, language, or timezone anti-analysis command",
-      "titleZh": "Locale, language,或timezone 反分析 命令",
+      "titleZh": "区域、语言或时区反分析命令",
       "severity": "medium",
       "summary": "A command line queried locale, language, or timezone information often used to gate execution by region or identify sandbox defaults.",
-      "summaryZh": "反分析相关遥测显示“Locale, language,或timezone 反分析 命令”；这通常用于识别沙箱、调试器或交互环境，并应结合退出、延迟或门控行为复核。",
+      "summaryZh": "反分析遥测显示区域、语言或时区检查命令；请结合退出、延迟、抑制执行等门控行为复核。",
       "mitreTechniqueId": "T1497.001",
       "mitreTechniqueName": "System Checks",
       "eventTypes": [
@@ -8633,10 +8708,10 @@
     {
       "id": "anti-analysis-input-idle-api-observed",
       "title": "User input or idle-state anti-analysis API observed",
-      "titleZh": "用户输入或空闲状态 反分析 API已观察",
+      "titleZh": "用户输入或空闲状态反分析 API",
       "severity": "medium",
       "summary": "An API event referenced user input, cursor, foreground window, or idle-time checks used to detect unattended sandbox sessions.",
-      "summaryZh": "反分析相关遥测显示“用户输入或空闲状态 反分析 API已观察”；这通常用于识别沙箱、调试器或交互环境，并应结合退出、延迟或门控行为复核。",
+      "summaryZh": "反分析遥测显示用户输入或空闲状态检查 API；请结合退出、延迟、抑制执行等门控行为复核。",
       "mitreTechniqueId": "T1497.001",
       "mitreTechniqueName": "System Checks",
       "eventTypes": [
@@ -8667,11 +8742,11 @@
     {
       "id": "anti-analysis-accelerated-sleep-metadata",
       "title": "Accelerated or skipped sleep telemetry observed",
-      "titleZh": "Accelerated或skipped 休眠 telemetry已观察",
+      "titleZh": "加速或跳过休眠遥测",
       "severity": "medium",
       "confidence": "medium",
       "summary": "Sleep or timeout telemetry carried requested/actual duration fields that can expose long-sleep evasion or sandbox time acceleration.",
-      "summaryZh": "反分析相关遥测显示“Accelerated或skipped 休眠 telemetry已观察”；这通常用于识别沙箱、调试器或交互环境，并应结合退出、延迟或门控行为复核。",
+      "summaryZh": "反分析遥测显示休眠被加速、跳过或改写的元数据；请结合退出、延迟、抑制执行等门控行为复核。",
       "mitreTechniqueId": "T1497.003",
       "mitreTechniqueName": "Time Based Evasion",
       "eventTypes": [
@@ -8737,10 +8812,10 @@
     {
       "id": "msiexec-remote-package-execution",
       "title": "Msiexec remote package execution",
-      "titleZh": "Msiexec 远程 package execution",
+      "titleZh": "Msiexec 远程安装包执行",
       "severity": "high",
       "summary": "A command line used msiexec to install or execute a remote HTTP/HTTPS/UNC package, a common proxy execution and download-execute pattern.",
-      "summaryZh": "下载、暂存或代理执行相关遥测显示“Msiexec 远程 package execution”；请结合来源 URL/UNC、落地路径和后续执行链复核。",
+      "summaryZh": "命令行使用 msiexec 安装或执行远程 HTTP/HTTPS/UNC 安装包，符合代理执行或下载执行模式。",
       "mitreTechniqueId": "T1218.007",
       "mitreTechniqueName": "Msiexec",
       "eventTypes": [
@@ -8766,10 +8841,10 @@
     {
       "id": "rundll32-remote-url-or-script-execution",
       "title": "Rundll32 remote URL or script execution",
-      "titleZh": "Rundll32 远程 URL或script execution",
+      "titleZh": "Rundll32 远程 URL 或脚本执行",
       "severity": "high",
       "summary": "A command line used rundll32 with URL handlers, JavaScript, or remote DLL/script references associated with proxy execution.",
-      "summaryZh": "持久化相关遥测显示“Rundll32 远程 URL或script execution”；请结合注册表、文件路径、命令行和用户可写位置证据复核。",
+      "summaryZh": "命令行使用 rundll32 搭配 URL handler、JavaScript 或远程 DLL/脚本引用，符合代理执行模式。",
       "mitreTechniqueId": "T1218.011",
       "mitreTechniqueName": "Rundll32",
       "eventTypes": [
@@ -8795,11 +8870,11 @@
     {
       "id": "archive-extracted-execute-chain-observed",
       "title": "Archive extracted then executed chain observed",
-      "titleZh": "归档解压后执行链已观察",
+      "titleZh": "归档解压后执行链",
       "severity": "high",
       "confidence": "high",
       "summary": "A normalized correlation event indicates an archive or ISO was extracted or mounted and a child payload executed from the extracted path. The rule requires an executed path plus archive/extraction context.",
-      "summaryZh": "下载、暂存或代理执行相关遥测显示“归档解压后执行链已观察”；请结合来源 URL/UNC、落地路径和后续执行链复核。",
+      "summaryZh": "下载、暂存或代理执行遥测显示归档解压后启动载荷；请结合来源 URL/UNC、解压路径和后续执行链复核。",
       "mitreTechniqueId": "T1204.002",
       "mitreTechniqueName": "Malicious File",
       "eventTypes": [
@@ -8834,10 +8909,10 @@
     {
       "id": "dns-long-label-or-base64-query",
       "title": "DNS long-label or base64-like query",
-      "titleZh": "DNS long-label或base64-like 查询",
+      "titleZh": "DNS 长标签或类 Base64 查询",
       "severity": "medium",
       "summary": "DNS telemetry carried long-label, high-entropy, base64-marker, or encoded-query metadata together with a tunnel/DGA/encoded classification, reducing false positives from ordinary query-length fields.",
-      "summaryZh": "网络、驱动、Netstat 或 PCAP 遥测显示“DNS long-label或base64-like 查询”；请结合进程、端点、协议字段和样本上下文复核。",
+      "summaryZh": "网络、驱动、Netstat 或 PCAP 遥测显示 DNS 长标签、类 Base64 编码查询或隧道特征；请结合进程、端点、协议字段和样本上下文复核。",
       "mitreTechniqueId": "T1071.004",
       "mitreTechniqueName": "DNS",
       "eventTypes": [
@@ -8898,11 +8973,11 @@
     {
       "id": "dns-exfil-volume-metadata-observed",
       "title": "DNS exfiltration volume metadata observed",
-      "titleZh": "DNS exfiltration volume 元数据已观察",
+      "titleZh": "DNS 外传流量规模元数据",
       "severity": "medium",
       "confidence": "low",
       "summary": "DNS or PCAP summary telemetry included query-count or byte-total fields for tunnel and exfiltration triage.",
-      "summaryZh": "网络、驱动、Netstat 或 PCAP 遥测显示“DNS exfiltration volume 元数据已观察”；请结合进程、端点、协议字段和样本上下文复核。",
+      "summaryZh": "网络、驱动、Netstat 或 PCAP 遥测显示 DNS 外传流量规模或频率元数据；请结合进程、端点、协议字段和样本上下文复核。",
       "mitreTechniqueId": "T1041",
       "mitreTechniqueName": "Exfiltration Over C2 Channel",
       "eventTypes": [
@@ -9561,11 +9636,11 @@
     {
       "id": "clipboard-collection-api-observed",
       "title": "Clipboard collection API observed",
-      "titleZh": "剪贴板收集 API已观察",
+      "titleZh": "剪贴板收集 API 调用",
       "severity": "medium",
       "confidence": "medium",
       "summary": "An API-call event referenced Windows clipboard access APIs that can collect copied credentials, tokens, wallet addresses, or operator input.",
-      "summaryZh": "凭据访问或收集相关遥测显示“剪贴板收集 API已观察”；请结合目标路径、API、命令行和后续网络/横向移动证据复核。",
+      "summaryZh": "凭据访问或收集遥测显示剪贴板读取/收集 API 调用；请结合目标路径、API、命令行和后续网络/横向移动证据复核。",
       "mitreTechniqueId": "T1115",
       "mitreTechniqueName": "Clipboard Data",
       "eventTypes": [
@@ -9643,11 +9718,11 @@
     {
       "id": "anti-analysis-uptime-check-command",
       "title": "Uptime or boot-time anti-analysis check",
-      "titleZh": "运行时长或boot-time 反分析 check",
+      "titleZh": "运行时长或启动时间反分析检查",
       "severity": "medium",
       "confidence": "medium",
       "summary": "A command line queried system uptime, boot time, or elapsed run time, often used to identify freshly started sandbox guests.",
-      "summaryZh": "反分析相关遥测显示“运行时长或boot-time 反分析 check”；这通常用于识别沙箱、调试器或交互环境，并应结合退出、延迟或门控行为复核。",
+      "summaryZh": "反分析遥测显示运行时长或启动时间检查；请结合退出、延迟、抑制执行等门控行为复核。",
       "mitreTechniqueId": "T1497.003",
       "mitreTechniqueName": "Time Based Evasion",
       "eventTypes": [
@@ -9805,11 +9880,11 @@
     {
       "id": "tor-hidden-service-domain",
       "title": "Tor hidden-service domain observed",
-      "titleZh": "Tor 隐藏服务域名已观察",
+      "titleZh": "Tor 隐藏服务域名通信",
       "severity": "high",
       "confidence": "high",
       "summary": "DNS, HTTP, or PCAP metadata referenced a .onion hidden-service domain, which can indicate anonymized C2 or proxy infrastructure.",
-      "summaryZh": "网络、驱动、Netstat 或 PCAP 遥测显示“Tor 隐藏服务域名已观察”；请结合进程、端点、协议字段和样本上下文复核。",
+      "summaryZh": "网络、驱动、Netstat 或 PCAP 遥测显示 Tor 隐藏服务域名通信；请结合进程、端点、协议字段和样本上下文复核。",
       "mitreTechniqueId": "T1090",
       "mitreTechniqueName": "Proxy",
       "eventTypes": [
@@ -11701,11 +11776,11 @@
     {
       "id": "http-json-tasking-or-gate-uri",
       "title": "HTTP JSON tasking or gate URI",
-      "titleZh": "HTTP JSON 任务或 Gate URI",
+      "titleZh": "HTTP JSON 任务下发或网关 URI",
       "severity": "medium",
       "confidence": "medium",
       "summary": "HTTP metadata referenced tasking, gate, panel, check-in, command, or polling URI/behavior patterns often seen in C2 protocols. JSON content type alone is handled by constrained companion rules and no longer matches this rule.",
-      "summaryZh": "HTTP 元数据引用 tasking、gate、panel、check-in、command 或 polling URI/行为模式，常见于 C2 协议。单独 JSON content-type 由受约束的配套规则处理，不再命中此规则。",
+      "summaryZh": "HTTP 元数据引用任务下发、网关、面板、签到、命令或轮询 URI/行为模式，常见于 C2 协议。单独 JSON content-type 由受约束的配套规则处理，不再命中此规则。",
       "mitreTechniqueId": "T1071.001",
       "mitreTechniqueName": "Web Protocols",
       "eventTypes": [
@@ -19200,11 +19275,11 @@
     {
       "id": "http-uri-api-gate-field-and",
       "title": "HTTP URI contains API gate and bot identifier",
-      "titleZh": "HTTP URI 同时包含 API gate 与 Bot 标识",
+      "titleZh": "HTTP URI 同时包含 API 网关和 Bot 标识",
       "severity": "high",
       "confidence": "medium",
       "summary": "HTTP URI contained both /api/ and gate plus an id-like query parameter in the same field, a constrained C2 gate pattern.",
-      "summaryZh": "HTTP URI 同一字段同时包含 /api/ 与 gate，并含类似 id 的查询参数，是受约束的 C2 gate 模式。",
+      "summaryZh": "HTTP URI 同一字段同时包含 /api/ 与 gate，并含类似 id 的查询参数，是受约束的 C2 网关模式。",
       "mitreTechniqueId": "T1071.001",
       "mitreTechniqueName": "Web Protocols",
       "eventTypes": [
@@ -22875,11 +22950,11 @@
     {
       "id": "injection-direct-syscall-or-ntdll-unhook",
       "title": "Direct syscall or NTDLL unhooking injection evidence",
-      "titleZh": "Direct syscall 或 NTDLL 反 Hook 注入证据",
+      "titleZh": "直接系统调用或 NTDLL 脱钩注入证据",
       "severity": "high",
       "confidence": "high",
       "summary": "API, memory, or driver process telemetry reported direct-syscall, syscall-stub, SysWhispers, HellsGate/HalosGate, or NTDLL unhooking evidence used to bypass user-mode monitoring before injection.",
-      "summaryZh": "API、内存或驱动进程遥测报告 direct syscall、syscall stub、SysWhispers、HellsGate/HalosGate 或 NTDLL 反 Hook 证据，常用于绕过用户态监控后执行注入；优先查看目标进程和后续远程写/线程事件。",
+      "summaryZh": "API、内存或驱动进程遥测报告直接系统调用、系统调用桩、SysWhispers、HellsGate/HalosGate 或 NTDLL 脱钩证据，常用于绕过用户态监控后执行注入；优先查看目标进程和后续远程写/线程事件。",
       "mitreTechniqueId": "T1055",
       "mitreTechniqueName": "Process Injection",
       "eventTypes": [
@@ -25853,7 +25928,7 @@
       "severity": "medium",
       "confidence": "medium",
       "summary": "Registry telemetry enabled DisableRestrictedAdmin=0, which can support credential-safe or pass-the-hash RDP lateral movement workflows.",
-      "summaryZh": "注册表遥测将 DisableRestrictedAdmin 设置为 0，可支撑凭据安全或 pass-the-hash 风格的 RDP 横向移动流程。",
+      "summaryZh": "注册表遥测显示启用 RDP RestrictedAdmin 相关设置，可能降低远程登录凭据暴露边界；请结合执行主体和横向移动上下文复核。",
       "mitreTechniqueId": "T1021.001",
       "mitreTechniqueName": "Remote Desktop Protocol",
       "eventTypes": [
@@ -29699,7 +29774,7 @@
       "severity": "high",
       "confidence": "medium",
       "summary": "A Winsock provider catalog write carries a provider/library path under a user-writable directory, a constrained network-triggered persistence signal.",
-      "summaryZh": "Winsock provider catalog 写入携带用户可写目录下的 provider/library 路径，是受约束的网络触发持久化信号。",
+      "summaryZh": "Winsock Provider Catalog 写入携带用户可写目录下的 provider/library 路径，是受约束的网络触发持久化信号。",
       "mitreTechniqueId": "T1546",
       "mitreTechniqueName": "Event Triggered Execution",
       "eventTypes": [
@@ -33925,11 +34000,11 @@
     {
       "id": "injection-process-doppelganging-transaction-sequence",
       "title": "Process doppelgänging transaction and section execution sequence",
-      "titleZh": "Process Doppelgänging 事务和节执行序列",
+      "titleZh": "Process Doppelgänging 事务与 Section 执行序列",
       "severity": "high",
       "confidence": "high",
       "summary": "API or normalized injection evidence contained transactional file creation plus section creation and process creation context consistent with process doppelgänging-style execution.",
-      "summaryZh": "API 或注入证据同时包含事务文件、节创建和进程创建上下文，符合 Process Doppelgänging 类执行链。",
+      "summaryZh": "API 或注入证据同时包含事务文件、Section 创建和进程创建上下文，符合 Process Doppelgänging 类执行链。",
       "mitreTechniqueId": "T1055",
       "mitreTechniqueName": "Process Injection",
       "eventTypes": [

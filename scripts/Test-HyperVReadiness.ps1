@@ -99,7 +99,14 @@ param(
     # Input: maximum VM/checkpoint candidates to include in the optional
     # profile inventory and failure diagnostics.
     [ValidateRange(1, 100)]
-    [int]$VmProfileListLimit = 20
+    [int]$VmProfileListLimit = 20,
+
+    # Return one machine-readable JSON envelope with checks and summary instead
+    # of a mixed PowerShell object stream. Processing remains read-only.
+    [switch]$Json,
+
+    [ValidateRange(4, 32)]
+    [int]$JsonDepth = 12
 )
 
 Set-StrictMode -Version 3.0
@@ -3097,11 +3104,7 @@ else {
     'Passed'
 }
 
-foreach ($result in $results) {
-    Write-Output $result
-}
-
-Write-Output ([pscustomobject][ordered]@{
+$summary = [pscustomobject][ordered]@{
         ContractVersion = 2
         Kind           = 'KSwordSandbox.HyperVReadiness'
         ResultType     = 'ReadinessSummary'
@@ -3166,6 +3169,24 @@ Write-Output ([pscustomobject][ordered]@{
                 }
             })
         Note           = 'No probe files were written and no VM mutation commands were executed; PowerShell Direct and guest payload probes run only when the VM is already running and credentials are visible.'
-    })
+    }
+
+if ($Json) {
+    [pscustomobject][ordered]@{
+        ContractVersion = 1
+        Kind = 'KSwordSandbox.HyperVReadinessEnvelope'
+        ResultType = 'ReadinessEnvelope'
+        MachineReadable = $true
+        Checks = @($results.ToArray())
+        Summary = $summary
+    } | ConvertTo-Json -Depth $JsonDepth
+}
+else {
+    foreach ($result in $results) {
+        Write-Output $result
+    }
+
+    Write-Output $summary
+}
 
 exit $exitCode

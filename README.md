@@ -102,7 +102,7 @@ tests/KSword.Sandbox.SmokeTests 控制台 smoke/contract tests
   -VmName '<existing VM>' `
   -CheckpointName '<clean checkpoint>' `
   -GuestWorkingDirectory 'C:\KSwordSandbox'
-.\install.ps1 -Mode Install -PromptPassword
+.\install.ps1 -InstallEntrypoint CreateOrPreparePath -PromptPassword
 .\scripts\Prepare-GuestPayload.ps1 -RepoRoot . -SelfContained
 .\scripts\Test-HyperVReadiness.ps1
 ```
@@ -119,7 +119,7 @@ Restore-VMSnapshot -VMName '<existing VM>' -Name '<clean checkpoint>' -Confirm:$
 再写本机配置：
 
 ```powershell
-.\install.ps1 -Mode Install -PromptPassword
+.\install.ps1 -InstallEntrypoint CreateOrPreparePath -PromptPassword
 .\install.ps1 -Mode Change -UpdateHyperVConfig `
   -VmName 'KSwordSandbox-Win10-Golden' `
   -CheckpointName 'Clean' `
@@ -147,13 +147,13 @@ Restore-VMSnapshot -VMName '<existing VM>' -Name '<clean checkpoint>' -Confirm:$
 VirusTotal（VT）key、检查环境、启动 WebUI 和查看状态。无交互本地实验室安装可使用：
 
 ```powershell
-.\install.ps1 -Mode Install -GeneratePassword
+.\install.ps1 -InstallEntrypoint CreateOrPreparePath -GeneratePassword
 ```
 
 已有 golden VM 时推荐使用人工输入的 guest 密码：
 
 ```powershell
-.\install.ps1 -Mode Install -PromptPassword
+.\install.ps1 -InstallEntrypoint CreateOrPreparePath -PromptPassword
 ```
 
 安装器会把 `KSWORDBOX_GUEST_PASSWORD` 保存在当前用户环境中（仓库外），可写入
@@ -334,7 +334,7 @@ live job，release notes 必须明确写“本候选未刷新 fresh live evidenc
 
 ```powershell
 .\scripts\package-portable.ps1 -PackageKind source -OutputRoot 'D:\Temp\KSwordSandbox\packages'
-.\scripts\package-portable.ps1 -PackageKind runtime -RuntimePublishRoot 'D:\Temp\KSwordSandbox\publish' -OutputRoot 'D:\Temp\KSwordSandbox\packages'
+.\scripts\package-portable.ps1 -PackageKind runtime -RuntimePublishRoot 'D:\Temp\KSwordSandbox\publish' -RequireCompleteRuntimePayloads -OutputRoot 'D:\Temp\KSwordSandbox\packages'
 ```
 
 清单默认排除样本、VM 镜像/检查点、runtime reports、captures、构建中间产物、符号、本机

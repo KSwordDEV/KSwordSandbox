@@ -1986,6 +1986,143 @@ function Test-SelfNoiseGuardReadiness {
         -Details @{ issues = @($issues.ToArray()); evidence = $evidence }
 }
 
+function Test-BehaviorRuleLocalizationReadiness {
+    $issues = New-Object System.Collections.Generic.List[string]
+    $evidence = [ordered]@{
+        rulesPath = 'rules/behavior-rules.json'
+        totalRules = 0
+        missingTitleZhCount = 0
+        missingSummaryZhCount = 0
+        mediumHighMissingZhCount = 0
+        reviewCandidateCount = 0
+        reviewCandidates = @()
+        reportPipelineMarkers = New-Object System.Collections.Generic.List[object]
+    }
+
+    $rulesPath = Join-Path $RepositoryRoot 'rules\behavior-rules.json'
+    if (-not (Test-Path -LiteralPath $rulesPath -PathType Leaf)) {
+        [void]$issues.Add('Missing rules/behavior-rules.json for localization readiness audit.')
+    }
+    else {
+        try {
+            $rules = Get-Content -LiteralPath $rulesPath -Raw | ConvertFrom-Json -ErrorAction Stop
+            $ruleItems = @(Get-ObjectPropertyValue -InputObject $rules -Name 'rules' -DefaultValue @())
+            $evidence.totalRules = $ruleItems.Count
+            $missingTitleZh = New-Object System.Collections.Generic.List[string]
+            $missingSummaryZh = New-Object System.Collections.Generic.List[string]
+            $mediumHighMissingZh = New-Object System.Collections.Generic.List[string]
+            $reviewCandidates = New-Object System.Collections.Generic.List[object]
+
+            foreach ($rule in $ruleItems) {
+                $ruleId = [string](Get-ObjectPropertyValue -InputObject $rule -Name 'id' -DefaultValue '')
+                $severity = [string](Get-ObjectPropertyValue -InputObject $rule -Name 'severity' -DefaultValue '')
+                $titleZh = [string](Get-ObjectPropertyValue -InputObject $rule -Name 'titleZh' -DefaultValue '')
+                $summaryZh = [string](Get-ObjectPropertyValue -InputObject $rule -Name 'summaryZh' -DefaultValue '')
+                $isMediumHigh = $severity -match '^(?i:medium|high|critical)$'
+
+                if ([string]::IsNullOrWhiteSpace($titleZh)) {
+                    [void]$missingTitleZh.Add($ruleId)
+                    if ($isMediumHigh) {
+                        [void]$mediumHighMissingZh.Add("${ruleId}:titleZh")
+                    }
+                }
+
+                if ([string]::IsNullOrWhiteSpace($summaryZh)) {
+                    [void]$missingSummaryZh.Add($ruleId)
+                    if ($isMediumHigh) {
+                        [void]$mediumHighMissingZh.Add("${ruleId}:summaryZh")
+                    }
+                }
+
+                if ($isMediumHigh -and
+                    -not [string]::IsNullOrWhiteSpace($titleZh) -and
+                    $titleZh -match '[A-Za-z][A-Za-z\-_/]{18,}') {
+                    [void]$reviewCandidates.Add([ordered]@{
+                            id = $ruleId
+                            severity = $severity
+                            titleZh = $titleZh
+                        })
+                }
+            }
+
+            $evidence.missingTitleZhCount = $missingTitleZh.Count
+            $evidence.missingSummaryZhCount = $missingSummaryZh.Count
+            $evidence.mediumHighMissingZhCount = $mediumHighMissingZh.Count
+            $evidence.reviewCandidateCount = $reviewCandidates.Count
+            $evidence.reviewCandidates = @($reviewCandidates.ToArray() | Select-Object -First 20)
+
+            if ($missingTitleZh.Count -gt 0) {
+                [void]$issues.Add("rules/behavior-rules.json has $($missingTitleZh.Count) rule(s) without titleZh.")
+            }
+
+            if ($missingSummaryZh.Count -gt 0) {
+                [void]$issues.Add("rules/behavior-rules.json has $($missingSummaryZh.Count) rule(s) without summaryZh.")
+            }
+
+            if ($mediumHighMissingZh.Count -gt 0) {
+                [void]$issues.Add("High/medium/critical rules have missing Chinese localization fields: $(@($mediumHighMissingZh.ToArray() | Select-Object -First 20) -join ', ')")
+            }
+        }
+        catch {
+            [void]$issues.Add("Unable to parse rules/behavior-rules.json for localization readiness audit: $($_.Exception.Message)")
+        }
+    }
+
+    $pipelineMarkers = [ordered]@{
+        'src\KSword.Sandbox.Abstractions\AnalysisModels.cs' = @('TitleZh', 'SummaryZh', 'JsonIgnoreCondition.WhenWritingNull')
+        'src\KSword.Sandbox.Core\Rules\BehaviorRule.cs' = @('TitleZh', 'SummaryZh')
+        'src\KSword.Sandbox.Core\Rules\RuleEngine.cs' = @('TitleZh = NullIfWhiteSpace(rule.TitleZh)', 'SummaryZh = NullIfWhiteSpace(summaryZh)')
+        'src\KSword.Sandbox.Core\Reporting\HtmlReportRenderer.cs' = @('GetReportFindingHtmlTranslations', 'finding.TitleZh', 'finding.SummaryZh')
+    }
+
+    foreach ($relative in $pipelineMarkers.Keys) {
+        $path = Join-Path $RepositoryRoot $relative
+        $markerResult = [ordered]@{
+            path = $relative
+            missingMarkers = @()
+        }
+
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+            [void]$issues.Add("Missing localization pipeline file: $relative")
+            $markerResult.missingMarkers = @($pipelineMarkers[$relative])
+            [void]$evidence.reportPipelineMarkers.Add($markerResult)
+            continue
+        }
+
+        $raw = Get-Content -LiteralPath $path -Raw
+        $missingMarkers = New-Object System.Collections.Generic.List[string]
+        foreach ($marker in $pipelineMarkers[$relative]) {
+            if ($raw.IndexOf($marker, [StringComparison]::Ordinal) -lt 0) {
+                [void]$missingMarkers.Add($marker)
+            }
+        }
+
+        $markerResult.missingMarkers = @($missingMarkers.ToArray())
+        [void]$evidence.reportPipelineMarkers.Add($markerResult)
+        foreach ($missingMarker in @($missingMarkers.ToArray())) {
+            [void]$issues.Add("Localization report pipeline marker '$missingMarker' missing from $relative")
+        }
+    }
+
+    if ($issues.Count -eq 0) {
+        Add-ReleaseCheckResult `
+            -Id 'behavior-rule-localization-readiness' `
+            -Title 'Behavior rule localization readiness / 行为规则汉化就绪' `
+            -Status Passed `
+            -Message "All $($evidence.totalRules) behavior rule(s) carry titleZh/summaryZh, and the report pipeline preserves finding TitleZh/SummaryZh into localized HTML." `
+            -Details @{ evidence = $evidence }
+        return
+    }
+
+    Add-ReleaseCheckResult `
+        -Id 'behavior-rule-localization-readiness' `
+        -Title 'Behavior rule localization readiness / 行为规则汉化就绪' `
+        -Status Failed `
+        -Message "Behavior rule localization readiness found $($issues.Count) issue(s)." `
+        -Remediation @('补齐 rules/behavior-rules.json 中每条规则的 titleZh/summaryZh；确认 BehaviorRule -> BehaviorFinding -> HtmlReportRenderer 链路保留中文字段；该检查只做 JSON/源码静态审计，不运行 smoke/live。') `
+        -Details @{ issues = @($issues.ToArray()); evidence = $evidence }
+}
+
 function Invoke-RepositoryPolicy {
     $scriptPath = Join-Path $RepositoryRoot 'scripts\Test-RepositoryPolicy.ps1'
     Invoke-ReleaseCommand `
@@ -2788,6 +2925,7 @@ Test-InstallModeMachineReadableContract
 Test-DeploymentDocsOperatorHints
 Test-NoFreshLiveEvidenceGuardrail
 Test-SelfNoiseGuardReadiness
+Test-BehaviorRuleLocalizationReadiness
 Invoke-RepositoryPolicy
 Invoke-SourcePackageStage
 Invoke-LightBuild

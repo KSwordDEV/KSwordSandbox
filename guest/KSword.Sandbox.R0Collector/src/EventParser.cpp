@@ -18,7 +18,7 @@ inline constexpr const char* kR0TelemetryCoverageFieldSet =
     "r0CoverageProducerMaskScope|r0CoverageProducerMask|"
     "r0CoverageProducerMaskHex|r0CoverageProducerMaskNames|"
     "r0CoverageAvailableCategories|r0CoverageKnownGaps|"
-    "r0CoverageGapAcknowledged|r0CoverageInterpretation|"
+    "r0CoverageFallbackOwners|r0CoverageGapAcknowledged|r0CoverageInterpretation|"
     "r0ReadinessContribution|zhR0CoverageHint";
 
 inline constexpr const char* kR0TelemetryCoverageInterpretation =
@@ -26,6 +26,20 @@ inline constexpr const char* kR0TelemetryCoverageInterpretation =
 
 inline constexpr const char* kR0TelemetryQueueCoverageCategory =
     "queue.loss.backpressure";
+
+inline constexpr const char* kR0TelemetryCoverageFallbackOwners =
+    "process.handleAccess=ETW/object-access;"
+    "thread.lifecycle=ETW/kernel-thread-or-Guest/API-trace;"
+    "thread.remoteCreation=ETW/kernel-thread-or-Guest/API-trace;"
+    "token.privilegeAdjustment=ETW/security-audit;"
+    "token.objectHandles=ETW/object-access;"
+    "service.control=Guest/SCM-or-ETW;"
+    "driver.serviceLoadSemantics=Guest/SCM-or-ETW;"
+    "network.rawPacketPayload=PCAP/sidecar;"
+    "network.dnsHttpTlsPayload=PCAP/DNS-HTTP-TLS-sidecar;"
+    "file.contentBytesAndHash=Guest/artifact-hashing;"
+    "registry.valueDataBytes=Guest/registry-snapshot-or-ETW;"
+    "userModeCallStack=ETW-or-Guest-instrumentation";
 
 // Input: DriverState value returned by GET_HEALTH or POLL.
 // Processing: Maps the public ABI enum to stable text while preserving unknown
@@ -1628,6 +1642,11 @@ std::string R0CoverageKnownGaps(
     if (!tokenPrivilegeTelemetryAvailable) {
         AppendPipeToken(gaps, "token.privilegeAdjustment");
     }
+    AppendPipeToken(gaps, "thread.lifecycle");
+    AppendPipeToken(gaps, "thread.remoteCreation");
+    AppendPipeToken(gaps, "token.objectHandles");
+    AppendPipeToken(gaps, "service.control");
+    AppendPipeToken(gaps, "driver.serviceLoadSemantics");
     if (!networkPayloadTelemetryAvailable) {
         AppendPipeToken(gaps, "network.rawPacketPayload");
         AppendPipeToken(gaps, "network.dnsHttpTlsPayload");
@@ -1637,6 +1656,7 @@ std::string R0CoverageKnownGaps(
     AppendPipeToken(gaps, "bounded.processCommandLinePrefix");
     AppendPipeToken(gaps, "registry.valueDataBytes");
     AppendPipeToken(gaps, "file.contentBytesAndHash");
+    AppendPipeToken(gaps, "userModeCallStack");
 
     return gaps.empty() ? "none" : gaps;
 }
@@ -1712,20 +1732,20 @@ std::string R0DriverEventKnownGaps(
     const unsigned char* payload,
     const size_t payloadBytes) {
     if (IsProcessHandleAccessPayload(eventType, payload, payloadBytes)) {
-        return "token.privilegeAdjustment|token.objectHandles|draft.payload";
+        return "thread.lifecycle|thread.remoteCreation|token.privilegeAdjustment|token.objectHandles|service.control|driver.serviceLoadSemantics|draft.payload";
     }
 
     switch (eventType) {
     case KswSandboxEventTypeDriverLoad:
-        return "none";
+        return "service.control|driver.serviceLoadSemantics";
     case KswSandboxEventTypeProcess:
-        return "process.handleAccess|token.privilegeAdjustment|bounded.processImagePath|bounded.processCommandLinePrefix";
+        return "process.handleAccess|thread.lifecycle|thread.remoteCreation|token.privilegeAdjustment|token.objectHandles|bounded.processImagePath|bounded.processCommandLinePrefix|userModeCallStack";
     case KswSandboxEventTypeImage:
-        return "bounded.imagePath|image.hashSignatureMetadata|image.contentBytes";
+        return "driver.serviceLoadSemantics|bounded.imagePath|image.hashSignatureMetadata|image.contentBytes";
     case KswSandboxEventTypeFile:
         return "bounded.filePath|file.contentBytesAndHash|userModeStack";
     case KswSandboxEventTypeRegistry:
-        return "bounded.registryKeyValue|registry.valueDataBytes|userModeStack";
+        return "service.control|driver.serviceLoadSemantics|bounded.registryKeyValue|registry.valueDataBytes|userModeStack";
     case KswSandboxEventTypeNetwork:
         return "network.rawPacketPayload|network.dnsHttpTlsPayload|pcap.sidecarCorrelationRequired";
     case KswSandboxEventTypeReserved:
@@ -1792,6 +1812,7 @@ void AddR0DriverEventCoverageFields(
     data.AddUtf8("r0CoverageProducerMaskNames", ProducerMaskNames(0));
     data.AddUtf8("r0CoverageAvailableCategories", R0DriverEventCoverageCategory(eventType, payload, payloadBytes));
     data.AddUtf8("r0CoverageKnownGaps", knownGaps);
+    data.AddUtf8("r0CoverageFallbackOwners", kR0TelemetryCoverageFallbackOwners);
     data.AddBool("r0CoverageGapAcknowledged", knownGaps != "none");
     data.AddUtf8("r0CoverageInterpretation", kR0TelemetryCoverageInterpretation);
     data.AddUtf8("r0ReadinessContribution", "event-row-confirms-parser-and-producer-output");
@@ -1830,6 +1851,7 @@ void AddR0ReadinessCoverageFields(
     data.AddUtf8("r0CoverageProducerMaskNames", ProducerMaskNames(producerMask));
     data.AddUtf8("r0CoverageAvailableCategories", availableCategories);
     data.AddUtf8("r0CoverageKnownGaps", knownGaps);
+    data.AddUtf8("r0CoverageFallbackOwners", kR0TelemetryCoverageFallbackOwners);
     data.AddBool("r0CoverageGapAcknowledged", knownGaps != "none");
     data.AddUtf8("r0CoverageInterpretation", kR0TelemetryCoverageInterpretation);
     data.AddUtf8(

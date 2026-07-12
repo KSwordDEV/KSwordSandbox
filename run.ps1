@@ -99,7 +99,7 @@ function Read-InstallState {
         return Get-Content -LiteralPath $script:InstallStatePath -Raw | ConvertFrom-Json
     }
     catch {
-        Write-RunInfo "中文提示：无法读取安装状态 '$script:InstallStatePath'，将忽略并继续。下一步：如配置异常，请重新运行 .\install.ps1 -Mode Install -PromptPassword。英文详情：$($_.Exception.Message)"
+        Write-RunInfo "中文提示：无法读取安装状态 '$script:InstallStatePath'，将忽略并继续。下一步：如配置异常，请重新运行 .\install.ps1 -InstallEntrypoint CreateOrPreparePath -PromptPassword。英文详情：$($_.Exception.Message)"
         return $null
     }
 }
@@ -1324,7 +1324,7 @@ function Show-RunStatus {
         VirusTotalUserSecretSet = -not [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($virusTotalSecretName, 'User'))
         VirusTotalConfigured = (-not [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($virusTotalSecretName, 'Process'))) -or (-not [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($virusTotalSecretName, 'User'))) -or (-not [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($virusTotalSecretName, 'Machine')))
         VirusTotalMissingKeyBehavior = 'optional hash-only enrichment is skipped quietly when key is absent or lookup fails'
-        GuestPasswordGuidance = "下一步：运行 .\install.ps1 -Mode Install -PromptPassword；如果需要同步 VM 实际密码，可运行 .\install.ps1 -Mode Change -ResetGuestVmPassword -GeneratePassword -Force"
+        GuestPasswordGuidance = "下一步：运行 .\install.ps1 -InstallEntrypoint CreateOrPreparePath -PromptPassword；如果需要同步 VM 实际密码，可运行 .\install.ps1 -Mode Change -ResetGuestVmPassword -GeneratePassword -Force"
         VirusTotalGuidance = "下一步：运行 .\install.ps1 -Mode ConfigureVTKey -PromptVTKey，或在 User 环境中设置 $virusTotalSecretName。"
         VmName = $vmName
         CheckpointName = $checkpointName

@@ -97,6 +97,11 @@ public static class SampleCorrelationClassifier
         "sgrmbroker"
     ];
 
+    private static readonly string[] NormalInteractiveGuiProcessNamePrefixes =
+    [
+        "notepad"
+    ];
+
     private static readonly string[] UserWritablePathHints =
     [
         @"\users\",
@@ -186,17 +191,26 @@ public static class SampleCorrelationClassifier
 
         if (HasExistingStrongCorrelation(data))
         {
-            return CorrelationDisposition.Confirmed("existing-strong-sample-correlation", "strongSampleCorrelation");
+            return CorrelationDisposition.Confirmed(
+                "existing-strong-sample-correlation",
+                "strongSampleCorrelation",
+                NormalBehaviorBoundary(evt, data, context));
         }
 
         if (MatchesSampleProcess(evt, data, context))
         {
-            return CorrelationDisposition.Confirmed("pid-or-lineage-matched-sample-process-tree", "processId");
+            return CorrelationDisposition.Confirmed(
+                "pid-or-lineage-matched-sample-process-tree",
+                "processId",
+                NormalBehaviorBoundary(evt, data, context));
         }
 
         if (AnyFieldMatchesSamplePath(evt, data, context))
         {
-            return CorrelationDisposition.Confirmed("path-or-command-matched-submitted-sample", "path");
+            return CorrelationDisposition.Confirmed(
+                "path-or-command-matched-submitted-sample",
+                "path",
+                NormalBehaviorBoundary(evt, data, context));
         }
 
         if (IsDriverEvidence(evt))
@@ -608,10 +622,14 @@ public static class SampleCorrelationClassifier
         data["sampleCorrelationStrength"] = disposition.Strength;
         data["strongSampleCorrelation"] = disposition.Strong.ToString(CultureInfo.InvariantCulture).ToLowerInvariant();
         data["sampleCorrelationClassifier"] = "core-sample-correlation-v1";
-        data["sampleCorrelationPolicy"] = "confirmed/probable events may enter behavior findings; environment/unknown rows are retained as evidence but excluded from primary behavior conclusions";
+        data["sampleCorrelationPolicy"] = "confirmed/probable events may enter behavior findings; environment/unknown rows are retained as evidence but excluded from primary behavior conclusions; trusted benign GUI presets such as Notepad require additional file, registry, network, persistence, injection, or privilege evidence before becoming a suspicious sample conclusion";
+        data["sampleCorrelationBoundary"] = disposition.Boundary;
 
         if (disposition.Kind is CorrelationKind.Environment or CorrelationKind.Unknown)
         {
+            data["evidenceDisposition"] = "retained-not-promoted";
+            data["sampleConclusionPromoted"] = "false";
+            data["sampleConclusionPolicy"] = "insufficient-sample-correlation-retain-evidence-only";
             data["behaviorCounted"] = "false";
             data["nonbehavior"] = "true";
             data["notSampleBehavior"] = "true";
@@ -627,11 +645,35 @@ public static class SampleCorrelationClassifier
         }
         else if (disposition.Kind is CorrelationKind.Confirmed or CorrelationKind.Probable)
         {
+            if (disposition.Kind == CorrelationKind.Confirmed &&
+                disposition.Boundary == "normal-interactive-gui-baseline")
+            {
+                data["evidenceDisposition"] = "retained-not-promoted";
+                data["sampleConclusionPromoted"] = "false";
+                data["sampleConclusionPolicy"] = "normal-interactive-gui-baseline-extra-evidence-required";
+                data["baselineSampleEvidence"] = "true";
+                data["sampleBehaviorCandidate"] = "false";
+                data["behaviorCounted"] = "false";
+                data["nonbehavior"] = "true";
+                data["notSampleBehavior"] = "true";
+                data["sampleBehaviorCandidateReason"] = "normal-interactive-gui-baseline-extra-evidence-required";
+                data["behaviorCountingPolicy"] = "normal-interactive-gui-baseline-retained-not-counted-as-suspicious-behavior";
+                data["normalBehaviorBoundary"] = disposition.Boundary;
+                data["zhBehaviorHint"] = "该事件属于 Notepad 等受信 benign preset 的交互式 GUI 基线活动：保留为样本相关证据，但需要额外文件、注册表、网络、持久化、注入或权限证据才升级为可疑结论。";
+                return;
+            }
+
+            AddIfMissing(data, "evidenceDisposition", "behavior-candidate");
+            AddIfMissing(data, "sampleConclusionPromoted", disposition.Kind == CorrelationKind.Confirmed ? "true" : "candidate");
+            AddIfMissing(data, "sampleConclusionPolicy", disposition.Kind == CorrelationKind.Confirmed ? "strong-sample-correlation" : "probable-sample-correlation-review-required");
             AddIfMissing(data, "sampleBehaviorCandidate", "true");
             AddIfMissing(data, "behaviorCounted", "true");
             AddIfMissing(data, "sampleBehaviorCandidateReason", disposition.Reason);
+            AddIfMissing(data, "normalBehaviorBoundary", disposition.Boundary);
             AddIfMissing(data, "zhBehaviorHint", disposition.Kind == CorrelationKind.Confirmed
-                ? "该事件已通过样本 PID、路径或进程血缘关联到样本。"
+                ? (disposition.Boundary == "normal-interactive-gui-baseline"
+                    ? "该事件属于 Notepad 等受信 benign preset 的交互式 GUI 基线活动：保留为样本相关证据，但需要额外文件、注册表、网络、持久化、注入或权限证据才升级为可疑结论。"
+                    : "该事件已通过样本 PID、路径或进程血缘关联到样本。")
                 : "该事件没有直接样本 PID，但目标路径/语义较强，作为疑似样本相关行为保留。");
         }
     }
@@ -654,6 +696,46 @@ public static class SampleCorrelationClassifier
             IsTruthy(Value(data, "selfNoise")) ||
             IsTruthy(Value(data, "selfProcess")) ||
             CollectionEventTypePrefixes.Any(prefix => evt.EventType.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static string NormalBehaviorBoundary(
+        SandboxEvent evt,
+        IReadOnlyDictionary<string, string> data,
+        CorrelationContext context)
+    {
+        var processName = TrimExe(FirstNonEmpty(
+            evt.ProcessName,
+            Value(data, "processName"),
+            Value(data, "actorProcessName"),
+            Value(data, "imageName"),
+            Path.GetFileName(Value(data, "processImagePath")),
+            Path.GetFileName(Value(data, "imagePath")),
+            context.SampleFileName));
+
+        if (TextEqualsOrStartsWithAny(processName, NormalInteractiveGuiProcessNamePrefixes) && IsNormalInteractiveGuiBaselineEvent(evt, data))
+        {
+            return "normal-interactive-gui-baseline";
+        }
+
+        return "sample-attribution-boundary";
+    }
+
+    private static bool IsNormalInteractiveGuiBaselineEvent(SandboxEvent evt, IReadOnlyDictionary<string, string> data)
+    {
+        if (IsHighSignalMutation(evt, data) || IsNetworkEvidence(evt) || IsServiceOrScheduledTaskEvidence(evt))
+        {
+            return false;
+        }
+
+        if (IsProcessEvidence(evt))
+        {
+            return true;
+        }
+
+        var eventKind = Value(data, "eventKind");
+        var eventFamily = Value(data, "eventFamily");
+        return TextEqualsAny(eventKind, "summary", "status", "metadata") ||
+            TextEqualsAny(eventFamily, "process", "window", "ui", "screenshot");
     }
 
     private static bool HasExistingStrongCorrelation(IReadOnlyDictionary<string, string> data)
@@ -1028,6 +1110,16 @@ public static class SampleCorrelationClassifier
             candidates.Any(candidate => string.Equals(value, candidate, StringComparison.OrdinalIgnoreCase));
     }
 
+    private static bool TextEqualsOrStartsWithAny(string? value, params string[] candidates)
+    {
+        return !string.IsNullOrWhiteSpace(value) &&
+            candidates.Any(candidate =>
+                string.Equals(value, candidate, StringComparison.OrdinalIgnoreCase) ||
+                value.StartsWith(candidate + "-", StringComparison.OrdinalIgnoreCase) ||
+                value.StartsWith(candidate + "_", StringComparison.OrdinalIgnoreCase) ||
+                value.StartsWith(candidate + ".", StringComparison.OrdinalIgnoreCase));
+    }
+
     private static bool IsTruthy(string? value)
     {
         return TextEqualsAny(value, "true", "1", "yes", "y");
@@ -1141,16 +1233,17 @@ public static class SampleCorrelationClassifier
         string Reason,
         string Field,
         string Strength,
-        bool Strong)
+        bool Strong,
+        string Boundary)
     {
-        public static CorrelationDisposition Unchanged() => new(CorrelationKind.Unchanged, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, false);
+        public static CorrelationDisposition Unchanged() => new(CorrelationKind.Unchanged, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, false, string.Empty);
 
-        public static CorrelationDisposition Confirmed(string reason, string field) => new(CorrelationKind.Confirmed, "confirmed", "correlated", reason, field, "strong", true);
+        public static CorrelationDisposition Confirmed(string reason, string field, string boundary = "sample-attribution-boundary") => new(CorrelationKind.Confirmed, "confirmed", "correlated", reason, field, "strong", true, boundary);
 
-        public static CorrelationDisposition Probable(string reason, string field) => new(CorrelationKind.Probable, "probable", "probable", reason, field, "medium", false);
+        public static CorrelationDisposition Probable(string reason, string field, string boundary = "probable-behavior-boundary") => new(CorrelationKind.Probable, "probable", "probable", reason, field, "medium", false, boundary);
 
-        public static CorrelationDisposition Environment(string reason, string field) => new(CorrelationKind.Environment, "environment", "environment", reason, field, "none", false);
+        public static CorrelationDisposition Environment(string reason, string field) => new(CorrelationKind.Environment, "environment", "environment", reason, field, "none", false, "environment-system-collector-boundary");
 
-        public static CorrelationDisposition Unknown(string reason, string field) => new(CorrelationKind.Unknown, "unknown", "unknown", reason, field, "none", false);
+        public static CorrelationDisposition Unknown(string reason, string field) => new(CorrelationKind.Unknown, "unknown", "unknown", reason, field, "none", false, "unknown-attribution-boundary");
     }
 }

@@ -44,6 +44,11 @@ internal static partial class ProgramMain
             warnings.Add($"发现 probable system actor finding evidence {reportAudit.ProbableSystemRows} 条；请复核是否为未归因系统噪声。/ Found {reportAudit.ProbableSystemRows} probable system-actor finding evidence row(s); review for unattributed system noise.");
         }
 
+        if (reportAudit.NormalInteractiveGuiBaselineRows > 0 && reportAudit.MediumHighFindingCount == 0)
+        {
+            warnings.Add($"观察到受信 benign GUI preset 正常基线行 {reportAudit.NormalInteractiveGuiBaselineRows} 条，当前未升级为中高风险主结论；不要把未知样本名称加入该 allowlist。/ Observed {reportAudit.NormalInteractiveGuiBaselineRows} trusted benign GUI baseline row(s) and no medium/high primary finding promotion; do not add unknown sample names to this allowlist.");
+        }
+
         var output = new
         {
             contractVersion = 1,
@@ -93,9 +98,9 @@ internal static partial class ProgramMain
         Console.WriteLine($"样本行为候选 / Sample behavior candidates: {reportAudit.SampleBehaviorCandidateCount}");
         Console.WriteLine($"排除的 metadata/self-noise / Excluded metadata/self-noise: {reportAudit.ExcludedNonBehaviorCandidateCount}");
         Console.WriteLine($"behaviorCounted=false: {reportAudit.BehaviorCountedFalseCount} | nonbehavior=true: {reportAudit.NonBehaviorTrueCount} | sampleBehaviorCandidate=false: {reportAudit.SampleBehaviorCandidateFalseCount}");
-        Console.WriteLine($"sampleCorrelation: confirmed={reportAudit.SampleCorrelationConfirmedCount}, probable={reportAudit.SampleCorrelationProbableCount}, environment={reportAudit.SampleCorrelationEnvironmentCount}, unknown={reportAudit.SampleCorrelationUnknownCount}");
-        Console.WriteLine($"Finding evidence audit: findings={reportAudit.FindingCount}, high/medium findings={reportAudit.MediumHighFindingCount}, high/medium evidence={reportAudit.MediumHighFindingEvidenceRows}, weak(environment/unknown)={reportAudit.MediumHighFindingWeakCorrelationRows}, probable={reportAudit.MediumHighFindingProbableRows}, confirmed={reportAudit.MediumHighFindingConfirmedRows}, probableSystemRows={reportAudit.ProbableSystemRows}, confirmedSvchostRows={reportAudit.ConfirmedSvchostRows}");
-        Console.WriteLine($"Collector self-noise/noise: {reportAudit.CollectorSelfNoiseCount}/{reportAudit.CollectorNoiseCount} | VT quiet: {reportAudit.VirusTotalQuietStateCount} | R0 health/readiness: {reportAudit.R0HealthOrReadinessCount}");
+        Console.WriteLine($"sampleCorrelation: confirmed={reportAudit.SampleCorrelationConfirmedCount}, probable={reportAudit.SampleCorrelationProbableCount}, environment={reportAudit.SampleCorrelationEnvironmentCount}, unknown={reportAudit.SampleCorrelationUnknownCount}, uncorrelated={reportAudit.SampleCorrelationUncorrelatedCount}");
+        Console.WriteLine($"Finding evidence audit: findings={reportAudit.FindingCount}, high/medium findings={reportAudit.MediumHighFindingCount}, high/medium evidence={reportAudit.MediumHighFindingEvidenceRows}, weak(environment/unknown/uncorrelated)={reportAudit.MediumHighFindingWeakCorrelationRows}, environment={reportAudit.MediumHighFindingEnvironmentRows}, unknown={reportAudit.MediumHighFindingUnknownRows}, uncorrelated={reportAudit.MediumHighFindingUncorrelatedRows}, probable={reportAudit.MediumHighFindingProbableRows}, confirmed={reportAudit.MediumHighFindingConfirmedRows}, staticOnly={reportAudit.MediumHighStaticOnlyEvidenceRows}, runtimeCorrelationRequired={reportAudit.MediumHighRuntimeCorrelationRequiredRows}, noSampleCorrelation={reportAudit.MediumHighNoSampleCorrelationRows}, systemActor={reportAudit.MediumHighFindingSystemActorRows}, probableSystemRows={reportAudit.ProbableSystemRows}, confirmedSvchostRows={reportAudit.ConfirmedSvchostRows}");
+        Console.WriteLine($"Collector self-noise/noise: {reportAudit.CollectorSelfNoiseCount}/{reportAudit.CollectorNoiseCount} | system actors: events={reportAudit.SystemActorEventCount}, findingEvidence={reportAudit.FindingEvidenceSystemActorRows} | VT quiet: {reportAudit.VirusTotalQuietStateCount} | R0 health/readiness: {reportAudit.R0HealthOrReadinessCount}");
         Console.WriteLine($"产物 / Artifacts: total={artifactAudit.TotalArtifacts}, downloadable={artifactAudit.DownloadableArtifacts}, rejected={artifactAudit.RejectedArtifacts}, dropped={artifactAudit.DroppedFiles}, screenshots={artifactAudit.Screenshots}, memory={artifactAudit.MemoryDumps}, pcap={artifactAudit.PacketCaptures}");
         Console.WriteLine($"Runbook progress: {(progressAudit.Exists ? "存在 / exists" : "缺失 / missing")} | state={FormatValueOrUnavailable(progressAudit.State)} | ageSeconds={FormatNullable(progressAudit.AgeSeconds)} | completed/failed/running={FormatNullable(progressAudit.CompletedSteps)}/{FormatNullable(progressAudit.FailedSteps)}/{FormatNullable(progressAudit.RunningSteps)}");
 
@@ -155,14 +160,9 @@ internal static partial class ProgramMain
             .ThenBy(group => group.Key, StringComparer.OrdinalIgnoreCase)
             .Select(group => new AuditNameCount(group.Key, group.Count()))
             .ToList();
-        var sampleCorrelationCounts = events
-            .Select(evt => AuditFirstDataValue(evt, "sampleCorrelation", "sample_correlation"))
-            .Where(value => !string.IsNullOrWhiteSpace(value))
-            .GroupBy(value => value, StringComparer.OrdinalIgnoreCase)
-            .OrderByDescending(group => group.Count())
-            .ThenBy(group => group.Key, StringComparer.OrdinalIgnoreCase)
-            .Select(group => new AuditNameCount(group.Key, group.Count()))
-            .ToList();
+        var sampleCorrelationCounts = BuildAuditValueCounts(events, "sampleCorrelation", "sample_correlation");
+        var sampleCorrelationReasonCounts = BuildAuditValueCounts(events, "sampleCorrelationReason", "sample_correlation_reason", "nonbehaviorReason");
+        var evidenceDispositionCounts = BuildAuditValueCounts(events, "evidenceDisposition", "evidence_disposition");
         var findingEvidence = report.Findings
             .SelectMany(finding => finding.Evidence.Select(evt => new AuditFindingEvidence(finding, evt)))
             .ToList();
@@ -179,11 +179,22 @@ internal static partial class ProgramMain
             MediumHighFindingEvidenceRows = mediumHighFindingEvidence.Count,
             MediumHighFindingWeakCorrelationRows = mediumHighFindingEvidence.Count(item => IsAuditWeakSampleCorrelation(item.Event)),
             MediumHighFindingEnvironmentRows = mediumHighFindingEvidence.Count(item => AuditTextEqualsAny(AuditFirstDataValue(item.Event, "sampleCorrelation", "sample_correlation"), "environment")),
-            MediumHighFindingUnknownRows = mediumHighFindingEvidence.Count(item => AuditTextEqualsAny(AuditFirstDataValue(item.Event, "sampleCorrelation", "sample_correlation"), "unknown", "uncorrelated")),
+            MediumHighFindingUnknownRows = mediumHighFindingEvidence.Count(item => AuditTextEqualsAny(AuditFirstDataValue(item.Event, "sampleCorrelation", "sample_correlation"), "unknown")),
             MediumHighFindingProbableRows = mediumHighFindingEvidence.Count(item => IsAuditProbableEvidence(item.Event)),
             MediumHighFindingConfirmedRows = mediumHighFindingEvidence.Count(item => IsAuditConfirmedEvidence(item.Event)),
+            MediumHighStaticOnlyEvidenceRows = mediumHighFindingEvidence.Count(item => AuditDataBoolTrue(item.Event, "staticOnly", "static_only")),
+            MediumHighRuntimeCorrelationRequiredRows = mediumHighFindingEvidence.Count(item => AuditDataBoolTrue(item.Event, "runtimeCorrelationRequired", "runtime_correlation_required")),
+            MediumHighNoSampleCorrelationRows = mediumHighFindingEvidence.Count(item => string.IsNullOrWhiteSpace(AuditFirstDataValue(item.Event, "sampleCorrelation", "sample_correlation"))),
             ConfirmedSvchostRows = findingEvidence.Count(item => IsAuditConfirmedEvidence(item.Event) && IsAuditSvchostEvidence(item.Event)),
             ProbableSystemRows = findingEvidence.Count(item => IsAuditProbableEvidence(item.Event) && IsAuditKnownSystemActorEvidence(item.Event)),
+            SystemActorEventCount = events.Count(IsAuditKnownSystemActorEvidence),
+            EnvironmentSystemActorEventCount = events.Count(evt => AuditTextEqualsAny(AuditFirstDataValue(evt, "sampleCorrelation", "sample_correlation"), "environment") && IsAuditKnownSystemActorEvidence(evt)),
+            FindingEvidenceSystemActorRows = findingEvidence.Count(item => IsAuditKnownSystemActorEvidence(item.Event)),
+            MediumHighFindingSystemActorRows = mediumHighFindingEvidence.Count(item => IsAuditKnownSystemActorEvidence(item.Event)),
+            MediumHighFindingUncorrelatedRows = mediumHighFindingEvidence.Count(item => AuditTextEqualsAny(AuditFirstDataValue(item.Event, "sampleCorrelation", "sample_correlation"), "uncorrelated")),
+            MediumHighFindingSessionOnlyRows = mediumHighFindingEvidence.Count(item => AuditTextEqualsAny(AuditFirstDataValue(item.Event, "sampleCorrelationStatus", "sample_correlation_status", "sampleCorrelationStrength", "sample_correlation_strength"), "session-only", "session-related")),
+            RetainedNotPromotedCount = events.Count(IsAuditRetainedNotPromotedEvidence),
+            NormalInteractiveGuiBaselineRows = events.Count(IsAuditNormalInteractiveGuiBaselineEvidence),
             SampleBehaviorCandidateCount = events.Count - excluded.Count,
             ExcludedNonBehaviorCandidateCount = excluded.Count,
             BehaviorCountedFalseCount = events.Count(evt => AuditDataBoolFalse(evt, "behaviorCounted", "behavior_counted", "countsAsBehavior", "countedAsBehavior")),
@@ -202,7 +213,14 @@ internal static partial class ProgramMain
             SampleCorrelationProbableCount = CountAuditDataEquals(events, "sampleCorrelation", "probable"),
             SampleCorrelationEnvironmentCount = CountAuditDataEquals(events, "sampleCorrelation", "environment"),
             SampleCorrelationUnknownCount = CountAuditDataEquals(events, "sampleCorrelation", "unknown"),
+            SampleCorrelationUncorrelatedCount = CountAuditDataEquals(events, "sampleCorrelation", "uncorrelated"),
             SampleCorrelationCounts = sampleCorrelationCounts,
+            SampleCorrelationReasonCounts = sampleCorrelationReasonCounts,
+            EvidenceDispositionCounts = evidenceDispositionCounts,
+            FindingEvidenceSampleCorrelationCounts = BuildAuditValueCounts(findingEvidence.Select(item => item.Event), "sampleCorrelation", "sample_correlation"),
+            MediumHighFindingEvidenceSampleCorrelationCounts = BuildAuditValueCounts(mediumHighFindingEvidence.Select(item => item.Event), "sampleCorrelation", "sample_correlation"),
+            MediumHighWeakEvidenceExamples = mediumHighFindingEvidence.Where(item => IsAuditWeakSampleCorrelation(item.Event)).Take(8).Select(BuildAuditEvidenceExample).ToList(),
+            ProbableSystemEvidenceExamples = findingEvidence.Where(item => IsAuditProbableEvidence(item.Event) && IsAuditKnownSystemActorEvidence(item.Event)).Take(8).Select(BuildAuditEvidenceExample).ToList(),
             TopEventTypes = topEventTypes,
             SourceCounts = sourceCounts
         };
@@ -332,6 +350,37 @@ internal static partial class ProgramMain
         return null;
     }
 
+
+    private static List<AuditNameCount> BuildAuditValueCounts(IEnumerable<SandboxEvent> events, params string[] keys)
+    {
+        return events
+            .Select(evt => AuditFirstDataValue(evt, keys))
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .GroupBy(value => value, StringComparer.OrdinalIgnoreCase)
+            .OrderByDescending(group => group.Count())
+            .ThenBy(group => group.Key, StringComparer.OrdinalIgnoreCase)
+            .Select(group => new AuditNameCount(group.Key, group.Count()))
+            .ToList();
+    }
+
+    private static AuditEvidenceExample BuildAuditEvidenceExample(AuditFindingEvidence item)
+    {
+        var evt = item.Event;
+        return new AuditEvidenceExample
+        {
+            RuleId = item.Finding.RuleId,
+            Severity = item.Finding.Severity,
+            EventType = evt.EventType,
+            Source = evt.Source,
+            SampleCorrelation = AuditFirstDataValue(evt, "sampleCorrelation", "sample_correlation"),
+            SampleCorrelationReason = AuditFirstDataValue(evt, "sampleCorrelationReason", "sample_correlation_reason", "nonbehaviorReason"),
+            EvidenceDisposition = AuditFirstDataValue(evt, "evidenceDisposition", "evidence_disposition"),
+            ProcessName = FirstNonEmpty(evt.ProcessName, AuditFirstDataValue(evt, "processName", "actorProcessName", "owningProcessName", "ownerProcessName")),
+            Path = FirstNonEmpty(evt.Path, AuditFirstDataValue(evt, "path", "filePath", "imagePath", "processImagePath", "objectPath", "keyPath")),
+            Boundary = AuditFirstDataValue(evt, "normalBehaviorBoundary", "sampleCorrelationBoundary")
+        };
+    }
+
     private static bool IsAuditNonBehaviorOrSelfNoiseEvent(SandboxEvent evt)
     {
         if (AuditDataBoolFalse(evt, "behaviorCounted", "behavior_counted", "countsAsBehavior", "countedAsBehavior") ||
@@ -379,6 +428,20 @@ internal static partial class ProgramMain
 
         var eventKind = AuditFirstDataValue(evt, "eventKind", "eventRole", "evidenceRole", "classification");
         return AuditTextEqualsAny(eventKind, "nonbehavior", "non-behavior", "metadata", "diagnostic", "health", "status", "summary");
+    }
+
+    private static bool IsAuditRetainedNotPromotedEvidence(SandboxEvent evt)
+    {
+        return AuditTextEqualsAny(AuditFirstDataValue(evt, "evidenceDisposition", "evidence_disposition"), "retained-not-promoted", "retained_not_promoted") ||
+            AuditTextEqualsAny(AuditFirstDataValue(evt, "sampleConclusionPromoted", "sample_conclusion_promoted"), "false") ||
+            IsAuditWeakSampleCorrelation(evt) ||
+            IsAuditNonBehaviorOrSelfNoiseEvent(evt);
+    }
+
+    private static bool IsAuditNormalInteractiveGuiBaselineEvidence(SandboxEvent evt)
+    {
+        return AuditTextEqualsAny(AuditFirstDataValue(evt, "normalBehaviorBoundary", "sampleCorrelationBoundary"), "normal-interactive-gui-baseline") ||
+            AuditTextContainsAny(AuditFirstDataValue(evt, "zhBehaviorHint"), "benign preset", "Notepad", "交互式 GUI");
     }
 
     private static bool IsAuditWeakSampleCorrelation(SandboxEvent evt)
@@ -622,6 +685,29 @@ internal static partial class ProgramMain
 
     private sealed record AuditNameCount(string Name, int Count);
 
+    private sealed class AuditEvidenceExample
+    {
+        public string RuleId { get; init; } = string.Empty;
+
+        public string Severity { get; init; } = string.Empty;
+
+        public string EventType { get; init; } = string.Empty;
+
+        public string Source { get; init; } = string.Empty;
+
+        public string SampleCorrelation { get; init; } = string.Empty;
+
+        public string SampleCorrelationReason { get; init; } = string.Empty;
+
+        public string EvidenceDisposition { get; init; } = string.Empty;
+
+        public string ProcessName { get; init; } = string.Empty;
+
+        public string Path { get; init; } = string.Empty;
+
+        public string Boundary { get; init; } = string.Empty;
+    }
+
     private sealed record AuditRunbookStep(string Label, string State);
 
     private sealed class AuditReportSummary
@@ -646,9 +732,31 @@ internal static partial class ProgramMain
 
         public int MediumHighFindingConfirmedRows { get; init; }
 
+        public int MediumHighStaticOnlyEvidenceRows { get; init; }
+
+        public int MediumHighRuntimeCorrelationRequiredRows { get; init; }
+
+        public int MediumHighNoSampleCorrelationRows { get; init; }
+
         public int ConfirmedSvchostRows { get; init; }
 
         public int ProbableSystemRows { get; init; }
+
+        public int SystemActorEventCount { get; init; }
+
+        public int EnvironmentSystemActorEventCount { get; init; }
+
+        public int FindingEvidenceSystemActorRows { get; init; }
+
+        public int MediumHighFindingSystemActorRows { get; init; }
+
+        public int MediumHighFindingUncorrelatedRows { get; init; }
+
+        public int MediumHighFindingSessionOnlyRows { get; init; }
+
+        public int RetainedNotPromotedCount { get; init; }
+
+        public int NormalInteractiveGuiBaselineRows { get; init; }
 
         public int SampleBehaviorCandidateCount { get; init; }
 
@@ -686,11 +794,25 @@ internal static partial class ProgramMain
 
         public int SampleCorrelationUnknownCount { get; init; }
 
+        public int SampleCorrelationUncorrelatedCount { get; init; }
+
         public List<AuditNameCount> TopEventTypes { get; init; } = [];
 
         public List<AuditNameCount> SourceCounts { get; init; } = [];
 
         public List<AuditNameCount> SampleCorrelationCounts { get; init; } = [];
+
+        public List<AuditNameCount> SampleCorrelationReasonCounts { get; init; } = [];
+
+        public List<AuditNameCount> EvidenceDispositionCounts { get; init; } = [];
+
+        public List<AuditNameCount> FindingEvidenceSampleCorrelationCounts { get; init; } = [];
+
+        public List<AuditNameCount> MediumHighFindingEvidenceSampleCorrelationCounts { get; init; } = [];
+
+        public List<AuditEvidenceExample> MediumHighWeakEvidenceExamples { get; init; } = [];
+
+        public List<AuditEvidenceExample> ProbableSystemEvidenceExamples { get; init; } = [];
     }
 
     private sealed class AuditArtifactSummary

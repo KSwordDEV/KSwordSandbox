@@ -124,8 +124,8 @@ internal sealed class InstallerContractScenario : ISmokeTestScenario
         RequireContains(doc, ".\\install.ps1 -Mode StartWebUI", "Install doc should describe direct WebUI startup.");
         RequireContains(doc, "-WhatIf", "Install doc should document safe preview paths.");
         RequireContains(doc, ".\\install.ps1 -Mode Change -ResetGuestVmPassword -GeneratePassword -Force", "Install doc should describe non-interactive actual VM password reset.");
-        RequireContains(doc, ".\\install.ps1 -Mode Install -GeneratePassword", "Install doc should describe non-interactive generated install.");
-        RequireContains(doc, ".\\install.ps1 -Mode Install -PromptPassword", "Install doc should describe non-interactive prompted install.");
+        RequireContains(doc, ".\\install.ps1 -InstallEntrypoint CreateOrPreparePath -GeneratePassword", "Install doc should describe non-interactive generated install.");
+        RequireContains(doc, ".\\install.ps1 -InstallEntrypoint CreateOrPreparePath -PromptPassword", "Install doc should describe non-interactive prompted install.");
         RequireContains(doc, ".\\install.ps1 -Mode Change -ResetPassword -GeneratePassword", "Install doc should describe non-interactive generated reset.");
         RequireContains(doc, ".\\install.ps1 -Mode Change -ResetPassword -PromptPassword", "Install doc should describe non-interactive prompted reset.");
         RequireContains(doc, "Uninstall", "Install doc should describe uninstall.");

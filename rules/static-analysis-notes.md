@@ -67,6 +67,10 @@ triage events, not as observed guest behavior.
   `matchedStringIds`, and optional metadata such as `scope`/`mitre`.
 - Chinese diagnostics may be placed in `Data.zhMessage` and `Data.zhHint`; do
   not add new report schema fields for localization-only text.
+- Rules that can become `medium`, `high`, or `critical` report findings must
+  carry human-reviewed `titleZh` and `summaryZh`; JobTool audit reports
+  `mediumHighFindingMissingZh` when a generated report would fall back to
+  English for these findings.
 - Rule-facing fields are string-valued and shared across static rows:
   `staticOnly`, `evidenceOrigin`, `evidenceKind`, `ruleScope`, `ruleKey`,
   `behaviorFamily`, and `triageLevel`. Rules should use these machine fields

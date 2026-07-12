@@ -304,13 +304,20 @@ typedef enum _KSWORD_SANDBOX_DRIVER_STATE {
  * Defensive JSONL coverage taxonomy used by R0Collector:
  *   DriverLoad -> driver.load startup/readiness heartbeat.
  *   Process    -> process.lifecycle create/exit metadata only; process handle
- *                 access and token privilege changes require explicit draft
- *                 payloads or ETW/audit fallback and must not be inferred.
+ *                 access, thread lifecycle/remote-thread creation, token object
+ *                 handles, and token privilege changes require explicit draft
+ *                 payloads, ETW/audit, or guest API-trace fallback and must not
+ *                 be inferred.
  *   Image      -> image.load metadata with bounded image path prefix.
+ *                 Kernel/driver-image loads are image metadata only; SCM
+ *                 service-control semantics and arbitrary driver-load intent are
+ *                 guest/SCM/ETW evidence.
  *   File       -> file.activity metadata with bounded file path prefix; file
  *                 content bytes and hashes are artifact/guest evidence.
  *   Registry   -> registry.activity metadata with bounded key/value prefixes;
- *                 value data bytes are not in the v1 payload.
+ *                 value data bytes are not in the v1 payload. Service key writes
+ *                 are configuration metadata, not proof that SCM created,
+ *                 started, or loaded a service/driver.
  *   Network    -> network.metadata WFP/ALE endpoint metadata only; raw packets
  *                 and DNS/HTTP/TLS payload details are PCAP/sidecar evidence.
  * Queue/loss/backpressure coverage is not a separate event type; it is exposed

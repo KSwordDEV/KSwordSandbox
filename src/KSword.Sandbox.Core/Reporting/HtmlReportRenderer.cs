@@ -72,6 +72,26 @@ public sealed class HtmlReportRenderer
 
     private sealed record EvidenceSummaryCard(string Title, string Value, string Detail, string Css, string CopyText);
 
+    private sealed record BehaviorRoutingStats(
+        int TotalEvents,
+        int SampleBehaviorEvents,
+        int ExcludedFromBehaviorStory,
+        int BehaviorCountedFalse,
+        int NonBehavior,
+        int NotSampleBehavior,
+        int CollectorSelfNoise,
+        int CollectorNoise,
+        int CollectionHealthRows,
+        int VtQuietStates,
+        int R0HealthRows,
+        int CorrelationConfirmed,
+        int CorrelationProbable,
+        int CorrelationEnvironment,
+        int CorrelationUnknown,
+        int RetainedNotPromoted,
+        int NormalInteractiveGuiBaseline,
+        int EvidenceDispositionRetainedNotPromoted);
+
     private sealed record EvidenceNarrativeCard(
         string Step,
         string Title,
@@ -317,9 +337,9 @@ section.card{counter-increment:report-section;max-height:75vh;max-height:var(--s
 .quick-nav{border-color:#b9ddff;position:sticky;top:8px;z-index:20}.quick-nav:before{background:var(--primary)}.quick-nav h2{font-size:16px;margin-bottom:8px}.quick-nav .hint{color:var(--muted);font-size:12px;margin:0 0 10px}.quick-links{display:flex;flex-wrap:wrap;gap:8px}.quick-link{align-items:center;background:#fff;border:1px solid #cfe6fb;border-radius:2px;color:#075985;display:inline-flex;gap:8px;min-height:40px;padding:7px 10px;text-decoration:none}.quick-link strong{font-size:13px}.quick-link small{background:#dff0ff;border-radius:2px;color:#075985;font-weight:900;min-width:24px;padding:3px 7px;text-align:center}.quick-link:hover{border-color:var(--primary);outline:2px solid rgba(67,160,255,.16)}
 .card h2{align-items:center;display:flex;gap:10px;margin:0 0 14px}.card h2:before{background:var(--primary);border-radius:0;content:'';display:inline-block;height:12px;width:12px}section.card>h2{backdrop-filter:none;background:#fff;border-bottom:1px solid #dbeafe;margin:-22px -22px 16px;padding:16px 22px;position:sticky;top:-22px;z-index:3}section.card>h2:after{background:var(--primary);border-radius:2px;color:white;content:'Step ' counter(report-section);font-size:11px;font-weight:900;margin-left:auto;padding:5px 9px;text-transform:uppercase}
 .grid{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(170px,1fr))}.metric{background:#fff;border:1px solid var(--line);border-left:3px solid var(--primary);border-radius:2px;padding:14px}.metric b{display:block;font-size:26px;margin-top:4px}
-.muted{color:var(--muted)}.risk-high{color:#b91c1c}.risk-medium{color:#b45309}.risk-low{color:#047857}.risk-info{color:var(--primary-deep)}
+.muted{color:var(--muted)}.risk-critical{color:#7f1d1d}.risk-high{color:#b91c1c}.risk-medium{color:#b45309}.risk-low{color:#047857}.risk-info{color:var(--primary-deep)}
 .badge,.chip,.evidence-count{border:1px solid transparent;border-radius:2px;display:inline-block;font-weight:700;padding:5px 9px}.chip{font-size:12px;margin:2px 4px 2px 0;padding:3px 7px}.evidence-count{background:#f8fbff;border-color:#cfe6fb;color:#075985;font-size:12px;margin:2px 6px 2px 0}
-.badge-high,.chip-high{background:#fee2e2;color:#991b1b}.badge-medium,.chip-medium{background:#fef3c7;color:#92400e}.badge-low,.chip-low{background:#dcfce7;color:#166534}.badge-info,.chip-info{background:var(--primary-soft);color:#075985}
+.badge-critical,.chip-critical{background:#fecaca;color:#7f1d1d}.badge-high,.chip-high{background:#fee2e2;color:#991b1b}.badge-medium,.chip-medium{background:#fef3c7;color:#92400e}.badge-low,.chip-low{background:#dcfce7;color:#166534}.badge-info,.chip-info{background:var(--primary-soft);color:#075985}
 .section-note{background:#f7fbff;border:1px solid #dbeafe;border-left:4px solid var(--primary);border-radius:2px;color:#475569;margin:10px 0;padding:10px 12px}
 table{border-collapse:collapse;border-spacing:0;width:100%;margin-top:14px}td,th{border-bottom:1px solid #e5edf6;padding:10px;text-align:left;vertical-align:top}th{background:#f8fbff;color:#475569;font-size:12px;position:sticky;text-transform:uppercase;top:0;z-index:1}
 code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.toc a{background:#fff;border:1px solid var(--line);border-radius:2px;color:#075985;display:inline-block;font-weight:700;margin:4px 8px 4px 0;padding:7px 12px;text-decoration:none}.toc a:hover{border-color:var(--primary);outline:2px solid rgba(67,160,255,.16)}
@@ -449,7 +469,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         QuickLink(html, "security", "Security / privilege", report.Events.Count(IsSampleBehaviorSecurityPrivilegeEvent).ToString());
         QuickLink(html, "files", "File system activity", report.Events.Count(IsSampleBehaviorFileEvent).ToString());
         QuickLink(html, "network", "Network behavior", report.Events.Count(IsSampleBehaviorNetworkEvent).ToString());
-        QuickLink(html, "r0", "R0 health", report.Events.Count(IsR0Event).ToString());
+        QuickLink(html, "r0", "R0 sample/health", report.Events.Count(IsR0Event).ToString());
         QuickLink(html, "vt", "VT lookups", report.Events.Count(IsVirusTotalEvent).ToString());
         QuickLink(html, "artifacts", "Artifact links", artifacts.Count.ToString());
         QuickLink(html, "events", "Raw normalized events", report.Events.Count.ToString());
@@ -473,7 +493,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         var staticFindings = StaticTriageFindings(report).ToList();
         var diagnosticFindings = DiagnosticFindings(report).ToList();
         html.AppendLine("<section id=\"risk\" class=\"card\"><h2>Risk summary</h2><div class=\"grid\">");
-        Metric(html, "High risk", CountSeverity(primaryFindings, "high").ToString(), "risk-high");
+        Metric(html, "Critical / high risk", (CountSeverity(primaryFindings, "critical") + CountSeverity(primaryFindings, "high")).ToString(), "risk-high");
         Metric(html, "Suspicious", CountSeverity(primaryFindings, "medium").ToString(), "risk-medium");
         Metric(html, "General / info", (CountSeverity(primaryFindings, "low") + CountSeverity(primaryFindings, "info")).ToString(), "risk-info");
         Metric(html, "Static triage", staticFindings.Count.ToString(), staticFindings.Any(f => SeverityRank(f.Severity) <= SeverityRank("medium")) ? "risk-medium" : "risk-info");
@@ -488,11 +508,74 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         Metric(html, "File events", report.Events.Count(IsSampleBehaviorFileEvent).ToString(), "risk-medium");
         Metric(html, "Network events", report.Events.Count(IsSampleBehaviorNetworkEvent).ToString(), "risk-medium");
         Metric(html, "Registry events", report.Events.Count(IsSampleBehaviorRegistryEvent).ToString(), "risk-medium");
-        Metric(html, "R0 / driver events", report.Events.Count(IsR0Event).ToString(), "risk-info");
+        Metric(html, "R0 sample telemetry", report.Events.Count(IsSampleBehaviorR0Event).ToString(), "risk-info");
+        Metric(html, "R0 health/readiness", report.Events.Count(IsR0CollectionHealthEvent).ToString(), "risk-info");
         html.AppendLine("</div>");
         AppendCollectionSelfNoisePolicySummary(html, report);
         html.AppendLine("</section>");
     }
+
+
+    private static BehaviorRoutingStats BuildBehaviorRoutingStats(IReadOnlyCollection<SandboxEvent> events)
+    {
+        var correlationConfirmed = events.Count(evt => TextEqualsAny(FirstEventDataValue(evt, "sampleCorrelation", "sample_correlation") ?? string.Empty, "confirmed"));
+        var correlationProbable = events.Count(evt => TextEqualsAny(FirstEventDataValue(evt, "sampleCorrelation", "sample_correlation") ?? string.Empty, "probable"));
+        var correlationEnvironment = events.Count(evt => TextEqualsAny(FirstEventDataValue(evt, "sampleCorrelation", "sample_correlation") ?? string.Empty, "environment"));
+        var correlationUnknown = events.Count(evt => TextEqualsAny(FirstEventDataValue(evt, "sampleCorrelation", "sample_correlation") ?? string.Empty, "unknown", "uncorrelated"));
+        var evidenceDispositionRetained = events.Count(evt => TextEqualsAny(FirstEventDataValue(evt, "evidenceDisposition", "evidence_disposition") ?? string.Empty, "retained-not-promoted", "retained_not_promoted"));
+        var weakCorrelation = events.Count(IsWeakOrEnvironmentalSampleCorrelationEvent);
+        var nonBehavior = events.Count(IsNonBehaviorEvent);
+        var notSample = events.Count(IsNotSampleBehaviorMarkerEvent);
+        var sampleCandidateFalse = events.Count(IsSampleBehaviorCandidateFalseEvent);
+        var behaviorCountedFalse = events.Count(IsBehaviorCountedFalseEvent);
+        return new BehaviorRoutingStats(
+            events.Count,
+            events.Count(IsSampleBehaviorEvent),
+            events.Count(IsExcludedFromBehaviorStoryEvent),
+            behaviorCountedFalse,
+            nonBehavior,
+            notSample,
+            events.Count(IsCollectorSelfNoiseEvent),
+            events.Count(evt => EventDataBoolTrue(evt, "collectorNoise", "collectionNoise", "noise")),
+            events.Count(IsCollectionHealthEvent),
+            events.Count(IsVirusTotalQuietStateEvent),
+            events.Count(IsR0CollectionHealthEvent),
+            correlationConfirmed,
+            correlationProbable,
+            correlationEnvironment,
+            correlationUnknown,
+            events.Count(evt => IsWeakOrEnvironmentalSampleCorrelationEvent(evt) || IsNonBehaviorEvent(evt) || IsNotSampleBehaviorMarkerEvent(evt) || IsSampleBehaviorCandidateFalseEvent(evt) || TextEqualsAny(FirstEventDataValue(evt, "evidenceDisposition", "evidence_disposition") ?? string.Empty, "retained-not-promoted", "retained_not_promoted")),
+            events.Count(evt => TextEqualsAny(FirstEventDataValue(evt, "normalBehaviorBoundary", "sampleCorrelationBoundary") ?? string.Empty, "normal-interactive-gui-baseline")),
+            evidenceDispositionRetained);
+    }
+
+    private static object BuildBehaviorRoutingStatsPayload(BehaviorRoutingStats stats) => new
+    {
+        schema = "ksword.report.behavior-routing-stats.v1",
+        policy = "retained_not_promoted",
+        stats.TotalEvents,
+        stats.SampleBehaviorEvents,
+        stats.ExcludedFromBehaviorStory,
+        stats.BehaviorCountedFalse,
+        stats.NonBehavior,
+        stats.NotSampleBehavior,
+        stats.CollectorSelfNoise,
+        stats.CollectorNoise,
+        stats.CollectionHealthRows,
+        stats.VtQuietStates,
+        stats.R0HealthRows,
+        stats.RetainedNotPromoted,
+        stats.NormalInteractiveGuiBaseline,
+        stats.EvidenceDispositionRetainedNotPromoted,
+        correlation = new
+        {
+            confirmed = stats.CorrelationConfirmed,
+            probable = stats.CorrelationProbable,
+            environment = stats.CorrelationEnvironment,
+            unknown = stats.CorrelationUnknown
+        },
+        conclusionBoundary = "environment/unknown/nonbehavior/readiness evidence is retained in raw evidence but not promoted to primary sample conclusions"
+    };
 
     /// <summary>
     /// Appends an early, compact evidence-quality policy card. Inputs are all
@@ -501,14 +584,17 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
     /// </summary>
     private static void AppendCollectionSelfNoisePolicySummary(StringBuilder html, AnalysisReport report)
     {
-        var behaviorCountedFalse = report.Events.Count(IsBehaviorCountedFalseEvent);
-        var nonBehavior = report.Events.Count(IsNonBehaviorEvent);
-        var notSampleBehavior = report.Events.Count(IsNotSampleBehaviorMarkerEvent);
-        var collectorSelfNoise = report.Events.Count(IsCollectorSelfNoiseEvent);
-        var vtQuiet = report.Events.Count(IsVirusTotalQuietStateEvent);
-        var r0Health = report.Events.Count(IsR0CollectionHealthEvent);
-        var excludedUnion = report.Events.Count(IsExcludedFromBehaviorStoryEvent);
-        var sampleBehavior = report.Events.Count(IsSampleBehaviorEvent);
+        var stats = BuildBehaviorRoutingStats(report.Events);
+        var behaviorCountedFalse = stats.BehaviorCountedFalse;
+        var nonBehavior = stats.NonBehavior;
+        var notSampleBehavior = stats.NotSampleBehavior;
+        var collectorSelfNoise = stats.CollectorSelfNoise;
+        var vtQuiet = stats.VtQuietStates;
+        var r0Health = stats.R0HealthRows;
+        var excludedUnion = stats.ExcludedFromBehaviorStory;
+        var sampleBehavior = stats.SampleBehaviorEvents;
+        var machineStats = BuildBehaviorRoutingStatsPayload(stats);
+        var statsJson = JsonSerializer.Serialize(machineStats, ArtifactJsonOptions);
         var copy = string.Join(
             Environment.NewLine,
             [
@@ -519,9 +605,19 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
                 $"nonbehavior={nonBehavior}",
                 $"notSampleBehavior={notSampleBehavior}",
                 $"collectorSelfNoise={collectorSelfNoise}",
+                $"collectorNoise={stats.CollectorNoise}",
+                $"collectionHealthRows={stats.CollectionHealthRows}",
                 $"vtQuietStates={vtQuiet}",
                 $"r0HealthRows={r0Health}",
-                "policy=Excluded rows are collection/reputation/health evidence, not sample behavior. Raw normalized events, report.json, and source artifacts remain complete and copyable."
+                $"correlationConfirmed={stats.CorrelationConfirmed}",
+                $"correlationProbable={stats.CorrelationProbable}",
+                $"correlationEnvironment={stats.CorrelationEnvironment}",
+                $"correlationUnknown={stats.CorrelationUnknown}",
+                $"retainedNotPromoted={stats.RetainedNotPromoted}",
+                $"normalInteractiveGuiBaseline={stats.NormalInteractiveGuiBaseline}",
+                "policy=Excluded rows are collection/reputation/health evidence, not sample behavior. Raw normalized events and source artifacts remain complete when indexed; report.json is a sampled normalized report view.",
+                "machineReadableJson:",
+                statsJson
             ]);
 
         html.AppendLine("<h3>Collection/self-noise policy</h3>");
@@ -1042,7 +1138,8 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         Metric(html, "Registry events", report.Events.Count(IsSampleBehaviorRegistryEvent).ToString(), "risk-medium");
         Metric(html, "File events", report.Events.Count(IsSampleBehaviorFileEvent).ToString(), "risk-medium");
         Metric(html, "Network events", report.Events.Count(IsSampleBehaviorNetworkEvent).ToString(), "risk-medium");
-        Metric(html, "R0 / driver events", report.Events.Count(IsR0Event).ToString(), "risk-info");
+        Metric(html, "R0 sample telemetry", report.Events.Count(IsSampleBehaviorR0Event).ToString(), "risk-info");
+        Metric(html, "R0 health/readiness", report.Events.Count(IsR0CollectionHealthEvent).ToString(), "risk-info");
         Metric(html, "Collection health", report.Events.Count(IsCollectionHealthEvent).ToString(), "risk-info");
         Metric(html, "VT lookups", report.Events.Count(IsVirusTotalEvent).ToString(), "risk-info");
         Metric(html, "Failure markers", report.Events.Count(IsOperationalFailureEvent).ToString(), "risk-high");
@@ -1077,7 +1174,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         Metric(html, "VT malicious", vtEvents.Count(evt => EventDataEqualsAny(evt, "vtVerdict", "verdict", "malicious")).ToString(), "risk-high");
         Metric(html, "VT suspicious", vtEvents.Count(evt => EventDataEqualsAny(evt, "vtVerdict", "verdict", "suspicious")).ToString(), "risk-medium");
         Metric(html, "VT status issues", vtEvents.Count(IsVirusTotalStatusIssue).ToString(), "risk-info");
-        Metric(html, "VT rule hits", vtFindings.Count.ToString(), vtFindings.Any(finding => NormalizeSeverity(finding.Severity) == "high") ? "risk-high" : "risk-info");
+        Metric(html, "VT rule hits", vtFindings.Count.ToString(), vtFindings.Any(finding => SeverityRank(finding.Severity) <= SeverityRank("high")) ? "risk-high" : "risk-info");
         html.AppendLine("</div>");
         AppendVirusTotalReputationStory(html, vtEvents);
 
@@ -3960,9 +4057,9 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
     }
 
     /// <summary>
-    /// Appends compact source-path hints for complete raw evidence.
+    /// Appends compact source-path hints for raw/source evidence.
     /// Inputs are the report and indexed artifacts; processing lists the
-    /// co-located report JSON plus raw guest/driver source artifacts, and the
+    /// co-located sampled report JSON plus raw guest/driver source artifacts, and the
     /// method returns no value.
     /// </summary>
     private static void AppendRawSourceHints(StringBuilder html, AnalysisReport report, IReadOnlyCollection<ArtifactDescriptor> artifacts)
@@ -3976,25 +4073,25 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
             .ToList();
 
         html.AppendLine("<div class=\"raw-source-hints\"><strong>Raw source paths</strong>");
-        html.AppendLine("<p class=\"muted\"><strong>Raw source guide.</strong> report.json is the complete normalized report; guest events, driver JSONL, and manifests are original source artifacts when indexed. Safe report-relative paths get Open/Download buttons; host or guest absolute paths remain copy-only.</p><ul>");
+        html.AppendLine("<p class=\"muted\"><strong>Raw source guide.</strong> report.json is a sampled normalized report view with findings and representative events; guest events, driver JSONL, and manifests are the complete original source artifacts when indexed. Safe report-relative paths get Open/Download buttons; host or guest absolute paths remain copy-only.</p><ul>");
         var reportJsonCopy = string.Join(
             Environment.NewLine,
             [
                 "report.json",
                 $"locationHint={reportJsonHint}",
-                "description=Complete normalized event and finding source."
+                "description=Sampled normalized report view with findings and representative events; use guest events/driver JSONL for complete raw telemetry."
             ]);
         AppendRawSourceHint(
             html,
-            "Complete normalized report JSON (all events)",
+            "Sampled normalized report JSON (representative events)",
             "report.json",
-            $"Complete normalized event and finding source. Expected location: {reportJsonHint}",
+            $"Sampled normalized report view with findings and representative events. Expected location: {reportJsonHint}",
             "report.json",
             reportJsonCopy);
 
         if (rawArtifacts.Count == 0)
         {
-            html.AppendLine("<li class=\"muted\">No raw source artifacts were indexed; report.json remains the complete normalized source.</li>");
+            html.AppendLine("<li class=\"muted\">No raw source artifacts were indexed; report.json remains the sampled normalized report view, not proof that no additional raw telemetry existed.</li>");
         }
         else
         {
@@ -6191,6 +6288,9 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
     private static bool IsSampleBehaviorSecurityPrivilegeEvent(SandboxEvent evt) =>
         IsSampleBehaviorEvent(evt) && IsSecurityPrivilegeEvent(evt);
 
+    private static bool IsSampleBehaviorR0Event(SandboxEvent evt) =>
+        IsSampleBehaviorEvent(evt) && IsR0Event(evt) && !IsR0CollectionHealthEvent(evt);
+
     /// <summary>
     /// Identifies normalized Windows Security/ETW privilege and process-access rows.
     /// Inputs are one normalized event; processing uses event-type prefixes and
@@ -6826,6 +6926,13 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
             return true;
         }
 
+        if (!evt.EventType.StartsWith("r0collector.", StringComparison.OrdinalIgnoreCase) &&
+            !TextEqualsAny(evt.Source, "r0collector", "collection-health") &&
+            !EventDataBoolTrue(evt, "collectionHealth", "collectionDiagnostic", "collectorDiagnostic"))
+        {
+            return false;
+        }
+
         return EventDataHasAnyKey(
             evt,
             "driverState",
@@ -7075,6 +7182,11 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         }
 
         var primaryFindings = PrimaryBehaviorFindings(report).ToList();
+        if (CountSeverity(primaryFindings, "critical") > 0)
+        {
+            return ("Critical risk", "critical");
+        }
+
         if (CountSeverity(primaryFindings, "high") > 0)
         {
             return ("High risk", "high");
@@ -7151,10 +7263,11 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
     {
         return NormalizeSeverity(severity) switch
         {
-            "high" => 0,
-            "medium" => 1,
-            "low" => 2,
-            _ => 3
+            "critical" => 0,
+            "high" => 1,
+            "medium" => 2,
+            "low" => 3,
+            _ => 4
         };
     }
 
@@ -7166,7 +7279,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
     private static string NormalizeSeverity(string severity)
     {
         var value = severity.ToLowerInvariant();
-        return value is "high" or "medium" or "low" ? value : "info";
+        return value is "critical" or "high" or "medium" or "low" ? value : "info";
     }
 
     /// <summary>
@@ -7546,6 +7659,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         (" generated at ", " 生成于 "),
         ("Analysis failed", "分析失败"),
         ("No high-risk behavior", "未发现高风险行为"),
+        ("Critical risk", "严重风险"),
         ("High risk", "高风险"),
         ("Suspicious", "可疑行为"),
         (">Queued<", ">已排队<"),
@@ -7595,6 +7709,10 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         ("No Windows Security, ETW privilege, or process-access telemetry rows were imported as sample behavior.", "未将 Windows Security、ETW 权限或进程访问遥测行作为样本行为导入。"),
         ("security/privilege", "安全/权限"),
         ("R0 health", "R0 健康状态"),
+        ("R0 health/readiness", "R0 健康/就绪"),
+        ("R0 sample/health", "R0 样本/健康"),
+        ("R0 sample telemetry", "R0 样本遥测"),
+        ("Critical / high risk", "严重/高风险"),
         ("VT lookups", "VT 查询"),
         ("Risk summary", "风险摘要"),
         ("Behavior detections", "行为命中"),
@@ -7948,7 +8066,12 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         ("Counts expose evidence anchors before opening raw pages: artifact references, network rows, and R0/driver rows.", "计数会在打开原始分页前暴露证据锚点：证据文件引用、网络行和 R0/驱动行。"),
         ("No raw rows exceed the inline cap.", "没有原始行超过内联上限。"),
         ("Complete normalized report JSON", "完整规范化报告 JSON"),
+        ("Sampled normalized report JSON", "采样规范化报告 JSON"),
+        ("representative events", "代表性事件"),
+        ("sampled normalized report view", "采样规范化报告视图"),
+        ("raw guest events, driver JSONL, and manifests are the complete original source artifacts when indexed", "索引存在时，原始 guest events、driver JSONL 和 manifest 才是完整原始来源证据"),
         ("(all events)", "（全部事件）"),
+        ("(representative events)", "（代表性事件）"),
         ("Raw source guide.", "原始来源指南。"),
         ("Complete normalized event and finding source.", "完整的规范化事件和命中来源。"),
         ("Expected location:", "预计位置："),
@@ -7992,7 +8115,8 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         ("more evidence events hidden in raw events/report.json", "条更多证据事件隐藏在原始事件/report.json 中"),
         ("hidden)", "隐藏)"),
         ("same directory as report.html/report.en.html/report.zh.html; job folder", "与 report.html/report.en.html/report.zh.html 位于同一目录；作业目录"),
-        ("No raw source artifacts were indexed; report.json remains the complete normalized source.", "未索引原始来源证据；report.json 仍是完整的规范化来源。"),
+        ("No raw source artifacts were indexed; report.json remains the sampled normalized report view, not proof that no additional raw telemetry existed.", "未索引原始来源证据；report.json 仍只是采样规范化报告视图，不能证明不存在额外原始遥测。"),
+        ("No raw source artifacts were indexed; report.json remains the sampled normalized report view, not proof that no additional raw telemetry existed.", "未索引原始来源证据；report.json 仍只是采样规范化报告视图，不能证明不存在额外原始遥测。"),
         ("additional raw source artifacts are listed in the Artifact links section.", "个额外原始来源证据已列在证据文件链接章节。"),
         ("safe link:", "安全链接："),
         ("General / info", "常规 / 信息"),

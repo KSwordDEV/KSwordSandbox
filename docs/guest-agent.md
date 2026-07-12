@@ -124,14 +124,22 @@ guest-output 目录下解析文件，而不是信任 VM 内绝对路径。
   correlated to the sample by root/child/creator PID or image/command path set
   `behaviorCounted=true`; logon-session-only matches are kept as
   `sampleCorrelationStatus=session-related` and remain `behaviorCounted=false`.
-  Token privilege rows normalize 4703 `PrivilegeList` /
-  `EnabledPrivilegeList` / `DisabledPrivilegeList` into rule-consumable
-  `privilege`, `privilegeName`, `privilegeNames`, `operation`, and `api`
-  aliases when present. Process-access rows normalize `ObjectName`,
-  `ObjectType`, `HandleId`, `AccessMask`, and decoded Process rights into
-  `targetProcess*`, `object*`, `accesses`, `requestedAccess`, `desiredAccess`,
-  and `operation` aliases when available. All rows include `zhMessage` and
-  `zhHint`.
+  All actual Security rows expose machine-readable fallback routing:
+  `securityFallbackSurfaceKey` / `fallbackSurfaceKey`, `fallbackOwner`,
+  `r0CoverageGap`, and `behaviorBoundary`. Token privilege rows normalize 4703
+  `PrivilegeList` / `EnabledPrivilegeList` / `DisabledPrivilegeList` into
+  rule-consumable `privilege`, `privilegeName`, `privilegeNames`, `operation`,
+  `api`, `enabledPrivilegeNames`, and `disabledPrivilegeNames` aliases when
+  present. 4696 rows add token-assignment aliases such as
+  `tokenTargetProcessId`, `tokenTargetImagePath`, `assignedTokenUser`, and
+  `tokenAssignment=true`. 4673/4674 rows add privileged-service/object aliases
+  (`privilegedServiceName`, `privilegedObjectName`, privilege names, and
+  operation markers). Process-access/handle rows normalize `ObjectName`,
+  `ObjectType`, `HandleId`, `SourceHandleId`, `TargetHandleId`, `AccessMask`,
+  decoded Process rights, and 4690 DuplicateHandle relationships into
+  `targetProcess*`, `sourceProcess*`, `duplicated*HandleId`, `object*`,
+  `accesses`, `requestedAccess`, `desiredAccess`, `api`, and `operation`
+  aliases when available. All rows include `zhMessage` and `zhHint`.
 - `etw_security.readiness.summary`,
   `etw_security.provider_manifest.readiness`, and
   `etw_security.surface.readiness` for targeted ETW/Security coverage
@@ -143,7 +151,14 @@ guest-output 目录下解析文件，而不是信任 VM 内绝对路径。
   module image load/unload to Security Event IDs and Kernel-Process/TI provider
   readiness. They are collection-health metadata with
   `behaviorCounted=false`, `nonbehavior=true`, `sampleBehaviorCandidate=false`,
-  plus Chinese `zhMessage` / `zhHint`.
+  plus Chinese `zhMessage` / `zhHint`. The readiness matrix is machine-readable:
+  summary/surface rows include `fallbackMatrixVersion`, `fallbackMatrixOwner`,
+  `surfaceKeys`, `eventIdMap` / `fallbackEventIdMaps` / `securityEventIds`,
+  `kernelProcessEventFamilies`, `fallbackOwner`, `r0CoverageGap`, and
+  `behaviorBoundary`. `SecurityEventLogProbe` also emits
+  `security_eventlog.fallback_surface.readiness` with `fallbackSurfaceKeys`,
+  per-surface owners, per-surface R0 gaps, and explicit thread/remote-thread and
+  module-load readiness entries while still avoiding any live ETW session.
 - `environment.detail` for additional runtime and guest context, including
   .NET framework description, runtime identifier, elevation estimate,
   interactive-session flag, time-zone metadata, temp/user profile paths, and

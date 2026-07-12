@@ -121,6 +121,13 @@ param(
 
     [switch]$PrepareGuestPayload,
 
+    [switch]$PassThru,
+
+    [switch]$Json,
+
+    [ValidateRange(4, 32)]
+    [int]$JsonDepth = 12,
+
     [switch]$Force
 )
 
@@ -144,7 +151,9 @@ foreach ($parameterName in $PSBoundParameters.Keys) {
 
 if ($PlanOnly -and -not $WhatIfPreference) {
     $WhatIfPreference = $true
-    Write-InstallInfo 'PlanOnly 已启用：本次只输出计划/诊断，不写入本机状态、不启动或还原 VM。 / PlanOnly enabled: diagnostics only.'
+    if (-not $Json) {
+        Write-InstallInfo 'PlanOnly 已启用：本次只输出计划/诊断，不写入本机状态、不启动或还原 VM。 / PlanOnly enabled: diagnostics only.'
+    }
 }
 
 function Read-MenuChoice {
@@ -169,7 +178,9 @@ function Read-InstallState {
         return Get-Content -LiteralPath $script:InstallStatePath -Raw | ConvertFrom-Json
     }
     catch {
-        Write-InstallInfo "中文提示：无法读取安装状态文件 '$script:InstallStatePath'，将忽略它并继续。下一步：如状态异常，请重新运行 .\install.ps1 -InstallEntrypoint CreateOrPreparePath -PromptPassword。英文详情：$($_.Exception.Message)"
+        if (-not $Json) {
+            Write-InstallInfo "中文提示：无法读取安装状态文件 '$script:InstallStatePath'，将忽略它并继续。下一步：如状态异常，请重新运行 .\install.ps1 -InstallEntrypoint CreateOrPreparePath -PromptPassword。英文详情：$($_.Exception.Message)"
+        }
         return $null
     }
 }
@@ -716,17 +727,20 @@ function Get-InstallEntrypointNextSteps {
     $steps = [System.Collections.Generic.List[string]]::new()
     switch ($SelectedEntrypoint) {
         'UseConfiguredEnvironment' {
-            [void]$steps.Add('下一步：确认 RecommendedActions 为空或只包含可接受项，然后运行 .\run.ps1 -Mode Plan -SamplePath <sample.exe> 做非变更计划检查。')
+            [void]$steps.Add('下一步：确认 RecommendedActions 为空或只包含可接受项；该入口只读，不写 install-state/sandbox.local.json/secret，也不启动、停止或还原 VM。')
+            [void]$steps.Add('下一步：运行 .\run.ps1 -Mode Plan -SamplePath <sample.exe> 做非变更计划检查；不要在发布低成本验证中加 -Live。')
             [void]$steps.Add('下一步：需要真实 Live 分析时，显式运行 .\run.ps1 -Mode Analyze -SamplePath <sample.exe> -Live；install 入口本身不会启动或还原 VM。')
         }
         'RestoreCleanCheckpoint' {
             [void]$steps.Add("下一步：先运行 .\install.ps1 -InstallEntrypoint RestoreCleanCheckpoint -PlanOnly 或 -WhatIf 检查 VM='$VmName' 和 checkpoint='$CheckpointName'。")
-            [void]$steps.Add('下一步：确认是隔离实验 VM 后，才在管理员 PowerShell 中加 -AllowVmMutation，并让 ShouldProcess/-Confirm 决定是否真实还原。')
+            [void]$steps.Add('下一步：确认是隔离实验 VM 后，才在管理员 PowerShell 中加 -AllowVmMutation，并让 ShouldProcess/-Confirm 或 -Force 决定是否真实还原。')
+            [void]$steps.Add('下一步：-Force 只是无人值守确认路径；仍必须与 -AllowVmMutation 同时出现，且仍经过 ShouldProcess 保护。')
         }
         'CreateOrPreparePath' {
-            [void]$steps.Add("下一步：首台机器先运行 .\install.ps1 -InstallEntrypoint CreateOrPreparePath -WhatIf 预览，再用 -Confirm 创建/刷新本机运行目录和 sandbox.local.json；不会创建 Hyper-V VM。输出路径：$RuntimeRoot。")
+            [void]$steps.Add("下一步：首台机器先运行 .\install.ps1 -InstallEntrypoint CreateOrPreparePath -PlanOnly 查看计划，再运行 -WhatIf 预览；两者都不会写文件、提示 secret、构建 payload 或修改 VM。输出路径：$RuntimeRoot。")
+            [void]$steps.Add('下一步：确认计划后，运行 .\install.ps1 -InstallEntrypoint CreateOrPreparePath -PromptPassword 创建/刷新仓库外运行目录、sandbox.local.json、secret 和 install-state；仍不会创建 Hyper-V VM。')
             [void]$steps.Add("下一步：如果还没有黄金 VM，请先在 Hyper-V 中创建/导入 VM 和干净 checkpoint，然后运行 .\install.ps1 -Mode Change -UpdateHyperVConfig -VmName <existing VM> -CheckpointName <checkpoint>。")
-            [void]$steps.Add('下一步：需要 self-contained Guest Agent/R0Collector payload 时，显式加 -PrepareGuestPayload；PlanOnly/WhatIf 只显示将要执行的准备动作。')
+            [void]$steps.Add('下一步：需要 self-contained Guest Agent/R0Collector payload 时，显式加 -PrepareGuestPayload；PlanOnly/WhatIf 只显示将要执行的准备动作，目标必须是仓库外 GuestPayloadRoot/runtime root。')
         }
     }
 
@@ -750,6 +764,7 @@ function Get-InstallOperatorModeMatrix {
             DefaultCommand = $configuredCommand
             SafeDiagnostics = @('.\install.ps1 -Mode Status', '.\install.ps1 -Mode CheckEnvironment', '.\run.ps1 -Mode Status', '.\run.ps1 -Mode CheckEnvironment')
             MutationBoundary = 'read-only diagnostics only; no local write and no VM mutation'
+            SafeBoundaryZh = '只读：不写本机状态、不改环境变量、不提示或保存 secret、不启动/停止/还原 VM。'
             StartsVm = $false
             RestoresCheckpoint = $false
             CreatesVm = $false
@@ -768,11 +783,13 @@ function Get-InstallOperatorModeMatrix {
             DefaultCommand = $restorePlanCommand
             SafeDiagnostics = @($restorePlanCommand, $restoreWhatIfCommand, '.\scripts\Test-HyperVReadiness.ps1')
             MutationBoundary = 'actual restore requires -AllowVmMutation plus explicit -Confirm or -Force on an isolated lab host'
+            SafeBoundaryZh = '默认只预览：-PlanOnly/-WhatIf 不调用 Restore-VMSnapshot；真实还原必须 -AllowVmMutation，并显式 -Confirm 或 -Force。'
             StartsVm = $false
             RestoresCheckpoint = $true
             CreatesVm = $false
             CreatesLocalConfig = $false
             MutatingCommand = $restoreCommand
+            UnattendedMutatingCommand = '.\install.ps1 -InstallEntrypoint RestoreCleanCheckpoint -AllowVmMutation -Force'
             NextStepsZh = @(
                 '下一步：先用 -PlanOnly 或 -WhatIf 确认 VM/checkpoint 名称；readiness/package 不会执行恢复。',
                 '下一步：确认隔离实验 VM 可被回退后，管理员 PowerShell 中显式使用 -AllowVmMutation -Confirm；无人值守 lab 才使用 -Force。'
@@ -787,6 +804,7 @@ function Get-InstallOperatorModeMatrix {
             DefaultCommand = $createCommand
             SafeDiagnostics = @('.\install.ps1 -InstallEntrypoint CreateOrPreparePath -PlanOnly', '.\install.ps1 -InstallEntrypoint CreateOrPreparePath -WhatIf', '.\install.ps1 -Mode CheckEnvironment')
             MutationBoundary = 'local filesystem/config/secret writes only through ShouldProcess; VM creation/checkpoint creation remains a manual Hyper-V operator task'
+            SafeBoundaryZh = '只准备本机：PlanOnly/WhatIf 不写文件；真实执行也只写仓库外 runtime/config/secret/payload，不创建 VM/checkpoint。'
             StartsVm = $false
             RestoresCheckpoint = $false
             CreatesVm = $false
@@ -808,33 +826,91 @@ function New-InstallEntrypointDiagnostics {
 
     $localConfig = Get-LocalSandboxConfigPath
     $checkpointMutationRequested = $SelectedEntrypoint -eq 'RestoreCleanCheckpoint'
+    $diagnosticWhatIf = [bool]$WhatIfPreference
     $createOrPrepareRequested = $SelectedEntrypoint -eq 'CreateOrPreparePath'
     $confirmExplicitlyRequested = $script:InitialRootBoundParameters.Contains('Confirm') -and [System.Convert]::ToBoolean($script:InitialRootBoundParameters['Confirm'])
+    $allowVmMutationGateSatisfied = $checkpointMutationRequested -and [bool]$AllowVmMutation
+    $confirmOrForceGateSatisfied = $checkpointMutationRequested -and ($confirmExplicitlyRequested -or [bool]$Force)
     $restoreConfirmationSatisfied = $checkpointMutationRequested -and [bool]$AllowVmMutation -and ($confirmExplicitlyRequested -or [bool]$Force)
-    $restoreWillExecute = $restoreConfirmationSatisfied -and -not [bool]$PlanOnly -and -not [bool]$WhatIfPreference
-    $status = Show-KSwordSandboxInstallStatus
+    $restoreWillExecute = $restoreConfirmationSatisfied -and -not [bool]$PlanOnly -and -not $diagnosticWhatIf
+    $createPlanActions = @(
+        [pscustomobject][ordered]@{ Action = 'CreateRuntimeRoot'; Target = [System.IO.Path]::GetFullPath($RuntimeRoot); WouldWrite = $createOrPrepareRequested -and -not $diagnosticWhatIf; RequiresShouldProcess = $true; VmMutation = $false },
+        [pscustomobject][ordered]@{ Action = 'WriteLocalConfig'; Target = $localConfig; WouldWrite = $createOrPrepareRequested -and -not $diagnosticWhatIf; RequiresShouldProcess = $true; VmMutation = $false },
+        [pscustomobject][ordered]@{ Action = 'SetWebConfigEnvironment'; Target = $script:WebConfigPathEnvironmentName; WouldWrite = $createOrPrepareRequested -and -not $diagnosticWhatIf -and -not [bool]$SkipWebConfigEnvironment; RequiresShouldProcess = $true; VmMutation = $false },
+        [pscustomobject][ordered]@{ Action = 'WriteInstallState'; Target = $script:InstallStatePath; WouldWrite = $createOrPrepareRequested -and -not $diagnosticWhatIf; RequiresShouldProcess = $true; VmMutation = $false },
+        [pscustomobject][ordered]@{ Action = 'StoreGuestPasswordSecret'; Target = $SecretName; WouldWrite = $createOrPrepareRequested -and ([bool]$GeneratePassword -or [bool]$PromptPassword -or [bool]$ResetPassword) -and -not $diagnosticWhatIf; RequiresShouldProcess = $true; VmMutation = $false },
+        [pscustomobject][ordered]@{ Action = 'PrepareGuestPayload'; Target = [System.IO.Path]::GetFullPath($GuestPayloadRoot); WouldWrite = $createOrPrepareRequested -and [bool]$PrepareGuestPayload -and -not $diagnosticWhatIf; RequiresShouldProcess = $true; VmMutation = $false }
+    )
+    if ($Json) {
+        $status = [pscustomobject][ordered]@{
+            Omitted = $true
+            Reason = 'Use -PassThru or non-Json diagnostics for full install status; JSON entrypoint diagnostics avoids module autoload WhatIf noise.'
+            StatusCommand = '.\install.ps1 -Mode Status'
+            CheckEnvironmentCommand = '.\install.ps1 -Mode CheckEnvironment'
+        }
+    }
+    else {
+        $status = Show-KSwordSandboxInstallStatus
+    }
 
     [pscustomobject][ordered]@{
+        ContractVersion = 2
+        Kind = 'KSwordSandbox.InstallEntrypointDiagnostics'
+        ResultType = 'InstallEntrypointDiagnostics'
+        GeneratedAtUtc = [DateTimeOffset]::UtcNow.ToString('O')
         InstallEntrypoint = $SelectedEntrypoint
+        ContractSchema = 'ksword.install.entrypoint-diagnostics.v2'
+        MachineReadable = $true
         OperatorModeMatrix = @(Get-InstallOperatorModeMatrix)
         UseConfiguredEnvironment = $SelectedEntrypoint -eq 'UseConfiguredEnvironment'
         RestoreExistingCleanCheckpointSnapshot = $checkpointMutationRequested
         CreateOrPrepareNewPath = $createOrPrepareRequested
         PlanOnly = [bool]$PlanOnly
-        WhatIf = [bool]$WhatIfPreference
+        WhatIf = $diagnosticWhatIf
         ShouldProcessRequired = $checkpointMutationRequested -or $createOrPrepareRequested
         VmMutationNeeded = $checkpointMutationRequested
         VmMutationAllowed = [bool]$AllowVmMutation
         RestoreRequiresAllowVmMutation = $checkpointMutationRequested
         RestoreRequiresExplicitConfirmOrForce = $checkpointMutationRequested
+        RestoreAllowVmMutationGateSatisfied = $allowVmMutationGateSatisfied
+        RestoreConfirmOrForceGateSatisfied = $confirmOrForceGateSatisfied
+        RestoreShouldProcessGateReached = $restoreWillExecute
         RestoreConfirmExplicitlyRequested = $confirmExplicitlyRequested
         RestoreForceExplicitlyRequested = [bool]$Force
         RestoreConfirmationGateSatisfied = $restoreConfirmationSatisfied
         StartsVm = $false
         StopsVm = $false
         RestoresCheckpointSnapshot = $restoreWillExecute
-        WritesLocalConfig = $createOrPrepareRequested -and -not [bool]$WhatIfPreference
-        PreparesGuestPayload = $createOrPrepareRequested -and [bool]$PrepareGuestPayload -and -not [bool]$WhatIfPreference
+        WritesLocalConfig = $createOrPrepareRequested -and -not $diagnosticWhatIf
+        WritesInstallState = $createOrPrepareRequested -and -not $diagnosticWhatIf
+        WritesSecrets = $createOrPrepareRequested -and ([bool]$GeneratePassword -or [bool]$PromptPassword -or [bool]$ResetPassword) -and -not $diagnosticWhatIf
+        PreparesGuestPayload = $createOrPrepareRequested -and [bool]$PrepareGuestPayload -and -not $diagnosticWhatIf
+        CreatesOrImportsVm = $false
+        CreatesCheckpointSnapshot = $false
+        CallsCSignTool = $false
+        ExecutesSample = $false
+        CreateOrPreparePlanActions = @($createPlanActions)
+        ReadOnlyAssertions = [pscustomobject][ordered]@{
+            NoVmMutationCommandsExecuted = -not $restoreWillExecute
+            DidNotStartVm = $true
+            DidNotStopVm = $true
+            DidNotRestoreCheckpoint = -not $restoreWillExecute
+            DidNotCreateVm = $true
+            DidNotCreateCheckpoint = $true
+            DidNotSignDriver = $true
+            DidNotCallCSignTool = $true
+            DidNotExecuteSample = $true
+            SecretValuePrinted = $false
+        }
+        SafetyAssertions = [pscustomobject][ordered]@{
+            UseConfiguredEnvironmentReadOnly = $SelectedEntrypoint -ne 'UseConfiguredEnvironment' -or (-not $restoreWillExecute -and -not $createOrPrepareRequested)
+            PlanOnlyDoesNotMutate = -not [bool]$PlanOnly -or (-not $restoreWillExecute -and -not ($createOrPrepareRequested -and -not $diagnosticWhatIf))
+            WhatIfDoesNotMutate = -not $diagnosticWhatIf -or (-not $restoreWillExecute -and -not ($createOrPrepareRequested -and -not $diagnosticWhatIf))
+            RestoreRequiresAllowVmMutation = $checkpointMutationRequested
+            RestoreRequiresShouldProcess = $checkpointMutationRequested
+            CreateOrPrepareNeverCreatesVm = $true
+            CreateOrPrepareWritesOnlyLocalConfiguredPaths = $createOrPrepareRequested
+        }
         VmName = $VmName
         CheckpointName = $CheckpointName
         RuntimeRoot = [System.IO.Path]::GetFullPath($RuntimeRoot)
@@ -853,6 +929,11 @@ function New-InstallEntrypointDiagnostics {
         PrepareGuestPayloadWhatIfCommand = '.\install.ps1 -InstallEntrypoint CreateOrPreparePath -PrepareGuestPayload -WhatIf'
         ChineseGuidance = '中文提示：安装入口需要显式选择使用已配置环境、还原已有干净快照，或创建/准备新路径；PlanOnly/WhatIf 不会启动、停止、还原或修改 VM。'
         NextSteps = @(Get-InstallEntrypointNextSteps -SelectedEntrypoint $SelectedEntrypoint)
+        FreshComputerNextActionsZh = @(
+            '下一步：首台机器先确认 Windows edition、Hyper-V feature/module、BIOS/UEFI 虚拟化和 SLAT；不满足时只运行 PlanOnly/WhatIf/WebUI/打包检查。',
+            '下一步：在 Hyper-V 外部手工创建/导入 Windows golden VM，启用 Guest Service Interface 和 PowerShell Direct，创建 clean checkpoint。',
+            '下一步：用 CreateOrPreparePath -PlanOnly/-WhatIf 预览，再用 -PromptPassword 写仓库外本机配置和 secret；不要修改 config\sandbox.example.json。'
+        )
         InstallStatus = $status
         SecretValuePrinted = $false
     }
@@ -865,7 +946,25 @@ function Show-InstallEntrypointDiagnostics {
         [string]$SelectedEntrypoint
     )
 
-    New-InstallEntrypointDiagnostics -SelectedEntrypoint $SelectedEntrypoint | Format-List
+    $diagnostics = New-InstallEntrypointDiagnostics -SelectedEntrypoint $SelectedEntrypoint
+    if ($Json) {
+        $savedWhatIfPreference = $WhatIfPreference
+        try {
+            $WhatIfPreference = $false
+            $diagnostics | ConvertTo-Json -Depth $JsonDepth
+        }
+        finally {
+            $WhatIfPreference = $savedWhatIfPreference
+        }
+        return
+    }
+
+    if ($PassThru) {
+        Write-Output $diagnostics
+        return
+    }
+
+    $diagnostics | Format-List
 }
 
 function Invoke-InstallerGuestPayloadPreparation {
@@ -904,13 +1003,17 @@ function Invoke-InstallerGuestPayloadPreparation {
 }
 
 function Invoke-UseConfiguredEnvironmentEntrypoint {
-    Write-InstallInfo '使用已配置环境入口：只显示状态和下一步；不会写入本机状态，不会启动、停止或还原 VM。 / Using configured environment diagnostics only.'
+    if (-not $Json) {
+        Write-InstallInfo '使用已配置环境入口：只显示状态和下一步；不会写入本机状态，不会启动、停止或还原 VM。 / Using configured environment diagnostics only.'
+    }
     Show-InstallEntrypointDiagnostics -SelectedEntrypoint 'UseConfiguredEnvironment'
 }
 
 function Invoke-CreateOrPreparePathEntrypoint {
     if ($PlanOnly -or $WhatIfPreference) {
-        Write-InstallInfo '预览：创建/准备路径入口只输出将写入的本机目录/config/payload 动作；当前不会修改文件系统。 / Previewing create/prepare path.'
+        if (-not $Json) {
+            Write-InstallInfo '预览：创建/准备路径入口只输出将写入的本机目录/config/payload 动作；当前不会修改文件系统。 / Previewing create/prepare path.'
+        }
         Show-InstallEntrypointDiagnostics -SelectedEntrypoint 'CreateOrPreparePath'
         return
     }
@@ -928,21 +1031,29 @@ function Invoke-CreateOrPreparePathEntrypoint {
 
 function Invoke-RestoreCleanCheckpointEntrypoint {
     if ($PlanOnly -or $WhatIfPreference) {
-        [void]$PSCmdlet.ShouldProcess("${VmName}::$CheckpointName", 'Restore existing clean checkpoint/snapshot')
-        Write-InstallInfo '预览：还原已有干净 checkpoint/snapshot 入口不会执行 Hyper-V 变更。 / Previewing checkpoint restore only.'
+        if (-not $Json) {
+            [void]$PSCmdlet.ShouldProcess("${VmName}::$CheckpointName", 'Restore existing clean checkpoint/snapshot')
+        }
+        if (-not $Json) {
+            Write-InstallInfo '预览：还原已有干净 checkpoint/snapshot 入口不会执行 Hyper-V 变更。 / Previewing checkpoint restore only.'
+        }
         Show-InstallEntrypointDiagnostics -SelectedEntrypoint 'RestoreCleanCheckpoint'
         return
     }
 
     if (-not $AllowVmMutation) {
-        Write-InstallInfo '默认安全计划：还原 checkpoint/snapshot 入口未加 -AllowVmMutation 时只显示计划和诊断；不会查询、启动、停止或还原 VM。 / Safe default: restore entrypoint is plan-only unless VM mutation is explicitly allowed.'
+        if (-not $Json) {
+            Write-InstallInfo '默认安全计划：还原 checkpoint/snapshot 入口未加 -AllowVmMutation 时只显示计划和诊断；不会查询、启动、停止或还原 VM。 / Safe default: restore entrypoint is plan-only unless VM mutation is explicitly allowed.'
+        }
         Show-InstallEntrypointDiagnostics -SelectedEntrypoint 'RestoreCleanCheckpoint'
         return
     }
 
     $confirmExplicitlyRequested = $script:InitialRootBoundParameters.Contains('Confirm') -and [System.Convert]::ToBoolean($script:InitialRootBoundParameters['Confirm'])
     if (-not $confirmExplicitlyRequested -and -not $Force) {
-        Write-InstallInfo '已拒绝真实 VM 变更：还原 checkpoint/snapshot 除了 -AllowVmMutation，还需要显式 -Confirm 交互确认；无人值守实验室脚本可改用 -Force 表示已外部确认。 / Checkpoint restore requires -Confirm or -Force.'
+        if (-not $Json) {
+            Write-InstallInfo '已拒绝真实 VM 变更：还原 checkpoint/snapshot 除了 -AllowVmMutation，还需要显式 -Confirm 交互确认；无人值守实验室脚本可改用 -Force 表示已外部确认。 / Checkpoint restore requires -Confirm or -Force.'
+        }
         Show-InstallEntrypointDiagnostics -SelectedEntrypoint 'RestoreCleanCheckpoint'
         return
     }
@@ -1022,6 +1133,13 @@ function Assert-InstallEntrypointContract {
         if (Test-BoundSwitchTruthy -BoundParameters $BoundParameters -Name $switchName) {
             throw "错误：-InstallEntrypoint $SelectedEntrypoint 不接受 -$switchName；该参数属于其他安装路径或 VM 变更路径。下一步：UseConfiguredEnvironment 只诊断；RestoreCleanCheckpoint 只还原已有快照；CreateOrPreparePath 只准备本机目录/config/payload。"
         }
+    }
+
+    if (($Json -or $PassThru) -and
+        $SelectedEntrypoint -ne 'UseConfiguredEnvironment' -and
+        -not $PlanOnly -and
+        -not $WhatIfPreference) {
+        throw "错误：-Json/-PassThru 只支持诊断路径：UseConfiguredEnvironment，或任意入口加 -PlanOnly/-WhatIf。下一步：真实写入/还原时去掉 -Json/-PassThru，或先运行 -PlanOnly -Json。"
     }
 }
 
@@ -2239,7 +2357,9 @@ if ($PSBoundParameters.ContainsKey('InstallEntrypoint')) {
 }
 
 if ($PrepareGuestPayload) {
-    Write-InstallInfo '中文提示：-PrepareGuestPayload 属于 CreateOrPreparePath 安装入口；将按创建/准备路径模式执行。 / PrepareGuestPayload routes through CreateOrPreparePath.'
+    if (-not $Json) {
+        Write-InstallInfo '中文提示：-PrepareGuestPayload 属于 CreateOrPreparePath 安装入口；将按创建/准备路径模式执行。 / PrepareGuestPayload routes through CreateOrPreparePath.'
+    }
     Invoke-InstallEntrypoint -SelectedEntrypoint 'CreateOrPreparePath'
     return
 }

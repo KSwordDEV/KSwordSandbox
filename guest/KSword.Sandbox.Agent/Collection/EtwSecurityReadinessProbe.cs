@@ -52,8 +52,10 @@ internal sealed class EtwSecurityReadinessProbe : IGuestProbe
             "token,privilege",
             "Microsoft-Windows-Security-Auditing",
             "4672,4673,4674,4696,4703,4704,4705,4717,4718",
+            "SecurityEventLogProbe",
             "Security audit rows; bounded collection is handled by SecurityEventLogProbe when log access and audit policy allow it.",
             "R0 callbacks can see process/file/registry/network activity but do not reliably explain token assignment, AdjustTokenPrivileges-style state, or user-right policy changes.",
+            "readiness rows are nonbehavior; only strongly sample-correlated security.* rows may be behavior candidates",
             "Security 日志可补足令牌和权限语义，但 readiness 行本身不是样本行为；只有强 PID/路径关联的实际 security.* 行才可能计数。"),
         new(
             "process-access",
@@ -61,8 +63,10 @@ internal sealed class EtwSecurityReadinessProbe : IGuestProbe
             "process-access,handle",
             "Microsoft-Windows-Security-Auditing; Microsoft-Windows-Threat-Intelligence",
             "4656,4663,4690",
+            "SecurityEventLogProbe; optional-provider-readiness",
             "Security Handle Manipulation auditing plus target process SACL; optional TI provider manifest readiness for richer process access semantics.",
             "R0 v1 does not directly report every OpenProcess/DuplicateHandle/VM access right against another process.",
+            "readiness rows are nonbehavior; actual 4656/4663/4690 rows require ObjectType=Process plus strong sample correlation before behaviorCounted=true",
             "进程句柄访问依赖 Security 审核策略和对象 SACL；本 readiness 只说明兜底面，不代表样本已经访问其它进程。"),
         new(
             "thread-lifecycle",
@@ -70,8 +74,10 @@ internal sealed class EtwSecurityReadinessProbe : IGuestProbe
             "thread,remote-thread",
             "Microsoft-Windows-Kernel-Process; Microsoft-Windows-Threat-Intelligence",
             "Kernel-Process ThreadStart/ThreadStop (typical manifest IDs 3/4; version-dependent); TI remote-thread events when present.",
+            "provider-manifest-readiness-only",
             "Provider manifest readiness only; live ETW trace/session is intentionally disabled.",
             "R0 v1 process callbacks do not provide complete per-thread lifecycle or remote-thread injection context.",
+            "readiness rows are nonbehavior; this agent does not subscribe to live thread ETW",
             "线程就绪度只记录 provider/事件族可见性；未开启长时间 ETW trace，因此不会产生线程行为证据。"),
         new(
             "module-load",
@@ -79,8 +85,10 @@ internal sealed class EtwSecurityReadinessProbe : IGuestProbe
             "module,image-load,dll",
             "Microsoft-Windows-Kernel-Process",
             "Kernel-Process ImageLoad/ImageUnload (typical manifest IDs 5/6; version-dependent).",
+            "provider-manifest-readiness-only",
             "Provider manifest readiness only; no image-load ETW subscription is started.",
             "R0 image callbacks may not be available or complete for all module ownership/reporting scenarios.",
+            "readiness rows are nonbehavior; this agent does not subscribe to live image-load ETW",
             "模块加载 readiness 仅说明 ETW 兜底面存在与否；它不是 DLL 加载行为证据。"),
         new(
             "process-lifecycle",
@@ -88,8 +96,10 @@ internal sealed class EtwSecurityReadinessProbe : IGuestProbe
             "process,lifecycle",
             "Microsoft-Windows-Security-Auditing; Microsoft-Windows-Kernel-Process",
             "Security 4688/4689; Kernel-Process ProcessStart/ProcessStop (typical manifest IDs 1/2; version-dependent).",
+            "SecurityEventLogProbe; provider-manifest-readiness-only",
             "SecurityEventLogProbe can read bounded Security rows; Kernel-Process is manifest-readiness only in this agent.",
             "Short-lived processes can be missed by low-rate snapshots, and R0 availability may be degraded.",
+            "readiness rows are nonbehavior; actual process.* or strongly correlated security.* rows carry behavior evidence",
             "进程生命周期 readiness 用于解释 Security/ETW 兜底面；最终行为仍以实际 process.*、driver.* 或强关联 security.* 事件为准。")
     ];
 
@@ -204,11 +214,19 @@ internal sealed class EtwSecurityReadinessProbe : IGuestProbe
 
         evt.Data["collectorMode"] = "etw-provider-manifest-readiness-only";
         evt.Data["readinessKind"] = "etw-security-r0-gap-map";
+        evt.Data["fallbackMatrixVersion"] = "etw-security-fallback-matrix-v2";
+        evt.Data["fallbackMatrixOwner"] = "guest-agent";
+        evt.Data["fallbackOwner"] = "EtwSecurityReadinessProbe; SecurityEventLogProbe";
+        evt.Data["behaviorBoundary"] = "readiness rows are collection-health/nonbehavior only; actual Security rows become behavior candidates only after strong sample PID/path correlation";
         evt.Data["r0CoverageGap"] = "token/privilege/process-access/thread/module semantics are not reliably available from the R0 callback stream in v1.";
         evt.Data["targetedSemanticGaps"] = "token; privilege; process-access; process-lifecycle; thread; remote-thread; module-load";
         evt.Data["surfaceCount"] = SurfaceExpectations.Length.ToString(CultureInfo.InvariantCulture);
         evt.Data["surfaceKeys"] = JoinDistinct(SurfaceExpectations.Select(static item => item.Key));
         evt.Data["surfaceNames"] = JoinDistinct(SurfaceExpectations.Select(static item => item.Name));
+        evt.Data["surfaceEventIdMaps"] = JoinDistinct(SurfaceExpectations.Select(static item => $"{item.Key}={item.EventIdMap}"));
+        evt.Data["surfaceFallbackOwners"] = JoinDistinct(SurfaceExpectations.Select(static item => $"{item.Key}={item.FallbackOwner}"));
+        evt.Data["surfaceR0CoverageGaps"] = JoinDistinct(SurfaceExpectations.Select(static item => $"{item.Key}={item.R0CoverageGap}"));
+        evt.Data["surfaceBehaviorBoundaries"] = JoinDistinct(SurfaceExpectations.Select(static item => $"{item.Key}={item.BehaviorBoundary}"));
         evt.Data["providerCount"] = providerResults.Count.ToString(CultureInfo.InvariantCulture);
         evt.Data["providerNames"] = JoinDistinct(providerResults.Select(static item => item.Provider.ProviderName));
         evt.Data["providerManifestStatuses"] = JoinDistinct(providerResults.Select(static item => $"{item.Provider.ProviderName}={item.Status}"));
@@ -309,8 +327,13 @@ internal sealed class EtwSecurityReadinessProbe : IGuestProbe
         evt.Data["providerNames"] = surface.ProviderNames;
         evt.Data["providerManifestStatuses"] = JoinDistinct(providerStatuses);
         evt.Data["eventIdMap"] = surface.EventIdMap;
+        evt.Data["securityEventIds"] = ExtractSecurityEventIds(surface.EventIdMap);
+        evt.Data["kernelProcessEventFamilies"] = ExtractKernelProcessEventFamilies(surface.EventIdMap);
+        evt.Data["fallbackOwner"] = surface.FallbackOwner;
         evt.Data["boundedCollectionSurface"] = surface.BoundedCollectionSurface;
         evt.Data["r0CoverageGap"] = surface.R0CoverageGap;
+        evt.Data["behaviorBoundary"] = surface.BehaviorBoundary;
+        evt.Data["fallbackMatrixVersion"] = "etw-security-fallback-matrix-v2";
         evt.Data["etwLiveCaptureEnabled"] = "false";
         evt.Data["etwSessionStarted"] = "false";
         evt.Data["sampleBehaviorCandidateReason"] = "surface-readiness-only-not-behavior";
@@ -428,6 +451,64 @@ internal sealed class EtwSecurityReadinessProbe : IGuestProbe
                 .Distinct(StringComparer.OrdinalIgnoreCase));
     }
 
+    private static string ExtractSecurityEventIds(string eventIdMap)
+    {
+        var ids = new List<string>();
+        var current = new System.Text.StringBuilder();
+        foreach (var ch in eventIdMap)
+        {
+            if (char.IsAsciiDigit(ch))
+            {
+                current.Append(ch);
+                continue;
+            }
+
+            AddSecurityEventId(ids, current);
+        }
+
+        AddSecurityEventId(ids, current);
+        return JoinDistinct(ids);
+    }
+
+    private static void AddSecurityEventId(List<string> ids, System.Text.StringBuilder current)
+    {
+        if (current.Length == 0)
+        {
+            return;
+        }
+
+        var value = current.ToString();
+        current.Clear();
+        if (value.Length == 4)
+        {
+            ids.Add(value);
+        }
+    }
+
+    private static string ExtractKernelProcessEventFamilies(string eventIdMap)
+    {
+        var families = new List<string>();
+        if (eventIdMap.Contains("ProcessStart", StringComparison.OrdinalIgnoreCase) ||
+            eventIdMap.Contains("ProcessStop", StringComparison.OrdinalIgnoreCase))
+        {
+            families.Add("ProcessStart/ProcessStop");
+        }
+
+        if (eventIdMap.Contains("ThreadStart", StringComparison.OrdinalIgnoreCase) ||
+            eventIdMap.Contains("ThreadStop", StringComparison.OrdinalIgnoreCase))
+        {
+            families.Add("ThreadStart/ThreadStop");
+        }
+
+        if (eventIdMap.Contains("ImageLoad", StringComparison.OrdinalIgnoreCase) ||
+            eventIdMap.Contains("ImageUnload", StringComparison.OrdinalIgnoreCase))
+        {
+            families.Add("ImageLoad/ImageUnload");
+        }
+
+        return JoinDistinct(families);
+    }
+
     private static void AddIfNotEmpty(Dictionary<string, string> data, string key, string? value)
     {
         if (!string.IsNullOrWhiteSpace(value))
@@ -489,8 +570,10 @@ internal sealed class EtwSecurityReadinessProbe : IGuestProbe
         string SemanticTags,
         string ProviderNames,
         string EventIdMap,
+        string FallbackOwner,
         string BoundedCollectionSurface,
         string R0CoverageGap,
+        string BehaviorBoundary,
         string ZhHint);
 
     private sealed record EtwProviderManifestResult(

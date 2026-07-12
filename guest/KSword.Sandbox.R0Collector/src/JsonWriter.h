@@ -104,6 +104,9 @@ inline void AddR0PrivilegeProcessAccessCoverageFields(
     data.AddUtf8(
         "tokenPrivilegeAdjustmentEtwFallbackReason",
         tokenPrivilegeTelemetryAvailable ? "none" : "not-implemented-no-token-privilege-producer");
+    data.AddUtf8(
+        "tokenPrivilegeAdjustmentFallbackOwner",
+        tokenPrivilegeTelemetryAvailable ? "none" : "etw-security-audit-or-kernel-token-provider");
     data.AddBool("r0ProcessHandleAccessTelemetryAvailable", processHandleAccessTelemetryAvailable);
     data.AddBool("r0ProcessHandleRightsTelemetryAvailable", processHandleAccessTelemetryAvailable);
     data.AddBool("r0ProcessHandleRequestedAccessAvailable", processHandleAccessTelemetryAvailable);
@@ -129,6 +132,29 @@ inline void AddR0PrivilegeProcessAccessCoverageFields(
     data.AddUtf8(
         "handleAccessEtwFallbackReason",
         processHandleAccessTelemetryAvailable ? "none" : "not-implemented-no-obcallback-handle-access-producer");
+    data.AddUtf8(
+        "processHandleAccessFallbackOwner",
+        processHandleAccessTelemetryAvailable ? "none" : "etw-object-access-or-kernel-obhandle-provider");
+    data.AddBool("r0ThreadHandleAccessTelemetryAvailable", processHandleAccessTelemetryAvailable);
+    data.AddBool("threadHandleAccessR0Direct", processHandleAccessTelemetryAvailable);
+    data.AddBool("threadHandleAccessEtwFallbackRequired", !processHandleAccessTelemetryAvailable);
+    data.AddUtf8(
+        "threadHandleAccessObservation",
+        processHandleAccessTelemetryAvailable ? "r0-direct-draft" : "etw-fallback-required");
+    data.AddUtf8(
+        "threadHandleAccessObservationSource",
+        processHandleAccessTelemetryAvailable
+            ? kR0ProcessHandleAccessTelemetrySourceDraft
+            : "etw-object-access-or-kernel-obhandle-provider");
+    data.AddUtf8(
+        "threadHandleAccessFallbackOwner",
+        processHandleAccessTelemetryAvailable ? "none" : "etw-object-access-or-kernel-obhandle-provider");
+    data.AddBool("threadLifecycleR0Direct", false);
+    data.AddBool("threadLifecycleFallbackRequired", true);
+    data.AddUtf8("threadLifecycleFallbackOwner", "etw-kernel-thread-or-guest-api-trace");
+    data.AddBool("remoteThreadCreationR0Direct", false);
+    data.AddBool("remoteThreadCreationFallbackRequired", true);
+    data.AddUtf8("remoteThreadCreationFallbackOwner", "etw-kernel-thread-or-guest-api-trace");
     data.AddUtf8("r0ProcessPrivilegeCoveragePolicy", kR0ProcessPrivilegeCoveragePolicy);
     data.AddUtf8("r0PrivilegeTelemetryFieldSet", kR0PrivilegeTelemetryFieldSet);
 }
@@ -175,6 +201,32 @@ inline void AddR0EtwCapabilityContractFields(
     classifyScope(processHandleAccessTelemetryAvailable, "handleAccess");
     classifyScope(tokenPrivilegeTelemetryAvailable, "tokenPrivilegeAdjustment");
 
+    std::string gapCategories;
+    const auto appendGap = [](std::string& gaps, const char* name) {
+        if (!gaps.empty()) {
+            gaps += "|";
+        }
+        gaps += name;
+    };
+    if (!processHandleAccessTelemetryAvailable) {
+        appendGap(gapCategories, "process.handleAccess");
+    }
+    if (!tokenPrivilegeTelemetryAvailable) {
+        appendGap(gapCategories, "token.privilegeAdjustment");
+    }
+    appendGap(gapCategories, "thread.lifecycle");
+    appendGap(gapCategories, "thread.remoteCreation");
+    appendGap(gapCategories, "token.objectHandles");
+    appendGap(gapCategories, "service.control");
+    appendGap(gapCategories, "driver.serviceLoadSemantics");
+    appendGap(gapCategories, "network.rawPacketPayload");
+    appendGap(gapCategories, "network.dnsPayload");
+    appendGap(gapCategories, "network.httpPayload");
+    appendGap(gapCategories, "network.tlsPayload");
+    appendGap(gapCategories, "file.contentBytesAndHash");
+    appendGap(gapCategories, "registry.valueDataBytes");
+    appendGap(gapCategories, "userModeCallStack");
+
     data.AddUnsigned("r0EtwCapabilityContractVersion", 1);
     data.AddUtf8("r0EtwCapabilityContractSource", contractSource);
     data.AddUtf8("r0EtwCapabilityContractEvidence", evidenceSource);
@@ -182,6 +234,26 @@ inline void AddR0EtwCapabilityContractFields(
     data.AddUtf8("r0DirectObservationScope", directScope.empty() ? "none" : directScope);
     data.AddUtf8("etwFallbackRequiredScope", fallbackScope.empty() ? "none" : fallbackScope);
     data.AddBool("etwFallbackRequiredForR0Gaps", !fallbackScope.empty());
+    data.AddUtf8("r0FallbackRequiredCategories", gapCategories.empty() ? "none" : gapCategories);
+    data.AddUtf8(
+        "r0FallbackOwners",
+        "process.handleAccess=ETW/object-access;"
+        "thread.lifecycle=ETW/kernel-thread-or-Guest/API-trace;"
+        "thread.remoteCreation=ETW/kernel-thread-or-Guest/API-trace;"
+        "token.privilegeAdjustment=ETW/security-audit;"
+        "token.objectHandles=ETW/object-access;"
+        "service.control=Guest/SCM-or-ETW;"
+        "driver.serviceLoadSemantics=Guest/SCM-or-ETW;"
+        "network.rawPacketPayload=PCAP/sidecar;"
+        "network.dnsPayload=PCAP/DNS-sidecar;"
+        "network.httpPayload=PCAP/HTTP-sidecar-or-browser;"
+        "network.tlsPayload=PCAP/TLS-sidecar;"
+        "file.contentBytesAndHash=Guest/artifact-hashing;"
+        "registry.valueDataBytes=Guest/registry-snapshot-or-ETW;"
+        "userModeCallStack=ETW-or-Guest-instrumentation");
+    data.AddUtf8(
+        "r0ReadinessGapInterpretation",
+        "coverage-gap-and-readiness-evidence-not-sample-verdict");
     data.AddUtf8(
         "r0EtwFallbackPolicy",
         "R0 emits advertised direct producer lanes; ETW fallback owns missing, disabled, or unimplemented lanes including handle access and token privilege adjustment unless draft R0 capability bits are advertised");
@@ -202,8 +274,17 @@ inline void AddR0EtwCapabilityContractFields(
 
     addDirectLane("processCreateExit", processCreateExitR0Direct, "ps-process-create-notify");
     addDirectLane("imageLoad", imageLoadR0Direct, "ps-image-load-notify");
+    data.AddBool("driverImageLoadMetadataR0Direct", imageLoadR0Direct);
+    data.AddBool("driverServiceLoadSemanticsR0Direct", false);
+    data.AddUtf8("driverServiceLoadFallbackOwner", "guest-service-control-manager-or-etw");
     addDirectLane("fileActivity", fileActivityR0Direct, "fltmgr-minifilter");
+    data.AddBool("fileContentHashR0Direct", false);
+    data.AddUtf8("fileContentHashFallbackOwner", "guest-artifact-hashing");
     addDirectLane("registryActivity", registryActivityR0Direct, "cm-registry-callback");
+    data.AddBool("registryValueDataBytesR0Direct", false);
+    data.AddUtf8("registryValueDataBytesFallbackOwner", "guest-registry-snapshot-or-etw");
+    data.AddBool("serviceControlR0Direct", false);
+    data.AddUtf8("serviceControlFallbackOwner", "guest-service-control-manager-or-etw");
     addDirectLane("networkActivity", networkActivityR0Direct, "wfp-ale-inspect-only");
     data.AddUtf8(
         "networkActivityR0Scope",
@@ -211,6 +292,12 @@ inline void AddR0EtwCapabilityContractFields(
     data.AddBool("networkProtocolPayloadR0Direct", false);
     data.AddBool("networkProtocolPayloadFallbackRequired", true);
     data.AddUtf8("networkProtocolPayloadFallbackOwner", "pcap-sidecar-or-etw");
+    data.AddBool("dnsPayloadR0Direct", false);
+    data.AddUtf8("dnsPayloadFallbackOwner", "pcap-dns-or-sidecar");
+    data.AddBool("httpPayloadR0Direct", false);
+    data.AddUtf8("httpPayloadFallbackOwner", "pcap-http-browser-or-sidecar");
+    data.AddBool("tlsPayloadR0Direct", false);
+    data.AddUtf8("tlsPayloadFallbackOwner", "pcap-tls-or-sidecar");
 
     AddR0PrivilegeProcessAccessCoverageFields(
         data,

@@ -161,6 +161,7 @@ a known gap:
   `r0CoverageProducerMaskNames`
 - `r0CoverageAvailableCategories`
 - `r0CoverageKnownGaps`
+- `r0CoverageFallbackOwners`
 - `r0CoverageGapAcknowledged`
 - `r0CoverageInterpretation=defensive-coverage-evidence-not-verdict`
 - `r0ReadinessContribution`
@@ -170,20 +171,35 @@ Category interpretation:
 
 - `driver.load`: typed DriverEntry heartbeat/readiness evidence.
 - `process.lifecycle`: process create/exit metadata; it does **not** imply
-  handle requested/granted access or token privilege adjustment telemetry.
+  handle requested/granted access, thread lifecycle, remote-thread creation,
+  token object handles, or token privilege adjustment telemetry.
 - `image.load`: image/module load metadata with bounded path prefix.
+  Kernel/driver-image loads are image metadata only; service-control/SCM
+  semantics for arbitrary driver loads remain Guest/ETW evidence.
 - `file.activity`: minifilter file operation metadata with bounded path prefix;
   content bytes and hashes are guest/artifact evidence.
 - `registry.activity`: callback key/value metadata; v1 does not carry value
-  data bytes.
+  data bytes. Service key writes are configuration metadata, not proof that SCM
+  created, started, or loaded a service/driver.
 - `network.metadata`: WFP/ALE endpoint metadata only; raw packets and
   DNS/HTTP/TLS payload details require PCAP/sidecar/ETW correlation.
 - `queue.loss.backpressure`: GET_STATUS, READ_EVENTS, per-record counters,
   sequence gaps, producer masks, and high-watermark diagnostics.
 
 中文：这些字段是 readiness/report coverage 证据，不是 verdict。报告应把
-`r0CoverageKnownGaps` 显示为“需要 fallback/关联”的缺口，而不是从相邻的进程、
-文件、注册表或网络元数据中推断未采集到的行为。
+`r0CoverageKnownGaps` 和 `r0CoverageFallbackOwners` 显示为“需要 fallback/关联”的缺口，
+而不是从相邻的进程、文件、注册表或网络元数据中推断未采集到的行为。
+
+Current explicit fallback lanes include `thread.lifecycle`,
+`thread.remoteCreation`, `process.handleAccess` when no draft row/capability is
+advertised, `token.privilegeAdjustment`, `token.objectHandles`,
+`service.control`, `driver.serviceLoadSemantics`,
+`network.rawPacketPayload`, `network.dnsHttpTlsPayload`,
+`file.contentBytesAndHash`, `registry.valueDataBytes`, and
+`userModeCallStack`.  Their owners are documented in
+`r0CoverageFallbackOwners` / `r0FallbackOwners`: ETW/security/object/thread
+providers, Guest service/artifact/registry collection, and PCAP/protocol
+sidecars as appropriate.
 
 Common `data` fields include `ioctl`, `batchIndex`, `recordOffset`, `version`,
 `versionHex`, `recordSize`, `driverEventType`, `driverEventTypeName`, `flags`,
@@ -297,7 +313,8 @@ Negotiation and queue rows must preserve these event-quality keys:
   `r0CoverageFieldSet`, `r0CoverageCategory`, `r0CoverageEvidenceSource`,
   `r0CoverageProducerMaskScope`, `r0CoverageProducerMaskHex`,
   `r0CoverageProducerMaskNames`, `r0CoverageAvailableCategories`,
-  `r0CoverageKnownGaps`, `r0CoverageGapAcknowledged`,
+  `r0CoverageKnownGaps`, `r0CoverageFallbackOwners`,
+  `r0CoverageGapAcknowledged`,
   `r0CoverageInterpretation`, and `r0ReadinessContribution`.
 - `r0collector.driverCapabilities.data`: `version`, `versionHex`, `size`,
   `abiVersionMajor`, `abiVersionMinor`, `capabilityFlagsHex`,
@@ -323,7 +340,13 @@ Negotiation and queue rows must preserve these event-quality keys:
   `registryActivityR0Direct`, `networkActivityR0Direct`,
   `handleAccessR0Direct`, `handleAccessEtwFallbackRequired`,
   `tokenPrivilegeAdjustmentR0Direct`, and
-  `tokenPrivilegeAdjustmentEtwFallbackRequired`, plus non-behavior hints
+  `tokenPrivilegeAdjustmentEtwFallbackRequired`, plus expanded gap/fallback
+  fields such as `r0FallbackRequiredCategories`, `r0FallbackOwners`,
+  `threadLifecycleR0Direct`, `remoteThreadCreationR0Direct`,
+  `serviceControlR0Direct`, `driverServiceLoadSemanticsR0Direct`,
+  `fileContentHashR0Direct`, `registryValueDataBytesR0Direct`,
+  `dnsPayloadR0Direct`, `httpPayloadR0Direct`, and `tlsPayloadR0Direct`.
+  These are readiness/coverage labels, not verdicts. Non-behavior hints
   `behaviorCounted=false`, `nonbehavior=true`, `noisePolicy`,
   `producerHint`, `producerProcessHint`, `selfProcessHint`, and zh hints so
   hosts do not count ABI/capability negotiation as sample behavior.

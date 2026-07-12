@@ -114,27 +114,63 @@ internal sealed class SecurityEventLogProbe : IGuestProbe
         new(
             "process-handle-access",
             "Process handle/object access",
+            "process-access,handle,duplicate-handle",
             "4656,4663,4690",
             "Microsoft-Windows-Security-Auditing",
+            "SecurityEventLogProbe",
+            "R0 v1 does not directly report every OpenProcess/DuplicateHandle/PROCESS_VM_* access right against another process.",
+            "readiness rows are nonbehavior; actual 4656/4663/4690 rows are behavior candidates only with ObjectType=Process and strong sample PID/path correlation",
             "Handle Manipulation success auditing plus a process object SACL are normally required; useful for PROCESS_VM_*, DUP_HANDLE, and DuplicateHandle gaps."),
         new(
             "privilege-use",
             "Privilege use/logon privileges",
+            "privilege,token",
             "4672,4673,4674",
             "Microsoft-Windows-Security-Auditing",
+            "SecurityEventLogProbe",
+            "R0 callbacks do not reliably explain Se*Privilege assignment/use or privileged service/object operations.",
+            "readiness rows are nonbehavior; actual privilege rows require strong sample PID/path correlation before behaviorCounted=true",
             "Special Logon and Sensitive Privilege Use success auditing explain Se*Privilege context not decoded by R0 callbacks."),
         new(
             "token-adjustment",
             "Token assignment/right adjustment",
+            "token,privilege,user-right",
             "4696,4703,4704,4705,4717,4718",
             "Microsoft-Windows-Security-Auditing",
+            "SecurityEventLogProbe",
+            "R0 callbacks do not directly explain primary-token assignment, AdjustTokenPrivileges-style changes, or local user-right policy changes.",
+            "readiness rows are nonbehavior; actual token/right rows require strong sample PID/path correlation before behaviorCounted=true",
             "Authorization Policy Change and related Security events provide low-rate token/right mutation context."),
         new(
             "process-create-exit",
             "Process create/exit",
+            "process,lifecycle",
             "4688,4689; Kernel-Process start/stop",
             "Microsoft-Windows-Security-Auditing; Microsoft-Windows-Kernel-Process",
+            "SecurityEventLogProbe; provider-manifest-readiness-only",
+            "Short-lived processes can be missed by snapshots and R0 availability may be degraded; Security 4688/4689 can add command line/token context.",
+            "readiness rows are nonbehavior; actual process.* or strongly correlated security.* rows carry behavior evidence",
             "Security events add command line/token elevation when audit policy is enabled; Kernel-Process ETW provider presence is an alternate live-capture surface."),
+        new(
+            "thread-remote-thread",
+            "Thread lifecycle and remote-thread readiness",
+            "thread,remote-thread",
+            "Kernel-Process ThreadStart/ThreadStop; Threat-Intelligence remote-thread events when present",
+            "Microsoft-Windows-Kernel-Process; Microsoft-Windows-Threat-Intelligence",
+            "provider-manifest-readiness-only",
+            "R0 v1 process callbacks do not provide complete per-thread lifecycle or remote-thread injection context.",
+            "readiness rows are nonbehavior; SecurityEventLogProbe does not start live thread ETW",
+            "Provider presence only; this collector does not subscribe to live Kernel-Process or TI thread events."),
+        new(
+            "module-load",
+            "Module image load/unload readiness",
+            "module,image-load,dll",
+            "Kernel-Process ImageLoad/ImageUnload",
+            "Microsoft-Windows-Kernel-Process",
+            "provider-manifest-readiness-only",
+            "R0 image callbacks may be unavailable or incomplete for all module ownership/reporting scenarios.",
+            "readiness rows are nonbehavior; SecurityEventLogProbe does not start live image-load ETW",
+            "Provider presence only; this collector does not subscribe to live Kernel-Process image events."),
     ];
 
     private static readonly Regex PrivilegeNameRegex = new(
@@ -623,7 +659,11 @@ internal sealed class SecurityEventLogProbe : IGuestProbe
             ["collectionName"] = CollectionName,
             ["evidenceRole"] = EvidenceRole,
             ["eventOrigin"] = "windows-security-auditing",
-            ["r0CoverageGap"] = "privilege/security audit events are supplied by Windows Security auditing rather than R0 callbacks",
+            ["securityFallbackSurfaceKey"] = SecurityFallbackSurfaceKey(rawEvent.EventId),
+            ["fallbackSurfaceKey"] = SecurityFallbackSurfaceKey(rawEvent.EventId),
+            ["fallbackOwner"] = "SecurityEventLogProbe",
+            ["r0CoverageGap"] = SecurityEventR0CoverageGap(rawEvent.EventId),
+            ["behaviorBoundary"] = "actual Security Event Log rows are behavior candidates only when strongly correlated to the sample by PID/path; uncorrelated/session-only rows remain nonbehavior context",
             ["auditDependency"] = "Requires Security log access and relevant Windows audit policy; absence is not fatal.",
             ["behaviorCounted"] = correlation.IsStrongSampleCorrelation.ToString(CultureInfo.InvariantCulture).ToLowerInvariant(),
             ["sampleBehaviorCandidate"] = correlation.IsStrongSampleCorrelation.ToString(CultureInfo.InvariantCulture).ToLowerInvariant(),
@@ -707,6 +747,7 @@ internal sealed class SecurityEventLogProbe : IGuestProbe
         AddIfNotEmpty(data, "disabledPrivilegeList", Field(rawEvent.EventData, "DisabledPrivilegeList"));
         AddPrivilegeAliases(data, rawEvent);
         AddObjectAccessAliases(data, rawEvent);
+        AddTokenProcessPrivilegeAliases(data, rawEvent);
         AddIfNotEmpty(data, "serviceName", Field(rawEvent.EventData, "ServiceName"));
         AddIfNotEmpty(data, "serviceFileName", Field(rawEvent.EventData, "ServiceFileName"));
         AddIfNotEmpty(data, "taskName", Field(rawEvent.EventData, "TaskName"));
@@ -761,6 +802,120 @@ internal sealed class SecurityEventLogProbe : IGuestProbe
             data["operation"] = TokenPrivilegeOperation(enabledPrivileges.Count > 0, disabledPrivileges.Count > 0);
             data["tokenPrivilegeAdjustment"] = "true";
             data["tokenPrivilegeAdjustmentSource"] = "windows-security-event-4703";
+        }
+    }
+
+    /// <summary>
+    /// Adds event-specific aliases for Security IDs whose EventData names vary
+    /// across Windows versions. These fields are optimized for rules/reports:
+    /// actor process, target process, token user/logon, privilege use, and
+    /// DuplicateHandle relationships remain available under stable keys while
+    /// the original eventData.* keys are still preserved.
+    /// </summary>
+    private static void AddTokenProcessPrivilegeAliases(Dictionary<string, string> data, RawSecurityEvent rawEvent)
+    {
+        var actorProcessId = FirstNonEmpty(
+            Field(rawEvent.EventData, "ProcessId"),
+            Field(rawEvent.EventData, "SourceProcessId"),
+            Field(rawEvent.EventData, "ClientProcessId"));
+        var actorProcessName = FirstNonEmpty(
+            Field(rawEvent.EventData, "ProcessName"),
+            Field(rawEvent.EventData, "Application"),
+            Field(rawEvent.EventData, "CallerProcessName"));
+        var targetProcessId = FirstNonEmpty(
+            Field(rawEvent.EventData, "TargetProcessId"),
+            Field(rawEvent.EventData, "NewProcessId"));
+        var targetProcessName = FirstNonEmpty(
+            Field(rawEvent.EventData, "TargetProcessName"),
+            Field(rawEvent.EventData, "NewProcessName"),
+            Field(rawEvent.EventData, "ProcessName"),
+            Field(rawEvent.EventData, "ObjectName"));
+        var sourceProcessId = Field(rawEvent.EventData, "SourceProcessId");
+        var sourceProcessName = FirstNonEmpty(
+            Field(rawEvent.EventData, "SourceProcessName"),
+            Field(rawEvent.EventData, "ProcessName"));
+        var targetUser = FirstNonEmpty(
+            Field(rawEvent.EventData, "TargetUserName"),
+            Field(rawEvent.EventData, "TargetAccountName"));
+        var targetDomain = FirstNonEmpty(
+            Field(rawEvent.EventData, "TargetDomainName"),
+            Field(rawEvent.EventData, "TargetAccountDomain"));
+
+        AddIfNotEmpty(data, "actorProcessId", actorProcessId);
+        AddIfNotEmpty(data, "actorProcessName", SafeFileName(actorProcessName));
+        AddIfNotEmpty(data, "actorImagePath", actorProcessName);
+        AddIfNotEmpty(data, "callerProcessId", actorProcessId);
+        AddIfNotEmpty(data, "callerProcessName", SafeFileName(actorProcessName));
+        AddIfNotEmpty(data, "callerImagePath", actorProcessName);
+        AddIfNotEmpty(data, "targetProcessId", targetProcessId);
+        AddIfNotEmpty(data, "targetProcessName", SafeFileName(targetProcessName));
+        AddIfNotEmpty(data, "targetImagePath", targetProcessName);
+        AddIfNotEmpty(data, "targetImage", targetProcessName);
+        AddIfNotEmpty(data, "targetAccount", JoinAccount(targetDomain, targetUser));
+
+        if (rawEvent.EventId == 4690)
+        {
+            AddIfNotEmpty(data, "sourceProcessId", sourceProcessId);
+            AddIfNotEmpty(data, "sourceProcessName", SafeFileName(sourceProcessName));
+            AddIfNotEmpty(data, "sourceImagePath", sourceProcessName);
+            AddIfNotEmpty(data, "sourceHandleId", Field(rawEvent.EventData, "SourceHandleId"));
+            AddIfNotEmpty(data, "duplicatedSourceHandleId", Field(rawEvent.EventData, "SourceHandleId"));
+            AddIfNotEmpty(data, "duplicatedTargetHandleId", FirstNonEmpty(
+                Field(rawEvent.EventData, "TargetHandleId"),
+                Field(rawEvent.EventData, "NewHandleId")));
+            AddIfNotEmpty(data, "duplicatedSourceProcessId", sourceProcessId);
+            AddIfNotEmpty(data, "duplicatedTargetProcessId", targetProcessId);
+            data["api"] = "DuplicateHandle";
+            data["operation"] = AppendOperation(data, "DuplicateHandle; handle duplicated");
+            data["handleDuplicationTelemetry"] = "true";
+            data["handleDuplicationTelemetrySource"] = "windows-security-event-4690";
+        }
+        else if (rawEvent.EventId == 4696)
+        {
+            AddIfNotEmpty(data, "tokenTargetProcessId", targetProcessId);
+            AddIfNotEmpty(data, "tokenTargetProcessName", SafeFileName(targetProcessName));
+            AddIfNotEmpty(data, "tokenTargetImagePath", targetProcessName);
+            AddIfNotEmpty(data, "tokenSubjectUserSid", Field(rawEvent.EventData, "SubjectUserSid"));
+            AddIfNotEmpty(data, "tokenTargetUserSid", Field(rawEvent.EventData, "TargetUserSid"));
+            AddIfNotEmpty(data, "tokenTargetUserName", targetUser);
+            AddIfNotEmpty(data, "tokenTargetDomainName", targetDomain);
+            AddIfNotEmpty(data, "tokenTargetLogonId", Field(rawEvent.EventData, "TargetLogonId"));
+            AddIfNotEmpty(data, "assignedTokenUser", JoinAccount(targetDomain, targetUser));
+            data["tokenAssignment"] = "true";
+            data["tokenAssignmentSource"] = "windows-security-event-4696";
+            data["operation"] = AppendOperation(data, "primary token assigned to process");
+        }
+        else if (rawEvent.EventId == 4703)
+        {
+            AddIfNotEmpty(data, "tokenSubjectLogonId", Field(rawEvent.EventData, "SubjectLogonId"));
+            AddIfNotEmpty(data, "tokenTargetLogonId", Field(rawEvent.EventData, "TargetLogonId"));
+            AddIfNotEmpty(data, "tokenTargetUserSid", Field(rawEvent.EventData, "TargetUserSid"));
+            AddIfNotEmpty(data, "tokenTargetUserName", targetUser);
+            AddIfNotEmpty(data, "tokenTargetDomainName", targetDomain);
+            AddIfNotEmpty(data, "adjustedTokenUser", JoinAccount(targetDomain, targetUser));
+            data["tokenPrivilegeAdjustment"] = "true";
+            data["tokenPrivilegeAdjustmentSource"] = "windows-security-event-4703";
+        }
+        else if (rawEvent.EventId == 4673)
+        {
+            AddIfNotEmpty(data, "privilegedServiceName", FirstNonEmpty(
+                Field(rawEvent.EventData, "Service"),
+                Field(rawEvent.EventData, "ServiceName")));
+            AddIfNotEmpty(data, "privilegedServiceProcessId", actorProcessId);
+            AddIfNotEmpty(data, "privilegedServiceProcessName", SafeFileName(actorProcessName));
+            data["privilegeUseTelemetry"] = "true";
+            data["privilegeUseTelemetrySource"] = "windows-security-event-4673";
+            data["operation"] = AppendOperation(data, "privileged service called");
+        }
+        else if (rawEvent.EventId == 4674)
+        {
+            AddIfNotEmpty(data, "privilegedObjectServer", Field(rawEvent.EventData, "ObjectServer"));
+            AddIfNotEmpty(data, "privilegedObjectType", Field(rawEvent.EventData, "ObjectType"));
+            AddIfNotEmpty(data, "privilegedObjectName", Field(rawEvent.EventData, "ObjectName"));
+            AddIfNotEmpty(data, "privilegedObjectHandleId", Field(rawEvent.EventData, "HandleId"));
+            data["privilegedObjectOperationTelemetry"] = "true";
+            data["privilegedObjectOperationTelemetrySource"] = "windows-security-event-4674";
+            data["operation"] = AppendOperation(data, "privileged object operation attempted");
         }
     }
 
@@ -1204,14 +1359,27 @@ internal sealed class SecurityEventLogProbe : IGuestProbe
 
         var evt = CreateCollectionDiagnosticEvent("security_eventlog.fallback_surface.readiness", phase, context, "fallbackSurfaceReadiness");
         evt.Data["collectorMode"] = "security-etw-readiness-query";
-        evt.Data["r0CoverageGap"] = "Readiness map for process handle access, privilege use, token adjustment, and process create/exit semantics not always represented by R0 callback JSONL.";
+        evt.Data["fallbackMatrixVersion"] = "security-eventlog-fallback-matrix-v2";
+        evt.Data["fallbackMatrixOwner"] = "guest-agent";
+        evt.Data["fallbackOwner"] = "SecurityEventLogProbe; EtwSecurityReadinessProbe";
+        evt.Data["behaviorBoundary"] = "readiness rows are collection-health/nonbehavior only; actual Security rows become behavior candidates only after strong sample PID/path correlation";
+        evt.Data["r0CoverageGap"] = "Readiness map for process handle access/duplicate, privilege use, token adjustment, process lifecycle, thread/remote-thread, and module-load semantics not always represented by R0 callback JSONL.";
         evt.Data["fallbackSurfaceCount"] = FallbackSurfaceExpectations.Length.ToString(CultureInfo.InvariantCulture);
         evt.Data["fallbackSurfaceKeys"] = JoinDistinct(FallbackSurfaceExpectations.Select(static item => item.SurfaceKey));
         evt.Data["fallbackSurfaceNames"] = JoinDistinct(FallbackSurfaceExpectations.Select(static item => item.SurfaceName));
-        evt.Data["fallbackSecurityEventIds"] = JoinDistinct(FallbackSurfaceExpectations.Select(static item => item.SecurityEventIds));
+        evt.Data["fallbackSurfaceTags"] = JoinDistinct(FallbackSurfaceExpectations.Select(static item => $"{item.SurfaceKey}={item.SurfaceTags}"));
+        evt.Data["fallbackEventIdMaps"] = JoinDistinct(FallbackSurfaceExpectations.Select(static item => $"{item.SurfaceKey}={item.SecurityEventIds}"));
+        evt.Data["fallbackSecurityEventIds"] = ExtractSecurityEventIds(JoinDistinct(FallbackSurfaceExpectations.Select(static item => item.SecurityEventIds)));
+        evt.Data["fallbackSecurityEventIdsBySurface"] = JoinDistinct(FallbackSurfaceExpectations.Select(static item => $"{item.SurfaceKey}={ExtractSecurityEventIds(item.SecurityEventIds)}"));
+        evt.Data["fallbackKernelProcessEventFamilies"] = JoinDistinct(FallbackSurfaceExpectations.Select(static item => $"{item.SurfaceKey}={ExtractKernelProcessEventFamilies(item.SecurityEventIds)}"));
         evt.Data["fallbackProviders"] = JoinDistinct(FallbackSurfaceExpectations.Select(static item => item.ProviderSurface));
+        evt.Data["fallbackOwnersBySurface"] = JoinDistinct(FallbackSurfaceExpectations.Select(static item => $"{item.SurfaceKey}={item.FallbackOwner}"));
+        evt.Data["fallbackR0CoverageGaps"] = JoinDistinct(FallbackSurfaceExpectations.Select(static item => $"{item.SurfaceKey}={item.R0CoverageGap}"));
+        evt.Data["fallbackBehaviorBoundaries"] = JoinDistinct(FallbackSurfaceExpectations.Select(static item => $"{item.SurfaceKey}={item.BehaviorBoundary}"));
         evt.Data["fallbackSurfaceNotes"] = JoinDistinct(FallbackSurfaceExpectations.Select(static item => $"{item.SurfaceName}: {item.ReadinessNote}"));
         evt.Data["etwLiveCaptureEnabled"] = "false";
+        evt.Data["etwSessionStarted"] = "false";
+        evt.Data["etwTraceDurationMilliseconds"] = "0";
         evt.Data["etwLiveCaptureReason"] = "readiness-only probe; no trace session is started";
         evt.Data["manifestQueryTimeoutMilliseconds"] = ProviderManifestCommandTimeout.TotalMilliseconds.ToString("0", CultureInfo.InvariantCulture);
         evt.Data["securityProviderManifestStatus"] = ProviderManifestStatus(securityProviderResult);
@@ -1224,6 +1392,8 @@ internal sealed class SecurityEventLogProbe : IGuestProbe
         evt.Data["surface.privilegeUse"] = "Security 4672/4673/4674; requires Special Logon/Sensitive Privilege Use success auditing; emitted rows remain nonbehavior unless sample-correlated.";
         evt.Data["surface.tokenAdjustment"] = "Security 4696/4703/4704/4705/4717/4718; requires Authorization Policy Change or related policy auditing; emitted rows remain nonbehavior unless sample-correlated.";
         evt.Data["surface.processCreateExit"] = "Security 4688/4689 and Kernel-Process ETW provider metadata; current implementation reads Security log only and records ETW provider readiness.";
+        evt.Data["surface.threadRemoteThread"] = "Kernel-Process ThreadStart/ThreadStop and optional Threat-Intelligence remote-thread provider readiness only; no live ETW trace is started.";
+        evt.Data["surface.moduleLoad"] = "Kernel-Process ImageLoad/ImageUnload provider readiness only; no live image-load ETW trace is started.";
         evt.Data["sampleBehaviorCandidateReason"] = "readiness-only-fallback-surface-map";
         evt.Data["zhMessage"] = "已记录 Security/ETW 补充面就绪度，用于说明 R0 未完全覆盖的进程句柄、权限、令牌和进程生命周期语义可由哪些低风险通道补足。";
 
@@ -1457,6 +1627,38 @@ internal sealed class SecurityEventLogProbe : IGuestProbe
         };
     }
 
+    private static string SecurityFallbackSurfaceKey(int eventId)
+    {
+        return eventId switch
+        {
+            4656 or 4663 or 4690 => "process-handle-access",
+            4672 or 4673 or 4674 => "privilege-use",
+            4696 or 4703 or 4704 or 4705 or 4717 or 4718 => "token-adjustment",
+            4688 or 4689 => "process-create-exit",
+            4697 => "service-install",
+            >= 4698 and <= 4702 => "scheduled-task-change",
+            4719 => "audit-policy-change",
+            >= 4720 and <= 4739 => "account-group-change",
+            _ => "security-audit"
+        };
+    }
+
+    private static string SecurityEventR0CoverageGap(int eventId)
+    {
+        return eventId switch
+        {
+            4656 or 4663 or 4690 => "R0 v1 does not directly report every OpenProcess/DuplicateHandle/PROCESS_VM_* access right against another process.",
+            4672 or 4673 or 4674 => "R0 callbacks do not reliably explain Se*Privilege assignment/use or privileged service/object operations.",
+            4696 or 4703 or 4704 or 4705 or 4717 or 4718 => "R0 callbacks do not directly explain primary-token assignment, AdjustTokenPrivileges-style changes, or local user-right policy changes.",
+            4688 or 4689 => "Security process lifecycle rows can add command line, token, and short-lived process context when snapshots or R0 evidence are incomplete.",
+            4697 => "Service installation may require user-mode registry/service-control context beyond low-level R0 callbacks.",
+            >= 4698 and <= 4702 => "Scheduled task changes are Security/Object Access context rather than direct R0 callback semantics.",
+            4719 => "Audit-policy tampering affects telemetry readiness and is not represented as a direct R0 process/file/registry callback.",
+            >= 4720 and <= 4739 => "Account/group policy changes are Security audit context outside direct R0 callback coverage.",
+            _ => "Security audit events supply Windows policy/audit context beyond direct R0 callbacks."
+        };
+    }
+
     private static string EventName(int eventId)
     {
         return eventId switch
@@ -1625,6 +1827,65 @@ internal sealed class SecurityEventLogProbe : IGuestProbe
                 .Where(static value => !string.IsNullOrWhiteSpace(value))
                 .Select(static value => value.Trim())
                 .Distinct(StringComparer.OrdinalIgnoreCase));
+    }
+
+    private static string ExtractSecurityEventIds(string eventIdMap)
+    {
+        var ids = new List<string>();
+        var current = new System.Text.StringBuilder();
+        foreach (var ch in eventIdMap)
+        {
+            if (char.IsAsciiDigit(ch))
+            {
+                current.Append(ch);
+                continue;
+            }
+
+            AddSecurityEventId(ids, current);
+        }
+
+        AddSecurityEventId(ids, current);
+        return JoinDistinct(ids);
+    }
+
+    private static void AddSecurityEventId(List<string> ids, System.Text.StringBuilder current)
+    {
+        if (current.Length == 0)
+        {
+            return;
+        }
+
+        var value = current.ToString();
+        current.Clear();
+        if (value.Length == 4)
+        {
+            ids.Add(value);
+        }
+    }
+
+    private static string ExtractKernelProcessEventFamilies(string eventIdMap)
+    {
+        var families = new List<string>();
+        if (eventIdMap.Contains("ProcessStart", StringComparison.OrdinalIgnoreCase) ||
+            eventIdMap.Contains("ProcessStop", StringComparison.OrdinalIgnoreCase) ||
+            eventIdMap.Contains("start/stop", StringComparison.OrdinalIgnoreCase))
+        {
+            families.Add("ProcessStart/ProcessStop");
+        }
+
+        if (eventIdMap.Contains("ThreadStart", StringComparison.OrdinalIgnoreCase) ||
+            eventIdMap.Contains("ThreadStop", StringComparison.OrdinalIgnoreCase))
+        {
+            families.Add("ThreadStart/ThreadStop");
+        }
+
+        if (eventIdMap.Contains("ImageLoad", StringComparison.OrdinalIgnoreCase) ||
+            eventIdMap.Contains("ImageUnload", StringComparison.OrdinalIgnoreCase))
+        {
+            families.Add("ImageLoad/ImageUnload");
+        }
+
+        return JoinDistinct(families);
     }
 
     private static IReadOnlyList<AuditPolicyRow> ParseAuditPolicyRows(string csv)
@@ -1894,6 +2155,18 @@ internal sealed class SecurityEventLogProbe : IGuestProbe
         return string.Empty;
     }
 
+    private static string JoinAccount(string domainName, string userName)
+    {
+        if (string.IsNullOrWhiteSpace(userName))
+        {
+            return string.Empty;
+        }
+
+        return string.IsNullOrWhiteSpace(domainName)
+            ? userName.Trim()
+            : $@"{domainName.Trim()}\{userName.Trim()}";
+    }
+
     private static void AddIfNotEmpty(Dictionary<string, string> data, string key, string? value)
     {
         if (!string.IsNullOrWhiteSpace(value))
@@ -1961,8 +2234,12 @@ internal sealed class SecurityEventLogProbe : IGuestProbe
     private readonly record struct FallbackSurfaceExpectation(
         string SurfaceKey,
         string SurfaceName,
+        string SurfaceTags,
         string SecurityEventIds,
         string ProviderSurface,
+        string FallbackOwner,
+        string R0CoverageGap,
+        string BehaviorBoundary,
         string ReadinessNote);
 
     private readonly record struct AuditPolicyRow(
