@@ -1,6 +1,6 @@
 # R0 ABI review and next implementation plan
 
-Date: 2026-07-12 (current status note refreshed for local v22+ release-prep baseline `77298d6 / v22`)
+Date: 2026-07-12 (current status note refreshed for local v28 release-prep commit `dd33924`)
 
 中文优先维护说明：本文是历史实施计划，不是当前 ABI 的唯一事实来源。阅读时先以
 `docs/r0-driver-core.md`、`docs/r0-collector.md`、`docs/r0-jsonl-schema.md` 和各
@@ -40,9 +40,9 @@ Reviewed files:
 - `docs/ksword5-driver-reuse.md`
 
 
-## Current v22 status correction
+## Current v28 status correction
 
-As of the local v22+ release-prep batch (baseline `77298d6 / v22`), the project has moved beyond several items in this
+As of the local v28 release-prep commit (`dd33924`), the project has moved beyond several items in this
 historical plan:
 
 - The current ABI source of truth advertises v1 typed payloads for process,

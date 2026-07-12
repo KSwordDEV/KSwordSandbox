@@ -272,16 +272,33 @@ public sealed class RuleEngine
             return true;
         }
 
-        return rule.Tags.Any(tag =>
-            string.Equals(tag, "diagnostic", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(tag, "metadata", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(tag, "collection", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(tag, "collection-health", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(tag, "r0collector", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(tag, "driver-health", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(tag, "virustotal", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(tag, "reputation", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(tag, "enrichment", StringComparison.OrdinalIgnoreCase));
+        if (rule.Tags.Any(tag =>
+                string.Equals(tag, "virustotal", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(tag, "enrichment", StringComparison.OrdinalIgnoreCase)))
+        {
+            return true;
+        }
+
+        if (rule.Tags.Any(tag =>
+                string.Equals(tag, "r0collector", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(tag, "driver-health", StringComparison.OrdinalIgnoreCase)))
+        {
+            return true;
+        }
+
+        if (IsInfoOrLowSeverity(rule) &&
+            rule.Tags.Any(tag =>
+                string.Equals(tag, "diagnostic", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(tag, "metadata", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(tag, "collection", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(tag, "collection-health", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(tag, "artifact", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(tag, "reputation", StringComparison.OrdinalIgnoreCase)))
+        {
+            return true;
+        }
+
+        return false;
     }
 
     private static bool IsNonBehaviorOrSelfNoiseEvent(SandboxEvent evt)
@@ -296,6 +313,13 @@ public sealed class RuleEngine
                 "notBehavior",
                 "not_behavior",
                 "notSampleBehavior",
+                "not_sample_behavior",
+                "notBehaviorCandidate",
+                "not_behavior_candidate",
+                "reportOnly",
+                "report_only",
+                "metadataOnly",
+                "metadata_only",
                 "collectionHealth",
                 "collectorSelfNoise",
                 "collector_self_noise",
@@ -344,7 +368,19 @@ public sealed class RuleEngine
             return TextEqualsAny(eventKind, "nonbehavior", "non-behavior", "metadata", "diagnostic", "health", "status", "summary");
         }
 
+        if (TryGetRuleFieldValue(evt, "behaviorScope", out var behaviorScope) &&
+            TextEqualsAny(behaviorScope, "artifact-index", "artifact-import-summary", "artifact-import-rejection", "artifact-import-metadata", "collection-health", "diagnostic", "host-operational", "host-control-plane"))
+        {
+            return true;
+        }
+
         return false;
+    }
+
+    private static bool IsInfoOrLowSeverity(BehaviorRule rule)
+    {
+        return string.Equals(rule.Severity, "info", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(rule.Severity, "low", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool EventDataBoolTrue(SandboxEvent evt, params string[] names)

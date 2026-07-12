@@ -668,7 +668,7 @@ static bool IsWebSafeArtifactMetadata(string key, string? value)
         return false;
     }
 
-    return !LooksLikeLocalAbsolutePath(value);
+    return !LooksLikeLocalAbsolutePath(value) && !ContainsEmbeddedLocalAbsolutePath(value);
 }
 
 static bool LooksLikeLocalAbsolutePath(string? value)
@@ -695,6 +695,46 @@ static bool LooksLikeLocalAbsolutePath(string? value)
 
     return Uri.TryCreate(trimmed, UriKind.Absolute, out var uri) &&
         string.Equals(uri.Scheme, Uri.UriSchemeFile, StringComparison.OrdinalIgnoreCase);
+}
+
+static bool ContainsEmbeddedLocalAbsolutePath(string? value)
+{
+    if (string.IsNullOrWhiteSpace(value))
+    {
+        return false;
+    }
+
+    var text = value.Trim();
+    for (var index = 0; index + 2 < text.Length; index++)
+    {
+        if (char.IsLetter(text[index]) &&
+            text[index + 1] == ':' &&
+            (text[index + 2] == '\\' || text[index + 2] == '/'))
+        {
+            return true;
+        }
+    }
+
+    for (var index = 0; index + 1 < text.Length; index++)
+    {
+        var isUncMarker =
+            (text[index] == '\\' && text[index + 1] == '\\') ||
+            (text[index] == '/' && text[index + 1] == '/');
+        if (!isUncMarker)
+        {
+            continue;
+        }
+
+        // Keep ordinary URL values such as https://example.test/file, but
+        // reject embedded UNC-style paths in JSON metadata like
+        // {"selector":"\\\\host\\share\\sample.bin"}.
+        if (index == 0 || text[index - 1] != ':')
+        {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 static string FirstNonEmpty(params string?[] values)

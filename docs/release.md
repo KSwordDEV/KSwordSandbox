@@ -9,13 +9,13 @@ packages. It is intentionally conservative: packages are staged outside the
 repository, release artifacts are not pushed by the packaging script, and
 sensitive/runtime material is excluded by manifest policy.
 
-## 当前发布 handoff（本地 v22+ 发布准备批次，基线 77298d6 / v22）
+## 当前发布 handoff（本地 v28 发布准备提交 dd33924）
 
 面向审阅者的当前结论：源码层 MVP 主链路已经成形，但正式 tag 前仍应由
-release manager 在候选提交上重新跑低副作用门禁。本轮发布准备批次没有重跑
+release manager 在候选提交上重新跑低副作用门禁。本轮发布准备提交没有重跑
 Hyper-V live、重 smoke 或驱动签名。
-v21/v22 已收敛 telemetry/product-readiness polish、defensive behavior matrix、artifact/download metadata、network address-scope metadata、live progress freshness 和 runtime guardrail。
-本轮发布准备批次没有新的 live `job id`、报告 hash、实验室记录或完整 `RuntimePublishRoot` handoff 证据，
+v28 已收敛 telemetry/product-readiness polish、defensive behavior matrix、artifact/download metadata、network sidecar/PCAP canonical lanes、live progress freshness、R0/Guest event quality 和 runtime guardrail。
+本轮发布准备提交没有新的 live `job id`、报告 hash、实验室记录或完整 `RuntimePublishRoot` handoff 证据，
 因此不能替 release notes 声明 `fresh live evidence` 或“runtime 包已完整交付”。若未补跑实验室 live，release notes 必须写：
 “本候选未刷新 fresh live evidence”。
 
@@ -26,7 +26,7 @@ v21/v22 已收敛 telemetry/product-readiness polish、defensive behavior matrix
   `runbook-progress.json`，主视图不展示命令/stdout/stderr。
 - Host 静态分析已输出 granular `static.*` 事件，行为规则消费
   `static.pe.*`、`static.string.*`、`static.packer.hint` 和
-  `static.yara.match`；规则库当前 550 条且静态命中仍是 triage，不等同 guest 行为。
+  `static.yara.match`；规则库当前 588 条（`2026-07-12-v28-behavior-rule-expansion`）且静态命中仍是 triage，不等同 guest 行为。
 - Artifact index/download 走 job 内安全 selector，Web DTO 暴露
   duplicate/rejection/download 诊断；包策略继续拒绝 runtime 产物入库。
 - VirusTotal 是 process-memory only 配置入口和 hash-only 查询；quiet

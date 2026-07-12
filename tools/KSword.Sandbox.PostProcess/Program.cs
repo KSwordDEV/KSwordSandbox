@@ -37,10 +37,18 @@ internal static class PostProcessProgram
 
             Directory.CreateDirectory(jobRoot);
             var sample = SampleHasher.Compute(samplePath, config.Analysis.MaxSampleBytes);
-            var staticAnalysis = new StaticAnalyzer().Analyze(samplePath);
+            var staticAnalyzer = new StaticAnalyzer();
+            var staticAnalysis = staticAnalyzer.Analyze(samplePath);
+            var staticEvents = StaticAnalyzer.CreateEvents(sample.FullPath, staticAnalysis)
+                .Select(NormalizeEvent)
+                .ToList();
             var guestEvents = LoadEventsWithSiblingDriverJsonl(eventsPath);
             var hostEvents = BuildHostPostProcessEvents(jobId, jobRoot, eventsPath, guestEvents.Count);
-            var allEvents = hostEvents.Concat(guestEvents).OrderBy(evt => evt.Timestamp).ToList();
+            var allEvents = hostEvents
+                .Concat(staticEvents)
+                .Concat(guestEvents)
+                .OrderBy(evt => evt.Timestamp)
+                .ToList();
             var rulesPath = Path.Combine(repoRoot, config.Paths.RulesDirectory, "behavior-rules.json");
             var findings = ReportEventSampler.SanitizeFindings(new RuleEngine(RuleEngine.LoadRuleSet(rulesPath)).Classify(allEvents));
             var driverEventsPath = Path.Combine(Path.GetDirectoryName(eventsPath) ?? string.Empty, "driver-events.jsonl");
@@ -66,7 +74,7 @@ internal static class PostProcessProgram
             var htmlEnReportPath = Path.Combine(jobRoot, "report.en.html");
             var renderer = new HtmlReportRenderer();
             File.WriteAllText(jsonReportPath, JsonSerializer.Serialize(report, JsonOptions));
-            File.WriteAllText(htmlReportPath, renderer.RenderEnglish(report));
+            File.WriteAllText(htmlReportPath, renderer.RenderChinese(report));
             foreach (var document in renderer.RenderBilingualReports(report))
             {
                 File.WriteAllText(Path.Combine(jobRoot, document.FileName), document.Html);
@@ -82,6 +90,7 @@ internal static class PostProcessProgram
                 samplePath,
                 eventsPath,
                 importedGuestEventCount = guestEvents.Count,
+                importedStaticEventCount = staticEvents.Count,
                 totalEventCount = allEvents.Count,
                 reportEventCount = reportEvents.Count,
                 omittedReportEventCount = omittedReportEvents,

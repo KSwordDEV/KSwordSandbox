@@ -858,8 +858,7 @@ public sealed class HostArtifactIndexBuilder
             artifact.RelativePath,
             artifact.ImportPath,
             artifact.SafeLink,
-            artifact.Name,
-            artifact.FullPath);
+            artifact.Name);
 
         return new ArtifactIndexRejection(
             collectionName,

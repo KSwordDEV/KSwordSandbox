@@ -98,8 +98,14 @@ public sealed partial class SandboxJobService
     /// </summary>
     public HostArtifactIndex BuildArtifactIndex(Guid jobId)
     {
-        EnsureJobExists(jobId);
-        return artifactIndexBuilder.Build(jobId, GetJobRoot(jobId));
+        var job = GetJob(jobId);
+        if (job is null)
+        {
+            throw new KeyNotFoundException($"Job {jobId:D} was not found in the in-memory job list.");
+        }
+
+        var jobConfig = BuildJobConfig(job.Submission, job.Submission.DurationSeconds);
+        return artifactIndexBuilder.Build(jobId, GetJobRoot(jobId), jobConfig.ArtifactCollection);
     }
 
     /// <summary>
@@ -174,7 +180,7 @@ public sealed partial class SandboxJobService
         var zhHtmlPath = Path.Combine(jobRoot, "report.zh.html");
         var enHtmlPath = Path.Combine(jobRoot, "report.en.html");
         File.WriteAllText(jsonPath, JsonSerializer.Serialize(report, JsonOptions));
-        WriteHtmlReports(jobRoot, report);
+        WriteHtmlReports(jobRoot, report, jobConfig.ArtifactCollection);
 
         var job = new AnalysisJob
         {
@@ -539,7 +545,7 @@ public sealed partial class SandboxJobService
         var zhHtmlPath = Path.Combine(jobRoot, "report.zh.html");
         var enHtmlPath = Path.Combine(jobRoot, "report.en.html");
         File.WriteAllText(jsonPath, JsonSerializer.Serialize(report, JsonOptions));
-        WriteHtmlReports(jobRoot, report);
+        WriteHtmlReports(jobRoot, report, jobConfig.ArtifactCollection);
 
         return job with
         {
@@ -555,19 +561,20 @@ public sealed partial class SandboxJobService
     /// <summary>
     /// Writes the default compatibility report plus explicit localized report
     /// variants. Inputs are one job directory and report model; processing keeps
-    /// report.html English for existing smoke tests and emits report.zh.html /
-    /// report.en.html for the bilingual WebUI; the method returns no value.
+    /// report.html Chinese for the default compatibility report and emits
+    /// report.zh.html / report.en.html for explicit bilingual WebUI links; the
+    /// method returns no value.
     /// </summary>
-    private void WriteHtmlReports(string jobRoot, AnalysisReport report)
+    private void WriteHtmlReports(string jobRoot, AnalysisReport report, ArtifactCollectionConfig artifactCollection)
     {
-        var artifactIndex = artifactIndexBuilder.Build(report.JobId, jobRoot);
-        File.WriteAllText(Path.Combine(jobRoot, "report.html"), reportRenderer.RenderEnglish(report, artifactIndex.Artifacts));
+        var artifactIndex = artifactIndexBuilder.Build(report.JobId, jobRoot, artifactCollection);
+        File.WriteAllText(Path.Combine(jobRoot, "report.html"), reportRenderer.RenderChinese(report, artifactIndex.Artifacts));
         foreach (var document in reportRenderer.RenderBilingualReports(report, artifactIndex.Artifacts))
         {
             File.WriteAllText(Path.Combine(jobRoot, document.FileName), document.Html);
         }
 
-        artifactIndexBuilder.WriteIndex(report.JobId, jobRoot);
+        artifactIndexBuilder.WriteIndex(report.JobId, jobRoot, artifactCollection);
     }
 
     /// <summary>

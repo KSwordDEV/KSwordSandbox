@@ -18,7 +18,7 @@ public sealed record ReportEventSamplingOptions
 
     public int MaxEvidenceEventsPerFinding { get; init; } = 8;
 
-    public int MaxEventDataPairs { get; init; } = 16;
+    public int MaxEventDataPairs { get; init; } = 24;
 
     public int MaxEventDataValueCharacters { get; init; } = 512;
 
@@ -314,6 +314,60 @@ public static class ReportEventSampler
         "nonbehavior",
         "zhMessage",
         "zhHint"
+    ];
+
+    private static readonly string[] StaticPriorityDataKeys =
+    [
+        "staticOnly",
+        "evidenceOrigin",
+        "evidenceKind",
+        "ruleScope",
+        "ruleKey",
+        "behaviorFamily",
+        "triageLevel",
+        "reportLane",
+        "evidenceStrength",
+        "runtimeCorrelationRequired",
+        "staticEvidenceBoundary",
+        "zhBehaviorFamily",
+        "zhTriageLevel",
+        "zhEvidenceBoundary",
+        "zhNextEvidenceHint",
+        "fileFormat",
+        "magic",
+        "isPe",
+        "architecture",
+        "machine",
+        "subsystem",
+        "sectionCount",
+        "sectionName",
+        "entropy",
+        "entropyLabel",
+        "moduleName",
+        "apiCount",
+        "clusterName",
+        "exportName",
+        "tlsCallback",
+        "resourceType",
+        "resourceName",
+        "resourceLanguage",
+        "resourceRole",
+        "dataRva",
+        "dataFileOffset",
+        "size",
+        "isPayloadCandidate",
+        "payloadCandidate",
+        "isEmbeddedPe",
+        "isLarge",
+        "overlaySize",
+        "overlayEntropy",
+        "indicatorKind",
+        "indicatorValue",
+        "stringKind",
+        "stringValue",
+        "yaraRule",
+        "matchedStrings",
+        "tags"
     ];
 
     private static readonly string[] NetworkCommonPriorityDataKeys =
@@ -668,6 +722,14 @@ public static class ReportEventSampler
 
     private static IEnumerable<string> BuildPriorityDataKeys(SandboxEvent evt)
     {
+        if ((evt.EventType ?? string.Empty).StartsWith("static.", StringComparison.OrdinalIgnoreCase))
+        {
+            foreach (var key in StaticPriorityDataKeys)
+            {
+                yield return key;
+            }
+        }
+
         if (string.Equals(evt.EventType, "artifact.import_summary", StringComparison.OrdinalIgnoreCase))
         {
             foreach (var key in ArtifactImportSummaryPriorityDataKeys)

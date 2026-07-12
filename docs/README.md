@@ -17,7 +17,7 @@ WebUI 展示实时进度和原始事件；可选 VirusTotal 只做 hash-only 查
 
 ## 发布就绪快照 / Release-readiness snapshot
 
-截至本地 v22+ 发布准备批次（基线 `77298d6 / v22`），发布评审（release review）的当前事实入口是
+截至本地 v28 发布准备提交 `dd33924`，发布评审（release review）的当前事实入口是
 [`v1-release-gap-audit.md`](v1-release-gap-audit.md)：它维护组件完成百分比、
 剩余差距和低副作用验收命令。简要状态：
 
@@ -33,6 +33,8 @@ WebUI 展示实时进度和原始事件；可选 VirusTotal 只做 hash-only 查
   R0 网络状态诊断、VT reputation 和中英 HTML 报告已形成可审阅闭环。
 - 默认发布、就绪检查和打包（release/readiness/package）不签名、不加载驱动、不调用 `CSignTool.exe`、
   不 push，也不把 runtime 产物带入 git。
+- 本轮仍未刷新 Hyper-V live、真实 Notepad 5s 或完整 RuntimePublishRoot handoff；
+  没有实验室 `job id` 时 release notes 必须写“本候选未刷新 fresh live evidence”。
 
 ## 仓库卫生提醒 / Repository hygiene reminder
 
