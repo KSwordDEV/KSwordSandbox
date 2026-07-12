@@ -104,6 +104,8 @@ $script:RunModeCoerced = $false
 $script:RunModeCoercionReason = ''
 $script:RunModeCoercionTriggerParameter = ''
 $script:RunModeCoercionOriginalMode = $Mode
+$script:OriginalRunBoundParameters = [hashtable]$PSBoundParameters
+$script:RunScriptPath = if ([string]::IsNullOrWhiteSpace($PSCommandPath)) { Join-Path $script:RepositoryRoot 'run.ps1' } else { $PSCommandPath }
 
 function Write-RunInfo {
     param([Parameter(Mandatory)][string]$Message)
@@ -719,6 +721,110 @@ function Test-RunIsAdministrator {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
     $principal = [Security.Principal.WindowsPrincipal]::new($identity)
     return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
+function ConvertTo-RunNativeArgument {
+    param([AllowNull()][string]$Argument)
+
+    if ($null -eq $Argument) {
+        return '""'
+    }
+
+    if ($Argument -notmatch '[\s"]') {
+        return $Argument
+    }
+
+    $escaped = $Argument -replace '(\\*)"', '$1$1\"'
+    $escaped = $escaped -replace '(\\+)$', '$1$1'
+    return '"' + $escaped + '"'
+}
+
+function Add-RunRelaunchStringArgument {
+    param(
+        [Parameter(Mandatory)][System.Collections.Generic.List[string]]$Arguments,
+        [Parameter(Mandatory)][string]$Name,
+        [AllowNull()][string]$Value,
+        [bool]$IncludeWhenEmpty = $false
+    )
+
+    if ($IncludeWhenEmpty -or -not [string]::IsNullOrWhiteSpace([string]$Value)) {
+        [void]$Arguments.Add("-$Name")
+        [void]$Arguments.Add([string]$Value)
+    }
+}
+
+function Add-RunRelaunchSwitchArgument {
+    param(
+        [Parameter(Mandatory)][System.Collections.Generic.List[string]]$Arguments,
+        [Parameter(Mandatory)][string]$Name,
+        [bool]$Enabled
+    )
+
+    if ($Enabled) {
+        [void]$Arguments.Add("-$Name")
+    }
+}
+
+function Invoke-RunSelfElevatedForLive {
+    param([Parameter(Mandatory)][string]$ResolvedSamplePath)
+
+    $powershellPath = (Get-Command -Name 'powershell.exe' -ErrorAction Stop | Select-Object -First 1).Source
+    $arguments = [System.Collections.Generic.List[string]]::new()
+    [void]$arguments.Add('-NoProfile')
+    [void]$arguments.Add('-ExecutionPolicy')
+    [void]$arguments.Add('Bypass')
+    [void]$arguments.Add('-File')
+    [void]$arguments.Add($script:RunScriptPath)
+    Add-RunRelaunchStringArgument -Arguments $arguments -Name 'Mode' -Value $Mode -IncludeWhenEmpty $true
+    Add-RunRelaunchStringArgument -Arguments $arguments -Name 'SamplePath' -Value $ResolvedSamplePath -IncludeWhenEmpty $true
+    Add-RunRelaunchStringArgument -Arguments $arguments -Name 'DurationSeconds' -Value ([string]$DurationSeconds) -IncludeWhenEmpty $true
+    Add-RunRelaunchStringArgument -Arguments $arguments -Name 'GuestReadyTimeoutSeconds' -Value ([string]$GuestReadyTimeoutSeconds) -IncludeWhenEmpty $true
+    Add-RunRelaunchStringArgument -Arguments $arguments -Name 'ExecutionTimeoutSeconds' -Value ([string]$ExecutionTimeoutSeconds) -IncludeWhenEmpty $true
+    Add-RunRelaunchStringArgument -Arguments $arguments -Name 'Configuration' -Value $Configuration -IncludeWhenEmpty $true
+
+    if ($script:OriginalRunBoundParameters.ContainsKey('SamplePreset')) {
+        Add-RunRelaunchStringArgument -Arguments $arguments -Name 'SamplePreset' -Value $SamplePreset -IncludeWhenEmpty $true
+    }
+
+    if ($script:OriginalRunBoundParameters.ContainsKey('Url')) {
+        Add-RunRelaunchStringArgument -Arguments $arguments -Name 'Url' -Value $Url -IncludeWhenEmpty $true
+    }
+
+    if ($script:OriginalRunBoundParameters.ContainsKey('ConfigPath')) {
+        Add-RunRelaunchStringArgument -Arguments $arguments -Name 'ConfigPath' -Value $ConfigPath -IncludeWhenEmpty $true
+    }
+
+    if ($script:OriginalRunBoundParameters.ContainsKey('RuntimeRoot')) {
+        Add-RunRelaunchStringArgument -Arguments $arguments -Name 'RuntimeRoot' -Value $RuntimeRoot -IncludeWhenEmpty $true
+    }
+
+    Add-RunRelaunchSwitchArgument -Arguments $arguments -Name 'Live' -Enabled ([bool]$Live)
+    Add-RunRelaunchSwitchArgument -Arguments $arguments -Name 'NoR0Collector' -Enabled ([bool]$NoR0Collector)
+    Add-RunRelaunchSwitchArgument -Arguments $arguments -Name 'NoOpenVmConsole' -Enabled ([bool]$NoOpenVmConsole)
+    Add-RunRelaunchSwitchArgument -Arguments $arguments -Name 'NoBuild' -Enabled ([bool]$NoBuild)
+    Add-RunRelaunchSwitchArgument -Arguments $arguments -Name 'SkipPayloadPreparation' -Enabled ([bool]$SkipPayloadPreparation)
+    Add-RunRelaunchSwitchArgument -Arguments $arguments -Name 'ForcePayloadPreparation' -Enabled ([bool]$ForcePayloadPreparation)
+    Add-RunRelaunchSwitchArgument -Arguments $arguments -Name 'OpenBrowser' -Enabled ([bool]$OpenBrowser)
+    Add-RunRelaunchSwitchArgument -Arguments $arguments -Name 'StrictUrl' -Enabled ([bool]$StrictUrl)
+    Add-RunRelaunchSwitchArgument -Arguments $arguments -Name 'RequirePayloadForWebUI' -Enabled ([bool]$RequirePayloadForWebUI)
+
+    $argumentLine = ($arguments.ToArray() | ForEach-Object { ConvertTo-RunNativeArgument -Argument $_ }) -join ' '
+    Write-RunInfo 'Live Hyper-V 需要管理员权限；正在触发 UAC 提权并重新启动同一命令。 / Requesting administrator via UAC for Live Hyper-V.'
+    Write-RunInfo "UAC 通过后，新管理员窗口会继续运行，并在样本执行前打开 VM 桌面：$ResolvedSamplePath"
+
+    try {
+        $process = Start-Process -FilePath $powershellPath -ArgumentList $argumentLine -Verb RunAs -WorkingDirectory $script:RepositoryRoot -WindowStyle Normal -PassThru -Wait
+    }
+    catch {
+        throw "错误：UAC 提权启动失败或被取消；样本尚未启动。下一步：批准 UAC 或手动以管理员身份运行同一命令。英文详情：$($_.Exception.Message)"
+    }
+
+    if ($null -ne $process) {
+        Write-RunInfo "管理员子进程已退出，ExitCode=$($process.ExitCode)。 / Elevated child process exited."
+        exit $process.ExitCode
+    }
+
+    exit 0
 }
 
 function Test-RunPathUnderRoot {
@@ -1819,6 +1925,10 @@ function Invoke-OneShotAnalysis {
     }
 
     $runLive = [bool]$Live -and (-not [bool]$PlanOnly) -and ($Mode -ne 'Plan')
+    if ($runLive -and (-not (Test-RunIsAdministrator)) -and (-not $WhatIfPreference)) {
+        Invoke-RunSelfElevatedForLive -ResolvedSamplePath $resolvedSample
+    }
+
     $payloadRoot = Get-GuestPayloadRoot -State $State -Config $Config -EffectiveRuntimeRoot $EffectiveRuntimeRoot
     if ($NoR0Collector) {
         Write-RunInfo 'R0Collector: 本次 Analyze/Plan 已通过 -NoR0Collector 禁用 R0 sidecar；不会修改配置文件。'

@@ -1,6 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
+    <ProjectReference Include="..\..\src\KSword.Sandbox.Abstractions\KSword.Sandbox.Abstractions.csproj" />
     <ProjectReference Include="..\..\src\KSword.Sandbox.Core\KSword.Sandbox.Core.csproj" />
   </ItemGroup>
 
