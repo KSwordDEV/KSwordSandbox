@@ -326,9 +326,48 @@ function Assert-RunLocalConfigReadyForInteractiveStartup {
     }
 
     Write-RunInfo '中文提示：本机配置未就绪，已停止启动，避免 WebUI/分析误用仓库模板。'
-    Write-RunInfo '下一步：请先打开安装向导，选择“安装/准备本机设置”，填写来宾密码；再在“更改设置”里确认 VM 名称、干净快照和 driver 路径。'
+    Write-RunInfo '下一步：新电脑/缺配置时运行 .\install.ps1 -InstallEntrypoint CreateOrPreparePath -PromptPassword；已有 VM 时再运行 .\install.ps1 -Mode Change -UpdateHyperVConfig -VmName <existing VM> -CheckpointName <checkpoint>。'
+    Write-RunInfo '下一步：若你以为已经配置完成，先运行 .\install.ps1 -InstallEntrypoint UseConfiguredEnvironment -PlanOnly 查看本机状态和 RecommendedActions。'
     Write-RunInfo '完成后重新运行 run.ps1；高级排障可使用 CheckEnvironment 模式。'
     throw "错误：$ModeName 需要本机 sandbox.local.json。$reason"
+}
+
+function Get-RunOperatorModeMatrix {
+    return @(
+        [pscustomobject][ordered]@{
+            ModeId = 'use-configured-environment'
+            Entrypoint = 'UseConfiguredEnvironment'
+            TitleZh = '使用已配置环境'
+            RuntimeBehaviorZh = 'run.ps1 只读取已有本机配置/secret/payload/VM profile；默认启动 WebUI 或生成 PlanOnly。'
+            SafeDiagnostics = @('.\install.ps1 -Mode Status', '.\install.ps1 -Mode CheckEnvironment', '.\run.ps1 -Mode Status', '.\run.ps1 -Mode CheckEnvironment')
+            PrimaryRunCommand = '.\run.ps1'
+            StartsVmByDefault = $false
+            RequiresLiveSwitchForVmMutation = $true
+            NextStepsZh = @('下一步：确认 RecommendedActions 后运行 .\run.ps1；需要真实执行样本时才显式加 -Live。')
+        },
+        [pscustomobject][ordered]@{
+            ModeId = 'rollback-restore-snapshot'
+            Entrypoint = 'RestoreCleanCheckpoint'
+            TitleZh = '回退/恢复已有干净快照'
+            RuntimeBehaviorZh = 'run.ps1 不恢复 snapshot；只在 .\run.ps1 -Mode Analyze ... -Live 中委托 live runbook 操作已配置 VM。'
+            SafeDiagnostics = @('.\install.ps1 -InstallEntrypoint RestoreCleanCheckpoint -PlanOnly', '.\install.ps1 -InstallEntrypoint RestoreCleanCheckpoint -AllowVmMutation -WhatIf', '.\scripts\Test-HyperVReadiness.ps1')
+            PrimaryRunCommand = '.\run.ps1 -Mode Analyze -SamplePath <sample.exe> -Live'
+            StartsVmByDefault = $false
+            RequiresLiveSwitchForVmMutation = $true
+            NextStepsZh = @('下一步：恢复 baseline 请回到 install.ps1 的 RestoreCleanCheckpoint 入口；run.ps1 默认不会回退 VM。')
+        },
+        [pscustomobject][ordered]@{
+            ModeId = 'fresh-create-new-computer'
+            Entrypoint = 'CreateOrPreparePath'
+            TitleZh = '全新创建/新电脑准备'
+            RuntimeBehaviorZh = 'run.ps1 不是创建 VM 向导；缺配置时会 fail fast 并指向 CreateOrPreparePath。'
+            SafeDiagnostics = @('.\install.ps1 -InstallEntrypoint CreateOrPreparePath -PlanOnly', '.\install.ps1 -InstallEntrypoint CreateOrPreparePath -WhatIf', '.\run.ps1 -Mode CheckEnvironment')
+            PrimaryRunCommand = '.\run.ps1 -Mode Analyze -SamplePreset Notepad'
+            StartsVmByDefault = $false
+            RequiresLiveSwitchForVmMutation = $true
+            NextStepsZh = @('下一步：先完成 install.ps1 CreateOrPreparePath、本机 VM/checkpoint profile 和 payload；再用 run.ps1 做 WebUI/PlanOnly。')
+        }
+    )
 }
 
 function Get-SecretName {
@@ -1196,10 +1235,10 @@ function Show-RunStatus {
         [void]$recommendedActions.Add([string]$webLaunchTarget.RecommendedAction)
     }
     if (-not $configExists) {
-        [void]$recommendedActions.Add("下一步：运行 .\install.ps1 -Mode Install -PromptPassword 创建本机配置；或运行 .\install.ps1 -Mode Change -UpdateHyperVConfig 记录 VM/checkpoint 路径。")
+        [void]$recommendedActions.Add("下一步：运行 .\install.ps1 -InstallEntrypoint CreateOrPreparePath -PromptPassword 创建本机配置；或运行 .\install.ps1 -Mode Change -UpdateHyperVConfig 记录 VM/checkpoint 路径。")
     }
     if (-not (Test-Path -LiteralPath $EffectiveRuntimeRoot -PathType Container)) {
-        [void]$recommendedActions.Add("下一步：运行 .\install.ps1 -Mode Install，在 '$EffectiveRuntimeRoot' 下创建运行目录。")
+        [void]$recommendedActions.Add("下一步：运行 .\install.ps1 -InstallEntrypoint CreateOrPreparePath，在 '$EffectiveRuntimeRoot' 下创建运行目录。")
     }
     if ($runtimeRootUnderRepository) {
         [void]$recommendedActions.Add("下一步：RuntimeRoot 当前位于仓库下，建议移到 D:\Temp\KSwordSandbox 或其他仓库外目录，避免 job/report/capture 误提交。")
@@ -1219,7 +1258,7 @@ function Show-RunStatus {
     if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($secretName, 'Process')) -and
         [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($secretName, 'User')) -and
         [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($secretName, 'Machine'))) {
-        [void]$recommendedActions.Add("下一步：运行 .\install.ps1 -Mode Install -PromptPassword 保存 guest password secret；如果只做本进程检查，可运行 .\scripts\Test-HyperVReadiness.ps1 -PromptForMissingGuestPassword。")
+        [void]$recommendedActions.Add("下一步：运行 .\install.ps1 -InstallEntrypoint CreateOrPreparePath -PromptPassword 保存 guest password secret；如果只做本进程检查，可运行 .\scripts\Test-HyperVReadiness.ps1 -PromptForMissingGuestPassword。")
     }
     foreach ($driverAction in @($driverStatus.RecommendedActions)) {
         [void]$recommendedActions.Add([string]$driverAction)
@@ -1242,6 +1281,14 @@ function Show-RunStatus {
         ConfigExists = $configExists
         WebUrl = $Url
         WebUiCommand = '.\run.ps1'
+        OperatorModeMatrixSchema = 'ksword.run.operator-mode-matrix.v1'
+        OperatorModeMatrix = @(Get-RunOperatorModeMatrix)
+        UseConfiguredEnvironmentCommand = '.\install.ps1 -InstallEntrypoint UseConfiguredEnvironment -PlanOnly'
+        RestoreCheckpointPlanCommand = '.\install.ps1 -InstallEntrypoint RestoreCleanCheckpoint -PlanOnly'
+        RestoreCheckpointWhatIfCommand = '.\install.ps1 -InstallEntrypoint RestoreCleanCheckpoint -AllowVmMutation -WhatIf'
+        RestoreCheckpointCommand = '.\install.ps1 -InstallEntrypoint RestoreCleanCheckpoint -AllowVmMutation -Confirm'
+        CreateOrPreparePathCommand = '.\install.ps1 -InstallEntrypoint CreateOrPreparePath -PromptPassword'
+        OperatorModeGuidanceZh = '中文提示：run.ps1 消费已安装配置；默认 WebUI/PlanOnly 不启动/还原 VM。回退/恢复快照请使用 install.ps1 RestoreCleanCheckpoint；新电脑准备请使用 install.ps1 CreateOrPreparePath。'
         WebUiLaunchKind = $webLaunchTarget.Kind
         WebUiLaunchPath = $webLaunchTarget.Path
         WebUiSourceProjectExists = $webLaunchTarget.SourceProjectExists
@@ -1324,6 +1371,11 @@ function Show-RunEnvironmentCheck {
         DailyStartupCommand = '.\run.ps1'
         StartWebUiCommand = '.\run.ps1 -Mode StartWebUI'
         CheckEnvironmentCommand = '.\run.ps1 -Mode CheckEnvironment'
+        OperatorModeMatrix = @(Get-RunOperatorModeMatrix)
+        UseConfiguredEnvironmentCommand = '.\install.ps1 -InstallEntrypoint UseConfiguredEnvironment -PlanOnly'
+        RestoreCheckpointPlanCommand = '.\install.ps1 -InstallEntrypoint RestoreCleanCheckpoint -PlanOnly'
+        RestoreCheckpointWhatIfCommand = '.\install.ps1 -InstallEntrypoint RestoreCleanCheckpoint -AllowVmMutation -WhatIf'
+        CreateOrPreparePathCommand = '.\install.ps1 -InstallEntrypoint CreateOrPreparePath -PromptPassword'
         PlanCommand = '.\run.ps1 -Mode Plan -SamplePath <sample.exe>'
         LiveCommand = '.\run.ps1 -Mode Analyze -SamplePath <sample.exe> -Live'
         AnalyzeNotepadPlanCommand = '.\run.ps1 -Mode Analyze -SamplePreset Notepad'

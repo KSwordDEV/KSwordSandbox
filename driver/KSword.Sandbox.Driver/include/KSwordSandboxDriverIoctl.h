@@ -222,6 +222,14 @@ typedef enum _KSWORD_SANDBOX_DRIVER_STATE {
  * guarded producer emits versioned payloads.  They let collectors name the
  * future surface without overclaiming that v1 process lifecycle events include
  * privilege or handle access telemetry.
+ *
+ * PROCESS_HANDLE_ACCESS_DRAFT is limited to PsProcessType/PsThreadType handle
+ * create/duplicate callbacks.  It does not observe token object handles and it
+ * does not observe AdjustTokenPrivileges/SeDebugPrivilege state changes.
+ * TOKEN_PRIVILEGE_DRAFT remains reserved until a future signed driver exposes
+ * an explicit token/privilege payload; until then collectors must express that
+ * lane as Security-audit/ETW fallback, never infer it from process create/exit
+ * or process/thread handle rows.
  */
 #define KSWORD_SANDBOX_CAPABILITY_FLAG_PROCESS_HANDLE_ACCESS_DRAFT 0x0000000000080000ULL
 #define KSWORD_SANDBOX_CAPABILITY_FLAG_TOKEN_PRIVILEGE_DRAFT       0x0000000000100000ULL
@@ -257,6 +265,12 @@ typedef enum _KSWORD_SANDBOX_DRIVER_STATE {
  *          does not unregister kernel callbacks or clear already queued events.
  * Return : not applicable; collectors must mask requested bits with
  *          SupportedProducerMask before issuing SET_PRODUCER_ENABLE_MASK.
+ *
+ * Noise policy: process-handle access is supported as a separate producer bit
+ * but intentionally omitted from KSWORD_SANDBOX_PRODUCER_MASK_DEFAULT.  A live
+ * build may register the Ob callback and advertise the producer while leaving
+ * emission disabled until an operator explicitly enables the bit with
+ * SET_PRODUCER_ENABLE_MASK.
  */
 #define KSWORD_SANDBOX_PRODUCER_FLAG_DRIVER    0x00000001U
 #define KSWORD_SANDBOX_PRODUCER_FLAG_PROCESS   0x00000002U
@@ -986,7 +1000,11 @@ typedef struct _KSWORD_SANDBOX_PROCESS_EVENT_PAYLOAD {
  *          overloading process lifecycle ImagePath/CommandLine slots.
  *          OriginalDesiredAccess and DesiredAccess come from pre-operation
  *          callback data; GrantedAccess is meaningful only for a successful
- *          post-operation observation.
+ *          post-operation observation.  ObjectType tells collectors whether to
+ *          decode DesiredAccess with process or thread right names.  The
+ *          current draft is read-only telemetry for process/thread objects; it
+ *          does not register token object callbacks and is not evidence that a
+ *          token privilege was adjusted.
  * Return : not applicable.
  */
 #define KSWORD_SANDBOX_PROCESS_HANDLE_ACCESS_EVENT_VERSION 0x00010001U /* draft */

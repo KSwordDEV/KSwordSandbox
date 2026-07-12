@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Net;
 using System.Security.Cryptography;
 using KSword.Sandbox.Abstractions;
+using KSword.Sandbox.Core.Artifacts;
 
 namespace KSword.Sandbox.Core.Network;
 
@@ -242,6 +243,11 @@ public static class NetworkTelemetrySchema
         AddIfNotEmpty(data, "sourceArtifactSelector", source.RelativePath);
         AddIfNotEmpty(data, "artifactSelector", source.RelativePath);
         AddIfNotEmpty(data, "sourceDownloadSelector", source.RelativePath);
+        var sourceSafeLink = ArtifactDescriptorFactory.BuildSafeLink(source.RelativePath);
+        AddIfNotEmpty(data, "sourceArtifactSafeLink", sourceSafeLink);
+        AddIfNotEmpty(data, "artifactSafeLink", sourceSafeLink);
+        AddIfNotEmpty(data, "safeLink", sourceSafeLink);
+        AddIfNotEmpty(data, "downloadSafeLink", sourceSafeLink);
         AddIfNotEmpty(data, "sourceImportRoot", source.ImportRoot);
         AddIfNotEmpty(data, "sourceArtifactKind", source.ArtifactKind);
         AddIfNotEmpty(data, "collectionName", source.CollectionName);
@@ -260,6 +266,8 @@ public static class NetworkTelemetrySchema
             AddIfNotEmpty(data, "sidecarSourceArtifactRelativePath", source.RelativePath);
             AddIfNotEmpty(data, "sidecarSourceArtifactSelector", source.RelativePath);
             AddIfNotEmpty(data, "sidecarDownloadSelector", source.RelativePath);
+            AddIfNotEmpty(data, "sidecarSourceArtifactSafeLink", sourceSafeLink);
+            AddIfNotEmpty(data, "sidecarDownloadSafeLink", sourceSafeLink);
             AddIfNotEmpty(data, "sidecarArtifactKind", source.ArtifactKind);
             AddIfNotEmpty(data, "sidecarEvidenceRole", source.EvidenceRole);
             AddIfNotEmpty(data, "sidecarImportMode", source.ImportMode);
@@ -275,11 +283,15 @@ public static class NetworkTelemetrySchema
             AddIfNotEmpty(data, "pcapSourceArtifactRelativePath", source.RelativePath);
             AddIfNotEmpty(data, "pcapSourceArtifactSelector", source.RelativePath);
             AddIfNotEmpty(data, "pcapDownloadSelector", source.RelativePath);
+            AddIfNotEmpty(data, "pcapSourceArtifactSafeLink", sourceSafeLink);
+            AddIfNotEmpty(data, "pcapDownloadSafeLink", sourceSafeLink);
             AddIfNotEmpty(data, "sourcePcapArtifactPath", source.FullPath);
             AddIfNotEmpty(data, "sourcePcapArtifactName", source.Name);
             AddIfNotEmpty(data, "sourcePcapArtifactRelativePath", source.RelativePath);
             AddIfNotEmpty(data, "sourcePcapArtifactSelector", source.RelativePath);
             AddIfNotEmpty(data, "sourcePcapDownloadSelector", source.RelativePath);
+            AddIfNotEmpty(data, "sourcePcapArtifactSafeLink", sourceSafeLink);
+            AddIfNotEmpty(data, "sourcePcapDownloadSafeLink", sourceSafeLink);
         }
 
         foreach (var pair in source.Metadata ?? EmptyMetadata)
@@ -300,10 +312,17 @@ public static class NetworkTelemetrySchema
                 string.Equals(pair.Key, "artifactRelativePath", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(pair.Key, "sourceArtifactRelativePath", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(pair.Key, "downloadSelector", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(pair.Key, "downloadSafeLink", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(pair.Key, "safeLink", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(pair.Key, "sourceArtifactSelector", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(pair.Key, "sourceArtifactSafeLink", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(pair.Key, "artifactSelector", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(pair.Key, "artifactSafeLink", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(pair.Key, "sourceDownloadSelector", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(pair.Key, "sourceDownloadSafeLink", StringComparison.OrdinalIgnoreCase) ||
                 pair.Key.StartsWith("sidecar", StringComparison.OrdinalIgnoreCase) ||
+                pair.Key.StartsWith("parentArtifact", StringComparison.OrdinalIgnoreCase) ||
+                pair.Key.StartsWith("parentDownload", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(pair.Key, "rootProcessId", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(pair.Key, "treeLineage", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(pair.Key, "processId", StringComparison.OrdinalIgnoreCase) ||
@@ -2178,6 +2197,14 @@ public static class NetworkTelemetrySchema
         var relativePath = FirstDataValue(data, "sourceArtifactRelativePath", "artifactRelativePath", "sourceArtifactSelector", "downloadSelector");
         AddAliases(data, relativePath, "sourceArtifactRelativePath", "artifactRelativePath");
 
+        var safeLink = FirstDataValue(data, "sourceArtifactSafeLink", "artifactSafeLink", "downloadSafeLink", "safeLink");
+        if (string.IsNullOrWhiteSpace(safeLink) && !string.IsNullOrWhiteSpace(relativePath))
+        {
+            safeLink = ArtifactDescriptorFactory.BuildSafeLink(relativePath);
+        }
+
+        AddAliases(data, safeLink, "sourceArtifactSafeLink", "artifactSafeLink", "downloadSafeLink", "safeLink");
+
         var sha256 = NormalizeHashText(FirstDataValue(data, "sourceArtifactSha256", "sha256", "hash.sha256", "artifactSha256", "artifactHashSha256"));
         AddAliases(data, sha256, "sourceArtifactSha256", "sha256", "hash.sha256", "artifactSha256", "artifactHashSha256");
 
@@ -2262,11 +2289,18 @@ public static class NetworkTelemetrySchema
         AddIfNotEmpty(data, "sourcePcapArtifactSelector", pcapRelativePath);
         AddIfNotEmpty(data, "pcapDownloadSelector", pcapRelativePath);
         AddIfNotEmpty(data, "sourcePcapDownloadSelector", pcapRelativePath);
+        var pcapSafeLink = ArtifactDescriptorFactory.BuildSafeLink(pcapRelativePath);
+        AddIfNotEmpty(data, "pcapSourceArtifactSafeLink", pcapSafeLink);
+        AddIfNotEmpty(data, "sourcePcapArtifactSafeLink", pcapSafeLink);
+        AddIfNotEmpty(data, "pcapDownloadSafeLink", pcapSafeLink);
+        AddIfNotEmpty(data, "sourcePcapDownloadSafeLink", pcapSafeLink);
         AddIfNotEmpty(data, "parentArtifactPath", pcapPath);
         AddIfNotEmpty(data, "parentArtifactName", pcapName);
         AddIfNotEmpty(data, "parentArtifactRelativePath", pcapRelativePath);
         AddIfNotEmpty(data, "parentArtifactSelector", pcapRelativePath);
         AddIfNotEmpty(data, "parentDownloadSelector", pcapRelativePath);
+        AddIfNotEmpty(data, "parentArtifactSafeLink", pcapSafeLink);
+        AddIfNotEmpty(data, "parentDownloadSafeLink", pcapSafeLink);
         AddIfNotEmpty(data, "parentArtifactKind", "PacketCapture");
         AddIfNotEmpty(data, "parentEvidenceRole", "packet-capture");
         if (isSidecarSource)

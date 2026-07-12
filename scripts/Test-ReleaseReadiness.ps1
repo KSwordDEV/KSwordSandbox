@@ -423,6 +423,39 @@ function Test-PackageManifests {
                 if ($guiSigningFallback -ine 'forbidden') {
                     [void]$issues.Add("releaseContract.guiSigningFallback must be forbidden: $relative")
                 }
+
+                $installModeContract = Get-ObjectPropertyValue -InputObject $releaseContract -Name 'installModeContract' -DefaultValue $null
+                if ($null -eq $installModeContract) {
+                    [void]$issues.Add("releaseContract.installModeContract is missing: $relative")
+                }
+                else {
+                    $operatorModeMatrix = Get-ObjectPropertyValue -InputObject $installModeContract -Name 'operatorModeMatrix' -DefaultValue $null
+                    if ($null -eq $operatorModeMatrix) {
+                        [void]$issues.Add("releaseContract.installModeContract.operatorModeMatrix is missing: $relative")
+                    }
+                    else {
+                        $operatorModes = @(Get-ObjectPropertyValue -InputObject $operatorModeMatrix -Name 'modes' -DefaultValue @())
+                        $operatorModeIds = @($operatorModes | ForEach-Object { [string](Get-ObjectPropertyValue -InputObject $_ -Name 'modeId' -DefaultValue '') } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+                        foreach ($requiredOperatorModeId in @(Get-CanonicalOperatorModeRequiredIds)) {
+                            if ($operatorModeIds -notcontains $requiredOperatorModeId) {
+                                [void]$issues.Add("operatorModeMatrix missing canonical mode '$requiredOperatorModeId': $relative")
+                            }
+                        }
+
+                        foreach ($requiredEntrypoint in @('UseConfiguredEnvironment', 'RestoreCleanCheckpoint', 'CreateOrPreparePath')) {
+                            $entrypointFound = $false
+                            foreach ($operatorMode in $operatorModes) {
+                                if ([string](Get-ObjectPropertyValue -InputObject $operatorMode -Name 'entrypoint' -DefaultValue '') -eq $requiredEntrypoint) {
+                                    $entrypointFound = $true
+                                    break
+                                }
+                            }
+                            if (-not $entrypointFound) {
+                                [void]$issues.Add("operatorModeMatrix missing entrypoint '$requiredEntrypoint': $relative")
+                            }
+                        }
+                    }
+                }
             }
 
             if ($null -eq $manifest.PSObject.Properties['stagedMetadata']) {
@@ -1552,6 +1585,44 @@ function Get-InstallModeRequiredIds {
     )
 }
 
+function Get-CanonicalOperatorModeRequiredIds {
+    return @(
+        'use-configured-environment',
+        'rollback-restore-snapshot',
+        'fresh-create-new-computer'
+    )
+}
+
+function Get-CanonicalOperatorModeMatrix {
+    return @(
+        [ordered]@{
+            modeId = 'use-configured-environment'
+            entrypoint = 'UseConfiguredEnvironment'
+            titleZh = '使用已配置环境'
+            defaultCommand = '.\install.ps1 -InstallEntrypoint UseConfiguredEnvironment -PlanOnly'
+            packageReadinessMutation = 'none'
+            nextActionsZh = @('下一步：先跑 Status/CheckEnvironment；若 RecommendedActions 为空，再启动 WebUI 或 PlanOnly。')
+        },
+        [ordered]@{
+            modeId = 'rollback-restore-snapshot'
+            entrypoint = 'RestoreCleanCheckpoint'
+            titleZh = '回退/恢复已有干净快照'
+            defaultCommand = '.\install.ps1 -InstallEntrypoint RestoreCleanCheckpoint -PlanOnly'
+            mutatingCommand = '.\install.ps1 -InstallEntrypoint RestoreCleanCheckpoint -AllowVmMutation -Confirm'
+            packageReadinessMutation = 'forbidden; package/readiness only records metadata and diagnostics'
+            nextActionsZh = @('下一步：readiness/package 不恢复快照；只有隔离 lab 操作者显式 -AllowVmMutation -Confirm/-Force 才能恢复已有 checkpoint。')
+        },
+        [ordered]@{
+            modeId = 'fresh-create-new-computer'
+            entrypoint = 'CreateOrPreparePath'
+            titleZh = '全新创建/新电脑准备'
+            defaultCommand = '.\install.ps1 -InstallEntrypoint CreateOrPreparePath -PromptPassword'
+            packageReadinessMutation = 'none; installer may write local config/secret only when operator runs it directly'
+            nextActionsZh = @('下一步：首机先确认 Hyper-V/BIOS/SLAT/管理员 shell，手工创建/导入 VM 和 clean checkpoint，再写本机 config/secret/payload。')
+        }
+    )
+}
+
 function Get-InstallContractGapNextActionsZh {
     param([string[]]$Gaps = @())
 
@@ -1561,8 +1632,9 @@ function Get-InstallContractGapNextActionsZh {
 
     $actions = New-Object System.Collections.Generic.List[string]
     [void]$actions.Add("检测到 install contract 缺口：$(@($Gaps) -join '；')。")
-    [void]$actions.Add('下一步：只在 scripts\Test-ReleaseReadiness.ps1、scripts\package-portable.ps1 和 packaging/*.manifest.json 中补齐机器可读 contract；不要改 install scripts 或 docs。')
+    [void]$actions.Add('下一步：只在允许的 install/run/readiness 脚本、packaging/*.manifest.json 和文档中补齐机器可读 contract；不要运行 install、smoke、Hyper-V live、签名或 VM mutation 来“证明” contract。')
     [void]$actions.Add("下一步：在 packaging/*.manifest.json 的 releaseContract.installModeContract.modeIds 中补齐：$((Get-InstallModeRequiredIds) -join ', ')。")
+    [void]$actions.Add("下一步：在 releaseContract.installModeContract.operatorModeMatrix.modes 中补齐三种 canonical operator mode：$((Get-CanonicalOperatorModeRequiredIds) -join ', ')。")
     [void]$actions.Add('下一步：重新运行允许的 parse/JSON/readiness 检查，确认 installModeContract、installContractGaps、installContractGapNextActionsZh 和 executionBoundaries 同时存在。')
     return @($actions.ToArray())
 }

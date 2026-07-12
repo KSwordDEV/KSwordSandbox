@@ -24,7 +24,9 @@ internal sealed class SecurityEventLogProbe : IGuestProbe
     private const int MaxEventsPerRead = 512;
     private const int MaxFieldValueLength = 2048;
     private const int MaxRenderedMessageLength = 1024;
+    private const int MaxAuditPolicySnippetLength = 4096;
     private static readonly TimeSpan CommandTimeout = TimeSpan.FromSeconds(4);
+    private static readonly TimeSpan AuditPolicyCommandTimeout = TimeSpan.FromSeconds(3);
     private static readonly TimeSpan QueryOverlap = TimeSpan.FromSeconds(2);
     private static readonly int[] ProcessAccessEventIds = [4656, 4663];
 
@@ -91,6 +93,19 @@ internal sealed class SecurityEventLogProbe : IGuestProbe
         (0x00100000u, "SYNCHRONIZE")
     ];
 
+    private static readonly AuditPolicyExpectation[] AuditPolicyExpectations =
+    [
+        new("0cce9211-69ae-11d9-bed3-505054503030", "Security System Extension", "安全系统扩展", "4697", "Service installation auditing; useful when service persistence is not visible in R0 callbacks."),
+        new("0cce921b-69ae-11d9-bed3-505054503030", "Special Logon", "特殊登录", "4672", "Special privilege assignment at logon; helps explain later privilege/token context."),
+        new("0cce9223-69ae-11d9-bed3-505054503030", "Handle Manipulation", "句柄操作", "4656,4663", "Process/object handle requests and accesses; requires object auditing/SACL for many targets."),
+        new("0cce9228-69ae-11d9-bed3-505054503030", "Sensitive Privilege Use", "敏感权限使用", "4673,4674", "Privileged service/object operations; complements R0 process and registry callbacks."),
+        new("0cce922b-69ae-11d9-bed3-505054503030", "Process Creation", "进程创建", "4688", "Process command line and token elevation context."),
+        new("0cce922c-69ae-11d9-bed3-505054503030", "Process Termination", "进程终止", "4689", "Process exit context for short-lived children."),
+        new("0cce922f-69ae-11d9-bed3-505054503030", "Audit Policy Change", "审核策略更改", "4719", "Audit policy tampering and readiness drift."),
+        new("0cce9231-69ae-11d9-bed3-505054503030", "Authorization Policy Change", "授权策略更改", "4703,4704,4705,4717,4718", "Token/user-right adjustment evidence, including AdjustTokenPrivileges-style gaps."),
+        new("0cce9227-69ae-11d9-bed3-505054503030", "Other Object Access Events", "其它对象访问事件", "4698,4699,4700,4701,4702", "Scheduled-task changes and other object-access events.")
+    ];
+
     private static readonly Regex PrivilegeNameRegex = new(
         @"\bSe[A-Za-z0-9]+Privilege\b",
         RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
@@ -131,7 +146,11 @@ internal sealed class SecurityEventLogProbe : IGuestProbe
             lastQueryUtc = null;
             seenEventKeys.Clear();
             observedLogonIds.Clear();
-            return [CreateStartedEvent(phase, context)];
+            return
+            [
+                CreateStartedEvent(phase, context),
+                await CreateAuditPolicySummaryEventAsync(phase, context, cancellationToken).ConfigureAwait(false)
+            ];
         }
 
         if (phase != ProbePhase.AfterStart && phase != ProbePhase.AfterRun && phase != ProbePhase.Cleanup)
@@ -216,6 +235,24 @@ internal sealed class SecurityEventLogProbe : IGuestProbe
     }
 
     /// <summary>
+    /// Queries the local Advanced Audit Policy table. Inputs are the caller
+    /// cancellation token; processing uses auditpol in report mode and returns
+    /// a bounded command result for a collection-health event.
+    /// </summary>
+    private static Task<BoundedCommandResult> QueryAuditPolicyAsync(CancellationToken cancellationToken)
+    {
+        var auditpolPath = ResolveAuditpolPath();
+        var arguments = new[]
+        {
+            "/get",
+            "/category:*",
+            "/r"
+        };
+
+        return BoundedProcessRunner.RunAsync(auditpolPath, arguments, AuditPolicyCommandTimeout, cancellationToken);
+    }
+
+    /// <summary>
     /// Resolves the event log command path. The input is implicit process
     /// environment state; processing prefers System32 and falls back to PATH.
     /// </summary>
@@ -232,6 +269,25 @@ internal sealed class SecurityEventLogProbe : IGuestProbe
         }
 
         return "wevtutil.exe";
+    }
+
+    /// <summary>
+    /// Resolves auditpol.exe. The input is implicit process environment state;
+    /// processing prefers System32 and falls back to PATH.
+    /// </summary>
+    private static string ResolveAuditpolPath()
+    {
+        var systemDirectory = Environment.SystemDirectory;
+        if (!string.IsNullOrWhiteSpace(systemDirectory))
+        {
+            var candidate = Path.Combine(systemDirectory, "auditpol.exe");
+            if (File.Exists(candidate))
+            {
+                return candidate;
+            }
+        }
+
+        return "auditpol.exe";
     }
 
     /// <summary>
@@ -890,6 +946,99 @@ internal sealed class SecurityEventLogProbe : IGuestProbe
             string.Equals(reason, "collectorLaunchFailed", StringComparison.OrdinalIgnoreCase);
     }
 
+    /// <summary>
+    /// Creates a non-behavior readiness row for Security audit policy coverage.
+    /// Inputs are phase/context; processing queries auditpol and matches
+    /// target subcategory GUIDs; the method returns a health event.
+    /// </summary>
+    private static async Task<SandboxEvent> CreateAuditPolicySummaryEventAsync(
+        ProbePhase phase,
+        GuestProbeContext context,
+        CancellationToken cancellationToken)
+    {
+        var result = await QueryAuditPolicyAsync(cancellationToken).ConfigureAwait(false);
+        var evt = CreateCollectionDiagnosticEvent("security_eventlog.audit_policy.summary", phase, context, "auditPolicyReadiness");
+        evt.Data["collectorMode"] = "auditpol-readiness-query";
+        evt.Data["auditPolicyCommandTimeoutMilliseconds"] = AuditPolicyCommandTimeout.TotalMilliseconds.ToString("0", CultureInfo.InvariantCulture);
+        evt.Data["targetAuditPolicySubcategories"] = JoinDistinct(AuditPolicyExpectations.Select(static item => item.EnglishName));
+        evt.Data["targetAuditPolicyGuids"] = JoinDistinct(AuditPolicyExpectations.Select(static item => item.Guid));
+        evt.Data["targetSecurityEventIds"] = FormatTargetEventIds();
+        evt.Data["auditPolicyReadinessRole"] = "explains whether Windows can emit Security Event Log fallback rows for R0 gaps";
+        evt.Data["r0CoverageGap"] = "Privilege and token adjustment semantics are not fully decoded by R0 callbacks; Security audit policy controls the fallback evidence surface.";
+        evt.Data["zhMessage"] = "已记录 Windows 高级审核策略就绪度，用于解释 Security 日志补充通道是否可能覆盖权限、令牌、进程和对象访问事件。";
+
+        AddCommandResultData(evt.Data, result);
+
+        if (!result.Succeeded)
+        {
+            evt.Data["captureState"] = "partial";
+            evt.Data["status"] = "partial";
+            evt.Data["reason"] = result.TimedOut ? "auditPolicyQueryTimedOut" : "auditPolicyQueryFailed";
+            evt.Data["auditPolicyStatus"] = result.TimedOut ? "queryTimedOut" : "queryFailed";
+            evt.Data["auditPolicyRawCsvSnippet"] = Truncate(result.StandardOutput, MaxAuditPolicySnippetLength);
+            evt.Data["zhHint"] = "auditpol 查询失败不会中断采集；如果报告缺少 4656/4663/4673/4674/4703 等 Security 行，请在 guest 中手工检查高级审核策略和进程对象 SACL。";
+            return evt;
+        }
+
+        var policyRows = ParseAuditPolicyRows(result.StandardOutput);
+        var rowsByGuid = policyRows
+            .Where(static row => !string.IsNullOrWhiteSpace(row.Guid))
+            .GroupBy(static row => NormalizeGuid(row.Guid), StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(static group => group.Key, static group => group.First(), StringComparer.OrdinalIgnoreCase);
+
+        var observed = new List<string>();
+        var enabled = new List<string>();
+        var disabled = new List<string>();
+        var missing = new List<string>();
+        var notes = new List<string>();
+
+        foreach (var expectation in AuditPolicyExpectations)
+        {
+            if (!rowsByGuid.TryGetValue(NormalizeGuid(expectation.Guid), out var row))
+            {
+                missing.Add($"{expectation.EnglishName} ({expectation.SecurityEventIds})");
+                continue;
+            }
+
+            var label = $"{FirstNonEmpty(row.Subcategory, expectation.EnglishName)}={FirstNonEmpty(row.InclusionSetting, "unknown")}";
+            observed.Add(label);
+            if (LooksSuccessAuditEnabled(row.InclusionSetting))
+            {
+                enabled.Add($"{expectation.EnglishName} ({expectation.SecurityEventIds})");
+            }
+            else
+            {
+                disabled.Add($"{expectation.EnglishName} ({expectation.SecurityEventIds})");
+                notes.Add($"{expectation.EnglishName}: {expectation.Rationale}");
+            }
+        }
+
+        evt.Data["auditPolicyParsedRowCount"] = policyRows.Count.ToString(CultureInfo.InvariantCulture);
+        evt.Data["auditPolicyObservedTargets"] = JoinDistinct(observed);
+        evt.Data["auditPolicySuccessEnabledTargets"] = JoinDistinct(enabled);
+        evt.Data["auditPolicyDisabledOrFailureOnlyTargets"] = JoinDistinct(disabled);
+        evt.Data["auditPolicyMissingTargets"] = JoinDistinct(missing);
+        evt.Data["auditPolicyGapNotes"] = JoinDistinct(notes);
+        evt.Data["auditPolicyRawCsvSnippet"] = Truncate(result.StandardOutput, MaxAuditPolicySnippetLength);
+        evt.Data["auditPolicyLocalizationNote"] = "Rows are matched by stable subcategory GUIDs; inclusion-setting text can be localized.";
+
+        if (missing.Count == 0 && disabled.Count == 0)
+        {
+            evt.Data["auditPolicyStatus"] = "targetPoliciesSuccessEnabled";
+            evt.Data["zhHint"] = "目标 Security 事件相关审核策略看起来已开启成功审核；仍需注意 4656/4663 进程对象访问通常还依赖对象 SACL，缺失事件不一定代表样本未访问。";
+        }
+        else
+        {
+            evt.Data["captureState"] = "partial";
+            evt.Data["status"] = "partial";
+            evt.Data["reason"] = "auditPolicyCoverageGap";
+            evt.Data["auditPolicyStatus"] = missing.Count > 0 ? "targetPoliciesMissingOrLocalized" : "targetPoliciesNotFullySuccessEnabled";
+            evt.Data["zhHint"] = "部分目标审核策略未确认开启成功审核；若需要补足 R0 无法解释的令牌/权限/句柄语义，请在快照中启用对应 Advanced Audit Policy，并对敏感进程对象配置必要 SACL。";
+        }
+
+        return evt;
+    }
+
     private static SandboxEvent CreateStartedEvent(ProbePhase phase, GuestProbeContext context)
     {
         var evt = CreateCollectionDiagnosticEvent("security_eventlog.collection.started", phase, context, "started");
@@ -1241,6 +1390,131 @@ internal sealed class SecurityEventLogProbe : IGuestProbe
                 .Distinct(StringComparer.OrdinalIgnoreCase));
     }
 
+    private static IReadOnlyList<AuditPolicyRow> ParseAuditPolicyRows(string csv)
+    {
+        if (string.IsNullOrWhiteSpace(csv))
+        {
+            return [];
+        }
+
+        var lines = csv
+            .Replace("\r", string.Empty, StringComparison.Ordinal)
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(static line => !string.IsNullOrWhiteSpace(line))
+            .ToList();
+        if (lines.Count == 0)
+        {
+            return [];
+        }
+
+        var header = ParseCsvLine(lines[0]);
+        var subcategoryIndex = HeaderIndex(header, "Subcategory", fallback: 2);
+        var guidIndex = HeaderIndex(header, "Subcategory GUID", fallback: 3);
+        var inclusionIndex = HeaderIndex(header, "Inclusion Setting", fallback: 4);
+        var exclusionIndex = HeaderIndex(header, "Exclusion Setting", fallback: 5);
+        var maxIndex = Math.Max(Math.Max(subcategoryIndex, guidIndex), Math.Max(inclusionIndex, exclusionIndex));
+        var rows = new List<AuditPolicyRow>();
+
+        foreach (var line in lines.Skip(1))
+        {
+            var fields = ParseCsvLine(line);
+            if (fields.Count <= maxIndex)
+            {
+                continue;
+            }
+
+            var guid = NormalizeGuid(fields[guidIndex]);
+            if (string.IsNullOrWhiteSpace(guid) || !LooksLikeGuid(guid))
+            {
+                continue;
+            }
+
+            rows.Add(new AuditPolicyRow(
+                fields[subcategoryIndex].Trim(),
+                guid,
+                fields[inclusionIndex].Trim(),
+                exclusionIndex < fields.Count ? fields[exclusionIndex].Trim() : string.Empty));
+        }
+
+        return rows;
+    }
+
+    private static int HeaderIndex(IReadOnlyList<string> header, string name, int fallback)
+    {
+        for (var index = 0; index < header.Count; index++)
+        {
+            if (string.Equals(header[index].Trim(), name, StringComparison.OrdinalIgnoreCase))
+            {
+                return index;
+            }
+        }
+
+        return fallback;
+    }
+
+    private static IReadOnlyList<string> ParseCsvLine(string line)
+    {
+        var fields = new List<string>();
+        var current = new System.Text.StringBuilder();
+        var quoted = false;
+
+        for (var index = 0; index < line.Length; index++)
+        {
+            var ch = line[index];
+            if (ch == '"')
+            {
+                if (quoted && index + 1 < line.Length && line[index + 1] == '"')
+                {
+                    current.Append('"');
+                    index++;
+                }
+                else
+                {
+                    quoted = !quoted;
+                }
+
+                continue;
+            }
+
+            if (ch == ',' && !quoted)
+            {
+                fields.Add(current.ToString());
+                current.Clear();
+                continue;
+            }
+
+            current.Append(ch);
+        }
+
+        fields.Add(current.ToString());
+        return fields;
+    }
+
+    private static bool LooksSuccessAuditEnabled(string inclusionSetting)
+    {
+        if (string.IsNullOrWhiteSpace(inclusionSetting))
+        {
+            return false;
+        }
+
+        var value = inclusionSetting.Trim();
+        return value.Contains("Success", StringComparison.OrdinalIgnoreCase) ||
+            value.Contains("成功", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string NormalizeGuid(string value)
+    {
+        return value
+            .Trim()
+            .Trim('{', '}')
+            .ToLowerInvariant();
+    }
+
+    private static bool LooksLikeGuid(string value)
+    {
+        return Guid.TryParse(value, out _);
+    }
+
     private static string ExtractRenderedFieldValue(string renderedMessage, params string[] labels)
     {
         if (string.IsNullOrWhiteSpace(renderedMessage))
@@ -1439,4 +1713,17 @@ internal sealed class SecurityEventLogProbe : IGuestProbe
         string Status,
         string Reason,
         string FieldName);
+
+    private readonly record struct AuditPolicyExpectation(
+        string Guid,
+        string EnglishName,
+        string ZhName,
+        string SecurityEventIds,
+        string Rationale);
+
+    private readonly record struct AuditPolicyRow(
+        string Subcategory,
+        string Guid,
+        string InclusionSetting,
+        string ExclusionSetting);
 }

@@ -733,6 +733,72 @@ function Get-InstallEntrypointNextSteps {
     return @($steps.ToArray())
 }
 
+function Get-InstallOperatorModeMatrix {
+    $configuredCommand = '.\install.ps1 -InstallEntrypoint UseConfiguredEnvironment -PlanOnly'
+    $restorePlanCommand = '.\install.ps1 -InstallEntrypoint RestoreCleanCheckpoint -PlanOnly'
+    $restoreWhatIfCommand = '.\install.ps1 -InstallEntrypoint RestoreCleanCheckpoint -AllowVmMutation -WhatIf'
+    $restoreCommand = '.\install.ps1 -InstallEntrypoint RestoreCleanCheckpoint -AllowVmMutation -Confirm'
+    $createCommand = '.\install.ps1 -InstallEntrypoint CreateOrPreparePath -PromptPassword'
+
+    return @(
+        [pscustomobject][ordered]@{
+            ModeId = 'use-configured-environment'
+            Entrypoint = 'UseConfiguredEnvironment'
+            TitleZh = '使用已配置环境'
+            TitleEn = 'Use already configured environment'
+            IntentZh = '读取已有 install-state、sandbox.local.json、guest secret、VM/checkpoint profile 和 payload 状态。'
+            DefaultCommand = $configuredCommand
+            SafeDiagnostics = @('.\install.ps1 -Mode Status', '.\install.ps1 -Mode CheckEnvironment', '.\run.ps1 -Mode Status', '.\run.ps1 -Mode CheckEnvironment')
+            MutationBoundary = 'read-only diagnostics only; no local write and no VM mutation'
+            StartsVm = $false
+            RestoresCheckpoint = $false
+            CreatesVm = $false
+            CreatesLocalConfig = $false
+            NextStepsZh = @(
+                '下一步：如果 RecommendedActions 为空或只剩可接受警告，运行 .\run.ps1 启动 WebUI，或运行 .\run.ps1 -Mode Analyze -SamplePreset Notepad 做 PlanOnly。',
+                '下一步：如果缺本机配置、secret、payload、VM 或 checkpoint，请切换到 fresh-create-new-computer 或 rollback-restore-snapshot 对应流程。'
+            )
+        },
+        [pscustomobject][ordered]@{
+            ModeId = 'rollback-restore-snapshot'
+            Entrypoint = 'RestoreCleanCheckpoint'
+            TitleZh = '回退/恢复已有干净快照'
+            TitleEn = 'Rollback or restore existing clean checkpoint/snapshot'
+            IntentZh = '只针对已经存在的 VM 和 clean checkpoint/snapshot；默认 PlanOnly/WhatIf 只展示计划。'
+            DefaultCommand = $restorePlanCommand
+            SafeDiagnostics = @($restorePlanCommand, $restoreWhatIfCommand, '.\scripts\Test-HyperVReadiness.ps1')
+            MutationBoundary = 'actual restore requires -AllowVmMutation plus explicit -Confirm or -Force on an isolated lab host'
+            StartsVm = $false
+            RestoresCheckpoint = $true
+            CreatesVm = $false
+            CreatesLocalConfig = $false
+            MutatingCommand = $restoreCommand
+            NextStepsZh = @(
+                '下一步：先用 -PlanOnly 或 -WhatIf 确认 VM/checkpoint 名称；readiness/package 不会执行恢复。',
+                '下一步：确认隔离实验 VM 可被回退后，管理员 PowerShell 中显式使用 -AllowVmMutation -Confirm；无人值守 lab 才使用 -Force。'
+            )
+        },
+        [pscustomobject][ordered]@{
+            ModeId = 'fresh-create-new-computer'
+            Entrypoint = 'CreateOrPreparePath'
+            TitleZh = '全新创建/新电脑准备'
+            TitleEn = 'Fresh create or new-computer preparation'
+            IntentZh = '准备仓库外 runtime root、本机 sandbox.local.json、guest secret，可选准备 payload；不会创建 Hyper-V VM 或 checkpoint。'
+            DefaultCommand = $createCommand
+            SafeDiagnostics = @('.\install.ps1 -InstallEntrypoint CreateOrPreparePath -PlanOnly', '.\install.ps1 -InstallEntrypoint CreateOrPreparePath -WhatIf', '.\install.ps1 -Mode CheckEnvironment')
+            MutationBoundary = 'local filesystem/config/secret writes only through ShouldProcess; VM creation/checkpoint creation remains a manual Hyper-V operator task'
+            StartsVm = $false
+            RestoresCheckpoint = $false
+            CreatesVm = $false
+            CreatesLocalConfig = $true
+            NextStepsZh = @(
+                '下一步：首台机器先确认 Windows/Hyper-V/BIOS 虚拟化/SLAT/管理员 shell，再创建或导入 golden VM 并创建 clean checkpoint。',
+                '下一步：运行 CreateOrPreparePath 保存本机配置/secret，再用 -Mode Change -UpdateHyperVConfig 记录真实 VM/checkpoint。'
+            )
+        }
+    )
+}
+
 function New-InstallEntrypointDiagnostics {
     param(
         [Parameter(Mandatory)]
@@ -743,10 +809,14 @@ function New-InstallEntrypointDiagnostics {
     $localConfig = Get-LocalSandboxConfigPath
     $checkpointMutationRequested = $SelectedEntrypoint -eq 'RestoreCleanCheckpoint'
     $createOrPrepareRequested = $SelectedEntrypoint -eq 'CreateOrPreparePath'
+    $confirmExplicitlyRequested = $script:InitialRootBoundParameters.Contains('Confirm') -and [System.Convert]::ToBoolean($script:InitialRootBoundParameters['Confirm'])
+    $restoreConfirmationSatisfied = $checkpointMutationRequested -and [bool]$AllowVmMutation -and ($confirmExplicitlyRequested -or [bool]$Force)
+    $restoreWillExecute = $restoreConfirmationSatisfied -and -not [bool]$PlanOnly -and -not [bool]$WhatIfPreference
     $status = Show-KSwordSandboxInstallStatus
 
     [pscustomobject][ordered]@{
         InstallEntrypoint = $SelectedEntrypoint
+        OperatorModeMatrix = @(Get-InstallOperatorModeMatrix)
         UseConfiguredEnvironment = $SelectedEntrypoint -eq 'UseConfiguredEnvironment'
         RestoreExistingCleanCheckpointSnapshot = $checkpointMutationRequested
         CreateOrPrepareNewPath = $createOrPrepareRequested
@@ -755,9 +825,14 @@ function New-InstallEntrypointDiagnostics {
         ShouldProcessRequired = $checkpointMutationRequested -or $createOrPrepareRequested
         VmMutationNeeded = $checkpointMutationRequested
         VmMutationAllowed = [bool]$AllowVmMutation
+        RestoreRequiresAllowVmMutation = $checkpointMutationRequested
+        RestoreRequiresExplicitConfirmOrForce = $checkpointMutationRequested
+        RestoreConfirmExplicitlyRequested = $confirmExplicitlyRequested
+        RestoreForceExplicitlyRequested = [bool]$Force
+        RestoreConfirmationGateSatisfied = $restoreConfirmationSatisfied
         StartsVm = $false
         StopsVm = $false
-        RestoresCheckpointSnapshot = $checkpointMutationRequested -and [bool]$AllowVmMutation -and -not [bool]$WhatIfPreference
+        RestoresCheckpointSnapshot = $restoreWillExecute
         WritesLocalConfig = $createOrPrepareRequested -and -not [bool]$WhatIfPreference
         PreparesGuestPayload = $createOrPrepareRequested -and [bool]$PrepareGuestPayload -and -not [bool]$WhatIfPreference
         VmName = $VmName
@@ -1757,6 +1832,9 @@ function Show-KSwordSandboxInstallStatus {
         GuestTestSigningGuidance = '.\install.ps1 -Mode Change -QueryGuestTestSigning; .\install.ps1 -Mode Change -EnableGuestTestSigning -RestartGuestAfterTestSigning -Force'
         InstallEntrypoint = $InstallEntrypoint
         InstallEntrypointChoices = @('UseConfiguredEnvironment', 'RestoreCleanCheckpoint', 'CreateOrPreparePath')
+        OperatorModeMatrix = @(Get-InstallOperatorModeMatrix)
+        OperatorModeMatrixSchema = 'ksword.install.operator-mode-matrix.v1'
+        OperatorModeGuidanceZh = '中文提示：三种操作者模式互斥选择：使用已配置环境只诊断；回退/恢复快照只针对已有 clean checkpoint 且必须显式确认；全新创建/新电脑准备只写本机目录/config/secret/payload，不创建 VM。'
         UseConfiguredEnvironmentCommand = '.\install.ps1 -InstallEntrypoint UseConfiguredEnvironment -PlanOnly'
         RestoreCheckpointPlanCommand = '.\install.ps1 -InstallEntrypoint RestoreCleanCheckpoint -PlanOnly'
         RestoreCheckpointWhatIfCommand = '.\install.ps1 -InstallEntrypoint RestoreCleanCheckpoint -AllowVmMutation -WhatIf'
@@ -1822,7 +1900,10 @@ function Show-KSwordSandboxEnvironmentCheck {
         CheckEnvironmentStartsVm = $false
         PlanOnlyStartsVm = $false
         InstallEntrypointChoices = @('UseConfiguredEnvironment', 'RestoreCleanCheckpoint', 'CreateOrPreparePath')
+        OperatorModeMatrix = @(Get-InstallOperatorModeMatrix)
         InstallEntrypointVmMutationRequiresAllowVmMutation = $true
+        RestoreCheckpointRequiresExplicitConfirmOrForce = $true
+        ReadinessPackageExecutesInstallerModes = $false
         LiveVmExecutionRequiresExplicitLive = $true
         SecretValuePrinted = $false
         ChineseGuidance = '中文提示：先用本命令查看缺口；安装入口先三选一：使用已配置环境、还原已有干净快照、或创建/准备新路径；配置 VM/快照/guest 密码/driver path/test signing 后，再用 run.ps1 的 Analyze 命令。'

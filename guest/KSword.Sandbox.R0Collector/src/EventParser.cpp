@@ -1032,6 +1032,9 @@ std::string ProcessAccessEventFlagNames(const ULONG flags) {
     appendFlag(KSWORD_SANDBOX_PROCESS_ACCESS_EVENT_FLAG_USER_MODE_REQUEST, "UserModeRequest");
     appendFlag(KSWORD_SANDBOX_PROCESS_ACCESS_EVENT_FLAG_ACCESS_REDUCED, "AccessReduced");
     appendFlag(KSWORD_SANDBOX_PROCESS_ACCESS_EVENT_FLAG_OPERATION_FAILED, "OperationFailed");
+    appendFlag(KSWORD_SANDBOX_PROCESS_ACCESS_EVENT_FLAG_PROCESS_OBJECT, "ProcessObject");
+    appendFlag(KSWORD_SANDBOX_PROCESS_ACCESS_EVENT_FLAG_THREAD_OBJECT, "ThreadObject");
+    appendFlag(KSWORD_SANDBOX_PROCESS_ACCESS_EVENT_FLAG_TARGET_TID_PRESENT, "TargetTidPresent");
 
     const ULONG unknownFlags = flags & ~knownFlags;
     if (unknownFlags != 0) {
@@ -1039,6 +1042,24 @@ std::string ProcessAccessEventFlagNames(const ULONG flags) {
     }
 
     return names.empty() ? "none" : names;
+}
+
+// Input: Draft process/thread handle-access object type.
+// Processing: Converts the public ABI object-type enum to a stable lowercase
+// name so access-mask decoding can distinguish process rights from thread
+// rights without WDK headers.
+// Return: Object type name, or "unrecognized" for future values.
+std::string ProcessAccessObjectTypeName(const ULONG objectType) {
+    switch (objectType) {
+    case KswSandboxProcessAccessObjectTypeNone:
+        return "none";
+    case KswSandboxProcessAccessObjectTypeProcess:
+        return "process";
+    case KswSandboxProcessAccessObjectTypeThread:
+        return "thread";
+    default:
+        return "unrecognized";
+    }
 }
 
 // Input: Windows process access mask.
@@ -1093,6 +1114,171 @@ std::string ProcessAccessMaskNames(const ULONG accessMask) {
     }
 
     return names.empty() ? "none" : names;
+}
+
+// Input: Windows thread access mask.
+// Processing: Decodes stable thread-specific and standard rights used by
+// ObRegisterCallbacks access checks, preserving unknown bits.  This avoids
+// labeling a PsThreadType handle as PROCESS_CREATE_THREAD/VM_WRITE/etc.
+// Return: Pipe-delimited access names, or "none".
+std::string ThreadAccessMaskNames(const ULONG accessMask) {
+    std::string names;
+    ULONG knownMask = 0;
+    const auto appendName = [&names](const std::string& name) {
+        if (!names.empty()) {
+            names += "|";
+        }
+        names += name;
+    };
+    const auto appendRight = [&](const ULONG bit, const char* name) {
+        if ((accessMask & bit) != 0) {
+            appendName(name);
+            knownMask |= bit;
+        }
+    };
+
+    appendRight(0x00000001U, "THREAD_TERMINATE");
+    appendRight(0x00000002U, "THREAD_SUSPEND_RESUME");
+    appendRight(0x00000008U, "THREAD_GET_CONTEXT");
+    appendRight(0x00000010U, "THREAD_SET_CONTEXT");
+    appendRight(0x00000020U, "THREAD_SET_INFORMATION");
+    appendRight(0x00000040U, "THREAD_QUERY_INFORMATION");
+    appendRight(0x00000080U, "THREAD_SET_THREAD_TOKEN");
+    appendRight(0x00000100U, "THREAD_IMPERSONATE");
+    appendRight(0x00000200U, "THREAD_DIRECT_IMPERSONATION");
+    appendRight(0x00000400U, "THREAD_SET_LIMITED_INFORMATION");
+    appendRight(0x00000800U, "THREAD_QUERY_LIMITED_INFORMATION");
+    appendRight(0x00001000U, "THREAD_RESUME");
+    appendRight(0x00010000U, "DELETE");
+    appendRight(0x00020000U, "READ_CONTROL");
+    appendRight(0x00040000U, "WRITE_DAC");
+    appendRight(0x00080000U, "WRITE_OWNER");
+    appendRight(0x00100000U, "SYNCHRONIZE");
+    appendRight(0x01000000U, "ACCESS_SYSTEM_SECURITY");
+    appendRight(0x02000000U, "MAXIMUM_ALLOWED");
+    appendRight(0x10000000U, "GENERIC_ALL");
+    appendRight(0x20000000U, "GENERIC_EXECUTE");
+    appendRight(0x40000000U, "GENERIC_WRITE");
+    appendRight(0x80000000U, "GENERIC_READ");
+
+    const ULONG unknownMask = accessMask & ~knownMask;
+    if (unknownMask != 0) {
+        appendName("Unknown(" + HexUnsignedLongLong(unknownMask, 8) + ")");
+    }
+
+    return names.empty() ? "none" : names;
+}
+
+// Input: Process-handle access object type plus an access mask.
+// Processing: Chooses the process or thread decoder according to ObjectType;
+// unknown/future object types preserve a process-style fallback for older
+// consumers while also emitting the decode scope separately.
+// Return: Pipe-delimited access names, or "none".
+std::string ProcessHandleAccessMaskNames(const ULONG objectType, const ULONG accessMask) {
+    if (objectType == KswSandboxProcessAccessObjectTypeThread) {
+        return ThreadAccessMaskNames(accessMask);
+    }
+
+    return ProcessAccessMaskNames(accessMask);
+}
+
+// Input: Process-handle access object type.
+// Processing: Names which rights table was used for a requested/granted mask.
+// Return: Stable decoder scope label.
+std::string ProcessHandleAccessDecodeScope(const ULONG objectType) {
+    switch (objectType) {
+    case KswSandboxProcessAccessObjectTypeProcess:
+        return "process-rights";
+    case KswSandboxProcessAccessObjectTypeThread:
+        return "thread-rights";
+    default:
+        return "process-rights-fallback";
+    }
+}
+
+// Input: Access mask and object type.
+// Processing: Flags rights that are usually sensitive for process injection,
+// tampering, termination, impersonation, or security-descriptor changes.
+// Return: true when the mask contains at least one high-signal right.
+bool SensitiveProcessHandleAccessMask(const ULONG objectType, const ULONG accessMask) {
+    if (objectType == KswSandboxProcessAccessObjectTypeThread) {
+        return (accessMask &
+            (0x00000001U | // THREAD_TERMINATE
+             0x00000002U | // THREAD_SUSPEND_RESUME
+             0x00000008U | // THREAD_GET_CONTEXT
+             0x00000010U | // THREAD_SET_CONTEXT
+             0x00000020U | // THREAD_SET_INFORMATION
+             0x00000080U | // THREAD_SET_THREAD_TOKEN
+             0x00000100U | // THREAD_IMPERSONATE
+             0x00000200U | // THREAD_DIRECT_IMPERSONATION
+             0x00000400U | // THREAD_SET_LIMITED_INFORMATION
+             0x00001000U | // THREAD_RESUME
+             0x00040000U | // WRITE_DAC
+             0x00080000U | // WRITE_OWNER
+             0x01000000U)) != 0; // ACCESS_SYSTEM_SECURITY
+    }
+
+    return (accessMask &
+        (0x00000001U | // PROCESS_TERMINATE
+         0x00000002U | // PROCESS_CREATE_THREAD
+         0x00000008U | // PROCESS_VM_OPERATION
+         0x00000010U | // PROCESS_VM_READ
+         0x00000020U | // PROCESS_VM_WRITE
+         0x00000040U | // PROCESS_DUP_HANDLE
+         0x00000080U | // PROCESS_CREATE_PROCESS
+         0x00000100U | // PROCESS_SET_QUOTA
+         0x00000200U | // PROCESS_SET_INFORMATION
+         0x00000800U | // PROCESS_SUSPEND_RESUME
+         0x00002000U | // PROCESS_SET_LIMITED_INFORMATION
+         0x00040000U | // WRITE_DAC
+         0x00080000U | // WRITE_OWNER
+         0x01000000U)) != 0; // ACCESS_SYSTEM_SECURITY
+}
+
+// Input: Access mask and object type.
+// Processing: Builds a compact reason list for sensitive-handle triage.
+// Return: Pipe-delimited reasons, or "none".
+std::string SensitiveProcessHandleAccessReasons(const ULONG objectType, const ULONG accessMask) {
+    std::string reasons;
+    const auto appendReason = [&reasons, accessMask](const ULONG bit, const char* reason) {
+        if ((accessMask & bit) == 0) {
+            return;
+        }
+        if (!reasons.empty()) {
+            reasons += "|";
+        }
+        reasons += reason;
+    };
+
+    if (objectType == KswSandboxProcessAccessObjectTypeThread) {
+        appendReason(0x00000001U, "thread-terminate");
+        appendReason(0x00000002U, "thread-suspend-resume");
+        appendReason(0x00000008U, "thread-get-context");
+        appendReason(0x00000010U, "thread-set-context");
+        appendReason(0x00000020U, "thread-set-information");
+        appendReason(0x00000080U, "thread-set-token");
+        appendReason(0x00000100U, "thread-impersonate");
+        appendReason(0x00000200U, "thread-direct-impersonation");
+        appendReason(0x00000400U, "thread-set-limited-information");
+        appendReason(0x00001000U, "thread-resume");
+    } else {
+        appendReason(0x00000001U, "process-terminate");
+        appendReason(0x00000002U, "process-create-thread");
+        appendReason(0x00000008U, "process-vm-operation");
+        appendReason(0x00000010U, "process-vm-read");
+        appendReason(0x00000020U, "process-vm-write");
+        appendReason(0x00000040U, "process-duplicate-handle");
+        appendReason(0x00000080U, "process-create-process");
+        appendReason(0x00000100U, "process-set-quota");
+        appendReason(0x00000200U, "process-set-information");
+        appendReason(0x00000800U, "process-suspend-resume");
+        appendReason(0x00002000U, "process-set-limited-information");
+    }
+
+    appendReason(0x00040000U, "write-dac");
+    appendReason(0x00080000U, "write-owner");
+    appendReason(0x01000000U, "access-system-security");
+    return reasons.empty() ? "none" : reasons;
 }
 
 // Input: Registry operation value from KSWORD_SANDBOX_REGISTRY_EVENT_PAYLOAD.

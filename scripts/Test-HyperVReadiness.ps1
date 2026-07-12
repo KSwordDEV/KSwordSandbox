@@ -2906,6 +2906,45 @@ function Get-ReadinessChineseNextActions {
     return @($actions.ToArray() | Select-Object -Unique)
 }
 
+function Get-ReadinessOperatorModeMatrix {
+    return @(
+        [pscustomobject][ordered]@{
+            ModeId = 'use-configured-environment'
+            Entrypoint = 'UseConfiguredEnvironment'
+            TitleZh = '使用已配置环境'
+            ReadinessRoleZh = '只读确认本机 config/secret/payload/VM/checkpoint 是否已经满足 Live 前置条件。'
+            DiagnosticCommands = @('.\install.ps1 -InstallEntrypoint UseConfiguredEnvironment -PlanOnly', '.\install.ps1 -Mode CheckEnvironment', '.\run.ps1 -Mode CheckEnvironment')
+            MutatesVm = $false
+            SignsDriver = $false
+            PushesOrPublishes = $false
+            NextActionsZh = @('下一步：如果本 readiness 失败，按 RecommendedActionsZh 修复；不要通过 readiness 自动创建 VM 或还原 checkpoint。')
+        },
+        [pscustomobject][ordered]@{
+            ModeId = 'rollback-restore-snapshot'
+            Entrypoint = 'RestoreCleanCheckpoint'
+            TitleZh = '回退/恢复已有干净快照'
+            ReadinessRoleZh = '验证 VM/checkpoint 名称存在性和 PowerShell Direct/Guest Service 前置条件；不执行恢复。'
+            DiagnosticCommands = @('.\install.ps1 -InstallEntrypoint RestoreCleanCheckpoint -PlanOnly', '.\install.ps1 -InstallEntrypoint RestoreCleanCheckpoint -AllowVmMutation -WhatIf', '.\scripts\Test-HyperVReadiness.ps1 -ListAvailableVmProfiles')
+            MutatingCommand = '.\install.ps1 -InstallEntrypoint RestoreCleanCheckpoint -AllowVmMutation -Confirm'
+            MutatesVm = $false
+            SignsDriver = $false
+            PushesOrPublishes = $false
+            NextActionsZh = @('下一步：只有隔离 lab 操作者确认后，才在 readiness 之外使用 -AllowVmMutation -Confirm 或 -Force 恢复已有 clean checkpoint。')
+        },
+        [pscustomobject][ordered]@{
+            ModeId = 'fresh-create-new-computer'
+            Entrypoint = 'CreateOrPreparePath'
+            TitleZh = '全新创建/新电脑准备'
+            ReadinessRoleZh = '识别首台机器缺口：Windows/Hyper-V/BIOS 虚拟化/SLAT/管理员 shell、VM、checkpoint、secret、payload、runtime root。'
+            DiagnosticCommands = @('.\install.ps1 -InstallEntrypoint CreateOrPreparePath -PlanOnly', '.\install.ps1 -InstallEntrypoint CreateOrPreparePath -WhatIf', '.\install.ps1 -Mode CheckEnvironment')
+            MutatesVm = $false
+            SignsDriver = $false
+            PushesOrPublishes = $false
+            NextActionsZh = @('下一步：先在 Hyper-V/宿主机上手工完成兼容性和 golden VM 准备，再运行 CreateOrPreparePath 写本机目录/config/secret。')
+        }
+    )
+}
+
 $script:ReadinessInputMetadata = Resolve-ReadinessInputConfiguration
 $promptMetadata = Import-GuestPasswordFromPrompt `
     -SecretName $GuestPasswordSecretName `
@@ -3092,6 +3131,8 @@ Write-Output ([pscustomobject][ordered]@{
         VmProfileInventoryIncluded = [bool]$ListAvailableVmProfiles
         VmProfileListLimit = $VmProfileListLimit
         InstallEntrypointChoices = @('UseConfiguredEnvironment', 'RestoreCleanCheckpoint', 'CreateOrPreparePath')
+        OperatorModeMatrixSchema = 'ksword.readiness.operator-mode-matrix.v1'
+        OperatorModeMatrix = @(Get-ReadinessOperatorModeMatrix)
         UseConfiguredEnvironmentCommand = '.\install.ps1 -InstallEntrypoint UseConfiguredEnvironment -PlanOnly'
         RestoreCheckpointPlanCommand = '.\install.ps1 -InstallEntrypoint RestoreCleanCheckpoint -PlanOnly'
         RestoreCheckpointWhatIfCommand = '.\install.ps1 -InstallEntrypoint RestoreCleanCheckpoint -AllowVmMutation -WhatIf'
@@ -3106,6 +3147,9 @@ Write-Output ([pscustomobject][ordered]@{
             DidNotStartVm = $true
             DidNotRestoreCheckpoint = $true
             DidNotEnableGuestService = $true
+            DidNotSignDriver = $true
+            DidNotCallCSignTool = $true
+            DidNotPushOrPublish = $true
             SecretValuePrinted = $false
         }
         RecommendedActions = $recommendedActions

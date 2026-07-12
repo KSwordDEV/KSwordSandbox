@@ -12,9 +12,10 @@ delegation, payload preparation, and WebUI startup behavior stay identical to
 the primary release wrapper.
 
 The wrapper does not print secret values, does not sign drivers, and does not
-start a VM by itself. Install-entrypoint selection can explicitly choose
-already configured environment diagnostics, existing clean checkpoint restore
-planning, or create/prepare-new-path behavior.
+start a VM by itself. Install-entrypoint selection explicitly maps to the
+three release-supported operator modes: use an already configured environment,
+rollback/restore an existing clean checkpoint/snapshot, or fresh create /
+new-computer local preparation.
 #>
 [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'Medium')]
 param(
@@ -515,8 +516,8 @@ function Invoke-ScriptInstallEntrypointMenu {
     Write-Host ''
     Write-Host '安装入口选择 / Install entrypoint selection:'
     Write-Host '  1) 使用已配置环境（只诊断，不修改 VM） / Use already configured environment'
-    Write-Host '  2) 还原已有干净 checkpoint/snapshot（默认只给计划；真实还原需 -AllowVmMutation） / Restore existing clean checkpoint'
-    Write-Host '  3) 创建/准备新的本机路径（目录/config，可选 payload；不创建 VM） / Create or prepare new local path'
+    Write-Host '  2) 回退/恢复已有干净 checkpoint/snapshot（默认只给计划；真实还原需 -AllowVmMutation） / Roll back or restore existing clean checkpoint'
+    Write-Host '  3) 全新创建/新电脑准备（目录/config，可选 payload；不创建 VM） / Fresh create or new-computer local preparation'
     $choice = Read-ScriptMenuChoice -Prompt '请选择 [1-3] / Choose [1-3]' -Allowed @('1', '2', '3')
     $selectedEntrypoint = switch ($choice) {
         '1' { 'UseConfiguredEnvironment' }

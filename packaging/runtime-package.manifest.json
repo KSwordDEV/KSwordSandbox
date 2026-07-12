@@ -37,6 +37,42 @@
         "compatibility-boundaries",
         "readiness-package-non-mutation"
       ],
+      "operatorModeMatrix": {
+        "schema": "ksword.release.operator-mode-matrix.v1",
+        "modes": [
+          {
+            "modeId": "use-configured-environment",
+            "entrypoint": "UseConfiguredEnvironment",
+            "titleZh": "使用已配置环境",
+            "defaultCommand": ".\\install.ps1 -InstallEntrypoint UseConfiguredEnvironment -PlanOnly",
+            "packageReadinessMutation": "none",
+            "nextActionsZh": [
+              "下一步：先跑 Status/CheckEnvironment；若 RecommendedActions 为空，再启动 WebUI 或 PlanOnly。"
+            ]
+          },
+          {
+            "modeId": "rollback-restore-snapshot",
+            "entrypoint": "RestoreCleanCheckpoint",
+            "titleZh": "回退/恢复已有干净快照",
+            "defaultCommand": ".\\install.ps1 -InstallEntrypoint RestoreCleanCheckpoint -PlanOnly",
+            "mutatingCommand": ".\\install.ps1 -InstallEntrypoint RestoreCleanCheckpoint -AllowVmMutation -Confirm",
+            "packageReadinessMutation": "forbidden; package/readiness only records metadata and diagnostics",
+            "nextActionsZh": [
+              "下一步：readiness/package 不恢复快照；只有隔离 lab 操作者显式 -AllowVmMutation -Confirm/-Force 才能恢复已有 checkpoint。"
+            ]
+          },
+          {
+            "modeId": "fresh-create-new-computer",
+            "entrypoint": "CreateOrPreparePath",
+            "titleZh": "全新创建/新电脑准备",
+            "defaultCommand": ".\\install.ps1 -InstallEntrypoint CreateOrPreparePath -PromptPassword",
+            "packageReadinessMutation": "none; installer may write local config/secret only when operator runs it directly",
+            "nextActionsZh": [
+              "下一步：首机先确认 Hyper-V/BIOS/SLAT/管理员 shell，手工创建/导入 VM 和 clean checkpoint，再写本机 config/secret/payload。"
+            ]
+          }
+        ]
+      },
       "generatedMetadataFields": [
         "installModeContract",
         "installContractGapDetected",

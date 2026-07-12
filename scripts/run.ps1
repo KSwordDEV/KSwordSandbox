@@ -11,7 +11,9 @@ remain identical to the primary root runtime wrapper.
 
 Default behavior is still a single WebUI launch path. Live Hyper-V execution is
 never implicit; it requires an explicit -Live option passed through to the root
-runtime wrapper.
+runtime wrapper. The runtime wrapper consumes one of the three install-side
+operator paths (configured environment, rollback/restore snapshot, or
+fresh/new-computer preparation) but does not create or restore VMs by default.
 #>
 [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'Medium')]
 param(

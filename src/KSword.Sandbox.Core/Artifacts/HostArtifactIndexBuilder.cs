@@ -1,5 +1,6 @@
 using KSword.Sandbox.Abstractions;
 using KSword.Sandbox.Abstractions.Artifacts;
+using KSword.Sandbox.Core.Network;
 using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -548,6 +549,19 @@ public sealed class HostArtifactIndexBuilder
             "dumpRelativePath",
             "pcapRelativePath",
             "pcapngRelativePath",
+            "pcapSourceArtifactRelativePath",
+            "sourcePcapArtifactRelativePath",
+            "pcapArtifactRelativePath",
+            "pcapSourceArtifactSelector",
+            "sourcePcapArtifactSelector",
+            "pcapDownloadSelector",
+            "sourcePcapDownloadSelector",
+            "sidecarSourceArtifactRelativePath",
+            "sidecarSourceArtifactSelector",
+            "sidecarDownloadSelector",
+            "parentArtifactRelativePath",
+            "parentArtifactSelector",
+            "parentDownloadSelector",
             "etlRelativePath",
             "diagnosticRelativePath"
         })
@@ -587,6 +601,10 @@ public sealed class HostArtifactIndexBuilder
             "pcapPath",
             "pcapngPath",
             "packetCapturePath",
+            "pcapSourceArtifactPath",
+            "sourcePcapArtifactPath",
+            "sidecarSourceArtifactPath",
+            "parentArtifactPath",
             "etlPath"
         })
         {
@@ -1086,9 +1104,19 @@ public sealed class HostArtifactIndexBuilder
                 CaptureState: "captured");
         }
 
-        if (relativePath.Contains("/packet-captures/", StringComparison.OrdinalIgnoreCase) ||
-            relativePath.StartsWith("packet-captures/", StringComparison.OrdinalIgnoreCase) ||
-            ArtifactDescriptorFactory.IsPacketCapturePath(path))
+        if (IsNetworkSidecarArtifactPath(path, relativePath))
+        {
+            return new ArtifactClassification(
+                ArtifactKind.Log,
+                Category: "network-sidecar",
+                EvidenceRole: "network-telemetry-sidecar",
+                CollectionName: "network-sidecars",
+                CapturePhase: InferCapturePhase(fileName),
+                CaptureState: "available",
+                Metadata: BuildNetworkSidecarMetadata(path, jobRoot));
+        }
+
+        if (ArtifactDescriptorFactory.IsPacketCapturePath(path))
         {
             return new ArtifactClassification(
                 ArtifactKind.PacketCapture,
@@ -1844,8 +1872,107 @@ public sealed class HostArtifactIndexBuilder
                 ? "pcapng"
                 : string.Equals(extension, ".pcap", StringComparison.OrdinalIgnoreCase)
                     ? "pcap"
-                    : "unknown"
+                : "unknown"
         };
+    }
+
+    private static bool IsNetworkSidecarArtifactPath(string path, string relativePath)
+    {
+        if (ArtifactDescriptorFactory.IsPacketCapturePath(path))
+        {
+            return false;
+        }
+
+        if (string.Equals(Path.GetFileName(path), "artifact-index.json", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(Path.GetFileName(path), "events.json", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(Path.GetFileName(path), "report.json", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return NetworkSidecarEventImporter.IsLikelyNetworkSidecarPath(relativePath) ||
+            NetworkSidecarEventImporter.IsLikelyNetworkSidecarPath(path);
+    }
+
+    private static IReadOnlyDictionary<string, string> BuildNetworkSidecarMetadata(string path, string jobRoot)
+    {
+        var relativePath = ArtifactDescriptorFactory.SafeRelativePath(jobRoot, path);
+        var safeLink = ArtifactDescriptorFactory.BuildSafeLink(relativePath);
+        var metadata = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["captureSource"] = "external",
+            ["hostCaptureStarted"] = "false",
+            ["importMode"] = "sidecar-artifact",
+            ["importSource"] = "sidecar-jsonl",
+            ["parser"] = "sidecar-jsonl",
+            ["parserInputKind"] = "network-sidecar",
+            ["collectionName"] = "network-sidecars",
+            ["evidenceRole"] = "network-telemetry-sidecar",
+            ["networkSidecarImportable"] = "true",
+            ["tsharkRequired"] = "false",
+            ["sidecarParentPcapLinked"] = "false",
+            ["sidecarPcapLinkSource"] = "none",
+            ["zhHint"] = "这是 PCAP 邻近或独立网络 sidecar；报告会保留源文件下载链接，并尽量导入 DNS/HTTP/TLS/flow 元数据。"
+        };
+
+        AddIfNotEmpty(metadata, "sourceArtifactRelativePath", relativePath);
+        AddIfNotEmpty(metadata, "sourceArtifactSelector", relativePath);
+        AddIfNotEmpty(metadata, "downloadSelector", relativePath);
+        AddIfNotEmpty(metadata, "sourceArtifactSafeLink", safeLink);
+        AddIfNotEmpty(metadata, "downloadSafeLink", safeLink);
+        AddIfNotEmpty(metadata, "sidecarSourceArtifactRelativePath", relativePath);
+        AddIfNotEmpty(metadata, "sidecarSourceArtifactSelector", relativePath);
+        AddIfNotEmpty(metadata, "sidecarDownloadSelector", relativePath);
+        AddIfNotEmpty(metadata, "sidecarSourceArtifactSafeLink", safeLink);
+        AddIfNotEmpty(metadata, "sidecarDownloadSafeLink", safeLink);
+
+        var parentPcapPath = FindAdjacentPacketCapture(path);
+        if (!string.IsNullOrWhiteSpace(parentPcapPath))
+        {
+            var parentRelativePath = ArtifactDescriptorFactory.SafeRelativePath(jobRoot, parentPcapPath);
+            var parentSafeLink = ArtifactDescriptorFactory.BuildSafeLink(parentRelativePath);
+            metadata["sidecarParentPcapLinked"] = "true";
+            metadata["sidecarPcapLinkSource"] = "host-artifact-index-adjacent";
+            AddIfNotEmpty(metadata, "parentArtifactPath", parentPcapPath);
+            AddIfNotEmpty(metadata, "parentArtifactName", Path.GetFileName(parentPcapPath));
+            AddIfNotEmpty(metadata, "parentArtifactRelativePath", parentRelativePath);
+            AddIfNotEmpty(metadata, "parentArtifactSelector", parentRelativePath);
+            AddIfNotEmpty(metadata, "parentDownloadSelector", parentRelativePath);
+            AddIfNotEmpty(metadata, "parentArtifactSafeLink", parentSafeLink);
+            AddIfNotEmpty(metadata, "parentDownloadSafeLink", parentSafeLink);
+            AddIfNotEmpty(metadata, "pcapSourceArtifactRelativePath", parentRelativePath);
+            AddIfNotEmpty(metadata, "pcapSourceArtifactSelector", parentRelativePath);
+            AddIfNotEmpty(metadata, "pcapDownloadSelector", parentRelativePath);
+            AddIfNotEmpty(metadata, "pcapSourceArtifactSafeLink", parentSafeLink);
+            AddIfNotEmpty(metadata, "pcapDownloadSafeLink", parentSafeLink);
+        }
+
+        return metadata;
+    }
+
+    private static string? FindAdjacentPacketCapture(string sidecarPath)
+    {
+        var directory = Path.GetDirectoryName(sidecarPath);
+        if (string.IsNullOrWhiteSpace(directory) || !Directory.Exists(directory))
+        {
+            return null;
+        }
+
+        var sidecarBase = Path.GetFileNameWithoutExtension(sidecarPath);
+        foreach (var candidate in Directory.EnumerateFiles(directory)
+            .Where(ArtifactDescriptorFactory.IsPacketCapturePath)
+            .OrderBy(file => file, StringComparer.OrdinalIgnoreCase))
+        {
+            var captureBase = Path.GetFileNameWithoutExtension(candidate);
+            if (sidecarBase.StartsWith(captureBase + ".", StringComparison.OrdinalIgnoreCase) ||
+                sidecarBase.Equals(captureBase, StringComparison.OrdinalIgnoreCase) ||
+                captureBase.StartsWith(sidecarBase + ".", StringComparison.OrdinalIgnoreCase))
+            {
+                return candidate;
+            }
+        }
+
+        return null;
     }
 
     private static string CollectionNameForKind(ArtifactKind kind)
