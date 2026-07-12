@@ -21,8 +21,7 @@ internal sealed class BehaviorRuleV25SemanticFieldsScenario : ISmokeTestScenario
         "http-transfer-authenticated-upload-hints",
         "tls-cert-common-name-ip-or-dynamic-host",
         "tls-cert-invalid-validity-window",
-        "artifact-evidence-matrix-selectors-ready",
-        "r0-backpressure-or-loss-observed"
+        "artifact-evidence-matrix-selectors-ready"
     ];
 
     public string ScenarioId => "behavior.rules-v25-semantic-fields";
@@ -40,8 +39,9 @@ internal sealed class BehaviorRuleV25SemanticFieldsScenario : ISmokeTestScenario
             string.Equals(rules.Version, "2026-07-12-v25-r0-file-network-semantic-fields", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(rules.Version, "2026-07-12-v26-self-noise-guard-hardening", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(rules.Version, "2026-07-12-v27-behavior-rule-expansion", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(rules.Version, "2026-07-12-v28-behavior-rule-expansion", StringComparison.OrdinalIgnoreCase),
-            "Behavior rules should carry the v25 R0/file/network semantic-field version or newer v26/v27/v28 behavior hardening version.");
+            string.Equals(rules.Version, "2026-07-12-v28-behavior-rule-expansion", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(rules.Version, "2026-07-12-v29-security-privilege", StringComparison.OrdinalIgnoreCase),
+            "Behavior rules should carry the v25 R0/file/network semantic-field version or newer behavior hardening version.");
 
         var indexedRules = rules.Rules.ToDictionary(rule => rule.Id, StringComparer.OrdinalIgnoreCase);
         foreach (var ruleId in RequiredRuleIds)

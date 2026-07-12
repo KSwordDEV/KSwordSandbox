@@ -564,7 +564,7 @@ internal sealed class SyntheticEndToEndSmokeScenario : ISmokeTestScenario
             "Guest import marker should count at least events.json plus driver-events.jsonl rows and stay bounded by the refreshed report event count.");
         SmokeAssert.True(report.Findings.Any(finding => finding.RuleId == "script-interpreter"), "Synthetic process event should trigger script-interpreter rule.");
         SmokeAssert.True(report.Findings.Any(finding => finding.RuleId == "registry-change"), "Synthetic registry event should trigger registry-change rule.");
-        SmokeAssert.True(report.Findings.Any(finding => finding.RuleId == "r0collector-mock-driver-event"), "Synthetic R0 mock event should trigger R0 collector rule.");
+        SmokeAssert.True(!report.Findings.Any(finding => finding.RuleId == "r0collector-mock-driver-event"), "Synthetic R0 mock plumbing should stay in R0/raw evidence and not trigger a behavior-rule finding.");
         SmokeAssert.True(report.Metrics.TryGetValue("events.total", out var totalEvents) && totalEvents >= 14, "Imported report metrics should count planning, runbook, guest, driver, and import events.");
 
         return report;

@@ -140,6 +140,13 @@ Do not globally exclude `source=r0collector` in rules whose purpose is to
 consume parsed R0 rows; instead, require the semantic fields and suppress known
 collector-health or self-noise markers.
 
+中文呈现要求：R0 规则摘要必须明确说明该命中属于哪一类证据：
+`sample-correlated` 样本相关行为、`collection health` 采集健康/证据质量、
+或 `security audit noise`/上下文审计噪声。不要把“未能归因到样本”的
+R0、Security 或 ETW 行写成良性结论；应写成“保持分诊/上下文复核”，
+并指出需要样本 PID、进程树、路径、端点、注册表值或后续执行证据来完成
+行为归因。
+
 For current high-signal scoring rules, the guard baseline is:
 `behaviorCounted=false`, `nonbehavior=true`, `collectorSelfNoise=true`,
 `collectorNoise=true`, `r0SelfNoise=true`, `noise=true`, `selfNoise=true`,
@@ -161,6 +168,14 @@ existing rule `tags`. The v27 and v28 behavior-rule batches follow this
 constraint by using tags such as `open-source-reference`, `sigma-style`,
 `elastic-style`, `splunk-style`, and `lolbas-inspired`; no dedicated
 source-reference schema field exists.
+
+Security/ETW audit rows are often broad Windows audit or provider context
+rather than sample behavior. Rules that consume Security log, ETW privilege,
+object-access, process-access, or event-log telemetry should present these rows
+as supporting context unless they positively correlate to the sample process or
+execution chain and a higher-signal action. In Chinese summaries, use wording
+such as “安全审计噪声/辅助上下文” for uncorrelated rows and reserve
+“样本相关防御规避/权限行为” for rows with clear sample attribution.
 
 ## Artifact-backed correlation handoff
 

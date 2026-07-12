@@ -35,6 +35,7 @@ internal sealed class SecurityEventLogProbe : IGuestProbe
     private static readonly int[] TargetEventIds =
     [
         4656, // A handle to an object was requested; filtered to Process objects after parsing.
+        4648, // A logon was attempted using explicit credentials.
         4663, // An attempt was made to access an object; filtered to Process objects after parsing.
         4672, // Special privileges assigned to new logon.
         4673, // A privileged service was called.
@@ -99,6 +100,7 @@ internal sealed class SecurityEventLogProbe : IGuestProbe
     private static readonly AuditPolicyExpectation[] AuditPolicyExpectations =
     [
         new("0cce9211-69ae-11d9-bed3-505054503030", "Security System Extension", "安全系统扩展", "4697", "Service installation auditing; useful when service persistence is not visible in R0 callbacks."),
+        new("0cce9215-69ae-11d9-bed3-505054503030", "Logon", "登录", "4648", "Explicit credential use; helps explain run-as, net-use, and process credential context not visible in R0 callbacks."),
         new("0cce921b-69ae-11d9-bed3-505054503030", "Special Logon", "特殊登录", "4672", "Special privilege assignment at logon; helps explain later privilege/token context."),
         new("0cce9223-69ae-11d9-bed3-505054503030", "Handle Manipulation", "句柄操作", "4656,4663,4690", "Process/object handle requests, accesses, and duplicate-handle attempts; requires object auditing/SACL for many targets."),
         new("0cce9228-69ae-11d9-bed3-505054503030", "Sensitive Privilege Use", "敏感权限使用", "4673,4674", "Privileged service/object operations; complements R0 process and registry callbacks."),
@@ -739,6 +741,7 @@ internal sealed class SecurityEventLogProbe : IGuestProbe
         AddIfNotEmpty(data, "targetUserName", Field(rawEvent.EventData, "TargetUserName"));
         AddIfNotEmpty(data, "targetDomainName", Field(rawEvent.EventData, "TargetDomainName"));
         AddIfNotEmpty(data, "targetLogonId", Field(rawEvent.EventData, "TargetLogonId"));
+        AddProcessAccountAliases(data, rawEvent);
         AddIfNotEmpty(data, "privilegeList", FirstNonEmpty(
             Field(rawEvent.EventData, "PrivilegeList"),
             Field(rawEvent.EventData, "EnabledPrivilegeList"),
@@ -748,12 +751,58 @@ internal sealed class SecurityEventLogProbe : IGuestProbe
         AddPrivilegeAliases(data, rawEvent);
         AddObjectAccessAliases(data, rawEvent);
         AddTokenProcessPrivilegeAliases(data, rawEvent);
+        AddCredentialUseAliases(data, rawEvent);
         AddIfNotEmpty(data, "serviceName", Field(rawEvent.EventData, "ServiceName"));
         AddIfNotEmpty(data, "serviceFileName", Field(rawEvent.EventData, "ServiceFileName"));
         AddIfNotEmpty(data, "taskName", Field(rawEvent.EventData, "TaskName"));
         AddIfNotEmpty(data, "memberName", Field(rawEvent.EventData, "MemberName"));
         AddIfNotEmpty(data, "memberSid", Field(rawEvent.EventData, "MemberSid"));
         AddIfNotEmpty(data, "groupName", Field(rawEvent.EventData, "TargetUserName"));
+    }
+
+    /// <summary>
+    /// Adds stable account aliases for Security rows where the same Windows
+    /// actor/target account is exposed with event-specific field names. These
+    /// aliases keep process-account reporting consistent while preserving raw
+    /// eventData.* fields.
+    /// </summary>
+    private static void AddProcessAccountAliases(Dictionary<string, string> data, RawSecurityEvent rawEvent)
+    {
+        var subjectUser = FirstNonEmpty(
+            Field(rawEvent.EventData, "SubjectUserName"),
+            Field(rawEvent.EventData, "AccountName"));
+        var subjectDomain = FirstNonEmpty(
+            Field(rawEvent.EventData, "SubjectDomainName"),
+            Field(rawEvent.EventData, "AccountDomain"));
+        var targetUser = FirstNonEmpty(
+            Field(rawEvent.EventData, "TargetUserName"),
+            Field(rawEvent.EventData, "TargetAccountName"),
+            Field(rawEvent.EventData, "NewTargetUserName"));
+        var targetDomain = FirstNonEmpty(
+            Field(rawEvent.EventData, "TargetDomainName"),
+            Field(rawEvent.EventData, "TargetAccountDomain"),
+            Field(rawEvent.EventData, "NewTargetDomainName"));
+        var subjectAccount = JoinAccount(subjectDomain, subjectUser);
+        var targetAccount = JoinAccount(targetDomain, targetUser);
+
+        AddIfNotEmpty(data, "subjectAccount", subjectAccount);
+        AddIfNotEmpty(data, "actorAccount", subjectAccount);
+        AddIfNotEmpty(data, "callerAccount", subjectAccount);
+        AddIfNotEmpty(data, "processAccount", FirstNonEmpty(targetAccount, subjectAccount));
+        AddIfNotEmpty(data, "processUser", FirstNonEmpty(targetAccount, subjectAccount));
+        AddIfNotEmpty(data, "targetAccount", targetAccount);
+        AddIfNotEmpty(data, "accountName", FirstNonEmpty(targetUser, subjectUser));
+        AddIfNotEmpty(data, "accountDomain", FirstNonEmpty(targetDomain, subjectDomain));
+        AddIfNotEmpty(data, "accountSid", FirstNonEmpty(
+            Field(rawEvent.EventData, "TargetUserSid"),
+            Field(rawEvent.EventData, "SubjectUserSid")));
+
+        if (rawEvent.EventId is >= 4720 and <= 4739)
+        {
+            data["accountChangeTelemetry"] = "true";
+            data["accountChangeTelemetrySource"] = $"windows-security-event-{rawEvent.EventId.ToString(CultureInfo.InvariantCulture)}";
+            data["operation"] = AppendOperation(data, EventName(rawEvent.EventId));
+        }
     }
 
     /// <summary>
@@ -917,6 +966,53 @@ internal sealed class SecurityEventLogProbe : IGuestProbe
             data["privilegedObjectOperationTelemetrySource"] = "windows-security-event-4674";
             data["operation"] = AppendOperation(data, "privileged object operation attempted");
         }
+    }
+
+    /// <summary>
+    /// Adds explicit-credential aliases for Security 4648. EventData field
+    /// names are stable enough for direct mapping, but these report-facing
+    /// aliases keep credential target, actor process, account, and network
+    /// endpoint fields discoverable under consistent names.
+    /// </summary>
+    private static void AddCredentialUseAliases(Dictionary<string, string> data, RawSecurityEvent rawEvent)
+    {
+        if (rawEvent.EventId != 4648)
+        {
+            return;
+        }
+
+        var processId = FirstNonEmpty(
+            Field(rawEvent.EventData, "ProcessId"),
+            Field(rawEvent.EventData, "ClientProcessId"));
+        var processName = FirstNonEmpty(
+            Field(rawEvent.EventData, "ProcessName"),
+            Field(rawEvent.EventData, "Application"));
+        var subjectAccount = JoinAccount(
+            Field(rawEvent.EventData, "SubjectDomainName"),
+            Field(rawEvent.EventData, "SubjectUserName"));
+        var targetAccount = JoinAccount(
+            Field(rawEvent.EventData, "TargetDomainName"),
+            Field(rawEvent.EventData, "TargetUserName"));
+
+        AddIfNotEmpty(data, "credentialSubjectAccount", subjectAccount);
+        AddIfNotEmpty(data, "credentialTargetAccount", targetAccount);
+        AddIfNotEmpty(data, "credentialTargetUserName", Field(rawEvent.EventData, "TargetUserName"));
+        AddIfNotEmpty(data, "credentialTargetDomainName", Field(rawEvent.EventData, "TargetDomainName"));
+        AddIfNotEmpty(data, "credentialTargetServerName", Field(rawEvent.EventData, "TargetServerName"));
+        AddIfNotEmpty(data, "credentialTargetInfo", Field(rawEvent.EventData, "TargetInfo"));
+        AddIfNotEmpty(data, "credentialProcessId", processId);
+        AddIfNotEmpty(data, "credentialProcessName", SafeFileName(processName));
+        AddIfNotEmpty(data, "credentialImagePath", processName);
+        AddIfNotEmpty(data, "credentialLogonGuid", FirstNonEmpty(
+            Field(rawEvent.EventData, "TargetLogonGuid"),
+            Field(rawEvent.EventData, "LogonGuid")));
+        AddIfNotEmpty(data, "credentialSourceIpAddress", Field(rawEvent.EventData, "IpAddress"));
+        AddIfNotEmpty(data, "credentialSourceIpPort", Field(rawEvent.EventData, "IpPort"));
+        data["explicitCredentialsUsed"] = "true";
+        data["credentialUseTelemetry"] = "true";
+        data["credentialUseTelemetrySource"] = "windows-security-event-4648";
+        data["operation"] = AppendOperation(data, "explicit credentials used for logon");
+        data["zhCredentialHint"] = "该事件表示某进程尝试使用显式凭据访问本机或远端资源；请结合 credentialTargetAccount、credentialTargetServerName、credentialProcessId 和样本关联字段判断是否属于样本行为。";
     }
 
     /// <summary>
@@ -1590,6 +1686,7 @@ internal sealed class SecurityEventLogProbe : IGuestProbe
     {
         return eventId switch
         {
+            4648 => "security.credential.explicit_logon",
             4672 => "security.privilege.special_logon",
             4656 => "security.process.access_requested",
             4663 => "security.process.accessed",
@@ -1632,6 +1729,7 @@ internal sealed class SecurityEventLogProbe : IGuestProbe
         return eventId switch
         {
             4656 or 4663 or 4690 => "process-handle-access",
+            4648 => "credential-use",
             4672 or 4673 or 4674 => "privilege-use",
             4696 or 4703 or 4704 or 4705 or 4717 or 4718 => "token-adjustment",
             4688 or 4689 => "process-create-exit",
@@ -1648,6 +1746,7 @@ internal sealed class SecurityEventLogProbe : IGuestProbe
         return eventId switch
         {
             4656 or 4663 or 4690 => "R0 v1 does not directly report every OpenProcess/DuplicateHandle/PROCESS_VM_* access right against another process.",
+            4648 => "R0 callbacks do not directly expose explicit credential use, run-as style logons, or credential target account/server context.",
             4672 or 4673 or 4674 => "R0 callbacks do not reliably explain Se*Privilege assignment/use or privileged service/object operations.",
             4696 or 4703 or 4704 or 4705 or 4717 or 4718 => "R0 callbacks do not directly explain primary-token assignment, AdjustTokenPrivileges-style changes, or local user-right policy changes.",
             4688 or 4689 => "Security process lifecycle rows can add command line, token, and short-lived process context when snapshots or R0 evidence are incomplete.",
@@ -1663,6 +1762,7 @@ internal sealed class SecurityEventLogProbe : IGuestProbe
     {
         return eventId switch
         {
+            4648 => "explicit-credentials-logon-attempted",
             4672 => "special-privileges-assigned-to-new-logon",
             4656 => "process-handle-requested",
             4663 => "process-object-accessed",
@@ -1704,6 +1804,7 @@ internal sealed class SecurityEventLogProbe : IGuestProbe
     {
         return eventId switch
         {
+            4648 => "Windows 安全日志记录了使用显式凭据尝试登录或访问资源的事件，可补充进程账户和凭据目标上下文。",
             4672 => "Windows 安全日志记录了新登录会话获得特殊权限的事件。",
             4656 => "Windows 安全日志记录了进程对象句柄请求事件，可作为 R0 进程访问权限观测的补充。",
             4663 => "Windows 安全日志记录了进程对象访问事件，可作为 R0 进程访问权限观测的补充。",

@@ -108,7 +108,14 @@ internal sealed class BehaviorRuleSchemaCollectionHealthGuardScenario : ISmokeTe
         "exclusiveMax"
     };
 
-    private static readonly HashSet<string> CollectionHealthRuleIds = new(StringComparer.OrdinalIgnoreCase)
+    private static readonly HashSet<string> NonBehaviorStatusRuleIds = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "virustotal-not-found",
+        "virustotal-rate-limited",
+        "virustotal-not-configured"
+    };
+
+    private static readonly HashSet<string> RemovedCollectionHealthFindingRuleIds = new(StringComparer.OrdinalIgnoreCase)
     {
         "r0collector-device-unavailable",
         "r0collector-start-failed",
@@ -117,9 +124,8 @@ internal sealed class BehaviorRuleSchemaCollectionHealthGuardScenario : ISmokeTe
         "r0collector-driver-health",
         "r0collector-lifecycle",
         "r0collector-ioctl-failure",
-        "virustotal-not-found",
-        "virustotal-rate-limited",
-        "virustotal-not-configured"
+        "r0-backpressure-or-loss-observed",
+        "process-tree-root-unavailable"
     };
 
     public string ScenarioId => "rules.schema-collection-health.guard";
@@ -196,7 +202,12 @@ internal sealed class BehaviorRuleSchemaCollectionHealthGuardScenario : ISmokeTe
     private static void AssertCollectionHealthRuleContracts(BehaviorRuleSet rules)
     {
         var indexed = rules.Rules.ToDictionary(rule => rule.Id, StringComparer.OrdinalIgnoreCase);
-        foreach (var ruleId in CollectionHealthRuleIds)
+        foreach (var removedRuleId in RemovedCollectionHealthFindingRuleIds)
+        {
+            SmokeAssert.True(!indexed.ContainsKey(removedRuleId), $"Collection-health/status rule '{removedRuleId}' should not exist as a behavior-rule finding source.");
+        }
+
+        foreach (var ruleId in NonBehaviorStatusRuleIds)
         {
             SmokeAssert.True(indexed.TryGetValue(ruleId, out var rule), $"Collection-health/status rule '{ruleId}' is missing.");
             SmokeAssert.True(string.Equals(rule!.Severity, "info", StringComparison.OrdinalIgnoreCase), $"Collection-health/status rule '{ruleId}' should remain info severity.");
@@ -213,14 +224,17 @@ internal sealed class BehaviorRuleSchemaCollectionHealthGuardScenario : ISmokeTe
     {
         var events = BuildCollectionHealthEvents();
         var findings = new RuleEngine(rules).Classify(events);
-        SmokeAssert.True(findings.Count > 0, "Synthetic collection-health events should match diagnostic/status rules.");
+        SmokeAssert.True(findings.Count > 0, "Synthetic VT status events should match reputation/status rules.");
 
         var unexpected = findings
-            .Where(finding => !CollectionHealthRuleIds.Contains(finding.RuleId))
+            .Where(finding => !NonBehaviorStatusRuleIds.Contains(finding.RuleId))
             .Select(finding => finding.RuleId)
             .Order(StringComparer.OrdinalIgnoreCase)
             .ToList();
-        SmokeAssert.True(unexpected.Count == 0, "Collection-health synthetic events should not trigger primary behavior rules: " + string.Join(", ", unexpected));
+        SmokeAssert.True(unexpected.Count == 0, "Collection-health synthetic events should not trigger behavior-rule findings: " + string.Join(", ", unexpected));
+        SmokeAssert.True(
+            findings.All(finding => !RemovedCollectionHealthFindingRuleIds.Contains(finding.RuleId)),
+            "R0/process-tree collection-health rows should remain in R0/raw sections and should not become behavior findings.");
 
         foreach (var finding in findings)
         {
@@ -242,6 +256,10 @@ internal sealed class BehaviorRuleSchemaCollectionHealthGuardScenario : ISmokeTe
                 ProcessName = "KSword.Sandbox.R0Collector.exe",
                 Data =
                 {
+                    ["behaviorCounted"] = "false",
+                    ["sampleBehaviorCandidate"] = "false",
+                    ["nonbehavior"] = "true",
+                    ["collectionHealth"] = "true",
                     ["collectorVersion"] = "synthetic-contract"
                 }
             },
@@ -253,6 +271,10 @@ internal sealed class BehaviorRuleSchemaCollectionHealthGuardScenario : ISmokeTe
                 Path = @"HKCU\Software\Microsoft\Windows\CurrentVersion\Run\ShouldRemainDiagnosticOnly",
                 Data =
                 {
+                    ["behaviorCounted"] = "false",
+                    ["sampleBehaviorCandidate"] = "false",
+                    ["nonbehavior"] = "true",
+                    ["collectionHealth"] = "true",
                     ["diagnosticCode"] = "open_device_not_found",
                     ["readinessState"] = "unavailable",
                     ["driverStateName"] = "DeviceUnavailable"
@@ -265,6 +287,10 @@ internal sealed class BehaviorRuleSchemaCollectionHealthGuardScenario : ISmokeTe
                 Source = "r0collector",
                 Data =
                 {
+                    ["behaviorCounted"] = "false",
+                    ["sampleBehaviorCandidate"] = "false",
+                    ["nonbehavior"] = "true",
+                    ["collectionHealth"] = "true",
                     ["driverStateName"] = "Healthy",
                     ["queueDepth"] = "0",
                     ["queueCapacity"] = "4096",
@@ -278,6 +304,10 @@ internal sealed class BehaviorRuleSchemaCollectionHealthGuardScenario : ISmokeTe
                 Source = "r0collector",
                 Data =
                 {
+                    ["behaviorCounted"] = "false",
+                    ["sampleBehaviorCandidate"] = "false",
+                    ["nonbehavior"] = "true",
+                    ["collectionHealth"] = "true",
                     ["operation"] = "DeviceIoControl",
                     ["error"] = "ERROR_INVALID_FUNCTION",
                     ["diagnosticStage"] = "driver-health"
@@ -291,6 +321,10 @@ internal sealed class BehaviorRuleSchemaCollectionHealthGuardScenario : ISmokeTe
                 Path = @"\\.\KSwordSandboxDriver",
                 Data =
                 {
+                    ["behaviorCounted"] = "false",
+                    ["sampleBehaviorCandidate"] = "false",
+                    ["nonbehavior"] = "true",
+                    ["collectionHealth"] = "true",
                     ["mock"] = "true",
                     ["driverEventPath"] = "driver-events.jsonl",
                     ["noise"] = "true"

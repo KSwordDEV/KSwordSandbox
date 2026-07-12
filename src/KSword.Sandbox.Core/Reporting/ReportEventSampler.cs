@@ -639,18 +639,22 @@ public static class ReportEventSampler
 
     private static IEnumerable<SandboxEvent> SelectEvents(IReadOnlyList<SandboxEvent> orderedEvents, ReportEventSamplingOptions options)
     {
-        if (orderedEvents.Count <= options.MaxInlineEvents)
+        var inlineCandidates = orderedEvents
+            .Where(static evt => !IsLowValueOperationalInlineEvent(evt))
+            .ToList();
+
+        if (inlineCandidates.Count <= options.MaxInlineEvents)
         {
-            return orderedEvents;
+            return inlineCandidates;
         }
 
-        var selected = new bool[orderedEvents.Count];
+        var selected = new bool[inlineCandidates.Count];
         var perType = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         var selectedCount = 0;
 
-        for (var index = 0; index < orderedEvents.Count && selectedCount < options.MaxInlineEvents; index++)
+        for (var index = 0; index < inlineCandidates.Count && selectedCount < options.MaxInlineEvents; index++)
         {
-            var evt = orderedEvents[index];
+            var evt = inlineCandidates[index];
             var eventType = NormalizeEventType(evt.EventType);
             var typeLimit = IsHighValueReportEvent(evt)
                 ? options.MaxHighValueEventsPerType
@@ -672,15 +676,47 @@ public static class ReportEventSampler
         // remains the authority; avoiding a fill pass prevents driver.file or
         // registry noise from overwhelming user-facing reports.
         var result = new List<SandboxEvent>(selectedCount);
-        for (var index = 0; index < orderedEvents.Count; index++)
+        for (var index = 0; index < inlineCandidates.Count; index++)
         {
             if (selected[index])
             {
-                result.Add(orderedEvents[index]);
+                result.Add(inlineCandidates[index]);
             }
         }
 
         return result;
+    }
+
+    private static bool IsLowValueOperationalInlineEvent(SandboxEvent evt)
+    {
+        var eventType = NormalizeEventType(evt.EventType);
+        if (TextEqualsAny(
+                eventType,
+                "agent.start",
+                "environment.snapshot",
+                "environment.detail",
+                "service.snapshot",
+                "scheduled_task.snapshot",
+                "startup_item.snapshot",
+                "registry.run.snapshot",
+                "dns.cache.snapshot",
+                "network.hosts.snapshot",
+                "network.proxy.snapshot",
+                "network.netstat.snapshot",
+                "network.tcp.listener.snapshot",
+                "network.udp.listener.snapshot"))
+        {
+            return true;
+        }
+
+        return EventDataBoolTrue(
+                evt,
+                "baselineSnapshot",
+                "inventorySnapshot",
+                "operationalEvent",
+                "hostControlPlane",
+                "hostGenerated") &&
+            !EventDataBoolTrue(evt, "behaviorCounted", "sampleBehaviorCandidate", "strongSampleCorrelation");
     }
 
     private static SandboxEvent BuildSamplingMarker(
@@ -898,6 +934,31 @@ public static class ReportEventSampler
     private static string DataValue(IReadOnlyDictionary<string, string> data, string key)
     {
         return data.TryGetValue(key, out var value) ? value : string.Empty;
+    }
+
+    private static bool EventDataBoolTrue(SandboxEvent evt, params string[] keys)
+    {
+        foreach (var key in keys)
+        {
+            if (evt.Data.TryGetValue(key, out var value) && IsTruthy(value))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool IsTruthy(string value)
+    {
+        return string.Equals(value, "true", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(value, "1", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(value, "yes", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool TextEqualsAny(string value, params string[] candidates)
+    {
+        return candidates.Any(candidate => string.Equals(value, candidate, StringComparison.OrdinalIgnoreCase));
     }
 
     private static string? Truncate(string? value, int maxCharacters)

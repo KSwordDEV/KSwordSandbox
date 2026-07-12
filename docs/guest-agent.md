@@ -112,7 +112,8 @@ guest-output 目录下解析文件，而不是信任 VM 内绝对路径。
   related `security.*` audit rows from a best-effort Windows Security Event Log
   supplement (`source=windowsEventLog`). The agent queries targeted
   Microsoft-Windows-Security-Auditing IDs including 4656/4663/4690 process-object
-  access fallback rows, 4672, 4688, 4689, and 4703, plus nearby token,
+  access fallback rows, 4648 explicit-credential logon attempts, 4672, 4688,
+  4689, and 4703, plus nearby token,
   privileged-service, service-install, scheduled-task, account/group,
   user-right, and audit-policy events. `wevtutil qe Security` is bounded with
   `/rd:true`, RenderedXml output, a per-read `/c` cap, and a short timeout;
@@ -130,7 +131,14 @@ guest-output 目录下解析文件，而不是信任 VM 内绝对路径。
   `PrivilegeList` / `EnabledPrivilegeList` / `DisabledPrivilegeList` into
   rule-consumable `privilege`, `privilegeName`, `privilegeNames`, `operation`,
   `api`, `enabledPrivilegeNames`, and `disabledPrivilegeNames` aliases when
-  present. 4696 rows add token-assignment aliases such as
+  present. Common Security rows also expose stable process-account aliases such
+  as `subjectAccount`, `actorAccount`, `callerAccount`, `processAccount`,
+  `processUser`, `targetAccount`, `accountName`, `accountDomain`, and
+  `accountSid`. 4648 rows add explicit credential-use aliases including
+  `credentialSubjectAccount`, `credentialTargetAccount`,
+  `credentialTargetServerName`, `credentialTargetInfo`, `credentialProcessId`,
+  `credentialImagePath`, `credentialSourceIpAddress`, `explicitCredentialsUsed`,
+  and `zhCredentialHint`. 4696 rows add token-assignment aliases such as
   `tokenTargetProcessId`, `tokenTargetImagePath`, `assignedTokenUser`, and
   `tokenAssignment=true`. 4673/4674 rows add privileged-service/object aliases
   (`privilegedServiceName`, `privilegedObjectName`, privilege names, and

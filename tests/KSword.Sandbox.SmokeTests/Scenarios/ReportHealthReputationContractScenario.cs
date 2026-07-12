@@ -17,7 +17,6 @@ internal sealed class ReportHealthReputationContractScenario : ISmokeTestScenari
 {
     private static readonly string[] DiagnosticRuleIds =
     [
-        "r0collector-device-unavailable",
         "virustotal-not-found",
         "virustotal-rate-limited"
     ];
@@ -60,6 +59,10 @@ internal sealed class ReportHealthReputationContractScenario : ISmokeTestScenari
                 Path = @"\\.\KSwordSandboxDriver",
                 Data =
                 {
+                    ["behaviorCounted"] = "false",
+                    ["sampleBehaviorCandidate"] = "false",
+                    ["nonbehavior"] = "true",
+                    ["collectionHealth"] = "true",
                     ["diagnosticCode"] = "open_device_not_found",
                     ["readinessState"] = "unavailable",
                     ["driverStateName"] = "DeviceUnavailable"
@@ -110,10 +113,7 @@ internal sealed class ReportHealthReputationContractScenario : ISmokeTestScenari
             SmokeAssert.True(finding.Tags.Contains("metadata", StringComparer.OrdinalIgnoreCase), $"Rule '{ruleId}' should be tagged as metadata.");
         }
 
-        var r0Finding = indexedFindings["r0collector-device-unavailable"];
-        SmokeAssert.True(r0Finding.Tags.Contains("diagnostic", StringComparer.OrdinalIgnoreCase), "R0 unavailable should be a diagnostic finding.");
-        SmokeAssert.True(r0Finding.Tags.Contains("collection", StringComparer.OrdinalIgnoreCase), "R0 unavailable should be collection-health metadata.");
-        SmokeAssert.True(r0Finding.Tags.Contains("driver-health", StringComparer.OrdinalIgnoreCase), "R0 unavailable should be driver-health metadata.");
+        SmokeAssert.True(!indexedFindings.ContainsKey("r0collector-device-unavailable"), "R0 unavailable should remain R0 health/raw evidence, not a behavior-rule finding.");
 
         foreach (var ruleId in new[] { "virustotal-not-found", "virustotal-rate-limited" })
         {

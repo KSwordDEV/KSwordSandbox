@@ -494,7 +494,7 @@ internal static class SmokeTestProgram
             string.Equals(driverEventPath, "driver-events.jsonl", StringComparison.OrdinalIgnoreCase),
             "synthetic R0 collector jsonl event should retain the driver-events.jsonl source clue");
         Assert(report.Findings.Any(finding => finding.RuleId == "registry-change"), "report json should include registry rule finding");
-        Assert(report.Findings.Any(finding => finding.RuleId == "r0collector-mock-driver-event"), "report json should include R0 collector rule finding");
+        Assert(!report.Findings.Any(finding => finding.RuleId == "r0collector-mock-driver-event"), "R0 collector mock plumbing should not become a behavior-rule finding");
         Assert(report.Metrics.TryGetValue("events.total", out var eventCount) && eventCount == report.Events.Count, "report metrics should count all raw events");
     }
 

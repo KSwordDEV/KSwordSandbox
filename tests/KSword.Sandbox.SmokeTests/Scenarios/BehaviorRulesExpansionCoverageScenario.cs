@@ -23,7 +23,6 @@ internal sealed class BehaviorRulesExpansionCoverageScenario : ISmokeTestScenari
         "dropped-executable-artifact-copied",
         "artifact-manifest-written",
         "process-tree-observed",
-        "process-tree-root-unavailable",
         "process-start-failed",
         "process-tree-child-count-observed",
         "lolbin-process-tree-node",

@@ -57,8 +57,8 @@ under `packet-captures/` or elsewhere in the collected job folder.
 导入 `events.json` 时，同一 guest 输出根目录下的相邻 `*.jsonl` 文件会合并进重新生成的
 `report.json` 和 `report.html`。这包括 `r0collector.mockDriverEvent` 等 R0Collector
 mock JSONL 行；它们保留为原始事件（raw events），带 `source=r0collector`，
-保留 `data.mock=true` / `data.driverEventPath`，并触发
-`r0collector-mock-driver-event` informational rule。Host 写出的
+保留 `data.mock=true` / `data.driverEventPath`，但不会触发行为规则 finding。
+R0 mock/health/lifecycle 行只属于 R0 health/raw evidence lanes。Host 写出的
 `guest.events.imported` 标记会把 `events.json` 行和导入的 JSONL 行都计入
 `eventCount`，因此 smoke run 能证明最终报告确实包含 R0 mock sidecar。
 

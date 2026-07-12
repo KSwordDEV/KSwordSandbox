@@ -273,9 +273,11 @@ public sealed class RuleEngine
     /// <summary>
     /// Determines whether a rule intentionally consumes operational metadata.
     /// Inputs are one behavior rule; processing checks the explicit
-    /// IncludeNonBehaviorEvidence switch plus stable diagnostic/reputation
-    /// tags; the method returns true for rules such as VT reputation and R0
-    /// health findings that should remain visible outside the behavior lane.
+    /// IncludeNonBehaviorEvidence switch plus stable VT/reputation tags; the
+    /// method returns true only for enrichment rules that are expected to
+    /// summarize nonbehavior rows as findings. Collection-health, R0 plumbing,
+    /// and generic diagnostic/metadata rows stay out of behavior-rule findings
+    /// and remain available in their dedicated report sections/raw events.
     /// </summary>
     private static bool RuleIncludesNonBehaviorEvidence(BehaviorRule rule)
     {
@@ -291,20 +293,8 @@ public sealed class RuleEngine
             return true;
         }
 
-        if (rule.Tags.Any(tag =>
-                string.Equals(tag, "r0collector", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(tag, "driver-health", StringComparison.OrdinalIgnoreCase)))
-        {
-            return true;
-        }
-
         if (IsInfoOrLowSeverity(rule) &&
             rule.Tags.Any(tag =>
-                string.Equals(tag, "diagnostic", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(tag, "metadata", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(tag, "collection", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(tag, "collection-health", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(tag, "artifact", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(tag, "reputation", StringComparison.OrdinalIgnoreCase)))
         {
             return true;
