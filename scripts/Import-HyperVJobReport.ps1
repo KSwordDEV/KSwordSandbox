@@ -29,6 +29,12 @@ if ([string]::IsNullOrWhiteSpace($RepoRoot)) {
     $RepoRoot = Split-Path -Parent $PSScriptRoot
 }
 
+$resolver = Join-Path $PSScriptRoot 'Resolve-PortableTool.ps1'
+if (-not (Test-Path -LiteralPath $resolver -PathType Leaf)) {
+    throw "错误：找不到 portable tool resolver：$resolver。下一步：确认 scripts\Resolve-PortableTool.ps1 已随源码/便携包提供。"
+}
+. $resolver
+
 $jobIdNoDash = $JobId -replace '-', ''
 if ([string]::IsNullOrWhiteSpace($RuntimeRoot)) {
     $RuntimeRoot = 'D:\Temp\KSwordSandbox'
@@ -158,9 +164,9 @@ if (-not (Test-Path -LiteralPath $EventsPath -PathType Leaf)) {
     }
 }
 
-$project = Join-Path $RepoRoot 'tools\KSword.Sandbox.JobTool\KSword.Sandbox.JobTool.csproj'
+$jobToolTarget = Resolve-KSwordPortableTool -RepoRoot $RepoRoot -Tool JobTool -ThrowIfMissing
 $args = @(
-    'run', '--project', $project, '--', 'import-live',
+    'import-live',
     '--repo-root', $RepoRoot,
     '--config', $ConfigPath,
     '--runtime-root', $RuntimeRoot,
@@ -177,13 +183,13 @@ if ($Json) {
 }
 
 if (-not $Json) {
-    Write-Host "[ksword-import] Importing guest events from $EventsPath"
+    Write-Host "[ksword-import] Importing guest events from $EventsPath via $($jobToolTarget.Kind)"
 }
-& dotnet @args
-if ($LASTEXITCODE -ne 0) {
+$exitCode = Invoke-KSwordPortableTool -Target $jobToolTarget -Arguments $args
+if ($exitCode -ne 0) {
     $diagnosticsPath = Join-Path $jobRoot 'report-rebuild-diagnostics.json'
     $diagnosticsHint = if (Test-Path -LiteralPath $diagnosticsPath -PathType Leaf) { " Diagnostics: $diagnosticsPath" } else { '' }
-    throw "KSword.Sandbox.JobTool failed with exit code $LASTEXITCODE.$diagnosticsHint"
+    throw "KSword.Sandbox.JobTool failed with exit code $exitCode.$diagnosticsHint"
 }
 
 if (-not $Json) {

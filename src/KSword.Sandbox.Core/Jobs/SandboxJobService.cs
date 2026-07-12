@@ -29,6 +29,23 @@ public sealed partial class SandboxJobService
         WriteIndented = true
     };
 
+    private static readonly HashSet<string> EventKeyImportOnlyDataKeys = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "artifactRelativePath",
+        "artifactSafeLink",
+        "artifactSelector",
+        "canonicalArtifactSelector",
+        "driverEventPath",
+        "driverEventsPath",
+        "driverEventsRelativePath",
+        "importPath",
+        "importRoot",
+        "jsonlImportStatus",
+        "jsonlPath",
+        "sourceArtifactKind",
+        "sourceArtifactPath"
+    };
+
     private readonly SandboxConfig config;
     private readonly RuleEngine ruleEngine;
     private readonly HyperVRunbookBuilder runbookBuilder;
@@ -903,7 +920,7 @@ public sealed partial class SandboxJobService
     /// </summary>
     private static List<SandboxEvent> LoadGuestEventsWithDriverJsonl(string eventsPath)
     {
-        var events = LoadEventsFromFile(eventsPath);
+        var events = LoadEventsFromFile(eventsPath).Select(NormalizeEvent).ToList();
         var eventKeys = events.Select(EventKey).ToHashSet(StringComparer.Ordinal);
         var searchRoot = Path.GetDirectoryName(eventsPath);
         if (string.IsNullOrWhiteSpace(searchRoot))
@@ -1318,8 +1335,24 @@ public sealed partial class SandboxJobService
     /// </summary>
     private static string EventKey(SandboxEvent evt)
     {
-        var data = string.Join(";", evt.Data.OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase).Select(pair => $"{pair.Key}={pair.Value}"));
+        var data = string.Join(
+            ";",
+            evt.Data
+                .Where(pair => !IsImportOnlyEventKeyData(evt, pair.Key))
+                .OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase)
+                .Select(pair => $"{pair.Key}={pair.Value}"));
         return string.Join("|", evt.EventType, evt.Source, evt.Timestamp.ToString("O"), evt.ProcessId?.ToString() ?? string.Empty, evt.Path ?? string.Empty, evt.CommandLine ?? string.Empty, data);
+    }
+
+    private static bool IsImportOnlyEventKeyData(SandboxEvent evt, string key)
+    {
+        if (EventKeyImportOnlyDataKeys.Contains(key))
+        {
+            return true;
+        }
+
+        return !evt.EventType.Equals("driver.parse_error", StringComparison.OrdinalIgnoreCase) &&
+            key.Equals("jsonlLineNumber", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>

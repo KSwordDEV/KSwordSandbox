@@ -35,6 +35,10 @@ progress-page 重新进入报告，避免自动打开失败时丢失上下文。
   其中包含可复制的高信号事件，便于分析员无需先打开完整 raw table 就理解规则命中。
   主行为 verdict 必须排除仅静态 triage、采集诊断、R0 unavailable/health rows、
   VirusTotal/reputation findings；这些信号应放在专门的质量或信誉章节。
+- 聚合行为事实 / Aggregated behavior facts：在 MITRE/raw timeline 之前，用卡片把
+  process、startup persistence、network、file/artifact、registry、R0/security 和 artifact
+  readiness 汇总成“发生了什么 / 证据是什么 / 为什么要复核”。没有采集到的 lane 必须明确说
+  “未采集到 sample-attributed evidence”，不得用空表暗示样本无行为。
 - MITRE 映射 / MITRE mapping。
 - 引擎与规则命中 / Engine/rule hits。
 - 静态分析 / Static analysis：包含 PE sections、URLs、strings、warnings 和 tags。

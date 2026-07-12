@@ -1828,16 +1828,17 @@ static bool TryResolveEnvironmentSecret(string secretName, out string value)
 }
 
 /// <summary>
-/// Finds the repository root by walking upward from the Web content root.
-/// The input is a project directory, processing looks for the solution file,
-/// and the function returns the best matching absolute path.
+/// Finds the source or portable package root by walking upward from the Web
+/// content root. The input is a project/published-app directory; processing
+/// first looks for the solution file and then package-root markers such as
+/// config/rules; the function returns the best matching absolute path.
 /// </summary>
 static string ResolveRepositoryRoot(string contentRoot)
 {
     var directory = new DirectoryInfo(contentRoot);
     while (directory is not null)
     {
-        if (File.Exists(Path.Combine(directory.FullName, "KSwordSandbox.sln")))
+        if (IsSourceOrPackageRoot(directory.FullName))
         {
             return directory.FullName;
         }
@@ -1846,6 +1847,17 @@ static string ResolveRepositoryRoot(string contentRoot)
     }
 
     return contentRoot;
+}
+
+static bool IsSourceOrPackageRoot(string directory)
+{
+    if (File.Exists(Path.Combine(directory, "KSwordSandbox.sln")))
+    {
+        return true;
+    }
+
+    return File.Exists(Path.Combine(directory, "config", "sandbox.example.json")) &&
+        File.Exists(Path.Combine(directory, "rules", "behavior-rules.json"));
 }
 
 /// <summary>

@@ -30,57 +30,54 @@ if ([string]::IsNullOrWhiteSpace($RepoRoot)) {
     $RepoRoot = Split-Path -Parent $PSScriptRoot
 }
 
+$resolver = Join-Path $PSScriptRoot 'Resolve-PortableTool.ps1'
+if (-not (Test-Path -LiteralPath $resolver -PathType Leaf)) {
+    throw "错误：找不到 portable tool resolver：$resolver。下一步：确认 scripts\Resolve-PortableTool.ps1 已随源码/便携包提供。"
+}
+. $resolver
+
 if ([string]::IsNullOrWhiteSpace($JobId) -and [string]::IsNullOrWhiteSpace($JobRoot)) {
     throw 'Missing -JobId or -JobRoot. / 缺少 -JobId 或 -JobRoot。'
 }
 
-$project = Join-Path $RepoRoot 'tools\KSword.Sandbox.JobTool\KSword.Sandbox.JobTool.csproj'
-if (-not (Test-Path -LiteralPath $project -PathType Leaf)) {
-    throw "JobTool project not found / 未找到 JobTool 项目: $project"
-}
-
-$dotnetArgs = @('run')
-if ($NoBuild) {
-    $dotnetArgs += '--no-build'
-}
-
-$dotnetArgs += @(
-    '--project', $project, '--',
+$jobToolTarget = Resolve-KSwordPortableTool -RepoRoot $RepoRoot -Tool JobTool -ThrowIfMissing
+$toolArgs = @(
     'rebuild-report',
     '--repo-root', $RepoRoot,
     '--duration', ([string]$DurationSeconds)
 )
 
 if (-not [string]::IsNullOrWhiteSpace($ConfigPath)) {
-    $dotnetArgs += @('--config', $ConfigPath)
+    $toolArgs += @('--config', $ConfigPath)
 }
 if (-not [string]::IsNullOrWhiteSpace($RuntimeRoot)) {
-    $dotnetArgs += @('--runtime-root', $RuntimeRoot)
+    $toolArgs += @('--runtime-root', $RuntimeRoot)
 }
 if (-not [string]::IsNullOrWhiteSpace($JobId)) {
-    $dotnetArgs += @('--job-id', $JobId)
+    $toolArgs += @('--job-id', $JobId)
 }
 if (-not [string]::IsNullOrWhiteSpace($JobRoot)) {
-    $dotnetArgs += @('--job-root', $JobRoot)
+    $toolArgs += @('--job-root', $JobRoot)
 }
 if (-not [string]::IsNullOrWhiteSpace($SamplePath)) {
-    $dotnetArgs += @('--sample', $SamplePath)
+    $toolArgs += @('--sample', $SamplePath)
 }
 if (-not [string]::IsNullOrWhiteSpace($EventsPath)) {
-    $dotnetArgs += @('--events', $EventsPath)
+    $toolArgs += @('--events', $EventsPath)
 }
 if (-not [string]::IsNullOrWhiteSpace($RunbookExecutionPath)) {
-    $dotnetArgs += @('--runbook-execution', $RunbookExecutionPath)
+    $toolArgs += @('--runbook-execution', $RunbookExecutionPath)
 }
 if ($Json) {
-    $dotnetArgs += '--json'
+    $toolArgs += '--json'
 }
 
 if (-not $Json) {
     Write-Host '[ksword-rebuild] Rebuilding report from existing artifacts only. / 仅从现有产物重建报告。'
     Write-Host '[ksword-rebuild] VM action: none. / VM 操作：无。'
+    Write-Host "[ksword-rebuild] JobTool target: $($jobToolTarget.Kind)"
 }
-& dotnet @dotnetArgs
-if ($LASTEXITCODE -ne 0) {
-    throw "KSword.Sandbox.JobTool rebuild-report failed with exit code $LASTEXITCODE."
+$exitCode = Invoke-KSwordPortableTool -Target $jobToolTarget -Arguments $toolArgs -NoBuild:$NoBuild
+if ($exitCode -ne 0) {
+    throw "KSword.Sandbox.JobTool rebuild-report failed with exit code $exitCode."
 }

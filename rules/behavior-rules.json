@@ -11265,7 +11265,6 @@
         "etw.security.*",
         "etw.privilege",
         "etw.privilege.*",
-        "process.access",
         "privilege.enabled"
       ],
       "evidenceFields": [

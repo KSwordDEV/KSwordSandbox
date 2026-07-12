@@ -45,6 +45,18 @@ excluding generated binaries, VM state, reports, samples, secrets, and signing m
 - manifest 和脚本现在显式排除截图、PCAP/PCAPNG、JSONL 事件流、dump、
   SQLite/DB、HAR/trace、VM 状态、样本、报告、secret 和签名材料。
 
+源码仓库提供 `scripts\Publish-RuntimePayloads.ps1` 作为 runtime handoff 的本地发布入口。
+该脚本面向 release manager/source checkout；便携 runtime 包只消费已发布 payload，
+不要求操作者在包内重新构建：
+
+```powershell
+.\scripts\Publish-RuntimePayloads.ps1 -RuntimePublishRoot 'D:\Temp\KSwordSandbox\publish'
+```
+
+该脚本把 `host-web`、`guest-tools`、`tools/job-tool`、`tools/postprocess` 发布到仓库外
+`RuntimePublishRoot`，并写入 `runtime-publish-manifest.json`。它不运行 smoke、不启动或还原
+Hyper-V、不签名、不调用 `CSignTool.exe`，也不从仓库 `bin/obj/x64` 复制 runtime payload。
+
 在 review handoff 或 source package dry run 前，从仓库根目录运行组合轻量门禁：
 
 ```powershell

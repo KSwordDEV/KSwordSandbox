@@ -70,6 +70,14 @@ public sealed class HtmlReportRenderer
 
     private sealed record ProcessTreeActivity(int EventCount, int FileCount, int RegistryCount, int NetworkCount);
 
+    private sealed record BehaviorFactCard(
+        string Title,
+        string Value,
+        string Css,
+        string WhatHappened,
+        string WhySuspicious,
+        IReadOnlyList<string> EvidenceLines);
+
     private sealed record EvidenceSummaryCard(string Title, string Value, string Detail, string Css, string CopyText);
 
     private sealed record BehaviorRoutingStats(
@@ -292,6 +300,7 @@ public sealed class HtmlReportRenderer
         html.AppendLine("<main>");
         AppendRiskSummary(html, report);
         AppendBehaviorDetections(html, report);
+        AppendAggregatedBehaviorFacts(html, report, artifactLinks);
         AppendMitreDetections(html, report);
         AppendRuleHits(html, report);
         AppendStaticAnalysis(html, report);
@@ -429,6 +438,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
             ("cover", "Cover"),
             ("risk", "Risk summary"),
             ("behavior", "Behavior detections"),
+            ("facts", "Aggregated behavior facts"),
             ("mitre", "Multi-dimensional / MITRE"),
             ("rules", "Engine and rule hits"),
             ("static", "Static analysis"),
@@ -467,6 +477,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         html.AppendLine("<p class=\"hint\">Sticky subnav for Process / Files / Network / R0 / VT / Artifacts quick navigation; counts show currently embedded representative evidence. R0 health, collector self-noise, and VT status rows are counted in their own lanes rather than primary behavior.</p>");
         html.AppendLine("<div class=\"quick-links\">");
         QuickLink(html, "risk", "Risk summary", PrimaryBehaviorFindings(report).Count().ToString());
+        QuickLink(html, "facts", "Behavior facts", BuildBehaviorFactCards(report, artifacts).Count(card => card.EvidenceLines.Count > 0).ToString());
         QuickLink(html, "process", "Process details", report.Events.Count(IsSampleBehaviorProcessEvent).ToString());
         QuickLink(html, "security", "Security / privilege", report.Events.Count(IsSampleBehaviorSecurityPrivilegeEvent).ToString());
         QuickLink(html, "files", "File system activity", report.Events.Count(IsSampleBehaviorFileEvent).ToString());
@@ -679,6 +690,215 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
             "Collector health, runbook, import, and timing diagnostics explain evidence quality and are not sample behavior.",
             diagnosticFindings);
         html.AppendLine("</section>");
+    }
+
+    /// <summary>
+    /// Appends a high-signal fact view ahead of raw timelines/tables.
+    /// Inputs are normalized report events and indexed artifacts; processing
+    /// groups sample-behavior rows into operator statements that explain what
+    /// happened, the supporting evidence, and why the behavior deserves review.
+    /// </summary>
+    private static void AppendAggregatedBehaviorFacts(
+        StringBuilder html,
+        AnalysisReport report,
+        IReadOnlyCollection<ArtifactDescriptor> artifacts)
+    {
+        var cards = BuildBehaviorFactCards(report, artifacts).ToList();
+        html.AppendLine("<section id=\"facts\" class=\"card\"><h2>Aggregated behavior facts</h2>");
+        html.AppendLine("<div class=\"section-note\"><strong>Behavior facts before raw events.</strong> This section groups normalized events into reviewer-facing facts. It does not remove evidence: raw normalized events, source JSON/JSONL, and artifact links remain available later in the report.</div>");
+
+        if (report.Events.Count == 0)
+        {
+            Empty(html, "No dynamic events were imported, so no aggregated behavior facts can be derived. This is an evidence gap, not proof of benign behavior.");
+            html.AppendLine("</section>");
+            return;
+        }
+
+        html.AppendLine("<div class=\"evidence-story-board\">");
+        foreach (var card in cards)
+        {
+            var evidenceText = card.EvidenceLines.Count == 0
+                ? "No supporting sample-behavior evidence rows were collected for this lane."
+                : string.Join(Environment.NewLine, card.EvidenceLines);
+            var copy = string.Join(
+                Environment.NewLine,
+                [
+                    card.Title,
+                    $"value={card.Value}",
+                    $"whatHappened={card.WhatHappened}",
+                    $"whyReview={card.WhySuspicious}",
+                    "evidence:",
+                    evidenceText
+                ]);
+
+            html.AppendLine($"<article class=\"evidence-story-lane copyable\" data-copy=\"{A(copy)}\">");
+            html.AppendLine($"<h3>{E(card.Title)}</h3>");
+            html.AppendLine($"<span class=\"overview-value {E(card.Css)}\">{E(card.Value)}</span>");
+            html.AppendLine($"<p><strong>What happened:</strong> {E(card.WhatHappened)}</p>");
+            html.AppendLine($"<p><strong>Why review:</strong> {E(card.WhySuspicious)}</p>");
+            if (card.EvidenceLines.Count == 0)
+            {
+                Empty(html, "No sample-attributed evidence for this lane.");
+            }
+            else
+            {
+                html.AppendLine("<ol class=\"story-evidence-list\">");
+                foreach (var line in card.EvidenceLines.Take(EvidenceStoryInlineLimit))
+                {
+                    html.AppendLine($"<li><code>{E(line)}</code></li>");
+                }
+
+                html.AppendLine("</ol>");
+            }
+
+            html.AppendLine($"<div class=\"toolbar\">{CopyButton("Copy behavior fact", copy)}</div>");
+            html.AppendLine("</article>");
+        }
+
+        html.AppendLine("</div></section>");
+    }
+
+    private static IReadOnlyList<BehaviorFactCard> BuildBehaviorFactCards(
+        AnalysisReport report,
+        IReadOnlyCollection<ArtifactDescriptor> artifacts)
+    {
+        var sampleEvents = report.Events
+            .Where(IsSampleBehaviorEvent)
+            .OrderBy(evt => evt.Timestamp)
+            .ToList();
+        var processEvents = sampleEvents
+            .Where(evt => IsSampleBehaviorProcessEvent(evt) || IsProcessAccessStyleEvent(evt))
+            .ToList();
+        var startupEvents = sampleEvents.Where(IsStartupEvent).ToList();
+        var networkEvents = sampleEvents.Where(IsNetworkEvent).ToList();
+        var fileEvents = sampleEvents.Where(IsFileEvent).ToList();
+        var registryEvents = sampleEvents.Where(IsRegistryEvent).ToList();
+        var securityEvents = sampleEvents.Where(IsSecurityPrivilegeFallbackEvent).ToList();
+        var r0Events = sampleEvents.Where(evt => IsR0Event(evt) && !IsR0CollectionHealthEvent(evt)).ToList();
+        var droppedArtifacts = artifacts
+            .Where(artifact => artifact.Kind == ArtifactKind.DroppedFile && !IsCollectorSelfNoiseArtifact(artifact))
+            .ToList();
+        var screenshots = artifacts
+            .Where(artifact => artifact.Kind == ArtifactKind.Screenshot && !IsCollectorSelfNoiseArtifact(artifact))
+            .ToList();
+        var memoryDumps = artifacts
+            .Where(artifact => artifact.Kind == ArtifactKind.MemoryDump && !IsCollectorSelfNoiseArtifact(artifact))
+            .ToList();
+        var pcaps = artifacts
+            .Where(artifact => artifact.Kind == ArtifactKind.PacketCapture && !IsCollectorSelfNoiseArtifact(artifact))
+            .ToList();
+
+        var processIdentities = processEvents
+            .Select(ProcessDisplayName)
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(6)
+            .ToList();
+        var startupSurfaces = startupEvents
+            .Select(evt => FirstNonEmpty(FirstEventDataValue(evt, "startupSurface"), FirstEventDataValue(evt, "startupCategory"), evt.EventType))
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(8)
+            .ToList();
+        var networkTargets = ExtractNetworkIocs(report).Take(8).ToList();
+        var fileTargets = ExtractFileIocs(report).Take(8).ToList();
+        var registryTargets = ExtractRegistryIocs(report).Take(8).ToList();
+        var artifactNames = artifacts
+            .Where(artifact => !IsCollectorSelfNoiseArtifact(artifact))
+            .Select(ArtifactDisplayName)
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(8)
+            .ToList();
+
+        return
+        [
+            new BehaviorFactCard(
+                "Execution and parent/child activity",
+                processEvents.Count == 0 ? "0 rows" : $"{processIdentities.Count} actors",
+                processEvents.Count > 0 ? "risk-info" : "risk-low",
+                processEvents.Count == 0
+                    ? "No sample-attributed process or process-access rows were embedded in this report view."
+                    : $"Observed {processEvents.Count} process/process-access rows across {processIdentities.Count} visible actor identity/identities: {FirstNonEmpty(string.Join(", ", processIdentities), "-")}.",
+                "Execution lineage is the anchor for attributing file, registry, network, startup, and artifact evidence to the sample instead of to sandbox plumbing.",
+                TopEvidenceLines(processEvents, 8)),
+            new BehaviorFactCard(
+                "Startup persistence before/after diff",
+                $"{startupEvents.Count} rows",
+                startupEvents.Count(evt => TextEqualsAny(FirstEventDataValue(evt, "change") ?? string.Empty, "created", "modified") || StartupEventHasUserWritableTarget(evt)) > 0 ? "risk-high" : startupEvents.Count > 0 ? "risk-medium" : "risk-low",
+                startupEvents.Count == 0
+                    ? "No startup.* or legacy startup diff rows were collected or imported."
+                    : $"Observed startup inventory changes on {startupSurfaces.Count} surface(s): {FirstNonEmpty(string.Join(", ", startupSurfaces), "-")}. Created/modified rows={startupEvents.Count(evt => TextEqualsAny(FirstEventDataValue(evt, "change") ?? string.Empty, "created", "modified"))}; deleted rows={startupEvents.Count(evt => TextEqualsAny(FirstEventDataValue(evt, "change") ?? string.Empty, "deleted"))}.",
+                "New or modified autostart entries are high signal because they can survive reboot. User-writable targets, WMI subscriptions, drivers, services, IFEO, Winlogon, LSA, AppInit, Winsock, and shell-extension surfaces deserve priority review.",
+                TopEvidenceLines(startupEvents, 8)),
+            new BehaviorFactCard(
+                "Network communication scope",
+                networkEvents.Count == 0 ? "0 rows" : $"{networkTargets.Count} IOCs",
+                networkEvents.Count > 0 ? "risk-medium" : "risk-low",
+                networkEvents.Count == 0
+                    ? "No sample-attributed DNS/HTTP/TLS/flow rows were embedded in this report view."
+                    : $"Observed {networkEvents.Count} network rows. Top normalized targets: {FirstNonEmpty(string.Join(", ", networkTargets), "-")}.",
+                "Network facts are grouped by endpoint/protocol so DNS, HTTP, TLS, PCAP, and R0 network rows do not overwhelm the reviewer as independent raw events.",
+                TopEvidenceLines(networkEvents, 8)),
+            new BehaviorFactCard(
+                "File and dropped-artifact activity",
+                $"{fileEvents.Count + droppedArtifacts.Count} items",
+                fileEvents.Count + droppedArtifacts.Count > 0 ? "risk-medium" : "risk-low",
+                fileEvents.Count + droppedArtifacts.Count == 0
+                    ? "No sample-attributed file writes or dropped-file artifacts were collected."
+                    : $"Observed {fileEvents.Count} file rows and {droppedArtifacts.Count} dropped-file artifact(s). Top paths: {FirstNonEmpty(string.Join(", ", fileTargets), "-")}.",
+                "Dropped files and user-writable writes are stronger evidence when paired with hashes, safe download selectors, or later execution/startup references.",
+                TopEvidenceLines(fileEvents, 6)
+                    .Concat(droppedArtifacts.Take(4).Select(ArtifactFactLine))
+                    .ToList()),
+            new BehaviorFactCard(
+                "Registry mutation scope",
+                $"{registryEvents.Count} rows",
+                registryEvents.Count > 0 ? "risk-medium" : "risk-low",
+                registryEvents.Count == 0
+                    ? "No sample-attributed registry mutation rows were embedded in this report view."
+                    : $"Observed {registryEvents.Count} registry rows. Top keys/values: {FirstNonEmpty(string.Join(", ", registryTargets), "-")}.",
+                "Registry writes become more suspicious when they map to persistence, credential access, policy weakening, COM hijack, IFEO, LSA, AppInit, or other startup surfaces.",
+                TopEvidenceLines(registryEvents, 8)),
+            new BehaviorFactCard(
+                "R0/security gap-filling telemetry",
+                $"{r0Events.Count + securityEvents.Count} rows",
+                r0Events.Count + securityEvents.Count > 0 ? "risk-info" : "risk-low",
+                r0Events.Count + securityEvents.Count == 0
+                    ? "No sample-attributed R0/security privilege rows were embedded in this report view."
+                    : $"Observed {r0Events.Count} R0/driver rows and {securityEvents.Count} security/privilege rows. Health/readiness rows remain outside this fact count.",
+                "R0 is treated as the primary source for process/image/kernel events; Windows Security/ETW-style rows fill privilege, service, task, object-access, and auxiliary gaps without being mixed with collector health.",
+                TopEvidenceLines(r0Events.Concat(securityEvents).OrderBy(evt => evt.Timestamp).ToList(), 8)),
+            new BehaviorFactCard(
+                "Artifact evidence readiness",
+                $"{artifacts.Count} indexed",
+                artifacts.Count > 0 ? "risk-info" : "risk-low",
+                artifacts.Count == 0
+                    ? "No report artifact index entries were supplied or inferred."
+                    : $"Indexed artifacts include dropped files={droppedArtifacts.Count}, screenshots={screenshots.Count}, memory dumps={memoryDumps.Count}, packet captures={pcaps.Count}. Top selectors: {FirstNonEmpty(string.Join(", ", artifactNames), "-")}.",
+                "Artifacts turn event claims into reviewable evidence. Missing artifacts should be reported honestly as collection gaps rather than fabricated behavior.",
+                artifacts
+                    .Where(artifact => !IsCollectorSelfNoiseArtifact(artifact))
+                    .Take(8)
+                    .Select(ArtifactFactLine)
+                    .ToList())
+        ];
+    }
+
+    private static IReadOnlyList<string> TopEvidenceLines(IEnumerable<SandboxEvent> events, int limit)
+    {
+        return events
+            .OrderBy(evt => evt.Timestamp)
+            .Take(limit)
+            .Select(EventOneLine)
+            .ToList();
+    }
+
+    private static string ArtifactFactLine(ArtifactDescriptor artifact)
+    {
+        var selector = FirstNonEmpty(MetadataValue(artifact.Metadata, "downloadSelector", "safeRelativeSelector"), artifact.SafeLink, artifact.RelativePath, artifact.ImportPath, "-");
+        var hash = FirstNonEmpty(artifact.Sha256, artifact.Hashes.GetValueOrDefault("sha256"), "-");
+        return $"artifact={ArtifactDisplayName(artifact)} | kind={artifact.Kind} | selector={selector} | size={FormatBytes(Math.Max(0, artifact.SizeBytes))} | sha256={hash}";
     }
 
     private static void AppendSecondaryFindingGroup(
@@ -3229,7 +3449,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         IReadOnlyCollection<ArtifactDescriptor> artifacts)
     {
         var candidateEvents = report.Events
-            .Where(IsSecurityPrivilegeEvent)
+            .Where(IsSecurityPrivilegeFallbackEvent)
             .OrderBy(evt => evt.Timestamp)
             .ToList();
         var telemetryEvents = candidateEvents
@@ -5903,7 +6123,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
             }
 
             var securityTarget = ExtractSecurityPrivilegeTarget(evt);
-            if (IsSecurityPrivilegeEvent(evt) && !string.IsNullOrWhiteSpace(securityTarget))
+            if (IsSecurityPrivilegeFallbackEvent(evt) && !string.IsNullOrWhiteSpace(securityTarget))
             {
                 edges.Add(new BehaviorGraphEdge(from, "security/privilege", securityTarget, EventToPlainText(evt), relatedArtifacts));
             }
@@ -6208,7 +6428,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
     /// </summary>
     private static string EventFamilyLabel(SandboxEvent evt)
     {
-        if (IsSecurityPrivilegeEvent(evt))
+        if (IsSecurityPrivilegeFallbackEvent(evt))
         {
             return "security/privilege";
         }
@@ -6567,7 +6787,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         IsSampleBehaviorEvent(evt) && evt.EventType.StartsWith("process.", StringComparison.OrdinalIgnoreCase);
 
     private static bool IsSampleBehaviorSecurityPrivilegeEvent(SandboxEvent evt) =>
-        IsSampleBehaviorEvent(evt) && IsSecurityPrivilegeEvent(evt);
+        IsSampleBehaviorEvent(evt) && IsSecurityPrivilegeFallbackEvent(evt);
 
     private static bool IsSampleBehaviorR0Event(SandboxEvent evt) =>
         IsSampleBehaviorEvent(evt) && IsR0Event(evt) && !IsR0CollectionHealthEvent(evt);
@@ -6596,6 +6816,15 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
         return TextEqualsAny(eventFamily, "security", "security/privilege", "security-privilege", "privilege", "process-access", "process_access") &&
             EventTextContainsAny(evt, "security", "etw", "privilege", "accessMask", "desiredAccess", "targetProcess", "handle", "token");
     }
+
+    private static bool IsSecurityPrivilegeFallbackEvent(SandboxEvent evt) =>
+        IsSecurityPrivilegeEvent(evt) && !IsR0GenericProcessAccessEvent(evt);
+
+    private static bool IsR0GenericProcessAccessEvent(SandboxEvent evt) =>
+        IsR0Event(evt) &&
+        IsProcessAccessStyleEvent(evt) &&
+        !evt.EventType.StartsWith("security.", StringComparison.OrdinalIgnoreCase) &&
+        !evt.EventType.StartsWith("etw.", StringComparison.OrdinalIgnoreCase);
 
     private static bool IsProcessAccessStyleEvent(SandboxEvent evt)
     {
@@ -7182,6 +7411,11 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
             return true;
         }
 
+        if (IsR0Event(evt))
+        {
+            return false;
+        }
+
         if (IsNetworkImportHealthEvent(evt))
         {
             return true;
@@ -7303,8 +7537,7 @@ code{background:#f1f7ff;border-radius:2px;padding:2px 5px;word-break:break-all}.
             evt.EventType.StartsWith("r0collector.driverPoll", StringComparison.OrdinalIgnoreCase) ||
             evt.EventType.StartsWith("r0collector.driverReadEvents", StringComparison.OrdinalIgnoreCase) ||
             evt.EventType.StartsWith("r0collector.ioctlFailure", StringComparison.OrdinalIgnoreCase) ||
-            evt.EventType.StartsWith("r0collector.driverProtocolError", StringComparison.OrdinalIgnoreCase) ||
-            EventTextContainsAny(evt, "readiness", "diagnose", "diagnostic", "unavailable", "driverCapabilities", "driverStatus", "driver状态"))
+            evt.EventType.StartsWith("r0collector.driverProtocolError", StringComparison.OrdinalIgnoreCase))
         {
             return true;
         }

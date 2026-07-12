@@ -339,6 +339,12 @@
     },
     {
       "sourceType": "repository",
+      "source": "scripts/Resolve-PortableTool.ps1",
+      "target": "scripts/Resolve-PortableTool.ps1",
+      "required": true
+    },
+    {
+      "sourceType": "repository",
       "source": "scripts/install.ps1",
       "target": "scripts/install.ps1",
       "required": true
@@ -377,6 +383,18 @@
       "sourceType": "repository",
       "source": "scripts/Inspect-JobArtifacts.ps1",
       "target": "scripts/Inspect-JobArtifacts.ps1",
+      "required": true
+    },
+    {
+      "sourceType": "repository",
+      "source": "scripts/Rebuild-JobReport.ps1",
+      "target": "scripts/Rebuild-JobReport.ps1",
+      "required": true
+    },
+    {
+      "sourceType": "repository",
+      "source": "scripts/Invoke-OperatorCli.ps1",
+      "target": "scripts/Invoke-OperatorCli.ps1",
       "required": true
     },
     {

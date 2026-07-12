@@ -641,6 +641,15 @@ function Resolve-RunConfigPath {
     return [System.IO.Path]::GetFullPath((Join-Path $script:RepositoryRoot $Path))
 }
 
+function Import-PortableToolResolver {
+    $resolver = Join-Path $script:RepositoryRoot 'scripts\Resolve-PortableTool.ps1'
+    if (-not (Test-Path -LiteralPath $resolver -PathType Leaf)) {
+        throw "错误：找不到 portable tool resolver：$resolver。下一步：请确认 scripts\Resolve-PortableTool.ps1 已随源码/便携包提供。"
+    }
+
+    . $resolver
+}
+
 function Get-WebUiLaunchTarget {
     param([bool]$ThrowIfMissing = $true)
 
@@ -1135,6 +1144,21 @@ function Get-RelativeRepositoryPath {
     return $fullPath.Replace('\', '/')
 }
 
+function Get-RelativePayloadPath {
+    param(
+        [Parameter(Mandatory)][string]$PayloadRoot,
+        [Parameter(Mandatory)][string]$Path
+    )
+
+    $fullRoot = [System.IO.Path]::GetFullPath($PayloadRoot).TrimEnd('\', '/') + '\'
+    $fullPath = [System.IO.Path]::GetFullPath($Path)
+    if ($fullPath.StartsWith($fullRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+        return $fullPath.Substring($fullRoot.Length).Replace('\', '/')
+    }
+
+    return $fullPath.Replace('\', '/')
+}
+
 function Get-GuestPayloadSourceFiles {
     $sourceRoots = @(
         'guest\KSword.Sandbox.Agent',
@@ -1166,6 +1190,16 @@ function Get-GuestPayloadSourceFiles {
     }
 
     return @($files | Sort-Object FullName)
+}
+
+function Test-GuestPayloadSourceTreeAvailable {
+    foreach ($relativeRoot in @('guest\KSword.Sandbox.Agent', 'guest\KSword.Sandbox.R0Collector', 'src\KSword.Sandbox.Abstractions')) {
+        if (-not (Test-Path -LiteralPath (Join-Path $script:RepositoryRoot $relativeRoot) -PathType Container)) {
+            return $false
+        }
+    }
+
+    return $true
 }
 
 function Get-FileSha256Hex {
@@ -1227,6 +1261,7 @@ function Test-GuestPayloadManifestFileHash {
     param(
         [Parameter(Mandatory)]$Manifest,
         [Parameter(Mandatory)][string]$Name,
+        [Parameter(Mandatory)][string]$PayloadRoot,
         [Parameter(Mandatory)][string]$ExpectedPath,
         [AllowEmptyCollection()]
         [Parameter(Mandatory)][System.Collections.Generic.List[string]]$Reasons
@@ -1252,14 +1287,20 @@ function Test-GuestPayloadManifestFileHash {
         return
     }
 
+    $relativePath = [string](Get-PayloadManifestProperty -Manifest $entry[0] -Name 'relativePath')
+    if (-not [string]::IsNullOrWhiteSpace($relativePath)) {
+        $expectedRelativePath = Get-RelativePayloadPath -PayloadRoot $PayloadRoot -Path $ExpectedPath
+        if (-not [System.StringComparer]::OrdinalIgnoreCase.Equals($relativePath.Replace('\', '/'), $expectedRelativePath)) {
+            $Reasons.Add("payload-manifest.json 中 $Name relativePath='$relativePath'，预期 '$expectedRelativePath'。下一步：重新发布 runtime payload。")
+        }
+    }
+
     $manifestPath = [string](Get-PayloadManifestProperty -Manifest $entry[0] -Name 'path')
-    if (-not [string]::IsNullOrWhiteSpace($manifestPath)) {
+    if ([string]::IsNullOrWhiteSpace($relativePath) -and -not [string]::IsNullOrWhiteSpace($manifestPath) -and -not [System.IO.Path]::IsPathRooted($manifestPath)) {
         try {
-            $samePath = [System.StringComparer]::OrdinalIgnoreCase.Equals(
-                [System.IO.Path]::GetFullPath($manifestPath),
-                [System.IO.Path]::GetFullPath($ExpectedPath))
-            if (-not $samePath) {
-                $Reasons.Add("payload-manifest.json 中 $Name 路径指向 '$manifestPath'，不是 '$ExpectedPath'。下一步：重新准备 guest payload。")
+            $manifestFull = [System.IO.Path]::GetFullPath((Join-Path $PayloadRoot $manifestPath))
+            if (-not [System.StringComparer]::OrdinalIgnoreCase.Equals($manifestFull, [System.IO.Path]::GetFullPath($ExpectedPath))) {
+                $Reasons.Add("payload-manifest.json 中 $Name 相对路径指向 '$manifestPath'，不是预期文件。下一步：重新发布 runtime payload。")
             }
         }
         catch {
@@ -1319,18 +1360,19 @@ function Test-GuestPayloadFresh {
     }
 
     $sourceFingerprint = [string](Get-PayloadManifestProperty -Manifest $manifest -Name 'sourceFingerprint')
-    if ([string]::IsNullOrWhiteSpace($sourceFingerprint)) {
+    $sourceTreeAvailable = Test-GuestPayloadSourceTreeAvailable
+    if ([string]::IsNullOrWhiteSpace($sourceFingerprint) -and $sourceTreeAvailable) {
         $reasons.Add('payload-manifest.json 缺少 sourceFingerprint。下一步：重新准备 guest payload。')
     }
-    else {
+    elseif (-not [string]::IsNullOrWhiteSpace($sourceFingerprint) -and $sourceTreeAvailable) {
         $currentFingerprint = Get-GuestPayloadSourceFingerprint
         if (-not [System.StringComparer]::OrdinalIgnoreCase.Equals($sourceFingerprint, $currentFingerprint)) {
             $reasons.Add('guest payload source fingerprint 已过期；Guest Agent/R0Collector 源码在暂存后发生变化。下一步：重新准备 guest payload。')
         }
     }
 
-    Test-GuestPayloadManifestFileHash -Manifest $manifest -Name 'GuestAgent' -ExpectedPath $AgentExe -Reasons $reasons
-    Test-GuestPayloadManifestFileHash -Manifest $manifest -Name 'R0Collector' -ExpectedPath $CollectorExe -Reasons $reasons
+    Test-GuestPayloadManifestFileHash -Manifest $manifest -Name 'GuestAgent' -PayloadRoot $PayloadRoot -ExpectedPath $AgentExe -Reasons $reasons
+    Test-GuestPayloadManifestFileHash -Manifest $manifest -Name 'R0Collector' -PayloadRoot $PayloadRoot -ExpectedPath $CollectorExe -Reasons $reasons
 
     return [pscustomobject]@{ Fresh = $reasons.Count -eq 0; Reasons = @($reasons) }
 }
@@ -1379,6 +1421,10 @@ function Ensure-GuestPayload {
     }
     else {
         Write-RunInfo '已通过 -ForcePayloadPreparation 强制重建 guest payload。 / Guest payload rebuild forced.'
+    }
+
+    if (-not (Test-GuestPayloadSourceTreeAvailable)) {
+        throw "错误：guest payload 缺失或过期，但当前目录不是完整源码树，无法重建 payload。下一步：从源码仓库运行 .\scripts\Publish-RuntimePayloads.ps1 重新生成 RuntimePublishRoot，或把完整 guest-tools 放入便携包 payload\guest-tools。"
     }
 
     $prepareScript = Join-Path $script:RepositoryRoot 'scripts\Prepare-GuestPayload.ps1'
@@ -1879,6 +1925,8 @@ function Invoke-WebUi {
         Write-RunInfo '中文提示：当前是已发布 WebUI 目标，-NoBuild 无需生效；将直接启动发布产物。 / -NoBuild is ignored for published WebUI.'
     }
 
+    Set-Location -LiteralPath $script:RepositoryRoot
+
     if ($launchTarget.Kind -eq 'SourceProject') {
         $arguments = @('run', '--no-launch-profile', '--project', $launchTarget.Path)
         if ($NoBuild) {
@@ -2045,27 +2093,20 @@ function Invoke-PostProcessJob {
         [Parameter(Mandatory)][string]$ResolvedSamplePath
     )
 
-    $postProcessProject = Join-Path $script:RepositoryRoot 'tools\KSword.Sandbox.PostProcess\KSword.Sandbox.PostProcess.csproj'
-    if (-not (Test-Path -LiteralPath $postProcessProject -PathType Leaf)) {
-        throw "错误：找不到 PostProcess 项目：$postProcessProject。下一步：请确认 tools\KSword.Sandbox.PostProcess 存在，并从完整仓库运行。"
-    }
+    Import-PortableToolResolver
+    $postProcessTarget = Resolve-KSwordPortableTool -RepoRoot $script:RepositoryRoot -Tool PostProcess -ThrowIfMissing
 
-    Write-RunInfo "正在把 live 产物后处理为报告：$JobRoot / Post-processing live artifacts into report."
-    $arguments = @('run', '--project', $postProcessProject)
-    if ($NoBuild) {
-        $arguments += '--no-build'
-    }
-    $arguments += @(
-        '--',
+    Write-RunInfo "正在把 live 产物后处理为报告：$JobRoot；target=$($postProcessTarget.Kind) / Post-processing live artifacts into report."
+    $arguments = @(
         '--repo-root', $script:RepositoryRoot,
         '--config-path', $EffectiveConfigPath,
         '--job-root', $JobRoot,
         '--sample-path', $ResolvedSamplePath
     )
 
-    & dotnet @arguments
-    if ($LASTEXITCODE -ne 0) {
-        throw "错误：后处理失败，退出码 $LASTEXITCODE。下一步：检查 job 目录和上方 dotnet 输出；修复后可用 Rebuild-JobReport 重新生成报告。"
+    $exitCode = Invoke-KSwordPortableTool -Target $postProcessTarget -Arguments $arguments -NoBuild:$NoBuild
+    if ($exitCode -ne 0) {
+        throw "错误：后处理失败，退出码 $exitCode。下一步：检查 job 目录和上方输出；修复后可用 Rebuild-JobReport 重新生成报告。"
     }
 }
 

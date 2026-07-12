@@ -110,7 +110,20 @@ generated metadata 字段：`gitMetadata`、`executionBoundaries`、`requiredEvi
    documents why dirty source was packaged.
 6. For runtime packages, publish host/guest/tool payloads into an external
    folder such as `D:\Temp\KSwordSandbox\publish`; do not stage payloads into
-   the repository.
+   the repository. The local helper is a source-checkout/release-manager entry
+   point and publishes the expected layout without signing, VM mutation, smoke
+   tests, or repository `bin/obj/x64` fallback:
+
+   ```powershell
+   .\scripts\Publish-RuntimePayloads.ps1 `
+     -RuntimePublishRoot 'D:\Temp\KSwordSandbox\publish'
+   ```
+
+   It publishes `host-web`, `tools/job-tool`, and `tools/postprocess` with
+   `dotnet publish`, delegates `guest-tools` to `Prepare-GuestPayload.ps1`, and
+   writes `runtime-publish-manifest.json` inside the external publish root.
+   Runtime portable packages consume these payloads; they do not require
+   operators to rerun this publish helper from inside the package.
 7. Build the package locally:
 
    ```powershell
@@ -532,6 +545,7 @@ under `D:\Temp\KSwordSandbox\packages` or another ignored external folder.
 重新发布对应 payload 到仓库外目录，再运行：
 
 ```powershell
+.\scripts\Publish-RuntimePayloads.ps1 -RuntimePublishRoot 'D:\Temp\KSwordSandbox\publish'
 .\scripts\Test-ReleaseReadiness.ps1 `
   -AllowDirtySource `
   -RuntimePublishRoot 'D:\Temp\KSwordSandbox\publish' `
@@ -551,7 +565,10 @@ the `scripts/` wrappers (`scripts/run.ps1`, `scripts/install.ps1`,
 `scripts/Manage-SandboxDriver.ps1`) so operators can run one-command WebUI
 startup plus read-only Status/CheckEnvironment checks from either layout. The
 published WebUI is expected at `app/host-web`; root `run.ps1` automatically uses
-that directory when the source project is not present.
+that directory when the source project is not present. Directly launching the
+published WebUI from `app/host-web` is also supported: startup walks upward to
+the package root markers (`config/sandbox.example.json` plus
+`rules/behavior-rules.json`) before resolving config and rules.
 
 ### 机器可读 handoff 字段 / Machine-readable handoff fields
 

@@ -284,17 +284,27 @@ function Get-PayloadFileDescriptor {
         [string]$Name,
 
         [Parameter(Mandatory)]
-        [string]$Path
+        [string]$Path,
+
+        [string]$RootForRelativePath = ''
     )
 
     $item = Get-Item -LiteralPath $Path
-    return [ordered]@{
+    $descriptor = [ordered]@{
         name = $Name
         path = (Get-NormalizedFullPath -Path $Path)
         length = $item.Length
         lastWriteUtc = $item.LastWriteTimeUtc.ToString('O')
         sha256 = Get-FileSha256Hex -Path $Path
     }
+
+    if (-not [string]::IsNullOrWhiteSpace($RootForRelativePath) -and (Test-PathUnderRoot -Path $Path -Root $RootForRelativePath)) {
+        $rootFull = (Get-NormalizedFullPath -Path $RootForRelativePath).TrimEnd('\', '/') + [System.IO.Path]::DirectorySeparatorChar
+        $pathFull = Get-NormalizedFullPath -Path $Path
+        $descriptor.relativePath = $pathFull.Substring($rootFull.Length).Replace('\', '/')
+    }
+
+    return $descriptor
 }
 
 # Test-PathUnderRoot checks whether a path is inside a root directory.
@@ -522,11 +532,12 @@ function Write-PayloadManifest {
         agentFileCount      = $AgentFileCount
         collectorFileCount  = $CollectorFileCount
         requiredHostFiles   = @(
-            (Get-PayloadFileDescriptor -Name 'GuestAgent' -Path $agentExecutablePath),
-            (Get-PayloadFileDescriptor -Name 'R0Collector' -Path $collectorExecutablePath),
+            (Get-PayloadFileDescriptor -Name 'GuestAgent' -Path $agentExecutablePath -RootForRelativePath $DestinationRoot),
+            (Get-PayloadFileDescriptor -Name 'R0Collector' -Path $collectorExecutablePath -RootForRelativePath $DestinationRoot),
             [ordered]@{
                 name = 'PayloadManifest'
                 path = (Get-NormalizedFullPath -Path $manifestPath)
+                relativePath = 'payload-manifest.json'
             }
         )
     }

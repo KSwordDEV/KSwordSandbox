@@ -182,41 +182,66 @@ function Invoke-JobToolCommand {
         [string[]]$ExtraArgs = @()
     )
 
-    $project = Join-Path $script:ResolvedRepoRoot 'tools\KSword.Sandbox.JobTool\KSword.Sandbox.JobTool.csproj'
-    if (-not (Test-Path -LiteralPath $project -PathType Leaf)) {
-        throw "JobTool project not found: $project"
+    $resolver = Join-Path $PSScriptRoot 'Resolve-PortableTool.ps1'
+    if (-not (Test-Path -LiteralPath $resolver -PathType Leaf)) {
+        throw "Portable tool resolver not found: $resolver"
+    }
+    . $resolver
+
+    $target = Resolve-KSwordPortableTool -RepoRoot $script:ResolvedRepoRoot -Tool JobTool -ThrowIfMissing
+    if ($target.RequiresDotNet -and $null -eq (Get-Command dotnet -ErrorAction SilentlyContinue)) {
+        throw "JobTool target '$($target.Kind)' requires dotnet, but dotnet was not found in PATH. $($target.RecommendedAction)"
     }
 
-    $dotnetArgs = @('run')
-    if ($NoBuild) {
-        $dotnetArgs += '--no-build'
-    }
-
-    $dotnetArgs += @('--project', $project, '--', $JobToolCommand, '--repo-root', $script:ResolvedRepoRoot)
+    $toolArgs = @($JobToolCommand, '--repo-root', $script:ResolvedRepoRoot)
     if (-not [string]::IsNullOrWhiteSpace($script:ResolvedConfigPath)) {
-        $dotnetArgs += @('--config', $script:ResolvedConfigPath)
+        $toolArgs += @('--config', $script:ResolvedConfigPath)
     }
     if (-not [string]::IsNullOrWhiteSpace($script:ResolvedRuntimeRoot)) {
-        $dotnetArgs += @('--runtime-root', $script:ResolvedRuntimeRoot)
+        $toolArgs += @('--runtime-root', $script:ResolvedRuntimeRoot)
     }
     if ($Json) {
-        $dotnetArgs += '--json'
+        $toolArgs += '--json'
     }
 
-    $dotnetArgs += $ExtraArgs
+    $toolArgs += $ExtraArgs
+
+    if ($target.Kind -eq 'SourceProject') {
+        $launcher = 'dotnet'
+        $launcherArgs = @('run')
+        if ($NoBuild) {
+            $launcherArgs += '--no-build'
+        }
+
+        $launcherArgs += @('--project', [string]$target.Path, '--')
+        $launcherArgs += $toolArgs
+    }
+    elseif ($target.Kind -eq 'PublishedDll') {
+        $launcher = 'dotnet'
+        $launcherArgs = @([string]$target.Path)
+        $launcherArgs += $toolArgs
+    }
+    elseif ($target.Kind -eq 'PublishedExe') {
+        $launcher = [string]$target.Path
+        $launcherArgs = $toolArgs
+    }
+    else {
+        throw "JobTool target is not runnable: $($target.Kind)"
+    }
+
     if (-not $Json) {
-        Write-Host "[ksword-operator] JobTool $JobToolCommand"
+        Write-Host "[ksword-operator] JobTool $JobToolCommand via $($target.Kind)"
     }
 
     $startedAtUtc = [DateTimeOffset]::UtcNow
     $output = @()
     $exitCode = 1
     try {
-        $output = @(& dotnet @dotnetArgs 2>&1 | ForEach-Object { [string]$_ })
+        $output = @(& $launcher @launcherArgs 2>&1 | ForEach-Object { [string]$_ })
         $exitCode = $LASTEXITCODE
     }
     catch {
-        $output = @("dotnet launch failed: $($_.Exception.Message)")
+        $output = @("JobTool launch failed: $($_.Exception.Message)")
         $exitCode = 127
     }
 
