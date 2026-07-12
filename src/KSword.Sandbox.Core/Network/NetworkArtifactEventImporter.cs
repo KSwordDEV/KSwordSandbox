@@ -272,17 +272,18 @@ public sealed class NetworkArtifactEventImporter
             .Where(ArtifactDescriptorFactory.IsPacketCapturePath)
             .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
             .ToList();
+        var matches = new List<string>();
         foreach (var capture in captures)
         {
             var captureBase = Path.GetFileNameWithoutExtension(capture);
             if (sidecarBase.StartsWith(captureBase + ".", StringComparison.OrdinalIgnoreCase) ||
                 sidecarBase.Equals(captureBase, StringComparison.OrdinalIgnoreCase))
             {
-                return Path.GetFullPath(capture);
+                matches.Add(capture);
             }
         }
 
-        return captures.Count == 1 ? Path.GetFullPath(captures[0]) : null;
+        return matches.Count == 1 ? Path.GetFullPath(matches[0]) : null;
     }
 
     private static bool IsCanonicalDriverEventsPath(string path)

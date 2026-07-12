@@ -130,20 +130,26 @@ prefer over brittle raw-string matches when available:
 These R0 fields are evidence shorthands, not final verdicts. R0-facing rules
 should still include `evidenceFields` and explicit self-noise/health guards
 such as `noise`, `selfNoise`, `collectorSelfNoise`, `collectorNoise`,
-`healthStatus`, `vtStatus`, and sandbox-agent/collector process exclusions.
+`r0SelfNoise`, `healthStatus`, `vtStatus`, and sandbox-agent/collector process
+exclusions.
 Do not globally exclude `source=r0collector` in rules whose purpose is to
 consume parsed R0 rows; instead, require the semantic fields and suppress known
 collector-health or self-noise markers.
 
-For recent high-signal scoring rules, the v26/v27 guard baseline is:
+For current high-signal scoring rules, the guard baseline is:
 `behaviorCounted=false`, `nonbehavior=true`, `collectorSelfNoise=true`,
-`collectorNoise=true`, `noise=true`, `selfNoise=true`,
-`source=collection-health`, `source=virustotal`, `source=r0collector`, and
+`collectorNoise=true`, `r0SelfNoise=true`, `noise=true`, `selfNoise=true`,
+`source=host`, `source=collection-health`, `source=virustotal`,
+`source=r0collector`, and
 explicit `KSword.Sandbox.Agent.exe` / `KSword.Sandbox.R0Collector.exe`
 process-name exclusions where those fields are not the behavior being
 intentionally consumed. New v28 scoring additions also include
 `sampleBehaviorCandidate=false` so imported artifacts, enrichment rows, and
 collector-derived non-sample rows cannot satisfy high-signal predicates. Treat
+the current v29 handoff as a contract release rather than a new behavior-rule
+batch unless `rules/behavior-rules.json` gets a v29 rule-set version and
+dedicated v29 IDs; until then, carry the v28 guard set forward for any new
+high/medium scoring rule. Treat
 open-source references such as SigmaHQ, Elastic detection-rules, Splunk Security
 Content, and LOLBAS as behavior-family inspiration only; keep KSword predicates
 expressed over local event fields and add source-reference tags only through

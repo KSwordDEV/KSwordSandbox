@@ -33,9 +33,8 @@ internal static class GuestSelfNoiseMetadata
             return;
         }
 
-        AddIfMissing(evt.Data, "behaviorCounted", "false");
-        AddIfMissing(evt.Data, "nonbehavior", "true");
-        AddIfMissing(evt.Data, "notSampleBehavior", "true");
+        ApplySelfNoiseBehaviorFlags(evt.Data);
+        AddIfMissing(evt.Data, "sampleBehaviorCandidateReason", "guest-agent-collection-or-diagnostic-self-noise");
 
         if (IsDiagnosticOrCollectionHealth(evt))
         {
@@ -163,9 +162,17 @@ internal static class GuestSelfNoiseMetadata
             string.Equals(value, expected, StringComparison.OrdinalIgnoreCase);
     }
 
+    private static void ApplySelfNoiseBehaviorFlags(IDictionary<string, string> data)
+    {
+        data["behaviorCounted"] = "false";
+        data["nonbehavior"] = "true";
+        data["notSampleBehavior"] = "true";
+        data["sampleBehaviorCandidate"] = "false";
+    }
+
     private static void AddIfMissing(IDictionary<string, string> data, string key, string value)
     {
-        if (!data.ContainsKey(key))
+        if (!data.TryGetValue(key, out var existing) || string.IsNullOrWhiteSpace(existing))
         {
             data[key] = value;
         }

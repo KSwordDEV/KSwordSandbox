@@ -11,9 +11,11 @@ KSwordSandbox 的宿主侧网络导入把网络证据当作已回收证据产物
 - Guest `artifacts/manifest.json` 中指向 `PacketCapture` artifacts 的 descriptors。
 - Collected guest output 下的 `.pcap` 和 `.pcapng` 文件，通常位于
   `packet-captures/**`。
-- Capture 文件旁边的 packet-capture sidecar JSONL/log 文件，例如
-  `*.dns.jsonl`, `*.http.jsonl`, `*.tls.jsonl`, `*.conn.jsonl`, `tshark*.jsonl`,
-  Zeek-like JSONL 或 KSword/R0 network JSONL rows。
+- Capture 文件旁边同 basename 的 packet-capture sidecar JSONL/log 文件，例如
+  `sample.jsonl`, `sample.dns.jsonl`, `sample.http.jsonl`, `sample.tls.jsonl`,
+  `sample.conn.jsonl`。`network-sidecars/**` 中也可导入 Zeek-like JSONL、
+  `tshark*.jsonl` 或 KSword/R0 network JSONL rows；若文件名不是同 basename，
+  只作为独立 sidecar 处理，除非 manifest/metadata 明确声明 parent PCAP。
 - 非严格 JSON 的弱结构 sidecar log rows，包括 `key=value` 或
   `key: value` tokens，以及类似下方的 loose flow text：
   `10.0.0.4:50200 -> 198.51.100.77:8080`。
@@ -72,6 +74,11 @@ Rows carrying parser metadata also carry `parserMetadataBounded=true` and
 `parserMetadataPolicy=bounded-parser-metadata-nonbehavior-coverage-boundary`。
 这些字段只说明“导入器在有界预算内看到了什么”；不要把 limit hit 解释成恶意规避、
 不要把 parser failure 解释成良性，也不要把没有 protocol rows 解释成没有网络行为。
+如果 sidecar 被成功读取但没有归一化出 DNS/HTTP/TLS/flow rows（例如全是未知 log、
+深层 JSON 或字段/行数超限），导入器会输出一条 nonbehavior `network.health`
+parser coverage row，带 `parserCoverageOnly=true`、`parserLinesRead`、
+`parserLineLimitHit`、`parserDepthLimitHit`、`parserFieldLimitHit`、
+`behaviorCounted=false` 和 `sampleBehaviorCandidate=false`。
 
 ## Guest 抓包诊断与导入证据 / Guest capture diagnostics vs imported evidence
 
@@ -209,7 +216,8 @@ Duplicate policy：
     `pcapSourceArtifactRelativePath` / `sourcePcapArtifactRelativePath`、
     `pcapSourceArtifactSha256` / `sourcePcapArtifactSha256` 和
     `pcapDownloadSelector` / `sourcePcapDownloadSelector` 保留 parent capture。
-    Guest-root aggregate import 会对同目录同 basename 的 sidecar 自动关联 sibling PCAP。
+    Guest-root aggregate import 只会对同目录同 basename、且唯一匹配的 sidecar 自动关联
+    sibling PCAP。
   - `collectionName`
   - `evidenceRole`
   - `importMode`
@@ -325,8 +333,15 @@ Sidecar rows 使用两层 artifact identity，避免把 sidecar 本身和 parent
 - 没有关联 PCAP 时，PCAP-specific parent fields 保持缺席；可见
   `sidecarParentPcapLinked=false`、`sidecarPcapLinkSource=none` 作为 provenance 状态。
 - Direct PCAP import 读取相邻 sidecar 时，`sidecarPcapLinkSource=pcap-import-adjacent-sidecar`。
+  该自动读取只接受与当前 PCAP 同 basename 的 sidecar，例如 `sample.pcap` 对应
+  `sample.jsonl` / `sample.dns.jsonl`；`dns.jsonl`、`tshark.jsonl` 或
+  `all-captures.dns.jsonl` 这类 global sidecar 不会被挂到某个 PCAP。
   Guest-root aggregate import 从同目录同 basename 推断时，
   `sidecarPcapLinkSource=adjacent-sibling-pcap`。
+- 歧义策略：如果同目录存在多个 PCAP，或同一个 sidecar basename 可匹配多个 capture，
+  importer 不会猜测 parent PCAP；PCAP-specific parent fields 保持缺席，并保留
+  `sidecarParentPcapLinked=false`、`sidecarPcapLinkSource=none`。需要关联 global /
+  ambiguous sidecar 时，应在 manifest/sidecar metadata 中显式声明 parent PCAP。
 - 如果 manifest/sidecar metadata 已经声明 parent PCAP，而相邻推断结果不同，既有
   parent metadata 优先；导入器记录 `sidecarPcapLinkConflict=manifest-vs-adjacent`、
   `sidecarPcapLinkConflictPolicy=keep-existing-parent-metadata` 和 inferred path 字段，

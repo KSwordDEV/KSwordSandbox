@@ -35258,6 +35258,7 @@
       ],
       "excludeDataContains": {
         "source": [
+          "host",
           "collection-health",
           "virustotal",
           "r0collector"
@@ -35282,6 +35283,9 @@
           "true"
         ],
         "selfNoise": [
+          "true"
+        ],
+        "r0SelfNoise": [
           "true"
         ]
       },
@@ -35345,6 +35349,7 @@
       ],
       "excludeDataContains": {
         "source": [
+          "host",
           "collection-health",
           "virustotal",
           "r0collector"
@@ -35369,6 +35374,9 @@
           "true"
         ],
         "selfNoise": [
+          "true"
+        ],
+        "r0SelfNoise": [
           "true"
         ]
       },
@@ -35440,6 +35448,7 @@
       ],
       "excludeDataContains": {
         "source": [
+          "host",
           "collection-health",
           "virustotal",
           "r0collector"
@@ -35464,6 +35473,9 @@
           "true"
         ],
         "selfNoise": [
+          "true"
+        ],
+        "r0SelfNoise": [
           "true"
         ]
       },
@@ -35533,6 +35545,7 @@
       ],
       "excludeDataContains": {
         "source": [
+          "host",
           "collection-health",
           "virustotal",
           "r0collector"
@@ -35557,6 +35570,9 @@
           "true"
         ],
         "selfNoise": [
+          "true"
+        ],
+        "r0SelfNoise": [
           "true"
         ]
       },
@@ -35621,6 +35637,7 @@
       ],
       "excludeDataContains": {
         "source": [
+          "host",
           "collection-health",
           "virustotal",
           "r0collector"
@@ -35645,6 +35662,9 @@
           "true"
         ],
         "selfNoise": [
+          "true"
+        ],
+        "r0SelfNoise": [
           "true"
         ]
       },
@@ -35710,6 +35730,7 @@
       ],
       "excludeDataContains": {
         "source": [
+          "host",
           "collection-health",
           "virustotal",
           "r0collector"
@@ -35734,6 +35755,9 @@
           "true"
         ],
         "selfNoise": [
+          "true"
+        ],
+        "r0SelfNoise": [
           "true"
         ]
       },
@@ -35800,6 +35824,7 @@
       ],
       "excludeDataContains": {
         "source": [
+          "host",
           "collection-health",
           "virustotal",
           "r0collector"
@@ -35824,6 +35849,9 @@
           "true"
         ],
         "selfNoise": [
+          "true"
+        ],
+        "r0SelfNoise": [
           "true"
         ]
       },
@@ -35888,6 +35916,7 @@
       ],
       "excludeDataContains": {
         "source": [
+          "host",
           "collection-health",
           "virustotal",
           "r0collector"
@@ -35912,6 +35941,9 @@
           "true"
         ],
         "selfNoise": [
+          "true"
+        ],
+        "r0SelfNoise": [
           "true"
         ]
       },
@@ -35977,6 +36009,7 @@
       ],
       "excludeDataContains": {
         "source": [
+          "host",
           "collection-health",
           "virustotal",
           "r0collector"
@@ -36001,6 +36034,9 @@
           "true"
         ],
         "selfNoise": [
+          "true"
+        ],
+        "r0SelfNoise": [
           "true"
         ]
       },
@@ -36066,6 +36102,7 @@
       ],
       "excludeDataContains": {
         "source": [
+          "host",
           "collection-health",
           "virustotal",
           "r0collector"
@@ -36090,6 +36127,9 @@
           "true"
         ],
         "selfNoise": [
+          "true"
+        ],
+        "r0SelfNoise": [
           "true"
         ]
       },

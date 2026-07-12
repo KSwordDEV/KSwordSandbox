@@ -169,8 +169,8 @@ guest-output 目录下解析文件，而不是信任 VM 内绝对路径。
   `heightPixels`, `artifactRelativePath`, `sizeBytes`, `sha256`,
   `artifactSelector` / `downloadSelector`, `processRole`, `rootProcessId`,
   `treeLineage`, `behaviorCounted=false`, `nonbehavior=true`, and
-  `notSampleBehavior=true`, plus `zhMessage`/`zhHint` when those values are
-  available.
+  `notSampleBehavior=true`, `sampleBehaviorCandidate=false`, plus
+  `zhMessage`/`zhHint` when those values are available.
 - `screenshot.skipped` when screenshot capture was requested but the platform or
   guest session cannot expose a desktop surface. This is non-fatal and includes
   structured `reason`, stable `reasonCode` / `reasonCategory`, `diagnosticStage`,
@@ -180,8 +180,8 @@ guest-output 目录下解析文件，而不是信任 VM 内绝对路径。
 - `screenshot.phase.summary` after each configured screenshot phase. This
   summary is marked `summaryEvent=true`, `collectionHealth=true`,
   `behaviorCounted=false`, `nonbehavior=true`, and
-  `notSampleBehavior=true`; it records captured/skipped counts, reason-count
-  JSON, and first/last/largest artifact selectors when screenshots were
+  `notSampleBehavior=true`, `sampleBehaviorCandidate=false`; it records
+  captured/skipped counts, reason-count JSON, and first/last/largest artifact selectors when screenshots were
   produced.
 - `memory_dump.captured` when `--memory-dump` successfully writes a
   `memory-dumps/*.dmp` minidump for the launched sample process or a visible
@@ -191,7 +191,8 @@ guest-output 目录下解析文件，而不是信任 VM 内绝对路径。
   `artifactSelector` / `downloadSelector`, `capturePolicy`, `processRole`,
   `rootProcessId`, `treeDepth`, `treeLineage`, direct-child/deeper-descendant
   targeting fields, `behaviorCounted=false`, `nonbehavior=true`,
-  `notSampleBehavior=true`, and `zhMessage`/`zhHint` when available.
+  `notSampleBehavior=true`, `sampleBehaviorCandidate=false`, and
+  `zhMessage`/`zhHint` when available.
 - `memory_dump.skipped` when memory dump capture was requested but the platform,
   process state, or access rights prevent capture. This is non-fatal and
   includes structured `reason`, stable `reasonCode` / `reasonCategory`,
@@ -208,7 +209,8 @@ guest-output 目录下解析文件，而不是信任 VM 内绝对路径。
   `deeperDescendantCoverageState` / `descendantCoverageCompleteness` so the
   report can explain why a run has fewer dump files than process-tree nodes.
   It carries `coverageTaxonomy` and is marked `behaviorCounted=false`,
-  `nonbehavior=true`, and `notSampleBehavior=true`. Timeout runs can also emit a `cleanup`
+  `nonbehavior=true`, `notSampleBehavior=true`, and
+  `sampleBehaviorCandidate=false`. Timeout runs can also emit a `cleanup`
   pre-kill sweep before `Kill(entireProcessTree:true)` so live descendants are
   dumped before the agent terminates the process tree.
 - `packet_capture.started`, `packet_capture.stopped`, and
@@ -217,8 +219,8 @@ guest-output 目录下解析文件，而不是信任 VM 内绝对路径。
   `packet-captures/*.pcapng`, and records size/path metadata for host PCAP
   import. Captured PCAPNG events also include `sha256`, `processRole`,
   `rootProcessId`, `treeLineage`, `sourceTool`/`artifactSourceTool`, and
-  `behaviorCounted=false`, `nonbehavior=true`, `notSampleBehavior=true`, and
-  `zhMessage`/`zhHint` when available.
+  `behaviorCounted=false`, `nonbehavior=true`, `notSampleBehavior=true`,
+  `sampleBehaviorCandidate=false`, and `zhMessage`/`zhHint` when available.
 - `packet_capture.skipped` and `packet_capture.failed` when packet capture was
   requested but Windows, rights, an existing capture session, `pktmon start`,
   `pktmon stop`, or `pktmon etl2pcap` prevents usable output. These events are
@@ -228,12 +230,12 @@ guest-output 目录下解析文件，而不是信任 VM 内绝对路径。
   A slow DNS/netstat/service/task query is bounded and converted to an event so
   later probes and final JSON artifact writing can continue. These diagnostic
   rows are explicitly marked `collectionHealth=true`,
-  `behaviorCounted=false`, `nonbehavior=true`, and `notSampleBehavior=true` so
-  reports do not treat collection failures as sample behavior.
+  `behaviorCounted=false`, `nonbehavior=true`, `notSampleBehavior=true`, and
+  `sampleBehaviorCandidate=false` so reports do not treat collection failures as sample behavior.
 - `probe.summary` after each probe and `probe.phase.summary` after each phase.
   These events are marked with `collectionHealth=true`,
-  `behaviorCounted=false`, `nonbehavior=true`, and `notSampleBehavior=true`;
-  they explain which collection channel ran, how long it took, how many events
+  `behaviorCounted=false`, `nonbehavior=true`, `notSampleBehavior=true`, and
+  `sampleBehaviorCandidate=false`; they explain which collection channel ran, how long it took, how many events
   it emitted, and whether it completed, failed, timed out, or was canceled.
   They are intentionally health/progress evidence, not sample behavior.
 - `process.start_failed`, `process.kill_failed`, and
@@ -251,17 +253,24 @@ guest-output 目录下解析文件，而不是信任 VM 内绝对路径。
   `probe.*`, `screenshot.*`, `memory_dump.*`, `packet_capture.*`, manifest
   health rows, and capture diagnostics) are normalized with
   `behaviorCounted=false`, `nonbehavior=true`, `notSampleBehavior=true`, and
-  Chinese operator fields. This does not change sample behavior events such as
-  `process.*`, `file.*`, TCP, service, scheduled task, startup item, or
-  registry behavior diffs.
+  `sampleBehaviorCandidate=false`, plus Chinese operator fields. This does not
+  change sample behavior events such as `process.*`, `file.*`, TCP, service,
+  scheduled task, startup item, or registry behavior diffs.
 - Optional artifact collection rows (`artifact.dropped_file.*`,
   `screenshot.*`, `memory_dump.*`, and `packet_capture.*`) also pass through a
   shared field normalizer before final `events.json` / manifest writing. This
-  keeps `artifactRelativePath`, `sizeBytes`, `sha256`,
+  keeps `artifactRelativePath`, `rootProcessId`, `treeLineage`, `sizeBytes`,
+  `sha256`, `collectionName`, `evidenceRole`, `zhHint`,
   `artifactRelativePathStatus`, `sizeBytesStatus`, `sha256Status`,
   `artifactIntegrityState`, `rootProcessIdStatus`, and `treeLineageStatus`
   present on captured, skipped, disabled, failed, and summary rows. Empty values
-  are intentional for rows that did not create a downloadable file.
+  are intentional stable fallbacks for rows that did not create a downloadable
+  file or cannot attribute a sample root process.
+- Guest artifact manifest descriptors and collection summaries use the same
+  non-behavior routing: descriptor/summary metadata carries
+  `behaviorCounted=false`, `nonbehavior=true`, `sampleBehaviorCandidate=false`,
+  stable `collectionName`/`evidenceRole`, and a `zhHint` fallback even when the
+  source event omitted optional quality fields.
 
 事件模型仍然是 `KSword.Sandbox.Abstractions.SandboxEvent`；附加细节放在既有字符串
 `Data` dictionary 中，避免修改 Core/Web/Abstractions 共享契约。
@@ -281,7 +290,8 @@ hash 和 host 可回收相对位置的持久证据链。
   `artifactSelector` / `downloadSelector`, `reasonTaxonomy`,
   `sourceCopiedSha256Match`, `processRole`, `rootProcessId`, root
   `treeLineage`, `rootProcessIdStatus`, `treeLineageStatus`,
-  `behaviorCounted=false`, `nonbehavior=true`, `zhMessage`/`zhHint`, and
+  `behaviorCounted=false`, `nonbehavior=true`,
+  `sampleBehaviorCandidate=false`, `zhMessage`/`zhHint`, and
   `evidenceRole=dropped-file`.
 - `artifact.dropped_file.skipped` when a candidate path disappeared, is outside
   the sample working directory, is under `--out`, or cannot be copied. Skipped
@@ -294,7 +304,8 @@ hash 和 host 可回收相对位置的持久证据链。
 - `artifact.manifest.written` after `artifacts/manifest.json` is written. The
   event records the manifest-relative path, manifest artifact count, and copied
   dropped-file count. Manifest success/failure rows are collection-health
-  metadata and carry `behaviorCounted=false` / `nonbehavior=true`.
+  metadata and carry `behaviorCounted=false` / `nonbehavior=true` /
+  `sampleBehaviorCandidate=false`.
 - `artifact.manifest.failed` if manifest writing fails; events and summary
   writing still continue best-effort.
 
@@ -348,8 +359,10 @@ VM-local path（`guestFullPath`）。它还携带 `guestRelativePath`、`sourceE
 和“复制回来的 artifact”。该选项不收集 memory dump；内存转储仍是单独的显式 opt-in。
 `file.created`/`file.modified` 候选 rows、`artifact.dropped_file.copied` 和
 `artifact.dropped_file.skipped` 共享 artifact 列族：`rootProcessId`、`treeLineage`、
-`processRole`、`artifactRelativePath`、`sizeBytes`、`sha256` 以及对应 status 字段；没有产出文件时
-这些值为空并由 `artifactRelativePathStatus`、`sizeBytesStatus`、`sha256Status` 解释原因。
+`processRole`、`artifactRelativePath`、`sizeBytes`、`sha256`、`collectionName`、
+`evidenceRole`、`zhHint` 以及对应 status 字段；没有产出文件或无法确认 root PID 时，
+这些值为空并由 `artifactRelativePathStatus`、`sizeBytesStatus`、`sha256Status`、
+`rootProcessIdStatus` 和 `treeLineageStatus` 解释原因。
 
 ## 可选内存转储 / Optional memory dumps
 
@@ -375,8 +388,8 @@ host artifact index 将这些文件分类为 `memory-dump`，不新增共享 art
 `childProcessDumpOutcome`、`directChildProcessDumpEnabled`、`deeperDescendantProcessDumpEnabled`、
 `descendantDumpOptInScope`、`descendantDumpOptInMode`、`descendantDumpOptInOption`、
 `memoryDumpOptInApplied`、`rootDumpOptInApplied`、`descendantDumpOptInApplied`
-和 `zhHint`；如果 root PID 本身不可用，则用 `rootProcessIdStatus` /
-`treeLineageStatus` 明确标记不可用。
+和 `zhHint`；如果 root PID 本身不可用，则保留空 `rootProcessId` /
+`treeLineage` fallback，并用 `rootProcessIdStatus` / `treeLineageStatus` 明确标记不可用。
 
 ## 可选网络抓包 / Optional packet capture
 
@@ -392,8 +405,9 @@ DNS/HTTP/TLS/flow 证据转换为规范化 `pcap.*` 事件。
 所有 packet-capture 生命周期事件都会保留 `sourceTool=pktmon.exe`、
 `artifactSourceTool=pktmon.exe` 和 `packetCaptureSource=guest-pktmon`；成功捕获时再补
 `sizeBytes`、`sha256` 和 PCAPNG block counters。started/stopped/skipped/failed/captured rows 都会带
-`artifactRelativePath`、`artifactRelativePathStatus`、`sizeBytesStatus` 与 `sha256Status`，使 pending、skipped
-和 captured rows 可以统一渲染。
+`artifactRelativePath`、`rootProcessId`、`treeLineage`、`collectionName`、`evidenceRole`、`zhHint`、
+`artifactRelativePathStatus`、`sizeBytesStatus` 与 `sha256Status`，使 pending、skipped
+和 captured rows 可以统一渲染；缺失值使用空字符串加 status 字段解释原因。
 
 ## 驱动 JSONL 兼容性 / Driver JSONL compatibility
 

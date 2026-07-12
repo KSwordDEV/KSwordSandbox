@@ -8,8 +8,9 @@ output directory. Processing reads the matching packaging/*.manifest.json file,
 copies allowed files into a staging tree outside the repository, writes generated
 package metadata, and creates a local zip unless -StageOnly is specified.
 
-The script is local-only: it does not push, publish, sign, or build. Runtime
-binaries must be supplied through an external RuntimePublishRoot; use
+The script is local-only: it does not run smoke tests, run Hyper-V live, push,
+publish, sign, call CSignTool.exe, or build payloads. Runtime binaries must be
+supplied through an external RuntimePublishRoot; use
 -RequireCompleteRuntimePayloads for handoff packages and omit it only for
 explicit layout/safety dry-runs. Source packages are source-only and reject
 generated binaries, samples, VM state, private signing material, and local
@@ -494,6 +495,25 @@ function Get-GitBranch {
     return 'unknown'
 }
 
+function Get-GitCommit {
+    $gitCommand = Get-Command git -ErrorAction SilentlyContinue
+    if ($null -eq $gitCommand) {
+        return 'unknown'
+    }
+
+    try {
+        $commit = @(git -C $RepositoryRoot rev-parse HEAD)
+        if ($LASTEXITCODE -eq 0 -and $commit.Count -gt 0 -and -not [string]::IsNullOrWhiteSpace($commit[0])) {
+            return [string]$commit[0]
+        }
+    }
+    catch {
+        return 'unknown'
+    }
+
+    return 'unknown'
+}
+
 # Get-GitStatusSnapshot returns compact dirty-state metadata for generated
 # package provenance. It never changes repository state.
 function Get-GitStatusSnapshot {
@@ -501,28 +521,55 @@ function Get-GitStatusSnapshot {
     if ($null -eq $gitCommand) {
         return [ordered]@{
             available   = $false
+            dirty       = $null
             isDirty     = $null
+            dirtyStatus = 'unknown-git-not-available'
             changeCount = $null
             preview     = @()
+            statusPorcelainPreview = @()
         }
     }
 
     try {
         $status = @(git -C $RepositoryRoot status --porcelain)
+        $dirty = ($status.Count -gt 0)
         return [ordered]@{
             available   = $true
-            isDirty     = ($status.Count -gt 0)
+            dirty       = $dirty
+            isDirty     = $dirty
+            dirtyStatus = if ($dirty) { 'dirty' } else { 'clean' }
             changeCount = $status.Count
             preview     = @($status | Select-Object -First 25)
+            statusPorcelainPreview = @($status | Select-Object -First 25)
         }
     }
     catch {
         return [ordered]@{
             available   = $true
+            dirty       = $null
             isDirty     = $null
+            dirtyStatus = 'unknown-git-status-failed'
             changeCount = $null
             preview     = @("git status failed: $($_.Exception.Message)")
+            statusPorcelainPreview = @("git status failed: $($_.Exception.Message)")
         }
+    }
+}
+
+function Get-PackageGitMetadataSnapshot {
+    $status = Get-GitStatusSnapshot
+    return [ordered]@{
+        schema = 'ksword.release.git-provenance.v1'
+        available = [bool]$status.available
+        branch = Get-GitBranch
+        commit = Get-GitCommit
+        shortCommit = Get-GitRevision
+        dirty = $status.dirty
+        isDirty = $status.isDirty
+        dirtyStatus = $status.dirtyStatus
+        statusCount = $status.changeCount
+        statusPreview = @($status.preview)
+        statusPorcelainPreview = @($status.statusPorcelainPreview)
     }
 }
 
@@ -825,6 +872,87 @@ function Get-PackageOperatorRecommendedActions {
     return @($actions.ToArray())
 }
 
+function Get-PackageExecutionBoundaries {
+    return [ordered]@{
+        schema = 'ksword.release.execution-boundaries.v1'
+        generatedBy = 'scripts/package-portable.ps1'
+        validationProfile = 'package-portable-local-only-no-smoke-no-live'
+        smokeTestsExecuted = $false
+        hyperVLiveExecuted = $false
+        vmStartRestoreStopExecuted = $false
+        vmMutationExecuted = $false
+        driverSigningExecuted = $false
+        guiSigningFallbackInvoked = $false
+        csignToolInvoked = $false
+        gitPushExecuted = $false
+        networkPublishExecuted = $false
+        payloadBuildExecuted = $false
+        repositoryBinaryFallbackUsed = $false
+        allowedActions = @('local staging', 'optional local zip creation', 'manifest parsing', 'file copy from repository allowlist', 'file copy from external RuntimePublishRoot when supplied', 'metadata generation')
+        forbiddenActions = @('smoke test execution', 'Hyper-V live execution', 'VM start/restore/stop/mutation', 'driver signing', 'GUI signing fallback', 'CSignTool.exe invocation', 'git push', 'network publish', 'repository bin/obj/x64 runtime fallback')
+        chinese = '中文：package-portable.ps1 只做本机 staging/zip/metadata；不跑 smoke、不跑 Hyper-V live、不签名、不调用 CSignTool.exe、不 push/publish、不从仓库 bin/obj/x64 兜底 runtime。'
+    }
+}
+
+function Get-PackageRequiredEvidenceFields {
+    return [ordered]@{
+        schema = 'ksword.release.required-evidence-fields.v1'
+        provenance = @('gitMetadata.branch', 'gitMetadata.commit', 'gitMetadata.shortCommit', 'gitMetadata.dirtyStatus', 'gitMetadata.statusCount', 'generatedAtUtc', 'packageKind', 'version')
+        sourceHandoff = @('gitMetadata.branch', 'gitMetadata.commit', 'gitMetadata.dirtyStatus', 'fileInventory[].path', 'fileInventory[].sizeBytes', 'fileInventory[].sha256', 'safetyContract', 'sourceRuntimeSafetyMetadata', 'executionBoundaries')
+        runtimeHandoff = @('runtimePublishRoot', 'operatorDiagnostics.runtimeDryRunGuardrail.handoffAllowed', 'operatorDiagnostics.runtimePublishSummary.missingCount=0', 'operatorDiagnostics.runtimePublishSummary.incompleteCount=0', 'operatorDiagnostics.runtimePublishSummary.forbiddenFileCount=0', 'operatorDiagnostics.runtimeCompletenessDiagnostics.entries', 'archivePath', 'archiveSha256')
+        freshLiveClaim = @('gitMetadata.commit', 'gitMetadata.branch', 'gitMetadata.dirtyStatus', 'job id', 'runtime root', 'generatedAtUtc/local time', 'report.json path', 'report.zh.html path', 'report.en.html path')
+        fallbackWhenMissingFreshLiveJobZh = '没有实验室 live job id 时，release notes 必须写“本候选未刷新 fresh live evidence”。'
+    }
+}
+
+function Get-RuntimeHandoffMissingNextActionsZh {
+    param(
+        [object[]]$RuntimeEntries,
+        [object]$RuntimeSummary,
+        [object]$RootDiagnostics
+    )
+
+    $actions = New-Object System.Collections.Generic.List[string]
+    if ($PackageKind -ne 'runtime') {
+        [void]$actions.Add('source package 不验证完整 runtime handoff；需要 runtime 交付时请改跑 package-portable.ps1 -PackageKind runtime -RuntimePublishRoot <external-publish-root> -RequireCompleteRuntimePayloads。')
+        return @($actions.ToArray())
+    }
+
+    if ($null -eq $RootDiagnostics -or -not [bool]$RootDiagnostics.provided) {
+        [void]$actions.Add('下一步：先把 host-web、guest-tools、tools/job-tool、tools/postprocess 发布到 D:\Temp\KSwordSandbox\publish 或其他仓库外 RuntimePublishRoot。')
+        [void]$actions.Add('下一步：重跑 .\scripts\package-portable.ps1 -PackageKind runtime -RuntimePublishRoot <external-publish-root> -RequireCompleteRuntimePayloads -OutputRoot <external-output-root> -Force。')
+    }
+    elseif (-not [bool]$RootDiagnostics.outsideRepository) {
+        [void]$actions.Add('下一步：RuntimePublishRoot 不能位于仓库内；移动到仓库外目录，禁止从 bin/obj/x64 或源码树兜底复制 runtime payload。')
+    }
+    elseif (-not [bool]$RootDiagnostics.exists) {
+        [void]$actions.Add("下一步：创建并填充仓库外 RuntimePublishRoot：$($RootDiagnostics.resolvedPath)。")
+    }
+
+    if ($null -ne $RuntimeSummary) {
+        if ([int]$RuntimeSummary.missingCount -gt 0) {
+            $missing = @([string[]]@($RuntimeSummary.missingRequiredSources + $RuntimeSummary.missingOptionalSources + $RuntimeSummary.missingHandoffRequiredSources) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique)
+            [void]$actions.Add("下一步：补齐缺失 runtime payload：$($missing -join ', ')。")
+        }
+        if ([int]$RuntimeSummary.incompleteCount -gt 0) {
+            [void]$actions.Add("下一步：重新发布不完整 payload：$(([string[]]@($RuntimeSummary.incompleteSources)) -join ', ')；确认预期 exe/dll/payload-manifest 存在。")
+        }
+        if ([int]$RuntimeSummary.forbiddenFileCount -gt 0) {
+            [void]$actions.Add('下一步：删除 RuntimePublishRoot 内的 .pdb/.sys/pcap/dump/VM/secret/signing/CSignTool/signtool/GUI signing fallback 文件后重新打包。')
+        }
+        if (-not [bool]$RuntimeSummary.completeRuntimePackageReady) {
+            [void]$actions.Add('下一步：补齐后先运行 .\scripts\Test-ReleaseReadiness.ps1 -AllowDirtySource -RuntimePublishRoot <external-publish-root> -RequireCompleteRuntimePackage，再生成 runtime 包。')
+        }
+    }
+
+    if ($actions.Count -eq 0) {
+        [void]$actions.Add('下一步：RuntimePublishRoot 已满足完整性；handoff 前检查 package-manifest.generated.json、archive SHA256 和 release notes evidence fields。')
+    }
+
+    [void]$actions.Add('边界提醒：不要通过 package 阶段补跑 smoke/live/签名/CSignTool；fresh live evidence 只能由 release manager 在 lab host 显式运行并记录 job id。')
+    return @($actions.ToArray())
+}
+
 
 function Get-ReleaseComponentProgressSnapshot {
     $now = [DateTimeOffset]::UtcNow.ToString('O')
@@ -902,6 +1030,9 @@ function Get-PackageGapAuditSnapshot {
         purpose = 'Machine-readable release/productization gap audit from portable packaging; no live evidence is generated.'
         validationProfile = 'package-portable-local-only-no-smoke-no-live'
         generatedBy = 'scripts/package-portable.ps1'
+        gitMetadata = $script:operatorDiagnostics.gitMetadata
+        executionBoundaries = $script:operatorDiagnostics.executionBoundaries
+        requiredEvidenceFields = $script:operatorDiagnostics.requiredEvidenceFields
         nonMutating = [ordered]@{
             hyperVLive = $false
             smokeTests = $false
@@ -910,6 +1041,7 @@ function Get-PackageGapAuditSnapshot {
             driverSigning = $false
             guiSigningFallback = $false
             csignTool = $false
+            csignToolInvoked = $false
             gitPush = $false
             networkPublish = $false
         }
@@ -935,6 +1067,7 @@ function Get-PackageGapAuditSnapshot {
             summary = $runtimeSummary
             expectedSources = @('host-web', 'guest-tools', 'tools/job-tool', 'tools/postprocess')
             remediationZh = '完整 runtime handoff 必须传入仓库外 RuntimePublishRoot 和 -RequireCompleteRuntimePayloads，并确认 missingCount/incompleteCount 均为 0；不要从仓库 bin/obj/x64 兜底复制。'
+            nextActionsZh = @($script:operatorDiagnostics.runtimeHandoffMissingNextActionsZh)
         }
         selfNoiseGuardReadiness = [ordered]@{
             staticAuditOnly = $true
@@ -977,8 +1110,26 @@ function Update-PackageOperatorDiagnostics {
     $runtimeSummary = Get-PackageRuntimePublishSummary -RuntimeEntries $runtimeEntries
     $recommendedActions = Get-PackageOperatorRecommendedActions -RuntimeEntries $runtimeEntries -RuntimeSummary $runtimeSummary
     $runtimeRootDiagnostics = Get-RuntimePublishRootPlacementDiagnostics
+    $runtimeHandoffMissingNextActionsZh = Get-RuntimeHandoffMissingNextActionsZh -RuntimeEntries $runtimeEntries -RuntimeSummary $runtimeSummary -RootDiagnostics $runtimeRootDiagnostics
+    $executionBoundaries = Get-PackageExecutionBoundaries
+    $requiredEvidenceFields = Get-PackageRequiredEvidenceFields
+    $gitMetadata = Get-PackageGitMetadataSnapshot
     $script:operatorDiagnostics = [ordered]@{
         packageKind = $PackageKind
+        gitMetadata = $gitMetadata
+        executionBoundaries = $executionBoundaries
+        requiredEvidenceFields = $requiredEvidenceFields
+        validationScope = [ordered]@{
+            noSmokeTests = $true
+            noHyperVLive = $true
+            noDriverSigning = $true
+            noCSignTool = $true
+            noGuiSigningFallback = $true
+            noGitPush = $true
+            noNetworkPublish = $true
+            noRepositoryBinaryFallback = $true
+            chinese = '机器可读边界：不跑 smoke、不跑 live、不签名、不调用 CSignTool.exe。'
+        }
         runtimePublishRootProvided = -not [string]::IsNullOrWhiteSpace($RuntimePublishRoot)
         runtimePublishRoot = if ([string]::IsNullOrWhiteSpace($RuntimePublishRoot)) { $null } else { $RuntimePublishRoot }
         runtimePublishRootRequiredForCompleteRuntime = ($PackageKind -eq 'runtime')
@@ -995,6 +1146,7 @@ function Update-PackageOperatorDiagnostics {
             handoffGate = 'Runtime handoff requires external RuntimePublishRoot, -RequireCompleteRuntimePayloads, all runtimePublish entries present, expected leaves present, no forbidden files, and not -StageOnly.'
             noRepositoryFallback = $true
             noBuildOrVmMutation = $true
+            nextActionsZh = @($runtimeHandoffMissingNextActionsZh)
         }
         missingRuntimePublishEntries = @($missingRuntimeEntries | ForEach-Object { $_.source })
         incompleteRuntimePublishEntries = @($runtimeEntries | Where-Object { [bool]$_.exists -and (@($_.missingExpectedLeaves).Count -gt 0 -or @($_.forbiddenFilePreview).Count -gt 0 -or [int]$_.fileCount -eq 0) } | ForEach-Object { $_.source })
@@ -1027,6 +1179,7 @@ function Update-PackageOperatorDiagnostics {
             chinese = '中文提示：runtime layout dry-run 只用于审阅目录和安全合约，不能作为可运行 handoff；完整 runtime zip 必须满足 handoffRequires。'
         }
         runtimePublishRootMissingRecommendedActions = @($recommendedActions | Where-Object { $_ -match 'RuntimePublishRoot|runtime 便携包|payload' })
+        runtimeHandoffMissingNextActionsZh = @($runtimeHandoffMissingNextActionsZh)
         preflightCommands = [ordered]@{
             releaseReadiness = '.\scripts\Test-ReleaseReadiness.ps1 -AllowDirtySource'
             completeRuntimeReadiness = '.\scripts\Test-ReleaseReadiness.ps1 -AllowDirtySource -RuntimePublishRoot <external-publish-root> -RequireCompleteRuntimePackage'
@@ -1053,10 +1206,13 @@ function Update-PackageOperatorDiagnostics {
             'driver binaries, certificates, private keys, signing material, GUI signing fallback, and CSignTool'
         )
         nonMutating = [ordered]@{
+            smokeTests = $false
+            hyperVLive = $false
             vmMutation = $false
             driverSigning = $false
             guiSigningFallback = $false
             csignTool = $false
+            csignToolInvoked = $false
             gitPush = $false
             networkPublish = $false
         }
@@ -1370,9 +1526,12 @@ function Write-GeneratedPackageManifest {
         packageName = [string](Get-ObjectPropertyValue -InputObject $Manifest -Name 'packageName' -DefaultValue "KSwordSandbox-$PackageKind")
         packageKind = $PackageKind
         version = $Version
-        sourceRevision = Get-GitRevision
-        sourceBranch = Get-GitBranch
+        sourceRevision = $script:operatorDiagnostics.gitMetadata.shortCommit
+        sourceCommit = $script:operatorDiagnostics.gitMetadata.commit
+        sourceBranch = $script:operatorDiagnostics.gitMetadata.branch
+        dirtyStatus = $script:operatorDiagnostics.gitMetadata.dirtyStatus
         gitStatus = Get-GitStatusSnapshot
+        gitMetadata = $script:operatorDiagnostics.gitMetadata
         generatedAtUtc = [DateTime]::UtcNow.ToString('o')
         repositoryRoot = $RepositoryRoot
         manifestPath = $manifestDisplayPath
@@ -1395,6 +1554,9 @@ function Write-GeneratedPackageManifest {
         manifestRequiredChecks = @(Get-ObjectArrayProperty -InputObject $Manifest -Name 'requiredChecks')
         packageDiagnostics = @($script:packageDiagnostics.ToArray())
         operatorDiagnostics = $script:operatorDiagnostics
+        executionBoundaries = $script:operatorDiagnostics.executionBoundaries
+        requiredEvidenceFields = $script:operatorDiagnostics.requiredEvidenceFields
+        runtimeHandoffMissingNextActionsZh = @($script:operatorDiagnostics.runtimeHandoffMissingNextActionsZh)
         reviewerChecklist = $script:operatorDiagnostics.reviewerChecklist
         componentProgress = $script:operatorDiagnostics.componentProgress
         gapAudit = $script:operatorDiagnostics.gapAudit
@@ -1431,10 +1593,12 @@ function Write-GeneratedPackageManifest {
             runtimeCompleteness = if ($PackageKind -ne 'runtime') { 'not applicable' } elseif ($RequireCompleteRuntimePayloads.IsPresent) { 'required' } else { 'layout dry-run allowed' }
         }
         safetyContract = [ordered]@{
-            Chinese = '中文提示：package-portable.ps1 已按 manifest 和硬性扩展/路径规则排除 secrets、本机状态、VM 磁盘/快照、样本、报告、截图、PCAP、dump、仓库二进制、legacy signing tool 和 GUI signing fallback；脚本不发布、不推送、不签名、不操作 VM。'
+            Chinese = '中文提示：package-portable.ps1 已按 manifest 和硬性扩展/路径规则排除 secrets、本机状态、VM 磁盘/快照、样本、报告、截图、PCAP、dump、仓库二进制、legacy signing tool 和 GUI signing fallback；脚本不跑 smoke、不跑 Hyper-V live、不发布、不推送、不签名、不调用 CSignTool.exe、不操作 VM。'
             SensitiveMaterial = 'not packaged'
             VmState = 'not packaged'
             VmMutation = 'not performed'
+            SmokeTests = 'not executed'
+            HyperVLive = 'not executed'
             RepositoryBuildOutput = 'not packaged'
             RuntimeBinariesSource = if ($PackageKind -eq 'runtime') { 'external RuntimePublishRoot only' } else { 'not packaged' }
             RuntimeArchivePolicy = if ($PackageKind -eq 'runtime') { 'non-StageOnly runtime archives require -RequireCompleteRuntimePayloads and a complete external RuntimePublishRoot' } else { 'source package is source-only' }
@@ -1538,6 +1702,8 @@ if (-not $StageOnly.IsPresent) {
 
 Write-PackageOperatorDiagnostic -Chinese "包类型：$PackageKind" -English "Kind: $PackageKind"
 Write-PackageOperatorDiagnostic -Chinese "版本：$Version" -English "Version: $Version"
+$gitDiagnostic = $script:operatorDiagnostics.gitMetadata
+Write-PackageOperatorDiagnostic -Chinese "Git：branch=$($gitDiagnostic.branch) commit=$($gitDiagnostic.shortCommit) dirty=$($gitDiagnostic.dirtyStatus) changes=$($gitDiagnostic.statusCount)" -English "Git: branch=$($gitDiagnostic.branch) commit=$($gitDiagnostic.shortCommit) dirty=$($gitDiagnostic.dirtyStatus) changes=$($gitDiagnostic.statusCount)"
 Write-PackageOperatorDiagnostic -Chinese "文件数：$($script:copiedFiles.Count)" -English "Files: $($script:copiedFiles.Count)"
 Write-PackageOperatorDiagnostic -Chinese "暂存目录：$stageRoot" -English "Stage: $stageRoot"
 Write-PackageOperatorDiagnostic -Chinese "生成元数据：$(Join-SafePath -Root $stageRoot -RelativePath 'package-manifest.generated.json')" -English 'Metadata: package-manifest.generated.json'
@@ -1570,7 +1736,7 @@ if ($PackageKind -eq 'runtime') {
 }
 Write-PackageOperatorDiagnostic -Chinese '中文提示：已排除本机 secret、install-state、DPAPI 备份、样本、报告、VM 磁盘/快照、仓库二进制、签名材料和 GUI signing fallback。'
 Write-PackageOperatorDiagnostic -Chinese 'fresh live 证据：未生成；若发布说明要声称当前候选已刷新真实 Notepad 5s，请先在实验室主机运行 live 并记录 job id。' -English 'Fresh live evidence: not generated by packaging.'
-Write-PackageOperatorDiagnostic -Chinese '安全合约：不修改 VM、不签名 driver、不使用 GUI signing fallback、不调用 CSignTool、不 git push/publish。' -English 'Safety: no VM mutation, no driver signing, no GUI signing fallback, no CSignTool, no git push/publish.'
+Write-PackageOperatorDiagnostic -Chinese '安全合约：不跑 smoke、不跑 Hyper-V live、不修改 VM、不签名 driver、不使用 GUI signing fallback、不调用 CSignTool、不 git push/publish。' -English 'Safety: no smoke tests, no Hyper-V live, no VM mutation, no driver signing, no GUI signing fallback, no CSignTool, no git push/publish.'
 if ($StageOnly.IsPresent) {
     Write-PackageOperatorDiagnostic -Chinese '压缩包：已跳过（-StageOnly，仅 layout/safety dry-run）' -English 'Archive: skipped (-StageOnly)'
 }

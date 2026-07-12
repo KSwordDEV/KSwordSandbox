@@ -258,8 +258,26 @@ public sealed partial class SandboxJobService
         var guestEvents = LoadGuestEventsWithDriverJsonl(resolvedEventsPath);
         var status = guestEvents.Count == 0 ? AnalysisStatus.Failed : AnalysisStatus.Completed;
         var message = guestEvents.Count == 0
-            ? $"Guest event import found no events in {resolvedEventsPath}."
-            : $"Imported {guestEvents.Count} guest event(s) from {resolvedEventsPath}.";
+            ? $"来宾事件导入未发现事件，报告状态已标记为 Failed：{resolvedEventsPath} / Guest event import found no events in {resolvedEventsPath}."
+            : $"已导入 {guestEvents.Count} 个来宾事件：{resolvedEventsPath} / Imported {guestEvents.Count} guest event(s) from {resolvedEventsPath}.";
+        if (guestEvents.Count == 0)
+        {
+            UpsertDurableHostEvent(jobId, CreateGuestImportOperationalMarker(
+                "guest.events.import_failed",
+                resolvedEventsPath,
+                "guest-events-import-failed",
+                "guest-event-import-failed-no-events-is-host-import-diagnostic-not-sample-behavior",
+                message,
+                new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["guestImportOutcome"] = "failed",
+                    ["failureKind"] = "no-events",
+                    ["eventCount"] = "0",
+                    ["eventsPath"] = resolvedEventsPath,
+                    ["terminalStatus"] = AnalysisStatus.Failed.ToString()
+                }));
+        }
+
         var updated = RegenerateReport(job with
         {
             Status = status,
@@ -268,6 +286,97 @@ public sealed partial class SandboxJobService
         }, status, guestEvents, resolvedEventsPath);
 
         PersistGuestImportState(updated, resolvedEventsPath, guestEvents.Count, status, message);
+        StoreJob(updated);
+        return updated;
+    }
+
+    /// <summary>
+    /// Records a successful live run where automatic guest import was disabled.
+    /// Inputs are a job id and operator-facing reason; processing persists a
+    /// host operational marker and regenerates reports with a terminal Completed
+    /// state so the job never remains indefinitely Running.
+    /// </summary>
+    public AnalysisJob RecordGuestImportSkipped(Guid jobId, string? message = null)
+    {
+        var job = GetJob(jobId);
+        if (job is null)
+        {
+            throw new KeyNotFoundException($"Job {jobId} was not found.");
+        }
+
+        var terminalMessage = CleanOperatorMessage(
+            message,
+            "来宾事件自动导入已按请求跳过；live run 已成功，报告状态已收敛为 Completed / Guest event auto-import was skipped by request; live run succeeded and report status is Completed.");
+        var guestEvents = LoadGuestEventsIfPresent(job.GuestEventsPath);
+        var markerPath = string.IsNullOrWhiteSpace(job.GuestEventsPath) ? GetJobRoot(jobId) : job.GuestEventsPath;
+        UpsertDurableHostEvent(jobId, CreateGuestImportOperationalMarker(
+            "guest.events.import_skipped",
+            markerPath,
+            "guest-events-import-skipped",
+            "guest-event-import-skipped-is-host-policy-not-sample-behavior",
+            terminalMessage,
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["guestImportOutcome"] = "skipped",
+                ["failureKind"] = string.Empty,
+                ["eventCount"] = guestEvents.Count.ToString(),
+                ["importGuestEvents"] = "false",
+                ["terminalStatus"] = AnalysisStatus.Completed.ToString()
+            }));
+
+        var updated = RegenerateReport(job with
+        {
+            Status = AnalysisStatus.Completed,
+            Messages = AppendMessage(job.Messages, terminalMessage)
+        }, AnalysisStatus.Completed, guestEvents, job.GuestEventsPath);
+
+        PersistGuestImportState(updated, job.GuestEventsPath, guestEvents.Count, AnalysisStatus.Completed, terminalMessage);
+        StoreJob(updated);
+        return updated;
+    }
+
+    /// <summary>
+    /// Records an automatic guest import failure after a successful live run.
+    /// Inputs are a job id, failure reason, and optional candidate events path;
+    /// processing persists a nonbehavior host marker and regenerates reports as
+    /// Failed so the publishing path cannot leave report/job state Running.
+    /// </summary>
+    public AnalysisJob RecordGuestImportFailure(Guid jobId, string? message, string? eventsPath = null)
+    {
+        var job = GetJob(jobId);
+        if (job is null)
+        {
+            throw new KeyNotFoundException($"Job {jobId} was not found.");
+        }
+
+        var terminalMessage = CleanOperatorMessage(
+            message,
+            "来宾事件自动导入失败；报告状态已收敛为 Failed / Guest event auto-import failed; report status is Failed.");
+        var normalizedEventsPath = NormalizeOptionalPath(eventsPath);
+        var existingGuestEvents = LoadGuestEventsIfPresent(job.GuestEventsPath);
+        var markerPath = normalizedEventsPath ?? job.GuestEventsPath ?? GetJobRoot(jobId);
+        UpsertDurableHostEvent(jobId, CreateGuestImportOperationalMarker(
+            "guest.events.import_failed",
+            markerPath,
+            "guest-events-import-failed",
+            "guest-event-import-failed-is-host-import-diagnostic-not-sample-behavior",
+            terminalMessage,
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["guestImportOutcome"] = "failed",
+                ["failureKind"] = "exception",
+                ["eventCount"] = "0",
+                ["eventsPath"] = normalizedEventsPath ?? string.Empty,
+                ["terminalStatus"] = AnalysisStatus.Failed.ToString()
+            }));
+
+        var updated = RegenerateReport(job with
+        {
+            Status = AnalysisStatus.Failed,
+            Messages = AppendMessage(job.Messages, terminalMessage)
+        }, AnalysisStatus.Failed, existingGuestEvents, job.GuestEventsPath);
+
+        PersistGuestImportState(updated, normalizedEventsPath ?? job.GuestEventsPath, 0, AnalysisStatus.Failed, terminalMessage);
         StoreJob(updated);
         return updated;
     }
@@ -364,11 +473,31 @@ public sealed partial class SandboxJobService
             throw new KeyNotFoundException($"Job {jobId} was not found.");
         }
 
+        UpsertDurableHostEvent(jobId, enrichmentEvent);
+
+        var guestEvents = LoadGuestEventsIfPresent(job.GuestEventsPath);
+        var updated = RegenerateReport(job with
+        {
+            Messages = AppendMessage(job.Messages, message)
+        }, job.Status, guestEvents, job.GuestEventsPath);
+
+        StoreJob(updated);
+        return updated;
+    }
+
+    /// <summary>
+    /// Upserts one durable host-side event under enrichment-events.json.
+    /// Inputs are a job id and normalized/normalizable event; processing uses
+    /// the same source/event/path identity as enrichment updates so operational
+    /// markers survive future report regeneration without accumulating copies.
+    /// </summary>
+    private void UpsertDurableHostEvent(Guid jobId, SandboxEvent hostEvent)
+    {
         var jobRoot = GetJobRoot(jobId);
         Directory.CreateDirectory(jobRoot);
         var enrichmentPath = GetEnrichmentEventsPath(jobId);
         var existing = LoadEventsIfPresent(enrichmentPath);
-        var normalized = NormalizeEvent(enrichmentEvent);
+        var normalized = NormalizeEvent(hostEvent);
         var nextEvents = existing
             .Where(evt => !SameEnrichmentIdentity(evt, normalized))
             .Select(NormalizeEvent)
@@ -380,15 +509,6 @@ public sealed partial class SandboxJobService
             .ThenBy(evt => evt.Source, StringComparer.OrdinalIgnoreCase)
             .ToList();
         File.WriteAllText(enrichmentPath, JsonSerializer.Serialize(nextEvents, JsonOptions));
-
-        var guestEvents = LoadGuestEventsIfPresent(job.GuestEventsPath);
-        var updated = RegenerateReport(job with
-        {
-            Messages = AppendMessage(job.Messages, message)
-        }, job.Status, guestEvents, job.GuestEventsPath);
-
-        StoreJob(updated);
-        return updated;
     }
 
     /// <summary>
@@ -1100,9 +1220,62 @@ public sealed partial class SandboxJobService
                 "Host import summary records how many guest events were read; it is not sample behavior.",
                 new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
             {
-                ["eventCount"] = guestEventCount.ToString()
+                ["eventCount"] = guestEventCount.ToString(),
+                ["guestImportOutcome"] = guestEventCount == 0 ? "failed" : "imported",
+                ["terminalStatus"] = (guestEventCount == 0 ? AnalysisStatus.Failed : AnalysisStatus.Completed).ToString()
             })
         });
+    }
+
+    /// <summary>
+    /// Builds a nonbehavior host operational marker for skipped/failed guest
+    /// import outcomes. Inputs are stable event identity plus display reason;
+    /// processing stamps behaviorCounted=false/nonbehavior=true through the
+    /// shared host metadata helper and returns a durable report event.
+    /// </summary>
+    private static SandboxEvent CreateGuestImportOperationalMarker(
+        string eventType,
+        string? path,
+        string evidenceKind,
+        string reason,
+        string hint,
+        IReadOnlyDictionary<string, string>? values = null)
+    {
+        var data = CreateHostOperationalEventData(evidenceKind, reason, hint, values);
+        data["guestImportMessage"] = hint;
+        data["guestImportMarker"] = "true";
+
+        return new SandboxEvent
+        {
+            EventType = eventType,
+            Source = "host",
+            Path = path,
+            Data = data
+        };
+    }
+
+    private static string CleanOperatorMessage(string? message, string fallback)
+    {
+        return string.IsNullOrWhiteSpace(message)
+            ? fallback
+            : message.Trim();
+    }
+
+    private static string? NormalizeOptionalPath(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return null;
+        }
+
+        try
+        {
+            return Path.GetFullPath(path);
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return path.Trim();
+        }
     }
 
     /// <summary>

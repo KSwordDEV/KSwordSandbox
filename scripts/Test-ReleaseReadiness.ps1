@@ -649,6 +649,7 @@ function Test-RuntimePublishCompleteness {
             repositoryBinaryFallbackAllowed = $false
             gateMode = if ($RequireCompleteRuntimePackage) { 'blocked-missing-runtime-publish-root' } else { 'source-layout-readiness-only' }
         }
+        $nextActionsZh = Get-RuntimeHandoffNextActionsZh -RuntimeSummary $runtimePublishSummary -RootDiagnostics $rootDiagnostics
 
         if ($RequireCompleteRuntimePackage) {
             Add-ReleaseCheckResult `
@@ -656,8 +657,8 @@ function Test-RuntimePublishCompleteness {
                 -Title 'Runtime publish completeness / runtime payload 完整性' `
                 -Status Failed `
                 -Message '完整 runtime 便携包要求 -RuntimePublishRoot；当前未提供。' `
-                -Remediation @('先把 host-web、guest-tools、tools/job-tool、tools/postprocess 发布到仓库外目录，再重跑：.\scripts\Test-ReleaseReadiness.ps1 -RuntimePublishRoot <external-publish-root> -RequireCompleteRuntimePackage。') `
-                -Details @{ expectedSources = $expectedSources; runtimePublishSummary = $runtimePublishSummary; rootDiagnostics = $rootDiagnostics; operatorHints = $operatorHints; dryRunOnly = $true; handoffAllowed = $false }
+                -Remediation @($nextActionsZh) `
+                -Details @{ expectedSources = $expectedSources; runtimePublishSummary = $runtimePublishSummary; rootDiagnostics = $rootDiagnostics; operatorHints = $operatorHints; nextActionsZh = @($nextActionsZh); dryRunOnly = $true; handoffAllowed = $false }
             return
         }
 
@@ -666,7 +667,7 @@ function Test-RuntimePublishCompleteness {
             -Title 'Runtime publish completeness / runtime payload 完整性' `
             -Status Skipped `
             -Message 'Skipped complete runtime payload gate. This is acceptable for source/layout readiness only; use -RuntimePublishRoot with -RequireCompleteRuntimePackage before runtime handoff.' `
-            -Details @{ expectedSources = $expectedSources; runtimePublishSummary = $runtimePublishSummary; rootDiagnostics = $rootDiagnostics; operatorHints = $operatorHints; dryRunOnly = $true; handoffAllowed = $false }
+            -Details @{ expectedSources = $expectedSources; runtimePublishSummary = $runtimePublishSummary; rootDiagnostics = $rootDiagnostics; operatorHints = $operatorHints; nextActionsZh = @($nextActionsZh); dryRunOnly = $true; handoffAllowed = $false }
         return
     }
 
@@ -814,6 +815,7 @@ function Test-RuntimePublishCompleteness {
         repositoryBinaryFallbackAllowed = $false
         gateMode = if ([bool]$runtimePublishSummary.handoffAllowed) { 'complete-runtime-handoff-verified' } elseif ($RequireCompleteRuntimePackage) { 'blocked-complete-runtime-handoff' } else { 'diagnostic-only-rerun-with-require-complete' }
     }
+    $nextActionsZh = Get-RuntimeHandoffNextActionsZh -RuntimeSummary $runtimePublishSummary -RootDiagnostics $rootDiagnostics -Entries @($entryDiagnostics.ToArray())
 
     if ($issues.Count -eq 0) {
         Add-ReleaseCheckResult `
@@ -821,7 +823,7 @@ function Test-RuntimePublishCompleteness {
             -Title 'Runtime publish completeness / runtime payload 完整性' `
             -Status Passed `
             -Message 'RuntimePublishRoot is outside the repository and contains non-empty expected runtime payload directories.' `
-            -Details @{ runtimePublishRoot = $RuntimePublishRoot; expectedSources = $expectedSources; runtimePublishSummary = $runtimePublishSummary; rootDiagnostics = $rootDiagnostics; entries = @($entryDiagnostics.ToArray()); operatorHints = $operatorHints; handoffAllowed = [bool]$runtimePublishSummary.handoffAllowed }
+            -Details @{ runtimePublishRoot = $RuntimePublishRoot; expectedSources = $expectedSources; runtimePublishSummary = $runtimePublishSummary; rootDiagnostics = $rootDiagnostics; entries = @($entryDiagnostics.ToArray()); operatorHints = $operatorHints; nextActionsZh = @($nextActionsZh); handoffAllowed = [bool]$runtimePublishSummary.handoffAllowed }
         return
     }
 
@@ -831,8 +833,8 @@ function Test-RuntimePublishCompleteness {
         -Title 'Runtime publish completeness / runtime payload 完整性' `
         -Status $status `
         -Message "Runtime publish completeness found $($issues.Count) issue(s)." `
-        -Remediation @('完整 runtime handoff 前必须补齐仓库外 RuntimePublishRoot，并确认每个 payload 含预期 exe/dll/manifest 且不含 .pdb/.sys/pcap/dump/VM/secret/signing 文件；package/readiness 不会从仓库 bin/obj/x64 回退复制，也不会构建、签名或操作 VM。') `
-        -Details @{ issues = @($issues.ToArray()); runtimePublishRoot = $RuntimePublishRoot; expectedSources = $expectedSources; runtimePublishSummary = $runtimePublishSummary; rootDiagnostics = $rootDiagnostics; entries = @($entryDiagnostics.ToArray()); operatorHints = $operatorHints; requireCompleteRuntimePackage = [bool]$RequireCompleteRuntimePackage; handoffAllowed = $false }
+        -Remediation @($nextActionsZh) `
+        -Details @{ issues = @($issues.ToArray()); runtimePublishRoot = $RuntimePublishRoot; expectedSources = $expectedSources; runtimePublishSummary = $runtimePublishSummary; rootDiagnostics = $rootDiagnostics; entries = @($entryDiagnostics.ToArray()); operatorHints = $operatorHints; nextActionsZh = @($nextActionsZh); requireCompleteRuntimePackage = [bool]$RequireCompleteRuntimePackage; handoffAllowed = $false }
 }
 
 function Test-CSignToolNotInReleasePath {
@@ -1462,8 +1464,12 @@ function Get-GitReleaseMetadata {
         branch = $null
         commit = $null
         shortCommit = $null
+        dirty = $null
+        isDirty = $null
+        dirtyStatus = 'unknown'
         statusCount = $null
         statusPreview = @()
+        statusPorcelainPreview = @()
     }
 
     if ($null -eq (Get-Command git -ErrorAction SilentlyContinue)) {
@@ -1476,15 +1482,97 @@ function Get-GitReleaseMetadata {
         $metadata.commit = [string](& git -C $RepositoryRoot rev-parse HEAD 2>$null)
         $metadata.shortCommit = [string](& git -C $RepositoryRoot rev-parse --short HEAD 2>$null)
         $statusLines = @(& git -C $RepositoryRoot status --porcelain 2>$null)
+        $dirty = ($statusLines.Count -gt 0)
+        $metadata.dirty = $dirty
+        $metadata.isDirty = $dirty
+        $metadata.dirtyStatus = if ($dirty) { 'dirty' } else { 'clean' }
         $metadata.statusCount = $statusLines.Count
         $metadata.statusPreview = @($statusLines | Select-Object -First 20)
+        $metadata.statusPorcelainPreview = @($statusLines | Select-Object -First 20)
     }
     catch {
         $metadata.available = $false
+        $metadata.dirtyStatus = 'unknown-git-status-failed'
         $metadata.statusPreview = @("Unable to collect git metadata: $($_.Exception.Message)")
+        $metadata.statusPorcelainPreview = @("Unable to collect git metadata: $($_.Exception.Message)")
     }
 
     return [pscustomobject]$metadata
+}
+
+function Get-ReleaseExecutionBoundaries {
+    return [ordered]@{
+        schema = 'ksword.release.execution-boundaries.v1'
+        generatedBy = 'scripts/Test-ReleaseReadiness.ps1'
+        validationProfile = 'release-readiness-no-smoke-no-live'
+        smokeTestsExecuted = $false
+        hyperVLiveExecuted = $false
+        vmStartRestoreStopExecuted = $false
+        vmMutationExecuted = $false
+        driverSigningExecuted = $false
+        guiSigningFallbackInvoked = $false
+        csignToolInvoked = $false
+        gitPushExecuted = $false
+        networkPublishExecuted = $false
+        payloadBuildExecuted = [bool]$IncludeBuild
+        sourcePackageStageOnlyDryRun = -not [bool]$SkipSourcePackageDryRun
+        allowedActions = @('git metadata read', 'repository policy', 'PowerShell parse', 'package manifest parse', 'source package StageOnly dry-run', 'optional compile build when -IncludeBuild is explicitly supplied')
+        forbiddenActions = @('smoke test execution', 'Hyper-V live execution', 'VM start/restore/stop/mutation', 'driver signing', 'GUI signing fallback', 'CSignTool.exe invocation', 'git push', 'network publish', 'fresh live evidence generation')
+        chinese = '中文：Test-ReleaseReadiness.ps1 不跑 smoke、不跑 Hyper-V live、不签名、不调用 CSignTool.exe、不 push/publish、不生成 fresh live evidence。'
+    }
+}
+
+function Get-ReleaseRequiredEvidenceFields {
+    return [ordered]@{
+        schema = 'ksword.release.required-evidence-fields.v1'
+        provenance = @('gitMetadata.branch', 'gitMetadata.commit', 'gitMetadata.shortCommit', 'gitMetadata.dirtyStatus', 'gitMetadata.statusCount', 'generatedAtUtc', 'repositoryRoot')
+        sourceHandoff = @('release-readiness.json.failedCount=0', 'gitMetadata.branch', 'gitMetadata.commit', 'gitMetadata.dirtyStatus', 'sourceRuntimeSafetyMetadata', 'executionBoundaries', 'results[].id/status')
+        runtimeHandoff = @('RuntimePublishRoot', 'RequireCompleteRuntimePackage=true', 'gapAudit.runtimePublishRootCompleteness.handoffVerified=true', 'summary.missingCount=0', 'summary.incompleteCount=0', 'summary.forbiddenFileCount=0', 'entries[].sourcePath')
+        freshLiveClaim = @('gitMetadata.commit', 'gitMetadata.branch', 'gitMetadata.dirtyStatus', 'job id', 'runtime root', 'generatedAtUtc/local time', 'report.json path', 'report.zh.html path', 'report.en.html path')
+        fallbackWhenMissingFreshLiveJobZh = '没有实验室 live job id 时，release notes 必须写“本候选未刷新 fresh live evidence”。'
+    }
+}
+
+function Get-RuntimeHandoffNextActionsZh {
+    param(
+        [object]$RuntimeSummary = $null,
+        [object]$RootDiagnostics = $null,
+        [object[]]$Entries = @()
+    )
+
+    $actions = New-Object System.Collections.Generic.List[string]
+    if ([string]::IsNullOrWhiteSpace($RuntimePublishRoot)) {
+        [void]$actions.Add('下一步：先把 host-web、guest-tools、tools/job-tool、tools/postprocess 发布到 D:\Temp\KSwordSandbox\publish 或其他仓库外 RuntimePublishRoot。')
+        [void]$actions.Add('下一步：重跑 .\scripts\Test-ReleaseReadiness.ps1 -AllowDirtySource -RuntimePublishRoot <external-publish-root> -RequireCompleteRuntimePackage。')
+    }
+    elseif ($null -ne $RootDiagnostics -and -not [bool]$RootDiagnostics.outsideRepository) {
+        [void]$actions.Add('下一步：RuntimePublishRoot 必须移到仓库外；不要从仓库 bin/obj/x64 或源码树兜底复制 runtime payload。')
+    }
+    elseif ($null -ne $RootDiagnostics -and -not [bool]$RootDiagnostics.exists) {
+        [void]$actions.Add("下一步：创建并填充仓库外 RuntimePublishRoot：$($RootDiagnostics.resolvedPath)。")
+    }
+
+    if ($null -ne $RuntimeSummary) {
+        if ([int]$RuntimeSummary.missingCount -gt 0) {
+            [void]$actions.Add("下一步：补齐缺失 runtime payload：$(([string[]]@($RuntimeSummary.missingSources)) -join ', ')。")
+        }
+        if ([int]$RuntimeSummary.incompleteCount -gt 0) {
+            [void]$actions.Add("下一步：重新发布不完整 payload：$(([string[]]@($RuntimeSummary.incompleteSources)) -join ', ')；确认预期 exe/dll/payload-manifest 存在。")
+        }
+        if ([int]$RuntimeSummary.forbiddenFileCount -gt 0) {
+            [void]$actions.Add('下一步：删除 RuntimePublishRoot 内的 .pdb/.sys/pcap/dump/VM/secret/signing/CSignTool/signtool/GUI signing fallback 文件。')
+        }
+        if (-not [bool]$RuntimeSummary.handoffAllowed) {
+            [void]$actions.Add('下一步：确认 RuntimePublishRoot 在仓库外、missingCount/incompleteCount/forbiddenFileCount 均为 0，并且本次使用 -RequireCompleteRuntimePackage。')
+        }
+    }
+
+    if ($actions.Count -eq 0) {
+        [void]$actions.Add('下一步：runtime handoff gate 已满足；生成 runtime zip 时仍需 package-portable.ps1 -PackageKind runtime -RuntimePublishRoot <external-publish-root> -RequireCompleteRuntimePayloads。')
+    }
+
+    [void]$actions.Add('边界提醒：readiness/package 不跑 smoke、不跑 live、不签名、不调用 CSignTool；fresh live evidence 只能由 release manager 在 lab host 显式运行并记录 job id。')
+    return @($actions.ToArray())
 }
 
 
@@ -1499,6 +1587,8 @@ function Get-ReleaseComponentProgressSnapshot {
         purpose = 'Machine-readable component progress for release reviewers; readiness is non-mutating and does not create fresh live evidence; gapAudit uses ksword.release.gap-audit.v28.'
         noFreshLiveEvidenceGenerated = $true
         freshLiveEvidenceGenerated = $false
+        executionBoundarySummary = 'no smoke, no Hyper-V live, no driver signing, no CSignTool, no git push/publish'
+        requiredEvidenceFieldsSchema = 'ksword.release.required-evidence-fields.v1'
         gapAuditSchema = 'ksword.release.gap-audit.v28'
         releaseNotesFallbackZh = '本候选未刷新 fresh live evidence'
         components = @(
@@ -1575,6 +1665,7 @@ function Get-ReleaseGapAuditSnapshot {
     $runtimeSummary = if ($null -ne $runtimeResult -and $null -ne $runtimeResult.details -and $runtimeResult.details.ContainsKey('runtimePublishSummary')) { $runtimeResult.details.runtimePublishSummary } else { $null }
     $runtimeEntries = if ($null -ne $runtimeResult -and $null -ne $runtimeResult.details -and $runtimeResult.details.ContainsKey('entries')) { @($runtimeResult.details.entries) } else { @() }
     $rootDiagnostics = if ($null -ne $runtimeResult -and $null -ne $runtimeResult.details -and $runtimeResult.details.ContainsKey('rootDiagnostics')) { $runtimeResult.details.rootDiagnostics } else { $null }
+    $runtimeNextActionsZh = if ($null -ne $runtimeResult -and $null -ne $runtimeResult.details -and $runtimeResult.details.ContainsKey('nextActionsZh')) { @($runtimeResult.details.nextActionsZh) } else { @(Get-RuntimeHandoffNextActionsZh -RuntimeSummary $runtimeSummary -RootDiagnostics $rootDiagnostics -Entries $runtimeEntries) }
 
     return [ordered]@{
         schema = 'ksword.release.gap-audit.v28'
@@ -1583,6 +1674,9 @@ function Get-ReleaseGapAuditSnapshot {
         purpose = 'Machine-readable release/productization gap audit; produced by non-mutating readiness only.'
         validationProfile = 'release-readiness-no-smoke-no-live'
         generatedBy = 'scripts/Test-ReleaseReadiness.ps1'
+        gitMetadata = Get-GitReleaseMetadata
+        executionBoundaries = Get-ReleaseExecutionBoundaries
+        requiredEvidenceFields = Get-ReleaseRequiredEvidenceFields
         nonMutating = [ordered]@{
             hyperVLive = $false
             smokeTests = $false
@@ -1590,8 +1684,10 @@ function Get-ReleaseGapAuditSnapshot {
             vmMutation = $false
             driverSigning = $false
             csignTool = $false
+            csignToolInvoked = $false
             guiSigningFallback = $false
             gitPush = $false
+            networkPublish = $false
         }
         guardrailResults = [ordered]@{
             packageManifests = if ($null -eq $manifestResult) { 'not-run' } else { [string]$manifestResult.status }
@@ -1621,6 +1717,7 @@ function Get-ReleaseGapAuditSnapshot {
             issues = if ($null -ne $runtimeResult -and $null -ne $runtimeResult.details -and $runtimeResult.details.ContainsKey('issues')) { @($runtimeResult.details.issues) } else { @() }
             expectedSources = if ($null -ne $runtimeResult -and $null -ne $runtimeResult.details -and $runtimeResult.details.ContainsKey('expectedSources')) { @($runtimeResult.details.expectedSources) } else { @('host-web', 'guest-tools', 'tools/job-tool', 'tools/postprocess') }
             remediationZh = '完整 runtime handoff 前，先把 host-web、guest-tools、tools/job-tool、tools/postprocess 发布到仓库外 RuntimePublishRoot，再用 -RuntimePublishRoot <external-publish-root> -RequireCompleteRuntimePackage 重跑 readiness；不要从仓库 bin/obj/x64 兜底。'
+            nextActionsZh = @($runtimeNextActionsZh)
         }
         selfNoiseGuardReadiness = [ordered]@{
             status = if ($null -eq $selfNoiseResult) { 'not-run' } else { [string]$selfNoiseResult.status }
@@ -1653,6 +1750,7 @@ function ConvertTo-ReleaseReadinessMarkdown {
     [void]$lines.Add("Generated: ``$($Summary.generatedAtUtc)``")
     [void]$lines.Add("Repository: ``$($Summary.repositoryRoot)``")
     [void]$lines.Add("Branch/commit: ``$($Summary.gitBranch)`` / ``$($Summary.gitShortCommit)``")
+    [void]$lines.Add("Dirty status: ``$($Summary.gitDirtyStatus)``")
     [void]$lines.Add("Changed items at check time: ``$($Summary.gitStatusCount)``")
     [void]$lines.Add('')
     [void]$lines.Add('## Summary')
@@ -1665,6 +1763,8 @@ function ConvertTo-ReleaseReadinessMarkdown {
     [void]$lines.Add('')
     [void]$lines.Add('## Non-mutating release boundaries')
     [void]$lines.Add('')
+    [void]$lines.Add("- Smoke tests executed: ``$($Summary.executionBoundaries.smokeTestsExecuted)``")
+    [void]$lines.Add("- Hyper-V live executed: ``$($Summary.executionBoundaries.hyperVLiveExecuted)``")
     [void]$lines.Add("- VM mutation: ``$($Summary.noVmMutation)``")
     [void]$lines.Add("- Driver signing: ``$($Summary.noDriverSigning)``")
     [void]$lines.Add("- GUI signing fallback: ``$($Summary.noGuiSigningFallback)``")
@@ -1681,8 +1781,24 @@ function ConvertTo-ReleaseReadinessMarkdown {
         [void]$lines.Add("- RuntimePublishRoot: ``$($Summary.runtimePublishRoot)``")
         [void]$lines.Add("- Require complete runtime package: ``$($Summary.requireCompleteRuntimePackage)``")
     }
+    foreach ($item in @($Summary.runtimeHandoffMissingNextActionsZh | Select-Object -First 6)) {
+        [void]$lines.Add("- Runtime next: $item")
+    }
 
     [void]$lines.Add('- Required final evidence before claiming a fresh live release: commit, job id, runtime root, generated time, report JSON path, zh/en HTML report paths.')
+    [void]$lines.Add('- Machine-readable evidence fields are listed in `requiredEvidenceFields` and include branch, commit, dirty status, runtime handoff fields, and fresh-live claim fields.')
+    [void]$lines.Add('')
+    [void]$lines.Add('### Required evidence fields')
+    [void]$lines.Add('')
+    foreach ($item in @($Summary.requiredEvidenceFields.provenance)) {
+        [void]$lines.Add("- Provenance: ``$item``")
+    }
+    foreach ($item in @($Summary.requiredEvidenceFields.runtimeHandoff)) {
+        [void]$lines.Add("- Runtime handoff: ``$item``")
+    }
+    foreach ($item in @($Summary.requiredEvidenceFields.freshLiveClaim)) {
+        [void]$lines.Add("- Fresh live claim: ``$item``")
+    }
     [void]$lines.Add('')
     [void]$lines.Add('## Reviewer checklist / 审阅清单')
     [void]$lines.Add('')
@@ -1754,6 +1870,13 @@ $failed = @($script:Results | Where-Object { $_.status -eq 'Failed' })
 $warnings = @($script:Results | Where-Object { $_.status -eq 'Warning' })
 $exitCode = if ($failed.Count -gt 0 -or ($TreatWarningsAsErrors -and $warnings.Count -gt 0)) { 1 } else { 0 }
 $gitMetadata = Get-GitReleaseMetadata
+$runtimeResultForSummary = @($script:Results | Where-Object { $_.id -eq 'runtime-publish-completeness' } | Select-Object -First 1)
+$runtimeHandoffMissingNextActionsZh = if ($runtimeResultForSummary.Count -gt 0 -and $null -ne $runtimeResultForSummary[0].details -and $runtimeResultForSummary[0].details.ContainsKey('nextActionsZh')) {
+    @($runtimeResultForSummary[0].details.nextActionsZh)
+}
+else {
+    @(Get-RuntimeHandoffNextActionsZh)
+}
 
 $summary = [pscustomobject][ordered]@{
     contractVersion       = 1
@@ -1765,8 +1888,23 @@ $summary = [pscustomobject][ordered]@{
     gitBranch             = $gitMetadata.branch
     gitCommit             = $gitMetadata.commit
     gitShortCommit        = $gitMetadata.shortCommit
+    gitDirty              = $gitMetadata.dirty
+    gitDirtyStatus        = $gitMetadata.dirtyStatus
     gitStatusCount        = $gitMetadata.statusCount
     gitStatusPreview      = @($gitMetadata.statusPreview)
+    gitMetadata           = [ordered]@{
+        schema = 'ksword.release.git-provenance.v1'
+        available = [bool]$gitMetadata.available
+        branch = $gitMetadata.branch
+        commit = $gitMetadata.commit
+        shortCommit = $gitMetadata.shortCommit
+        dirty = $gitMetadata.dirty
+        isDirty = $gitMetadata.isDirty
+        dirtyStatus = $gitMetadata.dirtyStatus
+        statusCount = $gitMetadata.statusCount
+        statusPreview = @($gitMetadata.statusPreview)
+        statusPorcelainPreview = @($gitMetadata.statusPorcelainPreview)
+    }
     exitCode              = $exitCode
     failedCount           = $failed.Count
     warningCount          = $warnings.Count
@@ -1779,6 +1917,13 @@ $summary = [pscustomobject][ordered]@{
     runtimePublishRoot    = if ([string]::IsNullOrWhiteSpace($RuntimePublishRoot)) { $null } else { $RuntimePublishRoot }
     requireCompleteRuntimePackage = [bool]$RequireCompleteRuntimePackage
     includeBuild          = [bool]$IncludeBuild
+    executionBoundaries   = Get-ReleaseExecutionBoundaries
+    requiredEvidenceFields = Get-ReleaseRequiredEvidenceFields
+    runtimeHandoffMissingNextActionsZh = @($runtimeHandoffMissingNextActionsZh)
+    noSmokeTests          = $true
+    noHyperVLive          = $true
+    smokeTestsExecuted    = $false
+    hyperVLiveExecuted    = $false
     noVmMutation          = $true
     noDriverSigning       = $true
     noGuiSigningFallback  = $true
@@ -1834,10 +1979,13 @@ $summary = [pscustomobject][ordered]@{
             completeRuntimeHandoffVerified = (-not [string]::IsNullOrWhiteSpace($RuntimePublishRoot) -and [bool]$RequireCompleteRuntimePackage -and $exitCode -eq 0)
         }
         nonMutating = [ordered]@{
+            smokeTests = $false
+            hyperVLive = $false
             vmMutation = $false
             driverSigning = $false
             guiSigningFallback = $false
             csignTool = $false
+            csignToolInvoked = $false
             gitPush = $false
             networkPublish = $false
         }
@@ -1862,6 +2010,7 @@ function ConvertTo-ChineseFirstLabel {
 }
 
 Write-Host "发布就绪检查结果：通过=$($summary.passedCount)，警告=$($summary.warningCount)，失败=$($summary.failedCount)，跳过=$($summary.skippedCount)。"
+Write-Host "Git：branch=$($summary.gitBranch)，commit=$($summary.gitShortCommit)，dirty=$($summary.gitDirtyStatus)，changes=$($summary.gitStatusCount)。"
 foreach ($result in $script:Results) {
     $prefix = switch ($result.status) {
         'Passed' { '通过 [pass]' }
@@ -1880,5 +2029,5 @@ foreach ($result in $script:Results) {
 
 Write-Host "发布就绪摘要已写入：$summaryPath"
 Write-Host "审阅交接摘要已写入：$markdownPath"
-Write-Host '安全护栏：未启动/还原/停止 VM，未签名，未调用 CSignTool/GUI signing fallback，未生成 fresh live evidence。'
+Write-Host '安全护栏：未跑 smoke，未跑 Hyper-V live，未启动/还原/停止 VM，未签名，未调用 CSignTool/GUI signing fallback，未 push/publish，未生成 fresh live evidence。'
 exit $exitCode

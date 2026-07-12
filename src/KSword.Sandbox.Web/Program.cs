@@ -1222,6 +1222,8 @@ static object BuildSafeRunbookBackgroundSnapshot(RunbookBackgroundExecutionSnaps
         snapshot.UpdatedAtUtc,
         snapshot.Duration,
         snapshot.GuestImportSucceeded,
+        snapshot.GuestImportSkipped,
+        snapshot.GuestImportFailed,
         snapshot.GuestImportMessage,
         snapshot.DurableSourcePath,
         snapshot.DurableProgressSourcePath,
@@ -1367,16 +1369,16 @@ static string ResolveRunbookProgressStreamState(
         return progressState == SandboxRunbookProgressStates.Canceled ? "canceled" : "failed";
     }
 
+    if (backgroundState is RunbookBackgroundExecutionStore.Running or RunbookBackgroundExecutionStore.Queued)
+    {
+        return backgroundState;
+    }
+
     if (backgroundState is RunbookBackgroundExecutionStore.Completed ||
         progressState is SandboxRunbookProgressStates.Completed ||
         progress.Success == true)
     {
         return "completed";
-    }
-
-    if (backgroundState is RunbookBackgroundExecutionStore.Running or RunbookBackgroundExecutionStore.Queued)
-    {
-        return backgroundState;
     }
 
     return string.IsNullOrWhiteSpace(progressState) ? backgroundState : progressState;
@@ -1386,7 +1388,17 @@ static string? ResolveRunbookProgressStreamMessage(
     SandboxRunbookProgressSnapshot progress,
     RunbookBackgroundExecutionSnapshot background)
 {
-    if (string.Equals(background.State, RunbookBackgroundExecutionStore.Failed, StringComparison.OrdinalIgnoreCase) &&
+    if ((string.Equals(background.State, RunbookBackgroundExecutionStore.Failed, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(background.State, RunbookBackgroundExecutionStore.Completed, StringComparison.OrdinalIgnoreCase)) &&
+        !string.IsNullOrWhiteSpace(background.Message))
+    {
+        return background.Message;
+    }
+
+    if ((string.Equals(background.State, RunbookBackgroundExecutionStore.Running, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(background.State, RunbookBackgroundExecutionStore.Queued, StringComparison.OrdinalIgnoreCase)) &&
+        (string.Equals(progress.State, SandboxRunbookProgressStates.Completed, StringComparison.OrdinalIgnoreCase) ||
+            progress.Success == true) &&
         !string.IsNullOrWhiteSpace(background.Message))
     {
         return background.Message;
@@ -1535,23 +1547,43 @@ static async Task<RunbookExecutionOutcome> ExecuteRunbookAndImportAsync(
     var result = await executor.ExecuteAsync(job.Runbook, options).ConfigureAwait(false);
     var updatedJob = service.SaveRunbookExecutionResult(jobId, result);
     var guestImportSucceeded = false;
+    var guestImportSkipped = false;
+    var guestImportFailed = false;
     string? guestImportMessage = null;
 
-    if (request.ImportGuestEvents && request.Live && result.Success)
+    if (request.Live && result.Success)
     {
-        try
+        if (!request.ImportGuestEvents)
         {
-            updatedJob = service.ImportGuestEvents(jobId);
-            guestImportSucceeded = true;
-            guestImportMessage = $"已导入来宾事件：{updatedJob.GuestEventsPath} / Guest events imported.";
+            guestImportSkipped = true;
+            guestImportMessage = "来宾事件自动导入已按请求关闭；live run 已成功，报告已收敛为 Completed / Guest event auto-import was disabled by request; live run succeeded and report is Completed.";
+            updatedJob = service.RecordGuestImportSkipped(jobId, guestImportMessage);
         }
-        catch (Exception ex) when (ex is DirectoryNotFoundException or FileNotFoundException or InvalidDataException or IOException or UnauthorizedAccessException)
+        else
         {
-            guestImportMessage = $"分析流程已结束，但未能自动导入来宾事件：{ex.Message} / Runbook completed, but guest events were not imported automatically.";
+            try
+            {
+                updatedJob = service.ImportGuestEvents(jobId);
+                guestImportSucceeded = updatedJob.Status == AnalysisStatus.Completed;
+                guestImportFailed = !guestImportSucceeded;
+                guestImportMessage = updatedJob.Messages.LastOrDefault();
+                if (string.IsNullOrWhiteSpace(guestImportMessage))
+                {
+                    guestImportMessage = guestImportSucceeded
+                        ? $"已导入来宾事件：{updatedJob.GuestEventsPath} / Guest events imported."
+                        : "来宾事件导入未发现事件，报告状态已收敛为 Failed / Guest import found no events; report status is Failed.";
+                }
+            }
+            catch (Exception ex) when (ex is DirectoryNotFoundException or FileNotFoundException or InvalidDataException or IOException or UnauthorizedAccessException or JsonException)
+            {
+                guestImportFailed = true;
+                guestImportMessage = $"来宾事件自动导入失败，报告状态已收敛为 Failed：{ex.Message} / Runbook completed, but guest events were not imported automatically.";
+                updatedJob = service.RecordGuestImportFailure(jobId, guestImportMessage);
+            }
         }
     }
 
-    return new RunbookExecutionOutcome(result, updatedJob, guestImportSucceeded, guestImportMessage);
+    return new RunbookExecutionOutcome(result, updatedJob, guestImportSucceeded, guestImportSkipped, guestImportFailed, guestImportMessage);
 }
 
 /// <summary>

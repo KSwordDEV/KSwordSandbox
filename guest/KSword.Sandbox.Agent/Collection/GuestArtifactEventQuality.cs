@@ -28,6 +28,7 @@ internal static class GuestArtifactEventQuality
         AddArtifactFieldDefaults(evt, lane);
         AddArtifactSelectorDefaults(evt.Data);
         AddRootLineageDefaults(evt);
+        AddArtifactHintDefaults(evt, lane);
 
         if (lane.SemanticType == "memory-dump")
         {
@@ -49,11 +50,13 @@ internal static class GuestArtifactEventQuality
         AddIfMissing(evt.Data, "status", state);
         AddIfMissing(evt.Data, "captureState", state);
 
-        if (IsCollectionNoiseEvent(evt.EventType))
+        if (IsCollectionNoiseEvent(evt.EventType) || IsCollectionNoiseLane(lane))
         {
             AddIfMissing(evt.Data, "behaviorCounted", "false");
             AddIfMissing(evt.Data, "nonbehavior", "true");
             AddIfMissing(evt.Data, "notSampleBehavior", "true");
+            AddIfMissing(evt.Data, "sampleBehaviorCandidate", "false");
+            AddIfMissing(evt.Data, "sampleBehaviorCandidateReason", "guest-artifact-collection-event");
         }
     }
 
@@ -100,11 +103,14 @@ internal static class GuestArtifactEventQuality
 
     private static void AddRootLineageDefaults(SandboxEvent evt)
     {
+        var existingTreeLineage = Value(evt.Data, "treeLineage");
         var rootProcessId = FirstNonEmpty(Value(evt.Data, "rootProcessId"), RootProcessIdFromEvent(evt));
         if (string.IsNullOrWhiteSpace(rootProcessId))
         {
+            AddIfMissing(evt.Data, "rootProcessId", string.Empty);
+            AddIfMissing(evt.Data, "treeLineage", existingTreeLineage);
             AddIfMissing(evt.Data, "rootProcessIdStatus", "unavailable");
-            AddIfMissing(evt.Data, "treeLineageStatus", string.IsNullOrWhiteSpace(Value(evt.Data, "treeLineage")) ? "unavailable" : "stable");
+            AddIfMissing(evt.Data, "treeLineageStatus", string.IsNullOrWhiteSpace(existingTreeLineage) ? "unavailable" : "stable");
             AddIfMissing(evt.Data, "lineageIncludesRoot", "false");
             return;
         }
@@ -115,6 +121,11 @@ internal static class GuestArtifactEventQuality
         AddIfMissing(evt.Data, "treeDepth", "0");
         AddIfMissing(evt.Data, "treeLineageStatus", string.IsNullOrWhiteSpace(Value(evt.Data, "treeLineage")) ? "unavailable" : "stable");
         AddIfMissing(evt.Data, "lineageIncludesRoot", LineageContainsPid(Value(evt.Data, "treeLineage"), rootProcessId).ToString(CultureInfo.InvariantCulture).ToLowerInvariant());
+    }
+
+    private static void AddArtifactHintDefaults(SandboxEvent evt, ArtifactLane lane)
+    {
+        AddIfMissing(evt.Data, "zhHint", ArtifactZhHint(lane, ArtifactState(evt)));
     }
 
     private static void AddMemoryDumpDescendantOptInDefaults(SandboxEvent evt)
@@ -302,6 +313,7 @@ internal static class GuestArtifactEventQuality
             "not-created-by-file-diff" => "not-created-by-file-diff",
             "conversion-pending" => "conversion-pending",
             "expected-pending-conversion" => "expected-pending-conversion",
+            "conversion-pending-pcapng" => "conversion-pending-pcapng",
             _ => "not-created"
         };
     }
@@ -433,6 +445,32 @@ internal static class GuestArtifactEventQuality
             eventType.StartsWith("screenshot.", StringComparison.OrdinalIgnoreCase) ||
             eventType.StartsWith("memory_dump.", StringComparison.OrdinalIgnoreCase) ||
             eventType.StartsWith("packet_capture.", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsCollectionNoiseLane(ArtifactLane lane)
+    {
+        return !string.Equals(lane.SemanticType, "dropped-file-candidate", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string ArtifactZhHint(ArtifactLane lane, string state)
+    {
+        return lane.SemanticType switch
+        {
+            "dropped-file" => "掉落文件采集事件不代表样本行为；请使用 artifactRelativePath 下载证据，并用 sizeBytes/sha256 与 status 字段判断完整性。",
+            "dropped-file-candidate" => "该文件差异行是 dropped-file 证据候选；若启用复制，请查看 artifact.dropped_file.* 的 artifactRelativePath、sizeBytes 和 sha256。",
+            "screenshot" => "截图采集事件不代表样本行为；请使用 artifactRelativePath 下载截图，并用 sizeBytes/sha256 与 status 字段判断证据是否可用。",
+            "memory-dump" => "内存转储采集事件不代表样本行为；dump 可能包含敏感内容，请用 artifactRelativePath、sizeBytes 和 sha256 校验证据。",
+            "packet-capture" => PacketCaptureZhHint(state),
+            _ => "该 artifact 采集 metadata 用于解释证据链质量，不应计入样本行为统计。"
+        };
+    }
+
+    private static string PacketCaptureZhHint(string state)
+    {
+        return string.Equals(state, "started", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(state, "stopped", StringComparison.OrdinalIgnoreCase)
+            ? "抓包生命周期事件不代表样本行为；artifactRelativePath 可指向预期 PCAPNG，最终完整性以 captured 事件的 sizeBytes/sha256 为准。"
+            : "抓包采集事件不代表样本行为；请使用 artifactRelativePath 下载 PCAP/PCAPNG，并用 sizeBytes/sha256 与 status 字段判断完整性。";
     }
 
     private static bool LineageContainsPid(string lineage, string rootProcessId)

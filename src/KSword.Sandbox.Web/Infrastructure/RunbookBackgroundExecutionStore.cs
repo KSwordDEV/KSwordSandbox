@@ -73,9 +73,10 @@ internal sealed class RunbookBackgroundExecutionStore
             try
             {
                 var outcome = await executeAsync().ConfigureAwait(false);
-                var importFailed = !string.IsNullOrWhiteSpace(outcome.GuestImportMessage) &&
-                    !outcome.GuestImportSucceeded;
-                var success = outcome.Execution.Success && !importFailed;
+                var importFailed = outcome.GuestImportFailed ||
+                    (outcome.Execution.Success && outcome.Job.Status == AnalysisStatus.Failed);
+                var terminalFailed = !outcome.Execution.Success || importFailed || outcome.Job.Status == AnalysisStatus.Failed;
+                var success = outcome.Execution.Success && !terminalFailed;
                 Update(new RunbookBackgroundExecutionSnapshot
                 {
                     JobId = jobId,
@@ -87,10 +88,10 @@ internal sealed class RunbookBackgroundExecutionStore
                     Execution = outcome.Execution,
                     Job = outcome.Job,
                     GuestImportSucceeded = outcome.GuestImportSucceeded,
+                    GuestImportSkipped = outcome.GuestImportSkipped,
+                    GuestImportFailed = importFailed,
                     GuestImportMessage = outcome.GuestImportMessage,
-                    Message = success
-                        ? "分析流程已完成；下一步：打开中文或英文报告 / Runbook execution completed. Next step: open the Chinese or English report."
-                        : outcome.Execution.Message ?? outcome.GuestImportMessage ?? "分析流程失败；下一步：打开进度页查看失败阶段并保留本条状态 / Runbook execution failed. Next step: open the progress page for the failed stage and keep this status text.",
+                    Message = ResolveTerminalMessage(success, outcome),
                     StartedAtUtc = now,
                     UpdatedAtUtc = DateTimeOffset.UtcNow
                 });
@@ -113,6 +114,30 @@ internal sealed class RunbookBackgroundExecutionStore
         });
 
         return true;
+    }
+
+    private static string ResolveTerminalMessage(bool success, RunbookExecutionOutcome outcome)
+    {
+        if (success)
+        {
+            return !string.IsNullOrWhiteSpace(outcome.GuestImportMessage)
+                ? outcome.GuestImportMessage!
+                : "分析流程已完成；下一步：打开中文或英文报告 / Runbook execution completed. Next step: open the Chinese or English report.";
+        }
+
+        if (outcome.GuestImportFailed && !string.IsNullOrWhiteSpace(outcome.GuestImportMessage))
+        {
+            return outcome.GuestImportMessage!;
+        }
+
+        if (!outcome.Execution.Success && !string.IsNullOrWhiteSpace(outcome.Execution.Message))
+        {
+            return $"分析流程失败：{outcome.Execution.Message} / Runbook execution failed.";
+        }
+
+        return !string.IsNullOrWhiteSpace(outcome.GuestImportMessage)
+            ? outcome.GuestImportMessage!
+            : "分析流程失败；下一步：打开进度页查看失败阶段并保留本条状态 / Runbook execution failed. Next step: open the progress page for the failed stage and keep this status text.";
     }
 
     /// <summary>
@@ -178,6 +203,10 @@ internal sealed record RunbookBackgroundExecutionSnapshot
     public AnalysisJob? Job { get; init; }
 
     public bool GuestImportSucceeded { get; init; }
+
+    public bool GuestImportSkipped { get; init; }
+
+    public bool GuestImportFailed { get; init; }
 
     public string? GuestImportMessage { get; init; }
 
@@ -271,6 +300,25 @@ internal sealed record RunbookBackgroundExecutionSnapshot
             hints.Add($"最新步骤：{LatestStepSummary.Ordinal} {LatestStepSummary.Title}（{LatestStepSummary.State}）。");
         }
 
+        if (GuestImportFailed)
+        {
+            hints.Add(string.IsNullOrWhiteSpace(GuestImportMessage)
+                ? "来宾事件导入失败：报告已收敛为 Failed；先查看任务消息和 report.json 中的 guest.events.import_failed 标记。"
+                : $"来宾事件导入失败：{GuestImportMessage}");
+        }
+        else if (GuestImportSkipped)
+        {
+            hints.Add(string.IsNullOrWhiteSpace(GuestImportMessage)
+                ? "来宾事件导入已按请求跳过：报告已收敛为 Completed，并写入 guest.events.import_skipped 标记。"
+                : $"来宾事件导入已跳过：{GuestImportMessage}");
+        }
+        else if (GuestImportSucceeded)
+        {
+            hints.Add(string.IsNullOrWhiteSpace(GuestImportMessage)
+                ? "来宾事件已导入：打开报告查看样本行为。"
+                : $"来宾事件导入完成：{GuestImportMessage}");
+        }
+
         if (IsStale)
         {
             hints.Add("后台状态可能陈旧：刷新 /runbook/background；若仍无变化，查看进度页和 Web Host 日志。");
@@ -326,4 +374,6 @@ internal sealed record RunbookExecutionOutcome(
     SandboxRunbookExecutionResult Execution,
     AnalysisJob Job,
     bool GuestImportSucceeded,
+    bool GuestImportSkipped,
+    bool GuestImportFailed,
     string? GuestImportMessage);

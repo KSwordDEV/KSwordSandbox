@@ -1,19 +1,20 @@
 # KSwordSandbox 发布打包检查清单 / Release packaging checklist
 
 中文优先：本页描述本机打包闭环。`scripts/package-portable.ps1` 只在本机
-staging/zip，不提交、不 push、不发布；清单和脚本会拒绝本机 secret、VM
-磁盘/快照、样本、报告、仓库构建二进制、符号和签名材料。
+staging/zip，不跑 smoke、不跑 Hyper-V live、不签名、不调用 `CSignTool.exe`、
+不提交、不 push、不发布；清单和脚本会拒绝本机 secret、VM 磁盘/快照、
+样本、报告、仓库构建二进制、符号和签名材料。
 
 This is the draft release wrapper for productized source and portable runtime
 packages. It is intentionally conservative: packages are staged outside the
 repository, release artifacts are not pushed by the packaging script, and
 sensitive/runtime material is excluded by manifest policy.
 
-## 当前发布 handoff（本地 v28 发布准备提交 dd33924）
+## 当前发布 handoff（本地 v28 发布准备；实际 branch/commit 以 `gitMetadata` 为准）
 
 面向审阅者的当前结论：源码层 MVP 主链路已经成形，但正式 tag 前仍应由
 release manager 在候选提交上重新跑低副作用门禁。本轮发布准备提交没有重跑
-Hyper-V live、重 smoke 或驱动签名。
+Hyper-V live、重 smoke、驱动签名或 `CSignTool.exe`。
 v28 已收敛 telemetry/product-readiness polish、defensive behavior matrix、artifact/download metadata、network sidecar/PCAP canonical lanes、live progress freshness、R0/Guest event quality 和 runtime guardrail。
 本轮发布准备提交没有新的 live `job id`、报告 hash、实验室记录或完整 `RuntimePublishRoot` handoff 证据，
 因此不能替 release notes 声明 `fresh live evidence` 或“runtime 包已完整交付”。若未补跑实验室 live，release notes 必须写：
@@ -74,9 +75,12 @@ v28 已收敛 telemetry/product-readiness polish、defensive behavior matrix、a
 - local config, environment files, DPAPI backups, and install state.
 
 两个 manifest 都带有 `releaseContract` 和 `stagedMetadata`。它们是面向操作者的
-guardrail，不是构建输入：用于声明 packaging/readiness 不得修改 Hyper-V、不得签名
-driver、不得使用 GUI signing fallback、不得调用 `CSignTool.exe`、不得 push 或 publish，
-并定义审阅者应在 staged package 内看到的 generated metadata 字段。
+guardrail，不是构建输入：用于声明 packaging/readiness 不跑 smoke、不跑 Hyper-V live、
+不得修改 Hyper-V、不得签名 driver、不得使用 GUI signing fallback、不得调用
+`CSignTool.exe`、不得 push 或 publish，并定义审阅者应在 staged package 内看到的
+generated metadata 字段：`gitMetadata`、`executionBoundaries`、`requiredEvidenceFields`、
+`runtimeHandoffMissingNextActionsZh`、`componentProgress`、`gapAudit` 和
+`sourceRuntimeSafetyMetadata`。
 
 ## 发布前检查清单 / Pre-release checklist
 
@@ -299,8 +303,9 @@ Release-manager diagnostics are printed at the end of each package run:
 - skipped optional runtime publish entries, for example when `guest-tools` or
   `tools/postprocess` has not yet been published into `RuntimePublishRoot`;
 - archive path and SHA-256 when `-StageOnly` is not used;
-- explicit safety line: no VM mutation, no driver signing, no GUI signing
-  fallback, no `CSignTool`, no `git push`, and no network publish.
+- explicit safety line: no smoke, no Hyper-V live, no VM mutation, no driver
+  signing, no GUI signing fallback, no `CSignTool`, no `git push`, and no
+  network publish.
 
 `package-manifest.generated.json` now includes `operatorDiagnostics` with
 runtime publish readiness, missing payload names, non-mutating guarantees, and
@@ -315,8 +320,16 @@ package safety guidance. Newer staging output should expose:
   It states that source packages are source-only, runtime payloads come only
   from an external `RuntimePublishRoot`, repository binary fallback is false,
   runtime archive handoff requires complete payloads, and non-mutating controls
-  (`no VM mutation`, `no driver signing`, `no GUI signing fallback`,
-  `CSignTool` not called, no push/publish) remain false/disabled.
+  (`no smoke`, `no Hyper-V live`, `no VM mutation`, `no driver signing`,
+  `no GUI signing fallback`, `CSignTool` not called, no push/publish) remain
+  false/disabled.
+- `gitMetadata`: latest branch, full commit, short commit, dirty boolean,
+  `dirtyStatus`, changed-file count, and `git status --porcelain` preview.
+- `executionBoundaries`: explicit booleans showing smoke tests were not run,
+  Hyper-V live was not run, signing was not performed, `CSignTool.exe` was not
+  invoked, and no push/publish happened.
+- `requiredEvidenceFields`: provenance, source handoff, runtime handoff, and
+  fresh-live claim fields reviewers must record before release handoff.
 - `runtimePublishSummary`: present/missing counts, missing required vs optional
   runtime payloads, `incompleteCount`, expected leaf-file gaps, forbidden-file
   previews, and whether this is a layout dry-run or complete runtime handoff.
@@ -337,6 +350,10 @@ package safety guidance. Newer staging output should expose:
 - `runtimePublishRootMissingRecommendedActions`: concise next commands when
   `RuntimePublishRoot` is absent, under the repository, or missing expected
   folders.
+- `runtimeHandoffMissingNextActionsZh`: Chinese next actions for complete
+  runtime handoff gaps, including missing external publish root, missing payload
+  folders, incomplete expected leaves, forbidden files, and the exact readiness
+  rerun command.
 - `completeRuntimePayloadsRequired` / `runtimePublishSummary`: whether this is
   an explicit complete-runtime handoff or only a layout dry-run.
 - `externalStateDiagnostics`: reminders that Hyper-V prerequisites, local VM
@@ -355,10 +372,11 @@ source tree.
 `release-readiness.md` under the configured output root. The Markdown handoff
 summary includes result counts, non-mutating boundaries, runtime handoff status,
 the generated `reviewerChecklist`, warning/failure remediation, and low-cost
-commands to rerun. The JSON also carries `sourceRuntimeSafetyMetadata` so
-release automation can distinguish source dry-runs from complete runtime
-handoff checks. Treat both files as generated evidence; do not copy them back
-into the repository.
+commands to rerun. The JSON also carries `gitMetadata`, `executionBoundaries`,
+`requiredEvidenceFields`, top-level `runtimeHandoffMissingNextActionsZh`
+plus runtime check details / `gapAudit` next actions, and `sourceRuntimeSafetyMetadata` so release
+automation can distinguish source dry-runs from complete runtime handoff checks.
+Treat both files as generated evidence; do not copy them back into the repository.
 
 The generated metadata is intended to be committed only as part of a built
 release artifact, never back into the source repository. Keep staged packages
@@ -405,10 +423,18 @@ that directory when the source project is not present.
 
 ### 机器可读 handoff 字段 / Machine-readable handoff fields
 
-`package-manifest.generated.json` 和 `release-readiness.json` 都应包含 `componentProgress`
-和 `gapAudit`。这是 deployment/productization 的机器可读进度/缺口快照，不是 fresh live evidence。
+`package-manifest.generated.json` 和 `release-readiness.json` 都应包含 `gitMetadata`、
+`executionBoundaries`、`requiredEvidenceFields`、`componentProgress` 和 `gapAudit`。
+这是 deployment/productization 的机器可读进度/缺口快照，不是 fresh live evidence。
 审阅者按以下 JSON 字段做最终 handoff：
 
+- `gitMetadata.branch`、`gitMetadata.commit`、`gitMetadata.shortCommit`、
+  `gitMetadata.dirtyStatus`、`gitMetadata.statusCount`：固定记录最近提交、分支和 dirty 状态。
+- `executionBoundaries`: `smokeTestsExecuted=false`、`hyperVLiveExecuted=false`、
+  `driverSigningExecuted=false`、`csignToolInvoked=false`、`gitPushExecuted=false`。
+- `requiredEvidenceFields`: 机器可读列出 source handoff、runtime handoff 和 fresh live
+  claim 必填字段；fresh live claim 必须有 commit/branch/dirty status、`job id`、
+  runtime root、时间和报告路径。
 - `componentProgress.components[].id`: `runtime-publish-root`, `package-safety-contract`,
   `release-smoke-scenarios`, `fresh-live-guardrail`, `self-noise-guard-readiness`,
   `operator-remediation-zh`。
@@ -423,6 +449,9 @@ that directory when the source project is not present.
   runtime handoff 必须看到 root 在仓库外、`summary.missingCount = 0`、
   `summary.incompleteCount = 0`、`summary.forbiddenFileCount = 0` 且
   `handoffAllowed = true`。
+- `runtimeHandoffMissingNextActionsZh` 或
+  `gapAudit.runtimePublishRootCompleteness.nextActionsZh`: 完整 handoff 缺失时的中文
+  next actions；不要用补跑 smoke/live/signing 代替补齐 `RuntimePublishRoot`。
 - `freshLiveEvidenceGuardrail`、`freshLiveEvidenceGenerated=false` 和
   `componentProgress.noFreshLiveEvidenceGenerated = true`：
   没有实验室 `job id` 时，release notes 必须写“本候选未刷新 fresh live evidence”。

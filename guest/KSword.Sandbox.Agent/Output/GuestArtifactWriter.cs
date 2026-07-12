@@ -290,6 +290,9 @@ internal sealed class GuestArtifactWriter
         AddIfNotEmpty(metadata, "semanticEventTags", SemanticTagsForClassification(classification));
         AddIfNotEmpty(metadata, "behaviorCounted", "false");
         AddIfNotEmpty(metadata, "nonbehavior", "true");
+        AddIfNotEmpty(metadata, "notSampleBehavior", "true");
+        AddIfNotEmpty(metadata, "sampleBehaviorCandidate", "false");
+        AddIfNotEmpty(metadata, "sampleBehaviorCandidateReason", "guest-artifact-descriptor");
         AddIfNotEmpty(metadata, "summaryRow", "false");
         AddIfNotEmpty(metadata, "reportRowKind", $"{ArtifactSemanticTypeForClassification(classification)}-artifact");
         AddIfNotEmpty(metadata, "capturePolicy", CapturePolicyForClassification(classification));
@@ -358,7 +361,39 @@ internal sealed class GuestArtifactWriter
             AddIfNotEmpty(metadata, "capturePhase", phase);
         }
 
+        AddArtifactDescriptorQualityFallbacks(classification, metadata);
         return metadata;
+    }
+
+    private static void AddArtifactDescriptorQualityFallbacks(
+        ArtifactClassification classification,
+        Dictionary<string, string> metadata)
+    {
+        var artifactRelativePath = ValueOrEmpty(
+            metadata,
+            "artifactRelativePath",
+            "relativePath",
+            "importPath",
+            "sourceArtifactRelativePath",
+            "packetCaptureRelativePath",
+            "pcapngRelativePath",
+            "memoryDumpRelativePath",
+            "screenshotRelativePath");
+        AddStableFallback(metadata, "artifactRelativePath", artifactRelativePath);
+
+        var rootProcessId = ValueOrEmpty(metadata, "rootProcessId", "processRootId", "rootPid");
+        AddStableFallback(metadata, "rootProcessId", rootProcessId);
+
+        var treeLineage = ValueOrEmpty(metadata, "treeLineage", "targetTreeLineage", "processTreeLineage");
+        if (string.IsNullOrWhiteSpace(treeLineage) && !string.IsNullOrWhiteSpace(rootProcessId))
+        {
+            treeLineage = rootProcessId;
+        }
+
+        AddStableFallback(metadata, "treeLineage", treeLineage);
+        AddIfMissing(metadata, "rootProcessIdStatus", string.IsNullOrWhiteSpace(rootProcessId) ? "unavailable" : "available");
+        AddIfMissing(metadata, "treeLineageStatus", string.IsNullOrWhiteSpace(treeLineage) ? "unavailable" : "stable");
+        AddIfMissing(metadata, "zhHint", ArtifactDescriptorZhHint(classification));
     }
 
     private static List<ArtifactCollectionDescriptor> BuildCollections(
@@ -448,6 +483,9 @@ internal sealed class GuestArtifactWriter
             ["artifactSemanticType"] = ArtifactSemanticTypeForCollection(name),
             ["behaviorCounted"] = "false",
             ["nonbehavior"] = "true",
+            ["notSampleBehavior"] = "true",
+            ["sampleBehaviorCandidate"] = "false",
+            ["sampleBehaviorCandidateReason"] = "guest-artifact-collection-summary",
             ["requested"] = enabled.ToString(System.Globalization.CultureInfo.InvariantCulture).ToLowerInvariant(),
             ["captureEnabled"] = enabled.ToString(System.Globalization.CultureInfo.InvariantCulture).ToLowerInvariant(),
             ["capturePolicy"] = CapturePolicyForCollection(name),
@@ -503,6 +541,7 @@ internal sealed class GuestArtifactWriter
             skippedEventPrefixes,
             disabledEventPrefixes,
             failedEventPrefixes ?? Array.Empty<string>());
+        AddCollectionProcessFallbacks(metadata);
         var concreteStatusReason = LastCollectionReason(
             events,
             name,
@@ -595,6 +634,22 @@ internal sealed class GuestArtifactWriter
         AddIfMissing(metadata, "artifactHashStatus", emptyStatus);
         AddIfMissing(metadata, "hashStatus", emptyStatus);
         AddIfMissing(metadata, "artifactExists", "false");
+    }
+
+    private static void AddCollectionProcessFallbacks(Dictionary<string, string> metadata)
+    {
+        var rootProcessId = ValueOrEmpty(metadata, "rootProcessId", "lastRootProcessId");
+        AddStableFallback(metadata, "rootProcessId", rootProcessId);
+
+        var treeLineage = ValueOrEmpty(metadata, "treeLineage", "lastTreeLineage");
+        if (string.IsNullOrWhiteSpace(treeLineage) && !string.IsNullOrWhiteSpace(rootProcessId))
+        {
+            treeLineage = rootProcessId;
+        }
+
+        AddStableFallback(metadata, "treeLineage", treeLineage);
+        AddIfMissing(metadata, "rootProcessIdStatus", string.IsNullOrWhiteSpace(rootProcessId) ? "unavailable" : "available");
+        AddIfMissing(metadata, "treeLineageStatus", string.IsNullOrWhiteSpace(treeLineage) ? "unavailable" : "stable");
     }
 
     private static string DetermineCollectionStatus(
@@ -1273,6 +1328,9 @@ internal sealed class GuestArtifactWriter
             "coverageTaxonomyVersion",
             "behaviorCounted",
             "nonbehavior",
+            "notSampleBehavior",
+            "sampleBehaviorCandidate",
+            "sampleBehaviorCandidateReason",
             "collectionHealth",
             "skippedReasons",
             "skippedReasonCounts",
@@ -1529,7 +1587,26 @@ internal sealed class GuestArtifactWriter
             return $"该通道已启用但没有文件产出；请结合对应事件确认是否没有可采集对象或采集条件未触发。";
         }
 
-        return string.Empty;
+        if (string.Equals(status, "captured", StringComparison.OrdinalIgnoreCase))
+        {
+            return $"该 {collectionName} collection summary 不代表样本行为；请使用 artifactRelativePath/sizeBytes/sha256 和 first/last/largest selector 校验证据。";
+        }
+
+        return $"该 {collectionName} collection metadata 用于解释证据链质量，不应计入样本行为统计。";
+    }
+
+    private static string ArtifactDescriptorZhHint(ArtifactClassification classification)
+    {
+        return classification.CollectionName switch
+        {
+            "dropped-files" => "掉落文件 artifact descriptor 不代表样本行为；请用 artifactRelativePath 下载，并用 sizeBytes/sha256 校验证据完整性。",
+            "screenshots" => "截图 artifact descriptor 不代表样本行为；请用 artifactRelativePath 下载，并用 sizeBytes/sha256 校验证据完整性。",
+            "memory-dumps" => "内存转储 artifact descriptor 不代表样本行为；dump 可能包含敏感内容，请用 sizeBytes/sha256 校验证据完整性。",
+            "packet-captures" => "抓包 artifact descriptor 不代表样本行为；请用 artifactRelativePath 下载 PCAP/PCAPNG，并用 sizeBytes/sha256 校验证据完整性。",
+            "driver-events" => "driver-events artifact descriptor 是采集链路证据；请结合 collection metadata 和 sha256 判断 JSONL 完整性。",
+            "r0-logs" => "R0Collector 日志 artifact descriptor 是采集诊断证据；请结合 collection metadata 和 sha256 判断日志完整性。",
+            _ => "artifact descriptor 用于解释证据链质量，不应计入样本行为统计。"
+        };
     }
 
     private static void CopyProcessIdentity(Dictionary<string, string> metadata, SandboxEvent evt)
@@ -1877,6 +1954,14 @@ internal sealed class GuestArtifactWriter
     {
         if ((!metadata.ContainsKey(key) || string.IsNullOrWhiteSpace(metadata[key])) &&
             !string.IsNullOrWhiteSpace(value))
+        {
+            metadata[key] = value;
+        }
+    }
+
+    private static void AddStableFallback(Dictionary<string, string> metadata, string key, string value)
+    {
+        if (!metadata.ContainsKey(key) || string.IsNullOrWhiteSpace(metadata[key]))
         {
             metadata[key] = value;
         }

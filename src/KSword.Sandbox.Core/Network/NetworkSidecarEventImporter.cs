@@ -64,6 +64,8 @@ public sealed class NetworkSidecarEventImporter
                     ["parserMaxFlattenedFields"] = MaxFlattenedFields.ToString(System.Globalization.CultureInfo.InvariantCulture),
                     ["parserMaxJsonDepth"] = MaxJsonDepth.ToString(System.Globalization.CultureInfo.InvariantCulture),
                     ["parserMaxFieldValueLength"] = NetworkTelemetrySchema.MaxDataValueLength.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    ["parserDepthLimitHit"] = FirstEventDataValue(events, "parserDepthLimitHit"),
+                    ["parserFieldLimitHit"] = FirstEventDataValue(events, "parserFieldLimitHit"),
                     ["sidecarProvenanceModel"] = "sourceArtifact=sidecar; pcapSourceArtifact=linked-parent-capture",
                     ["protocolHealthSummaryScope"] = "behavior-counted-canonical-events",
                     ["tsharkRequired"] = "false"
@@ -80,6 +82,7 @@ public sealed class NetworkSidecarEventImporter
         }
 
         var events = new List<SandboxEvent>();
+        var coverage = new SidecarParserCoverage();
         var lineNumber = 0;
         var lineLimitHit = false;
         try
@@ -92,17 +95,19 @@ public sealed class NetworkSidecarEventImporter
                 lineNumber++;
                 if (string.IsNullOrWhiteSpace(line))
                 {
+                    coverage.BlankLineCount++;
                     continue;
                 }
 
+                coverage.NonEmptyLineCount++;
                 var trimmed = line.Trim();
                 if (trimmed.StartsWith('{'))
                 {
-                    TryImportJsonLine(trimmed, path, lineNumber, source, events);
+                    TryImportJsonLine(trimmed, path, lineNumber, source, events, coverage);
                 }
                 else
                 {
-                    TryImportLogLine(trimmed, path, lineNumber, source, events);
+                    TryImportLogLine(trimmed, path, lineNumber, source, events, coverage);
                 }
             }
 
@@ -113,25 +118,59 @@ public sealed class NetworkSidecarEventImporter
             events.Add(CreateParseError(path, 0, ex.Message, source, "stream", "sidecar_stream_parse_error", "sidecar.stream"));
         }
 
-        ApplySidecarParserBounds(events, lineNumber, lineLimitHit);
+        coverage.LinesRead = lineNumber;
+        coverage.LineLimitHit = lineLimitHit;
+        if (ShouldAddParserCoverageHealth(events, coverage))
+        {
+            events.Add(CreateParserCoverageHealthEvent(path, source, coverage));
+        }
+
+        ApplySidecarParserBounds(events, coverage);
         return events;
     }
 
-    private static void ApplySidecarParserBounds(List<SandboxEvent> events, int linesRead, bool lineLimitHit)
+    private static void ApplySidecarParserBounds(List<SandboxEvent> events, SidecarParserCoverage coverage)
     {
-        var linesReadText = linesRead.ToString(System.Globalization.CultureInfo.InvariantCulture);
-        var limitHitText = lineLimitHit.ToString(System.Globalization.CultureInfo.InvariantCulture).ToLowerInvariant();
+        var linesReadText = coverage.LinesRead.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        var lineLimitHitText = BoolString(coverage.LineLimitHit);
+        var depthLimitHitText = BoolString(coverage.DepthLimitHit);
+        var fieldLimitHitText = BoolString(coverage.FieldLimitHit);
         foreach (var evt in events)
         {
             evt.Data["parserLinesRead"] = linesReadText;
-            evt.Data["parserLineLimitHit"] = limitHitText;
-            evt.Data["sidecarLineLimitHit"] = limitHitText;
+            evt.Data["parserLineLimitHit"] = lineLimitHitText;
+            evt.Data["sidecarLineLimitHit"] = lineLimitHitText;
             evt.Data["parserMaxLines"] = MaxLines.ToString(System.Globalization.CultureInfo.InvariantCulture);
             evt.Data["parserMaxFlattenedFields"] = MaxFlattenedFields.ToString(System.Globalization.CultureInfo.InvariantCulture);
             evt.Data["parserMaxJsonDepth"] = MaxJsonDepth.ToString(System.Globalization.CultureInfo.InvariantCulture);
             evt.Data["parserMaxFieldValueLength"] = NetworkTelemetrySchema.MaxDataValueLength.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            evt.Data["parserDepthLimitHit"] = depthLimitHitText;
+            evt.Data["parserFieldLimitHit"] = fieldLimitHitText;
             NetworkTelemetrySchema.ApplyHealthAndLocalization(evt.Data);
         }
+    }
+
+    private static bool ShouldAddParserCoverageHealth(IReadOnlyCollection<SandboxEvent> events, SidecarParserCoverage coverage)
+    {
+        if (coverage.LinesRead <= 0 || HasGeneratedProtocolEvent(events))
+        {
+            return false;
+        }
+
+        return events.Count == 0 ||
+            coverage.UnknownLineCount > 0 ||
+            coverage.DepthLimitHit ||
+            coverage.FieldLimitHit ||
+            coverage.LineLimitHit;
+    }
+
+    private static bool HasGeneratedProtocolEvent(IEnumerable<SandboxEvent> events)
+    {
+        return events.Any(evt =>
+            string.Equals(evt.EventType, "dns.query", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(evt.EventType, "http.request", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(evt.EventType, "tls.connection", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(evt.EventType, "network.flow", StringComparison.OrdinalIgnoreCase));
     }
 
     private static string FirstEventDataValue(IReadOnlyCollection<SandboxEvent> events, string key)
@@ -145,6 +184,11 @@ public sealed class NetworkSidecarEventImporter
         }
 
         return string.Empty;
+    }
+
+    private static string BoolString(bool value)
+    {
+        return value.ToString(System.Globalization.CultureInfo.InvariantCulture).ToLowerInvariant();
     }
 
     public static bool IsLikelyNetworkSidecarPath(string path)
@@ -181,21 +225,29 @@ public sealed class NetworkSidecarEventImporter
         string path,
         int lineNumber,
         NetworkArtifactSource source,
-        List<SandboxEvent> events)
+        List<SandboxEvent> events,
+        SidecarParserCoverage coverage)
     {
+        coverage.JsonLineCount++;
         try
         {
             using var document = JsonDocument.Parse(line);
             var fields = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            FlattenJson(document.RootElement, fields, prefix: string.Empty, depth: 0);
+            FlattenJson(document.RootElement, fields, prefix: string.Empty, depth: 0, coverage);
+            coverage.ObserveFlattenedFieldCount(fields.Count);
             if (TryCreateNetworkEvent(fields, path, lineNumber, source, "jsonl", out var evt))
             {
                 events.Add(evt);
+                coverage.ImportedEventCount++;
+                return;
             }
+
+            coverage.UnknownLineCount++;
         }
         catch (JsonException ex)
         {
             events.Add(CreateParseError(path, lineNumber, ex.Message, source, "jsonl", "sidecar_json_parse_error", "sidecar.line", line));
+            coverage.ParseErrorLineCount++;
         }
     }
 
@@ -204,19 +256,27 @@ public sealed class NetworkSidecarEventImporter
         string path,
         int lineNumber,
         NetworkArtifactSource source,
-        List<SandboxEvent> events)
+        List<SandboxEvent> events,
+        SidecarParserCoverage coverage)
     {
-        var fields = ParseKeyValueLine(line);
+        coverage.LogLineCount++;
+        var fields = ParseKeyValueLine(line, coverage);
         AddLooseLogHints(line, fields);
+        coverage.ObserveFlattenedFieldCount(fields.Count);
         if (fields.Count == 0)
         {
+            coverage.UnknownLineCount++;
             return;
         }
 
         if (TryCreateNetworkEvent(fields, path, lineNumber, source, "log", out var evt))
         {
             events.Add(evt);
+            coverage.ImportedEventCount++;
+            return;
         }
+
+        coverage.UnknownLineCount++;
     }
 
     private static bool TryCreateNetworkEvent(
@@ -424,6 +484,75 @@ public sealed class NetworkSidecarEventImporter
                     ? originalEventType
                     : "network.health",
             Timestamp = timestamp == default ? DateTimeOffset.UtcNow : timestamp,
+            Source = "host",
+            Path = path,
+            Data = data
+        };
+    }
+
+    private static SandboxEvent CreateParserCoverageHealthEvent(
+        string path,
+        NetworkArtifactSource source,
+        SidecarParserCoverage coverage)
+    {
+        var data = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["schema"] = NetworkTelemetrySchema.SchemaVersion,
+            ["eventFamily"] = "network",
+            ["eventKind"] = "health",
+            ["status"] = "parser_coverage_only",
+            ["healthCategory"] = "sidecar-parser-coverage",
+            ["parserCoverageOnly"] = "true",
+            ["sidecarParserCoverageOnly"] = "true",
+            ["parserCoverageStatus"] = "no-protocol-events",
+            ["parserCoverageReason"] = coverage.CoverageReason,
+            ["importSource"] = "sidecar-jsonl",
+            ["parser"] = "sidecar-jsonl",
+            ["parserInputKind"] = "network-sidecar",
+            ["parserBounded"] = "true",
+            ["parserMaxLines"] = MaxLines.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["parserLinesRead"] = coverage.LinesRead.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["parserLineLimitHit"] = BoolString(coverage.LineLimitHit),
+            ["sidecarLineLimitHit"] = BoolString(coverage.LineLimitHit),
+            ["parserMaxFlattenedFields"] = MaxFlattenedFields.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["parserMaxJsonDepth"] = MaxJsonDepth.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["parserMaxFieldValueLength"] = NetworkTelemetrySchema.MaxDataValueLength.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["parserDepthLimitHit"] = BoolString(coverage.DepthLimitHit),
+            ["parserFieldLimitHit"] = BoolString(coverage.FieldLimitHit),
+            ["parserFlattenedFieldCount"] = coverage.MaxFlattenedFieldCount.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["sidecarImportProvenance"] = "sidecar-artifact",
+            ["sidecarProvenanceModel"] = "sourceArtifact=sidecar; pcapSourceArtifact=linked-parent-capture",
+            ["sidecarSourceArtifactPath"] = source.FullPath,
+            ["sidecarSourceArtifactRelativePath"] = source.RelativePath,
+            ["sidecarSourceArtifactName"] = source.Name,
+            ["sidecarSourceArtifactSelector"] = source.RelativePath,
+            ["sidecarNonEmptyLineCount"] = coverage.NonEmptyLineCount.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["sidecarBlankLineCount"] = coverage.BlankLineCount.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["sidecarJsonLineCount"] = coverage.JsonLineCount.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["sidecarLogLineCount"] = coverage.LogLineCount.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["sidecarUnknownLineCount"] = coverage.UnknownLineCount.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["sidecarParseErrorLineCount"] = coverage.ParseErrorLineCount.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["sidecarImportedEventCount"] = coverage.ImportedEventCount.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["behaviorCounted"] = "false",
+            ["nonbehavior"] = "true",
+            ["sampleBehaviorCandidate"] = "false",
+            ["notSampleBehavior"] = "true",
+            ["semanticLane"] = "nonbehavior",
+            ["behaviorLane"] = "parser-coverage",
+            ["behaviorScope"] = "network-collection-health",
+            ["behaviorCountingPolicy"] = "excluded-from-sample-behavior-counts",
+            ["noisePolicy"] = "nonbehavior-evidence-quality",
+            ["collectorNoiseScope"] = "nonbehavior-evidence-quality",
+            ["sampleBehaviorBoundary"] = "nonbehavior-separated",
+            ["zhHint"] = "Sidecar 已被有界读取，但未归一化出 DNS/HTTP/TLS/flow 行；这只是解析覆盖状态，不证明样本没有网络行为。"
+        };
+
+        NetworkTelemetrySchema.AddArtifactData(data, source);
+        NetworkTelemetrySchema.ApplyHealthAndLocalization(data);
+        return new SandboxEvent
+        {
+            EventType = "network.health",
+            Timestamp = DateTimeOffset.UtcNow,
             Source = "host",
             Path = path,
             Data = data
@@ -1027,16 +1156,23 @@ public sealed class NetworkSidecarEventImporter
         return NetworkTelemetrySchema.NormalizeProtocol(value);
     }
 
-    private static void FlattenJson(JsonElement element, Dictionary<string, string> fields, string prefix, int depth)
+    private static void FlattenJson(
+        JsonElement element,
+        Dictionary<string, string> fields,
+        string prefix,
+        int depth,
+        SidecarParserCoverage coverage)
     {
         if (depth > MaxJsonDepth)
         {
+            coverage.DepthLimitHit = true;
             fields["parserDepthLimitHit"] = "true";
             return;
         }
 
         if (fields.Count >= MaxFlattenedFields)
         {
+            coverage.FieldLimitHit = true;
             fields["parserFieldLimitHit"] = "true";
             return;
         }
@@ -1048,16 +1184,17 @@ public sealed class NetworkSidecarEventImporter
                 {
                     if (fields.Count >= MaxFlattenedFields)
                     {
+                        coverage.FieldLimitHit = true;
                         fields["parserFieldLimitHit"] = "true";
                         break;
                     }
 
                     var key = string.IsNullOrWhiteSpace(prefix) ? property.Name : $"{prefix}.{property.Name}";
-                    FlattenJson(property.Value, fields, key, depth + 1);
+                    FlattenJson(property.Value, fields, key, depth + 1, coverage);
                     if (string.Equals(property.Name, "data", StringComparison.OrdinalIgnoreCase) &&
                         property.Value.ValueKind == JsonValueKind.Object)
                     {
-                        FlattenJson(property.Value, fields, string.Empty, depth + 1);
+                        FlattenJson(property.Value, fields, string.Empty, depth + 1, coverage);
                     }
                 }
 
@@ -1096,13 +1233,14 @@ public sealed class NetworkSidecarEventImporter
         return NetworkTelemetrySchema.BoundDataValue(value);
     }
 
-    private static Dictionary<string, string> ParseKeyValueLine(string line)
+    private static Dictionary<string, string> ParseKeyValueLine(string line, SidecarParserCoverage coverage)
     {
         var fields = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (Match match in KeyValueTokenRegex.Matches(line))
         {
             if (fields.Count >= MaxFlattenedFields)
             {
+                coverage.FieldLimitHit = true;
                 fields["parserFieldLimitHit"] = "true";
                 break;
             }
@@ -1384,5 +1522,65 @@ public sealed class NetworkSidecarEventImporter
         }
 
         return null;
+    }
+
+    private sealed class SidecarParserCoverage
+    {
+        public int LinesRead { get; set; }
+
+        public int NonEmptyLineCount { get; set; }
+
+        public int BlankLineCount { get; set; }
+
+        public int JsonLineCount { get; set; }
+
+        public int LogLineCount { get; set; }
+
+        public int UnknownLineCount { get; set; }
+
+        public int ParseErrorLineCount { get; set; }
+
+        public int ImportedEventCount { get; set; }
+
+        public int MaxFlattenedFieldCount { get; private set; }
+
+        public bool LineLimitHit { get; set; }
+
+        public bool DepthLimitHit { get; set; }
+
+        public bool FieldLimitHit { get; set; }
+
+        public string CoverageReason
+        {
+            get
+            {
+                if (LineLimitHit)
+                {
+                    return "line-limit-hit";
+                }
+
+                if (DepthLimitHit)
+                {
+                    return "json-depth-limit-hit";
+                }
+
+                if (FieldLimitHit)
+                {
+                    return "field-limit-hit";
+                }
+
+                if (UnknownLineCount > 0)
+                {
+                    return "unknown-sidecar-lines";
+                }
+
+                return "no-protocol-events";
+            }
+        }
+
+        public void ObserveFlattenedFieldCount(int count)
+        {
+            MaxFlattenedFieldCount = Math.Max(MaxFlattenedFieldCount, count);
+        }
     }
 }

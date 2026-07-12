@@ -2165,13 +2165,8 @@ public sealed class PcapArtifactEventImporter
             .OrderBy(path => path, StringComparer.OrdinalIgnoreCase))
         {
             var candidateBase = Path.GetFileNameWithoutExtension(candidate);
-            if (candidateBase.StartsWith(baseName, StringComparison.OrdinalIgnoreCase) ||
-                candidateBase.Contains(".dns", StringComparison.OrdinalIgnoreCase) ||
-                candidateBase.Contains(".http", StringComparison.OrdinalIgnoreCase) ||
-                candidateBase.Contains(".tls", StringComparison.OrdinalIgnoreCase) ||
-                candidateBase.Contains(".conn", StringComparison.OrdinalIgnoreCase) ||
-                candidateBase.Contains(".flow", StringComparison.OrdinalIgnoreCase) ||
-                Path.GetFileName(candidate).Contains("tshark", StringComparison.OrdinalIgnoreCase))
+            if (candidateBase.Equals(baseName, StringComparison.OrdinalIgnoreCase) ||
+                candidateBase.StartsWith(baseName + ".", StringComparison.OrdinalIgnoreCase))
             {
                 yield return candidate;
             }

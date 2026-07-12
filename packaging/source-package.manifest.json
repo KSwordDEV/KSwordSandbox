@@ -9,6 +9,9 @@
     "noNetworkPublishByPackageScript": true,
     "noGitPushByPackageScript": true,
     "noDriverSigningByPackageScript": true,
+    "noSmokeByPackageOrReadiness": true,
+    "noHyperVLiveByPackageOrReadiness": true,
+    "noCSignToolInvocationByPackageOrReadiness": true,
     "guiSigningFallback": "forbidden",
     "legacyCSignToolDefaultPath": "forbidden",
     "runtimePayloadSource": "not applicable; source package is source-only",
@@ -17,7 +20,10 @@
     "machineReadableGapAudit": "package-manifest.generated.json:gapAudit and release-readiness.json:gapAudit use ksword.release.gap-audit.v28 and cover no fresh live evidence, RuntimePublishRoot completeness, self-noise guard readiness, no VM mutation/no signing guardrails, and component progress",
     "runtimeCompletenessDiagnostics": "source package metadata still records RuntimePublishRoot as not applicable while release-readiness.json:gapAudit.runtimePublishRootCompleteness explains that runtime handoff must be verified separately with an external RuntimePublishRoot",
     "reviewerChecklistJson": "package-manifest.generated.json:reviewerChecklist and release-readiness.json:reviewerChecklist",
-    "noFreshLiveGuardrail": "package/readiness do not generate fresh live evidence; release notes must say 本候选未刷新 fresh live evidence unless a lab job id is recorded"
+    "noFreshLiveGuardrail": "package/readiness do not generate fresh live evidence; release notes must say 本候选未刷新 fresh live evidence unless a lab job id is recorded",
+    "machineReadableExecutionBoundaries": "package-manifest.generated.json:executionBoundaries and release-readiness.json:executionBoundaries explicitly list no smoke, no Hyper-V live, no signing, no CSignTool, no push/publish",
+    "machineReadableRequiredEvidenceFields": "package-manifest.generated.json:requiredEvidenceFields and release-readiness.json:requiredEvidenceFields list branch, commit, dirty status, runtime handoff fields, and fresh-live claim fields",
+    "gitProvenanceFields": "package-manifest.generated.json:gitMetadata and release-readiness.json:gitMetadata include branch, full commit, short commit, dirtyStatus, statusCount, and statusPreview"
   },
   "stagedMetadata": {
     "generatedManifest": "package-manifest.generated.json",
@@ -31,9 +37,28 @@
       "machine-readable componentProgress snapshot for deployment/productization review",
       "machine-readable gapAudit v28 snapshot for no fresh live evidence, RuntimePublishRoot completeness, no VM mutation/no signing guardrails, self-noise guard readiness, and component progress",
       "operatorDiagnostics.runtimePublishRootDiagnostics and runtimeCompletenessDiagnostics showing source package runtime handoff is not verified here",
+      "executionBoundaries declaring smoke/live/signing/CSignTool/push were not executed",
+      "gitMetadata with branch, full commit, short commit, dirty status, status count, and preview",
+      "requiredEvidenceFields for source handoff, runtime handoff, and fresh live claims",
+      "runtimeHandoffMissingNextActionsZh with Chinese next actions when complete RuntimePublishRoot handoff is missing",
       "reviewerChecklist JSON and no-fresh-live guardrail fields"
     ],
-    "selfHashNote": "The generated manifest lists itself in files but omits a recursive self-hash from fileInventory."
+    "selfHashNote": "The generated manifest lists itself in files but omits a recursive self-hash from fileInventory.",
+    "machineOutputContract": {
+      "executionBoundariesRequired": true,
+      "gitMetadataRequired": true,
+      "requiredEvidenceFieldsRequired": true,
+      "runtimeHandoffMissingNextActionsZhRequired": true,
+      "forbiddenExecution": [
+        "smoke",
+        "Hyper-V live",
+        "driver signing",
+        "CSignTool.exe",
+        "GUI signing fallback",
+        "git push",
+        "network publish"
+      ]
+    }
   },
   "includePatterns": [
     ".editorconfig",
@@ -279,7 +304,9 @@
   "requiredChecks": [
     "Run scripts/Test-RepositoryPolicy.ps1 before cutting a source package.",
     "Cut source packages from a clean git worktree unless AllowDirtySource is explicitly documented.",
-    "Do not include runtime-root folders, submitted samples, VM disks/checkpoints, local state/secrets, build intermediates, signed driver binaries, or private signing material."
+    "Do not include runtime-root folders, submitted samples, VM disks/checkpoints, local state/secrets, build intermediates, signed driver binaries, or private signing material.",
+    "package-manifest.generated.json and release-readiness.json must expose executionBoundaries: no smoke, no Hyper-V live, no signing, no CSignTool, no push/publish.",
+    "Machine-readable handoff evidence must include branch, commit, dirty status, requiredEvidenceFields, and Chinese next actions when complete RuntimePublishRoot handoff is missing."
   ],
   "componentProgressTemplate": {
     "schema": "ksword.release.component-progress.v1",

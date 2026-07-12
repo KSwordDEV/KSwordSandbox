@@ -216,8 +216,7 @@ internal static class LiveEventsPage
             <div class="actions">
               <a class="button secondary" href="/" data-zh="返回主界面" data-en="Back to dashboard">返回主界面</a>
               <a class="button secondary" href="/jobs/{{Attr(jobId)}}/execution-flow" data-zh="执行流程" data-en="Execution flow">执行流程</a>
-              <a class="button" href="/api/jobs/{{Attr(jobId)}}/report/html?lang=zh" target="_blank" rel="noopener" data-zh="打开中文报告" data-en="Open Chinese report">打开中文报告</a>
-              <a class="button secondary" href="/api/jobs/{{Attr(jobId)}}/report/html?lang=en" target="_blank" rel="noopener" data-zh="打开英文报告" data-en="Open English report">打开英文报告</a>
+              <span id="headerReportActions" class="artifact-action" data-copy="报告入口待确认 / report entry pending"><span class="pill waiting">报告入口待确认</span></span>
               <a class="button secondary" href="/settings" data-zh="设置 / VirusTotal" data-en="Settings / VirusTotal">设置 / VirusTotal</a>
               <button type="button" onclick="connectSse()" data-zh="连接实时流" data-en="Connect stream">连接实时流</button>
               <button class="secondary" type="button" onclick="refreshLiveEvents(true)" data-zh="手动刷新" data-en="Manual refresh">手动刷新</button>
@@ -262,7 +261,7 @@ internal static class LiveEventsPage
                 <button class="secondary" type="button" onclick="refreshArtifactCardsNow()" data-copy="手动刷新证据索引 / Refresh artifact index" data-zh="刷新证据/下载卡片" data-en="Refresh artifact/download cards">刷新证据/下载卡片</button>
                 <span class="pill quiet" data-copy="live monitor always shows report, events, driver-events, dropped files, screenshots, memory dumps, and PCAP lanes">报告、events、驱动遥测、落地文件、截图、内存转储、PCAP 均保留卡片 lane</span>
               </p>
-              <div id="reportReadyActions" class="report-ready muted" data-copy="报告待生成 / reports pending">报告按钮会在运行结束后保持可用。</div>
+              <div id="reportReadyActions" class="report-ready muted" data-copy="HTML 报告待确认 / HTML report pending">HTML 报告按钮会在确认 job HTML path 或 indexed report.html 后显示。</div>
               <div id="artifactReadinessPanel" class="report-ready muted" data-copy="证据就绪面板加载中 / artifact readiness panel loading">证据就绪面板加载中。</div>
               <div id="artifactCards" class="artifact-card-grid">
                 <article class="artifact-card waiting muted" data-copy="证据路径解析中 / artifacts pending" data-zh="正在解析证据（artifact）路径。" data-en="Resolving artifact paths.">正在解析证据（artifact）路径。</article>
@@ -364,11 +363,13 @@ internal static class LiveEventsPage
             let latestArtifactIndex = null;
             let latestArtifactRows = [];
             let latestArtifactSignals = {};
+            let latestReportReadiness = null;
             let reportAutoOpenScheduled = false;
             let reportAutoOpenTimer = null;
             let reportAutoOpenDeadline = 0;
             let reportAutoOpenHref = '';
             let reportAutoOpenRemainingSeconds = 0;
+            let virusTotalPersistInFlight = false;
             const monitorQuery = new URLSearchParams(window.location.search);
             const enteredFromUpload = monitorQuery.get('fromUpload') === '1';
             const uploadHandoffAccepted = monitorQuery.get('accepted') === '1';
@@ -412,7 +413,7 @@ internal static class LiveEventsPage
             function applyLanguage() {
               document.documentElement.lang = currentLanguage === 'en' ? 'en' : 'zh-CN';
               document.querySelectorAll('[data-zh][data-en]').forEach(el => {
-                if (el.id === 'status' || el.id === 'sources' || el.id === 'eventRows' || el.id === 'operatorCockpit' || el.id === 'artifactCards' || el.id === 'reportReadyActions' || el.id === 'vtResult' || el.id === 'uploadHandoffNotice' || el.id === 'streamFallbackStatus' || el.id === 'eventPageStatus' || el.id === 'selectedEventSummary' || el.id === 'severityFilters' || el.id === 'typeFilters' || el.id === 'sourceFilters') { return; }
+                if (el.id === 'status' || el.id === 'sources' || el.id === 'eventRows' || el.id === 'operatorCockpit' || el.id === 'artifactCards' || el.id === 'reportReadyActions' || el.id === 'headerReportActions' || el.id === 'vtResult' || el.id === 'uploadHandoffNotice' || el.id === 'streamFallbackStatus' || el.id === 'eventPageStatus' || el.id === 'selectedEventSummary' || el.id === 'severityFilters' || el.id === 'typeFilters' || el.id === 'sourceFilters') { return; }
                 el.textContent = t(el.getAttribute('data-zh'), el.getAttribute('data-en'));
               });
               document.getElementById('langToggle').textContent = currentLanguage === 'en' ? '切换到中文' : '切换到 English';
@@ -867,17 +868,15 @@ internal static class LiveEventsPage
               const state = String(snapshot.state || 'not_started').toLowerCase();
               const stateLabel = formatBackgroundState(state);
               const message = localizeServerMessage(snapshot.message || '');
-              const job = snapshot.job || {};
-              const hasReport = Boolean(job.htmlReportPath || job.htmlReportZhPath || job.htmlReportEnPath);
               const progress = summarizeProgressForStatus(lastProgressSnapshot, state);
               const elapsed = formatDuration(snapshot.duration || snapshot.Duration) || formatElapsedBetween(snapshot.startedAtUtc || snapshot.StartedAtUtc, snapshot.updatedAtUtc || snapshot.UpdatedAtUtc) || '-';
               const currentStep = progress.currentStep || t('等待执行器更新', 'waiting for executor update');
-              const reportButtons = hasReport || state === 'completed'
-                ? `<p class="actions">
-                    <a class="button" href="/api/jobs/${encodeURIComponent(jobId)}/report/html?lang=zh" target="_blank" rel="noopener">${t('打开中文报告', 'Open Chinese report')}</a>
-                    <a class="button secondary" href="/api/jobs/${encodeURIComponent(jobId)}/report/html?lang=en" target="_blank" rel="noopener">${t('打开英文报告', 'Open English report')}</a>
-                  </p>`
-                : '';
+              const reportReadiness = currentReportReadiness();
+              const reportButtons = reportReadiness.hasHtmlReport
+                ? `<p class="actions">${reportOpenLinksHtml()}</p>`
+                : (state === 'completed' || reportReadiness.hasJsonReport)
+                  ? `<p class="muted" data-copy="${escapeAttr(reportReadiness.copy)}">${escapeHtml(reportReadiness.hint)}</p>`
+                  : '';
               const importMessage = snapshot.guestImportMessage
                 ? `<p class="${snapshot.guestImportSucceeded ? 'ok' : 'muted'}" data-copy="${escapeAttr(snapshot.guestImportMessage)}">${escapeHtml(localizeServerMessage(snapshot.guestImportMessage))}</p>`
                 : '';
@@ -897,7 +896,7 @@ internal static class LiveEventsPage
                 ${outputDetails}`;
               target.setAttribute('data-copy', `后台分析 ${stateLabel}; 进度=${progress.percentText}; 当前=${currentStep}; 耗时=${elapsed}; 消息=${message}`);
               renderOperatorCockpit();
-              if (autoOpenReportFromMonitor && state === 'completed' && !reportAutoOpenScheduled) {
+              if (autoOpenReportFromMonitor && state === 'completed' && reportReadiness.hasJobHtmlReport && !reportAutoOpenScheduled) {
                 scheduleReportAutoOpen();
               }
             }
@@ -960,6 +959,15 @@ internal static class LiveEventsPage
             }
 
             function scheduleReportAutoOpen() {
+              const readiness = currentReportReadiness();
+              if (!readiness.hasJobHtmlReport) {
+                renderReportReadyActions(buildArtifactPaths(normalizeJobSnapshot(latestJobSnapshot || initialJob), latestArtifactSources));
+                setStatus(readiness.hasIndexedHtmlReport
+                  ? t('已发现 indexed report.html，但自动跳转只使用 job HTML path；请使用报告区域的证据下载链接。', 'An indexed report.html was found, but auto-open uses only job HTML paths; use the report area artifact download link.')
+                  : readiness.hint, false);
+                return;
+              }
+
               reportAutoOpenScheduled = true;
               const href = `/api/jobs/${encodeURIComponent(jobId)}/report/html?lang=zh`;
               reportAutoOpenHref = href;
@@ -977,6 +985,22 @@ internal static class LiveEventsPage
             }
 
             function updateReportAutoOpenNotice() {
+              const readiness = currentReportReadiness();
+              renderHeaderReportActions(readiness);
+              if (!readiness.hasJobHtmlReport) {
+                reportAutoOpenScheduled = false;
+                if (reportAutoOpenTimer) {
+                  clearInterval(reportAutoOpenTimer);
+                  reportAutoOpenTimer = null;
+                }
+
+                renderReportReadyActions(buildArtifactPaths(normalizeJobSnapshot(latestJobSnapshot || initialJob), latestArtifactSources));
+                setStatus(readiness.hasIndexedHtmlReport
+                  ? t('已发现 indexed report.html，但自动跳转已取消；请使用报告区域的证据下载链接。', 'An indexed report.html was found, but auto-open was canceled; use the report area artifact download link.')
+                  : readiness.hint, false);
+                return;
+              }
+
               const href = reportAutoOpenHref || `/api/jobs/${encodeURIComponent(jobId)}/report/html?lang=zh`;
               const remaining = Math.max(0, Math.ceil(((reportAutoOpenDeadline || Date.now()) - Date.now()) / 1000));
               reportAutoOpenRemainingSeconds = remaining;
@@ -987,9 +1011,8 @@ internal static class LiveEventsPage
                 target.innerHTML = `<strong>${escapeHtml(t('报告已生成，正在准备自动打开中文报告 report.zh.html。', 'Report is ready and preparing to open the Chinese report (report.zh.html).'))}</strong>
                   <p class="countdown" data-copy="${escapeAttr(countdown)}">${escapeHtml(countdown)}</p>
                   <div class="artifact-action">
-                    <a class="button" href="${escapeAttr(href)}">${escapeHtml(t('立即打开中文报告', 'Open Chinese report now'))}</a>
-                    <a class="button secondary" href="/api/jobs/${encodeURIComponent(jobId)}/report/html?lang=zh" target="_blank" rel="noopener">${escapeHtml(t('中文报告', 'Chinese report'))}</a>
-                    <a class="button secondary" href="/api/jobs/${encodeURIComponent(jobId)}/report/html?lang=en" target="_blank" rel="noopener">${escapeHtml(t('英文报告', 'English report'))}</a>
+                    <a class="button" href="${escapeAttr(href)}" data-copy="${escapeAttr(href)}">${escapeHtml(t('立即打开中文报告', 'Open Chinese report now'))}</a>
+                    ${reportOpenLinksHtml()}
                   </div>`;
                 target.setAttribute('data-copy', `${href} ${countdown}`);
               }
@@ -1308,10 +1331,14 @@ internal static class LiveEventsPage
               const vtStatus = vt ? normalizeVirusTotalStatus(vt) : 'pending';
               const vtQuiet = vt ? Boolean(vt.isQuietState || vt.IsQuietState || virusTotalWorkflowState(vt) === 'quiet') : true;
               const vtPolicy = vt ? virusTotalPolicyText(vtValue(vt, 'liveLogPolicy') || vtValue(vt, 'persistencePolicy')) : t('等待查询；默认页面展示，不上传样本', 'waiting; display-only by default and no sample upload');
-              const vtAction = vtStatus === 'found'
-                ? t('VT 官方已收录：如需要写入报告，请使用显式信誉增强入口；实时页默认仍是展示态。', 'VT found: use the explicit reputation-enrichment entry if it must be written to the report; the live page stays display-only by default.')
-                : t('VT 为静默状态：未配置、未收录、限速、鉴权失败、超时或失败都不阻断分析，也不写任务/行为日志。', 'VT is quiet: not configured, not found, rate limit, auth failure, timeout, or failure does not block analysis or write job/behavior logs.');
-              const vtCopy = `VirusTotal=${vtStatus}; quiet=${vtQuiet}; policy=${vtPolicy}; action=${vtAction}`;
+              const vtPersisted = vt ? virusTotalPersisted(vt) : false;
+              const vtCanPersist = vt ? virusTotalCanPersist(vt, vtStatus) : false;
+              const vtAction = vtPersisted
+                ? t('VT 官方已收录结果已写入报告/信誉增强；后续查看报告即可。', 'The VT found result has been persisted to report/reputation enrichment; view the report afterward.')
+                : vtCanPersist
+                  ? t('VT 官方已收录且可持久化：如需要让报告包含该信誉事件，请点击“写入报告/信誉增强”。', 'VT found and persistable: click Persist report/enrichment if the report should include this reputation event.')
+                  : t('VT 为静默或不可写入状态：未配置、未收录、限速、鉴权失败、超时或失败都不阻断分析，也不写任务/行为日志。', 'VT is quiet or not persistable: not configured, not found, rate limit, auth failure, timeout, or failure does not block analysis or write job/behavior logs.');
+              const vtCopy = `VirusTotal=${vtStatus}; quiet=${vtQuiet}; canPersist=${vtCanPersist}; persisted=${vtPersisted}; policy=${vtPolicy}; action=${vtAction}`;
 
               const artifactSummary = summarizeArtifactReadiness();
               const artifactAction = artifactSummary.downloadableCount > 0
@@ -1321,11 +1348,15 @@ internal static class LiveEventsPage
                   : t('证据索引仍在等待：运行中属于正常状态，报告、events、driver-events 和采集项会逐步出现。', 'Artifact index is still pending: during execution this is expected; reports, events, driver-events, and collection items appear progressively.');
               const artifactCopy = `证据=${artifactSummary.readyCount}/${artifactSummary.totalCount}; downloadable=${artifactSummary.downloadableCount}; rejected=${artifactSummary.rejectionCount}; action=${artifactAction}`;
 
-              const reportReady = isRunTerminal();
-              const reportAction = reportReady
-                ? t('运行已进入终态：可打开中文报告，并把本提示/卡片摘要复制给排障或交接人员。', 'Run is terminal: open the Chinese report and copy this hint/card summary for troubleshooting or handoff.')
-                : t('运行未结束：先看当前真实步骤和原始事件；报告按钮会在终态后保持可用。', 'Run is not terminal: watch the current real step and raw events first; report buttons remain available after terminal state.');
-              const reportCopy = `报告=${reportReady ? 'ready-or-terminal' : 'pending'}; action=${reportAction}`;
+              const reportReadiness = currentReportReadiness();
+              const reportAction = reportReadiness.hasHtmlReport
+                ? t('HTML 报告证据已确认：可打开中文/英文报告，并把本提示/卡片摘要复制给排障或交接人员。', 'HTML report evidence is confirmed: open the Chinese/English report and copy this hint/card summary for troubleshooting or handoff.')
+                : reportReadiness.hasJsonReport
+                  ? t('仅看到 JSON 报告证据：JSON/终态只作为提示，暂不显示 HTML 打开按钮，避免误导到 404。', 'Only JSON report evidence is visible: JSON/terminal state is only a hint, so HTML open buttons stay hidden to avoid misleading 404s.')
+                  : reportReadiness.terminal
+                    ? t('运行已终态但还没有 job HTML path 或 indexed report.html 证据：先刷新证据索引，不直接打开 HTML 端点。', 'The run is terminal but no job HTML path or indexed report.html evidence exists yet: refresh the artifact index first instead of opening the HTML endpoint.')
+                    : t('运行未结束：先看当前真实步骤和原始事件；HTML 按钮只会在确认 job HTML path 或 indexed report.html 后显示。', 'Run is not terminal: watch the current real step and raw events first; HTML buttons appear only after a job HTML path or indexed report.html is confirmed.');
+              const reportCopy = `报告 hasHtmlReport=${reportReadiness.hasHtmlReport}; hasJsonReport=${reportReadiness.hasJsonReport}; terminal=${reportReadiness.terminal}; evidence=${reportReadiness.evidenceText}; action=${reportAction}`;
 
               const hints = [
                 ...contractArrayValue(progressContract, 'operatorHintsZh').slice(0, 6).map((hint, index) => ({
@@ -1337,7 +1368,7 @@ internal static class LiveEventsPage
                 { title: t('当前步骤怎么处理', 'How to handle current step'), body: t(`当前真实步骤：${stepTitle}；状态：${stepState}。失败时打开“执行流程”，实时页不展开命令/stdout/stderr。`, `Current real step: ${stepTitle}; state: ${stepState}. If it fails, open Execution flow; the live page does not expand commands/stdout/stderr.`), tone: rawState === 'failed' || rawState === 'canceled' ? 'failed' : 'ready', copy: stepCopy },
                 { title: t('VT 查询/持久化状态', 'VT lookup/persistence state'), body: vtAction, tone: vtStatus === 'found' ? 'ready' : 'quiet', copy: vtCopy },
                 { title: t('证据/下载状态', 'Evidence/download status'), body: artifactAction, tone: artifactSummary.downloadableCount > 0 ? 'ready' : artifactSummary.indexLoaded ? 'waiting' : 'quiet', copy: artifactCopy },
-                { title: t('交接提示', 'Handoff hint'), body: reportAction, tone: reportReady ? 'ready' : 'waiting', copy: reportCopy }
+                { title: t('交接提示', 'Handoff hint'), body: reportAction, tone: reportReadiness.hasHtmlReport ? 'ready' : (reportReadiness.hasJsonReport || reportReadiness.terminal ? 'waiting' : 'quiet'), copy: reportCopy }
               ];
 
               const allCopy = hints.map(hint => hint.copy).join(' | ');
@@ -1418,10 +1449,11 @@ internal static class LiveEventsPage
               const permalink = vtValue(result, 'detectionPermalink') || vtValue(result, 'permalink') || '';
               const policy = virusTotalPolicyText(vtValue(result, 'liveLogPolicy'));
               const operatorState = virusTotalOperatorStateText(status, result, malicious, suspicious);
+              const persistenceCopy = virusTotalPersistenceCopy(result, status);
               const headline = status === 'found'
                 ? t(`命中 ${malicious + suspicious} / 官方已收录`, `${malicious + suspicious} detections / found`)
                 : operatorState;
-              const copy = `VirusTotal ${status}; ${headline}; ${operatorState}; ${community}; permalink=${permalink || 'n/a'}; policy=${policy}`;
+              const copy = `VirusTotal ${status}; ${headline}; ${operatorState}; ${community}; permalink=${permalink || 'n/a'}; policy=${policy}; ${persistenceCopy}`;
               return {
                 copy,
                 html: `<article class="cockpit-card ${tone}" data-copy="${escapeAttr(copy)}">
@@ -1430,6 +1462,7 @@ internal static class LiveEventsPage
                   <div class="cockpit-meta">
                     <span class="pill ${tone}" data-copy="${escapeAttr(status)}">${escapeHtml(virusTotalStatusLabel(status, result))}</span>
                     <span class="pill quiet" data-copy="${escapeAttr(policy)}">${escapeHtml(t('默认不写日志噪音', 'no log noise by default'))}</span>
+                    <span class="pill ${virusTotalPersisted(result) ? 'ready' : (virusTotalCanPersist(result, status) ? 'endpoint' : 'quiet')}" data-copy="${escapeAttr(persistenceCopy)}">${escapeHtml(virusTotalPersisted(result) ? t('已写入信誉增强', 'enrichment persisted') : (virusTotalCanPersist(result, status) ? t('可写入信誉增强', 'can persist enrichment') : t('不写入信誉增强', 'no enrichment write')))}</span>
                     <span class="pill ${permalink ? 'endpoint' : 'waiting'}" data-copy="${escapeAttr(permalink || t('官方链接未提供', 'official permalink not provided'))}">${escapeHtml(permalink ? t('官方链接就绪', 'permalink ready') : t('无官方链接', 'no permalink'))}</span>
                     ${cockpitCopyButton(copy)}
                   </div>
@@ -1463,20 +1496,28 @@ internal static class LiveEventsPage
             }
 
             function renderReportCockpitCard() {
-              const terminal = isRunTerminal();
-              const job = normalizeJobSnapshot(latestJobSnapshot || initialJob);
-              const hasReport = terminal || Boolean(job.htmlReportPath || job.htmlReportZhPath || job.htmlReportEnPath || job.jsonReportPath);
-              const tone = hasReport ? 'ready' : 'waiting';
-              const headline = hasReport ? t('报告入口可用', 'report entry ready') : t('等待报告生成', 'waiting for report');
-              const copy = `${headline}; zh=/api/jobs/${jobId}/report/html?lang=zh; en=/api/jobs/${jobId}/report/html?lang=en`;
+              const readiness = currentReportReadiness();
+              const tone = readiness.hasHtmlReport ? 'ready' : (readiness.hasJsonReport || readiness.terminal ? 'waiting' : 'quiet');
+              const headline = readiness.hasHtmlReport
+                ? t('HTML 报告入口可用', 'HTML report entry ready')
+                : readiness.hasJsonReport
+                  ? t('仅 JSON 报告就绪', 'JSON report only')
+                  : readiness.terminal
+                    ? t('终态，等待 HTML 证据', 'terminal, waiting for HTML evidence')
+                    : t('等待报告生成', 'waiting for report');
+              const copy = `${headline}; hasHtmlReport=${readiness.hasHtmlReport}; hasJsonReport=${readiness.hasJsonReport}; terminal=${readiness.terminal}; evidence=${readiness.evidenceText}`;
+              const actions = readiness.hasHtmlReport
+                ? reportOpenLinksHtml()
+                : `<span class="pill ${tone}" data-copy="${escapeAttr(readiness.hint)}">${escapeHtml(readiness.hint)}</span>`;
               return {
                 copy,
                 html: `<article class="cockpit-card ${tone}" data-copy="${escapeAttr(copy)}">
                   <h3>${escapeHtml(t('报告入口', 'Report entry'))}</h3>
                   <p class="cockpit-main">${escapeHtml(headline)}</p>
                   <div class="cockpit-meta">
-                    <a class="button secondary" href="/api/jobs/${encodeURIComponent(jobId)}/report/html?lang=zh" target="_blank" rel="noopener">${escapeHtml(t('中文报告', 'Chinese report'))}</a>
-                    <a class="button secondary" href="/api/jobs/${encodeURIComponent(jobId)}/report/html?lang=en" target="_blank" rel="noopener">${escapeHtml(t('英文报告', 'English report'))}</a>
+                    <span class="pill ${readiness.hasHtmlReport ? 'ready' : 'waiting'}" data-copy="${escapeAttr(`hasHtmlReport=${readiness.hasHtmlReport}`)}">${escapeHtml(readiness.hasHtmlReport ? t('HTML 已确认', 'HTML confirmed') : t('HTML 未确认', 'HTML not confirmed'))}</span>
+                    <span class="pill ${readiness.hasJsonReport ? 'ready' : 'quiet'}" data-copy="${escapeAttr(`hasJsonReport=${readiness.hasJsonReport}`)}">${escapeHtml(readiness.hasJsonReport ? t('JSON 已确认', 'JSON confirmed') : t('JSON 未确认', 'JSON not confirmed'))}</span>
+                    ${actions}
                     ${cockpitCopyButton(copy)}
                   </div>
                 </article>`
@@ -1712,10 +1753,14 @@ internal static class LiveEventsPage
             }
 
             function buildIndexedArtifactRows(paths) {
-              const artifacts = Array.isArray(latestArtifactIndex?.artifacts) ? latestArtifactIndex.artifacts : [];
+              const artifacts = artifactArray(latestArtifactIndex || {}, 'artifacts', 'Artifacts');
               const rows = [];
               const seen = new Set();
-              const reportReady = paths.hasAnyReport || isRunTerminal();
+              const reportReadiness = currentReportReadiness(paths);
+              const htmlReportReady = reportReadiness.hasHtmlReport;
+              const htmlReportDetail = htmlReportReady
+                ? t('HTML 报告证据已确认；打开按钮指向受控报告端点。', 'HTML report evidence is confirmed; open buttons target the guarded report endpoint.')
+                : reportReadiness.hint;
               const reportHtmlArtifact = findArtifact(artifacts, artifact => fileNameEquals(artifactPath(artifact), 'report.html') || fileNameEquals(artifact.name || artifact.Name, 'report.html'));
               const zhReportArtifact = findArtifact(artifacts, artifact => fileNameEquals(artifactPath(artifact), 'report.zh.html') || fileNameEquals(artifact.name || artifact.Name, 'report.zh.html'));
               const enReportArtifact = findArtifact(artifacts, artifact => fileNameEquals(artifactPath(artifact), 'report.en.html') || fileNameEquals(artifact.name || artifact.Name, 'report.en.html'));
@@ -1727,11 +1772,14 @@ internal static class LiveEventsPage
               const screenshotArtifact = findArtifact(artifacts, artifact => artifactMatches(artifact, 'screenshot', 'screenshots'));
               const dumpArtifact = findArtifact(artifacts, artifact => artifactMatches(artifact, 'memory-dump', 'memory-dumps'));
               const pcapArtifact = findArtifact(artifacts, artifact => artifactMatches(artifact, 'packet-capture', 'packet-captures') || isPacketCapturePath(artifactPath(artifact)));
+              const defaultHtmlHref = reportReadiness.hasJobHtmlReport
+                ? `/api/jobs/${encodeURIComponent(jobId)}/report/html`
+                : artifactDownloadHref(reportHtmlArtifact || reportHtmlArtifactForLanguage(reportReadiness, 'zh'));
 
-              pushArtifactCard(rows, seen, t('默认 HTML 报告', 'Default HTML report'), 'report.html', artifactPath(reportHtmlArtifact) || paths.reportHtmlPath, `/api/jobs/${encodeURIComponent(jobId)}/report/html`, reportReady || Boolean(reportHtmlArtifact), t('兼容报告端点（endpoint）', 'compatibility report endpoint'), reportHtmlArtifact);
-              pushArtifactCard(rows, seen, t('中文报告', 'Chinese report'), 'report.zh.html', artifactPath(zhReportArtifact) || paths.zhReportPath, `/api/jobs/${encodeURIComponent(jobId)}/report/html?lang=zh`, reportReady || Boolean(zhReportArtifact), t('打开 report.zh.html', 'opens report.zh.html'), zhReportArtifact);
-              pushArtifactCard(rows, seen, t('英文报告', 'English report'), 'report.en.html', artifactPath(enReportArtifact) || paths.enReportPath, `/api/jobs/${encodeURIComponent(jobId)}/report/html?lang=en`, reportReady || Boolean(enReportArtifact), t('打开 report.en.html', 'opens report.en.html'), enReportArtifact);
-              pushArtifactCard(rows, seen, t('JSON 报告', 'JSON report'), 'report.json', artifactPath(jsonReportArtifact) || paths.reportJsonPath, artifactDownloadHref(jsonReportArtifact), Boolean(jsonReportArtifact || paths.reportJsonPath), jsonReportArtifact ? artifactDetail(jsonReportArtifact, t('已索引，可下载', 'indexed and downloadable')) : t('等待证据索引（artifact index）下载链接', 'waiting for artifact-index download link'), jsonReportArtifact);
+              pushArtifactCard(rows, seen, t('默认 HTML 报告', 'Default HTML report'), 'report.html', artifactPath(reportHtmlArtifact) || paths.reportHtmlPath, htmlReportReady ? defaultHtmlHref : '', htmlReportReady, reportHtmlArtifact ? artifactDetail(reportHtmlArtifact, htmlReportDetail) : htmlReportDetail, reportHtmlArtifact);
+              pushArtifactCard(rows, seen, t('中文报告', 'Chinese report'), 'report.zh.html', artifactPath(zhReportArtifact) || paths.zhReportPath, htmlReportReady ? reportHtmlHrefForLanguage(reportReadiness, 'zh') : '', htmlReportReady, zhReportArtifact ? artifactDetail(zhReportArtifact, htmlReportDetail) : htmlReportDetail, zhReportArtifact);
+              pushArtifactCard(rows, seen, t('英文报告', 'English report'), 'report.en.html', artifactPath(enReportArtifact) || paths.enReportPath, htmlReportReady ? reportHtmlHrefForLanguage(reportReadiness, 'en') : '', htmlReportReady, enReportArtifact ? artifactDetail(enReportArtifact, htmlReportDetail) : htmlReportDetail, enReportArtifact);
+              pushArtifactCard(rows, seen, t('JSON 报告', 'JSON report'), 'report.json', artifactPath(jsonReportArtifact) || paths.reportJsonPath, artifactDownloadHref(jsonReportArtifact), reportReadiness.hasJsonReport, jsonReportArtifact ? artifactDetail(jsonReportArtifact, t('已索引，可下载；JSON 只作为 HTML 就绪提示，不显示 HTML 打开按钮', 'indexed and downloadable; JSON is only an HTML-readiness hint and does not show HTML open buttons')) : t('JSON 路径已记录；等待 artifact index 下载链接', 'JSON path is recorded; waiting for artifact-index download link'), jsonReportArtifact);
               pushArtifactCard(rows, seen, 'events.json', 'events.json', artifactPath(eventsArtifact) || paths.eventsJsonPath, artifactDownloadHref(eventsArtifact), Boolean(eventsArtifact || paths.eventsCollected), eventsArtifact ? artifactDetail(eventsArtifact, t('已索引，可下载', 'indexed and downloadable')) : (paths.eventsCollected ? t('已记录事件来源', 'event source recorded') : t('等待回收', 'waiting for collection')), eventsArtifact);
               pushArtifactCard(rows, seen, 'driver-events.jsonl', 'driver-events.jsonl', artifactPath(driverArtifact) || paths.driverEventsJsonlPath, artifactDownloadHref(driverArtifact), Boolean(driverArtifact || paths.driverCollected), driverArtifact ? artifactDetail(driverArtifact, t('已索引，可下载', 'indexed and downloadable')) : (paths.driverCollected ? t('已发现驱动遥测', 'driver telemetry found') : t('等待回收', 'waiting for collection')), driverArtifact);
               pushArtifactCard(rows, seen, t('执行记录', 'Runbook execution'), 'runbook-execution.json', artifactPath(runbookArtifact) || paths.runbookExecutionPath, artifactDownloadHref(runbookArtifact), Boolean(runbookArtifact || paths.runbookExecutionPath), runbookArtifact ? artifactDetail(runbookArtifact, t('已索引，可下载', 'indexed and downloadable')) : t('执行后生成', 'expected after execution'), runbookArtifact);
@@ -2059,27 +2107,167 @@ internal static class LiveEventsPage
               return `${(n / 1024 / 1024 / 1024).toFixed(1)} GB`;
             }
 
+            function reportOpenLinksHtml(readiness) {
+              readiness = readiness || currentReportReadiness();
+              const zhHref = reportHtmlHrefForLanguage(readiness, 'zh');
+              const enHref = reportHtmlHrefForLanguage(readiness, 'en');
+              const missingCopy = readiness.hasIndexedHtmlReport
+                ? t('indexed report.html 已确认，但 artifact download href 尚未返回；等待证据索引刷新', 'indexed report.html is confirmed, but artifact download href is not available yet; wait for artifact index refresh')
+                : readiness.hint;
+              const zh = zhHref
+                ? `<a class="button" href="${escapeAttr(zhHref)}" target="_blank" rel="noopener" data-copy="${escapeAttr(zhHref)}">${escapeHtml(t('打开中文报告', 'Open Chinese report'))}</a>`
+                : `<span class="pill waiting" data-copy="${escapeAttr(missingCopy)}">${escapeHtml(t('中文 HTML 链接待索引', 'Chinese HTML link pending'))}</span>`;
+              const en = enHref
+                ? `<a class="button secondary" href="${escapeAttr(enHref)}" target="_blank" rel="noopener" data-copy="${escapeAttr(enHref)}">${escapeHtml(t('打开英文报告', 'Open English report'))}</a>`
+                : `<span class="pill waiting" data-copy="${escapeAttr(missingCopy)}">${escapeHtml(t('英文 HTML 链接待索引', 'English HTML link pending'))}</span>`;
+              return `${zh}${en}`;
+            }
+
+            function reportOpenActionsHtml(readiness) {
+              return `<div class="artifact-action">${reportOpenLinksHtml(readiness)}</div>`;
+            }
+
+            function reportHtmlHrefForLanguage(readiness, language) {
+              readiness = readiness || currentReportReadiness();
+              if (readiness.hasJobHtmlReport) {
+                return `/api/jobs/${encodeURIComponent(jobId)}/report/html?lang=${language === 'en' ? 'en' : 'zh'}`;
+              }
+
+              const artifact = reportHtmlArtifactForLanguage(readiness, language);
+              return artifact ? artifactDownloadHref(artifact) : '';
+            }
+
+            function reportHtmlArtifactForLanguage(readiness, language) {
+              const artifacts = readiness?.htmlArtifacts || [];
+              const preferred = language === 'en'
+                ? ['report.en.html', 'report.html', 'report.zh.html']
+                : ['report.zh.html', 'report.html', 'report.en.html'];
+              for (const fileName of preferred) {
+                const artifact = artifacts.find(item => isReportArtifactNamed(item, fileName));
+                if (artifact) { return artifact; }
+              }
+
+              return artifacts[0] || null;
+            }
+
+            function renderHeaderReportActions(readiness) {
+              const target = document.getElementById('headerReportActions');
+              if (!target) { return; }
+              readiness = readiness || currentReportReadiness();
+              target.className = 'artifact-action';
+              target.setAttribute('data-copy', readiness.copy);
+              if (readiness.hasHtmlReport) {
+                target.innerHTML = reportOpenLinksHtml(readiness);
+                return;
+              }
+
+              const tone = readiness.hasJsonReport || readiness.terminal ? 'waiting' : 'quiet';
+              target.innerHTML = `
+                <span class="pill ${tone}" data-copy="${escapeAttr(readiness.hint)}">${escapeHtml(t('HTML 报告未确认', 'HTML report not confirmed'))}</span>
+                <span class="pill ${readiness.hasJsonReport ? 'ready' : 'quiet'}" data-copy="${escapeAttr(`hasJsonReport=${readiness.hasJsonReport}`)}">${escapeHtml(readiness.hasJsonReport ? t('JSON 可作为提示', 'JSON hint available') : t('等待报告证据', 'waiting report evidence'))}</span>`;
+            }
+
+            function currentReportReadiness(paths) {
+              const normalizedPaths = paths || buildArtifactPaths(normalizeJobSnapshot(latestJobSnapshot || initialJob), latestArtifactSources);
+              const artifacts = artifactArray(latestArtifactIndex || {}, 'artifacts', 'Artifacts');
+              const htmlArtifacts = artifacts.filter(isHtmlReportArtifact);
+              const jsonArtifacts = artifacts.filter(isJsonReportArtifact);
+              const hasJobHtmlReport = Boolean(normalizedPaths.hasJobHtmlReport || normalizedPaths.hasHtmlReport);
+              const hasIndexedHtmlReport = htmlArtifacts.length > 0;
+              const hasHtmlReport = Boolean(hasJobHtmlReport || hasIndexedHtmlReport);
+              const hasJsonReport = Boolean(normalizedPaths.hasJsonReport || jsonArtifacts.length > 0);
+              const terminal = isRunTerminal();
+              const htmlEvidence = [
+                hasJobHtmlReport ? t('job HTML path', 'job HTML path') : '',
+                ...htmlArtifacts.map(reportArtifactEvidenceText)
+              ].filter(Boolean);
+              const jsonEvidence = [
+                normalizedPaths.hasJsonReport ? t('job JSON path', 'job JSON path') : '',
+                ...jsonArtifacts.map(reportArtifactEvidenceText)
+              ].filter(Boolean);
+              let hint;
+              if (hasHtmlReport) {
+                hint = t('已确认 job HTML path 或 indexed report.html 证据；HTML 打开按钮可用。', 'Confirmed job HTML path or indexed report.html evidence; HTML open buttons are available.');
+              } else if (hasJsonReport && terminal) {
+                hint = t('运行已终态且 JSON 报告可见，但还没有 job HTML path / indexed report.html；暂不显示 HTML 打开按钮，避免 404。', 'Run is terminal and JSON report is visible, but no job HTML path / indexed report.html exists yet; HTML open buttons stay hidden to avoid 404s.');
+              } else if (hasJsonReport) {
+                hint = t('仅看到 JSON 报告证据；JSON 只能提示报告流程已推进，不能证明 HTML 端点可打开。', 'Only JSON report evidence is visible; JSON only hints that report generation progressed and does not prove the HTML endpoint can open.');
+              } else if (terminal) {
+                hint = t('运行已进入终态，但尚未看到 job HTML path 或 indexed report.html artifact；先刷新证据索引。', 'Run is terminal, but no job HTML path or indexed report.html artifact has been observed; refresh the artifact index first.');
+              } else {
+                hint = t('等待 job HTML path 或 indexed report.html artifact；终态和 JSON 不会单独点亮 HTML 打开按钮。', 'Waiting for a job HTML path or indexed report.html artifact; terminal state and JSON alone do not light up HTML open buttons.');
+              }
+
+              const evidenceText = [
+                htmlEvidence.length ? `html=${htmlEvidence.join(', ')}` : 'html=none',
+                jsonEvidence.length ? `json=${jsonEvidence.join(', ')}` : 'json=none',
+                `terminal=${terminal}`
+              ].join('; ');
+              const copy = `报告就绪判断 hasHtmlReport=${hasHtmlReport}; hasJsonReport=${hasJsonReport}; ${evidenceText}; ${hint}`;
+              const readiness = {
+                hasHtmlReport,
+                hasJsonReport,
+                hasJobHtmlReport,
+                hasIndexedHtmlReport,
+                terminal,
+                htmlEvidence,
+                jsonEvidence,
+                htmlArtifacts,
+                jsonArtifacts,
+                evidenceText,
+                hint,
+                copy
+              };
+              latestReportReadiness = readiness;
+              return readiness;
+            }
+
+            function reportArtifactEvidenceText(artifact) {
+              return firstArtifactText(artifactPath(artifact), artifactField(artifact, 'name', 'Name'), t('indexed report artifact', 'indexed report artifact'));
+            }
+
+            function isHtmlReportArtifact(artifact) {
+              return isReportArtifactNamed(artifact, 'report.html') ||
+                isReportArtifactNamed(artifact, 'report.zh.html') ||
+                isReportArtifactNamed(artifact, 'report.en.html');
+            }
+
+            function isJsonReportArtifact(artifact) {
+              return isReportArtifactNamed(artifact, 'report.json');
+            }
+
+            function isReportArtifactNamed(artifact, fileName) {
+              const download = artifactDownloadInfo(artifact);
+              const values = [
+                artifactPath(artifact),
+                artifactField(artifact, 'name', 'Name'),
+                artifactField(artifact, 'relativePath', 'RelativePath'),
+                artifactField(artifact, 'safeLink', 'SafeLink'),
+                artifactField(artifact, 'importPath', 'ImportPath'),
+                download.fileName
+              ];
+              return values.some(value => fileNameEquals(value, fileName));
+            }
+
             function renderReportReadyActions(paths) {
               const target = document.getElementById('reportReadyActions');
               if (!target) { return; }
+              const readiness = currentReportReadiness(paths);
+              renderHeaderReportActions(readiness);
               if (reportAutoOpenScheduled) {
                 updateReportAutoOpenNotice();
                 return;
               }
-              const terminal = isRunTerminal();
-              const hasReport = paths.hasAnyReport || terminal;
-              const label = terminal
-                ? t('运行已结束：可打开中文或英文报告。', 'Run finished: Chinese and English reports are available to open.')
-                : t('报告将在计划或运行结束后通过现有端点（endpoint）打开。', 'Reports open through the existing endpoint after planning or run completion.');
-              const actions = hasReport
-                ? `<div class="artifact-action">
-                    <a class="button" href="/api/jobs/${encodeURIComponent(jobId)}/report/html?lang=zh" target="_blank" rel="noopener">${t('打开中文报告', 'Open Chinese report')}</a>
-                    <a class="button secondary" href="/api/jobs/${encodeURIComponent(jobId)}/report/html?lang=en" target="_blank" rel="noopener">${t('打开英文报告', 'Open English report')}</a>
-                  </div>`
+              const label = readiness.hasHtmlReport
+                ? t('HTML 报告已确认：可打开中文或英文报告。', 'HTML report confirmed: Chinese and English reports are available to open.')
+                : readiness.hint;
+              const actions = readiness.hasHtmlReport ? reportOpenActionsHtml(readiness) : '';
+              const jsonHint = !readiness.hasHtmlReport && readiness.hasJsonReport
+                ? `<p class="muted" data-copy="${escapeAttr(readiness.evidenceText)}">${escapeHtml(t('JSON/终态只作为提示；未确认 HTML 时不显示打开按钮，避免误导到 404。', 'JSON/terminal state is only a hint; without confirmed HTML, open buttons stay hidden to avoid misleading 404s.'))}</p>`
                 : '';
-              target.innerHTML = `<strong>${escapeHtml(label)}</strong>${actions}`;
-              target.className = `report-ready ${hasReport ? 'ok' : 'muted'}`;
-              target.setAttribute('data-copy', `${label} /api/jobs/${jobId}/report/html?lang=zh /api/jobs/${jobId}/report/html?lang=en`);
+              target.innerHTML = `<strong>${escapeHtml(label)}</strong>${actions}${jsonHint}`;
+              target.className = `report-ready ${readiness.hasHtmlReport ? 'ok' : 'muted'}`;
+              target.setAttribute('data-copy', readiness.copy);
             }
 
             function artifactRow(displayName, fileName, path, href, ready, detail, artifact) {
@@ -2238,6 +2426,8 @@ internal static class LiveEventsPage
               const reportHtmlPath = job.htmlReportPath || '';
               const zhReportPath = job.htmlReportZhPath || '';
               const enReportPath = job.htmlReportEnPath || '';
+              const hasJobHtmlReport = Boolean(reportHtmlPath || zhReportPath || enReportPath);
+              const hasJsonReport = Boolean(reportJsonPath);
               const runbookPath = job.runbookExecutionResultPath || '';
               const jobRoot = getParentDirectory(reportJsonPath || reportHtmlPath || zhReportPath || enReportPath || runbookPath);
               const expectedGuestDirectory = jobRoot && jobIdNoDash ? combineHostPath(jobRoot, 'guest', jobIdNoDash) : '';
@@ -2263,7 +2453,10 @@ internal static class LiveEventsPage
                 zhReportPath: zhReportPath || (jobRoot ? combineHostPath(jobRoot, 'report.zh.html') : ''),
                 enReportPath: enReportPath || (jobRoot ? combineHostPath(jobRoot, 'report.en.html') : ''),
                 runbookExecutionPath: runbookPath || (jobRoot ? combineHostPath(jobRoot, 'runbook-execution.json') : ''),
-                hasAnyReport: Boolean(reportHtmlPath || zhReportPath || enReportPath || reportJsonPath),
+                hasJobHtmlReport,
+                hasHtmlReport: hasJobHtmlReport,
+                hasJsonReport,
+                hasAnyReport: Boolean(hasJobHtmlReport || hasJsonReport),
                 guestSourceDirectory,
                 eventsJsonPath,
                 eventsCollected: Boolean(recordedGuestEvents || sourceEvents),
@@ -2706,6 +2899,46 @@ internal static class LiveEventsPage
               }
             }
 
+            async function persistVirusTotalEnrichment() {
+              const current = lastVirusTotalResult;
+              const vtStatus = normalizeVirusTotalStatus(current);
+              if (!current || virusTotalPersisted(current)) {
+                showToast(t('VirusTotal 信誉增强已写入或暂无可写入结果', 'VirusTotal enrichment is already persisted or no eligible result is available'));
+                return;
+              }
+
+              if (!virusTotalCanPersist(current, vtStatus)) {
+                showToast(t('当前 VirusTotal 状态不可写入报告/信誉增强', 'The current VirusTotal state cannot be persisted to report/enrichment'));
+                return;
+              }
+
+              if (virusTotalPersistInFlight) { return; }
+              virusTotalPersistInFlight = true;
+              renderVirusTotal(current);
+              setStatus(t('正在写入 VirusTotal 报告/信誉增强...', 'Persisting VirusTotal report/reputation enrichment...'), false);
+              try {
+                const response = await fetch(`/api/jobs/${encodeURIComponent(jobId)}/enrichments/virustotal`, {
+                  method: 'POST',
+                  cache: 'no-store'
+                });
+                const payload = await requireOk(response, t('VirusTotal 写入报告/信誉增强', 'VirusTotal report/reputation enrichment'));
+                lastVirusTotalResult = payload;
+                const persisted = virusTotalPersisted(payload);
+                setStatus(
+                  persisted
+                    ? t('VirusTotal 已写入报告/信誉增强；报告刷新后会包含该信誉事件。', 'VirusTotal was persisted to report/reputation enrichment; the refreshed report will include this reputation event.')
+                    : t('VirusTotal POST 已完成，但服务端返回未写入；通常表示结果已转为静默或不可持久化状态。', 'VirusTotal POST completed, but the server did not persist it; usually the result became quiet or ineligible.'),
+                  false);
+                await refreshArtifactIndex(false);
+                renderArtifactPanel();
+              } catch (error) {
+                setStatus(error.message || t('VirusTotal 写入报告/信誉增强失败。', 'VirusTotal report/reputation enrichment failed.'), true);
+              } finally {
+                virusTotalPersistInFlight = false;
+                if (lastVirusTotalResult) { renderVirusTotal(lastVirusTotalResult); }
+              }
+            }
+
             function renderVirusTotal(result) {
               lastVirusTotalResult = result;
               const target = document.getElementById('vtResult');
@@ -2778,7 +3011,9 @@ internal static class LiveEventsPage
                 ? `<p class="muted">${escapeHtml(t('静默状态卡：未配置、未收录、限速、鉴权失败、超时或查询失败只在页面展示，不写任务/行为日志，也不会中断分析。', 'Quiet status card: not configured, not found, rate limits, auth failures, timeouts, or lookup failures are display-only, do not write job/behavior logs, and do not interrupt analysis.'))}</p>`
                 : '';
               const logPolicy = virusTotalPolicyText(vtValue(result, 'liveLogPolicy'));
-              const statusCopy = `${vtStatus}${vtValue(result, 'errorKind') ? ` / ${vtValue(result, 'errorKind')}` : ''}; ${logPolicy}`;
+              const persistenceActionHtml = virusTotalPersistenceActionHtml(result, vtStatus);
+              const persistenceCopy = virusTotalPersistenceCopy(result, vtStatus);
+              const statusCopy = `${vtStatus}${vtValue(result, 'errorKind') ? ` / ${vtValue(result, 'errorKind')}` : ''}; ${logPolicy}; ${persistenceCopy}`;
               target.className = className;
               target.innerHTML = `
                 <div class="card-status">
@@ -2832,8 +3067,8 @@ internal static class LiveEventsPage
                 ${sha}
                 ${cacheHtml}
                 ${retryHtml}
-                <p class="artifact-action"><span class="pill ${virusTotalStatusPillTone(vtStatus, result)}" data-copy="${escapeAttr(statusCopy)}">${escapeHtml(status || statusLabel)}</span><span class="pill quiet" data-copy="${escapeAttr(vtStatus)}">${escapeHtml(vtStatus)}</span>${link}${reportLink}${settingsLink}</p>`;
-              target.setAttribute('data-copy', `VirusTotal ${workflowLabel}; 进度=${progress}%; 当前=${currentStep}; ${stateSummary}; ${vtStatus}: ${label}; ${operatorState}; 引擎=${engineTotal}; 社区=${virusTotalCommunityCopy(result, communityVotes)} ${shaValue || ''}; ${logPolicy}`);
+                <p class="artifact-action"><span class="pill ${virusTotalStatusPillTone(vtStatus, result)}" data-copy="${escapeAttr(statusCopy)}">${escapeHtml(status || statusLabel)}</span><span class="pill quiet" data-copy="${escapeAttr(vtStatus)}">${escapeHtml(vtStatus)}</span>${persistenceActionHtml}${link}${reportLink}${settingsLink}</p>`;
+              target.setAttribute('data-copy', `VirusTotal ${workflowLabel}; 进度=${progress}%; 当前=${currentStep}; ${stateSummary}; ${vtStatus}: ${label}; ${operatorState}; 引擎=${engineTotal}; 社区=${virusTotalCommunityCopy(result, communityVotes)} ${shaValue || ''}; ${logPolicy}; ${persistenceCopy}`);
               renderOperatorCockpit();
             }
 
@@ -2886,6 +3121,57 @@ internal static class LiveEventsPage
               }
 
               return localizeServerMessage(raw);
+            }
+
+            function virusTotalIsQuiet(result, status) {
+              const normalized = status || normalizeVirusTotalStatus(result);
+              return Boolean(result?.isQuietState || result?.IsQuietState || virusTotalWorkflowState(result) === 'quiet' ||
+                ['not_configured', 'not_found', 'rate_limited', 'authentication_failed', 'timeout', 'missing_hash', 'invalid_hash', 'lookup_failed'].includes(normalized));
+            }
+
+            function virusTotalCanPersist(result, status) {
+              if (!result || virusTotalIsQuiet(result, status)) { return false; }
+              return vtBoolValue(result, 'canPersistEnrichmentEvent', 'CanPersistEnrichmentEvent');
+            }
+
+            function virusTotalPersisted(result) {
+              return vtBoolValue(result, 'persistedToEnrichmentEvents', 'PersistedToEnrichmentEvents');
+            }
+
+            function virusTotalPersistenceCopy(result, status) {
+              const canPersist = virusTotalCanPersist(result, status);
+              const persisted = virusTotalPersisted(result);
+              const quiet = virusTotalIsQuiet(result, status);
+              const policy = virusTotalPolicyText(vtValue(result, 'persistencePolicy') || vtValue(result, 'liveLogPolicy'));
+              return `VT持久化 canPersist=${canPersist}; persisted=${persisted}; quiet=${quiet}; endpoint=POST /api/jobs/${jobId}/enrichments/virustotal; policy=${policy}`;
+            }
+
+            function virusTotalPersistenceActionHtml(result, status) {
+              const persisted = virusTotalPersisted(result);
+              if (persisted) {
+                const copy = virusTotalPersistenceCopy(result, status);
+                return `<span class="pill ready" data-copy="${escapeAttr(copy)}">${escapeHtml(t('已写入报告/信誉增强', 'persisted to report/enrichment'))}</span>`;
+              }
+
+              if (virusTotalIsQuiet(result, status)) { return ''; }
+
+              const canPersist = virusTotalCanPersist(result, status);
+              if (canPersist) {
+                const copy = `${virusTotalPersistenceCopy(result, status)}; 操作=写入报告/信誉增强`;
+                const disabled = virusTotalPersistInFlight ? ' disabled' : '';
+                const label = virusTotalPersistInFlight
+                  ? t('正在写入...', 'Persisting...')
+                  : t('写入报告/信誉增强', 'Persist report/enrichment');
+                return `<button type="button"${disabled} data-copy="${escapeAttr(copy)}" onclick="persistVirusTotalEnrichment()">${escapeHtml(label)}</button>
+                  <span class="pill endpoint" data-copy="${escapeAttr(t('仅已收录 found 结果会写入；静默状态不会写入', 'Only found results are persisted; quiet states are not written'))}">${escapeHtml(t('显式写入 found 信誉事件', 'explicit found reputation write'))}</span>`;
+              }
+
+              if (status === 'found' || vtBoolValue(result, 'found')) {
+                const copy = virusTotalPersistenceCopy(result, status);
+                return `<span class="pill waiting" data-copy="${escapeAttr(copy)}">${escapeHtml(t('当前结果未满足写入条件', 'current result is not eligible to persist'))}</span>`;
+              }
+
+              return '';
             }
 
             function virusTotalQuietExplanationHtml(result, status) {
@@ -2964,15 +3250,15 @@ internal static class LiveEventsPage
             }
 
             function virusTotalStateSummary(status, result, malicious, suspicious, engineTotal) {
-              const persistable = Boolean(vtValue(result, 'canPersistEnrichmentEvent') || vtValue(result, 'CanPersistEnrichmentEvent'));
-              const persisted = Boolean(vtValue(result, 'persistedToEnrichmentEvents') || vtValue(result, 'PersistedToEnrichmentEvents'));
+              const persistable = virusTotalCanPersist(result, status);
+              const persisted = virusTotalPersisted(result);
               const policy = virusTotalPolicyText(vtValue(result, 'persistencePolicy') || vtValue(result, 'liveLogPolicy'));
               if (status === 'found' || vtBoolValue(result, 'found')) {
                 const hits = Number(malicious || 0) + Number(suspicious || 0);
                 const persistedText = persisted
                   ? t('已显式写入信誉增强', 'explicitly persisted to reputation enrichment')
                   : persistable
-                    ? t('可显式写入信誉增强；实时页默认仅展示', 'eligible for explicit reputation persistence; Live page is display-only by default')
+                    ? t('可点击“写入报告/信誉增强”；实时页默认仅展示', 'click Persist report/enrichment if needed; Live page is display-only by default')
                     : t('实时页仅展示', 'Live page display-only');
                 return t(`Found：官方已收录，${hits}/${engineTotal} 引擎命中；${persistedText}；${policy}。`, `Found: official report exists, ${hits}/${engineTotal} engine hits; ${persistedText}; ${policy}.`);
               }
